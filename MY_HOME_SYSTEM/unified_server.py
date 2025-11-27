@@ -40,23 +40,33 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)):
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text
+    
+    # 1. 食事記録の処理 (プレフィックス "食事_" を検知)
+    if msg.startswith("食事_"):
+        # "食事_和食" -> "和食" を抽出
+        category = msg.replace("食事_", "")
+        
+        user_name = get_profile_name(event)
+        
+        # DB保存
+        save_food_log(event.source.user_id, user_name, category)
+        print(f"[FOOD] 記録: {user_name} -> {category}")
+
+        # 完了メッセージを返信
+        reply_text = f"✅ {user_name}さんの夕食「{category}」を記録しました。"
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        return
+
+    # 2. おはよう記録の処理 (文字数制限チェックはここで行う)
     if len(msg) > config.MESSAGE_LENGTH_LIMIT: return
     
     keyword = next((k for k in config.OHAYO_KEYWORDS if k in msg.lower()), None)
-    if not keyword: return
-
-    user_name = "Unknown"
-    try:
-        if isinstance(event.source, SourceGroup):
-            user_name = line_bot_api.get_group_member_profile(event.source.group_id, event.source.user_id).display_name
-        elif isinstance(event.source, SourceUser):
-            user_name = line_bot_api.get_profile(event.source.user_id).display_name
-    except: pass
-
-    save_log(config.SQLITE_TABLE_OHAYO, 
-             (event.source.user_id, user_name, msg, get_now(), keyword),
-             "user_id, user_name, message, timestamp, recognized_keyword")
-    print(f"[OHAYO] 記録: {user_name}「{msg}」")
+    if keyword:
+        user_name = get_profile_name(event)
+        save_log(config.SQLITE_TABLE_OHAYO, 
+                 (event.source.user_id, user_name, msg, get_now(), keyword),
+                 "user_id, user_name, message, timestamp, recognized_keyword")
+        print(f"[OHAYO] 記録: {user_name} -> {msg}")
 
 
 # ==========================================
@@ -118,6 +128,39 @@ def save_log(table, values, columns):
         conn.close()
     except Exception as e: 
         print(f"[ERROR] DB Save: {e}")
+
+def save_food_log(user_id, user_name, category):
+    """食事データを専用テーブルに保存"""
+    now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+    today_str = now.strftime("%Y-%m-%d")
+    
+    # カラム: user_id, user_name, meal_date, meal_time_category, menu_category, timestamp
+    values = (user_id, user_name, today_str, "Dinner", category, now.isoformat())
+    
+    # 既存のsave_logを流用しても良いですが、カラム指定が異なるため直接SQL実行推奨
+    try:
+        conn = sqlite3.connect(config.SQLITE_DB_PATH)
+        sql = f"""
+            INSERT INTO {config.SQLITE_TABLE_FOOD} 
+            (user_id, user_name, meal_date, meal_time_category, menu_category, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """
+        conn.execute(sql, values)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[ERROR] DB Save (Food): {e}")
+
+def get_profile_name(event):
+    """イベントからユーザー名を取得する共通関数"""
+    try:
+        if isinstance(event.source, SourceGroup):
+            return line_bot_api.get_group_member_profile(event.source.group_id, event.source.user_id).display_name
+        elif isinstance(event.source, SourceUser):
+            return line_bot_api.get_profile(event.source.user_id).display_name
+    except:
+        return "Unknown"
+    return "Unknown"
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

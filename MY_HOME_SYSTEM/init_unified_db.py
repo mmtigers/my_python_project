@@ -42,6 +42,18 @@ def init_db():
             recognized_keyword TEXT
         )
     ''')
+    # 3. 食事記録用テーブル
+    cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_FOOD} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            user_name TEXT,
+            meal_date TEXT NOT NULL,
+            meal_time_category TEXT NOT NULL,
+            menu_category TEXT NOT NULL,
+            timestamp DATETIME NOT NULL
+        )
+    ''')
 
     conn.commit()
     conn.close()
