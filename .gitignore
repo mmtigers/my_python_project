@@ -1,0 +1,17 @@
+# Python bytecode files
+*.pyc
+__pycache__/
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# Editor files (VS Code specific)
+.vscode/
+
+# Logs and temporary files
+*.log
+tmp/
