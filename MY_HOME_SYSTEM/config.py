@@ -133,6 +133,7 @@ SQLITE_DB_PATH = "home_system.db"
 # テーブル名
 SQLITE_TABLE_SENSOR = "device_records"
 SQLITE_TABLE_OHAYO = "ohayo_records"
+SQLITE_TABLE_FOOD = "food_records"
 
 # ==========================================
 # 4. バックアップ設定
