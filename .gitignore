@@ -15,3 +15,11 @@ venv/
 # Logs and temporary files
 *.log
 tmp/
+
+# データベースファイル
+*.db
+*.sqlite
+*.sqlite3
+
+# バックアップディレクトリ
+MY_HOME_SYSTEM/db_backup/
