@@ -125,11 +125,13 @@ LINE_USER_ID = "Ud16cff6e78c41ade3bb7daf572c437fb"
 OHAYO_KEYWORDS = ["おはよ", "おはよう"]
 MESSAGE_LENGTH_LIMIT = 30
 
+
 # ==========================================
 # 3. 共通システム設定
 # ==========================================
 # 統合DBの名前
-SQLITE_DB_PATH = "home_system.db"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
 # テーブル名
 SQLITE_TABLE_SENSOR = "device_records"
 SQLITE_TABLE_OHAYO = "ohayo_records"
