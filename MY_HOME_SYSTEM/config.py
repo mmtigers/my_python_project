@@ -1,11 +1,17 @@
 # HOME_SYSTEM/config.py
 import os
+from dotenv import load_dotenv
+
+# .envファイルを読み込む
+# (このファイルと同じ場所にある .env を探します)
+load_dotenv()
 
 # ==========================================
-# 1. SwitchBot 設定 (MY_HOME_MONITOR/config.py から転記)
+# 1. SwitchBot 設定
 # ==========================================
-SWITCHBOT_API_TOKEN = "***REMOVED_SWITCHBOT_API_TOKEN***"
-SWITCHBOT_API_SECRET = "***REMOVED_SWITCHBOT_API_SECRET***"
+# 環境変数から取得 (GitHubには公開されません)
+SWITCHBOT_API_TOKEN = os.getenv("SWITCHBOT_API_TOKEN")
+SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
 
 # 監視デバイスリスト (電力、温湿度、開閉、人感、カメラ、ハブを網羅)
 MONITOR_DEVICES = [
@@ -113,13 +119,12 @@ MONITOR_DEVICES = [
 ]
 
 # ==========================================
-# 2. LINE Bot 設定 (LINEBOT/config.py から転記)
+# 2. LINE Bot 設定
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = "***REMOVED_LINE_CHANNEL_ACCESS_TOKEN***"
-LINE_CHANNEL_SECRET = "***REMOVED_LINE_CHANNEL_SECRET***"
-
-# 通知先ユーザーID (send_line.pyの設定などから確認)
-LINE_USER_ID = "Ud16cff6e78c41ade3bb7daf572c437fb"
+# 環境変数から取得
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+LINE_USER_ID = os.getenv("LINE_USER_ID")
 
 # おはよう判定の設定
 OHAYO_KEYWORDS = ["おはよ", "おはよう"]
@@ -129,9 +134,10 @@ MESSAGE_LENGTH_LIMIT = 30
 # ==========================================
 # 3. 共通システム設定
 # ==========================================
-# 統合DBの名前
+# 統合DBの名前 (絶対パス)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
+
 # テーブル名
 SQLITE_TABLE_SENSOR = "device_records"
 SQLITE_TABLE_OHAYO = "ohayo_records"
@@ -141,10 +147,10 @@ SQLITE_TABLE_FOOD = "food_records"
 # 4. バックアップ設定
 # ==========================================
 # バックアップ対象のファイルリスト
-# データベースだけでなく、プログラム本体も含めるのが推奨です
 BACKUP_FILES = [
     SQLITE_DB_PATH,                 # データベース (home_system.db)
     "config.py",                    # 設定ファイル
+    ".env"                          # ★注意: .env はバックアップには含めますが、Gitには上げません
 ]
 
 # ==========================================
