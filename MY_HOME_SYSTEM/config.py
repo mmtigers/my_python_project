@@ -1,11 +1,17 @@
 # HOME_SYSTEM/config.py
 import os
+from dotenv import load_dotenv
+
+# .envファイルを読み込む
+# (このファイルと同じ場所にある .env を探します)
+load_dotenv()
 
 # ==========================================
-# 1. SwitchBot 設定 (MY_HOME_MONITOR/config.py から転記)
+# 1. SwitchBot 設定
 # ==========================================
-SWITCHBOT_API_TOKEN = "b09c0711d0d0f4da0e21b54f7ae5902c69d763ce8b15bf592f11a10dfaa2efe4c1251dece5cb262be67f6a626cb08f38"
-SWITCHBOT_API_SECRET = "d6873a1676f65ca19e51ab8a6043f994"
+# 環境変数から取得 (GitHubには公開されません)
+SWITCHBOT_API_TOKEN = os.getenv("SWITCHBOT_API_TOKEN")
+SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
 
 # 監視デバイスリスト (電力、温湿度、開閉、人感、カメラ、ハブを網羅)
 MONITOR_DEVICES = [
@@ -113,13 +119,12 @@ MONITOR_DEVICES = [
 ]
 
 # ==========================================
-# 2. LINE Bot 設定 (LINEBOT/config.py から転記)
+# 2. LINE Bot 設定
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = "VKwvvJqOgFlxoZ8whaurQ4VJzS8XP4h+fiY+6siLLP5YDiSkZKsQ2wDuMpMy2Tc63dQD8sc/GGtveva483EMoGqf6Bhhub9spNrc596NYM2YkIdhVZ/V7onv077Ltv83WaDnlXQ06fZQ4RIJsy9+KwdB04t89/1O/w1cDnyilFU="
-LINE_CHANNEL_SECRET = "9db9eb67bee0a6e8e08619f174a4b60d"
-
-# 通知先ユーザーID (send_line.pyの設定などから確認)
-LINE_USER_ID = "Ud16cff6e78c41ade3bb7daf572c437fb"
+# 環境変数から取得
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+LINE_USER_ID = os.getenv("LINE_USER_ID")
 
 # おはよう判定の設定
 OHAYO_KEYWORDS = ["おはよ", "おはよう"]
@@ -129,9 +134,10 @@ MESSAGE_LENGTH_LIMIT = 30
 # ==========================================
 # 3. 共通システム設定
 # ==========================================
-# 統合DBの名前
+# 統合DBの名前 (絶対パス)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
+
 # テーブル名
 SQLITE_TABLE_SENSOR = "device_records"
 SQLITE_TABLE_OHAYO = "ohayo_records"
@@ -141,10 +147,10 @@ SQLITE_TABLE_FOOD = "food_records"
 # 4. バックアップ設定
 # ==========================================
 # バックアップ対象のファイルリスト
-# データベースだけでなく、プログラム本体も含めるのが推奨です
 BACKUP_FILES = [
     SQLITE_DB_PATH,                 # データベース (home_system.db)
     "config.py",                    # 設定ファイル
+    ".env"                          # ★注意: .env はバックアップには含めますが、Gitには上げません
 ]
 
 # ==========================================
