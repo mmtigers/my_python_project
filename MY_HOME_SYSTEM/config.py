@@ -16,14 +16,12 @@ SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
 # 監視デバイスリスト (電力、温湿度、開閉、人感、カメラ、ハブを網羅)
 MONITOR_DEVICES = [
     # --- Plug Mini (電力監視) ---
-MONITOR_DEVICES = [
-    # --- Plug Mini (電力監視) ---
     {
         "id": "24587C9CCBCE",  # 1Fのトイレ
         "type": "Plug Mini (JP)",
         "notify_settings": {
-            "power_threshold_watts": 5.0,
-            "notify_mode": "CONTINUOUS" # ★ 従来通り（つけっぱなし警告用）
+            "power_threshold_watts": 20.0,
+            "notify_mode": "LOG_ONLY" 
         }
     },
     {
@@ -31,7 +29,7 @@ MONITOR_DEVICES = [
         "type": "Plug Mini (JP)",
         "notify_settings": {
             "power_threshold_watts": 20.0, # ★ 待機電力(数W)を誤検知しないよう少し高めに設定推奨
-            "notify_mode": "ON_END_SUMMARY" # ★ 消えた時に「何時から何時まで」を通知
+            "notify_mode": "LOG_ONLY" # ★ 消えた時に「何時から何時まで」を通知
         }
     },
     {
@@ -39,7 +37,7 @@ MONITOR_DEVICES = [
         "type": "Plug Mini (JP)",
         "notify_settings": {
             "power_threshold_watts": 5.0,
-            "notify_mode": "ON_START" # ★ 炊き始めだけ通知
+            "notify_mode": "LOG_ONLY" # ★ 炊き始めだけ通知
         }
     },
 
@@ -130,9 +128,15 @@ MONITOR_DEVICES = [
 ]
 
 # ==========================================
-# 2. LINE Bot 設定
+# 2. 通知設定 (LINE / Discord)
 # ==========================================
-# 環境変数から取得
+# ★ 通知先を選択 ("line" または "discord")
+NOTIFICATION_TARGET = "discord"
+
+# Discord Webhook URL
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+# LINE設定
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
@@ -153,6 +157,8 @@ SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
 SQLITE_TABLE_SENSOR = "device_records"
 SQLITE_TABLE_OHAYO = "ohayo_records"
 SQLITE_TABLE_FOOD = "food_records"
+SQLITE_TABLE_DAILY = "daily_records"   
+SQLITE_TABLE_HEALTH = "health_records" 
 
 # ==========================================
 # 4. バックアップ設定
