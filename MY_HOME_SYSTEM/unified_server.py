@@ -128,11 +128,11 @@ def get_user_name(event):
 
 def save_food_log(uid, uname, content):
     cols = ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"]
-    return common.save_log_generic(config.SQLITE_TABLE_FOOD, cols, (uid, uname, common.get_today_date(), "Dinner", content, common.get_now_iso()))
+    return common.save_log_generic(config.SQLITE_TABLE_FOOD, cols, (uid, uname, common.get_today_date_str(), "Dinner", content, common.get_now_iso()))
 
 def save_daily_log(uid, uname, cat, val):
     cols = ["user_id", "user_name", "date", "category", "value", "timestamp"]
-    return common.save_log_generic(config.SQLITE_TABLE_DAILY, cols, (uid, uname, common.get_today_date(), cat, val, common.get_now_iso()))
+    return common.save_log_generic(config.SQLITE_TABLE_DAILY, cols, (uid, uname, common.get_today_date_str(), cat, val, common.get_now_iso()))
 
 @app.post("/webhook/switchbot")
 async def callback_switchbot(request: Request):
