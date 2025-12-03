@@ -5,7 +5,7 @@ import switchbot_get_device_list as sb_tool
 import time
 
 # ★ 今回適用したい新しいURL
-TARGET_URL = "https://e622da19e8fa.ngrok-free.app/webhook/switchbot"
+TARGET_URL = "https://09bfec8aec45.ngrok-free.app/webhook/switchbot"
 
 def super_fix_webhook():
     print(f"\n--- SwitchBot Webhook 完全修復 ---")
