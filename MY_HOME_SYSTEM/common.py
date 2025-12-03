@@ -98,7 +98,7 @@ def _send_discord_webhook(messages):
 def get_now_iso():
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()
 
-def get_today_date():
+def get_today_date_str():
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%Y-%m-%d")
 
 def get_display_date():

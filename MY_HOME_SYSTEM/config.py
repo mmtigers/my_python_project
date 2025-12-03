@@ -4,9 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# === 1. SwitchBot 設定 ===
+# ==========================================
+# 1. SwitchBot & Nature Remo 設定
+# ==========================================
 SWITCHBOT_API_TOKEN = os.getenv("SWITCHBOT_API_TOKEN")
 SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
+NATURE_REMO_ACCESS_TOKEN = os.getenv("NATURE_REMO_ACCESS_TOKEN")
 
 # 監視デバイスリスト
 MONITOR_DEVICES = [
