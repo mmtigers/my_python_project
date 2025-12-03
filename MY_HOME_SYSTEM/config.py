@@ -16,20 +16,31 @@ SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
 # 監視デバイスリスト (電力、温湿度、開閉、人感、カメラ、ハブを網羅)
 MONITOR_DEVICES = [
     # --- Plug Mini (電力監視) ---
+MONITOR_DEVICES = [
+    # --- Plug Mini (電力監視) ---
     {
-        "id": "24587C9CCBCE",  # 1Fのトイレ (Plug Mini)
+        "id": "24587C9CCBCE",  # 1Fのトイレ
         "type": "Plug Mini (JP)",
-        "notify_settings": {"power_threshold_watts": 5.0} # 必要なら閾値を設定
+        "notify_settings": {
+            "power_threshold_watts": 5.0,
+            "notify_mode": "CONTINUOUS" # ★ 従来通り（つけっぱなし警告用）
+        }
     },
     {
-        "id": "D83BDA178576",  # テレビ (Plug Mini)
+        "id": "D83BDA178576",  # テレビ
         "type": "Plug Mini (JP)",
-        "notify_settings": {"power_threshold_watts": 100.0} # 例: つけっぱなし検知
+        "notify_settings": {
+            "power_threshold_watts": 20.0, # ★ 待機電力(数W)を誤検知しないよう少し高めに設定推奨
+            "notify_mode": "ON_END_SUMMARY" # ★ 消えた時に「何時から何時まで」を通知
+        }
     },
     {
-        "id": "F09E9E9D599A",  # 炊飯器 (Plug Mini)
+        "id": "F09E9E9D599A",  # 炊飯器
         "type": "Plug Mini (JP)",
-        "notify_settings": {}
+        "notify_settings": {
+            "power_threshold_watts": 5.0,
+            "notify_mode": "ON_START" # ★ 炊き始めだけ通知
+        }
     },
 
     # --- MeterPlus (温湿度監視) ---
