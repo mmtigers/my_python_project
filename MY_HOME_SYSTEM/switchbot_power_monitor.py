@@ -5,74 +5,67 @@ import common
 import config
 import switchbot_get_device_list as sb_tool
 
-def insert_power_record(name, device_id, device_type, power_w, temp_c, humidity_p, threshold_w):
-    cols = ["timestamp", "device_name", "device_id", "device_type", "power_watts", "temperature_celsius", 
-            "humidity_percent", "threshold_watts"]
-    vals = (common.get_now_iso(), name, device_id, device_type, power_w, temp_c, humidity_p, threshold_w)
-    
-    if common.save_log_generic(config.SQLITE_TABLE_SENSOR, cols, vals):
-        log_parts = []
-        if power_w is not None: log_parts.append(f"{power_w:.1f}W")
-        if temp_c is not None: log_parts.append(f"{temp_c:.1f}°C")
-        print(f"[SUCCESS] 記録: {name} -> {', '.join(log_parts)}")
-
-def fetch_device_data(device_id, device_type):
+def fetch_device_data(device_id):
     url = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
     try:
         headers = sb_tool.create_switchbot_auth_headers()
         res = requests.get(url, headers=headers, timeout=10)
         data = res.json()
-        if data.get('statusCode') == 100:
-            body = data.get('body', {})
-            result = {}
-            if device_type.startswith('Plug'):
-                result['power'] = float(body.get('weight', 0)) 
-            elif device_type.startswith('Meter'):
-                result['temperature'] = float(body.get('temperature', 0))
-                result['humidity'] = float(body.get('humidity', 0))
-            return result
-        return None
+        if data.get('statusCode') == 100: return data.get('body', {})
     except Exception as e:
         print(f"[WARN] {device_id} 取得失敗: {e}")
-        return None
+    return None
+
+def get_prev_power(device_id):
+    conn = common.get_db_connection()
+    if not conn: return 0.0
+    try:
+        cur = conn.cursor()
+        cur.execute(f"SELECT power_watts FROM {config.SQLITE_TABLE_SENSOR} WHERE device_id=? ORDER BY id DESC LIMIT 1", (device_id,))
+        row = cur.fetchone()
+        return row["power_watts"] if row and row["power_watts"] is not None else 0.0
+    finally: conn.close()
 
 if __name__ == "__main__":
     print(f"\n=== SwitchBot 定期監視 ({common.get_now_iso()}) ===")
+    if not sb_tool.fetch_device_name_cache(): sys.exit(1)
     
-    if not sb_tool.fetch_device_name_cache():
-        sys.exit(1)
+    for s in config.MONITOR_DEVICES:
+        tid, ttype = s.get("id"), s.get("type")
+        if not (ttype.startswith("Plug") or ttype.startswith("Meter")): continue
         
-    device_settings_list = config.MONITOR_DEVICES
-    
-    for setting in device_settings_list:
-        target_id = setting.get("id")
-        target_type = setting.get("type")
-        notify_conf = setting.get("notify_settings", {})
-        threshold = notify_conf.get("power_threshold_watts")
-        mode = notify_conf.get("notify_mode", "LOG_ONLY") # デフォルトは静かに記録のみ
-
-        if not (target_type.startswith("Plug") or target_type.startswith("Meter")):
-            continue
-
-        target_name = sb_tool.get_device_name_by_id(target_id) or "Unknown"
-        data = fetch_device_data(target_id, target_type)
+        tname = sb_tool.get_device_name_by_id(tid) or "Unknown"
+        data = fetch_device_data(tid)
         
         if data:
-            p_w = data.get('power')
-            t_c = data.get('temperature')
-            h_p = data.get('humidity')
+            pw = float(data.get('weight', 0)) if ttype.startswith("Plug") else None
+            tc = float(data.get('temperature', 0)) if ttype.startswith("Meter") else None
+            hp = float(data.get('humidity', 0)) if ttype.startswith("Meter") else None
             
-            insert_power_record(target_name, target_id, target_type, p_w, t_c, h_p, threshold)
-            
-            # LOG_ONLYの場合はここで通知処理をスキップ（これが節約の肝）
-            if mode == "LOG_ONLY":
-                continue
+            # DB記録
+            cols = ["timestamp", "device_name", "device_id", "device_type", "power_watts", "temperature_celsius", "humidity_percent", "threshold_watts"]
+            vals = (common.get_now_iso(), tname, tid, ttype, pw, tc, hp, s.get("notify_settings", {}).get("power_threshold_watts"))
+            common.save_log_generic(config.SQLITE_TABLE_SENSOR, cols, vals)
+            print(f"[SUCCESS] 記録: {tname}")
 
-            # 以下、CONTINUOUSなどの旧設定用（必要なら残す）
-            if p_w is not None and threshold is not None and mode == "CONTINUOUS":
-                if p_w >= threshold:
-                    msg = {"type": "text", "text": f"🚨【電力アラート】\n{target_name} が {p_w:.1f}W を記録しました"}
-                    common.send_line_push(config.LINE_USER_ID, [msg])
-                    print(f"[ALERT] 送信: {target_name}")
+            # 通知判定
+            conf = s.get("notify_settings", {})
+            th = conf.get("power_threshold_watts")
+            mode = conf.get("notify_mode", "LOG_ONLY")
+            
+            if pw is not None and th is not None and mode != "LOG_ONLY":
+                prev = get_prev_power(tid)
+                msg = None
+                
+                if mode == "ON_START" and pw >= th and prev < th:
+                    msg = f"🍚【炊飯通知】\n{tname} が稼働開始しました ({pw}W)"
+                elif mode == "ON_END_SUMMARY" and pw < th and prev >= th:
+                    msg = f"💡【使用終了】\n{tname} の使用が終わりました"
+                elif mode == "CONTINUOUS" and pw >= th:
+                    msg = f"🚨【電力アラート】\n{tname} が稼働中です ({pw}W)"
+                
+                if msg:
+                    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}])
+                    print(f"[ALERT] 通知送信: {tname}")
 
     print("=== 完了 ===\n")
