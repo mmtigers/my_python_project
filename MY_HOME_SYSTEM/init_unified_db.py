@@ -49,6 +49,31 @@ def init_db():
             timestamp DATETIME NOT NULL
         )
     ''')
+
+    # 4. 日次活動記録 
+    cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DAILY} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            user_name TEXT,
+            date TEXT NOT NULL,
+            category TEXT NOT NULL, -- 外出 / 面会
+            value TEXT NOT NULL,    -- はい / いいえ
+            timestamp DATETIME NOT NULL
+        )
+    ''')
+    
+    # 5. 体調記録
+    cur.execute(f'''
+        CREATE TABLE IF NOT EXISTS health_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT,
+            status TEXT,  -- 元気/普通/不調
+            note TEXT,
+            timestamp DATETIME NOT NULL
+        )
+    ''')
+
     conn.commit()
     conn.close()
     print("[SUCCESS] 全テーブルの準備が完了しました。")
