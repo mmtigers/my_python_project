@@ -6,21 +6,24 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, SourceGroup, SourceUser
 import uvicorn
 import config
-import common # ★共通ライブラリ
+import common
 import switchbot_get_device_list as sb_tool
+
+# ロガー設定
+logger = common.setup_logging("server")
 
 USER_INPUT_STATE = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("[INFO] サーバー起動...")
+    logger.info("サーバー起動: デバイスリスト取得中...")
     sb_tool.fetch_device_name_cache()
     yield
-    print("[INFO] サーバー終了")
+    logger.info("サーバー終了")
 
 app = FastAPI(lifespan=lifespan)
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
-line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN) # プロフィール取得用のみ使用
+line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
 @app.post("/callback/line")
 async def callback_line(request: Request, x_line_signature: str = Header(None)):
@@ -43,7 +46,7 @@ def handle_message(event):
 
     # 2. 手入力モード
     if user_id in USER_INPUT_STATE:
-        if msg.startswith(("食事", "外出", "面会")): # ボタン操作割り込み
+        if msg.startswith(("食事", "外出", "面会")):
             del USER_INPUT_STATE[user_id]
         else:
             category = USER_INPUT_STATE[user_id]
@@ -88,7 +91,8 @@ def handle_message(event):
                 user_name = get_user_name(event)
                 if save_food_log(user_id, user_name, final_rec):
                     ask_outing_question(reply_token, final_rec)
-        except: pass
+        except Exception as e:
+            logger.error(f"解析失敗: {e}")
         return
 
     # 6. 外出・面会
@@ -111,9 +115,8 @@ def handle_message(event):
             user = get_user_name(event)
             cols = ["user_id", "user_name", "message", "timestamp", "recognized_keyword"]
             common.save_log_generic(config.SQLITE_TABLE_OHAYO, cols, (user_id, user, msg, common.get_now_iso(), kw))
-            print(f"[OHAYO] {user} -> {msg}")
+            logger.info(f"[OHAYO] {user} -> {msg}")
 
-# --- ヘルパー関数 ---
 def ask_outing_question(token, food_rec):
     items = [{"type": "action", "action": {"type": "message", "label": l, "text": f"外出_{l}"}} for l in ["はい", "いいえ"]]
     reply = {"type": "text", "text": f"✅ 食事「{food_rec}」を記録しました。\n続いて、今日は外出しましたか？", "quickReply": {"items": items}}
@@ -147,6 +150,7 @@ async def callback_switchbot(request: Request):
         ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
         (common.get_now_iso(), name, mac, "Webhook Device", state, ctx.get("brightness", "")))
     
+    if state: logger.info(f"[SENSOR] 受信: {name} -> {state}")
     if state in ["open", "detected"]:
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り通知】\n{name} が反応しました: {state}"}])
     return {"status": "success"}

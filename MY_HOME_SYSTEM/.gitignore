@@ -1,0 +1,13 @@
+# .gitignore
+*.pyc
+__pycache__/
+venv/
+.venv/
+.env
+.vscode/
+*.log
+tmp/
+*.db
+*.sqlite
+*.sqlite3
+MY_HOME_SYSTEM/db_backup/

@@ -5,11 +5,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ==========================================
-# 1. SwitchBot & Nature Remo 設定
+# 1. SwitchBot & Nature Remo & Camera 設定
 # ==========================================
 SWITCHBOT_API_TOKEN = os.getenv("SWITCHBOT_API_TOKEN")
 SWITCHBOT_API_SECRET = os.getenv("SWITCHBOT_API_SECRET")
 NATURE_REMO_ACCESS_TOKEN = os.getenv("NATURE_REMO_ACCESS_TOKEN")
+CAMERA_IP = os.getenv("CAMERA_IP")
+CAMERA_USER = os.getenv("CAMERA_USER")
+CAMERA_PASS = os.getenv("CAMERA_PASS")
 
 # 監視デバイスリスト
 MONITOR_DEVICES = [
@@ -44,7 +47,9 @@ MONITOR_DEVICES = [
     {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "notify_settings": {}},
     {"id": "FEACA2E1797C", "type": "Hub Mini", "notify_settings": {}},
     {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "notify_settings": {}},
-    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "notify_settings": {}}
+    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "notify_settings": {}},
+    # 監視カメラ
+    {"id": "VIGI_C540_W", "type": "ONVIF Camera", "notify_settings": {"notify_mode": "REALTIME"} } # 検知即通知
 ]
 
 # === 2. 通知 & LINE設定 ===
