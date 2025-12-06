@@ -27,6 +27,23 @@ def init_db():
     cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_HEALTH} (
         id INTEGER PRIMARY KEY AUTOINCREMENT, user_name TEXT, status TEXT, note TEXT, timestamp DATETIME)''')
 
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CAR} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        action TEXT,   -- LEAVE (外出) / RETURN (帰宅)
+        rule_name TEXT,
+        timestamp DATETIME NOT NULL
+    )''')
+
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CHILD} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,       -- 記録者のID
+        user_name TEXT,     -- 記録者の名前
+        child_name TEXT,    -- 子供の名前
+        condition TEXT,     -- 症状
+        timestamp DATETIME NOT NULL
+    )''')
+
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")
