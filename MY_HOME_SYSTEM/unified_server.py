@@ -9,17 +9,15 @@ import config
 import common
 import switchbot_get_device_list as sb_tool
 
-# ロガー設定
 logger = common.setup_logging("server")
-
 USER_INPUT_STATE = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("サーバー起動: デバイスリスト取得中...")
+    logger.info("システム起動！準備運動中...")
     sb_tool.fetch_device_name_cache()
     yield
-    logger.info("サーバー終了")
+    logger.info("システム終了。お疲れ様でした🍵")
 
 app = FastAPI(lifespan=lifespan)
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
@@ -41,7 +39,7 @@ def handle_message(event):
     # 1. スキップ
     if msg == "食事_スキップ":
         if user_id in USER_INPUT_STATE: del USER_INPUT_STATE[user_id]
-        common.send_reply(reply_token, [{"type": "text", "text": "👌 記録をスキップしました。"}])
+        common.send_reply(reply_token, [{"type": "text", "text": "はーい、了解です✨ 今日はゆっくり休んでね。"}])
         return
 
     # 2. 手入力モード
@@ -51,7 +49,7 @@ def handle_message(event):
         else:
             category = USER_INPUT_STATE[user_id]
             if len(msg) > 50:
-                common.send_reply(reply_token, [{"type": "text", "text": "⚠️ 50文字以内で入力してください。"}])
+                common.send_reply(reply_token, [{"type": "text", "text": "ごめんね、もう少し短く教えてくれる？💦 (50文字以内)"}])
                 return
             
             user_name = get_user_name(event)
@@ -61,25 +59,24 @@ def handle_message(event):
                 del USER_INPUT_STATE[user_id]
                 ask_outing_question(reply_token, final_rec)
             else:
-                common.send_reply(reply_token, [{"type": "text", "text": "❌ エラー: 記録失敗"}])
+                common.send_reply(reply_token, [{"type": "text", "text": "あら、記録に失敗しちゃったみたい😢 もう一度試してみて？"}])
             return
 
-    # 3. 食事カテゴリ選択
+    # 3. 食事カテゴリ
     if msg.startswith("食事カテゴリ_"):
         cat = msg.replace("食事カテゴリ_", "")
         menus = config.MENU_OPTIONS.get(cat, config.MENU_OPTIONS["その他"])
         items = [{"type": "action", "action": {"type": "message", "label": m[:20], "text": f"食事記録_{cat}_{m}"}} for m in menus]
         items.append({"type": "action", "action": {"type": "message", "label": "✏️ 手入力", "text": f"食事手入力_{cat}"}})
         
-        reply = {"type": "text", "text": f"【{cat}】ですね。メニューを選んでください。", "quickReply": {"items": items}}
-        common.send_reply(reply_token, [reply])
+        common.send_reply(reply_token, [{"type": "text", "text": f"【{cat}】だね！ 美味しそう✨\n具体的なメニューはどれ？", "quickReply": {"items": items}}])
         return
 
     # 4. 手入力要求
     if msg.startswith("食事手入力_"):
         cat = msg.replace("食事手入力_", "")
         USER_INPUT_STATE[user_id] = cat
-        common.send_reply(reply_token, [{"type": "text", "text": f"📝 【{cat}】のメニュー名を入力してください。"}])
+        common.send_reply(reply_token, [{"type": "text", "text": f"わかった！ {cat}のメニューを教えてね📝"}])
         return
 
     # 5. 食事記録確定
@@ -88,39 +85,34 @@ def handle_message(event):
             parts = msg.split("_", 2)
             if len(parts) >= 3:
                 final_rec = f"{parts[1]}: {parts[2]}"
-                user_name = get_user_name(event)
-                if save_food_log(user_id, user_name, final_rec):
+                if save_food_log(user_id, get_user_name(event), final_rec):
                     ask_outing_question(reply_token, final_rec)
-        except Exception as e:
-            logger.error(f"解析失敗: {e}")
+        except: pass
         return
 
     # 6. 外出・面会
     if msg.startswith("外出_"):
         save_daily_log(user_id, get_user_name(event), "外出", msg.replace("外出_", ""))
         items = [{"type": "action", "action": {"type": "message", "label": l, "text": f"面会_{l}"}} for l in ["はい", "いいえ"]]
-        reply = {"type": "text", "text": "パートナー以外の人と会いましたか？", "quickReply": {"items": items}}
-        common.send_reply(reply_token, [reply])
+        common.send_reply(reply_token, [{"type": "text", "text": "誰かと会ったりした？", "quickReply": {"items": items}}])
         return
 
     if msg.startswith("面会_"):
         save_daily_log(user_id, get_user_name(event), "面会", msg.replace("面会_", ""))
-        common.send_reply(reply_token, [{"type": "text", "text": "✅ 全ての記録が完了しました。お疲れ様でした！"}])
+        common.send_reply(reply_token, [{"type": "text", "text": "教えてくれてありがとう！\n今日も一日お疲れ様でした🍵 ゆっくり休んでね。"}])
         return
 
-    # 7. おはよう記録
+    # 7. おはよう
     if len(msg) <= config.MESSAGE_LENGTH_LIMIT:
         kw = next((k for k in config.OHAYO_KEYWORDS if k in msg.lower()), None)
         if kw:
             user = get_user_name(event)
-            cols = ["user_id", "user_name", "message", "timestamp", "recognized_keyword"]
-            common.save_log_generic(config.SQLITE_TABLE_OHAYO, cols, (user_id, user, msg, common.get_now_iso(), kw))
+            common.save_log_generic(config.SQLITE_TABLE_OHAYO, ["user_id", "user_name", "message", "timestamp", "recognized_keyword"], (user_id, user, msg, common.get_now_iso(), kw))
             logger.info(f"[OHAYO] {user} -> {msg}")
 
 def ask_outing_question(token, food_rec):
     items = [{"type": "action", "action": {"type": "message", "label": l, "text": f"外出_{l}"}} for l in ["はい", "いいえ"]]
-    reply = {"type": "text", "text": f"✅ 食事「{food_rec}」を記録しました。\n続いて、今日は外出しましたか？", "quickReply": {"items": items}}
-    common.send_reply(token, [reply])
+    common.send_reply(token, [{"type": "text", "text": f"「{food_rec}」を記録したよ📝\n\nあと、今日はお出かけした？", "quickReply": {"items": items}}])
 
 def get_user_name(event):
     try:
@@ -130,12 +122,10 @@ def get_user_name(event):
     return "Unknown"
 
 def save_food_log(uid, uname, content):
-    cols = ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"]
-    return common.save_log_generic(config.SQLITE_TABLE_FOOD, cols, (uid, uname, common.get_today_date_str(), "Dinner", content, common.get_now_iso()))
+    return common.save_log_generic(config.SQLITE_TABLE_FOOD, ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"], (uid, uname, common.get_today_date_str(), "Dinner", content, common.get_now_iso()))
 
 def save_daily_log(uid, uname, cat, val):
-    cols = ["user_id", "user_name", "date", "category", "value", "timestamp"]
-    return common.save_log_generic(config.SQLITE_TABLE_DAILY, cols, (uid, uname, common.get_today_date_str(), cat, val, common.get_now_iso()))
+    return common.save_log_generic(config.SQLITE_TABLE_DAILY, ["user_id", "user_name", "date", "category", "value", "timestamp"], (uid, uname, common.get_today_date_str(), cat, val, common.get_now_iso()))
 
 @app.post("/webhook/switchbot")
 async def callback_switchbot(request: Request):
@@ -152,7 +142,7 @@ async def callback_switchbot(request: Request):
     
     if state: logger.info(f"[SENSOR] 受信: {name} -> {state}")
     if state in ["open", "detected"]:
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り通知】\n{name} が反応しました: {state}"}])
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り】\n{name} が反応したよ！\n状態: {state}"}])
     return {"status": "success"}
 
 if __name__ == "__main__":

@@ -72,15 +72,13 @@ if __name__ == "__main__":
                 prev = get_prev_power(tid)
                 msg = None
                 if mode == "ON_START" and pw >= th and prev < th:
-                    msg = f"🍚【炊飯通知】\n{tname} が稼働開始しました ({pw}W)"
+                    msg = f"🍚【炊飯通知】\n{tname} が動き出したよ！ ({pw}W)"
                 elif mode == "ON_END_SUMMARY" and pw < th and prev >= th:
-                    msg = f"💡【使用終了】\n{tname} の使用が終わりました"
+                    msg = f"💡【使用終了】\n{tname} の電源が切れたみたい"
                 elif mode == "CONTINUOUS" and pw >= th:
-                    msg = f"🚨【電力アラート】\n{tname} が稼働中です ({pw}W)"
+                    msg = f"🚨【電力アラート】\n{tname} がまだついてるよ！ ({pw}W)"
                 
                 if msg:
-                    # 修正: send_line_push -> send_push
                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}])
                     logger.info(f"通知送信: {tname}")
-
-    logger.info("=== 完了 ===")
+    logger.info("=== チェック完了 ===")
