@@ -8,15 +8,13 @@ import config
 import logging
 from contextlib import contextmanager
 
-# === ログ設定共通化 ===
+# === ログ設定 ===
 def setup_logging(name=None):
-    """全スクリプト共通のログ設定"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    # 外部ライブラリのログを抑制
     logging.getLogger("zeep").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     return logging.getLogger(name)
@@ -25,7 +23,6 @@ logger = setup_logging("common")
 
 # === データベース関連 ===
 def get_db_connection():
-    """(旧) DB接続を取得する"""
     try:
         conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=10)
         conn.row_factory = sqlite3.Row
@@ -36,22 +33,19 @@ def get_db_connection():
 
 @contextmanager
 def get_db_cursor(commit=False):
-    """(新) 安全なDB接続用コンテキストマネージャ (with句で使える)"""
     conn = get_db_connection()
     if not conn:
         yield None
         return
     try:
         yield conn.cursor()
-        if commit:
-            conn.commit()
+        if commit: conn.commit()
     except Exception as e:
         logger.error(f"DB操作エラー: {e}")
     finally:
         conn.close()
 
 def save_log_generic(table, columns_list, values_list):
-    """汎用ログ保存関数"""
     with get_db_cursor(commit=True) as cur:
         if cur:
             placeholders = ", ".join(["?"] * len(values_list))
@@ -62,11 +56,18 @@ def save_log_generic(table, columns_list, values_list):
     return False
 
 # === 通知関連 ===
-def send_push(user_id, messages):
+def send_push(user_id, messages, image_data=None):
+    """
+    通知送信 (設定によりLINE/Discord自動切り替え)
+    :param image_data: バイナリ画像データ (Discord専用)
+    """
     target = getattr(config, "NOTIFICATION_TARGET", "line")
     if target == "discord":
-        return _send_discord_webhook(messages)
+        return _send_discord_webhook(messages, image_data)
     else:
+        # LINEは画像送信に公開URLが必要なため、今回はテキストのみ送る実装とします
+        if image_data:
+            logger.warning("LINEへの画像直接送信は未対応のため、テキストのみ送信します")
         return _send_line_api("push", {"to": user_id, "messages": messages})
 
 def send_reply(reply_token, messages):
@@ -88,7 +89,7 @@ def _send_line_api(endpoint, payload):
         logger.error(f"LINE接続エラー: {e}")
         return False
 
-def _send_discord_webhook(messages):
+def _send_discord_webhook(messages, image_data=None):
     url = config.DISCORD_WEBHOOK_URL
     if not url:
         logger.error("Discord URL未設定")
@@ -100,9 +101,17 @@ def _send_discord_webhook(messages):
         text_content += f"{text}\n\n"
     
     try:
-        res = requests.post(url, json={"content": text_content})
+        if image_data:
+            # 画像がある場合はマルチパート送信
+            files = {'file': ('snapshot.jpg', image_data, 'image/jpeg')}
+            data = {'content': text_content}
+            res = requests.post(url, files=files, data=data)
+        else:
+            # テキストのみ
+            res = requests.post(url, json={"content": text_content})
+
         if res.status_code not in [200, 204]:
-            logger.error(f"Discord失敗: {res.status_code}")
+            logger.error(f"Discord失敗: {res.status_code} {res.text}")
             return False
         return True
     except Exception as e:
