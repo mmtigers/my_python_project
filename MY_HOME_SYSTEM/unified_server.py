@@ -171,6 +171,47 @@ def handle_message(event):
             user = get_user_name(event)
             common.save_log_generic(config.SQLITE_TABLE_OHAYO, ["user_id", "user_name", "message", "timestamp", "recognized_keyword"], (user_id, user, msg, common.get_now_iso(), kw))
             logger.info(f"[OHAYO] {user} -> {msg}")
+    
+    # A. 排便・お腹記録のトリガー
+    if any(w in msg for w in ["うんち", "ウンチ", "排便", "トイレ", "便", "お腹", "下痢", "便秘"]):
+        if not msg.startswith("お腹記録_"):
+            # Discordに通知テスト (ボタンは出ないのでテキストで案内)
+            text_msg = "🚽 [Discord通知テスト]\nお腹の調子はどうですか？\n\n記録するにはLINEで以下のように送ってください：\n「お腹記録_排便_バナナ」\n「お腹記録_症状_腹痛あり」"
+            
+            # target="discord" を指定して送信
+            common.send_push(config.LINE_USER_ID, [{"type": "text", "text": text_msg}], target="discord")
+            return
+
+    # B. 記録実行
+    if msg.startswith("お腹記録_"):
+        try:
+            parts = msg.split("_", 2)
+            if len(parts) < 3: return
+            
+            rec_type = parts[1]
+            condition = parts[2]
+            user_name = get_user_name(event)
+
+            # DB保存
+            cols = ["user_id", "user_name", "record_type", "condition", "timestamp"]
+            vals = (user_id, user_name, rec_type, condition, common.get_now_iso())
+            
+            if common.save_log_generic(config.SQLITE_TABLE_DEFECATION, cols, vals):
+                # Discordに成功通知
+                if "血便" in condition or "腹痛" in condition:
+                    reply_text = f"✅ [Discord通知]\n{condition} を記録しました。\n無理せずお大事にしてください😢"
+                else:
+                    reply_text = f"✅ [Discord通知]\n{condition} を記録しました！"
+                
+                common.send_push(config.LINE_USER_ID, [{"type": "text", "text": reply_text}], target="discord")
+            else:
+                common.send_push(config.LINE_USER_ID, [{"type": "text", "text": "❌ 記録に失敗しました"}], target="discord")
+                
+        except Exception as e:
+            logger.error(f"お腹記録エラー: {e}")
+        return
+
+
 
 def ask_outing_question(token, food_rec):
     items = [{"type": "action", "action": {"type": "message", "label": l, "text": f"外出_{l}"}} for l in ["はい", "いいえ"]]
@@ -203,13 +244,19 @@ async def callback_switchbot(request: Request):
     name = sb_tool.get_device_name_by_id(mac) or f"Unknown_{mac}"
     state = str(ctx.get("detectionState", "")).lower()
     
+    # 場所を取得
+    location = common.get_device_location(mac)
+    
     common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
         ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
         (common.get_now_iso(), name, mac, "Webhook Device", state, ctx.get("brightness", "")))
     
-    if state: logger.info(f"[SENSOR] 受信: {name} -> {state}")
+    if state: logger.info(f"[SENSOR] 受信: {name} ({location}) -> {state}")
+    
     if state in ["open", "detected"]:
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り】\n{name} が反応したよ！\n状態: {state}"}])
+        # ★修正: 場所情報をメッセージに追加
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り通知】\n[{location}] {name} が反応しました: {state}"}])
+        
     return {"status": "success"}
 
 if __name__ == "__main__":
