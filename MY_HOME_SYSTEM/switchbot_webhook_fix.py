@@ -1,75 +1,113 @@
-# HOME_SYSTEM/switchbot_webhook_super_fix.py
+# HOME_SYSTEM/switchbot_webhook_fix.py
 import requests
-import json
-import switchbot_get_device_list as sb_tool
 import time
+import switchbot_get_device_list as sb_tool
+import common
+import config
 
-# ★ 今回適用したい新しいURL
-TARGET_URL = "https://09bfec8aec45.ngrok-free.app/webhook/switchbot"
+# ロガー設定
+logger = common.setup_logging("webhook_fix")
 
-def super_fix_webhook():
-    print(f"\n--- SwitchBot Webhook 完全修復 ---")
+def get_ngrok_url():
+    """ローカルで動いているngrokから現在のURLを取得する"""
+    try:
+        res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=5)
+        data = res.json()
+        tunnels = data.get("tunnels", [])
+        for t in tunnels:
+            if t.get("proto") == "https":
+                return t.get("public_url")
+    except Exception as e:
+        logger.error(f"ngrok URL取得失敗: {e}")
+    return None
+
+def update_switchbot_webhook(base_url):
+    """SwitchBotのWebhook URLを更新"""
+    target_url = f"{base_url}/webhook/switchbot"
+    logger.info(f"--- [SwitchBot] 更新処理: {target_url} ---")
+    
     headers = sb_tool.create_switchbot_auth_headers()
     
-    # === ステップ1: 現在の設定を確認 ===
-    print("[1/3] 現在の登録状況を確認中...")
-    query_url = "https://api.switch-bot.com/v1.1/webhook/queryWebhook"
+    # 1. 現在の設定を確認
     try:
-        res = requests.post(query_url, headers=headers, json={"action": "queryUrl"})
-        data = res.json()
-        current_urls = data.get('body', {}).get('urls', [])
-        print(f"   => 現在のURL: {current_urls}")
+        query = requests.post("https://api.switch-bot.com/v1.1/webhook/queryWebhook", headers=headers, json={"action": "queryUrl"}).json()
+        urls = query.get('body', {}).get('urls', [])
+        
+        if target_url in urls:
+            logger.info("✅ SwitchBotは既に正しいURLです。")
+            return True
+
+        # 古い設定を削除
+        for old_url in urls:
+            logger.info(f"削除中: {old_url}")
+            requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url})
+            time.sleep(1)
+            
     except Exception as e:
-        print(f"   => 確認エラー: {e}")
+        logger.error(f"SwitchBot確認エラー: {e}")
+
+    # 2. 新しいURLを登録
+    try:
+        headers = sb_tool.create_switchbot_auth_headers() # ヘッダー再生成
+        res = requests.post("https://api.switch-bot.com/v1.1/webhook/setupWebhook", headers=headers, json={
+            "action": "setupWebhook",
+            "url": target_url,
+            "deviceList": "ALL"
+        })
+        if res.json().get('statusCode') == 100:
+            logger.info("✅ SwitchBot 更新成功！")
+            return True
+    except Exception as e:
+        logger.error(f"SwitchBot登録エラー: {e}")
+    
+    return False
+
+def update_line_webhook(base_url):
+    """LINE BotのWebhook URLを更新"""
+    target_url = f"{base_url}/callback/line"
+    logger.info(f"--- [LINE] 更新処理: {target_url} ---")
+
+    url = "https://api.line.me/v2/bot/channel/webhook/endpoint"
+    headers = {
+        "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {"endpoint": target_url}
+
+    try:
+        res = requests.put(url, headers=headers, json=payload, timeout=10)
+        if res.status_code == 200:
+            logger.info("✅ LINE Bot 更新成功！")
+            return True
+        else:
+            logger.error(f"LINE更新失敗: {res.status_code} {res.text}")
+            return False
+    except Exception as e:
+        logger.error(f"LINE接続エラー: {e}")
+        return False
+
+def fix_all_webhooks():
+    logger.info("=== Webhook 自動修復ツール起動 ===")
+    
+    # 1. ngrokのURLを取得
+    base_url = get_ngrok_url()
+    if not base_url:
+        logger.error("❌ ngrokが起動していないか、URLが取得できません。")
         return
 
-    # === ステップ2: 古いURLを全て削除 ===
-    # 登録されているURLがあれば、一つずつ明示的に削除します
-    if current_urls:
-        print("[2/3] 古い設定を削除します...")
-        del_url = "https://api.switch-bot.com/v1.1/webhook/deleteWebhook"
-        
-        for old_url in current_urls:
-            # 削除リクエスト
-            print(f"   => 削除対象: {old_url}")
-            try:
-                # URLを指定して削除
-                payload = {"action": "deleteWebhook", "url": old_url}
-                res = requests.post(del_url, headers=headers, json=payload)
-                print(f"      結果: {res.json().get('message')}")
-            except Exception as e:
-                print(f"      エラー: {e}")
-            time.sleep(1)
+    logger.info(f"現在のベースURL: {base_url}")
+
+    # 2. 両方のサービスを更新
+    sb_result = update_switchbot_webhook(base_url)
+    line_result = update_line_webhook(base_url)
+
+    # 3. 結果通知 (Discord)
+    if sb_result and line_result:
+        msg = f"🔄 システム再起動完了\n\n✅ SwitchBot\n✅ LINE Bot\n\n新しいURLで待機中:\n{base_url}"
     else:
-        print("[2/3] 削除する設定はありませんでした。")
-
-    time.sleep(2) # 念のため待機
-
-    # === ステップ3: 新しいURLを登録 ===
-    print(f"[3/3] 新しいURLを登録します: {TARGET_URL}")
-    setup_url = "https://api.switch-bot.com/v1.1/webhook/setupWebhook"
-    payload = {
-        "action": "setupWebhook",
-        "url": TARGET_URL,
-        "deviceList": "ALL"
-    }
+        msg = f"⚠️ システム再起動 (一部失敗)\nSwitchBot: {'OK' if sb_result else 'NG'}\nLINE: {'OK' if line_result else 'NG'}\n\nログを確認してください。"
     
-    try:
-        # 新しいヘッダーを再生成（署名の時間切れ防止）
-        headers = sb_tool.create_switchbot_auth_headers()
-        res = requests.post(setup_url, headers=headers, json=payload)
-        data = res.json()
-        
-        print(f"   => ステータス: {data.get('statusCode')}")
-        print(f"   => メッセージ: {data.get('message')}")
-        
-        if data.get('statusCode') == 100:
-            print("\n✅ 完全修復完了！URLが正しく更新されました。")
-        else:
-            print("\n❌ 登録失敗。ログを確認してください。")
-
-    except Exception as e:
-        print(f"[ERROR] 登録エラー: {e}")
+    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord")
 
 if __name__ == "__main__":
-    super_fix_webhook()
+    fix_all_webhooks()
