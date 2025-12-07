@@ -5,7 +5,7 @@ from requests.auth import HTTPDigestAuth
 import config
 import common
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta  # <--- datetimeを追加
 import os
 import sys
 import time
@@ -18,6 +18,11 @@ from concurrent.futures import ThreadPoolExecutor
 # === ログ設定 ===
 logger = common.setup_logging("camera")
 logging.getLogger("zeep").setLevel(logging.WARNING)
+
+# === 画像保存設定 ===
+ASSETS_DIR = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
+if not os.path.exists(ASSETS_DIR):
+    os.makedirs(ASSETS_DIR, exist_ok=True)
 
 # === 定数定義 ===
 BINDING_NAME = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
@@ -160,6 +165,20 @@ def monitor_single_camera(cam_conf):
                                 
                                 # 画像取得
                                 img = capture_snapshot_rtsp(cam_conf)
+
+                                # --- ★ここから追加: ギャラリー用に画像を保存 ---
+                                if img:
+                                    try:
+                                        # 日時付きファイル名で保存
+                                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                                        filename = f"snapshot_{cam_conf['id']}_{timestamp}.jpg"
+                                        save_path = os.path.join(ASSETS_DIR, filename)
+                                        with open(save_path, "wb") as f:
+                                            f.write(img)
+                                        logger.info(f"🖼️ 画像保存: {filename}")
+                                    except Exception as e:
+                                        logger.error(f"画像保存失敗: {e}")
+                                # ------------------------------------------
                                 
                                 # DB記録
                                 common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
@@ -179,7 +198,7 @@ def monitor_single_camera(cam_conf):
                                             ["timestamp", "action", "rule_name"],
                                             (common.get_now_iso(), action, rule_name))
 
-                                # 通知 (優先度50以上のみ = 動き検知だけなら通知しない)
+                                # 通知 (優先度50以上のみ)
                                 if priority >= 50:
                                     msg = f"📷【カメラ通知】\n[{cam_loc}] {cam_name} で{label}を検知しました！"
                                     if event_type == "intrusion":
