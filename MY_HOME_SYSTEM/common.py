@@ -84,6 +84,24 @@ def save_log_generic(table, columns_list, values_list):
                 logger.error(f"データ保存失敗: {e}")
     return False
 
+def get_device_location(device_id):
+    """
+    デバイスIDから設定された場所(location)を取得する。
+    見つからない場合は '伊丹' (デフォルト) を返す。
+    """
+    # SwitchBot/NatureRemoデバイス
+    for d in config.MONITOR_DEVICES:
+        if d.get("id") == device_id:
+            return d.get("location", "伊丹")
+            
+    # カメラデバイス
+    if hasattr(config, "CAMERAS"):
+        for c in config.CAMERAS:
+            if c.get("id") == device_id:
+                return c.get("location", "伊丹")
+                
+    return "伊丹"
+
 # === 通知関連 ===
 def send_push(user_id, messages, image_data=None, target=None):
     if target is None:

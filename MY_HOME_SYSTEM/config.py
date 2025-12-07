@@ -26,6 +26,7 @@ CAMERAS = [
     {
         "id": "VIGI_C540_Parking",  # DB記録用のID
         "name": "駐車場カメラ",       # 通知用の名前
+        "location": "伊丹",     # カメラの設置場所
         "ip": os.getenv("CAMERA_IP", "192.168.1.110"), # .envのCAMERA_IPを使う
         "user": DEFAULT_CAM_USER,
         "pass": DEFAULT_CAM_PASS
@@ -34,6 +35,7 @@ CAMERAS = [
     {
         "id": "VIGI_C330I_Garden",
         "name": "庭カメラ",
+        "location": "伊丹",    
         "ip": "192.168.1.51", 
         "user": DEFAULT_CAM_USER,
         "pass": DEFAULT_CAM_PASS
@@ -53,28 +55,34 @@ else:
 # ==========================================
 MONITOR_DEVICES = [
     # Plug Mini
-    {"id": "24587C9CCBCE", "type": "Plug Mini (JP)", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "D83BDA178576", "type": "Plug Mini (JP)", "notify_settings": {"power_threshold_watts": 20.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "F09E9E9D599A", "type": "Plug Mini (JP)", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    # MeterPlus
-    {"id": "CFBF5E92AAD0", "type": "MeterPlus", "notify_settings": {}},
-    {"id": "E17F2E2DA99F", "type": "MeterPlus", "notify_settings": {}},
-    {"id": "E30D45A30356", "type": "MeterPlus", "notify_settings": {}},
-    {"id": "E9BA4D43962D", "type": "MeterPlus", "notify_settings": {}},
-    # Sensors
-    {"id": "E9B20697916C", "type": "Motion Sensor", "notify_settings": {}},
-    {"id": "F062114E225F", "type": "Motion Sensor", "notify_settings": {}},
-    {"id": "C937D8CB33A3", "type": "Contact Sensor", "notify_settings": {}},
-    {"id": "D92743516777", "type": "Contact Sensor", "notify_settings": {}},
-    {"id": "E07135DD95B1", "type": "Contact Sensor", "notify_settings": {}},
-    {"id": "F5866D92E63D", "type": "Contact Sensor", "notify_settings": {}},
-    {"id": "F69BB5721955", "type": "Contact Sensor", "notify_settings": {}},
-    # Hubs
-    {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "notify_settings": {}},
-    {"id": "FEACA2E1797C", "type": "Hub Mini", "notify_settings": {}},
-    # Other Cameras (Cloud)
-    {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "notify_settings": {}},
-    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "notify_settings": {}},
+    {"id": "24587C9CCBCE", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
+    {"id": "D83BDA178576", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 20.0, "notify_mode": "LOG_ONLY"}},
+    {"id": "F09E9E9D599A", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
+    # --- MeterPlus (温湿度監視) ---
+    {"id": "CFBF5E92AAD0", "type": "MeterPlus", "location": "伊丹", "notify_settings": {}},
+    {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "notify_settings": {}},
+    {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "notify_settings": {}},
+    {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "notify_settings": {}},
+
+    # --- Motion Sensor (人感センサー) ---
+    {"id": "E9B20697916C", "type": "Motion Sensor", "location": "高砂", "notify_settings": {}},
+    {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "notify_settings": {}},
+
+    # --- Contact Sensor (開閉センサー) ---
+    {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}},
+    {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}},
+    {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}}, # お母さんの部屋
+    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}}, # 庭へのドア
+    
+    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "伊丹", "notify_settings": {}}, # トイレ
+
+    # --- Hub Mini ---
+    {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "notify_settings": {}},
+    {"id": "FEACA2E1797C", "type": "Hub Mini", "location": "高砂", "notify_settings": {}},
+
+    # --- Cloud Cameras ---
+    {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "location": "伊丹", "notify_settings": {}},
+    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "location": "高砂", "notify_settings": {}}
 ]
 
 # ==========================================
@@ -114,6 +122,23 @@ SQLITE_TABLE_DAILY = "daily_records"
 SQLITE_TABLE_HEALTH = "health_records"
 SQLITE_TABLE_CAR = "car_records"
 SQLITE_TABLE_CHILD = "child_health_records"
+SQLITE_TABLE_DEFECATION = "defecation_records"
+
+# 排便の種類の選択肢 (ブリストルスケールを参考に簡易化)
+DEFECATION_TYPES = [
+    "🐰 コロコロ (硬い)", 
+    "🍌 バナナ (普通)", 
+    "💧 軟便・下痢", 
+    "🩸 血便・異常"
+]
+
+# お腹の症状の選択肢
+STOMACH_SYMPTOMS = [
+    "⚡ 腹痛あり", 
+    "🤢 吐き気・胃痛", 
+    "💨 ガス腹・張り", 
+    "👌 スッキリした"
+]
 
 # ==========================================
 # 6. バックアップ & メニュー
@@ -132,12 +157,3 @@ CAR_RULE_KEYWORDS = {
     "RETURN": ["Enter", "In", "Arrive"]
 }
 
-
-# ==========================================
-# 7. 給与明細分析 設定 (★追加)
-# ==========================================
-GMAIL_USER = os.getenv("GMAIL_USER")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
-TARGET_SENDER = os.getenv("TARGET_SENDER")
-PDF_PASSWORD = os.getenv("PDF_PASSWORD")
-SALARY_PDF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "salary_pdfs")
