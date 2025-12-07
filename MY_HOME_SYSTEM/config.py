@@ -131,3 +131,13 @@ CAR_RULE_KEYWORDS = {
     "LEAVE": ["Exit", "Leave", "Out"],
     "RETURN": ["Enter", "In", "Arrive"]
 }
+
+
+# ==========================================
+# 7. 給与明細分析 設定 (★追加)
+# ==========================================
+GMAIL_USER = os.getenv("GMAIL_USER")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+TARGET_SENDER = os.getenv("TARGET_SENDER")
+PDF_PASSWORD = os.getenv("PDF_PASSWORD")
+SALARY_PDF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "salary_pdfs")
