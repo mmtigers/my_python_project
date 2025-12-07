@@ -43,6 +43,17 @@ def init_db():
         timestamp DATETIME NOT NULL
     )''')
 
+    # 排便・お腹記録用テーブル
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DEFECATION} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,       -- 記録者のID
+        user_name TEXT,     -- 記録者の名前
+        record_type TEXT,   -- "排便" or "症状"
+        condition TEXT,     -- バナナ、下痢、腹痛など
+        note TEXT,          -- メモ (オプション)
+        timestamp DATETIME NOT NULL
+    )''')
+
 
     conn.commit()
     conn.close()
