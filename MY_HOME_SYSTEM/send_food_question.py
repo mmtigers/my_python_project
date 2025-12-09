@@ -26,7 +26,6 @@ def get_daily_summary():
             cursor.execute(f"SELECT action, timestamp FROM {config.SQLITE_TABLE_CAR} WHERE timestamp LIKE ? ORDER BY timestamp", (f"{today}%",))
             car_rows = cursor.fetchall()
             
-            # 車の利用回数と時間（簡易計算）
             car_count = 0
             last_leave = None
             total_out_seconds = 0
@@ -43,6 +42,28 @@ def get_daily_summary():
                     total_out_seconds += duration
                     last_leave = None # リセット
 
+            # === ★追加: 3. 防犯カメラ検知集計 ===
+            cursor.execute(f"SELECT contact_state FROM {config.SQLITE_TABLE_SENSOR} WHERE device_type = 'ONVIF Camera' AND timestamp LIKE ?", (f"{today}%",))
+            cam_rows = cursor.fetchall()
+            
+            cam_msg = "📷 カメラ検知: なし"
+            if cam_rows:
+                total_cam = len(cam_rows)
+                # 種類別にカウント
+                counts = {}
+                for r in cam_rows:
+                    etype = r["contact_state"] # person, vehicle, intrusion etc.
+                    counts[etype] = counts.get(etype, 0) + 1
+                
+                # 表示用ラベル変換
+                label_map = {"intrusion": "🚨侵入", "person": "👤人", "vehicle": "🚗車", "motion": "👀動き"}
+                details = []
+                for k, v in counts.items():
+                    lbl = label_map.get(k, k)
+                    details.append(f"{lbl}:{v}")
+                
+                cam_msg = f"📷 カメラ検知: {total_cam}回 ({' '.join(details)})"
+
             # レポート作成
             summary = []
             if tv_cnt > 0: summary.append(f"📺 テレビ: 約{tv_cnt*5/60:.1f}時間")
@@ -52,11 +73,13 @@ def get_daily_summary():
                 summary.append(f"⚡ 今日の電気: {kwh:.2f}kWh (約{int(kwh*31)}円)")
                 
             if car_count > 0:
-                # 分換算
                 out_min = total_out_seconds / 60
                 summary.append(f"🚗 車の利用: {car_count}回 (合計 約{int(out_min)}分)")
             else:
                 summary.append("🚗 車の利用はありませんでした。")
+            
+            # カメラ情報を追加
+            summary.append(cam_msg)
 
             return "\n".join(summary) + "\n\n" if summary else ""
         except Exception as e:
@@ -64,7 +87,6 @@ def get_daily_summary():
             return ""
 
 if __name__ == "__main__":
-    # ... (以降は変更なし、既存のまま) ...
     logger.info("質問送信処理を開始...")
     report = get_daily_summary()
     
@@ -75,15 +97,16 @@ if __name__ == "__main__":
     items = [{"type": "action", "action": {"type": "message", "label": l, "text": t}} for l, t in actions]
     
     now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-    target_platform = "discord" if now.year < 2026 else "line"
-    note = "\n(今はDiscordモードだよ！)" if target_platform == "discord" else ""
-
+    # 2026年以降でなくてもDiscordを優先したい場合はここを調整
+    target_platform = "discord" 
+    
     msg = {
         "type": "text",
-        "text": f"🌙 こんばんは、お疲れ様！\n\n{report}今日の夕食はどうしたの？{note}",
+        "text": f"🌙 こんばんは、お疲れ様！\n\n{report}今日の夕食はどうしたの？",
         "quickReply": {"items": items}
     }
     
+    # target="discord" を明示的に指定して送信
     if common.send_push(config.LINE_USER_ID, [msg], target=target_platform):
         logger.info("送信完了✨")
     else:
