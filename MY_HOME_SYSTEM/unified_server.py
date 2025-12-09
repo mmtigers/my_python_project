@@ -12,6 +12,10 @@ import switchbot_get_device_list as sb_tool
 logger = common.setup_logging("server")
 USER_INPUT_STATE = {}
 
+# クールタイム管理用 (デバイスID: 最終通知時刻)
+LAST_NOTIFY_TIME = {}
+COOLDOWN_SECONDS = 300  # 5分間は連続通知しない
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("システム起動！準備運動中...")
@@ -244,19 +248,27 @@ async def callback_switchbot(request: Request):
     name = sb_tool.get_device_name_by_id(mac) or f"Unknown_{mac}"
     state = str(ctx.get("detectionState", "")).lower()
     
-    # 場所を取得
-    location = common.get_device_location(mac)
-    
+    # DBには必ず記録する (データの粒度を保つため)
     common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
         ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
         (common.get_now_iso(), name, mac, "Webhook Device", state, ctx.get("brightness", "")))
     
-    if state: logger.info(f"[SENSOR] 受信: {name} ({location}) -> {state}")
-    
+    if state: logger.info(f"[SENSOR] 受信: {name} -> {state}")
+
+    # 通知判定 (クールタイム導入)
     if state in ["open", "detected"]:
-        # ★修正: 場所情報をメッセージに追加
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り通知】\n[{location}] {name} が反応しました: {state}"}])
+        current_time = time.time()
+        last_time = LAST_NOTIFY_TIME.get(mac, 0)
         
+        # 前回の通知から5分以上経過している場合のみ送信
+        if current_time - last_time > COOLDOWN_SECONDS:
+            common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【見守り】\n{name} が反応しました: {state}"}], target="discord")
+            # 時刻を更新
+            LAST_NOTIFY_TIME[mac] = current_time
+            logger.info(f"通知送信: {name}")
+        else:
+            logger.info(f"通知スキップ(クールタイム中): {name}")
+
     return {"status": "success"}
 
 if __name__ == "__main__":
