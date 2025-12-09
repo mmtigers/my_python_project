@@ -92,7 +92,7 @@ def capture_snapshot_rtsp(cam_conf):
 
 def monitor_single_camera(cam_conf):
     cam_name = cam_conf['name']
-    cam_port = cam_conf.get('port', 80) # ★修正: ポートをconfigから読み込む
+    cam_port = cam_conf.get('port', 80) # ★修正: 設定がなければ80、あればそれを使う
     cam_loc = cam_conf.get('location', '伊丹')
     
     logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port})")
@@ -157,28 +157,29 @@ def monitor_single_camera(cam_conf):
                                     ["timestamp", "device_name", "device_id", "device_type", "contact_state"],
                                     (common.get_now_iso(), "防犯カメラ", cam_conf['id'], "ONVIF Camera", event_type))
                                 
-                                # ★修正: 車判定ロジック強化 (侵入検知も含める)
+                                # 車の記録判定 (侵入も含めるようロジック強化)
                                 is_car_related = "vehicle" in event_type or "Vehicle" in str(rule_name) or event_type == "intrusion"
                                 if is_car_related:
                                     action = "UNKNOWN"
+                                    # 外出判定
                                     if any(k in rule_name for k in config.CAR_RULE_KEYWORDS["LEAVE"]):
                                         action = "LEAVE"
+                                    # 帰宅判定
                                     elif any(k in rule_name for k in config.CAR_RULE_KEYWORDS["RETURN"]):
                                         action = "RETURN"
                                     
                                     if action != "UNKNOWN":
-                                        logger.info(f"🚗 車両移動判定: {action} (Rule: {rule_name})")
                                         common.save_log_generic(config.SQLITE_TABLE_CAR,
                                             ["timestamp", "action", "rule_name"],
                                             (common.get_now_iso(), action, rule_name))
 
-                                # ★修正: 通知送信 (Discordを指定)
+                                # 通知送信 (Discord対応)
                                 if priority >= 50:
                                     msg = f"📷【カメラ通知】\n[{cam_loc}] {cam_name} で{label}を検知しました！"
                                     if event_type == "intrusion":
                                         msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
                                     
-                                    # target="discord" を追加
+                                    # ★修正: target="discord" を明示
                                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
                                     
                                     time.sleep(15)
