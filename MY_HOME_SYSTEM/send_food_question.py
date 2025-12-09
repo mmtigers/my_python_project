@@ -66,8 +66,15 @@ def get_daily_summary():
 
             # レポート作成
             summary = []
-            if tv_cnt > 0: summary.append(f"📺 テレビ: 約{tv_cnt*5/60:.1f}時間")
-            if rice: summary.append("🍚 ご飯: 炊きました")
+            # テレビ (0時間でも表示)
+            tv_hours = tv_cnt * 5 / 60
+            summary.append(f"📺 テレビ: 約{tv_hours:.1f}時間")
+
+            # 炊飯状況を分岐
+            if rice:
+                summary.append("🍚 ご飯: 炊きました")
+            else:
+                summary.append("🍚 ご飯: 炊いていません")
             if total_w > 0:
                 kwh = total_w * 5 / 60 / 1000
                 summary.append(f"⚡ 今日の電気: {kwh:.2f}kWh (約{int(kwh*31)}円)")
