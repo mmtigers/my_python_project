@@ -28,6 +28,7 @@ CAMERAS = [
         "name": "駐車場カメラ",       # 通知用の名前
         "location": "伊丹",     # カメラの設置場所
         "ip": os.getenv("CAMERA_IP", "192.168.1.110"), # .envのCAMERA_IPを使う
+        "port": 2020,
         "user": DEFAULT_CAM_USER,
         "pass": DEFAULT_CAM_PASS
     },
@@ -37,6 +38,7 @@ CAMERAS = [
         "name": "庭カメラ",
         "location": "伊丹",    
         "ip": "192.168.1.51", 
+        "port": 2020,
         "user": DEFAULT_CAM_USER,
         "pass": DEFAULT_CAM_PASS
     }

@@ -18,5 +18,8 @@ sleep 5
 echo "--- 3. Webhookアドレスを更新します ---"
 .venv/bin/python3 switchbot_webhook_fix.py
 
-echo "--- 4. Pythonサーバーを起動します ---"
+echo "--- 4. カメラ監視を起動します ---"
+.venv/bin/python3 camera_monitor.py &
+
+echo "--- 5. Pythonサーバーを起動します ---"
 .venv/bin/python3 unified_server.py
