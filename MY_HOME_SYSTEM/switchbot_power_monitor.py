@@ -28,8 +28,20 @@ def fetch_device_data(device_id, device_type):
         if data.get('statusCode') == 100:
             body = data.get('body', {})
             result = {}
+            
             if device_type.startswith('Plug'):
-                result['power'] = float(body.get('weight', 0)) 
+                # ★修正: weightが0なら、電圧×電流から計算する「二段構え」ロジック
+                watts = float(body.get('weight', 0))
+                
+                # weightが0で、かつ電流(electricCurrent)がある場合、計算で補完する
+                if watts == 0:
+                    volts = float(body.get('voltage', 0))
+                    amps = float(body.get('electricCurrent', 0)) / 1000.0 # mAをAに変換
+                    if volts > 0 and amps > 0:
+                        watts = volts * amps
+                        
+                result['power'] = round(watts, 1)
+
             elif device_type.startswith('Meter'):
                 result['temperature'] = float(body.get('temperature', 0))
                 result['humidity'] = float(body.get('humidity', 0))
@@ -57,15 +69,12 @@ if __name__ == "__main__":
         if not (ttype.startswith("Plug") or ttype.startswith("Meter")): continue
         
         tname = sb_tool.get_device_name_by_id(tid) or "Unknown"
-        # 場所を直接設定から取得 (または common.get_device_location(tid) でも可)
-        loc = s.get("location", "伊丹")
-        
         data = fetch_device_data(tid, ttype)
         
         if data:
-            pw = float(data.get('weight', 0)) if ttype.startswith("Plug") else None
-            tc = float(data.get('temperature', 0)) if ttype.startswith("Meter") else None
-            hp = float(data.get('humidity', 0)) if ttype.startswith("Meter") else None
+            pw = data.get('power')
+            tc = data.get('temperature')
+            hp = data.get('humidity')
             th = s.get("notify_settings", {}).get("power_threshold_watts")
             
             insert_power_record(tname, tid, ttype, pw, tc, hp, th)
@@ -74,15 +83,14 @@ if __name__ == "__main__":
             if pw is not None and th is not None and mode != "LOG_ONLY":
                 prev = get_prev_power(tid)
                 msg = None
-                # ★修正: メッセージに [場所] を追加
                 if mode == "ON_START" and pw >= th and prev < th:
-                    msg = f"🍚【炊飯通知】\n[{loc}] {tname} が稼働開始しました ({pw}W)"
+                    msg = f"🍚【炊飯通知】\n{tname} が動き出したよ！ ({pw}W)"
                 elif mode == "ON_END_SUMMARY" and pw < th and prev >= th:
-                    msg = f"💡【使用終了】\n[{loc}] {tname} の使用が終わりました"
+                    msg = f"💡【使用終了】\n{tname} の電源が切れたみたい"
                 elif mode == "CONTINUOUS" and pw >= th:
-                    msg = f"🚨【電力アラート】\n[{loc}] {tname} が稼働中です ({pw}W)"
+                    msg = f"🚨【電力アラート】\n{tname} がまだついてるよ！ ({pw}W)"
                 
                 if msg:
-                    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}])
-                    logger.info(f"通知送信: {tname} ({loc})")
-    logger.info("=== 完了 ===")
+                    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord")
+                    logger.info(f"通知送信: {tname}")
+    logger.info("=== チェック完了 ===")
