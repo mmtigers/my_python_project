@@ -1,13 +1,33 @@
-# .gitignore
+# Python bytecode
 *.pyc
 __pycache__/
+
+# Virtual environment
 venv/
 .venv/
+
+# Environment variables (重要: パスワードファイル)
 .env
+
+# Editor files
 .vscode/
+
+# Logs
 *.log
+logs/
+
+# Temporary files
 tmp/
+
+# Database (重要: 個人データ)
 *.db
 *.sqlite
 *.sqlite3
-MY_HOME_SYSTEM/db_backup/
+
+# Backups (重要: 設定・DBのバックアップ)
+# 修正: パスをカレントディレクトリ基準に変更
+db_backup/
+
+# Media / Assets (重要: プライベート画像)
+assets/snapshots/
+*.jpg
