@@ -23,6 +23,8 @@ tmp/
 *.db
 *.sqlite
 *.sqlite3
+*.csv
+*.pdf
 
 # Backups (重要: 設定・DBのバックアップ)
 # 修正: パスをカレントディレクトリ基準に変更
@@ -31,3 +33,5 @@ db_backup/
 # Media / Assets (重要: プライベート画像)
 assets/snapshots/
 *.jpg
+*.png
+*.txt
