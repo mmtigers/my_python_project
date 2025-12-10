@@ -1,28 +1,37 @@
-# Python bytecode files
+cat << 'EOF' > .gitignore
+# Python bytecode
 *.pyc
 __pycache__/
 
-# Virtual environment
+# Virtual Environments (Anywhere)
 venv/
 .venv/
 
-# Environment variables
+# Environment Variables
 .env
 
-# Editor files (VS Code specific)
+# Editor
 .vscode/
 
-# Logs and temporary files
+# Logs
 *.log
+logs/
+
+# Temporary
 tmp/
 
-# データベースファイル
+# Database
 *.db
 *.sqlite
 *.sqlite3
 
-# バックアップディレクトリ
+# Backups
 MY_HOME_SYSTEM/db_backup/
+
+# Private Assets (Images, PDFs)
+assets/snapshots/
+assets/salary_images/
 *.jpg
 *.png
 *.pdf
+EOF
