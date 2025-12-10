@@ -113,8 +113,8 @@ if __name__ == "__main__":
         "quickReply": {"items": items}
     }
     
-    # target="discord" を明示的に指定して送信
-    if common.send_push(config.LINE_USER_ID, [msg], target=target_platform):
+    # target="discord" を明示的に指定して送信、さらに channel="report" を追加
+    if common.send_push(config.LINE_USER_ID, [msg], target=target_platform, channel="report"):
         logger.info("送信完了✨")
     else:
         logger.error("送信失敗💦")
