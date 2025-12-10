@@ -91,7 +91,11 @@ MONITOR_DEVICES = [
 # 4. 通知 & LINE設定
 # ==========================================
 NOTIFICATION_TARGET = os.getenv("NOTIFICATION_TARGET", "line")
-DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
+
+DISCORD_WEBHOOK_ERROR = os.getenv("DISCORD_WEBHOOK_ERROR")
+DISCORD_WEBHOOK_REPORT = os.getenv("DISCORD_WEBHOOK_REPORT")
+DISCORD_WEBHOOK_NOTIFY = os.getenv("DISCORD_WEBHOOK_NOTIFY")
+DISCORD_WEBHOOK_URL = DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID = os.getenv("LINE_USER_ID")
@@ -159,3 +163,26 @@ CAR_RULE_KEYWORDS = {
     "RETURN": ["Enter", "In", "Arrive"]
 }
 
+# ==========================================
+# 7. 給料明細管理 (Salary Manager)
+# ==========================================
+# 機密情報はすべて環境変数から取得
+GMAIL_USER = os.getenv("GMAIL_USER")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SALARY_MAIL_SENDER = os.getenv("SALARY_MAIL_SENDER")
+
+# PDFパスワードリスト (カンマ区切り文字列をリストに変換)
+_passwords_str = os.getenv("SALARY_PDF_PASSWORDS", "")
+SALARY_PDF_PASSWORDS = [p.strip() for p in _passwords_str.split(",") if p.strip()]
+
+# ディレクトリ・ファイルパス設定
+SALARY_IMAGE_DIR = os.path.join(BASE_DIR, "..", "assets", "salary_images")
+SALARY_DATA_DIR = os.path.join(BASE_DIR, "data")
+SALARY_CSV_PATH = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
+BONUS_CSV_PATH = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
+
+# ディレクトリ自動作成
+for d in [SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
+    if not os.path.exists(d):
+        os.makedirs(d, exist_ok=True)
