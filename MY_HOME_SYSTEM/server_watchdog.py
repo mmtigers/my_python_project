@@ -67,25 +67,24 @@ def is_process_alive(process_keyword: str) -> bool:
         logger.error(f"Process check error: {e}")
         return False
 
-def notify_user(text: str, target: str = None):
-    """
-    ユーザーに通知を送る
-    target指定がない場合は config.NOTIFICATION_TARGET を使用
-    """
+def notify_user(text: str, target: str = None, channel: str = "notify"):
+    """ユーザーに通知を送る"""
     if target is None:
         target = getattr(config, "NOTIFICATION_TARGET", "line")
+    
+    # channel引数を渡す
+    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": text}], target=target, channel=channel)
     
     # 共通モジュールを使って送信
     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": text}], target=target)
 
 def notify_error_to_admin(error_msg: str):
-    """
-    システムエラーを管理用Discordに送る (ユーザーには送らない)
-    """
+    """管理者(Discord)にエラーログを送る"""
     common.send_push(
         config.LINE_USER_ID, 
         [{"type": "text", "text": f"😰 **Watchdog Error**\n```{error_msg}```"}], 
-        target="discord"
+        target="discord",
+        channel="error"  # ★エラーチャンネルへ
     )
 
 def main():
@@ -104,7 +103,7 @@ def main():
             # --- 正常時 ---
             if LOCK_FILE.exists():
                 # 前回まで停止していた -> 復旧通知
-                notify_user(MSG_RECOVERED)
+                notify_user(MSG_RECOVERED, target="discord", channel="notify")
                 LOCK_FILE.unlink() # ロック削除
                 logger.info("Recovery notification sent.")
         
@@ -116,14 +115,14 @@ def main():
             if not LOCK_FILE.exists():
                 # 新規停止
                 should_notify = True
-                notify_user(MSG_STOPPED)
+                notify_user(MSG_STOPPED, target="discord", channel="error")
                 logger.info("Stop alert sent.")
             else:
                 # 継続停止 -> リマインド判定
                 last_alert_time = LOCK_FILE.stat().st_mtime
                 if current_time - last_alert_time > REMINDER_INTERVAL_SEC:
                     should_notify = True
-                    notify_user(MSG_REMINDER)
+                    notify_user(MSG_REMINDER, target="discord", channel="error")
                     logger.info("Reminder alert sent.")
 
             # 通知した場合、ロックファイルのタイムスタンプを更新
