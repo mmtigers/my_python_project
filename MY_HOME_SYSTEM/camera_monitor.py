@@ -173,11 +173,9 @@ def monitor_single_camera(cam_conf):
                                             (common.get_now_iso(), action, rule_name))
 
                                 # ★修正: 通知送信 (Discordを指定)
-                                if priority >= 50:
-                                    msg = f"📷【カメラ通知】\n[{cam_loc}] {cam_name} で{label}を検知しました！"
-                                    if event_type == "intrusion":
-                                        msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
-                                    
+                                if event_type == "intrusion":
+                                    msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
+                                
                                     # target="discord" を追加
                                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
                                     
