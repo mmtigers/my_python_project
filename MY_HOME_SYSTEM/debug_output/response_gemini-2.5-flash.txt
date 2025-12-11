@@ -1,0 +1,10 @@
+```json
+{
+    "year": 2025,
+    "month": 11,
+    "type": "給与",
+    "name": "松江 将博",
+    "total_payment": 686180,
+    "net_payment": 486823
+}
+```

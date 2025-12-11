@@ -80,9 +80,8 @@ def run_backup():
     # 3. 通知
     msg = f"📦 バックアップ完了\n成功: {success_count}ファイル\n容量: {total_size/1024:.1f} KB"
     logger.info(msg)
-    
-    # 成功時もDiscord/LINEに通知 (Discord推奨)
-    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord")
+    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")
+
 
 if __name__ == "__main__":
     run_backup()

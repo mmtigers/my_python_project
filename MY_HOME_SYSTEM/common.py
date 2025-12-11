@@ -8,14 +8,15 @@ import config
 import logging
 from contextlib import contextmanager
 
-# === カスタムログハンドラー ===
+# === カスタムログハンドラー (エラー用チャンネルに送信) ===
 class DiscordErrorHandler(logging.Handler):
     def emit(self, record):
         if record.levelno >= logging.ERROR:
             try:
                 msg = self.format(record)
                 if "Discord" in msg: return
-                url = config.DISCORD_WEBHOOK_URL
+                # ★修正: エラー専用URLを使用
+                url = config.DISCORD_WEBHOOK_ERROR
                 if url:
                     payload = {"content": f"😰 **システムエラー発生**\n```{msg}```"}
                     requests.post(url, json=payload, timeout=5)
@@ -33,7 +34,8 @@ def setup_logging(name=None):
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
     
-    if config.DISCORD_WEBHOOK_URL:
+    # エラー用Webhookがあれば有効化
+    if config.DISCORD_WEBHOOK_ERROR:
         discord_handler = DiscordErrorHandler()
         discord_handler.setFormatter(formatter)
         discord_handler.setLevel(logging.ERROR)
@@ -61,16 +63,6 @@ def get_db_cursor(commit=False):
     finally:
         if conn: conn.close()
 
-def get_db_connection():
-    """旧互換用: DB接続を取得"""
-    try:
-        conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=10)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except Exception as e:
-        logger.error(f"DB接続エラー: {e}")
-        return None
-
 def save_log_generic(table, columns_list, values_list):
     with get_db_cursor(commit=True) as cur:
         if cur:
@@ -84,31 +76,17 @@ def save_log_generic(table, columns_list, values_list):
                 logger.error(f"データ保存失敗: {e}")
     return False
 
-def get_device_location(device_id):
-    """
-    デバイスIDから設定された場所(location)を取得する。
-    見つからない場合は '伊丹' (デフォルト) を返す。
-    """
-    # SwitchBot/NatureRemoデバイス
-    for d in config.MONITOR_DEVICES:
-        if d.get("id") == device_id:
-            return d.get("location", "伊丹")
-            
-    # カメラデバイス
-    if hasattr(config, "CAMERAS"):
-        for c in config.CAMERAS:
-            if c.get("id") == device_id:
-                return c.get("location", "伊丹")
-                
-    return "伊丹"
-
 # === 通知関連 ===
-def send_push(user_id, messages, image_data=None, target=None):
+def send_push(user_id, messages, image_data=None, target=None, channel="notify"):
+    """
+    通知を送信する
+    channel: "notify"(通常), "report"(報告), "error"(エラー)
+    """
     if target is None:
         target = getattr(config, "NOTIFICATION_TARGET", "line")
 
     if target == "discord":
-        return _send_discord_webhook(messages, image_data)
+        return _send_discord_webhook(messages, image_data, channel)
     else:
         if image_data: logger.warning("LINEへの画像送信は未対応です")
         return _send_line_api("push", {"to": user_id, "messages": messages})
@@ -129,9 +107,19 @@ def _send_line_api(endpoint, payload):
         logger.error(f"LINE接続エラー: {e}")
         return False
 
-def _send_discord_webhook(messages, image_data=None):
-    url = config.DISCORD_WEBHOOK_URL
-    if not url: return False
+def _send_discord_webhook(messages, image_data=None, channel="notify"):
+    # ★修正: チャンネルに応じてURLを切り替え
+    if channel == "error":
+        url = config.DISCORD_WEBHOOK_ERROR
+    elif channel == "report":
+        url = config.DISCORD_WEBHOOK_REPORT
+    else:
+        # デフォルトは通知用
+        url = config.DISCORD_WEBHOOK_NOTIFY or config.DISCORD_WEBHOOK_URL
+    
+    if not url:
+        logger.warning(f"Discord Webhook URL未設定 (channel={channel})")
+        return False
     
     text_content = ""
     for msg in messages:
@@ -146,7 +134,7 @@ def _send_discord_webhook(messages, image_data=None):
             res = requests.post(url, json={"content": text_content}, timeout=10)
         return res.status_code in [200, 204]
     except Exception as e:
-        logger.error(f"Discord接続エラー: {e}")
+        print(f"Discord接続エラー: {e}")
         return False
 
 # === ユーティリティ ===
