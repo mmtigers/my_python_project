@@ -106,7 +106,7 @@ def get_prev_power(device_id):
         except Exception:
             return 0.0
 
-def process_power_notification(name, device_id, current_power, settings):
+def process_power_notification(name, device_id, current_power, settings, location):
     """電力に基づく通知判定を行う"""
     threshold = settings.get("power_threshold_watts")
     mode = settings.get("notify_mode", "LOG_ONLY")
@@ -148,6 +148,7 @@ def main():
             tid = s.get("id")
             ttype = s.get("type")
             tname = s.get("name") or sb_tool.get_device_name_by_id(tid) or "Unknown"
+            tloc = s.get("location", "家") # 場所を取得
             
             # データ取得
             data = fetch_device_status(tid, ttype)
@@ -162,7 +163,7 @@ def main():
 
                 # プラグなら通知判定
                 if "Plug" in ttype and data.get('power') is not None:
-                    process_power_notification(tname, tid, data['power'], notify_settings)
+                    process_power_notification(tname, tid, data['power'], notify_settings, tloc)
                     
         except Exception as e:
             logger.error(f"デバイス処理エラー [{tname}]: {e}")
