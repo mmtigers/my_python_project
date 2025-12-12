@@ -115,30 +115,38 @@ else:
 
 # 監視デバイス (SwitchBot等)
 MONITOR_DEVICES = [
-    # Plug Mini
-    {"id": "24587C9CCBCE", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "D83BDA178576", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 20.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "F09E9E9D599A", "type": "Plug Mini (JP)", "location": "伊丹", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    # --- MeterPlus (温湿度監視) ---
-    {"id": "CFBF5E92AAD0", "type": "MeterPlus", "location": "伊丹", "notify_settings": {}},
-    {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "notify_settings": {}},
-    {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "notify_settings": {}},
-    {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "notify_settings": {}},
-    # --- Motion Sensor (人感センサー) ---
-    {"id": "E9B20697916C", "type": "Motion Sensor", "location": "高砂", "notify_settings": {}},
-    {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "notify_settings": {}},
-    # --- Contact Sensor (開閉センサー) ---
-    {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}},
-    {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}},
-    {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}}, 
-    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "高砂", "notify_settings": {}}, 
-    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "伊丹", "notify_settings": {}}, 
-    # --- Hub Mini ---
-    {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "notify_settings": {}},
-    {"id": "FEACA2E1797C", "type": "Hub Mini", "location": "高砂", "notify_settings": {}},
-    # --- Cloud Cameras ---
-    {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "location": "伊丹", "notify_settings": {}},
-    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "location": "高砂", "notify_settings": {}}
+    # --- 🏠 伊丹 (自宅) ---
+    # Plug
+    {"id": "24587C9CCBCE", "type": "Plug Mini (JP)", "location": "伊丹", "name": "1Fのトイレ", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
+    {"id": "D83BDA178576", "type": "Plug Mini (JP)", "location": "伊丹", "name": "テレビ", "notify_settings": {"power_threshold_watts": 20.0, "notify_mode": "LOG_ONLY"}},
+    {"id": "F09E9E9D599A", "type": "Plug Mini (JP)", "location": "伊丹", "name": "炊飯器", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
+    # Meter
+    {"id": "CFBF5E92AAD0", "type": "MeterPlus", "location": "伊丹", "name": "仕事部屋", "notify_settings": {}},
+    {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "name": "居間", "notify_settings": {}},
+    # Motion
+    {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "name": "人感センサー", "notify_settings": {}},
+    # Contact (開閉)
+    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "伊丹", "name": "トイレ", "notify_settings": {}},
+    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "伊丹", "name": "庭へのドア", "notify_settings": {}},
+    # Hub
+    {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "name": "ハブミニ E4", "notify_settings": {}},
+    # Cam
+    {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "location": "伊丹", "name": "ともやのへや", "notify_settings": {}},
+
+    # --- 👵 高砂 (実家) ---
+    # Contact (開閉) - ここが重要！
+    {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "name": "冷蔵庫", "notify_settings": {}},
+    {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "name": "玄関", "notify_settings": {}},
+    {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "name": "お母さんの部屋", "notify_settings": {}},
+    # Meter
+    {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "name": "1Fの洗面所", "notify_settings": {}},
+    {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "name": "リビング", "notify_settings": {}},
+    # Motion
+    {"id": "E9B20697916C", "type": "Motion Sensor", "location": "高砂", "name": "和室", "notify_settings": {}},
+    # Hub
+    {"id": "FEACA2E1797C", "type": "Hub Mini", "location": "高砂", "name": "高砂のハブミニ", "notify_settings": {}},
+    # Cam
+    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "location": "高砂", "name": "高砂の玄関", "notify_settings": {}},
 ]
 
 # 給与PDFパスワード

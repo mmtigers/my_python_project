@@ -64,8 +64,53 @@ def get_daily_summary():
                 
                 cam_msg = f"📷 カメラ検知: {total_cam}回 ({' '.join(details)})"
 
+            # === 3. 高砂の開閉カウント (内訳表示版) ===
+            taka_report_str = "👵 高砂の活動: データなし"
+            
+            # 高砂にある接触センサーの設定を取得
+            taka_sensors = [d for d in config.MONITOR_DEVICES if d.get("location") == "高砂" and "Contact" in d.get("type", "")]
+            taka_ids = [d["id"] for d in taka_sensors]
+            
+            if taka_ids:
+                placeholders = ",".join(["?"] * len(taka_ids))
+                # デバイスIDごとに 'open' の回数を集計
+                query = f"""
+                    SELECT device_id, COUNT(*) 
+                    FROM {config.SQLITE_TABLE_SENSOR} 
+                    WHERE timestamp LIKE ? AND device_id IN ({placeholders}) 
+                    AND contact_state = 'open'
+                    GROUP BY device_id
+                """
+                cursor.execute(query, (f"{today}%", *taka_ids))
+                counts_data = cursor.fetchall()
+                
+                # ID -> 名前(設定ファイル) のマッピング
+                id_to_name = {d["id"]: d.get("name", "不明") for d in taka_sensors}
+                
+                details = []
+                total_count = 0
+                
+                for row in counts_data:
+                    did = row["device_id"]
+                    cnt = row[1]
+                    dname = id_to_name.get(did, did)
+                    # "冷蔵庫" などの短い名前にしたい場合、configのnameが短ければそのまま使える
+                    details.append(f"{dname}:{cnt}")
+                    total_count += cnt
+                
+                if total_count > 0:
+                    detail_str = " ".join(details)
+                    taka_report_str = f"👵 高砂の活動(計{total_count}回): {detail_str}"
+                else:
+                    taka_report_str = "👵 高砂の活動: センサー反応なし"
+
+
+
             # レポート作成
             summary = []
+
+            # 高砂の情報を一番上に追加
+            summary.append(taka_report_str)
             # テレビ (0時間でも表示)
             tv_hours = tv_cnt * 5 / 60
             summary.append(f"📺 テレビ: 約{tv_hours:.1f}時間")
