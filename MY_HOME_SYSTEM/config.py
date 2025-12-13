@@ -48,6 +48,7 @@ SQLITE_TABLE_HEALTH = "health_records"
 SQLITE_TABLE_CAR = "car_records"
 SQLITE_TABLE_CHILD = "child_health_records"
 SQLITE_TABLE_DEFECATION = "defecation_records"
+SQLITE_TABLE_AI_REPORT = "ai_report_records"
 
 # バックアップ対象
 BACKUP_FILES = [SQLITE_DB_PATH, "config.py", ".env"]
