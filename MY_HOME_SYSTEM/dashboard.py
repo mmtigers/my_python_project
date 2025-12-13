@@ -11,6 +11,7 @@ import pytz
 import traceback
 import importlib
 import sys
+import numpy as np
 
 # 自作モジュール
 import config
@@ -24,7 +25,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# 設定リロード（開発中の変更反映用）
+# 設定リロード
 importlib.reload(config)
 
 # === 🎨 デザイン・CSS定義 ===
@@ -32,12 +33,10 @@ def get_custom_css():
     """主婦向けの見やすく優しいデザイン定義"""
     return """
     <style>
-        /* 全体フォント: 読みやすさ重視 */
         html, body, [class*="css"] { 
             font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif; 
         }
         
-        /* メトリックカード: カード風のデザインで区切りを明確に */
         div[data-testid="stMetric"] {
             background-color: #ffffff; 
             padding: 15px; 
@@ -49,7 +48,6 @@ def get_custom_css():
         div[data-testid="stMetricLabel"] { font-size: 0.9rem; color: #666; }
         div[data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: bold; color: #2c3e50; }
         
-        /* AIレポートボックス: 目立つが優しい色合い */
         .ai-report-box {
             background-color: #e3f2fd; 
             border-left: 6px solid #2196f3;
@@ -57,15 +55,12 @@ def get_custom_css():
             border-radius: 8px; 
             margin-bottom: 24px; 
             color: #0d47a1;
-            font-size: 1.05rem;
-            line-height: 1.6;
+            font-size: 1.0rem;
+            line-height: 1.5; /* 行間を詰める */
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .ai-icon { font-size: 1.8rem; margin-right: 12px; vertical-align: middle; }
         .ai-title { font-weight: bold; font-size: 1.1rem; vertical-align: middle; }
-
-        /* 画像ギャラリー */
-        .photo-caption { font-size: 0.8rem; color: #555; text-align: center; }
     </style>
     """
 
@@ -79,18 +74,15 @@ def apply_friendly_names(df):
     """データフレームに日本語名と場所をマッピングする"""
     if df.empty: return df
     
-    # マッピング辞書の作成
     id_map = {d['id']: d.get('name', d['id']) for d in config.MONITOR_DEVICES}
     loc_map = {d['id']: d.get('location', 'その他') for d in config.MONITOR_DEVICES}
     
-    # マッピング適用（見つからない場合は既存のdevice_nameを使用）
     df['friendly_name'] = df['device_id'].map(id_map).fillna(df['device_name'])
     df['location'] = df['device_id'].map(loc_map).fillna('その他')
     return df
 
 @st.cache_data(ttl=60)
 def load_generic_data(table_name, limit=500):
-    """汎用テーブル読み込み（キャッシュ付き）"""
     print(f"📥 [Dashboard] Loading {table_name}...")
     conn = None
     try:
@@ -107,7 +99,6 @@ def load_generic_data(table_name, limit=500):
 
 @st.cache_data(ttl=60)
 def load_sensor_data(limit=5000):
-    """センサーデータ読み込み＆名前解決（キャッシュ付き）"""
     print(f"📥 [Dashboard] Loading sensors (limit={limit})...")
     conn = None
     try:
@@ -116,7 +107,6 @@ def load_sensor_data(limit=5000):
         
         if df.empty: return df
 
-        # タイムゾーン処理
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         if df['timestamp'].dt.tz is None:
             df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
@@ -131,11 +121,9 @@ def load_sensor_data(limit=5000):
         if conn: conn.close()
 
 def load_ai_report():
-    """最新のAIレポートを取得"""
     conn = None
     try:
         conn = get_db_connection()
-        # テーブル存在確認
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (config.SQLITE_TABLE_AI_REPORT,))
         if not cur.fetchone(): return None
@@ -147,23 +135,71 @@ def load_ai_report():
     finally:
         if conn: conn.close()
 
+def calculate_monthly_cost_cumulative():
+    """今月の電気代累積値を計算 (積分法)"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        now = datetime.now(pytz.timezone('Asia/Tokyo'))
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        
+        # 今月のNature Remoデータを全取得
+        query = f"""
+            SELECT timestamp, power_watts
+            FROM {config.SQLITE_TABLE_SENSOR} 
+            WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
+            ORDER BY timestamp ASC
+        """
+        df = pd.read_sql_query(query, conn)
+        
+        if df.empty: return 0
+        
+        # タイムスタンプ処理
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        if df['timestamp'].dt.tz is None:
+            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
+        else:
+            df['timestamp'] = df['timestamp'].dt.tz_convert('Asia/Tokyo')
+
+        # 積分計算 (台形公式に近い形で: 電力 × 時間差)
+        # 時間差(h)を計算
+        df['time_diff'] = df['timestamp'].diff().dt.total_seconds() / 3600
+        df = df.dropna(subset=['time_diff']) # 先頭行は差分なし
+        
+        # 異常値除外 (接続切れなどで長時間あいた場合、その間ずっと高出力だったことにしないよう、例えば1時間以上は除外)
+        df = df[df['time_diff'] <= 1.0]
+        
+        # 前回の電力値を使って計算 (簡易矩形近似)
+        # kWh = kW * h = (W / 1000) * h
+        df['kwh'] = (df['power_watts'] / 1000) * df['time_diff']
+        
+        total_kwh = df['kwh'].sum()
+        return int(total_kwh * 31)
+        
+    except Exception as e:
+        print(f"❌ Cost calculation error: {e}")
+        return 0
+    finally:
+        if conn: conn.close()
+
 # === 🖥️ メイン表示ロジック ===
 def main():
-    # CSS適用
     st.markdown(get_custom_css(), unsafe_allow_html=True)
-    
     now = datetime.now(pytz.timezone('Asia/Tokyo'))
     print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
 
-    # 1. AI執事メッセージ (最優先表示)
+    # 1. AI執事メッセージ
     report = load_ai_report()
     if report is not None:
         report_time = pd.to_datetime(report['timestamp']).tz_convert('Asia/Tokyo').strftime('%m/%d %H:%M')
+        # 改行を最小限に: ダブル改行は<br>、シングルはスペースに
+        clean_msg = report['message'].replace('\n\n', '<br>').replace('\n', ' ')
+        
         st.markdown(f"""
         <div class="ai-report-box">
             <span class="ai-icon">🎩</span>
             <span class="ai-title">執事からの報告 ({report_time})</span><br>
-            {report['message'].replace(chr(10), '<br>')}
+            {clean_msg}
         </div>
         """, unsafe_allow_html=True)
 
@@ -174,72 +210,68 @@ def main():
     df_food = load_generic_data(config.SQLITE_TABLE_FOOD)
     df_car = load_generic_data(config.SQLITE_TABLE_CAR)
 
-    # 2. ステータスメトリクス (トップ表示)
+    # 2. ステータスメトリクス
     # 実家の様子
     taka_msg = "⚪ データなし"
     if not df_sensor.empty:
-        # 高砂の接触センサー(open/detected)
         df_taka = df_sensor[(df_sensor['location']=='高砂') & (df_sensor['contact_state'].isin(['open','detected']))]
         if not df_taka.empty:
             last_active = df_taka.iloc[0]['timestamp']
             diff_min = (now - last_active).total_seconds() / 60
-            
             if diff_min < 60: taka_msg = "🟢 元気 (1時間以内)"
             elif diff_min < 180: taka_msg = "🟡 静か (3時間以内)"
             else: taka_msg = f"🔴 {int(diff_min/60)}時間動きなし"
 
-    # 電気代予測
-    pred_cost = 0
-    if not df_sensor.empty:
-        start_of_month = now.replace(day=1, hour=0, minute=0, second=0)
-        df_elec = df_sensor[(df_sensor['device_type']=='Nature Remo E Lite') & (df_sensor['timestamp'] >= start_of_month)]
-        if not df_elec.empty:
-            avg_watts = df_elec['power_watts'].mean()
-            # 予測計算: 平均W * 24h * 30日 * 31円 / 1000
-            pred_cost = int((avg_watts * 24 * 30 / 1000) * 31)
+    # 電気代 (累積)
+    current_cost = calculate_monthly_cost_cumulative()
 
     # 車の状況
     car_msg = "🏠 在宅"
     if not df_car.empty:
-        last_action = df_car.iloc[0]['action']
-        if last_action == 'LEAVE':
-            car_msg = "🚗 外出中"
+        if df_car.iloc[0]['action'] == 'LEAVE': car_msg = "🚗 外出中"
 
-    # 今日のトイレ回数
+    # 今日のトイレ回数 (伊丹のみであることを明記)
     toilet_count = 0
+    toilet_label = "🚽 トイレ"
     if not df_sensor.empty:
         today_start = now.replace(hour=0, minute=0, second=0)
+        
+        # 場所ごとにカウント
         df_toilet = df_sensor[
             (df_sensor['friendly_name'].str.contains('トイレ')) & 
             (df_sensor['contact_state'].isin(['open','detected'])) &
             (df_sensor['timestamp'] >= today_start)
         ]
+        
+        # 高砂のトイレがあるか確認
+        taka_toilet = df_toilet[df_toilet['location'] == '高砂']
+        if taka_toilet.empty:
+            toilet_label = "🚽 トイレ (伊丹)"
+            
         toilet_count = len(df_toilet)
 
-    # カラム表示
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("👵 高砂 (実家)", taka_msg)
-    col2.metric("⚡ 電気予報(月)", f"約 {pred_cost:,} 円")
+    col2.metric("⚡ 今月の電気代 (累積)", f"{current_cost:,} 円")
     col3.metric("🚗 車 (伊丹)", car_msg)
-    col4.metric("🚽 今日のトイレ", f"{toilet_count} 回")
+    col4.metric(toilet_label, f"{toilet_count} 回")
 
     st.markdown("---")
 
     # ==========================================
-    # 3. 機能別タブコンテンツ
+    # 3. 機能別タブ
     # ==========================================
     tabs = st.tabs([
         "📅 カレンダー", "🖼️ 写真・防犯", "💰 電気・家電", 
         "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ"
     ])
 
-    # Tab 1: カレンダー (主要イベントのみ)
+    # Tab 1: カレンダー
     with tabs[0]:
         calendar_events = []
         if not df_sensor.empty:
             df_sensor['date_str'] = df_sensor['timestamp'].dt.strftime('%Y-%m-%d')
             
-            # 冷蔵庫・トイレの回数
             for key, label, color in [('冷蔵庫', '🧊冷蔵庫', '#a8dadc'), ('トイレ', '🚽トイレ', '#ffccd5')]:
                 df_target = df_sensor[
                     (df_sensor['friendly_name'].str.contains(key)) & 
@@ -252,118 +284,117 @@ def main():
                             "title": f"{label}: {count}回", "start": date_val, 
                             "color": color, "textColor": "#333", "allDay": True
                         })
-        
-        # 健康ログ
         if not df_child.empty:
             for _, row in df_child.iterrows():
                 if "元気" not in row['condition']:
-                    calendar_events.append({
-                        "title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), 
-                        "color": "#ffb703", "textColor": "#333"
-                    })
+                    calendar_events.append({"title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), "color": "#ffb703", "textColor": "#333"})
 
-        calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="main_calendar")
+        calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="cal_main")
 
     # Tab 2: 写真・防犯
     with tabs[1]:
         st.subheader("🖼️ カメラ・ギャラリー")
         img_dir = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
         images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
-        
         if images:
-            st.markdown("##### 最新のスナップショット")
             cols_img = st.columns(4)
             for i, img_path in enumerate(images[:4]):
                 cols_img[i].image(img_path, caption=os.path.basename(img_path), use_container_width=True)
-            
-            with st.expander("📂 過去の写真を見る"):
+            with st.expander("📂 過去の写真"):
                 cols_past = st.columns(4)
                 for i, img_path in enumerate(images[4:20]):
-                    cols_past[i % 4].image(img_path, caption=os.path.basename(img_path), use_container_width=True)
+                    cols_past[i%4].image(img_path, caption=os.path.basename(img_path), use_container_width=True)
         else:
-            st.info("保存された写真はありません")
+            st.info("写真なし")
 
-        st.subheader("🛡️ 防犯・侵入検知")
+        st.subheader("🛡️ 防犯ログ")
         if not df_sensor.empty:
-            df_security = df_sensor[df_sensor['contact_state'] == 'intrusion']
-            if not df_security.empty:
-                st.error("⚠️ 侵入検知ログがあります")
-                st.dataframe(df_security[['timestamp', 'friendly_name', 'location']], use_container_width=True)
-            else:
-                st.success("✅ 異常なし (侵入検知記録なし)")
+            df_sec = df_sensor[df_sensor['contact_state'] == 'intrusion']
+            if not df_sec.empty:
+                st.error("⚠️ 侵入検知あり")
+                st.dataframe(df_sec[['timestamp', 'friendly_name', 'location']], use_container_width=True)
 
-    # Tab 3: 電気・家電
+    # Tab 3: 電気・家電 (修正: 分離)
     with tabs[2]:
         if not df_sensor.empty:
-            col_graph, col_pie = st.columns([2, 1])
-            with col_graph:
-                st.subheader("⚡ 消費電力推移 (24h)")
-                df_power = df_sensor[
-                    (df_sensor['device_type'].str.contains('Plug|Nature')) & 
+            col_left, col_right = st.columns([1, 1])
+            
+            # 家全体（スマートメーター）
+            with col_left:
+                st.subheader("⚡ 家全体の消費電力 (24h)")
+                df_total = df_sensor[
+                    (df_sensor['device_type'] == 'Nature Remo E Lite') & 
                     (df_sensor['timestamp'] >= now - timedelta(hours=24))
                 ]
-                if not df_power.empty:
-                    fig = px.line(df_power, x='timestamp', y='power_watts', color='friendly_name', 
-                                  labels={'timestamp': '時間', 'power_watts': '電力(W)', 'friendly_name': '機器'})
-                    st.plotly_chart(fig, use_container_width=True)
+                if not df_total.empty:
+                    fig_total = px.line(df_total, x='timestamp', y='power_watts', 
+                                      title="スマートメーター計測値", labels={'timestamp': '時間', 'power_watts': '電力(W)'})
+                    st.plotly_chart(fig_total, use_container_width=True)
+                else:
+                    st.info("スマートメーターデータなし")
+
+            # 個別家電
+            with col_right:
+                st.subheader("🔌 個別家電の推移 (24h)")
+                df_app = df_sensor[
+                    (df_sensor['device_type'].str.contains('Plug')) & 
+                    (df_sensor['timestamp'] >= now - timedelta(hours=24))
+                ]
+                if not df_app.empty:
+                    fig_app = px.line(df_app, x='timestamp', y='power_watts', color='friendly_name',
+                                    title="各プラグの計測値", labels={'timestamp': '時間', 'power_watts': '電力(W)'})
+                    st.plotly_chart(fig_app, use_container_width=True)
+                else:
+                    st.info("プラグデータなし")
             
-            with col_pie:
-                st.subheader("🏆 電力シェア")
-                if not df_power.empty:
-                    # 最新の値を取得して円グラフ化
-                    latest_power = df_power.sort_values('timestamp').groupby('device_id').tail(1)
-                    latest_power = latest_power[latest_power['power_watts'] > 1] # 待機電力などは除外
-                    if not latest_power.empty:
-                        fig_pie = px.pie(latest_power, values='power_watts', names='friendly_name', title='現在の稼働状況')
-                        st.plotly_chart(fig_pie, use_container_width=True)
+            st.markdown("---")
+            
+            # 電力シェア (スマートメーター除外)
+            st.subheader("🏆 家電別・電力シェア (現在の稼働状況)")
+            if not df_sensor.empty:
+                # Nature Remoを除外して最新取得
+                df_latest = df_sensor[df_sensor['device_type'] != 'Nature Remo E Lite'].sort_values('timestamp').groupby('device_id').tail(1)
+                # プラグ系のみ、かつ1W以上
+                df_pie = df_latest[
+                    (df_latest['device_type'].str.contains('Plug')) & 
+                    (df_latest['power_watts'] > 1)
+                ]
+                if not df_pie.empty:
+                    fig_pie = px.pie(df_pie, values='power_watts', names='friendly_name', title='内訳 (スマートメーター除く)')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                else:
+                    st.info("稼働中の個別家電はありません")
 
     # Tab 4: 健康・食事
     with tabs[3]:
-        col_health, col_poop = st.columns(2)
-        with col_health:
+        c1, c2 = st.columns(2)
+        with c1:
             st.markdown("##### 🏥 子供の体調")
-            if not df_child.empty:
-                st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
-            else:
-                st.info("記録なし")
-        with col_poop:
+            if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
+        with c2:
             st.markdown("##### 💩 お腹・排便")
-            if not df_poop.empty:
-                st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
-            else:
-                st.info("記録なし")
-        
+            if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
         st.markdown("##### 🍽️ 食事ログ")
-        if not df_food.empty:
-            st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
+        if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
 
     # Tab 5: 高砂詳細
     with tabs[4]:
         if not df_sensor.empty:
-            st.subheader("👵 実家のセンサーログ")
+            st.subheader("👵 実家のログ")
             df_taka_log = df_sensor[df_sensor['location']=='高砂']
             st.dataframe(df_taka_log[['timestamp', 'friendly_name', 'contact_state']].head(50), use_container_width=True)
 
     # Tab 6: 全ログ
     with tabs[5]:
         if not df_sensor.empty:
-            locations = df_sensor['location'].unique()
-            selected_loc = st.multiselect("場所フィルタ", locations, default=locations)
-            
-            df_filtered = df_sensor[df_sensor['location'].isin(selected_loc)]
-            st.dataframe(
-                df_filtered[['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts', 'temperature_celsius']].head(200),
-                use_container_width=True
-            )
+            locs = df_sensor['location'].unique()
+            sel = st.multiselect("場所", locs, default=locs)
+            st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        err_msg = traceback.format_exc()
-        st.error("システムエラーが発生しました")
-        st.code(err_msg)
-        
-        # エラー発生時はDiscordへ通知 (commonモジュール利用)
-        print(f"❌ Critical Dashboard Error: {e}")
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"📉 **Dashboard Error**\n```{str(e)}```"}], target="discord", channel="error")
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"📉 Dashboard Error: {e}"}], target="discord", channel="error")
+        st.error("エラーが発生しました")
+        st.code(traceback.format_exc())
