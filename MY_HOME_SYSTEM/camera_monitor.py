@@ -56,16 +56,20 @@ def analyze_event_type(xml_str):
             rule_name = xml_str[start:end]
         except: pass
 
+    # --- 判定ロジック (ここを強化) ---
+    
     # 1. 侵入・ライン通過
-    if 'Name="IsIntrusion"' in xml_str or 'Name="IsLineCross"' in xml_str:
+    # Name属性だけでなく、Rule名に 'Intrusion' や 'LineCross', 'Cross' が含まれる場合も対象にする
+    if ('Name="IsIntrusion"' in xml_str or 'Name="IsLineCross"' in xml_str or 
+        "Intrusion" in rule_name or "LineCross" in rule_name or "Cross" in rule_name):
         return "intrusion", "敷地への侵入", PRIORITY_MAP["intrusion"], rule_name
 
     # 2. 人物検知
-    if 'Name="IsPeople"' in xml_str or 'People' in rule_name:
+    if 'Name="IsPeople"' in xml_str or 'People' in rule_name or 'Person' in rule_name:
         return "person", "人", PRIORITY_MAP["person"], rule_name
 
     # 3. 車両検知
-    if 'Name="IsVehicle"' in xml_str or 'Vehicle' in rule_name:
+    if 'Name="IsVehicle"' in xml_str or 'Vehicle' in rule_name or 'Car' in rule_name:
         return "vehicle", "車", PRIORITY_MAP["vehicle"], rule_name
 
     # 4. 一般的な動体検知
@@ -92,14 +96,13 @@ def capture_snapshot_rtsp(cam_conf):
 
 def monitor_single_camera(cam_conf):
     cam_name = cam_conf['name']
-    cam_port = cam_conf.get('port', 80) # ★修正: ポートをconfigから読み込む
+    cam_port = cam_conf.get('port', 80)
     cam_loc = cam_conf.get('location', '伊丹')
     
     logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port})")
 
     while True: 
         try:
-            # ★修正: ポート番号を指定して接続
             mycam = ONVIFCamera(cam_conf['ip'], cam_port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
@@ -157,7 +160,7 @@ def monitor_single_camera(cam_conf):
                                     ["timestamp", "device_name", "device_id", "device_type", "contact_state"],
                                     (common.get_now_iso(), "防犯カメラ", cam_conf['id'], "ONVIF Camera", event_type))
                                 
-                                # ★修正: 車判定ロジック強化 (侵入検知も含める)
+                                # 車判定ロジック (外出/帰宅記録用)
                                 is_car_related = "vehicle" in event_type or "Vehicle" in str(rule_name) or event_type == "intrusion"
                                 if is_car_related:
                                     action = "UNKNOWN"
@@ -172,15 +175,14 @@ def monitor_single_camera(cam_conf):
                                             ["timestamp", "action", "rule_name"],
                                             (common.get_now_iso(), action, rule_name))
 
-                                # ★修正: 通知送信 (Discordを指定)
-                                if priority >= 50:
-                                    msg = f"📷【カメラ通知】\n[{cam_loc}] {cam_name} で{label}を検知しました！"
-                                    if event_type == "intrusion":
-                                        msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
+                                # 通知送信 (侵入のみ)
+                                if event_type == "intrusion":
+                                    msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
                                     
-                                    # target="discord" を追加
+                                    # target="discord" を指定
                                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
                                     
+                                    # 通知した場合はクールタイムを入れる
                                     time.sleep(15)
                                     break
 
