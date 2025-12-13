@@ -6,6 +6,7 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage
 import uvicorn
 import time
+import asyncio
 import config
 import common
 import switchbot_get_device_list as sb_tool
@@ -13,10 +14,14 @@ from handlers import line_logic
 
 logger = common.setup_logging("server")
 
-# 状態管理キャッシュ
-LAST_NOTIFY_TIME = {} # 開閉センサーなどの連打防止用 (mac: time)
-LAST_DEVICE_STATE = {} # 人感センサーの状態変化判定用 (mac: state)
-COOLDOWN_SECONDS = 300
+# 状態管理
+LAST_NOTIFY_TIME = {} # 開閉センサーの連打防止用 (mac: timestamp)
+IS_ACTIVE = {}        # 人感センサーの活動状態 (mac: bool)
+MOTION_TASKS = {}     # 人感センサーの「動きなし監視タイマー」 (mac: asyncio.Task)
+
+# 定数設定
+CONTACT_COOLDOWN = 300   # 開閉センサー: 5分 (連打防止)
+MOTION_TIMEOUT = 900     # 人感センサー: 15分 (動きなし判定までの時間)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,6 +33,41 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
 line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
+
+# --- 非同期通知ヘルパー ---
+async def send_inactive_notification(mac, name, location, timeout):
+    """指定時間待機し、キャンセルされなければ「動きなし」を通知する"""
+    try:
+        # 指定時間待つ (この間に detected が来ればキャンセルされる)
+        await asyncio.sleep(timeout)
+        
+        # 時間経過後、通知を実行
+        msg = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
+        
+        # common.send_push は同期関数なので Executor で実行
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, 
+            common.send_push, 
+            config.LINE_USER_ID, 
+            [{"type": "text", "text": msg}], 
+            None, # image_data
+            "discord", 
+            "notify"
+        )
+        
+        logger.info(f"通知送信: {msg}")
+        
+        # 状態リセット
+        IS_ACTIVE[mac] = False
+        if mac in MOTION_TASKS:
+            del MOTION_TASKS[mac]
+
+    except asyncio.CancelledError:
+        # キャンセルされた＝動きがあったので何もしない
+        logger.info(f"動きなしタイマーキャンセル: {name} (活動継続)")
+
+# --- エンドポイント ---
 
 @app.post("/callback/line")
 async def callback_line(request: Request, x_line_signature: str = Header(None)):
@@ -51,10 +91,9 @@ async def callback_switchbot(request: Request):
     mac = ctx.get("deviceMac")
     if not mac: return {"status": "ignored"}
     
-    # 1. デバイス情報の特定 (configから検索)
+    # 1. デバイス情報の特定
     device_conf = next((d for d in config.MONITOR_DEVICES if d["id"] == mac), None)
     
-    # 名前と場所の解決
     if device_conf:
         name = device_conf.get("name") or sb_tool.get_device_name_by_id(mac) or f"Unknown_{mac}"
         location = device_conf.get("location", "場所不明")
@@ -76,30 +115,39 @@ async def callback_switchbot(request: Request):
 
     # 3. 通知ロジック
     msg_text = None
+    current_time = time.time()
     
-    # A. 人感センサー (Motion Sensor)
-    # 要件: 動きなし(not_detected)⇔あり(detected) の変化時のみ通知
+    # A. 人感センサー (Motion Sensor) - 新ロジック
     if "Motion" in dev_type:
-        last_state = LAST_DEVICE_STATE.get(mac)
-        
-        # 状態が変わった場合のみ通知 (初回は通知しない、またはdetectedなら通知するなど調整可。ここは変化重視)
-        if state != last_state:
-            # 状態更新
-            LAST_DEVICE_STATE[mac] = state
+        # --- 動きあり (DETECTED) ---
+        if state == "detected":
+            # 1. 「動きなし待ち」のタイマーがあればキャンセル (活動継続)
+            if mac in MOTION_TASKS:
+                MOTION_TASKS[mac].cancel()
+                del MOTION_TASKS[mac]
             
-            # 通知メッセージ作成
-            if state == "detected":
+            # 2. 非アクティブ(静寂)状態からの変化なら通知
+            if not IS_ACTIVE.get(mac, False):
                 msg_text = f"👀【{location}・見守り】\n{name} で動きがありました"
-            elif state == "not_detected":
-                msg_text = f"💤【{location}・見守り】\n{name} の動きが止まりました"
+                IS_ACTIVE[mac] = True # アクティブ化
+        
+        # --- 動きなし (NOT_DETECTED) ---
+        elif state == "not_detected":
+            # アクティブ状態なら「15分タイマー」をセット
+            if IS_ACTIVE.get(mac, False):
+                # 念のため既存タスクがあればキャンセル
+                if mac in MOTION_TASKS:
+                    MOTION_TASKS[mac].cancel()
+                
+                # タイマー起動 (非同期)
+                task = asyncio.create_task(send_inactive_notification(mac, name, location, MOTION_TIMEOUT))
+                MOTION_TASKS[mac] = task
 
     # B. 開閉センサー (Contact Sensor)
-    # 要件: 開いた(open)時、または閉め忘れ(timeOutNotClose)時に通知 (連打防止あり)
+    # 要件: 開いた(open)時、または閉め忘れ(timeOutNotClose)時に通知 (5分クールタイム)
     elif state in ["open", "timeoutnotclose"]:
-        current_time = time.time()
         last_time = LAST_NOTIFY_TIME.get(mac, 0)
-        
-        if current_time - last_time > COOLDOWN_SECONDS:
+        if current_time - last_time > CONTACT_COOLDOWN:
             if state == "open":
                 msg_text = f"🚪【{location}・防犯】\n{name} が開きました"
             else:
@@ -107,7 +155,7 @@ async def callback_switchbot(request: Request):
             
             LAST_NOTIFY_TIME[mac] = current_time
 
-    # 通知送信 (Discordの通知チャンネルへ)
+    # 即時通知があれば送信
     if msg_text:
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg_text}], target="discord", channel="notify")
         logger.info(f"通知送信: {msg_text}")
