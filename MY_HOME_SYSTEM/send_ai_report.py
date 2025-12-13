@@ -166,6 +166,18 @@ def build_system_prompt(data):
     5. **長さ:** スマホで読みやすいよう、300文字程度にまとめてください。
     """
 
+def save_report_to_db(message):
+    """生成されたレポートをDBに保存"""
+    print("💾 [DB Save] レポートを記録します...")
+    # テーブル名、カラムリスト、値のタプル
+    return common.save_log_generic(
+        config.SQLITE_TABLE_AI_REPORT, 
+        ["message", "timestamp"], 
+        (message, common.get_now_iso())
+    )
+
+
+
 def generate_report(model, data):
     """AIを使ってメッセージを生成"""
     print("🧠 [AI Thinking] レポートを作成中...")
@@ -224,6 +236,18 @@ def main():
             print("🎉 All Done! 正常に終了しました。")
         else:
             logger.error("メッセージの送信に失敗しました")
+            sys.exit(1)
+
+
+        # ▼【追加】DB保存
+        if save_report_to_db(report_text):
+            print("   ✅ DB保存完了")
+        else:
+            logger.error("   ❌ DB保存失敗")
+
+        if send_notification(report_text, args.target):
+            print("🎉 完了")
+        else:
             sys.exit(1)
 
     except Exception as e:
