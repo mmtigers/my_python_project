@@ -17,16 +17,19 @@ ngrok http 8000 > /dev/null &
 echo "--- 2. ngrokの立ち上がりを待ちます (5秒) ---"
 sleep 5
 
+# 仮想環境のPythonパス
+PYTHON_EXEC="/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3"
+
 echo "--- 3. Webhookアドレスを更新します ---"
-.venv/bin/python3 switchbot_webhook_fix.py
+$PYTHON_EXEC switchbot_webhook_fix.py
 
 echo "--- 4. カメラ監視を起動します ---"
-.venv/bin/python3 camera_monitor.py &
+$PYTHON_EXEC camera_monitor.py &
 
 echo "--- 5. ダッシュボードを起動します ---"
-# ★ここを追加！(ポート8501)
 source .venv/bin/activate
 streamlit run dashboard.py > /dev/null 2>&1 &
+deactivate
 
 echo "--- 6. Pythonサーバーを起動します ---"
-.venv/bin/python3 unified_server.py
+$PYTHON_EXEC unified_server.py
