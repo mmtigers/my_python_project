@@ -8,6 +8,7 @@ import argparse
 import sys
 from datetime import datetime
 import pytz
+from weather_service import WeatherService  # 天気サービスのインポート
 
 logger = common.setup_logging("ai_report")
 
@@ -72,13 +73,21 @@ def fetch_daily_data():
         # 5. 子供
         cursor.execute(f"SELECT child_name, condition FROM {config.SQLITE_TABLE_CHILD} WHERE timestamp LIKE ?", (f"{today_str}%",))
         data['children_health'] = [{ "child": r["child_name"], "condition": r["condition"] } for r in cursor.fetchall()]
+
+    # 6. 天気 (APIコール)
+    try:
+        data['weather_report'] = WeatherService().get_weather_report()
+    except Exception as e:
+        logger.error(f"天気情報取得失敗: {e}")
+        data['weather_report'] = "（天気情報の取得に失敗しました）"
+
     return data
 
 def get_time_context(hour):
     """時間帯ごとのコンテキスト設定"""
     if 5 <= hour < 11:
         return {
-            "context": "朝です。天気や気温（データ参照）に触れ、今日一日の元気を送るような爽やかなメッセージにしてください。",
+            "context": "朝です。今日一日のスタートに向けた、明るく爽やかなメッセージにしてください。",
             "greeting": "おはようございます",
             "closing": "それでは、素敵な一日を！行ってらっしゃい👋"
         }
@@ -119,9 +128,9 @@ def build_system_prompt(data):
     【作成ルール】
     1. トーン: 丁寧語だが親しみやすく。絵文字を使用。
     2. 内容優先度:
+       - **天気情報** (データ内の 'weather_report' を参照し、洗濯や外出時の服装アドバイスを一言添える)
        - 子供のこと (記録があれば必ず触れる)
        - 実家の様子 (反応があれば安心させる)
-       - 電気代 (ポジティブに)
     3. 締め: 「{time_ctx['closing']}」のようなニュアンスで。
     4. 長さ: スマホで読みやすいよう、200〜300文字程度。改行は適度に入れて読みやすく。
     """
