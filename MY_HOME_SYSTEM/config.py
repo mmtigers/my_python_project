@@ -2,6 +2,7 @@
 import os
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
+import json
 
 # .envファイルのロード
 load_dotenv()
@@ -48,6 +49,7 @@ SQLITE_TABLE_HEALTH = "health_records"
 SQLITE_TABLE_CAR = "car_records"
 SQLITE_TABLE_CHILD = "child_health_records"
 SQLITE_TABLE_DEFECATION = "defecation_records"
+SQLITE_TABLE_AI_REPORT = "ai_report_records"
 
 # バックアップ対象
 BACKUP_FILES = [SQLITE_DB_PATH, "config.py", ".env"]
@@ -74,6 +76,20 @@ MENU_OPTIONS: Dict[str, List[str]] = {
     "外食": ["マクドナルド", "魚べえ", "サイゼリヤ", "丸亀製麺"],
     "その他": ["スーパーの惣菜", "コンビニ", "冷凍食品", "カップ麺"]
 }
+
+# 記念日・イベント設定 (外部JSON読み込み)
+IMPORTANT_DATES = []
+_events_path = os.path.join(BASE_DIR, "family_events.json")
+if os.path.exists(_events_path):
+    try:
+        with open(_events_path, "r", encoding="utf-8") as f:
+            IMPORTANT_DATES = json.load(f)
+    except Exception as e:
+        print(f"⚠️ 記念日設定の読み込みに失敗: {e}")
+
+# ゾロ目チェックをするかどうか
+CHECK_ZOROME = True
+
 
 # 車検知キーワード
 CAR_RULE_KEYWORDS: Dict[str, List[str]] = {
@@ -125,9 +141,6 @@ MONITOR_DEVICES = [
     {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "name": "居間", "notify_settings": {}},
     # Motion
     {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "name": "人感センサー", "notify_settings": {}},
-    # Contact (開閉)
-    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "伊丹", "name": "トイレ", "notify_settings": {}},
-    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "伊丹", "name": "庭へのドア", "notify_settings": {}},
     # Hub
     {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "name": "ハブミニ E4", "notify_settings": {}},
     # Cam
@@ -138,6 +151,8 @@ MONITOR_DEVICES = [
     {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "name": "冷蔵庫", "notify_settings": {}},
     {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "name": "玄関", "notify_settings": {}},
     {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "name": "お母さんの部屋", "notify_settings": {}},
+    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "高砂", "name": "トイレ", "notify_settings": {}},
+    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "高砂", "name": "庭へのドア", "notify_settings": {}},
     # Meter
     {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "name": "1Fの洗面所", "notify_settings": {}},
     {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "name": "リビング", "notify_settings": {}},
