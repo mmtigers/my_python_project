@@ -194,6 +194,17 @@ SHOPPING_TARGETS = [
     }
 ]
 
+# ▼ 美容院・散髪予約の設定 (確定情報に更新)
+HAIRCUT_TARGETS = [
+    {
+        "platform": "HotPepperBeauty",
+        "sender": "reserve@beauty.hotpepper.jp",
+        "subject_keywords": ["ご予約が確定いたしました"]
+    }
+]
+
+# 散髪サイクルの目安 (日)
+HAIRCUT_CYCLE_DAYS = 60
 
 # 自動作成ディレクトリ
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:

@@ -72,7 +72,17 @@ def init_db():
         timestamp DATETIME NOT NULL
     )''')   
 
-
+    # ▼【追加】散髪履歴テーブル
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS haircut_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT,       -- HotPepperBeauty など
+        visit_date TEXT,     -- 来店日時 (YYYY-MM-DD HH:MM)
+        shop_name TEXT,      -- 店名
+        menu TEXT,           -- メニュー内容 (カットなど)
+        price INTEGER,       -- 金額
+        email_id TEXT UNIQUE,-- 重複防止
+        timestamp DATETIME NOT NULL
+    )''')
 
     conn.commit()
     conn.close()
