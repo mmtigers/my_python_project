@@ -10,6 +10,7 @@ def init_db():
     conn = sqlite3.connect(config.SQLITE_DB_PATH)
     cur = conn.cursor()
 
+    # 既存のテーブル定義...
     cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_SENSOR} (
         id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME NOT NULL, device_name TEXT, device_id TEXT, device_type TEXT,
         power_watts REAL, temperature_celsius REAL, humidity_percent REAL, contact_state TEXT, movement_state TEXT,
@@ -29,31 +30,36 @@ def init_db():
 
     cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CAR} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        action TEXT,   -- LEAVE (外出) / RETURN (帰宅)
+        action TEXT,
         rule_name TEXT,
         timestamp DATETIME NOT NULL
     )''')
 
     cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CHILD} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT,       -- 記録者のID
-        user_name TEXT,     -- 記録者の名前
-        child_name TEXT,    -- 子供の名前
-        condition TEXT,     -- 症状
+        user_id TEXT,
+        user_name TEXT,
+        child_name TEXT,
+        condition TEXT,
         timestamp DATETIME NOT NULL
     )''')
 
-    # 排便・お腹記録用テーブル
     cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DEFECATION} (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT,       -- 記録者のID
-        user_name TEXT,     -- 記録者の名前
-        record_type TEXT,   -- "排便" or "症状"
-        condition TEXT,     -- バナナ、下痢、腹痛など
-        note TEXT,          -- メモ (オプション)
+        user_id TEXT,
+        user_name TEXT,
+        record_type TEXT,
+        condition TEXT,
+        note TEXT,
         timestamp DATETIME NOT NULL
     )''')
 
+    # ▼【追加】AIレポート保存用テーブル
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_AI_REPORT} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT,          -- 生成されたメッセージ本文
+        timestamp DATETIME NOT NULL
+    )''')
 
     conn.commit()
     conn.close()
