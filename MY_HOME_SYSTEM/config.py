@@ -50,6 +50,8 @@ SQLITE_TABLE_CAR = "car_records"
 SQLITE_TABLE_CHILD = "child_health_records"
 SQLITE_TABLE_DEFECATION = "defecation_records"
 SQLITE_TABLE_AI_REPORT = "ai_report_records"
+SQLITE_TABLE_SHOPPING = "shopping_records"
+
 
 # バックアップ対象
 BACKUP_FILES = [SQLITE_DB_PATH, "config.py", ".env"]
@@ -173,6 +175,25 @@ SALARY_IMAGE_DIR = os.path.join(BASE_DIR, "..", "assets", "salary_images")
 SALARY_DATA_DIR = os.path.join(BASE_DIR, "data")
 SALARY_CSV_PATH = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
 BONUS_CSV_PATH = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
+
+
+# ▼ 追加: ショッピング解析設定
+# プライベートな検索クエリはここで管理
+SHOPPING_TARGETS = [
+    {
+        "platform": "Amazon",
+        "sender": "auto-confirm@amazon.co.jp",
+        # 「注文済み」を追加
+        "subject_keywords": ["Amazon.co.jpのご注文", "注文済み", "Amazon.co.jp order"]
+    },
+    {
+        "platform": "Rakuten",
+        "sender": "order@rakuten.co.jp",
+        # 「ご注文内容の確認」を追加
+        "subject_keywords": ["注文内容ご確認", "ご注文内容の確認", "発送のご案内"]
+    }
+]
+
 
 # 自動作成ディレクトリ
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
