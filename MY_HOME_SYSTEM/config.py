@@ -76,6 +76,20 @@ MENU_OPTIONS: Dict[str, List[str]] = {
     "その他": ["スーパーの惣菜", "コンビニ", "冷凍食品", "カップ麺"]
 }
 
+# 記念日・イベント設定 (外部JSON読み込み)
+IMPORTANT_DATES = []
+_events_path = os.path.join(BASE_DIR, "family_events.json")
+if os.path.exists(_events_path):
+    try:
+        with open(_events_path, "r", encoding="utf-8") as f:
+            IMPORTANT_DATES = json.load(f)
+    except Exception as e:
+        print(f"⚠️ 記念日設定の読み込みに失敗: {e}")
+
+# ゾロ目チェックをするかどうか
+CHECK_ZOROME = True
+
+
 # 車検知キーワード
 CAR_RULE_KEYWORDS: Dict[str, List[str]] = {
     "LEAVE": ["Exit", "Leave", "Out"],
