@@ -126,9 +126,6 @@ MONITOR_DEVICES = [
     {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "name": "居間", "notify_settings": {}},
     # Motion
     {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "name": "人感センサー", "notify_settings": {}},
-    # Contact (開閉)
-    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "伊丹", "name": "トイレ", "notify_settings": {}},
-    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "伊丹", "name": "庭へのドア", "notify_settings": {}},
     # Hub
     {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "name": "ハブミニ E4", "notify_settings": {}},
     # Cam
@@ -139,6 +136,8 @@ MONITOR_DEVICES = [
     {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "name": "冷蔵庫", "notify_settings": {}},
     {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "name": "玄関", "notify_settings": {}},
     {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "name": "お母さんの部屋", "notify_settings": {}},
+    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "高砂", "name": "トイレ", "notify_settings": {}},
+    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "高砂", "name": "庭へのドア", "notify_settings": {}},
     # Meter
     {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "name": "1Fの洗面所", "notify_settings": {}},
     {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "name": "リビング", "notify_settings": {}},
