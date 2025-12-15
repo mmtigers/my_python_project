@@ -9,8 +9,10 @@ import sys
 from datetime import datetime
 import pytz
 
+# 各種サービスのインポート
 from weather_service import WeatherService
 from news_service import NewsService
+from menu_service import MenuService
 
 logger = common.setup_logging("ai_report")
 
@@ -36,7 +38,6 @@ def setup_gemini():
         logger.error("❌ Gemini API Keyなし")
         sys.exit(1)
     genai.configure(api_key=config.GEMINI_API_KEY)
-    # モデルの選択ロジック
     candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
     try:
         models = [m.name.replace("models/", "") for m in genai.list_models()]
@@ -46,9 +47,11 @@ def setup_gemini():
     except: return genai.GenerativeModel("gemini-1.5-flash")
 
 def fetch_daily_data():
-    """各種データを収集する"""
+    """センサー、DB、外部APIから日次データを収集する"""
     data = {}
     today_str = common.get_today_date_str()
+    # 現在時刻（JST）
+    current_hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour
     
     print("📊 [Data Fetching] DB & Sensors...")
     with common.get_db_cursor() as cursor:
@@ -91,11 +94,23 @@ def fetch_daily_data():
     # 7. ニュース
     print("📰 [Data Fetching] News...")
     try:
-        # 最新5件を取得 (辞書リスト)
         data['news_topics'] = NewsService().get_top_news(limit=5)
     except Exception as e:
         logger.error(f"ニュース取得失敗: {e}")
         data['news_topics'] = []
+
+    # 8. 晩御飯の提案 (お昼の時間帯 11:00-13:59 のみ実行)
+    # 検証時は時間制限を外してテストすることが可能
+    if 11 <= current_hour < 14:
+        print("🍳 [Data Fetching] Menu Suggestion...")
+        try:
+            ms = MenuService()
+            data['menu_suggestion_context'] = {
+                "recent_menus": ms.get_recent_menus(days=5), # 直近5日間の被りを避ける
+                "special_day": ms.get_special_day_info()     # 給料日・ボーナス日情報
+            }
+        except Exception as e:
+            logger.error(f"メニュー情報取得失敗: {e}")
 
     return data
 
@@ -126,6 +141,32 @@ def build_system_prompt(data):
     hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour
     time_ctx = get_time_context(hour)
 
+    # --- メニュー提案セクションの構築 ---
+    menu_prompt_section = ""
+    if 'menu_suggestion_context' in data:
+        ctx = data['menu_suggestion_context']
+        special_day = ctx.get('special_day')
+        recent_menus = ctx.get('recent_menus', [])
+        
+        recent_history_str = "\n".join(recent_menus) if recent_menus else "(履歴なし)"
+        
+        special_msg = ""
+        if special_day:
+            special_msg = f"※ 今日は「{special_day}」です！いつもより少し豪華なメニューや、家族が好きなものを提案してください。"
+        
+        menu_prompt_section = f"""
+        【晩御飯の献立提案 (重要)】
+        お昼の連絡なので、主婦の味方として「今夜の献立」を3つ提案してください。
+        
+        [提案の条件]
+        1. **「主婦が気軽に作れる」** 手間のかかりすぎないもの。
+        2. 直近の履歴と被らないもの。
+           <直近の履歴>
+           {recent_history_str}
+        3. {special_msg}
+        """
+
+    # --- プロンプトの組み立て ---
     return f"""
     あなたは「優秀で気が利く、少しユーモアのある執事」です。
     主人の代わりに、妻の{mom_name}さんへ「現在の家の状況」をレポートします。
@@ -142,13 +183,13 @@ def build_system_prompt(data):
 
     【作成ルール】
     1. **役割**: 忙しい主婦の味方として、簡潔かつ温かい言葉を選んでください。
-    2. **構成と内容**:
-       - **挨拶 & 天気**: 天気データ('weather_report')を見て、服装のアドバイスを一言。
-       - **今日のニュース**: 提供された 'news_topics' (タイトルとURLのリスト) から**3つ**を選び、紹介してください。
-         ※ 重要: 各ニュースは「タイトル」の次の行に「URL」を記載する形式にしてください。
-       - **家の状況**: 子供の体調('children_health')や実家('parents_home')の記録があれば必ず触れてください。
+    2. **構成**:
+       - **挨拶 & 天気**: 天気データ('weather_report')を見て、服装や傘の一言アドバイス。
+       - **ニュース**: 'news_topics' から3つ選び、タイトルとURLを紹介（URLは改行して記載）。
+       - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
+       - **家の状況**: 子供や実家の記録があれば触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
-    4. **長さ**: 情報をしっかり伝えるため、**500文字前後**で作成してください。改行や絵文字を使って視認性を高めてください。
+    4. **長さ**: 全体で **500文字前後**。改行や絵文字を使って読みやすく整形してください。
     """
 
 def generate_report(model, data):
@@ -196,7 +237,13 @@ def main():
     except Exception as e:
         logger.error(f"Critical Error: {e}")
         traceback.print_exc()
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"😰 AI Reporter Error: {e}"}], target="discord", channel="error")
+        # エラー時はDiscordのErrorチャンネルに通知
+        common.send_push(
+            config.LINE_USER_ID, 
+            [{"type": "text", "text": f"😰 AI Reporter Error: {e}"}], 
+            target="discord", 
+            channel="error"
+        )
         sys.exit(1)
 
 if __name__ == "__main__":
