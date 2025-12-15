@@ -8,7 +8,9 @@ import argparse
 import sys
 from datetime import datetime
 import pytz
-from weather_service import WeatherService  # 天気サービスのインポート
+
+from weather_service import WeatherService
+from news_service import NewsService
 
 logger = common.setup_logging("ai_report")
 
@@ -34,6 +36,7 @@ def setup_gemini():
         logger.error("❌ Gemini API Keyなし")
         sys.exit(1)
     genai.configure(api_key=config.GEMINI_API_KEY)
+    # モデルの選択ロジック
     candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
     try:
         models = [m.name.replace("models/", "") for m in genai.list_models()]
@@ -43,8 +46,11 @@ def setup_gemini():
     except: return genai.GenerativeModel("gemini-1.5-flash")
 
 def fetch_daily_data():
+    """各種データを収集する"""
     data = {}
     today_str = common.get_today_date_str()
+    
+    print("📊 [Data Fetching] DB & Sensors...")
     with common.get_db_cursor() as cursor:
         if not cursor: raise ConnectionError("DB接続失敗")
         
@@ -74,12 +80,22 @@ def fetch_daily_data():
         cursor.execute(f"SELECT child_name, condition FROM {config.SQLITE_TABLE_CHILD} WHERE timestamp LIKE ?", (f"{today_str}%",))
         data['children_health'] = [{ "child": r["child_name"], "condition": r["condition"] } for r in cursor.fetchall()]
 
-    # 6. 天気 (APIコール)
+    # 6. 天気
+    print("🌤️ [Data Fetching] Weather...")
     try:
         data['weather_report'] = WeatherService().get_weather_report()
     except Exception as e:
         logger.error(f"天気情報取得失敗: {e}")
         data['weather_report'] = "（天気情報の取得に失敗しました）"
+
+    # 7. ニュース
+    print("📰 [Data Fetching] News...")
+    try:
+        # 最新5件を取得 (辞書リスト)
+        data['news_topics'] = NewsService().get_top_news(limit=5)
+    except Exception as e:
+        logger.error(f"ニュース取得失敗: {e}")
+        data['news_topics'] = []
 
     return data
 
@@ -107,7 +123,6 @@ def get_time_context(hour):
 def build_system_prompt(data):
     mom_name = getattr(config, "MOM_NAME", "奥様")
     
-    # 時間帯によるコンテキスト切り替え
     hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour
     time_ctx = get_time_context(hour)
 
@@ -126,17 +141,18 @@ def build_system_prompt(data):
     {json.dumps(data, ensure_ascii=False)}
 
     【作成ルール】
-    1. トーン: 丁寧語だが親しみやすく。絵文字を使用。
-    2. 内容優先度:
-       - **天気情報** (データ内の 'weather_report' を参照し、洗濯や外出時の服装アドバイスを一言添える)
-       - 子供のこと (記録があれば必ず触れる)
-       - 実家の様子 (反応があれば安心させる)
-    3. 締め: 「{time_ctx['closing']}」のようなニュアンスで。
-    4. 長さ: スマホで読みやすいよう、200〜300文字程度。改行は適度に入れて読みやすく。
+    1. **役割**: 忙しい主婦の味方として、簡潔かつ温かい言葉を選んでください。
+    2. **構成と内容**:
+       - **挨拶 & 天気**: 天気データ('weather_report')を見て、服装のアドバイスを一言。
+       - **今日のニュース**: 提供された 'news_topics' (タイトルとURLのリスト) から**3つ**を選び、紹介してください。
+         ※ 重要: 各ニュースは「タイトル」の次の行に「URL」を記載する形式にしてください。
+       - **家の状況**: 子供の体調('children_health')や実家('parents_home')の記録があれば必ず触れてください。
+    3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
+    4. **長さ**: 情報をしっかり伝えるため、**500文字前後**で作成してください。改行や絵文字を使って視認性を高めてください。
     """
 
 def generate_report(model, data):
-    print("🧠 [AI Thinking]...")
+    print("🧠 [AI Thinking] 生成中...")
     prompt = build_system_prompt(data)
     response = model.generate_content(prompt)
     return response.text.strip()
@@ -158,7 +174,7 @@ def send_notification(message, target):
     success = False
     for t in targets:
         if common.send_push(config.LINE_USER_ID, [msg_payload], target=t, channel="report"):
-            print(f"   ✅ {t}: OK")
+            print(f"   ✅ {t}: 送信成功")
             success = True
     return success
 
@@ -169,14 +185,18 @@ def main():
         model = setup_gemini()
         data = fetch_daily_data()
         text = generate_report(model, data)
-        print(f"\n📝 Report:\n{text}\n")
+        print(f"\n📝 Generated Report:\n{'-'*30}\n{text}\n{'-'*30}\n")
         
         save_report_to_db(text)
-        if send_notification(text, args.target): print("🎉 Done")
-        else: sys.exit(1)
+        if send_notification(text, args.target): 
+            print("🎉 All tasks completed successfully.")
+        else: 
+            sys.exit(1)
+            
     except Exception as e:
-        logger.error(f"Error: {e}")
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"😰 AI Error: {e}"}], target="discord", channel="error")
+        logger.error(f"Critical Error: {e}")
+        traceback.print_exc()
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"😰 AI Reporter Error: {e}"}], target="discord", channel="error")
         sys.exit(1)
 
 if __name__ == "__main__":
