@@ -33,6 +33,7 @@ def parse_arguments():
     parser.add_argument('--target', type=str, default='discord', choices=['line', 'discord', 'both'], help='通知先')
     return parser.parse_args()
 
+# 元の実装から一切変更しない
 def setup_gemini():
     if not config.GEMINI_API_KEY:
         logger.error("❌ Gemini API Keyなし")
@@ -50,8 +51,16 @@ def fetch_daily_data():
     """センサー、DB、外部APIから日次データを収集する"""
     data = {}
     today_str = common.get_today_date_str()
+    
     # 現在時刻（JST）
-    current_hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour
+    jst = pytz.timezone('Asia/Tokyo')
+    now = datetime.now(jst)
+    current_hour = now.hour
+    weekday = now.weekday() # 0:月, 4:金, 6:日
+    
+    # 金曜日の夜(17時以降)かどうか判定 (機能追加部分)
+    data['is_friday_night'] = (weekday == 4 and current_hour >= 17)
+    data['current_month'] = now.month
     
     print("📊 [Data Fetching] DB & Sensors...")
     with common.get_db_cursor() as cursor:
@@ -100,14 +109,13 @@ def fetch_daily_data():
         data['news_topics'] = []
 
     # 8. 晩御飯の提案 (お昼の時間帯 11:00-13:59 のみ実行)
-    # 検証時は時間制限を外してテストすることが可能
     if 11 <= current_hour < 14:
         print("🍳 [Data Fetching] Menu Suggestion...")
         try:
             ms = MenuService()
             data['menu_suggestion_context'] = {
-                "recent_menus": ms.get_recent_menus(days=5), # 直近5日間の被りを避ける
-                "special_day": ms.get_special_day_info()     # 給料日・ボーナス日情報
+                "recent_menus": ms.get_recent_menus(days=5), 
+                "special_day": ms.get_special_day_info()
             }
         except Exception as e:
             logger.error(f"メニュー情報取得失敗: {e}")
@@ -141,7 +149,7 @@ def build_system_prompt(data):
     hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour
     time_ctx = get_time_context(hour)
 
-    # --- メニュー提案セクションの構築 ---
+    # --- メニュー提案セクション ---
     menu_prompt_section = ""
     if 'menu_suggestion_context' in data:
         ctx = data['menu_suggestion_context']
@@ -149,21 +157,27 @@ def build_system_prompt(data):
         recent_menus = ctx.get('recent_menus', [])
         
         recent_history_str = "\n".join(recent_menus) if recent_menus else "(履歴なし)"
-        
-        special_msg = ""
-        if special_day:
-            special_msg = f"※ 今日は「{special_day}」です！いつもより少し豪華なメニューや、家族が好きなものを提案してください。"
+        special_msg = f"※ 今日は「{special_day}」です！" if special_day else ""
         
         menu_prompt_section = f"""
         【晩御飯の献立提案 (重要)】
         お昼の連絡なので、主婦の味方として「今夜の献立」を3つ提案してください。
-        
         [提案の条件]
         1. **「主婦が気軽に作れる」** 手間のかかりすぎないもの。
-        2. 直近の履歴と被らないもの。
-           <直近の履歴>
-           {recent_history_str}
+        2. 直近の履歴 ({recent_history_str}) と被らないもの。
         3. {special_msg}
+        """
+
+    # --- 週末イベント提案セクション (機能追加部分) ---
+    event_prompt_section = ""
+    if data.get('is_friday_night'):
+        month = data.get('current_month', 12)
+        event_prompt_section = f"""
+        【週末お出かけ提案 (重要)】
+        今日は金曜日の夜です。明日の土日に家族（5歳と2歳の子供連れ）で楽しめそうな、
+        「兵庫・大阪・奈良」エリアの定番スポットや、{month}月の季節に合った過ごし方を1つ提案してください。
+        （例: 寒いので屋内の○○、イルミネーションが見える○○、など）
+        ※Web検索は使用せず、あなたの知識の中からおすすめを提案してください。
         """
 
     # --- プロンプトの組み立て ---
@@ -185,9 +199,11 @@ def build_system_prompt(data):
     1. **役割**: 忙しい主婦の味方として、簡潔かつ温かい言葉を選んでください。
     2. **構成**:
        - **挨拶 & 天気**: 天気データ('weather_report')を見て、服装や傘の一言アドバイス。
-       - **ニュース**: 'news_topics' から3つ選び、タイトルとURLを紹介（URLは改行して記載）。
+       - **ニュース**: 'news_topics' から3つ選んで紹介。
+         **重要**: Discordで見やすくするため、ニュースのURLは必ず Markdown形式 `[タイトル](URL)` で埋め込んでください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
-       - **家の状況**: 子供や実家の記録があれば触れる。
+       - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
+       - **家の状況**: 子供の記録があれば触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
     4. **長さ**: 全体で **500文字前後**。改行や絵文字を使って読みやすく整形してください。
     """
