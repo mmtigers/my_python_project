@@ -61,6 +61,29 @@ def init_db():
         timestamp DATETIME NOT NULL
     )''')
 
+    # ▼【追加】購入履歴テーブル (重複防止のため email_id に UNIQUE 制約)
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_SHOPPING} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT,       -- Amazon / Rakuten
+        order_date TEXT,     -- 注文日 (YYYY-MM-DD)
+        item_name TEXT,      -- 商品名（件名から抜粋）
+        price INTEGER,       -- 金額
+        email_id TEXT UNIQUE,-- GmailのMessage-ID (重複登録防止)
+        timestamp DATETIME NOT NULL
+    )''')   
+
+    # ▼【追加】散髪履歴テーブル
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS haircut_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        platform TEXT,       -- HotPepperBeauty など
+        visit_date TEXT,     -- 来店日時 (YYYY-MM-DD HH:MM)
+        shop_name TEXT,      -- 店名
+        menu TEXT,           -- メニュー内容 (カットなど)
+        price INTEGER,       -- 金額
+        email_id TEXT UNIQUE,-- 重複防止
+        timestamp DATETIME NOT NULL
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")
