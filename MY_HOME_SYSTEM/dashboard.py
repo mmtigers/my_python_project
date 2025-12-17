@@ -372,20 +372,22 @@ def main():
                 else:
                     st.info("データがありません")
 
-            # --- 個別家電 (24h) ---
+            # --- 個別家電 (今日) ---
             with col_right:
-                st.subheader("🔌 個別家電 (直近24h)")
+                st.subheader("🔌 個別家電 (今日)")
                 df_app = df_sensor[
                     (df_sensor['device_type'].str.contains('Plug')) & 
-                    (df_sensor['timestamp'] >= now - timedelta(hours=24))
+                    (df_sensor['timestamp'] >= today_start) & 
+                    (df_sensor['timestamp'] < today_end)
                 ]
                 if not df_app.empty:
-                    st.plotly_chart(px.line(df_app, x='timestamp', y='power_watts', color='friendly_name', title="プラグ計測値"), use_container_width=True)
+                    # 修正: X軸を今日の0-24時に固定
+                    fig_app = px.line(df_app, x='timestamp', y='power_watts', color='friendly_name', title="プラグ計測値")
+                    fig_app.update_xaxes(range=[today_start, today_end])
+                    st.plotly_chart(fig_app, use_container_width=True)
                 else:
                     st.info("プラグデータなし")
             
-            # 【変更】電力シェア（円グラフ）は削除
-
     # Tab: 室温
     with tab_temp:
         st.subheader("🌡️ 室温 (今日の推移)")

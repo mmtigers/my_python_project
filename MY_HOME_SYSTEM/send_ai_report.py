@@ -200,7 +200,7 @@ def build_system_prompt(data):
     2. **構成**:
        - **挨拶 & 天気**: 天気データ('weather_report')を見て、服装や傘の一言アドバイス。
        - **ニュース**: 'news_topics' から3つ選んで紹介。
-         **重要**: Discordで見やすくするため、ニュースのURLは必ず Markdown形式 `[タイトル](URL)` で埋め込んでください。
+         **重要(変更)**: Discordのプレビューカードを非表示にし、かつリンクにするために、URLは必ず **`[タイトル](<URL>)`** の形式（URLを `<` と `>` で囲む）で記述してください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
        - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
        - **家の状況**: 子供の記録があれば触れる。
