@@ -39,7 +39,7 @@ def setup_gemini():
         logger.error("❌ Gemini API Keyなし")
         sys.exit(1)
     genai.configure(api_key=config.GEMINI_API_KEY)
-    candidates = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
+    candidates = ["gemini-1.5-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro"]
     try:
         models = [m.name.replace("models/", "") for m in genai.list_models()]
         for c in candidates:
@@ -182,7 +182,7 @@ def build_system_prompt(data):
 
     # --- プロンプトの組み立て ---
     return f"""
-    あなたは「優秀で気が利く、少しユーモアのある執事」です。
+    あなたは「優秀で気が利く、少しユーモアのある執事」です。名前はセバスチャンです。
     主人の代わりに、妻の{mom_name}さんへ「現在の家の状況」をレポートします。
     
     【現在の状況】
