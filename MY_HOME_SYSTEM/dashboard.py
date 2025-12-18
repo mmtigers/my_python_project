@@ -281,6 +281,29 @@ def main():
                     itami_val = f"🟢 活動中 ({int(diff_c)}分前)"
                     itami_theme = "theme-green"
 
+    # -- 🍚 炊飯器 (New!) --
+    rice_val = "⚪ データなし"
+    rice_theme = "theme-gray"
+    if not df_sensor.empty:
+        # 直近15分の炊飯器データを取得
+        check_time = now - timedelta(minutes=15)
+        df_rice = df_sensor[
+            (df_sensor['friendly_name'].str.contains('炊飯器')) & 
+            (df_sensor['timestamp'] >= check_time)
+        ]
+        
+        if not df_rice.empty:
+            max_watts = df_rice['power_watts'].max()
+            if max_watts > 20: # 閾値20W
+                rice_val = "🍚 ご飯あり"
+                rice_theme = "theme-green"
+            else:
+                rice_val = "🍚 なし"
+                rice_theme = "theme-red"
+
+
+
+
     # -- 交通 (3番目) --
     jr_status = train_service.get_jr_traffic_status()
     line_g = jr_status["宝塚線"]
@@ -298,7 +321,7 @@ def main():
 
     # -- 電気代 --
     current_cost = calculate_monthly_cost_cumulative()
-    elec_val = f"⚡ {current_cost:,} 円 (今月)"
+    elec_val = f"⚡ {current_cost:,} 円"
     elec_theme = "theme-blue"
 
     # -- 車 --
@@ -309,7 +332,7 @@ def main():
         car_theme = "theme-yellow"
 
     # 描画
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     
     def render_card(col, title, value, theme):
         with col:
@@ -322,9 +345,10 @@ def main():
 
     render_card(col1, "👵 高砂 (実家)", taka_val, taka_theme)
     render_card(col2, "🏠 伊丹 (自宅)", itami_val, itami_theme)
-    render_card(col3, "🚃 JR宝塚・神戸", traffic_val, traffic_theme)
-    render_card(col4, "💰 電気代", elec_val, elec_theme)
-    render_card(col5, "🚗 車 (伊丹)", car_val, car_theme)
+    render_card(col3, "🍚 炊飯器", rice_val, rice_theme) # 追加
+    render_card(col4, "🚃 JR宝塚・神戸", traffic_val, traffic_theme)
+    render_card(col5, "💰 電気代", elec_val, elec_theme)
+    render_card(col6, "🚗 車 (伊丹)", car_val, car_theme)
 
     st.markdown("---")
 
