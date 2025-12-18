@@ -57,7 +57,6 @@ def get_custom_css():
             font-size: 1.2rem;
             font-weight: bold;
             line-height: 1.3;
-            /* 改行させない設定 (一応残すが、テキスト側で改行コードを消す) */
             white-space: normal; 
         }
         
@@ -98,7 +97,7 @@ def get_custom_css():
     </style>
     """
 
-# === 🛠️ データ処理ロジック (変更なし) ===
+# === 🛠️ データ処理ロジック ===
 
 FRIENDLY_NAME_FIXES = {
     "リビング": "高砂のリビング",
@@ -176,6 +175,32 @@ def load_calendar_sensor_data(days=35):
         return apply_friendly_names(df)
     except: return pd.DataFrame()
 
+# ★ 新規追加: 天気履歴ロード関数
+@st.cache_data(ttl=300)
+def load_weather_history(days=40, location='伊丹'):
+    """指定期間・場所の天気履歴を取得"""
+    try:
+        conn = get_db_connection()
+        # weather_historyテーブルがあるか確認
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='weather_history'")
+        if not cur.fetchone():
+            conn.close()
+            return pd.DataFrame()
+
+        start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+        query = f"""
+            SELECT date, min_temp, max_temp, weather_desc, umbrella_level 
+            FROM weather_history 
+            WHERE location = '{location}' AND date >= '{start_date}'
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        print(f"Weather load error: {e}")
+        return pd.DataFrame()
+
 def load_ai_report():
     try:
         conn = get_db_connection()
@@ -229,13 +254,14 @@ def main():
     # データロード
     df_sensor = load_sensor_data(limit=10000)
     df_calendar_sensor = load_calendar_sensor_data(days=35)
+    df_weather = load_weather_history(days=40, location='伊丹') # ★天気データ
     df_poop = load_generic_data(config.SQLITE_TABLE_DEFECATION)
     df_child = load_generic_data(config.SQLITE_TABLE_CHILD)
     df_food = load_generic_data(config.SQLITE_TABLE_FOOD)
     df_car = load_generic_data(config.SQLITE_TABLE_CAR)
     df_security_log = load_generic_data("security_logs", limit=100)
 
-    # === 2. ステータスカード (改行削除) ===
+    # === 2. ステータスカード ===
     
     # -- 高砂 --
     taka_val = "⚪ データなし"
@@ -281,28 +307,20 @@ def main():
                     itami_val = f"🟢 活動中 ({int(diff_c)}分前)"
                     itami_theme = "theme-green"
 
-    # -- 🍚 炊飯器 (New!) --
+    # -- 🍚 炊飯器 --
     rice_val = "⚪ データなし"
     rice_theme = "theme-gray"
     if not df_sensor.empty:
-        # 直近15分の炊飯器データを取得
         check_time = now - timedelta(minutes=15)
-        df_rice = df_sensor[
-            (df_sensor['friendly_name'].str.contains('炊飯器')) & 
-            (df_sensor['timestamp'] >= check_time)
-        ]
-        
+        df_rice = df_sensor[(df_sensor['friendly_name'].str.contains('炊飯器')) & (df_sensor['timestamp'] >= check_time)]
         if not df_rice.empty:
             max_watts = df_rice['power_watts'].max()
-            if max_watts > 20: # 閾値20W
+            if max_watts > 5:
                 rice_val = "🍚 ご飯あり"
                 rice_theme = "theme-green"
             else:
                 rice_val = "🍚 なし"
                 rice_theme = "theme-red"
-
-
-
 
     # -- 交通 (3番目) --
     jr_status = train_service.get_jr_traffic_status()
@@ -321,7 +339,7 @@ def main():
 
     # -- 電気代 --
     current_cost = calculate_monthly_cost_cumulative()
-    elec_val = f"⚡ {current_cost:,} 円"
+    elec_val = f"⚡ {current_cost:,} 円 (今月)"
     elec_theme = "theme-blue"
 
     # -- 車 --
@@ -345,7 +363,7 @@ def main():
 
     render_card(col1, "👵 高砂 (実家)", taka_val, taka_theme)
     render_card(col2, "🏠 伊丹 (自宅)", itami_val, itami_theme)
-    render_card(col3, "🍚 炊飯器", rice_val, rice_theme) # 追加
+    render_card(col3, "🍚 炊飯器", rice_val, rice_theme)
     render_card(col4, "🚃 JR宝塚・神戸", traffic_val, traffic_theme)
     render_card(col5, "💰 電気代", elec_val, elec_theme)
     render_card(col6, "🚗 車 (伊丹)", car_val, car_theme)
@@ -361,6 +379,8 @@ def main():
     # Tab: カレンダー
     with tab_cal:
         calendar_events = []
+        
+        # 1. センサーイベント (冷蔵庫・トイレ)
         if not df_calendar_sensor.empty:
             df_calendar_sensor['date_str'] = df_calendar_sensor['timestamp'].dt.strftime('%Y-%m-%d')
             for key, label, color in [('冷蔵庫', '🧊冷蔵庫', '#a8dadc'), ('トイレ', '🚽トイレ', '#ffccd5')]:
@@ -372,10 +392,44 @@ def main():
                     counts = df_target.groupby('date_str').size()
                     for d_val, c_val in counts.items():
                         calendar_events.append({"title": f"{label}: {c_val}回", "start": d_val, "color": color, "textColor": "#333", "allDay": True})
+        
+        # 2. 子供の体調
         if not df_child.empty:
             for _, row in df_child.iterrows():
                 if "元気" not in row['condition']:
                     calendar_events.append({"title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), "color": "#ffb703", "textColor": "#333"})
+        
+        # 3. 天気履歴 (新規追加)
+        if not df_weather.empty:
+            for _, row in df_weather.iterrows():
+                desc = row['weather_desc']
+                # アイコン判定
+                w_icon = "🌤"
+                bg_color = "#f5f5f5" # デフォルト: グレー
+                
+                if "雨" in desc: 
+                    w_icon = "☔"
+                    bg_color = "#e3f2fd" # 薄い青
+                elif "晴" in desc:
+                    w_icon = "☀"
+                    bg_color = "#fff3e0" # 薄いオレンジ
+                elif "曇" in desc:
+                    w_icon = "☁"
+                elif "雪" in desc:
+                    w_icon = "⛄"
+                
+                # タイトル作成 (例: ☀晴れ 15/8℃)
+                w_title = f"{w_icon}{desc} {int(row['max_temp'])}/{int(row['min_temp'])}℃"
+                
+                calendar_events.append({
+                    "title": w_title,
+                    "start": row['date'],
+                    "backgroundColor": bg_color,
+                    "borderColor": "transparent",
+                    "textColor": "#444",
+                    "allDay": True
+                })
+
         calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="cal_main")
 
     # Tab: 交通 (詳細)
@@ -404,7 +458,6 @@ def main():
             """, unsafe_allow_html=True)
 
         st.markdown("---")
-        # 時刻表示を +20分に変更
         st.subheader(f"📍 ルート検索 ({(datetime.now() + timedelta(minutes=20)).strftime('%H:%M')} 出発想定)")
         
         col_out, col_in = st.columns(2)
