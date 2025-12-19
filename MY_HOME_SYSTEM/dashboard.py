@@ -144,6 +144,43 @@ def load_weather_history(days=40, location='伊丹'):
         logger.error(f"Weather Load Error: {e}")
         return pd.DataFrame()
 
+@st.cache_data(ttl=3600)
+def load_app_rankings(date_str=None):
+    """アプリランキングを取得"""
+    conn = None
+    try:
+        conn = get_db_connection()
+        # テーブル存在確認
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
+        if not cur.fetchone():
+            return pd.DataFrame()
+
+        if not date_str:
+            date_str = datetime.now().strftime('%Y-%m-%d')
+        
+        # 指定日のデータ
+        query = f"SELECT * FROM app_rankings WHERE date = '{date_str}' ORDER BY rank ASC"
+        df = pd.read_sql_query(query, conn)
+        
+        # なければ最新日を取得
+        if df.empty:
+            q_latest = "SELECT date FROM app_rankings ORDER BY date DESC LIMIT 1"
+            latest_df = pd.read_sql_query(q_latest, conn)
+            if not latest_df.empty:
+                latest_date = latest_df.iloc[0]['date']
+                query = f"SELECT * FROM app_rankings WHERE date = '{latest_date}' ORDER BY rank ASC"
+                df = pd.read_sql_query(query, conn)
+        
+        return df
+    except Exception as e:
+        logger.error(f"App Ranking Load Error: {e}")
+        return pd.DataFrame()
+    finally:
+        if conn: conn.close()
+
+
+
 def load_ai_report():
     query = f"SELECT * FROM {config.SQLITE_TABLE_AI_REPORT} ORDER BY id DESC LIMIT 1"
     df = load_data_from_db(query)
@@ -250,26 +287,32 @@ def get_itami_status(df_sensor, now):
     return val, theme
 
 def get_rice_status(df_sensor, now):
-    """炊飯器ステータス判定"""
-    val = "⚪ データなし"
-    theme = "theme-gray"
+    """炊飯器ステータス判定: その日の最大電力が500W超かで判定"""
+    # デフォルトは「ご飯なし」
+    val = "🍚 炊いてない"
+    theme = "theme-red"
     
-    if df_sensor.empty: return val, theme
-
-    check_time = now - timedelta(minutes=15)
-    df_rice = df_sensor[
-        (df_sensor['friendly_name'].str.contains('炊飯器')) & 
-        (df_sensor['timestamp'] >= check_time)
-    ]
+    # 今日の日付文字列 (YYYY-MM-DD)
+    today_str = now.strftime('%Y-%m-%d')
+    
+    # DBから今日の炊飯器の最大電力を取得するクエリ
+    # device_name に '炊飯器' が含まれるレコードを対象
+    query = f"""
+        SELECT MAX(power_watts) as max_power 
+        FROM {config.SQLITE_TABLE_SENSOR} 
+        WHERE device_name LIKE '%炊飯器%' 
+        AND timestamp >= '{today_str}'
+    """
+    
+    # データを取得 (dashboard.py内のヘルパー関数を使用)
+    df_rice = load_data_from_db(query, date_column=None)
     
     if not df_rice.empty:
-        max_watts = df_rice['power_watts'].max()
-        if max_watts > 5:
+        max_watts = df_rice.iloc[0]['max_power']
+        # max_watts はデータがない場合 None になるのでチェック
+        if max_watts is not None and max_watts >= 500:
             val = "🍚 ご飯あり"
             theme = "theme-green"
-        else:
-            val = "🍚 なし"
-            theme = "theme-red"
             
     return val, theme
 
@@ -589,9 +632,69 @@ def render_logs_tab(df_sensor):
         sel = st.multiselect("場所", locs, default=locs)
         st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
 
+def render_trends_tab():
+    """最近の流行タブ"""
+    st.title("🌟 最近の流行・トレンド")
+    st.caption("Google Playストアのランキング情報を表示します")
+
+    # セクション: アプリ
+    st.subheader("📱 スマホアプリ (人気/売上)")
+    df_apps = load_app_rankings()
+    
+    if df_apps.empty:
+        st.info("データがありません。ランキング取得を実行してください。")
+        return
+
+    # 日付表示
+    recorded_date = df_apps.iloc[0]['date']
+    st.write(f"取得日: **{recorded_date}**")
+
+    col_free, col_gross = st.columns(2)
+    
+    def render_rank_list(col, title, r_type):
+        with col:
+            st.markdown(f"#### {title}")
+            target_df = df_apps[df_apps['ranking_type'] == r_type].sort_values('rank')
+            if target_df.empty:
+                st.warning("データなし")
+                return
+            
+            for _, row in target_df.iterrows():
+                # Score表示 (0.0の場合は非表示)
+                score_html = f'<div class="app-score">★{row["score"]:.1f}</div>' if row['score'] > 0 else ''
+                
+                # HTMLでリスト表示
+                html = f"""
+                <div class="app-rank-item">
+                    <div class="app-rank-num">{row['rank']}</div>
+                    <img src="{row['icon_url']}" class="app-icon">
+                    <div class="app-info">
+                        <div class="app-title">{row['title']}</div>
+                        <div class="app-dev">{row['developer']}</div>
+                    </div>
+                    {score_html}
+                </div>
+                """
+                st.markdown(html, unsafe_allow_html=True)
+
+    render_rank_list(col_free, "🆓 無料トップ (流行)", "free")
+    render_rank_list(col_gross, "💰 売上トップ (人気)", "grossing")
+
+
 # === メイン処理 ===
 
 def main():
+
+    # ★追加: サイドバーで手動更新可能にする
+    with st.sidebar:
+        st.header("設定")
+        if st.button("🔄 データを更新"):
+            st.cache_data.clear()
+            st.rerun()
+        st.markdown(get_custom_css(), unsafe_allow_html=True)
+        now = datetime.now(pytz.timezone('Asia/Tokyo'))
+        print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
+
     try:
         # CSS適用
         st.markdown(get_custom_css(), unsafe_allow_html=True)
@@ -622,9 +725,9 @@ def main():
         render_metrics_section(now, df_sensor, df_car)
 
         # タブ切り替え
-        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log = st.tabs([
+        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends = st.tabs([
             "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
-            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ"
+            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行"
         ])
 
         with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
@@ -635,6 +738,7 @@ def main():
         with tab_health: render_health_tab(df_child, df_poop, df_food)
         with tab_taka: render_takasago_tab(df_sensor)
         with tab_log: render_logs_tab(df_sensor)
+        with tab_trends: render_trends_tab()
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
