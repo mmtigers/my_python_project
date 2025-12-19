@@ -67,8 +67,18 @@ def fetch_daily_data():
         if not cursor: raise ConnectionError("DB接続失敗")
         
         # 1. 環境
-        cursor.execute(f"SELECT device_name, avg(temperature_celsius) as t, avg(humidity_percent) as h FROM {config.SQLITE_TABLE_SENSOR} WHERE timestamp LIKE ? AND device_type LIKE '%Meter%' GROUP BY device_id", (f"{today_str}%",))
-        data['environment'] = [{ "place": r["device_name"], "temp": round(r["t"],1), "humidity": round(r["h"],1) } for r in cursor.fetchall()]
+        # 伊丹のデバイスIDを特定
+        itami_ids = [d['id'] for d in config.MONITOR_DEVICES if d.get('location') == '伊丹']
+
+        # SQLで device_id も取得するように変更
+        cursor.execute(f"SELECT device_id, device_name, avg(temperature_celsius) as t, avg(humidity_percent) as h FROM {config.SQLITE_TABLE_SENSOR} WHERE timestamp LIKE ? AND device_type LIKE '%Meter%' GROUP BY device_id", (f"{today_str}%",))
+        
+        # 取得したデータから device_id が伊丹リストに含まれるものだけを抽出
+        data['environment'] = [
+            { "place": r["device_name"], "temp": round(r["t"],1), "humidity": round(r["h"],1) } 
+            for r in cursor.fetchall() 
+            if r["device_id"] in itami_ids
+        ]
         
         # 2. 実家
         target_loc = getattr(config, "PARENTS_LOCATION", "高砂")
@@ -95,7 +105,7 @@ def fetch_daily_data():
     # 6. 天気
     print("🌤️ [Data Fetching] Weather...")
     try:
-        data['weather_report'] = WeatherService().get_weather_report()
+        data['weather_report'] = WeatherService().get_weather_report_text()
     except Exception as e:
         logger.error(f"天気情報取得失敗: {e}")
         data['weather_report'] = "（天気情報の取得に失敗しました）"
@@ -203,7 +213,8 @@ def build_system_prompt(data):
          **重要(変更)**: Discordのプレビューカードを非表示にし、かつリンクにするために、URLは必ず **`[タイトル](<URL>)`** の形式（URLを `<` と `>` で囲む）で記述してください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
        - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
-       - **家の状況**: 子供の記録があれば触れる。
+       - **家の状況**: 子供の記録があれば触れる。高砂や実家の状況は触れない。夫は仕事を頑張っているので褒める。
+       - **季節感**: 子供関連の夏休みや冬休み、クリスマスや正月、バレンタイン、母の日など、様々な季節のイベントが近ければ触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
     4. **長さ**: 全体で **500文字前後**。改行や絵文字を使って読みやすく整形してください。
     """
