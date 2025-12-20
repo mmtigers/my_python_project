@@ -1,3 +1,4 @@
+# MY_HOME_SYSTEM/car_presence_checker.py
 import cv2
 import numpy as np
 import os
@@ -5,10 +6,11 @@ import shutil
 import time
 import subprocess
 import sqlite3
-from datetime import datetime
 import traceback
+from datetime import datetime
+from typing import Tuple, Optional, Dict, Any, List
 
-# プロジェクト内モジュールのインポート
+# プロジェクト内モジュール
 import config
 import common
 
@@ -19,33 +21,33 @@ import common
 logger = common.setup_logging("car_checker")
 
 # 判定設定
-TARGET_CAMERA_ID = "VIGI_C540_Parking"
-CENTER_CROP_RATIO = 0.3      # 中央30%を判定エリアとする
-RTSP_PORT = 554              # VIGIカメラのRTSP標準ポート
+TARGET_CAMERA_ID: str = "VIGI_C540_Parking"
+CENTER_CROP_RATIO: float = 0.3      # 中央30%を判定エリアとする
+RTSP_PORT: int = 554                # VIGIカメラのRTSP標準ポート
 
 # --- 昼間用設定 (色判定) ---
-BLUE_PIXEL_THRESHOLD = 0.1   # 青色率10%以上で「車あり」
-BLUE_LOWER = np.array([90, 50, 50])    # 青色の下限 (H, S, V)
-BLUE_UPPER = np.array([130, 255, 255]) # 青色の上限
+BLUE_PIXEL_THRESHOLD: float = 0.1   # 青色率10%以上で「車あり」
+BLUE_LOWER: np.ndarray = np.array([90, 50, 50])    # 青色の下限 (H, S, V)
+BLUE_UPPER: np.ndarray = np.array([130, 255, 255]) # 青色の上限
 
 # --- 夜間用設定 (反射＆エッジ判定) ---
 # 1. 反射検知 (ナンバープレート等)
-BRIGHTNESS_VAL_THRESH = 230  # この輝度(0-255)以上を「反射光」とみなす
-BRIGHTNESS_RATIO_THRESH = 0.005 # 画面の0.5%以上が光っていれば車あり
+BRIGHTNESS_VAL_THRESH: int = 230  # この輝度(0-255)以上を「反射光」とみなす
+BRIGHTNESS_RATIO_THRESH: float = 0.005 # 画面の0.5%以上が光っていれば車あり
 
 # 2. エッジ検知 (車体の複雑さ)
-CANNY_THRESH_1 = 50
-CANNY_THRESH_2 = 150
-EDGE_RATIO_THRESH = 0.05    # エッジ密度が5%以上なら車あり (地面は平坦)
+CANNY_THRESH_1: int = 50
+CANNY_THRESH_2: int = 150
+EDGE_RATIO_THRESH: float = 0.05    # エッジ密度が5%以上なら車あり (地面は平坦)
 
 # ファイルパス設定
-TEMP_IMAGE_PATH_TEMPLATE = "/tmp/car_check_{}.jpg"
+TEMP_IMAGE_PATH_TEMPLATE: str = "/tmp/car_check_{}.jpg"
 
 # ==========================================
 # 2. ヘルパー関数 (画像処理・取得)
 # ==========================================
 
-def capture_snapshot(cam_conf: dict) -> str:
+def capture_snapshot(cam_conf: Dict[str, Any]) -> Optional[str]:
     """RTSP経由でカメラからスナップショットを取得する"""
     tmp_path = TEMP_IMAGE_PATH_TEMPLATE.format(cam_conf['id'])
     rtsp_url = f"rtsp://{cam_conf['user']}:{cam_conf['pass']}@{cam_conf['ip']}:{RTSP_PORT}/stream1"
@@ -71,9 +73,9 @@ def is_night_mode(hsv_img: np.ndarray) -> bool:
     saturation = hsv_img[:, :, 1]
     mean_sat = np.mean(saturation)
     # 彩度平均が15未満ならほぼモノクロ
-    return mean_sat < 15
+    return bool(mean_sat < 15)
 
-def analyze_night_mode(crop_img_bgr):
+def analyze_night_mode(crop_img_bgr: np.ndarray) -> Tuple[bool, str, float]:
     """
     夜間用のハイブリッド判定 (反射検知 + エッジ検知)
     Returns: (is_present, details_str, score)
@@ -92,13 +94,13 @@ def analyze_night_mode(crop_img_bgr):
 
     # 判定ロジック
     if bright_ratio >= BRIGHTNESS_RATIO_THRESH:
-        return True, "Night:Reflection", bright_ratio
+        return True, "Night:Reflection", float(bright_ratio)
     elif edge_ratio >= EDGE_RATIO_THRESH:
-        return True, "Night:Edge", edge_ratio
+        return True, "Night:Edge", float(edge_ratio)
     else:
-        return False, "Night:Clear", max(bright_ratio, edge_ratio)
+        return False, "Night:Clear", float(max(bright_ratio, edge_ratio))
 
-def analyze_car_presence(image_path: str):
+def analyze_car_presence(image_path: str) -> Tuple[Optional[bool], str, float]:
     """
     画像から車の有無を判定する (昼夜自動切替)
     Returns: (is_present, details_str, score)
@@ -126,9 +128,9 @@ def analyze_car_presence(image_path: str):
         logger.info(f"☀️ 昼間解析: 青色率={blue_ratio:.2%} (閾値{BLUE_PIXEL_THRESHOLD:.0%})")
         
         if blue_ratio >= BLUE_PIXEL_THRESHOLD:
-            return True, "Day:BlueColor", blue_ratio
+            return True, "Day:BlueColor", float(blue_ratio)
         else:
-            return False, "Day:Clear", blue_ratio
+            return False, "Day:Clear", float(blue_ratio)
 
     except Exception as e:
         logger.error(f"❌ 画像解析エラー: {e}")
@@ -138,20 +140,28 @@ def analyze_car_presence(image_path: str):
 # 3. データベース・ファイル操作
 # ==========================================
 
-def get_last_status_from_db():
+def get_last_status_from_db() -> Tuple[str, str]:
     """DBから直近の状態を取得"""
     try:
-        with sqlite3.connect(config.SQLITE_DB_PATH, timeout=10) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+        # common.get_db_cursor を使用
+        with common.get_db_cursor() as cursor:
+            if not cursor:
+                return "UNKNOWN", ""
+            
+            # Row Factoryを設定してカラム名アクセスを可能にする
+            cursor.connection.row_factory = sqlite3.Row
+            
             cursor.execute(f"SELECT action, timestamp FROM {config.SQLITE_TABLE_CAR} ORDER BY id DESC LIMIT 1")
             row = cursor.fetchone()
-            if row: return row["action"], row["timestamp"]
+            
+            if row:
+                return str(row["action"]), str(row["timestamp"])
+                
     except Exception as e:
         logger.error(f"❌ DB読み込みエラー: {e}")
     return "UNKNOWN", ""
 
-def save_evidence_image(src_path: str, action: str, details: str) -> str:
+def save_evidence_image(src_path: str, action: str, details: str) -> Optional[str]:
     """証拠画像を保存"""
     # ファイル名に詳細(Day/Night)を含める
     safe_details = details.replace(":", "-")
@@ -166,12 +176,14 @@ def save_evidence_image(src_path: str, action: str, details: str) -> str:
         logger.error(f"❌ 画像保存エラー: {e}")
         return None
 
-def record_result_to_db(action: str, details: str, score: float, image_path: str, has_status_changed: bool):
+def record_result_to_db(action: str, details: str, score: float, image_path: str, has_status_changed: bool) -> None:
     """DBに保存 (イベントログ & 防犯ログ)"""
     now_iso = common.get_now_iso()
     try:
-        with sqlite3.connect(config.SQLITE_DB_PATH, timeout=10) as conn:
-            cursor = conn.cursor()
+        # common.get_db_cursor(commit=True) を使用して一括コミット
+        with common.get_db_cursor(commit=True) as cursor:
+            if not cursor:
+                return
             
             # 1. イベントログ (変化時)
             if has_status_changed:
@@ -182,6 +194,7 @@ def record_result_to_db(action: str, details: str, score: float, image_path: str
                 logger.info(f"📝 イベント記録: {action} ({details})")
             
             # 2. 防犯ログ (画像付き)
+            # 画像移動処理はここで行う
             evidence_path = save_evidence_image(image_path, action, details)
             if evidence_path:
                 info_text = f"{action} (Score:{score:.1%}, {details})"
@@ -190,7 +203,7 @@ def record_result_to_db(action: str, details: str, score: float, image_path: str
                     VALUES (?, ?, ?, ?, ?)
                 """, (now_iso, "ParkingCamera", info_text, evidence_path, now_iso))
                 
-            conn.commit()
+            # commitはcontext managerが自動実行
 
     except Exception as e:
         logger.error(f"❌ DB書き込みエラー: {e}")
@@ -199,7 +212,7 @@ def record_result_to_db(action: str, details: str, score: float, image_path: str
 # 4. 通知ロジック
 # ==========================================
 
-def send_user_notification(action: str, score: float, details: str):
+def send_user_notification(action: str, score: float, details: str) -> None:
     """LINE/Discordへ通知"""
     # 判定理由によってメッセージを微調整
     reason_ja = "色判定"
@@ -234,8 +247,10 @@ def send_user_notification(action: str, score: float, details: str):
 # 5. メイン処理
 # ==========================================
 
-def main():
+def main() -> None:
     logger.info("🚀 車チェック開始 (Hybrid版)")
+    img_path: Optional[str] = None
+    
     try:
         target_cam = next((c for c in config.CAMERAS if c["id"] == TARGET_CAMERA_ID), None)
         if not target_cam:
@@ -250,7 +265,7 @@ def main():
         
         # エラー時は終了
         if is_present is None:
-            if os.path.exists(img_path): os.remove(img_path)
+            if img_path and os.path.exists(img_path): os.remove(img_path)
             return
 
         current_action = "RETURN" if is_present else "LEAVE"
@@ -267,13 +282,17 @@ def main():
                 if (datetime.now() - last_dt).total_seconds() > 3600:
                     should_save_log = True
                     logger.info("⏰ 定期記録タイミング")
-            except: pass
+            except Exception: pass
 
         # 4. 記録と通知
         if should_save_log:
             record_result_to_db(current_action, details, score, img_path, has_status_changed)
             if has_status_changed:
                 send_user_notification(current_action, score, details)
+            # 画像は record_result_to_db 内で move されるか、不要なら下記で削除される
+            # ただし move された場合、元のパスにはもうファイルがない
+            if os.path.exists(img_path):
+                os.remove(img_path)
         else:
             logger.info(f"✅ 変化なし: {current_action} ({details}) - 記録スキップ")
             if os.path.exists(img_path): os.remove(img_path)
@@ -281,6 +300,14 @@ def main():
     except Exception as e:
         logger.error(f"🔥 エラー発生: {e}\n{traceback.format_exc()}")
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"⚠️ 車検知エラー: {e}"}], target="discord")
+        
+    finally:
+        # 万が一残っていた場合のクリーンアップ
+        if img_path and os.path.exists(img_path):
+            try:
+                os.remove(img_path)
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     main()
