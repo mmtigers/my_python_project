@@ -11,11 +11,17 @@ from datetime import datetime, timedelta
 import pytz
 import traceback
 import importlib
+import logging
 import sys
 
 # 自作モジュール
 import config
 import common
+import train_service
+
+# === ロガー設定 ===
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # === ページ設定 ===
 st.set_page_config(
@@ -28,123 +34,226 @@ st.set_page_config(
 # 設定リロード
 importlib.reload(config)
 
-# === 🎨 デザイン・CSS定義 ===
-def get_custom_css():
-    return """
-    <style>
-        html, body, [class*="css"] { 
-            font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif; 
-        }
-        div[data-testid="stMetric"] {
-            background-color: #ffffff; padding: 15px; border-radius: 12px;
-            border: 1px solid #e0e0e0; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center;
-        }
-        div[data-testid="stMetricLabel"] { font-size: 0.9rem; color: #666; }
-        div[data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: bold; color: #2c3e50; }
-        
-        /* AIレポート (Expanderヘッダーの強調) */
-        .streamlit-expanderHeader {
-            font-weight: bold;
-            color: #0d47a1;
-            background-color: #f0f8ff;
-            border-radius: 5px;
-        }
-    </style>
-    """
-
-# === 🛠️ データ処理ロジック ===
-
-# 表示名の強制置換マップ
+# === 定数・設定 ===
 FRIENDLY_NAME_FIXES = {
     "リビング": "高砂のリビング",
     "１Fの洗面所": "高砂の洗面所",
     "居間": "伊丹のリビング",
-    "仕事部屋": "伊丹の書斎"
+    "仕事部屋": "伊丹の書斎",
+    "人感センサー": "高砂のトイレ(人感)" 
 }
 
+# === ヘルパー関数: データ処理 ===
+
 def get_db_connection():
+    """データベース接続を取得 (読み取り専用)"""
     return sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
 
+def process_dataframe(df):
+    """DataFrameのタイムスタンプを日本時間に変換し、表示名を適用する共通処理"""
+    if df.empty or 'timestamp' not in df.columns:
+        return df
+
+    # タイムゾーン変換
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    if df['timestamp'].dt.tz is None:
+        df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
+    else:
+        df['timestamp'] = df['timestamp'].dt.tz_convert('Asia/Tokyo')
+    
+    return df
+
 def apply_friendly_names(df):
-    """
-    デバイスIDから名称への変換に加え、指定の表示名へ置換を行う
-    """
+    """デバイスIDから表示名への変換と、特定の名称置換を行う"""
     if df.empty: return df
     
-    # 1. IDからconfig定義の名前へ変換
+    # config定義からのマッピング
     id_map = {d['id']: d.get('name', d['id']) for d in config.MONITOR_DEVICES}
     loc_map = {d['id']: d.get('location', 'その他') for d in config.MONITOR_DEVICES}
     
     df['friendly_name'] = df['device_id'].map(id_map).fillna(df['device_name'])
     df['location'] = df['device_id'].map(loc_map).fillna('その他')
     
-    # 2. 指定の表示名へ強制置換 (完全一致で置換)
+    # 強制置換
     df['friendly_name'] = df['friendly_name'].replace(FRIENDLY_NAME_FIXES)
     
     return df
 
 @st.cache_data(ttl=60)
-def load_generic_data(table_name, limit=500):
-    print(f"📥 [Dashboard] Loading {table_name}...")
+def load_data_from_db(query, date_column='timestamp'):
+    """汎用データロード関数"""
     try:
         conn = get_db_connection()
-        # テーブル存在確認
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        if not cur.fetchone():
-            conn.close()
-            return pd.DataFrame()
-
-        df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}", conn)
+        df = pd.read_sql_query(query, conn)
         conn.close()
         
-        if not df.empty and 'timestamp' in df.columns:
-            # タイムゾーン処理
-            df['timestamp'] = pd.to_datetime(df['timestamp'])
-            if df['timestamp'].dt.tz is None:
-                df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
-            else:
-                df['timestamp'] = df['timestamp'].dt.tz_convert('Asia/Tokyo')
+        # timestampカラムがある場合は日付処理を行う
+        if date_column in df.columns:
+            # カラム名を一時的にtimestampにして処理
+            if date_column != 'timestamp':
+                df.rename(columns={date_column: 'timestamp'}, inplace=True)
+            
+            df = process_dataframe(df)
+            
+            # 元に戻す（必要なら）
+            if date_column != 'timestamp':
+                df.rename(columns={'timestamp': date_column}, inplace=True)
+                
         return df
     except Exception as e:
-        print(f"❌ Error loading {table_name}: {e}")
+        logger.error(f"Data Load Error (Query: {query[:30]}...): {e}")
         return pd.DataFrame()
 
-@st.cache_data(ttl=60)
+# 個別のデータロード関数群
+def load_generic_data(table_name, limit=500):
+    query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
+    return load_data_from_db(query)
+
 def load_sensor_data(limit=5000):
-    print(f"📥 [Dashboard] Loading sensors (limit={limit})...")
+    query = f"SELECT * FROM {config.SQLITE_TABLE_SENSOR} ORDER BY timestamp DESC LIMIT {limit}"
+    df = load_data_from_db(query)
+    return apply_friendly_names(df)
+
+@st.cache_data(ttl=300)
+def load_calendar_sensor_data(days=35):
+    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    query = f"""
+        SELECT * FROM {config.SQLITE_TABLE_SENSOR} 
+        WHERE timestamp >= '{start_date}' 
+        AND (contact_state IN ('open', 'detected') OR movement_state = 'detected')
+    """
+    df = load_data_from_db(query)
+    return apply_friendly_names(df)
+
+@st.cache_data(ttl=300)
+def load_weather_history(days=40, location='伊丹'):
+    # weather_historyテーブルの存在確認は省略（エラー時は空DFが返るため）
+    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    query = f"""
+        SELECT date, min_temp, max_temp, weather_desc, umbrella_level 
+        FROM weather_history 
+        WHERE location = '{location}' AND date >= '{start_date}'
+    """
+    # weather_historyにはtimestampカラムがないため、process_dataframeは通さない
     try:
         conn = get_db_connection()
-        df = pd.read_sql_query(f"SELECT * FROM {config.SQLITE_TABLE_SENSOR} ORDER BY timestamp DESC LIMIT {limit}", conn)
+        df = pd.read_sql_query(query, conn)
         conn.close()
-        if df.empty: return df
-
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        if df['timestamp'].dt.tz is None:
-            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
-        else:
-            df['timestamp'] = df['timestamp'].dt.tz_convert('Asia/Tokyo')
-            
-        return apply_friendly_names(df)
+        return df
     except Exception as e:
-        print(f"❌ Error loading sensors: {e}")
+        logger.error(f"Weather Load Error: {e}")
         return pd.DataFrame()
+
+# --- 年間気温データ取得用関数 (新規追加) ---
+@st.cache_data(ttl=3600)
+def load_yearly_temperature_stats(year, location='伊丹'):
+    """指定年の外気温と室温(伊丹)の日次統計を取得"""
+    conn = get_db_connection()
+    try:
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+
+        # 1. 外気温データの取得
+        q_weather = f"""
+            SELECT date, max_temp as out_max, min_temp as out_min
+            FROM weather_history
+            WHERE location = '{location}' AND date >= '{start_date}' AND date <= '{end_date}'
+        """
+        df_weather = pd.read_sql_query(q_weather, conn)
+
+        # 2. 室温データの取得 (伊丹のデバイスを特定して集計)
+        # 伊丹のデバイスIDリストを作成
+        itami_ids = [d['id'] for d in config.MONITOR_DEVICES if d.get('location') == location]
+        if not itami_ids:
+            return df_weather # 室温データなしで返す
+
+        ids_str = "'" + "','".join(itami_ids) + "'"
+        
+        # SQLiteの日付関数で日ごとに集計 (タイムゾーン考慮のためsubstrで簡易処理)
+        # timestampはISO形式 'YYYY-MM-DDTHH:MM:SS...' 前提
+        q_sensor = f"""
+            SELECT 
+                substr(timestamp, 1, 10) as date,
+                MAX(temperature_celsius) as in_max,
+                MIN(temperature_celsius) as in_min
+            FROM {config.SQLITE_TABLE_SENSOR}
+            WHERE 
+                timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
+                AND device_id IN ({ids_str})
+                AND temperature_celsius IS NOT NULL
+            GROUP BY date
+        """
+        df_sensor = pd.read_sql_query(q_sensor, conn)
+
+        # 3. 結合
+        if df_weather.empty and df_sensor.empty:
+            return pd.DataFrame()
+        
+        if df_weather.empty:
+            df_merged = df_sensor
+        elif df_sensor.empty:
+            df_merged = df_weather
+        else:
+            df_merged = pd.merge(df_weather, df_sensor, on='date', how='outer')
+        
+        return df_merged.sort_values('date')
+
+    except Exception as e:
+        logger.error(f"Yearly Temp Load Error: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+
+@st.cache_data(ttl=3600)
+def load_ranking_dates(limit=3):
+    """ランキングが記録されている日付を新しい順に取得"""
+    conn = get_db_connection()
+    try:
+        # app_rankingsテーブルが存在するか確認
+        cur = conn.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
+        if not cur.fetchone():
+            return []
+            
+        query = f"SELECT DISTINCT date FROM app_rankings ORDER BY date DESC LIMIT {limit}"
+        df = pd.read_sql_query(query, conn)
+        return df['date'].tolist()
+    except Exception as e:
+        logger.error(f"Ranking Dates Load Error: {e}")
+        return []
+    finally:
+        conn.close()
+
+@st.cache_data(ttl=3600)
+def load_ranking_data(date_str, ranking_type):
+    """指定日・指定タイプのランキングを取得"""
+    conn = get_db_connection()
+    try:
+        query = f"""
+            SELECT rank, title, app_id 
+            FROM app_rankings 
+            WHERE date = '{date_str}' AND ranking_type = '{ranking_type}'
+            ORDER BY rank ASC
+        """
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        logger.error(f"Ranking Data Load Error: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
 
 def load_ai_report():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (config.SQLITE_TABLE_AI_REPORT,))
-        if not cur.fetchone(): return None
-        df = pd.read_sql_query(f"SELECT * FROM {config.SQLITE_TABLE_AI_REPORT} ORDER BY id DESC LIMIT 1", conn)
-        conn.close()
-        return df.iloc[0] if not df.empty else None
-    except: return None
+    query = f"SELECT * FROM {config.SQLITE_TABLE_AI_REPORT} ORDER BY id DESC LIMIT 1"
+    df = load_data_from_db(query)
+    return df.iloc[0] if not df.empty else None
 
 def calculate_monthly_cost_cumulative():
-    """今月の電気代累積値を計算 (積分法)"""
+    """今月の電気代概算"""
     try:
-        conn = get_db_connection()
         now = datetime.now(pytz.timezone('Asia/Tokyo'))
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
         
@@ -153,296 +262,617 @@ def calculate_monthly_cost_cumulative():
             WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
             ORDER BY timestamp ASC
         """
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        df = load_data_from_db(query)
         
         if df.empty: return 0
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        if df['timestamp'].dt.tz is None:
-            df['timestamp'] = df['timestamp'].dt.tz_localize('UTC').dt.tz_convert('Asia/Tokyo')
-        else:
-            df['timestamp'] = df['timestamp'].dt.tz_convert('Asia/Tokyo')
-
+        
         df['time_diff'] = df['timestamp'].diff().dt.total_seconds() / 3600
         df = df.dropna(subset=['time_diff'])
-        df = df[df['time_diff'] <= 1.0] # 1時間以上の欠測は除外
+        # 異常値除外 (1時間以上の欠落は無視)
+        df = df[df['time_diff'] <= 1.0]
         
         df['kwh'] = (df['power_watts'] / 1000) * df['time_diff']
+        # 概算単価 31円/kWh
         return int(df['kwh'].sum() * 31)
-    except: return 0
+    except Exception as e:
+        logger.error(f"Cost Calc Error: {e}")
+        return 0
 
-# === 🖥️ メイン表示ロジック ===
-def main():
-    st.markdown(get_custom_css(), unsafe_allow_html=True)
-    now = datetime.now(pytz.timezone('Asia/Tokyo'))
-    print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
+# === ロジック層: ステータス判定 ===
 
-    # 1. AI執事メッセージ (スマホ対策: Expander化)
-    report = load_ai_report()
-    if report is not None:
-        report_time = pd.to_datetime(report['timestamp']).tz_convert('Asia/Tokyo')
-        time_str = report_time.strftime('%H:%M')
-        
-        hour = report_time.hour
-        icon = "☀️" if 5 <= hour < 11 else ("🕛" if 11 <= hour < 17 else "🌙")
-        
-        with st.expander(f"{icon} 執事からの報告 ({time_str}) - タップして読む", expanded=False):
-            clean_msg = report['message'].replace('\n', '  \n') 
-            st.markdown(clean_msg)
-
-    # データロード
-    df_sensor = load_sensor_data(limit=10000)
-    df_poop = load_generic_data(config.SQLITE_TABLE_DEFECATION)
-    df_child = load_generic_data(config.SQLITE_TABLE_CHILD)
-    df_food = load_generic_data(config.SQLITE_TABLE_FOOD)
-    df_car = load_generic_data(config.SQLITE_TABLE_CAR)
+def get_takasago_status(df_sensor, now):
+    """高砂の実家のステータス判定"""
+    val = "⚪ データなし"
+    theme = "theme-gray"
     
-    # 防犯ログのロード (security_logsテーブル)
-    df_security_log = load_generic_data("security_logs", limit=100)
+    if df_sensor.empty: return val, theme
 
-    # 2. ステータスメトリクス
-    # 高砂
-    taka_msg = "⚪ データなし"
-    if not df_sensor.empty:
-        # 名称置換後でもlocationが正しくマッピングされている前提
-        df_taka = df_sensor[
-            (df_sensor['location']=='高砂') & 
-            (df_sensor['contact_state'].isin(['open','detected']))
-        ]
-        if not df_taka.empty:
-            last_active = df_taka.iloc[0]['timestamp']
-            diff_min = (now - last_active).total_seconds() / 60
-            if diff_min < 60: taka_msg = "🟢 元気 (1h以内)"
-            elif diff_min < 180: taka_msg = "🟡 静か (3h以内)"
-            else: taka_msg = f"🔴 {int(diff_min/60)}時間なし"
+    df_taka = df_sensor[
+        (df_sensor['location'] == '高砂') & 
+        (df_sensor['contact_state'].isin(['open', 'detected']))
+    ]
+    
+    if not df_taka.empty:
+        last_active = df_taka.iloc[0]['timestamp']
+        diff_min = (now - last_active).total_seconds() / 60
+        
+        if diff_min < 60:
+            val = "🟢 元気 (1h以内)"
+            theme = "theme-green"
+        elif diff_min < 180:
+            val = "🟡 静か (3h以内)"
+            theme = "theme-yellow"
+        else:
+            val = f"🔴 {int(diff_min/60)}時間 動きなし"
+            theme = "theme-red"
+            
+    return val, theme
 
-    # 伊丹
-    itami_msg = "⚪ データなし"
-    if not df_sensor.empty:
-        df_itami_motion = df_sensor[
+def get_itami_status(df_sensor, now):
+    """伊丹（自宅）のステータス判定"""
+    val = "⚪ データなし"
+    theme = "theme-gray"
+    
+    if df_sensor.empty: return val, theme
+
+    # 人感センサー優先
+    df_motion = df_sensor[
+        (df_sensor['location'] == '伊丹') & 
+        (df_sensor['device_type'].str.contains('Motion')) & 
+        (df_sensor['movement_state'] == 'detected')
+    ].sort_values('timestamp', ascending=False)
+    
+    if not df_motion.empty:
+        last_mov = df_motion.iloc[0]['timestamp']
+        diff_m = (now - last_mov).total_seconds() / 60
+        
+        if diff_m < 10:
+            val = "🟢 活動中 (今)"
+            theme = "theme-green"
+        elif diff_m < 60:
+            val = f"🟢 活動中 ({int(diff_m)}分前)"
+            theme = "theme-green"
+        else:
+            val = f"🟡 静か ({int(diff_m/60)}h前)"
+            theme = "theme-yellow"
+    else:
+        # 開閉センサー
+        df_contact = df_sensor[
             (df_sensor['location'] == '伊丹') & 
-            (df_sensor['device_type'].str.contains('Motion')) &
-            (df_sensor['movement_state'] == 'detected')
+            (df_sensor['contact_state'] == 'open')
         ].sort_values('timestamp', ascending=False)
         
-        if not df_itami_motion.empty:
-            last_mov = df_itami_motion.iloc[0]['timestamp']
-            diff_m = (now - last_mov).total_seconds() / 60
-            if diff_m < 10: itami_msg = "🟢 活動中 (今)"
-            elif diff_m < 60: itami_msg = f"🟢 {int(diff_m)}分前"
-            else: itami_msg = f"🟡 {int(diff_m/60)}時間動きなし"
-        else:
-            df_itami_contact = df_sensor[
-                (df_sensor['location'] == '伊丹') & 
-                (df_sensor['contact_state'] == 'open')
-            ].sort_values('timestamp', ascending=False)
-            if not df_itami_contact.empty:
-                last_c = df_itami_contact.iloc[0]['timestamp']
-                diff_c = (now - last_c).total_seconds() / 60
-                if diff_c < 60: itami_msg = f"🟢 {int(diff_c)}分前(ドア)"
+        if not df_contact.empty:
+            last_c = df_contact.iloc[0]['timestamp']
+            diff_c = (now - last_c).total_seconds() / 60
+            if diff_c < 60:
+                val = f"🟢 活動中 ({int(diff_c)}分前)"
+                theme = "theme-green"
+                
+    return val, theme
 
-    # 電気代
-    current_cost = calculate_monthly_cost_cumulative()
+def get_rice_status(df_sensor, now):
+    """炊飯器ステータス判定: その日の最大電力が500W超かで判定"""
+    # デフォルトは「ご飯なし」
+    val = "🍚 炊いてない"
+    theme = "theme-red"
+    
+    # 今日の日付文字列 (YYYY-MM-DD)
+    today_str = now.strftime('%Y-%m-%d')
+    
+    # DBから今日の炊飯器の最大電力を取得するクエリ
+    # device_name に '炊飯器' が含まれるレコードを対象
+    query = f"""
+        SELECT MAX(power_watts) as max_power 
+        FROM {config.SQLITE_TABLE_SENSOR} 
+        WHERE device_name LIKE '%炊飯器%' 
+        AND timestamp >= '{today_str}'
+    """
+    
+    # データを取得 (dashboard.py内のヘルパー関数を使用)
+    df_rice = load_data_from_db(query, date_column=None)
+    
+    if not df_rice.empty:
+        max_watts = df_rice.iloc[0]['max_power']
+        # max_watts はデータがない場合 None になるのでチェック
+        if max_watts is not None and max_watts >= 500:
+            val = "🍚 ご飯あり"
+            theme = "theme-green"
+            
+    return val, theme
 
-    # 車
-    car_msg = "🏠 在宅"
+def get_traffic_status():
+    """交通情報ステータス"""
+    jr_status = train_service.get_jr_traffic_status()
+    line_g = jr_status["宝塚線"]
+    line_a = jr_status["神戸線"]
+    
+    if line_g.get("is_suspended") or line_a.get("is_suspended"):
+        return "⛔ 運休発生 詳細を確認", "theme-red", line_g, line_a
+    elif line_g["is_delay"] or line_a["is_delay"]:
+        return "⚠️ 遅延あり 詳細を確認", "theme-yellow", line_g, line_a
+    else:
+        return "🟢 平常運転 (遅れなし)", "theme-green", line_g, line_a
+
+def get_car_status(df_car):
+    """車ステータス"""
+    val = "🏠 在宅"
+    theme = "theme-green"
     if not df_car.empty and df_car.iloc[0]['action'] == 'LEAVE':
-        car_msg = "🚗 外出中"
+        val = "🚗 外出中"
+        theme = "theme-yellow"
+    return val, theme
 
-    # カラム表示
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("👵 高砂 (実家)", taka_msg)
-    col2.metric("🏠 伊丹 (自宅)", itami_msg)
-    col3.metric("⚡ 電気代 (今月)", f"{current_cost:,} 円")
-    col4.metric("🚗 車 (伊丹)", car_msg)
+# === UI層: 描画コンポーネント ===
+
+def get_custom_css():
+    return """
+    <style>
+        html, body, [class*="css"] { 
+            font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif; 
+        }
+        .status-card {
+            padding: 15px 10px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            margin-bottom: 10px;
+            height: 100%;
+        }
+        .status-title {
+            font-size: 0.85rem; color: #555; margin-bottom: 8px; font-weight: bold; opacity: 0.8;
+        }
+        .status-value {
+            font-size: 1.2rem; font-weight: bold; line-height: 1.3; white-space: normal; 
+        }
+        .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .theme-yellow { background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }
+        .theme-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .theme-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+        .theme-gray { background-color: #f5f5f5; color: #757575; border: 1px solid #e0e0e0; }
+        
+        .route-card {
+            background-color: #fff; padding: 15px; border-radius: 10px; 
+            border: 1px solid #ddd; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .route-path {
+            margin-top: 15px; padding-top: 10px; border-top: 1px dashed #ccc; font-size: 0.95rem; color: #333;
+        }
+        .station-node { font-weight: bold; color: #000; }
+        .line-node { color: #666; font-size: 0.85rem; margin: 0 5px; }
+        .transfer-mark { color: #f57f17; font-weight:bold; margin: 0 5px; }
+        
+        .streamlit-expanderHeader {
+            font-weight: bold; color: #0d47a1; background-color: #f0f8ff; border-radius: 5px;
+        }
+    </style>
+    """
+
+def render_status_card_html(title, value, theme):
+    return f"""
+    <div class="status-card {theme}">
+        <div class="status-title">{title}</div>
+        <div class="status-value">{value}</div>
+    </div>
+    """
+
+def render_metrics_section(now, df_sensor, df_car):
+    """トップ画面のメトリクス（ステータスカード）を描画"""
+    # 各ステータス計算
+    taka_val, taka_theme = get_takasago_status(df_sensor, now)
+    itami_val, itami_theme = get_itami_status(df_sensor, now)
+    rice_val, rice_theme = get_rice_status(df_sensor, now)
+    traffic_val, traffic_theme, _, _ = get_traffic_status()
+    current_cost = calculate_monthly_cost_cumulative()
+    car_val, car_theme = get_car_status(df_car)
+    
+    # 描画
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    
+    with col1: st.markdown(render_status_card_html("👵 高砂 (実家)", taka_val, taka_theme), unsafe_allow_html=True)
+    with col2: st.markdown(render_status_card_html("🏠 伊丹 (自宅)", itami_val, itami_theme), unsafe_allow_html=True)
+    with col3: st.markdown(render_status_card_html("🍚 炊飯器", rice_val, rice_theme), unsafe_allow_html=True)
+    with col4: st.markdown(render_status_card_html("🚃 JR宝塚・神戸", traffic_val, traffic_theme), unsafe_allow_html=True)
+    with col5: st.markdown(render_status_card_html("💰 電気代", f"⚡ {current_cost:,} 円", "theme-blue"), unsafe_allow_html=True)
+    with col6: st.markdown(render_status_card_html("🚗 車 (伊丹)", car_val, car_theme), unsafe_allow_html=True)
 
     st.markdown("---")
 
-    # ==========================================
-    # 3. 機能別タブ
-    # ==========================================
-    tab_cal, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log = st.tabs([
-        "📅 カレンダー", "🖼️ 写真・防犯", "💰 電気・家電", 
-        "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ"
-    ])
+def render_calendar_tab(df_calendar_sensor, df_child, df_weather):
+    """カレンダータブの描画"""
+    calendar_events = []
+    
+    # 1. センサーイベント
+    if not df_calendar_sensor.empty:
+        df_calendar_sensor['date_str'] = df_calendar_sensor['timestamp'].dt.strftime('%Y-%m-%d')
+        for key, label, color in [('冷蔵庫', '🧊冷蔵庫', '#a8dadc'), ('トイレ', '🚽トイレ', '#ffccd5')]:
+            df_device = df_calendar_sensor[df_calendar_sensor['friendly_name'].str.contains(key, na=False)]
+            mask_contact = df_device['contact_state'].isin(['open', 'detected'])
+            mask_motion = df_device['movement_state'] == 'detected'
+            df_target = df_device[mask_contact | mask_motion]
+            if not df_target.empty:
+                counts = df_target.groupby('date_str').size()
+                for d_val, c_val in counts.items():
+                    calendar_events.append({"title": f"{label}: {c_val}回", "start": d_val, "color": color, "textColor": "#333", "allDay": True})
+    
+    # 2. 子供の体調
+    if not df_child.empty:
+        for _, row in df_child.iterrows():
+            if "元気" not in row['condition']:
+                calendar_events.append({"title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), "color": "#ffb703", "textColor": "#333"})
+    
+    # 3. 天気履歴
+    if not df_weather.empty:
+        for _, row in df_weather.iterrows():
+            desc = row['weather_desc']
+            w_icon = "🌤"
+            bg_color = "#f5f5f5"
+            
+            if "雨" in desc: 
+                w_icon = "☔"; bg_color = "#e3f2fd"
+            elif "晴" in desc:
+                w_icon = "☀"; bg_color = "#fff3e0"
+            elif "曇" in desc:
+                w_icon = "☁"
+            elif "雪" in desc:
+                w_icon = "⛄"
+            
+            w_title = f"{w_icon}{desc} {int(row['max_temp'])}/{int(row['min_temp'])}℃"
+            calendar_events.append({
+                "title": w_title, "start": row['date'], 
+                "backgroundColor": bg_color, "borderColor": "transparent", 
+                "textColor": "#444", "allDay": True
+            })
 
-    # Tab: カレンダー
-    with tab_cal:
-        calendar_events = []
-        if not df_sensor.empty:
-            df_sensor['date_str'] = df_sensor['timestamp'].dt.strftime('%Y-%m-%d')
-            for key, label, color in [('冷蔵庫', '🧊冷蔵庫', '#a8dadc'), ('トイレ', '🚽トイレ', '#ffccd5')]:
-                df_target = df_sensor[(df_sensor['friendly_name'].str.contains(key)) & (df_sensor['contact_state'].isin(['open','detected']))]
-                if not df_target.empty:
-                    counts = df_target.groupby('date_str').size()
-                    for d_val, c_val in counts.items():
-                        calendar_events.append({"title": f"{label}: {c_val}回", "start": d_val, "color": color, "textColor": "#333", "allDay": True})
-        if not df_child.empty:
-            for _, row in df_child.iterrows():
-                if "元気" not in row['condition']:
-                    calendar_events.append({"title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), "color": "#ffb703", "textColor": "#333"})
-        calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="cal_main")
+    calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="cal_main")
 
-    # Tab: 写真・防犯
-    with tab_photo:
-        st.subheader("🖼️ カメラ・ギャラリー")
-        img_dir = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
-        images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
-        if images:
-            cols_img = st.columns(4)
-            for i, p in enumerate(images[:4]):
-                cols_img[i].image(p, caption=os.path.basename(p), use_container_width=True)
-            with st.expander("📂 過去の写真"):
-                cols_past = st.columns(4)
-                for i, p in enumerate(images[4:20]):
-                    cols_past[i%4].image(p, caption=os.path.basename(p), use_container_width=True)
-        else: st.info("写真なし")
+def render_traffic_tab():
+    """交通情報タブの描画"""
+    st.subheader("🚃 JR宝塚線・神戸線 運行状況")
+    _, _, line_g, line_a = get_traffic_status()
+    
+    c_t1, c_t2 = st.columns(2)
+    
+    for col, line, name in [(c_t1, line_g, "JR 宝塚線"), (c_t2, line_a, "JR 神戸線")]:
+        bg_color = "#ffebee" if line["is_delay"] else "#e8f5e9"
+        status_color = "#d32f2f" if line["is_delay"] else "#2e7d32"
+        with col:
+            st.markdown(f"""
+            <div style="background-color:{bg_color}; padding:15px; border-radius:10px; border:1px solid #ccc;">
+                <h3 style="margin:0; color:#333;">{name}</h3>
+                <h2 style="margin:5px 0; color:{status_color};">{line['status']}</h2>
+                <p style="margin:0;">{line['detail']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    dep_time = (datetime.now() + timedelta(minutes=20)).strftime('%H:%M')
+    st.subheader(f"📍 ルート検索 ({dep_time} 出発想定)")
+    
+    col_out, col_in = st.columns(2)
+    _render_route_search(col_out, "伊丹(兵庫県)", "長岡京", "📤")
+    _render_route_search(col_in, "長岡京", "伊丹(兵庫県)", "📥")
+
+def _render_route_search(col, from_st, to_st, label_icon):
+    with col:
+        st.markdown(f"##### {label_icon} {from_st} → {to_st}")
+        data = train_service.get_route_info(from_st, to_st)
         
-        st.subheader("🛡️ 防犯ログ (検知分類)")
-        # 優先: security_logsテーブル (分類あり)
-        if not df_security_log.empty:
-            df_security_log = apply_friendly_names(df_security_log)
-            # 表示カラムの選定
-            cols = ['timestamp', 'friendly_name']
-            if 'classification' in df_security_log.columns:
-                cols.append('classification')
-            if 'image_path' in df_security_log.columns:
-                cols.append('image_path')
-            
-            # カラム名日本語化
-            df_disp = df_security_log[cols].copy()
-            df_disp.columns = [c.replace('timestamp', '検知時刻').replace('friendly_name', 'デバイス').replace('classification', '検知種別').replace('image_path', '画像') for c in df_disp.columns]
-            
-            st.dataframe(df_disp, use_container_width=True)
-            
-        # フォールバック: sensor_dataの侵入検知 (データがない場合のみ表示)
-        elif not df_sensor.empty:
-            df_sec = df_sensor[df_sensor['contact_state'] == 'intrusion']
-            if not df_sec.empty:
-                st.error("⚠️ 侵入検知あり (詳細分類なし)")
-                st.dataframe(df_sec[['timestamp', 'friendly_name', 'location']], use_container_width=True)
-            else:
-                st.info("不審な検知はありません")
+        if data["summary"] == "取得成功":
+            details_html = ""
+            if data.get("details"):
+                steps = []
+                for d in data["details"]:
+                    if "⬇️" in d: steps.append(f"<div class='line-node'>{d}</div>")
+                    elif "🔄" in d: steps.append(f"<div class='transfer-mark'>{d}</div>")
+                    else: steps.append(f"<div class='station-node'>{d}</div>")
+                details_html = f"<div class='route-path'>{''.join(steps)}</div>"
 
-    # Tab: 電気・家電
-    with tab_elec:
-        if not df_sensor.empty:
-            col_left, col_right = st.columns([1, 1])
-            
-            # 本日の範囲設定 (00:00:00 - 23:59:59)
-            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            today_end = today_start + timedelta(days=1)
-            yesterday_start = today_start - timedelta(days=1)
+            st.markdown(f"""
+            <div class="route-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{data['departure']}</span>
+                    <span style="color:#777;">➡</span>
+                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{data['arrival']}</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; color:#555; margin-bottom:5px;">
+                    <span>⏱️ <b>{data['duration']}</b></span>
+                    <span>💰 {data['cost']}</span>
+                </div>
+                <div style="font-size:0.9rem; color:#666;">
+                    <span>🔄 乗換: {data['transfer']}</span>
+                </div>
+                {details_html}
+            </div>
+            """, unsafe_allow_html=True)
+            if data["url"]:
+                st.link_button(f"🔗 Yahoo!路線情報で見る", data["url"])
+        else:
+            st.warning("ルート情報を取得できませんでした")
 
-            # --- スマートメーター (今日 vs 昨日) ---
-            with col_left:
-                st.subheader("⚡ 消費電力 (今日 vs 昨日)")
-                
-                df_today = df_sensor[
-                    (df_sensor['device_type'] == 'Nature Remo E Lite') & 
-                    (df_sensor['timestamp'] >= today_start) & (df_sensor['timestamp'] < today_end)
-                ].copy()
-                
-                df_yesterday = df_sensor[
-                    (df_sensor['device_type'] == 'Nature Remo E Lite') & 
-                    (df_sensor['timestamp'] >= yesterday_start) & (df_sensor['timestamp'] < today_start)
-                ].copy()
+def render_photos_tab(df_security_log):
+    """写真・防犯タブ"""
+    st.subheader("🖼️ カメラ・ギャラリー")
+    img_dir = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
+    images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
+    if images:
+        cols_img = st.columns(4)
+        for i, p in enumerate(images[:4]):
+            cols_img[i].image(p, caption=os.path.basename(p), use_container_width=True)
+        with st.expander("📂 過去の写真"):
+            cols_past = st.columns(4)
+            for i, p in enumerate(images[4:20]):
+                cols_past[i%4].image(p, caption=os.path.basename(p), use_container_width=True)
+    else: st.info("写真なし")
+    
+    st.subheader("🛡️ 防犯ログ (検知分類)")
+    if not df_security_log.empty:
+        df_security_log = apply_friendly_names(df_security_log)
+        cols = ['timestamp', 'friendly_name']
+        if 'classification' in df_security_log.columns: cols.append('classification')
+        if 'image_path' in df_security_log.columns: cols.append('image_path')
+        df_disp = df_security_log[cols].copy()
+        df_disp.columns = [c.replace('timestamp', '検知時刻').replace('friendly_name', 'デバイス').replace('classification', '検知種別').replace('image_path', '画像') for c in df_disp.columns]
+        st.dataframe(df_disp, use_container_width=True)
+    else:
+        st.info("不審な検知はありません")
 
-                if not df_today.empty or not df_yesterday.empty:
-                    fig = go.Figure()
-                    if not df_yesterday.empty:
-                        df_yesterday['plot_time'] = df_yesterday['timestamp'] + timedelta(days=1)
-                        fig.add_trace(go.Scatter(
-                            x=df_yesterday['plot_time'], y=df_yesterday['power_watts'],
-                            mode='lines', name='昨日', line=dict(color='#cccccc', width=2)
-                        ))
-                    if not df_today.empty:
-                        fig.add_trace(go.Scatter(
-                            x=df_today['timestamp'], y=df_today['power_watts'],
-                            mode='lines', name='今日', line=dict(color='#3366cc', width=3)
-                        ))
+def render_electricity_tab(df_sensor, now):
+    """電気・家電タブ"""
+    if df_sensor.empty:
+        st.info("データがありません")
+        return
 
-                    # X軸固定 (0-24時)
-                    fig.update_layout(
-                        xaxis_range=[today_start, today_end],
-                        xaxis_title="時間", yaxis_title="電力(W)",
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("データがありません")
-
-            # --- 個別家電 (24h) ---
-            with col_right:
-                st.subheader("🔌 個別家電 (直近24h)")
-                df_app = df_sensor[
-                    (df_sensor['device_type'].str.contains('Plug')) & 
-                    (df_sensor['timestamp'] >= now - timedelta(hours=24))
-                ]
-                if not df_app.empty:
-                    st.plotly_chart(px.line(df_app, x='timestamp', y='power_watts', color='friendly_name', title="プラグ計測値"), use_container_width=True)
-                else:
-                    st.info("プラグデータなし")
-            
-            # 【変更】電力シェア（円グラフ）は削除
-
-    # Tab: 室温
-    with tab_temp:
-        st.subheader("🌡️ 室温 (今日の推移)")
+    col_left, col_right = st.columns([1, 1])
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    yesterday_start = today_start - timedelta(days=1)
+    
+    with col_left:
+        st.subheader("⚡ 消費電力 (今日 vs 昨日)")
+        df_today = df_sensor[(df_sensor['device_type'] == 'Nature Remo E Lite') & (df_sensor['timestamp'] >= today_start) & (df_sensor['timestamp'] < today_end)].copy()
+        df_yesterday = df_sensor[(df_sensor['device_type'] == 'Nature Remo E Lite') & (df_sensor['timestamp'] >= yesterday_start) & (df_sensor['timestamp'] < today_start)].copy()
         
-        # 本日の範囲
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start + timedelta(days=1)
+        if not df_today.empty or not df_yesterday.empty:
+            fig = go.Figure()
+            if not df_yesterday.empty:
+                df_yesterday['plot_time'] = df_yesterday['timestamp'] + timedelta(days=1)
+                fig.add_trace(go.Scatter(x=df_yesterday['plot_time'], y=df_yesterday['power_watts'], mode='lines', name='昨日', line=dict(color='#cccccc', width=2)))
+            if not df_today.empty:
+                fig.add_trace(go.Scatter(x=df_today['timestamp'], y=df_today['power_watts'], mode='lines', name='今日', line=dict(color='#3366cc', width=3)))
+            fig.update_layout(xaxis_range=[today_start, today_end], xaxis_title="時間", yaxis_title="電力(W)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+            st.plotly_chart(fig, use_container_width=True)
+        else: st.info("データがありません")
         
-        df_temp = df_sensor[
-            (df_sensor['device_type'].str.contains('Meter')) & 
-            (df_sensor['timestamp'] >= today_start) & 
-            (df_sensor['timestamp'] < today_end)
-        ]
-        
+    with col_right:
+        st.subheader("🔌 個別家電 (今日)")
+        df_app = df_sensor[(df_sensor['device_type'].str.contains('Plug')) & (df_sensor['timestamp'] >= today_start) & (df_sensor['timestamp'] < today_end)]
+        if not df_app.empty:
+            fig_app = px.line(df_app, x='timestamp', y='power_watts', color='friendly_name', title="プラグ計測値")
+            fig_app.update_xaxes(range=[today_start, today_end])
+            st.plotly_chart(fig_app, use_container_width=True)
+        else: st.info("プラグデータなし")
+
+def render_temperature_tab(df_sensor, now):
+    # 今日の推移
+    st.subheader("🌡️ 室温・湿度 (今日の推移)")
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_end = today_start + timedelta(days=1)
+    df_temp = df_sensor[(df_sensor['device_type'].str.contains('Meter')) & (df_sensor['timestamp'] >= today_start) & (df_sensor['timestamp'] < today_end)]
+    
+    col1, col2 = st.columns(2)
+    with col1:
         if not df_temp.empty:
-            # 室温グラフ (横軸固定)
-            fig_t = px.line(df_temp, x='timestamp', y='temperature_celsius', color='friendly_name', title="温度 (℃)")
+            fig_t = px.line(df_temp, x='timestamp', y='temperature_celsius', color='friendly_name', title="室温 (℃)")
             fig_t.update_xaxes(range=[today_start, today_end]) 
             st.plotly_chart(fig_t, use_container_width=True)
+        else:
+            st.info("今日の室温データなし")
             
-            # 湿度グラフ (横軸固定)
-            st.subheader("💧 湿度 (今日の推移)")
+    with col2:
+        if not df_temp.empty:
             fig_h = px.line(df_temp, x='timestamp', y='humidity_percent', color='friendly_name', title="湿度 (%)")
             fig_h.update_xaxes(range=[today_start, today_end]) 
             st.plotly_chart(fig_h, use_container_width=True)
         else:
-            st.info("本日の温度データがまだありません")
+            st.info("今日の湿度データなし")
 
-    # Tab: 健康・食事
-    with tab_health:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("##### 🏥 子供")
-            if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
-        with c2:
-            st.markdown("##### 💩 排便")
-            if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
-        st.markdown("##### 🍽️ 食事")
-        if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
+    st.markdown("---")
 
-    # Tab: 高砂
-    with tab_taka:
-        if not df_sensor.empty:
-            st.subheader("👵 実家ログ")
-            st.dataframe(df_sensor[df_sensor['location']=='高砂'][['timestamp', 'friendly_name', 'contact_state']].head(50), use_container_width=True)
+    # 年間推移グラフの追加
+    st.subheader(f"📅 年間気温・室温推移 ({now.year}年)")
+    df_yearly = load_yearly_temperature_stats(now.year)
+    
+    if not df_yearly.empty:
+        fig = go.Figure()
 
-    # Tab: 全ログ
-    with tab_log:
-        if not df_sensor.empty:
-            locs = df_sensor['location'].unique()
-            sel = st.multiselect("場所", locs, default=locs)
-            st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
+        # 1. 最高気温(外)
+        if 'out_max' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['out_max'],
+                mode='lines', name='最高気温(外)',
+                line=dict(color='#ff5252', width=2)
+            ))
+            
+        # 2. 最低気温(外)
+        if 'out_min' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['out_min'],
+                mode='lines', name='最低気温(外)',
+                line=dict(color='#448aff', width=2)
+            ))
+
+        # 3. 最高室温(内) - 伊丹
+        if 'in_max' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['in_max'],
+                mode='lines', name='最高室温(内)',
+                line=dict(color='#ff9800', width=2, dash='dot') # オレンジ点線
+            ))
+
+        # 4. 最低室温(内) - 伊丹
+        if 'in_min' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['in_min'],
+                mode='lines', name='最低室温(内)',
+                line=dict(color='#00bcd4', width=2, dash='dot') # 水色点線
+            ))
+            
+        fig.update_layout(
+            xaxis_title="日付", yaxis_title="温度(℃)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("年間データがまだありません。")
+
+def render_health_tab(df_child, df_poop, df_food):
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### 🏥 子供")
+        if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
+    with c2:
+        st.markdown("##### 💩 排便")
+        if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
+    st.markdown("##### 🍽️ 食事")
+    if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
+
+def render_health_tab(df_child, df_poop, df_food):
+    """健康・食事タブ"""
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### 🏥 子供")
+        if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
+    with c2:
+        st.markdown("##### 💩 排便")
+        if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
+    st.markdown("##### 🍽️ 食事")
+    if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
+
+def render_takasago_tab(df_sensor):
+    """高砂詳細タブ"""
+    if not df_sensor.empty:
+        st.subheader("👵 実家ログ")
+        st.dataframe(df_sensor[df_sensor['location']=='高砂'][['timestamp', 'friendly_name', 'contact_state']].head(50), use_container_width=True)
+
+def render_logs_tab(df_sensor):
+    """全ログタブ"""
+    if not df_sensor.empty:
+        locs = df_sensor['location'].unique()
+        sel = st.multiselect("場所", locs, default=locs)
+        st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
+
+def render_trends_tab():
+    """最近の流行タブ: シンプルな時系列比較表示"""
+    st.title("🌟 最近の流行・トレンド推移")
+    st.caption("Google Playストアのランキング（最新3回分）を表示します")
+
+    # 利用可能な日付を取得 (新しい順に3つ)
+    dates = load_ranking_dates(limit=3)
+    if not dates:
+        st.info("データがありません。ランキング取得スクリプトを実行してください。")
+        return
+
+    # 表示用ヘルパー関数: 3カラム比較表示
+    def render_history_section(title, ranking_type):
+        st.subheader(title)
+        
+        # 必要な数だけカラムを作成
+        cols = st.columns(len(dates))
+        
+        for i, date_str in enumerate(dates):
+            with cols[i]:
+                # ヘッダー (今週/先週/先々週)
+                label = "今週" if i == 0 else ("先週" if i == 1 else "先々週")
+                st.markdown(f"**{label} ({date_str[5:]})**")
+                
+                # データ取得
+                df = load_ranking_data(date_str, ranking_type)
+                if df.empty:
+                    st.write("- データなし -")
+                    continue
+                
+                # リスト表示 (テキスト + リンク)
+                for _, row in df.iterrows():
+                    url = f"https://play.google.com/store/apps/details?id={row['app_id']}"
+                    # アプリ名が長い場合は省略する等の処理も可能だが、一旦そのまま
+                    st.markdown(f"{row['rank']}. [{row['title']}]({url})")
+
+    # 無料ランキング (流行)
+    render_history_section("🆓 無料トップ (流行)", "free")
+    
+    st.markdown("---")
+    
+    # 売上ランキング (人気)
+    render_history_section("💰 売上トップ (人気)", "grossing")
+
+
+# === メイン処理 ===
+
+def main():
+
+    # ★追加: サイドバーで手動更新可能にする
+    with st.sidebar:
+        st.header("設定")
+        if st.button("🔄 データを更新"):
+            st.cache_data.clear()
+            st.rerun()
+        st.markdown(get_custom_css(), unsafe_allow_html=True)
+        now = datetime.now(pytz.timezone('Asia/Tokyo'))
+        print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
+
+    try:
+        # CSS適用
+        st.markdown(get_custom_css(), unsafe_allow_html=True)
+        now = datetime.now(pytz.timezone('Asia/Tokyo'))
+        print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
+
+        # データ読み込み
+        df_sensor = load_sensor_data(limit=10000)
+        df_calendar_sensor = load_calendar_sensor_data(days=35)
+        df_weather = load_weather_history(days=40, location='伊丹')
+        df_poop = load_generic_data(config.SQLITE_TABLE_DEFECATION)
+        df_child = load_generic_data(config.SQLITE_TABLE_CHILD)
+        df_food = load_generic_data(config.SQLITE_TABLE_FOOD)
+        df_car = load_generic_data(config.SQLITE_TABLE_CAR)
+        df_security_log = load_generic_data("security_logs", limit=100)
+
+        # AIレポート表示
+        report = load_ai_report()
+        if report is not None:
+            report_time = pd.to_datetime(report['timestamp']).tz_convert('Asia/Tokyo')
+            time_str = report_time.strftime('%H:%M')
+            hour = report_time.hour
+            icon = "☀️" if 5 <= hour < 11 else ("🕛" if 11 <= hour < 17 else "🌙")
+            with st.expander(f"{icon} セバスチャンからの報告 ({time_str}) - タップして読む", expanded=False):
+                st.markdown(report['message'].replace('\n', '  \n'))
+
+        # メトリクス（ステータスカード）表示
+        render_metrics_section(now, df_sensor, df_car)
+
+        # タブ切り替え
+        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends = st.tabs([
+            "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
+            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行"
+        ])
+
+        with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
+        with tab_train: render_traffic_tab()
+        with tab_photo: render_photos_tab(df_security_log)
+        with tab_elec: render_electricity_tab(df_sensor, now)
+        with tab_temp: render_temperature_tab(df_sensor, now)
+        with tab_health: render_health_tab(df_child, df_poop, df_food)
+        with tab_taka: render_takasago_tab(df_sensor)
+        with tab_log: render_logs_tab(df_sensor)
+        with tab_trends: render_trends_tab()
+
+    except Exception as e:
+        err_msg = f"📉 Dashboard Error: {e}"
+        logger.error(err_msg)
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": err_msg}], target="discord", channel="error")
+        st.error("システムエラーが発生しました。ログを確認してください。")
+        st.code(traceback.format_exc())
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"📉 Dashboard Error: {e}"}], target="discord", channel="error")
-        st.error("システムエラーが発生しました")
-        st.code(traceback.format_exc())
+    main()
