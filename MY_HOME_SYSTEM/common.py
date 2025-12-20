@@ -151,7 +151,7 @@ def _send_line_push(user_id: str, messages: List[dict]) -> bool:
         logger.error(f"LINE接続エラー: {e}")
         return False
 
-def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = None, channel: str = "notify") -> bool:
+def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = "discord", channel: str = "notify") -> bool:
     """
     プッシュ通知送信の統合関数
     :param target: 'line' or 'discord'. Noneの場合はconfig.NOTIFICATION_TARGETを使用
