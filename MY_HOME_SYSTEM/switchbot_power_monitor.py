@@ -1,6 +1,10 @@
-# HOME_SYSTEM/switchbot_power_monitor.py
+# MY_HOME_SYSTEM/switchbot_power_monitor.py
 import requests
 import sys
+import logging
+from typing import Dict, Any, Optional, List, Union, Tuple
+
+# 自作モジュール
 import common
 import config
 import switchbot_get_device_list as sb_tool
@@ -8,17 +12,19 @@ import switchbot_get_device_list as sb_tool
 # ロガー設定
 logger = common.setup_logging("device_monitor")
 
-def insert_device_record(name, device_id, device_type, data):
+def insert_device_record(name: str, device_id: str, device_type: str, data: Dict[str, Any]) -> None:
     """
     デバイスのステータスをDBに記録する
     """
-    cols = ["timestamp", "device_name", "device_id", "device_type", 
-            "power_watts", "temperature_celsius", "humidity_percent", 
-            "contact_state", "movement_state", "brightness_state", "threshold_watts"]
+    cols: List[str] = [
+        "timestamp", "device_name", "device_id", "device_type", 
+        "power_watts", "temperature_celsius", "humidity_percent", 
+        "contact_state", "movement_state", "brightness_state", "threshold_watts"
+    ]
     
-    threshold = data.get('threshold')
+    threshold: Optional[float] = data.get('threshold')
     
-    vals = (
+    vals: Tuple[Any, ...] = (
         common.get_now_iso(), 
         name, 
         device_id, 
@@ -34,32 +40,36 @@ def insert_device_record(name, device_id, device_type, data):
     
     if common.save_log_generic(config.SQLITE_TABLE_SENSOR, cols, vals):
         # ログ出力用メッセージ作成
-        log_parts = []
-        if data.get('power') is not None: log_parts.append(f"{data['power']}W")
-        if data.get('temperature') is not None: log_parts.append(f"{data['temperature']}°C")
-        if data.get('contact'): log_parts.append(f"開閉:{data['contact']}")
-        if data.get('motion'): log_parts.append(f"動き:{data['motion']}")
+        log_parts: List[str] = []
+        if data.get('power') is not None: 
+            log_parts.append(f"{data['power']}W")
+        if data.get('temperature') is not None: 
+            log_parts.append(f"{data['temperature']}°C")
+        if data.get('contact'): 
+            log_parts.append(f"開閉:{data['contact']}")
+        if data.get('motion'): 
+            log_parts.append(f"動き:{data['motion']}")
         
         log_msg = ", ".join(log_parts) if log_parts else "No Data"
         logger.info(f"記録: {name} -> {log_msg}")
 
-def calculate_plug_power(body):
+def calculate_plug_power(body: Dict[str, Any]) -> float:
     """プラグの電力を計算する（0W補正付き）"""
-    watts = float(body.get('weight', 0))
+    watts: float = float(body.get('weight', 0))
     
     # 0Wの場合、電圧×電流で再計算（APIの仕様による補正）
     if watts == 0:
-        volts = float(body.get('voltage', 0))
+        volts: float = float(body.get('voltage', 0))
         # APIのelectricCurrentはmA単位の場合があるため Aに変換
-        amps = float(body.get('electricCurrent', 0)) / 1000.0
+        amps: float = float(body.get('electricCurrent', 0)) / 1000.0
         if volts > 0 and amps > 0:
             watts = volts * amps
             
     return round(watts, 1)
 
-def fetch_device_status(device_id, device_type):
+def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """APIからデバイスの状態を取得して辞書で返す"""
-    url = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
+    url: str = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
     try:
         headers = sb_tool.create_switchbot_auth_headers()
         res = requests.get(url, headers=headers, timeout=10)
@@ -69,8 +79,8 @@ def fetch_device_status(device_id, device_type):
             logger.warning(f"API Error [{device_id}]: {data}")
             return None
 
-        body = data.get('body', {})
-        result = {}
+        body: Dict[str, Any] = data.get('body', {})
+        result: Dict[str, Any] = {}
         
         # デバイスタイプ別のデータ抽出
         if "Plug" in device_type:
@@ -94,30 +104,37 @@ def fetch_device_status(device_id, device_type):
         logger.error(f"[{device_id}] ステータス取得失敗: {e}")
         return None
 
-def get_prev_power(device_id):
+def get_prev_power(device_id: str) -> float:
     """DBから前回の電力値を取得"""
+    # common.get_db_cursor を使用
     with common.get_db_cursor() as cur:
-        if not cur: return 0.0
+        if not cur: 
+            return 0.0
         try:
             sql = f"SELECT power_watts FROM {config.SQLITE_TABLE_SENSOR} WHERE device_id=? ORDER BY id DESC LIMIT 1"
             cur.execute(sql, (device_id,))
             row = cur.fetchone()
-            return row["power_watts"] if row and row["power_watts"] is not None else 0.0
+            # rowは辞書ライクなオブジェクト(sqlite3.Row)またはTupleの可能性があるが、
+            # commonの実装に依存。ここでは安全にアクセス
+            if row:
+                val = row["power_watts"] if isinstance(row, (dict, list)) or hasattr(row, "__getitem__") else row[0]
+                return float(val) if val is not None else 0.0
+            return 0.0
         except Exception:
             return 0.0
 
-def process_power_notification(name, device_id, current_power, settings, location):
+def process_power_notification(name: str, device_id: str, current_power: float, settings: Dict[str, Any], location: str) -> None:
     """電力に基づく通知判定を行う"""
-    threshold = settings.get("power_threshold_watts")
-    mode = settings.get("notify_mode", "LOG_ONLY")
+    threshold: Optional[float] = settings.get("power_threshold_watts")
+    mode: str = settings.get("notify_mode", "LOG_ONLY")
     # 設定でターゲット指定があれば優先、なければデフォルト
-    target = settings.get("target", config.NOTIFICATION_TARGET)
+    target: str = settings.get("target", config.NOTIFICATION_TARGET)
 
     if threshold is None or mode == "LOG_ONLY":
         return
 
-    prev_power = get_prev_power(device_id)
-    msg = None
+    prev_power: float = get_prev_power(device_id)
+    msg: Optional[str] = None
 
     # 通知ロジック
     if mode == "ON_START" and current_power >= threshold and prev_power < threshold:
@@ -135,7 +152,7 @@ def process_power_notification(name, device_id, current_power, settings, locatio
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target=target)
         logger.info(f"通知送信 ({target}): {name}")
 
-def main():
+def main() -> None:
     logger.info("=== 全デバイス定期チェック開始 ===")
     
     # デバイス名のキャッシュ更新
@@ -143,19 +160,24 @@ def main():
         logger.error("デバイスリストの取得に失敗したため中断します")
         sys.exit(1)
     
+    # config.MONITOR_DEVICES は List[Dict] を想定
     for s in config.MONITOR_DEVICES:
         try:
-            tid = s.get("id")
-            ttype = s.get("type")
-            tname = s.get("name") or sb_tool.get_device_name_by_id(tid) or "Unknown"
-            tloc = s.get("location", "家") # 場所を取得
+            tid: str = s.get("id", "")
+            ttype: str = s.get("type", "")
+            # IDから名前解決、失敗したらUnknown
+            tname: str = s.get("name") or sb_tool.get_device_name_by_id(tid) or "Unknown"
+            tloc: str = s.get("location", "家") # 場所を取得
             
+            if not tid or not ttype:
+                continue
+
             # データ取得
             data = fetch_device_status(tid, ttype)
             
             if data:
                 # 閾値情報の付与
-                notify_settings = s.get("notify_settings", {})
+                notify_settings: Dict[str, Any] = s.get("notify_settings", {})
                 data['threshold'] = notify_settings.get("power_threshold_watts")
                 
                 # DB記録
@@ -163,10 +185,10 @@ def main():
 
                 # プラグなら通知判定
                 if "Plug" in ttype and data.get('power') is not None:
-                    process_power_notification(tname, tid, data['power'], notify_settings, tloc)
+                    process_power_notification(tname, tid, float(data['power']), notify_settings, tloc)
                     
         except Exception as e:
-            logger.error(f"デバイス処理エラー [{tname}]: {e}")
+            logger.error(f"デバイス処理エラー [{s.get('name', 'Unknown')}]: {e}")
             continue
 
     logger.info("=== チェック完了 ===")
