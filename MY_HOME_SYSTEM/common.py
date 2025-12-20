@@ -152,12 +152,48 @@ def _send_line_push(user_id: str, messages: List[dict]) -> bool:
         return False
 
 def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = "discord", channel: str = "notify") -> bool:
-    """
-    プッシュ通知送信の統合関数
-    :param target: 'line' or 'discord'. Noneの場合はconfig.NOTIFICATION_TARGETを使用
+    """     
+    メッセージを送信するラッパー関数
+    - target='line': LINEに送信 (失敗時、429エラーならDiscordへフォールバック)
+    - target='discord': Discordに送信
     """
     if target is None:
         target = config.NOTIFICATION_TARGET
+    
+    if target.lower == 'line':
+        try:
+            # LINE送信ロジック (既存コードの想定)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"
+            }
+            data = {
+                "to": user_id,
+                "messages": messages
+            }
+            response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=data)
+            
+            # --- ここから修正 ---
+            # 429 (Too Many Requests) の場合、警告ログを出してDiscordへ転送
+            if response.status_code == 429:
+                logger.warning("LINE API limit reached (429). Falling back to Discord.")
+                # 再帰的にDiscord宛で呼び出す
+                return send_push(user_id, messages, target='discord', channel=channel)
+            
+            # その他のエラー
+            elif response.status_code != 200:
+                logger.error(f"LINE API Error: {response.status_code} {response.text}")
+                # 4xx, 5xxエラー時も、重要通知が漏れないようDiscordに送るのが安全（オプション）
+                return send_push(user_id, [{"type": "text", "text": f"⚠️ LINE送信失敗により転送:\n{messages[0].get('text', '')}"}], target='discord', channel='error')
+
+            return True
+            # --- ここまで修正 ---
+
+        except Exception as e:
+            logger.error(f"LINE send exception: {e}")
+            return False
+
+
 
     if target.lower() == "discord":
         return _send_discord_webhook(messages, image_data, channel)
