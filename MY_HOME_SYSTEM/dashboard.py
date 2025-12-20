@@ -145,39 +145,42 @@ def load_weather_history(days=40, location='伊丹'):
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def load_app_rankings(date_str=None):
-    """アプリランキングを取得"""
-    conn = None
+def load_ranking_dates(limit=3):
+    """ランキングが記録されている日付を新しい順に取得"""
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
-        # テーブル存在確認
+        # app_rankingsテーブルが存在するか確認
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
         if not cur.fetchone():
-            return pd.DataFrame()
-
-        if not date_str:
-            date_str = datetime.now().strftime('%Y-%m-%d')
-        
-        # 指定日のデータ
-        query = f"SELECT * FROM app_rankings WHERE date = '{date_str}' ORDER BY rank ASC"
+            return []
+            
+        query = f"SELECT DISTINCT date FROM app_rankings ORDER BY date DESC LIMIT {limit}"
         df = pd.read_sql_query(query, conn)
-        
-        # なければ最新日を取得
-        if df.empty:
-            q_latest = "SELECT date FROM app_rankings ORDER BY date DESC LIMIT 1"
-            latest_df = pd.read_sql_query(q_latest, conn)
-            if not latest_df.empty:
-                latest_date = latest_df.iloc[0]['date']
-                query = f"SELECT * FROM app_rankings WHERE date = '{latest_date}' ORDER BY rank ASC"
-                df = pd.read_sql_query(query, conn)
-        
-        return df
+        return df['date'].tolist()
     except Exception as e:
-        logger.error(f"App Ranking Load Error: {e}")
+        logger.error(f"Ranking Dates Load Error: {e}")
+        return []
+    finally:
+        conn.close()
+
+@st.cache_data(ttl=3600)
+def load_ranking_data(date_str, ranking_type):
+    """指定日・指定タイプのランキングを取得"""
+    conn = get_db_connection()
+    try:
+        query = f"""
+            SELECT rank, title, app_id 
+            FROM app_rankings 
+            WHERE date = '{date_str}' AND ranking_type = '{ranking_type}'
+            ORDER BY rank ASC
+        """
+        return pd.read_sql_query(query, conn)
+    except Exception as e:
+        logger.error(f"Ranking Data Load Error: {e}")
         return pd.DataFrame()
     finally:
-        if conn: conn.close()
+        conn.close()
 
 
 
@@ -633,52 +636,48 @@ def render_logs_tab(df_sensor):
         st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
 
 def render_trends_tab():
-    """最近の流行タブ"""
-    st.title("🌟 最近の流行・トレンド")
-    st.caption("Google Playストアのランキング情報を表示します")
+    """最近の流行タブ: シンプルな時系列比較表示"""
+    st.title("🌟 最近の流行・トレンド推移")
+    st.caption("Google Playストアのランキング（最新3回分）を表示します")
 
-    # セクション: アプリ
-    st.subheader("📱 スマホアプリ (人気/売上)")
-    df_apps = load_app_rankings()
-    
-    if df_apps.empty:
-        st.info("データがありません。ランキング取得を実行してください。")
+    # 利用可能な日付を取得 (新しい順に3つ)
+    dates = load_ranking_dates(limit=3)
+    if not dates:
+        st.info("データがありません。ランキング取得スクリプトを実行してください。")
         return
 
-    # 日付表示
-    recorded_date = df_apps.iloc[0]['date']
-    st.write(f"取得日: **{recorded_date}**")
-
-    col_free, col_gross = st.columns(2)
-    
-    def render_rank_list(col, title, r_type):
-        with col:
-            st.markdown(f"#### {title}")
-            target_df = df_apps[df_apps['ranking_type'] == r_type].sort_values('rank')
-            if target_df.empty:
-                st.warning("データなし")
-                return
-            
-            for _, row in target_df.iterrows():
-                # Score表示 (0.0の場合は非表示)
-                score_html = f'<div class="app-score">★{row["score"]:.1f}</div>' if row['score'] > 0 else ''
+    # 表示用ヘルパー関数: 3カラム比較表示
+    def render_history_section(title, ranking_type):
+        st.subheader(title)
+        
+        # 必要な数だけカラムを作成
+        cols = st.columns(len(dates))
+        
+        for i, date_str in enumerate(dates):
+            with cols[i]:
+                # ヘッダー (今週/先週/先々週)
+                label = "今週" if i == 0 else ("先週" if i == 1 else "先々週")
+                st.markdown(f"**{label} ({date_str[5:]})**")
                 
-                # HTMLでリスト表示
-                html = f"""
-                <div class="app-rank-item">
-                    <div class="app-rank-num">{row['rank']}</div>
-                    <img src="{row['icon_url']}" class="app-icon">
-                    <div class="app-info">
-                        <div class="app-title">{row['title']}</div>
-                        <div class="app-dev">{row['developer']}</div>
-                    </div>
-                    {score_html}
-                </div>
-                """
-                st.markdown(html, unsafe_allow_html=True)
+                # データ取得
+                df = load_ranking_data(date_str, ranking_type)
+                if df.empty:
+                    st.write("- データなし -")
+                    continue
+                
+                # リスト表示 (テキスト + リンク)
+                for _, row in df.iterrows():
+                    url = f"https://play.google.com/store/apps/details?id={row['app_id']}"
+                    # アプリ名が長い場合は省略する等の処理も可能だが、一旦そのまま
+                    st.markdown(f"{row['rank']}. [{row['title']}]({url})")
 
-    render_rank_list(col_free, "🆓 無料トップ (流行)", "free")
-    render_rank_list(col_gross, "💰 売上トップ (人気)", "grossing")
+    # 無料ランキング (流行)
+    render_history_section("🆓 無料トップ (流行)", "free")
+    
+    st.markdown("---")
+    
+    # 売上ランキング (人気)
+    render_history_section("💰 売上トップ (人気)", "grossing")
 
 
 # === メイン処理 ===
