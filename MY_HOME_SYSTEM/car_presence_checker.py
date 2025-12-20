@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import os
+import shutil
 import time
 import subprocess
 import sqlite3
@@ -159,7 +160,7 @@ def save_evidence_image(src_path: str, action: str, details: str) -> str:
     
     try:
         os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-        os.rename(src_path, dest_path)
+        shutil.move(src_path, dest_path)
         return f"security_logs/{filename}"
     except Exception as e:
         logger.error(f"❌ 画像保存エラー: {e}")
