@@ -3,11 +3,10 @@ import sqlite3
 import logging
 import argparse
 import time
+import requests
+import json
 from datetime import datetime, timedelta
 import pandas as pd
-
-# Google Play Scraper (searchを使用)
-from google_play_scraper import search as play_search
 
 # 自作モジュール
 import config
@@ -19,14 +18,17 @@ logger = logging.getLogger('AppRankingService')
 
 class AppRankingService:
     """
-    Google Playストアの情報を取得・保存・分析・通知するサービスクラス
-    ※ランキングAPIがないため、キーワード検索結果の上位をトレンドとして扱います。
+    アプリランキング情報を取得・保存・分析・通知するサービス
+    ※安定性確保のため、Apple App Storeの公式RSSフィードを使用します。
     """
     
     TABLE_NAME = "app_rankings"
-    FETCH_COUNT = 30  # 取得件数
-    COUNTRY = 'jp'
-    LANG = 'ja'
+    FETCH_COUNT = 50  # 取得件数
+    
+    # Apple RSS Feed (JSON形式)
+    # top-grossing(売上)は廃止されたため、top-paid(有料)を使用
+    URL_FREE = "https://rss.applemarketingtools.com/api/v2/jp/apps/top-free/50/apps.json"
+    URL_PAID = "https://rss.applemarketingtools.com/api/v2/jp/apps/top-paid/50/apps.json"
 
     def __init__(self):
         self._ensure_table_exists()
@@ -37,7 +39,7 @@ class AppRankingService:
         CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
-            ranking_type TEXT, -- 'free' (無料人気) or 'grossing' (売上人気)
+            ranking_type TEXT, -- 'free' or 'paid'
             rank INTEGER,
             app_id TEXT,
             title TEXT,
@@ -71,55 +73,72 @@ class AppRankingService:
             pass
 
     def fetch_and_save_rankings(self):
-        """トレンドアプリを取得してDBに保存"""
+        """ランキングフィードからデータを取得してDBに保存"""
         today_str = datetime.now().strftime('%Y-%m-%d')
-        logger.info(f"🚀 アプリトレンド取得開始: {today_str}")
+        logger.info(f"🚀 ランキング取得開始 (Source: Apple RSS): {today_str}")
         
-        # 1. 無料トップ相当 (キーワード検索: '無料 人気')
-        self._fetch_by_search(
-            "無料 人気 アプリ", 
+        # 1. 無料ランキング
+        self._fetch_rss(
+            self.URL_FREE, 
             "free", 
             today_str
         )
         
-        # API制限考慮のウェイト
-        time.sleep(2)
-
-        # 2. 売上トップ相当 (キーワード検索: '売上 人気 ゲーム')
-        self._fetch_by_search(
-            "売上 人気 ゲーム", 
-            "grossing", 
+        # 2. 有料ランキング
+        self._fetch_rss(
+            self.URL_PAID, 
+            "paid", 
             today_str
         )
         
         logger.info("✅ 全処理完了")
 
-    def _fetch_by_search(self, query, type_label, today_str):
-        """検索結果をランキングとして保存"""
+    def _fetch_rss(self, url, type_label, today_str):
+        """RSS(JSON)を取得してDBに保存"""
         conn = None
         try:
-            # 検索実行
-            logger.info(f"🔍 検索実行: '{query}'...")
-            results = play_search(
-                query,
-                lang=self.LANG,
-                country=self.COUNTRY
-            )
+            logger.info(f"🌍 データ取得中: {type_label}...")
             
-            # 件数を絞る
-            results = results[:self.FETCH_COUNT]
-            count = len(results)
+            res = requests.get(url, timeout=10)
+            res.raise_for_status()
+            
+            data = res.json()
+            results = data.get('feed', {}).get('results', [])
+            
+            apps = []
+            
+            for i, item in enumerate(results):
+                try:
+                    app_id = item.get('id')
+                    title = item.get('name')
+                    developer = item.get('artistName')
+                    icon_url = item.get('artworkUrl100') # 100x100アイコン
+                    
+                    if not title or not app_id:
+                        continue
+
+                    apps.append({
+                        "app_id": str(app_id),
+                        "title": title,
+                        "developer": developer,
+                        "icon_url": icon_url,
+                        "score": 0.0
+                    })
+                except Exception:
+                    continue
+            
+            count = len(apps)
             logger.info(f"👉 取得件数: {count}件")
 
             if count == 0:
-                logger.warning(f"検索結果が0件のため保存をスキップします ({query})")
+                logger.warning(f"データが見つかりませんでした ({type_label})")
                 return
-            
-            # DB保存 (明示的にConnect/Commit)
+
+            # DB保存
             conn = sqlite3.connect(config.SQLITE_DB_PATH)
             cursor = conn.cursor()
             
-            for i, app in enumerate(results):
+            for i, app in enumerate(apps):
                 rank = i + 1
                 sql = f"""
                 INSERT OR REPLACE INTO {self.TABLE_NAME}
@@ -130,23 +149,22 @@ class AppRankingService:
                     today_str,
                     type_label,
                     rank,
-                    app.get('appId'),
-                    app.get('title'),
-                    app.get('developer'),
-                    app.get('icon'),
-                    app.get('score'),
+                    app['app_id'],
+                    app['title'],
+                    app['developer'],
+                    app['icon_url'],
+                    app['score'],
                     common.get_now_iso()
                 )
                 cursor.execute(sql, vals)
             
-            conn.commit() # ★ここで確実に保存
-            logger.info(f"💾 DB保存完了: {type_label} {count}件")
-                    
+            conn.commit()
+            logger.info(f"💾 DB保存完了: {type_label}")
+
         except Exception as e:
-            self._handle_error(f"取得・保存エラー ({type_label}): {e}")
+            self._handle_error(f"RSS取得エラー ({type_label}): {e}")
         finally:
-            if conn:
-                conn.close()
+            if conn: conn.close()
 
     def analyze_and_notify(self, target="discord"):
         """前回との比較分析を行い通知する"""
@@ -207,18 +225,17 @@ class AppRankingService:
         merged = pd.merge(df_today_free, df_last_free, on='app_id', suffixes=('', '_last'))
         merged['rank_diff'] = merged['rank_last'] - merged['rank'] # プラスなら上昇
         up_apps = merged.sort_values('rank_diff', ascending=False).head(3)
-        # 少なくとも5ランク以上アップのみ対象
-        up_apps = up_apps[up_apps['rank_diff'] >= 5]
+        up_apps = up_apps[up_apps['rank_diff'] >= 3] # 3ランク以上アップ
 
         # --- メッセージ構築 ---
         msg = f"📱 **今週のアプリ流行チェック**\n"
         msg += f"({last_date_str[5:]} との比較)\n\n"
         
         msg += "奥様、今週も一週間お疲れ様でした🍵\n"
-        msg += "今話題になっているアプリの情報をまとめました✨\n\n"
+        msg += "App Storeの最新ランキング情報をまとめました✨\n\n"
 
         if not new_apps.empty:
-            msg += "**🆕 新しくランクイン！**\n"
+            msg += "**🆕 今週の初登場！**\n"
             for _, row in new_apps.iterrows():
                 msg += f"・{row['rank']}位: **{row['title']}**\n"
             msg += "\n"
@@ -227,17 +244,17 @@ class AppRankingService:
             msg += "**🔥 人気急上昇！**\n"
             for _, row in up_apps.iterrows():
                 diff = int(row['rank_diff'])
-                msg += f"・{row['title']} (⬆️{diff}ランクUP!)\n"
+                msg += f"・{row['title']} (⬆️{diff}UP)\n"
             msg += "\n"
         
         # トップ3
-        msg += "**👑 今週の無料人気トップ3**\n"
+        msg += "**👑 今週の無料トップ3**\n"
         top3 = df_today_free.sort_values('rank').head(3)
         for _, row in top3.iterrows():
             medal = ['🥇','🥈','🥉'][row['rank']-1]
             msg += f"{medal} {row['title']}\n"
             
-        msg += "\n気になるものがあれば、ダッシュボードの「🌟最近の流行」タブで詳細をご覧くださいね😊"
+        msg += "\n詳細はダッシュボードの「🌟最近の流行」タブでご覧ください😊"
         
         return msg
 
@@ -246,13 +263,13 @@ class AppRankingService:
         df_free = df_today[df_today['ranking_type'] == 'free'].sort_values('rank').head(5)
         
         msg = "📱 **アプリ流行チェック (初回)**\n\n"
-        msg += "奥様、Google Playストアのランキング記録を開始しました✨\n"
-        msg += "現在の「無料人気」トップ5はこちらです：\n\n"
+        msg += "奥様、アプリランキングの記録を開始しました✨\n"
+        msg += "現在の「無料トップ5」はこちらです：\n\n"
         
         for _, row in df_free.iterrows():
             msg += f"{row['rank']}位: **{row['title']}**\n"
             
-        msg += "\n来週からは、順位の変動や急上昇アプリをお知らせしますね！"
+        msg += "\n来週からは、順位の変動をお知らせしますね！"
         self._send_notification(msg, target)
 
     def _send_notification(self, message, target):
@@ -276,7 +293,7 @@ if __name__ == "__main__":
     
     if args.mode == 'fetch':
         service.fetch_and_save_rankings()
-        if datetime.now().weekday() == 4: # 金曜日
+        if datetime.now().weekday() == 4:
             service.analyze_and_notify(target=args.target)
     
     elif args.mode == 'analyze':
