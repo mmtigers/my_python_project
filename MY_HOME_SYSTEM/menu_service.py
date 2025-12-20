@@ -1,8 +1,13 @@
-import sqlite3
+# MY_HOME_SYSTEM/menu_service.py
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
+import sqlite3
+
+# 自作モジュール
+import common
+import config
 
 # ログ設定
 logger = logging.getLogger('MenuService')
@@ -14,33 +19,30 @@ class MenuService:
     - 特別な日（給料日、ボーナス日）の判定
     """
     
-    DB_NAME = "home_system.db"
-    
     # 特別な日の定義
-    PAYDAY_DAY = 25
-    BONUS_DATES = [(6, 10), (12, 10)] # (月, 日)
+    PAYDAY_DAY: int = 25
+    BONUS_DATES: List[Tuple[int, int]] = [(6, 10), (12, 10)] # (月, 日)
 
-    def __init__(self):
-        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+    def __init__(self) -> None:
+        # DB初期化は common モジュール経由で行うため、パスの計算は不要になった
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         """food_recordsテーブルの初期化（存在しない場合のみ作成）"""
-        db_path = os.path.join(self.base_dir, self.DB_NAME)
-        try:
-            with sqlite3.connect(db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS food_records (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        date TEXT,  -- YYYY-MM-DD
-                        menu TEXT,
-                        created_at TEXT
-                    )
-                ''')
-                conn.commit()
-        except Exception as e:
-            logger.error(f"❌ DB初期化エラー: {e}")
+        # common.get_db_cursor を使用してリソース管理を委譲
+        with common.get_db_cursor(commit=True) as cursor:
+            if cursor:
+                try:
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS food_records (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            date TEXT,  -- YYYY-MM-DD
+                            menu TEXT,
+                            created_at TEXT
+                        )
+                    ''')
+                except Exception as e:
+                    logger.error(f"❌ DB初期化エラー: {e}")
 
     def get_recent_menus(self, days: int = 7) -> List[str]:
         """
@@ -52,19 +54,21 @@ class MenuService:
         Returns:
             List[str]: "YYYY-MM-DD: メニュー名" のリスト
         """
-        db_path = os.path.join(self.base_dir, self.DB_NAME)
         try:
             target_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
             
-            with sqlite3.connect(db_path) as conn:
-                cursor = conn.cursor()
+            # 読み取り専用でカーソル取得
+            with common.get_db_cursor() as cursor:
+                if not cursor:
+                    return []
+
                 cursor.execute(
                     "SELECT date, menu FROM food_records WHERE date >= ? ORDER BY date DESC", 
                     (target_date,)
                 )
                 rows = cursor.fetchall()
                 
-            return [f"{r[0]}: {r[1]}" for r in rows]
+            return [f"{r['date']}: {r['menu']}" for r in rows]
             
         except Exception as e:
             logger.error(f"❌ メニュー履歴取得エラー: {e}")
@@ -81,7 +85,7 @@ class MenuService:
         month = today.month
         day = today.day
         
-        special_messages = []
+        special_messages: List[str] = []
 
         # 給料日判定
         if day == self.PAYDAY_DAY:
