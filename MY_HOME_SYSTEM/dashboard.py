@@ -144,6 +144,68 @@ def load_weather_history(days=40, location='伊丹'):
         logger.error(f"Weather Load Error: {e}")
         return pd.DataFrame()
 
+# --- 年間気温データ取得用関数 (新規追加) ---
+@st.cache_data(ttl=3600)
+def load_yearly_temperature_stats(year, location='伊丹'):
+    """指定年の外気温と室温(伊丹)の日次統計を取得"""
+    conn = get_db_connection()
+    try:
+        start_date = f"{year}-01-01"
+        end_date = f"{year}-12-31"
+
+        # 1. 外気温データの取得
+        q_weather = f"""
+            SELECT date, max_temp as out_max, min_temp as out_min
+            FROM weather_history
+            WHERE location = '{location}' AND date >= '{start_date}' AND date <= '{end_date}'
+        """
+        df_weather = pd.read_sql_query(q_weather, conn)
+
+        # 2. 室温データの取得 (伊丹のデバイスを特定して集計)
+        # 伊丹のデバイスIDリストを作成
+        itami_ids = [d['id'] for d in config.MONITOR_DEVICES if d.get('location') == location]
+        if not itami_ids:
+            return df_weather # 室温データなしで返す
+
+        ids_str = "'" + "','".join(itami_ids) + "'"
+        
+        # SQLiteの日付関数で日ごとに集計 (タイムゾーン考慮のためsubstrで簡易処理)
+        # timestampはISO形式 'YYYY-MM-DDTHH:MM:SS...' 前提
+        q_sensor = f"""
+            SELECT 
+                substr(timestamp, 1, 10) as date,
+                MAX(temperature_celsius) as in_max,
+                MIN(temperature_celsius) as in_min
+            FROM {config.SQLITE_TABLE_SENSOR}
+            WHERE 
+                timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
+                AND device_id IN ({ids_str})
+                AND temperature_celsius IS NOT NULL
+            GROUP BY date
+        """
+        df_sensor = pd.read_sql_query(q_sensor, conn)
+
+        # 3. 結合
+        if df_weather.empty and df_sensor.empty:
+            return pd.DataFrame()
+        
+        if df_weather.empty:
+            df_merged = df_sensor
+        elif df_sensor.empty:
+            df_merged = df_weather
+        else:
+            df_merged = pd.merge(df_weather, df_sensor, on='date', how='outer')
+        
+        return df_merged.sort_values('date')
+
+    except Exception as e:
+        logger.error(f"Yearly Temp Load Error: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+
 @st.cache_data(ttl=3600)
 def load_ranking_dates(limit=3):
     """ランキングが記録されている日付を新しい順に取得"""
@@ -592,23 +654,89 @@ def render_electricity_tab(df_sensor, now):
         else: st.info("プラグデータなし")
 
 def render_temperature_tab(df_sensor, now):
-    """室温・環境タブ"""
-    st.subheader("🌡️ 室温 (今日の推移)")
+    # 今日の推移
+    st.subheader("🌡️ 室温・湿度 (今日の推移)")
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
-    
     df_temp = df_sensor[(df_sensor['device_type'].str.contains('Meter')) & (df_sensor['timestamp'] >= today_start) & (df_sensor['timestamp'] < today_end)]
     
-    if not df_temp.empty:
-        fig_t = px.line(df_temp, x='timestamp', y='temperature_celsius', color='friendly_name', title="温度 (℃)")
-        fig_t.update_xaxes(range=[today_start, today_end]) 
-        st.plotly_chart(fig_t, use_container_width=True)
-        
-        st.subheader("💧 湿度 (今日の推移)")
-        fig_h = px.line(df_temp, x='timestamp', y='humidity_percent', color='friendly_name', title="湿度 (%)")
-        fig_h.update_xaxes(range=[today_start, today_end]) 
-        st.plotly_chart(fig_h, use_container_width=True)
-    else: st.info("本日の温度データがまだありません")
+    col1, col2 = st.columns(2)
+    with col1:
+        if not df_temp.empty:
+            fig_t = px.line(df_temp, x='timestamp', y='temperature_celsius', color='friendly_name', title="室温 (℃)")
+            fig_t.update_xaxes(range=[today_start, today_end]) 
+            st.plotly_chart(fig_t, use_container_width=True)
+        else:
+            st.info("今日の室温データなし")
+            
+    with col2:
+        if not df_temp.empty:
+            fig_h = px.line(df_temp, x='timestamp', y='humidity_percent', color='friendly_name', title="湿度 (%)")
+            fig_h.update_xaxes(range=[today_start, today_end]) 
+            st.plotly_chart(fig_h, use_container_width=True)
+        else:
+            st.info("今日の湿度データなし")
+
+    st.markdown("---")
+
+    # 年間推移グラフの追加
+    st.subheader(f"📅 年間気温・室温推移 ({now.year}年)")
+    df_yearly = load_yearly_temperature_stats(now.year)
+    
+    if not df_yearly.empty:
+        fig = go.Figure()
+
+        # 1. 最高気温(外)
+        if 'out_max' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['out_max'],
+                mode='lines', name='最高気温(外)',
+                line=dict(color='#ff5252', width=2)
+            ))
+            
+        # 2. 最低気温(外)
+        if 'out_min' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['out_min'],
+                mode='lines', name='最低気温(外)',
+                line=dict(color='#448aff', width=2)
+            ))
+
+        # 3. 最高室温(内) - 伊丹
+        if 'in_max' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['in_max'],
+                mode='lines', name='最高室温(内)',
+                line=dict(color='#ff9800', width=2, dash='dot') # オレンジ点線
+            ))
+
+        # 4. 最低室温(内) - 伊丹
+        if 'in_min' in df_yearly.columns:
+            fig.add_trace(go.Scatter(
+                x=df_yearly['date'], y=df_yearly['in_min'],
+                mode='lines', name='最低室温(内)',
+                line=dict(color='#00bcd4', width=2, dash='dot') # 水色点線
+            ))
+            
+        fig.update_layout(
+            xaxis_title="日付", yaxis_title="温度(℃)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            hovermode="x unified"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("年間データがまだありません。")
+
+def render_health_tab(df_child, df_poop, df_food):
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("##### 🏥 子供")
+        if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
+    with c2:
+        st.markdown("##### 💩 排便")
+        if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
+    st.markdown("##### 🍽️ 食事")
+    if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
 
 def render_health_tab(df_child, df_poop, df_food):
     """健康・食事タブ"""
