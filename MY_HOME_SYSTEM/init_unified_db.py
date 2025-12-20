@@ -84,6 +84,33 @@ def init_db():
         timestamp DATETIME NOT NULL
     )''')
 
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS weather_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT UNIQUE,       -- YYYY-MM-DD
+            min_temp REAL,          -- 最低気温
+            max_temp REAL,          -- 最高気温
+            weather_desc TEXT,      -- 天気記述
+            recorded_at TEXT
+        )
+    ''')
+    logger.info("✅ weather_history テーブル準備完了")
+    
+    # 2. 防犯ログテーブル (ダッシュボード表示用)
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS security_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            device_name TEXT,
+            classification TEXT,    -- person, vehicle, intrusion
+            image_path TEXT,        -- 画像ファイルのパス
+            recorded_at TEXT
+        )
+    ''')
+    logger.info("✅ security_logs テーブル準備完了")
+
+
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")
