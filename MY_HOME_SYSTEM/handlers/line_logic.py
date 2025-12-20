@@ -2,6 +2,7 @@
 import common
 import config
 from linebot.models import MessageEvent, TextMessage, SourceGroup, SourceUser
+import handlers.ai_logic as ai_logic
 
 # ユーザーの状態管理 (入力待ちなど)
 # {user_id: "state_category"}
@@ -144,13 +145,18 @@ def process_message(event, line_bot_api):
         return
     
     # トリガーワード検知 (お腹系)
-    if any(w in msg for w in ["うんち", "排便", "トイレ", "お腹", "下痢", "便秘"]):
-         common.send_push(config.LINE_USER_ID, [
-             {"type": "text", "text": "🚽 [Discord通知テスト]\nお腹の調子はどうですか？\n記録形式: 「お腹記録_排便_バナナ」"}
-         ], target="discord")
-         return
+    # ↓ この既存ロジックは AIの方が賢いので削除またはコメントアウトしても良いですが、
+    #   念のため残しておき、AIが処理しなかった場合のバックアップにすることも可能です。
+    #   今回は「AIに任せる」ため、ここに来る前にAI処理を挟みます。
 
-    # --- おはよう挨拶 ---
+    # === 3. AI自然言語処理 (ここを追加！) ===
+    # 既存のコマンドに当てはまらなかった場合、Geminiに解析させる
+    
+    # 短すぎる挨拶などはOHAYOロジックに任せるため、ある程度の長さか、特定キーワードがある場合
+    # または「AIにお任せ」スタイルなら、すべてのメッセージを投げても良いですが、
+    # APIコストとレスポンス速度を考慮し、「コマンド以外」かつ「挨拶以外」で回すのが賢明です。
+    
+    # 先に「おはよう」チェックを行う (既存ロジック)
     if len(msg) <= config.MESSAGE_LENGTH_LIMIT:
         kw = next((k for k in config.OHAYO_KEYWORDS if k in msg.lower()), None)
         if kw:
@@ -158,6 +164,24 @@ def process_message(event, line_bot_api):
                 ["user_id", "user_name", "message", "timestamp", "recognized_keyword"], 
                 (user_id, user_name, msg, common.get_now_iso(), kw))
             common.logger.info(f"[OHAYO] {user_name} -> {msg}")
+            # おはようの場合はここで終了（AIには投げない）
+            return
+
+    # ここでAI呼び出し！
+    common.logger.info(f"🤖 AI解析へ: {msg}")
+    ai_response = ai_logic.analyze_text_and_execute(msg, user_id, user_name)
+    
+    if ai_response:
+        # AIが何かを処理した、または雑談を返した場合はそれを返信
+        common.send_reply(reply_token, [{"type": "text", "text": ai_response}])
+        return
+
+    # AIも反応しなかった場合（エラーや該当なし）、従来のお腹トリガーなどへ
+    if any(w in msg for w in ["うんち", "排便", "トイレ", "お腹", "下痢", "便秘"]):
+         common.send_push(config.LINE_USER_ID, [
+             {"type": "text", "text": "🚽 [Discord通知]\nお腹の調子はどうですか？\n記録なら「うんち出た」のように教えてね。"}
+         ], target="discord")
+         return 
 
 
 def ask_outing_question(token, food_rec):
