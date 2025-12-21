@@ -24,10 +24,13 @@ def get_ngrok_url_with_retry(max_retries=20, delay=3):
             
             for t in tunnels:
                 if t.get("proto") == "https":
-                    url = t.get("public_url")
-                    if url:
-                        logger.info(f"✅ FOUND: ngrok URL取得成功 ({i+1}回目): {url}")
-                        return url
+                    # ★追加: 接続先がポート8000 (サーバー) であるか確認
+                    addr = t.get("config", {}).get("addr", "")
+                    if "8000" in addr:
+                        url = t.get("public_url")
+                        if url:
+                            logger.info(f"✅ FOUND: サーバー用URLを発見 ({i+1}回目): {url}")
+                            return url
         except Exception:
             # 接続できない＝まだ起動していないとみなす
             pass
