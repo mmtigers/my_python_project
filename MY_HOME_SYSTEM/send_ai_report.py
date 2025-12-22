@@ -8,6 +8,8 @@ import argparse
 import sys
 from datetime import datetime
 import pytz
+from PIL import Image
+import camera_digest_service
 
 # 各種サービスのインポート
 from weather_service import WeatherService
@@ -130,6 +132,17 @@ def fetch_daily_data():
         except Exception as e:
             logger.error(f"メニュー情報取得失敗: {e}")
 
+
+    # 9. カメラ画像 (機能追加)
+    print("📷 [Data Fetching] Camera Images...")
+    try:
+        # 画像パスのリストを取得 (最大8枚程度にしておく)
+        data['camera_images_paths'] = camera_digest_service.get_todays_highlight_images(limit=8)
+    except Exception as e:
+        logger.error(f"カメラ画像収集失敗: {e}")
+        data['camera_images_paths'] = []
+
+
     return data
 
 def get_time_context(hour):
@@ -221,9 +234,49 @@ def build_system_prompt(data):
 
 def generate_report(model, data):
     print("🧠 [AI Thinking] 生成中...")
+    
     prompt = build_system_prompt(data)
-    response = model.generate_content(prompt)
-    return response.text.strip()
+    
+    # 画像ロード
+    content_parts = [prompt]
+    
+    image_paths = data.get('camera_images_paths', [])
+    images_loaded = []
+    
+    if image_paths:
+        print(f"   🖼️ {len(image_paths)}枚の画像をAIに送信します...")
+        for path in image_paths:
+            try:
+                img = Image.open(path)
+                images_loaded.append(img)
+                content_parts.append(img)
+            except Exception as e:
+                logger.error(f"画像ロード失敗 ({path}): {e}")
+
+    # 画像がある場合はシステムプロンプトに指示を追加
+    if images_loaded:
+        # プロンプトの末尾に画像に関する指示を追記
+        content_parts[0] += """
+        
+        【追加指示：カメラ画像の解析】
+        添付された画像は、今日一日の自宅周辺の防犯カメラ映像（ダイジェスト）です。
+        これらの画像を見て、以下の点についてレポートに「📷 防犯カメラハイライト」というセクションを作って簡潔に報告してください。
+        
+        1. **何が写っているか**: 人（家族や配達員）、車、または特筆すべき変化。
+        2. **雰囲気**: 穏やかだったか、出入りが多かったか。
+        3. **注意点**: 不審な点があれば（なければ「特に異常はありませんでした」と報告）。
+        
+        ※ 画像がない、または何も写っていない場合は「特に大きな動きはありませんでした」としてください。
+        """
+
+    try:
+        # 画像付きでgenerate_contentを呼ぶ
+        response = model.generate_content(content_parts)
+        return response.text.strip()
+    finally:
+        # メモリ解放のため閉じる
+        for img in images_loaded:
+            img.close()
 
 def save_report_to_db(message):
     return common.save_log_generic(
