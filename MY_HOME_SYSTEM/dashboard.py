@@ -13,6 +13,9 @@ import traceback
 import importlib
 import logging
 import sys
+import shutil
+import subprocess
+import requests
 
 # 自作モジュール
 import config
@@ -113,6 +116,71 @@ def load_sensor_data(limit=5000):
     query = f"SELECT * FROM {config.SQLITE_TABLE_SENSOR} ORDER BY timestamp DESC LIMIT {limit}"
     df = load_data_from_db(query)
     return apply_friendly_names(df)
+
+def get_ngrok_url():
+    """ngrokの現在の公開URLを取得する"""
+    try:
+        res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            # サーバー用(8000)とダッシュボード用(8501)を探す
+            urls = {}
+            for t in data.get('tunnels', []):
+                addr = t.get('config', {}).get('addr', '')
+                if '8000' in addr:
+                    urls['server'] = t.get('public_url')
+                elif '8501' in addr:
+                    urls['dashboard'] = t.get('public_url')
+            return urls
+    except:
+        pass
+    return {}
+
+def get_disk_usage():
+    """ディスク使用量を取得"""
+    try:
+        total, used, free = shutil.disk_usage("/")
+        return {
+            "total_gb": total // (2**30),
+            "used_gb": used // (2**30),
+            "free_gb": free // (2**30),
+            "percent": (used / total) * 100
+        }
+    except:
+        return None
+
+def get_memory_usage():
+    """メモリ使用状況を取得 (freeコマンドを使用)"""
+    try:
+        # Linuxのfreeコマンド出力を解析
+        res = subprocess.run(['free', '-h'], capture_output=True, text=True)
+        lines = res.stdout.strip().split('\n')
+        if len(lines) >= 2:
+            # ヘッダー: total used free shared buff/cache available
+            # 値: Mem: 7.6Gi 1.2Gi 4.5Gi ...
+            parts = lines[1].split()
+            return {
+                "total": parts[1],
+                "used": parts[2],
+                "free": parts[3],
+                "available": parts[6]
+            }
+    except:
+        pass
+    return None
+
+def get_system_logs(lines=50):
+    """Systemdのログを取得"""
+    try:
+        cmd = ["journalctl", "-u", "home_system.service", "-n", str(lines), "--no-pager"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        return res.stdout
+    except Exception as e:
+        return f"ログ取得エラー: {e}"
+
+
+
+
 
 @st.cache_data(ttl=300)
 def load_calendar_sensor_data(days=35):
@@ -808,6 +876,69 @@ def render_trends_tab():
     render_history_section("💰 売上トップ (人気)", "grossing")
 
 
+def render_system_tab():
+    """システム管理タブの描画"""
+    st.title("🔧 システム管理コックピット")
+    
+    # 1. 接続情報 (ngrok)
+    st.subheader("🌐 外部接続 (ngrok)")
+    urls = get_ngrok_url()
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**📱 LINE Bot / Server (Port 8000)**")
+        if urls.get('server'):
+            st.success(f"接続OK: {urls['server']}")
+            st.caption("※LINE Botの設定URLはこれになります")
+        else:
+            st.error("取得失敗 (ngrokを確認してください)")
+            
+    with c2:
+        st.markdown("**📊 Dashboard (Port 8501)**")
+        if urls.get('dashboard'):
+            st.success(f"接続OK: {urls['dashboard']}")
+            st.link_button("ダッシュボードを開く", urls['dashboard'])
+        else:
+            st.warning("取得失敗 (固定ドメイン設定を確認)")
+
+    st.markdown("---")
+
+    # 2. リソース状況
+    st.subheader("💻 リソース状況")
+    
+    # ディスク
+    disk = get_disk_usage()
+    if disk:
+        st.write(f"**💾 ディスク使用率: {disk['percent']:.1f}%** (残り {disk['free_gb']} GB / 全体 {disk['total_gb']} GB)")
+        st.progress(int(disk['percent']))
+    
+    # メモリ
+    mem = get_memory_usage()
+    if mem:
+        c_m1, c_m2, c_m3 = st.columns(3)
+        c_m1.metric("メモリ合計", mem['total'])
+        c_m2.metric("使用中", mem['used'])
+        c_m3.metric("利用可能", mem['available'])
+
+    st.markdown("---")
+
+    # 3. ログビューア
+    st.subheader("📜 サーバーログ (Journalctl)")
+    
+    col_log_opt, _ = st.columns([1, 3])
+    with col_log_opt:
+        log_lines = st.selectbox("表示行数", [50, 100, 200], index=0)
+    
+    if st.button("🔄 ログを最新にする"):
+        st.rerun()
+
+    logs = get_system_logs(log_lines)
+    st.code(logs, language="text")
+    
+
+
+
+
 # === メイン処理 ===
 
 def main():
@@ -852,9 +983,9 @@ def main():
         render_metrics_section(now, df_sensor, df_car)
 
         # タブ切り替え
-        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends = st.tabs([
+        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys = st.tabs([
             "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
-            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行"
+            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理"
         ])
 
         with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
@@ -866,6 +997,7 @@ def main():
         with tab_taka: render_takasago_tab(df_sensor)
         with tab_log: render_logs_tab(df_sensor)
         with tab_trends: render_trends_tab()
+        with tab_sys: render_system_tab()
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
