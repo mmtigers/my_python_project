@@ -11,6 +11,7 @@ import config
 import common
 import switchbot_get_device_list as sb_tool
 from handlers import line_logic
+import backup_database
 
 logger = common.setup_logging("server")
 
@@ -161,6 +162,62 @@ async def callback_switchbot(request: Request):
         logger.info(f"通知送信: {msg_text}")
 
     return {"status": "success"}
+
+
+# --- 追加: 定期バックアップタスク ---
+async def schedule_daily_backup():
+    """毎日AM3:00にバックアップを実行するループ"""
+    logger.info("🕰️ バックアップスケジューラ起動 (Target: 03:00)")
+    while True:
+        now = datetime.datetime.now()
+        # 次の3時を計算
+        target = now.replace(hour=3, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target += datetime.timedelta(days=1)
+        
+        wait_seconds = (target - now).total_seconds()
+        logger.info(f"⏳ 次回バックアップまで待機: {int(wait_seconds/3600)}時間{int((wait_seconds%3600)/60)}分")
+        
+        # 待機
+        await asyncio.sleep(wait_seconds)
+        
+        # 実行
+        logger.info("📦 定期バックアップを開始します...")
+        # ファイル操作などの重い処理はExecutorで実行してサーバーを止めない
+        loop = asyncio.get_running_loop()
+        success, res, size = await loop.run_in_executor(None, backup_database.perform_backup)
+        
+        if success:
+            logger.info("✅ バックアップ成功通知を送信")
+            common.send_push(
+                config.LINE_USER_ID, 
+                [{"type": "text", "text": f"📦 [システム通知]\n定期バックアップが完了しました。\nサイズ: {size:.1f}MB"}], 
+                target="discord", channel="notify"
+            )
+        else:
+            logger.error(f"❌ バックアップ失敗通知: {res}")
+            common.send_push(
+                config.LINE_USER_ID, 
+                [{"type": "text", "text": f"🚨 [システムエラー]\nバックアップに失敗しました。\n{res}"}], 
+                target="discord", channel="error"
+            )
+            
+        # 連続実行防止のため少し待つ
+        await asyncio.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("🚀 System Season 3 Starting...")
+    sb_tool.fetch_device_name_cache()
+    
+    # ★ バックアップタスクを開始
+    asyncio.create_task(schedule_daily_backup())
+    
+    yield
+    logger.info("🛑 System Shutdown.")
+
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,87 +1,86 @@
-# HOME_SYSTEM/backup_database.py
+# MY_HOME_SYSTEM/backup_database.py
 import os
 import shutil
-from datetime import datetime, timedelta
-import sys
-import common
+import zipfile
+import datetime
+import glob
+import logging
 import config
+import common
 
-# ロガー設定
+# ログ設定
 logger = common.setup_logging("backup")
-BACKUP_DIR = os.path.join(common.config.BASE_DIR, "db_backup")
 
-def delete_old_backups(days_to_keep=30):
-    """古いバックアップファイルを削除する"""
-    logger.info(f"--- 古いバックアップの整理 ({days_to_keep}日以前) ---")
-    now = datetime.now()
-    deleted_count = 0
-    
+# バックアップ保存先 (プロジェクトの親ディレクトリ/backups)
+BACKUP_DIR = os.path.join(config.BASE_DIR, "..", "backups")
+
+# 保持する世代数 (最新7日分)
+KEEP_GENERATIONS = 7
+
+def perform_backup():
+    """
+    DBと設定ファイルをZIP圧縮してバックアップする (画像は除外)
+    """
+    logger.info("📦 バックアップ処理を開始します (軽量版)...")
+
+    # 保存先ディレクトリ作成
     if not os.path.exists(BACKUP_DIR):
-        return
+        os.makedirs(BACKUP_DIR, exist_ok=True)
 
-    for filename in os.listdir(BACKUP_DIR):
-        file_path = os.path.join(BACKUP_DIR, filename)
-        # ファイルかどうか確認
-        if not os.path.isfile(file_path):
-            continue
+    # バックアップファイル名の決定
+    today_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    zip_filename = f"backup_db_{today_str}.zip"
+    zip_filepath = os.path.join(BACKUP_DIR, zip_filename)
+
+    try:
+        # ZIP作成
+        with zipfile.ZipFile(zip_filepath, 'w', zipfile.ZIP_DEFLATED) as zipf:
             
-        # タイムスタンプを確認
-        file_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-        if now - file_time > timedelta(days=days_to_keep):
-            try:
-                os.remove(file_path)
-                logger.info(f"削除: {filename}")
-                deleted_count += 1
-            except Exception as e:
-                logger.error(f"削除失敗 {filename}: {e}")
-    
-    if deleted_count > 0:
-        logger.info(f"合計 {deleted_count} 個の古いファイルを削除しました。")
+            # 1. データベース (最重要)
+            if os.path.exists(config.SQLITE_DB_PATH):
+                logger.info("  - Database archiving...")
+                zipf.write(config.SQLITE_DB_PATH, arcname="home_system.db")
+            
+            # 2. 設定ファイル (重要)
+            # 復旧時に最低限必要なファイルをバックアップ
+            target_files = ["config.py", ".env", "family_events.json"]
+            for f_name in target_files:
+                f_path = os.path.join(config.BASE_DIR, f_name)
+                if os.path.exists(f_path):
+                    zipf.write(f_path, arcname=f_name)
 
-def run_backup():
-    logger.info("--- バックアップ開始 ---")
-    
-    if not os.path.exists(BACKUP_DIR):
-        try:
-            os.makedirs(BACKUP_DIR)
-        except OSError as e:
-            logger.error(f"フォルダ作成失敗: {e}")
-            return
+            # ※ 画像 (assets/snapshots) は容量削減のため除外しました
 
-    # 1. バックアップ実行
-    target_files = getattr(config, "BACKUP_FILES", [])
-    success_count = 0
-    total_size = 0
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    for file_name in target_files:
-        source_path = os.path.join(common.config.BASE_DIR, file_name) if not os.path.isabs(file_name) else file_name
+        # ファイルサイズ確認
+        size_mb = os.path.getsize(zip_filepath) / (1024 * 1024)
+        logger.info(f"✅ バックアップ完了: {zip_filename} ({size_mb:.2f} MB)")
+
+        # ローテーション実行 (古いファイルを削除)
+        _rotate_backups()
         
-        if not os.path.exists(source_path):
-            logger.warning(f"元ファイルなし: {file_name}")
-            continue
+        return True, zip_filename, size_mb
 
-        name_only, ext = os.path.splitext(os.path.basename(file_name))
-        backup_name = f"{name_only}_{timestamp}{ext}"
-        backup_path = os.path.join(BACKUP_DIR, backup_name)
+    except Exception as e:
+        logger.error(f"❌ バックアップ失敗: {e}")
+        # 失敗したら作りかけのファイルを消す
+        if os.path.exists(zip_filepath):
+            os.remove(zip_filepath)
+        return False, str(e), 0
 
-        try:
-            shutil.copy2(source_path, backup_path)
-            logger.info(f"[OK] {os.path.basename(file_name)} -> {backup_name}")
-            success_count += 1
-            total_size += os.path.getsize(backup_path)
-        except Exception as e:
-            logger.error(f"コピー失敗: {e}")
-
-    # 2. 古いファイルの掃除
-    delete_old_backups(days_to_keep=30)
-
-    # 3. 通知
-    msg = f"📦 バックアップ完了\n成功: {success_count}ファイル\n容量: {total_size/1024:.1f} KB"
-    logger.info(msg)
-    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")
-
+def _rotate_backups():
+    """古いバックアップを削除して世代管理する"""
+    files = sorted(glob.glob(os.path.join(BACKUP_DIR, "backup_db_*.zip")))
+    
+    if len(files) > KEEP_GENERATIONS:
+        # 古い順に削除
+        files_to_delete = files[:-KEEP_GENERATIONS]
+        for f in files_to_delete:
+            try:
+                os.remove(f)
+                logger.info(f"🗑️ 古いバックアップを削除: {os.path.basename(f)}")
+            except Exception as e:
+                logger.warning(f"削除失敗 {f}: {e}")
 
 if __name__ == "__main__":
-    run_backup()
+    # テスト実行用
+    perform_backup()
