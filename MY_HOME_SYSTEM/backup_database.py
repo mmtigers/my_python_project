@@ -7,6 +7,7 @@ import glob
 import logging
 import config
 import common
+import sqlite3
 
 # ログ設定
 logger = common.setup_logging("backup")
@@ -21,7 +22,12 @@ def perform_backup():
     """
     DBと設定ファイルをZIP圧縮してバックアップする (画像は除外)
     """
+
+    # ★ 1. まずDBを綺麗にする
+    vacuum_db()
     logger.info("📦 バックアップ処理を開始します (軽量版)...")
+    
+
 
     # 保存先ディレクトリ作成
     if not os.path.exists(BACKUP_DIR):
@@ -66,6 +72,22 @@ def perform_backup():
         if os.path.exists(zip_filepath):
             os.remove(zip_filepath)
         return False, str(e), 0
+
+def vacuum_db():
+    """DBを最適化(VACUUM)してファイルサイズを圧縮する"""
+    db_path = config.SQLITE_DB_PATH
+    if not os.path.exists(db_path):
+        return
+
+    logger.info("🧹 データベースの最適化(VACUUM)を開始します...")
+    try:
+        # common.pyのヘルパーを使わず、直接排他接続して実行
+        conn = sqlite3.connect(db_path)
+        conn.execute("VACUUM")
+        conn.close()
+        logger.info("✨ 最適化完了")
+    except Exception as e:
+        logger.error(f"⚠️ VACUUM失敗（バックアップは継続します）: {e}")
 
 def _rotate_backups():
     """古いバックアップを削除して世代管理する"""
