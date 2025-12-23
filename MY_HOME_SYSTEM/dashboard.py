@@ -1017,6 +1017,22 @@ def render_system_tab():
     else:
         # 日付指定時はログが多くなる可能性があるため、高さ固定でスクロールさせる
         st.code(logs, language="text")
+
+    st.markdown("---")
+    st.subheader("⚠️ サーバー操作")
+    
+    col_reboot, _ = st.columns([1, 2])
+    with col_reboot:
+        if st.button("🔄 システム再起動 (Restart Service)"):
+            try:
+                st.info("再起動コマンドを送信しました。しばらくお待ちください...")
+                # 権限設定済みのコマンドを実行
+                subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True)
+                st.success("再起動を受け付けました。10秒後にページをリロードしてください。")
+            except subprocess.CalledProcessError as e:
+                st.error(f"再起動に失敗しました: {e}")
+            except Exception as e:
+                st.error(f"エラー: {e}")
     
     # 4. バックアップ管理 (変更なし)
     # ... (既存のバックアップ管理コードをここに維持) ...
