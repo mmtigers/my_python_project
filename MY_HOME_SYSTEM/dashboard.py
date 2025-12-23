@@ -70,6 +70,14 @@ def apply_friendly_names(df):
     """デバイスIDから表示名への変換と、特定の名称置換を行う"""
     if df.empty: return df
     
+    # ★ 修正: device_idカラムがないデータ（security_logsなど）への対応を追加
+    if 'device_id' not in df.columns:
+        # device_nameがあればそれをfriendly_nameとして代用
+        if 'device_name' in df.columns:
+            df['friendly_name'] = df['device_name']
+            df['location'] = 'その他'
+        return df
+
     # config定義からのマッピング
     id_map = {d['id']: d.get('name', d['id']) for d in config.MONITOR_DEVICES}
     loc_map = {d['id']: d.get('location', 'その他') for d in config.MONITOR_DEVICES}
@@ -935,7 +943,55 @@ def render_system_tab():
     logs = get_system_logs(log_lines)
     st.code(logs, language="text")
     
-
+    # --- ★ 追加: バックアップ管理セクション ---
+    st.markdown("---")
+    st.subheader("📦 データバックアップ")
+    
+    backup_dir = os.path.join(config.BASE_DIR, "..", "backups")
+    if os.path.exists(backup_dir):
+        # 最新のファイルを探す
+        files = sorted(glob.glob(os.path.join(backup_dir, "*.zip")), reverse=True)
+        
+        if files:
+            latest_file = files[0]
+            f_name = os.path.basename(latest_file)
+            f_size = os.path.getsize(latest_file) / (1024 * 1024)
+            f_time = datetime.fromtimestamp(os.path.getmtime(latest_file)).strftime('%Y/%m/%d %H:%M')
+            
+            c_bk1, c_bk2 = st.columns([2, 1])
+            with c_bk1:
+                st.success(f"✅ 最新バックアップ: {f_time}")
+                st.caption(f"ファイル名: {f_name} | サイズ: {f_size:.1f} MB")
+            
+            with c_bk2:
+                # ダウンロードボタン
+                with open(latest_file, "rb") as f:
+                    st.download_button(
+                        label="⬇️ ダウンロード",
+                        data=f,
+                        file_name=f_name,
+                        mime="application/zip",
+                        key="dl_btn"
+                    )
+            
+            with st.expander("🗂️ バックアップ履歴 (最新5件)"):
+                for bf in files[:5]:
+                    bs = os.path.getsize(bf) / (1024*1024)
+                    bt = datetime.fromtimestamp(os.path.getmtime(bf)).strftime('%m/%d %H:%M')
+                    st.text(f"・{bt} : {os.path.basename(bf)} ({bs:.1f}MB)")
+        else:
+            st.warning("バックアップファイルがまだありません")
+            if st.button("今すぐ手動バックアップを実行"):
+                # 注意: Streamlitから直接呼ぶと少し時間がかかる場合があります
+                import backup_database
+                success, res, size = backup_database.perform_backup()
+                if success:
+                    st.success(f"完了しました！ ({size:.1f}MB)")
+                    st.rerun()
+                else:
+                    st.error(f"失敗: {res}")
+    else:
+        st.info("バックアップディレクトリが作成されていません（次回実行時に作成されます）")
 
 
 
