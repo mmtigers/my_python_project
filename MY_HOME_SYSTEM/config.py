@@ -13,6 +13,7 @@ load_dotenv()
 SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")
 SWITCHBOT_API_SECRET: Optional[str] = os.getenv("SWITCHBOT_API_SECRET")
 NATURE_REMO_ACCESS_TOKEN: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN")
+NATURE_REMO_ACCESS_TOKEN_TAKASAGO: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN_TAKASAGO")
 
 LINE_CHANNEL_ACCESS_TOKEN: Optional[str] = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
@@ -210,3 +211,48 @@ HAIRCUT_CYCLE_DAYS = 60
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, exist_ok=True)
+
+
+# 自転車駐車場監視設定
+BICYCLE_PARKING_URL = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php"
+SQLITE_TABLE_BICYCLE = "bicycle_parking_records"
+
+
+# ==========================================
+# 4. 土地価格監視設定
+# ==========================================
+# 国土交通省API用設定 (都道府県コード2桁 + 市区町村コード3桁)
+# 伊丹市=28207, 高砂市=28216, 奈良市=29201
+LAND_PRICE_TARGETS = [
+    {
+        "city_code": "28207",     # 兵庫県伊丹市
+        "city_name": "伊丹市",
+        "districts": ["鈴原町"],
+        "filter_chome": list(range(1, 9)) # 1丁目〜8丁目
+    },
+    {
+        "city_code": "28216",     # 兵庫県高砂市
+        "city_name": "高砂市",
+        "districts": ["西畑", "鍵町"],
+        "filter_chome": [1]       # 西畑は1丁目のみ (鍵町など丁目が無いエリアは自動で通過します)
+    },
+    {
+        "city_code": "29201",     # 奈良県奈良市
+        "city_name": "奈良市",
+        "districts": ["西九条町"],
+        "filter_chome": [1]       # 1丁目のみ
+    }
+]
+
+# ==========================================
+# 5. 不動産情報ライブラリ (新・土地価格API)
+# ==========================================
+# 申請URL: https://www.reinfolib.mlit.go.jp/api/request/
+# ここに取得したAPIキーを入力してください
+REINFOLIB_API_KEY = "ここに取得したキーを貼り付ける"
+
+
+# Google Photos API設定
+GOOGLE_PHOTOS_CREDENTIALS = os.path.join(BASE_DIR, "google_photos_credentials.json")
+GOOGLE_PHOTOS_TOKEN = os.path.join(BASE_DIR, "google_photos_token.json")
+GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']

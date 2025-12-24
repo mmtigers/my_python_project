@@ -110,6 +110,34 @@ def init_db():
     logger.info("✅ security_logs テーブル準備完了")
 
 
+    # ▼【追加】駐輪場待機数レコード
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_BICYCLE} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        area_name TEXT,      -- エリア名（例：阪急伊丹駅前地下 Aブロック）
+        status_text TEXT,    -- 取得した状態テキスト（例：5人待ち、空きあり）
+        waiting_count INTEGER, -- 待機人数（数値抽出、空きなら0）
+        timestamp DATETIME NOT NULL
+    )''')
+    logger.info("✅ bicycle_parking_records テーブル準備完了")
+
+
+    # ▼【追加】土地取引価格テーブル
+    # 取引ID (trade_id) がAPIから返るため、それをユニークキーとします
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS land_price_records (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trade_id TEXT UNIQUE,     -- APIの取引ID
+        prefecture TEXT,          -- 都道府県
+        city TEXT,                -- 市区町村
+        district TEXT,            -- 町名 (例: 鈴原町)
+        type TEXT,                -- 種類 (例: 宅地(土地と建物), 宅地(土地))
+        price INTEGER,            -- 取引総額
+        area_m2 INTEGER,          -- 面積
+        price_per_m2 INTEGER,     -- 平米単価 (計算値またはAPI値)
+        transaction_period TEXT,  -- 取引時期 (例: 2024年第3四半期)
+        recorded_at DATETIME NOT NULL
+    )''')
+    
+    logger.info("✅ land_price_records テーブル準備完了")
 
     conn.commit()
     conn.close()
