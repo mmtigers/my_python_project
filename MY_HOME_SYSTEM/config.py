@@ -13,6 +13,7 @@ load_dotenv()
 SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")
 SWITCHBOT_API_SECRET: Optional[str] = os.getenv("SWITCHBOT_API_SECRET")
 NATURE_REMO_ACCESS_TOKEN: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN")
+NATURE_REMO_ACCESS_TOKEN_TAKASAGO: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN_TAKASAGO")
 
 LINE_CHANNEL_ACCESS_TOKEN: Optional[str] = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
@@ -249,3 +250,9 @@ LAND_PRICE_TARGETS = [
 # 申請URL: https://www.reinfolib.mlit.go.jp/api/request/
 # ここに取得したAPIキーを入力してください
 REINFOLIB_API_KEY = "ここに取得したキーを貼り付ける"
+
+
+# Google Photos API設定
+GOOGLE_PHOTOS_CREDENTIALS = os.path.join(BASE_DIR, "google_photos_credentials.json")
+GOOGLE_PHOTOS_TOKEN = os.path.join(BASE_DIR, "google_photos_token.json")
+GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
