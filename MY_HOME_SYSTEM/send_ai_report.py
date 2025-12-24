@@ -9,10 +9,12 @@ import sys
 from datetime import datetime
 import pytz
 
+
 # 各種サービスのインポート
 from weather_service import WeatherService
 from news_service import NewsService
 from menu_service import MenuService
+from google_photos_service import GooglePhotosService
 
 logger = common.setup_logging("ai_report")
 
@@ -130,6 +132,23 @@ def fetch_daily_data():
         except Exception as e:
             logger.error(f"メニュー情報取得失敗: {e}")
 
+    # 9. 今日の写真 (Google Photos)
+    print("📸 [Data Fetching] Google Photos...")
+    try:
+        gp_service = GooglePhotosService()
+        # 過去1日分の写真を最大5枚取得
+        photos = gp_service.get_recent_photos(limit=5, days=1)
+        if photos:
+            # 写真があればGeminiで分析してテキスト化
+            data['photo_analysis'] = gp_service.analyze_photos_with_gemini(photos)
+        else:
+            data['photo_analysis'] = None
+    except Exception as e:
+        logger.error(f"写真処理スキップ: {e}")
+        data['photo_analysis'] = None
+
+
+
     return data
 
 def get_time_context(hour):
@@ -190,6 +209,19 @@ def build_system_prompt(data):
         ※Web検索は使用せず、あなたの知識の中からおすすめを提案してください。
         """
 
+    # --- 写真セクション ---
+    photo_section = ""
+    if data.get('photo_analysis'):
+        photo_section = f"""
+        【今日の写真ハイライト】
+        Google Photosに新しい写真がありました。AIによる分析結果は以下の通りです：
+        {data['photo_analysis']}
+        
+        レポートの後半で、「そういえば、今日はこんな写真が撮れていましたね！」という風に、
+        この内容を自然に会話に盛り込んでください。楽しそうな様子を伝えてください。
+        """
+
+
     # --- プロンプトの組み立て ---
     return f"""
     あなたは「優秀で気が利く、少しユーモアのある執事」です。名前はセバスチャンです。
@@ -213,6 +245,7 @@ def build_system_prompt(data):
          **重要(変更)**: Discordのプレビューカードを非表示にし、かつリンクにするために、URLは必ず **`[タイトル](<URL>)`** の形式（URLを `<` と `>` で囲む）で記述してください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
        - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
+       - **写真の話題**: {photo_section if photo_section else "（写真はなし）"}
        - **家の状況**: 子供の記録があれば触れる。高砂や実家の状況は触れない。夫は仕事を頑張っているので褒める。
        - **季節感**: 子供関連の夏休みや冬休み、クリスマスや正月、バレンタイン、母の日など、様々な季節のイベントが近ければ触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
