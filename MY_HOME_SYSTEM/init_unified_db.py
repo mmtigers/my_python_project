@@ -110,6 +110,16 @@ def init_db():
     logger.info("✅ security_logs テーブル準備完了")
 
 
+    # ▼【追加】駐輪場待機数レコード
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_BICYCLE} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        area_name TEXT,      -- エリア名（例：阪急伊丹駅前地下 Aブロック）
+        status_text TEXT,    -- 取得した状態テキスト（例：5人待ち、空きあり）
+        waiting_count INTEGER, -- 待機人数（数値抽出、空きなら0）
+        timestamp DATETIME NOT NULL
+    )''')
+    logger.info("✅ bicycle_parking_records テーブル準備完了")
+
 
     conn.commit()
     conn.close()

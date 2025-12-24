@@ -210,3 +210,8 @@ HAIRCUT_CYCLE_DAYS = 60
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
     if not os.path.exists(d):
         os.makedirs(d, exist_ok=True)
+
+
+# 自転車駐車場監視設定
+BICYCLE_PARKING_URL = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php"
+SQLITE_TABLE_BICYCLE = "bicycle_parking_records"
