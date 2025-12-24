@@ -36,5 +36,6 @@ assets/salary_images/
 *.pdf
 *.txt
 *.zip
+*.json
 family_events.json
 EOF
