@@ -255,4 +255,4 @@ REINFOLIB_API_KEY = "ここに取得したキーを貼り付ける"
 # Google Photos API設定
 GOOGLE_PHOTOS_CREDENTIALS = os.path.join(BASE_DIR, "google_photos_credentials.json")
 GOOGLE_PHOTOS_TOKEN = os.path.join(BASE_DIR, "google_photos_token.json")
-GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary.readonly']
+GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary']

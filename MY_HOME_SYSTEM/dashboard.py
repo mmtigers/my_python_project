@@ -358,7 +358,25 @@ def load_ranking_data(date_str, ranking_type):
     finally:
         conn.close()
 
+@st.cache_data(ttl=3600)
+def load_bicycle_data(limit=2000):
+    """駐輪場データの読み込み"""
+    # configに定数がない場合のフォールバック付き
+    table_name = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")
+    try:
+        # テーブル存在確認
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+        if not cur.fetchone():
+            return pd.DataFrame()
+        conn.close()
 
+        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}"
+        return load_data_from_db(query)
+    except Exception as e:
+        logger.error(f"Bicycle Data Load Error: {e}")
+        return pd.DataFrame()
 
 def load_ai_report():
     query = f"SELECT * FROM {config.SQLITE_TABLE_AI_REPORT} ORDER BY id DESC LIMIT 1"
@@ -922,6 +940,56 @@ def render_trends_tab():
     render_history_section("💰 売上トップ (人気)", "grossing")
 
 
+def render_bicycle_tab(df_bicycle):
+    """駐輪場タブの描画"""
+    st.title("🚲 駐輪場待機数推移")
+    
+    if df_bicycle.empty:
+        st.info("駐輪場データがまだありません。スクリプトが実行されているか確認してください。")
+        return
+
+    # 監視対象のエリア名（ご指定の3箇所）
+    target_areas = [
+        "JR伊丹駅前(第1)自転車駐車場 (A)", 
+        "JR伊丹駅前(第3)自転車駐車場 (A)", 
+        "JR伊丹駅前(第3)自転車駐車場 (E)"
+    ]
+    
+    # 指定エリアのデータのみ抽出
+    df_target = df_bicycle[df_bicycle['area_name'].isin(target_areas)].copy()
+    
+    if df_target.empty:
+        st.warning("指定されたエリアのデータが見つかりません。")
+        with st.expander("現在取得できているエリア一覧"):
+            st.write(df_bicycle['area_name'].unique())
+        return
+
+    # 折れ線グラフで推移を表示
+    fig = px.line(
+        df_target, 
+        x='timestamp', 
+        y='waiting_count', 
+        color='area_name', 
+        title="待機人数の変化",
+        markers=True,
+        symbol="area_name" # エリアごとにマーカーの形を変える
+    )
+    fig.update_layout(
+        xaxis_title="日時", 
+        yaxis_title="待機数 (人/台)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # 最新状況の表表示
+    st.subheader("📊 最新の状況")
+    # エリアごとに最新のレコードを取得
+    latest_df = df_target.sort_values('timestamp', ascending=False).drop_duplicates('area_name')
+    st.dataframe(
+        latest_df[['timestamp', 'area_name', 'waiting_count', 'status_text']].sort_values('area_name'),
+        use_container_width=True
+    )
+
 def render_system_tab():
     """システム管理タブの描画"""
     st.title("🔧 システム管理コックピット")
@@ -1109,6 +1177,7 @@ def main():
         df_food = load_generic_data(config.SQLITE_TABLE_FOOD)
         df_car = load_generic_data(config.SQLITE_TABLE_CAR)
         df_security_log = load_generic_data("security_logs", limit=100)
+        df_bicycle = load_bicycle_data(limit=3000)
 
         # AIレポート表示
         report = load_ai_report()
@@ -1124,9 +1193,9 @@ def main():
         render_metrics_section(now, df_sensor, df_car)
 
         # タブ切り替え
-        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_money = st.tabs([
+        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_money, tab_bicycle = st.tabs([
             "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
-            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理", "📉 資産シミュ"
+            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理", "📉 資産シミュ", "🚲 駐輪場"
         ])
 
         with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
@@ -1140,6 +1209,7 @@ def main():
         with tab_trends: render_trends_tab()
         with tab_sys: render_system_tab()
         with tab_money:financial_service.render_simulation_tab()
+        with tab_bicycle: render_bicycle_tab(df_bicycle)
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
