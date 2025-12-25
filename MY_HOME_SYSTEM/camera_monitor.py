@@ -101,8 +101,13 @@ def monitor_single_camera(cam_conf):
     
     logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port})")
 
+    # === 【修正】連続エラーカウントと通知閾値の設定 ===
+    consecutive_conn_errors = 0
+    NOTIFY_THRESHOLD = 5  # 5回連続で失敗するまではWARNINGに留める
+
     while True: 
         try:
+            # ONVIFカメラ接続
             mycam = ONVIFCamera(cam_conf['ip'], cam_port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
@@ -118,14 +123,21 @@ def monitor_single_camera(cam_conf):
                 url=events_wsdl, encrypt=True, binding_name=BINDING_NAME
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+            
+            # === 【修正】接続成功時にエラーカウントをリセット ===
+            if consecutive_conn_errors > 0:
+                logger.info(f"✅ [{cam_name}] 接続復旧しました (連続失敗回数をリセット)")
+            consecutive_conn_errors = 0
+            
             logger.info(f"✅ [{cam_name}] 接続確立")
 
             error_count = 0
+            # イベント受信ループ
             while True:
                 try:
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
-                    error_count = 0
+                    error_count = 0  # PullMessages成功で内部エラーカウンタもリセット
                     
                     if hasattr(events, 'NotificationMessage'):
                         for event in events.NotificationMessage:
@@ -187,17 +199,36 @@ def monitor_single_camera(cam_conf):
                                     break
 
                 except Exception as e:
+                    # 内部ループ（PullMessages）のエラーハンドリング
                     err = str(e)
+                    # タイムアウトはよくあるので無視してループ継続
                     if "timed out" in err or "TimeOut" in err: continue
+                    
                     error_count += 1
                     if error_count >= 5:
-                        logger.warning(f"⚠️ [{cam_name}] 再接続します...")
+                        logger.warning(f"⚠️ [{cam_name}] ストリーム不安定のため再接続します... (Error: {err})")
                         break
                     time.sleep(2)
 
         except Exception as e:
-            logger.error(f"❌ [{cam_name}] 接続エラー (Port:{cam_port}): {e}")
-            time.sleep(30)
+            # === 【修正】外部ループ（接続自体）のエラーハンドリング ===
+            consecutive_conn_errors += 1
+            err_msg = str(e)
+            
+            # 待機時間の計算 (基本30秒 * 失敗回数。最大300秒)
+            wait_time = min(30 * consecutive_conn_errors, 300)
+
+            # エラー判定: 接続拒否やタイムアウトは一時的なものとして扱う
+            is_network_transient = "Connection refused" in err_msg or "timed out" in err_msg or "No route to host" in err_msg
+
+            # 閾値以下の回数であれば WARNING（通知なし）で留める
+            if is_network_transient and consecutive_conn_errors < NOTIFY_THRESHOLD:
+                logger.warning(f"⚠️ [{cam_name}] 接続試行中({consecutive_conn_errors}/{NOTIFY_THRESHOLD})... : {err_msg} (Next retry in {wait_time}s)")
+            else:
+                # 閾値を超えた、または予期せぬエラーの場合は ERROR（通知あり）
+                logger.error(f"❌ [{cam_name}] 接続エラー (Port:{cam_port}): {err_msg} (Retry in {wait_time}s)")
+
+            time.sleep(wait_time)
 
 async def main():
     if not WSDL_DIR: return

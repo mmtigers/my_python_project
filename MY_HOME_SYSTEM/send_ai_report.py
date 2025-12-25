@@ -222,18 +222,6 @@ def build_system_prompt(data):
         ※Web検索は使用せず、あなたの知識の中からおすすめを提案してください。
         """
 
-    # --- 写真セクション ---
-    photo_section = ""
-    if data.get('photo_analysis'):
-        photo_section = f"""
-        【今日の写真ハイライト】
-        Google Photosに新しい写真がありました。AIによる分析結果は以下の通りです：
-        {data['photo_analysis']}
-        
-        レポートの後半で、「そういえば、今日はこんな写真が撮れていましたね！」という風に、
-        この内容を自然に会話に盛り込んでください。楽しそうな様子を伝えてください。
-        """
-
 
     # --- プロンプトの組み立て ---
     return f"""
@@ -258,7 +246,6 @@ def build_system_prompt(data):
          **重要(変更)**: Discordのプレビューカードを非表示にし、かつリンクにするために、URLは必ず **`[タイトル](<URL>)`** の形式（URLを `<` と `>` で囲む）で記述してください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
        - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
-       - **写真の話題**: {photo_section if photo_section else "（写真はなし）"}
        - **家の状況**: 子供の記録があれば触れる。高砂や実家の状況は触れない。
        - **季節感**: 子供関連の夏休みや冬休み、クリスマスや正月、バレンタイン、母の日など、様々な季節のイベントが近ければ触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
