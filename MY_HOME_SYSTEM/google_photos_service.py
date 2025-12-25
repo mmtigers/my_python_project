@@ -30,20 +30,44 @@ class GooglePhotosService:
         try:
             # トークンファイルが存在すれば読み込む
             if os.path.exists(config.GOOGLE_PHOTOS_TOKEN):
-                self.creds = Credentials.from_authorized_user_file(config.GOOGLE_PHOTOS_TOKEN, config.GOOGLE_PHOTOS_SCOPES)
+                try:
+                    self.creds = Credentials.from_authorized_user_file(config.GOOGLE_PHOTOS_TOKEN, config.GOOGLE_PHOTOS_SCOPES)
+                except Exception:
+                    self.creds = None
             
-            # 有効な認証情報がない場合、新規取得またはリフレッシュ
+            # 有効な認証情報がない場合
             if not self.creds or not self.creds.valid:
                 if self.creds and self.creds.expired and self.creds.refresh_token:
-                    logger.info("🔄 トークンをリフレッシュします...")
-                    self.creds.refresh(Request())
-                else:
+                    logger.info("🔄 Google Photosトークンをリフレッシュします...")
+                    try:
+                        self.creds.refresh(Request())
+                    except Exception:
+                        self.creds = None # リフレッシュ失敗時は新規取得へ
+
+                # ★★★ ここから修正・追加 ★★★
+                if not self.creds:
                     logger.info("🆕 新規認証フローを開始します (ブラウザ認証が必要です)")
-                    # 注意: ヘッドレス環境ではローカルPCで作成したtoken.jsonを転送することを推奨
+                    
+                    # 既存のトークンファイルがあれば邪魔なので消す
+                    if os.path.exists(config.GOOGLE_PHOTOS_TOKEN):
+                        os.remove(config.GOOGLE_PHOTOS_TOKEN)
+
                     flow = InstalledAppFlow.from_client_secrets_file(
-                        config.GOOGLE_PHOTOS_CREDENTIALS, config.GOOGLE_PHOTOS_SCOPES)
-                    self.creds = flow.run_local_server(port=0)
-                
+                        config.GOOGLE_PHOTOS_CREDENTIALS, 
+                        config.GOOGLE_PHOTOS_SCOPES
+                    )
+                    
+
+
+                    # 【重要】prompt='consent' を追加して、強制的に同意画面を出させる
+                    self.creds = flow.run_local_server(
+                        port=0,
+                        authorization_prompt_message="👇 以下のURLをコピーして、ブラウザの【シークレットモード (InPrivate)】で開いてください:\n:\n\n{url}\n",
+                        prompt='consent',
+                        open_browser=False  # ← ここを False にして自動起動を止めます
+                    )
+                # ★★★ ここまで修正・追加 ★★★
+
                 # トークンを保存
                 with open(config.GOOGLE_PHOTOS_TOKEN, 'w') as token:
                     token.write(self.creds.to_json())
@@ -51,6 +75,7 @@ class GooglePhotosService:
             self.service = build('photoslibrary', 'v1', credentials=self.creds, static_discovery=False)
             logger.info("✅ Google Photos API 接続成功")
             
+           
         except Exception as e:
             # ★追加: エラーの詳細を記録し、service は None とする
             logger.error(f"Google Photos 認証エラー: {e}")
