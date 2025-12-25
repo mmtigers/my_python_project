@@ -1,4 +1,3 @@
-# MY_HOME_SYSTEM/land_price_service.py
 import requests
 import sqlite3
 import logging
@@ -24,7 +23,7 @@ class LandPriceService:
     """
     国土交通省「不動産情報ライブラリ」APIを利用して、
     指定エリアの土地価格情報を収集・記録するクラス
-    (2025年 新API対応版)
+    (2025年 新API対応版 / リンク通知機能付き)
     """
     
     # 新APIエンドポイント (XIT001: 不動産取引価格情報)
@@ -39,7 +38,6 @@ class LandPriceService:
         # APIキーのチェック
         if not getattr(config, "REINFOLIB_API_KEY", None):
             logger.error("❌ REINFOLIB_API_KEY が config.py に設定されていません。")
-            logger.error("👉 https://www.reinfolib.mlit.go.jp/api/request/ からキーを取得してください。")
             sys.exit(1)
 
     def _create_retry_session(self, retries=3, backoff_factor=1.0):
@@ -55,13 +53,12 @@ class LandPriceService:
     def fetch_and_save(self):
         logger.info("🚀 土地価格情報の取得を開始します (新API)...")
         
-        targets = self._get_target_periods() # (year, quarter) のリスト
+        targets = self._get_target_periods()
         total_new = 0
         new_items_details = []
 
         try:
             for target_area in config.LAND_PRICE_TARGETS:
-                # configのcity_code (例:28207) から 都道府県コード(28) を抽出
                 city_code = target_area["city_code"]
                 area_code = city_code[:2] 
                 
@@ -107,13 +104,12 @@ class LandPriceService:
             self.session.close()
 
     def _get_target_periods(self):
-        """検索対象の期間 (年, 四半期) を生成"""
+        """直近3四半期分を生成"""
         now = datetime.now()
         year = now.year
         q = (now.month - 1) // 3 + 1
         
         periods = []
-        # 直近3四半期分
         for _ in range(3):
             periods.append((year, q))
             q -= 1
@@ -129,13 +125,18 @@ class LandPriceService:
         params = {
             "year": year,
             "quarter": quarter,
-            "area": area_code,  # 都道府県コード
-            "city": city_code,  # 市区町村コード
-            "priceClassification": "01" # 01:取引価格情報
+            "area": area_code,
+            "city": city_code,
+            "priceClassification": "01"
         }
         
         try:
             res = self.session.get(self.API_URL, headers=headers, params=params, timeout=10)
+            
+            # 404は「未発表」として正常処理（空リストを返す）
+            if res.status_code == 404:
+                return []
+
             res.raise_for_status()
             self.consecutive_error_count = 0
             
@@ -151,18 +152,15 @@ class LandPriceService:
 
     def _check_chome_filter(self, district_name, target_chome_list):
         if not target_chome_list: return True
-        # 漢数字変換
         kanji_map = str.maketrans("１２３４５６７８９", "123456789")
         normalized = district_name.translate(kanji_map)
         match = re.search(r'(\d+)丁目', normalized)
         if match:
             return int(match.group(1)) in target_chome_list
-        # 丁目が文字列にないがフィルタがある場合、念のため通す（「西畑」単体など）
         return True
 
     def _save_record(self, item, city_name):
         try:
-            # ユニークID作成 (新APIにはIDがない場合があるため複合キーで)
             trade_id = f"{item.get('CityCode')}_{item.get('DistrictName')}_{item.get('TradePrice')}_{item.get('Period')}"
             
             with common.get_db_cursor(commit=True) as cur:
@@ -186,9 +184,23 @@ class LandPriceService:
             return False
 
     def _notify_user(self, count, details):
+        """
+        Discord Reportチャンネルへ通知
+        Markdownリンクを含めて情報元へのアクセスを容易にします
+        """
         body = "\n".join(details[:5])
         if len(details) > 5: body += f"\n...他 {len(details)-5} 件"
-        msg = f"🏘️ **土地価格情報 (新着)**\n指定エリアで {count} 件の取引情報が見つかりました。\n\n{body}"
+        
+        # configからURLを取得してリンクを作成
+        link_url = getattr(config, "REINFOLIB_WEB_URL", "https://www.reinfolib.mlit.go.jp/")
+        
+        msg = (
+            f"🏘️ **土地価格情報 (新着)**\n"
+            f"指定エリアで {count} 件の取引情報が見つかりました。\n\n"
+            f"{body}\n\n"
+            f"🔗 [不動産情報ライブラリで詳細を確認]({link_url})"
+        )
+        
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")
 
 if __name__ == "__main__":
