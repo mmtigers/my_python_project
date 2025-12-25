@@ -249,10 +249,13 @@ LAND_PRICE_TARGETS = [
 # ==========================================
 # 申請URL: https://www.reinfolib.mlit.go.jp/api/request/
 # ここに取得したAPIキーを入力してください
-REINFOLIB_API_KEY = "ここに取得したキーを貼り付ける"
+REINFOLIB_API_KEY = "8fe0cddac7dc402eb1018843395734ec"
 
 
 # Google Photos API設定
 GOOGLE_PHOTOS_CREDENTIALS = os.path.join(BASE_DIR, "google_photos_credentials.json")
 GOOGLE_PHOTOS_TOKEN = os.path.join(BASE_DIR, "google_photos_token.json")
 GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary']
+
+# WebサイトのURL (通知用)
+REINFOLIB_WEB_URL = "https://www.reinfolib.mlit.go.jp/"
