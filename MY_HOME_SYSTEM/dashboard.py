@@ -1248,6 +1248,92 @@ def render_bicycle_tab(df_bicycle: pd.DataFrame):
     )
 
 
+
+
+def render_quest_tab():
+    """Family Questの状況を表示するタブ"""
+    st.title("⚔️ Family Quest 現在の状況")
+    
+    try:
+        with common.get_db_cursor() as cur:
+            # ユーザー情報の取得
+            cur.execute("SELECT name, current_points, avatar FROM quest_users ORDER BY current_points DESC")
+            rows = cur.fetchall()
+            
+            # タスク履歴（直近5件）の取得
+            cur.execute("""
+                SELECT u.name, t.title, s.completed_at 
+                FROM quest_status s
+                JOIN quest_tasks t ON s.task_id = t.id
+                JOIN quest_users u ON t.target_user_id = u.id
+                WHERE s.is_completed = 1 
+                ORDER BY s.completed_at DESC 
+                LIMIT 5
+            """)
+            history = cur.fetchall()
+
+        if not rows:
+            st.info("データがありません。アプリでユーザー登録を行ってください。")
+            return
+
+        # --- 1. メトリクス表示 (カード風) ---
+        cols = st.columns(len(rows))
+        for i, (name, points, avatar) in enumerate(rows):
+            with cols[i]:
+                # 1位には王冠をつける演出
+                rank_icon = "👑" if i == 0 else ""
+                st.metric(
+                    label=f"{rank_icon} {name} ({avatar})",
+                    value=f"{points} pt",
+                    delta=None
+                )
+
+        st.divider()
+
+        # --- 2. グラフ表示 ---
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("📊 ポイントランキング")
+            df_quest = pd.DataFrame(rows, columns=["名前", "ポイント", "アバター"])
+            # グラフの色を少しカラフルに
+            fig = px.bar(
+                df_quest, 
+                x="名前", 
+                y="ポイント", 
+                color="名前", 
+                text="ポイント",
+                title="現在の獲得ポイント"
+            )
+            fig.update_traces(textposition='outside')
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            st.subheader("📜 最近の達成タスク")
+            if history:
+                for name, title, completed_at in history:
+                    # 時間をパースして表示
+                    try:
+                        dt = datetime.strptime(completed_at, '%Y-%m-%d %H:%M:%S.%f')
+                    except ValueError:
+                        # 秒以下がない場合などのフォールバック
+                        try:
+                            dt = datetime.strptime(completed_at, '%Y-%m-%d %H:%M:%S')
+                        except:
+                            dt = datetime.now() # エラー時は現在時刻にしておく
+
+                    time_str = dt.strftime('%m/%d %H:%M')
+                    st.markdown(f"**{name}** が **『{title}』** を達成！  \n<span style='color:grey; font-size:0.8em'>({time_str})</span>", unsafe_allow_html=True)
+                    st.write("---")
+            else:
+                st.write("まだ履歴がありません")
+
+    except Exception as e:
+        st.error(f"クエスト情報の読み込みに失敗しました: {e}")
+
+
+
+
 def render_system_tab():
     """システム管理タブの描画"""
     st.title("🔧 システム管理コックピット")
@@ -1478,20 +1564,22 @@ def main():
         # タブ切り替え
         tabs = st.tabs(
             [
-                "🚃 交通",
-                "🖼️ 写真・防犯",
-                "💰 電気・家電",
-                "🌡️ 室温・環境",
-                "🏥 健康・食事",
-                "👵 高砂詳細",
-                "📜 全ログ",
-                "🌟 最近の流行",
+                "⚔️ クエスト",  # <--- 追加
+                "🚃 電車遅延",
+                "📸 防犯カメラ",
+                "💡 電力・環境",
+                "🌡️ 気温詳細",
+                "🏥 健康管理",
+                "👵 高砂実家",
+                "📝 ログ分析",
+                "📊 トレンド",
                 "🔧 システム管理",
                 "🚲 駐輪場",
             ]
         )
 
         (
+            tab_quest,      # <--- 追加
             tab_train,
             tab_photo,
             tab_elec,
@@ -1504,6 +1592,8 @@ def main():
             tab_bicycle,
         ) = tabs
 
+        with tab_quest:
+            render_quest_tab()
         with tab_train:
             render_traffic_tab()
         with tab_photo:

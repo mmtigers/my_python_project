@@ -106,43 +106,58 @@ def fetch_daily_data():
         cursor.execute(f"SELECT child_name, condition FROM {config.SQLITE_TABLE_CHILD} WHERE timestamp LIKE ?", (f"{today_str}%",))
         data['children_health'] = [{ "child": r["child_name"], "condition": r["condition"] } for r in cursor.fetchall()]
 
-    # 6. 天気
-    print("🌤️ [Data Fetching] Weather...")
-    try:
-        data['weather_report'] = WeatherService().get_weather_report_text()
-    except Exception as e:
-        logger.error(f"天気情報取得失敗: {e}")
-        data['weather_report'] = "（天気情報の取得に失敗しました）"
-
-    # 7. ニュース
-    print("📰 [Data Fetching] News...")
-    try:
-        data['news_topics'] = NewsService().get_top_news(limit=5)
-    except Exception as e:
-        logger.error(f"ニュース取得失敗: {e}")
-        data['news_topics'] = []
-
-    # 8. 晩御飯の提案 (お昼の時間帯 11:00-13:59 のみ実行)
-    if 11 <= current_hour < 14:
-        print("🍳 [Data Fetching] Menu Suggestion...")
+        # 6. 天気
+        print("🌤️ [Data Fetching] Weather...")
         try:
-            ms = MenuService()
-            data['menu_suggestion_context'] = {
-                "recent_menus": ms.get_recent_menus(days=5), 
-                "special_day": ms.get_special_day_info()
-            }
+            data['weather_report'] = WeatherService().get_weather_report_text()
         except Exception as e:
-            logger.error(f"メニュー情報取得失敗: {e}")
+            logger.error(f"天気情報取得失敗: {e}")
+            data['weather_report'] = "（天気情報の取得に失敗しました）"
+
+        # 7. ニュース
+        print("📰 [Data Fetching] News...")
+        try:
+            data['news_topics'] = NewsService().get_top_news(limit=5)
+        except Exception as e:
+            logger.error(f"ニュース取得失敗: {e}")
+            data['news_topics'] = []
+
+        # 8. 晩御飯の提案 (お昼の時間帯 11:00-13:59 のみ実行)
+        if 11 <= current_hour < 14:
+            print("🍳 [Data Fetching] Menu Suggestion...")
+            try:
+                ms = MenuService()
+                data['menu_suggestion_context'] = {
+                    "recent_menus": ms.get_recent_menus(days=5), 
+                    "special_day": ms.get_special_day_info()
+                }
+            except Exception as e:
+                logger.error(f"メニュー情報取得失敗: {e}")
 
 
-    # 9. カメラ画像 (機能追加)
-    print("📷 [Data Fetching] Camera Images...")
-    try:
-        # 画像パスのリストを取得 (最大8枚程度にしておく)
-        data['camera_images_paths'] = camera_digest_service.get_todays_highlight_images(limit=8)
-    except Exception as e:
-        logger.error(f"カメラ画像収集失敗: {e}")
-        data['camera_images_paths'] = []
+        # 9. カメラ画像 (機能追加)
+        print("📷 [Data Fetching] Camera Images...")
+        try:
+            # 画像パスのリストを取得 (最大8枚程度にしておく)
+            data['camera_images_paths'] = camera_digest_service.get_todays_highlight_images(limit=8)
+        except Exception as e:
+            logger.error(f"カメラ画像収集失敗: {e}")
+            data['camera_images_paths'] = []
+
+        # ▼▼▼ 追加: 10. Family Quest (今日のお手伝い) ▼▼▼
+        # quest_status, quest_tasks, quest_users を結合して、誰が何を完了したか取得
+        cursor.execute("""
+            SELECT u.name, t.title, t.points
+            FROM quest_status s
+            JOIN quest_tasks t ON s.task_id = t.id
+            JOIN quest_users u ON t.target_user_id = u.id
+            WHERE s.date = ? AND s.is_completed = 1
+        """, (today_str,))
+        
+        data['quest_achievements'] = [
+            {"user": r["name"], "title": r["title"], "points": r["points"]} 
+            for r in cursor.fetchall()
+        ]
 
 
     return data
@@ -204,6 +219,38 @@ def build_system_prompt(data):
         （例: 寒いので屋内の○○、イルミネーションが見える○○、など）
         ※Web検索は使用せず、あなたの知識の中からおすすめを提案してください。
         """
+    
+
+    # ▼▼▼ 追加: クエスト成果セクション ▼▼▼
+    quest_prompt_section = ""
+    achievements = data.get('quest_achievements', [])
+    
+    if achievements:
+        # ユーザーごとにタスクをまとめる処理
+        user_quests = {}
+        total_points = 0
+        for item in achievements:
+            name = item['user']
+            if name not in user_quests: user_quests[name] = []
+            user_quests[name].append(item['title'])
+            total_points += item['points']
+        
+        # 文字列の生成 (例: "- 智矢: おもちゃ片付け, 食器下げ")
+        lines = []
+        for name, titles in user_quests.items():
+            lines.append(f"- {name}: {', '.join(titles)}")
+        
+        quest_summary = "\n".join(lines)
+        
+        quest_prompt_section = f"""
+        【本日のお手伝い・クエスト成果 (重要)】
+        今日は子供たちが以下のようにお手伝い(クエスト)を達成しました！(合計 {total_points}pt 獲得)
+        この頑張りを「〇〇くん、～をして偉かったね！」のように具体的に褒める言葉をレポートに必ず入れてください。
+        
+        [達成リスト]
+        {quest_summary}
+        """
+
 
 
     # --- プロンプトの組み立て ---
@@ -229,6 +276,7 @@ def build_system_prompt(data):
          **重要(変更)**: Discordのプレビューカードを非表示にし、かつリンクにするために、URLは必ず **`[タイトル](<URL>)`** の形式（URLを `<` と `>` で囲む）で記述してください。
        - **夕食の提案**: {menu_prompt_section if menu_prompt_section else "（この時間は提案不要）"}
        - **週末イベント**: {event_prompt_section if event_prompt_section else "（この時間は提案不要）"}
+       - **お手伝い成果**: {quest_prompt_section if quest_prompt_section else "（特になし）"}
        - **家の状況**: 子供の記録があれば触れる。高砂や実家の状況は触れない。
        - **季節感**: 子供関連の夏休みや冬休み、クリスマスや正月、バレンタイン、母の日など、様々な季節のイベントが近ければ触れる。
     3. **締め**: 「{time_ctx['closing']}」のようなニュアンスで。
