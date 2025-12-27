@@ -20,7 +20,7 @@ logger = common.setup_logging("camera")
 logging.getLogger("zeep").setLevel(logging.WARNING)
 
 # === 画像保存設定 ===
-ASSETS_DIR = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
+ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")
 if not os.path.exists(ASSETS_DIR):
     os.makedirs(ASSETS_DIR, exist_ok=True)
 
