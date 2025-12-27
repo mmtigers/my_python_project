@@ -52,7 +52,7 @@ SQLITE_TABLE_CHILD = "child_health_records"
 SQLITE_TABLE_DEFECATION = "defecation_records"
 SQLITE_TABLE_AI_REPORT = "ai_report_records"
 SQLITE_TABLE_SHOPPING = "shopping_records"
-
+SQLITE_TABLE_NAS = "nas_records"
 
 # バックアップ対象
 BACKUP_FILES = [SQLITE_DB_PATH, "config.py", ".env"]
