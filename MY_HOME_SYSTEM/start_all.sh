@@ -10,6 +10,25 @@ pkill -f unified_server.py
 pkill -f camera_monitor.py
 pkill -f "streamlit run"
 
+# ▼▼▼ 追加: NASマウント待機処理 ▼▼▼
+echo "--- 0.5. NASのマウントを確認します ---"
+MAX_RETRIES=10
+COUNT=0
+MOUNT_POINT="/mnt/nas"
+
+while ! mountpoint -q "$MOUNT_POINT"; do
+  echo "⏳ NASがまだマウントされていません... (試行 $COUNT/$MAX_RETRIES)"
+  sleep 3
+  COUNT=$((COUNT+1))
+  
+  if [ $COUNT -ge $MAX_RETRIES ]; then
+    echo "❌ NASのマウントに失敗しました。処理を中断します。"
+    # 必要に応じてここでDiscord通知スクリプトを呼ぶなどの処理が可能
+    exit 1
+  fi
+done
+echo "✅ NASマウント確認OK"
+
 # ngrokはSystemdで自動起動しているのでここでは起動しない
 # echo "--- 1. ngrokを起動します ---"
 # バックグラウンドで起動
