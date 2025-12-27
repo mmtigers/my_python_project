@@ -1,17 +1,20 @@
 # HOME_SYSTEM/unified_server.py
 from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage
 import uvicorn
 import time
+import datetime
 import asyncio
 import config
 import common
 import switchbot_get_device_list as sb_tool
 from handlers import line_logic
 import backup_database
+
 
 logger = common.setup_logging("server")
 
@@ -216,6 +219,16 @@ async def lifespan(app: FastAPI):
     
     yield
     logger.info("🛑 System Shutdown.")
+
+app = FastAPI(lifespan=lifespan)
+
+# ▼▼▼ 追加: NASの画像をWeb経由で表示できるようにする設定 ▼▼▼
+# config.ASSETS_DIR はNASのパス (/mnt/nas/home_system/assets) になっています
+app.mount("/assets", StaticFiles(directory=config.ASSETS_DIR), name="assets")
+# ▲▲▲ 追加終わり ▲▲▲
+
+handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
+line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
 
 
