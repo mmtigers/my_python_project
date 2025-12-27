@@ -8,6 +8,10 @@ logger = common.setup_logging("init_db")
 def init_db():
     logger.info(f"データベース初期化: {config.SQLITE_DB_PATH}")
     conn = sqlite3.connect(config.SQLITE_DB_PATH)
+
+    # ★追加: WALモードを有効化 (並列書き込みに強くなる)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    
     cur = conn.cursor()
 
     # 既存のテーブル定義...

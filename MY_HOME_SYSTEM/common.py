@@ -12,6 +12,8 @@ import config
 from linebot.exceptions import LineBotApiError
 from linebot import LineBotApi
 from linebot.exceptions import LineBotApiError
+from requests.adapters import HTTPAdapter # 追加
+from urllib3.util.retry import Retry # 追加
 
 # LineBotApiの初期化
 if config.LINE_CHANNEL_ACCESS_TOKEN:
@@ -67,24 +69,56 @@ def setup_logging(name: str) -> logging.Logger:
 
 logger = setup_logging("common")
 
-# === データベース関連 ===
+# === データベース関連 (強化版) ===
 @contextmanager
 def get_db_cursor(commit: bool = False):
-    """DB接続コンテキストマネージャ"""
+    """DB接続コンテキストマネージャ (リトライ機能付き)"""
     conn = None
-    try:
-        conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=10)
-        conn.row_factory = sqlite3.Row
-        yield conn.cursor()
-        if commit:
-            conn.commit()
-    except Exception as e:
-        logger.error(f"データベース操作エラー: {e}")
-        if conn:
-            conn.rollback()
-    finally:
-        if conn:
+    max_retries = 5
+    retry_delay = 1.0
+
+    for attempt in range(max_retries):
+        try:
+            # timeoutを長めに設定 (デフォルトは5秒だが、並列処理が多い場合は20-30秒推奨)
+            conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)
+            conn.row_factory = sqlite3.Row
+            
+            # WALモード有効化 (同時実行性能の向上) - 毎回呼んでも低コスト
+            conn.execute("PRAGMA journal_mode=WAL;")
+            
+            yield conn.cursor()
+            
+            if commit:
+                conn.commit()
+            break # 成功したらループを抜ける
+
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e):
+                # ロックエラーなら待機してリトライ
+                logger.warning(f"⚠️ DB is locked. Retrying... ({attempt+1}/{max_retries})")
+                if conn:
+                    conn.close()
+                time.sleep(retry_delay)
+            else:
+                # その他のエラーは即座にraise
+                logger.error(f"データベース操作エラー: {e}")
+                if conn: conn.rollback()
+                raise e
+        except Exception as e:
+            logger.error(f"予期せぬDBエラー: {e}")
+            if conn: conn.rollback()
+            raise e
+    else:
+        # ループがbreakされずに終了した場合（リトライ上限）
+        logger.error("❌ DB Retry limit reached.")
+        if conn: conn.close()
+
+    # finallyでのcloseは、成功時のみ行う (yield先でエラーが出た場合もcloseされるようcontextmanagerの仕様に委ねるが、明示的に書く)
+    if conn:
+        try:
             conn.close()
+        except:
+            pass
 
 def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """汎用データ保存関数"""
@@ -99,6 +133,21 @@ def save_log_generic(table: str, columns_list: List[str], values_list: tuple) ->
             except Exception as e:
                 logger.error(f"データ保存失敗 ({table}): {e}")
     return False
+
+# === 通信関連 (新規追加) ===
+def get_retry_session(retries=3, backoff_factor=1.0):
+    """リトライ機能付きのRequestsセッションを作成"""
+    session = requests.Session()
+    retry = Retry(
+        total=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 # === 通知関連 ===
 def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channel: str = "notify") -> bool:
@@ -152,14 +201,17 @@ def _send_line_push(user_id: str, messages: List[dict]) -> bool:
     payload = {"to": user_id, "messages": messages}
     
     try:
-        res = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        # リトライセッションを使用
+        session = get_retry_session()
+        res = session.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        
         if res.status_code != 200:
             logger.error(f"LINE API Error: {res.status_code} {res.text}")
             return False
         return True
     except Exception as e:
         logger.error(f"LINE接続エラー: {e}")
-        return False
+        return False    
 
 def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = "discord", channel: str = "notify") -> bool:
     """     
@@ -170,9 +222,8 @@ def send_push(user_id: str, messages: List[dict], image_data: bytes = None, targ
     if target is None:
         target = config.NOTIFICATION_TARGET
     
-    if target.lower == 'line':
+    if target.lower() == 'line':
         try:
-            # LINE送信ロジック (既存コードの想定)
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"
@@ -181,29 +232,25 @@ def send_push(user_id: str, messages: List[dict], image_data: bytes = None, targ
                 "to": user_id,
                 "messages": messages
             }
-            response = requests.post("https://api.line.me/v2/bot/message/push", headers=headers, json=data)
+            # リトライセッションを使用
+            session = get_retry_session()
+            response = session.post("https://api.line.me/v2/bot/message/push", headers=headers, json=data, timeout=10)
             
-            # --- ここから修正 ---
-            # 429 (Too Many Requests) の場合、警告ログを出してDiscordへ転送
             if response.status_code == 429:
                 logger.warning("LINE API limit reached (429). Falling back to Discord.")
-                # 再帰的にDiscord宛で呼び出す
                 return send_push(user_id, messages, target='discord', channel=channel)
             
-            # その他のエラー
             elif response.status_code != 200:
                 logger.error(f"LINE API Error: {response.status_code} {response.text}")
-                # 4xx, 5xxエラー時も、重要通知が漏れないようDiscordに送るのが安全（オプション）
-                return send_push(user_id, [{"type": "text", "text": f"⚠️ LINE送信失敗により転送:\n{messages[0].get('text', '')}"}], target='discord', channel='error')
+                # 失敗時、Discordへ転送
+                fallback_msg = [{"type": "text", "text": f"⚠️ LINE送信失敗により転送:\n{messages[0].get('text', '')}"}]
+                return send_push(user_id, fallback_msg, target='discord', channel='error')
 
             return True
-            # --- ここまで修正 ---
 
         except Exception as e:
             logger.error(f"LINE send exception: {e}")
             return False
-
-
 
     if target.lower() == "discord":
         return _send_discord_webhook(messages, image_data, channel)
