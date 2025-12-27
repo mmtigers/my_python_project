@@ -259,3 +259,10 @@ GOOGLE_PHOTOS_SCOPES = ['https://www.googleapis.com/auth/photoslibrary']
 
 # WebサイトのURL (通知用)
 REINFOLIB_WEB_URL = "https://www.reinfolib.mlit.go.jp/"
+
+# ==========================================
+# 6. NAS設定 (BUFFALO LS720D)
+# ==========================================
+NAS_IP = "192.168.1.20"
+NAS_MOUNT_POINT = "/mnt/nas"
+NAS_CHECK_TIMEOUT = 5  # Ping等のタイムアウト(秒)
