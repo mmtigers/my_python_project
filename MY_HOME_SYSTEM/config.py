@@ -37,8 +37,19 @@ SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")
 # 2. システム・パス設定
 # ==========================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ▼▼▼ 追加・変更 ▼▼▼
+# NAS設定
+NAS_MOUNT_POINT = "/mnt/nas"
+NAS_PROJECT_ROOT = os.path.join(NAS_MOUNT_POINT, "home_system")
+
+# DBは速度と安定性のためローカル(SDカード)維持を推奨
 SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
-ASSETS_DIR = os.path.join(BASE_DIR, "..", "assets")
+
+# 画像データ等は容量節約のためNASへ変更
+ASSETS_DIR = os.path.join(NAS_PROJECT_ROOT, "assets")
+
+# ログはローカルのまま
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 # DBテーブル名定義

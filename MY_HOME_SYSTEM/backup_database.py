@@ -13,7 +13,10 @@ import sqlite3
 logger = common.setup_logging("backup")
 
 # バックアップ保存先 (プロジェクトの親ディレクトリ/backups)
-BACKUP_DIR = os.path.join(config.BASE_DIR, "..", "backups")
+if hasattr(config, "NAS_PROJECT_ROOT"):
+    BACKUP_DIR = os.path.join(config.NAS_PROJECT_ROOT, "backups")
+else:
+    BACKUP_DIR = "/mnt/nas/home_system/backups"
 
 # 保持する世代数 (最新7日分)
 KEEP_GENERATIONS = 7
