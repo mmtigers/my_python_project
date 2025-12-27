@@ -188,7 +188,7 @@ def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channe
         return False
 
 def _send_line_push(user_id: str, messages: List[dict]) -> bool:
-    """LINE Push API送信"""
+    """LINE Push API送信 (エラーハンドリング強化版)"""
     if not config.LINE_CHANNEL_ACCESS_TOKEN:
         logger.error("LINE Token未設定")
         return False
@@ -201,66 +201,74 @@ def _send_line_push(user_id: str, messages: List[dict]) -> bool:
     payload = {"to": user_id, "messages": messages}
     
     try:
-        # リトライセッションを使用
         session = get_retry_session()
         res = session.post(url, headers=headers, data=json.dumps(payload), timeout=10)
         
+        # --- 修正: 429 (レート制限) を特別扱いする ---
+        if res.status_code == 429:
+            logger.warning("⚠️ LINE API limit reached (429).")
+            return False
+        # ----------------------------------------
+
         if res.status_code != 200:
             logger.error(f"LINE API Error: {res.status_code} {res.text}")
             return False
         return True
     except Exception as e:
         logger.error(f"LINE接続エラー: {e}")
-        return False    
+        return False
 
 def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = "discord", channel: str = "notify") -> bool:
-    """     
-    メッセージを送信するラッパー関数
-    - target='line': LINEに送信 (失敗時、429エラーならDiscordへフォールバック)
-    - target='discord': Discordに送信
+    """
+    メッセージを送信するラッパー関数 (修正版)
+    - LINE送信失敗時(特に429)は自動的にDiscordへフォールバックします
     """
     if target is None:
         target = config.NOTIFICATION_TARGET
     
-    if target.lower() == 'line':
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"
-            }
-            data = {
-                "to": user_id,
-                "messages": messages
-            }
-            # リトライセッションを使用
-            session = get_retry_session()
-            response = session.post("https://api.line.me/v2/bot/message/push", headers=headers, json=data, timeout=10)
-            
-            if response.status_code == 429:
-                logger.warning("LINE API limit reached (429). Falling back to Discord.")
-                return send_push(user_id, messages, target='discord', channel=channel)
-            
-            elif response.status_code != 200:
-                logger.error(f"LINE API Error: {response.status_code} {response.text}")
-                # 失敗時、Discordへ転送
-                fallback_msg = [{"type": "text", "text": f"⚠️ LINE送信失敗により転送:\n{messages[0].get('text', '')}"}]
-                return send_push(user_id, fallback_msg, target='discord', channel='error')
-
-            return True
-
-        except Exception as e:
-            logger.error(f"LINE send exception: {e}")
-            return False
-
-    if target.lower() == "discord":
-        return _send_discord_webhook(messages, image_data, channel)
-    else:
+    target_lower = target.lower()
+    
+    # 送信先の判定
+    should_send_discord = target_lower in ["discord", "all", "both"]
+    should_send_line = target_lower in ["line", "all", "both"]
+    
+    # ターゲット指定がない(elseルート)場合のデフォルト挙動維持
+    if not should_send_discord and not should_send_line:
+        should_send_line = True
+        # 画像がある場合はDiscordにも送る（既存ロジック踏襲）
         if image_data:
+            should_send_discord = True
+
+    success = True
+
+    # 1. Discord送信
+    if should_send_discord:
+        if not _send_discord_webhook(messages, image_data, channel):
+            success = False
+
+    # 2. LINE送信 (Discordへのフォールバック機能付き)
+    if should_send_line:
+        # 画像直接送信は未実装のため、Discordへ送っていない場合はDiscordへ逃がす
+        if image_data and not should_send_discord:
             logger.warning("LINEへの画像直接送信は未実装です (Discordへフォールバックします)")
             _send_discord_webhook(messages, image_data, channel)
+            # LINEには画像を見ろというメッセージを送る
+            messages = list(messages) # コピー
             messages.append({"type": "text", "text": "※画像はDiscordに送信しました"})
-        
-        return _send_line_push(user_id, messages)
+
+        # LINE送信実行
+        if not _send_line_push(user_id, messages):
+            # 失敗した場合、かつDiscordにまだ送っていない情報であればフォールバック
+            if not should_send_discord:
+                logger.warning("Falling back to Discord due to LINE error.")
+                fallback_msg = [{"type": "text", "text": f"⚠️ LINE送信失敗により転送:\n{messages[0].get('text', '')}"}]
+                _send_discord_webhook(fallback_msg, None, 'error')
+            
+            # LINEのみへの送信が失敗した場合はFalseとする
+            if not should_send_discord:
+                success = False
+
+    return success
 
 def send_reply(reply_token: str, messages: List[dict]) -> bool:
     """LINE Reply API送信"""
