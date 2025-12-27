@@ -1,6 +1,7 @@
 import feedparser
 import logging
 import requests
+import common
 
 logger = logging.getLogger('NewsService')
 
@@ -19,7 +20,8 @@ class NewsService:
     def _fetch_feed(self, url):
         """RSSを安全に取得"""
         try:
-            res = requests.get(url, headers=self.HEADERS, timeout=10)
+            session = common.get_retry_session()
+            res = session.get(url, headers=self.HEADERS, timeout=10)
             if res.status_code == 200:
                 return feedparser.parse(res.content)
             else:

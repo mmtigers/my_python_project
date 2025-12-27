@@ -51,7 +51,7 @@ FRIENDLY_NAME_FIXES = {
 
 def get_db_connection():
     """データベース接続を取得 (読み取り専用)"""
-    return sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
+    return sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0)
 
 def process_dataframe(df):
     """DataFrameのタイムスタンプを日本時間に変換し、表示名を適用する共通処理"""
