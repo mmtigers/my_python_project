@@ -9,7 +9,17 @@ import traceback
 from typing import List, Any, Optional, Union
 from contextlib import contextmanager
 import config
+from linebot.exceptions import LineBotApiError
+from linebot import LineBotApi
+from linebot.exceptions import LineBotApiError
 
+# LineBotApiの初期化
+if config.LINE_CHANNEL_ACCESS_TOKEN:
+    line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
+else:
+    line_bot_api = None
+
+    
 # === ロギング設定 ===
 class DiscordErrorHandler(logging.Handler):
     """エラーログをDiscordに通知するハンドラ"""
@@ -222,6 +232,52 @@ def send_reply(reply_token: str, messages: List[dict]) -> bool:
     except Exception as e:
         logger.error(f"LINE Reply 接続エラー: {e}")
         return False
+
+def get_line_message_quota():
+    """
+    LINE Messaging APIの今月のメッセージ送信数を取得する。
+    Returns:
+        dict: {'total_usage': int, 'type': 'none'|'limited', 'value': int|None, 'remain': int|None}
+        エラー時は None を返す。
+    """
+    if not line_bot_api:
+        return None
+
+    try:
+        # 消費数を取得 (Get consumption)
+        consumption = line_bot_api.get_message_quota_consumption()
+        total_usage = consumption.total_usage
+
+        # 上限を取得 (Get quota) - 未設定(none)の場合は目安がないためNone
+        # 無料プラン(フリー)の場合は通常 200通 (2025年現在、変更の可能性あり)
+        try:
+            quota = line_bot_api.get_message_quota()
+            quota_type = quota.type # 'none' (無制限/従量) or 'limited' (上限あり)
+            quota_value = quota.value # 上限数
+        except LineBotApiError:
+            # 権限不足などで取得できない場合はデフォルト値を仮定
+            quota_type = 'unknown'
+            quota_value = 200 # フリープランの一般的な上限
+        
+        remain = None
+        if quota_value is not None:
+            remain = max(0, quota_value - total_usage)
+
+        return {
+            "total_usage": total_usage,
+            "type": quota_type,
+            "limit": quota_value,
+            "remain": remain
+        }
+
+    except Exception as e:
+        # ロガーが未定義の場合はprintで代用 (通常は定義済み)
+        if 'logger' in globals():
+            logger.error(f"Failed to get LINE quota: {e}")
+        else:
+            print(f"Failed to get LINE quota: {e}")
+        return None
+
 
 # === ユーティリティ ===
 def get_now_iso() -> str:
