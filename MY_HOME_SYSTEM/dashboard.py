@@ -16,7 +16,7 @@ import sys
 import shutil
 import subprocess
 import requests
-import financial_service
+# import financial_service  <-- 削除
 
 # 自作モジュール
 import config
@@ -1252,10 +1252,10 @@ def main():
         # メトリクス（ステータスカード）表示
         render_metrics_section(now, df_sensor, df_car)
 
-        # タブ切り替え
-        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_money, tab_bicycle = st.tabs([
+        # タブ切り替え（tab_money削除）
+        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_bicycle = st.tabs([
             "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
-            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理", "📉 資産シミュ", "🚲 駐輪場"
+            "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理", "🚲 駐輪場"
         ])
 
         with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
@@ -1268,8 +1268,8 @@ def main():
         with tab_log: render_logs_tab(df_sensor)
         with tab_trends: render_trends_tab()
         with tab_sys: render_system_tab()
-        with tab_money:financial_service.render_simulation_tab()
         with tab_bicycle: render_bicycle_tab(df_bicycle)
+        # 削除: with tab_money:financial_service.render_simulation_tab()
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
