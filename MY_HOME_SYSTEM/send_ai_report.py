@@ -145,23 +145,6 @@ def fetch_daily_data():
         data['camera_images_paths'] = []
 
 
-    # 9. 今日の写真 (Google Photos)
-    print("📸 [Data Fetching] Google Photos...")
-    try:
-        gp_service = GooglePhotosService()
-        # 過去1日分の写真を最大5枚取得
-        photos = gp_service.get_recent_photos(limit=5, days=1)
-        if photos:
-            # 写真があればGeminiで分析してテキスト化
-            data['photo_analysis'] = gp_service.analyze_photos_with_gemini(photos)
-        else:
-            data['photo_analysis'] = None
-    except Exception as e:
-        logger.error(f"写真処理スキップ: {e}")
-        data['photo_analysis'] = None
-
-
-
     return data
 
 def get_time_context(hour):

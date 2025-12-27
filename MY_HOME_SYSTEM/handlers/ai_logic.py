@@ -3,6 +3,8 @@ from google.generativeai.types import FunctionDeclaration, Tool
 import json
 import datetime
 import traceback
+import sqlite3
+import re
 import common
 import config
 
@@ -16,43 +18,77 @@ else:
     logger.warning("⚠️ GEMINI_API_KEYが設定されていません。AI機能は無効です。")
 
 # ==========================================
-# 1. ツール定義 (関数宣言方式)
+# 0. データベーススキーマ定義 (AI用コンテキスト)
+# ==========================================
+DB_SCHEMA_INFO = f"""
+あなたは以下のSQLiteテーブルを持つホームシステムのデータベースにアクセスできます。
+ユーザーの質問に答えるために、適切なSQLクエリを作成してデータを検索してください。
+
+【テーブル定義】
+1. {config.SQLITE_TABLE_CHILD} (子供の体調)
+   - Columns: timestamp (日時), child_name (名前), condition (症状・様子)
+   - 用途: 「子供の熱はいつ？」「最近の体調は？」などの質問に使用。
+
+2. {config.SQLITE_TABLE_SHOPPING} (買い物履歴)
+   - Columns: order_date (注文日), platform (Amazon/Rakuten/LINE入力), item_name (商品名), price (金額)
+   - 用途: 「最近何買った？」「今月のAmazonの利用額は？」などの質問に使用。
+
+3. {config.SQLITE_TABLE_FOOD} (食事記録)
+   - Columns: timestamp (日時), menu_category (メニュー内容: '自炊: カレー' 等), meal_time_category (Dinner等)
+   - 用途: 「先週の夕食は何だった？」「外食の頻度は？」などの質問に使用。
+
+4. {config.SQLITE_TABLE_SENSOR} (センサー・電力データ)
+   - Columns: timestamp, device_name, device_type, power_watts, temperature_celsius, humidity_percent
+   - 用途: 「今の室温は？」「電気代（電力）の推移は？」などの質問に使用。
+   - 注意: 電気代計算には 'Nature Remo E Lite' の power_watts を使用。
+
+5. {config.SQLITE_TABLE_CAR} (車の移動)
+   - Columns: timestamp, action (LEAVE/RETURN)
+   - 用途: 「いつ外出した？」「車は今ある？」などの質問に使用。
+
+6. {config.SQLITE_TABLE_DEFECATION} (排便記録)
+   - Columns: timestamp, user_name, condition, note
+   - 用途: 「お腹の調子」「うんちいつ出た？」などの質問に使用。
+
+【SQL作成ルール】
+- 日付比較は `timestamp` カラム (ISO8601形式: YYYY-MM-DDTHH:MM:SS) または `date` カラムを使用。
+- 直近のデータを検索する場合は `ORDER BY timestamp DESC LIMIT N` を活用する。
+- 曖昧検索には `LIKE '%キーワード%'` を使用する。
+"""
+
+# ==========================================
+# 1. ツール定義 (関数宣言)
 # ==========================================
 
-def declare_child_health(child_name: str, condition: str, is_emergency: bool = False):
-    """子供の体調や怪我、様子を記録する。
+# --- 既存の記録用ツール ---
 
-    Args:
-        child_name: 子供の名前 (例: たろう, はな, 子供)
-        condition: 症状や状態 (例: 38度の熱, 鼻水が出ている, 元気いっぱい)
-        is_emergency: 熱や怪我など、心配な症状の場合はTrue
-    """
+def declare_child_health(child_name: str, condition: str, is_emergency: bool = False):
+    """子供の体調や怪我、様子を記録する。"""
     pass
 
 def declare_shopping(item_name: str, price: int, date_str: str = None):
-    """買い物や支出を記録する。
-
-    Args:
-        item_name: 買ったものや店名 (例: スーパーの食材, コンビニ, ガソリン)
-        price: 金額 (円)
-        date_str: 日付 (YYYY-MM-DD形式)。指定がなければ今日。
-    """
+    """買い物や支出を記録する。"""
     pass
 
 def declare_defecation(condition: str, note: str = ""):
-    """排便やトイレ、お腹の調子を記録する。
+    """排便やトイレ、お腹の調子を記録する。"""
+    pass
 
+# --- 新規追加: 検索用ツール ---
+
+def search_database(sql_query: str):
+    """データベースから情報を検索する。ユーザーの質問に答えるために必要なデータを取得するSQLを実行する。
+    
     Args:
-        condition: 状態 (例: 普通のうんち, 下痢気味, 便秘)
-        note: 補足メモ (任意)
+        sql_query: 実行するSQLite形式のSELECTクエリ (例: "SELECT * FROM child_health_records ORDER BY timestamp DESC LIMIT 5")
     """
     pass
 
-# ツールセット
-my_tools = [declare_child_health, declare_shopping, declare_defecation]
+# ツールセット登録
+my_tools = [declare_child_health, declare_shopping, declare_defecation, search_database]
 
 # ==========================================
-# 2. 実行ロジック (DB保存)
+# 2. 実行ロジック
 # ==========================================
 
 def execute_child_health(args, user_id, user_name):
@@ -75,8 +111,6 @@ def execute_child_health(args, user_id, user_name):
 def execute_shopping(args, user_id, user_name):
     """買い物をDBに保存"""
     item = args.get("item_name")
-    
-    # 【修正箇所】AIが float (3000.0) で返すことがあるため、int に強制変換
     try:
         price = int(args.get("price", 0))
     except (ValueError, TypeError):
@@ -108,6 +142,38 @@ def execute_defecation(args, user_id, user_name):
     
     return f"🚽 お腹の記録をしました。\n状態: {condition}"
 
+def execute_search_database(args):
+    """読み取り専用でSQLを実行し結果を返す"""
+    query = args.get("sql_query", "")
+    
+    # 安全対策: SELECT以外のクエリを禁止
+    if not re.match(r"^\s*SELECT", query, re.IGNORECASE):
+        return "❌ エラー: データ検索以外の操作（更新・削除など）は許可されていません。"
+
+    # 読み取り専用モードで接続
+    try:
+        # common.get_db_cursorは書き込みも可能な設定になりうるため、ここでは明示的にroモードで接続する
+        conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
+        cursor = conn.cursor()
+        
+        logger.info(f"🔍 Executing SQL: {query}")
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        conn.close()
+
+        if not rows:
+            return "該当するデータは見つかりませんでした。"
+
+        # 結果を見やすく整形 (Markdownテーブル風、またはJSON)
+        # AIが解釈しやすいJSON形式で返す
+        result_list = [dict(zip(columns, row)) for row in rows]
+        return json.dumps(result_list, ensure_ascii=False, default=str)
+
+    except Exception as e:
+        logger.error(f"SQL Execution Error: {e}")
+        return f"検索中にエラーが発生しました: {str(e)}"
+
 # ==========================================
 # 3. メイン処理 (Gemini呼び出し)
 # ==========================================
@@ -118,40 +184,36 @@ def analyze_text_and_execute(text: str, user_id: str, user_name: str) -> str:
         return None 
 
     try:
+        # モデル初期化 (toolsを指定)
         model = genai.GenerativeModel('gemini-2.5-flash', tools=my_tools)
         
+        # プロンプト構築
         prompt = f"""
         ユーザー名: {user_name}
         現在日時: {common.get_now_iso()}
         
-        あなたは家庭用アシスタントです。ユーザーのメッセージから情報を抽出し、適切な関数を呼び出してください。
-        関数を呼び出す必要がない雑談や挨拶の場合は、親しみやすい口調で返事をしてください。
+        あなたは家庭用アシスタント「セバスチャン」です。
+        ユーザーのメッセージから意図を理解し、以下のいずれかを行ってください：
+        1. 記録が必要な場合: 適切な記録用ツールを呼び出す。
+        2. 情報検索が必要な場合: 提供されたテーブル定義を元にSQLを作成し、`search_database` ツールを呼び出す。
+        3. 雑談や挨拶の場合: 親しみやすい口調で返事をする。
+
+        {DB_SCHEMA_INFO}
         
         ユーザーメッセージ: {text}
         """
 
-        response = model.generate_content(prompt)
+        # チャットセッション開始（履歴なしの単発）
+        chat = model.start_chat(enable_automatic_function_calling=True)
+        response = chat.sendMessage(prompt)
         
-        if response.parts:
-            for part in response.parts:
-                if fn := part.function_call:
-                    tool_name = fn.name
-                    args = dict(fn.args)
-                    logger.info(f"🤖 AI Tool Call: {tool_name} args={args}")
-                    
-                    if tool_name == "declare_child_health":
-                        return execute_child_health(args, user_id, user_name)
-                    elif tool_name == "declare_shopping":
-                        return execute_shopping(args, user_id, user_name)
-                    elif tool_name == "declare_defecation":
-                        return execute_defecation(args, user_id, user_name)
-        
+        # 自動実行された結果を含むレスポンスが返ってくる
         if response.text:
-            return response.text
+            return response.text.strip()
             
     except Exception as e:
         logger.error(f"AI解析エラー: {e}")
         logger.error(traceback.format_exc())
-        return None 
+        return "申し訳ありません、処理中にエラーが発生しました🙇"
 
     return None
