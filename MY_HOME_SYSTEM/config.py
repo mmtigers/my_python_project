@@ -39,7 +39,7 @@ SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SQLITE_DB_PATH = os.path.join(BASE_DIR, "home_system.db")
 ASSETS_DIR = os.path.join(BASE_DIR, "..", "assets")
-LOG_DIR = os.path.join(BASE_DIR, "..", "logs")
+LOG_DIR = os.path.join(BASE_DIR, "logs")
 
 # DBテーブル名定義
 SQLITE_TABLE_SENSOR = "device_records"
