@@ -9,7 +9,7 @@ import common
 # ログ設定
 logger = common.setup_logging("cam_digest")
 
-SNAPSHOT_DIR = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
+SNAPSHOT_DIR = os.path.join(config.ASSETS_DIR, "snapshots")
 
 def get_todays_highlight_images(limit=10):
     """
