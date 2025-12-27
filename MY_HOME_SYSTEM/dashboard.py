@@ -91,6 +91,28 @@ def apply_friendly_names(df):
     
     return df
 
+
+
+def load_nas_status():
+    """NASの最新状態を取得"""
+    # configに定数がない場合のフォールバック
+    table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
+    try:
+        # テーブル存在確認
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+        if not cur.fetchone():
+            return None
+        conn.close()
+
+        query = f"SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT 1"
+        df = load_data_from_db(query)
+        return df.iloc[0] if not df.empty else None
+    except Exception as e:
+        logger.error(f"NAS Data Load Error: {e}")
+        return None
+
 @st.cache_data(ttl=60)
 def load_data_from_db(query, date_column='timestamp'):
     """汎用データロード関数"""
@@ -1041,6 +1063,44 @@ def render_system_tab():
         st.progress(int(mem['percent']))
     else:
         st.warning("メモリ情報の取得に失敗しました")
+
+    st.markdown("---")
+
+
+    # ▼▼▼ 3. NAS情報 (ここを追加) ▼▼▼
+    st.subheader("🗄️ NAS 状態 (BUFFALO LS720D)")
+    nas_data = load_nas_status()
+
+    if nas_data is not None:
+        # ステータス表示
+        c_nas1, c_nas2, c_nas3 = st.columns(3)
+        with c_nas1:
+            ping_icon = "✅" if nas_data['status_ping'] == 'OK' else "❌"
+            st.metric("Ping疎通", f"{ping_icon} {nas_data['status_ping']}")
+        with c_nas2:
+            mount_icon = "✅" if nas_data['status_mount'] == 'OK' else "❌"
+            st.metric("マウント", f"{mount_icon} {nas_data['status_mount']}")
+        with c_nas3:
+            # 最終更新
+            ts = nas_data['timestamp']
+            if isinstance(ts, str):
+                ts = pd.to_datetime(ts).tz_localize('UTC').tz_convert('Asia/Tokyo') if 'T' in ts else pd.to_datetime(ts)
+            last_upd = ts.strftime('%m/%d %H:%M')
+            st.metric("最終確認", last_upd)
+            
+        # 容量表示
+        if nas_data['total_gb'] > 0:
+            usage_rate = nas_data['percent']
+            st.write(f"**💾 NASディスク使用率: {usage_rate:.1f}%** (使用 {nas_data['used_gb']} GB / 全体 {nas_data['total_gb']} GB)")
+            
+            # 90%超で赤く警告表示などはStreamlit標準progressではできないが、キャプションで補足
+            if usage_rate > 90:
+                st.warning("⚠️ 容量が残り少なくなっています！")
+            st.progress(int(usage_rate))
+        else:
+            st.warning("容量データが取得できていません")
+    else:
+        st.info("NASの監視データがまだありません (nas_monitor.pyを実行してください)")
 
     st.markdown("---")
 
