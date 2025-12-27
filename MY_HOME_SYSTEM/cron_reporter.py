@@ -32,7 +32,7 @@ class CronReporter:
         load_dotenv(dotenv_path)
         
         # 通知先設定
-        self.line_token = os.getenv("LINE_ACCESS_TOKEN")
+        self.line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         self.discord_webhook = os.getenv("DISCORD_WEBHOOK_REPORT")
 
         # 少なくともどちらか一つは設定されているべき
