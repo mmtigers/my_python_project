@@ -480,25 +480,77 @@ def get_car_status(df_car):
     return val, theme
 
 def get_bicycle_status(df_bicycle):
-    """駐輪場ステータス (主要3エリアの合計待機数)"""
+    """駐輪場ステータス (主要3エリアの個別表示 + 前日比)"""
     if df_bicycle.empty:
         return "⚪ データなし", "theme-gray"
     
-    target_areas = [
-        "JR伊丹駅前(第1)自転車駐車場 (A)", 
-        "JR伊丹駅前(第3)自転車駐車場 (A)", 
-        "JR伊丹駅前(第3)自転車駐車場 (E)"
-    ]
-    # 最新データを抽出
+    targets = {
+        "JR伊丹駅前(第1)自転車駐車場 (A)": "第1A", 
+        "JR伊丹駅前(第3)自転車駐車場 (A)": "第3A", 
+        "JR伊丹駅前(第3)自転車駐車場 (E)": "第3E"
+    }
+    
+    # タイムスタンプの型変換を確実に行う
+    if not pd.api.types.is_datetime64_any_dtype(df_bicycle['timestamp']):
+        df_bicycle['timestamp'] = pd.to_datetime(df_bicycle['timestamp']).dt.tz_convert('Asia/Tokyo')
+
+    # 最新データを抽出 (エリアごとの最新行)
     latest_df = df_bicycle.sort_values('timestamp', ascending=False).drop_duplicates('area_name')
-    target_df = latest_df[latest_df['area_name'].isin(target_areas)]
     
-    if target_df.empty:
+    details = []
+    total_wait = 0
+    has_data = False
+    
+    for full_name, short_name in targets.items():
+        # 最新値の取得
+        row = latest_df[latest_df['area_name'] == full_name]
+        
+        if not row.empty:
+            current_val = int(row.iloc[0]['waiting_count'])
+            current_time = row.iloc[0]['timestamp']
+            
+            # 前日データの検索 (24時間前 ±1時間の範囲で最も近いデータを探す)
+            # 同じエリアのデータを抽出
+            df_area = df_bicycle[df_bicycle['area_name'] == full_name]
+            
+            # 24時間前の時刻
+            target_time = current_time - timedelta(days=1)
+            
+            # 前日付近のデータをフィルタ (高速化のため前後2時間で絞る)
+            df_near = df_area[
+                (df_area['timestamp'] >= target_time - timedelta(hours=2)) & 
+                (df_area['timestamp'] <= target_time + timedelta(hours=2))
+            ]
+            
+            diff_str = ""
+            if not df_near.empty:
+                # ターゲット時刻との差が最小の行を取得
+                nearest_idx = (df_near['timestamp'] - target_time).abs().idxmin()
+                past_val = int(df_near.loc[nearest_idx]['waiting_count'])
+                
+                diff = current_val - past_val
+                if diff > 0:
+                    diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>" # 赤で増加
+                elif diff < 0:
+                    diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>" # 緑で減少
+                else:
+                    diff_str = f" <span style='color:#757575;'>(➡️0)</span>"
+            else:
+                diff_str = " <span style='color:#999;'>(--)</span>"
+
+            details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
+            total_wait += current_val
+            has_data = True
+        else:
+            details.append(f"{short_name}: -")
+    
+    if not has_data:
         return "⚪ データなし", "theme-gray"
-    
-    total_wait = target_df['waiting_count'].sum()
-    
-    val = f"🚲 待機: {int(total_wait)}人"
+        
+    # HTMLで表示 (改行と文字サイズ調整)
+    val = f"<div style='font-size:0.85rem; line-height:1.4; text-align:left; display:inline-block;'>{'<br>'.join(details)}</div>"
+
+    # 色判定 (合計数に基づく)
     if total_wait == 0:
         theme = "theme-green"
     elif total_wait < 10:
@@ -664,12 +716,29 @@ def render_traffic_tab():
             """, unsafe_allow_html=True)
 
     st.markdown("---")
-    dep_time = (datetime.now() + timedelta(minutes=20)).strftime('%H:%M')
-    st.subheader(f"📍 ルート検索 ({dep_time} 出発想定)")
+    # 時間帯によるルート検索の出し分け
+    now_jst = datetime.now(pytz.timezone('Asia/Tokyo'))
+    current_hour = now_jst.hour
+    dep_time = (now_jst + timedelta(minutes=20)).strftime('%H:%M')
     
-    col_out, col_in = st.columns(2)
-    _render_route_search(col_out, "伊丹(兵庫県)", "長岡京", "📤")
-    _render_route_search(col_in, "長岡京", "伊丹(兵庫県)", "📥")
+    st.subheader(f"📍 ルート検索 ({dep_time} 出発想定)")
+    container = st.container()
+    
+    # センター寄せやカラム調整のために空のカラムを使うこともできるが、
+    # ここではシンプルに表示対象のみを描画する
+    
+    # 朝 (04:00 - 11:59) : 伊丹 -> 長岡京 (出勤)
+    if 4 <= current_hour < 12:
+        _render_route_search(container, "伊丹(兵庫県)", "長岡京", "📤 出勤ルート")
+        
+    # 昼・夜 (12:00 - 23:59) : 長岡京 -> 伊丹 (帰宅)
+    elif 12 <= current_hour <= 23:
+        _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
+        
+    # 深夜 (00:00 - 03:59) : デフォルトで帰宅ルートを表示 (終電/深夜帰宅対応)
+    else:
+        st.caption("※深夜帯のため帰宅ルートを表示します")
+        _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
 
 def _render_route_search(col, from_st, to_st, label_icon):
     with col:
