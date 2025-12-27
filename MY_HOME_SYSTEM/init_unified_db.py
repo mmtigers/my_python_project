@@ -143,6 +143,22 @@ def init_db():
     
     logger.info("✅ land_price_records テーブル準備完了")
 
+
+    # ▼【追加】NAS監視記録テーブル
+    cur.execute(f'''CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_NAS} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp DATETIME NOT NULL,
+        device_name TEXT,      -- 設定上の名前 (例: BUFFALO LS720D)
+        ip_address TEXT,       -- IPアドレス
+        status_ping TEXT,      -- 'OK' or 'NG'
+        status_mount TEXT,     -- 'OK' or 'NG'
+        total_gb INTEGER,      -- 全容量
+        used_gb INTEGER,       -- 使用容量
+        free_gb INTEGER,       -- 空き容量
+        percent REAL           -- 使用率(%)
+    )''')
+    logger.info("✅ nas_records テーブル準備完了")
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")
