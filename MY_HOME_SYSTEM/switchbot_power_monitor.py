@@ -100,9 +100,15 @@ def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, 
         
         return result
 
-    except Exception as e:
-        logger.error(f"[{device_id}] ステータス取得失敗: {e}")
+
+    except requests.exceptions.Timeout:
+        # タイムアウトはWARNINGレベルに留める（Discord通知しない）
+        logger.warning(f"[{device_id}] ステータス取得タイムアウト (API遅延)")
         return None
+    except Exception as e:
+        # その他の予期せぬエラーはERRORレベル
+        logger.error(f"[{device_id}] ステータス取得失敗: {e}")
+        return None 
 
 def get_prev_power(device_id: str) -> float:
     """DBから前回の電力値を取得"""
