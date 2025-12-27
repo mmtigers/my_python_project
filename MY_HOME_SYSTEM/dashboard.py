@@ -4,7 +4,7 @@ import pandas as pd
 import sqlite3
 import plotly.express as px
 import plotly.graph_objects as go
-from streamlit_calendar import calendar
+# from streamlit_calendar import calendar  <-- 削除
 import os
 import glob
 from datetime import datetime, timedelta, date
@@ -16,12 +16,12 @@ import sys
 import shutil
 import subprocess
 import requests
-# import financial_service  <-- 削除
 
 # 自作モジュール
 import config
 import common
 import train_service
+import financial_service
 
 # === ロガー設定 ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,34 +71,26 @@ def apply_friendly_names(df):
     """デバイスIDから表示名への変換と、特定の名称置換を行う"""
     if df.empty: return df
     
-    # ★ 修正: device_idカラムがないデータ（security_logsなど）への対応を追加
     if 'device_id' not in df.columns:
-        # device_nameがあればそれをfriendly_nameとして代用
         if 'device_name' in df.columns:
             df['friendly_name'] = df['device_name']
             df['location'] = 'その他'
         return df
 
-    # config定義からのマッピング
     id_map = {d['id']: d.get('name', d['id']) for d in config.MONITOR_DEVICES}
     loc_map = {d['id']: d.get('location', 'その他') for d in config.MONITOR_DEVICES}
     
     df['friendly_name'] = df['device_id'].map(id_map).fillna(df['device_name'])
     df['location'] = df['device_id'].map(loc_map).fillna('その他')
     
-    # 強制置換
     df['friendly_name'] = df['friendly_name'].replace(FRIENDLY_NAME_FIXES)
     
     return df
 
-
-
 def load_nas_status():
     """NASの最新状態を取得"""
-    # configに定数がない場合のフォールバック
     table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
     try:
-        # テーブル存在確認
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
@@ -121,15 +113,10 @@ def load_data_from_db(query, date_column='timestamp'):
         df = pd.read_sql_query(query, conn)
         conn.close()
         
-        # timestampカラムがある場合は日付処理を行う
         if date_column in df.columns:
-            # カラム名を一時的にtimestampにして処理
             if date_column != 'timestamp':
                 df.rename(columns={date_column: 'timestamp'}, inplace=True)
-            
             df = process_dataframe(df)
-            
-            # 元に戻す（必要なら）
             if date_column != 'timestamp':
                 df.rename(columns={'timestamp': date_column}, inplace=True)
                 
@@ -154,7 +141,6 @@ def get_ngrok_url():
         res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=2)
         if res.status_code == 200:
             data = res.json()
-            # サーバー用(8000)とダッシュボード用(8501)を探す
             urls = {}
             for t in data.get('tunnels', []):
                 addr = t.get('config', {}).get('addr', '')
@@ -181,24 +167,16 @@ def get_disk_usage():
         return None
 
 def get_memory_usage():
-    """
-    メモリ使用状況を取得 (free -m コマンドを使用して数値計算を行う)
-    Returns:
-        dict: total_mb, used_mb, free_mb, available_mb, percent
-    """
+    """メモリ使用状況を取得"""
     try:
-        # -m: メガバイト単位, -t: 合計行などは不要
         res = subprocess.run(['free', '-m'], capture_output=True, text=True)
         lines = res.stdout.strip().split('\n')
         
-        # ヘッダー: total used free shared buff/cache available
-        # Mem:      7900 1200 3000 ...
         if len(lines) >= 2:
             parts = lines[1].split()
-            # freeコマンドの出力フォーマットに依存
             total = int(parts[1])
             used = int(parts[2])
-            available = int(parts[6]) # availableの方が実質的な空き容量に近い
+            available = int(parts[6])
             
             percent = (used / total) * 100 if total > 0 else 0
             
@@ -209,35 +187,20 @@ def get_memory_usage():
                 "percent": percent
             }
     except Exception as e:
-        print(f"Memory check error: {e}")
         pass
     return None
 
 def get_system_logs(lines=50, priority=None, target_date=None):
-    """
-    Systemdのログを取得
-    Args:
-        lines (int): 取得行数 (直近モード用)
-        priority (str): ログレベル (例: 'err', 'warning')
-        target_date (date): 指定日 (日付指定モード用)
-    """
+    """Systemdのログを取得"""
     try:
-        # 基本コマンド
         cmd = ["journalctl", "-u", "home_system.service", "--no-pager"]
-        
-        # モード分岐
         if target_date:
-            # 日付指定モード: その日の00:00:00から23:59:59まで
-            # ※日付指定時は行数制限(-n)を適用せず、その日のログを広く拾う
-            # (ただしブラウザ負荷防止のため、安全策として最大5000行のリミットは設ける)
             since_str = f"{target_date} 00:00:00"
             until_str = f"{target_date} 23:59:59"
             cmd.extend(["--since", since_str, "--until", until_str, "-n", "5000"])
         else:
-            # 直近モード: 指定行数だけ表示
             cmd.extend(["-n", str(lines)])
         
-        # 優先度フィルタ
         if priority:
             cmd.extend(["-p", priority])
             
@@ -246,31 +209,14 @@ def get_system_logs(lines=50, priority=None, target_date=None):
     except Exception as e:
         return f"ログ取得エラー: {e}"
 
-
-
-
-
-@st.cache_data(ttl=300)
-def load_calendar_sensor_data(days=35):
-    start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
-    query = f"""
-        SELECT * FROM {config.SQLITE_TABLE_SENSOR} 
-        WHERE timestamp >= '{start_date}' 
-        AND (contact_state IN ('open', 'detected') OR movement_state = 'detected')
-    """
-    df = load_data_from_db(query)
-    return apply_friendly_names(df)
-
 @st.cache_data(ttl=300)
 def load_weather_history(days=40, location='伊丹'):
-    # weather_historyテーブルの存在確認は省略（エラー時は空DFが返るため）
     start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
     query = f"""
         SELECT date, min_temp, max_temp, weather_desc, umbrella_level 
         FROM weather_history 
         WHERE location = '{location}' AND date >= '{start_date}'
     """
-    # weather_historyにはtimestampカラムがないため、process_dataframeは通さない
     try:
         conn = get_db_connection()
         df = pd.read_sql_query(query, conn)
@@ -280,7 +226,6 @@ def load_weather_history(days=40, location='伊丹'):
         logger.error(f"Weather Load Error: {e}")
         return pd.DataFrame()
 
-# --- 年間気温データ取得用関数 (新規追加) ---
 @st.cache_data(ttl=3600)
 def load_yearly_temperature_stats(year, location='伊丹'):
     """指定年の外気温と室温(伊丹)の日次統計を取得"""
@@ -289,7 +234,6 @@ def load_yearly_temperature_stats(year, location='伊丹'):
         start_date = f"{year}-01-01"
         end_date = f"{year}-12-31"
 
-        # 1. 外気温データの取得
         q_weather = f"""
             SELECT date, max_temp as out_max, min_temp as out_min
             FROM weather_history
@@ -297,16 +241,12 @@ def load_yearly_temperature_stats(year, location='伊丹'):
         """
         df_weather = pd.read_sql_query(q_weather, conn)
 
-        # 2. 室温データの取得 (伊丹のデバイスを特定して集計)
-        # 伊丹のデバイスIDリストを作成
         itami_ids = [d['id'] for d in config.MONITOR_DEVICES if d.get('location') == location]
         if not itami_ids:
-            return df_weather # 室温データなしで返す
+            return df_weather
 
         ids_str = "'" + "','".join(itami_ids) + "'"
         
-        # SQLiteの日付関数で日ごとに集計 (タイムゾーン考慮のためsubstrで簡易処理)
-        # timestampはISO形式 'YYYY-MM-DDTHH:MM:SS...' 前提
         q_sensor = f"""
             SELECT 
                 substr(timestamp, 1, 10) as date,
@@ -321,7 +261,6 @@ def load_yearly_temperature_stats(year, location='伊丹'):
         """
         df_sensor = pd.read_sql_query(q_sensor, conn)
 
-        # 3. 結合
         if df_weather.empty and df_sensor.empty:
             return pd.DataFrame()
         
@@ -340,14 +279,10 @@ def load_yearly_temperature_stats(year, location='伊丹'):
     finally:
         conn.close()
 
-
-
 @st.cache_data(ttl=3600)
 def load_ranking_dates(limit=3):
-    """ランキングが記録されている日付を新しい順に取得"""
     conn = get_db_connection()
     try:
-        # app_rankingsテーブルが存在するか確認
         cur = conn.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
         if not cur.fetchone():
@@ -364,7 +299,6 @@ def load_ranking_dates(limit=3):
 
 @st.cache_data(ttl=3600)
 def load_ranking_data(date_str, ranking_type):
-    """指定日・指定タイプのランキングを取得"""
     conn = get_db_connection()
     try:
         query = f"""
@@ -382,11 +316,8 @@ def load_ranking_data(date_str, ranking_type):
 
 @st.cache_data(ttl=3600)
 def load_bicycle_data(limit=2000):
-    """駐輪場データの読み込み"""
-    # configに定数がない場合のフォールバック付き
     table_name = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")
     try:
-        # テーブル存在確認
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
@@ -422,7 +353,6 @@ def calculate_monthly_cost_cumulative():
         
         df['time_diff'] = df['timestamp'].diff().dt.total_seconds() / 3600
         df = df.dropna(subset=['time_diff'])
-        # 異常値除外 (1時間以上の欠落は無視)
         df = df[df['time_diff'] <= 1.0]
         
         df['kwh'] = (df['power_watts'] / 1000) * df['time_diff']
@@ -507,28 +437,20 @@ def get_itami_status(df_sensor, now):
 
 def get_rice_status(df_sensor, now):
     """炊飯器ステータス判定: その日の最大電力が500W超かで判定"""
-    # デフォルトは「ご飯なし」
     val = "🍚 炊いてない"
     theme = "theme-red"
     
-    # 今日の日付文字列 (YYYY-MM-DD)
     today_str = now.strftime('%Y-%m-%d')
-    
-    # DBから今日の炊飯器の最大電力を取得するクエリ
-    # device_name に '炊飯器' が含まれるレコードを対象
     query = f"""
         SELECT MAX(power_watts) as max_power 
         FROM {config.SQLITE_TABLE_SENSOR} 
         WHERE device_name LIKE '%炊飯器%' 
         AND timestamp >= '{today_str}'
     """
-    
-    # データを取得 (dashboard.py内のヘルパー関数を使用)
     df_rice = load_data_from_db(query, date_column=None)
     
     if not df_rice.empty:
         max_watts = df_rice.iloc[0]['max_power']
-        # max_watts はデータがない場合 None になるのでチェック
         if max_watts is not None and max_watts >= 500:
             val = "🍚 ご飯あり"
             theme = "theme-green"
@@ -542,11 +464,11 @@ def get_traffic_status():
     line_a = jr_status["神戸線"]
     
     if line_g.get("is_suspended") or line_a.get("is_suspended"):
-        return "⛔ 運休発生 詳細を確認", "theme-red", line_g, line_a
+        return "⛔ 運休発生", "theme-red", line_g, line_a
     elif line_g["is_delay"] or line_a["is_delay"]:
-        return "⚠️ 遅延あり 詳細を確認", "theme-yellow", line_g, line_a
+        return "⚠️ 遅延あり", "theme-yellow", line_g, line_a
     else:
-        return "🟢 平常運転 (遅れなし)", "theme-green", line_g, line_a
+        return "🟢 平常運転", "theme-green", line_g, line_a
 
 def get_car_status(df_car):
     """車ステータス"""
@@ -557,6 +479,71 @@ def get_car_status(df_car):
         theme = "theme-yellow"
     return val, theme
 
+def get_bicycle_status(df_bicycle):
+    """駐輪場ステータス (主要3エリアの合計待機数)"""
+    if df_bicycle.empty:
+        return "⚪ データなし", "theme-gray"
+    
+    target_areas = [
+        "JR伊丹駅前(第1)自転車駐車場 (A)", 
+        "JR伊丹駅前(第3)自転車駐車場 (A)", 
+        "JR伊丹駅前(第3)自転車駐車場 (E)"
+    ]
+    # 最新データを抽出
+    latest_df = df_bicycle.sort_values('timestamp', ascending=False).drop_duplicates('area_name')
+    target_df = latest_df[latest_df['area_name'].isin(target_areas)]
+    
+    if target_df.empty:
+        return "⚪ データなし", "theme-gray"
+    
+    total_wait = target_df['waiting_count'].sum()
+    
+    val = f"🚲 待機: {int(total_wait)}人"
+    if total_wait == 0:
+        theme = "theme-green"
+    elif total_wait < 10:
+        theme = "theme-yellow"
+    else:
+        theme = "theme-red"
+        
+    return val, theme
+
+def get_server_status():
+    """サーバー稼働ステータス (メモリ使用率)"""
+    mem = get_memory_usage()
+    if mem:
+        val = f"💻 RAM: {int(mem['percent'])}%"
+        theme = "theme-green" if mem['percent'] < 80 else "theme-red"
+    else:
+        val = "⚪ 取得失敗"
+        theme = "theme-gray"
+    return val, theme
+
+def get_nas_status_simple(nas_data):
+    """NAS簡易ステータス"""
+    # 修正前: if not nas_data: 
+    # 解説: pandas Seriesに対して if 文を使うと ValueError になるため、None チェックに変更
+    if nas_data is None:
+        return "⚪ データなし", "theme-gray"
+    
+    # データが存在する場合の処理
+    # Seriesへのアクセスは辞書同様に行えるが、念のため .get() を使うか、
+    # 必須カラムとして扱うならそのままアクセスする（ここでは既存に合わせてアクセス）
+    try:
+        if nas_data['status_ping'] == 'OK':
+            val = "🗄️ NAS: 稼働中"
+            theme = "theme-green"
+        else:
+            val = "⚠️ NAS: 応答なし"
+            theme = "theme-red"
+    except KeyError:
+        # 万が一カラムが欠損していた場合のフォールバック
+        val = "⚠️ NAS: データ異常"
+        theme = "theme-yellow"
+
+    return val, theme
+
+
 # === UI層: 描画コンポーネント ===
 
 def get_custom_css():
@@ -566,18 +553,22 @@ def get_custom_css():
             font-family: "Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", Meiryo, sans-serif; 
         }
         .status-card {
-            padding: 15px 10px;
-            border-radius: 12px;
+            padding: 10px 5px;
+            border-radius: 10px;
             text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-            margin-bottom: 10px;
-            height: 100%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 8px;
+            height: 90px; /* 高さ固定で揃える */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
         }
         .status-title {
-            font-size: 0.85rem; color: #555; margin-bottom: 8px; font-weight: bold; opacity: 0.8;
+            font-size: 0.8rem; color: #555; margin-bottom: 5px; font-weight: bold; opacity: 0.8;
         }
         .status-value {
-            font-size: 1.2rem; font-weight: bold; line-height: 1.3; white-space: normal; 
+            font-size: 1.1rem; font-weight: bold; line-height: 1.2; white-space: normal; 
         }
         .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
         .theme-yellow { background-color: #fffde7; color: #f9a825; border: 1px solid #fff9c4; }
@@ -610,75 +601,48 @@ def render_status_card_html(title, value, theme):
     </div>
     """
 
-def render_metrics_section(now, df_sensor, df_car):
-    """トップ画面のメトリクス（ステータスカード）を描画"""
-    # 各ステータス計算
+def render_dashboard_summary(now, df_sensor, df_car, df_bicycle, nas_data):
+    """トップ画面のサマリー（3x3 グリッド）を描画"""
+    
+    # --- ステータス取得 ---
+    # Row 1
     taka_val, taka_theme = get_takasago_status(df_sensor, now)
     itami_val, itami_theme = get_itami_status(df_sensor, now)
-    rice_val, rice_theme = get_rice_status(df_sensor, now)
-    traffic_val, traffic_theme, _, _ = get_traffic_status()
-    current_cost = calculate_monthly_cost_cumulative()
     car_val, car_theme = get_car_status(df_car)
     
-    # 描画
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    # Row 2
+    rice_val, rice_theme = get_rice_status(df_sensor, now)
+    cost = calculate_monthly_cost_cumulative()
+    elec_val = f"⚡ {cost:,} 円"
+    bicycle_val, bicycle_theme = get_bicycle_status(df_bicycle)
     
-    with col1: st.markdown(render_status_card_html("👵 高砂 (実家)", taka_val, taka_theme), unsafe_allow_html=True)
-    with col2: st.markdown(render_status_card_html("🏠 伊丹 (自宅)", itami_val, itami_theme), unsafe_allow_html=True)
-    with col3: st.markdown(render_status_card_html("🍚 炊飯器", rice_val, rice_theme), unsafe_allow_html=True)
-    with col4: st.markdown(render_status_card_html("🚃 JR宝塚・神戸", traffic_val, traffic_theme), unsafe_allow_html=True)
-    with col5: st.markdown(render_status_card_html("💰 電気代", f"⚡ {current_cost:,} 円", "theme-blue"), unsafe_allow_html=True)
-    with col6: st.markdown(render_status_card_html("🚗 車 (伊丹)", car_val, car_theme), unsafe_allow_html=True)
+    # Row 3
+    traffic_val, traffic_theme, _, _ = get_traffic_status()
+    server_val, server_theme = get_server_status()
+    nas_val, nas_theme = get_nas_status_simple(nas_data)
+
+    # --- 描画 (3列x3行) ---
+    
+    # Row 1
+    c1, c2, c3 = st.columns(3)
+    with c1: st.markdown(render_status_card_html("👵 高砂 (実家)", taka_val, taka_theme), unsafe_allow_html=True)
+    with c2: st.markdown(render_status_card_html("🏠 伊丹 (自宅)", itami_val, itami_theme), unsafe_allow_html=True)
+    with c3: st.markdown(render_status_card_html("🚗 車 (伊丹)", car_val, car_theme), unsafe_allow_html=True)
+
+    # Row 2
+    c4, c5, c6 = st.columns(3)
+    with c4: st.markdown(render_status_card_html("🍚 炊飯器", rice_val, rice_theme), unsafe_allow_html=True)
+    with c5: st.markdown(render_status_card_html("💰 今月の電気代", elec_val, "theme-blue"), unsafe_allow_html=True)
+    with c6: st.markdown(render_status_card_html("🚲 駐輪場待機", bicycle_val, bicycle_theme), unsafe_allow_html=True)
+
+    # Row 3
+    c7, c8, c9 = st.columns(3)
+    with c7: st.markdown(render_status_card_html("🚃 JR運行情報", traffic_val, traffic_theme), unsafe_allow_html=True)
+    with c8: st.markdown(render_status_card_html("🖥️ サーバー", server_val, server_theme), unsafe_allow_html=True)
+    with c9: st.markdown(render_status_card_html("🗄️ NAS", nas_val, nas_theme), unsafe_allow_html=True)
 
     st.markdown("---")
 
-def render_calendar_tab(df_calendar_sensor, df_child, df_weather):
-    """カレンダータブの描画"""
-    calendar_events = []
-    
-    # 1. センサーイベント
-    if not df_calendar_sensor.empty:
-        df_calendar_sensor['date_str'] = df_calendar_sensor['timestamp'].dt.strftime('%Y-%m-%d')
-        for key, label, color in [('冷蔵庫', '🧊冷蔵庫', '#a8dadc'), ('トイレ', '🚽トイレ', '#ffccd5')]:
-            df_device = df_calendar_sensor[df_calendar_sensor['friendly_name'].str.contains(key, na=False)]
-            mask_contact = df_device['contact_state'].isin(['open', 'detected'])
-            mask_motion = df_device['movement_state'] == 'detected'
-            df_target = df_device[mask_contact | mask_motion]
-            if not df_target.empty:
-                counts = df_target.groupby('date_str').size()
-                for d_val, c_val in counts.items():
-                    calendar_events.append({"title": f"{label}: {c_val}回", "start": d_val, "color": color, "textColor": "#333", "allDay": True})
-    
-    # 2. 子供の体調
-    if not df_child.empty:
-        for _, row in df_child.iterrows():
-            if "元気" not in row['condition']:
-                calendar_events.append({"title": f"🏥{row['child_name']}", "start": row['timestamp'].isoformat(), "color": "#ffb703", "textColor": "#333"})
-    
-    # 3. 天気履歴
-    if not df_weather.empty:
-        for _, row in df_weather.iterrows():
-            desc = row['weather_desc']
-            w_icon = "🌤"
-            bg_color = "#f5f5f5"
-            
-            if "雨" in desc: 
-                w_icon = "☔"; bg_color = "#e3f2fd"
-            elif "晴" in desc:
-                w_icon = "☀"; bg_color = "#fff3e0"
-            elif "曇" in desc:
-                w_icon = "☁"
-            elif "雪" in desc:
-                w_icon = "⛄"
-            
-            w_title = f"{w_icon}{desc} {int(row['max_temp'])}/{int(row['min_temp'])}℃"
-            calendar_events.append({
-                "title": w_title, "start": row['date'], 
-                "backgroundColor": bg_color, "borderColor": "transparent", 
-                "textColor": "#444", "allDay": True
-            })
-
-    calendar(events=calendar_events, options={"initialView": "dayGridMonth", "height": 600}, key="cal_main")
 
 def render_traffic_tab():
     """交通情報タブの描画"""
@@ -892,18 +856,6 @@ def render_health_tab(df_child, df_poop, df_food):
     st.markdown("##### 🍽️ 食事")
     if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
 
-def render_health_tab(df_child, df_poop, df_food):
-    """健康・食事タブ"""
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("##### 🏥 子供")
-        if not df_child.empty: st.dataframe(df_child[['timestamp', 'child_name', 'condition']], use_container_width=True)
-    with c2:
-        st.markdown("##### 💩 排便")
-        if not df_poop.empty: st.dataframe(df_poop[['timestamp', 'user_name', 'condition']], use_container_width=True)
-    st.markdown("##### 🍽️ 食事")
-    if not df_food.empty: st.dataframe(df_food[['timestamp', 'menu_category']], use_container_width=True)
-
 def render_takasago_tab(df_sensor):
     """高砂詳細タブ"""
     if not df_sensor.empty:
@@ -918,49 +870,33 @@ def render_logs_tab(df_sensor):
         st.dataframe(df_sensor[df_sensor['location'].isin(sel)][['timestamp', 'friendly_name', 'location', 'contact_state', 'power_watts']].head(200), use_container_width=True)
 
 def render_trends_tab():
-    """最近の流行タブ: シンプルな時系列比較表示"""
+    """最近の流行タブ"""
     st.title("🌟 最近の流行・トレンド推移")
     st.caption("Google Playストアのランキング（最新3回分）を表示します")
 
-    # 利用可能な日付を取得 (新しい順に3つ)
     dates = load_ranking_dates(limit=3)
     if not dates:
         st.info("データがありません。ランキング取得スクリプトを実行してください。")
         return
 
-    # 表示用ヘルパー関数: 3カラム比較表示
     def render_history_section(title, ranking_type):
         st.subheader(title)
-        
-        # 必要な数だけカラムを作成
         cols = st.columns(len(dates))
-        
         for i, date_str in enumerate(dates):
             with cols[i]:
-                # ヘッダー (今週/先週/先々週)
                 label = "今週" if i == 0 else ("先週" if i == 1 else "先々週")
                 st.markdown(f"**{label} ({date_str[5:]})**")
-                
-                # データ取得
                 df = load_ranking_data(date_str, ranking_type)
                 if df.empty:
                     st.write("- データなし -")
                     continue
-                
-                # リスト表示 (テキスト + リンク)
                 for _, row in df.iterrows():
                     url = f"https://play.google.com/store/apps/details?id={row['app_id']}"
-                    # アプリ名が長い場合は省略する等の処理も可能だが、一旦そのまま
                     st.markdown(f"{row['rank']}. [{row['title']}]({url})")
 
-    # 無料ランキング (流行)
     render_history_section("🆓 無料トップ (流行)", "free")
-    
     st.markdown("---")
-    
-    # 売上ランキング (人気)
     render_history_section("💰 売上トップ (人気)", "grossing")
-
 
 def render_bicycle_tab(df_bicycle):
     """駐輪場タブの描画"""
@@ -970,14 +906,12 @@ def render_bicycle_tab(df_bicycle):
         st.info("駐輪場データがまだありません。スクリプトが実行されているか確認してください。")
         return
 
-    # 監視対象のエリア名（ご指定の3箇所）
     target_areas = [
         "JR伊丹駅前(第1)自転車駐車場 (A)", 
         "JR伊丹駅前(第3)自転車駐車場 (A)", 
         "JR伊丹駅前(第3)自転車駐車場 (E)"
     ]
     
-    # 指定エリアのデータのみ抽出
     df_target = df_bicycle[df_bicycle['area_name'].isin(target_areas)].copy()
     
     if df_target.empty:
@@ -986,7 +920,6 @@ def render_bicycle_tab(df_bicycle):
             st.write(df_bicycle['area_name'].unique())
         return
 
-    # 折れ線グラフで推移を表示
     fig = px.line(
         df_target, 
         x='timestamp', 
@@ -994,7 +927,7 @@ def render_bicycle_tab(df_bicycle):
         color='area_name', 
         title="待機人数の変化",
         markers=True,
-        symbol="area_name" # エリアごとにマーカーの形を変える
+        symbol="area_name"
     )
     fig.update_layout(
         xaxis_title="日時", 
@@ -1003,9 +936,7 @@ def render_bicycle_tab(df_bicycle):
     )
     st.plotly_chart(fig, use_container_width=True)
     
-    # 最新状況の表表示
     st.subheader("📊 最新の状況")
-    # エリアごとに最新のレコードを取得
     latest_df = df_target.sort_values('timestamp', ascending=False).drop_duplicates('area_name')
     st.dataframe(
         latest_df[['timestamp', 'area_name', 'waiting_count', 'status_text']].sort_values('area_name'),
@@ -1016,7 +947,6 @@ def render_system_tab():
     """システム管理タブの描画"""
     st.title("🔧 システム管理コックピット")
     
-    # 1. 接続情報 (変更なし)
     st.subheader("🌐 外部接続 (ngrok)")
     urls = get_ngrok_url()
     
@@ -1039,40 +969,30 @@ def render_system_tab():
 
     st.markdown("---")
 
-    # 2. リソース状況 (UI統一)
     st.subheader("💻 リソース状況")
     
-    # ディスク (既存のまま)
     disk = get_disk_usage()
     if disk:
         st.write(f"**💾 ディスク使用率: {disk['percent']:.1f}%** (使用 {disk['used_gb']} GB / 全体 {disk['total_gb']} GB)")
         st.progress(int(disk['percent']))
     
-    st.write("") # スペース調整
+    st.write("") 
 
-    # メモリ (ディスクと同じスタイルに変更)
     mem = get_memory_usage()
     if mem:
-        # 色分け: 80%超えで赤、それ以外は通常
         bar_color = "red" if mem['percent'] > 80 else None
-        
         st.write(f"**🧠 メモリ使用率: {mem['percent']:.1f}%** (使用 {mem['used_mb']} MB / 全体 {mem['total_mb']} MB)")
-        # availableも補足情報として表示
         st.caption(f"実質空き容量 (Available): {mem['available_mb']} MB")
-        
         st.progress(int(mem['percent']))
     else:
         st.warning("メモリ情報の取得に失敗しました")
 
     st.markdown("---")
 
-
-    # ▼▼▼ 3. NAS情報 (ここを追加) ▼▼▼
     st.subheader("🗄️ NAS 状態 (BUFFALO LS720D)")
     nas_data = load_nas_status()
 
     if nas_data is not None:
-        # ステータス表示
         c_nas1, c_nas2, c_nas3 = st.columns(3)
         with c_nas1:
             ping_icon = "✅" if nas_data['status_ping'] == 'OK' else "❌"
@@ -1081,48 +1001,36 @@ def render_system_tab():
             mount_icon = "✅" if nas_data['status_mount'] == 'OK' else "❌"
             st.metric("マウント", f"{mount_icon} {nas_data['status_mount']}")
         with c_nas3:
-            # 最終更新
             ts = nas_data['timestamp']
             if isinstance(ts, str):
                 ts = pd.to_datetime(ts).tz_localize('UTC').tz_convert('Asia/Tokyo') if 'T' in ts else pd.to_datetime(ts)
             last_upd = ts.strftime('%m/%d %H:%M')
             st.metric("最終確認", last_upd)
             
-        # 容量表示
         if nas_data['total_gb'] > 0:
             usage_rate = nas_data['percent']
             st.write(f"**💾 NASディスク使用率: {usage_rate:.1f}%** (使用 {nas_data['used_gb']} GB / 全体 {nas_data['total_gb']} GB)")
-            
-            # 90%超で赤く警告表示などはStreamlit標準progressではできないが、キャプションで補足
             if usage_rate > 90:
                 st.warning("⚠️ 容量が残り少なくなっています！")
             st.progress(int(usage_rate))
         else:
             st.warning("容量データが取得できていません")
     else:
-        st.info("NASの監視データがまだありません (nas_monitor.pyを実行してください)")
+        st.info("NASの監視データがまだありません")
 
     st.markdown("---")
 
-    # 3. ログビューア (★機能強化)
     st.subheader("📜 サーバーログ (Journalctl)")
     
-    # フィルタUIの構成
-    # 上段: 検索モード切り替え
     search_mode = st.radio("検索モード", ["直近のログを表示", "日付を指定して検索"], horizontal=True)
-    
-    # 下段: 詳細設定
     col_opt1, col_opt2, _ = st.columns([1, 1, 2])
-    
     target_date = None
     lines_val = 50
     
     with col_opt1:
         if search_mode == "日付を指定して検索":
-            # 日付ピッカー (デフォルトは今日)
             target_date = st.date_input("対象日", date.today())
         else:
-            # 行数選択
             lines_val = st.selectbox("表示行数", [50, 100, 200, 500], index=0)
     
     with col_opt2:
@@ -1137,14 +1045,11 @@ def render_system_tab():
     if st.button("🔄 ログを更新"):
         st.rerun()
 
-    # ログ取得実行
     logs = get_system_logs(lines=lines_val, priority=selected_priority, target_date=target_date)
     
-    # 表示
     if not logs:
         st.info("該当するログはありません")
     else:
-        # 日付指定時はログが多くなる可能性があるため、高さ固定でスクロールさせる
         st.code(logs, language="text")
 
     st.markdown("---")
@@ -1155,7 +1060,6 @@ def render_system_tab():
         if st.button("🔄 システム再起動 (Restart Service)"):
             try:
                 st.info("再起動コマンドを送信しました。しばらくお待ちください...")
-                # 権限設定済みのコマンドを実行
                 subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True)
                 st.success("再起動を受け付けました。10秒後にページをリロードしてください。")
             except subprocess.CalledProcessError as e:
@@ -1163,15 +1067,11 @@ def render_system_tab():
             except Exception as e:
                 st.error(f"エラー: {e}")
     
-    # 4. バックアップ管理 (変更なし)
-    # ... (既存のバックアップ管理コードをここに維持) ...
-    # render_system_tabの残りの部分（バックアップなど）はそのまま残してください
     st.markdown("---")
     st.subheader("📦 データバックアップ")
     
     backup_dir = os.path.join(config.BASE_DIR, "..", "backups")
     if os.path.exists(backup_dir):
-        # ... (バックアップ表示ロジックは既存のまま) ...
         files = sorted(glob.glob(os.path.join(backup_dir, "*.zip")), reverse=True)
         if files:
             latest_file = files[0]
@@ -1195,7 +1095,6 @@ def render_system_tab():
         else:
             st.warning("バックアップファイルがまだありません")
             if st.button("今すぐ手動バックアップを実行"):
-                # 注意: Streamlitから直接呼ぶと少し時間がかかる場合があります
                 import backup_database
                 success, res, size = backup_database.perform_backup()
                 if success:
@@ -1206,13 +1105,10 @@ def render_system_tab():
     else:
         st.info("バックアップディレクトリが作成されていません（次回実行時に作成されます）")
 
-
-
 # === メイン処理 ===
 
 def main():
 
-    # ★追加: サイドバーで手動更新可能にする
     with st.sidebar:
         st.header("設定")
         if st.button("🔄 データを更新"):
@@ -1223,14 +1119,13 @@ def main():
         print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
 
     try:
-        # CSS適用
         st.markdown(get_custom_css(), unsafe_allow_html=True)
         now = datetime.now(pytz.timezone('Asia/Tokyo'))
         print(f"🔄 [Dashboard] Rendering... ({now.strftime('%H:%M:%S')})")
 
         # データ読み込み
         df_sensor = load_sensor_data(limit=10000)
-        df_calendar_sensor = load_calendar_sensor_data(days=35)
+        # df_calendar_sensor は削除
         df_weather = load_weather_history(days=40, location='伊丹')
         df_poop = load_generic_data(config.SQLITE_TABLE_DEFECATION)
         df_child = load_generic_data(config.SQLITE_TABLE_CHILD)
@@ -1238,6 +1133,7 @@ def main():
         df_car = load_generic_data(config.SQLITE_TABLE_CAR)
         df_security_log = load_generic_data("security_logs", limit=100)
         df_bicycle = load_bicycle_data(limit=3000)
+        nas_data = load_nas_status()
 
         # AIレポート表示
         report = load_ai_report()
@@ -1249,16 +1145,15 @@ def main():
             with st.expander(f"{icon} セバスチャンからの報告 ({time_str}) - タップして読む", expanded=False):
                 st.markdown(report['message'].replace('\n', '  \n'))
 
-        # メトリクス（ステータスカード）表示
-        render_metrics_section(now, df_sensor, df_car)
+        # メトリクス（ステータスカード）表示 - 拡張版
+        render_dashboard_summary(now, df_sensor, df_car, df_bicycle, nas_data)
 
-        # タブ切り替え（tab_money削除）
-        tab_cal, tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_bicycle = st.tabs([
-            "📅 カレンダー", "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
+        # タブ切り替え（カレンダー削除）
+        tab_train, tab_photo, tab_elec, tab_temp, tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_bicycle = st.tabs([
+            "🚃 交通", "🖼️ 写真・防犯", "💰 電気・家電", 
             "🌡️ 室温・環境", "🏥 健康・食事", "👵 高砂詳細", "📜 全ログ", "🌟 最近の流行", "🔧 システム管理", "🚲 駐輪場"
         ])
 
-        with tab_cal: render_calendar_tab(df_calendar_sensor, df_child, df_weather)
         with tab_train: render_traffic_tab()
         with tab_photo: render_photos_tab(df_security_log)
         with tab_elec: render_electricity_tab(df_sensor, now)
@@ -1269,7 +1164,6 @@ def main():
         with tab_trends: render_trends_tab()
         with tab_sys: render_system_tab()
         with tab_bicycle: render_bicycle_tab(df_bicycle)
-        # 削除: with tab_money:financial_service.render_simulation_tab()
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
