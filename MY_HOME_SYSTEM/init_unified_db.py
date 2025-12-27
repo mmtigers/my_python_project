@@ -159,6 +159,44 @@ def init_db():
     )''')
     logger.info("✅ nas_records テーブル準備完了")
 
+
+    # ▼【追加】Family Quest テーブル群
+    # ユーザー管理
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_users (
+        id TEXT PRIMARY KEY, -- 'kid1', 'dad' 等
+        name TEXT,
+        avatar TEXT,
+        color_theme TEXT,    -- 'green', 'pink' 等 (UI用)
+        current_points INTEGER DEFAULT 0
+    )''')
+    
+    # タスク定義
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_user_id TEXT, -- 誰向けのタスクか
+        title TEXT,
+        icon_name TEXT,      -- 'Gamepad2', 'Utensils' 等
+        points INTEGER,
+        is_daily_reset INTEGER DEFAULT 1 -- 1なら毎日リセット
+    )''')
+
+    # タスクの実行状態（毎日リセットなどを管理するため）
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_status (
+        task_id INTEGER,
+        date TEXT,           -- '2024-01-01'
+        is_completed INTEGER DEFAULT 0,
+        completed_at DATETIME,
+        PRIMARY KEY (task_id, date)
+    )''')
+
+    # ごほうび定義
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_rewards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        cost INTEGER,
+        icon_char TEXT       -- '📺' 等
+    )''')
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")

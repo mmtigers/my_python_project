@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Star,
   Check,
@@ -15,31 +15,27 @@ import {
   Shirt
 } from 'lucide-react';
 
-// --- モックデータ ---
+// --- 設定: アイコン変換マップ ---
+// サーバーから送られてくる文字列を実際のアイコンコンポーネントに変換します
+const ICON_MAP = {
+  Gamepad2: <Gamepad2 size={24} />,
+  Utensils: <Utensils size={24} />,
+  Shirt: <Shirt size={24} />,
+  Smile: <Smile size={24} />,
+  Moon: <Moon size={24} />,
+  Trash2: <Trash2 size={24} />,
+  BedDouble: <BedDouble size={24} />,
+};
 
+// --- 固定設定: UIの見た目 (ユーザーの色やアバター) ---
 const USERS = [
-  // 子供を優先して表示
   { id: 'kid1', name: '智矢', avatar: '👦🏻', color: 'bg-green-500', lightColor: 'bg-green-50', borderColor: 'border-green-200', text: 'text-green-600', button: 'bg-green-100 text-green-700' },
   { id: 'kid2', name: '涼花', avatar: '👧🏻', color: 'bg-yellow-400', lightColor: 'bg-yellow-50', borderColor: 'border-yellow-200', text: 'text-yellow-600', button: 'bg-yellow-100 text-yellow-700' },
   { id: 'mom', name: 'ママ', avatar: '👩🏻', color: 'bg-pink-500', lightColor: 'bg-pink-50', borderColor: 'border-pink-200', text: 'text-pink-600', button: 'bg-pink-100 text-pink-700' },
   { id: 'dad', name: 'パパ', avatar: '👨🏻', color: 'bg-blue-500', lightColor: 'bg-blue-50', borderColor: 'border-blue-200', text: 'text-blue-600', button: 'bg-blue-100 text-blue-700' },
 ];
 
-const INITIAL_QUESTS = [
-  // お兄ちゃん (5歳) のタスク
-  { id: 1, userId: 'kid1', title: 'おもちゃを片付ける', icon: <Gamepad2 size={24} />, points: 10, isCompleted: false },
-  { id: 2, userId: 'kid1', title: '食器を下げる', icon: <Utensils size={24} />, points: 20, isCompleted: false },
-  { id: 3, userId: 'kid1', title: 'お着替えする', icon: <Shirt size={24} />, points: 15, isCompleted: false },
-
-  // 妹ちゃん (2歳) のタスク
-  { id: 4, userId: 'kid2', title: 'はみがき', icon: <Smile size={24} />, points: 50, isCompleted: false },
-  { id: 5, userId: 'kid2', title: 'パジャマきる', icon: <Moon size={24} />, points: 30, isCompleted: false },
-
-  // パパ・ママのタスク
-  { id: 6, userId: 'dad', title: 'ゴミ出し', icon: <Trash2 size={24} />, points: 50, isCompleted: false },
-  { id: 7, userId: 'mom', title: '寝かしつけ', icon: <BedDouble size={24} />, points: 100, isCompleted: false },
-];
-
+// --- 固定設定: ごほうびリスト (一旦固定のままにします) ---
 const REWARDS = [
   { id: 1, title: 'YouTube 30分', cost: 100, icon: '📺' },
   { id: 2, title: 'おやつ1つ', cost: 50, icon: '🍪' },
@@ -50,40 +46,83 @@ const REWARDS = [
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('quests'); // 'quests' or 'rewards'
-  const [quests, setQuests] = useState(INITIAL_QUESTS);
 
-  // ユーザーごとのポイント管理
+  // データはサーバーから取るので初期値は空にします
+  const [quests, setQuests] = useState([]);
+
+  // ポイントもサーバーから取るので初期値は0にします
   const [userPoints, setUserPoints] = useState({
-    dad: 120,
-    mom: 350,
-    kid1: 80,
-    kid2: 40,
+    dad: 0,
+    mom: 0,
+    kid1: 0,
+    kid2: 0,
   });
 
-  // アニメーション用
   const [animatingId, setAnimatingId] = useState(null);
 
-  // クエスト完了ハンドラ
+  // ★ 追加: 起動時にデータを取得
+  useEffect(() => {
+    fetch('/api/quest/data')
+      .then(res => res.json())
+      .then(data => {
+        // 1. ポイント情報の更新
+        const newPoints = {};
+        // サーバーのユーザーIDをキーにしてポイントを格納
+        Object.keys(data.users).forEach(uid => {
+          newPoints[uid] = data.users[uid].points;
+        });
+        // もしDBにないユーザーがいてもエラーにならないよう、現在のstateとマージ
+        setUserPoints(prev => ({ ...prev, ...newPoints }));
+
+        // 2. タスク情報の更新
+        // サーバーのアイコン名(文字列)をアイコン部品に置換
+        const loadedQuests = data.tasks.map(t => ({
+          ...t,
+          icon: ICON_MAP[t.icon] || <Star size={24} /> // 未定義なら★を表示
+        }));
+        setQuests(loadedQuests);
+      })
+      .catch(err => console.error("データ取得に失敗しました:", err));
+  }, []);
+
+  // ★ 修正: タスク完了ハンドラ (サーバー通信を追加)
   const toggleQuest = (questId, points, userId) => {
     const questIndex = quests.findIndex(q => q.id === questId);
-    const quest = quests[questIndex];
+    if (questIndex === -1) return;
 
+    const quest = quests[questIndex];
     const isCompleting = !quest.isCompleted;
 
+    // 1. 画面を先に更新 (サクサク動くように見せるため)
     const newQuests = [...quests];
     newQuests[questIndex] = { ...quest, isCompleted: isCompleting };
     setQuests(newQuests);
 
-    setUserPoints(prev => ({
-      ...prev,
-      [userId]: isCompleting
-        ? prev[userId] + points
-        : Math.max(0, prev[userId] - points)
-    }));
-
+    // アニメーション発火
     if (isCompleting) {
       triggerAnimation(questId);
     }
+
+    // 2. サーバーに送信
+    fetch('/api/quest/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: userId,
+        task_id: questId,
+        points: points,
+        completed: isCompleting
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        // サーバーから返ってきた最新の正確なポイントで更新
+        setUserPoints(prev => ({ ...prev, [userId]: data.newPoints }));
+      })
+      .catch(err => {
+        console.error("通信エラー:", err);
+        // エラー時は画面を元に戻す処理などが必要ですが、簡易版なので省略
+      });
   };
 
   const triggerAnimation = (id) => {
@@ -91,14 +130,31 @@ export default function App() {
     setTimeout(() => setAnimatingId(null), 800);
   };
 
-  const redeemReward = (cost, userId, userName) => {
+  // ★ 修正: ごほうび交換ハンドラ (サーバー通信を追加)
+  const redeemReward = (cost, userId, userName, rewardTitle) => {
     if (userPoints[userId] >= cost) {
-      if (window.confirm(`${userName}がポイントを使って交換しますか？`)) {
-        setUserPoints(prev => ({
-          ...prev,
-          [userId]: prev[userId] - cost
-        }));
-        alert(`交換しました！${userName}、やったね！🎉`);
+      if (window.confirm(`${userName}がポイントを使って「${rewardTitle}」と交換しますか？`)) {
+
+        // 画面を更新する前にサーバーにリクエスト
+        fetch('/api/quest/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            cost: cost,
+            reward_title: rewardTitle
+          })
+        })
+          .then(res => res.json())
+          .then(data => {
+            // 成功したらポイントを更新
+            setUserPoints(prev => ({ ...prev, [userId]: data.newPoints }));
+            alert(`交換しました！${userName}、やったね！🎉`);
+          })
+          .catch(err => {
+            console.error("通信エラー:", err);
+            alert("エラーが発生しました。");
+          });
       }
     } else {
       alert('ポイントが足りないよ！がんばろう！💪');
@@ -143,9 +199,12 @@ export default function App() {
 
         {/* ユーザーごとのセクションを表示 */}
         {USERS.map(user => {
+          // userId でフィルタリング
           const userQuests = quests.filter(q => q.userId === user.id);
           const completedCount = userQuests.filter(q => q.isCompleted).length;
           const progress = userQuests.length > 0 ? (completedCount / userQuests.length) * 100 : 0;
+          // ポイントは state から取得
+          const currentPoint = userPoints[user.id] || 0;
 
           return (
             <div key={user.id} className="min-w-[85vw] max-w-[320px] snap-center shrink-0 bg-white rounded-3xl shadow-lg border border-slate-100 overflow-hidden">
@@ -167,7 +226,7 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-full shadow-sm">
                   <Star className="text-yellow-400 fill-yellow-400" size={14} />
-                  <span className="font-black text-slate-700 text-sm">{userPoints[user.id]}</span>
+                  <span className="font-black text-slate-700 text-sm">{currentPoint}</span>
                 </div>
               </div>
 
@@ -181,13 +240,17 @@ export default function App() {
                         key={quest.id}
                         onClick={() => toggleQuest(quest.id, quest.points, user.id)}
                         className={`relative group cursor-pointer border rounded-xl p-3 transition-all duration-200 active:scale-95 flex items-center justify-between ${quest.isCompleted
-                            ? 'bg-slate-50 border-slate-100 opacity-60'
-                            : 'bg-white border-slate-100 shadow-sm hover:border-slate-300'
+                          ? 'bg-slate-50 border-slate-100 opacity-60'
+                          : 'bg-white border-slate-100 shadow-sm hover:border-slate-300'
                           }`}
                       >
                         <div className="flex items-center gap-3">
                           <div className={`p-2 rounded-full ${quest.isCompleted ? 'bg-slate-200 text-slate-400' : `${user.button}`}`}>
-                            {React.cloneElement(quest.icon, { size: 18 })}
+                            {/* アイコンは既にコンポーネント化されています */}
+                            {quest.icon && React.isValidElement(quest.icon)
+                              ? React.cloneElement(quest.icon, { size: 18 })
+                              : <Star size={18} />
+                            }
                           </div>
                           <div>
                             <h3 className={`font-bold text-sm ${quest.isCompleted ? 'line-through text-slate-400' : 'text-slate-700'}`}>
@@ -201,8 +264,8 @@ export default function App() {
                         </div>
 
                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${quest.isCompleted
-                            ? 'bg-green-500 border-green-500'
-                            : 'bg-white border-slate-200'
+                          ? 'bg-green-500 border-green-500'
+                          : 'bg-white border-slate-200'
                           }`}>
                           {quest.isCompleted && <Check size={14} className="text-white" strokeWidth={4} />}
                         </div>
@@ -225,15 +288,16 @@ export default function App() {
                   /* --- リワード一覧 --- */
                   <div className="grid grid-cols-2 gap-2">
                     {REWARDS.map(reward => {
-                      const canAfford = userPoints[user.id] >= reward.cost;
+                      const canAfford = currentPoint >= reward.cost;
                       return (
                         <button
                           key={reward.id}
-                          onClick={() => redeemReward(reward.cost, user.id, user.name)}
+                          // 引数を追加しています
+                          onClick={() => redeemReward(reward.cost, user.id, user.name, reward.title)}
                           disabled={!canAfford}
                           className={`p-2 rounded-xl border text-center transition-all ${canAfford
-                              ? 'bg-white border-slate-200 shadow hover:shadow-md'
-                              : 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed'
+                            ? 'bg-white border-slate-200 shadow hover:shadow-md'
+                            : 'bg-slate-50 border-slate-100 opacity-50 cursor-not-allowed'
                             }`}
                         >
                           <div className="text-2xl mb-1">{reward.icon}</div>
