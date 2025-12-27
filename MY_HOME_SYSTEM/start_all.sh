@@ -35,4 +35,7 @@ nohup streamlit run dashboard.py > /dev/null 2>&1 &
 deactivate
 
 echo "--- 6. Pythonサーバーを起動します ---"
-$PYTHON_EXEC unified_server.py
+# 【修正】ログをファイルに追記するように変更 (nohupでバックグラウンド化も推奨ですが、構成に合わせてリダイレクトのみ変更します)
+# 変更前: $PYTHON_EXEC unified_server.py
+# 変更後:
+$PYTHON_EXEC unified_server.py >> /home/masahiro/develop/MY_HOME_SYSTEM/logs/server.log 2>&1
