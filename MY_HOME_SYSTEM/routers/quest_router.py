@@ -175,7 +175,7 @@ def get_all_data():
         "logs": formatted_logs
     }
 
-@router.post("/quest/complete")
+@router.post("/complete")
 def complete_quest(action: QuestAction):
     conn = get_db_connection()
     cur = conn.cursor()

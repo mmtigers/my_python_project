@@ -2,9 +2,9 @@
 
 export const INITIAL_USERS = [
     {
-        id: 'dad',
+        user_id: 'dad', // ★修正: id -> user_id
         name: 'まさひろ',
-        job: '勇者',
+        job_class: '勇者', // ★修正: job -> job_class
         level: 1,
         exp: 0,
         nextLevelExp: 100,
@@ -15,9 +15,9 @@ export const INITIAL_USERS = [
         inventory: []
     },
     {
-        id: 'mom',
+        user_id: 'mom', // ★修正
         name: 'はるな',
-        job: '魔法使い',
+        job_class: '魔法使い', // ★修正
         level: 1,
         exp: 0,
         nextLevelExp: 100,
