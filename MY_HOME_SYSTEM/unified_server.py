@@ -75,7 +75,7 @@ async def schedule_daily_backup():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("🚀 System Season 3 Starting...")
-    
+    logger.info(f"📂 Server is using DB at: {config.SQLITE_DB_PATH}")
     # 1. キャッシュ更新
     sb_tool.fetch_device_name_cache()
     
@@ -99,112 +99,6 @@ line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
 app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
 
-# # --- Quest API用モデル ---
-# class QuestAction(BaseModel):
-#     user_id: str
-#     task_id: int
-#     points: int
-#     completed: bool  # True:完了, False:キャンセル
-
-# class RewardRedemption(BaseModel):
-#     user_id: str
-#     cost: int
-#     reward_title: str
-
-# # --- Quest API エンドポイント ---
-
-# @app.post("/api/quest/complete")
-# async def complete_quest(action: QuestAction):
-#     # 旧エンドポイント互換性のため残す場合はこれを使いますが、
-#     # 下の /api/quest/action の方が高機能です
-#     msg = f"🌟 Family Quest\n{action.user_id} がタスク完了！\n+{action.points}ポイント GET!"
-#     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="line")
-#     return {"status": "ok", "new_points": 100}
-
-# @app.get("/api/quest/data")
-# async def get_quest_data():
-#     """初期表示用：全データ（ユーザー、タスク、今日の進捗）を取得"""
-#     today = datetime.datetime.now().strftime('%Y-%m-%d')
-    
-#     with common.get_db_cursor() as cur:
-#         # 1. ユーザーと現在のポイント
-#         cur.execute("SELECT id, name, current_points FROM quest_users")
-#         users = {row[0]: {"points": row[2], "name": row[1]} for row in cur.fetchall()}
-        
-#         # 2. タスク定義
-#         cur.execute("SELECT id, target_user_id, title, icon_name, points FROM quest_tasks")
-#         tasks = []
-#         for row in cur.fetchall():
-#             tasks.append({
-#                 "id": row[0],
-#                 "userId": row[1],
-#                 "title": row[2],
-#                 "icon": row[3], # アイコン名はフロントで解決
-#                 "points": row[4],
-#                 "isCompleted": False # デフォルト
-#             })
-            
-#         # 3. 今日の完了状況を上書き
-#         cur.execute("SELECT task_id FROM quest_status WHERE date = ? AND is_completed = 1", (today,))
-#         completed_ids = set(row[0] for row in cur.fetchall())
-        
-#         for task in tasks:
-#             if task["id"] in completed_ids:
-#                 task["isCompleted"] = True
-                
-#     return {"users": users, "tasks": tasks}
-
-# @app.post("/api/quest/action")
-# async def update_quest_status(action: QuestAction):
-#     """タスクの完了・キャンセル切り替え"""
-#     today = datetime.datetime.now().strftime('%Y-%m-%d')
-#     logger.info(f"Quest Action: {action}")
-
-#     with common.get_db_cursor(commit=True) as cur:
-#         # 1. ステータス更新 (Upsert的な処理)
-#         cur.execute("""
-#             INSERT INTO quest_status (task_id, date, is_completed, completed_at)
-#             VALUES (?, ?, ?, ?)
-#             ON CONFLICT(task_id, date) DO UPDATE SET
-#             is_completed = excluded.is_completed,
-#             completed_at = excluded.completed_at
-#         """, (action.task_id, today, 1 if action.completed else 0, datetime.datetime.now()))
-
-#         # 2. ポイント増減
-#         delta = action.points if action.completed else -action.points
-#         cur.execute("UPDATE quest_users SET current_points = MAX(0, current_points + ?) WHERE id = ?", (delta, action.user_id))
-        
-#         # 3. 最新ポイント取得
-#         cur.execute("SELECT current_points, name FROM quest_users WHERE id = ?", (action.user_id,))
-#         res = cur.fetchone()
-#         new_points = res[0]
-#         user_name = res[1]
-
-#     # 4. 通知 (完了時のみ)
-#     if action.completed:
-#         msg = f"🎉【Family Quest】\n{user_name}が「タスク」を達成しました！\n💰 +{action.points} pt (現在: {new_points} pt)"
-#         # Discord通知に変更 (LINE不調のため)
-#         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="notify")
-
-#     return {"status": "success", "newPoints": new_points}
-
-# @app.post("/api/quest/redeem")
-# async def redeem_reward(req: RewardRedemption):
-#     """ごほうび交換"""
-#     with common.get_db_cursor(commit=True) as cur:
-#         # ポイント消費
-#         cur.execute("UPDATE quest_users SET current_points = current_points - ? WHERE id = ?", (req.cost, req.user_id))
-        
-#         cur.execute("SELECT current_points, name FROM quest_users WHERE id = ?", (req.user_id,))
-#         res = cur.fetchone()
-#         new_points = res[0]
-#         user_name = res[1]
-
-#     # 通知
-#     msg = f"🎁【ごほうび交換】\n{user_name}が「{req.reward_title}」を交換しました！\n消費: {req.cost} pt (残り: {new_points} pt)\nパパママ、確認お願いします！"
-#     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="line")
-
-#     return {"status": "success", "newPoints": new_points}
 
 
 # --- 非同期通知ヘルパー ---
