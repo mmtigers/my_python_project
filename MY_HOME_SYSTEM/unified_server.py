@@ -16,6 +16,7 @@ import common
 import switchbot_get_device_list as sb_tool
 from handlers import line_logic
 import backup_database
+from routers import quest_router
 
 logger = common.setup_logging("server")
 
@@ -81,6 +82,12 @@ async def lifespan(app: FastAPI):
     # 2. バックアップタスクを開始
     asyncio.create_task(schedule_daily_backup())
     
+    try:
+        quest_router.seed_data()
+        logger.info("✅ Quest DB Seeded (checked)")
+    except Exception as e:
+        logger.error(f"Quest seed error: {e}")
+
     yield
     logger.info("🛑 System Shutdown.")
 
@@ -90,6 +97,7 @@ app = FastAPI(lifespan=lifespan)
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
 line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
+app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
 
 # --- Quest API用モデル ---
 class QuestAction(BaseModel):
