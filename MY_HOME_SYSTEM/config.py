@@ -40,7 +40,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ▼▼▼ 追加・変更 ▼▼▼
 # NAS設定
-NAS_MOUNT_POINT = "/mnt/nas"
+NAS_MOUNT_POINT = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")
 NAS_PROJECT_ROOT = os.path.join(NAS_MOUNT_POINT, "home_system")
 
 # DBは速度と安定性のためローカル(SDカード)維持を推奨
@@ -183,7 +183,7 @@ _passwords_str = os.getenv("SALARY_PDF_PASSWORDS", "")
 SALARY_PDF_PASSWORDS = [p.strip() for p in _passwords_str.split(",") if p.strip()]
 
 # ディレクトリ・ファイルパス設定
-SALARY_IMAGE_DIR = os.path.join(BASE_DIR, "..", "assets", "salary_images")
+SALARY_IMAGE_DIR = os.path.join(ASSETS_DIR, "salary_images")
 SALARY_DATA_DIR = os.path.join(BASE_DIR, "data")
 SALARY_CSV_PATH = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
 BONUS_CSV_PATH = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
