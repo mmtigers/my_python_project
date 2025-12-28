@@ -890,7 +890,7 @@ def _render_route_search(col, from_st: str, to_st: str, label_icon: str):
 def render_photos_tab(df_security_log: pd.DataFrame):
     """写真・防犯タブ"""
     st.subheader("🖼️ カメラ・ギャラリー")
-    img_dir = os.path.join(config.BASE_DIR, "..", "assets", "snapshots")
+    img_dir = os.path.join(config.ASSETS_DIR, "snapshots")
     images = sorted(glob.glob(os.path.join(img_dir, "*.jpg")), reverse=True)
     if images:
         cols_img = st.columns(4)
