@@ -90,15 +90,23 @@ def get_all_data():
     
     # Users
     users = []
-    for row in cur.execute("SELECT * FROM quest_users"):
+    
+    # 【修正1】ループを回す前に、fetchall() ですべてのデータを先に取ってしまう
+    # これでカーソルの状態に依存しなくなります
+    user_rows = cur.execute("SELECT * FROM quest_users").fetchall()
+    
+    for row in user_rows:
         u = dict(row)
         u['nextLevelExp'] = calculate_next_level_exp(u['level'])
-        # 簡易的に inventory を取得 (報酬履歴から装備品のみ抽出)
+        
+        # 【修正2】inventory取得など、内部で cur を使っても
+        # 外側のループは user_rows (リスト) を回しているので影響を受けない
         inv_rows = cur.execute("""
             SELECT r.* FROM reward_history rh 
             JOIN reward_master r ON rh.reward_id = r.reward_id 
             WHERE rh.user_id = ? AND r.category = 'equip'
         """, (u['user_id'],)).fetchall()
+        
         u['inventory'] = [dict(r) for r in inv_rows]
         
         # UI表示用の avatar (DBにないので補完)
