@@ -1,71 +1,14 @@
 import React, { useState } from 'react';
 import {
-  Sword, Shield, Scroll, Coins, Heart, Star,
-  Clock, Calendar, CheckCircle2, ShoppingBag,
-  Zap, Trophy, AlertCircle, Coffee, Undo2, Users,
-  Shirt, Crown, BookOpen, Tent
+  Sword, Shield, Scroll, ShoppingBag,
+  Zap, Undo2, Users, Shirt, Crown, BookOpen, Tent
 } from 'lucide-react';
 
-// --- モックデータ & ロジック設定 ---
-
-const DAYS = ['日', '月', '火', '水', '木', '金', '土'];
-const getDayIndex = () => new Date().getDay();
-const getCurrentTime = () => {
-  const now = new Date();
-  return now.getHours() * 100 + now.getMinutes();
-};
-const getNextLevelExp = (level) => Math.floor(100 * Math.pow(1.2, level - 1));
-
-// RPG初期データ
-const INITIAL_USERS = [
-  {
-    id: 'dad',
-    name: 'まさひろ',
-    job: '勇者',
-    level: 1,
-    exp: 0,
-    nextLevelExp: 100,
-    gold: 50,
-    hp: 25,
-    maxHp: 25,
-    avatar: '⚔️',
-    inventory: []
-  },
-  {
-    id: 'mom',
-    name: 'はるな',
-    job: '魔法使い',
-    level: 1,
-    exp: 0,
-    nextLevelExp: 100,
-    gold: 150,
-    hp: 20,
-    maxHp: 20,
-    avatar: '🪄',
-    inventory: []
-  },
-];
-
-const MASTER_QUESTS = [
-  { id: 1, title: 'お風呂掃除', exp: 20, gold: 10, type: 'daily', days: null, icon: '💧' },
-  { id: 2, title: '食器洗い', exp: 15, gold: 5, type: 'daily', days: null, icon: '🍽️' },
-  { id: 3, title: '洗濯干し', exp: 15, gold: 5, type: 'daily', days: null, icon: '👕' },
-  { id: 4, title: '燃えるゴミ出し', exp: 30, gold: 15, type: 'weekly', days: [1, 4], icon: '🔥' },
-  { id: 5, title: 'プラゴミ出し', exp: 30, gold: 15, type: 'weekly', days: [3], icon: '♻️' },
-  { id: 6, title: '週末の買い出し', exp: 50, gold: 30, type: 'weekly', days: [6, 0], icon: '🛒' },
-  { id: 7, title: '寝かしつけ', exp: 40, gold: 0, type: 'daily', days: null, icon: '💤' },
-  { id: 8, title: '保育園送り', exp: 25, gold: 10, type: 'daily', days: [1, 2, 3, 4, 5], icon: '🚲' },
-];
-
-const MASTER_REWARDS = [
-  { id: 101, title: '高級アイス', cost: 100, category: 'food', icon: '🍨', desc: 'HP全回復' },
-  { id: 102, title: 'ビール/お酒', cost: 150, category: 'food', icon: '🍺', desc: 'MP回復' },
-  { id: 103, title: 'マッサージ券', cost: 500, category: 'service', icon: '💆', desc: '肩こり解消' },
-  { id: 201, title: 'はやての靴', cost: 3000, category: 'equip', icon: '👟', desc: 'すばやさ+20' },
-  { id: 202, title: '勇者のゲーム', cost: 5000, category: 'equip', icon: '🎮', desc: '娯楽+50' },
-  { id: 203, title: '時の砂時計', cost: 1000, category: 'special', icon: '⏳', desc: '自由時間' },
-  { id: 204, title: '伝説の包丁', cost: 2500, category: 'equip', icon: '🔪', desc: '料理+30' },
-];
+// --- 新しく作成したファイルのインポート ---
+import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from './constants/masterData';
+import { getDayIndex, getNextLevelExp } from './utils/gameHelpers';
+import LevelUpModal from './components/ui/LevelUpModal';
+import Header from './components/layout/Header';
 
 export default function App() {
   const [viewMode, setViewMode] = useState('user'); // 'user', 'party', 'familyLog'
@@ -95,19 +38,11 @@ export default function App() {
     setAdventureLogs(prev => [newLog, ...prev]);
   };
 
-  // --- 画面切り替え ---
+  // --- 画面切り替えハンドラ ---
   const handleUserSwitch = (idx) => {
     setViewMode('user');
     setCurrentUserIdx(idx);
     addLog(`${users[idx].name} に プレイヤーを きりかえた！`);
-  };
-
-  const handlePartySwitch = () => {
-    setViewMode('party');
-  };
-
-  const handleFamilyLogSwitch = () => {
-    setViewMode('familyLog');
   };
 
   // --- クエスト処理 ---
@@ -186,81 +121,18 @@ export default function App() {
   return (
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
 
-      {/* --- レベルアップ モーダル --- */}
-      {levelUpInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-blue-900 border-4 border-double border-yellow-400 p-8 rounded-xl shadow-2xl text-center max-w-xs w-full animate-bounce-short">
-            <div className="text-6xl mb-4 animate-pulse">🎉</div>
-            <h2 className="text-2xl font-bold text-yellow-300 mb-2">LEVEL UP!</h2>
-            <div className="text-white text-lg mb-4">
-              {levelUpInfo.name}は<br />
-              <span className="text-yellow-300 font-bold">{levelUpInfo.job} Lv.{levelUpInfo.level}</span><br />
-              になった！
-            </div>
-            <button
-              onClick={() => setLevelUpInfo(null)}
-              className="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded border-2 border-white"
-            >
-              OK
-            </button>
-          </div>
-        </div>
-      )}
+      {/* レベルアップモーダル (コンポーネント化済み) */}
+      <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
 
-      {/* --- ヘッダー (Top Tabs) --- */}
-      <div className="bg-blue-900 border-b-4 border-white p-2 sticky top-0 z-10 shadow-lg">
-        {/* 上段: タブ切り替え */}
-        <div className="flex gap-1 mb-2 overflow-x-auto no-scrollbar">
-          {/* 個別ユーザーボタン */}
-          {users.map((u, idx) => (
-            <button
-              key={u.id}
-              onClick={() => handleUserSwitch(idx)}
-              className={`flex-1 min-w-[80px] px-2 py-1.5 border-2 rounded text-sm font-bold transition-all whitespace-nowrap ${viewMode === 'user' && currentUserIdx === idx
-                  ? 'bg-yellow-500 border-white text-black translate-y-0.5'
-                  : 'bg-blue-800 border-gray-400 text-gray-300'
-                }`}
-            >
-              {u.name}
-            </button>
-          ))}
-
-          {/* パーティーボタン */}
-          <button
-            onClick={handlePartySwitch}
-            className={`flex-1 min-w-[80px] px-2 py-1.5 border-2 rounded text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1 ${viewMode === 'party'
-                ? 'bg-purple-600 border-white text-white translate-y-0.5'
-                : 'bg-blue-800 border-gray-400 text-gray-300'
-              }`}
-          >
-            <Users size={14} />
-            パーティー
-          </button>
-
-          {/* みんなの記録ボタン */}
-          <button
-            onClick={handleFamilyLogSwitch}
-            className={`flex-1 min-w-[80px] px-2 py-1.5 border-2 rounded text-sm font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1 ${viewMode === 'familyLog'
-                ? 'bg-green-600 border-white text-white translate-y-0.5'
-                : 'bg-blue-800 border-gray-400 text-gray-300'
-              }`}
-          >
-            <BookOpen size={14} />
-            記録
-          </button>
-        </div>
-
-        {/* 下段: 所持金表示 (ユーザーモード時のみ) */}
-        {viewMode === 'user' && (
-          <div className="flex justify-end">
-            <div className="flex items-center gap-2 bg-black/50 px-3 py-1 rounded border border-yellow-600">
-              <Coins className="text-yellow-400" size={16} />
-              <div className="text-xl font-bold text-yellow-300 tabular-nums">{currentUser.gold.toLocaleString()}</div>
-              <div className="text-[10px] text-yellow-500">G</div>
-            </div>
-          </div>
-        )}
-      </div>
+      {/* ヘッダー (コンポーネント化済み) */}
+      <Header
+        users={users}
+        currentUserIdx={currentUserIdx}
+        viewMode={viewMode}
+        onUserSwitch={handleUserSwitch}
+        onPartySwitch={() => setViewMode('party')}
+        onLogSwitch={() => setViewMode('familyLog')}
+      />
 
       {/* --- メインコンテンツ --- */}
       <div className="p-4 space-y-4 max-w-md mx-auto">
@@ -528,18 +400,6 @@ export default function App() {
         )}
 
       </div>
-
-      <style>{`
-        @keyframes bounce-short {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
-        }
-        .animate-bounce-short {
-          animation: bounce-short 0.5s ease-in-out 3;
-        }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
     </div>
   );
 }
