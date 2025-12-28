@@ -197,6 +197,75 @@ def init_db():
         icon_char TEXT       -- '📺' 等
     )''')
 
+
+    # ==========================================
+    # ▼▼▼ Family Quest RPG Tables (New) ▼▼▼
+    # ==========================================
+    
+    # 1. ユーザーマスタ (RPGステータス管理)
+    # レベル、経験値(EXP)、所持金(Gold)を永続化
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_users (
+        user_id TEXT PRIMARY KEY, -- 'dad', 'mom' など
+        name TEXT,
+        job_class TEXT,           -- '勇者', '魔法使い' など
+        level INTEGER DEFAULT 1,
+        exp INTEGER DEFAULT 0,
+        gold INTEGER DEFAULT 0,
+        updated_at DATETIME
+    )''')
+    
+    # 2. クエストマスタ (タスク定義)
+    # 曜日指定(0=月, 6=日, null=毎日), 時間帯などを定義
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_master (
+        quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT,
+        exp_gain INTEGER DEFAULT 10,
+        gold_gain INTEGER DEFAULT 5,
+        icon_key TEXT,            -- フロントエンドのアイコン識別子
+        day_of_week TEXT,         -- '0,1,2,3,4' のようなCSV形式 または NULL
+        time_limit_start TEXT,    -- '06:00'
+        time_limit_end TEXT,      -- '09:00'
+        target_user TEXT          -- 'all', 'dad', 'mom'
+    )''')
+    
+    # 3. クエスト履歴 (完了ログ)
+    # 本日の完了判定や、レベルアップ計算に使用
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        quest_id INTEGER,
+        quest_title TEXT,
+        exp_earned INTEGER,
+        gold_earned INTEGER,
+        completed_at DATETIME NOT NULL
+    )''')
+
+    # 4. 報酬マスタ (ショップアイテム)
+    cur.execute('''CREATE TABLE IF NOT EXISTS reward_master (
+        reward_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        cost_gold INTEGER,
+        category TEXT,           -- 'item'(装備), 'consumable'(消耗品/権利)
+        icon_key TEXT
+    )''')
+
+    # 5. 報酬交換履歴
+    cur.execute('''CREATE TABLE IF NOT EXISTS reward_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        reward_id INTEGER,
+        reward_title TEXT,
+        cost_gold INTEGER,
+        redeemed_at DATETIME NOT NULL
+    )''')
+
+    logger.info("✅ Quest RPG テーブル準備完了")
+
+
+
+
+
     conn.commit()
     conn.close()
     logger.info("全テーブルの準備が完了しました。")
