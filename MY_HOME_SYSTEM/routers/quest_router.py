@@ -7,6 +7,11 @@ import math
 import sqlite3
 import config
 import common
+try:
+    import quest_data
+except ImportError:
+    # 実行ディレクトリによっては相対インポートが必要な場合のフォールバック
+    from .. import quest_data
 
 router = APIRouter()
 logger = common.setup_logging("quest_router")
@@ -35,48 +40,54 @@ def calculate_next_level_exp(level: int) -> int:
 
 # --- Endpoints ---
 
+@router.post("/sync_master")
+def sync_master_data():
+    """
+    quest_data.py の内容をデータベースに同期（UPSERT）します。
+    新しいクエストの追加や、金額の変更などが反映されます。
+    """
+    logger.info("🔄 Starting Master Data Sync...")
+    
+    with common.get_db_cursor(commit=True) as cur:
+        # 1. Users (新規追加のみ。既存ユーザーのレベル等は維持)
+        for u in quest_data.USERS:
+            cur.execute("""
+                INSERT OR IGNORE INTO quest_users (user_id, name, job_class, level, exp, gold)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (u['user_id'], u['name'], u['job_class'], u['level'], u['exp'], u['gold']))
+
+        # 2. Quests (IDが一致すれば内容を上書き更新)
+        for q in quest_data.QUESTS:
+            cur.execute("""
+                INSERT INTO quest_master (quest_id, title, description, exp_gain, gold_gain, icon_key, day_of_week)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(quest_id) DO UPDATE SET
+                    title = excluded.title,
+                    description = excluded.description,
+                    exp_gain = excluded.exp_gain,
+                    gold_gain = excluded.gold_gain,
+                    icon_key = excluded.icon_key,
+                    day_of_week = excluded.day_of_week
+            """, (q['id'], q['title'], q['type'], q['exp'], q['gold'], q['icon'], q['days']))
+
+        # 3. Rewards (IDが一致すれば内容を上書き更新)
+        for r in quest_data.REWARDS:
+            cur.execute("""
+                INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(reward_id) DO UPDATE SET
+                    title = excluded.title,
+                    category = excluded.category,
+                    cost_gold = excluded.cost_gold,
+                    icon_key = excluded.icon_key
+            """, (r['id'], r['title'], r['category'], r['cost'], r['icon']))
+            
+    logger.info("✅ Master Data Sync Completed.")
+    return {"status": "synced", "message": "Master data has been updated from quest_data.py"}
+
 @router.post("/seed")
 def seed_data():
-    """初期データ投入用 (DBが空の場合のみ実行)"""
-    # common.get_db_cursor(commit=True) を使用し、処理成功時に自動コミットを行う
-    with common.get_db_cursor(commit=True) as cur:
-        # ユーザー
-        users = [
-            ('dad', 'まさひろ', '勇者', 1, 0, 50),
-            ('mom', 'はるな', '魔法使い', 1, 0, 150)
-        ]
-        for u in users:
-            cur.execute("INSERT OR IGNORE INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)", u)
-
-        # クエスト (フロントエンドの定数と同じ内容)
-        quests = [
-            (1, 'お風呂掃除', 'daily', 20, 10, '💧', None),
-            (2, '食器洗い', 'daily', 15, 5, '🍽️', None),
-            (3, '洗濯干し', 'daily', 15, 5, '👕', None),
-            (4, '燃えるゴミ出し', 'weekly', 30, 15, '🔥', '1,4'),
-            (5, 'プラゴミ出し', 'weekly', 30, 15, '♻️', '3'),
-            (6, '週末の買い出し', 'weekly', 50, 30, '🛒', '0,6'),
-            (7, '寝かしつけ', 'daily', 40, 0, '💤', None),
-            (8, '保育園送り', 'daily', 25, 10, '🚲', '1,2,3,4,5'),
-        ]
-        for q in quests:
-            cur.execute("INSERT OR IGNORE INTO quest_master (quest_id, title, description, exp_gain, gold_gain, icon_key, day_of_week) VALUES (?, ?, ?, ?, ?, ?, ?)", q)
-
-        # 報酬
-        rewards = [
-            (101, '高級アイス', 'food', 100, '🍨'),
-            (102, 'ビール/お酒', 'food', 150, '🍺'),
-            (103, 'マッサージ券', 'service', 500, '💆'),
-            (201, 'はやての靴', 'equip', 3000, '👟'),
-            (202, '勇者のゲーム', 'equip', 5000, '🎮'),
-            (203, '時の砂時計', 'special', 1000, '⏳'),
-            (204, '伝説の包丁', 'equip', 2500, '🔪'),
-        ]
-        for r in rewards:
-            cur.execute("INSERT OR IGNORE INTO reward_master (reward_id, title, category, cost_gold, icon_key) VALUES (?, ?, ?, ?, ?)", r)
-            
-    return {"status": "seeded"}
-
+    return sync_master_data()
 
 @router.get("/data")
 def get_all_data() -> Dict[str, Any]:
