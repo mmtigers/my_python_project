@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import datetime
 import math
+import importlib
 import sqlite3
 import config
 import common
@@ -48,8 +49,17 @@ def sync_master_data():
     """
     logger.info("🔄 Starting Master Data Sync...")
     
+    # ★★★ ここにリロード処理を追加 ★★★
+    # これにより、キャッシュを破棄して最新のファイルを読み込みます
+    try:
+        importlib.reload(quest_data)
+        logger.info("📂 quest_data module reloaded.")
+    except Exception as e:
+        logger.error(f"Failed to reload quest_data: {e}")
+        return {"status": "error", "message": "Failed to reload data file"}
+
     with common.get_db_cursor(commit=True) as cur:
-        # 1. Users (新規追加のみ。既存ユーザーのレベル等は維持)
+        # 1. Users
         for u in quest_data.USERS:
             cur.execute("""
                 INSERT OR IGNORE INTO quest_users (user_id, name, job_class, level, exp, gold)
