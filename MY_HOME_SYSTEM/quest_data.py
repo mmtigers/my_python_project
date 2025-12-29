@@ -17,7 +17,7 @@ USERS = [
 # type: 'daily' (毎日) or 'weekly' (週間)
 # days: 曜日指定 (0=月, 1=火, ... 6=日)。毎日なら None
 QUESTS = [
-    {'id': 1, 'title': 'お風呂掃除', 'type': 'daily', 'exp': 20, 'gold': 10, 'icon': '💧', 'days': None},
+    {'id': 1, 'title': 'お風呂掃除', 'type': 'daily', 'exp': 10, 'gold': 10, 'icon': '💧', 'days': None},
     {'id': 2, 'title': '食器洗い', 'type': 'daily', 'exp': 15, 'gold': 5, 'icon': '🍽️', 'days': None},
     {'id': 3, 'title': '洗濯干し', 'type': 'daily', 'exp': 15, 'gold': 5, 'icon': '👕', 'days': None},
     {'id': 4, 'title': '燃えるゴミ出し', 'type': 'weekly', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '1,4'}, # 火・金
