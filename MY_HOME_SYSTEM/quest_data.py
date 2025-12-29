@@ -17,16 +17,20 @@ USERS = [
 # type: 'daily' (毎日) or 'weekly' (週間)
 # days: 曜日指定 (0=月, 1=火, ... 6=日)。毎日なら None
 QUESTS = [
-    {'id': 1, 'title': 'お風呂掃除', 'type': 'daily', 'exp': 10, 'gold': 10, 'icon': '💧', 'days': None},
-    {'id': 2, 'title': '食器洗い', 'type': 'daily', 'exp': 15, 'gold': 5, 'icon': '🍽️', 'days': None},
-    {'id': 3, 'title': '洗濯干し', 'type': 'daily', 'exp': 15, 'gold': 5, 'icon': '👕', 'days': None},
-    {'id': 4, 'title': '燃えるゴミ出し', 'type': 'weekly', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '1,4'}, # 火・金
-    {'id': 5, 'title': 'プラゴミ出し', 'type': 'weekly', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '3'},   # 木
-    {'id': 6, 'title': '週末の買い出し', 'type': 'weekly', 'exp': 50, 'gold': 30, 'icon': '🛒', 'days': '0,6'}, # 月・日
-    {'id': 7, 'title': '寝かしつけ', 'type': 'daily', 'exp': 40, 'gold': 0, 'icon': '💤', 'days': None},
-    {'id': 8, 'title': '保育園送り', 'type': 'daily', 'exp': 25, 'gold': 10, 'icon': '🚲', 'days': '1,2,3,4,5'},
-    # 必要に応じて以下のように追加してください
-    # {'id': 9, 'title': '部屋の片付け', 'type': 'daily', 'exp': 10, 'gold': 5, 'icon': '🧹', 'days': None},
+    # --- デイリー (共通) ---
+    {'id': 1, 'title': 'お風呂掃除', 'type': 'daily', 'target': 'all', 'exp': 10, 'gold': 10, 'icon': '💧', 'days': None},
+    {'id': 2, 'title': '食器洗い', 'type': 'daily', 'target': 'all', 'exp': 15, 'gold': 5, 'icon': '🍽️', 'days': None},
+    
+    # --- デイリー (個人) ---
+    {'id': 8, 'title': '保育園送り', 'type': 'daily', 'target': 'dad', 'exp': 25, 'gold': 10, 'icon': '🚲', 'days': '1,2,3,4,5'},
+    {'id': 30, 'title': 'お花の水やり', 'type': 'daily', 'target': 'mom', 'exp': 10, 'gold': 5, 'icon': '🌻', 'days': '0,2,4,6'},
+    
+    # --- 期間限定 (イベント) ---
+    {'id': 100, 'title': '【年末】大掃除：窓拭き', 'type': 'limited', 'target': 'all', 'exp': 100, 'gold': 50, 'icon': '🪟', 'start': '2025-12-25', 'end': '2025-12-31'},
+    
+    # --- ランダム出現 (低確率・高報酬) ---
+    {'id': 200, 'title': 'はぐれメタルの討伐(家中のゴミ拾い)', 'type': 'random', 'target': 'all', 'exp': 500, 'gold': 100, 'icon': '🔘', 'chance': 0.1},
+    {'id': 201, 'title': 'パパへの肩たたき券発行', 'type': 'random', 'target': 'sun', 'exp': 50, 'gold': 30, 'icon': '💆', 'chance': 0.3},
 ]
 
 # 報酬アイテム定義
