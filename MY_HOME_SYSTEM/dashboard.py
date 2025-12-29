@@ -1256,36 +1256,35 @@ def render_quest_tab():
     
     try:
         with common.get_db_cursor() as cur:
-            # ユーザー情報の取得
-            cur.execute("SELECT name, current_points, avatar FROM quest_users ORDER BY current_points DESC")
+            # 【重要】4つのカラムを取得 (name, exp, gold, job_class)
+            cur.execute("SELECT name, exp, gold, job_class FROM quest_users ORDER BY exp DESC")
             rows = cur.fetchall()
             
-            # タスク履歴（直近5件）の取得
+            # 【重要】テーブル名を履歴テーブル(quest_history)に合わせ、3つのカラムを取得
             cur.execute("""
-                SELECT u.name, t.title, s.completed_at 
-                FROM quest_status s
-                JOIN quest_tasks t ON s.task_id = t.id
-                JOIN quest_users u ON t.target_user_id = u.id
-                WHERE s.is_completed = 1 
-                ORDER BY s.completed_at DESC 
+                SELECT u.name, h.quest_title, h.completed_at 
+                FROM quest_history h
+                JOIN quest_users u ON h.user_id = u.user_id
+                ORDER BY h.completed_at DESC 
                 LIMIT 5
             """)
             history = cur.fetchall()
 
         if not rows:
-            st.info("データがありません。アプリでユーザー登録を行ってください。")
+            st.info("データがありません。 seed_quest_data.py を実行するか、アプリでユーザー登録を行ってください。")
             return
 
         # --- 1. メトリクス表示 (カード風) ---
         cols = st.columns(len(rows))
-        for i, (name, points, avatar) in enumerate(rows):
+        # 【修正箇所】SELECTに合わせて (name, exp, gold, job_class) の4つを受け取るようにします
+        for i, (name, exp, gold, job_class) in enumerate(rows):
             with cols[i]:
-                # 1位には王冠をつける演出
-                rank_icon = "👑" if i == 0 else ""
+                rank_icon = "👑" if i == 0 else "🛡️"
+                # 経験値をメイン値に、ゴールドを変化分(delta)に表示
                 st.metric(
-                    label=f"{rank_icon} {name} ({avatar})",
-                    value=f"{points} pt",
-                    delta=None
+                    label=f"{rank_icon} {name} ({job_class})",
+                    value=f"{exp} EXP",
+                    delta=f"{gold} G"
                 )
 
         st.divider()
@@ -1294,42 +1293,41 @@ def render_quest_tab():
         col1, col2 = st.columns([2, 1])
         
         with col1:
-            st.subheader("📊 ポイントランキング")
-            df_quest = pd.DataFrame(rows, columns=["名前", "ポイント", "アバター"])
-            # グラフの色を少しカラフルに
+            st.subheader("📊 経験値ランキング")
+            # 【修正箇所】ここも4つのカラム名（ラベル）を指定します
+            df_quest = pd.DataFrame(rows, columns=["名前", "経験値", "ゴールド", "職業"])
             fig = px.bar(
                 df_quest, 
                 x="名前", 
-                y="ポイント", 
-                color="名前", 
-                text="ポイント",
-                title="現在の獲得ポイント"
+                y="経験値", 
+                color="職業", 
+                text="経験値",
+                title="現在のレベル状況"
             )
             fig.update_traces(textposition='outside')
             st.plotly_chart(fig, use_container_width=True)
 
         with col2:
-            st.subheader("📜 最近の達成タスク")
+            st.subheader("📜 最近の達成履歴")
             if history:
+                # こちらは3つのカラム(name, title, completed_at)なので、変数の数も3つでOK
                 for name, title, completed_at in history:
-                    # 時間をパースして表示
                     try:
-                        dt = datetime.strptime(completed_at, '%Y-%m-%d %H:%M:%S.%f')
-                    except ValueError:
-                        # 秒以下がない場合などのフォールバック
-                        try:
-                            dt = datetime.strptime(completed_at, '%Y-%m-%d %H:%M:%S')
-                        except:
-                            dt = datetime.now() # エラー時は現在時刻にしておく
+                        # 日時表示を綺麗に整形
+                        t_str = completed_at.split('.')[0].replace('T', ' ')
+                        dt = datetime.strptime(t_str, '%Y-%m-%d %H:%M:%S')
+                        time_display = dt.strftime('%m/%d %H:%M')
+                    except:
+                        time_display = completed_at
 
-                    time_str = dt.strftime('%m/%d %H:%M')
-                    st.markdown(f"**{name}** が **『{title}』** を達成！  \n<span style='color:grey; font-size:0.8em'>({time_str})</span>", unsafe_allow_html=True)
+                    st.markdown(f"**{name}** が **『{title}』** を達成！  \n<span style='color:grey; font-size:0.8em'>({time_display})</span>", unsafe_allow_html=True)
                     st.write("---")
             else:
-                st.write("まだ履歴がありません")
+                st.write("まだ冒険の記録がありません")
 
     except Exception as e:
         st.error(f"クエスト情報の読み込みに失敗しました: {e}")
+        logger.error(f"Quest Tab Error: {e}")
 
 
 
