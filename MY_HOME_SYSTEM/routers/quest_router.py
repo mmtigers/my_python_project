@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/routers/quest_router.py
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, Field
 from typing import List, Dict, Any, Optional
 import datetime
 import math
@@ -16,6 +16,33 @@ except ImportError:
 
 router = APIRouter()
 logger = common.setup_logging("quest_router")
+
+# --- Validation Models (設定ファイルの正当性チェック用) ---
+# quest_data.py の中身がこのルールに従っているか厳しくチェックします
+
+class MasterUser(BaseModel):
+    user_id: str
+    name: str
+    job_class: str
+    level: int = 1
+    exp: int = 0
+    gold: int = 50
+
+class MasterQuest(BaseModel):
+    id: int
+    title: str
+    type: str # 'daily' or 'weekly'
+    exp: int
+    gold: int
+    icon: str
+    days: Optional[str] = None # 必須ではない
+
+class MasterReward(BaseModel):
+    id: int
+    title: str
+    category: str
+    cost: int
+    icon: str
 
 # --- Pydantic Models (リクエスト/レスポンス定義) ---
 class UserAction(BaseModel):
@@ -54,20 +81,35 @@ def sync_master_data():
     try:
         importlib.reload(quest_data)
         logger.info("📂 quest_data module reloaded.")
-    except Exception as e:
-        logger.error(f"Failed to reload quest_data: {e}")
-        return {"status": "error", "message": "Failed to reload data file"}
 
+        # ★ここでバリデーション実行！
+        # データが不正な場合、即座に ValidationError が発生し、DB更新は行われません
+        valid_users = [MasterUser(**u) for u in quest_data.USERS]
+        valid_quests = [MasterQuest(**q) for q in quest_data.QUESTS]
+        valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
+
+        logger.info("✅ Data validation passed.")
+
+    except ValidationError as e:
+        # エラー内容をログに出し、ユーザーにも分かりやすく返す
+        error_msg = f"設定ファイルの記述ミス: {e}"
+        logger.error(f"❌ {error_msg}")
+        return {"status": "error", "message": error_msg}
+    except Exception as e:
+        logger.error(f"❌ Failed to load quest_data: {e}")
+        return {"status": "error", "message": f"ファイルの読み込みに失敗: {e}"}
+    
+    # 2. DB更新 (検証をパスしたデータのみを使用)
     with common.get_db_cursor(commit=True) as cur:
-        # 1. Users
-        for u in quest_data.USERS:
+        # Users
+        for u in valid_users:
             cur.execute("""
                 INSERT OR IGNORE INTO quest_users (user_id, name, job_class, level, exp, gold)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (u['user_id'], u['name'], u['job_class'], u['level'], u['exp'], u['gold']))
+            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold))
 
-        # 2. Quests (IDが一致すれば内容を上書き更新)
-        for q in quest_data.QUESTS:
+        # Quests
+        for q in valid_quests:
             cur.execute("""
                 INSERT INTO quest_master (quest_id, title, description, exp_gain, gold_gain, icon_key, day_of_week)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -78,10 +120,10 @@ def sync_master_data():
                     gold_gain = excluded.gold_gain,
                     icon_key = excluded.icon_key,
                     day_of_week = excluded.day_of_week
-            """, (q['id'], q['title'], q['type'], q['exp'], q['gold'], q['icon'], q['days']))
+            """, (q.id, q.title, q.type, q.exp, q.gold, q.icon, q.days))
 
-        # 3. Rewards (IDが一致すれば内容を上書き更新)
-        for r in quest_data.REWARDS:
+        # Rewards
+        for r in valid_rewards:
             cur.execute("""
                 INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
                 VALUES (?, ?, ?, ?, ?)
@@ -90,10 +132,12 @@ def sync_master_data():
                     category = excluded.category,
                     cost_gold = excluded.cost_gold,
                     icon_key = excluded.icon_key
-            """, (r['id'], r['title'], r['category'], r['cost'], r['icon']))
+            """, (r.id, r.title, r.category, r.cost, r.icon))
             
-    logger.info("✅ Master Data Sync Completed.")
-    return {"status": "synced", "message": "Master data has been updated from quest_data.py"}
+    logger.info("✅ Master Data Sync Completed Successfully.")
+    return {"status": "synced", "message": "Master data validation passed and DB updated."}
+
+    
 
 @router.post("/seed")
 def seed_data():
