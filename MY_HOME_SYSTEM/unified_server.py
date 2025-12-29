@@ -6,10 +6,12 @@ from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import uvicorn
 import time
 import datetime
+import os
 import asyncio
 import config
 import common
@@ -99,6 +101,13 @@ line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
 app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://192.168.x.x:5173", "*"], # 必要に応じてIPを指定
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # --- 非同期通知ヘルパー ---
@@ -231,12 +240,11 @@ if hasattr(config, "ASSETS_DIR"):
 # Family Quest アプリ
 # ディレクトリが存在するか確認してからマウントする安全策
 import os
-QUEST_DIST_DIR = "/home/masahiro/develop/family-quest/dist"
-if os.path.exists(QUEST_DIST_DIR):
-    app.mount("/quest", StaticFiles(directory=QUEST_DIST_DIR, html=True), name="quest")
-    logger.info("✅ Family Quest mounted.")
+if os.path.exists(config.QUEST_DIST_DIR):
+    app.mount("/quest", StaticFiles(directory=config.QUEST_DIST_DIR, html=True), name="quest")
+    logger.info(f"✅ Family Quest mounted from {config.QUEST_DIST_DIR}")
 else:
-    logger.warning(f"⚠️ Family Quest dist not found at {QUEST_DIST_DIR}")
+    logger.warning(f"⚠️ Family Quest dist not found at {config.QUEST_DIST_DIR}")
 
 
 if __name__ == "__main__":
