@@ -6,6 +6,7 @@ import datetime
 import math
 import importlib
 import sqlite3
+import random
 import config
 import common
 try:
@@ -32,10 +33,14 @@ class MasterQuest(BaseModel):
     id: int
     title: str
     type: str # 'daily' or 'weekly'
+    target: str = 'all'      # ★追加
     exp: int
     gold: int
     icon: str
     days: Optional[str] = None # 必須ではない
+    start: Optional[str] = None # 追加
+    end: Optional[str] = None   # 追加
+    chance: Optional[float] = 1.0 # 追加
 
 class MasterReward(BaseModel):
     id: int
@@ -101,42 +106,36 @@ def sync_master_data():
     
     # 2. DB更新 (検証をパスしたデータのみを使用)
     with common.get_db_cursor(commit=True) as cur:
-        # Users
+        # --- ユーザー情報の同期を追加 ---
         for u in valid_users:
             cur.execute("""
-                INSERT OR IGNORE INTO quest_users (user_id, name, job_class, level, exp, gold)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold))
-
-        # Quests
+                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    name = excluded.name,
+                    job_class = excluded.job_class
+            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, datetime.datetime.now()))
+        
         for q in valid_quests:
             cur.execute("""
-                INSERT INTO quest_master (quest_id, title, description, exp_gain, gold_gain, icon_key, day_of_week)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO quest_master (
+                    quest_id, title, quest_type, target_user, exp_gain, gold_gain, 
+                    icon_key, day_of_week, start_date, end_date, occurrence_chance
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(quest_id) DO UPDATE SET
                     title = excluded.title,
-                    description = excluded.description,
+                    quest_type = excluded.quest_type,
+                    target_user = excluded.target_user,
                     exp_gain = excluded.exp_gain,
                     gold_gain = excluded.gold_gain,
                     icon_key = excluded.icon_key,
-                    day_of_week = excluded.day_of_week
-            """, (q.id, q.title, q.type, q.exp, q.gold, q.icon, q.days))
-
-        # Rewards
-        for r in valid_rewards:
-            cur.execute("""
-                INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
-                VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(reward_id) DO UPDATE SET
-                    title = excluded.title,
-                    category = excluded.category,
-                    cost_gold = excluded.cost_gold,
-                    icon_key = excluded.icon_key
-            """, (r.id, r.title, r.category, r.cost, r.icon))
-            
-    logger.info("✅ Master Data Sync Completed Successfully.")
-    return {"status": "synced", "message": "Master data validation passed and DB updated."}
-
+                    day_of_week = excluded.day_of_week,
+                    start_date = excluded.start_date,
+                    end_date = excluded.end_date,
+                    occurrence_chance = excluded.occurrence_chance
+            """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, q.days, q.start, q.end, q.chance))
+    return {"status": "synced", "message": "Master data updated."}
     
 
 @router.post("/seed")
@@ -178,15 +177,33 @@ def get_all_data() -> Dict[str, Any]:
             
             users.append(u)
 
-        # Quests
-        quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
-        for q in quests:
-            # DBの '1,4' 文字列を配列 [1, 4] に変換
+        # Quests取得
+        all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
+        filtered_quests = []
+        today_str = datetime.date.today().isoformat()
+        
+        for q in all_quests:
+            # 1. 期間限定チェック
+            if q['quest_type'] == 'limited':
+                if q['start_date'] and today_str < q['start_date']: continue
+                if q['end_date'] and today_str > q['end_date']: continue
+            
+            # 2. ランダム出現チェック (日付をシードにしてその日は固定)
+            if q['quest_type'] == 'random':
+                seed = f"{today_str}_{q['quest_id']}"
+                if random.Random(seed).random() > q['occurrence_chance']:
+                    continue
+            
+            # 3. カラム名マッピング (フロントエンド互換)
+            q['icon'] = q['icon_key']
+            q['type'] = q['quest_type']
+            q['target'] = q['target_user']
             if q['day_of_week']:
                 q['days'] = [int(d) for d in q['day_of_week'].split(',')]
             else:
                 q['days'] = None
-            q['icon'] = q['icon_key'] # フロントエンド互換
+                
+            filtered_quests.append(q)
 
         # Rewards
         rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
@@ -234,7 +251,7 @@ def get_all_data() -> Dict[str, Any]:
     
     return {
         "users": users,
-        "quests": quests,
+        "quests": filtered_quests,
         "rewards": rewards,
         "completedQuests": completed, # フロントエンドの判定用
         "logs": formatted_logs

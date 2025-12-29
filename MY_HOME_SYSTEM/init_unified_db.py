@@ -161,35 +161,37 @@ def init_db():
 
 
     # ----------------------------------------------------------------
-    # ▼▼▼ Family Quest テーブル (修正済み: 重複していた古い定義を削除) ▼▼▼
+    # ▼▼▼ Family Quest テーブル (修正版：最新スキーマに統合) ▼▼▼
     # ----------------------------------------------------------------
     
-    # 1. ユーザーマスタ (RPGステータス管理)
+    # 1. ユーザーマスタ
     cur.execute('''CREATE TABLE IF NOT EXISTS quest_users (
-        user_id TEXT PRIMARY KEY, -- 'dad', 'mom' など
+        user_id TEXT PRIMARY KEY,
         name TEXT,
-        job_class TEXT,           -- '勇者', '魔法使い' など
+        job_class TEXT,
         level INTEGER DEFAULT 1,
         exp INTEGER DEFAULT 0,
         gold INTEGER DEFAULT 0,
         updated_at DATETIME
     )''')
     
-    # 2. クエストマスタ (タスク定義)
+    # 2. クエストマスタ (一本化された最新定義)
     cur.execute('''CREATE TABLE IF NOT EXISTS quest_master (
         quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
+        quest_type TEXT DEFAULT 'daily',    -- 'daily', 'limited', 'random'
         exp_gain INTEGER DEFAULT 10,
         gold_gain INTEGER DEFAULT 5,
-        icon_key TEXT,            -- フロントエンドのアイコン識別子
-        day_of_week TEXT,         -- '0,1,2,3,4' のようなCSV形式 または NULL
-        time_limit_start TEXT,    -- '06:00'
-        time_limit_end TEXT,      -- '09:00'
-        target_user TEXT          -- 'all', 'dad', 'mom'
+        icon_key TEXT,
+        day_of_week TEXT,                   -- '0,1,2,3,4,5,6'
+        target_user TEXT DEFAULT 'all',      -- 'all', 'dad', 'mom', 'sun'
+        start_date TEXT,                    -- 'YYYY-MM-DD'
+        end_date TEXT,                      -- 'YYYY-MM-DD'
+        occurrence_chance REAL DEFAULT 1.0   -- 0.0〜1.0
     )''')
     
-    # 3. クエスト履歴 (完了ログ)
+    # 3. クエスト履歴
     cur.execute('''CREATE TABLE IF NOT EXISTS quest_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
@@ -217,6 +219,23 @@ def init_db():
         reward_title TEXT,
         cost_gold INTEGER,
         redeemed_at DATETIME NOT NULL
+    )''')
+
+    # 2. クエストマスタ (タスク定義) の拡張
+    # 2. クエストマスタ (タスク定義)
+    cur.execute('''CREATE TABLE IF NOT EXISTS quest_master (
+        quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        description TEXT,
+        quest_type TEXT DEFAULT 'daily',    -- ★'daily', 'limited', 'random'
+        exp_gain INTEGER DEFAULT 10,
+        gold_gain INTEGER DEFAULT 5,
+        icon_key TEXT,
+        day_of_week TEXT,                   -- '0,1,2,3,4'
+        target_user TEXT DEFAULT 'all',      -- ★'all', 'dad', 'mom' など
+        start_date TEXT,                    -- ★期間限定用
+        end_date TEXT,                      -- ★期間限定用
+        occurrence_chance REAL DEFAULT 1.0   -- ★ランダム出現確率
     )''')
 
     logger.info("✅ Quest RPG テーブル準備完了")
