@@ -144,14 +144,15 @@ def fetch_daily_data():
             logger.error(f"カメラ画像収集失敗: {e}")
             data['camera_images_paths'] = []
 
-        # ▼▼▼ 修正: 10. Family Quest (今日のお手伝い成果を取得) ▼▼▼
-        # quest_history から本日の完了ログを、quest_users からユーザー名を取得します
-        cursor.execute(f"""
-            SELECT u.name, h.quest_title as title, h.exp_earned as points
-            FROM quest_history h
-            JOIN quest_users u ON h.user_id = u.user_id
-            WHERE h.completed_at LIKE ?
-        """, (f"{today_str}%",))
+        # ▼▼▼ 追加: 10. Family Quest (今日のお手伝い) ▼▼▼
+        # quest_status, quest_tasks, quest_users を結合して、誰が何を完了したか取得
+        cursor.execute("""
+            SELECT u.name, t.title, t.points
+            FROM quest_status s
+            JOIN quest_tasks t ON s.task_id = t.id
+            JOIN quest_users u ON t.target_user_id = u.id
+            WHERE s.date = ? AND s.is_completed = 1
+        """, (today_str,))
         
         data['quest_achievements'] = [
             {"user": r["name"], "title": r["title"], "points": r["points"]} 
