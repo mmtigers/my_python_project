@@ -277,3 +277,8 @@ REINFOLIB_WEB_URL = "https://www.reinfolib.mlit.go.jp/"
 NAS_IP = "192.168.1.20"
 NAS_MOUNT_POINT = "/mnt/nas"
 NAS_CHECK_TIMEOUT = 5  # Ping等のタイムアウト(秒)
+
+
+# Family Quest Frontend
+# 開発環境と本番環境でパスが変わる場合は環境変数化を検討
+QUEST_DIST_DIR = "/home/masahiro/develop/family-quest/dist"

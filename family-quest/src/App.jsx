@@ -28,26 +28,30 @@ export default function App() {
 
   const fetchGameData = async () => {
     try {
-      const res = await fetch('/api/quest/data');
+      // 変更点A: 開発環境(Vite)と本番環境で接続先を切り替える
+      // (Viteのプロキシ設定をしていない場合、これを入れないと404エラーになります)
+      const host = import.meta.env.DEV ? 'http://localhost:8000' : '';
+      const res = await fetch(`${host}/api/quest/data`);
+
       if (!res.ok) throw new Error('Network error');
       const data = await res.json();
 
-      // データが空配列の場合は初期データを使う安全策
-      if (data.users && data.users.length > 0) {
-        setUsers(data.users);
-      } else {
-        console.warn("API returned empty users. Using Initial data.");
-      }
+      // 変更点B: サーバーから取得した最新のマスタデータでStateを上書きする
+      // (これにより、quest_data.py の変更が画面に反映されるようになります)
+      if (data.users) setUsers(data.users);
+      
+      // ▼ 追加箇所ここから ▼
+      if (data.quests) setQuests(data.quests);   // サーバー定義のクエストで上書き
+      if (data.rewards) setRewards(data.rewards); // サーバー定義の報酬アイテムで上書き
+      // ▲ 追加箇所ここまで ▲
 
-      if (data.quests && data.quests.length > 0) setQuests(data.quests);
-      if (data.rewards && data.rewards.length > 0) setRewards(data.rewards);
-
-      setCompletedQuests(data.completedQuests || []);
-      setAdventureLogs(data.logs || []);
-    } catch (err) {
-      console.error("Failed to load quest data:", err);
-      // エラー時は初期値のまま (INITIAL_USERS)
-    } finally {
+      if (data.completedQuests) setCompletedQuests(data.completedQuests);
+      if (data.logs) setAdventureLogs(data.logs);
+      
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Fetch failed", error);
+      // エラー時は初期値(masterData.js)が維持されるので、そのまま続行
       setIsLoading(false);
     }
   };
