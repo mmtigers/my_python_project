@@ -29,6 +29,10 @@ jobs:
 
     - name: Run Tests
       run: |
-        # 環境変数をダミーで設定（CIでのテスト用）
+        # CI環境用の環境変数を設定
         export SQLITE_DB_PATH=":memory:"
+        export NAS_MOUNT_POINT="./tmp_nas"  # <--- これを追加！(NASの場所を一時フォルダに変更)
+        export NOTIFICATION_TARGET="none"   # <--- ついでに通知も飛ばないように設定
+        
+        # テスト実行
         python -m unittest discover tests
