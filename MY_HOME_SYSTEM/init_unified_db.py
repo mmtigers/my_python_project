@@ -296,6 +296,32 @@ def init_db():
             )
         ''')
 
+
+        # 6. 装備マスタ
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS equipment_master (
+                equipment_id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                type TEXT,  -- weapon / armor
+                power INTEGER,
+                cost_gold INTEGER,
+                icon_key TEXT
+            )
+        ''')
+
+        # 7. ユーザー所有装備 & 装備状態
+        # is_equipped: 1=装備中, 0=所持のみ
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS user_equipments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                equipment_id INTEGER,
+                is_equipped INTEGER DEFAULT 0,
+                acquired_at DATETIME,
+                UNIQUE(user_id, equipment_id)
+            )
+        ''')
+
         # --- Legacy / Unused Definitions ---
         # 以下のテーブルは元のスクリプトで定義されていましたが、現在の主要ロジックでは
         # おそらく使用されていません。しかし、後方互換性(Zero Regression)のため定義を残します。

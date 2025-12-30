@@ -63,3 +63,20 @@ REWARDS = [
     {'id': 3, 'title': '休日・朝寝坊権利 (1時間)', 'category': 'service', 'cost_gold': 1000, 'icon_key': '🛌'},
     {'id': 4, 'title': '自由時間 (3時間)', 'category': 'service', 'cost_gold': 3000, 'icon_key': '🧘'}
 ]
+
+# ==========================================
+# 4. 装備品定義 (Equipment)
+# ==========================================
+EQUIPMENTS = [
+    # --- 武器 (Weapon) ---
+    {'id': 1, 'name': '木の棒', 'type': 'weapon', 'power': 3, 'cost': 50, 'icon': '🪵'},
+    {'id': 2, 'name': '銅の剣', 'type': 'weapon', 'power': 10, 'cost': 200, 'icon': '🗡️'},
+    {'id': 3, 'name': '鋼の剣', 'type': 'weapon', 'power': 25, 'cost': 800, 'icon': '⚔️'},
+    {'id': 4, 'name': '勇者の剣', 'type': 'weapon', 'power': 50, 'cost': 5000, 'icon': '✨'},
+    
+    # --- 防具 (Armor) ---
+    {'id': 101, 'name': '布の服', 'type': 'armor', 'power': 3, 'cost': 50, 'icon': '👕'},
+    {'id': 102, 'name': '皮の鎧', 'type': 'armor', 'power': 10, 'cost': 200, 'icon': '🦺'},
+    {'id': 103, 'name': '鉄の鎧', 'type': 'armor', 'power': 25, 'cost': 800, 'icon': '🛡️'},
+    {'id': 104, 'name': '光の鎧', 'type': 'armor', 'power': 50, 'cost': 5000, 'icon': '🌟'},
+]
