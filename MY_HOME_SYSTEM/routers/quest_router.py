@@ -165,7 +165,7 @@ class QuestService:
             # 4. History (Today)
             today_str = common.get_today_date_str()
             completed = [dict(row) for row in cur.execute(
-                "SELECT * FROM quest_history WHERE date(completed_at) = ?", (today_str,)
+                "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
             )]
             
             # 5. Logs
