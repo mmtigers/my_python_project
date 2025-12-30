@@ -238,6 +238,39 @@ def init_db():
         occurrence_chance REAL DEFAULT 1.0   -- ★ランダム出現確率
     )''')
 
+
+    # 1. ユーザー（お子様など）を管理するテーブル
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS quest_users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL
+        )
+    """)
+
+    # 2. クエスト（お手伝い内容）を定義するテーブル
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS quest_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            points INTEGER DEFAULT 0,
+            target_user_id INTEGER,
+            FOREIGN KEY (target_user_id) REFERENCES quest_users(id)
+        )
+    """)
+
+    # 3. クエストの達成状況を記録するテーブル
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS quest_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id INTEGER,
+            date TEXT NOT NULL,
+            is_completed INTEGER DEFAULT 1,
+            FOREIGN KEY (task_id) REFERENCES quest_tasks(id)
+        )
+    """)
+
+
+
     logger.info("✅ Quest RPG テーブル準備完了")
 
 

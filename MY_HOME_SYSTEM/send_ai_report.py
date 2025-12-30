@@ -5,6 +5,7 @@ import config
 import common
 import traceback
 import argparse
+import sqlite3
 import sys
 from datetime import datetime
 import pytz
@@ -146,18 +147,23 @@ def fetch_daily_data():
 
         # ▼▼▼ 追加: 10. Family Quest (今日のお手伝い) ▼▼▼
         # quest_status, quest_tasks, quest_users を結合して、誰が何を完了したか取得
-        cursor.execute("""
-            SELECT u.name, t.title, t.points
-            FROM quest_status s
-            JOIN quest_tasks t ON s.task_id = t.id
-            JOIN quest_users u ON t.target_user_id = u.id
-            WHERE s.date = ? AND s.is_completed = 1
-        """, (today_str,))
-        
-        data['quest_achievements'] = [
-            {"user": r["name"], "title": r["title"], "points": r["points"]} 
-            for r in cursor.fetchall()
-        ]
+        data['quest_achievements'] = []
+        try:
+            cursor.execute("""
+                SELECT u.name, t.title, t.points
+                FROM quest_status s
+                JOIN quest_tasks t ON s.task_id = t.id
+                JOIN quest_users u ON t.target_user_id = u.id
+                WHERE s.date = ? AND s.is_completed = 1
+            """, (today_str,))
+            
+            data['quest_achievements'] = [
+                {"user": r["name"], "title": r["title"], "points": r["points"]} 
+                for r in cursor.fetchall()
+            ]
+        except sqlite3.OperationalError as e:
+            # テーブルがない場合などは警告ログに留め、処理を継続させる
+            logger.warning(f"クエストデータの取得をスキップしました (スキーマ未反映の可能性): {e}")
 
 
     return data
