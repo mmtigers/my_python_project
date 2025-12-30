@@ -11,6 +11,7 @@ import { apiClient } from './utils/apiClient';
 import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
+import FamilyParty from './components/quest/FamilyParty';
 
 // --- Components Extraction (UI Components) ---
 
@@ -396,10 +397,9 @@ export default function App() {
         )}
 
         {/* 3. パーティモード（プレースホルダー） */}
+        {/* 3. パーティモード（実装） */}
         {viewMode === 'party' && (
-          <div className="text-center py-20 text-gray-500 tracking-widest animate-pulse">
-            PARTY MODE COMING SOON...
-          </div>
+          <FamilyParty users={users} ownedEquipments={ownedEquipments} />
         )}
       </div>
     </div>
