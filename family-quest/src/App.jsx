@@ -9,6 +9,7 @@ import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
 import { apiClient } from './utils/apiClient';
 import RewardList from './components/quest/RewardList';
+import EquipmentShop from './components/quest/EquipmentShop';
 
 // --- Components Extraction (UI Components) ---
 
@@ -120,6 +121,9 @@ const useGameData = (onLevelUp) => {
   const [completedQuests, setCompletedQuests] = useState([]);
   const [adventureLogs, setAdventureLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  // ▼ 追加: 装備関連のstate
+  const [equipments, setEquipments] = useState([]);
+  const [ownedEquipments, setOwnedEquipments] = useState([]);
 
   // データ取得: apiClientを使用
   const fetchGameData = useCallback(async () => {
@@ -131,7 +135,11 @@ const useGameData = (onLevelUp) => {
       if (data.rewards) setRewards(data.rewards);
       if (data.completedQuests) setCompletedQuests(data.completedQuests);
       if (data.logs) setAdventureLogs(data.logs);
-      
+      // ▼ 追加: 装備データの反映
+      if (data.equipments) setEquipments(data.equipments);
+      if (data.ownedEquipments) setOwnedEquipments(data.ownedEquipments);
+
+
       // 初回ロード完了
       setIsLoading(false);
     } catch (error) {
@@ -171,7 +179,7 @@ const useGameData = (onLevelUp) => {
           user_id: currentUser.user_id,
           quest_id: q_id
         });
-        
+
         await fetchGameData();
 
         // レベルアップ判定と通知
@@ -202,7 +210,7 @@ const useGameData = (onLevelUp) => {
         user_id: currentUser.user_id,
         reward_id: reward.reward_id || reward.id
       });
-      
+
       await fetchGameData();
       alert(`まいどあり！\n${reward.title} を手に入れた！\n(残金: ${res.newGold} G)`);
     } catch (e) {
@@ -210,9 +218,43 @@ const useGameData = (onLevelUp) => {
     }
   };
 
+  // ▼ 追加: 装備購入アクション
+  const buyEquipment = async (currentUser, item) => {
+    if ((currentUser?.gold || 0) < item.cost) {
+      alert("ゴールドが足りません！");
+      return;
+    }
+    if (!window.confirm(`${item.name} を購入しますか？`)) return;
+
+    try {
+      await apiClient.post('/api/quest/equip/purchase', {
+        user_id: currentUser.user_id,
+        equipment_id: item.equipment_id
+      });
+      await fetchGameData();
+      alert(`チャキーン！\n${item.name} を手に入れた！`);
+    } catch (e) {
+      alert(`購入失敗: ${e.message}`);
+    }
+  };
+
+  // ▼ 追加: 装備変更アクション
+  const changeEquipment = async (currentUser, item) => {
+    try {
+      await apiClient.post('/api/quest/equip/change', {
+        user_id: currentUser.user_id,
+        equipment_id: item.equipment_id
+      });
+      await fetchGameData();
+    } catch (e) {
+      alert(`装備変更失敗: ${e.message}`);
+    }
+  };
+
   return {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    completeQuest, buyReward
+    equipments, ownedEquipments, // 忘れずエクスポート
+    completeQuest, buyReward, buyEquipment, changeEquipment // 忘れずエクスポート
   };
 };
 
@@ -231,7 +273,7 @@ export default function App() {
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
-  
+
   const handleUserSwitch = (idx) => {
     setViewMode('user');
     setCurrentUserIdx(idx);
@@ -240,6 +282,10 @@ export default function App() {
   const handleQuestClick = (quest) => completeQuest(currentUser, quest);
   // eslint-disable-next-line no-unused-vars
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
+
+  // ▼ 追加: ハンドラー
+  const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
+  const handleEquip = (item) => changeEquipment(currentUser, item);
 
   // 最近のログ（3件）
   const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
@@ -287,33 +333,36 @@ export default function App() {
             <div className="border-2 border-white bg-black/80 rounded min-h-[320px] p-2 flex flex-col gap-4">
               <div className="flex-1">
                 {activeTab === 'quest' && (
-                  <QuestList 
-                    quests={quests} 
-                    completedQuests={completedQuests} 
-                    currentUser={currentUser} 
-                    onQuestClick={handleQuestClick} 
+                  <QuestList
+                    quests={quests}
+                    completedQuests={completedQuests}
+                    currentUser={currentUser}
+                    onQuestClick={handleQuestClick}
                   />
                 )}
                 {activeTab === 'shop' && (
-                   <RewardList 
-                     rewards={rewards}
-                     currentUser={currentUser}
-                     onBuy={handleBuyReward}
-                   />
+                  <RewardList
+                    rewards={rewards}
+                    currentUser={currentUser}
+                    onBuy={handleBuyReward}
+                  />
                 )}
                 {activeTab === 'equip' && (
-                   <div className="text-center text-gray-500 py-10">
-                      <div className="text-4xl mb-2">🛡️</div>
-                      <div>準備中...</div>
-                   </div>
+                  <EquipmentShop
+                    equipments={equipments}
+                    ownedEquipments={ownedEquipments}
+                    currentUser={currentUser}
+                    onBuy={handleBuyEquipment}
+                    onEquip={handleEquip}
+                  />
                 )}
               </div>
               <div className="border-2 border-dashed border-gray-500 bg-black/50 p-2 rounded min-h-[80px] mt-auto">
                 <div className="space-y-1 font-mono text-sm">
                   {todayLogs.map((log) => (
                     <div key={log.id} className="text-gray-400 text-xs">
-                        <span className="mr-1 text-blue-500">▶</span>
-                        {log.text}
+                      <span className="mr-1 text-blue-500">▶</span>
+                      {log.text}
                     </div>
                   ))}
                   {todayLogs.length === 0 && <div className="text-gray-600 text-center text-xs">まだ記録はありません</div>}
@@ -324,9 +373,9 @@ export default function App() {
         )}
         {/* Partyモード等の拡張用プレースホルダー */}
         {viewMode !== 'user' && (
-           <div className="text-center py-20 text-gray-500">
-              COMING SOON...
-           </div>
+          <div className="text-center py-20 text-gray-500">
+            COMING SOON...
+          </div>
         )}
       </div>
     </div>

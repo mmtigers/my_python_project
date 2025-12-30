@@ -20,6 +20,18 @@ logger = common.setup_logging("quest_router")
 
 # --- Domain Models & Service Layer ---
 
+class MasterEquipment(BaseModel):
+    id: int
+    name: str
+    type: str
+    power: int
+    cost: int
+    icon: str
+
+class EquipAction(BaseModel):
+    user_id: str
+    equipment_id: int
+
 class QuestService:
     """
     Questシステムのビジネスロジックとデータアクセスを担当するサービスクラス。
@@ -44,6 +56,7 @@ class QuestService:
             valid_users = [MasterUser(**u) for u in quest_data.USERS]
             valid_quests = [MasterQuest(**q) for q in quest_data.QUESTS]
             valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
+            valid_equipments = [MasterEquipment(**e) for e in quest_data.EQUIPMENTS]
         except Exception as e:
             logger.error(f"❌ Master Data Validation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
@@ -88,7 +101,21 @@ class QuestService:
                         cost_gold = excluded.cost_gold,
                         icon_key = excluded.icon_key
                 """, (r.id, r.title, r.category, r.cost_gold, r.icon_key))
-
+            
+            # ▼ 追加: 装備マスタ同期
+            for e in valid_equipments:
+                cur.execute("""
+                    INSERT INTO equipment_master (equipment_id, name, type, power, cost_gold, icon_key)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(equipment_id) DO UPDATE SET
+                        name = excluded.name,
+                        type = excluded.type,
+                        power = excluded.power,
+                        cost_gold = excluded.cost_gold,
+                        icon_key = excluded.icon_key
+                """, (e.id, e.name, e.type, e.power, e.cost, e.icon))
+        
+        
         return {"status": "synced", "message": "Master data updated successfully."}
 
     def get_all_view_data(self) -> Dict[str, Any]:
@@ -120,13 +147,109 @@ class QuestService:
             # 5. Logs
             logs = self._fetch_recent_logs(cur)
 
+            # ▼ 追加: 装備マスタ取得
+            equipments = [dict(row) for row in cur.execute("SELECT * FROM equipment_master")]
+            for e in equipments:
+                e['icon'] = e['icon_key']
+                e['cost'] = e['cost_gold']
+
+            # ▼ 追加: ユーザーの所有装備取得
+            # フロントエンドで使いやすいように {user_id: [item1, item2...]} 形式にするか、
+            # あるいはフラットなリストで返す。ここでは全リストを返してフロントでフィルタする方式を採用。
+            owned_equipments = [dict(row) for row in cur.execute("""
+                SELECT ue.*, em.type 
+                FROM user_equipments ue
+                JOIN equipment_master em ON ue.equipment_id = em.equipment_id
+            """)]
+
+            # ユーザーのステータス計算（装備補正）
+            # base_hp + armor_power / base_attack + weapon_power 等の計算は
+            # ここで行うかフロントで行うかですが、今回は簡易的にデータを渡すだけにします。
+
         return {
-            "users": users,
-            "quests": filtered_quests,
-            "rewards": rewards,
-            "completedQuests": completed,
-            "logs": logs
+            "users": users,           # 既存
+            "quests": filtered_quests,# 既存
+            "rewards": rewards,       # 既存
+            "completedQuests": completed, # 既存
+            "logs": logs,             # 既存
+            "equipments": equipments, # ★新規
+            "ownedEquipments": owned_equipments # ★新規
         }
+    
+    def process_purchase_equipment(self, user_id: str, equipment_id: int) -> Dict[str, Any]:
+        """装備を購入する"""
+        with common.get_db_cursor(commit=True) as cur:
+            # マスタ確認
+            item = cur.execute("SELECT * FROM equipment_master WHERE equipment_id=?", (equipment_id,)).fetchone()
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
+            
+            if not item: raise HTTPException(404, "Item not found")
+            if not user: raise HTTPException(404, "User not found")
+            
+            # 重複所持チェック
+            owned = cur.execute(
+                "SELECT * FROM user_equipments WHERE user_id=? AND equipment_id=?", 
+                (user_id, equipment_id)
+            ).fetchone()
+            if owned:
+                raise HTTPException(400, "Already owned")
+
+            # 所持金チェック
+            if user['gold'] < item['cost_gold']:
+                raise HTTPException(400, "Not enough gold")
+            
+            # 購入処理
+            new_gold = user['gold'] - item['cost_gold']
+            cur.execute("UPDATE quest_users SET gold=? WHERE user_id=?", (new_gold, user_id))
+            
+            # 所有テーブルに追加
+            cur.execute("""
+                INSERT INTO user_equipments (user_id, equipment_id, is_equipped, acquired_at)
+                VALUES (?, ?, 0, ?)
+            """, (user_id, equipment_id, common.get_now_iso()))
+            
+            logger.info(f"Equip Purchased: User={user_id}, Item={item['name']}")
+            
+            return {"status": "purchased", "newGold": new_gold}
+
+    def process_change_equipment(self, user_id: str, equipment_id: int) -> Dict[str, Any]:
+        """装備を変更（装着）する"""
+        with common.get_db_cursor(commit=True) as cur:
+            # アイテム確認
+            target_item = cur.execute("""
+                SELECT ue.*, em.type 
+                FROM user_equipments ue
+                JOIN equipment_master em ON ue.equipment_id = em.equipment_id
+                WHERE ue.user_id=? AND ue.equipment_id=?
+            """, (user_id, equipment_id)).fetchone()
+            
+            if not target_item:
+                raise HTTPException(404, "Equipment not owned")
+            
+            item_type = target_item['type']
+            
+            # 同一タイプの装備をすべて外す
+            # (SQLiteでJOIN UPDATEは複雑なので、サブクエリでID抽出して更新)
+            cur.execute("""
+                UPDATE user_equipments 
+                SET is_equipped = 0
+                WHERE user_id = ? 
+                  AND equipment_id IN (
+                      SELECT em.equipment_id FROM equipment_master em 
+                      WHERE em.type = ?
+                  )
+            """, (user_id, item_type))
+            
+            # 対象のアイテムを装備する
+            cur.execute("""
+                UPDATE user_equipments SET is_equipped = 1
+                WHERE user_id = ? AND equipment_id = ?
+            """, (user_id, equipment_id))
+            
+            logger.info(f"Equip Changed: User={user_id}, ItemID={equipment_id}")
+            
+            return {"status": "equipped", "equipment_id": equipment_id}
+
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         """クエストを完了し、経験値とゴールドを付与する（トランザクション）"""
@@ -426,3 +549,11 @@ def cancel_quest(action: HistoryAction):
 @router.post("/reward/purchase", response_model=PurchaseResponse)
 def purchase_reward(action: RewardAction):
     return service.process_purchase_reward(action.user_id, action.reward_id)
+
+@router.post("/equip/purchase", response_model=PurchaseResponse)
+def purchase_equipment(action: EquipAction):
+    return service.process_purchase_equipment(action.user_id, action.equipment_id)
+
+@router.post("/equip/change")
+def change_equipment(action: EquipAction):
+    return service.process_change_equipment(action.user_id, action.equipment_id)
