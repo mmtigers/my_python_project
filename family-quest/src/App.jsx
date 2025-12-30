@@ -139,11 +139,12 @@ const useGameData = (onLevelUp) => {
   const [completedQuests, setCompletedQuests] = useState([]);
   const [adventureLogs, setAdventureLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  // ▼ 追加: 装備関連のstate
+
   const [equipments, setEquipments] = useState([]);
   const [ownedEquipments, setOwnedEquipments] = useState([]);
+  const [familyStats, setFamilyStats] = useState(null);
+  const [chronicle, setChronicle] = useState([]);
 
-  // データ取得: apiClientを使用
   const fetchGameData = useCallback(async () => {
     try {
       const data = await apiClient.get('/api/quest/data');
@@ -153,21 +154,23 @@ const useGameData = (onLevelUp) => {
       if (data.rewards) setRewards(data.rewards);
       if (data.completedQuests) setCompletedQuests(data.completedQuests);
       if (data.logs) setAdventureLogs(data.logs);
-      // ▼ 追加: 装備データの反映
       if (data.equipments) setEquipments(data.equipments);
       if (data.ownedEquipments) setOwnedEquipments(data.ownedEquipments);
 
-      // 2. 家族の記録データを取得
-      const chronicleData = await apiClient.get('/api/quest/family/chronicle');
-      setFamilyStats(chronicleData.stats);
-      setChronicle(chronicleData.chronicle);
+      // 記録データの取得
+      try {
+        const chronicleData = await apiClient.get('/api/quest/family/chronicle');
+        if (chronicleData) {
+          setFamilyStats(chronicleData.stats);
+          setChronicle(chronicleData.chronicle);
+        }
+      } catch (err) {
+        console.warn("Chronicle data fetch failed:", err);
+      }
 
-
-      // 初回ロード完了
       setIsLoading(false);
     } catch (error) {
       console.error("Game Data Load Error:", error);
-      // エラー時はローディング状態を解除し、キャッシュまたは初期値を維持
       setIsLoading(false);
     }
   }, []);
@@ -176,7 +179,6 @@ const useGameData = (onLevelUp) => {
     fetchGameData();
   }, [fetchGameData]);
 
-  // Actions
   const completeQuest = async (currentUser, quest) => {
     const q_id = quest.quest_id || quest.id;
     const completedEntry = completedQuests.find(
@@ -184,7 +186,6 @@ const useGameData = (onLevelUp) => {
     );
 
     if (completedEntry) {
-      // キャンセル処理
       if (!window.confirm("この行動を 取り消しますか？")) return;
       try {
         await apiClient.post('/api/quest/quest/cancel', {
@@ -196,16 +197,12 @@ const useGameData = (onLevelUp) => {
         alert(`キャンセル失敗: ${e.message}`);
       }
     } else {
-      // 完了処理
       try {
         const res = await apiClient.post('/api/quest/complete', {
           user_id: currentUser.user_id,
           quest_id: q_id
         });
-
         await fetchGameData();
-
-        // レベルアップ判定と通知
         if (res.leveledUp && onLevelUp) {
           onLevelUp({
             user: currentUser.name,
@@ -213,7 +210,6 @@ const useGameData = (onLevelUp) => {
             job: currentUser.job_class
           });
         }
-
       } catch (e) {
         alert(`クエスト完了失敗: ${e.message}`);
       }
@@ -233,7 +229,6 @@ const useGameData = (onLevelUp) => {
         user_id: currentUser.user_id,
         reward_id: reward.reward_id || reward.id
       });
-
       await fetchGameData();
       alert(`まいどあり！\n${reward.title} を手に入れた！\n(残金: ${res.newGold} G)`);
     } catch (e) {
@@ -241,7 +236,6 @@ const useGameData = (onLevelUp) => {
     }
   };
 
-  // ▼ 追加: 装備購入アクション
   const buyEquipment = async (currentUser, item) => {
     if ((currentUser?.gold || 0) < item.cost) {
       alert("ゴールドが足りません！");
@@ -261,7 +255,6 @@ const useGameData = (onLevelUp) => {
     }
   };
 
-  // ▼ 追加: 装備変更アクション
   const changeEquipment = async (currentUser, item) => {
     try {
       await apiClient.post('/api/quest/equip/change', {
@@ -277,8 +270,7 @@ const useGameData = (onLevelUp) => {
   return {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
-    familyStats, // ★ これが抜けていないか確認
-    chronicle,   // ★ これが抜けていないか確認
+    familyStats, chronicle,
     completeQuest, buyReward, buyEquipment, changeEquipment,
     fetchGameData
   };
@@ -292,13 +284,12 @@ export default function App() {
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
 
-  // Hookの使用（レベルアップ時のコールバックを渡す）
   const {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    equipments, ownedEquipments,  // 追加
-    familyStats, chronicle,       // 追加
+    equipments, ownedEquipments,
+    familyStats, chronicle,
     completeQuest, buyReward,
-    buyEquipment, changeEquipment // 追加
+    buyEquipment, changeEquipment
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
@@ -311,12 +302,9 @@ export default function App() {
   const handleQuestClick = (quest) => completeQuest(currentUser, quest);
   // eslint-disable-next-line no-unused-vars
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
-
-  // ▼ 追加: ハンドラー
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
 
-  // 最近のログ（3件）
   const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
 
   if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
@@ -335,12 +323,79 @@ export default function App() {
       />
 
       <div className="p-4 space-y-4 max-w-md mx-auto">
-        {/* 4. 記録タブの実装 */}
+        {/* 1. ユーザー個別画面 (ここが消えていたため復元) */}
+        {viewMode === 'user' && (
+          <>
+            <UserStatusCard user={currentUser} />
+
+            <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
+              {[
+                { id: 'quest', label: 'クエスト', icon: Sword },
+                { id: 'equip', label: 'そうび', icon: Shirt },
+                { id: 'shop', label: 'よろず屋', icon: ShoppingBag },
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`
+                    border-2 border-white p-2 rounded flex flex-col items-center gap-1 transition-colors
+                    ${activeTab === tab.id ? 'bg-red-700 text-white' : 'bg-blue-900 text-gray-300 hover:bg-blue-800'}
+                  `}
+                >
+                  <tab.icon size={18} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="border-2 border-white bg-black/80 rounded min-h-[320px] p-2 flex flex-col gap-4">
+              <div className="flex-1">
+                {activeTab === 'quest' && (
+                  <QuestList
+                    quests={quests}
+                    completedQuests={completedQuests}
+                    currentUser={currentUser}
+                    onQuestClick={handleQuestClick}
+                  />
+                )}
+                {activeTab === 'shop' && (
+                  <RewardList
+                    rewards={rewards}
+                    currentUser={currentUser}
+                    onBuy={handleBuyReward}
+                  />
+                )}
+                {activeTab === 'equip' && (
+                  <EquipmentShop
+                    equipments={equipments}
+                    ownedEquipments={ownedEquipments}
+                    currentUser={currentUser}
+                    onBuy={handleBuyEquipment}
+                    onEquip={handleEquip}
+                  />
+                )}
+              </div>
+              <div className="border-2 border-dashed border-gray-500 bg-black/50 p-2 rounded min-h-[80px] mt-auto">
+                <div className="space-y-1 font-mono text-sm">
+                  {todayLogs.map((log) => (
+                    <div key={log.id} className="text-gray-400 text-xs">
+                      <span className="mr-1 text-blue-500">▶</span>
+                      {log.text}
+                    </div>
+                  ))}
+                  {todayLogs.length === 0 && <div className="text-gray-600 text-center text-xs">まだ記録はありません</div>}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 2. 記録タブの実装 */}
         {viewMode === 'familyLog' && (
           <FamilyLog stats={familyStats} chronicle={chronicle} />
         )}
 
-        {/* 5. パーティモード（まだならプレースホルダー） */}
+        {/* 3. パーティモード（プレースホルダー） */}
         {viewMode === 'party' && (
           <div className="text-center py-20 text-gray-500 tracking-widest animate-pulse">
             PARTY MODE COMING SOON...
