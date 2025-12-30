@@ -62,7 +62,8 @@ const UserStatusCard = ({ user }) => {
 const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
   const currentDay = new Date().getDay();
 
-  const availableQuests = quests.filter(q => {
+  // 1. フィルタリング（表示対象の抽出）
+  const filteredQuests = quests.filter(q => {
     if (q.target !== 'all' && q.target !== currentUser?.user_id) return false;
     if (q.type === 'daily' && q.days) {
       if (!q.days || (Array.isArray(q.days) && q.days.length === 0)) return true;
@@ -72,10 +73,26 @@ const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
     return true;
   });
 
+  // 2. ソート（未完了を上、完了を下に）
+  const sortedQuests = [...filteredQuests].sort((a, b) => {
+    const aId = a.quest_id || a.id;
+    const bId = b.quest_id || b.id;
+
+    const aDone = completedQuests.some(cq =>
+      cq.user_id === currentUser?.user_id && cq.quest_id === aId
+    );
+    const bDone = completedQuests.some(cq =>
+      cq.user_id === currentUser?.user_id && cq.quest_id === bId
+    );
+
+    if (aDone === bDone) return 0; // 同じ状態なら順序維持
+    return aDone ? 1 : -1;        // aが完了済みなら後ろへ、未完了なら前へ
+  });
+
   return (
     <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">-- 本日の依頼 --</div>
-      {availableQuests.map(q => {
+      {sortedQuests.map(q => {
         const isRandom = q.type === 'random';
         const isLimited = q.type === 'limited';
         const isPersonal = q.target !== 'all';
