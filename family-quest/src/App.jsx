@@ -1,3 +1,4 @@
+// family-quest/src/App.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Sword, Shirt, ShoppingBag, Undo2, Crown
@@ -6,24 +7,12 @@ import {
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from './constants/masterData';
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
+import { apiClient } from './utils/apiClient';
 
-// --- Components Extraction (コンポーネント抽出) ---
-
-/**
- * @typedef {Object} User
- * @property {string} user_id
- * @property {string} name
- * @property {string} job_class
- * @property {number} level
- * @property {number} exp
- * @property {number} nextLevelExp
- * @property {number} gold
- * @property {string} avatar
- */
+// --- Components Extraction (UI Components) ---
 
 /**
  * ユーザーステータスカード (HP, EXP, Goldバー) を描画
- * @param {{ user: User }} props
  */
 const UserStatusCard = ({ user }) => {
   if (!user) return null;
@@ -67,23 +56,14 @@ const UserStatusCard = ({ user }) => {
 
 /**
  * クエストリストを描画
- * @param {{ 
- * quests: Array, 
- * completedQuests: Array, 
- * currentUser: User, 
- * onQuestClick: (quest: any) => void 
- * }} props
  */
 const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
   const currentDay = new Date().getDay();
 
-  // フィルタリングロジックをここに移動し、描画をクリーンに保つ
   const availableQuests = quests.filter(q => {
     if (q.target !== 'all' && q.target !== currentUser?.user_id) return false;
     if (q.type === 'daily' && q.days) {
-      // 安全策: APIからnullや空配列が返る可能性を考慮
       if (!q.days || (Array.isArray(q.days) && q.days.length === 0)) return true;
-      
       const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
       return dayList.includes(currentDay);
     }
@@ -130,9 +110,9 @@ const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
   );
 };
 
-// --- Custom Hook (ロジック抽出) ---
+// --- Custom Hook (Logic Layer) ---
 
-const useGameData = () => {
+const useGameData = (onLevelUp) => {
   const [users, setUsers] = useState(INITIAL_USERS || []);
   const [quests, setQuests] = useState(MASTER_QUESTS || []);
   const [rewards, setRewards] = useState(MASTER_REWARDS || []);
@@ -140,13 +120,10 @@ const useGameData = () => {
   const [adventureLogs, setAdventureLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const host = import.meta.env.DEV ? 'http://192.168.1.200:8000' : '';
-
+  // データ取得: apiClientを使用
   const fetchGameData = useCallback(async () => {
     try {
-      const res = await fetch(`${host}/api/quest/data`);
-      if (!res.ok) throw new Error('Network error');
-      const data = await res.json();
+      const data = await apiClient.get('/api/quest/data');
 
       if (data.users) setUsers(data.users);
       if (data.quests) setQuests(data.quests);
@@ -154,12 +131,14 @@ const useGameData = () => {
       if (data.completedQuests) setCompletedQuests(data.completedQuests);
       if (data.logs) setAdventureLogs(data.logs);
       
+      // 初回ロード完了
       setIsLoading(false);
     } catch (error) {
-      console.error("Fetch failed", error);
+      console.error("Game Data Load Error:", error);
+      // エラー時はローディング状態を解除し、キャッシュまたは初期値を維持
       setIsLoading(false);
     }
-  }, [host]);
+  }, []);
 
   useEffect(() => {
     fetchGameData();
@@ -173,35 +152,38 @@ const useGameData = () => {
     );
 
     if (completedEntry) {
+      // キャンセル処理
       if (!window.confirm("この行動を 取り消しますか？")) return;
       try {
-        const res = await fetch(`${host}/api/quest/quest/cancel`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: currentUser.user_id,
-            history_id: completedEntry.id
-          })
+        await apiClient.post('/api/quest/quest/cancel', {
+          user_id: currentUser.user_id,
+          history_id: completedEntry.id
         });
-        if (!res.ok) throw new Error('Cancel failed');
         await fetchGameData();
       } catch (e) {
-        alert("通信エラー: キャンセルできませんでした");
+        alert(`キャンセル失敗: ${e.message}`);
       }
     } else {
+      // 完了処理
       try {
-        const res = await fetch(`${host}/api/quest/complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            user_id: currentUser.user_id,
-            quest_id: q_id
-          })
+        const res = await apiClient.post('/api/quest/complete', {
+          user_id: currentUser.user_id,
+          quest_id: q_id
         });
-        if (!res.ok) throw new Error('Complete failed');
+        
         await fetchGameData();
+
+        // レベルアップ判定と通知
+        if (res.leveledUp && onLevelUp) {
+          onLevelUp({
+            user: currentUser.name,
+            level: res.newLevel,
+            job: currentUser.job_class
+          });
+        }
+
       } catch (e) {
-        alert("通信エラー: 完了できませんでした");
+        alert(`クエスト完了失敗: ${e.message}`);
       }
     }
   };
@@ -215,19 +197,15 @@ const useGameData = () => {
     if (!window.confirm(`${reward.title} を 購入しますか？`)) return;
 
     try {
-      const res = await fetch(`${host}/api/quest/reward/purchase`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: currentUser.user_id,
-          reward_id: reward.reward_id || reward.id
-        })
+      const res = await apiClient.post('/api/quest/reward/purchase', {
+        user_id: currentUser.user_id,
+        reward_id: reward.reward_id || reward.id
       });
-      if (!res.ok) throw new Error('Purchase failed');
+      
       await fetchGameData();
-      alert(`まいどあり！\n${reward.title} を手に入れた！`);
+      alert(`まいどあり！\n${reward.title} を手に入れた！\n(残金: ${res.newGold} G)`);
     } catch (e) {
-      alert("通信エラー: 購入できませんでした");
+      alert(`購入失敗: ${e.message}`);
     }
   };
 
@@ -245,11 +223,11 @@ export default function App() {
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
 
-  // フックを使用してデータとロジックを取得
+  // Hookの使用（レベルアップ時のコールバックを渡す）
   const {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
     completeQuest, buyReward
-  } = useGameData();
+  } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
   
@@ -262,9 +240,10 @@ export default function App() {
   // eslint-disable-next-line no-unused-vars
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
 
-  const todayLogs = adventureLogs.slice(0, 3);
+  // 最近のログ（3件）
+  const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
 
-  if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono">LOADING ADVENTURE DATA...</div>;
+  if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
 
   return (
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
@@ -314,22 +293,39 @@ export default function App() {
                     onQuestClick={handleQuestClick} 
                   />
                 )}
-                {/* Note: 'equip' と 'shop' タブの実装も同様に行うべきですが、
-                   今回はメインロジックである 'quest' に焦点を当て、
-                   Zero Regression を守るため、構造のみ維持しています。
-                */}
+                {activeTab === 'shop' && (
+                   <div className="text-center text-gray-500 py-10">
+                      <div className="text-4xl mb-2">🛖</div>
+                      <div>準備中...</div>
+                   </div>
+                )}
+                {activeTab === 'equip' && (
+                   <div className="text-center text-gray-500 py-10">
+                      <div className="text-4xl mb-2">🛡️</div>
+                      <div>準備中...</div>
+                   </div>
+                )}
               </div>
               <div className="border-2 border-dashed border-gray-500 bg-black/50 p-2 rounded min-h-[80px] mt-auto">
                 <div className="space-y-1 font-mono text-sm">
                   {todayLogs.map((log) => (
-                    <div key={log.id} className="text-gray-400"><span className="mr-1">▶</span>{log.text}</div>
+                    <div key={log.id} className="text-gray-400 text-xs">
+                        <span className="mr-1 text-blue-500">▶</span>
+                        {log.text}
+                    </div>
                   ))}
+                  {todayLogs.length === 0 && <div className="text-gray-600 text-center text-xs">まだ記録はありません</div>}
                 </div>
               </div>
             </div>
           </>
         )}
-        {/* PartyモードとLogモードの表示は省略されていますが、元のコード構造は維持されています */}
+        {/* Partyモード等の拡張用プレースホルダー */}
+        {viewMode !== 'user' && (
+           <div className="text-center py-20 text-gray-500">
+              COMING SOON...
+           </div>
+        )}
       </div>
     </div>
   );
