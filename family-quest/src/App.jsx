@@ -269,7 +269,12 @@ export default function App() {
   // Hookの使用（レベルアップ時のコールバックを渡す）
   const {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    completeQuest, buyReward
+    equipments,        // ★ 追加
+    ownedEquipments,   // ★ 追加
+    completeQuest,
+    buyReward,
+    buyEquipment,      // ★ 追加
+    changeEquipment    // ★ 追加
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
