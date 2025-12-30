@@ -1,8 +1,7 @@
 """
 Family Quest Master Data - Professional Review Edition
-[2025-12-30 更新]
-- 共通クエスト：生活習慣と家事労働の分離
-- 個人クエスト：仕事、調理、寝かしつけ、学習を最適化
+[2025-12-31 更新]
+- クエスト定義の適正化（平日限定、工程分割、ターゲット限定）
 - 1G = 1円相当
 """
 
@@ -12,22 +11,22 @@ Family Quest Master Data - Professional Review Edition
 USERS = [
     {
         'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', # FIXED: avatarを追加
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',
         'info': '35歳 / INTJ / 三菱電機勤務 / 186cm' 
     },
     {
         'user_id': 'mom', 'name': 'はるな', 'job_class': '専業主婦', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄', # FIXED: avatarを追加
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄',
         'info': '32歳 / 育児・家庭運営責任者' 
     },
     {
         'user_id': 'son', 'name': 'ともや', 'job_class': '長男', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦', # FIXED: avatarを追加
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦',
         'info': '5歳 / 学習習慣形成フェーズ' 
     },
     {
         'user_id': 'daughter', 'name': 'すずか', 'job_class': '長女', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', # FIXED: avatarを追加
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶',
         'info': '2歳 / 生活習慣学習フェーズ' 
     }
 ]
@@ -36,19 +35,42 @@ USERS = [
 # 2. クエスト定義
 # ==========================================
 QUESTS = [
-    {'id': 1, 'title': 'お着替え (準備含む)', 'type': 'daily', 'target': 'all', 'exp': 20, 'gold': 5, 'icon': '👕'},
+    # --- 子供向け 生活習慣 ---
+    {'id': 1, 'title': 'お着替え', 'type': 'daily', 'target': 'all', 'exp': 20, 'gold': 5, 'icon': '👕'},
     {'id': 2, 'title': 'はみがき', 'type': 'daily', 'target': 'all', 'exp': 15, 'gold': 5, 'icon': '🪥'},
-    {'id': 3, 'title': 'ごはんを食べる (完食)', 'type': 'daily', 'target': 'all', 'exp': 20, 'gold': 5, 'icon': '🍚'},
-    {'id': 4, 'title': '洗濯物干し', 'type': 'daily', 'target': 'all', 'exp': 100, 'gold': 50, 'icon': '☀️'},
-    {'id': 5, 'title': '洗濯物たたみ・収納', 'type': 'daily', 'target': 'all', 'exp': 120, 'gold': 80, 'icon': '🧺'},
-    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'exp': 200, 'gold': 50, 'icon': '🏢'},
-    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'daily', 'target': 'dad', 'exp': 350, 'gold': 80, 'icon': '🔥'},
+    
+    # ごはん：子供限定 (Son, Daughter)
+    {'id': 3, 'title': 'ごはんを食べる (完食)', 'type': 'daily', 'target': 'son', 'exp': 20, 'gold': 5, 'icon': '🍚'},
+    {'id': 301, 'title': 'ごはんを食べる (完食)', 'type': 'daily', 'target': 'daughter', 'exp': 20, 'gold': 5, 'icon': '🍚'},
+
+    # --- 父 (Dad) ---
+    # 仕事：平日(月=1 ～ 金=5)のみ
+    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'exp': 200, 'gold': 50, 'icon': '🏢', 'days': '1,2,3,4,5'},
+    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'daily', 'target': 'dad', 'exp': 350, 'gold': 80, 'icon': '🔥', 'days': '1,2,3,4,5'},
+    
+    # 家事・健康
     {'id': 12, 'title': '食器の片づけ・キッチンリセット', 'type': 'daily', 'target': 'dad', 'exp': 80, 'gold': 50, 'icon': '🍽️'},
     {'id': 13, 'title': '排便日時記録 (健康管理)', 'type': 'daily', 'target': 'dad', 'exp': 10, 'gold': 10, 'icon': '📝'}, 
+    {'id': 14, 'title': '体重計測 (健康管理)', 'type': 'daily', 'target': 'dad', 'exp': 10, 'gold': 10, 'icon': '⚖️'},
+
+    # 洗濯 (父担当分)
+    {'id': 15, 'title': '洗濯物を干す', 'type': 'daily', 'target': 'dad', 'exp': 50, 'gold': 30, 'icon': '☀️'},
+    {'id': 16, 'title': '洗濯物を畳む', 'type': 'daily', 'target': 'dad', 'exp': 40, 'gold': 30, 'icon': '👕'},
+    {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'dad', 'exp': 30, 'gold': 20, 'icon': '🧺'},
+
+    # --- 母 (Mom) ---
+    # 家事全般
     {'id': 20, 'title': '昼食を作る', 'type': 'daily', 'target': 'mom', 'exp': 100, 'gold': 100, 'icon': '🥪'},
     {'id': 21, 'title': '夕食を作る', 'type': 'daily', 'target': 'mom', 'exp': 150, 'gold': 150, 'icon': '🍳'},
     {'id': 22, 'title': '子供の寝かしつけ (2名対応)', 'type': 'daily', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '🛌'},
     {'id': 23, 'title': '日中の家庭運営・育児基本給', 'type': 'daily', 'target': 'mom', 'exp': 250, 'gold': 50, 'icon': '🏠'},
+    
+    # 洗濯 (母担当分)
+    {'id': 24, 'title': '洗濯物を干す', 'type': 'daily', 'target': 'mom', 'exp': 50, 'gold': 30, 'icon': '☀️'},
+    {'id': 25, 'title': '洗濯物を畳む', 'type': 'daily', 'target': 'mom', 'exp': 40, 'gold': 30, 'icon': '👕'},
+    {'id': 26, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'mom', 'exp': 30, 'gold': 20, 'icon': '🧺'},
+
+    # --- 長男 (Son) ---
     {'id': 30, 'title': '国語プリント完了', 'type': 'daily', 'target': 'son', 'exp': 50, 'gold': 20, 'icon': '📝'},
     {'id': 31, 'title': '算数プリント完了', 'type': 'daily', 'target': 'son', 'exp': 50, 'gold': 20, 'icon': '🧮'}
 ]
@@ -57,7 +79,6 @@ QUESTS = [
 # 3. 報酬定義 (ショップメニュー)
 # ==========================================
 REWARDS = [
-    # FIXED: cost -> cost_gold, icon -> icon_key に統一
     {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦'},
     {'id': 2, 'title': 'ビール/お酒アップグレード', 'category': 'food', 'cost_gold': 150, 'icon_key': '🍺'},
     {'id': 3, 'title': '休日・朝寝坊権利 (1時間)', 'category': 'service', 'cost_gold': 1000, 'icon_key': '🛌'},

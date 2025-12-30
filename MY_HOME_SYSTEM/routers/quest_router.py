@@ -48,11 +48,11 @@ class QuestService:
         return level * 20 + 5
 
     def sync_master_data(self) -> Dict[str, str]:
-        """設定ファイル(quest_data.py)の内容をDBのマスタテーブルに同期する"""
-        logger.info("🔄 Starting Master Data Sync...")
+        """設定ファイル(quest_data.py)の内容をDBのマスタテーブルに完全同期する"""
+        logger.info("🔄 Starting Master Data Sync (Strict Mode)...")
         try:
             importlib.reload(quest_data)
-            # バリデーション用モデルへの変換（データ整合性チェック）
+            # バリデーション用モデルへの変換
             valid_users = [MasterUser(**u) for u in quest_data.USERS]
             valid_quests = [MasterQuest(**q) for q in quest_data.QUESTS]
             valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
@@ -62,7 +62,7 @@ class QuestService:
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
         
         with common.get_db_cursor(commit=True) as cur:
-            # 1. ユーザー同期
+            # 1. ユーザー同期 (ユーザーは履歴保持のため削除せず、更新のみ)
             for u in valid_users:
                 cur.execute("""
                     INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, updated_at)
@@ -73,7 +73,16 @@ class QuestService:
                         avatar = excluded.avatar
                 """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
             
-            # 2. クエスト同期
+            # --- 2. クエスト同期 (不要なデータは削除) ---
+            active_q_ids = [q.id for q in valid_quests]
+            if active_q_ids:
+                placeholders = ','.join(['?'] * len(active_q_ids))
+                # マスタにないIDを削除
+                cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({placeholders})", active_q_ids)
+            else:
+                cur.execute("DELETE FROM quest_master")
+
+            # 追加・更新
             for q in valid_quests:
                 cur.execute("""
                     INSERT INTO quest_master (
@@ -87,10 +96,18 @@ class QuestService:
                         target_user = excluded.target_user,
                         exp_gain = excluded.exp_gain,
                         gold_gain = excluded.gold_gain,
-                        icon_key = excluded.icon_key
+                        icon_key = excluded.icon_key,
+                        day_of_week = excluded.day_of_week  -- ★ここが重要（曜日変更を反映）
                 """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, q.days, q.start, q.end, q.chance))
 
-            # 3. 報酬同期
+            # --- 3. 報酬同期 (不要なデータは削除) ---
+            active_r_ids = [r.id for r in valid_rewards]
+            if active_r_ids:
+                placeholders = ','.join(['?'] * len(active_r_ids))
+                cur.execute(f"DELETE FROM reward_master WHERE reward_id NOT IN ({placeholders})", active_r_ids)
+            else:
+                cur.execute("DELETE FROM reward_master")
+
             for r in valid_rewards:
                 cur.execute("""
                     INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
@@ -102,7 +119,14 @@ class QuestService:
                         icon_key = excluded.icon_key
                 """, (r.id, r.title, r.category, r.cost_gold, r.icon_key))
             
-            # ▼ 追加: 装備マスタ同期
+            # --- 4. 装備マスタ同期 (不要なデータは削除) ---
+            active_e_ids = [e.id for e in valid_equipments]
+            if active_e_ids:
+                placeholders = ','.join(['?'] * len(active_e_ids))
+                cur.execute(f"DELETE FROM equipment_master WHERE equipment_id NOT IN ({placeholders})", active_e_ids)
+            else:
+                cur.execute("DELETE FROM equipment_master")
+
             for e in valid_equipments:
                 cur.execute("""
                     INSERT INTO equipment_master (equipment_id, name, type, power, cost_gold, icon_key)
@@ -115,8 +139,8 @@ class QuestService:
                         icon_key = excluded.icon_key
                 """, (e.id, e.name, e.type, e.power, e.cost, e.icon))
         
-        
-        return {"status": "synced", "message": "Master data updated successfully."}
+        logger.info("✅ Master data sync completed (Orphans removed).")
+        return {"status": "synced", "message": "Master data updated and cleaned successfully."}
 
     def get_all_view_data(self) -> Dict[str, Any]:
         """フロントエンド描画用の全データを取得する"""
