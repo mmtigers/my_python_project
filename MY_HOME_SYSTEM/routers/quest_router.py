@@ -450,6 +450,95 @@ class QuestService:
             new_exp = 0  # Lv1でマイナスなら0丸め
             
         return new_level, new_exp
+    
+
+    def get_family_chronicle(self) -> Dict[str, Any]:
+        """家族全員の統計と全期間のログを取得する"""
+        with common.get_db_cursor() as cur:
+            # 1. 家族の統計（総力）を計算
+            users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
+            total_level = sum(u['level'] for u in users)
+            total_gold = sum(u['gold'] for u in users)
+            
+            # クエスト累計達成数
+            total_quests = cur.execute("SELECT COUNT(*) as count FROM quest_history").fetchone()['count']
+            
+            # パーティランクの決定（簡易ロジック）
+            if total_level < 10: rank = "駆け出しの家族"
+            elif total_level < 30: rank = "新進気鋭のパーティ"
+            elif total_level < 60: rank = "熟練のクラン"
+            else: rank = "伝説のギルド"
+
+            # 2. 全期間のログを取得（リッチ版）
+            # クエスト達成履歴と報酬獲得履歴を統合
+            logs = self._fetch_full_adventure_logs(cur)
+
+        return {
+            "stats": {
+                "totalLevel": total_level,
+                "totalGold": total_gold,
+                "totalQuests": total_quests,
+                "partyRank": rank
+            },
+            "chronicle": logs
+        }
+
+    def _fetch_full_adventure_logs(self, cur) -> List[dict]:
+        """全期間（最大100件）の全ユーザーログを取得"""
+        # クエスト履歴
+        q_rows = cur.execute("""
+            SELECT 'quest' as type, user_id, quest_title as title, 
+                   gold_earned as gold, exp_earned as exp, completed_at as ts 
+            FROM quest_history ORDER BY completed_at DESC LIMIT 100
+        """).fetchall()
+        
+        # 報酬履歴
+        r_rows = cur.execute("""
+            SELECT 'reward' as type, user_id, reward_title as title, 
+                   cost_gold as gold, 0 as exp, redeemed_at as ts 
+            FROM reward_history ORDER BY redeemed_at DESC LIMIT 100
+        """).fetchall()
+        
+        # 装備購入履歴（もしあれば） - user_equipmentsから取得
+        e_rows = cur.execute("""
+            SELECT 'equip' as type, ue.user_id, em.name as title, 
+                   em.cost_gold as gold, 0 as exp, ue.acquired_at as ts 
+            FROM user_equipments ue
+            JOIN equipment_master em ON ue.equipment_id = em.equipment_id
+            ORDER BY acquired_at DESC LIMIT 100
+        """).fetchall()
+
+        # すべて統合して時間順にソート
+        all_events = sorted(q_rows + r_rows + e_rows, key=lambda x: x['ts'], reverse=True)[:100]
+        
+        # ユーザー情報の取得（名前とアバター用）
+        user_info = {row['user_id']: {"name": row['name'], "avatar": row['avatar']} 
+                     for row in cur.execute("SELECT user_id, name, avatar FROM quest_users")}
+
+        formatted = []
+        for ev in all_events:
+            u = user_info.get(ev['user_id'], {"name": "旅人", "avatar": "👤"})
+            
+            text = ""
+            if ev['type'] == 'quest':
+                text = f"{u['name']}は {ev['title']} を達成した！"
+            elif ev['type'] == 'reward':
+                text = f"{u['name']}は {ev['title']} を獲得した！"
+            elif ev['type'] == 'equip':
+                text = f"{u['name']}は {ev['title']} を購入した！"
+
+            formatted.append({
+                "type": ev['type'],
+                "userName": u['name'],
+                "userAvatar": u['avatar'],
+                "title": ev['title'],
+                "text": text,
+                "gold": ev['gold'],
+                "exp": ev['exp'],
+                "timestamp": ev['ts'],
+                "dateStr": ev['ts'].split('T')[0] if 'T' in ev['ts'] else ev['ts'].split(' ')[0]
+            })
+        return formatted
 
 
 # --- Validation Models (Pydantic) ---
@@ -557,3 +646,8 @@ def purchase_equipment(action: EquipAction):
 @router.post("/equip/change")
 def change_equipment(action: EquipAction):
     return service.process_change_equipment(action.user_id, action.equipment_id)
+
+@router.get("/family/chronicle")
+def get_family_chronicle():
+    """家族全体の記録を取得する"""
+    return service.get_family_chronicle()

@@ -10,6 +10,7 @@ import Header from './components/layout/Header';
 import { apiClient } from './utils/apiClient';
 import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
+import FamilyLog from './components/quest/FamilyLog';
 
 // --- Components Extraction (UI Components) ---
 
@@ -156,6 +157,11 @@ const useGameData = (onLevelUp) => {
       if (data.equipments) setEquipments(data.equipments);
       if (data.ownedEquipments) setOwnedEquipments(data.ownedEquipments);
 
+      // 2. 家族の記録データを取得
+      const chronicleData = await apiClient.get('/api/quest/family/chronicle');
+      setFamilyStats(chronicleData.stats);
+      setChronicle(chronicleData.chronicle);
+
 
       // 初回ロード完了
       setIsLoading(false);
@@ -270,8 +276,11 @@ const useGameData = (onLevelUp) => {
 
   return {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    equipments, ownedEquipments, // 忘れずエクスポート
-    completeQuest, buyReward, buyEquipment, changeEquipment // 忘れずエクスポート
+    equipments, ownedEquipments,
+    familyStats, // ★ これが抜けていないか確認
+    chronicle,   // ★ これが抜けていないか確認
+    completeQuest, buyReward, buyEquipment, changeEquipment,
+    fetchGameData
   };
 };
 
@@ -286,12 +295,10 @@ export default function App() {
   // Hookの使用（レベルアップ時のコールバックを渡す）
   const {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    equipments,        // ★ 追加
-    ownedEquipments,   // ★ 追加
-    completeQuest,
-    buyReward,
-    buyEquipment,      // ★ 追加
-    changeEquipment    // ★ 追加
+    equipments, ownedEquipments,  // 追加
+    familyStats, chronicle,       // 追加
+    completeQuest, buyReward,
+    buyEquipment, changeEquipment // 追加
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
@@ -328,75 +335,15 @@ export default function App() {
       />
 
       <div className="p-4 space-y-4 max-w-md mx-auto">
-        {viewMode === 'user' && (
-          <>
-            <UserStatusCard user={currentUser} />
-
-            <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
-              {[
-                { id: 'quest', label: 'クエスト', icon: Sword },
-                { id: 'equip', label: 'そうび', icon: Shirt },
-                { id: 'shop', label: 'よろず屋', icon: ShoppingBag },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`
-                    border-2 border-white p-2 rounded flex flex-col items-center gap-1 transition-colors
-                    ${activeTab === tab.id ? 'bg-red-700 text-white' : 'bg-blue-900 text-gray-300 hover:bg-blue-800'}
-                  `}
-                >
-                  <tab.icon size={18} />
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="border-2 border-white bg-black/80 rounded min-h-[320px] p-2 flex flex-col gap-4">
-              <div className="flex-1">
-                {activeTab === 'quest' && (
-                  <QuestList
-                    quests={quests}
-                    completedQuests={completedQuests}
-                    currentUser={currentUser}
-                    onQuestClick={handleQuestClick}
-                  />
-                )}
-                {activeTab === 'shop' && (
-                  <RewardList
-                    rewards={rewards}
-                    currentUser={currentUser}
-                    onBuy={handleBuyReward}
-                  />
-                )}
-                {activeTab === 'equip' && (
-                  <EquipmentShop
-                    equipments={equipments}
-                    ownedEquipments={ownedEquipments}
-                    currentUser={currentUser}
-                    onBuy={handleBuyEquipment}
-                    onEquip={handleEquip}
-                  />
-                )}
-              </div>
-              <div className="border-2 border-dashed border-gray-500 bg-black/50 p-2 rounded min-h-[80px] mt-auto">
-                <div className="space-y-1 font-mono text-sm">
-                  {todayLogs.map((log) => (
-                    <div key={log.id} className="text-gray-400 text-xs">
-                      <span className="mr-1 text-blue-500">▶</span>
-                      {log.text}
-                    </div>
-                  ))}
-                  {todayLogs.length === 0 && <div className="text-gray-600 text-center text-xs">まだ記録はありません</div>}
-                </div>
-              </div>
-            </div>
-          </>
+        {/* 4. 記録タブの実装 */}
+        {viewMode === 'familyLog' && (
+          <FamilyLog stats={familyStats} chronicle={chronicle} />
         )}
-        {/* Partyモード等の拡張用プレースホルダー */}
-        {viewMode !== 'user' && (
-          <div className="text-center py-20 text-gray-500">
-            COMING SOON...
+
+        {/* 5. パーティモード（まだならプレースホルダー） */}
+        {viewMode === 'party' && (
+          <div className="text-center py-20 text-gray-500 tracking-widest animate-pulse">
+            PARTY MODE COMING SOON...
           </div>
         )}
       </div>
