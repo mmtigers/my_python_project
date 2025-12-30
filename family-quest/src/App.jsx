@@ -8,6 +8,7 @@ import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from './constants/master
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
 import { apiClient } from './utils/apiClient';
+import RewardList from './components/quest/RewardList';
 
 // --- Components Extraction (UI Components) ---
 
@@ -294,10 +295,11 @@ export default function App() {
                   />
                 )}
                 {activeTab === 'shop' && (
-                   <div className="text-center text-gray-500 py-10">
-                      <div className="text-4xl mb-2">🛖</div>
-                      <div>準備中...</div>
-                   </div>
+                   <RewardList 
+                     rewards={rewards}
+                     currentUser={currentUser}
+                     onBuy={handleBuyReward}
+                   />
                 )}
                 {activeTab === 'equip' && (
                    <div className="text-center text-gray-500 py-10">

@@ -1,4 +1,3 @@
-# HOME_SYSTEM/common.py
 import sqlite3
 import requests
 import json
@@ -6,14 +5,15 @@ import datetime
 import pytz
 import logging
 import traceback
+import os  # 追加
 from typing import List, Any, Optional, Union
 from contextlib import contextmanager
+from logging.handlers import TimedRotatingFileHandler # 追加
 import config
 from linebot.exceptions import LineBotApiError
 from linebot import LineBotApi
-from linebot.exceptions import LineBotApiError
-from requests.adapters import HTTPAdapter # 追加
-from urllib3.util.retry import Retry # 追加
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # LineBotApiの初期化
 if config.LINE_CHANNEL_ACCESS_TOKEN:
@@ -26,42 +26,55 @@ else:
 class DiscordErrorHandler(logging.Handler):
     """エラーログをDiscordに通知するハンドラ"""
     def emit(self, record):
-        # ERROR以上のみ、かつ自分自身のログ（再帰防止）でない場合
         if record.levelno >= logging.ERROR and "Discord" not in record.msg:
             try:
                 msg = self.format(record)
-                # エラー専用Webhookを使用
                 url = config.DISCORD_WEBHOOK_ERROR
                 if url:
-                    payload = {"content": f"😰 **システムエラー発生**\n```{msg[:1800]}```"} # 2000文字制限対策
+                    payload = {"content": f"😰 **システムエラー発生**\n```{msg[:1800]}```"}
                     requests.post(url, json=payload, timeout=5)
             except Exception:
-                # ここでのエラーは握りつぶす（無限ループ防止）
                 pass
 
 def setup_logging(name: str) -> logging.Logger:
-    """ロガーのセットアップ"""
+    """ロガーのセットアップ (ローテーション機能付き)"""
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     
-    # ハンドラが重複しないようにクリア
     if logger.handlers:
         logger.handlers.clear()
     
-    # 標準出力
-    stream_handler = logging.StreamHandler()
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    # 1. 標準出力 (開発確認用)
+    stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
+
+    # 2. ファイル出力 (ローテーション付き)
+    # logsディレクトリの確保
+    log_dir = os.path.join(config.BASE_DIR, "logs")
+    os.makedirs(log_dir, exist_ok=True)
     
-    # Discord通知 (エラー時)
+    # 毎日深夜0時にローテーション、7世代(1週間分)保持
+    log_file = os.path.join(log_dir, "home_system.log")
+    file_handler = TimedRotatingFileHandler(
+        filename=log_file,
+        when='midnight',
+        interval=1,
+        backupCount=7,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # 3. Discord通知 (エラー時)
     if config.DISCORD_WEBHOOK_ERROR:
         discord_handler = DiscordErrorHandler()
         discord_handler.setFormatter(formatter)
         discord_handler.setLevel(logging.ERROR)
         logger.addHandler(discord_handler)
     
-    # 外部ライブラリのノイズ抑制
     logging.getLogger("zeep").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     
