@@ -282,3 +282,21 @@ NAS_CHECK_TIMEOUT = 5  # Ping等のタイムアウト(秒)
 # Family Quest Frontend
 # 開発環境と本番環境でパスが変わる場合は環境変数化を検討
 QUEST_DIST_DIR = "/home/masahiro/develop/family-quest/dist"
+
+# === Network & Security Settings ===
+
+# フロントエンドのオリジン設定
+# 環境変数 FRONTEND_URL が設定されていればそれを優先、なければデフォルト値を使用
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://192.168.1.200:5173")
+
+# CORSで許可するオリジンのリスト
+CORS_ORIGINS = [
+    "http://localhost:5173",      # ローカル開発用 (Viteデフォルト)
+    "http://127.0.0.1:5173",      # ローカル開発用 (IP指定)
+    FRONTEND_URL,                 # 本番/検証環境 (LAN内など)
+]
+
+# 必要に応じて追加: "*" を許可するかどうか (セキュリティリスクがあるため、開発中以外はFalse推奨)
+ALLOW_ALL_ORIGINS = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
+if ALLOW_ALL_ORIGINS:
+    CORS_ORIGINS = ["*"]
