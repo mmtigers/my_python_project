@@ -165,7 +165,7 @@ app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
 # Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://192.168.x.x:5173", "*"], 
+    allow_origins=config.CORS_ORIGINS,  # configから読み込み
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
