@@ -181,7 +181,7 @@ class QuestService:
             # フロントエンドで使いやすいように {user_id: [item1, item2...]} 形式にするか、
             # あるいはフラットなリストで返す。ここでは全リストを返してフロントでフィルタする方式を採用。
             owned_equipments = [dict(row) for row in cur.execute("""
-                SELECT ue.*, em.type 
+                SELECT ue.*, em.name, em.type, em.power, em.icon_key 
                 FROM user_equipments ue
                 JOIN equipment_master em ON ue.equipment_id = em.equipment_id
             """)]

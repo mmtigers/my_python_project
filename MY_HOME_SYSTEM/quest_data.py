@@ -20,12 +20,12 @@ USERS = [
         'info': '32歳 / 育児・家庭運営責任者' 
     },
     {
-        'user_id': 'son', 'name': 'ともや', 'job_class': '長男', 
+        'user_id': 'son', 'name': 'ともや', 'job_class': '年長', 
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦',
         'info': '5歳 / 学習習慣形成フェーズ' 
     },
     {
-        'user_id': 'daughter', 'name': 'すずか', 'job_class': '長女', 
+        'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人', 
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶',
         'info': '2歳 / 生活習慣学習フェーズ' 
     }
