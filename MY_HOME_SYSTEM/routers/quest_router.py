@@ -1,25 +1,68 @@
 # MY_HOME_SYSTEM/routers/quest_router.py
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, ValidationError, Field
-from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional, Union
 import datetime
 import math
 import importlib
-import sqlite3
 import random
 import config
 import common
+
+# import quest_data with fallback
 try:
     import quest_data
 except ImportError:
-    # 実行ディレクトリによっては相対インポートが必要な場合のフォールバック
     from .. import quest_data
 
 router = APIRouter()
 logger = common.setup_logging("quest_router")
 
-# --- Validation Models (設定ファイルの正当性チェック用) ---
-# quest_data.py の中身がこのルールに従っているか厳しくチェックします
+# --- Domain Models (Business Logic Helpers) ---
+
+def calculate_next_level_exp(level: int) -> int:
+    """レベルに応じた必要経験値を計算する (1.2乗カーブ)"""
+    return math.floor(100 * math.pow(1.2, level - 1))
+
+def calculate_max_hp(level: int) -> int:
+    """レベルに応じた最大HPを計算する"""
+    return level * 20 + 5
+
+def process_level_up(current_level: int, current_exp: int) -> tuple[int, int, bool]:
+    """
+    経験値加算後のレベルと残余経験値を計算する
+    Returns: (new_level, new_exp, is_leveled_up)
+    """
+    next_exp_req = calculate_next_level_exp(current_level)
+    leveled_up = False
+    
+    while current_exp >= next_exp_req:
+        current_exp -= next_exp_req
+        current_level += 1
+        leveled_up = True
+        next_exp_req = calculate_next_level_exp(current_level)
+        
+    return current_level, current_exp, leveled_up
+
+def process_level_down(current_level: int, current_exp: int) -> tuple[int, int]:
+    """
+    経験値減算後のレベルと経験値を計算する（クエストキャンセル時用）
+    Returns: (new_level, new_exp)
+    """
+    new_level = current_level
+    new_exp = current_exp
+    
+    while new_exp < 0 and new_level > 1:
+        new_level -= 1
+        prev_level_max = calculate_next_level_exp(new_level)
+        new_exp += prev_level_max
+        
+    if new_exp < 0:
+        new_exp = 0  # Lv1でマイナスなら0丸め
+        
+    return new_level, new_exp
+
+# --- Validation Models (For Master Data Sync) ---
 
 class MasterUser(BaseModel):
     user_id: str
@@ -28,28 +71,30 @@ class MasterUser(BaseModel):
     level: int = 1
     exp: int = 0
     gold: int = 50
+    avatar: str = '🙂'
 
 class MasterQuest(BaseModel):
     id: int
     title: str
-    type: str # 'daily' or 'weekly'
-    target: str = 'all'      # ★追加
+    type: str  # 'daily', 'weekly', 'random', 'limited'
+    target: str = 'all'
     exp: int
     gold: int
     icon: str
-    days: Optional[str] = None # 必須ではない
-    start: Optional[str] = None # 追加
-    end: Optional[str] = None   # 追加
-    chance: Optional[float] = 1.0 # 追加
+    days: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    chance: Optional[float] = 1.0
 
 class MasterReward(BaseModel):
     id: int
     title: str
     category: str
-    cost: int
-    icon: str
+    cost_gold: int
+    icon_key: str
 
-# --- Pydantic Models (リクエスト/レスポンス定義) ---
+# --- API Request/Response Models ---
+
 class UserAction(BaseModel):
     user_id: str
 
@@ -65,57 +110,55 @@ class HistoryAction(BaseModel):
     user_id: str
     history_id: int
 
-# --- Helper Functions ---
+# Responses
+class SyncResponse(BaseModel):
+    status: str
+    message: str
 
-def calculate_next_level_exp(level: int) -> int:
-    """レベルに応じた必要経験値を計算する (1.2乗カーブ)"""
-    return math.floor(100 * math.pow(1.2, level - 1))
+class CompleteResponse(BaseModel):
+    status: str
+    leveledUp: bool
+    newLevel: int
+    earnedGold: int
+    earnedExp: int
+
+class CancelResponse(BaseModel):
+    status: str
+
+class PurchaseResponse(BaseModel):
+    status: str
+    newGold: int
 
 # --- Endpoints ---
 
-@router.post("/sync_master")
+@router.post("/sync_master", response_model=SyncResponse)
 def sync_master_data():
-    """
-    quest_data.py の内容をデータベースに同期（UPSERT）します。
-    新しいクエストの追加や、金額の変更などが反映されます。
-    """
+    """設定ファイル(quest_data.py)の内容をDBのマスタテーブルに同期する"""
     logger.info("🔄 Starting Master Data Sync...")
-    
-    # ★★★ ここにリロード処理を追加 ★★★
-    # これにより、キャッシュを破棄して最新のファイルを読み込みます
     try:
         importlib.reload(quest_data)
-        logger.info("📂 quest_data module reloaded.")
-
-        # ★ここでバリデーション実行！
-        # データが不正な場合、即座に ValidationError が発生し、DB更新は行われません
         valid_users = [MasterUser(**u) for u in quest_data.USERS]
         valid_quests = [MasterQuest(**q) for q in quest_data.QUESTS]
         valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
-
-        logger.info("✅ Data validation passed.")
-
-    except ValidationError as e:
-        # エラー内容をログに出し、ユーザーにも分かりやすく返す
-        error_msg = f"設定ファイルの記述ミス: {e}"
-        logger.error(f"❌ {error_msg}")
-        return {"status": "error", "message": error_msg}
     except Exception as e:
-        logger.error(f"❌ Failed to load quest_data: {e}")
-        return {"status": "error", "message": f"ファイルの読み込みに失敗: {e}"}
+        logger.error(f"❌ Validation failed: {e}")
+        # Note: Return generic dict to match error schema or raise HTTPException
+        # Keeping original behavior of returning dict with error status
+        return {"status": "error", "message": str(e)} # type: ignore
     
-    # 2. DB更新 (検証をパスしたデータのみを使用)
     with common.get_db_cursor(commit=True) as cur:
-        # --- ユーザー情報の同期を追加 ---
+        # 1. ユーザー同期
         for u in valid_users:
             cur.execute("""
-                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                     name = excluded.name,
-                    job_class = excluded.job_class
-            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, datetime.datetime.now()))
+                    job_class = excluded.job_class,
+                    avatar = excluded.avatar
+            """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
         
+        # 2. クエスト同期
         for q in valid_quests:
             cur.execute("""
                 INSERT INTO quest_master (
@@ -129,72 +172,59 @@ def sync_master_data():
                     target_user = excluded.target_user,
                     exp_gain = excluded.exp_gain,
                     gold_gain = excluded.gold_gain,
-                    icon_key = excluded.icon_key,
-                    day_of_week = excluded.day_of_week,
-                    start_date = excluded.start_date,
-                    end_date = excluded.end_date,
-                    occurrence_chance = excluded.occurrence_chance
+                    icon_key = excluded.icon_key
             """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, q.days, q.start, q.end, q.chance))
-    return {"status": "synced", "message": "Master data updated."}
-    
 
-@router.post("/seed")
+        # 3. 報酬同期
+        for r in valid_rewards:
+            cur.execute("""
+                INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(reward_id) DO UPDATE SET
+                    title = excluded.title,
+                    category = excluded.category,
+                    cost_gold = excluded.cost_gold,
+                    icon_key = excluded.icon_key
+            """, (r.id, r.title, r.category, r.cost_gold, r.icon_key))
+
+    return {"status": "synced", "message": "Master data updated."}
+
+@router.post("/seed", response_model=SyncResponse)
 def seed_data():
     return sync_master_data()
 
 @router.get("/data")
 def get_all_data() -> Dict[str, Any]:
-    """アプリ起動時に必要な全データを返す"""
-    # 読み取り専用操作のため commit=False (デフォルト)
+    """フロントエンド描画用の全データを取得する"""
     with common.get_db_cursor() as cur:
-        # Users
-        users: List[Dict[str, Any]] = []
-        
-        # カーソルの状態依存を避けるため fetchall で取得
+        # 1. Users
         user_rows = cur.execute("SELECT * FROM quest_users").fetchall()
-        
+        users = []
         for row in user_rows:
             u = dict(row)
             u['nextLevelExp'] = calculate_next_level_exp(u['level'])
-            
-            # 同じカーソルを再利用してインベントリ取得 (N+1問題は残るが、挙動維持優先)
-            inv_rows = cur.execute("""
-                SELECT r.* FROM reward_history rh 
-                JOIN reward_master r ON rh.reward_id = r.reward_id 
-                WHERE rh.user_id = ? AND r.category = 'equip'
-            """, (u['user_id'],)).fetchall()
-            
-            u['inventory'] = [dict(r) for r in inv_rows]
-            
-            # UI表示用の avatar (DBにないので補完)
-            if u['user_id'] == 'dad': u['avatar'] = '⚔️'
-            elif u['user_id'] == 'mom': u['avatar'] = '🪄'
-            else: u['avatar'] = '🙂'
-            
-            # HP (簡易計算: level * 20 + 5)
-            u['maxHp'] = u['level'] * 20 + 5
-            u['hp'] = u['maxHp'] # 常に満タン
-            
+            u['maxHp'] = calculate_max_hp(u['level'])
+            u['hp'] = u['maxHp']  # 現在HPはMaxHPと同じとする仕様
             users.append(u)
 
-        # Quests取得
+        # 2. Quests
         all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
         filtered_quests = []
         today_str = datetime.date.today().isoformat()
         
         for q in all_quests:
-            # 1. 期間限定チェック
+            # 期間限定チェック
             if q['quest_type'] == 'limited':
                 if q['start_date'] and today_str < q['start_date']: continue
                 if q['end_date'] and today_str > q['end_date']: continue
             
-            # 2. ランダム出現チェック (日付をシードにしてその日は固定)
+            # ランダム出現チェック (日付+IDをシードにする)
             if q['quest_type'] == 'random':
                 seed = f"{today_str}_{q['quest_id']}"
                 if random.Random(seed).random() > q['occurrence_chance']:
                     continue
             
-            # 3. カラム名マッピング (フロントエンド互換)
+            # フロントエンド互換マッピング
             q['icon'] = q['icon_key']
             q['type'] = q['quest_type']
             q['target'] = q['target_user']
@@ -205,33 +235,37 @@ def get_all_data() -> Dict[str, Any]:
                 
             filtered_quests.append(q)
 
-        # Rewards
+        # 3. Rewards
         rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
         for r in rewards:
             r['icon'] = r['icon_key']
+            r['cost'] = r['cost_gold']
 
-        # History (本日のクエスト完了状況)
-        today = datetime.date.today().isoformat()
+        # 4. Completed History (Today)
         completed = [dict(row) for row in cur.execute(
-            "SELECT * FROM quest_history WHERE date(completed_at) = ?", (today,)
+            "SELECT * FROM quest_history WHERE date(completed_at) = ?", (today_str,)
         )]
         
-        # Logs (冒険の書: 最近の50件)
-        # クエスト履歴
-        q_logs = cur.execute("SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts FROM quest_history ORDER BY id DESC LIMIT 50").fetchall()
-        # 報酬履歴
-        r_logs = cur.execute("SELECT id, user_id, reward_title as title, 'reward' as type, redeemed_at as ts FROM reward_history ORDER BY id DESC LIMIT 50").fetchall()
+        # 5. Logs (Recent 50)
+        q_logs = cur.execute("""
+            SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts 
+            FROM quest_history ORDER BY id DESC LIMIT 50
+        """).fetchall()
         
-        # 統合してソート
+        r_logs = cur.execute("""
+            SELECT id, user_id, reward_title as title, 'reward' as type, redeemed_at as ts 
+            FROM reward_history ORDER BY id DESC LIMIT 50
+        """).fetchall()
+        
         all_logs = sorted(q_logs + r_logs, key=lambda x: x['ts'], reverse=True)[:50]
         
-        # 名前解決して整形
+        # 名前解決
         user_map = {u['user_id']: u['name'] for u in users}
-        
         formatted_logs = []
+        
         for l in all_logs:
             name = user_map.get(l['user_id'], '誰か')
-            ts_str = l['ts'] # YYYY-MM-DD HH:MM:SS
+            ts_str = l['ts']
             date_str = ts_str.split(' ')[0]
             
             text = ""
@@ -247,55 +281,43 @@ def get_all_data() -> Dict[str, Any]:
                 "timestamp": ts_str
             })
 
-    # コンテキストマネージャ終了時に自動でcloseされる
-    
     return {
         "users": users,
         "quests": filtered_quests,
         "rewards": rewards,
-        "completedQuests": completed, # フロントエンドの判定用
+        "completedQuests": completed,
         "logs": formatted_logs
     }
 
-
-@router.post("/complete")
+@router.post("/complete", response_model=CompleteResponse)
 def complete_quest(action: QuestAction):
     """クエストを完了し、経験値とゴールドを付与する"""
-    # 更新処理なので commit=True
     with common.get_db_cursor(commit=True) as cur:
-        # 1. クエスト情報取得
+        # クエスト取得
         quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (action.quest_id,)).fetchone()
         if not quest:
-            # 404エラー送出 (コンテキストを抜けるのでロールバック/クローズは自動)
             raise HTTPException(status_code=404, detail="Quest not found")
             
-        # 2. ユーザー情報取得
+        # ユーザー取得
         user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (action.user_id,)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
-            
+        
+        # 計算
         current_level = user['level']
-        current_exp = user['exp'] + quest['exp_gain']
-        current_gold = user['gold'] + quest['gold_gain']
+        added_exp = user['exp'] + quest['exp_gain']
+        added_gold = user['gold'] + quest['gold_gain']
         
-        # 3. レベルアップ判定
-        leveled_up = False
-        next_exp = calculate_next_level_exp(current_level)
-        
-        while current_exp >= next_exp:
-            current_exp -= next_exp
-            current_level += 1
-            leveled_up = True
-            next_exp = calculate_next_level_exp(current_level)
+        new_level, new_exp, leveled_up = process_level_up(current_level, added_exp)
             
-        # 4. 更新
+        # 更新
         cur.execute("""
             UPDATE quest_users 
             SET level = ?, exp = ?, gold = ?, updated_at = ? 
             WHERE user_id = ?
-        """, (current_level, current_exp, current_gold, datetime.datetime.now(), action.user_id))
+        """, (new_level, new_exp, added_gold, datetime.datetime.now(), action.user_id))
         
-        # 5. 履歴保存
+        # 履歴
         cur.execute("""
             INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -304,17 +326,16 @@ def complete_quest(action: QuestAction):
     return {
         "status": "success",
         "leveledUp": leveled_up,
-        "newLevel": current_level,
+        "newLevel": new_level,
         "earnedGold": quest['gold_gain'],
         "earnedExp": quest['exp_gain']
     }
 
-
-@router.post("/quest/cancel")
+@router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
-    """間違えて完了したクエストを取り消す (経験値・ゴールドの巻き戻し)"""
+    """完了したクエストを取り消す (経験値・ゴールドの巻き戻し)"""
     with common.get_db_cursor(commit=True) as cur:
-        # 履歴取得
+        # 履歴確認
         hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (action.history_id,)).fetchone()
         if not hist:
             raise HTTPException(status_code=404, detail="History not found")
@@ -322,22 +343,16 @@ def cancel_quest(action: HistoryAction):
         if hist['user_id'] != action.user_id:
             raise HTTPException(status_code=403, detail="User mismatch")
 
-        # ユーザー情報
+        # ユーザー取得
         user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (action.user_id,)).fetchone()
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         
-        # 減算処理 (レベルダウンも考慮)
+        # 減算処理
         new_gold = max(0, user['gold'] - hist['gold_earned'])
-        new_exp = user['exp'] - hist['exp_earned']
-        new_level = user['level']
+        raw_exp_diff = user['exp'] - hist['exp_earned']
         
-        while new_exp < 0 and new_level > 1:
-            new_level -= 1
-            prev_level_max = calculate_next_level_exp(new_level)
-            new_exp += prev_level_max
-            
-        if new_exp < 0: new_exp = 0 # Lv1でマイナスなら0丸め
+        new_level, new_exp = process_level_down(user['level'], raw_exp_diff)
         
         # 更新
         cur.execute("UPDATE quest_users SET level=?, exp=?, gold=? WHERE user_id=?", 
@@ -348,16 +363,17 @@ def cancel_quest(action: HistoryAction):
     
     return {"status": "cancelled"}
 
-
-@router.post("/reward/purchase")
+@router.post("/reward/purchase", response_model=PurchaseResponse)
 def purchase_reward(action: RewardAction):
     """報酬を購入し、ゴールドを消費する"""
     with common.get_db_cursor(commit=True) as cur:
         reward = cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (action.reward_id,)).fetchone()
         user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (action.user_id,)).fetchone()
         
-        if not reward or not user:
-            raise HTTPException(status_code=404, detail="Not found")
+        if not reward:
+            raise HTTPException(status_code=404, detail="Reward not found")
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
             
         if user['gold'] < reward['cost_gold']:
             raise HTTPException(status_code=400, detail="Not enough gold")
