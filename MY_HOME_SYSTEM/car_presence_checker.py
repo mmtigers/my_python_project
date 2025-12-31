@@ -64,8 +64,16 @@ def capture_snapshot(cam_conf: Dict[str, Any]) -> Optional[str]:
         )
         if os.path.exists(tmp_path):
             return tmp_path
+    except subprocess.CalledProcessError as e:
+        # 【修正】FFmpegの終了コードエラー（接続切れ含む）はWARNINGにする
+        logger.warning(f"⚠️ 画像取得失敗 (Exit Code {e.returncode}): {cam_conf['name']} に接続できませんでした。")
+    except subprocess.TimeoutExpired:
+        # 【修正】タイムアウトもWARNING
+        logger.warning(f"⚠️ 画像取得タイムアウト: {cam_conf['name']} からの応答がありません。")
     except Exception as e:
-        logger.error(f"❌ 画像取得エラー: {e}")
+        # その他の想定外エラーはERRORのまま
+        logger.error(f"❌ 画像取得エラー (Unexpected): {e}")
+        
     return None
 
 def is_night_mode(hsv_img: np.ndarray) -> bool:
