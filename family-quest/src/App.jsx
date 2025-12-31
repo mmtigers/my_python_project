@@ -59,12 +59,12 @@ const UserStatusCard = ({ user }) => {
 };
 
 /**
- * クエストリストを描画
+ * クエストリストを描画（色分け・バッジ強化版）
  */
 const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
   const currentDay = new Date().getDay();
 
-  // 1. フィルタリング（表示対象の抽出）
+  // 1. フィルタリング
   const filteredQuests = quests.filter(q => {
     if (q.target !== 'all' && q.target !== currentUser?.user_id) return false;
     if (q.type === 'daily' && q.days) {
@@ -75,50 +75,85 @@ const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
     return true;
   });
 
-  // 2. ソート（未完了を上、完了を下に）
+  // 2. ソート（未完了を上、完了を下に。その中で時間限定を優先）
   const sortedQuests = [...filteredQuests].sort((a, b) => {
     const aId = a.quest_id || a.id;
     const bId = b.quest_id || b.id;
+    const aDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === aId);
+    const bDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === bId);
 
-    const aDone = completedQuests.some(cq =>
-      cq.user_id === currentUser?.user_id && cq.quest_id === aId
-    );
-    const bDone = completedQuests.some(cq =>
-      cq.user_id === currentUser?.user_id && cq.quest_id === bId
-    );
+    if (aDone !== bDone) return aDone ? 1 : -1;
 
-    if (aDone === bDone) return 0; // 同じ状態なら順序維持
-    return aDone ? 1 : -1;        // aが完了済みなら後ろへ、未完了なら前へ
+    // 両方未完了なら、時間限定を上に
+    if (!aDone) {
+      if (a.start_time && !b.start_time) return -1;
+      if (!a.start_time && b.start_time) return 1;
+    }
+
+    return 0;
   });
 
   return (
     <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
       <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">-- 本日の依頼 --</div>
       {sortedQuests.map(q => {
-        const isRandom = q.type === 'random';
-        const isLimited = q.type === 'limited';
-        const isPersonal = q.target !== 'all';
         const qId = q.quest_id || q.id;
         const isDone = completedQuests.some(cq =>
           cq.user_id === currentUser?.user_id && cq.quest_id === qId
         );
 
+        // クエストタイプ判定
+        const isTimeLimited = !!q.start_time; // 時間限定
+        const isRandom = q.type === 'random'; // ランダム
+        const isLimited = q.type === 'limited'; // 期間限定(日付)
+        const isPersonal = q.target !== 'all'; // 個人宛
+
+        // 背景色・ボーダー色の決定
+        let containerClass = "border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200"; // デフォルト
+
+        if (!isDone) {
+          if (isTimeLimited) {
+            // 時間限定: オレンジ～赤のグラデーションで目立たせる
+            containerClass = "border-orange-400 bg-gradient-to-r from-orange-900/90 to-red-900/90 hover:from-orange-800 hover:to-red-800 shadow-[0_0_10px_rgba(255,165,0,0.3)]";
+          } else if (isRandom) {
+            // ランダム: 紫系
+            containerClass = "border-purple-400 bg-purple-950/90 hover:bg-purple-900";
+          } else if (isLimited) {
+            // 期間限定: 赤紫系
+            containerClass = "border-pink-400 bg-pink-950/90 hover:bg-pink-900";
+          }
+        } else {
+          // 完了済み: グレーアウト
+          containerClass = "border-gray-600 bg-gray-900/50 grayscale";
+        }
+
         return (
           <div key={qId} onClick={() => onQuestClick(q)}
-            className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] ${isDone ? 'border-gray-600 bg-gray-900/50' : 'border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200'}`}>
-            <div className="flex items-center gap-3">
-              <span className={`text-2xl ${isRandom && !isDone ? 'animate-bounce' : ''} ${isDone ? 'opacity-30 grayscale' : ''}`}>{q.icon || q.icon_key}</span>
+            className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}>
+
+            {/* 背景のキラキラ演出（レアの場合） */}
+            {isRandom && !isDone && <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>}
+
+            <div className="flex items-center gap-3 relative z-10">
+              <span className={`text-2xl ${isRandom && !isDone ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>{q.icon || q.icon_key}</span>
               <div>
-                <div className="flex items-center gap-2">
-                  {isLimited && !isDone && <span className="bg-red-600 text-[8px] px-1 rounded">期間限定</span>}
-                  {isRandom && !isDone && <span className="bg-purple-600 text-[8px] px-1 rounded animate-pulse">レア出現!</span>}
-                  {isPersonal && !isDone && <span className="bg-blue-600 text-[8px] px-1 rounded">勅命</span>}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* バッジ表示 */}
+                  {isTimeLimited && !isDone && (
+                    <span className="bg-yellow-500 text-black text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
+                      ⏰ {q.start_time}~{q.end_time}
+                    </span>
+                  )}
+                  {isLimited && !isDone && <span className="bg-red-600 text-[10px] px-1 rounded font-bold">期間限定</span>}
+                  {isRandom && !isDone && <span className="bg-purple-600 text-[10px] px-1 rounded font-bold animate-pulse">レア出現!</span>}
+                  {isPersonal && !isDone && <span className="bg-blue-600 text-[10px] px-1 rounded">自分専用</span>}
+
                   <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>{q.title}</div>
                 </div>
                 {!isDone && (
-                  <div className="flex gap-2 text-xs">
-                    <span className="text-orange-300">{q.exp_gain || q.exp} Exp</span>
-                    {(q.gold_gain || q.gold) > 0 && <span className="text-yellow-300">{q.gold_gain || q.gold} G</span>}
+                  <div className="flex gap-2 text-xs mt-0.5">
+                    <span className="text-orange-300 font-mono">EXP: {q.exp_gain || q.exp}</span>
+                    {(q.gold_gain || q.gold) > 0 && <span className="text-yellow-300 font-mono">{q.gold_gain || q.gold} G</span>}
                   </div>
                 )}
               </div>
@@ -130,6 +165,7 @@ const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
     </div>
   );
 };
+
 
 // --- Custom Hook (Logic Layer) ---
 
