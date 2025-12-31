@@ -103,7 +103,8 @@ def monitor_single_camera(cam_conf):
 
     # === 【修正】連続エラーカウントと通知閾値の設定 ===
     consecutive_conn_errors = 0
-    NOTIFY_THRESHOLD = 5  # 5回連続で失敗するまではWARNINGに留める
+    NOTIFY_THRESHOLD = 5  # 5回連続失敗で通知
+    has_notified_error = False  # エラー通知済みフラグを追加
 
     while True: 
         try:
@@ -124,10 +125,12 @@ def monitor_single_camera(cam_conf):
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            # === 【修正】接続成功時にエラーカウントをリセット ===
+            
+            # === 接続成功時 ===
             if consecutive_conn_errors > 0:
-                logger.info(f"✅ [{cam_name}] 接続復旧しました (連続失敗回数をリセット)")
+                logger.info(f"✅ [{cam_name}] 接続復旧しました")
             consecutive_conn_errors = 0
+            has_notified_error = False  # フラグをリセット
             
             logger.info(f"✅ [{cam_name}] 接続確立")
 
@@ -218,15 +221,25 @@ def monitor_single_camera(cam_conf):
             # 待機時間の計算 (基本30秒 * 失敗回数。最大300秒)
             wait_time = min(30 * consecutive_conn_errors, 300)
 
-            # エラー判定: 接続拒否やタイムアウトは一時的なものとして扱う
-            is_network_transient = "Connection refused" in err_msg or "timed out" in err_msg or "No route to host" in err_msg
+            # エラー判定: 接続拒否やタイムアウトはネットワーク/機器起因
+            is_network_issue = "Connection refused" in err_msg or "timed out" in err_msg or "No route to host" in err_msg or "111" in err_msg
 
-            # 閾値以下の回数であれば WARNING（通知なし）で留める
-            if is_network_transient and consecutive_conn_errors < NOTIFY_THRESHOLD:
-                logger.warning(f"⚠️ [{cam_name}] 接続試行中({consecutive_conn_errors}/{NOTIFY_THRESHOLD})... : {err_msg} (Next retry in {wait_time}s)")
+            if is_network_issue:
+                if consecutive_conn_errors < NOTIFY_THRESHOLD:
+                    # 閾値未満: WARNING (通知なし)
+                    logger.warning(f"⚠️ [{cam_name}] 接続試行中({consecutive_conn_errors}/{NOTIFY_THRESHOLD})... : {err_msg}")
+                
+                elif consecutive_conn_errors == NOTIFY_THRESHOLD and not has_notified_error:
+                    # 閾値到達時: ERROR (通知あり・初回のみ)
+                    logger.error(f"❌ [{cam_name}] 接続不能: 規定回数失敗しました。以降は復旧まで静観します。(Error: {err_msg})")
+                    has_notified_error = True
+                
+                else:
+                    # 閾値超過かつ通知済み: WARNING (通知なし・静観モード)
+                    logger.warning(f"💤 [{cam_name}] 接続不可継続中 ({consecutive_conn_errors}回目)... Retry in {wait_time}s")
             else:
-                # 閾値を超えた、または予期せぬエラーの場合は ERROR（通知あり）
-                logger.error(f"❌ [{cam_name}] 接続エラー (Port:{cam_port}): {err_msg} (Retry in {wait_time}s)")
+                # ネットワーク以外（認証エラーやコードバグなど）は毎回 ERROR
+                logger.error(f"❌ [{cam_name}] 予期せぬ接続エラー: {err_msg}")
 
             time.sleep(wait_time)
 
