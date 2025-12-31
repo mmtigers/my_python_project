@@ -10,6 +10,9 @@ pkill -f unified_server.py
 pkill -f camera_monitor.py
 pkill -f "streamlit run"
 
+# ★追加: プロセスが完全に死ぬのを少し待つ
+sleep 3
+
 # ▼▼▼ 追加: NASマウント待機処理 ▼▼▼
 echo "--- 0.5. NASのマウントを確認します ---"
 MAX_RETRIES=10

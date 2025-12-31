@@ -287,11 +287,17 @@ async def _process_sensor_logic(mac: str, name: str, location: str, dev_type: st
 if hasattr(config, "ASSETS_DIR") and os.path.exists(config.ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=config.ASSETS_DIR), name="assets")
 
+# ★追加: アップロード画像を /uploads/xxx.jpg でアクセス可能にする
+if hasattr(config, "UPLOAD_DIR"):
+    app.mount("/uploads", StaticFiles(directory=config.UPLOAD_DIR), name="uploads")
+    logger.info(f"✅ Uploads mounted from {config.UPLOAD_DIR}")
+
 if os.path.exists(config.QUEST_DIST_DIR):
     app.mount("/quest", StaticFiles(directory=config.QUEST_DIST_DIR, html=True), name="quest")
     logger.info(f"✅ Family Quest mounted from {config.QUEST_DIST_DIR}")
 else:
     logger.warning(f"⚠️ Family Quest dist not found at {config.QUEST_DIST_DIR}")
+
 
 
 if __name__ == "__main__":

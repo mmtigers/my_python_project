@@ -1,8 +1,12 @@
 # MY_HOME_SYSTEM/routers/quest_router.py
 from fastapi import APIRouter, HTTPException, status
+from fastapi import File, UploadFile
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import datetime
+import shutil # 追加
+import os # 既存だが確認
+import uuid # 追加
 import math
 import pytz
 import importlib
@@ -656,3 +660,40 @@ def change_equipment(action: EquipAction):
 @router.get("/family/chronicle")
 def get_family_chronicle():
     return user_service.get_family_chronicle()
+
+# ★追加: unified_server.py から呼ばれる初期化用関数を復活
+def seed_data():
+    return game_system.sync_master_data()
+
+# ★追加: 同期用エンドポイント（エイリアス）
+@router.post("/seed", response_model=SyncResponse)
+def seed_data_endpoint():
+    return game_system.sync_master_data()
+
+@router.post("/upload")
+async def upload_image(file: UploadFile = File(...)):
+    """画像をアップロードし、アクセス用URLを返す"""
+    try:
+        # 拡張子の検証
+        allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in allowed_extensions:
+            raise HTTPException(status_code=400, detail="許可されていないファイル形式です")
+
+        # ユニークなファイル名を生成 (衝突防止)
+        new_filename = f"{uuid.uuid4()}{file_ext}"
+        file_path = os.path.join(config.UPLOAD_DIR, new_filename)
+
+        # ファイル保存
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        logger.info(f"Image Uploaded: {new_filename}")
+
+        # アクセス用URLを返す
+        # ※本番環境のドメインに合わせて調整が必要だが、ローカルならこれでOK
+        return {"url": f"/uploads/{new_filename}"}
+
+    except Exception as e:
+        logger.error(f"Upload failed: {e}")
+        raise HTTPException(status_code=500, detail="画像の保存に失敗しました")

@@ -14,6 +14,7 @@ from lxml import etree
 import logging
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+import traceback
 
 # === ログ設定 ===
 logger = common.setup_logging("camera")
@@ -99,7 +100,7 @@ def monitor_single_camera(cam_conf):
     cam_port = cam_conf.get('port', 80)
     cam_loc = cam_conf.get('location', '伊丹')
     
-    logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port})")
+    logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port}) WSDL:{WSDL_DIR}")
 
     # === 【修正】連続エラーカウントと通知閾値の設定 ===
     consecutive_conn_errors = 0
@@ -208,8 +209,10 @@ def monitor_single_camera(cam_conf):
                     if "timed out" in err or "TimeOut" in err: continue
                     
                     error_count += 1
+                    # ★修正: 内部エラー時も詳細ログを出す
                     if error_count >= 5:
                         logger.warning(f"⚠️ [{cam_name}] ストリーム不安定のため再接続します... (Error: {err})")
+                        logger.debug(traceback.format_exc())
                         break
                     time.sleep(2)
 
@@ -218,6 +221,10 @@ def monitor_single_camera(cam_conf):
             consecutive_conn_errors += 1
             err_msg = str(e)
             
+            # ★追加: 詳細なスタックトレースを取得
+            tb = traceback.format_exc()
+
+
             # 待機時間の計算 (基本30秒 * 失敗回数。最大300秒)
             wait_time = min(30 * consecutive_conn_errors, 300)
 
@@ -239,7 +246,7 @@ def monitor_single_camera(cam_conf):
                     logger.warning(f"💤 [{cam_name}] 接続不可継続中 ({consecutive_conn_errors}回目)... Retry in {wait_time}s")
             else:
                 # ネットワーク以外（認証エラーやコードバグなど）は毎回 ERROR
-                logger.error(f"❌ [{cam_name}] 予期せぬ接続エラー: {err_msg}")
+                logger.error(f"❌ [{cam_name}] 予期せぬ接続エラー: {err_msg}\n詳細:\n{tb}")
 
             time.sleep(wait_time)
 
