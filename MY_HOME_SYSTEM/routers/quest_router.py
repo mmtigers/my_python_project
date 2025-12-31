@@ -88,9 +88,10 @@ class QuestService:
                 cur.execute("""
                     INSERT INTO quest_master (
                         quest_id, title, quest_type, target_user, exp_gain, gold_gain, 
-                        icon_key, day_of_week, start_date, end_date, occurrence_chance
+                        icon_key, day_of_week, start_date, end_date, occurrence_chance,
+                        start_time, end_time
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(quest_id) DO UPDATE SET
                         title = excluded.title,
                         quest_type = excluded.quest_type,
@@ -98,8 +99,11 @@ class QuestService:
                         exp_gain = excluded.exp_gain,
                         gold_gain = excluded.gold_gain,
                         icon_key = excluded.icon_key,
-                        day_of_week = excluded.day_of_week  -- ★ここが重要（曜日変更を反映）
-                """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, q.days, q.start, q.end, q.chance))
+                        day_of_week = excluded.day_of_week,
+                        start_time = excluded.start_time,
+                        end_time = excluded.end_time
+                """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, 
+                      q.days, q.start, q.end, q.chance, q.start_time, q.end_time))
 
             # --- 3. 報酬同期 (不要なデータは削除) ---
             active_r_ids = [r.id for r in valid_rewards]
