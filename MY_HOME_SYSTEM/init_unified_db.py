@@ -269,7 +269,8 @@ def init_db():
                 quest_title TEXT,
                 exp_earned INTEGER,
                 gold_earned INTEGER,
-                completed_at DATETIME NOT NULL
+                completed_at DATETIME NOT NULL,
+                status TEXT DEFAULT 'approved' 
             )
         ''')
 

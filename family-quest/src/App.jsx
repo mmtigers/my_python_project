@@ -3,12 +3,13 @@ import React, { useState } from 'react';
 import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 
 import { INITIAL_USERS } from './constants/masterData';
-import { useGameData } from './hooks/useGameData'; // ★Hooksのインポート
+import { useGameData } from './hooks/useGameData';
 
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
-import UserStatusCard from './components/quest/UserStatusCard'; // ★コンポーネントのインポート
-import QuestList from './components/quest/QuestList';           // ★コンポーネントのインポート
+import UserStatusCard from './components/quest/UserStatusCard';
+import QuestList from './components/quest/QuestList';
+import ApprovalList from './components/quest/ApprovalList'; // ★追加
 import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
@@ -20,16 +21,18 @@ export default function App() {
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
 
-  // ★ロジックはHooksに委譲
   const {
-    users, quests, rewards, completedQuests, adventureLogs, isLoading,
+    users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
     familyStats, chronicle,
-    completeQuest, buyReward,
+    completeQuest, approveQuest, buyReward, // ★approveQuest追加
     buyEquipment, changeEquipment
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
+
+  // 親かどうか判定
+  const isParent = ['dad', 'mom'].includes(currentUser?.user_id);
 
   const handleUserSwitch = (idx) => {
     setViewMode('user');
@@ -38,6 +41,7 @@ export default function App() {
 
   const handleQuestClick = (quest) => completeQuest(currentUser, quest);
   // eslint-disable-next-line no-unused-vars
+  const handleApprove = (historyItem) => approveQuest(currentUser, historyItem); // ★承認ハンドラ
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
@@ -65,6 +69,15 @@ export default function App() {
           <>
             <UserStatusCard user={currentUser} />
 
+            {/* ★承認リスト（親のみ表示） */}
+            {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
+              <ApprovalList
+                pendingQuests={pendingQuests}
+                users={users}
+                onApprove={handleApprove}
+              />
+            )}
+
             <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
               {[
                 { id: 'quest', label: 'クエスト', icon: Sword },
@@ -91,6 +104,7 @@ export default function App() {
                   <QuestList
                     quests={quests}
                     completedQuests={completedQuests}
+                    pendingQuests={pendingQuests} // ★pendingリストを渡す
                     currentUser={currentUser}
                     onQuestClick={handleQuestClick}
                   />
