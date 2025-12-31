@@ -300,3 +300,8 @@ CORS_ORIGINS = [
 ALLOW_ALL_ORIGINS = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
+
+
+# --- Upload Settings ---
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
