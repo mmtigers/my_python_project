@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import datetime
 import math
+import pytz
 import importlib
 import random
 import common
@@ -382,23 +383,35 @@ class QuestService:
     # --- Internal Helpers ---
 
     def _filter_active_quests(self, quests: List[dict]) -> List[dict]:
-        """現在有効なクエストのみをフィルタリングし、フォーマットを整える"""
         filtered = []
-        today_str = common.get_today_date_str()
-        
+        now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        today_str = now.strftime("%Y-%m-%d")
+        current_time_str = now.strftime("%H:%M") # HH:MM形式
+
         for q in quests:
-            # 期間限定チェック
+            # 期間チェック
             if q['quest_type'] == 'limited':
                 if q['start_date'] and today_str < q['start_date']: continue
                 if q['end_date'] and today_str > q['end_date']: continue
             
-            # ランダム出現チェック (日付+IDをシードにする)
+            # ランダムチェック
             if q['quest_type'] == 'random':
                 seed = f"{today_str}_{q['quest_id']}"
-                if random.Random(seed).random() > q['occurrence_chance']:
-                    continue
+                if random.Random(seed).random() > q['occurrence_chance']: continue
             
-            # フロントエンド互換マッピング
+            # ▼ 時間帯チェック (新規追加)
+            # start_time / end_time が設定されている場合、現在時刻が範囲外なら除外
+            if q.get('start_time') and q.get('end_time'):
+                # 05:00 - 09:00 のような単純範囲
+                if q['start_time'] <= q['end_time']:
+                    if not (q['start_time'] <= current_time_str <= q['end_time']):
+                        continue
+                # 22:00 - 05:00 のような日またぎ範囲 (今回は単純比較のみ実装)
+                else:
+                    if not (current_time_str >= q['start_time'] or current_time_str <= q['end_time']):
+                        continue
+
+            # フロントエンド用整形
             q['icon'] = q['icon_key']
             q['type'] = q['quest_type']
             q['target'] = q['target_user']
@@ -406,7 +419,6 @@ class QuestService:
                 q['days'] = [int(d) for d in q['day_of_week'].split(',')]
             else:
                 q['days'] = None
-                
             filtered.append(q)
         return filtered
 
@@ -588,6 +600,8 @@ class MasterQuest(BaseModel):
     start: Optional[str] = None
     end: Optional[str] = None
     chance: Optional[float] = 1.0
+    start_time: Optional[str] = None  # 追加: 表示開始時刻 (HH:MM)
+    end_time: Optional[str] = None    # 追加: 表示終了時刻 (HH:MM)
 
 class MasterReward(BaseModel):
     id: int
