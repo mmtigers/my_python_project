@@ -296,7 +296,7 @@ class QuestService:
             # ★メダルドロップ判定 (5%)
             earned_medals = 0
             # データベース上のカラムはデフォルト0だが、念のためNoneケア
-            current_medals = user.get('medal_count') or 0
+            # current_medals = user.get('medal_count') or 0
             
             if random.random() < 0.05:
                 earned_medals = 1
