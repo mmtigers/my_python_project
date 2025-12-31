@@ -1,3 +1,4 @@
+# MY_HOME_SYSTEM/update_schema.py
 import os
 import sys
 import sqlite3
@@ -6,23 +7,18 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 
 def update_db_schema():
-    print("🛠️ Database Schema Update...")
+    print("🛠️ Database Schema Update for Phase 2 (Medals)...")
     conn = sqlite3.connect(config.SQLITE_DB_PATH)
     cur = conn.cursor()
     
-    # カラム追加の試行
+    # quest_users テーブルに medal_count カラムを追加
     try:
-        cur.execute("ALTER TABLE quest_master ADD COLUMN start_time TEXT")
-        print("✅ Added 'start_time' column.")
+        cur.execute("ALTER TABLE quest_users ADD COLUMN medal_count INTEGER DEFAULT 0")
+        print("✅ Added 'medal_count' column to quest_users.")
     except Exception as e:
-        print(f"ℹ️ 'start_time': {e}")
+        # すでに存在する場合はエラーになるので無視
+        print(f"ℹ️ 'medal_count' column check: {e}")
 
-    try:
-        cur.execute("ALTER TABLE quest_master ADD COLUMN end_time TEXT")
-        print("✅ Added 'end_time' column.")
-    except Exception as e:
-        print(f"ℹ️ 'end_time': {e}")
-        
     conn.commit()
     conn.close()
     print("🏁 Update finished.")

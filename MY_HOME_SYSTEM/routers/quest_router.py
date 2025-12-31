@@ -281,46 +281,49 @@ class QuestService:
 
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
-        """クエストを完了し、経験値とゴールドを付与する（トランザクション）"""
+        """クエストを完了し、経験値とゴールドを付与する。稀にメダルも付与する。"""
         with common.get_db_cursor(commit=True) as cur:
-            # Check existence
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
 
-            if not quest:
-                raise HTTPException(status_code=404, detail="Quest not found")
-            if not user:
-                raise HTTPException(status_code=404, detail="User not found")
+            if not quest or not user:
+                raise HTTPException(status_code=404, detail="Not found")
 
-            # Calc
             current_level = user['level']
             added_exp = user['exp'] + quest['exp_gain']
             added_gold = user['gold'] + quest['gold_gain']
             
-            new_level, new_exp, leveled_up = self._calc_level_up(current_level, added_exp)
+            # ★メダルドロップ判定 (5%)
+            earned_medals = 0
+            # データベース上のカラムはデフォルト0だが、念のためNoneケア
+            current_medals = user.get('medal_count') or 0
             
+            if random.random() < 0.05:
+                earned_medals = 1
+                logger.info(f"✨ Lucky! Medal dropped for {user_id}")
+
+            new_level, new_exp, leveled_up = self._calc_level_up(current_level, added_exp)
             now_iso = common.get_now_iso()
 
-            # Update DB
+            # medal_count を加算して更新
             cur.execute("""
                 UPDATE quest_users 
-                SET level = ?, exp = ?, gold = ?, updated_at = ? 
+                SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
                 WHERE user_id = ?
-            """, (new_level, new_exp, added_gold, now_iso, user_id))
+            """, (new_level, new_exp, added_gold, earned_medals, now_iso, user_id))
             
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (user_id, quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
             
-            logger.info(f"Quest Completed: User={user_id}, Quest={quest['title']}, LvUp={leveled_up}")
-            
             return {
-                "status": "success",
-                "leveledUp": leveled_up,
-                "newLevel": new_level,
-                "earnedGold": quest['gold_gain'],
-                "earnedExp": quest['exp_gain']
+                "status": "success", 
+                "leveledUp": leveled_up, 
+                "newLevel": new_level, 
+                "earnedGold": quest['gold_gain'], 
+                "earnedExp": quest['exp_gain'],
+                "earnedMedals": earned_medals  # ★レスポンスに追加
             }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
@@ -640,6 +643,7 @@ class CompleteResponse(BaseModel):
     newLevel: int
     earnedGold: int
     earnedExp: int
+    earnedMedals: int = 0  # ★追加
 
 class CancelResponse(BaseModel):
     status: str
