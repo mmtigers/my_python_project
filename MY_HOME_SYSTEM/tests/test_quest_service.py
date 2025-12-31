@@ -1,3 +1,4 @@
+# MY_HOME_SYSTEM/tests/test_quest_service.py
 import unittest
 import sys
 import os
@@ -11,15 +12,16 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 import common
 import init_unified_db
-from routers.quest_router import QuestService, MasterUser, MasterQuest, MasterReward
+# 修正: 分割されたサービスをインポート
+from routers.quest_router import QuestService, UserService, ShopService
 
 class TestQuestService(unittest.TestCase):
     
     def setUp(self):
         """各テストケースの実行前に呼ばれる"""
-        # --- 修正: テスト中はDiscord通知を無効化 ---
+        # テスト中はDiscord通知を無効化
         self.original_webhook = config.DISCORD_WEBHOOK_ERROR
-        config.DISCORD_WEBHOOK_ERROR = None  # 一時的にNoneにする
+        config.DISCORD_WEBHOOK_ERROR = None
         
         # ロガーのセットアップ
         common.setup_logging("test_quest")
@@ -31,14 +33,17 @@ class TestQuestService(unittest.TestCase):
         # DB初期化（テーブル作成）
         init_unified_db.init_db()
         
-        self.service = QuestService()
+        # 修正: 各サービスを個別にインスタンス化
+        self.quest_service = QuestService()
+        self.user_service = UserService()
+        self.shop_service = ShopService()
         
         # テストデータのシード
         self._seed_master_data()
 
     def tearDown(self):
         """各テストケースの終了後に呼ばれる"""
-        # --- 修正: Discord通知設定を復元 ---
+        # Discord通知設定を復元
         config.DISCORD_WEBHOOK_ERROR = self.original_webhook
         
         # DBファイルの削除
@@ -46,7 +51,7 @@ class TestQuestService(unittest.TestCase):
             try:
                 os.remove(self.test_db_file)
             except PermissionError:
-                pass # Windows等でファイルロックが残る場合の安全策
+                pass 
 
     def _seed_master_data(self):
         """テストに必要な最低限のマスタデータを投入"""
@@ -73,12 +78,14 @@ class TestQuestService(unittest.TestCase):
 
     def test_calculate_next_level_exp(self):
         """経験値計算ロジックの検証"""
-        self.assertEqual(self.service.calculate_next_level_exp(1), 100)
-        self.assertEqual(self.service.calculate_next_level_exp(2), 120)
+        # 修正: UserServiceを使用
+        self.assertEqual(self.user_service.calculate_next_level_exp(1), 100)
+        self.assertEqual(self.user_service.calculate_next_level_exp(2), 120)
 
     def test_complete_quest_basic(self):
         """クエスト完了の基本動作検証"""
-        result = self.service.process_complete_quest("user1", 101)
+        # 修正: QuestServiceを使用
+        result = self.quest_service.process_complete_quest("user1", 101)
         
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["earnedExp"], 50)
@@ -95,7 +102,8 @@ class TestQuestService(unittest.TestCase):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute("UPDATE quest_users SET exp=90 WHERE user_id='user1'")
         
-        result = self.service.process_complete_quest("user1", 101)
+        # 修正: QuestServiceを使用
+        result = self.quest_service.process_complete_quest("user1", 101)
         
         self.assertTrue(result["leveledUp"])
         self.assertEqual(result["newLevel"], 2)
@@ -107,7 +115,8 @@ class TestQuestService(unittest.TestCase):
 
     def test_purchase_reward_success(self):
         """報酬購入（成功）"""
-        result = self.service.process_purchase_reward("user1", 201)
+        # 修正: ShopServiceを使用
+        result = self.shop_service.process_purchase_reward("user1", 201)
         
         self.assertEqual(result["status"], "purchased")
         self.assertEqual(result["newGold"], 50)
@@ -119,19 +128,21 @@ class TestQuestService(unittest.TestCase):
         
         from fastapi import HTTPException
         with self.assertRaises(HTTPException) as cm:
-            self.service.process_purchase_reward("user1", 201)
+            # 修正: ShopServiceを使用
+            self.shop_service.process_purchase_reward("user1", 201)
         
         self.assertEqual(cm.exception.status_code, 400)
 
     def test_quest_cancel(self):
         """クエストキャンセルの検証"""
-        self.service.process_complete_quest("user1", 101)
+        self.quest_service.process_complete_quest("user1", 101)
         
         with common.get_db_cursor() as cur:
             hist = cur.execute("SELECT * FROM quest_history ORDER BY id DESC LIMIT 1").fetchone()
             hist_id = hist["id"]
         
-        self.service.process_cancel_quest("user1", hist_id)
+        # 修正: QuestServiceを使用
+        self.quest_service.process_cancel_quest("user1", hist_id)
         
         with common.get_db_cursor() as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
