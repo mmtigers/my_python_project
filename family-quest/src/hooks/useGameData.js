@@ -8,6 +8,7 @@ export const useGameData = (onLevelUp) => {
     const [quests, setQuests] = useState(MASTER_QUESTS || []);
     const [rewards, setRewards] = useState(MASTER_REWARDS || []);
     const [completedQuests, setCompletedQuests] = useState([]);
+    const [pendingQuests, setPendingQuests] = useState([]); // ★追加: 承認待ちリスト
     const [adventureLogs, setAdventureLogs] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
@@ -24,13 +25,10 @@ export const useGameData = (onLevelUp) => {
             if (data.quests) setQuests(data.quests);
             if (data.rewards) setRewards(data.rewards);
             if (data.completedQuests) setCompletedQuests(data.completedQuests);
+            if (data.pendingQuests) setPendingQuests(data.pendingQuests); // ★追加
             if (data.logs) setAdventureLogs(data.logs);
             if (data.equipments) setEquipments(data.equipments);
             if (data.ownedEquipments) setOwnedEquipments(data.ownedEquipments);
-
-            if (data.boss) {
-                // ボスデータがあればここでセット（今回はParty側で処理しているが、拡張性を考慮）
-            }
 
             // 記録データの取得
             try {
@@ -56,6 +54,15 @@ export const useGameData = (onLevelUp) => {
 
     const completeQuest = async (currentUser, quest) => {
         const q_id = quest.quest_id || quest.id;
+
+        // 承認待ちチェック
+        const isPending = pendingQuests.some(pq => pq.user_id === currentUser.user_id && pq.quest_id === q_id);
+        if (isPending) {
+            alert("親の承認待ちです。承認されるまでお待ちください！");
+            return;
+        }
+
+        // 完了済みチェック
         const completedEntry = completedQuests.find(
             q => q.user_id === currentUser.user_id && q.quest_id === q_id
         );
@@ -79,6 +86,11 @@ export const useGameData = (onLevelUp) => {
                 });
                 await fetchGameData();
 
+                // メッセージがあれば表示（pendingの場合など）
+                if (res.message) {
+                    alert(res.message);
+                }
+
                 if (res.earnedMedals > 0) {
                     alert(`✨ ラッキー！！ ✨\nちいさなメダル を見つけた！`);
                 }
@@ -93,6 +105,31 @@ export const useGameData = (onLevelUp) => {
             } catch (e) {
                 alert(`クエスト完了失敗: ${e.message}`);
             }
+        }
+    };
+
+    // ★追加: 承認アクション
+    const approveQuest = async (currentUser, historyItem) => {
+        if (!['dad', 'mom'].includes(currentUser.user_id)) {
+            alert("承認権限がありません！");
+            return;
+        }
+
+        if (!window.confirm(`${historyItem.quest_title} を承認しますか？`)) return;
+
+        try {
+            const res = await apiClient.post('/api/quest/approve', {
+                approver_id: currentUser.user_id,
+                history_id: historyItem.id
+            });
+            await fetchGameData();
+
+            if (res.leveledUp && onLevelUp) {
+                // 子供がレベルアップした場合の通知（任意）
+                // alert(`${historyItem.quest_title} 承認完了！\n子供がレベルアップしました！`);
+            }
+        } catch (e) {
+            alert(`承認失敗: ${e.message}`);
         }
     };
 
@@ -148,10 +185,10 @@ export const useGameData = (onLevelUp) => {
     };
 
     return {
-        users, quests, rewards, completedQuests, adventureLogs, isLoading,
+        users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
         equipments, ownedEquipments,
         familyStats, chronicle,
-        completeQuest, buyReward, buyEquipment, changeEquipment,
+        completeQuest, approveQuest, buyReward, buyEquipment, changeEquipment,
         fetchGameData
     };
 };

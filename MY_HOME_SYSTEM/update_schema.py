@@ -7,17 +7,17 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 
 def update_db_schema():
-    print("🛠️ Database Schema Update for Phase 2 (Medals)...")
+    print("🛠️ Database Schema Update for Phase 3 (Approval Flow)...")
     conn = sqlite3.connect(config.SQLITE_DB_PATH)
     cur = conn.cursor()
     
-    # quest_users テーブルに medal_count カラムを追加
+    # 1. quest_history テーブルに status カラムを追加
     try:
-        cur.execute("ALTER TABLE quest_users ADD COLUMN medal_count INTEGER DEFAULT 0")
-        print("✅ Added 'medal_count' column to quest_users.")
+        # 既存の履歴はすべて 'approved' (承認済み) として扱う
+        cur.execute("ALTER TABLE quest_history ADD COLUMN status TEXT DEFAULT 'approved'")
+        print("✅ Added 'status' column to quest_history.")
     except Exception as e:
-        # すでに存在する場合はエラーになるので無視
-        print(f"ℹ️ 'medal_count' column check: {e}")
+        print(f"ℹ️ 'status' column check: {e}")
 
     conn.commit()
     conn.close()
