@@ -1,3 +1,4 @@
+# MY_HOME_SYSTEM/tests/test_unified_server.py
 import pytest
 import asyncio
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -17,6 +18,7 @@ mock_config = MagicMock()
 temp_dir = tempfile.mkdtemp()
 mock_config.ASSETS_DIR = temp_dir
 mock_config.QUEST_DIST_DIR = temp_dir
+mock_config.UPLOAD_DIR = temp_dir # ★追加: これがないと StaticFiles でエラーになる
 
 # その他の設定値
 mock_config.LINE_USER_ID = "test_user_id"
