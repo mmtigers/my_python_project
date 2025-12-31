@@ -1,73 +1,84 @@
 #!/bin/bash
 
-# プロジェクトのディレクトリへ移動
-cd /home/masahiro/develop/MY_HOME_SYSTEM || exit
+# ==========================================
+# MY_HOME_SYSTEM 起動スクリプト (Final Stable)
+# ==========================================
 
-# ログディレクトリの準備
-mkdir -p logs
+PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
+QUEST_DIR="/home/masahiro/develop/family-quest"
+cd "$PROJECT_DIR" || exit 1
 
-echo "--- 0. 古いプロセスを掃除します ---"
-# ngrokはSystemdで管理しているので殺さない
-# pkill ngrok
-pkill -f unified_server.py
-pkill -f camera_monitor.py
-pkill -f scheduler.py         # ★追加: スケジューラーも停止
-pkill -f "streamlit run"
-
-# ★ プロセスが完全に死ぬのを少し待つ
-sleep 3
-
-# ▼▼▼ NASマウント待機処理 ▼▼▼
-echo "--- 0.5. NASのマウントを確認します ---"
-MAX_RETRIES=10
-COUNT=0
-MOUNT_POINT="/mnt/nas"
-
-# mountpointコマンドがあるか確認し、なければスキップ(Mac開発環境等用)
-if command -v mountpoint >/dev/null 2>&1; then
-  while ! mountpoint -q "$MOUNT_POINT"; do
-    echo "⏳ NASがまだマウントされていません... (試行 $COUNT/$MAX_RETRIES)"
-    sleep 3
-    COUNT=$((COUNT+1))
-    
-    if [ $COUNT -ge $MAX_RETRIES ]; then
-      echo "❌ NASのマウントに失敗しました。処理を中断します。"
-      exit 1
-    fi
-  done
-  echo "✅ NASマウント確認OK"
-else
-  echo "⚠️ mountpointコマンドが見つかりません。チェックをスキップします。"
-fi
-
-# 仮想環境のPythonパス (環境に合わせて自動検出または固定)
+# Pythonパス
 if [ -f ".venv/bin/python3" ]; then
     PYTHON_EXEC=".venv/bin/python3"
 else
     PYTHON_EXEC="python3"
 fi
-echo "🐍 Using Python: $PYTHON_EXEC"
 
-echo "--- 1. 初期化処理 ---"
-# Webhookアドレス更新 (起動時1回のみ)
+# ログディレクトリ
+mkdir -p logs
+
+# --- Phase 0: 徹底的なクリーンアップ ---
+echo "--- Cleanup Old Processes ---"
+# まずは優しく停止
+pkill -f unified_server.py
+pkill -f camera_monitor.py
+pkill -f scheduler.py
+pkill -f "streamlit run"
+
+# プロセスが消えるまで最大10秒待機 (ここが重要)
+for i in {1..10}; do
+  if ! pgrep -f unified_server.py > /dev/null; then
+    echo "✅ Old server stopped."
+    break
+  fi
+  echo "⏳ Waiting for shutdown... ($i/10)"
+  sleep 1
+done
+
+# まだ生きていたら強制終了
+if pgrep -f unified_server.py > /dev/null; then
+  echo "💀 Force killing server..."
+  pkill -9 -f unified_server.py
+fi
+
+# --- Phase 1: NASマウント確認 ---
+echo "--- Check NAS Mount ---"
+MOUNT_POINT="/mnt/nas"
+if command -v mountpoint >/dev/null 2>&1; then
+  if ! mountpoint -q "$MOUNT_POINT"; then
+    echo "⚠️ NAS is NOT mounted. Skipping checks to avoid hang."
+    # ここでexit 1するとSystemdが無限再起動するので、
+    # NASなしでもサーバーだけは起動させるようにする（あるいはここで待機ループ）
+  else
+    echo "✅ NAS Mounted."
+  fi
+fi
+
+# --- Phase 2: Frontend Build (Build Skip Logic) ---
+# ※Systemdタイムアウト回避のため、自動ビルドは一旦コメントアウト推奨
+# echo "--- Check Frontend ---"
+# if [ -d "$QUEST_DIR" ]; then
+#   (cd "$QUEST_DIR" && npm install >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1 && npm run build >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1)
+# fi
+
+# --- Phase 3: 初期化 ---
+echo "--- Fix Webhook ---"
 $PYTHON_EXEC switchbot_webhook_fix.py
 
-echo "--- 2. 常駐プロセスを起動します ---"
-
-# (A) カメラ監視 (常駐)
-echo "   - Camera Monitor"
+# --- Phase 4: 常駐プロセス起動 ---
+echo "--- Start Background Services ---"
 $PYTHON_EXEC camera_monitor.py >> logs/camera.log 2>&1 &
-
-# (B) タスクスケジューラー (★追加: 定期実行スクリプトの管理)
-echo "   - Task Scheduler (Monitor, Car, NAS, etc.)"
 $PYTHON_EXEC scheduler.py >> logs/scheduler.log 2>&1 &
 
-# (C) ダッシュボード (Streamlit)
-echo "   - Dashboard"
 source .venv/bin/activate
 nohup streamlit run dashboard.py > /dev/null 2>&1 &
 deactivate
 
-echo "--- 3. Pythonサーバーを起動します ---"
-# サーバーはメインとして最後に起動 (ログ追記モード)
-$PYTHON_EXEC unified_server.py >> logs/server.log 2>&1
+# --- Phase 5: メインサーバー起動 (exec使用) ---
+echo "🚀 Starting Unified Server..."
+echo "Logs: logs/server.log"
+
+# ★重要: execを使うことで、シェルのプロセスがPythonプロセスに置き換わります。
+# これによりSystemdからのシグナル(停止命令)が直接Pythonに届くようになり、管理が安定します。
+exec $PYTHON_EXEC unified_server.py >> logs/server.log 2>&1
