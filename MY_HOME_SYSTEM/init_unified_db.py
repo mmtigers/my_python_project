@@ -236,11 +236,11 @@ def init_db():
                 level INTEGER DEFAULT 1,
                 exp INTEGER DEFAULT 0,
                 gold INTEGER DEFAULT 0,
+                medal_count INTEGER DEFAULT 0,
                 avatar TEXT DEFAULT '🙂', 
                 updated_at DATETIME
             )
         ''')
-        # ※ avatarカラムは別Routerのコードで参照されているため明示
 
         # 2. クエストマスタ
         cur.execute('''
@@ -321,6 +321,18 @@ def init_db():
                 UNIQUE(user_id, equipment_id)
             )
         ''')
+
+
+        # 8. パーティ状態管理 (ボスバトル用) ★追加
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS party_state (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                current_boss_id INTEGER DEFAULT 1,
+                current_hp INTEGER DEFAULT 0,
+                charge_gauge INTEGER DEFAULT 0,
+                updated_at TEXT
+            )
+        """)
 
         # --- Legacy / Unused Definitions ---
         # 以下のテーブルは元のスクリプトで定義されていましたが、現在の主要ロジックでは
