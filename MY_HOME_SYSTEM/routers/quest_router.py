@@ -82,18 +82,23 @@ class HistoryAction(BaseModel):
     user_id: str
     history_id: int
 
+class ApproveAction(BaseModel):
+    approver_id: str
+    history_id: int
+
 # Response Models
 class SyncResponse(BaseModel):
     status: str
     message: str
 
 class CompleteResponse(BaseModel):
-    status: str
+    status: str # 'success' or 'pending'
     leveledUp: bool
     newLevel: int
     earnedGold: int
     earnedExp: int
     earnedMedals: int = 0
+    message: Optional[str] = None
 
 class CancelResponse(BaseModel):
     status: str
@@ -139,7 +144,6 @@ class UserService:
         return new_level, new_exp
 
     def get_family_chronicle(self) -> Dict[str, Any]:
-        """家族全員の統計と全期間のログを取得する"""
         with common.get_db_cursor() as cur:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
             total_level = sum(u['level'] for u in users)
@@ -159,7 +163,8 @@ class UserService:
         }
 
     def _fetch_full_adventure_logs(self, cur) -> List[dict]:
-        q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history ORDER BY completed_at DESC LIMIT 100").fetchall()
+        # status = 'approved' のものだけを取得
+        q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' ORDER BY completed_at DESC LIMIT 100").fetchall()
         r_rows = cur.execute("SELECT 'reward' as type, user_id, reward_title as title, cost_gold as gold, 0 as exp, redeemed_at as ts FROM reward_history ORDER BY redeemed_at DESC LIMIT 100").fetchall()
         e_rows = cur.execute("""
             SELECT 'equip' as type, ue.user_id, em.name as title, em.cost_gold as gold, 0 as exp, ue.acquired_at as ts 
@@ -187,12 +192,18 @@ class UserService:
 
 
 class QuestService:
-    """クエストの進行管理、完了/キャンセル処理を担当"""
+    """クエストの進行管理、完了/キャンセル、承認フローを担当"""
     
+    # 承認が必要なユーザーID
+    CHILDREN_IDS = ['son', 'daughter']
+    # 承認権限を持つユーザーID
+    PARENT_IDS = ['dad', 'mom']
+
     def __init__(self):
         self.user_service = UserService()
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
+        """クエストを完了する（子供の場合は承認待ちステータスにする）"""
         with common.get_db_cursor(commit=True) as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
@@ -200,43 +211,90 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
-            # 経験値計算
-            current_level = user['level']
-            added_exp = user['exp'] + quest['exp_gain']
-            new_level, new_exp, leveled_up = self.user_service.calc_level_up(current_level, added_exp)
-            
-            added_gold = user['gold'] + quest['gold_gain']
             now_iso = common.get_now_iso()
-
-            # メダルドロップ判定 (5%)
-            earned_medals = 0
-            if random.random() < 0.05:
-                earned_medals = 1
-                logger.info(f"✨ Lucky! Medal dropped for {user_id}")
-
-            # DB更新
-            cur.execute("""
-                UPDATE quest_users 
-                SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
-                WHERE user_id = ?
-            """, (new_level, new_exp, added_gold, earned_medals, now_iso, user_id))
             
-            cur.execute("""
-                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (user_id, quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
+            # --- 承認フロー分岐 ---
+            if user_id in self.CHILDREN_IDS:
+                # 子供の場合: 報酬を与えず、status='pending'で履歴作成
+                cur.execute("""
+                    INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                    VALUES (?, ?, ?, ?, ?, ?, 'pending')
+                """, (user_id, quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
+                
+                logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}")
+                return {
+                    "status": "pending",
+                    "leveledUp": False, "newLevel": user['level'],
+                    "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
+                    "message": "親の承認待ちです"
+                }
             
-            # ボスバトルチャージ (簡易連携)
-            try:
-                cur.execute("UPDATE party_state SET charge_gauge = charge_gauge + 1 WHERE id = 1")
-            except Exception:
-                pass
+            # 大人の場合: 即時承認 (既存ロジック)
+            return self._apply_quest_rewards(cur, user, quest, now_iso)
 
-            return {
-                "status": "success", 
-                "leveledUp": leveled_up, "newLevel": new_level, 
-                "earnedGold": quest['gold_gain'], "earnedExp": quest['exp_gain'], "earnedMedals": earned_medals
-            }
+    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        """親が保留中のクエストを承認し、報酬を付与する"""
+        if approver_id not in self.PARENT_IDS:
+            raise HTTPException(status_code=403, detail="承認権限がありません")
+
+        with common.get_db_cursor(commit=True) as cur:
+            hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
+            if not hist: raise HTTPException(status_code=404, detail="History not found")
+            if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="このクエストは承認待ちではありません")
+
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
+            # クエスト定義を一応取得（報酬額は履歴にあるが、詳細情報用）
+            quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
+            
+            # 報酬ロジックの適用
+            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id)
+            
+            logger.info(f"Quest Approved: Approver={approver_id}, Target={user['user_id']}")
+            return result
+
+    def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None) -> Dict[str, Any]:
+        """報酬計算・DB更新の共通ロジック"""
+        # 経験値計算
+        current_level = user['level']
+        added_exp = user['exp'] + quest['exp_gain']
+        new_level, new_exp, leveled_up = self.user_service.calc_level_up(current_level, added_exp)
+        
+        added_gold = user['gold'] + quest['gold_gain']
+
+        # メダルドロップ判定 (5%)
+        earned_medals = 0
+        if random.random() < 0.05:
+            earned_medals = 1
+            logger.info(f"✨ Lucky! Medal dropped for {user['user_id']}")
+
+        # ユーザー更新
+        cur.execute("""
+            UPDATE quest_users 
+            SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
+            WHERE user_id = ?
+        """, (new_level, new_exp, added_gold, earned_medals, now_iso, user['user_id']))
+        
+        if history_id:
+            # 承認時: 既存履歴を更新
+            cur.execute("UPDATE quest_history SET status='approved', completed_at=? WHERE id=?", (now_iso, history_id))
+        else:
+            # 即時完了時: 新規履歴作成
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, 'approved')
+            """, (user['user_id'], quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
+        
+        # ボスバトルチャージ
+        try:
+            cur.execute("UPDATE party_state SET charge_gauge = charge_gauge + 1 WHERE id = 1")
+        except Exception:
+            pass
+
+        return {
+            "status": "success", 
+            "leveledUp": leveled_up, "newLevel": new_level, 
+            "earnedGold": quest['gold_gain'], "earnedExp": quest['exp_gain'], "earnedMedals": earned_medals
+        }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
@@ -244,10 +302,15 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['user_id'] != user_id: raise HTTPException(status_code=403, detail="User mismatch")
 
+            # 承認待ち(pending)なら単に削除して終わり
+            if hist['status'] == 'pending':
+                cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+                return {"status": "cancelled"}
+
+            # 承認済み(approved)なら減算処理が必要
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user: raise HTTPException(status_code=404, detail="User not found")
             
-            # 減算計算
             new_gold = max(0, user['gold'] - hist['gold_earned'])
             raw_exp_diff = user['exp'] - hist['exp_earned']
             new_level, new_exp = self.user_service.calc_level_down(user['level'], raw_exp_diff)
@@ -272,24 +335,18 @@ class QuestService:
         current_time_str = now.strftime("%H:%M")
 
         for q in quests:
-            # 期間チェック
             if q['quest_type'] == 'limited':
                 if q['start_date'] and today_str < q['start_date']: continue
                 if q['end_date'] and today_str > q['end_date']: continue
-            
-            # ランダムチェック
             if q['quest_type'] == 'random':
                 seed = f"{today_str}_{q['quest_id']}"
                 if random.Random(seed).random() > q['occurrence_chance']: continue
-            
-            # 時間帯チェック
             if q.get('start_time') and q.get('end_time'):
                 if q['start_time'] <= q['end_time']:
                     if not (q['start_time'] <= current_time_str <= q['end_time']): continue
                 else:
                     if not (current_time_str >= q['start_time'] or current_time_str <= q['end_time']): continue
 
-            # フロントエンド用整形
             q['icon'] = q['icon_key']
             q['type'] = q['quest_type']
             q['target'] = q['target_user']
@@ -379,12 +436,12 @@ class GameSystem:
         self.shop_service = ShopService()
 
     def sync_master_data(self) -> Dict[str, str]:
-        """マスタデータの同期 (quest_data.py -> DB)"""
+        """マスタデータの同期"""
+        # (Step A-1と同じ内容のため省略せず記述)
         logger.info("🔄 Starting Master Data Sync...")
         try:
             importlib.reload(quest_data)
             valid_users = [MasterUser(**u) for u in quest_data.USERS]
-            # クエストデータの安全な取り込み
             valid_quests = []
             for q in quest_data.QUESTS:
                 q_data = q.copy()
@@ -399,7 +456,6 @@ class GameSystem:
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
         
         with common.get_db_cursor(commit=True) as cur:
-            # Users
             for u in valid_users:
                 cur.execute("""
                     INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, updated_at)
@@ -408,7 +464,6 @@ class GameSystem:
                         name = excluded.name, job_class = excluded.job_class, avatar = excluded.avatar
                 """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
             
-            # Quests
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
                 ph = ','.join(['?'] * len(active_q_ids))
@@ -431,7 +486,6 @@ class GameSystem:
                 """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, 
                       q.days, q.start, q.end, q.chance, q.start_time, q.end_time))
 
-            # Rewards
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
@@ -448,7 +502,6 @@ class GameSystem:
                         cost_gold = excluded.cost_gold, icon_key = excluded.icon_key
                 """, (r.id, r.title, r.category, r.cost_gold, r.icon_key))
             
-            # Equipments
             active_e_ids = [e.id for e in valid_equipments]
             if active_e_ids:
                 ph = ','.join(['?'] * len(active_e_ids))
@@ -470,60 +523,59 @@ class GameSystem:
 
     def get_all_view_data(self) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
-            # Users
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
             for u in users:
                 u['nextLevelExp'] = self.user_service.calculate_next_level_exp(u['level'])
                 u['maxHp'] = self.user_service.calculate_max_hp(u['level'])
                 u['hp'] = u['maxHp']
 
-            # Quests
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
 
-            # Rewards
             rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
             for r in rewards:
                 r['icon'] = r['icon_key']
                 r['cost'] = r['cost_gold']
 
-            # History (Today)
             today_str = common.get_today_date_str()
+            # 完了済みクエスト: status='approved' または 'pending' (pendingも表示して「承認待ち」と出すため)
             completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
             )]
             
-            # Logs (簡易版)
+            # ★追加: 承認待ち(全期間): pendingを取得（親の承認リスト用）
+            pending = [dict(row) for row in cur.execute(
+                "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at ASC"
+            )]
+
             logs = self._fetch_recent_logs(cur)
 
-            # Equipments
             equipments = [dict(row) for row in cur.execute("SELECT * FROM equipment_master")]
             for e in equipments:
                 e['icon'] = e['icon_key']
                 e['cost'] = e['cost_gold']
 
-            # Owned Equipments
             owned_equipments = [dict(row) for row in cur.execute("""
                 SELECT ue.*, em.name, em.type, em.power, em.icon_key 
                 FROM user_equipments ue
                 JOIN equipment_master em ON ue.equipment_id = em.equipment_id
             """)]
             
-            # Boss State
             boss_state = self._get_party_state(cur)
 
         return {
             "users": users, "quests": filtered_quests, "rewards": rewards,
             "completedQuests": completed, "logs": logs,
+            "pendingQuests": pending, 
             "equipments": equipments, "ownedEquipments": owned_equipments,
             "boss": boss_state
         }
 
     def _fetch_recent_logs(self, cur) -> List[dict]:
-        """簡易ログ取得 (Dashboard用)"""
+        # ログには承認済みだけを表示
         q_logs = cur.execute("""
             SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts 
-            FROM quest_history ORDER BY id DESC LIMIT 20
+            FROM quest_history WHERE status='approved' ORDER BY id DESC LIMIT 20
         """).fetchall()
         r_logs = cur.execute("""
             SELECT id, user_id, reward_title as title, 'reward' as type, redeemed_at as ts 
@@ -541,11 +593,9 @@ class GameSystem:
         return formatted
 
     def _get_party_state(self, cur) -> Dict[str, Any]:
-        """ボス情報取得（存在しなければNone）"""
         try:
             row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
             if not row: return None
-            # マスタから詳細取得
             boss_def = next((b for b in quest_data.BOSSES if b['id'] == row['current_boss_id']), None)
             if not boss_def: return None
             return {
@@ -561,9 +611,7 @@ class GameSystem:
 # 3. API Endpoints (Wiring)
 # ==========================================
 
-# インスタンス化
 game_system = GameSystem()
-# 個別サービスへのショートカット（可読性のため）
 quest_service = game_system.quest_service
 shop_service = game_system.shop_service
 user_service = game_system.user_service
@@ -583,6 +631,11 @@ def get_all_data() -> Dict[str, Any]:
 @router.post("/complete", response_model=CompleteResponse)
 def complete_quest(action: QuestAction):
     return quest_service.process_complete_quest(action.user_id, action.quest_id)
+
+# ★新規追加: 承認エンドポイント
+@router.post("/approve", response_model=CompleteResponse)
+def approve_quest(action: ApproveAction):
+    return quest_service.process_approve_quest(action.approver_id, action.history_id)
 
 @router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
