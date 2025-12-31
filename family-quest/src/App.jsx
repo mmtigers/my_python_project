@@ -1,328 +1,18 @@
 // family-quest/src/App.jsx
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Sword, Shirt, ShoppingBag, Undo2, Crown
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 
-import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from './constants/masterData';
+import { INITIAL_USERS } from './constants/masterData';
+import { useGameData } from './hooks/useGameData'; // ★Hooksのインポート
+
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
-import { apiClient } from './utils/apiClient';
+import UserStatusCard from './components/quest/UserStatusCard'; // ★コンポーネントのインポート
+import QuestList from './components/quest/QuestList';           // ★コンポーネントのインポート
 import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
 import FamilyParty from './components/quest/FamilyParty';
-
-// --- Components Extraction (UI Components) ---
-
-/**
- * ユーザーステータスカード (HP, EXP, Goldバー) を描画
- */
-const UserStatusCard = ({ user }) => {
-  if (!user) return null;
-
-  const expPercentage = ((user.exp || 0) / (user.nextLevelExp || 100)) * 100;
-  const expRemaining = (user.nextLevelExp || 100) - (user.exp || 0);
-
-  return (
-    <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-3 shadow-xl relative animate-in fade-in duration-300">
-      <div className="absolute top-2 right-2 opacity-10 pointer-events-none"><Crown size={80} /></div>
-      <div className="flex items-start gap-4 relative z-10">
-        <div className="text-5xl bg-blue-900 p-2 rounded border-2 border-white shadow-inner">
-          {user.avatar || '🙂'}
-        </div>
-        <div className="flex-1 space-y-1">
-          <div className="flex justify-between items-baseline border-b border-blue-600 pb-1">
-            <span className="text-lg font-bold text-yellow-300 tracking-widest">{user.name}</span>
-            <span className="text-sm text-cyan-200">{user.job_class} Lv.{user.level}</span>
-          </div>
-          <div className="grid grid-cols-[30px_1fr] items-center text-sm gap-2">
-            <span className="font-bold text-red-300">HP</span>
-            <div className="w-full bg-gray-900 h-3 rounded border border-gray-600 overflow-hidden">
-              <div className="bg-gradient-to-r from-green-500 to-green-400 h-full" style={{ width: '100%' }}></div>
-            </div>
-            <span className="font-bold text-orange-300">EXP</span>
-            <div className="w-full bg-gray-900 h-3 rounded border border-gray-600 overflow-hidden relative">
-              <div className="bg-gradient-to-r from-orange-500 to-yellow-400 h-full transition-all duration-700"
-                style={{ width: `${expPercentage}%` }}></div>
-              <div className="absolute inset-0 text-[8px] flex items-center justify-center text-white/80 font-bold">
-                あと {expRemaining}
-              </div>
-            </div>
-            <span className="font-bold text-yellow-300">G</span>
-            <div className="text-right font-bold text-yellow-300">{(user.gold || 0).toLocaleString()} G</div>
-            {/* ★メダル表示を追加 */}
-            <span className="font-bold text-yellow-500">🏅</span>
-            <div className="text-right font-bold text-yellow-500">{(user.medal_count || 0)} 枚</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/**
- * クエストリストを描画（色分け・バッジ強化版）
- */
-const QuestList = ({ quests, completedQuests, currentUser, onQuestClick }) => {
-  const currentDay = new Date().getDay();
-
-  // 1. フィルタリング
-  const filteredQuests = quests.filter(q => {
-    if (q.target !== 'all' && q.target !== currentUser?.user_id) return false;
-    if (q.type === 'daily' && q.days) {
-      if (!q.days || (Array.isArray(q.days) && q.days.length === 0)) return true;
-      const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
-      return dayList.includes(currentDay);
-    }
-    return true;
-  });
-
-  // 2. ソート（未完了を上、完了を下に。その中で時間限定を優先）
-  const sortedQuests = [...filteredQuests].sort((a, b) => {
-    const aId = a.quest_id || a.id;
-    const bId = b.quest_id || b.id;
-    const aDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === aId);
-    const bDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === bId);
-
-    if (aDone !== bDone) return aDone ? 1 : -1;
-
-    // 両方未完了なら、時間限定を上に
-    if (!aDone) {
-      if (a.start_time && !b.start_time) return -1;
-      if (!a.start_time && b.start_time) return 1;
-    }
-
-    return 0;
-  });
-
-  return (
-    <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">-- 本日の依頼 --</div>
-      {sortedQuests.map(q => {
-        const qId = q.quest_id || q.id;
-        const isDone = completedQuests.some(cq =>
-          cq.user_id === currentUser?.user_id && cq.quest_id === qId
-        );
-
-        // クエストタイプ判定
-        const isTimeLimited = !!q.start_time; // 時間限定
-        const isRandom = q.type === 'random'; // ランダム
-        const isLimited = q.type === 'limited'; // 期間限定(日付)
-        const isPersonal = q.target !== 'all'; // 個人宛
-
-        // 背景色・ボーダー色の決定
-        let containerClass = "border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200"; // デフォルト
-
-        if (!isDone) {
-          if (isTimeLimited) {
-            // 時間限定: オレンジ～赤のグラデーションで目立たせる
-            containerClass = "border-orange-400 bg-gradient-to-r from-orange-900/90 to-red-900/90 hover:from-orange-800 hover:to-red-800 shadow-[0_0_10px_rgba(255,165,0,0.3)]";
-          } else if (isRandom) {
-            // ランダム: 紫系
-            containerClass = "border-purple-400 bg-purple-950/90 hover:bg-purple-900";
-          } else if (isLimited) {
-            // 期間限定: 赤紫系
-            containerClass = "border-pink-400 bg-pink-950/90 hover:bg-pink-900";
-          }
-        } else {
-          // 完了済み: グレーアウト
-          containerClass = "border-gray-600 bg-gray-900/50 grayscale";
-        }
-
-        return (
-          <div key={qId} onClick={() => onQuestClick(q)}
-            className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}>
-
-            {/* 背景のキラキラ演出（レアの場合） */}
-            {isRandom && !isDone && <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>}
-
-            <div className="flex items-center gap-3 relative z-10">
-              <span className={`text-2xl ${isRandom && !isDone ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>{q.icon || q.icon_key}</span>
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* バッジ表示 */}
-                  {isTimeLimited && !isDone && (
-                    <span className="bg-yellow-500 text-black text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
-                      ⏰ {q.start_time}~{q.end_time}
-                    </span>
-                  )}
-                  {isLimited && !isDone && <span className="bg-red-600 text-[10px] px-1 rounded font-bold">期間限定</span>}
-                  {isRandom && !isDone && <span className="bg-purple-600 text-[10px] px-1 rounded font-bold animate-pulse">レア出現!</span>}
-                  {isPersonal && !isDone && <span className="bg-blue-600 text-[10px] px-1 rounded">自分専用</span>}
-
-                  <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>{q.title}</div>
-                </div>
-                {!isDone && (
-                  <div className="flex gap-2 text-xs mt-0.5">
-                    <span className="text-orange-300 font-mono">EXP: {q.exp_gain || q.exp}</span>
-                    {(q.gold_gain || q.gold) > 0 && <span className="text-yellow-300 font-mono">{q.gold_gain || q.gold} G</span>}
-                  </div>
-                )}
-              </div>
-            </div>
-            {isDone && <span className="text-red-400 text-xs border border-red-500 px-1 py-0.5 rounded flex items-center gap-1"><Undo2 size={10} /> 戻す</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-
-// --- Custom Hook (Logic Layer) ---
-
-const useGameData = (onLevelUp) => {
-  const [users, setUsers] = useState(INITIAL_USERS || []);
-  const [quests, setQuests] = useState(MASTER_QUESTS || []);
-  const [rewards, setRewards] = useState(MASTER_REWARDS || []);
-  const [completedQuests, setCompletedQuests] = useState([]);
-  const [adventureLogs, setAdventureLogs] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  const [equipments, setEquipments] = useState([]);
-  const [ownedEquipments, setOwnedEquipments] = useState([]);
-  const [familyStats, setFamilyStats] = useState(null);
-  const [chronicle, setChronicle] = useState([]);
-
-  const fetchGameData = useCallback(async () => {
-    try {
-      const data = await apiClient.get('/api/quest/data');
-
-      if (data.users) setUsers(data.users);
-      if (data.quests) setQuests(data.quests);
-      if (data.rewards) setRewards(data.rewards);
-      if (data.completedQuests) setCompletedQuests(data.completedQuests);
-      if (data.logs) setAdventureLogs(data.logs);
-      if (data.equipments) setEquipments(data.equipments);
-      if (data.ownedEquipments) setOwnedEquipments(data.ownedEquipments);
-
-      // 記録データの取得
-      try {
-        const chronicleData = await apiClient.get('/api/quest/family/chronicle');
-        if (chronicleData) {
-          setFamilyStats(chronicleData.stats);
-          setChronicle(chronicleData.chronicle);
-        }
-      } catch (err) {
-        console.warn("Chronicle data fetch failed:", err);
-      }
-
-      setIsLoading(false);
-    } catch (error) {
-      console.error("Game Data Load Error:", error);
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchGameData();
-  }, [fetchGameData]);
-
-  const completeQuest = async (currentUser, quest) => {
-    const q_id = quest.quest_id || quest.id;
-    const completedEntry = completedQuests.find(
-      q => q.user_id === currentUser.user_id && q.quest_id === q_id
-    );
-
-    if (completedEntry) {
-      if (!window.confirm("この行動を 取り消しますか？")) return;
-      try {
-        await apiClient.post('/api/quest/quest/cancel', {
-          user_id: currentUser.user_id,
-          history_id: completedEntry.id
-        });
-        await fetchGameData();
-      } catch (e) {
-        alert(`キャンセル失敗: ${e.message}`);
-      }
-    } else {
-      try {
-        const res = await apiClient.post('/api/quest/complete', {
-          user_id: currentUser.user_id,
-          quest_id: q_id
-        });
-        await fetchGameData();
-
-        // ★メダル獲得時の通知ロジックを追加
-        if (res.earnedMedals > 0) {
-          alert(`✨ ラッキー！！ ✨\nちいさなメダル を見つけた！`);
-        }
-
-        if (res.leveledUp && onLevelUp) {
-          onLevelUp({
-            user: currentUser.name,
-            level: res.newLevel,
-            job: currentUser.job_class
-          });
-        }
-      } catch (e) {
-        alert(`クエスト完了失敗: ${e.message}`);
-      }
-    }
-  };
-
-  const buyReward = async (currentUser, reward) => {
-    const cost = reward.cost_gold || reward.cost;
-    if ((currentUser?.gold || 0) < cost) {
-      alert("ゴールドが足りません！");
-      return;
-    }
-    if (!window.confirm(`${reward.title} を 購入しますか？`)) return;
-
-    try {
-      const res = await apiClient.post('/api/quest/reward/purchase', {
-        user_id: currentUser.user_id,
-        reward_id: reward.reward_id || reward.id
-      });
-      await fetchGameData();
-      alert(`まいどあり！\n${reward.title} を手に入れた！\n(残金: ${res.newGold} G)`);
-    } catch (e) {
-      alert(`購入失敗: ${e.message}`);
-    }
-  };
-
-  const buyEquipment = async (currentUser, item) => {
-    if ((currentUser?.gold || 0) < item.cost) {
-      alert("ゴールドが足りません！");
-      return;
-    }
-    if (!window.confirm(`${item.name} を購入しますか？`)) return;
-
-    try {
-      await apiClient.post('/api/quest/equip/purchase', {
-        user_id: currentUser.user_id,
-        equipment_id: item.equipment_id
-      });
-      await fetchGameData();
-      alert(`チャキーン！\n${item.name} を手に入れた！`);
-    } catch (e) {
-      alert(`購入失敗: ${e.message}`);
-    }
-  };
-
-  const changeEquipment = async (currentUser, item) => {
-    try {
-      await apiClient.post('/api/quest/equip/change', {
-        user_id: currentUser.user_id,
-        equipment_id: item.equipment_id
-      });
-      await fetchGameData();
-    } catch (e) {
-      alert(`装備変更失敗: ${e.message}`);
-    }
-  };
-
-  return {
-    users, quests, rewards, completedQuests, adventureLogs, isLoading,
-    equipments, ownedEquipments,
-    familyStats, chronicle,
-    completeQuest, buyReward, buyEquipment, changeEquipment,
-    fetchGameData
-  };
-};
-
-// --- Main Component ---
 
 export default function App() {
   const [viewMode, setViewMode] = useState('user');
@@ -330,6 +20,7 @@ export default function App() {
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
 
+  // ★ロジックはHooksに委譲
   const {
     users, quests, rewards, completedQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
@@ -369,7 +60,7 @@ export default function App() {
       />
 
       <div className="p-4 space-y-4 max-w-md mx-auto">
-        {/* 1. ユーザー個別画面 (ここが消えていたため復元) */}
+        {/* 1. ユーザー個別画面 */}
         {viewMode === 'user' && (
           <>
             <UserStatusCard user={currentUser} />
@@ -436,13 +127,12 @@ export default function App() {
           </>
         )}
 
-        {/* 2. 記録タブの実装 */}
+        {/* 2. 記録タブ */}
         {viewMode === 'familyLog' && (
           <FamilyLog stats={familyStats} chronicle={chronicle} />
         )}
 
-        {/* 3. パーティモード（プレースホルダー） */}
-        {/* 3. パーティモード（実装） */}
+        {/* 3. パーティモード */}
         {viewMode === 'party' && (
           <FamilyParty users={users} ownedEquipments={ownedEquipments} />
         )}
