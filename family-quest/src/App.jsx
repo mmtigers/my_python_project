@@ -51,6 +51,9 @@ const UserStatusCard = ({ user }) => {
             </div>
             <span className="font-bold text-yellow-300">G</span>
             <div className="text-right font-bold text-yellow-300">{(user.gold || 0).toLocaleString()} G</div>
+            {/* ★メダル表示を追加 */}
+            <span className="font-bold text-yellow-500">🏅</span>
+            <div className="text-right font-bold text-yellow-500">{(user.medal_count || 0)} 枚</div>
           </div>
         </div>
       </div>
@@ -240,6 +243,12 @@ const useGameData = (onLevelUp) => {
           quest_id: q_id
         });
         await fetchGameData();
+
+        // ★メダル獲得時の通知ロジックを追加
+        if (res.earnedMedals > 0) {
+          alert(`✨ ラッキー！！ ✨\nちいさなメダル を見つけた！`);
+        }
+
         if (res.leveledUp && onLevelUp) {
           onLevelUp({
             user: currentUser.name,
