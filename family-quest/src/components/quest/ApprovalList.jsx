@@ -2,7 +2,7 @@
 import React from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
-const ApprovalList = ({ pendingQuests, users, onApprove }) => {
+const ApprovalList = ({ pendingQuests, users, onApprove, onReject }) => {
     if (!pendingQuests || pendingQuests.length === 0) return null;
 
     // ユーザーIDから名前を引けるようにするマップ
@@ -28,12 +28,24 @@ const ApprovalList = ({ pendingQuests, users, onApprove }) => {
                                     <div className="font-bold text-sm text-white">{quest.quest_title}</div>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => onApprove(quest)}
-                                className="bg-yellow-600 hover:bg-yellow-500 text-white text-xs font-bold py-1.5 px-3 rounded shadow active:scale-95 transition-all flex items-center gap-1"
-                            >
-                                <CheckCircle2 size={14} /> 承認
-                            </button>
+                            {/* ボタンエリア */}
+                            <div className="flex gap-2">
+                                {/* ★追加: 再チャレンジ(却下)ボタン */}
+                                <button
+                                    onClick={() => onReject(quest)}
+                                    className="bg-red-600/80 hover:bg-red-500 text-white text-xs font-bold py-1.5 px-3 rounded shadow active:scale-95 transition-all flex items-center gap-1"
+                                >
+                                    <XCircle size={14} /> 再挑戦
+                                </button>
+
+                                {/* 承認ボタン */}
+                                <button
+                                    onClick={() => onApprove(quest)}
+                                    className="bg-yellow-600 hover:bg-yellow-500 text-white text-xs font-bold py-1.5 px-3 rounded shadow active:scale-95 transition-all flex items-center gap-1"
+                                >
+                                    <CheckCircle2 size={14} /> 承認
+                                </button>
+                            </div>
                         </div>
                     );
                 })}
