@@ -14,20 +14,25 @@ import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
 import FamilyParty from './components/quest/FamilyParty';
+import AvatarUploader from './components/ui/AvatarUploader';
 
 export default function App() {
   const [viewMode, setViewMode] = useState('user');
   const [activeTab, setActiveTab] = useState('quest');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
+  // ★追加: アバターアップロード用ステート
+  const [editingUser, setEditingUser] = useState(null);
 
   const {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
     familyStats, chronicle,
-    completeQuest, approveQuest, rejectQuest, // ★修正: rejectQuestを受け取る
-    buyReward, buyEquipment, changeEquipment
+    completeQuest, approveQuest, rejectQuest,
+    buyReward, buyEquipment, changeEquipment,
+    refreshData // ★追加: 更新後にデータを再取得するために必要 (hooksからexportされているはずです)
   } = useGameData((info) => setLevelUpInfo(info));
+
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
 
@@ -51,8 +56,20 @@ export default function App() {
   if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
 
   return (
-    <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
+    <div className="app-container min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
       <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
+
+      {/* ★追加: アバターアップロードモーダル */}
+      {editingUser && (
+        <AvatarUploader
+          user={editingUser}
+          onClose={() => setEditingUser(null)}
+          onUploadComplete={() => {
+            // 画像更新後、データをリフレッシュして画面に即時反映させる
+            if (refreshData) refreshData();
+          }}
+        />
+      )}
 
       <Header
         users={users}
@@ -63,11 +80,16 @@ export default function App() {
         onLogSwitch={() => setViewMode('familyLog')}
       />
 
+
+
       <div className="p-4 space-y-4 max-w-md mx-auto">
         {/* 1. ユーザー個別画面 */}
         {viewMode === 'user' && (
           <>
-            <UserStatusCard user={currentUser} />
+            <UserStatusCard
+              user={currentUser}
+              onAvatarClick={(user) => setEditingUser(user)}
+            />
 
             {/* ★承認リスト（親のみ表示） */}
             {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
