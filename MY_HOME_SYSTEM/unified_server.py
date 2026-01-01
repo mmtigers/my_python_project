@@ -11,6 +11,7 @@ import datetime
 import os
 import asyncio
 import logging
+import sound_manager
 
 # Local Modules
 from linebot import LineBotApi, WebhookHandler
@@ -139,6 +140,8 @@ async def lifespan(app: FastAPI):
     
     # 2. Start Background Task
     task = asyncio.create_task(schedule_daily_backup())
+    # ★追加: 音声ファイルの整合性チェック
+    sound_manager.check_and_restore_sounds()
     
     # 3. Seed DB
     try:

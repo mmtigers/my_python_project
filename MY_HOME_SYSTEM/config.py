@@ -68,6 +68,10 @@ SQLITE_TABLE_NAS = "nas_records"
 # バックアップ対象
 BACKUP_FILES = [SQLITE_DB_PATH, "config.py", ".env"]
 
+# デフォルトアセット (Gitリポジトリに含まれる、復旧用データ)
+DEFAULT_ASSETS_DIR = os.path.join(BASE_DIR, "defaults")
+DEFAULT_SOUND_SOURCE = os.path.join(DEFAULT_ASSETS_DIR, "sounds")
+
 # ==========================================
 # 3. デバイス・ルール設定
 # ==========================================

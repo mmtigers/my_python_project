@@ -125,6 +125,9 @@ class PurchaseResponse(BaseModel):
     status: str
     newGold: int
 
+# [追加] Request Model
+class SoundTestRequest(BaseModel):
+    sound_key: str
 
 # ==========================================
 # 2. Service Layers (Logic Separation)
@@ -767,3 +770,12 @@ async def upload_image(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail="画像の保存に失敗しました")
+    
+@router.post("/test_sound")
+def test_sound(req: SoundTestRequest):
+    """指定したサウンドキーの音をサーバーで再生する（テスト用）"""
+    if req.sound_key not in config.SOUND_MAP:
+        raise HTTPException(status_code=400, detail=f"Invalid sound key. Options: {list(config.SOUND_MAP.keys())}")
+    
+    sound_manager.play(req.sound_key)
+    return {"status": "playing", "key": req.sound_key}
