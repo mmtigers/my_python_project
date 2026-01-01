@@ -170,7 +170,7 @@ class CronReporter:
 
             # --- 送信処理 ---
             self._send_discord(discord_msg)
-            self._send_line(line_msg)
+            # self._send_line(line_msg)
             
             logger.info("✅ レポート送信完了")
 
