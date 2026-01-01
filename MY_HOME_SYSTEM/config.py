@@ -305,3 +305,27 @@ if ALLOW_ALL_ORIGINS:
 # --- Upload Settings ---
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ==========================================
+# 7. サウンド設定 (RasPi Server Side)
+# ==========================================
+SOUND_DIR = os.path.join(ASSETS_DIR, "sounds")
+if not os.path.exists(SOUND_DIR):
+    os.makedirs(SOUND_DIR, exist_ok=True)
+
+# 使用するプレイヤーコマンド (ラズパイなら 'mpg123' や 'aplay' など)
+# ※インストールが必要: sudo apt install mpg123
+SOUND_PLAYER_CMD = "mpg123"
+
+# ★重要: 手順1で確認した番号(X)を入れてください。
+# 例: card 1 なら "hw:1,0"、 card 2 なら "hw:2,0"
+SOUND_PLAYER_ARGS = ["-a", "hw:2,0"]
+
+# イベントとファイル名のマッピング
+SOUND_MAP = {
+    "level_up": "level_up.mp3",       # レベルアップ！
+    "quest_clear": "quest_clear.mp3", # クエスト完了（通常）
+    "medal_get": "medal_get.mp3",     # メダル発見！
+    "submit": "submit.mp3",           # 子供の申請音
+    "approve": "approve.mp3",         # 親の承認音
+}

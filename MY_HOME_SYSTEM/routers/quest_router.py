@@ -11,8 +11,17 @@ import math
 import pytz
 import importlib
 import random
+import uuid
+import sys  # ★追加
 import common
 import config
+import sound_manager  # これで確実に読み込めます
+try:
+    import quest_data
+except ImportError:
+    from .. import quest_data
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # import quest_data with fallback
 try:
@@ -94,6 +103,11 @@ class ApproveAction(BaseModel):
 class SyncResponse(BaseModel):
     status: str
     message: str
+
+# ★追加: アバター更新用
+class UpdateUserAction(BaseModel):
+    user_id: str
+    avatar_url: str
 
 class CompleteResponse(BaseModel):
     status: str # 'success' or 'pending'
@@ -232,6 +246,9 @@ class QuestService:
                     "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
                     "message": "親の承認待ちです"
                 }
+
+                # ★追加: 申請音
+                sound_manager.play("submit")
             
             # 大人の場合: 即時承認 (既存ロジック)
             return self._apply_quest_rewards(cur, user, quest, now_iso)
@@ -249,6 +266,9 @@ class QuestService:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
             # クエスト定義を一応取得（報酬額は履歴にあるが、詳細情報用）
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
+
+            # ★追加: 承認音
+            sound_manager.play("approve")
             
             # 報酬ロジックの適用
             result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id)
@@ -267,6 +287,7 @@ class QuestService:
 
         # メダルドロップ判定 (5%)
         earned_medals = 0
+        is_lucky = False  # ★修正: 初期値を必ず設定
         if random.random() < 0.05:
             earned_medals = 1
             logger.info(f"✨ Lucky! Medal dropped for {user['user_id']}")
@@ -293,6 +314,16 @@ class QuestService:
             cur.execute("UPDATE party_state SET charge_gauge = charge_gauge + 1 WHERE id = 1")
         except Exception:
             pass
+
+        # ★追加: イベントに応じたサウンド再生
+        if leveled_up:
+            sound_manager.play("level_up")
+        elif is_lucky:
+            sound_manager.play("medal_get")
+        else:
+            sound_manager.play("quest_clear")
+
+
 
         return {
             "status": "success", 
