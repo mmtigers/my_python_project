@@ -207,6 +207,19 @@ class UserService:
                 "dateStr": ev['ts'].split('T')[0] if 'T' in ev['ts'] else ev['ts'].split(' ')[0]
             })
         return formatted
+    
+    def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:
+        """ユーザーのアバターURLを更新する"""
+        with common.get_db_cursor(commit=True) as cur:
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
+            if not user:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?", 
+                       (avatar_url, common.get_now_iso(), user_id))
+            
+            logger.info(f"Avatar Updated: User={user_id}, URL={avatar_url}")
+            return {"status": "updated", "avatar": avatar_url}
 
 
 class QuestService:
@@ -722,6 +735,10 @@ def seed_data():
 @router.post("/seed", response_model=SyncResponse)
 def seed_data_endpoint():
     return game_system.sync_master_data()
+
+@router.post("/user/update")
+def update_user_avatar(action: UpdateUserAction):
+    return user_service.update_avatar(action.user_id, action.avatar_url)
 
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
