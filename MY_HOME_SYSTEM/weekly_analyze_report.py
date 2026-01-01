@@ -1,8 +1,8 @@
-# HOME_SYSTEM/weekly_analyze_report.py
 import config
 import common
 import datetime
 import pytz
+import sys
 
 # ロガー設定
 logger = common.setup_logging("weekly_report")
@@ -139,9 +139,21 @@ def is_month_end_report():
     return now.month != next_week.month
 
 def run_report():
-    logger.info("週間レポート生成開始...")
-    
+    # 【追加】実行タイミング制御
+    # スケジューラから毎時呼ばれるため、ここで「月曜日」かつ「朝8時」かチェックする
+    # 引数 "--force" があれば強制実行する
+    is_force = len(sys.argv) > 1 and sys.argv[1] == "--force"
     now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+    
+    is_monday = (now.weekday() == 0) # 0=Monday
+    is_morning = (now.hour == 8)     # 8時台
+    
+    if not is_force and not (is_monday and is_morning):
+        logger.info(f"⏭️ 現在はレポート送信タイミングではありません ({now.strftime('%a %H:%M')}) - Skip")
+        return
+
+    logger.info("📊 週間レポート生成プロセスを開始します...")
+    
     date_fmt = "%m/%d"
 
     # 1. 期間ごとの集計
@@ -191,9 +203,9 @@ def run_report():
     full_msg = msg_header + msg_body + msg_footer
     
     if common.send_push(config.LINE_USER_ID, [{"type": "text", "text": full_msg}]):
-        logger.info("レポート送信完了")
+        logger.info("✅ レポート送信完了")
     else:
-        logger.error("レポート送信失敗")
+        logger.error("❌ レポート送信失敗")
 
 if __name__ == "__main__":
     run_report()

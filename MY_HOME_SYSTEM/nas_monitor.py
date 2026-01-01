@@ -1,4 +1,3 @@
-# MY_HOME_SYSTEM/nas_monitor.py
 import os
 import shutil
 import subprocess
@@ -117,12 +116,18 @@ class NasMonitor:
         self.save_to_db(ping_ok, mount_ok, usage)
 
         # 5. 通知判定 (容量不足または定期レポート)
-        # 容量90%超えで警告
         is_full = usage['percent'] > 90
         
-        # 通常レポートは毎回送るとうるさいので、ここでの通知は「異常時」のみにするか、
-        # あるいは「特定の日時だけ」送る制御を入れても良いですが、
-        # 基本要件通り「正常時もReportチャンネルへ送る」設定で実装します。
+        # 【修正】通知頻度の抑制
+        # 異常時(is_full)は即時通知。
+        # 正常時は「朝8時台」のみ通知する (スケジューラが1時間おきなので1日1回だけヒットする想定)
+        now = datetime.now()
+        is_report_time = (now.hour == 8)
+
+        if not is_full and not is_report_time:
+            # 正常かつ報告時間外ならログのみで終了
+            logger.info("⏳ 正常稼働中 - 定時報告(8時)ではないため通知をスキップします")
+            return
         
         status_icon = "🔴" if is_full else "🟢"
         title = "容量不足警告" if is_full else "NAS稼働レポート"
