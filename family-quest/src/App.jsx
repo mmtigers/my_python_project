@@ -45,6 +45,29 @@ export default function App() {
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
+  // 1. ハンドラー関数の定義
+  const handleReject = async (history) => {
+    if (!currentUser) return;
+    try {
+      await apiClient.post('/api/quest/reject', {
+        approver_id: currentUser.user_id,
+        history_id: history.id
+      });
+      // データを再読み込みして画面を更新
+      await fetchGameData();
+      // 必要ならトースト通知など
+    } catch (error) {
+      console.error("Reject failed:", error);
+    }
+  };
+
+  // 2. コンポーネントへの渡し
+  <ApprovalList
+    pendingQuests={gameData.pendingQuests}
+    users={gameData.users}
+    onApprove={handleApprove}
+    onReject={handleReject}  // ★これを追加
+  />
 
   const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
 
