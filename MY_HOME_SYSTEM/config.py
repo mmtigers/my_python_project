@@ -76,7 +76,7 @@ DEFAULT_SOUND_SOURCE = os.path.join(DEFAULT_ASSETS_DIR, "sounds")
 # 3. デバイス・ルール設定
 # ==========================================
 # 通知ターゲット (デフォルト)
-NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "line")
+NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "discord")
 
 # 子供設定
 _children_str = os.getenv("CHILDREN_NAMES", "")
