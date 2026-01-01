@@ -275,6 +275,24 @@ class QuestService:
             
             logger.info(f"Quest Approved: Approver={approver_id}, Target={user['user_id']}")
             return result
+    
+    # ★追加: 却下（再チャレンジ）処理
+    def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
+        """親が承認待ちのクエストを却下（削除）し、再チャレンジさせる"""
+        if approver_id not in self.PARENT_IDS:
+            raise HTTPException(status_code=403, detail="承認権限がありません")
+
+        with common.get_db_cursor(commit=True) as cur:
+            hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
+            if not hist: raise HTTPException(status_code=404, detail="History not found")
+            if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
+
+            # 履歴を削除する（これで「未実施」の状態に戻る）
+            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+            
+            logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
+            return {"status": "rejected"}
+
 
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None) -> Dict[str, Any]:
         """報酬計算・DB更新の共通ロジック"""
@@ -671,6 +689,10 @@ def complete_quest(action: QuestAction):
 @router.post("/approve", response_model=CompleteResponse)
 def approve_quest(action: ApproveAction):
     return quest_service.process_approve_quest(action.approver_id, action.history_id)
+
+@router.post("/reject", response_model=CancelResponse)
+def reject_quest(action: ApproveAction):
+    return quest_service.process_reject_quest(action.approver_id, action.history_id)
 
 @router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
