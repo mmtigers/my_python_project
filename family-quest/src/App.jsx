@@ -9,7 +9,7 @@ import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
 import UserStatusCard from './components/quest/UserStatusCard';
 import QuestList from './components/quest/QuestList';
-import ApprovalList from './components/quest/ApprovalList'; // ★追加
+import ApprovalList from './components/quest/ApprovalList';
 import RewardList from './components/quest/RewardList';
 import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
@@ -25,8 +25,8 @@ export default function App() {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
     familyStats, chronicle,
-    completeQuest, approveQuest, buyReward, // ★approveQuest追加
-    buyEquipment, changeEquipment
+    completeQuest, approveQuest, rejectQuest, // ★修正: rejectQuestを受け取る
+    buyReward, buyEquipment, changeEquipment
   } = useGameData((info) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
@@ -40,34 +40,11 @@ export default function App() {
   };
 
   const handleQuestClick = (quest) => completeQuest(currentUser, quest);
-  // eslint-disable-next-line no-unused-vars
-  const handleApprove = (historyItem) => approveQuest(currentUser, historyItem); // ★承認ハンドラ
+  const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
+  const handleReject = (historyItem) => rejectQuest(currentUser, historyItem); // ★修正: 正しいハンドラ定義
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
-  // 1. ハンドラー関数の定義
-  const handleReject = async (history) => {
-    if (!currentUser) return;
-    try {
-      await apiClient.post('/api/quest/reject', {
-        approver_id: currentUser.user_id,
-        history_id: history.id
-      });
-      // データを再読み込みして画面を更新
-      await fetchGameData();
-      // 必要ならトースト通知など
-    } catch (error) {
-      console.error("Reject failed:", error);
-    }
-  };
-
-  // 2. コンポーネントへの渡し
-  <ApprovalList
-    pendingQuests={gameData.pendingQuests}
-    users={gameData.users}
-    onApprove={handleApprove}
-    onReject={handleReject}  // ★これを追加
-  />
 
   const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
 
@@ -98,6 +75,7 @@ export default function App() {
                 pendingQuests={pendingQuests}
                 users={users}
                 onApprove={handleApprove}
+                onReject={handleReject} // ★修正: ここで正しく渡す
               />
             )}
 
@@ -127,7 +105,7 @@ export default function App() {
                   <QuestList
                     quests={quests}
                     completedQuests={completedQuests}
-                    pendingQuests={pendingQuests} // ★pendingリストを渡す
+                    pendingQuests={pendingQuests}
                     currentUser={currentUser}
                     onQuestClick={handleQuestClick}
                   />
