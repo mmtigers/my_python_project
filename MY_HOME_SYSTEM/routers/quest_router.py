@@ -15,6 +15,7 @@ import uuid
 import sys  # ★追加
 import common
 import config
+import game_logic
 import sound_manager  # これで確実に読み込めます
 try:
     import quest_data
@@ -135,34 +136,6 @@ class SoundTestRequest(BaseModel):
 
 class UserService:
     """ユーザーのステータス計算、レベル管理、ログ取得を担当"""
-
-    @staticmethod
-    def calculate_next_level_exp(level: int) -> int:
-        return math.floor(100 * math.pow(1.2, level - 1))
-
-    @staticmethod
-    def calculate_max_hp(level: int) -> int:
-        return level * 20 + 5
-
-    def calc_level_up(self, current_level: int, current_exp: int) -> tuple[int, int, bool]:
-        next_exp_req = self.calculate_next_level_exp(current_level)
-        leveled_up = False
-        while current_exp >= next_exp_req:
-            current_exp -= next_exp_req
-            current_level += 1
-            leveled_up = True
-            next_exp_req = self.calculate_next_level_exp(current_level)
-        return current_level, current_exp, leveled_up
-
-    def calc_level_down(self, current_level: int, current_exp: int) -> tuple[int, int]:
-        new_level = current_level
-        new_exp = current_exp
-        while new_exp < 0 and new_level > 1:
-            new_level -= 1
-            prev_level_max = self.calculate_next_level_exp(new_level)
-            new_exp += prev_level_max
-        if new_exp < 0: new_exp = 0
-        return new_level, new_exp
 
     def get_family_chronicle(self) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
@@ -311,37 +284,38 @@ class QuestService:
 
 
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None) -> Dict[str, Any]:
-        """報酬計算・DB更新の共通ロジック"""
-        # 経験値計算
-        current_level = user['level']
-        added_exp = user['exp'] + quest['exp_gain']
-        new_level, new_exp, leveled_up = self.user_service.calc_level_up(current_level, added_exp)
+        """報酬計算・DB更新の共通ロジック (GameLogicを使用)"""
         
-        added_gold = user['gold'] + quest['gold_gain']
+        # 1. 報酬計算 (GameLogic)
+        rewards = game_logic.GameLogic.calculate_drop_rewards(quest['gold_gain'], quest['exp_gain'])
+        earned_gold = rewards['gold']
+        earned_exp = rewards['exp']
+        earned_medals = rewards['medals']
+        is_lucky = rewards['is_lucky']
 
-        # メダルドロップ判定 (5%)
-        earned_medals = 0
-        is_lucky = False  # ★修正: 初期値を必ず設定
-        if random.random() < 0.05:
-            earned_medals = 1
-            logger.info(f"✨ Lucky! Medal dropped for {user['user_id']}")
+        # 2. レベルアップ計算 (GameLogic)
+        new_level, new_exp, leveled_up = game_logic.GameLogic.calc_level_progress(
+            user['level'], user['exp'], earned_exp
+        )
+        
+        # 3. 資産更新
+        final_gold = user['gold'] + earned_gold
 
-        # ユーザー更新
+        # DB更新 (User)
         cur.execute("""
             UPDATE quest_users 
             SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
             WHERE user_id = ?
-        """, (new_level, new_exp, added_gold, earned_medals, now_iso, user['user_id']))
+        """, (new_level, new_exp, final_gold, earned_medals, now_iso, user['user_id']))
         
+        # DB更新 (History)
         if history_id:
-            # 承認時: 既存履歴を更新
             cur.execute("UPDATE quest_history SET status='approved', completed_at=? WHERE id=?", (now_iso, history_id))
         else:
-            # 即時完了時: 新規履歴作成
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'approved')
-            """, (user['user_id'], quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
+            """, (user['user_id'], quest['quest_id'], quest['title'], earned_exp, earned_gold, now_iso))
         
         # ボスバトルチャージ
         try:
@@ -349,7 +323,7 @@ class QuestService:
         except Exception:
             pass
 
-        # ★追加: イベントに応じたサウンド再生
+        # サウンド再生
         if leveled_up:
             sound_manager.play("level_up")
         elif is_lucky:
@@ -357,12 +331,10 @@ class QuestService:
         else:
             sound_manager.play("quest_clear")
 
-
-
         return {
             "status": "success", 
             "leveledUp": leveled_up, "newLevel": new_level, 
-            "earnedGold": quest['gold_gain'], "earnedExp": quest['exp_gain'], "earnedMedals": earned_medals
+            "earnedGold": earned_gold, "earnedExp": earned_exp, "earnedMedals": earned_medals
         }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
@@ -371,18 +343,19 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['user_id'] != user_id: raise HTTPException(status_code=403, detail="User mismatch")
 
-            # 承認待ち(pending)なら単に削除して終わり
             if hist['status'] == 'pending':
                 cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
                 return {"status": "cancelled"}
 
-            # 承認済み(approved)なら減算処理が必要
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user: raise HTTPException(status_code=404, detail="User not found")
             
+            # GameLogic でレベルダウン計算
+            new_level, new_exp = game_logic.GameLogic.calc_level_down(
+                user['level'], user['exp'], hist['exp_earned']
+            )
+            
             new_gold = max(0, user['gold'] - hist['gold_earned'])
-            raw_exp_diff = user['exp'] - hist['exp_earned']
-            new_level, new_exp = self.user_service.calc_level_down(user['level'], raw_exp_diff)
             
             cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?", 
                         (new_level, new_exp, new_gold, common.get_now_iso(), user_id))
@@ -594,8 +567,9 @@ class GameSystem:
         with common.get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
             for u in users:
-                u['nextLevelExp'] = self.user_service.calculate_next_level_exp(u['level'])
-                u['maxHp'] = self.user_service.calculate_max_hp(u['level'])
+                # ★修正: GameLogic を使用
+                u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])
+                u['maxHp'] = game_logic.GameLogic.calculate_max_hp(u['level'])
                 u['hp'] = u['maxHp']
 
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
@@ -607,12 +581,10 @@ class GameSystem:
                 r['cost'] = r['cost_gold']
 
             today_str = common.get_today_date_str()
-            # 完了済みクエスト: status='approved' または 'pending' (pendingも表示して「承認待ち」と出すため)
             completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
             )]
             
-            # ★追加: 承認待ち(全期間): pendingを取得（親の承認リスト用）
             pending = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at ASC"
             )]
