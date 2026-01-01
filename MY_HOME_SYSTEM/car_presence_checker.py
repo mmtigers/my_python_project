@@ -247,7 +247,7 @@ def send_user_notification(action: str, score: float, details: str) -> None:
     common.send_push(
         config.LINE_USER_ID, 
         [{"type": "text", "text": message}], 
-        target="all"
+        target="discord"
     )
     logger.info(f"📨 通知送信完了: {action}")
 

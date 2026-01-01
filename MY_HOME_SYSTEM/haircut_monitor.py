@@ -223,7 +223,7 @@ class HaircutMonitor:
                 if reservation_date:
                     is_new_record = self._save_reservation(reservation_date)
                     message = self._create_notification_message(reservation_date, is_new_record)
-                    self._send_line_notify(message)
+                    # self._send_line_notify(message)
                     self._send_discord_notify(message)
                 else:
                     logger.warning("⚠️ 日時抽出失敗")

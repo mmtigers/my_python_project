@@ -202,7 +202,7 @@ def run_report():
 
     full_msg = msg_header + msg_body + msg_footer
     
-    if common.send_push(config.LINE_USER_ID, [{"type": "text", "text": full_msg}]):
+    if common.send_push(config.LINE_USER_ID, [{"type": "text", "text": full_msg}], target="discord"):
         logger.info("✅ レポート送信完了")
     else:
         logger.error("❌ レポート送信失敗")
