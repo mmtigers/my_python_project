@@ -15,7 +15,7 @@ import FamilyLog from './components/quest/FamilyLog';
 import FamilyParty from './components/quest/FamilyParty';
 import AvatarUploader from './components/ui/AvatarUploader';
 
-// 確認/取消モーダル用コンポーネント (インライン定義)
+// ★追加: 確認/取消モーダル
 const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
   if (!target) return null;
   const isCancel = mode === 'cancel';
@@ -83,19 +83,21 @@ export default function App() {
     setCurrentUserIdx(idx);
   };
 
-  // ★修正: QuestList から渡された _isInfinite を使う
+  // ★修正: バグ改修の核心部分
   const handleQuestClick = (quest) => {
     const qId = quest.quest_id || quest.id;
 
-    // QuestListで判定済みのフラグ(_isInfinite)があればそれを優先する
-    const isInfinite = quest._isInfinite === true || quest.type === 'infinite' || quest.quest_type === 'infinite';
+    // APIから来たデータなら 'quest_type'、マスタ定義そのままなら 'type'
+    // どちらに入っていても判定できるようにする
+    const type = quest.quest_type || quest.type;
+    const isInfinite = type === 'infinite';
 
     const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
     const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
 
     if (isPending) return; // 申請中は無視
 
-    // 無限クエストなら、完了済みでも「キャンセル」ではなく「実施」に進む
+    // 無限クエストなら、完了済み履歴があっても「キャンセル」ではなく「新規実施」として扱う
     if (isCompleted && !isInfinite) {
       // 通常クエストで完了済みの場合はキャンセル確認へ
       const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);

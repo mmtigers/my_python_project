@@ -15,17 +15,32 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
         return true;
     });
 
-    // ヘルパー関数: 完了状態の判定
+    // ヘルパー関数: 状態判定と「自分だけの回数」計算
     const checkStatus = (quest) => {
         const qId = quest.quest_id || quest.id;
+        // マスタデータ上の type を確認
         const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite';
 
-        let isDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
+        // 自分の完了履歴を検索
+        const myCompletions = completedQuests.filter(cq =>
+            cq.user_id === currentUser?.user_id &&
+            cq.quest_id === qId &&
+            cq.status === 'approved' // 承認済みのみカウント
+        );
+
+        let isDone = myCompletions.length > 0;
         if (isInfinite) isDone = false; // 無限クエストは常に未完了扱い
 
         const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
 
-        return { isDone, isPending, isInfinite };
+        // 無限クエストの場合の表示用タイトル
+        let displayTitle = quest.title;
+        if (isInfinite) {
+            const count = myCompletions.length + 1; // 次の回数
+            displayTitle = `${quest.title} (${count}回目)`;
+        }
+
+        return { isDone, isPending, isInfinite, displayTitle };
     };
 
     // 2. ソート
@@ -48,7 +63,7 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
         <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">-- 本日の依頼 --</div>
             {sortedQuests.map(q => {
-                const { isDone, isPending, isInfinite } = checkStatus(q);
+                const { isDone, isPending, isInfinite, displayTitle } = checkStatus(q);
 
                 const isTimeLimited = !!q.start_time;
                 const isRandom = q.type === 'random';
@@ -75,11 +90,10 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
                 return (
                     <div
                         key={q.quest_id || q.id}
-                        // ★修正: ここで _isInfinite フラグを埋め込んで渡す
-                        onClick={() => onQuestClick({ ...q, _isInfinite: isInfinite })}
+                        // 素直にクエストオブジェクトを渡す（_isInfiniteハックは削除）
+                        onClick={() => onQuestClick(q)}
                         className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}
                     >
-
                         {isRandom && !isDone && !isPending && <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>}
 
                         <div className="flex items-center gap-3 relative z-10">
@@ -99,7 +113,8 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
 
                                     {isPending && <span className="bg-yellow-500 text-black text-[10px] px-1 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>}
 
-                                    <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>{q.title}</div>
+                                    {/* 計算した displayTitle を表示 */}
+                                    <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>{displayTitle}</div>
                                 </div>
                                 {!isDone && !isPending && (
                                     <div className="flex gap-2 text-xs mt-0.5">
