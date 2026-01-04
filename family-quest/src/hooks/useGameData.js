@@ -50,6 +50,19 @@ export const useGameData = (onLevelUp) => {
         fetchGameData();
     }, [fetchGameData]);
 
+    // ★追加: キャンセル専用の関数 (App.jsxのモーダルから呼ばれる)
+    const cancelQuest = async (currentUser, historyItem) => {
+        try {
+            await apiClient.post('/api/quest/quest/cancel', {
+                user_id: currentUser.user_id,
+                history_id: historyItem.id || historyItem.history_id
+            });
+            await fetchGameData();
+        } catch (e) {
+            alert(`キャンセル失敗: ${e.message}`);
+        }
+    };
+
     const completeQuest = async (currentUser, quest) => {
         const q_id = quest.quest_id || quest.id;
 
@@ -59,54 +72,34 @@ export const useGameData = (onLevelUp) => {
             return;
         }
 
-        // ▼▼▼ 修正箇所 ▼▼▼
-        // 無限クエストの場合は、完了履歴があっても「戻す」対象にはしないため、検索をスキップします。
-        // QuestList.jsx から渡される _isInfinite フラグ、または quest_type を確認
-        const isInfinite = quest._isInfinite || quest.type === 'infinite' || quest.quest_type === 'infinite';
+        // ▼ 修正: ここにあったキャンセル分岐(completedEntryの確認)は削除しました。
+        // App.jsx 側で「完了済みならキャンセルモーダルを出す」制御をしているため、
+        // この関数が呼ばれるときは「新規完了アクション」のみとなります。
 
-        const completedEntry = isInfinite
-            ? null // 無限クエストなら、キャンセル対象の履歴はないものとして扱う
-            : completedQuests.find(q => q.user_id === currentUser.user_id && q.quest_id === q_id);
-        //
+        try {
+            const res = await apiClient.post('/api/quest/complete', {
+                user_id: currentUser.user_id,
+                quest_id: q_id
+            });
+            await fetchGameData();
 
-
-        if (completedEntry) {
-            if (!window.confirm("この行動を 取り消しますか？")) return;
-            try {
-                await apiClient.post('/api/quest/quest/cancel', {
-                    user_id: currentUser.user_id,
-                    history_id: completedEntry.id
-                });
-                await fetchGameData();
-            } catch (e) {
-                alert(`キャンセル失敗: ${e.message}`);
+            if (res.message) {
+                alert(res.message);
             }
-        } else {
-            try {
-                const res = await apiClient.post('/api/quest/complete', {
-                    user_id: currentUser.user_id,
-                    quest_id: q_id
-                });
-                await fetchGameData();
 
-                if (res.message) {
-                    alert(res.message);
-                }
-
-                if (res.earnedMedals > 0) {
-                    alert(`✨ ラッキー！！ ✨\nちいさなメダル を見つけた！`);
-                }
-
-                if (res.leveledUp && onLevelUp) {
-                    onLevelUp({
-                        user: currentUser.name,
-                        level: res.newLevel,
-                        job: currentUser.job_class
-                    });
-                }
-            } catch (e) {
-                alert(`クエスト完了失敗: ${e.message}`);
+            if (res.earnedMedals > 0) {
+                alert(`✨ ラッキー！！ ✨\nちいさなメダル を見つけた！`);
             }
+
+            if (res.leveledUp && onLevelUp) {
+                onLevelUp({
+                    user: currentUser.name,
+                    level: res.newLevel,
+                    job: currentUser.job_class
+                });
+            }
+        } catch (e) {
+            alert(`クエスト完了失敗: ${e.message}`);
         }
     };
 
@@ -133,7 +126,6 @@ export const useGameData = (onLevelUp) => {
         }
     };
 
-    // ★追加: 却下(再チャレンジ)アクション
     const rejectQuest = async (currentUser, historyItem) => {
         if (!['dad', 'mom'].includes(currentUser.user_id)) {
             alert("権限がありません！");
@@ -208,7 +200,7 @@ export const useGameData = (onLevelUp) => {
         users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
         equipments, ownedEquipments,
         familyStats, chronicle,
-        completeQuest, approveQuest, rejectQuest, // ★ここでエクスポート
+        completeQuest, approveQuest, rejectQuest, cancelQuest, // ★ ここに cancelQuest を追加してエクスポート
         buyReward, buyEquipment, changeEquipment,
         fetchGameData
     };
