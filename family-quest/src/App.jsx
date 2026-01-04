@@ -1,6 +1,5 @@
-// family-quest/src/App.jsx
-import React, { useState } from 'react';
-import { Sword, Shirt, ShoppingBag } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sword, Shirt, ShoppingBag, RotateCcw } from 'lucide-react'; // RotateCcw 追加
 
 import { INITIAL_USERS } from './constants/masterData';
 import { useGameData } from './hooks/useGameData';
@@ -16,27 +15,67 @@ import FamilyLog from './components/quest/FamilyLog';
 import FamilyParty from './components/quest/FamilyParty';
 import AvatarUploader from './components/ui/AvatarUploader';
 
+// 確認/取消モーダル用コンポーネント (インライン定義)
+const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
+  if (!target) return null;
+  const isCancel = mode === 'cancel';
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-in fade-in">
+      <div className="bg-slate-800 border border-slate-600 rounded-lg p-6 max-w-sm w-full shadow-2xl text-center">
+        <h3 className={`text-xl font-bold mb-4 ${isCancel ? 'text-red-400' : 'text-blue-400'}`}>
+          {isCancel ? '行動の取り消し' : '確認'}
+        </h3>
+        <p className="text-white mb-6">
+          {isCancel ? (
+            <>
+              「{target.quest_title || target.title}」<br />
+              を取り消しますか？<br />
+              <span className="text-xs text-gray-400 mt-2 block">
+                (獲得した経験値やゴールドは没収されます)
+              </span>
+            </>
+          ) : (
+            <>
+              「{target.title}」<br />
+              を達成しますか？
+            </>
+          )}
+        </p>
+        <div className="flex gap-4 justify-center">
+          <button onClick={onCancel} className="flex-1 py-3 bg-gray-600 rounded text-white font-bold">
+            やめる
+          </button>
+          <button onClick={onConfirm} className={`flex-1 py-3 rounded text-white font-bold ${isCancel ? 'bg-red-600' : 'bg-blue-600'}`}>
+            {isCancel ? '取り消す' : '達成する'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function App() {
   const [viewMode, setViewMode] = useState('user');
   const [activeTab, setActiveTab] = useState('quest');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState(null);
-  // ★追加: アバターアップロード用ステート
   const [editingUser, setEditingUser] = useState(null);
+
+  // キャンセル/確認モーダル用
+  const [modalMode, setModalMode] = useState(null); // 'cancel' or null
+  const [targetHistory, setTargetHistory] = useState(null);
 
   const {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
     equipments, ownedEquipments,
     familyStats, chronicle,
-    completeQuest, approveQuest, rejectQuest,
+    completeQuest, approveQuest, rejectQuest, cancelQuest,
     buyReward, buyEquipment, changeEquipment,
-    refreshData // ★追加: 更新後にデータを再取得するために必要 (hooksからexportされているはずです)
+    refreshData
   } = useGameData((info) => setLevelUpInfo(info));
 
-
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
-
-  // 親かどうか判定
   const isParent = ['dad', 'mom'].includes(currentUser?.user_id);
 
   const handleUserSwitch = (idx) => {
@@ -44,30 +83,67 @@ export default function App() {
     setCurrentUserIdx(idx);
   };
 
-  const handleQuestClick = (quest) => completeQuest(currentUser, quest);
+  // ★修正: QuestList から渡された _isInfinite を使う
+  const handleQuestClick = (quest) => {
+    const qId = quest.quest_id || quest.id;
+
+    // QuestListで判定済みのフラグ(_isInfinite)があればそれを優先する
+    const isInfinite = quest._isInfinite === true || quest.type === 'infinite' || quest.quest_type === 'infinite';
+
+    const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
+    const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
+
+    if (isPending) return; // 申請中は無視
+
+    // 無限クエストなら、完了済みでも「キャンセル」ではなく「実施」に進む
+    if (isCompleted && !isInfinite) {
+      // 通常クエストで完了済みの場合はキャンセル確認へ
+      const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
+      setTargetHistory(historyItem);
+      setModalMode('cancel');
+      return;
+    }
+
+    // 未完了、または無限クエストの場合は即実施
+    completeQuest(currentUser, quest);
+  };
+
+  const handleModalConfirm = async () => {
+    if (modalMode === 'cancel' && targetHistory) {
+      await cancelQuest(currentUser, targetHistory);
+    }
+    setModalMode(null);
+    setTargetHistory(null);
+  };
+
   const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
-  const handleReject = (historyItem) => rejectQuest(currentUser, historyItem); // ★修正: 正しいハンドラ定義
+  const handleReject = (historyItem) => rejectQuest(currentUser, historyItem);
   const handleBuyReward = (reward) => buyReward(currentUser, reward);
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
 
-  const todayLogs = adventureLogs ? adventureLogs.slice(0, 3) : [];
-
   if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
 
   return (
-    <div className="app-container min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
+    <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
       <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
 
-      {/* ★追加: アバターアップロードモーダル */}
+      {/* アバター編集モーダル */}
       {editingUser && (
         <AvatarUploader
           user={editingUser}
           onClose={() => setEditingUser(null)}
-          onUploadComplete={() => {
-            // 画像更新後、データをリフレッシュして画面に即時反映させる
-            if (refreshData) refreshData();
-          }}
+          onUploadComplete={() => { if (refreshData) refreshData(); }}
+        />
+      )}
+
+      {/* キャンセル確認モーダル */}
+      {modalMode && (
+        <ConfirmModal
+          mode={modalMode}
+          target={targetHistory}
+          onConfirm={handleModalConfirm}
+          onCancel={() => { setModalMode(null); setTargetHistory(null); }}
         />
       )}
 
@@ -80,8 +156,6 @@ export default function App() {
         onLogSwitch={() => setViewMode('familyLog')}
       />
 
-
-
       <div className="p-4 space-y-4 max-w-md mx-auto">
         {/* 1. ユーザー個別画面 */}
         {viewMode === 'user' && (
@@ -91,75 +165,70 @@ export default function App() {
               onAvatarClick={(user) => setEditingUser(user)}
             />
 
-            {/* ★承認リスト（親のみ表示） */}
+            {/* 親のみ：承認リスト */}
             {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
               <ApprovalList
                 pendingQuests={pendingQuests}
                 users={users}
                 onApprove={handleApprove}
-                onReject={handleReject} // ★修正: ここで正しく渡す
+                onReject={handleReject}
               />
             )}
 
+            {/* タブ切り替え */}
             <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
-              {[
-                { id: 'quest', label: 'クエスト', icon: Sword },
-                { id: 'equip', label: 'そうび', icon: Shirt },
-                { id: 'shop', label: 'よろず屋', icon: ShoppingBag },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`
-                    border-2 border-white p-2 rounded flex flex-col items-center gap-1 transition-colors
-                    ${activeTab === tab.id ? 'bg-red-700 text-white' : 'bg-blue-900 text-gray-300 hover:bg-blue-800'}
-                  `}
-                >
-                  <tab.icon size={18} />
-                  {tab.label}
-                </button>
-              ))}
+              <button
+                onClick={() => setActiveTab('quest')}
+                className={`p-2 rounded ${activeTab === 'quest' ? 'bg-yellow-600 text-black' : 'bg-gray-800 text-gray-400'}`}
+              >
+                <Sword size={16} className="mx-auto mb-1" />
+                クエスト
+              </button>
+              <button
+                onClick={() => setActiveTab('shop')}
+                className={`p-2 rounded ${activeTab === 'shop' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+              >
+                <ShoppingBag size={16} className="mx-auto mb-1" />
+                ごほうび
+              </button>
+              <button
+                onClick={() => setActiveTab('equip')}
+                className={`p-2 rounded ${activeTab === 'equip' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400'}`}
+              >
+                <Shirt size={16} className="mx-auto mb-1" />
+                そうび
+              </button>
             </div>
 
-            <div className="border-2 border-white bg-black/80 rounded min-h-[320px] p-2 flex flex-col gap-4">
-              <div className="flex-1">
-                {activeTab === 'quest' && (
-                  <QuestList
-                    quests={quests}
-                    completedQuests={completedQuests}
-                    pendingQuests={pendingQuests}
-                    currentUser={currentUser}
-                    onQuestClick={handleQuestClick}
-                  />
-                )}
-                {activeTab === 'shop' && (
-                  <RewardList
-                    rewards={rewards}
-                    currentUser={currentUser}
-                    onBuy={handleBuyReward}
-                  />
-                )}
-                {activeTab === 'equip' && (
-                  <EquipmentShop
-                    equipments={equipments}
-                    ownedEquipments={ownedEquipments}
-                    currentUser={currentUser}
-                    onBuy={handleBuyEquipment}
-                    onEquip={handleEquip}
-                  />
-                )}
-              </div>
-              <div className="border-2 border-dashed border-gray-500 bg-black/50 p-2 rounded min-h-[80px] mt-auto">
-                <div className="space-y-1 font-mono text-sm">
-                  {todayLogs.map((log) => (
-                    <div key={log.id} className="text-gray-400 text-xs">
-                      <span className="mr-1 text-blue-500">▶</span>
-                      {log.text}
-                    </div>
-                  ))}
-                  {todayLogs.length === 0 && <div className="text-gray-600 text-center text-xs">まだ記録はありません</div>}
-                </div>
-              </div>
+            {/* コンテンツエリア */}
+            <div className="min-h-[300px]">
+              {activeTab === 'quest' && (
+                <QuestList
+                  quests={quests}
+                  completedQuests={completedQuests}
+                  pendingQuests={pendingQuests}
+                  currentUser={currentUser}
+                  onQuestClick={handleQuestClick} // 修正したハンドラを使用
+                />
+              )}
+
+              {activeTab === 'shop' && (
+                <RewardList
+                  rewards={rewards}
+                  userGold={currentUser.gold}
+                  onBuy={handleBuyReward}
+                />
+              )}
+
+              {activeTab === 'equip' && (
+                <EquipmentShop
+                  equipments={equipments}
+                  ownedEquipments={ownedEquipments}
+                  currentUser={currentUser}
+                  onBuy={handleBuyEquipment}
+                  onEquip={handleEquip}
+                />
+              )}
             </div>
           </>
         )}
