@@ -50,6 +50,7 @@ def handle_postback(event, line_bot_api):
     # data="action=child_check&child=智矢&status=genki" を辞書化
     data = dict(parse_qsl(event.postback.data))
     action = data.get("action")
+    target_name = data.get("child")
 
     if action == "child_check":
         child_name = data.get("child")
@@ -82,6 +83,40 @@ def handle_postback(event, line_bot_api):
             quota_text = get_quota_text()
             full_msg = f"✅ {child_name}: {condition_text}\n{reply_msg}{quota_text}"
             common.send_reply(reply_token, [{"type": "text", "text": full_msg}])
+        
+    # ▼ 修正: インデントを戻して if と同じレベルにする
+    elif action == "get_history":
+        # 直近5件を取得
+        history_text = f"📊 【{target_name}】の最近の記録\n"
+        
+        with common.get_db_cursor() as cur:
+            # child_health_recordsから該当者のデータを新しい順に5件取得
+            cur.execute(f"""
+                SELECT timestamp, condition 
+                FROM {config.SQLITE_TABLE_CHILD} 
+                WHERE child_name = ? 
+                ORDER BY id DESC LIMIT 5
+            """, (target_name,))
+            rows = cur.fetchall()
+        
+        if not rows:
+            history_text += "\nまだ記録がありません。"
+        else:
+            for row in rows:
+                # 日付整形
+                try:
+                    dt = datetime.datetime.fromisoformat(row["timestamp"])
+                    date_str = dt.strftime("%m/%d %H:%M")
+                except:
+                    date_str = "??/??"
+                
+                history_text += f"\n・{date_str}: {row['condition']}"
+
+        quota_text = get_quota_text()
+        common.send_reply(reply_token, [{"type": "text", "text": history_text + quota_text}])
+    
+    else:
+        common.logger.info(f"Unknown postback action: {action}")
 
 def process_message(event, line_bot_api):
     """メッセージ処理（既存ロジック改修）"""
