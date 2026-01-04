@@ -4,9 +4,11 @@ import config
 from linebot.models import MessageEvent, TextMessage, PostbackEvent
 from urllib.parse import parse_qsl
 import handlers.ai_logic as ai_logic
+import datetime
 
 # ユーザーの状態管理
 USER_INPUT_STATE = {}
+TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
 
 def get_user_name(event, line_bot_api) -> str:
     """プロファイル取得（変更なし）"""
@@ -39,84 +41,199 @@ def get_quota_text():
         pass
     return ""
 
-def handle_postback(event, line_bot_api):
-    """
-    ボタン押下(Postback)時の処理
-    """
-    user_id = event.source.user_id
-    reply_token = event.reply_token
-    user_name = get_user_name(event, line_bot_api)
-    
-    # data="action=child_check&child=智矢&status=genki" を辞書化
-    data = dict(parse_qsl(event.postback.data))
-    action = data.get("action")
-    target_name = data.get("child")
+# ▼▼▼ 追加: 入力用カルーセルを作成する関数 ▼▼▼
+def create_health_carousel_flex():
+    """詳細入力用カルーセルを作成"""
+    bubbles = []
+    styles = config.FAMILY_SETTINGS["styles"]
 
-    if action == "child_check":
-        child_name = data.get("child")
-        status = data.get("status")
-        
-        # ステータス定義
-        status_info = {
-            "genki": ("😊 元気いっぱい", "記録しました！今日も一日楽しく過ごせますように✨"),
-            "fever": ("🤒 お熱がある", "心配ですね😢 無理せず温かくして休んでください。"),
-            "cold": ("🤧 鼻水・咳", "風邪気味かな？早めに休ませてあげてくださいね。"),
-            "other": ("✏️ その他", None) # 手入力へ
+    for name in TARGET_MEMBERS:
+        st = styles.get(name, {"color": "#333333", "age": "", "icon": "🙂"})
+        bubble = {
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": st["color"],
+                "contents": [
+                    {"type": "text", "text": f"{st['icon']} {name}", "color": "#FFFFFF", "weight": "bold", "size": "xl"}
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [{"type": "text", "text": "体調を選択してください", "size": "sm", "color": "#666666"}]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": [
+                    {"type": "button", "style": "primary", "color": st["color"], "height": "sm",
+                     "action": {"type": "postback", "label": "💮 元気！", "data": f"action=child_check&child={name}&status=genki"}},
+                    {"type": "button", "style": "secondary", "height": "sm",
+                     "action": {"type": "postback", "label": "🤒 熱あり", "data": f"action=child_check&child={name}&status=fever"}},
+                    {"type": "button", "style": "secondary", "height": "sm",
+                     "action": {"type": "postback", "label": "🤧 鼻水・他", "data": f"action=child_check&child={name}&status=cold"}},
+                    {"type": "separator", "margin": "md"},
+                    {"type": "button", "style": "link", "height": "sm", "margin": "md",
+                     "action": {"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}}
+                ]
+            }
         }
-        
-        condition_text, reply_msg = status_info.get(status, ("その他", None))
+        bubbles.append(bubble)
 
-        if status == "other":
-            # 手入力モードへ移行
-            USER_INPUT_STATE[user_id] = f"子供記録_{child_name}"
-            common.send_reply(reply_token, [{
-                "type": "text",
-                "text": f"了解です。{child_name}ちゃんの詳しい様子をメッセージで教えてください📝"
-            }])
-        else:
-            # 即時記録
-            common.save_log_generic(config.SQLITE_TABLE_CHILD,
-                ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                (user_id, user_name, child_name, condition_text, common.get_now_iso()))
-            
-            # 完了メッセージ（残数付き）
-            quota_text = get_quota_text()
-            full_msg = f"✅ {child_name}: {condition_text}\n{reply_msg}{quota_text}"
-            common.send_reply(reply_token, [{"type": "text", "text": full_msg}])
-        
-    # ▼ 修正: インデントを戻して if と同じレベルにする
-    elif action == "get_history":
-        # 直近5件を取得
-        history_text = f"📊 【{target_name}】の最近の記録\n"
-        
-        with common.get_db_cursor() as cur:
-            # child_health_recordsから該当者のデータを新しい順に5件取得
-            cur.execute(f"""
-                SELECT timestamp, condition 
-                FROM {config.SQLITE_TABLE_CHILD} 
-                WHERE child_name = ? 
-                ORDER BY id DESC LIMIT 5
-            """, (target_name,))
-            rows = cur.fetchall()
-        
-        if not rows:
-            history_text += "\nまだ記録がありません。"
-        else:
-            for row in rows:
-                # 日付整形
-                try:
-                    dt = datetime.datetime.fromisoformat(row["timestamp"])
-                    date_str = dt.strftime("%m/%d %H:%M")
-                except:
-                    date_str = "??/??"
-                
-                history_text += f"\n・{date_str}: {row['condition']}"
+    return {"type": "flex", "altText": "体調入力パネル", "contents": {"type": "carousel", "contents": bubbles}}
 
-        quota_text = get_quota_text()
-        common.send_reply(reply_token, [{"type": "text", "text": history_text + quota_text}])
+# ▼▼▼ 追加: 今日の記録サマリを取得する関数 ▼▼▼
+def get_daily_health_summary():
+    """今日の記録サマリを取得"""
+    today_str = common.get_today_date_str() # YYYY-MM-DD
+    summary_lines = []
     
-    else:
-        common.logger.info(f"Unknown postback action: {action}")
+    with common.get_db_cursor() as cur:
+        for name in TARGET_MEMBERS:
+            
+            # 今日の最新の記録を取得
+            cur.execute(f"""
+                SELECT condition, timestamp FROM {config.SQLITE_TABLE_CHILD}
+                WHERE child_name = ? AND timestamp LIKE ?
+                ORDER BY id DESC LIMIT 1
+            """, (name, f"{today_str}%"))
+            row = cur.fetchone()
+            
+            if row:
+                # 時刻抽出
+                try:
+                    time_str = datetime.datetime.fromisoformat(row["timestamp"]).strftime("%H:%M")
+                except:
+                    time_str = "??:??"
+                status = row["condition"]
+                # 絵文字装飾
+                icon = "✅" if "元気" in status else "⚠️"
+                summary_lines.append(f"{icon} {name}: {status} ({time_str})")
+            else:
+                summary_lines.append(f"❓ {name}: (未記録)")
+    
+    return "\n".join(summary_lines)
+
+def handle_postback(event, line_bot_api):
+    """Postback処理"""
+    try:
+        user_id = event.source.user_id
+        reply_token = event.reply_token
+        user_name = get_user_name(event, line_bot_api)
+        
+        data = dict(parse_qsl(event.postback.data))
+        action = data.get("action")
+        target_name = data.get("child")
+        
+        quota_text = get_quota_text()
+
+        # === 1. 全員元気 (一括) ===
+        if action == "all_genki":
+            timestamp = common.get_now_iso()
+            for name in TARGET_MEMBERS:
+                common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                    ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                    (user_id, user_name, name, "😊 元気いっぱい", timestamp))
+            
+            reply_msg = f"✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨\n\n[詳細確認]ボタンで修正できます。{quota_text}"
+            
+            # 確認ボタン付きのメッセージを返す
+            buttons = {
+                "type": "template",
+                "altText": "記録完了",
+                "template": {
+                    "type": "buttons",
+                    "text": reply_msg[:160], # Text limit precaution
+                    "actions": [{"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}]
+                }
+            }
+            common.send_reply(reply_token, [buttons])
+
+        # === 2. 詳細入力パネル表示 ===
+        elif action == "show_health_input":
+            flex_msg = create_health_carousel_flex()
+            common.send_reply(reply_token, [{"type": "text", "text": "気になる方の体調を入力してください👇"}, flex_msg])
+
+        # === 3. 個別記録 ===
+        elif action == "child_check":
+            status = data.get("status")
+            status_map = {
+                "genki": "😊 元気いっぱい",
+                "fever": "🤒 お熱がある",
+                "cold": "🤧 鼻水・咳・他",
+                "other": "✏️ その他"
+            }
+            condition_text = status_map.get(status, "その他")
+            
+            if status == "other":
+                USER_INPUT_STATE[user_id] = f"子供記録_{target_name}"
+                common.send_reply(reply_token, [{"type": "text", "text": f"了解です。{target_name}の様子をメッセージで送ってください📝"}])
+            else:
+                common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                    ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                    (user_id, user_name, target_name, condition_text, common.get_now_iso()))
+                
+                # 記録後のフィードバック（サマリ確認へ誘導）
+                reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
+                # サマリボタンを付ける
+                buttons = {
+                    "type": "template",
+                    "altText": "記録完了",
+                    "template": {
+                        "type": "buttons",
+                        "text": reply_text,
+                        "actions": [{"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}]
+                    }
+                }
+                common.send_reply(reply_token, [buttons])
+
+        # === 4. 記録確認 & 修正 ===
+        elif action == "check_status":
+            summary = get_daily_health_summary()
+            today_disp = datetime.datetime.now().strftime("%m/%d")
+            
+            # Flex Messageでサマリを表示
+            flex_content = {
+                "type": "bubble",
+                "body": {
+                    "type": "box", "layout": "vertical",
+                    "contents": [
+                        {"type": "text", "text": f"📅 {today_disp} の記録", "weight": "bold", "size": "md"},
+                        {"type": "separator", "margin": "md"},
+                        {"type": "text", "text": summary, "wrap": True, "margin": "md", "lineSpacing": "6px"}
+                    ]
+                },
+                "footer": {
+                    "type": "box", "layout": "vertical", "spacing": "sm",
+                    "contents": [
+                        # ▼▼▼ 修正箇所: label は action の中に入れます ▼▼▼
+                        {
+                            "type": "button", 
+                            "style": "secondary", 
+                            # "label": "..." ← ここにあったのが間違い
+                            "action": {
+                                "type": "postback", 
+                                "label": "✏️ 修正する (入力パネル)", # ここが正解
+                                "data": "action=show_health_input"
+                            }
+                        }
+                        # ▲▲▲▲▲▲
+                    ]
+                }
+            }
+            common.send_reply(reply_token, [{"type": "flex", "altText": "記録サマリ", "contents": flex_content}])
+
+        else:
+            common.logger.info(f"Unknown action: {action}")
+
+    except Exception as e:
+        common.logger.error(f"Handle Postback Error: {e}")
+        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"エラー: {e}"}], target="discord", channel="error")
 
 def process_message(event, line_bot_api):
     """メッセージ処理（既存ロジック改修）"""
@@ -128,11 +245,27 @@ def process_message(event, line_bot_api):
     # === 1. 手入力モード処理 (修正版) ===
     if user_id in USER_INPUT_STATE:
         category = USER_INPUT_STATE[user_id]
-        
-        # キャンセル処理
-        if msg.startswith(("キャンセル", "戻る", "やめる")):
+        if msg.startswith(("キャンセル", "戻る")):
             del USER_INPUT_STATE[user_id]
-            common.send_reply(reply_token, [{"type": "text", "text": "入力をキャンセルしました。"}])
+            common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
+            return
+
+        if category.startswith("子供記録_"):
+            target_child = category.replace("子供記録_", "")
+            common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                (user_id, user_name, target_child, msg, common.get_now_iso()))
+            del USER_INPUT_STATE[user_id]
+            
+            # 手入力完了後もサマリ確認ボタンを出す
+            buttons = {
+                "type": "template", "altText": "記録完了",
+                "template": {
+                    "type": "buttons", "text": f"📝 {target_child}: {msg}\n詳細を記録しました。",
+                    "actions": [{"type": "postback", "label": "📊 記録を確認", "data": "action=check_status"}]
+                }
+            }
+            common.send_reply(reply_token, [buttons])
             return
 
         # ▼▼▼ 追加: 子供記録の手入力処理 ▼▼▼
