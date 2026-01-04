@@ -83,14 +83,19 @@ export default function App() {
     setCurrentUserIdx(idx);
   };
 
-  // ★修正: バグ改修の核心部分
+  // ★修正: QuestList から渡された _isInfinite を優先的に使用
   const handleQuestClick = (quest) => {
     const qId = quest.quest_id || quest.id;
 
-    // APIから来たデータなら 'quest_type'、マスタ定義そのままなら 'type'
-    // どちらに入っていても判定できるようにする
-    const type = quest.quest_type || quest.type;
-    const isInfinite = type === 'infinite';
+    // 1. _isInfinite (QuestList判定) があればそれを使う
+    // 2. なければマスタデータの type / quest_type を確認する
+    let isInfinite = false;
+    if (typeof quest._isInfinite !== 'undefined') {
+      isInfinite = quest._isInfinite;
+    } else {
+      const type = quest.quest_type || quest.type;
+      isInfinite = (type === 'infinite');
+    }
 
     const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
     const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
