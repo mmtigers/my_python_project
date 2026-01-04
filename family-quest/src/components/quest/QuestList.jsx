@@ -90,8 +90,8 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
                 return (
                     <div
                         key={q.quest_id || q.id}
-                        // 素直にクエストオブジェクトを渡す（_isInfiniteハックは削除）
-                        onClick={() => onQuestClick(q)}
+                        // ★重要修正: ここで _isInfinite フラグを確実に埋め込んで渡す
+                        onClick={() => onQuestClick({ ...q, _isInfinite: isInfinite })}
                         className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}
                     >
                         {isRandom && !isDone && !isPending && <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>}
@@ -113,7 +113,6 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
 
                                     {isPending && <span className="bg-yellow-500 text-black text-[10px] px-1 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>}
 
-                                    {/* 計算した displayTitle を表示 */}
                                     <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>{displayTitle}</div>
                                 </div>
                                 {!isDone && !isPending && (
