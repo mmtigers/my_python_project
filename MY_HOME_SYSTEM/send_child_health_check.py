@@ -18,14 +18,13 @@ def parse_arguments():
     return parser.parse_args()
 
 def check_special_events(today):
-    """記念日・ゾロ目チェック (既存ロジック維持)"""
+    """記念日・ゾロ目チェック"""
     messages = []
     # 1. 登録済み記念日
     for event in config.IMPORTANT_DATES:
         try:
             evt_date = datetime.datetime.strptime(event["date"], "%Y-%m-%d")
             if today.month == evt_date.month and today.day == evt_date.day:
-                # 年数計算簡略化
                 years = today.year - evt_date.year
                 if (today.month, today.day) < (evt_date.month, evt_date.day): years -= 1
                 
@@ -47,29 +46,35 @@ def check_special_events(today):
     return "\n\n".join(messages)
 
 def create_child_health_flex():
-    """子供ごとの体調入力カード(Carousel)を作成"""
+    """家族全員の体調入力カード(Carousel)を作成"""
     bubbles = []
-    children = config.CHILDREN_NAMES if config.CHILDREN_NAMES else ["子供"]
     
-    # お子様ごとのテーマカラー設定
-    child_styles = {
+    # 記録対象リスト（順序指定）
+    target_members = ["智矢", "涼花", "将博", "春菜"]
+    
+    # スタイル定義
+    styles = {
         "智矢": {"color": "#1E90FF", "age": "5歳", "icon": "👦"}, # Blue
         "涼花": {"color": "#FF69B4", "age": "2歳", "icon": "👧"}, # Pink
+        "将博": {"color": "#2E8B57", "age": "35歳", "icon": "👨"}, # Green
+        "春菜": {"color": "#FF8C00", "age": "ママ", "icon": "👩"}, # Orange
     }
 
-    for child in children:
-        style = child_styles.get(child, {"color": "#333333", "age": "", "icon": "👶"})
+    for name in target_members:
+        # デフォルトスタイル
+        st = styles.get(name, {"color": "#333333", "age": "", "icon": "🙂"})
         
+        # Flex Bubble構築
         bubble = {
             "type": "bubble",
             "size": "kilo",
             "header": {
                 "type": "box",
                 "layout": "vertical",
-                "backgroundColor": style["color"],
+                "backgroundColor": st["color"],
                 "contents": [
-                    {"type": "text", "text": "朝の健康チェック", "color": "#FFFFFF", "weight": "bold", "size": "xs"},
-                    {"type": "text", "text": f"{style['icon']} {child} ({style['age']})", "color": "#FFFFFF", "weight": "bold", "size": "xl", "margin": "md"}
+                    {"type": "text", "text": "健康チェック", "color": "#FFFFFF", "weight": "bold", "size": "xs"},
+                    {"type": "text", "text": f"{st['icon']} {name}", "color": "#FFFFFF", "weight": "bold", "size": "xl", "margin": "md"}
                 ]
             },
             "body": {
@@ -77,7 +82,7 @@ def create_child_health_flex():
                 "layout": "vertical",
                 "spacing": "md",
                 "contents": [
-                    {"type": "text", "text": "おはようございます！\n今の体調を教えてください✨", "wrap": True, "size": "sm", "color": "#666666"}
+                    {"type": "text", "text": "今の体調を教えてください✨", "size": "sm", "color": "#666666"}
                 ]
             },
             "footer": {
@@ -86,17 +91,21 @@ def create_child_health_flex():
                 "spacing": "sm",
                 "contents": [
                     # 1. 元気
-                    {"type": "button", "style": "primary", "color": style["color"], "height": "sm",
-                     "action": {"type": "postback", "label": "💮 元気いっぱい！", "data": f"action=child_check&child={child}&status=genki"}},
-                    # 2. 熱
+                    {"type": "button", "style": "primary", "color": st["color"], "height": "sm",
+                     "action": {"type": "postback", "label": "💮 元気いっぱい！", "data": f"action=child_check&child={name}&status=genki"}},
+                    # 2. 不調系（熱/風邪）
                     {"type": "button", "style": "secondary", "height": "sm",
-                     "action": {"type": "postback", "label": "🤒 お熱がある", "data": f"action=child_check&child={child}&status=fever"}},
-                    # 3. 鼻水・咳
+                     "action": {"type": "postback", "label": "🤒 お熱がある", "data": f"action=child_check&child={name}&status=fever"}},
+                    # 3. その他/詳細
                     {"type": "button", "style": "secondary", "height": "sm",
-                     "action": {"type": "postback", "label": "🤧 鼻水・咳", "data": f"action=child_check&child={child}&status=cold"}},
-                    # 4. その他（手入力へ誘導）
-                    {"type": "button", "style": "link", "height": "sm",
-                     "action": {"type": "postback", "label": "その他の不調・記録", "data": f"action=child_check&child={child}&status=other"}}
+                     "action": {"type": "postback", "label": "🤧 鼻水・咳・他", "data": f"action=child_check&child={name}&status=cold"}},
+                    
+                    # 区切り線
+                    {"type": "separator", "margin": "md"},
+                    
+                    # 4. 履歴参照ボタン (NEW!)
+                    {"type": "button", "style": "link", "height": "sm", "margin": "md",
+                     "action": {"type": "postback", "label": "📊 最近の記録を見る", "data": f"action=get_history&child={name}"}}
                 ]
             }
         }
@@ -120,11 +129,10 @@ def main():
         # 1. 記念日メッセージ
         special_msg = check_special_events(now)
         if special_msg:
-            # Discord用のMarkdown(**)を除去してLINE用に
             clean_msg = special_msg.replace("**", "")
             payloads.append({"type": "text", "text": f"☀️ おはようございます！\n\n{clean_msg}"})
         
-        # 2. 体調入力Flex Message
+        # 2. 体調入力Flex Message (全員分)
         payloads.append(create_child_health_flex())
 
         # 3. 送信
