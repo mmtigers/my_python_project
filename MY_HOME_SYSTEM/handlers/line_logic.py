@@ -1,26 +1,26 @@
 # HOME_SYSTEM/handlers/line_logic.py
 import common
 import config
-from linebot.models import MessageEvent, TextMessage, SourceGroup, SourceUser
+from linebot.models import MessageEvent, TextMessage, PostbackEvent
+from urllib.parse import parse_qsl
 import handlers.ai_logic as ai_logic
 
-# ユーザーの状態管理 (入力待ちなど)
-# {user_id: "state_category"}
+# ユーザーの状態管理
 USER_INPUT_STATE = {}
 
 def get_user_name(event, line_bot_api) -> str:
-    """LINEのプロフィールから名前を取得"""
+    """プロファイル取得（変更なし）"""
     try:
-        if isinstance(event.source, SourceGroup):
+        if event.source.type == "group":
             return line_bot_api.get_group_member_profile(event.source.group_id, event.source.user_id).display_name
-        elif isinstance(event.source, SourceUser):
+        elif event.source.type == "user":
             return line_bot_api.get_profile(event.source.user_id).display_name
     except Exception:
         pass
     return "家族のみんな"
 
 def create_quick_reply(items_data: list) -> dict:
-    """QuickReplyオブジェクトの生成ヘルパー"""
+    """QuickReply生成（変更なし）"""
     items = []
     for label, text in items_data:
         items.append({
@@ -29,39 +29,117 @@ def create_quick_reply(items_data: list) -> dict:
         })
     return {"items": items}
 
+def get_quota_text():
+    """今月のメッセージ残数を取得してテキスト化"""
+    try:
+        quota = common.get_line_message_quota()
+        if quota and quota.get('remain') is not None:
+            return f"\n(今月の残り: {quota['remain']}通)"
+    except:
+        pass
+    return ""
+
+def handle_postback(event, line_bot_api):
+    """
+    ボタン押下(Postback)時の処理
+    """
+    user_id = event.source.user_id
+    reply_token = event.reply_token
+    user_name = get_user_name(event, line_bot_api)
+    
+    # data="action=child_check&child=智矢&status=genki" を辞書化
+    data = dict(parse_qsl(event.postback.data))
+    action = data.get("action")
+
+    if action == "child_check":
+        child_name = data.get("child")
+        status = data.get("status")
+        
+        # ステータス定義
+        status_info = {
+            "genki": ("😊 元気いっぱい", "記録しました！今日も一日楽しく過ごせますように✨"),
+            "fever": ("🤒 お熱がある", "心配ですね😢 無理せず温かくして休んでください。"),
+            "cold": ("🤧 鼻水・咳", "風邪気味かな？早めに休ませてあげてくださいね。"),
+            "other": ("✏️ その他", None) # 手入力へ
+        }
+        
+        condition_text, reply_msg = status_info.get(status, ("その他", None))
+
+        if status == "other":
+            # 手入力モードへ移行
+            USER_INPUT_STATE[user_id] = f"子供記録_{child_name}"
+            common.send_reply(reply_token, [{
+                "type": "text",
+                "text": f"了解です。{child_name}ちゃんの詳しい様子をメッセージで教えてください📝"
+            }])
+        else:
+            # 即時記録
+            common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                (user_id, user_name, child_name, condition_text, common.get_now_iso()))
+            
+            # 完了メッセージ（残数付き）
+            quota_text = get_quota_text()
+            full_msg = f"✅ {child_name}: {condition_text}\n{reply_msg}{quota_text}"
+            common.send_reply(reply_token, [{"type": "text", "text": full_msg}])
+
 def process_message(event, line_bot_api):
-    """メッセージ処理のメインルーター"""
+    """メッセージ処理（既存ロジック改修）"""
     msg = event.message.text.strip()
     user_id = event.source.user_id
     reply_token = event.reply_token
     user_name = get_user_name(event, line_bot_api)
 
-    # === 1. 手入力モード処理 ===
+    # === 1. 手入力モード処理 (修正版) ===
     if user_id in USER_INPUT_STATE:
         category = USER_INPUT_STATE[user_id]
         
-        # キャンセル・別コマンド検知
-        if msg.startswith(("食事", "外出", "面会", "キャンセル", "戻る")):
+        # キャンセル処理
+        if msg.startswith(("キャンセル", "戻る", "やめる")):
             del USER_INPUT_STATE[user_id]
-            # ここではreturnせず、下のコマンド判定に流す
-        else:
+            common.send_reply(reply_token, [{"type": "text", "text": "入力をキャンセルしました。"}])
+            return
+
+        # ▼▼▼ 追加: 子供記録の手入力処理 ▼▼▼
+        if category.startswith("子供記録_"):
+            target_child = category.replace("子供記録_", "")
+            
+            # DB保存
+            common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                (user_id, user_name, target_child, msg, common.get_now_iso()))
+            
+            del USER_INPUT_STATE[user_id]
+            
+            # 完了通知
+            quota_text = get_quota_text()
+            common.send_reply(reply_token, [{
+                "type": "text", 
+                "text": f"詳しくありがとうございます！\n📝 {target_child}: {msg}\n記録しました。お大事にしてくださいね。{quota_text}"
+            }])
+            return
+        # ▲▲▲ ここまで ▲▲▲
+
+        # 既存: 食事記録の手入力処理
+        if category.startswith("食事") or category in ["自炊", "外食", "その他"]: # カテゴリ名の揺らぎに対応
             if len(msg) > 50:
-                common.send_reply(reply_token, [{"type": "text", "text": "ごめんね、もう少し短く教えてくれる？💦 (50文字以内)"}])
+                common.send_reply(reply_token, [{"type": "text", "text": "長すぎるよ💦 50文字以内でお願い！"}])
                 return
 
             final_rec = f"{category}: {msg} (手入力)"
             
-            # 保存処理
-            if category.startswith("食事"):
-                common.save_log_generic(config.SQLITE_TABLE_FOOD, 
-                    ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-                    (user_id, user_name, common.get_today_date_str(), "Dinner", final_rec, common.get_now_iso()))
-                
-                # 次の質問へ
-                ask_outing_question(reply_token, final_rec)
-                
+            common.save_log_generic(config.SQLITE_TABLE_FOOD, 
+                ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
+                (user_id, user_name, common.get_today_date_str(), "Dinner", final_rec, common.get_now_iso()))
+            
             del USER_INPUT_STATE[user_id]
+            
+            # 次の質問へ
+            ask_outing_question(reply_token, final_rec)
             return
+            
+        # 該当しないカテゴリがStateに残っていた場合の安全策
+        del USER_INPUT_STATE[user_id]
 
     # === 2. コマンド分岐 ===
     

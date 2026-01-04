@@ -6,126 +6,130 @@ import argparse
 import sys
 import config
 import common
+from linebot.models import FlexSendMessage, BubbleContainer, BoxComponent, TextComponent, ButtonComponent
 
 # ロガー設定
 logger = common.setup_logging("morning_check")
 
 def parse_arguments():
-    """コマンドライン引数の解析"""
     parser = argparse.ArgumentParser(description='朝の体調確認＆記念日通知スクリプト')
     parser.add_argument('--target', type=str, default='line', choices=['line', 'discord'],
                         help='通知先 (line, discord)')
     return parser.parse_args()
 
-def get_age_or_years(date_str, today):
-    """
-    誕生日なら年齢、記念日なら経過年数を計算する
-    date_str: "YYYY-MM-DD"
-    """
-    try:
-        dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-        years = today.year - dt.year
-        # まだ誕生日/記念日が来ていない場合は-1
-        if (today.month, today.day) < (dt.month, dt.day):
-            years -= 1
-        return years
-    except ValueError:
-        return None
-
 def check_special_events(today):
-    """
-    今日が特別な日かどうかをチェックし、メッセージを返す
-    """
+    """記念日・ゾロ目チェック (既存ロジック維持)"""
     messages = []
-    
-    # 1. 登録済み記念日・誕生日のチェック
+    # 1. 登録済み記念日
     for event in config.IMPORTANT_DATES:
         try:
-            # 日付文字列のパース (YYYY-MM-DD 想定)
             evt_date = datetime.datetime.strptime(event["date"], "%Y-%m-%d")
-            
-            # 月日が一致するか
             if today.month == evt_date.month and today.day == evt_date.day:
-                years = get_age_or_years(event["date"], today)
-                name = event.get('name', '???')
+                # 年数計算簡略化
+                years = today.year - evt_date.year
+                if (today.month, today.day) < (evt_date.month, evt_date.day): years -= 1
                 
+                name = event.get('name', '???')
                 if event["type"] == "birthday":
                     msg = f"🎉 今日は **{name}の{years}歳のお誕生日** です！\nおめでとうございます🎂✨"
                 elif event["type"] == "anniversary":
                     msg = f"💍 今日は **{name}から{years}周年** の記念日です！\nおめでとうございます🥂"
                 else:
                     msg = f"✨ 今日は **{name}** の日です！"
-                
                 messages.append(msg)
-                
-        except Exception as e:
-            logger.warning(f"日付データ解析エラー ({event}): {e}")
+        except Exception:
             continue
 
-    # 2. ゾロ目の日チェック (configで有効な場合)
-    if getattr(config, "CHECK_ZOROME", False):
-        if today.month == today.day:
-            messages.append(f"✨ 今日は **{today.month}月{today.day}日**、ゾロ目の日です！\n何かいいことあるかも？🍀")
+    # 2. ゾロ目
+    if getattr(config, "CHECK_ZOROME", False) and today.month == today.day:
+        messages.append(f"✨ 今日は **{today.month}月{today.day}日**、ゾロ目の日です！🍀")
 
     return "\n\n".join(messages)
 
-def create_morning_message(special_msg):
-    """
-    朝の挨拶メッセージを作成する
-    """
-    base_msg = "☀️ おはようございます！\n"
+def create_child_health_flex():
+    """子供ごとの体調入力カード(Carousel)を作成"""
+    bubbles = []
+    children = config.CHILDREN_NAMES if config.CHILDREN_NAMES else ["子供"]
     
-    if special_msg:
-        # 特別な日なら、最初にお祝いを
-        base_msg += f"\n{special_msg}\n\n"
-        base_msg += "素敵な一日になりますように✨\n"
-        base_msg += "ところで、子供たちの体調はいかがですか？😊"
-    else:
-        # 通常運転
-        base_msg += "子供たちの体調はいかがですか？\n変わりないか教えてください😊"
-    
-    return base_msg
+    # お子様ごとのテーマカラー設定
+    child_styles = {
+        "智矢": {"color": "#1E90FF", "age": "5歳", "icon": "👦"}, # Blue
+        "涼花": {"color": "#FF69B4", "age": "2歳", "icon": "👧"}, # Pink
+    }
+
+    for child in children:
+        style = child_styles.get(child, {"color": "#333333", "age": "", "icon": "👶"})
+        
+        bubble = {
+            "type": "bubble",
+            "size": "kilo",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "backgroundColor": style["color"],
+                "contents": [
+                    {"type": "text", "text": "朝の健康チェック", "color": "#FFFFFF", "weight": "bold", "size": "xs"},
+                    {"type": "text", "text": f"{style['icon']} {child} ({style['age']})", "color": "#FFFFFF", "weight": "bold", "size": "xl", "margin": "md"}
+                ]
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "md",
+                "contents": [
+                    {"type": "text", "text": "おはようございます！\n今の体調を教えてください✨", "wrap": True, "size": "sm", "color": "#666666"}
+                ]
+            },
+            "footer": {
+                "type": "box",
+                "layout": "vertical",
+                "spacing": "sm",
+                "contents": [
+                    # 1. 元気
+                    {"type": "button", "style": "primary", "color": style["color"], "height": "sm",
+                     "action": {"type": "postback", "label": "💮 元気いっぱい！", "data": f"action=child_check&child={child}&status=genki"}},
+                    # 2. 熱
+                    {"type": "button", "style": "secondary", "height": "sm",
+                     "action": {"type": "postback", "label": "🤒 お熱がある", "data": f"action=child_check&child={child}&status=fever"}},
+                    # 3. 鼻水・咳
+                    {"type": "button", "style": "secondary", "height": "sm",
+                     "action": {"type": "postback", "label": "🤧 鼻水・咳", "data": f"action=child_check&child={child}&status=cold"}},
+                    # 4. その他（手入力へ誘導）
+                    {"type": "button", "style": "link", "height": "sm",
+                     "action": {"type": "postback", "label": "その他の不調・記録", "data": f"action=child_check&child={child}&status=other"}}
+                ]
+            }
+        }
+        bubbles.append(bubble)
+
+    return {
+        "type": "flex",
+        "altText": "朝の体調確認をお願いします！",
+        "contents": {"type": "carousel", "contents": bubbles}
+    }
 
 def main():
     print(f"\n🚀 --- Morning Check Start: {datetime.datetime.now().strftime('%H:%M:%S')} ---")
     args = parse_arguments()
     
     try:
-        # 今日の日付
         now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-        print(f"📅 Today: {now.strftime('%Y-%m-%d')}")
         
-        # 1. 記念日チェック
+        payloads = []
+        
+        # 1. 記念日メッセージ
         special_msg = check_special_events(now)
         if special_msg:
-            print(f"✨ Special Event Detected:\n{special_msg}")
-        else:
-            print("⚪ No special event today.")
+            # Discord用のMarkdown(**)を除去してLINE用に
+            clean_msg = special_msg.replace("**", "")
+            payloads.append({"type": "text", "text": f"☀️ おはようございます！\n\n{clean_msg}"})
+        
+        # 2. 体調入力Flex Message
+        payloads.append(create_child_health_flex())
 
-        # 2. メッセージ作成
-        full_text = create_morning_message(special_msg)
-        
-        # 3. ボタン作成
-        actions = []
-        if config.CHILDREN_NAMES:
-            for child in config.CHILDREN_NAMES:
-                actions.append((f"👦👧 {child}", f"子供選択_{child}"))
-        else:
-            actions.append(("子供の記録", "子供選択_子供"))
-
-        actions.append(("✨ みんな元気！", "子供記録_全員_元気"))
-        
-        items = [{"type": "action", "action": {"type": "message", "label": l, "text": t}} for l, t in actions]
-        
-        msg_payload = {
-            "type": "text",
-            "text": full_text,
-            "quickReply": {"items": items}
-        }
-        
-        # 4. 送信
+        # 3. 送信
         target = args.target
-        if common.send_push(config.LINE_USER_ID, [msg_payload], target=target):
+        if common.send_push(config.LINE_USER_ID, payloads, target=target):
             print(f"✅ 送信成功 ({target})")
         else:
             logger.error(f"送信失敗 ({target})")
@@ -134,9 +138,6 @@ def main():
     except Exception as e:
         logger.error(f"エラー発生: {e}")
         logger.error(traceback.format_exc())
-        common.send_push(config.LINE_USER_ID, 
-                         [{"type": "text", "text": f"😰 **Morning Check Error**\n```{e}```"}], 
-                         target="discord", channel="error")
         sys.exit(1)
 
 if __name__ == "__main__":
