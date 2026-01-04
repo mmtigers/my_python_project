@@ -323,7 +323,7 @@ SOUND_PLAYER_CMD = "mpg123"
 
 # ★重要: 手順1で確認した番号(X)を入れてください。
 # 例: card 1 なら "hw:1,0"、 card 2 なら "hw:2,0"
-SOUND_PLAYER_ARGS = ["-a", "hw:2,0"]
+SOUND_PLAYER_ARGS = ["-o", "pulse"]
 
 # イベントとファイル名のマッピング
 SOUND_MAP = {
