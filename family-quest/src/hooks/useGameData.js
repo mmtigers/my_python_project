@@ -59,9 +59,16 @@ export const useGameData = (onLevelUp) => {
             return;
         }
 
-        const completedEntry = completedQuests.find(
-            q => q.user_id === currentUser.user_id && q.quest_id === q_id
-        );
+        // ▼▼▼ 修正箇所 ▼▼▼
+        // 無限クエストの場合は、完了履歴があっても「戻す」対象にはしないため、検索をスキップします。
+        // QuestList.jsx から渡される _isInfinite フラグ、または quest_type を確認
+        const isInfinite = quest._isInfinite || quest.type === 'infinite' || quest.quest_type === 'infinite';
+
+        const completedEntry = isInfinite
+            ? null // 無限クエストなら、キャンセル対象の履歴はないものとして扱う
+            : completedQuests.find(q => q.user_id === currentUser.user_id && q.quest_id === q_id);
+        //
+
 
         if (completedEntry) {
             if (!window.confirm("この行動を 取り消しますか？")) return;
