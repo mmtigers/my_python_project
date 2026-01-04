@@ -129,18 +129,52 @@ def apply_friendly_names(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    if "device_id" not in df.columns:
-        if "device_name" in df.columns:
-            df["friendly_name"] = df["device_name"]
-            df["location"] = "その他"
-        return df
+    # --- 【修正箇所】ここから ---
+    # 0. カラム名の揺らぎ吸収 (camera_id -> device_id)
+    if "device_id" not in df.columns and "camera_id" in df.columns:
+        df["device_id"] = df["camera_id"]
 
+    # 1. 必須カラム 'device_id' の存在チェック (KeyError回避の根本対策)
+    if "device_id" not in df.columns:
+        # 多くのテーブルで呼び出されるため、InfoレベルではなくDebugレベル推奨だが、
+        # 今回はトラブルシューティングのためWarningで出す
+        logger.warning(f"apply_friendly_names: 'device_id' column missing. Columns: {list(df.columns)}")
+        # UIが落ちないように最低限の列を埋める
+        df["friendly_name"] = "Unknown"
+        df["location"] = "その他"
+        return df
+    # --- 【修正箇所】ここまで ---
+
+    # 2. Configからデフォルトのマッピング(予備)を作成
+    #    ID -> Config上の名前
     id_map = {d["id"]: d.get("name", d["id"]) for d in config.MONITOR_DEVICES}
+    
+    # 3. ロケーションマップの作成 (Configベース)
     loc_map = {d["id"]: d.get("location", "その他") for d in config.MONITOR_DEVICES}
 
-    df["friendly_name"] = df["device_id"].map(id_map).fillna(df["device_name"])
+    # 4. DB内の「最新のデバイス名」を取得してマッピングを上書き
+    if "device_name" in df.columns and "timestamp" in df.columns:
+        try:
+            latest_df = df.sort_values("timestamp", ascending=False)
+            latest_df = latest_df.drop_duplicates(subset="device_id", keep="first")
+            valid_latest = latest_df[latest_df["device_name"].notna() & (latest_df["device_name"] != "")]
+            db_latest_map = valid_latest.set_index("device_id")["device_name"].to_dict()
+            id_map.update(db_latest_map)
+        except Exception as e:
+            logger.warning(f"Friendly name mapping update failed: {e}")
+
+    # 5. マッピングの適用 (device_idがあることは保証済み)
+    df["friendly_name"] = df["device_id"].map(id_map)
+    
+    # マッピングで見つからなかった場合は device_name -> device_id の順でフォールバック
+    if "device_name" in df.columns:
+        df["friendly_name"] = df["friendly_name"].fillna(df["device_name"])
+    df["friendly_name"] = df["friendly_name"].fillna(df["device_id"])
+
+    # 6. ロケーションの適用 (ここが以前のエラー箇所)
     df["location"] = df["device_id"].map(loc_map).fillna("その他")
 
+    # 7. 名称の微調整
     df["friendly_name"] = df["friendly_name"].replace(FRIENDLY_NAME_FIXES)
 
     return df

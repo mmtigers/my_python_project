@@ -120,8 +120,6 @@ def get_prev_power(device_id: str) -> float:
             sql = f"SELECT power_watts FROM {config.SQLITE_TABLE_SENSOR} WHERE device_id=? ORDER BY id DESC LIMIT 1"
             cur.execute(sql, (device_id,))
             row = cur.fetchone()
-            # rowは辞書ライクなオブジェクト(sqlite3.Row)またはTupleの可能性があるが、
-            # commonの実装に依存。ここでは安全にアクセス
             if row:
                 val = row["power_watts"] if isinstance(row, (dict, list)) or hasattr(row, "__getitem__") else row[0]
                 return float(val) if val is not None else 0.0
@@ -133,7 +131,6 @@ def process_power_notification(name: str, device_id: str, current_power: float, 
     """電力に基づく通知判定を行う"""
     threshold: Optional[float] = settings.get("power_threshold_watts")
     mode: str = settings.get("notify_mode", "LOG_ONLY")
-    # 設定でターゲット指定があれば優先、なければデフォルト
     target: str = settings.get("target", config.NOTIFICATION_TARGET)
 
     if threshold is None or mode == "LOG_ONLY":
@@ -151,8 +148,6 @@ def process_power_notification(name: str, device_id: str, current_power: float, 
     
     elif mode == "CONTINUOUS" and current_power >= threshold:
         msg = f"🚨【電力アラート】\n{name} がまだついてるよ！ ({current_power}W)"
-        # アラート系は強制的にDiscordにも送りたい場合はここで制御可能
-        # target = "discord" 
 
     if msg:
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target=target)
@@ -171,9 +166,14 @@ def main() -> None:
         try:
             tid: str = s.get("id", "")
             ttype: str = s.get("type", "")
-            # IDから名前解決、失敗したらUnknown
-            tname: str = s.get("name") or sb_tool.get_device_name_by_id(tid) or "Unknown"
-            tloc: str = s.get("location", "家") # 場所を取得
+            
+            # ▼▼▼ 修正: 名前解決の優先順位変更 (API > Config > Unknown) ▼▼▼
+            api_name = sb_tool.get_device_name_by_id(tid)
+            config_name = s.get("name")
+            tname: str = api_name or config_name or "Unknown"
+            # ▲▲▲ 修正終了 ▲▲▲
+            
+            tloc: str = s.get("location", "家") 
             
             if not tid or not ttype:
                 continue
@@ -186,7 +186,7 @@ def main() -> None:
                 notify_settings: Dict[str, Any] = s.get("notify_settings", {})
                 data['threshold'] = notify_settings.get("power_threshold_watts")
                 
-                # DB記録
+                # DB記録 (ここで最新の tname が保存される)
                 insert_device_record(tname, tid, ttype, data)
 
                 # プラグなら通知判定
