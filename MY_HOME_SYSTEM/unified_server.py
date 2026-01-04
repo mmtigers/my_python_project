@@ -16,7 +16,7 @@ import sound_manager
 # Local Modules
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage
+from linebot.models import MessageEvent, TextMessage, PostbackEvent
 
 import config
 import common
@@ -192,6 +192,11 @@ def handle_message(event):
         line_logic.process_message(event, line_bot_api)
     except Exception as e: 
         logger.error(f"メッセージ処理中にエラー発生: {e}")
+
+@handler.add(PostbackEvent)
+def handle_postback_event(event):
+    from handlers import line_logic
+    line_logic.handle_postback(event, line_bot_api)
 
 
 # --- Endpoints: SwitchBot ---
