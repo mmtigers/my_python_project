@@ -49,7 +49,7 @@ def play(event_key: str):
         subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL, 
-            stderr=subprocess.DEVNULL
+            stderr=None  # ★ここを変更 (DEVNULL -> None)
         )
     except Exception as e:
         logger.error(f"❌ Sound playback failed: {e}")
