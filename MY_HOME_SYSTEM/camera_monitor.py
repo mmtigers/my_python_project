@@ -110,7 +110,37 @@ def monitor_single_camera(cam_conf):
     while True: 
         try:
             # ONVIFカメラ接続
-            mycam = ONVIFCamera(cam_conf['ip'], cam_port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
+            # ポートの候補リスト (設定値 -> 80 -> 2020 の順で試行)
+            target_ports = []
+            if cam_port not in [80, 2020]:
+                target_ports.append(cam_port)
+            target_ports.extend([80, 2020])
+            # 重複削除しつつ順序保持
+            target_ports = list(dict.fromkeys(target_ports))
+
+            mycam = None
+            last_connect_err = None
+
+            # 接続試行ループ
+            for port in target_ports:
+                try:
+                    # 既に接続中の場合はスキップなどの制御は適宜
+                    logger.debug(f"[{cam_name}] Connecting to Port {port}...")
+                    mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
+                    # 接続成功したらそのポートを採用
+                    if port != cam_port:
+                        logger.warning(f"⚠️ [{cam_name}] ポート {cam_port} で接続できませんでしたが、{port} で成功しました。設定を見直してください。")
+                    break 
+                except Exception as e:
+                    last_connect_err = e
+                    # 認証エラー等はポートを変えても無駄なので即中断
+                    if "401" in str(e) or "Unauthorized" in str(e):
+                        raise e
+                    continue # 次のポートへ
+
+            if mycam is None:
+                # 全ポート全滅なら最後のエラーをraiseして外側の例外処理へ
+                raise last_connect_err
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
             

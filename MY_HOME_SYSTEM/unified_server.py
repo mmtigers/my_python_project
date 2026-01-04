@@ -69,14 +69,18 @@ async def schedule_daily_backup():
             target += datetime.timedelta(days=1)
         
         wait_seconds = (target - now).total_seconds()
-        logger.info(f"⏳ 次回バックアップまで待機: {wait_seconds / 3600:.1f}時間")
+        # logger.info(f"⏳ 次回バックアップまで待機: {wait_seconds / 3600:.1f}時間")
         
-        await asyncio.sleep(wait_seconds)
+        # 1時間ごとのチェックで待機する実装に変更（長時間のsleepはキャンセル時に反応が悪いため）
+        # ここでは単純化のためsleepを使用しますが、実運用ではループで細かく待つのがベター
+        try:
+            await asyncio.sleep(wait_seconds)
+        except asyncio.CancelledError:
+            break
         
         # Backup Execution
         logger.info("📦 定期バックアップを開始します...")
         loop = asyncio.get_running_loop()
-        # Run blocking I/O in executor
         success, res, size = await loop.run_in_executor(None, backup_database.perform_backup)
         
         if success:
@@ -94,8 +98,25 @@ async def schedule_daily_backup():
                 target="discord", channel="error"
             )
             
-        # Prevent rapid loop in edge cases
         await asyncio.sleep(60)
+
+# ▼▼▼ 追加: 定期デバイスリスト更新タスク ▼▼▼
+async def schedule_device_refresh():
+    """1時間に1回デバイスリストをSwitchBot APIから再取得してキャッシュを更新する"""
+    logger.info("🔄 デバイスリスト自動更新スケジューラ起動 (Interval: 1h)")
+    while True:
+        try:
+            await asyncio.sleep(3600) # 1時間待機
+            logger.info("🔄 SwitchBotデバイスリストの定期更新を実行中...")
+            loop = asyncio.get_running_loop()
+            # ネットワークIOを含むためexecutorで実行
+            await loop.run_in_executor(None, sb_tool.fetch_device_name_cache)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"デバイスリスト更新中にエラー: {e}")
+            await asyncio.sleep(300) # エラー時は5分後再試行
+# ▲▲▲ 追加終了 ▲▲▲
 
 
 # --- Async Notification Helper ---
@@ -135,12 +156,14 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 System Season 3 Starting...")
     logger.info(f"📂 Server is using DB at: {config.SQLITE_DB_PATH}")
     
-    # 1. Update Cache
+    # 1. Update Cache (Initial)
     sb_tool.fetch_device_name_cache()
     
-    # 2. Start Background Task
-    task = asyncio.create_task(schedule_daily_backup())
-    # ★追加: 音声ファイルの整合性チェック
+    # 2. Start Background Tasks
+    task_backup = asyncio.create_task(schedule_daily_backup())
+    task_refresh = asyncio.create_task(schedule_device_refresh()) # ★追加
+    
+    # 音声ファイルの整合性チェック
     sound_manager.check_and_restore_sounds()
     
     # 3. Seed DB
@@ -153,7 +176,8 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown logic
-    task.cancel()
+    task_backup.cancel()
+    task_refresh.cancel() # ★追加
     logger.info("🛑 System Shutdown.")
 
 
@@ -209,12 +233,16 @@ async def callback_switchbot(body: SwitchBotWebhookBody):
     # 1. Identify Device
     device_conf = next((d for d in config.MONITOR_DEVICES if d["id"] == mac), None)
     
+    # ▼▼▼ 修正: 名前解決の優先順位変更 (API > Config > Unknown) ▼▼▼
+    api_name = sb_tool.get_device_name_by_id(mac)
+    config_name = device_conf.get("name") if device_conf else None
+    name = api_name or config_name or f"Unknown_{mac}"
+    # ▲▲▲ 修正終了 ▲▲▲
+
     if device_conf:
-        name = device_conf.get("name") or sb_tool.get_device_name_by_id(mac) or f"Unknown_{mac}"
         location = device_conf.get("location", "場所不明")
         dev_type = device_conf.get("type", "Unknown")
     else:
-        name = sb_tool.get_device_name_by_id(mac) or f"Unknown_{mac}"
         location = "未登録"
         dev_type = "Unknown"
 
@@ -298,14 +326,13 @@ if hasattr(config, "ASSETS_DIR") and os.path.exists(config.ASSETS_DIR):
 # ★追加: アップロード画像を /uploads/xxx.jpg でアクセス可能にする
 if hasattr(config, "UPLOAD_DIR"):
     app.mount("/uploads", StaticFiles(directory=config.UPLOAD_DIR), name="uploads")
-    logger.info(f"✅ Uploads mounted from {config.UPLOAD_DIR}")
+    # logger.info(f"✅ Uploads mounted from {config.UPLOAD_DIR}")
 
 if os.path.exists(config.QUEST_DIST_DIR):
     app.mount("/quest", StaticFiles(directory=config.QUEST_DIST_DIR, html=True), name="quest")
-    logger.info(f"✅ Family Quest mounted from {config.QUEST_DIST_DIR}")
+    # logger.info(f"✅ Family Quest mounted from {config.QUEST_DIST_DIR}")
 else:
     logger.warning(f"⚠️ Family Quest dist not found at {config.QUEST_DIST_DIR}")
-
 
 
 if __name__ == "__main__":
