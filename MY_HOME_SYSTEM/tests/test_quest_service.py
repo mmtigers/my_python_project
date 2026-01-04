@@ -13,6 +13,7 @@ import config
 import common
 import init_unified_db
 # 修正: 分割されたサービスをインポート
+import game_logic  # ★追加: GameLogicをインポート
 from routers.quest_router import QuestService, UserService, ShopService
 
 class TestQuestService(unittest.TestCase):
@@ -79,8 +80,8 @@ class TestQuestService(unittest.TestCase):
     def test_calculate_next_level_exp(self):
         """経験値計算ロジックの検証"""
         # 修正: UserServiceを使用
-        self.assertEqual(self.user_service.calculate_next_level_exp(1), 100)
-        self.assertEqual(self.user_service.calculate_next_level_exp(2), 120)
+        self.assertEqual(game_logic.GameLogic.calculate_next_level_exp(1), 100)
+        self.assertEqual(game_logic.GameLogic.calculate_next_level_exp(2), 120)
 
     def test_complete_quest_basic(self):
         """クエスト完了の基本動作検証"""
