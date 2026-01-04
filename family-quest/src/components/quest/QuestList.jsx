@@ -1,6 +1,5 @@
-// family-quest/src/components/quest/QuestList.jsx
 import React from 'react';
-import { Undo2, Clock, CheckCircle2 } from 'lucide-react';
+import { Undo2, Clock, CheckCircle2, RotateCcw } from 'lucide-react';
 
 const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, onQuestClick }) => {
     const currentDay = new Date().getDay();
@@ -16,23 +15,28 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
         return true;
     });
 
+    // ヘルパー関数: 完了状態の判定
+    const checkStatus = (quest) => {
+        const qId = quest.quest_id || quest.id;
+        const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite';
+
+        let isDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
+        if (isInfinite) isDone = false; // 無限クエストは常に未完了扱い
+
+        const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
+
+        return { isDone, isPending, isInfinite };
+    };
+
     // 2. ソート
     const sortedQuests = [...filteredQuests].sort((a, b) => {
-        const aId = a.quest_id || a.id;
-        const bId = b.quest_id || b.id;
+        const statusA = checkStatus(a);
+        const statusB = checkStatus(b);
 
-        // 状態判定
-        const aDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === aId);
-        const bDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === bId);
-        const aPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === aId);
-        const bPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === bId);
-
-        const aFinished = aDone || aPending;
-        const bFinished = bDone || bPending;
+        const aFinished = statusA.isDone || statusA.isPending;
+        const bFinished = statusB.isDone || statusB.isPending;
 
         if (aFinished !== bFinished) return aFinished ? 1 : -1;
-
-        // 未完了なら時間限定を優先
         if (!aFinished) {
             if (a.start_time && !b.start_time) return -1;
             if (!a.start_time && b.start_time) return 1;
@@ -44,24 +48,22 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
         <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
             <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">-- 本日の依頼 --</div>
             {sortedQuests.map(q => {
-                const qId = q.quest_id || q.id;
-                const isDone = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
-                const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
+                const { isDone, isPending, isInfinite } = checkStatus(q);
 
                 const isTimeLimited = !!q.start_time;
                 const isRandom = q.type === 'random';
                 const isLimited = q.type === 'limited';
-                const isPersonal = q.target !== 'all';
 
                 let containerClass = "border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200";
 
                 if (isDone) {
                     containerClass = "border-gray-600 bg-gray-900/50 grayscale";
                 } else if (isPending) {
-                    containerClass = "border-yellow-500 bg-yellow-900/40"; // 申請中
+                    containerClass = "border-yellow-500 bg-yellow-900/40";
                 } else {
-                    // 未完了
-                    if (isTimeLimited) {
+                    if (isInfinite) {
+                        containerClass = "border-cyan-400 bg-cyan-950/90 hover:bg-cyan-900 shadow-[0_0_8px_rgba(0,255,255,0.2)]";
+                    } else if (isTimeLimited) {
                         containerClass = "border-orange-400 bg-gradient-to-r from-orange-900/90 to-red-900/90 hover:from-orange-800 hover:to-red-800 shadow-[0_0_10px_rgba(255,165,0,0.3)]";
                     } else if (isRandom) {
                         containerClass = "border-purple-400 bg-purple-950/90 hover:bg-purple-900";
@@ -71,17 +73,23 @@ const QuestList = ({ quests, completedQuests, pendingQuests = [], currentUser, o
                 }
 
                 return (
-                    <div key={qId} onClick={() => onQuestClick(q)}
-                        className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}>
+                    <div
+                        key={q.quest_id || q.id}
+                        // ★修正: ここで _isInfinite フラグを埋め込んで渡す
+                        onClick={() => onQuestClick({ ...q, _isInfinite: isInfinite })}
+                        className={`border p-2 rounded flex justify-between items-center cursor-pointer select-none transition-all active:scale-[0.98] relative overflow-hidden ${containerClass}`}
+                    >
 
                         {isRandom && !isDone && !isPending && <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>}
 
                         <div className="flex items-center gap-3 relative z-10">
-                            <span className={`text-2xl ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
+                            <span className={`text-2xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
                                 {q.icon || q.icon_key}
                             </span>
                             <div>
                                 <div className="flex items-center gap-2 flex-wrap">
+                                    {isInfinite && !isPending && <span className="bg-cyan-600 text-[10px] px-1 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>}
+
                                     {isTimeLimited && !isDone && !isPending && (
                                         <span className="bg-yellow-500 text-black text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
                                             ⏰ {q.start_time}~{q.end_time}

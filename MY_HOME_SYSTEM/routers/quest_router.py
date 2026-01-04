@@ -581,6 +581,7 @@ class GameSystem:
                 r['cost'] = r['cost_gold']
 
             today_str = common.get_today_date_str()
+            # --- ここから変更 ---
             completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
             )]
@@ -588,6 +589,25 @@ class GameSystem:
             pending = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at ASC"
             )]
+
+            # ★追加: 無限クエストのタイトル加工処理
+            # 1. 今日の完了回数を集計 (status='approved'のみ)
+            completion_counts = {}
+            for c in completed:
+                if c['status'] == 'approved':
+                    qid = c['quest_id']
+                    completion_counts[qid] = completion_counts.get(qid, 0) + 1
+            
+            # 2. クエストリストを書き換え
+            for q in filtered_quests:
+                # DBのカラムは 'quest_type'、filter_active_quests で 'type' にもコピーされている想定
+                q_type = q.get('quest_type') or q.get('type')
+                
+                if q_type == 'infinite':
+                    count = completion_counts.get(q['quest_id'], 0)
+                    if count > 0:
+                        q['title'] = f"{q['title']} ({count + 1}回目)"
+            # --- ここまで追加 ---
 
             logs = self._fetch_recent_logs(cur)
 

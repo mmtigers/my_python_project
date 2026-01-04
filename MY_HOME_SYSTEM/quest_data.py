@@ -39,6 +39,7 @@ QUESTS = [
     # --- 共通: 基本生活習慣 (朝) ---
     {'id': 1, 'title': 'お着替え (準備含む)', 'type': 'daily', 'target': 'all', 'exp': 20, 'gold': 5, 'icon': '👕', 'start_time': '05:00', 'end_time': '08:00'},
     {'id': 2, 'title': 'はみがき (朝)', 'type': 'daily', 'target': 'all', 'exp': 15, 'gold': 5, 'icon': '🪥', 'start_time': '05:00', 'end_time': '09:00'},
+    {'id': 901, 'title': 'お皿洗い', 'type': 'infinite', 'target': 'all', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう（何度でもOK）', 'chance': 1.0},
     
     # --- 智矢 (Son) 新規追加分 ---
     {'id': 40, 'title': '朝のトイレに行く', 'type': 'daily', 'target': 'son', 'exp': 10, 'gold': 5, 'icon': '🚽', 'start_time': '05:00', 'end_time': '07:30'},
