@@ -1,9 +1,8 @@
 """
-Family Quest Master Data - Phase 1 Expansion
-[2025-12-31 更新]
-- 智矢くんの生活習慣・自立クエストを追加
-- 年末大掃除クエストを追加
-- スペシャル報酬（ユニバチケット）を追加
+Family Quest Master Data - Phase 2 Expansion
+[2026-01-05 更新]
+- ママのお手伝い、トイレ掃除、ルンバ整備などを追加
+- ご褒美（Youtube、温泉、旅行など）を大幅拡充
 """
 
 # ==========================================
@@ -41,13 +40,22 @@ QUESTS = [
     {'id': 2, 'title': 'はみがき (朝)', 'type': 'daily', 'target': 'all', 'exp': 15, 'gold': 5, 'icon': '🪥', 'start_time': '05:00', 'end_time': '09:00'},
     {'id': 901, 'title': 'お皿洗い', 'type': 'infinite', 'target': 'all', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう（何度でもOK）', 'chance': 1.0},
     
-    # --- 智矢 (Son) 新規追加分 ---
+    # --- 共通: 協力・お手伝い (新規追加) ---
+    # 土曜日(6)限定
+    {'id': 7, 'title': 'ルンバの水交換', 'type': 'daily', 'target': 'all', 'exp': 50, 'gold': 30, 'icon': '🤖', 'days': '6'},
+    # 毎日
+    {'id': 8, 'title': '寝る前のおもちゃ片付け', 'type': 'daily', 'target': 'all', 'exp': 40, 'gold': 20, 'icon': '🧸', 'start_time': '19:00', 'end_time': '21:00'},
+
+    # --- 智矢 (Son) ---
     {'id': 40, 'title': '朝のトイレに行く', 'type': 'daily', 'target': 'son', 'exp': 10, 'gold': 5, 'icon': '🚽', 'start_time': '05:00', 'end_time': '07:30'},
     {'id': 41, 'title': '寝る前のトイレに行く', 'type': 'daily', 'target': 'son', 'exp': 10, 'gold': 5, 'icon': '🚽', 'start_time': '19:00', 'end_time': '20:30'},
     {'id': 42, 'title': '朝起きたら顔を洗う', 'type': 'daily', 'target': 'son', 'exp': 10, 'gold': 5, 'icon': '🧖', 'start_time': '05:00', 'end_time': '08:00'},
     {'id': 43, 'title': '一人で本を読む', 'type': 'daily', 'target': 'son', 'exp': 30, 'gold': 10, 'icon': '📖'},
     {'id': 44, 'title': '靴を並べるお手伝い', 'type': 'daily', 'target': 'son', 'exp': 20, 'gold': 10, 'icon': '👞'},
     {'id': 45, 'title': 'ピアノの練習', 'type': 'daily', 'target': 'son', 'exp': 50, 'gold': 20, 'icon': '🎹'},
+    # 新規追加: ママのお手伝い
+    {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'exp': 30, 'gold': 10, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう（何度でもOK）'},
+    
     # 土日限定 (0=Sun, 6=Sat)
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '0,6'},
     # ボーナス (高報酬)
@@ -75,6 +83,8 @@ QUESTS = [
     {'id': 15, 'title': '洗濯物を干す', 'type': 'daily', 'target': 'dad', 'exp': 50, 'gold': 30, 'icon': '☀️'},
     {'id': 16, 'title': '洗濯物を畳む', 'type': 'daily', 'target': 'dad', 'exp': 40, 'gold': 30, 'icon': '👕'},
     {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'dad', 'exp': 30, 'gold': 20, 'icon': '🧺'},
+    # 新規追加: 日曜朝のトイレ掃除
+    {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'daily', 'target': 'dad', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '0', 'start_time': '06:00', 'end_time': '12:00'},
 
     # --- 母 (Mom) ---
     {'id': 20, 'title': '昼食を作る', 'type': 'daily', 'target': 'mom', 'exp': 100, 'gold': 100, 'icon': '🥪', 'start_time': '10:00', 'end_time': '14:00'},
@@ -86,9 +96,6 @@ QUESTS = [
     {'id': 26, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'mom', 'exp': 30, 'gold': 20, 'icon': '🧺'},
 
     # --- 期間限定イベント (Parents Only) ---
-    # target='all' から dad/mom 個別に変更
-    # {'id': 90, 'title': '大掃除 (年末限定)', 'type': 'limited', 'target': 'dad', 'exp': 500, 'gold': 500, 'icon': '🧹', 'start_date': '2024-12-20', 'end_date': '2025-12-31'},
-    # {'id': 91, 'title': '大掃除 (年末限定)', 'type': 'limited', 'target': 'mom', 'exp': 500, 'gold': 500, 'icon': '🧹', 'start_date': '2024-12-20', 'end_date': '2025-12-31'},
     {'id': 92, 'title': 'お雑煮を作る (年末限定)', 'type': 'limited', 'target': 'mom', 'exp': 80, 'gold': 80, 'icon': '🥪', 'start_date': '2024-12-31', 'end_date': '2026-1-1'},
 ]
 
@@ -96,13 +103,25 @@ QUESTS = [
 # 3. 報酬定義 (ショップメニュー)
 # ==========================================
 REWARDS = [
+    # --- 既存: 食べ物・小休憩 ---
     {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦'},
     {'id': 2, 'title': 'ビール/お酒アップグレード', 'category': 'food', 'cost_gold': 150, 'icon_key': '🍺'},
     {'id': 3, 'title': '休日・朝寝坊権利 (1時間)', 'category': 'service', 'cost_gold': 1000, 'icon_key': '🛌'},
     {'id': 4, 'title': '自由時間 (3時間)', 'category': 'service', 'cost_gold': 3000, 'icon_key': '🧘'},
     
-    # 新規追加: スペシャル
+    # --- 新規追加: エンタメ (Youtube) ---
+    {'id': 10, 'title': 'Youtube (10分)', 'category': 'service', 'cost_gold': 50, 'icon_key': '📺'},
+    {'id': 11, 'title': 'Youtube (30分)', 'category': 'service', 'cost_gold': 150, 'icon_key': '📺'},
+    {'id': 12, 'title': 'Youtube (60分)', 'category': 'service', 'cost_gold': 300, 'icon_key': '📺'},
+
+    # --- 新規追加: 物品・チケット ---
+    {'id': 13, 'title': '湯の華廊 チケット', 'category': 'special', 'cost_gold': 1000, 'icon_key': '♨️'},
+    {'id': 14, 'title': 'チョコレート (3000円分)', 'category': 'food', 'cost_gold': 3000, 'icon_key': '🍫'},
+    {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 15000, 'icon_key': '⌚'},
+
+    # --- スペシャル ---
     {'id': 99, 'title': 'ユニバのチケット (ペア)', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🎢'},
+    {'id': 100, 'title': 'ホテルに宿泊 (家族旅行)', 'category': 'special', 'cost_gold': 50000, 'icon_key': '🏨'},
 ]
 
 # ==========================================
