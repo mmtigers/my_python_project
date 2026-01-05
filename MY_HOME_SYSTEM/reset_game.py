@@ -1,49 +1,196 @@
 import os
 import sys
-import datetime
+import logging
+import sqlite3
+import traceback
+from datetime import datetime
 
-# 共通モジュールを読み込めるようにパス設定
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# --- 設定 ---
+DB_PATH = "home_system.db"  # DBファイル名を実際の環境に合わせて確認してください
+LOG_DIR = "logs"
 
-import common
+# 日本語名とDB内のuser_idまたはnameのマッピング
+# DBの中身が 'dad', 'mom' 等の場合はここを有効活用します
+NAME_MAP = {
+    "将博": "dad",
+    "春菜": "mom",
+    "智矢": "son",
+    "涼花": "daughter"
+}
 
-def reset_game_data():
-    print("🧨 ゲームデータの完全リセットを開始します...")
-    
-    # ユーザーに確認
-    confirm = input("全ての履歴、装備、レベル、所持金が消去されます。よろしいですか？ (y/N): ")
-    if confirm.lower() != 'y':
-        print("中止しました。")
-        return
+# --- ログ設定 ---
+os.makedirs(LOG_DIR, exist_ok=True)
+log_file = os.path.join(LOG_DIR, f"reset_game_{datetime.now().strftime('%Y%m%d')}.log")
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler(log_file, encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+def get_db_connection():
+    """データベース接続を取得する"""
+    if not os.path.exists(DB_PATH):
+        logging.error(f"DBファイルが見つかりません: {DB_PATH}")
+        print(f"❌ DBファイル '{DB_PATH}' が見つかりません。")
+        sys.exit(1)
+        
     try:
-        with common.get_db_cursor(commit=True) as cur:
-            # 1. 履歴テーブルの全削除
-            print("🗑️  クエスト履歴を削除中...")
-            cur.execute("DELETE FROM quest_history")
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        logging.error(f"DB接続エラー: {e}")
+        raise
+
+def fetch_users():
+    """
+    DBからユーザー情報を取得し、表示用のリストを作成する
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # quest_usersテーブルからユーザー情報を取得
+        cursor.execute("SELECT user_id, name FROM quest_users")
+        rows = cursor.fetchall()
+        
+        users_info = []
+        for row in rows:
+            # DBのnameカラムに日本語名が入っているか、user_idがキーになっているか確認
+            # 表示用に (user_id, name) のタプルなどを保存
+            u_id = row['user_id']
+            u_name = row['name']
             
-            print("🗑️  報酬履歴を削除中...")
-            cur.execute("DELETE FROM reward_history")
+            # DBのnameが空の場合のフォールバック
+            display_name = u_name if u_name else u_id
+            users_info.append({"id": u_id, "name": display_name})
             
-            # 2. 装備所持テーブルの全削除
-            print("🗑️  所有装備を削除中...")
-            cur.execute("DELETE FROM user_equipments")
+        return users_info
+
+    except Exception as e:
+        logging.error(f"ユーザーリスト取得失敗: {e}")
+        logging.debug(traceback.format_exc())
+        return []
+    finally:
+        if conn:
+            conn.close()
+
+def select_user_interactive(users_info):
+    """
+    ユーザーにリストを表示し、選択させる
+    """
+    print("\n--- リセット対象を選択してください ---")
+    
+    # 候補リストの作成
+    # NAME_MAPにある名前を優先的に表示し、DBにあってマップにないものも追加
+    display_candidates = []
+    
+    # マップにある日本語名に対応するDBデータがあるか確認
+    db_user_ids = [u['id'] for u in users_info]
+    
+    for jp_name, db_id in NAME_MAP.items():
+        if db_id in db_user_ids:
+            display_candidates.append({"label": jp_name, "db_id": db_id})
+    
+    # マップにないその他のユーザー（もし入っていれば）
+    mapped_ids = NAME_MAP.values()
+    for u in users_info:
+        if u['id'] not in mapped_ids:
+             display_candidates.append({"label": f"{u['name']} ({u['id']})", "db_id": u['id']})
+
+    if not display_candidates:
+        print("リセット可能なユーザーが見つかりませんでした。")
+        return None
+
+    for index, user in enumerate(display_candidates):
+        print(f"{index + 1}. {user['label']}")
+    print("q. キャンセル")
+    print("--------------------------------------")
+
+    while True:
+        choice = input("番号を入力してください: ").strip()
+        
+        if choice.lower() == 'q':
+            print("操作をキャンセルしました。")
+            sys.exit(0)
             
-            # 3. ユーザーステータスの初期化
-            print("✨ ユーザーを初期状態(Lv.1 / 0G)に戻しています...")
-            cur.execute("""
-                UPDATE quest_users 
-                SET level = 1, 
-                    exp = 0, 
-                    gold = 0, 
-                    updated_at = ?
-            """, (datetime.datetime.now().isoformat(),))
-            
-        print("\n✅ リセット完了！ 全員「レベル1・所持金0」からスタートです。")
-        print("   ブラウザをリロードして確認してください。")
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(display_candidates):
+                return display_candidates[idx] # {"label":..., "db_id":...}
+        
+        print("無効な入力です。リストの番号を入力してください。")
+
+def reset_user_data(target_user):
+    """
+    指定されたユーザーのゲームデータをリセットする
+    """
+    user_id = target_user['db_id']
+    user_label = target_user['label']
+    
+    logging.info(f"ユーザー '{user_label}' (ID: {user_id}) のリセット処理を開始します。")
+    
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # ★修正箇所: 正しいテーブル名(quest_users)とカラム名(exp, gold)を指定
+        # user_id をキーにして更新します
+        cursor.execute("""
+            UPDATE quest_users 
+            SET level = 1, exp = 0, gold = 0 
+            WHERE user_id = ?
+        """, (user_id,))
+        
+        if cursor.rowcount == 0:
+            logging.warning(f"ID '{user_id}' のデータが見つかりませんでした。")
+            print(f"⚠️ 注意: データが見つかりませんでした。")
+        else:
+            conn.commit()
+            logging.info(f"DB更新成功: {user_label} のデータをリセットしました。")
+            print(f"\n✅ {user_label} さんのデータをリセットしました (Level=1, Exp=0, Gold=0)。")
         
     except Exception as e:
-        print(f"\n❌ エラーが発生しました: {e}")
+        error_msg = f"リセット処理中にエラーが発生: {str(e)}"
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        print(f"\n❌ エラーが発生しました。ログを確認してください: {log_file}")
+        sys.exit(1)
+    finally:
+        if conn:
+            conn.close()
+
+def main():
+    logging.info("スクリプト起動: ユーザー選択モード")
+    
+    # 1. ユーザー候補の取得
+    users_info = fetch_users()
+    
+    if not users_info:
+        logging.error("ユーザー情報が取得できませんでした。DBを確認してください。")
+        print("ユーザー情報が取得できませんでした。")
+        sys.exit(1)
+
+    # 2. ユーザーによる選択
+    selected = select_user_interactive(users_info)
+    if not selected:
+        sys.exit(0)
+    
+    # 3. 最終確認
+    confirm = input(f"\n本当に '{selected['label']}' のデータをリセットしますか？ (y/n): ").strip().lower()
+    if confirm != 'y':
+        logging.info("ユーザーにより操作がキャンセルされました。")
+        print("キャンセルしました。")
+        sys.exit(0)
+
+    # 4. リセット実行
+    reset_user_data(selected)
 
 if __name__ == "__main__":
-    reset_game_data()
+    main()
