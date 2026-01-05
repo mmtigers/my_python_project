@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import os
 import sys
 import time
+import socket
 import zeep.helpers
 from lxml import etree
 import logging
@@ -18,7 +19,8 @@ import traceback
 
 # === ログ設定 ===
 logger = common.setup_logging("camera")
-logging.getLogger("zeep").setLevel(logging.WARNING)
+# 調査のためZeep(通信ライブラリ)のログも少し出す
+logging.getLogger("zeep").setLevel(logging.ERROR) 
 
 # === 画像保存設定 ===
 ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")
@@ -57,10 +59,7 @@ def analyze_event_type(xml_str):
             rule_name = xml_str[start:end]
         except: pass
 
-    # --- 判定ロジック (ここを強化) ---
-    
     # 1. 侵入・ライン通過
-    # Name属性だけでなく、Rule名に 'Intrusion' や 'LineCross', 'Cross' が含まれる場合も対象にする
     if ('Name="IsIntrusion"' in xml_str or 'Name="IsLineCross"' in xml_str or 
         "Intrusion" in rule_name or "LineCross" in rule_name or "Cross" in rule_name):
         return "intrusion", "敷地への侵入", PRIORITY_MAP["intrusion"], rule_name
@@ -95,52 +94,82 @@ def capture_snapshot_rtsp(cam_conf):
         logger.error(f"[{cam_conf['name']}] 画像キャプチャ失敗: {e}")
     return None
 
+def perform_emergency_diagnosis(ip):
+    """エラー発生直後にポートの状態を診断する"""
+    results = {}
+    target_ports = [80, 2020, 554]
+    
+    msg = f"🚑 [緊急診断] {ip} の接続状態チェック:\n"
+    
+    for port in target_ports:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(2.0)
+        try:
+            res = sock.connect_ex((ip, port))
+            status = "OPEN (OK)" if res == 0 else f"CLOSED/FILTERED (Err: {res})"
+            results[port] = (res == 0)
+        except Exception as e:
+            status = f"ERROR ({e})"
+            results[port] = False
+        finally:
+            sock.close()
+        msg += f"   - Port {port}: {status}\n"
+
+    # 診断結果の解釈
+    if all(results.values()):
+        msg += "   👉 結論: ネットワークは正常です。認証エラーか、カメラの接続数上限(Busy)の可能性があります。"
+    elif not any(results.values()):
+        msg += "   👉 結論: カメラとの通信が完全に途絶しています(電源断/IP変更/ケーブル抜け)。"
+    elif results[554] and not results[2020] and not results[80]:
+        msg += "   👉 結論: 映像(RTSP)は生きていますが、制御(ONVIF/HTTP)サービスだけダウンしています。"
+    
+    logger.error(msg)
+    return results
+
 def monitor_single_camera(cam_conf):
     cam_name = cam_conf['name']
-    cam_port = cam_conf.get('port', 80)
+    cam_base_port = cam_conf.get('port', 80)
     cam_loc = cam_conf.get('location', '伊丹')
     
-    logger.info(f"🚀 [{cam_name}] 監視スレッド起動 (IP:{cam_conf['ip']} Port:{cam_port}) WSDL:{WSDL_DIR}")
+    logger.info(f"🚀 [{cam_name}] 監視プロセス起動 (Target IP:{cam_conf['ip']})")
 
-    # === 【修正】連続エラーカウントと通知閾値の設定 ===
     consecutive_conn_errors = 0
-    NOTIFY_THRESHOLD = 5  # 5回連続失敗で通知
-    has_notified_error = False  # エラー通知済みフラグを追加
+    NOTIFY_THRESHOLD = 5
+    has_notified_error = False
+
+    # ポートフォールバック用のリスト作成
+    port_candidates = []
+    if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
+    port_candidates.extend([2020, 80]) # 優先順位: 指定ポート -> 2020 -> 80
+    port_candidates = list(dict.fromkeys(port_candidates)) # 重複排除
 
     while True: 
+        mycam = None
+        current_port = None
+        
         try:
-            # ONVIFカメラ接続
-            # ポートの候補リスト (設定値 -> 80 -> 2020 の順で試行)
-            target_ports = []
-            if cam_port not in [80, 2020]:
-                target_ports.append(cam_port)
-            target_ports.extend([80, 2020])
-            # 重複削除しつつ順序保持
-            target_ports = list(dict.fromkeys(target_ports))
-
-            mycam = None
-            last_connect_err = None
-
-            # 接続試行ループ
-            for port in target_ports:
+            # --- 接続フェーズ ---
+            for port in port_candidates:
                 try:
-                    # 既に接続中の場合はスキップなどの制御は適宜
-                    logger.debug(f"[{cam_name}] Connecting to Port {port}...")
+                    logger.debug(f"[{cam_name}] ポート {port} で接続試行中...")
                     mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
-                    # 接続成功したらそのポートを採用
-                    if port != cam_port:
-                        logger.warning(f"⚠️ [{cam_name}] ポート {cam_port} で接続できませんでしたが、{port} で成功しました。設定を見直してください。")
-                    break 
+                    
+                    # サービス作成テスト（ここが通れば認証OK）
+                    mycam.create_events_service()
+                    
+                    current_port = port
+                    logger.info(f"✅ [{cam_name}] 接続成功 (Port: {port})")
+                    break
                 except Exception as e:
-                    last_connect_err = e
-                    # 認証エラー等はポートを変えても無駄なので即中断
+                    # 認証エラー系は即時記録
                     if "401" in str(e) or "Unauthorized" in str(e):
-                        raise e
-                    continue # 次のポートへ
+                        logger.warning(f"⚠️ [{cam_name}] Port {port} 認証失敗: パスワードかユーザー名が違います。")
+                    continue
+            
+            if current_port is None:
+                raise Exception(f"全ポート({port_candidates})で接続に失敗しました")
 
-            if mycam is None:
-                # 全ポート全滅なら最後のエラーをraiseして外側の例外処理へ
-                raise last_connect_err
+            # --- 監視セットアップ ---
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
             
@@ -156,22 +185,19 @@ def monitor_single_camera(cam_conf):
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            
-            # === 接続成功時 ===
+            # --- 接続安定時のカウンタリセット ---
             if consecutive_conn_errors > 0:
-                logger.info(f"✅ [{cam_name}] 接続復旧しました")
+                logger.info(f"🎉 [{cam_name}] 接続が復旧しました！")
             consecutive_conn_errors = 0
-            has_notified_error = False  # フラグをリセット
-            
-            logger.info(f"✅ [{cam_name}] 接続確立")
+            has_notified_error = False
 
+            # --- イベント受信ループ ---
             error_count = 0
-            # イベント受信ループ
             while True:
                 try:
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
-                    error_count = 0  # PullMessages成功で内部エラーカウンタもリセット
+                    error_count = 0 
                     
                     if hasattr(events, 'NotificationMessage'):
                         for event in events.NotificationMessage:
@@ -190,98 +216,75 @@ def monitor_single_camera(cam_conf):
                                 logger.info(f"🔥 [{cam_name}] 検知: {label} (Rule: {rule_name})")
                                 img = capture_snapshot_rtsp(cam_conf)
 
-                                # ギャラリー保存
                                 if img:
                                     try:
                                         ts = datetime.now().strftime('%Y%m%d_%H%M%S')
                                         filename = f"snapshot_{cam_conf['id']}_{ts}.jpg"
                                         save_path = os.path.join(ASSETS_DIR, filename)
                                         with open(save_path, "wb") as f: f.write(img)
-                                        logger.info(f"🖼️ 画像保存: {filename}")
-                                    except Exception as e:
-                                        logger.error(f"画像保存失敗: {e}")
+                                    except Exception: pass
                                 
-                                # DB記録
                                 common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
                                     ["timestamp", "device_name", "device_id", "device_type", "contact_state"],
                                     (common.get_now_iso(), "防犯カメラ", cam_conf['id'], "ONVIF Camera", event_type))
                                 
-                                # 車判定ロジック (外出/帰宅記録用)
                                 is_car_related = "vehicle" in event_type or "Vehicle" in str(rule_name) or event_type == "intrusion"
                                 if is_car_related:
                                     action = "UNKNOWN"
-                                    if any(k in rule_name for k in config.CAR_RULE_KEYWORDS["LEAVE"]):
-                                        action = "LEAVE"
-                                    elif any(k in rule_name for k in config.CAR_RULE_KEYWORDS["RETURN"]):
-                                        action = "RETURN"
+                                    if any(k in rule_name for k in config.CAR_RULE_KEYWORDS["LEAVE"]): action = "LEAVE"
+                                    elif any(k in rule_name for k in config.CAR_RULE_KEYWORDS["RETURN"]): action = "RETURN"
                                     
                                     if action != "UNKNOWN":
-                                        logger.info(f"🚗 車両移動判定: {action} (Rule: {rule_name})")
+                                        logger.info(f"🚗 車両判定: {action}")
                                         common.save_log_generic(config.SQLITE_TABLE_CAR,
                                             ["timestamp", "action", "rule_name"],
                                             (common.get_now_iso(), action, rule_name))
 
-                                # 通知送信 (侵入のみ)
                                 if event_type == "intrusion":
                                     msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
-                                    
-                                    # target="discord" を指定
                                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
-                                    
-                                    # 通知した場合はクールタイムを入れる
                                     time.sleep(15)
-                                    break
+                                    # break # ループは抜けないほうが安定するかもしれないが、リセットしたいならbreak
 
                 except Exception as e:
-                    # 内部ループ（PullMessages）のエラーハンドリング
                     err = str(e)
-                    # タイムアウトはよくあるので無視してループ継続
                     if "timed out" in err or "TimeOut" in err: continue
                     
                     error_count += 1
-                    # ★修正: 内部エラー時も詳細ログを出す
+                    logger.warning(f"⚠️ [{cam_name}] イベント受信エラー({error_count}回目): {err}")
                     if error_count >= 5:
-                        logger.warning(f"⚠️ [{cam_name}] ストリーム不安定のため再接続します... (Error: {err})")
-                        logger.debug(traceback.format_exc())
-                        break
+                        raise Exception("イベント受信エラー過多により再接続します")
                     time.sleep(2)
 
         except Exception as e:
-            # === 【修正】外部ループ（接続自体）のエラーハンドリング ===
+            # === エラー発生時の徹底診断フェーズ ===
             consecutive_conn_errors += 1
             err_msg = str(e)
             
-            # ★追加: 詳細なスタックトレースを取得
-            tb = traceback.format_exc()
+            logger.error(f"❌ [{cam_name}] 接続切断/失敗 ({consecutive_conn_errors}回目): {err_msg}")
+            
+            # 【重要】エラー直後のポート診断を実行
+            perform_emergency_diagnosis(cam_conf['ip'])
 
-
-            # 待機時間の計算 (基本30秒 * 失敗回数。最大300秒)
+            # 待機時間計算
             wait_time = min(30 * consecutive_conn_errors, 300)
+            
+            # 通知ロジック
+            if consecutive_conn_errors == NOTIFY_THRESHOLD and not has_notified_error:
+                logger.error(f"❌ [{cam_name}] 接続不能が続いています。ログの診断結果を確認してください。(Error: {err_msg})")
+                has_notified_error = True
 
-            # エラー判定: 接続拒否やタイムアウトはネットワーク/機器起因
-            is_network_issue = "Connection refused" in err_msg or "timed out" in err_msg or "No route to host" in err_msg or "111" in err_msg
-
-            if is_network_issue:
-                if consecutive_conn_errors < NOTIFY_THRESHOLD:
-                    # 閾値未満: WARNING (通知なし)
-                    logger.warning(f"⚠️ [{cam_name}] 接続試行中({consecutive_conn_errors}/{NOTIFY_THRESHOLD})... : {err_msg}")
-                
-                elif consecutive_conn_errors == NOTIFY_THRESHOLD and not has_notified_error:
-                    # 閾値到達時: ERROR (通知あり・初回のみ)
-                    logger.error(f"❌ [{cam_name}] 接続不能: 規定回数失敗しました。以降は復旧まで静観します。(Error: {err_msg})")
-                    has_notified_error = True
-                
-                else:
-                    # 閾値超過かつ通知済み: WARNING (通知なし・静観モード)
-                    logger.warning(f"💤 [{cam_name}] 接続不可継続中 ({consecutive_conn_errors}回目)... Retry in {wait_time}s")
-            else:
-                # ネットワーク以外（認証エラーやコードバグなど）は毎回 ERROR
-                logger.error(f"❌ [{cam_name}] 予期せぬ接続エラー: {err_msg}\n詳細:\n{tb}")
+            # オブジェクトのクリーンアップ（リソース解放）
+            try:
+                if mycam: del mycam
+            except: pass
 
             time.sleep(wait_time)
 
 async def main():
-    if not WSDL_DIR: return
+    if not WSDL_DIR: 
+        logger.error("❌ WSDLディレクトリが見つかりません。")
+        return
     loop = asyncio.get_running_loop()
     tasks = []
     with ThreadPoolExecutor(max_workers=len(config.CAMERAS)) as executor:
