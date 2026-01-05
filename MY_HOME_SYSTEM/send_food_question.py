@@ -150,7 +150,7 @@ if __name__ == "__main__":
     
     now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
     # 2026年以降でなくてもDiscordを優先したい場合はここを調整
-    target_platform = "discord" 
+    target_platform = "line" 
     
     msg = {
         "type": "text",

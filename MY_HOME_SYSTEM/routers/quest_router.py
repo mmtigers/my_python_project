@@ -503,7 +503,9 @@ class GameSystem:
                     INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
-                        name = excluded.name, job_class = excluded.job_class, avatar = excluded.avatar
+                        name = excluded.name, 
+                        job_class = excluded.job_class
+                        -- avatar = excluded.avatar は削除（ユーザー設定を維持するため）
                 """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
             
             active_q_ids = [q.id for q in valid_quests]
