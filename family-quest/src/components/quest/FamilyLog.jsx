@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Coins, Star, History } from 'lucide-react';
+import { Trophy, Coins, Star, History, Clock } from 'lucide-react';
 
 /**
  * 家族全体の記録（統計とタイムライン）を表示するコンポーネント
@@ -14,6 +14,13 @@ const FamilyLog = ({ stats, chronicle }) => {
         groups[date].push(item);
         return groups;
     }, {});
+
+    // ★追加: 時刻フォーマット関数
+    const formatTime = (ts) => {
+        if (!ts) return '';
+        const date = new Date(ts);
+        return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    };
 
     return (
         <div className="space-y-4 animate-in fade-in duration-500 pb-6">
@@ -69,6 +76,11 @@ const FamilyLog = ({ stats, chronicle }) => {
                                         </div>
 
                                         <div className="flex-1">
+                                            <div className="flex items-center gap-1 text-[10px] text-gray-400 mb-0.5">
+                                                <Clock size={10} />
+                                                {formatTime(log.timestamp)}
+                                            </div>
+
                                             <div className="text-xs text-white leading-relaxed">
                                                 {log.text}
                                             </div>
