@@ -202,7 +202,7 @@ class QuestService:
     """クエストの進行管理、完了/キャンセル、承認フローを担当"""
     
     # 承認が必要なユーザーID
-    CHILDREN_IDS = ['son', 'daughter']
+    CHILDREN_IDS = ['daughter']
     # 承認権限を持つユーザーID
     PARENT_IDS = ['dad', 'mom']
 
