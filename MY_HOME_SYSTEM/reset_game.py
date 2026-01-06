@@ -6,11 +6,10 @@ import traceback
 from datetime import datetime
 
 # --- 設定 ---
-DB_PATH = "home_system.db"  # DBファイル名を実際の環境に合わせて確認してください
+DB_PATH = "home_system.db"  # DBファイルパス
 LOG_DIR = "logs"
 
-# 日本語名とDB内のuser_idまたはnameのマッピング
-# DBの中身が 'dad', 'mom' 等の場合はここを有効活用します
+# 日本語名とDB内のuser_idのマッピング
 NAME_MAP = {
     "将博": "dad",
     "春菜": "mom",
@@ -55,18 +54,13 @@ def fetch_users():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # quest_usersテーブルからユーザー情報を取得
         cursor.execute("SELECT user_id, name FROM quest_users")
         rows = cursor.fetchall()
         
         users_info = []
         for row in rows:
-            # DBのnameカラムに日本語名が入っているか、user_idがキーになっているか確認
-            # 表示用に (user_id, name) のタプルなどを保存
             u_id = row['user_id']
             u_name = row['name']
-            
-            # DBのnameが空の場合のフォールバック
             display_name = u_name if u_name else u_id
             users_info.append({"id": u_id, "name": display_name})
             
@@ -86,18 +80,16 @@ def select_user_interactive(users_info):
     """
     print("\n--- リセット対象を選択してください ---")
     
-    # 候補リストの作成
-    # NAME_MAPにある名前を優先的に表示し、DBにあってマップにないものも追加
     display_candidates = []
     
-    # マップにある日本語名に対応するDBデータがあるか確認
+    # NAME_MAPにある名前を優先表示
     db_user_ids = [u['id'] for u in users_info]
     
     for jp_name, db_id in NAME_MAP.items():
         if db_id in db_user_ids:
             display_candidates.append({"label": jp_name, "db_id": db_id})
     
-    # マップにないその他のユーザー（もし入っていれば）
+    # マップにないその他のユーザーも追加
     mapped_ids = NAME_MAP.values()
     for u in users_info:
         if u['id'] not in mapped_ids:
@@ -122,7 +114,7 @@ def select_user_interactive(users_info):
         if choice.isdigit():
             idx = int(choice) - 1
             if 0 <= idx < len(display_candidates):
-                return display_candidates[idx] # {"label":..., "db_id":...}
+                return display_candidates[idx]
         
         print("無効な入力です。リストの番号を入力してください。")
 
@@ -140,11 +132,10 @@ def reset_user_data(target_user):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # ★修正箇所: 正しいテーブル名(quest_users)とカラム名(exp, gold)を指定
-        # user_id をキーにして更新します
+        # ★修正箇所: medal_count = 0 を追加
         cursor.execute("""
             UPDATE quest_users 
-            SET level = 1, exp = 0, gold = 0 
+            SET level = 1, exp = 0, gold = 0, medal_count = 0 
             WHERE user_id = ?
         """, (user_id,))
         
@@ -154,7 +145,8 @@ def reset_user_data(target_user):
         else:
             conn.commit()
             logging.info(f"DB更新成功: {user_label} のデータをリセットしました。")
-            print(f"\n✅ {user_label} さんのデータをリセットしました (Level=1, Exp=0, Gold=0)。")
+            # メッセージにもメダルリセットを含める
+            print(f"\n✅ {user_label} さんのデータをリセットしました (Level=1, Exp=0, Gold=0, Medal=0)。")
         
     except Exception as e:
         error_msg = f"リセット処理中にエラーが発生: {str(e)}"
@@ -169,7 +161,6 @@ def reset_user_data(target_user):
 def main():
     logging.info("スクリプト起動: ユーザー選択モード")
     
-    # 1. ユーザー候補の取得
     users_info = fetch_users()
     
     if not users_info:
@@ -177,19 +168,16 @@ def main():
         print("ユーザー情報が取得できませんでした。")
         sys.exit(1)
 
-    # 2. ユーザーによる選択
     selected = select_user_interactive(users_info)
     if not selected:
         sys.exit(0)
     
-    # 3. 最終確認
     confirm = input(f"\n本当に '{selected['label']}' のデータをリセットしますか？ (y/n): ").strip().lower()
     if confirm != 'y':
         logging.info("ユーザーにより操作がキャンセルされました。")
         print("キャンセルしました。")
         sys.exit(0)
 
-    # 4. リセット実行
     reset_user_data(selected)
 
 if __name__ == "__main__":
