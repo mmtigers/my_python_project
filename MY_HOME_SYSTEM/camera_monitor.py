@@ -47,6 +47,28 @@ def find_wsdl_path():
 
 WSDL_DIR = find_wsdl_path()
 
+def close_camera_connection(mycam):
+    """Zeep/Requestsのセッションを明示的に閉じてカメラの接続枠を解放する"""
+    if not mycam:
+        return
+    try:
+        # 内部で保持しているサービス(devicemgmt, events, mediaなど)のセッションを閉じる
+        services = [
+            getattr(mycam, 'devicemgmt', None),
+            getattr(mycam, 'events', None),
+            getattr(mycam, 'media', None),
+            getattr(mycam, 'ptz', None),
+            getattr(mycam, 'imaging', None)
+        ]
+        
+        for svc in services:
+            if svc and hasattr(svc, 'zeep_client'):
+                try:
+                    svc.zeep_client.transport.session.close()
+                except: pass
+    except Exception as e:
+        logger.warning(f"Session close error: {e}")
+
 def analyze_event_type(xml_str):
     if 'Value="true"' not in xml_str and 'State="true"' not in xml_str:
         return None, None, 0, None
@@ -137,6 +159,9 @@ def monitor_single_camera(cam_conf):
     NOTIFY_THRESHOLD = 5
     has_notified_error = False
 
+    # Backoffの上限設定（最大10分待機）
+    MAX_WAIT_TIME = 600 
+
     # ポートフォールバック用のリスト作成
     port_candidates = []
     if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
@@ -151,7 +176,14 @@ def monitor_single_camera(cam_conf):
             # --- 接続フェーズ ---
             for port in port_candidates:
                 try:
+                    # 【修正1】攻撃とみなされないようポートスキャン時に少し待つ
+                    time.sleep(1.0)
+                    
                     logger.debug(f"[{cam_name}] ポート {port} で接続試行中...")
+                    
+                    # 【修正2】ソケットタイムアウトを明示してハング防止
+                    socket.setdefaulttimeout(10.0)
+
                     mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
                     
                     # サービス作成テスト（ここが通れば認証OK）
@@ -161,6 +193,10 @@ def monitor_single_camera(cam_conf):
                     logger.info(f"✅ [{cam_name}] 接続成功 (Port: {port})")
                     break
                 except Exception as e:
+                    # 【修正3】失敗時は即座にセッションを閉じてリソース解放
+                    close_camera_connection(mycam)
+                    mycam = None # Reset
+                    
                     # 認証エラー系は即時記録
                     if "401" in str(e) or "Unauthorized" in str(e):
                         logger.warning(f"⚠️ [{cam_name}] Port {port} 認証失敗: パスワードかユーザー名が違います。")
@@ -185,18 +221,25 @@ def monitor_single_camera(cam_conf):
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            # --- 接続安定時のカウンタリセット ---
-            if consecutive_conn_errors > 0:
-                logger.info(f"🎉 [{cam_name}] 接続が復旧しました！")
-            consecutive_conn_errors = 0
-            has_notified_error = False
+            # 【重要】ここではまだエラーカウンタをリセットしない
+            # イベント受信が安定して初めてリセットする仕様に変更
 
             # --- イベント受信ループ ---
             error_count = 0
+            success_pull_count = 0 # 成功回数カウンタ
+
             while True:
                 try:
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
+                    
+                    # 【修正4】イベント取得成功数をカウントし、安定してからリセット
+                    success_pull_count += 1
+                    if success_pull_count >= 5 and consecutive_conn_errors > 0:
+                        logger.info(f"🎉 [{cam_name}] 接続が完全に安定しました(Count Reset)")
+                        consecutive_conn_errors = 0
+                        has_notified_error = False
+                    
                     error_count = 0 
                     
                     if hasattr(events, 'NotificationMessage'):
@@ -244,7 +287,6 @@ def monitor_single_camera(cam_conf):
                                     msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
                                     common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
                                     time.sleep(15)
-                                    # break # ループは抜けないほうが安定するかもしれないが、リセットしたいならbreak
 
                 except Exception as e:
                     err = str(e)
@@ -252,9 +294,12 @@ def monitor_single_camera(cam_conf):
                     
                     error_count += 1
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー({error_count}回目): {err}")
+                    
+                    # 短期的なエラーなら少し待つ
+                    time.sleep(2)
+
                     if error_count >= 5:
                         raise Exception("イベント受信エラー過多により再接続します")
-                    time.sleep(2)
 
         except Exception as e:
             # === エラー発生時の徹底診断フェーズ ===
@@ -263,22 +308,24 @@ def monitor_single_camera(cam_conf):
             
             logger.error(f"❌ [{cam_name}] 接続切断/失敗 ({consecutive_conn_errors}回目): {err_msg}")
             
-            # 【重要】エラー直後のポート診断を実行
-            perform_emergency_diagnosis(cam_conf['ip'])
+            # 【修正5】緊急診断は頻度を落とす（3回に1回、かつ3回目以降）
+            if consecutive_conn_errors >= 3 and consecutive_conn_errors % 3 == 0:
+                perform_emergency_diagnosis(cam_conf['ip'])
 
-            # 待機時間計算
-            wait_time = min(30 * consecutive_conn_errors, 300)
+            # 【修正6】セッションの確実なクリーンアップ
+            close_camera_connection(mycam)
+            mycam = None
+
+            # 【修正7】待機時間の指数関数的増加（Exponential Backoff）
+            # 30, 60, 120... と倍々で増え、最大10分(600秒)で頭打ち
+            wait_time = min(30 * (2 ** (min(consecutive_conn_errors, 6) - 1)), MAX_WAIT_TIME)
             
             # 通知ロジック
             if consecutive_conn_errors == NOTIFY_THRESHOLD and not has_notified_error:
-                logger.error(f"❌ [{cam_name}] 接続不能が続いています。ログの診断結果を確認してください。(Error: {err_msg})")
+                logger.error(f"❌ [{cam_name}] 接続不能が続いています。待機時間を {wait_time}秒 に拡大します。(Error: {err_msg})")
                 has_notified_error = True
 
-            # オブジェクトのクリーンアップ（リソース解放）
-            try:
-                if mycam: del mycam
-            except: pass
-
+            logger.info(f"💤 [{cam_name}] {wait_time}秒 待機します...")
             time.sleep(wait_time)
 
 async def main():

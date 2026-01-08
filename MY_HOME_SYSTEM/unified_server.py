@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
+from fastapi.responses import JSONResponse
 import uvicorn
 import time
 import datetime
@@ -12,6 +13,7 @@ import os
 import asyncio
 import logging
 import sound_manager
+import traceback
 
 # Local Modules
 from linebot import LineBotApi, WebhookHandler
@@ -183,6 +185,30 @@ async def lifespan(app: FastAPI):
 
 # --- FastAPI App Definition ---
 app = FastAPI(lifespan=lifespan)
+# ▼▼▼ 追加: 全体エラーハンドリング (500エラーの見える化) ▼▼▼
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    想定外のエラーが発生した場合に、ログにスタックトレースを出力し、
+    フロントエンドにJSON形式でエラー内容を返却する
+    """
+    # エラーの詳細（スタックトレース）を取得
+    tb_str = traceback.format_exc()
+    
+    # ログに詳細を出力 (これが原因特定に不可欠)
+    logger.error(f"❌ Unhandled Server Error at {request.url.path}\n{tb_str}")
+    
+    # クライアントへのレスポンス (500 Internal Server Error)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "status": "error",
+            "message": "Internal Server Error",
+            "detail": str(exc),  # 開発用: エラーメッセージそのものを返す
+            "path": request.url.path
+        }
+    )
+
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
 line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
 
