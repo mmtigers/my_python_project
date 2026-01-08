@@ -116,6 +116,22 @@ def setup_logging(name: str) -> logging.Logger:
 
 logger = setup_logging("common")
 
+def execute_read_query(query: str, params: tuple = ()) -> str:
+    """読み取り専用モードで安全にSELECTを実行する"""
+    try:
+        # 物理的に書き込みを禁止する mode=ro で接続
+        conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows: return "該当するデータはありませんでした。"
+        return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
+    except Exception as e:
+        return f"検索エラー: {str(e)}"
+
 def retry_api_call(func):
     """
     API呼び出しにリトライロジックを付与するデコレータ。
