@@ -72,8 +72,7 @@ def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, 
     url: str = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
     try:
         headers = sb_tool.create_switchbot_auth_headers()
-        res = requests.get(url, headers=headers, timeout=10)
-        data = res.json()
+        data = sb_tool.request_switchbot_api(url, headers)
         
         if data.get('statusCode') != 100:
             logger.warning(f"API Error [{device_id}]: {data}")
