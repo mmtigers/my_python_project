@@ -6,6 +6,7 @@ import pytz
 import logging
 import traceback
 import os  # 追加
+import asyncio
 from typing import List, Any, Optional, Union
 from contextlib import contextmanager
 from logging.handlers import TimedRotatingFileHandler # 追加
@@ -146,6 +147,11 @@ def save_log_generic(table: str, columns_list: List[str], values_list: tuple) ->
             except Exception as e:
                 logger.error(f"データ保存失敗 ({table}): {e}")
     return False
+
+async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:
+    """save_log_generic の非同期ラッパー"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, save_log_generic, table, columns_list, values_list)
 
 # === 通信関連 (新規追加) ===
 def get_retry_session(retries=3, backoff_factor=1.0):
