@@ -3,6 +3,7 @@ import os
 from typing import List, Dict, Optional
 from dotenv import load_dotenv
 import json
+import sys
 
 # .envファイルのロード
 load_dotenv()
@@ -224,8 +225,15 @@ HAIRCUT_CYCLE_DAYS = 60
 
 # 自動作成ディレクトリ
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
-    if not os.path.exists(d):
-        os.makedirs(d, exist_ok=True)
+    try:
+        if not os.path.exists(d):
+            os.makedirs(d, exist_ok=True)
+    except PermissionError:
+        # NAS等の権限エラーで落ちないように警告のみ出して通過させる
+        print(f"⚠️ Warning: Failed to create directory '{d}' due to permission error. NAS features may be unavailable.", file=sys.stderr)
+    except Exception as e:
+        print(f"⚠️ Warning: Unexpected error creating directory '{d}': {e}", file=sys.stderr)
+# ------------------------------
 
 
 # 自転車駐車場監視設定

@@ -79,4 +79,7 @@ echo "🎧 Bluetooth Monitor started."
 $PYTHON_EXEC scheduler.py > logs/scheduler_boot.log 2>&1 &
 echo "⏰ Scheduler started."
 
+$PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 > logs/dashboard_boot.log 2>&1 &
+echo "📊 Dashboard started."
+
 echo "✅ All systems go!"
