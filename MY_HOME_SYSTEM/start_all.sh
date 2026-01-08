@@ -4,6 +4,8 @@
 # MY_HOME_SYSTEM 起動スクリプト (Final Stable)
 # ==========================================
 
+export PYTHONPATH=$(pwd)
+
 PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
 QUEST_DIR="/home/masahiro/develop/family-quest"
 cd "$PROJECT_DIR" || exit 1
@@ -69,11 +71,11 @@ echo "--- Start Background Services ---"
 $PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
 echo "🚀 Server started."
 
-$PYTHON_EXEC camera_monitor.py > logs/camera_boot.log 2>&1 &
+$PYTHON_EXEC monitors/camera_monitor.py > logs/camera_boot.log 2>&1 &
 echo "📷 Camera Monitor started."
 
 # ★追加: Bluetoothモニター起動
-$PYTHON_EXEC bluetooth_monitor.py > logs/bluetooth_boot.log 2>&1 &
+$PYTHON_EXEC monitors/bluetooth_monitor.py > logs/bluetooth_boot.log 2>&1 &
 echo "🎧 Bluetooth Monitor started."
 
 $PYTHON_EXEC scheduler.py > logs/scheduler_boot.log 2>&1 &

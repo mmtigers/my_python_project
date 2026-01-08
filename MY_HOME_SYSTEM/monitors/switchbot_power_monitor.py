@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List, Union, Tuple
 # 自作モジュール
 import common
 import config
-import switchbot_get_device_list as sb_tool
+from services import switchbot_service as sb_tool
 
 # ロガー設定
 logger = common.setup_logging("device_monitor")

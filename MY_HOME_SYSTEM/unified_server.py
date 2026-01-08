@@ -22,9 +22,9 @@ from linebot.models import MessageEvent, TextMessage, PostbackEvent
 
 import config
 import common
-import switchbot_get_device_list as sb_tool
+from services import switchbot_service as sb_tool
 from handlers import line_logic
-import backup_database
+from services import backup_service as backup_database
 from routers import quest_router
 
 # Logger Setup
@@ -83,7 +83,7 @@ async def schedule_daily_backup():
         # Backup Execution
         logger.info("📦 定期バックアップを開始します...")
         loop = asyncio.get_running_loop()
-        success, res, size = await loop.run_in_executor(None, backup_database.perform_backup)
+        success, res, size = await loop.run_in_executor(None, backup_service.perform_backup)
         
         if success:
             logger.info("✅ バックアップ成功通知を送信")
@@ -229,8 +229,13 @@ app.add_middleware(
 @app.post("/callback/line")
 async def callback_line(request: Request, x_line_signature: str = Header(None)):
     body = (await request.body()).decode('utf-8')
+    
+    # イベントループの取得
+    loop = asyncio.get_running_loop()
+    
     try: 
-        handler.handle(body, x_line_signature)
+        # handler.handle をスレッドプールで実行し、完了を待機
+        await loop.run_in_executor(None, lambda: handler.handle(body, x_line_signature))
     except InvalidSignatureError:
         logger.warning("Invalid Signature detected.")
         raise HTTPException(status_code=400)
@@ -276,7 +281,8 @@ async def callback_switchbot(body: SwitchBotWebhookBody):
     
     # 2. Logging to DB
     try:
-        common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
+        # ★非同期ラッパーを await で呼ぶように変更
+        await common.save_log_async(config.SQLITE_TABLE_SENSOR, 
             ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
             (common.get_now_iso(), name, mac, "Webhook Device", state, ctx.brightness or ""))
     except Exception as e:

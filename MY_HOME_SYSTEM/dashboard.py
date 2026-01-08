@@ -1538,9 +1538,9 @@ def render_system_tab():
         else:
             st.warning("バックアップファイルがまだありません")
             if st.button("今すぐ手動バックアップを実行"):
-                import backup_database
+                import MY_HOME_SYSTEM.backup_service as backup_service
 
-                success, res, size = backup_database.perform_backup()
+                success, res, size = backup_service.perform_backup()
                 if success:
                     st.success(f"完了しました！ ({size:.1f}MB)")
                     st.rerun()

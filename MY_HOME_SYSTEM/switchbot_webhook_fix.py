@@ -1,7 +1,7 @@
 # MY_HOME_SYSTEM/switchbot_webhook_fix.py
 import requests
 import time
-import switchbot_get_device_list as sb_tool
+import MY_HOME_SYSTEM.switchbot_service as sb_tool
 import common
 import config
 import sys
