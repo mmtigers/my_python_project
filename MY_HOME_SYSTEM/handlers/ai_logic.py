@@ -84,8 +84,39 @@ def search_database(sql_query: str):
     """
     pass
 
+def get_health_logs(child_name: str = None, days: int = 7):
+    """
+    子供の体調記録や排便記録を確認します。
+    Args:
+        child_name: 子供の名前（智矢、涼花、パパ、ママなど）。指定がない場合は全員。
+        days: 過去何日分を遡るか（デフォルト7）。
+    """
+    pass
+
+def execute_get_expenditure_logs(args):
+    """買い物履歴を安全に検索"""
+    keyword = args.get("item_keyword")
+    platform = args.get("platform")
+    days = args.get("days", 30)
+
+    query = f"SELECT order_date, platform, item_name, price FROM {config.SQLITE_TABLE_SHOPPING} WHERE order_date > datetime('now', '-? days')"
+    params = [days]
+
+    if keyword:
+        query += " AND item_name LIKE ?"
+        params.append(f"%{keyword}%")
+    if platform:
+        query += " AND platform = ?"
+        params.append(platform)
+
+    query += " ORDER BY order_date DESC"
+    # common.execute_read_query（後述）を使用して実行
+    return common.execute_read_query(query, tuple(params))
+
 # ツールセット登録
-my_tools = [declare_child_health, declare_shopping, declare_defecation, search_database]
+my_tools = [declare_child_health, declare_shopping, declare_defecation, get_health_logs, get_expenditure_logs]
+
+
 
 # ==========================================
 # 2. 実行ロジック
@@ -173,6 +204,30 @@ def execute_search_database(args):
     except Exception as e:
         logger.error(f"SQL Execution Error: {e}")
         return f"検索中にエラーが発生しました: {str(e)}"
+
+def execute_get_health_logs(args):
+    """体調・排便ログを安全に検索"""
+    child_name = args.get("child_name")
+    days = args.get("days", 7)
+    
+    # SQLの骨組み（値は ? でプレースホルダにする）
+    # 体調(child)と排便(defecation)を両方見るためのUNION例
+    query = f"""
+        SELECT timestamp, child_name as target, condition, '体調' as type 
+        FROM {config.SQLITE_TABLE_CHILD} 
+        WHERE timestamp > datetime('now', '-? days')
+        UNION ALL
+        SELECT timestamp, user_name as target, condition, '排便' as type 
+        FROM {config.SQLITE_TABLE_DEFECATION} 
+        WHERE timestamp > datetime('now', '-? days')
+    """
+    params = [days, days]
+
+    if child_name:
+        query = f"SELECT * FROM ({query}) WHERE target LIKE ?"
+        params.append(f"%{child_name}%")
+
+    return common.execute_read_query(query, tuple(params)) # common側で sqlite3.connect(..., mode='ro') を使う
 
 # ==========================================
 # 3. メイン処理 (Gemini呼び出し)
