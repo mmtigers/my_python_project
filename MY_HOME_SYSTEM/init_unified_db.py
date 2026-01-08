@@ -359,6 +359,20 @@ def init_db():
             )
         """)
 
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS reward_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                reward_id INTEGER NOT NULL,
+                reward_name TEXT,
+                cost INTEGER NOT NULL,
+                purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'requested',
+                FOREIGN KEY(user_id) REFERENCES users(id),
+                FOREIGN KEY(reward_id) REFERENCES rewards(id)
+            )
+        """)
+
     logger.info("✅ 全テーブルの準備が完了しました。")
 
 if __name__ == "__main__":

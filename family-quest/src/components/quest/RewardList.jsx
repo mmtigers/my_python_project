@@ -7,7 +7,7 @@ import { ShoppingBag, Coins } from 'lucide-react';
  * @param {Object} currentUser - 現在ログイン中のユーザー
  * @param {Function} onBuy - 購入時のコールバック関数
  */
-const RewardList = ({ rewards, currentUser, onBuy }) => {
+const RewardList = ({ rewards, userGold, onBuy }) => {
   // ユーザーが購入可能なアイテムのみ表示するフィルターなどを入れる場合はここ
   // 今回は全表示します
 
@@ -17,24 +17,25 @@ const RewardList = ({ rewards, currentUser, onBuy }) => {
         <ShoppingBag size={16} />
         <span>-- 商品一覧 --</span>
       </div>
-      
+
       {rewards.length === 0 && (
         <div className="text-center text-gray-500 py-4 text-xs">商品が入荷待ちです...</div>
       )}
 
       {rewards.map((reward) => {
         const cost = reward.cost_gold || reward.cost || 0;
-        const canAfford = (currentUser?.gold || 0) >= cost;
+        const canAfford = (userGold || 0) >= cost;
         const rId = reward.reward_id || reward.id;
 
         return (
           <div
             key={rId}
+            // クリックイベントを追加 (購入可能な場合のみ)
             onClick={() => canAfford && onBuy(reward)}
             className={`
               border p-2 rounded flex justify-between items-center transition-all select-none
-              ${canAfford 
-                ? 'border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200 cursor-pointer active:scale-[0.98]' 
+              ${canAfford
+                ? 'border-white bg-blue-900/80 hover:bg-blue-800 hover:border-yellow-200 cursor-pointer active:scale-[0.98]'
                 : 'border-gray-700 bg-gray-900/50 opacity-60 cursor-not-allowed grayscale'}
             `}
           >
@@ -47,7 +48,7 @@ const RewardList = ({ rewards, currentUser, onBuy }) => {
                 <div className="text-xs text-gray-400">{reward.category}</div>
               </div>
             </div>
-            
+
             <div className={`flex items-center gap-1 font-bold ${canAfford ? 'text-yellow-300' : 'text-red-400'}`}>
               {cost.toLocaleString()} <span className="text-[10px]">G</span>
               {!canAfford && <span className="text-[10px] ml-1">(不足)</span>}

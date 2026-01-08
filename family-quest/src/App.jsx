@@ -19,35 +19,65 @@ import AvatarUploader from './components/ui/AvatarUploader';
 const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
   if (!target) return null;
   const isCancel = mode === 'cancel';
+  const isPurchase = mode === 'purchase'; // 追加
+
+  let title = '確認';
+  let message = '';
+  let confirmBtnText = '実行する';
+  let confirmBtnColor = 'bg-blue-600';
+
+  if (isCancel) {
+    title = '行動の取り消し';
+    message = (
+      <>
+        「{target.quest_title || target.title}」<br />
+        を取り消しますか？<br />
+        <span className="text-xs text-gray-400 mt-2 block">
+          (獲得した経験値やゴールドは没収されます)
+        </span>
+      </>
+    );
+    confirmBtnText = '取り消す';
+    confirmBtnColor = 'bg-red-600';
+  } else if (isPurchase) { // 追加: 購入確認用の表示
+    title = '購入の確認';
+    const cost = target.cost_gold || target.cost;
+    message = (
+      <>
+        「{target.title}」<br />
+        （{cost} G）を購入しますか？
+      </>
+    );
+    confirmBtnText = 'はい';
+    confirmBtnColor = 'bg-yellow-600 text-black';
+  } else {
+    // デフォルト（クエスト完了確認など将来用）
+    title = '確認';
+    message = (
+      <>
+        「{target.title}」<br />
+        を達成しますか？
+      </>
+    );
+    confirmBtnText = '達成する';
+    confirmBtnColor = 'bg-blue-600';
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-in fade-in">
       <div className="bg-slate-800 border border-slate-600 rounded-lg p-6 max-w-sm w-full shadow-2xl text-center">
-        <h3 className={`text-xl font-bold mb-4 ${isCancel ? 'text-red-400' : 'text-blue-400'}`}>
-          {isCancel ? '行動の取り消し' : '確認'}
+        <h3 className={`text-xl font-bold mb-4 ${isCancel ? 'text-red-400' : isPurchase ? 'text-yellow-400' : 'text-blue-400'}`}>
+          {title}
         </h3>
-        <p className="text-white mb-6">
-          {isCancel ? (
-            <>
-              「{target.quest_title || target.title}」<br />
-              を取り消しますか？<br />
-              <span className="text-xs text-gray-400 mt-2 block">
-                (獲得した経験値やゴールドは没収されます)
-              </span>
-            </>
-          ) : (
-            <>
-              「{target.title}」<br />
-              を達成しますか？
-            </>
-          )}
+        <p className="text-white mb-6 leading-relaxed">
+          {message}
         </p>
         <div className="flex gap-4 justify-center">
-          <button onClick={onCancel} className="flex-1 py-3 bg-gray-600 rounded text-white font-bold">
-            やめる
+          <button onClick={onCancel} className="flex-1 py-3 bg-gray-600 rounded text-white font-bold hover:bg-gray-500">
+            {isPurchase ? 'いいえ' : 'やめる'}
           </button>
-          <button onClick={onConfirm} className={`flex-1 py-3 rounded text-white font-bold ${isCancel ? 'bg-red-600' : 'bg-blue-600'}`}>
-            {isCancel ? '取り消す' : '達成する'}
+          <button onClick={onConfirm} className={`flex-1 py-3 rounded text-white font-bold hover:opacity-80 ${confirmBtnColor}`}>
+            {confirmBtnText}
           </button>
         </div>
       </div>
@@ -65,6 +95,7 @@ export default function App() {
   // キャンセル/確認モーダル用
   const [modalMode, setModalMode] = useState(null); // 'cancel' or null
   const [targetHistory, setTargetHistory] = useState(null);
+  const [targetItem, setTargetItem] = useState(null);       // ★追加: 購入アイテム用
 
   const {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
@@ -111,6 +142,12 @@ export default function App() {
       return;
     }
 
+    // ★追加: 購入ボタンクリック時のハンドラ
+    const handleBuyReward = (reward) => {
+      setTargetItem(reward);
+      setModalMode('purchase');
+    };
+
     // 未完了、または無限クエストの場合は即実施
     completeQuest(currentUser, quest);
   };
@@ -118,9 +155,21 @@ export default function App() {
   const handleModalConfirm = async () => {
     if (modalMode === 'cancel' && targetHistory) {
       await cancelQuest(currentUser, targetHistory);
+    } else if (modalMode === 'purchase' && targetItem) {
+      // 購入処理を実行
+      await buyReward(currentUser, targetItem);
     }
+    // 状態リセット
     setModalMode(null);
     setTargetHistory(null);
+    setTargetItem(null);
+  };
+
+  // ★追加: モーダルキャンセル時のハンドラ
+  const handleModalCancel = () => {
+    setModalMode(null);
+    setTargetHistory(null);
+    setTargetItem(null);
   };
 
   const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
@@ -148,9 +197,10 @@ export default function App() {
       {modalMode && (
         <ConfirmModal
           mode={modalMode}
-          target={targetHistory}
+          // モードに応じてターゲットを切り替え
+          target={modalMode === 'purchase' ? targetItem : targetHistory}
           onConfirm={handleModalConfirm}
-          onCancel={() => { setModalMode(null); setTargetHistory(null); }}
+          onCancel={handleModalCancel}
         />
       )}
 
@@ -222,6 +272,7 @@ export default function App() {
               {activeTab === 'shop' && (
                 <RewardList
                   rewards={rewards}
+                  // ★修正: ユーザーオブジェクトではなく所持金を渡す
                   userGold={currentUser.gold}
                   onBuy={handleBuyReward}
                 />
