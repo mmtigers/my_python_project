@@ -91,7 +91,17 @@ def get_health_logs(child_name: str = None, days: int = 7):
         child_name: 子供の名前（智矢、涼花、パパ、ママなど）。指定がない場合は全員。
         days: 過去何日分を遡るか（デフォルト7）。
     """
-    pass
+    # 実行ロジックへ委譲
+    args = {"child_name": child_name, "days": days}
+    return execute_get_health_logs(args)
+
+# 実行用ロジックが先に定義されている必要があるため、ツールの下にある実行ロジックを参照できるようにする
+# Pythonでは関数内で呼ぶ分には定義順序は問わないが、
+# ここでは execute_get_expenditure_logs がまだ定義されていないため、
+# execute_get_expenditure_logs の定義はこの後にある。
+# よって、my_tools の定義をファイルの最後に移動するか、
+# execute_ 関数群を先に書くのが正しいが、今回は安全に「ラッパー関数」を定義して
+# execute_get_expenditure_logs を呼び出す形にする。
 
 def execute_get_expenditure_logs(args):
     """買い物履歴を安全に検索"""
@@ -110,12 +120,23 @@ def execute_get_expenditure_logs(args):
         params.append(platform)
 
     query += " ORDER BY order_date DESC"
-    # common.execute_read_query（後述）を使用して実行
     return common.execute_read_query(query, tuple(params))
+
+# ▼▼▼ 追加した関数 ▼▼▼
+def get_expenditure_logs(item_keyword: str = None, platform: str = None, days: int = 30):
+    """
+    過去の買い物履歴や支出を検索します。
+    Args:
+        item_keyword: 商品名の一部（例: "お茶", "オムツ"）。
+        platform: 購入先（Amazon, Rakuten, LINE入力）。指定なしなら全て。
+        days: 検索対象の日数（デフォルト30日）。
+    """
+    args = {"item_keyword": item_keyword, "platform": platform, "days": days}
+    return execute_get_expenditure_logs(args)
+# ▲▲▲ 追加終了 ▲▲▲
 
 # ツールセット登録
 my_tools = [declare_child_health, declare_shopping, declare_defecation, get_health_logs, get_expenditure_logs]
-
 
 
 # ==========================================
@@ -183,7 +204,6 @@ def execute_search_database(args):
 
     # 読み取り専用モードで接続
     try:
-        # common.get_db_cursorは書き込みも可能な設定になりうるため、ここでは明示的にroモードで接続する
         conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
         cursor = conn.cursor()
         
@@ -197,7 +217,6 @@ def execute_search_database(args):
             return "該当するデータは見つかりませんでした。"
 
         # 結果を見やすく整形 (Markdownテーブル風、またはJSON)
-        # AIが解釈しやすいJSON形式で返す
         result_list = [dict(zip(columns, row)) for row in rows]
         return json.dumps(result_list, ensure_ascii=False, default=str)
 
@@ -210,8 +229,6 @@ def execute_get_health_logs(args):
     child_name = args.get("child_name")
     days = args.get("days", 7)
     
-    # SQLの骨組み（値は ? でプレースホルダにする）
-    # 体調(child)と排便(defecation)を両方見るためのUNION例
     query = f"""
         SELECT timestamp, child_name as target, condition, '体調' as type 
         FROM {config.SQLITE_TABLE_CHILD} 
@@ -227,7 +244,7 @@ def execute_get_health_logs(args):
         query = f"SELECT * FROM ({query}) WHERE target LIKE ?"
         params.append(f"%{child_name}%")
 
-    return common.execute_read_query(query, tuple(params)) # common側で sqlite3.connect(..., mode='ro') を使う
+    return common.execute_read_query(query, tuple(params))
 
 # ==========================================
 # 3. メイン処理 (Gemini呼び出し)
@@ -258,11 +275,10 @@ def analyze_text_and_execute(text: str, user_id: str, user_name: str) -> str:
         ユーザーメッセージ: {text}
         """
 
-        # チャットセッション開始（履歴なしの単発）
+        # チャットセッション開始
         chat = model.start_chat(enable_automatic_function_calling=True)
         response = chat.send_message(prompt)
         
-        # 自動実行された結果を含むレスポンスが返ってくる
         if response.text:
             return response.text.strip()
             
