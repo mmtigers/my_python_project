@@ -259,28 +259,30 @@ def process_message(event, line_bot_api):
     reply_token = event.reply_token
     user_name = get_user_name(event, line_bot_api)
 
-    # === 1. 手入力モード処理 (修正版) ===
+    # === 1. 手入力モード処理 (Pydanticモデル版) ===
     if user_id in USER_INPUT_STATE:
-        state = USER_INPUT_STATE[user_id] # これが UserInputState オブジェクトになる
+        state = USER_INPUT_STATE[user_id]
         
-        # キャンセル処理は共通
+        # キャンセル処理は全モード共通
         if msg.startswith(("キャンセル", "戻る")):
             del USER_INPUT_STATE[user_id]
             common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
             return
+        
+        # 安全策：古い形式（文字列）が残っていたら削除してスキップ
+        if not isinstance(state, UserInputState):
+            del USER_INPUT_STATE[user_id]
+            return
 
-        # 子供の体調入力モードか判定
-        if isinstance(state, UserInputState) and state.mode == InputMode.CHILD_HEALTH:
+        # --- A. 子供の体調入力モード ---
+        if state.mode == InputMode.CHILD_HEALTH:
             target_child = state.target_name
-            
-            # DB保存
             common.save_log_generic(config.SQLITE_TABLE_CHILD,
                 ["user_id", "user_name", "child_name", "condition", "timestamp"],
                 (user_id, user_name, target_child, msg, common.get_now_iso()))
             
-            del USER_INPUT_STATE[user_id] # 完了したので削除
+            del USER_INPUT_STATE[user_id]
             
-            # 完了通知
             buttons = {
                 "type": "template", "altText": "記録完了",
                 "template": {
@@ -291,26 +293,28 @@ def process_message(event, line_bot_api):
             common.send_reply(reply_token, [buttons])
             return
 
-
-        # 既存: 食事記録の手入力処理
-        if category.startswith("食事") or category in ["自炊", "外食", "その他"]: # カテゴリ名の揺らぎに対応
+        # --- B. 食事記録の入力モード ---
+        elif state.mode == InputMode.MEAL:
+            category = state.category or "その他"
             if len(msg) > 50:
                 common.send_reply(reply_token, [{"type": "text", "text": "長すぎるよ💦 50文字以内でお願い！"}])
                 return
 
             final_rec = f"{category}: {msg} (手入力)"
-            
             common.save_log_generic(config.SQLITE_TABLE_FOOD, 
                 ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
                 (user_id, user_name, common.get_today_date_str(), "Dinner", final_rec, common.get_now_iso()))
             
             del USER_INPUT_STATE[user_id]
-            
-            # 次の質問へ
             ask_outing_question(reply_token, final_rec)
             return
-            
-        # 該当しないカテゴリがStateに残っていた場合の安全策
+
+        # --- C. お腹記録（今後拡張が必要な場合） ---
+        elif state.mode == InputMode.STOMACH:
+            # 今はAIがメインですが、手入力が必要になったらここに書く
+            pass
+
+        # 該当なし（安全のため削除）
         del USER_INPUT_STATE[user_id]
 
     # === 2. コマンド分岐 ===
@@ -351,7 +355,10 @@ def process_message(event, line_bot_api):
 
     if msg.startswith("食事手入力_"):
         cat = msg.replace("食事手入力_", "")
-        USER_INPUT_STATE[user_id] = cat
+        USER_INPUT_STATE[user_id] = UserInputState(
+            mode=InputMode.MEAL, 
+            category=cat
+        )
         common.send_reply(reply_token, [{"type": "text", "text": f"わかった！ {cat}のメニューを教えてね📝"}])
         return
 
