@@ -16,6 +16,7 @@ import sound_manager
 import traceback
 from models.switchbot import SwitchBotWebhookBody
 from fastapi.exceptions import RequestValidationError
+from models.line import LineWebhookBody
 
 # Local Modules
 from linebot import LineBotApi, WebhookHandler
@@ -242,16 +243,21 @@ app.add_middleware(
 # --- Endpoints: LINE ---
 @app.post("/callback/line")
 async def callback_line(request: Request, x_line_signature: str = Header(None)):
-    body = (await request.body()).decode('utf-8')
+    raw_body = (await request.body()).decode('utf-8')
     
-    # イベントループの取得
+    # 1. まず Pydantic で構造をチェック（不正なリクエストを弾く）
+    try:
+        json_body = await request.json()
+        LineWebhookBody(**json_body)
+    except Exception as e:
+        logger.warning(f"不正なLINE Webhook形式を検知: {e}")
+        # 公式の署名検証でも弾かれますが、ここで検知できるとログが分かりやすくなります
+    
+    # 2. 既存の処理（公式ライブラリへ）
     loop = asyncio.get_running_loop()
-    
     try: 
-        # handler.handle をスレッドプールで実行し、完了を待機
-        await loop.run_in_executor(None, lambda: handler.handle(body, x_line_signature))
+        await loop.run_in_executor(None, lambda: handler.handle(raw_body, x_line_signature))
     except InvalidSignatureError:
-        logger.warning("Invalid Signature detected.")
         raise HTTPException(status_code=400)
     return "OK"
 
