@@ -5,6 +5,7 @@ from linebot.models import MessageEvent, TextMessage, PostbackEvent
 from urllib.parse import parse_qsl
 import handlers.ai_logic as ai_logic
 import datetime
+from models.line import LinePostbackData, UserInputState, InputMode
 
 # ユーザーの状態管理
 USER_INPUT_STATE = {}
@@ -77,6 +78,8 @@ def create_health_carousel_flex():
                      "action": {"type": "postback", "label": "🤒 熱あり", "data": f"action=child_check&child={name}&status=fever"}},
                     {"type": "button", "style": "secondary", "height": "sm",
                      "action": {"type": "postback", "label": "🤧 鼻水・他", "data": f"action=child_check&child={name}&status=cold"}},
+                    {"type": "button", "style": "secondary", "height": "sm",
+                     "action": {"type": "postback", "label": "✏️ その他（手入力）", "data": f"action=child_check&child={name}&status=other"}},
                     {"type": "separator", "margin": "md"},
                     {"type": "button", "style": "link", "height": "sm", "margin": "md",
                      "action": {"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}}
@@ -126,10 +129,18 @@ def handle_postback(event, line_bot_api):
         reply_token = event.reply_token
         user_name = get_user_name(event, line_bot_api)
         
-        data = dict(parse_qsl(event.postback.data))
-        action = data.get("action")
-        target_name = data.get("child")
+        # 1. クエリ文字列を辞書に変換
+        raw_dict = dict(parse_qsl(event.postback.data))
         
+        # 2. Pydanticモデルでバリデーション
+        try:
+            pb = LinePostbackData(**raw_dict)
+        except Exception as e:
+            common.logger.warning(f"⚠️ 不正なポストバック形式を無視: {raw_dict} (Error: {e})")
+            return
+
+        action = pb.action
+        target_name = pb.child
         quota_text = get_quota_text()
 
         # === 1. 全員元気 (一括) ===
@@ -161,23 +172,29 @@ def handle_postback(event, line_bot_api):
 
         # === 3. 個別記録 ===
         elif action == "child_check":
-            status = data.get("status")
             status_map = {
                 "genki": "😊 元気いっぱい",
                 "fever": "🤒 お熱がある",
                 "cold": "🤧 鼻水・咳・他",
                 "other": "✏️ その他"
             }
-            condition_text = status_map.get(status, "その他")
             
-            if status == "other":
-                USER_INPUT_STATE[user_id] = f"子供記録_{target_name}"
+            
+            # pb.status を安全に使用
+            condition_text = status_map.get(pb.status or "", "その他")
+            
+            if pb.status == "other" and target_name:
+                # 以前: USER_INPUT_STATE[user_id] = f"子供記録_{target_name}"
+                USER_INPUT_STATE[user_id] = UserInputState(
+                    mode=InputMode.CHILD_HEALTH, 
+                    target_name=target_name
+                )
                 common.send_reply(reply_token, [{"type": "text", "text": f"了解です。{target_name}の様子をメッセージで送ってください📝"}])
-            else:
+            elif target_name:
                 common.save_log_generic(config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
                     (user_id, user_name, target_name, condition_text, common.get_now_iso()))
-                
+                            
                 # 記録後のフィードバック（サマリ確認へ誘導）
                 reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
                 # サマリボタンを付ける
@@ -244,20 +261,26 @@ def process_message(event, line_bot_api):
 
     # === 1. 手入力モード処理 (修正版) ===
     if user_id in USER_INPUT_STATE:
-        category = USER_INPUT_STATE[user_id]
+        state = USER_INPUT_STATE[user_id] # これが UserInputState オブジェクトになる
+        
+        # キャンセル処理は共通
         if msg.startswith(("キャンセル", "戻る")):
             del USER_INPUT_STATE[user_id]
             common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
             return
 
-        if category.startswith("子供記録_"):
-            target_child = category.replace("子供記録_", "")
+        # 子供の体調入力モードか判定
+        if isinstance(state, UserInputState) and state.mode == InputMode.CHILD_HEALTH:
+            target_child = state.target_name
+            
+            # DB保存
             common.save_log_generic(config.SQLITE_TABLE_CHILD,
                 ["user_id", "user_name", "child_name", "condition", "timestamp"],
                 (user_id, user_name, target_child, msg, common.get_now_iso()))
-            del USER_INPUT_STATE[user_id]
             
-            # 手入力完了後もサマリ確認ボタンを出す
+            del USER_INPUT_STATE[user_id] # 完了したので削除
+            
+            # 完了通知
             buttons = {
                 "type": "template", "altText": "記録完了",
                 "template": {
@@ -268,25 +291,6 @@ def process_message(event, line_bot_api):
             common.send_reply(reply_token, [buttons])
             return
 
-        # ▼▼▼ 追加: 子供記録の手入力処理 ▼▼▼
-        if category.startswith("子供記録_"):
-            target_child = category.replace("子供記録_", "")
-            
-            # DB保存
-            common.save_log_generic(config.SQLITE_TABLE_CHILD,
-                ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                (user_id, user_name, target_child, msg, common.get_now_iso()))
-            
-            del USER_INPUT_STATE[user_id]
-            
-            # 完了通知
-            quota_text = get_quota_text()
-            common.send_reply(reply_token, [{
-                "type": "text", 
-                "text": f"詳しくありがとうございます！\n📝 {target_child}: {msg}\n記録しました。お大事にしてくださいね。{quota_text}"
-            }])
-            return
-        # ▲▲▲ ここまで ▲▲▲
 
         # 既存: 食事記録の手入力処理
         if category.startswith("食事") or category in ["自炊", "外食", "その他"]: # カテゴリ名の揺らぎに対応
@@ -411,7 +415,9 @@ def process_message(event, line_bot_api):
                 (user_id, user_name, msg, common.get_now_iso(), kw))
             common.logger.info(f"[OHAYO] {user_name} -> {msg}")
             # おはようの場合はここで終了（AIには投げない）
-            return
+            reply_text = f"{user_name}さん、おはようございます！☀️今日も一日頑張りましょう。"
+            common.send_reply(reply_token, [{"type": "text", "text": reply_text}])
+            return # 返信を送ってから終了
 
     # ここでAI呼び出し！
     common.logger.info(f"🤖 AI解析へ: {msg}")

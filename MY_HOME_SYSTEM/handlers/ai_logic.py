@@ -205,7 +205,7 @@ def analyze_text_and_execute(text: str, user_id: str, user_name: str) -> str:
 
         # チャットセッション開始（履歴なしの単発）
         chat = model.start_chat(enable_automatic_function_calling=True)
-        response = chat.sendMessage(prompt)
+        response = chat.send_message(prompt)
         
         # 自動実行された結果を含むレスポンスが返ってくる
         if response.text:
