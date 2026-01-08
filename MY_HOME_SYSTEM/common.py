@@ -7,6 +7,8 @@ import logging
 import traceback
 import os  # 追加
 import asyncio
+import tenacity
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import List, Any, Optional, Union
 from contextlib import contextmanager
 from logging.handlers import TimedRotatingFileHandler # 追加
@@ -81,7 +83,24 @@ def setup_logging(name: str) -> logging.Logger:
     
     return logger
 
+
+
 logger = setup_logging("common")
+
+def retry_api_call(func):
+    """
+    API呼び出しにリトライロジックを付与するデコレータ。
+    - 最大3回試行
+    - 指数バックオフ（2秒, 4秒, 8秒...と間隔を広げる）
+    - ネットワークエラー（requests.exceptions.RequestException）時に発動
+    """
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(requests.exceptions.RequestException),
+        before_sleep=tenacity.before_sleep_log(logging.getLogger("common"), logging.WARNING),
+        reraise=True
+    )(func)
 
 # === データベース関連 (強化版) ===
 @contextmanager
@@ -237,6 +256,7 @@ def _send_line_push(user_id: str, messages: List[dict]) -> bool:
         logger.error(f"LINE接続エラー: {e}")
         return False
 
+@retry_api_call
 def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = "discord", channel: str = "notify") -> bool:
     """
     メッセージを送信するラッパー関数 (修正版)
@@ -351,6 +371,8 @@ def get_line_message_quota():
         else:
             print(f"Failed to get LINE quota: {e}")
         return None
+
+
 
 
 # === ユーティリティ ===
