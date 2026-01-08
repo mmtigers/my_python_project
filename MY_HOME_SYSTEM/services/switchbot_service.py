@@ -7,6 +7,7 @@ import base64
 import uuid
 import config 
 import common
+from models.switchbot import DeviceStatusResponse
 
 DEVICE_NAME_CACHE = {}
 
@@ -15,7 +16,10 @@ def request_switchbot_api(url, headers):
     """SwitchBot APIへのリクエスト（リトライ付き）"""
     response = requests.get(url, headers=headers, timeout=10)
     response.raise_for_status() # 4xx, 5xxエラー時に例外を投げてリトライをトリガー
-    return response.json()
+    # ★ここで Pydantic を使って「最低限 statusCode があるか」を検証
+    raw_data = response.json()
+    validated = DeviceStatusResponse(**raw_data)
+    return validated.dict() # 検証済みデータを辞書として返す
 
 def create_switchbot_auth_headers():
     """認証ヘッダーを生成する関数"""

@@ -14,6 +14,8 @@ import asyncio
 import logging
 import sound_manager
 import traceback
+from models.switchbot import SwitchBotWebhookBody
+from fastapi.exceptions import RequestValidationError
 
 # Local Modules
 from linebot import LineBotApi, WebhookHandler
@@ -43,17 +45,17 @@ CONTACT_COOLDOWN = 300   # 5分 (連打防止)
 MOTION_TIMEOUT = 900     # 15分 (動きなし判定までの時間)
 
 
-# --- Pydantic Models ---
-class SwitchBotContext(BaseModel):
-    deviceMac: str
-    detectionState: str
-    brightness: Optional[str] = None
-    timeOfSample: Optional[int] = None
+# # --- Pydantic Models ---
+# class SwitchBotContext(BaseModel):
+#     deviceMac: str
+#     detectionState: str
+#     brightness: Optional[str] = None
+#     timeOfSample: Optional[int] = None
 
-class SwitchBotWebhookBody(BaseModel):
-    context: SwitchBotContext
-    eventType: Optional[str] = None
-    deviceType: Optional[str] = None
+# class SwitchBotWebhookBody(BaseModel):
+#     context: SwitchBotContext
+#     eventType: Optional[str] = None
+#     deviceType: Optional[str] = None
 
 
 # --- Background Task: Scheduled Backup ---
@@ -207,6 +209,18 @@ async def global_exception_handler(request: Request, exc: Exception):
             "detail": str(exc),  # 開発用: エラーメッセージそのものを返す
             "path": request.url.path
         }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """バリデーションエラー（データ形式異常）を検知して通知する"""
+    error_detail = exc.errors()
+    logger.error(f"❌ SwitchBot Webhook データ形式異常を検知しました:\nURL: {request.url.path}\nErrors: {error_detail}")
+    
+    # Discordへも通知が行くように（logger.errorで既に飛ぶ設定ならOK）
+    return JSONResponse(
+        status_code=422,
+        content={"detail": error_detail, "body": "Invalid data format"}
     )
 
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
