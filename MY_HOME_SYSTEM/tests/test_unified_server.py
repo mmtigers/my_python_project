@@ -36,10 +36,10 @@ sys.modules["config"] = mock_config
 
 # 依存モジュールのモック化
 sys.modules["common"] = MagicMock()
-sys.modules["switchbot_get_device_list"] = MagicMock()
+sys.modules["services.switchbot_service"] = MagicMock()
 sys.modules["handlers"] = MagicMock()
 sys.modules["handlers.line_logic"] = MagicMock()
-sys.modules["backup_database"] = MagicMock()
+sys.modules["services.backup_service"] = MagicMock()
 sys.modules["routers"] = MagicMock()
 sys.modules["routers.quest_router"] = MagicMock()
 

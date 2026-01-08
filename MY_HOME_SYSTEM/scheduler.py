@@ -3,42 +3,50 @@ import time
 import subprocess
 import sys
 import logging
+import os  # <--- 追加
 from datetime import datetime
-import common  # 既存のlogging設定を利用
+import common
 
 # ロガー設定
 logger = common.setup_logging("scheduler")
 
 # === 設定: 定期実行するスクリプトと間隔(秒) ===
+# 修正: パスを monitors/ 始まりに変更
 TASKS = [
     # 頻度: 高 (5分〜10分)
-    {"script": "switchbot_power_monitor.py", "interval": 300,  "last_run": 0}, # 5分: 電源・家電監視
-    {"script": "nature_remo_monitor.py",     "interval": 300,  "last_run": 0}, # 5分: Nature Remo 監視
-    {"script": "car_presence_checker.py",    "interval": 600,  "last_run": 0}, # 10分: 車の有無 (画像解析)
-    {"script": "server_watchdog.py",         "interval": 600,  "last_run": 0}, # 10分: サーバー死活監視
+    {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0},
+    {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0},
+    {"script": "monitors/car_presence_checker.py",    "interval": 600,  "last_run": 0},
+    {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0},
 
     # 頻度: 中 (30分)
-    {"script": "bicycle_parking_monitor.py", "interval": 1800, "last_run": 0}, # 30分: 駐輪場空き状況
+    {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0},
 
     # 頻度: 低 (1時間〜)
-    {"script": "nas_monitor.py",             "interval": 3600, "last_run": 0}, # 60分: NAS容量・Ping監視
-    {"script": "haircut_monitor.py",         "interval": 3600, "last_run": 0}, # 60分: 散髪予約メール確認
+    {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0},
+    {"script": "monitors/haircut_monitor.py",         "interval": 3600, "last_run": 0},
 ]
 
 def run_script(script_name):
     """サブプロセスとしてスクリプトを実行"""
     try:
-        # 現在のPythonインタプリタを使用
         cmd = [sys.executable, script_name]
         logger.info(f"▶️ Task Start: {script_name}")
         
-        # 実行 (完了を待つ)
+        # 修正: サブプロセスが親ディレクトリの common.py をimportできるようにする
+        current_env = os.environ.copy()
+        cwd = os.getcwd()
+        current_path = current_env.get("PYTHONPATH", "")
+        # 現在のディレクトリをPYTHONPATHの先頭に追加
+        current_env["PYTHONPATH"] = f"{cwd}{os.pathsep}{current_path}"
+
         start_time = time.time()
         result = subprocess.run(
             cmd, 
             capture_output=True, 
             text=True, 
-            check=False
+            check=False,
+            env=current_env  # <--- 環境変数を渡す
         )
         duration = time.time() - start_time
 
@@ -51,23 +59,18 @@ def run_script(script_name):
         logger.error(f"🔥 Scheduler Error ({script_name}): {e}")
 
 def main():
-    logger.info("🚀 System Scheduler Started (Season 5)")
+    logger.info("🚀 System Scheduler Started (Season 5 - Refactored)")
     logger.info(f"📋 Registered Tasks: {len(TASKS)}")
 
-    # 初回実行の分散を防ぐため、起動直後は少し待機しても良いが、
-    # ここでは即時計測を開始し、次回以降intervalに従う単純ループとする
-    
     try:
         while True:
             current_time = time.time()
             
             for task in TASKS:
-                # 経過時間をチェック
                 if current_time - task["last_run"] >= task["interval"]:
                     run_script(task["script"])
                     task["last_run"] = time.time()
             
-            # CPU負荷軽減
             time.sleep(10)
 
     except KeyboardInterrupt:
