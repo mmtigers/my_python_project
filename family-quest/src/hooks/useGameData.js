@@ -151,7 +151,7 @@ export const useGameData = (onLevelUp) => {
             alert("ゴールドが足りません！");
             return;
         }
-        if (!window.confirm(`${reward.title} を 購入しますか？`)) return;
+
 
         try {
             const res = await apiClient.post('/api/quest/reward/purchase', {
