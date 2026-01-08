@@ -14,6 +14,7 @@ import EquipmentShop from './components/quest/EquipmentShop';
 import FamilyLog from './components/quest/FamilyLog';
 import FamilyParty from './components/quest/FamilyParty';
 import AvatarUploader from './components/ui/AvatarUploader';
+import MessageModal from './components/ui/MessageModal';
 
 // ★追加: 確認/取消モーダル
 const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
@@ -96,6 +97,7 @@ export default function App() {
   const [modalMode, setModalMode] = useState(null); // 'cancel' or null
   const [targetHistory, setTargetHistory] = useState(null);
   const [targetItem, setTargetItem] = useState(null);       // ★追加: 購入アイテム用
+  const [messageModal, setMessageModal] = useState(null); // { title, message, icon }
 
   const {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
@@ -156,16 +158,24 @@ export default function App() {
     if (modalMode === 'cancel' && targetHistory) {
       await cancelQuest(currentUser, targetHistory);
     } else if (modalMode === 'purchase' && targetItem) {
-      // 購入処理を実行
-      await buyReward(currentUser, targetItem);
+      // ★修正: 購入処理の結果を受け取る
+      const result = await buyReward(currentUser, targetItem);
+
+      // 成功した場合のみ、リッチなメッセージモーダルを表示
+      if (result && result.success) {
+        setMessageModal({
+          title: "お買い上げ！",
+          message: `${result.reward.title} を\n手に入れた！`,
+          icon: result.reward.icon || result.reward.icon_key || '🎁'
+        });
+      }
     }
-    // 状態リセット
+    // 確認モーダルは閉じる
     setModalMode(null);
     setTargetHistory(null);
     setTargetItem(null);
   };
 
-  // ★追加: モーダルキャンセル時のハンドラ
   const handleModalCancel = () => {
     setModalMode(null);
     setTargetHistory(null);
@@ -187,6 +197,17 @@ export default function App() {
   return (
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
       <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
+
+
+      {/* ★追加: 汎用メッセージモーダル (LevelUpModalの下あたりに配置) */}
+      {messageModal && (
+        <MessageModal
+          title={messageModal.title}
+          message={messageModal.message}
+          icon={messageModal.icon}
+          onClose={() => setMessageModal(null)}
+        />
+      )}
 
       {/* アバター編集モーダル */}
       {editingUser && (
