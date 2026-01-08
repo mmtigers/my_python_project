@@ -55,8 +55,8 @@ class MasterQuest(BaseModel):
     gold: int
     icon: str
     days: Optional[str] = None
-    start: Optional[str] = None
-    end: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     chance: Optional[float] = 1.0
     start_time: Optional[str] = None
     end_time: Optional[str] = None
@@ -374,12 +374,30 @@ class QuestService:
         filtered = []
         now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
         today_str = now.strftime("%Y-%m-%d")
+        today_date = now.date()
         current_time_str = now.strftime("%H:%M")
 
         for q in quests:
             if q['quest_type'] == 'limited':
-                if q['start_date'] and today_str < q['start_date']: continue
-                if q['end_date'] and today_str > q['end_date']: continue
+                try:
+                    # start_date判定
+                    if q.get('start_date'):
+                        # '/'区切りなどにも対応したければ dateutil.parser.parse 推奨だが、
+                        # 標準ライブラリで簡易的にやるなら strptime をフォーマットに合わせて試行するか、
+                        # 最低限 "-" で split して date型を作る
+                        y, m, d = map(int, q['start_date'].split('-'))
+                        start_dt = datetime.date(y, m, d)
+                        if today_date < start_dt: continue
+
+                    # end_date判定
+                    if q.get('end_date'):
+                        y, m, d = map(int, q['end_date'].split('-'))
+                        end_dt = datetime.date(y, m, d)
+                        if today_date > end_dt: continue
+                except ValueError as e:
+                    # 日付形式エラーの場合はログを出してスキップ（あるいは安全側に倒して表示しない）
+                    logger.warning(f"Date parse error for quest {q.get('id')}: {e}")
+                    continue
             if q['quest_type'] == 'random':
                 seed = f"{today_str}_{q['quest_id']}"
                 if random.Random(seed).random() > q['occurrence_chance']: continue
@@ -526,9 +544,16 @@ class GameSystem:
                     ON CONFLICT(quest_id) DO UPDATE SET
                         title = excluded.title, quest_type = excluded.quest_type, target_user = excluded.target_user,
                         exp_gain = excluded.exp_gain, gold_gain = excluded.gold_gain, icon_key = excluded.icon_key,
-                        day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time
-                """, (q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, 
-                      q.days, q.start, q.end, q.chance, q.start_time, q.end_time))
+                        day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time,
+                        start_date = excluded.start_date, end_date = excluded.end_date, occurrence_chance = excluded.occurrence_chance
+                """, (
+                    q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, 
+                    q.days, 
+                    # [修正前] q.start, q.end, 
+                    # [修正後] ★ここを変数名に合わせて修正
+                    q.start_date, q.end_date, 
+                    q.chance, q.start_time, q.end_time
+                ))
 
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
