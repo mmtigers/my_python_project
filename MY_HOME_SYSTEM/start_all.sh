@@ -23,10 +23,11 @@ echo "--- Cleanup Old Processes ---"
 # まずは優しく停止
 pkill -f unified_server.py
 pkill -f camera_monitor.py
+pkill -f bluetooth_monitor.py  # ★追加
 pkill -f scheduler.py
 pkill -f "streamlit run"
 
-# プロセスが消えるまで最大10秒待機 (ここが重要)
+# プロセスが消えるまで最大10秒待機
 for i in {1..10}; do
   if ! pgrep -f unified_server.py > /dev/null; then
     echo "✅ Old server stopped."
@@ -48,15 +49,12 @@ MOUNT_POINT="/mnt/nas"
 if command -v mountpoint >/dev/null 2>&1; then
   if ! mountpoint -q "$MOUNT_POINT"; then
     echo "⚠️ NAS is NOT mounted. Skipping checks to avoid hang."
-    # ここでexit 1するとSystemdが無限再起動するので、
-    # NASなしでもサーバーだけは起動させるようにする（あるいはここで待機ループ）
   else
     echo "✅ NAS Mounted."
   fi
 fi
 
 # --- Phase 2: Frontend Build (Build Skip Logic) ---
-# ※Systemdタイムアウト回避のため、自動ビルドは一旦コメントアウト推奨
 # echo "--- Check Frontend ---"
 # if [ -d "$QUEST_DIR" ]; then
 #   (cd "$QUEST_DIR" && npm install >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1 && npm run build >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1)
@@ -68,17 +66,17 @@ $PYTHON_EXEC switchbot_webhook_fix.py
 
 # --- Phase 4: 常駐プロセス起動 ---
 echo "--- Start Background Services ---"
-$PYTHON_EXEC camera_monitor.py >> logs/camera.log 2>&1 &
-$PYTHON_EXEC scheduler.py >> logs/scheduler.log 2>&1 &
+$PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
+echo "🚀 Server started."
 
-source .venv/bin/activate
-nohup streamlit run dashboard.py > /dev/null 2>&1 &
-deactivate
+$PYTHON_EXEC camera_monitor.py > logs/camera_boot.log 2>&1 &
+echo "📷 Camera Monitor started."
 
-# --- Phase 5: メインサーバー起動 (exec使用) ---
-echo "🚀 Starting Unified Server..."
-echo "Logs: logs/server.log"
+# ★追加: Bluetoothモニター起動
+$PYTHON_EXEC bluetooth_monitor.py > logs/bluetooth_boot.log 2>&1 &
+echo "🎧 Bluetooth Monitor started."
 
-# ★重要: execを使うことで、シェルのプロセスがPythonプロセスに置き換わります。
-# これによりSystemdからのシグナル(停止命令)が直接Pythonに届くようになり、管理が安定します。
-exec $PYTHON_EXEC unified_server.py >> logs/server.log 2>&1
+$PYTHON_EXEC scheduler.py > logs/scheduler_boot.log 2>&1 &
+echo "⏰ Scheduler started."
+
+echo "✅ All systems go!"
