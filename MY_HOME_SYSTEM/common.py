@@ -27,39 +27,66 @@ else:
     
 # === ロギング設定 ===
 class DiscordErrorHandler(logging.Handler):
-    """エラーログをDiscordに通知するハンドラ"""
+    """エラーログをDiscordに通知するハンドラ (スタックトレース対応版)"""
     def emit(self, record):
+        # Discordの無限ループ防止条件は維持
         if record.levelno >= logging.ERROR and "Discord" not in record.msg:
             try:
-                msg = self.format(record)
                 url = config.DISCORD_WEBHOOK_ERROR
-                if url:
-                    payload = {"content": f"😰 **システムエラー発生**\n```{msg[:1800]}```"}
-                    requests.post(url, json=payload, timeout=5)
+                if not url:
+                    return
+
+                # 基本メッセージのフォーマット
+                log_msg = self.format(record)
+                
+                # --- 追加: スタックトレースの取得 ---
+                stack_trace = ""
+                if record.exc_info:
+                    # 例外が発生している場合はその詳細を取得
+                    stack_trace = "".join(traceback.format_exception(*record.exc_info))
+                elif record.levelno >= logging.ERROR:
+                    # 例外ではないがERRORの場合、呼び出し元のスタックを取得
+                    stack_trace = "".join(traceback.format_stack())
+                
+                # Discordの文字数制限(2000文字)を考慮して整形
+                content = f"😰 **システムエラー発生**\n```python\n{log_msg}\n```"
+                
+                if stack_trace:
+                    # スタックトレースをコードブロックとして追加 (後半1000文字程度を優先)
+                    trace_snippet = stack_trace[-1000:]
+                    content += f"\n**Stack Trace (End):**\n```python\n{trace_snippet}```"
+
+                payload = {"content": content}
+                requests.post(url, json=payload, timeout=5)
             except Exception:
+                # 通知自体のエラーでシステムを止めないためのpass
                 pass
 
 def setup_logging(name: str) -> logging.Logger:
-    """ロガーのセットアップ (ローテーション機能付き)"""
+    """ロガーのセットアップ (二重通知防止・初期化強化版)"""
     logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
     
+    # 1. 親ロガーへの伝播を確実に止める (二重通知防止の核心)
+    logger.propagate = False
+    
+    # 2. 既存のハンドラを完全にクリアする
     if logger.handlers:
         logger.handlers.clear()
     
+    # 3. ログレベルの設定
+    logger.setLevel(logging.INFO)
+    
+    # フォーマッタの設定 (ミリ秒まで表示するように微調整)
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    # 1. 標準出力 (開発確認用)
+    # --- ハンドラ1: 標準出力 (コンソール) ---
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    # 2. ファイル出力 (ローテーション付き)
-    # logsディレクトリの確保
+    # --- ハンドラ2: ファイル出力 (ローテーション付き) ---
     log_dir = os.path.join(config.BASE_DIR, "logs")
     os.makedirs(log_dir, exist_ok=True)
-    
-    # 毎日深夜0時にローテーション、7世代(1週間分)保持
     log_file = os.path.join(log_dir, "home_system.log")
     file_handler = TimedRotatingFileHandler(
         filename=log_file,
@@ -70,14 +97,16 @@ def setup_logging(name: str) -> logging.Logger:
     )
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    
-    # 3. Discord通知 (エラー時)
-    if config.DISCORD_WEBHOOK_ERROR:
+
+    # --- ハンドラ3: Discord通知 (ERROR以上のみ) ---
+    # 修正ポイント: 判定を1箇所に集約し、重複登録を排除
+    if hasattr(config, "DISCORD_WEBHOOK_ERROR") and config.DISCORD_WEBHOOK_ERROR:
         discord_handler = DiscordErrorHandler()
+        discord_handler.setLevel(logging.ERROR)  # ERROR以上のみ送信
         discord_handler.setFormatter(formatter)
-        discord_handler.setLevel(logging.ERROR)
         logger.addHandler(discord_handler)
     
+    # 外部ライブラリのログレベル抑制
     logging.getLogger("zeep").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     
