@@ -1,4 +1,4 @@
-# HOME_SYSTEM/switchbot_get_device_list.py
+# HOME_SYSTEM/switchbot_service.py
 import requests
 import time
 import hashlib
@@ -6,8 +6,16 @@ import hmac
 import base64
 import uuid
 import config 
+import common
 
 DEVICE_NAME_CACHE = {}
+
+@common.retry_api_call
+def request_switchbot_api(url, headers):
+    """SwitchBot APIへのリクエスト（リトライ付き）"""
+    response = requests.get(url, headers=headers, timeout=10)
+    response.raise_for_status() # 4xx, 5xxエラー時に例外を投げてリトライをトリガー
+    return response.json()
 
 def create_switchbot_auth_headers():
     """認証ヘッダーを生成する関数"""
@@ -33,7 +41,7 @@ def fetch_device_name_cache():
     try:
         url = "https://api.switch-bot.com/v1.1/devices"
         headers = create_switchbot_auth_headers()
-        res = requests.get(url, headers=headers).json()
+        res = request_switchbot_api(url, headers)
         if res.get('statusCode') == 100:
             # 通常デバイス
             for d in res['body']['deviceList']: 
@@ -51,3 +59,4 @@ def fetch_device_name_cache():
 def get_device_name_by_id(device_id):
     """IDから名前を検索する関数"""
     return DEVICE_NAME_CACHE.get(device_id, None)
+
