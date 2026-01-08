@@ -159,9 +159,11 @@ export const useGameData = (onLevelUp) => {
                 reward_id: reward.reward_id || reward.id
             });
             await fetchGameData();
-            alert(`まいどあり！\n${reward.title} を手に入れた！\n(残金: ${res.newGold} G)`);
+            return { success: true, newGold: res.newGold, reward: reward };
+
         } catch (e) {
             alert(`購入失敗: ${e.message}`);
+            return { success: false, error: e.message };
         }
     };
 
