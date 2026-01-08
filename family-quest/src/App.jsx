@@ -174,7 +174,11 @@ export default function App() {
 
   const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
   const handleReject = (historyItem) => rejectQuest(currentUser, historyItem);
-  const handleBuyReward = (reward) => buyReward(currentUser, reward);
+  const handleBuyReward = (reward) => {
+    console.log("Open Modal for:", reward); // デバッグ用ログ
+    setTargetItem(reward);
+    setModalMode('purchase');
+  };
   const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
   const handleEquip = (item) => changeEquipment(currentUser, item);
 
