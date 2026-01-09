@@ -418,7 +418,30 @@ def get_line_message_quota():
         return None
 
 
-
+def create_resilient_session(retries=3, backoff_factor=2, status_forcelist=(500, 502, 504)):
+    """
+    接続拒否やタイムアウト発生時に、指数関数的に待機時間を延ばしながらリトライするセッションを作成する。
+    
+    Args:
+        retries (int): 最大リトライ回数
+        backoff_factor (int): 待機時間の倍率 (例: 2なら 1s, 2s, 4s...)
+        status_forcelist (tuple): リトライ対象とするHTTPステータスコード
+    """
+    session = requests.Session()
+    
+    retry_strategy = Retry(
+        total=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+        allowed_methods=["HEAD", "GET", "POST", "OPTIONS"], # POST(SOAP)もリトライ対象にする
+        raise_on_status=False
+    )
+    
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    
+    return session
 
 # === ユーティリティ ===
 def get_now_iso() -> str:
