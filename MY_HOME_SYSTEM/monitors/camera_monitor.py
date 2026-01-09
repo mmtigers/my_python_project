@@ -16,11 +16,39 @@ import logging
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 import traceback
+import signal
 
 # === ログ設定 ===
 logger = common.setup_logging("camera")
 # 調査のためZeep(通信ライブラリ)のログも少し出す
 logging.getLogger("zeep").setLevel(logging.ERROR) 
+
+# プロセス終了時にUnsubscribeするために、アクティブなSubscriptionを保持する
+active_subscriptions = []
+
+def cleanup_handler(signum, frame):
+    """プロセス終了シグナルを受け取った時のクリーンアップ処理"""
+    logger.info(f"🛑 終了シグナル({signum})を受信。カメラ接続のクリーンアップを開始します...")
+    
+    for sub in active_subscriptions:
+        try:
+            # ONVIFのUnsubscribeメソッドを呼び出す
+            if hasattr(sub, 'Unsubscribe'):
+                sub.Unsubscribe()
+                logger.info("✅ Unsubscribe送信成功")
+            # zeep objectの場合のフォールバック
+            elif hasattr(sub, 'service') and hasattr(sub.service, 'Unsubscribe'):
+                sub.service.Unsubscribe(_soapheaders=None)
+                logger.info("✅ Unsubscribe送信成功 (zeep)")
+        except Exception as e:
+            logger.warning(f"⚠️ Unsubscribe送信失敗 (無視します): {e}")
+
+    logger.info("👋 監視プロセスを終了します")
+    sys.exit(0)
+
+# シグナルハンドラの登録 (Ctrl+C や systemctl stop を捕捉)
+signal.signal(signal.SIGINT, cleanup_handler)
+signal.signal(signal.SIGTERM, cleanup_handler)
 
 # === 画像保存設定 ===
 ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")
@@ -208,7 +236,13 @@ def monitor_single_camera(cam_conf):
             # --- 監視セットアップ ---
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
-            
+
+            # ==========================================
+            # 作成したサブスクリプションをグローバルリストに登録し、終了時にUnsubscribeできるようにする
+            active_subscriptions.append(subscription)
+            logger.info(f"✅ [{cam_name}] Subscription登録完了 (Cleanup対象)")
+            # ==========================================
+
             try:
                 plp_address = subscription.SubscriptionReference.Address._value_1
             except AttributeError:
