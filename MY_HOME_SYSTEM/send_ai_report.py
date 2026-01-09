@@ -153,7 +153,7 @@ def fetch_daily_data():
                 SELECT u.name, t.title, t.points
                 FROM quest_status s
                 JOIN quest_tasks t ON s.task_id = t.id
-                JOIN quest_users u ON t.target_user_id = u.id
+                JOIN quest_users u ON t.target_user_id = u.rowid
                 WHERE s.date = ? AND s.is_completed = 1
             """, (today_str,))
             
