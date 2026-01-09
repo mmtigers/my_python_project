@@ -180,7 +180,7 @@ def perform_emergency_diagnosis(ip, cam_conf=None):
     elif not any(results.values()):
         msg += "   👉 結論: カメラとの通信が完全に途絶しています(電源断/IP変更/ケーブル抜け)。"
     
-    logger.error(msg)
+    logger.warning(msg)
     return results
 
 def try_soft_reboot(ip, user, password):
