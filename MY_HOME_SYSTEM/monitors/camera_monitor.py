@@ -44,7 +44,7 @@ def cleanup_handler(signum, frame):
             logger.warning(f"⚠️ Unsubscribe送信失敗 (無視します): {e}")
 
     logger.info("👋 監視プロセスを終了します")
-    sys.exit(0)
+    os._exit(0)
 
 # シグナルハンドラの登録 (Ctrl+C や systemctl stop を捕捉)
 signal.signal(signal.SIGINT, cleanup_handler)
@@ -151,6 +151,9 @@ def perform_emergency_diagnosis(ip):
     
     msg = f"🚑 [緊急診断] {ip} の接続状態チェック:\n"
     
+    if results[80] and not results[2020]:
+        try_soft_reboot(cam_conf['ip'], cam_conf['user'], cam_conf['pass'])
+
     for port in target_ports:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2.0)
@@ -176,6 +179,32 @@ def perform_emergency_diagnosis(ip):
     logger.error(msg)
     return results
 
+def try_soft_reboot(ip, user, password):
+    """Port 80が生きていれば、ONVIFまたはHTTPで再起動を試みる"""
+    logger.info(f"🔄 [{ip}] Port 80経由でのソフトリブートを試行します...")
+    try:
+        # 方法1: ONVIF DeviceMgmt (Port 80で待ち受けている場合に有効)
+        # ※ ONVIFデーモン自体が死んでいる場合は失敗するが、httpd経由で通ることもある
+        mycam = ONVIFCamera(ip, 80, user, password, wsdl_dir=WSDL_DIR)
+        mycam.devicemgmt.SystemReboot()
+        logger.info(f"✅ [{ip}] ONVIF SystemReboot コマンド送信成功")
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ ONVIF Reboot失敗: {e}")
+        
+        # 方法2: ベンダー固有のHTTPコマンド (例: 一般的なコマンド)
+        # ※ 必要に応じて機種ごとのコマンドを追加
+        try:
+            # 例: 一部のカメラ用
+            url = f"http://{ip}/cgi-bin/reboot.sh" 
+            requests.get(url, auth=HTTPDigestAuth(user, password), timeout=5)
+            logger.info(f"✅ [{ip}] HTTP CGI Reboot コマンド送信成功")
+            return True
+        except Exception:
+            pass
+            
+    return False
+
 def monitor_single_camera(cam_conf):
     cam_name = cam_conf['name']
     cam_base_port = cam_conf.get('port', 80)
@@ -195,6 +224,9 @@ def monitor_single_camera(cam_conf):
     if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
     port_candidates.extend([2020, 80]) # 優先順位: 指定ポート -> 2020 -> 80
     port_candidates = list(dict.fromkeys(port_candidates)) # 重複排除
+
+    # ★追加: 現在のサブスクリプションを追跡する変数
+    current_subscription = None
 
     while True: 
         mycam = None
@@ -240,7 +272,8 @@ def monitor_single_camera(cam_conf):
             # ==========================================
             # 作成したサブスクリプションをグローバルリストに登録し、終了時にUnsubscribeできるようにする
             active_subscriptions.append(subscription)
-            logger.info(f"✅ [{cam_name}] Subscription登録完了 (Cleanup対象)")
+            current_subscription = subscription # ★追跡開始
+            logger.info(f"✅ [{cam_name}] Subscription登録完了")
             # ==========================================
 
             try:
@@ -336,15 +369,24 @@ def monitor_single_camera(cam_conf):
                         raise Exception("イベント受信エラー過多により再接続します")
 
         except Exception as e:
-            # === エラー発生時の徹底診断フェーズ ===
-            consecutive_conn_errors += 1
-            err_msg = str(e)
-            
-            logger.error(f"❌ [{cam_name}] 接続切断/失敗 ({consecutive_conn_errors}回目): {err_msg}")
-            
-            # 【修正5】緊急診断は頻度を落とす（3回に1回、かつ3回目以降）
-            if consecutive_conn_errors >= 3 and consecutive_conn_errors % 3 == 0:
-                perform_emergency_diagnosis(cam_conf['ip'])
+            # === エラー発生時のクリーンアップ (ここが重要) ===
+            logger.error(f"❌ [{cam_name}] エラー発生: {e}")
+
+            # ★ 1. 明示的にUnsubscribeを試みる
+            if current_subscription:
+                try:
+                    # リストから削除
+                    if current_subscription in active_subscriptions:
+                        active_subscriptions.remove(current_subscription)
+                    
+                    # カメラへ解除通知
+                    if hasattr(current_subscription, 'Unsubscribe'):
+                        current_subscription.Unsubscribe()
+                        logger.info(f"🧹 [{cam_name}] 古いSubscriptionを解除しました")
+                except Exception as cleanup_err:
+                    logger.warning(f"⚠️ Cleanup失敗(無視): {cleanup_err}")
+                finally:
+                    current_subscription = None
 
             # 【修正6】セッションの確実なクリーンアップ
             close_camera_connection(mycam)
