@@ -299,7 +299,7 @@ QUEST_DIST_DIR = "/home/masahiro/develop/family-quest/dist"
 
 # フロントエンドのオリジン設定
 # 環境変数 FRONTEND_URL が設定されていればそれを優先、なければデフォルト値を使用
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://192.168.1.200:5173")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
 
 # CORSで許可するオリジンのリスト
 CORS_ORIGINS = [
