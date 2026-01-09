@@ -32,6 +32,9 @@ LOG_FILE="${LOG_DIR}/$(basename "${SCRIPT_NAME}" .py).log"
 # プロジェクトルートに移動 (相対パスimport対策)
 cd "${PROJECT_ROOT}" || exit 1
 
+# プロジェクトルートをPythonの検索パスに追加する
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
+
 # 実行 & ログ出力 (タイムスタンプ付与も検討できますが、今回はシンプルに追記)
 # 必要であれば .env の読み込みもここで行います
 # source .env
