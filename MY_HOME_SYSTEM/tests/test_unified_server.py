@@ -29,8 +29,15 @@ mock_config.CORS_ORIGINS = ["*"]
 
 sys.modules["config"] = mock_config
 
-# 依存モジュールのモック化
+# --- 3. 依存モジュールのモック化 (★ここを修正) ---
+# unified_server.py が直接インポートしているモジュールを全てモックにする
 sys.modules["common"] = MagicMock()
+sys.modules["core"] = MagicMock()
+sys.modules["core.logger"] = MagicMock()
+sys.modules["core.utils"] = MagicMock()
+sys.modules["core.database"] = MagicMock()
+sys.modules["services.notification_service"] = MagicMock() # ★重要: これを監視対象にする
+
 sys.modules["services.switchbot_service"] = MagicMock()
 sys.modules["handlers"] = MagicMock()
 sys.modules["handlers.line_logic"] = MagicMock()
@@ -38,19 +45,19 @@ sys.modules["services.backup_service"] = MagicMock()
 sys.modules["routers"] = MagicMock()
 sys.modules["routers.quest_router"] = MagicMock()
 
-# --- 3. サーバーモジュール & モデルのインポート ---
+# --- 4. サーバーモジュール & モデルのインポート ---
 import unified_server
 from models.switchbot import SwitchBotWebhookBody, SwitchBotContext
 
 @pytest.fixture
-def mock_common():
-    """commonモジュールのモックを返すフィクスチャ（テスト毎にリセット）"""
-    mock = sys.modules["common"]
-    mock.reset_mock()  # ★修正: 前のテストの呼び出し履歴を消去
+def mock_notification():
+    """通知サービスのモックを返すフィクスチャ"""
+    mock = sys.modules["services.notification_service"]
+    mock.reset_mock()
     return mock
 
 @pytest.mark.asyncio
-async def test_switchbot_motion_detected(mock_common):
+async def test_switchbot_motion_detected(mock_notification):
     """
     SwitchBot: 人感センサー 'detected' 受信時の挙動確認
     """
@@ -74,12 +81,14 @@ async def test_switchbot_motion_detected(mock_common):
 
     # 検証
     assert unified_server.IS_ACTIVE["mac_motion"] is True
-    mock_common.send_push.assert_called()
-    args = mock_common.send_push.call_args[0]
+    
+    # ★修正: commonではなくmock_notificationをチェック
+    mock_notification.send_push.assert_called()
+    args = mock_notification.send_push.call_args[0]
     assert "動きがありました" in args[1][0]["text"]
 
 @pytest.mark.asyncio
-async def test_switchbot_motion_not_detected_timer(mock_common):
+async def test_switchbot_motion_not_detected_timer(mock_notification):
     """
     SwitchBot: 人感センサー 'not_detected' 受信時のタイマーセット確認
     """
@@ -101,7 +110,7 @@ async def test_switchbot_motion_not_detected_timer(mock_common):
         mock_create_task.assert_called()
 
 @pytest.mark.asyncio
-async def test_switchbot_contact_cooldown(mock_common):
+async def test_switchbot_contact_cooldown(mock_notification):
     """
     SwitchBot: 開閉センサーの連打防止 (Cooldown) 確認
     """
@@ -119,9 +128,9 @@ async def test_switchbot_contact_cooldown(mock_common):
 
     # 1回目: 通知される
     await unified_server.callback_switchbot(body)
-    assert mock_common.send_push.call_count == 1
+    assert mock_notification.send_push.call_count == 1
     
     # 2回目 (直後): 通知されない
-    mock_common.send_push.reset_mock() # ここでのリセットも有効だが、テスト開始時のリセットが重要
+    mock_notification.send_push.reset_mock()
     await unified_server.callback_switchbot(body)
-    mock_common.send_push.assert_not_called()
+    mock_notification.send_push.assert_not_called()
