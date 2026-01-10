@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient } from '../utils/apiClient';
-import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../constants/masterData';
+import { apiClient } from '../lib/apiClient';
+import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
 
 export const useGameData = (onLevelUp) => {
     const [users, setUsers] = useState(INITIAL_USERS || []);

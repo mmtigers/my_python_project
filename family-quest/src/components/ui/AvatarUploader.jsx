@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Upload, X, Loader2, Camera } from 'lucide-react';
-import { apiClient } from '../../utils/apiClient';
+import { apiClient } from "../../lib/apiClient";
 
 const AvatarUploader = ({ user, onClose, onUploadComplete }) => {
     const [uploading, setUploading] = useState(false);
