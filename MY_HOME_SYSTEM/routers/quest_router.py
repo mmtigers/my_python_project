@@ -4,19 +4,20 @@ from fastapi import File, UploadFile
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import datetime
-import shutil # 追加
-import os # 既存だが確認
-import uuid # 追加
+import shutil 
+import os 
+import uuid 
 import math
 import pytz
 import importlib
 import random
-import uuid
-import sys  # ★追加
+import sys
+import aiofiles  # ★追加: 非同期ファイル操作用
+
 import common
 import config
 import game_logic
-import sound_manager  # これで確実に読み込めます
+import sound_manager
 try:
     import quest_data
 except ImportError:
@@ -744,30 +745,57 @@ def seed_data_endpoint():
 def update_user_avatar(action: UpdateUserAction):
     return user_service.update_avatar(action.user_id, action.avatar_url)
 
+# ★追加: ヘッダ検証ロジック
+def validate_image_header(header: bytes) -> bool:
+    """ファイルヘッダ（マジックナンバー）による画像形式検証"""
+    # JPEG (FF D8 FF)
+    if header.startswith(b'\xff\xd8\xff'): return True
+    # PNG (89 50 4E 47 0D 0A 1A 0A)
+    if header.startswith(b'\x89PNG\r\n\x1a\n'): return True
+    # GIF (GIF87a / GIF89a)
+    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'): return True
+    # WebP (RIFF....WEBP)
+    if header.startswith(b'RIFF') and header[8:12] == b'WEBP': return True
+    
+    return False
+
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
-    """画像をアップロードし、アクセス用URLを返す"""
+    """画像をアップロードし、アクセス用URLを返す (Secure & Async)"""
     try:
-        # 拡張子の検証
+        # 1. 拡張子の検証 (既存ロジック)
         allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
         file_ext = os.path.splitext(file.filename)[1].lower()
         if file_ext not in allowed_extensions:
-            raise HTTPException(status_code=400, detail="許可されていないファイル形式です")
+            raise HTTPException(status_code=400, detail="許可されていないファイル形式です(拡張子)")
 
-        # ユニークなファイル名を生成 (衝突防止)
+        # 2. ヘッダ検証 (マジックナンバー) - ★追加
+        # 先頭12バイトを読んで検証
+        header = await file.read(12)
+        if not validate_image_header(header):
+            logger.warning(f"Invalid file header detected. Ext: {file_ext}")
+            raise HTTPException(status_code=400, detail="ファイルの内容が画像として認識できません")
+        
+        # 検証のために読み込んだポインタを先頭に戻す
+        await file.seek(0)
+
+        # 3. ユニークなファイル名を生成
         new_filename = f"{uuid.uuid4()}{file_ext}"
         file_path = os.path.join(config.UPLOAD_DIR, new_filename)
 
-        # ファイル保存
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # 4. 非同期書き込み (aiofiles使用) - ★修正
+        # チャンクサイズ (例: 1MB) ごとに書き込むことでメモリ効率を維持
+        async with aiofiles.open(file_path, "wb") as buffer:
+            while content := await file.read(1024 * 1024):
+                await buffer.write(content)
             
         logger.info(f"Image Uploaded: {new_filename}")
 
         # アクセス用URLを返す
-        # ※本番環境のドメインに合わせて調整が必要だが、ローカルならこれでOK
         return {"url": f"/uploads/{new_filename}"}
 
+    except HTTPException as he:
+        raise he
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail="画像の保存に失敗しました")
