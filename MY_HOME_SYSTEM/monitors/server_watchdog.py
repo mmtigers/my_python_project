@@ -2,6 +2,10 @@ import subprocess
 import time
 import traceback
 from pathlib import Path
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import config
 # import common <-- 削除
 from core.logger import setup_logging
