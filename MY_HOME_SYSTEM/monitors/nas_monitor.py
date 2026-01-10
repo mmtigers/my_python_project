@@ -5,6 +5,8 @@ import sys
 import traceback
 from datetime import datetime
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # 自作モジュール
 import config
 # import common <-- 削除
