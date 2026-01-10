@@ -1,4 +1,4 @@
-# HOME_SYSTEM/unified_server.py
+# MY_HOME_SYSTEM/unified_server.py
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,14 +24,22 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, PostbackEvent
 
 import config
-import common
+# import common  <-- 廃止
+# ▼▼▼ 新しいモジュールからの直接インポート ▼▼▼
+from core.logger import setup_logging
+from core.utils import get_now_iso
+from core.database import save_log_async
+from services.notification_service import send_push
+# ▲▲▲ 追加終了 ▲▲▲
+
 from services import switchbot_service as sb_tool
 from handlers import line_logic
 from services import backup_service as backup_database
 from routers import quest_router
 
 # Logger Setup
-logger = common.setup_logging("server")
+# logger = common.setup_logging("server") <-- 変更
+logger = setup_logging("server")
 
 # --- Global State Management ---
 # 開閉センサーの連打防止用 (mac: timestamp)
@@ -44,19 +52,6 @@ MOTION_TASKS: Dict[str, asyncio.Task] = {}
 # Constants
 CONTACT_COOLDOWN = 300   # 5分 (連打防止)
 MOTION_TIMEOUT = 900     # 15分 (動きなし判定までの時間)
-
-
-# # --- Pydantic Models ---
-# class SwitchBotContext(BaseModel):
-#     deviceMac: str
-#     detectionState: str
-#     brightness: Optional[str] = None
-#     timeOfSample: Optional[int] = None
-
-# class SwitchBotWebhookBody(BaseModel):
-#     context: SwitchBotContext
-#     eventType: Optional[str] = None
-#     deviceType: Optional[str] = None
 
 
 # --- Background Task: Scheduled Backup ---
@@ -74,10 +69,7 @@ async def schedule_daily_backup():
             target += datetime.timedelta(days=1)
         
         wait_seconds = (target - now).total_seconds()
-        # logger.info(f"⏳ 次回バックアップまで待機: {wait_seconds / 3600:.1f}時間")
         
-        # 1時間ごとのチェックで待機する実装に変更（長時間のsleepはキャンセル時に反応が悪いため）
-        # ここでは単純化のためsleepを使用しますが、実運用ではループで細かく待つのがベター
         try:
             await asyncio.sleep(wait_seconds)
         except asyncio.CancelledError:
@@ -86,18 +78,20 @@ async def schedule_daily_backup():
         # Backup Execution
         logger.info("📦 定期バックアップを開始します...")
         loop = asyncio.get_running_loop()
-        success, res, size = await loop.run_in_executor(None, backup_service.perform_backup)
+        success, res, size = await loop.run_in_executor(None, backup_database.perform_backup)
         
         if success:
             logger.info("✅ バックアップ成功通知を送信")
-            common.send_push(
+            # common.send_push(...) <-- 変更
+            send_push(
                 config.LINE_USER_ID, 
                 [{"type": "text", "text": f"📦 [システム通知]\n定期バックアップが完了しました。\nサイズ: {size:.1f}MB"}], 
                 target="discord", channel="notify"
             )
         else:
             logger.error(f"❌ バックアップ失敗通知: {res}")
-            common.send_push(
+            # common.send_push(...) <-- 変更
+            send_push(
                 config.LINE_USER_ID, 
                 [{"type": "text", "text": f"🚨 [システムエラー]\nバックアップに失敗しました。\n{res}"}], 
                 target="discord", channel="error"
@@ -135,7 +129,7 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None, 
-            common.send_push, 
+            send_push, # common.send_push <-- 変更
             config.LINE_USER_ID, 
             [{"type": "text", "text": msg}], 
             None, 
@@ -302,9 +296,11 @@ async def callback_switchbot(body: SwitchBotWebhookBody):
     # 2. Logging to DB
     try:
         # ★非同期ラッパーを await で呼ぶように変更
-        await common.save_log_async(config.SQLITE_TABLE_SENSOR, 
+        # await common.save_log_async(...) <-- 変更
+        await save_log_async(config.SQLITE_TABLE_SENSOR, 
             ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
-            (common.get_now_iso(), name, mac, "Webhook Device", state, ctx.brightness or ""))
+            # common.get_now_iso() <-- 変更
+            (get_now_iso(), name, mac, "Webhook Device", state, ctx.brightness or ""))
     except Exception as e:
         logger.error(f"Failed to save log: {e}")
     
@@ -361,7 +357,7 @@ async def _process_sensor_logic(mac: str, name: str, location: str, dev_type: st
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
-            common.send_push,
+            send_push, # common.send_push <-- 変更
             config.LINE_USER_ID, 
             [{"type": "text", "text": msg_text}], 
             None,
