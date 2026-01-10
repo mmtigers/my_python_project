@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { Sword, Shirt, ShoppingBag } from 'lucide-react';
-
-// ★パス変更: libから読み込み
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
+import { User, Quest, QuestHistory, Reward, Equipment } from '@/types';
 
-// UIコンポーネント (共通パーツ)
+// UI Components
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
 import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
+import { Button } from './components/ui/Button'; // 新しく作ったButtonを活用
+import { Modal } from './components/ui/Modal';   // 新しく作ったModalを活用
 
-// ★パス変更: 機能(Feature)フォルダから読み込み
+// Feature Components
+// ※まだ .jsx のものは一旦 @ts-ignore するか、型定義なしで読み込まれます
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
@@ -20,16 +22,23 @@ import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
 
-// 確認モーダル（本来は別ファイル推奨ですが、一旦ここに維持）
-const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
+// 確認モーダル（ここも共通Modalに置き換えてスッキリさせます）
+const ConfirmModal = ({
+  mode, target, onConfirm, onCancel
+}: {
+  mode: 'cancel' | 'purchase' | 'complete' | null,
+  target: any,
+  onConfirm: () => void,
+  onCancel: () => void
+}) => {
   if (!target) return null;
   const isCancel = mode === 'cancel';
   const isPurchase = mode === 'purchase';
 
   let title = '確認';
-  let message = '';
+  let message: React.ReactNode = '';
+  let confirmBtnVariant: 'primary' | 'danger' | 'secondary' = 'primary';
   let confirmBtnText = '実行する';
-  let confirmBtnColor = 'bg-blue-600';
 
   if (isCancel) {
     title = '行動の取り消し';
@@ -43,7 +52,7 @@ const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
       </>
     );
     confirmBtnText = '取り消す';
-    confirmBtnColor = 'bg-red-600';
+    confirmBtnVariant = 'danger';
   } else if (isPurchase) {
     title = '購入の確認';
     const cost = target.cost_gold || target.cost;
@@ -54,7 +63,7 @@ const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
       </>
     );
     confirmBtnText = 'はい';
-    confirmBtnColor = 'bg-yellow-600 text-black';
+    confirmBtnVariant = 'primary'; // Shop用にあえてPrimary
   } else {
     title = '確認';
     message = (
@@ -64,64 +73,56 @@ const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
       </>
     );
     confirmBtnText = '達成する';
-    confirmBtnColor = 'bg-blue-600';
+    confirmBtnVariant = 'primary';
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 animate-in fade-in">
-      <div className="bg-slate-800 border border-slate-600 rounded-lg p-6 max-w-sm w-full shadow-2xl text-center">
-        <h3 className={`text-xl font-bold mb-4 ${isCancel ? 'text-red-400' : isPurchase ? 'text-yellow-400' : 'text-blue-400'}`}>
-          {title}
-        </h3>
-        <p className="text-white mb-6 leading-relaxed">
-          {message}
-        </p>
-        <div className="flex gap-4 justify-center">
-          <button onClick={onCancel} className="flex-1 py-3 bg-gray-600 rounded text-white font-bold hover:bg-gray-500">
-            {isPurchase ? 'いいえ' : 'やめる'}
-          </button>
-          <button onClick={onConfirm} className={`flex-1 py-3 rounded text-white font-bold hover:opacity-80 ${confirmBtnColor}`}>
-            {confirmBtnText}
-          </button>
-        </div>
+    <Modal isOpen={true} onClose={onCancel} title={title}>
+      <div className="text-center mb-6 leading-relaxed font-bold">
+        {message}
       </div>
-    </div>
+      <div className="flex gap-4 justify-center">
+        <Button onClick={onCancel} variant="secondary" className="flex-1">
+          {isPurchase ? 'いいえ' : 'やめる'}
+        </Button>
+        <Button onClick={onConfirm} variant={confirmBtnVariant} className="flex-1">
+          {confirmBtnText}
+        </Button>
+      </div>
+    </Modal>
   );
 };
 
 export default function App() {
-  const [viewMode, setViewMode] = useState('user');
-  const [activeTab, setActiveTab] = useState('quest');
+  const [viewMode, setViewMode] = useState<'user' | 'party' | 'familyLog'>('user');
+  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip'>('quest');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
-  const [levelUpInfo, setLevelUpInfo] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
+  const [levelUpInfo, setLevelUpInfo] = useState<any>(null);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  const [modalMode, setModalMode] = useState(null);
-  const [targetHistory, setTargetHistory] = useState(null);
-  const [targetItem, setTargetItem] = useState(null);
-  const [messageModal, setMessageModal] = useState(null);
+  const [modalMode, setModalMode] = useState<'cancel' | 'purchase' | 'complete' | null>(null);
+  const [targetHistory, setTargetHistory] = useState<QuestHistory | null>(null);
+  const [targetItem, setTargetItem] = useState<any>(null);
+  const [messageModal, setMessageModal] = useState<{ title: string, message: string, icon?: string } | null>(null);
 
   const {
-    users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
-    equipments, ownedEquipments,
-    familyStats, chronicle,
+    users, quests, rewards, completedQuests, pendingQuests,
+    equipments, ownedEquipments, familyStats, chronicle, isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest,
-    buyReward, buyEquipment, changeEquipment,
-    refreshData
-  } = useGameData((info) => setLevelUpInfo(info));
+    buyReward, buyEquipment, changeEquipment, refreshData
+  } = useGameData((info: any) => setLevelUpInfo(info));
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
   const isParent = ['dad', 'mom'].includes(currentUser?.user_id);
 
-  const handleUserSwitch = (idx) => {
+  const handleUserSwitch = (idx: number) => {
     setViewMode('user');
     setCurrentUserIdx(idx);
   };
 
-  const handleQuestClick = (quest) => {
+  const handleQuestClick = (quest: Quest) => {
     const qId = quest.quest_id || quest.id;
     let isInfinite = false;
-    // .tsx化したQuestListからは _isInfinite が渡ってくる
     if (typeof quest._isInfinite !== 'undefined') {
       isInfinite = quest._isInfinite;
     } else {
@@ -136,8 +137,10 @@ export default function App() {
 
     if (isCompleted && !isInfinite) {
       const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
-      setTargetHistory(historyItem);
-      setModalMode('cancel');
+      if (historyItem) {
+        setTargetHistory(historyItem);
+        setModalMode('cancel');
+      }
       return;
     }
 
@@ -168,14 +171,15 @@ export default function App() {
     setTargetItem(null);
   };
 
-  const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
-  const handleReject = (historyItem) => rejectQuest(currentUser, historyItem);
-  const handleBuyReward = (reward) => {
+  // 各ハンドラ
+  const handleApprove = (historyItem: QuestHistory) => approveQuest(currentUser, historyItem);
+  const handleReject = (historyItem: QuestHistory) => rejectQuest(currentUser, historyItem);
+  const handleBuyReward = (reward: Reward) => {
     setTargetItem(reward);
     setModalMode('purchase');
   };
-  const handleBuyEquipment = (item) => buyEquipment(currentUser, item);
-  const handleEquip = (item) => changeEquipment(currentUser, item);
+  const handleBuyEquipment = (item: Equipment) => buyEquipment(currentUser, item);
+  const handleEquip = (item: Equipment) => changeEquipment(currentUser, item);
 
   if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
 
@@ -223,7 +227,7 @@ export default function App() {
           <>
             <UserStatusCard
               user={currentUser}
-              onAvatarClick={(user) => setEditingUser(user)}
+              onAvatarClick={(user: User) => setEditingUser(user)}
             />
 
             {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
