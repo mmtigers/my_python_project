@@ -1,16 +1,20 @@
-# MY_HOME_SYSTEM/switchbot_power_monitor.py
+# MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py
 import requests
 import sys
 import logging
 from typing import Dict, Any, Optional, List, Union, Tuple
 
 # 自作モジュール
-import common
 import config
 from services import switchbot_service as sb_tool
+# import common <-- 削除
+from core.logger import setup_logging
+from core.database import save_log_generic, get_db_cursor
+from core.utils import get_now_iso
+from services.notification_service import send_push
 
 # ロガー設定
-logger = common.setup_logging("device_monitor")
+logger = setup_logging("device_monitor")
 
 def insert_device_record(name: str, device_id: str, device_type: str, data: Dict[str, Any]) -> None:
     """
@@ -25,7 +29,7 @@ def insert_device_record(name: str, device_id: str, device_type: str, data: Dict
     threshold: Optional[float] = data.get('threshold')
     
     vals: Tuple[Any, ...] = (
-        common.get_now_iso(), 
+        get_now_iso(), 
         name, 
         device_id, 
         device_type, 
@@ -38,7 +42,7 @@ def insert_device_record(name: str, device_id: str, device_type: str, data: Dict
         threshold
     )
     
-    if common.save_log_generic(config.SQLITE_TABLE_SENSOR, cols, vals):
+    if save_log_generic(config.SQLITE_TABLE_SENSOR, cols, vals):
         # ログ出力用メッセージ作成
         log_parts: List[str] = []
         if data.get('power') is not None: 
@@ -111,8 +115,7 @@ def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, 
 
 def get_prev_power(device_id: str) -> float:
     """DBから前回の電力値を取得"""
-    # common.get_db_cursor を使用
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         if not cur: 
             return 0.0
         try:
@@ -149,7 +152,8 @@ def process_power_notification(name: str, device_id: str, current_power: float, 
         msg = f"🚨【電力アラート】\n{name} がまだついてるよ！ ({current_power}W)"
 
     if msg:
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target=target)
+        # common.send_push -> send_push
+        send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target=target)
         logger.info(f"通知送信 ({target}): {name}")
 
 def main() -> None:
