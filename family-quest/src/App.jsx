@@ -1,26 +1,30 @@
-import React, { useState, useEffect } from 'react';
-import { Sword, Shirt, ShoppingBag, RotateCcw } from 'lucide-react'; // RotateCcw 追加
+import React, { useState } from 'react';
+import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 
-import { INITIAL_USERS } from './constants/masterData';
+// ★パス変更: libから読み込み
+import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 
+// UIコンポーネント (共通パーツ)
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
-import UserStatusCard from './components/quest/UserStatusCard';
-import QuestList from './components/quest/QuestList';
-import ApprovalList from './components/quest/ApprovalList';
-import RewardList from './components/quest/RewardList';
-import EquipmentShop from './components/quest/EquipmentShop';
-import FamilyLog from './components/quest/FamilyLog';
-import FamilyParty from './components/quest/FamilyParty';
 import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
 
-// ★追加: 確認/取消モーダル
+// ★パス変更: 機能(Feature)フォルダから読み込み
+import UserStatusCard from './features/family/components/UserStatusCard';
+import QuestList from './features/quest/components/QuestList';
+import ApprovalList from './features/quest/components/ApprovalList';
+import RewardList from './features/shop/components/RewardList';
+import EquipmentShop from './features/shop/components/EquipmentShop';
+import FamilyLog from './features/family/components/FamilyLog';
+import FamilyParty from './features/family/components/FamilyParty';
+
+// 確認モーダル（本来は別ファイル推奨ですが、一旦ここに維持）
 const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
   if (!target) return null;
   const isCancel = mode === 'cancel';
-  const isPurchase = mode === 'purchase'; // 追加
+  const isPurchase = mode === 'purchase';
 
   let title = '確認';
   let message = '';
@@ -40,7 +44,7 @@ const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
     );
     confirmBtnText = '取り消す';
     confirmBtnColor = 'bg-red-600';
-  } else if (isPurchase) { // 追加: 購入確認用の表示
+  } else if (isPurchase) {
     title = '購入の確認';
     const cost = target.cost_gold || target.cost;
     message = (
@@ -52,7 +56,6 @@ const ConfirmModal = ({ mode, target, onConfirm, onCancel }) => {
     confirmBtnText = 'はい';
     confirmBtnColor = 'bg-yellow-600 text-black';
   } else {
-    // デフォルト（クエスト完了確認など将来用）
     title = '確認';
     message = (
       <>
@@ -93,11 +96,10 @@ export default function App() {
   const [levelUpInfo, setLevelUpInfo] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
 
-  // キャンセル/確認モーダル用
-  const [modalMode, setModalMode] = useState(null); // 'cancel' or null
+  const [modalMode, setModalMode] = useState(null);
   const [targetHistory, setTargetHistory] = useState(null);
-  const [targetItem, setTargetItem] = useState(null);       // ★追加: 購入アイテム用
-  const [messageModal, setMessageModal] = useState(null); // { title, message, icon }
+  const [targetItem, setTargetItem] = useState(null);
+  const [messageModal, setMessageModal] = useState(null);
 
   const {
     users, quests, rewards, completedQuests, pendingQuests, adventureLogs, isLoading,
@@ -116,13 +118,10 @@ export default function App() {
     setCurrentUserIdx(idx);
   };
 
-  // ★修正: QuestList から渡された _isInfinite を優先的に使用
   const handleQuestClick = (quest) => {
     const qId = quest.quest_id || quest.id;
-
-    // 1. _isInfinite (QuestList判定) があればそれを使う
-    // 2. なければマスタデータの type / quest_type を確認する
     let isInfinite = false;
+    // .tsx化したQuestListからは _isInfinite が渡ってくる
     if (typeof quest._isInfinite !== 'undefined') {
       isInfinite = quest._isInfinite;
     } else {
@@ -133,24 +132,15 @@ export default function App() {
     const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
     const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
 
-    if (isPending) return; // 申請中は無視
+    if (isPending) return;
 
-    // 無限クエストなら、完了済み履歴があっても「キャンセル」ではなく「新規実施」として扱う
     if (isCompleted && !isInfinite) {
-      // 通常クエストで完了済みの場合はキャンセル確認へ
       const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
       setTargetHistory(historyItem);
       setModalMode('cancel');
       return;
     }
 
-    // ★追加: 購入ボタンクリック時のハンドラ
-    const handleBuyReward = (reward) => {
-      setTargetItem(reward);
-      setModalMode('purchase');
-    };
-
-    // 未完了、または無限クエストの場合は即実施
     completeQuest(currentUser, quest);
   };
 
@@ -158,10 +148,7 @@ export default function App() {
     if (modalMode === 'cancel' && targetHistory) {
       await cancelQuest(currentUser, targetHistory);
     } else if (modalMode === 'purchase' && targetItem) {
-      // ★修正: 購入処理の結果を受け取る
       const result = await buyReward(currentUser, targetItem);
-
-      // 成功した場合のみ、リッチなメッセージモーダルを表示
       if (result && result.success) {
         setMessageModal({
           title: "お買い上げ！",
@@ -170,7 +157,6 @@ export default function App() {
         });
       }
     }
-    // 確認モーダルは閉じる
     setModalMode(null);
     setTargetHistory(null);
     setTargetItem(null);
@@ -185,7 +171,6 @@ export default function App() {
   const handleApprove = (historyItem) => approveQuest(currentUser, historyItem);
   const handleReject = (historyItem) => rejectQuest(currentUser, historyItem);
   const handleBuyReward = (reward) => {
-    console.log("Open Modal for:", reward); // デバッグ用ログ
     setTargetItem(reward);
     setModalMode('purchase');
   };
@@ -198,8 +183,6 @@ export default function App() {
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
       <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
 
-
-      {/* ★追加: 汎用メッセージモーダル (LevelUpModalの下あたりに配置) */}
       {messageModal && (
         <MessageModal
           title={messageModal.title}
@@ -209,7 +192,6 @@ export default function App() {
         />
       )}
 
-      {/* アバター編集モーダル */}
       {editingUser && (
         <AvatarUploader
           user={editingUser}
@@ -218,11 +200,9 @@ export default function App() {
         />
       )}
 
-      {/* キャンセル確認モーダル */}
       {modalMode && (
         <ConfirmModal
           mode={modalMode}
-          // モードに応じてターゲットを切り替え
           target={modalMode === 'purchase' ? targetItem : targetHistory}
           onConfirm={handleModalConfirm}
           onCancel={handleModalCancel}
@@ -239,7 +219,6 @@ export default function App() {
       />
 
       <div className="p-4 space-y-4 max-w-md mx-auto">
-        {/* 1. ユーザー個別画面 */}
         {viewMode === 'user' && (
           <>
             <UserStatusCard
@@ -247,7 +226,6 @@ export default function App() {
               onAvatarClick={(user) => setEditingUser(user)}
             />
 
-            {/* 親のみ：承認リスト */}
             {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
               <ApprovalList
                 pendingQuests={pendingQuests}
@@ -257,7 +235,6 @@ export default function App() {
               />
             )}
 
-            {/* タブ切り替え */}
             <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
               <button
                 onClick={() => setActiveTab('quest')}
@@ -282,7 +259,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* コンテンツエリア */}
             <div className="min-h-[300px]">
               {activeTab === 'quest' && (
                 <QuestList
@@ -290,14 +266,13 @@ export default function App() {
                   completedQuests={completedQuests}
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
-                  onQuestClick={handleQuestClick} // 修正したハンドラを使用
+                  onQuestClick={handleQuestClick}
                 />
               )}
 
               {activeTab === 'shop' && (
                 <RewardList
                   rewards={rewards}
-                  // ★修正: ユーザーオブジェクトではなく所持金を渡す
                   userGold={currentUser.gold}
                   onBuy={handleBuyReward}
                 />
@@ -316,12 +291,10 @@ export default function App() {
           </>
         )}
 
-        {/* 2. 記録タブ */}
         {viewMode === 'familyLog' && (
           <FamilyLog stats={familyStats} chronicle={chronicle} />
         )}
 
-        {/* 3. パーティモード */}
         {viewMode === 'party' && (
           <FamilyParty users={users} ownedEquipments={ownedEquipments} />
         )}
