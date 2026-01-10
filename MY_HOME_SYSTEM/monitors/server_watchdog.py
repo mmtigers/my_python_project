@@ -1,10 +1,11 @@
-# HOME_SYSTEM/server_watchdog.py
 import subprocess
 import time
 import traceback
 from pathlib import Path
-import common
 import config
+# import common <-- 削除
+from core.logger import setup_logging
+from services.notification_service import send_push
 
 # === 設定 ===
 WATCH_SERVICE_NAME = "home_system.service"
@@ -12,7 +13,7 @@ WATCH_PROCESS_NAME = "unified_server.py"
 REMINDER_INTERVAL_SEC = 6 * 3600  # 6時間
 
 LOCK_FILE = Path(config.BASE_DIR) / "watchdog_alert_sent.lock"
-logger = common.setup_logging("watchdog")
+logger = setup_logging("watchdog")
 
 # === メッセージ (主婦向け) ===
 MSG_STOPPED = (
@@ -41,24 +42,27 @@ def is_process_alive(process_keyword: str) -> bool:
     try:
         # 自分自身を除外
         cmd = f"ps aux | grep '{process_keyword}' | grep -v grep"
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=False)
-        return len(res.stdout.strip()) > 0
+        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        return bool(res.stdout.strip())
     except Exception:
         return False
 
-def main():
+if __name__ == "__main__":
     try:
-        # チェック
+        logger.info("🔍 Watchdog check started...")
+        
         status = get_service_status(WATCH_SERVICE_NAME)
         process_alive = is_process_alive(WATCH_PROCESS_NAME)
+        
+        # サービスが active または activating で、かつプロセスが生きていれば正常
         is_healthy = (status in ["active", "activating"]) and process_alive
         
         logger.info(f"Health Check: Service={status}, Process={'OK' if process_alive else 'NG'}")
 
         if is_healthy:
             if LOCK_FILE.exists():
-                # 復旧通知 (target=Noneでconfigに従うが、緊急系はDiscordにも送ると良い)
-                common.send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
+                # 復旧通知
+                send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
                 LOCK_FILE.unlink()
                 logger.info("Recovery notification sent.")
         else:
@@ -68,12 +72,12 @@ def main():
             if not LOCK_FILE.exists():
                 should_notify = True
                 # 異常時はDiscordのエラーチャンネルへ
-                common.send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")
+                send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")
                 logger.info("Stop alert sent.")
             else:
                 if current_time - LOCK_FILE.stat().st_mtime > REMINDER_INTERVAL_SEC:
                     should_notify = True
-                    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")
+                    send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")
                     logger.info("Reminder alert sent.")
 
             if should_notify:
@@ -82,8 +86,3 @@ def main():
     except Exception:
         err = traceback.format_exc()
         logger.error(f"Watchdog Crashed: {err}")
-        # commonのロガーが自動でDiscordに飛ばすが、念のため
-        pass
-
-if __name__ == "__main__":
-    main()

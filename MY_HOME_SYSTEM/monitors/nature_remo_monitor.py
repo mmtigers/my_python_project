@@ -1,10 +1,19 @@
-# HOME_SYSTEM/nature_remo_monitor.py
+# MY_HOME_SYSTEM/monitors/nature_remo_monitor.py
 import requests
-import common
-import config
 import sys
+import os
+# import common <-- 削除
 
-logger = common.setup_logging("nature_remo")
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import config
+from core.logger import setup_logging
+from core.database import save_log_generic
+from core.utils import get_now_iso
+
+
+
+logger = setup_logging("nature_remo")
 
 def fetch_nature_remo_data():
     token = config.NATURE_REMO_ACCESS_TOKEN
@@ -45,9 +54,10 @@ if __name__ == "__main__":
     if not targets: logger.warning("スマートメーターが見つかりませんでした。")
     
     for t in targets:
-        if common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
+        # common.save_log_generic -> save_log_generic
+        if save_log_generic(config.SQLITE_TABLE_SENSOR, 
                                  ["timestamp", "device_name", "device_id", "device_type", "power_watts"],
-                                 (common.get_now_iso(), t["name"], t["id"], "Nature Remo E Lite", t["power"])):
-            logger.info(f"記録: {t['name']} -> {t['power']}W")
-    
-    logger.info("=== 完了 ===")
+                                 (get_now_iso(), t["name"], t["id"], "SmartMeter", t["power"])):
+            logger.info(f"💾 Record: {t['name']} = {t['power']}W")
+        else:
+            logger.error("DB保存失敗")

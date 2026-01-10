@@ -1,8 +1,9 @@
-# MY_HOME_SYSTEM/car_presence_checker.py
+# MY_HOME_SYSTEM/monitors/car_presence_checker.py
 import cv2
 import numpy as np
 import os
 import shutil
+import sys
 import time
 import subprocess
 import sqlite3
@@ -10,15 +11,24 @@ import traceback
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any, List
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
 # プロジェクト内モジュール
 import config
-import common
+# import common <-- 削除
+from core.logger import setup_logging
+from core.database import get_db_cursor
+from core.utils import get_now_iso
+from services.notification_service import send_push
+
+
 
 # ==========================================
 # 1. 設定・定数定義
 # ==========================================
 # ログ設定
-logger = common.setup_logging("car_checker")
+logger = setup_logging("car_checker")
 
 # 判定設定
 TARGET_CAMERA_ID: str = "VIGI_C540_Parking"
@@ -65,13 +75,10 @@ def capture_snapshot(cam_conf: Dict[str, Any]) -> Optional[str]:
         if os.path.exists(tmp_path):
             return tmp_path
     except subprocess.CalledProcessError as e:
-        # 【修正】FFmpegの終了コードエラー（接続切れ含む）はWARNINGにする
         logger.warning(f"⚠️ 画像取得失敗 (Exit Code {e.returncode}): {cam_conf['name']} に接続できませんでした。")
     except subprocess.TimeoutExpired:
-        # 【修正】タイムアウトもWARNING
         logger.warning(f"⚠️ 画像取得タイムアウト: {cam_conf['name']} からの応答がありません。")
     except Exception as e:
-        # その他の想定外エラーはERRORのまま
         logger.error(f"❌ 画像取得エラー (Unexpected): {e}")
         
     return None
@@ -151,8 +158,8 @@ def analyze_car_presence(image_path: str) -> Tuple[Optional[bool], str, float]:
 def get_last_status_from_db() -> Tuple[str, str]:
     """DBから直近の状態を取得"""
     try:
-        # common.get_db_cursor を使用
-        with common.get_db_cursor() as cursor:
+        # common.get_db_cursor -> get_db_cursor
+        with get_db_cursor() as cursor:
             if not cursor:
                 return "UNKNOWN", ""
             
@@ -186,10 +193,10 @@ def save_evidence_image(src_path: str, action: str, details: str) -> Optional[st
 
 def record_result_to_db(action: str, details: str, score: float, image_path: str, has_status_changed: bool) -> None:
     """DBに保存 (イベントログ & 防犯ログ)"""
-    now_iso = common.get_now_iso()
+    now_iso = get_now_iso()
     try:
-        # common.get_db_cursor(commit=True) を使用して一括コミット
-        with common.get_db_cursor(commit=True) as cursor:
+        # common.get_db_cursor(commit=True) -> get_db_cursor
+        with get_db_cursor(commit=True) as cursor:
             if not cursor:
                 return
             
@@ -244,7 +251,8 @@ def send_user_notification(action: str, score: float, details: str) -> None:
     else:
         return
 
-    common.send_push(
+    # common.send_push -> send_push
+    send_push(
         config.LINE_USER_ID, 
         [{"type": "text", "text": message}], 
         target="discord"
@@ -307,7 +315,7 @@ def main() -> None:
 
     except Exception as e:
         logger.error(f"🔥 エラー発生: {e}\n{traceback.format_exc()}")
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"⚠️ 車検知エラー: {e}"}], target="discord")
+        send_push(config.LINE_USER_ID, [{"type": "text", "text": f"⚠️ 車検知エラー: {e}"}], target="discord")
         
     finally:
         # 万が一残っていた場合のクリーンアップ

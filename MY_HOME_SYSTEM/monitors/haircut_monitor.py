@@ -1,22 +1,26 @@
+# MY_HOME_SYSTEM/monitors/haircut_monitor.py
 import imaplib
 import email
 import re
+import sys
 import os
-import logging
-import requests
 import sqlite3
 from datetime import datetime
 from email.header import decode_header
 from typing import Optional
 from dotenv import load_dotenv
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# 自作モジュール
+import config
+from core.logger import setup_logging
+from services.notification_service import send_push
+
+
+
 # ログ設定
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger('HaircutMonitor')
+logger = setup_logging("HaircutMonitor")
 
 class HaircutMonitor:
     """
@@ -29,10 +33,10 @@ class HaircutMonitor:
     TARGET_SENDER = "reserve@beauty.hotpepper.jp"
     TARGET_SUBJECT = "ご予約が確定いたしました"
     DB_NAME = "home_system.db"
-    REQUEST_TIMEOUT = 10  # 秒
 
     def __init__(self):
         """初期設定: 環境変数ロードとDB準備"""
+        # configから読み込む形に変更 (なければ.envから)
         self.base_dir = os.path.dirname(os.path.abspath(__file__))
         self._load_environment()
         self._init_database()
@@ -44,14 +48,14 @@ class HaircutMonitor:
 
         self.gmail_user = os.getenv("GMAIL_USER")
         self.gmail_password = os.getenv("GMAIL_APP_PASSWORD")
-        self.line_token = os.getenv("LINE_ACCESS_TOKEN")
-        # 修正: キー名を統一
-        self.discord_webhook = os.getenv("DISCORD_WEBHOOK_NOTIFY")
-
+        
+        # LINE/Discordの設定は config.py や services.notification_service に委譲するが、
+        # ここでは環境変数のチェックのみ行う
         if not self.gmail_user or not self.gmail_password:
             error_msg = "❌ 環境変数 (GMAIL_USER, GMAIL_APP_PASSWORD) が設定されていません。"
             logger.error(error_msg)
-            self._send_discord_error(error_msg)
+            # エラー通知も共通サービス経由で
+            send_push(config.LINE_USER_ID, [{"type":"text", "text": error_msg}], target="discord", channel="error")
             raise ValueError(error_msg)
         
         logger.info("✅ 設定ロード完了")
@@ -74,7 +78,6 @@ class HaircutMonitor:
             logger.info(f"✅ データベース接続確認: {self.DB_NAME}")
         except Exception as e:
             logger.error(f"❌ DB初期化エラー: {e}")
-            self._send_discord_error(f"DB初期化失敗: {e}")
 
     def _save_reservation(self, dt: datetime) -> bool:
         """予約日時をデータベースに保存 (True:新規, False:重複)"""
@@ -103,7 +106,6 @@ class HaircutMonitor:
 
         except Exception as e:
             logger.error(f"❌ DB保存エラー: {e}")
-            self._send_discord_error(f"DB保存失敗: {e}")
             return False
 
     def _get_email_body(self, msg: email.message.Message) -> str:
@@ -134,7 +136,6 @@ class HaircutMonitor:
                 return dt
             except ValueError as e:
                 logger.error(f"⚠️ 日時パースエラー: {e}")
-                self._send_discord_error(f"日時パースエラー: {raw_date_str}")
                 return None
         return None
 
@@ -154,37 +155,6 @@ class HaircutMonitor:
                 f"再確認: 美容院の予約データは既に記録済みです🌿\n"
                 f"🗓️ 日時: {date_str}"
             )
-
-    def _send_line_notify(self, message: str):
-        """LINE通知"""
-        if not self.line_token: return
-        url = "https://notify-api.line.me/api/notify"
-        headers = {"Authorization": f"Bearer {self.line_token}"}
-        try:
-            requests.post(url, headers=headers, data={"message": "\n" + message}, timeout=self.REQUEST_TIMEOUT)
-            logger.info("✅ LINE通知送信")
-        except Exception as e:
-            logger.error(f"❌ LINE送信エラー: {e}")
-
-    def _send_discord_notify(self, message: str):
-        """Discord通知"""
-        if not self.discord_webhook: return
-        try:
-            requests.post(self.discord_webhook, json={"content": message}, timeout=self.REQUEST_TIMEOUT)
-            logger.info("✅ Discord通知送信")
-        except Exception as e:
-            logger.error(f"❌ Discord送信エラー: {e}")
-
-    def _send_discord_error(self, error_message: str):
-        """エラー通知"""
-        if not self.discord_webhook: return
-        try:
-            requests.post(
-                self.discord_webhook, 
-                json={"content": f"🚨 **エラー発生(Monitor)** 🚨\n```\n{error_message}\n```"},
-                timeout=self.REQUEST_TIMEOUT
-            )
-        except Exception: pass
 
     def run(self):
         """メイン処理フロー"""
@@ -223,11 +193,16 @@ class HaircutMonitor:
                 if reservation_date:
                     is_new_record = self._save_reservation(reservation_date)
                     message = self._create_notification_message(reservation_date, is_new_record)
-                    # self._send_line_notify(message)
-                    self._send_discord_notify(message)
+                    
+                    # 統一通知サービスを使用 (LINEとDiscord両方へ送信可能)
+                    send_push(
+                        config.LINE_USER_ID, 
+                        [{"type": "text", "text": message}], 
+                        target="all" # LINEとDiscord両方に送る
+                    )
                 else:
                     logger.warning("⚠️ 日時抽出失敗")
-                    self._send_discord_error(f"日時抽出失敗: {subject}")
+                    send_push(config.LINE_USER_ID, [{"type":"text", "text": f"⚠️ 日時抽出失敗: {subject}"}], target="discord", channel="error")
             
             mail.close()
             mail.logout()
@@ -235,7 +210,7 @@ class HaircutMonitor:
 
         except Exception as e:
             logger.error(f"❌ 予期せぬエラー: {e}")
-            self._send_discord_error(f"システムエラー: {e}")
+            send_push(config.LINE_USER_ID, [{"type":"text", "text": f"🚨 システムエラー(Haircut): {e}"}], target="discord", channel="error")
 
 if __name__ == "__main__":
     monitor = HaircutMonitor()

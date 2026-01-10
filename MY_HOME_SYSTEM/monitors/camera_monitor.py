@@ -1,13 +1,19 @@
 # MY_HOME_SYSTEM/monitors/camera_monitor.py
-from onvif import ONVIFCamera
-from onvif.client import ONVIFService
-from requests.auth import HTTPDigestAuth
-import config
-import common
-import asyncio
-from datetime import datetime, timedelta
 import os
 import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import config
+# import common <-- 削除
+from core.logger import setup_logging
+from core.database import save_log_generic
+from core.utils import get_now_iso
+from services.notification_service import send_push
+
+import asyncio
+from datetime import datetime, timedelta
+
+
 import time
 import socket
 import zeep.helpers
@@ -18,9 +24,13 @@ from concurrent.futures import ThreadPoolExecutor
 import traceback
 import signal
 import requests
+from onvif import ONVIFCamera
+from onvif.client import ONVIFService
+from requests.auth import HTTPDigestAuth
+
 
 # === ログ設定 ===
-logger = common.setup_logging("camera")
+logger = setup_logging("camera")
 # 調査のためZeep(通信ライブラリ)のログも少し出す
 logging.getLogger("zeep").setLevel(logging.ERROR) 
 
@@ -45,7 +55,6 @@ def cleanup_handler(signum, frame):
             logger.warning(f"⚠️ Unsubscribe送信失敗 (無視します): {e}")
 
     logger.info("👋 監視プロセスを終了します")
-    # 【重要修正】Systemdのタイムアウトを回避するため、スレッドごと強制終了する
     os._exit(0)
 
 # シグナルハンドラの登録 (Ctrl+C や systemctl stop を捕捉)
@@ -172,7 +181,6 @@ def perform_emergency_diagnosis(ip, cam_conf=None):
             sock.close()
         msg += f"   - Port {port}: {status}\n"
     
-    # 診断結果の解釈とソフトリブート
     if results.get(80) and not results.get(2020):
         msg += "   👉 結論: Web(Port 80)は生存していますが、ONVIFサービスがダウンしています。"
         if cam_conf:
@@ -212,33 +220,28 @@ def monitor_single_camera(cam_conf):
     consecutive_conn_errors = 0
     NOTIFY_THRESHOLD = 5
     has_notified_error = False
-
-    # Backoffの上限設定（最大10分待機）
     MAX_WAIT_TIME = 600 
 
-    # ポートフォールバック用のリスト作成
     port_candidates = []
     if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
-    port_candidates.extend([2020, 80]) # 優先順位: 指定ポート -> 2020 -> 80
-    port_candidates = list(dict.fromkeys(port_candidates)) # 重複排除
+    port_candidates.extend([2020, 80]) 
+    port_candidates = list(dict.fromkeys(port_candidates)) 
 
-    # ★追加: 現在のサブスクリプションを追跡する変数
     current_subscription = None
 
     while True: 
         mycam = None
-        # 【修正】ここではカウンタをリセットしない（Outer loop内でのリセットは「接続成功」を意味しないため）
         
         try:
             # --- 接続フェーズ ---
             current_port = None
             for port in port_candidates:
                 try:
-                    time.sleep(1.0) # ポートスキャン負荷軽減
-                    socket.setdefaulttimeout(10.0) # ソケットタイムアウト設定
+                    time.sleep(1.0) 
+                    socket.setdefaulttimeout(10.0)
 
                     mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
-                    mycam.create_events_service() # 認証テスト
+                    mycam.create_events_service() 
                     
                     current_port = port
                     logger.info(f"✅ [{cam_name}] 接続成功 (Port: {port})")
@@ -257,12 +260,9 @@ def monitor_single_camera(cam_conf):
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
 
-            # ==========================================
-            # 作成したサブスクリプションをグローバルリストに登録し、終了時にUnsubscribeできるようにする
             active_subscriptions.append(subscription)
-            current_subscription = subscription # ★追跡開始
+            current_subscription = subscription 
             logger.info(f"✅ [{cam_name}] Subscription登録完了")
-            # ==========================================
 
             try:
                 plp_address = subscription.SubscriptionReference.Address._value_1
@@ -284,7 +284,6 @@ def monitor_single_camera(cam_conf):
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
                     
-                    # 【修正】イベント取得成功数をカウントし、安定してからリセット
                     success_pull_count += 1
                     if success_pull_count >= 5 and consecutive_conn_errors > 0:
                         logger.info(f"🎉 [{cam_name}] 接続が完全に安定しました(Count Reset)")
@@ -316,9 +315,9 @@ def monitor_single_camera(cam_conf):
                                         with open(save_path, "wb") as f: f.write(img)
                                     except Exception: pass
                                 
-                                common.save_log_generic(config.SQLITE_TABLE_SENSOR, 
+                                save_log_generic(config.SQLITE_TABLE_SENSOR, 
                                     ["timestamp", "device_name", "device_id", "device_type", "contact_state"],
-                                    (common.get_now_iso(), "防犯カメラ", cam_conf['id'], "ONVIF Camera", event_type))
+                                    (get_now_iso(), "防犯カメラ", cam_conf['id'], "ONVIF Camera", event_type))
                                 
                                 is_car_related = "vehicle" in event_type or "Vehicle" in str(rule_name) or event_type == "intrusion"
                                 if is_car_related:
@@ -328,34 +327,31 @@ def monitor_single_camera(cam_conf):
                                     
                                     if action != "UNKNOWN":
                                         logger.info(f"🚗 車両判定: {action}")
-                                        common.save_log_generic(config.SQLITE_TABLE_CAR,
+                                        save_log_generic(config.SQLITE_TABLE_CAR,
                                             ["timestamp", "action", "rule_name"],
-                                            (common.get_now_iso(), action, rule_name))
+                                            (get_now_iso(), action, rule_name))
 
                                 if event_type == "intrusion":
                                     msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
-                                    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
-                                    time.sleep(15) # 通知連投防止
+                                    send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
+                                    time.sleep(15) 
 
                 except Exception as e:
                     err = str(e)
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    # 致命的エラーチェック
                     fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe"]
                     if any(f in err for f in fatal_errors):
                         logger.warning(f"⚠️ [{cam_name}] 致命的エラー検知: {err} -> 即時再接続")
                         perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
-                        raise Exception("Fatal Connection Error") # Inner Loopを抜ける
+                        raise Exception("Fatal Connection Error") 
 
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー: {err}")
                     time.sleep(2)
 
         except Exception as e:
-            # === エラー発生時のクリーンアップ & 再接続ロジック ===
             err_msg = str(e)
             
-            # クリーンアップ
             if current_subscription:
                 try:
                     if current_subscription in active_subscriptions:
@@ -371,7 +367,6 @@ def monitor_single_camera(cam_conf):
             
             consecutive_conn_errors += 1
 
-            # 待機時間の指数関数的増加（Exponential Backoff）
             wait_time = min(30 * (2 ** (min(consecutive_conn_errors, 6) - 1)), MAX_WAIT_TIME)
             
             if consecutive_conn_errors >= NOTIFY_THRESHOLD and not has_notified_error:
