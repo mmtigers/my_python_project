@@ -261,13 +261,20 @@ def process_message(event, line_bot_api):
 
     # === 1. 手入力モード処理 (Pydanticモデル版) ===
     if user_id in USER_INPUT_STATE:
-        state = USER_INPUT_STATE[user_id]
-        
-        # キャンセル処理は全モード共通
-        if msg.startswith(("キャンセル", "戻る")):
+        if msg.startswith(("食事カテゴリ_", "食事記録_", "子供選択_", "子供記録_", "外出_", "面会_", "お腹記録_")):
+            # 状態を削除（モード解除）
             del USER_INPUT_STATE[user_id]
-            common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
-            return
+            # ここで return せず、そのまま下の「2. コマンド分岐」へ進ませる
+            
+        else:
+            # --- 既存の手入力処理 ---
+            state = USER_INPUT_STATE[user_id]
+            
+            # キャンセル処理
+            if msg.startswith(("キャンセル", "戻る")):
+                del USER_INPUT_STATE[user_id]
+                common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
+                return
         
         # 安全策：古い形式（文字列）が残っていたら削除してスキップ
         if not isinstance(state, UserInputState):
@@ -314,8 +321,12 @@ def process_message(event, line_bot_api):
             # 今はAIがメインですが、手入力が必要になったらここに書く
             pass
 
-        # 該当なし（安全のため削除）
-        del USER_INPUT_STATE[user_id]
+        # 該当なしの場合も念のため削除
+            if user_id in USER_INPUT_STATE:
+                 del USER_INPUT_STATE[user_id]
+            
+            # 手入力処理を行ったらここで終了
+            return
 
     # === 2. コマンド分岐 ===
     
