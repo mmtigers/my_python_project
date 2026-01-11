@@ -1,8 +1,11 @@
 import React, { useMemo } from 'react';
 import { Undo2, Clock, RotateCcw } from 'lucide-react';
+// ★追加: framer-motion をインポート
+import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { useQuestStatus } from '../hooks/useQuestStatus';
+
 
 interface QuestListProps {
     quests: Quest[];
@@ -12,7 +15,7 @@ interface QuestListProps {
     onQuestClick: (quest: Quest) => void;
 }
 
-// 個別のクエストアイテムコンポーネント（リストの再描画を最適化するため分割）
+// 個別のクエストアイテムコンポーネント（変更なし）
 const QuestItem: React.FC<{
     quest: Quest;
     completedQuests: QuestHistory[];
@@ -21,13 +24,11 @@ const QuestItem: React.FC<{
     onClick: (q: Quest) => void;
 }> = ({ quest, completedQuests, pendingQuests, currentUser, onClick }) => {
 
-    // ロジックはHookにお任せ
     const {
         isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
-    // クリック時のハンドラ：無限フラグなどを付与して親に渡す
     const handleClick = () => {
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
@@ -99,13 +100,9 @@ const QuestItem: React.FC<{
 export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick }: QuestListProps) {
     const currentDay = new Date().getDay();
 
-    // フィルタリングとソート（表示順制御）
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
-            // ターゲット限定 (user_id一致 or all)
             if (q.target && q.target !== 'all' && q.target !== currentUser?.user_id) return false;
-
-            // 曜日限定
             if (q.type === 'daily' && q.days) {
                 if (Array.isArray(q.days) && q.days.length === 0) return true;
                 const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
@@ -113,29 +110,46 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
-            // ※簡易ソート: 本来はHookのロジックを使って未完了を上に持ってくるべきですが、
-            // ここでは一旦ID順やデータ順としています。
-            // 必要であれば useQuestStatus を内部で使ってソートキーを作ることも可能です。
             return (b.id as number) - (a.id as number);
         });
     }, [quests, currentUser, currentDay]);
 
     return (
-        <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
+        <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
             <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">
                 -- 本日の依頼 --
             </div>
 
-            {sortedQuests.map(q => (
-                <QuestItem
-                    key={q.id || q.quest_id}
-                    quest={q}
-                    completedQuests={completedQuests}
-                    pendingQuests={pendingQuests}
-                    currentUser={currentUser}
-                    onClick={onQuestClick}
-                />
-            ))}
+            {/* ★変更: AnimatePresence でラップし、要素の増減を検知 */}
+            <AnimatePresence mode="popLayout">
+                {sortedQuests.map(q => (
+                    // ★変更: motion.div でラップし、アニメーション設定を記述
+                    <motion.div
+                        key={q.id || q.quest_id} // ★重要: keyはここに移す
+                        layout // 削除時に他の要素が詰めるアニメーション
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }} // 左にスライドして消える
+                        transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                    >
+                        <QuestItem
+                            // key={...} // ★重要: ここからkeyは削除（親のmotion.divにつけたため）
+                            quest={q}
+                            completedQuests={completedQuests}
+                            pendingQuests={pendingQuests}
+                            currentUser={currentUser}
+                            onClick={onQuestClick}
+                        />
+                    </motion.div>
+                ))}
+            </AnimatePresence>
+
+            {/* クエストがない場合の表示（オプション） */}
+            {sortedQuests.length === 0 && (
+                <div className="text-center text-gray-500 py-10 text-sm">
+                    現在挑戦できるクエストはありません
+                </div>
+            )}
         </div>
     );
 };
