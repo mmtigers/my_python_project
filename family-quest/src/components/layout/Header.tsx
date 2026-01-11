@@ -1,4 +1,3 @@
-import React from 'react';
 import { Coins, BookOpen, Users } from 'lucide-react';
 import { User } from '@/types'; // 型定義をインポート
 

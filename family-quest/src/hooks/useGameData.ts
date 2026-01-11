@@ -99,7 +99,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 history_id: history.id,
             });
         },
-        onSuccess: (res) => {
+        onSuccess: () => {
             handleSuccess();
             // 承認時のレベルアップも考慮するならここで処理
         },
@@ -126,7 +126,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 reward_id: reward.id || reward.reward_id,
             });
         },
-        onSuccess: (res) => {
+        onSuccess: () => {
             // 購入成功時はここでinvalidateするが、App.jsx側で結果を受け取りたい場合の対応
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
         },
@@ -141,7 +141,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 equipment_id: item.id || item.equipment_id,
             });
         },
-        onSuccess: (res, variables) => {
+        onSuccess: (_, variables) => {
             handleSuccess(`チャキーン！\n${variables.item.name} を手に入れた！`);
         },
         onError: (err) => handleError('装備購入', err),

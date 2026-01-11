@@ -152,7 +152,7 @@ export default function App() {
       await cancelQuest(currentUser, targetHistory);
     } else if (modalMode === 'purchase' && targetItem) {
       const result = await buyReward(currentUser, targetItem);
-      if (result && result.success) {
+      if (result && result.success && result.reward) {
         setMessageModal({
           title: "お買い上げ！",
           message: `${result.reward.title} を\n手に入れた！`,

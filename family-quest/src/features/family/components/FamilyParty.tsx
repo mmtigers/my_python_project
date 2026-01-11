@@ -1,16 +1,20 @@
 import React, { useMemo } from 'react';
-import { Sword, Shield, Crown, Skull } from 'lucide-react';
+import { Crown, Skull, Sword, Shield } from 'lucide-react';
+import { User, Equipment } from '@/types';
 
-/**
- * ドラクエ風 パーティステータス画面 (詳細表示版)
- */
-const FamilyParty = ({ users, ownedEquipments }) => {
+interface FamilyPartyProps {
+    users: User[];
+    ownedEquipments: any[]; // 型定義に合わせて調整 (例: Equipment & { is_equipped: number, user_id: string })
+}
+
+const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments }) => {
     // ユーザーごとの詳細ステータスを計算
     const partyData = useMemo(() => {
         return users.map(user => {
-            const myEquips = ownedEquipments.filter(e => e.user_id === user.user_id && e.is_equipped === 1);
-            const weapon = myEquips.find(e => e.type === 'weapon');
-            const armor = myEquips.find(e => e.type === 'armor');
+            // APIレスポンス構造によっては ownedEquipments の中身を any として扱うか、型定義を強化する
+            const myEquips = ownedEquipments.filter((e: any) => e.user_id === user.user_id && e.is_equipped === 1);
+            const weapon = myEquips.find((e: any) => e.type === 'weapon');
+            const armor = myEquips.find((e: any) => e.type === 'armor');
 
             // 攻撃力・守備力の計算
             const baseAtk = user.level * 3;
@@ -18,10 +22,14 @@ const FamilyParty = ({ users, ownedEquipments }) => {
             const totalAtk = baseAtk + (weapon?.power || 0);
             const totalDef = baseDef + (armor?.power || 0);
 
+            // HPの計算 (簡易: Lv * 10 + 50)
+            const maxHp = (user.level * 10) + 50;
+
             return {
                 ...user,
-                weapon,
-                armor,
+                hp: maxHp,
+                weapon: weapon as Equipment | undefined,
+                armor: armor as Equipment | undefined,
                 stats: { atk: totalAtk, def: totalDef }
             };
         });
@@ -40,11 +48,7 @@ const FamilyParty = ({ users, ownedEquipments }) => {
 
             {/* キャラクターリスト (2列グリッド) */}
             <div className="grid grid-cols-2 gap-2">
-                {/* ★修正: (member) => { に変更 */}
                 {partyData.map((member) => {
-                    // 画像アバター判定
-                    const isImageAvatar = member.avatar && (member.avatar.startsWith('/uploads') || member.avatar.startsWith('http'));
-
                     return (
                         <div key={member.user_id} className="border-2 border-white bg-blue-950/80 p-1 relative shadow-md flex flex-col">
                             {/* 枠の装飾 */}
@@ -55,11 +59,13 @@ const FamilyParty = ({ users, ownedEquipments }) => {
 
                             {/* 上部：基本情報 */}
                             <div className="flex items-center gap-2 p-2 border-b border-gray-600 bg-black/20">
-                                <div className="w-12 h-12 bg-gray-900 rounded p-1 border border-gray-600 shadow-inner overflow-hidden flex items-center justify-center">
-                                    {isImageAvatar ? (
+                                <div
+                                    className="w-12 h-12 bg-gray-900 rounded p-1 border border-gray-600 shadow-inner overflow-hidden flex items-center justify-center"
+                                >
+                                    {member.avatar ? (
                                         <img src={member.avatar} alt={member.name} className="w-full h-full object-cover" />
                                     ) : (
-                                        <div className="text-2xl">{member.avatar || '🙂'}</div>
+                                        <div className="text-2xl">{member.icon || '🙂'}</div>
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
@@ -67,7 +73,7 @@ const FamilyParty = ({ users, ownedEquipments }) => {
                                         {member.name}
                                     </div>
                                     <div className="text-[10px] text-cyan-300 truncate">
-                                        Lv.{member.level} {member.job_class}
+                                        Lv.{member.level} {member.job_class || '冒険者'}
                                     </div>
                                 </div>
                             </div>
