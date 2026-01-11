@@ -1,11 +1,12 @@
 import React from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { motion, HTMLMotionProps } from "framer-motion";
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "success" | "ghost" | "outline";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {
     variant?: ButtonVariant;
     size?: ButtonSize;
     isLoading?: boolean;
@@ -15,7 +16,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ({ className, variant = "primary", size = "md", isLoading, children, disabled, ...props }, ref) => {
 
         // ベーススタイル（共通）
-        const baseStyles = "inline-flex items-center justify-center rounded font-bold transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-95";
+        const baseStyles = "inline-flex items-center justify-center rounded font-bold transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
 
         // バリエーション（色・見た目）
         const variants = {
@@ -36,15 +37,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         };
 
         return (
-            <button
+            <motion.button
                 ref={ref}
                 className={cn(baseStyles, variants[variant], sizes[size], className)}
                 disabled={disabled || isLoading}
+                whileTap={{ scale: 0.95 }}
+                transition={{ type: "spring", stiffness: 400, damping: 17 }}
                 {...props}
             >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {children}
-            </button>
+            </motion.button>
         );
     }
 );
