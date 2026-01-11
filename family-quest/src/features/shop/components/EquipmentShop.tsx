@@ -1,21 +1,33 @@
 import React from 'react';
 import { Shield, Sword } from 'lucide-react';
+import { User, Equipment } from '@/types';
 
-/**
- * 装備ショップ＆管理コンポーネント
- */
-const EquipmentShop = ({ equipments, ownedEquipments, currentUser, onBuy, onEquip }) => {
+interface EquipmentShopProps {
+    equipments: Equipment[];
+    ownedEquipments: any[];
+    currentUser: User;
+    onBuy: (item: Equipment) => void;
+    onEquip: (item: Equipment) => void;
+}
 
+const EquipmentShop: React.FC<EquipmentShopProps> = ({
+    equipments,
+    ownedEquipments,
+    currentUser,
+    onBuy,
+    onEquip
+}) => {
     // 自分の持っているアイテム情報を取得するヘルパー
-    const getOwnedStatus = (itemId) => {
+    const getOwnedStatus = (itemId: number) => {
         return ownedEquipments.find(
-            oe => oe.equipment_id === itemId && oe.user_id === currentUser.user_id
+            (oe: any) => oe.equipment_id === itemId && oe.user_id === currentUser.user_id
         );
     };
 
-    // 種別ごとに表示エリアを分ける
-    const renderSection = (title, type, icon) => {
+    // セクションごとにレンダリング
+    const renderSection = (title: string, type: string, icon: React.ReactNode) => {
         const items = equipments.filter(e => e.type === type);
+        if (items.length === 0) return null;
 
         return (
             <div className="mb-4">
@@ -26,12 +38,15 @@ const EquipmentShop = ({ equipments, ownedEquipments, currentUser, onBuy, onEqui
 
                 <div className="space-y-2">
                     {items.map(item => {
-                        const owned = getOwnedStatus(item.equipment_id);
+                        const itemId = Number(item.equipment_id || item.id);
+                        const owned = getOwnedStatus(itemId);
                         const isEquipped = owned?.is_equipped === 1;
                         const canAfford = (currentUser.gold || 0) >= item.cost;
 
+
                         return (
-                            <div key={item.equipment_id}
+                            <div
+                                key={itemId}
                                 className={`
                   border p-2 rounded flex justify-between items-center transition-all select-none
                   ${isEquipped
@@ -39,14 +54,12 @@ const EquipmentShop = ({ equipments, ownedEquipments, currentUser, onBuy, onEqui
                                         : 'border-gray-700 bg-gray-900/50'}
                 `}
                             >
-                                {/* 左側：アイコンと情報 */}
+                                {/* 左側: アイコンと情報 */}
                                 <div className="flex items-center gap-3">
                                     <div className="relative">
-                                        <span className="text-2xl">{item.icon}</span>
+                                        <span className="text-2xl">{item.icon || (type === 'weapon' ? '🗡️' : '🛡️')}</span>
                                         {isEquipped && (
-                                            <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold px-1 rounded-full animate-pulse">
-                                                E
-                                            </span>
+                                            <span className="absolute -top-1 -right-1 bg-yellow-500 text-black text-[8px] font-bold px-1 rounded-full animate-pulse">E</span>
                                         )}
                                     </div>
                                     <div>
@@ -59,7 +72,7 @@ const EquipmentShop = ({ equipments, ownedEquipments, currentUser, onBuy, onEqui
                                     </div>
                                 </div>
 
-                                {/* 右側：アクションボタン */}
+                                {/* 右側: アクションボタン */}
                                 <div>
                                     {owned ? (
                                         isEquipped ? (
