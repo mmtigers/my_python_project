@@ -57,7 +57,7 @@ if __name__ == "__main__":
         # common.save_log_generic -> save_log_generic
         if save_log_generic(config.SQLITE_TABLE_SENSOR, 
                                  ["timestamp", "device_name", "device_id", "device_type", "power_watts"],
-                                 (get_now_iso(), t["name"], t["id"], "SmartMeter", t["power"])):
+                                 (get_now_iso(), t["name"], t["id"], "Nature Remo E Lite", t["power"])):
             logger.info(f"💾 Record: {t['name']} = {t['power']}W")
         else:
             logger.error("DB保存失敗")
