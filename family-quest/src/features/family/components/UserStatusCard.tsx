@@ -1,6 +1,7 @@
 import React from 'react';
 import { Crown } from 'lucide-react';
 import { User } from '@/types';
+import { CountUp } from '@/components/ui/CountUp';
 
 interface UserStatusCardProps {
     user: User;
@@ -60,7 +61,9 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                                 style={{ width: `${hpPercentage}%` }}
                             />
                             <div className="absolute inset-0 text-[8px] flex items-center justify-center text-white/80 font-bold leading-none">
-                                {currentHp}/{maxHp}
+                                <span className="flex gap-0.5">
+                                    <CountUp value={currentHp} /> / {maxHp}
+                                </span>
                             </div>
                         </div>
 
@@ -79,13 +82,13 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                         {/* ゴールド */}
                         <span className="font-bold text-yellow-300">G</span>
                         <div className="text-right font-bold text-yellow-300 tabular-nums">
-                            {(user.gold || 0).toLocaleString()} G
+                            <CountUp value={user.gold || 0} suffix=" G" />
                         </div>
 
                         {/* メダル */}
                         <span className="font-bold text-yellow-500">🏅</span>
                         <div className="text-right font-bold text-yellow-500 tabular-nums">
-                            {(user.medal_count || 0)} 枚
+                            <CountUp value={user.medal_count || 0} suffix=" 枚" />
                         </div>
                     </div>
                 </div>
