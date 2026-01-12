@@ -2,6 +2,7 @@ import React from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { motion, HTMLMotionProps } from "framer-motion";
+import { useSound } from "@/hooks/useSound";
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "success" | "ghost" | "outline";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
@@ -14,7 +15,8 @@ interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-    ({ className, variant = "primary", size = "md", isLoading, children, disabled, ...props }, ref) => {
+    ({ className, variant = "primary", size = "md", isLoading, children, disabled, onClick, ...props }, ref) => {
+        const { play } = useSound();
 
         // ベーススタイル（共通）
         const baseStyles = "inline-flex items-center justify-center rounded font-bold transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none";
@@ -37,6 +39,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             icon: "h-10 w-10",
         };
 
+        // ★ラップ関数: 音を鳴らしてから元のonClickを実行
+        const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
+            console.log("Button clicked! Playing tap sound...");
+            if (!disabled && !isLoading) {
+                play('tap');
+            }
+            if (onClick) {
+                onClick(e);
+            }
+        };
+
         return (
             <motion.button
                 ref={ref}
@@ -44,7 +57,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
                 disabled={disabled || isLoading}
                 whileTap={{ scale: 0.95 }}
                 transition={{ type: "spring", stiffness: 400, damping: 17 }}
+                onClick={handleClick}
                 {...props}
+
+
             >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {children}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
+import { useSound } from './hooks/useSound'; // 追加: 音を鳴らすため
 import { User, Quest, QuestHistory, Reward, Equipment } from '@/types';
 
 // UI Components
@@ -9,11 +10,9 @@ import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
 import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
-import { Button } from './components/ui/Button'; // 新しく作ったButtonを活用
-import { Modal } from './components/ui/Modal';   // 新しく作ったModalを活用
+import { Button } from './components/ui/Button';
+import { Modal } from './components/ui/Modal';
 
-// Feature Components
-// ※まだ .jsx のものは一旦 @ts-ignore するか、型定義なしで読み込まれます
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
@@ -22,11 +21,10 @@ import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
 
-// 確認モーダル（ここも共通Modalに置き換えてスッキリさせます）
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
 }: {
-  mode: 'cancel' | 'purchase' | 'complete' | null,
+  mode: 'cancel' | 'purchase' | 'complete' | 'equip_buy' | null,
   target: any,
   onConfirm: () => void,
   onCancel: () => void
@@ -34,6 +32,7 @@ const ConfirmModal = ({
   if (!target) return null;
   const isCancel = mode === 'cancel';
   const isPurchase = mode === 'purchase';
+  const isEquipBuy = mode === 'equip_buy';
 
   let title = '確認';
   let message: React.ReactNode = '';
@@ -63,17 +62,15 @@ const ConfirmModal = ({
       </>
     );
     confirmBtnText = 'はい';
-    confirmBtnVariant = 'primary'; // Shop用にあえてPrimary
-  } else {
-    title = '確認';
+  } else if (isEquipBuy) {
+    title = '装備の購入';
     message = (
       <>
-        「{target.title}」<br />
-        を達成しますか？
+        「{target.name}」<br />
+        （{target.cost} G）を購入しますか？
       </>
     );
-    confirmBtnText = '達成する';
-    confirmBtnVariant = 'primary';
+    confirmBtnText = '買う！';
   }
 
   return (
@@ -83,7 +80,7 @@ const ConfirmModal = ({
       </div>
       <div className="flex gap-4 justify-center">
         <Button onClick={onCancel} variant="secondary" className="flex-1">
-          {isPurchase ? 'いいえ' : 'やめる'}
+          {isPurchase || isEquipBuy ? 'いいえ' : 'やめる'}
         </Button>
         <Button onClick={onConfirm} variant={confirmBtnVariant} className="flex-1">
           {confirmBtnText}
@@ -100,10 +97,12 @@ export default function App() {
   const [levelUpInfo, setLevelUpInfo] = useState<any>(null);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  const [modalMode, setModalMode] = useState<'cancel' | 'purchase' | 'complete' | null>(null);
+  const [modalMode, setModalMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | null>(null);
   const [targetHistory, setTargetHistory] = useState<QuestHistory | null>(null);
   const [targetItem, setTargetItem] = useState<any>(null);
   const [messageModal, setMessageModal] = useState<{ title: string, message: string, icon?: string } | null>(null);
+
+  const { play } = useSound(); // 音機能を利用
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
@@ -120,7 +119,7 @@ export default function App() {
     setCurrentUserIdx(idx);
   };
 
-  const handleQuestClick = (quest: Quest) => {
+  const handleQuestClick = async (quest: Quest) => {
     const qId = quest.quest_id || quest.id;
     let isInfinite = false;
     if (typeof quest._isInfinite !== 'undefined') {
@@ -133,8 +132,13 @@ export default function App() {
     const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
     const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
 
-    if (isPending) return;
+    // 申請中は無視
+    if (isPending) {
+      setMessageModal({ title: "確認中", message: "親の承認待ちです", icon: "⏳" });
+      return;
+    }
 
+    // 完了済み(かつ無限じゃない)ならキャンセル確認へ
     if (isCompleted && !isInfinite) {
       const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
       if (historyItem) {
@@ -144,22 +148,64 @@ export default function App() {
       return;
     }
 
-    completeQuest(currentUser, quest);
-  };
+    // クエスト完了処理を実行
+    const result = await completeQuest(currentUser, quest);
 
-  const handleModalConfirm = async () => {
-    if (modalMode === 'cancel' && targetHistory) {
-      await cancelQuest(currentUser, targetHistory);
-    } else if (modalMode === 'purchase' && targetItem) {
-      const result = await buyReward(currentUser, targetItem);
-      if (result && result.success && result.reward) {
+    // 結果に応じた処理
+    if (!result.success) {
+      if (result.reason === 'pending') {
+        setMessageModal({ title: "確認中", message: "承認されるまでお待ちください", icon: "⏳" });
+      } else {
+        // エラー時は必要ならメッセージを
+        console.error("Quest completion failed");
+      }
+    } else {
+      // メダル獲得時
+      if (result.earnedMedals > 0) {
+        play('medal'); // メダル音
         setMessageModal({
-          title: "お買い上げ！",
-          message: `${result.reward.title} を\n手に入れた！`,
-          icon: result.reward.icon || result.reward.icon_key || '🎁'
+          title: "ラッキー！！",
+          message: "ちいさなメダル を見つけた！",
+          icon: "🏅"
         });
       }
     }
+  };
+
+  const handleModalConfirm = async () => {
+    // キャンセル処理
+    if (modalMode === 'cancel' && targetHistory) {
+      await cancelQuest(currentUser, targetHistory);
+    }
+    // ごほうび購入
+    else if (modalMode === 'purchase' && targetItem) {
+      const result = await buyReward(currentUser, targetItem);
+      if (result.success) {
+        play('medal'); // 購入成功音(仮)
+        setMessageModal({
+          title: "お買い上げ！",
+          message: `${result.reward.title} を\n手に入れた！`,
+          icon: result.reward.icon || '🎁'
+        });
+      } else if (result.reason === 'gold') {
+        setMessageModal({ title: "資金不足", message: "ゴールドが足りません！", icon: "💸" });
+      }
+    }
+    // 装備購入
+    else if (modalMode === 'equip_buy' && targetItem) {
+      const result = await buyEquipment(currentUser, targetItem);
+      if (result.success) {
+        play('medal'); // 購入音
+        setMessageModal({
+          title: "装備ゲット！",
+          message: `${result.item.name} を\n手に入れた！`,
+          icon: "⚔️"
+        });
+      } else if (result.reason === 'gold') {
+        setMessageModal({ title: "資金不足", message: "ゴールドが足りません！", icon: "💸" });
+      }
+    }
+
     setModalMode(null);
     setTargetHistory(null);
     setTargetItem(null);
@@ -172,14 +218,29 @@ export default function App() {
   };
 
   // 各ハンドラ
-  const handleApprove = (historyItem: QuestHistory) => approveQuest(currentUser, historyItem);
-  const handleReject = (historyItem: QuestHistory) => rejectQuest(currentUser, historyItem);
+  const handleApprove = async (historyItem: QuestHistory) => {
+    const res = await approveQuest(currentUser, historyItem);
+    if (res.success) play('approve');
+  };
+
+  const handleReject = async (historyItem: QuestHistory) => {
+    await rejectQuest(currentUser, historyItem);
+  };
+
   const handleBuyReward = (reward: Reward) => {
     setTargetItem(reward);
     setModalMode('purchase');
   };
-  const handleBuyEquipment = (item: Equipment) => buyEquipment(currentUser, item);
-  const handleEquip = (item: Equipment) => changeEquipment(currentUser, item);
+
+  const handleBuyEquipment = (item: Equipment) => {
+    setTargetItem(item);
+    setModalMode('equip_buy');
+  };
+
+  const handleEquip = async (item: Equipment) => {
+    const res = await changeEquipment(currentUser, item);
+    if (res.success) play('tap');
+  };
 
   if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
 
@@ -207,7 +268,7 @@ export default function App() {
       {modalMode && (
         <ConfirmModal
           mode={modalMode}
-          target={modalMode === 'purchase' ? targetItem : targetHistory}
+          target={(modalMode === 'purchase' || modalMode === 'equip_buy') ? targetItem : targetHistory}
           onConfirm={handleModalConfirm}
           onCancel={handleModalCancel}
         />
