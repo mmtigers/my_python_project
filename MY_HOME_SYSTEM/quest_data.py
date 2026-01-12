@@ -55,6 +55,7 @@ QUESTS = [
     {'id': 41, 'title': '寝る前のトイレに行く', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🚽'},
     {'id': 42, 'title': '朝起きたら顔を洗う', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🧖'},
     {'id': 3, 'title': '朝ごはんを食べる (完食)', 'type': 'daily', 'target': 'son', 'category': 'health', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🍳'},
+    {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢'},
     # 知育 (Study)
     {'id': 43, 'title': '一人で本を読む', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 15, 'icon': '📖'},
     {'id': 30, 'title': '国語プリント完了', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '📝'},
@@ -89,9 +90,9 @@ QUESTS = [
     {'id': 306, 'title': 'お出かけの時に靴を履く', 'type': 'daily', 'target': 'daughter', 'category': 'life', 'difficulty': 'E', 'exp': 15, 'gold': 5, 'icon': '👟'},
 
     # --- 共通: 基本生活習慣 (夜) ---
-    {'id': 4, 'title': 'はみがき (夜)', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'E', 'exp': 15, 'gold': 5, 'icon': '🪥', 'start_time': '17:00', 'end_time': '22:00'},
-    {'id': 5, 'title': 'お風呂にはいる', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🛁', 'start_time': '17:00', 'end_time': '22:00'},
-    {'id': 6, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'D', 'exp': 15, 'gold': 10, 'icon': '🎒', 'start_time': '17:00', 'end_time': '22:00'},
+    {'id': 4, 'title': 'はみがき (夜)', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'E', 'exp': 15, 'gold': 15, 'icon': '🪥', 'start_time': '17:00', 'end_time': '20:00'},
+    {'id': 5, 'title': 'お風呂にはいる', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🛁', 'start_time': '17:00', 'end_time': '20:00'},
+    {'id': 6, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🎒', 'start_time': '17:00', 'end_time': '20:00'},
 
     # --- 父 (Dad) : 仕事・家事・健康のハイブリッド ---
     {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '1,2,3,4,5'},
