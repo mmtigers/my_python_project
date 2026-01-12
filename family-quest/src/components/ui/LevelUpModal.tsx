@@ -3,6 +3,8 @@ import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Zap } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useSound } from '@/hooks/useSound';
+import { useEffect } from 'react';
 
 // レベルアップ情報の型定義
 interface LevelUpInfo {
@@ -17,6 +19,13 @@ interface LevelUpModalProps {
 }
 
 const LevelUpModal: React.FC<LevelUpModalProps> = ({ info, onClose }) => {
+    const { play } = useSound();
+    useEffect(() => {
+        if (info) {
+            play('levelUp'); // ★表示時に再生
+        }
+    }, [info, play]);
+
     if (!info) return null;
 
     return (

@@ -1,11 +1,10 @@
 import React, { useMemo } from 'react';
 import { Undo2, Clock, RotateCcw } from 'lucide-react';
-// ★追加: framer-motion をインポート
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { useQuestStatus } from '../hooks/useQuestStatus';
-
+import { useSound } from '@/hooks/useSound';
 
 interface QuestListProps {
     quests: Quest[];
@@ -15,7 +14,7 @@ interface QuestListProps {
     onQuestClick: (quest: Quest) => void;
 }
 
-// 個別のクエストアイテムコンポーネント（変更なし）
+// 個別のクエストアイテムコンポーネント
 const QuestItem: React.FC<{
     quest: Quest;
     completedQuests: QuestHistory[];
@@ -24,12 +23,24 @@ const QuestItem: React.FC<{
     onClick: (q: Quest) => void;
 }> = ({ quest, completedQuests, pendingQuests, currentUser, onClick }) => {
 
+    const { play } = useSound();
+
     const {
         isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
     const handleClick = () => {
+        // 音の再生ロジックはここで完結させる
+        if (!isDone && !isPending) {
+            // 完了または申請アクション
+            if (quest.type === 'daily' || isInfinite) {
+                play('clear'); // 完了音
+            } else {
+                play('submit'); // 申請音
+            }
+        }
+        // 親から渡されたハンドラを実行
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
@@ -114,37 +125,36 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         });
     }, [quests, currentUser, currentDay]);
 
+    // ★修正: ここにあった handleQuestClick ラッパーを削除しました。
+    // 音の再生は QuestItem 側で行うため、ここでは onQuestClick をそのまま渡します。
+
     return (
         <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
             <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">
                 -- 本日の依頼 --
             </div>
 
-            {/* ★変更: AnimatePresence でラップし、要素の増減を検知 */}
             <AnimatePresence mode="popLayout">
                 {sortedQuests.map(q => (
-                    // ★変更: motion.div でラップし、アニメーション設定を記述
                     <motion.div
-                        key={q.id || q.quest_id} // ★重要: keyはここに移す
-                        layout // 削除時に他の要素が詰めるアニメーション
+                        key={q.id || q.quest_id}
+                        layout
                         initial={{ opacity: 0, scale: 0.95 }}
                         animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }} // 左にスライドして消える
+                        exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }}
                         transition={{ type: "spring", stiffness: 300, damping: 25 }}
                     >
                         <QuestItem
-                            // key={...} // ★重要: ここからkeyは削除（親のmotion.divにつけたため）
                             quest={q}
                             completedQuests={completedQuests}
                             pendingQuests={pendingQuests}
                             currentUser={currentUser}
-                            onClick={onQuestClick}
+                            onClick={onQuestClick} // ★修正: 親のハンドラを直接渡す
                         />
                     </motion.div>
                 ))}
             </AnimatePresence>
 
-            {/* クエストがない場合の表示（オプション） */}
             {sortedQuests.length === 0 && (
                 <div className="text-center text-gray-500 py-10 text-sm">
                     現在挑戦できるクエストはありません
