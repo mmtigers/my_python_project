@@ -62,8 +62,17 @@ fi
 #   (cd "$QUEST_DIR" && npm install >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1 && npm run build >> ../MY_HOME_SYSTEM/logs/quest_build.log 2>&1)
 # fi
 
-# --- Phase 3: 初期化 ---
-echo "--- Fix Webhook ---"
+# --- Phase 3: 初期化 & ngrok起動 ---
+echo "--- Start ngrok & Fix Webhook ---"
+
+# 1. ngrokをバックグラウンドで起動 (ログは捨てるか保存するかはお好みで)
+# ※ ポート8000を指定して起動
+nohup ngrok http 8000 > /dev/null 2>&1 &
+NGROK_PID=$!
+echo "🚀 ngrok started (PID: $NGROK_PID)"
+
+# 2. ngrokが立ち上がるのを少し待ってからFixスクリプトを実行
+sleep 5
 $PYTHON_EXEC switchbot_webhook_fix.py
 
 # --- Phase 4: 常駐プロセス起動 ---
