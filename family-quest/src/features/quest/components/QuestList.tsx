@@ -82,6 +82,11 @@ const QuestItem: React.FC<{
                             {displayTitle}
                         </div>
                     </div>
+                    {(quest.desc || quest.description) && (
+                        <div className="text-xs text-gray-400 mt-0.5 leading-tight">
+                            {quest.desc || quest.description}
+                        </div>
+                    )}
 
                     {/* 報酬情報 (未完了時のみ) */}
                     {!isDone && !isPending && (

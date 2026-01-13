@@ -25,6 +25,7 @@ export interface Quest {
     quest_id?: ID;
     title: string;
     description?: string;
+    desc?: string;
 
     // ★ ? をつけてオプショナルに変更
     difficulty?: number;
