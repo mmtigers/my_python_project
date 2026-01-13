@@ -114,7 +114,8 @@ const QuestItem: React.FC<{
 };
 
 export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick }: QuestListProps) {
-    const currentDay = new Date().getDay();
+    const jsDay = new Date().getDay();
+    const currentDay = (jsDay + 6) % 7;
 
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
