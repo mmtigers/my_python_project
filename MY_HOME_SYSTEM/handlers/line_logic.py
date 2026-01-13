@@ -141,6 +141,7 @@ def handle_postback(event, line_bot_api):
 
         action = pb.action
         target_name = pb.child
+        val = pb.value
         quota_text = get_quota_text()
 
         # === 1. 全員元気 (一括) ===
@@ -244,6 +245,54 @@ def handle_postback(event, line_bot_api):
                 }
             }
             common.send_reply(reply_token, [{"type": "flex", "altText": "記録サマリ", "contents": flex_content}])
+
+            # === 5. 食事アンケート回答 (★ここを追加) ===
+        elif action == "food_answer":
+            # LinePostbackDataに 'value' フィールドがない場合に備え、raw_dictから取得
+            val = raw_dict.get("value")
+
+            if val == "self_cook":
+                # 自炊 -> メニュー選択肢を表示
+                cat = "自炊"
+                # configから自炊メニューリストを取得（なければデフォルト）
+                menus = config.MENU_OPTIONS.get(cat, ["カレー", "炒め物", "その他"])
+                
+                actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
+                actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
+
+                reply_msg = {
+                    "type": "text",
+                    "text": "自炊お疲れ様です🍳\nメインのメニューは何でしたか？",
+                    "quickReply": create_quick_reply(actions)
+                }
+                common.send_reply(reply_token, [reply_msg])
+
+            elif val == "eating_out":
+                # 外食 -> メニュー選択肢を表示
+                cat = "外食"
+                menus = config.MENU_OPTIONS.get(cat, ["寿司", "焼肉", "その他"])
+                
+                actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
+                actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
+
+                reply_msg = {
+                    "type": "text",
+                    "text": "外食いいですね🍜\n何を食べに行きましたか？",
+                    "quickReply": create_quick_reply(actions)
+                }
+                common.send_reply(reply_token, [reply_msg])
+            
+            elif val == "other":
+                # その他 -> 手入力モードへ
+                USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category="その他")
+                common.send_reply(reply_token, [{"type": "text", "text": "了解です。\n食べたものを入力してください📝"}])
+
+            elif val == "skip":
+                # スキップ
+                common.send_reply(reply_token, [{"type": "text", "text": "了解です。ゆっくり休んでください🍵"}])
+            
+            else:
+                common.logger.info(f"Unknown food value: {val}")
 
         else:
             common.logger.info(f"Unknown action: {action}")

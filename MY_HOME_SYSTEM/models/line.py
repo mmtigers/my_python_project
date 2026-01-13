@@ -35,6 +35,7 @@ class LinePostbackData(BaseModel):
     action: str
     child: Optional[str] = None
     status: Optional[str] = None
+    value: Optional[str] = None
 
 class InputMode(str, Enum):
     """入力モードの定義。タイポを物理的に防ぎます。"""

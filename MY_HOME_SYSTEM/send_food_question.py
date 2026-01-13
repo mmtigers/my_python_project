@@ -142,14 +142,29 @@ if __name__ == "__main__":
     logger.info("質問送信処理を開始...")
     report = get_daily_summary()
     
+    # 【修正】: ラベル、データ(postback.data)、表示テキスト のタプルに変更
+    # データ形式は "action=キー&value=値" のクエリ文字列形式を推奨
     actions = [
-        ("🏠 自炊", "食事カテゴリ_自炊"), ("🍜 外食", "食事カテゴリ_外食"),
-        ("🍱 その他", "食事カテゴリ_その他"), ("スキップ", "食事_スキップ")
+        ("🏠 自炊",   "action=food_answer&value=self_cook",   "自炊しました"),
+        ("🍜 外食",   "action=food_answer&value=eating_out",  "外食しました"),
+        ("🍱 その他", "action=food_answer&value=other",       "その他"),
+        ("スキップ",  "action=food_answer&value=skip",        "回答をスキップ")
     ]
-    items = [{"type": "action", "action": {"type": "message", "label": l, "text": t}} for l, t in actions]
+
+    # 【修正】: type="postback" に変更
+    items = []
+    for label, data, display_text in actions:
+        items.append({
+            "type": "action",
+            "action": {
+                "type": "postback",
+                "label": label,
+                "data": data,
+                "displayText": display_text  # ボタンを押した時にユーザーの発言として表示される文字
+            }
+        })
     
     now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-    # 2026年以降でなくてもDiscordを優先したい場合はここを調整
     target_platform = "line" 
     
     msg = {
@@ -158,7 +173,6 @@ if __name__ == "__main__":
         "quickReply": {"items": items}
     }
     
-    # target="discord" を明示的に指定して送信、さらに channel="report" を追加
     if common.send_push(config.LINE_USER_ID, [msg], target=target_platform, channel="report"):
         logger.info("送信完了✨")
     else:
