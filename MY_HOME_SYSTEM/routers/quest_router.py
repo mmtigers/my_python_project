@@ -50,6 +50,7 @@ class MasterUser(BaseModel):
 class MasterQuest(BaseModel):
     id: int
     title: str
+    desc: Optional[str] = None
     type: str  # 'daily', 'weekly', 'random', 'limited'
     target: str = 'all'
     exp: int
@@ -537,25 +538,24 @@ class GameSystem:
             for q in valid_quests:
                 cur.execute("""
                     INSERT INTO quest_master (
-                        quest_id, title, quest_type, target_user, exp_gain, gold_gain, 
+                        quest_id, title, description, quest_type, target_user, exp_gain, gold_gain, 
                         icon_key, day_of_week, start_date, end_date, occurrence_chance,
                         start_time, end_time
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(quest_id) DO UPDATE SET
-                        title = excluded.title, quest_type = excluded.quest_type, target_user = excluded.target_user,
+                        title = excluded.title,
+                        description = excluded.description,
+                        quest_type = excluded.quest_type, target_user = excluded.target_user,
                         exp_gain = excluded.exp_gain, gold_gain = excluded.gold_gain, icon_key = excluded.icon_key,
                         day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time,
                         start_date = excluded.start_date, end_date = excluded.end_date, occurrence_chance = excluded.occurrence_chance
                 """, (
-                    q.id, q.title, q.type, q.target, q.exp, q.gold, q.icon, 
+                    q.id, q.title, q.desc, q.type, q.target, q.exp, q.gold, q.icon,  # ★3番目に q.desc を追加
                     q.days, 
-                    # [修正前] q.start, q.end, 
-                    # [修正後] ★ここを変数名に合わせて修正
                     q.start_date, q.end_date, 
                     q.chance, q.start_time, q.end_time
                 ))
-
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
