@@ -283,7 +283,7 @@ export default function App() {
         onLogSwitch={() => setViewMode('familyLog')}
       />
 
-      <div className="p-4 space-y-4 max-w-md mx-auto">
+      <div className="p-4 space-y-4 w-full max-w-md md:max-w-5xl mx-auto transition-all duration-300">
         {viewMode === 'user' && (
           <>
             <UserStatusCard
