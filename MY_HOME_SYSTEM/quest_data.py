@@ -65,8 +65,9 @@ QUESTS = [
     # 2-2. パパ (Dad) - 家計と衛生の守護者
     # ------------------------------------------
     # [Work & Health]
-    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '1,2,3,4,5', 'desc': '家族の生活基盤を守るための戦い'},
-    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '1,2,3,4,5', 'desc': '激務を乗り越え、多額の報酬を得る'},
+    # 修正: 平日(月-金)は '0,1,2,3,4'
+    {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
+    {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '0,1,2,3,4', 'desc': '激務を乗り越え、多額の報酬を得る'},
     {'id': 13, 'title': '排便日時記録 (健康管理)', 'type': 'daily', 'target': 'dad', 'category': 'health', 'difficulty': 'E', 'exp': 10, 'gold': 10, 'icon': '📝', 'desc': '腸内環境のモニタリング'}, 
     {'id': 14, 'title': '体重計測 (健康管理)', 'type': 'daily', 'target': 'dad', 'category': 'health', 'difficulty': 'E', 'exp': 10, 'gold': 10, 'icon': '⚖️', 'desc': '身体ステータスのチェック'},
     {'id': 62, 'title': 'ランニング 5km', 'type': 'daily', 'target': 'dad', 'category': 'health', 'difficulty': 'A', 'exp': 200, 'gold': 50, 'icon': '🏃‍♂️', 'desc': '体力向上・ダイエット'},
@@ -79,7 +80,8 @@ QUESTS = [
     {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '0', 'desc': 'トイレの神様にご挨拶。金運UP?'},
     {'id': 60, 'title': 'お風呂掃除', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
-    {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '0,6', 'desc': 'ママを休ませるための男飯', 'start_time': '16:00', 'end_time': '20:00'},
+    # 修正: 週末(土-日)は '5,6'
+    {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '16:00', 'end_time': '20:00'},
     
     # [Housework - Garbage Disposal]
     # 朝8:00〜08:30 の30分一本勝負
@@ -151,8 +153,10 @@ QUESTS = [
     {'id': 52, 'title': '妹におもちゃを貸してあげる', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'D', 'exp': 30, 'gold': 10, 'icon': '🤝', 'desc': '優しいお兄ちゃんの証'},
     {'id': 53, 'title': '「ありがとう」を言う', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🗣️', 'desc': '感謝の言葉を口にしよう'},
     {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
-    {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '0,6', 'desc': '荷物持ちのサポート任務'},
-    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🧹', 'days': '0,6', 'desc': '週末は自分の城をきれいにしよう'},
+    # 修正: 週末(土-日)は '5,6'
+    {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
+    # 修正: 週末(土-日)は '5,6'
+    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
     
     # [Hero Pack]
     {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
