@@ -404,6 +404,7 @@ class QuestService:
         today_str = now.strftime("%Y-%m-%d")
         today_date = now.date()
         current_time_str = now.strftime("%H:%M")
+        current_weekday = today_date.weekday()
 
         for q in quests:
             if q['quest_type'] == 'limited':
@@ -439,7 +440,11 @@ class QuestService:
             q['type'] = q['quest_type']
             q['target'] = q['target_user']
             if q['day_of_week']:
-                q['days'] = [int(d) for d in q['day_of_week'].split(',')]
+                days_list = [int(d) for d in q['day_of_week'].split(',')]
+                q['days'] = days_list
+                # サーバーサイドで曜日チェックを実施 (Zero Regression: API契約は維持)
+                if current_weekday not in days_list:
+                    continue
             else:
                 q['days'] = None
             filtered.append(q)
