@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Undo2, Clock, RotateCcw, Hourglass } from 'lucide-react';
+import { Undo2, Clock, RotateCcw, Hourglass, TrendingUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -31,7 +31,7 @@ const QuestItem: React.FC<{
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
-    // ★追加: ボーナス計算
+    // ボーナス計算
     const bonusGold = quest.bonus_gold || 0;
     const bonusExp = quest.bonus_exp || 0;
     const hasBonus = bonusGold > 0 || bonusExp > 0;
@@ -63,111 +63,107 @@ const QuestItem: React.FC<{
     };
 
     return (
-        <Card
-            variant={variant}
-            onClick={handleClick}
-            // ★改良: タブレットでは高さ固定をやめ、paddingとGridでレイアウトを整える
-            className="md:p-6 md:h-full"
-        >
-            {/* ランダムクエストのキラキラ演出 */}
-            {isRandom && !isDone && !isPending && (
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
-            )}
+        // ★修正: Cardの外にバッジを出すため、relativeな親divで包む
+        <div className="relative h-full group">
+            <Card
+                variant={variant}
+                onClick={handleClick}
+                // ボーナス時の赤枠アニメーションはCard自体に適用
+                className={`md:p-6 md:h-full ${hasBonus && !isDone && !isPending ? 'border-2 border-red-400 animate-pulse-slow' : ''}`}
+            >
+                {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
+                {isRandom && !isDone && !isPending && (
+                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+                )}
 
-            {/* ★追加: キャリーオーバーボーナスバッジ */}
+                {/* クールダウン時のオーバーレイ */}
+                {isCooldown && (
+                    <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg animate-pulse cursor-not-allowed">
+                        <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                            <Hourglass size={12} className="animate-spin" />
+                            Wait...
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6 relative z-10 w-full h-full">
+                    {/* 1. アイコンエリア */}
+                    <div className="flex items-center justify-center min-w-[3rem]">
+                        <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
+                            {quest.icon || quest.icon_key}
+                        </span>
+                    </div>
+
+                    {/* 2. テキスト情報エリア */}
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-1">
+                            {/* バッジ類 */}
+                            {isInfinite && !isPending && (
+                                <span className="bg-cyan-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
+                            )}
+                            {isTimeLimited && !isDone && !isPending && (
+                                <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
+                                    ⏰ {quest.start_time}~{quest.end_time}
+                                </span>
+                            )}
+                            {isLimited && !isDone && !isPending && (
+                                <span className="bg-red-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">期間限定</span>
+                            )}
+                            {isPending && (
+                                <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>
+                            )}
+                        </div>
+
+                        {/* タイトル */}
+                        <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>
+                            {displayTitle}
+                        </div>
+
+                        {/* 説明文 */}
+                        {(quest.desc || quest.description) && (
+                            <div className="text-xs md:text-sm text-gray-400 leading-tight md:leading-normal">
+                                {quest.desc || quest.description}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* 3. 報酬・ステータスエリア */}
+                    <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
+                        {isDone ? (
+                            <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
+                                <Undo2 size={12} className="md:w-4 md:h-4" /> 戻す
+                            </span>
+                        ) : isPending ? (
+                            <span className="text-yellow-300 text-xs md:text-sm whitespace-nowrap">確認待ち</span>
+                        ) : (
+                            <div className="flex flex-col items-end">
+                                <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
+                                    EXP +{totalExp}
+                                </span>
+                                {totalGold > 0 && (
+                                    <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
+                                        {totalGold} G
+                                    </span>
+                                )}
+                                {hasBonus && (
+                                    <span className="text-[10px] md:text-xs text-red-300 font-bold animate-pulse">
+                                        (Bonus +{bonusGold}G)
+                                    </span>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </Card>
+
+            {/* ★修正: バッジをCardの外側（relativeな親divの直下）に移動 */}
             {hasBonus && !isDone && !isPending && (
-                <div className="absolute -top-3 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg border border-white flex items-center gap-1 z-20 animate-bounce">
+                <div className="absolute -top-3 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg border border-white flex items-center gap-1 z-30 animate-bounce pointer-events-none">
                     <TrendingUp size={12} />
                     <span>UP!</span>
                 </div>
             )}
-
-            {/* クールダウン時のオーバーレイ */}
-            {isCooldown && (
-                <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg animate-pulse cursor-not-allowed">
-                    <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                        <Hourglass size={12} className="animate-spin" />
-                        Wait...
-                    </div>
-                </div>
-            )}
-
-            {/* ★改良: レイアウト構造の変更 
-                スマホ(初期値): flex (横並び)
-                タブレット(md): grid (3列: アイコン / 内容 / 報酬・状態) 
-            */}
-            <div className="flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6 relative z-10 w-full h-full">
-
-                {/* 1. アイコンエリア */}
-                <div className="flex items-center justify-center min-w-[3rem]">
-                    <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
-                        {quest.icon || quest.icon_key}
-                    </span>
-                </div>
-
-                {/* 2. テキスト情報エリア */}
-                <div className="flex-1 min-w-0"> {/* min-w-0はテキストの折り返しに必要 */}
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                        {/* バッジ類 */}
-                        {isInfinite && !isPending && (
-                            <span className="bg-cyan-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
-                        )}
-                        {isTimeLimited && !isDone && !isPending && (
-                            <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
-                                ⏰ {quest.start_time}~{quest.end_time}
-                            </span>
-                        )}
-                        {isLimited && !isDone && !isPending && (
-                            <span className="bg-red-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">期間限定</span>
-                        )}
-                        {isPending && (
-                            <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>
-                        )}
-                    </div>
-
-                    {/* タイトル */}
-                    <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>
-                        {displayTitle}
-                    </div>
-
-                    {/* 説明文 */}
-                    {(quest.desc || quest.description) && (
-                        <div className="text-xs md:text-sm text-gray-400 leading-tight md:leading-normal">
-                            {quest.desc || quest.description}
-                        </div>
-                    )}
-                </div>
-
-                {/* 3. 報酬・ステータスエリア */}
-                <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
-                    {isDone ? (
-                        <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
-                            <Undo2 size={12} className="md:w-4 md:h-4" /> 戻す
-                        </span>
-                    ) : isPending ? (
-                        <span className="text-yellow-300 text-xs md:text-sm whitespace-nowrap">確認待ち</span>
-                    ) : (
-                        // 未完了時の報酬表示（ボーナス時は赤字で強調）
-                        <div className="flex flex-col items-end">
-                            <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
-                                EXP +{totalExp}
-                            </span>
-                            {totalGold > 0 && (
-                                <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
-                                    {totalGold} G
-                                </span>
-                            )}
-                            {/* ボーナス内訳の小文字表示 */}
-                            {hasBonus && (
-                                <span className="text-[10px] md:text-xs text-red-300 font-bold animate-pulse">
-                                    (Bonus +{bonusGold}G)
-                                </span>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
-        </Card>
+        </div>
     );
 };
 
