@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Undo2, Clock, RotateCcw } from 'lucide-react';
+import React, { useMemo, useState } from 'react'; // useStateを追加
+import { Undo2, Clock, RotateCcw, Hourglass } from 'lucide-react'; // Hourglassを追加
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -25,12 +25,16 @@ const QuestItem: React.FC<{
 
     const { play } = useSound();
 
+    const [isCooldown, setIsCooldown] = useState(false);
+
     const {
         isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
     const handleClick = () => {
+
+        if (isCooldown || isDone || isPending) return;
         // 音の再生ロジックはここで完結させる
         if (!isDone && !isPending) {
             // 完了または申請アクション
@@ -38,6 +42,13 @@ const QuestItem: React.FC<{
                 play('clear'); // 完了音
             } else {
                 play('submit'); // 申請音
+            }
+
+            if (isInfinite) {
+                setIsCooldown(true);
+                setTimeout(() => {
+                    setIsCooldown(false);
+                }, 60000);
             }
         }
         // 親から渡されたハンドラを実行
@@ -49,6 +60,16 @@ const QuestItem: React.FC<{
             {/* ランダムクエストのキラキラ演出 */}
             {isRandom && !isDone && !isPending && (
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+            )}
+
+            {/* [追加] クールダウン時のオーバーレイ表示 */}
+            {isCooldown && (
+                <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg animate-pulse cursor-not-allowed">
+                    <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                        <Hourglass size={12} className="animate-spin" />
+                        Wait...
+                    </div>
+                </div>
             )}
 
             <div className="flex items-center gap-3 relative z-10 w-full">

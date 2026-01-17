@@ -220,6 +220,32 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
+            last_hist = cur.execute("""
+                SELECT completed_at FROM quest_history 
+                WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
+                ORDER BY completed_at DESC LIMIT 1
+            """, (user_id, quest['quest_id'])).fetchone()
+
+            if last_hist and last_hist['completed_at']:
+                try:
+                    # ISOフォーマットの日付文字列をパース
+                    last_time = datetime.datetime.fromisoformat(last_hist['completed_at'])
+                    now_check = datetime.datetime.now()
+                    
+                    # タイムゾーン情報を削除してナイーブな比較を行う
+                    if last_time.tzinfo is not None: 
+                        last_time = last_time.replace(tzinfo=None)
+                    
+                    # 5秒未満の連続実行はエラーとする
+                    if (now_check - last_time).total_seconds() < 10:
+                        logger.warning(f"Spam check blocked: User={user_id}, Quest={quest_id}")
+                        raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    # 日付パースエラー等はログに出して処理を続行（安全側に倒す）
+                    logger.warning(f"Spam check date parse error: {e}")
+
             now_iso = common.get_now_iso()
             
             # --- 承認フロー分岐 ---
