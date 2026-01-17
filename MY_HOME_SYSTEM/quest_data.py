@@ -193,9 +193,9 @@ REWARDS = [
     # --- Small (消費型: 100G〜500G) ---
     {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦', 'desc': '頑張った自分へのご褒美デザート'},
     {'id': 2, 'title': 'ビール/お酒アップグレード', 'category': 'food', 'cost_gold': 150, 'icon_key': '🍺', 'desc': 'いつもの発泡酒をプレミアムモルツに'},
-    {'id': 10, 'title': 'Youtube (10分)', 'category': 'service', 'cost_gold': 50, 'icon_key': '📺', 'desc': '好きな動画を見てリフレッシュ'},
-    {'id': 11, 'title': 'Youtube (30分)', 'category': 'service', 'cost_gold': 150, 'icon_key': '📺', 'desc': '少し長めの動画も楽しめる'},
-    {'id': 12, 'title': 'Youtube (60分)', 'category': 'service', 'cost_gold': 300, 'icon_key': '📺', 'desc': '映画一本分くらいの自由視聴'},
+    {'id': 10, 'title': 'Youtube (10:00)', 'category': 'service', 'cost_gold': 50, 'icon_key': '📺', 'desc': '好きな動画を見てリフレッシュ'},
+    {'id': 11, 'title': 'Youtube (30:00)', 'category': 'service', 'cost_gold': 150, 'icon_key': '📺', 'desc': '少し長めの動画も楽しめる'},
+    {'id': 12, 'title': 'Youtube (60:00)', 'category': 'service', 'cost_gold': 300, 'icon_key': '📺', 'desc': '映画一本分くらいの自由視聴'},
     {'id': 20, 'title': 'ガチャガチャ 1回', 'category': 'item', 'cost_gold': 400, 'icon_key': '💊', 'desc': '何が出るかな？運試しの1回'},
     {'id': 21, 'title': '好きなおやつ 1個', 'category': 'food', 'cost_gold': 100, 'icon_key': '🍪', 'desc': '今日のおやつをグレードアップ'},
 
