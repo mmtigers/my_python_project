@@ -31,6 +31,17 @@ const QuestItem: React.FC<{
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
+    // ★追加: ボーナス計算
+    const bonusGold = quest.bonus_gold || 0;
+    const bonusExp = quest.bonus_exp || 0;
+    const hasBonus = bonusGold > 0 || bonusExp > 0;
+
+    // 合計報酬
+    const baseGold = quest.gold_gain || quest.gold || 0;
+    const baseExp = quest.exp_gain || quest.exp || 0;
+    const totalGold = baseGold + bonusGold;
+    const totalExp = baseExp + bonusExp;
+
     const handleClick = () => {
         if (isCooldown || isDone || isPending) return;
 
@@ -61,6 +72,14 @@ const QuestItem: React.FC<{
             {/* ランダムクエストのキラキラ演出 */}
             {isRandom && !isDone && !isPending && (
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+            )}
+
+            {/* ★追加: キャリーオーバーボーナスバッジ */}
+            {hasBonus && !isDone && !isPending && (
+                <div className="absolute -top-3 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg border border-white flex items-center gap-1 z-20 animate-bounce">
+                    <TrendingUp size={12} />
+                    <span>UP!</span>
+                </div>
             )}
 
             {/* クールダウン時のオーバーレイ */}
@@ -119,7 +138,7 @@ const QuestItem: React.FC<{
                     )}
                 </div>
 
-                {/* 3. 報酬・ステータスエリア (タブレットでは右端に強調表示) */}
+                {/* 3. 報酬・ステータスエリア */}
                 <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
                     {isDone ? (
                         <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
@@ -128,14 +147,20 @@ const QuestItem: React.FC<{
                     ) : isPending ? (
                         <span className="text-yellow-300 text-xs md:text-sm whitespace-nowrap">確認待ち</span>
                     ) : (
-                        // 未完了時の報酬表示（タブレットで大きく）
+                        // 未完了時の報酬表示（ボーナス時は赤字で強調）
                         <div className="flex flex-col items-end">
-                            <span className="text-orange-300 font-mono text-xs md:text-lg font-bold whitespace-nowrap">
-                                EXP +{quest.exp_gain || quest.exp}
+                            <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
+                                EXP +{totalExp}
                             </span>
-                            {(quest.gold_gain || quest.gold || 0) > 0 && (
-                                <span className="text-yellow-300 font-mono text-xs md:text-lg font-bold whitespace-nowrap">
-                                    {quest.gold_gain || quest.gold} G
+                            {totalGold > 0 && (
+                                <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
+                                    {totalGold} G
+                                </span>
+                            )}
+                            {/* ボーナス内訳の小文字表示 */}
+                            {hasBonus && (
+                                <span className="text-[10px] md:text-xs text-red-300 font-bold animate-pulse">
+                                    (Bonus +{bonusGold}G)
                                 </span>
                             )}
                         </div>
@@ -160,6 +185,11 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
+            // ボーナスがあるものを優先的に上に表示する
+            const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
+            const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
+            if (bonusA !== bonusB) return bonusB - bonusA;
+
             return (b.id as number) - (a.id as number);
         });
     }, [quests, currentUser, currentDay]);
@@ -179,7 +209,6 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }}
                         transition={{ type: "spring", stiffness: 300, damping: 25 }}
-                        // ★追加: Grid内での高さを揃える
                         className="h-full"
                     >
                         <QuestItem

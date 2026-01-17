@@ -138,7 +138,7 @@ QUESTS = [
     {'id': 6, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🎒', 'start_time': '19:00', 'end_time': '20:30', 'desc': '忘れ物がないか確認しよう'},
 
     # [Study & Lessons]
-    {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'desc': '今日も元気に登園しよう'},
+    {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
     {'id': 1009, 'title': '習い事：みらい (療育)', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 80, 'icon': '🏫', 'days': '0', 'desc': '月曜日は先生とのお勉強'},
     {'id': 1010, 'title': '習い事：ピアノ教室', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 80, 'icon': '🎹', 'days': '1', 'desc': '火曜日は音楽の修行'},
     {'id': 43, 'title': '一人で本を読む', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 15, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
@@ -152,7 +152,7 @@ QUESTS = [
     {'id': 44, 'title': '靴を並べるお手伝い', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいにすると気持ちいい'},
     {'id': 52, 'title': '妹におもちゃを貸してあげる', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'D', 'exp': 30, 'gold': 10, 'icon': '🤝', 'desc': '優しいお兄ちゃんの証'},
     {'id': 53, 'title': '「ありがとう」を言う', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🗣️', 'desc': '感謝の言葉を口にしよう'},
-    {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
+    {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
     # 修正: 週末(土-日)は '5,6'
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
     # 修正: 週末(土-日)は '5,6'
@@ -185,9 +185,9 @@ QUESTS = [
     # ------------------------------------------
     # 2-6. レア・ボス級・期間限定 (Special)
     # ------------------------------------------
-    {'id': 991, 'title': '大掃除 (家族全員)', 'type': 'limited', 'target': 'all', 'category': 'house', 'difficulty': 'S', 'exp': 1000, 'gold': 500, 'icon': '🧹', 'desc': '年末等の大イベント'},
-    {'id': 992, 'title': '予防接種を受ける', 'type': 'limited', 'target': 'son', 'category': 'health', 'difficulty': 'S', 'exp': 500, 'gold': 300, 'icon': '💉', 'desc': '泣かずに頑張る'},
-    {'id': 92, 'title': 'お雑煮を作る (年末限定)', 'type': 'limited', 'target': 'mom', 'category': 'house', 'difficulty': 'A', 'exp': 80, 'gold': 80, 'icon': '🥪', 'start_date': '2024-12-31', 'end_date': '2026-01-01', 'desc': 'お正月の特別クエスト'},
+#     {'id': 991, 'title': '大掃除 (家族全員)', 'type': 'limited', 'target': 'all', 'category': 'house', 'difficulty': 'S', 'exp': 1000, 'gold': 500, 'icon': '🧹', 'desc': '年末等の大イベント'},
+#     {'id': 992, 'title': '予防接種を受ける', 'type': 'limited', 'target': 'son', 'category': 'health', 'difficulty': 'S', 'exp': 500, 'gold': 300, 'icon': '💉', 'desc': '泣かずに頑張る'},
+#     {'id': 92, 'title': 'お雑煮を作る (年末限定)', 'type': 'limited', 'target': 'mom', 'category': 'house', 'difficulty': 'A', 'exp': 80, 'gold': 80, 'icon': '🥪', 'start_date': '2024-12-31', 'end_date': '2026-01-01', 'desc': 'お正月の特別クエスト'},
 ]
 
 # ==========================================

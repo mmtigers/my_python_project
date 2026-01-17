@@ -37,6 +37,10 @@ export interface Quest {
     gold?: number;
     gold_gain?: number;
 
+    // ★追加: キャリーオーバーボーナス
+    bonus_gold?: number;
+    bonus_exp?: number;
+
     quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
     type?: string;
 
