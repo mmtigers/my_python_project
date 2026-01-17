@@ -351,3 +351,10 @@ FAMILY_SETTINGS = {
         "春菜": {"color": "#FF8C00", "age": "ママ", "icon": "👩"},
     }
 }
+
+# ▼▼▼ NVR設定 (追加) ▼▼▼
+# NAS上の録画データ保存ルート
+NVR_RECORD_DIR = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
+
+# カメラ設定 (既存のCAMERASリストにディレクトリマッピング用キーを追加しても良いですが、
+# IDに含まれる文字列("Parking", "Garden")で判定するロジックにするため、そのままでもOKです)

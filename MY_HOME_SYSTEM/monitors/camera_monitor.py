@@ -4,6 +4,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+import glob
 # import common <-- 削除
 from core.logger import setup_logging
 from core.database import save_log_generic
@@ -144,21 +145,104 @@ def analyze_event_type(xml_str):
 
     return None, None, 0, None
 
-def capture_snapshot_rtsp(cam_conf):
-    tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
-    rtsp_url = f"rtsp://{cam_conf['user']}:{cam_conf['pass']}@{cam_conf['ip']}:554/stream1"
+def capture_snapshot_from_nvr(cam_conf, target_time=None):
+    """
+    NAS上の録画データから、指定時刻(デフォルトは現在)の画像を切り出す
+    """
+    if target_time is None:
+        target_time = datetime.now()
+
+    # 1. 保存先ディレクトリの特定
+    # config.pyで定義した NVR_RECORD_DIR を使用
+    # カメラIDに基づいてサブディレクトリを決定 (Parking または Garden)
+    if "Parking" in cam_conf['id']:
+        sub_dir = "parking"
+    elif "Garden" in cam_conf['id']:
+        sub_dir = "garden"
+    else:
+        # フォールバック (IDが一致しない場合)
+        logger.warning(f"[{cam_conf['name']}] NVRディレクトリが特定できません。ID: {cam_conf['id']}")
+        return None
+
+    record_dir = os.path.join(config.NVR_RECORD_DIR, sub_dir)
+
+    # 2. 該当する動画ファイルの探索
+    # ファイル名: YYYYMMDD_HHMMSS.mp4 (開始時刻)
+    # 録画は10分(600秒)ごとなので、ターゲット時刻の「10分〜0分前」に開始したファイルを探す
     
-    cmd = [
-        "ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", rtsp_url,
-        "-frames:v", "1", "-q:v", "2", tmp_path
-    ]
+    # 探索範囲を少し広げて、ターゲット時刻より前のファイルを探す
+    # (ファイル名ベースでソートされている前提)
     try:
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
+        # パターン: record_dir/*.mp4 (日付フォルダ構成にする場合はここを調整)
+        # 今回はPhase2の設定で直下に置いているため "*.mp4" でOK
+        # ※もし日付フォルダ分けする場合は os.path.join(record_dir, target_time.strftime('%Y%m%d'), "*.mp4")
+        
+        # 効率化のため、今日と昨日のファイルだけ対象にするなどの工夫が可能ですが、
+        # まずは glob で全取得してソート (ファイル数が数千になると遅くなるので注意)
+        # ★改善: globの範囲を絞る
+        files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
+        
+        if not files:
+            logger.warning(f"[{cam_conf['name']}] 録画ファイルが見つかりません: {record_dir}")
+            return None
+
+        target_file = None
+        
+        # バイナリサーチ的アプローチ、あるいは逆順探索
+        # 「ファイル開始時刻 <= ターゲット時刻」となる最新のファイルを見つける
+        for f_path in reversed(files):
+            filename = os.path.basename(f_path)
+            try:
+                # ファイル名から時刻抽出 (YYYYMMDD_HHMMSS.mp4)
+                time_str = filename.split('.')[0]
+                file_start_dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+                
+                if file_start_dt <= target_time:
+                    target_file = f_path
+                    break
+            except ValueError:
+                continue
+        
+        if not target_file:
+            # 見つからない場合は一番新しいファイルを使う(現在進行形など)
+            target_file = files[-1]
+            # 念のため開始時刻を再取得
+            try:
+                time_str = os.path.basename(target_file).split('.')[0]
+                file_start_dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
+            except:
+                file_start_dt = target_time # エラー回避
+
+        # 3. 切り出し位置(シーク秒数)の計算
+        seek_seconds = (target_time - file_start_dt).total_seconds()
+        if seek_seconds < 0: seek_seconds = 0
+        
+        # ffmpegで切り出し
+        # -ss を入力(-i)の前に置くと高速シークになる
+        tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
+        
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", str(seek_seconds),
+            "-i", target_file,
+            "-frames:v", "1",
+            "-q:v", "2", # 画質設定
+            tmp_path
+        ]
+        
+        # ログを減らす
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        
         if os.path.exists(tmp_path):
-            with open(tmp_path, "rb") as f: return f.read()
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        else:
+            logger.error(f"[{cam_conf['name']}] ffmpeg画像生成失敗")
+            return None
+
     except Exception as e:
-        logger.error(f"[{cam_conf['name']}] 画像キャプチャ失敗: {e}")
-    return None
+        logger.error(f"[{cam_conf['name']}] NVR画像取得エラー: {e}")
+        return None
 
 def perform_emergency_diagnosis(ip, cam_conf=None):
     """エラー発生直後にポートの状態を診断する"""
@@ -305,7 +389,7 @@ def monitor_single_camera(cam_conf):
                             
                             if event_type:
                                 logger.info(f"🔥 [{cam_name}] 検知: {label} (Rule: {rule_name})")
-                                img = capture_snapshot_rtsp(cam_conf)
+                                img = capture_snapshot_from_nvr(cam_conf)
 
                                 if img:
                                     try:
