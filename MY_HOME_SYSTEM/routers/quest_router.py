@@ -210,9 +210,65 @@ class QuestService:
 
     def __init__(self):
         self.user_service = UserService()
+    
+    def calculate_quest_boost(self, cur, user_id: str, quest: dict) -> Dict[str, int]:
+        """
+        クエストの放置日数に応じたボーナスを計算する
+        - 対象: デイリークエストのみ
+        - ロジック: 最終承認日から1日空くごとに +10% (最大 +100%)
+        """
+        if quest['quest_type'] != 'daily':
+            return {"gold": 0, "exp": 0}
+
+        # 最終承認日時を取得
+        last_hist = cur.execute("""
+            SELECT completed_at FROM quest_history 
+            WHERE user_id = ? AND quest_id = ? AND status = 'approved'
+            ORDER BY completed_at DESC LIMIT 1
+        """, (user_id, quest['quest_id'])).fetchone()
+
+        now = datetime.datetime.now()
+        last_date = None
+
+        if last_hist:
+            try:
+                # ISO文字列から日付へ
+                dt = datetime.datetime.fromisoformat(last_hist['completed_at'])
+                last_date = dt.date()
+            except Exception:
+                pass
+        
+        # 履歴がない、または日付が取れない場合はボーナスなし（初回ボーナス等は無し）
+        if not last_date:
+            return {"gold": 0, "exp": 0}
+
+        # 経過日数 (今日 - 最終日)
+        # 例: 昨日(diff=1) -> ボーナスなし
+        #     一昨日(diff=2) -> 1日サボり -> +10%
+        today_date = now.date()
+        days_diff = (today_date - last_date).days
+
+        if days_diff <= 1:
+            return {"gold": 0, "exp": 0}
+        
+        # ボーナス係数 (サボり日数 * 10%)
+        # 最大10日分 (+100%) でキャップ
+        missed_days = days_diff - 1
+        bonus_ratio = min(missed_days * 0.10, 1.0)
+
+        # 勉強系(study)はさらにボーナス強化（促進のため +20%刻み）
+        # ★補足: quest_data.py のカテゴリが使える前提。なければ標準レート
+        # DB上のquest_masterにはcategoryカラムがない場合があるため、データ構造依存だが、
+        # 今回はシンプルに標準ロジックのみ、またはdescription等で判定も可能。
+        # 安全のため一律ロジックとする。
+
+        bonus_gold = int(quest['gold_gain'] * bonus_ratio)
+        bonus_exp = int(quest['exp_gain'] * bonus_ratio)
+
+        return {"gold": bonus_gold, "exp": bonus_exp}
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
-        """クエストを完了する（子供の場合は承認待ちステータスにする）"""
+        """クエストを完了する"""
         with common.get_db_cursor(commit=True) as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
@@ -220,6 +276,7 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
+            # スパムチェック (直近の pending または approved を確認)
             last_hist = cur.execute("""
                 SELECT completed_at FROM quest_history 
                 WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
@@ -228,47 +285,45 @@ class QuestService:
 
             if last_hist and last_hist['completed_at']:
                 try:
-                    # ISOフォーマットの日付文字列をパース
                     last_time = datetime.datetime.fromisoformat(last_hist['completed_at'])
                     now_check = datetime.datetime.now()
-                    
-                    # タイムゾーン情報を削除してナイーブな比較を行う
                     if last_time.tzinfo is not None: 
                         last_time = last_time.replace(tzinfo=None)
                     
-                    # 5秒未満の連続実行はエラーとする
                     if (now_check - last_time).total_seconds() < 10:
-                        logger.warning(f"Spam check blocked: User={user_id}, Quest={quest_id}")
                         raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
                 except HTTPException:
                     raise
-                except Exception as e:
-                    # 日付パースエラー等はログに出して処理を続行（安全側に倒す）
-                    logger.warning(f"Spam check date parse error: {e}")
+                except Exception:
+                    pass
 
             now_iso = common.get_now_iso()
             
+            # ★追加: ボーナス計算と適用
+            boost = self.calculate_quest_boost(cur, user_id, quest)
+            total_exp = quest['exp_gain'] + boost['exp']
+            total_gold = quest['gold_gain'] + boost['gold']
+            
             # --- 承認フロー分岐 ---
             if user_id in self.CHILDREN_IDS:
-                # 子供の場合: 報酬を与えず、status='pending'で履歴作成
+                # 子供の場合: 計算済みの報酬額(total_exp/gold)を記録して申請
                 cur.execute("""
                     INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
-                """, (user_id, quest['quest_id'], quest['title'], quest['exp_gain'], quest['gold_gain'], now_iso))
+                """, (user_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
                 
-                logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}")
+                logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}, BonusG={boost['gold']}")
+                sound_manager.play("submit")
+
                 return {
                     "status": "pending",
                     "leveledUp": False, "newLevel": user['level'],
                     "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
                     "message": "親の承認待ちです"
                 }
-
-                # ★追加: 申請音
-                sound_manager.play("submit")
             
-            # 大人の場合: 即時承認 (既存ロジック)
-            return self._apply_quest_rewards(cur, user, quest, now_iso)
+            # 大人の場合: 即時承認 (計算済み報酬を渡す)
+            return self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         """親が保留中のクエストを承認し、報酬を付与する"""
@@ -281,14 +336,18 @@ class QuestService:
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="このクエストは承認待ちではありません")
 
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
-            # クエスト定義を一応取得（報酬額は履歴にあるが、詳細情報用）
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
 
-            # ★追加: 承認音
             sound_manager.play("approve")
             
-            # 報酬ロジックの適用
-            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id)
+            # ★修正: 履歴に保存された報酬額(ボーナス込み)を採用する
+            # hist['gold_earned'], hist['exp_earned'] を使用
+            override_rewards = {
+                "gold": hist['gold_earned'],
+                "exp": hist['exp_earned']
+            }
+
+            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
             
             logger.info(f"Quest Approved: Approver={approver_id}, Target={user['user_id']}")
             return result
@@ -311,18 +370,31 @@ class QuestService:
             return {"status": "rejected"}
 
 
-    def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None) -> Dict[str, Any]:
-        """報酬計算・DB更新の共通ロジック (GameLogicを使用)"""
+    def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:
+        """報酬計算・DB更新の共通ロジック"""
         
-        # 1. 報酬計算 (GameLogic)
-        rewards = game_logic.GameLogic.calculate_drop_rewards(quest['gold_gain'], quest['exp_gain'])
+        # 1. 報酬決定
+        if override_rewards:
+            # 履歴やボーナス計算済みの値を使用
+            # GameLogic.calculate_drop_rewards はランダム要素(Lucky)のみ計算させるために使う手もあるが、
+            # ここではシンプルにベースをOverride値とし、Lucky判定だけGameLogicに任せたいが...
+            # GameLogicの仕様上、引数で渡すのが確実。
+            base_gold = override_rewards['gold']
+            base_exp = override_rewards['exp']
+        else:
+            base_gold = quest['gold_gain']
+            base_exp = quest['exp_gain']
+
+        # GameLogic で最終計算 (Lucky判定など)
+        # ※ GameLogic 側で base_gold に対してランダム補正がかかる場合がある
+        rewards = game_logic.GameLogic.calculate_drop_rewards(base_gold, base_exp)
         earned_gold = rewards['gold']
         earned_exp = rewards['exp']
         earned_medals = rewards['medals']
         is_lucky = rewards['is_lucky']
 
-        # 2. レベルアップ計算 (GameLogic)
-        new_level, new_exp, leveled_up = game_logic.GameLogic.calc_level_progress(
+        # 2. レベルアップ計算
+        new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(
             user['level'], user['exp'], earned_exp
         )
         
@@ -334,12 +406,17 @@ class QuestService:
             UPDATE quest_users 
             SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
             WHERE user_id = ?
-        """, (new_level, new_exp, final_gold, earned_medals, now_iso, user['user_id']))
+        """, (new_level, new_exp_val, final_gold, earned_medals, now_iso, user['user_id']))
         
         # DB更新 (History)
         if history_id:
-            cur.execute("UPDATE quest_history SET status='approved', completed_at=? WHERE id=?", (now_iso, history_id))
+            # 承認時は履歴のステータス更新
+            # ※ gold_earned は申請時に保存されたもの(Lucky前)だが、最終結果(Lucky後)に更新するか？
+            # -> 整合性のため、最終獲得額に更新しておくのがベター
+            cur.execute("UPDATE quest_history SET status='approved', completed_at=?, gold_earned=?, exp_earned=? WHERE id=?", 
+                       (now_iso, earned_gold, earned_exp, history_id))
         else:
+            # 即時完了時は新規作成
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'approved')
@@ -351,7 +428,7 @@ class QuestService:
         except Exception:
             pass
 
-        # サウンド再生
+        # サウンド
         if leveled_up:
             sound_manager.play("level_up")
         elif is_lucky:
@@ -626,7 +703,6 @@ class GameSystem:
         with common.get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
             for u in users:
-                # ★修正: GameLogic を使用
                 u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])
                 u['maxHp'] = game_logic.GameLogic.calculate_max_hp(u['level'])
                 u['hp'] = u['maxHp']
@@ -634,13 +710,28 @@ class GameSystem:
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
 
+            # ★追加: クエスト一覧にボーナス情報を注入
+            for q in filtered_quests:
+                # ターゲットユーザーが決まっている場合のみボーナス計算（allの場合はユーザー切り替え時にView側で処理したほうが良いが、
+                # ここでは簡易的に「現在のユーザー」という概念がAPIにないため、
+                # フロントエンドでUserが切り替わるたびにFetchしなおすか、
+                # あるいは「全員分」計算するのは重い。
+                # 現状の仕様では、quest['target_user'] が 'son' などの特定ユーザーの場合に有効。
+                # 'all' の場合は誰の履歴を見るか不明瞭なため、一旦 'son' 等の特定ターゲットのみ適用する。
+                if q['target_user'] and q['target_user'] != 'all':
+                    boost = self.quest_service.calculate_quest_boost(cur, q['target_user'], q)
+                    q['bonus_gold'] = boost['gold']
+                    q['bonus_exp'] = boost['exp']
+                else:
+                    q['bonus_gold'] = 0
+                    q['bonus_exp'] = 0
+
             rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
             for r in rewards:
                 r['icon'] = r['icon_key']
                 r['cost'] = r['cost_gold']
 
             today_str = common.get_today_date_str()
-            # --- ここから変更 ---
             completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
             )]
@@ -648,7 +739,6 @@ class GameSystem:
             pending = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at ASC"
             )]
-
            
             logs = self._fetch_recent_logs(cur)
 
