@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react'; // useStateを追加
-import { Undo2, Clock, RotateCcw, Hourglass } from 'lucide-react'; // Hourglassを追加
+import React, { useMemo, useState } from 'react';
+import { Undo2, Clock, RotateCcw, Hourglass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -24,7 +24,6 @@ const QuestItem: React.FC<{
 }> = ({ quest, completedQuests, pendingQuests, currentUser, onClick }) => {
 
     const { play } = useSound();
-
     const [isCooldown, setIsCooldown] = useState(false);
 
     const {
@@ -33,15 +32,13 @@ const QuestItem: React.FC<{
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
     const handleClick = () => {
-
         if (isCooldown || isDone || isPending) return;
-        // 音の再生ロジックはここで完結させる
+
         if (!isDone && !isPending) {
-            // 完了または申請アクション
             if (quest.type === 'daily' || isInfinite) {
-                play('clear'); // 完了音
+                play('clear');
             } else {
-                play('submit'); // 申請音
+                play('submit');
             }
 
             if (isInfinite) {
@@ -51,18 +48,22 @@ const QuestItem: React.FC<{
                 }, 60000);
             }
         }
-        // 親から渡されたハンドラを実行
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
     return (
-        <Card variant={variant} onClick={handleClick}>
+        <Card
+            variant={variant}
+            onClick={handleClick}
+            // ★改良: タブレットでは高さ固定をやめ、paddingとGridでレイアウトを整える
+            className="md:p-6 md:h-full"
+        >
             {/* ランダムクエストのキラキラ演出 */}
             {isRandom && !isDone && !isPending && (
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
             )}
 
-            {/* [追加] クールダウン時のオーバーレイ表示 */}
+            {/* クールダウン時のオーバーレイ */}
             {isCooldown && (
                 <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg animate-pulse cursor-not-allowed">
                     <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
@@ -72,63 +73,74 @@ const QuestItem: React.FC<{
                 </div>
             )}
 
-            <div className="flex items-center gap-3 relative z-10 w-full">
-                {/* アイコン */}
-                <span className={`text-2xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
-                    {quest.icon || quest.icon_key}
-                </span>
+            {/* ★改良: レイアウト構造の変更 
+                スマホ(初期値): flex (横並び)
+                タブレット(md): grid (3列: アイコン / 内容 / 報酬・状態) 
+            */}
+            <div className="flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6 relative z-10 w-full h-full">
 
-                {/* テキスト情報 */}
-                <div className="flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
+                {/* 1. アイコンエリア */}
+                <div className="flex items-center justify-center min-w-[3rem]">
+                    <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
+                        {quest.icon || quest.icon_key}
+                    </span>
+                </div>
+
+                {/* 2. テキスト情報エリア */}
+                <div className="flex-1 min-w-0"> {/* min-w-0はテキストの折り返しに必要 */}
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                        {/* バッジ類 */}
                         {isInfinite && !isPending && (
-                            <span className="bg-cyan-600 text-[10px] px-1 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
+                            <span className="bg-cyan-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
                         )}
-
                         {isTimeLimited && !isDone && !isPending && (
-                            <span className="bg-yellow-500 text-black text-[10px] px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
+                            <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
                                 ⏰ {quest.start_time}~{quest.end_time}
                             </span>
                         )}
-
                         {isLimited && !isDone && !isPending && (
-                            <span className="bg-red-600 text-[10px] px-1 rounded font-bold">期間限定</span>
+                            <span className="bg-red-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">期間限定</span>
                         )}
-
                         {isPending && (
-                            <span className="bg-yellow-500 text-black text-[10px] px-1 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>
+                            <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>
                         )}
-
-                        <div className={`font-bold ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>
-                            {displayTitle}
-                        </div>
                     </div>
-                    {(quest.desc || quest.description) && (
-                        <div className="text-xs text-gray-400 mt-0.5 leading-tight">
-                            {quest.desc || quest.description}
-                        </div>
-                    )}
 
-                    {/* 報酬情報 (未完了時のみ) */}
-                    {!isDone && !isPending && (
-                        <div className="flex gap-2 text-xs mt-0.5">
-                            <span className="text-orange-300 font-mono">EXP: {quest.exp_gain || quest.exp}</span>
-                            {(quest.gold_gain || quest.gold || 0) > 0 && (
-                                <span className="text-yellow-300 font-mono">{quest.gold_gain || quest.gold} G</span>
-                            )}
+                    {/* タイトル */}
+                    <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>
+                        {displayTitle}
+                    </div>
+
+                    {/* 説明文 */}
+                    {(quest.desc || quest.description) && (
+                        <div className="text-xs md:text-sm text-gray-400 leading-tight md:leading-normal">
+                            {quest.desc || quest.description}
                         </div>
                     )}
                 </div>
 
-                {/* 右側のステータス表示 */}
-                {isDone && (
-                    <span className="text-red-400 text-xs border border-red-500 px-1 py-0.5 rounded flex items-center gap-1 shrink-0">
-                        <Undo2 size={10} /> 戻す
-                    </span>
-                )}
-                {isPending && (
-                    <span className="text-yellow-300 text-xs shrink-0">親の確認待ち...</span>
-                )}
+                {/* 3. 報酬・ステータスエリア (タブレットでは右端に強調表示) */}
+                <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
+                    {isDone ? (
+                        <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
+                            <Undo2 size={12} className="md:w-4 md:h-4" /> 戻す
+                        </span>
+                    ) : isPending ? (
+                        <span className="text-yellow-300 text-xs md:text-sm whitespace-nowrap">確認待ち</span>
+                    ) : (
+                        // 未完了時の報酬表示（タブレットで大きく）
+                        <div className="flex flex-col items-end">
+                            <span className="text-orange-300 font-mono text-xs md:text-lg font-bold whitespace-nowrap">
+                                EXP +{quest.exp_gain || quest.exp}
+                            </span>
+                            {(quest.gold_gain || quest.gold || 0) > 0 && (
+                                <span className="text-yellow-300 font-mono text-xs md:text-lg font-bold whitespace-nowrap">
+                                    {quest.gold_gain || quest.gold} G
+                                </span>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
         </Card>
     );
@@ -152,12 +164,9 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         });
     }, [quests, currentUser, currentDay]);
 
-    // ★修正: ここにあった handleQuestClick ラッパーを削除しました。
-    // 音の再生は QuestItem 側で行うため、ここでは onQuestClick をそのまま渡します。
-
     return (
-        <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
-            <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold">
+        <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
+            <div className="md:col-span-2 text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm md:text-lg font-bold">
                 -- 本日の依頼 --
             </div>
 
@@ -170,20 +179,22 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         animate={{ opacity: 1, scale: 1 }}
                         exit={{ opacity: 0, x: -50, scale: 0.9, transition: { duration: 0.2 } }}
                         transition={{ type: "spring", stiffness: 300, damping: 25 }}
+                        // ★追加: Grid内での高さを揃える
+                        className="h-full"
                     >
                         <QuestItem
                             quest={q}
                             completedQuests={completedQuests}
                             pendingQuests={pendingQuests}
                             currentUser={currentUser}
-                            onClick={onQuestClick} // ★修正: 親のハンドラを直接渡す
+                            onClick={onQuestClick}
                         />
                     </motion.div>
                 ))}
             </AnimatePresence>
 
             {sortedQuests.length === 0 && (
-                <div className="text-center text-gray-500 py-10 text-sm">
+                <div className="md:col-span-2 text-center text-gray-500 py-10 text-sm md:text-xl">
                     現在挑戦できるクエストはありません
                 </div>
             )}
