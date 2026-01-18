@@ -199,6 +199,30 @@ class QuestService:
     def __init__(self):
         self.user_service = UserService()
     
+    # --- ★追加: 攻撃力計算ヘルパー ---
+    def _calculate_user_attack_power(self, cur, user_id: str) -> int:
+        """
+        ユーザーの基礎攻撃力（Lv*3）＋装備攻撃力の合計を算出する
+        """
+        # 1. ユーザーレベル取得
+        user_row = cur.execute("SELECT level FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
+        if not user_row: return 0
+        level = user_row['level']
+        
+        # 2. 装備中のアイテムのPower合計を取得
+        # (武器だけでなく防具もPowerを持っていれば加算し、総合的な「強さ」とする)
+        row = cur.execute("""
+            SELECT SUM(em.power) as total_power
+            FROM user_equipments ue
+            JOIN equipment_master em ON ue.equipment_id = em.equipment_id
+            WHERE ue.user_id = ? AND ue.is_equipped = 1
+        """, (user_id,)).fetchone()
+        
+        equip_power = row['total_power'] if row and row['total_power'] else 0
+        
+        # 攻撃力計算式: Lv * 3 + 装備パワー
+        return (level * 3) + equip_power
+
     # --- ボスロジック開始 ---
 
     def _check_and_reset_weekly_boss(self, cur):
@@ -390,15 +414,25 @@ class QuestService:
                     "message": "親の承認待ちです"
                 }
             
-            # ★修正: 大人の即時完了時にもボスダメージ処理を追加
+            # ★大人の場合（即時完了）
+            # 1. 報酬適用
             result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
             
-            # ボスへのダメージ (獲得EXPと同じ値をダメージとする)
-            damage_value = total_exp
+            # 2. ★ダメージ計算 (ステータス反映)
+            atk_power = self._calculate_user_attack_power(cur, user_id)
+            is_critical = random.random() < 0.1 # 10%でクリティカル
+            crit_multiplier = 1.5 if is_critical else 1.0
+            
+            # ダメージ = (クエストEXP + 攻撃力) * 倍率
+            damage_value = int((total_exp + atk_power) * crit_multiplier)
+            
+            # 3. ボスへ反映
             boss_effect = self._apply_boss_damage(cur, damage_value)
+            boss_effect['isCritical'] = is_critical # クリティカル情報を付与
+            
             result['bossEffect'] = boss_effect
             
-            logger.info(f"Quest Completed (Adult) & Boss Damaged: User={user_id}, Dmg={damage_value}")
+            logger.info(f"Adult Attack: User={user_id}, Base={total_exp}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
@@ -421,14 +455,26 @@ class QuestService:
                 "exp": hist['exp_earned']
             }
 
+            # 1. 報酬適用
             result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
             
-            # ★追加: ボスへのダメージ処理
-            damage_value = override_rewards['exp']
+            # 2. ★ダメージ計算 (ステータス反映)
+            # 攻撃者はクエスト実行者 (hist['user_id'])
+            attacker_id = hist['user_id']
+            atk_power = self._calculate_user_attack_power(cur, attacker_id)
+            is_critical = random.random() < 0.1
+            crit_multiplier = 1.5 if is_critical else 1.0
+            
+            base_damage = override_rewards['exp']
+            damage_value = int((base_damage + atk_power) * crit_multiplier)
+            
+            # 3. ボスへ反映
             boss_effect = self._apply_boss_damage(cur, damage_value)
+            boss_effect['isCritical'] = is_critical
+            
             result['bossEffect'] = boss_effect
             
-            logger.info(f"Quest Approved & Boss Damaged: Approver={approver_id}, Dmg={damage_value}")
+            logger.info(f"Child Attack Approved: Attacker={attacker_id}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
     
     def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
