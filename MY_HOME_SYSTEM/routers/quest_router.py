@@ -12,24 +12,20 @@ import pytz
 import importlib
 import random
 import sys
-import aiofiles  # ★追加: 非同期ファイル操作用
+import aiofiles
 
 import common
 import config
 import game_logic
 import sound_manager
-try:
-    import quest_data
-except ImportError:
-    from .. import quest_data
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # import quest_data with fallback
 try:
     import quest_data
 except ImportError:
     from .. import quest_data
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 router = APIRouter()
 logger = common.setup_logging("quest_router")
@@ -51,7 +47,7 @@ class MasterQuest(BaseModel):
     id: int
     title: str
     desc: Optional[str] = None
-    type: str  # 'daily', 'weekly', 'random', 'limited'
+    type: str
     target: str = 'all'
     exp: int
     gold: int
@@ -102,24 +98,28 @@ class ApproveAction(BaseModel):
     approver_id: str
     history_id: int
 
+class UpdateUserAction(BaseModel):
+    user_id: str
+    avatar_url: str
+
+class SoundTestRequest(BaseModel):
+    sound_key: str
+
 # Response Models
 class SyncResponse(BaseModel):
     status: str
     message: str
 
-# ★追加: アバター更新用
-class UpdateUserAction(BaseModel):
-    user_id: str
-    avatar_url: str
-
 class CompleteResponse(BaseModel):
-    status: str # 'success' or 'pending'
+    status: str
     leveledUp: bool
     newLevel: int
     earnedGold: int
     earnedExp: int
     earnedMedals: int = 0
     message: Optional[str] = None
+    # ★追加: ボス演出用データ
+    bossEffect: Optional[dict] = None 
 
 class CancelResponse(BaseModel):
     status: str
@@ -128,17 +128,11 @@ class PurchaseResponse(BaseModel):
     status: str
     newGold: int
 
-# [追加] Request Model
-class SoundTestRequest(BaseModel):
-    sound_key: str
-
 # ==========================================
 # 2. Service Layers (Logic Separation)
 # ==========================================
 
 class UserService:
-    """ユーザーのステータス計算、レベル管理、ログ取得を担当"""
-
     def get_family_chronicle(self) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
@@ -159,7 +153,6 @@ class UserService:
         }
 
     def _fetch_full_adventure_logs(self, cur) -> List[dict]:
-        # status = 'approved' のものだけを取得
         q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' ORDER BY completed_at DESC LIMIT 100").fetchall()
         r_rows = cur.execute("SELECT 'reward' as type, user_id, reward_title as title, cost_gold as gold, 0 as exp, redeemed_at as ts FROM reward_history ORDER BY redeemed_at DESC LIMIT 100").fetchall()
         e_rows = cur.execute("""
@@ -187,7 +180,6 @@ class UserService:
         return formatted
     
     def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:
-        """ユーザーのアバターURLを更新する"""
         with common.get_db_cursor(commit=True) as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user:
@@ -201,26 +193,121 @@ class UserService:
 
 
 class QuestService:
-    """クエストの進行管理、完了/キャンセル、承認フローを担当"""
-    
-    # 承認が必要なユーザーID
-    CHILDREN_IDS = ['daughter']
-    # 承認権限を持つユーザーID
+    CHILDREN_IDS = ['daughter', 'son', 'child'] # 調整
     PARENT_IDS = ['dad', 'mom']
 
     def __init__(self):
         self.user_service = UserService()
     
+    # --- ボスロジック開始 ---
+
+    def _check_and_reset_weekly_boss(self, cur):
+        """週が変わっていたらボスをリセット・再抽選する"""
+        party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
+        if not party_row:
+            return 
+        
+        # ★修正: sqlite3.Row を安全に辞書に変換
+        party = {k: party_row[k] for k in party_row.keys()}
+            
+        now = datetime.datetime.now()
+        today_date = now.date()
+        # 今週の月曜日を算出
+        this_monday = today_date - datetime.timedelta(days=today_date.weekday())
+        this_monday_str = str(this_monday)
+        
+        # DB上の週と一致するかチェック
+        db_week_start = party.get('week_start_date')
+        
+        if db_week_start != this_monday_str:
+            logger.info(f"🔄 New Week Detected! Resetting Boss... (Old: {db_week_start}, New: {this_monday_str})")
+            
+            # quest_data.BOSSES の長さを取得して動的にループさせる
+            # BOSSES が未定義の場合は安全策として1固定
+            boss_list = getattr(quest_data, "BOSSES", [])
+            total_bosses = len(boss_list) if boss_list else 5
+
+            next_boss_id = party['current_boss_id'] + 1
+            if next_boss_id > total_bosses:
+                next_boss_id = 1
+                
+            # 新しいHPの設定 (例: 基礎HP 1000)
+            new_max_hp = 1000
+            
+            cur.execute("""
+                UPDATE party_state 
+                SET current_boss_id = ?, 
+                    current_hp = ?, 
+                    max_hp = ?,
+                    week_start_date = ?,
+                    is_defeated = 0,
+                    total_damage = 0,
+                    charge_gauge = 0,
+                    updated_at = ?
+                WHERE id = 1
+            """, (next_boss_id, new_max_hp, new_max_hp, this_monday_str, common.get_now_iso()))
+
+    def _apply_boss_damage(self, cur, damage: int) -> dict:
+        """ボスにダメージを与え、状態を更新し、演出データを返す"""
+        
+        # まず週次チェック
+        self._check_and_reset_weekly_boss(cur)
+        
+        party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
+        if not party_row:
+            return None
+            
+        # ★修正: sqlite3.Row を安全に辞書に変換
+        party = {k: party_row[k] for k in party_row.keys()}
+
+        current_hp = party['current_hp']
+        is_defeated = party['is_defeated']
+        
+        # すでに撃破済みの場合はダメージ処理スキップ
+        if is_defeated:
+            return {
+                "damage": damage,
+                "remainingHp": 0,
+                "isDefeated": True,
+                "isNewDefeat": False
+            }
+            
+        # ダメージ計算
+        new_hp = max(0, current_hp - damage)
+        new_defeated = 1 if new_hp == 0 else 0
+        
+        # DB更新
+        cur.execute("""
+            UPDATE party_state 
+            SET current_hp = ?, 
+                total_damage = total_damage + ?, 
+                is_defeated = ?,
+                updated_at = ?
+            WHERE id = 1
+        """, (new_hp, damage, new_defeated, common.get_now_iso()))
+        
+        # サウンド演出トリガー
+        is_new_defeat = (new_defeated == 1 and is_defeated == 0)
+        
+        if is_new_defeat:
+            sound_manager.play("boss_defeat_fanfare")
+            logger.info("🎉 WEEKLY BOSS DEFEATED!")
+        else:
+            sound_manager.play("attack_hit")
+            
+        return {
+            "damage": damage,
+            "remainingHp": new_hp,
+            "isDefeated": bool(new_defeated),
+            "isNewDefeat": is_new_defeat
+        }
+
+    # --- ボスロジック終了 ---
+
     def calculate_quest_boost(self, cur, user_id: str, quest: dict) -> Dict[str, int]:
-        """
-        クエストの放置日数に応じたボーナスを計算する
-        - 対象: デイリークエストのみ
-        - ロジック: 最終承認日から1日空くごとに +10% (最大 +100%)
-        """
         if quest['quest_type'] != 'daily':
             return {"gold": 0, "exp": 0}
 
-        # 最終承認日時を取得
         last_hist = cur.execute("""
             SELECT completed_at FROM quest_history 
             WHERE user_id = ? AND quest_id = ? AND status = 'approved'
@@ -232,43 +319,28 @@ class QuestService:
 
         if last_hist:
             try:
-                # ISO文字列から日付へ
                 dt = datetime.datetime.fromisoformat(last_hist['completed_at'])
                 last_date = dt.date()
             except Exception:
                 pass
         
-        # 履歴がない、または日付が取れない場合はボーナスなし（初回ボーナス等は無し）
         if not last_date:
             return {"gold": 0, "exp": 0}
 
-        # 経過日数 (今日 - 最終日)
-        # 例: 昨日(diff=1) -> ボーナスなし
-        #     一昨日(diff=2) -> 1日サボり -> +10%
         today_date = now.date()
         days_diff = (today_date - last_date).days
 
         if days_diff <= 1:
             return {"gold": 0, "exp": 0}
         
-        # ボーナス係数 (サボり日数 * 10%)
-        # 最大10日分 (+100%) でキャップ
         missed_days = days_diff - 1
         bonus_ratio = min(missed_days * 0.10, 1.0)
-
-        # 勉強系(study)はさらにボーナス強化（促進のため +20%刻み）
-        # ★補足: quest_data.py のカテゴリが使える前提。なければ標準レート
-        # DB上のquest_masterにはcategoryカラムがない場合があるため、データ構造依存だが、
-        # 今回はシンプルに標準ロジックのみ、またはdescription等で判定も可能。
-        # 安全のため一律ロジックとする。
-
         bonus_gold = int(quest['gold_gain'] * bonus_ratio)
         bonus_exp = int(quest['exp_gain'] * bonus_ratio)
 
         return {"gold": bonus_gold, "exp": bonus_exp}
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
-        """クエストを完了する"""
         with common.get_db_cursor(commit=True) as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
@@ -276,7 +348,7 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
-            # スパムチェック (直近の pending または approved を確認)
+            # スパムチェック
             last_hist = cur.execute("""
                 SELECT completed_at FROM quest_history 
                 WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
@@ -298,15 +370,11 @@ class QuestService:
                     pass
 
             now_iso = common.get_now_iso()
-            
-            # ★追加: ボーナス計算と適用
             boost = self.calculate_quest_boost(cur, user_id, quest)
             total_exp = quest['exp_gain'] + boost['exp']
             total_gold = quest['gold_gain'] + boost['gold']
             
-            # --- 承認フロー分岐 ---
             if user_id in self.CHILDREN_IDS:
-                # 子供の場合: 計算済みの報酬額(total_exp/gold)を記録して申請
                 cur.execute("""
                     INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
@@ -322,39 +390,9 @@ class QuestService:
                     "message": "親の承認待ちです"
                 }
             
-            # 大人の場合: 即時承認 (計算済み報酬を渡す)
             return self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
-        """親が保留中のクエストを承認し、報酬を付与する"""
-        if approver_id not in self.PARENT_IDS:
-            raise HTTPException(status_code=403, detail="承認権限がありません")
-
-        with common.get_db_cursor(commit=True) as cur:
-            hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
-            if not hist: raise HTTPException(status_code=404, detail="History not found")
-            if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="このクエストは承認待ちではありません")
-
-            user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
-            quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
-
-            sound_manager.play("approve")
-            
-            # ★修正: 履歴に保存された報酬額(ボーナス込み)を採用する
-            # hist['gold_earned'], hist['exp_earned'] を使用
-            override_rewards = {
-                "gold": hist['gold_earned'],
-                "exp": hist['exp_earned']
-            }
-
-            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
-            
-            logger.info(f"Quest Approved: Approver={approver_id}, Target={user['user_id']}")
-            return result
-    
-    # ★追加: 却下（再チャレンジ）処理
-    def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
-        """親が承認待ちのクエストを却下（削除）し、再チャレンジさせる"""
         if approver_id not in self.PARENT_IDS:
             raise HTTPException(status_code=403, detail="承認権限がありません")
 
@@ -363,77 +401,88 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
-            # 履歴を削除する（これで「未実施」の状態に戻る）
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
+            quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
+
+            # ★変更: 音の重複を避けるため、ここでは承認音は鳴らさない (または attack_hit に任せる)
+            # sound_manager.play("approve")
             
+            override_rewards = {
+                "gold": hist['gold_earned'],
+                "exp": hist['exp_earned']
+            }
+
+            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
+            
+            # ★追加: ボスへのダメージ処理
+            damage_value = override_rewards['exp']
+            boss_effect = self._apply_boss_damage(cur, damage_value)
+            result['bossEffect'] = boss_effect
+            
+            logger.info(f"Quest Approved & Boss Damaged: Approver={approver_id}, Dmg={damage_value}")
+            return result
+    
+    def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
+        if approver_id not in self.PARENT_IDS:
+            raise HTTPException(status_code=403, detail="承認権限がありません")
+
+        with common.get_db_cursor(commit=True) as cur:
+            hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
+            if not hist: raise HTTPException(status_code=404, detail="History not found")
+            if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
+
+            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
             return {"status": "rejected"}
 
-
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:
-        """報酬計算・DB更新の共通ロジック"""
-        
-        # 1. 報酬決定
         if override_rewards:
-            # 履歴やボーナス計算済みの値を使用
-            # GameLogic.calculate_drop_rewards はランダム要素(Lucky)のみ計算させるために使う手もあるが、
-            # ここではシンプルにベースをOverride値とし、Lucky判定だけGameLogicに任せたいが...
-            # GameLogicの仕様上、引数で渡すのが確実。
             base_gold = override_rewards['gold']
             base_exp = override_rewards['exp']
         else:
             base_gold = quest['gold_gain']
             base_exp = quest['exp_gain']
 
-        # GameLogic で最終計算 (Lucky判定など)
-        # ※ GameLogic 側で base_gold に対してランダム補正がかかる場合がある
         rewards = game_logic.GameLogic.calculate_drop_rewards(base_gold, base_exp)
         earned_gold = rewards['gold']
         earned_exp = rewards['exp']
         earned_medals = rewards['medals']
         is_lucky = rewards['is_lucky']
 
-        # 2. レベルアップ計算
         new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(
             user['level'], user['exp'], earned_exp
         )
         
-        # 3. 資産更新
         final_gold = user['gold'] + earned_gold
 
-        # DB更新 (User)
         cur.execute("""
             UPDATE quest_users 
             SET level = ?, exp = ?, gold = ?, medal_count = medal_count + ?, updated_at = ? 
             WHERE user_id = ?
         """, (new_level, new_exp_val, final_gold, earned_medals, now_iso, user['user_id']))
         
-        # DB更新 (History)
         if history_id:
-            # 承認時は履歴のステータス更新
-            # ※ gold_earned は申請時に保存されたもの(Lucky前)だが、最終結果(Lucky後)に更新するか？
-            # -> 整合性のため、最終獲得額に更新しておくのがベター
             cur.execute("UPDATE quest_history SET status='approved', completed_at=?, gold_earned=?, exp_earned=? WHERE id=?", 
                        (now_iso, earned_gold, earned_exp, history_id))
         else:
-            # 即時完了時は新規作成
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'approved')
             """, (user['user_id'], quest['quest_id'], quest['title'], earned_exp, earned_gold, now_iso))
         
-        # ボスバトルチャージ
+        # ボスチャージゲージ (念のため残す)
         try:
             cur.execute("UPDATE party_state SET charge_gauge = charge_gauge + 1 WHERE id = 1")
         except Exception:
             pass
 
-        # サウンド
+        # サウンド (レベルアップ優先)
         if leveled_up:
             sound_manager.play("level_up")
         elif is_lucky:
             sound_manager.play("medal_get")
-        else:
+        elif not history_id:
+            # 即時完了時のみここで鳴らす(承認時は_apply_boss_damageで鳴らすため)
             sound_manager.play("quest_clear")
 
         return {
@@ -455,7 +504,6 @@ class QuestService:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user: raise HTTPException(status_code=404, detail="User not found")
             
-            # GameLogic でレベルダウン計算
             new_level, new_exp = game_logic.GameLogic.calc_level_down(
                 user['level'], user['exp'], hist['exp_earned']
             )
@@ -466,19 +514,12 @@ class QuestService:
                         (new_level, new_exp, new_gold, common.get_now_iso(), user_id))
             cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
             
-            try:
-                cur.execute("UPDATE party_state SET charge_gauge = MAX(0, charge_gauge - 1) WHERE id = 1")
-            except Exception:
-                pass
-            
             logger.info(f"Quest Cancelled: User={user_id}, HistoryID={history_id}")
         return {"status": "cancelled"}
 
     def filter_active_quests(self, quests: List[dict]) -> List[dict]:
-        """現在の時間・条件に合わせてクエストをフィルタリングする"""
         filtered = []
         now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-        today_str = now.strftime("%Y-%m-%d")
         today_date = now.date()
         current_time_str = now.strftime("%H:%M")
         current_weekday = today_date.weekday()
@@ -486,26 +527,19 @@ class QuestService:
         for q in quests:
             if q['quest_type'] == 'limited':
                 try:
-                    # start_date判定
                     if q.get('start_date'):
-                        # '/'区切りなどにも対応したければ dateutil.parser.parse 推奨だが、
-                        # 標準ライブラリで簡易的にやるなら strptime をフォーマットに合わせて試行するか、
-                        # 最低限 "-" で split して date型を作る
                         y, m, d = map(int, q['start_date'].split('-'))
                         start_dt = datetime.date(y, m, d)
                         if today_date < start_dt: continue
-
-                    # end_date判定
                     if q.get('end_date'):
                         y, m, d = map(int, q['end_date'].split('-'))
                         end_dt = datetime.date(y, m, d)
                         if today_date > end_dt: continue
                 except ValueError as e:
-                    # 日付形式エラーの場合はログを出してスキップ（あるいは安全側に倒して表示しない）
                     logger.warning(f"Date parse error for quest {q.get('id')}: {e}")
                     continue
             if q['quest_type'] == 'random':
-                seed = f"{today_str}_{q['quest_id']}"
+                seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
                 if random.Random(seed).random() > q['occurrence_chance']: continue
             if q.get('start_time') and q.get('end_time'):
                 if q['start_time'] <= q['end_time']:
@@ -519,7 +553,6 @@ class QuestService:
             if q['day_of_week']:
                 days_list = [int(d) for d in q['day_of_week'].split(',')]
                 q['days'] = days_list
-                # サーバーサイドで曜日チェックを実施 (Zero Regression: API契約は維持)
                 if current_weekday not in days_list:
                     continue
             else:
@@ -529,8 +562,6 @@ class QuestService:
 
 
 class ShopService:
-    """報酬交換、装備購入、装備変更を担当"""
-
     def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             reward = cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (reward_id,)).fetchone()
@@ -598,16 +629,12 @@ class ShopService:
 
 
 class GameSystem:
-    """ゲームシステム全体（マスタ管理、初期化、一括データ取得）のファサード"""
-    
     def __init__(self):
         self.quest_service = QuestService()
         self.user_service = UserService()
         self.shop_service = ShopService()
 
     def sync_master_data(self) -> Dict[str, str]:
-        """マスタデータの同期"""
-        # (Step A-1と同じ内容のため省略せず記述)
         logger.info("🔄 Starting Master Data Sync...")
         try:
             importlib.reload(quest_data)
@@ -633,7 +660,6 @@ class GameSystem:
                     ON CONFLICT(user_id) DO UPDATE SET
                         name = excluded.name, 
                         job_class = excluded.job_class
-                        -- avatar = excluded.avatar は削除（ユーザー設定を維持するため）
                 """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
             
             active_q_ids = [q.id for q in valid_quests]
@@ -659,7 +685,7 @@ class GameSystem:
                         day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time,
                         start_date = excluded.start_date, end_date = excluded.end_date, occurrence_chance = excluded.occurrence_chance
                 """, (
-                    q.id, q.title, q.desc, q.type, q.target, q.exp, q.gold, q.icon,  # ★3番目に q.desc を追加
+                    q.id, q.title, q.desc, q.type, q.target, q.exp, q.gold, q.icon,
                     q.days, 
                     q.start_date, q.end_date, 
                     q.chance, q.start_time, q.end_time
@@ -710,14 +736,7 @@ class GameSystem:
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
 
-            # ★追加: クエスト一覧にボーナス情報を注入
             for q in filtered_quests:
-                # ターゲットユーザーが決まっている場合のみボーナス計算（allの場合はユーザー切り替え時にView側で処理したほうが良いが、
-                # ここでは簡易的に「現在のユーザー」という概念がAPIにないため、
-                # フロントエンドでUserが切り替わるたびにFetchしなおすか、
-                # あるいは「全員分」計算するのは重い。
-                # 現状の仕様では、quest['target_user'] が 'son' などの特定ユーザーの場合に有効。
-                # 'all' の場合は誰の履歴を見るか不明瞭なため、一旦 'son' 等の特定ターゲットのみ適用する。
                 if q['target_user'] and q['target_user'] != 'all':
                     boost = self.quest_service.calculate_quest_boost(cur, q['target_user'], q)
                     q['bonus_gold'] = boost['gold']
@@ -764,7 +783,6 @@ class GameSystem:
         }
 
     def _fetch_recent_logs(self, cur) -> List[dict]:
-        # ログには承認済みだけを表示
         q_logs = cur.execute("""
             SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts 
             FROM quest_history WHERE status='approved' ORDER BY id DESC LIMIT 20
@@ -784,18 +802,44 @@ class GameSystem:
             formatted.append({"id": f"{l['type']}_{l['id']}", "text": text, "dateStr": date_str, "timestamp": ts_str})
         return formatted
 
+    # ★修正: _get_party_state
     def _get_party_state(self, cur) -> Dict[str, Any]:
+        # データ取得時にも週次チェック (Lazy Init)
+        self.quest_service._check_and_reset_weekly_boss(cur)
+        
         try:
-            row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-            if not row: return None
-            boss_def = next((b for b in quest_data.BOSSES if b['id'] == row['current_boss_id']), None)
-            if not boss_def: return None
+            row_obj = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
+            if not row_obj: return None
+            
+            # ★修正: sqlite3.Row を安全に辞書に変換
+            row = {k: row_obj[k] for k in row_obj.keys()}
+            
+            # quest_data からボスマスタ情報を取得
+            # BOSSES が存在しない場合のガード
+            boss_list = getattr(quest_data, "BOSSES", [])
+            boss_def = next((b for b in boss_list if b['id'] == row['current_boss_id']), None)
+            
+            # 定義が見つからない場合のフォールバック
+            if not boss_def:
+                boss_def = {"id": 99, "name": "謎の影", "icon": "❓", "desc": "正体不明の敵", "hp": 1000}
+
+            # max_hp は DBの値（難易度調整後）を優先する
+            current_max_hp = row.get('max_hp', boss_def['hp'])
+
             return {
-                "bossId": boss_def['id'], "bossName": boss_def['name'], "bossIcon": boss_def['icon'],
-                "maxHp": boss_def['hp'], "currentHp": row['current_hp'], "charge": row['charge_gauge'],
-                "desc": boss_def['desc']
+                "bossId": boss_def['id'],
+                "bossName": boss_def['name'],
+                "bossIcon": boss_def['icon'],
+                "maxHp": current_max_hp,
+                "currentHp": row['current_hp'],
+                "hpPercentage": (row['current_hp'] / current_max_hp) * 100 if current_max_hp > 0 else 0,
+                "charge": row['charge_gauge'],
+                "desc": boss_def['desc'],
+                "isDefeated": bool(row.get('is_defeated', 0)),
+                "weekStartDate": row.get('week_start_date')
             }
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error getting party state: {e}")
             return None
 
 
@@ -824,7 +868,6 @@ def get_all_data() -> Dict[str, Any]:
 def complete_quest(action: QuestAction):
     return quest_service.process_complete_quest(action.user_id, action.quest_id)
 
-# ★新規追加: 承認エンドポイント
 @router.post("/approve", response_model=CompleteResponse)
 def approve_quest(action: ApproveAction):
     return quest_service.process_approve_quest(action.approver_id, action.history_id)
@@ -853,11 +896,10 @@ def change_equipment(action: EquipAction):
 def get_family_chronicle():
     return user_service.get_family_chronicle()
 
-# ★追加: unified_server.py から呼ばれる初期化用関数を復活
+# Initialization alias
 def seed_data():
     return game_system.sync_master_data()
 
-# ★追加: 同期用エンドポイント（エイリアス）
 @router.post("/seed", response_model=SyncResponse)
 def seed_data_endpoint():
     return game_system.sync_master_data()
@@ -866,53 +908,35 @@ def seed_data_endpoint():
 def update_user_avatar(action: UpdateUserAction):
     return user_service.update_avatar(action.user_id, action.avatar_url)
 
-# ★追加: ヘッダ検証ロジック
 def validate_image_header(header: bytes) -> bool:
-    """ファイルヘッダ（マジックナンバー）による画像形式検証"""
-    # JPEG (FF D8 FF)
     if header.startswith(b'\xff\xd8\xff'): return True
-    # PNG (89 50 4E 47 0D 0A 1A 0A)
     if header.startswith(b'\x89PNG\r\n\x1a\n'): return True
-    # GIF (GIF87a / GIF89a)
     if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'): return True
-    # WebP (RIFF....WEBP)
     if header.startswith(b'RIFF') and header[8:12] == b'WEBP': return True
-    
     return False
 
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
-    """画像をアップロードし、アクセス用URLを返す (Secure & Async)"""
     try:
-        # 1. 拡張子の検証 (既存ロジック)
         allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
         file_ext = os.path.splitext(file.filename)[1].lower()
         if file_ext not in allowed_extensions:
             raise HTTPException(status_code=400, detail="許可されていないファイル形式です(拡張子)")
 
-        # 2. ヘッダ検証 (マジックナンバー) - ★追加
-        # 先頭12バイトを読んで検証
         header = await file.read(12)
         if not validate_image_header(header):
             logger.warning(f"Invalid file header detected. Ext: {file_ext}")
             raise HTTPException(status_code=400, detail="ファイルの内容が画像として認識できません")
         
-        # 検証のために読み込んだポインタを先頭に戻す
         await file.seek(0)
-
-        # 3. ユニークなファイル名を生成
         new_filename = f"{uuid.uuid4()}{file_ext}"
         file_path = os.path.join(config.UPLOAD_DIR, new_filename)
 
-        # 4. 非同期書き込み (aiofiles使用) - ★修正
-        # チャンクサイズ (例: 1MB) ごとに書き込むことでメモリ効率を維持
         async with aiofiles.open(file_path, "wb") as buffer:
             while content := await file.read(1024 * 1024):
                 await buffer.write(content)
             
         logger.info(f"Image Uploaded: {new_filename}")
-
-        # アクセス用URLを返す
         return {"url": f"/uploads/{new_filename}"}
 
     except HTTPException as he:
@@ -923,7 +947,6 @@ async def upload_image(file: UploadFile = File(...)):
     
 @router.post("/test_sound")
 def test_sound(req: SoundTestRequest):
-    """指定したサウンドキーの音をサーバーで再生する（テスト用）"""
     if req.sound_key not in config.SOUND_MAP:
         raise HTTPException(status_code=400, detail=f"Invalid sound key. Options: {list(config.SOUND_MAP.keys())}")
     

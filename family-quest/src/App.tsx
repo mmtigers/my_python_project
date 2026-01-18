@@ -107,6 +107,7 @@ export default function App() {
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     equipments, ownedEquipments, familyStats, chronicle, isLoading,
+    boss, // ★修正: ここで boss を取り出す
     completeQuest, approveQuest, rejectQuest, cancelQuest,
     buyReward, buyEquipment, changeEquipment, refreshData
   } = useGameData((info: any) => setLevelUpInfo(info));
@@ -361,8 +362,7 @@ export default function App() {
         )}
 
         {viewMode === 'party' && (
-          <FamilyParty users={users} ownedEquipments={ownedEquipments} />
-        )}
+          <FamilyParty users={users} ownedEquipments={ownedEquipments} boss={boss} />)}
       </div>
     </div>
   );
