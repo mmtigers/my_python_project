@@ -340,6 +340,8 @@ SOUND_MAP = {
     "medal_get": "medal_get.mp3",     # メダル発見！
     "submit": "submit.mp3",           # 子供の申請音
     "approve": "approve.mp3",         # 親の承認音
+    "attack_hit": "attack.mp3",            # ボスへの攻撃音
+    "boss_defeat_fanfare": "fanfare.mp3",  # ボス撃破時のファンファーレ
 }
 
 FAMILY_SETTINGS = {
