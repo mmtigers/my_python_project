@@ -1,13 +1,15 @@
 import React, { useMemo } from 'react';
 import { Crown, Skull, Sword, Shield } from 'lucide-react';
-import { User, Equipment } from '@/types';
+import { User, Equipment, Boss } from '@/types';
+import BossCard from './BossCard'; // ★追加
 
 interface FamilyPartyProps {
     users: User[];
     ownedEquipments: any[]; // 型定義に合わせて調整 (例: Equipment & { is_equipped: number, user_id: string })
+    boss: Boss | null; // ★追加
 }
 
-const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments }) => {
+const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments, boss }) => {
     // ユーザーごとの詳細ステータスを計算
     const partyData = useMemo(() => {
         return users.map(user => {
@@ -36,7 +38,10 @@ const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments }) => 
     }, [users, ownedEquipments]);
 
     return (
-        <div className="animate-in fade-in duration-500 space-y-4 font-mono">
+        <div className="animate-in fade-in duration-500 space-y-4 font-mono pb-8">
+            {/* ★ここに追加: ボスカード (一番目立つ位置に配置) */}
+            <BossCard boss={boss} />
+
             {/* ヘッダー枠 */}
             <div className="border-4 border-double border-white bg-black p-2 text-center shadow-lg">
                 <h2 className="text-xl font-bold text-yellow-400 tracking-widest flex items-center justify-center gap-2">
@@ -136,11 +141,7 @@ const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments }) => 
                 })}
             </div>
 
-            {/* 予告 */}
-            <div className="border border-dashed border-gray-600 p-3 text-center text-gray-500 text-xs mt-4 bg-black/50">
-                <Skull className="mx-auto mb-1 opacity-50" size={16} />
-                <p>ボスバトル機能 開発中...</p>
-            </div>
+
         </div>
     );
 };
