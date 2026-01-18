@@ -116,10 +116,13 @@ export interface QuestResult {
     earnedMedals: number;
     message?: string;
     // 追加
-    bossEffect?: {
-        damage: number;
-        remainingHp: number;
-        isDefeated: boolean;
-        isNewDefeat: boolean;
-    };
+    bossEffect?: BossEffect;
+}
+
+export interface BossEffect {
+    damage: number;
+    remainingHp: number;
+    isDefeated: boolean;
+    isNewDefeat: boolean;
+    isCritical?: boolean;
 }
