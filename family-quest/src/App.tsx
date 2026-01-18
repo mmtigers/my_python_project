@@ -3,8 +3,8 @@ import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
+import AdminDashboard from './features/admin/components/AdminDashboard';
 
-// ★修正: 重複していた import を1つにまとめました
 import { User, Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
 // UI Components
@@ -107,15 +107,31 @@ export default function App() {
 
   const [battleEffect, setBattleEffect] = useState<BossEffect | null>(null);
 
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [tapCount, setTapCount] = useState(0);
+
   const { play } = useSound();
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     equipments, ownedEquipments, familyStats, chronicle, isLoading,
     boss,
+    adminUpdateBoss,
     completeQuest, approveQuest, rejectQuest, cancelQuest,
     buyReward, buyEquipment, changeEquipment, refreshData
   } = useGameData((info: any) => setLevelUpInfo(info));
+
+  // 隠しコマンド判定
+  const handleHeaderTitleClick = () => {
+    const newCount = tapCount + 1;
+    setTapCount(newCount);
+    if (newCount >= 5) {
+      setIsAdminOpen(true);
+      setTapCount(0);
+    }
+    // 2秒操作がなければリセット
+    setTimeout(() => setTapCount(0), 2000);
+  };
 
   const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
   const isParent = ['dad', 'mom'].includes(currentUser?.user_id);
@@ -182,7 +198,6 @@ export default function App() {
     }
     else if (modalMode === 'purchase' && targetItem) {
       const result = await buyReward(currentUser, targetItem);
-      // ★修正: result.reward が存在するかチェックを追加 (&& result.reward)
       if (result.success && result.reward) {
         play('medal');
         setMessageModal({
@@ -196,7 +211,6 @@ export default function App() {
     }
     else if (modalMode === 'equip_buy' && targetItem) {
       const result = await buyEquipment(currentUser, targetItem);
-      // ★修正: result.item が存在するかチェックを追加 (&& result.item)
       if (result.success && result.item) {
         play('medal');
         setMessageModal({
@@ -253,6 +267,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
+
+      {isAdminOpen && (
+        <AdminDashboard
+          boss={boss}
+          onUpdate={adminUpdateBoss}
+          onClose={() => setIsAdminOpen(false)}
+        />
+      )}
+
       <BattleEffect
         effect={battleEffect}
         boss={boss}
@@ -287,14 +310,22 @@ export default function App() {
         />
       )}
 
-      <Header
-        users={users}
-        currentUserIdx={currentUserIdx}
-        viewMode={viewMode}
-        onUserSwitch={handleUserSwitch}
-        onPartySwitch={() => setViewMode('party')}
-        onLogSwitch={() => setViewMode('familyLog')}
-      />
+      {/* ★修正: 隠しボタンの範囲を「中央のタイトル部分」のみに限定 (w-48 = 約192px) */}
+      {/* これにより左右のボタン（プレイヤー切り替え等）への干渉を防ぎます */}
+      <div className="relative z-10">
+        <div
+          className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-16 z-50"
+          onClick={handleHeaderTitleClick}
+        ></div>
+        <Header
+          users={users}
+          currentUserIdx={currentUserIdx}
+          viewMode={viewMode}
+          onUserSwitch={handleUserSwitch}
+          onPartySwitch={() => setViewMode('party')}
+          onLogSwitch={() => setViewMode('familyLog')}
+        />
+      </div>
 
       <div className="p-4 space-y-4 w-full max-w-md md:max-w-5xl mx-auto transition-all duration-300">
         {viewMode === 'user' && (

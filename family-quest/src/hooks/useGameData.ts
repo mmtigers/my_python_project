@@ -24,6 +24,20 @@ interface ChronicleResponse {
 export const useGameData = (onLevelUp?: (info: any) => void) => {
     const queryClient = useQueryClient();
 
+    // ★追加: 管理用Mutation
+    const adminUpdateBossMutation = useMutation({
+        mutationFn: async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
+            return apiClient.post('/api/quest/admin/boss/update', {
+                max_hp: data.maxHp,
+                current_hp: data.currentHp,
+                is_defeated: data.isDefeated
+            });
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['gameData'] });
+        },
+    });
+
     // 1. メインデータの取得
     const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
@@ -233,6 +247,16 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         queryClient.invalidateQueries({ queryKey: ['gameData'] });
     };
 
+    // ★追加: 公開関数
+    const adminUpdateBoss = async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
+        try {
+            await adminUpdateBossMutation.mutateAsync(data);
+            return { success: true };
+        } catch (e) {
+            return { success: false };
+        }
+    };
+
     const safeUsers = gameData?.users || INITIAL_USERS;
     const safeQuests = gameData?.quests || MASTER_QUESTS;
     const safeRewards = gameData?.rewards || MASTER_REWARDS;
@@ -258,6 +282,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         buyReward,
         buyEquipment,
         changeEquipment,
-        refreshData
+        refreshData,
+        adminUpdateBoss, // ★エクスポート
     };
 };
