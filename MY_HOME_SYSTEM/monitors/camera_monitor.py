@@ -27,38 +27,27 @@ from onvif import ONVIFCamera
 from onvif.client import ONVIFService
 from requests.auth import HTTPDigestAuth
 
-
 # === ログ設定 ===
 logger = setup_logging("camera")
-# 調査のためZeep(通信ライブラリ)のログも少し出す
 logging.getLogger("zeep").setLevel(logging.ERROR) 
 
-# プロセス終了時にUnsubscribeするために、アクティブなPullPointServiceを保持する
-# (修正: subscriptionデータではなく、通信可能なserviceオブジェクトを保持します)
+# プロセス終了時にUnsubscribeするために保持
 active_pullpoints = []
 
 def cleanup_handler(signum, frame):
     """プロセス終了シグナルを受け取った時のクリーンアップ処理"""
     logger.info(f"🛑 終了シグナル({signum})を受信。カメラ接続のクリーンアップを開始します...")
-    
     for svc in active_pullpoints:
         try:
-            # ONVIFのUnsubscribeメソッドを呼び出す
             if hasattr(svc, 'Unsubscribe'):
                 svc.Unsubscribe()
-                logger.info("✅ Unsubscribe送信成功")
-            # zeep objectの場合のフォールバック
             elif hasattr(svc, 'service') and hasattr(svc.service, 'Unsubscribe'):
                 svc.service.Unsubscribe(_soapheaders=None)
-                logger.info("✅ Unsubscribe送信成功 (zeep)")
-        except Exception as e:
-            # 既に切れている場合は無視
+        except Exception:
             pass
-
     logger.info("👋 監視プロセスを終了します")
     os._exit(0)
 
-# シグナルハンドラの登録 (Ctrl+C や systemctl stop を捕捉)
 signal.signal(signal.SIGINT, cleanup_handler)
 signal.signal(signal.SIGTERM, cleanup_handler)
 
@@ -76,8 +65,8 @@ PRIORITY_MAP = {
 }
 
 # Renew設定
-RENEW_INTERVAL = 60      # 60秒ごとに更新リクエストを送る
-RENEW_DURATION = "PT600S" # 更新時に要求する有効期間 (10分)
+RENEW_INTERVAL = 60      
+RENEW_DURATION = "PT600S"
 
 def find_wsdl_path():
     for path in sys.path:
@@ -92,11 +81,8 @@ def find_wsdl_path():
 WSDL_DIR = find_wsdl_path()
 
 def close_camera_connection(mycam):
-    """Zeep/Requestsのセッションを明示的に閉じてカメラの接続枠を解放する"""
-    if not mycam:
-        return
+    if not mycam: return
     try:
-        # 内部で保持しているサービス(devicemgmt, events, mediaなど)のセッションを閉じる
         services = [
             getattr(mycam, 'devicemgmt', None),
             getattr(mycam, 'events', None),
@@ -104,19 +90,13 @@ def close_camera_connection(mycam):
             getattr(mycam, 'ptz', None),
             getattr(mycam, 'imaging', None)
         ]
-        
         for svc in services:
             if svc and hasattr(svc, 'zeep_client'):
-                try:
-                    svc.zeep_client.transport.session.close()
+                try: svc.zeep_client.transport.session.close()
                 except: pass
-        
-        # メインのtransportも閉じる
         if hasattr(mycam, 'transport') and hasattr(mycam.transport, 'session'):
              mycam.transport.session.close()
-
-    except Exception as e:
-        logger.warning(f"Session close error: {e}")
+    except Exception: pass
 
 def analyze_event_type(xml_str):
     if 'Value="true"' not in xml_str and 'State="true"' not in xml_str:
@@ -149,129 +129,136 @@ def analyze_event_type(xml_str):
 
     return None, None, 0, None
 
+def capture_live_snapshot(cam_conf, mycam=None):
+    """
+    【追加機能】カメラから直接ライブ静止画を取得する (NVRフォールバック用)
+    """
+    start_ts = time.time()
+    uri = None
+    
+    # 1. ONVIF経由でSnapshot URIを取得
+    if mycam:
+        try:
+            media = mycam.create_media_service()
+            profiles = media.GetProfiles()
+            token = profiles[0].token 
+            snapshot = media.GetSnapshotUri({'ProfileToken': token})
+            uri = snapshot.Uri
+        except Exception as e:
+            logger.debug(f"ℹ️ [Live] Snapshot URI取得失敗 (想定内): {e}")
+
+    # 2. URIからダウンロード
+    if uri:
+        try:
+            # タイムアウトを少し長めに確保
+            res = requests.get(uri, auth=HTTPDigestAuth(cam_conf['user'], cam_conf['pass']), timeout=8.0)
+            elapsed = time.time() - start_ts
+            
+            if res.status_code == 200:
+                size_kb = len(res.content) / 1024
+                logger.info(f"✅ [Perf] Live画像取得成功: {elapsed:.2f}s, Size: {size_kb:.1f}KB")
+                return res.content
+            else:
+                logger.warning(f"⚠️ [Live] 取得失敗 Status: {res.status_code}, Time: {elapsed:.2f}s")
+        except Exception as e:
+            logger.error(f"❌ [Live] ダウンロードエラー: {e}")
+            
+    return None
+
 def capture_snapshot_from_nvr(cam_conf, target_time=None):
     """
-    NAS上の録画データから、指定時刻(デフォルトは現在)の画像を切り出す
+    NAS上の録画データから、指定時刻の画像を切り出す
     """
-    if target_time is None:
-        target_time = datetime.now()
+    start_ts = time.time()
+    if target_time is None: target_time = datetime.now()
 
-    if "Parking" in cam_conf['id']:
-        sub_dir = "parking"
-    elif "Garden" in cam_conf['id']:
-        sub_dir = "garden"
-    else:
-        logger.warning(f"[{cam_conf['name']}] NVRディレクトリが特定できません。ID: {cam_conf['id']}")
-        return None
+    if "Parking" in cam_conf['id']: sub_dir = "parking"
+    elif "Garden" in cam_conf['id']: sub_dir = "garden"
+    else: return None
 
     record_dir = os.path.join(config.NVR_RECORD_DIR, sub_dir)
 
     try:
         files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
-        
         if not files:
-            # logger.warning(f"[{cam_conf['name']}] 録画ファイルが見つかりません: {record_dir}")
+            logger.warning(f"⚠️ [NVR] 録画ファイルなし (Dir: {record_dir})")
             return None
 
         target_file = None
-        
+        # 逆順探索で直近のファイルを探す
         for f_path in reversed(files):
             filename = os.path.basename(f_path)
             try:
-                # ファイル名から時刻抽出 (YYYYMMDD_HHMMSS.mp4)
                 time_str = filename.split('.')[0]
                 file_start_dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
-                
                 if file_start_dt <= target_time:
                     target_file = f_path
                     break
-            except ValueError:
-                continue
+            except ValueError: continue
         
         if not target_file:
             target_file = files[-1]
-            try:
-                time_str = os.path.basename(target_file).split('.')[0]
-                file_start_dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
-            except:
-                file_start_dt = target_time
+            logger.info(f"ℹ️ [NVR] ターゲット時刻以前のファイルが見つからないため、最新ファイルを使用: {os.path.basename(target_file)}")
 
-        seek_seconds = (target_time - file_start_dt).total_seconds()
+        # 時刻差分の計算とログ
+        try:
+            ts_str = os.path.basename(target_file).split('.')[0]
+            start_dt = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+            seek_seconds = (target_time - start_dt).total_seconds()
+            
+            # ラグ確認用ログ
+            time_lag = (datetime.now() - start_dt).total_seconds()
+            logger.info(f"🔍 [NVR] File: {os.path.basename(target_file)}, Lag: {time_lag:.1f}s, Seek: {seek_seconds:.1f}s")
+        except:
+            seek_seconds = 0
+            
         if seek_seconds < 0: seek_seconds = 0
         
         tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
         
+        # ffmpeg実行 (エラー出力をPIPEでキャプチャ)
         cmd = [
-            "ffmpeg", "-y",
-            "-ss", str(seek_seconds),
-            "-i", target_file,
-            "-frames:v", "1",
-            "-q:v", "2", # 画質設定
-            tmp_path
+            "ffmpeg", "-y", "-ss", str(seek_seconds), "-i", target_file,
+            "-frames:v", "1", "-q:v", "2", tmp_path
         ]
         
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        proc = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
         
-        if os.path.exists(tmp_path):
+        elapsed = time.time() - start_ts
+        
+        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+            size_kb = os.path.getsize(tmp_path) / 1024
+            logger.info(f"✅ [Perf] NVR切り出し成功: {elapsed:.2f}s, Size: {size_kb:.1f}KB")
             with open(tmp_path, "rb") as f:
                 return f.read()
         else:
-            # logger.error(f"[{cam_conf['name']}] ffmpeg画像生成失敗")
+            # 失敗時はstderrをログに出す（重要）
+            err_msg = proc.stderr.decode('utf-8', errors='ignore')[-300:] # 末尾300文字だけ
+            logger.warning(f"⚠️ [NVR] 切り出し失敗 ({elapsed:.2f}s). FFmpeg Err: {err_msg}")
             return None
 
     except Exception as e:
-        logger.error(f"[{cam_conf['name']}] NVR画像取得エラー: {e}")
+        logger.error(f"❌ [NVR] 画像取得例外: {e}")
         return None
 
 def perform_emergency_diagnosis(ip, cam_conf=None):
     """エラー発生直後にポートの状態を診断する"""
     results = {}
-    target_ports = [80, 2020, 554]
-    
+    target_ports = [80, 2020]
     msg = f"🚑 [緊急診断] {ip} の接続状態チェック:\n"
-    
     for port in target_ports:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2.0)
         try:
             res = sock.connect_ex((ip, port))
-            status = "OPEN (OK)" if res == 0 else f"CLOSED/FILTERED (Err: {res})"
+            status = "OPEN (OK)" if res == 0 else f"Err: {res}"
             results[port] = (res == 0)
-        except Exception as e:
-            status = f"ERROR ({e})"
+        except Exception:
             results[port] = False
-        finally:
-            sock.close()
+        finally: sock.close()
         msg += f"   - Port {port}: {status}\n"
-    
-    if results.get(80) and not results.get(2020):
-        msg += "   👉 結論: Web(Port 80)は生存していますが、ONVIFサービスがダウンしています。"
-        if cam_conf:
-             try_soft_reboot(cam_conf['ip'], cam_conf['user'], cam_conf['pass'])
-    elif not any(results.values()):
-        msg += "   👉 結論: カメラとの通信が完全に途絶しています(電源断/IP変更/ケーブル抜け)。"
-    
     logger.warning(msg)
     return results
-
-def try_soft_reboot(ip, user, password):
-    """Port 80が生きていれば、ONVIFまたはHTTPで再起動を試みる"""
-    logger.info(f"🔄 [{ip}] Port 80経由でのソフトリブートを試行します...")
-    try:
-        mycam = ONVIFCamera(ip, 80, user, password, wsdl_dir=WSDL_DIR)
-        mycam.devicemgmt.SystemReboot()
-        logger.info(f"✅ [{ip}] ONVIF SystemReboot コマンド送信成功")
-        return True
-    except Exception as e:
-        logger.warning(f"⚠️ ONVIF Reboot失敗: {e}")
-        try:
-            url = f"http://{ip}/cgi-bin/reboot.sh" 
-            requests.get(url, auth=HTTPDigestAuth(user, password), timeout=5)
-            logger.info(f"✅ [{ip}] HTTP CGI Reboot コマンド送信成功")
-            return True
-        except Exception:
-            pass
-    return False
 
 def monitor_single_camera(cam_conf):
     cam_name = cam_conf['name']
@@ -289,52 +276,38 @@ def monitor_single_camera(cam_conf):
     if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
     port_candidates.extend([2020, 80]) 
     port_candidates = list(dict.fromkeys(port_candidates)) 
-
-    # 最後に使用して成功したポートを優先する
     last_success_port = None
 
     while True: 
         mycam = None
         current_pullpoint = None
+        renew_supported = True 
         
         try:
             # --- 接続フェーズ ---
             current_port = None
-            
-            # 前回成功したポートがあればそれを先頭に持ってくる
-            if last_success_port and last_success_port in port_candidates:
-                ports_to_try = [last_success_port] + [p for p in port_candidates if p != last_success_port]
-            else:
-                ports_to_try = port_candidates
+            ports_to_try = [last_success_port] + [p for p in port_candidates if p != last_success_port] if last_success_port else port_candidates
 
             for port in ports_to_try:
                 try:
                     time.sleep(1.0) 
                     socket.setdefaulttimeout(10.0)
-
                     mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
-                    # 接続確認のためにサービスを作成してみる
                     mycam.create_events_service() 
-                    
                     current_port = port
-                    last_success_port = port # 成功ポートを記憶
+                    last_success_port = port 
                     logger.info(f"✅ [{cam_name}] 接続成功 (Port: {port})")
                     break
-                except Exception as e:
+                except Exception:
                     close_camera_connection(mycam)
                     mycam = None 
-                    if "401" in str(e) or "Unauthorized" in str(e):
-                        logger.warning(f"⚠️ [{cam_name}] Port {port} 認証失敗")
                     continue
             
-            if current_port is None:
-                raise Exception(f"全ポート({port_candidates})で接続に失敗しました")
+            if current_port is None: raise Exception("全ポート接続失敗")
 
             # --- 監視セットアップ ---
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
-
-            # 接続情報を解析
             try:
                 plp_address = subscription.SubscriptionReference.Address._value_1
             except AttributeError:
@@ -347,10 +320,8 @@ def monitor_single_camera(cam_conf):
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            # クリーンアップ用に保持
             active_pullpoints.append(pullpoint)
             current_pullpoint = pullpoint
-            
             logger.info(f"✅ [{cam_name}] Subscription登録完了")
 
             # --- イベント受信ループ ---
@@ -360,21 +331,24 @@ def monitor_single_camera(cam_conf):
             while True:
                 try:
                     # ==========================================
-                    # 🔹 Renew処理 (ここが修正ポイント)
+                    # 🔹 Renew処理
                     # ==========================================
                     now = time.time()
-                    if now - last_renew_time > RENEW_INTERVAL:
+                    if renew_supported and (now - last_renew_time > RENEW_INTERVAL):
                         try:
-                            # 期間を延長する
                             pullpoint.Renew(RENEW_DURATION)
                             last_renew_time = now
                             logger.debug(f"🔄 [{cam_name}] Subscription Renew成功")
                         except Exception as e:
-                            logger.warning(f"⚠️ [{cam_name}] Renew失敗 -> 再接続へ: {e}")
-                            raise Exception("Renew Failed")
+                            err_str = str(e)
+                            if "no operation" in err_str or "AttributeError" in err_str:
+                                logger.info(f"ℹ️ [{cam_name}] Renew非対応を確認しました。自動更新を無効化します。")
+                                renew_supported = False
+                            else:
+                                logger.warning(f"⚠️ [{cam_name}] Renew一時的失敗: {err_str}")
 
                     # ==========================================
-                    # 🔹 PullMessages (イベント取得)
+                    # 🔹 PullMessages
                     # ==========================================
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
@@ -389,18 +363,18 @@ def monitor_single_camera(cam_conf):
                         for event in events.NotificationMessage:
                             message_node = getattr(event, 'Message', None)
                             if not message_node: continue
-
+                            
                             raw_element = getattr(message_node, '_value_1', message_node)
-                            if hasattr(raw_element, 'tag'):
-                                xml_str = etree.tostring(raw_element, encoding='unicode')
-                            else:
-                                xml_str = str(raw_element)
-
+                            xml_str = etree.tostring(raw_element, encoding='unicode') if hasattr(raw_element, 'tag') else str(raw_element)
                             event_type, label, priority, rule_name = analyze_event_type(xml_str)
                             
                             if event_type:
                                 logger.info(f"🔥 [{cam_name}] 検知: {label} (Rule: {rule_name})")
+                                
+                                # 画像取得 (NVR -> Fallback)
                                 img = capture_snapshot_from_nvr(cam_conf)
+                                if not img:
+                                    img = capture_live_snapshot(cam_conf, mycam)
 
                                 if img:
                                     try:
@@ -419,12 +393,9 @@ def monitor_single_camera(cam_conf):
                                     action = "UNKNOWN"
                                     if any(k in rule_name for k in config.CAR_RULE_KEYWORDS["LEAVE"]): action = "LEAVE"
                                     elif any(k in rule_name for k in config.CAR_RULE_KEYWORDS["RETURN"]): action = "RETURN"
-                                    
                                     if action != "UNKNOWN":
                                         logger.info(f"🚗 車両判定: {action}")
-                                        save_log_generic(config.SQLITE_TABLE_CAR,
-                                            ["timestamp", "action", "rule_name"],
-                                            (get_now_iso(), action, rule_name))
+                                        save_log_generic(config.SQLITE_TABLE_CAR, ["timestamp", "action", "rule_name"], (get_now_iso(), action, rule_name))
 
                                 if event_type == "intrusion":
                                     msg = f"🚨【緊急】[{cam_loc}] {cam_name} に侵入者です！"
@@ -433,15 +404,12 @@ def monitor_single_camera(cam_conf):
 
                 except Exception as e:
                     err = str(e)
-                    # タイムアウトは正常動作なので無視してループ継続
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe", "Renew Failed"]
+                    fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe"]
                     if any(f in err for f in fatal_errors):
                         logger.warning(f"⚠️ [{cam_name}] 致命的エラー検知: {err} -> 即時再接続")
-                        # 接続が完全に切れている場合のみ診断
-                        if "Renew Failed" not in err:
-                            perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
+                        if "Renew" not in err: perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
                         raise Exception("Fatal Connection Error") 
 
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー: {err}")
@@ -449,23 +417,16 @@ def monitor_single_camera(cam_conf):
 
         except Exception as e:
             err_msg = str(e)
-            
-            # クリーンアップ
             if current_pullpoint:
                 try:
-                    if current_pullpoint in active_pullpoints:
-                        active_pullpoints.remove(current_pullpoint)
-                    if hasattr(current_pullpoint, 'Unsubscribe'):
-                        current_pullpoint.Unsubscribe()
-                        logger.debug(f"🧹 [{cam_name}] Unsubscribe完了")
+                    if current_pullpoint in active_pullpoints: active_pullpoints.remove(current_pullpoint)
+                    if hasattr(current_pullpoint, 'Unsubscribe'): current_pullpoint.Unsubscribe()
                 except Exception: pass
                 finally: current_pullpoint = None
 
             close_camera_connection(mycam)
             mycam = None
-            
             consecutive_conn_errors += 1
-
             wait_time = min(30 * (2 ** (min(consecutive_conn_errors, 6) - 1)), MAX_WAIT_TIME)
             
             if consecutive_conn_errors >= NOTIFY_THRESHOLD and not has_notified_error:
