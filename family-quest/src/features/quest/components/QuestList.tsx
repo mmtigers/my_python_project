@@ -43,7 +43,7 @@ const QuestItem: React.FC<{
     const totalExp = baseExp + bonusExp;
 
     const handleClick = () => {
-        if (isCooldown || isDone || isPending) return;
+        if (isCooldown) return;
 
         if (!isDone && !isPending) {
             if (quest.type === 'daily' || isInfinite) {
@@ -59,11 +59,13 @@ const QuestItem: React.FC<{
                 }, 60000);
             }
         }
+
+        // 【重要】 完了済みであっても onClick を発火させ、親側でキャンセル処理を行えるようにする
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
+    // ★ここで handleClick を終了し、コンポーネントの描画結果を return します
     return (
-        // ★修正: Cardの外にバッジを出すため、relativeな親divで包む
         <div className="relative h-full group">
             <Card
                 variant={variant}
@@ -156,7 +158,7 @@ const QuestItem: React.FC<{
                 </div>
             </Card>
 
-            {/* ★修正: バッジをCardの外側（relativeな親divの直下）に移動 */}
+            {/* バッジ */}
             {hasBonus && !isDone && !isPending && (
                 <div className="absolute -top-3 -right-2 bg-gradient-to-r from-red-600 to-orange-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg border border-white flex items-center gap-1 z-30 animate-bounce pointer-events-none">
                     <TrendingUp size={12} />
@@ -181,11 +183,9 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
-            // ボーナスがあるものを優先的に上に表示する
             const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
             const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
             if (bonusA !== bonusB) return bonusB - bonusA;
-
             return (b.id as number) - (a.id as number);
         });
     }, [quests, currentUser, currentDay]);
