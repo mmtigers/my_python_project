@@ -92,3 +92,34 @@ export interface Equipment {
 
     icon?: string; // 絵文字
 }
+
+export interface Boss {
+    bossId: number;
+    bossName: string;
+    bossIcon: string;
+    maxHp: number;
+    currentHp: number;
+    hpPercentage: number;
+    charge: number; // ゲージ等（将来用）
+    desc: string;
+    isDefeated: boolean;
+    weekStartDate: string;
+}
+
+// ★修正: APIレスポンス (CompleteResponse相当) に演出用データが含まれる場合がある
+export interface QuestResult {
+    status: string;
+    leveledUp: boolean;
+    newLevel: number;
+    earnedGold: number;
+    earnedExp: number;
+    earnedMedals: number;
+    message?: string;
+    // 追加
+    bossEffect?: {
+        damage: number;
+        remainingHp: number;
+        isDefeated: boolean;
+        isNewDefeat: boolean;
+    };
+}
