@@ -75,6 +75,15 @@ class TestQuestService(unittest.TestCase):
                 VALUES (?, ?, ?)
             """, (201, "Test Reward", 50))
 
+            # ▼▼▼ 追加ここから ▼▼▼
+            # パーティ（ボス）状態の初期化
+            # week_start_date は 'YYYY-MM-DD' 形式。テスト用に適当な日付でOK
+            cur.execute("""
+                INSERT INTO party_state (id, current_boss_id, current_hp, max_hp, week_start_date, is_defeated, total_damage, charge_gauge, updated_at)
+                VALUES (1, 1, 1000, 1000, '2025-01-01', 0, 0, 0, ?)
+            """, (datetime.now().isoformat(),))
+            # ▲▲▲ 追加ここまで ▲▲▲
+
     # --- テストケース ---
 
     def test_calculate_next_level_exp(self):
