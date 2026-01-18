@@ -390,7 +390,16 @@ class QuestService:
                     "message": "親の承認待ちです"
                 }
             
-            return self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
+            # ★修正: 大人の即時完了時にもボスダメージ処理を追加
+            result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
+            
+            # ボスへのダメージ (獲得EXPと同じ値をダメージとする)
+            damage_value = total_exp
+            boss_effect = self._apply_boss_damage(cur, damage_value)
+            result['bossEffect'] = boss_effect
+            
+            logger.info(f"Quest Completed (Adult) & Boss Damaged: User={user_id}, Dmg={damage_value}")
+            return result
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         if approver_id not in self.PARENT_IDS:
