@@ -5,7 +5,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 import glob
-# import common <-- 削除
 from core.logger import setup_logging
 from core.database import save_log_generic
 from core.utils import get_now_iso
@@ -13,7 +12,6 @@ from services.notification_service import send_push
 
 import asyncio
 from datetime import datetime, timedelta
-
 
 import time
 import socket
@@ -35,25 +33,27 @@ logger = setup_logging("camera")
 # 調査のためZeep(通信ライブラリ)のログも少し出す
 logging.getLogger("zeep").setLevel(logging.ERROR) 
 
-# プロセス終了時にUnsubscribeするために、アクティブなSubscriptionを保持する
-active_subscriptions = []
+# プロセス終了時にUnsubscribeするために、アクティブなPullPointServiceを保持する
+# (修正: subscriptionデータではなく、通信可能なserviceオブジェクトを保持します)
+active_pullpoints = []
 
 def cleanup_handler(signum, frame):
     """プロセス終了シグナルを受け取った時のクリーンアップ処理"""
     logger.info(f"🛑 終了シグナル({signum})を受信。カメラ接続のクリーンアップを開始します...")
     
-    for sub in active_subscriptions:
+    for svc in active_pullpoints:
         try:
             # ONVIFのUnsubscribeメソッドを呼び出す
-            if hasattr(sub, 'Unsubscribe'):
-                sub.Unsubscribe()
+            if hasattr(svc, 'Unsubscribe'):
+                svc.Unsubscribe()
                 logger.info("✅ Unsubscribe送信成功")
             # zeep objectの場合のフォールバック
-            elif hasattr(sub, 'service') and hasattr(sub.service, 'Unsubscribe'):
-                sub.service.Unsubscribe(_soapheaders=None)
+            elif hasattr(svc, 'service') and hasattr(svc.service, 'Unsubscribe'):
+                svc.service.Unsubscribe(_soapheaders=None)
                 logger.info("✅ Unsubscribe送信成功 (zeep)")
         except Exception as e:
-            logger.warning(f"⚠️ Unsubscribe送信失敗 (無視します): {e}")
+            # 既に切れている場合は無視
+            pass
 
     logger.info("👋 監視プロセスを終了します")
     os._exit(0)
@@ -74,6 +74,10 @@ BINDING_NAME = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBin
 PRIORITY_MAP = {
     "intrusion": 100, "person": 80, "vehicle": 50, "motion": 10
 }
+
+# Renew設定
+RENEW_INTERVAL = 60      # 60秒ごとに更新リクエストを送る
+RENEW_DURATION = "PT600S" # 更新時に要求する有効期間 (10分)
 
 def find_wsdl_path():
     for path in sys.path:
@@ -152,44 +156,25 @@ def capture_snapshot_from_nvr(cam_conf, target_time=None):
     if target_time is None:
         target_time = datetime.now()
 
-    # 1. 保存先ディレクトリの特定
-    # config.pyで定義した NVR_RECORD_DIR を使用
-    # カメラIDに基づいてサブディレクトリを決定 (Parking または Garden)
     if "Parking" in cam_conf['id']:
         sub_dir = "parking"
     elif "Garden" in cam_conf['id']:
         sub_dir = "garden"
     else:
-        # フォールバック (IDが一致しない場合)
         logger.warning(f"[{cam_conf['name']}] NVRディレクトリが特定できません。ID: {cam_conf['id']}")
         return None
 
     record_dir = os.path.join(config.NVR_RECORD_DIR, sub_dir)
 
-    # 2. 該当する動画ファイルの探索
-    # ファイル名: YYYYMMDD_HHMMSS.mp4 (開始時刻)
-    # 録画は10分(600秒)ごとなので、ターゲット時刻の「10分〜0分前」に開始したファイルを探す
-    
-    # 探索範囲を少し広げて、ターゲット時刻より前のファイルを探す
-    # (ファイル名ベースでソートされている前提)
     try:
-        # パターン: record_dir/*.mp4 (日付フォルダ構成にする場合はここを調整)
-        # 今回はPhase2の設定で直下に置いているため "*.mp4" でOK
-        # ※もし日付フォルダ分けする場合は os.path.join(record_dir, target_time.strftime('%Y%m%d'), "*.mp4")
-        
-        # 効率化のため、今日と昨日のファイルだけ対象にするなどの工夫が可能ですが、
-        # まずは glob で全取得してソート (ファイル数が数千になると遅くなるので注意)
-        # ★改善: globの範囲を絞る
         files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
         
         if not files:
-            logger.warning(f"[{cam_conf['name']}] 録画ファイルが見つかりません: {record_dir}")
+            # logger.warning(f"[{cam_conf['name']}] 録画ファイルが見つかりません: {record_dir}")
             return None
 
         target_file = None
         
-        # バイナリサーチ的アプローチ、あるいは逆順探索
-        # 「ファイル開始時刻 <= ターゲット時刻」となる最新のファイルを見つける
         for f_path in reversed(files):
             filename = os.path.basename(f_path)
             try:
@@ -204,21 +189,16 @@ def capture_snapshot_from_nvr(cam_conf, target_time=None):
                 continue
         
         if not target_file:
-            # 見つからない場合は一番新しいファイルを使う(現在進行形など)
             target_file = files[-1]
-            # 念のため開始時刻を再取得
             try:
                 time_str = os.path.basename(target_file).split('.')[0]
                 file_start_dt = datetime.strptime(time_str, "%Y%m%d_%H%M%S")
             except:
-                file_start_dt = target_time # エラー回避
+                file_start_dt = target_time
 
-        # 3. 切り出し位置(シーク秒数)の計算
         seek_seconds = (target_time - file_start_dt).total_seconds()
         if seek_seconds < 0: seek_seconds = 0
         
-        # ffmpegで切り出し
-        # -ss を入力(-i)の前に置くと高速シークになる
         tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
         
         cmd = [
@@ -230,14 +210,13 @@ def capture_snapshot_from_nvr(cam_conf, target_time=None):
             tmp_path
         ]
         
-        # ログを減らす
         subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
         
         if os.path.exists(tmp_path):
             with open(tmp_path, "rb") as f:
                 return f.read()
         else:
-            logger.error(f"[{cam_conf['name']}] ffmpeg画像生成失敗")
+            # logger.error(f"[{cam_conf['name']}] ffmpeg画像生成失敗")
             return None
 
     except Exception as e:
@@ -311,23 +290,34 @@ def monitor_single_camera(cam_conf):
     port_candidates.extend([2020, 80]) 
     port_candidates = list(dict.fromkeys(port_candidates)) 
 
-    current_subscription = None
+    # 最後に使用して成功したポートを優先する
+    last_success_port = None
 
     while True: 
         mycam = None
+        current_pullpoint = None
         
         try:
             # --- 接続フェーズ ---
             current_port = None
-            for port in port_candidates:
+            
+            # 前回成功したポートがあればそれを先頭に持ってくる
+            if last_success_port and last_success_port in port_candidates:
+                ports_to_try = [last_success_port] + [p for p in port_candidates if p != last_success_port]
+            else:
+                ports_to_try = port_candidates
+
+            for port in ports_to_try:
                 try:
                     time.sleep(1.0) 
                     socket.setdefaulttimeout(10.0)
 
                     mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
+                    # 接続確認のためにサービスを作成してみる
                     mycam.create_events_service() 
                     
                     current_port = port
+                    last_success_port = port # 成功ポートを記憶
                     logger.info(f"✅ [{cam_name}] 接続成功 (Port: {port})")
                     break
                 except Exception as e:
@@ -344,10 +334,7 @@ def monitor_single_camera(cam_conf):
             event_service = mycam.create_events_service()
             subscription = event_service.CreatePullPointSubscription()
 
-            active_subscriptions.append(subscription)
-            current_subscription = subscription 
-            logger.info(f"✅ [{cam_name}] Subscription登録完了")
-
+            # 接続情報を解析
             try:
                 plp_address = subscription.SubscriptionReference.Address._value_1
             except AttributeError:
@@ -360,11 +347,35 @@ def monitor_single_camera(cam_conf):
             )
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
+            # クリーンアップ用に保持
+            active_pullpoints.append(pullpoint)
+            current_pullpoint = pullpoint
+            
+            logger.info(f"✅ [{cam_name}] Subscription登録完了")
+
             # --- イベント受信ループ ---
             success_pull_count = 0 
+            last_renew_time = time.time()
             
             while True:
                 try:
+                    # ==========================================
+                    # 🔹 Renew処理 (ここが修正ポイント)
+                    # ==========================================
+                    now = time.time()
+                    if now - last_renew_time > RENEW_INTERVAL:
+                        try:
+                            # 期間を延長する
+                            pullpoint.Renew(RENEW_DURATION)
+                            last_renew_time = now
+                            logger.debug(f"🔄 [{cam_name}] Subscription Renew成功")
+                        except Exception as e:
+                            logger.warning(f"⚠️ [{cam_name}] Renew失敗 -> 再接続へ: {e}")
+                            raise Exception("Renew Failed")
+
+                    # ==========================================
+                    # 🔹 PullMessages (イベント取得)
+                    # ==========================================
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
                     
@@ -422,12 +433,15 @@ def monitor_single_camera(cam_conf):
 
                 except Exception as e:
                     err = str(e)
+                    # タイムアウトは正常動作なので無視してループ継続
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe"]
+                    fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe", "Renew Failed"]
                     if any(f in err for f in fatal_errors):
                         logger.warning(f"⚠️ [{cam_name}] 致命的エラー検知: {err} -> 即時再接続")
-                        perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
+                        # 接続が完全に切れている場合のみ診断
+                        if "Renew Failed" not in err:
+                            perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
                         raise Exception("Fatal Connection Error") 
 
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー: {err}")
@@ -436,15 +450,16 @@ def monitor_single_camera(cam_conf):
         except Exception as e:
             err_msg = str(e)
             
-            if current_subscription:
+            # クリーンアップ
+            if current_pullpoint:
                 try:
-                    if current_subscription in active_subscriptions:
-                        active_subscriptions.remove(current_subscription)
-                    if hasattr(current_subscription, 'Unsubscribe'):
-                        current_subscription.Unsubscribe()
+                    if current_pullpoint in active_pullpoints:
+                        active_pullpoints.remove(current_pullpoint)
+                    if hasattr(current_pullpoint, 'Unsubscribe'):
+                        current_pullpoint.Unsubscribe()
                         logger.debug(f"🧹 [{cam_name}] Unsubscribe完了")
                 except Exception: pass
-                finally: current_subscription = None
+                finally: current_pullpoint = None
 
             close_camera_connection(mycam)
             mycam = None
