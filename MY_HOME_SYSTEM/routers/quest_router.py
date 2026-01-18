@@ -430,7 +430,9 @@ class QuestService:
             boss_effect = self._apply_boss_damage(cur, damage_value)
             boss_effect['isCritical'] = is_critical # クリティカル情報を付与
             
-            result['bossEffect'] = boss_effect
+            # ★修正: 設定が有効な場合のみ、フロントエンドへ演出データを返す
+            if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
+                result['bossEffect'] = boss_effect
             
             logger.info(f"Adult Attack: User={user_id}, Base={total_exp}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
@@ -472,7 +474,9 @@ class QuestService:
             boss_effect = self._apply_boss_damage(cur, damage_value)
             boss_effect['isCritical'] = is_critical
             
-            result['bossEffect'] = boss_effect
+            # ★修正: 設定が有効な場合のみ、フロントエンドへ演出データを返す
+            if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
+                result['bossEffect'] = boss_effect
             
             logger.info(f"Child Attack Approved: Attacker={attacker_id}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result

@@ -360,3 +360,8 @@ NVR_RECORD_DIR = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
 # カメラ設定 (既存のCAMERASリストにディレクトリマッピング用キーを追加しても良いですが、
 # IDに含まれる文字列("Parking", "Garden")で判定するロジックにするため、そのままでもOKです)
+
+# === 機能トグル設定 ===
+# ボスバトルの画面演出（ポップアップ）を有効にするか
+# True: 派手な演出あり / False: 演出なし（HPバーの更新のみ）
+ENABLE_BATTLE_EFFECT = False
