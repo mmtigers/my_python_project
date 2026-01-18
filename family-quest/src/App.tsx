@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Sword, Shirt, ShoppingBag } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
-import { useSound } from './hooks/useSound'; // 追加: 音を鳴らすため
-import { User, Quest, QuestHistory, Reward, Equipment } from '@/types';
+import { useSound } from './hooks/useSound';
+
+// ★修正: 重複していた import を1つにまとめました
+import { User, Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
 // UI Components
 import LevelUpModal from './components/ui/LevelUpModal';
@@ -20,6 +22,7 @@ import RewardList from './features/shop/components/RewardList';
 import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
+import BattleEffect from './components/ui/BattleEffect';
 
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
@@ -102,12 +105,14 @@ export default function App() {
   const [targetItem, setTargetItem] = useState<any>(null);
   const [messageModal, setMessageModal] = useState<{ title: string, message: string, icon?: string } | null>(null);
 
-  const { play } = useSound(); // 音機能を利用
+  const [battleEffect, setBattleEffect] = useState<BossEffect | null>(null);
+
+  const { play } = useSound();
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     equipments, ownedEquipments, familyStats, chronicle, isLoading,
-    boss, // ★修正: ここで boss を取り出す
+    boss,
     completeQuest, approveQuest, rejectQuest, cancelQuest,
     buyReward, buyEquipment, changeEquipment, refreshData
   } = useGameData((info: any) => setLevelUpInfo(info));
@@ -133,13 +138,11 @@ export default function App() {
     const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
     const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
 
-    // 申請中は無視
     if (isPending) {
       setMessageModal({ title: "確認中", message: "親の承認待ちです", icon: "⏳" });
       return;
     }
 
-    // 完了済み(かつ無限じゃない)ならキャンセル確認へ
     if (isCompleted && !isInfinite) {
       const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
       if (historyItem) {
@@ -149,21 +152,21 @@ export default function App() {
       return;
     }
 
-    // クエスト完了処理を実行
     const result = await completeQuest(currentUser, quest);
 
-    // 結果に応じた処理
     if (!result.success) {
       if (result.reason === 'pending') {
         setMessageModal({ title: "確認中", message: "承認されるまでお待ちください", icon: "⏳" });
       } else {
-        // エラー時は必要ならメッセージを
         console.error("Quest completion failed");
       }
     } else {
-      // メダル獲得時
+      if (result.bossEffect) {
+        setBattleEffect(result.bossEffect);
+      }
+
       if (result.earnedMedals > 0) {
-        play('medal'); // メダル音
+        play('medal');
         setMessageModal({
           title: "ラッキー！！",
           message: "ちいさなメダル を見つけた！",
@@ -174,15 +177,14 @@ export default function App() {
   };
 
   const handleModalConfirm = async () => {
-    // キャンセル処理
     if (modalMode === 'cancel' && targetHistory) {
       await cancelQuest(currentUser, targetHistory);
     }
-    // ごほうび購入
     else if (modalMode === 'purchase' && targetItem) {
       const result = await buyReward(currentUser, targetItem);
-      if (result.success) {
-        play('medal'); // 購入成功音(仮)
+      // ★修正: result.reward が存在するかチェックを追加 (&& result.reward)
+      if (result.success && result.reward) {
+        play('medal');
         setMessageModal({
           title: "お買い上げ！",
           message: `${result.reward.title} を\n手に入れた！`,
@@ -192,11 +194,11 @@ export default function App() {
         setMessageModal({ title: "資金不足", message: "ゴールドが足りません！", icon: "💸" });
       }
     }
-    // 装備購入
     else if (modalMode === 'equip_buy' && targetItem) {
       const result = await buyEquipment(currentUser, targetItem);
-      if (result.success) {
-        play('medal'); // 購入音
+      // ★修正: result.item が存在するかチェックを追加 (&& result.item)
+      if (result.success && result.item) {
+        play('medal');
         setMessageModal({
           title: "装備ゲット！",
           message: `${result.item.name} を\n手に入れた！`,
@@ -218,10 +220,14 @@ export default function App() {
     setTargetItem(null);
   };
 
-  // 各ハンドラ
   const handleApprove = async (historyItem: QuestHistory) => {
     const res = await approveQuest(currentUser, historyItem);
-    if (res.success) play('approve');
+    if (res.success) {
+      play('approve');
+      if (res.bossEffect) {
+        setBattleEffect(res.bossEffect);
+      }
+    }
   };
 
   const handleReject = async (historyItem: QuestHistory) => {
@@ -247,6 +253,12 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
+      <BattleEffect
+        effect={battleEffect}
+        boss={boss}
+        onClose={() => setBattleEffect(null)}
+      />
+
       <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
 
       {messageModal && (
