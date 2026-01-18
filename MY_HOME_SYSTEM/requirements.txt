@@ -117,3 +117,4 @@ watchdog==6.0.0
 wrapt==2.0.1
 yarl==1.22.0
 zeep==4.3.2
+aiofiles==24.1.0
