@@ -128,6 +128,12 @@ class PurchaseResponse(BaseModel):
     status: str
     newGold: int
 
+# ★追加: 管理用リクエストモデル
+class AdminBossUpdate(BaseModel):
+    max_hp: Optional[int] = None
+    current_hp: Optional[int] = None
+    is_defeated: Optional[bool] = None
+
 # ==========================================
 # 2. Service Layers (Logic Separation)
 # ==========================================
@@ -1011,3 +1017,35 @@ def test_sound(req: SoundTestRequest):
     
     sound_manager.play(req.sound_key)
     return {"status": "playing", "key": req.sound_key}
+
+@router.post("/admin/boss/update")
+def admin_update_boss(action: AdminBossUpdate):
+    """管理画面からボスのステータスを直接変更する"""
+    with common.get_db_cursor(commit=True) as cur:
+        updates = []
+        params = []
+        
+        if action.max_hp is not None:
+            updates.append("max_hp = ?")
+            params.append(action.max_hp)
+            
+        if action.current_hp is not None:
+            updates.append("current_hp = ?")
+            params.append(action.current_hp)
+            
+        if action.is_defeated is not None:
+            updates.append("is_defeated = ?")
+            params.append(1 if action.is_defeated else 0)
+            
+        if not updates:
+            return {"status": "no_change"}
+            
+        updates.append("updated_at = ?")
+        params.append(common.get_now_iso())
+        
+        sql = f"UPDATE party_state SET {', '.join(updates)} WHERE id = 1"
+        cur.execute(sql, tuple(params))
+        
+        logger.info(f"👮 Admin Boss Update: {action.dict()}")
+        
+    return {"status": "updated"}
