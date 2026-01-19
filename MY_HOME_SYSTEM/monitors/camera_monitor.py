@@ -281,7 +281,7 @@ def monitor_single_camera(cam_conf):
     while True: 
         mycam = None
         current_pullpoint = None
-        renew_supported = True 
+        renew_supported = False if "Parking" in cam_conf.get('id', '') else True
         
         try:
             # --- 接続フェーズ ---
@@ -406,11 +406,21 @@ def monitor_single_camera(cam_conf):
                     err = str(e)
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    fatal_errors = ["Connection refused", "Errno 111", "RemoteDisconnected", "No route to host", "Broken pipe"]
+                    # 【変更】致命的エラー（サーバーダウン等、長期待機が必要なもの）
+                    fatal_errors = ["Connection refused", "Errno 111", "No route to host"]
+                    
+                    # 【追加】再接続ですぐ直るエラー（切断、リセット等）→ 即時再接続扱いにする
+                    instant_retry_errors = ["RemoteDisconnected", "Connection aborted", "Broken pipe", "Connection reset"]
+
                     if any(f in err for f in fatal_errors):
-                        logger.warning(f"⚠️ [{cam_name}] 致命的エラー検知: {err} -> 即時再接続")
+                        logger.warning(f"⚠️ [{cam_name}] サーバーダウン検知: {err} -> 待機モードへ")
                         if "Renew" not in err: perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
                         raise Exception("Fatal Connection Error") 
+
+                    # 【追加】瞬断系エラーなら break して即再接続（Outer Loopへ）
+                    if any(f in err for f in instant_retry_errors):
+                        logger.info(f"🔄 [{cam_name}] 接続切断(瞬断): {err} -> 即時再接続します")
+                        break 
 
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー: {err}")
                     time.sleep(2)
