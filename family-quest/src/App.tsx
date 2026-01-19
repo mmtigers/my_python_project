@@ -4,6 +4,7 @@ import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
 import AdminDashboard from './features/admin/components/AdminDashboard';
+import { ShopContainer } from './features/shop/components/ShopContainer';
 
 import { User, Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
@@ -18,7 +19,6 @@ import { Modal } from './components/ui/Modal';
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
-import RewardList from './features/shop/components/RewardList';
 import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
@@ -380,7 +380,8 @@ export default function App() {
               )}
 
               {activeTab === 'shop' && (
-                <RewardList
+                <ShopContainer
+                  userId={currentUser.user_id} // ★ここを追加
                   rewards={rewards}
                   userGold={currentUser.gold}
                   onBuy={handleBuyReward}
