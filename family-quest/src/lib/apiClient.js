@@ -1,10 +1,5 @@
-/**
- * API通信を管理するクライアントクラス
- * 環境変数 VITE_API_URL があればそれをベースURLとして使用します。
- */
+// src/lib/apiClient.js
 
-// 開発環境と本番環境で接続先を切り替えるためのベースURL設定
-// .env ファイル等で VITE_API_URL を指定可能にします
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 
 class ApiClient {
@@ -12,19 +7,10 @@ class ApiClient {
     this.baseUrl = baseUrl;
   }
 
-  /**
-   * GETリクエストを実行
-   * @param {string} endpoint - APIのエンドポイント (例: '/api/quest/data')
-   */
   async get(endpoint) {
     return this._request(endpoint, { method: 'GET' });
   }
 
-  /**
-   * POSTリクエストを実行
-   * @param {string} endpoint 
-   * @param {object} body - JSONボディ
-   */
   async post(endpoint, body) {
     return this._request(endpoint, {
       method: 'POST',
@@ -35,34 +21,47 @@ class ApiClient {
     });
   }
 
-  /**
-   * 共通リクエスト処理
-   * エラーレスポンスのハンドリングなどを統一
-   */
   async _request(endpoint, options) {
-    // URL結合時のスラッシュ重複防止
     const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
     const url = `${this.baseUrl}${cleanEndpoint}`;
 
     try {
       const response = await fetch(url, options);
-      
-      // レスポンスがJSONでない場合も考慮しつつパース
-      const data = await response.json().catch(() => null);
-
       if (!response.ok) {
-        // バックエンドからのエラーメッセージがあればそれを使用
-        const errorMessage = data?.detail || data?.message || `Error ${response.status}: ${response.statusText}`;
-        throw new Error(errorMessage);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `API Error: ${response.status}`);
       }
-      
-      return data;
+      return response.json();
     } catch (error) {
       console.error(`API Request Failed [${endpoint}]:`, error);
-      throw error; // 呼び出し元でUIへの通知などを行うために再スロー
+      throw error;
     }
   }
+
+  // --- Inventory Methods ---
+  // ★修正: すべてのパスの先頭に '/api/quest' を追加
+
+  async fetchInventory(userId) {
+    return this.get(`/api/quest/inventory/${userId}`);
+  }
+
+  async useItem(userId, inventoryId) {
+    return this.post('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });
+  }
+
+  async cancelItemUsage(userId, inventoryId) {
+    return this.post('/api/quest/inventory/cancel', { user_id: userId, inventory_id: inventoryId });
+  }
+
+  async consumeItem(approverId, inventoryId) {
+    return this.post('/api/quest/inventory/consume', { approver_id: approverId, inventory_id: inventoryId });
+  }
+
+  // 管理者用: 承認待ちアイテム一覧を取得
+  async fetchPendingInventory() {
+    return this.get('/api/quest/inventory/admin/pending');
+  }
+
 }
 
-// シングルトンインスタンスとしてエクスポート
 export const apiClient = new ApiClient(BASE_URL);

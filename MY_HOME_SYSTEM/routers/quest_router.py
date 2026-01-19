@@ -134,6 +134,27 @@ class AdminBossUpdate(BaseModel):
     current_hp: Optional[int] = None
     is_defeated: Optional[bool] = None
 
+
+# Response Model for Inventory Item
+class InventoryItem(BaseModel):
+    id: int             # inventory ID
+    reward_id: int      # master ID
+    title: str
+    desc: Optional[str] = None
+    icon: str
+    status: str         # owned, pending, consumed
+    purchased_at: str
+    used_at: Optional[str] = None
+
+# Action Models
+class UseItemAction(BaseModel):
+    user_id: str
+    inventory_id: int
+
+class ConsumeItemAction(BaseModel):
+    approver_id: str    # 親のID
+    inventory_id: int
+
 # ==========================================
 # 2. Service Layers (Logic Separation)
 # ==========================================
@@ -636,16 +657,27 @@ class ShopService:
             if not user: raise HTTPException(status_code=404, detail="User not found")
             if user['gold'] < reward['cost_gold']: raise HTTPException(status_code=400, detail="Not enough gold")
                 
+            # 1. お金の減算 (既存)
             new_gold = user['gold'] - reward['cost_gold']
             cur.execute("UPDATE quest_users SET gold = ?, updated_at = ? WHERE user_id = ?", 
                        (new_gold, common.get_now_iso(), user_id))
             
+            now_iso = common.get_now_iso()
+
+            # 2. 履歴ログに追加 (既存: 分析・統計用)
             cur.execute("""
                 INSERT INTO reward_history (user_id, reward_id, reward_title, cost_gold, redeemed_at)
                 VALUES (?, ?, ?, ?, ?)
-            """, (user_id, reward['reward_id'], reward['title'], reward['cost_gold'], common.get_now_iso()))
+            """, (user_id, reward['reward_id'], reward['title'], reward['cost_gold'], now_iso))
             
-            logger.info(f"Reward Purchased: User={user_id}, Item={reward['title']}")
+            # 3. 【新規】インベントリに追加 (実体管理用)
+            cur.execute("""
+                INSERT INTO user_inventory (user_id, reward_id, status, purchased_at)
+                VALUES (?, ?, 'owned', ?)
+            """, (user_id, reward['reward_id'], now_iso))
+            
+            logger.info(f"Reward Purchased & Stored: User={user_id}, Item={reward['title']}")
+            
         return {"status": "purchased", "newGold": new_gold}
 
     def process_purchase_equipment(self, user_id: str, equipment_id: int) -> Dict[str, Any]:
@@ -692,6 +724,87 @@ class ShopService:
             logger.info(f"Equip Changed: User={user_id}, ItemID={equipment_id}")
             return {"status": "equipped", "equipment_id": equipment_id}
 
+
+class InventoryService:
+    def get_user_inventory(self, user_id: str) -> List[dict]:
+        with common.get_db_cursor() as cur:
+            # マスタ情報と結合して取得
+            sql = """
+                SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
+                       rm.title, rm.icon_key as icon, rm.category
+                FROM user_inventory ui
+                JOIN reward_master rm ON ui.reward_id = rm.reward_id
+                WHERE ui.user_id = ? AND ui.status IN ('owned', 'pending')
+                ORDER BY ui.purchased_at DESC
+            """
+            rows = cur.execute(sql, (user_id,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        """子供がアイテムを使用する（申請状態にする）"""
+        with common.get_db_cursor(commit=True) as cur:
+            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
+            if not item: raise HTTPException(404, "Item not found")
+            if item['user_id'] != user_id: raise HTTPException(403, "Not your item")
+            if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
+
+            cur.execute("""
+                UPDATE user_inventory 
+                SET status = 'pending', used_at = ? 
+                WHERE id = ?
+            """, (common.get_now_iso(), inventory_id))
+            
+            # 通知用サウンド再生などはここで行う
+            sound_manager.play("select") 
+            
+            return {"status": "pending", "message": "使いました！パパ・ママに承認してもらってね"}
+
+    def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
+        """親が使用を承認する（消費済みにする）"""
+        # 親権限チェック (QuestServiceの定数を利用)
+        if approver_id not in QuestService.PARENT_IDS:
+             raise HTTPException(403, "承認権限がありません")
+
+        with common.get_db_cursor(commit=True) as cur:
+            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
+            if not item: raise HTTPException(404, "Item not found")
+            
+            cur.execute("""
+                UPDATE user_inventory 
+                SET status = 'consumed', used_at = ? 
+                WHERE id = ?
+            """, (common.get_now_iso(), inventory_id))
+
+            sound_manager.play("quest_clear") # 承認音
+            
+            return {"status": "consumed", "message": "承認しました"}
+
+    def cancel_usage(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        """申請を取り下げる"""
+        with common.get_db_cursor(commit=True) as cur:
+            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
+            if not item: raise HTTPException(404, "Item not found")
+            if item['user_id'] != user_id: raise HTTPException(403, "Not your item")
+            if item['status'] != 'pending': raise HTTPException(400, "Not pending")
+
+            cur.execute("UPDATE user_inventory SET status = 'owned', used_at = NULL WHERE id = ?", (inventory_id,))
+            return {"status": "owned", "message": "リュックに戻しました"}
+    
+    def get_pending_items(self) -> List[dict]:
+        """【管理用】全ユーザーの承認待ちアイテムを取得"""
+        with common.get_db_cursor() as cur:
+            sql = """
+                SELECT ui.id, ui.user_id, ui.reward_id, ui.used_at,
+                       rm.title, rm.icon_key as icon, rm.category,
+                       qu.name as user_name
+                FROM user_inventory ui
+                JOIN reward_master rm ON ui.reward_id = rm.reward_id
+                LEFT JOIN quest_users qu ON ui.user_id = qu.user_id
+                WHERE ui.status = 'pending'
+                ORDER BY ui.used_at ASC
+            """
+            rows = cur.execute(sql).fetchall()
+            return [dict(row) for row in rows]
 
 class GameSystem:
     def __init__(self):
@@ -1049,3 +1162,26 @@ def admin_update_boss(action: AdminBossUpdate):
         logger.info(f"👮 Admin Boss Update: {action.dict()}")
         
     return {"status": "updated"}
+
+
+inventory_service = InventoryService() # インスタンス化
+
+@router.get("/inventory/{user_id}")
+def get_inventory(user_id: str):
+    return inventory_service.get_user_inventory(user_id)
+
+@router.post("/inventory/use")
+def use_item(action: UseItemAction):
+    return inventory_service.use_item(action.user_id, action.inventory_id)
+
+@router.post("/inventory/consume")
+def consume_item(action: ConsumeItemAction):
+    return inventory_service.consume_item(action.approver_id, action.inventory_id)
+
+@router.post("/inventory/cancel")
+def cancel_item_usage(action: UseItemAction):
+    return inventory_service.cancel_usage(action.user_id, action.inventory_id)
+
+@router.get("/inventory/admin/pending")
+def get_admin_pending_inventory():
+    return inventory_service.get_pending_items()
