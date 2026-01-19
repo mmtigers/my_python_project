@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, Equipment, Boss } from '@/types'; // Boss追加
+import { User, Quest, QuestHistory, Reward, Equipment, Boss } from '@/types';
 
 // APIレスポンスの型定義
 interface GameDataResponse {
@@ -13,7 +13,7 @@ interface GameDataResponse {
     logs: any[];
     equipments: Equipment[];
     ownedEquipments: any[];
-    boss: Boss | null; // ★追加
+    boss: Boss | null;
 }
 
 interface ChronicleResponse {
@@ -24,7 +24,7 @@ interface ChronicleResponse {
 export const useGameData = (onLevelUp?: (info: any) => void) => {
     const queryClient = useQueryClient();
 
-    // ★追加: 管理用Mutation
+    // 管理用Mutation
     const adminUpdateBossMutation = useMutation({
         mutationFn: async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
             return apiClient.post('/api/quest/admin/boss/update', {
@@ -131,8 +131,10 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 reward_id: reward.id || reward.reward_id,
             });
         },
-        onSuccess: () => {
+        onSuccess: (data, variables) => {
+            // ★修正: 所持金(gameData)の更新に加え、個人のもちもの(inventory)も更新する
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
+            queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });
         },
         onError: (err) => handleError('購入', err),
     });
@@ -181,7 +183,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 success: true,
                 earnedMedals: res.earnedMedals,
                 leveledUp: res.leveledUp,
-                bossEffect: res.bossEffect // ★追加で返す
+                bossEffect: res.bossEffect
             };
         } catch (e) {
             return { success: false, reason: 'error' };
@@ -200,11 +202,10 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
         if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };
         try {
-            // レスポンスを受け取る
             const res: any = await approveQuestMutation.mutateAsync({ user, history: historyItem });
             return {
                 success: true,
-                bossEffect: res?.bossEffect // ★追加で返す
+                bossEffect: res?.bossEffect
             };
         } catch (e) { return { success: false }; }
     };
@@ -245,9 +246,9 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
 
     const refreshData = () => {
         queryClient.invalidateQueries({ queryKey: ['gameData'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得
     };
 
-    // ★追加: 公開関数
     const adminUpdateBoss = async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
         try {
             await adminUpdateBossMutation.mutateAsync(data);
@@ -272,7 +273,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         ownedEquipments: gameData?.ownedEquipments || [],
         familyStats: chronicleData?.stats || null,
         chronicle: chronicleData?.chronicle || [],
-        boss: gameData?.boss || null, // ★ここが重要：ボスデータを返す
+        boss: gameData?.boss || null,
         isLoading: isGameDataLoading,
 
         completeQuest,
@@ -283,6 +284,6 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         buyEquipment,
         changeEquipment,
         refreshData,
-        adminUpdateBoss, // ★エクスポート
+        adminUpdateBoss,
     };
 };
