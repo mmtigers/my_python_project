@@ -8,6 +8,8 @@ const SOUNDS = {
     levelUp: '/quest/level_up.mp3',    // レベルアップ
     medal: '/quest/medal_get.mp3',     // メダル獲得
     tap: '/quest/tap.mp3',             // タップ音
+    select: '/quest/submit.mp3',       // select は submit(決定音) を使用
+    cancel: '/quest/tap.mp3',          // cancel は tap(タップ音) を使用
 } as const;
 
 type SoundKey = keyof typeof SOUNDS;

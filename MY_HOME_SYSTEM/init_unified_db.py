@@ -373,6 +373,21 @@ def init_db():
             )
         """)
 
+        # --- Inventory System ---
+        # 購入した個別のアイテムを管理するテーブル
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS user_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                reward_id INTEGER,
+                status TEXT DEFAULT 'owned',  -- owned:所持, pending:使用申請中, consumed:使用済
+                purchased_at DATETIME NOT NULL,
+                used_at DATETIME,
+                FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id)
+            )
+        ''')
+
+
     logger.info("✅ 全テーブルの準備が完了しました。")
 
 if __name__ == "__main__":
