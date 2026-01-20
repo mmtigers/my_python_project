@@ -9,6 +9,19 @@ import sys
 load_dotenv()
 
 # ==========================================
+# 0. 環境・機能フラグ設定 (New!)
+# ==========================================
+# 環境設定 (development / production)
+# .env で ENV=production と設定されていれば本番モードになります
+ENV = os.getenv("ENV", "development")
+
+# もちもの使用時の承認フロー設定
+# True: 子供が使用 -> 親に通知(LINE/Discord) -> 親が承認 -> 消費
+# False: 子供が使用 -> 即座に消費 (ログはDiscordに残る)
+# ※デフォルトはOFF
+ENABLE_APPROVAL_FLOW = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
+
+# ==========================================
 # 1. 認証・API設定 (Secrets)
 # ==========================================
 SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")
@@ -365,3 +378,4 @@ NVR_RECORD_DIR = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 # ボスバトルの画面演出（ポップアップ）を有効にするか
 # True: 派手な演出あり / False: 演出なし（HPバーの更新のみ）
 ENABLE_BATTLE_EFFECT = False
+
