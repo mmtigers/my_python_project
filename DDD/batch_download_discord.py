@@ -2,19 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-Production Grade Batch Downloader (v1.2.0 Notification Update)
+Production Grade Batch Downloader (v2.2.0 Universal Support)
 -------------------------------------------------
 Features:
-- Atomic File Writes (Prevents corrupted partial files)
-- Modern Pathlib Implementation
-- Strict Type Hinting & Docstrings
-- Robust Error Handling & Logging
-- Strategy Pattern for Scalability
-- Automatic Deduplication of URL List
-- Dependency Checks (ffmpeg, yt-dlp version)
-- Smart Log Handling (Clean logs for Cron jobs)
-- Force Run Mode (--force argument support)
-- Simplified Discord Notifications (No URLs)
+- Multi-List Support: Automatically processes all files in 'list/' directory.
+- Smart Organization: Creates subfolders based on list filenames.
+- Atomic File Writes & Robust Error Handling.
+- Download History Management.
+- Discord Notifications.
+- Schedule: 02:00 - 06:00.
+- Universal Support: Uses yt-dlp for ALL supported sites (not just YouTube).
+- Specialized Scraping: Specific logic for 'tktube'.
 """
 
 import os
@@ -26,10 +24,10 @@ import datetime
 import logging
 import signal
 import requests
-import subprocess
+import glob
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple, Any, Set
-from dataclasses import dataclass
+from typing import List, Optional, Tuple, Any, Set, NamedTuple
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # External Libraries
@@ -39,7 +37,7 @@ from tqdm import tqdm
 import yt_dlp
 
 # ==========================================
-# 0. 環境設定 & ロギング初期化
+# 0. 環境設定 & ロギング
 # ==========================================
 logging.basicConfig(
     level=logging.INFO,
@@ -48,28 +46,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Downloader")
 
-# 簡易的な引数チェック（--force があれば時間制限などを無視）
 FORCE_MODE = "--force" in sys.argv
 
-# プロジェクトルートの解決
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR
-
-# 'services' ディレクトリが見つかるまで親を探索 (最大3階層)
-found_root = False
 for _ in range(3):
     if (PROJECT_ROOT / "services").exists():
-        found_root = True
         break
     PROJECT_ROOT = PROJECT_ROOT.parent
-
-if not found_root:
+else:
     PROJECT_ROOT = Path("/home/masahiro/develop/MY_HOME_SYSTEM")
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-# 通知サービスのインポート
 try:
     from services.notification_service import _send_discord_webhook
 except ImportError:
@@ -82,26 +72,28 @@ except ImportError:
 # ==========================================
 @dataclass(frozen=True)
 class AppConfig:
-    """アプリケーション設定 (Immutable)"""
-    # --force オプションがある場合は時間制限を無効化
     RESTRICT_TIME: bool = not FORCE_MODE
-    START_HOUR: int = 0
-    END_HOUR: int = 5
-    INTERVAL_SECONDS: int = 3600
+    START_HOUR: int = 2
+    END_HOUR: int = 6
+    SHORT_SLEEP_SECONDS: int = 5
     MIN_FREE_SPACE_GB: int = 50
     
-    # パス関係
     BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR", "/mnt/nas/ddd"))
     LIST_FILE_PATH: Path = CURRENT_DIR / "list.txt"
+    LIST_DIR_PATH: Path = CURRENT_DIR / "list"
+    HISTORY_FILE_PATH: Path = CURRENT_DIR / "history.txt"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
     
-    # ネットワーク設定
     REQUEST_TIMEOUT: int = 20
     MAX_RETRIES: int = 3
     
-    # UI設定
-    # ターミナル実行時のみプログレスバーを表示（ログファイル汚染防止）
+    # 抽出パターン (Specialized Scraping)
+    URL_PATTERNS: List[Tuple[str, str]] = field(default_factory=lambda: [
+        ('HD', r"video_alt_url\s*:\s*['\"]([^'\"]+)['\"]"),
+        ('SD', r"video_url\s*:\s*['\"]([^'\"]+)['\"]"),
+    ])
+    
     SHOW_PROGRESS_BAR: bool = sys.stdout.isatty()
 
     @property
@@ -110,396 +102,308 @@ class AppConfig:
 
 CONFIG = AppConfig()
 
+class DownloadTask(NamedTuple):
+    url: str
+    source_name: str
+
 # ==========================================
 # 2. マネージャー & ユーティリティ
 # ==========================================
 class DiscordNotifier:
-    """通知管理"""
     @staticmethod
     def send(text: str, is_error: bool = False) -> None:
         channel = 'error' if is_error else 'notify'
         message = {"type": "text", "text": text}
         try:
             _send_discord_webhook([message], channel=channel)
-            logger.info("🔔 Discord通知送信完了")
         except Exception as e:
             logger.error(f"⚠️ Discord通知エラー: {e}")
 
+class HistoryManager:
+    @staticmethod
+    def load_history() -> Set[str]:
+        history = set()
+        if CONFIG.HISTORY_FILE_PATH.exists():
+            try:
+                with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:
+                    history = {line.strip() for line in f if line.strip()}
+            except Exception: pass
+        return history
+
+    @staticmethod
+    def add_history(url: str) -> None:
+        try:
+            with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:
+                f.write(f"{url}\n")
+        except Exception: pass
+
 class NetworkManager:
-    """ネットワークセッション管理"""
     @staticmethod
     def create_session() -> requests.Session:
         session = requests.Session()
-        retries = Retry(
-            total=CONFIG.MAX_RETRIES,
-            backoff_factor=2,
-            status_forcelist=[500, 502, 503, 504],
-            allowed_methods=["GET"]
-        )
-        adapter = HTTPAdapter(max_retries=retries)
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-        })
+        retries = Retry(total=CONFIG.MAX_RETRIES, backoff_factor=2, status_forcelist=[500, 502, 503, 504])
+        session.mount("http://", HTTPAdapter(max_retries=retries))
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        session.headers.update({'User-Agent': 'Mozilla/5.0 ... Chrome/120.0.0.0 Safari/537.36'})
         return session
 
 class FileSystemManager:
-    """ファイルシステム操作管理"""
-
     @staticmethod
     def sanitize_filename(filename: str) -> str:
-        """OSで使用できない文字を置換"""
         return re.sub(r'[\\/*?:"<>|]', '_', filename)
 
     @staticmethod
     def ensure_dir(path: Path) -> bool:
-        """ディレクトリ作成（権限チェック付き）"""
         try:
             path.mkdir(parents=True, exist_ok=True)
             return True
         except PermissionError:
-            msg = f"❌ 権限エラー: {path} に書き込めません。"
-            logger.error(msg)
-            DiscordNotifier.send(msg, is_error=True)
+            DiscordNotifier.send(f"❌ 権限エラー: {path}", is_error=True)
             return False
 
     @staticmethod
     def check_disk_space(path: Path) -> bool:
-        """ディスク容量チェック"""
         try:
             check_path = path
             while not check_path.exists():
                 check_path = check_path.parent
-                if check_path == check_path.parent:
-                    break
-
+                if check_path == check_path.parent: break
             total, used, free = shutil.disk_usage(check_path)
-            free_gb = free // (2**30)
-
-            if free_gb < CONFIG.MIN_FREE_SPACE_GB:
-                msg = (f"⚠️ **DISK FULL**: 空き容量が {free_gb}GB です。\n"
-                       f"NVR録画領域保護のため中断します。")
-                logger.warning(msg)
-                DiscordNotifier.send(msg, is_error=True)
+            if (free // (2**30)) < CONFIG.MIN_FREE_SPACE_GB:
+                DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)
                 return False
             return True
-        except Exception as e:
-            logger.error(f"⚠️ Disk check error: {e}")
+        except Exception:
             return True
 
-# ==========================================
-# 3. システム健全性チェック
-# ==========================================
 class SystemHealthChecker:
     @staticmethod
     def is_within_time_window() -> bool:
-        if not CONFIG.RESTRICT_TIME:
-            return True
-        current_hour = datetime.datetime.now().hour
-        return CONFIG.START_HOUR <= current_hour < CONFIG.END_HOUR
+        if not CONFIG.RESTRICT_TIME: return True
+        return CONFIG.START_HOUR <= datetime.datetime.now().hour < CONFIG.END_HOUR
 
     @staticmethod
     def verify_nas_mount() -> bool:
-        if not CONFIG.NAS_MOUNT_POINT.exists():
-            msg = f"⛔ **CRITICAL**: `{CONFIG.NAS_MOUNT_POINT}` が見つかりません。"
-            logger.critical(msg)
-            DiscordNotifier.send(msg, is_error=True)
-            return False
-
-        if not CONFIG.nas_marker_path.exists():
-            msg = (f"⛔ **CRITICAL**: NASマウントチェック失敗！\n"
-                   f"`{CONFIG.NAS_MARKER_FILE}` が見つかりません。\n"
-                   f"SDカード保護のため停止します。")
-            logger.critical(msg)
-            DiscordNotifier.send(msg, is_error=True)
+        if not CONFIG.NAS_MOUNT_POINT.exists() or not CONFIG.nas_marker_path.exists():
+            DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)
             return False
         return True
     
     @staticmethod
     def check_dependencies() -> None:
-        """外部依存ツールのチェック"""
-        try:
-            import yt_dlp.version
-            logger.info(f"ℹ️ yt-dlp version: {yt_dlp.version.__version__}")
-        except ImportError:
-            pass
-
         if shutil.which("ffmpeg") is None:
-            msg = "⚠️ **WARNING**: `ffmpeg` がインストールされていません。\n高画質動画の結合に失敗する可能性があります。"
-            logger.warning(msg)
-            DiscordNotifier.send(msg, is_error=True)
+            logger.warning("⚠️ ffmpeg not found.")
 
 # ==========================================
-# 4. ダウンロード戦略 (Strategy Pattern)
+# 3. ダウンロード戦略 (Strategy Pattern)
 # ==========================================
 class DownloadStrategy(ABC):
-    
     def __init__(self, save_base_dir: Path, session: requests.Session):
         self.save_base_dir = save_base_dir
         self.session = session
 
     @abstractmethod
-    def download(self, url: str) -> bool:
+    def download(self, task: DownloadTask) -> bool:
         pass
 
-    def _prepare_directory(self, sub_dir: str = "") -> Optional[Path]:
-        target_dir = self.save_base_dir / sub_dir if sub_dir else self.save_base_dir
+    def _determine_save_dir(self, source_name: str, category: str = "others") -> Optional[Path]:
+        if source_name == "list":
+            target_dir = self.save_base_dir / category
+        else:
+            target_dir = self.save_base_dir / category / source_name
         
-        if not FileSystemManager.ensure_dir(target_dir):
-            return None
-        if not FileSystemManager.check_disk_space(target_dir):
-            return None
+        if not FileSystemManager.ensure_dir(target_dir): return None
+        if not FileSystemManager.check_disk_space(target_dir): return None
         return target_dir
 
     def _should_skip(self, filepath: Path) -> bool:
         if filepath.exists() and filepath.stat().st_size > 0:
-            logger.info(f"⏭️ 既に存在するためスキップ: {filepath.name}")
+            logger.info(f"⏭️ Skip: {filepath.name}")
             return True
         return False
 
-class YoutubeStrategy(DownloadStrategy):
-    """yt-dlpを使用したYouTubeダウンロード"""
-    
-    def download(self, url: str) -> bool:
-        logger.info("🎥 YouTube動画として処理します...")
-        target_dir = self._prepare_directory("youtube")
+# ★変更点: YouTubeStrategy を UniversalYtDlpStrategy に名称変更し、汎用的に利用
+class UniversalYtDlpStrategy(DownloadStrategy):
+    def download(self, task: DownloadTask) -> bool:
+        logger.info(f"🎥 Universal処理: {task.url} (List: {task.source_name})")
+        
+        # YouTubeの場合は "youtube" フォルダ、それ以外は "others" フォルダに分類
+        category = "youtube" if "youtube.com" in task.url or "youtu.be" in task.url else "others"
+        
+        target_dir = self._determine_save_dir(task.source_name, category)
         if not target_dir: return False
 
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'outtmpl': f'{str(target_dir)}/%(title)s.%(ext)s',
             'merge_output_format': 'mp4',
-            'quiet': True,
-            'no_warnings': True,
-            'nopart': False,
+            'quiet': True, 'no_warnings': True, 'nopart': False,
         }
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                filename_str = ydl.prepare_filename(info)
+                info = ydl.extract_info(task.url, download=False)
+                filename = Path(ydl.prepare_filename(info)).with_suffix('.mp4')
                 
-                base_path = Path(filename_str)
-                final_path = base_path.with_suffix('.mp4')
+                if self._should_skip(filename): return True
 
-                if self._should_skip(base_path) or self._should_skip(final_path):
-                    return True
-
-                logger.info(f"📥 ダウンロード開始: {info.get('title')}")
-                ydl.download([url])
-                logger.info("✨ 完了")
-                
-                # 通知内容からURLを削除
-                DiscordNotifier.send(f"✅ **YouTube保存完了**\nファイル: `{final_path.name}`")
+                logger.info(f"📥 DL開始: {info.get('title')}")
+                ydl.download([task.url])
+                DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{filename.name}`")
                 return True
         except Exception as e:
-            logger.error(f"⚠️ YouTubeエラー: {e}")
+            logger.error(f"⚠️ Universal DL エラー: {e}")
             return False
 
-class GenericStrategy(DownloadStrategy):
-    """汎用スクレイピング (Tktube等)"""
-    
-    def __init__(self, save_base_dir: Path, session: requests.Session, sub_dir: str = ""):
-        super().__init__(save_base_dir, session)
-        self.sub_dir = sub_dir
-
-    def download(self, url: str) -> bool:
-        target_dir = self._prepare_directory(self.sub_dir)
+# ★変更点: スクレイピングが必要な特定サイト専用
+class ScrapingStrategy(DownloadStrategy):
+    def download(self, task: DownloadTask) -> bool:
+        category = "tktube"
+        target_dir = self._determine_save_dir(task.source_name, category)
         if not target_dir: return False
 
-        html = self._fetch_html(url)
+        html = self._fetch_html(task.url)
         if not html: return False
 
         candidates = self._extract_video_urls(html)
         if not candidates:
-            logger.warning("⚠️ 動画リンクが見つかりませんでした。")
+            logger.warning("⚠️ 動画リンクなし")
             return False
 
-        filename = self._generate_filename(url)
+        filename = FileSystemManager.sanitize_filename(task.url.split('?')[0].rstrip('/').split('/')[-1] or f"vid_{int(time.time())}") + ".mp4"
         final_path = target_dir / filename
 
-        if self._should_skip(final_path):
-            return True
-
-        return self._execute_atomic_download(candidates, final_path, url, target_dir)
+        if self._should_skip(final_path): return True
+        return self._execute_atomic_download(candidates, final_path, task.url, target_dir)
 
     def _fetch_html(self, url: str) -> Optional[str]:
         try:
             self.session.headers['Referer'] = url
             res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)
-            res.raise_for_status()
             return res.text
-        except Exception as e:
-            logger.error(f"❌ サイトアクセスエラー: {e}")
-            return None
+        except Exception: return None
 
     def _extract_video_urls(self, html: str) -> List[Tuple[str, str]]:
         urls = []
-        match_hd = re.search(r"video_alt_url\s*:\s*['\"]([^'\"]+)['\"]", html)
-        if match_hd:
-            urls.append(('HD', match_hd.group(1).strip().rstrip('/')))
-        match_sd = re.search(r"video_url\s*:\s*['\"]([^'\"]+)['\"]", html)
-        if match_sd:
-            urls.append(('SD', match_sd.group(1).strip().rstrip('/')))
+        for label, pattern in CONFIG.URL_PATTERNS:
+            match = re.search(pattern, html)
+            if match: urls.append((label, match.group(1).strip().rstrip('/')))
         return urls
 
-    def _generate_filename(self, url: str) -> str:
-        clean_url = url.split('?')[0].rstrip('/')
-        raw_name = clean_url.split('/')[-1] or f"video_{int(time.time())}"
-        safe_name = FileSystemManager.sanitize_filename(raw_name)
-        return f"{safe_name}.mp4"
-
     def _execute_atomic_download(self, candidates: List[Tuple[str, str]], final_path: Path, src_url: str, save_dir: Path) -> bool:
-        """アトミック書き込み (.tmp -> .mp4)"""
         temp_path = final_path.with_suffix('.tmp')
         self.session.headers['Referer'] = src_url
         
         for label, video_url in candidates:
-            logger.info(f"↳ {label} を試行中...")
             try:
                 with self.session.get(video_url, stream=True, timeout=CONFIG.REQUEST_TIMEOUT) as res:
                     if res.status_code == 404: continue
-                    res.raise_for_status()
-                    total_size = int(res.headers.get('content-length', 0))
-
-                    logger.info(f"📥 ダウンロード中: {final_path.name}")
-                    
-                    with open(temp_path, 'wb') as f, tqdm(
-                        total=total_size, 
-                        unit='iB', 
-                        unit_scale=True, 
-                        unit_divisor=1024, 
-                        colour='green', 
-                        leave=False,
-                        disable=not CONFIG.SHOW_PROGRESS_BAR
-                    ) as bar:
-                        for chunk in res.iter_content(chunk_size=1024*1024):
+                    total = int(res.headers.get('content-length', 0))
+                    with open(temp_path, 'wb') as f, tqdm(total=total, unit='iB', unit_scale=True, disable=not CONFIG.SHOW_PROGRESS_BAR) as bar:
+                        for chunk in res.iter_content(1024*1024):
                             size = f.write(chunk)
                             bar.update(size)
-                    
                     temp_path.rename(final_path)
-                    
-                    logger.info("✨ 完了")
-                    # 通知内容からURLを削除 (保存先フォルダだけ残す)
-                    DiscordNotifier.send(f"✅ **動画保存完了**\nファイル: `{final_path.name}`\n保存先: `{save_dir}`")
+                    DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
                     return True
-
-            except Exception as e:
-                logger.warning(f"⚠️ {label} 失敗: {e}")
-                if temp_path.exists():
-                    try: temp_path.unlink()
-                    except OSError: pass
+            except Exception:
+                if temp_path.exists(): temp_path.unlink()
                 continue
-        
-        logger.error("⛔ 全候補でのダウンロードに失敗しました")
         return False
 
 # ==========================================
-# 5. メインコントローラー
+# 4. メインコントローラー
 # ==========================================
 class BatchDownloader:
-    
     def __init__(self):
         self.session = NetworkManager.create_session()
         self._shutdown_requested = False
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+        self.history = HistoryManager.load_history()
 
     def _signal_handler(self, signum: int, frame: Any) -> None:
-        logger.info(f"🛑 停止シグナル検知 ({signum})。安全に終了します...")
+        logger.info("🛑 停止シグナル検知")
         self._shutdown_requested = True
 
     def _get_strategy(self, url: str) -> DownloadStrategy:
-        if "youtube.com" in url or "youtu.be" in url:
-            return YoutubeStrategy(CONFIG.BASE_SAVE_DIR, self.session)
-        elif "tktube" in url:
-            return GenericStrategy(CONFIG.BASE_SAVE_DIR, self.session, sub_dir="tktube")
+        # ★変更点: "tktube" 以外はすべて yt-dlp (Universal) に任せる
+        if "tktube" in url:
+            return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
         else:
-            return GenericStrategy(CONFIG.BASE_SAVE_DIR, self.session)
+            return UniversalYtDlpStrategy(CONFIG.BASE_SAVE_DIR, self.session)
 
-    def _wait_interval(self) -> None:
-        if self._shutdown_requested: return
-        minutes = CONFIG.INTERVAL_SECONDS / 60
-        logger.info(f"💤 ネットワーク負荷軽減のため {minutes:.0f}分 待機します...")
+    def _collect_tasks(self) -> List[DownloadTask]:
+        tasks = []
         
-        for _ in range(CONFIG.INTERVAL_SECONDS):
-            if self._shutdown_requested:
-                logger.info("🛑 待機をキャンセルして終了します。")
-                break
-            time.sleep(1)
-
-    def run(self) -> None:
-        # 0. 依存チェック
-        SystemHealthChecker.check_dependencies()
-
-        # 1. 前提条件チェック
-        if not CONFIG.LIST_FILE_PATH.exists():
-            logger.error(f"エラー: {CONFIG.LIST_FILE_PATH} が見つかりません。")
-            return
-        
-        if not SystemHealthChecker.is_within_time_window():
-            if FORCE_MODE:
-                logger.info(f"⚠️ FORCEモード: 時間制限（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）を無視して実行します。")
-            else:
-                logger.info(f"🕒 現在は指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため実行しません。")
-                return
-
-        if not SystemHealthChecker.verify_nas_mount():
-            return
-
-        # 2. リスト読み込み（重複排除 & 正規化）
-        try:
-            urls: Set[str] = set()
+        if CONFIG.LIST_FILE_PATH.exists():
             with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
                 for line in f:
-                    clean_line = line.strip()
-                    if clean_line and not clean_line.startswith("#"):
-                        urls.add(clean_line)
-            
-            sorted_urls = sorted(list(urls))
-            
-        except UnicodeDecodeError:
-            logger.error("リストファイルのエンコード読み込みに失敗しました。")
-            return
+                    url = line.strip()
+                    if url and not url.startswith("#") and url not in self.history:
+                        tasks.append(DownloadTask(url, "list"))
+        
+        if CONFIG.LIST_DIR_PATH.exists():
+            for list_file in CONFIG.LIST_DIR_PATH.glob("*.txt"):
+                source_name = list_file.stem
+                try:
+                    with open(list_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            url = line.strip()
+                            if url and not url.startswith("#") and url not in self.history:
+                                tasks.append(DownloadTask(url, source_name))
+                except Exception as e:
+                    logger.error(f"リスト読み込みエラー ({list_file.name}): {e}")
 
-        if not sorted_urls:
+        unique_tasks = {}
+        for t in tasks:
+            if t.url not in unique_tasks:
+                unique_tasks[t.url] = t
+        
+        return list(unique_tasks.values())
+
+    def run(self) -> None:
+        SystemHealthChecker.check_dependencies()
+        
+        if not SystemHealthChecker.is_within_time_window():
+            if FORCE_MODE: logger.info("⚠️ FORCEモード: 時間制限無視")
+            else:
+                logger.info(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了")
+                return
+
+        if not SystemHealthChecker.verify_nas_mount(): return
+
+        tasks = self._collect_tasks()
+        if not tasks:
             logger.info("処理対象のURLがありません。")
             return
 
         logger.info("="*60)
-        logger.info("   🚀 Robust Batch Downloader Started (v1.2.0)")
-        logger.info(f"   Mode: {'FORCE (Limit Ignore)' if FORCE_MODE else 'NORMAL (Scheduled)'}")
-        logger.info(f"   Targets: {len(sorted_urls)} unique URLs")
-        logger.info(f"   Interval: {CONFIG.INTERVAL_SECONDS}s | Save: {CONFIG.BASE_SAVE_DIR}")
+        logger.info("   🚀 Smart Pipeline Downloader (v2.2.0)")
+        logger.info(f"   Schedule: {CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00")
+        logger.info(f"   Tasks: {len(tasks)}")
         logger.info("="*60)
 
-        # 3. バッチ処理実行
-        for i, url in enumerate(sorted_urls):
-            if self._shutdown_requested:
-                break
-                
+        for i, task in enumerate(tasks):
+            if self._shutdown_requested: break
             if not SystemHealthChecker.is_within_time_window() and not FORCE_MODE:
-                logger.info("⏰ 終了時刻になりました。本日の処理を中断します。")
+                logger.info("⏰ 終了時刻により中断")
                 break
 
-            if not url.startswith("http"):
-                continue
-
-            logger.info(f"\n[{i+1}/{len(sorted_urls)}] 処理開始: {url}")
+            logger.info(f"\n[{i+1}/{len(tasks)}] 開始: {task.url}")
             
             try:
-                strategy = self._get_strategy(url)
-                strategy.download(url)
+                strategy = self._get_strategy(task.url)
+                if strategy.download(task):
+                    HistoryManager.add_history(task.url)
             except Exception as e:
-                logger.error(f"予期せぬエラーが発生しました: {e}", exc_info=True)
+                logger.error(f"エラー: {e}")
 
-            if i < len(sorted_urls) - 1:
-                self._wait_interval()
+            if i < len(tasks) - 1:
+                if not self._shutdown_requested:
+                    time.sleep(CONFIG.SHORT_SLEEP_SECONDS)
 
-        logger.info("🎉 本日のスケジュール終了")
+        logger.info("🎉 全処理終了")
 
 if __name__ == "__main__":
-    downloader = BatchDownloader()
-    downloader.run()
+    BatchDownloader().run()
