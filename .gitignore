@@ -36,7 +36,11 @@ assets/salary_images/
 *.jpg
 *.png
 *.pdf
+# すべての .txt を除外
 *.txt
+
+# ただし requirements.txt は含める
+!requirements.txt
 
 *.zip
 *.mp3
