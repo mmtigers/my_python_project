@@ -36,8 +36,8 @@ assets/salary_images/
 *.jpg
 *.png
 *.pdf
-# *.txt
-list.txt
+*.txt
+
 *.zip
 *.mp3
 *.json
