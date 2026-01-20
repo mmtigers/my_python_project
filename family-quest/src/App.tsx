@@ -238,18 +238,18 @@ function App() {
               />
             )}
 
-            <div className="flex gap-2 mb-4 bg-white p-2 rounded-xl shadow-sm sticky top-16 z-10">
+            <div className="flex gap-2 mb-4 bg-black p-2 rounded-lg border-2 border-white shadow-lg sticky top-16 z-10">
               {/* タブボタン：変更なし */}
-              <button onClick={() => setActiveTab('quest')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button onClick={() => setActiveTab('quest')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Sword size={20} className="mb-1" /> クエスト
               </button>
-              <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <ShoppingBag size={20} className="mb-1" /> ごほうび
               </button>
-              <button onClick={() => setActiveTab('equip')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button onClick={() => setActiveTab('equip')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Shirt size={20} className="mb-1" /> そうび
               </button>
-              <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+              <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Backpack size={20} className="mb-1" /> もちもの
               </button>
             </div>
@@ -267,9 +267,7 @@ function App() {
 
               {activeTab === 'shop' && (
                 <div className="animate-slide-in-right">
-                  <div className="bg-orange-50 p-3 rounded-lg mb-4 text-center text-xs text-orange-600 border border-orange-100">
-                    たまったゴールドで ごほうびをゲットしよう！
-                  </div>
+
                   <RewardList
                     rewards={rewards}
                     userGold={currentUser.gold}
@@ -280,9 +278,7 @@ function App() {
 
               {activeTab === 'equip' && (
                 <div className="animate-slide-in-right">
-                  <div className="bg-green-50 p-3 rounded-lg mb-4 text-center text-xs text-green-600 border border-green-100">
-                    つよいそうびで ボスをたおそう！
-                  </div>
+
                   <EquipmentShop
                     equipments={equipments}
                     ownedEquipments={ownedEquipments}
@@ -295,9 +291,7 @@ function App() {
 
               {activeTab === 'inventory' && (
                 <div className="animate-slide-in-right">
-                  <div className="bg-yellow-50 p-3 rounded-lg mb-4 text-center text-xs text-yellow-700 border border-yellow-100">
-                    手に入れたチケットは ここからつかえるよ！
-                  </div>
+
                   <InventoryList userId={currentUser.user_id} />
                 </div>
               )}
