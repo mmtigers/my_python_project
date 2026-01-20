@@ -18,6 +18,7 @@ import common
 import config
 import game_logic
 import sound_manager
+from services import notification_service
 
 # import quest_data with fallback
 try:
@@ -728,7 +729,6 @@ class ShopService:
 class InventoryService:
     def get_user_inventory(self, user_id: str) -> List[dict]:
         with common.get_db_cursor() as cur:
-            # マスタ情報と結合して取得
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
                        rm.title, rm.icon_key as icon, rm.category
@@ -741,23 +741,78 @@ class InventoryService:
             return [dict(row) for row in rows]
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
-        """子供がアイテムを使用する（申請状態にする）"""
+        """子供がアイテムを使用する（申請 or 即時使用）"""
         with common.get_db_cursor(commit=True) as cur:
-            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
+            sql = """
+                SELECT ui.*, rm.title, qu.name as user_name
+                FROM user_inventory ui
+                JOIN reward_master rm ON ui.reward_id = rm.reward_id
+                JOIN quest_users qu ON ui.user_id = qu.user_id
+                WHERE ui.id = ?
+            """
+            item = cur.execute(sql, (inventory_id,)).fetchone()
+
             if not item: raise HTTPException(404, "Item not found")
             if item['user_id'] != user_id: raise HTTPException(403, "Not your item")
             if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
 
-            cur.execute("""
-                UPDATE user_inventory 
-                SET status = 'pending', used_at = ? 
-                WHERE id = ?
-            """, (common.get_now_iso(), inventory_id))
+            # 承認フローが有効かどうか
+            if config.ENABLE_APPROVAL_FLOW:
+                cur.execute("""
+                    UPDATE user_inventory 
+                    SET status = 'pending', used_at = ? 
+                    WHERE id = ?
+                """, (common.get_now_iso(), inventory_id))
+                
+                # 通知送信
+                self._send_approval_request(item)
+
+                sound_manager.play("select")
+                
+                # ★修正②: 誰に承認を求めるかメッセージを分岐
+                if user_id == 'dad':
+                    msg = "使いました！ママ(はるな)に承認してもらってね"
+                elif user_id == 'mom':
+                    msg = "使いました！パパ(まさひろ)に承認してもらってね"
+                else:
+                    msg = "使いました！パパ・ママに承認してもらってね"
+
+                return {"status": "pending", "message": msg}
             
-            # 通知用サウンド再生などはここで行う
-            sound_manager.play("select") 
-            
-            return {"status": "pending", "message": "使いました！パパ・ママに承認してもらってね"}
+            else:
+                # 承認フロー無効 (即時使用)
+                cur.execute("""
+                    UPDATE user_inventory 
+                    SET status = 'consumed', used_at = ? 
+                    WHERE id = ?
+                """, (common.get_now_iso(), inventory_id))
+
+                msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
+                notification_service.send_push(
+                    user_id=config.LINE_USER_ID, 
+                    messages=[{"type": "text", "text": msg}],
+                    priority="normal"
+                )
+
+                sound_manager.play("quest_clear")
+                return {"status": "consumed", "message": "アイテムを使いました！"}
+    
+    def _send_approval_request(self, item):
+        """承認依頼通知を送る処理"""
+        user_name = item['user_name']
+        item_title = item['title']
+        
+        # 宛先判定: 基本はLINEグループ(両親)へ。設定がなければ管理者個人へ。
+        # ※「父→母」「母→父」などの細かい出し分けも、グループに送れば両方が見られるため確実です。
+        dest_line_id = config.LINE_PARENTS_GROUP_ID or config.LINE_USER_ID
+        
+        msg_text = f"【承認依頼】\n{user_name}が「{item_title}」を使いたがっています！\nアプリの「もちもの」タブまたは承認リストから承認してください。"
+        
+        notification_service.send_push(
+            user_id=dest_line_id,
+            messages=[{"type": "text", "text": msg_text}],
+            priority="high" # ★重要通知: 本番環境ならLINEに飛びます
+        )
 
     def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
         """親が使用を承認する（消費済みにする）"""

@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
-import { Sword, Shirt, ShoppingBag } from 'lucide-react';
+import { useState } from 'react';
+import { Sword, Shirt, ShoppingBag, Backpack } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
 import AdminDashboard from './features/admin/components/AdminDashboard';
-import { ShopContainer } from './features/shop/components/ShopContainer';
+import RewardList from './features/shop/components/RewardList';
+import { InventoryList } from './features/shop/components/InventoryList';
 
-import { User, Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
+import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
 // UI Components
 import LevelUpModal from './components/ui/LevelUpModal';
@@ -32,310 +33,203 @@ const ConfirmModal = ({
   onConfirm: () => void,
   onCancel: () => void
 }) => {
-  if (!target) return null;
-  const isCancel = mode === 'cancel';
-  const isPurchase = mode === 'purchase';
-  const isEquipBuy = mode === 'equip_buy';
+  if (!mode || !target) return null;
 
-  let title = '確認';
-  let message: React.ReactNode = '';
-  let confirmBtnVariant: 'primary' | 'danger' | 'secondary' = 'primary';
-  let confirmBtnText = '実行する';
-
-  if (isCancel) {
-    title = '行動の取り消し';
-    message = (
-      <>
-        「{target.quest_title || target.title}」<br />
-        を取り消しますか？<br />
-        <span className="text-xs text-gray-400 mt-2 block">
-          (獲得した経験値やゴールドは没収されます)
-        </span>
-      </>
-    );
-    confirmBtnText = '取り消す';
-    confirmBtnVariant = 'danger';
-  } else if (isPurchase) {
-    title = '購入の確認';
-    const cost = target.cost_gold || target.cost;
-    message = (
-      <>
-        「{target.title}」<br />
-        （{cost} G）を購入しますか？
-      </>
-    );
-    confirmBtnText = 'はい';
-  } else if (isEquipBuy) {
-    title = '装備の購入';
-    message = (
-      <>
-        「{target.name}」<br />
-        （{target.cost} G）を購入しますか？
-      </>
-    );
-    confirmBtnText = '買う！';
-  }
+  const messages = {
+    cancel: { title: 'クエストをやめる', text: `「${target.quest_title}」をやめますか？\n（ペナルティはありません）` },
+    purchase: { title: 'アイテム購入', text: `「${target.title}」を ${target.cost_gold}G で買いますか？` },
+    equip_buy: { title: '装備の購入', text: `「${target.name}」を ${target.cost}G で買いますか？` },
+    complete: { title: 'クエスト完了', text: `「${target.title}」を完了にしますか？` },
+  };
+  const msg = messages[mode];
 
   return (
-    <Modal isOpen={true} onClose={onCancel} title={title}>
-      <div className="text-center mb-6 leading-relaxed font-bold">
-        {message}
-      </div>
-      <div className="flex gap-4 justify-center">
-        <Button onClick={onCancel} variant="secondary" className="flex-1">
-          {isPurchase || isEquipBuy ? 'いいえ' : 'やめる'}
-        </Button>
-        <Button onClick={onConfirm} variant={confirmBtnVariant} className="flex-1">
-          {confirmBtnText}
-        </Button>
+    <Modal isOpen={true} onClose={onCancel} title={msg.title}>
+      <div className="p-4">
+        <p className="whitespace-pre-wrap text-center mb-6">{msg.text}</p>
+        <div className="flex gap-4 justify-center">
+          <Button variant="secondary" onClick={onCancel}>キャンセル</Button>
+          <Button variant="primary" onClick={onConfirm}>はい</Button>
+        </div>
       </div>
     </Modal>
   );
 };
 
-export default function App() {
-  const [viewMode, setViewMode] = useState<'user' | 'party' | 'familyLog'>('user');
-  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip'>('quest');
-  const [currentUserIdx, setCurrentUserIdx] = useState(0);
-  const [levelUpInfo, setLevelUpInfo] = useState<any>(null);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-
-  const [modalMode, setModalMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | null>(null);
-  const [targetHistory, setTargetHistory] = useState<QuestHistory | null>(null);
-  const [targetItem, setTargetItem] = useState<any>(null);
-  const [messageModal, setMessageModal] = useState<{ title: string, message: string, icon?: string } | null>(null);
-
-  const [battleEffect, setBattleEffect] = useState<BossEffect | null>(null);
-
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
-  const [tapCount, setTapCount] = useState(0);
-
+function App() {
   const { play } = useSound();
+  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip' | 'inventory'>('quest');
+  const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party'>('main');
+  const [currentUserIdx, setCurrentUserIdx] = useState(0);
+
+  // モーダル状態
+  const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<any>(null);
+
+  // 結果表示用
+  const [levelUpInfo, setLevelUpInfo] = useState<any>(null);
+  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error' } | null>(null);
+  const [bossEffect, setBossEffect] = useState<BossEffect | null>(null);
+
+  // アバターアップロード
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+
+  const handleLevelUp = (info: any) => {
+    setLevelUpInfo(info);
+  };
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
-    equipments, ownedEquipments, familyStats, chronicle, isLoading,
-    boss,
-    adminUpdateBoss,
-    completeQuest, approveQuest, rejectQuest, cancelQuest,
-    buyReward, buyEquipment, changeEquipment, refreshData
-  } = useGameData((info: any) => setLevelUpInfo(info));
+    equipments, ownedEquipments, familyStats, chronicle, boss,
+    isLoading,
+    completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward, buyEquipment, changeEquipment,
+    refreshData, adminUpdateBoss
+  } = useGameData(handleLevelUp);
 
-  // 隠しコマンド判定
-  const handleHeaderTitleClick = () => {
-    const newCount = tapCount + 1;
-    setTapCount(newCount);
-    if (newCount >= 5) {
-      setIsAdminOpen(true);
-      setTapCount(0);
-    }
-    // 2秒操作がなければリセット
-    setTimeout(() => setTapCount(0), 2000);
-  };
+  const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
 
-  const currentUser = users?.[currentUserIdx] || INITIAL_USERS?.[0] || {};
-  const isParent = ['dad', 'mom'].includes(currentUser?.user_id);
-
-  const handleUserSwitch = (idx: number) => {
-    setViewMode('user');
+  // --- Handlers ---
+  const handleUserChange = (idx: number) => {
     setCurrentUserIdx(idx);
+    // ★修正③: ユーザーアイコンを押したら必ずメイン画面(User View)に戻す
+    setViewMode('main');
+    play('tap');
   };
 
-  const handleQuestClick = async (quest: Quest) => {
-    const qId = quest.quest_id || quest.id;
-    let isInfinite = false;
-    if (typeof quest._isInfinite !== 'undefined') {
-      isInfinite = quest._isInfinite;
+  const handleQuestClick = (q: Quest | QuestHistory, isHistory: boolean) => {
+    if (isHistory) {
+      setConfirmTarget(q);
+      setConfirmMode('cancel');
     } else {
-      const type = quest.quest_type || quest.type;
-      isInfinite = (type === 'infinite');
+      setConfirmTarget(q);
+      setConfirmMode('complete');
     }
+    play('select');
+  };
 
-    const isCompleted = completedQuests.some(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
-    const isPending = pendingQuests.some(pq => pq.user_id === currentUser?.user_id && pq.quest_id === qId);
+  const handleBuyReward = (r: Reward) => {
+    setConfirmTarget(r);
+    setConfirmMode('purchase');
+    play('select');
+  };
 
-    if (isPending) {
-      setMessageModal({ title: "確認中", message: "親の承認待ちです", icon: "⏳" });
-      return;
-    }
+  const handleBuyEquipment = (e: Equipment) => {
+    setConfirmTarget(e);
+    setConfirmMode('equip_buy');
+    play('select');
+  };
 
-    if (isCompleted && !isInfinite) {
-      const historyItem = completedQuests.find(cq => cq.user_id === currentUser?.user_id && cq.quest_id === qId);
-      if (historyItem) {
-        setTargetHistory(historyItem);
-        setModalMode('cancel');
-      }
-      return;
-    }
-
-    const result = await completeQuest(currentUser, quest);
-
-    if (!result.success) {
-      if (result.reason === 'pending') {
-        setMessageModal({ title: "確認中", message: "承認されるまでお待ちください", icon: "⏳" });
-      } else {
-        console.error("Quest completion failed");
-      }
-    } else {
-      if (result.bossEffect) {
-        setBattleEffect(result.bossEffect);
-      }
-
-      if (result.earnedMedals > 0) {
-        play('medal');
-        setMessageModal({
-          title: "ラッキー！！",
-          message: "ちいさなメダル を見つけた！",
-          icon: "🏅"
-        });
+  const handleEquip = async (e: Equipment) => {
+    if (confirm(`「${e.name}」を装備しますか？`)) {
+      const res = await changeEquipment(currentUser, e);
+      if (res.success) {
+        setMessageData({ title: "装備変更", text: "装備を変更しました！", type: "success" });
+        play('select');
       }
     }
   };
 
-  const handleModalConfirm = async () => {
-    if (modalMode === 'cancel' && targetHistory) {
-      await cancelQuest(currentUser, targetHistory);
-    }
-    else if (modalMode === 'purchase' && targetItem) {
-      const result = await buyReward(currentUser, targetItem);
-      if (result.success && result.reward) {
+  // --- Confirm Execution ---
+  const executeConfirm = async () => {
+    if (!confirmMode || !confirmTarget) return;
+
+    let res: any = { success: false };
+
+    if (confirmMode === 'complete') {
+      res = await completeQuest(currentUser, confirmTarget);
+      if (res.success) {
+        if (res.status === 'pending') {
+          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
+        } else {
+          if (res.bossEffect) setBossEffect(res.bossEffect);
+        }
+      }
+    } else if (confirmMode === 'cancel') {
+      res = await cancelQuest(currentUser, confirmTarget);
+    } else if (confirmMode === 'purchase') {
+      res = await buyReward(currentUser, confirmTarget);
+      if (res.success) {
+        setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
         play('medal');
-        setMessageModal({
-          title: "お買い上げ！",
-          message: `${result.reward.title} を\n手に入れた！`,
-          icon: result.reward.icon || '🎁'
-        });
-      } else if (result.reason === 'gold') {
-        setMessageModal({ title: "資金不足", message: "ゴールドが足りません！", icon: "💸" });
+      }
+    } else if (confirmMode === 'equip_buy') {
+      res = await buyEquipment(currentUser, confirmTarget);
+      if (res.success) {
+        setMessageData({ title: "購入完了", text: "装備を手に入れました！", type: "success" });
+        play('medal');
       }
     }
-    else if (modalMode === 'equip_buy' && targetItem) {
-      const result = await buyEquipment(currentUser, targetItem);
-      if (result.success && result.item) {
-        play('medal');
-        setMessageModal({
-          title: "装備ゲット！",
-          message: `${result.item.name} を\n手に入れた！`,
-          icon: "⚔️"
-        });
-      } else if (result.reason === 'gold') {
-        setMessageModal({ title: "資金不足", message: "ゴールドが足りません！", icon: "💸" });
-      }
+
+    if (!res.success && res.reason) {
+      const reasons: { [key: string]: string } = {
+        gold: "お金が足りません！",
+        pending: "すでに申請中です",
+        permission: "権限がありません",
+        error: "エラーが発生しました"
+      };
+      setMessageData({ title: "エラー", text: reasons[res.reason] || "失敗しました", type: "error" });
+      play('cancel');
     }
 
-    setModalMode(null);
-    setTargetHistory(null);
-    setTargetItem(null);
+    setConfirmMode(null);
+    setConfirmTarget(null);
   };
 
-  const handleModalCancel = () => {
-    setModalMode(null);
-    setTargetHistory(null);
-    setTargetItem(null);
-  };
-
-  const handleApprove = async (historyItem: QuestHistory) => {
-    const res = await approveQuest(currentUser, historyItem);
+  // 承認・却下ハンドラ
+  const handleApprove = async (history: QuestHistory) => {
+    const res = await approveQuest(currentUser, history);
     if (res.success) {
       play('approve');
-      if (res.bossEffect) {
-        setBattleEffect(res.bossEffect);
-      }
+      if (res.bossEffect) setBossEffect(res.bossEffect);
     }
   };
 
-  const handleReject = async (historyItem: QuestHistory) => {
-    await rejectQuest(currentUser, historyItem);
+  const handleReject = async (history: QuestHistory) => {
+    if (confirm("本当に却下しますか？")) {
+      const res = await rejectQuest(currentUser, history);
+      if (res.success) play('cancel');
+    }
   };
 
-  const handleBuyReward = (reward: Reward) => {
-    setTargetItem(reward);
-    setModalMode('purchase');
+  const getHeaderViewMode = () => {
+    if (viewMode === 'familyLog') return 'familyLog';
+    if (viewMode === 'party') return 'party';
+    return 'user';
   };
 
-  const handleBuyEquipment = (item: Equipment) => {
-    setTargetItem(item);
-    setModalMode('equip_buy');
-  };
-
-  const handleEquip = async (item: Equipment) => {
-    const res = await changeEquipment(currentUser, item);
-    if (res.success) play('tap');
-  };
-
-  if (isLoading) return <div className="bg-black text-white h-screen flex items-center justify-center font-mono animate-pulse">LOADING ADVENTURE...</div>;
+  if (isLoading) return <div className="p-10 text-center">Loading Family Quest...</div>;
 
   return (
-    <div className="min-h-screen bg-black font-mono text-white pb-8 select-none relative overflow-hidden">
-
-      {isAdminOpen && (
-        <AdminDashboard
-          boss={boss}
-          onUpdate={adminUpdateBoss}
-          onClose={() => setIsAdminOpen(false)}
-        />
-      )}
-
-      <BattleEffect
-        effect={battleEffect}
-        boss={boss}
-        onClose={() => setBattleEffect(null)}
+    <div className="min-h-screen bg-gray-900 pb-20 font-sans text-gray-100">
+      <Header
+        users={users}
+        currentUserIdx={currentUserIdx}
+        viewMode={getHeaderViewMode()}
+        onUserSwitch={handleUserChange}
+        onPartySwitch={() => { setViewMode('party'); play('select'); }}
+        onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
       />
 
-      <LevelUpModal info={levelUpInfo} onClose={() => setLevelUpInfo(null)} />
-
-      {messageModal && (
-        <MessageModal
-          title={messageModal.title}
-          message={messageModal.message}
-          icon={messageModal.icon}
-          onClose={() => setMessageModal(null)}
-        />
-      )}
-
-      {editingUser && (
-        <AvatarUploader
-          user={editingUser}
-          onClose={() => setEditingUser(null)}
-          onUploadComplete={() => { if (refreshData) refreshData(); }}
-        />
-      )}
-
-      {modalMode && (
-        <ConfirmModal
-          mode={modalMode}
-          target={(modalMode === 'purchase' || modalMode === 'equip_buy') ? targetItem : targetHistory}
-          onConfirm={handleModalConfirm}
-          onCancel={handleModalCancel}
-        />
-      )}
-
-      {/* ★修正: 隠しボタンの範囲を「中央のタイトル部分」のみに限定 (w-48 = 約192px) */}
-      {/* これにより左右のボタン（プレイヤー切り替え等）への干渉を防ぎます */}
-      <div className="relative z-10">
-        <div
-          className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-16 z-50"
-          onClick={handleHeaderTitleClick}
-        ></div>
-        <Header
-          users={users}
-          currentUserIdx={currentUserIdx}
-          viewMode={viewMode}
-          onUserSwitch={handleUserSwitch}
-          onPartySwitch={() => setViewMode('party')}
-          onLogSwitch={() => setViewMode('familyLog')}
-        />
-      </div>
+      {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
 
       <div className="p-4 space-y-4 w-full max-w-md md:max-w-5xl mx-auto transition-all duration-300">
-        {viewMode === 'user' && (
+
+        {viewMode === 'admin' && (
+          <AdminDashboard
+            boss={boss}
+            onUpdate={adminUpdateBoss}
+            onClose={() => setViewMode('main')}
+          />
+        )}
+
+        {viewMode === 'main' && (
           <>
             <UserStatusCard
               user={currentUser}
-              onAvatarClick={(user: User) => setEditingUser(user)}
+              onAvatarClick={() => setIsAvatarModalOpen(true)}
             />
 
-            {isParent && pendingQuests.length > 0 && activeTab === 'quest' && (
+            {(currentUser.user_id === 'dad' || currentUser.user_id === 'mom') && (
               <ApprovalList
                 pendingQuests={pendingQuests}
                 users={users}
@@ -344,58 +238,68 @@ export default function App() {
               />
             )}
 
-            <div className="grid grid-cols-3 gap-1 text-center text-xs font-bold">
-              <button
-                onClick={() => setActiveTab('quest')}
-                className={`p-2 rounded ${activeTab === 'quest' ? 'bg-yellow-600 text-black' : 'bg-gray-800 text-gray-400'}`}
-              >
-                <Sword size={16} className="mx-auto mb-1" />
-                クエスト
+            <div className="flex gap-2 mb-4 bg-white p-2 rounded-xl shadow-sm sticky top-16 z-10">
+              {/* タブボタン：変更なし */}
+              <button onClick={() => setActiveTab('quest')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <Sword size={20} className="mb-1" /> クエスト
               </button>
-              <button
-                onClick={() => setActiveTab('shop')}
-                className={`p-2 rounded ${activeTab === 'shop' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-              >
-                <ShoppingBag size={16} className="mx-auto mb-1" />
-                ごほうび
+              <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <ShoppingBag size={20} className="mb-1" /> ごほうび
               </button>
-              <button
-                onClick={() => setActiveTab('equip')}
-                className={`p-2 rounded ${activeTab === 'equip' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400'}`}
-              >
-                <Shirt size={16} className="mx-auto mb-1" />
-                そうび
+              <button onClick={() => setActiveTab('equip')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <Shirt size={20} className="mb-1" /> そうび
+              </button>
+              <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-50'}`}>
+                <Backpack size={20} className="mb-1" /> もちもの
               </button>
             </div>
 
-            <div className="min-h-[300px]">
+            <div className="min-h-[300px] animate-fade-in">
               {activeTab === 'quest' && (
                 <QuestList
                   quests={quests}
                   completedQuests={completedQuests}
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
-                  onQuestClick={handleQuestClick}
+                  onQuestClick={(q) => handleQuestClick(q, false)}
                 />
               )}
 
               {activeTab === 'shop' && (
-                <ShopContainer
-                  userId={currentUser.user_id} // ★ここを追加
-                  rewards={rewards}
-                  userGold={currentUser.gold}
-                  onBuy={handleBuyReward}
-                />
+                <div className="animate-slide-in-right">
+                  <div className="bg-orange-50 p-3 rounded-lg mb-4 text-center text-xs text-orange-600 border border-orange-100">
+                    たまったゴールドで ごほうびをゲットしよう！
+                  </div>
+                  <RewardList
+                    rewards={rewards}
+                    userGold={currentUser.gold}
+                    onBuy={handleBuyReward}
+                  />
+                </div>
               )}
 
               {activeTab === 'equip' && (
-                <EquipmentShop
-                  equipments={equipments}
-                  ownedEquipments={ownedEquipments}
-                  currentUser={currentUser}
-                  onBuy={handleBuyEquipment}
-                  onEquip={handleEquip}
-                />
+                <div className="animate-slide-in-right">
+                  <div className="bg-green-50 p-3 rounded-lg mb-4 text-center text-xs text-green-600 border border-green-100">
+                    つよいそうびで ボスをたおそう！
+                  </div>
+                  <EquipmentShop
+                    equipments={equipments}
+                    ownedEquipments={ownedEquipments}
+                    currentUser={currentUser}
+                    onBuy={handleBuyEquipment}
+                    onEquip={handleEquip}
+                  />
+                </div>
+              )}
+
+              {activeTab === 'inventory' && (
+                <div className="animate-slide-in-right">
+                  <div className="bg-yellow-50 p-3 rounded-lg mb-4 text-center text-xs text-yellow-700 border border-yellow-100">
+                    手に入れたチケットは ここからつかえるよ！
+                  </div>
+                  <InventoryList userId={currentUser.user_id} />
+                </div>
               )}
             </div>
           </>
@@ -406,8 +310,55 @@ export default function App() {
         )}
 
         {viewMode === 'party' && (
-          <FamilyParty users={users} ownedEquipments={ownedEquipments} boss={boss} />)}
+          <FamilyParty users={users} ownedEquipments={ownedEquipments} boss={boss} />
+        )}
+
       </div>
+
+      <ConfirmModal
+        mode={confirmMode}
+        target={confirmTarget}
+        onConfirm={executeConfirm}
+        onCancel={() => { setConfirmMode(null); play('cancel'); }}
+      />
+
+      <LevelUpModal
+        info={levelUpInfo}
+        onClose={() => setLevelUpInfo(null)}
+      />
+
+      {messageData && (
+        <MessageModal
+          title={messageData.title}
+          message={messageData.text}
+          onClose={() => setMessageData(null)}
+        />
+      )}
+
+      {isAvatarModalOpen && (
+        <AvatarUploader
+          user={currentUser}
+          onClose={() => setIsAvatarModalOpen(false)}
+          onUploadComplete={() => {
+            refreshData();
+            setMessageData({ title: "変更完了", text: "アバターを変更しました！", type: "success" });
+          }}
+        />
+      )}
+
+      {bossEffect && (
+        <BattleEffect
+          effect={bossEffect}
+          boss={boss}
+          onClose={() => {
+            setBossEffect(null);
+            refreshData();
+          }}
+        />
+      )}
+
     </div>
   );
 }
+
+export default App;
