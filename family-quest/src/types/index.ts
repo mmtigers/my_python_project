@@ -126,3 +126,26 @@ export interface BossEffect {
     isNewDefeat: boolean;
     isCritical?: boolean;
 }
+
+// ギルド依頼 (Bounty)
+export interface Bounty {
+    id: number;
+    title: string;
+    description?: string;
+    reward_gold: number;
+
+    target_type: 'ALL' | 'ADULTS' | 'CHILDREN' | 'USER';
+    target_user_id?: string;
+
+    status: 'OPEN' | 'TAKEN' | 'PENDING_APPROVAL' | 'COMPLETED' | 'CANCELED';
+
+    created_by: string;   // 依頼主
+    assignee_id?: string; // 受注者
+
+    created_at: string;
+
+    // UI制御用フラグ (Backendから付与される)
+    is_mine: boolean;
+    is_assigned_to_me: boolean;
+    can_accept: boolean;
+}

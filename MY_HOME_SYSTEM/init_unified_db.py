@@ -388,6 +388,39 @@ def init_db():
         ''')
 
 
+        # --- Guild Bounty System (Guild Board) ---
+        # 家族間の突発的な依頼を管理する掲示板テーブル
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS bounties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,          -- 依頼タイトル
+                description TEXT,             -- 詳細（牛乳の種類、掃除の場所など）
+                reward_gold INTEGER DEFAULT 0, -- 報酬ゴールド
+                reward_exp INTEGER DEFAULT 0,  -- 報酬経験値（子供向けに設定する場合など）
+                
+                -- ターゲット設定
+                target_type TEXT NOT NULL,    -- 'ALL', 'ADULTS', 'CHILDREN', 'USER'
+                target_user_id TEXT,          -- target_type='USER' の場合の指定ID
+                
+                -- 状態管理
+                status TEXT DEFAULT 'OPEN',   -- OPEN, TAKEN, PENDING_APPROVAL, COMPLETED, CANCELED
+                
+                -- アクター
+                created_by TEXT NOT NULL,     -- 依頼者（user_id）
+                assignee_id TEXT,             -- 受注者（user_id）
+                
+                -- タイムスタンプ
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME,
+                completed_at DATETIME
+            )
+        ''')
+
+
+
+
+
     logger.info("✅ 全テーブルの準備が完了しました。")
 
 if __name__ == "__main__":

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Sword, Shirt, ShoppingBag, Backpack } from 'lucide-react';
+import { Sword, Shirt, ShoppingBag, Backpack, Scroll } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
 import AdminDashboard from './features/admin/components/AdminDashboard';
 import RewardList from './features/shop/components/RewardList';
 import { InventoryList } from './features/shop/components/InventoryList';
+import { GuildBoard } from './features/guild/components/GuildBoard';
 
 import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
@@ -17,6 +18,7 @@ import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
 
+
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
@@ -24,6 +26,7 @@ import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
 import BattleEffect from './components/ui/BattleEffect';
+
 
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
@@ -58,7 +61,7 @@ const ConfirmModal = ({
 
 function App() {
   const { play } = useSound();
-  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip' | 'inventory'>('quest');
+  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip' | 'inventory' | 'guild'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
@@ -243,6 +246,7 @@ function App() {
               <button onClick={() => setActiveTab('quest')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Sword size={20} className="mb-1" /> クエスト
               </button>
+
               <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <ShoppingBag size={20} className="mb-1" /> ごほうび
               </button>
@@ -251,6 +255,14 @@ function App() {
               </button>
               <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Backpack size={20} className="mb-1" /> もちもの
+              </button>
+              {/* ★追加: ギルドタブ */}
+              <button
+                onClick={() => { play('tap'); setActiveTab('guild'); }} // cursor -> tap に変更
+                className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'guild' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'
+                  }`}
+              >
+                <Scroll size={20} className="mb-1" /> ギルド
               </button>
             </div>
 
@@ -263,6 +275,14 @@ function App() {
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(q, false)}
                 />
+              )}
+
+              {/* ★追加: ギルド画面の表示 */}
+              {activeTab === 'guild' && (
+                <div className="animate-fade-in">
+                  {/* userId プロパティを追加 */}
+                  <GuildBoard userId={currentUser.user_id} />
+                </div>
               )}
 
               {activeTab === 'shop' && (
