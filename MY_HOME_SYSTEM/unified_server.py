@@ -48,6 +48,7 @@ from services import switchbot_service as sb_tool
 from handlers import line_logic
 from services import backup_service as backup_database
 from routers import quest_router
+from routers import bounty_router
 
 # Logger Setup
 # logger = common.setup_logging("server") <-- 変更
@@ -238,6 +239,7 @@ handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
 
 # Router
 app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
+app.include_router(bounty_router.router, prefix="/api/bounties", tags=["Bounties"]) # ★追加
 
 # Middleware
 app.add_middleware(

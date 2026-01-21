@@ -65,3 +65,29 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient(BASE_URL);
+
+// ▼▼▼ Guild Bounty API (修正版) ▼▼▼
+// 既存の apiClient インスタンスを使うことで、BASE_URLの指定ミスを防ぎ、エラー処理を統一します
+
+export const fetchBounties = async (userId) => {
+  return apiClient.get(`api/bounties/list?user_id=${userId}`);
+};
+
+export const createBounty = async (bountyData) => {
+  return apiClient.post('api/bounties/create', bountyData);
+};
+
+export const acceptBounty = async (bountyId, userId) => {
+  // postメソッドの第2引数に body を渡す
+  return apiClient.post(`api/bounties/${bountyId}/accept`, { user_id: userId });
+};
+
+export const completeBounty = async (bountyId, userId) => {
+  // POST /api/bounties/{id}/complete
+  return apiClient.post(`api/bounties/${bountyId}/complete`, { user_id: userId });
+};
+
+export const approveBounty = async (bountyId, userId) => {
+  // POST /api/bounties/{id}/approve
+  return apiClient.post(`api/bounties/${bountyId}/approve`, { user_id: userId });
+};

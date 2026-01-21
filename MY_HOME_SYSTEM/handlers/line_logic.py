@@ -23,7 +23,11 @@ from linebot.v3.webhooks import MessageEvent, PostbackEvent
 # ▲▲▲ ▲▲▲
 
 # Local Modules
-from core.logger import logger
+# ▼▼▼ 修正箇所: ロガーの初期化方法を変更 ▼▼▼
+# from core.logger import logger  <-- 削除
+from core.logger import setup_logging
+logger = setup_logging("line_logic")
+# ▲▲▲ ▲▲▲
 from core.utils import get_now_iso, get_today_date_str
 from core.database import save_log_async
 import handlers.ai_logic as ai_logic
