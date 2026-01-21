@@ -18,10 +18,22 @@ from models.switchbot import SwitchBotWebhookBody
 from fastapi.exceptions import RequestValidationError
 from models.line import LineWebhookBody
 
-# Local Modules
-from linebot import LineBotApi, WebhookHandler
-from linebot.exceptions import InvalidSignatureError
-from linebot.models import MessageEvent, TextMessage, PostbackEvent
+# ▼▼▼ LINE BOT SDK v3 Imports ▼▼▼
+from linebot.v3 import WebhookHandler
+from linebot.v3.exceptions import InvalidSignatureError
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    ReplyMessageRequest,
+    TextMessage, # 送信メッセージ用モデル
+)
+from linebot.v3.webhooks import (
+    MessageEvent,
+    TextMessageContent, # 受信メッセージ用モデル (旧: TextMessage)
+    PostbackEvent
+)
+# ▲▲▲ ▲▲▲
 
 import config
 # import common  <-- 廃止
@@ -218,8 +230,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": error_detail, "body": "Invalid data format"}
     )
 
+# ▼▼▼ LINE BOT SETUP (v3 Refactoring) ▼▼▼
+# v3では Configuration オブジェクトを使用します
+line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
-line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
+# ▲▲▲ ▲▲▲
 
 # Router
 app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
@@ -255,17 +270,29 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)):
         raise HTTPException(status_code=400)
     return "OK"
 
-@handler.add(MessageEvent, message=TextMessage)
+# ▼▼▼ イベントハンドラ修正 ▼▼▼
+# TextMessageContent は受信用モデルです
+@handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    try: 
-        line_logic.process_message(event, line_bot_api)
+    # ApiClient をコンテキストマネージャーで使用するのが v3 推奨の実装です
+    try:
+        with ApiClient(line_configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            # 既存のロジックに MessagingApi インスタンスを渡します
+            line_logic.process_message(event, line_bot_api)
     except Exception as e: 
         logger.error(f"メッセージ処理中にエラー発生: {e}")
+        # traceback.print_exc()
 
 @handler.add(PostbackEvent)
 def handle_postback_event(event):
-    from handlers import line_logic
-    line_logic.handle_postback(event, line_bot_api)
+    try:
+        with ApiClient(line_configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_logic.handle_postback(event, line_bot_api)
+    except Exception as e:
+        logger.error(f"Postback処理中にエラー発生: {e}")
+# ▲▲▲ ▲▲▲
 
 
 # --- Endpoints: SwitchBot ---

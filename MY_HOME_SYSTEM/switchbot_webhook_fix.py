@@ -1,46 +1,69 @@
 # MY_HOME_SYSTEM/switchbot_webhook_fix.py
+import sys
+import os
+import traceback
+
+# --- 1. 強制パス設定 (Path Injection) ---
+# このファイルがある場所 (/home/masahiro/develop/MY_HOME_SYSTEM)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# その親ディレクトリ (/home/masahiro/develop)
+PARENT_DIR = os.path.dirname(BASE_DIR)
+
+# Pythonの検索パスの先頭に追加
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+if PARENT_DIR not in sys.path:
+    sys.path.insert(1, PARENT_DIR)
+
+print(f"🔍 DEBUG: Base Dir: {BASE_DIR}")
+
+# --- 2. インポート試行 (Verbose Import) ---
+try:
+    import common
+    import config
+    # servicesフォルダから switchbot_service をインポート
+    from services import switchbot_service as sb_tool
+    print("✅ Module Loaded: switchbot_service")
+except ImportError as e:
+    print("\n❌ IMPORT ERROR DETECTED!")
+    print(f"Reason: {e}")
+    print("--- Detailed Traceback ---")
+    traceback.print_exc()
+    print("--------------------------")
+    sys.exit(1)
+
 import requests
 import time
-import MY_HOME_SYSTEM.switchbot_service as sb_tool
-import common
-import config
-import sys
 
 # ロガー設定
 logger = common.setup_logging("webhook_fix")
 
 def get_ngrok_url_with_retry(max_retries=20, delay=3):
-    """
-    ngrokのURLを取得する。失敗してもリトライする堅牢仕様。
-    """
+    """ngrokのURLを取得する"""
     logger.info("SEARCH: ngrokの起動を確認しています...")
     
     for i in range(max_retries):
         try:
-            # ローカルのngrok管理画面からトンネル情報を取得
             res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=5)
             data = res.json()
             tunnels = data.get("tunnels", [])
             
             for t in tunnels:
                 if t.get("proto") == "https":
-                    # ★追加: 接続先がポート8000 (サーバー) であるか確認
                     addr = t.get("config", {}).get("addr", "")
                     if "8000" in addr:
                         url = t.get("public_url")
                         if url:
-                            logger.info(f"✅ FOUND: サーバー用URLを発見 ({i+1}回目): {url}")
+                            logger.info(f"✅ FOUND: サーバー用URLを発見: {url}")
                             return url
         except Exception:
-            # 接続できない＝まだ起動していないとみなす
             pass
         
-        # まだ見つからない場合
-        sys.stdout.write(f"\r⏳ 待機中... ngrokの準備を待っています ({i+1}/{max_retries})")
+        sys.stdout.write(f"\r⏳ 待機中... ({i+1}/{max_retries})")
         sys.stdout.flush()
         time.sleep(delay)
     
-    print("") # 改行
+    print("") 
     logger.error("❌ TIMEOUT: ngrokのURLが取得できませんでした。")
     return None
 
@@ -52,7 +75,7 @@ def update_switchbot_webhook(base_url):
     headers = sb_tool.create_switchbot_auth_headers()
     
     try:
-        # 1. 現在の設定を確認
+        # 現在の設定を確認
         query = requests.post("https://api.switch-bot.com/v1.1/webhook/queryWebhook", headers=headers, json={"action": "queryUrl"}).json()
         urls = query.get('body', {}).get('urls', [])
         
@@ -66,8 +89,8 @@ def update_switchbot_webhook(base_url):
             requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url})
             time.sleep(1)
 
-        # 2. 新しいURLを登録
-        headers = sb_tool.create_switchbot_auth_headers() # ヘッダー再生成(時間経過対策)
+        # 新しいURLを登録
+        headers = sb_tool.create_switchbot_auth_headers()
         res = requests.post("https://api.switch-bot.com/v1.1/webhook/setupWebhook", headers=headers, json={
             "action": "setupWebhook",
             "url": target_url,
@@ -116,32 +139,16 @@ def update_line_webhook(base_url):
 def fix_all_webhooks():
     logger.info("🚀 Webhook自動修復ツール起動")
     
-    # 1. ngrokのURLを取得 (最大60秒待機)
     base_url = get_ngrok_url_with_retry(max_retries=20, delay=3)
-    
     if not base_url:
-        msg = "😰 **システム起動失敗**\n外部との接続（ngrok）に失敗しました。\nパパに確認してもらってください💦"
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="error")
         sys.exit(1)
 
-    # 2. サービス更新
     sb_result = update_switchbot_webhook(base_url)
     line_result = update_line_webhook(base_url)
 
-    # 3. 結果通知
-    # どちらかが成功していれば、システムとしては「起きた」とみなして良い
     if sb_result or line_result:
-        status_text = []
-        if sb_result: status_text.append("✅ 家電連携 (SwitchBot)")
-        if line_result: status_text.append("✅ LINE Bot")
-        
-        msg_body = "✨ **システム準備OK** ✨\n\n" + "\n".join(status_text) + "\n\n今日も一日見守ります！"
-        # 成功時はDiscordのレポートチャンネルへ
+        msg_body = "✨ **システム準備OK** ✨\nwebhook更新完了"
         common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg_body}], target="discord", channel="report")
-    else:
-        # 両方失敗
-        msg_err = "⚠️ **接続設定エラー**\nURLは取得できましたが、SwitchBot/LINEへの登録に失敗しました。"
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg_err}], target="discord", channel="error")
 
 if __name__ == "__main__":
     fix_all_webhooks()
