@@ -1,50 +1,107 @@
-# HOME_SYSTEM/handlers/line_logic.py
-import common
+# MY_HOME_SYSTEM/handlers/line_logic.py
 import config
-from linebot.models import MessageEvent, TextMessage, PostbackEvent
-from urllib.parse import parse_qsl
-import handlers.ai_logic as ai_logic
+import asyncio
+import json
+import sqlite3
 import datetime
+from urllib.parse import parse_qsl
+
+# ▼▼▼ v3 Imports ▼▼▼
+from linebot.v3.messaging import (
+    MessagingApi,
+    ReplyMessageRequest,
+    PushMessageRequest,
+    TextMessage,
+    FlexMessage,
+    FlexContainer,
+    QuickReply,
+    QuickReplyItem,
+    MessageAction,
+    PostbackAction
+)
+from linebot.v3.webhooks import MessageEvent, PostbackEvent
+# ▲▲▲ ▲▲▲
+
+# Local Modules
+from core.logger import logger
+from core.utils import get_now_iso, get_today_date_str
+from core.database import save_log_async
+import handlers.ai_logic as ai_logic
 from models.line import LinePostbackData, UserInputState, InputMode
 
 # ユーザーの状態管理
 USER_INPUT_STATE = {}
 TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
 
-def get_user_name(event, line_bot_api) -> str:
-    """プロファイル取得（変更なし）"""
+# --- Helper Functions ---
+
+def sync_run(coro):
+    """
+    スレッドプール内で非同期関数(DB保存等)を実行するためのヘルパー。
+    Webhookハンドラは別スレッドで動いているため、asyncio.run()で
+    新しいイベントループを作って実行して完了を待機する。
+    """
     try:
+        return asyncio.run(coro)
+    except Exception as e:
+        logger.error(f"Sync execution error: {e}")
+
+def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):
+    """テキストメッセージ返信のショートカット"""
+    try:
+        # v3では TextMessage オブジェクトを作成して送信
+        msg = TextMessage(text=text, quickReply=quick_reply)
+        api.reply_message(
+            ReplyMessageRequest(
+                replyToken=reply_token,
+                messages=[msg]
+            )
+        )
+    except Exception as e:
+        logger.error(f"Reply Error: {e}")
+
+def get_user_name(event, line_bot_api: MessagingApi) -> str:
+    """プロファイル取得 (v3対応)"""
+    try:
+        user_id = event.source.user_id
         if event.source.type == "group":
-            return line_bot_api.get_group_member_profile(event.source.group_id, event.source.user_id).display_name
+            group_id = event.source.group_id
+            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            return profile.display_name
         elif event.source.type == "user":
-            return line_bot_api.get_profile(event.source.user_id).display_name
+            profile = line_bot_api.get_profile(user_id)
+            return profile.display_name
     except Exception:
         pass
     return "家族のみんな"
 
-def create_quick_reply(items_data: list) -> dict:
-    """QuickReply生成（変更なし）"""
+def create_quick_reply(items_data: list) -> QuickReply:
+    """QuickReply生成 (v3モデル使用)"""
     items = []
     for label, text in items_data:
-        items.append({
-            "type": "action",
-            "action": {"type": "message", "label": label[:20], "text": text}
-        })
-    return {"items": items}
+        # ラベルは最大20文字制限
+        safe_label = str(label)[:20]
+        items.append(QuickReplyItem(
+            action=MessageAction(label=safe_label, text=text)
+        ))
+    return QuickReply(items=items)
 
-def get_quota_text():
-    """今月のメッセージ残数を取得してテキスト化"""
+def get_quota_text(api: MessagingApi):
+    """今月のメッセージ残数を取得 (v3対応)"""
     try:
-        quota = common.get_line_message_quota()
-        if quota and quota.get('remain') is not None:
-            return f"\n(今月の残り: {quota['remain']}通)"
+        quota = api.get_message_quota()
+        if quota and quota.value is not None:
+             # total_usage などのプロパティ名はSDKのバージョンによるが、
+             # 一般的に value (残り) や totalUsage (使用量) が返る
+             return f"\n(当月送信数: {quota.total_usage}通)" 
     except:
         pass
     return ""
 
-# ▼▼▼ 追加: 入力用カルーセルを作成する関数 ▼▼▼
+# --- Logic & UI Generators ---
+
 def create_health_carousel_flex():
-    """詳細入力用カルーセルを作成"""
+    """詳細入力用カルーセルを作成 (v3 FlexContainer変換)"""
     bubbles = []
     styles = config.FAMILY_SETTINGS["styles"]
 
@@ -88,88 +145,118 @@ def create_health_carousel_flex():
         }
         bubbles.append(bubble)
 
-    return {"type": "flex", "altText": "体調入力パネル", "contents": {"type": "carousel", "contents": bubbles}}
+    # 辞書からFlexContainerオブジェクトへ変換
+    return FlexContainer.from_dict({"type": "carousel", "contents": bubbles})
 
-# ▼▼▼ 追加: 今日の記録サマリを取得する関数 ▼▼▼
 def get_daily_health_summary():
-    """今日の記録サマリを取得"""
-    today_str = common.get_today_date_str() # YYYY-MM-DD
+    """今日の記録サマリを取得 (SQLite直接接続版)"""
+    today_str = get_today_date_str() # YYYY-MM-DD
     summary_lines = []
     
-    with common.get_db_cursor() as cur:
-        for name in TARGET_MEMBERS:
+    # common.get_db_cursor の代わりに直接接続
+    try:
+        with sqlite3.connect(config.SQLITE_DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
             
-            # 今日の最新の記録を取得
-            cur.execute(f"""
-                SELECT condition, timestamp FROM {config.SQLITE_TABLE_CHILD}
-                WHERE child_name = ? AND timestamp LIKE ?
-                ORDER BY id DESC LIMIT 1
-            """, (name, f"{today_str}%"))
-            row = cur.fetchone()
-            
-            if row:
-                # 時刻抽出
-                try:
-                    time_str = datetime.datetime.fromisoformat(row["timestamp"]).strftime("%H:%M")
-                except:
-                    time_str = "??:??"
-                status = row["condition"]
-                # 絵文字装飾
-                icon = "✅" if "元気" in status else "⚠️"
-                summary_lines.append(f"{icon} {name}: {status} ({time_str})")
-            else:
-                summary_lines.append(f"❓ {name}: (未記録)")
+            for name in TARGET_MEMBERS:
+                # 今日の最新の記録を取得
+                cur.execute(f"""
+                    SELECT condition, timestamp FROM {config.SQLITE_TABLE_CHILD}
+                    WHERE child_name = ? AND timestamp LIKE ?
+                    ORDER BY id DESC LIMIT 1
+                """, (name, f"{today_str}%"))
+                row = cur.fetchone()
+                
+                if row:
+                    try:
+                        dt = datetime.datetime.fromisoformat(row["timestamp"])
+                        time_str = dt.strftime("%H:%M")
+                    except:
+                        time_str = "??:??"
+                    status = row["condition"]
+                    icon = "✅" if "元気" in status else "⚠️"
+                    summary_lines.append(f"{icon} {name}: {status} ({time_str})")
+                else:
+                    summary_lines.append(f"❓ {name}: (未記録)")
+    except Exception as e:
+        logger.error(f"DB Read Error: {e}")
+        return "（データ取得エラー）"
     
     return "\n".join(summary_lines)
 
-def handle_postback(event, line_bot_api):
+
+# --- Handlers ---
+
+def handle_postback(event, line_bot_api: MessagingApi):
     """Postback処理"""
     try:
         user_id = event.source.user_id
         reply_token = event.reply_token
         user_name = get_user_name(event, line_bot_api)
         
-        # 1. クエリ文字列を辞書に変換
+        # クエリ文字列を解析
         raw_dict = dict(parse_qsl(event.postback.data))
         
-        # 2. Pydanticモデルでバリデーション
         try:
             pb = LinePostbackData(**raw_dict)
         except Exception as e:
-            common.logger.warning(f"⚠️ 不正なポストバック形式を無視: {raw_dict} (Error: {e})")
+            logger.warning(f"⚠️ 不正なポストバック形式: {raw_dict} (Error: {e})")
             return
 
         action = pb.action
         target_name = pb.child
-        val = pb.value
-        quota_text = get_quota_text()
+        # quota_text = get_quota_text(line_bot_api) # 必要なら復活
 
         # === 1. 全員元気 (一括) ===
         if action == "all_genki":
-            timestamp = common.get_now_iso()
+            timestamp = get_now_iso()
             for name in TARGET_MEMBERS:
-                common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                sync_run(save_log_async(config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                    (user_id, user_name, name, "😊 元気いっぱい", timestamp))
+                    (user_id, user_name, name, "😊 元気いっぱい", timestamp)))
             
-            reply_msg = f"✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨\n\n[詳細確認]ボタンで修正できます。{quota_text}"
+            # 完了メッセージと確認ボタン
+            reply_text = "✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨"
+            # v3ではTemplateMessageよりもFlexMessageやAction付きTextが推奨されますが、
+            # 既存のロジックに近い形でボタンを提示する場合、ここではAction付きのFlexまたはQuickReply等で対応。
+            # シンプルにテキスト+QuickReplyで確認ボタンを出す形にします。
+            qr = create_quick_reply([("📊 記録を確認", "action=check_status_trigger")]) # トリガーワードを発火させるか、再度Postbackさせるか
+            # ここではPostbackActionを含むQuickReplyは作れない(QuickReplyはMessage/Camera/Location等)ため、
+            # Flex Messageでボタンを表示します。
             
-            # 確認ボタン付きのメッセージを返す
-            buttons = {
-                "type": "template",
-                "altText": "記録完了",
-                "template": {
-                    "type": "buttons",
-                    "text": reply_msg[:160], # Text limit precaution
-                    "actions": [{"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}]
+            button_flex = {
+                "type": "bubble",
+                "body": {
+                    "type": "box", "layout": "vertical",
+                    "contents": [{"type": "text", "text": reply_text, "wrap": True}]
+                },
+                "footer": {
+                    "type": "box", "layout": "vertical",
+                    "contents": [
+                        {"type": "button", "action": {"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}}
+                    ]
                 }
             }
-            common.send_reply(reply_token, [buttons])
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    replyToken=reply_token,
+                    messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                )
+            )
 
         # === 2. 詳細入力パネル表示 ===
         elif action == "show_health_input":
-            flex_msg = create_health_carousel_flex()
-            common.send_reply(reply_token, [{"type": "text", "text": "気になる方の体調を入力してください👇"}, flex_msg])
+            flex_container = create_health_carousel_flex()
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    replyToken=reply_token,
+                    messages=[
+                        TextMessage(text="気になる方の体調を入力してください👇"),
+                        FlexMessage(altText="体調入力パネル", contents=flex_container)
+                    ]
+                )
+            )
 
         # === 3. 個別記録 ===
         elif action == "child_check":
@@ -179,43 +266,43 @@ def handle_postback(event, line_bot_api):
                 "cold": "🤧 鼻水・咳・他",
                 "other": "✏️ その他"
             }
-            
-            
-            # pb.status を安全に使用
             condition_text = status_map.get(pb.status or "", "その他")
             
             if pb.status == "other" and target_name:
-                # 以前: USER_INPUT_STATE[user_id] = f"子供記録_{target_name}"
                 USER_INPUT_STATE[user_id] = UserInputState(
                     mode=InputMode.CHILD_HEALTH, 
                     target_name=target_name
                 )
-                common.send_reply(reply_token, [{"type": "text", "text": f"了解です。{target_name}の様子をメッセージで送ってください📝"}])
+                send_reply_text(line_bot_api, reply_token, f"了解です。{target_name}の様子をメッセージで送ってください📝")
+            
             elif target_name:
-                common.save_log_generic(config.SQLITE_TABLE_CHILD,
+                sync_run(save_log_async(config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                    (user_id, user_name, target_name, condition_text, common.get_now_iso()))
+                    (user_id, user_name, target_name, condition_text, get_now_iso())))
                             
-                # 記録後のフィードバック（サマリ確認へ誘導）
                 reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
-                # サマリボタンを付ける
-                buttons = {
-                    "type": "template",
-                    "altText": "記録完了",
-                    "template": {
-                        "type": "buttons",
-                        "text": reply_text,
-                        "actions": [{"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}]
+                
+                # サマリボタン付きFlex
+                button_flex = {
+                    "type": "bubble",
+                    "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": reply_text}]},
+                    "footer": {
+                        "type": "box", "layout": "vertical",
+                        "contents": [{"type": "button", "action": {"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}}]
                     }
                 }
-                common.send_reply(reply_token, [buttons])
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        replyToken=reply_token,
+                        messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                    )
+                )
 
         # === 4. 記録確認 & 修正 ===
         elif action == "check_status":
             summary = get_daily_health_summary()
             today_disp = datetime.datetime.now().strftime("%m/%d")
             
-            # Flex Messageでサマリを表示
             flex_content = {
                 "type": "bubble",
                 "body": {
@@ -229,152 +316,131 @@ def handle_postback(event, line_bot_api):
                 "footer": {
                     "type": "box", "layout": "vertical", "spacing": "sm",
                     "contents": [
-                        # ▼▼▼ 修正箇所: label は action の中に入れます ▼▼▼
                         {
                             "type": "button", 
                             "style": "secondary", 
-                            # "label": "..." ← ここにあったのが間違い
                             "action": {
                                 "type": "postback", 
-                                "label": "✏️ 修正する (入力パネル)", # ここが正解
+                                "label": "✏️ 修正する (入力パネル)", 
                                 "data": "action=show_health_input"
                             }
                         }
-                        # ▲▲▲▲▲▲
                     ]
                 }
             }
-            common.send_reply(reply_token, [{"type": "flex", "altText": "記録サマリ", "contents": flex_content}])
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    replyToken=reply_token,
+                    messages=[FlexMessage(altText="記録サマリ", contents=FlexContainer.from_dict(flex_content))]
+                )
+            )
 
-            # === 5. 食事アンケート回答 (★ここを追加) ===
+        # === 5. 食事アンケート回答 ===
         elif action == "food_answer":
-            # LinePostbackDataに 'value' フィールドがない場合に備え、raw_dictから取得
             val = raw_dict.get("value")
 
             if val == "self_cook":
-                # 自炊 -> メニュー選択肢を表示
                 cat = "自炊"
-                # configから自炊メニューリストを取得（なければデフォルト）
                 menus = config.MENU_OPTIONS.get(cat, ["カレー", "炒め物", "その他"])
-                
                 actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
                 actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
-
-                reply_msg = {
-                    "type": "text",
-                    "text": "自炊お疲れ様です🍳\nメインのメニューは何でしたか？",
-                    "quickReply": create_quick_reply(actions)
-                }
-                common.send_reply(reply_token, [reply_msg])
+                qr = create_quick_reply(actions)
+                send_reply_text(line_bot_api, reply_token, "自炊お疲れ様です🍳\nメインのメニューは何でしたか？", qr)
 
             elif val == "eating_out":
-                # 外食 -> メニュー選択肢を表示
                 cat = "外食"
                 menus = config.MENU_OPTIONS.get(cat, ["寿司", "焼肉", "その他"])
-                
                 actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
                 actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
-
-                reply_msg = {
-                    "type": "text",
-                    "text": "外食いいですね🍜\n何を食べに行きましたか？",
-                    "quickReply": create_quick_reply(actions)
-                }
-                common.send_reply(reply_token, [reply_msg])
+                qr = create_quick_reply(actions)
+                send_reply_text(line_bot_api, reply_token, "外食いいですね🍜\n何を食べに行きましたか？", qr)
             
             elif val == "other":
-                # その他 -> 手入力モードへ
                 USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category="その他")
-                common.send_reply(reply_token, [{"type": "text", "text": "了解です。\n食べたものを入力してください📝"}])
+                send_reply_text(line_bot_api, reply_token, "了解です。\n食べたものを入力してください📝")
 
             elif val == "skip":
-                # スキップ
-                common.send_reply(reply_token, [{"type": "text", "text": "了解です。ゆっくり休んでください🍵"}])
+                send_reply_text(line_bot_api, reply_token, "了解です。ゆっくり休んでください🍵")
             
             else:
-                common.logger.info(f"Unknown food value: {val}")
+                logger.info(f"Unknown food value: {val}")
 
         else:
-            common.logger.info(f"Unknown action: {action}")
+            logger.info(f"Unknown action: {action}")
 
     except Exception as e:
-        common.logger.error(f"Handle Postback Error: {e}")
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"エラー: {e}"}], target="discord", channel="error")
+        logger.error(f"Handle Postback Error: {e}")
+        # エラー通知（オプション）
+        # send_push(...) 
 
-def process_message(event, line_bot_api):
-    """メッセージ処理（既存ロジック改修）"""
+def process_message(event, line_bot_api: MessagingApi):
+    """メッセージ処理"""
     msg = event.message.text.strip()
     user_id = event.source.user_id
     reply_token = event.reply_token
     user_name = get_user_name(event, line_bot_api)
 
-    # === 1. 手入力モード処理 (Pydanticモデル版) ===
+    # === 1. 手入力モード処理 ===
     if user_id in USER_INPUT_STATE:
+        # 割り込みコマンド検知時はモード解除
         if msg.startswith(("食事カテゴリ_", "食事記録_", "子供選択_", "子供記録_", "外出_", "面会_", "お腹記録_")):
-            # 状態を削除（モード解除）
             del USER_INPUT_STATE[user_id]
-            # ここで return せず、そのまま下の「2. コマンド分岐」へ進ませる
-            
         else:
-            # --- 既存の手入力処理 ---
             state = USER_INPUT_STATE[user_id]
             
-            # キャンセル処理
             if msg.startswith(("キャンセル", "戻る")):
                 del USER_INPUT_STATE[user_id]
-                common.send_reply(reply_token, [{"type": "text", "text": "キャンセルしました。"}])
+                send_reply_text(line_bot_api, reply_token, "キャンセルしました。")
                 return
-        
-        # 安全策：古い形式（文字列）が残っていたら削除してスキップ
-        if not isinstance(state, UserInputState):
-            del USER_INPUT_STATE[user_id]
-            return
-
-        # --- A. 子供の体調入力モード ---
-        if state.mode == InputMode.CHILD_HEALTH:
-            target_child = state.target_name
-            common.save_log_generic(config.SQLITE_TABLE_CHILD,
-                ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                (user_id, user_name, target_child, msg, common.get_now_iso()))
             
-            del USER_INPUT_STATE[user_id]
-            
-            buttons = {
-                "type": "template", "altText": "記録完了",
-                "template": {
-                    "type": "buttons", "text": f"📝 {target_child}: {msg}\n詳細を記録しました。",
-                    "actions": [{"type": "postback", "label": "📊 記録を確認", "data": "action=check_status"}]
+            # --- A. 子供の体調入力 ---
+            if state.mode == InputMode.CHILD_HEALTH:
+                target_child = state.target_name
+                sync_run(save_log_async(config.SQLITE_TABLE_CHILD,
+                    ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                    (user_id, user_name, target_child, msg, get_now_iso())))
+                
+                del USER_INPUT_STATE[user_id]
+                
+                # 確認ボタンFlex
+                button_flex = {
+                    "type": "bubble",
+                    "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": f"📝 {target_child}: {msg}\n詳細を記録しました。"}]},
+                    "footer": {
+                        "type": "box", "layout": "vertical",
+                        "contents": [{"type": "button", "action": {"type": "postback", "label": "📊 記録を確認", "data": "action=check_status"}}]
+                    }
                 }
-            }
-            common.send_reply(reply_token, [buttons])
-            return
-
-        # --- B. 食事記録の入力モード ---
-        elif state.mode == InputMode.MEAL:
-            category = state.category or "その他"
-            if len(msg) > 50:
-                common.send_reply(reply_token, [{"type": "text", "text": "長すぎるよ💦 50文字以内でお願い！"}])
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        replyToken=reply_token,
+                        messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                    )
+                )
                 return
 
-            final_rec = f"{category}: {msg} (手入力)"
-            common.save_log_generic(config.SQLITE_TABLE_FOOD, 
-                ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-                (user_id, user_name, common.get_today_date_str(), "Dinner", final_rec, common.get_now_iso()))
-            
-            del USER_INPUT_STATE[user_id]
-            ask_outing_question(reply_token, final_rec)
-            return
+            # --- B. 食事記録入力 ---
+            elif state.mode == InputMode.MEAL:
+                category = state.category or "その他"
+                if len(msg) > 50:
+                    send_reply_text(line_bot_api, reply_token, "長すぎるよ💦 50文字以内でお願い！")
+                    return
 
-        # --- C. お腹記録（今後拡張が必要な場合） ---
-        elif state.mode == InputMode.STOMACH:
-            # 今はAIがメインですが、手入力が必要になったらここに書く
-            pass
+                final_rec = f"{category}: {msg} (手入力)"
+                sync_run(save_log_async(config.SQLITE_TABLE_FOOD, 
+                    ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
+                    (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())))
+                
+                del USER_INPUT_STATE[user_id]
+                ask_outing_question(line_bot_api, reply_token, final_rec)
+                return
 
-        # 該当なしの場合も念のため削除
-            if user_id in USER_INPUT_STATE:
-                 del USER_INPUT_STATE[user_id]
-            
-            # 手入力処理を行ったらここで終了
+            # --- C. お腹記録 ---
+            elif state.mode == InputMode.STOMACH:
+                pass # 現状AI任せだが拡張用
+
+            # 処理を行ったらreturn
+            if user_id in USER_INPUT_STATE: del USER_INPUT_STATE[user_id]
             return
 
     # === 2. コマンド分岐 ===
@@ -384,178 +450,140 @@ def process_message(event, line_bot_api):
         child_name = msg.replace("子供選択_", "")
         actions = [(symptom, f"子供記録_{child_name}_{symptom}") for symptom in config.CHILD_SYMPTOMS]
         actions.append(("✨ みんな元気！", "子供記録_全員_元気"))
-        
-        reply_msg = {
-            "type": "text",
-            "text": f"{child_name}ちゃんの様子はどうですか？",
-            "quickReply": create_quick_reply(actions)
-        }
-        common.send_reply(reply_token, [reply_msg])
+        qr = create_quick_reply(actions)
+        send_reply_text(line_bot_api, reply_token, f"{child_name}ちゃんの様子はどうですか？", qr)
         return
 
     if msg.startswith("子供記録_"):
-        handle_child_record(msg, user_id, user_name, reply_token)
+        handle_child_record(msg, user_id, user_name, reply_token, line_bot_api)
         return
 
     # --- 食事記録 ---
     if msg.startswith("食事カテゴリ_"):
         cat = msg.replace("食事カテゴリ_", "")
-        menus = config.MENU_OPTIONS.get(cat, config.MENU_OPTIONS["その他"])
+        menus = config.MENU_OPTIONS.get(cat, config.MENU_OPTIONS.get("その他", ["その他"]))
         
         actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
         actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
         
-        reply_msg = {
-            "type": "text", 
-            "text": f"【{cat}】だね！ 美味しそう✨\n具体的なメニューはどれ？", 
-            "quickReply": create_quick_reply(actions)
-        }
-        common.send_reply(reply_token, [reply_msg])
+        qr = create_quick_reply(actions)
+        send_reply_text(line_bot_api, reply_token, f"【{cat}】だね！ 具体的なメニューは？", qr)
         return
 
     if msg.startswith("食事手入力_"):
         cat = msg.replace("食事手入力_", "")
-        USER_INPUT_STATE[user_id] = UserInputState(
-            mode=InputMode.MEAL, 
-            category=cat
-        )
-        common.send_reply(reply_token, [{"type": "text", "text": f"わかった！ {cat}のメニューを教えてね📝"}])
+        USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category=cat)
+        send_reply_text(line_bot_api, reply_token, f"わかった！ {cat}のメニューを教えてね📝")
         return
 
     if msg.startswith("食事記録_"):
         parts = msg.split("_", 2)
         if len(parts) >= 3:
             final_rec = f"{parts[1]}: {parts[2]}"
-            common.save_log_generic(config.SQLITE_TABLE_FOOD,
+            sync_run(save_log_async(config.SQLITE_TABLE_FOOD,
                 ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-                (user_id, user_name, common.get_today_date_str(), "Dinner", final_rec, common.get_now_iso()))
-            ask_outing_question(reply_token, final_rec)
+                (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())))
+            ask_outing_question(line_bot_api, reply_token, final_rec)
         return
     
     if msg == "食事_スキップ":
         if user_id in USER_INPUT_STATE: del USER_INPUT_STATE[user_id]
-        common.send_reply(reply_token, [{"type": "text", "text": "はーい、了解です✨ 今日はゆっくり休んでね。"}])
+        send_reply_text(line_bot_api, reply_token, "はーい、了解です✨ 今日はゆっくり休んでね。")
         return
 
     # --- 外出・面会 ---
     if msg.startswith("外出_"):
         val = msg.replace("外出_", "")
-        common.save_log_generic(config.SQLITE_TABLE_DAILY, 
+        sync_run(save_log_async(config.SQLITE_TABLE_DAILY, 
             ["user_id", "user_name", "date", "category", "value", "timestamp"],
-            (user_id, user_name, common.get_today_date_str(), "外出", val, common.get_now_iso()))
+            (user_id, user_name, get_today_date_str(), "外出", val, get_now_iso())))
         
         actions = [("はい", "面会_はい"), ("いいえ", "面会_いいえ")]
-        common.send_reply(reply_token, [{"type": "text", "text": "誰かと会ったりした？", "quickReply": create_quick_reply(actions)}])
+        qr = create_quick_reply(actions)
+        send_reply_text(line_bot_api, reply_token, "誰かと会ったりした？", qr)
         return
 
     if msg.startswith("面会_"):
         val = msg.replace("面会_", "")
-        common.save_log_generic(config.SQLITE_TABLE_DAILY,
+        sync_run(save_log_async(config.SQLITE_TABLE_DAILY,
             ["user_id", "user_name", "date", "category", "value", "timestamp"],
-            (user_id, user_name, common.get_today_date_str(), "面会", val, common.get_now_iso()))
-        common.send_reply(reply_token, [{"type": "text", "text": "教えてくれてありがとう！\n今日も一日お疲れ様でした🍵 ゆっくり休んでね。"}])
+            (user_id, user_name, get_today_date_str(), "面会", val, get_now_iso())))
+        send_reply_text(line_bot_api, reply_token, "教えてくれてありがとう！\n今日も一日お疲れ様でした🍵")
         return
 
     # --- お腹記録 ---
     if msg.startswith("お腹記録_"):
-        handle_stomach_record(msg, user_id, user_name, reply_token)
+        handle_stomach_record(msg, user_id, user_name, reply_token, line_bot_api)
         return
-    
-    # トリガーワード検知 (お腹系)
-    # ↓ この既存ロジックは AIの方が賢いので削除またはコメントアウトしても良いですが、
-    #   念のため残しておき、AIが処理しなかった場合のバックアップにすることも可能です。
-    #   今回は「AIに任せる」ため、ここに来る前にAI処理を挟みます。
 
-    # === 3. AI自然言語処理 (ここを追加！) ===
-    # 既存のコマンドに当てはまらなかった場合、Geminiに解析させる
-    
-    # 短すぎる挨拶などはOHAYOロジックに任せるため、ある程度の長さか、特定キーワードがある場合
-    # または「AIにお任せ」スタイルなら、すべてのメッセージを投げても良いですが、
-    # APIコストとレスポンス速度を考慮し、「コマンド以外」かつ「挨拶以外」で回すのが賢明です。
-    
-    # 先に「おはよう」チェックを行う (既存ロジック)
+    # === 3. AI自然言語処理 ===
+    # おはようチェック
     if len(msg) <= config.MESSAGE_LENGTH_LIMIT:
         kw = next((k for k in config.OHAYO_KEYWORDS if k in msg.lower()), None)
         if kw:
-            common.save_log_generic(config.SQLITE_TABLE_OHAYO, 
+            sync_run(save_log_async(config.SQLITE_TABLE_OHAYO, 
                 ["user_id", "user_name", "message", "timestamp", "recognized_keyword"], 
-                (user_id, user_name, msg, common.get_now_iso(), kw))
-            common.logger.info(f"[OHAYO] {user_name} -> {msg}")
-            # おはようの場合はここで終了（AIには投げない）
-            reply_text = f"{user_name}さん、おはようございます！☀️今日も一日頑張りましょう。"
-            common.send_reply(reply_token, [{"type": "text", "text": reply_text}])
-            return # 返信を送ってから終了
+                (user_id, user_name, msg, get_now_iso(), kw)))
+            send_reply_text(line_bot_api, reply_token, f"{user_name}さん、おはようございます！☀️")
+            return
 
-    # ここでAI呼び出し！
-    common.logger.info(f"🤖 AI解析へ: {msg}")
+    # AI呼び出し (同期的に実行)
+    logger.info(f"🤖 AI解析へ: {msg}")
     ai_response = ai_logic.analyze_text_and_execute(msg, user_id, user_name)
     
     if ai_response:
-        # AIが何かを処理した、または雑談を返した場合はそれを返信
-        common.send_reply(reply_token, [{"type": "text", "text": ai_response}])
+        send_reply_text(line_bot_api, reply_token, ai_response)
         return
 
-    # AIも反応しなかった場合（エラーや該当なし）、従来のお腹トリガーなどへ
+    # Fallback (AIも反応なしの場合)
     if any(w in msg for w in ["うんち", "排便", "トイレ", "お腹", "下痢", "便秘"]):
-         common.send_push(config.LINE_USER_ID, [
-             {"type": "text", "text": "🚽 [Discord通知]\nお腹の調子はどうですか？\n記録なら「うんち出た」のように教えてね。"}
-         ], target="discord")
-         return 
+         # Discord通知のみ行う場合
+         # sync_run(notification_service.send_push(...)) # 必要なら
+         pass 
 
-
-def ask_outing_question(token, food_rec):
+def ask_outing_question(api: MessagingApi, token: str, food_rec: str):
     actions = [("はい", "外出_はい"), ("いいえ", "外出_いいえ")]
-    common.send_reply(token, [{
-        "type": "text", 
-        "text": f"「{food_rec}」を記録したよ📝\n\nあと、今日はお出かけした？", 
-        "quickReply": create_quick_reply(actions)
-    }])
+    qr = create_quick_reply(actions)
+    send_reply_text(api, token, f"「{food_rec}」を記録したよ📝\n\nあと、今日はお出かけした？", qr)
 
-def handle_child_record(msg, user_id, user_name, reply_token):
+def handle_child_record(msg, user_id, user_name, reply_token, api: MessagingApi):
     try:
         parts = msg.split("_", 2)
         if len(parts) < 3: return
         target_child, condition = parts[1], parts[2]
         
-        # 保存
         if target_child == "全員":
             for child in config.CHILDREN_NAMES:
-                common.save_log_generic(config.SQLITE_TABLE_CHILD, ["user_id", "user_name", "child_name", "condition", "timestamp"], (user_id, user_name, child, "元気いっぱい", common.get_now_iso()))
-            reply_text = "✨ よかった！みんな元気で何よりです。\n今日も一日頑張りましょう！"
+                sync_run(save_log_async(config.SQLITE_TABLE_CHILD, ["user_id", "user_name", "child_name", "condition", "timestamp"], (user_id, user_name, child, "元気いっぱい", get_now_iso())))
+            reply_text = "✨ よかった！みんな元気で何よりです。"
         else:
-            common.save_log_generic(config.SQLITE_TABLE_CHILD, ["user_id", "user_name", "child_name", "condition", "timestamp"], (user_id, user_name, target_child, condition, common.get_now_iso()))
+            sync_run(save_log_async(config.SQLITE_TABLE_CHILD, ["user_id", "user_name", "child_name", "condition", "timestamp"], (user_id, user_name, target_child, condition, get_now_iso())))
             
-            # 応答生成
             if "元気" in condition: reply_text = f"✅ {target_child}ちゃん、元気で安心しました！"
             elif "熱" in condition: reply_text = f"😢 {target_child}ちゃん、お熱ですか...心配ですね。\n無理せず温かくして過ごしてくださいね。"
-            elif "怪我" in condition: reply_text = f"🤕 {target_child}ちゃん、痛かったね💦\n早く治りますように。"
-            else: reply_text = f"📝 {target_child}ちゃん: {condition}\n記録しました。様子を見てあげてくださいね。"
+            elif "怪我" in condition: reply_text = f"🤕 {target_child}ちゃん、痛かったね💦"
+            else: reply_text = f"📝 {target_child}ちゃん: {condition}\n記録しました。"
 
-            # 重篤な場合はDiscordにも通知
-            if "熱" in condition or "怪我" in condition:
-                common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【体調不良】{target_child}: {condition}"}], target="discord", channel="notify")
-
-        common.send_reply(reply_token, [{"type": "text", "text": reply_text}])
+        send_reply_text(api, reply_token, reply_text)
 
     except Exception as e:
-        common.logger.error(f"子供記録エラー: {e}")
+        logger.error(f"子供記録エラー: {e}")
 
-def handle_stomach_record(msg, user_id, user_name, reply_token):
+def handle_stomach_record(msg, user_id, user_name, reply_token, api: MessagingApi):
     try:
         parts = msg.split("_", 2)
         if len(parts) < 3: return
         rec_type, condition = parts[1], parts[2]
         
-        common.save_log_generic(config.SQLITE_TABLE_DEFECATION, 
+        sync_run(save_log_async(config.SQLITE_TABLE_DEFECATION, 
             ["user_id", "user_name", "record_type", "condition", "timestamp"], 
-            (user_id, user_name, rec_type, condition, common.get_now_iso()))
+            (user_id, user_name, rec_type, condition, get_now_iso())))
         
-        # Discordへ通知
-        msg_text = f"✅ [Discord通知]\n{condition} を記録しました！"
+        msg_text = f"✅ {condition} を記録しました！"
         if "腹痛" in condition or "血便" in condition:
             msg_text += "\n無理せずお大事にしてください😢"
         
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg_text}], target="discord")
+        send_reply_text(api, reply_token, msg_text)
 
     except Exception as e:
-        common.logger.error(f"お腹記録エラー: {e}")
+        logger.error(f"お腹記録エラー: {e}")
