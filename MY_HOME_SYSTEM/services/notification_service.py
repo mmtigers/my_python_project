@@ -2,7 +2,7 @@
 import json
 import logging
 import requests
-from typing import List, Optional
+from typing import List, Optional, Any
 # ▼▼▼ v3 Imports ▼▼▼
 from linebot.v3.messaging import (
     Configuration,
