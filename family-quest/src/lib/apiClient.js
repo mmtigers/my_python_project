@@ -62,6 +62,10 @@ class ApiClient {
     return this.get('/api/quest/inventory/admin/pending');
   }
 
+  async delete(endpoint) {
+    return this._request(endpoint, { method: 'DELETE' });
+  }
+
 }
 
 export const apiClient = new ApiClient(BASE_URL);
@@ -90,4 +94,13 @@ export const completeBounty = async (bountyId, userId) => {
 export const approveBounty = async (bountyId, userId) => {
   // POST /api/bounties/{id}/approve
   return apiClient.post(`api/bounties/${bountyId}/approve`, { user_id: userId });
+};
+
+
+export const resignBounty = async (bountyId, userId) => {
+  return apiClient.post(`api/bounties/${bountyId}/resign`, { user_id: userId });
+};
+
+export const deleteBounty = async (bountyId, userId) => {
+  return apiClient.delete(`api/bounties/${bountyId}?user_id=${userId}`);
 };
