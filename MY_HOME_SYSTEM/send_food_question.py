@@ -3,6 +3,16 @@ import config
 import common
 import datetime
 import pytz
+import sys
+
+# ▼▼▼ v3対応: Imports追加 ▼▼▼
+from linebot.v3.messaging import (
+    TextMessage,
+    QuickReply,
+    QuickReplyItem,
+    PostbackAction
+)
+# ▲▲▲ ▲▲▲
 
 logger = common.setup_logging("food_question")
 
@@ -142,38 +152,40 @@ if __name__ == "__main__":
     logger.info("質問送信処理を開始...")
     report = get_daily_summary()
     
-    # 【修正】: ラベル、データ(postback.data)、表示テキスト のタプルに変更
-    # データ形式は "action=キー&value=値" のクエリ文字列形式を推奨
-    actions = [
+    # アクション定義
+    actions_data = [
         ("🏠 自炊",   "action=food_answer&value=self_cook",   "自炊しました"),
         ("🍜 外食",   "action=food_answer&value=eating_out",  "外食しました"),
         ("🍱 その他", "action=food_answer&value=other",       "その他"),
         ("スキップ",  "action=food_answer&value=skip",        "回答をスキップ")
     ]
 
-    # 【修正】: type="postback" に変更
+    # ▼▼▼ v3対応: QuickReplyオブジェクトの構築 ▼▼▼
     items = []
-    for label, data, display_text in actions:
-        items.append({
-            "type": "action",
-            "action": {
-                "type": "postback",
-                "label": label,
-                "data": data,
-                "displayText": display_text  # ボタンを押した時にユーザーの発言として表示される文字
-            }
-        })
+    for label, data, display_text in actions_data:
+        items.append(QuickReplyItem(
+            action=PostbackAction(
+                label=label,
+                data=data,
+                displayText=display_text
+            )
+        ))
+    
+    quick_reply = QuickReply(items=items)
+    # ▲▲▲ ▲▲▲
     
     now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
     target_platform = "line" 
     
-    msg = {
-        "type": "text",
-        "text": f"🌙 こんばんは、お疲れ様！\n\n{report}今日の夕食はどうしたの？",
-        "quickReply": {"items": items}
-    }
+    # メッセージ本文
+    msg_text = f"{report}こんばんは！\n今日の夕食はどうしましたか？🍽️"
+
+    # ▼▼▼ v3対応: TextMessageオブジェクトとして構築 ▼▼▼
+    # common.send_push に v3 オブジェクトを渡します
+    payload = TextMessage(text=msg_text, quickReply=quick_reply)
     
-    if common.send_push(config.LINE_USER_ID, [msg], target=target_platform, channel="report"):
+    if common.send_push(config.LINE_USER_ID, [payload], target=target_platform):
         logger.info("送信完了✨")
     else:
-        logger.error("送信失敗💦")
+        logger.error("送信失敗")
+        sys.exit(1)

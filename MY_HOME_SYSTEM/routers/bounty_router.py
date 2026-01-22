@@ -221,10 +221,55 @@ def approve_bounty(bounty_id: int, action: BountyAction):
         
         if assignee and reward > 0:
             cur.execute("""
-                UPDATE users 
+                UPDATE quest_users 
                 SET gold = gold + ? 
                 WHERE user_id = ?
             """, (reward, assignee))
             logger.info(f"💰 Reward Paid: {reward}G to {assignee}")
 
     return {"status": "completed", "reward_paid": reward}
+
+@router.delete("/{bounty_id}")
+def delete_bounty(bounty_id: int, user_id: str = Query(...)):
+    """依頼を取り下げる（削除）: 誰も受注していない場合のみ"""
+    with common.get_db_cursor(commit=True) as cur:
+        # 権限とステータスチェック
+        target = cur.execute("SELECT * FROM bounties WHERE id = ?", (bounty_id,)).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="依頼が見つかりません")
+            
+        if target['created_by'] != user_id:
+            raise HTTPException(status_code=403, detail="依頼主のみが削除できます")
+            
+        if target['status'] != 'OPEN':
+            raise HTTPException(status_code=400, detail="既に進行中のため削除できません")
+
+        # 物理削除（または論理削除フラグでも可だが、間違えて作成したケースを想定し物理削除とする）
+        cur.execute("DELETE FROM bounties WHERE id = ?", (bounty_id,))
+        
+        logger.info(f"🗑️ Bounty Deleted: ID={bounty_id} by {user_id}")
+        
+    return {"status": "deleted"}
+
+@router.post("/{bounty_id}/resign")
+def resign_bounty(bounty_id: int, action: BountyAction):
+    """受注を辞退する（ステータスをOPENに戻す）"""
+    with common.get_db_cursor(commit=True) as cur:
+        # 権限チェック
+        target = cur.execute("SELECT * FROM bounties WHERE id = ?", (bounty_id,)).fetchone()
+        if not target:
+            raise HTTPException(status_code=404, detail="依頼が見つかりません")
+            
+        if target['status'] != 'TAKEN' or target['assignee_id'] != action.user_id:
+            raise HTTPException(status_code=400, detail="辞退できる状態ではありません")
+
+        # ステータスをOPENに戻し、assigneeをクリア
+        cur.execute("""
+            UPDATE bounties 
+            SET status = 'OPEN', assignee_id = NULL, updated_at = ?
+            WHERE id = ?
+        """, (common.get_now_iso(), bounty_id))
+        
+        logger.info(f"🏳️ Bounty Resigned: ID={bounty_id} by {action.user_id}")
+        
+    return {"status": "resigned"}
