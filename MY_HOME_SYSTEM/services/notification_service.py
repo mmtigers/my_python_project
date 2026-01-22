@@ -3,18 +3,27 @@ import json
 import logging
 import requests
 from typing import List, Optional
-from linebot import LineBotApi
-from linebot.models import TextSendMessage
-from linebot.exceptions import LineBotApiError
+# ▼▼▼ v3 Imports ▼▼▼
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    PushMessageRequest,
+    ReplyMessageRequest,
+    TextMessage,
+    FlexMessage,
+    Message
+)
+# ▲▲▲ ▲▲▲
 import config
 from core.network import get_retry_session, retry_api_call
 
 logger = logging.getLogger("service.notification")
 
-# LineBotApiの初期化
-line_bot_api = None
+# v3 Configuration
+line_configuration = None
 if config.LINE_CHANNEL_ACCESS_TOKEN:
-    line_bot_api = LineBotApi(config.LINE_CHANNEL_ACCESS_TOKEN)
+    line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
 
 def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channel: str = "notify") -> bool:
     """DiscordへのWebhook送信"""
@@ -30,7 +39,15 @@ def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channe
     
     text_content = ""
     for msg in messages:
-        text = msg.get("text") or msg.get("altText") or "（画像またはスタンプ）"
+        # v3オブジェクトの場合は text 属性などを取得
+        if hasattr(msg, "text"):
+            text = msg.text
+        elif hasattr(msg, "alt_text"):
+            text = msg.alt_text
+        elif isinstance(msg, dict):
+            text = msg.get("text") or msg.get("altText") or "（画像またはスタンプ）"
+        else:
+            text = "（メッセージ）"
         text_content += f"{text}\n\n"
     
     try:
@@ -45,126 +62,108 @@ def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channe
         logger.error(f"Discord送信失敗: {e}")
         return False
 
-def _send_line_push(user_id: str, messages: List[dict]) -> bool:
-    """LINE Push API送信 (Messaging API)"""
-    if not line_bot_api:
-        logger.warning("LINE Bot API is not initialized.")
+def _send_line_push(user_id: str, messages: List[Any]) -> bool:
+    """LINE Push API送信 (v3対応版)"""
+    if not line_configuration:
         return False
-
-    # dict形式のメッセージをSDKのモデルに変換 (現在はTextのみ簡易対応)
-    # 本格的にやるならFlexMessageなども対応が必要ですが、まずはTextで実装
+    
     sdk_messages = []
-    for msg in messages:
-        if msg.get('type') == 'text':
-            sdk_messages.append(TextSendMessage(text=msg.get('text')))
-        # 必要に応じてImageSendMessageなども追加
     
-    if not sdk_messages:
-        return False
-
     try:
-        line_bot_api.push_message(user_id, sdk_messages)
-        return True
-    except LineBotApiError as e:
-        logger.error(f"LINE API Error: {e.status_code} {e.message}")
-        if e.status_code == 429:
-            logger.warning("⚠️ LINE API limit reached.")
-        return False
-    except Exception as e:
-        logger.error(f"LINE送信失敗: {e}")
-        return False
-
-@retry_api_call
-def send_push(user_id: str, messages: List[dict], image_data: bytes = None, target: str = None, channel: str = "notify", priority: str = "normal") -> bool:
-    """
-    メッセージ送信ラッパー
-    
-    Args:
-        priority (str): 'high' なら本番環境でLINEに通知。'normal' ならDiscordのみ。
-    """
-    
-    # 1. 宛先決定ロジック
-    # 開発環境なら強制的にDiscordのみ
-    is_production = (config.ENV == "production")
-    
-    # ターゲット指定がない場合の自動判定
-    should_send_line = False
-    should_send_discord = True # デフォルトはDiscordにログを残す
-    
-    if is_production:
-        if priority == "high":
-            should_send_line = True
-        elif target and target.lower() == "line":
-             should_send_line = True
-    else:
-        # 開発環境でLINE指定があっても、誤送信防止のためログに出してDiscordへ
-        if priority == "high" or (target and target.lower() == "line"):
-             logger.info("[DEV MODE] LINE送信をスキップし、Discordに転送します")
-
-    success = True
-
-    # 2. Discord送信 (ログ保存・通知用)
-    if should_send_discord:
-        prefix = ""
-        if should_send_line and is_production:
-            prefix = "📱 [LINE送信] "
-        elif not is_production and (priority == "high" or target == "line"):
-            prefix = "🧪 [DEV/LINE転送] "
+        for msg in messages:
+            # A. 既に v3 オブジェクトの場合
+            if isinstance(msg, Message): 
+                sdk_messages.append(msg)
             
-        # メッセージのコピーを作成してプレフィックス付与
-        discord_msgs = []
-        for m in messages:
-            dm = m.copy()
-            if 'text' in dm:
-                dm['text'] = prefix + dm['text']
-            discord_msgs.append(dm)
+            # B. 辞書型の場合 (互換性維持)
+            elif isinstance(msg, dict):
+                msg_type = msg.get("type")
+                if msg_type == "text":
+                    sdk_messages.append(TextMessage(text=msg.get("text")))
+                elif msg_type == "flex":
+                    # FlexMessageオブジェクトへの変換は複雑なため、
+                    # 可能な限り呼び出し元でオブジェクト化することを推奨
+                    pass 
+                # 必要に応じて ImageMessage 等も追加
+            
+        if not sdk_messages:
+            logger.warning("LINE送信対象のメッセージがありません")
+            return False
 
-        if not _send_discord_webhook(discord_msgs, image_data, channel):
-            success = False # Discord失敗はシステム的に失敗扱いにするか要検討（今回はログだけ残す形でもよい）
+        # v3 送信処理
+        with ApiClient(line_configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.push_message(
+                PushMessageRequest(
+                    to=user_id,
+                    messages=sdk_messages
+                )
+            )
+        return True
 
-    # 3. LINE送信 (本番かつ重要通知のみ)
-    if should_send_line and is_production:
-        # 画像はLINE Pushで送ると高コスト/複雑なので、Discordに送った旨だけ伝える簡易実装推奨
-        line_msgs = messages
+    except Exception as e:
+        logger.error(f"LINE Push Error: {e}")
+        return False
+
+def send_push(user_id: str, messages: List[Any], image_data: bytes = None, target: str = "both", channel: str = "notify") -> bool:
+    """統合プッシュ通知関数"""
+    success = True
+    
+    # 1. Discord送信
+    if target in ["discord", "both"]:
+        if not _send_discord_webhook(messages, image_data, channel):
+            logger.warning("Discordへの通知に失敗しました")
+            success = False
+
+    # 2. LINE送信 (image_dataはLINEには送らない簡易実装)
+    if target in ["line", "both"]:
+        # 画像がある場合はテキストで注記を追加
+        line_msgs = list(messages)
         if image_data:
-            line_msgs = list(messages)
-            line_msgs.append({"type": "text", "text": "※画像はDiscordを確認してください"})
+            line_msgs.append(TextMessage(text="※画像はDiscordを確認してください"))
 
         if not _send_line_push(user_id, line_msgs):
             # LINE失敗時はDiscordのエラーチャンネルに通知
             logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")
-            fallback = [{"type": "text", "text": f"⚠️ LINE送信失敗:\n{messages[0].get('text', '')}"}]
+            fallback = [{"type": "text", "text": "⚠️ LINE送信失敗: (詳細ログ確認)"}]
             _send_discord_webhook(fallback, None, 'error')
             success = False
 
     return success
 
-# ... (send_reply, get_line_message_quota は変更なしでOK) ...
-def send_reply(reply_token: str, messages: List[dict]) -> bool:
-    """LINE Reply API送信"""
-    if not line_bot_api: return False
+def send_reply(reply_token: str, messages: List[Any]) -> bool:
+    """LINE Reply API送信 (v3対応版)"""
+    if not line_configuration: return False
+    
     sdk_messages = []
     for msg in messages:
-        if msg.get('type') == 'text':
-            sdk_messages.append(TextSendMessage(text=msg.get('text')))
+        if isinstance(msg, Message):
+            sdk_messages.append(msg)
+        elif isinstance(msg, dict) and msg.get('type') == 'text':
+            sdk_messages.append(TextMessage(text=msg.get('text')))
+            
     try:
-        line_bot_api.reply_message(reply_token, sdk_messages)
+        with ApiClient(line_configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    replyToken=reply_token,
+                    messages=sdk_messages
+                )
+            )
         return True
     except Exception as e:
         logger.error(f"LINE Reply Error: {e}")
         return False
 
 def get_line_message_quota():
-    """LINE送信数確認"""
-    if not line_bot_api: return None
+    """LINE送信数確認 (v3対応版)"""
+    if not line_configuration: return None
     try:
-        consumption = line_bot_api.get_message_quota_consumption()
-        quota = line_bot_api.get_message_quota()
-        return {
-            "total_usage": consumption.total_usage,
-            "type": quota.type,
-            "limit": quota.value,
-            "remain": max(0, quota.value - consumption.total_usage)
-        }
-    except Exception:
+        with ApiClient(line_configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            # v3では get_message_quota_consumption は廃止、get_message_quota で統合情報を取得
+            return line_bot_api.get_message_quota()
+    except Exception as e:
+        logger.error(f"Quota Check Error: {e}")
         return None
