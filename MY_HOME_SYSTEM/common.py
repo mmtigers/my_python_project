@@ -1,3 +1,5 @@
+# MY_HOME_SYSTEM/common.py
+
 """
 common.py (Facade Pattern)
 Deprecated: This module is kept for backward compatibility.
@@ -25,13 +27,13 @@ from core.database import (
 )
 
 # --- Services ---
+# notification_serviceから line_bot_api のインポートを削除しました
 from services.notification_service import (
-    line_bot_api,
     send_push,
     send_reply,
     get_line_message_quota,
-    _send_discord_webhook, # 内部利用されている可能性があるため
-    _send_line_push        # 同上
+    _send_discord_webhook, 
+    _send_line_push        
 )
 
 # --- Global Logger for 'common' namespace (Backward Compatibility) ---
