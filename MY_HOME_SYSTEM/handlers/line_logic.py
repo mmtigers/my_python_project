@@ -195,20 +195,23 @@ def get_daily_health_summary():
 def handle_postback(event, line_bot_api: MessagingApi):
     """Postback処理"""
     try:
+        # (既存の初期化処理...)
         user_id = event.source.user_id
         reply_token = event.reply_token
         user_name = get_user_name(event, line_bot_api)
         
-        # クエリ文字列を解析
         raw_dict = dict(parse_qsl(event.postback.data))
         
         try:
             pb = LinePostbackData(**raw_dict)
         except Exception as e:
-            logger.warning(f"⚠️ 不正なポストバック形式: {raw_dict} (Error: {e})")
-            return
+            # Pydanticモデルにないフィールドがある場合のエラーハンドリング
+            # 新規追加の category や item は LinePostbackData に定義されていない可能性があるため
+            # raw_dict を直接使うフォールバックを行う
+            pb = LinePostbackData(action=raw_dict.get("action", "unknown"))
+            # logger.warning(...) # 必要に応じてログ
 
-        action = pb.action
+        action = raw_dict.get("action") # pb.action だと定義不足で落ちる可能性を考慮し raw_dict優先
         target_name = pb.child
         # quota_text = get_quota_text(line_bot_api) # 必要なら復活
 
@@ -339,35 +342,44 @@ def handle_postback(event, line_bot_api: MessagingApi):
                 )
             )
 
-        # === 5. 食事アンケート回答 ===
-        elif action == "food_answer":
-            val = raw_dict.get("value")
-
-            if val == "self_cook":
-                cat = "自炊"
-                menus = config.MENU_OPTIONS.get(cat, ["カレー", "炒め物", "その他"])
-                actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
-                actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
-                qr = create_quick_reply(actions)
-                send_reply_text(line_bot_api, reply_token, "自炊お疲れ様です🍳\nメインのメニューは何でしたか？", qr)
-
-            elif val == "eating_out":
-                cat = "外食"
-                menus = config.MENU_OPTIONS.get(cat, ["寿司", "焼肉", "その他"])
-                actions = [(m, f"食事記録_{cat}_{m}") for m in menus]
-                actions.append(("✏️ 手入力", f"食事手入力_{cat}"))
-                qr = create_quick_reply(actions)
-                send_reply_text(line_bot_api, reply_token, "外食いいですね🍜\n何を食べに行きましたか？", qr)
+        # === 5. 食事アンケート回答 (Refactored Logic) ===
+        if action == "food_record_direct":
+            # 【新規】ワンタップ記録
+            category = raw_dict.get("category", "その他")
+            item = raw_dict.get("item", "").strip()
             
-            elif val == "other":
-                USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category="その他")
-                send_reply_text(line_bot_api, reply_token, "了解です。\n食べたものを入力してください📝")
+            # バリデーション: itemが空なら不明として処理
+            if not item:
+                item = "不明なメニュー"
 
-            elif val == "skip":
-                send_reply_text(line_bot_api, reply_token, "了解です。ゆっくり休んでください🍵")
+            # 記録フォーマット生成 "カテゴリ: メニュー"
+            final_rec = f"{category}: {item}"
             
+            # DB保存 (sync_runラッパーを使用)
+            sync_run(save_log_async(config.SQLITE_TABLE_FOOD,
+                ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
+                (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())))
+            
+            # 完了メッセージ
+            reply_text = f"🍽️ 記録しました！\n【{category}】{item}\n\n今日も一日お疲れ様でした🍵"
+            send_reply_text(line_bot_api, reply_token, reply_text)
+
+        elif action == "food_manual":
+            # 【更新】手入力モードへ移行
+            category = raw_dict.get("category", "その他")
+            
+            # 状態管理更新
+            USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category=category)
+            
+            # カテゴリに応じた親切なメッセージ
+            if "外食" in category:
+                prompt_text = "お店の名前（または食べたもの）を入力してください 🍜"
+            elif "自炊" in category:
+                prompt_text = "作ったメニューを入力してください 🍳"
             else:
-                logger.info(f"Unknown food value: {val}")
+                prompt_text = "食べたものを入力してください 📝"
+                
+            send_reply_text(line_bot_api, reply_token, f"了解です！\n{prompt_text}")
 
         else:
             logger.info(f"Unknown action: {action}")

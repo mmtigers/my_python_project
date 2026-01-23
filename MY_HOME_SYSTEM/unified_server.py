@@ -232,9 +232,25 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # ▼▼▼ LINE BOT SETUP (v3 Refactoring) ▼▼▼
-# v3では Configuration オブジェクトを使用します
-line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
+# 変数を事前に初期化 (Pylance対策 & 安全性向上)
+line_bot_api = None
+handler = None
+
+if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
+    try:
+        # Configuration作成
+        line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
+        # ApiClient作成
+        api_client = ApiClient(line_configuration)
+        # MessagingApiインスタンス作成 (★これが抜けていました！)
+        line_bot_api = MessagingApi(api_client)
+        
+        handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
+        logger.info("✅ LINE Bot v3 Initialized")
+    except Exception as e:
+        logger.error(f"❌ LINE Bot Init Failed: {e}")
+else:
+    logger.warning("⚠️ LINE Config missing")
 # ▲▲▲ ▲▲▲
 
 # Router
@@ -272,29 +288,26 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)):
         raise HTTPException(status_code=400)
     return "OK"
 
-# ▼▼▼ イベントハンドラ修正 ▼▼▼
-# TextMessageContent は受信用モデルです
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    # ApiClient をコンテキストマネージャーで使用するのが v3 推奨の実装です
+    """テキストメッセージイベント"""
     try:
-        with ApiClient(line_configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            # 既存のロジックに MessagingApi インスタンスを渡します
-            line_logic.process_message(event, line_bot_api)
-    except Exception as e: 
-        logger.error(f"メッセージ処理中にエラー発生: {e}")
-        # traceback.print_exc()
+        # 修正: v3ロジックに合わせて line_bot_api を渡す
+        line_logic.handle_message(event, line_bot_api)
+    except Exception as e:
+        logger.error(f"LINE Message Error: {e}")
+        traceback.print_exc()
 
 @handler.add(PostbackEvent)
-def handle_postback_event(event):
+def handle_postback(event):
+    """Postbackイベント(ボタン押下等)"""
     try:
-        with ApiClient(line_configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_logic.handle_postback(event, line_bot_api)
+        logger.info(f"📩 Postback Received: {event.postback.data}")
+        # 修正: v3ロジックに合わせて line_bot_api を渡す
+        line_logic.handle_postback(event, line_bot_api)
     except Exception as e:
-        logger.error(f"Postback処理中にエラー発生: {e}")
-# ▲▲▲ ▲▲▲
+        logger.error(f"LINE Postback Error: {e}")
+        traceback.print_exc()
 
 
 # --- Endpoints: SwitchBot ---
