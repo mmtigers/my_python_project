@@ -326,11 +326,17 @@ class BatchDownloader:
         logger.info("🛑 停止シグナル検知")
         self._shutdown_requested = True
 
-    def _get_strategy(self, url: str) -> DownloadStrategy:
-        # ★変更点: "tktube" 以外はすべて yt-dlp (Universal) に任せる
+    def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
+        # 【修正】YouTube関連のURLが含まれていたらスキップする判定を追加
+        if "youtube.com" in url or "youtu.be" in url:
+            logger.info(f"🚫 YouTube機能は現在無効化されているためスキップします: {url}")
+            return None
+
+        # 既存のロジック: tktubeなら専用ストラテジー、それ以外はUniversal
         if "tktube" in url:
             return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
         else:
+            # YouTube以外の汎用サイト（Twitter/X, Vimeoなど）は引き続きダウンロード可能
             return UniversalYtDlpStrategy(CONFIG.BASE_SAVE_DIR, self.session)
 
     def _collect_tasks(self) -> List[DownloadTask]:
@@ -394,6 +400,11 @@ class BatchDownloader:
             
             try:
                 strategy = self._get_strategy(task.url)
+                
+                # 【追加】YouTube等のスキップ対象（None）だった場合は次へ
+                if strategy is None:
+                    continue
+
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)
             except Exception as e:
