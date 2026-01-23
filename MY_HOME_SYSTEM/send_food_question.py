@@ -1,191 +1,234 @@
-# HOME_SYSTEM/send_food_question.py
+import sys
+import re
+import datetime
+from typing import List, Tuple, Dict, Optional
+
+# プロジェクト内モジュール
 import config
 import common
-import datetime
-import pytz
-import sys
+from linebot.v3.messaging import FlexMessage, FlexContainer
 
-# ▼▼▼ v3対応: Imports追加 ▼▼▼
-from linebot.v3.messaging import (
-    TextMessage,
-    QuickReply,
-    QuickReplyItem,
-    PostbackAction
-)
-# ▲▲▲ ▲▲▲
+# ロガー設定
+logger = common.setup_logging("food_question_v2")
 
-logger = common.setup_logging("food_question")
+# ==========================================
+# UI設定 (ビジネスロジックと分離)
+# ==========================================
+UI_THEME = {
+    "自炊": {
+        "label": "🍳 自炊・家ご飯",
+        "color": "#E67A7A",  # 暖色系
+        "prefix": "🍳"
+    },
+    "外食": {
+        "label": "🏪 外食・テイクアウト",
+        "color": "#7AC2E6",  # 寒色系
+        "prefix": "🏪"
+    }
+}
 
-def get_daily_summary():
-    with common.get_db_cursor() as cursor:
-        if not cursor: return ""
-        try:
-            today = common.get_today_date_str()
+# 表示設定
+RANKING_LIMIT = 3
+LOOKBACK_DAYS = 30
+
+
+def fetch_frequent_menus(days: int = 30) -> Dict[str, List[Tuple[str, int]]]:
+    """
+    DBから過去の履歴を集計し、カテゴリごとの頻出メニューを取得する。
+    
+    Returns:
+        Dict[str, List[Tuple[str, int]]]
+        例: {"自炊": [('カレー', 5), ...], "外食": [('マクドナルド', 3), ...]}
+    """
+    # 1. 結果格納用dictの初期化
+    ranked_results = {cat: [] for cat in UI_THEME.keys()}
+
+    # 検索対象の日付を計算 (YYYY-MM-DD)
+    target_date = (datetime.datetime.now() - datetime.timedelta(days=days)).strftime('%Y-%m-%d')
+
+    try:
+        # execute_read_query ではなく get_db_cursor を使用して直接Rowオブジェクトを取得する
+        with common.get_db_cursor() as cursor:
+            if not cursor:
+                logger.warning("DBカーソルの取得に失敗しました。デフォルト値を使用します。")
+                return ranked_results
+
+            query = f"""
+                SELECT menu_category, COUNT(*) as cnt 
+                FROM {config.SQLITE_TABLE_FOOD} 
+                WHERE timestamp > ?
+                GROUP BY menu_category 
+                ORDER BY cnt DESC
+            """
             
-            # 1. 家電データ
-            cursor.execute(f"SELECT device_name, device_type, power_watts FROM {config.SQLITE_TABLE_SENSOR} WHERE timestamp LIKE ? AND power_watts IS NOT NULL", (f"{today}%",))
+            cursor.execute(query, (target_date,))
             rows = cursor.fetchall()
             
-            tv_cnt, rice, total_w = 0, False, 0
+            if not rows:
+                logger.info("直近の履歴データがありません。デフォルト値を使用します。")
+                return ranked_results
+
+            # 正規表現: "カテゴリ: メニュー (補足)" の形式を解析
+            pattern = re.compile(r"^([^:]+):(.+)")
+
             for row in rows:
-                if "テレビ" in row["device_name"] and row["power_watts"] > 20: tv_cnt += 1
-                if "炊飯器" in row["device_name"] and row["power_watts"] > 5: rice = True
-                if row["device_type"] == "Nature Remo E Lite": total_w += row["power_watts"]
-            
-            # 2. 車データ
-            cursor.execute(f"SELECT action, timestamp FROM {config.SQLITE_TABLE_CAR} WHERE timestamp LIKE ? ORDER BY timestamp", (f"{today}%",))
-            car_rows = cursor.fetchall()
-            
-            car_count = 0
-            last_leave = None
-            total_out_seconds = 0
-            
-            for row in car_rows:
-                action = row["action"]
-                ts = datetime.datetime.fromisoformat(row["timestamp"])
-                
-                if action == "LEAVE":
-                    car_count += 1
-                    last_leave = ts
-                elif action == "RETURN" and last_leave:
-                    duration = (ts - last_leave).total_seconds()
-                    total_out_seconds += duration
-                    last_leave = None # リセット
+                content = row["menu_category"] # Rowオブジェクトなので辞書のようにアクセス可能
+                if not content:
+                    continue
 
-            # === ★追加: 3. 防犯カメラ検知集計 ===
-            cursor.execute(f"SELECT contact_state FROM {config.SQLITE_TABLE_SENSOR} WHERE device_type = 'ONVIF Camera' AND timestamp LIKE ?", (f"{today}%",))
-            cam_rows = cursor.fetchall()
-            
-            cam_msg = "📷 カメラ検知: なし"
-            if cam_rows:
-                total_cam = len(cam_rows)
-                # 種類別にカウント
-                counts = {}
-                for r in cam_rows:
-                    etype = r["contact_state"] # person, vehicle, intrusion etc.
-                    counts[etype] = counts.get(etype, 0) + 1
-                
-                # 表示用ラベル変換
-                label_map = {"intrusion": "🚨侵入", "person": "👤人", "vehicle": "🚗車", "motion": "👀動き"}
-                details = []
-                for k, v in counts.items():
-                    lbl = label_map.get(k, k)
-                    details.append(f"{lbl}:{v}")
-                
-                cam_msg = f"📷 カメラ検知: {total_cam}回 ({' '.join(details)})"
-
-            # === 3. 高砂の開閉カウント (内訳表示版) ===
-            taka_report_str = "👵 高砂の活動: データなし"
-            
-            # 高砂にある接触センサーの設定を取得
-            taka_sensors = [d for d in config.MONITOR_DEVICES if d.get("location") == "高砂" and "Contact" in d.get("type", "")]
-            taka_ids = [d["id"] for d in taka_sensors]
-            
-            if taka_ids:
-                placeholders = ",".join(["?"] * len(taka_ids))
-                # デバイスIDごとに 'open' の回数を集計
-                query = f"""
-                    SELECT device_id, COUNT(*) 
-                    FROM {config.SQLITE_TABLE_SENSOR} 
-                    WHERE timestamp LIKE ? AND device_id IN ({placeholders}) 
-                    AND contact_state = 'open'
-                    GROUP BY device_id
-                """
-                cursor.execute(query, (f"{today}%", *taka_ids))
-                counts_data = cursor.fetchall()
-                
-                # ID -> 名前(設定ファイル) のマッピング
-                id_to_name = {d["id"]: d.get("name", "不明") for d in taka_sensors}
-                
-                details = []
-                total_count = 0
-                
-                for row in counts_data:
-                    did = row["device_id"]
-                    cnt = row[1]
-                    dname = id_to_name.get(did, did)
-                    # "冷蔵庫" などの短い名前にしたい場合、configのnameが短ければそのまま使える
-                    details.append(f"{dname}:{cnt}")
-                    total_count += cnt
-                
-                if total_count > 0:
-                    detail_str = " ".join(details)
-                    taka_report_str = f"👵 高砂の活動(計{total_count}回): {detail_str}"
+                match = pattern.match(content)
+                if match:
+                    cat_raw = match.group(1).strip()
+                    item_raw = match.group(2).strip()
+                    
+                    # サニタイズ: "(手入力)" などのシステム付与文字列を除去
+                    item_clean = item_raw.replace("(手入力)", "").strip()
+                    
+                    # UI設定にあるカテゴリか判定 (部分一致許容: "自炊" in "自炊(その他)")
+                    target_cat = next((key for key in UI_THEME.keys() if key in cat_raw), None)
+                    
+                    if target_cat and item_clean:
+                        # 重複チェック (既存リストに名前がない場合のみ追加)
+                        current_list = ranked_results[target_cat]
+                        if item_clean not in [x[0] for x in current_list]:
+                            current_list.append((item_clean, row["cnt"]))
                 else:
-                    taka_report_str = "👵 高砂の活動: センサー反応なし"
+                    logger.debug(f"Skipping malformed record: {content}")
+
+    except Exception as e:
+        logger.error(f"ランキングデータ取得エラー (Default fallback triggered): {e}", exc_info=True)
+
+    return ranked_results
 
 
-
-            # レポート作成
-            summary = []
-
-            # 高砂の情報を一番上に追加
-            summary.append(taka_report_str)
-            # テレビ (0時間でも表示)
-            tv_hours = tv_cnt * 5 / 60
-            summary.append(f"📺 テレビ: 約{tv_hours:.1f}時間")
-
-            # 炊飯状況を分岐
-            if rice:
-                summary.append("🍚 ご飯: 炊きました")
-            else:
-                summary.append("🍚 ご飯: 炊いていません")
-            if total_w > 0:
-                kwh = total_w * 5 / 60 / 1000
-                summary.append(f"⚡ 今日の電気: {kwh:.2f}kWh (約{int(kwh*31)}円)")
+def fill_defaults_from_config(ranked_data: Dict[str, List[Tuple[str, int]]], limit: int) -> Dict[str, List[Tuple[str, int]]]:
+    """
+    データ不足分を config.MENU_OPTIONS の定義値で埋める。
+    """
+    for cat in ranked_data.keys():
+        current_items = ranked_data[cat]
+        current_names = {x[0] for x in current_items}
+        
+        # config.py からデフォルト候補を取得
+        # configに定義がない場合は空リスト
+        defaults = getattr(config, "MENU_OPTIONS", {}).get(cat, [])
+        
+        for d_item in defaults:
+            if len(current_items) >= limit:
+                break
+            if d_item not in current_names:
+                current_items.append((d_item, 0))
                 
-            if car_count > 0:
-                out_min = total_out_seconds / 60
-                summary.append(f"🚗 車の利用: {car_count}回 (合計 約{int(out_min)}分)")
-            else:
-                summary.append("🚗 車の利用はありませんでした。")
-            
-            # カメラ情報を追加
-            summary.append(cam_msg)
+    return ranked_data
 
-            return "\n".join(summary) + "\n\n" if summary else ""
-        except Exception as e:
-            logger.error(f"集計失敗: {e}")
-            return ""
+
+def create_food_flex_container(ranked_data: Dict[str, List[Tuple[str, int]]]) -> FlexContainer:
+    """Flex Messageのコンテナを構築 (UI生成)"""
+    
+    body_contents = []
+    
+    for i, cat_key in enumerate(UI_THEME.keys()):
+        theme = UI_THEME[cat_key]
+        items = ranked_data.get(cat_key, [])
+        
+        # セクションヘッダー
+        body_contents.append({
+            "type": "text",
+            "text": f"{theme['label']} (よく使う)",
+            "size": "xs",
+            "color": "#999999",
+            "weight": "bold",
+            "margin": "lg"
+        })
+        
+        # ランキングボタン
+        for item_name, _ in items[:RANKING_LIMIT]:
+            display_label = (item_name[:18] + '..') if len(item_name) > 20 else item_name
+            
+            body_contents.append({
+                "type": "button",
+                "style": "secondary",
+                "height": "sm",
+                "action": {
+                    "type": "postback",
+                    "label": f"{theme['prefix']} {display_label}",
+                    "data": f"action=food_record_direct&category={cat_key}&item={item_name}"
+                },
+                "margin": "xs"
+            })
+            
+        # 「その他」手入力ボタン
+        body_contents.append({
+            "type": "button",
+            "style": "link",
+            "height": "sm",
+            "action": {
+                "type": "postback",
+                "label": f"✏️ その他 ({cat_key})",
+                "data": f"action=food_manual&category={cat_key}"
+            },
+            "margin": "none"
+        })
+        
+        if i < len(UI_THEME) - 1:
+             body_contents.append({"type": "separator", "margin": "md"})
+
+    bubble = {
+        "type": "bubble",
+        "header": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {"type": "text", "text": "🍽️ 今日の夕食は？", "weight": "bold", "size": "xl", "color": "#FFFFFF"},
+                {"type": "text", "text": "タップでかんたん記録", "size": "xs", "color": "#FFFFFFEE"}
+            ],
+            "backgroundColor": "#E67A7A",
+            "paddingAll": "20px"
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": body_contents
+        },
+        "footer": {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                 {
+                    "type": "button",
+                    "action": {"type": "postback", "label": "スキップ", "data": "action=food_skip"},
+                    "color": "#AAAAAA"
+                }
+            ]
+        }
+    }
+    return FlexContainer.from_dict(bubble)
+
+
+def main():
+    logger.info("--- 夕食アンケート処理開始 (v2.2 Stable) ---")
+    
+    try:
+        # 1. データ取得
+        raw_data = fetch_frequent_menus(days=LOOKBACK_DAYS)
+        
+        # 2. デフォルト値充填
+        filled_data = fill_defaults_from_config(raw_data, limit=RANKING_LIMIT)
+        
+        # 3. Flex Message構築
+        flex_content = create_food_flex_container(filled_data)
+        msg = FlexMessage(altText="今日の夕食アンケートが届きました🍽️", contents=flex_content)
+        
+        # 4. 送信
+        if common.send_push(config.LINE_USER_ID, [msg], target="line"):
+            logger.info("送信完了✨")
+        else:
+            logger.error("送信失敗 (send_push returned False)")
+            sys.exit(1)
+            
+    except Exception as e:
+        logger.critical(f"予期せぬエラーで中断しました: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    logger.info("質問送信処理を開始...")
-    report = get_daily_summary()
-    
-    # アクション定義
-    actions_data = [
-        ("🏠 自炊",   "action=food_answer&value=self_cook",   "自炊しました"),
-        ("🍜 外食",   "action=food_answer&value=eating_out",  "外食しました"),
-        ("🍱 その他", "action=food_answer&value=other",       "その他"),
-        ("スキップ",  "action=food_answer&value=skip",        "回答をスキップ")
-    ]
-
-    # ▼▼▼ v3対応: QuickReplyオブジェクトの構築 ▼▼▼
-    items = []
-    for label, data, display_text in actions_data:
-        items.append(QuickReplyItem(
-            action=PostbackAction(
-                label=label,
-                data=data,
-                displayText=display_text
-            )
-        ))
-    
-    quick_reply = QuickReply(items=items)
-    # ▲▲▲ ▲▲▲
-    
-    now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-    target_platform = "line" 
-    
-    # メッセージ本文
-    msg_text = f"{report}こんばんは！\n今日の夕食はどうしましたか？🍽️"
-
-    # ▼▼▼ v3対応: TextMessageオブジェクトとして構築 ▼▼▼
-    # common.send_push に v3 オブジェクトを渡します
-    payload = TextMessage(text=msg_text, quickReply=quick_reply)
-    
-    if common.send_push(config.LINE_USER_ID, [payload], target=target_platform):
-        logger.info("送信完了✨")
-    else:
-        logger.error("送信失敗")
-        sys.exit(1)
+    main()
