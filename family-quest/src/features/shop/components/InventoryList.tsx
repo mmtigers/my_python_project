@@ -5,15 +5,9 @@ import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { useSound } from '../../../hooks/useSound';
 import { Loader2, PackageOpen, Clock, AlertCircle } from 'lucide-react';
+import { InventoryItem } from '../../../types';
 
-type InventoryItem = {
-    id: number;
-    title: string;
-    icon: string;
-    desc: string;
-    status: 'owned' | 'pending' | 'consumed';
-    purchased_at: string;
-};
+
 
 type Props = {
     userId: string;
@@ -22,31 +16,48 @@ type Props = {
 export const InventoryList: React.FC<Props> = ({ userId }) => {
     const queryClient = useQueryClient();
     const { play } = useSound();
+    const queryKey = ['inventory', userId]; // QueryKeyを定数化
 
     // データ取得
-    const { data: items, isLoading } = useQuery({
-        queryKey: ['inventory', userId],
+    const { data: items, isLoading } = useQuery<InventoryItem[]>({ // 型引数を指定
+        queryKey: queryKey,
         queryFn: () => apiClient.fetchInventory(userId),
         refetchInterval: 5000
     });
 
     const useMutationAction = useMutation({
         mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),
-        onSuccess: (data) => {
-            queryClient.invalidateQueries({ queryKey: ['inventory', userId] });
-            // 即時消費か承認待ちかで音を変える
-            if (data.status === 'consumed') {
-                play('clear'); // ★ここを修正 (quest_clear -> clear)
-            } else {
-                play('select');
-            }
+        onSuccess: (data, variables) => {
+            const usedInventoryId = variables; // 使用したアイテムID
+
+            // ★追加: 即時反映処理 (Optimistic Update like behavior)
+            // サーバーからの応答を待たず、または応答直後にキャッシュを書き換えてアイテムを消す
+            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
+                if (!oldItems) return [];
+                // consumed(使用済み)になったアイテムをリストから除外
+                return oldItems.filter(item => item.id !== usedInventoryId);
+            });
+
+            // 念のためサーバーとも同期
+            queryClient.invalidateQueries({ queryKey: queryKey });
+
+            // ★変更: 承認不要なので常にクリア音を再生
+            play('clear');
         }
     });
 
     const cancelMutation = useMutation({
         mutationFn: (inventoryId: number) => apiClient.cancelItemUsage(userId, inventoryId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['inventory', userId] });
+        onSuccess: (data, variables) => {
+            // キャンセル時も即座にステータスを戻す
+            const targetId = variables;
+            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
+                if (!oldItems) return [];
+                return oldItems.map(item =>
+                    item.id === targetId ? { ...item, status: 'owned' } : item
+                );
+            });
+            queryClient.invalidateQueries({ queryKey: queryKey });
             play('cancel');
         }
     });
@@ -79,8 +90,8 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                     <Card
                         key={item.id}
                         className={`relative overflow-hidden transition-all duration-300 transform hover:scale-[1.02] ${isPending
-                                ? 'bg-amber-50 border-amber-300 shadow-amber-100 ring-2 ring-amber-200'
-                                : 'bg-white border-slate-200 shadow-sm hover:shadow-md'
+                            ? 'bg-amber-50 border-amber-300 shadow-amber-100 ring-2 ring-amber-200'
+                            : 'bg-white border-slate-200 shadow-sm hover:shadow-md'
                             }`}
                     >
                         {/* 背景装飾 */}
@@ -118,7 +129,8 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                         size="md"
                                         className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md active:scale-95 transition-all"
                                         onClick={() => {
-                                            if (confirm(`「${item.title}」を使いますか？\n（パパ・ママに通知がいきます）`)) {
+                                            // ★変更: 「パパ・ママに通知がいきます」の文言を削除
+                                            if (confirm(`「${item.title}」を使いますか？`)) {
                                                 useMutationAction.mutate(item.id);
                                             }
                                         }}
@@ -129,6 +141,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                     </Button>
                                 )}
 
+                                {/* 既存機能維持: 過去データ等でpendingのものがあれば表示する */}
                                 {isPending && (
                                     <div className="flex items-center justify-between bg-amber-100/50 p-2 rounded-lg">
                                         <div className="flex items-center gap-2 text-amber-700 text-sm font-bold animate-pulse">
@@ -138,6 +151,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                         <button
                                             className="text-xs text-slate-400 underline hover:text-slate-600 px-2 py-1"
                                             onClick={() => cancelMutation.mutate(item.id)}
+                                            disabled={cancelMutation.isPending}
                                         >
                                             やめる
                                         </button>

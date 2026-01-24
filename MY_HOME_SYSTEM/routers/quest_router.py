@@ -147,6 +147,11 @@ class InventoryItem(BaseModel):
     purchased_at: str
     used_at: Optional[str] = None
 
+# ★追加: アイテム使用レスポンスモデル (Pydantic)
+class UseItemResponse(BaseModel):
+    status: str
+    message: str
+
 # Action Models
 class UseItemAction(BaseModel):
     user_id: str
@@ -741,8 +746,9 @@ class InventoryService:
             return [dict(row) for row in rows]
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
-        """子供がアイテムを使用する（申請 or 即時使用）"""
+        """アイテムを使用する（全ユーザー即時使用・承認なし）"""
         with common.get_db_cursor(commit=True) as cur:
+            # アイテム情報の取得とバリデーション（既存維持）
             sql = """
                 SELECT ui.*, rm.title, qu.name as user_name
                 FROM user_inventory ui
@@ -756,46 +762,35 @@ class InventoryService:
             if item['user_id'] != user_id: raise HTTPException(403, "Not your item")
             if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
 
-            # 承認フローが有効かどうか
-            if config.ENABLE_APPROVAL_FLOW:
-                cur.execute("""
-                    UPDATE user_inventory 
-                    SET status = 'pending', used_at = ? 
-                    WHERE id = ?
-                """, (common.get_now_iso(), inventory_id))
-                
-                # 通知送信
-                self._send_approval_request(item)
+            now_iso = common.get_now_iso()
 
-                sound_manager.play("select")
-                
-                # ★修正②: 誰に承認を求めるかメッセージを分岐
-                if user_id == 'dad':
-                    msg = "使いました！ママ(はるな)に承認してもらってね"
-                elif user_id == 'mom':
-                    msg = "使いました！パパ(まさひろ)に承認してもらってね"
-                else:
-                    msg = "使いました！パパ・ママに承認してもらってね"
-
-                return {"status": "pending", "message": msg}
+            # ★変更点: 承認フローの設定(ENABLE_APPROVAL_FLOW)に関わらず、即時消費させる
             
-            else:
-                # 承認フロー無効 (即時使用)
-                cur.execute("""
-                    UPDATE user_inventory 
-                    SET status = 'consumed', used_at = ? 
-                    WHERE id = ?
-                """, (common.get_now_iso(), inventory_id))
+            # 1. ステータスを 'consumed' に更新
+            cur.execute("""
+                UPDATE user_inventory 
+                SET status = 'consumed', used_at = ? 
+                WHERE id = ?
+            """, (now_iso, inventory_id))
 
-                msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
-                notification_service.send_push(
-                    user_id=config.LINE_USER_ID, 
-                    messages=[{"type": "text", "text": msg}],
-                    priority="normal"
-                )
+            # ★追加: 冒険の記録(ログ)に残すために quest_history に挿入する
+            # quest_id はダミー(0など)で、タイトルに「アイテム使用: 〇〇」を入れる
+            log_title = f"アイテム使用: {item['title']}"
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES (?, 0, ?, 0, 0, ?, 'approved')
+            """, (user_id, log_title, now_iso))
 
-                sound_manager.play("quest_clear")
-                return {"status": "consumed", "message": "アイテムを使いました！"}
+            # 2. 使用通知を送信 (承認依頼ではなく報告)
+            msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
+            notification_service.send_push(
+                user_id=config.LINE_USER_ID, 
+                messages=[{"type": "text", "text": msg}]
+            )
+            # 3. 効果音再生
+            sound_manager.play("quest_clear")
+
+            return {"status": "consumed", "message": "アイテムを使いました！"}
     
     def _send_approval_request(self, item):
         """承認依頼通知を送る処理"""
@@ -1225,7 +1220,7 @@ inventory_service = InventoryService() # インスタンス化
 def get_inventory(user_id: str):
     return inventory_service.get_user_inventory(user_id)
 
-@router.post("/inventory/use")
+@router.post("/inventory/use", response_model=UseItemResponse)
 def use_item(action: UseItemAction):
     return inventory_service.use_item(action.user_id, action.inventory_id)
 
@@ -1240,3 +1235,4 @@ def cancel_item_usage(action: UseItemAction):
 @router.get("/inventory/admin/pending")
 def get_admin_pending_inventory():
     return inventory_service.get_pending_items()
+
