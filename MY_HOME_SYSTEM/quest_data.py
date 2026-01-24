@@ -58,6 +58,7 @@ QUESTS = [
     {'id': 5, 'title': 'お風呂にはいる', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🛁', 'start_time': '17:00', 'end_time': '21:00', 'desc': '一日の汚れを落としてさっぱりしよう'},
     {'id': 7, 'title': 'ルンバの水交換', 'type': 'daily', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'days': '6', 'desc': '掃除ロボットのメンテナンス任務'},
     {'id': 901, 'title': 'お皿洗い', 'type': 'infinite', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
+    
 
     # ------------------------------------------
     # 2-2. パパ (Dad) - 通勤ハックと家計防衛
@@ -76,7 +77,9 @@ QUESTS = [
     
     # [Housework]
     {'id': 12, 'title': '食器の片づけ・キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'desc': 'シンクをピカピカにして明日を迎える'},
-    {'id': 15, 'title': '洗濯物ミッション (干す/畳む/しまう)', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 60, 'icon': '👕', 'desc': '洗濯関連のタスクをどれか一つ遂行'},
+    {'id': 15, 'title': '洗濯物を干す', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
+    {'id': 16, 'title': '洗濯物を畳む', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
+    {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
     {'id': 60, 'title': 'お風呂掃除', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
     {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '16:00', 'end_time': '20:00'},
@@ -93,13 +96,20 @@ QUESTS = [
     {'id': 23, 'title': '日中の家庭運営・育児基本給', 'type': 'daily', 'target': 'mom', 'category': 'work', 'difficulty': 'S', 'exp': 250, 'gold': 50, 'icon': '🏠', 'desc': '見えない家事と育児への報酬'},
     
     # [Housework Pack] - 細かい洗濯タスク等を統合
-    {'id': 2001, 'title': '洗濯マスター (干す・畳む・収納)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 100, 'gold': 80, 'icon': '🧺', 'desc': '洗濯物クエスト一括達成ボーナス'},
-    
+    {'id': 15, 'title': '洗濯物を干す', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
+    {'id': 16, 'title': '洗濯物を畳む', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
+    {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
+   
     # [Garbage]
-    {'id': 1003, 'title': 'ゴミまとめ・分別', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'desc': '家中のゴミを集めてパパへパス'},
-
+    {'id': 1000, 'title': 'ゴミ捨て (燃えるゴミ)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '0,3', 'desc': '月・木は必ず遂行せよ', 'start_time': '08:00', 'end_time': '12:00'},
+    {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
+    {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
+    
     # [Family Management]
     {'id': 22, 'title': '子供の寝かしつけ', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '🛌', 'start_time': '20:00', 'end_time': '23:30', 'desc': '今日も一日お疲れ様。良い夢を'},
+    {'id': 1006, 'title': '幼稚園の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '✍️', 'days': '0,1,2,3,4', 'desc': '毎日の体調と様子を報告'},
+    {'id': 1007, 'title': 'みらいの連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
+    {'id': 1008, 'title': '休日の朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
     {'id': 1006, 'title': '連絡帳記入 (幼稚園/療育)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '✍️', 'desc': '先生への報告業務'},
     
     # [Self Care]
@@ -110,8 +120,8 @@ QUESTS = [
     # 2-4. 智矢 (Son) - 新1年生・準備パック
     # ------------------------------------------
     # 【NEW】ルーティンパック (バラバラのタスクを統合してスッキリ表示)
-    {'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 80, 'icon': '🌅', 'start_time': '06:30', 'end_time': '08:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん完食。全部できたらクリア！'},
-    {'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 70, 'icon': '🌙', 'start_time': '19:00', 'end_time': '21:00', 'desc': 'トイレ・歯磨き・お片付け完了。パパママにおやすみなさい！'},
+    {'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 80, 'icon': '🌅', 'start_time': '06:30', 'end_time': '08:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん完食。全部できたらクリア！'},
+    {'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 70, 'icon': '🌙', 'start_time': '19:00', 'end_time': '21:00', 'desc': 'トイレ・歯磨き・お片付け完了。パパママにおやすみなさい！'},
 
     # 【NEW】小学校準備・プレ実装
     {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
@@ -123,10 +133,23 @@ QUESTS = [
     {'id': 31, 'title': '算数プリント (強化中)', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。2枚やれば160Gゲット！'},
     {'id': 45, 'title': 'ピアノの練習', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
     {'id': 1009, 'title': '習い事：みらい / ピアノ', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
+    {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
+    
 
     # [Moral & Help]
     {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
-    {'id': 53, 'title': '「ありがとう」を言う', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🗣️', 'desc': '感謝の魔法'},
+    # {'id': 53, 'title': '「ありがとう」を言う', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🗣️', 'desc': '感謝の魔法'},
+    {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
+    # 修正: 週末(土-日)は '5,6'
+    {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
+    # 修正: 週末(土-日)は '5,6'
+    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
+    
+    # [Hero Pack]
+    {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
+    {'id': 1021, 'title': '明日の装備確認', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 20, 'icon': '🎒', 'desc': 'カバンの中身を全部出して再点検'},
+    {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
+
     
     # ------------------------------------------
     # 2-5. 涼花 (Daughter)
@@ -177,19 +200,31 @@ REWARDS = [
     {'id': 102, 'title': 'SHARP ヘルシオ ホットクック', 'category': 'item', 'cost_gold': 60000, 'icon_key': '🍲', 'desc': '家事の時間を減らして家族の時間を増やす魔法の鍋'},
     
     # Legend Reward
-    {'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 700000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状'},
+    {'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状'},
 ]
 
 # ==========================================
 # 4. 装備品定義 (Equipment)
 # ==========================================
 EQUIPMENTS = [
+    # --- 武器 (Weapon) ---
     {'id': 1, 'name': 'ひのきのぼう', 'type': 'weapon', 'power': 2, 'cost': 30, 'icon': '🪵', 'desc': '旅立ちの第一歩。安い。'},
     {'id': 2, 'name': '銅の剣', 'type': 'weapon', 'power': 10, 'cost': 200, 'icon': '🗡️', 'desc': '少し強くなった気がする剣。'},
+    {'id': 5, 'name': '鉄の槍', 'type': 'weapon', 'power': 18, 'cost': 450, 'icon': '🔱', 'desc': 'リーチが長い。'},
     {'id': 3, 'name': '鋼の剣', 'type': 'weapon', 'power': 25, 'cost': 800, 'icon': '⚔️', 'desc': '一人前の証。'},
+    {'id': 6, 'name': 'はじゃのつるぎ', 'type': 'weapon', 'power': 35, 'cost': 1500, 'icon': '🎇', 'desc': '光り輝く刀身。'},
+    {'id': 7, 'name': 'ドラゴンキラー', 'type': 'weapon', 'power': 45, 'cost': 3000, 'icon': '🐉', 'desc': 'ドラゴン特攻がある気がする。'},
     {'id': 4, 'name': '勇者の剣', 'type': 'weapon', 'power': 60, 'cost': 5000, 'icon': '✨', 'desc': '伝説の勇者が使っていた剣。'},
+    {'id': 8, 'name': 'メタルキングの剣', 'type': 'weapon', 'power': 100, 'cost': 15000, 'icon': '👑', 'desc': '最強の破壊力。'},
+
+    # --- 防具 (Armor) ---
     {'id': 101, 'name': '布の服', 'type': 'armor', 'power': 3, 'cost': 50, 'icon': '👕', 'desc': 'ただの服。'},
+    {'id': 105, 'name': '旅人の服', 'type': 'armor', 'power': 6, 'cost': 100, 'icon': '🧥', 'desc': '動きやすい服。'},
+    {'id': 102, 'name': '皮の鎧', 'type': 'armor', 'power': 10, 'cost': 200, 'icon': '🦺', 'desc': '軽くて丈夫。'},
+    {'id': 106, 'name': 'みかわしの服', 'type': 'armor', 'power': 15, 'cost': 600, 'icon': '💃', 'desc': '攻撃をよけやすくなる。'},
     {'id': 103, 'name': '鉄の鎧', 'type': 'armor', 'power': 25, 'cost': 800, 'icon': '🛡️', 'desc': '重いが防御力は高い。'},
+    {'id': 107, 'name': '魔法の鎧', 'type': 'armor', 'power': 35, 'cost': 2000, 'icon': '🔮', 'desc': '魔法耐性がつくかもしれない。'},
+    {'id': 104, 'name': '光の鎧', 'type': 'armor', 'power': 50, 'cost': 5000, 'icon': '🌟', 'desc': '歩くたびにHPが回復する気分になれる。'},
     {'id': 108, 'name': 'メタルキングの鎧', 'type': 'armor', 'power': 90, 'cost': 12000, 'icon': '💎', 'desc': '全てを跳ね返す最強の鎧。'},
 ]
 
@@ -199,6 +234,9 @@ EQUIPMENTS = [
 # 子供の「敵」を具現化し、倒す（克服する）対象として設定
 BOSSES = [
     {'id': 1, 'name': 'ホコリ・スライム', 'hp': 200, 'exp': 100, 'gold': 100, 'icon': '🦠', 'desc': '部屋の隅から生まれた魔物。弱い。'},
+    {'id': 2, 'name': 'ヌギッパ・ウルフ', 'hp': 600, 'exp': 300, 'gold': 300, 'icon': '🐺', 'desc': '服を脱ぎっぱなしにする獣。'},
+    {'id': 3, 'name': 'ゾンビ・ディッシュ', 'hp': 1500, 'exp': 800, 'gold': 800, 'icon': '🧟', 'desc': '洗い場に溜まった皿の怨念。'},
+    
     {'id': 4, 'name': '散らかりドラゴン', 'hp': 3000, 'exp': 2000, 'gold': 2000, 'icon': '🐉', 'desc': '全てを散乱させる巨竜。'},
     {'id': 5, 'name': '魔王カジ・ホウキ', 'hp': 10000, 'exp': 10000, 'gold': 10000, 'icon': '😈', 'desc': '家事の根源にしてラスボス。'},
     
