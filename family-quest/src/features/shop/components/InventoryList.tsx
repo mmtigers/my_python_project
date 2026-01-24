@@ -27,7 +27,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
 
     const useMutationAction = useMutation({
         mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),
-        onSuccess: (data, variables) => {
+        onSuccess: (_data, variables) => {
             const usedInventoryId = variables; // 使用したアイテムID
 
             // ★追加: 即時反映処理 (Optimistic Update like behavior)
@@ -48,7 +48,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
 
     const cancelMutation = useMutation({
         mutationFn: (inventoryId: number) => apiClient.cancelItemUsage(userId, inventoryId),
-        onSuccess: (data, variables) => {
+        onSuccess: (_data, variables) => {
             // キャンセル時も即座にステータスを戻す
             const targetId = variables;
             queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
