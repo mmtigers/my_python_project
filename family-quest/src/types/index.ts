@@ -106,6 +106,18 @@ export interface Boss {
     weekStartDate: string;
 }
 
+// ★追加: インベントリアイテムの型定義
+export interface InventoryItem {
+    id: number;
+    reward_id: number;
+    title: string;
+    icon: string;
+    desc: string;
+    status: 'owned' | 'pending' | 'consumed';
+    purchased_at: string;
+    category?: string;
+}
+
 // ★修正: APIレスポンス (CompleteResponse相当) に演出用データが含まれる場合がある
 export interface QuestResult {
     status: string;
