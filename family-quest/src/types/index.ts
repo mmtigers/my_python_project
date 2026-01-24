@@ -70,8 +70,12 @@ export interface Reward {
     id?: ID;
     reward_id?: ID;
     title: string;
-    desc?: string;
-    category?: string; // food, service, item
+
+    // ★修正: DBカラム(description)とpythonデータ(desc)の両方に対応できるようにします
+    desc?: string;        // Python/MasterData由来
+    description?: string; // DB Select由来 (今回追加)
+
+    category?: string;    // food, service, item
 
     cost: number;      // 統一用
     cost_gold?: number; // API生データ用

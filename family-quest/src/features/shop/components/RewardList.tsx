@@ -24,7 +24,11 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy }) => 
       {rewards.map((reward, index) => {
         const cost = reward.cost_gold || reward.cost || 0;
         const canAfford = userGold >= cost;
+
         const rId = reward.reward_id || reward.id || index;
+
+        // ★追加: 説明文の優先順位ロジック
+        const displayText = reward.description || reward.desc || reward.category || 'General';
 
         return (
           <Card
@@ -37,19 +41,26 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy }) => 
                 : 'border-gray-700 bg-gray-900/50 opacity-60 cursor-not-allowed grayscale'}
             `}
           >
-            <div className="flex items-center gap-3">
-              <span className="text-2xl filter drop-shadow-lg">{reward.icon || reward.icon_key || '🎁'}</span>
-              <div>
-                <div className={`font-bold ${canAfford ? 'text-white' : 'text-gray-400'}`}>
+            {/* ★変更: 左側のアイコンとテキストエリア (overflow-hiddenではみ出し防止) */}
+            <div className="flex items-center gap-3 overflow-hidden">
+              <span className="text-2xl filter drop-shadow-lg flex-shrink-0">
+                {reward.icon || reward.icon_key || '🎁'}
+              </span>
+
+              {/* ★変更: テキストエリア (min-w-0で縮小を許可) */}
+              <div className="min-w-0">
+                <div className={`font-bold truncate ${canAfford ? 'text-white' : 'text-gray-400'}`}>
                   {reward.title}
                 </div>
-                <div className="text-xs text-gray-400 uppercase tracking-wider">
-                  {reward.category || 'General'}
+                {/* ★変更: uppercase削除、2行まで表示、文字サイズ調整 */}
+                <div className="text-[10px] text-gray-300 leading-tight line-clamp-2">
+                  {displayText}
                 </div>
               </div>
             </div>
 
-            <div className={`flex items-center gap-1 font-bold ${canAfford ? 'text-yellow-300' : 'text-red-400'}`}>
+            {/* ★変更: 右側の価格エリア (flex-shrink-0で価格が潰れるのを防ぐ) */}
+            <div className={`flex-shrink-0 flex items-center gap-1 font-bold pl-2 ${canAfford ? 'text-yellow-300' : 'text-red-400'}`}>
               {cost.toLocaleString()} <span className="text-[10px]">G</span>
               {!canAfford && <span className="text-[10px] ml-1">(不足)</span>}
             </div>

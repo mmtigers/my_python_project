@@ -66,6 +66,8 @@ class MasterReward(BaseModel):
     category: str
     cost_gold: int
     icon_key: str
+    # ★追加: quest_data.pyのdescを受け取るフィールド
+    desc: Optional[str] = None
 
 class MasterEquipment(BaseModel):
     id: int
@@ -918,21 +920,40 @@ class GameSystem:
                     q.start_date, q.end_date, 
                     q.chance, q.start_time, q.end_time
                 ))
+            
+            # -----------------------------------------------------
+            # ★追加: reward_masterテーブルへのカラム追加マイグレーション
+            # 既存システムへの影響を最小限にするため、ここで動的にチェックします
+            # -----------------------------------------------------
+            try:
+                # カラムが存在するか確認（ダミー検索）
+                cur.execute("SELECT description FROM reward_master LIMIT 1")
+            except Exception:
+                # エラー（カラムなし）の場合、ALTER TABLEを実行
+                logger.info("⚠️ 'description' column missing in reward_master. Adding it now...")
+                cur.execute("ALTER TABLE reward_master ADD COLUMN description TEXT")
+
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
                 cur.execute(f"DELETE FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids)
             else:
                 cur.execute("DELETE FROM reward_master")
-
+            
             for r in valid_rewards:
+                # ★修正: descriptionカラムへの保存を追加
                 cur.execute("""
-                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(reward_id) DO UPDATE SET
-                        title = excluded.title, category = excluded.category,
-                        cost_gold = excluded.cost_gold, icon_key = excluded.icon_key
-                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key))
+                        title = excluded.title, 
+                        category = excluded.category,
+                        cost_gold = excluded.cost_gold, 
+                        icon_key = excluded.icon_key,
+                        description = excluded.description
+                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc))
+
+            
             
             active_e_ids = [e.id for e in valid_equipments]
             if active_e_ids:
