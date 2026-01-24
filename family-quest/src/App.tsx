@@ -262,7 +262,7 @@ function App() {
                 className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'guild' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'
                   }`}
               >
-                <Scroll size={20} className="mb-1" /> ギルド
+                <Scroll size={20} className="mb-1" /> ギルド（開発中）
               </button>
             </div>
 
