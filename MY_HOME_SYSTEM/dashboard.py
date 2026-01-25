@@ -1041,6 +1041,11 @@ def render_electricity_tab(df_sensor: pd.DataFrame, now: datetime):
 
 
 def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
+    if df_sensor.empty or "device_type" not in df_sensor.columns:
+        st.info("データがありません")
+        return
+    
+    
     # 今日の推移
     st.subheader("🌡️ 室温・湿度 (今日の推移)")
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
