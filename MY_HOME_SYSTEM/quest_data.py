@@ -82,7 +82,7 @@ QUESTS = [
     {'id': 17, 'title': '洗濯物をしまう', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
     {'id': 60, 'title': 'お風呂掃除', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
-    {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '16:00', 'end_time': '20:00'},
+    {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '15:00', 'end_time': '20:00'},
     
     # [Garbage Disposal] - 時間指定を緩和 (出勤時についで出し)
     {'id': 1000, 'title': 'ゴミ出しミッション', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🗑️', 'desc': '出勤時にゴミ集積所へドロップ'},

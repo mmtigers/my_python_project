@@ -161,8 +161,8 @@ def main() -> None:
     
     # デバイス名のキャッシュ更新
     if not sb_tool.fetch_device_name_cache():
-        logger.error("デバイスリストの取得に失敗したため中断します")
-        sys.exit(1)
+        logger.warning("デバイスリスト取得失敗。config定義名を使用して継続します。")
+    # sys.exit(1) を削除し、処理を続行させる
     
     # config.MONITOR_DEVICES は List[Dict] を想定
     for s in config.MONITOR_DEVICES:
