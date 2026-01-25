@@ -8,6 +8,8 @@ import uuid
 import config 
 import common
 from models.switchbot import DeviceStatusResponse
+import logging
+logger = logging.getLogger(__name__) # または core.logger から取得
 
 DEVICE_NAME_CACHE = {}
 
@@ -57,8 +59,9 @@ def fetch_device_name_cache():
             print(f"[SUCCESS] {len(DEVICE_NAME_CACHE)} 個のデバイス名をキャッシュしました。")
             return True
     except Exception as e:
-        print(f"[ERROR] デバイスリスト取得失敗: {e}")
-    return False
+        # exc_info=True でスタックトレースをログに残す
+        logger.error(f"デバイスリスト取得失敗: {e}", exc_info=True)
+        return False
 
 def get_device_name_by_id(device_id):
     """IDから名前を検索する関数"""
