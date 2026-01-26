@@ -78,6 +78,8 @@ class AppConfig:
     SHORT_SLEEP_SECONDS: int = 5
     MIN_FREE_SPACE_GB: int = 50
     
+    # 【追加】機能フラグ: 環境変数で制御可能にする (デフォルトはFalse=無効のまま維持)
+    ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"
     BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR", "/mnt/nas/ddd"))
     LIST_FILE_PATH: Path = CURRENT_DIR / "list.txt"
     LIST_DIR_PATH: Path = CURRENT_DIR / "list"
@@ -327,10 +329,12 @@ class BatchDownloader:
         self._shutdown_requested = True
 
     def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
-        # 【修正】YouTube関連のURLが含まれていたらスキップする判定を追加
+        # 【修正】ハードコードではなく、設定フラグで制御するように変更
         if "youtube.com" in url or "youtu.be" in url:
-            logger.info(f"🚫 YouTube機能は現在無効化されているためスキップします: {url}")
-            return None
+            if not CONFIG.ENABLE_YOUTUBE_DL:
+                logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")
+                return None
+            # 有効な場合は通常のフローへ進む
 
         # 既存のロジック: tktubeなら専用ストラテジー、それ以外はUniversal
         if "tktube" in url:
