@@ -125,7 +125,7 @@ QUESTS = [
 
     # 【NEW】小学校準備・プレ実装
     {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
-    {'id': 1102, 'title': '明日の装備チェック', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'D', 'exp': 40, 'gold': 30, 'icon': '🎒', 'desc': 'GPS・ハンカチ・ティッシュ・時間割を確認'},
+    # {'id': 1102, 'title': '明日の装備チェック', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'D', 'exp': 40, 'gold': 30, 'icon': '🎒', 'desc': 'GPS・ハンカチ・ティッシュ・時間割を確認'},
 
     # [Study] - 報酬大幅UP (30G -> 80G)
     {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},

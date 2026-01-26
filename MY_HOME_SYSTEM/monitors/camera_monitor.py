@@ -1,6 +1,9 @@
 # MY_HOME_SYSTEM/monitors/camera_monitor.py
 import os
 import sys
+# 【修正】型ヒント用ライブラリ追加
+from typing import Optional, Dict, Any, Tuple, List
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
@@ -23,6 +26,9 @@ from concurrent.futures import ThreadPoolExecutor
 import traceback
 import signal
 import requests
+# 【修正】明確な例外クラスのインポート
+from http.client import RemoteDisconnected
+from urllib3.exceptions import ProtocolError
 from onvif import ONVIFCamera
 from onvif.client import ONVIFService
 from requests.auth import HTTPDigestAuth
@@ -32,7 +38,8 @@ logger = setup_logging("camera")
 logging.getLogger("zeep").setLevel(logging.ERROR) 
 
 # プロセス終了時にUnsubscribeするために保持
-active_pullpoints = []
+# 【修正】型ヒント追加
+active_pullpoints: List[Any] = []
 
 def cleanup_handler(signum, frame):
     """プロセス終了シグナルを受け取った時のクリーンアップ処理"""
@@ -60,7 +67,7 @@ if not os.path.exists(ASSETS_DIR):
 BINDING_NAME = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 
 # 優先度定義
-PRIORITY_MAP = {
+PRIORITY_MAP: Dict[str, int] = {
     "intrusion": 100, "person": 80, "vehicle": 50, "motion": 10
 }
 
@@ -68,7 +75,7 @@ PRIORITY_MAP = {
 RENEW_INTERVAL = 60      
 RENEW_DURATION = "PT600S"
 
-def find_wsdl_path():
+def find_wsdl_path() -> Optional[str]:
     for path in sys.path:
         if 'site-packages' in path and os.path.exists(path):
             candidate = os.path.join(path, 'onvif', 'wsdl')
@@ -80,7 +87,7 @@ def find_wsdl_path():
 
 WSDL_DIR = find_wsdl_path()
 
-def close_camera_connection(mycam):
+def close_camera_connection(mycam: Any) -> None:
     if not mycam: return
     try:
         services = [
@@ -93,12 +100,12 @@ def close_camera_connection(mycam):
         for svc in services:
             if svc and hasattr(svc, 'zeep_client'):
                 try: svc.zeep_client.transport.session.close()
-                except: pass
+                except Exception: pass
         if hasattr(mycam, 'transport') and hasattr(mycam.transport, 'session'):
              mycam.transport.session.close()
     except Exception: pass
 
-def analyze_event_type(xml_str):
+def analyze_event_type(xml_str: str) -> Tuple[Optional[str], Optional[str], int, Optional[str]]:
     if 'Value="true"' not in xml_str and 'State="true"' not in xml_str:
         return None, None, 0, None
 
@@ -108,7 +115,7 @@ def analyze_event_type(xml_str):
             start = xml_str.find('Rule="') + 6
             end = xml_str.find('"', start)
             rule_name = xml_str[start:end]
-        except: pass
+        except Exception: pass
 
     # 1. 侵入・ライン通過
     if ('Name="IsIntrusion"' in xml_str or 'Name="IsLineCross"' in xml_str or 
@@ -129,7 +136,7 @@ def analyze_event_type(xml_str):
 
     return None, None, 0, None
 
-def capture_live_snapshot(cam_conf, mycam=None):
+def capture_live_snapshot(cam_conf: Dict[str, Any], mycam: Any = None) -> Optional[bytes]:
     """
     【追加機能】カメラから直接ライブ静止画を取得する (NVRフォールバック用)
     """
@@ -165,7 +172,7 @@ def capture_live_snapshot(cam_conf, mycam=None):
             
     return None
 
-def capture_snapshot_from_nvr(cam_conf, target_time=None):
+def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime] = None) -> Optional[bytes]:
     """
     NAS上の録画データから、指定時刻の画像を切り出す
     """
@@ -209,7 +216,7 @@ def capture_snapshot_from_nvr(cam_conf, target_time=None):
             # ラグ確認用ログ
             time_lag = (datetime.now() - start_dt).total_seconds()
             logger.info(f"🔍 [NVR] File: {os.path.basename(target_file)}, Lag: {time_lag:.1f}s, Seek: {seek_seconds:.1f}s")
-        except:
+        except Exception:
             seek_seconds = 0
             
         if seek_seconds < 0: seek_seconds = 0
@@ -241,7 +248,7 @@ def capture_snapshot_from_nvr(cam_conf, target_time=None):
         logger.error(f"❌ [NVR] 画像取得例外: {e}")
         return None
 
-def perform_emergency_diagnosis(ip, cam_conf=None):
+def perform_emergency_diagnosis(ip: str, cam_conf: Optional[Dict[str, Any]] = None) -> Dict[int, bool]:
     """エラー発生直後にポートの状態を診断する"""
     results = {}
     target_ports = [80, 2020]
@@ -260,7 +267,7 @@ def perform_emergency_diagnosis(ip, cam_conf=None):
     logger.warning(msg)
     return results
 
-def monitor_single_camera(cam_conf):
+def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     cam_name = cam_conf['name']
     cam_base_port = cam_conf.get('port', 80)
     cam_loc = cam_conf.get('location', '伊丹')
@@ -271,6 +278,10 @@ def monitor_single_camera(cam_conf):
     NOTIFY_THRESHOLD = 5
     has_notified_error = False
     MAX_WAIT_TIME = 600 
+
+    # 【修正】Flapping検知用変数
+    last_disconnect_time = 0.0
+    disconnect_count_short_term = 0
 
     port_candidates = []
     if cam_base_port not in [80, 2020]: port_candidates.append(cam_base_port)
@@ -354,10 +365,13 @@ def monitor_single_camera(cam_conf):
                     events = pullpoint.PullMessages(params)
                     
                     success_pull_count += 1
-                    if success_pull_count >= 5 and consecutive_conn_errors > 0:
-                        logger.info(f"🎉 [{cam_name}] 接続が完全に安定しました(Count Reset)")
-                        consecutive_conn_errors = 0
-                        has_notified_error = False
+                    if success_pull_count >= 5:
+                        if consecutive_conn_errors > 0:
+                            logger.info(f"🎉 [{cam_name}] 接続が完全に安定しました(Count Reset)")
+                            consecutive_conn_errors = 0
+                            has_notified_error = False
+                        # 【修正】安定時は短期間切断カウンタもリセット
+                        disconnect_count_short_term = 0
                     
                     if hasattr(events, 'NotificationMessage'):
                         for event in events.NotificationMessage:
@@ -402,24 +416,41 @@ def monitor_single_camera(cam_conf):
                                     send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], image_data=img, target="discord")
                                     time.sleep(15) 
 
+                # 【修正】具体的な例外クラスでの捕捉とFlapping対策
+                except (RemoteDisconnected, ConnectionResetError, ProtocolError, BrokenPipeError) as e:
+                    now_ts = time.time()
+                    # 60秒以内の再発ならカウントアップ
+                    if now_ts - last_disconnect_time < 60:
+                        disconnect_count_short_term += 1
+                    else:
+                        disconnect_count_short_term = 1
+                    last_disconnect_time = now_ts
+
+                    # 短期間に3回以上切断されたらバックオフ (Flapping防止)
+                    if disconnect_count_short_term > 3:
+                        logger.warning(f"⚠️ [{cam_name}] 接続不安定検出 (頻発: {disconnect_count_short_term}回目). 10秒待機後に再接続します. Err: {e}")
+                        time.sleep(10)
+                    else:
+                        logger.info(f"🔄 [{cam_name}] 接続切断(瞬断): {e} -> 即時再接続します")
+                    
+                    break # イベントループを抜けて再接続へ
+
                 except Exception as e:
                     err = str(e)
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    # 【変更】致命的エラー（サーバーダウン等、長期待機が必要なもの）
+                    # 致命的エラー
                     fatal_errors = ["Connection refused", "Errno 111", "No route to host"]
-                    
-                    # 【追加】再接続ですぐ直るエラー（切断、リセット等）→ 即時再接続扱いにする
-                    instant_retry_errors = ["RemoteDisconnected", "Connection aborted", "Broken pipe", "Connection reset"]
+                    # その他の瞬断系（例外クラスで捕捉できなかった場合用）
+                    instant_retry_errors = ["Connection aborted", "Connection reset"]
 
                     if any(f in err for f in fatal_errors):
                         logger.warning(f"⚠️ [{cam_name}] サーバーダウン検知: {err} -> 待機モードへ")
                         if "Renew" not in err: perform_emergency_diagnosis(cam_conf['ip'], cam_conf)
                         raise Exception("Fatal Connection Error") 
 
-                    # 【追加】瞬断系エラーなら break して即再接続（Outer Loopへ）
                     if any(f in err for f in instant_retry_errors):
-                        logger.info(f"🔄 [{cam_name}] 接続切断(瞬断): {err} -> 即時再接続します")
+                        logger.info(f"🔄 [{cam_name}] 接続切断(Generic): {err} -> 即時再接続します")
                         break 
 
                     logger.warning(f"⚠️ [{cam_name}] イベント受信エラー: {err}")
@@ -448,7 +479,7 @@ def monitor_single_camera(cam_conf):
             logger.info(f"💤 [{cam_name}] {wait_time}秒 待機します...")
             time.sleep(wait_time)
 
-async def main():
+async def main() -> None:
     if not WSDL_DIR: 
         logger.error("❌ WSDLディレクトリが見つかりません。")
         return
