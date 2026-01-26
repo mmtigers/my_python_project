@@ -330,6 +330,7 @@ def init_db():
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 current_boss_id INTEGER DEFAULT 1,
                 current_hp INTEGER DEFAULT 0,
+                max_hp INTEGER DEFAULT 100,  -- 👈 ここを追加してください
                 charge_gauge INTEGER DEFAULT 0,
                 updated_at TEXT
             )
