@@ -389,7 +389,7 @@ def handle_postback(event, line_bot_api: MessagingApi):
         # エラー通知（オプション）
         # send_push(...) 
 
-def process_message(event, line_bot_api: MessagingApi):
+def handle_message(event, line_bot_api: MessagingApi):
     """メッセージ処理"""
     msg = event.message.text.strip()
     user_id = event.source.user_id
