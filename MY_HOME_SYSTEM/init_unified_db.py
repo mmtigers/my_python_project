@@ -339,6 +339,20 @@ def init_db():
             )
         """)
 
+
+        # SUUMO監視用テーブル
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS suumo_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                property_id TEXT UNIQUE,  -- 物件固有ID (URLの一部など)
+                title TEXT,
+                address TEXT,             -- ★追加: 住所
+                rent_price INTEGER,       -- 家賃 + 管理費
+                url TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
         # --- Legacy / Unused Definitions ---
         # 以下のテーブルは元のスクリプトで定義されていましたが、現在の主要ロジックでは
         # おそらく使用されていません。しかし、後方互換性(Zero Regression)のため定義を残します。

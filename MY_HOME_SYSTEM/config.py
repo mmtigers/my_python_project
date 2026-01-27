@@ -379,3 +379,13 @@ NVR_RECORD_DIR = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 # True: 派手な演出あり / False: 演出なし（HPバーの更新のみ）
 ENABLE_BATTLE_EFFECT = False
 
+# ==========================================
+# 8. 外部サイト監視設定 (Monitor Settings)
+# ==========================================
+# SUUMO検索URL (Envから読み込み / デフォルトはNone)
+SUUMO_SEARCH_URL: Optional[str] = os.getenv("SUUMO_SEARCH_URL")
+# 通知対象の最大家賃（管理費込み）
+SUUMO_MAX_BUDGET = 70000
+
+# 監視サイクル（秒） - scheduler.pyで使用
+SUUMO_MONITOR_INTERVAL = 3600  # 1時間に1回

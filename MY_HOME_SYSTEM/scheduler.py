@@ -25,6 +25,9 @@ TASKS = [
     # 頻度: 低 (1時間〜)
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0},
     {"script": "monitors/haircut_monitor.py",         "interval": 3600, "last_run": 0},
+    # 頻度: 低 (SUUMO監視 - 1時間に1回)
+    # config.SUUMO_MONITOR_INTERVAL (3600秒) で設定
+    {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0},
 ]
 
 def run_script(script_name):
