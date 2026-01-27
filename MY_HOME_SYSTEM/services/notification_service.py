@@ -2,7 +2,8 @@
 import json
 import logging
 import requests
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Union
+
 # ▼▼▼ v3 Imports ▼▼▼
 from linebot.v3.messaging import (
     Configuration,
@@ -12,20 +13,21 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     TextMessage,
     FlexMessage,
-    Message
+    Message,
+    MessagingApiBlob
 )
 # ▲▲▲ ▲▲▲
 import config
-from core.network import get_retry_session, retry_api_call
+from core.logger import setup_logging # 修正: core.loggerを使用
 
-logger = logging.getLogger("service.notification")
+logger = setup_logging("service.notification") # 修正: 統一ロガーを使用
 
 # v3 Configuration
-line_configuration = None
+line_configuration: Optional[Configuration] = None
 if config.LINE_CHANNEL_ACCESS_TOKEN:
     line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
 
-def _send_discord_webhook(messages: List[dict], image_data: bytes = None, channel: str = "notify") -> bool:
+def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify") -> bool:
     """DiscordへのWebhook送信"""
     if channel == "error":
         url = config.DISCORD_WEBHOOK_ERROR
@@ -67,7 +69,7 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
     if not line_configuration:
         return False
     
-    sdk_messages = []
+    sdk_messages: List[Message] = []
     
     try:
         for msg in messages:
@@ -79,7 +81,7 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
             elif isinstance(msg, dict):
                 msg_type = msg.get("type")
                 if msg_type == "text":
-                    sdk_messages.append(TextMessage(text=msg.get("text")))
+                    sdk_messages.append(TextMessage(text=msg.get("text", "")))
                 elif msg_type == "flex":
                     # FlexMessageオブジェクトへの変換は複雑なため、
                     # 可能な限り呼び出し元でオブジェクト化することを推奨
@@ -105,7 +107,7 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
         logger.error(f"LINE Push Error: {e}")
         return False
 
-def send_push(user_id: str, messages: List[Any], image_data: bytes = None, target: str = "both", channel: str = "notify") -> bool:
+def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify") -> bool:
     """統合プッシュ通知関数"""
     success = True
     
@@ -135,12 +137,12 @@ def send_reply(reply_token: str, messages: List[Any]) -> bool:
     """LINE Reply API送信 (v3対応版)"""
     if not line_configuration: return False
     
-    sdk_messages = []
+    sdk_messages: List[Message] = []
     for msg in messages:
         if isinstance(msg, Message):
             sdk_messages.append(msg)
         elif isinstance(msg, dict) and msg.get('type') == 'text':
-            sdk_messages.append(TextMessage(text=msg.get('text')))
+            sdk_messages.append(TextMessage(text=msg.get('text', "")))
             
     try:
         with ApiClient(line_configuration) as api_client:
@@ -156,13 +158,12 @@ def send_reply(reply_token: str, messages: List[Any]) -> bool:
         logger.error(f"LINE Reply Error: {e}")
         return False
 
-def get_line_message_quota():
+def get_line_message_quota() -> Optional[Any]: # 修正: 戻り値の型ヒントを追加
     """LINE送信数確認 (v3対応版)"""
     if not line_configuration: return None
     try:
         with ApiClient(line_configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
-            # v3では get_message_quota_consumption は廃止、get_message_quota で統合情報を取得
             return line_bot_api.get_message_quota()
     except Exception as e:
         logger.error(f"Quota Check Error: {e}")
