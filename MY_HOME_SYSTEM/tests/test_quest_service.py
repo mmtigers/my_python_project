@@ -41,6 +41,8 @@ class TestQuestService(unittest.TestCase):
         
         # テストデータのシード
         self._seed_master_data()
+    
+    
 
     def tearDown(self):
         """各テストケースの終了後に呼ばれる"""
@@ -53,6 +55,17 @@ class TestQuestService(unittest.TestCase):
                 os.remove(self.test_db_file)
             except PermissionError:
                 pass 
+
+    def verify_schema(self, table_name: str, expected_columns: list[str]) -> None:
+        """テーブルに必要なカラムが存在するか検証するユーティリティ"""
+        with common.get_db_cursor() as cur:
+            cur.execute(f"PRAGMA table_info({table_name})")
+            columns = [row["name"] for row in cur.fetchall()]
+            for col in expected_columns:
+                if col not in columns:
+                    raise AssertionError(f"Missing column '{col}' in table '{table_name}'")
+
+    
 
     def _seed_master_data(self):
         """テストに必要な最低限のマスタデータを投入"""
