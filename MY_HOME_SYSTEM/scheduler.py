@@ -21,6 +21,8 @@ TASKS = [
 
     # 頻度: 中 (30分)
     {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0},
+    # (診療時間チェックはスクリプト内部で行うため、常時起動でOK)
+    {"script": "monitors/clinic_monitor.py",          "interval": 1800, "last_run": 0},
 
     # 頻度: 低 (1時間〜)
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0},
