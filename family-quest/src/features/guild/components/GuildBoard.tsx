@@ -301,7 +301,7 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
                                         <div className="flex flex-col w-full">
                                             <span className="text-xs text-green-400 mb-1 animate-pulse text-center">報告が届いています！</span>
                                             <Button
-                                                variant="warning"
+                                                variant="warning" // Button.tsxに追加したのでOK
                                                 size="sm"
                                                 onClick={() => approveMutation.mutate(b.id)}
                                                 disabled={approveMutation.isPending}

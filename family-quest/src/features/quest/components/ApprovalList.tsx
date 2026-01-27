@@ -26,7 +26,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
     const queryClient = useQueryClient();
 
     // 1. アイテムの承認待ちリストを取得
-    const { data: pendingItems, isLoading } = useQuery({
+    const { data: pendingItems } = useQuery({
         queryKey: ['pendingInventory'],
         queryFn: () => apiClient.fetchPendingInventory(),
         refetchInterval: 5000 // ポーリングで最新状態を維持
