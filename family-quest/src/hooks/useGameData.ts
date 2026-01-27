@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, Equipment, Boss } from '@/types';
+import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult } from '@/types';
 
 // APIレスポンスの型定義
 interface GameDataResponse {
@@ -62,14 +62,14 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
     // クエスト完了
     const completeQuestMutation = useMutation({
         mutationFn: async ({ user, quest }: { user: User; quest: Quest }) => {
-            return apiClient.post('/api/quest/complete', {
+            return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定
                 user_id: user.user_id,
                 quest_id: quest.id || quest.quest_id,
             });
         },
         onSuccess: (res, variables) => {
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
-            // レベルアップ判定
+            // res は QuestResult 型になるためアクセス可能
             if (res.leveledUp && onLevelUp) {
                 onLevelUp({
                     user: variables.user.name,
@@ -131,8 +131,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 reward_id: reward.id || reward.reward_id,
             });
         },
-        onSuccess: (data, variables) => {
-            // ★修正: 所持金(gameData)の更新に加え、個人のもちもの(inventory)も更新する
+        onSuccess: (_data, variables) => { // data -> _data
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });
         },
@@ -178,6 +177,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         }
 
         try {
+            // QuestResult型として受け取る
             const res = await completeQuestMutation.mutateAsync({ user, quest });
             return {
                 success: true,
@@ -202,7 +202,8 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
         if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };
         try {
-            const res: any = await approveQuestMutation.mutateAsync({ user, history: historyItem });
+            // any キャストまたは QuestResult型定義を使う
+            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem }) as any;
             return {
                 success: true,
                 bossEffect: res?.bossEffect
@@ -218,12 +219,13 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         } catch (e) { return { success: false }; }
     };
 
+    // buyReward ラッパー
     const buyReward = async (user: User, reward: Reward) => {
         const cost = reward.cost_gold || reward.cost;
         if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };
 
         try {
-            const res = await buyRewardMutation.mutateAsync({ user, reward });
+            const res = await buyRewardMutation.mutateAsync({ user, reward }) as any;
             return { success: true, newGold: res.newGold, reward };
         } catch (e) { return { success: false, reason: 'error' }; }
     };

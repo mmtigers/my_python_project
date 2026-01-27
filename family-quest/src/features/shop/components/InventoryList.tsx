@@ -19,7 +19,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
     const queryKey = ['inventory', userId]; // QueryKeyを定数化
 
     // データ取得
-    const { data: items, isLoading } = useQuery<InventoryItem[]>({ // 型引数を指定
+    const { data: items, isLoading } = useQuery({
         queryKey: queryKey,
         queryFn: () => apiClient.fetchInventory(userId),
         refetchInterval: 5000

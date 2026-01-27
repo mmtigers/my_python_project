@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { motion, HTMLMotionProps } from "framer-motion";
 import { useSound } from "@/hooks/useSound";
 
-type ButtonVariant = "primary" | "secondary" | "danger" | "success" | "ghost" | "outline";
+type ButtonVariant = "primary" | "secondary" | "danger" | "success" | "warning" | "ghost" | "outline";
 type ButtonSize = "sm" | "md" | "lg" | "icon";
 
 interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {
@@ -27,6 +27,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             secondary: "bg-slate-700 text-slate-200 border-2 border-slate-500 hover:bg-slate-600",
             success: "bg-green-600 text-white border-2 border-green-400 hover:bg-green-500 shadow-lg shadow-green-900/50",
             danger: "bg-red-600 text-white border-2 border-red-400 hover:bg-red-500 shadow-lg shadow-red-900/50",
+            warning: "bg-amber-500 text-white border-2 border-amber-300 hover:bg-amber-400 shadow-lg shadow-amber-900/50",
             ghost: "bg-transparent text-slate-300 hover:text-white hover:bg-slate-800",
             outline: "bg-transparent border-2 border-slate-600 text-slate-300 hover:border-slate-400 hover:text-white",
         };

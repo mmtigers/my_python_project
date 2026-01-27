@@ -1,5 +1,5 @@
 import React from 'react';
-import { Skull, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Boss } from '@/types';
 
 interface BossCardProps {

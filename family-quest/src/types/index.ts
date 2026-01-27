@@ -1,22 +1,22 @@
+// family-quest/src/types/index.ts
+
 // 共通の型定義
 
-// ID型 (APIによってはnumberだったりstringだったりするため柔軟に)
+// ID型
 export type ID = number | string;
 
 // ユーザー情報
 export interface User {
-    user_id: string; // "dad", "mom" など
+    user_id: string;
     name: string;
     level: number;
     exp: number;
-    // ★追加: 修正漏れしていたプロパティ
     avatar?: string;
     icon?: string;
     medal_count?: number;
-
     job_class?: string;
     gold: number;
-    equipment_id?: ID; // 装備中のアイテムID
+    equipment_id?: ID;
 }
 
 // クエスト情報
@@ -26,26 +26,18 @@ export interface Quest {
     title: string;
     description?: string;
     desc?: string;
-
-    // ★ ? をつけてオプショナルに変更
     difficulty?: number;
     reward_exp?: number;
     reward_gold?: number;
-
     exp_gain?: number;
     exp?: number;
     gold?: number;
     gold_gain?: number;
-
-    // ★追加: キャリーオーバーボーナス
     bonus_gold?: number;
     bonus_exp?: number;
-
     quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
     type?: string;
-
     _isInfinite?: boolean;
-
     icon?: string;
     icon_key?: string;
     start_time?: string;
@@ -54,34 +46,32 @@ export interface Quest {
     target?: string;
 }
 
-// クエスト履歴 (完了・申請中)
+// クエスト履歴
 export interface QuestHistory {
-    history_id?: ID; // 履歴の一意なID
-    id?: ID;         // idの場合もある
+    history_id?: ID;
+    id?: ID;
     user_id: string;
     quest_id: ID;
     quest_title?: string;
     status: 'pending' | 'approved' | 'rejected' | 'completed';
-    date?: string; // YYYY-MM-DD
+    date?: string;
+    // ★追加: 型エラー修正
+    gold_earned?: number;
+    exp_earned?: number;
 }
 
-// 報酬アイテム (ショップ)
+// 報酬アイテム
 export interface Reward {
     id?: ID;
     reward_id?: ID;
     title: string;
-
-    // ★修正: DBカラム(description)とpythonデータ(desc)の両方に対応できるようにします
-    desc?: string;        // Python/MasterData由来
-    description?: string; // DB Select由来 (今回追加)
-
-    category?: string;    // food, service, item
-
-    cost: number;      // 統一用
-    cost_gold?: number; // API生データ用
-
-    icon?: string;     // 絵文字など
-    icon_key?: string; // サーバー側のキー
+    desc?: string;
+    description?: string;
+    category?: string;
+    cost: number;
+    cost_gold?: number;
+    icon?: string;
+    icon_key?: string;
 }
 
 // 装備アイテム
@@ -90,11 +80,10 @@ export interface Equipment {
     equipment_id?: ID;
     name: string;
     description?: string;
-    type: 'weapon' | 'armor' | string; // ★修正: stringも許容
-    power: number; // 攻撃力 or 防御力
+    type: 'weapon' | 'armor' | string;
+    power: number;
     cost: number;
-
-    icon?: string; // 絵文字
+    icon?: string;
 }
 
 export interface Boss {
@@ -104,13 +93,13 @@ export interface Boss {
     maxHp: number;
     currentHp: number;
     hpPercentage: number;
-    charge: number; // ゲージ等（将来用）
+    charge: number;
     desc: string;
     isDefeated: boolean;
     weekStartDate: string;
 }
 
-// ★追加: インベントリアイテムの型定義
+// インベントリアイテム
 export interface InventoryItem {
     id: number;
     reward_id: number;
@@ -122,7 +111,7 @@ export interface InventoryItem {
     category?: string;
 }
 
-// ★修正: APIレスポンス (CompleteResponse相当) に演出用データが含まれる場合がある
+// ★追加: クエスト完了結果 (APIレスポンス用)
 export interface QuestResult {
     status: string;
     leveledUp: boolean;
@@ -131,10 +120,10 @@ export interface QuestResult {
     earnedExp: number;
     earnedMedals: number;
     message?: string;
-    // 追加
     bossEffect?: BossEffect;
 }
 
+// ★追加: ボスダメージ演出用
 export interface BossEffect {
     damage: number;
     remainingHp: number;
@@ -143,25 +132,29 @@ export interface BossEffect {
     isCritical?: boolean;
 }
 
-// ギルド依頼 (Bounty)
+// ギルド依頼
 export interface Bounty {
     id: number;
     title: string;
     description?: string;
     reward_gold: number;
-
     target_type: 'ALL' | 'ADULTS' | 'CHILDREN' | 'USER';
     target_user_id?: string;
-
     status: 'OPEN' | 'TAKEN' | 'PENDING_APPROVAL' | 'COMPLETED' | 'CANCELED';
-
-    created_by: string;   // 依頼主
-    assignee_id?: string; // 受注者
-
+    created_by: string;
+    assignee_id?: string;
     created_at: string;
-
-    // UI制御用フラグ (Backendから付与される)
     is_mine: boolean;
     is_assigned_to_me: boolean;
     can_accept: boolean;
+}
+
+// ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)
+export interface PendingInventory {
+    id: number;
+    user_id: string;
+    user_name: string;
+    title: string;
+    icon: string;
+    used_at: string;
 }

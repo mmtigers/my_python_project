@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Crown, Skull, Sword, Shield } from 'lucide-react';
+import { Crown, Sword, Shield } from 'lucide-react';
 import { User, Equipment, Boss } from '@/types';
 import BossCard from './BossCard'; // ★追加
 
