@@ -330,8 +330,10 @@ def init_db():
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 current_boss_id INTEGER DEFAULT 1,
                 current_hp INTEGER DEFAULT 0,
-                max_hp INTEGER DEFAULT 100,  -- 前回追加した分
-                week_start_date TEXT,        -- 👈 今回追加が必要なカラム
+                max_hp INTEGER DEFAULT 100,
+                week_start_date TEXT,
+                is_defeated INTEGER DEFAULT 0,  -- ★追加: 討伐フラグ
+                total_damage INTEGER DEFAULT 0, -- ★追加: 累計ダメージ
                 charge_gauge INTEGER DEFAULT 0,
                 updated_at TEXT
             )
