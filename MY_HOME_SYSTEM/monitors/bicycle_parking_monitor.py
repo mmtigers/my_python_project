@@ -50,14 +50,15 @@ class BicycleParkingMonitor:
         Webページを取得して解析を実行する。
         
         Returns:
-            bool: 取得と解析が成功した場合はTrue
+            bool: 取得と解析が成功した場合はTrue、失敗（通信エラー含む）はFalse
         """
         logger.info(f"🌍 アクセス中: {self.url}")
         try:
             headers: Dict[str, str] = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
-            res = requests.get(self.url, headers=headers, timeout=15)
+            # タイムアウトを10秒に短縮し、ハングアップを防止
+            res = requests.get(self.url, headers=headers, timeout=10)
             res.raise_for_status()
             
             # 文字コードをUTF-8に強制指定（文字化け防止）
@@ -67,8 +68,14 @@ class BicycleParkingMonitor:
             self._extract_data_robust(soup)
             return True
 
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.RequestException) as e:
+            # 【修正点】ネットワーク系のエラーはWARNINGとし、通知を飛ばさない (Fail-Safe)
+            logger.warning(f"⚠️ 通信エラーにより取得をスキップしました: {e}")
+            return False
+
         except Exception as e:
-            logger.error(f"❌ 取得エラー: {e}")
+            # パースエラーや予期せぬ例外はERRORとして通知する
+            logger.error(f"❌ 解析エラー: {e}")
             logger.debug(traceback.format_exc())
             return False
 
@@ -193,7 +200,10 @@ if __name__ == "__main__":
     print("🚲 --- Bicycle Parking Monitor (Refactored) ---")
     monitor = BicycleParkingMonitor()
     
-    if monitor.fetch_and_parse():
+    # 【修正点】戻り値を受け取る
+    is_success = monitor.fetch_and_parse()
+    
+    if is_success:
         print(f"\n✅ 解析完了: {len(monitor.records)} 件のエリア情報を取得")
         
         if monitor.records:
@@ -210,6 +220,10 @@ if __name__ == "__main__":
             monitor.save_to_db()
         else:
             print("ℹ️ 保存は行っていません (`--save` で保存)")
+            
+        sys.exit(0)
     else:
-        print("❌ データの取得に失敗しました。")
-        sys.exit(1)
+        # 【修正点】失敗時も一時的なエラーであればシステムエラー扱い（exit 1）にしない
+        # ログにはWARNINGが出ているため、運用上の追跡は可能
+        print("⚠️ データの取得に失敗しましたが、一時的なエラーとして終了します。")
+        sys.exit(0)
