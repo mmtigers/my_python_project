@@ -236,17 +236,7 @@ HAIRCUT_TARGETS = [
 # 散髪サイクルの目安 (日)
 HAIRCUT_CYCLE_DAYS = 60
 
-# 自動作成ディレクトリ
-for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR]:
-    try:
-        if not os.path.exists(d):
-            os.makedirs(d, exist_ok=True)
-    except PermissionError:
-        # NAS等の権限エラーで落ちないように警告のみ出して通過させる
-        print(f"⚠️ Warning: Failed to create directory '{d}' due to permission error. NAS features may be unavailable.", file=sys.stderr)
-    except Exception as e:
-        print(f"⚠️ Warning: Unexpected error creating directory '{d}': {e}", file=sys.stderr)
-# ------------------------------
+
 
 
 # 自転車駐車場監視設定
@@ -389,3 +379,32 @@ SUUMO_MAX_BUDGET = 70000
 
 # 監視サイクル（秒） - scheduler.pyで使用
 SUUMO_MONITOR_INTERVAL = 3600  # 1時間に1回
+
+# ==========================================
+# 9. 小児科予約監視設定 (New!)
+# ==========================================
+# ターゲットURL
+CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
+CLINIC_HTML_DIR: str = os.path.join(ASSETS_DIR, "clinic_html")
+
+# 監視実行時間帯 (0-23時)
+# エラー防止のため、ここはシンプルなint定義とします
+CLINIC_MONITOR_START_HOUR: int = 6
+CLINIC_MONITOR_END_HOUR: int = 19
+
+# リクエスト設定
+CLINIC_REQUEST_TIMEOUT: int = 10
+CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
+
+
+# 自動作成ディレクトリ
+for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR]:
+    try:
+        if not os.path.exists(d):
+            os.makedirs(d, exist_ok=True)
+    except PermissionError:
+        # NAS等の権限エラーで落ちないように警告のみ出して通過させる
+        print(f"⚠️ Warning: Failed to create directory '{d}' due to permission error. NAS features may be unavailable.", file=sys.stderr)
+    except Exception as e:
+        print(f"⚠️ Warning: Unexpected error creating directory '{d}': {e}", file=sys.stderr)
+# ------------------------------
