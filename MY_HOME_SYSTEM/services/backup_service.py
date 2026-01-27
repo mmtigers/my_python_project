@@ -4,19 +4,27 @@ import datetime
 import shutil
 import time
 from pathlib import Path
+from typing import Tuple
 from common import setup_logging
+# 設計書 (Source: 137) に従い core.logger を使用
+from core.logger import setup_logging
 import config
 
 # ロガー設定
 logger = setup_logging("backup")
 
-def perform_robust_backup():
+def perform_backup() -> Tuple[bool, str, float]:
     """
+    データベースのバックアップを実行する。
+    
     【根治策】
     NASへの直接バックアップはファイルロック(CIFS)の問題でハングするため、
-    1. ローカル(SDカード)にバックアップを作成
+    1. ローカル(一時領域)にバックアップを作成
     2. 完成したファイルをNASへ転送
     という2段階方式を採用する。
+
+    Returns:
+        Tuple[bool, str, float]: (成功フラグ, メッセージ, バックアップサイズMB)
     """
     src_db_path = config.SQLITE_DB_PATH
     
@@ -48,8 +56,9 @@ def perform_robust_backup():
                 # バックアップ実行
                 src_conn.backup(dst_conn, pages=-1)
         
-        local_size = os.path.getsize(temp_path)
-        logger.info(f"✅ Local backup created: {temp_path} ({local_size} bytes)")
+        local_size_bytes = os.path.getsize(temp_path)
+        local_size_mb = local_size_bytes / (1024 * 1024)
+        logger.info(f"✅ Local backup created: {temp_path} ({local_size_mb:.2f} MB)")
 
         # --- Phase 2: Transfer to NAS ---
         logger.info("Phase 2: Transferring to NAS...")
@@ -61,19 +70,18 @@ def perform_robust_backup():
             except OSError as e:
                 logger.warning(f"Failed to create NAS dir: {e}. Checking if exists...")
 
-        # コピー実行 (shutil.moveだと権限エラー時に消えるリスクがあるため copy -> remove)
+        # コピー実行
         shutil.copy2(temp_path, nas_final_path)
         
         # 転送確認
-        if nas_final_path.exists() and os.path.getsize(nas_final_path) == local_size:
+        if nas_final_path.exists() and os.path.getsize(nas_final_path) == local_size_bytes:
             logger.info(f"✅ Transfer successful: {nas_final_path}")
             
             # --- Phase 3: Cleanup ---
             os.remove(temp_path)
             logger.info("🗑️ Local temp file cleaned up.")
             
-            # 成功通知 (必要なら)
-            # common.send_push(...) 
+            return True, "バックアップ完了", local_size_mb
             
         else:
             raise OSError("Transfer verification failed (Size mismatch or file missing)")
@@ -84,15 +92,16 @@ def perform_robust_backup():
         if temp_path.exists():
             try:
                 os.remove(temp_path)
-            except:
+            except Exception:
                 pass
+        return False, str(e), 0.0
     finally:
         # 空の一時ディレクトリなら消しておく
         try:
             if temp_dir.exists() and not os.listdir(temp_dir):
                 os.rmdir(temp_dir)
-        except:
+        except Exception:
             pass
 
 if __name__ == "__main__":
-    perform_robust_backup()
+    perform_backup()
