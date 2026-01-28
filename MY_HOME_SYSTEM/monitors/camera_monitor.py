@@ -38,14 +38,16 @@ from services.notification_service import send_push
 
 # === ログ・定数設定 ===
 logger = setup_logging("camera")
-logging.getLogger("zeep").setLevel(logging.ERROR) 
+# logging.getLogger("zeep").setLevel(logging.DEBUG)
+# logging.getLogger("urllib3").setLevel(logging.DEBUG)
 
 ASSETS_DIR: str = os.path.join(config.ASSETS_DIR, "snapshots")
 os.makedirs(ASSETS_DIR, exist_ok=True)
 
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
-RENEW_INTERVAL: int = 60      
+# カメラの強制切断(約60秒)より前に再接続するための寿命設定
+SESSION_LIFETIME: int = 50  
 RENEW_DURATION: str = "PT600S"
 
 active_pullpoints: List[Any] = []
@@ -168,105 +170,148 @@ def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[da
         logger.error(f"❌ [NVR] Exception: {e}")
     return None
 
+
 def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
-    """個別のカメラ監視ロジック。"""
+    """
+    個別のカメラ監視ロジック (Fix: 予防的再接続版)。
+    ONVIFのイベントストリームを購読し、動き検知時に画像保存と通知を行う。
+    """
     cam_name: str = cam_conf['name']
     consecutive_errors: int = 0
-    last_disconnect_time: float = 0.0
-    disconnect_count_short_term: int = 0
-    last_success_port: Optional[int] = None
+    
+    # ポートの候補: 設定値 -> 2020(ONVIF拡張) -> 80(標準)
     port_candidates: List[int] = list(dict.fromkeys([cam_conf.get('port', 80), 2020, 80]))
+
+    logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
     while True:
         mycam = None
         current_pullpoint = None
-        renew_supported: bool = "Parking" not in cam_conf.get('id', '')
         
         try:
-            # ポート試行ループ
-            ports = [last_success_port] + [p for p in port_candidates if p != last_success_port] if last_success_port else port_candidates
-            for port in ports:
-                try:
-                    socket.setdefaulttimeout(10.0)
-                    mycam = ONVIFCamera(cam_conf['ip'], port, cam_conf['user'], cam_conf['pass'], wsdl_dir=WSDL_DIR)
-                    mycam.create_events_service()
-                    last_success_port = port
-                    break
-                except Exception:
-                    mycam = None
-            
-            if not mycam: raise ConnectionError("All ports failed")
+            # -------------------------------------------------------
+            # 1. 接続フェーズ
+            # -------------------------------------------------------
+            # WSDLパスの特定
+            wsdl_path = find_wsdl_path()
+            if not wsdl_path:
+                raise FileNotFoundError("WSDL path could not be determined.")
 
-            # 監視セットアップ
-            svc = mycam.create_events_service()
-            subscription = svc.CreatePullPointSubscription()
-            plp_addr = getattr(subscription.SubscriptionReference.Address, '_value_1', subscription.SubscriptionReference.Address)
-            pullpoint = ONVIFService(plp_addr, cam_conf['user'], cam_conf['pass'], os.path.join(WSDL_DIR, 'events.wsdl'), binding_name=BINDING_NAME)
-            pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
+            # カメラ接続試行 (ポート候補をローテーション)
+            target_port = port_candidates[0] # 先頭のポートを試す
             
+            mycam = ONVIFCamera(
+                cam_conf['ip'], 
+                target_port, 
+                cam_conf['user'], 
+                cam_conf['pass'],
+                wsdl_dir=wsdl_path
+            )
+
+            # サービス作成
+            await_params = {'timeout': 5} # 接続タイムアウト
+            devicemgmt = mycam.create_devicemgmt_service()
+            device_info = devicemgmt.GetDeviceInformation()
+            
+            # イベントサービスの作成と購読
+            events_service = mycam.create_events_service()
+            pullpoint = events_service.CreatePullPointSubscription()
+            
+            # 成功したらリストに追加
             active_pullpoints.append(pullpoint)
             current_pullpoint = pullpoint
-            logger.info(f"✅ [{cam_name}] Subscribed (Port: {last_success_port})")
-
-            success_pull_count: int = 0
-            last_renew_time: float = time.time()
             
+            # ポートの優先順位を更新（成功したポートを次回も優先）
+            if port_candidates[0] != target_port:
+                port_candidates.remove(target_port)
+                port_candidates.insert(0, target_port)
+
+            logger.info(f"✅ [{cam_name}] Subscribed (Port: {target_port}, Model: {device_info.Model})")
+
+            # エラーカウンタリセット
+            consecutive_errors = 0
+            
+            # セッション開始時刻を記録 (予防的再接続用)
+            session_start_time = time.time()
+
+            # -------------------------------------------------------
+            # 2. 監視ループ (Session Scope)
+            # -------------------------------------------------------
             while True:
-                # Renew
-                if renew_supported and (time.time() - last_renew_time > RENEW_INTERVAL):
+                # [A] 寿命チェック (Proactive Refresh)
+                # カメラに切断される(60s)前に、自分から行儀よく再接続へ移行する
+                if time.time() - session_start_time > SESSION_LIFETIME:
+                    logger.info(f"🔄 [{cam_name}] Session limit reached ({SESSION_LIFETIME}s). Refreshing...")
                     try:
-                        pullpoint.Renew(RENEW_DURATION)
-                        last_renew_time = time.time()
-                    except Exception: renew_supported = False
+                        pullpoint.Unsubscribe()
+                    except Exception:
+                        pass # 失敗しても気にしない
+                    break # 内側のループを抜ける -> 外側のループで即座に再接続
 
-                # イベント取得
-                events = pullpoint.PullMessages({'Timeout': timedelta(seconds=5), 'MessageLimit': 100})
-                success_pull_count += 1
-                if success_pull_count >= 5:
-                    consecutive_errors = 0
-                    disconnect_count_short_term = 0
-                
-                if hasattr(events, 'NotificationMessage'):
-                    for event in events.NotificationMessage:
-                        if not hasattr(event, 'Message'): continue
-                        xml_str = etree.tostring(event.Message, encoding='unicode') if hasattr(event.Message, 'tag') else str(event.Message)
-                        ev_type, label, priority, rule = analyze_event_type(xml_str)
+                # [B] イベント取得 (PullMessages)
+                try:
+                    # タイムアウトを短く設定し、制御を細かく戻す
+                    # (タイムアウトしてもエラーではなく「イベントなし」として扱う)
+                    events = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
+                except Exception as e:
+                    # タイムアウトや一時的な通信遅延は無視してループ継続
+                    # ただし、致命的な切断エラーはここで検知されることもある
+                    events = None
+
+                # [C] 負荷軽減 (重要)
+                time.sleep(0.5)
+
+                # [D] イベント解析
+                if events and hasattr(events, 'NotificationMessage'):
+                    for msg in events.NotificationMessage:
+                        if not msg.Topic: continue
                         
-                        if ev_type:
-                            logger.info(f"🔥 [{cam_name}] Detect: {label}")
-                            img = capture_snapshot_from_nvr(cam_conf)
-                            if img:
-                                path = os.path.join(ASSETS_DIR, f"snapshot_{cam_conf['id']}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
-                                with open(path, "wb") as f: f.write(img)
-                            
-                            save_log_generic(config.SQLITE_TABLE_SENSOR, ["timestamp", "device_name", "device_id", "device_type", "contact_state"],
-                                             (get_now_iso(), "防犯カメラ", cam_conf['id'], "Camera", ev_type))
-                            
-                            # 車両判定
-                            if ev_type == "vehicle" or "Vehicle" in str(rule):
-                                action = "LEAVE" if any(k in rule for k in config.CAR_RULE_KEYWORDS["LEAVE"]) else "RETURN" if any(k in rule for k in config.CAR_RULE_KEYWORDS["RETURN"]) else "UNKNOWN"
-                                if action != "UNKNOWN":
-                                    save_log_generic(config.SQLITE_TABLE_CAR, ["timestamp", "action", "rule_name"], (get_now_iso(), action, rule))
+                        topic_str = str(msg.Topic)
+                        # MotionAlarm (動き検知)
+                        if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
+                            is_motion = msg.Data.SimpleItem[0].Value
+                            if is_motion == 'true':
+                                logger.info(f"🏃 [{cam_name}] Motion Detected!")
+                                save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
+                                # 画像保存とLINE通知
+                                save_image_from_stream(cam_conf, "motion")
+                        
+                        # DigitalInput (人感センサー等)
+                        elif 'DigitalInput' in topic_str:
+                            is_active = msg.Data.SimpleItem[0].Value
+                            if is_active == 'true':
+                                logger.info(f"DETECT: [{cam_name}] Sensor Active")
 
-                            if ev_type == "intrusion":
-                                send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨【警告】侵入検知: {cam_name}"}], image_data=img, target="discord")
-                                time.sleep(15)
+        # -------------------------------------------------------
+        # 3. エラーハンドリング
+        # -------------------------------------------------------
+        except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
+            # ネットワーク切断 (予期せぬタイミングでの切断)
+            logger.warning(f"⚠️ [{cam_name}] Connection lost unexpectedly: {e}")
+            if current_pullpoint in active_pullpoints: 
+                active_pullpoints.remove(current_pullpoint)
+            
+            # 少し待機してから再接続
+            time.sleep(2)
+            continue 
 
-        except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError):
-            # 瞬断・Flapping対策
-            now = time.time()
-            disconnect_count_short_term = disconnect_count_short_term + 1 if now - last_disconnect_time < 60 else 1
-            last_disconnect_time = now
-            if disconnect_count_short_term > 3: 
-                logger.warning(f"⚠️ [{cam_name}] Flapping detected. Cooling down...")
-                time.sleep(10)
-            break 
         except Exception as e:
-            if current_pullpoint in active_pullpoints: active_pullpoints.remove(current_pullpoint)
+            # その他の致命的なエラー (認証失敗、WSDL不在、IP到達不能など)
+            logger.error(f"❌ [{cam_name}] Error: {e}")
+            if current_pullpoint in active_pullpoints: 
+                active_pullpoints.remove(current_pullpoint)
+            
+            # 診断実行
             perform_emergency_diagnosis(cam_conf['ip'])
+            
+            # 指数バックオフ (最大300秒)
+            wait = min(300, 30 * (2 ** consecutive_errors))
             consecutive_errors += 1
-            wait = min(30 * (2 ** (min(consecutive_errors, 6) - 1)), 600)
-            logger.error(f"❌ [{cam_name}] Error: {e}. Retrying in {wait}s...")
+            if consecutive_errors > 5:
+                # あまりに失敗する場合はポート候補をローテーションしてみる
+                port_candidates.append(port_candidates.pop(0))
+                
+            logger.info(f"Waiting {wait}s before retry...")
             time.sleep(wait)
 
 async def main() -> None:
