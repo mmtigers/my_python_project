@@ -3,7 +3,7 @@ import os
 import sys
 import requests
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 # プロジェクトルートへのパス解決 (単体実行用)
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -16,46 +16,35 @@ logger = setup_logging("clinic_monitor")
 
 class ClinicMonitor:
     """
-    伊丹たかの小児科の予約ページHTMLを定期収集するモニタークラス。
-    
-    Attributes:
-        url (str): 監視対象のURL
-        save_dir (str): HTML保存先ディレクトリ
-        timeout (int): リクエストタイムアウト(秒)
-        user_agent (str): リクエストヘッダーのUser-Agent
+    小児科予約ページのHTMLを定期収集するモニタークラス。
     """
 
     def __init__(self) -> None:
-        """設定をロードし、初期化を行う"""
-        self.url: str = getattr(config, "CLINIC_MONITOR_URL", "")
-        self.save_dir: str = getattr(config, "CLINIC_HTML_DIR", "")
+        """設定をロードし、初期化を行う。"""
+        self.url: str = getattr(config, "CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
+        self.save_dir: str = getattr(config, "CLINIC_HTML_DIR", os.path.join(config.ASSETS_DIR, "clinic_html"))
         self.timeout: int = getattr(config, "CLINIC_REQUEST_TIMEOUT", 10)
         self.user_agent: str = getattr(config, "CLINIC_USER_AGENT", "MyHomeSystem/1.0")
+        
+        # 稼働時間の設定 (デフォルト: 6時〜19時)
+        self.start_hour: int = getattr(config, "CLINIC_MONITOR_START_HOUR", 6)
+        self.end_hour: int = getattr(config, "CLINIC_MONITOR_END_HOUR", 19)
 
-        # 設定不備チェック (CRITICALではなくERRORで停止)
-        if not self.url or not self.save_dir:
-            logger.error("❌ Config Invalid: CLINIC_MONITOR_URL or CLINIC_HTML_DIR is missing.")
-            sys.exit(1)
+        # 保存ディレクトリの作成
+        if not os.path.exists(self.save_dir):
+            try:
+                os.makedirs(self.save_dir, exist_ok=True)
+                logger.info(f"📁 Created directory: {self.save_dir}")
+            except Exception as e:
+                logger.error(f"❌ Failed to create directory {self.save_dir}: {e}")
 
     def is_operating_hours(self) -> bool:
-        """
-        現在時刻が監視対象の時間帯かチェックする。
-
-        Returns:
-            bool: 実行すべき時間帯であれば True
-        """
-        current_hour: int = datetime.now().hour
-        start: int = getattr(config, "CLINIC_MONITOR_START_HOUR", 8)
-        end: int = getattr(config, "CLINIC_MONITOR_END_HOUR", 19)
-        return start <= current_hour <= end
+        """現在時刻が監視対象の時間帯内（診察・予約時間内）か判定する。"""
+        now_hour: int = datetime.now().hour
+        return self.start_hour <= now_hour < self.end_hour
 
     def save_html(self, content: bytes) -> None:
-        """
-        取得したHTMLバイナリをファイルに保存する。
-
-        Args:
-            content (bytes): レスポンスボディ
-        """
+        """取得したHTMLコンテンツをファイルに保存する。"""
         timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename: str = f"clinic_{timestamp}.html"
         filepath: str = os.path.join(self.save_dir, filename)
@@ -63,30 +52,27 @@ class ClinicMonitor:
         try:
             with open(filepath, "wb") as f:
                 f.write(content)
-            logger.info(f"✅ Saved HTML: {filename} ({len(content)} bytes)")
+            logger.info(f"💾 Saved HTML: {filename}")
         except OSError as e:
-            # ディスクIOエラーは Warning ではなく Error 扱い
-            logger.error(f"❌ Failed to save HTML to {filepath}: {e}")
+            logger.error(f"❌ Disk IO Error at {filepath}: {e}")
 
     def run(self) -> None:
         """
         メイン実行処理。
         時間帯チェックを行い、対象であればHTMLを取得して保存する。
         """
-        # 1. 時間帯チェック
         if not self.is_operating_hours():
-            # 正常動作範囲内のスキップなので INFO で記録 (ノイズ低減のため文言を簡素化)
-            logger.info("💤 Out of operating hours. Task skipped.")
+            logger.info(f"💤 Out of operating hours ({self.start_hour}-{self.end_hour}). Task skipped.")
             return
 
-        logger.info(f"Fetching clinic status from: {self.url}")
+        if not self.url:
+            logger.error("❌ Clinic URL is not configured.")
+            return
 
-        headers: Dict[str, str] = {
-            "User-Agent": self.user_agent
-        }
+        headers: Dict[str, str] = {"User-Agent": self.user_agent}
 
-        # 2. HTML取得
         try:
+            logger.info(f"🌐 Fetching clinic status: {self.url}")
             response: requests.Response = requests.get(
                 self.url, 
                 headers=headers, 
@@ -94,18 +80,14 @@ class ClinicMonitor:
             )
             
             if response.status_code == 200:
-                # 3. 保存
                 self.save_html(response.content)
             else:
-                # 相手サーバーエラー (500系) や 404 は WARNING (一時的な可能性が高いため)
                 logger.warning(f"⚠️ HTTP Error: {response.status_code} - {response.reason}")
 
         except requests.exceptions.RequestException as e:
-            # 接続エラーはリトライせず、次のスケジュールまで待機 (WARNING)
             logger.warning(f"⚠️ Connection failed: {e}")
         except Exception as e:
-            # 想定外のコードエラー等は ERROR
-            logger.error(f"💀 Unexpected Error in ClinicMonitor: {e}", exc_info=True)
+            logger.error(f"🔥 Unexpected error in ClinicMonitor: {e}")
 
 if __name__ == "__main__":
     monitor = ClinicMonitor()
