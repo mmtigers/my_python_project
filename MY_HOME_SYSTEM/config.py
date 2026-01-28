@@ -2,19 +2,42 @@
 import os
 import sys
 import json
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any, Union
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, ValidationError
 
 # .envファイルのロード
 load_dotenv()
 
 # ==========================================
+# Type Definitions with Pydantic
+# ==========================================
+
+class CameraConfig(BaseModel):
+    id: str
+    name: str
+    location: str
+    ip: str
+    port: int = 2020
+    user: Optional[str] = None
+    password: Optional[str] = Field(None, alias="pass")
+
+class NotifySettings(BaseModel):
+    power_threshold_watts: Optional[float] = None
+    notify_mode: str = "LOG_ONLY"
+    target: Optional[str] = None
+
+class DeviceConfig(BaseModel):
+    id: str
+    type: str
+    location: str
+    name: str
+    notify_settings: NotifySettings = Field(default_factory=NotifySettings)
+
+# ==========================================
 # 0. 環境・機能フラグ設定
 # ==========================================
-# 環境設定 (development / production)
 ENV: str = os.getenv("ENV", "development")
-
-# もちもの使用時の承認フロー設定
 ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
 
 # ==========================================
@@ -42,6 +65,9 @@ GMAIL_APP_PASSWORD: Optional[str] = os.getenv("GMAIL_APP_PASSWORD")
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
 SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")
 
+# 不動産情報
+REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
+
 # ==========================================
 # 2. システム・パス設定
 # ==========================================
@@ -55,12 +81,17 @@ NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 SQLITE_DB_PATH: str = os.path.join(BASE_DIR, "home_system.db")
 ASSETS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "assets")
 LOG_DIR: str = os.path.join(BASE_DIR, "logs")
+DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json") # 外部設定ファイル
 
-# DBテーブル名定義
-SQLITE_TABLE_SENSOR: str = "device_records"
+# DBテーブル名定義 (設計書 v1.0.0 準拠へ移行)
+# 旧: SQLITE_TABLE_SENSOR = "device_records"
+SQLITE_TABLE_SWITCHBOT_LOGS: str = "switchbot_meter_logs" # New: 温湿度
+SQLITE_TABLE_POWER_USAGE: str = "power_usage"           # New: 電力
+SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"             # New: 生活ログ統合
+
+# Legacy/Specific Tables (必要に応じて統合を検討)
 SQLITE_TABLE_OHAYO: str = "ohayo_records"
 SQLITE_TABLE_FOOD: str = "food_records"
-SQLITE_TABLE_DAILY: str = "daily_records"
 SQLITE_TABLE_HEALTH: str = "health_records"
 SQLITE_TABLE_CAR: str = "car_records"
 SQLITE_TABLE_CHILD: str = "child_health_records"
@@ -70,14 +101,14 @@ SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
 SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 
-BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env"]
+BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
 
 # デフォルトアセット
 DEFAULT_ASSETS_DIR: str = os.path.join(BASE_DIR, "defaults")
 DEFAULT_SOUND_SOURCE: str = os.path.join(DEFAULT_ASSETS_DIR, "sounds")
 
 # ==========================================
-# 3. デバイス・ルール設定
+# 3. デバイス・ルール設定 (Externalized)
 # ==========================================
 NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "discord")
 
@@ -104,7 +135,7 @@ if os.path.exists(_events_path):
         with open(_events_path, "r", encoding="utf-8") as f:
             IMPORTANT_DATES = json.load(f)
     except Exception as e:
-        print(f"⚠️ 記念日設定の読み込みに失敗: {e}")
+        print(f"⚠️ 記念日設定の読み込みに失敗: {e}", file=sys.stderr)
 
 CHECK_ZOROME: bool = True
 
@@ -114,30 +145,27 @@ CAR_RULE_KEYWORDS: Dict[str, List[str]] = {
     "RETURN": ["Enter", "In", "Arrive"]
 }
 
-# カメラ設定
-DEFAULT_CAM_USER: str = os.getenv("CAMERA_USER", "admin")
-DEFAULT_CAM_PASS: str = os.getenv("CAMERA_PASS", "")
-CAMERAS: List[Dict[str, Any]] = [
-    {
-        "id": "VIGI_C540_Parking",
-        "name": "駐車場カメラ",
-        "location": "伊丹",
-        "ip": os.getenv("CAMERA_IP", "192.168.1.110"),
-        "port": 2020,
-        "user": DEFAULT_CAM_USER,
-        "pass": DEFAULT_CAM_PASS
-    },
-    {
-        "id": "VIGI_C330I_Garden",
-        "name": "庭カメラ",
-        "location": "伊丹",    
-        "ip": "192.168.1.51", 
-        "port": 2020,
-        "user": DEFAULT_CAM_USER,
-        "pass": DEFAULT_CAM_PASS
-    }
-]
+# デバイス設定の読み込み (devices.json)
+CAMERAS: List[Dict[str, Any]] = []
+MONITOR_DEVICES: List[Dict[str, Any]] = []
 
+if os.path.exists(DEVICES_JSON_PATH):
+    try:
+        with open(DEVICES_JSON_PATH, "r", encoding="utf-8") as f:
+            _devices_data = json.load(f)
+            # バリデーションして読み込み
+            if "cameras" in _devices_data:
+                CAMERAS = [CameraConfig(**c).model_dump(by_alias=True) for c in _devices_data["cameras"]]
+            if "monitor_devices" in _devices_data:
+                MONITOR_DEVICES = [DeviceConfig(**d).model_dump() for d in _devices_data["monitor_devices"]]
+    except ValidationError as ve:
+        print(f"❌ devices.json Validation Error: {ve}", file=sys.stderr)
+    except Exception as e:
+        print(f"⚠️ devices.json load failed: {e}", file=sys.stderr)
+else:
+    print(f"ℹ️ devices.json not found at {DEVICES_JSON_PATH}. Running without device config.", file=sys.stderr)
+
+# カメラ互換性用変数
 if CAMERAS:
     CAMERA_IP: Optional[str] = CAMERAS[0].get("ip")
     CAMERA_USER: Optional[str] = CAMERAS[0].get("user")
@@ -145,30 +173,6 @@ if CAMERAS:
 else:
     CAMERA_IP, CAMERA_USER, CAMERA_PASS = None, None, None
 
-# 監視デバイス (SwitchBot等)
-MONITOR_DEVICES: List[Dict[str, Any]] = [
-    # --- 🏠 伊丹 (自宅) ---
-    {"id": "24587C9CCBCE", "type": "Plug Mini (JP)", "location": "伊丹", "name": "1Fのトイレ", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "D83BDA178576", "type": "Plug Mini (JP)", "location": "伊丹", "name": "テレビ", "notify_settings": {"power_threshold_watts": 20.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "F09E9E9D599A", "type": "Plug Mini (JP)", "location": "伊丹", "name": "炊飯器", "notify_settings": {"power_threshold_watts": 5.0, "notify_mode": "LOG_ONLY"}},
-    {"id": "CFBF5E92AAD0", "type": "MeterPlus", "location": "伊丹", "name": "仕事部屋", "notify_settings": {}},
-    {"id": "E9BA4D43962D", "type": "MeterPlus", "location": "伊丹", "name": "居間", "notify_settings": {}},
-    {"id": "F062114E225F", "type": "Motion Sensor", "location": "伊丹", "name": "人感センサー", "notify_settings": {}},
-    {"id": "DE3B6D1C8AE4", "type": "Hub Mini", "location": "伊丹", "name": "ハブミニ E4", "notify_settings": {}},
-    {"id": "eb66a4f83686d73815zteu", "type": "Indoor Cam", "location": "伊丹", "name": "ともやのへや", "notify_settings": {}},
-
-    # --- 👵 高砂 (実家) ---
-    {"id": "D92743516777", "type": "Contact Sensor", "location": "高砂", "name": "冷蔵庫", "notify_settings": {}},
-    {"id": "C937D8CB33A3", "type": "Contact Sensor", "location": "高砂", "name": "玄関", "notify_settings": {}},
-    {"id": "E07135DD95B1", "type": "Contact Sensor", "location": "高砂", "name": "お母さんの部屋", "notify_settings": {}},
-    {"id": "F69BB5721955", "type": "Contact Sensor", "location": "高砂", "name": "トイレ", "notify_settings": {}},
-    {"id": "F5866D92E63D", "type": "Contact Sensor", "location": "高砂", "name": "庭へのドア", "notify_settings": {}},
-    {"id": "E17F2E2DA99F", "type": "MeterPlus", "location": "高砂", "name": "1Fの洗面所", "notify_settings": {}},
-    {"id": "E30D45A30356", "type": "MeterPlus", "location": "高砂", "name": "リビング", "notify_settings": {}},
-    {"id": "E9B20697916C", "type": "Motion Sensor", "location": "高砂", "name": "和室", "notify_settings": {}},
-    {"id": "FEACA2E1797C", "type": "Hub Mini", "location": "高砂", "name": "高砂のハブミニ", "notify_settings": {}},
-    {"id": "ebb1e93d271a144eaf3571", "type": "Pan/Tilt Cam", "location": "高砂", "name": "高砂の玄関", "notify_settings": {}},
-]
 
 # 給与PDFパスワード
 _passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
@@ -209,6 +213,7 @@ BICYCLE_PARKING_URL: str = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/
 # ==========================================
 # 4. 土地価格監視設定
 # ==========================================
+# 必要に応じてこれもJSON化可能ですが、変更頻度が低いため現状維持
 LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
     {
         "city_code": "28207",     # 兵庫県伊丹市
@@ -231,11 +236,8 @@ LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
 ]
 
 # ==========================================
-# 5. 不動産情報ライブラリ (Secrets)
+# 5. 不動産情報ライブラリ
 # ==========================================
-# ★修正点: セキュリティ保護のためハードコードを削除し、環境変数から読み込みます
-REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
-
 GOOGLE_PHOTOS_CREDENTIALS: str = os.path.join(BASE_DIR, "google_photos_credentials.json")
 GOOGLE_PHOTOS_TOKEN: str = os.path.join(BASE_DIR, "google_photos_token.json")
 GOOGLE_PHOTOS_SCOPES: List[str] = ['https://www.googleapis.com/auth/photoslibrary']
@@ -248,7 +250,6 @@ REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
 NAS_CHECK_TIMEOUT: int = 5
 
-# ★修正点: 環境依存パスを環境変数化
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", "/home/masahiro/develop/family-quest/dist")
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
@@ -262,14 +263,11 @@ if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ==========================================
 # 7. Sound & Family
 # ==========================================
 SOUND_DIR: str = os.path.join(ASSETS_DIR, "sounds")
-if not os.path.exists(SOUND_DIR):
-    os.makedirs(SOUND_DIR, exist_ok=True)
 
 SOUND_PLAYER_CMD: str = "mpg123"
 SOUND_PLAYER_ARGS: List[str] = ["-o", "pulse"]
@@ -315,11 +313,9 @@ CLINIC_REQUEST_TIMEOUT: int = 10
 CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
 
 # ディレクトリ自動作成
-for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR]:
+for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR, UPLOAD_DIR, SOUND_DIR]:
     try:
         if not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
-    except PermissionError:
-        print(f"⚠️ Warning: Failed to create directory '{d}' due to permission error.", file=sys.stderr)
     except Exception as e:
-        print(f"⚠️ Warning: Unexpected error creating directory '{d}': {e}", file=sys.stderr)
+        print(f"⚠️ Warning: Failed to create directory '{d}': {e}", file=sys.stderr)
