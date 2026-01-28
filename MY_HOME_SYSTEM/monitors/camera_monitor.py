@@ -68,12 +68,21 @@ signal.signal(signal.SIGINT, cleanup_handler)
 signal.signal(signal.SIGTERM, cleanup_handler)
 
 def find_wsdl_path() -> Optional[str]:
-    """WSDLファイルのディレクトリを動的に探索する。"""
+    """WSDLファイルのディレクトリを動的に探索する（パス構造の変化に対応）。"""
     for path in sys.path:
-        if 'site-packages' in path and os.path.exists(path):
-            candidate = os.path.join(path, 'onvif', 'wsdl')
+        if not os.path.exists(path):
+            continue
+            
+        # 候補1: 標準的な構造 (onvif/wsdl)
+        candidate_standard = os.path.join(path, 'onvif', 'wsdl')
+        # 候補2: 今回見つかった構造 (site-packages直下のwsdl)
+        candidate_direct = os.path.join(path, 'wsdl')
+
+        for candidate in [candidate_standard, candidate_direct]:
             if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
+                logger.info(f"✅ WSDL found at: {candidate}")
                 return candidate
+                
     return None
 
 WSDL_DIR: Optional[str] = find_wsdl_path()
