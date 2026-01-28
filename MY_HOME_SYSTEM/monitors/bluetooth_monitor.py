@@ -1,30 +1,29 @@
 import time
 import subprocess
-import logging
 import os
 import sys
+from typing import Optional
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
-# import common <-- 削除
 from core.logger import setup_logging
 from services.notification_service import send_push
 
 # === 設定 ===
-TARGET_MAC = "F4:4E:FC:B6:65:D4"
-CHECK_INTERVAL_HEALTHY = 60
-MAX_BACKOFF_SECONDS = 3600
+TARGET_MAC: str = "F4:4E:FC:B6:65:D4"
+CHECK_INTERVAL_HEALTHY: int = 60
+MAX_BACKOFF_SECONDS: int = 3600
 
 # ロガーの設定
 logger = setup_logging("bluetooth")
 
 class BluetoothMonitor:
-    def __init__(self):
-        self.consecutive_failures = 0
-        self.last_status = "UNKNOWN"
+    def __init__(self) -> None:
+        self.consecutive_failures: int = 0
+        self.last_status: str = "UNKNOWN"
 
     def is_connected(self) -> bool:
-        # (変更なし)
+        """Bluetoothデバイスが接続されているか確認する"""
         try:
             result = subprocess.run(
                 ["bluetoothctl", "info", TARGET_MAC], 
@@ -36,18 +35,24 @@ class BluetoothMonitor:
             return False
 
     def attempt_connect(self) -> bool:
-        # (変更なし)
+        """接続を試行し、成功すればPulseAudioのシンクを設定する"""
         logger.info(f"Attempting to connect to {TARGET_MAC}...")
-        subprocess.run(["bluetoothctl", "trust", TARGET_MAC], capture_output=True)
-        ret = subprocess.run(["bluetoothctl", "connect", TARGET_MAC], capture_output=True, text=True)
-        
-        if ret.returncode == 0:
-            logger.info("✅ Connection successful. Setting PulseAudio sink...")
-            subprocess.run(["pacmd", "set-default-sink", f"bluez_sink.{TARGET_MAC.replace(':', '_')}.a2dp_sink"], capture_output=True)
-            return True
-        return False
+        try:
+            subprocess.run(["bluetoothctl", "trust", TARGET_MAC], capture_output=True, timeout=10)
+            ret = subprocess.run(["bluetoothctl", "connect", TARGET_MAC], capture_output=True, text=True, timeout=20)
+            
+            if ret.returncode == 0:
+                logger.info("✅ Connection successful. Setting PulseAudio sink...")
+                # 音声出力先をBluetoothスピーカーに切り替え
+                sink_name = f"bluez_sink.{TARGET_MAC.replace(':', '_')}.a2dp_sink"
+                subprocess.run(["pacmd", "set-default-sink", sink_name], capture_output=True)
+                return True
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("Connection attempt timed out.")
+            return False
 
-    def run(self):
+    def run(self) -> None:
         logger.info("Bluetooth Monitor Started")
         while True:
             try:
@@ -60,7 +65,6 @@ class BluetoothMonitor:
                 else:
                     if self.last_status == "CONNECTED":
                         logger.warning(f"⚠️ {TARGET_MAC} disconnected!")
-                        # common.send_push -> send_push
                         send_push(
                             config.LINE_USER_ID, 
                             [{"type": "text", "text": f"⚠️ Bluetoothスピーカー切断\n{TARGET_MAC}"}],

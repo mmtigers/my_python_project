@@ -2,27 +2,27 @@ import os
 import shutil
 import subprocess
 import sys
-import traceback
 from datetime import datetime
+from typing import Dict, Optional, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 自作モジュール
 import config
-# import common <-- 削除
 from core.logger import setup_logging
+from core.database import save_log_generic
+from core.utils import get_now_iso
 from services.notification_service import send_push
 
 # ロガー設定
 logger = setup_logging("nas_monitor")
 
 class NasMonitor:
-    def __init__(self):
-        self.ip = getattr(config, "NAS_IP", "192.168.1.20")
-        self.mount_point = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
-        self.timeout = getattr(config, "NAS_CHECK_TIMEOUT", 5)
-        # デバイス名 (configになければデフォルト値)
-        self.device_name = "BUFFALO LS720D"
+    def __init__(self) -> None:
+        self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
+        self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
+        self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
+        self.device_name: str = "BUFFALO LS720D"
 
     def check_ping(self) -> bool:
         """NASへのPing疎通確認"""
@@ -44,7 +44,7 @@ class NasMonitor:
             return False
         return os.path.ismount(self.mount_point)
 
-    def get_disk_usage(self):
+    def get_disk_usage(self) -> Optional[Dict[str, float]]:
         """ディスク使用量を取得 (GB単位)"""
         try:
             total, used, free = shutil.disk_usage(self.mount_point)
@@ -58,13 +58,26 @@ class NasMonitor:
             logger.error(f"Disk usage check error: {e}")
             return None
 
-    def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: dict):
+    def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:
         """状態をDBに保存"""
-        # 今回はDB保存は省略、または core.database.save_log_async を使う形に改修可能
-        # 必要であればここも from core.database import save_log_generic 等を追加
-        pass 
+        percent = usage['percent'] if usage else 0
+        
+        # SENSORテーブルのbattery_levelカラムなどを流用して記録
+        # 必要に応じてカラム構成は見直すが、現状は既存スキーマに合わせる
+        save_log_generic(
+            config.SQLITE_TABLE_SENSOR,
+            ["timestamp", "device_name", "device_id", "device_type", "contact_state", "battery_level"],
+            (
+                get_now_iso(),
+                "NAS_Monitor",
+                self.ip,
+                "Server",
+                "mounted" if mount_ok else "unmounted",
+                percent 
+            )
+        )
 
-    def run(self):
+    def run(self) -> None:
         logger.info("Checking NAS status...")
         
         # 1. Ping Check
@@ -76,6 +89,8 @@ class NasMonitor:
                 [{"type": "text", "text": f"🚨 【NAS障害】\nPing応答がありません。\nIP: {self.ip}"}],
                 target="discord", channel="error"
             )
+            # Ping NGでもDBには記録を残す
+            self.save_to_db(False, False, None)
             return
 
         # 2. Mount Check
@@ -87,7 +102,8 @@ class NasMonitor:
                 [{"type": "text", "text": f"⚠️ 【NAS警告】\nマウントが外れています。\nPath: {self.mount_point}"}],
                 target="discord", channel="error"
             )
-            # マウント復旧コマンドをここに書くことも可能
+            # 復旧コマンド等は必要に応じて実装
+            self.save_to_db(ping_ok, False, None)
             return
 
         # 3. Disk Usage
@@ -123,7 +139,6 @@ class NasMonitor:
         
         channel = "error" if is_full else "report"
         
-        # Discordに見やすく送信
         send_push(
             config.LINE_USER_ID, 
             [{"type": "text", "text": msg}],

@@ -4,54 +4,66 @@ import traceback
 from pathlib import Path
 import sys
 import os
+from typing import Optional
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-# import common <-- 削除
 from core.logger import setup_logging
 from services.notification_service import send_push
 
 # === 設定 ===
-WATCH_SERVICE_NAME = "home_system.service"
-WATCH_PROCESS_NAME = "unified_server.py"
-REMINDER_INTERVAL_SEC = 6 * 3600  # 6時間
+WATCH_SERVICE_NAME: str = "home_system.service"
+WATCH_PROCESS_NAME: str = "unified_server.py"
+REMINDER_INTERVAL_SEC: int = 6 * 3600  # 6時間
 
-LOCK_FILE = Path(config.BASE_DIR) / "watchdog_alert_sent.lock"
+LOCK_FILE: Path = Path(config.BASE_DIR) / "watchdog_alert_sent.lock"
 logger = setup_logging("watchdog")
 
 # === メッセージ (主婦向け) ===
-MSG_STOPPED = (
+MSG_STOPPED: str = (
     "あら、サーバーが止まっちゃったみたいです💦\n"
     "パパに確認してもらってくださいね🙇\n"
     "(自動監視システムより)"
 )
-MSG_RECOVERED = (
+MSG_RECOVERED: str = (
     "お待たせしました！\n"
     "サーバーが復活しました✨\n"
     "もう大丈夫ですよ😊"
 )
-MSG_REMINDER = (
+MSG_REMINDER: str = (
     "まだサーバーが止まっているようです😢\n"
     "お時間ある時に確認お願いします💦"
 )
 
 def get_service_status(service_name: str) -> str:
+    """systemctlを使ってサービスのステータスを確認する"""
     try:
-        res = subprocess.run(["systemctl", "is-active", service_name], capture_output=True, text=True, check=False)
+        res = subprocess.run(
+            ["systemctl", "is-active", service_name], 
+            capture_output=True, text=True, check=False
+        )
         return res.stdout.strip()
     except Exception:
         return "error"
 
 def is_process_alive(process_keyword: str) -> bool:
+    """
+    pgrepを使ってプロセスが起動しているか確認する。
+    shell=Trueを使用せず、安全にコマンドを実行する。
+    """
     try:
-        # 自分自身を除外
-        cmd = f"ps aux | grep '{process_keyword}' | grep -v grep"
-        res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        return bool(res.stdout.strip())
+        # pgrep -f [pattern]
+        res = subprocess.run(
+            ["pgrep", "-f", process_keyword], 
+            capture_output=True, text=True, check=False
+        )
+        # 終了コード0ならプロセスが存在する
+        return res.returncode == 0
     except Exception:
         return False
 
-if __name__ == "__main__":
+def check_health() -> None:
     try:
         logger.info("🔍 Watchdog check started...")
         
@@ -90,3 +102,6 @@ if __name__ == "__main__":
     except Exception:
         err = traceback.format_exc()
         logger.error(f"Watchdog Crashed: {err}")
+
+if __name__ == "__main__":
+    check_health()
