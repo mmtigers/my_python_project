@@ -1,32 +1,165 @@
-# HOME_SYSTEM/init_unified_db.py
+# MY_HOME_SYSTEM/init_unified_db.py
 import sqlite3
+import logging
+from typing import List, Dict, Any, Optional
 import config
 import common
 
 logger = common.setup_logging("init_db")
 
-def init_db():
+def validate_schema_integrity(conn: sqlite3.Connection) -> None:
+    """
+    設計書(3.1)に基づくスキーマ整合性の自動検証を行う。
+    主要テーブルのカラム定義が期待通りかチェックする。
+    """
+    # 検証対象のテーブル定義 (テーブル名: [必須カラムリスト])
+    expected_schemas: Dict[str, List[str]] = {
+        # New Core Tables
+        "users": ["name", "level", "xp", "gold", "status"],
+        "quests": ["title", "description", "xp_reward", "gold_reward", "difficulty"],
+        config.SQLITE_TABLE_DAILY_LOGS: ["category", "detail", "timestamp"],
+        config.SQLITE_TABLE_SWITCHBOT_LOGS: ["device_id", "temperature", "humidity", "timestamp"],
+        config.SQLITE_TABLE_POWER_USAGE: ["wattage", "timestamp"],
+        
+        # Legacy/Existing Tables (Critical for current operation)
+        config.SQLITE_TABLE_CHILD: ["child_name", "condition", "timestamp"],
+        config.SQLITE_TABLE_FOOD: ["menu_category", "meal_time_category"],
+        config.SQLITE_TABLE_DEFECATION: ["record_type", "condition"]
+    }
+
+    cur = conn.cursor()
+    issues: List[str] = []
+
+    for table, columns in expected_schemas.items():
+        try:
+            cur.execute(f"PRAGMA table_info({table})")
+            existing_cols = [row[1] for row in cur.fetchall()]
+            
+            if not existing_cols:
+                # 初期化前は存在しないのが正常だが、init後に呼ぶ前提
+                issues.append(f"Missing Table: {table}")
+                continue
+
+            for col in columns:
+                if col not in existing_cols:
+                    issues.append(f"Table '{table}' missing column '{col}'")
+        except Exception as e:
+            issues.append(f"Error checking {table}: {e}")
+
+    if issues:
+        for issue in issues:
+            logger.warning(f"⚠️ Schema Integrity Issue: {issue}")
+    else:
+        logger.info("✅ Schema Integrity Validation Passed.")
+
+def init_db() -> None:
     """
     アプリケーションで使用する全SQLiteテーブルを初期化する。
-    重複定義を防ぐため IF NOT EXISTS を使用。
+    設計書 v1.0.0 (Section 3.2) および既存機能の後方互換性を維持する。
     """
     logger.info(f"データベース初期化開始: {config.SQLITE_DB_PATH}")
 
-    # common.get_db_cursor を使用してトランザクション管理を統一
-    # commit=True により、コンテキストを抜ける際に自動コミットされる
     with common.get_db_cursor(commit=True) as cur:
-        
-        # WALモード有効化 (Performance tuning)
+        # WALモード有効化
         try:
             cur.execute("PRAGMA journal_mode=WAL;")
-            logger.info("✅ WALモードを設定しました")
         except Exception as e:
-            logger.warning(f"⚠️ WALモードの設定に失敗しました (無視可能です): {e}")
+            logger.warning(f"⚠️ WALモード設定失敗: {e}")
 
-        # --- IoT & Sensor Data ---
-        
+        # ==========================================
+        # 1. New Core Tables (Design Doc v1.0.0)
+        # ==========================================
+
+        # Users (旧: quest_users から移行予定)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT UNIQUE, -- LINE ID等
+                name TEXT,
+                level INTEGER DEFAULT 1,
+                xp INTEGER DEFAULT 0,
+                gold INTEGER DEFAULT 0,
+                status TEXT DEFAULT '在宅', -- 在宅/外出
+                job_class TEXT,
+                medal_count INTEGER DEFAULT 0,
+                avatar TEXT, 
+                updated_at DATETIME
+            )
+        ''')
+
+        # Quests (旧: quest_master から移行予定)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS quests (
+                quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                xp_reward INTEGER DEFAULT 10,
+                gold_reward INTEGER DEFAULT 5,
+                difficulty INTEGER DEFAULT 1,
+                quest_type TEXT DEFAULT 'daily',
+                icon_key TEXT,
+                start_date TEXT,
+                end_date TEXT
+            )
+        ''')
+
+        # Quest History
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS quest_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                quest_id INTEGER,
+                quest_title TEXT,
+                status TEXT DEFAULT 'approved', -- approved/pending
+                approved_at DATETIME NOT NULL,
+                exp_earned INTEGER,
+                gold_earned INTEGER
+            )
+        ''')
+
+        # Daily Logs (統合ログ: 生活イベント)
         cur.execute(f'''
-            CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_SENSOR} (
+            CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DAILY_LOGS} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                category TEXT NOT NULL, -- 排便, 風呂, 睡眠, 食事 etc.
+                detail TEXT,
+                timestamp DATETIME NOT NULL
+            )
+        ''')
+
+        # SwitchBot Meter Logs (温湿度分離)
+        cur.execute(f'''
+            CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_SWITCHBOT_LOGS} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                device_name TEXT,
+                temperature REAL,
+                humidity REAL,
+                timestamp DATETIME NOT NULL
+            )
+        ''')
+
+        # Power Usage (電力ログ分離)
+        cur.execute(f'''
+            CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_POWER_USAGE} (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT,
+                device_name TEXT,
+                wattage REAL,
+                timestamp DATETIME NOT NULL
+            )
+        ''')
+
+        # ==========================================
+        # 2. Existing / Legacy Tables (Must Keep)
+        # ==========================================
+        # これらは config.py で定義された定数を使用し、既存コードとの互換性を保ちます。
+
+        # Sensor Data (Old integrated table - for compatibility)
+        # config.pyで "device_records" と定義されていたテーブル
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS device_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 timestamp DATETIME NOT NULL, 
                 device_name TEXT, 
@@ -43,9 +176,8 @@ def init_db():
                 threshold_watts REAL
             )
         ''')
-        
-        # --- Logs & Records ---
 
+        # Ohayo (挨拶)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_OHAYO} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -57,6 +189,7 @@ def init_db():
             )
         ''')
         
+        # Food (食事)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_FOOD} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -69,8 +202,10 @@ def init_db():
             )
         ''')
         
-        cur.execute(f'''
-            CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DAILY} (
+        # Daily Records (Old Generic)
+        # config.py で SQLITE_TABLE_DAILY と定義されているもの
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS daily_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
                 user_id TEXT, 
                 user_name TEXT, 
@@ -81,6 +216,7 @@ def init_db():
             )
         ''')
     
+        # Health (汎用健康)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_HEALTH} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -91,6 +227,7 @@ def init_db():
             )
         ''')
 
+        # Car (車検知)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CAR} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,6 +237,7 @@ def init_db():
             )
         ''')
 
+        # Child Health (子供体調 - 重要)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_CHILD} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,6 +249,7 @@ def init_db():
             )
         ''')
 
+        # Defecation (排便記録 - 重要)
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_DEFECATION} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,8 +262,7 @@ def init_db():
             )
         ''')
 
-        # --- AI & External Services ---
-
+        # AI Report
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_AI_REPORT} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,6 +271,7 @@ def init_db():
             )
         ''')
 
+        # Shopping
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_SHOPPING} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -145,7 +284,8 @@ def init_db():
             )
         ''')   
 
-        cur.execute(f'''
+        # Haircut
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS haircut_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform TEXT,
@@ -158,6 +298,7 @@ def init_db():
             )
         ''')
 
+        # Weather
         cur.execute('''
             CREATE TABLE IF NOT EXISTS weather_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -169,6 +310,7 @@ def init_db():
             )
         ''')
         
+        # Security Logs (Images)
         cur.execute('''
             CREATE TABLE IF NOT EXISTS security_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,6 +322,7 @@ def init_db():
             )
         ''')
 
+        # Bicycle Parking
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_BICYCLE} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -190,7 +333,8 @@ def init_db():
             )
         ''')
 
-        cur.execute(f'''
+        # Land Price
+        cur.execute('''
             CREATE TABLE IF NOT EXISTS land_price_records (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 trade_id TEXT UNIQUE,
@@ -206,6 +350,7 @@ def init_db():
             )
         ''')
 
+        # NAS Monitoring
         cur.execute(f'''
             CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_NAS} (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,13 +366,11 @@ def init_db():
             )
         ''')
 
-        # --- Family Quest RPG System ---
+        # ==========================================
+        # 3. Game & Quest System (Legacy/Transitional)
+        # ==========================================
         
-        # Note: 元のコードには重複定義がありましたが、IF NOT EXISTSにより
-        # 最初の定義(user_id TEXT)が優先される仕様でした。
-        # ここでは実際に有効だった定義のみを記述し、重複を除去しています。
-
-        # 1. ユーザーマスタ
+        # 旧ユーザーテーブル (quest_users)
         cur.execute('''
             CREATE TABLE IF NOT EXISTS quest_users (
                 user_id TEXT PRIMARY KEY,
@@ -242,7 +385,7 @@ def init_db():
             )
         ''')
 
-        # 2. クエストマスタ
+        # 旧クエストマスタ (quest_master)
         cur.execute('''
             CREATE TABLE IF NOT EXISTS quest_master (
                 quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,21 +403,7 @@ def init_db():
             )
         ''')
         
-        # 3. クエスト履歴
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS quest_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                quest_id INTEGER,
-                quest_title TEXT,
-                exp_earned INTEGER,
-                gold_earned INTEGER,
-                completed_at DATETIME NOT NULL,
-                status TEXT DEFAULT 'approved' 
-            )
-        ''')
-
-        # 4. 報酬マスタ
+        # 報酬マスタ
         cur.execute('''
             CREATE TABLE IF NOT EXISTS reward_master (
                 reward_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -285,7 +414,7 @@ def init_db():
             )
         ''')
 
-        # 5. 報酬交換履歴
+        # 報酬履歴
         cur.execute('''
             CREATE TABLE IF NOT EXISTS reward_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -297,8 +426,7 @@ def init_db():
             )
         ''')
 
-
-        # 6. 装備マスタ
+        # 装備マスタ
         cur.execute('''
             CREATE TABLE IF NOT EXISTS equipment_master (
                 equipment_id INTEGER PRIMARY KEY,
@@ -310,8 +438,7 @@ def init_db():
             )
         ''')
 
-        # 7. ユーザー所有装備 & 装備状態
-        # is_equipped: 1=装備中, 0=所持のみ
+        # ユーザー装備
         cur.execute('''
             CREATE TABLE IF NOT EXISTS user_equipments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -323,8 +450,7 @@ def init_db():
             )
         ''')
 
-
-        # 8. パーティ状態管理 (ボスバトル用) ★追加
+        # ボス戦 (Party State)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS party_state (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -332,114 +458,66 @@ def init_db():
                 current_hp INTEGER DEFAULT 0,
                 max_hp INTEGER DEFAULT 100,
                 week_start_date TEXT,
-                is_defeated INTEGER DEFAULT 0,  -- ★追加: 討伐フラグ
-                total_damage INTEGER DEFAULT 0, -- ★追加: 累計ダメージ
+                is_defeated INTEGER DEFAULT 0,
+                total_damage INTEGER DEFAULT 0, 
                 charge_gauge INTEGER DEFAULT 0,
                 updated_at TEXT
             )
         """)
 
-
-        # SUUMO監視用テーブル
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS suumo_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                property_id TEXT UNIQUE,  -- 物件固有ID (URLの一部など)
-                title TEXT,
-                address TEXT,             -- ★追加: 住所
-                rent_price INTEGER,       -- 家賃 + 管理費
-                url TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        # --- Legacy / Unused Definitions ---
-        # 以下のテーブルは元のスクリプトで定義されていましたが、現在の主要ロジックでは
-        # おそらく使用されていません。しかし、後方互換性(Zero Regression)のため定義を残します。
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS quest_tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,
-                points INTEGER DEFAULT 0,
-                target_user_id INTEGER,
-                FOREIGN KEY (target_user_id) REFERENCES quest_users(id)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS quest_status (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id INTEGER,
-                date TEXT NOT NULL,
-                is_completed INTEGER DEFAULT 1,
-                FOREIGN KEY (task_id) REFERENCES quest_tasks(id)
-            )
-        """)
-
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS reward_history (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                reward_id INTEGER NOT NULL,
-                reward_name TEXT,
-                cost INTEGER NOT NULL,
-                purchased_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'requested',
-                FOREIGN KEY(user_id) REFERENCES users(id),
-                FOREIGN KEY(reward_id) REFERENCES rewards(id)
-            )
-        """)
-
-        # --- Inventory System ---
-        # 購入した個別のアイテムを管理するテーブル
+        # インベントリ
         cur.execute('''
             CREATE TABLE IF NOT EXISTS user_inventory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT,
                 reward_id INTEGER,
-                status TEXT DEFAULT 'owned',  -- owned:所持, pending:使用申請中, consumed:使用済
+                status TEXT DEFAULT 'owned',
                 purchased_at DATETIME NOT NULL,
                 used_at DATETIME,
                 FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id)
             )
         ''')
 
-
-        # --- Guild Bounty System (Guild Board) ---
-        # 家族間の突発的な依頼を管理する掲示板テーブル
-
+        # ギルド掲示板
         cur.execute('''
             CREATE TABLE IF NOT EXISTS bounties (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                title TEXT NOT NULL,          -- 依頼タイトル
-                description TEXT,             -- 詳細（牛乳の種類、掃除の場所など）
-                reward_gold INTEGER DEFAULT 0, -- 報酬ゴールド
-                reward_exp INTEGER DEFAULT 0,  -- 報酬経験値（子供向けに設定する場合など）
-                
-                -- ターゲット設定
-                target_type TEXT NOT NULL,    -- 'ALL', 'ADULTS', 'CHILDREN', 'USER'
-                target_user_id TEXT,          -- target_type='USER' の場合の指定ID
-                
-                -- 状態管理
-                status TEXT DEFAULT 'OPEN',   -- OPEN, TAKEN, PENDING_APPROVAL, COMPLETED, CANCELED
-                
-                -- アクター
-                created_by TEXT NOT NULL,     -- 依頼者（user_id）
-                assignee_id TEXT,             -- 受注者（user_id）
-                
-                -- タイムスタンプ
+                title TEXT NOT NULL,
+                description TEXT,
+                reward_gold INTEGER DEFAULT 0,
+                reward_exp INTEGER DEFAULT 0,
+                target_type TEXT NOT NULL,
+                target_user_id TEXT,
+                status TEXT DEFAULT 'OPEN',
+                created_by TEXT NOT NULL,
+                assignee_id TEXT,
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME,
                 completed_at DATETIME
             )
         ''')
 
+        # SUUMO
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS suumo_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                property_id TEXT UNIQUE,
+                title TEXT,
+                address TEXT,
+                rent_price INTEGER,
+                url TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
 
+    # 検証実行
+    try:
+        with sqlite3.connect(config.SQLITE_DB_PATH) as conn:
+            validate_schema_integrity(conn)
+    except Exception as e:
+        logger.error(f"Schema Validation Failed: {e}")
 
-
-
-    logger.info("✅ 全テーブルの準備が完了しました。")
+    logger.info("✅ 全テーブルの準備・初期化が完了しました。")
 
 if __name__ == "__main__":
     init_db()
