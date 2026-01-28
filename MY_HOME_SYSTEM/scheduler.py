@@ -2,86 +2,116 @@
 import time
 import subprocess
 import sys
-import logging
-import os  # <--- 追加
+import os
 from datetime import datetime
-import common
+from typing import List, Dict, Any, TypedDict
+
+# プロジェクトルートへのパス解決
+PROJECT_ROOT: str = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(PROJECT_ROOT)
+
+import config
+from core.logger import setup_logging
 
 # ロガー設定
-logger = common.setup_logging("scheduler")
+logger = setup_logging("scheduler")
+
+class Task(TypedDict):
+    """実行タスクのデータ構造定義。"""
+    script: str
+    interval: int
+    last_run: float
+    args: List[str]
 
 # === 設定: 定期実行するスクリプトと間隔(秒) ===
-# 修正: パスを monitors/ 始まりに変更
-TASKS = [
+# 基本設計書およびこれまでのリファクタリング内容に基づき構成
+TASKS: List[Task] = [
     # 頻度: 高 (5分〜10分)
-    {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0},
-    {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0},
-    {"script": "monitors/car_presence_checker.py",    "interval": 600,  "last_run": 0},
-    {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0},
+    {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0, "args": []},
+    {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0, "args": []},
+    {"script": "monitors/car_presence_checker.py",    "interval": 600,  "last_run": 0, "args": []},
+    {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
 
     # 頻度: 中 (30分)
-    {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0},
-    # (診療時間チェックはスクリプト内部で行うため、常時起動でOK)
-    {"script": "monitors/clinic_monitor.py",          "interval": 1800, "last_run": 0},
+    {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0, "args": ["--save"]},
+    {"script": "monitors/clinic_monitor.py",          "interval": 1800, "last_run": 0, "args": []},
 
     # 頻度: 低 (1時間〜)
-    {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0},
-    {"script": "monitors/haircut_monitor.py",         "interval": 3600, "last_run": 0},
-    # 頻度: 低 (SUUMO監視 - 1時間に1回)
-    # config.SUUMO_MONITOR_INTERVAL (3600秒) で設定
-    {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0},
+    {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},
+    {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0, "args": []},
+    {"script": "weekly_analyze_report.py",            "interval": 3600, "last_run": 0, "args": []},
 ]
 
-def run_script(script_name):
-    """サブプロセスとしてスクリプトを実行"""
-    try:
-        cmd = [sys.executable, script_name]
-        logger.info(f"▶️ Task Start: {script_name}")
+def run_script(script_path: str, args: List[str]) -> bool:
+    """
+    指定されたスクリプトをサブプロセスとして実行する。
+    
+    Args:
+        script_path (str): 実行するスクリプトの相対パス
+        args (List[str]): スクリプトに渡す引数
         
-        # 修正: サブプロセスが親ディレクトリの common.py をimportできるようにする
-        current_env = os.environ.copy()
-        cwd = os.getcwd()
-        current_path = current_env.get("PYTHONPATH", "")
-        # 現在のディレクトリをPYTHONPATHの先頭に追加
-        current_env["PYTHONPATH"] = f"{cwd}{os.pathsep}{current_path}"
+    Returns:
+        bool: 実行成功(returncode 0)ならTrue
+    """
+    full_path: str = os.path.join(PROJECT_ROOT, script_path)
+    
+    if not os.path.exists(full_path):
+        logger.error(f"❌ Script not found: {full_path}")
+        return False
 
-        start_time = time.time()
+    logger.info(f"▶️ Executing: {script_path} {' '.join(args)}")
+    
+    # 子プロセスがプロジェクトのモジュールを読めるよう PYTHONPATH を設定
+    env: Dict[str, str] = os.environ.copy()
+    env["PYTHONPATH"] = PROJECT_ROOT
+
+    try:
+        # 実行完了を待機
         result = subprocess.run(
-            cmd, 
-            capture_output=True, 
-            text=True, 
-            check=False,
-            env=current_env  # <--- 環境変数を渡す
+            [sys.executable, full_path] + args,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300  # 1タスク最大5分のタイムアウト
         )
-        duration = time.time() - start_time
 
         if result.returncode == 0:
-            logger.info(f"✅ Task Success: {script_name} ({duration:.1f}s)")
+            logger.info(f"✅ Finished: {script_path}")
+            return True
         else:
-            logger.error(f"❌ Task Failed: {script_name} (Code: {result.returncode})\nError:\n{result.stderr}")
-            
+            logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {result.returncode})")
+            if result.stderr:
+                logger.error(f"Stderr: {result.stderr.strip()}")
+            return False
+
+    except subprocess.TimeoutExpired:
+        logger.error(f"⏰ Timeout: {script_path} exceeded 300 seconds.")
+        return False
     except Exception as e:
-        logger.error(f"🔥 Scheduler Error ({script_name}): {e}")
+        logger.exception(f"🔥 Unexpected error running {script_path}: {e}")
+        return False
 
-def main():
-    logger.info("🚀 System Scheduler Started (Season 5 - Refactored)")
-    logger.info(f"📋 Registered Tasks: {len(TASKS)}")
+def main() -> None:
+    """メインループ。"""
+    logger.info("⏰ --- MY_HOME_SYSTEM Scheduler Started ---")
+    
+    while True:
+        now: float = time.time()
+        
+        for task in TASKS:
+            # 実行タイミングの判定
+            if now - task["last_run"] >= task["interval"]:
+                run_script(task["script"], task["args"])
+                task["last_run"] = now
 
-    try:
-        while True:
-            current_time = time.time()
-            
-            for task in TASKS:
-                if current_time - task["last_run"] >= task["interval"]:
-                    run_script(task["script"])
-                    task["last_run"] = time.time()
-            
-            time.sleep(10)
-
-    except KeyboardInterrupt:
-        logger.info("🛑 Scheduler Stopped by User")
-    except Exception as e:
-        logger.critical(f"💀 Scheduler Crashed: {e}")
+        # CPU負荷軽減のための短いスリープ
+        time.sleep(10)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("👋 Scheduler stopped by user.")
+    except Exception as e:
+        logger.critical(f"💀 Scheduler crashed: {e}", exc_info=True)
+        sys.exit(1)
