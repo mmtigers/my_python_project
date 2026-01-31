@@ -266,7 +266,10 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)) 
     
     body = (await request.body()).decode('utf-8')
     try:
-        line_handler.handle(body, x_line_signature)
+        # ▼▼▼ 修正: asyncio.to_thread を使って、同期処理を別スレッドで実行する ▼▼▼
+        # これにより、line_logic.py 内の asyncio.run() がメインループと衝突しなくなります。
+        await asyncio.to_thread(line_handler.handle, body, x_line_signature)
+        # ▲▲▲ ▲▲▲
     except InvalidSignatureError:
         raise HTTPException(status_code=400)
     except Exception as e:
