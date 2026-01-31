@@ -233,7 +233,8 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 action TEXT,
                 rule_name TEXT,
-                timestamp DATETIME NOT NULL
+                timestamp DATETIME,
+                score REAL
             )
         ''')
 
