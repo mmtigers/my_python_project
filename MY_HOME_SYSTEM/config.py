@@ -303,19 +303,29 @@ SUUMO_MAX_BUDGET: int = 70000
 SUUMO_MONITOR_INTERVAL: int = 3600
 
 # ==========================================
-# 9. 小児科予約監視設定
+# 9. 小児科予約監視設定 (Clinic Monitor)
 # ==========================================
+# Rule 9.2: 機密情報の分離 - URL等は環境変数から読み込む [cite: 177]
 CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
 CLINIC_HTML_DIR: str = os.path.join(ASSETS_DIR, "clinic_html")
-CLINIC_MONITOR_START_HOUR: int = 6
-CLINIC_MONITOR_END_HOUR: int = 19
-CLINIC_REQUEST_TIMEOUT: int = 10
+CLINIC_STATS_CSV: str = os.path.join(ASSETS_DIR, "clinic_stats.csv")
+
+# 監視実行時間帯 (0-23時)
+# 基本設計書 9.2: デフォルト値を持ちつつ環境変数で上書き可能にする
+CLINIC_MONITOR_START_HOUR: int = int(os.getenv("CLINIC_MONITOR_START_HOUR", "8"))
+CLINIC_MONITOR_END_HOUR: int = int(os.getenv("CLINIC_MONITOR_END_HOUR", "19"))
+
+# リクエスト設定
+CLINIC_REQUEST_TIMEOUT: int = int(os.getenv("CLINIC_REQUEST_TIMEOUT", "10"))
 CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
 
-# ディレクトリ自動作成
-for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR, UPLOAD_DIR, SOUND_DIR]:
+# 自動作成ディレクトリへの追加
+for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR]:
     try:
         if not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
     except Exception as e:
         print(f"⚠️ Warning: Failed to create directory '{d}': {e}", file=sys.stderr)
+
+# グラフ画像の保存先
+CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
