@@ -63,11 +63,11 @@ def process_appliances(location: str, token: str) -> None:
                         (device_id, device_name, power_val, get_now_iso())
                     )
                     
-                    # 2. 旧テーブル (device_records) - 互換性
-                    save_log_generic("device_records",
-                        ["timestamp", "device_name", "device_id", "device_type", "power_watts"],
-                        (get_now_iso(), device_name, device_id, "SmartMeter", power_val)
-                    )
+                    # # 2. 旧テーブル (device_records) - 互換性
+                    # save_log_generic("device_records",
+                    #     ["timestamp", "device_name", "device_id", "device_type", "power_watts"],
+                    #     (get_now_iso(), device_name, device_id, "SmartMeter", power_val)
+                    # )
                     
                     logger.debug(f"⚡ Power: {device_name} = {power_val}W")
 
@@ -106,13 +106,13 @@ def process_devices(location: str, token: str) -> None:
                 (device_id, device_name, te_val, hu_val if hu_val else 0.0, get_now_iso())
             )
             
-            # 2. 旧テーブル (device_records)
-            save_log_generic("device_records",
-                ["timestamp", "device_name", "device_id", "device_type", 
-                 "temperature_celsius", "humidity_percent", "brightness_state"],
-                (get_now_iso(), device_name, device_id, "NatureRemo", 
-                 te_val, hu_val, str(il_val) if il_val else "")
-            )
+            # # 2. 旧テーブル (device_records)
+            # save_log_generic("device_records",
+            #     ["timestamp", "device_name", "device_id", "device_type", 
+            #      "temperature_celsius", "humidity_percent", "brightness_state"],
+            #     (get_now_iso(), device_name, device_id, "NatureRemo", 
+            #      te_val, hu_val, str(il_val) if il_val else "")
+            # )
             
             logger.debug(f"🌡️ Sensor: {device_name} = {te_val}°C / {hu_val}%")
 

@@ -129,30 +129,25 @@ def apply_friendly_names(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    # --- 【修正箇所】ここから ---
-    # 0. カラム名の揺らぎ吸収 (camera_id -> device_id)
+    # 0. カラム名の揺らぎ吸収
     if "device_id" not in df.columns and "camera_id" in df.columns:
         df["device_id"] = df["camera_id"]
 
-    # 1. 必須カラム 'device_id' の存在チェック (KeyError回避の根本対策)
+    # 1. 必須カラム 'device_id' の存在チェック
     if "device_id" not in df.columns:
-        # 多くのテーブルで呼び出されるため、InfoレベルではなくDebugレベル推奨だが、
-        # 今回はトラブルシューティングのためWarningで出す
-        logger.warning(f"apply_friendly_names: 'device_id' column missing. Columns: {list(df.columns)}")
         # UIが落ちないように最低限の列を埋める
         df["friendly_name"] = "Unknown"
         df["location"] = "その他"
         return df
-    # --- 【修正箇所】ここまで ---
 
-    # 2. Configからデフォルトのマッピング(予備)を作成
-    #    ID -> Config上の名前
+    # 2. Configからデフォルトのマッピングを作成
     id_map = {d["id"]: d.get("name", d["id"]) for d in config.MONITOR_DEVICES}
     
-    # 3. ロケーションマップの作成 (Configベース)
+    # 3. ロケーションマップの作成
     loc_map = {d["id"]: d.get("location", "その他") for d in config.MONITOR_DEVICES}
 
     # 4. DB内の「最新のデバイス名」を取得してマッピングを上書き
+    #    (注: 複数テーブルからの統合データの場合、device_nameが含まれていない場合もあるためチェック)
     if "device_name" in df.columns and "timestamp" in df.columns:
         try:
             latest_df = df.sort_values("timestamp", ascending=False)
@@ -163,7 +158,7 @@ def apply_friendly_names(df: pd.DataFrame) -> pd.DataFrame:
         except Exception as e:
             logger.warning(f"Friendly name mapping update failed: {e}")
 
-    # 5. マッピングの適用 (device_idがあることは保証済み)
+    # 5. マッピングの適用
     df["friendly_name"] = df["device_id"].map(id_map)
     
     # マッピングで見つからなかった場合は device_name -> device_id の順でフォールバック
@@ -171,7 +166,7 @@ def apply_friendly_names(df: pd.DataFrame) -> pd.DataFrame:
         df["friendly_name"] = df["friendly_name"].fillna(df["device_name"])
     df["friendly_name"] = df["friendly_name"].fillna(df["device_id"])
 
-    # 6. ロケーションの適用 (ここが以前のエラー箇所)
+    # 6. ロケーションの適用
     df["location"] = df["device_id"].map(loc_map).fillna("その他")
 
     # 7. 名称の微調整
@@ -218,9 +213,6 @@ def load_nas_status() -> Optional[pd.Series]:
         )
         if not cur.fetchone():
             return None
-        
-        # クエリ実行のため一度閉じるか、Connectionを再利用する。
-        # ここではload_data_from_dbを再利用するため閉じる
         cur.close()
         conn.close()
         conn = None
@@ -242,9 +234,74 @@ def load_generic_data(table_name: str, limit: int = 500) -> pd.DataFrame:
 
 
 def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
-    query = f"SELECT * FROM {config.SQLITE_TABLE_SENSOR} ORDER BY timestamp DESC LIMIT {limit}"
-    df = load_data_from_db(query)
-    return apply_friendly_names(df)
+    """
+    【v1.0.0対応】新旧テーブルからセンサーデータを統合して取得する
+    Target Tables:
+      1. device_records (Legacy / Other sensors)
+      2. switchbot_meter_logs (Temperature / Humidity)
+      3. power_usage (Electricity)
+    """
+    # 1. Legacy / Others (開閉センサー等)
+    query_legacy = f"""
+        SELECT timestamp, device_id, device_name, device_type, 
+               temperature_celsius, humidity_percent, power_watts, 
+               contact_state, movement_state, brightness_state
+        FROM device_records 
+        ORDER BY timestamp DESC LIMIT {limit}
+    """
+    df_legacy = load_data_from_db(query_legacy)
+
+    # 2. SwitchBot Meter Logs (New: 温湿度)
+    # カラム名を旧仕様 (temperature_celsius, humidity_percent) にエイリアスして取得
+    query_meter = f"""
+        SELECT timestamp, device_id, device_name, 
+               temperature as temperature_celsius, 
+               humidity as humidity_percent
+        FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
+        ORDER BY timestamp DESC LIMIT {limit}
+    """
+    df_meter = load_data_from_db(query_meter)
+    if not df_meter.empty:
+        df_meter["device_type"] = "Meter"
+
+    # 3. Power Usage (New: 電力)
+    # カラム名を旧仕様 (power_watts) にエイリアスして取得
+    query_power = f"""
+        SELECT timestamp, device_id, device_name, 
+               wattage as power_watts
+        FROM {config.SQLITE_TABLE_POWER_USAGE}
+        ORDER BY timestamp DESC LIMIT {limit}
+    """
+    df_power = load_data_from_db(query_power)
+    if not df_power.empty:
+        # Nature Remo E Lite か Plug かは device_name 等で区別が必要だが、
+        # いったん 'Nature Remo E Lite' と仮定するか、既存ロジックに任せる
+        # ここでは後段のロジックが device_type='Nature Remo E Lite' を期待している箇所があるため補完
+        df_power["device_type"] = df_power["device_name"].apply(
+            lambda x: "Nature Remo E Lite" if x and "Remo" in str(x) else "Plug"
+        )
+        # device_nameがない場合
+        df_power["device_type"] = df_power["device_type"].replace("Plug", "Nature Remo E Lite") 
+
+    # --- 統合 ---
+    df_list = []
+    if not df_legacy.empty: df_list.append(df_legacy)
+    if not df_meter.empty: df_list.append(df_meter)
+    if not df_power.empty: df_list.append(df_power)
+
+    if not df_list:
+        return pd.DataFrame()
+
+    df_merged = pd.concat(df_list, ignore_index=True)
+    
+    # 統合後の再ソート
+    if "timestamp" in df_merged.columns:
+        # load_data_from_db で既に型変換されているはずだが念のため
+        df_merged["timestamp"] = pd.to_datetime(df_merged["timestamp"])
+        df_merged = df_merged.sort_values("timestamp", ascending=False).reset_index(drop=True)
+
+    # 表示名適用
+    return apply_friendly_names(df_merged).head(limit)
 
 
 def get_ngrok_url() -> Dict[str, str]:
@@ -262,7 +319,6 @@ def get_ngrok_url() -> Dict[str, str]:
                     urls["dashboard"] = t.get("public_url")
             return urls
     except Exception:
-        # 接続エラー等は無視するがログには残さない（頻発するため）
         pass
     return {}
 
@@ -363,27 +419,70 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         """
         df_weather = pd.read_sql_query(q_weather, conn)
 
+        # 温室度の取得：load_sensor_data は重いので直接SQLで集計する
+        # ここも新旧テーブル両方を見る必要があるが、簡略化のため新テーブル優先で結合
+        
+        # 伊丹のデバイスIDを取得
         itami_ids = [
             d["id"] for d in config.MONITOR_DEVICES if d.get("location") == location
         ]
         if not itami_ids:
             return df_weather
-
+            
         ids_str = "'" + "','".join(itami_ids) + "'"
 
-        q_sensor = f"""
+        # 新テーブル (switchbot_meter_logs) から集計
+        q_new = f"""
+            SELECT 
+                substr(timestamp, 1, 10) as date,
+                MAX(temperature) as in_max,
+                MIN(temperature) as in_min
+            FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS}
+            WHERE 
+                timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
+                AND device_id IN ({ids_str})
+                AND temperature IS NOT NULL
+            GROUP BY date
+        """
+        
+        # 旧テーブル (device_records) から集計
+        q_old = f"""
             SELECT 
                 substr(timestamp, 1, 10) as date,
                 MAX(temperature_celsius) as in_max,
                 MIN(temperature_celsius) as in_min
-            FROM {config.SQLITE_TABLE_SENSOR}
+            FROM device_records
             WHERE 
                 timestamp >= '{start_date}' AND timestamp <= '{end_date}T23:59:59'
                 AND device_id IN ({ids_str})
                 AND temperature_celsius IS NOT NULL
             GROUP BY date
         """
-        df_sensor = pd.read_sql_query(q_sensor, conn)
+        
+        # 実行と結合
+        df_new = pd.DataFrame()
+        df_old = pd.DataFrame()
+        
+        try:
+            df_new = pd.read_sql_query(q_new, conn)
+        except Exception:
+            pass # テーブルがない場合など
+            
+        try:
+            df_old = pd.read_sql_query(q_old, conn)
+        except Exception:
+            pass
+
+        # 結合処理
+        if not df_new.empty and not df_old.empty:
+            df_sensor = pd.concat([df_new, df_old]).groupby("date").agg({
+                "in_max": "max",
+                "in_min": "min"
+            }).reset_index()
+        elif not df_new.empty:
+            df_sensor = df_new
+        else:
+            df_sensor = df_old
 
         if df_weather.empty and df_sensor.empty:
             return pd.DataFrame()
@@ -455,8 +554,6 @@ def load_bicycle_data(limit: int = 2000) -> pd.DataFrame:
         )
         if not cur.fetchone():
             return pd.DataFrame()
-        # pandas read用に一度クローズして再利用（またはcur不要）だが、
-        # load_data_from_dbが接続を作るのでここはチェックのみ
         conn.close()
         conn = None
 
@@ -476,24 +573,35 @@ def load_ai_report() -> Optional[pd.Series]:
 
 
 def calculate_monthly_cost_cumulative() -> int:
-    """今月の電気代概算"""
+    """今月の電気代概算 (v1.0.0対応: power_usage優先)"""
     try:
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
 
+        # 1. 新テーブル (power_usage) から取得
         query = f"""
-            SELECT timestamp, power_watts FROM {config.SQLITE_TABLE_SENSOR} 
-            WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
+            SELECT timestamp, wattage as power_watts 
+            FROM {config.SQLITE_TABLE_POWER_USAGE} 
+            WHERE timestamp >= '{start_of_month}'
             ORDER BY timestamp ASC
         """
         df = load_data_from_db(query)
+
+        # 2. 新テーブルが空なら旧テーブル (device_records) へフォールバック
+        if df.empty:
+            query_old = f"""
+                SELECT timestamp, power_watts FROM device_records
+                WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
+                ORDER BY timestamp ASC
+            """
+            df = load_data_from_db(query_old)
 
         if df.empty:
             return 0
 
         df["time_diff"] = df["timestamp"].diff().dt.total_seconds() / 3600
         df = df.dropna(subset=["time_diff"])
-        df = df[df["time_diff"] <= 1.0]
+        df = df[df["time_diff"] <= 1.0] # 異常な間隔を除外
 
         df["kwh"] = (df["power_watts"] / 1000) * df["time_diff"]
         # 概算単価 31円/kWh
@@ -547,7 +655,7 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
     # 人感センサー優先
     df_motion = df_sensor[
         (df_sensor["location"] == "伊丹")
-        & (df_sensor["device_type"].str.contains("Motion"))
+        & (df_sensor["device_type"].str.contains("Motion", na=False))
         & (df_sensor["movement_state"] == "detected")
     ].sort_values("timestamp", ascending=False)
 
@@ -585,17 +693,20 @@ def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
     val = "🍚 炊いてない"
     theme = "theme-red"
 
-    today_str = now.strftime("%Y-%m-%d")
-    query = f"""
-        SELECT MAX(power_watts) as max_power 
-        FROM {config.SQLITE_TABLE_SENSOR} 
-        WHERE device_name LIKE '%炊飯器%' 
-        AND timestamp >= '{today_str}'
-    """
-    df_rice = load_data_from_db(query, date_column=None)
+    # device_nameカラムがない可能性があるためチェック
+    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
+        return val, theme
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # メモリ上のDataFrameから判定（重いクエリを避ける）
+    df_rice = df_sensor[
+        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
+        (df_sensor["timestamp"] >= today_start)
+    ]
 
     if not df_rice.empty:
-        max_watts = df_rice.iloc[0]["max_power"]
+        max_watts = df_rice["power_watts"].max()
         if max_watts is not None and max_watts >= 500:
             val = "🍚 ご飯あり"
             theme = "theme-green"
@@ -638,14 +749,12 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
         "JR伊丹駅前(第3)自転車駐車場 (E)": "第3E",
     }
 
-    # タイムスタンプの型変換を確実に行う
     if not pd.api.types.is_datetime64_any_dtype(df_bicycle["timestamp"]):
         df_bicycle = df_bicycle.copy()
         df_bicycle["timestamp"] = pd.to_datetime(df_bicycle["timestamp"]).dt.tz_convert(
             "Asia/Tokyo"
         )
 
-    # 最新データを抽出 (エリアごとの最新行)
     latest_df = df_bicycle.sort_values(
         "timestamp", ascending=False
     ).drop_duplicates("area_name")
@@ -655,18 +764,15 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
     has_data = False
 
     for full_name, short_name in targets.items():
-        # 最新値の取得
         row = latest_df[latest_df["area_name"] == full_name]
 
         if not row.empty:
             current_val = int(row.iloc[0]["waiting_count"])
             current_time = row.iloc[0]["timestamp"]
 
-            # 前日データの検索 (24時間前 ±1時間の範囲で最も近いデータを探す)
             df_area = df_bicycle[df_bicycle["area_name"] == full_name]
             target_time = current_time - timedelta(days=1)
-
-            # 前日付近のデータをフィルタ (高速化のため前後2時間で絞る)
+            
             df_near = df_area[
                 (df_area["timestamp"] >= target_time - timedelta(hours=2))
                 & (df_area["timestamp"] <= target_time + timedelta(hours=2))
@@ -674,15 +780,14 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
 
             diff_str = ""
             if not df_near.empty:
-                # ターゲット時刻との差が最小の行を取得
                 nearest_idx = (df_near["timestamp"] - target_time).abs().idxmin()
                 past_val = int(df_near.loc[nearest_idx]["waiting_count"])
 
                 diff = current_val - past_val
                 if diff > 0:
-                    diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"  # 赤で増加
+                    diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"
                 elif diff < 0:
-                    diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"  # 緑で減少
+                    diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"
                 else:
                     diff_str = f" <span style='color:#757575;'>(➡️0)</span>"
             else:
@@ -697,10 +802,8 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
     if not has_data:
         return "⚪ データなし", "theme-gray"
 
-    # HTMLで表示 (改行と文字サイズ調整)
     val = f"<div style='font-size:0.85rem; line-height:1.4; text-align:left; display:inline-block;'>{'<br>'.join(details)}</div>"
 
-    # 色判定 (合計数に基づく)
     if total_wait == 0:
         theme = "theme-green"
     elif total_wait < 10:
@@ -712,7 +815,7 @@ def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
 
 
 def get_server_status() -> Tuple[str, str]:
-    """サーバー稼働ステータス (メモリ使用率)"""
+    """サーバー稼働ステータス"""
     mem = get_memory_usage()
     if mem:
         val = f"💻 RAM: {int(mem['percent'])}%"
@@ -855,7 +958,6 @@ def render_traffic_tab():
             )
 
     st.markdown("---")
-    # 時間帯によるルート検索の出し分け
     now_jst = datetime.now(pytz.timezone("Asia/Tokyo"))
     current_hour = now_jst.hour
     dep_time = (now_jst + timedelta(minutes=20)).strftime("%H:%M")
@@ -863,15 +965,10 @@ def render_traffic_tab():
     st.subheader(f"📍 ルート検索 ({dep_time} 出発想定)")
     container = st.container()
 
-    # 朝 (04:00 - 11:59) : 伊丹 -> 長岡京 (出勤)
     if 4 <= current_hour < 12:
         _render_route_search(container, "伊丹(兵庫県)", "長岡京", "📤 出勤ルート")
-
-    # 昼・夜 (12:00 - 23:59) : 長岡京 -> 伊丹 (帰宅)
     elif 12 <= current_hour <= 23:
         _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
-
-    # 深夜 (00:00 - 03:59) : デフォルトで帰宅ルートを表示 (終電/深夜帰宅対応)
     else:
         st.caption("※深夜帯のため帰宅ルートを表示します")
         _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
@@ -1022,7 +1119,7 @@ def render_electricity_tab(df_sensor: pd.DataFrame, now: datetime):
     with col_right:
         st.subheader("🔌 個別家電 (今日)")
         df_app = df_sensor[
-            (df_sensor["device_type"].str.contains("Plug"))
+            (df_sensor["device_type"].str.contains("Plug", na=False))
             & (df_sensor["timestamp"] >= today_start)
             & (df_sensor["timestamp"] < today_end)
         ]
@@ -1045,13 +1142,12 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
         st.info("データがありません")
         return
     
-    
     # 今日の推移
     st.subheader("🌡️ 室温・湿度 (今日の推移)")
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     today_end = today_start + timedelta(days=1)
     df_temp = df_sensor[
-        (df_sensor["device_type"].str.contains("Meter"))
+        (df_sensor["device_type"].str.contains("Meter", na=False))
         & (df_sensor["timestamp"] >= today_start)
         & (df_sensor["timestamp"] < today_end)
     ]
@@ -1087,14 +1183,13 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
 
     st.markdown("---")
 
-    # 年間推移グラフの追加
+    # 年間推移グラフ
     st.subheader(f"📅 年間気温・室温推移 ({now.year}年)")
     df_yearly = load_yearly_temperature_stats(now.year)
 
     if not df_yearly.empty:
         fig = go.Figure()
 
-        # 1. 最高気温(外)
         if "out_max" in df_yearly.columns:
             fig.add_trace(
                 go.Scatter(
@@ -1106,7 +1201,6 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                 )
             )
 
-        # 2. 最低気温(外)
         if "out_min" in df_yearly.columns:
             fig.add_trace(
                 go.Scatter(
@@ -1118,7 +1212,6 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                 )
             )
 
-        # 3. 最高室温(内) - 伊丹
         if "in_max" in df_yearly.columns:
             fig.add_trace(
                 go.Scatter(
@@ -1126,11 +1219,10 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                     y=df_yearly["in_max"],
                     mode="lines",
                     name="最高室温(内)",
-                    line=dict(color="#ff9800", width=2, dash="dot"),  # オレンジ点線
+                    line=dict(color="#ff9800", width=2, dash="dot"),
                 )
             )
 
-        # 4. 最低室温(内) - 伊丹
         if "in_min" in df_yearly.columns:
             fig.add_trace(
                 go.Scatter(
@@ -1138,7 +1230,7 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                     y=df_yearly["in_min"],
                     mode="lines",
                     name="最低室温(内)",
-                    line=dict(color="#00bcd4", width=2, dash="dot"),  # 水色点線
+                    line=dict(color="#00bcd4", width=2, dash="dot"),
                 )
             )
 
@@ -1287,19 +1379,15 @@ def render_bicycle_tab(df_bicycle: pd.DataFrame):
     )
 
 
-
-
 def render_quest_tab():
     """Family Questの状況を表示するタブ"""
     st.title("⚔️ Family Quest 現在の状況")
     
     try:
         with common.get_db_cursor() as cur:
-            # 【重要】4つのカラムを取得 (name, exp, gold, job_class)
             cur.execute("SELECT name, exp, gold, job_class FROM quest_users ORDER BY exp DESC")
             rows = cur.fetchall()
             
-            # 【重要】テーブル名を履歴テーブル(quest_history)に合わせ、3つのカラムを取得
             cur.execute("""
                 SELECT u.name, h.quest_title, h.completed_at 
                 FROM quest_history h
@@ -1313,13 +1401,10 @@ def render_quest_tab():
             st.info("データがありません。 seed_quest_data.py を実行するか、アプリでユーザー登録を行ってください。")
             return
 
-        # --- 1. メトリクス表示 (カード風) ---
         cols = st.columns(len(rows))
-        # 【修正箇所】SELECTに合わせて (name, exp, gold, job_class) の4つを受け取るようにします
         for i, (name, exp, gold, job_class) in enumerate(rows):
             with cols[i]:
                 rank_icon = "👑" if i == 0 else "🛡️"
-                # 経験値をメイン値に、ゴールドを変化分(delta)に表示
                 st.metric(
                     label=f"{rank_icon} {name} ({job_class})",
                     value=f"{exp} EXP",
@@ -1328,12 +1413,10 @@ def render_quest_tab():
 
         st.divider()
 
-        # --- 2. グラフ表示 ---
         col1, col2 = st.columns([2, 1])
         
         with col1:
             st.subheader("📊 経験値ランキング")
-            # 【修正箇所】ここも4つのカラム名（ラベル）を指定します
             df_quest = pd.DataFrame(rows, columns=["名前", "経験値", "ゴールド", "職業"])
             fig = px.bar(
                 df_quest, 
@@ -1349,10 +1432,8 @@ def render_quest_tab():
         with col2:
             st.subheader("📜 最近の達成履歴")
             if history:
-                # こちらは3つのカラム(name, title, completed_at)なので、変数の数も3つでOK
                 for name, title, completed_at in history:
                     try:
-                        # 日時表示を綺麗に整形
                         t_str = completed_at.split('.')[0].replace('T', ' ')
                         dt = datetime.strptime(t_str, '%Y-%m-%d %H:%M:%S')
                         time_display = dt.strftime('%m/%d %H:%M')
@@ -1367,8 +1448,6 @@ def render_quest_tab():
     except Exception as e:
         st.error(f"クエスト情報の読み込みに失敗しました: {e}")
         logger.error(f"Quest Tab Error: {e}")
-
-
 
 
 def render_system_tab():

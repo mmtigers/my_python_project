@@ -305,7 +305,7 @@ async def switchbot_webhook(body: SwitchBotWebhookBody) -> Dict[str, str]:
         )
 
     # 3. ロジック実行 (通知・見守りタイマー等)
-    await _process_sensor_logic(mac, name, location, ctx.deviceType, state)
+    await _process_sensor_logic(mac, name, location, body.deviceType, state)
     
     return {"status": "success"}
 
@@ -335,29 +335,68 @@ if line_handler:
 
 # === Static Files & SPA (設計書準拠) ===
 
+# === Static Files & SPA (設計書準拠) ===
+
 # 1. 共通Assets
 if os.path.exists(config.ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=config.ASSETS_DIR), name="assets")
 if os.path.exists(config.UPLOAD_DIR):
     app.mount("/uploads", StaticFiles(directory=config.UPLOAD_DIR), name="uploads")
 
-# 2. Family Quest (SPA) 配信
-# 設計書ではルートパス配信が推奨されていますが、既存ブックマーク等の互換性のため
-# "/quest_static" マウントと、ルートパスへのSPAフォールバックを両立させます。
+# 2. Family Quest (SPA) 配信 [修正版]
+#    Viteの base: '/quest/' 設定に対応し、assetsだけでなくルート直下のファイル(sw.js等)も配信する
 if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
-    # 静的リソース用マウント
-    app.mount("/quest_static", StaticFiles(directory=config.QUEST_DIST_DIR), name="quest_static")
+    
+    # 既存の "/quest_static" は互換性のため残すとしても、メインは以下のハンドラで行うため
+    # app.mount("/quest/assets", ...) は削除してください（競合回避のため）
 
-    @app.get("/{full_path:path}")
-    async def serve_family_quest(full_path: str) -> Union[FileResponse, Any]:
-        # APIやWebhookなど、FastAPIが処理すべきパスは除外
-        reserved_paths = ["api", "assets", "uploads", "callback", "webhook", "quest_static"]
-        if any(full_path.startswith(p) for p in reserved_paths):
-             raise HTTPException(status_code=404)
+    @app.get("/quest/{file_path:path}")
+    async def serve_quest_app(file_path: str):
+        """
+        Family Quest用の包括的ハンドラ
+        /quest/ 以下へのリクエストに対し:
+        1. 物理ファイルが存在すればそれを返す (registerSW.js, assets/xxx.js 等)
+        2. 存在しなければSPAとして index.html を返す
+        """
+        # パスの結合と正規化
+        target_path = os.path.normpath(os.path.join(config.QUEST_DIST_DIR, file_path))
         
-        # 上記以外はすべて index.html を返し、フロントエンド(React)側でルーティングさせる
+        # セキュリティチェック: QUEST_DIST_DIR の外へのアクセスを防ぐ
+        if not target_path.startswith(str(os.path.abspath(config.QUEST_DIST_DIR))):
+             raise HTTPException(status_code=403, detail="Access denied")
+
+        # ファイル実体が存在すれば、静的ファイルとして返す
+        if os.path.isfile(target_path):
+            return FileResponse(target_path)
+            
+        # ファイルがない場合は SPAのルーティングとして index.html を返す
         index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
-        return FileResponse(index_path)
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        else:
+            return JSONResponse(status_code=404, content={"error": "SPA index.html not found"})
+
+    # /quest (末尾スラッシュなし) へのアクセスも index.html へ
+    @app.get("/quest")
+    async def serve_quest_root():
+        index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        return JSONResponse(status_code=404, content={"error": "SPA not found"})
+
+# 3. ルートパスのフォールバック (既存コードの維持)
+@app.get("/{full_path:path}")
+async def serve_root_fallback(full_path: str):
+    # APIやWebhookなど、FastAPIが処理すべきパスは除外
+    reserved_paths = ["api", "assets", "uploads", "callback", "webhook", "quest", "quest_static"]
+    if any(full_path.startswith(p) for p in reserved_paths):
+         raise HTTPException(status_code=404)
+    
+    # ここに来るのは /dashboard など他のパス。必要に応じて Family Quest へ誘導するか 404 にする。
+    # 今回の修正範囲外だが、念のため index.html を返しておく（既存動作維持）
+    if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
+        return FileResponse(os.path.join(config.QUEST_DIST_DIR, "index.html"))
+    raise HTTPException(status_code=404)
 
 if __name__ == "__main__":
     import uvicorn

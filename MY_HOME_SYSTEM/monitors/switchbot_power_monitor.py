@@ -2,6 +2,7 @@
 import requests
 import sys
 import os
+import time
 from typing import Dict, Any, Optional, List, Tuple
 
 # プロジェクトルートへのパス解決 (unified_server.py 等と整合性を保つ)
@@ -99,9 +100,17 @@ def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, 
         
         return result
 
+    except requests.exceptions.HTTPError as e:
+        # [追加] 429エラー(レート制限)はWarningレベルでハンドリングし、スタックトレースを出さない
+        if e.response is not None and e.response.status_code == 429:
+            logger.warning(f"⚠️ API Rate Limit Reached for [{device_id}]. Skipping this turn.")
+            return None
+        # その他のHTTPエラーはこれまで通り
+        logger.error(f"❌ HTTP Error for [{device_id}]: {e}")
+        return None
     except Exception as e:
-        logger.error(f"❌ Error fetching status for [{device_id}]: {e}")
-        return None 
+        logger.error(f"❌ Unexpected Error for [{device_id}]: {e}")
+        return None
 
 def get_prev_power(device_id: str) -> float:
     """
@@ -155,6 +164,9 @@ def main() -> None:
         status: Optional[Dict[str, Any]] = fetch_device_status(did, dtype)
         if not status: continue
 
+        # [追加] APIバースト防止のため、リクエスト間に2秒のインターバルを設ける
+        time.sleep(2)
+
         # 1. 新テーブルへの振り分け保存
         if "power" in status:
             insert_power_record(did, dname, status["power"])
@@ -164,7 +176,7 @@ def main() -> None:
             insert_meter_record(did, dname, status["temperature"], status["humidity"])
 
         # 2. 後方互換性のための旧テーブル保存
-        insert_legacy_record(dname, did, dtype, status)
+        # insert_legacy_record(dname, did, dtype, status)
 
     logger.info(f"🏁 --- Monitor Completed ({len(monitor_devices)} devices processed) ---")
 
