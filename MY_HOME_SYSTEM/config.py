@@ -84,8 +84,8 @@ LOG_DIR: str = os.path.join(BASE_DIR, "logs")
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json") # 外部設定ファイル
 
 # DBテーブル名定義 (設計書 v1.0.0 準拠へ移行)
-# 旧: SQLITE_TABLE_SENSOR = "device_records"
-SQLITE_TABLE_SWITCHBOT_LOGS: str = "switchbot_meter_logs" # New: 温湿度
+SQLITE_TABLE_SENSOR: str = "device_records"  # Legacy support (Fix for 'config has no attribute')
+SQLITE_TABLE_SWITCHBOT_LOGS: str = "switchbot_meter_logs"
 SQLITE_TABLE_POWER_USAGE: str = "power_usage"           # New: 電力
 SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"             # New: 生活ログ統合
 
