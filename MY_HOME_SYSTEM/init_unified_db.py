@@ -111,7 +111,7 @@ def init_db() -> None:
                 quest_id INTEGER,
                 quest_title TEXT,
                 status TEXT DEFAULT 'approved', -- approved/pending
-                approved_at DATETIME NOT NULL,
+                completed_at DATETIME NOT NULL, -- completed_at に修正
                 exp_earned INTEGER,
                 gold_earned INTEGER
             )
