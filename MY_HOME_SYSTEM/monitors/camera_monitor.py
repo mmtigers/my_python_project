@@ -184,6 +184,31 @@ def close_camera_session(camera_instance: Any):
     except Exception as e:
         logger.debug(f"Session close warning: {e}")
 
+def force_close_session(service_obj: Any) -> None:
+    """
+    ONVIFService, ONVIFCamera, または zeep Client が保持する
+    HTTPセッション(requests.Session)を強制的にcloseし、ファイル記述子を解放する。
+    """
+    if not service_obj:
+        return
+
+    try:
+        # パターン1: zeep_client 属性を持つ場合 (ONVIFService, devicemgmt等)
+        if hasattr(service_obj, 'zeep_client') and hasattr(service_obj.zeep_client, 'transport'):
+            if hasattr(service_obj.zeep_client.transport, 'session'):
+                service_obj.zeep_client.transport.session.close()
+        
+        # パターン2: 直接 transport を持つ場合 (ONVIFCamera等)
+        elif hasattr(service_obj, 'transport') and hasattr(service_obj.transport, 'session'):
+            service_obj.transport.session.close()
+
+        # パターン3: devicemgmt を経由する場合 (ONVIFCameraの別パターン)
+        elif hasattr(service_obj, 'devicemgmt'):
+            force_close_session(service_obj.devicemgmt)
+
+    except Exception as e:
+        logger.debug(f"Session close warning: {e}")
+
 def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     cam_name: str = cam_conf['name']
     consecutive_errors: int = 0
@@ -321,13 +346,29 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             logger.info(f"[{cam_name}] Retry in {wait}s...")
             time.sleep(wait)
         finally:
-            # [追加] ループの終了時、再試行時、エラー発生時を問わず必ずセッションを閉じる
+            # ▼▼▼ 修正2: 徹底的なリソース解放 ▼▼▼
+            
+            # 1. PullPointのクリーンアップ
             if current_pullpoint:
+                if current_pullpoint in active_pullpoints:
+                    active_pullpoints.remove(current_pullpoint)
                 try:
                     current_pullpoint.Unsubscribe()
                 except Exception:
                     pass
-            close_camera_session(mycam)
+                # セッション物理切断
+                force_close_session(current_pullpoint)
+
+            # 2. Events Serviceのクリーンアップ
+            if events_service:
+                force_close_session(events_service)
+
+            # 3. Main Camera (DeviceMgmt) のクリーンアップ
+            if mycam:
+                force_close_session(mycam)
+            
+            # ▲▲▲ ▲▲▲
+            
             # 再接続までの安全マージン
             time.sleep(1)
 
