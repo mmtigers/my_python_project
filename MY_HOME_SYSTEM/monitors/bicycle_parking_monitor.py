@@ -41,58 +41,65 @@ class BicycleParkingMonitor:
         Webサイトからデータを取得し、self.recordsに格納する。
         """
         logger.info(f"Fetching data from: {self.url}")
+        
+        # 【修正】セッションを使用してリトライを行う & 明示的なClose (Context Manager)
         try:
-            res = requests.get(self.url, timeout=15)
-            res.encoding = res.apparent_encoding
-            
-            if res.status_code != 200:
-                logger.error(f"HTTP Error: {res.status_code}")
-                return False
+            with self._get_session() as session:
+                res = session.get(self.url, timeout=15)
+                res.encoding = res.apparent_encoding
                 
-            soup = BeautifulSoup(res.text, 'html.parser')
-            
-            # テーブル構造に依存したスクレイピング
-            # (伊丹・鈴原エリアを含むテーブルをターゲットとする)
-            tables = soup.find_all('table')
-            if not tables:
-                logger.warning("No tables found on the page.")
-                return False
-
-            self.records = []
-            
-            # 特定のエリアキーワード
-            target_keywords = ["鈴原", "伊丹", "阪急"]
-            
-            for table in tables:
-                rows = table.find_all('tr')
-                for row in rows:
-                    cols = row.find_all(['td', 'th'])
-                    text_row = [c.get_text(strip=True) for c in cols]
+                if res.status_code != 200:
+                    # HTTPステータスエラーはサーバー側の問題の可能性があるためWARNINGとする
+                    logger.warning(f"HTTP Error: {res.status_code}")
+                    return False
                     
-                    if len(text_row) >= 2:
-                        area_name = text_row[0]
-                        status_text = text_row[1] # "空きあり", "待ち人数：5人" etc.
-                        
-                        # ターゲットエリアか判定
-                        if any(k in area_name for k in target_keywords):
-                            # 待ち人数を抽出 (正規表現)
-                            count = 0
-                            match = re.search(r'(\d+)人', status_text)
-                            if match:
-                                count = int(match.group(1))
-                            elif "空" in status_text or "○" in status_text:
-                                count = 0
-                            
-                            self.records.append({
-                                "area_name": area_name,
-                                "status_text": status_text,
-                                "waiting_count": count
-                            })
+                soup = BeautifulSoup(res.text, 'html.parser')
+                
+                # テーブル構造に依存したスクレイピング
+                tables = soup.find_all('table')
+                if not tables:
+                    logger.warning("No tables found on the page.")
+                    return False
 
-            return True
+                self.records = []
+                
+                # 特定のエリアキーワード
+                target_keywords = ["鈴原", "伊丹", "阪急"]
+                
+                for table in tables:
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cols = row.find_all(['td', 'th'])
+                        text_row = [c.get_text(strip=True) for c in cols]
+                        
+                        if len(text_row) >= 2:
+                            area_name = text_row[0]
+                            status_text = text_row[1]
+                            
+                            if any(k in area_name for k in target_keywords):
+                                count = 0
+                                match = re.search(r'(\d+)人', status_text)
+                                if match:
+                                    count = int(match.group(1))
+                                elif "空" in status_text or "○" in status_text:
+                                    count = 0
+                                
+                                self.records.append({
+                                    "area_name": area_name,
+                                    "status_text": status_text,
+                                    "waiting_count": count
+                                })
+                return True
+
+        except requests.exceptions.RequestException as e:
+            # 【修正】リトライ後も失敗したネットワークエラーは、重要度が低いためWARNINGに留める
+            # これにより DiscordErrorHandler (ERROR以上で通知) を回避する
+            logger.warning(f"Network Connection Failed (Retries exhausted): {e}")
+            return False
 
         except Exception as e:
-            logger.error(f"Scraping failed: {e}")
+            # 【修正】予期せぬパースエラーやロジックエラーは引き続きERRORで通知する
+            logger.error(f"Unexpected Scraping failed: {e}")
             logger.debug(traceback.format_exc())
             return False
 
@@ -143,4 +150,12 @@ if __name__ == "__main__":
             if args.save:
                 monitor.save_to_db()
     else:
-        sys.exit(1)
+        # 【修正】エラーハンドリング済みの失敗なら異常終了コードを出さない運用に変更するか、
+        # Scheduler側でWARNINGを検知できないため、exit(1)は残すが
+        # Schedulerがログを吐く際、標準エラー出力がWARNINGなら通知しない制御は難しいため
+        # ここでは「既知の失敗」として正常終了(0)させるか、exit(1)させるかの判断。
+        # 今回は「通知ノイズ削減」が主目的なので、スクリプト内でWARNINGログを出した上で
+        # sys.exit(0) することでSchedulerの "Task failed" 通知も抑制します。
+        
+        logger.warning("⚠️ Task finished incompletely due to network/parsing issues.")
+        sys.exit(0) # Schedulerへの通知を抑制
