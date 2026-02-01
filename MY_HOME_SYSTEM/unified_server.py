@@ -88,7 +88,7 @@ async def _process_sensor_logic(mac: str, name: str, location: str, dev_type: st
     now = time.time()
     
     # Motion Sensor Logic
-    if "Motion" in dev_type:
+    if dev_type and "Motion" in dev_type:
         if state == "detected":
             # 既存のタイマーがあればキャンセル（動きがあったため）
             if mac in MOTION_TASKS: 

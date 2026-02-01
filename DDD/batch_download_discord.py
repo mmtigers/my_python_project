@@ -387,6 +387,19 @@ class BatchDownloader:
         if not tasks:
             logger.info("処理対象のURLがありません。")
             return
+        
+        # ▼▼▼ 修正: YouTube無効時は事前にリストから除外する (High Performance Fix) ▼▼▼
+        if not CONFIG.ENABLE_YOUTUBE:
+            original_count = len(tasks)
+            # YouTubeっぽいURLを除外 (簡易判定)
+            tasks = [
+                t for t in tasks 
+                if not ("youtube.com" in t.url or "youtu.be" in t.url)
+            ]
+            skipped_count = original_count - len(tasks)
+            if skipped_count > 0:
+                logger.info(f"🚫 YouTube機能が無効なため、{skipped_count} 件のタスクをスキップしました。")
+        # ▲▲▲ 修正終了 ▲▲▲
 
         logger.info("="*60)
         logger.info("   🚀 Smart Pipeline Downloader (v2.2.0)")

@@ -53,6 +53,11 @@ class BluetoothMonitor:
             return False
 
     def run(self) -> None:
+        # configに ENABLE_BLUETOOTH が未定義の場合は True (有効) とみなす安全策を入れています
+        if not getattr(config, "ENABLE_BLUETOOTH", True):
+            logger.info("🚫 Bluetooth Monitor is disabled by config. Exiting.")
+            return
+        
         logger.info("Bluetooth Monitor Started")
         while True:
             try:
