@@ -1026,12 +1026,12 @@ def render_photos_tab(df_security_log: pd.DataFrame):
     if images:
         cols_img = st.columns(4)
         for i, p in enumerate(images[:4]):
-            cols_img[i].image(p, caption=os.path.basename(p), use_container_width=True)
+            cols_img[i].image(p, caption=os.path.basename(p), width="stretch")
         with st.expander("📂 過去の写真"):
             cols_past = st.columns(4)
             for i, p in enumerate(images[4:20]):
                 cols_past[i % 4].image(
-                    p, caption=os.path.basename(p), use_container_width=True
+                    p, caption=os.path.basename(p), width="stretch"
                 )
     else:
         st.info("写真なし")
@@ -1052,7 +1052,7 @@ def render_photos_tab(df_security_log: pd.DataFrame):
             .replace("image_path", "画像")
             for c in df_disp.columns
         ]
-        st.dataframe(df_disp, use_container_width=True)
+        st.dataframe(df_disp, width="stretch")
     else:
         st.info("不審な検知はありません")
 
@@ -1112,7 +1112,7 @@ def render_electricity_tab(df_sensor: pd.DataFrame, now: datetime):
                     orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
                 ),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("データがありません")
 
@@ -1132,7 +1132,7 @@ def render_electricity_tab(df_sensor: pd.DataFrame, now: datetime):
                 title="プラグ計測値",
             )
             fig_app.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_app, use_container_width=True)
+            st.plotly_chart(fig_app, width="stretch")
         else:
             st.info("プラグデータなし")
 
@@ -1163,7 +1163,7 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                 title="室温 (℃)",
             )
             fig_t.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_t, use_container_width=True)
+            st.plotly_chart(fig_t, width="stretch")
         else:
             st.info("今日の室温データなし")
 
@@ -1177,7 +1177,7 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
                 title="湿度 (%)",
             )
             fig_h.update_xaxes(range=[today_start, today_end])
-            st.plotly_chart(fig_h, use_container_width=True)
+            st.plotly_chart(fig_h, width="stretch")
         else:
             st.info("今日の湿度データなし")
 
@@ -1242,7 +1242,7 @@ def render_temperature_tab(df_sensor: pd.DataFrame, now: datetime):
             ),
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     else:
         st.info("年間データがまだありません。")
 
@@ -1256,19 +1256,19 @@ def render_health_tab(
         if not df_child.empty:
             st.dataframe(
                 df_child[["timestamp", "child_name", "condition"]],
-                use_container_width=True,
+                width="stretch",
             )
     with c2:
         st.markdown("##### 💩 排便")
         if not df_poop.empty:
             st.dataframe(
                 df_poop[["timestamp", "user_name", "condition"]],
-                use_container_width=True,
+                width="stretch",
             )
     st.markdown("##### 🍽️ 食事")
     if not df_food.empty:
         st.dataframe(
-            df_food[["timestamp", "menu_category"]], use_container_width=True
+            df_food[["timestamp", "menu_category"]], width="stretch"
         )
 
 
@@ -1280,7 +1280,7 @@ def render_takasago_tab(df_sensor: pd.DataFrame):
             df_sensor[df_sensor["location"] == "高砂"][
                 ["timestamp", "friendly_name", "contact_state"]
             ].head(50),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -1293,7 +1293,7 @@ def render_logs_tab(df_sensor: pd.DataFrame):
             df_sensor[df_sensor["location"].isin(sel)][
                 ["timestamp", "friendly_name", "location", "contact_state", "power_watts"]
             ].head(200),
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -1365,7 +1365,7 @@ def render_bicycle_tab(df_bicycle: pd.DataFrame):
             orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
         ),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("📊 最新の状況")
     latest_df = df_target.sort_values(
@@ -1375,7 +1375,7 @@ def render_bicycle_tab(df_bicycle: pd.DataFrame):
         latest_df[
             ["timestamp", "area_name", "waiting_count", "status_text"]
         ].sort_values("area_name"),
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1427,7 +1427,7 @@ def render_quest_tab():
                 title="現在のレベル状況"
             )
             fig.update_traces(textposition='outside')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         with col2:
             st.subheader("📜 最近の達成履歴")

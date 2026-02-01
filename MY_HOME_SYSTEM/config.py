@@ -39,6 +39,7 @@ class DeviceConfig(BaseModel):
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
 ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
+ENABLE_BLUETOOTH: bool = False
 
 # ==========================================
 # 1. 認証・API設定 (Secrets)
