@@ -1,4 +1,6 @@
 import requests
+from requests.adapters import HTTPAdapter  # <--- 追加
+from urllib3.util.retry import Retry       # <--- 追加
 from bs4 import BeautifulSoup
 import sys
 import os
@@ -35,6 +37,24 @@ class BicycleParkingMonitor:
         self.url: str = getattr(config, "BICYCLE_PARKING_URL", "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php")
         self.table_name: str = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_logs")
         self.records: List[ParkingRecord] = []
+    
+    def _get_session(self) -> requests.Session:
+        """
+        リトライ戦略を設定したrequestsセッションを作成して返す。
+        - 接続エラーや一時的なサーバーエラー(5xx)に対して、自動的にリトライを行う。
+        - Backoff Factor=1 により、リトライ間隔を空けてサーバー負荷を考慮する。
+        """
+        session = requests.Session()
+        retries = Retry(
+            total=3,                # 最大リトライ回数
+            backoff_factor=1,       # リトライ間隔 (1秒, 2秒, 4秒...)
+            status_forcelist=[500, 502, 503, 504],  # リトライ対象のHTTPステータス
+            allowed_methods=["GET"] # GETリクエストのみ対象
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
 
     def fetch_and_parse(self) -> bool:
         """
