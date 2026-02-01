@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/routers/bounty_router.py
 from fastapi import APIRouter, HTTPException, Query, Body
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 import datetime
 import common
@@ -18,10 +18,41 @@ CHILDREN = ['daughter', 'son', 'child']
 class BountyCreate(BaseModel):
     title: str
     description: Optional[str] = None
-    reward_gold: int
+    
+    # ★修正1: フィールド定義に上限(le)を設定 (ドキュメント用)
+    reward_gold: int = Field(..., ge=0, description="報酬額")
+
     target_type: str  # 'ALL', 'ADULTS', 'CHILDREN', 'USER'
     target_user_id: Optional[str] = None
     created_by: str
+
+    # ★修正2: 入力値を検証する前に実行されるバリデーターを追加
+    # これにより、巨大な数字や小数が来ても、エラーになる前に安全な整数に変換します
+    @field_validator('reward_gold', mode='before')
+    @classmethod
+    def parse_reward_gold(cls, v):
+        MAX_GOLD = 10_000  # 上限: 1万G
+
+        # 数値、文字列、浮動小数点など、どんな型が来ても安全に処理
+        try:
+            # まず数値(float)として解釈
+            val = float(v)
+            
+            # 上限を超えていたら、上限値に張り付ける (エラーにせず丸める優しさ)
+            if val > MAX_GOLD:
+                return MAX_GOLD
+            
+            # 負の数は0にする
+            if val < 0:
+                return 0
+                
+            # 整数に変換して返す
+            return int(val)
+            
+        except (ValueError, TypeError):
+            # 万が一、数値として読めない文字（"あいうえお"等）が来たら0にする
+            # (または raise ValueError でエラーを返しても良いですが、安全側に倒します)
+            return 0
 
 class BountyAction(BaseModel):
     user_id: str
