@@ -11,6 +11,12 @@ from typing import Dict, Any, List
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
+# 定数
+CHECK_INTERVAL = 60  # 秒
+RTSP_PORT = 554
+HTTP_TIMEOUT = 3.0
+STARTUP_DELAY = 30   # [追加] 起動後の待機時間（秒）
+
 try:
     import config
     from core.logger import setup_logging
@@ -118,39 +124,54 @@ async def check_http_layer(ip: str, port: int) -> Dict[str, Any]:
     except Exception:
         return {"status": "FAIL", "latency": 0.0}
 
-async def monitor_camera(camera: Dict[str, Any]) -> Dict[str, Any]:
-    """1台のカメラに対して全てのチェックを並列実行する"""
-    ip = camera.get("ip")
-    name = camera.get("name", "Unknown")
-    # config.pyで指定されているポート（VIGIの場合は管理用ポートやONVIFポート）
-    config_port = camera.get("port", 80)
+async def monitor_camera(cam_config: Dict[str, Any]) -> Dict[str, Any]:
+    """カメラごとの監視を実行（リトライ機能付き）"""
+    name = cam_config["name"]
+    ip = cam_config["ip"]
     
-    if not ip:
-        return None
-
-    # 並列でチェック実行
-    ping_res, rtsp_res, app_res = await asyncio.gather(
-        ping_host(ip),
-        check_tcp_port(ip, RTSP_PORT),      # Port 554 (RTSP)
-        check_http_layer(ip, config_port)   # Application/HTTP check
-    )
-    
-    # ログ詳細の整形
     error_details = []
-    if ping_res["error"]: error_details.append(f"Ping:{ping_res['error']}")
-    if rtsp_res["status"] != "OPEN": error_details.append(f"RTSP:{rtsp_res['status']}")
+    
+    # 1. Ping Check (with Retry)
+    # [修正] 3回までリトライを行い、一時的なパケットロスを許容する
+    ping_data = None
+    for attempt in range(3):
+        ping_data = await ping_host(ip)
+        if ping_data["success"]:
+            break
+        await asyncio.sleep(2) # リトライ間隔
+
+    # 最終的に失敗していた場合のみエラーとして記録
+    if not ping_data["success"]:
+        error_details.append("Ping:Unreachable")
+    
+    # 2. RTSP Port Check
+    # Pingが通った場合のみポートチェックを行う（Ping失敗時はRTSPも失敗するため省略可だが、現状維持でもOK）
+    rtsp_data = {"open": False, "latency": 0}
+    if ping_data["success"]:
+        rtsp_data = await check_port(ip, RTSP_PORT)
+        if not rtsp_data["open"]:
+            error_details.append("RTSP:ERROR")
+    else:
+        # Ping失敗時はRTSPも未確認扱いまたはエラー扱い
+        error_details.append("RTSP:Skipped")
+
+    # 3. HTTP Check (Optional)
+    # 必要であればここにもリトライを入れるが、今回はPing/RTSPを優先
+
+    # 結果の集約
+    has_error = len(error_details) > 0
     
     return {
-        "Timestamp": datetime.datetime.now().isoformat(),
+        "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Camera_Name": name,
         "IP_Address": ip,
-        "Ping_Status": ping_res["status"],
-        "Ping_Latency_ms": ping_res["latency"],
-        "Port_RTSP_Status": rtsp_res["status"],
-        "Port_RTSP_Latency_ms": rtsp_res["latency"],
-        "App_Layer_Status": app_res["status"],
-        "App_Layer_Latency_ms": app_res["latency"],
-        "Error_Detail": "; ".join(error_details)
+        "Ping_Status": "OK" if ping_data["success"] else "NG",
+        "Ping_Latency_ms": f"{ping_data['latency']:.1f}",
+        "Port_RTSP_Status": "OPEN" if rtsp_data["open"] else "CLOSED",
+        "Port_RTSP_Latency_ms": f"{rtsp_data['latency']:.1f}",
+        "App_Layer_Status": "-", # 今回は省略
+        "App_Layer_Latency_ms": "0",
+        "Error_Detail": "; ".join(error_details) if has_error else ""
     }
 
 def init_csv():
@@ -171,8 +192,9 @@ def init_csv():
             logger.error(f"Failed to create CSV file: {e}")
 
 async def main():
-    logger.info("Starting Network Logger for ONVIF Cameras...")
-    init_csv()
+    logger.info(f"⏳ Network Monitor starting... waiting for system warm-up ({STARTUP_DELAY}s).")
+    await asyncio.sleep(STARTUP_DELAY)
+    logger.info("🚀 Network Monitor started.")
     
     while True:
         try:
