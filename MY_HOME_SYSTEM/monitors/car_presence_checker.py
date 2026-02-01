@@ -5,6 +5,7 @@ import os
 import shutil
 import sys
 import traceback
+import time  # Added for sleep
 from datetime import datetime
 from typing import Tuple, Optional, List, Any
 
@@ -23,7 +24,12 @@ from services.notification_service import send_push
 logger = setup_logging("car_checker")
 
 # 定数定義
+# Note: config.CAMERAS内のportはONVIF/HTTP用(2020)の可能性があるため、
+# RTSPは標準の554をデフォルトとしつつ、必要に応じて環境変数等で変更可能な設計とする。
 RTSP_PORT: int = 554
+MAX_RETRIES: int = 3
+RETRY_INTERVAL: int = 5  # seconds
+
 # 判定エリア設定
 CENTER_CROP_RATIO: float = 0.3
 
@@ -33,9 +39,6 @@ BLUE_LOWER: np.ndarray = np.array([90, 50, 50])
 BLUE_UPPER: np.ndarray = np.array([130, 255, 255])
 
 # 夜間用 (輝度判定: 暗い車庫を検知)
-# 注意: 車があると「明るい（ヘッドライト/反射）」場合と「暗い（車体）」場合があるため、環境に合わせて調整が必要
-# ここでは「車がいない=地面が反射して明るい？」「車がある=暗い？」等のロジック依存があるが
-# 既存ロジック(明るい=PRESENT)を踏襲する。
 NIGHT_BRIGHTNESS_THRESHOLD: float = 40.0
 NIGHT_START_HOUR: int = 18
 NIGHT_END_HOUR: int = 6
@@ -44,24 +47,64 @@ NIGHT_END_HOUR: int = 6
 STATE_PRESENT = "PRESENT"
 STATE_ABSENT = "ABSENT"
 
-def get_camera_frame() -> Optional[np.ndarray]:
-    """RTSP経由でカメラの最新フレームを取得する。"""
-    rtsp_url: str = f"rtsp://{config.CAMERA_USER}:{config.CAMERA_PASS}@{config.CAMERA_IP}:{RTSP_PORT}/stream1"
-    cap = cv2.VideoCapture(rtsp_url)
-    if not cap.isOpened():
-        logger.error("❌ RTSPストリームを開けませんでした。")
+def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL) -> Optional[np.ndarray]:
+    """
+    RTSP経由でカメラの最新フレームを取得する。
+    接続失敗時は指定回数リトライを行う。
+    """
+    # config不備のガード
+    if not config.CAMERA_IP or not config.CAMERA_USER:
+        logger.error("❌ Camera config is missing (IP or User not found).")
         return None
+
+    rtsp_url: str = f"rtsp://{config.CAMERA_USER}:{config.CAMERA_PASS}@{config.CAMERA_IP}:{RTSP_PORT}/stream1"
     
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    ret, frame = cap.read()
-    cap.release()
-    return frame if ret else None
+    for attempt in range(1, retries + 1):
+        cap = None
+        try:
+            cap = cv2.VideoCapture(rtsp_url)
+            if not cap.isOpened():
+                logger.warning(f"⚠️ RTSP Connection failed (Attempt {attempt}/{retries}). Retrying in {interval}s...")
+                time.sleep(interval)
+                continue
+            
+            # バッファ対策: 最新フレームを取得
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            # 念のため数フレーム空読みして安定させる（オプション）
+            if attempt > 1:
+                cap.read() 
+                
+            ret, frame = cap.read()
+            
+            if ret and frame is not None:
+                if attempt > 1:
+                    logger.info(f"✅ RTSP Connection recovered on attempt {attempt}.")
+                return frame
+            else:
+                logger.warning(f"⚠️ RTSP Stream opened but failed to read frame (Attempt {attempt}/{retries}).")
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Unexpected error during RTSP connection: {e}")
+        finally:
+            if cap:
+                cap.release()
+        
+        # 次の試行まで待機（最終回以外）
+        if attempt < retries:
+            time.sleep(interval)
+
+    logger.error(f"❌ RTSP connection failed after {retries} attempts. Giving up.")
+    return None
 
 def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
     """
     画像から車の有無を判定するロジック。
     Returns: (判定結果 STATE_*, 理由詳細, スコア)
     """
+    if img is None:
+        return "UNKNOWN", "Invalid Image", 0.0
+
     h, w = img.shape[:2]
     ch, cw = int(h * CENTER_CROP_RATIO), int(w * CENTER_CROP_RATIO)
     cy, cx = h // 2, w // 2
@@ -73,7 +116,6 @@ def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
     if is_night:
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         brightness: float = float(np.mean(gray))
-        # 既存ロジック準拠: 明るいとPRESENT
         res = STATE_PRESENT if brightness > NIGHT_BRIGHTNESS_THRESHOLD else STATE_ABSENT
         return res, f"NightMode({brightness:.1f})", brightness
     else:
@@ -87,11 +129,10 @@ def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
 def record_result_to_db(action: str, details: str, score: float, img_path: str, is_changed: bool) -> bool:
     """判定結果をDBに記録し、変化時は画像を永続保存する。"""
     timestamp: str = get_now_iso()
-    # 修正: カラム名と変数を一致させる (scoreを追加)
     cols: List[str] = ["timestamp", "action", "rule_name", "score"]
     vals: Tuple[Any, ...] = (timestamp, action, f"{details}", score)
     
-    if is_changed:
+    if is_changed and os.path.exists(img_path):
         save_dir: str = os.path.join(config.ASSETS_DIR, "car_history")
         os.makedirs(save_dir, exist_ok=True)
         permanent_path = os.path.join(save_dir, f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{action}.jpg")
@@ -101,7 +142,6 @@ def record_result_to_db(action: str, details: str, score: float, img_path: str, 
         except Exception as e:
             logger.warning(f"⚠️ Image move failed: {e}")
     
-    # 既存のヘルパー関数を使用
     return save_log_generic(config.SQLITE_TABLE_CAR, cols, vals)
 
 def main() -> None:
@@ -109,10 +149,12 @@ def main() -> None:
     tmp_img_path = "/tmp/car_check_latest.jpg"
     
     try:
-        # 1. 映像取得
+        # 1. 映像取得 (Retry機能付き)
         frame = get_camera_frame()
         if frame is None:
-            return # エラーログはget_camera_frame内で出力済み
+            # エラーログはget_camera_frame内で出力済み
+            # 連続エラー通知を防ぐため、ここではRaiseしない
+            return 
 
         # 2. AI判定
         current_action, details, score = judge_car_presence(frame)
@@ -132,8 +174,6 @@ def main() -> None:
                     last_ts = row["timestamp"] if isinstance(row, dict) else row[1]
         
         # 状態変化判定
-        # 初回(UNKNOWN)の場合は、通知スパムを防ぐため「変化なし」として静かにDB保存だけする運用も考えられるが、
-        # ここでは「前回が不明なら通知しない」という安全策を取る
         if last_action == "UNKNOWN":
             logger.info(f"🆕 Initial state detected: {current_action}. Saving without notification.")
             record_result_to_db(current_action, details, score, tmp_img_path, is_changed=True)
@@ -145,9 +185,7 @@ def main() -> None:
         should_save: bool = has_status_changed
         if not has_status_changed and last_ts:
             try:
-                # タイムゾーン考慮が必要だが、簡易的に比較
                 last_dt = datetime.fromisoformat(last_ts)
-                # datetime.now() がTZなしの場合の対策
                 now = datetime.now()
                 if last_dt.tzinfo is not None and now.tzinfo is None:
                     now = now.astimezone()
@@ -156,13 +194,12 @@ def main() -> None:
                     should_save = True
             except Exception as e:
                 logger.warning(f"Time comparison failed: {e}")
-                should_save = True # エラー時は念のため保存
+                should_save = True
 
         # 4. 保存と通知
         if should_save:
             success = record_result_to_db(current_action, details, score, tmp_img_path, has_status_changed)
             
-            # DB保存に成功し、かつ状態が変わっている場合のみ通知
             if success and has_status_changed:
                 status_msg: str = "🚗 車が戻りました" if current_action == STATE_PRESENT else "💨 車が出かけました"
                 send_push(
@@ -172,7 +209,7 @@ def main() -> None:
                 )
                 logger.info(f"📢 Status change notification sent: {current_action}")
             elif not success:
-                 logger.error("❌ Failed to save record to DB. Notification skipped to prevent loop.")
+                 logger.error("❌ Failed to save record to DB.")
         else:
             logger.info(f"✅ No change: {current_action} ({details})")
         
@@ -182,7 +219,7 @@ def main() -> None:
     except Exception as e:
         err_detail = f"🔥 Car Presence Checker Error: {e}\n{traceback.format_exc()}"
         logger.error(err_detail)
-        # エラー通知は頻度制御を入れたいが、現状は維持
+        # エラー通知
         send_push(config.LINE_USER_ID or "", [{"type": "text", "text": f"⚠️ 車庫監視スクリプトでエラーが発生しました。\n{e}"}], target="discord", channel="error")
 
 if __name__ == "__main__":
