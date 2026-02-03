@@ -314,6 +314,20 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     for msg in events.NotificationMessage:
                         if not msg.Topic: continue
                         topic_str = str(msg.Topic)
+
+                        # ▼▼▼【追加】データ収集用デバッグログ ▼▼▼
+                        # カメラから送られてくる全てのイベントトピックとデータを記録します
+                        try:
+                            # 値の取得を試みる（構造解析用）
+                            debug_val = "N/A"
+                            if hasattr(msg.Data, 'SimpleItem') and msg.Data.SimpleItem:
+                                item = msg.Data.SimpleItem[0]
+                                debug_val = f"{item.Name}={item.Value}"
+                            
+                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+                        except Exception as e:
+                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data Parse Error: {e}")
+                        # ▲▲▲【追加終了】▲▲▲
                         
                         if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
                             try:
