@@ -3,6 +3,8 @@ import requests
 import sys
 import os
 import time
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from typing import Optional, List, Dict, Any, Tuple
 
 # プロジェクトルートへのパス解決
@@ -16,22 +18,57 @@ from core.utils import get_now_iso
 # ロガー設定
 logger = setup_logging("nature_remo")
 
+# --- セッションとリトライ設定 (Design 9.3, 9.8) ---
+def create_session() -> requests.Session:
+    """
+    リトライロジックを組み込んだセッションを作成する。
+    - total=3: 最大3回リトライ
+    - backoff_factor=1: 1秒, 2秒, 4秒...と待機時間を増やす
+    - status_forcelist: 500, 502, 503, 504 などのサーバーエラー時はリトライ
+    """
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+        allowed_methods=["GET"]
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+# グローバルセッション (Design 9.5: TCPコネクション再利用)
+_session = create_session()
+
 def fetch_api(endpoint: str, token: str) -> Optional[List[Dict[str, Any]]]:
     """
     Nature Remo APIからデータを取得する共通関数。
     """
+    headers: Dict[str, str] = {"Authorization": f"Bearer {token}"}
+    url: str = f"https://api.nature.global/1/{endpoint}"
+
     try:
-        headers: Dict[str, str] = {"Authorization": f"Bearer {token}"}
-        url: str = f"https://api.nature.global/1/{endpoint}"
-        res = requests.get(url, headers=headers, timeout=10)
+        # タイムアウトを少し長めに確保 (Design 9.8)
+        res = _session.get(url, headers=headers, timeout=15)
         
         if res.status_code != 200:
-            logger.error(f"⚠️ API Error [{endpoint}]: {res.status_code}")
+            # 4xx系エラー（認証失敗など）は設定ミスや契約切れの可能性があるため WARNING or ERROR
+            # ここではAPI仕様変更などを考慮し WARNING とする
+            logger.warning(f"⚠️ API Error [{endpoint}]: Status {res.status_code} - {res.text}")
             return None
             
         return res.json()
+
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        # Design 8.2: ネットワーク起因の一時エラーは WARNING (通知なし)
+        # リトライ(max_retries=3)後の最終的な失敗のみここに到達する
+        logger.warning(f"⚠️ Network Issue [{endpoint}]: Connection failed after retries. ({str(e)})")
+        return None
+
     except Exception as e:
-        logger.error(f"❌ Connection failed [{endpoint}]: {e}")
+        # Design 8.2: 想定外の論理エラー（パース失敗、コードバグ）のみ ERROR (通知あり)
+        logger.error(f"❌ Unexpected Error [{endpoint}]: {e}", exc_info=True)
         return None
 
 def process_appliances(location: str, token: str) -> None:
@@ -57,17 +94,10 @@ def process_appliances(location: str, token: str) -> None:
                     device_name: str = f"{location}_{app.get('nickname', 'SmartMeter')}"
                     device_id: str = app.get("id", "unknown")
 
-                    # 1. 新テーブル (power_usage)
                     save_log_generic(config.SQLITE_TABLE_POWER_USAGE,
                         ["device_id", "device_name", "wattage", "timestamp"],
                         (device_id, device_name, power_val, get_now_iso())
                     )
-                    
-                    # # 2. 旧テーブル (device_records) - 互換性
-                    # save_log_generic("device_records",
-                    #     ["timestamp", "device_name", "device_id", "device_type", "power_watts"],
-                    #     (get_now_iso(), device_name, device_id, "SmartMeter", power_val)
-                    # )
                     
                     logger.debug(f"⚡ Power: {device_name} = {power_val}W")
 
@@ -88,55 +118,43 @@ def process_devices(location: str, token: str) -> None:
         device_name: str = f"{location}_{dev.get('name', 'Remo')}"
         device_id: str = dev.get("id", "unknown")
         
-        # 温湿度データの抽出
         te_val: Optional[float] = None
         hu_val: Optional[float] = None
-        il_val: Optional[float] = None
 
         if "te" in events: te_val = float(events["te"]["val"])
         if "hu" in events: hu_val = float(events["hu"]["val"])
-        if "il" in events: il_val = float(events["il"]["val"])
 
-        # データがあれば保存
         if te_val is not None:
-            # 1. 新テーブル (switchbot_meter_logs を温湿度ログとして共用)
-            # Nature Remoですが、スキーマ（device_id, temp, humid）が同じためここに統合します
             save_log_generic(config.SQLITE_TABLE_SWITCHBOT_LOGS,
                 ["device_id", "device_name", "temperature", "humidity", "timestamp"],
                 (device_id, device_name, te_val, hu_val if hu_val else 0.0, get_now_iso())
             )
             
-            # # 2. 旧テーブル (device_records)
-            # save_log_generic("device_records",
-            #     ["timestamp", "device_name", "device_id", "device_type", 
-            #      "temperature_celsius", "humidity_percent", "brightness_state"],
-            #     (get_now_iso(), device_name, device_id, "NatureRemo", 
-            #      te_val, hu_val, str(il_val) if il_val else "")
-            # )
-            
             logger.debug(f"🌡️ Sensor: {device_name} = {te_val}°C / {hu_val}%")
 
 def main() -> None:
-    """メイン処理: 登録された全拠点のトークンで監視を実行"""
+    """メイン処理"""
     logger.info("🚀 --- Nature Remo Monitor Started ---")
 
-    # 監視対象リスト (拠点名, トークン)
-    # config.py に定義があればリストに追加
     targets: List[Tuple[str, Optional[str]]] = [
         ("伊丹", config.NATURE_REMO_ACCESS_TOKEN),
         ("高砂", config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO)
     ]
 
-    for location, token in targets:
-        if not token:
-            continue
+    try:
+        for location, token in targets:
+            if not token:
+                continue
+                
+            logger.info(f"📍 Checking location: {location}")
+            process_appliances(location, token)
+            process_devices(location, token)
             
-        logger.info(f"📍 Checking location: {location}")
-        process_appliances(location, token)
-        process_devices(location, token)
-        
-        # APIレートリミット考慮 (短時間の連続アクセス回避)
-        time.sleep(1)
+            time.sleep(2) # Design 9.4: APIレート制限対策 (Interval確保)
+            
+    finally:
+        # Design 9.5: リソースの明示的解放
+        _session.close()
 
     logger.info("🏁 --- Nature Remo Monitor Completed ---")
 
