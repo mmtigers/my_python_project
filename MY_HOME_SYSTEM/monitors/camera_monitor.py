@@ -224,6 +224,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     while True:
         mycam = None
         current_pullpoint = None
+        events_service = None # 初期化漏れ防止
         
         try:
             wsdl_path = find_wsdl_path()
@@ -322,29 +323,46 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                             except Exception: pass
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            logger.warning(f"⚠️ [{cam_name}] Connection lost: {e}")
+            # 既知の切断エラーは即座にリトライ（警告ログのみ）
+            logger.warning(f"⚠️ [{cam_name}] Connection lost (Transient): {e}")
             time.sleep(2)
             continue 
 
         except Exception as e:
+            # カウンタをインクリメント
+            consecutive_errors += 1
             err_msg = str(e)
-            logger.error(f"❌ [{cam_name}] Error: {err_msg}")
             
-            if "Unknown error" in err_msg or "Unauthorized" in err_msg:
-                logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
+            # 設計書 9.8 準拠: 3回未満は WARNING、3回以上で ERROR
+            if consecutive_errors < 3:
+                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {err_msg}")
+            else:
+                logger.error(f"❌ [{cam_name}] Persistent Error: {err_msg}")
+                if "Unknown error" in err_msg or "Unauthorized" in err_msg:
+                    logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
             
             if current_pullpoint in active_pullpoints: 
                 active_pullpoints.remove(current_pullpoint)
             
+            # 診断はWARNINGレベルでも実施してログに残す（トラブルシューティング用）
             perform_emergency_diagnosis(cam_conf['ip'])
             
-            wait = min(300, 30 * (2 ** consecutive_errors))
-            consecutive_errors += 1
-            if consecutive_errors > 3:
+            # 待機時間の計算 (指数バックオフ)
+            wait = min(300, 30 * (2 ** (consecutive_errors - 1))) # 初回は30秒
+            
+            # 3回失敗したらポートを切り替える (ローテーション)
+            if consecutive_errors >= 3:
+                old_port = port_candidates[0]
                 port_candidates.append(port_candidates.pop(0))
+                new_port = port_candidates[0]
+                logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
+                # ポート変更後はカウンタをリセットせず、次の試行で即座に判定させるか、
+                # あるいは「新しいポートでの試行」としてカウント継続するか。
+                # ここでは「継続」させ、ダメならまたERROR通知が出るようにします。
                 
             logger.info(f"[{cam_name}] Retry in {wait}s...")
             time.sleep(wait)
+            
         finally:
             # ▼▼▼ 修正2: 徹底的なリソース解放 ▼▼▼
             
