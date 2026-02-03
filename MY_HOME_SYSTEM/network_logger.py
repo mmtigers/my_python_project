@@ -136,23 +136,28 @@ async def monitor_camera(cam_config: Dict[str, Any]) -> Dict[str, Any]:
     ping_data = None
     for attempt in range(3):
         ping_data = await ping_host(ip)
-        if ping_data["success"]:
+        # 修正: 'success' キーではなく 'status' == 'OK' で判定
+        if ping_data["status"] == "OK":
             break
         await asyncio.sleep(2) # リトライ間隔
 
     # 最終的に失敗していた場合のみエラーとして記録
-    if not ping_data["success"]:
+    # 修正: 'success' キーではなく 'status' == 'OK' で判定
+    if ping_data["status"] != "OK":
         error_details.append("Ping:Unreachable")
     
     # 2. RTSP Port Check
-    # Pingが通った場合のみポートチェックを行う（Ping失敗時はRTSPも失敗するため省略可だが、現状維持でもOK）
-    rtsp_data = {"open": False, "latency": 0}
-    if ping_data["success"]:
-        rtsp_data = await check_port(ip, RTSP_PORT)
-        if not rtsp_data["open"]:
+    # Pingが通った場合のみポートチェックを行う
+    rtsp_data = {"status": "UNKNOWN", "latency": 0} # 初期値を辞書構造に合わせて修正
+    is_ping_ok = (ping_data["status"] == "OK") # 判定結果を変数化
+
+    if is_ping_ok:
+        # 修正: 関数名を check_tcp_port に訂正
+        rtsp_data = await check_tcp_port(ip, RTSP_PORT)
+        # check_tcp_port は {"status": "OPEN", ...} を返す
+        if rtsp_data["status"] != "OPEN":
             error_details.append("RTSP:ERROR")
     else:
-        # Ping失敗時はRTSPも未確認扱いまたはエラー扱い
         error_details.append("RTSP:Skipped")
 
     # 3. HTTP Check (Optional)
@@ -165,10 +170,11 @@ async def monitor_camera(cam_config: Dict[str, Any]) -> Dict[str, Any]:
         "Timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Camera_Name": name,
         "IP_Address": ip,
-        "Ping_Status": "OK" if ping_data["success"] else "NG",
+        "Ping_Status": ping_data["status"], # そのままstatusを使用
         "Ping_Latency_ms": f"{ping_data['latency']:.1f}",
-        "Port_RTSP_Status": "OPEN" if rtsp_data["open"] else "CLOSED",
-        "Port_RTSP_Latency_ms": f"{rtsp_data['latency']:.1f}",
+        # rtsp_data["status"] == "OPEN" かどうかで判定
+        "Port_RTSP_Status": "OPEN" if rtsp_data.get("status") == "OPEN" else "CLOSED",
+        "Port_RTSP_Latency_ms": f"{rtsp_data.get('latency', 0):.1f}",
         "App_Layer_Status": "-", # 今回は省略
         "App_Layer_Latency_ms": "0",
         "Error_Detail": "; ".join(error_details) if has_error else ""
