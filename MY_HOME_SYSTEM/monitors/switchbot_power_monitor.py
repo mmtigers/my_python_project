@@ -165,7 +165,7 @@ def main() -> None:
         if not status: continue
 
         # [追加] APIバースト防止のため、リクエスト間に2秒のインターバルを設ける
-        time.sleep(2)
+        time.sleep(5)
 
         # 1. 新テーブルへの振り分け保存
         if "power" in status:
