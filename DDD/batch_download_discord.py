@@ -389,7 +389,7 @@ class BatchDownloader:
             return
         
         # ▼▼▼ 修正: YouTube無効時は事前にリストから除外する (High Performance Fix) ▼▼▼
-        if not CONFIG.ENABLE_YOUTUBE:
+        if not CONFIG.ENABLE_YOUTUBE_DL:
             original_count = len(tasks)
             # YouTubeっぽいURLを除外 (簡易判定)
             tasks = [
