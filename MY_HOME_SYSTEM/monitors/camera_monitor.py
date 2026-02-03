@@ -213,6 +213,8 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     cam_name: str = cam_conf['name']
     consecutive_errors: int = 0
     port_candidates: List[int] = [2020, 80]
+
+    is_first_connect: bool = True
     
     if cam_conf.get('port'):
         if cam_conf['port'] in port_candidates:
@@ -252,8 +254,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             check_camera_time(devicemgmt, cam_name)
             
             device_info = devicemgmt.GetDeviceInformation()
-            logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
-
+            if is_first_connect:
+                logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
+            else:
+                logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
             # 3. イベント購読
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
@@ -280,14 +284,19 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             active_pullpoints.append(pullpoint)
             current_pullpoint = pullpoint
             
-            logger.info(f"✅ [{cam_name}] Subscribed successfully.")
+            if is_first_connect:
+                logger.info(f"✅ [{cam_name}] Subscribed successfully.")
+                is_first_connect = False # フラグを折る
+            else:
+                logger.debug(f"✅ [{cam_name}] Subscribed successfully (Refresh).")
+            
             consecutive_errors = 0
             session_start_time = time.time()
 
             # 4. 監視ループ
             while True:
                 if time.time() - session_start_time > SESSION_LIFETIME:
-                    logger.info(f"🔄 [{cam_name}] Refreshing session...")
+                    logger.debug(f"🔄 [{cam_name}] Refreshing session...")
                     try:
                         if hasattr(subscription, 'Unsubscribe'):
                             subscription.Unsubscribe()
@@ -332,6 +341,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             # カウンタをインクリメント
             consecutive_errors += 1
             err_msg = str(e)
+            logger.error(f"❌ [{cam_name}] Error: {err_msg}")
+
+            # エラー発生後は、復帰したことがわかるように次回接続時にINFOを出すようにする
+            is_first_connect = True
             
             # 設計書 9.8 準拠: 3回未満は WARNING、3回以上で ERROR
             if consecutive_errors < 3:
@@ -362,7 +375,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 
             logger.info(f"[{cam_name}] Retry in {wait}s...")
             time.sleep(wait)
-            
+
         finally:
             # ▼▼▼ 修正2: 徹底的なリソース解放 ▼▼▼
             
