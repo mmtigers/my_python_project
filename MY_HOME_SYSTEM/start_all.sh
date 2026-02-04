@@ -59,28 +59,13 @@ fi
 
 # --- Phase 3: 初期化 & Webhook修正 ---
 echo "--- Fix Webhook (Using Systemd ngrok) ---"
-
-# ★修正2: ngrokは systemd (ngrok.service) 側で管理するため、ここでは起動しない
-# nohup ngrok http 8000 > /dev/null 2>&1 &
-# echo "🚀 ngrok started..."
-# sleep 5
-
-# 既に動いているngrokの情報を取得して更新
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 
-# --- Phase 4: 常駐プロセス起動 ---
-echo "--- Start Background Services ---"
+# --- Phase 4: サーバー起動 (ここだけにする) ---
+echo "--- Start Home System Server ---"
+# unified_server.py が内部で scheduler_boot.py を起動します
 $PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
-echo "🚀 Server started."
-
-$PYTHON_EXEC monitors/camera_monitor.py > logs/camera_boot.log 2>&1 &
-echo "📷 Camera Monitor started."
-
-$PYTHON_EXEC monitors/bluetooth_monitor.py > logs/bluetooth_boot.log 2>&1 &
-echo "🎧 Bluetooth Monitor started."
-
-$PYTHON_EXEC scheduler.py > logs/scheduler_boot.log 2>&1 &
-echo "⏰ Scheduler started."
+echo "🚀 System started. Check logs/server_boot.log for details."
 
 # ★修正3: LAN内公開用にアドレス指定を追加
 $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 > logs/dashboard_boot.log 2>&1 &
