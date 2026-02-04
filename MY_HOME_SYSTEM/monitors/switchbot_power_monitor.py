@@ -4,6 +4,7 @@ import sys
 import os
 import time
 from typing import Dict, Any, Optional, List, Tuple
+from requests.exceptions import HTTPError, ConnectionError, Timeout, RequestException # 追加
 
 # プロジェクトルートへのパス解決 (unified_server.py 等と整合性を保つ)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -100,16 +101,27 @@ def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, 
         
         return result
 
-    except requests.exceptions.HTTPError as e:
-        # [追加] 429エラー(レート制限)はWarningレベルでハンドリングし、スタックトレースを出さない
+    # 1. HTTPステータスエラー (4xx, 5xx) - 既存ロジック維持
+    except HTTPError as e:
         if e.response is not None and e.response.status_code == 429:
-            logger.warning(f"⚠️ API Rate Limit Reached for [{device_id}]. Skipping this turn.")
+            logger.warning(f"⚠️ API Rate Limit Reached for [{device_id}]. Skipping.")
             return None
-        # その他のHTTPエラーはこれまで通り
         logger.error(f"❌ HTTP Error for [{device_id}]: {e}")
         return None
+
+    # 2. [新規] 接続・DNS・タイムアウトエラー -> Warningとして扱う
+    except (ConnectionError, Timeout) as e:
+        logger.warning(f"⏳ Network unstable for [{device_id}]: {e} (Skipping this turn)")
+        return None
+
+    # 3. [新規] その他のRequestsライブラリ由来のエラー -> Error
+    except RequestException as e:
+        logger.error(f"❌ API Request Failed for [{device_id}]: {e}")
+        return None
+
+    # 4. [維持] コードバグ等の予期せぬエラー -> Error (Traceback重視)
     except Exception as e:
-        logger.error(f"❌ Unexpected Error for [{device_id}]: {e}")
+        logger.error(f"❌ Unexpected System Error for [{device_id}]: {e}", exc_info=True) # exc_info=Trueでスタックトレースを出す
         return None
 
 def get_prev_power(device_id: str) -> float:
