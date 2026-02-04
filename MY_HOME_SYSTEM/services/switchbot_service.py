@@ -92,3 +92,18 @@ def fetch_device_name_cache() -> bool:
 def get_device_name_by_id(device_id: str) -> Optional[str]:
     """IDから名前を検索する関数"""
     return DEVICE_NAME_CACHE.get(device_id, None)
+
+def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:
+    """
+    指定されたデバイスの最新ステータスを取得する
+    """
+    url = f"{config.SWITCHBOT_API_HOST}/v1.1/devices/{device_id}/status"
+    headers = create_switchbot_auth_headers()
+    
+    try:
+        # request_switchbot_api は既存の関数を使用
+        response_data = request_switchbot_api(url, headers)
+        return response_data
+    except Exception as e:
+        logger.error(f"Failed to get device status [ID:{device_id}]: {e}")
+        return None
