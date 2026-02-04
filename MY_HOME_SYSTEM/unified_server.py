@@ -24,10 +24,9 @@ from core.logger import setup_logging
 from services import sensor_service
 
 # Routers
-# ▼▼▼ 修正: bounty_router も有効化 ▼▼▼
 from routers import quest_router, webhook_router, system_router, bounty_router
 
-# Handlers (初期化のため)
+# Handlers
 from handlers import line_handler
 
 # Logger
@@ -35,12 +34,16 @@ logger = setup_logging("unified_server")
 
 # Global State
 scheduler_process: Optional[subprocess.Popen] = None
+camera_process = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理"""
-    # --- Startup ---
     logger.info("🚀 --- API Server Starting Up ---")
+
+    global camera_process
+    camera_script = os.path.join(PROJECT_ROOT, "monitors/camera_monitor.py")
+    camera_process = subprocess.Popen([sys.executable, camera_script])
     
     # Schedulerの起動管理
     global scheduler_process
@@ -56,7 +59,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # --- Shutdown ---
     logger.info("🛑 --- API Server Shutting Down ---")
     
     if scheduler_process:
@@ -68,7 +70,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             scheduler_process.kill()
         logger.info("Scheduler stopped.")
 
-    # Sensor Serviceのクリーンアップ
     sensor_service.cancel_all_tasks()
     logger.info("Bye!")
 
@@ -79,7 +80,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS (ダッシュボード等からのアクセス許可)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -88,7 +88,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Exception Handlers ---
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"🔥 Global Exception: {exc}", exc_info=True)
@@ -101,11 +100,11 @@ async def global_exception_handler(request: Request, exc: Exception):
 app.include_router(webhook_router.router)
 app.include_router(quest_router.router, prefix="/api/quest", tags=["quest"])
 app.include_router(system_router.router, prefix="/api/system", tags=["system"])
-# ▼▼▼ 修正: Bounty Router (懸賞金) を登録 ▼▼▼
 app.include_router(bounty_router.router, prefix="/api/bounty", tags=["bounty"])
 
 # --- Static Files & SPA Serving ---
-# 1. Assets (画像など)
+
+# 1. Assets
 assets_dir = os.path.join(PROJECT_ROOT, "assets")
 if not os.path.exists(assets_dir):
     os.makedirs(assets_dir)
@@ -118,28 +117,42 @@ if not os.path.exists(uploads_dir):
 app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # 3. Quest App (Frontend/SPA)
-if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
-    app.mount("/quest_static", StaticFiles(directory=config.QUEST_DIST_DIR), name="quest_static")
+# 安全に設定を取得し、ログを出力してデバッグしやすくする
+quest_dist_dir = getattr(config, "QUEST_DIST_DIR", None)
 
+if quest_dist_dir and os.path.exists(quest_dist_dir):
+    logger.info(f"📂 Quest App Configured: {quest_dist_dir}")
+    
+    # 静的ファイル (JS/CSSなど) の配信
+    app.mount("/quest_static", StaticFiles(directory=quest_dist_dir), name="quest_static")
+
+    # SPA用ルーティング (ファイルが存在すればそれを、なければindex.htmlを返す)
     @app.get("/quest/{full_path:path}")
     async def serve_quest_spa(full_path: str):
-        """React/VueなどのSPA用ルーティング (index.htmlへのフォールバック)"""
-        file_path = os.path.join(config.QUEST_DIST_DIR, full_path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
+        target_file = os.path.join(quest_dist_dir, full_path)
         
-        index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
+        # ファイル実体があればそれを返す (画像やJSなど)
+        if os.path.isfile(target_file):
+            return FileResponse(target_file)
+        
+        # なければSPAとして index.html を返す
+        index_path = os.path.join(quest_dist_dir, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        return JSONResponse(status_code=404, content={"error": "Quest App Not Found"})
+        return JSONResponse(status_code=404, content={"error": "index.html not found"})
 
+    # ルートパス (/quest と /quest/) の両方をハンドリング
     @app.get("/quest")
+    @app.get("/quest/")
     async def serve_quest_root():
-        """/quest アクセス時に index.html を返す"""
-        index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
+        index_path = os.path.join(quest_dist_dir, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        return JSONResponse(status_code=404, content={"error": "Quest App Not Found"})
+        return JSONResponse(status_code=404, content={"error": "index.html not found"})
+
+else:
+    # 設定がない、またはディレクトリが存在しない場合の警告
+    logger.warning(f"⚠️ Quest App Directory NOT FOUND or NOT SET. Config value: {quest_dist_dir}")
 
 # --- Root Endpoints ---
 @app.get("/")
@@ -153,3 +166,8 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    # 0.0.0.0 で起動することで外部（192.168.1.xxx）からのアクセスを許可します
+    uvicorn.run(app, host="0.0.0.0", port=8000)
