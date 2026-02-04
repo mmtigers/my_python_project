@@ -10,14 +10,14 @@ import sys
 from datetime import datetime
 import pytz
 from PIL import Image
-import camera_digest_service
+import tools.camera_digest_service as camera_digest_service
 
 
 # 各種サービスのインポート
 from weather_service import WeatherService
 from news_service import NewsService
 from menu_service import MenuService
-from google_photos_service import GooglePhotosService
+from tools.google_photos_service import GooglePhotosService
 
 logger = common.setup_logging("ai_report")
 
