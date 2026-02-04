@@ -2,32 +2,17 @@
 import os
 import sys
 import asyncio
-import time
 import datetime
 import subprocess
 import traceback
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional, AsyncGenerator, List, Union
+from typing import AsyncGenerator, Optional
 
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
-
-# --- LINE Bot SDK v3 Imports ---
-from linebot.v3 import WebhookHandler
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import (
-    Configuration,
-    ApiClient,
-    MessagingApi,
-)
-from linebot.v3.webhooks import (
-    MessageEvent,
-    TextMessageContent,
-    PostbackEvent
-)
 
 # プロジェクトルートの解決
 PROJECT_ROOT: str = os.path.dirname(os.path.abspath(__file__))
@@ -37,87 +22,18 @@ if PROJECT_ROOT not in sys.path:
 import config
 import sound_manager
 from core.logger import setup_logging
-from core.utils import get_now_iso
-from core.database import save_log_async
-from services.notification_service import send_push
 from services import switchbot_service as sb_tool
-from services import backup_service as backup_database
-from handlers import line_logic
-from routers import quest_router, bounty_router
-from models.switchbot import SwitchBotWebhookBody
+from services import backup_service
+from services import sensor_service
+# 新しいRouterとHandlerをインポート
+from routers import quest_router, bounty_router, webhook_router, system_router
+from handlers import line_handler  # 初期化のためインポート
 
 # === Logger Setup ===
 logger = setup_logging("unified_server")
 
-# === Global State (復元) ===
-# センサー監視用の状態変数を維持
-LAST_NOTIFY_TIME: Dict[str, float] = {}
-IS_ACTIVE: Dict[str, bool] = {}
-MOTION_TASKS: Dict[str, asyncio.Task] = {}
+# === Global State ===
 scheduler_process: Optional[subprocess.Popen] = None
-
-# 定数
-MOTION_TIMEOUT: int = 900       # 15分 (見守りタイマー)
-CONTACT_COOLDOWN: int = 300     # 5分 (通知抑制)
-
-# === Background Logic (復元 & 型定義) ===
-
-async def send_inactive_notification(mac: str, name: str, location: str, timeout: int) -> None:
-    """無反応検知通知 (復元: 動きがない場合に通知を送る)"""
-    try:
-        await asyncio.sleep(timeout)
-        msg = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
-        
-        await asyncio.to_thread(
-            send_push,
-            config.LINE_USER_ID, 
-            [{"type": "text", "text": msg}], 
-            None, "discord", "notify"
-        )
-        logger.info(f"通知送信: {msg}")
-        IS_ACTIVE[mac] = False
-        if mac in MOTION_TASKS:
-            del MOTION_TASKS[mac]
-            
-    except asyncio.CancelledError:
-        logger.debug(f"動きなしタイマーキャンセル: {name}")
-
-async def _process_sensor_logic(mac: str, name: str, location: str, dev_type: str, state: str) -> None:
-    """センサー検知ロジック (復元: Webhook受信時のメインロジック)"""
-    msg: Optional[str] = None
-    now = time.time()
-    
-    # Motion Sensor Logic
-    if dev_type and "Motion" in dev_type:
-        if state == "detected":
-            # 既存のタイマーがあればキャンセル（動きがあったため）
-            if mac in MOTION_TASKS: 
-                MOTION_TASKS[mac].cancel()
-            
-            # 非アクティブ状態からの復帰時に通知
-            if not IS_ACTIVE.get(mac, False):
-                msg = f"👀【{location}・見守り】\n{name} で動きがありました"
-                IS_ACTIVE[mac] = True
-            
-            # 新たな「動きなし」監視タイマーをセット
-            MOTION_TASKS[mac] = asyncio.create_task(
-                send_inactive_notification(mac, name, location, MOTION_TIMEOUT)
-            )
-    
-    # Contact Sensor Logic
-    elif state in ["open", "timeoutnotclose"]:
-        if now - LAST_NOTIFY_TIME.get(mac, 0.0) > CONTACT_COOLDOWN:
-            msg = f"🚪【{location}・防犯】\n{name} が開きました" if state == "open" else f"⚠️【{location}・注意】\n{name} が開けっ放しです"
-            LAST_NOTIFY_TIME[mac] = now
-            
-    if msg:
-        # 非同期で通知送信
-        await asyncio.to_thread(
-            send_push, 
-            config.LINE_USER_ID, 
-            [{"type": "text", "text": msg}], 
-            None, "discord", "notify"
-        )
 
 # === Scheduled Tasks ===
 
@@ -139,18 +55,14 @@ async def schedule_daily_backup() -> None:
             logger.info("📦 Starting periodic backup...")
             loop = asyncio.get_running_loop()
             
-            success, res, size = await loop.run_in_executor(None, backup_database.perform_backup)
+            # Service層へ委譲
+            success, res, size = await loop.run_in_executor(None, backup_service.perform_backup)
             
             if success:
                 logger.info(f"✅ Backup successful: {size:.1f}MB")
             else:
                 logger.error(f"❌ Backup failed: {res}")
-                await asyncio.to_thread(
-                    send_push,
-                    config.LINE_USER_ID, 
-                    [{"type": "text", "text": f"🚨 バックアップ失敗: {res}"}], 
-                    None, "discord", "error"
-                )
+            
             await asyncio.sleep(60)
             
         except asyncio.CancelledError:
@@ -211,9 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     task_backup.cancel()
     task_refresh.cancel()
     
-    # 実行中の見守りタスクをキャンセル
-    for t in MOTION_TASKS.values():
-        t.cancel()
+    # センサー監視タスクのクリーンアップ (Serviceへ委譲)
+    sensor_service.cancel_all_tasks()
         
     logger.info("👋 System Shutdown complete.")
 
@@ -228,7 +139,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === Exception Handlers (Fail-Safe) ===
+# === Exception Handlers ===
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error(f"❌ Unhandled Error at {request.url.path}: {exc}\n{traceback.format_exc()}")
@@ -239,106 +150,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     logger.error(f"❌ Validation Error: {exc.errors()}")
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
-# === LINE Bot Setup ===
-line_handler: Optional[WebhookHandler] = None
-line_bot_api: Optional[MessagingApi] = None
-
-if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
-    try:
-        line_conf = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
-        line_bot_api = MessagingApi(ApiClient(line_conf))
-        line_handler = WebhookHandler(config.LINE_CHANNEL_SECRET)
-        logger.info("✅ LINE Bot API v3 initialized")
-    except Exception as e:
-        logger.error(f"LINE initialization failed: {e}")
-
-# === Routers (Existing APIs) ===
+# === Routers ===
+# 既存のAPI
 app.include_router(quest_router.router, prefix="/api/quest", tags=["Quest"])
 app.include_router(bounty_router.router, prefix="/api/bounties", tags=["Bounties"])
 
-# === Webhooks & System APIs ===
+# 新規追加・分離したAPI
+app.include_router(webhook_router.router, tags=["Webhooks"]) # /callback/line, /webhook/switchbot
+app.include_router(system_router.router, prefix="/api/system", tags=["System"]) # /backup
 
-@app.post("/callback/line")
-async def callback_line(request: Request, x_line_signature: str = Header(None)) -> str:
-    """LINE Bot Webhook"""
-    if not line_handler:
-        raise HTTPException(status_code=501, detail="LINE Bot not configured")
-    
-    body = (await request.body()).decode('utf-8')
-    try:
-        # ▼▼▼ 修正: asyncio.to_thread を使って、同期処理を別スレッドで実行する ▼▼▼
-        # これにより、line_logic.py 内の asyncio.run() がメインループと衝突しなくなります。
-        await asyncio.to_thread(line_handler.handle, body, x_line_signature)
-        # ▲▲▲ ▲▲▲
-    except InvalidSignatureError:
-        raise HTTPException(status_code=400)
-    except Exception as e:
-        logger.error(f"LINE callback error: {e}")
-        # LINEサーバーにはOKを返し、再送ループを防ぐ
-    return "OK"
-
-@app.post("/webhook/switchbot")
-async def switchbot_webhook(body: SwitchBotWebhookBody) -> Dict[str, str]:
-    """SwitchBot Webhook受信・処理 (復元機能)"""
-    ctx = body.context
-    mac = ctx.deviceMac
-    
-    # デバイス情報の解決
-    api_name = sb_tool.get_device_name_by_id(mac)
-    # config.MONITOR_DEVICES は devices.json から読み込まれた最新データを使用
-    device_conf = next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)
-    
-    name = api_name or (device_conf.get("name") if device_conf else f"Unknown_{mac}")
-    location = device_conf.get("location", "未登録") if device_conf else "場所不明"
-    state = str(ctx.detectionState).lower()
-
-    # 1. ログ保存 (旧テーブルへ - 互換性維持)
-    await save_log_async("device_records", 
-        ["timestamp", "device_name", "device_id", "device_type", "contact_state", "brightness_state"],
-        (get_now_iso(), name, mac, "Webhook", state, ctx.brightness or "")
-    )
-    
-    # 2. 新テーブル(daily_logs)への保存 (設計書準拠: イベントとして記録)
-    #    重要な検知イベントのみを記録し、ログの肥大化を防ぐ
-    if state in ["detected", "open", "timeoutnotclose"]:
-        detail_msg = f"{name}: {state}"
-        await save_log_async(config.SQLITE_TABLE_DAILY_LOGS,
-            ["category", "detail", "timestamp"],
-            ("Sensor", detail_msg, get_now_iso())
-        )
-
-    # 3. ロジック実行 (通知・見守りタイマー等)
-    await _process_sensor_logic(mac, name, location, body.deviceType, state)
-    
-    return {"status": "success"}
-
-@app.post("/api/system/backup")
-async def manual_backup() -> Dict[str, Any]:
-    """手動バックアップトリガー (復元)"""
-    success, msg, size = backup_database.perform_backup()
-    if not success: 
-        raise HTTPException(status_code=500, detail=msg)
-    return {"status": "success", "message": msg, "size_mb": size}
-
-# === Event Handlers (LINE) ===
-if line_handler:
-    @line_handler.add(MessageEvent, message=TextMessageContent)
-    def handle_message(event: MessageEvent) -> None:
-        try:
-            line_logic.handle_message(event, line_bot_api)
-        except Exception as e:
-            logger.error(f"LINE message handling error: {e}")
-
-    @line_handler.add(PostbackEvent)
-    def handle_postback(event: PostbackEvent) -> None:
-        try:
-            line_logic.handle_postback(event, line_bot_api)
-        except Exception as e:
-            logger.error(f"LINE postback handling error: {e}")
-
-# === Static Files & SPA (設計書準拠) ===
-
-# === Static Files & SPA (設計書準拠) ===
+# === Static Files & SPA ===
 
 # 1. 共通Assets
 if os.path.exists(config.ASSETS_DIR):
@@ -346,40 +167,20 @@ if os.path.exists(config.ASSETS_DIR):
 if os.path.exists(config.UPLOAD_DIR):
     app.mount("/uploads", StaticFiles(directory=config.UPLOAD_DIR), name="uploads")
 
-# 2. Family Quest (SPA) 配信 [修正版]
-#    Viteの base: '/quest/' 設定に対応し、assetsだけでなくルート直下のファイル(sw.js等)も配信する
+# 2. Family Quest (SPA)
 if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
-    
-    # 既存の "/quest_static" は互換性のため残すとしても、メインは以下のハンドラで行うため
-    # app.mount("/quest/assets", ...) は削除してください（競合回避のため）
-
     @app.get("/quest/{file_path:path}")
     async def serve_quest_app(file_path: str):
-        """
-        Family Quest用の包括的ハンドラ
-        /quest/ 以下へのリクエストに対し:
-        1. 物理ファイルが存在すればそれを返す (registerSW.js, assets/xxx.js 等)
-        2. 存在しなければSPAとして index.html を返す
-        """
-        # パスの結合と正規化
         target_path = os.path.normpath(os.path.join(config.QUEST_DIST_DIR, file_path))
-        
-        # セキュリティチェック: QUEST_DIST_DIR の外へのアクセスを防ぐ
         if not target_path.startswith(str(os.path.abspath(config.QUEST_DIST_DIR))):
              raise HTTPException(status_code=403, detail="Access denied")
-
-        # ファイル実体が存在すれば、静的ファイルとして返す
         if os.path.isfile(target_path):
             return FileResponse(target_path)
-            
-        # ファイルがない場合は SPAのルーティングとして index.html を返す
         index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
         if os.path.exists(index_path):
             return FileResponse(index_path)
-        else:
-            return JSONResponse(status_code=404, content={"error": "SPA index.html not found"})
+        return JSONResponse(status_code=404, content={"error": "SPA index.html not found"})
 
-    # /quest (末尾スラッシュなし) へのアクセスも index.html へ
     @app.get("/quest")
     async def serve_quest_root():
         index_path = os.path.join(config.QUEST_DIST_DIR, "index.html")
@@ -387,21 +188,16 @@ if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
             return FileResponse(index_path)
         return JSONResponse(status_code=404, content={"error": "SPA not found"})
 
-# 3. ルートパスのフォールバック (既存コードの維持)
+# 3. Fallback (SPA Routing Support)
 @app.get("/{full_path:path}")
 async def serve_root_fallback(full_path: str):
-    # APIやWebhookなど、FastAPIが処理すべきパスは除外
-    reserved_paths = ["api", "assets", "uploads", "callback", "webhook", "quest", "quest_static"]
+    reserved_paths = ["api", "assets", "uploads", "callback", "webhook", "quest"]
     if any(full_path.startswith(p) for p in reserved_paths):
          raise HTTPException(status_code=404)
-    
-    # ここに来るのは /dashboard など他のパス。必要に応じて Family Quest へ誘導するか 404 にする。
-    # 今回の修正範囲外だが、念のため index.html を返しておく（既存動作維持）
     if hasattr(config, "QUEST_DIST_DIR") and os.path.exists(config.QUEST_DIST_DIR):
         return FileResponse(os.path.join(config.QUEST_DIST_DIR, "index.html"))
     raise HTTPException(status_code=404)
 
 if __name__ == "__main__":
     import uvicorn
-    # 設計書準拠: LAN内固定IPでの運用
     uvicorn.run(app, host="0.0.0.0", port=8000)
