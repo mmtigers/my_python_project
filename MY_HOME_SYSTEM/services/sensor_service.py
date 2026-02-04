@@ -1,10 +1,13 @@
 # MY_HOME_SYSTEM/services/sensor_service.py
 import asyncio
 import time
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 
 import config
+import common
 from core.logger import setup_logging
+from core.utils import get_now_iso
+from core.database import save_log_async
 from services.notification_service import send_push
 
 # ロガー設定
@@ -18,6 +21,10 @@ MOTION_TASKS: Dict[str, asyncio.Task] = {}
 # 定数
 MOTION_TIMEOUT: int = 900       # 15分 (見守りタイマー)
 CONTACT_COOLDOWN: int = 300     # 5分 (通知抑制)
+
+# ==========================================
+# 1. Webhook Logic (Passive)
+# ==========================================
 
 async def send_inactive_notification(mac: str, name: str, location: str, timeout: int) -> None:
     """無反応検知通知 (動きがない場合に通知を送る)"""
@@ -40,7 +47,7 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
         logger.debug(f"動きなしタイマーキャンセル: {name}")
 
 async def process_sensor_data(mac: str, name: str, location: str, dev_type: str, state: str) -> None:
-    """センサー検知メインロジック"""
+    """センサー検知メインロジック (Webhook経由)"""
     msg: Optional[str] = None
     now = time.time()
     
@@ -68,7 +75,6 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
             LAST_NOTIFY_TIME[mac] = now
             
     if msg:
-        # 非同期で通知送信
         await asyncio.to_thread(
             send_push, 
             config.LINE_USER_ID, 
@@ -81,3 +87,72 @@ def cancel_all_tasks():
     for t in MOTION_TASKS.values():
         t.cancel()
     logger.info("All motion sensor tasks cancelled.")
+
+
+
+
+# ==========================================
+# 2. Polling Logic (Active) - New!
+# ==========================================
+
+async def process_meter_data(device_id: str, device_name: str, temp: float, humidity: float) -> None:
+    """温湿度計データの保存"""
+    await save_log_async(
+        config.SQLITE_TABLE_SWITCHBOT_LOGS,
+        ["device_id", "device_name", "temperature", "humidity", "timestamp"],
+        (device_id, device_name, temp, humidity, get_now_iso())
+    )
+    # 必要であればここで熱中症アラートなどのロジックを追加可能
+
+async def process_power_data(device_id: str, device_name: str, wattage: float, notify_settings: Dict[str, Any]) -> None:
+    """
+    電力データの保存と通知判定
+    - 前回のDB値を参照して、閾値をまたいだ場合のみ通知する (Stateful Check)
+    """
+    # 1. 保存前の最新値を取得（前回値）
+    prev_wattage = 0.0
+    try:
+        # 直近の1件を取得
+        rows = await asyncio.to_thread(
+            common.execute_read_query,
+            f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
+            (device_id,)
+        )
+        if rows:
+            prev_wattage = float(rows[0]['wattage'])
+    except Exception as e:
+        logger.warning(f"Failed to fetch prev power for {device_name}: {e}")
+
+    # 2. データを保存
+    await save_log_async(
+        config.SQLITE_TABLE_POWER_USAGE,
+        ["device_id", "device_name", "wattage", "timestamp"],
+        (device_id, device_name, wattage, get_now_iso())
+    )
+    
+    # 3. 通知判定 (閾値クロス検知)
+    threshold = notify_settings.get("threshold")
+    if threshold is None:
+        return
+
+    msg = None
+    target_platform = notify_settings.get("target", "discord")
+    
+    # OFF -> ON
+    if prev_wattage < threshold and wattage >= threshold:
+        msg = f"💡【使用開始】\n{device_name} がONになりました ({wattage}W)"
+        # 連続通知防止などは必要であればここにGlobal Stateを追加するが、
+        # DB比較方式なら「閾値をまたいだ瞬間」しか検知しないため基本不要。
+        
+    # ON -> OFF
+    elif prev_wattage >= threshold and wattage < threshold:
+        msg = f"🌑【使用終了】\n{device_name} がOFFになりました"
+
+    if msg:
+        logger.info(f"Power Notification Triggered: {msg}")
+        await asyncio.to_thread(
+            send_push,
+            config.LINE_USER_ID,
+            [{"type": "text", "text": msg}],
+            None, target_platform, "notify"
+        )

@@ -1,170 +1,63 @@
 # MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py
-import requests
+import asyncio
 import sys
 import os
 import time
-from typing import Dict, Any, Optional, List, Tuple
-from requests.exceptions import HTTPError, ConnectionError, Timeout, RequestException # 追加
+from typing import Dict, Any, Optional, List
 
-# プロジェクトルートへのパス解決 (unified_server.py 等と整合性を保つ)
+# プロジェクトルートへのパス解決
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 自作モジュール
 import config
 from services import switchbot_service as sb_tool
+from services import sensor_service
 from core.logger import setup_logging
-from core.database import save_log_generic, get_db_cursor
-from core.utils import get_now_iso
-from services.notification_service import send_push
 
 # ロガー設定
 logger = setup_logging("device_monitor")
 
-def insert_power_record(device_id: str, device_name: str, wattage: float) -> bool:
+def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """
-    電力消費データを power_usage テーブルに記録する (設計書 3.2 準拠)。
+    SwitchBot APIからステータスを取得する（同期処理ラッパー）。
+    エラーハンドリングはここで行う。
     """
-    cols: List[str] = ["device_id", "device_name", "wattage", "timestamp"]
-    vals: Tuple[Any, ...] = (device_id, device_name, wattage, get_now_iso())
-    
-    success: bool = save_log_generic(config.SQLITE_TABLE_POWER_USAGE, cols, vals)
-    if success:
-        logger.debug(f"💾 Power record saved: {device_name} ({wattage}W)")
-    return success
-
-def insert_meter_record(device_id: str, device_name: str, temp: float, humid: float) -> bool:
-    """
-    温湿度データを switchbot_meter_logs テーブルに記録する (設計書 3.2 準拠)。
-    """
-    cols: List[str] = ["device_id", "device_name", "temperature", "humidity", "timestamp"]
-    vals: Tuple[Any, ...] = (device_id, device_name, temp, humid, get_now_iso())
-    
-    success: bool = save_log_generic(config.SQLITE_TABLE_SWITCHBOT_LOGS, cols, vals)
-    if success:
-        logger.debug(f"💾 Meter record saved: {device_name} ({temp}°C / {humid}%)")
-    return success
-
-def insert_legacy_record(name: str, device_id: str, device_type: str, data: Dict[str, Any]) -> None:
-    """
-    後方互換性のため、旧 device_records テーブルにも記録を継続する。
-    """
-    cols: List[str] = [
-        "timestamp", "device_name", "device_id", "device_type", 
-        "power_watts", "temperature_celsius", "humidity_percent", 
-        "contact_state", "movement_state", "brightness_state"
-    ]
-    vals: Tuple[Any, ...] = (
-        get_now_iso(), name, device_id, device_type, 
-        data.get('power'), data.get('temperature'), data.get('humidity'),
-        data.get('contact'), data.get('motion'), data.get('brightness')
-    )
-    save_log_generic("device_records", cols, vals)
-
-def calculate_plug_power(body: Dict[str, Any]) -> float:
-    """
-    プラグの電力を計算・補正する。
-    """
-    watts: float = float(body.get('weight', 0))
-    if watts == 0:
-        volts: float = float(body.get('voltage', 0))
-        amps: float = float(body.get('electricCurrent', 0)) / 1000.0
-        if volts > 0 and amps > 0:
-            watts = volts * amps
-    return round(watts, 1)
-
-def fetch_device_status(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
-    """
-    SwitchBot APIからデバイスの状態を取得する。Fail-Safe実装。
-    """
-    url: str = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
     try:
-        headers: Dict[str, str] = sb_tool.create_switchbot_auth_headers()
-        # 再試行ロジックを含むAPIリクエスト (設計書 9.3 準拠)
-        data: Dict[str, Any] = sb_tool.request_switchbot_api(url, headers)
-        
-        if data.get('statusCode') != 100:
-            logger.warning(f"⚠️ API Status Error [{device_id}]: {data.get('statusCode')}")
+        status = sb_tool.get_device_status(device_id)
+        if not status:
+            logger.warning(f"Status unavailable for {device_id}")
             return None
+            
+        # 必要なデータを正規化して返す
+        result = {}
+        
+        # 1. 電力計 (Plug Mini / Nature Remo E Lite)
+        if "weight" in status or "electricCurrent" in status or "voltage" in status or "power" in status:
+             # Plug Mini (JP) returns 'weight' field sometimes misused or specific fields
+             # API仕様依存: get_device_statusの実装に依存するが、通常は辞書が返る
+             # ここでは sb_tool が整形済みデータを返すと仮定、あるいは生の辞書から抽出
+             p = status.get("power") or status.get("weight") or 0.0 # APIの揺らぎ対応
+             result["power"] = float(p)
 
-        body: Dict[str, Any] = data.get('body', {})
-        result: Dict[str, Any] = {}
-        
-        if "Plug" in device_type:
-            result['power'] = calculate_plug_power(body)
-        elif "Meter" in device_type:
-            result['temperature'] = float(body.get('temperature', 0))
-            result['humidity'] = float(body.get('humidity', 0))
-        elif "Contact" in device_type:
-            result['contact'] = body.get('openState', 'unknown')
-        elif "Motion" in device_type:
-            result['motion'] = "detected" if body.get('moveDetected') else "clear"
-        
+        # 2. 温湿度計 (Meter / Hub 2)
+        if "temperature" in status or "humidity" in status:
+            result["temperature"] = float(status.get("temperature", 0.0))
+            result["humidity"] = float(status.get("humidity", 0.0))
+            
         return result
 
-    # 1. HTTPステータスエラー (4xx, 5xx) - 既存ロジック維持
-    except HTTPError as e:
-        if e.response is not None and e.response.status_code == 429:
-            logger.warning(f"⚠️ API Rate Limit Reached for [{device_id}]. Skipping.")
-            return None
-        logger.error(f"❌ HTTP Error for [{device_id}]: {e}")
-        return None
-
-    # 2. [新規] 接続・DNS・タイムアウトエラー -> Warningとして扱う
-    except (ConnectionError, Timeout) as e:
-        logger.warning(f"⏳ Network unstable for [{device_id}]: {e} (Skipping this turn)")
-        return None
-
-    # 3. [新規] その他のRequestsライブラリ由来のエラー -> Error
-    except RequestException as e:
-        logger.error(f"❌ API Request Failed for [{device_id}]: {e}")
-        return None
-
-    # 4. [維持] コードバグ等の予期せぬエラー -> Error (Traceback重視)
     except Exception as e:
-        logger.error(f"❌ Unexpected System Error for [{device_id}]: {e}", exc_info=True) # exc_info=Trueでスタックトレースを出す
+        logger.error(f"Fetch Error [{device_id}]: {e}")
         return None
 
-def get_prev_power(device_id: str) -> float:
+async def main() -> None:
     """
-    DBから直近の電力値を取得する。
+    メインループ。全デバイスの巡回監視 (Async版)。
     """
-    with get_db_cursor() as cur:
-        if not cur: return 0.0
-        try:
-            sql: str = f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id=? ORDER BY id DESC LIMIT 1"
-            cur.execute(sql, (device_id,))
-            row: Optional[sqlite3.Row] = cur.fetchone()
-            return float(row["wattage"]) if row else 0.0
-        except Exception:
-            return 0.0
-
-def process_notifications(name: str, device_id: str, current_power: float, settings: Dict[str, Any]) -> None:
-    """
-    電力変化に基づく通知処理。
-    """
-    threshold: Optional[float] = settings.get("power_threshold_watts")
-    mode: str = settings.get("notify_mode", "LOG_ONLY")
-    if threshold is None or mode == "LOG_ONLY": return
-
-    prev_power: float = get_prev_power(device_id)
-    msg: Optional[str] = None
-
-    if mode == "ON_START" and current_power >= threshold and prev_power < threshold:
-        msg = f"🍚【炊飯通知】\n{name} が動き出したよ！ ({current_power}W)"
-    elif mode == "ON_END_SUMMARY" and current_power < threshold and prev_power >= threshold:
-        msg = f"💡【使用終了】\n{name} の電源が切れたみたい"
-
-    if msg:
-        send_push(config.LINE_USER_ID or "", [{"type": "text", "text": msg}], target=settings.get("target", "discord"))
-
-def main() -> None:
-    """
-    メインループ。全デバイスの巡回監視。
-    """
-    logger.info("🚀 --- SwitchBot Monitor Started (New Schema Mode) ---")
+    logger.info("🚀 --- SwitchBot Monitor Started (New Architecture) ---")
     
-    # devices.json からロードされた全デバイスを処理
     monitor_devices: List[Dict[str, Any]] = config.MONITOR_DEVICES
+    processed_count = 0
     
     for device in monitor_devices:
         did: str = device.get("id", "")
@@ -173,24 +66,34 @@ def main() -> None:
         
         if not did or not dtype: continue
 
-        status: Optional[Dict[str, Any]] = fetch_device_status(did, dtype)
-        if not status: continue
-
-        # [追加] APIバースト防止のため、リクエスト間に2秒のインターバルを設ける
-        time.sleep(5)
-
-        # 1. 新テーブルへの振り分け保存
-        if "power" in status:
-            insert_power_record(did, dname, status["power"])
-            process_notifications(dname, did, status["power"], device.get("notify_settings", {}))
+        # 同期APIコールをスレッドで実行してイベントループをブロックさせない
+        status = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
+        
+        if status:
+            # 1. 電力データの処理 (Serviceへ委譲)
+            if "power" in status:
+                await sensor_service.process_power_data(
+                    did, dname, status["power"], device.get("notify_settings", {})
+                )
             
-        if "temperature" in status:
-            insert_meter_record(did, dname, status["temperature"], status["humidity"])
+            # 2. 温湿度データの処理 (Serviceへ委譲)
+            if "temperature" in status:
+                await sensor_service.process_meter_data(
+                    did, dname, status["temperature"], status["humidity"]
+                )
+            
+            processed_count += 1
+            logger.info(f"✅ Processed: {dname}")
 
-        # 2. 後方互換性のための旧テーブル保存
-        # insert_legacy_record(dname, did, dtype, status)
+        # APIレートリミット対策 (Blocking sleep -> Await sleep)
+        await asyncio.sleep(5)
 
-    logger.info(f"🏁 --- Monitor Completed ({len(monitor_devices)} devices processed) ---")
+    logger.info(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Monitor interrupted by user.")
+    except Exception as e:
+        logger.critical(f"Unexpected Error: {e}")
