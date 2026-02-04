@@ -20,7 +20,7 @@ from linebot.v3.messaging import (
     MessageAction
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
-from linebot.v3.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.v3.exceptions import InvalidSignatureError
 
 import config
 from core.logger import setup_logging
@@ -57,7 +57,7 @@ def reply_message(reply_token: str, messages: List[any]):
                 messages=messages
             )
         )
-    except LineBotApiError as e:
+    except Exception as e:
         logger.error(f"LINE Reply Failed: {e}")
 
 # === Event Handlers ===

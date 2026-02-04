@@ -1,191 +1,246 @@
 # MY_HOME_SYSTEM/services/ai_service.py
-import google.generativeai as genai
-from google.generativeai.types import FunctionDeclaration, Tool
+import asyncio
 import json
 import traceback
-import sqlite3
-import re
-import common
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+
+import google.generativeai as genai
+from google.api_core.exceptions import GoogleAPIError
+
 import config
+import common
+from core.logger import setup_logging
+from core.utils import get_now_iso
+
+# Service連携
+from services import line_service
 
 # ロガー設定
-logger = common.setup_logging("ai_service")
+logger = setup_logging("ai_service")
 
-# Gemini初期化
+# === Gemini 初期化 ===
 if config.GEMINI_API_KEY:
     genai.configure(api_key=config.GEMINI_API_KEY)
+    # Gemini 1.5 Flash / 2.0 Flash を推奨
+    MODEL_NAME = 'gemini-2.0-flash' 
 else:
     logger.warning("⚠️ GEMINI_API_KEYが設定されていません。AI機能は無効です。")
+    MODEL_NAME = None
 
 # ==========================================
-# 0. データベーススキーマ定義
-# ==========================================
-DB_SCHEMA_INFO = f"""
-あなたは以下のSQLiteテーブルを持つホームシステムのデータベースにアクセスできます。
-ユーザーの質問に答えるために、適切なSQLクエリを作成してデータを検索してください。
-
-【テーブル定義】
-1. {config.SQLITE_TABLE_CHILD} (子供の体調)
-   - Columns: timestamp (日時), child_name (名前), condition (症状・様子)
-2. {config.SQLITE_TABLE_SHOPPING} (買い物履歴)
-   - Columns: order_date (注文日), platform (Amazon/Rakuten/LINE入力), item_name (商品名), price (金額)
-3. {config.SQLITE_TABLE_FOOD} (食事記録)
-   - Columns: timestamp (日時), menu_category (メニュー内容: '自炊: カレー' 等), meal_time_category (Dinner等)
-4. {config.SQLITE_TABLE_SENSOR} (センサー・電力データ)
-   - Columns: timestamp, device_name, device_type, power_watts, temperature_celsius, humidity_percent
-5. {config.SQLITE_TABLE_CAR} (車の移動)
-   - Columns: timestamp, action (LEAVE/RETURN)
-6. {config.SQLITE_TABLE_DEFECATION} (排便記録)
-   - Columns: timestamp, user_name, condition, note
-"""
-
-# ==========================================
-# 1. ツール定義 (Interface)
+# 1. Tool Functions (実装)
 # ==========================================
 
-def declare_child_health(child_name: str, condition: str, is_emergency: bool = False):
-    """子供の体調や怪我、様子を記録する。"""
-    pass
-
-def declare_shopping(item_name: str, price: int, date_str: str = None):
-    """買い物や支出を記録する。"""
-    pass
-
-def declare_defecation(condition: str, note: str = ""):
-    """排便やトイレ、お腹の調子を記録する。"""
-    pass
-
-def search_database(sql_query: str):
-    """データベースから情報を検索する。SELECT文のみ許可。"""
-    pass
-
-def get_health_logs(child_name: str = None, days: int = 7):
-    """子供の体調記録や排便記録を確認する。"""
-    args = {"child_name": child_name, "days": days}
-    return execute_get_health_logs(args)
-
-def get_expenditure_logs(item_keyword: str = None, platform: str = None, days: int = 30):
-    """過去の買い物履歴や支出を検索する。"""
-    args = {"item_keyword": item_keyword, "platform": platform, "days": days}
-    return execute_get_expenditure_logs(args)
-
-my_tools = [declare_child_health, declare_shopping, declare_defecation, search_database, get_health_logs, get_expenditure_logs]
-
-# ==========================================
-# 2. 実行ロジック
-# ==========================================
-
-def execute_child_health(args, user_id, user_name):
-    child_name = args.get("child_name", "子供")
-    condition = args.get("condition", "記録なし")
-    
-    common.save_log_generic(config.SQLITE_TABLE_CHILD,
-        ["user_id", "user_name", "child_name", "condition", "timestamp"],
-        (user_id, user_name, child_name, condition, common.get_now_iso())
-    )
-    
-    msg = f"📝 {child_name}ちゃんの様子を記録しました:「{condition}」"
-    if args.get("is_emergency"):
-        msg += "\n無理せず、お大事にしてくださいね😢"
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🚨 {child_name}: {condition}"}], target="discord")
-    return msg
-
-def execute_shopping(args, user_id, user_name):
-    item = args.get("item_name")
-    try: price = int(args.get("price", 0))
-    except: price = 0
-    date_str = args.get("date_str") or common.get_today_date_str()
-    import time
-    unique_id = f"LINE_MANUAL_{int(time.time())}_{price}"
-    
-    common.save_log_generic(config.SQLITE_TABLE_SHOPPING,
-        ["platform", "order_date", "item_name", "price", "email_id", "timestamp"],
-        ("LINE入力", date_str, item, price, unique_id, common.get_now_iso())
-    )
-    return f"💰 家計簿につけました！\n{date_str}: {item} ({price}円)"
-
-def execute_defecation(args, user_id, user_name):
-    condition = args.get("condition")
-    note = args.get("note", "")
-    common.save_log_generic(config.SQLITE_TABLE_DEFECATION,
-        ["user_id", "user_name", "record_type", "condition", "note", "timestamp"],
-        (user_id, user_name, "排便", condition, note, common.get_now_iso())
-    )
-    return f"🚽 お腹の記録をしました。\n状態: {condition}"
-
-def execute_search_database(args):
-    query = args.get("sql_query", "")
-    if not re.match(r"^\s*SELECT", query, re.IGNORECASE):
-        return "❌ エラー: データ検索以外の操作は許可されていません。"
-    try:
-        conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
-        cursor = conn.cursor()
-        logger.info(f"🔍 Executing SQL: {query}")
-        cursor.execute(query)
-        rows = cursor.fetchall()
-        columns = [d[0] for d in cursor.description]
-        conn.close()
-        if not rows: return "該当するデータは見つかりませんでした。"
-        return json.dumps([dict(zip(columns, row)) for row in rows], ensure_ascii=False, default=str)
-    except Exception as e:
-        logger.error(f"SQL Error: {e}")
-        return f"検索中にエラーが発生しました: {str(e)}"
-
-def execute_get_health_logs(args):
-    child_name = args.get("child_name")
-    days = args.get("days", 7)
-    query = f"""
-        SELECT timestamp, child_name as target, condition, '体調' as type 
-        FROM {config.SQLITE_TABLE_CHILD} 
-        WHERE timestamp > datetime('now', '-? days')
-        UNION ALL
-        SELECT timestamp, user_name as target, condition, '排便' as type 
-        FROM {config.SQLITE_TABLE_DEFECATION} 
-        WHERE timestamp > datetime('now', '-? days')
+async def tool_record_child_health(user_id: str, user_name: str, args: Dict[str, Any]) -> str:
     """
-    params = [days, days]
-    if child_name:
-        query = f"SELECT * FROM ({query}) WHERE target LIKE ?"
-        params.append(f"%{child_name}%")
-    return common.execute_read_query(query, tuple(params))
+    [Tool] 子供の体調を記録する
+    Args:
+        child_name (str): 子供の名前 (呼び捨て可)
+        condition (str): 症状や様子 (例: 37.5度の熱, 元気, 咳が出ている)
+    """
+    child_name = args.get("child_name")
+    condition = args.get("condition")
+    
+    # 名前の正規化 (config.FAMILY_SETTINGS["members"] とのマッチング)
+    # 簡易的に "長男" -> "マサヒロJr" のような変換が必要ならここで行うか、AIに任せる
+    # ここではAIが正しい名前(configにある名前)を抽出してくると期待する
+    
+    msg_obj = await line_service.log_child_health(user_id, user_name, child_name, condition)
+    return f"記録完了: {msg_obj.text}"
 
-def execute_get_expenditure_logs(args):
-    keyword = args.get("item_keyword")
-    platform = args.get("platform")
-    days = args.get("days", 30)
-    query = f"SELECT order_date, platform, item_name, price FROM {config.SQLITE_TABLE_SHOPPING} WHERE order_date > datetime('now', '-? days')"
-    params = [days]
-    if keyword:
-        query += " AND item_name LIKE ?"
-        params.append(f"%{keyword}%")
-    if platform:
-        query += " AND platform = ?"
-        params.append(platform)
-    query += " ORDER BY order_date DESC"
-    return common.execute_read_query(query, tuple(params))
+async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -> str:
+    """
+    [Tool] 食事を記録する
+    Args:
+        item (str): 食べたもの
+        category (str): カテゴリ (朝食/昼食/夕食/間食/自炊/外食 など)
+    """
+    item = args.get("item")
+    category = args.get("category", "その他")
+    
+    msg_obj = await line_service.log_food_record(user_id, user_name, category, item, is_manual=True)
+    return f"記録完了: {msg_obj.text}"
 
-# ==========================================
-# 3. メイン処理 (Gemini呼び出し)
-# ==========================================
+async def tool_search_db(args: Dict[str, Any]) -> str:
+    """
+    [Tool] データベースから情報を検索する (読み取り専用)
+    Args:
+        query_intent (str): 検索したい内容の要約 (SQL生成はAIに任せず、定型クエリを使う方針に変更も可だが、ここでは簡易RAG的にSQL実行を許可する)
+        sql_query (str): 実行したいSQLiteのSELECT文 (AIが生成)
+    """
+    sql = args.get("sql_query")
+    if not sql: return "SQLクエリが指定されていません"
+    
+    # 安全対策: SELECT以外は禁止
+    if not sql.strip().upper().startswith("SELECT"):
+        return "エラー: データ変更操作は許可されていません。"
 
-def analyze_text_and_execute(text: str, user_id: str, user_name: str) -> str:
-    """Geminiで解析しツール実行または応答を返す"""
-    if not config.GEMINI_API_KEY: return None 
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash', tools=my_tools)
-        prompt = f"""
-        ユーザー名: {user_name}
-        現在日時: {common.get_now_iso()}
-        あなたは家庭用アシスタント「セバスチャン」です。
-        ユーザーの意図を理解し、記録ツールまたは情報検索ツール(search_database)を呼び出すか、親しみやすく返答してください。
-        {DB_SCHEMA_INFO}
-        メッセージ: {text}
-        """
-        chat = model.start_chat(enable_automatic_function_calling=True)
-        response = chat.send_message(prompt)
-        if response.text: return response.text.strip()
+        # 読み取り専用で実行
+        rows = await asyncio.to_thread(common.execute_read_query, sql)
+        if not rows:
+            return "該当するデータは見つかりませんでした。"
+        # 結果を文字列化して返す（長すぎる場合はカット）
+        return str(rows)[:2000]
     except Exception as e:
-        logger.error(f"AI解析エラー: {e}")
-        logger.error(traceback.format_exc())
-        return "申し訳ありません、処理中にエラーが発生しました🙇"
-    return None
+        return f"DB検索エラー: {e}"
+
+# ==========================================
+# 2. Tool Definitions (Schema)
+# ==========================================
+
+tools_schema = [
+    {
+        "function_declarations": [
+            {
+                "name": "record_child_health",
+                "description": "子供の体調や様子を記録します。体温、病状、機嫌などを記録できます。",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "child_name": {"type": "STRING", "description": f"子供の名前。候補: {config.FAMILY_SETTINGS['members']}"},
+                        "condition": {"type": "STRING", "description": "体調の状態、体温、具体的な症状など"}
+                    },
+                    "required": ["child_name", "condition"]
+                }
+            },
+            {
+                "name": "record_food",
+                "description": "食事の内容を記録します。",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "item": {"type": "STRING", "description": "食べたメニュー名"},
+                        "category": {"type": "STRING", "description": "食事カテゴリ (朝食, 昼食, 夕食, おやつ, 外食, 自炊)"}
+                    },
+                    "required": ["item"]
+                }
+            },
+            {
+                "name": "search_db",
+                "description": "過去の記録（体調、食事、センサーログ、買い物履歴）をデータベースから検索します。",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "sql_query": {
+                            "type": "STRING", 
+                            "description": f"""
+                            実行するSQLiteのSELECT文。テーブル一覧:
+                            - {config.SQLITE_TABLE_CHILD} (timestamp, child_name, condition)
+                            - {config.SQLITE_TABLE_FOOD} (timestamp, menu_category)
+                            - {config.SQLITE_TABLE_SHOPPING} (order_date, item_name, price)
+                            - {config.SQLITE_TABLE_POWER_USAGE} (timestamp, device_name, wattage)
+                            ※ timestampは 'YYYY-MM-DD HH:MM:SS' 形式の文字列。
+                            """
+                        }
+                    },
+                    "required": ["sql_query"]
+                }
+            }
+        ]
+    }
+]
+
+# ==========================================
+# 3. Main Logic
+# ==========================================
+
+async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> Optional[str]:
+    """
+    ユーザーの入力を解析し、適切なツールを実行するか、会話応答を返す。
+    Returns:
+        str: LINEに返信するメッセージテキスト (Noneの場合は返信なし)
+    """
+    if not MODEL_NAME or not config.GEMINI_API_KEY:
+        return None
+
+    try:
+        # --- 1. Generate Content (Call Gemini) ---
+        model = genai.GenerativeModel(MODEL_NAME, tools=tools_schema)
+        
+        # System Prompt Construction
+        system_prompt = f"""
+        あなたは「セバスチャン」という名前の、有能で忠実な執事です。
+        ユーザー（{user_name}様）の生活をサポートするために、会話を通じて記録を行ったり、情報を検索したりします。
+        
+        【現在情報】
+        - 現在時刻: {get_now_iso()}
+        - ユーザー名: {user_name}
+        
+        【振る舞いの指針】
+        - 丁寧で落ち着いた口調（です・ます調）で話してください。
+        - ユーザーが記録を求めた場合は、適切なツールを呼び出してください。
+        - ユーザーが質問をした場合は、search_dbツールを使って過去のデータを検索してください。
+        - ツールを呼び出した後は、その結果に基づいて「承知いたしました。〜を記録しました。」のように完了報告をしてください。
+        - 雑談の場合は、気の利いた返答を短めに返してください。
+        """
+
+        # API Call (Non-streaming for simpler function handling)
+        chat = model.start_chat(enable_automatic_function_calling=True)
+        
+        # User Message
+        response = await asyncio.to_thread(
+            chat.send_message,
+            f"{system_prompt}\n\nユーザーメッセージ: {text}"
+        )
+
+        # Gemini SDKの automatic_function_calling は内部でツール実行まで行ってくれるが、
+        # Python関数との紐付け（マッピング）が必要。
+        # ここでは手動制御(Manual Control)の方が既存のService層と非同期連携しやすいため、
+        # function_call の有無をチェックして自前で実行するパターンを採用する。
+        # ※ ただし上記 start_chat(enable_automatic_function_calling=True) だとSDKが勝手に実行しようとしてエラーになる可能性があるため、
+        #    Falseにして自前でパースする。
+        
+        # Re-initialize without auto execution for manual handling
+        chat_manual = model.start_chat(enable_automatic_function_calling=False)
+        response = await asyncio.to_thread(
+            chat_manual.send_message,
+            f"{system_prompt}\n\nユーザーメッセージ: {text}"
+        )
+        
+        part = response.parts[0]
+        
+        # --- 2. Handle Function Call ---
+        if part.function_call:
+            fc = part.function_call
+            fname = fc.name
+            fargs = dict(fc.args)
+            
+            logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
+            
+            tool_result = ""
+            if fname == "record_child_health":
+                tool_result = await tool_record_child_health(user_id, user_name, fargs)
+            elif fname == "record_food":
+                tool_result = await tool_record_food(user_id, user_name, fargs)
+            elif fname == "search_db":
+                tool_result = await tool_search_db(fargs)
+            else:
+                tool_result = "エラー: 未知のツールが呼び出されました。"
+
+            # ツールの実行結果をAIに返して、最終的な回答を生成させる
+            # (FunctionResponse を送る)
+            from google.ai.generativelanguage_v1beta.types import content
+            
+            function_response = content.Part(
+                function_response=content.FunctionResponse(
+                    name=fname,
+                    response={"result": tool_result}
+                )
+            )
+            
+            # Send result back to model
+            final_res = await asyncio.to_thread(
+                chat_manual.send_message,
+                [function_response]
+            )
+            return final_res.text
+
+        # --- 3. No Function Call (Normal Chat) ---
+        return response.text
+
+    except Exception as e:
+        logger.error(f"AI Analysis Error: {e}")
+        logger.debug(traceback.format_exc())
+        return "申し訳ございません。処理中にエラーが発生しました。"
