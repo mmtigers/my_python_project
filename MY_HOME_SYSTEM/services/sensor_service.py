@@ -112,16 +112,26 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
     # 1. 保存前の最新値を取得（前回値）
     prev_wattage = 0.0
     try:
-        # 直近の1件を取得
-        rows = await asyncio.to_thread(
-            common.execute_read_query,
-            f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
-            (device_id,)
-        )
-        if rows:
-            prev_wattage = float(rows[0]['wattage'])
+        def _fetch_prev_wattage():
+            # common.execute_read_query ではなく get_db_cursor を直接使用する
+            with common.get_db_cursor() as cur:
+                row = cur.execute(
+                    f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
+                    (device_id,)
+                ).fetchone()
+                # RowFactoryが有効なら辞書ライク、そうでなければタプル(index 0)
+                if row:
+                    try:
+                        return float(row['wattage'])
+                    except (TypeError, IndexError, KeyError):
+                        return float(row[0])
+                return 0.0
+
+        prev_wattage = await asyncio.to_thread(_fetch_prev_wattage)
+        
     except Exception as e:
-        logger.warning(f"Failed to fetch prev power for {device_name}: {e}")
+        # ログレベルを warning から debug に下げておく（初回起動時などはデータがないため）
+        logger.debug(f"Prev power fetch skipped for {device_name}: {e}")
 
     # 2. データを保存
     await save_log_async(
@@ -141,8 +151,6 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
     # OFF -> ON
     if prev_wattage < threshold and wattage >= threshold:
         msg = f"💡【使用開始】\n{device_name} がONになりました ({wattage}W)"
-        # 連続通知防止などは必要であればここにGlobal Stateを追加するが、
-        # DB比較方式なら「閾値をまたいだ瞬間」しか検知しないため基本不要。
         
     # ON -> OFF
     elif prev_wattage >= threshold and wattage < threshold:
