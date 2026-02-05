@@ -14,7 +14,7 @@ import common
 import init_unified_db
 # 修正: 分割されたサービスをインポート
 import game_logic  # ★追加: GameLogicをインポート
-from routers.quest_router import QuestService, UserService, ShopService
+from services.quest_service import QuestService, UserService, ShopService
 
 class TestQuestService(unittest.TestCase):
     
