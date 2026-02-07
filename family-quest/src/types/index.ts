@@ -72,6 +72,7 @@ export interface Reward {
     cost_gold?: number;
     icon?: string;
     icon_key?: string;
+    target?: string;
 }
 
 // 装備アイテム

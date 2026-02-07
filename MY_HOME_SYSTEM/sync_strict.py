@@ -15,7 +15,6 @@ def sync_quests(cur):
     # 2. マスターに存在しない古いデータをDBから削除 (Clean Up)
     if master_ids:
         placeholders = ','.join(['?'] * len(master_ids))
-        # テーブル名: quest_master, 主キー: quest_id
         sql_delete = f"DELETE FROM quest_master WHERE quest_id NOT IN ({placeholders})"
         cur.execute(sql_delete, master_ids)
         logger.info(f"Deleted obsolete quests: {cur.rowcount} rows")
@@ -25,33 +24,39 @@ def sync_quests(cur):
 
     # 3. マスターデータをUpsert
     for q in QUESTS:
-        # キー名のゆれを吸収 (exp/exp_gain, gold/gold_gain, icon/icon_key)
         exp_val = q.get('exp_gain', q.get('exp', 0))
         gold_val = q.get('gold_gain', q.get('gold', 0))
         icon_val = q.get('icon_key', q.get('icon', '📝'))
         
-        # init_unified_db.py の定義に合わせてカラムを指定
+        # ★修正: days, type, target, desc などの主要カラムも同期するように拡張
+        # (init_unified_db.py の定義と一致させる)
+        
         cur.execute("""
             INSERT INTO quest_master (
                 quest_id, title, quest_type, target_user, 
-                exp_gain, gold_gain, icon_key
+                exp_gain, gold_gain, icon_key, 
+                days, description
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(quest_id) DO UPDATE SET
                 title = excluded.title,
                 quest_type = excluded.quest_type,
                 target_user = excluded.target_user,
                 exp_gain = excluded.exp_gain,
                 gold_gain = excluded.gold_gain,
-                icon_key = excluded.icon_key
+                icon_key = excluded.icon_key,
+                days = excluded.days,
+                description = excluded.description
         """, (
             q['id'],
             q['title'],
-            q['type'],
-            q['target'],
+            q.get('type', 'daily'),     # type
+            q.get('target', 'all'),     # target
             exp_val,
             gold_val,
-            icon_val
+            icon_val,
+            q.get('days'),              # days (0,1,2...)
+            q.get('desc')               # desc -> description
         ))
     logger.info(f"Upserted {len(QUESTS)} quests.")
 
@@ -67,34 +72,45 @@ def sync_rewards(cur):
     
     # Upsert
     for r in REWARDS:
-        # ★ここを修正: cost または cost_gold どちらでも取得できるようにする
         cost_val = r.get('cost_gold', r.get('cost', 0))
         icon_val = r.get('icon_key', r.get('icon', '🎁'))
         
+        # ★修正: target と desc を同期対象に追加
+        target_val = r.get('target', 'all')
+        desc_val = r.get('desc', '')
+
         cur.execute("""
-            INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO reward_master (
+                reward_id, title, category, cost_gold, icon_key, target, desc
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(reward_id) DO UPDATE SET
                 title = excluded.title,
+                category = excluded.category,
                 cost_gold = excluded.cost_gold,
-                icon_key = excluded.icon_key
-        """, (r['id'], r['title'], r['category'], cost_val, icon_val))
+                icon_key = excluded.icon_key,
+                target = excluded.target,
+                desc = excluded.desc
+        """, (
+            r['id'], 
+            r['title'], 
+            r.get('category', 'small'), 
+            cost_val, 
+            icon_val, 
+            target_val, 
+            desc_val
+        ))
     logger.info(f"Upserted {len(REWARDS)} rewards.")
 
 def main():
-    logger.info("Starting Strict Master Data Sync (v2)...")
-    
+    logger.info("Starting Strict Master Data Sync (v2.1)...")
     try:
-        # commonモジュールのDB接続を使用（自動コミット）
         with common.get_db_cursor(commit=True) as cur:
             sync_quests(cur)
             sync_rewards(cur)
-            
         logger.info("✅ Sync completed successfully.")
-        
     except Exception as e:
         logger.error(f"❌ Sync failed: {e}")
-        # 詳細なエラー情報を出すためにtracebackを表示しても良いが、まずはメッセージのみ
         import traceback
         traceback.print_exc()
         sys.exit(1)
