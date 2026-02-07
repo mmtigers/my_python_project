@@ -204,6 +204,9 @@ class QuestService:
     def calculate_quest_boost(self, cur, user_id: str, quest: dict) -> Dict[str, int]:
         if quest['quest_type'] != 'daily':
             return {"gold": 0, "exp": 0}
+        
+        if quest.get('days') and len(quest['days']) > 0:
+            return {"gold": 0, "exp": 0}
 
         last_hist = cur.execute("""
             SELECT completed_at FROM quest_history 
