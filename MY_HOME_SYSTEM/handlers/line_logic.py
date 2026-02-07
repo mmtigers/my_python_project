@@ -192,56 +192,66 @@ def get_daily_health_summary():
 
 # --- Handlers ---
 
-def handle_postback(event, line_bot_api: MessagingApi):
-    """Postback処理"""
+def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
+    """
+    Postbackイベント（ボタン押下等）を処理するハンドラ関数。
+    
+    Args:
+        event (PostbackEvent): LINEプラットフォームからのPostbackイベントオブジェクト
+        line_bot_api (MessagingApi): LINE Messaging APIクライアントインスタンス
+    """
     try:
-        # (既存の初期化処理...)
+        # ユーザー情報の取得
         user_id = event.source.user_id
         reply_token = event.reply_token
         user_name = get_user_name(event, line_bot_api)
         
+        # Postbackデータのパース
+        # data形式例: "action=child_check&child=Taro&status=genki"
         raw_dict = dict(parse_qsl(event.postback.data))
         
+        # モデルへのマッピング（バリデーション用だが、未知のフィールド許容のためtry-except）
         try:
             pb = LinePostbackData(**raw_dict)
-        except Exception as e:
-            # Pydanticモデルにないフィールドがある場合のエラーハンドリング
-            # 新規追加の category や item は LinePostbackData に定義されていない可能性があるため
-            # raw_dict を直接使うフォールバックを行う
+        except Exception:
+            # Pydanticモデルに定義されていないフィールドがある場合のフォールバック
             pb = LinePostbackData(action=raw_dict.get("action", "unknown"))
-            # logger.warning(...) # 必要に応じてログ
 
-        action = raw_dict.get("action") # pb.action だと定義不足で落ちる可能性を考慮し raw_dict優先
+        # アクションの取得（空白除去で堅牢化）
+        action = raw_dict.get("action", "").strip()
         target_name = pb.child
-        # quota_text = get_quota_text(line_bot_api) # 必要なら復活
 
-        # === 1. 全員元気 (一括) ===
+        # === 1. 全員元気 (一括記録) ===
         if action == "all_genki":
             timestamp = get_now_iso()
+            
+            # 全対象メンバーのログを保存
             for name in TARGET_MEMBERS:
-                sync_run(save_log_async(config.SQLITE_TABLE_CHILD,
+                sync_run(save_log_async(
+                    config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                    (user_id, user_name, name, "😊 元気いっぱい", timestamp)))
+                    (user_id, user_name, name, "😊 元気いっぱい", timestamp)
+                ))
             
-            # 完了メッセージと確認ボタン
+            # 完了メッセージの生成
             reply_text = "✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨"
-            # v3ではTemplateMessageよりもFlexMessageやAction付きTextが推奨されますが、
-            # 既存のロジックに近い形でボタンを提示する場合、ここではAction付きのFlexまたはQuickReply等で対応。
-            # シンプルにテキスト+QuickReplyで確認ボタンを出す形にします。
-            qr = create_quick_reply([("📊 記録を確認", "action=check_status_trigger")]) # トリガーワードを発火させるか、再度Postbackさせるか
-            # ここではPostbackActionを含むQuickReplyは作れない(QuickReplyはMessage/Camera/Location等)ため、
-            # Flex Messageでボタンを表示します。
             
+            # 確認用ボタン付きメッセージ（Flex Message）
             button_flex = {
                 "type": "bubble",
                 "body": {
-                    "type": "box", "layout": "vertical",
+                    "type": "box", 
+                    "layout": "vertical",
                     "contents": [{"type": "text", "text": reply_text, "wrap": True}]
                 },
                 "footer": {
-                    "type": "box", "layout": "vertical",
+                    "type": "box", 
+                    "layout": "vertical",
                     "contents": [
-                        {"type": "button", "action": {"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}}
+                        {
+                            "type": "button", 
+                            "action": {"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}
+                        }
                     ]
                 }
             }
@@ -283,13 +293,15 @@ def handle_postback(event, line_bot_api: MessagingApi):
                 send_reply_text(line_bot_api, reply_token, f"了解です。{target_name}の様子をメッセージで送ってください📝")
             
             elif target_name:
-                sync_run(save_log_async(config.SQLITE_TABLE_CHILD,
+                sync_run(save_log_async(
+                    config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                    (user_id, user_name, target_name, condition_text, get_now_iso())))
+                    (user_id, user_name, target_name, condition_text, get_now_iso())
+                ))
                             
                 reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
                 
-                # サマリボタン付きFlex
+                # サマリ確認ボタン
                 button_flex = {
                     "type": "bubble",
                     "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": reply_text}]},
@@ -342,36 +354,26 @@ def handle_postback(event, line_bot_api: MessagingApi):
                 )
             )
 
-        # === 5. 食事アンケート回答 (Refactored Logic) ===
-        if action == "food_record_direct":
-            # 【新規】ワンタップ記録
+        # === 5. 食事アンケート回答 ===
+        elif action == "food_record_direct":
             category = raw_dict.get("category", "その他")
-            item = raw_dict.get("item", "").strip()
+            item = raw_dict.get("item", "").strip() or "不明なメニュー"
             
-            # バリデーション: itemが空なら不明として処理
-            if not item:
-                item = "不明なメニュー"
-
-            # 記録フォーマット生成 "カテゴリ: メニュー"
             final_rec = f"{category}: {item}"
             
-            # DB保存 (sync_runラッパーを使用)
-            sync_run(save_log_async(config.SQLITE_TABLE_FOOD,
+            sync_run(save_log_async(
+                config.SQLITE_TABLE_FOOD,
                 ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-                (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())))
+                (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())
+            ))
             
-            # 完了メッセージ
             reply_text = f"🍽️ 記録しました！\n【{category}】{item}\n\n今日も一日お疲れ様でした🍵"
             send_reply_text(line_bot_api, reply_token, reply_text)
 
         elif action == "food_manual":
-            # 【更新】手入力モードへ移行
             category = raw_dict.get("category", "その他")
-            
-            # 状態管理更新
             USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category=category)
             
-            # カテゴリに応じた親切なメッセージ
             if "外食" in category:
                 prompt_text = "お店の名前（または食べたもの）を入力してください 🍜"
             elif "自炊" in category:
@@ -381,13 +383,19 @@ def handle_postback(event, line_bot_api: MessagingApi):
                 
             send_reply_text(line_bot_api, reply_token, f"了解です！\n{prompt_text}")
 
+        # === Fail-Safe: 未定義のアクション ===
         else:
-            logger.info(f"Unknown action: {action}")
+            logger.warning(f"Unknown action received: '{action}' from user: {user_id}")
+            # ユーザーへのフィードバック
+            line_bot_api.reply_message(
+                ReplyMessageRequest(
+                    replyToken=reply_token,
+                    messages=[TextMessage(text="⚠️ 不明な操作、または未対応のアクションです。")]
+                )
+            )
 
     except Exception as e:
-        logger.error(f"Handle Postback Error: {e}")
-        # エラー通知（オプション）
-        # send_push(...) 
+        logger.error(f"Handle Postback Error: {e}", exc_info=True)
 
 def handle_message(event, line_bot_api: MessagingApi):
     """メッセージ処理"""
