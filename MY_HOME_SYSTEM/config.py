@@ -252,7 +252,8 @@ REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
 NAS_CHECK_TIMEOUT: int = 5
 
-QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", "/home/masahiro/develop/family-quest/dist")
+_default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "dist")
+QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
 CORS_ORIGINS: List[str] = [
