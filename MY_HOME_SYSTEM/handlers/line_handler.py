@@ -2,9 +2,11 @@
 import asyncio
 import os
 import sys
+import json
 from typing import Optional, List
 
 from fastapi import Request, HTTPException
+import handlers.line_logic as line_logic
 
 # LINE Bot SDK v3
 from linebot.v3 import WebhookHandler
@@ -132,13 +134,27 @@ if line_handler:
         
         logger.info(f"📩 Postback [{user_id}]: {data_str}")
 
+        # 1. Family Quest (承認/却下) の処理
         if data_str.startswith("approve:") or data_str.startswith("reject:"):
             cmd_map = {"approve": "承認", "reject": "却下"}
-            action, hist_id = data_str.split(":")
-            cmd_text = f"{cmd_map[action]} {hist_id}"
-            asyncio.run(_process_message_async(user_id, "Postback", cmd_text, reply_token))
-        else:
-            reply_message(reply_token, TextMessage(text=f"Unknown Action: {data_str}"))
+            try:
+                action, hist_id = data_str.split(":")
+                cmd_text = f"{cmd_map[action]} {hist_id}"
+                # 非同期で処理を実行（承認処理は時間がかかる場合があるため）
+                asyncio.run(_process_message_async(user_id, "Postback", cmd_text, reply_token))
+            except ValueError:
+                logger.error(f"Invalid Postback format: {data_str}")
+            return
+
+        # 2. 既存ロジック (line_logic.py) への委譲
+        # show_health_input, child_check, その他のボタン操作はここで処理
+        try:
+            # line_logic側に処理を丸投げする
+            line_logic.handle_postback(event, line_bot_api)
+        except Exception as e:
+            logger.error(f"Logic Delegation Error: {e}")
+            # 万が一のエラー時はユーザーに通知（任意）
+            # reply_message(reply_token, TextMessage(text="⚠️ 処理中にエラーが発生しました。"))
 
 # 外部からの呼び出し用エントリーポイント
 def handle_request(request: Request, body: str, signature: str):
