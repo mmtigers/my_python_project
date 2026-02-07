@@ -183,12 +183,37 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
+            const getStatusScore = (quest: Quest) => {
+                const qId = quest.id || quest.quest_id;
+                // 無限クエストは常に「未完了（最優先）」扱い
+                const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite' || (quest as any)._isInfinite;
+                if (isInfinite) return 0;
+
+                // 申請中チェック
+                const isPending = pendingQuests.some(pq => pq.user_id === currentUser.user_id && pq.quest_id === qId);
+                if (isPending) return 1; // 申請中は2番目
+
+                // 完了チェック
+                const isDone = completedQuests.some(cq => cq.user_id === currentUser.user_id && cq.quest_id === qId && cq.status === 'approved');
+                if (isDone) return 2; // 完了済みは一番下
+
+                return 0; // 未完了は最優先
+            };
+
+            const scoreA = getStatusScore(a);
+            const scoreB = getStatusScore(b);
+
+            if (scoreA !== scoreB) {
+                return scoreA - scoreB; // 0(未完了) -> 1(申請中) -> 2(完了) の順
+            }
+            // ------------------------------------------
+
             const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
             const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
             if (bonusA !== bonusB) return bonusB - bonusA;
             return (b.id as number) - (a.id as number);
         });
-    }, [quests, currentUser, currentDay]);
+    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
 
     return (
         <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
