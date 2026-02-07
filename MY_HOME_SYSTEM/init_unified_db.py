@@ -411,7 +411,9 @@ def init_db() -> None:
                 title TEXT NOT NULL,
                 cost_gold INTEGER,
                 category TEXT,
-                icon_key TEXT
+                icon_key TEXT,
+                desc TEXT,
+                target TEXT DEFAULT 'all'
             )
         ''')
 
