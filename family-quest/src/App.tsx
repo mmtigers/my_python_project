@@ -100,13 +100,57 @@ function App() {
   };
 
   const handleQuestClick = (q: Quest | QuestHistory, isHistory: boolean) => {
+    // 1. 履歴タブなど、明示的に履歴として渡された場合
     if (isHistory) {
       setConfirmTarget(q);
       setConfirmMode('cancel');
+      play('select');
+      return;
+    }
+
+    // 2. クエストリストから渡された場合 (q は Quest 型)
+    // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
+    const isInfinite = (q as any)._isInfinite || (q as any).type === 'infinite' || (q as any).quest_type === 'infinite';
+
+    if (isInfinite) {
+      setConfirmTarget(q);
+      setConfirmMode('complete');
+      play('select');
+      return;
+    }
+
+    // 3. 完了済み、または申請中リストにあるかを探す
+    const qId = q.id || (q as any).quest_id;
+
+    // 申請中を探す
+    const pendingEntry = pendingQuests.find(pq =>
+      pq.user_id === currentUser.user_id &&
+      pq.quest_id === qId
+    );
+
+    // 完了済みを探す
+    const completedEntry = completedQuests.find(cq =>
+      cq.user_id === currentUser.user_id &&
+      cq.quest_id === qId &&
+      cq.status === 'approved'
+    );
+
+    const historyEntry = pendingEntry || completedEntry;
+
+    if (historyEntry) {
+      // 既に履歴がある（完了or申請中）なら「キャンセル（取り下げ）」モードにする
+      // targetには Quest オブジェクトではなく、見つかった History オブジェクトを渡す
+      // (ConfirmModalで target.quest_title を参照するため)
+      // ※Historyオブジェクトに quest_title が結合されている前提ですが、
+      //  もし不足している場合は q.title を補完する必要があります。
+      setConfirmTarget({ ...historyEntry, quest_title: (q as any).title || (historyEntry as any).quest_title });
+      setConfirmMode('cancel');
     } else {
+      // 未実施なら「完了」モード
       setConfirmTarget(q);
       setConfirmMode('complete');
     }
+
     play('select');
   };
 
