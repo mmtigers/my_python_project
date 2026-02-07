@@ -1,13 +1,23 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
+import time
 import json
 import traceback
-import random
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
+from google.ai.generativelanguage_v1beta.types import content
+
+# Retry logic
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential_jitter,
+    retry_if_exception_type,
+    BeforeSleep
+)
 
 import config
 import common
@@ -24,10 +34,55 @@ logger = setup_logging("ai_service")
 if config.GEMINI_API_KEY:
     genai.configure(api_key=config.GEMINI_API_KEY)
     # Gemini 1.5 Flash / 2.0 Flash を推奨
-    MODEL_NAME = 'gemini-2.0-flash' 
+    MODEL_NAME = 'gemini-2.0-flash'
 else:
     logger.warning("⚠️ GEMINI_API_KEYが設定されていません。AI機能は無効です。")
     MODEL_NAME = None
+
+# 定数設定
+MAX_RETRIES = 3
+REQUESTS_PER_MINUTE_LIMIT = 10  # 必要に応じて調整
+FALLBACK_MESSAGE = "申し訳ございません。現在AIサービスが混雑しており応答できません。少し時間を置いて再度お試しください。"
+
+
+# ==========================================
+# 0. Rate Limiter (簡易実装)
+# ==========================================
+
+class SimpleRateLimiter:
+    """
+    簡易的なトークンバケット風レートリミッター。
+    指定された期間（1分）内のリクエスト数を制限する。
+    """
+    def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):
+        self.limit = limit
+        self.count = 0
+        self.last_reset_time = time.time()
+        self._lock = asyncio.Lock()
+
+    async def allow_request(self) -> bool:
+        """
+        リクエストが許可されるかどうかを判定し、カウンタを更新する。
+
+        Returns:
+            bool: リクエスト許可ならTrue, 制限超過ならFalse
+        """
+        async with self._lock:
+            now = time.time()
+            # 1分経過していればリセット
+            if now - self.last_reset_time > 60:
+                self.count = 0
+                self.last_reset_time = now
+            
+            if self.count >= self.limit:
+                return False
+            
+            self.count += 1
+            return True
+
+# グローバルインスタンス
+rate_limiter = SimpleRateLimiter()
+
 
 # ==========================================
 # 1. Tool Functions (実装)
@@ -35,27 +90,37 @@ else:
 
 async def tool_record_child_health(user_id: str, user_name: str, args: Dict[str, Any]) -> str:
     """
-    [Tool] 子供の体調を記録する
+    [Tool] 子供の体調を記録する。
+
     Args:
-        child_name (str): 子供の名前 (呼び捨て可)
-        condition (str): 症状や様子 (例: 37.5度の熱, 元気, 咳が出ている)
+        user_id (str): LINEユーザーID
+        user_name (str): ユーザー名
+        args (Dict[str, Any]): ツール引数 (child_name, condition)
+
+    Returns:
+        str: 実行結果メッセージ
     """
     child_name = args.get("child_name")
     condition = args.get("condition")
     
     # 名前の正規化 (config.FAMILY_SETTINGS["members"] とのマッチング)
-    # 簡易的に "長男" -> "マサヒロJr" のような変換が必要ならここで行うか、AIに任せる
     # ここではAIが正しい名前(configにある名前)を抽出してくると期待する
     
     msg_obj = await line_service.log_child_health(user_id, user_name, child_name, condition)
     return f"記録完了: {msg_obj.text}"
 
+
 async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -> str:
     """
-    [Tool] 食事を記録する
+    [Tool] 食事を記録する。
+
     Args:
-        item (str): 食べたもの
-        category (str): カテゴリ (朝食/昼食/夕食/間食/自炊/外食 など)
+        user_id (str): LINEユーザーID
+        user_name (str): ユーザー名
+        args (Dict[str, Any]): ツール引数 (item, category)
+
+    Returns:
+        str: 実行結果メッセージ
     """
     item = args.get("item")
     category = args.get("category", "その他")
@@ -63,15 +128,20 @@ async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -
     msg_obj = await line_service.log_food_record(user_id, user_name, category, item, is_manual=True)
     return f"記録完了: {msg_obj.text}"
 
+
 async def tool_search_db(args: Dict[str, Any]) -> str:
     """
-    [Tool] データベースから情報を検索する (読み取り専用)
+    [Tool] データベースから情報を検索する (読み取り専用)。
+
     Args:
-        query_intent (str): 検索したい内容の要約 (SQL生成はAIに任せず、定型クエリを使う方針に変更も可だが、ここでは簡易RAG的にSQL実行を許可する)
-        sql_query (str): 実行したいSQLiteのSELECT文 (AIが生成)
+        args (Dict[str, Any]): ツール引数 (sql_query)
+
+    Returns:
+        str: 検索結果またはエラーメッセージ
     """
     sql = args.get("sql_query")
-    if not sql: return "SQLクエリが指定されていません"
+    if not sql:
+        return "SQLクエリが指定されていません"
     
     # 安全対策: SELECT以外は禁止
     if not sql.strip().upper().startswith("SELECT"):
@@ -87,6 +157,7 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
     except Exception as e:
         return f"DB検索エラー: {e}"
 
+
 # ==========================================
 # 2. Tool Definitions (Schema)
 # ==========================================
@@ -100,7 +171,7 @@ tools_schema = [
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "child_name": {"type": "STRING", "description": f"子供の名前。候補: {config.FAMILY_SETTINGS['members']}"},
+                        "child_name": {"type": "STRING", "description": f"子供の名前。候補: {config.FAMILY_SETTINGS.get('members', [])}"},
                         "condition": {"type": "STRING", "description": "体調の状態、体温、具体的な症状など"}
                     },
                     "required": ["child_name", "condition"]
@@ -143,22 +214,66 @@ tools_schema = [
     }
 ]
 
+
 # ==========================================
-# 3. Main Logic
+# 3. Helper Logic (Retry Wrapper)
+# ==========================================
+
+def _log_retry_attempt(retry_state):
+    """リトライ時のログ出力用コールバック"""
+    exception = retry_state.outcome.exception()
+    logger.warning(
+        f"⚠️ Gemini API Temporary Failure: {exception}. "
+        f"Retrying in {retry_state.next_action.sleep}s... "
+        f"(Attempt {retry_state.attempt_number}/{MAX_RETRIES})"
+    )
+
+@retry(
+    retry=retry_if_exception_type(ResourceExhausted),
+    wait=wait_exponential_jitter(initial=2, max=10),
+    stop=stop_after_attempt(MAX_RETRIES),
+    before_sleep=_log_retry_attempt,
+    reraise=True  # 最終的な失敗は呼び出し元でハンドリングするためraiseする
+)
+async def _call_gemini_api_with_retry(chat_session, prompt: str):
+    """
+    Gemini APIを呼び出す内部関数。Tenacityによるリトライロジックを含む。
+    
+    Args:
+        chat_session: Gemini ChatSessionオブジェクト
+        prompt (str): 送信するプロンプト
+
+    Returns:
+        GenerateContentResponse: APIレスポンス
+    """
+    # 同期メソッドの場合は asyncio.to_thread でラップして実行
+    return await asyncio.to_thread(chat_session.send_message, prompt)
+
+
+# ==========================================
+# 4. Main Logic
 # ==========================================
 
 async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> Optional[str]:
     """
     ユーザーの入力を解析し、適切なツールを実行するか、会話応答を返す。
+    レートリミットおよびリトライロジックを含む。
+
+    Args:
+        user_id (str): LINEユーザーID
+        user_name (str): ユーザー名
+        text (str): ユーザーからの入力テキスト
+
     Returns:
-        str: LINEに返信するメッセージテキスト (Noneの場合は返信なし)
+        Optional[str]: LINEに返信するメッセージテキスト (Noneの場合は返信なし)
     """
     if not MODEL_NAME or not config.GEMINI_API_KEY:
         return None
 
-    # リトライ設定
-    MAX_RETRIES = 3
-    base_delay = 2  # 秒
+    # 1. 簡易レートリミットチェック
+    if not await rate_limiter.allow_request():
+        logger.warning(f"⚠️ Rate limit exceeded for AI service (User: {user_name})")
+        return FALLBACK_MESSAGE
 
     try:
         model = genai.GenerativeModel(MODEL_NAME, tools=tools_schema)
@@ -179,36 +294,23 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         - 雑談の場合は、気の利いた返答を短めに返してください。
         """
 
-        # Gemini呼び出し (Retry Logic)
-        response = None
-        # Auto Function Callingは無効化し、手動で制御する（二重呼び出し防止）
+        # Geminiセッション開始 (Auto Function Calling無効化)
         chat_manual = model.start_chat(enable_automatic_function_calling=False)
+        full_prompt = f"{system_prompt}\n\nユーザーメッセージ: {text}"
 
-        for attempt in range(MAX_RETRIES):
-            try:
-                # ★修正点: API呼び出しはこの1箇所のみにする
-                response = await asyncio.to_thread(
-                    chat_manual.send_message,
-                    f"{system_prompt}\n\nユーザーメッセージ: {text}"
-                )
-                break # 成功したらループを抜ける
+        # 2. API呼び出し (Retry Logic適用)
+        try:
+            response = await _call_gemini_api_with_retry(chat_manual, full_prompt)
+        except ResourceExhausted:
+            logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
+            return FALLBACK_MESSAGE
+        except GoogleAPIError as e:
+            logger.error(f"❌ Gemini API Fatal Error: {e}")
+            return "申し訳ございません。AIサービスで予期せぬエラーが発生しました。"
 
-            except ResourceExhausted as e:
-                # 429 Too Many Requests
-                if attempt < MAX_RETRIES - 1:
-                    sleep_time = base_delay * (2 ** attempt) + random.uniform(0, 1)
-                    logger.warning(f"⚠️ Gemini Quota Exceeded. Retrying in {sleep_time:.1f}s... ({attempt+1}/{MAX_RETRIES})")
-                    await asyncio.sleep(sleep_time)
-                else:
-                    logger.error("❌ Gemini Quota Exhausted after retries.")
-                    return "申し訳ございません。現在AIへのアクセスが集中しており、処理できませんでした。（429 Error）"
-            except Exception as e:
-                # その他のエラーは即座にログを出して終了
-                logger.error(f"Gemini API Error (Attempt {attempt+1}): {e}")
-                raise e
-
-        if not response:
-            return "エラー: AIからの応答がありませんでした。"
+        if not response or not response.parts:
+            logger.error("❌ Empty response from Gemini")
+            return "エラー: AIからの応答が空でした。"
 
         part = response.parts[0]
         
@@ -231,8 +333,6 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 tool_result = "エラー: 未知のツールが呼び出されました。"
 
             # 結果をAIに返して最終回答を生成
-            from google.ai.generativelanguage_v1beta.types import content
-            
             function_response = content.Part(
                 function_response=content.FunctionResponse(
                     name=fname,
@@ -240,18 +340,19 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 )
             )
             
-            # ツール結果の送信もリトライ対象にするべきだが、
-            # 複雑化を避けるため今回は簡易実装とする（必要ならここもループ化推奨）
-            final_res = await asyncio.to_thread(
-                chat_manual.send_message,
-                [function_response]
-            )
-            return final_res.text
+            # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
+            try:
+                final_res = await _call_gemini_api_with_retry(chat_manual, [function_response])
+                return final_res.text
+            except ResourceExhausted:
+                # ツール実行は成功しているが、最終回答生成でコケた場合
+                logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
+                return f"{tool_result}\n(AIの応答生成が制限を超過したため、実行結果のみ表示します)"
 
         # --- Normal Chat ---
         return response.text
 
     except Exception as e:
-        logger.error(f"AI Analysis Error: {e}")
+        logger.error(f"AI Analysis Unexpected Error: {e}")
         logger.debug(traceback.format_exc())
         return "申し訳ございません。処理中にエラーが発生しました。"
