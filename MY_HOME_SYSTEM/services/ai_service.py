@@ -2,11 +2,12 @@
 import asyncio
 import json
 import traceback
+import random
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 import google.generativeai as genai
-from google.api_core.exceptions import GoogleAPIError
+from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
 
 import config
 import common
@@ -155,11 +156,13 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
     if not MODEL_NAME or not config.GEMINI_API_KEY:
         return None
 
+    # リトライ設定
+    MAX_RETRIES = 3
+    base_delay = 2  # 秒
+
     try:
-        # --- 1. Generate Content (Call Gemini) ---
         model = genai.GenerativeModel(MODEL_NAME, tools=tools_schema)
         
-        # System Prompt Construction
         system_prompt = f"""
         あなたは「セバスチャン」という名前の、有能で忠実な執事です。
         ユーザー（{user_name}様）の生活をサポートするために、会話を通じて記録を行ったり、情報を検索したりします。
@@ -176,32 +179,40 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         - 雑談の場合は、気の利いた返答を短めに返してください。
         """
 
-        # API Call (Non-streaming for simpler function handling)
-        chat = model.start_chat(enable_automatic_function_calling=True)
-        
-        # User Message
-        response = await asyncio.to_thread(
-            chat.send_message,
-            f"{system_prompt}\n\nユーザーメッセージ: {text}"
-        )
-
-        # Gemini SDKの automatic_function_calling は内部でツール実行まで行ってくれるが、
-        # Python関数との紐付け（マッピング）が必要。
-        # ここでは手動制御(Manual Control)の方が既存のService層と非同期連携しやすいため、
-        # function_call の有無をチェックして自前で実行するパターンを採用する。
-        # ※ ただし上記 start_chat(enable_automatic_function_calling=True) だとSDKが勝手に実行しようとしてエラーになる可能性があるため、
-        #    Falseにして自前でパースする。
-        
-        # Re-initialize without auto execution for manual handling
+        # Gemini呼び出し (Retry Logic)
+        response = None
+        # Auto Function Callingは無効化し、手動で制御する（二重呼び出し防止）
         chat_manual = model.start_chat(enable_automatic_function_calling=False)
-        response = await asyncio.to_thread(
-            chat_manual.send_message,
-            f"{system_prompt}\n\nユーザーメッセージ: {text}"
-        )
-        
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                # ★修正点: API呼び出しはこの1箇所のみにする
+                response = await asyncio.to_thread(
+                    chat_manual.send_message,
+                    f"{system_prompt}\n\nユーザーメッセージ: {text}"
+                )
+                break # 成功したらループを抜ける
+
+            except ResourceExhausted as e:
+                # 429 Too Many Requests
+                if attempt < MAX_RETRIES - 1:
+                    sleep_time = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(f"⚠️ Gemini Quota Exceeded. Retrying in {sleep_time:.1f}s... ({attempt+1}/{MAX_RETRIES})")
+                    await asyncio.sleep(sleep_time)
+                else:
+                    logger.error("❌ Gemini Quota Exhausted after retries.")
+                    return "申し訳ございません。現在AIへのアクセスが集中しており、処理できませんでした。（429 Error）"
+            except Exception as e:
+                # その他のエラーは即座にログを出して終了
+                logger.error(f"Gemini API Error (Attempt {attempt+1}): {e}")
+                raise e
+
+        if not response:
+            return "エラー: AIからの応答がありませんでした。"
+
         part = response.parts[0]
         
-        # --- 2. Handle Function Call ---
+        # --- Handle Function Call ---
         if part.function_call:
             fc = part.function_call
             fname = fc.name
@@ -219,8 +230,7 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
             else:
                 tool_result = "エラー: 未知のツールが呼び出されました。"
 
-            # ツールの実行結果をAIに返して、最終的な回答を生成させる
-            # (FunctionResponse を送る)
+            # 結果をAIに返して最終回答を生成
             from google.ai.generativelanguage_v1beta.types import content
             
             function_response = content.Part(
@@ -230,14 +240,15 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 )
             )
             
-            # Send result back to model
+            # ツール結果の送信もリトライ対象にするべきだが、
+            # 複雑化を避けるため今回は簡易実装とする（必要ならここもループ化推奨）
             final_res = await asyncio.to_thread(
                 chat_manual.send_message,
                 [function_response]
             )
             return final_res.text
 
-        # --- 3. No Function Call (Normal Chat) ---
+        # --- Normal Chat ---
         return response.text
 
     except Exception as e:

@@ -210,6 +210,13 @@ def force_close_session(service_obj: Any) -> None:
         logger.debug(f"Session close warning: {e}")
 
 def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
+    """
+    単一のカメラに対してONVIF接続を行い、イベントストリームを監視するプロセス。
+    接続断時のリトライロジックおよびイベントパースの安全性を含む。
+
+    Args:
+        cam_conf (Dict[str, Any]): カメラ設定辞書 (ip, port, user, pass, name等を含む)
+    """
     cam_name: str = cam_conf['name']
     consecutive_errors: int = 0
     port_candidates: List[int] = [2020, 80]
@@ -224,9 +231,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
     while True:
-        mycam = None
-        current_pullpoint = None
-        events_service = None # 初期化漏れ防止
+        mycam: Optional[ONVIFCamera] = None
+        current_pullpoint: Optional[ONVIFService] = None
+        events_service: Optional[ONVIFService] = None
         
         try:
             wsdl_path = find_wsdl_path()
@@ -235,20 +242,17 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             target_port = port_candidates[0]
             
             # 1. カメラ接続 (ONVIFCamera)
-            # ★Fix: encrypt=True (デフォルト) を使用してWSSEヘッダーを有効化
-            # collect_onvif_logs.py と同じ設定にする
             mycam = ONVIFCamera(
                 cam_conf['ip'], 
                 target_port, 
                 cam_conf['user'], 
                 cam_conf['pass'],
                 wsdl_dir=wsdl_path,
-                encrypt=True # 明示的にTrue (WSSE有効)
+                encrypt=True
             )
 
             # 2. devicemgmtサービス作成 & 認証設定
             devicemgmt = mycam.create_devicemgmt_service()
-            # ★Fix: Digest認証も追加 (WSSE + Digest の最強構成)
             devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
             check_camera_time(devicemgmt, cam_name)
@@ -258,6 +262,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
             else:
                 logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
+
             # 3. イベント購読
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
@@ -274,11 +279,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 user=cam_conf['user'],
                 passwd=cam_conf['pass'],
                 url=events_wsdl,
-                encrypt=True, # ★Fix: PullPointもWSSE有効化
+                encrypt=True,
                 binding_name=BINDING_NAME
             )
             
-            # ★Fix: PullPointにDigest認証追加
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
 
             active_pullpoints.append(pullpoint)
@@ -286,7 +290,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             if is_first_connect:
                 logger.info(f"✅ [{cam_name}] Subscribed successfully.")
-                is_first_connect = False # フラグを折る
+                is_first_connect = False
             else:
                 logger.debug(f"✅ [{cam_name}] Subscribed successfully (Refresh).")
             
@@ -295,6 +299,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
             # 4. 監視ループ
             while True:
+                # セッション更新チェック
                 if time.time() - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Refreshing session...")
                     try:
@@ -303,6 +308,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     except Exception: pass
                     break
 
+                # イベント取得
                 try:
                     events = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
                 except Exception:
@@ -312,55 +318,76 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                 if events and hasattr(events, 'NotificationMessage'):
                     for msg in events.NotificationMessage:
-                        if not msg.Topic: continue
-                        topic_str = str(msg.Topic)
-
-                        # ▼▼▼【追加】データ収集用デバッグログ ▼▼▼
-                        # カメラから送られてくる全てのイベントトピックとデータを記録します
+                        # === イベント処理の安全化（Section 8.5 信頼性設計） ===
                         try:
-                            # 値の取得を試みる（構造解析用）
-                            debug_val = "N/A"
-                            if hasattr(msg.Data, 'SimpleItem') and msg.Data.SimpleItem:
-                                item = msg.Data.SimpleItem[0]
-                                debug_val = f"{item.Name}={item.Value}"
-                            
-                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
-                        except Exception as e:
-                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data Parse Error: {e}")
-                        # ▲▲▲【追加終了】▲▲▲
-                        
-                        if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
-                            try:
-                                is_motion = msg.Data.SimpleItem[0].Value
-                                if is_motion == 'true':
-                                    logger.info(f"🏃 [{cam_name}] Motion Detected!")
-                                    save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
-                                    save_image_from_stream(cam_conf, "motion")
-                            except Exception: pass
+                            # 1. Topicの取得
+                            raw_topic = getattr(msg, 'Topic', None)
+                            if not raw_topic:
+                                continue
+                            topic_str = str(raw_topic)
 
-                        elif 'DigitalInput' in topic_str:
-                            try:
-                                is_active = msg.Data.SimpleItem[0].Value
-                                if is_active == 'true':
-                                    logger.info(f"DETECT: [{cam_name}] Sensor Active")
-                            except Exception: pass
+                            # 2. Data属性の安全な探索 (AttributeError対策)
+                            # メーカーやライブラリVerにより格納場所が異なるため、Data -> Message の順で探索
+                            data_node = getattr(msg, 'Data', None)
+                            if data_node is None:
+                                data_node = getattr(msg, 'Message', None)
+
+                            # 3. SimpleItemの抽出とデバッグ情報の生成
+                            simple_item = None
+                            debug_val = "N/A"
+
+                            if data_node:
+                                # SimpleItemが存在するか確認
+                                raw_items = getattr(data_node, 'SimpleItem', [])
+                                
+                                # zeepの返り値がリストでない場合（単体要素）の正規化
+                                if raw_items is not None and not isinstance(raw_items, list):
+                                    raw_items = [raw_items]
+                                
+                                if raw_items and len(raw_items) > 0:
+                                    simple_item = raw_items[0]
+                                    # Name, Valueへの安全なアクセス
+                                    s_name = getattr(simple_item, 'Name', 'Unknown')
+                                    s_value = getattr(simple_item, 'Value', 'Unknown')
+                                    debug_val = f"{s_name}={s_value}"
+                            else:
+                                # データ構造不明時は属性一覧をデバッグ用に出力
+                                debug_val = f"<No Data/Message> Attrs: {dir(msg)}"
+
+                            # 4. 監査ログ
+                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+
+                            # 5. ビジネスロジック判定
+                            if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
+                                if simple_item:
+                                    val = getattr(simple_item, 'Value', '')
+                                    # 文字列比較で安全に判定
+                                    if str(val).lower() == 'true':
+                                        logger.info(f"🏃 [{cam_name}] Motion Detected!")
+                                        save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
+                                        save_image_from_stream(cam_conf, "motion")
+                            
+                            elif 'DigitalInput' in topic_str:
+                                if simple_item:
+                                    val = getattr(simple_item, 'Value', '')
+                                    if str(val).lower() == 'true':
+                                        logger.info(f"DETECT: [{cam_name}] Sensor Active")
+
+                        except Exception as e:
+                            # パースエラー等をキャッチし、ループを継続させる
+                            logger.warning(f"⚠️ [{cam_name}] Event Parse Warning: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
+                            continue
+                        # === イベント処理終了 ===
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            # 既知の切断エラーは即座にリトライ（警告ログのみ）
             logger.warning(f"⚠️ [{cam_name}] Connection lost (Transient): {e}")
             time.sleep(2)
             continue 
 
         except Exception as e:
-            # カウンタをインクリメント
             consecutive_errors += 1
             err_msg = str(e)
-            logger.error(f"❌ [{cam_name}] Error: {err_msg}")
-
-            # エラー発生後は、復帰したことがわかるように次回接続時にINFOを出すようにする
-            is_first_connect = True
-            
-            # 設計書 9.8 準拠: 3回未満は WARNING、3回以上で ERROR
+            # 3回未満はWARNING、以降はERROR
             if consecutive_errors < 3:
                 logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {err_msg}")
             else:
@@ -371,29 +398,20 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             if current_pullpoint in active_pullpoints: 
                 active_pullpoints.remove(current_pullpoint)
             
-            # 診断はWARNINGレベルでも実施してログに残す（トラブルシューティング用）
             perform_emergency_diagnosis(cam_conf['ip'])
             
-            # 待機時間の計算 (指数バックオフ)
-            wait = min(300, 30 * (2 ** (consecutive_errors - 1))) # 初回は30秒
+            wait = min(300, 30 * (2 ** (consecutive_errors - 1)))
             
-            # 3回失敗したらポートを切り替える (ローテーション)
             if consecutive_errors >= 3:
                 old_port = port_candidates[0]
                 port_candidates.append(port_candidates.pop(0))
                 new_port = port_candidates[0]
                 logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
-                # ポート変更後はカウンタをリセットせず、次の試行で即座に判定させるか、
-                # あるいは「新しいポートでの試行」としてカウント継続するか。
-                # ここでは「継続」させ、ダメならまたERROR通知が出るようにします。
                 
             logger.info(f"[{cam_name}] Retry in {wait}s...")
             time.sleep(wait)
 
         finally:
-            # ▼▼▼ 修正2: 徹底的なリソース解放 ▼▼▼
-            
-            # 1. PullPointのクリーンアップ
             if current_pullpoint:
                 if current_pullpoint in active_pullpoints:
                     active_pullpoints.remove(current_pullpoint)
@@ -401,21 +419,17 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     current_pullpoint.Unsubscribe()
                 except Exception:
                     pass
-                # セッション物理切断
                 force_close_session(current_pullpoint)
 
-            # 2. Events Serviceのクリーンアップ
             if events_service:
                 force_close_session(events_service)
 
-            # 3. Main Camera (DeviceMgmt) のクリーンアップ
             if mycam:
                 force_close_session(mycam)
             
-            # ▲▲▲ ▲▲▲
-            
-            # 再接続までの安全マージン
             time.sleep(1)
+
+
 
 async def main() -> None:
     if not WSDL_DIR: return logger.error("WSDL not found")
