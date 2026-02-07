@@ -1,3 +1,4 @@
+# MY_HOME_SYSTEM/monitors/server_watchdog.py
 import subprocess
 import time
 import traceback
@@ -37,7 +38,12 @@ MSG_REMINDER: str = (
 )
 
 def get_service_status(service_name: str) -> str:
-    """systemctlを使ってサービスのステータスを確認する"""
+    """
+    systemctlを使ってサービスのステータスを確認する
+    
+    Returns:
+        str: 'active', 'inactive', 'failed', or 'error'
+    """
     try:
         res = subprocess.run(
             ["systemctl", "is-active", service_name], 
@@ -50,7 +56,12 @@ def get_service_status(service_name: str) -> str:
 def is_process_alive(process_keyword: str) -> bool:
     """
     pgrepを使ってプロセスが起動しているか確認する。
-    shell=Trueを使用せず、安全にコマンドを実行する。
+    
+    Args:
+        process_keyword (str): 検索するプロセス名のキーワード
+        
+    Returns:
+        bool: プロセスが存在すればTrue
     """
     try:
         # pgrep -f [pattern]
@@ -64,8 +75,11 @@ def is_process_alive(process_keyword: str) -> bool:
         return False
 
 def check_health() -> None:
+    """
+    サービスの生存確認を行い、異常があれば通知を送信する
+    """
     try:
-        logger.info("🔍 Watchdog check started...")
+        logger.debug("🔍 Watchdog check started...")
         
         status = get_service_status(WATCH_SERVICE_NAME)
         process_alive = is_process_alive(WATCH_PROCESS_NAME)
@@ -73,15 +87,21 @@ def check_health() -> None:
         # サービスが active または activating で、かつプロセスが生きていれば正常
         is_healthy = (status in ["active", "activating"]) and process_alive
         
-        logger.info(f"Health Check: Service={status}, Process={'OK' if process_alive else 'NG'}")
+        process_status_str = 'OK' if process_alive else 'NG'
 
         if is_healthy:
+            # Log Level Adjustment: DEBUG for healthy state
+            logger.debug("Health Check: Service=%s, Process=%s", status, process_status_str)
+            
             if LOCK_FILE.exists():
                 # 復旧通知
                 send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
                 LOCK_FILE.unlink()
                 logger.info("Recovery notification sent.")
         else:
+            # 異常検知時は WARNING でログに残す
+            logger.warning("⚠️ Unhealthy State Detected: Service=%s, Process=%s", status, process_status_str)
+
             current_time = time.time()
             should_notify = False
             
@@ -101,7 +121,7 @@ def check_health() -> None:
 
     except Exception:
         err = traceback.format_exc()
-        logger.error(f"Watchdog Crashed: {err}")
+        logger.error("Watchdog Crashed: %s", err)
 
 if __name__ == "__main__":
     check_health()
