@@ -35,10 +35,17 @@ def create_session() -> requests.Session:
 def fetch_data_sync(location: str, token: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     Nature Remo APIからデータを取得・整形して返す (同期処理)
-    Returns: {
-        "appliances": [...], # 家電リスト (電力データ含む)
-        "devices": [...]     # デバイスリスト (温湿度含む)
-    }
+    
+    Args:
+        location (str): 拠点名（伊丹/高砂など）
+        token (str): APIアクセストークン
+
+    Returns:
+        Dict[str, List[Dict[str, Any]]]: 
+            {
+                "appliances": [...], # 家電リスト (電力データ含む)
+                "devices": [...]     # デバイスリスト (温湿度含む)
+            }
     """
     if not token:
         return {}
@@ -61,14 +68,21 @@ def fetch_data_sync(location: str, token: str) -> Dict[str, List[Dict[str, Any]]
         result["devices"] = res_dev.json()
         
     except Exception as e:
-        logger.error(f"API Error at {location}: {e}")
+        # 通信エラー等は介入が必要な可能性があるため ERROR/WARNING で出力
+        logger.error("API Error at %s: %s", location, e)
     
     return result
 
 # --- Main Logic (Async) ---
 
-async def process_location(location: str, token: str):
-    """1つの拠点(伊丹/高砂)のデータを処理する"""
+async def process_location(location: str, token: str) -> None:
+    """
+    1つの拠点(伊丹/高砂)のデータを処理する
+    
+    Args:
+        location (str): 拠点名
+        token (str): APIトークン
+    """
     if not token:
         return
 
@@ -78,13 +92,12 @@ async def process_location(location: str, token: str):
     # 1. 電力データの処理 (Appliances)
     for app in data.get("appliances", []):
         # スマートメーター (Nature Remo E Lite) の判定
-        # typeが 'EL_SMART_METER' のものを探す
         if app.get("type") == "EL_SMART_METER":
             smart_meter = app.get("smart_meter", {})
             echonet_props = smart_meter.get("echonetlite_properties", [])
             
             # 瞬時電力計測値 (EPC: 0xE7) を探す
-            power_val = None
+            power_val: Optional[float] = None
             for prop in echonet_props:
                 if prop.get("epc") == 231: # 0xE7 = 231
                     val_str = prop.get("val")
@@ -96,9 +109,12 @@ async def process_location(location: str, token: str):
                 dev_id = app.get("id", "unknown")
                 dev_name = f"{location}_{app.get('nickname', 'SmartMeter')}"
                 
-                # Serviceへ委譲 (通知設定は今のところ空)
+                # Serviceへ委譲
                 await sensor_service.process_power_data(dev_id, dev_name, power_val, {})
-                logger.info(f"⚡ Power: {dev_name} = {power_val}W")
+                
+                # Log Level Adjustment: DEBUG for steady state
+                # フォーマット処理の負荷を下げるため %s 記法を使用
+                logger.debug("⚡ Power: %s = %sW", dev_name, power_val)
 
     # 2. センサーデータの処理 (Devices)
     for dev in data.get("devices", []):
@@ -106,8 +122,8 @@ async def process_location(location: str, token: str):
         dev_name = f"{location}_{dev.get('name', 'Remo')}"
         
         events = dev.get("newest_events", {})
-        te_val = None
-        hu_val = None
+        te_val: Optional[float] = None
+        hu_val: Optional[float] = None
         
         if "te" in events: 
             te_val = float(events["te"]["val"])
@@ -119,7 +135,8 @@ async def process_location(location: str, token: str):
             await sensor_service.process_meter_data(
                 dev_id, dev_name, te_val, hu_val if hu_val else 0.0
             )
-            logger.info(f"🌡️ Sensor: {dev_name} = {te_val}°C")
+            # Log Level Adjustment: DEBUG for steady state
+            logger.debug("🌡️ Sensor: %s = %s°C", dev_name, te_val)
 
 
 async def main() -> None:
@@ -143,4 +160,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Interrupted")
     except Exception as e:
-        logger.critical(f"Unexpected Error: {e}")
+        logger.critical("Unexpected Error: %s", e)
