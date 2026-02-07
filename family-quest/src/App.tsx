@@ -336,6 +336,7 @@ function App() {
                     rewards={rewards}
                     userGold={currentUser.gold}
                     onBuy={handleBuyReward}
+                    currentUser={currentUser}
                   />
                 </div>
               )}

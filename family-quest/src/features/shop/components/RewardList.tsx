@@ -1,22 +1,40 @@
 import React, { useMemo } from 'react';
 import { ShoppingBag } from 'lucide-react';
-import { Reward } from '@/types';
+import { Reward, User } from '@/types';
 import { Card } from '@/components/ui/Card';
 
 interface RewardListProps {
   rewards: Reward[];
   userGold: number;
   onBuy: (reward: Reward) => void;
+  currentUser: User;
 }
 
-const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy }) => {
+const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, currentUser }) => {
   const sortedRewards = useMemo(() => {
-    return [...rewards].sort((a, b) => {
+    // 1. フィルタリング
+    const filtered = rewards.filter(r => {
+      const target = r.target || 'all'; // targetがない場合は全員
+
+      if (target === 'all') return true;
+
+      const isAdult = currentUser.user_id === 'dad' || currentUser.user_id === 'mom';
+
+      if (target === 'children') return !isAdult;
+      if (target === 'adults') return isAdult;
+      if (target === 'mom') return currentUser.user_id === 'mom';
+      if (target === 'dad') return currentUser.user_id === 'dad';
+
+      return true;
+    });
+
+    // 2. ソート (安い順)
+    return filtered.sort((a, b) => {
       const costA = a.cost_gold || a.cost || 0;
       const costB = b.cost_gold || b.cost || 0;
       return costA - costB;
     });
-  }, [rewards]);
+  }, [rewards, currentUser]);
 
   return (
     <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -29,7 +47,7 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy }) => 
         <div className="text-center text-gray-500 py-4 text-xs">商品が入荷待ちです...</div>
       )}
 
-      {rewards.map((reward, index) => {
+      {sortedRewards.map((reward, index) => {
         const cost = reward.cost_gold || reward.cost || 0;
         const canAfford = userGold >= cost;
 
