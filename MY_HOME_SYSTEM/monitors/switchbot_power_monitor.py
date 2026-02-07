@@ -3,6 +3,7 @@ import asyncio
 import sys
 import os
 import time
+import json
 from typing import Dict, Any, Optional, List
 
 # プロジェクトルートへのパス解決
@@ -25,7 +26,7 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
     try:
         status = sb_tool.get_device_status(device_id)
         if not status:
-            logger.warning(f"Status unavailable for {device_id}")
+            logger.warning(f"⚠️ Status unavailable for {device_id} (Type: {device_type})")
             return None
             
         # 必要なデータを正規化して返す
@@ -47,8 +48,35 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
         return result
 
     except Exception as e:
-        logger.error(f"Fetch Error [{device_id}]: {e}")
+        logger.error(f"❌ Fetch Error [{device_id}]: {e}")
         return None
+
+async def run_diagnostic_check():
+    """
+    診断モード: 現在のAPIトークンで見えている全デバイスを取得して表示する
+    """
+    logger.info("🔍 [DIAGNOSTIC] Fetching raw device list from SwitchBot API...")
+    try:
+        headers = sb_tool.create_switchbot_auth_headers()
+        if not headers:
+            logger.critical("❌ [DIAGNOSTIC] Failed to create auth headers. Check Token/Secret.")
+            return
+
+        url = f"{config.SWITCHBOT_API_HOST}/v1.1/devices"
+        
+        # サービス層のメソッドを再利用 (同期関数をスレッドで実行)
+        data = await asyncio.to_thread(sb_tool.request_switchbot_api, url, headers)
+        
+        # 生データを整形して出力
+        logger.info(f"📋 [DIAGNOSTIC] Raw API Response:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
+        
+        body = data.get("body", {})
+        device_list = body.get("deviceList", [])
+        infrared_list = body.get("infraredRemoteList", [])
+        logger.info(f"ℹ️ [DIAGNOSTIC] API reports {len(device_list)} physical devices and {len(infrared_list)} IR devices.")
+        
+    except Exception as e:
+        logger.error(f"❌ [DIAGNOSTIC] Diagnostic fetch failed: {e}")
 
 async def main() -> None:
     """
@@ -56,15 +84,34 @@ async def main() -> None:
     """
     logger.info("🚀 --- SwitchBot Monitor Started (New Architecture) ---")
     
+    # 1. バリデーション
+    if not config.SWITCHBOT_API_TOKEN or not config.SWITCHBOT_API_SECRET:
+        logger.critical("❌ API Token or Secret is missing in config.py or .env")
+        return
+
+    # 2. 診断ログ出力 (リスト取得確認)
+    await run_diagnostic_check()
+    
+    # 3. 監視対象の取得
     monitor_devices: List[Dict[str, Any]] = config.MONITOR_DEVICES
+    
+    if not monitor_devices:
+        logger.warning("⚠️ config.MONITOR_DEVICES is empty! No devices defined in devices.json.")
+        # 空でも後続の完了メッセージのために処理は続行（loopは回らない）
+
     processed_count = 0
     
-    for device in monitor_devices:
+    for i, device in enumerate(monitor_devices):
         did: str = device.get("id", "")
         dtype: str = device.get("type", "")
         dname: str = device.get("name", "Unknown")
         
-        if not did or not dtype: continue
+        # ログ: 処理対象の確認
+        # logger.debug(f"Checking target [{i}]: {dname} ({did})")
+
+        if not did or not dtype:
+            logger.info(f"⏭️ Skip target [{i}]: Missing ID or Type. Config: {device}")
+            continue
 
         # 同期APIコールをスレッドで実行してイベントループをブロックさせない
         status = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
@@ -84,11 +131,16 @@ async def main() -> None:
             
             processed_count += 1
             logger.info(f"✅ Processed: {dname}")
+        else:
+            logger.warning(f"⚠️ Data not available for: {dname} (ID: {did}). Check if device is online.")
 
         # APIレートリミット対策 (Blocking sleep -> Await sleep)
         await asyncio.sleep(5)
 
-    logger.info(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
+    if processed_count == 0:
+        logger.warning("⚠️ --- Monitor Completed but 0 devices were processed. Check configuration or API response. ---")
+    else:
+        logger.info(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
 
 if __name__ == "__main__":
     try:
@@ -96,4 +148,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Monitor interrupted by user.")
     except Exception as e:
-        logger.critical(f"Unexpected Error: {e}")
+        logger.critical(f"Unexpected Error: {e}", exc_info=True)

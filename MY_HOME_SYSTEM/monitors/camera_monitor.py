@@ -231,10 +231,11 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
     while True:
-        mycam: Optional[ONVIFCamera] = None
-        current_pullpoint: Optional[ONVIFService] = None
-        events_service: Optional[ONVIFService] = None
+        mycam: Any = None
+        current_pullpoint: Any = None
+        events_service: Any = None
         
+
         try:
             wsdl_path = find_wsdl_path()
             if not wsdl_path: raise FileNotFoundError("WSDL path could not be determined.")
