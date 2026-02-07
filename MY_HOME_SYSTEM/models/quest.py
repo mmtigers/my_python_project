@@ -38,6 +38,7 @@ class MasterReward(BaseModel):
     cost_gold: int
     icon_key: str
     desc: Optional[str] = None
+    target: str = "all"
 
 class MasterEquipment(BaseModel):
     id: int
