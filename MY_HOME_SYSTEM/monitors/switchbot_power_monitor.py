@@ -18,6 +18,13 @@ from core.logger import setup_logging
 # ロガー設定
 logger = setup_logging("device_monitor")
 
+# 監視対象とするデバイスタイプ（これ以外はスキップしてログを汚さない）
+TARGET_DEVICE_TYPES = [
+    "Meter", "MeterPlus", "Hub 2", "WoIOSensor",  # 温湿度計
+    "Plug", "Plug Mini (JP)", "Plug Mini (US)", "Strip",  # 電源プラグ
+    "Nature Remo E Lite"  # 電力計（例外的にここで扱う場合）
+]
+
 def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """
     SwitchBot APIからステータスを取得する（同期処理ラッパー）。
@@ -29,21 +36,39 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
             logger.warning(f"⚠️ Status unavailable for {device_id} (Type: {device_type})")
             return None
             
-        # 必要なデータを正規化して返す
+        # ステータスコードのチェック
+        if status.get("statusCode") != 100:
+            logger.error(f"❌ API Error [ID:{device_id}]: {status.get('message')}")
+            return None
+
+        # データ本体の取得
+        data = status.get("body", {})
         result = {}
         
-        # 1. 電力計 (Plug Mini / Nature Remo E Lite)
-        if "weight" in status or "electricCurrent" in status or "voltage" in status or "power" in status:
-             # Plug Mini (JP) returns 'weight' field sometimes misused or specific fields
-             # API仕様依存: get_device_statusの実装に依存するが、通常は辞書が返る
-             # ここでは sb_tool が整形済みデータを返すと仮定、あるいは生の辞書から抽出
-             p = status.get("power") or status.get("weight") or 0.0 # APIの揺らぎ対応
-             result["power"] = float(p)
+        # 1. 電力計データの抽出 (Plug Mini / Nature Remo E Lite)
+        p_val = None
+        candidates = [data.get("watt"), data.get("weight"), data.get("power")]
+        for c in candidates:
+            if c is not None:
+                try:
+                    # 文字列 "on"/"off" は float変換でエラーになるのでスキップされる
+                    val = float(c)
+                    if val >= 0:
+                        p_val = val
+                        break
+                except (ValueError, TypeError):
+                    continue
+        
+        if p_val is not None:
+            result["power"] = p_val
 
         # 2. 温湿度計 (Meter / Hub 2)
-        if "temperature" in status or "humidity" in status:
-            result["temperature"] = float(status.get("temperature", 0.0))
-            result["humidity"] = float(status.get("humidity", 0.0))
+        if "temperature" in data or "humidity" in data:
+            try:
+                result["temperature"] = float(data.get("temperature", 0.0))
+                result["humidity"] = float(data.get("humidity", 0.0))
+            except (ValueError, TypeError):
+                pass
             
         return result
 
@@ -51,94 +76,67 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
         logger.error(f"❌ Fetch Error [{device_id}]: {e}")
         return None
 
-async def run_diagnostic_check():
-    """
-    診断モード: 現在のAPIトークンで見えている全デバイスを取得して表示する
-    """
-    logger.info("🔍 [DIAGNOSTIC] Fetching raw device list from SwitchBot API...")
-    try:
-        headers = sb_tool.create_switchbot_auth_headers()
-        if not headers:
-            logger.critical("❌ [DIAGNOSTIC] Failed to create auth headers. Check Token/Secret.")
-            return
-
-        url = f"{config.SWITCHBOT_API_HOST}/v1.1/devices"
-        
-        # サービス層のメソッドを再利用 (同期関数をスレッドで実行)
-        data = await asyncio.to_thread(sb_tool.request_switchbot_api, url, headers)
-        
-        # 生データを整形して出力
-        logger.info(f"📋 [DIAGNOSTIC] Raw API Response:\n{json.dumps(data, indent=2, ensure_ascii=False)}")
-        
-        body = data.get("body", {})
-        device_list = body.get("deviceList", [])
-        infrared_list = body.get("infraredRemoteList", [])
-        logger.info(f"ℹ️ [DIAGNOSTIC] API reports {len(device_list)} physical devices and {len(infrared_list)} IR devices.")
-        
-    except Exception as e:
-        logger.error(f"❌ [DIAGNOSTIC] Diagnostic fetch failed: {e}")
-
-async def main() -> None:
-    """
-    メインループ。全デバイスの巡回監視 (Async版)。
-    """
-    logger.info("🚀 --- SwitchBot Monitor Started (New Architecture) ---")
+async def main():
+    logger.info("🚀 --- SwitchBot Monitor Started (Fixed Architecture v2) ---")
     
-    # 1. バリデーション
-    if not config.SWITCHBOT_API_TOKEN or not config.SWITCHBOT_API_SECRET:
-        logger.critical("❌ API Token or Secret is missing in config.py or .env")
+    # config.py からデバイス定義を読み込む
+    devices = config.MONITOR_DEVICES
+    processed_count = 0
+
+    if not devices:
+        logger.warning("⚠️ No devices found in config.MONITOR_DEVICES.")
         return
 
-    # 2. 診断ログ出力 (リスト取得確認)
-    await run_diagnostic_check()
-    
-    # 3. 監視対象の取得
-    monitor_devices: List[Dict[str, Any]] = config.MONITOR_DEVICES
-    
-    if not monitor_devices:
-        logger.warning("⚠️ config.MONITOR_DEVICES is empty! No devices defined in devices.json.")
-        # 空でも後続の完了メッセージのために処理は続行（loopは回らない）
-
-    processed_count = 0
-    
-    for i, device in enumerate(monitor_devices):
-        did: str = device.get("id", "")
-        dtype: str = device.get("type", "")
-        dname: str = device.get("name", "Unknown")
+    for i, device in enumerate(devices):
+        did = device.get("id")
+        dname = device.get("name", "Unknown")
         
-        # ログ: 処理対象の確認
-        # logger.debug(f"Checking target [{i}]: {dname} ({did})")
+        # 修正: キー名 "type" を優先し、念のため "device_type" も見る
+        dtype = device.get("type") or device.get("device_type") or "Unknown"
 
-        if not did or not dtype:
-            logger.info(f"⏭️ Skip target [{i}]: Missing ID or Type. Config: {device}")
+        if not did:
             continue
 
-        # 同期APIコールをスレッドで実行してイベントループをブロックさせない
+        # 対象外のデバイスタイプはスキップ
+        is_target = any(t in dtype for t in TARGET_DEVICE_TYPES)
+        if not is_target:
+            # logger.debug(f"⏭️ Skipping non-target device: {dname} ({dtype})")
+            continue
+
+        # APIコール
         status = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
         
         if status:
-            # 1. 電力データの処理 (Serviceへ委譲)
+            has_data = False
+            # 1. 電力データの処理
             if "power" in status:
                 await sensor_service.process_power_data(
                     did, dname, status["power"], device.get("notify_settings", {})
                 )
+                has_data = True
             
-            # 2. 温湿度データの処理 (Serviceへ委譲)
+            # 2. 温湿度データの処理
             if "temperature" in status:
                 await sensor_service.process_meter_data(
                     did, dname, status["temperature"], status["humidity"]
                 )
+                has_data = True
             
-            processed_count += 1
-            logger.info(f"✅ Processed: {dname}")
+            if has_data:
+                processed_count += 1
+                logger.info(f"✅ Processed: {dname}")
+            else:
+                # ターゲットタイプだが有効なデータが取れなかった場合のみ警告
+                logger.warning(f"⚠️ No valid data extracted for: {dname} (ID: {did})")
         else:
-            logger.warning(f"⚠️ Data not available for: {dname} (ID: {did}). Check if device is online.")
+            # 取得失敗時は fetch_device_status_sync 内でログが出ている
+            pass 
 
-        # APIレートリミット対策 (Blocking sleep -> Await sleep)
-        await asyncio.sleep(5)
+        # APIレートリミット対策
+        await asyncio.sleep(2)
 
     if processed_count == 0:
-        logger.warning("⚠️ --- Monitor Completed but 0 devices were processed. Check configuration or API response. ---")
+        logger.warning("⚠️ --- Monitor Completed but 0 devices were processed. Check 'type' in devices.json ---")
     else:
         logger.info(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
 
@@ -148,4 +146,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Monitor interrupted by user.")
     except Exception as e:
-        logger.critical(f"Unexpected Error: {e}", exc_info=True)
+        logger.critical(f"Critical Error: {e}")
