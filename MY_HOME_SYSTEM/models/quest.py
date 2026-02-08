@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/models/quest.py
 from pydantic import BaseModel
 from typing import Optional
+from typing import Optional, List, Dict
 
 # ==========================================
 # Domain Models (Pydantic)
@@ -128,3 +129,24 @@ class UseItemAction(BaseModel):
 class ConsumeItemAction(BaseModel):
     approver_id: str    # 親のID
     inventory_id: int
+
+# Analytics Models
+class WeeklyDailyStat(BaseModel):
+    date: str           # "YYYY-MM-DD"
+    day_label: str      # "Mon", "Tue"...
+    users: Dict[str, Dict[str, int]]  # { "user_id": { "exp": 100, "gold": 50 } }
+
+class RankingItem(BaseModel):
+    user_id: str
+    user_name: str
+    avatar: str
+    value: int
+    label: str          # 表示用単位など
+
+class WeeklyReportResponse(BaseModel):
+    startDate: str
+    endDate: str
+    dailyStats: List[WeeklyDailyStat]
+    rankings: Dict[str, List[RankingItem]]
+    mvp: Optional[RankingItem] = None
+    mostPopularQuest: Optional[str] = None

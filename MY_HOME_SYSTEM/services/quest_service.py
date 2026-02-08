@@ -477,6 +477,138 @@ class QuestService:
                 q['days'] = None
             filtered.append(q)
         return filtered
+    
+    def get_weekly_analytics(self) -> Dict[str, Any]:
+        try:
+            with common.get_db_cursor() as cur:
+                # 1. 期間計算 (今週の月曜〜現在)
+                now = datetime.datetime.now()
+                today_date = now.date()
+                start_date = today_date - datetime.timedelta(days=today_date.weekday()) # Monday
+                start_str = start_date.strftime("%Y-%m-%d")
+                
+                # 2. ユーザー情報の取得
+                users = {row['user_id']: dict(row) for row in cur.execute("SELECT user_id, name, avatar FROM quest_users").fetchall()}
+                
+                # 3. クエスト履歴データの取得 (承認済み)
+                sql_quest = """
+                    SELECT user_id, exp_earned, gold_earned, completed_at, quest_title
+                    FROM quest_history 
+                    WHERE status = 'approved' AND date(completed_at) >= ?
+                    ORDER BY completed_at ASC
+                """
+                quest_logs = cur.execute(sql_quest, (start_str,)).fetchall()
+
+                # 4. ごほうび購入履歴の取得
+                sql_inv = """
+                    SELECT user_id, count(*) as count
+                    FROM inventory
+                    WHERE date(purchased_at) >= ?
+                    GROUP BY user_id
+                """
+                inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
+                shopping_counts = {uid: 0 for uid in users.keys()}
+                for row in inv_rows:
+                    if row['user_id'] in shopping_counts:
+                        shopping_counts[row['user_id']] = row['count']
+
+                # 5. データ集計
+                daily_map = {}
+                for i in range(7):
+                    d = start_date + datetime.timedelta(days=i)
+                    d_str = d.strftime("%Y-%m-%d")
+                    daily_map[d_str] = {uid: {"exp": 0, "gold": 0} for uid in users.keys()}
+
+                total_stats = {uid: {"exp": 0, "gold": 0, "count": 0, "shopping": 0} for uid in users.keys()}
+                quest_counts = {}
+
+                for log in quest_logs:
+                    ts = log['completed_at']
+                    date_part = ts.split('T')[0] if 'T' in ts else ts.split(' ')[0]
+                    uid = log['user_id']
+                    
+                    if uid not in users: continue
+                    
+                    if date_part in daily_map:
+                        daily_map[date_part][uid]['exp'] += log['exp_earned']
+                        daily_map[date_part][uid]['gold'] += log['gold_earned']
+                    
+                    total_stats[uid]['exp'] += log['exp_earned']
+                    total_stats[uid]['gold'] += log['gold_earned']
+                    total_stats[uid]['count'] += 1
+                    
+                    q_title = log['quest_title']
+                    quest_counts[q_title] = quest_counts.get(q_title, 0) + 1
+
+                for uid, count in shopping_counts.items():
+                    if uid in total_stats:
+                        total_stats[uid]['shopping'] = count
+
+                # 6. レスポンス整形
+                daily_stats_list = []
+                weekdays = ["月", "火", "水", "木", "金", "土", "日"]
+                cumulative = {uid: {"exp": 0, "gold": 0} for uid in users.keys()}
+                
+                for i in range(7):
+                    d = start_date + datetime.timedelta(days=i)
+                    d_str = d.strftime("%Y-%m-%d")
+                    day_data = daily_map.get(d_str, {})
+                    
+                    current_snapshot = {}
+                    for uid in users.keys():
+                        val = day_data.get(uid, {"exp": 0, "gold": 0})
+                        cumulative[uid]['exp'] += val['exp']
+                        cumulative[uid]['gold'] += val['gold']
+                        current_snapshot[uid] = cumulative[uid].copy()
+                    
+                    daily_stats_list.append({
+                        "date": d_str,
+                        "day_label": weekdays[i],
+                        "users": current_snapshot
+                    })
+
+                def make_rank(key, label_suffix):
+                    sorted_users = sorted(total_stats.items(), key=lambda x: x[1][key], reverse=True)
+                    return [
+                        {
+                            "user_id": uid, 
+                            "user_name": users[uid]['name'], 
+                            "avatar": users[uid]['avatar'], 
+                            "value": data[key],
+                            "label": f"{data[key]}{label_suffix}"
+                        } 
+                        for uid, data in sorted_users if data[key] > 0
+                    ]
+
+                rankings = {
+                    "exp": make_rank("exp", " XP"),
+                    "gold": make_rank("gold", " G"),
+                    "count": make_rank("count", " クエスト"),
+                    "shopping": make_rank("shopping", " 個")
+                }
+
+                mvp_data = rankings['exp'][0] if rankings['exp'] else None
+                popular_quest = max(quest_counts.items(), key=lambda x: x[1])[0] if quest_counts else "なし"
+
+                return {
+                    "startDate": start_str,
+                    "endDate": datetime.datetime.now().strftime("%Y-%m-%d"),
+                    "dailyStats": daily_stats_list,
+                    "rankings": rankings,
+                    "mvp": mvp_data,
+                    "mostPopularQuest": popular_quest
+                }
+        except Exception as e:
+            logger.error(f"Weekly Analytics Error: {e}")
+            # エラー時も空データを返すことで500を防ぐ
+            return {
+                "startDate": "",
+                "endDate": "",
+                "dailyStats": [],
+                "rankings": {"exp": [], "gold": [], "count": [], "shopping": []},
+                "mvp": None,
+                "mostPopularQuest": "エラー"
+            }
 
 
 class ShopService:
