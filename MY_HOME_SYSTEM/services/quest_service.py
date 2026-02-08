@@ -1,4 +1,3 @@
-# MY_HOME_SYSTEM/services/quest_service.py
 import datetime
 import importlib
 import random
@@ -118,18 +117,36 @@ class QuestService:
         return (level * 3) + equip_power
 
     def _check_and_reset_weekly_boss(self, cur):
+        """
+        週次ボスのリセット判定を行い、party_stateレコードが存在しない場合は初期化する。
+        """
         party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-        if not party_row:
-            return 
-        party = {k: party_row[k] for k in party_row.keys()}
-            
+        
         now = datetime.datetime.now()
         today_date = now.date()
         this_monday = today_date - datetime.timedelta(days=today_date.weekday())
         this_monday_str = str(this_monday)
         
+        # ---------------------------------------------------------
+        # FIX: レコードが存在しない場合の自己修復 (Auto-Healing)
+        # ---------------------------------------------------------
+        if not party_row:
+            logger.warning("⚠️ party_state record not found. Initializing new record...")
+            initial_boss_id = 1
+            initial_hp = 1000
+            
+            cur.execute("""
+                INSERT INTO party_state (id, current_boss_id, current_hp, max_hp, week_start_date, is_defeated, total_damage, charge_gauge, updated_at)
+                VALUES (1, ?, ?, ?, ?, 0, 0, 0, ?)
+            """, (initial_boss_id, initial_hp, initial_hp, this_monday_str, common.get_now_iso()))
+            
+            # 初期化後に再度取得
+            party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
+
+        party = {k: party_row[k] for k in party_row.keys()}
         db_week_start = party.get('week_start_date')
         
+        # 週替わり判定
         if db_week_start != this_monday_str:
             logger.info(f"🔄 New Week Detected! Resetting Boss... (Old: {db_week_start}, New: {this_monday_str})")
             
@@ -156,11 +173,20 @@ class QuestService:
             """, (next_boss_id, new_max_hp, new_max_hp, this_monday_str, common.get_now_iso()))
 
     def _apply_boss_damage(self, cur, damage: int) -> dict:
+        # ここで修復ロジックが走るため、以降は party_row が確実に取得できる
         self._check_and_reset_weekly_boss(cur)
         
         party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
+        # 万が一のSafety Check
         if not party_row:
-            return None
+            logger.error("CRITICAL: Failed to initialize party_state even after check.")
+            return {
+                "damage": damage,
+                "remainingHp": 0,
+                "isDefeated": False,
+                "isNewDefeat": False
+            }
+
         party = {k: party_row[k] for k in party_row.keys()}
 
         current_hp = party['current_hp']
@@ -201,13 +227,22 @@ class QuestService:
             "isNewDefeat": is_new_defeat
         }
 
-    def calculate_quest_boost(self, cur, user_id: str, quest: dict) -> Dict[str, int]:
+    def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:
+        # 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる
+        
+        # 1. クエストタイプのチェック
+        # sqlite3.Row は辞書のように [] でアクセス可能です
         if quest['quest_type'] != 'daily':
             return {"gold": 0, "exp": 0}
         
-        if quest.get('days') and len(quest['days']) > 0:
+        # 2. 曜日指定のチェック (修正箇所)
+        # 原因: DB生データには 'days' キーがなく、'day_of_week' カラムが存在する。
+        # また sqlite3.Row に .get() は存在しないためAttributeErrorになる。
+        # 修正: 'day_of_week' カラムの値を確認する。値が入っていれば曜日限定なのでブースト対象外。
+        if quest['day_of_week']: 
             return {"gold": 0, "exp": 0}
 
+        # --- 以下、既存ロジック ---
         last_hist = cur.execute("""
             SELECT completed_at FROM quest_history 
             WHERE user_id = ? AND quest_id = ? AND status = 'approved'
@@ -299,10 +334,12 @@ class QuestService:
             damage_value = int((total_exp + atk_power) * crit_multiplier)
             
             boss_effect = self._apply_boss_damage(cur, damage_value)
-            boss_effect['isCritical'] = is_critical
             
-            if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
-                result['bossEffect'] = boss_effect
+            # Safety Guard
+            if boss_effect:
+                boss_effect['isCritical'] = is_critical
+                if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
+                    result['bossEffect'] = boss_effect
             
             logger.info(f"Adult Attack: User={user_id}, Base={total_exp}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
@@ -335,10 +372,12 @@ class QuestService:
             damage_value = int((base_damage + atk_power) * crit_multiplier)
             
             boss_effect = self._apply_boss_damage(cur, damage_value)
-            boss_effect['isCritical'] = is_critical
             
-            if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
-                result['bossEffect'] = boss_effect
+            # Safety Guard
+            if boss_effect:
+                boss_effect['isCritical'] = is_critical
+                if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
+                    result['bossEffect'] = boss_effect
             
             logger.info(f"Child Attack Approved: Attacker={attacker_id}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
@@ -506,7 +545,13 @@ class QuestService:
                     WHERE date(purchased_at) >= ?
                     GROUP BY user_id
                 """
-                inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
+                try:
+                    inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
+                except Exception:
+                    # inventory テーブル名変更対応 (user_inventoryの場合あり)
+                    sql_inv = sql_inv.replace("FROM inventory", "FROM user_inventory")
+                    inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
+
                 shopping_counts = {uid: 0 for uid in users.keys()}
                 for row in inv_rows:
                     if row['user_id'] in shopping_counts:
