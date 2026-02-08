@@ -15,7 +15,7 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction, EquipAction, 
-    UpdateUserAction, SoundTestRequest, AdminBossUpdate, UseItemAction, ConsumeItemAction
+    UpdateUserAction, SoundTestRequest, AdminBossUpdate, UseItemAction, ConsumeItemAction, WeeklyReportResponse
 )
 from services.quest_service import (
     game_system, quest_service, shop_service, user_service, inventory_service
@@ -184,3 +184,7 @@ def cancel_item_usage(action: UseItemAction):
 @router.get("/inventory/admin/pending")
 def get_admin_pending_inventory():
     return inventory_service.get_pending_items()
+
+@router.get("/analytics/weekly")
+def get_weekly_analytics():
+    return quest_service.get_weekly_analytics()
