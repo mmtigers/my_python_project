@@ -99,7 +99,7 @@ export const WeeklyTrends = () => {
                 </div>
 
                 {/* No.1 ユーザー表示エリア */}
-                <div className="p-6 flex flex-col items-center text-center relative z-10 flex-grow justify-center">
+                <div className="p-6 flex flex-col items-center text-center relative z-10 flex-grow shrink-0 justify-center">
                     {topUser ? (
                         <>
                             <div className="mb-4 relative group">
