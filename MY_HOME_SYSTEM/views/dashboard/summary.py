@@ -33,14 +33,28 @@ def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, st
     return val, theme
 
 def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
+    """伊丹（自宅）のステータス判定（修正版）"""
     val = "⚪ データなし"
     theme = "theme-gray"
     if df_sensor.empty: return val, theme
 
+    # 1. デバイスタイプの判定: 'Motion' を含むか、または 'Webhook' (SwitchBot) である
+    is_motion_device = (
+        df_sensor["device_type"].str.contains("Motion", na=False) | 
+        (df_sensor["device_type"] == "Webhook")
+    )
+    
+    # 2. 検知ステータスの判定: movement_state または contact_state が 'detected' である
+    # (webhook_routerが contact_state に保存してしまう問題への対応)
+    is_detected = (
+        (df_sensor["movement_state"] == "detected") | 
+        (df_sensor["contact_state"] == "detected")
+    )
+
     df_motion = df_sensor[
         (df_sensor["location"] == "伊丹") & 
-        (df_sensor["device_type"].str.contains("Motion", na=False)) & 
-        (df_sensor["movement_state"] == "detected")
+        is_motion_device & 
+        is_detected
     ].sort_values("timestamp", ascending=False)
 
     if not df_motion.empty:
@@ -55,6 +69,7 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
             val = f"🟡 静か ({int(diff_m/60)}h前)"
             theme = "theme-yellow"
     else:
+        # 開閉センサーのロジック
         df_contact = df_sensor[
             (df_sensor["location"] == "伊丹") & (df_sensor["contact_state"] == "open")
         ].sort_values("timestamp", ascending=False)
@@ -63,80 +78,6 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
             if diff_c < 60:
                 val = f"🟢 活動中 ({int(diff_c)}分前)"
                 theme = "theme-green"
-    return val, theme
-
-def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
-    val = "🍚 炊いてない"
-    theme = "theme-red"
-    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
-        return val, theme
-
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    df_rice = df_sensor[
-        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
-        (df_sensor["timestamp"] >= today_start)
-    ]
-    if not df_rice.empty:
-        max_watts = df_rice["power_watts"].max()
-        if max_watts is not None and max_watts >= 500:
-            val = "🍚 ご飯あり"
-            theme = "theme-green"
-    return val, theme
-
-def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
-    if df_bicycle.empty: return "⚪ データなし", "theme-gray"
-    
-    targets = {
-        "JR伊丹駅前(第1)自転車駐車場 (A)": "第1A",
-        "JR伊丹駅前(第3)自転車駐車場 (A)": "第3A",
-        "JR伊丹駅前(第3)自転車駐車場 (E)": "第3E",
-    }
-    
-    # タイムゾーン処理はanalysis_serviceで行われている前提だが念のため
-    if not pd.api.types.is_datetime64_any_dtype(df_bicycle["timestamp"]):
-        df_bicycle = df_bicycle.copy()
-        df_bicycle["timestamp"] = pd.to_datetime(df_bicycle["timestamp"]).dt.tz_convert("Asia/Tokyo")
-
-    latest_df = df_bicycle.sort_values("timestamp", ascending=False).drop_duplicates("area_name")
-    details = []
-    total_wait = 0
-    has_data = False
-
-    for full_name, short_name in targets.items():
-        row = latest_df[latest_df["area_name"] == full_name]
-        if not row.empty:
-            current_val = int(row.iloc[0]["waiting_count"])
-            current_time = row.iloc[0]["timestamp"]
-            
-            # 前日比
-            target_time = current_time - timedelta(days=1)
-            df_area = df_bicycle[df_bicycle["area_name"] == full_name]
-            df_near = df_area[
-                (df_area["timestamp"] >= target_time - timedelta(hours=2)) & 
-                (df_area["timestamp"] <= target_time + timedelta(hours=2))
-            ]
-            
-            diff_str = ""
-            if not df_near.empty:
-                nearest_idx = (df_near["timestamp"] - target_time).abs().idxmin()
-                past_val = int(df_near.loc[nearest_idx]["waiting_count"])
-                diff = current_val - past_val
-                if diff > 0: diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"
-                elif diff < 0: diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"
-                else: diff_str = f" <span style='color:#757575;'>(➡️0)</span>"
-            else:
-                diff_str = " <span style='color:#999;'>(--)</span>"
-
-            details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
-            total_wait += current_val
-            has_data = True
-        else:
-            details.append(f"{short_name}: -")
-
-    if not has_data: return "⚪ データなし", "theme-gray"
-    
-    val = f"<div style='font-size:0.85rem; line-height:1.4; text-align:left; display:inline-block;'>{'<br>'.join(details)}</div>"
-    theme = "theme-green" if total_wait == 0 else ("theme-yellow" if total_wait < 10 else "theme-red")
     return val, theme
 
 def get_traffic_status() -> Tuple[str, str]:
@@ -170,6 +111,86 @@ def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:
     if not df_car.empty and df_car.iloc[0]["action"] == "LEAVE":
         return "🚗 外出中", "theme-yellow"
     return "🏠 在宅", "theme-green"
+
+
+def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
+    val = "🍚 炊いてない"
+    theme = "theme-red"
+    # カラム存在チェック
+    if "device_name" not in df_sensor.columns or "power_watts" not in df_sensor.columns:
+        return val, theme
+
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # 炊飯器の電力データを検索
+    df_rice = df_sensor[
+        (df_sensor["device_name"].astype(str).str.contains("炊飯器")) &
+        (df_sensor["timestamp"] >= today_start)
+    ]
+    
+    if not df_rice.empty:
+        max_watts = df_rice["power_watts"].max()
+        # 500W以上で稼働していれば「ご飯あり」とみなす
+        if max_watts is not None and max_watts >= 500:
+            val = "🍚 ご飯あり"
+            theme = "theme-green"
+    return val, theme
+
+def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:
+    if df_bicycle.empty: return "⚪ データなし", "theme-gray"
+    
+    targets = {
+        "JR伊丹駅前(第1)自転車駐車場 (A)": "第1A",
+        "JR伊丹駅前(第3)自転車駐車場 (A)": "第3A",
+        "JR伊丹駅前(第3)自転車駐車場 (E)": "第3E",
+    }
+    
+    # タイムゾーン処理
+    if not pd.api.types.is_datetime64_any_dtype(df_bicycle["timestamp"]):
+        df_bicycle = df_bicycle.copy()
+        df_bicycle["timestamp"] = pd.to_datetime(df_bicycle["timestamp"]).dt.tz_convert("Asia/Tokyo")
+
+    latest_df = df_bicycle.sort_values("timestamp", ascending=False).drop_duplicates("area_name")
+    details = []
+    total_wait = 0
+    has_data = False
+
+    for full_name, short_name in targets.items():
+        row = latest_df[latest_df["area_name"] == full_name]
+        if not row.empty:
+            current_val = int(row.iloc[0]["waiting_count"])
+            current_time = row.iloc[0]["timestamp"]
+            
+            # 前日比計算
+            target_time = current_time - timedelta(days=1)
+            df_area = df_bicycle[df_bicycle["area_name"] == full_name]
+            df_near = df_area[
+                (df_area["timestamp"] >= target_time - timedelta(hours=2)) & 
+                (df_area["timestamp"] <= target_time + timedelta(hours=2))
+            ]
+            
+            diff_str = ""
+            if not df_near.empty:
+                nearest_idx = (df_near["timestamp"] - target_time).abs().idxmin()
+                past_val = int(df_near.loc[nearest_idx]["waiting_count"])
+                diff = current_val - past_val
+                if diff > 0: diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"
+                elif diff < 0: diff_str = f" <span style='color:#388e3c;'>(🔻{abs(diff)})</span>"
+                else: diff_str = f" <span style='color:#757575;'>(➡️0)</span>"
+            else:
+                diff_str = " <span style='color:#999;'>(--)</span>"
+
+            details.append(f"{short_name}: <b>{current_val}</b>台{diff_str}")
+            total_wait += current_val
+            has_data = True
+        else:
+            details.append(f"{short_name}: -")
+
+    if not has_data: return "⚪ データなし", "theme-gray"
+    
+    val = f"<div style='font-size:0.85rem; line-height:1.4; text-align:left; display:inline-block;'>{'<br>'.join(details)}</div>"
+    theme = "theme-green" if total_wait == 0 else ("theme-yellow" if total_wait < 10 else "theme-red")
+    return val, theme
 
 # === Render Function ===
 
