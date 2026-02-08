@@ -1,14 +1,15 @@
 import React from 'react';
 import { User } from '@/types';
-import { Users, Scroll } from 'lucide-react';
+import { Users, Scroll, TrendingUp } from 'lucide-react';
 
 interface HeaderProps {
     users: User[];
     currentUserIdx: number;
-    viewMode: 'user' | 'party' | 'familyLog';
+    viewMode: 'user' | 'party' | 'familyLog' | 'trends'; // trendsを追加
     onUserSwitch: (idx: number) => void;
     onPartySwitch: () => void;
     onLogSwitch: () => void;
+    onTrendsSwitch: () => void; // 追加
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -18,6 +19,7 @@ const Header: React.FC<HeaderProps> = ({
     onUserSwitch,
     onPartySwitch,
     onLogSwitch,
+    onTrendsSwitch,
 }) => {
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
@@ -30,7 +32,7 @@ const Header: React.FC<HeaderProps> = ({
                 <p className="text-[10px] text-gray-500 font-mono">我が家の冒険譚</p>
             </div>
 
-            {/* Unified Navigation Area (Users + Party + Log) */}
+            {/* Unified Navigation Area (Users + Party + Log + Trends) */}
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
                 {/* 1. Users */}
@@ -50,11 +52,11 @@ const Header: React.FC<HeaderProps> = ({
                                     ? 'border-yellow-400 ring-4 ring-yellow-500/30 bg-gray-800'
                                     : 'border-gray-600 bg-gray-900'}
               `}>
-                                {user.avatar ? (
+                                {user.avatar && user.avatar.startsWith('/') ? (
                                     <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center text-3xl">
-                                        {user.icon || '🙂'}
+                                        {user.avatar || user.icon || '🙂'}
                                     </div>
                                 )}
                             </div>
@@ -106,7 +108,36 @@ const Header: React.FC<HeaderProps> = ({
                     )}
                 </button>
 
-                {/* 3. Log Button */}
+                {/* 3. Trends Button (New) */}
+                <button
+                    onClick={onTrendsSwitch}
+                    className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'trends' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
+                        }`}
+                >
+                    <div className={`
+            w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 shadow-lg flex items-center justify-center relative transition-colors
+            ${viewMode === 'trends'
+                            ? 'border-indigo-400 ring-4 ring-indigo-500/30 bg-gray-800 text-indigo-400'
+                            : 'border-gray-600 bg-gray-900 text-gray-500'}
+          `}>
+                        {/* アイコンサイズを 32 に統一 */}
+                        <TrendingUp size={32} />
+                    </div>
+                    <div className={`
+            mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md transition-colors whitespace-nowrap
+            ${viewMode === 'trends'
+                            ? 'bg-indigo-600 text-white border border-indigo-300 transform scale-110'
+                            : 'bg-gray-800 text-gray-400 border border-gray-600'}
+          `}>
+                        ランキング
+                    </div>
+                    {viewMode === 'trends' && (
+                        <div className="absolute -bottom-2 text-indigo-400 animate-bounce text-xs">▲</div>
+                    )}
+                </button>
+
+
+                {/* 4. Log Button */}
                 <button
                     onClick={onLogSwitch}
                     className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'familyLog' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'

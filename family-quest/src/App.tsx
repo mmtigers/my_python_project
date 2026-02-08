@@ -10,6 +10,7 @@ import { GuildBoard } from './features/guild/components/GuildBoard';
 
 import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 
+
 // UI Components
 import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
@@ -26,7 +27,7 @@ import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
 import FamilyParty from './features/family/components/FamilyParty';
 import BattleEffect from './components/ui/BattleEffect';
-
+import { WeeklyTrends } from './features/family/components/WeeklyTrends';
 
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
@@ -62,7 +63,7 @@ const ConfirmModal = ({
 function App() {
   const { play } = useSound();
   const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip' | 'inventory' | 'guild'>('quest');
-  const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party'>('main');
+  const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party' | 'trends'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
   // モーダル状態
@@ -241,6 +242,7 @@ function App() {
   const getHeaderViewMode = () => {
     if (viewMode === 'familyLog') return 'familyLog';
     if (viewMode === 'party') return 'party';
+    if (viewMode === 'trends') return 'trends';
     return 'user';
   };
 
@@ -255,6 +257,7 @@ function App() {
         onUserSwitch={handleUserChange}
         onPartySwitch={() => { setViewMode('party'); play('select'); }}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
+        onTrendsSwitch={() => { setViewMode('trends'); play('select'); }}
       />
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
@@ -370,6 +373,10 @@ function App() {
 
         {viewMode === 'party' && (
           <FamilyParty users={users} ownedEquipments={ownedEquipments} boss={boss} />
+        )}
+
+        {viewMode === 'trends' && (
+          <WeeklyTrends />
         )}
 
       </div>
