@@ -12,6 +12,8 @@ import time
 from lxml import etree
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from http.client import RemoteDisconnected
+from urllib3.exceptions import ProtocolError
 
 # === ロガー設定 ===
 logger = common.setup_logging("onvif_collector")
@@ -19,6 +21,9 @@ logger = common.setup_logging("onvif_collector")
 # === 設定 ===
 LOG_DIR = os.path.join(config.BASE_DIR, "logs")
 BINDING_NAME = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
+
+# ★追加: VIGIカメラ等の強制切断対策 (50秒で自発的に再接続)
+SESSION_LIFETIME = 50
 
 def ensure_log_dir():
     if not os.path.exists(LOG_DIR):
@@ -101,11 +106,22 @@ def collect_single_camera(cam_conf):
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             logger.info(f"✅ [{cam_name}] 記録開始")
 
+            # ★追加: セッション開始時刻
+            session_start_time = time.time()
+
             while True:
                 try:
+                    # ★追加: 50秒経過チェック (Proactive Refresh)
+                    if time.time() - session_start_time > SESSION_LIFETIME:
+                        # 正常な再接続フローなのでログは最小限に
+                        # logger.info(f"🔄 [{cam_name}] 定期セッション更新 (50s)")
+                        try:
+                            if hasattr(subscription, 'Unsubscribe'):
+                                subscription.Unsubscribe()
+                        except Exception: pass
+                        break # 内側のループを抜けて再接続へ
+
                     # ポーリング
-                    # print(f".", end="", flush=True) # 複数台だと混ざるのでコンソール出力は控える
-                    
                     params = {'Timeout': timedelta(seconds=5), 'MessageLimit': 100}
                     events = pullpoint.PullMessages(params)
                     
@@ -132,17 +148,22 @@ def collect_single_camera(cam_conf):
                     err = str(e)
                     if "timed out" in err or "TimeOut" in err: continue
                     
-                    logger.warning(f"⚠️ [{cam_name}] 通信瞬断: {err}")
-                    time.sleep(5)
-                    break # 再接続へ
+                    # その他のエラーは外側のexceptでキャッチさせるために投げる
+                    raise e
+
+        except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
+             # ★修正: 切断エラーは想定内なので WARNING ではなく INFO で扱う
+             # logger.info(f"🔄 [{cam_name}] 通信切断(想定内): {e}. 再接続します...")
+             time.sleep(1)
+             continue
 
         except KeyboardInterrupt:
             logger.info(f"[{cam_name}] 停止しました。")
             break
         except Exception as e:
             logger.error(f"❌ [{cam_name}] 接続エラー: {e}")
-            logger.info(f"[{cam_name}] 30秒後に再試行...")
-            time.sleep(30)
+            logger.info(f"[{cam_name}] 10秒後に再試行...")
+            time.sleep(10)
 
 async def main():
     if not ensure_log_dir(): return
