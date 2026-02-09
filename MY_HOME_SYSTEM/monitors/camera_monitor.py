@@ -256,7 +256,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             devicemgmt = mycam.create_devicemgmt_service()
             devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            check_camera_time(devicemgmt, cam_name)
+            # 時刻チェックを行い、ズレが許容範囲を超えている場合は接続を中断する
+            if not check_camera_time(devicemgmt, cam_name):
+                raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
             
             device_info = devicemgmt.GetDeviceInformation()
             if is_first_connect:
@@ -388,11 +390,21 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
         except Exception as e:
             consecutive_errors += 1
             err_msg = str(e)
+
+            # ONVIF/Zeep特有の隠れたエラー情報を抽出
+            detailed_info = ""
+            if hasattr(e, 'detail'):
+                detailed_info += f" | Detail: {e.detail}"
+            if hasattr(e, 'content'):
+                detailed_info += f" | Content: {str(e.content)[:200]}"  # 長すぎる場合はカット
+            
+            # エラーメッセージを強化
+            full_err_msg = f"{err_msg}{detailed_info}"
             # 3回未満はWARNING、以降はERROR
             if consecutive_errors < 3:
-                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {err_msg}")
+                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {full_err_msg}")
             else:
-                logger.error(f"❌ [{cam_name}] Persistent Error: {err_msg}")
+                logger.error(f"❌ [{cam_name}] Persistent Error: {full_err_msg}")
                 if "Unknown error" in err_msg or "Unauthorized" in err_msg:
                     logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
             
