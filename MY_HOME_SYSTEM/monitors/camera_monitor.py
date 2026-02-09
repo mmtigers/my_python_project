@@ -221,7 +221,13 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     consecutive_errors: int = 0
     port_candidates: List[int] = [2020, 80]
 
+    # [追加] 切断頻度追跡用の変数を追加
+    transient_error_count: int = 0
+    last_transient_error_time: float = 0
+
     is_first_connect: bool = True
+
+    
     
     if cam_conf.get('port'):
         if cam_conf['port'] in port_candidates:
@@ -383,9 +389,23 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                         # === イベント処理終了 ===
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            logger.warning(f"⚠️ [{cam_name}] Connection lost (Transient): {e}")
+            # [変更] Handle known VIGI disconnection behavior as INFO
+            # 短時間(15秒)に連続して発生した場合のみWARNINGとする
+            now = time.time()
+            if now - last_transient_error_time < 15:
+                transient_error_count += 1
+            else:
+                transient_error_count = 1
+            
+            last_transient_error_time = now
+
+            if transient_error_count >= 3:
+                logger.warning(f"⚠️ [{cam_name}] Connection lost (Frequent): {e} ({transient_error_count}/3). Retrying...")
+            else:
+                logger.info(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting...")
+            
             time.sleep(2)
-            continue 
+            continue
 
         except Exception as e:
             consecutive_errors += 1

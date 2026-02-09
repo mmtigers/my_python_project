@@ -38,7 +38,7 @@ TASKS: List[Task] = [
 
     # 頻度: 低 (1時間〜)
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},
-    {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0, "args": []},
+    # {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0, "args": []},
     {"script": "weekly_analyze_report.py",            "interval": 3600, "last_run": 0, "args": []},
 ]
 
