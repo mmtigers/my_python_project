@@ -16,7 +16,10 @@ from http.client import RemoteDisconnected
 from urllib3.exceptions import ProtocolError
 
 # === ロガー設定 ===
-logger = common.setup_logging("onvif_collector")
+logger = common.setup_logging(
+    "onvif_collector", 
+    webhook_url=getattr(config, "DISCORD_WEBHOOK_ERROR_CAM", None)
+)
 
 # === 設定 ===
 LOG_DIR = os.path.join(config.BASE_DIR, "logs")
@@ -80,6 +83,9 @@ def collect_single_camera(cam_conf):
     # 開始通知
     # common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🎥 {cam_name} のデータ記録を始めます✨"}])
 
+    # ★修正: ここに初期化を追加
+    consecutive_errors = 0
+
     while True: # 再接続ループ
         try:
             logger.info(f"📡 [{cam_name}] 接続中...")
@@ -107,6 +113,11 @@ def collect_single_camera(cam_conf):
             
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             logger.info(f"✅ [{cam_name}] 記録開始")
+
+            # 接続成功時はカウンターリセット
+            if consecutive_errors > 0:
+                logger.info(f"✅ [{cam_name}] 再接続に成功しました (Errors: {consecutive_errors} -> 0)")
+            consecutive_errors = 0
 
             # ★追加: セッション開始時刻
             session_start_time = time.time()
@@ -177,6 +188,7 @@ def collect_single_camera(cam_conf):
             
             is_transient = any(k in err_str for k in transient_keywords)
             
+            # ★ここでエラーが発生していた（consecutive_errorsが未定義だったため）
             consecutive_errors += 1
             
             if is_transient:
