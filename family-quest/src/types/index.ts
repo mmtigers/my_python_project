@@ -44,6 +44,7 @@ export interface Quest {
     end_time?: string;
     days?: number[] | string | null;
     target?: string;
+    pre_requisite_quest_id?: number | null;
 }
 
 // クエスト履歴
