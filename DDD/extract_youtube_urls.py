@@ -2,47 +2,51 @@
 # -*- coding: utf-8 -*-
 
 """
-YouTube URL Extractor (v3.0.0 Auto-Subscription)
------------------------------------------------
-Features:
-- Subscription Mode: Auto-crawl channels listed in 'subscriptions.txt'.
-- Channel Crawling: Extracts /videos & /playlists automatically.
-- Organized Output: Saves to 'list/Channel_Playlist.txt'.
-- High Performance Metadata Extraction (extract_flat).
+YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)
+------------------------------------------------------
+指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプト。
+MY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に準拠。
 """
 
 import sys
 import argparse
-import logging
 import re
-import time
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional, Set, Iterator
+from typing import List, Optional, Set, Iterator, Dict, Any
+
 import yt_dlp
 
 # ==========================================
-# 0. 環境設定 & ロギング
+# 0. 環境設定 & ロギング (Unified Logging)
 # ==========================================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger("UrlExtractor")
-
+# プロジェクトルートへのパス解決 (DDD/ から core/ を参照するため)
 CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
+
+try:
+    from core.logger import get_logger
+    logger = get_logger(__name__)
+except ImportError:
+    # 開発環境や単体実行時のフォールバック
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("UrlExtractor")
 
 # ==========================================
-# 1. コンフィグレーション
+# 1. コンフィグレーション (Configuration)
 # ==========================================
 @dataclass(frozen=True)
 class AppConfig:
-    OUTPUT_DIR: Path = CURRENT_DIR
+    """アプリケーション設定を保持する定数クラス。"""
+    OUTPUT_BASE_DIR: Path = CURRENT_DIR
     SUB_DIR_NAME: str = "list"
     SUBSCRIPTION_FILE: str = "subscriptions.txt"
     
-    YDL_OPTS: dict = field(default_factory=lambda: {
+    # yt-dlp オプション: 高速化のため extract_flat を使用
+    YDL_OPTS: Dict[str, Any] = field(default_factory=lambda: {
         'extract_flat': True,
         'quiet': True,
         'ignoreerrors': True,
@@ -53,6 +57,15 @@ CONFIG = AppConfig()
 
 @dataclass
 class ExtractionResult:
+    """抽出結果を格納するデータクラス。
+
+    Attributes:
+        title (str): 動画リストまたはプレイリストのタイトル。
+        urls (List[str]): 抽出されたURLのリスト。
+        source_url (str): 抽出元のURL。
+        channel_name (str): チャンネル名。不明な場合は 'unknown_channel'。
+        is_playlist (bool): プレイリストの場合は True。
+    """
     title: str
     urls: List[str]
     source_url: str
@@ -63,9 +76,18 @@ class ExtractionResult:
 # 2. コアロジック (Extractor)
 # ==========================================
 class YouTubeExtractor:
-    
+    """YouTubeからURL情報を抽出するクラス。"""
+
     @staticmethod
-    def _normalize_url(entry: dict) -> Optional[str]:
+    def _normalize_url(entry: Dict[str, Any]) -> Optional[str]:
+        """エントリ情報から正規化されたYouTube URLを生成する。
+
+        Args:
+            entry (Dict[str, Any]): yt-dlp から取得したエントリ辞書。
+
+        Returns:
+            Optional[str]: 正規化されたURL。生成できない場合は None。
+        """
         url = entry.get('url') or entry.get('webpage_url')
         video_id = entry.get('id')
         
@@ -77,11 +99,28 @@ class YouTubeExtractor:
         return None
 
     def _is_channel_url(self, url: str) -> bool:
+        """指定されたURLがチャンネルトップページのURLかを判定する。
+
+        Args:
+            url (str): 判定対象のURL。
+
+        Returns:
+            bool: チャンネルURLであれば True。
+        """
         clean_url = url.split('?')[0].rstrip('/')
         return bool(re.search(r"youtube\.com/(@[\w\-\.]+|channel/[\w\-]+|c/[\w\-]+|user/[\w\-]+)$", clean_url))
 
     def _extract_single_list(self, target_url: str, force_title: str = "") -> Optional[ExtractionResult]:
-        logger.info(f"🔍 解析中...: {target_url}")
+        """単一のURL（動画リストやプレイリスト）から情報を抽出する。
+
+        Args:
+            target_url (str): 対象のURL。
+            force_title (str, optional): タイトルを強制指定する場合に使用。
+
+        Returns:
+            Optional[ExtractionResult]: 抽出結果オブジェクト。失敗時は None。
+        """
+        logger.info(f"🔍 解析開始: {target_url}")
         
         results: Set[str] = set()
         list_title = force_title or "unknown_list"
@@ -90,7 +129,8 @@ class YouTubeExtractor:
         try:
             with yt_dlp.YoutubeDL(CONFIG.YDL_OPTS) as ydl:
                 info = ydl.extract_info(target_url, download=False)
-                if not info: return None
+                if not info:
+                    return None
 
                 channel_name = info.get('channel') or info.get('uploader') or "unknown_channel"
                 if not force_title:
@@ -100,15 +140,20 @@ class YouTubeExtractor:
                 if entries:
                     logger.info(f"   ↳ リスト取得中: '{list_title}' (by {channel_name})")
                     for entry in entries:
-                        if not entry: continue
+                        if not entry:
+                            continue
                         url = self._normalize_url(entry)
-                        if url: results.add(url)
+                        if url:
+                            results.add(url)
                 else:
+                    # 単一動画の場合
                     url = self._normalize_url(info)
-                    if url: results.add(url)
+                    if url:
+                        results.add(url)
 
-        except Exception as e:
-            logger.warning(f"⚠️ 抽出スキップ ({target_url}): {e}")
+        except Exception:
+            # Error Handling: スタックトレースを含めてログ出力
+            logger.error(f"❌ 抽出失敗 ({target_url})", exc_info=True)
             return None
 
         sorted_urls = sorted(list(results))
@@ -123,6 +168,16 @@ class YouTubeExtractor:
         )
 
     def extract_iter(self, target_url: str) -> Iterator[ExtractionResult]:
+        """URLの種類に応じて再帰的または単発で抽出を行うイテレータ。
+
+        チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。
+
+        Args:
+            target_url (str): 開始URL。
+
+        Yields:
+            Iterator[ExtractionResult]: 抽出結果を順次返す。
+        """
         if self._is_channel_url(target_url):
             logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")
             base_url = target_url.split('?')[0].rstrip('/')
@@ -130,8 +185,15 @@ class YouTubeExtractor:
             # Phase 1: All Videos
             video_result = self._extract_single_list(f"{base_url}/videos")
             if video_result:
-                video_result.title += " - All Videos"
-                yield video_result
+                # チャンネル動画一覧であることを明記
+                # dataclassはfrozenではないため属性変更可能だが、設計上新しいインスタンスの方が安全
+                yield ExtractionResult(
+                    title=f"{video_result.title} - All Videos",
+                    urls=video_result.urls,
+                    source_url=video_result.source_url,
+                    channel_name=video_result.channel_name,
+                    is_playlist=False
+                )
 
             # Phase 2: Playlists
             try:
@@ -141,7 +203,8 @@ class YouTubeExtractor:
                         playlists = list(pl_tab['entries'])
                         logger.info(f"📂 {len(playlists)} 個のプレイリストが見つかりました。")
                         for pl in playlists:
-                            if not pl: continue
+                            if not pl:
+                                continue
                             pl_url = pl.get('url')
                             pl_title = pl.get('title', 'Unknown Playlist')
                             if pl_url:
@@ -149,25 +212,48 @@ class YouTubeExtractor:
                                 if res:
                                     res.is_playlist = True
                                     yield res
-            except Exception as e:
-                logger.error(f"❌ プレイリスト一覧取得失敗: {e}")
+            except Exception:
+                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)
         else:
             res = self._extract_single_list(target_url)
-            if res: yield res
+            if res:
+                yield res
 
 # ==========================================
 # 3. ファイル管理 & サブスクリプション
 # ==========================================
 class FileManager:
+    """ファイル保存に関する責務を持つクラス。"""
     
     @staticmethod
     def _sanitize_filename(filename: str) -> str:
+        """ファイル名として使用できない文字を置換する。
+
+        Args:
+            filename (str): 元の文字列。
+
+        Returns:
+            str: 安全なファイル名文字列。
+        """
         safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()
         return safe[:200].strip('. ')
 
     def save(self, result: ExtractionResult, output_base_dir: Path) -> bool:
+        """抽出結果をテキストファイルに保存する。
+
+        Args:
+            result (ExtractionResult): 保存対象の抽出データ。
+            output_base_dir (Path): 保存先のルートディレクトリ。
+
+        Returns:
+            bool: 保存に成功した場合は True。
+        """
         target_dir = output_base_dir / CONFIG.SUB_DIR_NAME
-        target_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)
+            return False
 
         safe_channel = self._sanitize_filename(result.channel_name)
         safe_title = self._sanitize_filename(result.title)
@@ -181,71 +267,89 @@ class FileManager:
                     f.write(url + "\n")
             logger.info(f"✅ 保存完了: {filename} ({len(result.urls)} 件)")
             return True
-        except IOError as e:
-            logger.error(f"❌ ファイル保存エラー: {e}")
+        except IOError:
+            logger.error(f"❌ ファイル書き込みエラー: {output_path}", exc_info=True)
             return False
 
 class SubscriptionManager:
+    """定期巡回（サブスクリプション）を管理するクラス。"""
+
     def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):
         self.extractor = extractor
         self.file_manager = file_manager
-        self.sub_file = CONFIG.OUTPUT_DIR / CONFIG.SUBSCRIPTION_FILE
+        self.sub_file = CONFIG.OUTPUT_BASE_DIR / CONFIG.SUBSCRIPTION_FILE
 
-    def process_subscriptions(self):
+    def process_subscriptions(self) -> None:
+        """登録されたチャンネルリストを読み込み、順次抽出を実行する。"""
         if not self.sub_file.exists():
             logger.warning(f"⚠️ {CONFIG.SUBSCRIPTION_FILE} が見つかりません。")
-            with self.sub_file.open("w", encoding="utf-8") as f:
-                f.write("# ここにチャンネルURLを1行ずつ記述してください\n")
-            logger.info(f"🆕 空のファイルを作成しました: {self.sub_file}")
+            try:
+                with self.sub_file.open("w", encoding="utf-8") as f:
+                    f.write("# ここにチャンネルURLを1行ずつ記述してください\n")
+                logger.info(f"🆕 空のファイルを作成しました: {self.sub_file}")
+            except IOError:
+                logger.error(f"❌ 設定ファイル作成失敗: {self.sub_file}", exc_info=True)
             return
 
-        with self.sub_file.open("r", encoding="utf-8") as f:
-            urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+        urls: List[str] = []
+        try:
+            with self.sub_file.open("r", encoding="utf-8") as f:
+                urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+        except IOError:
+            logger.error(f"❌ 設定ファイル読み込み失敗: {self.sub_file}", exc_info=True)
+            return
 
         logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件")
         
         for i, url in enumerate(urls):
-            logger.info(f"\n[{i+1}/{len(urls)}] 巡回中: {url}")
+            logger.info(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
             for result in self.extractor.extract_iter(url):
-                self.file_manager.save(result, CONFIG.OUTPUT_DIR)
+                self.file_manager.save(result, CONFIG.OUTPUT_BASE_DIR)
 
 # ==========================================
 # 4. アプリケーション本体
 # ==========================================
 class UrlExtractorApp:
+    """アプリケーションのエントリーポイントクラス。"""
+
     def __init__(self):
         self.extractor = YouTubeExtractor()
         self.file_manager = FileManager()
         self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)
 
-    def run(self):
-        print("=" * 50)
-        print("   YouTube URL Extractor (v3.0.0)")
-        print("=" * 50)
+    def run(self) -> None:
+        """コマンドライン引数を解析し、メイン処理を実行する。"""
+        logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("url", nargs="?", help="抽出対象のYouTube URL")
-        parser.add_argument("--cron", action="store_true", help="サブスクリプション自動巡回モード")
+        parser = argparse.ArgumentParser(description="Extract YouTube URLs from channels or playlists.")
+        parser.add_argument("url", nargs="?", help="Target YouTube URL")
+        parser.add_argument("--cron", action="store_true", help="Auto-subscription mode")
         args = parser.parse_args()
 
         if args.cron:
             self.sub_manager.process_subscriptions()
-            logger.info("🎉 自動巡回完了")
+            logger.info("🎉 自動巡回プロセスが完了しました")
             return
 
         target_url = args.url
         if not target_url:
+            # 対話モード（loggerではなくinputを使用）
             try:
-                target_url = input("URLを入力してください (Enterで終了):\n> ").strip()
+                print("URLを入力してください (Enterで終了):")
+                target_url = input("> ").strip()
             except KeyboardInterrupt:
+                logger.info("ユーザーにより中断されました")
                 sys.exit(0)
 
         if target_url:
             total_files = 0
+            # イテレータを回して処理
             for result in self.extractor.extract_iter(target_url):
-                if self.file_manager.save(result, CONFIG.OUTPUT_DIR):
+                if self.file_manager.save(result, CONFIG.OUTPUT_BASE_DIR):
                     total_files += 1
-            logger.info(f"🎉 処理完了: {total_files} ファイル作成")
+            logger.info(f"🎉 処理完了: 計 {total_files} ファイルを作成しました")
+        else:
+            logger.info("URLが指定されなかったため終了します")
 
 if __name__ == "__main__":
     app = UrlExtractorApp()
