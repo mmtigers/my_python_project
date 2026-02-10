@@ -8,9 +8,21 @@ import config
 # === ロギング設定 ===
 class DiscordErrorHandler(logging.Handler):
     """エラーログをDiscordに通知するハンドラ (スタックトレース対応版)"""
+    # ★追加: 初期化時にWebhook URLを受け取れるようにする
+    def __init__(self, webhook_url=None):
+        super().__init__()
+        self.webhook_url = webhook_url
+    
+    
     def emit(self, record):
         if record.levelno >= logging.ERROR and "Discord" not in record.msg:
             try:
+
+                # ★修正: 指定されたURLがあれば使い、なければデフォルト設定を使う
+                url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR
+                if not url:
+                    return
+                
                 url = config.DISCORD_WEBHOOK_ERROR
                 if not url:
                     return
@@ -34,7 +46,7 @@ class DiscordErrorHandler(logging.Handler):
             except Exception:
                 pass
 
-def setup_logging(name: str) -> logging.Logger:
+def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
     """ロガーのセットアップ"""
     logger = logging.getLogger(name)
     logger.propagate = False
@@ -65,14 +77,13 @@ def setup_logging(name: str) -> logging.Logger:
     logger.addHandler(file_handler)
 
     # Discord通知
-    if hasattr(config, "DISCORD_WEBHOOK_ERROR") and config.DISCORD_WEBHOOK_ERROR:
-        discord_handler = DiscordErrorHandler()
+    # ★追加: 引数でURLが指定されていれば優先、なければconfig.DISCORD_WEBHOOK_ERRORを使用
+    target_url = webhook_url or getattr(config, "DISCORD_WEBHOOK_ERROR", None)
+
+    if target_url:
+        discord_handler = DiscordErrorHandler(webhook_url=target_url)
         discord_handler.setLevel(logging.ERROR)
         discord_handler.setFormatter(formatter)
         logger.addHandler(discord_handler)
-    
-    # 外部ライブラリの抑制
-    logging.getLogger("zeep").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-    
+
     return logger
