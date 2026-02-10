@@ -24,6 +24,8 @@ BINDING_NAME = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBin
 
 # ★追加: VIGIカメラ等の強制切断対策 (50秒で自発的に再接続)
 SESSION_LIFETIME = 50
+# ★追加: エラー通知を抑制する閾値
+MAX_RETRY_THRESHOLD = 3
 
 def ensure_log_dir():
     if not os.path.exists(LOG_DIR):
@@ -76,7 +78,7 @@ def collect_single_camera(cam_conf):
         return
 
     # 開始通知
-    common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🎥 {cam_name} のデータ記録を始めます✨"}])
+    # common.send_push(config.LINE_USER_ID, [{"type": "text", "text": f"🎥 {cam_name} のデータ記録を始めます✨"}])
 
     while True: # 再接続ループ
         try:
@@ -161,9 +163,37 @@ def collect_single_camera(cam_conf):
             logger.info(f"[{cam_name}] 停止しました。")
             break
         except Exception as e:
-            logger.error(f"❌ [{cam_name}] 接続エラー: {e}")
-            logger.info(f"[{cam_name}] 10秒後に再試行...")
-            time.sleep(10)
+            # ★修正: 全てのエラーをここで一元管理し、通知制御を行う
+            err_str = str(e)
+            
+            # 想定内のエラーキーワードリスト
+            transient_keywords = [
+                'RemoteDisconnected', 
+                'Connection aborted', 
+                'BrokenPipeError', 
+                'ConnectionResetError',
+                'Unknown error' # onvifライブラリがラップしたものも含む
+            ]
+            
+            is_transient = any(k in err_str for k in transient_keywords)
+            
+            consecutive_errors += 1
+            
+            if is_transient:
+                if consecutive_errors >= MAX_RETRY_THRESHOLD:
+                    # 3回以上連続したら初めてERRORログを出す
+                    logger.error(f"❌ [{cam_name}] 接続エラー(頻発): {e} ({consecutive_errors}/{MAX_RETRY_THRESHOLD})")
+                else:
+                    # それまではINFO/WARNING程度に留める
+                    logger.info(f"🔄 [{cam_name}] 通信切断(再接続中): {consecutive_errors}回目. Error: {e}")
+                
+                time.sleep(2) # 短い待機で再試行
+            
+            else:
+                # 明らかな予期せぬエラー
+                logger.error(f"❌ [{cam_name}] 予期せぬエラー: {e}")
+                logger.info(f"[{cam_name}] 10秒後に再試行...")
+                time.sleep(10)
 
 async def main():
     if not ensure_log_dir(): return
