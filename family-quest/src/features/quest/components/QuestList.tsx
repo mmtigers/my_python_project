@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Undo2, Clock, RotateCcw, Hourglass, TrendingUp } from 'lucide-react';
+import { Undo2, Clock, RotateCcw, Hourglass, TrendingUp, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -27,7 +27,7 @@ const QuestItem: React.FC<{
     const [isCooldown, setIsCooldown] = useState(false);
 
     const {
-        isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited,
+        isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited, isLocked,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
 
@@ -44,6 +44,7 @@ const QuestItem: React.FC<{
 
     const handleClick = () => {
         if (isCooldown) return;
+        if (isLocked) return;
 
         if (!isDone && !isPending) {
             if (quest.type === 'daily' || isInfinite) {
@@ -71,7 +72,10 @@ const QuestItem: React.FC<{
                 variant={variant}
                 onClick={handleClick}
                 // ボーナス時の赤枠アニメーションはCard自体に適用
-                className={`md:p-6 md:h-full ${hasBonus && !isDone && !isPending ? 'border-2 border-red-400 animate-pulse-slow' : ''}`}
+                className={`md:p-6 md:h-full 
+                    ${hasBonus && !isDone && !isPending && !isLocked ? 'border-2 border-red-400 animate-pulse-slow' : ''}
+                    ${isLocked ? 'opacity-60 grayscale cursor-not-allowed bg-gray-100 border-gray-300' : ''}
+                `}
             >
                 {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
                 {isRandom && !isDone && !isPending && (
@@ -91,24 +95,38 @@ const QuestItem: React.FC<{
                 <div className="flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6 relative z-10 w-full h-full">
                     {/* 1. アイコンエリア */}
                     <div className="flex items-center justify-center min-w-[3rem]">
-                        <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
-                            {quest.icon || quest.icon_key}
-                        </span>
+                        {/* ▼ ロック時は鍵アイコンを表示 */}
+                        {isLocked ? (
+                            <span className="text-2xl md:text-5xl text-gray-400">
+                                <Lock size={32} />
+                            </span>
+                        ) : (
+                            <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
+                                {quest.icon || quest.icon_key}
+                            </span>
+                        )}
                     </div>
 
                     {/* 2. テキスト情報エリア */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
-                            {/* バッジ類 */}
-                            {isInfinite && !isPending && (
+                            {/* ▼ ロックバッジ */}
+                            {isLocked && (
+                                <span className="bg-gray-500 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                                    <Lock size={10} /> 未開放
+                                </span>
+                            )}
+
+                            {/* ... (他のバッジ: 無限、時間制限、申請中) ... */}
+                            {isInfinite && !isPending && !isLocked && (
                                 <span className="bg-cyan-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
                             )}
-                            {isTimeLimited && !isDone && !isPending && (
+                            {isTimeLimited && !isDone && !isPending && !isLocked && (
                                 <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
                                     ⏰ {quest.start_time}~{quest.end_time}
                                 </span>
                             )}
-                            {isLimited && !isDone && !isPending && (
+                            {isLimited && !isDone && !isPending && !isLocked && (
                                 <span className="bg-red-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">期間限定</span>
                             )}
                             {isPending && (
@@ -117,11 +135,11 @@ const QuestItem: React.FC<{
                         </div>
 
                         {/* タイトル */}
-                        <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : 'text-white'}`}>
+                        <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : isLocked ? 'text-gray-500' : 'text-white'}`}>
                             {displayTitle}
                         </div>
 
-                        {/* 説明文 */}
+                        {/* 説明文: ロック時は「条件: 〇〇」と出しても親切だが、一旦そのまま表示 */}
                         {(quest.desc || quest.description) && (
                             <div className="text-xs md:text-sm text-gray-400 leading-tight md:leading-normal">
                                 {quest.desc || quest.description}
@@ -131,7 +149,12 @@ const QuestItem: React.FC<{
 
                     {/* 3. 報酬・ステータスエリア */}
                     <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
-                        {isDone ? (
+                        {/* ▼ ロック時の表示 */}
+                        {isLocked ? (
+                            <span className="text-gray-400 text-xs md:text-sm whitespace-nowrap font-mono">
+                                LOCKED
+                            </span>
+                        ) : isDone ? (
                             <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
                                 <Undo2 size={12} className="md:w-4 md:h-4" /> 戻す
                             </span>
@@ -145,11 +168,6 @@ const QuestItem: React.FC<{
                                 {totalGold > 0 && (
                                     <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
                                         {totalGold} G
-                                    </span>
-                                )}
-                                {hasBonus && (
-                                    <span className="text-[10px] md:text-xs text-red-300 font-bold animate-pulse">
-                                        (Bonus +{bonusGold}G)
                                     </span>
                                 )}
                             </div>
@@ -183,31 +201,46 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
+            // ▼ ソート順のロジック更新
             const getStatusScore = (quest: Quest) => {
                 const qId = quest.id || quest.quest_id;
-                // 無限クエストは常に「未完了（最優先）」扱い
+
+                // 1. ロック判定 (Hooksが使えないのでここで簡易判定)
+                const preReqId = quest.pre_requisite_quest_id;
+                const isPreReqCleared = !preReqId || completedQuests.some(cq =>
+                    cq.user_id === currentUser.user_id &&
+                    cq.quest_id === preReqId &&
+                    cq.status === 'approved'
+                );
+                const isLocked = !isPreReqCleared;
+
                 const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite' || (quest as any)._isInfinite;
-                if (isInfinite) return 0;
+                if (isInfinite) return 0; // 無限は最優先(挑戦可能)
 
-                // 申請中チェック
                 const isPending = pendingQuests.some(pq => pq.user_id === currentUser.user_id && pq.quest_id === qId);
-                if (isPending) return 1; // 申請中は2番目
-
-                // 完了チェック
                 const isDone = completedQuests.some(cq => cq.user_id === currentUser.user_id && cq.quest_id === qId && cq.status === 'approved');
-                if (isDone) return 2; // 完了済みは一番下
 
-                return 0; // 未完了は最優先
+                // 優先順位: 
+                // 0: 未完了(挑戦可能)
+                // 1: 申請中 (目立つように上の方へ、または完了の前へ)
+                // 2: ロック済み (これからやるものだが今はできない -> 下へ)
+                // 3: 完了済み (一番下)
+
+                if (isPending) return 1;
+                if (isLocked) return 2;  // ▼ ロックは未完了の後、完了の前
+                if (isDone) return 3;
+
+                return 0; // 未完了・挑戦可能
             };
 
             const scoreA = getStatusScore(a);
             const scoreB = getStatusScore(b);
 
             if (scoreA !== scoreB) {
-                return scoreA - scoreB; // 0(未完了) -> 1(申請中) -> 2(完了) の順
+                return scoreA - scoreB;
             }
-            // ------------------------------------------
 
+            // ... (ボーナス順などの既存ソート) ...
             const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
             const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
             if (bonusA !== bonusB) return bonusB - bonusA;

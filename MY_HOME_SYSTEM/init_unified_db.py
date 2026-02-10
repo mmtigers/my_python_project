@@ -400,6 +400,7 @@ def init_db() -> None:
                 target_user TEXT DEFAULT 'all',
                 start_date TEXT,
                 end_date TEXT,
+                pre_requisite_quest_id INTEGER,
                 occurrence_chance REAL DEFAULT 1.0
             )
         ''')

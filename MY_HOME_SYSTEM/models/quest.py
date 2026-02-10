@@ -31,6 +31,7 @@ class MasterQuest(BaseModel):
     chance: Optional[float] = 1.0
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+    pre_requisite_quest_id: Optional[int] = None
 
 class MasterReward(BaseModel):
     id: int

@@ -17,6 +17,21 @@ export const useQuestStatus = ({ quest, currentUser, completedQuests, pendingQue
         const isLimited = quest.type === 'limited';
         const isTimeLimited = !!quest.start_time;
 
+        // ▼ 追加: ロック判定ロジック (Smart Client方式)
+        // 1. 前提クエストIDがあるか確認
+        const preReqId = quest.pre_requisite_quest_id;
+
+        // 2. 前提条件の達成確認
+        // completedQuests には「今日」の承認済みデータのみが入っている前提 (GameSystem仕様)
+        const isPreReqCleared = !preReqId || completedQuests.some(cq =>
+            cq.user_id === currentUser.user_id &&
+            cq.quest_id === preReqId &&
+            cq.status === 'approved'
+        );
+
+        // 3. ロック状態の確定 (前提未達成ならロック)
+        const isLocked = !isPreReqCleared;
+
         // 自分の完了履歴
         const myCompletions = completedQuests.filter(cq =>
             cq.user_id === currentUser.user_id &&
@@ -40,9 +55,10 @@ export const useQuestStatus = ({ quest, currentUser, completedQuests, pendingQue
         }
 
         // カードのバリエーション決定
-        let variant: 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' = 'default';
+        let variant: 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' | 'locked' = 'default';
 
-        if (isDone) variant = 'completed';
+        if (isLocked) variant = 'locked'; // ▼ ロックを最優先で判定
+        else if (isDone) variant = 'completed';
         else if (isPending) variant = 'pending';
         else if (isInfinite) variant = 'infinite';
         else if (isTimeLimited) variant = 'timeLimit';
@@ -56,6 +72,7 @@ export const useQuestStatus = ({ quest, currentUser, completedQuests, pendingQue
             isRandom,
             isTimeLimited,
             isLimited,
+            isLocked,
             displayTitle,
             variant
         };

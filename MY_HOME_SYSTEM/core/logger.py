@@ -23,10 +23,7 @@ class DiscordErrorHandler(logging.Handler):
                 if not url:
                     return
                 
-                url = config.DISCORD_WEBHOOK_ERROR
-                if not url:
-                    return
-
+                
                 log_msg = self.format(record)
                 
                 stack_trace = ""
