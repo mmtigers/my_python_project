@@ -200,7 +200,7 @@ class PostBootHealthCheck:
 
     # --- 4. Peripherals ---
     def check_peripherals(self):
-        # NAS
+        # NAS Check with Write Test (Robustness Fix)
         nas_ip = getattr(config, "NAS_IP", "192.168.1.100")
         mount_point = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         is_mounted = os.path.ismount(mount_point)
@@ -211,12 +211,31 @@ class PostBootHealthCheck:
              ping_nas = True
         except: pass
 
-        if is_mounted and ping_nas:
-            self.results.append(CheckResult("NAS", STATUS_OK, f"Mounted ({nas_ip})"))
-        elif ping_nas and not is_mounted:
-            self.results.append(CheckResult("NAS", STATUS_ERR, "Not Mounted"))
+        nas_status = STATUS_ERR
+        nas_msg = "Unknown"
+
+        if is_mounted:
+            # 書き込み権限の確認
+            test_file = os.path.join(mount_point, ".health_check_rw")
+            try:
+                with open(test_file, "w") as f:
+                    f.write("ok")
+                os.remove(test_file)
+                # 書き込み成功
+                nas_status = STATUS_OK
+                nas_msg = f"Mounted & Writable ({nas_ip})"
+            except (IOError, PermissionError) as e:
+                # マウントされているが書き込めない
+                nas_status = STATUS_ERR
+                nas_msg = f"Mounted but READ-ONLY/Permission Denied"
+        elif ping_nas:
+            nas_status = STATUS_ERR
+            nas_msg = "Not Mounted (Ping OK)"
         else:
-            self.results.append(CheckResult("NAS", STATUS_ERR, "Not Reachable"))
+            nas_status = STATUS_ERR
+            nas_msg = "Not Reachable"
+
+        self.results.append(CheckResult("NAS", nas_status, nas_msg))
 
         # Cameras
         cameras = getattr(config, "CAMERAS", [])
