@@ -42,8 +42,16 @@ from services.notification_service import send_push
 # === ログ・定数設定 ===
 logger = setup_logging("camera")
 
-ASSETS_DIR: str = os.path.join(config.ASSETS_DIR, "snapshots")
-os.makedirs(ASSETS_DIR, exist_ok=True)
+try:
+    ASSETS_DIR: str = os.path.join(config.ASSETS_DIR, "snapshots")
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+except (PermissionError, OSError) as e:
+    # NAS等が書き込み不可の場合、ローカルの一時ディレクトリにフォールバック
+    fallback_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_assets", "snapshots")
+    logger.warning(f"⚠️ Failed to create NAS directory '{ASSETS_DIR}': {e}")
+    logger.warning(f"   -> 📂 Switching to local fallback: '{fallback_path}'")
+    ASSETS_DIR = fallback_path
+    os.makedirs(ASSETS_DIR, exist_ok=True)
 
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
@@ -380,7 +388,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                                 debug_val = f"<No Data/Message> Attrs: {dir(msg)}"
 
                             # 4. 監査ログ
-                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+                            logger.debug(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
 
                             # 5. ビジネスロジック判定
                             if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
