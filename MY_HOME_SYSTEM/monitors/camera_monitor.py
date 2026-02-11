@@ -236,6 +236,18 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
+    # -------------------------------------------------------
+    # [追記] TopicFilterの定義
+    # -------------------------------------------------------
+    # RuleEngine配下(CellMotionDetector, VMDなど)のみを受信するフィルタ
+    # これにより IsConfigChange などのノイズをカットし、通信負荷を下げます
+    topic_filter = {
+        'TopicExpression': {
+            '_value_1': 'tns1:RuleEngine//.',
+            'Dialect': 'http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet'
+        }
+    }
+
     while True:
         mycam: Any = None
         current_pullpoint: Any = None
@@ -275,12 +287,16 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             # 3. イベント購読
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
-            subscription = events_service.CreatePullPointSubscription()
+            logger.info(f"[{cam_name}] Creating subscription with TopicFilter...")
+            current_pullpoint = events_service.CreatePullPointSubscription(
+                Filter=topic_filter,
+                InitialTerminationTime='PT60S'  # 明示的に60秒を指定(必要に応じて調整)
+            )
             
             try:
-                plp_address = subscription.SubscriptionReference.Address._value_1
+                plp_address = current_pullpoint.SubscriptionReference.Address._value_1
             except AttributeError:
-                plp_address = subscription.SubscriptionReference.Address
+                plp_address = current_pullpoint.SubscriptionReference.Address
 
             events_wsdl = os.path.join(wsdl_path, 'events.wsdl')
             pullpoint = ONVIFService(
@@ -312,8 +328,8 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 if time.time() - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Refreshing session...")
                     try:
-                        if hasattr(subscription, 'Unsubscribe'):
-                            subscription.Unsubscribe()
+                        if hasattr(current_pullpoint, 'Unsubscribe'):
+                            current_pullpoint.Unsubscribe()
                     except Exception: pass
                     break
 
