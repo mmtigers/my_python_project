@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import logging
 from typing import List, Dict, Optional, Any, Union
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
@@ -75,15 +76,56 @@ REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
 # 2. システム・パス設定
 # ==========================================
 BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
+FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")
+
+def _ensure_safe_path(preferred_path: str, fallback_name: str) -> str:
+    """
+    指定されたパスを作成し、書き込み権限がない場合はローカルへフォールバックする。
+    
+    Args:
+        preferred_path (str): 本来保存したいパス (例: NAS上のパス)
+        fallback_name (str): フォールバック時のディレクトリ名
+    
+    Returns:
+        str: 安全に書き込み可能なパス
+    """
+    try:
+        os.makedirs(preferred_path, exist_ok=True)
+        # 書き込みテスト (ディレクトリが存在しても書き込めない場合があるため)
+        test_file = os.path.join(preferred_path, ".write_test")
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.remove(test_file)
+        return preferred_path
+    except (OSError, PermissionError, IOError) as e:
+        # フォールバック処理
+        fallback_path = os.path.join(FALLBACK_ROOT, fallback_name)
+        try:
+            os.makedirs(fallback_path, exist_ok=True)
+            print(f"⚠️ [Config Warning] Failed to access '{preferred_path}'. Falling back to local: '{fallback_path}'. Reason: {e}", file=sys.stderr)
+            return fallback_path
+        except Exception as fatal_e:
+            print(f"❌ [Config Critical] Failed to create fallback path '{fallback_path}': {fatal_e}", file=sys.stderr)
+            return preferred_path # 最終手段として元のパスを返すが、恐らくエラーになる
+
 
 # NAS設定
 NAS_MOUNT_POINT: str = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")
-NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
+NAS_PROJECT_ROOT: str = _ensure_safe_path(
+    os.path.join(NAS_MOUNT_POINT, "home_system"), 
+    "home_system"
+)
 
 # DB & Assets
 SQLITE_DB_PATH: str = os.path.join(BASE_DIR, "home_system.db")
-ASSETS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "assets")
-LOG_DIR: str = os.path.join(BASE_DIR, "logs")
+ASSETS_DIR: str = _ensure_safe_path(
+    os.path.join(NAS_PROJECT_ROOT, "assets"), 
+    "assets"
+)
+LOG_DIR: str = _ensure_safe_path(
+    os.path.join(BASE_DIR, "logs"), 
+    "logs"
+)
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json") # 外部設定ファイル
 
 # DBテーブル名定義 (設計書 v1.0.0 準拠へ移行)
@@ -329,7 +371,8 @@ for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DI
         if not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
     except Exception as e:
-        print(f"⚠️ Warning: Failed to create directory '{d}': {e}", file=sys.stderr)
+        # ここでのエラーは致命的だが、import停止を防ぐためログ出力にとどめる
+        print(f"⚠️ Warning: Failed to ensure directory existence '{d}': {e}", file=sys.stderr)
 
 # グラフ画像の保存先
 CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")

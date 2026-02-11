@@ -27,12 +27,28 @@ class ClinicMonitor:
     def __init__(self) -> None:
         """設定をロードし、初期化を行う。"""
         self.url: str = getattr(config, "CLINIC_MONITOR_URL", "")
-        self.save_dir: str = getattr(config, "CLINIC_HTML_DIR", "")
+        
+        # Robustness Fix: config.py で解決された安全なパスを使用するが、念のためディレクトリ生成を試みる
+        base_dir = getattr(config, "CLINIC_HTML_DIR", "")
+        if not base_dir:
+            # 万が一 config が空の場合のデフォルト
+            base_dir = os.path.join(os.path.dirname(__file__), "..", "assets", "clinic_html")
+            
+        self.save_dir: str = base_dir
+        
+        # ディレクトリ準備 (エラーでもクラッシュさせない)
+        try:
+            os.makedirs(self.save_dir, exist_ok=True)
+        except OSError as e:
+            logger.error(f"❌ Failed to create save directory '{self.save_dir}'. Saving to monitor directory. Error: {e}")
+            self.save_dir = os.path.dirname(__file__) # 最終フォールバック
+
         self.timeout: int = getattr(config, "CLINIC_REQUEST_TIMEOUT", 10)
         self.user_agent: str = getattr(config, "CLINIC_USER_AGENT", "MyHomeSystem/1.0")
 
-        if not self.url or not self.save_dir:
-            logger.error("❌ Config Invalid: CLINIC_MONITOR_URL or CLINIC_HTML_DIR is missing.")
+        if not self.url:
+            logger.error("❌ Config Invalid: CLINIC_MONITOR_URL is missing.")
+            # URLがない場合は機能しないため終了してよいが、save_dirエラーでは終了しない
             sys.exit(1)
 
     def is_operating_hours(self) -> bool:
