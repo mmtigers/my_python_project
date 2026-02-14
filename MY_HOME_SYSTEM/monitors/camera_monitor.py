@@ -272,14 +272,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     consecutive_errors: int = 0
     port_candidates: List[int] = [2020, 80]
 
-    # [追加] 切断頻度追跡用の変数を追加
     transient_error_count: int = 0
     last_transient_error_time: float = 0
-
     is_first_connect: bool = True
 
-    
-    
     if cam_conf.get('port'):
         if cam_conf['port'] in port_candidates:
             port_candidates.remove(cam_conf['port'])
@@ -291,13 +287,12 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
         mycam: Any = None
         current_pullpoint: Any = None
         events_service: Any = None
-        
 
         try:
-            wsdl_path = find_wsdl_path()
+            wsdl_path: Optional[str] = find_wsdl_path()
             if not wsdl_path: raise FileNotFoundError("WSDL path could not be determined.")
 
-            target_port = port_candidates[0]
+            target_port: int = port_candidates[0]
             
             # 1. カメラ接続 (ONVIFCamera)
             mycam = ONVIFCamera(
@@ -310,14 +305,13 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             )
 
             # 2. devicemgmtサービス作成 & 認証設定
-            devicemgmt = mycam.create_devicemgmt_service()
+            devicemgmt: Any = mycam.create_devicemgmt_service()
             devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            # 時刻チェックを行い、ズレが許容範囲を超えている場合は接続を中断する
             if not check_camera_time(devicemgmt, cam_name):
                 raise ConnectionRefusedError(f"[{cam_name}] Time verification failed. Check camera clock.")
             
-            device_info = devicemgmt.GetDeviceInformation()
+            device_info: Any = devicemgmt.GetDeviceInformation()
             if is_first_connect:
                 logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
             else:
@@ -326,16 +320,18 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             # 3. イベント購読
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
-            logger.info(f"[{cam_name}] Creating subscription with TopicFilter...")
+            
+            # 【修正1】定常的なサブスクリプション作成のログをDEBUGに降格
+            logger.debug(f"[{cam_name}] Creating subscription with TopicFilter...")
             current_pullpoint = events_service.CreatePullPointSubscription()
             
             try:
-                plp_address = current_pullpoint.SubscriptionReference.Address._value_1
+                plp_address: str = current_pullpoint.SubscriptionReference.Address._value_1
             except AttributeError:
-                plp_address = current_pullpoint.SubscriptionReference.Address
+                plp_address: str = current_pullpoint.SubscriptionReference.Address
 
-            events_wsdl = os.path.join(wsdl_path, 'events.wsdl')
-            pullpoint = ONVIFService(
+            events_wsdl: str = os.path.join(wsdl_path, 'events.wsdl')
+            pullpoint: Any = ONVIFService(
                 xaddr=plp_address,
                 user=cam_conf['user'],
                 passwd=cam_conf['pass'],
@@ -356,30 +352,21 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 logger.debug(f"✅ [{cam_name}] Subscribed successfully (Refresh).")
             
             consecutive_errors = 0
-            session_start_time = time.time()
+            session_start_time: float = time.time()
 
             # 4. 監視ループ
             while True:
-                # セッション更新チェック
                 if time.time() - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Refreshing session...")
-                    try:
-                        if hasattr(current_pullpoint, 'Unsubscribe'):
-                            current_pullpoint.Unsubscribe()
-                    except Exception: pass
+                    # ここでbreakし、finallyブロックで確実な解放を行わせる
                     break
 
-                # イベント取得
                 try:
-                    events = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
-                    
-                    # 調査用プローブ: 基本設計書のログポリシーに則り、DEBUGレベルで運用する
+                    events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
                     if events:
                         logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
                         logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
-                        
                 except Exception as e:
-                    # 予期せぬエラー発生時に原因を特定しやすくするため、エラーメッセージをデバッグ出力に残す
                     logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
                     events = None
 
@@ -387,58 +374,43 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                 if events and hasattr(events, 'NotificationMessage'):
                     for msg in events.NotificationMessage:
-                        # === イベント処理（生XML対応の強靭化版） ===
                         try:
-                            topic_str = "Unknown"
-                            debug_val = "N/A"
-                            is_motion = False
+                            topic_str: str = "Unknown"
+                            debug_val: str = "N/A"
+                            is_motion: bool = False
                             
-                            # 1. Topicの安全な取得 (VIGI特有の _value_1=None 対策)
                             if hasattr(msg, 'Topic'):
                                 if hasattr(msg.Topic, '_value_1') and msg.Topic._value_1 is not None:
                                     topic_str = str(msg.Topic._value_1)
                                 else:
                                     topic_str = str(msg.Topic)
 
-                            # 2. Message内の「生のXMLデータ」を取り出してパースする
                             if hasattr(msg, 'Message') and hasattr(msg.Message, '_value_1'):
-                                element = msg.Message._value_1
-                                # lxmlのElementオブジェクトか判定
+                                element: Any = msg.Message._value_1
                                 if type(element).__name__ == '_Element':
-                                    # 生のXMLを文字列にデコード
-                                    xml_str = etree.tostring(element, encoding='unicode')
+                                    xml_str: str = etree.tostring(element, encoding='unicode')
                                     debug_val = xml_str
-                                    
-                                    # XML文字列の中に「動体検知」と「検知状態(true/1)」が含まれるか判定
-                                    xml_lower = xml_str.lower()
+                                    xml_lower: str = xml_str.lower()
                                     if ('motion' in xml_lower or 'ruleengine' in xml_lower) and ('value="true"' in xml_lower or 'value="1"' in xml_lower):
                                         is_motion = True
                                 else:
-                                    # Elementでない場合はそのまま文字列化
                                     debug_val = str(element)
                             
-                            # 3. 監査ログ出力 (INFOレベルで必ず出力させる)
                             logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
 
-                            # 4. ビジネスロジック判定 (動体検知)
-                            # XMLの直接解析でMotion判定されたか、または従来の判定に合致した場合
                             if is_motion or ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
                                 logger.info(f"🏃 [{cam_name}] Motion Detected!")
                                 save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
-                                
-                                # NASからの画像切り出し＆LINE通知関数の呼び出し
                                 save_image_from_stream(cam_conf, "motion")
                                 
                         except Exception as e:
-                            # パースエラー等をキャッチし、ループを継続させる
                             logger.warning(f"⚠️ [{cam_name}] Event Parse Warning: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
                             continue
-                        # === イベント処理終了 ===
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            # [変更] Handle known VIGI disconnection behavior as INFO
-            # 短時間(15秒)に連続して発生した場合のみWARNINGとする
-            now = time.time()
+            # 【修正3】一時的障害に対するExponential Backoffの適用とログレベル適正化
+            consecutive_errors += 1
+            now: float = time.time()
             if now - last_transient_error_time < 15:
                 transient_error_count += 1
             else:
@@ -446,28 +418,28 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             last_transient_error_time = now
 
+            # 指数関数的待機 (Max 300秒)
+            wait_time: int = min(300, 5 * (2 ** (consecutive_errors - 1)))
+
             if transient_error_count >= 3:
-                logger.warning(f"⚠️ [{cam_name}] Connection lost (Frequent): {e} ({transient_error_count}/3). Retrying...")
+                logger.warning(f"⚠️ [{cam_name}] Connection lost (Frequent): {e} ({transient_error_count}/3). Retrying in {wait_time}s...")
             else:
-                logger.info(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting...")
+                logger.warning(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting in {wait_time}s...")
             
-            time.sleep(2)
+            time.sleep(wait_time)
             continue
 
         except Exception as e:
             consecutive_errors += 1
-            err_msg = str(e)
+            err_msg: str = str(e)
 
-            # ONVIF/Zeep特有の隠れたエラー情報を抽出
-            detailed_info = ""
+            detailed_info: str = ""
             if hasattr(e, 'detail'):
                 detailed_info += f" | Detail: {e.detail}"
             if hasattr(e, 'content'):
-                detailed_info += f" | Content: {str(e.content)[:200]}"  # 長すぎる場合はカット
+                detailed_info += f" | Content: {str(e.content)[:200]}"
             
-            # エラーメッセージを強化
-            full_err_msg = f"{err_msg}{detailed_info}"
-            # 3回未満はWARNING、以降はERROR
+            full_err_msg: str = f"{err_msg}{detailed_info}"
             if consecutive_errors < 3:
                 logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {full_err_msg}")
             else:
@@ -480,36 +452,41 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             perform_emergency_diagnosis(cam_conf['ip'])
             
-            wait = min(300, 30 * (2 ** (consecutive_errors - 1)))
+            wait_time_fatal: int = min(300, 30 * (2 ** (consecutive_errors - 1)))
             
             if consecutive_errors >= 3:
-                old_port = port_candidates[0]
+                old_port: int = port_candidates[0]
                 port_candidates.append(port_candidates.pop(0))
-                new_port = port_candidates[0]
+                new_port: int = port_candidates[0]
                 logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
                 
-            logger.info(f"[{cam_name}] Retry in {wait}s...")
-            time.sleep(wait)
+            logger.info(f"[{cam_name}] Retry in {wait_time_fatal}s...")
+            time.sleep(wait_time_fatal)
 
         finally:
+            # 【修正2】リソース解放処理の明示的な記録
+            logger.debug(f"🧹 [{cam_name}] Starting resource cleanup...")
             if current_pullpoint:
                 if current_pullpoint in active_pullpoints:
                     active_pullpoints.remove(current_pullpoint)
                 try:
                     current_pullpoint.Unsubscribe()
-                except Exception:
-                    pass
+                    logger.debug(f"🗑️ [{cam_name}] Unsubscribed from PullPoint successfully.")
+                except Exception as e:
+                    logger.debug(f"⚠️ [{cam_name}] PullPoint Unsubscribe skipped or failed: {e}")
+                
                 force_close_session(current_pullpoint)
 
             if events_service:
                 force_close_session(events_service)
+                logger.debug(f"🔌 [{cam_name}] Events service session closed.")
 
             if mycam:
                 force_close_session(mycam)
+                logger.debug(f"🔌 [{cam_name}] Camera devicemgmt session closed.")
             
+            logger.debug(f"✨ [{cam_name}] Resource cleanup completed.")
             time.sleep(1)
-
-
 
 async def main() -> None:
     if not WSDL_DIR: return logger.error("WSDL not found")
