@@ -199,41 +199,33 @@ class PostBootHealthCheck:
             self.results.append(CheckResult(target["name"], status, msg))
 
     # --- 4. Peripherals ---
-    def check_peripherals(self):
-        # NAS Check with Write Test (Robustness Fix)
-        nas_ip = getattr(config, "NAS_IP", "192.168.1.100")
+    def check_peripherals(self) -> None:
+        """NASの書き込み権限を含む周辺機器のチェックを行う [cite: 438]"""
+        nas_ip = getattr(config, "NAS_IP", "192.168.1.20")
         mount_point = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         is_mounted = os.path.ismount(mount_point)
         
-        ping_nas = False
-        try:
-             subprocess.check_call(["ping", "-c", "1", "-W", "1", nas_ip], stdout=subprocess.DEVNULL)
-             ping_nas = True
-        except: pass
-
-        nas_status = STATUS_ERR
-        nas_msg = "Unknown"
+        nas_status, nas_msg = STATUS_ERR, "Disconnected"
 
         if is_mounted:
-            # 書き込み権限の確認
             test_file = os.path.join(mount_point, ".health_check_rw")
             try:
                 with open(test_file, "w") as f:
                     f.write("ok")
                 os.remove(test_file)
-                # 書き込み成功
-                nas_status = STATUS_OK
-                nas_msg = f"Mounted & Writable ({nas_ip})"
+                nas_status, nas_msg = STATUS_OK, f"Mounted & Writable ({nas_ip})"
             except (IOError, PermissionError) as e:
-                # マウントされているが書き込めない
-                nas_status = STATUS_ERR
-                nas_msg = f"Mounted but READ-ONLY/Permission Denied"
-        elif ping_nas:
-            nas_status = STATUS_ERR
-            nas_msg = "Not Mounted (Ping OK)"
-        else:
-            nas_status = STATUS_ERR
-            nas_msg = "Not Reachable"
+                # 権限エラーは介入が必要なため、ERRORとして即時通知 [cite: 361, 469]
+                nas_status, nas_msg = STATUS_ERR, "Permission Denied"
+                error_detail = f"NAS書き込み権限エラー: {e}"
+                logger.error(error_detail)
+                common.send_push(
+                    user_id=getattr(config, "LINE_USER_ID", None),
+                    messages=[{"type": "text", "text": f"🚨 [System Alert] NAS権限エラー\n内容: {error_detail}"}],
+                    target="discord",
+                    channel="report"
+                )
+
 
         self.results.append(CheckResult("NAS", nas_status, nas_msg))
 
