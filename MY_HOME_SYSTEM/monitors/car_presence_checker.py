@@ -146,17 +146,18 @@ def record_result_to_db(action: str, details: str, score: float, img_path: str, 
 
 def main() -> None:
     """メイン監視プロセス。"""
-    tmp_img_path = "/tmp/car_check_latest.jpg"
+    tmp_img_path: str = "/tmp/car_check_latest.jpg"
     
     try:
         # 1. 映像取得 (Retry機能付き)
-        frame = get_camera_frame()
+        frame: Optional[np.ndarray] = get_camera_frame()
         if frame is None:
-            # エラーログはget_camera_frame内で出力済み
-            # 連続エラー通知を防ぐため、ここではRaiseしない
             return 
 
         # 2. AI判定
+        current_action: str
+        details: str
+        score: float
         current_action, details, score = judge_car_presence(frame)
         cv2.imwrite(tmp_img_path, frame)
 
@@ -166,7 +167,6 @@ def main() -> None:
         
         with get_db_cursor() as cur:
             if cur:
-                # 最新の1件を取得
                 cur.execute(f"SELECT action, timestamp FROM {config.SQLITE_TABLE_CAR} ORDER BY id DESC LIMIT 1")
                 row = cur.fetchone()
                 if row:
@@ -185,8 +185,8 @@ def main() -> None:
         should_save: bool = has_status_changed
         if not has_status_changed and last_ts:
             try:
-                last_dt = datetime.fromisoformat(last_ts)
-                now = datetime.now()
+                last_dt: datetime = datetime.fromisoformat(last_ts)
+                now: datetime = datetime.now()
                 if last_dt.tzinfo is not None and now.tzinfo is None:
                     now = now.astimezone()
                 
@@ -198,7 +198,7 @@ def main() -> None:
 
         # 4. 保存と通知
         if should_save:
-            success = record_result_to_db(current_action, details, score, tmp_img_path, has_status_changed)
+            success: bool = record_result_to_db(current_action, details, score, tmp_img_path, has_status_changed)
             
             if success and has_status_changed:
                 status_msg: str = "🚗 車が戻りました" if current_action == STATE_PRESENT else "💨 車が出かけました"
@@ -211,13 +211,14 @@ def main() -> None:
             elif not success:
                  logger.error("❌ Failed to save record to DB.")
         else:
-            logger.info(f"✅ No change: {current_action} ({details})")
+            # 変更箇所：状態に変化がない場合は DEBUG へ降格
+            logger.debug(f"✅ No change: {current_action} ({details})")
         
         # クリーンアップ
         if os.path.exists(tmp_img_path): os.remove(tmp_img_path)
 
     except Exception as e:
-        err_detail = f"🔥 Car Presence Checker Error: {e}\n{traceback.format_exc()}"
+        err_detail: str = f"🔥 Car Presence Checker Error: {e}\n{traceback.format_exc()}"
         logger.error(err_detail)
         # エラー通知
         send_push(config.LINE_USER_ID or "", [{"type": "text", "text": f"⚠️ 車庫監視スクリプトでエラーが発生しました。\n{e}"}], target="discord", channel="error")
