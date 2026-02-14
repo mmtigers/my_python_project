@@ -372,12 +372,15 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 # イベント取得
                 try:
                     events = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
-                    # ↓↓↓【調査用プローブここから追加】↓↓↓
+                    
+                    # 調査用プローブ: 基本設計書のログポリシーに則り、DEBUGレベルで運用する
                     if events:
-                        # logger.info(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
-                        # logger.info(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
-                    # ↑↑↑【調査用プローブここまで】↑↑↑
-                except Exception:
+                        logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
+                        logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
+                        
+                except Exception as e:
+                    # 予期せぬエラー発生時に原因を特定しやすくするため、エラーメッセージをデバッグ出力に残す
+                    logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
                     events = None
 
                 time.sleep(0.5)
