@@ -78,7 +78,15 @@ class NasMonitor:
         )
 
     def run(self) -> None:
-        logger.info("Checking NAS status...")
+        """NASの状態監視およびディスク使用量の確認を実行する。
+        
+        Pingによる死活監視、マウント状態の確認、ディスク容量の取得を行い、
+        結果をデータベースへ保存する。
+        容量不足の警告時や、定時（8時）の稼働レポート送信時以外は、
+        DEBUGログを出力して通知処理をスキップする。
+        """
+        
+        logger.debug("Checking NAS status...")
         
         # 1. Ping Check
         ping_ok = self.check_ping()
@@ -122,7 +130,7 @@ class NasMonitor:
 
         if not is_full and not is_report_time:
             # 正常かつ報告時間外ならログのみで終了
-            logger.info("⏳ 正常稼働中 - 定時報告(8時)ではないため通知をスキップします")
+            logger.debug("⏳ 正常稼働中 - 定時報告(8時)ではないため通知をスキップします")
             return
         
         status_icon = "🔴" if is_full else "🟢"
