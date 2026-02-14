@@ -76,38 +76,37 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
         logger.error(f"❌ Fetch Error [{device_id}]: {e}")
         return None
 
-async def main():
+async def main() -> None:
     logger.info("🚀 --- SwitchBot Monitor Started (Fixed Architecture v2) ---")
     
     # config.py からデバイス定義を読み込む
-    devices = config.MONITOR_DEVICES
-    processed_count = 0
+    devices: List[Dict[str, Any]] = config.MONITOR_DEVICES
+    processed_count: int = 0
 
     if not devices:
         logger.warning("⚠️ No devices found in config.MONITOR_DEVICES.")
         return
 
     for i, device in enumerate(devices):
-        did = device.get("id")
-        dname = device.get("name", "Unknown")
+        did: str = device.get("id", "")
+        dname: str = device.get("name", "Unknown")
         
         # 修正: キー名 "type" を優先し、念のため "device_type" も見る
-        dtype = device.get("type") or device.get("device_type") or "Unknown"
+        dtype: str = device.get("type") or device.get("device_type") or "Unknown"
 
         if not did:
             continue
 
         # 対象外のデバイスタイプはスキップ
-        is_target = any(t in dtype for t in TARGET_DEVICE_TYPES)
+        is_target: bool = any(t in dtype for t in TARGET_DEVICE_TYPES)
         if not is_target:
-            # logger.debug(f"⏭️ Skipping non-target device: {dname} ({dtype})")
             continue
 
         # APIコール
-        status = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
+        status: Optional[Dict[str, Any]] = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
         
         if status:
-            has_data = False
+            has_data: bool = False
             # 1. 電力データの処理
             if "power" in status:
                 await sensor_service.process_power_data(
@@ -124,9 +123,9 @@ async def main():
             
             if has_data:
                 processed_count += 1
-                logger.info(f"✅ Processed: {dname}")
+                # 変更箇所：定常ポーリングの成功は DEBUG へ降格
+                logger.debug(f"✅ Processed: {dname}")
             else:
-                # ターゲットタイプだが有効なデータが取れなかった場合のみ警告
                 logger.warning(f"⚠️ No valid data extracted for: {dname} (ID: {did})")
         else:
             # 取得失敗時は fetch_device_status_sync 内でログが出ている
@@ -138,7 +137,8 @@ async def main():
     if processed_count == 0:
         logger.warning("⚠️ --- Monitor Completed but 0 devices were processed. Check 'type' in devices.json ---")
     else:
-        logger.info(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
+        # 変更箇所：ポーリングサイクルの終了は DEBUG へ降格
+        logger.debug(f"🏁 --- Monitor Completed ({processed_count} devices processed) ---")
 
 if __name__ == "__main__":
     try:
