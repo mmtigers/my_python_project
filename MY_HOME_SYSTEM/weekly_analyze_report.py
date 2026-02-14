@@ -191,7 +191,7 @@ def run_report() -> None:
     is_morning = (now.hour == 8)     # 8時台
     
     if not is_force and not (is_monday and is_morning):
-        logger.info(f"⏭️ 現在はレポート送信タイミングではありません ({now.strftime('%a %H:%M')}) - Skip")
+        logger.debug(f"⏭️ 現在はレポート送信タイミングではありません ({now.strftime('%a %H:%M')}) - Skip")
         return
 
     logger.info("📊 週間レポート生成プロセスを開始します...")
