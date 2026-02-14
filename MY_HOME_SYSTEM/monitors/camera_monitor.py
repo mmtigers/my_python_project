@@ -136,49 +136,92 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
         return True
 
 def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
-    """NASの録画データから指定時刻の画像を切り出す。"""
+    """NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・リトライ機構付き）"""
     if target_time is None: target_time = dt_class.now()
     sub_dir = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
     if not sub_dir: return None
 
     record_dir: str = os.path.join(config.NVR_RECORD_DIR, sub_dir)
-    try:
-        files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
-        if not files: return None
+    
+    # 恒久対策: ディスク書き込みのバッファ遅延を吸収するためのポーリング機構
+    max_retries = 6      # 最大試行回数
+    retry_delay = 0.5    # 再試行までの待機秒数（最大で計3秒待機）
 
-        target_file = files[-1]
-        for f_path in reversed(files):
-            try:
-                f_dt = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
-                if f_dt <= target_time:
-                    target_file = f_path
-                    break
-            except ValueError: continue
-        
-        f_start_dt = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
-        seek_sec = max(0.0, (target_time - f_start_dt).total_seconds())
-        
-        tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
-        cmd = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
-        
-        if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-            with open(tmp_path, "rb") as f: return f.read()
-    except Exception:
-        pass
+    for attempt in range(max_retries):
+        try:
+            files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
+            if not files:
+                logger.warning(f"⚠️ [{cam_conf['name']}] No .mp4 files found in {record_dir}")
+                return None
+
+            target_file = files[-1]
+            for f_path in reversed(files):
+                try:
+                    f_dt = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
+                    if f_dt <= target_time:
+                        target_file = f_path
+                        break
+                except ValueError: continue
+            
+            f_start_dt = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
+            # 暫定値でのマイナスは廃止。イベント発生の「ジャストの時刻」を狙う
+            seek_sec = max(0.0, (target_time - f_start_dt).total_seconds())
+            
+            tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
+            cmd = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
+            
+            # FFmpeg実行
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+            
+            # 画像が正しく（0バイト以上で）生成されていれば成功
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                logger.info(f"✅ [{cam_conf['name']}] Snapshot created successfully (Attempt {attempt + 1}/{max_retries})")
+                with open(tmp_path, "rb") as f: 
+                    return f.read()
+            
+            # 失敗（まだディスクに書かれていない）場合は少し待ってリトライ
+            logger.info(f"⏳ [{cam_conf['name']}] Frame not yet flushed to disk. Retrying {attempt + 1}/{max_retries}...")
+            time.sleep(retry_delay)
+
+        except Exception as e:
+            logger.error(f"🚨 FFmpeg Exception: {e}")
+            time.sleep(retry_delay)
+
+    logger.error(f"❌ [{cam_conf['name']}] Failed to capture snapshot after {max_retries} attempts.")
     return None
 
 def save_image_from_stream(cam_conf: Dict[str, Any], trigger_type: str) -> None:
+    """画像を保存し、Discordへ直接アップロード通知を行う（根本対策済）"""
     image_data = capture_snapshot_from_nvr(cam_conf)
-    if not image_data: return
+    if not image_data: 
+        logger.warning(f"⚠️ [{cam_conf['name']}] Image data is empty. Skipping save and notification.")
+        return
 
+    # NASへ画像を保存
     filename = f"{cam_conf['id']}_{trigger_type}_{dt_class.now().strftime('%Y%m%d_%H%M%S')}.jpg"
     filepath = os.path.join(ASSETS_DIR, filename)
     with open(filepath, "wb") as f:
         f.write(image_data)
+    logger.info(f"💾 [{cam_conf['name']}] Image successfully saved to NAS: {filepath}")
     
-    img_url = f"{config.FRONTEND_URL}/assets/snapshots/{filename}"
-    send_push(config.LINE_USER_ID, [{"type":"image", "originalContentUrl": img_url, "previewImageUrl": img_url}], target="line")
+    # 恒久対策: Discordへローカルの画像ファイルを直接アップロード（multipart/form-data）
+    webhook_url = config.DISCORD_WEBHOOK_NOTIFY or config.DISCORD_WEBHOOK_URL
+    if webhook_url:
+        try:
+            logger.info(f"📤 [{cam_conf['name']}] Uploading image directly to Discord...")
+            with open(filepath, "rb") as img_file:
+                files = {"file": (filename, img_file, "image/jpeg")}
+                payload = {"content": f"🚨 **{cam_conf['name']}**で動体を検知しました！"}
+                res = requests.post(webhook_url, data=payload, files=files, timeout=10)
+                
+                if res.status_code in [200, 204]:
+                    logger.info(f"✅ [{cam_conf['name']}] Discord notification sent successfully.")
+                else:
+                    logger.error(f"❌ Discord API Error: {res.status_code} - {res.text}")
+        except Exception as e:
+            logger.error(f"🚨 Failed to send image to Discord: {e}")
+    else:
+        logger.warning("⚠️ Discord Webhook URL is not configured.")
 
 def close_camera_session(camera_instance: Any):
     """ONVIFカメラの内部セッションを強制的に閉じる"""
@@ -244,18 +287,6 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
-    # -------------------------------------------------------
-    # [追記] TopicFilterの定義
-    # -------------------------------------------------------
-    # RuleEngine配下(CellMotionDetector, VMDなど)のみを受信するフィルタ
-    # これにより IsConfigChange などのノイズをカットし、通信負荷を下げます
-    topic_filter = {
-        'TopicExpression': {
-            '_value_1': 'tns1:RuleEngine//.',
-            'Dialect': 'http://www.onvif.org/ver10/tev/topicExpression/ConcreteSet'
-        }
-    }
-
     while True:
         mycam: Any = None
         current_pullpoint: Any = None
@@ -296,10 +327,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             logger.info(f"[{cam_name}] Creating subscription with TopicFilter...")
-            current_pullpoint = events_service.CreatePullPointSubscription(
-                Filter=topic_filter,
-                InitialTerminationTime='PT60S'  # 明示的に60秒を指定(必要に応じて調整)
-            )
+            current_pullpoint = events_service.CreatePullPointSubscription()
             
             try:
                 plp_address = current_pullpoint.SubscriptionReference.Address._value_1
@@ -344,6 +372,11 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 # イベント取得
                 try:
                     events = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
+                    # ↓↓↓【調査用プローブここから追加】↓↓↓
+                    if events:
+                        # logger.info(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
+                        # logger.info(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
+                    # ↑↑↑【調査用プローブここまで】↑↑↑
                 except Exception:
                     events = None
 
@@ -351,61 +384,48 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                 if events and hasattr(events, 'NotificationMessage'):
                     for msg in events.NotificationMessage:
-                        # === イベント処理の安全化（Section 8.5 信頼性設計） ===
+                        # === イベント処理（生XML対応の強靭化版） ===
                         try:
-                            # 1. Topicの取得
-                            raw_topic = getattr(msg, 'Topic', None)
-                            if not raw_topic:
-                                continue
-                            topic_str = str(raw_topic)
-
-                            # 2. Data属性の安全な探索 (AttributeError対策)
-                            # メーカーやライブラリVerにより格納場所が異なるため、Data -> Message の順で探索
-                            data_node = getattr(msg, 'Data', None)
-                            if data_node is None:
-                                data_node = getattr(msg, 'Message', None)
-
-                            # 3. SimpleItemの抽出とデバッグ情報の生成
-                            simple_item = None
+                            topic_str = "Unknown"
                             debug_val = "N/A"
-
-                            if data_node:
-                                # SimpleItemが存在するか確認
-                                raw_items = getattr(data_node, 'SimpleItem', [])
-                                
-                                # zeepの返り値がリストでない場合（単体要素）の正規化
-                                if raw_items is not None and not isinstance(raw_items, list):
-                                    raw_items = [raw_items]
-                                
-                                if raw_items and len(raw_items) > 0:
-                                    simple_item = raw_items[0]
-                                    # Name, Valueへの安全なアクセス
-                                    s_name = getattr(simple_item, 'Name', 'Unknown')
-                                    s_value = getattr(simple_item, 'Value', 'Unknown')
-                                    debug_val = f"{s_name}={s_value}"
-                            else:
-                                # データ構造不明時は属性一覧をデバッグ用に出力
-                                debug_val = f"<No Data/Message> Attrs: {dir(msg)}"
-
-                            # 4. 監査ログ
-                            logger.debug(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
-
-                            # 5. ビジネスロジック判定
-                            if 'RuleEngine/CellMotionDetector/Motion' in topic_str:
-                                if simple_item:
-                                    val = getattr(simple_item, 'Value', '')
-                                    # 文字列比較で安全に判定
-                                    if str(val).lower() == 'true':
-                                        logger.info(f"🏃 [{cam_name}] Motion Detected!")
-                                        save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
-                                        save_image_from_stream(cam_conf, "motion")
+                            is_motion = False
                             
-                            elif 'DigitalInput' in topic_str:
-                                if simple_item:
-                                    val = getattr(simple_item, 'Value', '')
-                                    if str(val).lower() == 'true':
-                                        logger.info(f"DETECT: [{cam_name}] Sensor Active")
+                            # 1. Topicの安全な取得 (VIGI特有の _value_1=None 対策)
+                            if hasattr(msg, 'Topic'):
+                                if hasattr(msg.Topic, '_value_1') and msg.Topic._value_1 is not None:
+                                    topic_str = str(msg.Topic._value_1)
+                                else:
+                                    topic_str = str(msg.Topic)
 
+                            # 2. Message内の「生のXMLデータ」を取り出してパースする
+                            if hasattr(msg, 'Message') and hasattr(msg.Message, '_value_1'):
+                                element = msg.Message._value_1
+                                # lxmlのElementオブジェクトか判定
+                                if type(element).__name__ == '_Element':
+                                    # 生のXMLを文字列にデコード
+                                    xml_str = etree.tostring(element, encoding='unicode')
+                                    debug_val = xml_str
+                                    
+                                    # XML文字列の中に「動体検知」と「検知状態(true/1)」が含まれるか判定
+                                    xml_lower = xml_str.lower()
+                                    if ('motion' in xml_lower or 'ruleengine' in xml_lower) and ('value="true"' in xml_lower or 'value="1"' in xml_lower):
+                                        is_motion = True
+                                else:
+                                    # Elementでない場合はそのまま文字列化
+                                    debug_val = str(element)
+                            
+                            # 3. 監査ログ出力 (INFOレベルで必ず出力させる)
+                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+
+                            # 4. ビジネスロジック判定 (動体検知)
+                            # XMLの直接解析でMotion判定されたか、または従来の判定に合致した場合
+                            if is_motion or ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
+                                logger.info(f"🏃 [{cam_name}] Motion Detected!")
+                                save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
+                                
+                                # NASからの画像切り出し＆LINE通知関数の呼び出し
+                                save_image_from_stream(cam_conf, "motion")
+                                
                         except Exception as e:
                             # パースエラー等をキャッチし、ループを継続させる
                             logger.warning(f"⚠️ [{cam_name}] Event Parse Warning: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
