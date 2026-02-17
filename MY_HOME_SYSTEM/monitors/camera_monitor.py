@@ -136,16 +136,16 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
         return True
 
 def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
-    """NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・リトライ機構付き）"""
+    """NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・根本対策済み）"""
     if target_time is None: target_time = dt_class.now()
     sub_dir = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
     if not sub_dir: return None
 
     record_dir: str = os.path.join(config.NVR_RECORD_DIR, sub_dir)
     
-    # 恒久対策: ディスク書き込みのバッファ遅延を吸収するためのポーリング機構
-    max_retries = 6      # 最大試行回数
-    retry_delay = 0.5    # 再試行までの待機秒数（最大で計3秒待機）
+    # 根本対策1: NVRのディスク書き込みバッファを待つため、待機時間を延長
+    max_retries = 10     # 試行回数を10回に増加
+    retry_delay = 1.0    # 1秒間隔（最大約10秒待機）
 
     for attempt in range(max_retries):
         try:
@@ -164,27 +164,33 @@ def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[da
                 except ValueError: continue
             
             f_start_dt = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
-            # 暫定値でのマイナスは廃止。イベント発生の「ジャストの時刻」を狙う
-            seek_sec = max(0.0, (target_time - f_start_dt).total_seconds())
+            
+            # 根本対策2: ジャストの時刻は遅延で未到達の可能性があるため、確実に存在する少し前（1.5秒前）にシークする
+            exact_seek = (target_time - f_start_dt).total_seconds()
+            seek_sec = max(0.0, exact_seek - 1.5)
             
             tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
             cmd = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
             
-            # FFmpeg実行
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+            # 根本対策3: エラー内容を隠蔽せず取得するために text=True を追加
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             
-            # 画像が正しく（0バイト以上で）生成されていれば成功
             if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
                 logger.info(f"✅ [{cam_conf['name']}] Snapshot created successfully (Attempt {attempt + 1}/{max_retries})")
                 with open(tmp_path, "rb") as f: 
                     return f.read()
             
-            # 失敗（まだディスクに書かれていない）場合は少し待ってリトライ
-            logger.info(f"⏳ [{cam_conf['name']}] Frame not yet flushed to disk. Retrying {attempt + 1}/{max_retries}...")
+            # 失敗時、リトライ状況を記録
+            logger.warning(f"⏳ [{cam_conf['name']}] Frame not yet flushed or EOF. Retrying {attempt + 1}/{max_retries}...")
+            
+            # 最後の試行でも失敗した場合は、FFmpegの生のエラーメッセージを吐き出す
+            if attempt == max_retries - 1:
+                logger.error(f"🚨 FFmpeg Stderr Output: {res.stderr.strip()}")
+                
             time.sleep(retry_delay)
 
         except Exception as e:
-            logger.error(f"🚨 FFmpeg Exception: {e}")
+            logger.error(f"🚨 Exception during capture: {e}")
             time.sleep(retry_delay)
 
     logger.error(f"❌ [{cam_conf['name']}] Failed to capture snapshot after {max_retries} attempts.")
@@ -400,7 +406,16 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                             if is_motion or ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
                                 logger.info(f"🏃 [{cam_name}] Motion Detected!")
-                                save_log_generic("camera", f"[{cam_name}] Motion detected", "INFO")
+                                # 現在の時刻
+                                JST = datetime.timezone(datetime.timedelta(hours=9))
+                                now_str = dt_class.now(JST).isoformat()             
+
+                                # device_records のスキーマに合わせたカラムと値
+                                columns = ["timestamp", "device_name", "device_id", "device_type", "movement_state"]
+                                values = (now_str, cam_name, cam_conf['id'], "ONVIF_CAMERA", "ON")
+
+                                # 正しい引数でDB保存を呼び出し
+                                save_log_generic("device_records", columns, values)
                                 save_image_from_stream(cam_conf, "motion")
                                 
                         except Exception as e:
