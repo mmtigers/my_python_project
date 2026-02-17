@@ -310,6 +310,20 @@ if ALLOW_ALL_ORIGINS:
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 
+
+# ==========================================
+# Video Processing (Timelapse)
+# ==========================================
+# テンポラリ動画保存先ディレクトリ (SDカード保護のためNAS上を指定)
+TMP_VIDEO_DIR: str = _ensure_safe_path(
+    os.path.join(NAS_PROJECT_ROOT, "tmp_video"), 
+    "tmp_video"
+)
+
+# NVR録画ファイルのベースディレクトリ (既存になければ追加)
+if 'NVR_RECORD_DIR' not in locals():
+    NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
+
 # ==========================================
 # 7. Sound & Family
 # ==========================================
