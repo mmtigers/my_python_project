@@ -8,6 +8,7 @@ import logging
 import subprocess
 import traceback
 import signal
+import uuid
 import glob
 import requests
 import datetime
@@ -136,65 +137,105 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
         return True
 
 def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
-    """NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・根本対策済み）"""
-    if target_time is None: target_time = dt_class.now()
-    sub_dir = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
-    if not sub_dir: return None
+    """
+    NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・根本対策済み）。
+    リトライ上限到達時やエラー発生時も、確実に一時ファイル等のリソースを解放する。
+
+    Args:
+        cam_conf (Dict[str, Any]): カメラ設定辞書
+        target_time (Optional[datetime.datetime]): 取得対象の時刻。Noneの場合は現在時刻を使用。
+
+    Returns:
+        Optional[bytes]: 取得した画像データのバイト列。失敗時はNone。
+    """
+    if target_time is None:
+        target_time = dt_class.now()
+        
+    sub_dir: Optional[str] = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
+    if not sub_dir:
+        return None
 
     record_dir: str = os.path.join(config.NVR_RECORD_DIR, sub_dir)
     
-    # 根本対策1: NVRのディスク書き込みバッファを待つため、待機時間を延長
-    max_retries = 10     # 試行回数を10回に増加
-    retry_delay = 1.0    # 1秒間隔（最大約10秒待機）
+    max_retries: int = 10     
+    retry_delay: float = 1.0    
 
-    for attempt in range(max_retries):
-        try:
-            files = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
-            if not files:
-                logger.warning(f"⚠️ [{cam_conf['name']}] No .mp4 files found in {record_dir}")
-                return None
+    # 並行処理時の競合を防ぐため、一時ファイル名を完全にユニーク化
+    unique_id: str = uuid.uuid4().hex[:8]
+    tmp_path: str = f"/tmp/snapshot_{cam_conf['id']}_{unique_id}.jpg"
+    
+    cam_name: str = cam_conf['name']
 
-            target_file = files[-1]
-            for f_path in reversed(files):
-                try:
-                    f_dt = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
-                    if f_dt <= target_time:
-                        target_file = f_path
-                        break
-                except ValueError: continue
-            
-            f_start_dt = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
-            
-            # 根本対策2: ジャストの時刻は遅延で未到達の可能性があるため、確実に存在する少し前（1.5秒前）にシークする
-            exact_seek = (target_time - f_start_dt).total_seconds()
-            seek_sec = max(0.0, exact_seek - 1.5)
-            
-            tmp_path = f"/tmp/snapshot_{cam_conf['id']}.jpg"
-            cmd = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
-            
-            # 根本対策3: エラー内容を隠蔽せず取得するために text=True を追加
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
-            
-            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-                logger.info(f"✅ [{cam_conf['name']}] Snapshot created successfully (Attempt {attempt + 1}/{max_retries})")
-                with open(tmp_path, "rb") as f: 
-                    return f.read()
-            
-            # 失敗時、リトライ状況を記録
-            logger.warning(f"⏳ [{cam_conf['name']}] Frame not yet flushed or EOF. Retrying {attempt + 1}/{max_retries}...")
-            
-            # 最後の試行でも失敗した場合は、FFmpegの生のエラーメッセージを吐き出す
-            if attempt == max_retries - 1:
-                logger.error(f"🚨 FFmpeg Stderr Output: {res.stderr.strip()}")
+    try:
+        for attempt in range(1, max_retries + 1):
+            try:
+                files: List[str] = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
+                if not files:
+                    logger.warning(f"⚠️ [{cam_name}] No .mp4 files found in {record_dir}")
+                    return None
+
+                target_file: str = files[-1]
+                for f_path in reversed(files):
+                    try:
+                        f_dt: datetime.datetime = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
+                        if f_dt <= target_time:
+                            target_file = f_path
+                            break
+                    except ValueError:
+                        continue
                 
-            time.sleep(retry_delay)
+                f_start_dt: datetime.datetime = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
+                
+                exact_seek: float = (target_time - f_start_dt).total_seconds()
+                seek_sec: float = max(0.0, exact_seek - 1.5)
+                
+                # FFmpeg実行前に、万が一の残留ファイルを削除（State Leak防止）
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except OSError as e:
+                        logger.warning(f"⚠️ [{cam_name}] Failed to clear temp file before run: {e}")
 
-        except Exception as e:
-            logger.error(f"🚨 Exception during capture: {e}")
-            time.sleep(retry_delay)
+                cmd: List[str] = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
+                res: subprocess.CompletedProcess = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                
+                if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                    logger.info(f"✅ [{cam_name}] Snapshot created successfully (Attempt {attempt}/{max_retries})")
+                    
+                    with open(tmp_path, "rb") as f: 
+                        image_data: bytes = f.read()
+                        
+                    return image_data
+                
+                # 失敗時、リトライ状況を記録
+                logger.warning(f"⏳ [{cam_name}] Frame not yet flushed or EOF. Retrying {attempt}/{max_retries}...")
+                
+                if attempt == max_retries:
+                    logger.error(f"🚨 FFmpeg Stderr Output: {res.stderr.strip()}")
+                    
+                time.sleep(retry_delay)
 
-    logger.error(f"❌ [{cam_conf['name']}] Failed to capture snapshot after {max_retries} attempts.")
-    return None
+            except Exception as e:
+                logger.error(f"🚨 Exception during capture attempt {attempt}: {e}")
+                time.sleep(retry_delay)
+
+        # ループを抜けたということは、リトライ上限到達
+        logger.error(f"❌ [{cam_name}] Failed to capture snapshot after {max_retries} attempts.")
+        return None
+
+    except Exception as e:
+        logger.error(f"❌ [{cam_name}] Unhandled exception in capture_snapshot_from_nvr: {e}")
+        return None
+
+    finally:
+        # 必ずリソース（一時ファイル）を解放し、ログを出力する
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError as e:
+                logger.warning(f"⚠️ [{cam_name}] Failed to remove temp file during cleanup: {e}")
+                
+        logger.info(f"🔌 [{cam_name}] Connection closed / Resource released.")
 
 def save_image_from_stream(cam_conf: Dict[str, Any], trigger_type: str) -> None:
     """画像を保存し、Discordへ直接アップロード通知を行う（根本対策済）"""

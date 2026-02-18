@@ -35,8 +35,52 @@ except ImportError:
     def get_logger(name): return logging.getLogger(name)
 
 # ==========================================
+# Logger Initialization
+# ==========================================
+# ディレクトリ解決時にロガーを使用するため、初期化を上部に移動
+logger = get_logger("newface_monitor")
+
+# ==========================================
 # Configuration & Constants
 # ==========================================
+
+def get_target_directory(nas_dir_str: str, fallback_dir_str: str) -> Path:
+    """
+    保存先ディレクトリを取得する。
+    NASへのアクセスが不可能な場合はERRORを出力し、ローカル環境へフォールバックする。
+
+    Args:
+        nas_dir_str (str): 本来のNASディレクトリパス
+        fallback_dir_str (str): フォールバック用のローカルディレクトリパス
+
+    Returns:
+        Path: 利用可能なディレクトリパス（Pathオブジェクト）
+    """
+    nas_dir = Path(nas_dir_str)
+    fallback_dir = Path(fallback_dir_str)
+
+    try:
+        # NASディレクトリの存在確認
+        if not nas_dir.exists():
+            raise FileNotFoundError(f"Directory not found: {nas_dir}")
+        
+        # アクセス権限の簡易チェック（書き込み・実行権限）
+        if not os.access(nas_dir, os.W_OK | os.X_OK):
+            raise PermissionError(f"Insufficient permissions for: {nas_dir}")
+            
+        return nas_dir
+
+    except Exception as e:
+        # インフラ障害は介入が必要なため、WARNINGではなくERRORとして記録し通知ガードを突破する
+        logger.error(
+            f"❌ [Config Error] Failed to access NAS '{nas_dir}'. "
+            f"Reason: {e}. Falling back to local: '{fallback_dir}'"
+        )
+        
+        # フォールバック先のディレクトリが存在しない場合は作成 (Fail-Soft)
+        fallback_dir.mkdir(parents=True, exist_ok=True)
+        return fallback_dir
+
 
 class MonitorConfig:
     """モニタリング設定および定数管理クラス。"""
@@ -51,9 +95,12 @@ class MonitorConfig:
     SELECTOR_IMAGE: str = 'div.ph img:not(.list_today)'
 
     # File Paths
-    # 基本設計書に基づき、データディレクトリは適切に解決する
     BASE_DIR: Path = Path(__file__).resolve().parent
-    DATA_DIR: Path = BASE_DIR / 'data'
+    NAS_DIR_STR: str = '/mnt/nas/home_system/newface_monitor/data'  # 本環境のNASパスに適宜変更してください
+    LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
+    
+    # NASアクセスを検証し、動的にデータディレクトリを解決する
+    DATA_DIR: Path = get_target_directory(NAS_DIR_STR, LOCAL_DIR_STR)
     DATA_FILE: Path = DATA_DIR / 'known_casts.json'
 
     # Network Settings
@@ -67,12 +114,7 @@ class MonitorConfig:
     RETRY_BACKOFF: float = 1.0
 
     # Notification Settings
-    # 機密情報はソースコードに含めず環境変数から取得 (Source: 382)
     DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
-
-
-# ロガーの初期化 (Source: 334)
-logger = get_logger("newface_monitor")
 
 
 # ==========================================

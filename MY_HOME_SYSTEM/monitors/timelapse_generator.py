@@ -19,6 +19,59 @@ logger = setup_logging("timelapse_generator")
 # 対象とするカメラのリスト（config.CAMERAS から取得するか、固定で指定）
 TARGET_CAMERAS = [cam["name"] for cam in config.CAMERAS] if config.CAMERAS else ["garden", "parking"]
 
+def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:
+    """
+    FFmpegを使用して動画ファイルからクリップを抽出する。
+    Exponential Backoffを用いたリトライを行い、破損ファイル等で復旧不可能な場合はFalseを返す。
+    
+    Args:
+        cmd (List[str]): 実行するFFmpegコマンドのリスト
+        input_path (str): 入力動画ファイルのパス（ログ出力用）
+        output_path (str): 出力先ファイルのパス（ログ出力用）
+        max_retries (int): 最大リトライ回数 (デフォルト: 3)
+        
+    Returns:
+        bool: 抽出に成功した場合はTrue、スキップ（失敗）した場合はFalse
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.debug(f"抽出開始: {input_path} (Attempt: {attempt}/{max_retries})")
+            
+            # subprocess実行 (必ずtimeoutを設定しプロセスハングを防ぐ)
+            subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+            logger.debug(f"抽出成功: {output_path}")
+            return True
+            
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.lower() if e.stderr else ""
+            
+            # フェイルソフト: 致命的なファイル破損と判断される場合はリトライを打ち切り即座にスキップ
+            if "moov atom not found" in err_msg or "invalid data found" in err_msg:
+                logger.error(f"ファイル破損のためスキップします: {input_path}")
+                return False
+                
+            # Silence Policy: 途中経過はWARNINGに留める
+            logger.warning(f"FFmpegエラー (Attempt {attempt}/{max_retries}): {err_msg.strip()}")
+            
+            if attempt < max_retries:
+                sleep_time = 2 ** attempt  # 指数関数的待機 (2, 4秒...)
+                time.sleep(sleep_time)
+                
+        except subprocess.TimeoutExpired:
+            logger.warning(f"FFmpegタイムアウト (Attempt {attempt}/{max_retries}): {input_path}")
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)
+
+    # 最終的に失敗が確定した段階で1度だけERRORを出力
+    logger.error(f"最大リトライ回数超過。抽出をスキップします: {input_path}")
+    return False
+
 def get_event_times(camera_name: str, start_time: str, end_time: str) -> List[datetime.datetime]:
     """DBから指定時間帯のイベント検知時刻を取得する"""
     event_times = []
@@ -60,48 +113,67 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         found_files = sorted(glob.glob(search_pattern))
         
         if not found_files:
-            # ★追加: 見つからなかったファイルパスを警告出力する
             logger.warning(f"⚠️ 動画ファイルが見つかりません: {search_pattern}")
             continue
             
-        src_video = found_files[-1] # 最新のファイルを使用
-        logger.info(f"🎥 動画ファイルを発見: {src_video} (抽出開始...)")
+        # --- 🎬 修正: 常に最新ファイルを選ぶバグを修正し、イベント時刻に合ったファイルを探す ---
+        dt_naive = dt.replace(tzinfo=None)
+        src_video = None
+        f_start_dt = None
+        
+        # 録画ファイルを順番にチェックし、イベント時刻(dt)以前の最後のファイルを見つける
+        for f in found_files:
+            f_name = os.path.basename(f).split('.')[0]
+            try:
+                f_time = datetime.datetime.strptime(f_name, "%Y%m%d_%H%M%S")
+                if f_time <= dt_naive:
+                    src_video = f
+                    f_start_dt = f_time
+                else:
+                    break # ソート済みなので、時刻を超えたら探索終了
+            except ValueError:
+                continue
+        
+        if not src_video or not f_start_dt:
+            logger.warning(f"⚠️ イベント時刻 {dt.strftime('%H:%M:%S')} に対応する録画ファイルがありません。スキップします。")
+            continue
+
+        logger.info(f"🎥 動画ファイルを発見: {src_video} (対象イベント: {dt.strftime('%H:%M:%S')})")
         
         clip_name = os.path.join(tmp_dir, f"{camera_name}_{dt.strftime('%H%M%S')}.ts")
         
-        # --- 🎬 修正箇所: ここから ---
-        # ファイル名 (例: 20260215_091822.mp4) から録画開始時刻を取得し、シーク秒数を計算する
-        f_start_dt_str = os.path.basename(src_video).split('.')[0]
-        try:
-            f_start_dt = datetime.datetime.strptime(f_start_dt_str, "%Y%m%d_%H%M%S")
-            # タイムゾーンのズレを防ぐためnaiveな日時に統一して計算
-            dt_naive = dt.replace(tzinfo=None) 
-            exact_seek = (dt_naive - f_start_dt).total_seconds()
-            seek_sec = str(max(0.0, exact_seek - 5.0)) # 5秒前から切り出し
-        except ValueError:
-            seek_sec = "0"
-            logger.warning(f"⚠️ ファイル名からの時刻取得に失敗しました。先頭から切り出します: {src_video}")
+        # シーク秒数を計算する
+        exact_seek = (dt_naive - f_start_dt).total_seconds()
+        seek_sec = str(max(0.0, exact_seek - 5.0)) # 5秒前から切り出し
 
+        # ★適用1＆2: scaleを854に、倍速を0.125(8倍速)に変更
         text_overlay = f"drawtext=text='{dt.strftime('%Y-%m-%d %H\\:%M\\:%S')}':fontcolor=white:fontsize=24:x=w-tw-10:y=10"
-        filter_complex = f"[0:v]{text_overlay},scale=1280:-2,setpts=0.25*PTS[v]"
+        filter_complex = f"[0:v]{text_overlay},scale=854:-2,setpts=0.125*PTS[v]"
         
         cmd = [
             "nice", "-n", "15", "ffmpeg", "-y",
-            "-ss", seek_sec,  # ★追加: 計算した秒数から切り出しを開始する
+            "-ss", seek_sec,
+            "-t", "20",
             "-i", src_video,
-            "-t", "20",       # そこから20秒間切り出す
             "-filter_complex", filter_complex,
             "-map", "[v]",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+            "-c:v", "libx264", 
+            "-preset", "faster",   # ★修正: ultrafast から faster に変更（画質を保ったまま容量を劇的に圧縮）
+            "-crf", "28",          # ★修正: 強制ビットレートを廃止し、綺麗な画質設定を復活
+            "-maxrate", "1000k",   # ★追加: 容量爆発を防ぐための「お守り」の上限
+            "-bufsize", "2000k",
             clip_name
         ]
         
-        try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=True)
+        # 修正: 専用関数での抽出処理（リトライ・スキップ制御対応）
+        success = extract_video_clip(cmd, src_video, clip_name)
+        
+        if success:
             clips.append(clip_name)
             last_end_time = dt + datetime.timedelta(seconds=20)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg抽出エラー: {e.stderr.strip()}")
+        else:
+            logger.warning(f"⚠️ クリップ抽出スキップ: {dt.strftime('%H:%M:%S')} のイベントをスキップしました。")
+            continue
 
     if not clips:
         return ""
@@ -224,7 +296,7 @@ def main():
         # 🛡️ 恒久対策: ハードリミットと均等サンプリング処理
         # ==========================================
         # 1日の最大処理件数を定義 (Raspberry Pi 5 のサーマルリミットを考慮して最大50件 = 約15分エンコード程度に抑える)
-        MAX_SAFE_LIMIT = 50 
+        MAX_SAFE_LIMIT = 20 
         
         # コマンドライン引数で明示的に limit が渡されている場合はそちらを優先
         actual_limit = args.limit if args.limit > 0 else MAX_SAFE_LIMIT

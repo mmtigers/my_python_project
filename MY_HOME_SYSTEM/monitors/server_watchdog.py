@@ -56,23 +56,61 @@ def get_service_status(service_name: str) -> str:
 def is_process_alive(process_keyword: str) -> bool:
     """
     pgrepを使ってプロセスが起動しているか確認する。
-    
-    Args:
-        process_keyword (str): 検索するプロセス名のキーワード
-        
-    Returns:
-        bool: プロセスが存在すればTrue
     """
     try:
-        # pgrep -f [pattern]
         res = subprocess.run(
             ["pgrep", "-f", process_keyword], 
             capture_output=True, text=True, check=False
         )
-        # 終了コード0ならプロセスが存在する
         return res.returncode == 0
     except Exception:
         return False
+
+def check_throttling_status() -> None:
+    """
+    Raspberry Piのスロットリング状態（電圧・温度制限）を確認する。
+    現在の異常と過去の履歴を分離し、現在の異常のみを通知する。
+    """
+    try:
+        res = subprocess.run(
+            ["vcgencmd", "get_throttled"],
+            capture_output=True, text=True, check=False
+        )
+        
+        if res.returncode != 0:
+            return
+
+        output = res.stdout.strip()
+        if "throttled=" not in output:
+            return
+            
+        hex_str = output.split("=")[1]
+        throttled_val = int(hex_str, 16)
+        
+        # 下位4ビットの抽出 (Bit 0-3: 現在発生中のエラー)
+        # 0x01: Under-voltage, 0x02: ARM frequency capped, 0x04: Currently throttled, 0x08: Soft temperature limit
+        current_issues = throttled_val & 0x0F
+        
+        if current_issues != 0:
+            # 現在進行形の電圧低下・熱制限 (ERROR -> 即時通知対象)
+            msg = f"System Alert\nCURRENT Throttling Detected: {hex_str}\n※Raspberry Piが高負荷・または電圧低下中です。"
+            logger.error(msg.replace("\n", " "))
+            
+            # 通知バッファの汚染を防ぐため、リストはローカルで明示的に定義して渡す
+            send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="error")
+            
+        elif throttled_val != 0:
+            # 過去の履歴のみ (WARNING -> ログのみ、通知しない)
+            logger.warning(f"History Throttling Flag Detected (Code: {hex_str}). System recovered.")
+            
+        else:
+            logger.debug("System voltage and temperature are normal (0x0).")
+
+    except FileNotFoundError:
+        # 開発環境（Mac/Windows等）で vcgencmd がない場合はスキップ
+        logger.debug("vcgencmd command not found. Skipping hardware health check.")
+    except Exception as e:
+        logger.error(f"Failed to check throttling status: {e}")
 
 def check_health() -> None:
     """
@@ -84,22 +122,17 @@ def check_health() -> None:
         status = get_service_status(WATCH_SERVICE_NAME)
         process_alive = is_process_alive(WATCH_PROCESS_NAME)
         
-        # サービスが active または activating で、かつプロセスが生きていれば正常
         is_healthy = (status in ["active", "activating"]) and process_alive
-        
         process_status_str = 'OK' if process_alive else 'NG'
 
         if is_healthy:
-            # Log Level Adjustment: DEBUG for healthy state
             logger.debug("Health Check: Service=%s, Process=%s", status, process_status_str)
             
             if LOCK_FILE.exists():
-                # 復旧通知
                 send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
                 LOCK_FILE.unlink()
                 logger.info("Recovery notification sent.")
         else:
-            # 異常検知時は WARNING でログに残す
             logger.warning("⚠️ Unhealthy State Detected: Service=%s, Process=%s", status, process_status_str)
 
             current_time = time.time()
@@ -107,7 +140,6 @@ def check_health() -> None:
             
             if not LOCK_FILE.exists():
                 should_notify = True
-                # 異常時はDiscordのエラーチャンネルへ
                 send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")
                 logger.info("Stop alert sent.")
             else:
@@ -124,4 +156,7 @@ def check_health() -> None:
         logger.error("Watchdog Crashed: %s", err)
 
 if __name__ == "__main__":
+    # ハードウェアの健全性確認（スロットリング監視）
+    check_throttling_status()
+    # ソフトウェアの健全性確認（プロセス死活監視）
     check_health()
