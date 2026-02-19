@@ -65,7 +65,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
         logger.error(f"❌ Script not found: {full_path}")
         return False
 
-    logger.info(f"▶️ Executing: {script_path} {' '.join(args)}")
+    logger.debug(f"▶️ Executing: {script_path} {' '.join(args)}")
     
     # 子プロセスがプロジェクトのモジュールを読めるよう PYTHONPATH を設定
     env: Dict[str, str] = os.environ.copy()
@@ -82,7 +82,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
         )
 
         if result.returncode == 0:
-            logger.info(f"✅ Finished: {script_path}")
+            logger.debug(f"✅ Finished: {script_path}")
             return True
         else:
             logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {result.returncode})")

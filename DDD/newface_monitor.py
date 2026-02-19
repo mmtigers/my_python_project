@@ -14,10 +14,18 @@ import os
 import json
 import time
 import random
+import sys 
+import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Set, Dict, Optional
 from urllib.parse import urljoin
+
+# プロジェクトルート（DDDの親ディレクトリ）をパスに追加
+CURRENT_DIR = Path(__file__).resolve().parent # ~/develop/DDD
+PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM" # ~/develop/MY_HOME_SYSTEM
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.append(str(PROJECT_ROOT))
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -28,59 +36,22 @@ from bs4 import BeautifulSoup
 try:
     # システム統合環境下でのインポート
     from core.logger import get_logger
+    from core.nas_utils import get_managed_target_directory
 except ImportError:
     # 単体テスト用フォールバック
     import logging
     logging.basicConfig(level=logging.INFO)
     def get_logger(name): return logging.getLogger(name)
+    def get_managed_target_directory(*args, **kwargs): return Path("./data")
 
 # ==========================================
 # Logger Initialization
 # ==========================================
-# ディレクトリ解決時にロガーを使用するため、初期化を上部に移動
 logger = get_logger("newface_monitor")
 
 # ==========================================
 # Configuration & Constants
 # ==========================================
-
-def get_target_directory(nas_dir_str: str, fallback_dir_str: str) -> Path:
-    """
-    保存先ディレクトリを取得する。
-    NASへのアクセスが不可能な場合はERRORを出力し、ローカル環境へフォールバックする。
-
-    Args:
-        nas_dir_str (str): 本来のNASディレクトリパス
-        fallback_dir_str (str): フォールバック用のローカルディレクトリパス
-
-    Returns:
-        Path: 利用可能なディレクトリパス（Pathオブジェクト）
-    """
-    nas_dir = Path(nas_dir_str)
-    fallback_dir = Path(fallback_dir_str)
-
-    try:
-        # NASディレクトリの存在確認
-        if not nas_dir.exists():
-            raise FileNotFoundError(f"Directory not found: {nas_dir}")
-        
-        # アクセス権限の簡易チェック（書き込み・実行権限）
-        if not os.access(nas_dir, os.W_OK | os.X_OK):
-            raise PermissionError(f"Insufficient permissions for: {nas_dir}")
-            
-        return nas_dir
-
-    except Exception as e:
-        # インフラ障害は介入が必要なため、WARNINGではなくERRORとして記録し通知ガードを突破する
-        logger.error(
-            f"❌ [Config Error] Failed to access NAS '{nas_dir}'. "
-            f"Reason: {e}. Falling back to local: '{fallback_dir}'"
-        )
-        
-        # フォールバック先のディレクトリが存在しない場合は作成 (Fail-Soft)
-        fallback_dir.mkdir(parents=True, exist_ok=True)
-        return fallback_dir
-
 
 class MonitorConfig:
     """モニタリング設定および定数管理クラス。"""
@@ -98,11 +69,8 @@ class MonitorConfig:
     BASE_DIR: Path = Path(__file__).resolve().parent
     NAS_DIR_STR: str = '/mnt/nas/home_system/newface_monitor/data'  # 本環境のNASパスに適宜変更してください
     LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
+    MOUNT_POINT: str = '/mnt/nas'
     
-    # NASアクセスを検証し、動的にデータディレクトリを解決する
-    DATA_DIR: Path = get_target_directory(NAS_DIR_STR, LOCAL_DIR_STR)
-    DATA_FILE: Path = DATA_DIR / 'known_casts.json'
-
     # Network Settings
     USER_AGENT: str = (
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -115,6 +83,31 @@ class MonitorConfig:
 
     # Notification Settings
     DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
+
+    @classmethod
+    def get_data_dir(cls) -> Path:
+        """NASアクセスを検証・修復し、動的にデータディレクトリを解決する。
+        
+        クラスロード時ではなく、実際の処理が必要になったタイミング（遅延評価）で
+        マウント確認や自動修復ロジックを実行する。
+        
+        Returns:
+            Path: 利用可能なディレクトリパス
+        """
+        return get_managed_target_directory(
+            nas_dir_str=cls.NAS_DIR_STR, 
+            fallback_dir_str=cls.LOCAL_DIR_STR,
+            mount_point=cls.MOUNT_POINT
+        )
+
+    @classmethod
+    def get_data_file(cls) -> Path:
+        """保存先JSONファイルのパスを取得する。
+        
+        Returns:
+            Path: known_casts.json の完全なパス
+        """
+        return cls.get_data_dir() / 'known_casts.json'
 
 
 # ==========================================
@@ -195,7 +188,7 @@ class DiscordNotifier:
                 ]
             }
             try:
-                # レート制限回避のための待機 (Source: 396)
+                # レート制限回避のための待機
                 time.sleep(1)
                 response = requests.post(self.webhook_url, json=payload, timeout=10)
                 response.raise_for_status()
@@ -214,16 +207,17 @@ class DataManager:
         Returns:
             Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。
         """
-        if not MonitorConfig.DATA_FILE.exists():
+        data_file = MonitorConfig.get_data_file()
+        if not data_file.exists():
             logger.info("No existing data found. Starting with empty state.")
             return set()
 
         try:
-            with open(MonitorConfig.DATA_FILE, 'r', encoding='utf-8') as f:
+            with open(data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return {CastMember(**item) for item in data}
         except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"Failed to load data from {MonitorConfig.DATA_FILE}: {e}")
+            logger.error(f"Failed to load data from {data_file}: {e}")
             # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
             return set()
 
@@ -234,14 +228,15 @@ class DataManager:
         Args:
             casts (Set[CastMember]): 保存対象のキャスト集合。
         """
+        data_file = MonitorConfig.get_data_file()
         try:
-            MonitorConfig.DATA_DIR.mkdir(parents=True, exist_ok=True)
+            data_file.parent.mkdir(parents=True, exist_ok=True)
             data = [c.to_dict() for c in casts]
             
-            with open(MonitorConfig.DATA_FILE, 'w', encoding='utf-8') as f:
+            with open(data_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"Saved {len(casts)} casts to {MonitorConfig.DATA_FILE}")
+            logger.info(f"Saved {len(casts)} casts to {data_file}")
         except IOError as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
 
@@ -254,7 +249,7 @@ class WebMonitor:
         self.session = self._create_robust_session()
 
     def _create_robust_session(self) -> requests.Session:
-        """リトライロジックを組み込んだ堅牢なHTTPセッションを作成する (Source: 364)。
+        """リトライロジックを組み込んだ堅牢なHTTPセッションを作成する。
 
         Returns:
             requests.Session: 設定済みのセッションオブジェクト。
@@ -353,7 +348,7 @@ class WebMonitor:
                 casts.add(cast)
 
             except Exception as e:
-                # 個別のパースエラーで全体を止めない (Source: 302)
+                # 個別のパースエラーで全体を止めない
                 logger.warning(f"Error parsing specific cast element: {e}")
                 continue
 
@@ -361,7 +356,7 @@ class WebMonitor:
         return casts
 
     def close(self):
-        """リソースを明示的に解放する (Source: 401)。"""
+        """リソースを明示的に解放する。"""
         if self.session:
             self.session.close()
 
@@ -411,11 +406,11 @@ def run_monitor():
             DataManager.save_known_casts(current_casts)
 
     except Exception as e:
-        # 想定外のエラー（Source: 388）
+        # 想定外のエラー
         logger.critical(f"Critical error in NewFace Monitor: {e}", exc_info=True)
     
     finally:
-        # 終了時のリソース解放 (Source: 401)
+        # 終了時のリソース解放
         monitor.close()
         logger.info("=== NewFace Monitor Finished ===")
 

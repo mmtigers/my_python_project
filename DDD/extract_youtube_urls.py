@@ -28,32 +28,54 @@ if str(PROJECT_ROOT) not in sys.path:
 
 try:
     from core.logger import get_logger
+    from core.nas_utils import get_managed_target_directory
     logger = get_logger(__name__)
 except ImportError:
     # 開発環境や単体実行時のフォールバック
     import logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("UrlExtractor")
+    def get_managed_target_directory(*args, **kwargs): return Path("./data")
 
 # ==========================================
 # 1. コンフィグレーション (Configuration)
 # ==========================================
-@dataclass(frozen=True)
 class AppConfig:
     """アプリケーション設定を保持する定数クラス。"""
-    OUTPUT_BASE_DIR: Path = CURRENT_DIR
+    
+    # File Paths
+    BASE_DIR: Path = CURRENT_DIR
+    NAS_DIR_STR: str = '/mnt/nas/home_system/youtube_extractor/data'  # 本環境のNASパスに適宜変更してください
+    LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
+    MOUNT_POINT: str = '/mnt/nas'
+
     SUB_DIR_NAME: str = "list"
     SUBSCRIPTION_FILE: str = "subscriptions.txt"
     
     # yt-dlp オプション: 高速化のため extract_flat を使用
-    YDL_OPTS: Dict[str, Any] = field(default_factory=lambda: {
+    YDL_OPTS: Dict[str, Any] = {
         'extract_flat': True,
         'quiet': True,
         'ignoreerrors': True,
         'no_warnings': True,
-    })
+    }
 
-CONFIG = AppConfig()
+    @classmethod
+    def get_output_base_dir(cls) -> Path:
+        """NASアクセスを検証・修復し、動的にベースディレクトリを解決する（遅延評価）。
+        
+        クラスロード時ではなく、実際のファイル処理が必要になったタイミングで
+        マウント確認や自動修復ロジックを実行する。
+        
+        Returns:
+            Path: 利用可能なディレクトリパス
+        """
+        return get_managed_target_directory(
+            nas_dir_str=cls.NAS_DIR_STR,
+            fallback_dir_str=cls.LOCAL_DIR_STR,
+            mount_point=cls.MOUNT_POINT
+        )
+
 
 @dataclass
 class ExtractionResult:
@@ -127,7 +149,7 @@ class YouTubeExtractor:
         channel_name = "unknown_channel"
 
         try:
-            with yt_dlp.YoutubeDL(CONFIG.YDL_OPTS) as ydl:
+            with yt_dlp.YoutubeDL(AppConfig.YDL_OPTS) as ydl:
                 info = ydl.extract_info(target_url, download=False)
                 if not info:
                     return None
@@ -197,7 +219,7 @@ class YouTubeExtractor:
 
             # Phase 2: Playlists
             try:
-                with yt_dlp.YoutubeDL(CONFIG.YDL_OPTS) as ydl:
+                with yt_dlp.YoutubeDL(AppConfig.YDL_OPTS) as ydl:
                     pl_tab = ydl.extract_info(f"{base_url}/playlists", download=False)
                     if pl_tab and 'entries' in pl_tab:
                         playlists = list(pl_tab['entries'])
@@ -238,17 +260,17 @@ class FileManager:
         safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()
         return safe[:200].strip('. ')
 
-    def save(self, result: ExtractionResult, output_base_dir: Path) -> bool:
+    def save(self, result: ExtractionResult) -> bool:
         """抽出結果をテキストファイルに保存する。
 
         Args:
             result (ExtractionResult): 保存対象の抽出データ。
-            output_base_dir (Path): 保存先のルートディレクトリ。
 
         Returns:
             bool: 保存に成功した場合は True。
         """
-        target_dir = output_base_dir / CONFIG.SUB_DIR_NAME
+        # 遅延評価でディレクトリを取得
+        target_dir = AppConfig.get_output_base_dir() / AppConfig.SUB_DIR_NAME
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -277,26 +299,29 @@ class SubscriptionManager:
     def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):
         self.extractor = extractor
         self.file_manager = file_manager
-        self.sub_file = CONFIG.OUTPUT_BASE_DIR / CONFIG.SUBSCRIPTION_FILE
 
     def process_subscriptions(self) -> None:
         """登録されたチャンネルリストを読み込み、順次抽出を実行する。"""
-        if not self.sub_file.exists():
-            logger.warning(f"⚠️ {CONFIG.SUBSCRIPTION_FILE} が見つかりません。")
+        # 遅延評価でサブスクリプションファイルのパスを取得
+        sub_file = AppConfig.get_output_base_dir() / AppConfig.SUBSCRIPTION_FILE
+
+        if not sub_file.exists():
+            logger.warning(f"⚠️ {sub_file.name} が見つかりません。")
             try:
-                with self.sub_file.open("w", encoding="utf-8") as f:
+                sub_file.parent.mkdir(parents=True, exist_ok=True)
+                with sub_file.open("w", encoding="utf-8") as f:
                     f.write("# ここにチャンネルURLを1行ずつ記述してください\n")
-                logger.info(f"🆕 空のファイルを作成しました: {self.sub_file}")
+                logger.info(f"🆕 空のファイルを作成しました: {sub_file}")
             except IOError:
-                logger.error(f"❌ 設定ファイル作成失敗: {self.sub_file}", exc_info=True)
+                logger.error(f"❌ 設定ファイル作成失敗: {sub_file}", exc_info=True)
             return
 
         urls: List[str] = []
         try:
-            with self.sub_file.open("r", encoding="utf-8") as f:
+            with sub_file.open("r", encoding="utf-8") as f:
                 urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
         except IOError:
-            logger.error(f"❌ 設定ファイル読み込み失敗: {self.sub_file}", exc_info=True)
+            logger.error(f"❌ 設定ファイル読み込み失敗: {sub_file}", exc_info=True)
             return
 
         logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件")
@@ -304,7 +329,7 @@ class SubscriptionManager:
         for i, url in enumerate(urls):
             logger.info(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
             for result in self.extractor.extract_iter(url):
-                self.file_manager.save(result, CONFIG.OUTPUT_BASE_DIR)
+                self.file_manager.save(result)
 
 # ==========================================
 # 4. アプリケーション本体
@@ -345,7 +370,7 @@ class UrlExtractorApp:
             total_files = 0
             # イテレータを回して処理
             for result in self.extractor.extract_iter(target_url):
-                if self.file_manager.save(result, CONFIG.OUTPUT_BASE_DIR):
+                if self.file_manager.save(result):
                     total_files += 1
             logger.info(f"🎉 処理完了: 計 {total_files} ファイルを作成しました")
         else:

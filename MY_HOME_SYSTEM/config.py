@@ -111,10 +111,7 @@ def _ensure_safe_path(preferred_path: str, fallback_name: str) -> str:
 
 # NAS設定
 NAS_MOUNT_POINT: str = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")
-NAS_PROJECT_ROOT: str = _ensure_safe_path(
-    os.path.join(NAS_MOUNT_POINT, "home_system"), 
-    "home_system"
-)
+NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 
 # DB & Assets
 SQLITE_DB_PATH: str = os.path.join(BASE_DIR, "home_system.db")
