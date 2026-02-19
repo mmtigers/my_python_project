@@ -12,6 +12,7 @@ import uuid
 import glob
 import requests
 import datetime
+import cv2
 from datetime import datetime as dt_class, timedelta
 from typing import Optional, Dict, Any, Tuple, List
 from concurrent.futures import ThreadPoolExecutor
@@ -136,110 +137,166 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
         logger.warning(f"⚠️ [{cam_name}] Failed to check camera time: {e}")
         return True
 
-def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
+# def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
+#     """
+#     NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・根本対策済み）。
+#     リトライ上限到達時やエラー発生時も、確実に一時ファイル等のリソースを解放する。
+
+#     Args:
+#         cam_conf (Dict[str, Any]): カメラ設定辞書
+#         target_time (Optional[datetime.datetime]): 取得対象の時刻。Noneの場合は現在時刻を使用。
+
+#     Returns:
+#         Optional[bytes]: 取得した画像データのバイト列。失敗時はNone。
+#     """
+#     if target_time is None:
+#         target_time = dt_class.now()
+        
+#     sub_dir: Optional[str] = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
+#     if not sub_dir:
+#         return None
+
+#     record_dir: str = os.path.join(config.NVR_RECORD_DIR, sub_dir)
+    
+#     max_retries: int = 10     
+#     retry_delay: float = 1.0    
+
+#     # 並行処理時の競合を防ぐため、一時ファイル名を完全にユニーク化
+#     unique_id: str = uuid.uuid4().hex[:8]
+#     tmp_path: str = f"/tmp/snapshot_{cam_conf['id']}_{unique_id}.jpg"
+    
+#     cam_name: str = cam_conf['name']
+
+#     try:
+#         for attempt in range(1, max_retries + 1):
+#             try:
+#                 files: List[str] = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
+#                 if not files:
+#                     logger.warning(f"⚠️ [{cam_name}] No .mp4 files found in {record_dir}")
+#                     return None
+
+#                 target_file: str = files[-1]
+#                 for f_path in reversed(files):
+#                     try:
+#                         f_dt: datetime.datetime = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
+#                         if f_dt <= target_time:
+#                             target_file = f_path
+#                             break
+#                     except ValueError:
+#                         continue
+                
+#                 f_start_dt: datetime.datetime = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
+                
+#                 exact_seek: float = (target_time - f_start_dt).total_seconds()
+#                 seek_sec: float = max(0.0, exact_seek - 1.5)
+                
+#                 # FFmpeg実行前に、万が一の残留ファイルを削除（State Leak防止）
+#                 if os.path.exists(tmp_path):
+#                     try:
+#                         os.remove(tmp_path)
+#                     except OSError as e:
+#                         logger.warning(f"⚠️ [{cam_name}] Failed to clear temp file before run: {e}")
+
+#                 cmd: List[str] = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
+#                 res: subprocess.CompletedProcess = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                
+#                 if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+#                     logger.info(f"✅ [{cam_name}] Snapshot created successfully (Attempt {attempt}/{max_retries})")
+                    
+#                     with open(tmp_path, "rb") as f: 
+#                         image_data: bytes = f.read()
+                        
+#                     return image_data
+                
+#                 # 失敗時、リトライ状況を記録
+#                 logger.warning(f"⏳ [{cam_name}] Frame not yet flushed or EOF. Retrying {attempt}/{max_retries}...")
+                
+#                 if attempt == max_retries:
+#                     logger.error(f"🚨 FFmpeg Stderr Output: {res.stderr.strip()}")
+                    
+#                 time.sleep(retry_delay)
+
+#             except Exception as e:
+#                 logger.error(f"🚨 Exception during capture attempt {attempt}: {e}")
+#                 time.sleep(retry_delay)
+
+#         # ループを抜けたということは、リトライ上限到達
+#         logger.error(f"❌ [{cam_name}] Failed to capture snapshot after {max_retries} attempts.")
+#         return None
+
+#     except Exception as e:
+#         logger.error(f"❌ [{cam_name}] Unhandled exception in capture_snapshot_from_nvr: {e}")
+#         return None
+
+#     finally:
+#         # 必ずリソース（一時ファイル）を解放し、ログを出力する
+#         if os.path.exists(tmp_path):
+#             try:
+#                 os.remove(tmp_path)
+#             except OSError as e:
+#                 logger.warning(f"⚠️ [{cam_name}] Failed to remove temp file during cleanup: {e}")
+                
+#         logger.info(f"🔌 [{cam_name}] Connection closed / Resource released.")
+
+def capture_snapshot_from_stream_cv2(cam_conf: Dict[str, Any]) -> Optional[bytes]:
     """
-    NASの録画データから指定時刻の画像を切り出す（I/O遅延耐性・根本対策済み）。
-    リトライ上限到達時やエラー発生時も、確実に一時ファイル等のリソースを解放する。
+    OpenCVを使用してRTSPストリームから最新のフレームを取得する。
+    
+    バッファに古いフレームが滞留するのを防ぐため、内部バッファサイズを制限しつつ、
+    最新フレームに追いつくまで高速で grab() を回して古いフレームを破棄する。
 
     Args:
-        cam_conf (Dict[str, Any]): カメラ設定辞書
-        target_time (Optional[datetime.datetime]): 取得対象の時刻。Noneの場合は現在時刻を使用。
+        cam_conf (Dict[str, Any]): カメラ設定辞書 (ip, user, passなどを含む)
 
     Returns:
-        Optional[bytes]: 取得した画像データのバイト列。失敗時はNone。
+        Optional[bytes]: 取得した画像データのバイト列。失敗・EOF到達時はNone。
     """
-    if target_time is None:
-        target_time = dt_class.now()
-        
-    sub_dir: Optional[str] = "parking" if "Parking" in cam_conf['id'] else "garden" if "Garden" in cam_conf['id'] else None
-    if not sub_dir:
+    cam_name: str = cam_conf.get('name', 'Unknown')
+    
+    # ストリームURLの構築（設定に rtsp_url があれば優先、なければ標準フォーマットを推測）
+    rtsp_url: str = cam_conf.get(
+        'rtsp_url', 
+        f"rtsp://{cam_conf.get('user')}:{cam_conf.get('pass')}@{cam_conf.get('ip')}:554/stream1"
+    )
+    
+    cap = cv2.VideoCapture(rtsp_url)
+    if not cap.isOpened():
+        logger.error(f"❌ [{cam_name}] Failed to open RTSP stream.")
         return None
-
-    record_dir: str = os.path.join(config.NVR_RECORD_DIR, sub_dir)
     
-    max_retries: int = 10     
-    retry_delay: float = 1.0    
-
-    # 並行処理時の競合を防ぐため、一時ファイル名を完全にユニーク化
-    unique_id: str = uuid.uuid4().hex[:8]
-    tmp_path: str = f"/tmp/snapshot_{cam_conf['id']}_{unique_id}.jpg"
-    
-    cam_name: str = cam_conf['name']
-
     try:
-        for attempt in range(1, max_retries + 1):
-            try:
-                files: List[str] = sorted(glob.glob(os.path.join(record_dir, "*.mp4")))
-                if not files:
-                    logger.warning(f"⚠️ [{cam_name}] No .mp4 files found in {record_dir}")
-                    return None
-
-                target_file: str = files[-1]
-                for f_path in reversed(files):
-                    try:
-                        f_dt: datetime.datetime = dt_class.strptime(os.path.basename(f_path).split('.')[0], "%Y%m%d_%H%M%S")
-                        if f_dt <= target_time:
-                            target_file = f_path
-                            break
-                    except ValueError:
-                        continue
+        # バックエンドのバッファサイズを最小限(1)に設定（環境依存だが遅延防止に有効）
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # 溜まっている古いフレームを高速で読み飛ばす（バッファクリア）
+        frames_to_clear: int = 5 
+        for _ in range(frames_to_clear):
+            if not cap.grab():
+                logger.warning(f"⚠️ [{cam_name}] Stream disconnected during grab() or EOF reached.")
+                return None
                 
-                f_start_dt: datetime.datetime = dt_class.strptime(os.path.basename(target_file).split('.')[0], "%Y%m%d_%H%M%S")
-                
-                exact_seek: float = (target_time - f_start_dt).total_seconds()
-                seek_sec: float = max(0.0, exact_seek - 1.5)
-                
-                # FFmpeg実行前に、万が一の残留ファイルを削除（State Leak防止）
-                if os.path.exists(tmp_path):
-                    try:
-                        os.remove(tmp_path)
-                    except OSError as e:
-                        logger.warning(f"⚠️ [{cam_name}] Failed to clear temp file before run: {e}")
-
-                cmd: List[str] = ["ffmpeg", "-y", "-ss", str(seek_sec), "-i", target_file, "-frames:v", "1", "-q:v", "2", tmp_path]
-                res: subprocess.CompletedProcess = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
-                
-                if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
-                    logger.info(f"✅ [{cam_name}] Snapshot created successfully (Attempt {attempt}/{max_retries})")
-                    
-                    with open(tmp_path, "rb") as f: 
-                        image_data: bytes = f.read()
-                        
-                    return image_data
-                
-                # 失敗時、リトライ状況を記録
-                logger.warning(f"⏳ [{cam_name}] Frame not yet flushed or EOF. Retrying {attempt}/{max_retries}...")
-                
-                if attempt == max_retries:
-                    logger.error(f"🚨 FFmpeg Stderr Output: {res.stderr.strip()}")
-                    
-                time.sleep(retry_delay)
-
-            except Exception as e:
-                logger.error(f"🚨 Exception during capture attempt {attempt}: {e}")
-                time.sleep(retry_delay)
-
-        # ループを抜けたということは、リトライ上限到達
-        logger.error(f"❌ [{cam_name}] Failed to capture snapshot after {max_retries} attempts.")
+        # 最新フレームの読み出し
+        ret, frame = cap.retrieve()
+        if ret and frame is not None:
+            logger.debug(f"✅ [{cam_name}] Snapshot captured directly from stream.")
+            success, buffer = cv2.imencode('.jpg', frame)
+            if success:
+                return buffer.tobytes()
+        
+        logger.error(f"❌ [{cam_name}] Failed to retrieve or decode frame after grab.")
         return None
-
+        
     except Exception as e:
-        logger.error(f"❌ [{cam_name}] Unhandled exception in capture_snapshot_from_nvr: {e}")
+        logger.error(f"🚨 [{cam_name}] Exception during RTSP capture: {e}")
         return None
-
     finally:
-        # 必ずリソース（一時ファイル）を解放し、ログを出力する
-        if os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError as e:
-                logger.warning(f"⚠️ [{cam_name}] Failed to remove temp file during cleanup: {e}")
-                
-        logger.info(f"🔌 [{cam_name}] Connection closed / Resource released.")
+        # 無駄なリソースやファイルディスクリプタを残さないよう確実に解放
+        cap.release()
+
 
 def save_image_from_stream(cam_conf: Dict[str, Any], trigger_type: str) -> None:
     """画像を保存し、Discordへ直接アップロード通知を行う（根本対策済）"""
-    image_data = capture_snapshot_from_nvr(cam_conf)
+    image_data = capture_snapshot_from_stream_cv2(cam_conf)
     if not image_data: 
         logger.warning(f"⚠️ [{cam_conf['name']}] Image data is empty. Skipping save and notification.")
         return
