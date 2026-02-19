@@ -307,6 +307,63 @@ def force_close_session(service_obj: Any) -> None:
     except Exception as e:
         logger.debug(f"Session close warning: {e}")
 
+def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
+    """
+    単一のONVIFイベントメッセージをパースし、処理結果に関わらず
+    確実にリソース（メモリ・参照）を解放します。
+    """
+    cam_name: str = cam_conf['name']
+    topic_str: str = "Unknown"
+    debug_val: str = "N/A"
+    is_motion: bool = False
+    
+    try:
+        # 1. Topicの抽出
+        if hasattr(msg, 'Topic'):
+            if hasattr(msg.Topic, '_value_1') and msg.Topic._value_1 is not None:
+                topic_str = str(msg.Topic._value_1)
+            else:
+                topic_str = str(msg.Topic)
+
+        # 2. Message(XML)のパース
+        if hasattr(msg, 'Message') and hasattr(msg.Message, '_value_1'):
+            element: Any = msg.Message._value_1
+            if type(element).__name__ == '_Element':
+                xml_str: str = etree.tostring(element, encoding='unicode')
+                debug_val = xml_str
+                xml_lower: str = xml_str.lower()
+                if ('motion' in xml_lower or 'ruleengine' in xml_lower) and ('value="true"' in xml_lower or 'value="1"' in xml_lower):
+                    is_motion = True
+            else:
+                debug_val = str(element)
+        
+        logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+
+        # 3. 早期リターン（対象外イベント）
+        if not is_motion and not ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
+            # 動体検知ではない場合、ここで処理を終了（finallyへ飛ぶ）
+            return
+
+        # 4. 動体検知時のアクション（DB保存・画像取得）
+        logger.info(f"🏃 [{cam_name}] Motion Detected!")
+        JST = datetime.timezone(datetime.timedelta(hours=9))
+        now_str = dt_class.now(JST).isoformat()             
+
+        columns = ["timestamp", "device_name", "device_id", "device_type", "movement_state"]
+        values = (now_str, cam_name, cam_conf['id'], "ONVIF_CAMERA", "ON")
+
+        save_log_generic("device_records", columns, values)
+        save_image_from_stream(cam_conf, "motion")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ [{cam_name}] Event Parse Error: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
+    finally:
+        # ✅ いかなる場合（早期リターン・例外発生）でも確実にリソースを解放する
+        # LXMLのElementツリーや巨大な文字列のメモリ参照を明示的にクリア
+        del msg
+        logger.debug(f"🧹 [{cam_name}] Event processing completed / Local resources released.")
+
+
 def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     """
     単一のカメラに対してONVIF接続を行い、イベントストリームを監視するプロセス。
@@ -421,47 +478,8 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                 if events and hasattr(events, 'NotificationMessage'):
                     for msg in events.NotificationMessage:
-                        try:
-                            topic_str: str = "Unknown"
-                            debug_val: str = "N/A"
-                            is_motion: bool = False
-                            
-                            if hasattr(msg, 'Topic'):
-                                if hasattr(msg.Topic, '_value_1') and msg.Topic._value_1 is not None:
-                                    topic_str = str(msg.Topic._value_1)
-                                else:
-                                    topic_str = str(msg.Topic)
-
-                            if hasattr(msg, 'Message') and hasattr(msg.Message, '_value_1'):
-                                element: Any = msg.Message._value_1
-                                if type(element).__name__ == '_Element':
-                                    xml_str: str = etree.tostring(element, encoding='unicode')
-                                    debug_val = xml_str
-                                    xml_lower: str = xml_str.lower()
-                                    if ('motion' in xml_lower or 'ruleengine' in xml_lower) and ('value="true"' in xml_lower or 'value="1"' in xml_lower):
-                                        is_motion = True
-                                else:
-                                    debug_val = str(element)
-                            
-                            logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
-
-                            if is_motion or ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
-                                logger.info(f"🏃 [{cam_name}] Motion Detected!")
-                                # 現在の時刻
-                                JST = datetime.timezone(datetime.timedelta(hours=9))
-                                now_str = dt_class.now(JST).isoformat()             
-
-                                # device_records のスキーマに合わせたカラムと値
-                                columns = ["timestamp", "device_name", "device_id", "device_type", "movement_state"]
-                                values = (now_str, cam_name, cam_conf['id'], "ONVIF_CAMERA", "ON")
-
-                                # 正しい引数でDB保存を呼び出し
-                                save_log_generic("device_records", columns, values)
-                                save_image_from_stream(cam_conf, "motion")
-                                
-                        except Exception as e:
-                            logger.warning(f"⚠️ [{cam_name}] Event Parse Warning: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
-                            continue
+                        process_camera_event(msg, cam_conf)
+                        
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
             # 【修正3】一時的障害に対するExponential Backoffの適用とログレベル適正化
