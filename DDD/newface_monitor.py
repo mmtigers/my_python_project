@@ -209,7 +209,7 @@ class DataManager:
         """
         data_file = MonitorConfig.get_data_file()
         if not data_file.exists():
-            logger.info("No existing data found. Starting with empty state.")
+            logger.debug("No existing data found. Starting with empty state.")
             return set()
 
         try:
@@ -236,7 +236,7 @@ class DataManager:
             with open(data_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
-            logger.info(f"Saved {len(casts)} casts to {data_file}")
+            logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except IOError as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
 
@@ -280,7 +280,7 @@ class WebMonitor:
             # Bot検知回避のためのランダム待機
             time.sleep(random.uniform(1.0, 3.0))
 
-            logger.info(f"Fetching URL: {MonitorConfig.TARGET_URL}")
+            logger.debug(f"Fetching URL: {MonitorConfig.TARGET_URL}")
             response = self.session.get(MonitorConfig.TARGET_URL, timeout=MonitorConfig.TIMEOUT)
             response.raise_for_status()
 
@@ -352,7 +352,7 @@ class WebMonitor:
                 logger.warning(f"Error parsing specific cast element: {e}")
                 continue
 
-        logger.info(f"Successfully parsed {len(casts)} casts.")
+        logger.debug(f"Successfully parsed {len(casts)} casts.")
         return casts
 
     def close(self):
@@ -367,7 +367,7 @@ class WebMonitor:
 
 def run_monitor():
     """モニタープロセスのメインロジック。"""
-    logger.info("=== NewFace Monitor Started ===")
+    logger.debug("=== NewFace Monitor Started ===")
     
     monitor = WebMonitor()
     notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
@@ -401,7 +401,7 @@ def run_monitor():
             updated_casts = known_casts.union(current_casts)
             DataManager.save_known_casts(updated_casts)
         else:
-            logger.info("No new casts detected.")
+            logger.debug("No new casts detected.")
             # 最新状態で上書き保存（メタデータ更新のため）
             DataManager.save_known_casts(current_casts)
 
@@ -412,7 +412,7 @@ def run_monitor():
     finally:
         # 終了時のリソース解放
         monitor.close()
-        logger.info("=== NewFace Monitor Finished ===")
+        logger.debug("=== NewFace Monitor Finished ===")
 
 
 if __name__ == "__main__":
