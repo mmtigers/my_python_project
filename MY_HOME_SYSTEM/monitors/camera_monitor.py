@@ -292,6 +292,7 @@ def capture_snapshot_from_stream_cv2(cam_conf: Dict[str, Any]) -> Optional[bytes
     finally:
         # 無駄なリソースやファイルディスクリプタを残さないよう確実に解放
         cap.release()
+        logger.debug(f"🔌 [{cam_name}] Connection closed / Resource released.")
 
 
 def save_image_from_stream(cam_conf: Dict[str, Any], trigger_type: str) -> None:
@@ -394,7 +395,7 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
             else:
                 debug_val = str(element)
         
-        logger.info(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
+        logger.debug(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
 
         # 3. 早期リターン（対象外イベント）
         if not is_motion and not ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
@@ -555,7 +556,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             if transient_error_count >= 3:
                 logger.warning(f"⚠️ [{cam_name}] Connection lost (Frequent): {e} ({transient_error_count}/3). Retrying in {wait_time}s...")
             else:
-                logger.warning(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting in {wait_time}s...")
+                logger.debug(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting in {wait_time}s...")
             
             time.sleep(wait_time)
             continue
