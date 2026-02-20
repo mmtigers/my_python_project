@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -18,11 +19,33 @@ from services.notification_service import send_push
 logger = setup_logging("nas_monitor")
 
 class NasMonitor:
+    """NASの状態監視、ディスク使用量の確認、および障害復旧時の自動切り戻しを行うクラス"""
+    
     def __init__(self) -> None:
         self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
+        self.fallback_dir: str = getattr(config, "FALLBACK_DIR", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.device_name: str = "BUFFALO LS720D"
+        self.state_file: str = "/tmp/nas_monitor_state.json"
+
+    def _load_state(self) -> Dict[str, bool]:
+        """前回の監視状態をファイルから読み込む"""
+        if os.path.exists(self.state_file):
+            try:
+                with open(self.state_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"State load error: {e}")
+        return {"is_healthy": True}  # デフォルトは正常とみなす
+
+    def _save_state(self, state: Dict[str, bool]) -> None:
+        """現在の監視状態をファイルへ保存する"""
+        try:
+            with open(self.state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f)
+        except Exception as e:
+            logger.error(f"State save error: {e}")
 
     def check_ping(self) -> bool:
         """NASへのPing疎通確認"""
@@ -44,6 +67,62 @@ class NasMonitor:
             return False
         return os.path.ismount(self.mount_point)
 
+    def check_write_permission(self) -> bool:
+        """NASへの実際の書き込み・削除が可能かテストする"""
+        test_file = os.path.join(self.mount_point, '.write_test')
+        try:
+            with open(test_file, 'w') as f:
+                f.write('health_check')
+            os.remove(test_file)
+            return True
+        except IOError as e:
+            logger.error(f"Write permission check error: {e}")
+            return False
+
+    def sync_fallback_data(self) -> None:
+        """フォールバックディレクトリのデータをNASへ安全に同期・移動する"""
+        if not os.path.exists(self.fallback_dir) or not os.listdir(self.fallback_dir):
+            logger.debug("フォールバックディレクトリに同期対象のデータはありません。")
+            return
+
+        logger.info(f"Starting fallback data sync from {self.fallback_dir} to {self.mount_point}")
+        
+        # rsyncを使用して安全に転送。--remove-source-filesで転送完了したファイルのみ元から削除
+        cmd = [
+            "rsync", "-av", "--remove-source-files", 
+            f"{self.fallback_dir}/", 
+            f"{self.mount_point}/"
+        ]
+        
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0:
+                logger.info("✅ NAS restored and fallback data synced.")
+                
+                # 通知（復旧および同期完了）
+                send_push(
+                    config.LINE_USER_ID, 
+                    [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {self.mount_point}"}],
+                    target="discord", channel="report"
+                )
+                
+                # rsync --remove-source-files は空ディレクトリを残すため、クリーンアップ
+                self._cleanup_empty_dirs(self.fallback_dir)
+            else:
+                logger.error(f"Sync failed with rsync error: {res.stderr}")
+        except Exception as e:
+            logger.error(f"Sync process exception: {e}")
+
+    def _cleanup_empty_dirs(self, path: str) -> None:
+        """指定パス配下の空ディレクトリを再帰的に削除する"""
+        for root, dirs, files in os.walk(path, topdown=False):
+            for d in dirs:
+                dir_path = os.path.join(root, d)
+                try:
+                    os.rmdir(dir_path)
+                except OSError:
+                    pass  # 中身があるディレクトリは無視
+
     def get_disk_usage(self) -> Optional[Dict[str, float]]:
         """ディスク使用量を取得 (GB単位)"""
         try:
@@ -61,9 +140,6 @@ class NasMonitor:
     def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:
         """状態をDBに保存"""
         percent = usage['percent'] if usage else 0
-        
-        # SENSORテーブルのbattery_levelカラムなどを流用して記録
-        # 必要に応じてカラム構成は見直すが、現状は既存スキーマに合わせる
         save_log_generic(
             config.SQLITE_TABLE_SENSOR,
             ["timestamp", "device_name", "device_id", "device_type", "contact_state", "battery_level"],
@@ -78,59 +154,52 @@ class NasMonitor:
         )
 
     def run(self) -> None:
-        """NASの状態監視およびディスク使用量の確認を実行する。
+        """NASの状態監視、復旧検知、およびディスク使用量の確認を実行する。"""
         
-        Pingによる死活監視、マウント状態の確認、ディスク容量の取得を行い、
-        結果をデータベースへ保存する。
-        容量不足の警告時や、定時（8時）の稼働レポート送信時以外は、
-        DEBUGログを出力して通知処理をスキップする。
-        """
-        
-        logger.debug("Checking NAS status...")
-        
-        # 1. Ping Check
         ping_ok = self.check_ping()
-        if not ping_ok:
-            logger.error(f"❌ Ping Check Failed: {self.ip}")
+        mount_ok = self.check_mount() if ping_ok else False
+        write_ok = self.check_write_permission() if mount_ok else False
+        
+        is_currently_healthy = ping_ok and mount_ok and write_ok
+        previous_state = self._load_state()
+        was_healthy = previous_state.get("is_healthy", True)
+
+        # 1. 状態遷移の検知（正常 -> 異常：フォールバック移行時）
+        if not is_currently_healthy and was_healthy:
+            logger.error(f"❌ NAS connection lost or write failed. Falling back to local storage. (Ping: {ping_ok}, Mount: {mount_ok}, Write: {write_ok})")
             send_push(
                 config.LINE_USER_ID, 
-                [{"type": "text", "text": f"🚨 【NAS障害】\nPing応答がありません。\nIP: {self.ip}"}],
+                [{"type": "text", "text": f"🚨 【NAS障害】\nNASへのアクセスが失われました。\nローカルフォールバックへ移行します。\nIP: {self.ip}"}],
                 target="discord", channel="error"
             )
-            # Ping NGでもDBには記録を残す
-            self.save_to_db(False, False, None)
+            self._save_state({"is_healthy": False})
+
+        # 2. 状態遷移の検知（異常 -> 正常：NAS復旧時）
+        elif is_currently_healthy and not was_healthy:
+            logger.debug("NAS recovery detected. Initiating fallback data sync...")
+            self.sync_fallback_data()
+            self._save_state({"is_healthy": True})
+
+        # DB記録
+        usage = self.get_disk_usage() if is_currently_healthy else None
+        self.save_to_db(ping_ok, mount_ok, usage)
+
+        # 異常継続中の場合はここで処理終了（ログ汚染を防ぐ）
+        if not is_currently_healthy:
             return
 
-        # 2. Mount Check
-        mount_ok = self.check_mount()
-        if not mount_ok:
-            logger.error(f"❌ Mount Check Failed: {self.mount_point}")
-            send_push(
-                config.LINE_USER_ID, 
-                [{"type": "text", "text": f"⚠️ 【NAS警告】\nマウントが外れています。\nPath: {self.mount_point}"}],
-                target="discord", channel="error"
-            )
-            # 復旧コマンド等は必要に応じて実装
-            self.save_to_db(ping_ok, False, None)
-            return
+        # 3. 正常継続時の定常チェック
+        logger.debug("NAS mount and write permissions are normal.")
 
-        # 3. Disk Usage
-        usage = self.get_disk_usage()
         if not usage:
             return
 
-        # 4. DB保存 (正常系)
-        self.save_to_db(ping_ok, mount_ok, usage)
-
-        # 5. 通知判定 (容量不足または定期レポート)
+        # 通知判定 (容量不足または定期レポート)
         is_full = usage['percent'] > 90
-        
         now = datetime.now()
         is_report_time = (now.hour == 8)
 
         if not is_full and not is_report_time:
-            # 正常かつ報告時間外ならログのみで終了
-            logger.debug("⏳ 正常稼働中 - 定時報告(8時)ではないため通知をスキップします")
             return
         
         status_icon = "🔴" if is_full else "🟢"
@@ -146,7 +215,6 @@ class NasMonitor:
         )
         
         channel = "error" if is_full else "report"
-        
         send_push(
             config.LINE_USER_ID, 
             [{"type": "text", "text": msg}],
