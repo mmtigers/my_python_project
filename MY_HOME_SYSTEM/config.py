@@ -2,10 +2,83 @@
 import os
 import sys
 import json
+import time
 import logging
-from typing import List, Dict, Optional, Any, Union
+from typing import Optional, List, Dict, Any
+
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
+
+# ==========================================
+# Logger Initialization
+# ==========================================
+# 起動シーケンス初期の段階で循環参照を避けるため、標準のloggingで名前空間を合わせる
+logger = logging.getLogger("config_init")
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter('[%(levelname)s] %(name)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+def ensure_safe_path_with_backoff(
+    preferred_path: str, 
+    fallback_name: str, 
+    max_retries: int = 5
+) -> str:
+    """
+    NASなどのマウント遅延を考慮し、Exponential Backoffを用いてディレクトリの作成とアクセス権限を確認する。
+    アクセスできない場合は最大5回（1s, 2s, 4s, 8s, 16s）待機して再試行し、
+    最終的に失敗した場合はローカルのフォールバックディレクトリを返す。
+
+    Args:
+        preferred_path (str): 本来保存したいパス (例: /mnt/nas/home_system/assets)
+        fallback_name (str): フォールバック時のディレクトリ名
+        max_retries (int): 最大リトライ回数 (デフォルト: 5)
+
+    Returns:
+        str: 安全に書き込み可能なパス（成功時は preferred_path、失敗時は fallback_path）
+    """
+    base_dir: str = os.path.dirname(os.path.abspath(__file__))
+    fallback_root: str = os.path.join(base_dir, "temp_fallback")
+    
+    for attempt in range(max_retries + 1):
+        try:
+            os.makedirs(preferred_path, exist_ok=True)
+            
+            # 書き込みテスト (ディレクトリが存在しても権限がない場合を検知)
+            test_file: str = os.path.join(preferred_path, ".write_test")
+            with open(test_file, 'w') as f:
+                f.write("test")
+            os.remove(test_file)
+            
+            if attempt > 0:
+                logger.info(f"✅ Retry {attempt}: Successfully accessed '{preferred_path}'.")
+            return preferred_path
+
+        except (OSError, PermissionError, IOError) as e:
+            if attempt < max_retries:
+                wait_time: int = 2 ** attempt  # 1, 2, 4, 8, 16秒
+                logger.warning(
+                    f"⚠️ [Attempt {attempt + 1}/{max_retries}] Failed to access '{preferred_path}'. "
+                    f"Retrying in {wait_time}s... Reason: {e}"
+                )
+                time.sleep(wait_time)
+            else:
+                # 最大リトライ回数を超過した場合のフォールバック処理
+                fallback_path: str = os.path.join(fallback_root, fallback_name)
+                try:
+                    os.makedirs(fallback_path, exist_ok=True)
+                    logger.error(
+                        f"🚨 【NAS障害・介入要求】\n"
+                        f"Max retries ({max_retries}) reached. Failed to access NAS path.\n"
+                        f"Path: {preferred_path}\n"
+                        f"Falling back to local: '{fallback_path}'.\nReason: {e}"
+                    )
+                    return fallback_path
+                except Exception as fatal_e:
+                    logger.error(f"❌ [Critical] Failed to create fallback path '{fallback_path}': {fatal_e}")
+                    return preferred_path
 
 # .envファイルのロード
 load_dotenv()
@@ -13,7 +86,6 @@ load_dotenv()
 # ==========================================
 # Type Definitions with Pydantic
 # ==========================================
-
 class CameraConfig(BaseModel):
     id: str
     name: str
@@ -78,60 +150,30 @@ REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
 BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
 FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")
 
-def _ensure_safe_path(preferred_path: str, fallback_name: str) -> str:
-    """
-    指定されたパスを作成し、書き込み権限がない場合はローカルへフォールバックする。
-    
-    Args:
-        preferred_path (str): 本来保存したいパス (例: NAS上のパス)
-        fallback_name (str): フォールバック時のディレクトリ名
-    
-    Returns:
-        str: 安全に書き込み可能なパス
-    """
-    try:
-        os.makedirs(preferred_path, exist_ok=True)
-        # 書き込みテスト (ディレクトリが存在しても書き込めない場合があるため)
-        test_file = os.path.join(preferred_path, ".write_test")
-        with open(test_file, 'w') as f:
-            f.write("test")
-        os.remove(test_file)
-        return preferred_path
-    except (OSError, PermissionError, IOError) as e:
-        # フォールバック処理
-        fallback_path = os.path.join(FALLBACK_ROOT, fallback_name)
-        try:
-            os.makedirs(fallback_path, exist_ok=True)
-            print(f"⚠️ [Config Warning] Failed to access '{preferred_path}'. Falling back to local: '{fallback_path}'. Reason: {e}", file=sys.stderr)
-            return fallback_path
-        except Exception as fatal_e:
-            print(f"❌ [Config Critical] Failed to create fallback path '{fallback_path}': {fatal_e}", file=sys.stderr)
-            return preferred_path # 最終手段として元のパスを返すが、恐らくエラーになる
-
-
 # NAS設定
 NAS_MOUNT_POINT: str = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")
 NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 
-# DB & Assets
+# DB & Assets (バックオフ付きの安全なパス取得を適用)
 SQLITE_DB_PATH: str = os.path.join(BASE_DIR, "home_system.db")
-ASSETS_DIR: str = _ensure_safe_path(
+
+ASSETS_DIR: str = ensure_safe_path_with_backoff(
     os.path.join(NAS_PROJECT_ROOT, "assets"), 
     "assets"
 )
-LOG_DIR: str = _ensure_safe_path(
+LOG_DIR: str = ensure_safe_path_with_backoff(
     os.path.join(BASE_DIR, "logs"), 
     "logs"
 )
-DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json") # 外部設定ファイル
+DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json")
 
-# DBテーブル名定義 (設計書 v1.0.0 準拠へ移行)
-SQLITE_TABLE_SENSOR: str = "device_records"  # Legacy support (Fix for 'config has no attribute')
+# DBテーブル名定義
+SQLITE_TABLE_SENSOR: str = "device_records"
 SQLITE_TABLE_SWITCHBOT_LOGS: str = "switchbot_meter_logs"
-SQLITE_TABLE_POWER_USAGE: str = "power_usage"           # New: 電力
-SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"             # New: 生活ログ統合
+SQLITE_TABLE_POWER_USAGE: str = "power_usage"
+SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"
 
-# Legacy/Specific Tables (必要に応じて統合を検討)
+# Legacy/Specific Tables
 SQLITE_TABLE_OHAYO: str = "ohayo_records"
 SQLITE_TABLE_FOOD: str = "food_records"
 SQLITE_TABLE_HEALTH: str = "health_records"
@@ -177,7 +219,7 @@ if os.path.exists(_events_path):
         with open(_events_path, "r", encoding="utf-8") as f:
             IMPORTANT_DATES = json.load(f)
     except Exception as e:
-        print(f"⚠️ 記念日設定の読み込みに失敗: {e}", file=sys.stderr)
+        logger.warning(f"⚠️ 記念日設定の読み込みに失敗: {e}")
 
 CHECK_ZOROME: bool = True
 
@@ -195,17 +237,16 @@ if os.path.exists(DEVICES_JSON_PATH):
     try:
         with open(DEVICES_JSON_PATH, "r", encoding="utf-8") as f:
             _devices_data = json.load(f)
-            # バリデーションして読み込み
             if "cameras" in _devices_data:
                 CAMERAS = [CameraConfig(**c).model_dump(by_alias=True) for c in _devices_data["cameras"]]
             if "monitor_devices" in _devices_data:
                 MONITOR_DEVICES = [DeviceConfig(**d).model_dump() for d in _devices_data["monitor_devices"]]
     except ValidationError as ve:
-        print(f"❌ devices.json Validation Error: {ve}", file=sys.stderr)
+        logger.error(f"❌ devices.json Validation Error: {ve}")
     except Exception as e:
-        print(f"⚠️ devices.json load failed: {e}", file=sys.stderr)
+        logger.warning(f"⚠️ devices.json load failed: {e}")
 else:
-    print(f"ℹ️ devices.json not found at {DEVICES_JSON_PATH}. Running without device config.", file=sys.stderr)
+    logger.info(f"ℹ️ devices.json not found at {DEVICES_JSON_PATH}. Running without device config.")
 
 # カメラ互換性用変数
 if CAMERAS:
@@ -214,7 +255,6 @@ if CAMERAS:
     CAMERA_PASS: Optional[str] = CAMERAS[0].get("pass")
 else:
     CAMERA_IP, CAMERA_USER, CAMERA_PASS = None, None, None
-
 
 # 給与PDFパスワード
 _passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
@@ -255,22 +295,21 @@ BICYCLE_PARKING_URL: str = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/
 # ==========================================
 # 4. 土地価格監視設定
 # ==========================================
-# 必要に応じてこれもJSON化可能ですが、変更頻度が低いため現状維持
 LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
     {
-        "city_code": "28207",     # 兵庫県伊丹市
+        "city_code": "28207",
         "city_name": "伊丹市",
         "districts": ["鈴原町"],
         "filter_chome": list(range(1, 9))
     },
     {
-        "city_code": "28216",     # 兵庫県高砂市
+        "city_code": "28216",
         "city_name": "高砂市",
         "districts": ["西畑", "鍵町"],
         "filter_chome": [1]
     },
     {
-        "city_code": "29201",     # 奈良県奈良市
+        "city_code": "29201",
         "city_name": "奈良市",
         "districts": ["西九条町"],
         "filter_chome": [1]
@@ -307,17 +346,16 @@ if ALLOW_ALL_ORIGINS:
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 
-
 # ==========================================
 # Video Processing (Timelapse)
 # ==========================================
-# テンポラリ動画保存先ディレクトリ (SDカード保護のためNAS上を指定)
-TMP_VIDEO_DIR: str = _ensure_safe_path(
+# テンポラリ動画保存先ディレクトリ (バックオフ付きの安全なパス取得を適用)
+TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
     os.path.join(NAS_PROJECT_ROOT, "tmp_video"), 
     "tmp_video"
 )
 
-# NVR録画ファイルのベースディレクトリ (既存になければ追加)
+# NVR録画ファイルのベースディレクトリ
 if 'NVR_RECORD_DIR' not in locals():
     NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
@@ -349,7 +387,6 @@ FAMILY_SETTINGS: Dict[str, Any] = {
     }
 }
 
-NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 ENABLE_BATTLE_EFFECT: bool = False
 
 # ==========================================
@@ -362,28 +399,22 @@ SUUMO_MONITOR_INTERVAL: int = 3600
 # ==========================================
 # 9. 小児科予約監視設定 (Clinic Monitor)
 # ==========================================
-# Rule 9.2: 機密情報の分離 - URL等は環境変数から読み込む [cite: 177]
 CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
 CLINIC_HTML_DIR: str = os.path.join(ASSETS_DIR, "clinic_html")
 CLINIC_STATS_CSV: str = os.path.join(ASSETS_DIR, "clinic_stats.csv")
 
-# 監視実行時間帯 (0-23時)
-# 基本設計書 9.2: デフォルト値を持ちつつ環境変数で上書き可能にする
 CLINIC_MONITOR_START_HOUR: int = int(os.getenv("CLINIC_MONITOR_START_HOUR", "8"))
 CLINIC_MONITOR_END_HOUR: int = int(os.getenv("CLINIC_MONITOR_END_HOUR", "19"))
-
-# リクエスト設定
 CLINIC_REQUEST_TIMEOUT: int = int(os.getenv("CLINIC_REQUEST_TIMEOUT", "10"))
 CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
 
-# 自動作成ディレクトリへの追加
+# 自動作成ディレクトリへの追加 (printをloggerに置き換え)
 for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR]:
     try:
         if not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
     except Exception as e:
-        # ここでのエラーは致命的だが、import停止を防ぐためログ出力にとどめる
-        print(f"⚠️ Warning: Failed to ensure directory existence '{d}': {e}", file=sys.stderr)
+        logger.warning(f"⚠️ Warning: Failed to ensure directory existence '{d}': {e}")
 
 # グラフ画像の保存先
 CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
