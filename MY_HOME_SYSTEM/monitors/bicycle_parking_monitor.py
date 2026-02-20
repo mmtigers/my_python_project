@@ -60,7 +60,7 @@ class BicycleParkingMonitor:
         """
         Webサイトからデータを取得し、self.recordsに格納する。
         """
-        logger.info(f"Fetching data from: {self.url}")
+        logger.debug(f"Fetching data from: {self.url}")
         
         # 【修正】セッションを使用してリトライを行う & 明示的なClose (Context Manager)
         try:
@@ -126,7 +126,7 @@ class BicycleParkingMonitor:
     def save_to_db(self) -> None:
         """取得したデータをDBに保存する"""
         if not self.records:
-            logger.info("No records to save.")
+            logger.debug("No records to save.")
             return
 
         success_count = 0
@@ -146,7 +146,7 @@ class BicycleParkingMonitor:
             except Exception as e:
                 logger.error(f"DB保存エラー ({r['area_name']}): {e}")
 
-        logger.info(f"💾 {success_count}/{len(self.records)} 件のデータを保存しました。")
+        logger.debug(f"💾 {success_count}/{len(self.records)} 件のデータを保存しました。")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="駐輪場待機状況モニター")
@@ -154,18 +154,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 自動実行(cron)を想定し、printではなくloggerを使用
-    logger.info("🚲 --- Bicycle Parking Monitor ---")
+    logger.debug("🚲 --- Bicycle Parking Monitor ---")
     monitor = BicycleParkingMonitor()
     
     is_success = monitor.fetch_and_parse()
     
     if is_success:
-        logger.info(f"✅ 解析完了: {len(monitor.records)} 件のエリア情報を取得")
+        logger.debug(f"✅ 解析完了: {len(monitor.records)} 件のエリア情報を取得")
         
         if monitor.records:
             for r in monitor.records:
-                # ログレベル INFO で結果を出力
-                logger.info(f"  - {r['area_name']}: {r['status_text']}")
+                # ログレベル DEBUG で結果を出力
+                logger.debug(f"  - {r['area_name']}: {r['status_text']}")
             
             if args.save:
                 monitor.save_to_db()

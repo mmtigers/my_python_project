@@ -141,7 +141,7 @@ async def process_location(location: str, token: str) -> None:
 
 async def main() -> None:
     """メイン処理"""
-    logger.info("🚀 --- Nature Remo Monitor Started (New Architecture) ---")
+    logger.debug("🚀 --- Nature Remo Monitor Started (New Architecture) ---")
 
     targets: List[Tuple[str, Optional[str]]] = [
         ("伊丹", config.NATURE_REMO_ACCESS_TOKEN),
@@ -152,7 +152,7 @@ async def main() -> None:
         if token:
             await process_location(loc, token)
 
-    logger.info("🏁 --- Monitor Completed ---")
+    logger.debug("🏁 --- Monitor Completed ---")
 
 if __name__ == "__main__":
     try:
