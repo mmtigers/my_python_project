@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import subprocess
 import signal
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
@@ -32,6 +33,26 @@ from handlers import line_handler
 # Logger
 logger = setup_logging("unified_server")
 
+# --- 追加: ログサイレンスポリシーの実装 ---
+class PollingEndpointFilter(logging.Filter):
+    """
+    特定のポーリングエンドポイントに対する正常なGETリクエスト(200 OK)のログ出力を抑制するフィルター。
+    基本設計書 運用・保守設計「DEBUG: 正常なポーリングは運用時に出力しない」に準拠。
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            # 正常なGETリクエスト（HTTP 200）のみを対象とする
+            if "GET" in msg and " 200 " in msg:
+                # 抑制対象のエンドポイントリスト（部分一致）
+                if ("/api/quest/inventory/admin/pending" in msg or
+                    "/api/bounties/list" in msg or
+                    "/api/quest/data" in msg):
+                    return False # ログ出力をスキップ
+        except Exception:
+            pass
+        return True # 上記以外（エラーやPOSTなど）は通常通り出力
+
 # Global State
 scheduler_process: Optional[subprocess.Popen] = None
 camera_process = None
@@ -39,6 +60,7 @@ camera_process = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理"""
+    logging.getLogger("uvicorn.access").addFilter(PollingEndpointFilter())
     logger.info("🚀 --- API Server Starting Up ---")
 
     global camera_process

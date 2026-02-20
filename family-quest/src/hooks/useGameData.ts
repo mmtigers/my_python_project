@@ -3,6 +3,53 @@ import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
 import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult } from '@/types';
 
+// 新規追加: any型を排除するための厳密なインターフェース定義
+interface AdventureLog {
+    id: string | number;
+    message: string;
+    created_at: string;
+}
+
+interface OwnedEquipment {
+    id: string | number;
+    equipment_id: string | number;
+    user_id: string;
+    equipped: boolean;
+}
+
+interface FamilyStats {
+    total_quests: number;
+    total_medals: number;
+    level: number;
+}
+
+interface ChronicleItem {
+    id: string | number;
+    event_type: string;
+    description: string;
+    timestamp: string;
+}
+
+interface LevelUpInfo {
+    user: string;
+    level: number;
+    job: string;
+}
+
+interface Bounty {
+    id: string | number;
+    title: string;
+    reward: number;
+    status: string;
+}
+
+interface PendingInventory {
+    id: string | number;
+    item_id: string | number;
+    user_id: string;
+    status: string;
+}
+
 // APIレスポンスの型定義
 interface GameDataResponse {
     users: User[];
@@ -10,19 +57,33 @@ interface GameDataResponse {
     rewards: Reward[];
     completedQuests: QuestHistory[];
     pendingQuests: QuestHistory[];
-    logs: any[];
+    logs: AdventureLog[];
     equipments: Equipment[];
-    ownedEquipments: any[];
+    ownedEquipments: OwnedEquipment[];
     boss: Boss | null;
 }
 
 interface ChronicleResponse {
-    stats: any;
-    chronicle: any[];
+    stats: FamilyStats;
+    chronicle: ChronicleItem[];
 }
 
-export const useGameData = (onLevelUp?: (info: any) => void) => {
+interface ApproveResponse {
+    success: boolean;
+    bossEffect?: any; // 必要に応じて厳密な型を定義
+}
+
+interface PurchaseResponse {
+    newGold: number;
+    success: boolean;
+}
+
+export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
     const queryClient = useQueryClient();
+
+    const handleError = (actionName: string, error: unknown) => {
+        console.error(`${actionName} failed:`, error);
+    };
 
     // 管理用Mutation
     const adminUpdateBossMutation = useMutation({
@@ -43,6 +104,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         queryKey: ['gameData'],
         queryFn: () => apiClient.get('/api/quest/data'),
         staleTime: 1000 * 30,
+        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限
     });
 
     // 2. 年代記データの取得
@@ -52,12 +114,24 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         staleTime: 1000 * 60 * 5,
     });
 
+    // 追加: ペンディングインベントリの取得（無限ループ防止のための安全なポーリング）
+    const { data: pendingInventory } = useQuery<PendingInventory[]>({
+        queryKey: ['pendingInventory'],
+        queryFn: () => apiClient.get('/api/quest/inventory/admin/pending'),
+        refetchInterval: 1000 * 10,
+        staleTime: 1000 * 5,
+    });
+
+    // 追加: バウンティリストの取得（無限ループ防止のための安全なポーリング）
+    const { data: bounties } = useQuery<Bounty[]>({
+        queryKey: ['bounties'],
+        queryFn: () => apiClient.get('/api/bounties/list'),
+        refetchInterval: 1000 * 15, // 15秒間隔
+        staleTime: 1000 * 5,
+    });
+
     // --- Actions (Mutations) ---
 
-    // 汎用エラーハンドリング (コンソールのみ)
-    const handleError = (actionName: string, error: any) => {
-        console.error(`${actionName} failed:`, error);
-    };
 
     // クエスト完了
     const completeQuestMutation = useMutation({
@@ -74,7 +148,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
                 onLevelUp({
                     user: variables.user.name,
                     level: res.newLevel,
-                    job: variables.user.job_class
+                    job: variables.user.job_class || '無職' // または 'ノービス', '' など
                 });
             }
         },
@@ -202,8 +276,8 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
         if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };
         try {
-            // any キャストまたは QuestResult型定義を使う
-            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem }) as any;
+            // any キャストを排除し、型安全なレスポンスを定義
+            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem }) as unknown as ApproveResponse;
             return {
                 success: true,
                 bossEffect: res?.bossEffect
@@ -225,7 +299,7 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };
 
         try {
-            const res = await buyRewardMutation.mutateAsync({ user, reward }) as any;
+            const res = await buyRewardMutation.mutateAsync({ user, reward }) as unknown as PurchaseResponse;
             return { success: true, newGold: res.newGold, reward };
         } catch (e) { return { success: false, reason: 'error' }; }
     };
@@ -260,14 +334,11 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         }
     };
 
-    const safeUsers = gameData?.users || INITIAL_USERS;
-    const safeQuests = gameData?.quests || MASTER_QUESTS;
-    const safeRewards = gameData?.rewards || MASTER_REWARDS;
 
     return {
-        users: safeUsers,
-        quests: safeQuests,
-        rewards: safeRewards,
+        users: gameData?.users || INITIAL_USERS,
+        quests: gameData?.quests || MASTER_QUESTS,
+        rewards: gameData?.rewards || MASTER_REWARDS,
         completedQuests: gameData?.completedQuests || [],
         pendingQuests: gameData?.pendingQuests || [],
         adventureLogs: gameData?.logs || [],
@@ -276,6 +347,8 @@ export const useGameData = (onLevelUp?: (info: any) => void) => {
         familyStats: chronicleData?.stats || null,
         chronicle: chronicleData?.chronicle || [],
         boss: gameData?.boss || null,
+        pendingInventory: pendingInventory || [],
+        bounties: bounties || [],
         isLoading: isGameDataLoading,
 
         completeQuest,
