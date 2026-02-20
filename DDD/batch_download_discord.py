@@ -25,6 +25,7 @@ import logging
 import signal
 import requests
 import glob
+from collections import defaultdict
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Any, Set, NamedTuple
 from dataclasses import dataclass, field
@@ -372,34 +373,108 @@ class BatchDownloader:
         
         return list(unique_tasks.values())
 
+    def _purge_skipped_tasks(self, skipped_tasks: List[DownloadTask]) -> None:
+        """
+        スキップ対象となったタスクを元リストから物理削除し、アーカイブへ退避する。
+        
+        Args:
+            skipped_tasks (List[DownloadTask]): パージ対象のタスクリスト
+        """
+        if not skipped_tasks:
+            return
+
+        # 1. タスクをソース(ファイル名)ごとにグループ化
+        tasks_by_source = defaultdict(set)
+        for task in skipped_tasks:
+            tasks_by_source[task.source_name].add(task.url)
+
+        deleted_count = 0
+        archive_path = CONFIG.BASE_SAVE_DIR / "archived_tasks.txt"
+
+        # 2. アーカイブへの追記（SSOTからパージされた証跡を残す）
+        try:
+            with open(archive_path, "a", encoding="utf-8") as af:
+                af.write(f"\n# Archived on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                for task in skipped_tasks:
+                    af.write(f"{task.url}\n")
+        except Exception as e:
+            logger.error(f"⚠️ アーカイブファイルへの書き込みに失敗しました: {e}")
+            return # アーカイブ失敗時は元ファイルの削除も中断（データロスト防止）
+
+        # 3. 元ファイルからの物理削除（インメモリでフィルタリングして上書き）
+        for source_name, urls_to_remove in tasks_by_source.items():
+            if source_name == "list":
+                file_path = CONFIG.LIST_FILE_PATH
+            else:
+                file_path = CONFIG.LIST_DIR_PATH / f"{source_name}.txt"
+
+            if not file_path.exists():
+                continue
+
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+
+                # パージ対象外の行だけを残す
+                retained_lines = []
+                for line in lines:
+                    url = line.strip()
+                    if url in urls_to_remove:
+                        deleted_count += 1
+                        logger.debug(f"🗑️ パージ実行: {url} (from {source_name})")
+                    else:
+                        retained_lines.append(line)
+
+                # アトミックな上書き更新
+                temp_path = file_path.with_suffix('.tmp')
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    f.writelines(retained_lines)
+                temp_path.replace(file_path)
+
+            except Exception as e:
+                logger.error(f"⚠️ リストファイル({file_path.name})のパージ処理に失敗しました: {e}")
+
+        logger.info(f"🧹 期限切れ（無効）のタスク {deleted_count} 件をパージしました。")
+
+
     def run(self) -> None:
         SystemHealthChecker.check_dependencies()
         
         if not SystemHealthChecker.is_within_time_window():
-            if FORCE_MODE: logger.info("⚠️ FORCEモード: 時間制限無視")
+            if FORCE_MODE: 
+                logger.debug("⚠️ FORCEモード: 時間制限無視")
             else:
-                logger.info(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了")
+                logger.debug(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了")
                 return
 
-        if not SystemHealthChecker.verify_nas_mount(): return
+        if not SystemHealthChecker.verify_nas_mount(): 
+            return
 
         tasks = self._collect_tasks()
         if not tasks:
-            logger.info("処理対象のURLがありません。")
+            logger.debug("処理対象のURLがありません。")
             return
         
-        # ▼▼▼ 修正: YouTube無効時は事前にリストから除外する (High Performance Fix) ▼▼▼
+        # YouTube無効時はタスクを除外し、パージ処理へ回す
+        skipped_tasks = []
         if not CONFIG.ENABLE_YOUTUBE_DL:
-            original_count = len(tasks)
-            # YouTubeっぽいURLを除外 (簡易判定)
-            tasks = [
-                t for t in tasks 
-                if not ("youtube.com" in t.url or "youtu.be" in t.url)
-            ]
-            skipped_count = original_count - len(tasks)
-            if skipped_count > 0:
-                logger.info(f"🚫 YouTube機能が無効なため、{skipped_count} 件のタスクをスキップしました。")
-        # ▲▲▲ 修正終了 ▲▲▲
+            valid_tasks = []
+            for t in tasks:
+                if "youtube.com" in t.url or "youtu.be" in t.url:
+                    skipped_tasks.append(t)
+                else:
+                    valid_tasks.append(t)
+            
+            if skipped_tasks:
+                logger.info(f"🚫 YouTube機能が無効なため、{len(skipped_tasks)} 件のタスクをスキップおよびパージします。")
+                self._purge_skipped_tasks(skipped_tasks)
+            
+            tasks = valid_tasks
+
+        # パージ後、タスクが0になった場合は終了
+        if not tasks:
+            logger.debug("パージ処理の結果、実行可能なタスクがなくなりました。")
+            return
 
         logger.info("="*60)
         logger.info("   🚀 Smart Pipeline Downloader (v2.2.0)")

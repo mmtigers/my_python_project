@@ -14,6 +14,8 @@ import re
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Iterator, Dict, Any
+import sqlite3
+from contextlib import closing
 
 import yt_dlp
 
@@ -294,43 +296,84 @@ class FileManager:
             return False
 
 class SubscriptionManager:
-    """定期巡回（サブスクリプション）を管理するクラス。"""
+    """
+    定期巡回（サブスクリプション）を管理するクラス。
+    SSOTポリシーに基づき、SQLite DBを用いて状態を管理する。
+    """
 
     def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):
         self.extractor = extractor
         self.file_manager = file_manager
+        
+        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置
+        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"
+
+    def _verify_environment(self) -> bool:
+        """
+        NASのマウント状態（フォールバック中ではないか）を検証する。
+        
+        Returns:
+            bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False
+        """
+        current_base = AppConfig.get_output_base_dir()
+        if AppConfig.LOCAL_DIR_STR in str(current_base):
+            logger.error("🚨 NASがアンマウント状態（ローカルフォールバック中）を検知しました。")
+            logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")
+            return False
+        return True
+
+    def _init_db(self) -> None:
+        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            with closing(conn.cursor()) as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        channel_url TEXT UNIQUE NOT NULL,
+                        is_active INTEGER DEFAULT 1,
+                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            conn.commit()
 
     def process_subscriptions(self) -> None:
-        """登録されたチャンネルリストを読み込み、順次抽出を実行する。"""
-        # 遅延評価でサブスクリプションファイルのパスを取得
-        sub_file = AppConfig.get_output_base_dir() / AppConfig.SUBSCRIPTION_FILE
+        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""
+        # 1. 環境検証（データロスト防止の防波堤）
+        if not self._verify_environment():
+            return
 
-        if not sub_file.exists():
-            logger.warning(f"⚠️ {sub_file.name} が見つかりません。")
-            try:
-                sub_file.parent.mkdir(parents=True, exist_ok=True)
-                with sub_file.open("w", encoding="utf-8") as f:
-                    f.write("# ここにチャンネルURLを1行ずつ記述してください\n")
-                logger.info(f"🆕 空のファイルを作成しました: {sub_file}")
-            except IOError:
-                logger.error(f"❌ 設定ファイル作成失敗: {sub_file}", exc_info=True)
+        # 2. DB初期化
+        try:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db()
+        except sqlite3.Error as e:
+            logger.error(f"❌ DB初期化エラー: {e}", exc_info=True)
             return
 
         urls: List[str] = []
+        
+        # 3. DBからアクティブなサブスクリプションを取得
         try:
-            with sub_file.open("r", encoding="utf-8") as f:
-                urls = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
-        except IOError:
-            logger.error(f"❌ 設定ファイル読み込み失敗: {sub_file}", exc_info=True)
+            with closing(sqlite3.connect(self.db_path)) as conn:
+                with closing(conn.cursor()) as cur:
+                    cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")
+                    rows = cur.fetchall()
+                    urls = [row[0] for row in rows]
+        except sqlite3.Error as e:
+            logger.error(f"❌ DB読み込みエラー: {e}", exc_info=True)
             return
 
-        logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件")
+        if not urls:
+            logger.debug("DBにアクティブなサブスクリプションが登録されていません。")
+            return
+
+        logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")
         
         for i, url in enumerate(urls):
-            logger.info(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
+            logger.debug(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
             for result in self.extractor.extract_iter(url):
                 self.file_manager.save(result)
-
+                
 # ==========================================
 # 4. アプリケーション本体
 # ==========================================
