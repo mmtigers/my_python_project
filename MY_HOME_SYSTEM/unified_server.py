@@ -33,34 +33,63 @@ from handlers import line_handler
 # Logger
 logger = setup_logging("unified_server")
 
-# --- 追加: ログサイレンスポリシーの実装 ---
-class PollingEndpointFilter(logging.Filter):
+# --- 変更: ログサイレンスポリシーの実装 (Silence Policy 6.1準拠) ---
+class SilencePolicyFilter(logging.Filter):
     """
-    特定のポーリングエンドポイントに対する正常なGETリクエスト(200 OK)のログ出力を抑制するフィルター。
-    基本設計書 運用・保守設計「DEBUG: 正常なポーリングは運用時に出力しない」に準拠。
+    特定の頻繁なエンドポイント（ポーリング、ヘルスチェック、静的ファイル）に対する
+    正常なGETリクエスト(HTTP 200/304)のアクセスログを抑制するフィルター。
+    重要な状態変化(POST/PUT/DELETE)やエラーはそのまま出力する。
     """
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             msg = record.getMessage()
-            # 正常なGETリクエスト（HTTP 200）のみを対象とする
-            if "GET" in msg and " 200 " in msg:
-                # 抑制対象のエンドポイントリスト（部分一致）
-                if ("/api/quest/inventory/admin/pending" in msg or
-                    "/api/bounties/list" in msg or
-                    "/api/quest/data" in msg):
-                    return False # ログ出力をスキップ
+            
+            # GETリクエスト以外(POST, PUT, DELETE等)はフィルタリングせず出力
+            if "GET " not in msg:
+                return True
+                
+            # 正常系 (200 OK) または キャッシュ (304 Not Modified) 以外はエラー/警告として出力
+            if " 200 " not in msg and " 304 " not in msg:
+                return True
+
+            # ログ出力を抑制するパスやキーワードのリスト
+            silenced_keywords = [
+                # ポーリング/定常アクセス
+                "/api/quest/inventory/admin/pending",
+                "/api/bounty/list",
+                "/api/quest/data",
+                # ヘルスチェック
+                "GET /health ",
+                "GET / HTTP",
+                # 静的アセット配下
+                "/assets/",
+                "/uploads/",
+                "/quest_static/",
+                # 静的ファイルの拡張子
+                ".png", ".jpg", ".jpeg", ".gif", ".ico",
+                ".css", ".js", ".json", ".woff", ".woff2"
+            ]
+
+            # メッセージ内に抑制対象のキーワードが含まれていればログ出力をスキップ (False)
+            if any(keyword in msg for keyword in silenced_keywords):
+                return False
+
         except Exception:
+            # フィルタ処理中の予期せぬエラーでアプリケーションを止めないための安全策
             pass
-        return True # 上記以外（エラーやPOSTなど）は通常通り出力
+            
+        return True # 上記のどれにも引っかからなければ出力 (True)
 
 # Global State
 scheduler_process: Optional[subprocess.Popen] = None
 camera_process = None
 
-@asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理"""
-    logging.getLogger("uvicorn.access").addFilter(PollingEndpointFilter())
+    
+    # UvicornのアクセスロガーにSilence Policyを適用
+    logging.getLogger("uvicorn.access").addFilter(SilencePolicyFilter())
+    
     logger.info("🚀 --- API Server Starting Up ---")
 
     global camera_process
