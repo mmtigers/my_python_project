@@ -5,7 +5,9 @@ import shutil
 import config
 
 # 基本設計書に準拠し、coreモジュールからloggerをインポート
-from core import logger
+from core.logger import setup_logging
+
+logger = setup_logging("sound_manager")
 
 def play(event_key: str) -> None:
     """
