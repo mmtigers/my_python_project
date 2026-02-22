@@ -134,7 +134,13 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
             return False
         return True
     except Exception as e:
-        logger.warning(f"⚠️ [{cam_name}] Failed to check camera time: {e}")
+        err_str: str = str(e)
+        if "ISO8601" in err_str or "Unrecognised" in err_str or "zeep" in str(type(e)):
+            logger.error(f"❌ [{cam_name}] XML/Date Parse Error in ONVIF response. Camera returned invalid date: {e}")
+        else:
+            logger.error(f"⚠️ [{cam_name}] Failed to check camera time unexpectedly: {e}")
+        
+        # 監視そのものを止めないためのFail-Soft対応
         return True
 
 # def capture_snapshot_from_nvr(cam_conf: Dict[str, Any], target_time: Optional[datetime.datetime] = None) -> Optional[bytes]:
@@ -572,20 +578,38 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 detailed_info += f" | Content: {str(e.content)[:200]}"
             
             full_err_msg: str = f"{err_msg}{detailed_info}"
-            if consecutive_errors < 3:
-                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/3). Retrying... Reason: {full_err_msg}")
-            else:
-                logger.error(f"❌ [{cam_name}] Persistent Error: {full_err_msg}")
+
+            # 指数関数的待機 (5秒ベース、最大300秒)
+            wait_time_fatal: int = min(300, 5 * (2 ** (consecutive_errors - 1)))
+            # --- ログのエスカレーションと通知連携 ---
+            if consecutive_errors >= 5:
+                # ログレベルを ERROR に昇格
+                logger.error(f"❌ [{cam_name}] Persistent Error ({consecutive_errors} times): {full_err_msg}")
+                
+                # 通知ガード: 5回目、およびその後は一定間隔（例: 12回毎 = 約1時間毎）で通知を発火
+                if consecutive_errors == 5 or consecutive_errors % 12 == 0:
+                    try:
+                        alert_msg: str = f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています（連続{consecutive_errors}回失敗）。\n詳細: {err_msg}"
+                        send_push(
+                            config.LINE_USER_ID or "", 
+                            [{"type": "text", "text": alert_msg}], 
+                            target="discord"
+                        )
+                        logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
+                    except Exception as push_err:
+                        logger.error(f"🚨 通知送信に失敗しました: {push_err}")
+                
                 if "Unknown error" in err_msg or "Unauthorized" in err_msg:
                     logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
+            else:
+                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/5). Retrying... Reason: {full_err_msg}")
             
             if current_pullpoint in active_pullpoints: 
                 active_pullpoints.remove(current_pullpoint)
             
             perform_emergency_diagnosis(cam_conf['ip'])
             
-            wait_time_fatal: int = min(300, 30 * (2 ** (consecutive_errors - 1)))
-            
+            # ポートローテーション (3回失敗以降で実施)
             if consecutive_errors >= 3:
                 old_port: int = port_candidates[0]
                 port_candidates.append(port_candidates.pop(0))

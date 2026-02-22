@@ -15,8 +15,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core.logger import setup_logging
 from core.database import get_db_cursor, save_log_generic
-from core.utils import get_now_iso
 from services.notification_service import send_push
+from core.utils import get_now_iso, with_exponential_backoff
 
 # ==========================================
 # 1. 設定・定数定義
@@ -46,6 +46,41 @@ NIGHT_END_HOUR: int = 6
 # 状態定数 (SSOT)
 STATE_PRESENT = "PRESENT"
 STATE_ABSENT = "ABSENT"
+
+
+@with_exponential_backoff(base_delay=5, max_delay=300, alert_threshold=5)
+def get_camera_frame() -> np.ndarray:
+    """
+    RTSP経由でカメラの最新フレームを取得する。
+    例外発生時は with_exponential_backoff デコレータにより無限リトライが行われる。
+    
+    Returns:
+        np.ndarray: 取得に成功した画像フレーム
+    Raises:
+        ValueError: 設定情報が不足している場合
+        ConnectionError: RTSPストリームが開けなかった場合
+        IOError: フレームの読み出しに失敗した場合
+    """
+    if not config.CAMERA_IP or not config.CAMERA_USER:
+        raise ValueError("Camera config is missing (IP or User not found).")
+
+    rtsp_url: str = f"rtsp://{config.CAMERA_USER}:{config.CAMERA_PASS}@{config.CAMERA_IP}:{RTSP_PORT}/stream1"
+    
+    cap = cv2.VideoCapture(rtsp_url)
+    if not cap.isOpened():
+        raise ConnectionError(f"RTSP Connection failed to open: {rtsp_url}")
+    
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.read()  # バッファクリアのための空読み
+        ret, frame = cap.read()
+        
+        if ret and frame is not None:
+            return frame
+        else:
+            raise IOError("RTSP Stream opened but failed to read frame.")
+    finally:
+        cap.release()
 
 def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL) -> Optional[np.ndarray]:
     """
