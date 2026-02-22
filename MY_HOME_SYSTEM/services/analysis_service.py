@@ -45,18 +45,12 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     
-    # ★根本対策: format='mixed' で tz-aware(あり) と tz-naive(なし) の混在エラーを防ぐ
-    df["timestamp"] = pd.to_datetime(df["timestamp"], format='mixed')
-    
-    # 混在するタイムゾーン情報をすべて「Asia/Tokyo」に統一・変換する安全な関数
-    def to_jst(ts):
-        if pd.isnull(ts): return ts
-        if ts.tzinfo is None:
-            return ts.tz_localize("Asia/Tokyo") # タイムゾーンがないものは日本時間とみなす
-        else:
-            return ts.tz_convert("Asia/Tokyo")  # あるものは日本時間に変換する
-            
-    df["timestamp"] = df["timestamp"].apply(to_jst)
+    # 【最終修正】format="mixed" を確実に追加し、以降の冗長なapply処理を削除
+    df["timestamp"] = pd.to_datetime(
+        df["timestamp"], 
+        format="mixed", 
+        utc=True
+    ).dt.tz_convert("Asia/Tokyo")
 
     return df
 
