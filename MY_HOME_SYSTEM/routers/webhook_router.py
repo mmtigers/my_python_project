@@ -30,13 +30,26 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)) 
         logger.error(f"LINE callback error: {e}")
     return "OK"
 
+# 対象とするセンサーのデバイスタイプ（温湿度計やプラグ等は除外）
+TARGET_DEVICE_TYPES = ["Contact Sensor", "Motion Sensor"]
+
 @router.post("/webhook/switchbot")
 async def switchbot_webhook(body: SwitchBotWebhookBody):
     """SwitchBot Webhook受信・処理"""
     ctx = body.context
     mac = ctx.deviceMac
     
-    # デバイス情報の解決
+    # 🌟 追加: デバイスタイプの取得（フォールバック付き）
+    device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))
+
+    # 🌟 追加: ガード節 (Fail-Fast)
+    # 対象外のデバイスからのWebhookはDBアクセスを行う前に即座に破棄し、I/Oを保護する
+    if device_type not in TARGET_DEVICE_TYPES:
+        # ログレベル設計に準拠: 不要な通知やエラーは出さず、DEBUGレベルで記録
+        logger.debug(f"Ignored webhook from unsupported device type: {device_type} (MAC: {mac})")
+        return {"status": "ignored", "reason": "unsupported_device"}
+
+    # デバイス情報の解決 (既存ロジック)
     api_name = sb_tool.get_device_name_by_id(mac)
     device_conf = next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)
     

@@ -58,7 +58,7 @@ if command -v mountpoint >/dev/null 2>&1; then
 fi
 
 # --- Phase 3: 初期化 & Webhook修正 ---
-echo "--- Fix Webhook (Using Systemd ngrok) ---"
+echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 
 # --- Phase 4: サーバー起動 (ここだけにする) ---
