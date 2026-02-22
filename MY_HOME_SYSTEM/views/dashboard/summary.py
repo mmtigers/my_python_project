@@ -13,7 +13,8 @@ from .common import render_status_card_html
 def get_takasago_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
     val = "⚪ データなし"
     theme = "theme-gray"
-    if df_sensor.empty: return val, theme
+    if df_sensor.empty or "location" not in df_sensor.columns or "contact_state" not in df_sensor.columns:
+        return val, theme
 
     df_taka = df_sensor[
         (df_sensor["location"] == "高砂") & (df_sensor["contact_state"].isin(["open", "detected"]))
@@ -36,7 +37,9 @@ def get_itami_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:
     """伊丹（自宅）のステータス判定（修正版）"""
     val = "⚪ データなし"
     theme = "theme-gray"
-    if df_sensor.empty: return val, theme
+    required_cols = ["location", "device_type", "movement_state", "contact_state"]
+    if df_sensor.empty or not all(col in df_sensor.columns for col in required_cols):
+        return val, theme
 
     # 1. デバイスタイプの判定: 'Motion' を含むか、または 'Webhook' (SwitchBot) である
     is_motion_device = (
