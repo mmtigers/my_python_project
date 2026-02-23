@@ -13,6 +13,7 @@ import glob
 import requests
 import datetime
 import cv2
+import platform
 from datetime import datetime as dt_class, timedelta
 from typing import Optional, Dict, Any, Tuple, List
 from concurrent.futures import ThreadPoolExecutor
@@ -78,6 +79,24 @@ def cleanup_handler(signum: int, frame: Any) -> None:
 
 signal.signal(signal.SIGINT, cleanup_handler)
 signal.signal(signal.SIGTERM, cleanup_handler)
+
+def is_host_reachable(ip: str) -> bool:
+    """
+    Pingコマンドを使用してホストへのL3到達性（Route）を確認する。
+    """
+    param: str = '-n' if platform.system().lower() == 'windows' else '-c'
+    cmd: List[str] = ['ping', param, '1', ip]
+    try:
+        res: subprocess.CompletedProcess = subprocess.run(
+            cmd, 
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.DEVNULL, 
+            timeout=3
+        )
+        return res.returncode == 0
+    except (subprocess.TimeoutExpired, Exception) as e:
+        logger.debug(f"Ping execution failed for {ip}: {e}")
+        return False
 
 def find_wsdl_path() -> Optional[str]:
     """WSDLファイルのディレクトリを動的に探索する。"""
@@ -432,13 +451,12 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     """
     単一のカメラに対してONVIF接続を行い、イベントストリームを監視するプロセス。
     接続断時のリトライロジックおよびイベントパースの安全性を含む。
-
-    Args:
-        cam_conf (Dict[str, Any]): カメラ設定辞書 (ip, port, user, pass, name等を含む)
     """
     cam_name: str = cam_conf['name']
+    ip_address: str = cam_conf['ip']
     consecutive_errors: int = 0
     port_candidates: List[int] = [2020, 80]
+    max_backoff_time: int = 3600  # 最大1時間の待機 (サスペンド)
 
     transient_error_count: int = 0
     last_transient_error_time: float = 0
@@ -452,6 +470,17 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
     while True:
+        # 1. L3到達性の事前チェック (ホストダウン時の即時サスペンド)
+        if not is_host_reachable(ip_address):
+            consecutive_errors += 1
+            backoff_time: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
+            logger.warning(
+                f"⚠️ [{cam_name}] 接続失敗 (No route to host). "
+                f"{consecutive_errors}回目の失敗。{backoff_time}秒間監視をサスペンドします。"
+            )
+            time.sleep(backoff_time)
+            continue
+
         mycam: Any = None
         current_pullpoint: Any = None
         events_service: Any = None
@@ -462,9 +491,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
             target_port: int = port_candidates[0]
             
-            # 1. カメラ接続 (ONVIFCamera)
+            # 2. カメラ接続 (ONVIFCamera)
             mycam = ONVIFCamera(
-                cam_conf['ip'], 
+                ip_address, 
                 target_port, 
                 cam_conf['user'], 
                 cam_conf['pass'],
@@ -472,7 +501,6 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 encrypt=True
             )
 
-            # 2. devicemgmtサービス作成 & 認証設定
             devicemgmt: Any = mycam.create_devicemgmt_service()
             devicemgmt.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
@@ -482,6 +510,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             device_info: Any = devicemgmt.GetDeviceInformation()
             if is_first_connect:
                 logger.info(f"📡 [{cam_name}] Connected. Model: {device_info.Model}")
+                is_first_connect = False
             else:
                 logger.debug(f"📡 [{cam_name}] Connected. Model: {device_info.Model} (Reconnected)")
 
@@ -489,7 +518,6 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             events_service = mycam.create_events_service()
             events_service.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
             
-            # 【修正1】定常的なサブスクリプション作成のログをDEBUGに降格
             logger.debug(f"[{cam_name}] Creating subscription with TopicFilter...")
             current_pullpoint = events_service.CreatePullPointSubscription()
             
@@ -513,12 +541,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             active_pullpoints.append(pullpoint)
             current_pullpoint = pullpoint
             
-            if is_first_connect:
-                logger.info(f"✅ [{cam_name}] Subscribed successfully.")
-                is_first_connect = False
-            else:
-                logger.debug(f"✅ [{cam_name}] Subscribed successfully (Refresh).")
-            
+            # 接続成功時にエラーカウントをリセット
             consecutive_errors = 0
             session_start_time: float = time.time()
 
@@ -526,11 +549,11 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             while True:
                 if time.time() - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Refreshing session...")
-                    # ここでbreakし、finallyブロックで確実な解放を行わせる
                     break
 
                 try:
                     events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
+                    # ... (ログ出力等は省略せず元の通り) ...
                     if events:
                         logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
                         logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
@@ -543,10 +566,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 if events and hasattr(events, 'NotificationMessage'):
                     for msg in events.NotificationMessage:
                         process_camera_event(msg, cam_conf)
-                        
 
         except (RemoteDisconnected, ProtocolError, BrokenPipeError, ConnectionResetError) as e:
-            # 【修正3】一時的障害に対するExponential Backoffの適用とログレベル適正化
+            # 【修正点】一時的障害に対するExponential Backoffの適用とサスペンドログ
             consecutive_errors += 1
             now: float = time.time()
             if now - last_transient_error_time < 15:
@@ -556,11 +578,13 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             last_transient_error_time = now
 
-            # 指数関数的待機 (Max 300秒)
-            wait_time: int = min(300, 5 * (2 ** (consecutive_errors - 1)))
+            wait_time: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
 
             if transient_error_count >= 3:
-                logger.warning(f"⚠️ [{cam_name}] Connection lost (Frequent): {e} ({transient_error_count}/3). Retrying in {wait_time}s...")
+                logger.warning(
+                    f"⚠️ [{cam_name}] 接続失敗 (Transient Network Error: {e}). "
+                    f"{consecutive_errors}回目の失敗。{wait_time}秒間監視をサスペンドします。"
+                )
             else:
                 logger.debug(f"🔄 [{cam_name}] Connection lost (Intentional/Transient): {e}. Reconnecting in {wait_time}s...")
             
@@ -568,6 +592,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             continue
 
         except Exception as e:
+            # 【修正点】致命的障害時のバックオフと無意味なポート切り替えの抑止
             consecutive_errors += 1
             err_msg: str = str(e)
 
@@ -579,14 +604,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             full_err_msg: str = f"{err_msg}{detailed_info}"
 
-            # 指数関数的待機 (5秒ベース、最大300秒)
-            wait_time_fatal: int = min(300, 5 * (2 ** (consecutive_errors - 1)))
-            # --- ログのエスカレーションと通知連携 ---
+            wait_time_fatal: int = min(10 * (2 ** consecutive_errors), max_backoff_time)
+            
             if consecutive_errors >= 5:
-                # ログレベルを ERROR に昇格
                 logger.error(f"❌ [{cam_name}] Persistent Error ({consecutive_errors} times): {full_err_msg}")
-                
-                # 通知ガード: 5回目、およびその後は一定間隔（例: 12回毎 = 約1時間毎）で通知を発火
                 if consecutive_errors == 5 or consecutive_errors % 12 == 0:
                     try:
                         alert_msg: str = f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています（連続{consecutive_errors}回失敗）。\n詳細: {err_msg}"
@@ -601,22 +622,26 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 
                 if "Unknown error" in err_msg or "Unauthorized" in err_msg:
                     logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
-            else:
-                logger.warning(f"⚠️ [{cam_name}] Connect Failed ({consecutive_errors}/5). Retrying... Reason: {full_err_msg}")
             
             if current_pullpoint in active_pullpoints: 
                 active_pullpoints.remove(current_pullpoint)
             
-            perform_emergency_diagnosis(cam_conf['ip'])
-            
-            # ポートローテーション (3回失敗以降で実施)
-            if consecutive_errors >= 3:
-                old_port: int = port_candidates[0]
-                port_candidates.append(port_candidates.pop(0))
-                new_port: int = port_candidates[0]
-                logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
+            # ホストが生きている場合のみ緊急診断とポートローテーションを実行
+            if is_host_reachable(ip_address):
+                perform_emergency_diagnosis(ip_address)
                 
-            logger.info(f"[{cam_name}] Retry in {wait_time_fatal}s...")
+                if consecutive_errors >= 3:
+                    old_port: int = port_candidates[0]
+                    port_candidates.append(port_candidates.pop(0))
+                    new_port: int = port_candidates[0]
+                    logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
+            else:
+                logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping port rotation.")
+                
+            logger.warning(
+                f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error). "
+                f"{consecutive_errors}回目の失敗。{wait_time_fatal}秒間監視をサスペンドします。"
+            )
             time.sleep(wait_time_fatal)
 
         finally:
