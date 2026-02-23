@@ -48,44 +48,17 @@ STATE_PRESENT = "PRESENT"
 STATE_ABSENT = "ABSENT"
 
 
-@with_exponential_backoff(base_delay=5, max_delay=300, alert_threshold=5)
-def get_camera_frame() -> np.ndarray:
-    """
-    RTSP経由でカメラの最新フレームを取得する。
-    例外発生時は with_exponential_backoff デコレータにより無限リトライが行われる。
-    
-    Returns:
-        np.ndarray: 取得に成功した画像フレーム
-    Raises:
-        ValueError: 設定情報が不足している場合
-        ConnectionError: RTSPストリームが開けなかった場合
-        IOError: フレームの読み出しに失敗した場合
-    """
-    if not config.CAMERA_IP or not config.CAMERA_USER:
-        raise ValueError("Camera config is missing (IP or User not found).")
-
-    rtsp_url: str = f"rtsp://{config.CAMERA_USER}:{config.CAMERA_PASS}@{config.CAMERA_IP}:{RTSP_PORT}/stream1"
-    
-    cap = cv2.VideoCapture(rtsp_url)
-    if not cap.isOpened():
-        raise ConnectionError(f"RTSP Connection failed to open: {rtsp_url}")
-    
-    try:
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        cap.read()  # バッファクリアのための空読み
-        ret, frame = cap.read()
-        
-        if ret and frame is not None:
-            return frame
-        else:
-            raise IOError("RTSP Stream opened but failed to read frame.")
-    finally:
-        cap.release()
-
 def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL) -> Optional[np.ndarray]:
     """
     RTSP経由でカメラの最新フレームを取得する。
-    接続失敗時は指定回数リトライを行う。
+    接続失敗時は指定回数リトライを行い、試行ごとに必ず関連リソースを解放する。
+    
+    Args:
+        retries (int): 最大リトライ回数
+        interval (int): リトライ間隔（秒）
+        
+    Returns:
+        Optional[np.ndarray]: 取得に成功した画像フレーム。失敗時はNone。
     """
     # config不備のガード
     if not config.CAMERA_IP or not config.CAMERA_USER:
@@ -95,12 +68,11 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
     rtsp_url: str = f"rtsp://{config.CAMERA_USER}:{config.CAMERA_PASS}@{config.CAMERA_IP}:{RTSP_PORT}/stream1"
     
     for attempt in range(1, retries + 1):
-        cap = None
+        cap: Optional[cv2.VideoCapture] = None
         try:
             cap = cv2.VideoCapture(rtsp_url)
             if not cap.isOpened():
                 logger.warning(f"⚠️ RTSP Connection failed (Attempt {attempt}/{retries}). Retrying in {interval}s...")
-                time.sleep(interval)
                 continue
             
             # バッファ対策: 最新フレームを取得
@@ -120,10 +92,13 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
                 logger.warning(f"⚠️ RTSP Stream opened but failed to read frame (Attempt {attempt}/{retries}).")
                 
         except Exception as e:
-            logger.warning(f"⚠️ Unexpected error during RTSP connection: {e}")
+            logger.error(f"❌ Exception occurred during RTSP handling: {e}")
+            
         finally:
-            if cap:
+            # 【重要】例外発生時・リトライ時・成功時に関わらず、必ずリソースを解放しログを出力する
+            if cap is not None and cap.isOpened():
                 cap.release()
+                logger.info("🧹 RTSP connection and resources safely released.")
         
         # 次の試行まで待機（最終回以外）
         if attempt < retries:
