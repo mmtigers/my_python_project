@@ -66,51 +66,46 @@ def is_process_alive(process_keyword: str) -> bool:
     except Exception:
         return False
 
-def check_throttling_status() -> None:
+def check_throttling_status():
     """
-    Raspberry Piのスロットリング状態（電圧・温度制限）を確認する。
-    現在の異常と過去の履歴を分離し、現在の異常のみを通知する。
+    Raspberry Piのハードウェア健全性（スロットリングや電圧低下）を確認する。
+    設計書のログレベル運用に基づき、過去の履歴はWARNING（通知なし）、
+    現在発生中の異常のみERROR（Discord通知）として扱う。
     """
     try:
-        res = subprocess.run(
-            ["vcgencmd", "get_throttled"],
-            capture_output=True, text=True, check=False
-        )
-        
-        if res.returncode != 0:
-            return
+        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, check=True)
+        if 'throttled=' in result.stdout:
+            val_str = result.stdout.split('=')[1].strip()
+            val = int(val_str, 16)
+            
+            if val == 0:
+                return  # 完全に正常
 
-        output = res.stdout.strip()
-        if "throttled=" not in output:
-            return
+            # ビットマスクの定義
+            ACTIVE_MASK = 0x0000F   # 現在発生中 (Bit 0-3: Under-voltage, Throttled 等)
+            HISTORY_MASK = 0xF0000  # 過去の履歴 (Bit 16-19: Has occurred)
             
-        hex_str = output.split("=")[1]
-        throttled_val = int(hex_str, 16)
-        
-        # 下位4ビットの抽出 (Bit 0-3: 現在発生中のエラー)
-        # 0x01: Under-voltage, 0x02: ARM frequency capped, 0x04: Currently throttled, 0x08: Soft temperature limit
-        current_issues = throttled_val & 0x0F
-        
-        if current_issues != 0:
-            # 現在進行形の電圧低下・熱制限 (ERROR -> 即時通知対象)
-            msg = f"System Alert\nCURRENT Throttling Detected: {hex_str}\n※Raspberry Piが高負荷・または電圧低下中です。"
-            logger.error(msg.replace("\n", " "))
+            active_issues = val & ACTIVE_MASK
+            history_issues = val & HISTORY_MASK
             
-            # 通知バッファの汚染を防ぐため、リストはローカルで明示的に定義して渡す
-            send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="error")
-            
-        elif throttled_val != 0:
-            # 過去の履歴のみ (WARNING -> ログのみ、通知しない)
-            logger.warning(f"History Throttling Flag Detected (Code: {hex_str}). System recovered.")
-            
-        else:
-            logger.debug("System voltage and temperature are normal (0x0).")
-
+            # 1. 現在発生中の異常がある場合 (ERRORレベル: 介入が必要)
+            if active_issues != 0:
+                logger.error(f"⚠️ Active Throttling Detected: {hex(val)}")
+                msg = f"System Alert: Active Hardware Throttling/Under-voltage Detected! Code: {hex(val)}"
+                # ERRORレベルなのでDiscord/LINEへ通知
+                send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="error")
+                
+            # 2. 過去の履歴のみの場合 (WARNINGレベル: 自動復旧済みのため通知しない)
+            elif history_issues != 0:
+                # 今回の 0x80000 (Soft temperature limit has occurred) はここに入り、通知が抑制される
+                logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")
+                
     except FileNotFoundError:
-        # 開発環境（Mac/Windows等）で vcgencmd がない場合はスキップ
-        logger.debug("vcgencmd command not found. Skipping hardware health check.")
+        # vcgencmdがインストールされていない環境（テスト環境等）向けのFail-Soft処理
+        logger.debug("vcgencmd not found, skipping throttling check.")
     except Exception as e:
-        logger.error(f"Failed to check throttling status: {e}")
+        err = traceback.format_exc()
+        logger.error(f"Throttling Check Crashed: {err}")
 
 def check_health() -> None:
     """
