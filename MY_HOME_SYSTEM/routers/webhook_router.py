@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/routers/webhook_router.py
 import asyncio
+import time
 from fastapi import APIRouter, Request, Header, HTTPException
 from linebot.v3.exceptions import InvalidSignatureError
 
@@ -39,23 +40,31 @@ async def switchbot_webhook(body: SwitchBotWebhookBody):
     ctx = body.context
     mac = ctx.deviceMac
     
-    # 🌟 追加: デバイスタイプの取得（フォールバック付き）
     device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))
 
-    # 🌟 追加: ガード節 (Fail-Fast)
-    # 対象外のデバイスからのWebhookはDBアクセスを行う前に即座に破棄し、I/Oを保護する
+    # ガード節 1: 対象外デバイス (Fail-Fast)
     if device_type not in TARGET_DEVICE_TYPES:
-        # ログレベル設計に準拠: 不要な通知やエラーは出さず、DEBUGレベルで記録
         logger.debug(f"Ignored webhook from unsupported device type: {device_type} (MAC: {mac})")
         return {"status": "ignored", "reason": "unsupported_device"}
 
+    state = str(ctx.detectionState).lower()
+    current_time = time.time()
+
+    # 🌟 追加: ガード節 2 - イベントの重複排除 (Fail-Fast)
+    # 連続アクセスによるDBへの過剰書き込みをインメモリで防御
+    if sensor_service.is_duplicate_webhook(mac, state, current_time):
+        # ガイドライン(6.1)に基づき、ログのノイズ化を防ぐため DEBUG レベルで出力
+        logger.debug(f"Duplicate webhook ignored for device: {mac}, state: {state}")
+        return {"status": "ignored", "reason": "duplicate_event"}
+
+    # --- これ以降は重複していない有効なイベントのみが通過する ---
+    
     # デバイス情報の解決 (既存ロジック)
     api_name = sb_tool.get_device_name_by_id(mac)
     device_conf = next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)
     
     name = api_name or (device_conf.get("name") if device_conf else f"Unknown_{mac}")
     location = device_conf.get("location", "未登録") if device_conf else "場所不明"
-    state = str(ctx.detectionState).lower()
 
     # 1. ログ保存 (互換性維持)
     await save_log_async("device_records", 

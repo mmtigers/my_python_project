@@ -7,9 +7,11 @@ import subprocess
 import signal
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
+import ipaddress
 
-from fastapi import FastAPI, Request, HTTPException
+from typing import AsyncGenerator, Optional, Callable, Awaitable
+
+from fastapi import FastAPI, Request, HTTPException, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -138,6 +140,62 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """
+    リクエスト元のIPアドレスを検証し、許可されたネットワークからのアクセスのみを後続へ渡すミドルウェア。
+    Cloudflare等のリバースプロキシ環境に対応し、CF-Connecting-IP または X-Forwarded-For ヘッダーから
+    実クライアントIPを取得して判定する。
+
+    例外として、外部からのWebhook受信が必要な以下のパスは全IPからアクセスを許可する:
+    - /webhook/switchbot
+    - /callback/line
+
+    許可ネットワーク:
+    - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
+    - ローカルホスト (127.0.0.1, ::1)
+    """
+    allowed_webhook_paths = {
+        "/webhook/switchbot",
+        "/callback/line"
+    }
+
+    # 1. 例外パスの判定（Webhook関連は無条件で許可）
+    if request.url.path in allowed_webhook_paths:
+        return await call_next(request)
+
+    # 2. クライアントIPの取得 (リバースプロキシ対応)
+    # Cloudflareの独自ヘッダーを最優先、次に一般的な X-Forwarded-For を確認
+    client_ip: str | None = request.headers.get("cf-connecting-ip")
+    
+    if not client_ip:
+        x_forwarded_for = request.headers.get("x-forwarded-for")
+        if x_forwarded_for:
+            # X-Forwarded-Forはカンマ区切りで複数IPが入る場合があるため、先頭（元のクライアント）を取得
+            client_ip = x_forwarded_for.split(",")[0].strip()
+        else:
+            # ヘッダーがない場合は直接の接続元IPを取得
+            client_ip = request.client.host if request.client else "0.0.0.0"
+
+    try:
+        # 文字列として取得したIPを判定用のオブジェクトに変換
+        ip_obj = ipaddress.ip_address(client_ip)
+        
+        # 3. IPアドレスがローカルホスト(is_loopback)またはプライベートIP(is_private)か検証
+        if ip_obj.is_loopback or ip_obj.is_private:
+            return await call_next(request)
+            
+    except ValueError:
+        # 不正な形式のIPアドレス文字列が渡された場合のフェイルセーフ（意図せぬクラッシュ防止）
+        pass
+
+    # 4. 許可条件を満たさない場合はログを記録し、403 Forbidden を返す (printは不使用)
+    logger.warning(f"Blocked unauthorized external access - IP: {client_ip}, Path: {request.url.path}")
+    return JSONResponse(
+        status_code=403,
+        content={"detail": "Forbidden: Access denied."}
+    )
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
