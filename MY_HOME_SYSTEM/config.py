@@ -256,6 +256,11 @@ if CAMERAS:
 else:
     CAMERA_IP, CAMERA_USER, CAMERA_PASS = None, None, None
 
+# 動体検知の過剰発火を防ぐためのクールダウン（秒）
+# デフォルトは60秒。.envで上書き可能。
+MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))
+
+
 # 給与PDFパスワード
 _passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
 SALARY_PDF_PASSWORDS: List[str] = [p.strip() for p in _passwords_str.split(",") if p.strip()]
