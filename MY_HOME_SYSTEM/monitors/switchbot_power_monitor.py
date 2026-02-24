@@ -4,7 +4,7 @@ import sys
 import os
 import time
 import json
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 
 # プロジェクトルートへのパス解決
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -40,7 +40,7 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
         data: Dict[str, Any] = status.get("body", {})
         result: Dict[str, Any] = {}
         
-        # 1. 電力計データの抽出
+        # 1. 電力計データ（アナログ値）の抽出
         p_val: Optional[float] = None
         candidates: List[Any] = [data.get("watt"), data.get("weight"), data.get("power")]
         for c in candidates:
@@ -56,19 +56,70 @@ def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[
         if p_val is not None:
             result["power"] = p_val
 
-        # 2. 温湿度計
+        # 2. 温湿度計（アナログ値）の抽出
         if "temperature" in data or "humidity" in data:
             try:
                 result["temperature"] = float(data.get("temperature", 0.0))
                 result["humidity"] = float(data.get("humidity", 0.0))
             except (ValueError, TypeError):
                 pass
+                
+        # 3. デジタル状態（ON/OFFなど）の抽出
+        # 'power' が文字列 "ON"/"OFF" の場合、または 'powerState' が存在する場合に取得
+        raw_power: Any = data.get("power")
+        if isinstance(raw_power, str) and raw_power.upper() in ["ON", "OFF"]:
+            result["power_state"] = raw_power.upper()
+        elif "powerState" in data:
+            result["power_state"] = str(data.get("powerState")).upper()
             
         return result
 
     except Exception as e:
         logger.error(f"❌ Fetch Error [{device_id}]: {e}")
         return None
+
+def log_device_state_change(
+    dname: str, 
+    did: str, 
+    last_status: Optional[Dict[str, Any]], 
+    current_status: Dict[str, Any]
+) -> None:
+    """
+    デバイスの状態変化を評価し、基本設計書 6.1 の Silence Policy に基づき適切なログレベルで出力する。
+
+    基準:
+    - INFO: 'power_state' などのデジタルな状態変化（ON/OFFの切り替わり等）が発生した場合。
+            重要なイベントとしてシステムが把握すべき操作や状態変化に限定する。
+    - DEBUG: 'power' (消費電力), 'temperature', 'humidity' などのアナログ値の微小な変動のみの場合、
+             または状態に変化がない場合。ログファイルへのノイズを防ぐため降格させる。
+    """
+    if last_status == current_status:
+        logger.debug(f"✅ Device state unchanged: {dname}")
+        return
+        
+    if last_status is None:
+        # 初回取得時は起動時のログフラッド（ノイズ）を防ぐため DEBUG レベルとする
+        logger.debug(f"🔄 Initial device state: {dname} (ID: {did}) -> {current_status}")
+        return
+
+    # 差分のあるキーを抽出
+    changed_keys: List[str] = [
+        key for key, value in current_status.items()
+        if last_status.get(key) != value
+    ]
+
+    # デジタルな状態変化とみなすキーの定義（必要に応じて "online" などを追加可能）
+    digital_state_keys: Set[str] = {"power_state", "status", "online"}
+    
+    # デジタル状態の変化が含まれているか判定
+    has_digital_change: bool = any(key in digital_state_keys for key in changed_keys)
+
+    if has_digital_change:
+        # デジタルな変化（ON->OFF等）が含まれる場合は INFO
+        logger.info(f"🔄 Device state changed [Digital]: {dname} (ID: {did}) -> {current_status}")
+    else:
+        # アナログな変化（温度 24.8 -> 24.9 等）のみの場合は DEBUG
+        logger.debug(f"🔄 Device state changed [Analog]: {dname} (ID: {did}) -> {current_status}")
 
 async def main() -> None:
     # 定常起動はDEBUGに降格
@@ -96,14 +147,14 @@ async def main() -> None:
         status: Optional[Dict[str, Any]] = await asyncio.to_thread(fetch_device_status_sync, did, dtype)
         
         if status:
-            # 差分検知ロジック
             last_status: Optional[Dict[str, Any]] = _last_device_states.get(did)
+            
+            # ログ設計のポリシーに従い、変化の質を評価して出力
+            log_device_state_change(dname, did, last_status, status)
+            
+            # キャッシュの更新
             if last_status != status:
-                logger.info(f"🔄 Device state changed: {dname} (ID: {did}) -> {status}")
                 _last_device_states[did] = status
-            else:
-                # 変化なしはDEBUG
-                logger.debug(f"✅ Device state unchanged: {dname}")
 
             has_data: bool = False
             
@@ -115,14 +166,12 @@ async def main() -> None:
             
             if "temperature" in status:
                 await sensor_service.process_meter_data(
-                    did, dname, status["temperature"], status["humidity"]
+                    did, dname, status["temperature"], status.get("humidity", 0.0)
                 )
                 has_data = True
             
             if has_data:
                 processed_count += 1
-        else:
-            pass 
 
         await asyncio.sleep(2)
 
