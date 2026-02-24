@@ -18,7 +18,7 @@ LAST_NOTIFY_TIME: Dict[str, float] = {}
 IS_ACTIVE: Dict[str, bool] = {}
 MOTION_TASKS: Dict[str, asyncio.Task] = {}
 
-# 🌟 追加: Webhook重複排除用のインメモリーキャッシュ
+# Webhook重複排除用のインメモリーキャッシュ
 EVENT_CACHE: Dict[str, Dict[str, Any]] = {}
 DEDUPE_TTL_SECONDS: float = 3.0  # 3秒以内の同一ステータスは重複とみなす
 
@@ -34,19 +34,11 @@ def is_duplicate_webhook(mac: str, state: str, event_timestamp: float) -> bool:
     インメモリキャッシュ（EVENT_CACHE）を参照し、以下の両方を満たす場合は重複(True)とする。
     1. 同一MACアドレスに対する直近のイベントとステータス(state)が完全に一致していること
     2. 直近のイベント処理時刻から `DEDUPE_TTL_SECONDS` 秒以内の受信であること
-    
-    Args:
-        mac (str): デバイスのMACアドレス
-        state (str): 検出された状態（例: "detected", "open"）
-        event_timestamp (float): イベントの受信時刻（エポック秒）
-        
-    Returns:
-        bool: 重複している場合はTrue、新規処理すべきイベントであればFalse
     """
-    last_event = EVENT_CACHE.get(mac)
+    last_event: Optional[Dict[str, Any]] = EVENT_CACHE.get(mac)
     
     if last_event:
-        time_passed = event_timestamp - last_event["timestamp"]
+        time_passed: float = event_timestamp - last_event["timestamp"]
         # ステータスが同じ、かつTTL内の連続受信であれば重複として弾く
         if last_event["state"] == state and time_passed <= DEDUPE_TTL_SECONDS:
             return True
@@ -66,7 +58,7 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
     """無反応検知通知 (動きがない場合に通知を送る)"""
     try:
         await asyncio.sleep(timeout)
-        msg = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
+        msg: str = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
         
         await asyncio.to_thread(
             send_push,
@@ -74,7 +66,8 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
             [{"type": "text", "text": msg}], 
             None, "discord", "notify"
         )
-        logger.info(f"通知送信: {msg}")
+        # 状態の大きな変化（タイムアウト）なので INFO を維持
+        logger.info(f"通知送信 [Digital Event]: {msg}")
         IS_ACTIVE[mac] = False
         if mac in MOTION_TASKS:
             del MOTION_TASKS[mac]
@@ -83,21 +76,30 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
         logger.debug(f"動きなしタイマーキャンセル: {name}")
 
 async def process_sensor_data(mac: str, name: str, location: str, dev_type: str, state: str) -> None:
-    """センサー検知メインロジック (Webhook経由)"""
+    """
+    センサー検知メインロジック (Webhook経由)
+    
+    Silence Policy:
+    - INFO: 状態が「非アクティブ → アクティブ」に変化した場合、またはドア開閉などの明確なイベント。
+    - DEBUG: 既に「アクティブ」な状態での継続的な検知（モーションセンサーの連続反応など）。
+    """
     msg: Optional[str] = None
-    now = time.time()
+    now: float = time.time()
     
     # Motion Sensor Logic
     if dev_type and "Motion" in dev_type:
         if state == "detected":
-            # 既存のタイマーがあればキャンセル（動きがあったため）
             if mac in MOTION_TASKS: 
                 MOTION_TASKS[mac].cancel()
             
-            # 非アクティブ状態からの復帰時に通知
+            # 非アクティブ状態からの復帰時のみ通知・INFOログを出力
             if not IS_ACTIVE.get(mac, False):
+                logger.info(f"🚶 [Digital Event] Motion detected (Active): {name}")
                 msg = f"👀【{location}・見守り】\n{name} で動きがありました"
                 IS_ACTIVE[mac] = True
+            else:
+                # 継続的な検知はノイズになるためDEBUGレベルに降格
+                logger.debug(f"🚶 [Analog/Continuous] Motion detected (Already Active): {name}")
             
             # 新たな「動きなし」監視タイマーをセット
             MOTION_TASKS[mac] = asyncio.create_task(
@@ -106,6 +108,8 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
     
     # Contact Sensor Logic
     elif state in ["open", "timeoutnotclose"]:
+        # 開閉は明確なデジタル状態変化のためINFO
+        logger.info(f"🚪 [Digital Event] Contact sensor state: {name} ({state})")
         if now - LAST_NOTIFY_TIME.get(mac, 0.0) > CONTACT_COOLDOWN:
             msg = f"🚪【{location}・防犯】\n{name} が開きました" if state == "open" else f"⚠️【{location}・注意】\n{name} が開けっ放しです"
             LAST_NOTIFY_TIME[mac] = now
@@ -118,44 +122,48 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
             None, "discord", "notify"
         )
 
-def cancel_all_tasks():
+def cancel_all_tasks() -> None:
     """シャットダウン時のタスククリーンアップ"""
     for t in MOTION_TASKS.values():
         t.cancel()
     logger.info("All motion sensor tasks cancelled.")
-
-
-
 
 # ==========================================
 # 2. Polling Logic (Active) - New!
 # ==========================================
 
 async def process_meter_data(device_id: str, device_name: str, temp: float, humidity: float) -> None:
-    """温湿度計データの保存"""
+    """
+    温湿度計データの保存
+    
+    Silence Policy:
+    - DEBUG: 温湿度のアナログ値保存は定常処理のため、ログノイズ防止として DEBUG に限定。
+    """
     await save_log_async(
         config.SQLITE_TABLE_SWITCHBOT_LOGS,
         ["device_id", "device_name", "temperature", "humidity", "timestamp"],
         (device_id, device_name, temp, humidity, get_now_iso())
     )
-    # 必要であればここで熱中症アラートなどのロジックを追加可能
+    logger.debug(f"🌡️ [Analog] Meter data saved: {device_name} (Temp: {temp}℃, Hum: {humidity}%)")
 
 async def process_power_data(device_id: str, device_name: str, wattage: float, notify_settings: Dict[str, Any]) -> None:
     """
     電力データの保存と通知判定
     - 前回のDB値を参照して、閾値をまたいだ場合のみ通知する (Stateful Check)
+    
+    Silence Policy:
+    - INFO: 閾値を跨ぐ（ON/OFF）状態の切り替わりが発生した場合。
+    - DEBUG: 平常時の電力値（アナログ値）の保存処理。
     """
     # 1. 保存前の最新値を取得（前回値）
-    prev_wattage = 0.0
+    prev_wattage: float = 0.0
     try:
-        def _fetch_prev_wattage():
-            # common.execute_read_query ではなく get_db_cursor を直接使用する
+        def _fetch_prev_wattage() -> float:
             with common.get_db_cursor() as cur:
                 row = cur.execute(
                     f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
                     (device_id,)
                 ).fetchone()
-                # RowFactoryが有効なら辞書ライク、そうでなければタプル(index 0)
                 if row:
                     try:
                         return float(row['wattage'])
@@ -166,7 +174,6 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
         prev_wattage = await asyncio.to_thread(_fetch_prev_wattage)
         
     except Exception as e:
-        # ログレベルを warning から debug に下げておく（初回起動時などはデータがないため）
         logger.debug(f"Prev power fetch skipped for {device_name}: {e}")
 
     # 2. データを保存
@@ -175,14 +182,15 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
         ["device_id", "device_name", "wattage", "timestamp"],
         (device_id, device_name, wattage, get_now_iso())
     )
+    logger.debug(f"⚡ [Analog] Power data saved: {device_name} ({wattage}W)")
     
     # 3. 通知判定 (閾値クロス検知)
-    threshold = notify_settings.get("threshold")
+    threshold: Optional[float] = notify_settings.get("threshold")
     if threshold is None:
         return
 
-    msg = None
-    target_platform = notify_settings.get("target", "discord")
+    msg: Optional[str] = None
+    target_platform: str = notify_settings.get("target", "discord")
     
     # OFF -> ON
     if prev_wattage < threshold and wattage >= threshold:
@@ -193,7 +201,8 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
         msg = f"🌑【使用終了】\n{device_name} がOFFになりました"
 
     if msg:
-        logger.info(f"Power Notification Triggered: {msg}")
+        # 閾値超えは明確な状態変化のため INFO
+        logger.info(f"🔔 [Digital Event] Power state threshold crossed: {msg}")
         await asyncio.to_thread(
             send_push,
             config.LINE_USER_ID,
