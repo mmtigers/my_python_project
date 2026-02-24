@@ -61,6 +61,12 @@ PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "
 SESSION_LIFETIME: int = 50  
 RENEW_DURATION: str = "PT600S"
 
+# クールダウンの秒数を設定 (config.py から読み込み。未定義時は60秒)
+MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)
+
+# 各カメラの最終検知時刻を保持する辞書
+last_motion_detected: Dict[str, float] = {}
+
 active_pullpoints: List[Any] = []
 
 def cleanup_handler(signum: int, frame: Any) -> None:
@@ -392,10 +398,16 @@ def force_close_session(service_obj: Any) -> None:
 
 def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
     """
-    単一のONVIFイベントメッセージをパースし、処理結果に関わらず
-    確実にリソース（メモリ・参照）を解放します。
+    単一のONVIFイベントメッセージをパースし、動体検知イベントを処理します。
+    処理結果に関わらず確実にリソースを解放し、連続発火を防ぐためのクールダウン（Debounce）処理を行います。
+
+    Args:
+        msg (Any): ONVIFイベントメッセージオブジェクト
+        cam_conf (Dict[str, Any]): カメラ設定辞書
     """
+    global last_motion_detected
     cam_name: str = cam_conf['name']
+    cam_id: str = cam_conf['id']
     topic_str: str = "Unknown"
     debug_val: str = "N/A"
     is_motion: bool = False
@@ -427,7 +439,18 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
             # 動体検知ではない場合、ここで処理を終了（finallyへ飛ぶ）
             return
 
-        # 4. 動体検知時のアクション（DB保存・画像取得）
+        # 4. クールダウン（Debounce）処理の追加
+        current_time: float = time.time()
+        last_detected_time: float = last_motion_detected.get(cam_id, 0.0)
+        
+        if current_time - last_detected_time < MOTION_COOLDOWN_SEC:
+            logger.debug(f"🏃 [{cam_name}] Motion Detected (Skipped due to cooldown)")
+            return
+            
+        # 状態更新（有効な検知として処理を進めるため、タイムスタンプを更新）
+        last_motion_detected[cam_id] = current_time
+
+        # 5. 動体検知時のアクション（DB保存・画像取得）
         logger.info(f"🏃 [{cam_name}] Motion Detected!")
         JST = datetime.timezone(datetime.timedelta(hours=9))
         now_str = dt_class.now(JST).isoformat()             
@@ -442,7 +465,6 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
         logger.warning(f"⚠️ [{cam_name}] Event Parse Error: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
     finally:
         # ✅ いかなる場合（早期リターン・例外発生）でも確実にリソースを解放する
-        # LXMLのElementツリーや巨大な文字列のメモリ参照を明示的にクリア
         del msg
         logger.debug(f"🧹 [{cam_name}] Event processing completed / Local resources released.")
 
