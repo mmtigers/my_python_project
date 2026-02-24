@@ -14,6 +14,58 @@ from pydantic import BaseModel, Field, ValidationError
 # ==========================================
 # 起動シーケンス初期の段階で循環参照を避けるため、標準のloggingで名前空間を合わせる
 logger = logging.getLogger("config_init")
+
+def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
+    """
+    指定されたストレージパスの存在確認、ディレクトリ作成、および書き込み権限のテストを行う。
+    NAS等のマウント遅延を考慮し、Exponential Backoffによるリトライを実行する。
+
+    Args:
+        base_path (str): 確認対象のベースディレクトリパス
+        max_retries (int): 最大リトライ回数。デフォルトは5。
+
+    Returns:
+        bool: ストレージの初期化と書き込みテストが成功した場合はTrue、最終的に失敗した場合はFalse。
+    """
+    test_file: str = os.path.join(base_path, ".write_test")
+
+    for attempt in range(max_retries + 1):
+        try:
+            # 1. ディレクトリの存在確認と作成
+            # マウント前の一時的なローカル作成を防ぐため、リトライごとに毎回実行する
+            os.makedirs(base_path, exist_ok=True)
+
+            # 2. 書き込み・権限テスト
+            # ディレクトリが存在しても、マウント直後の不安定な状態や権限不足をここで検知
+            with open(test_file, 'w') as f:
+                f.write("test")
+            
+            # テストファイルのクリーンアップ
+            os.remove(test_file)
+
+            if attempt > 0:
+                logger.info(f"✅ Retry {attempt}: Successfully accessed '{base_path}'.")
+            
+            return True
+
+        except (OSError, PermissionError, IOError) as e:
+            if attempt < max_retries:
+                # Exponential Backoff (1s, 2s, 4s, 8s, 16s)
+                wait_time: int = 2 ** attempt
+                logger.warning(
+                    f"⚠️ [Attempt {attempt + 1}/{max_retries}] Failed to access '{base_path}'. "
+                    f"Retrying in {wait_time}s... Reason: {e}"
+                )
+                time.sleep(wait_time)
+            else:
+                logger.error(
+                    f"🚨 [Critical] Max retries ({max_retries}) reached. "
+                    f"Failed to access or initialize storage at '{base_path}'. Reason: {e}"
+                )
+                return False
+                
+    return False
+
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter('[%(levelname)s] %(name)s: %(message)s')
@@ -27,9 +79,8 @@ def ensure_safe_path_with_backoff(
     max_retries: int = 5
 ) -> str:
     """
-    NASなどのマウント遅延を考慮し、Exponential Backoffを用いてディレクトリの作成とアクセス権限を確認する。
-    アクセスできない場合は最大5回（1s, 2s, 4s, 8s, 16s）待機して再試行し、
-    最終的に失敗した場合はローカルのフォールバックディレクトリを返す。
+    NASなどのマウント遅延を考慮してディレクトリを検証し、
+    アクセスできない場合はローカルのフォールバックディレクトリを返す。
 
     Args:
         preferred_path (str): 本来保存したいパス (例: /mnt/nas/home_system/assets)
@@ -39,46 +90,28 @@ def ensure_safe_path_with_backoff(
     Returns:
         str: 安全に書き込み可能なパス（成功時は preferred_path、失敗時は fallback_path）
     """
+    # 新設した検証・初期化関数に処理を委譲
+    is_valid: bool = verify_and_initialize_storage(preferred_path, max_retries)
+    
+    if is_valid:
+        return preferred_path
+
+    # 最大リトライ回数を超過した場合のフォールバック処理
     base_dir: str = os.path.dirname(os.path.abspath(__file__))
     fallback_root: str = os.path.join(base_dir, "temp_fallback")
+    fallback_path: str = os.path.join(fallback_root, fallback_name)
     
-    for attempt in range(max_retries + 1):
-        try:
-            os.makedirs(preferred_path, exist_ok=True)
-            
-            # 書き込みテスト (ディレクトリが存在しても権限がない場合を検知)
-            test_file: str = os.path.join(preferred_path, ".write_test")
-            with open(test_file, 'w') as f:
-                f.write("test")
-            os.remove(test_file)
-            
-            if attempt > 0:
-                logger.info(f"✅ Retry {attempt}: Successfully accessed '{preferred_path}'.")
-            return preferred_path
-
-        except (OSError, PermissionError, IOError) as e:
-            if attempt < max_retries:
-                wait_time: int = 2 ** attempt  # 1, 2, 4, 8, 16秒
-                logger.warning(
-                    f"⚠️ [Attempt {attempt + 1}/{max_retries}] Failed to access '{preferred_path}'. "
-                    f"Retrying in {wait_time}s... Reason: {e}"
-                )
-                time.sleep(wait_time)
-            else:
-                # 最大リトライ回数を超過した場合のフォールバック処理
-                fallback_path: str = os.path.join(fallback_root, fallback_name)
-                try:
-                    os.makedirs(fallback_path, exist_ok=True)
-                    logger.error(
-                        f"🚨 【NAS障害・介入要求】\n"
-                        f"Max retries ({max_retries}) reached. Failed to access NAS path.\n"
-                        f"Path: {preferred_path}\n"
-                        f"Falling back to local: '{fallback_path}'.\nReason: {e}"
-                    )
-                    return fallback_path
-                except Exception as fatal_e:
-                    logger.error(f"❌ [Critical] Failed to create fallback path '{fallback_path}': {fatal_e}")
-                    return preferred_path
+    try:
+        os.makedirs(fallback_path, exist_ok=True)
+        logger.error(
+            f"🚨 【NAS障害・介入要求】\n"
+            f"Falling back to local: '{fallback_path}' instead of '{preferred_path}'."
+        )
+        return fallback_path
+    except Exception as fatal_e:
+        logger.error(f"❌ [Critical] Failed to create fallback path '{fallback_path}': {fatal_e}")
+        # フォールバックディレクトリすら作成できない異常事態のフェイルセーフ
+        return preferred_path
 
 # .envファイルのロード
 load_dotenv()
