@@ -18,9 +18,45 @@ LAST_NOTIFY_TIME: Dict[str, float] = {}
 IS_ACTIVE: Dict[str, bool] = {}
 MOTION_TASKS: Dict[str, asyncio.Task] = {}
 
+# 🌟 追加: Webhook重複排除用のインメモリーキャッシュ
+EVENT_CACHE: Dict[str, Dict[str, Any]] = {}
+DEDUPE_TTL_SECONDS: float = 3.0  # 3秒以内の同一ステータスは重複とみなす
+
 # 定数
 MOTION_TIMEOUT: int = 900       # 15分 (見守りタイマー)
 CONTACT_COOLDOWN: int = 300     # 5分 (通知抑制)
+
+def is_duplicate_webhook(mac: str, state: str, event_timestamp: float) -> bool:
+    """
+    Webhookイベントの重複排除を判定する。
+    
+    【判定条件】
+    インメモリキャッシュ（EVENT_CACHE）を参照し、以下の両方を満たす場合は重複(True)とする。
+    1. 同一MACアドレスに対する直近のイベントとステータス(state)が完全に一致していること
+    2. 直近のイベント処理時刻から `DEDUPE_TTL_SECONDS` 秒以内の受信であること
+    
+    Args:
+        mac (str): デバイスのMACアドレス
+        state (str): 検出された状態（例: "detected", "open"）
+        event_timestamp (float): イベントの受信時刻（エポック秒）
+        
+    Returns:
+        bool: 重複している場合はTrue、新規処理すべきイベントであればFalse
+    """
+    last_event = EVENT_CACHE.get(mac)
+    
+    if last_event:
+        time_passed = event_timestamp - last_event["timestamp"]
+        # ステータスが同じ、かつTTL内の連続受信であれば重複として弾く
+        if last_event["state"] == state and time_passed <= DEDUPE_TTL_SECONDS:
+            return True
+            
+    # 新規イベント、状態変化、または十分な時間が経過している場合はキャッシュを更新
+    EVENT_CACHE[mac] = {
+        "state": state,
+        "timestamp": event_timestamp
+    }
+    return False
 
 # ==========================================
 # 1. Webhook Logic (Passive)
