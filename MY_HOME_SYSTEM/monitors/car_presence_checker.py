@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 import traceback
-import time  # Added for sleep
+import time
 from datetime import datetime
 from typing import Tuple, Optional, List, Any
 
@@ -24,8 +24,6 @@ from core.utils import get_now_iso, with_exponential_backoff
 logger = setup_logging("car_checker")
 
 # 定数定義
-# Note: config.CAMERAS内のportはONVIF/HTTP用(2020)の可能性があるため、
-# RTSPは標準の554をデフォルトとしつつ、必要に応じて環境変数等で変更可能な設計とする。
 RTSP_PORT: int = 554
 MAX_RETRIES: int = 3
 RETRY_INTERVAL: int = 5  # seconds
@@ -60,7 +58,6 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
     Returns:
         Optional[np.ndarray]: 取得に成功した画像フレーム。失敗時はNone。
     """
-    # config不備のガード
     if not config.CAMERA_IP or not config.CAMERA_USER:
         logger.error("❌ Camera config is missing (IP or User not found).")
         return None
@@ -78,7 +75,6 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
             # バッファ対策: 最新フレームを取得
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
-            # 念のため数フレーム空読みして安定させる（オプション）
             if attempt > 1:
                 cap.read() 
                 
@@ -95,12 +91,11 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
             logger.error(f"❌ Exception occurred during RTSP handling: {e}")
             
         finally:
-            # 【重要】例外発生時・リトライ時・成功時に関わらず、必ずリソースを解放しログを出力する
+            # 【変更点】定常時のリソース解放ログをINFOからDEBUGへ降格 (Silence Policy対応)
             if cap is not None and cap.isOpened():
                 cap.release()
-                logger.info("🧹 RTSP connection and resources safely released.")
+                logger.debug("🧹 RTSP connection and resources safely released.")
         
-        # 次の試行まで待機（最終回以外）
         if attempt < retries:
             time.sleep(interval)
 
@@ -110,7 +105,12 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
 def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
     """
     画像から車の有無を判定するロジック。
-    Returns: (判定結果 STATE_*, 理由詳細, スコア)
+    
+    Args:
+        img (np.ndarray): 判定対象の画像フレーム
+        
+    Returns:
+        Tuple[str, str, float]: (判定結果状態, 判定理由の詳細, 判定スコア)
     """
     if img is None:
         return "UNKNOWN", "Invalid Image", 0.0
@@ -137,7 +137,19 @@ def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
         return res, f"DayMode({blue_ratio:.1%})", blue_ratio
 
 def record_result_to_db(action: str, details: str, score: float, img_path: str, is_changed: bool) -> bool:
-    """判定結果をDBに記録し、変化時は画像を永続保存する。"""
+    """
+    判定結果をDBに記録し、状態変化時は画像を永続保存する。
+    
+    Args:
+        action (str): 車の有無の状態 (STATE_PRESENT / STATE_ABSENT)
+        details (str): 判定理由の詳細
+        score (float): 判定スコア
+        img_path (str): 一時保存された画像のパス
+        is_changed (bool): 前回から状態が変化したかどうか
+        
+    Returns:
+        bool: DBへの記録が成功した場合はTrue、失敗時はFalse
+    """
     timestamp: str = get_now_iso()
     cols: List[str] = ["timestamp", "action", "rule_name", "score"]
     vals: Tuple[Any, ...] = (timestamp, action, f"{details}", score)
@@ -155,7 +167,7 @@ def record_result_to_db(action: str, details: str, score: float, img_path: str, 
     return save_log_generic(config.SQLITE_TABLE_CAR, cols, vals)
 
 def main() -> None:
-    """メイン監視プロセス。"""
+    """メイン監視プロセス。定期実行により車の入出庫状態を判定し、通知・記録を行う。"""
     tmp_img_path: str = "/tmp/car_check_latest.jpg"
     
     try:
@@ -191,7 +203,7 @@ def main() -> None:
 
         has_status_changed: bool = (last_action != current_action)
         
-        # 定期記録判定 (1時間経過していたら、変化がなくても記録する)
+        # 定期記録判定
         should_save: bool = has_status_changed
         if not has_status_changed and last_ts:
             try:
@@ -221,7 +233,6 @@ def main() -> None:
             elif not success:
                  logger.error("❌ Failed to save record to DB.")
         else:
-            # 変更箇所：状態に変化がない場合は DEBUG へ降格
             logger.debug(f"✅ No change: {current_action} ({details})")
         
         # クリーンアップ
@@ -230,7 +241,6 @@ def main() -> None:
     except Exception as e:
         err_detail: str = f"🔥 Car Presence Checker Error: {e}\n{traceback.format_exc()}"
         logger.error(err_detail)
-        # エラー通知
         send_push(config.LINE_USER_ID or "", [{"type": "text", "text": f"⚠️ 車庫監視スクリプトでエラーが発生しました。\n{e}"}], target="discord", channel="error")
 
 if __name__ == "__main__":
