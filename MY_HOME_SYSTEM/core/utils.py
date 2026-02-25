@@ -3,7 +3,9 @@ import pytz
 import time
 import functools
 import logging
-from typing import Callable, Any
+import os
+from pathlib import Path
+from typing import Callable, Any, Union
 
 logger = logging.getLogger("core")
 
@@ -49,3 +51,46 @@ def with_exponential_backoff(
                     time.sleep(delay)
         return wrapper
     return decorator
+
+
+def wait_for_storage_warmup(
+    target_path: Union[str, Path], 
+    max_retries: int = 5, 
+    base_delay: float = 1.0, 
+    max_delay: float = 16.0
+) -> bool:
+    """
+    ストレージ（NAS等）へのアクセスが可能になるまで、指数関数的バックオフを用いて待機する。
+    HDDのスピンダウン（スリープ）からの復帰遅延による Errno 2 エラーを防止するためのウォームアップ処理。
+
+    Args:
+        target_path (Union[str, Path]): アクセスを確認する対象のパス（ファイルまたはディレクトリ）。
+        max_retries (int): 最大リトライ回数。デフォルトは5回。
+        base_delay (float): 初回の待機時間（秒）。デフォルトは1.0秒。
+        max_delay (float): 最大の待機時間（秒）。デフォルトは16.0秒。
+
+    Returns:
+        bool: 指定回数内にアクセス可能となった場合は True、不可の場合は False。
+    """
+    path_obj = Path(target_path)
+    # ファイルパスが指定された場合は、その親ディレクトリが存在/アクセス可能かをチェック対象とする
+    check_target = path_obj if path_obj.is_dir() else path_obj.parent
+
+    for attempt in range(max_retries + 1):
+        # パスの存在とアクセス権限（読み書き）をチェック
+        if check_target.exists() and os.access(check_target, os.R_OK | os.W_OK):
+            if attempt > 0:
+                logger.info(f"💡 [Storage Warmup] ストレージが応答しました（{attempt}回のリトライで復帰）: {check_target}")
+            return True
+            
+        if attempt < max_retries:
+            # Exponential Backoff の計算
+            delay = min(max_delay, base_delay * (2 ** attempt))
+            logger.debug(
+                f"⏳ [Storage Warmup] アクセス待機中（{attempt + 1}/{max_retries}回目）。"
+                f"{delay}秒待機... 対象: {check_target}"
+            )
+            time.sleep(delay)
+        
+    logger.error(f"❌ [Storage Warmup] {max_retries}回リトライしましたが、ストレージにアクセスできません: {check_target}")
+    return False
