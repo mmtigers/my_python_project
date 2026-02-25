@@ -37,6 +37,7 @@ try:
     # システム統合環境下でのインポート
     from core.logger import get_logger
     from core.nas_utils import get_managed_target_directory
+    from core.utils import wait_for_storage_warmup
 except ImportError:
     # 単体テスト用フォールバック
     import logging
@@ -368,6 +369,13 @@ class WebMonitor:
 def run_monitor():
     """モニタープロセスのメインロジック。"""
     logger.debug("=== NewFace Monitor Started ===")
+
+    # ★追加: NASのウォームアップ（スリープ復帰待機）処理
+    # データディレクトリ（/mnt/nas/...）のアクセスが確立されるまで待機する
+    data_dir = MonitorConfig.get_data_dir()
+    if not wait_for_storage_warmup(data_dir):
+        logger.error("NASストレージへのアクセスが確立できないため、処理を中断します。")
+        return
     
     monitor = WebMonitor()
     notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
