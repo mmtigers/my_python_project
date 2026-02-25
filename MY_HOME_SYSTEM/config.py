@@ -456,3 +456,15 @@ for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DI
 
 # グラフ画像の保存先
 CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
+
+# ==========================================
+# 10. Memory Monitor Settings
+# ==========================================
+# システム全体のメモリ使用率警告閾値 (%)
+MEMORY_ALERT_PERCENT: float = 85.0
+# MY_HOME_SYSTEM関連プロセスのメモリ上限 (MB)
+PROCESS_MEMORY_LIMIT_MB: float = 500.0
+# 通知スパム防止のためのクールダウンタイム (秒) - 例: 2時間
+MEMORY_ALERT_COOLDOWN_SEC: int = 7200
+# 最終通知時刻を記録する一時ファイルパス
+MEMORY_ALERT_LAST_NOTIFY_FILE: str = os.path.join(FALLBACK_ROOT, "last_memory_alert.txt")
