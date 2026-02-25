@@ -41,6 +41,8 @@ TASKS: List[Task] = [
     # スクリプト内で `if not (17 <= now.hour <= 18): exit()` のような制御を入れるか、
     # 以下のタスク定義でラッパースクリプトを指定します。
     {"script": "monitors/timelapse_runner.py", "interval": 300, "last_run": 0, "args": []},
+    # 頻度: 中 (10分 = 600秒)
+    {"script": "monitors/memory_monitor.py",          "interval": 600,  "last_run": 0, "args": []},
 
     # 頻度: 低 (1時間〜)
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},

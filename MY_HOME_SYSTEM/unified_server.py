@@ -191,7 +191,7 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
         pass
 
     # 4. 許可条件を満たさない場合はログを記録し、403 Forbidden を返す (printは不使用)
-    logger.warning(f"Blocked unauthorized external access - IP: {client_ip}, Path: {request.url.path}")
+    logger.debug(f"Blocked unauthorized external access - IP: {client_ip}, Path: {request.url.path}")
     return JSONResponse(
         status_code=403,
         content={"detail": "Forbidden: Access denied."}
@@ -278,5 +278,12 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    # 0.0.0.0 で起動することで外部（192.168.1.xxx）からのアクセスを許可します
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import logging
+    
+    # 【改修】Uvicornのデフォルトログ設定を取得し、アクセスログのレベルを WARNING に変更
+    # これにより、正常なAPIポーリングやWebhook受信時の INFO ログスパムを抑止する
+    log_config = uvicorn.config.LOGGING_CONFIG
+    log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
+
+    # 0.0.0.0 で起動することで外部（192.168.1.xxx等）からのアクセスを許可します
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=log_config)
