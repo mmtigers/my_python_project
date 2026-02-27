@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import psutil
 
@@ -58,10 +58,43 @@ def record_notification() -> None:
     except Exception as e:
         logger.error(f"通知時刻の記録に失敗しました: {e}")
 
-def main():
-    logger.info("メモリ監視を開始します...")
+def get_top_memory_processes(limit: int = 5) -> str:
+    """
+    現在メモリを大量に消費している上位プロセスを取得し、フォーマットされた文字列を返す。
     
-    alert_messages = []
+    Args:
+        limit (int): 取得する上位プロセスの数。デフォルトは5。
+        
+    Returns:
+        str: 上位プロセスのPID、プロセス名、メモリ使用量(MB)を含むログ用文字列。
+    """
+    process_list: List[Tuple[int, str, float]] = []
+    
+    for p in psutil.process_iter(['pid', 'name', 'memory_info']):
+        try:
+            # RSS (Resident Set Size: 物理メモリ使用量) を MB 単位で計算
+            rss_mb = p.info['memory_info'].rss / (1024 * 1024)
+            process_list.append((p.info['pid'], p.info['name'], rss_mb))
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            # プロセスが既に終了している、またはアクセス権がない場合はスキップ
+            continue
+            
+    # メモリ消費量（タプルの3番目の要素）の降順でソート
+    process_list.sort(key=lambda x: x[2], reverse=True)
+    
+    top_procs = process_list[:limit]
+    lines = ["【Top Memory Consuming Processes】"]
+    for pid, name, rss in top_procs:
+        # 視認性を高めるためにフォーマットを調整
+        lines.append(f"  - PID: {pid:<6} | Name: {name:<20} | Memory: {rss:.1f} MB")
+        
+    return "\n".join(lines)
+
+def main() -> None:
+    # [Silence Policy遵守] 定常ログをINFOからDEBUGへ変更
+    logger.debug("メモリ監視を開始します...")
+    
+    alert_messages: List[str] = []
     
     # 1. システム全体のメモリチェック
     mem = psutil.virtual_memory()
@@ -72,6 +105,11 @@ def main():
         msg = f"⚠️ [システムメモリ警告] 全体使用率が {mem_percent}% に達しています。(閾値: {sys_threshold}%)"
         logger.warning(msg)
         alert_messages.append(msg)
+        
+        # [プロファイリング強化] 閾値超過時に上位プロセスの情報を取得・記録
+        top_procs_msg = get_top_memory_processes(limit=5)
+        logger.warning(f"システムメモリ逼迫時の詳細情報:\n{top_procs_msg}")
+        alert_messages.append(top_procs_msg)
 
     # 2. プロセスごとのメモリチェック
     proc_limit_mb = getattr(config, "PROCESS_MEMORY_LIMIT_MB", 500.0)
