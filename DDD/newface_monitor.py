@@ -39,11 +39,56 @@ try:
     from core.nas_utils import get_managed_target_directory
     from core.utils import wait_for_storage_warmup
 except ImportError:
-    # 単体テスト用フォールバック
+    # 単体テスト用・モジュール欠損時のフォールバック
     import logging
+    import time
+    from pathlib import Path
+
     logging.basicConfig(level=logging.INFO)
-    def get_logger(name): return logging.getLogger(name)
-    def get_managed_target_directory(*args, **kwargs): return Path("./data")
+    def get_logger(name: str) -> logging.Logger: 
+        return logging.getLogger(name)
+        
+    def get_managed_target_directory(*args, **kwargs) -> Path: 
+        return Path("./data")
+
+    def wait_for_storage_warmup(target_dir: Path, max_retries: int = 5, base_delay: float = 1.0) -> bool:
+        """
+        NAS等のストレージがマウントされ、書き込み可能になるまで待機する。
+        Exponential Backoffを用いてリトライを行い、テストファイルの作成・削除で死活確認を行う。
+
+        Args:
+            target_dir (Path): アクセス確認を行う対象ディレクトリ。
+            max_retries (int): 最大リトライ回数。
+            base_delay (float): ベースとなる待機時間（秒）。
+
+        Returns:
+            bool: ストレージへのアクセスが確立できた場合はTrue、タイムアウトした場合はFalse。
+        """
+        logger = get_logger("storage_warmup")
+        
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug(f"Directory creation failed for {target_dir}: {e}")
+            # 作成失敗時も後続のI/Oテストで確実なハンドリングを行うため処理を継続
+
+        test_file = target_dir / ".storage_warmup_test"
+        
+        for attempt in range(max_retries):
+            try:
+                # テストファイルの書き込みと削除で物理的なI/O確認
+                test_file.write_text("warmup_check", encoding="utf-8")
+                test_file.unlink()
+                logger.debug(f"Storage warmup verified at {target_dir}")
+                return True
+            except (IOError, OSError) as e:
+                delay = base_delay * (2 ** attempt)
+                logger.debug(f"Storage access failed (Attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay}s...")
+                time.sleep(delay)
+
+        # 最終的にアクセスできない場合はパニックを起こさずFalseを返す
+        logger.error(f"Storage warmup failed after {max_retries} attempts.")
+        return False
 
 # ==========================================
 # Logger Initialization
@@ -366,21 +411,23 @@ class WebMonitor:
 # Main Execution Flow
 # ==========================================
 
-def run_monitor():
+def run_monitor() -> None:
     """モニタープロセスのメインロジック。"""
     logger.debug("=== NewFace Monitor Started ===")
 
-    # ★追加: NASのウォームアップ（スリープ復帰待機）処理
-    # データディレクトリ（/mnt/nas/...）のアクセスが確立されるまで待機する
     data_dir = MonitorConfig.get_data_dir()
+    
+    # フェイルソフト: ストレージが利用できない場合は安全にタスクを終了（Exit）
     if not wait_for_storage_warmup(data_dir):
-        logger.error("NASストレージへのアクセスが確立できないため、処理を中断します。")
+        logger.error("NASストレージへのアクセスが確立できないため、当該バッチ処理を安全に中断します。")
         return
     
-    monitor = WebMonitor()
-    notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
-    
+    monitor = None
     try:
+        # リソースを必要とするインスタンス化はウォームアップ確認後に実行
+        monitor = WebMonitor()
+        notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
+        
         # 1. Load Data
         known_casts = DataManager.load_known_casts()
 
@@ -388,12 +435,11 @@ def run_monitor():
         try:
             current_casts = monitor.fetch_current_casts()
         except requests.RequestException:
-            # ネットワークエラー時は処理を中断するが、プロセスは正常終了させる
             logger.error("Aborting monitor run due to network failure.")
             return
 
         if not current_casts:
-            logger.warning("No casts found via scraping. Verify selectors or site availability.")
+            logger.debug("No casts found via scraping. Verify selectors or site availability.")
             return
 
         # 3. Detect Diff
@@ -405,21 +451,19 @@ def run_monitor():
             logger.info(f"Detected {len(new_casts)} new casts.")
             notifier.notify(new_casts)
             
-            # Merge and Save
             updated_casts = known_casts.union(current_casts)
             DataManager.save_known_casts(updated_casts)
         else:
             logger.debug("No new casts detected.")
-            # 最新状態で上書き保存（メタデータ更新のため）
             DataManager.save_known_casts(current_casts)
 
     except Exception as e:
-        # 想定外のエラー
         logger.critical(f"Critical error in NewFace Monitor: {e}", exc_info=True)
     
     finally:
-        # 終了時のリソース解放
-        monitor.close()
+        # 終了時のリソース解放: tryブロック内でエラーが起きても確実にCloseする
+        if monitor is not None:
+            monitor.close()
         logger.debug("=== NewFace Monitor Finished ===")
 
 
