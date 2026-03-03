@@ -69,37 +69,40 @@ def get_camera_frame(retries: int = MAX_RETRIES, interval: int = RETRY_INTERVAL)
         try:
             cap = cv2.VideoCapture(rtsp_url)
             if not cap.isOpened():
-                logger.warning(f"⚠️ RTSP Connection failed (Attempt {attempt}/{retries}). Retrying in {interval}s...")
-                continue
-            
-            # バッファ対策: 最新フレームを取得
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            if attempt > 1:
-                cap.read() 
-                
-            ret, frame = cap.read()
-            
-            if ret and frame is not None:
-                if attempt > 1:
-                    logger.info(f"✅ RTSP Connection recovered on attempt {attempt}.")
-                return frame
+                logger.warning(f"⚠️ RTSP Connection failed (Attempt {attempt}/{retries}).")
             else:
-                logger.warning(f"⚠️ RTSP Stream opened but failed to read frame (Attempt {attempt}/{retries}).")
+                # バッファ対策: 最新フレームを取得
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 
+                if attempt > 1:
+                    cap.read() 
+                    
+                ret, frame = cap.read()
+                
+                if ret and frame is not None:
+                    if attempt > 1:
+                        logger.info(f"✅ RTSP Connection recovered on attempt {attempt}.")
+                    return frame
+                else:
+                    logger.warning(f"⚠️ RTSP Stream opened but failed to read frame (Attempt {attempt}/{retries}).")
+                    
         except Exception as e:
-            logger.error(f"❌ Exception occurred during RTSP handling: {e}")
+            logger.warning(f"⚠️ Unexpected error during RTSP connection: {e}")
             
         finally:
-            # 【変更点】定常時のリソース解放ログをINFOからDEBUGへ降格 (Silence Policy対応)
+            # リソース解放を確実に実行し、ログで証跡を残す
             if cap is not None and cap.isOpened():
                 cap.release()
-                logger.debug("🧹 RTSP connection and resources safely released.")
+            logger.debug("🧹 RTSP connection and resources safely released.")
         
         if attempt < retries:
-            time.sleep(interval)
+            # Exponential Backoff (指数関数的待機)
+            backoff_time = interval * (2 ** (attempt - 1))
+            logger.debug(f"⏳ Waiting {backoff_time}s before next attempt...")
+            time.sleep(backoff_time)
 
-    logger.error(f"❌ RTSP connection failed after {retries} attempts. Giving up.")
+    # リトライ枯渇時はWarningレベルで記録 (ネットワーク起因の一時的エラー扱い)
+    logger.warning(f"⚠️ RTSP connection failed after {retries} attempts. Giving up.")
     return None
 
 def judge_car_presence(img: np.ndarray) -> Tuple[str, str, float]:
@@ -234,14 +237,17 @@ def main() -> None:
                  logger.error("❌ Failed to save record to DB.")
         else:
             logger.debug(f"✅ No change: {current_action} ({details})")
-        
-        # クリーンアップ
-        if os.path.exists(tmp_img_path): os.remove(tmp_img_path)
 
     except Exception as e:
         err_detail: str = f"🔥 Car Presence Checker Error: {e}\n{traceback.format_exc()}"
         logger.error(err_detail)
         send_push(config.LINE_USER_ID or "", [{"type": "text", "text": f"⚠️ 車庫監視スクリプトでエラーが発生しました。\n{e}"}], target="discord", channel="error")
+
+    finally:
+        # 5. クリーンアップ (例外発生時にも必ず実行)
+        if os.path.exists(tmp_img_path):
+            os.remove(tmp_img_path)
+            logger.debug(f"🧹 Temporary file {tmp_img_path} removed safely.")
 
 if __name__ == "__main__":
     main()
