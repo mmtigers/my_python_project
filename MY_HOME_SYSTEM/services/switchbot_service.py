@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 import requests
 import config 
 # from common import retry_api_call # 削除
-from core.network import retry_api_call # 修正: coreモジュールを使用
+
 from core.logger import setup_logging   # 修正: core.loggerを使用
 from models.switchbot import DeviceStatusResponse
 
@@ -17,15 +17,37 @@ logger = setup_logging("service.switchbot")
 
 DEVICE_NAME_CACHE: Dict[str, str] = {}
 
-@retry_api_call
-def request_switchbot_api(url: str, headers: Dict[str, str]) -> Dict[str, Any]:
-    """SwitchBot APIへのリクエスト（リトライ付き）"""
-    response = requests.get(url, headers=headers, timeout=10)
-    response.raise_for_status()
-    
-    raw_data = response.json()
-    validated = DeviceStatusResponse(**raw_data)
-    return validated.dict()
+def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:
+    """SwitchBot APIへのリクエスト（Exponential Backoff リトライ付き）"""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=10.0)
+            response.raise_for_status()
+            
+            raw_data = response.json()
+            validated = DeviceStatusResponse(**raw_data)
+            return validated.dict()
+            
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            # ERRORではなくWARNINGとし、Tracebackは出さない
+            logger.warning(f"⚠️ SwitchBot API connection issue (Attempt {attempt + 1}/{max_retries}): {e}")
+            
+        except requests.exceptions.RequestException as e:
+            # 認証エラー(401)などの致命的なものはERRORとして扱う
+            logger.error(f"❌ SwitchBot API fatal error: {e}")
+            break
+            
+        # Exponential Backoff の適用
+        if attempt < max_retries - 1:
+            backoff_time = 2 ** attempt  # 1s, 2s, 4s...
+            logger.debug(f"Retrying in {backoff_time} seconds...")
+            time.sleep(backoff_time)
+            
+    # Fail-Soft: 最終的に失敗した場合は None を返し、システムを止めない
+    logger.warning("⚠️ SwitchBot API completely failed after retries. Operating in Fail-Soft mode.")
+    return None
+
+
 
 def create_switchbot_auth_headers() -> Dict[str, str]:
     """認証ヘッダーを生成する関数"""
@@ -68,6 +90,10 @@ def fetch_device_name_cache() -> bool:
             return False
 
         res = request_switchbot_api(url, headers)
+
+        # Fail-Soft対応: APIがNoneを返した場合はFalseとして安全に終了
+        if not res:
+            return False
         
         # statusCodeのチェックは request_switchbot_api 内のPydanticモデルでも行われるが念のため
         if res.get('statusCode') == 100:
