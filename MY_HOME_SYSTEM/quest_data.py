@@ -83,6 +83,7 @@ QUESTS = [
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
     {'id': 60, 'title': 'お風呂掃除', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
     {'id': 61, 'title': '週末の夕食を作る', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '15:00', 'end_time': '20:00'},
+    {'id': 65, 'title': '洗車', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '🚗', 'days': '5,6', 'desc': '愛車をピカピカに磨き上げる（※月1回までのセルフ運用）'},
     
     # [Garbage Disposal] - 時間指定を緩和 (出勤時についで出し)
     {'id': 1000, 'title': 'ゴミ出しミッション', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🗑️', 'desc': '出勤時にゴミ集積所へドロップ'},
@@ -140,6 +141,7 @@ QUESTS = [
     {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     # {'id': 53, 'title': '「ありがとう」を言う', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 10, 'gold': 5, 'icon': '🗣️', 'desc': '感謝の魔法'},
     {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
+    {'id': 49, 'title': 'パパのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'days': '5,6', 'desc': '週末はパパのサポート任務だ！'},
     # 修正: 週末(土-日)は '5,6'
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
     # 修正: 週末(土-日)は '5,6'
@@ -233,7 +235,9 @@ REWARDS = [
     # --- Large (目標型) ---
     {'id': 25, 'title': '回転寿司に行く権', 'category': 'special', 'cost_gold': 2000, 'icon_key': '🍣', 'desc': '回るけど美味しい！パパにお願いしよう', 'target': 'all'},
     {'id': 24, 'title': '好きなおもちゃ (小)', 'category': 'item', 'cost_gold': 5000, 'icon_key': '🤖', 'desc': 'ずっと欲しかったあのおもちゃ', 'target': 'children'},
-    {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 30000, 'icon_key': '⌚', 'desc': '高性能なハイエンド装備', 'target': 'dad'},
+    {'id': 32, 'title': 'いちご狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍓', 'desc': '甘くて美味しいいちごをたくさん食べよう！', 'target': 'children'},
+    {'id': 33, 'title': 'しいたけ狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍄', 'desc': '自分で採ったしいたけは最高に美味しいぞ', 'target': 'children'},
+    # {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 30000, 'icon_key': '⌚', 'desc': '高性能なハイエンド装備', 'target': 'dad'},
 
     # --- Premium (夢の報酬) ---
     {'id': 99, 'title': 'ユニバのチケット (ペア)', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🎢', 'desc': 'ハリポタで最高の一日を', 'target': 'mom'},
@@ -241,6 +245,7 @@ REWARDS = [
     # {'id': 101, 'title': '映画のチケット＆半日自由時間', 'category': 'special', 'cost_gold': 20000, 'icon_key': '🎥', 'desc': '好きな映画を見てリフレッシュ'},
     {'id': 100, 'title': 'ホテルに宿泊 (家族旅行)', 'category': 'special', 'cost_gold': 50000, 'icon_key': '🏨', 'desc': '日常を忘れて優雅な滞在', 'target': 'children'},
     {'id': 102, 'title': 'SHARP ヘルシオ ホットクック', 'category': 'item', 'cost_gold': 60000, 'icon_key': '🍲', 'desc': '家事の時間を減らして家族の時間を増やす魔法の鍋', 'target': 'mom'},
+    {'id': 104, 'title': '鈴鹿サーキットのチケット', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🏎️', 'desc': '遊園地と車のアトラクションで遊び尽くす！', 'target': 'children'},
     
     # Legend Reward
     {'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},
