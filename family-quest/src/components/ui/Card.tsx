@@ -1,7 +1,7 @@
 import React from 'react';
 
 // カードのバリエーション定義
-type CardVariant = 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited';
+type CardVariant = 'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' | 'locked';
 
 interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
     variant?: CardVariant;
@@ -33,6 +33,10 @@ export const Card: React.FC<CardProps> = ({ variant = 'default', className = '',
         case 'limited':
             variantStyle = "border-pink-400 bg-pink-950/90 hover:bg-pink-900";
             break;
+        case 'locked':
+            variantStyle = "border-gray-500 bg-gray-800/50 grayscale opacity-80 cursor-not-allowed";
+            break;
+
     }
 
     // 押せる感じ（カーソルポインター）にするかどうか

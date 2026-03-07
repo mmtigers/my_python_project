@@ -17,6 +17,7 @@ export interface User {
     job_class?: string;
     gold: number;
     equipment_id?: ID;
+    role?: string;
 }
 
 // クエスト情報

@@ -12,6 +12,7 @@ interface QuestListProps {
     pendingQuests: QuestHistory[];
     currentUser: User;
     onQuestClick: (quest: Quest) => void;
+    isDaily?: boolean; // ★追加
 }
 
 // 個別のクエストアイテムコンポーネント
@@ -42,9 +43,15 @@ const QuestItem: React.FC<{
     const totalGold = baseGold + bonusGold;
     const totalExp = baseExp + bonusExp;
 
+    const isSharedCompleted = !!(quest as any).is_shared_completed_by && (quest as any).is_shared_completed_by !== currentUser.user_id;
+    const isSharedPending = !!(quest as any).is_shared_pending_by && (quest as any).is_shared_pending_by !== currentUser.user_id;
+    const isSharedDoneByOther = isSharedCompleted || isSharedPending;
+    const sharedName = (quest as any).shared_completed_by_name || (quest as any).shared_pending_by_name;
+    const isEffectivelyLocked = isLocked || isSharedDoneByOther;
+
     const handleClick = () => {
         if (isCooldown) return;
-        if (isLocked) return;
+        if (isEffectivelyLocked) return; // ★変更: 他者が対応済みの場合はクリックできない
 
         if (!isDone && !isPending) {
             if (quest.type === 'daily' || isInfinite) {
@@ -71,10 +78,9 @@ const QuestItem: React.FC<{
             <Card
                 variant={variant}
                 onClick={handleClick}
-                // ボーナス時の赤枠アニメーションはCard自体に適用
-                className={`md:p-6 md:h-full 
-                    ${hasBonus && !isDone && !isPending && !isLocked ? 'border-2 border-red-400 animate-pulse-slow' : ''}
-                    ${isLocked ? 'opacity-60 grayscale cursor-not-allowed bg-gray-100 border-gray-300' : ''}
+                className={`md:p-6 md:h-full transition-all duration-300
+                    ${hasBonus && !isDone && !isPending && !isEffectivelyLocked ? 'border-2 border-red-400 animate-pulse-slow' : ''}
+                    ${isEffectivelyLocked ? 'opacity-50 grayscale cursor-not-allowed bg-gray-200 border-gray-400' : ''}
                 `}
             >
                 {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
@@ -110,8 +116,20 @@ const QuestItem: React.FC<{
                     {/* 2. テキスト情報エリア */}
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap mb-1">
+                            {/* ▼ 特別クエストバッジ */}
+                            {quest.type === 'special' && (
+                                <span className="bg-purple-600 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">
+                                    特別
+                                </span>
+                            )}
+                            {/* ▼ 共有クエスト(他者対応済み)バッジ */}
+                            {isSharedDoneByOther && (
+                                <span className="bg-gray-600 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold border border-gray-400">
+                                    {sharedName}が対応済み
+                                </span>
+                            )}
                             {/* ▼ ロックバッジ */}
-                            {isLocked && (
+                            {isLocked && !isSharedDoneByOther && (
                                 <span className="bg-gray-500 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
                                     <Lock size={10} /> 未開放
                                 </span>
@@ -187,13 +205,25 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, isDaily }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
 
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
-            if (q.target && q.target !== 'all' && q.target !== currentUser?.user_id) return false;
+            // ★追加: タブの振り分け ('daily' と それ以外)
+            if (isDaily && q.type !== 'daily') return false;
+            if (!isDaily && q.type === 'daily') return false;
+
+            // ★変更: ターゲット判定 (role プレフィックスの対応)
+            if (q.target && q.target !== 'all') {
+                if (q.target.startsWith('role_')) {
+                    if (currentUser.role !== q.target) return false;
+                } else if (q.target !== currentUser?.user_id) {
+                    return false;
+                }
+            }
+
             if (q.type === 'daily' && q.days) {
                 if (Array.isArray(q.days) && q.days.length === 0) return true;
                 const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
