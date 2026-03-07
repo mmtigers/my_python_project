@@ -15,6 +15,7 @@ class MasterUser(BaseModel):
     exp: int = 0
     gold: int = 50
     avatar: str = '🙂'
+    role: Optional[str] = None
 
 class MasterQuest(BaseModel):
     id: int
@@ -32,6 +33,7 @@ class MasterQuest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
+    reset_period: Optional[str] = 'weekly_monday'
 
 class MasterReward(BaseModel):
     id: int

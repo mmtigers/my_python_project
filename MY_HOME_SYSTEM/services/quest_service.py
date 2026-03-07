@@ -98,6 +98,28 @@ class QuestService:
     CHILDREN_IDS = ['daughter', 'son', 'child']
     PARENT_IDS = ['dad', 'mom']
 
+    def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
+        if not completed_at_str: return False
+        now = datetime.datetime.now()
+        try:
+            completed_date = datetime.datetime.fromisoformat(completed_at_str).date()
+        except Exception:
+            completed_date = datetime.datetime.strptime(completed_at_str.split(' ')[0], "%Y-%m-%d").date()
+        
+        today = now.date()
+        
+        if reset_period == 'daily':
+            return completed_date == today
+        elif reset_period == 'weekly_monday':
+            this_monday = today - datetime.timedelta(days=today.weekday())
+            return completed_date >= this_monday
+        elif reset_period == 'monthly_1st':
+            this_month_1st = today.replace(day=1)
+            return completed_date >= this_month_1st
+        else: # デフォルト
+            this_monday = today - datetime.timedelta(days=today.weekday())
+            return completed_date >= this_monday
+
     def __init__(self):
         self.user_service = UserService()
     
@@ -856,14 +878,32 @@ class GameSystem:
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
         
         with common.get_db_cursor(commit=True) as cur:
+            # ★追加: マイグレーション処理 (role カラムの追加と初期化)
+            try:
+                cur.execute("SELECT role FROM quest_users LIMIT 1")
+            except Exception:
+                logger.info("⚠️ 'role' column missing in quest_users. Adding it now...")
+                cur.execute("ALTER TABLE quest_users ADD COLUMN role TEXT")
+                cur.execute("UPDATE quest_users SET role = 'role_adult' WHERE user_id IN ('dad', 'mom')")
+                cur.execute("UPDATE quest_users SET role = 'role_child' WHERE user_id IN ('daughter', 'son', 'child')")
+
+            # ★追加: マイグレーション処理 (reset_period カラムの追加)
+            try:
+                cur.execute("SELECT reset_period FROM quest_master LIMIT 1")
+            except Exception:
+                logger.info("⚠️ 'reset_period' column missing in quest_master. Adding it now...")
+                cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'")
+
             for u in valid_users:
+                role_val = getattr(u, 'role', None)
                 cur.execute("""
-                    INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
                         name = excluded.name, 
-                        job_class = excluded.job_class
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, datetime.datetime.now()))
+                        job_class = excluded.job_class,
+                        role = COALESCE(excluded.role, quest_users.role)
+                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, datetime.datetime.now()))
             
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
@@ -965,14 +1005,48 @@ class GameSystem:
                 r['icon'] = r['icon_key']
                 r['cost'] = r['cost_gold']
 
-            today_str = common.get_today_date_str()
-            completed = [dict(row) for row in cur.execute(
-                "SELECT * FROM quest_history WHERE completed_at LIKE ?", (f"{today_str}%",)
+            # 過去1ヶ月の完了履歴を取得して周期を判定する
+            recent_completed = [dict(row) for row in cur.execute(
+                "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= date('now', '-1 month') ORDER BY completed_at DESC"
             )]
-            
             pending = [dict(row) for row in cur.execute(
-                "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at ASC"
+                "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
             )]
+
+            # ユーザーマップ作成
+            user_map = {u['user_id']: u['name'] for u in users}
+
+            valid_completed = []
+            quest_latest_history = {} # クエスト+ユーザー ごとの最新履歴
+            for c in recent_completed:
+                key = f"{c['quest_id']}_{c['user_id']}"
+                if key not in quest_latest_history:
+                    quest_latest_history[key] = c
+
+            for q in filtered_quests:
+                q_id = q['quest_id']
+                reset_period = q.get('reset_period') or 'weekly_monday'
+                
+                # 自分や家族の履歴が現在の周期内かを判定
+                for key, c in quest_latest_history.items():
+                    if c['quest_id'] == q_id:
+                        if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                            valid_completed.append(c)
+
+                # 共有クエスト(複数人ターゲット)の他者対応状況を判定
+                target = q.get('target_user')
+                if target and target.startswith('role_'):
+                    completed_by_someone = next((c for c in valid_completed if c['quest_id'] == q_id), None)
+                    if completed_by_someone:
+                        q['is_shared_completed_by'] = completed_by_someone['user_id']
+                        q['shared_completed_by_name'] = user_map.get(completed_by_someone['user_id'], '誰か')
+                    else:
+                        pending_by_someone = next((p for p in pending if p['quest_id'] == q_id), None)
+                        if pending_by_someone:
+                            q['is_shared_pending_by'] = pending_by_someone['user_id']
+                            q['shared_pending_by_name'] = user_map.get(pending_by_someone['user_id'], '誰か')
+
+            completed = valid_completed
            
             logs = self._fetch_recent_logs(cur)
 
