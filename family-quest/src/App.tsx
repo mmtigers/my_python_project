@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Sword, Shirt, ShoppingBag, Backpack, Scroll } from 'lucide-react';
+import { Sword, Shirt, ShoppingBag, Backpack, Scroll, Sparkles } from 'lucide-react'; // Sparkles追加
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
@@ -62,7 +62,7 @@ const ConfirmModal = ({
 
 function App() {
   const { play } = useSound();
-  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'equip' | 'inventory' | 'guild'>('quest');
+  const [activeTab, setActiveTab] = useState<'quest' | 'special_quest' | 'shop' | 'equip' | 'inventory' | 'guild'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party' | 'trends'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
@@ -288,25 +288,28 @@ function App() {
               />
             )}
 
-            <div className="flex gap-2 mb-4 bg-black p-2 rounded-lg border-2 border-white shadow-lg sticky top-16 z-10">
-              {/* タブボタン：変更なし */}
-              <button onClick={() => setActiveTab('quest')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
-                <Sword size={20} className="mb-1" /> クエスト
+            <div className="flex gap-2 mb-4 bg-black p-2 rounded-lg border-2 border-white shadow-lg sticky top-16 z-10 overflow-x-auto">
+              <button onClick={() => setActiveTab('quest')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-800'}`}>
+                <Sword size={20} className="mb-1" /> 通常クエスト
+              </button>
+              {/* ★追加: 特別クエストタブ */}
+              <button onClick={() => setActiveTab('special_quest')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'special_quest' ? 'bg-purple-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-800'}`}>
+                <Sparkles size={20} className="mb-1" /> 特別クエスト
               </button>
 
-              <button onClick={() => setActiveTab('shop')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
+              <button onClick={() => setActiveTab('shop')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <ShoppingBag size={20} className="mb-1" /> ごほうび
               </button>
-              <button onClick={() => setActiveTab('equip')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
+              <button onClick={() => setActiveTab('equip')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Shirt size={20} className="mb-1" /> そうび
               </button>
-              <button onClick={() => setActiveTab('inventory')} className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
+              <button onClick={() => setActiveTab('inventory')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <Backpack size={20} className="mb-1" /> もちもの
               </button>
               {/* ★追加: ギルドタブ */}
               <button
                 onClick={() => { play('tap'); setActiveTab('guild'); }} // cursor -> tap に変更
-                className={`flex-1 py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'guild' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'
+                className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'guild' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'
                   }`}
               >
                 <Scroll size={20} className="mb-1" /> ギルド（開発中）
@@ -321,6 +324,17 @@ function App() {
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(q, false)}
+                  isDaily={true} // ★追加: 日常クエストのみ
+                />
+              )}
+              {activeTab === 'special_quest' && (
+                <QuestList
+                  quests={quests}
+                  completedQuests={completedQuests}
+                  pendingQuests={pendingQuests}
+                  currentUser={currentUser}
+                  onQuestClick={(q) => handleQuestClick(q, false)}
+                  isDaily={false} // ★追加: 特別クエストのみ
                 />
               )}
 
