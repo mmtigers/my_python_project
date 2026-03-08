@@ -1067,12 +1067,20 @@ class GameSystem:
             for q in filtered_quests:
                 q_id = q['quest_id']
                 reset_period = q.get('reset_period') or 'weekly_monday'
+                is_infinite = (q.get('quest_type') == 'infinite') # ★追加: 無限クエスト判定
                 
-                # 自分や家族の履歴が現在の周期内かを判定
-                for key, c in quest_latest_history.items():
-                    if c['quest_id'] == q_id:
-                        if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                            valid_completed.append(c)
+                if is_infinite:
+                    # ★追加: 無限クエストは最新1件で絞らず、条件を満たす全履歴を追加
+                    for c in recent_completed:
+                        if c['quest_id'] == q_id:
+                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                                valid_completed.append(c)
+                else:
+                    # 既存: 通常クエストは重複排除後(quest_latest_history)の最新1件で判定
+                    for key, c in quest_latest_history.items():
+                        if c['quest_id'] == q_id:
+                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                                valid_completed.append(c)
 
                 # 共有クエスト(複数人ターゲット)の他者対応状況を判定
                 target = q.get('target_user')
