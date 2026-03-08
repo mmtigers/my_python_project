@@ -89,7 +89,7 @@ QUESTS = [
     {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
     {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
-    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': 'カバンにコップを入れて服を準備しよう','start_time': '18:00', 'end_time': '21:00' },
+    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': 'カバンにコップを入れて服を準備しよう'},
     {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫',  'days': '0,1,3,4','desc': '先生とのお勉強やレッスン'},
 
     # ------------------------------------------
