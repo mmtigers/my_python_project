@@ -135,6 +135,13 @@ export interface BossEffect {
     isCritical?: boolean;
 }
 
+export interface FamilyMileage {
+    is_set: boolean;
+    target_name?: string;
+    current_exp?: number;
+    target_exp?: number;
+}
+
 // ギルド依頼
 export interface Bounty {
     id: number;

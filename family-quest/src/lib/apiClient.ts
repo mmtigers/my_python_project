@@ -40,6 +40,16 @@ class ApiClient {
         });
     }
 
+    async put<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
+        return this._request<T>(endpoint, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+    }
+
     async delete<T>(endpoint: string): Promise<T> {
         return this._request<T>(endpoint, { method: 'DELETE' });
     }
@@ -84,6 +94,14 @@ class ApiClient {
 
     async fetchPendingInventory(): Promise<PendingInventory[]> {
         return this.get<PendingInventory[]>('/api/quest/inventory/admin/pending');
+    }
+
+    async getFamilyMileage(): Promise<any> {
+        return this.get<any>('/api/quest/family-mileage');
+    }
+
+    async updateFamilyMileage(targetName: string, targetExp: number): Promise<ApiResponse> {
+        return this.put<ApiResponse>('/api/quest/family-mileage', { target_name: targetName, target_exp: targetExp });
     }
 }
 

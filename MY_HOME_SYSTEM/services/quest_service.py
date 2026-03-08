@@ -416,6 +416,41 @@ class QuestService:
             cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
             return {"status": "rejected"}
+    
+    def get_family_mileage(self) -> Dict[str, Any]:
+        with common.get_db_cursor() as cur:
+            row = cur.execute("SELECT * FROM family_mileage WHERE id = 1").fetchone()
+            if not row:
+                return {"is_set": False}
+            return {
+                "is_set": True,
+                "target_name": row['target_name'],
+                "current_exp": row['current_exp'],
+                "target_exp": row['target_exp']
+            }
+
+    def update_family_mileage(self, target_name: str, target_exp: int) -> Dict[str, Any]:
+        now_iso = common.get_now_iso()
+        with common.get_db_cursor(commit=True) as cur:
+            row = cur.execute("SELECT * FROM family_mileage WHERE id = 1").fetchone()
+            if row:
+                # 履歴に保存
+                cur.execute("""
+                    INSERT INTO family_mileage_history (target_name, achieved_exp, target_exp, completed_at)
+                    VALUES (?, ?, ?, ?)
+                """, (row['target_name'], row['current_exp'], row['target_exp'], now_iso))
+                
+                cur.execute("""
+                    UPDATE family_mileage 
+                    SET target_name = ?, current_exp = 0, target_exp = ?, updated_at = ?
+                    WHERE id = 1
+                """, (target_name, target_exp, now_iso))
+            else:
+                cur.execute("""
+                    INSERT INTO family_mileage (id, target_name, current_exp, target_exp, updated_at)
+                    VALUES (1, ?, 0, ?, ?)
+                """, (target_name, target_exp, now_iso))
+        return {"status": "updated"}
 
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:
         if override_rewards:
@@ -430,6 +465,12 @@ class QuestService:
         earned_exp = rewards['exp']
         earned_medals = rewards['medals']
         is_lucky = rewards['is_lucky']
+
+        # ★ ファミリーマイレージへのEXP加算 (レコードが存在する場合のみ)
+        try:
+            cur.execute("UPDATE family_mileage SET current_exp = current_exp + ?, updated_at = ? WHERE id = 1", (earned_exp, now_iso))
+        except Exception as e:
+            logger.error(f"Failed to update family mileage: {e}")
 
         new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(
             user['level'], user['exp'], earned_exp

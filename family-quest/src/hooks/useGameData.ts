@@ -114,6 +114,13 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         staleTime: 1000 * 60 * 5,
     });
 
+    const { data: familyMileage } = useQuery<any>({
+        queryKey: ['familyMileage'],
+        queryFn: () => apiClient.getFamilyMileage(),
+        staleTime: 1000 * 30,
+        refetchInterval: 1000 * 10,
+    });
+
     // 追加: ペンディングインベントリの取得（無限ループ防止のための安全なポーリング）
     const { data: pendingInventory } = useQuery<PendingInventory[]>({
         queryKey: ['pendingInventory'],
@@ -334,6 +341,24 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         }
     };
 
+    const adminUpdateFamilyMileageMutation = useMutation({
+        mutationFn: async ({ targetName, targetExp }: { targetName: string, targetExp: number }) => {
+            return apiClient.updateFamilyMileage(targetName, targetExp);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['familyMileage'] });
+        },
+    });
+
+    const adminUpdateFamilyMileage = async (targetName: string, targetExp: number) => {
+        try {
+            await adminUpdateFamilyMileageMutation.mutateAsync({ targetName, targetExp });
+            return { success: true };
+        } catch (e) {
+            return { success: false };
+        }
+    };
+
 
     return {
         users: gameData?.users || INITIAL_USERS,
@@ -349,6 +374,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         boss: gameData?.boss || null,
         pendingInventory: pendingInventory || [],
         bounties: bounties || [],
+        familyMileage: familyMileage || { is_set: false },
         isLoading: isGameDataLoading,
 
         completeQuest,
@@ -360,5 +386,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         changeEquipment,
         refreshData,
         adminUpdateBoss,
+        adminUpdateFamilyMileage,
     };
 };

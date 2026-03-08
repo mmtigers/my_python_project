@@ -15,7 +15,7 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction, EquipAction, 
-    UpdateUserAction, SoundTestRequest, AdminBossUpdate, UseItemAction, ConsumeItemAction, WeeklyReportResponse
+    UpdateUserAction, SoundTestRequest, AdminBossUpdate, UseItemAction, ConsumeItemAction, WeeklyReportResponse, FamilyMileageUpdate
 )
 from services.quest_service import (
     game_system, quest_service, shop_service, user_service, inventory_service
@@ -164,6 +164,14 @@ def admin_update_boss(action: AdminBossUpdate):
         logger.info(f"👮 Admin Boss Update: {action.dict()}")
         
     return {"status": "updated"}
+
+@router.get("/family-mileage")
+def get_family_mileage():
+    return quest_service.get_family_mileage()
+
+@router.put("/family-mileage")
+def update_family_mileage(action: FamilyMileageUpdate):
+    return quest_service.update_family_mileage(action.target_name, action.target_exp)
 
 @router.get("/inventory/{user_id}")
 def get_inventory(user_id: str):

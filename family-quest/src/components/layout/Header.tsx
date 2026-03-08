@@ -10,6 +10,7 @@ interface HeaderProps {
     onPartySwitch: () => void;
     onLogSwitch: () => void;
     onTrendsSwitch: () => void; // 追加
+    onAdminOpen: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -20,12 +21,16 @@ const Header: React.FC<HeaderProps> = ({
     onPartySwitch,
     onLogSwitch,
     onTrendsSwitch,
+    onAdminOpen,
 }) => {
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
 
             {/* Title Area (隠しボタン用エリア) */}
-            <div className="pt-4 pb-2 text-center relative pointer-events-none">
+            <div
+                className="pt-4 pb-2 text-center relative cursor-pointer"
+                onClick={onAdminOpen}
+            >
                 <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: '"Press Start 2P", cursive, sans-serif' }}>
                     FAMILY QUEST
                 </h1>

@@ -58,17 +58,15 @@ QUESTS = [
     # ------------------------------------------
     # A-1. 通常：共通 (All)
     # ------------------------------------------
-    {'id': 5, 'title': 'お風呂にはいる', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🛁', 'start_time': '17:00', 'end_time': '21:00', 'desc': '一日の汚れを落としてさっぱりしよう'},
-    {'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 80, 'icon': '🌅', 'start_time': '06:30', 'end_time': '08:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん完食。全部できたらクリア！'},
-    {'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 70, 'icon': '🌙', 'start_time': '19:00', 'end_time': '21:00', 'desc': 'トイレ・歯磨き・お片付け完了。パパママにおやすみなさい！'},
+    {'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 80, 'icon': '🌅', 'start_time': '06:30', 'end_time': '08:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん完食。'},
+    {'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 70, 'icon': '🌙', 'start_time': '19:00', 'end_time': '21:00', 'desc': 'お風呂・トイレ・歯磨き・お片付け完了。全部できたらクリア！'},
 
     # ------------------------------------------
     # A-2. 通常：パパ (Dad)
     # ------------------------------------------
     {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
-    {'id': 13, 'title': '排便日時記録 (健康管理)', 'type': 'daily', 'target': 'dad', 'category': 'health', 'difficulty': 'E', 'exp': 10, 'gold': 10, 'icon': '📝', 'desc': '腸内環境のモニタリング'}, 
-    {'id': 12, 'title': '食器の片づけ・キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'desc': 'シンクをピカピカにして明日を迎える'},
-
+    {'id': 12, 'title': 'キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'days': '0,1,2,3,4',  'desc': 'シンクをピカピカにして明日を迎える'},
+    {'id': 13, 'title': 'リビングリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🪁', 'days': '0,1,2,3,4', 'desc': 'リビングをピカピカにして明日を迎える'},
  
     # ------------------------------------------
     # A-3. 通常：ママ (Mom)
@@ -80,24 +78,25 @@ QUESTS = [
     {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1006, 'title': '幼稚園の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '✍️', 'days': '0,1,2,3,4', 'desc': '毎日の体調と様子を報告'},
-    {'id': 1007, 'title': 'みらいの連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
-    {'id': 1008, 'title': '休日の朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
+    {'id': 1007, 'title': '習い事の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
+    {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
 
 
     # ------------------------------------------
     # A-4. 通常：智矢 (Son)
     # ------------------------------------------
-    {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
+    # {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
     {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
     {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
-    {'id': 1021, 'title': '明日の装備確認', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 20, 'icon': '🎒', 'desc': 'カバンの中身を全部出して再点検'},
+    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': 'カバンにコップを入れて服を準備しよう','start_time': '18:00', 'end_time': '21:00' },
+    {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫',  'days': '0,1,3,4','desc': '先生とのお勉強やレッスン'},
 
     # ------------------------------------------
     # A-5. 通常：涼花 (Daughter)
     # ------------------------------------------
     {'id': 301, 'title': '朝ごはんを食べる (完食)', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🍳', 'start_time': '07:00', 'end_time': '08:30', 'desc': 'もぐもぐ食べて大きくなろう'},
-    {'id': 303, 'title': '野菜を一口食べる', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'A', 'exp': 50, 'gold': 50, 'icon': '🥦', 'desc': '嫌いなものでも一口！'},
+    {'id': 303, 'title': '野菜を食べる', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'A', 'exp': 50, 'gold': 50, 'icon': '🥦', 'desc': '嫌いなものでも一口！'},
     {'id': 304, 'title': 'パジャマを自分で着る', 'type': 'daily', 'target': 'daughter', 'category': 'life', 'difficulty': 'C', 'exp': 30, 'gold': 20, 'icon': '👚', 'start_time': '19:00', 'end_time': '20:30', 'desc': 'ボタンも自分で留められるかな？'},
 
 
@@ -108,7 +107,7 @@ QUESTS = [
     # ------------------------------------------
     # B-1. 特別：共通 (All)
     # ------------------------------------------
-    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'days': '6', 'desc': '掃除ロボットのメンテナンス任務'},
+    {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
     {'id': 901, 'title': 'お皿洗い', 'type': 'infinite', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
 
     # ------------------------------------------
@@ -116,26 +115,23 @@ QUESTS = [
     # ------------------------------------------
     {'id': 11, 'title': '会社勤務 (高負荷・残業)', 'type': 'special', 'target': 'dad', 'category': 'work', 'difficulty': 'A', 'exp': 350, 'gold': 200, 'icon': '🔥', 'days': '0,1,2,3,4', 'desc': '激務を乗り越え、多額の報酬を得る'},
     {'id': 18, 'title': 'トイレ掃除 (念入り)', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '✨', 'days': '6', 'desc': 'トイレの神様にご挨拶。金運UP?'},
-    {'id': 61, 'title': '週末の夕食を作る', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'days': '5,6', 'desc': 'ママを休ませるための男飯', 'start_time': '15:00', 'end_time': '20:00'},
+    {'id': 61, 'title': '夕食を作る', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '👨‍🍳', 'desc': 'ママを休ませるための男飯', 'start_time': '15:00', 'end_time': '20:00'},
     {'id': 65, 'title': '洗車', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 200, 'icon': '🚗', 'days': '5,6', 'desc': '愛車をピカピカに磨き上げる（※月1回までのセルフ運用）'},
-    {'id': 9001, 'title': '【伊勢志摩】旅行計画会議', 'type': 'limited', 'target': 'dad', 'category': 'life', 'difficulty': 'D', 'exp': 50, 'gold': 50, 'icon': '🗺️', 'end_date': '2026-03-14', 'desc': '旅行のしおりや行き先を家族で話す'},
     {'id': 502, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'target': 'dad', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
-    {'id': 501, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'dad', 'days': '0,1,2,3,4,5,6', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
+    {'id': 501, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'dad', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
     {'id': 14, 'title': '体重計測 (健康管理)', 'type': 'special', 'target': 'dad', 'category': 'health', 'difficulty': 'E', 'exp': 10, 'gold': 10, 'icon': '⚖️', 'desc': '身体ステータスのチェック'},
     {'id': 15, 'title': '洗濯物を干す', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
     {'id': 16, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
     {'id': 17, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
     {'id': 60, 'title': 'お風呂掃除', 'type': 'special', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 40, 'icon': '🧽', 'desc': '浴槽を磨いて湯船を準備する'},
-    {'id': 1200, 'title': '通勤ハック：読書/資格勉強', 'type': 'special', 'target': 'dad', 'category': 'study', 'difficulty': 'C', 'exp': 150, 'gold': 50, 'icon': '🚃', 'days': '0,1,2,3,4', 'desc': '往復の電車内でスマホを見ずに自己研鑽 (生成AIパスポート等)'},
-
+    
     # ------------------------------------------
     # B-3. 特別：ママ (Mom)
     # ------------------------------------------
     {'id': 503, 'title': '寝室の布団上げ＆掃除', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 40, 'gold': 100, 'icon': '🛏️', 'desc': '布団をあげて掃除機をかける'},
     {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
     {'id': 1011, 'title': '女神のメンテナンス', 'type': 'special', 'target': 'mom', 'category': 'health', 'difficulty': 'D', 'exp': 40, 'gold': 20, 'icon': '🧖‍♀️', 'desc': 'パックやスキンケアで美を高める'},
-    {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'days': '0,1,2,3,4,5,6', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
-    {'id': 505, 'title': 'お菓子を我慢する', 'type': 'special', 'target': 'mom', 'days': '0,1,2,3,4,5,6', 'exp': 20, 'gold': 30, 'icon': '🙅‍♀️', 'desc': '間食を控えて健康に'},
+    {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
     {'id': 15, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
     {'id': 16, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
     {'id': 17, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
@@ -144,16 +140,16 @@ QUESTS = [
     # ------------------------------------------
     # B-4. 特別：智矢 (Son)
     # ------------------------------------------
-    {'id': 30, 'title': '国語プリント (強化中)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '📝', 'desc': 'ひらがな特訓。YouTubeより稼げるぞ！'},
-    {'id': 31, 'title': '算数プリント (強化中)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。2枚やれば160Gゲット！'},
+    {'id': 30, 'title': '国語プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '📝', 'desc': 'ひらがな特訓。1枚でもいいぞ'},
+    {'id': 31, 'title': '算数プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
     {'id': 45, 'title': 'ピアノの練習', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
-    {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
     {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
+    {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
     {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
     {'id': 49, 'title': 'パパのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'days': '5,6', 'desc': '週末はパパのサポート任務だ！'},
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
-    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
-    {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
+    {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
+    # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
 
     # ------------------------------------------
     # B-5. 特別：涼花 (Daughter)

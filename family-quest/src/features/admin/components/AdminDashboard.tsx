@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/Button';
 interface AdminDashboardProps {
     boss: Boss | null;
     onUpdate: (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => Promise<any>;
+    onUpdateMileage: (targetName: string, targetExp: number) => Promise<any>;
     onClose: () => void;
 }
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onClose }) => {
+const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdateMileage, onClose }) => {
     const [maxHp, setMaxHp] = useState(1000);
     const [currentHp, setCurrentHp] = useState(1000);
     const [isDefeated, setIsDefeated] = useState(false);
@@ -104,6 +105,51 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onClose
                         setIsDefeated(false);
                     }}>
                         全回復 (Reset)
+                    </Button>
+                </div>
+
+                {/* 共有目標（マイレージ）操作エリア */}
+                <div className="space-y-6 bg-gray-900 p-4 rounded-lg border border-gray-700 mt-8">
+                    <h3 className="text-lg font-bold text-gray-400">共有目標（ファミリーマイレージ）</h3>
+                    <div className="space-y-2">
+                        <label className="block text-sm">新しい目標名</label>
+                        <input
+                            type="text"
+                            id="mileageNameInput"
+                            className="w-full bg-gray-800 text-white p-2 rounded border border-gray-600"
+                            placeholder="例: 週末は焼肉！"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <label className="block text-sm">目標EXP</label>
+                        <input
+                            type="number"
+                            id="mileageExpInput"
+                            defaultValue={1000}
+                            className="w-full bg-gray-800 text-white p-2 rounded border border-gray-600"
+                        />
+                    </div>
+                    <Button
+                        onClick={async () => { // ★非同期処理に変更
+                            const name = (document.getElementById('mileageNameInput') as HTMLInputElement).value;
+                            const exp = Number((document.getElementById('mileageExpInput') as HTMLInputElement).value);
+
+                            if (name && exp) {
+                                // ★ 実際のAPI処理を実行
+                                const res = await onUpdateMileage(name, exp);
+                                if (res && res.success) {
+                                    alert("新しい共有目標を設定しました！");
+                                    onClose(); // 成功したら管理画面を閉じる
+                                } else {
+                                    alert("目標の設定に失敗しました");
+                                }
+                            } else {
+                                alert("目標名と目標EXPの両方を入力してください");
+                            }
+                        }}
+                        className="w-full flex items-center justify-center gap-2 bg-blue-600"
+                    >
+                        <Save size={18} /> 目標を設定してリセット
                     </Button>
                 </div>
             </div>
