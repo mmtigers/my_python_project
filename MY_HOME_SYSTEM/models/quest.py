@@ -110,6 +110,10 @@ class AdminBossUpdate(BaseModel):
     current_hp: Optional[int] = None
     is_defeated: Optional[bool] = None
 
+class FamilyMileageUpdate(BaseModel):
+    target_name: str
+    target_exp: int
+
 # Inventory Models
 class InventoryItem(BaseModel):
     id: int             # inventory ID
