@@ -482,6 +482,28 @@ def init_db() -> None:
             )
         ''')
 
+        # ファミリーマイレージ (共有目標)
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS family_mileage (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                target_name TEXT NOT NULL,
+                current_exp INTEGER DEFAULT 0,
+                target_exp INTEGER NOT NULL,
+                updated_at DATETIME
+            )
+        ''')
+
+        # ファミリーマイレージ履歴
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS family_mileage_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_name TEXT NOT NULL,
+                achieved_exp INTEGER NOT NULL,
+                target_exp INTEGER NOT NULL,
+                completed_at DATETIME NOT NULL
+            )
+        ''')
+
         # ギルド掲示板
         cur.execute('''
             CREATE TABLE IF NOT EXISTS bounties (
