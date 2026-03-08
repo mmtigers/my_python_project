@@ -18,6 +18,8 @@ import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
+import { FamilyMileageCard } from './features/family/components/FamilyMileageCard'; // ★これを追加
+
 
 
 import UserStatusCard from './features/family/components/UserStatusCard';
@@ -85,9 +87,10 @@ function App() {
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     equipments, ownedEquipments, familyStats, chronicle, boss,
+    familyMileage,
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward, buyEquipment, changeEquipment,
-    refreshData, adminUpdateBoss
+    refreshData, adminUpdateBoss, adminUpdateFamilyMileage
   } = useGameData(handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
@@ -258,6 +261,7 @@ function App() {
         onPartySwitch={() => { setViewMode('party'); play('select'); }}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onTrendsSwitch={() => { setViewMode('trends'); play('select'); }}
+        onAdminOpen={() => { setViewMode('admin'); play('select'); }}
       />
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
@@ -268,12 +272,17 @@ function App() {
           <AdminDashboard
             boss={boss}
             onUpdate={adminUpdateBoss}
+            onUpdateMileage={adminUpdateFamilyMileage}
             onClose={() => setViewMode('main')}
           />
         )}
 
         {viewMode === 'main' && (
           <>
+            {/* 共有目標（ファミリーマイレージ）表示領域 */}
+            {/* ★ 修正: ダミーデータ(window.__familyMileageData)ではなく、実際の familyMileage を渡す */}
+            <FamilyMileageCard mileage={familyMileage} />
+
             <UserStatusCard
               user={currentUser}
               onAvatarClick={() => setIsAvatarModalOpen(true)}
