@@ -468,3 +468,17 @@ PROCESS_MEMORY_LIMIT_MB: float = 500.0
 MEMORY_ALERT_COOLDOWN_SEC: int = 7200
 # 最終通知時刻を記録する一時ファイルパス
 MEMORY_ALERT_LAST_NOTIFY_FILE: str = os.path.join(FALLBACK_ROOT, "last_memory_alert.txt")
+
+# ==========================================
+# 11. TV Lock Feature Settings
+# ==========================================
+_tv_unlock_quest_ids_str: str = os.getenv("TV_UNLOCK_QUEST_IDS", "")
+TV_UNLOCK_QUEST_IDS: List[int] = []
+if _tv_unlock_quest_ids_str:
+    try:
+        # 数字のみを抽出してint型に変換
+        TV_UNLOCK_QUEST_IDS = [int(q.strip()) for q in _tv_unlock_quest_ids_str.split(",") if q.strip().isdigit()]
+    except Exception as e:
+        logger.warning(f"⚠️ TV_UNLOCK_QUEST_IDS parse error: {e}")
+
+TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
