@@ -401,8 +401,40 @@ class QuestService:
                 if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
                     result['bossEffect'] = boss_effect
             
+            # --- TV Lock Feature ---
+            if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
+                if hist['user_id'] in self.CHILDREN_IDS:
+                    self._trigger_tv_unlock(quest['quest_id'])
+
             logger.info(f"Child Attack Approved: Attacker={attacker_id}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
             return result
+
+    def _trigger_tv_unlock(self, quest_id: int):
+        import threading
+        from services import switchbot_service
+        from services import notification_service
+        
+        def unlock_task():
+            logger.info(f"📺 Initiating TV Unlock (Turn ON) for quest_id: {quest_id}")
+            try:
+                res = switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")
+                if res and res.get("statusCode") == 100:
+                    logger.info("✅ TV Unlock successful.")
+                else:
+                    raise Exception(f"API returned error: {res}")
+            except Exception as e:
+                logger.error(f"❌ TV Unlock failed: {e}")
+                # Fail-Soft: エラー時は親グループへ通知
+                if config.LINE_PARENTS_GROUP_ID:
+                    msg = "⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。"
+                    notification_service.send_push(
+                        user_id=config.LINE_PARENTS_GROUP_ID,
+                        messages=[{"type": "text", "text": msg}]
+                    )
+        
+        # APIコールでAPIルーティング（メインスレッド）をブロックしないよう非同期で実行
+        t = threading.Thread(target=unlock_task, daemon=True)
+        t.start()
     
     def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
         if approver_id not in self.PARENT_IDS:

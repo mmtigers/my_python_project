@@ -48,6 +48,32 @@ def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 
     return None
 
 
+def post_switchbot_api(url: str, headers: Dict[str, str], json_data: Dict[str, Any]) -> Dict[str, Any]:
+    """SwitchBot APIへのPOSTリクエスト（リトライ付き・コマンド動作用）"""
+    response = requests.post(url, headers=headers, json=json_data, timeout=10)
+    response.raise_for_status()
+    # コマンド送信レスポンスは汎用的なJSONが返るため、モデルバリデーションは行わずに返す
+    return response.json()
+
+def send_device_command(device_id: str, command: str, parameter: str = "default", command_type: str = "command") -> Optional[Dict[str, Any]]:
+    """指定されたデバイスにコマンドを送信する"""
+    url = f"{config.SWITCHBOT_API_HOST}/v1.1/devices/{device_id}/commands"
+    headers = create_switchbot_auth_headers()
+    if not headers:
+        return None
+        
+    payload = {
+        "command": command,
+        "parameter": parameter,
+        "commandType": command_type
+    }
+    
+    try:
+        response_data = post_switchbot_api(url, headers, payload)
+        return response_data
+    except Exception as e:
+        logger.error(f"Failed to send command [{command}] to device [ID:{device_id}]: {e}")
+        return None
 
 def create_switchbot_auth_headers() -> Dict[str, str]:
     """認証ヘッダーを生成する関数"""
