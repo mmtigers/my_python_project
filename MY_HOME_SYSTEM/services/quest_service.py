@@ -1098,7 +1098,7 @@ class GameSystem:
 
             for q in filtered_quests:
                 q_id = q['quest_id']
-                reset_period = q.get('reset_period') or 'weekly_monday'
+                reset_period = q.get('reset_period') or 'daily'
                 is_infinite = (q.get('quest_type') == 'infinite') # ★追加: 無限クエスト判定
                 
                 if is_infinite:

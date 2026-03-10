@@ -33,7 +33,7 @@ class MasterQuest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
-    reset_period: Optional[str] = 'weekly_monday'
+    reset_period: Optional[str] = 'daily'
 
 class MasterReward(BaseModel):
     id: int
