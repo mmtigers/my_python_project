@@ -127,6 +127,7 @@ class CameraConfig(BaseModel):
     port: int = 2020
     user: Optional[str] = None
     password: Optional[str] = Field(None, alias="pass")
+    rtsp_url: Optional[str] = None
 
 class NotifySettings(BaseModel):
     power_threshold_watts: Optional[float] = None
