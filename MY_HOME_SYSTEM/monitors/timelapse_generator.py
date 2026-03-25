@@ -276,7 +276,8 @@ def main():
 
     TARGET_CAM_MAP = {
         "防犯カメラ": "garden", 
-        "駐車場カメラ": "parking"
+        "駐車場カメラ": "parking",
+        "玄関カメラ": "entrance"
     }
 
     for db_name, nas_folder in TARGET_CAM_MAP.items():
