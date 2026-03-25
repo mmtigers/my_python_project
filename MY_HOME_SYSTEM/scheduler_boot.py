@@ -29,13 +29,13 @@ TASKS: List[Task] = [
     # 頻度: 高 (5分〜10分)
     {"script": "monitors/switchbot_power_monitor.py", "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0, "args": []},
-    {"script": "monitors/car_presence_checker.py",    "interval": 600,  "last_run": 0, "args": []},
+    # {"script": "monitors/car_presence_checker.py",    "interval": 600,  "last_run": 0, "args": []},
     {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
 
     # 頻度: 中 (30分)
     {"script": "monitors/tv_lock_monitor.py",         "interval": 300,  "last_run": 0, "args": []},
-    {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0, "args": ["--save"]},
-    {"script": "monitors/clinic_monitor.py",          "interval": 1800, "last_run": 0, "args": []},
+    # {"script": "monitors/bicycle_parking_monitor.py", "interval": 1800, "last_run": 0, "args": ["--save"]},
+    # {"script": "monitors/clinic_monitor.py",          "interval": 1800, "last_run": 0, "args": []},
     # 頻度: 中 (5分ごとにチェックし、スクリプト内で17:30条件を満たせば処理するラッパー想定、
     # もしくはここで直接時刻判定を行う。今回は一番シンプルな5分毎起動→スクリプト内で時刻判定を想定)
     # ※ただし、より確実にするため、ここでは300秒間隔で起動させます。
