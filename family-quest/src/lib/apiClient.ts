@@ -2,7 +2,17 @@
 
 import { Bounty, InventoryItem, PendingInventory } from "../types";
 
-const BASE_URL: string = import.meta.env.VITE_API_URL || '';
+// 現在の環境に最も適したBASE_URLを動的に判定する
+const getBaseUrl = (): string => {
+    // 1. .envで明示的に指定されている場合 (ローカル開発環境など)
+    if (import.meta.env.VITE_API_URL) {
+        return import.meta.env.VITE_API_URL;
+    }
+    // 2. 指定がない場合は、ブラウザが現在アクセスしているドメインをそのまま使用する
+    return typeof window !== 'undefined' ? window.location.origin : '';
+};
+
+const BASE_URL: string = getBaseUrl();
 
 interface RequestOptions extends RequestInit {
     headers?: Record<string, string>;
