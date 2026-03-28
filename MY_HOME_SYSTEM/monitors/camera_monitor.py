@@ -58,7 +58,7 @@ except (PermissionError, OSError) as e:
 
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
-SESSION_LIFETIME: int = 50  
+SESSION_LIFETIME: int = 3600
 RENEW_DURATION: str = "PT600S"
 
 # クールダウンの秒数を設定 (config.py から読み込み。未定義時は60秒)
@@ -477,17 +477,13 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     cam_name: str = cam_conf['name']
     ip_address: str = cam_conf['ip']
     consecutive_errors: int = 0
-    port_candidates: List[int] = [2020, 80]
+    # 設定ファイルで指定されたポートのみを使用し、勝手な切り替えを禁止する
+    port_candidates: List[int] = [cam_conf.get('port', 80)]
     max_backoff_time: int = 3600  # 最大1時間の待機 (サスペンド)
 
     transient_error_count: int = 0
     last_transient_error_time: float = 0
     is_first_connect: bool = True
-
-    if cam_conf.get('port'):
-        if cam_conf['port'] in port_candidates:
-            port_candidates.remove(cam_conf['port'])
-        port_candidates.insert(0, cam_conf['port'])
 
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
 
@@ -569,8 +565,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
             # 4. 監視ループ
             while True:
+                # SESSION_LIFETIME (3600秒) 経過時のみ、安全にループを抜けてセッションを作り直す
                 if time.time() - session_start_time > SESSION_LIFETIME:
-                    logger.debug(f"🔄 [{cam_name}] Refreshing session...")
+                    logger.debug(f"🔄 [{cam_name}] Session lifetime reached. Refreshing gracefully...")
                     break
 
                 try:
@@ -689,7 +686,8 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 logger.debug(f"🔌 [{cam_name}] Camera devicemgmt session closed.")
             
             logger.debug(f"✨ [{cam_name}] Resource cleanup completed.")
-            time.sleep(1)
+            # カメラ側のリソース解放（Unsubscribe等）が完了するまで待機する（Race condition防止）
+            time.sleep(3)
 
 async def main() -> None:
     if not WSDL_DIR: return logger.error("WSDL not found")

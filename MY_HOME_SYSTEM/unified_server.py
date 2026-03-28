@@ -133,9 +133,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:8501",
+    "http://192.168.1.200:5173", 
+    "https://m-mhts.com"        # 👈 Cloudflareの公開ドメインを追加
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -179,23 +186,21 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
             client_ip = request.client.host if request.client else "0.0.0.0"
 
     try:
-        # 文字列として取得したIPを判定用のオブジェクトに変換
         ip_obj = ipaddress.ip_address(client_ip)
         
-        # 3. IPアドレスがローカルホスト(is_loopback)またはプライベートIP(is_private)か検証
         if ip_obj.is_loopback or ip_obj.is_private:
             return await call_next(request)
             
     except ValueError:
-        # 不正な形式のIPアドレス文字列が渡された場合のフェイルセーフ（意図せぬクラッシュ防止）
         pass
 
-    # 4. 許可条件を満たさない場合はログを記録し、403 Forbidden を返す (printは不使用)
-    logger.debug(f"Blocked unauthorized external access - IP: {client_ip}, Path: {request.url.path}")
-    return JSONResponse(
-        status_code=403,
-        content={"detail": "Forbidden: Access denied."}
-    )
+    # 🌟 変更: Cloudflare Access (Zero Trust) を導入したため、IPベースの遮断を無効化し、
+    # 認証はCloudflareのエッジネットワークに委譲する。
+    # ※もしCloudflare経由であることを厳密に担保したい場合は、将来的に
+    # `Cf-Access-Jwt-Assertion` ヘッダーの検証をここに追加する。
+    
+    logger.debug(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    return await call_next(request)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
