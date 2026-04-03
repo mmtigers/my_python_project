@@ -90,7 +90,8 @@ QUESTS = [
     {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
     {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': '明日着る服を準備しよう'},
-    {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫',  'days': '0,1,3,4','desc': '先生とのお勉強やレッスン'},
+    {'id': 1022, 'title': '小学校の練習', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢', 'desc': '小学校に歩いて行こう'},
+    {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
 
     # ------------------------------------------
     # A-5. 通常：涼花 (Daughter)
@@ -143,12 +144,14 @@ QUESTS = [
     {'id': 30, 'title': '国語プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '📝', 'desc': 'ひらがな特訓。1枚でもいいぞ'},
     {'id': 31, 'title': '算数プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
     {'id': 45, 'title': 'ピアノの練習', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
+    {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
     {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
     {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
     {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
     {'id': 49, 'title': 'パパのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'days': '5,6', 'desc': '週末はパパのサポート任務だ！'},
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
     {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
+    {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 3000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
     # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
 
     # ------------------------------------------
@@ -181,7 +184,7 @@ REWARDS = [
 
     # --- Large (目標型) ---
     {'id': 25, 'title': '回転寿司に行く権', 'category': 'special', 'cost_gold': 2000, 'icon_key': '🍣', 'desc': '回るけど美味しい！パパにお願いしよう', 'target': 'all'},
-    {'id': 24, 'title': '好きなおもちゃ (小)', 'category': 'item', 'cost_gold': 5000, 'icon_key': '🤖', 'desc': 'ずっと欲しかったあのおもちゃ', 'target': 'children'},
+    {'id': 24, 'title': '好きなおもちゃ', 'category': 'item', 'cost_gold': 5000, 'icon_key': '🤖', 'desc': 'ずっと欲しかったあのおもちゃ', 'target': 'children'},
     {'id': 32, 'title': 'いちご狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍓', 'desc': '甘くて美味しいいちごをたくさん食べよう！', 'target': 'children'},
     {'id': 33, 'title': 'しいたけ狩り', 'category': 'special', 'cost_gold': 4000, 'icon_key': '🍄', 'desc': '自分で採ったしいたけは最高に美味しいぞ', 'target': 'children'},
     # {'id': 15, 'title': 'スマートウォッチ', 'category': 'item', 'cost_gold': 30000, 'icon_key': '⌚', 'desc': '高性能なハイエンド装備', 'target': 'dad'},
