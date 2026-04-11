@@ -108,12 +108,24 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         if last_end_time and dt < last_end_time:
             continue
 
-        date_str = dt.strftime("%Y%m%d")
-        search_pattern = os.path.join(config.NVR_RECORD_DIR, nas_folder, f"{date_str}_*.mp4")
-        found_files = sorted(glob.glob(search_pattern))
+        # --- 修正: 日またぎファイル検索ロジック ---
+        dt_prev = dt - datetime.timedelta(hours=1)
+        date_str_current = dt.strftime("%Y%m%d")
+        date_str_prev = dt_prev.strftime("%Y%m%d")
+        
+        search_patterns = [
+            os.path.join(config.NVR_RECORD_DIR, nas_folder, f"{date_str_current}_*.mp4")
+        ]
+        if date_str_current != date_str_prev:
+            search_patterns.append(os.path.join(config.NVR_RECORD_DIR, nas_folder, f"{date_str_prev}_*.mp4"))
+
+        found_files = []
+        for pattern in search_patterns:
+            found_files.extend(glob.glob(pattern))
+        found_files.sort()
         
         if not found_files:
-            logger.warning(f"⚠️ 動画ファイルが見つかりません: {search_pattern}")
+            logger.warning(f"⚠️ 動画ファイルが見つかりません (検索パターン: {search_patterns})")
             continue
             
         # --- 🎬 修正: 常に最新ファイルを選ぶバグを修正し、イベント時刻に合ったファイルを探す ---
@@ -140,28 +152,29 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
 
         logger.info(f"🎥 動画ファイルを発見: {src_video} (対象イベント: {dt.strftime('%H:%M:%S')})")
         
-        clip_name = os.path.join(tmp_dir, f"{camera_name}_{dt.strftime('%H%M%S')}.ts")
+        clip_name = os.path.join(tmp_dir, f"{camera_name}_{dt.strftime('%H%M%S')}.mp4")
         
         # シーク秒数を計算する
         exact_seek = (dt_naive - f_start_dt).total_seconds()
         seek_sec = str(max(0.0, exact_seek - 5.0)) # 5秒前から切り出し
 
-        # ★適用1＆2: scaleを854に、倍速を0.125(8倍速)に変更
+        # --- 修正: 解像度を720pに変更 ---
         text_overlay = f"drawtext=text='{dt.strftime('%Y-%m-%d %H\\:%M\\:%S')}':fontcolor=white:fontsize=24:x=w-tw-10:y=10"
-        filter_complex = f"[0:v]{text_overlay},scale=854:-2,setpts=0.125*PTS[v]"
+        filter_complex = f"[0:v]{text_overlay},scale=-2:720,setpts=0.125*PTS[v]"
         
         cmd = [
             "nice", "-n", "15", "ffmpeg", "-y",
             "-ss", seek_sec,
-            "-t", "20",
+            "-t", "40",            # --- 修正: 40秒間切り出し (8倍速で5秒の尺を確保) ---
             "-i", src_video,
             "-filter_complex", filter_complex,
             "-map", "[v]",
             "-c:v", "libx264", 
-            "-preset", "faster",   # ★修正: ultrafast から faster に変更（画質を保ったまま容量を劇的に圧縮）
-            "-crf", "28",          # ★修正: 強制ビットレートを廃止し、綺麗な画質設定を復活
-            "-maxrate", "1000k",   # ★追加: 容量爆発を防ぐための「お守り」の上限
+            "-preset", "faster",
+            "-crf", "28",
+            "-maxrate", "1000k",
             "-bufsize", "2000k",
+            "-an",                 # --- 修正: 音声を破棄してコンテナ破損を防ぐ ---
             clip_name
         ]
         
@@ -170,7 +183,7 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         
         if success:
             clips.append(clip_name)
-            last_end_time = dt + datetime.timedelta(seconds=20)
+            last_end_time = dt + datetime.timedelta(seconds=40) # --- 修正: 切り出し時間に合わせて40秒スキップ ---
         else:
             logger.warning(f"⚠️ クリップ抽出スキップ: {dt.strftime('%H:%M:%S')} のイベントをスキップしました。")
             continue
@@ -275,7 +288,7 @@ def main():
     os.makedirs(config.TMP_VIDEO_DIR, exist_ok=True)
 
     TARGET_CAM_MAP = {
-        "防犯カメラ": "garden", 
+        "庭カメラ": "garden", 
         "駐車場カメラ": "parking",
         "玄関カメラ": "entrance"
     }
