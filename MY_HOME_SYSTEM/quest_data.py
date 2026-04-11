@@ -33,7 +33,7 @@ USERS = [
         'info': '32歳 / 育児・家庭運営責任者 / 伝説の秘宝「アルハンブラ」を目指す者' 
     },
     {
-        'user_id': 'son', 'name': 'ともや', 'job_class': 'もうすぐ1年生', 
+        'user_id': 'son', 'name': 'ともや', 'job_class': 'ピカピカの1年生', 
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦',
         'info': '5歳 / 文武両道・早起きのヒーロー / YouTubeより稼げる仕事を探求中' 
     },
@@ -87,10 +87,10 @@ QUESTS = [
     # ------------------------------------------
     # {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
     # {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
-    {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
-    {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
-    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': '明日着る服を準備しよう'},
-    {'id': 1022, 'title': '小学校の練習', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢', 'desc': '小学校に歩いて行こう'},
+    # {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
+    # {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
+    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': '明日必要なものをランドセルに入れよう'},
+    {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
     {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
 
     # ------------------------------------------
@@ -109,7 +109,7 @@ QUESTS = [
     # B-1. 特別：共通 (All)
     # ------------------------------------------
     {'id': 7, 'title': 'ルンバの水交換', 'type': 'special', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🤖', 'desc': '掃除ロボットのメンテナンス任務'},
-    {'id': 901, 'title': 'お皿洗い', 'type': 'infinite', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
+    {'id': 901, 'title': '食器の片付け', 'type': 'infinite', 'target': 'all', 'category': 'house', 'difficulty': 'C', 'exp': 15, 'gold': 50, 'icon': '🍽️', 'desc': 'ご飯のあとのお皿をきれいに洗おう', 'chance': 1.0},
 
     # ------------------------------------------
     # B-2. 特別：パパ (Dad)
@@ -141,17 +141,17 @@ QUESTS = [
     # ------------------------------------------
     # B-4. 特別：智矢 (Son)
     # ------------------------------------------
-    {'id': 30, 'title': '国語プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '📝', 'desc': 'ひらがな特訓。1枚でもいいぞ'},
-    {'id': 31, 'title': '算数プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
-    {'id': 45, 'title': 'ピアノの練習', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
-    {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
+    {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
+    # {'id': 31, 'title': '算数プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
+    {'id': 45, 'title': 'ピアノの練習(10分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
+    # {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
     {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
     {'id': 44, 'title': '一人で45分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 45, 'gold': 90, 'icon': '📖', 'desc': '本の世界をもっと冒険しよう'},
     {'id': 48, 'title': 'ママのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '🧚', 'desc': 'ママに頼まれたことをやろう'},
     {'id': 49, 'title': 'パパのお手伝い', 'type': 'infinite', 'target': 'son', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🛠️', 'days': '5,6', 'desc': '週末はパパのサポート任務だ！'},
     {'id': 46, 'title': '休みの日は買い物についてくる', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '🛒', 'days': '5,6', 'desc': '荷物持ちのサポート任務'},
     {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
-    {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 3000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
+    # {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 2000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
     # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
 
     # ------------------------------------------
