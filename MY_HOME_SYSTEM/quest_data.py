@@ -89,9 +89,11 @@ QUESTS = [
     # {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
     # {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     # {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
-    {'id': 1021, 'title': '明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 50, 'icon': '🎒', 'desc': '明日必要なものをランドセルに入れよう'},
-    {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
-    {'id': 1009, 'title': '習い事：みらい / ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
+    {'id': 1021, 'title': '宿題と明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '🎒', 'days': '0,1,2,3,4','desc': '宿題をクリアして明日必要なものをランドセルに入れよう'},
+    # {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
+    # {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
+    {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
+    {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
 
     # ------------------------------------------
     # A-5. 通常：涼花 (Daughter)
@@ -141,8 +143,8 @@ QUESTS = [
     # ------------------------------------------
     # B-4. 特別：智矢 (Son)
     # ------------------------------------------
-    {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
-    # {'id': 31, 'title': '算数プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 100, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
+   
+    {'id': 31, 'title': 'プリント', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 80, 'icon': '🧮', 'desc': '計算マスター。1枚でもいいぞ'},
     {'id': 45, 'title': 'ピアノの練習(10分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 50, 'gold': 50, 'icon': '🎹', 'desc': '毎日少しずつ上手になろう'},
     # {'id': 58, 'title': 'ピアノの練習(30分)', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 500, 'icon': '🎹', 'desc': '30分1人で練習しよう'},
     {'id': 43, 'title': '一人で30分間 本を読む', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 30, 'gold': 60, 'icon': '📖', 'desc': '本の世界を冒険しよう'},
