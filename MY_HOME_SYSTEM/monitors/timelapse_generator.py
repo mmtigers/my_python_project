@@ -152,20 +152,20 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
 
         logger.info(f"🎥 動画ファイルを発見: {src_video} (対象イベント: {dt.strftime('%H:%M:%S')})")
         
-        clip_name = os.path.join(tmp_dir, f"{camera_name}_{dt.strftime('%H%M%S')}.mp4")
+        # ★修正: 拡張子を.mp4から.tsに戻す（concat時のタイムスタンプ破損を完全に防ぐため）
+        clip_name = os.path.join(tmp_dir, f"{camera_name}_{dt.strftime('%H%M%S')}.ts")
         
         # シーク秒数を計算する
         exact_seek = (dt_naive - f_start_dt).total_seconds()
         seek_sec = str(max(0.0, exact_seek - 5.0)) # 5秒前から切り出し
 
-        # --- 修正: 解像度を720pに変更 ---
         text_overlay = f"drawtext=text='{dt.strftime('%Y-%m-%d %H\\:%M\\:%S')}':fontcolor=white:fontsize=24:x=w-tw-10:y=10"
         filter_complex = f"[0:v]{text_overlay},scale=-2:720,setpts=0.125*PTS[v]"
         
         cmd = [
             "nice", "-n", "15", "ffmpeg", "-y",
             "-ss", seek_sec,
-            "-t", "40",            # --- 修正: 40秒間切り出し (8倍速で5秒の尺を確保) ---
+            "-t", "40",
             "-i", src_video,
             "-filter_complex", filter_complex,
             "-map", "[v]",
@@ -174,16 +174,20 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
             "-crf", "28",
             "-maxrate", "1000k",
             "-bufsize", "2000k",
-            "-an",                 # --- 修正: 音声を破棄してコンテナ破損を防ぐ ---
+            "-an",
+            "-f", "mpegts",        # ★追加: .ts出力用にフォーマットを明示
             clip_name
         ]
         
-        # 修正: 専用関数での抽出処理（リトライ・スキップ制御対応）
         success = extract_video_clip(cmd, src_video, clip_name)
         
         if success:
             clips.append(clip_name)
-            last_end_time = dt + datetime.timedelta(seconds=40) # --- 修正: 切り出し時間に合わせて40秒スキップ ---
+            last_end_time = dt + datetime.timedelta(seconds=40)
+            
+            # ★追加: 全件処理時のラズパイ過熱を防ぐためのマイクロインターバル
+            # （間引きロジックを撤廃する代わりの Fail-Soft 設計）
+            time.sleep(0.5)
         else:
             logger.warning(f"⚠️ クリップ抽出スキップ: {dt.strftime('%H:%M:%S')} のイベントをスキップしました。")
             continue
@@ -288,7 +292,7 @@ def main():
     os.makedirs(config.TMP_VIDEO_DIR, exist_ok=True)
 
     TARGET_CAM_MAP = {
-        "庭カメラ": "garden", 
+        "防犯カメラ": "garden", 
         "駐車場カメラ": "parking",
         "玄関カメラ": "entrance"
     }
@@ -306,29 +310,12 @@ def main():
             
         logger.info(f"✅ {db_name} のイベントを {len(event_times)} 件見つけました。動画生成を開始します。")
         
-        # ==========================================
-        # 🛡️ 恒久対策: ハードリミットと均等サンプリング処理
-        # ==========================================
-        # 1日の最大処理件数を定義 (Raspberry Pi 5 のサーマルリミットを考慮して最大50件 = 約15分エンコード程度に抑える)
-        MAX_SAFE_LIMIT = 20 
-        
-        # コマンドライン引数で明示的に limit が渡されている場合はそちらを優先
-        actual_limit = args.limit if args.limit > 0 else MAX_SAFE_LIMIT
-
-        if len(event_times) > actual_limit:
-            # 設計書準拠: WARNINGログとして記録（Discord等の通知対象にするため）
-            logger.warning(f"⚠️ [{db_name}] イベント数({len(event_times)}件)が安全上限({actual_limit}件)を超過しました。システムの過熱を防ぐため均等サンプリングを実施します。")
-            
-            # 1日の出来事が満遍なく含まれるように、均等な間隔で要素を抽出する
-            step = len(event_times) / actual_limit
-            sampled_times = [event_times[math.floor(i * step)] for i in range(actual_limit)]
-            event_times = sampled_times
-            
-            logger.info(f"🔧 サンプリング完了: {len(event_times)} 件の動画生成を開始します。")
+        # コマンドライン引数で明示的に limit が渡されている場合のみ制限を適用（検証時用）
+        if args.limit > 0:
+            logger.info(f"🔧 検証モード: 上限 {args.limit} 件で動画生成を開始します。")
+            event_times = event_times[:args.limit]
         else:
             logger.info(f"🚀 全 {len(event_times)} 件の動画生成を開始します。")
-        
-        # ==========================================
         
         output_video = process_video_clips(db_name, nas_folder, event_times, config.TMP_VIDEO_DIR)
         
