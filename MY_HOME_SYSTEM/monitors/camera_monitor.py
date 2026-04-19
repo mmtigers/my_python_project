@@ -520,40 +520,42 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             consecutive_errors = 0
             session_start_time: float = time.time()
             
-            # --- 追加: 玄関カメラ用のRenewタイマー初期化 ---
-            last_renew_time = time.time()
-            RENEW_INTERVAL_SEC = 540  # 9分間隔 (カメラ側の切断期限10分より前に更新する)
+            # --- 修正: 玄関カメラ専用の再接続（Subscribeし直し）タイマー ---
+            # 10分の有効期限が切れる前に、自発的にセッションを切り替える
+            last_subscribe_time = time.time()
+            FORCE_RECONNECT_INTERVAL_SEC = 540  # 9分
 
             # 4. 監視ループ
             while True:
+                current_time = time.time()
+                
                 # SESSION_LIFETIME (3600秒) 経過時のみ、安全にループを抜けてセッションを作り直す
-                if time.time() - session_start_time > SESSION_LIFETIME:
+                if current_time - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Session lifetime reached. Refreshing gracefully...")
                     break
 
-                # --- 追加: 玄関カメラ専用の Renew (購読更新) ロジック ---
+                # --- 修正: 玄関カメラ専用の自発的再接続ロジック ---
                 if cam_name == "玄関カメラ":
-                    current_time = time.time()
-                    if current_time - last_renew_time > RENEW_INTERVAL_SEC:
-                        try:
-                            logger.debug(f"🔄 [{cam_name}] Sending Renew request to keep subscription alive...")
-                            pullpoint.Renew("PT600S") # 10分間の延長を要求
-                            last_renew_time = current_time
-                        except Exception as renew_e:
-                            logger.error(f"❌ [{cam_name}] Renew failed: {renew_e}. Forcing reconnect.")
-                            break # 更新に失敗した場合は再接続へ
+                    if current_time - last_subscribe_time > FORCE_RECONNECT_INTERVAL_SEC:
+                        logger.info(f"🔄 [{cam_name}] 9 minutes passed. Reconnecting to avoid silent timeout...")
+                        break # ループを抜けて安全に再接続（外側のループへ）
                 # -----------------------------------------------------------
 
                 try:
                     events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
                     # ... (ログ出力等は省略せず元の通り) ...
                     if events:
-                        logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
-                        logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: {events.NotificationMessage}")
+                        # ★ここを info に変更（玄関カメラのみログを出す）
+                        if cam_name == "玄関カメラ":
+                            logger.info(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
+                            if hasattr(events, 'NotificationMessage'):
+                                logger.info(f"📦 [EVENT PAYLOAD] {cam_name}: 含まれるメッセージ数: {len(events.NotificationMessage)}")
+                                logger.info(f"📝 [PAYLOAD DETAIL] {events.NotificationMessage}")
                 except Exception as e:
                     # --- 修正: 玄関カメラのみ例外ハンドリングを強化し、他は既存ロジックを維持 ---
                     if cam_name == "玄関カメラ":
-                        logger.error(f"❌ [{cam_name}] Failed to pull messages: {e}. Breaking loop to reconnect.")
+                        # Renew非対応カメラのため、通信断エラーが出た場合はWARNINGとし、再接続へ移行
+                        logger.warning(f"⚠️ [{cam_name}] Failed to pull messages: {e}. Breaking loop to reconnect.")
                         break # 例外を握りつぶさず、ループを抜けて外側の Exponential Backoff 再接続へ移行
                     else:
                         # ★ 駐車場カメラ・庭カメラは絶対にこのルート（既存のまま）を通る ★
