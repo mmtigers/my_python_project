@@ -1,0 +1,3 @@
+# [Secret wallet / 保育士] 心臓が跳ねるデートのシーン
+
+Prompt: Anime style, 4:5 aspect ratio. A breathtakingly handsome 32yo Japanese man (black hair, no glasses, adult charm). A young female nursery teacher. At a lively amusement park. He shows a digital VIP entrance ticket on the 'Secret wallet' app, guiding her in.
