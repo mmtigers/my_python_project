@@ -1,0 +1,3 @@
+# [Secret wallet / おとなしめ事務職] 自宅での究極の癒やしのシーン
+
+Prompt: Anime style, 4:5 aspect ratio. A breathtakingly handsome 32yo Japanese man (black hair, no glasses, adult charm). A demure young female office worker. In a dimly lit bedroom. He silently hands a sleek black 'Secret wallet' physical card to the waiter.

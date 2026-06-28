@@ -1,0 +1,3 @@
+# [Secret wallet / おとなしめ事務職] 仕事終わりの癒やしのシーン
+
+Prompt: Anime style, 4:5 aspect ratio. A breathtakingly handsome 32yo Japanese man (black hair, no glasses, adult charm). A demure young female office worker. On a quiet, dimly lit night street. He effortlessly pays the bill using the 'Secret wallet' app on his smartphone, smiling generously.
