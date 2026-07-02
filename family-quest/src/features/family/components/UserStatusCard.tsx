@@ -12,7 +12,7 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
     if (!user) return null;
 
     // 簡易計算: 次のレベルまで = (Lv+1)*100 とする (APIデータがあればそれを使う)
-    const nextLevelExp = (user.level + 1) * 100;
+    const nextLevelExp = Math.floor(100 * Math.pow(1.2, user.level - 1));
     const currentExp = user.exp || 0;
 
     // 進捗率と残りEXP
