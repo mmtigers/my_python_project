@@ -100,7 +100,10 @@ class QuestService:
 
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
-        now = datetime.datetime.now()
+        
+        import pytz
+        now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        
         try:
             completed_date = datetime.datetime.fromisoformat(completed_at_str).date()
         except Exception:
@@ -1079,8 +1082,14 @@ class GameSystem:
                 r['cost'] = r['cost_gold']
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
+            # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
+            import pytz
+            now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+            one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+
             recent_completed = [dict(row) for row in cur.execute(
-                "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= date('now', '-1 month') ORDER BY completed_at DESC"
+                "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= ? ORDER BY completed_at DESC",
+                (one_month_ago,)
             )]
             pending = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
@@ -1090,29 +1099,29 @@ class GameSystem:
             user_map = {u['user_id']: u['name'] for u in users}
 
             valid_completed = []
-            quest_latest_history = {} # クエスト+ユーザー ごとの最新履歴
-            for c in recent_completed:
-                key = f"{c['quest_id']}_{c['user_id']}"
-                if key not in quest_latest_history:
-                    quest_latest_history[key] = c
 
             for q in filtered_quests:
                 q_id = q['quest_id']
                 reset_period = q.get('reset_period') or 'daily'
-                is_infinite = (q.get('quest_type') == 'infinite') # ★追加: 無限クエスト判定
+                is_infinite = (q.get('quest_type') == 'infinite')
                 
                 if is_infinite:
-                    # ★追加: 無限クエストは最新1件で絞らず、条件を満たす全履歴を追加
+                    # 無限クエストは条件を満たす全履歴を追加
                     for c in recent_completed:
                         if c['quest_id'] == q_id:
                             if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
                                 valid_completed.append(c)
                 else:
-                    # 既存: 通常クエストは重複排除後(quest_latest_history)の最新1件で判定
-                    for key, c in quest_latest_history.items():
+                    # 通常クエストの場合、ユーザーごとに最新の履歴を評価する
+                    users_processed = set()
+                    for c in recent_completed:
                         if c['quest_id'] == q_id:
-                            if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
-                                valid_completed.append(c)
+                            uid = c['user_id']
+                            if uid not in users_processed:
+                                if self.quest_service.is_within_reset_period(c['completed_at'], reset_period):
+                                    valid_completed.append(c)
+                                # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
+                                users_processed.add(uid)
 
                 # 共有クエスト(複数人ターゲット)の他者対応状況を判定
                 target = q.get('target_user')
