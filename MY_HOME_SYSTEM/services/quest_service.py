@@ -101,27 +101,34 @@ class QuestService:
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
         
-        import pytz
-        now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        import datetime
+        # 外部ライブラリを使わず、標準機能でJST（+9時間）を定義
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        now_jst = datetime.datetime.now(JST)
+        today_jst = now_jst.date()
         
         try:
-            completed_date = datetime.datetime.fromisoformat(completed_at_str).date()
+            # DBの文字列をdatetimeオブジェクトへ変換
+            dt = datetime.datetime.fromisoformat(completed_at_str)
+            # タイムゾーン情報がない（UTCとして記録されている）場合、UTCとみなしてJSTに変換
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=datetime.timezone.utc)
+            
+            completed_date = dt.astimezone(JST).date()
         except Exception:
-            completed_date = datetime.datetime.strptime(completed_at_str.split(' ')[0], "%Y-%m-%d").date()
-        
-        today = now.date()
-        
+            try:
+                completed_date = datetime.datetime.strptime(completed_at_str.split(' ')[0], "%Y-%m-%d").date()
+            except:
+                return False
+
         if reset_period == 'daily':
-            return completed_date == today
-        elif reset_period == 'weekly_monday':
-            this_monday = today - datetime.timedelta(days=today.weekday())
-            return completed_date >= this_monday
-        elif reset_period == 'monthly_1st':
-            this_month_1st = today.replace(day=1)
-            return completed_date >= this_month_1st
-        else: # デフォルト
-            this_monday = today - datetime.timedelta(days=today.weekday())
-            return completed_date >= this_monday
+            return completed_date == today_jst
+        elif reset_period == 'weekly':
+            # 週の月曜日を基準にする
+            start_of_week = today_jst - datetime.timedelta(days=today_jst.weekday())
+            return completed_date >= start_of_week
+        
+        return False
 
     def __init__(self):
         self.user_service = UserService()
@@ -1086,6 +1093,10 @@ class GameSystem:
             import pytz
             now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
             one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+
+            import datetime
+            JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+            one_month_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
             recent_completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= ? ORDER BY completed_at DESC",
