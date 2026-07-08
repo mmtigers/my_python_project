@@ -1090,18 +1090,20 @@ class GameSystem:
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
-            import pytz
-            now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-            one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
-
-            import datetime
-            JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
-            one_month_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+            try:
+                now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+                one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+            except Exception as jst_err:
+                # 万が一のタイムゾーンエラーに対する防御型フォールバック（Safety Guard）
+                logger.error(f"❌ Failed to calculate JST time for analytics: {jst_err}")
+                now_native = datetime.datetime.now()
+                one_month_ago = (now_native - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
             recent_completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= ? ORDER BY completed_at DESC",
                 (one_month_ago,)
             )]
+
             pending = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
             )]
