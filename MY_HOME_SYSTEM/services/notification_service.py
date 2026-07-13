@@ -27,7 +27,7 @@ line_configuration: Optional[Configuration] = None
 if config.LINE_CHANNEL_ACCESS_TOKEN:
     line_configuration = Configuration(access_token=config.LINE_CHANNEL_ACCESS_TOKEN)
 
-def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify") -> bool:
+def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool:
     """DiscordへのWebhook送信"""
     if channel == "error":
         url = config.DISCORD_WEBHOOK_ERROR
@@ -54,12 +54,18 @@ def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = Non
     
     try:
         if image_data:
-            files = {'file': ('snapshot.jpg', image_data, 'image/jpeg')}
-            res = requests.post(url, files=files, data={'content': text_content}, timeout=10)
+            # MIMEタイプの指定を外し、Discord側にファイル拡張子で自動判定させる
+            files = {'file': (filename, image_data)}
+            res = requests.post(url, files=files, data={'content': text_content}, timeout=60) # タイムアウトを60秒に延長
         else:
             res = requests.post(url, json={"content": text_content}, timeout=10)
         
-        return res.status_code in [200, 204]
+        # ステータスコードが成功(200, 204)以外の場合、エラー内容をログに出力して原因を特定する
+        if res.status_code not in [200, 204]:
+            logger.error(f"Discord API エラー: {res.status_code} - {res.text}")
+            return False
+            
+        return True
     except Exception as e:
         logger.error(f"Discord送信失敗: {e}")
         return False
@@ -107,13 +113,13 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
         logger.error(f"LINE Push Error: {e}")
         return False
 
-def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify") -> bool:
+def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify", filename: str = "snapshot.jpg") -> bool:
     """統合プッシュ通知関数"""
     success = True
     
     # 1. Discord送信
     if target in ["discord", "both"]:
-        if not _send_discord_webhook(messages, image_data, channel):
+        if not _send_discord_webhook(messages, image_data, channel, filename):
             logger.warning("Discordへの通知に失敗しました")
             success = False
 

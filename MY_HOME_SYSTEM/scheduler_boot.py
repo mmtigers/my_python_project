@@ -49,6 +49,7 @@ TASKS: List[Task] = [
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},
     # {"script": "monitors/suumo_monitor.py",           "interval": 3600, "last_run": 0, "args": []},
     {"script": "weekly_analyze_report.py",            "interval": 3600, "last_run": 0, "args": []},
+    {"script": "monitors/scheduled_timelapse.py", "interval": 300, "last_run": 0, "args": []},
 ]
 
 def run_script(script_path: str, args: List[str]) -> bool:
