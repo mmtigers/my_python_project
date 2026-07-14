@@ -82,7 +82,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
             env=env,
             capture_output=True,
             text=True,
-            timeout=900  # 1タスク最大5分のタイムアウト
+            timeout=3600  # タイムラプスなど長時間タスクを許容するため60分に延長
         )
 
         if result.returncode == 0:
@@ -95,7 +95,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
             return False
 
     except subprocess.TimeoutExpired:
-        logger.error(f"⏰ Timeout: {script_path} exceeded 300 seconds.")
+        logger.error(f"⏰ Timeout: {script_path} exceeded 3600 seconds.")
         return False
     except Exception as e:
         logger.exception(f"🔥 Unexpected error running {script_path}: {e}")
