@@ -57,6 +57,18 @@ def cleanup_old_records(days: int = 7):
                 except Exception as e:
                     logger.error(f"ファイル削除エラー ({f}): {e}")
 
+def cleanup_orphaned_videos(days: int = 1):
+    """異常終了時などに残留した一時動画ファイルを削除する(ガベージコレクション)"""
+    now_ts = time_module.time()
+    for f in glob.glob(os.path.join(PROJECT_ROOT, "data", "timelapse_*.mp4")):
+        if os.path.isfile(f):
+            if now_ts - os.path.getmtime(f) > days * 86400:
+                try:
+                    os.remove(f)
+                    logger.info(f"残留していた古い動画ファイルを削除しました: {os.path.basename(f)}")
+                except Exception as e:
+                    logger.error(f"動画ファイル削除エラー ({f}): {e}")
+
 def get_target_files(target_dir: str, target_date: str, start_time: time, end_time: time) -> list:
     """指定された時間帯に含まれる10分単位のMP4ファイルを取得する"""
     files = []
@@ -78,7 +90,7 @@ def get_target_files(target_dir: str, target_date: str, start_time: time, end_ti
             
     return files
 
-def generate_timelapse(file_list: list, output_base_path: str) -> list:
+def generate_timelapse(file_list: list, output_base_path: str, is_dry_run: bool = False) -> list:
     """FFmpegを使用してタイムラプス動画を生成し、分割されたファイルのリストを返す"""
     if not file_list:
         return []
@@ -106,7 +118,13 @@ def generate_timelapse(file_list: list, output_base_path: str) -> list:
         ]
         
         logger.info(f"FFmpegコマンド実行: {' '.join(cmd)}")
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        if is_dry_run:
+            logger.info("[DRY-RUN] FFmpegコマンドの実行をスキップしました")
+            return ["dry_run_dummy.mp4"]
+            
+        # タイムアウトを1800秒(30分)に設定して実行
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1800)
         
         if res.returncode == 0:
             logger.info("タイムラプス生成成功")
@@ -117,12 +135,23 @@ def generate_timelapse(file_list: list, output_base_path: str) -> list:
             logger.error(f"FFmpegエラー: {res.stderr.decode('utf-8')}")
             return []
             
+    except subprocess.TimeoutExpired as e:
+        logger.error(f"FFmpeg処理がタイムアウト(1800秒)しました: {e}")
+        return []
     except Exception as e:
         logger.error(f"動画生成中に例外発生: {e}")
         return []
     finally:
         if os.path.exists(list_file_path):
             os.remove(list_file_path)
+
+def notify_error(message: str):
+    """エラーチャンネルへの通知"""
+    try:
+        line_user_id = getattr(config, "LINE_USER_ID", "")
+        send_push(line_user_id, [message], target="discord", channel="error")
+    except Exception as e:
+        logger.error(f"エラー通知送信に失敗: {e}")
 
 def main(args):
     now = datetime.now()
@@ -147,8 +176,9 @@ def main(args):
             logger.error(f"カスタム時刻のフォーマットエラー (HHMM形式で指定してください): {e}")
             return
             
-    # 古い記録ファイルのクリーンアップ
+    # 古いファイルのクリーンアップ
     cleanup_old_records()
+    cleanup_orphaned_videos()
     
     # 処理対象のカメラを決定 (引数指定があればそれを優先、なければデフォルト)
     target_camera_keys = args.cameras.split(",") if args.cameras else DEFAULT_TARGET_CAMERAS
@@ -188,6 +218,11 @@ def main(args):
                 output_filename = f"timelapse_{camera_name}_{schedule_name}_{target_date_str}.mp4"
                 output_path = os.path.join(PROJECT_ROOT, "data", output_filename)
                 
+                if args.dry_run:
+                    logger.info(f"[DRY-RUN] 対象ファイル数: {len(target_files)}")
+                    generate_timelapse(target_files, output_path, is_dry_run=True)
+                    continue
+
                 generated_files = generate_timelapse(target_files, output_path)
                 
                 if generated_files:
@@ -211,12 +246,20 @@ def main(args):
                                 logger.info(f"Discordへタイムラプス動画({part_filename})の送信完了")
                             else:
                                 logger.error(f"Discordへのタイムラプス動画({part_filename})送信に失敗しました")
+                                notify_error(f"⚠️ 【通知エラー】[{camera_name}] {schedule_name} のタイムラプス動画({part_filename})のDiscord送信に失敗しました。")
                                 
                         except Exception as e:
                             logger.error(f"通知送信処理中に例外発生 ({part_filename}): {e}")
+                            notify_error(f"⚠️ 【システムエラー】[{camera_name}] {schedule_name} の通知送信中に例外が発生しました: {e}")
                         
+                        # APIのレートリミットを回避するためのインターバル
                         if idx < total_parts:
                             time_module.sleep(5)
+                else:
+                    # FFmpegの生成に失敗した場合
+                    logger.error(f"[{camera_name}] {schedule_name} の動画生成に失敗しました。")
+                    notify_error(f"⚠️ 【エラー】[{camera_name}] {schedule_name} のタイムラプス動画生成（FFmpeg）に失敗しました。詳細はサーバーログを確認してください。")
+
                 
                 # 実行完了を記録
                 Path(record_file).touch()
@@ -234,9 +277,10 @@ if __name__ == "__main__":
     parser.add_argument("--start", type=str, help="カスタム開始時刻 (例: 1200)")
     parser.add_argument("--end", type=str, help="カスタム終了時刻 (例: 1330)")
     parser.add_argument("--cameras", type=str, help="対象カメラをカンマ区切りで指定 (例: entrance,parking)")
+    parser.add_argument("--dry-run", action="store_true", help="FFmpegの実行と通知をスキップし、対象ファイルとコマンドのみを出力する")
     args = parser.parse_args()
     
-    if args.force or (args.start and args.end) or args.date:
-        logger.info(f"手動強制実行モードで起動: {args}")
+    if args.force or (args.start and args.end) or args.date or args.dry_run:
+        logger.info(f"手動強制実行(またはDRY-RUN)モードで起動: {args}")
         
     main(args)
