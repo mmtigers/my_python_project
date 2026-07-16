@@ -12,7 +12,7 @@ Features:
 - Discord Notifications.
 - Schedule: 02:00 - 06:00.
 - Universal Support: Uses yt-dlp for ALL supported sites (not just YouTube).
-- Specialized Scraping: Specific logic for 'tktube'.
+- Specialized Scraping: Specific logic for 'missav'.
 """
 
 import os
@@ -92,10 +92,8 @@ class AppConfig:
     MAX_RETRIES: int = 3
     
     # 抽出パターン (Specialized Scraping)
-    URL_PATTERNS: List[Tuple[str, str]] = field(default_factory=lambda: [
-        ('HD', r"video_alt_url\s*:\s*['\"]([^'\"]+)['\"]"),
-        ('SD', r"video_url\s*:\s*['\"]([^'\"]+)['\"]"),
-    ])
+    # missavはm3u8形式かつJS難読化されているため、正規表現のリストではなく専用関数で解析します
+    URL_PATTERNS: List[Tuple[str, str]] = field(default_factory=list)
     
     SHOW_PROGRESS_BAR: bool = sys.stdout.isatty()
 
@@ -225,7 +223,7 @@ class DownloadStrategy(ABC):
             return True
         return False
 
-# ★変更点: YouTubeStrategy を UniversalYtDlpStrategy に名称変更し、汎用的に利用
+# ★UniversalYtDlpStrategy
 class UniversalYtDlpStrategy(DownloadStrategy):
     def download(self, task: DownloadTask) -> bool:
         logger.info(f"🎥 Universal処理: {task.url} (List: {task.source_name})")
@@ -258,61 +256,96 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             logger.error(f"⚠️ Universal DL エラー: {e}")
             return False
 
-# ★変更点: スクレイピングが必要な特定サイト専用
+# ★スクレイピングが必要な特定サイト専用 (missav用)
 class ScrapingStrategy(DownloadStrategy):
     def download(self, task: DownloadTask) -> bool:
-        category = "tktube"
+        category = "missav"
         target_dir = self._determine_save_dir(task.source_name, category)
         if not target_dir: return False
 
         html = self._fetch_html(task.url)
         if not html: return False
 
-        candidates = self._extract_video_urls(html)
-        if not candidates:
-            logger.warning("⚠️ 動画リンクなし")
+        m3u8_url = self._extract_m3u8_url(html)
+        if not m3u8_url:
+            logger.warning("⚠️ M3U8リンクの抽出に失敗しました。ページ構成が変更された可能性があります。")
             return False
 
-        filename = FileSystemManager.sanitize_filename(task.url.split('?')[0].rstrip('/').split('/')[-1] or f"vid_{int(time.time())}") + ".mp4"
+        # URLからファイル名を生成（例: snos-314-uncensored-leak.mp4）
+        video_id = task.url.split('?')[0].rstrip('/').split('/')[-1] or f"vid_{int(time.time())}"
+        filename = FileSystemManager.sanitize_filename(video_id) + ".mp4"
         final_path = target_dir / filename
 
         if self._should_skip(final_path): return True
-        return self._execute_atomic_download(candidates, final_path, task.url, target_dir)
+        
+        return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)
 
     def _fetch_html(self, url: str) -> Optional[str]:
         try:
             self.session.headers['Referer'] = url
             res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)
             return res.text
-        except Exception: return None
+        except Exception as e:
+            logger.error(f"HTML取得エラー: {e}")
+            return None
 
-    def _extract_video_urls(self, html: str) -> List[Tuple[str, str]]:
-        urls = []
-        for label, pattern in CONFIG.URL_PATTERNS:
-            match = re.search(pattern, html)
-            if match: urls.append((label, match.group(1).strip().rstrip('/')))
-        return urls
-
-    def _execute_atomic_download(self, candidates: List[Tuple[str, str]], final_path: Path, src_url: str, save_dir: Path) -> bool:
-        temp_path = final_path.with_suffix('.tmp')
-        self.session.headers['Referer'] = src_url
+    def _extract_m3u8_url(self, html: str) -> Optional[str]:
+        # missavのJS難読化(p,a,c,k,e,d)を解除してm3u8を抽出
+        match = re.search(r"eval\(function\(p,a,c,k,e,d\).*?return p}\('(.*?)',\s*(\d+),\s*(\d+),\s*'([^']*)'\.split\('\|'\)", html)
+        if not match: return None
         
-        for label, video_url in candidates:
-            try:
-                with self.session.get(video_url, stream=True, timeout=CONFIG.REQUEST_TIMEOUT) as res:
-                    if res.status_code == 404: continue
-                    total = int(res.headers.get('content-length', 0))
-                    with open(temp_path, 'wb') as f, tqdm(total=total, unit='iB', unit_scale=True, disable=not CONFIG.SHOW_PROGRESS_BAR) as bar:
-                        for chunk in res.iter_content(1024*1024):
-                            size = f.write(chunk)
-                            bar.update(size)
-                    temp_path.rename(final_path)
-                    DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
-                    return True
-            except Exception:
-                if temp_path.exists(): temp_path.unlink()
-                continue
-        return False
+        p = match.group(1).replace("\\'", "'")
+        c = int(match.group(3))
+        k = match.group(4).split('|')
+        
+        def e_func(num: int) -> str:
+            if num == 0: return "0"
+            chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+            res = ""
+            while num > 0:
+                res = chars[num % 36] + res
+                num //= 36
+            return res
+
+        unpacked = p
+        for i in range(c - 1, -1, -1):
+            word = k[i] if i < len(k) and k[i] else e_func(i)
+            # 正規表現の置換でバックスラッシュ等が誤動作しないようlambdaでエスケープ処理
+            unpacked = re.sub(r'\b' + e_func(i) + r'\b', lambda m, w=word: w, unpacked)
+            
+        # 1080p -> 720p -> オリジナルの順で取得を試行
+        for var_name in ['source1280', 'source842', 'source']:
+            url_match = re.search(f"{var_name}=['\"]([^'\"]+)['\"]", unpacked)
+            if url_match:
+                return url_match.group(1)
+
+        # 変数名が変更された場合のフォールバック
+        fallback = re.search(r"['\"](https://[^'\"]+\.m3u8)['\"]", unpacked)
+        if fallback:
+            return fallback.group(1)
+            
+        return None
+
+    def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
+        # HLS(m3u8)はyt-dlpに処理を委譲してダウンロードと結合を行う
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': str(final_path),
+            'http_headers': {'Referer': page_url}, # ホットリンク防止の回避
+            'quiet': not CONFIG.SHOW_PROGRESS_BAR,
+            'no_warnings': True,
+            'concurrent_fragment_downloads': 5, # チャンク分割DLの高速化
+        }
+        try:
+            logger.info(f"📥 M3U8 DL開始 (yt-dlp): {final_path.name}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([m3u8_url])
+            DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
+            return True
+        except Exception as e:
+            logger.error(f"⚠️ M3U8 DL エラー: {e}")
+            if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除
+            return False
 
 # ==========================================
 # 4. メインコントローラー
@@ -337,8 +370,8 @@ class BatchDownloader:
                 return None
             # 有効な場合は通常のフローへ進む
 
-        # 既存のロジック: tktubeなら専用ストラテジー、それ以外はUniversal
-        if "tktube" in url:
+        # missavなら専用ストラテジー、それ以外はUniversal
+        if "missav" in url:
             return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
         else:
             # YouTube以外の汎用サイト（Twitter/X, Vimeoなど）は引き続きダウンロード可能
