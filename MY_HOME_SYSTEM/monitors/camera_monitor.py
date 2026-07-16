@@ -231,62 +231,6 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
 
     return None
 
-# def capture_snapshot_from_stream_cv2(cam_conf: Dict[str, Any]) -> Optional[bytes]:
-#     """
-#     OpenCVを使用してRTSPストリームから最新のフレームを取得する。
-    
-#     バッファに古いフレームが滞留するのを防ぐため、内部バッファサイズを制限しつつ、
-#     最新フレームに追いつくまで高速で grab() を回して古いフレームを破棄する。
-
-#     Args:
-#         cam_conf (Dict[str, Any]): カメラ設定辞書 (ip, user, passなどを含む)
-
-#     Returns:
-#         Optional[bytes]: 取得した画像データのバイト列。失敗・EOF到達時はNone。
-#     """
-#     cam_name: str = cam_conf.get('name', 'Unknown')
-    
-#     # ストリームURLの構築（設定に rtsp_url があれば優先、なければ標準フォーマットを推測）
-#     rtsp_url: str = cam_conf.get(
-#         'rtsp_url', 
-#         f"rtsp://{cam_conf.get('user')}:{cam_conf.get('pass')}@{cam_conf.get('ip')}:554/stream1"
-#     )
-    
-#     cap = cv2.VideoCapture(rtsp_url)
-#     if not cap.isOpened():
-#         logger.error(f"❌ [{cam_name}] Failed to open RTSP stream.")
-#         return None
-    
-#     try:
-#         # バックエンドのバッファサイズを最小限(1)に設定（環境依存だが遅延防止に有効）
-#         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
-#         # 溜まっている古いフレームを高速で読み飛ばす（バッファクリア）
-#         frames_to_clear: int = 5 
-#         for _ in range(frames_to_clear):
-#             if not cap.grab():
-#                 logger.warning(f"⚠️ [{cam_name}] Stream disconnected during grab() or EOF reached.")
-#                 return None
-                
-#         # 最新フレームの読み出し
-#         ret, frame = cap.retrieve()
-#         if ret and frame is not None:
-#             logger.debug(f"✅ [{cam_name}] Snapshot captured directly from stream.")
-#             success, buffer = cv2.imencode('.jpg', frame)
-#             if success:
-#                 return buffer.tobytes()
-        
-#         logger.error(f"❌ [{cam_name}] Failed to retrieve or decode frame after grab.")
-#         return None
-        
-#     except Exception as e:
-#         logger.error(f"🚨 [{cam_name}] Exception during RTSP capture: {e}")
-#         return None
-#     finally:
-#         # 無駄なリソースやファイルディスクリプタを残さないよう確実に解放
-#         cap.release()
-#         logger.debug(f"🔌 [{cam_name}] Connection closed / Resource released.")
-
 
 def save_image_from_stream(cam_name: str, event_type: str = "motion") -> Optional[str]:
     cam_conf = next((c for c in config.CAMERAS if c["name"] == cam_name), None)

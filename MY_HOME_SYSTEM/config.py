@@ -122,6 +122,7 @@ load_dotenv()
 class CameraConfig(BaseModel):
     id: str
     name: str
+    nas_folder: Optional[str] = None  # 追加: NASの物理フォルダ名
     location: str
     ip: str
     port: int = 2020
