@@ -15,10 +15,12 @@ venv/
 
 # Logs
 *.log
+*.csv
 logs/
 
 # Temporary
 tmp/
+*.done
 
 # Database
 *.db
@@ -36,7 +38,7 @@ assets/salary_images/
 *.jpg
 *.png
 *.pdf
-# すべての .txt を除外
+*.mp4
 *.txt
 
 # ただし requirements.txt は含める
