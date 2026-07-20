@@ -42,8 +42,8 @@ def get_live_stream(camera_id: str):
 
     raise HTTPException(status_code=503, detail="Stream generation timeout")
 
-@router.get("/record/{camera_id}/{target_date}/playlist.m3u8")
-def get_record_stream(camera_id: str, target_date: str):
+@router.get("/record/{camera_id}/{target_date}/{playlist_file}")
+def get_record_stream(camera_id: str, target_date: str, playlist_file: str):
     """録画VOD HLSプレイリスト（.m3u8）の取得。target_date は YYYYMMDD 形式"""
     cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
     if not cam_conf:
