@@ -28,6 +28,9 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
 
         let hls: Hls;
 
+        // ★追加: 無限ループ防止のための時間記録用変数
+        let recoverDecodingErrorDate = 0;
+
         if (Hls.isSupported()) {
             hls = new Hls({
                 startPosition: startPosition !== undefined ? startPosition : -1,
@@ -38,8 +41,16 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
                 if (data.fatal) {
                     console.error("HLS Fatal Error:", data);
                     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        console.error("メディアエラー: コーデック(H.265等)がブラウザ非対応の可能性があります。");
-                        hls.recoverMediaError();
+                        // ★変更: 無限ループを防ぐため、3秒以内の連続エラーは破棄する
+                        const now = performance.now();
+                        if (now - recoverDecodingErrorDate > 3000) {
+                            recoverDecodingErrorDate = now;
+                            console.warn("メディアエラー: 回復を試みます...");
+                            hls.recoverMediaError();
+                        } else {
+                            console.error("致命的なメディアエラー: 回復できないためHLSを破棄します。");
+                            hls.destroy();
+                        }
                     } else {
                         hls.destroy();
                     }
@@ -61,7 +72,7 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
         return () => {
             if (hls) hls.destroy();
         };
-    }, [streamUrl, autoPlay, startPosition, onVideoRef]);
+    }, [streamUrl, autoPlay, startPosition]);
 
     return (
         <video

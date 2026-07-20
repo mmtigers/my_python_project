@@ -42,29 +42,48 @@ def get_live_stream(camera_id: str):
 
     raise HTTPException(status_code=503, detail="Stream generation timeout")
 
-@router.get("/record/{camera_id}/{target_date}/{playlist_file}")
-def get_record_stream(camera_id: str, target_date: str, playlist_file: str):
-    """録画VOD HLSプレイリスト（.m3u8）の取得。target_date は YYYYMMDD 形式"""
+@router.get("/record/{camera_id}/{target_date}/info")
+def get_record_info(camera_id: str, target_date: str):
+    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""
     cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
     if not cam_conf:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
-    if not playlist_path:
-        raise HTTPException(status_code=404, detail="Recordings not found for the specified date")
+    offset = camera_service.get_record_start_offset(cam_conf, target_date)
+    return {"offset_seconds": offset}
 
-    return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")
+@router.get("/record/{camera_id}/{target_date}/{filename}")
+def get_record_file(camera_id: str, target_date: str, filename: str):
+    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""
+    # .m3u8 プレイリストの要求の場合
+    if filename.endswith(".m3u8"):
+        cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+        if not cam_conf:
+            raise HTTPException(status_code=404, detail="Camera not found")
 
-@router.get("/{mode}/{camera_id}/{segment_file}")
-def get_hls_segment(mode: str, camera_id: str, segment_file: str):
-    """ライブおよび録画のHLSセグメント（.tsファイル）を配信"""
-    if mode == "live":
-        base_dir = camera_service.HLS_LIVE_DIR
-    elif mode == "record":
+        playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
+        if not playlist_path:
+            raise HTTPException(status_code=404, detail="Recordings not found for the specified date")
+
+        return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")
+
+    # .ts セグメントの要求の場合
+    elif filename.endswith(".ts"):
         base_dir = camera_service.HLS_VOD_DIR
-    else:
-        raise HTTPException(status_code=400, detail="Invalid mode")
+        # NASの元動画に日付フォルダは無いため、生成されたtsファイルも camera_id 直下のパスで解決する
+        segment_path = os.path.join(base_dir, camera_id, filename)
+        if not os.path.exists(segment_path):
+            raise HTTPException(status_code=404, detail="Segment not found")
+            
+        return FileResponse(segment_path, media_type="video/MP2T")
 
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file extension")
+
+@router.get("/live/{camera_id}/{segment_file}")
+def get_live_segment(camera_id: str, segment_file: str):
+    """ライブのHLSセグメント（.tsファイル）を配信"""
+    base_dir = camera_service.HLS_LIVE_DIR
     segment_path = os.path.join(base_dir, camera_id, segment_file)
     if not os.path.exists(segment_path):
         raise HTTPException(status_code=404, detail="Segment not found")
