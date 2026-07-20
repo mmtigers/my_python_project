@@ -9,6 +9,7 @@ export default defineConfig({
   
   // ▼▼▼ PWA Plugin 設定追加 ▼▼▼
   VitePWA({
+    useCredentials: true,
     registerType: 'autoUpdate', // ユーザーへの通知なしに自動更新（シンプル構成）
     includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'vite.svg'],
     manifest: {

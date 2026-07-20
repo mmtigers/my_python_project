@@ -27,7 +27,7 @@ from core.logger import setup_logging
 from services import sensor_service
 
 # Routers
-from routers import quest_router, webhook_router, system_router, bounty_router
+from routers import quest_router, webhook_router, system_router, bounty_router, camera_router # ★追加: camera_router
 
 # Handlers
 from handlers import line_handler
@@ -215,6 +215,7 @@ app.include_router(webhook_router.router)
 app.include_router(quest_router.router, prefix="/api/quest", tags=["quest"])
 app.include_router(system_router.router, prefix="/api/system", tags=["system"])
 app.include_router(bounty_router.router, prefix="/api/bounty", tags=["bounty"])
+app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"]) # ★追加: カメラ用APIルート
 
 # --- Static Files & SPA Serving ---
 
@@ -241,7 +242,9 @@ if quest_dist_dir and os.path.exists(quest_dist_dir):
     app.mount("/quest_static", StaticFiles(directory=quest_dist_dir), name="quest_static")
 
     # SPA用ルーティング (ファイルが存在すればそれを、なければindex.htmlを返す)
+    # ★変更: /camera 配下のパスもSPAのルーティングに含める
     @app.get("/quest/{full_path:path}")
+    @app.get("/camera/{full_path:path}")
     async def serve_quest_spa(full_path: str):
         target_file = os.path.join(quest_dist_dir, full_path)
         
@@ -255,9 +258,12 @@ if quest_dist_dir and os.path.exists(quest_dist_dir):
             return FileResponse(index_path)
         return JSONResponse(status_code=404, content={"error": "index.html not found"})
 
-    # ルートパス (/quest と /quest/) の両方をハンドリング
+    # ルートパス (/quest, /quest/, /camera, /camera/) をハンドリング
+    # ★変更: /camera のルートアクセスを許可
     @app.get("/quest")
     @app.get("/quest/")
+    @app.get("/camera")
+    @app.get("/camera/")
     async def serve_quest_root():
         index_path = os.path.join(quest_dist_dir, "index.html")
         if os.path.exists(index_path):
