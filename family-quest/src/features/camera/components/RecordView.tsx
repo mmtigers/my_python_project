@@ -10,11 +10,12 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
     const [targetDate, setTargetDate] = useState<string>('');
     const [targetTime, setTargetTime] = useState<string>('');
     const [playUrlSuffix, setPlayUrlSuffix] = useState<string | null>(null);
-    const [startSeconds, setStartSeconds] = useState<number>(0);
+    const [startOffsets, setStartOffsets] = useState<{ [key: string]: number }>({});
+    const timeInputRef = useRef<HTMLInputElement>(null); // ★追加: input要素への参照用
 
     const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
 
-    const handlePlay = () => {
+    const handlePlay = async () => {
         if (!targetDate || !targetTime) {
             alert("日付と時刻を指定してください");
             return;
@@ -24,7 +25,25 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
         const [hours, minutes] = targetTime.split(':').map(Number);
         const totalSeconds = hours * 3600 + minutes * 60;
 
-        setStartSeconds(totalSeconds);
+        // 各カメラごとにAPIからオフセットを取得し、正確なシーク位置を計算する
+        const offsets: { [key: string]: number } = {};
+        for (const camera of cameras) {
+            try {
+                const res = await fetch(`/api/cameras/record/${camera.id}/${dateStr}/info`);
+                if (res.ok) {
+                    const data = await res.json();
+                    // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
+                    offsets[camera.id] = Math.max(0, totalSeconds - data.offset_seconds);
+                } else {
+                    offsets[camera.id] = totalSeconds;
+                }
+            } catch (err) {
+                console.error("Failed to fetch offset", err);
+                offsets[camera.id] = totalSeconds;
+            }
+        }
+
+        setStartOffsets(offsets);
         // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる
         setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);
     };
@@ -48,7 +67,19 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                 <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">時刻</label>
                     {/* 背景色と文字色を明示的に指定して視認性を改善 */}
-                    <input type="time" className="p-2 border rounded bg-white text-gray-900" value={targetTime} onChange={e => setTargetTime(e.target.value)} />
+                    <input
+                        type="time"
+                        ref={timeInputRef} // ★追加
+                        className="p-2 border rounded bg-white text-gray-900"
+                        value={targetTime}
+                        onChange={e => {
+                            setTargetTime(e.target.value);
+                            // ★追加: 値が入力されたらフォーカスを外し、プルダウンを強制的に閉じる
+                            if (e.target.value) {
+                                timeInputRef.current?.blur();
+                            }
+                        }}
+                    />
                 </div>
                 <button className="px-8 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold transition-colors" onClick={handlePlay}>
                     再生開始
@@ -76,7 +107,7 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                                     streamUrl={`/api/cameras/record/${camera.id}/${playUrlSuffix}`}
                                     autoPlay={true}
                                     muted={true}
-                                    startPosition={startSeconds}
+                                    startPosition={startOffsets[camera.id] || 0}
                                     onVideoRef={(el) => { videoRefs.current[camera.id] = el; }}
                                 />
                             ) : (
