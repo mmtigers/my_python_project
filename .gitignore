@@ -21,6 +21,8 @@ logs/
 # Temporary
 tmp/
 *.done
+*.ts
+*.m3u8
 
 # Database
 *.db
