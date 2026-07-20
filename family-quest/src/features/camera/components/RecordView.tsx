@@ -25,7 +25,8 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
         const totalSeconds = hours * 3600 + minutes * 60;
 
         setStartSeconds(totalSeconds);
-        setPlayUrlSuffix(`${dateStr}/playlist.m3u8`);
+        // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる
+        setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);
     };
 
     const handleGlobalPlay = () => Object.values(videoRefs.current).forEach(v => v?.play());
@@ -41,11 +42,13 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
             <div className="bg-gray-200 p-4 rounded-lg mb-4 flex flex-wrap gap-4 items-end shadow">
                 <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">日付</label>
-                    <input type="date" className="p-2 border rounded" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
+                    {/* 背景色と文字色を明示的に指定して視認性を改善 */}
+                    <input type="date" className="p-2 border rounded bg-white text-gray-900" value={targetDate} onChange={e => setTargetDate(e.target.value)} />
                 </div>
                 <div>
                     <label className="block text-sm font-bold text-gray-700 mb-1">時刻</label>
-                    <input type="time" className="p-2 border rounded" value={targetTime} onChange={e => setTargetTime(e.target.value)} />
+                    {/* 背景色と文字色を明示的に指定して視認性を改善 */}
+                    <input type="time" className="p-2 border rounded bg-white text-gray-900" value={targetTime} onChange={e => setTargetTime(e.target.value)} />
                 </div>
                 <button className="px-8 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold transition-colors" onClick={handlePlay}>
                     再生開始
