@@ -4,6 +4,7 @@ import subprocess
 import time
 import urllib.parse
 import glob
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from core.logger import setup_logging
 import config
@@ -15,9 +16,13 @@ except ImportError:
 
 logger = setup_logging("camera_service")
 
-HLS_LIVE_DIR = "/tmp/home_system_cameras/live"
-HLS_VOD_DIR = "/tmp/home_system_cameras/vod"
+# /tmp (RAM) から物理ストレージ（プロジェクト直下のdataディレクトリ）へ変更
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")
+HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")
+
 _active_processes: Dict[str, subprocess.Popen] = {}
+_active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
 
 def init_output_dir(base_dir: str, camera_id: str) -> str:
@@ -142,6 +147,14 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
     playlist_path = os.path.join(cam_dir, f"record_{target_date}.m3u8")
 
     # キャッシュ：既にその日のプレイリストが存在し、ファイル更新日時が新しければそれを返す
+    process_key = f"{cam_id}_{target_date}"
+
+    # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中の場合は処理をスキップ
+    if process_key in _active_vod_processes and _active_vod_processes[process_key].poll() is None:
+        logger.info(f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成は既に実行中です。")
+        return playlist_path
+
+    # キャッシュ：既にその日のプレイリストが存在し、過去の日付であればそれを返す
     if os.path.exists(playlist_path) and target_date != datetime.now().strftime("%Y%m%d"):
         return playlist_path
 
@@ -166,6 +179,14 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
         playlist_path
     ]
 
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 2. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
+    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    _active_vod_processes[process_key] = process
+    
+    # 3. フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する
+    for _ in range(10):
+        if os.path.exists(playlist_path):
+            break
+        time.sleep(0.5)
     
     return playlist_path if os.path.exists(playlist_path) else None
