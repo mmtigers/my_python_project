@@ -1,11 +1,11 @@
-import datetime
 import os
+import sys
 import subprocess
 import time
 import urllib.parse
 import glob
 from typing import Optional, Dict, Any, List
-from core.logger import get_logger
+from core.logger import setup_logging
 import config
 
 try:
@@ -13,7 +13,7 @@ try:
 except ImportError:
     ONVIFCamera = Any
 
-logger = get_logger(__name__)
+logger = setup_logging("camera_service")
 
 HLS_LIVE_DIR = "/tmp/home_system_cameras/live"
 HLS_VOD_DIR = "/tmp/home_system_cameras/vod"
@@ -25,30 +25,33 @@ def init_output_dir(base_dir: str, camera_id: str) -> str:
     os.makedirs(cam_dir, exist_ok=True)
     return cam_dir
 
+def find_wsdl_path() -> Optional[str]:
+    """camera_monitor.pyと同等のWSDL動的探索ロジック"""
+    for path in sys.path:
+        if not os.path.exists(path):
+            continue
+        candidate_standard = os.path.join(path, 'onvif', 'wsdl')
+        candidate_direct = os.path.join(path, 'wsdl')
+        for candidate in [candidate_standard, candidate_direct]:
+            if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
+                return candidate
+    return None
+
 def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
-    """ONVIF経由でRTSP URLを動的に取得する（キャッシュ付き）"""
     cam_id = cam_conf['id']
     if cam_id in _rtsp_cache:
         return _rtsp_cache[cam_id]
 
-    # devices.json に rtsp_url が直接定義されている場合（玄関カメラ等）はそれを利用
     if cam_conf.get("rtsp_url"):
         _rtsp_cache[cam_id] = cam_conf["rtsp_url"]
         return cam_conf["rtsp_url"]
 
-    # 定義がない場合はONVIFで動的取得
     try:
-        wsdl_path = os.path.join(config.BASE_DIR, 'wsdl')
-        # wsdlディレクトリが存在しない場合は、onvifライブラリのデフォルトパスを使用
-        if not os.path.exists(wsdl_path):
-            import sys
-            for path in sys.path:
-                candidate = os.path.join(path, 'onvif', 'wsdl')
-                if os.path.exists(candidate):
-                    wsdl_path = candidate
-                    break
+        wsdl_path = find_wsdl_path()
+        if not wsdl_path:
+            raise FileNotFoundError("WSDL directory not found in sys.path")
 
-        mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('password', ''), wsdl_dir=wsdl_path)
+        mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('pass', ''), wsdl_dir=wsdl_path)
         media_service = mycam.create_media_service()
         profiles = media_service.GetProfiles()
         token = profiles[0].token
@@ -60,9 +63,12 @@ def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
         res = media_service.GetStreamUri(req)
         uri = res.Uri
 
-        # 認証情報をURLに埋め込む
         parsed = urllib.parse.urlparse(uri)
-        auth_uri = f"rtsp://{cam_conf['user']}:{cam_conf.get('password', '')}@{parsed.netloc}{parsed.path}?{parsed.query}"
+        # URLセーフな形式にエンコード（safe='' を指定してすべての記号をエンコード）
+        safe_user = urllib.parse.quote(cam_conf['user'], safe='')
+        safe_pass = urllib.parse.quote(cam_conf.get('pass', ''), safe='')
+        
+        auth_uri = f"rtsp://{safe_user}:{safe_pass}@{parsed.netloc}{parsed.path}?{parsed.query}"
         
         _rtsp_cache[cam_id] = auth_uri
         return auth_uri
@@ -71,31 +77,29 @@ def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
         raise
 
 def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
-    """ライブ用のHLSストリームを nice 値付きで生成する"""
     cam_id = cam_conf['id']
     cam_dir = init_output_dir(HLS_LIVE_DIR, cam_id)
     playlist_path = os.path.join(cam_dir, "stream.m3u8")
 
-    # 既にプロセスが存在し、稼働中の場合
     if cam_id in _active_processes and _active_processes[cam_id].poll() is None:
         return playlist_path
 
     try:
         rtsp_url = get_rtsp_url(cam_conf)
     except Exception:
-        # RTSP URLが取得できない場合はフォールバック
         return ""
 
-    logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始")
+    # ログ出力時のマスク処理もエンコード済みのパスワード文字列を対象とする
+    safe_pass_for_log = urllib.parse.quote(cam_conf.get('pass', ''), safe='')
+    logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始 (RTSP: {rtsp_url.replace(safe_pass_for_log, '***')})")
 
-    # CPU負荷を抑えるため nice -n 15 を付与、-c:v copy で再エンコードなし
     cmd = [
         "nice", "-n", "15",
         "ffmpeg", "-y",
         "-rtsp_transport", "tcp",
         "-i", rtsp_url,
         "-c:v", "copy",
-        "-an",  # 音声不要の要件に準拠
+        "-an",
         "-f", "hls",
         "-hls_time", "2",
         "-hls_list_size", "5",
@@ -103,7 +107,9 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
         playlist_path
     ]
 
-    process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # FFmpegのエラーを追えるようにログファイルへ出力
+    log_file = open(os.path.join(cam_dir, "ffmpeg.log"), "w")
+    process = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
     _active_processes[cam_id] = process
     return playlist_path
 
