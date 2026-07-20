@@ -118,6 +118,28 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
     _active_processes[cam_id] = process
     return playlist_path
 
+def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
+        """指定日の最初の録画ファイルの開始時刻を0時からの秒数で返す"""
+        nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
+        nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
+        search_dir = os.path.join(nvr_base_dir, nas_folder_name)
+        
+        search_pattern = os.path.join(search_dir, f"{target_date}_*.mp4")
+        mp4_files = sorted(glob.glob(search_pattern))
+        
+        if not mp4_files:
+            return 0
+            
+        try:
+            first_file = os.path.basename(mp4_files[0])
+            time_str = first_file.split("_")[1].split(".")[0]
+            dt = datetime.strptime(time_str, "%H%M%S")
+            return dt.hour * 3600 + dt.minute * 60 + dt.second
+        except Exception as e:
+            logger.warning(f"Failed to parse start offset for {cam_conf['name']}: {e}")
+            return 0
+
+
 def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:
     """
     指定された日付の録画ファイル群を結合し、シームレス再生用のVODプレイリストを生成する
@@ -152,16 +174,45 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
     # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中の場合は処理をスキップ
     if process_key in _active_vod_processes and _active_vod_processes[process_key].poll() is None:
         logger.info(f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成は既に実行中です。")
-        return playlist_path
+        # フロントエンドが500エラー（FileResponseのクラッシュ）にならないよう、生成を待機する
+        for _ in range(10):
+            if os.path.exists(playlist_path):
+                return playlist_path
+            time.sleep(0.5)
+        return None
 
     # キャッシュ：既にその日のプレイリストが存在し、過去の日付であればそれを返す
-    if os.path.exists(playlist_path) and target_date != datetime.now().strftime("%Y%m%d"):
-        return playlist_path
 
-    # ffmpegのconcatファイルリスト作成
+    # ffmpegのconcatファイルリスト作成 (ffconcat version 1.0 を使用しタイムラインを補正)
     with open(concat_file_path, "w", encoding="utf-8") as f:
-        for mp4 in mp4_files:
+        f.write("ffconcat version 1.0\n")
+        
+        for i in range(len(mp4_files)):
+            mp4 = mp4_files[i]
             f.write(f"file '{mp4}'\n")
+            
+            # 次のファイルとの時間差を計算し、動画の再生時間(duration)を明示する
+            duration = 600.0  # 正常な10分ファイル(600秒)をデフォルトとする
+            
+            if i < len(mp4_files) - 1:
+                try:
+                    # 20260720_210200.mp4 のようなファイル名から時刻部分(210200)を抽出
+                    curr_time_str = os.path.basename(mp4).split("_")[1].split(".")[0]
+                    next_time_str = os.path.basename(mp4_files[i+1]).split("_")[1].split(".")[0]
+                    
+                    dt_curr = datetime.strptime(curr_time_str, "%H%M%S")
+                    dt_next = datetime.strptime(next_time_str, "%H%M%S")
+                    
+                    diff_seconds = (dt_next - dt_curr).total_seconds()
+                    
+                    # 0秒以上かつ異常値(12時間以上等)でなければ、実時間差をdurationに設定
+                    # これにより、ファイルが欠落している隙間は最終フレームで停止したまま時間を稼ぐ
+                    if 0 < diff_seconds <= 43200:
+                        duration = diff_seconds
+                except Exception as e:
+                    logger.warning(f"Failed to calculate duration for {mp4}: {e}")
+            
+            f.write(f"duration {duration}\n")
 
     logger.info(f"🎞️ [{cam_conf['name']}] {target_date} の録画プレイリスト生成中...")
 
@@ -178,6 +229,8 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
         "-hls_playlist_type", "vod",
         playlist_path
     ]
+
+    
 
     # 2. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
