@@ -400,6 +400,15 @@ if 'NVR_RECORD_DIR' not in locals():
     NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
 # ==========================================
+# Retention / Cleanup Settings
+# ==========================================
+# NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
+RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
+# DBバックアップの保持日数
+DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))
+DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
+
+# ==========================================
 # 7. Sound & Family
 # ==========================================
 SOUND_DIR: str = os.path.join(ASSETS_DIR, "sounds")
