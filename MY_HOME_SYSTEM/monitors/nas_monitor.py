@@ -3,8 +3,9 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Tuple
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -137,6 +138,63 @@ class NasMonitor:
             logger.error(f"Disk usage check error: {e}")
             return None
 
+    def cleanup_old_files(self, directory: str, retention_days: int, extensions: Tuple[str, ...]) -> Dict[str, Any]:
+        """指定ディレクトリ配下を再帰的に走査し、保持日数を超えた対象拡張子のファイルを削除する。"""
+        result: Dict[str, Any] = {"deleted_count": 0, "freed_gb": 0.0}
+
+        if not directory or not os.path.isdir(directory):
+            return result
+
+        cutoff = time.time() - (retention_days * 86400)
+        freed_bytes = 0
+
+        for root, _dirs, files in os.walk(directory):
+            for name in files:
+                if not name.lower().endswith(extensions):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        size = os.path.getsize(path)
+                        os.remove(path)
+                        result["deleted_count"] += 1
+                        freed_bytes += size
+                except OSError as e:
+                    logger.warning(f"Cleanup skip (error): {path}: {e}")
+
+        result["freed_gb"] = round(freed_bytes / (2**30), 2)
+        return result
+
+    def run_retention_cleanup(self) -> None:
+        """保持期間を超えたNVR録画・カメラスナップショット・DBバックアップを削除する。"""
+        targets = [
+            ("NVR録画", getattr(config, "NVR_RECORD_DIR", None),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
+            ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
+            ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
+             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
+        ]
+
+        summary_lines = []
+        for label, directory, retention_days, extensions in targets:
+            if not directory:
+                continue
+            result = self.cleanup_old_files(directory, retention_days, extensions)
+            if result["deleted_count"] > 0:
+                logger.info(
+                    f"🗑️ Cleanup {label} ({directory}): "
+                    f"removed {result['deleted_count']} files, freed {result['freed_gb']} GB"
+                )
+                summary_lines.append(f"- {label}: {result['deleted_count']}件 / {result['freed_gb']}GB")
+
+        if summary_lines:
+            send_push(
+                config.LINE_USER_ID,
+                [{"type": "text", "text": "🗑️ **古いファイルの自動削除**\n" + "\n".join(summary_lines)}],
+                target="discord", channel="report"
+            )
+
     def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:
         """状態をDBに保存"""
         percent = usage['percent'] if usage else 0
@@ -198,6 +256,10 @@ class NasMonitor:
         is_full = usage['percent'] > 90
         now = datetime.now()
         is_report_time = (now.hour == 8)
+
+        # 保持期間を超えた録画・バックアップの自動削除（1日1回、レポート時刻に合わせて実行）
+        if is_report_time:
+            self.run_retention_cleanup()
 
         if not is_full and not is_report_time:
             return
