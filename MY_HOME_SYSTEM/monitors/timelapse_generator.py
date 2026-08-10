@@ -16,9 +16,6 @@ from services.notification_service import send_push
 
 logger = setup_logging("timelapse_generator")
 
-# 対象とするカメラのリスト（config.CAMERAS から取得するか、固定で指定）
-TARGET_CAMERAS = [cam["name"] for cam in config.CAMERAS] if config.CAMERAS else ["garden", "parking"]
-
 def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:
     """
     FFmpegを使用して動画ファイルからクリップを抽出する。
@@ -159,7 +156,8 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         exact_seek = (dt_naive - f_start_dt).total_seconds()
         seek_sec = str(max(0.0, exact_seek - 5.0)) # 5秒前から切り出し
 
-        text_overlay = f"drawtext=text='{dt.strftime('%Y-%m-%d %H\\:%M\\:%S')}':fontcolor=white:fontsize=24:x=w-tw-10:y=10"
+        overlay_time_str = dt.strftime('%Y-%m-%d %H\\:%M\\:%S')
+        text_overlay = f"drawtext=text='{overlay_time_str}':fontcolor=white:fontsize=24:x=w-tw-10:y=10"
         filter_complex = f"[0:v]{text_overlay},scale=-2:720,setpts=0.125*PTS[v]"
         
         cmd = [

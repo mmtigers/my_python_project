@@ -22,7 +22,8 @@ RECORD_DIR = os.path.join(PROJECT_ROOT, "data", "timelapse_records")
 os.makedirs(RECORD_DIR, exist_ok=True)
 
 # 監視対象の設定（ベースディレクトリと全カメラの定義）
-TARGET_BASE_DIR = "/mnt/nas/home_system/nvr_recordings"
+# config.NVR_RECORD_DIR を基準に解決し、環境ごとの上書きに追従する
+TARGET_BASE_DIR = getattr(config, "NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings")
 TARGET_CAMERAS = getattr(config, "TIMELAPSE_CAMERAS", {
     "entrance": os.path.join(TARGET_BASE_DIR, "entrance"),
     "garden": os.path.join(TARGET_BASE_DIR, "garden"),
