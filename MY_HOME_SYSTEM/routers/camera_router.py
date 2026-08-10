@@ -8,6 +8,23 @@ from services import camera_service
 
 router = APIRouter()
 
+
+def _resolve_segment_path(base_dir: str, camera_id: str, filename: str) -> str:
+    """
+    base_dir/camera_id/filename を解決し、パストラバーサル（`..`等）で
+    base_dir の外側に出ていないことを確認したうえで絶対パスを返す。
+    範囲外と判定された場合は 400 を送出する。
+    """
+    candidate = os.path.join(base_dir, camera_id, filename)
+    resolved_base = os.path.realpath(base_dir)
+    resolved_candidate = os.path.realpath(candidate)
+
+    if os.path.commonpath([resolved_base, resolved_candidate]) != resolved_base:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    return resolved_candidate
+
+
 @router.get("/settings")
 def get_camera_settings():
     """フロントエンドへ有効なカメラの一覧と設定を返す"""
@@ -69,12 +86,15 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 
     # .ts セグメントの要求の場合
     elif filename.endswith(".ts"):
-        base_dir = camera_service.HLS_VOD_DIR
+        cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+        if not cam_conf:
+            raise HTTPException(status_code=404, detail="Camera not found")
+
         # NASの元動画に日付フォルダは無いため、生成されたtsファイルも camera_id 直下のパスで解決する
-        segment_path = os.path.join(base_dir, camera_id, filename)
+        segment_path = _resolve_segment_path(camera_service.HLS_VOD_DIR, camera_id, filename)
         if not os.path.exists(segment_path):
             raise HTTPException(status_code=404, detail="Segment not found")
-            
+
         return FileResponse(segment_path, media_type="video/MP2T")
 
     else:
@@ -83,9 +103,12 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 @router.get("/live/{camera_id}/{segment_file}")
 def get_live_segment(camera_id: str, segment_file: str):
     """ライブのHLSセグメント（.tsファイル）を配信"""
-    base_dir = camera_service.HLS_LIVE_DIR
-    segment_path = os.path.join(base_dir, camera_id, segment_file)
+    cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+    if not cam_conf:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)
     if not os.path.exists(segment_path):
         raise HTTPException(status_code=404, detail="Segment not found")
-        
+
     return FileResponse(segment_path, media_type="video/MP2T")
