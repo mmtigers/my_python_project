@@ -69,12 +69,16 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 
     # .ts セグメントの要求の場合
     elif filename.endswith(".ts"):
+        cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+        if not cam_conf:
+            raise HTTPException(status_code=404, detail="Camera not found")
+
         base_dir = camera_service.HLS_VOD_DIR
         # NASの元動画に日付フォルダは無いため、生成されたtsファイルも camera_id 直下のパスで解決する
         segment_path = os.path.join(base_dir, camera_id, filename)
         if not os.path.exists(segment_path):
             raise HTTPException(status_code=404, detail="Segment not found")
-            
+
         return FileResponse(segment_path, media_type="video/MP2T")
 
     else:
@@ -83,9 +87,13 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 @router.get("/live/{camera_id}/{segment_file}")
 def get_live_segment(camera_id: str, segment_file: str):
     """ライブのHLSセグメント（.tsファイル）を配信"""
+    cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+    if not cam_conf:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
     base_dir = camera_service.HLS_LIVE_DIR
     segment_path = os.path.join(base_dir, camera_id, segment_file)
     if not os.path.exists(segment_path):
         raise HTTPException(status_code=404, detail="Segment not found")
-        
+
     return FileResponse(segment_path, media_type="video/MP2T")
