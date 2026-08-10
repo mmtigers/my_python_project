@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 import config
 import common
+from core.migrations import apply_pending_migrations
 
 logger = common.setup_logging("init_db")
 
@@ -552,6 +553,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_device_records_device_ts
             ON device_records (device_id, timestamp DESC)
         ''')
+
+        # バージョン管理されたマイグレーション (migrations/ 配下) を適用
+        apply_pending_migrations(cur.connection)
 
     # 検証実行
     try:
