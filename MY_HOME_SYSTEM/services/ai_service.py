@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
+import re
 import time
 import json
 import traceback
@@ -128,6 +129,20 @@ async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -
     return f"記録完了: {msg_obj.text}"
 
 
+# AIツールからのSELECTで参照を許可するテーブル (tools_schemaのsql_query説明に記載した4テーブルのみ)
+ALLOWED_SEARCH_TABLES = {
+    config.SQLITE_TABLE_CHILD,
+    config.SQLITE_TABLE_FOOD,
+    config.SQLITE_TABLE_SHOPPING,
+    config.SQLITE_TABLE_POWER_USAGE,
+}
+
+
+def _extract_referenced_tables(sql: str) -> List[str]:
+    """SQL文中の FROM / JOIN の直後に現れるテーブル名を抽出する（簡易パーサ）"""
+    return re.findall(r"(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", sql, flags=re.IGNORECASE)
+
+
 async def tool_search_db(args: Dict[str, Any]) -> str:
     """
     [Tool] データベースから情報を検索する (読み取り専用)。
@@ -141,10 +156,19 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
     sql = args.get("sql_query")
     if not sql:
         return "SQLクエリが指定されていません"
-    
+
     # 安全対策: SELECT以外は禁止
     if not sql.strip().upper().startswith("SELECT"):
         return "エラー: データ変更操作は許可されていません。"
+
+    # 安全対策: ドキュメントに明記した許可テーブル以外への参照を禁止
+    referenced_tables = _extract_referenced_tables(sql)
+    if not referenced_tables:
+        return "エラー: 参照テーブルを特定できませんでした。"
+    disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]
+    if disallowed:
+        logger.warning(f"⚠️ search_db blocked disallowed table(s): {disallowed} (sql={sql!r})")
+        return "エラー: 許可されていないテーブルへのアクセスです。"
 
     try:
         # 読み取り専用で実行

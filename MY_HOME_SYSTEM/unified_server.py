@@ -207,7 +207,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"🔥 Global Exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "error": str(exc)}
+        content={"detail": "Internal Server Error"}
     )
 
 # --- Router Registration ---
