@@ -181,7 +181,12 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
             time.sleep(0.5)
         return None
 
-    # キャッシュ：既にその日のプレイリストが存在し、過去の日付であればそれを返す
+    # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
+    #    当日分は録画ファイルが増え続けるため、キャッシュ対象から除外し毎回最新の状態で再生成する
+    today_str = datetime.now().strftime("%Y%m%d")
+    if target_date < today_str and os.path.exists(playlist_path):
+        logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
+        return playlist_path
 
     # ffmpegのconcatファイルリスト作成 (ffconcat version 1.0 を使用しタイムラインを補正)
     with open(concat_file_path, "w", encoding="utf-8") as f:
@@ -232,11 +237,11 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
 
     
 
-    # 2. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
+    # 3. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _active_vod_processes[process_key] = process
-    
-    # 3. フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する
+
+    # 4. フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する
     for _ in range(10):
         if os.path.exists(playlist_path):
             break
