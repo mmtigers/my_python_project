@@ -43,7 +43,7 @@
 ### `LoanSimulator.__init__`
 
 * **役割**: ローンシミュレーションの初期条件（開始日、借入総額、総返済月数、初回支払額）と、2025年3月31日までの確定金利スケジュールを設定する。
-* 根拠: `__init__` (行番号: 14〜25 / 抜粋: "def **init**(self):")
+* 根拠: `__init__` (行番号: 14〜27 / 抜粋: "def **init**(self):")
 
 
 * **引数/リクエスト**: `self` (インスタンス自身)
@@ -51,73 +51,73 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `__init__` (行番号: 14〜25 / 抜粋: "self.FIXED_RATES = [")
+* 根拠: `__init__` (行番号: 23 / 抜粋: "self.FIXED_RATES = [")
 
 
 * **副作用**: 自身のインスタンス変数（START_DATE, TOTAL_AMOUNT, TOTAL_MONTHS, INITIAL_PAYMENT, FIXED_RATES）の初期化。
-* 根拠: `__init__` (行番号: 15〜25 / 抜粋: "self.START_DATE = date(2024, 6")
+* 根拠: `__init__` (行番号: 16〜27 / 抜粋: "self.START_DATE = date(2024, 6")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `__init__` (行番号: 14〜25 / 抜粋: "def **init**(self):")
+* 根拠: `__init__` (行番号: 14〜27 / 抜粋: "def **init**(self):")
 
 
 
 ### `LoanSimulator._get_scheduled_rate`
 
 * **役割**: 指定された日付時点での適用金利を判定する。確定スケジュールに該当する場合はその金利を返し、2025年4月1日以降の場合は経過年数と指定された上昇率に基づいて算出し、上限キャップを適用した数値を返す。
-* 根拠: `_get_scheduled_rate` (行番号: 27〜45 / 抜粋: "def _get_scheduled_rate(self, ")
+* 根拠: `_get_scheduled_rate` (行番号: 29〜52 / 抜粋: "def _get_scheduled_rate(self, ")
 
 
 * **引数/リクエスト**:
 * `current_date`: date (判定対象の日付)
 * `future_rise_rate`: float (デフォルト値 0.0、2025年4月以降の年次金利上昇率)
 * `max_rate`: float (デフォルト値 2.0、計算金利の上限値)
-* 根拠: `_get_scheduled_rate` (行番号: 27 / 抜粋: "def _get_scheduled_rate(self, ")
+* 根拠: `_get_scheduled_rate` (行番号: 29 / 抜粋: "def _get_scheduled_rate(self, ")
 
 
 * **戻り値/レスポンス**: float (計算された金利)
-* 根拠: `_get_scheduled_rate` (行番号: 33, 44, 45 / 抜粋: "return min(calculated_rate, ma")
+* 根拠: `_get_scheduled_rate` (行番号: 36, 50, 52 / 抜粋: "return min(calculated_rate, ma")
 
 
 * **副作用**: なし
-* 根拠: `_get_scheduled_rate` (行番号: 27〜45 / 抜粋: "return base_rate")
+* 根拠: `_get_scheduled_rate` (行番号: 29〜52 / 抜粋: "return base_rate")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `_get_scheduled_rate` (行番号: 27〜45 / 抜粋: "def _get_scheduled_rate(self, ")
+* 根拠: `_get_scheduled_rate` (行番号: 29〜52 / 抜粋: "def _get_scheduled_rate(self, ")
 
 
 
 ### `LoanSimulator.calculate_schedule`
 
 * **役割**: 月ごとのローン残高、支払額、利息、元金、金利の推移を計算しリスト化する。5年（60ヶ月）ごとの支払額再計算、および前回支払額の125%を上限とする激変緩和措置を適用してDataFrameに変換して返す。
-* 根拠: `calculate_schedule` (行番号: 47〜88 / 抜粋: "def calculate_schedule(self, f")
+* 根拠: `calculate_schedule` (行番号: 54〜109 / 抜粋: "def calculate_schedule(self, f")
 
 
 * **引数/リクエスト**:
 * `future_rise_rate`: float (デフォルト値 0.05)
 * `max_future_rate`: float (デフォルト値 2.0)
-* 根拠: `calculate_schedule` (行番号: 47 / 抜粋: "def calculate_schedule(self, f")
+* 根拠: `calculate_schedule` (行番号: 54 / 抜粋: "def calculate_schedule(self, f")
 
 
 * **戻り値/レスポンス**: pandas.DataFrame (月ごとのローン推移データ)
-* 根拠: `calculate_schedule` (行番号: 88 / 抜粋: "return pd.DataFrame(schedule)")
+* 根拠: `calculate_schedule` (行番号: 109 / 抜粋: "return pd.DataFrame(schedule)")
 
 
 * **副作用**: なし
-* 根拠: `calculate_schedule` (行番号: 47〜88 / 抜粋: "def calculate_schedule(self, f")
+* 根拠: `calculate_schedule` (行番号: 54〜109 / 抜粋: "def calculate_schedule(self, f")
 
 
 * **エラーハンドリング**: 残り月数が0以下になった場合のゼロ除算回避（if remaining_months > 0）および金利0時の分岐処理。例外の明示的なキャッチ（try-except）はなし。
-* 根拠: `calculate_schedule` (行番号: 62〜65 / 抜粋: "if remaining_months > 0:")
+* 根拠: `calculate_schedule` (行番号: 72〜76 / 抜粋: "if remaining_months > 0:")
 
 
 
 ### `AssetSimulator.calculate_hybrid_growth`
 
 * **役割**: 指定期間において、投資部分（複利で増加）と現金部分（単利・加算のみ）の合計資産推移をシミュレーションし、DataFrameとして返す静的メソッド。
-* 根拠: `calculate_hybrid_growth` (行番号: 91〜115 / 抜粋: "def calculate_hybrid_growth(st")
+* 根拠: `calculate_hybrid_growth` (行番号: 112〜144 / 抜粋: "def calculate_hybrid_growth(st")
 
 
 * **引数/リクエスト**:
@@ -128,42 +128,42 @@
 * `monthly_total_save`: 数値型 (毎月の総積立額)
 * `invest_ratio`: 数値型 (総積立額のうち投資へ回す割合[%])
 * `annual_return`: float (想定年利回り[%])
-* 根拠: `calculate_hybrid_growth` (行番号: 92 / 抜粋: "def calculate_hybrid_growth(st")
+* 根拠: `calculate_hybrid_growth` (行番号: 113 / 抜粋: "def calculate_hybrid_growth(st")
 
 
 * **戻り値/レスポンス**: pandas.DataFrame (月ごとの資産推移データ)
-* 根拠: `calculate_hybrid_growth` (行番号: 115 / 抜粋: "return pd.DataFrame(schedule)")
+* 根拠: `calculate_hybrid_growth` (行番号: 144 / 抜粋: "return pd.DataFrame(schedule)")
 
 
 * **副作用**: なし
-* 根拠: `calculate_hybrid_growth` (行番号: 92〜115 / 抜粋: "return pd.DataFrame(schedule)")
+* 根拠: `calculate_hybrid_growth` (行番号: 112〜144 / 抜粋: "return pd.DataFrame(schedule)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `calculate_hybrid_growth` (行番号: 92〜115 / 抜粋: "def calculate_hybrid_growth(st")
+* 根拠: `calculate_hybrid_growth` (行番号: 112〜144 / 抜粋: "def calculate_hybrid_growth(st")
 
 
 
 ### `render_simulation_tab`
 
 * **役割**: Streamlitを使用してシミュレーション設定用のサイドバーUIを提供し、入力値をもとに各シミュレータを呼び出す。結果を結合して「ローンと資産の逆転日（X-Day）」を算出し、各種KPIカード、資産とローンの推移グラフ、返済額内訳グラフ、詳細データテーブルを画面にレンダリングする。
-* 根拠: `render_simulation_tab` (行番号: 119〜252 / 抜粋: "def render_simulation_tab():")
+* 根拠: `render_simulation_tab` (行番号: 148〜332 / 抜粋: "def render_simulation_tab():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `render_simulation_tab` (行番号: 119 / 抜粋: "def render_simulation_tab():")
+* 根拠: `render_simulation_tab` (行番号: 148 / 抜粋: "def render_simulation_tab():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `render_simulation_tab` (行番号: 119〜252 / 抜粋: "def render_simulation_tab():")
+* 根拠: `render_simulation_tab` (行番号: 148〜332 / 抜粋: "def render_simulation_tab():")
 
 
 * **副作用**: Streamlitの関数群（`st.markdown`, `st.sidebar`, `st.plotly_chart` など）を呼び出し、Web画面のDOMを書き換える副作用がある。
-* 根拠: `render_simulation_tab` (行番号: 120, 192, 226 等 / 抜粋: "st.plotly_chart(fig, use_conta")
+* 根拠: `render_simulation_tab` (行番号: 149, 255, 302 等 / 抜粋: "st.plotly_chart(fig, use_conta")
 
 
 * **エラーハンドリング**: `df_merged["balance"]` のNaN値をゼロ埋めしてエラーを防止。例外の明示的なキャッチ（try-except）はなし。
-* 根拠: `render_simulation_tab` (行番号: 153 / 抜粋: "df_merged["balance"] = df_merg")
+* 根拠: `render_simulation_tab` (行番号: 190 / 抜粋: "df_merged["balance"] = df_merg")
 
 
 

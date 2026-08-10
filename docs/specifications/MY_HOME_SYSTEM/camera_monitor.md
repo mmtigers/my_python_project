@@ -21,91 +21,96 @@
 | `os`, `sys`, `time`, `socket`, `subprocess`, `uuid`, `platform` | 標準ライブラリ | システム操作、プロセス実行、パス解決、通信等 | 根拠: `import os` など (行番号: 2〜14 / 抜粋: "import os") |
 | `asyncio` | 標準ライブラリ | 非同期イベントループの実行 | 根拠: `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
 | `logging` | 標準ライブラリ | ログ出力（直接使用せず外部モジュール経由用） | 根拠: `import logging` (行番号: 7 / 抜粋: "import logging") |
+| `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得（`process_camera_event`のエラーログに使用） | 根拠: `import traceback` (行番号: 9 / 抜粋: "import traceback") |
+| `signal` | 標準ライブラリ | SIGINT/SIGTERM受信時のクリーンアップハンドラ登録 | 根拠: `import signal` (行番号: 10 / 抜粋: "import signal") |
+| `requests` | 外部ライブラリ | インポートされているが、`requests.auth.HTTPDigestAuth`経由での間接的な利用が主（本体の直接呼び出しはなし） | 根拠: `import requests` (行番号: 12 / 抜粋: "import requests") |
 | `datetime` (dt_class, timedelta) | 標準ライブラリ | 時刻取得、時間差計算、タイムゾーン処理 | 根拠: `from datetime import datetime ...` (行番号: 15 / 抜粋: "from datetime import datetime") |
 | `typing` | 標準ライブラリ | 型アノテーション | 根拠: `from typing import Optional...` (行番号: 16 / 抜粋: "from typing import Optional") |
 | `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | 複数カメラ監視プロセスの並行実行 | 根拠: `from concurrent.futures...` (行番号: 17 / 抜粋: "from concurrent.futures import") |
+| `http.client.RemoteDisconnected` | 標準ライブラリ | `monitor_single_camera`の一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from http.client import RemoteDisconnected` (行番号: 18 / 抜粋: "from http.client import RemoteDisconnected") |
+| `urllib3.exceptions.ProtocolError` | 外部ライブラリ | 同上、一時的ネットワーク障害の判定に使用する例外クラス | 根拠: `from urllib3.exceptions import ProtocolError` (行番号: 19 / 抜粋: "from urllib3.exceptions import ProtocolError") |
 | `requests.auth.HTTPDigestAuth` | 外部ライブラリ | ONVIFサービスのDigest認証 | 根拠: `from requests.auth import...` (行番号: 20 / 抜粋: "from requests.auth import") |
 | `onvif` (ONVIFCamera, ONVIFService, ONVIFError) | 外部ライブラリ | ONVIFカメラとの通信およびイベント購読 | 根拠: `from onvif import ONVIFCamera...` (行番号: 24 / 抜粋: "from onvif import ONVIFCamera") |
 | `zeep.exceptions` | 外部ライブラリ | SOAP通信時の例外捕捉 | 根拠: `import zeep.exceptions` (行番号: 26 / 抜粋: "import zeep.exceptions") |
 | `lxml.etree` | 外部ライブラリ | ONVIFから返却されるXMLのパース | 根拠: `from lxml import etree` (行番号: 27 / 抜粋: "from lxml import etree") |
-| `config` | ローカルモジュール | 設定値（カメラ情報、パス、定数）の取得 | 根拠: `import config` (行番号: 35 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: `from core.logger import...` (行番号: 36 / 抜粋: "from core.logger import setup") |
-| `core.database.save_log_generic` | ローカルモジュール | 動体検知時のデータベース保存 | 根拠: `from core.database import...` (行番号: 37 / 抜粋: "from core.database import save_") |
-| `services.notification_service.send_push` | ローカルモジュール | 障害時の管理者へのプッシュ通知送信 | 根拠: `from services.notification_service...` (行番号: 38 / 抜粋: "from services.notification") |
+| `config` | ローカルモジュール | 設定値（カメラ情報、パス、定数）の取得 | 根拠: `import config` (行番号: 38 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化 | 根拠: `from core.logger import...` (行番号: 39 / 抜粋: "from core.logger import setup") |
+| `core.database.save_log_generic` | ローカルモジュール | 動体検知時のデータベース保存 | 根拠: `from core.database import...` (行番号: 40 / 抜粋: "from core.database import save_") |
+| `services.notification_service.send_push` | ローカルモジュール | 障害時の管理者へのプッシュ通知送信 | 根拠: `from services.notification_service...` (行番号: 41 / 抜粋: "from services.notification") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 486 / 抜粋: "for cam in config.CAMERAS") |
-| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 290 / 抜粋: "save_log_generic("device_records") |
-| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push(config.LINE_USER_ID...` (行番号: 425 / 抜粋: "send_push(") |
-| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 154 / 抜粋: "nas_folder = cam_conf.get(") |
+| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "for cam in config.CAMERAS") |
+| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 362 / 抜粋: "save_log_generic("device_records") |
+| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push(config.LINE_USER_ID...` (行番号: 559 / 抜粋: "send_push(") |
+| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 181 / 抜粋: "nas_folder = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `cleanup_handler`
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
-* 根拠: `cleanup_handler` (行番号: 62〜72 / 抜粋: "def cleanup_handler(signum:")
+* 根拠: `cleanup_handler` (行番号: 70〜82 / 抜粋: "def cleanup_handler(signum:")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
-* 根拠: `cleanup_handler` (行番号: 62 / 抜粋: "def cleanup_handler(signum: int,")
+* 根拠: `cleanup_handler` (行番号: 70 / 抜粋: "def cleanup_handler(signum: int,")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `cleanup_handler` (行番号: 62 / 抜粋: "-> None:")
+* 根拠: `cleanup_handler` (行番号: 70 / 抜粋: "-> None:")
 
 
 * **副作用**: ONVIFのUnsubscribeリクエスト送信、プロセス終了(`os._exit(0)`)。
-* 根拠: `os._exit` (行番号: 72 / 抜粋: "os._exit(0)")
+* 根拠: `os._exit` (行番号: 82 / 抜粋: "os._exit(0)")
 
 
 * **エラーハンドリング**: Unsubscribe時の例外(`Exception`)は無視(`pass`)される。
-* 根拠: `except Exception` (行番号: 69 / 抜粋: "except Exception: pass")
+* 根拠: `except Exception` (行番号: 79 / 抜粋: "except Exception:")
 
 
 
 ### `is_host_reachable`
 
 * **役割**: OSのpingコマンドを実行し、指定されたIPアドレスの到達性を確認する。
-* 根拠: `is_host_reachable` (行番号: 77〜90 / 抜粋: "def is_host_reachable(ip:")
+* 根拠: `is_host_reachable` (行番号: 87〜103 / 抜粋: "def is_host_reachable(ip:")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `is_host_reachable` (行番号: 77 / 抜粋: "def is_host_reachable(ip: str)")
+* 根拠: `is_host_reachable` (行番号: 87 / 抜粋: "def is_host_reachable(ip: str)")
 
 
 * **戻り値/レスポンス**: `bool` (到達可能ならTrue)
-* 根拠: `is_host_reachable` (行番号: 77 / 抜粋: "-> bool:")
+* 根拠: `is_host_reachable` (行番号: 87 / 抜粋: "-> bool:")
 
 
 * **副作用**: 外部コマンド（ping）の実行。
-* 根拠: `subprocess.run` (行番号: 83 / 抜粋: "subprocess.run(cmd,")
+* 根拠: `subprocess.run` (行番号: 94 / 抜粋: "subprocess.run(cmd,")
 
 
 * **エラーハンドリング**: タイムアウトや実行例外発生時はFalseを返す。
-* 根拠: `except` (行番号: 88 / 抜粋: "except (subprocess.TimeoutExpired")
+* 根拠: `except` (行番号: 101 / 抜粋: "except (subprocess.TimeoutExpired")
 
 
 
 ### `find_wsdl_path`
 
 * **役割**: `sys.path` を走査し、ONVIFのWSDLファイル (`devicemgmt.wsdl`) が存在するディレクトリパスを探索する。
-* 根拠: `find_wsdl_path` (行番号: 93〜101 / 抜粋: "def find_wsdl_path() ->")
+* 根拠: `find_wsdl_path` (行番号: 105〜115 / 抜粋: "def find_wsdl_path() ->")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `find_wsdl_path` (行番号: 93 / 抜粋: "def find_wsdl_path() ->")
+* 根拠: `find_wsdl_path` (行番号: 105 / 抜粋: "def find_wsdl_path() ->")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかったディレクトリパス、なければNone)
-* 根拠: `find_wsdl_path` (行番号: 93 / 抜粋: "-> Optional[str]:")
+* 根拠: `find_wsdl_path` (行番号: 105 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: なし
-* 根拠: `find_wsdl_path` (行番号: 93〜101 / 抜粋: "return candidate")
+* 根拠: `find_wsdl_path` (行番号: 114 / 抜粋: "return candidate")
 
 
 * **エラーハンドリング**: なし
@@ -113,207 +118,207 @@
 ### `perform_emergency_diagnosis`
 
 * **役割**: 指定されたIPの特定ポート（80, 2020）へのTCP接続テストを行い、ポートの状態（Open/Closed）をログに出力する。
-* 根拠: `perform_emergency_diagnosis` (行番号: 105〜120 / 抜粋: "def perform_emergency_diagnosis")
+* 根拠: `perform_emergency_diagnosis` (行番号: 119〜135 / 抜粋: "def perform_emergency_diagnosis")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `perform_emergency_diagnosis` (行番号: 105 / 抜粋: "(ip: str) -> Dict[int, bool]:")
+* 根拠: `perform_emergency_diagnosis` (行番号: 119 / 抜粋: "(ip: str) -> Dict[int, bool]:")
 
 
 * **戻り値/レスポンス**: `Dict[int, bool]` (ポート番号と接続可否の辞書)
-* 根拠: `perform_emergency_diagnosis` (行番号: 105 / 抜粋: "-> Dict[int, bool]:")
+* 根拠: `perform_emergency_diagnosis` (行番号: 119 / 抜粋: "-> Dict[int, bool]:")
 
 
 * **副作用**: TCPソケットの作成と接続試行。
-* 根拠: `sock.connect_ex` (行番号: 112 / 抜粋: "res = sock.connect_ex((ip,")
+* 根拠: `sock.connect_ex` (行番号: 127 / 抜粋: "res = sock.connect_ex((ip,")
 
 
 * **エラーハンドリング**: 接続エラー時は例外をキャッチし、エラー文字列をログ用メッセージに追記する。
-* 根拠: `except Exception` (行番号: 116 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 132 / 抜粋: "except Exception as e:")
 
 
 
 ### `check_camera_time`
 
 * **役割**: カメラのシステム時刻(UTC)を取得し、稼働サーバーの現在時刻(JST想定)との差分が5分(300秒)以上あるかチェックして警告を出す。
-* 根拠: `check_camera_time` (行番号: 122〜147 / 抜粋: "def check_camera_time(devicemgmt")
+* 根拠: `check_camera_time` (行番号: 137〜167 / 抜粋: "def check_camera_time(devicemgmt")
 
 
 * **引数/リクエスト**: `devicemgmt: Any` (ONVIFデバイス管理サービス), `cam_name: str` (カメラ名)
-* 根拠: `check_camera_time` (行番号: 122 / 抜粋: "(devicemgmt: Any, cam_name: str)")
+* 根拠: `check_camera_time` (行番号: 137 / 抜粋: "(devicemgmt: Any, cam_name: str)")
 
 
 * **戻り値/レスポンス**: `bool` (時刻ズレが5分以内の場合、またはチェック失敗時はFail-SoftのためTrue、ズレが大きい場合はFalse)
-* 根拠: `check_camera_time` (行番号: 122 / 抜粋: "-> bool:")
+* 根拠: `check_camera_time` (行番号: 137 / 抜粋: "-> bool:")
 
 
 * **副作用**: `devicemgmt.GetSystemDateAndTime()` によるカメラへのAPIリクエスト。
-* 根拠: `devicemgmt.GetSystemDateAndTime()` (行番号: 125 / 抜粋: "sys_dt = devicemgmt.GetSystemDa")
+* 根拠: `devicemgmt.GetSystemDateAndTime()` (行番号: 140 / 抜粋: "sys_dt = devicemgmt.GetSystemDa")
 
 
 * **エラーハンドリング**: XML/Dateパースエラーなどの例外が発生した場合はエラーログを出力し、True（Fail-Soft）を返す。
-* 根拠: `except Exception` (行番号: 140 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 159 / 抜粋: "except Exception as e:")
 
 
 
 ### `capture_snapshot_from_nvr`
 
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
-* 根拠: `capture_snapshot_from_nvr` (行番号: 149〜196 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 169〜232 / 抜粋: "def capture_snapshot_from_nvr(")
 
 
 * **引数/リクエスト**: `cam_conf: dict` (カメラ設定), `target_time: dt_class = None` (対象時刻・現在未使用)
-* 根拠: `capture_snapshot_from_nvr` (行番号: 149 / 抜粋: "(cam_conf: dict, target_time: dt")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 169 / 抜粋: "(cam_conf: dict, target_time: dt")
 
 
 * **戻り値/レスポンス**: `Optional[bytes]` (画像バイト列、または失敗時はNone)
-* 根拠: `capture_snapshot_from_nvr` (行番号: 149 / 抜粋: "-> Optional[bytes]:")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 169 / 抜粋: "-> Optional[bytes]:")
 
 
 * **副作用**: NASフォルダの走査(`glob.glob`)、一時ファイルの作成(`uuid`使用)と削除、外部コマンド(`ffmpeg`)の実行。
-* 根拠: `subprocess.run(cmd` (行番号: 180 / 抜粋: "subprocess.run(cmd,")
+* 根拠: `subprocess.run(cmd` (行番号: 214 / 抜粋: "subprocess.run(cmd,")
 
 
 * **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。
-* 根拠: `except subprocess.TimeoutExpired` (行番号: 187 / 抜粋: "except subprocess.TimeoutExpire")
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 222 / 抜粋: "except subprocess.TimeoutExpire")
 
 
 
 ### `save_image_from_stream`
 
 * **役割**: `capture_snapshot_from_nvr` を呼び出してスナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。
-* 根拠: `save_image_from_stream` (行番号: 198〜222 / 抜粋: "def save_image_from_stream(")
+* 根拠: `save_image_from_stream` (行番号: 235〜261 / 抜粋: "def save_image_from_stream(")
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
-* 根拠: `save_image_from_stream` (行番号: 198 / 抜粋: "(cam_name: str, event_type:")
+* 根拠: `save_image_from_stream` (行番号: 235 / 抜粋: "(cam_name: str, event_type:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (保存されたファイルのパス、失敗時はNone)
-* 根拠: `save_image_from_stream` (行番号: 198 / 抜粋: "-> Optional[str]:")
+* 根拠: `save_image_from_stream` (行番号: 235 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: ファイルシステムへの画像ファイル書き込み。
-* 根拠: `f.write(image_data)` (行番号: 218 / 抜粋: "f.write(image_data)")
+* 根拠: `f.write(image_data)` (行番号: 257 / 抜粋: "f.write(image_data)")
 
 
 * **エラーハンドリング**: ファイル保存時の例外をキャッチし、ログ出力してNoneを返す。
-* 根拠: `except Exception as e` (行番号: 220 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 259 / 抜粋: "except Exception as e:")
 
 
 
 ### `close_camera_session`
 
 * **役割**: ONVIFカメラインスタンスの内部セッション（Zeepやtransport）を強制的にクローズする。
-* 根拠: `close_camera_session` (行番号: 224〜233 / 抜粋: "def close_camera_session(")
+* 根拠: `close_camera_session` (行番号: 263〜273 / 抜粋: "def close_camera_session(")
 
 
 * **引数/リクエスト**: `camera_instance: Any` (ONVIFカメラインスタンス)
-* 根拠: `close_camera_session` (行番号: 224 / 抜粋: "(camera_instance: Any):")
+* 根拠: `close_camera_session` (行番号: 263 / 抜粋: "(camera_instance: Any):")
 
 
 * **戻り値/レスポンス**: 型ヒントなし（暗黙的にNone）
-* 根拠: `close_camera_session` (行番号: 224 / 抜粋: "def close_camera_session(")
+* 根拠: `close_camera_session` (行番号: 263 / 抜粋: "def close_camera_session(")
 
 
 * **副作用**: HTTPセッション(`requests.Session`)の解放。
-* 根拠: `session.close()` (行番号: 229 / 抜粋: "camera_instance.devicemgmt.trans")
+* 根拠: `session.close()` (行番号: 269 / 抜粋: "camera_instance.devicemgmt.trans")
 
 
 * **エラーハンドリング**: 全ての例外をキャッチし、警告ログ（debugレベル）を出力。
-* 根拠: `except Exception` (行番号: 232 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 272 / 抜粋: "except Exception as e:")
 
 
 
 ### `force_close_session`
 
 * **役割**: さまざまなパターンのオブジェクト（ONVIFService, ONVIFCamera, zeep_client等）からHTTPセッションを探し出して強制的にクローズし、ファイル記述子を解放する。
-* 根拠: `force_close_session` (行番号: 235〜255 / 抜粋: "def force_close_session(")
+* 根拠: `force_close_session` (行番号: 275〜298 / 抜粋: "def force_close_session(")
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
-* 根拠: `force_close_session` (行番号: 235 / 抜粋: "(service_obj: Any) -> None:")
+* 根拠: `force_close_session` (行番号: 275 / 抜粋: "(service_obj: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `force_close_session` (行番号: 235 / 抜粋: "-> None:")
+* 根拠: `force_close_session` (行番号: 275 / 抜粋: "-> None:")
 
 
 * **副作用**: HTTPセッション(`requests.Session`)の解放。
-* 根拠: `session.close()` (行番号: 245 / 抜粋: "service_obj.zeep_client.tran")
+* 根拠: `session.close()` (行番号: 287 / 抜粋: "service_obj.zeep_client.tran")
 
 
 * **エラーハンドリング**: 全ての例外をキャッチし、警告ログ（debugレベル）を出力。
-* 根拠: `except Exception` (行番号: 254 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 297 / 抜粋: "except Exception as e:")
 
 
 
 ### `process_camera_event`
 
 * **役割**: ONVIFイベントメッセージをパースし、動体検知イベントであるかを判定。クールダウン判定後、DB保存とスナップショット保存を実行する。
-* 根拠: `process_camera_event` (行番号: 257〜304 / 抜粋: "def process_camera_event(")
+* 根拠: `process_camera_event` (行番号: 300〜370 / 抜粋: "def process_camera_event(")
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
-* 根拠: `process_camera_event` (行番号: 257 / 抜粋: "(msg: Any, cam_conf: Dict")
+* 根拠: `process_camera_event` (行番号: 300 / 抜粋: "(msg: Any, cam_conf: Dict")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `process_camera_event` (行番号: 257 / 抜粋: "-> None:")
+* 根拠: `process_camera_event` (行番号: 300 / 抜粋: "-> None:")
 
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
-* 根拠: `save_log_generic` (行番号: 295 / 抜粋: "save_log_generic("device_record")
+* 根拠: `save_log_generic` (行番号: 362 / 抜粋: "save_log_generic("device_record")
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。
-* 根拠: `except Exception as e` (行番号: 299 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 365 / 抜粋: "except Exception as e:")
 
 
 
 ### `monitor_single_camera`
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、ポート切り替え、セッション更新などを制御するメインループ。
-* 根拠: `monitor_single_camera` (行番号: 307〜481 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 373〜616 / 抜粋: "def monitor_single_camera(")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]` (対象カメラ設定)
-* 根拠: `monitor_single_camera` (行番号: 307 / 抜粋: "(cam_conf: Dict[str, Any]) -> ")
+* 根拠: `monitor_single_camera` (行番号: 373 / 抜粋: "(cam_conf: Dict[str, Any]) -> ")
 
 
 * **戻り値/レスポンス**: `None` (無限ループ)
-* 根拠: `monitor_single_camera` (行番号: 307 / 抜粋: "-> None:")
+* 根拠: `monitor_single_camera` (行番号: 373 / 抜粋: "-> None:")
 
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
-* 根拠: `send_push` (行番号: 424 / 抜粋: "send_push(")
+* 根拠: `send_push` (行番号: 559 / 抜粋: "send_push(")
 
 
 * **エラーハンドリング**: 一時的障害（`RemoteDisconnected`等）と、致命的障害（その他例外）を分けて処理。連続エラー回数に基づくExponential Backoff（最大3600秒）、特定条件（5回・12の倍数回失敗時）での管理者への通知を行う。
-* 根拠: `except (RemoteDisconnected...` (行番号: 396 / 抜粋: "except (RemoteDisconnected, Pro")
+* 根拠: `except (RemoteDisconnected...` (行番号: 515 / 抜粋: "except (RemoteDisconnected, Pro")
 
 
 
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 483〜487 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 618〜622 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 483 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 618 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `main` (行番号: 483 / 抜粋: "-> None:")
+* 根拠: `main` (行番号: 618 / 抜粋: "-> None:")
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 485 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 621 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 484 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 619 / 抜粋: "if not WSDL_DIR: return logger")
 
 
 
@@ -423,9 +428,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 486 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 56 / 抜粋: "getattr(config, 'MOTION_COOLD") |
-| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 295 / 抜粋: "save_log_generic("device_record") |
-| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 424 / 抜粋: "send_push(") |
+| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 63 / 抜粋: "getattr(config, 'MOTION_COOLD") |
+| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 362 / 抜粋: "save_log_generic("device_record") |
+| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 559 / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 
