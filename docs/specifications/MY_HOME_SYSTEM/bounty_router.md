@@ -30,10 +30,10 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | 実装が提供されていないため、ログの出力先やフォーマットが不明（`common.py`に依存のため要確認）。 | 根拠: `logger` (行番号: 10 / 抜粋: "logger = common.setup_logging...") |
-| `common.get_db_cursor` | 実装が提供されていないため、接続先DBの種類、トランザクションの仕様（`commit=True`時の排他制御やロールバック挙動）が不明（`common.py`に依存のため要確認）。 | 根拠: `get_db_cursor` (行番号: 73 / 抜粋: "with common.get_db_cursor() as...") |
-| `common.get_now_iso` | 実装が提供されていないため、タイムゾーンや正確なISOフォーマットの形式が不明（`common.py`に依存のため要確認）。 | 根拠: `get_now_iso` (行番号: 133 / 抜粋: "now_iso = common.get_now_iso()") |
-| `bounties` テーブル | DDLが提供されていないため、各カラムの厳密な型や制約が不明（DBスキーマに依存のため要確認）。 | 根拠: `SQLクエリ` (行番号: 76 / 抜粋: "SELECT * FROM bounties ORDER B...") |
-| `quest_users` テーブル | DDLが提供されていないため、各カラムの厳密な型や制約が不明（DBスキーマに依存のため要確認）。 | 根拠: `SQLクエリ` (行番号: 226 / 抜粋: "UPDATE quest_users SET gold = ...") |
+| `common.get_db_cursor` | 実装が提供されていないため、接続先DBの種類、トランザクションの仕様（`commit=True`時の排他制御やロールバック挙動）が不明（`common.py`に依存のため要確認）。 | 根拠: `get_db_cursor` (行番号: 101 / 抜粋: "with common.get_db_cursor() as...") |
+| `common.get_now_iso` | 実装が提供されていないため、タイムゾーンや正確なISOフォーマットの形式が不明（`common.py`に依存のため要確認）。 | 根拠: `get_now_iso` (行番号: 157 / 抜粋: "now_iso = common.get_now_iso()") |
+| `bounties` テーブル | DDLが提供されていないため、各カラムの厳密な型や制約が不明（DBスキーマに依存のため要確認）。 | 根拠: `SQLクエリ` (行番号: 104 / 抜粋: "SELECT * FROM bounties ORDER B...") |
+| `quest_users` テーブル | DDLが提供されていないため、各カラムの厳密な型や制約が不明（DBスキーマに依存のため要確認）。 | 根拠: `SQLクエリ` (行番号: 255 / 抜粋: "UPDATE quest_users SET gold = ...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -58,232 +58,232 @@
 
 
 * **プロパティ**: `title` (str), `description` (Optional[str]), `reward_gold` (int), `target_type` (str), `target_user_id` (Optional[str]), `created_by` (str)
-* 根拠: クラス変数定義 (行番号: 19〜26 / 抜粋: "title: str...")
+* 根拠: クラス変数定義 (行番号: 19〜27 / 抜粋: "title: str...")
 
 
 
 ### `BountyCreate.parse_reward_gold` (Validator)
 
 * **役割**: 入力された `reward_gold` を数値に変換し、負の数は0、10,000を超える場合は10,000に丸める。数値として解釈できない場合は0を返す。
-* 根拠: `parse_reward_gold` (行番号: 28〜48 / 抜粋: "def parse_reward_gold(cls, v):...")
+* 根拠: `parse_reward_gold` (行番号: 31〜55 / 抜粋: "def parse_reward_gold(cls, v):...")
 
 
 * **引数/リクエスト**: `v` (任意の型)
-* 根拠: メソッド引数 (行番号: 30 / 抜粋: "def parse_reward_gold(cls, v):")
+* 根拠: メソッド引数 (行番号: 33 / 抜粋: "def parse_reward_gold(cls, v):")
 
 
 * **戻り値/レスポンス**: `int` (0〜10,000の整数)
-* 根拠: 戻り値 (行番号: 44, 48 / 抜粋: "return int(val)")
+* 根拠: 戻り値 (行番号: 50 / 抜粋: "return int(val)")
 
 
 * **副作用**: なし
-* 根拠: メソッド内ロジック (行番号: 30〜48 / 抜粋: "try: val = float(v)...")
+* 根拠: メソッド内ロジック (行番号: 37〜39 / 抜粋: "try: val = float(v)...")
 
 
 * **エラーハンドリング**: `ValueError`, `TypeError` をキャッチし、例外発生時は `0` を返す。
-* 根拠: 例外処理 (行番号: 46〜48 / 抜粋: "except (ValueError, TypeError)...")
+* 根拠: 例外処理 (行番号: 52〜55 / 抜粋: "except (ValueError, TypeError)...")
 
 
 
 ### `BountyAction` (Pydantic Model)
 
 * **役割**: 依頼に対するアクション（受注、完了、承認など）実行時の入力スキーマを定義する。
-* 根拠: `BountyAction` (行番号: 50 / 抜粋: "class BountyAction(BaseModel):")
+* 根拠: `BountyAction` (行番号: 57 / 抜粋: "class BountyAction(BaseModel):")
 
 
 * **プロパティ**: `user_id` (str)
-* 根拠: クラス変数定義 (行番号: 51 / 抜粋: "user_id: str")
+* 根拠: クラス変数定義 (行番号: 58 / 抜粋: "user_id: str")
 
 
 
 ### `BountyResponse` (Pydantic Model)
 
 * **役割**: 依頼情報を返却する際のレスポンススキーマを定義する。
-* 根拠: `BountyResponse` (行番号: 53 / 抜粋: "class BountyResponse(BaseMode...")
+* 根拠: `BountyResponse` (行番号: 60 / 抜粋: "class BountyResponse(BaseMode...")
 
 
 
 ### `is_target_match` (関数)
 
 * **役割**: 指定されたユーザーIDが、募集対象の条件（ALL, USER, ADULTS, CHILDREN）に一致するかを判定する。
-* 根拠: `is_target_match` (行番号: 68〜77 / 抜粋: "def is_target_match(user_id: s...")
+* 根拠: `is_target_match` (行番号: 78〜88 / 抜粋: "def is_target_match(user_id: s...")
 
 
 * **引数/リクエスト**: `user_id` (str), `target_type` (str), `target_user_id` (Optional[str])
-* 根拠: 関数引数 (行番号: 68 / 抜粋: "def is_target_match(user_id: s...")
+* 根拠: 関数引数 (行番号: 78 / 抜粋: "def is_target_match(user_id: s...")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: 関数定義 (行番号: 68 / 抜粋: "-> bool:")
+* 根拠: 関数定義 (行番号: 78 / 抜粋: "-> bool:")
 
 
 * **副作用**: なし
-* 根拠: 関数内ロジック (行番号: 69〜77 / 抜粋: "if target_type == 'ALL':...")
+* 根拠: 関数内ロジック (行番号: 80〜88 / 抜粋: "if target_type == 'ALL':...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内ロジック (行番号: 69〜77 / 抜粋: "if target_type == 'ALL':...")
+* 根拠: 関数内ロジック (行番号: 80〜88 / 抜粋: "if target_type == 'ALL':...")
 
 
 
 ### `get_bounties` (エンドポイント)
 
 * **役割**: 掲示板に表示すべき依頼一覧（自分が作成したもの、自分が受注したもの、自分に向けられた募集中のもの）を取得し、表示用フラグ（`is_mine`, `is_assigned_to_me`, `can_accept`）を付与して返却する。
-* 根拠: `get_bounties` (行番号: 81〜125 / 抜粋: "def get_bounties(user_id: str ...")
+* 根拠: `get_bounties` (行番号: 92〜148 / 抜粋: "def get_bounties(user_id: str ...")
 
 
 * **引数/リクエスト**: `user_id` (str: Queryパラメータ)
-* 根拠: 関数引数 (行番号: 82 / 抜粋: "def get_bounties(user_id: str ...")
+* 根拠: 関数引数 (行番号: 93 / 抜粋: "def get_bounties(user_id: str ...")
 
 
 * **戻り値/レスポンス**: `List[BountyResponse]`
-* 根拠: デコレータ定義 (行番号: 81 / 抜粋: "response_model=List[BountyResp...")
+* 根拠: デコレータ定義 (行番号: 92 / 抜粋: "response_model=List[BountyResp...")
 
 
 * **副作用**: DBからのデータ読み取り（`bounties` テーブル全件取得）。
-* 根拠: DBクエリ (行番号: 92 / 抜粋: "rows = cur.execute("SELECT * F...")
+* 根拠: DBクエリ (行番号: 104 / 抜粋: "rows = cur.execute("SELECT * F...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内ロジック (行番号: 90〜125 / 抜粋: "with common.get_db_cursor() as...")
+* 根拠: 関数内ロジック (行番号: 101〜148 / 抜粋: "with common.get_db_cursor() as...")
 
 
 
 ### `create_bounty` (エンドポイント)
 
 * **役割**: 新しい依頼をDBに作成する。
-* 根拠: `create_bounty` (行番号: 127〜145 / 抜粋: "def create_bounty(bounty: Boun...")
+* 根拠: `create_bounty` (行番号: 150〜172 / 抜粋: "def create_bounty(bounty: Boun...")
 
 
 * **引数/リクエスト**: `bounty` (BountyCreate)
-* 根拠: 関数引数 (行番号: 128 / 抜粋: "def create_bounty(bounty: Boun...")
+* 根拠: 関数引数 (行番号: 151 / 抜粋: "def create_bounty(bounty: Boun...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "created"}`)
-* 根拠: 戻り値 (行番号: 145 / 抜粋: "return {"status": "created"}")
+* 根拠: 戻り値 (行番号: 172 / 抜粋: "return {"status": "created"}")
 
 
 * **副作用**: DBへのデータ書き込み（`bounties` テーブルへのINSERT）、ロギング。
-* 根拠: DBクエリ及びロガー (行番号: 134〜143 / 抜粋: "INSERT INTO bounties ( title, ...")
+* 根拠: DBクエリ及びロガー (行番号: 159〜170 / 抜粋: "INSERT INTO bounties ( title, ...")
 
 
 * **エラーハンドリング**: `bounty.reward_gold < 0` の場合、HTTP 400エラーを送出する。
-* 根拠: 例外処理 (行番号: 130 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理 (行番号: 153〜154 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
 ### `accept_bounty` (エンドポイント)
 
 * **役割**: 指定された依頼を受注状態（`TAKEN`）に更新し、受注者（`assignee_id`）を登録する。
-* 根拠: `accept_bounty` (行番号: 147〜178 / 抜粋: "def accept_bounty(bounty_id: i...")
+* 根拠: `accept_bounty` (行番号: 174〜205 / 抜粋: "def accept_bounty(bounty_id: i...")
 
 
 * **引数/リクエスト**: `bounty_id` (int), `action` (BountyAction)
-* 根拠: 関数引数 (行番号: 148 / 抜粋: "def accept_bounty(bounty_id: i...")
+* 根拠: 関数引数 (行番号: 175 / 抜粋: "def accept_bounty(bounty_id: i...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "taken", "assignee_id": action.user_id}`)
-* 根拠: 戻り値 (行番号: 178 / 抜粋: "return {"status": "taken", "as...")
+* 根拠: 戻り値 (行番号: 205 / 抜粋: "return {"status": "taken", "as...")
 
 
 * **副作用**: DBからのデータ読み取り、DBへのデータ書き込み（`bounties` テーブルのUPDATE）、ロギング。
-* 根拠: DBクエリ及びロガー (行番号: 167〜176 / 抜粋: "UPDATE bounties SET status = '...")
+* 根拠: DBクエリ及びロガー (行番号: 194〜203 / 抜粋: "UPDATE bounties SET status = '...")
 
 
 * **エラーハンドリング**: レコード不在時(404)、ステータスがOPEN以外時(409)、依頼主と一致時(400)、対象外ユーザー時(403)、排他制御による更新失敗時(409)に `HTTPException` を送出する。
-* 根拠: 例外処理群 (行番号: 153〜174 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理群 (行番号: 180〜201 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
 ### `complete_bounty` (エンドポイント)
 
 * **役割**: 受注者が依頼の完了報告を行い、ステータスを承認待ち（`PENDING_APPROVAL`）に更新する。
-* 根拠: `complete_bounty` (行番号: 181〜196 / 抜粋: "def complete_bounty(bounty_id:...")
+* 根拠: `complete_bounty` (行番号: 208〜224 / 抜粋: "def complete_bounty(bounty_id:...")
 
 
 * **引数/リクエスト**: `bounty_id` (int), `action` (BountyAction)
-* 根拠: 関数引数 (行番号: 182 / 抜粋: "def complete_bounty(bounty_id:...")
+* 根拠: 関数引数 (行番号: 209 / 抜粋: "def complete_bounty(bounty_id:...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "pending_approval"}`)
-* 根拠: 戻り値 (行番号: 196 / 抜粋: "return {"status": "pending_app...")
+* 根拠: 戻り値 (行番号: 224 / 抜粋: "return {"status": "pending_app...")
 
 
 * **副作用**: DBへのデータ書き込み（`bounties` テーブルのUPDATE）、ロギング。
-* 根拠: DBクエリ及びロガー (行番号: 185〜194 / 抜粋: "UPDATE bounties SET status = '...")
+* 根拠: DBクエリ及びロガー (行番号: 213〜222 / 抜粋: "UPDATE bounties SET status = '...")
 
 
 * **エラーハンドリング**: 更新件数が0件（ステータス不整合または権限なし）の場合、HTTP 400エラーを送出する。
-* 根拠: 例外処理 (行番号: 191 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理 (行番号: 219〜220 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
 ### `approve_bounty` (エンドポイント)
 
 * **役割**: 依頼主が完了報告を承認し、ステータスを完了（`COMPLETED`）に更新し、受注者の所持ゴールドを増加させる。
-* 根拠: `approve_bounty` (行番号: 198〜231 / 抜粋: "def approve_bounty(bounty_id: ...")
+* 根拠: `approve_bounty` (行番号: 226〜261 / 抜粋: "def approve_bounty(bounty_id: ...")
 
 
 * **引数/リクエスト**: `bounty_id` (int), `action` (BountyAction)
-* 根拠: 関数引数 (行番号: 199 / 抜粋: "def approve_bounty(bounty_id: ...")
+* 根拠: 関数引数 (行番号: 227 / 抜粋: "def approve_bounty(bounty_id: ...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "completed", "reward_paid": reward}`)
-* 根拠: 戻り値 (行番号: 231 / 抜粋: "return {"status": "completed",...")
+* 根拠: 戻り値 (行番号: 261 / 抜粋: "return {"status": "completed",...")
 
 
 * **副作用**: DB読み取り、DBデータ書き込み（`bounties` テーブルのUPDATE、`quest_users` テーブルのUPDATE）、ロギング。
-* 根拠: DBクエリ群 (行番号: 216〜229 / 抜粋: "UPDATE bounties SET status = '..." 及び "UPDATE quest_users SET gold = ...")
+* 根拠: DBクエリ群 (行番号: 243〜258 / 抜粋: "UPDATE bounties SET status = '..." 及び "UPDATE quest_users SET gold = ...")
 
 
 * **エラーハンドリング**: レコード不在時(404)、ステータスがPENDING_APPROVAL以外時(400)、依頼主以外が実行時(403)に `HTTPException` を送出する。
-* 根拠: 例外処理群 (行番号: 204〜211 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理群 (行番号: 232〜239 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
 ### `delete_bounty` (エンドポイント)
 
 * **役割**: 依頼を取り下げ、レコードを物理削除する。
-* 根拠: `delete_bounty` (行番号: 233〜252 / 抜粋: "def delete_bounty(bounty_id: i...")
+* 根拠: `delete_bounty` (行番号: 263〜283 / 抜粋: "def delete_bounty(bounty_id: i...")
 
 
 * **引数/リクエスト**: `bounty_id` (int), `user_id` (str: Queryパラメータ)
-* 根拠: 関数引数 (行番号: 234 / 抜粋: "def delete_bounty(bounty_id: i...")
+* 根拠: 関数引数 (行番号: 264 / 抜粋: "def delete_bounty(bounty_id: i...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "deleted"}`)
-* 根拠: 戻り値 (行番号: 252 / 抜粋: "return {"status": "deleted"}")
+* 根拠: 戻り値 (行番号: 283 / 抜粋: "return {"status": "deleted"}")
 
 
 * **副作用**: DBからのデータ削除（`bounties` テーブルのDELETE）、ロギング。
-* 根拠: DBクエリ及びロガー (行番号: 247〜250 / 抜粋: "cur.execute("DELETE FROM bount...")
+* 根拠: DBクエリ及びロガー (行番号: 279〜281 / 抜粋: "cur.execute("DELETE FROM bount...")
 
 
 * **エラーハンドリング**: レコード不在時(404)、依頼主以外が実行時(403)、ステータスがOPEN以外時(400)に `HTTPException` を送出する。
-* 根拠: 例外処理群 (行番号: 238〜244 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理群 (行番号: 269〜276 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
 ### `resign_bounty` (エンドポイント)
 
 * **役割**: 受注者が依頼の受注を辞退し、ステータスを `OPEN` に戻す。
-* 根拠: `resign_bounty` (行番号: 254〜275 / 抜粋: "def resign_bounty(bounty_id: i...")
+* 根拠: `resign_bounty` (行番号: 285〜306 / 抜粋: "def resign_bounty(bounty_id: i...")
 
 
 * **引数/リクエスト**: `bounty_id` (int), `action` (BountyAction)
-* 根拠: 関数引数 (行番号: 255 / 抜粋: "def resign_bounty(bounty_id: i...")
+* 根拠: 関数引数 (行番号: 286 / 抜粋: "def resign_bounty(bounty_id: i...")
 
 
 * **戻り値/レスポンス**: `dict` (`{"status": "resigned"}`)
-* 根拠: 戻り値 (行番号: 275 / 抜粋: "return {"status": "resigned"}")
+* 根拠: 戻り値 (行番号: 306 / 抜粋: "return {"status": "resigned"}")
 
 
 * **副作用**: DBへのデータ書き込み（`bounties` テーブルのUPDATE）、ロギング。
-* 根拠: DBクエリ及びロガー (行番号: 267〜273 / 抜粋: "UPDATE bounties SET status = '...")
+* 根拠: DBクエリ及びロガー (行番号: 298〜304 / 抜粋: "UPDATE bounties SET status = '...")
 
 
 * **エラーハンドリング**: レコード不在時(404)、ステータスがTAKEN以外または受注者以外が実行時(400)に `HTTPException` を送出する。
-* 根拠: 例外処理群 (行番号: 259〜263 / 抜粋: "raise HTTPException(status_cod...")
+* 根拠: 例外処理群 (行番号: 291〜295 / 抜粋: "raise HTTPException(status_cod...")
 
 
 
@@ -356,8 +356,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | DB接続処理、トランザクション制御の厳密な仕様、現在時刻取得の実装詳細を確認するため。 | `import common`, `common.get_db_cursor()`, `common.get_now_iso()` (行番号: 6, 73, 133) |
-| 高 | DBスキーマ定義ファイル（`schema.sql`等） | `bounties`テーブル、`quest_users`テーブルの正確なデータ型、制約（NOT NULL、外部キー等）を確認するため。 | SQLクエリ内のテーブル名 (行番号: 76, 226) |
+| 高 | `common.py` | DB接続処理、トランザクション制御の厳密な仕様、現在時刻取得の実装詳細を確認するため。 | `import common`, `common.get_db_cursor()`, `common.get_now_iso()` (行番号: 6, 101, 157) |
+| 高 | DBスキーマ定義ファイル（`schema.sql`等） | `bounties`テーブル、`quest_users`テーブルの正確なデータ型、制約（NOT NULL、外部キー等）を確認するため。 | SQLクエリ内のテーブル名 (行番号: 104, 255) |
 | 中 | `config.py` | インポートされているが使用箇所がないため、モジュール初期化時の副作用等がないか確認するため。 | `import config` (行番号: 7) |
 
 ## 8. 保守上の注意点
