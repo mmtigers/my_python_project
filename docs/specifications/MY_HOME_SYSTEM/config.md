@@ -13,6 +13,10 @@
 * 根拠: [環境変数読み込み処理] (行番号取得不可 / 抜粋: `ENV: str = os.getenv("ENV"`)
 
 
+* SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照。未設定時は検証をスキップする後方互換設計)。
+* 根拠: [環境変数読み込み処理] (抜粋: `SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")`)
+
+
 * ロガーの初期化設定を行う。
 * 根拠: [ロガー設定処理] (行番号取得不可 / 抜粋: `logger = logging.getLogger`)
 
