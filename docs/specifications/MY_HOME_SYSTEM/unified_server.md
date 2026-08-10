@@ -37,12 +37,14 @@
 | `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
 | `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
 | `fastapi.exceptions` | 外部パッケージ | リクエスト検証例外（未使用だが有） | 根拠: `[RequestValidationError]` (行番号: 18 / 抜粋: "from fastapi.exceptions import ") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動と設定取得 | 根拠: `[uvicorn]` (行番号: 254 / 抜粋: "import uvicorn") |
-| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`等)の取得 | 根拠: `[config]` (行番号: 24 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 25 / 抜粋: "from core.logger import setup_l") |
-| `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 26 / 抜粋: "from services import sensor_ser") |
-| `routers.*` | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 29 / 抜粋: "from routers import quest_route") |
-| `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 32 / 抜粋: "from handlers import line_handl") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動と設定取得 | 根拠: `[uvicorn]` (抜粋: "import uvicorn") |
+| `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 25 / 抜粋: "import sqlite3") |
+| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 27 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 28 / 抜粋: "from core.logger import setup_l") |
+| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 29 / 抜粋: "from core.migrations import apply_pending_migrations") |
+| `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 30 / 抜粋: "from services import sensor_ser") |
+| `routers.*` | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_route") |
+| `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 36 / 抜粋: "from handlers import line_handl") |
 
 ### ブラックボックスとなる外部要素
 
@@ -53,7 +55,8 @@
 | `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 100 / 抜粋: "sensor_service.cancel_all_tasks") |
 | 各ルーター (`quest`, `webhook`, `system`, `bounty`) | 各パス配下の具体的なルーティング定義が不明 | `app.include_router(...)` (行番号: 189-192 / 抜粋: "app.include_router(webhook_rout") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 80 / 抜粋: "camera_process = subprocess.Po") |
-| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 85 / 抜粋: "scheduler_process = subprocess.") |
+| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 119 / 抜粋: "scheduler_process = subprocess.") |
+| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 104 / 抜粋: "apply_pending_migrations(migration_conn)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -82,24 +85,24 @@
 
 ### `lifespan`
 
-* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にサブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
-* 根拠: `async def lifespan(app: FastA` (行番号: 75-102 / 抜粋: "async def lifespan(app: FastA")
+* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にサブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
+* 根拠: `async def lifespan(app: FastA` (行番号: 92-140 / 抜粋: "async def lifespan(app: FastA")
 
 
 * **引数/リクエスト**: `app: FastAPI`
-* 根拠: `async def lifespan(app: FastA` (行番号: 75 / 抜粋: "async def lifespan(app: FastA")
+* 根拠: `async def lifespan(app: FastA` (行番号: 92 / 抜粋: "async def lifespan(app: FastA")
 
 
 * **戻り値/レスポンス**: `AsyncGenerator[None, None]`
-* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 75 / 抜粋: "-> AsyncGenerator[None, None]:")
+* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 92 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
-* **副作用**: Uvicornロガー設定の変更、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
-* 根拠: 該当関数内処理 (行番号: 78, 80, 85, 94-98 / 抜粋: "scheduler_process.terminate()")
+* **副作用**: Uvicornロガー設定の変更、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
+* 根拠: 該当関数内処理 (行番号: 102-104, 112, 119, 132, 136 / 抜粋: "apply_pending_migrations(migration_conn)", "scheduler_process.terminate()")
 
 
-* **エラーハンドリング**: スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を補足し、フォールバック（エラーログ出力や強制kill）を実行する。
-* 根拠: `except Exception as e:` (行番号: 88-89 / 抜粋: "except Exception as e:"), `except subprocess.TimeoutExpire` (行番号: 96-97 / 抜粋: "except subprocess.TimeoutExpire")
+* **エラーハンドリング**: マイグレーション適用失敗時の例外(`Exception`)を捕捉しエラーログ出力のうえ起動は継続する。スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を捕捉し、フォールバック（エラーログ出力や強制kill）を実行する。
+* 根拠: `except Exception as e: logger.error(f"⚠️ Migration check failed...")` (行番号: 107-108 / 抜粋: "Migration check failed"), `except Exception as e:` (行番号: 123-124 / 抜粋: "Failed to start scheduler"), `except subprocess.TimeoutExpire` (行番号: 135-136 / 抜粋: "except subprocess.TimeoutExpire")
 
 
 
@@ -128,24 +131,24 @@
 
 ### `global_exception_handler`
 
-* **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログに記録した上でステータスコード500のエラーレスポンスを返す。
-* 根拠: `async def global_exception_hand` (行番号: 182-187 / 抜粋: "async def global_exception_hand")
+* **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
+* 根拠: `async def global_exception_hand` (行番号: 218-224 / 抜粋: "async def global_exception_hand")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_hand` (行番号: 183 / 抜粋: "async def global_exception_hand")
+* 根拠: `async def global_exception_hand` (行番号: 219 / 抜粋: "async def global_exception_hand")
 
 
-* **戻り値/レスポンス**: `JSONResponse` (HTTP 500, detailとエラー内容のJSON)
-* 根拠: `return JSONResponse(...)` (行番号: 185-187 / 抜粋: "return JSONResponse( status_c")
+* **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
+* 根拠: `return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})` (行番号: 221-224 / 抜粋: "content={"detail": "Internal Server Error"}")
 
 
 * **副作用**: エラーログへのスタックトレース出力。
-* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 184 / 抜粋: "logger.error(f"🔥 Global Exce")
+* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 220 / 抜粋: "logger.error(f"🔥 Global Exce")
 
 
 * **エラーハンドリング**: なし（本メソッド自体が最上位の例外ハンドラ）
-* 根拠: `@app.exception_handler(Exceptio` (行番号: 182 / 抜粋: "@app.exception_handler(Exceptio")
+* 根拠: `@app.exception_handler(Exceptio` (行番号: 218 / 抜粋: "@app.exception_handler(Exceptio")
 
 
 
@@ -291,8 +294,9 @@ graph TD
     App --> Endpoints
 
     subgraph "External Modules (Black Box)"
-        Config["config (QUEST_DIST_DIR)"]
+        Config["config (QUEST_DIST_DIR, SQLITE_DB_PATH)"]
         Logger["core.logger"]
+        Migrations["core.migrations (apply_pending_migrations)"]
         Sensors["services.sensor_service"]
         Routers["routers (quest, webhook, system, bounty)"]
     end
@@ -304,6 +308,7 @@ graph TD
 
     App --> Config
     Lifespan --> Sensors
+    Lifespan --> Migrations
     App --> Routers
     
     Lifespan --> Camera
