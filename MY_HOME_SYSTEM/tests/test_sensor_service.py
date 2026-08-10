@@ -47,6 +47,19 @@ class TestIsDuplicateWebhook:
         assert sensor_service.is_duplicate_webhook("mac1", "open", 100.0) is False
         assert sensor_service.is_duplicate_webhook("mac1", "close", 100.1) is False
 
+    def test_boundary_exactly_at_ttl_is_still_duplicate(self):
+        """判定は `time_passed <= DEDUPE_TTL_SECONDS` のため、ちょうどTTL経過時点は重複扱い(境界値)"""
+        assert sensor_service.is_duplicate_webhook("mac1", "open", 100.0) is False
+        assert sensor_service.is_duplicate_webhook(
+            "mac1", "open", 100.0 + sensor_service.DEDUPE_TTL_SECONDS
+        ) is True
+
+    def test_boundary_just_after_ttl_is_not_duplicate(self):
+        assert sensor_service.is_duplicate_webhook("mac1", "open", 100.0) is False
+        assert sensor_service.is_duplicate_webhook(
+            "mac1", "open", 100.0 + sensor_service.DEDUPE_TTL_SECONDS + 1e-6
+        ) is False
+
 
 @pytest.mark.asyncio
 class TestProcessSensorDataMotion:
