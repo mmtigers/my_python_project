@@ -33,6 +33,9 @@ jobs:
         export SQLITE_DB_PATH=":memory:"
         export NAS_MOUNT_POINT="./tmp_nas"  # <--- これを追加！(NASの場所を一時フォルダに変更)
         export NOTIFICATION_TARGET="none"   # <--- ついでに通知も飛ばないように設定
-        
+
         # テスト実行
-        python -m unittest discover tests
+        # 旧 `unittest discover` はpytestスタイルのテスト(@pytest.mark.asyncio等)を
+        # 収集できず、実装と乖離したテストが検知されないまま放置される問題があったため、
+        # unittest.TestCase / pytestスタイルの両方を収集できる pytest に統一する。
+        python -m pytest tests/ -v

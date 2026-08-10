@@ -21,7 +21,8 @@ def get_db_cursor(commit: bool = False):
             conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL;")
-            
+            conn.execute("PRAGMA foreign_keys=ON;")
+
             yield conn.cursor()
             
             if commit:

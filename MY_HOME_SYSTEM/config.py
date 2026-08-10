@@ -163,6 +163,11 @@ LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")
 LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
 
+# SwitchBot WebhookはLINEと異なり署名検証機構がないため、
+# 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
+# 未設定の場合は従来通り検証なし（後方互換）。
+SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+
 # Discord Webhooks
 DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")
 DISCORD_WEBHOOK_ERROR_CAM: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR_CAM")
