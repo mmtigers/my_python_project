@@ -35,7 +35,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`モジュール | `BASE_DIR`や`LINE_USER_ID`の具体的な値、およびその他の設定内容が現在のファイルからは判断不可 | 根拠: `config` (行番号: 12 / 抜粋: "import config") |
-| `core.logger` | ロギングの出力先（コンソール、ファイル等）、フォーマットなどの具体的な振る舞いが判断不可 | 根拠: `setup_logging("watchdog")` (行番号: 21 / 抜粋: "logger = setup_logging("watc...") |
+| `core.logger` | ロギングの出力先（コンソール、ファイル等）、フォーマットなどの具体的な振る舞いが判断不可 | 根拠: `setup_logging("watchdog")` (行番号: 22 / 抜粋: "logger = setup_logging("watc...") |
 | `services.notification_service` | `send_push`関数の通信先の仕様、リトライ制御の有無、フォーマット変換などの実装詳細が判断不可 | 根拠: `send_push(config.LINE_US...` (行番号: 14 / 抜粋: "from services.notification_...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -43,92 +43,92 @@
 ### `get_service_status`
 
 * **役割**: `systemctl is-active`コマンドを使用して、指定したサービスの現在のステータス文字列を取得する。
-* 根拠: `get_service_status` (行番号: 31〜42 / 抜粋: "res = subprocess.run...")
+* 根拠: `get_service_status` (行番号: 40〜54 / 抜粋: "res = subprocess.run...")
 
 
 * **引数/リクエスト**: `service_name: str`
-* 根拠: `service_name: str` (行番号: 31 / 抜粋: "def get_service_status(service...")
+* 根拠: `service_name: str` (行番号: 40 / 抜粋: "def get_service_status(service...")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `-> str:` (行番号: 31 / 抜粋: "-> str:")
+* 根拠: `-> str:` (行番号: 40 / 抜粋: "-> str:")
 
 
 * **副作用**: OSコマンド（`systemctl`）の実行。
-* 根拠: `subprocess.run(["systemctl", "is-active", service_name]` (行番号: 38〜40 / 抜粋: "res = subprocess.run...")
+* 根拠: `subprocess.run(["systemctl", "is-active", service_name]` (行番号: 48〜51 / 抜粋: "res = subprocess.run...")
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は、エラーとして文字列 `"error"` を返す。
-* 根拠: `except Exception:` (行番号: 42〜43 / 抜粋: "except Exception:\n        return "error"")
+* 根拠: `except Exception:` (行番号: 53〜54 / 抜粋: "except Exception:\n        return "error"")
 
 
 
 ### `is_process_alive`
 
 * **役割**: `pgrep -f`コマンドを使用して、指定したキーワードに合致するプロセスが起動しているかを判定する。
-* 根拠: `is_process_alive` (行番号: 45〜55 / 抜粋: "res = subprocess.run...")
+* 根拠: `is_process_alive` (行番号: 56〜67 / 抜粋: "res = subprocess.run...")
 
 
 * **引数/リクエスト**: `process_keyword: str`
-* 根拠: `process_keyword: str` (行番号: 45 / 抜粋: "def is_process_alive(process_k...")
+* 根拠: `process_keyword: str` (行番号: 56 / 抜粋: "def is_process_alive(process_k...")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `-> bool:` (行番号: 45 / 抜粋: "-> bool:")
+* 根拠: `-> bool:` (行番号: 56 / 抜粋: "-> bool:")
 
 
 * **副作用**: OSコマンド（`pgrep`）の実行。
-* 根拠: `subprocess.run(["pgrep", "-f", process_keyword]` (行番号: 50〜52 / 抜粋: "res = subprocess.run...")
+* 根拠: `subprocess.run(["pgrep", "-f", process_keyword]` (行番号: 61〜64 / 抜粋: "res = subprocess.run...")
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は `False` を返す。
-* 根拠: `except Exception:` (行番号: 54〜55 / 抜粋: "except Exception:\n        return False")
+* 根拠: `except Exception:` (行番号: 66〜67 / 抜粋: "except Exception:\n        return False")
 
 
 
 ### `check_throttling_status`
 
-* **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はエラーログと通知を行い、過去履歴のみの場合は警告ログのみ記録する。
-* 根拠: `check_throttling_status` (行番号: 57〜89 / 抜粋: "def check_throttling_status():")
+* **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はERRORレベルでログのみ記録し（後述の通り`send_push`直接呼び出しは行わない）、過去履歴のみの場合はWARNINGレベルでログを記録する。
+* 根拠: `check_throttling_status` (行番号: 69〜111 / 抜粋: "def check_throttling_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_throttling_status():` (行番号: 57 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 69 / 抜粋: "def check_throttling_status():")
 
 
 * **戻り値/レスポンス**: なし（定義なし）
-* 根拠: `def check_throttling_status():` (行番号: 57 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 69 / 抜粋: "def check_throttling_status():")
 
 
-* **副作用**: OSコマンド（`vcgencmd`）の実行、エラー時の`send_push`関数による通知送信、ログ出力。
-* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 63 / 抜粋: "result = subprocess.run...") および `send_push` (行番号: 77 / 抜粋: "send_push(config.LINE_USER...")
+* **副作用**: OSコマンド（`vcgencmd`）の実行、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
+* 根拠: `subprocess.run(['vcgencmd', 'get_throttled']` (行番号: 75 / 抜粋: "result = subprocess.run...")、`logger.error(f"⚠️ System Alert: {msg}")` (行番号: 99〜101 / 抜粋: "# 【修正点2】 core/logger.py の仕様上 logger.error だけでDiscordに自動送信されるため、\n                # send_push を削除して二重通知のスパムを防ぎます。")、`logger.warning(...)` (行番号: 105)
 
 
-* **エラーハンドリング**: コマンドが見つからない場合は `FileNotFoundError` をキャッチしてデバッグログを出力しスキップする。その他の例外はキャッチしてエラートレースをログに出力する。
-* 根拠: `except FileNotFoundError:` および `except Exception as e:` (行番号: 83〜89 / 抜粋: "except FileNotFoundError:...")
+* **エラーハンドリング**: コマンドが見つからない場合は `FileNotFoundError` をキャッチしてデバッグログを出力しスキップする。その他の例外はキャッチするが、無限ループ（監視ループからの繰り返し呼び出し）を防ぐため、意図的にエラートレースではなく例外メッセージのみをWARNINGレベルでログ出力する。
+* 根拠: `except FileNotFoundError:` (行番号: 107〜108) および `except Exception as e: # 万が一の予期せぬエラーも、無限ループを防ぐためにWARNINGに落とす` (行番号: 109〜111)
 
 
 
 ### `check_health`
 
 * **役割**: サービスとプロセスのステータスを確認し、両方が正常であればロックファイルを解除し復旧通知を送信する。異常であれば、初回は停止通知を送信してロックファイルを作成し、その後は一定時間（6時間）ごとにリマインダー通知を送信する。
-* 根拠: `check_health` (行番号: 91〜131 / 抜粋: "def check_health() -> None:")
+* 根拠: `check_health` (行番号: 113〜154 / 抜粋: "def check_health() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_health() -> None:` (行番号: 91 / 抜粋: "def check_health() -> None:")
+* 根拠: `def check_health() -> None:` (行番号: 113 / 抜粋: "def check_health() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 91 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 113 / 抜粋: "-> None:")
 
 
-* **副作用**: `get_service_status`と`is_process_alive`の呼び出し、ロックファイルの作成/更新/削除（`touch`, `unlink`）、`send_push`による通知送信、ログ出力。
-* 根拠: `LOCK_FILE.unlink()`, `LOCK_FILE.touch()`, `send_push`等 (行番号: 106, 116, 122, 126 / 抜粋: "LOCK_FILE.touch()")
+* **副作用**: `get_service_status`と`is_process_alive`の呼び出し、ロックファイルの作成/更新/削除（`touch`, `unlink`）、`send_push`による通知送信（復旧・停止・リマインダーの3パターン）、ログ出力。
+* 根拠: `LOCK_FILE.unlink()` (行番号: 131), `send_push(...MSG_RECOVERED...)` (行番号: 130), `send_push(...MSG_STOPPED...)` (行番号: 141), `send_push(...MSG_REMINDER...)` (行番号: 146), `LOCK_FILE.touch()` (行番号: 150)
 
 
 * **エラーハンドリング**: 全体で `Exception` をキャッチし、例外発生時はエラートレースをログに出力する。
-* 根拠: `except Exception:` (行番号: 128〜131 / 抜粋: "except Exception:\n        err = ...")
+* 根拠: `except Exception:` (行番号: 152〜154 / 抜粋: "except Exception:\n        err = ...")
 
 
 
@@ -145,7 +145,7 @@ flowchart TD
     B -- "その他のException" --> E["エラーログ記録"]
     
     C -- "完全に正常 (val == 0)" --> F["処理完了"]
-    C -- "現在発生中 (active_issues != 0)" --> G["エラーログ記録 & 外部：send_push()"]
+    C -- "現在発生中 (active_issues != 0)" --> G["エラーログ記録のみ<br>(send_pushは削除済み。logger.error経由でDiscordへ自動転送)"]
     C -- "過去の履歴 (history_issues != 0)" --> H["警告ログ記録"]
     
     D --> I["check_health()呼び出し"]
@@ -216,8 +216,9 @@ flowchart TD
     Main --> check_health
 
     check_throttling --> Vcgencmd
-    check_throttling --> Notification
     check_throttling --> Logger
+    %% 注: check_throttling_status は send_push (Notification) を直接呼び出さない
+    %% (core/logger.py のlogger.errorフック経由でDiscordに自動転送される設計のため)
 
     check_health --> get_status
     check_health --> is_process
@@ -239,16 +240,18 @@ flowchart TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | ロックファイルの保存先である `BASE_DIR` および、通知の送信先となる `LINE_USER_ID` の実際の値を確認するため。 | 根拠: `config.BASE_DIR`, `config.LINE_USER_ID` (行番号: 20, 116 / 抜粋: "Path(config.BASE_DIR)") |
-| 高 | `services/notification_service.py` | `send_push`関数が引数の `target="discord"` や `channel="error"` 等をどのようにハンドリングしているか、APIの実態を把握するため。 | 根拠: `send_push(config.LINE_USER_...` (行番号: 116 / 抜粋: "send_push(config.LINE_USER...") |
-| 中 | `home_system.service` (systemd設定ファイル) | スクリプトが正常性の判断に使用している対象サービスが、内部でどのようにプロセスの起動・再起動を管理しているか把握するため。 | 根拠: `WATCH_SERVICE_NAME: str = ...` (行番号: 16 / 抜粋: "WATCH_SERVICE_NAME: str = ...") |
-| 中 | `unified_server.py` | 監視対象の実体となるPythonプロセス。このプロセスが停止する原因の特定や、プロセス側のヘルスチェック機能を調べるため。 | 根拠: `WATCH_PROCESS_NAME: str = ...` (行番号: 17 / 抜粋: "WATCH_PROCESS_NAME: str = ...") |
+| 高 | `config.py` | ロックファイルの保存先である `BASE_DIR` および、通知の送信先となる `LINE_USER_ID` の実際の値を確認するため。 | 根拠: `config.BASE_DIR`, `config.LINE_USER_ID` (行番号: 21, 130 / 抜粋: "Path(config.BASE_DIR)") |
+| 高 | `services/notification_service.py` | `send_push`関数が引数の `target="discord"` や `channel="error"` 等をどのようにハンドリングしているか、APIの実態を把握するため。 | 根拠: `send_push(config.LINE_USER_...` (行番号: 130, 141, 146 / 抜粋: "send_push(config.LINE_USER...") |
+| 中 | `home_system.service` (systemd設定ファイル) | スクリプトが正常性の判断に使用している対象サービスが、内部でどのようにプロセスの起動・再起動を管理しているか把握するため。 | 根拠: `WATCH_SERVICE_NAME: str = ...` (行番号: 17 / 抜粋: "WATCH_SERVICE_NAME: str = ...") |
+| 中 | `unified_server.py` | 監視対象の実体となるPythonプロセス。このプロセスが停止する原因の特定や、プロセス側のヘルスチェック機能を調べるため。 | 根拠: `WATCH_PROCESS_NAME: str = ...` (行番号: 18 / 抜粋: "WATCH_PROCESS_NAME: str = ...") |
 
 ## 8. 保守上の注意点
 
 * `get_service_status`, `is_process_alive`, `check_throttling_status`関数はOSコマンド(`systemctl`, `pgrep`, `vcgencmd`)に直接依存しているため、実行環境（Raspberry Piなど）以外のOSや環境ではエラーとなるか正しく動作しません。
 * `check_health`関数内ではファイルシステムを利用してロック制御(`watchdog_alert_sent.lock`)を行っています。`config.BASE_DIR` に指定されたディレクトリへの書き込み・削除権限がない場合、例外が発生します。
 * `check_throttling_status`内で`FileNotFoundError`以外のエラー（権限エラー等）が発生した場合、例外はキャッチされてログ出力のみが行われ、システムは停止せずに後続のプロセス監視（`check_health`）へ進みます。
+* `check_throttling_status`は、現在発生中のスロットリング異常を検知しても`send_push`を直接呼び出さない設計になっている（コード中コメント「修正点2」）。これは`core/logger.py`側で`logger.error`呼び出しがDiscordへ自動転送される仕組みがあるため、二重通知を避ける意図的な設計判断であり、バグではない。
+* `check_throttling_status`の汎用例外ハンドラは、`traceback.format_exc()`によるスタックトレース出力ではなく、例外メッセージのみを`logger.warning`で記録する（コメント「無限ループを防ぐためにWARNINGに落とす」）。一方`check_health`の汎用例外ハンドラは`traceback.format_exc()`で完全なスタックトレースを`logger.error`に出力しており、2つの関数でエラーハンドリングの粒度・ログレベルが異なる。
 
 ## 9. 不明事項一覧
 
