@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import HlsPlayer from '../../../components/ui/HlsPlayer';
 import { CameraConfig } from '../types';
 import { apiClient } from '@/lib/apiClient';
@@ -12,15 +12,30 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
     const [targetTime, setTargetTime] = useState<string>('');
     const [playUrlSuffix, setPlayUrlSuffix] = useState<string | null>(null);
     const [startOffsets, setStartOffsets] = useState<{ [key: string]: number }>({});
+    const [validationError, setValidationError] = useState<string | null>(null);
     const timeInputRef = useRef<HTMLInputElement>(null); // ★追加: input要素への参照用
 
     const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
+    // ★変更: HlsPlayer に渡す onVideoRef はカメラごとに参照を安定させる。
+    // (毎レンダー新規のインライン関数を渡すと、HlsPlayer 側の useEffect の依存配列に
+    //  onVideoRef を含めた際に再レンダーのたびに HLS.js のセットアップがやり直されてしまう)
+    const videoRefSetters = useRef<{ [key: string]: (el: HTMLVideoElement | null) => void }>({});
+    const getVideoRefSetter = useCallback((cameraId: string) => {
+        if (!videoRefSetters.current[cameraId]) {
+            videoRefSetters.current[cameraId] = (el: HTMLVideoElement | null) => {
+                videoRefs.current[cameraId] = el;
+            };
+        }
+        return videoRefSetters.current[cameraId];
+    }, []);
 
     const handlePlay = async () => {
         if (!targetDate || !targetTime) {
-            alert("日付と時刻を指定してください");
+            // ★変更: 素の alert() を廃止し、入力欄付近にインラインでエラーを表示する
+            setValidationError("日付と時刻を指定してください");
             return;
         }
+        setValidationError(null);
 
         const dateStr = targetDate.replace(/-/g, '');
         const [hours, minutes] = targetTime.split(':').map(Number);
@@ -82,6 +97,12 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                 </button>
             </div>
 
+            {validationError && (
+                <div className="text-sm text-red-400 text-center bg-red-950/40 border border-red-700 rounded px-3 py-2 mb-4">
+                    {validationError}
+                </div>
+            )}
+
             {playUrlSuffix && (
                 <div className="flex flex-wrap gap-2 mb-4 justify-center bg-gray-800 p-2 rounded">
                     <button className="px-4 py-2 bg-blue-500 text-white rounded" onClick={handleGlobalPlay}>▶ 同期再生</button>
@@ -104,7 +125,7 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                                     autoPlay={true}
                                     muted={true}
                                     startPosition={startOffsets[camera.id] || 0}
-                                    onVideoRef={(el) => { videoRefs.current[camera.id] = el; }}
+                                    onVideoRef={getVideoRefSetter(camera.id)}
                                 />
                             ) : (
                                 <div className="absolute inset-0 flex items-center justify-center text-gray-600">待機中</div>
