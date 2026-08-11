@@ -19,6 +19,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理制御およびスレッド委譲（`Lock`, `to_thread`） | `import asyncio` (抜粋: "import asyncio") |
+| `re` | 標準ライブラリ | `tool_search_db`が生成SQLから参照テーブル名を抽出するための正規表現マッチング | `import re` (行番号: 3 / 抜粋: "import re") |
 | `time` | 標準ライブラリ | レート制限における経過時間計測 | `import time` (抜粋: "import time") |
 | `json` | 標準ライブラリ | インポートされているが未使用 | `import json` (抜粋: "import json") |
 | `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得 | `import traceback` (抜粋: "import traceback") |
@@ -139,29 +140,57 @@
 
 
 
+### `ALLOWED_SEARCH_TABLES` (変数)
+
+* **役割**: `tool_search_db`がSELECTで参照することを許可するテーブル名の集合(set)。`config.SQLITE_TABLE_CHILD`, `_FOOD`, `_SHOPPING`, `_POWER_USAGE`の4テーブルのみを許可する。
+* 根拠: `ALLOWED_SEARCH_TABLES = {...}` (行番号: 132-138 / 抜粋: "ALLOWED_SEARCH_TABLES = {")
+
+
+
+### `_extract_referenced_tables` (関数)
+
+* **役割**: SQL文字列から `FROM` / `JOIN` 直後に現れるテーブル名を正規表現で抽出する簡易パーサ。
+* 根拠: `def _extract_referenced_tables(sql: str) -> List[str]:` (行番号: 141 / 抜粋: "def _extract_referenced_tables")
+
+
+* **引数/リクエスト**: `sql: str`
+* 根拠: 関数シグネチャ (行番号: 141)
+
+
+* **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト)
+* 根拠: `return re.findall(...)` (行番号: 143)
+
+
+* **副作用**: なし
+* **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）
+
+
+
 ### `tool_search_db` (関数)
 
-* **役割**: 引数で渡されたSQLクエリを用いて読み取り専用のDB検索を行い、結果を文字列で返す。
-* 根拠: `async def tool_search_db` (行番号取得不可 / 抜粋: "async def tool_search_db")
+* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。
+* 根拠: `async def tool_search_db` (行番号: 146 / 抜粋: "async def tool_search_db")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "args: Dict[str, Any]")
+* 根拠: 関数シグネチャ (行番号: 146 / 抜粋: "args: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号取得不可 / 抜粋: "return str(rows)[:2000]")
+* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号: 179 / 抜粋: "return str(rows)[:2000]")
 
 
-* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）
-* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号取得不可 / 抜粋: "common.execute_read_query, sql")
+* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行を`logger.warning`で記録。
+* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 175 / 抜粋: "common.execute_read_query, sql")
 
 
 * **エラーハンドリング**:
 * 引数 `sql_query` の存在確認。
 * クエリが "SELECT" で始まらない場合は実行をブロックしエラーメッセージを返却。
+* `_extract_referenced_tables` で参照テーブルを特定できない場合はエラーメッセージを返却。
+* 参照テーブルのいずれかが `ALLOWED_SEARCH_TABLES` に含まれない場合は、警告ログを出力しエラーメッセージを返却（実行しない）。
 * DB検索時のあらゆる例外を捕捉し、エラーメッセージとして返却。
-* 根拠: `if not sql.strip().upper().startswith("SELECT"):` / `except Exception as e:` (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 161) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 168) / `except Exception as e:` (行番号: 180)
 
 
 
@@ -267,7 +296,12 @@ flowchart TD
     CheckTool -- Yes --> IdentifyTool{ツール特定}
     IdentifyTool -- "record_child_health" --> RunHealth[ツール実行: tool_record_child_health]
     IdentifyTool -- "record_food" --> RunFood[ツール実行: tool_record_food]
-    IdentifyTool -- "search_db" --> RunSearch[ツール実行: tool_search_db]
+    IdentifyTool -- "search_db" --> CheckSelect{"SELECT文か?"}
+    CheckSelect -- No --> RunSearch[ツール実行: tool_search_db<br>エラーメッセージ返却]
+    CheckSelect -- Yes --> CheckTableAllowed{"参照テーブルは<br>ALLOWED_SEARCH_TABLESに<br>含まれるか?"}
+    CheckTableAllowed -- No --> RunSearch
+    CheckTableAllowed -- Yes --> RunSearchOk[外部：common.execute_read_query 実行]
+    RunSearchOk --> RunSearch
     IdentifyTool -- "その他" --> SetUnknownError[結果にエラー文字セット]
     
     RunHealth --> BuildFuncRes[FunctionResponse 生成]
@@ -296,6 +330,8 @@ graph TD
         tool_record_child_health
         tool_record_food
         tool_search_db
+        _extract_referenced_tables
+        ALLOWED_SEARCH_TABLES[変数: ALLOWED_SEARCH_TABLES]
         rate_limiter[Instance: rate_limiter]
         tools_schema[変数: tools_schema]
     end
@@ -335,6 +371,9 @@ graph TD
     tool_record_food --> line_service
     
     tool_search_db --> common
+    tool_search_db --> _extract_referenced_tables
+    tool_search_db --> ALLOWED_SEARCH_TABLES
+    tool_search_db --> logger
 
 ```
 
@@ -348,7 +387,10 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `tool_search_db` 内でクエリの `SELECT` 開始チェックを行っているが、それ以外のSQL構文解析やサニタイズは行われておらず、`common.execute_read_query` 側での安全確保に依存している。
+* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。ただし `_extract_referenced_tables` は正規表現による簡易パーサであり、サブクエリ内の`FROM`/`JOIN`や複雑なSQL構文を網羅的に解析するものではない点に留意。
+* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES` (行番号: 132-143, 164-171)
+
+
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。
 * `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。
 * `json` と `datetime` モジュールがインポートされているが、ファイル内で一度も使用されていない。

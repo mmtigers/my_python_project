@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/routers/webhook_router.py
 import asyncio
+import hmac
 import time
 from fastapi import APIRouter, Request, Header, HTTPException
 from linebot.v3.exceptions import InvalidSignatureError
@@ -35,8 +36,15 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)) 
 TARGET_DEVICE_TYPES = ["Contact Sensor", "Motion Sensor"]
 
 @router.post("/webhook/switchbot")
-async def switchbot_webhook(body: SwitchBotWebhookBody):
+async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     """SwitchBot Webhook受信・処理"""
+    # SwitchBotにはLINEのような署名検証機構がないため、
+    # config.SWITCHBOT_WEBHOOK_TOKEN が設定されている場合のみ、
+    # クエリパラメータ ?token=... による簡易な共有シークレット検証を行う。
+    if config.SWITCHBOT_WEBHOOK_TOKEN:
+        if not token or not hmac.compare_digest(token, config.SWITCHBOT_WEBHOOK_TOKEN):
+            raise HTTPException(status_code=401, detail="Invalid token")
+
     ctx = body.context
     mac = ctx.deviceMac
     
