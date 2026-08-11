@@ -21,6 +21,8 @@ from contextlib import closing
 
 import yt_dlp
 
+from file_utils import sanitize_filename as _shared_sanitize_filename
+
 # ==========================================
 # 0. 環境設定 & ロギング (Unified Logging)
 # ==========================================
@@ -265,8 +267,7 @@ class FileManager:
         Returns:
             str: 安全なファイル名文字列。
         """
-        safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()
-        return safe[:200].strip('. ')
+        return _shared_sanitize_filename(filename)
 
     def save(self, result: ExtractionResult) -> bool:
         """抽出結果をテキストファイルに保存する。
