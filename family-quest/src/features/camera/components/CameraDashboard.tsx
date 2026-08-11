@@ -3,6 +3,7 @@ import LiveView from './LiveView';
 import RecordView from './RecordView';
 import { CameraConfig } from '../types';
 import { Camera } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
 
 const CameraDashboard: React.FC = () => {
     const [cameras, setCameras] = useState<CameraConfig[]>([]);
@@ -11,8 +12,7 @@ const CameraDashboard: React.FC = () => {
 
     useEffect(() => {
         document.title = "ホーム監視カメラ";
-        fetch('/api/cameras/settings')
-            .then(res => res.json())
+        apiClient.get<CameraConfig[]>('/api/cameras/settings')
             .then(data => {
                 const activeCameras = data.filter((c: CameraConfig) => c.enabled);
                 activeCameras.sort((a: CameraConfig, b: CameraConfig) => a.order - b.order);

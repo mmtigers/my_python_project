@@ -10,7 +10,10 @@ interface HeaderProps {
     onPartySwitch: () => void;
     onLogSwitch: () => void;
     onTrendsSwitch: () => void; // 追加
-    onAdminOpen: () => void;
+    // ★注意: 未指定(undefined)の場合は保護者ではないユーザーとして扱い、
+    // タイトルをクリック可能にしない（クライアント側のUI上の配慮であり、
+    // セキュリティ境界ではない。バックエンド側で別途権限チェックが必要）。
+    onAdminOpen?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -26,9 +29,9 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
 
-            {/* Title Area (隠しボタン用エリア) */}
+            {/* Title Area (隠しボタン用エリア: onAdminOpenが渡された場合のみクリック可能) */}
             <div
-                className="pt-4 pb-2 text-center relative cursor-pointer"
+                className={`pt-4 pb-2 text-center relative ${onAdminOpen ? 'cursor-pointer' : ''}`}
                 onClick={onAdminOpen}
             >
                 <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: '"Press Start 2P", cursive, sans-serif' }}>

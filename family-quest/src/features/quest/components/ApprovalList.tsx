@@ -1,40 +1,25 @@
 import React from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Package } from 'lucide-react'; // Packageアイコン追加
-import { QuestHistory, User } from '@/types';
+import { QuestHistory, User, PendingInventory } from '@/types';
 import { Button } from '../../../components/ui/Button';
 import { apiClient } from '../../../lib/apiClient';
 
 type Props = {
     pendingQuests: QuestHistory[];
+    pendingItems: PendingInventory[];
     users: User[];
+    currentUser: User;
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
 };
 
-// 承認待ちアイテムの型定義
-type PendingInventory = {
-    id: number;
-    user_id: string;
-    user_name: string;
-    title: string;
-    icon: string;
-    used_at: string;
-};
-
-const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject }) => {
+const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, currentUser, onApprove, onReject }) => {
     const queryClient = useQueryClient();
 
-    // 1. アイテムの承認待ちリストを取得
-    const { data: pendingItems } = useQuery({
-        queryKey: ['pendingInventory'],
-        queryFn: () => apiClient.fetchPendingInventory(),
-        refetchInterval: 5000 // ポーリングで最新状態を維持
-    });
-
-    // 2. アイテム承認（消費）アクション
+    // アイテム承認（消費）アクション
     const consumeMutation = useMutation({
-        mutationFn: (inventoryId: number) => apiClient.consumeItem('dad', inventoryId), // 'dad'は仮。App.tsxから親IDを渡すのがベストですが一旦これで動作します
+        mutationFn: (inventoryId: number) => apiClient.consumeItem(currentUser.user_id, inventoryId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
             // 必要に応じて親のインベントリリストなども更新

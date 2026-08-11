@@ -18,6 +18,12 @@ export interface User {
     gold: number;
     equipment_id?: ID;
     role?: string;
+    // バックエンド(MY_HOME_SYSTEM)から送られてくるHP。個々のプレイヤーはダメージを
+    // 受けない仕様のため hp は常に maxHp と等しいが、maxHp 自体は
+    // calculate_max_hp(level) = level * 20 + 5 で計算される値なのでフロント側で
+    // 独自に再計算してはいけない（旧実装は誤った式で再計算していた）。
+    hp?: number;
+    maxHp?: number;
 }
 
 // クエスト情報
