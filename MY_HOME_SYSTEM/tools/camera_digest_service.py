@@ -53,7 +53,7 @@ def get_todays_highlight_images(limit: int = 10) -> List[str]:
         List[str]: 有効な画像ファイルパスのリスト。
     """
     today_str = datetime.now().strftime('%Y%m%d')
-    # パターン: snapshot_{id}_{YYYYMMDD}_{HHMMSS}.jpg
+    # パターン: {cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg (camera_monitor.py の save_image_from_stream が生成)
     pattern = os.path.join(SNAPSHOT_DIR, f"*_{today_str}_*.jpg")
     
     logger.debug(f"Searching images with pattern: {pattern}")
