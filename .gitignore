@@ -55,3 +55,5 @@ DDD/*プロンプト*.md
 *.mp3
 *.json
 family_events.json
+# Explicit (defense-in-depth) in case the broad *.json rule above is ever narrowed:
+*.local.json
