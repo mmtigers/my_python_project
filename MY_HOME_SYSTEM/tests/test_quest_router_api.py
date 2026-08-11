@@ -172,3 +172,28 @@ class TestImageUpload:
         saved_files = list(_clean_upload_dir.iterdir())
         assert len(saved_files) == 1
         assert saved_files[0].parent == _clean_upload_dir
+
+    def test_valid_upload_saves_a_genuinely_decodable_image(self, api_client, _clean_upload_dir):
+        """
+        マジックバイトチェックを通した実データが、保存後もPillowで正しくデコードできる
+        本物の画像であることを確認する(Pillowのバージョン更新に対する回帰ガード)。
+        """
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGB", (32, 16), color="blue").save(buf, format="JPEG")
+        buf.seek(0)
+
+        res = api_client.post(
+            "/api/quest/upload",
+            files={"file": ("avatar.jpg", buf, "image/jpeg")},
+        )
+        assert res.status_code == 200
+
+        saved_files = list(_clean_upload_dir.iterdir())
+        assert len(saved_files) == 1
+
+        decoded = Image.open(saved_files[0])
+        decoded.load()
+        assert decoded.size == (32, 16)
+        assert decoded.format == "JPEG"
