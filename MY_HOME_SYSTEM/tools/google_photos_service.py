@@ -1,6 +1,5 @@
 # MY_HOME_SYSTEM/google_photos_service.py
 import os.path
-import pickle
 import requests
 import logging
 from datetime import datetime, timedelta
