@@ -2,7 +2,7 @@
 # テスト・Lint・セキュリティスキャン専用の依存関係。
 # 本番実行には不要なため requirements.txt とは分離している。
 # CIでは requirements.txt と合わせてインストールする。
-httpx==0.28.1
+httpx2==2.10.0
 pytest-cov==7.0.0
 freezegun==1.5.5
 hypothesis==6.145.1
