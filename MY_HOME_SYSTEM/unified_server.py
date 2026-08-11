@@ -136,6 +136,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             scheduler_process.kill()
         logger.info("Scheduler stopped.")
 
+    if camera_process:
+        logger.info("Stopping camera monitor...")
+        camera_process.terminate()
+        try:
+            camera_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            camera_process.kill()
+        logger.info("Camera monitor stopped.")
+
     sensor_service.cancel_all_tasks()
     logger.info("Bye!")
 

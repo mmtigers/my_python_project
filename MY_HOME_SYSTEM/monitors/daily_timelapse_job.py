@@ -78,8 +78,9 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
     logger.info(f"==========【日次タイムラプスバッチ開始】==========")
     logger.info(f"カメラ: {camera_name}, 対象日: {target_date_str}{time_range_log}")
 
-    # NASのNVR録画ディレクトリパス
-    nvr_dir = f"/mnt/nas/home_system/nvr_recordings/{camera_name}"
+    # NASのNVR録画ディレクトリパス (config.NVR_RECORD_DIR を基準に解決し、環境ごとの上書きに追従する)
+    nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")
+    nvr_dir = os.path.join(nvr_base_dir, camera_name)
     if not os.path.exists(nvr_dir):
         logger.error(f"カメラディレクトリが見つかりません: {nvr_dir}")
         return

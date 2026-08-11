@@ -462,7 +462,8 @@ class VideoBuilder:
         return cmd
 
     def _build_drawtext(self, ev: EventRecord, start_dt: datetime.datetime) -> str:
-        font_opt = f":fontfile='{FONT_FILE.replace(':', '\\\\:')}'" if os.path.exists(FONT_FILE) else ""
+        escaped_font_file = FONT_FILE.replace(':', '\\\\:')
+        font_opt = f":fontfile='{escaped_font_file}'" if os.path.exists(FONT_FILE) else ""
         if HAS_DRAWTEXT_LOCALTIME:
             ts = int(start_dt.timestamp())
             expr = r'%{pts\:localtime\:' + str(ts) + r'\:%Y-%m-%d %H\\\:%M\\\:%S}'
