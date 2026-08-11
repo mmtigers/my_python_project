@@ -3,7 +3,8 @@ import asyncio
 import os
 import sys
 import json
-from typing import Optional, List
+import time
+from typing import Optional, List, Any, Dict
 
 from fastapi import Request, HTTPException
 import handlers.line_logic as line_logic
@@ -45,8 +46,31 @@ if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
     except Exception as e:
         logger.error(f"LINE initialization failed: {e}")
 
+# プロフィール表示名のキャッシュ (ログ用のためだけに毎回 LINE API を叩かないようにする)
+_PROFILE_CACHE_TTL_SEC = 3600
+_profile_cache: Dict[str, tuple] = {}  # user_id -> (display_name, cached_at)
+
+
+def _get_display_name(user_id: str) -> str:
+    """LINEのユーザー表示名を取得する。TTL付きでキャッシュし、API呼び出し頻度を抑える。"""
+    cached = _profile_cache.get(user_id)
+    if cached and (time.time() - cached[1]) < _PROFILE_CACHE_TTL_SEC:
+        return cached[0]
+
+    user_name = "Unknown"
+    try:
+        if line_bot_api:
+            profile = line_bot_api.get_profile(user_id)
+            user_name = profile.display_name
+    except Exception:
+        pass
+
+    _profile_cache[user_id] = (user_name, time.time())
+    return user_name
+
+
 # === Helper Methods ===
-def reply_message(reply_token: str, messages: List[any]):
+def reply_message(reply_token: str, messages: List[Any]):
     """メッセージ返信のラッパー"""
     if not line_bot_api: return
     try:
@@ -72,13 +96,7 @@ if line_handler:
         msg_text = event.message.text.strip()
         reply_token = event.reply_token
 
-        user_name = "Unknown"
-        try:
-            if line_bot_api:
-                profile = line_bot_api.get_profile(user_id)
-                user_name = profile.display_name
-        except Exception:
-            pass
+        user_name = _get_display_name(user_id)
 
         logger.info(f"📩 Recv [{user_name}]: {msg_text}")
         

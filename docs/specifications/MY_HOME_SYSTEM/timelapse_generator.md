@@ -51,7 +51,7 @@
 ### 関数: `extract_video_clip`
 
 * **役割**: FFmpegコマンドを実行して動画ファイルからクリップを抽出する。最大リトライ回数までのExponential Backoffを用いたリトライ制御、及び致命的なエラー時のフェイルソフト処理を行う。
-* 根拠: `def extract_video_clip(...)` (行番号: 22〜66 / 抜粋: "subprocess.run(cmd, check=True...")
+* 根拠: `def extract_video_clip(...)` (行番号: 22〜73 / 抜粋: "subprocess.run(cmd, check=True...")
 
 
 * **引数/リクエスト**:
@@ -63,48 +63,48 @@
 
 
 * **戻り値/レスポンス**: `bool` - 抽出に成功した場合はTrue、スキップ（失敗）した場合はFalse
-* 根拠: `return True` / `return False` (行番号: 42, 51, 65 / 抜粋: "return True")
+* 根拠: `return True` / `return False` (行番号: 49, 57, 73 / 抜粋: "return True")
 
 
 * **副作用**: `subprocess.run`による外部プロセス（FFmpeg等）の実行
-* 根拠: `subprocess.run(cmd, check=...` (行番号: 36〜41 / 抜粋: "subprocess.run( cmd, check=T...")
+* 根拠: `subprocess.run(cmd, check=...` (行番号: 41〜47 / 抜粋: "subprocess.run( cmd, check=T...")
 
 
 * **エラーハンドリング**: `subprocess.CalledProcessError` 及び `subprocess.TimeoutExpired` をキャッチし、エラー出力の内容に応じてリトライの継続または打ち切りを行う。
-* 根拠: `except subprocess.CalledProcessError as e:` / `except subprocess.TimeoutExpired:` (行番号: 44, 60 / 抜粋: "except subprocess.CalledProc...")
+* 根拠: `except subprocess.CalledProcessError as e:` / `except subprocess.TimeoutExpired:` (行番号: 51, 66 / 抜粋: "except subprocess.CalledProc...")
 
 
 
 ### 関数: `get_event_times`
 
 * **役割**: データベースから指定時間帯・指定デバイスのイベント検知時刻（`timestamp`）を取得し、`datetime`オブジェクトのリストとして返す。
-* 根拠: `def get_event_times(...)` (行番号: 68〜90 / 抜粋: "SELECT timestamp FROM device...")
+* 根拠: `def get_event_times(...)` (行番号: 75〜100 / 抜粋: "SELECT timestamp FROM device...")
 
 
 * **引数/リクエスト**:
 * `camera_name`: `str` - 対象のカメラ名
 * `start_time`: `str` - 取得開始時刻（ISOフォーマット風文字列）
 * `end_time`: `str` - 取得終了時刻（ISOフォーマット風文字列）
-* 根拠: `def get_event_times(camera_name: str, start_time: str, end_time: str) -> List[datetime.datetime]:` (行番号: 68 / 抜粋: "camera_name: str, start_time...")
+* 根拠: `def get_event_times(camera_name: str, start_time: str, end_time: str) -> List[datetime.datetime]:` (行番号: 75 / 抜粋: "camera_name: str, start_time...")
 
 
 * **戻り値/レスポンス**: `List[datetime.datetime]` - 変換された日時オブジェクトのリスト
-* 根拠: `return event_times` (行番号: 90 / 抜粋: "return event_times")
+* 根拠: `return event_times` (行番号: 100 / 抜粋: "return event_times")
 
 
 * **副作用**: DBからのデータ読み取り
-* 根拠: `cur.execute(query, ...)` (行番号: 79 / 抜粋: "cur.execute(query, (camera_n...")
+* 根拠: `cur.execute(query, ...)` (行番号: 88 / 抜粋: "cur.execute(query, (camera_n...")
 
 
 * **エラーハンドリング**: ISOフォーマットのパース失敗時（`ValueError`）はスキップ。全体の例外（`Exception`）発生時はエラーログを出力する。
-* 根拠: `except ValueError:` / `except Exception as e:` (行番号: 85, 88 / 抜粋: "except ValueError: pass")
+* 根拠: `except ValueError:` / `except Exception as e:` (行番号: 95, 97 / 抜粋: "except ValueError: pass")
 
 
 
 ### 関数: `process_video_clips`
 
 * **役割**: イベント時刻のリストから対象となる動画ファイルを検索・選択し、`extract_video_clip`を用いてタイムラプス用のクリップ（.ts）を抽出。その後、リストファイルを作成してFFmpegのconcatにより結合した単一の動画ファイル（.mp4）を生成する。
-* 根拠: `def process_video_clips(...)` (行番号: 92〜177 / 抜粋: "concat_cmd = [ "nice", "-n",...")
+* 根拠: `def process_video_clips(...)` (行番号: 102〜213 / 抜粋: "concat_cmd = [ "nice", "-n",...")
 
 
 * **引数/リクエスト**:
@@ -112,11 +112,11 @@
 * `nas_folder`: `str` - NASのフォルダ名
 * `event_times`: `List[datetime.datetime]` - イベント日時のリスト
 * `tmp_dir`: `str` - 一時ファイルの出力先ディレクトリ
-* 根拠: `def process_video_clips(camera_name: str, nas_folder: str, event_times: List[datetime.datetime], tmp_dir: str) -> str:` (行番号: 92 / 抜粋: "camera_name: str, nas_folder...")
+* 根拠: `def process_video_clips(camera_name: str, nas_folder: str, event_times: List[datetime.datetime], tmp_dir: str) -> str:` (行番号: 102 / 抜粋: "camera_name: str, nas_folder...")
 
 
 * **戻り値/レスポンス**: `str` - 生成された出力動画ファイルのパス（クリップがない場合は空文字列 `""`）
-* 根拠: `return output_video` / `return ""` (行番号: 177, 163 / 抜粋: "return output_video")
+* 根拠: `return output_video` / `return ""` (行番号: 213, 196 / 抜粋: "return output_video")
 
 
 * **副作用**:
@@ -124,46 +124,46 @@
 * スリープ処理（`time.sleep(0.5)`）
 * リストファイルの書き込み（`with open(...)`）
 * FFmpegプロセスの実行（`extract_video_clip`呼び出し、及び結合コマンドの`subprocess.run`）
-* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 111, 168, 175 / 抜粋: "subprocess.run(concat_cmd, s...")
+* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 124, 201, 211 / 抜粋: "subprocess.run(concat_cmd, s...")
 
 
 * **エラーハンドリング**: `strptime`によるファイル名のパース失敗時（`ValueError`）はスキップ。
-* 根拠: `except ValueError:` (行番号: 128 / 抜粋: "except ValueError: continue")
+* 根拠: `except ValueError:` (行番号: 146 / 抜粋: "except ValueError: continue")
 
 
 
 ### 関数: `upload_video_to_discord`
 
 * **役割**: 生成した動画ファイルをDiscordへアップロードする。ファイルサイズが閾値（8MB）を超える場合はFFmpegを用いて動画を分割（30秒間隔）し、順次アップロードする。
-* 根拠: `def upload_video_to_discord(...)` (行番号: 179〜225 / 抜粋: "res = requests.post(webhook_...")
+* 根拠: `def upload_video_to_discord(...)` (行番号: 215〜271 / 抜粋: "res = requests.post(webhook_...")
 
 
 * **引数/リクエスト**:
 * `file_path`: `str` - アップロードする動画ファイルのパス
 * `message`: `str` - Discordに送信するテキストメッセージ
-* 根拠: `def upload_video_to_discord(file_path: str, message: str) -> None:` (行番号: 179 / 抜粋: "file_path: str, message: str...")
+* 根拠: `def upload_video_to_discord(file_path: str, message: str) -> None:` (行番号: 215 / 抜粋: "file_path: str, message: str...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 179 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 215 / 抜粋: "-> None:")
 
 
 * **副作用**:
 * 外部APIへのHTTPリクエスト（`requests.post`）
 * ファイルサイズ取得・読み込み
 * FFmpegを用いた分割動画ファイルの生成
-* 根拠: `requests.post(webhook_url...` / `subprocess.run(split_cmd...` (行番号: 194, 210 / 抜粋: "res = requests.post(webhook_...")
+* 根拠: `requests.post(webhook_url...` / `subprocess.run(split_cmd...` (行番号: 234, 256 / 抜粋: "res = requests.post(webhook_...")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200または204でない場合のエラーログ出力。リクエスト時の例外（`Exception`）をキャッチしてエラーログ出力。
-* 根拠: `if res.status_code not in [200, 204]:` / `except Exception as e:` (行番号: 197, 201, 221 / 抜粋: "except Exception as e:")
+* 根拠: `if res.status_code not in [200, 204]:` / `except Exception as e:` (行番号: 237, 241, 269 / 抜粋: "except Exception as e:")
 
 
 
 ### 関数: `main`
 
 * **役割**: スクリプトのエントリポイント。コマンドライン引数の解析、対象日時・期間の決定、一時ディレクトリの作成を行い、定義されたカメラごとに一連の処理（イベント取得、動画生成、アップロード）を順に実行する。最後に一時ファイルを削除する。
-* 根拠: `def main():` (行番号: 227〜279 / 抜粋: "parser.parse_args()")
+* 根拠: `def main():` (行番号: 273〜330 / 抜粋: "parser.parse_args()")
 
 
 * **引数/リクエスト**: なし（コマンドライン引数 `sys.argv` に依存）
@@ -174,11 +174,11 @@
 * コンソールへのログ出力
 * 一時ファイルの削除（`os.remove`）
 * 各関数呼び出しによる全体処理の実行
-* 根拠: `os.makedirs(config.TMP_VI...` / `os.remove(f)` (行番号: 243, 279 / 抜粋: "os.remove(f)")
+* 根拠: `os.makedirs(config.TMP_VI...` / `os.remove(f)` (行番号: 292, 330 / 抜粋: "os.remove(f)")
 
 
 * **エラーハンドリング**: `--date` 引数の形式が不正な場合（`ValueError`）、エラーログを出力して終了する。
-* 根拠: `except ValueError:` (行番号: 234 / 抜粋: "except ValueError: logger.er...")
+* 根拠: `except ValueError:` (行番号: 282 / 抜粋: "except ValueError: logger.er...")
 
 
 
