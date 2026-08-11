@@ -30,6 +30,19 @@ def _parse_date(value: str) -> date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
+def _asset_default(env_name: str) -> int:
+    """資産内訳UIの初期値。実際の残高は個人情報のため git 管理対象に直書きせず、
+    未設定時は 0 にフォールバックする（シミュレーション自体は利用可能なままにする）。"""
+    raw = os.getenv(env_name)
+    if not raw:
+        return 0
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(f"{env_name} の値が不正です（整数として解釈できません）。0として扱います。")
+        return 0
+
+
 class LoanSimulator:
     def __init__(self):
         # --- 基本条件 (環境変数から読み込み。未設定の場合はエラーとする) ---
@@ -202,11 +215,11 @@ def render_simulation_tab():
     st.sidebar.header("🛠️ シミュレーション条件")
     
     with st.sidebar.expander("📊 現在の資産内訳 (入力済)", expanded=False):
-        s_cash = st.number_input("預金・現金・暗号資産", value=12341762, step=10000)
-        s_stock = st.number_input("株式 (現物)", value=4790594, step=10000)
-        s_trust = st.number_input("投資信託", value=15177758, step=10000)
-        s_pension = st.number_input("年金 (DC/iDeCo等)", value=4109821, step=10000)
-        s_point = st.number_input("ポイント・マイル", value=18192, step=1000)
+        s_cash = st.number_input("預金・現金・暗号資産", value=_asset_default("FINANCIAL_ASSET_CASH"), step=10000)
+        s_stock = st.number_input("株式 (現物)", value=_asset_default("FINANCIAL_ASSET_STOCK"), step=10000)
+        s_trust = st.number_input("投資信託", value=_asset_default("FINANCIAL_ASSET_TRUST"), step=10000)
+        s_pension = st.number_input("年金 (DC/iDeCo等)", value=_asset_default("FINANCIAL_ASSET_PENSION"), step=10000)
+        s_point = st.number_input("ポイント・マイル", value=_asset_default("FINANCIAL_ASSET_POINT"), step=1000)
         
         total_initial = s_cash + s_stock + s_trust + s_pension + s_point
         st.markdown(f"**合計: {total_initial:,} 円**")

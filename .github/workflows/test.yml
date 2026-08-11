@@ -27,6 +27,13 @@ jobs:
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+    - name: Lint (ruff)
+      run: |
+        # ruff.toml intentionally enables only a small, high-signal Pyflakes
+        # rule set (undefined names etc.) so this catches real bugs without
+        # failing on pre-existing style variance across the codebase.
+        ruff check .
+
     - name: Run Tests
       run: |
         # CI環境用の環境変数を設定
