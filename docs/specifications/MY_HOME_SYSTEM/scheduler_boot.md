@@ -10,7 +10,8 @@
 ## 2. ファイルの概要
 
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
-* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号取得不可 / 抜粋: "while True:", "TASKS: List[Task] = [")
+* `ThreadPoolExecutor` により各タスクを並列実行する。1タスクの長時間化が他のタスクの実行タイミングを丸ごと遅延させないための設計。
+* 根拠: `main` 関数内のループおよび `TASKS` 定義 (行番号: 94-126, 29-43 / 抜粋: "with ThreadPoolExecutor(...", "TASKS: List[Task] = [")
 
 
 
@@ -20,25 +21,26 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号取得不可 / 抜粋: "import time") |
-| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号取得不可 / 抜粋: "import subprocess") |
-| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号取得不可 / 抜粋: "import sys") |
-| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号取得不可 / 抜粋: "import os") |
-| `datetime` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from datetime import datetime` (行番号取得不可 / 抜粋: "from datetime import datetime") |
-| `List` | 標準ライブラリ | 型ヒント（リスト） | `from typing import List, ...` (行番号取得不可 / 抜粋: "from typing import List, Dict,") |
-| `Dict` | 標準ライブラリ | 型ヒント（辞書） | `from typing import ... Dict, ...` (行番号取得不可 / 抜粋: "from typing import List, Dict,") |
-| `Any` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from typing import ... Any, ...` (行番号取得不可 / 抜粋: "from typing import List, Dict,") |
-| `TypedDict` | 標準ライブラリ | 辞書型の構造定義 | `from typing import ... TypedDict` (行番号取得不可 / 抜粋: "from typing import List, Dict,") |
-| `config` | ローカルモジュール | 未使用（コード内に使用箇所なし。インポートの副作用利用の可能性あり） | `import config` (行番号取得不可 / 抜粋: "import config") |
-| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号取得不可 / 抜粋: "from core.logger import setup_log") |
+| `time` | 標準ライブラリ | 現在時刻の取得、待機処理（スリープ） | `import time` (行番号: 2 / 抜粋: "import time") |
+| `subprocess` | 標準ライブラリ | 外部スクリプトのサブプロセス実行 | `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
+| `sys` | 標準ライブラリ | モジュール検索パスの追加、プロセス終了処理、Pythonインタープリタパス取得 | `import sys` (行番号: 4 / 抜粋: "import sys") |
+| `os` | 標準ライブラリ | パスの絶対パス解決・結合・存在確認、環境変数の取得 | `import os` (行番号: 5 / 抜粋: "import os") |
+| `ThreadPoolExecutor`, `Future` | 標準ライブラリ (`concurrent.futures`) | タスクの並列実行、実行中タスクの完了状態管理 | `from concurrent.futures import ThreadPoolExecutor, Future` (行番号: 6 / 抜粋: "from concurrent.futures import") |
+| `datetime` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from datetime import datetime` (行番号: 7 / 抜粋: "from datetime import datetime") |
+| `List` | 標準ライブラリ | 型ヒント（リスト） | `from typing import List, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
+| `Dict` | 標準ライブラリ | 型ヒント（辞書、`in_flight`の型等） | `from typing import ... Dict, ...` (行番号: 8, 106 / 抜粋: "in_flight: Dict[str, Future] = {}") |
+| `Any` | 標準ライブラリ | 未使用（コード内に使用箇所なし） | `from typing import ... Any, ...` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
+| `TypedDict` | 標準ライブラリ | 辞書型の構造定義 | `from typing import ... TypedDict` (行番号: 8 / 抜粋: "from typing import List, Dict,") |
+| `config` | ローカルモジュール | 未使用（コード内に使用箇所なし。インポートの副作用利用の可能性あり） | `import config` (行番号: 14 / 抜粋: "import config") |
+| `setup_logging` | ローカルモジュール | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_log") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュールがインポートされているが、本ファイル内での使用箇所や実装内容が提供されていないため | `import config` (行番号取得不可 / 抜粋: "import config") |
-| `setup_logging` | 実装内容が外部ファイル(`core.logger`)にあるため、ログの出力先やフォーマット仕様が不明 | `from core.logger import setup_logging` (行番号取得不可 / 抜粋: "from core.logger import setup_log") |
-| `TASKS` に定義されている各スクリプト | サブプロセスとして呼び出される対象ファイル（`monitors/*.py`など）の実装が提供されていないため | `TASKS: List[Task] = [...]` (行番号取得不可 / 抜粋: "{"script": "monitors/switchbot") |
+| `config` | モジュールがインポートされているが、本ファイル内での使用箇所や実装内容が提供されていないため | `import config` (行番号: 14 / 抜粋: "import config") |
+| `setup_logging` | 実装内容が外部ファイル(`core.logger`)にあるため、ログの出力先やフォーマット仕様が不明 | `from core.logger import setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup_log") |
+| `TASKS` に定義されている各スクリプト | サブプロセスとして呼び出される対象ファイル（`monitors/*.py`など）の実装が提供されていないため | `TASKS: List[Task] = [...]` (行番号: 29 / 抜粋: "{"script": "monitors/switchbot") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -90,24 +92,24 @@
 
 ### `main`
 
-* **役割**: 定義された `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上のタスクに対して `run_script` を呼び出す無限ループを実行する。
-* 根拠: `def main() -> None:` (行番号取得不可 / 抜粋: "メインループ。")
+* **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
+* 根拠: `def main() -> None:` (行番号: 94 / 抜粋: "メインループ。")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
 
 
-* **副作用**: `run_script` によるタスク実行。`TASKS` 内各タスクの `last_run` の更新。1回のループ終了ごとの10秒間のスリープ。
-* 根拠: `task["last_run"] = now`, `time.sleep(10)` (行番号取得不可 / 抜粋: "task["last_run"] = now", "time.sleep(10)")
+* **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。
+* 根拠: `in_flight[script] = executor.submit(run_script, script, task["args"])`, `task["last_run"] = now`, `time.sleep(10)` (行番号: 106, 108, 122-123, 126)
 
 
-* **エラーハンドリング**: 関数内での明示的な例外キャッチはなし。
-* 根拠: 関数内部の処理 (行番号取得不可 / 抜粋: "def main() -> None:")
+* **エラーハンドリング**: 関数内での明示的な例外キャッチはなし（各タスクの例外は `run_script` 内、または `Future` 内部で捕捉・保持される）。
+* 根拠: 関数内部の処理 (行番号: 94-126)
 
 
 
@@ -145,19 +147,25 @@ flowchart TD
     
     LoopStart --> IterateTasks{"TASKSをループ"}
     
-    IterateTasks -- "タスクあり" --> CheckTime{"now - last_run >= interval"}
-    CheckTime -- True --> RunScript("run_script()実行")
-    RunScript --> CheckExist{"os.path.exists()"}
-    CheckExist -- True --> Subprocess["外部：subprocess.run()"]
-    Subprocess -- 成功/失敗 --> UpdateLastRun("last_runをnowに更新")
-    CheckExist -- False --> LogError("エラーログ出力")
-    LogError --> UpdateLastRun
-    
+    IterateTasks -- "タスクあり" --> CheckRunning{"in_flight[script]が<br>実行中(未完了)か?"}
+    CheckRunning -- True --> IterateTasks
+    CheckRunning -- False --> CheckTime{"now - last_run >= interval"}
+    CheckTime -- True --> UpdateLastRun("last_runをnowに更新")
+    UpdateLastRun --> SubmitTask["外部：executor.submit(run_script)<br>(別スレッドで非同期実行)"]
+    SubmitTask --> RegisterFuture("in_flight[script]にFutureを登録")
+    RegisterFuture --> IterateTasks
     CheckTime -- False --> IterateTasks
-    UpdateLastRun --> IterateTasks
     
     IterateTasks -- "タスク確認完了" --> Sleep["外部：time.sleep(10)"]
     Sleep --> LoopStart
+
+    subgraph "run_script (別スレッドで実行)"
+        RSStart(("run_script開始")) --> CheckExist{"os.path.exists()"}
+        CheckExist -- True --> Subprocess["外部：subprocess.run()"]
+        CheckExist -- False --> LogError("エラーログ出力")
+    end
+
+    SubmitTask -.->|"executor.submitで別スレッド起動"| RSStart
     
     MainBlock -- False --> End([End])
     
@@ -176,6 +184,7 @@ flowchart TD
 graph TD
     Scheduler["scheduler_boot.py"]
     SysLib["標準ライブラリ: sys, os, time, subprocess"]
+    ConcurrentLib["標準ライブラリ: concurrent.futures (ThreadPoolExecutor, Future)"]
     TypingLib["標準ライブラリ: typing (未使用含む)"]
     DateLib["標準ライブラリ: datetime (未使用)"]
     Config["外部: config (ブラックボックス)"]
@@ -183,6 +192,7 @@ graph TD
     Scripts["外部: TASKSで定義されたスクリプト群 (ブラックボックス)"]
 
     Scheduler --> SysLib
+    Scheduler --> ConcurrentLib
     Scheduler --> TypingLib
     Scheduler --> DateLib
     Scheduler --> Config
@@ -201,9 +211,19 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **タイムアウト設定の矛盾**: `subprocess.run` の引数では `timeout=900`（15分）と指定されているが、直上のコメントでは `1タスク最大5分のタイムアウト` と記載され、例外時のログメッセージでも `exceeded 300 seconds.` と記載されている。仕様と実装に乖離がある。
-* **同期待機の仕様**: `subprocess.run` はプロセスの終了を同期的に待機する。そのため、あるタスクの実行時間が長引いた場合（最大900秒）、後続のタスクの実行開始時刻が予定より遅延する。
-* **未使用のインポート**: `datetime`, `Any`, `Dict` はインポートされているがコード内で使用されていない。また `config` も明示的な使用箇所がない。
+* **並列実行への変更**: 従来は `main()` のループ内で `run_script` を直接（同期的に）呼び出しており、1タスクの実行時間が長引くと後続タスクの実行開始が遅延する問題があった。現在は `ThreadPoolExecutor`（ワーカー数=`len(TASKS)`）で各タスクを別スレッドに投入する設計に変更されており、この問題は解消されている。
+* 根拠: `with ThreadPoolExecutor(...)` および `executor.submit(run_script, ...)` (行番号: 108, 123)
+
+
+* **多重起動防止の仕組み**: `in_flight` 辞書（スクリプトパス→`Future`）で実行中タスクを管理し、`Future.done()` が `False`（未完了）の間はそのタスクの次回投入をスキップする。ループ周期(10秒)ごとに判定するため、タスクの完了検知には最大10秒弱の遅延がありうる。
+* 根拠: `if running_future is not None and not running_future.done(): continue` (行番号: 116-118)
+
+
+* **タイムアウト設定と実装の整合**: `subprocess.run` の `timeout=3600`（60分）は、直上のコメント「タイムラプスなど長時間タスクを許容するため60分に延長」および例外時のログメッセージ「exceeded 3600 seconds.」と整合しており、矛盾は確認されなかった。
+* 根拠: `timeout=3600` のコメントおよび `TimeoutExpired` 時のログ (行番号: 75, 88)
+
+
+* **未使用のインポート**: `datetime`, `Any`（`Dict`は`in_flight`の型ヒントで使用）はインポートされているがコード内で使用されていない。また `config` も明示的な使用箇所がない。
 * **パス解決の依存**: 外部スクリプトの実行パスは `__file__` を基準とした `PROJECT_ROOT` に依存しているため、このファイル自身のディレクトリ階層を変更するとすべてのタスク実行が失敗する。
 
 ## 9. 不明事項一覧

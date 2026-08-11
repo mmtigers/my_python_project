@@ -10,7 +10,7 @@
 ## 2. ファイルの概要
 
 * 環境変数に設定されたベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。更新が行われた場合はプッシュ通知を送信して報告する。
-* 根拠: [関数 `fix_all_webhooks` の処理内容、およびログ文字列] (行番号: 95〜109 / 抜粋: "🚀 Webhook自動修復ツール起動")
+* 根拠: [関数 `fix_all_webhooks` の処理内容、およびログ文字列] (行番号: 102〜117 / 抜粋: "🚀 Webhook自動修復ツール起動")
 
 
 
@@ -20,24 +20,24 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sys` | 標準ライブラリ | システムパスの追加、および異常時のスクリプト終了(`sys.exit`) | `import sys` (行番号: 2, 13-15, 23, 101) |
-| `os` | 標準ライブラリ | ファイルパスの取得、および環境変数の取得 | `import os` (行番号: 3, 9-10, 98) |
+| `sys` | 標準ライブラリ | システムパスの追加、および異常時のスクリプト終了(`sys.exit`) | `import sys` (行番号: 2, 13-15, 23, 109) |
+| `os` | 標準ライブラリ | ファイルパスの取得、および環境変数の取得 | `import os` (行番号: 3, 9-10, 106) |
 | `traceback` | 標準ライブラリ | 本ファイル内では未使用 | `import traceback` (行番号: 4) |
-| `requests` | サードパーティ | 外部API（SwitchBot, LINE）へのHTTPリクエスト送信 | `import requests` (行番号: 5, 37, 44, 49, 80, 85) |
-| `time` | 標準ライブラリ | APIコール間のスリープ処理（待機） | `import time` (行番号: 6, 45) |
-| `common` | カスタムモジュール | ロガー設定の初期化、および完了時のプッシュ通知送信 | `import common` (行番号: 18, 26, 108) |
-| `config` | カスタムモジュール | LINEチャネルアクセストークンやユーザーIDの設定値取得 | `import config` (行番号: 19, 67, 72, 81, 108) |
-| `services.switchbot_service` (as `sb_tool`) | カスタムモジュール | SwitchBot API通信用の認証ヘッダー生成 | `from services import switchbot_service as sb_tool` (行番号: 20, 34, 48) |
+| `requests` | サードパーティ | 外部API（SwitchBot, LINE）へのHTTPリクエスト送信 | `import requests` (行番号: 5, 36, 46, 51, 86, 91) |
+| `time` | 標準ライブラリ | APIコール間のスリープ処理（待機） | `import time` (行番号: 6, 47) |
+| `common` | カスタムモジュール | ロガー設定の初期化、および完了時のプッシュ通知送信 | `import common` (行番号: 18, 26, 117) |
+| `config` | カスタムモジュール | LINEチャネルアクセストークンやユーザーIDの設定値取得 | `import config` (行番号: 19, 73, 79, 86, 117) |
+| `services.switchbot_service` (as `sb_tool`) | カスタムモジュール | SwitchBot API通信用の認証ヘッダー生成 | `from services import switchbot_service as sb_tool` (行番号: 20, 33, 50) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | ロガーの初期化処理、ログの出力先やフォーマットの実装が不明。 | `logger = common.setup_logging("webhook_fix")` (行番号: 26) |
-| `common.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 108) |
-| `config.LINE_CHANNEL_ACCESS_TOKEN` | 環境変数等からの読み込み処理など、具体的な定義内容や値が不明。 | `if not config.LINE_CHANNEL_ACCESS_TOKEN:` (行番号: 67) |
-| `config.LINE_USER_ID` | 通知先となるユーザーIDの定義内容や値が不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 108) |
-| `sb_tool.create_switchbot_auth_headers` | APIリクエストに必要なトークンや署名生成などの具体的な認証ロジックが不明。 | `headers = sb_tool.create_switchbot_auth_headers()` (行番号: 34) |
+| `common.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 117) |
+| `config.LINE_CHANNEL_ACCESS_TOKEN` | 環境変数等からの読み込み処理など、具体的な定義内容や値が不明。 | `if not config.LINE_CHANNEL_ACCESS_TOKEN:` (行番号: 73) |
+| `config.LINE_USER_ID` | 通知先となるユーザーIDの定義内容や値が不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 117) |
+| `sb_tool.create_switchbot_auth_headers` | APIリクエストに必要なトークンや署名生成などの具体的な認証ロジックが不明。 | `headers = sb_tool.create_switchbot_auth_headers()` (行番号: 33) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -52,69 +52,69 @@
 
 
 * **戻り値/レスポンス**: `bool` (更新が成功した場合は `True`、設定済み・更新不要・失敗時は `False`)
-* 根拠: [return文] (行番号: 42, 55, 61 / 抜粋: "return True", "return False")
+* 根拠: [return文] (行番号: 41, 59, 66 / 抜粋: "return True", "return False")
 
 
 * **副作用**:
 * 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/queryWebhook` へのPOSTリクエスト
 * 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/deleteWebhook` へのPOSTリクエスト
 * 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/setupWebhook` へのPOSTリクエスト
-* 根拠: [requestsメソッド] (行番号: 37, 44, 49 / 抜粋: "requests.post(...)")
+* 根拠: [requestsメソッド] (行番号: 36, 46, 51 / 抜粋: "requests.post(...)")
 
 
 * **エラーハンドリング**: 例外(`Exception`)発生時にエラーログを出力し、`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 36, 58〜61 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (行番号: 35, 63〜66 / 抜粋: "except Exception as e:")
 
 
 
 ### `update_line_webhook`
 
 * **役割**: LINE Messaging APIを利用してWebhookエンドポイントの現在設定を取得し、変更が必要な場合のみ新しいURLに更新する。
-* 根拠: [関数定義およびDocstring] (行番号: 63〜64 / 抜粋: "LINE BotのWebhook URLを更新")
+* 根拠: [関数定義およびDocstring] (行番号: 68〜69 / 抜粋: "LINE BotのWebhook URLを更新")
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
-* 根拠: [関数定義] (行番号: 63 / 抜粋: "def update_line_webhook(base_url):")
+* 根拠: [関数定義] (行番号: 68 / 抜粋: "def update_line_webhook(base_url):")
 
 
 * **戻り値/レスポンス**: `bool` (更新が成功した場合は `True`、スキップ・設定済み・失敗時は `False`)
-* 根拠: [return文] (行番号: 69, 83, 87, 90, 93 / 抜粋: "return True", "return False")
+* 根拠: [return文] (行番号: 75, 89, 94, 97, 100 / 抜粋: "return True", "return False")
 
 
 * **副作用**:
 * 外部API呼び出し: `https://api.line.me/v2/bot/channel/webhook/endpoint` へのGETリクエスト
 * 外部API呼び出し: `https://api.line.me/v2/bot/channel/webhook/endpoint` へのPUTリクエスト
-* 根拠: [requestsメソッド] (行番号: 80, 85 / 抜粋: "requests.get(...)", "requests.put(...)")
+* 根拠: [requestsメソッド] (行番号: 86, 91 / 抜粋: "requests.get(...)", "requests.put(...)")
 
 
 * **エラーハンドリング**: 例外(`Exception`)発生時にエラーログを出力し、`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 78, 91〜93 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (行番号: 84, 98〜100 / 抜粋: "except Exception as e:")
 
 
 
 ### `fix_all_webhooks`
 
 * **役割**: 実行環境の環境変数からベースURLを取得し、SwitchBotとLINEのWebhook更新処理を実行する。いずれかが更新された場合のみ通知を送信する。
-* 根拠: [関数定義およびコメント] (行番号: 95〜109 / 抜粋: "実際に更新が走った時のみ通知を送信")
+* 根拠: [関数定義およびコメント] (行番号: 102〜117 / 抜粋: "実際に更新が走った時のみ通知を送信")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 95 / 抜粋: "def fix_all_webhooks():")
+* 根拠: [関数定義] (行番号: 102 / 抜粋: "def fix_all_webhooks():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: [return文の不在] (行番号: 95〜109 / 抜粋: "return文なし")
+* 根拠: [return文の不在] (行番号: 102〜117 / 抜粋: "return文なし")
 
 
 * **副作用**:
 * 環境変数取得: `os.environ.get("WEBHOOK_BASE_URL")`
 * 外部モジュール呼び出し: `common.send_push` によるプッシュ通知送信
 * システム終了: 設定がない場合の `sys.exit(1)`
-* 根拠: [処理内容] (行番号: 98, 101, 108 / 抜粋: "sys.exit(1)", "common.send_push(...)")
+* 根拠: [処理内容] (行番号: 106, 109, 117 / 抜粋: "sys.exit(1)", "common.send_push(...)")
 
 
 * **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。
-* 根拠: [ifブロック] (行番号: 99〜101 / 抜粋: "if not base_url:")
+* 根拠: [ifブロック] (行番号: 107〜109 / 抜粋: "if not base_url:")
 
 
 

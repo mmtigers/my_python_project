@@ -32,9 +32,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの各設定値 | 具体的な設定値や環境変数からの読み込みロジックが現在のファイルには含まれていないため不明 | `getattr(config, "...", ...)` (行番号: 31, 32, 53, 90, 100, 120, 122) |
+| `config` モジュールの各設定値 | 具体的な設定値や環境変数からの読み込みロジックが現在のファイルには含まれていないため不明 | `getattr(config, "...", ...)` (行番号: 31, 32, 53, 102, 115, 142, 144) |
 | `setup_logging` の実装 | ログの出力先、フォーマット等の詳細が不明 | `logger = setup_logging("memory_monitor")` (行番号: 17) |
-| `send_push` の実装 | APIエンドポイント、通信リトライ処理の有無、エラーハンドリングの詳細が不明 | `success = send_push(...)` (行番号: 121) |
+| `send_push` の実装 | APIエンドポイント、通信リトライ処理の有無、エラーハンドリングの詳細が不明 | `success = send_push(...)` (行番号: 143) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -110,7 +110,7 @@
 ### `get_top_memory_processes`
 
 * **役割**: 実行中の全プロセスからメモリ（RSS）使用量を取得し、上位 `limit` 件を降順でソートしてフォーマットされた文字列として返す。
-* 根拠: `def get_top_memory_processes(limit: int = 5) -> str:` (行番号: 61〜83 / 抜粋: `process_list.sort(...)`, `top_procs = ...`)
+* 根拠: `def get_top_memory_processes(limit: int = 5) -> str:` (行番号: 61〜91 / 抜粋: `process_list.sort(...)`, `top_procs = ...`)
 
 
 * **引数/リクエスト**: `limit` (`int`) 取得する上位プロセスの数。デフォルト値は5。
@@ -122,36 +122,36 @@
 
 
 * **副作用**: なし
-* 根拠: `psutil` を用いた情報取得のみ (行番号: 61〜83)
+* 根拠: `psutil` を用いた情報取得のみ (行番号: 61〜91)
 
 
 * **エラーハンドリング**: ループ内でプロセス取得中に発生する `psutil.NoSuchProcess`, `psutil.AccessDenied`, `psutil.ZombieProcess` 例外を捕捉し、スキップする。
-* 根拠: `except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess): continue` (行番号: 71〜73)
+* 根拠: `except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess): continue` (行番号: 78〜80)
 
 
 
 ### `main`
 
 * **役割**: システム全体のメモリ使用率チェックと、個別プロセスのメモリチェックを実行し、閾値を超過した場合はアラートメッセージを生成。アラートが存在し、かつクールダウン期間外であれば外部へ通知を送信し、通知時刻を記録する。
-* 根拠: `def main() -> None:` (行番号: 85〜132 / 抜粋: `if mem_percent >= sys_threshold:`, `if check_cooldown():... send_push(...)`)
+* 根拠: `def main() -> None:` (行番号: 93〜155 / 抜粋: `if mem_percent >= sys_threshold:`, `if check_cooldown():... send_push(...)`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main() -> None:` (行番号: 85)
+* 根拠: `def main() -> None:` (行番号: 93)
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 85)
+* 根拠: `-> None:` (行番号: 93)
 
 
 * **副作用**: 外部APIへの通信（`send_push`）、ログファイルへの書き込み（`logger`）、ファイルシステムへのアクセス（`check_cooldown`, `record_notification` の呼び出し）。
-* 根拠: `send_push(...)` (行番号: 121〜126), `record_notification()` (行番号: 129)
+* 根拠: `send_push(...)` (行番号: 143〜148), `record_notification()` (行番号: 151)
 
 
 * **エラーハンドリング**:
 * プロセスごとのメモリチェックループ内で、プロセス状態に起因する例外（`NoSuchProcess` 等）を捕捉しスキップする。
 * それ以外の予期せぬ例外は `Exception` で捕捉し、エラーログを出力する。
-* 根拠: `except (psutil.NoSuchProcess, ...) as e:` (行番号: 111〜113), `except Exception as e:` (行番号: 114〜115 / 抜粋: `logger.error(...)`)
+* 根拠: `except (psutil.NoSuchProcess, ...) as e:` (行番号: 129〜131), `except Exception as e:` (行番号: 132〜133 / 抜粋: `logger.error(...)`)
 
 
 
@@ -239,7 +239,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` または `.env` 等の設定ファイル | 各種閾値や通知先ID、記録ファイルのパスなど、動作の根幹となるパラメータが定義されているため。 | `getattr(config, "MEMORY_ALERT_PERCENT", 85.0)` 等 (行番号: 90 他) |
+| 高 | `config.py` または `.env` 等の設定ファイル | 各種閾値や通知先ID、記録ファイルのパスなど、動作の根幹となるパラメータが定義されているため。 | `getattr(config, "MEMORY_ALERT_PERCENT", 85.0)` 等 (行番号: 102 他) |
 | 中 | `services/notification_service.py` | `send_push` 関数の詳細な実装（通知プラットフォームの仕様、リトライロジックなど）を確認するため。 | `from services.notification_service import send_push` (行番号: 15) |
 | 低 | `core/logger.py` | ログの保存先、ローテーション、重要度の扱いなどの全体方針を把握するため。 | `from core.logger import setup_logging` (行番号: 14) |
 

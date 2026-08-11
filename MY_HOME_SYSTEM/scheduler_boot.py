@@ -3,6 +3,7 @@ import time
 import subprocess
 import sys
 import os
+from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
 from typing import List, Dict, Any, TypedDict
 
@@ -91,20 +92,38 @@ def run_script(script_path: str, args: List[str]) -> bool:
         return False
 
 def main() -> None:
-    """メインループ。"""
-    logger.info("⏰ --- MY_HOME_SYSTEM Scheduler Started ---")
-    
-    while True:
-        now: float = time.time()
-        
-        for task in TASKS:
-            # 実行タイミングの判定
-            if now - task["last_run"] >= task["interval"]:
-                run_script(task["script"], task["args"])
-                task["last_run"] = now
+    """
+    メインループ。
 
-        # CPU負荷軽減のための短いスリープ
-        time.sleep(10)
+    各タスクは ThreadPoolExecutor 上で並列実行する。
+    直列実行だと1タスク（例: 長時間かかるNAS監視）がブロックしている間、
+    server_watchdog 等の重要な監視タスクまで丸ごと遅延してしまうため。
+    同一タスクが実行中の間は、そのタスクだけ次回実行をスキップして
+    多重起動（前回実行が長引いた際の連続再実行）を防ぐ。
+    """
+    logger.info("⏰ --- MY_HOME_SYSTEM Scheduler Started (Parallel Mode) ---")
+
+    in_flight: Dict[str, Future] = {}
+
+    with ThreadPoolExecutor(max_workers=max(len(TASKS), 1), thread_name_prefix="scheduler") as executor:
+        while True:
+            now: float = time.time()
+
+            for task in TASKS:
+                script = task["script"]
+
+                # 前回実行がまだ完了していなければ、今回はスキップして詰まりを防ぐ
+                running_future = in_flight.get(script)
+                if running_future is not None and not running_future.done():
+                    continue
+
+                # 実行タイミングの判定
+                if now - task["last_run"] >= task["interval"]:
+                    task["last_run"] = now
+                    in_flight[script] = executor.submit(run_script, script, task["args"])
+
+            # CPU負荷軽減のための短いスリープ
+            time.sleep(10)
 
 if __name__ == "__main__":
     try:
