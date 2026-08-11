@@ -56,7 +56,7 @@ def main():
                         logger.error(f"Stderr: {result.stderr.strip()}")
                         
             except subprocess.TimeoutExpired:
-                logger.error("⏰ タイムラプス生成がタイムアウト（10分）しました。")
+                logger.error("⏰ タイムラプス生成がタイムアウト（30分）しました。")
             except Exception as e:
                 logger.exception(f"🔥 予期せぬエラー: {e}")
         else:
