@@ -57,3 +57,12 @@ DDD/*プロンプト*.md
 family_events.json
 # Explicit (defense-in-depth) in case the broad *.json rule above is ever narrowed:
 *.local.json
+
+# family-quest: the blanket *.ts rule above targets HLS transport-stream
+# segments (video, generated at runtime), and the blanket *.json rule targets
+# personal data files — neither is meant to exclude this app's own committed
+# source/config. Explicitly un-ignore them so the project stays buildable.
+!family-quest/**/*.ts
+!family-quest/package.json
+!family-quest/package-lock.json
+!family-quest/tsconfig*.json

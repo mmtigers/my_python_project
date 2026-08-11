@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult } from '@/types';
+import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult, PendingInventory, FamilyMileage } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
 interface AdventureLog {
@@ -43,13 +43,6 @@ interface Bounty {
     status: string;
 }
 
-interface PendingInventory {
-    id: string | number;
-    item_id: string | number;
-    user_id: string;
-    status: string;
-}
-
 // APIレスポンスの型定義
 interface GameDataResponse {
     users: User[];
@@ -85,6 +78,14 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         console.error(`${actionName} failed:`, error);
     };
 
+    // apiClient側でスローされるErrorのmessageには、バックエンドが返す
+    // {"detail": "..."} の内容が入っている（apiClient.ts参照）。
+    // ここでそれを取り出し、呼び出し元(App.tsx)がユーザーに実際のエラー内容を
+    // 表示できるようにする。
+    const extractErrorDetail = (error: unknown): string | undefined => {
+        return error instanceof Error ? error.message : undefined;
+    };
+
     // 管理用Mutation
     const adminUpdateBossMutation = useMutation({
         mutationFn: async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
@@ -114,17 +115,19 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         staleTime: 1000 * 60 * 5,
     });
 
-    const { data: familyMileage } = useQuery<any>({
+    const { data: familyMileage } = useQuery<FamilyMileage>({
         queryKey: ['familyMileage'],
         queryFn: () => apiClient.getFamilyMileage(),
         staleTime: 1000 * 30,
         refetchInterval: 1000 * 10,
     });
 
-    // 追加: ペンディングインベントリの取得（無限ループ防止のための安全なポーリング）
+    // 承認待ちインベントリの取得（無限ループ防止のための安全なポーリング）
+    // ★このクエリがアプリ内で唯一の登録元。ApprovalList側では独自クエリを持たず、
+    // ここから props で受け取る（重複登録の解消）。
     const { data: pendingInventory } = useQuery<PendingInventory[]>({
         queryKey: ['pendingInventory'],
-        queryFn: () => apiClient.get('/api/quest/inventory/admin/pending'),
+        queryFn: () => apiClient.fetchPendingInventory(),
         refetchInterval: 1000 * 10,
         staleTime: 1000 * 5,
     });
@@ -167,7 +170,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post('/api/quest/quest/cancel', {
                 user_id: user.user_id,
-                history_id: history.id || history.history_id,
+                history_id: history.id ?? history.history_id,
             });
         },
         onSuccess: () => {
@@ -181,7 +184,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post('/api/quest/approve', {
                 approver_id: user.user_id,
-                history_id: history.id,
+                history_id: history.id ?? history.history_id,
             });
         },
         onSuccess: () => {
@@ -195,7 +198,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post('/api/quest/reject', {
                 approver_id: user.user_id,
-                history_id: history.id,
+                history_id: history.id ?? history.history_id,
             });
         },
         onSuccess: () => {
@@ -267,7 +270,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
                 bossEffect: res.bossEffect
             };
         } catch (e) {
-            return { success: false, reason: 'error' };
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
         }
     };
 
@@ -276,7 +279,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
             await cancelQuestMutation.mutateAsync({ user, history: historyItem });
             return { success: true };
         } catch (e) {
-            return { success: false };
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
         }
     };
 
@@ -289,7 +292,9 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
                 success: true,
                 bossEffect: res?.bossEffect
             };
-        } catch (e) { return { success: false }; }
+        } catch (e) {
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
+        }
     };
 
     const rejectQuest = async (user: User, historyItem: QuestHistory) => {
@@ -297,7 +302,9 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         try {
             await rejectQuestMutation.mutateAsync({ user, history: historyItem });
             return { success: true };
-        } catch (e) { return { success: false }; }
+        } catch (e) {
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
+        }
     };
 
     // buyReward ラッパー
@@ -308,7 +315,9 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         try {
             const res = await buyRewardMutation.mutateAsync({ user, reward }) as unknown as PurchaseResponse;
             return { success: true, newGold: res.newGold, reward };
-        } catch (e) { return { success: false, reason: 'error' }; }
+        } catch (e) {
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
+        }
     };
 
     const buyEquipment = async (user: User, item: Equipment) => {
@@ -317,14 +326,18 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         try {
             await buyEquipmentMutation.mutateAsync({ user, item });
             return { success: true, item };
-        } catch (e) { return { success: false, reason: 'error' }; }
+        } catch (e) {
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
+        }
     };
 
     const changeEquipment = async (user: User, item: Equipment) => {
         try {
             await changeEquipmentMutation.mutateAsync({ user, item });
             return { success: true };
-        } catch (e) { return { success: false }; }
+        } catch (e) {
+            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
+        }
     };
 
     const refreshData = () => {
@@ -337,7 +350,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
             await adminUpdateBossMutation.mutateAsync(data);
             return { success: true };
         } catch (e) {
-            return { success: false };
+            return { success: false, detail: extractErrorDetail(e) };
         }
     };
 
@@ -355,7 +368,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
             await adminUpdateFamilyMileageMutation.mutateAsync({ targetName, targetExp });
             return { success: true };
         } catch (e) {
-            return { success: false };
+            return { success: false, detail: extractErrorDetail(e) };
         }
     };
 

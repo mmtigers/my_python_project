@@ -112,7 +112,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                 <div className="space-y-6 bg-gray-900 p-4 rounded-lg border border-gray-700 mt-8">
                     <h3 className="text-lg font-bold text-gray-400">共有目標（ファミリーマイレージ）</h3>
                     <div className="space-y-2">
-                        <label className="block text-sm">新しい目標名</label>
+                        <label className="block text-sm" htmlFor="mileageNameInput">新しい目標名</label>
                         <input
                             type="text"
                             id="mileageNameInput"
@@ -121,7 +121,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="block text-sm">目標EXP</label>
+                        <label className="block text-sm" htmlFor="mileageExpInput">目標EXP</label>
                         <input
                             type="number"
                             id="mileageExpInput"
