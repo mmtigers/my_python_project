@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Sword, Shirt, ShoppingBag, Backpack, Scroll, Sparkles } from 'lucide-react'; // Sparkles追加
 import { INITIAL_USERS } from './lib/masterData';
-import { useGameData } from './hooks/useGameData';
+import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
 import AdminDashboard from './features/admin/components/AdminDashboard';
 import RewardList from './features/shop/components/RewardList';
@@ -38,23 +38,63 @@ import FamilyParty from './features/family/components/FamilyParty';
 import BattleEffect from './components/ui/BattleEffect';
 import { WeeklyTrends } from './features/family/components/WeeklyTrends';
 
+// ConfirmModal の target に渡りうる型。モードごとに実際に持っているプロパティが異なるため、
+// メッセージ生成はモードごとに個別にキャストして組み立てる（getMessage 内）。
+type ConfirmTarget = Quest | QuestHistory | Reward | Equipment;
+
+// useGameData.ts の completeQuest/cancelQuest/buyReward/buyEquipment/changeEquipment/rejectQuest
+// ラッパー関数群の戻り値をまとめて受け取るための型（各関数は success 以外のフィールドが少しずつ異なる）
+interface ActionResult {
+  success: boolean;
+  status?: string;
+  message?: string;
+  earnedMedals?: number;
+  leveledUp?: boolean;
+  bossEffect?: BossEffect;
+  newGold?: number;
+  reward?: Reward;
+  item?: Equipment;
+  reason?: string;
+  detail?: string;
+}
+
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
 }: {
-  mode: 'cancel' | 'purchase' | 'complete' | 'equip_buy' | null,
-  target: any,
+  mode: 'cancel' | 'purchase' | 'complete' | 'equip_buy' | 'equip' | 'reject' | null,
+  target: ConfirmTarget | null,
   onConfirm: () => void,
   onCancel: () => void
 }) => {
   if (!mode || !target) return null;
 
-  const messages = {
-    cancel: { title: 'クエストをやめる', text: `「${target.quest_title}」をやめますか？\n（ペナルティはありません）` },
-    purchase: { title: 'アイテム購入', text: `「${target.title}」を ${target.cost_gold}G で買いますか？` },
-    equip_buy: { title: '装備の購入', text: `「${target.name}」を ${target.cost}G で買いますか？` },
-    complete: { title: 'クエスト完了', text: `「${target.title}」を完了にしますか？` },
+  const getMessage = (): { title: string; text: string } => {
+    switch (mode) {
+      case 'cancel': {
+        const t = target as QuestHistory;
+        return { title: 'クエストをやめる', text: `「${t.quest_title}」をやめますか？\n（ペナルティはありません）` };
+      }
+      case 'purchase': {
+        const t = target as Reward;
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
+      }
+      case 'equip_buy': {
+        const t = target as Equipment;
+        return { title: '装備の購入', text: `「${t.name}」を ${t.cost}G で買いますか？` };
+      }
+      case 'complete': {
+        const t = target as Quest;
+        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };
+      }
+      case 'equip': {
+        const t = target as Equipment;
+        return { title: '装備変更', text: `「${t.name}」を装備しますか？` };
+      }
+      case 'reject':
+        return { title: '却下確認', text: '本当に却下しますか？' };
+    }
   };
-  const msg = messages[mode];
+  const msg = getMessage();
 
   return (
     <Modal isOpen={true} onClose={onCancel} title={msg.title}>
@@ -76,18 +116,18 @@ function App() {
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
   // モーダル状態
-  const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | null>(null);
-  const [confirmTarget, setConfirmTarget] = useState<any>(null);
+  const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | 'equip' | 'reject' | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
 
   // 結果表示用
-  const [levelUpInfo, setLevelUpInfo] = useState<any>(null);
+  const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
   const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error' } | null>(null);
   const [bossEffect, setBossEffect] = useState<BossEffect | null>(null);
 
   // アバターアップロード
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
 
-  const handleLevelUp = (info: any) => {
+  const handleLevelUp = (info: LevelUpInfo) => {
     setLevelUpInfo(info);
   };
 
@@ -141,7 +181,7 @@ function App() {
       // (ConfirmModalで target.quest_title を参照するため)
       // ※Historyオブジェクトに quest_title が結合されている前提ですが、
       //  もし不足している場合は q.title を補完する必要があります。
-      setConfirmTarget({ ...historyEntry, quest_title: (q as any).title || (historyEntry as any).quest_title });
+      setConfirmTarget({ ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
       setConfirmMode('cancel');
     } else {
       // 未実施なら「完了」モード
@@ -164,24 +204,20 @@ function App() {
     play('select');
   };
 
-  const handleEquip = async (e: Equipment) => {
-    if (confirm(`「${e.name}」を装備しますか？`)) {
-      const res = await changeEquipment(currentUser, e);
-      if (res.success) {
-        setMessageData({ title: "装備変更", text: "装備を変更しました！", type: "success" });
-        play('select');
-      }
-    }
+  const handleEquip = (e: Equipment) => {
+    setConfirmTarget(e);
+    setConfirmMode('equip');
+    play('select');
   };
 
   // --- Confirm Execution ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
 
-    let res: any = { success: false };
+    let res: ActionResult = { success: false };
 
     if (confirmMode === 'complete') {
-      res = await completeQuest(currentUser, confirmTarget);
+      res = await completeQuest(currentUser, confirmTarget as Quest);
       if (res.success) {
         if (res.status === 'pending') {
           setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
@@ -190,18 +226,41 @@ function App() {
         }
       }
     } else if (confirmMode === 'cancel') {
-      res = await cancelQuest(currentUser, confirmTarget);
+      res = await cancelQuest(currentUser, confirmTarget as QuestHistory);
     } else if (confirmMode === 'purchase') {
-      res = await buyReward(currentUser, confirmTarget);
+      res = await buyReward(currentUser, confirmTarget as Reward);
       if (res.success) {
         setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
         play('medal');
       }
     } else if (confirmMode === 'equip_buy') {
-      res = await buyEquipment(currentUser, confirmTarget);
+      res = await buyEquipment(currentUser, confirmTarget as Equipment);
       if (res.success) {
         setMessageData({ title: "購入完了", text: "装備を手に入れました！", type: "success" });
         play('medal');
+      }
+    } else if (confirmMode === 'equip') {
+      res = await changeEquipment(currentUser, confirmTarget as Equipment);
+      if (res.success) {
+        setMessageData({ title: "装備変更", text: "装備を変更しました！", type: "success" });
+        play('select');
+      }
+    } else if (confirmMode === 'reject') {
+      res = await rejectQuest(currentUser, confirmTarget as QuestHistory);
+      if (res.success) {
+        play('cancel');
+      } else {
+        // ★却下専用のエラー文言（元の handleReject の window.confirm/reasons ロジックを踏襲）
+        const reasons: { [key: string]: string } = {
+          permission: "権限がありません",
+          error: "エラーが発生しました"
+        };
+        const text = res.detail || (res.reason && reasons[res.reason]) || "却下に失敗しました";
+        setMessageData({ title: "エラー", text, type: "error" });
+        play('cancel');
+        setConfirmMode(null);
+        setConfirmTarget(null);
+        return;
       }
     }
 
@@ -239,21 +298,10 @@ function App() {
     }
   };
 
-  const handleReject = async (history: QuestHistory) => {
-    if (confirm("本当に却下しますか？")) {
-      const res = await rejectQuest(currentUser, history);
-      if (res.success) {
-        play('cancel');
-      } else {
-        const reasons: { [key: string]: string } = {
-          permission: "権限がありません",
-          error: "エラーが発生しました"
-        };
-        const text = res.detail || (res.reason && reasons[res.reason]) || "却下に失敗しました";
-        setMessageData({ title: "エラー", text, type: "error" });
-        play('cancel');
-      }
-    }
+  const handleReject = (history: QuestHistory) => {
+    setConfirmTarget(history);
+    setConfirmMode('reject');
+    play('select');
   };
 
   const getHeaderViewMode = () => {
