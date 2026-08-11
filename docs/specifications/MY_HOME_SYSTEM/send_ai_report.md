@@ -40,11 +40,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`内の定数 | ファイル内に定義がなく、値や構造が不明 | `config.GEMINI_API_KEY` 等 (行番号: 54) |
-| `common`モジュールの実装 | 関数内の処理内容や戻り値の型が推測不能 | `common.get_db_cursor()` 等 (行番号: 88) |
-| `WeatherService`, `NewsService`, `MenuService` | クラスの詳細な実装・戻り値の構造が不明 | `WeatherService().get_weather_report_text()` (行番号: 166) |
-| `camera_digest_service` | 取得する画像のファイルパス形式が不明 | `camera_digest_service.get_todays_highlight_images(limit=8)` (行番号: 191) |
-| DBスキーマ | テーブル構成、カラムのデータ型が不明 | `SELECT device_id, device_name, ...` (行番号: 93) |
+| `config`内の定数 | ファイル内に定義がなく、値や構造が不明 | `config.GEMINI_API_KEY` 等 (行番号: 60) |
+| `common`モジュールの実装 | 関数内の処理内容や戻り値の型が推測不能 | `common.get_db_cursor()` 等 (行番号: 104) |
+| `WeatherService`, `NewsService`, `MenuService` | クラスの詳細な実装・戻り値の構造が不明 | `WeatherService().get_weather_report_text()` (行番号: 214) |
+| `camera_digest_service` | 取得する画像のファイルパス形式が不明 | `camera_digest_service.get_todays_highlight_images(limit=8)` (行番号: 242) |
+| DBスキーマ | テーブル構成、カラムのデータ型が不明 | `SELECT device_id, device_name, ...` (行番号: 112) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -59,7 +59,7 @@
 
 
 * **戻り値/レスポンス**: `str` (家族構成の説明テキスト)
-* 根拠: `return f"""...- 夫: {dad_name}..."""` (行番号: 35-41)
+* 根拠: `return f"""...- 夫: {dad_name}..."""` (行番号: 38-44)
 
 
 * **副作用**: なし
@@ -67,22 +67,22 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `getattr` を使用し、例外処理のブロックがない (行番号: 31-34)
+* 根拠: `getattr` を使用し、例外処理のブロックがない (行番号: 33-35)
 
 
 
 ### `parse_arguments`
 
 * **役割**: コマンドライン引数（`--target`）を解析する。
-* 根拠: `parser.add_argument('--target', ...)` (行番号: 45 / 抜粋: "コマンドライン引数を解析します。")
+* 根拠: `parser.add_argument('--target', ...)` (行番号: 49 / 抜粋: "コマンドライン引数を解析します。")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def parse_arguments() -> argparse.Namespace:` (行番号: 43)
+* 根拠: `def parse_arguments() -> argparse.Namespace:` (行番号: 46)
 
 
 * **戻り値/レスポンス**: `argparse.Namespace` (解析された引数オブジェクト)
-* 根拠: `return parser.parse_args()` (行番号: 46)
+* 根拠: `return parser.parse_args()` (行番号: 50)
 
 
 * **副作用**: なし
@@ -97,61 +97,61 @@
 ### `setup_gemini`
 
 * **役割**: Gemini APIクライアントを初期化し、利用可能なモデルを選択する。
-* 根拠: `genai.configure(api_key=config.GEMINI_API_KEY)` (行番号: 58 / 抜粋: "Gemini APIクライアントを初期化します。")
+* 根拠: `genai.configure(api_key=config.GEMINI_API_KEY)` (行番号: 64 / 抜粋: "Gemini APIクライアントを初期化します。")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def setup_gemini() -> genai.GenerativeModel:` (行番号: 49)
+* 根拠: `def setup_gemini() -> genai.GenerativeModel:` (行番号: 52)
 
 
 * **戻り値/レスポンス**: `genai.GenerativeModel`
-* 根拠: `return genai.GenerativeModel(c)` (行番号: 65)
+* 根拠: `return genai.GenerativeModel(c)` (行番号: 73)
 
 
 * **副作用**: `genai`モジュールの初期化設定、APIキー不在時のシステム終了処理 (`sys.exit(1)`)
-* 根拠: `sys.exit(1)` (行番号: 56)
+* 根拠: `sys.exit(1)` (行番号: 62)
 
 
 * **エラーハンドリング**: モデルリスト取得失敗時の例外を捕捉し、デフォルトモデルへフォールバックする。
-* 根拠: `except Exception as e: ... return genai.GenerativeModel("gemini-1.5-flash")` (行番号: 67-69)
+* 根拠: `except Exception as e: ... return genai.GenerativeModel("gemini-1.5-flash")` (行番号: 76-78)
 
 
 
 ### `fetch_daily_data`
 
 * **役割**: データベースと外部APIから各種データを収集し、辞書としてまとめる。DB取得失敗時も可能な限り処理を継続する。
-* 根拠: `data: Dict[str, Any] = {}` (行番号: 78 / 抜粋: "センサー、DB、外部APIから日次データを収集")
+* 根拠: `data: Dict[str, Any] = {}` (行番号: 88 / 抜粋: "センサー、DB、外部APIから日次データを収集")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def fetch_daily_data() -> Dict[str, Any]:` (行番号: 71)
+* 根拠: `def fetch_daily_data() -> Dict[str, Any]:` (行番号: 80)
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (収集したデータの辞書)
-* 根拠: `return data` (行番号: 196)
+* 根拠: `return data` (行番号: 247)
 
 
 * **副作用**: DBからのデータReadアクセス、複数外部APIへの通信呼び出し
-* 根拠: `common.get_db_cursor()`, `WeatherService().get_weather_report_text()` 等 (行番号: 88, 166)
+* 根拠: `common.get_db_cursor()`, `WeatherService().get_weather_report_text()` 等 (行番号: 104, 214)
 
 
 * **エラーハンドリング**: 各データ取得ブロックごとに `try-except` があり、エラーをログに記録しつつ空データや代替データをセットする。DB接続エラー自体も捕捉し続行する。
-* 根拠: `except Exception as e: logger.warning(...)` (複数箇所 / 行番号: 101, 114, 127, 137, 147, 161, 167, 174, 185, 192)
+* 根拠: `except Exception as e: logger.warning(...)` (複数箇所 / 行番号: 122, 139, 157, 169, 180, 200, 215, 223, 236, 243)
 
 
 
 ### `get_time_context`
 
 * **役割**: 与えられた時間（hour）に基づき、時間帯に合わせた挨拶やコンテキスト情報を提供する。
-* 根拠: `if 5 <= hour < 11: return {...}` (行番号: 207-221 / 抜粋: "時間帯ごとのコンテキスト設定を返します。")
+* 根拠: `if 5 <= hour < 11: return {...}` (行番号: 258-275 / 抜粋: "時間帯ごとのコンテキスト設定を返します。")
 
 
 * **引数/リクエスト**: `hour: int`
-* 根拠: `def get_time_context(hour: int) -> Dict[str, str]:` (行番号: 199)
+* 根拠: `def get_time_context(hour: int) -> Dict[str, str]:` (行番号: 249)
 
 
 * **戻り値/レスポンス**: `Dict[str, str]` (キーに context, greeting, closing を持つ辞書)
-* 根拠: `return {"context": "...", "greeting": "...", "closing": "..."}` (行番号: 208-212等)
+* 根拠: `return {"context": "...", "greeting": "...", "closing": "..."}` (行番号: 259-263等)
 
 
 * **副作用**: なし
@@ -166,103 +166,103 @@
 ### `build_system_prompt`
 
 * **役割**: `data`と`get_time_context`を元に、Geminiへ送信するシステムプロンプト文字列を構築する。
-* 根拠: `return f"""...あなたは「優秀で気が利く..."""` (行番号: 261-281 / 抜粋: "Geminiへのシステムプロンプトを構築します。")
+* 根拠: `return f"""...あなたは「優秀で気が利く..."""` (行番号: 336-362 / 抜粋: "Geminiへのシステムプロンプトを構築します。")
 
 
 * **引数/リクエスト**: `data: Dict[str, Any]`
-* 根拠: `def build_system_prompt(data: Dict[str, Any]) -> str:` (行番号: 223)
+* 根拠: `def build_system_prompt(data: Dict[str, Any]) -> str:` (行番号: 277)
 
 
 * **戻り値/レスポンス**: `str` (プロンプト文字列)
-* 根拠: `return f"""..."""` (行番号: 261)
+* 根拠: `return f"""..."""` (行番号: 336)
 
 
 * **副作用**: `datetime.now`による現在時刻の取得
-* 根拠: `hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour` (行番号: 228)
+* 根拠: `hour = datetime.now(pytz.timezone('Asia/Tokyo')).hour` (行番号: 282)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 辞書の`get`メソッドでキー不在を回避 (行番号: 247, 252)
+* 根拠: 辞書の`get`メソッドでキー不在を回避 (行番号: 290, 307)
 
 
 
 ### `generate_report`
 
 * **役割**: システムプロンプトと画像データを用いてGemini APIからテキストを生成し、使用した画像をクローズする。
-* 根拠: `response = model.generate_content(content_parts)` (行番号: 304 / 抜粋: "Geminiを使用してレポートテキストを生成します。")
+* 根拠: `response = model.generate_content(content_parts)` (行番号: 388 / 抜粋: "Geminiを使用してレポートテキストを生成します。")
 
 
 * **引数/リクエスト**: `model: genai.GenerativeModel`, `data: Dict[str, Any]`
-* 根拠: `def generate_report(model: genai.GenerativeModel, data: Dict[str, Any]) -> str:` (行番号: 283)
+* 根拠: `def generate_report(model: genai.GenerativeModel, data: Dict[str, Any]) -> str:` (行番号: 364)
 
 
 * **戻り値/レスポンス**: `str` (生成されたレポートテキスト)
-* 根拠: `return response.text.strip()` (行番号: 305)
+* 根拠: `return response.text.strip()` (行番号: 389)
 
 
 * **副作用**: ファイルI/O（画像のオープン・クローズ）、外部API（Gemini）への通信
-* 根拠: `img = Image.open(path)`, `img.close()` (行番号: 295, 311)
+* 根拠: `img = Image.open(path)`, `img.close()` (行番号: 378, 396)
 
 
 * **エラーハンドリング**: 画像読み込み失敗を捕捉してスキップ。Gemini生成失敗時はエラーを記録し例外を再送出(`raise`)。`finally`ブロックで画像を確実に閉じる。
-* 根拠: `except Exception as e: ... raise`, `finally: ... img.close()` (行番号: 298, 306, 309)
+* 根拠: `except Exception as e: ... raise`, `finally: ... img.close()` (行番号: 381, 390, 396)
 
 
 
 ### `save_report_to_db`
 
 * **役割**: 生成されたレポートをデータベースに保存する。
-* 根拠: `common.save_log_generic(...)` (行番号: 315 / 抜粋: "生成されたレポートをDBに保存します。")
+* 根拠: `common.save_log_generic(...)` (行番号: 401 / 抜粋: "生成されたレポートをDBに保存します。")
 
 
 * **引数/リクエスト**: `message: str`
-* 根拠: `def save_report_to_db(message: str) -> bool:` (行番号: 313)
+* 根拠: `def save_report_to_db(message: str) -> bool:` (行番号: 398)
 
 
 * **戻り値/レスポンス**: `bool` (成功時`True`、失敗時`False`)
-* 根拠: `return True`, `return False` (行番号: 320, 323)
+* 根拠: `return True`, `return False` (行番号: 406, 409)
 
 
 * **副作用**: データベースへの書き込み処理
-* 根拠: `common.save_log_generic` (行番号: 315)
+* 根拠: `common.save_log_generic` (行番号: 401)
 
 
 * **エラーハンドリング**: 例外を捕捉してログ出力し`False`を返す。
-* 根拠: `except Exception as e:` (行番号: 321)
+* 根拠: `except Exception as e:` (行番号: 407)
 
 
 
 ### `send_notification`
 
 * **役割**: 指定されたターゲット(`line`, `discord`, または`both`)へ、アクション付きメッセージを通知する。
-* 根拠: `common.send_push(...)` (行番号: 341 / 抜粋: "LINE/Discordへ通知を送信します。")
+* 根拠: `common.send_push(...)` (行番号: 425 / 抜粋: "LINE/Discordへ通知を送信します。")
 
 
 * **引数/リクエスト**: `message: str`, `target: str`
-* 根拠: `def send_notification(message: str, target: str) -> bool:` (行番号: 326)
+* 根拠: `def send_notification(message: str, target: str) -> bool:` (行番号: 411)
 
 
 * **戻り値/レスポンス**: `bool` (1つでも成功すれば`True`)
-* 根拠: `return success_count > 0` (行番号: 348)
+* 根拠: `return success_count > 0` (行番号: 433)
 
 
 * **副作用**: 外部APIへの通信（Push通知）
-* 根拠: `common.send_push(...)` (行番号: 341)
+* 根拠: `common.send_push(...)` (行番号: 425)
 
 
 * **エラーハンドリング**: 送信例外を捕捉し、ログを出力。
-* 根拠: `except Exception as e:` (行番号: 345)
+* 根拠: `except Exception as e:` (行番号: 430)
 
 
 
 ### `main`
 
 * **役割**: スクリプトのメイン処理。引数解析、初期化、データ収集、レポート生成、DB保存、通知送信を一連の流れとして実行する。
-* 根拠: `args = parse_arguments() ... model = setup_gemini() ...` (行番号: 352-364)
+* 根拠: `args = parse_arguments() ... model = setup_gemini() ...` (行番号: 437-449)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 350)
+* 根拠: `def main():` (行番号: 435)
 
 
 * **戻り値/レスポンス**: なし
@@ -270,11 +270,11 @@
 
 
 * **副作用**: プロセス終了、各関数の副作用を統合
-* 根拠: `sys.exit(1)` (行番号: 367, 377)
+* 根拠: `sys.exit(1)` (行番号: 453, 466)
 
 
 * **エラーハンドリング**: メイン処理全体を`try-except`で囲み、致命的なエラー発生時にDiscordへエラー通知を行い、`sys.exit(1)`で終了する。
-* 根拠: `except Exception as e: ... common.send_push(...)` (行番号: 369-376)
+* 根拠: `except Exception as e: ... common.send_push(...)` (行番号: 455-465)
 
 
 
@@ -347,8 +347,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | テーブル名、定数、APIキー、家族構成データが依存しており、動作環境の理解に必須。 | `import config` および随所での使用 (行番号: 4, 31等) |
-| 高 | `common.py` | DB接続処理、保存処理、通知送信といった副作用を伴うクリティカルな関数が実装されている。 | `common.get_db_cursor()`, `common.send_push()` (行番号: 88, 341) |
+| 高 | `config.py` | テーブル名、定数、APIキー、家族構成データが依存しており、動作環境の理解に必須。 | `import config` および随所での使用 (行番号: 4, 33等) |
+| 高 | `common.py` | DB接続処理、保存処理、通知送信といった副作用を伴うクリティカルな関数が実装されている。 | `common.get_db_cursor()`, `common.send_push()` (行番号: 104, 425) |
 | 中 | `menu_service.py` | 特定時間帯のみ呼び出される献立決定ロジックの全貌把握のため。 | `from menu_service import MenuService` (行番号: 18) |
 | 中 | `weather_service.py` | 天気情報のフォーマット（文字列）の確認。 | `from weather_service import WeatherService` (行番号: 16) |
 | 低 | `tools/camera_digest_service.py` | 画像ファイルパスの生成方法と画像の保存場所の確認。 | `import tools.camera_digest_service` (行番号: 19) |
