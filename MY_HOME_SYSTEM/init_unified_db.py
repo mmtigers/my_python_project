@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 import config
 import common
+from core.migrations import apply_pending_migrations
 
 logger = common.setup_logging("init_db")
 
@@ -535,6 +536,26 @@ def init_db() -> None:
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # ==========================================
+        # インデックス (5〜10分間隔で継続的に書き込まれるログテーブルは
+        # device_id + timestamp での検索・直近値取得が頻発するため付与)
+        # ==========================================
+        cur.execute(f'''
+            CREATE INDEX IF NOT EXISTS idx_power_usage_device_ts
+            ON {config.SQLITE_TABLE_POWER_USAGE} (device_id, timestamp DESC)
+        ''')
+        cur.execute(f'''
+            CREATE INDEX IF NOT EXISTS idx_switchbot_logs_device_ts
+            ON {config.SQLITE_TABLE_SWITCHBOT_LOGS} (device_id, timestamp DESC)
+        ''')
+        cur.execute('''
+            CREATE INDEX IF NOT EXISTS idx_device_records_device_ts
+            ON device_records (device_id, timestamp DESC)
+        ''')
+
+        # バージョン管理されたマイグレーション (migrations/ 配下) を適用
+        apply_pending_migrations(cur.connection)
 
     # 検証実行
     try:

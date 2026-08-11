@@ -39,7 +39,7 @@
 ### `ping_host`
 
 * **役割**: Linuxシステムの `ping` コマンドを非同期サブプロセスで実行し、指定されたIPアドレスの到達確認とレイテンシ計測を行う。
-* 根拠: `ping_host` 関数定義とコメント (行番号: 38-40 / 抜粋: "ICMP Pingを実行し、到達確認とレイテンシ計測を行")
+* 根拠: `ping_host` 関数定義とコメント (行番号: 38-75 / 抜粋: "ICMP Pingを実行し、到達確認とレイテンシ計測を行")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
@@ -51,103 +51,103 @@
 
 
 * **副作用**: サブプロセス（OSコマンド）の実行。
-* 根拠: `asyncio.create_subprocess_exec` 呼び出し (行番号: 48 / 抜粋: "asyncio.create_subprocess_exec")
+* 根拠: `asyncio.create_subprocess_exec` 呼び出し (行番号: 50 / 抜粋: "asyncio.create_subprocess_exec")
 
 
 * **エラーハンドリング**: サブプロセス起動・実行時の例外をキャッチし、エラーログ出力およびエラーステータス（"ERROR"）を返却する。
-* 根拠: `except Exception as e:` ブロック (行番号: 64-66 / 抜粋: "logger.error(f"Ping execution")
+* 根拠: `except Exception as e:` ブロック (行番号: 73-75 / 抜粋: "logger.error(f"Ping execution")
 
 
 
 ### `check_tcp_port`
 
 * **役割**: 指定されたIPアドレスとポートに対して非同期TCP接続（ハンドシェイク）を試行し、結果とレイテンシを計測する。
-* 根拠: `check_tcp_port` 関数定義とコメント (行番号: 69-70 / 抜粋: "指定されたポートへのTCP接続（ハンドシェイク）を試行")
+* 根拠: `check_tcp_port` 関数定義とコメント (行番号: 78-118 / 抜粋: "指定されたポートへのTCP接続（ハンドシェイク）を試行")
 
 
 * **引数/リクエスト**: `ip: str` (対象IPアドレス), `port: int` (対象ポート番号)
-* 根拠: `check_tcp_port` 関数定義 (行番号: 69 / 抜粋: "def check_tcp_port(ip: str, p")
+* 根拠: `check_tcp_port` 関数定義 (行番号: 78 / 抜粋: "def check_tcp_port(ip: str, p")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (ステータスとレイテンシを含む辞書)
-* 根拠: `check_tcp_port` 関数定義と返却値 (行番号: 69 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `check_tcp_port` 関数定義と返却値 (行番号: 78 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: TCPソケットの作成と通信試行。
-* 根拠: `asyncio.open_connection` 呼び出し (行番号: 81 / 抜粋: "future = asyncio.open_connecti")
+* 根拠: `asyncio.open_connection` 呼び出し (行番号: 92 / 抜粋: "future = asyncio.open_connecti")
 
 
 * **エラーハンドリング**: `TimeoutError`, `ConnectionRefusedError`, `OSError` などの接続失敗をキャッチして対応するステータスを返却。例外発生時も明示的にwriterリソースを解放 (`finally`) する。
-* 根拠: `except` / `finally` ブロック (行番号: 92-106 / 抜粋: "except asyncio.TimeoutError:")
+* 根拠: `except` / `finally` ブロック (行番号: 102-118 / 抜粋: "except asyncio.TimeoutError:")
 
 
 
 ### `monitor_camera`
 
 * **役割**: 単一のカメラ設定情報を受け取り、Pingチェック（再試行含む）とTCPポートチェック（Ping成功時のみ）を実行、ログ保存用の辞書データを作成する。IPが存在しない場合は処理をスキップする。
-* 根拠: `monitor_camera` 関数内処理 (行番号: 110-143 / 抜粋: "1. Ping Check (with Retry)")
+* 根拠: `monitor_camera` 関数内処理 (行番号: 121-176 / 抜粋: "1. Ping Check (with Retry)")
 
 
 * **引数/リクエスト**: `cam_config: Dict[str, Any]` (カメラ設定の辞書)
-* 根拠: `monitor_camera` 関数定義 (行番号: 110 / 抜粋: "cam_config: Dict[str, Any]")
+* 根拠: `monitor_camera` 関数定義 (行番号: 121 / 抜粋: "cam_config: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (監視結果のデータ辞書。IPがない場合はNone)
-* 根拠: `monitor_camera` 返却値 (行番号: 110 / 抜粋: "Optional[Dict[str, Any]]:")
+* 根拠: `monitor_camera` 返却値 (行番号: 121 / 抜粋: "Optional[Dict[str, Any]]:")
 
 
 * **副作用**: なし。
-* 根拠: 外部リソース変更なし (行番号: 110-160 / 抜粋: "return { "Timestamp": datetime")
+* 根拠: 外部リソース変更なし (行番号: 121-176 / 抜粋: "return { "Timestamp": datetime")
 
 
 * **エラーハンドリング**: 引数の辞書に "ip" キーがない場合、警告ログを出力しNoneを返して終了する。
-* 根拠: `if not ip:` ブロック (行番号: 121-123 / 抜粋: "logger.warning(f"Skipping came")
+* 根拠: `if not ip:` ブロック (行番号: 134-136 / 抜粋: "logger.warning(f"Skipping came")
 
 
 
 ### `init_csv`
 
 * **役割**: ログ保存先のディレクトリとCSVファイルが存在しない場合、それらを作成してヘッダーを書き込む。
-* 根拠: `init_csv` 関数内処理 (行番号: 163-172 / 抜粋: "ディレクトリがない場合は作成（念のため）")
+* 根拠: `init_csv` 関数内処理 (行番号: 179-192 / 抜粋: "ディレクトリがない場合は作成（念のため）")
 
 
 * **引数/リクエスト**: なし。
-* 根拠: `init_csv` 関数定義 (行番号: 163 / 抜粋: "def init_csv() -> None:")
+* 根拠: `init_csv` 関数定義 (行番号: 179 / 抜粋: "def init_csv() -> None:")
 
 
 * **戻り値/レスポンス**: なし (`None`)。
-* 根拠: `init_csv` 関数定義 (行番号: 163 / 抜粋: "-> None:")
+* 根拠: `init_csv` 関数定義 (行番号: 179 / 抜粋: "-> None:")
 
 
 * **副作用**: ファイルシステムへのディレクトリおよびファイル作成、書き込みアクセス。
-* 根拠: `os.makedirs` および `open(CSV_FILE, 'w')` (行番号: 166-170 / 抜粋: "os.makedirs(os.path.dirname(CS")
+* 根拠: `os.makedirs` および `open(CSV_FILE, 'w')` (行番号: 183-186 / 抜粋: "os.makedirs(os.path.dirname(CS")
 
 
 * **エラーハンドリング**: 初期化失敗の例外をキャッチし、ログを記録するがプロセスは停止させない。
-* 根拠: `except Exception as e:` ブロック (行番号: 173-175 / 抜粋: "logger.critical(f"Failed to in")
+* 根拠: `except Exception as e:` ブロック (行番号: 190-192 / 抜粋: "logger.critical(f"Failed to in")
 
 
 
 ### `main`
 
 * **役割**: 起動待機後、CSV初期化を行い、定期的な監視ループ (`CHECK_INTERVAL`) を実行する。複数カメラの監視を非同期で並列実行し、結果をCSVへ追記し異常時には警告ログを出力する。
-* 根拠: `main` 関数内のループおよび非同期タスク並列処理 (行番号: 178-223 / 抜粋: "メイン監視ループ。")
+* 根拠: `main` 関数内のループおよび非同期タスク並列処理 (行番号: 195-240 / 抜粋: "メイン監視ループ。")
 
 
 * **引数/リクエスト**: なし。
-* 根拠: `main` 関数定義 (行番号: 178 / 抜粋: "async def main() -> None:")
+* 根拠: `main` 関数定義 (行番号: 195 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: なし (`None`)。
-* 根拠: `main` 関数定義 (行番号: 178 / 抜粋: "-> None:")
+* 根拠: `main` 関数定義 (行番号: 195 / 抜粋: "-> None:")
 
 
 * **副作用**: CSVファイルへの追記書き込み処理。
-* 根拠: `open(CSV_FILE, 'a')` (行番号: 206 / 抜粋: "with open(CSV_FILE, 'a', newli")
+* 根拠: `open(CSV_FILE, 'a')` (行番号: 222 / 抜粋: "with open(CSV_FILE, 'a', newli")
 
 
 * **エラーハンドリング**: CSV書き込み失敗時、およびメインループ内での予期せぬエラー時に例外をキャッチしログ出力する。キーボード割込 (`KeyboardInterrupt`) はファイル末尾でハンドリング。
-* 根拠: `try-except` ブロック群 (行番号: 205-223 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック群 (行番号: 225-226, 236-237 / 抜粋: "except Exception as e:")
 
 
 
