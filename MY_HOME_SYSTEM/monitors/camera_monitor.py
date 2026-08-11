@@ -70,7 +70,9 @@ active_pullpoints: List[Any] = []
 def cleanup_handler(signum: int, frame: Any) -> None:
     """プロセス終了時のクリーンアップ。"""
     logger.info(f"🛑 Shutdown signal ({signum}) received. Cleaning up subscriptions...")
-    for svc in active_pullpoints:
+    # 他スレッド(monitor_single_camera)が同時に active_pullpoints を変更しうるため、
+    # イテレーション中の RuntimeError(list changed size)を避けてコピーを走査する
+    for svc in list(active_pullpoints):
         try:
             if hasattr(svc, 'Unsubscribe'):
                 svc.Unsubscribe()
@@ -98,7 +100,7 @@ def is_host_reachable(ip: str) -> bool:
             timeout=3
         )
         return res.returncode == 0
-    except (subprocess.TimeoutExpired, Exception) as e:
+    except Exception as e:
         logger.debug(f"Ping execution failed for {ip}: {e}")
         return False
 
@@ -178,8 +180,12 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     if target_time is None:
         target_time = dt_class.now()
 
-    nas_folder = cam_conf.get("nas_folder")
-    if not nas_folder or not os.path.exists(nas_folder):
+    # nas_folder は NVR録画ベースディレクトリ配下の「フォルダ名」であり、絶対パスではない
+    # (camera_service.py の get_rtsp_url等と同じ解決ロジックに合わせる)
+    nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
+    nas_folder_name = cam_conf.get("nas_folder") or cam_conf["name"]
+    nas_folder = os.path.join(nvr_base_dir, nas_folder_name)
+    if not os.path.exists(nas_folder):
         # 設計書準拠: 介入が必要なエラー(NASマウント外れ等)は ERROR
         logger.error(f"❌ [{cam_conf['name']}] NAS folder not found or unmounted: {nas_folder}")
         return None
@@ -260,18 +266,6 @@ def save_image_from_stream(cam_name: str, event_type: str = "motion") -> Optiona
         logger.error(f"❌ [{cam_name}] Failed to save image to {filepath}: {e}")
         return None
 
-def close_camera_session(camera_instance: Any):
-    """ONVIFカメラの内部セッションを強制的に閉じる"""
-    try:
-        if camera_instance:
-            # zeepのtransport内にあるsessionを閉じる
-            if hasattr(camera_instance, 'devicemgmt'):
-                 camera_instance.devicemgmt.transport.session.close()
-            elif hasattr(camera_instance, 'transport'):
-                 camera_instance.transport.session.close()
-    except Exception as e:
-        logger.debug(f"Session close warning: {e}")
-
 def force_close_session(service_obj: Any) -> None:
     """
     ONVIFService, ONVIFCamera, または zeep Client が保持する
@@ -336,7 +330,7 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
         logger.debug(f"🕵️ [TOPIC AUDIT] {cam_name} | Topic: {topic_str} | Data: {debug_val}")
 
         # 3. 早期リターン（対象外イベント）
-        if not is_motion and not ('RuleEngine/CellMotionDetector/Motion' in topic_str and str(debug_val).lower() in ['true', '1']):
+        if not is_motion:
             # 動体検知ではない場合、ここで処理を終了（finallyへ飛ぶ）
             return
 
@@ -360,7 +354,7 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
         values = (now_str, cam_name, cam_conf['id'], "ONVIF_CAMERA", "ON")
 
         save_log_generic("device_records", columns, values)
-        save_image_from_stream(cam_conf, "motion")
+        save_image_from_stream(cam_name, "motion")
         
     except Exception as e:
         logger.warning(f"⚠️ [{cam_name}] Event Parse Error: {e} | Trace: {traceback.format_exc().splitlines()[-1]}")
@@ -557,9 +551,10 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     try:
                         alert_msg: str = f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています（連続{consecutive_errors}回失敗）。\n詳細: {err_msg}"
                         send_push(
-                            config.LINE_USER_ID or "", 
-                            [{"type": "text", "text": alert_msg}], 
-                            target="discord"
+                            config.LINE_USER_ID or "",
+                            [{"type": "text", "text": alert_msg}],
+                            target="discord",
+                            channel="error"
                         )
                         logger.info(f"📤 [{cam_name}] 管理者へ障害通知を送信しました。")
                     except Exception as push_err:
@@ -571,18 +566,12 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             if current_pullpoint in active_pullpoints: 
                 active_pullpoints.remove(current_pullpoint)
             
-            # ホストが生きている場合のみ緊急診断とポートローテーションを実行
+            # ホストが生きている場合のみ緊急診断を実行
             if is_host_reachable(ip_address):
                 perform_emergency_diagnosis(ip_address)
-                
-                if consecutive_errors >= 3:
-                    old_port: int = port_candidates[0]
-                    port_candidates.append(port_candidates.pop(0))
-                    new_port: int = port_candidates[0]
-                    logger.warning(f"🔄 [{cam_name}] Switching port from {old_port} to {new_port}")
             else:
-                logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping port rotation.")
-                
+                logger.warning(f"⚠️ [{cam_name}] Host is unreachable. Skipping diagnosis.")
+
             logger.warning(
                 f"⚠️ [{cam_name}] 接続失敗 (Connection/ONVIF Error). "
                 f"{consecutive_errors}回目の失敗。{wait_time_fatal}秒間監視をサスペンドします。"
