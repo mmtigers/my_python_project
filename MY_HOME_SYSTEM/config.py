@@ -163,6 +163,11 @@ LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")
 LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
 
+# SwitchBot WebhookはLINEと異なり署名検証機構がないため、
+# 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
+# 未設定の場合は従来通り検証なし（後方互換）。
+SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+
 # Discord Webhooks
 DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")
 DISCORD_WEBHOOK_ERROR_CAM: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR_CAM")
@@ -398,6 +403,15 @@ TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
 # NVR録画ファイルのベースディレクトリ
 if 'NVR_RECORD_DIR' not in locals():
     NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
+
+# ==========================================
+# Retention / Cleanup Settings
+# ==========================================
+# NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
+RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
+# DBバックアップの保持日数
+DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))
+DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
 # ==========================================
 # 7. Sound & Family

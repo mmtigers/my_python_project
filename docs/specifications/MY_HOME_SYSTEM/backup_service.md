@@ -34,13 +34,13 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SQLITE_DB_PATH` | 定義元が存在せず、バックアップ対象の元DBパスの実体・値が不明 | `config.SQLITE_DB_PATH` (行番号: 26 / 抜粋: "src_db_path = config.SQLIT...") |
-| `config.BASE_DIR` | 定義元が存在せず、一時ディレクトリのベースパスの実体・値が不明 | `config.BASE_DIR` (行番号: 31 / 抜粋: "temp_dir = Path(config.BAS...") |
-| `config.NAS_PROJECT_ROOT` | 定義元が存在せず、NASのルートパスの実体・値が不明 | `getattr(config, "NAS_PROJE..."` (行番号: 33 / 抜粋: "nas_root = getattr(config,...") |
-| `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 33 / 抜粋: "os.path.join(config.NAS_MO...") |
-| `config.LINE_USER_ID` | 定義元が存在せず、通知先IDの実体が不明 | `getattr(config, "LINE_USER..."` (行番号: 68 / 抜粋: "user_id=getattr(config, "L...") |
+| `config.SQLITE_DB_PATH` | 定義元が存在せず、バックアップ対象の元DBパスの実体・値が不明 | `config.SQLITE_DB_PATH` (行番号: 27 / 抜粋: "src_db_path = config.SQLIT...") |
+| `config.BASE_DIR` | 定義元が存在せず、一時ディレクトリのベースパスの実体・値が不明 | `config.BASE_DIR` (行番号: 32 / 抜粋: "temp_dir = Path(config.BAS...") |
+| `config.NAS_PROJECT_ROOT` | 定義元が存在せず、NASのルートパスの実体・値が不明 | `getattr(config, "NAS_PROJE..."` (行番号: 34 / 抜粋: "nas_root = getattr(config,...") |
+| `config.NAS_MOUNT_POINT` | 定義元が存在せず、NASマウントポイントの実体・値が不明 | `os.path.join(config.NAS_MO..."` (行番号: 34 / 抜粋: "os.path.join(config.NAS_MO...") |
+| `config.LINE_USER_ID` | 定義元が存在せず、通知先IDの実体が不明 | `getattr(config, "LINE_USER..."` (行番号: 79 / 抜粋: "user_id=getattr(config, "L...") |
 | `core.logger.setup_logging` | 実装が提供されておらず、ログの出力先・出力形式が不明 | `setup_logging("backup")` (行番号: 15 / 抜粋: "logger = setup_logging("ba...") |
-| `common.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 67 / 抜粋: "send_push(") |
+| `common.send_push` | 実装が提供されておらず、実際の通信方式や成否の扱いが不明 | `send_push(...)` (行番号: 78 / 抜粋: "send_push(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -54,7 +54,7 @@
 ### `perform_backup`
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
-* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜62 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜73 / 抜粋: "def perform_backup() -> Tu...")
 
 
 * **引数/リクエスト**: なし
@@ -62,40 +62,40 @@
 
 
 * **戻り値/レスポンス**: `Tuple[bool, str, float]`。成功時は `(True, "バックアップ完了", バックアップサイズMB)`、失敗時は `(False, エラーメッセージ, 0.0)` を返す。
-* 根拠: `return True, "バックアップ完了", local_size_mb` および `return False, str(e), 0.0` (行番号: 55, 62 / 抜粋: "return True, "バックアップ完了",...")
+* 根拠: `return True, "バックアップ完了", local_size_mb` および `return False, str(e), 0.0` (行番号: 64, 73 / 抜粋: "return True, "バックアップ完了",...")
 
 
 * **副作用**: ローカルに一時ディレクトリおよびDBファイルを作成、`sqlite3` によるDBの読み取り・書き込み、NASディレクトリへファイルをコピー出力、一時ファイルの削除、標準出力（ログ出力）、外部API呼び出し（`send_push`）。
-* 根拠: `src_conn.backup(...)`、`shutil.copy2(...)`、`os.remove(...)` (行番号: 42, 50, 54 / 抜粋: "src_conn.backup(dst_conn, ...")
+* 根拠: `src_conn.backup(...)`、`shutil.copy2(...)`、`os.remove(...)` (行番号: 45, 58, 62 / 抜粋: "src_conn.backup(dst_conn, ...")
 
 
 * **エラーハンドリング**:
 * NASディレクトリ作成時に `PermissionError` または `OSError` が発生した場合、エラーを通知した上で例外を再送出（`raise`）する。
 * 処理全体を `try...except Exception as e` で囲み、あらゆる例外を捕捉して `_notify_and_log_error` へ渡し、一時ファイルが存在する場合は削除して失敗のタプルを返す。
-* 根拠: `except (PermissionError, OSError) as e:` および `except Exception as e:` (行番号: 48〜50, 58〜62 / 抜粋: "except Exception as e:")
+* 根拠: `except (PermissionError, OSError) as e:` および `except Exception as e:` (行番号: 54〜56, 68〜73 / 抜粋: "except Exception as e:")
 
 
 
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 64〜71 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 75〜83 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 64 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 75 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 64 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 75 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
-* 根拠: `logger.error(...)`、`send_push(...)` (行番号: 66〜67 / 抜粋: "logger.error(f"❌ {message...")
+* 根拠: `logger.error(...)`、`send_push(...)` (行番号: 77〜78 / 抜粋: "logger.error(f"❌ {message...")
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 64〜71 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 75〜83 / 抜粋: "def _notify_and_log_error(...)")
 
 
 
@@ -178,7 +178,7 @@ graph TD
 * `common` モジュールから `setup_logging` をインポートした後、直後に `core.logger` の `setup_logging` で上書きしており、未使用のインポートが存在する。
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * `_notify_and_log_error` の `send_push` 呼び出しにおいて、`user_id` に `config.LINE_USER_ID` を指定しているにもかかわらず、引数として `target="discord"` を指定しており、設定意図と実態が不整合を起こしている可能性がある。
-* NASディレクトリ作成失敗時のエラーハンドリング（48〜50行目）で `_notify_and_log_error` を呼び出した後 `raise` しているため、外側の `except Exception as e:` （58行目）で再度例外が捕捉され、同一エラーに対して `_notify_and_log_error` が二重に呼び出される構造になっている。
+* NASディレクトリ作成失敗時のエラーハンドリング（54〜56行目）で `_notify_and_log_error` を呼び出した後 `raise` しているため、外側の `except Exception as e:` （68行目）で再度例外が捕捉され、同一エラーに対して `_notify_and_log_error` が二重に呼び出される構造になっている。
 
 ## 9. 不明事項一覧
 

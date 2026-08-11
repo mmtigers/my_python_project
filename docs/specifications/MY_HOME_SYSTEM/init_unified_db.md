@@ -9,7 +9,7 @@
 
 ## 2. ファイルの概要
 
-本ファイルは、SQLiteデータベースの初期化とスキーマの整合性検証を行うスクリプトです。システムの稼働に必要な各種テーブル群（Core Tables、Legacy Tables、Game & Quest System等のトランジション用テーブル）を `CREATE TABLE IF NOT EXISTS` 文を用いて作成し、主要なテーブルに期待されるカラムが正しく定義されているかを `PRAGMA table_info` を使用して自動検証します。
+本ファイルは、SQLiteデータベースの初期化とスキーマの整合性検証を行うスクリプトです。システムの稼働に必要な各種テーブル群（Core Tables、Legacy Tables、Game & Quest System等のトランジション用テーブル）を `CREATE TABLE IF NOT EXISTS` 文を用いて作成し、高頻度書き込みテーブル（`power_usage`, `switchbot_meter_logs`, `device_records`）へのインデックスを`CREATE INDEX IF NOT EXISTS`で作成し、バージョン管理されたマイグレーション（`migrations/`配下）を適用したうえで、主要なテーブルに期待されるカラムが正しく定義されているかを `PRAGMA table_info` を使用して自動検証します。
 
 ## 3. 外部依存関係
 
@@ -22,6 +22,7 @@
 | `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional）に使用 | 根拠: `from typing import List...` (行番号取得不可 / 抜粋: "from typing import List, Dict") |
 | `config` | カスタムモジュール | データベースのパスやテーブル名の定数を取得 | 根拠: `import config` (行番号取得不可 / 抜粋: "import config") |
 | `common` | カスタムモジュール | ロガーの初期化やDBカーソルの取得に使用 | 根拠: `import common` (行番号取得不可 / 抜粋: "import common") |
+| `core.migrations.apply_pending_migrations` | カスタムモジュール | `migrations/`配下のバージョン管理されたマイグレーションSQLの適用 | 根拠: `from core.migrations import apply_pending_migrations` (抜粋: "from core.migrations import apply_pending_migrations") |
 
 ### ブラックボックスとなる外部要素
 
@@ -59,8 +60,8 @@
 
 ### `init_db`
 
-* **役割**: ロギング開始後、`common.get_db_cursor` でカーソルを取得し、WALモードを有効化。その後、アプリケーションで利用する全テーブル（Core, Legacy, Game/Quest等）の `CREATE TABLE IF NOT EXISTS` 文を実行し、最後に `sqlite3.connect` を用いて `validate_schema_integrity` を呼び出す。
-* 根拠: `def init_db() -> None:` (行番号取得不可 / 抜粋: "def init_db() -> None:")
+* **役割**: ロギング開始後、`common.get_db_cursor` でカーソルを取得し、WALモードを有効化。その後、アプリケーションで利用する全テーブル（Core, Legacy, Game/Quest等）の `CREATE TABLE IF NOT EXISTS` 文、高頻度書き込みテーブル向けの `CREATE INDEX IF NOT EXISTS` 文を実行し、`apply_pending_migrations(cur.connection)` でバージョン管理されたマイグレーションを適用したうえで、最後に `sqlite3.connect` を用いて `validate_schema_integrity` を呼び出す。
+* 根拠: `def init_db() -> None:` (行番号取得不可 / 抜粋: "def init_db() -> None:")、`apply_pending_migrations(cur.connection)` (抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **引数/リクエスト**: なし
@@ -71,8 +72,8 @@
 * 根拠: 戻り値の型アノテーション (行番号取得不可 / 抜粋: "-> None:")
 
 
-* **副作用**: データベースファイルへのテーブル作成（書き込み処理）、設定変更（`PRAGMA journal_mode=WAL;`）、および標準出力を伴うログ記録。
-* 根拠: `cur.execute` によるSQL実行 (行番号取得不可 / 抜粋: "cur.execute('''")
+* **副作用**: データベースファイルへのテーブル作成（書き込み処理）、設定変更（`PRAGMA journal_mode=WAL;`）、`power_usage`/`switchbot_meter_logs`/`device_records`へのインデックス作成、`core.migrations.apply_pending_migrations`によるマイグレーションSQLの適用（`schema_migrations`テーブルへの記録を含む）、および標準出力を伴うログ記録。
+* 根拠: `cur.execute` によるSQL実行 (行番号取得不可 / 抜粋: "cur.execute('''")、インデックス作成 (抜粋: "CREATE INDEX IF NOT EXISTS idx_power_usage_device_ts")、マイグレーション適用 (抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **エラーハンドリング**:
@@ -97,7 +98,9 @@ flowchart TD
     SetWAL -- 例外発生 --> LogWALError[警告ログ出力]
     SetWAL -- 正常 --> CreateTables[各テーブルの CREATE TABLE IF NOT EXISTS 実行]
     LogWALError --> CreateTables
-    CreateTables --> ConnectDB{外部: sqlite3.connect}
+    CreateTables --> CreateIndexes[power_usage等への<br>CREATE INDEX IF NOT EXISTS 実行]
+    CreateIndexes --> ApplyMigrations[外部: apply_pending_migrations<br>migrations/配下のSQLを適用]
+    ApplyMigrations --> ConnectDB{外部: sqlite3.connect}
     ConnectDB --> CallValidate[validate_schema_integrity 呼び出し]
     
     subgraph validate_schema_integrity処理
@@ -140,10 +143,12 @@ graph TD
         config[config モジュール]
         common[common モジュール]
         sqlite3[sqlite3 モジュール]
+        migrations["core.migrations (apply_pending_migrations)"]
     end
 
     subgraph データベース
         SQLiteDB[(SQLite Database)]
+        MigrationFiles["migrations/*.sql"]
     end
 
     logger -->|初期化依存| common
@@ -151,6 +156,9 @@ graph TD
     init_db -->|カーソル取得| common
     init_db -->|コネクション取得| sqlite3
     init_db -->|DB操作| SQLiteDB
+    init_db -->|マイグレーション適用| migrations
+    migrations -->|SQL読み込み| MigrationFiles
+    migrations -->|DB操作| SQLiteDB
     init_db -->|関数呼び出し| validate_schema_integrity
     validate_schema_integrity -->|DB情報取得| SQLiteDB
     validate_schema_integrity -->|ログ出力| logger
@@ -170,7 +178,8 @@ graph TD
 * `init_db` 内でテーブル作成に `common.get_db_cursor(commit=True)` を使用している一方、その直後の `validate_schema_integrity` 実行時には別途 `sqlite3.connect(config.SQLITE_DB_PATH)` で新規コネクションを張り直している。
 * `validate_schema_integrity` で定義されている `expected_schemas` 辞書にはすべての作成テーブルが網羅されているわけではなく、一部の主要テーブルのみが検証対象となっている。
 * WALモードの有効化 (`PRAGMA journal_mode=WAL;`) に失敗した場合でも、例外をキャッチして処理を継続する設計となっている。
-* 複数の `CREATE TABLE` において、外部キー制約を利用しているテーブル (`user_inventory` など) があるが、`PRAGMA foreign_keys = ON;` を実行する記述が本ファイル内には存在しない。
+* 複数の `CREATE TABLE` において、外部キー制約を利用しているテーブル (`user_inventory` など) があるが、`PRAGMA foreign_keys = ON;` を実行する記述は本ファイル内には存在しない。ただし `init_db` が使用する `common.get_db_cursor`（実体は `core/database.py` の `get_db_cursor`）が接続確立時に毎回 `PRAGMA foreign_keys=ON;` を発行するため、本ファイル経由のDB操作では外部キー制約は有効化された状態になる。
+* `apply_pending_migrations` は `migrations/` 配下の未適用SQLファイルをファイル名昇順で適用し、`schema_migrations` テーブルで適用済みバージョンを管理する。既に別経路（`services/quest_service.py` の実行時チェック等）でカラムが追加済みの環境に対して再適用された場合、`ALTER TABLE` の失敗(`sqlite3.OperationalError`)は警告ログに留め処理を継続する。
 
 ## 9. 不明事項一覧
 
@@ -179,7 +188,7 @@ graph TD
 | 各テーブルの実際のテーブル名 | 定数として管理されており、本ファイル内では定義されていないため。 | `config.py` |
 | データベースの物理保存パス | `SQLITE_DB_PATH` で指定されているが実際の文字列が不明なため。 | `config.py` |
 | `get_db_cursor` の詳細挙動 | 例外発生時のロールバック処理などがどのように行われているか不明なため。 | `common.py` |
-| 外部キー制約の有効化状態 | 本ファイルで外部キー制約を用いたテーブルを生成しているが、制約の有効化状態が呼び出し元の挙動に依存するため。 | DB接続を管理するファイル (例: `common.py`) |
+| `migrations/`配下のSQL内容 | 実際にどのようなマイグレーションが登録されているか（対象テーブル・カラム）が本ファイルからは不明なため。 | `migrations/*.sql`, `core/migrations.py` |
 
 ## 10. 自己検証結果
 

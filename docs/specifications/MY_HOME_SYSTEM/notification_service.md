@@ -82,116 +82,116 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 ### `_send_discord_webhook`
 
-* **役割**: Discordの指定チャンネル(error, report, notify)に対応するWebhook URLへテキストおよび画像データを含めたメッセージを送信する。
-* 根拠: [関数定義] (行番号: 30〜65 / 抜粋: "def _send_discord_webhook(...)")
+* **役割**: Discordの指定チャンネル(error, report, notify)に対応するWebhook URLへテキストおよび画像データを含めたメッセージを送信する。画像添付時はファイル名を指定してアップロードする。
+* 根拠: [関数定義] (行番号: 30〜71 / 抜粋: "def _send_discord_webhook(...)")
 
 
-* **引数/リクエスト**: `messages: List[Any]`, `image_data: Optional[bytes] = None`, `channel: str = "notify"`
-* 根拠: [関数定義] (行番号: 30 / 抜粋: "def _send_discord_webhook(messages...")
+* **引数/リクエスト**: `messages: List[Any]`, `image_data: Optional[bytes] = None`, `channel: str = "notify"`, `filename: str = "snapshot.jpg"`
+* 根拠: [関数定義] (行番号: 30 / 抜粋: "def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool:")
 
 
-* **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue)
-* 根拠: [戻り値] (行番号: 62 / 抜粋: "return res.status_code in [200, 204]")
+* **戻り値/レスポンス**: `bool` (HTTPステータスコードが200または204の場合にTrue、それ以外はFalse)
+* 根拠: [戻り値] (行番号: 64, 66, 68 / 抜粋: "if res.status_code not in [200, 204]:", "return False", "return True")
 
 
-* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行。
-* 根拠: [外部通信] (行番号: 58, 60 / 抜粋: "res = requests.post(url...")
+* **副作用**: 外部のDiscord Webhook URLへのHTTP POSTリクエストの実行（画像添付時は`files`パラメータで`filename`を指定してアップロード、タイムアウト60秒。テキストのみの場合はJSON送信、タイムアウト10秒）。
+* 根拠: [外部通信] (行番号: 58〜59, 61 / 抜粋: "files = {'file': (filename, image_data)}", "res = requests.post(url, files=files...")
 
 
-* **エラーハンドリング**: リクエスト時に例外が発生した場合、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。
-* 根拠: [例外処理] (行番号: 63〜65 / 抜粋: "except Exception as e: ... return False")
+* **エラーハンドリング**: HTTPステータスコードが200/204以外の場合、レスポンス内容を含めたエラーログを出力してFalseを返す。リクエスト時に例外が発生した場合も、エラーログを出力してFalseを返す。URLが設定されていない場合は早期リターンでFalseを返す。
+* 根拠: [ステータスコード判定] (行番号: 64〜66 / 抜粋: "logger.error(f"Discord API エラー: {res.status_code} - {res.text}")")、[例外処理] (行番号: 69〜71 / 抜粋: "except Exception as e: ... return False")
 
 
 
 ### `_send_line_push`
 
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
-* 根拠: [関数定義] (行番号: 67〜108 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 73〜114 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **引数/リクエスト**: `user_id: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 67 / 抜粋: "def _send_line_push(user_id: str...")
+* 根拠: [関数定義] (行番号: 73 / 抜粋: "def _send_line_push(user_id: str...")
 
 
 * **戻り値/レスポンス**: `bool` (送信成功時にTrue)
-* 根拠: [戻り値] (行番号: 104, 108 / 抜粋: "return True ... return False")
+* 根拠: [戻り値] (行番号: 110, 114 / 抜粋: "return True ... return False")
 
 
 * **副作用**: LINE APIへのHTTP POSTリクエスト実行。
-* 根拠: [外部通信] (行番号: 98〜103 / 抜粋: "line_bot_api.push_message(...)")
+* 根拠: [外部通信] (行番号: 102〜109 / 抜粋: "line_bot_api.push_message(...)")
 
 
 * **エラーハンドリング**: 送信対象のメッセージがない場合は警告ログを出力しFalse。送信処理中に例外が発生した場合はエラーログを出力しFalseを返す。
-* 根拠: [例外処理] (行番号: 106〜108 / 抜粋: "except Exception as e: ... return False")
+* 根拠: [例外処理] (行番号: 97〜99, 112〜114 / 抜粋: "except Exception as e: ... return False")
 
 
 
 ### `send_push`
 
-* **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。
-* 根拠: [関数定義] (行番号: 110〜132 / 抜粋: "def send_push(user_id: str...")
+* **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。
+* 根拠: [関数定義] (行番号: 116〜140 / 抜粋: "def send_push(user_id: str...")
 
 
-* **引数/リクエスト**: `user_id: str`, `messages: List[Any]`, `image_data: Optional[bytes] = None`, `target: str = "both"`, `channel: str = "notify"`
-* 根拠: [関数定義] (行番号: 110 / 抜粋: "def send_push(user_id: str...")
+* **引数/リクエスト**: `user_id: str`, `messages: List[Any]`, `image_data: Optional[bytes] = None`, `target: str = "both"`, `channel: str = "notify"`, `filename: str = "snapshot.jpg"`
+* 根拠: [関数定義] (行番号: 116 / 抜粋: "def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify", filename: str = "snapshot.jpg") -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 132 / 抜粋: "return success")
+* 根拠: [戻り値] (行番号: 140 / 抜粋: "return success")
 
 
-* **副作用**: `_send_discord_webhook` および `_send_line_push` の呼び出し。
-* 根拠: [関数呼び出し] (行番号: 115, 126 / 抜粋: "_send_discord_webhook(...)")
+* **副作用**: `_send_discord_webhook`（通常送信時および失敗時のフォールバック送信の計2箇所）および `_send_line_push` の呼び出し。
+* 根拠: [関数呼び出し] (行番号: 122, 133, 137 / 抜粋: "_send_discord_webhook(...)")
 
 
 * **エラーハンドリング**: 各送信関数の戻り値を確認し、失敗時はログ出力を行い `success` フラグをFalseにする。LINE失敗時はDiscordへフォールバック送信を実行する。
-* 根拠: [条件分岐] (行番号: 127〜130 / 抜粋: "logger.error('LINE送信失敗...')")
+* 根拠: [条件分岐] (行番号: 133〜138 / 抜粋: "logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")")
 
 
 
 ### `send_reply`
 
 * **役割**: LINE Messaging API (v3) を利用し、受け取ったリプライトークンに対して返信メッセージを送信する。
-* 根拠: [関数定義] (行番号: 134〜155 / 抜粋: "def send_reply(reply_token: str...")
+* 根拠: [関数定義] (行番号: 142〜165 / 抜粋: "def send_reply(reply_token: str...")
 
 
 * **引数/リクエスト**: `reply_token: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 134 / 抜粋: "def send_reply(reply_token: str...")
+* 根拠: [関数定義] (行番号: 142 / 抜粋: "def send_reply(reply_token: str...")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 151, 155 / 抜粋: "return True ... return False")
+* 根拠: [戻り値] (行番号: 162, 165 / 抜粋: "return True ... return False")
 
 
 * **副作用**: LINE APIへのHTTP POSTリクエスト実行。
-* 根拠: [外部通信] (行番号: 145〜150 / 抜粋: "line_bot_api.reply_message(...)")
+* 根拠: [外部通信] (行番号: 154〜161 / 抜粋: "line_bot_api.reply_message(...)")
 
 
 * **エラーハンドリング**: 例外発生時にエラーログを出力しFalseを返す。
-* 根拠: [例外処理] (行番号: 153〜155 / 抜粋: "except Exception as e: ... return False")
+* 根拠: [例外処理] (行番号: 163〜165 / 抜粋: "except Exception as e: ... return False")
 
 
 
 ### `get_line_message_quota`
 
 * **役割**: LINE Messaging API (v3) を利用し、LINEの当月のメッセージ送信可能枠を取得する。
-* 根拠: [関数定義] (行番号: 157〜165 / 抜粋: "def get_line_message_quota() ->...")
+* 根拠: [関数定義] (行番号: 167〜176 / 抜粋: "def get_line_message_quota() ->...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 157 / 抜粋: "def get_line_message_quota() ->...")
+* 根拠: [関数定義] (行番号: 167 / 抜粋: "def get_line_message_quota() ->...")
 
 
 * **戻り値/レスポンス**: `Optional[Any]`
-* 根拠: [戻り値] (行番号: 162, 165 / 抜粋: "return line_bot_api.get_message_quota()")
+* 根拠: [戻り値] (行番号: 173, 176 / 抜粋: "return line_bot_api.get_message_quota()")
 
 
 * **副作用**: LINE APIへのHTTP GETリクエスト実行。
-* 根拠: [外部通信] (行番号: 162 / 抜粋: "return line_bot_api.get_message_quota()")
+* 根拠: [外部通信] (行番号: 173 / 抜粋: "return line_bot_api.get_message_quota()")
 
 
 * **エラーハンドリング**: 例外発生時にエラーログを出力しNoneを返す。
-* 根拠: [例外処理] (行番号: 163〜165 / 抜粋: "except Exception as e: ... return None")
+* 根拠: [例外処理] (行番号: 174〜176 / 抜粋: "except Exception as e: ... return None")
 
 
 
@@ -279,13 +279,15 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | 使用されている各種Webhook URLやLINEアクセストークンなどの設定値の全体像を把握するため。 | 根拠: `config`からの変数読み込み (行番号: 20, 27, 33等) |
 | 中 | `core/logger.py` | システム全体のログフォーマットや出力先（ファイル出力の有無など）の仕様を確認するため。 | 根拠: `setup_logging`のインポート (行番号: 21) |
-| 中 | このモジュールを呼び出す各種サービス/コントローラー | `send_push`や`send_reply`に渡される`messages`オブジェクトの実体（v3 SDKオブジェクトなのか辞書型なのか）を特定するため。 | 根拠: 呼び出し元でオブジェクト化を推奨するコメント (行番号: 87) |
+| 中 | このモジュールを呼び出す各種サービス/コントローラー | `send_push`や`send_reply`に渡される`messages`オブジェクトの実体（v3 SDKオブジェクトなのか辞書型なのか）を特定するため。 | 根拠: 呼び出し元でオブジェクト化を推奨するコメント (行番号: 92〜93) |
 
 ## 8. 保守上の注意点
 
 * `json` および `logging` がインポートされているが使用されていない。
 * `_send_line_push` 内で、`type` が `"flex"` の辞書型メッセージの変換処理が `pass` となっており未実装である（呼び出し元でのオブジェクト化を前提としている）。
-* `_send_discord_webhook` ではリクエストに `timeout=10` がハードコードされている。
+* `_send_discord_webhook` のタイムアウトは送信内容によって異なる（画像添付時: `timeout=60`、テキストのみ: `timeout=10`）。いずれもハードコードされている。
+* `_send_discord_webhook` はHTTPステータスコードが200/204以外の場合、`res.text`を含めたエラー内容をログに出力してからFalseを返す（Discord API側のエラー原因特定を目的とした挙動）。
+* `send_push`および`_send_discord_webhook`には`filename`引数（デフォルト`"snapshot.jpg"`）があり、画像添付時のアップロードファイル名を呼び出し元から指定できる。MIMEタイプは明示せず、Discord側の拡張子判定に委ねている。
 * `send_push` 関数において、LINE送信失敗時にDiscordへのフォールバック通知を同期的に行っているため、レスポンスタイムが遅延する可能性がある。
 * LINEの設定 (`line_configuration`) はグローバル変数として保持されており、`config.LINE_CHANNEL_ACCESS_TOKEN` が無い場合は `None` のままとなる。
 
