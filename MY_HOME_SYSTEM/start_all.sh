@@ -67,8 +67,9 @@ echo "--- Start Home System Server ---"
 $PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
 echo "🚀 System started. Check logs/server_boot.log for details."
 
-# ★修正3: LAN内公開用にアドレス指定を追加
-$PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 0.0.0.0 > logs/dashboard_boot.log 2>&1 &
+# ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
+# (必要な場合は信頼できるリバースプロキシ経由でアクセスすること)
+$PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 > logs/dashboard_boot.log 2>&1 &
 echo "📊 Dashboard started."
 
 echo "✅ All systems go!"

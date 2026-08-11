@@ -1,44 +1,93 @@
 # MY_HOME_SYSTEM/financial_service.py
+import os
+import json
 import pandas as pd
 import numpy_financial as npf
 import streamlit as st
 import plotly.graph_objects as go
-from datetime import date
+from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import common
 
 # ロガー設定
 logger = common.setup_logging("FinancialService")
 
+# ==========================================
+# 個人の実際のローン条件は git 管理対象のソースに直書きせず、環境変数から読み込む。
+# (.env / .env.example 参照。未設定の場合、この機能を使う際に明確なエラーを出す)
+# ==========================================
+_FINANCIAL_START_DATE = os.getenv("FINANCIAL_START_DATE")  # 例: "2024-06-27"
+_FINANCIAL_TOTAL_AMOUNT = os.getenv("FINANCIAL_TOTAL_AMOUNT")  # 例: "50000000"
+_FINANCIAL_TOTAL_MONTHS = os.getenv("FINANCIAL_TOTAL_MONTHS")  # 例: "420"
+_FINANCIAL_INITIAL_PAYMENT = os.getenv("FINANCIAL_INITIAL_PAYMENT")  # 例: "140000"
+_FINANCIAL_RATE_SCHEDULE = os.getenv("FINANCIAL_RATE_SCHEDULE")  # 例: '[["2024-06-01","2024-09-30",0.5]]'
+# 確定スケジュール終了後の変動予測の起点金利・起点日 (未設定ならスケジュール末尾から自動導出)
+_FINANCIAL_PROJECTION_BASE_RATE = os.getenv("FINANCIAL_PROJECTION_BASE_RATE")
+_FINANCIAL_PROJECTION_BASE_DATE = os.getenv("FINANCIAL_PROJECTION_BASE_DATE")
+
+
+def _parse_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
 class LoanSimulator:
     def __init__(self):
-        # --- 基本条件 (2024/06/27 開始) ---
-        self.START_DATE = date(2024, 6, 27)
-        self.TOTAL_AMOUNT = 54_000_000
-        self.TOTAL_MONTHS = 416
-        self.INITIAL_PAYMENT = 143_205
-        
-        # --- 確定している金利スケジュール ---
-        # ★修正: 「2025/4以降ずっと0.975」という設定を削除し、計算ロジックに任せるように変更
-        self.FIXED_RATES = [
-            (date(2024, 6, 1), date(2024, 9, 30), 0.575),
-            (date(2024, 10, 1), date(2025, 3, 31), 0.725),
-            # ここにあった (date(2025, 4, 1), None, 0.975) を削除
+        # --- 基本条件 (環境変数から読み込み。未設定の場合はエラーとする) ---
+        missing = [
+            name for name, val in [
+                ("FINANCIAL_START_DATE", _FINANCIAL_START_DATE),
+                ("FINANCIAL_TOTAL_AMOUNT", _FINANCIAL_TOTAL_AMOUNT),
+                ("FINANCIAL_TOTAL_MONTHS", _FINANCIAL_TOTAL_MONTHS),
+                ("FINANCIAL_INITIAL_PAYMENT", _FINANCIAL_INITIAL_PAYMENT),
+                ("FINANCIAL_RATE_SCHEDULE", _FINANCIAL_RATE_SCHEDULE),
+            ] if not val
         ]
+        if missing:
+            raise RuntimeError(
+                "住宅ローンシミュレーション機能は未設定です。"
+                f"以下の環境変数を .env に設定してください: {', '.join(missing)} "
+                "(詳細は .env.example を参照)"
+            )
+
+        try:
+            self.START_DATE = _parse_date(_FINANCIAL_START_DATE)
+            self.TOTAL_AMOUNT = int(_FINANCIAL_TOTAL_AMOUNT)
+            self.TOTAL_MONTHS = int(_FINANCIAL_TOTAL_MONTHS)
+            self.INITIAL_PAYMENT = int(_FINANCIAL_INITIAL_PAYMENT)
+            raw_schedule = json.loads(_FINANCIAL_RATE_SCHEDULE)
+            self.FIXED_RATES = [
+                (_parse_date(start), _parse_date(end) if end else None, float(rate))
+                for start, end, rate in raw_schedule
+            ]
+        except (ValueError, TypeError, json.JSONDecodeError) as e:
+            raise RuntimeError(f"住宅ローンシミュレーションの環境変数の形式が不正です: {e}")
+
+        # 確定スケジュール終了後の変動予測の起点 (未設定ならスケジュール末尾から自動導出)
+        if _FINANCIAL_PROJECTION_BASE_RATE:
+            self._projection_base_rate = float(_FINANCIAL_PROJECTION_BASE_RATE)
+        else:
+            self._projection_base_rate = self.FIXED_RATES[-1][2] if self.FIXED_RATES else 1.0
+
+        if _FINANCIAL_PROJECTION_BASE_DATE:
+            self._projection_base_date = _parse_date(_FINANCIAL_PROJECTION_BASE_DATE)
+        elif self.FIXED_RATES and self.FIXED_RATES[-1][1]:
+            self._projection_base_date = self.FIXED_RATES[-1][1] + relativedelta(days=1)
+        else:
+            self._projection_base_date = self.START_DATE
 
     def _get_scheduled_rate(self, current_date, future_rise_rate=0.0, max_rate=2.0):
         """指定年月時点の金利を取得する"""
-        
-        # 1. 確定スケジュールの確認 (2025/3まで)
+
+        # 1. 確定スケジュールの確認
         for start, end, rate in self.FIXED_RATES:
             if start <= current_date:
                 if end is None or current_date <= end:
                     return rate
-        
-        # 2. 変動予測 (2025/4/1 を基準に、毎年指定%ずつ上昇)
-        base_rate = 0.975
-        base_date = date(2025, 4, 1)
-        
+
+        # 2. 変動予測 (確定スケジュール終了後を基準に、毎年指定%ずつ上昇)
+        base_rate = self._projection_base_rate
+        base_date = self._projection_base_date
+
         if current_date >= base_date:
             # 経過年数 (2025=0年目, 2026=1年目...)
             years_passed = (current_date.year - base_date.year)
@@ -175,7 +224,11 @@ def render_simulation_tab():
     init_invest = s_stock + s_trust + s_pension
     init_cash = s_cash + s_point
 
-    loan_sim = LoanSimulator()
+    try:
+        loan_sim = LoanSimulator()
+    except RuntimeError as e:
+        st.error(f"⚠️ {e}")
+        return
     df_loan = loan_sim.calculate_schedule(future_rise_rate=future_rise, max_future_rate=max_rate_limit)
     
     months_to_sim = len(df_loan) + 120
