@@ -353,10 +353,18 @@ class QuestService:
             if last_hist and last_hist['completed_at']:
                 try:
                     last_time = datetime.datetime.fromisoformat(last_hist['completed_at'])
-                    now_check = datetime.datetime.now()
-                    if last_time.tzinfo is not None: 
-                        last_time = last_time.replace(tzinfo=None)
-                    
+                    # completed_at は common.get_now_iso() によりJST付きで保存される。
+                    # 以前はここで tzinfo を切り捨てた上で datetime.datetime.now()(サーバーのOSローカル時刻)
+                    # と比較していたため、サーバーのOSタイムゾーンがJST以外(例: GitHub ActionsのUTC)だと
+                    # 実時間で10秒経過しても差分が約9時間分ズレたままになり、同じクエストが
+                    # 約9時間もの間 429 (「少し時間を空けてから」)で完了できなくなる不具合があった。
+                    # tzinfoを保持したまま比較することで、サーバーのOSタイムゾーンに依存せず
+                    # 常に「実時間で10秒経過したか」を正しく判定する。
+                    if last_time.tzinfo is None:
+                        # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
+                        last_time = last_time.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+                    now_check = datetime.datetime.now(last_time.tzinfo)
+
                     if (now_check - last_time).total_seconds() < 10:
                         raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
                 except HTTPException:
