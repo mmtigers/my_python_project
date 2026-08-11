@@ -19,11 +19,14 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
     const expPercentage = Math.min(100, (currentExp / nextLevelExp) * 100);
     const expRemaining = nextLevelExp - currentExp;
 
-    // HP計算 (簡易ロジック: Lv * 10 + 50)
-    // APIに hp / max_hp があればそれを使う
-    const maxHp = (user.level * 10) + 50;
-    const currentHp = maxHp; // とりあえず満タン表示
-    const hpPercentage = 100;
+    // HPはバックエンド(MY_HOME_SYSTEM)が計算した値をそのまま使う。
+    // 個々のプレイヤーはダメージを受けない仕様のため hp は常に maxHp と等しいが、
+    // maxHp の値自体は calculate_max_hp(level) = level*20+5 で決まるため、
+    // フロント側で再計算せずAPIレスポンスの値を信頼する。
+    // 古いキャッシュ等でフィールドが欠けている場合は100%満タン表示にフォールバックする。
+    const maxHp = user.maxHp;
+    const currentHp = user.hp ?? maxHp ?? 0;
+    const hpPercentage = maxHp ? (currentHp / maxHp) * 100 : 100;
 
     return (
         <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-3 shadow-xl relative animate-in fade-in duration-300">
@@ -62,7 +65,7 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                             />
                             <div className="absolute inset-0 text-[8px] flex items-center justify-center text-white/80 font-bold leading-none">
                                 <span className="flex gap-0.5">
-                                    <CountUp value={currentHp} /> / {maxHp}
+                                    <CountUp value={currentHp} /> / {maxHp ?? '-'}
                                 </span>
                             </div>
                         </div>
