@@ -239,6 +239,17 @@ class DiscordNotifier:
                 response = requests.post(self.webhook_url, json=payload, timeout=10)
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response is not None else None
+                logger.error(f"Failed to send notification for {cast.name}: {e}")
+                if status in (401, 404):
+                    # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
+                    # 無駄なだけなので打ち切る（サーキットブレーカー）。
+                    logger.error(
+                        f"Discord Webhook returned {status} — URL is likely invalid or revoked. "
+                        "Aborting remaining notifications for this run."
+                    )
+                    break
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {e}")
 
