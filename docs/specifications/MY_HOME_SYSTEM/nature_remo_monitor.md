@@ -32,12 +32,12 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 143 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
-| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 144 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 147 / 抜粋: "("伊丹", config.NATURE_REMO_ACCE") |
+| `config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO` | 環境変数または定数の実値が別ファイルに定義されているため不明。 | `[main]` (行番号: 148 / 抜粋: "("高砂", config.NATURE_REMO_ACCE") |
 | `core.logger.setup_logging` | ログの出力先（標準出力、ファイルなど）およびフォーマットの実装が不明。 | `[トップレベル]` (行番号: 18 / 抜粋: "logger = setup_logging("nature") |
-| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 109 / 抜粋: "await sensor_service.process_p") |
-| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 131 / 抜粋: "await sensor_service.process_m") |
-| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 55 / 抜粋: "url_app = "[https://api.nature](https://www.google.com/search?q=https://api.nature).") |
+| `sensor_service.process_power_data` | 電力データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 113 / 抜粋: "await sensor_service.process_p") |
+| `sensor_service.process_meter_data` | 温湿度データをどこに保存・送信するのか、具体的な処理ロジックが不明。 | `[process_location]` (行番号: 135 / 抜粋: "await sensor_service.process_m") |
+| `Nature Remo API` | `api.nature.global` の正確なレスポンススキーマの全容（コード上でアクセスしているキー以外）が不明。 | `[fetch_data_sync]` (行番号: 59 / 抜粋: "url_app = "[https://api.nature](https://www.google.com/search?q=https://api.nature).") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -67,7 +67,7 @@
 ### `fetch_data_sync`
 
 * **役割**: Nature Remo APIに対して同期的にHTTP GETリクエストを行い、`appliances` と `devices` のデータを取得する。
-* 根拠: `[fetch_data_sync]` (行番号: 35〜70 / 抜粋: "def fetch_data_sync(location: ")
+* 根拠: `[fetch_data_sync]` (行番号: 35〜74 / 抜粋: "def fetch_data_sync(location: ")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIアクセストークン)
@@ -75,84 +75,84 @@
 
 
 * **戻り値/レスポンス**: `Dict[str, List[Dict[str, Any]]]` (取得結果を格納した辞書。トークンが空の場合は空辞書を返す)
-* 根拠: `[fetch_data_sync]` (行番号: 35〜70 / 抜粋: "return result")
+* 根拠: `[fetch_data_sync]` (行番号: 35〜74 / 抜粋: "return result")
 
 
 * **副作用**: 外部API (`https://api.nature.global`) へのネットワーク通信。
-* 根拠: `[fetch_data_sync]` (行番号: 56〜62 / 抜粋: "res_app = session.get(url_app,")
+* 根拠: `[fetch_data_sync]` (行番号: 59〜68 / 抜粋: "res_app = session.get(url_app,")
 
 
 * **エラーハンドリング**: 通信エラーなどすべての例外を `Exception` としてキャッチし、ロガーにエラー内容を出力して、取得できた範囲のデータを返す。
-* 根拠: `[fetch_data_sync]` (行番号: 66〜68 / 抜粋: "except Exception as e:")
+* 根拠: `[fetch_data_sync]` (行番号: 70〜72 / 抜粋: "except Exception as e:")
 
 
 
 ### `process_location`
 
 * **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。
-* 根拠: `[process_location]` (行番号: 74〜135 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 78〜139 / 抜粋: "async def process_location(loc")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
-* 根拠: `[process_location]` (行番号: 74 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 78 / 抜粋: "async def process_location(loc")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_location]` (行番号: 74 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 78 / 抜粋: "async def process_location(loc")
 
 
 * **副作用**: 外部サービス (`sensor_service.process_power_data`, `sensor_service.process_meter_data`) の非同期呼び出し、ログへの出力。
-* 根拠: `[process_location]` (行番号: 109〜131 / 抜粋: "await sensor_service.process_p")
+* 根拠: `[process_location]` (行番号: 113, 135 / 抜粋: "await sensor_service.process_p")
 
 
 * **エラーハンドリング**: なし（例外は上位に伝播するが、通信エラーは `fetch_data_sync` 内部で処理されるため辞書操作時のキーエラー等以外は発生しにくい）。
-* 根拠: `[process_location]` (行番号: 74〜135 / 抜粋: "async def process_location(loc")
+* 根拠: `[process_location]` (行番号: 78〜139 / 抜粋: "async def process_location(loc")
 
 
 
 ### `main`
 
 * **役割**: 伊丹と高砂の2つの拠点情報・トークンを定義し、トークンが存在する拠点についてのみ `process_location` を順次実行する。
-* 根拠: `[main]` (行番号: 138〜151 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[main]` (行番号: 138 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[main]` (行番号: 138 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
 
 
 * **副作用**: `process_location` の呼び出し。
-* 根拠: `[main]` (行番号: 149 / 抜粋: "await process_location(loc, to")
+* 根拠: `[main]` (行番号: 153 / 抜粋: "await process_location(loc, to")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[main]` (行番号: 138〜151 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
 
 
 
 ### `__main__` (エントリーポイント)
 
 * **役割**: スクリプトが直接実行された際、イベントループを起動して `main()` 関数を実行する。
-* 根拠: `[__main__]` (行番号: 153〜159 / 抜粋: "if **name** == "**main**":")
+* 根拠: `[__main__]` (行番号: 157〜163 / 抜粋: "if **name** == "**main**":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[__main__]` (行番号: 153 / 抜粋: "if **name** == "**main**":")
+* 根拠: `[__main__]` (行番号: 157 / 抜粋: "if **name** == "**main**":")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[__main__]` (行番号: 153〜159 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 157〜163 / 抜粋: "asyncio.run(main())")
 
 
 * **副作用**: 非同期イベントループの開始。
-* 根拠: `[__main__]` (行番号: 155 / 抜粋: "asyncio.run(main())")
+* 根拠: `[__main__]` (行番号: 159 / 抜粋: "asyncio.run(main())")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして INFO ログを出力。その他の予期せぬ例外 (`Exception`) をキャッチし、CRITICAL ログを出力する。
-* 根拠: `[__main__]` (行番号: 156〜159 / 抜粋: "except KeyboardInterrupt:")
+* 根拠: `[__main__]` (行番号: 160〜163 / 抜粋: "except KeyboardInterrupt:")
 
 
 
@@ -213,8 +213,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/sensor_service.py` | 抽出された電力データや温湿度データが最終的にどのようにDBに保存されるか、あるいは別システムに送信されるかを確認するため。 | `[process_location]` (行番号: 109, 131) |
-| 中 | `config.py` | 利用されている Nature Remo のアクセストークンの設定方法と、その他の環境変数の依存関係を把握するため。 | `[main]` (行番号: 143, 144) |
+| 高 | `services/sensor_service.py` | 抽出された電力データや温湿度データが最終的にどのようにDBに保存されるか、あるいは別システムに送信されるかを確認するため。 | `[process_location]` (行番号: 113, 135) |
+| 中 | `config.py` | 利用されている Nature Remo のアクセストークンの設定方法と、その他の環境変数の依存関係を把握するため。 | `[main]` (行番号: 147, 148) |
 | 低 | `core/logger.py` | ログの永続化先（ファイルローテーションの有無など）やフォーマット規則を把握するため。 | `[トップレベル]` (行番号: 18) |
 
 ## 8. 保守上の注意点

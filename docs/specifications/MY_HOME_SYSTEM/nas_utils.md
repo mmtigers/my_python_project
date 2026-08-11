@@ -38,7 +38,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 ### `attempt_remount`
 
 * **役割**: OSの`mount`コマンドを`sudo`権限付きで実行し、指定されたマウントポイントの再マウントを試みる。
-* 根拠: `attempt_remount` (行番号: 19〜40 / 抜粋: "res = subprocess.run...")
+* 根拠: `attempt_remount` (行番号: 19〜45 / 抜粋: "res = subprocess.run...")
 
 
 * **引数/リクエスト**: `mount_point: str` (対象のマウントポイント)
@@ -46,84 +46,84 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 
 
 * **戻り値/レスポンス**: `bool` (コマンドが正常終了(`returncode == 0`)した場合はTrue、それ以外はFalse)
-* 根拠: `attempt_remount`戻り値 (行番号: 33, 36, 39 / 抜粋: "return True", "return False")
+* 根拠: `attempt_remount`戻り値 (行番号: 39, 42, 45 / 抜粋: "return True", "return False")
 
 
 * **副作用**: OSコマンド(`sudo mount`)の実行、ログの出力
-* 根拠: `attempt_remount`内処理 (行番号: 29, 27 / 抜粋: "res = subprocess.run...", "logger.info(...)")
+* 根拠: `attempt_remount`内処理 (行番号: 28, 31 / 抜粋: "res = subprocess.run...", "logger.info(...)")
 
 
 * **エラーハンドリング**: `Exception`をキャッチし、エラーログを出力してFalseを返す。
-* 根拠: `attempt_remount`例外処理 (行番号: 37〜39 / 抜粋: "except Exception as e:")
+* 根拠: `attempt_remount`例外処理 (行番号: 43〜45 / 抜粋: "except Exception as e:")
 
 
 
 ### `sync_fallback_to_nas`
 
 * **役割**: ローカルのフォールバックディレクトリ内に存在するファイル・ディレクトリを、NASのターゲットディレクトリへコピーし、コピー成功後にローカル側の元データを削除する。
-* 根拠: `sync_fallback_to_nas` (行番号: 41〜65 / 抜粋: "shutil.copy2(item, target_path)")
+* 根拠: `sync_fallback_to_nas` (行番号: 47〜72 / 抜粋: "shutil.copy2(item, target_path)")
 
 
 * **引数/リクエスト**: `local_dir: Path` (ローカルのフォールバックパス), `nas_dir: Path` (NASのターゲットパス)
-* 根拠: `sync_fallback_to_nas`引数 (行番号: 41 / 抜粋: "def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:")
+* 根拠: `sync_fallback_to_nas`引数 (行番号: 47 / 抜粋: "def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `sync_fallback_to_nas`戻り値 (行番号: 41, 48 / 抜粋: "-> None:", "return")
+* 根拠: `sync_fallback_to_nas`戻り値 (行番号: 47, 55 / 抜粋: "-> None:", "return")
 
 
 * **副作用**: NASディレクトリへのファイル・ディレクトリ書き込み、ローカルディレクトリ内のデータ削除(`unlink`, `rmtree`)、ログの出力
-* 根拠: `sync_fallback_to_nas`内処理 (行番号: 57, 58, 60, 61 / 抜粋: "item.unlink()", "shutil.rmtree(item)")
+* 根拠: `sync_fallback_to_nas`内処理 (行番号: 65, 68 / 抜粋: "item.unlink()", "shutil.rmtree(item)")
 
 
 * **エラーハンドリング**: `Exception`をキャッチし、エラーログ(`exc_info=True`)を出力する。
-* 根拠: `sync_fallback_to_nas`例外処理 (行番号: 64〜65 / 抜粋: "except Exception as e:")
+* 根拠: `sync_fallback_to_nas`例外処理 (行番号: 71〜72 / 抜粋: "except Exception as e:")
 
 
 
 ### `is_mounted_and_writable`
 
 * **役割**: 指定されたパスがマウントポイントであるかを確認し、ターゲットディレクトリの作成を試みた上で、書き込みおよび実行権限があるかを検証する。
-* 根拠: `is_mounted_and_writable` (行番号: 67〜79 / 抜粋: "return os.access(target_dir, os.W_OK | os.X_OK)")
+* 根拠: `is_mounted_and_writable` (行番号: 74〜85 / 抜粋: "return os.access(target_dir, os.W_OK | os.X_OK)")
 
 
 * **引数/リクエスト**: `target_dir: Path` (アクセス確認対象のディレクトリ), `mount_point: str` (マウントポイント)
-* 根拠: `is_mounted_and_writable`引数 (行番号: 67 / 抜粋: "def is_mounted_and_writable(target_dir: Path, mount_point: str) -> bool:")
+* 根拠: `is_mounted_and_writable`引数 (行番号: 74 / 抜粋: "def is_mounted_and_writable(target_dir: Path, mount_point: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (マウントされており、かつアクセス権があればTrue、なければFalse)
-* 根拠: `is_mounted_and_writable`戻り値 (行番号: 71, 76, 79 / 抜粋: "return False", "return os.access(...)")
+* 根拠: `is_mounted_and_writable`戻り値 (行番号: 78, 83, 85 / 抜粋: "return False", "return os.access(...)")
 
 
 * **副作用**: ターゲットディレクトリが存在しない場合、親ディレクトリを含めて作成(`mkdir`)する。
-* 根拠: `is_mounted_and_writable`内処理 (行番号: 75 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)")
+* 根拠: `is_mounted_and_writable`内処理 (行番号: 82 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)")
 
 
 * **エラーハンドリング**: ディレクトリ作成やアクセス確認時の`OSError`をキャッチし、Falseを返す。
-* 根拠: `is_mounted_and_writable`例外処理 (行番号: 77〜79 / 抜粋: "except OSError:")
+* 根拠: `is_mounted_and_writable`例外処理 (行番号: 84〜85 / 抜粋: "except OSError:")
 
 
 
 ### `get_managed_target_directory`
 
 * **役割**: NASディレクトリへのアクセスが可能か確認し、可能ならフォールバックデータを同期してNASパスを返す。不可の場合は再マウントを試み、成功すれば同期してNASパスを返す。復旧失敗時はエラー通知を行い、ローカルのフォールバックパスを返す。
-* 根拠: `get_managed_target_directory` (行番号: 81〜118 / 抜粋: "if is_mounted_and_writable...", "return fallback_dir")
+* 根拠: `get_managed_target_directory` (行番号: 87〜126 / 抜粋: "if is_mounted_and_writable...", "return fallback_dir")
 
 
 * **引数/リクエスト**: `nas_dir_str: str` (NASディレクトリパス), `fallback_dir_str: str` (フォールバックディレクトリパス), `mount_point: str` (デフォルト: "/mnt/nas")
-* 根拠: `get_managed_target_directory`引数 (行番号: 81 / 抜粋: "def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path:")
+* 根拠: `get_managed_target_directory`引数 (行番号: 87 / 抜粋: "def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path:")
 
 
 * **戻り値/レスポンス**: `Path` (最終的に利用可能なディレクトリパス。NASパスまたはフォールバックパス)
-* 根拠: `get_managed_target_directory`戻り値 (行番号: 94, 99, 118 / 抜粋: "return nas_dir", "return fallback_dir")
+* 根拠: `get_managed_target_directory`戻り値 (行番号: 104, 109, 126 / 抜粋: "return nas_dir", "return fallback_dir")
 
 
 * **副作用**: `sync_fallback_to_nas`の呼び出しによるファイル操作、`attempt_remount`によるOSコマンド実行、`send_push`による外部通知、フォールバックディレクトリの作成(`mkdir`)、ログ出力。
-* 根拠: `get_managed_target_directory`内処理 (行番号: 93, 98, 110, 117 / 抜粋: "sync_fallback_to_nas(...)", "fallback_dir.mkdir(...)")
+* 根拠: `get_managed_target_directory`内処理 (行番号: 103, 108, 118, 125 / 抜粋: "sync_fallback_to_nas(...)", "fallback_dir.mkdir(...)")
 
 
 * **エラーハンドリング**: 外部通知前に`getattr`を用いて`config.LINE_USER_ID`の存在を安全に確認し、存在する場合のみ通知処理を行う。
-* 根拠: `get_managed_target_directory`例外回避 (行番号: 107〜108 / 抜粋: "user_id = getattr(config, "LINE_USER_ID", None)")
+* 根拠: `get_managed_target_directory`例外回避 (行番号: 116〜117 / 抜粋: "user_id = getattr(config, "LINE_USER_ID", None)")
 
 
 

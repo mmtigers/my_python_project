@@ -32,10 +32,10 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 120 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
+| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 128 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
 | `sb_tool.get_device_status` | SwitchBot API通信の内部実装およびAPIからのレスポンスの厳密な仕様が不明。 | 根拠: [`fetch_device_status_sync`内のAPI呼出] (行番号: 31 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`") |
-| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 157-159 / 抜粋: "`await sensor_service.process_power_data(...)`") |
-| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 163-165 / 抜粋: "`await sensor_service.process_meter_data(...)`") |
+| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 162-164 / 抜粋: "`await sensor_service.process_power_data(...)`") |
+| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 168-170 / 抜粋: "`await sensor_service.process_meter_data(...)`") |
 | `setup_logging` | ログの出力先、フォーマット設定の内部実装が不明。 | 根拠: [ロガー初期化処理] (行番号: 17 / 抜粋: "`logger = setup_logging("device_monitor")`") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -57,7 +57,7 @@
 ### `fetch_device_status_sync`
 
 * **役割**: 指定されたデバイスIDを用いて外部APIからステータスを取得し、電力、温湿度、電源状態（ON/OFF）を抽出・加工して辞書として返す。
-* 根拠: [関数定義] (行番号: 28-77 / 抜粋: "`def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:`")
+* 根拠: [関数定義] (行番号: 28-79 / 抜粋: "`def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:`")
 
 
 * **引数/リクエスト**: `device_id` (str: デバイスID), `device_type` (str: デバイスのタイプ)
@@ -73,53 +73,53 @@
 
 
 * **エラーハンドリング**: APIの `statusCode` が100以外の場合にエラーログを出力し `None` を返す。また、処理全体を `try-except` で囲み、予期せぬ例外発生時にエラーログを出力して `None` を返す。
-* 根拠: [ステータスコード判定と例外捕捉] (行番号: 36, 75 / 抜粋: "`if status.get("statusCode") != 100:`" および "`except Exception as e:`")
+* 根拠: [ステータスコード判定と例外捕捉] (行番号: 36, 77 / 抜粋: "`if status.get("statusCode") != 100:`" および "`except Exception as e:`")
 
 
 
 ### `log_device_state_change`
 
 * **役割**: 前回の状態と現在の状態を比較し、状態の変化がない場合やデジタルな変化（電源ON/OFF等）かアナログな変化（温湿度の微少変動等）かに応じて出力するログレベル（INFO / DEBUG）を制御する。
-* 根拠: [関数定義] (行番号: 79-114 / 抜粋: "`def log_device_state_change(...) -> None:`")
+* 根拠: [関数定義] (行番号: 81-122 / 抜粋: "`def log_device_state_change(...) -> None:`")
 
 
 * **引数/リクエスト**: `dname` (str: デバイス名), `did` (str: デバイスID), `last_status` (Optional[Dict[str, Any]]: 前回の状態), `current_status` (Dict[str, Any]: 現在の状態)
-* 根拠: [関数の引数定義] (行番号: 80-83 / 抜粋: "`dname: str, did: str, last_status: Optional[Dict[str, Any]], current_status: Dict[str, Any]`")
+* 根拠: [関数の引数定義] (行番号: 82-85 / 抜粋: "`dname: str, did: str, last_status: Optional[Dict[str, Any]], current_status: Dict[str, Any]`")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数の戻り値型定義] (行番号: 84 / 抜粋: "`-> None:`")
+* 根拠: [関数の戻り値型定義] (行番号: 86 / 抜粋: "`-> None:`")
 
 
 * **副作用**: なし（ロガーへの出力のみ）
-* 根拠: [関数内の処理] (行番号: 79-114 / 抜粋: "`logger.info(...)`, `logger.debug(...)`")
+* 根拠: [関数内の処理] (行番号: 81-122 / 抜粋: "`logger.info(...)`, `logger.debug(...)`")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数内の処理] (行番号: 79-114 / 抜粋: "関数内にtry-except文は存在しない")
+* 根拠: [関数内の処理] (行番号: 81-122 / 抜粋: "関数内にtry-except文は存在しない")
 
 
 
 ### `main`
 
 * **役割**: 設定ファイルから監視対象デバイス一覧を取得し、非同期に各デバイスのステータス取得、状態変化のログ出力、キャッシュ更新、およびセンサーサービスへのデータ処理依頼をループで実行する監視のメイン処理。
-* 根拠: [関数定義] (行番号: 116-173 / 抜粋: "`async def main() -> None:`")
+* 根拠: [関数定義] (行番号: 124-181 / 抜粋: "`async def main() -> None:`")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数の引数定義] (行番号: 116 / 抜粋: "`()`")
+* 根拠: [関数の引数定義] (行番号: 124 / 抜粋: "`()`")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数の戻り値型定義] (行番号: 116 / 抜粋: "`-> None:`")
+* 根拠: [関数の戻り値型定義] (行番号: 124 / 抜粋: "`-> None:`")
 
 
 * **副作用**: グローバル変数 `_last_device_states` の更新、および `sensor_service` 内の非同期関数呼び出し。
-* 根拠: [状態代入と外部呼出] (行番号: 154, 157, 163 / 抜粋: "`_last_device_states[did] = status`" および "`await sensor_service.process_power_data(...)`")
+* 根拠: [状態代入と外部呼出] (行番号: 157, 162 / 抜粋: "`_last_device_states[did] = status`" および "`await sensor_service.process_power_data(...)`")
 
 
 * **エラーハンドリング**: なし（例外処理は呼び出し元の `if __name__ == "__main__":` ブロック内で実施）
-* 根拠: [関数内の処理] (行番号: 116-173 / 抜粋: "関数内にtry-except文は存在しない")
+* 根拠: [関数内の処理] (行番号: 124-181 / 抜粋: "関数内にtry-except文は存在しない")
 
 
 
@@ -211,8 +211,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `MONITOR_DEVICES` 内の辞書の構造（特に `notify_settings` などのキーの有無）を把握することで、設定起因の不具合調査が可能になるため。 | 根拠: [`main`内の参照] (行番号: 120, 158 / 抜粋: "`getattr(config, "MONITOR_DEVICES", [])`" および "`device.get("notify_settings", {})`") |
-| 高 | `services/sensor_service.py` | 取得した電力や温湿度データが最終的にどのようにDB保存・通知されているかを追跡し、データ損失時の調査範囲を明確にするため。 | 根拠: [`main`内の呼出] (行番号: 157, 163 / 抜粋: "`await sensor_service.process_power_data(...)`") |
+| 高 | `config.py` | `MONITOR_DEVICES` 内の辞書の構造（特に `notify_settings` などのキーの有無）を把握することで、設定起因の不具合調査が可能になるため。 | 根拠: [`main`内の参照] (行番号: 128, 163 / 抜粋: "`getattr(config, "MONITOR_DEVICES", [])`" および "`device.get("notify_settings", {})`") |
+| 高 | `services/sensor_service.py` | 取得した電力や温湿度データが最終的にどのようにDB保存・通知されているかを追跡し、データ損失時の調査範囲を明確にするため。 | 根拠: [`main`内の呼出] (行番号: 162, 168 / 抜粋: "`await sensor_service.process_power_data(...)`") |
 | 中 | `services/switchbot_service.py` | SwitchBot APIへのリクエストパラメータやレスポンスの生データ形式を把握し、新しいセンサー値に対応させる際の設計方針を決めるため。 | 根拠: [`fetch_device_status_sync`内の呼出] (行番号: 31 / 抜粋: "`sb_tool.get_device_status(device_id)`") |
 
 ## 8. 保守上の注意点

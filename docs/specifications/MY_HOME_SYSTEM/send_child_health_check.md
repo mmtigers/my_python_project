@@ -32,10 +32,10 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.IMPORTANT_DATES` | オブジェクトの構造や定義内容が提供ファイル内に存在しないため不明。 | 根拠: `for event in config.IMPORTANT_DATES:` (行番号: 28 / 抜粋: "for event in config.IMPORTANT_...") |
-| `config.CHECK_ZOROME` | 値の有無およびデフォルト以外の設定状態が不明。 | 根拠: `getattr(config, "CHECK_ZOROME", False)` (行番号: 43 / 抜粋: "getattr(config, "CHECK_ZOROME...") |
-| `config.LINE_USER_ID` | 具体的な値やデータ型が提供ファイル内に存在しないため不明。 | 根拠: `common.send_push(config.LINE_USER_ID` (行番号: 120 / 抜粋: "if common.send_push(config.LI...") |
+| `config.CHECK_ZOROME` | 値の有無およびデフォルト以外の設定状態が不明。 | 根拠: `getattr(config, "CHECK_ZOROME", False)` (行番号: 46 / 抜粋: "getattr(config, "CHECK_ZOROME...") |
+| `config.LINE_USER_ID` | 具体的な値やデータ型が提供ファイル内に存在しないため不明。 | 根拠: `common.send_push(config.LINE_USER_ID` (行番号: 139 / 抜粋: "if common.send_push(config.LI...") |
 | `common.setup_logging` | 生成されるロガーの実装詳細や出力先が不明。 | 根拠: `logger = common.setup_logging("morning_check")` (行番号: 17 / 抜粋: "logger = common.setup_loggin...") |
-| `common.send_push` | ペイロード（FlexMessageオブジェクト等）の処理方法やDiscord対応の変換ロジックが不明。 | 根拠: `common.send_push(config.LINE_USER_ID` (行番号: 120 / 抜粋: "if common.send_push(config.LI...") |
+| `common.send_push` | ペイロード（FlexMessageオブジェクト等）の処理方法やDiscord対応の変換ロジックが不明。 | 根拠: `common.send_push(config.LINE_USER_ID` (行番号: 139 / 抜粋: "if common.send_push(config.LI...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -65,7 +65,7 @@
 ### `check_special_events`
 
 * **役割**: 指定された日付から `config.IMPORTANT_DATES` を走査し、誕生日・周年記念日・その他の記念日を判定しメッセージを生成する。設定があればゾロ目の日の判定も行う。
-* 根拠: `def check_special_events(today):` (行番号: 25〜46 / 抜粋: "def check_special_events(tod...")
+* 根拠: `def check_special_events(today):` (行番号: 25〜49 / 抜粋: "def check_special_events(tod...")
 
 
 * **引数/リクエスト**: `today` (日付情報のオブジェクト、monthとdayとyear属性を持つもの)
@@ -73,64 +73,64 @@
 
 
 * **戻り値/レスポンス**: `str` (生成されたメッセージを改行 `\n\n` で結合した文字列)
-* 根拠: `return "\n\n".join(messages)` (行番号: 46 / 抜粋: "return "\n\n".join(messages)")
+* 根拠: `return "\n\n".join(messages)` (行番号: 49 / 抜粋: "return "\n\n".join(messages)")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内のコード (行番号: 25〜46 / 抜粋: "messages = []...")
+* 根拠: 該当関数内のコード (行番号: 25〜49 / 抜粋: "messages = []...")
 
 
 * **エラーハンドリング**: 記念日の日付パース処理などで例外が発生した場合、`except Exception:` で握りつぶして次の要素の処理へ進む(`continue`)。
-* 根拠: `except Exception:` (行番号: 40〜41 / 抜粋: "except Exception:\n    continue")
+* 根拠: `except Exception:` (行番号: 43〜44 / 抜粋: "except Exception:\n    continue")
 
 
 
 ### `create_start_check_flex`
 
 * **役割**: 「全員元気」「詳細を入力」「記録を確認」の3つのボタンを含む、朝の体調確認用のLINE Flex Messageオブジェクトを生成する。
-* 根拠: `def create_start_check_flex():` (行番号: 48〜96 / 抜粋: "def create_start_check_flex()...")
+* 根拠: `def create_start_check_flex():` (行番号: 51〜112 / 抜粋: "def create_start_check_flex()...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def create_start_check_flex():` (行番号: 48 / 抜粋: "def create_start_check_flex()...")
+* 根拠: `def create_start_check_flex():` (行番号: 51 / 抜粋: "def create_start_check_flex()...")
 
 
 * **戻り値/レスポンス**: `linebot.v3.messaging.FlexMessage`
-* 根拠: `return FlexMessage(alt_text="朝の体調確認", contents=container)` (行番号: 96 / 抜粋: "return FlexMessage(alt_text=...")
+* 根拠: `return FlexMessage(alt_text="朝の体調確認", contents=container)` (行番号: 112 / 抜粋: "return FlexMessage(alt_text=...")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内のコード (行番号: 48〜96 / 抜粋: "bubble_json = {...")
+* 根拠: 該当関数内のコード (行番号: 51〜112 / 抜粋: "bubble_json = {...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内のコード (行番号: 48〜96 / 抜粋: "bubble_json = {...")
+* 根拠: 該当関数内のコード (行番号: 51〜112 / 抜粋: "bubble_json = {...")
 
 
 
 ### `main`
 
 * **役割**: プログラムのエントリーポイント。現在時刻を取得して記念日確認と体調確認Flexメッセージを生成し、引数で指定されたターゲットへプッシュ通知を送信する。
-* 根拠: `def main():` (行番号: 98〜129 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 115〜148 / 抜粋: "def main():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 98 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 115 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 該当関数内のコード (行番号: 98〜129 / 抜粋: "print(f"\n🚀 --- Morning Chec...")
+* 根拠: 該当関数内のコード (行番号: 115〜148 / 抜粋: "print(f"\n🚀 --- Morning Chec...")
 
 
 * **副作用**:
 * 標準出力(`print`)への実行ログ出力
 * 外部関数(`common.send_push`)による通知送信
 * エラー時のシステム終了(`sys.exit(1)`)
-* 根拠: `print(...)` および `common.send_push(...)` および `sys.exit(1)` (行番号: 99, 120, 124, 129 / 抜粋: "print(f"\n🚀 --- Morning Chec...")
+* 根拠: `print(...)` および `common.send_push(...)` および `sys.exit(1)` (行番号: 116, 139, 143, 148 / 抜粋: "print(f"\n🚀 --- Morning Chec...")
 
 
 * **エラーハンドリング**: 関数全体を `try...except Exception as e` で囲み、何らかの例外が発生した場合はロガーにエラー内容とスタックトレースを記録し、異常終了(`sys.exit(1)`)する。また、`common.send_push` がFalsyな値を返した場合はログを出力し異常終了する。
-* 根拠: `except Exception as e:` (行番号: 126〜129 / 抜粋: "except Exception as e:\n    l...")
+* 根拠: `except Exception as e:` (行番号: 145〜148 / 抜粋: "except Exception as e:\n    l...")
 
 
 
@@ -196,7 +196,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | `send_push`が、LINE v3 SDKの `FlexMessage` オブジェクトをどのように処理しているか、Discord指定時に適切にパース・変換できるかを確認する必要があるため。 | 根拠: `common.send_push(config.LINE_USER_ID, payloads, target=target)` (行番号: 120 / 抜粋: "if common.send_push(config.LI...") |
+| 高 | `common.py` | `send_push`が、LINE v3 SDKの `FlexMessage` オブジェクトをどのように処理しているか、Discord指定時に適切にパース・変換できるかを確認する必要があるため。 | 根拠: `common.send_push(config.LINE_USER_ID, payloads, target=target)` (行番号: 139 / 抜粋: "if common.send_push(config.LI...") |
 | 中 | `config.py` | `IMPORTANT_DATES`の構造や、`LINE_USER_ID`などの環境依存情報の具体的な形式を把握するため。 | 根拠: `for event in config.IMPORTANT_DATES:` (行番号: 28 / 抜粋: "for event in config.IMPORTANT_...") |
 
 ## 8. 保守上の注意点
