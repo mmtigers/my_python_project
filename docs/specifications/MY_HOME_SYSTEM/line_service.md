@@ -34,17 +34,17 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 28 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
-| `common.get_db_cursor` | トランザクション管理やDB接続の詳細な仕組みが不明。 | `with common.get_db_cursor() a...` (行番号: 70 / 抜粋: "with common.get_db_cursor() a...") |
+| `common.get_db_cursor` | トランザクション管理やDB接続の詳細な仕組みが不明。 | `with common.get_db_cursor() a...` (行番号: 73 / 抜粋: "with common.get_db_cursor() a...") |
 | `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。 | `await save_log_async(...)` (行番号: 36 / 抜粋: "await save_log_async(") |
-| `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 100 / 抜粋: "data = await asyncio.to_threa...") |
-| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 160 / 抜粋: "res = await asyncio.to_thread...") |
+| `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 110 / 抜粋: "data = await asyncio.to_threa...") |
+| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 170 / 抜粋: "res = await asyncio.to_thread...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `log_child_health`
 
 * **役割**: 子供の体調をDBに記録し、記録完了の`TextMessage`を返す。
-* 根拠: `async def log_child_health...` (行番号: 34-40 / 抜粋: "def log_child_health(user_id:")
+* 根拠: `async def log_child_health...` (行番号: 34-41 / 抜粋: "def log_child_health(user_id:")
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `child_name` (str), `condition` (str)
@@ -60,168 +60,168 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理(`try-except`)なし (行番号: 34-40 / 抜粋: "該当ブロック内に例外処理なし")
+* 根拠: 該当ブロック内に例外処理(`try-except`)なし (行番号: 34-41 / 抜粋: "該当ブロック内に例外処理なし")
 
 
 
 ### `log_food_record`
 
 * **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。
-* 根拠: `async def log_food_record...` (行番号: 42-49 / 抜粋: "def log_food_record(user_id:")
+* 根拠: `async def log_food_record...` (行番号: 43-51 / 抜粋: "def log_food_record(user_id:")
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `category` (str), `item` (str), `is_manual` (bool, デフォルト `False`)
-* 根拠: 関数の引数定義 (行番号: 42 / 抜粋: "category: str, item: str, is_")
+* 根拠: 関数の引数定義 (行番号: 43 / 抜粋: "category: str, item: str, is_")
 
 
 * **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 42 / 抜粋: "-> TextMessage:")
+* 根拠: 戻り値の型ヒント (行番号: 43 / 抜粋: "-> TextMessage:")
 
 
 * **副作用**: 外部関数(`save_log_async`)によるDB書き込み。
-* 根拠: `await save_log_async...` (行番号: 45 / 抜粋: "await save_log_async(")
+* 根拠: `await save_log_async...` (行番号: 46 / 抜粋: "await save_log_async(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 42-49 / 抜粋: "該当ブロック内に例外処理なし")
+* 根拠: 該当ブロック内に例外処理なし (行番号: 43-51 / 抜粋: "該当ブロック内に例外処理なし")
 
 
 
 ### `log_daily_action`
 
 * **役割**: ユーザーの日常動作（外出・面会など）をログ出力する（返信は行わない）。
-* 根拠: `async def log_daily_action...` (行番号: 51-54 / 抜粋: "def log_daily_action(user_id:")
+* 根拠: `async def log_daily_action...` (行番号: 53-56 / 抜粋: "def log_daily_action(user_id:")
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `action_type` (str), `value` (str)
-* 根拠: 関数の引数定義 (行番号: 51 / 抜粋: "action_type: str, value: str)")
+* 根拠: 関数の引数定義 (行番号: 53 / 抜粋: "action_type: str, value: str)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 51 / 抜粋: "-> None:")
+* 根拠: 戻り値の型ヒント (行番号: 53 / 抜粋: "-> None:")
 
 
 * **副作用**: ロガーによる情報出力。
-* 根拠: `logger.info...` (行番号: 53 / 抜粋: "logger.info(f"Daily Action: ")
+* 根拠: `logger.info...` (行番号: 55 / 抜粋: "logger.info(f"Daily Action: ")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 51-54 / 抜粋: "該当ブロック内に例外処理なし")
+* 根拠: 該当ブロック内に例外処理なし (行番号: 53-56 / 抜粋: "該当ブロック内に例外処理なし")
 
 
 
 ### `log_ohayo`
 
 * **役割**: おはようメッセージと認識されたキーワードをDBに記録する。
-* 根拠: `async def log_ohayo...` (行番号: 56-62 / 抜粋: "def log_ohayo(user_id: str, u")
+* 根拠: `async def log_ohayo...` (行番号: 58-64 / 抜粋: "def log_ohayo(user_id: str, u")
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `message` (str), `keyword` (str)
-* 根拠: 関数の引数定義 (行番号: 56 / 抜粋: "message: str, keyword: str)")
+* 根拠: 関数の引数定義 (行番号: 58 / 抜粋: "message: str, keyword: str)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 56 / 抜粋: "-> None:")
+* 根拠: 戻り値の型ヒント (行番号: 58 / 抜粋: "-> None:")
 
 
 * **副作用**: 外部関数(`save_log_async`)によるDB書き込み。
-* 根拠: `await save_log_async...` (行番号: 58 / 抜粋: "await save_log_async(")
+* 根拠: `await save_log_async...` (行番号: 60 / 抜粋: "await save_log_async(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 56-62 / 抜粋: "該当ブロック内に例外処理なし")
+* 根拠: 該当ブロック内に例外処理なし (行番号: 58-64 / 抜粋: "該当ブロック内に例外処理なし")
 
 
 
 ### `get_daily_health_summary_text`
 
 * **役割**: 設定された全メンバーの今日の体調記録の最新をDBから取得し、サマリの文字列として結合して返す。
-* 根拠: `def get_daily_health_summary...` (行番号: 64-96 / 抜粋: "def get_daily_health_summary_")
+* 根拠: `def get_daily_health_summary...` (行番号: 66-101 / 抜粋: "def get_daily_health_summary_")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数の引数定義 (行番号: 64 / 抜粋: "def get_daily_health_summary_")
+* 根拠: 関数の引数定義 (行番号: 66 / 抜粋: "def get_daily_health_summary_")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: 戻り値の型ヒント (行番号: 64 / 抜粋: "-> str:")
+* 根拠: 戻り値の型ヒント (行番号: 66 / 抜粋: "-> str:")
 
 
 * **副作用**: DBからの読み取り処理、およびDBコネクションの `row_factory` プロパティの変更。
-* 根拠: `cur.connection.row_factory = sqlite3.Row` (行番号: 73 / 抜粋: "cur.connection.row_factory = ")
+* 根拠: `cur.connection.row_factory = sqlite3.Row` (行番号: 75 / 抜粋: "cur.connection.row_factory = ")
 
 
 * **エラーハンドリング**: タイムスタンプのパース失敗時に時間を `??:??` とし、DB読み取り時の汎用エラー(`Exception`)をキャッチしてエラーメッセージ文字列を返す。
-* 根拠: `except Exception as e:` (行番号: 84, 93 / 抜粋: "except Exception as e:")
+* 根拠: `except:` および `except Exception as e:` (行番号: 90, 97 / 抜粋: "except Exception as e:")
 
 
 
 ### `get_user_status_message`
 
 * **役割**: 外部のゲームシステムから全ユーザーデータを取得し、該当するユーザーのステータス情報を含む`TextMessage`を返す。
-* 根拠: `async def get_user_status_me...` (行番号: 98-121 / 抜粋: "def get_user_status_message(u")
+* 根拠: `async def get_user_status_me...` (行番号: 107-130 / 抜粋: "def get_user_status_message(u")
 
 
 * **引数/リクエスト**: `user_id` (str)
-* 根拠: 関数の引数定義 (行番号: 98 / 抜粋: "user_id: str")
+* 根拠: 関数の引数定義 (行番号: 107 / 抜粋: "user_id: str")
 
 
 * **戻り値/レスポンス**: `Union[TextMessage, FlexMessage]`
-* 根拠: 戻り値の型ヒント (行番号: 98 / 抜粋: "-> Union[TextMessage, FlexMes")
+* 根拠: 戻り値の型ヒント (行番号: 107 / 抜粋: "-> Union[TextMessage, FlexMes")
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 101 / 抜粋: "await asyncio.to_thread(game_")
+* 根拠: `await asyncio.to_thread...` (行番号: 110 / 抜粋: "await asyncio.to_thread(game_")
 
 
 * **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
-* 根拠: `except Exception as e:` (行番号: 118 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 128 / 抜粋: "except Exception as e:")
 
 
 
 ### `get_active_quests_message`
 
 * **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出して`TextMessage`を返す。
-* 根拠: `async def get_active_quests...` (行番号: 123-149 / 抜粋: "def get_active_quests_message")
+* 根拠: `async def get_active_quests...` (行番号: 132-157 / 抜粋: "def get_active_quests_message")
 
 
 * **引数/リクエスト**: `user_id` (str)
-* 根拠: 関数の引数定義 (行番号: 123 / 抜粋: "user_id: str")
+* 根拠: 関数の引数定義 (行番号: 132 / 抜粋: "user_id: str")
 
 
 * **戻り値/レスポンス**: `Union[TextMessage, FlexMessage]`
-* 根拠: 戻り値の型ヒント (行番号: 123 / 抜粋: "-> Union[TextMessage, FlexMes")
+* 根拠: 戻り値の型ヒント (行番号: 132 / 抜粋: "-> Union[TextMessage, FlexMes")
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 126 / 抜粋: "await asyncio.to_thread(game_")
+* 根拠: `await asyncio.to_thread...` (行番号: 135 / 抜粋: "await asyncio.to_thread(game_")
 
 
 * **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
-* 根拠: `except Exception as e:` (行番号: 146 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 155 / 抜粋: "except Exception as e:")
 
 
 
 ### `process_approval_command`
 
 * **役割**: 入力テキストを解析し、クエストの承認または却下の処理を実行して結果の`TextMessage`を返す。
-* 根拠: `async def process_approval_c...` (行番号: 151-186 / 抜粋: "def process_approval_command(")
+* 根拠: `async def process_approval_c...` (行番号: 159-194 / 抜粋: "def process_approval_command(")
 
 
 * **引数/リクエスト**: `approver_id` (str), `text` (str)
-* 根拠: 関数の引数定義 (行番号: 151 / 抜粋: "approver_id: str, text: str")
+* 根拠: 関数の引数定義 (行番号: 159 / 抜粋: "approver_id: str, text: str")
 
 
 * **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 151 / 抜粋: "-> TextMessage:")
+* 根拠: 戻り値の型ヒント (行番号: 159 / 抜粋: "-> TextMessage:")
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`quest_service.process_approve_quest` または `process_reject_quest`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 161, 172 / 抜粋: "await asyncio.to_thread(")
+* 根拠: `await asyncio.to_thread...` (行番号: 170, 182 / 抜粋: "await asyncio.to_thread(")
 
 
 * **エラーハンドリング**: ID変換時の `ValueError` をキャッチし専用メッセージを返す。その他の `Exception` をキャッチし、例外に `detail` 属性があればそれを付与したエラーメッセージを返す。
-* 根拠: `except ValueError:` および `except Exception as e:` (行番号: 177, 179 / 抜粋: "except ValueError:")
+* 根拠: `except ValueError:` および `except Exception as e:` (行番号: 187, 189 / 抜粋: "except ValueError:")
 
 
 

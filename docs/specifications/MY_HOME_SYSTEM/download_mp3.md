@@ -80,7 +80,7 @@
 ### `download_audio_as_mp3`
 
 * **役割**: 提供されたYouTube URLから音声をダウンロードし、MP3形式（192kbps）に変換して指定ディレクトリに保存する。指定ディレクトリが存在しない場合は再帰的に作成する。
-* 根拠: `download_audio_as_mp3` (行番号: 23〜74 / 抜粋: "def download_audio_as_mp3")
+* 根拠: `download_audio_as_mp3` (行番号: 23〜89 / 抜粋: "def download_audio_as_mp3")
 
 
 * **引数/リクエスト**: `youtube_url` (str: 対象URL), `output_dir` (str: 保存先パス), `custom_filename` (Optional[str]: ユーザー指定のファイル名、未指定時はNone)
@@ -92,34 +92,34 @@
 
 
 * **副作用**: ファイルシステムへのディレクトリ作成（`os.makedirs`）および音声ファイルの書き込み。標準出力(`print`)への進行状態・結果の出力。
-* 根拠: `os.makedirs`, `ydl.download` (行番号: 29, 69 / 抜粋: "os.makedirs(output_dir", "ydl.download([youtube_url])")
+* 根拠: `os.makedirs`, `ydl.download` (行番号: 35, 82 / 抜粋: "os.makedirs(output_dir", "ydl.download([youtube_url])")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の`OSError`、ダウンロード時の`yt_dlp.utils.DownloadError`、その他予期せぬ`Exception`をそれぞれ捕捉し、標準出力へエラー内容を表示して関数を終了する。
-* 根拠: `except OSError as e:` など (行番号: 31, 72, 74 / 抜粋: "except yt_dlp.utils.DownloadEr")
+* 根拠: `except OSError as e:` など (行番号: 37, 86, 88 / 抜粋: "except yt_dlp.utils.DownloadEr")
 
 
 
 ### `main`
 
 * **役割**: スクリプトの実行エントリーポイント。FFmpegのインストール確認後、ユーザーからの標準入力を経てダウンロード処理を呼び出す。
-* 根拠: `main` (行番号: 77〜100 / 抜粋: "def main():")
+* 根拠: `main` (行番号: 92〜116 / 抜粋: "def main():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 92 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def main():` (行番号: 77 / 抜粋: "def main():")
+* 根拠: `def main():` (行番号: 92 / 抜粋: "def main():")
 
 
 * **副作用**: 標準入力（`input`）の待機、標準出力へのメッセージ表示、プロセス終了（`sys.exit`）の実行。
-* 根拠: `input`, `sys.exit` (行番号: 87, 80 / 抜粋: "url = input("YouTube URLを", "sys.exit(1)")
+* 根拠: `input`, `sys.exit` (行番号: 102, 95 / 抜粋: "url = input("YouTube URLを", "sys.exit(1)")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` を捕捉し、メッセージを表示して安全にプロセスを中断・終了（終了コード0）する。
-* 根拠: `except KeyboardInterrupt:` (行番号: 98〜100 / 抜粋: "except KeyboardInterrupt:")
+* 根拠: `except KeyboardInterrupt:` (行番号: 114〜116 / 抜粋: "except KeyboardInterrupt:")
 
 
 
