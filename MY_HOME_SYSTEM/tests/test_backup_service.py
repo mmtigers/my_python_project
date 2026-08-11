@@ -58,10 +58,10 @@ def test_perform_backup_notifies_and_returns_false_on_nas_dir_creation_failure(m
 
     assert success is False
     assert size_mb == 0.0
-    # NASディレクトリ作成失敗時は _notify_and_log_error が2回呼ばれる
-    # (makedirs失敗時の直接通知 + re-raiseされた例外を外側のexceptが再度通知するため)。
-    # 通知が二重に飛ぶこと自体は軽微な問題だが、少なくとも1回は必ず通知されることを保証する。
-    assert len(notified) >= 1
+    # NASディレクトリ作成失敗時に通知が1回だけ飛ぶこと(以前は内側except+外側exceptで
+    # 二重に通知されるバグがあった。再発防止のため厳密に1回であることを検証する)。
+    assert len(notified) == 1
+    assert "NASディレクトリ作成失敗" in notified[0]["messages"][0]["text"]
     assert all("🚨" in n["messages"][0]["text"] for n in notified)
 
 

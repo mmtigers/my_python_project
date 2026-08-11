@@ -33,7 +33,7 @@ def update_switchbot_webhook(base_url):
     headers = sb_tool.create_switchbot_auth_headers()
     
     try:
-        query = requests.post("https://api.switch-bot.com/v1.1/webhook/queryWebhook", headers=headers, json={"action": "queryUrl"}).json()
+        query = requests.post("https://api.switch-bot.com/v1.1/webhook/queryWebhook", headers=headers, json={"action": "queryUrl"}, timeout=10).json()
         urls = query.get('body', {}).get('urls', [])
         
         if target_url in urls:
@@ -43,7 +43,7 @@ def update_switchbot_webhook(base_url):
         # 古い設定を削除
         for old_url in urls:
             logger.info(f"   🗑️ 古い設定を削除: {old_url}")
-            requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url})
+            requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url}, timeout=10)
             time.sleep(1)
 
         # 新しいURLを登録
@@ -52,7 +52,7 @@ def update_switchbot_webhook(base_url):
             "action": "setupWebhook",
             "url": target_url,
             "deviceList": "ALL"  # SwitchBot APIの仕様上ALL必須
-        })
+        }, timeout=10)
         
         if res.json().get('statusCode') == 100:
             logger.info("   ✅ 新しいURLを登録しました")
@@ -83,7 +83,7 @@ def update_line_webhook(base_url):
 
     try:
         # 現在のエンドポイントを取得して比較（API呼び出しを節約）
-        get_res = requests.get("https://api.line.me/v2/bot/channel/webhook/endpoint", headers={"Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"})
+        get_res = requests.get("https://api.line.me/v2/bot/channel/webhook/endpoint", headers={"Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}"}, timeout=10)
         if get_res.status_code == 200 and get_res.json().get("endpoint") == target_url:
             logger.info("   ✅ 設定済みです (更新不要)")
             return False
