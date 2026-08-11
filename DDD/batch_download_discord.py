@@ -30,6 +30,8 @@ from collections import defaultdict
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Any, Set, NamedTuple
 from dataclasses import dataclass, field
+
+from file_utils import sanitize_filename as _shared_sanitize_filename
 from pathlib import Path
 
 # External Libraries
@@ -51,13 +53,20 @@ logger = logging.getLogger("Downloader")
 FORCE_MODE = "--force" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR
-for _ in range(3):
-    if (PROJECT_ROOT / "services").exists():
-        break
-    PROJECT_ROOT = PROJECT_ROOT.parent
+_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")
+if _env_root:
+    PROJECT_ROOT = Path(_env_root)
 else:
-    PROJECT_ROOT = Path("/home/masahiro/develop/MY_HOME_SYSTEM")
+    PROJECT_ROOT = CURRENT_DIR
+    for _ in range(3):
+        if (PROJECT_ROOT / "services").exists():
+            break
+        PROJECT_ROOT = PROJECT_ROOT.parent
+    else:
+        # 開発者個人の環境に依存した固定パスへのフォールバックはせず、
+        # notification_service が見つからない場合は下の except ImportError で
+        # 無効化されるだけにする（他の環境でも安全に動く）。
+        PROJECT_ROOT = CURRENT_DIR
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
@@ -153,7 +162,7 @@ class NetworkManager:
 class FileSystemManager:
     @staticmethod
     def sanitize_filename(filename: str) -> str:
-        return re.sub(r'[\\/*?:"<>|]', '_', filename)
+        return _shared_sanitize_filename(filename)
 
     @staticmethod
     def ensure_dir(path: Path) -> bool:
@@ -242,6 +251,9 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             'outtmpl': f'{str(target_dir)}/%(title)s.%(ext)s',
             'merge_output_format': 'mp4',
             'quiet': True, 'no_warnings': True, 'nopart': False,
+            # 動画タイトルがそのままファイル名になるため、極端に長いタイトルで
+            # ext4等のファイル名長制限（255バイト）に抵触して失敗するのを防ぐ。
+            'trim_file_name': 150,
         }
 
         try:
