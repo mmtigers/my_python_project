@@ -22,7 +22,8 @@
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期関数の同期的な実行(`asyncio.run`) | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import asyncio") |
 | `os`, `sys`, `json` | 標準ライブラリ | ファイル内での明示的な使用箇所なし | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import os") |
-| `Optional`, `List` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from typing import Optional") |
+| `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定用タイムスタンプ取得 | インポート宣言 (行番号: 5 / 抜粋: "import time") |
+| `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from typing import Optional") |
 | `Request`, `HTTPException` | 外部ライブラリ (FastAPI) | 型ヒントおよび例外送出 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from fastapi import Request") |
 | `handlers.line_logic` | 内部モジュール | ポストバックイベントの一部処理委譲 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import handlers.line_logic") |
 | `WebhookHandler`等 (linebot.v3) | 外部ライブラリ | LINE APIの初期化、イベントハンドリング、メッセージ送信 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from linebot.v3 import") |
@@ -47,6 +48,29 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `_get_display_name`
+
+* **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。
+* 根拠: `def _get_display_name(user_id: str) -> str:` (抜粋: "def _get_display_name(user_id: str) -> str:")
+
+
+* **引数/リクエスト**: `user_id`: `str`型
+* 根拠: 引数定義 (抜粋: "user_id: str")
+
+
+* **戻り値/レスポンス**: `str` (表示名。取得失敗時は`"Unknown"`)
+* 根拠: `return user_name` (抜粋: "return user_name")
+
+
+* **副作用**: キャッシュヒット時はなし。キャッシュミス時は`line_bot_api.get_profile`呼び出しと`_profile_cache`への書き込み。
+* 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (抜粋: "profile = line_bot_api.get_profile(user_id)")
+
+
+* **エラーハンドリング**: `get_profile`失敗時は例外を無視し`"Unknown"`のまま続行（キャッシュにも`"Unknown"`が書き込まれ、TTL間は再試行されない）。
+* 根拠: `except Exception: pass` (抜粋: "except Exception: pass")
+
+
+
 ### `reply_message`
 
 * **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。
@@ -55,8 +79,8 @@
 
 * **引数/リクエスト**:
 * `reply_token`: `str`型 (LINE APIの返信用トークン)
-* `messages`: `List[any]`型または単一のオブジェクト (送信するメッセージオブジェクト)
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "reply_token: str, messages: L")
+* `messages`: `List[Any]`型または単一のオブジェクト (送信するメッセージオブジェクト)
+* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "reply_token: str, messages: List[Any]")
 
 
 * **戻り値/レスポンス**: なし (`None`)
@@ -74,7 +98,7 @@
 
 ### `handle_message`
 
-* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。
+* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。
 * 根拠: `@line_handler.add` デコレータと関数定義 (行番号: 行番号取得不可 / 抜粋: "def handle_message(event: Mess")
 
 
@@ -87,12 +111,12 @@
 * 根拠: return文が存在しない (行番号: 行番号取得不可 / 抜粋: "asyncio.run(")
 
 
-* **副作用**: `line_bot_api.get_profile` による外部API呼び出し、および `_process_message_async` の実行に伴う副作用。
-* 根拠: API呼び出し処理 (行番号: 行番号取得不可 / 抜粋: "profile = line_bot_api.get_pro")
+* **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、および `_process_message_async` の実行に伴う副作用。
+* 根拠: 関数呼び出し (抜粋: "user_name = _get_display_name(user_id)")
 
 
-* **エラーハンドリング**: `get_profile` の失敗時 (未登録ユーザー等) は例外を無視し、`user_name` を "Unknown" のまま続行する。
-* 根拠: try-except-passブロック (行番号: 行番号取得不可 / 抜粋: "except Exception: pass")
+* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。
+* 根拠: `_get_display_name`の呼び出し (抜粋: "user_name = _get_display_name(user_id)")
 
 
 
@@ -189,8 +213,12 @@ flowchart TD
     CheckSig -- 成功 --> RouteEvent{イベント種別}
     
     RouteEvent -- MessageEvent --> HandleMsg["handle_message()"]
-    HandleMsg --> GetProfile["外部：line_bot_api.get_profile()"]
-    GetProfile --> RunAsyncMessage["asyncio.run(_process_message_async)"]
+    HandleMsg --> GetDisplayName["_get_display_name()"]
+    GetDisplayName --> CacheHit{"_profile_cacheに<br>TTL内のエントリがあるか?"}
+    CacheHit -- Yes --> RunAsyncMessage["asyncio.run(_process_message_async)"]
+    CacheHit -- No --> GetProfile["外部：line_bot_api.get_profile()"]
+    GetProfile --> UpdateCache["_profile_cacheへ書き込み"]
+    UpdateCache --> RunAsyncMessage
     
     RouteEvent -- PostbackEvent --> HandlePostback["handle_postback()"]
     HandlePostback --> PostbackData{data文字列の判定}
@@ -258,6 +286,10 @@ graph TD
 | 中 | `services/ai_service.py` | 未定義のコマンドを受け取った際のフォールバックロジック（AI解析）の具体的なプロンプト仕様や外部API呼び出しの詳細を知るため。 | 該当モジュールのメソッド呼び出し (抜粋: "await ai_service.analyze_tex") |
 
 ## 8. 保守上の注意点
+
+* **プロフィール表示名のキャッシュ**: 従来は`handle_message`が受信メッセージ毎に`line_bot_api.get_profile`を直接呼び出しており、ログ表示用の名前取得だけのために毎回外部API通信が発生していた。現在は`_get_display_name`がTTL付き（3600秒）のインメモリキャッシュ(`_profile_cache`)を挟むため、キャッシュヒット時は外部API呼び出しが発生しない。プロセス再起動でキャッシュはクリアされる。
+* 根拠: `_profile_cache`, `_PROFILE_CACHE_TTL_SEC` (抜粋: "_profile_cache: Dict[str, tuple] = {}")
+
 
 * **非同期処理の実行**: `handle_message` および `handle_postback` は同期関数として定義されており、内部で `asyncio.run()` を使用して非同期関数を呼び出している。FastAPIのイベントループ内でさらにイベントループを生成しようとする可能性があり、ASGIサーバーの実行環境によっては `RuntimeError` が発生するリスクがある。
 * 根拠: `asyncio.run` の使用 (行番号取得不可 / 抜粋: "asyncio.run( _process_message")
