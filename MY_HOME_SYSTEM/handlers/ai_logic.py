@@ -109,8 +109,10 @@ def execute_get_expenditure_logs(args):
     platform = args.get("platform")
     days = args.get("days", 30)
 
-    query = f"SELECT order_date, platform, item_name, price FROM {config.SQLITE_TABLE_SHOPPING} WHERE order_date > datetime('now', '-? days')"
-    params = [days]
+    # 注意: SQLiteのプレースホルダ(?)はクオートされた文字列リテラルの内側では
+    # 認識されないため、修飾子文字列全体("-N days")を単一のパラメータとして渡す。
+    query = f"SELECT order_date, platform, item_name, price FROM {config.SQLITE_TABLE_SHOPPING} WHERE order_date > datetime('now', ?)"
+    params = [f"-{int(days)} days"]
 
     if keyword:
         query += " AND item_name LIKE ?"
@@ -229,16 +231,19 @@ def execute_get_health_logs(args):
     child_name = args.get("child_name")
     days = args.get("days", 7)
     
+    # 注意: SQLiteのプレースホルダ(?)はクオートされた文字列リテラルの内側では
+    # 認識されないため、修飾子文字列全体("-N days")を単一のパラメータとして渡す。
     query = f"""
-        SELECT timestamp, child_name as target, condition, '体調' as type 
-        FROM {config.SQLITE_TABLE_CHILD} 
-        WHERE timestamp > datetime('now', '-? days')
+        SELECT timestamp, child_name as target, condition, '体調' as type
+        FROM {config.SQLITE_TABLE_CHILD}
+        WHERE timestamp > datetime('now', ?)
         UNION ALL
-        SELECT timestamp, user_name as target, condition, '排便' as type 
-        FROM {config.SQLITE_TABLE_DEFECATION} 
-        WHERE timestamp > datetime('now', '-? days')
+        SELECT timestamp, user_name as target, condition, '排便' as type
+        FROM {config.SQLITE_TABLE_DEFECATION}
+        WHERE timestamp > datetime('now', ?)
     """
-    params = [days, days]
+    date_modifier = f"-{int(days)} days"
+    params = [date_modifier, date_modifier]
 
     if child_name:
         query = f"SELECT * FROM ({query}) WHERE target LIKE ?"

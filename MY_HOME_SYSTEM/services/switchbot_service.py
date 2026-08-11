@@ -26,7 +26,7 @@ def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 
             
             raw_data = response.json()
             validated = DeviceStatusResponse(**raw_data)
-            return validated.dict()
+            return validated.model_dump()
             
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             # ERRORではなくWARNINGとし、Tracebackは出さない
