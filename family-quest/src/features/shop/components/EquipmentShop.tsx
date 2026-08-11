@@ -1,10 +1,10 @@
 import React from 'react';
 import { Shield, Sword } from 'lucide-react';
-import { User, Equipment } from '@/types';
+import { User, Equipment, OwnedEquipment } from '@/types';
 
 interface EquipmentShopProps {
     equipments: Equipment[];
-    ownedEquipments: any[];
+    ownedEquipments: OwnedEquipment[];
     currentUser: User;
     onBuy: (item: Equipment) => void;
     onEquip: (item: Equipment) => void;
@@ -20,7 +20,7 @@ const EquipmentShop: React.FC<EquipmentShopProps> = ({
     // 自分の持っているアイテム情報を取得するヘルパー
     const getOwnedStatus = (itemId: number) => {
         return ownedEquipments.find(
-            (oe: any) => oe.equipment_id === itemId && oe.user_id === currentUser.user_id
+            (oe) => oe.equipment_id === itemId && oe.user_id === currentUser.user_id
         );
     };
 

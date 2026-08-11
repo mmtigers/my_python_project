@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult, PendingInventory, FamilyMileage } from '@/types';
+import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult, PendingInventory, FamilyMileage, OwnedEquipment, BossEffect } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
 interface AdventureLog {
@@ -10,27 +10,38 @@ interface AdventureLog {
     created_at: string;
 }
 
-interface OwnedEquipment {
-    id: string | number;
-    equipment_id: string | number;
-    user_id: string;
-    equipped: boolean;
+// 家族全体の統計情報 (UserService.get_family_chronicle の "stats" レスポンスに対応)
+export interface FamilyStats {
+    totalLevel: number;
+    totalGold: number;
+    totalQuests: number;
+    partyRank: string;
 }
 
-interface FamilyStats {
-    total_quests: number;
-    total_medals: number;
-    level: number;
+// 年代記の1エントリ (UserService._fetch_full_adventure_logs のレスポンスに対応。
+// FamilyLog.tsx 側で複数の代替フィールド名にも防御的にフォールバックしているため、
+// それらも任意プロパティとして許容する)
+export interface ChronicleItem {
+    type?: string;
+    timestamp?: string;
+    dateStr?: string;
+    date?: string;
+    id?: string | number;
+    userName?: string;
+    userAvatar?: string;
+    avatar_url?: string;
+    title?: string;
+    text?: string;
+    message?: string;
+    quest_title?: string;
+    gold?: number;
+    reward_gold?: number;
+    exp?: number;
+    reward_exp?: number;
+    created_at?: string;
 }
 
-interface ChronicleItem {
-    id: string | number;
-    event_type: string;
-    description: string;
-    timestamp: string;
-}
-
-interface LevelUpInfo {
+export interface LevelUpInfo {
     user: string;
     level: number;
     job: string;
@@ -63,7 +74,7 @@ interface ChronicleResponse {
 
 interface ApproveResponse {
     success: boolean;
-    bossEffect?: any; // 必要に応じて厳密な型を定義
+    bossEffect?: BossEffect;
 }
 
 interface PurchaseResponse {
@@ -265,6 +276,11 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
             const res = await completeQuestMutation.mutateAsync({ user, quest });
             return {
                 success: true,
+                // ★バグ修正: 以前は status/message を返り値から落としていたため、
+                // 子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが
+                // App.tsx 側で絶対に表示されなかった（res.status が常に undefined）。
+                status: res.status,
+                message: res.message,
                 earnedMedals: res.earnedMedals,
                 leveledUp: res.leveledUp,
                 bossEffect: res.bossEffect
