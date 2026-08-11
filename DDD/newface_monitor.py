@@ -278,10 +278,15 @@ class DataManager:
         try:
             data_file.parent.mkdir(parents=True, exist_ok=True)
             data = [c.to_dict() for c in casts]
-            
-            with open(data_file, 'w', encoding='utf-8') as f:
+
+            # アトミック書き込み: 一時ファイルに書き出してから置き換えることで、
+            # 書き込み中断時に既存データが破損/空になるのを防ぐ
+            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)
+            tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
-            
+            tmp_path.replace(data_file)
+
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except IOError as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
@@ -372,7 +377,10 @@ class WebMonitor:
                     href = link_elem.get('href')
                     detail_url = urljoin(MonitorConfig.TARGET_URL, href)
                     # パスからIDを生成 (例: /prof/123 -> 123)
-                    clean_path = href.rstrip('/')
+                    # クエリ文字列(?utm=...等)が付与されるとcast_idが実行ごとに
+                    # ブレて「新規キャスト」の誤検知を招くため、先に除去する
+                    href_no_query = href.split('?')[0]
+                    clean_path = href_no_query.rstrip('/')
                     cast_id = os.path.basename(clean_path)
 
                 if not cast_id:
