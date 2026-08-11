@@ -1,2 +1,4 @@
 requests>=2.28.0
 beautifulsoup4>=4.11.0
+yt-dlp>=2024.1.0
+tqdm>=4.66.0

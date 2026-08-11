@@ -11,6 +11,8 @@ MY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に
 import sys
 import argparse
 import re
+import time
+import random
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Set, Iterator, Dict, Any
@@ -53,6 +55,10 @@ class AppConfig:
 
     SUB_DIR_NAME: str = "list"
     SUBSCRIPTION_FILE: str = "subscriptions.txt"
+
+    # レート制限対策: チャンネル/URLごとの巡回間隔とサーキットブレーカー閾値
+    SUBSCRIPTION_SLEEP_RANGE: tuple = (2.0, 5.0)
+    CONSECUTIVE_FAILURE_THRESHOLD: int = 3
     
     # yt-dlp オプション: 高速化のため extract_flat を使用
     YDL_OPTS: Dict[str, Any] = {
@@ -285,6 +291,9 @@ class FileManager:
         filename = f"{safe_title}.txt" if safe_channel == "unknown_channel" else f"{safe_channel}_{safe_title}.txt"
         output_path = target_dir / filename
 
+        if output_path.exists():
+            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")
+
         try:
             with output_path.open("w", encoding="utf-8") as f:
                 for url in result.urls:
@@ -368,11 +377,27 @@ class SubscriptionManager:
             return
 
         logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")
-        
+
+        consecutive_failures = 0
         for i, url in enumerate(urls):
+            if i > 0:
+                # レート制限/Bot検知対策: リクエスト間にジッター付きの待機を挟む
+                time.sleep(random.uniform(*AppConfig.SUBSCRIPTION_SLEEP_RANGE))
+
             logger.debug(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
+            got_result = False
             for result in self.extractor.extract_iter(url):
                 self.file_manager.save(result)
+                got_result = True
+
+            if got_result:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                logger.warning(f"⚠️ 抽出結果を取得できませんでした ({url}) — 連続失敗数: {consecutive_failures}")
+                if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:
+                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")
+                    break
                 
 # ==========================================
 # 4. アプリケーション本体
