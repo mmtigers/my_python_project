@@ -38,46 +38,46 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュール内の定義 | `BASE_DIR`, `CAMERAS`, `DISCORD_WEBHOOK_ERROR_CAM` などの具体的なデータ構造や値が提供されたコード内に存在しないため。 | `os.path.join(config.BASE_DIR, "logs")` (行番号: 24 / 抜粋: "config.BASE_DIR") |
-| `common` モジュール内の実装 | `setup_logging`, `get_today_date_str` の内部処理や正確な戻り値が提供されたコード内に存在しないため。 | `common.setup_logging(...)` (行番号: 18 / 抜粋: "common.setup_logging") |
+| `config` モジュール内の定義 | `BASE_DIR`, `CAMERAS`, `DISCORD_WEBHOOK_ERROR_CAM` などの具体的なデータ構造や値が提供されたコード内に存在しないため。 | `os.path.join(config.BASE_DIR, "logs")` (行番号: 25 / 抜粋: "config.BASE_DIR") |
+| `common` モジュール内の実装 | `setup_logging`, `get_today_date_str` の内部処理や正確な戻り値が提供されたコード内に存在しないため。 | `common.setup_logging(...)` (行番号: 19 / 抜粋: "common.setup_logging") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `ensure_log_dir`
 
 * **役割**: ログ保存用ディレクトリが存在するか確認し、存在しない場合は作成する。
-* 根拠: `ensure_log_dir` (行番号: 29-37 / 抜粋: "def ensure_log_dir():")
+* 根拠: `ensure_log_dir` (行番号: 33-41 / 抜粋: "def ensure_log_dir():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `ensure_log_dir` (行番号: 29 / 抜粋: "def ensure_log_dir():")
+* 根拠: `ensure_log_dir` (行番号: 33 / 抜粋: "def ensure_log_dir():")
 
 
 * **戻り値/レスポンス**: bool（作成成功・既存の場合はTrue、失敗時はFalse）
-* 根拠: `return` (行番号: 35, 37 / 抜粋: "return True", "return False")
+* 根拠: `return` (行番号: 40, 41 / 抜粋: "return False", "return True")
 
 
 * **副作用**: ファイルシステム上にディレクトリを作成する (`os.makedirs`)。
-* 根拠: `os.makedirs` (行番号: 32 / 抜粋: "os.makedirs(LOG_DIR)")
+* 根拠: `os.makedirs` (行番号: 36 / 抜粋: "os.makedirs(LOG_DIR)")
 
 
 * **エラーハンドリング**: `OSError` を捕捉し、エラーログを出力してFalseを返す。
-* 根拠: `except OSError` (行番号: 34 / 抜粋: "except OSError as e:")
+* 根拠: `except OSError` (行番号: 38 / 抜粋: "except OSError as e:")
 
 
 
 ### `get_log_filepath`
 
 * **役割**: カメラIDからファイル名に使えない文字（英数字、アンダースコア、ハイフン以外）を除去し、日付を含めたログファイルの保存パスを生成する。
-* 根拠: `get_log_filepath` (行番号: 39-44 / 抜粋: "def get_log_filepath(camera_id):")
+* 根拠: `get_log_filepath` (行番号: 43-48 / 抜粋: "def get_log_filepath(camera_id):")
 
 
 * **引数/リクエスト**: `camera_id` (文字列として処理される)
-* 根拠: `camera_id` (行番号: 39 / 抜粋: "def get_log_filepath(camera_id):")
+* 根拠: `camera_id` (行番号: 43 / 抜粋: "def get_log_filepath(camera_id):")
 
 
 * **戻り値/レスポンス**: 文字列（ログファイルの絶対パス）
-* 根拠: `return` (行番号: 44 / 抜粋: "return os.path.join(LOG_DIR, ...)")
+* 根拠: `return` (行番号: 48 / 抜粋: "return os.path.join(LOG_DIR, ...)")
 
 
 * **副作用**: なし
@@ -92,11 +92,11 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 ### `write_to_file`
 
 * **役割**: 指定されたカメラのログファイルにタイムスタンプとテキストを追記する。
-* 根拠: `write_to_file` (行番号: 46-55 / 抜粋: "def write_to_file(camera_id, text):")
+* 根拠: `write_to_file` (行番号: 50-58 / 抜粋: "def write_to_file(camera_id, text):")
 
 
 * **引数/リクエスト**: `camera_id` (ファイル名生成用), `text` (ファイルに書き込む内容)
-* 根拠: `camera_id, text` (行番号: 46 / 抜粋: "def write_to_file(camera_id, text):")
+* 根拠: `camera_id, text` (行番号: 50 / 抜粋: "def write_to_file(camera_id, text):")
 
 
 * **戻り値/レスポンス**: なし
@@ -104,30 +104,30 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 
 
 * **副作用**: ファイルシステムへの書き込み（追記モードによるファイルオープンと書き込み）。
-* 根拠: `open` (行番号: 50 / 抜粋: "with open(filepath, "a", ...)")
+* 根拠: `open` (行番号: 54 / 抜粋: "with open(filepath, "a", ...)")
 
 
 * **エラーハンドリング**: `Exception` を捕捉し、ロガーにエラーを出力する。
-* 根拠: `except Exception` (行番号: 54 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 57 / 抜粋: "except Exception as e:")
 
 
 
 ### `find_wsdl_path`
 
 * **役割**: `sys.path` を走査し、`onvif/wsdl/devicemgmt.wsdl` または `devicemgmt.wsdl` が存在するディレクトリパスを探索する。
-* 根拠: `find_wsdl_path` (行番号: 57-65 / 抜粋: "def find_wsdl_path():")
+* 根拠: `find_wsdl_path` (行番号: 60-68 / 抜粋: "def find_wsdl_path():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `find_wsdl_path` (行番号: 57 / 抜粋: "def find_wsdl_path():")
+* 根拠: `find_wsdl_path` (行番号: 60 / 抜粋: "def find_wsdl_path():")
 
 
 * **戻り値/レスポンス**: 文字列（ディレクトリパス）または None（見つからなかった場合）
-* 根拠: `return` (行番号: 62, 64, 65 / 抜粋: "return candidate", "return None")
+* 根拠: `return` (行番号: 65, 67, 68 / 抜粋: "return candidate", "return None")
 
 
 * **副作用**: ファイルシステムの走査 (`os.walk`) を実行する。
-* 根拠: `os.walk` (行番号: 63 / 抜粋: "for root, dirs, files in os.walk(path):")
+* 根拠: `os.walk` (行番号: 66 / 抜粋: "for root, dirs, files in os.walk(path):")
 
 
 * **エラーハンドリング**: なし
@@ -138,11 +138,11 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 ### `collect_single_camera`
 
 * **役割**: 単一のカメラに対するONVIF接続を初期化し、イベントを定期的にポーリングしてログファイルに保存する。指定秒数経過時の定期再接続、および各種通信エラー時の再試行制御を行う。
-* 根拠: `collect_single_camera` (行番号: 67-175 / 抜粋: "def collect_single_camera(cam_conf):")
+* 根拠: `collect_single_camera` (行番号: 70-208 / 抜粋: "def collect_single_camera(cam_conf):")
 
 
 * **引数/リクエスト**: `cam_conf`（`name`, `ip`, `id`, `user`, `pass` などのキーを含む辞書オブジェクト）
-* 根拠: `cam_conf` (行番号: 67, 69-71 / 抜粋: "cam_name = cam_conf['name']")
+* 根拠: `cam_conf` (行番号: 70, 72-74 / 抜粋: "cam_name = cam_conf['name']")
 
 
 * **戻り値/レスポンス**: なし
@@ -150,7 +150,7 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 
 
 * **副作用**: 外部APIへのネットワークリクエスト（ONVIF通信）、ファイルへのログ書き込み、スリープ処理。
-* 根拠: `ONVIFCamera` (行番号: 87 / 抜粋: "mycam = ONVIFCamera(...)")
+* 根拠: `ONVIFCamera` (行番号: 93 / 抜粋: "mycam = ONVIFCamera(...)")
 
 
 * **エラーハンドリング**:
@@ -158,18 +158,18 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 * `RemoteDisconnected`, `ProtocolError`, `BrokenPipeError`, `ConnectionResetError` は想定内切断として1秒待機し再試行。
 * `KeyboardInterrupt` を捕捉しループを抜ける。
 * その他例外は文字列マッチングで一時的エラーか予期せぬエラーか判別し、閾値に基づくエラーログ出力とスリープ（2秒または10秒）を実施する。
-* 根拠: `except` ブロック全体 (行番号: 136-175 / 抜粋: "except (RemoteDisconnected, ...)")
+* 根拠: `except` ブロック全体 (行番号: 167-208 / 抜粋: "except (RemoteDisconnected, ...)")
 
 
 
 ### `main`
 
 * **役割**: ログディレクトリの確認後、`config.CAMERAS` に定義されたカメラリストに基づいてスレッドプールを生成し、各カメラの収集処理を非同期で実行する。
-* 根拠: `main` (行番号: 177-187 / 抜粋: "async def main():")
+* 根拠: `main` (行番号: 210-221 / 抜粋: "async def main():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 177 / 抜粋: "async def main():")
+* 根拠: `main` (行番号: 210 / 抜粋: "async def main():")
 
 
 * **戻り値/レスポンス**: なし
@@ -177,7 +177,7 @@ ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを�
 
 
 * **副作用**: スレッドプールの生成と実行。
-* 根拠: `ThreadPoolExecutor` (行番号: 183 / 抜粋: "with ThreadPoolExecutor(...)")
+* 根拠: `ThreadPoolExecutor` (行番号: 217 / 抜粋: "with ThreadPoolExecutor(...)")
 
 
 * **エラーハンドリング**: なし（呼び出し元でのハンドリングに依存）。
@@ -268,8 +268,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `CAMERAS` リストの各要素の正確な構造や、`BASE_DIR` などシステム全体の挙動を決定づける環境変数の定義を確認するため。 | `import config` (行番号: 5), `config.CAMERAS` (行番号: 184) |
-| 中 | `common.py` | `setup_logging` によるロギングの詳細な仕様（DiscordへのWebhook連携の仕組み等）や日付フォーマットの仕様を確認するため。 | `import common` (行番号: 6), `common.setup_logging` (行番号: 18) |
+| 高 | `config.py` | `CAMERAS` リストの各要素の正確な構造や、`BASE_DIR` などシステム全体の挙動を決定づける環境変数の定義を確認するため。 | `import config` (行番号: 5), `config.CAMERAS` (行番号: 218) |
+| 中 | `common.py` | `setup_logging` によるロギングの詳細な仕様（DiscordへのWebhook連携の仕組み等）や日付フォーマットの仕様を確認するため。 | `import common` (行番号: 6), `common.setup_logging` (行番号: 19) |
 
 ## 8. 保守上の注意点
 
