@@ -52,6 +52,11 @@ export interface Quest {
     days?: number[] | string | null;
     target?: string;
     pre_requisite_quest_id?: number | null;
+    // ★共有クエスト判定用 (バックエンドの get_available_quests が付与するフィールド)
+    is_shared_completed_by?: string;
+    shared_completed_by_name?: string;
+    is_shared_pending_by?: string;
+    shared_pending_by_name?: string;
 }
 
 // クエスト履歴
@@ -106,6 +111,19 @@ export interface Boss {
     desc: string;
     isDefeated: boolean;
     weekStartDate: string;
+}
+
+// 所持装備（バックエンドの user_equipments と equipment_master の JOIN 結果 = `ue.*` + em.name/type/power/icon_key）
+export interface OwnedEquipment {
+    id: number;
+    user_id: string;
+    equipment_id: number;
+    is_equipped: number; // SQLite上は 0/1 の整数
+    acquired_at?: string;
+    name: string;
+    type: 'weapon' | 'armor' | string;
+    power: number;
+    icon_key?: string;
 }
 
 // インベントリアイテム

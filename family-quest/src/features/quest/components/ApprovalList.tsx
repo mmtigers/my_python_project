@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Package } from 'lucide-react'; // Packageアイコン追加
 import { QuestHistory, User, PendingInventory } from '@/types';
 import { Button } from '../../../components/ui/Button';
+import { Modal } from '../../../components/ui/Modal';
 import { apiClient } from '../../../lib/apiClient';
 
 type Props = {
@@ -16,6 +17,8 @@ type Props = {
 
 const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, currentUser, onApprove, onReject }) => {
     const queryClient = useQueryClient();
+    // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「アイテム使用承認」の確認を行う
+    const [itemToConsume, setItemToConsume] = useState<PendingInventory | null>(null);
 
     // アイテム承認（消費）アクション
     const consumeMutation = useMutation({
@@ -87,11 +90,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, cur
                             <Button
                                 variant="primary"
                                 size="sm"
-                                onClick={() => {
-                                    if (confirm(`${item.user_name}くんの「${item.title}」使用を承認しますか？`)) {
-                                        consumeMutation.mutate(item.id);
-                                    }
-                                }}
+                                onClick={() => setItemToConsume(item)}
                                 disabled={consumeMutation.isPending}
                             >
                                 <CheckCircle size={18} /> OK
@@ -100,6 +99,31 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, cur
                     </div>
                 ))}
             </div>
+
+            {itemToConsume && (
+                <Modal isOpen={true} onClose={() => setItemToConsume(null)} title="使用の承認">
+                    <div className="flex flex-col gap-4">
+                        <p className="text-gray-700">
+                            {itemToConsume.user_name}くんの「{itemToConsume.title}」使用を承認しますか？
+                        </p>
+                        <div className="flex gap-4">
+                            <Button variant="secondary" onClick={() => setItemToConsume(null)} className="flex-1">
+                                キャンセル
+                            </Button>
+                            <Button
+                                variant="primary"
+                                className="flex-1"
+                                onClick={() => {
+                                    consumeMutation.mutate(itemToConsume.id);
+                                    setItemToConsume(null);
+                                }}
+                            >
+                                承認する
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };

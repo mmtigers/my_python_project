@@ -43,10 +43,10 @@ const QuestItem: React.FC<{
     const totalGold = baseGold + bonusGold;
     const totalExp = baseExp + bonusExp;
 
-    const isSharedCompleted = !!(quest as any).is_shared_completed_by && (quest as any).is_shared_completed_by !== currentUser.user_id;
-    const isSharedPending = !!(quest as any).is_shared_pending_by && (quest as any).is_shared_pending_by !== currentUser.user_id;
+    const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
+    const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
     const isSharedDoneByOther = isSharedCompleted || isSharedPending;
-    const sharedName = (quest as any).shared_completed_by_name || (quest as any).shared_pending_by_name;
+    const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
     const isEffectivelyLocked = isLocked || isSharedDoneByOther;
 
     const handleClick = () => {
@@ -265,7 +265,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             if (bonusA !== bonusB) return bonusB - bonusA;
             return (b.id as number) - (a.id as number);
         });
-    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
+    }, [quests, currentUser, currentDay, completedQuests, pendingQuests, isDaily]);
 
     return (
         <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
