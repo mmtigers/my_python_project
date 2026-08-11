@@ -126,3 +126,117 @@ class TestRequestSwitchbotApiRetry:
 
         assert result is None
         assert call_count["n"] == 1
+
+
+class TestSendDeviceCommand:
+    def test_missing_credentials_returns_none_without_http_call(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", None)
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", None)
+        calls = []
+        monkeypatch.setattr(switchbot_service.requests, "post", lambda *a, **kw: calls.append(1))
+
+        result = switchbot_service.send_device_command("dev1", "turnOn")
+
+        assert result is None
+        assert calls == []
+
+    def test_success_returns_response_json(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+        fake_response = MagicMock()
+        fake_response.json.return_value = {"statusCode": 100, "message": "success"}
+        fake_response.raise_for_status.return_value = None
+        monkeypatch.setattr(switchbot_service.requests, "post", lambda *a, **kw: fake_response)
+
+        result = switchbot_service.send_device_command("dev1", "turnOn")
+
+        assert result == {"statusCode": 100, "message": "success"}
+
+    def test_http_error_is_caught_and_returns_none(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+
+        def _raise(*a, **kw):
+            raise requests.exceptions.RequestException("device offline")
+
+        monkeypatch.setattr(switchbot_service.requests, "post", _raise)
+
+        assert switchbot_service.send_device_command("dev1", "turnOn") is None
+
+
+class TestGetDeviceStatus:
+    def test_returns_parsed_status(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+        fake_response = MagicMock()
+        fake_response.json.return_value = {"statusCode": 100, "message": "success", "body": {"power": "on"}}
+        fake_response.raise_for_status.return_value = None
+        monkeypatch.setattr(switchbot_service.requests, "get", lambda *a, **kw: fake_response)
+
+        result = switchbot_service.get_device_status("dev1")
+
+        assert result["body"]["power"] == "on"
+
+    def test_exception_is_caught_and_returns_none(self, monkeypatch):
+        def _raise(*a, **kw):
+            raise requests.exceptions.Timeout("no response")
+        monkeypatch.setattr(switchbot_service.requests, "get", _raise)
+
+        assert switchbot_service.get_device_status("dev1") is None
+
+
+class TestFetchDeviceNameCache:
+    @pytest.fixture(autouse=True)
+    def _clean_cache(self):
+        switchbot_service.DEVICE_NAME_CACHE.clear()
+        yield
+        switchbot_service.DEVICE_NAME_CACHE.clear()
+
+    def test_missing_credentials_returns_false(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", None)
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", None)
+        assert switchbot_service.fetch_device_name_cache() is False
+
+    def test_populates_cache_from_devices_and_infrared_remotes(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+        fake_response = MagicMock()
+        fake_response.json.return_value = {
+            "statusCode": 100,
+            "message": "success",
+            "body": {
+                "deviceList": [{"deviceId": "d1", "deviceName": "玄関ドア"}],
+                "infraredRemoteList": [{"deviceId": "ir1", "deviceName": "テレビ"}],
+            },
+        }
+        fake_response.raise_for_status.return_value = None
+        monkeypatch.setattr(switchbot_service.requests, "get", lambda *a, **kw: fake_response)
+
+        result = switchbot_service.fetch_device_name_cache()
+
+        assert result is True
+        assert switchbot_service.get_device_name_by_id("d1") == "玄関ドア"
+        assert switchbot_service.get_device_name_by_id("ir1") == "テレビ"
+
+    def test_unknown_device_id_returns_none(self):
+        assert switchbot_service.get_device_name_by_id("nonexistent") is None
+
+    def test_non_success_status_code_returns_false(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+        fake_response = MagicMock()
+        fake_response.json.return_value = {"statusCode": 190, "message": "invalid auth", "body": {}}
+        fake_response.raise_for_status.return_value = None
+        monkeypatch.setattr(switchbot_service.requests, "get", lambda *a, **kw: fake_response)
+
+        assert switchbot_service.fetch_device_name_cache() is False
+
+    def test_no_response_from_api_returns_false(self, monkeypatch):
+        monkeypatch.setattr(config, "SWITCHBOT_API_TOKEN", "token")
+        monkeypatch.setattr(config, "SWITCHBOT_API_SECRET", "secret")
+
+        def _always_fails(*a, **kw):
+            raise requests.exceptions.ConnectionError("offline")
+        monkeypatch.setattr(switchbot_service.requests, "get", _always_fails)
+
+        assert switchbot_service.fetch_device_name_cache() is False
