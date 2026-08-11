@@ -23,6 +23,7 @@ import shutil
 import datetime
 import logging
 import signal
+import fcntl
 import requests
 import glob
 from collections import defaultdict
@@ -85,6 +86,7 @@ class AppConfig:
     LIST_FILE_PATH: Path = CURRENT_DIR / "list.txt"
     LIST_DIR_PATH: Path = CURRENT_DIR / "list"
     HISTORY_FILE_PATH: Path = CURRENT_DIR / "history.txt"
+    LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
     
@@ -118,7 +120,7 @@ class DiscordNotifier:
         try:
             _send_discord_webhook([message], channel=channel)
         except Exception as e:
-            logger.error(f"⚠️ Discord通知エラー: {e}")
+            logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)
 
 class HistoryManager:
     @staticmethod
@@ -174,8 +176,9 @@ class FileSystemManager:
                 DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)
                 return False
             return True
-        except Exception:
-            return True
+        except Exception as e:
+            logger.error(f"⚠️ ディスク容量チェックに失敗しました（安全のためダウンロードを中断します）: {e}", exc_info=True)
+            return False
 
 class SystemHealthChecker:
     @staticmethod
@@ -253,7 +256,7 @@ class UniversalYtDlpStrategy(DownloadStrategy):
                 DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{filename.name}`")
                 return True
         except Exception as e:
-            logger.error(f"⚠️ Universal DL エラー: {e}")
+            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)
             return False
 
 # ★スクレイピングが必要な特定サイト専用 (missav用)
@@ -286,7 +289,7 @@ class ScrapingStrategy(DownloadStrategy):
             res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)
             return res.text
         except Exception as e:
-            logger.error(f"HTML取得エラー: {e}")
+            logger.error(f"HTML取得エラー: {e}", exc_info=True)
             return None
 
     def _extract_m3u8_url(self, html: str) -> Optional[str]:
@@ -343,7 +346,7 @@ class ScrapingStrategy(DownloadStrategy):
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
             return True
         except Exception as e:
-            logger.error(f"⚠️ M3U8 DL エラー: {e}")
+            logger.error(f"⚠️ M3U8 DL エラー: {e}", exc_info=True)
             if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除
             return False
 
@@ -397,7 +400,7 @@ class BatchDownloader:
                             if url and not url.startswith("#") and url not in self.history:
                                 tasks.append(DownloadTask(url, source_name))
                 except Exception as e:
-                    logger.error(f"リスト読み込みエラー ({list_file.name}): {e}")
+                    logger.error(f"リスト読み込みエラー ({list_file.name}): {e}", exc_info=True)
 
         unique_tasks = {}
         for t in tasks:
@@ -431,7 +434,7 @@ class BatchDownloader:
                 for task in skipped_tasks:
                     af.write(f"{task.url}\n")
         except Exception as e:
-            logger.error(f"⚠️ アーカイブファイルへの書き込みに失敗しました: {e}")
+            logger.error(f"⚠️ アーカイブファイルへの書き込みに失敗しました: {e}", exc_info=True)
             return # アーカイブ失敗時は元ファイルの削除も中断（データロスト防止）
 
         # 3. 元ファイルからの物理削除（インメモリでフィルタリングして上書き）
@@ -465,12 +468,31 @@ class BatchDownloader:
                 temp_path.replace(file_path)
 
             except Exception as e:
-                logger.error(f"⚠️ リストファイル({file_path.name})のパージ処理に失敗しました: {e}")
+                logger.error(f"⚠️ リストファイル({file_path.name})のパージ処理に失敗しました: {e}", exc_info=True)
 
         logger.info(f"🧹 期限切れ（無効）のタスク {deleted_count} 件をパージしました。")
 
 
     def run(self) -> None:
+        # 【追加】多重起動防止ロック: cron等での実行が重複した場合に
+        # list.txt / list/*.txt の読み書きが競合しないようにする
+        lock_fd = os.open(str(CONFIG.LOCK_FILE_PATH), os.O_CREAT | os.O_RDWR)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")
+            os.close(lock_fd)
+            sys.exit(1)
+
+        try:
+            self._run_locked()
+        finally:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+
+    def _run_locked(self) -> None:
         SystemHealthChecker.check_dependencies()
         
         if not SystemHealthChecker.is_within_time_window():
@@ -533,7 +555,7 @@ class BatchDownloader:
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)
             except Exception as e:
-                logger.error(f"エラー: {e}")
+                logger.error(f"エラー: {e}", exc_info=True)
 
             if i < len(tasks) - 1:
                 if not self._shutdown_requested:

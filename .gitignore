@@ -44,6 +44,10 @@ assets/salary_images/
 *.mp4
 *.txt
 
+# DDD: personal generated content, not source
+DDD/split_results/
+DDD/*プロンプト*.md
+
 # ただし requirements.txt は含める
 !requirements.txt
 
