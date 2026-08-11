@@ -518,10 +518,10 @@ def handle_message(event, line_bot_api: MessagingApi):
     # --- 外出・面会 ---
     if msg.startswith("外出_"):
         val = msg.replace("外出_", "")
-        sync_run(save_log_async(config.SQLITE_TABLE_DAILY, 
-            ["user_id", "user_name", "date", "category", "value", "timestamp"],
-            (user_id, user_name, get_today_date_str(), "外出", val, get_now_iso())))
-        
+        sync_run(save_log_async(config.SQLITE_TABLE_DAILY_LOGS,
+            ["user_id", "category", "detail", "timestamp"],
+            (user_id, "外出", val, get_now_iso())))
+
         actions = [("はい", "面会_はい"), ("いいえ", "面会_いいえ")]
         qr = create_quick_reply(actions)
         send_reply_text(line_bot_api, reply_token, "誰かと会ったりした？", qr)
@@ -529,9 +529,9 @@ def handle_message(event, line_bot_api: MessagingApi):
 
     if msg.startswith("面会_"):
         val = msg.replace("面会_", "")
-        sync_run(save_log_async(config.SQLITE_TABLE_DAILY,
-            ["user_id", "user_name", "date", "category", "value", "timestamp"],
-            (user_id, user_name, get_today_date_str(), "面会", val, get_now_iso())))
+        sync_run(save_log_async(config.SQLITE_TABLE_DAILY_LOGS,
+            ["user_id", "category", "detail", "timestamp"],
+            (user_id, "面会", val, get_now_iso())))
         send_reply_text(line_bot_api, reply_token, "教えてくれてありがとう！\n今日も一日お疲れ様でした🍵")
         return
 

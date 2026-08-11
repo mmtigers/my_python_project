@@ -19,6 +19,7 @@ import json
 import os
 import sys
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -124,3 +125,204 @@ class TestExecuteGetHealthLogs:
 
         assert all(row["target"] == "daughter" for row in data)
         assert len(data) == 1
+
+
+class TestAnalyzeTextAndExecute:
+    """
+    handlers/ai_logic.py の analyze_text_and_execute() のテスト。
+    実際のGemini APIへは一切アクセスしない。genai.GenerativeModel をモックする。
+    このファイルは enable_automatic_function_calling=True を使うため、
+    ai_service.py側のような function_call/parts の分岐は無く、
+    chat.send_message() の戻り値の .text だけを見ればよい。
+    """
+
+    def test_returns_none_when_no_api_key_configured(self, monkeypatch):
+        monkeypatch.setattr(config, "GEMINI_API_KEY", None)
+
+        result = ai_logic.analyze_text_and_execute("こんにちは", "U1", "太郎")
+
+        assert result is None
+
+    def test_returns_stripped_response_text_on_success(self, monkeypatch):
+        monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-key")
+        fake_model = MagicMock()
+        fake_model.start_chat.return_value.send_message.return_value = MagicMock(
+            text="  こんにちは、太郎様。  "
+        )
+        monkeypatch.setattr(ai_logic.genai, "GenerativeModel", MagicMock(return_value=fake_model))
+
+        result = ai_logic.analyze_text_and_execute("こんにちは", "U1", "太郎")
+
+        assert result == "こんにちは、太郎様。"
+
+    def test_empty_response_text_returns_none(self, monkeypatch):
+        monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-key")
+        fake_model = MagicMock()
+        fake_model.start_chat.return_value.send_message.return_value = MagicMock(text="")
+        monkeypatch.setattr(ai_logic.genai, "GenerativeModel", MagicMock(return_value=fake_model))
+
+        result = ai_logic.analyze_text_and_execute("こんにちは", "U1", "太郎")
+
+        assert result is None
+
+    def test_exception_is_caught_and_returns_apology_string_not_raised(self, monkeypatch):
+        monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-key")
+        monkeypatch.setattr(
+            ai_logic.genai, "GenerativeModel", MagicMock(side_effect=Exception("Gemini API down"))
+        )
+
+        result = ai_logic.analyze_text_and_execute("こんにちは", "U1", "太郎")
+
+        assert "処理中にエラーが発生しました" in result
+
+
+class TestExecuteChildHealth:
+    def test_saves_record_and_returns_confirmation_message(self, isolated_db):
+        result = ai_logic.execute_child_health(
+            {"child_name": "智矢", "condition": "元気"}, "U1", "太郎"
+        )
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_CHILD}").fetchone()
+        assert row["child_name"] == "智矢"
+        assert row["condition"] == "元気"
+        assert "記録しました" in result
+
+    def test_missing_args_default_to_placeholder_values(self, isolated_db):
+        ai_logic.execute_child_health({}, "U1", "太郎")
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_CHILD}").fetchone()
+        assert row["child_name"] == "子供"
+        assert row["condition"] == "記録なし"
+
+    def test_emergency_flag_adds_warning_text_and_sends_discord_push(self, isolated_db, monkeypatch):
+        mock_send_push = MagicMock()
+        monkeypatch.setattr(ai_logic.common, "send_push", mock_send_push)
+
+        result = ai_logic.execute_child_health(
+            {"child_name": "智矢", "condition": "高熱", "is_emergency": True}, "U1", "太郎"
+        )
+
+        assert "お大事に" in result
+        mock_send_push.assert_called_once()
+        call_kwargs = mock_send_push.call_args
+        assert call_kwargs.kwargs["target"] == "discord"
+
+    def test_no_emergency_flag_does_not_send_push(self, isolated_db, monkeypatch):
+        mock_send_push = MagicMock()
+        monkeypatch.setattr(ai_logic.common, "send_push", mock_send_push)
+
+        ai_logic.execute_child_health({"child_name": "智矢", "condition": "元気"}, "U1", "太郎")
+
+        mock_send_push.assert_not_called()
+
+
+class TestExecuteShopping:
+    def test_saves_record_with_valid_price(self, isolated_db):
+        result = ai_logic.execute_shopping(
+            {"item_name": "おむつ", "price": 1500, "date_str": "2026-01-01"}, "U1", "太郎"
+        )
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_SHOPPING}").fetchone()
+        assert row["item_name"] == "おむつ"
+        assert row["price"] == 1500
+        assert row["order_date"] == "2026-01-01"
+        assert "1500円" in result
+
+    def test_non_numeric_price_falls_back_to_zero(self, isolated_db):
+        ai_logic.execute_shopping({"item_name": "おむつ", "price": "abc"}, "U1", "太郎")
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_SHOPPING}").fetchone()
+        assert row["price"] == 0
+
+    def test_missing_price_defaults_to_zero(self, isolated_db):
+        ai_logic.execute_shopping({"item_name": "おむつ"}, "U1", "太郎")
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_SHOPPING}").fetchone()
+        assert row["price"] == 0
+
+    def test_missing_date_defaults_to_today(self, isolated_db):
+        ai_logic.execute_shopping({"item_name": "おむつ", "price": 100}, "U1", "太郎")
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_SHOPPING}").fetchone()
+        assert row["order_date"] == common.get_today_date_str()
+
+
+class TestExecuteDefecation:
+    def test_saves_record_and_returns_confirmation(self, isolated_db):
+        result = ai_logic.execute_defecation(
+            {"condition": "普通", "note": "特になし"}, "U1", "太郎"
+        )
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_DEFECATION}").fetchone()
+        assert row["condition"] == "普通"
+        assert row["note"] == "特になし"
+        assert "普通" in result
+
+
+class TestExecuteSearchDatabase:
+    def test_valid_select_returns_json_serialized_rows(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
+                ("智矢", "元気", "2026-01-01T00:00:00"),
+            )
+
+        result = ai_logic.execute_search_database(
+            {"sql_query": f"SELECT child_name, condition FROM {config.SQLITE_TABLE_CHILD}"}
+        )
+
+        data = json.loads(result)
+        assert data == [{"child_name": "智矢", "condition": "元気"}]
+
+    def test_non_select_query_is_rejected(self, isolated_db):
+        result = ai_logic.execute_search_database(
+            {"sql_query": f"DELETE FROM {config.SQLITE_TABLE_CHILD}"}
+        )
+
+        assert "許可されていません" in result
+        with common.get_db_cursor() as cur:
+            # 実際には削除が実行されていないこと(そもそも保護されていること)を明示的に確認
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
+
+    def test_empty_result_returns_not_found_message(self, isolated_db):
+        result = ai_logic.execute_search_database(
+            {"sql_query": f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='存在しない'"}
+        )
+
+        assert "見つかりませんでした" in result
+
+    def test_db_connection_error_is_caught_and_returns_error_string(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "SQLITE_DB_PATH", "/nonexistent/path/does_not_exist.db")
+
+        result = ai_logic.execute_search_database(
+            {"sql_query": f"SELECT * FROM {config.SQLITE_TABLE_CHILD}"}
+        )
+
+        assert "検索中にエラーが発生しました" in result
+
+
+class TestDeclareToolStubsKnownIssue:
+    """
+    my_tools に登録されている declare_child_health / declare_shopping / declare_defecation は
+    passのみのスタブで、実際に保存を行う execute_child_health 等とは配線されていない。
+    Geminiの自動関数呼び出しがこれらを実際に呼んだ場合、何も保存されず沈黙して
+    失敗する可能性がある(既知の問題として最終レポートで報告する)。
+    このテストはその「現状の挙動」を明示的に固定するピン留めテストであり、
+    正しい挙動であることを主張するものではない。
+    """
+
+    def test_declare_child_health_stub_has_no_side_effect(self, isolated_db):
+        result = ai_logic.declare_child_health("智矢", "元気")
+
+        assert result is None
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
