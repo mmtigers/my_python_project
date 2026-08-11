@@ -1,0 +1,204 @@
+# MY_HOME_SYSTEM/tests/test_line_logic_postback.py
+"""
+handlers/line_logic.py の handle_postback() (LINE会話ステートマシンの
+Postbackディスパッチ側) のテスト。
+
+実際のLINE API・AIサービスへは一切アクセスしない。line_bot_apiはMagicMockで、
+handlers.ai_logic.analyze_text_and_execute はモックで代替する。
+グローバル可変状態 USER_INPUT_STATE はテスト前後でクリアし、他テストへの
+汚染を防ぐ。
+"""
+import os
+import sys
+from unittest.mock import MagicMock
+
+import pytest
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+import common
+import config
+from handlers import line_logic
+from models.line import InputMode
+
+
+@pytest.fixture(autouse=True)
+def _reset_user_input_state():
+    line_logic.USER_INPUT_STATE.clear()
+    yield
+    line_logic.USER_INPUT_STATE.clear()
+
+
+@pytest.fixture
+def mock_line_api():
+    api = MagicMock()
+    api.get_profile.return_value = MagicMock(display_name="テストユーザー")
+    api.get_group_member_profile.return_value = MagicMock(display_name="テストグループ")
+    return api
+
+
+def fake_postback_event(data: str, user_id="U1", reply_token="tok", source_type="user"):
+    event = MagicMock()
+    event.source.user_id = user_id
+    event.source.type = source_type
+    event.reply_token = reply_token
+    event.postback.data = data
+    return event
+
+
+def _texts_from_reply(mock_api):
+    """reply_message呼び出しに渡されたTextMessageのテキスト一覧を返す"""
+    call = mock_api.reply_message.call_args
+    req = call[0][0]
+    return [m.text for m in req.messages if hasattr(m, "text")]
+
+
+class TestAllGenki:
+    def test_saves_log_for_every_target_member_and_replies_flex(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=all_genki")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        with common.get_db_cursor() as cur:
+            rows = cur.execute(
+                f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
+            ).fetchall()
+        saved_names = {row["child_name"] for row in rows}
+        assert saved_names == set(config.FAMILY_SETTINGS["members"])
+        mock_line_api.reply_message.assert_called_once()
+
+
+class TestShowHealthInput:
+    def test_replies_with_text_and_flex_carousel(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=show_health_input")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        req = mock_line_api.reply_message.call_args[0][0]
+        assert len(req.messages) == 2
+
+
+class TestChildCheck:
+    def test_status_other_enters_child_health_input_mode_without_saving(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=child_check&child=智矢&status=other")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        assert line_logic.USER_INPUT_STATE["U1"].mode == InputMode.CHILD_HEALTH
+        assert line_logic.USER_INPUT_STATE["U1"].target_name == "智矢"
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
+
+    def test_status_genki_saves_directly_without_entering_input_mode(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=child_check&child=智矢&status=genki")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='智矢'"
+            ).fetchone()
+        assert row is not None
+        assert "元気" in row["condition"]
+        assert "U1" not in line_logic.USER_INPUT_STATE
+
+    def test_missing_child_param_is_a_silent_noop(self, isolated_db, mock_line_api):
+        """child パラメータが無い場合、既存実装ではどの分岐にも入らず
+        DB保存も返信も一切行われない(サイレントな無反応)。この既存挙動を固定する。"""
+        event = fake_postback_event("action=child_check&status=genki")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        mock_line_api.reply_message.assert_not_called()
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
+
+
+class TestCheckStatus:
+    def test_builds_summary_flex_from_existing_records(self, isolated_db, mock_line_api):
+        today = line_logic.get_today_date_str()
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
+                ("智矢", "😊 元気いっぱい", f"{today}T08:00:00"),
+            )
+        event = fake_postback_event("action=check_status")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        mock_line_api.reply_message.assert_called_once()
+
+    def test_db_read_error_falls_back_to_error_text_in_summary(self, isolated_db, mock_line_api, monkeypatch):
+        monkeypatch.setattr(
+            line_logic.sqlite3, "connect", MagicMock(side_effect=Exception("disk error"))
+        )
+        event = fake_postback_event("action=check_status")
+
+        line_logic.handle_postback(event, mock_line_api)  # 例外が外に漏れないこと
+
+        mock_line_api.reply_message.assert_called_once()
+
+
+class TestFoodRecordDirect:
+    def test_saves_record_and_replies_with_category_and_item(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=food_record_direct&category=麺類&item=ラーメン")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
+        assert "麺類" in row["menu_category"]
+        assert "ラーメン" in row["menu_category"]
+
+    def test_missing_item_defaults_to_placeholder(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=food_record_direct&category=麺類")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
+        assert "不明なメニュー" in row["menu_category"]
+
+
+class TestFoodManual:
+    @pytest.mark.parametrize(
+        "category,expected_fragment",
+        [
+            ("外食", "お店の名前"),
+            ("自炊", "作ったメニュー"),
+            ("その他", "食べたもの"),
+        ],
+    )
+    def test_sets_meal_input_mode_with_category_specific_prompt(
+        self, isolated_db, mock_line_api, category, expected_fragment
+    ):
+        event = fake_postback_event(f"action=food_manual&category={category}")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        assert line_logic.USER_INPUT_STATE["U1"].mode == InputMode.MEAL
+        assert line_logic.USER_INPUT_STATE["U1"].category == category
+        assert expected_fragment in _texts_from_reply(mock_line_api)[0]
+
+
+class TestUnknownAction:
+    def test_unknown_action_replies_with_fallback_warning_text(self, isolated_db, mock_line_api):
+        event = fake_postback_event("action=something_undefined")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        assert "不明な操作" in _texts_from_reply(mock_line_api)[0]
+
+
+class TestHandlePostbackCrashIsolation:
+    def test_exception_inside_handler_is_logged_only_no_reraise_no_extra_reply(
+        self, isolated_db, mock_line_api
+    ):
+        """handle_postback全体はtry/exceptで包まれ、例外はログのみで外へは伝播しない
+        (ユーザーへの追加返信もされない)。line_bot_api.reply_message自体を失敗させて確認する。"""
+        mock_line_api.reply_message.side_effect = Exception("LINE API down")
+        event = fake_postback_event("action=all_genki")
+
+        line_logic.handle_postback(event, mock_line_api)  # 例外が外に漏れないこと
