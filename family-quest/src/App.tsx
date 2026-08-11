@@ -9,6 +9,13 @@ import { InventoryList } from './features/shop/components/InventoryList';
 import { GuildBoard } from './features/guild/components/GuildBoard';
 
 import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
+import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
+
+// 保護者ユーザーID一覧（MY_HOME_SYSTEM/services/quest_service.py の PARENT_IDS と一致させる）
+// ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
+// セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、
+// 本当のアクセス制御はバックエンド側で別途実装される必要がある。
+const PARENT_USER_IDS = ['dad', 'mom'];
 
 
 // UI Components
@@ -87,7 +94,7 @@ function App() {
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     equipments, ownedEquipments, familyStats, chronicle, boss,
-    familyMileage,
+    familyMileage, pendingInventory,
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward, buyEquipment, changeEquipment,
     refreshData, adminUpdateBoss, adminUpdateFamilyMileage
@@ -113,9 +120,11 @@ function App() {
     }
 
     // 2. クエストリストから渡された場合 (q は Quest 型)
-    // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
-    const isInfinite = (q as any)._isInfinite || (q as any).type === 'infinite' || (q as any).quest_type === 'infinite';
+    // ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約
+    const { isInfinite, pendingEntry, completedEntry } =
+      getQuestLockState(q as Quest, currentUser, completedQuests, pendingQuests);
 
+    // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
     if (isInfinite) {
       setConfirmTarget(q);
       setConfirmMode('complete');
@@ -124,21 +133,6 @@ function App() {
     }
 
     // 3. 完了済み、または申請中リストにあるかを探す
-    const qId = q.id || (q as any).quest_id;
-
-    // 申請中を探す
-    const pendingEntry = pendingQuests.find(pq =>
-      pq.user_id === currentUser.user_id &&
-      pq.quest_id === qId
-    );
-
-    // 完了済みを探す
-    const completedEntry = completedQuests.find(cq =>
-      cq.user_id === currentUser.user_id &&
-      cq.quest_id === qId &&
-      cq.status === 'approved'
-    );
-
     const historyEntry = pendingEntry || completedEntry;
 
     if (historyEntry) {
@@ -211,14 +205,16 @@ function App() {
       }
     }
 
-    if (!res.success && res.reason) {
+    if (!res.success) {
       const reasons: { [key: string]: string } = {
         gold: "お金が足りません！",
         pending: "すでに申請中です",
         permission: "権限がありません",
         error: "エラーが発生しました"
       };
-      setMessageData({ title: "エラー", text: reasons[res.reason] || "失敗しました", type: "error" });
+      // バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
+      const text = res.detail || (res.reason && reasons[res.reason]) || "失敗しました";
+      setMessageData({ title: "エラー", text, type: "error" });
       play('cancel');
     }
 
@@ -232,13 +228,31 @@ function App() {
     if (res.success) {
       play('approve');
       if (res.bossEffect) setBossEffect(res.bossEffect);
+    } else {
+      const reasons: { [key: string]: string } = {
+        permission: "権限がありません",
+        error: "エラーが発生しました"
+      };
+      const text = res.detail || (res.reason && reasons[res.reason]) || "承認に失敗しました";
+      setMessageData({ title: "エラー", text, type: "error" });
+      play('cancel');
     }
   };
 
   const handleReject = async (history: QuestHistory) => {
     if (confirm("本当に却下しますか？")) {
       const res = await rejectQuest(currentUser, history);
-      if (res.success) play('cancel');
+      if (res.success) {
+        play('cancel');
+      } else {
+        const reasons: { [key: string]: string } = {
+          permission: "権限がありません",
+          error: "エラーが発生しました"
+        };
+        const text = res.detail || (res.reason && reasons[res.reason]) || "却下に失敗しました";
+        setMessageData({ title: "エラー", text, type: "error" });
+        play('cancel');
+      }
     }
   };
 
@@ -261,7 +275,11 @@ function App() {
         onPartySwitch={() => { setViewMode('party'); play('select'); }}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onTrendsSwitch={() => { setViewMode('trends'); play('select'); }}
-        onAdminOpen={() => { setViewMode('admin'); play('select'); }}
+        onAdminOpen={
+          PARENT_USER_IDS.includes(currentUser.user_id)
+            ? () => { setViewMode('admin'); play('select'); }
+            : undefined
+        }
       />
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
@@ -288,10 +306,12 @@ function App() {
               onAvatarClick={() => setIsAvatarModalOpen(true)}
             />
 
-            {(currentUser.user_id === 'dad' || currentUser.user_id === 'mom') && (
+            {PARENT_USER_IDS.includes(currentUser.user_id) && (
               <ApprovalList
                 pendingQuests={pendingQuests}
+                pendingItems={pendingInventory}
                 users={users}
+                currentUser={currentUser}
                 onApprove={handleApprove}
                 onReject={handleReject}
               />

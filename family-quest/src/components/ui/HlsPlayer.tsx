@@ -37,7 +37,7 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
             });
             hls.loadSource(streamUrl);
             hls.attachMedia(video);
-            hls.on(Hls.Events.ERROR, (event, data) => {
+            hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) {
                     console.error("HLS Fatal Error:", data);
                     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Trophy, Coins, Star, Crown, Medal } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 
@@ -57,15 +57,13 @@ const RankBadge = ({ rank }: { rank: number }) => {
 };
 
 export const WeeklyTrends = () => {
-    const [data, setData] = useState<TrendData | null>(null);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        apiClient.get('/api/quest/analytics/weekly')
-            .then((res: unknown) => setData(res as TrendData))
-            .catch(console.error)
-            .finally(() => setLoading(false));
-    }, []);
+    // useGameData.ts の他クエリと同様のポーリング方針 (staleTime/refetchInterval) を踏襲
+    const { data, isLoading: loading } = useQuery<TrendData>({
+        queryKey: ['weeklyTrends'],
+        queryFn: () => apiClient.get<TrendData>('/api/quest/analytics/weekly'),
+        staleTime: 1000 * 60,
+        refetchInterval: 1000 * 30,
+    });
 
     if (loading) return <div className="p-12 text-center text-gray-400 animate-pulse">データを集計中...</div>;
     if (!data) return <div className="p-12 text-center text-gray-500">データがありません</div>;

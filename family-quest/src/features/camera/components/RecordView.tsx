@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import HlsPlayer from '../../../components/ui/HlsPlayer';
 import { CameraConfig } from '../types';
+import { apiClient } from '@/lib/apiClient';
 
 interface RecordViewProps {
     cameras: CameraConfig[];
@@ -29,14 +30,9 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
         const offsets: { [key: string]: number } = {};
         for (const camera of cameras) {
             try {
-                const res = await fetch(`/api/cameras/record/${camera.id}/${dateStr}/info`);
-                if (res.ok) {
-                    const data = await res.json();
-                    // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
-                    offsets[camera.id] = Math.max(0, totalSeconds - data.offset_seconds);
-                } else {
-                    offsets[camera.id] = totalSeconds;
-                }
+                const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);
+                // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
+                offsets[camera.id] = Math.max(0, totalSeconds - data.offset_seconds);
             } catch (err) {
                 console.error("Failed to fetch offset", err);
                 offsets[camera.id] = totalSeconds;
