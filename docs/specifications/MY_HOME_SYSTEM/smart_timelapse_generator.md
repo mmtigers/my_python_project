@@ -48,6 +48,154 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `get_ffmpeg_stderr`
+
+* **役割**: `DEBUG_FFMPEG`設定が有効な場合は`sys.stderr`を、無効な場合は`subprocess.DEVNULL`を返す。FFmpeg実行時の標準エラー出力先を一元的に切り替えるためのヘルパー関数。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def get_ffmpeg_stderr():\n    return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+
+
+* **引数/リクエスト**: なし。
+* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "def get_ffmpeg_stderr():")
+
+
+* **戻り値/レスポンス**: `sys.stderr`または`subprocess.DEVNULL`（型ヒントなし）。
+* 根拠: 関数本体 (行番号取得不可 / 抜粋: "return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `MotionRecord` (dataclass)
+
+* **役割**: 動体検知処理(`MotionDetector`)が1秒単位で記録する、検知時刻・最大輪郭面積・輪郭数を保持するデータ構造。
+* 根拠: `@dataclass class MotionRecord:` (行番号取得不可 / 抜粋: "class MotionRecord:\n    time_sec: int\n    largest_area: float\n    contour_count: int")
+
+
+* **フィールド**: `time_sec: int`, `largest_area: float`, `contour_count: int`
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `EventRecord` (dataclass)
+
+* **役割**: `MotionRecord`をグルーピングして生成される「イベント」（一連の動きのまとまり）のデータ構造。開始・終了秒、スコア、検出物体数（人物・車両・動物・顔）などを保持する。`__post_init__`で`duration`（継続時間）を自動計算する。
+* 根拠: `@dataclass class EventRecord:` および `def __post_init__(self):` (行番号取得不可 / 抜粋: "self.duration = (self.end_sec - self.start_sec) + 1")
+
+
+* **フィールド**: `event_id: str`, `start_sec: int`, `end_sec: int`, `max_area: float`, `score: float = 0.0`, `duration: int = 0`, `person_count: int = 0`, `vehicle_count: int = 0`, `animal_count: int = 0`, `face_detected: int = 0`
+
+
+* **副作用**: `__post_init__`によるインスタンス自身の`duration`フィールドの上書き。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `SummaryInfo` (dataclass)
+
+* **役割**: 1回のタイムラプス生成ジョブ全体の結果サマリ（対象日、イベント数、処理時間、出力パス、ファイルサイズ、バージョン情報等）を保持し、`mark_as_done`で完了記録ファイル(`.done`)としてJSON出力される。
+* 根拠: `@dataclass class SummaryInfo:` (行番号取得不可 / 抜粋: "class SummaryInfo:\n    target_date: str")
+
+
+* **フィールド**: `target_date: str`, `events: int = 0`, `summary_duration: int = 0`, `total_processing_time: float = 0.0`, `output_path: str = ""`, `file_size_bytes: int = 0`, `version: str = __version__`, `ffmpeg_version: str = ""`, `opencv_version: str = cv2.__version__`, `fast_stream_copy_mode: bool = FAST_STREAM_COPY_MODE`
+
+
+* **副作用**: なし（フィールドのデフォルト値取得時に`cv2.__version__`等の外部値を参照）。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `sec_to_time`
+
+* **役割**: 秒数(int)を`datetime.timedelta`経由で`H:MM:SS`形式の文字列に変換する。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def sec_to_time(sec: int) -> str:\n    return str(datetime.timedelta(seconds=sec))")
+
+
+* **引数/リクエスト**: `sec: int`
+
+
+* **戻り値/レスポンス**: `str`
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `check_dependencies`
+
+* **役割**: 実行に必要な外部コマンド(`ffmpeg`, `ffprobe`, `nice`)が`PATH`上に存在するかを`shutil.which`で確認する。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "required_cmds = ["ffmpeg", "ffprobe", "nice"]")
+
+
+* **引数/リクエスト**: なし。
+
+
+* **戻り値/レスポンス**: `bool`（全コマンドが存在すればTrue）
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: コマンドが見つからない場合はエラーログを出力してFalseを返す（例外は発生させない）。
+* 根拠: `if not shutil.which(cmd): logger.error(...)` (行番号取得不可)
+
+
+
+### `get_ffmpeg_version`
+
+* **役割**: `ffmpeg -version`コマンドを実行し、出力の1行目（バージョン文字列）を取得する。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "res = subprocess.run(["ffmpeg", "-version"]...")
+
+
+* **引数/リクエスト**: なし。
+
+
+* **戻り値/レスポンス**: `str`（取得失敗時は`"Unknown"`）
+
+
+* **副作用**: 外部プロセス(`ffmpeg`)の実行。
+
+
+* **エラーハンドリング**: 例外発生時は`"Unknown"`を返す（例外を再送出しない）。
+* 根拠: `except Exception: return "Unknown"` (行番号取得不可)
+
+
+
+### `check_drawtext_localtime_support`
+
+* **役割**: `ffmpeg -h filter=drawtext`の出力に`localtime`という文字列が含まれるかを確認し、実行環境のffmpegが`drawtext`フィルタの`localtime`指定に対応しているかを判定する。モジュールロード時に一度だけ実行され、結果は`HAS_DRAWTEXT_LOCALTIME`というモジュールレベル変数に保持される。
+* 根拠: 関数定義および呼び出し (行番号取得不可 / 抜粋: "HAS_DRAWTEXT_LOCALTIME = check_drawtext_localtime_support()")
+
+
+* **引数/リクエスト**: なし。
+
+
+* **戻り値/レスポンス**: `bool`
+
+
+* **副作用**: 外部プロセス(`ffmpeg`)の実行。モジュールロード時に1回実行されるため、インポート自体に若干の遅延が生じる。
+
+
+* **エラーハンドリング**: 例外発生時は`False`を返す。
+* 根拠: `except Exception: return False` (行番号取得不可)
+
+
+
 ### `get_video_info`
 
 * **役割**: `ffprobe`コマンドを用いて入力動画のメタデータ情報をJSON形式で取得する。
@@ -134,6 +282,64 @@
 
 
 
+### `escape_ffmpeg_filename`
+
+* **役割**: FFmpegの`concat`デマクサ用ファイルリストに書き込むファイルパス中のシングルクォートをエスケープする。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "return filename.replace("'", "'\\\\''")")
+
+
+* **引数/リクエスト**: `filename: str`
+
+
+* **戻り値/レスポンス**: `str`
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `escape_drawtext`
+
+* **役割**: FFmpegの`drawtext`フィルタに渡すテキスト中の特殊文字（バックスラッシュ、シングルクォート、コロン）をエスケープする。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "return text.replace('\\\\', '\\\\\\\\').replace(...)")
+
+
+* **引数/リクエスト**: `text: str`
+
+
+* **戻り値/レスポンス**: `str`
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: なし。
+
+
+
+### `check_roi`
+
+* **役割**: 設定されたROI（関心領域: `ROI_X`, `ROI_Y`, `ROI_W`, `ROI_H`）が、映像の幅・高さ内に収まっている妥当な値かを検証する。`MotionDetector.__init__`から呼び出される。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "if ROI_W <= 0 or ROI_H <= 0: raise ValueError(...)")
+
+
+* **引数/リクエスト**: `w: int`, `h: int`
+
+
+* **戻り値/レスポンス**: `None`
+
+
+* **副作用**: なし。
+
+
+* **エラーハンドリング**: ROIが不正な場合（幅/高さが0以下、始点が画面外、範囲が画面サイズを超過）は`ValueError`を送出する（呼び出し元での捕捉は行わない）。
+* 根拠: `raise ValueError(...)` (3箇所, 行番号取得不可)
+
+
+
 ### `setup_directories`
 
 * **役割**: 処理に必要な作業用ディレクトリ、出力ディレクトリ、記録用ディレクトリを作成し、作業用ディレクトリ内の既存ファイルを削除（クリーンアップ）する。
@@ -174,6 +380,45 @@
 * 根拠: `except Exception as e:` (行番号取得不可 / 抜粋: "logger.warning(f"作業ディレクトリのクリ...")
 
 
+
+
+
+### `mark_as_done`
+
+* **役割**: ジョブの完了記録として、`SummaryInfo`の内容をJSON形式で`.done`ファイルに書き出す。ファイル名は入力動画のベース名から拡張子を除いたものに`.done`を付与して生成する。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "json.dump(asdict(summary), f, indent=2, ensure_ascii=False)")
+
+
+* **引数/リクエスト**: `records_dir: str`, `base_filename: str`, `summary: SummaryInfo`
+
+
+* **戻り値/レスポンス**: なし（`None`）
+
+
+* **副作用**: `records_dir`ディレクトリの作成（存在しない場合）、`.done`ファイルへの書き込み。
+
+
+* **エラーハンドリング**: なし（明示的な例外処理は行われていない）。
+
+
+
+### `log_cpu_usage`
+
+* **役割**: `psutil`がインストールされている場合のみ、現在のCPU使用率をINFOレベルでログ出力する。
+* 根拠: 関数定義 (行番号取得不可 / 抜粋: "if HAS_PSUTIL: logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")")
+
+
+* **引数/リクエスト**: なし。
+
+
+* **戻り値/レスポンス**: なし（`None`）
+
+
+* **副作用**: `psutil`利用可能時のログ出力。
+
+
+* **エラーハンドリング**: なし。`psutil`が未インストールの環境では`HAS_PSUTIL`フラグにより処理自体がスキップされる（インポート時の`try/except ImportError`により判定）。
+* 根拠: `try: import psutil; HAS_PSUTIL = True except ImportError: HAS_PSUTIL = False` (行番号取得不可)
 
 
 
@@ -444,7 +689,8 @@ graph TD
         EventBuilder
         VideoBuilder
         Uploader
-        Utils(setup_directories, get_video_info等)
+        Utils(setup_directories, get_video_info, check_dependencies, get_ffmpeg_version, check_drawtext_localtime_support, escape_ffmpeg_filename, escape_drawtext, check_roi, sec_to_time, mark_as_done, log_cpu_usage等)
+        DataClasses(MotionRecord, EventRecord, SummaryInfo)
     end
     
     subgraph "ブラックボックスモジュール"
@@ -480,8 +726,12 @@ graph TD
     MotionDetector --> FFmpeg
     MotionDetector --> OpenCV
     MotionDetector --> Config
+    MotionDetector --> DataClasses
     
     EventBuilder --> Config
+    EventBuilder --> DataClasses
+    VideoBuilder --> DataClasses
+    Uploader --> DataClasses
     
     VideoBuilder --> FFmpeg
     VideoBuilder --> Config

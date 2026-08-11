@@ -2,8 +2,9 @@ import datetime
 import importlib
 import random
 import math
+import threading
 import pytz
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from fastapi import HTTPException
 import common
@@ -28,6 +29,27 @@ except ImportError:
     except ImportError:
         logger.warning("quest_data module not found via relative import.")
         quest_data = None
+
+# ==========================================
+# Completion Lock (Race Condition Guard)
+# ==========================================
+# process_complete_quest は「直近履歴を読む→報酬を書く」という手順のため、
+# 同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）が
+# 別スレッドでほぼ同時に到達すると、どちらも「直近の完了履歴なし」を読んでしまい、
+# 経験値・ゴールド・ボスダメージが二重に加算されるレースコンディションが発生しうる。
+# そのため、同一キーへの処理はプロセス内で直列化する。
+_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}
+_completion_locks_guard = threading.Lock()
+
+
+def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:
+    with _completion_locks_guard:
+        lock = _completion_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _completion_locks[key] = lock
+        return lock
+
 
 # ==========================================
 # Service Classes
@@ -308,6 +330,12 @@ class QuestService:
         return {"gold": bonus_gold, "exp": bonus_exp}
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
+        # 同一ユーザー・同一クエストへの同時多重リクエストによる二重加算を防ぐため、
+        # DBトランザクションの外側でプロセス内ロックを取得して処理全体を直列化する。
+        with _get_completion_lock((user_id, quest_id)):
+            return self._process_complete_quest_locked(user_id, quest_id)
+
+    def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()

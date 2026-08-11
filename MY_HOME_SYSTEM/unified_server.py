@@ -22,8 +22,11 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+import sqlite3
+
 import config
 from core.logger import setup_logging
+from core.migrations import apply_pending_migrations
 from services import sensor_service
 
 # Routers
@@ -93,6 +96,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logging.getLogger("uvicorn.access").addFilter(SilencePolicyFilter())
     
     logger.info("🚀 --- API Server Starting Up ---")
+
+    # スキーママイグレーションの適用 (migrations/ 配下、詳細は core/migrations.py 参照)
+    try:
+        migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)
+        try:
+            apply_pending_migrations(migration_conn)
+        finally:
+            migration_conn.close()
+    except Exception as e:
+        logger.error(f"⚠️ Migration check failed (continuing startup): {e}")
 
     global camera_process
     camera_script = os.path.join(PROJECT_ROOT, "monitors/camera_monitor.py")
@@ -216,7 +229,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"🔥 Global Exception: {exc}", exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "error": str(exc)}
+        content={"detail": "Internal Server Error"}
     )
 
 # --- Router Registration ---

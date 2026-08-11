@@ -21,8 +21,9 @@
 | `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 行番号取得不可 / 抜粋: "import importlib") |
 | `random` | 標準ライブラリ | クリティカルヒットの判定、ランダムクエスト発生判定 | `import random` (行番号: 行番号取得不可 / 抜粋: "import random") |
 | `math` | 標準ライブラリ | インポートされているが未使用 | `import math` (行番号: 行番号取得不可 / 抜粋: "import math") |
+| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理 | `import threading` (抜粋: "import threading") |
 | `pytz` | 外部ライブラリ | タイムゾーンの設定 | `import pytz` (行番号: 行番号取得不可 / 抜粋: "import pytz") |
-| `typing` (`List`, `Dict`, `Any`, `Optional`) | 標準ライブラリ | 型ヒント | `from typing import List, Dic` (行番号: 行番号取得不可 / 抜粋: "from typing import List, Dict,") |
+| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dic` (行番号: 行番号取得不可 / 抜粋: "from typing import List, Dict,") |
 | `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPExcept` (行番号: 行番号取得不可 / 抜粋: "from fastapi import HTTPExcept") |
 | `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 行番号取得不可 / 抜粋: "import common") |
 | `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 行番号取得不可 / 抜粋: "import config") |
@@ -45,6 +46,19 @@
 | DBの各テーブルスキーマ | カラムの型、制約(UNIQUE, NOT NULL等)、外部キー設定などが不明 | `cur.execute("SELECT level, go` (行番号: 行番号取得不可 / 抜粋: "cur.execute("SELECT level, gol") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` (モジュールレベル変数)
+
+* **役割**: `(user_id, quest_id)` のタプルをキーとして `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）が競合すると報酬・ボスダメージが二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入された。
+* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}`, `def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:` (抜粋: "同一(user_id, quest_id)への同時リクエスト")
+
+
+* **引数/リクエスト**: `key: Tuple[str, int]` (`user_id`と`quest_id`の組)
+* **戻り値/レスポンス**: `threading.Lock`
+* **副作用**: `_completion_locks`辞書への書き込み（キー未登録時のみ）
+* **エラーハンドリング**: なし
+
+
 
 ### `UserService.get_family_chronicle`
 
@@ -255,8 +269,21 @@
 
 ### `QuestService.process_complete_quest`
 
-* **役割**: クエストを完了する。子供の場合は承認待ちステータスで履歴を作り、大人の場合は即時に報酬・ダメージ適用を行う。
-* 根拠: `QuestService.process_complete_quest` (行番号: 行番号取得不可 / 抜粋: "def process_complete_quest(sel")
+* **役割**: `_get_completion_lock((user_id, quest_id))`でプロセス内ロックを取得したうえで、実処理を委譲した`_process_complete_quest_locked`を呼び出す薄いラッパー。ロックにより、同一ユーザー・同一クエストへの同時多重リクエストが「直近履歴を読む→報酬を書く」という手順の間で競合し二重加算されることを防ぐ。
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (抜粋: "with _get_completion_lock((user_id, quest_id)):")
+
+
+* **引数/リクエスト**: `user_id: str`, `quest_id: int`
+* **戻り値/レスポンス**: `Dict[str, Any]` (`_process_complete_quest_locked`の戻り値をそのまま返却)
+* **副作用**: ロックの取得・解放（`with`文によるスコープ管理）。実処理の副作用は`_process_complete_quest_locked`側。
+* **エラーハンドリング**: なし（`_process_complete_quest_locked`内の例外はそのまま伝播する）
+
+
+
+### `QuestService._process_complete_quest_locked`
+
+* **役割**: クエストを完了する実処理（ロック取得後に呼ばれる）。子供の場合は承認待ちステータスで履歴を作り、大人の場合は即時に報酬・ダメージ適用を行う。
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (抜粋: "def _process_complete_quest_locked(sel")
 
 
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
@@ -271,7 +298,7 @@
 * 根拠: メソッド呼び出しとクエリ (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO que")
 
 
-* **エラーハンドリング**: データ不在時 `HTTPException(404)`、10秒以内の重複実行時 `HTTPException(429)`
+* **エラーハンドリング**: データ不在時 `HTTPException(404)`、10秒以内の重複実行時 `HTTPException(429)`（このタイムベースのチェックに加え、呼び出し元の`process_complete_quest`のプロセス内ロックにより、ほぼ同時に到達した複数リクエストが直列化される点に注意）
 * 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
 
 
@@ -790,7 +817,9 @@
 
 ```mermaid
 flowchart TD
-    Start[Start: process_complete_quest] --> DB_Select{"DBからユーザとクエストを取得できるか"}
+    Start[Start: process_complete_quest] --> AcquireLock["_get_completion_lock((user_id, quest_id))で<br>プロセス内ロックを取得"]
+    AcquireLock --> CallLocked["_process_complete_quest_locked を呼び出し"]
+    CallLocked --> DB_Select{"DBからユーザとクエストを取得できるか"}
     DB_Select -- No --> Err404[HTTPException 404: Not found]
     DB_Select -- Yes --> SpamCheck{"直近10秒以内に完了履歴があるか"}
     SpamCheck -- Yes --> Err429[HTTPException 429: 少し時間を空けてください]
@@ -823,12 +852,16 @@ graph TD
         InventoryService
         GameSystem
         game_system_inst[game_system インスタンス]
+        get_completion_lock["_get_completion_lock()"]
+        completion_locks["_completion_locks (dict)"]
     end
 
     GameSystem --> QuestService
     GameSystem --> UserService
     GameSystem --> ShopService
     QuestService --> UserService
+    QuestService -->|process_complete_quest| get_completion_lock
+    get_completion_lock --> completion_locks
 
     subgraph External Modules
         common
@@ -839,7 +872,10 @@ graph TD
         switchbot_service
         models_quest["models.quest"]
         quest_data
+        threading_lib["threading (Lock)"]
     end
+
+    get_completion_lock --> threading_lib
 
     subgraph Database/Tables
         quest_users
@@ -906,6 +942,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* `process_complete_quest`の二重加算防止用ロック(`_get_completion_lock`)はプロセス内(`threading.Lock`)のみを対象としており、複数プロセス/複数ワーカーでアプリケーションを稼働させる構成では別プロセスからの同時リクエストまでは防げない点に注意（本アプリケーションは単一プロセスでの稼働を前提とした設計）。また`_completion_locks`辞書はキーが増え続ける設計であり、明示的なエントリ削除処理は存在しない（同一(user_id, quest_id)の組み合わせ数が有限であるため実用上のメモリ増大は限定的と考えられる）。
 * `QuestService._apply_quest_rewards` にて `family_mileage` および `party_state` のUPDATE時に例外が発生した場合、`except Exception as e:` でエラーをキャッチしログを出力しているが、呼び出し元の処理自体は成功（中断されない）となりDB状態が不整合となる可能性がある。
 * `QuestService.filter_active_quests` にて日付文字列を `split('-')` で分割しており、対象フォーマット (`YYYY-MM-DD`) に厳密に依存している。
 * `QuestService.get_weekly_analytics` にて `inventory` テーブル名が存在しない場合に、クエリ文字列を置換して `user_inventory` テーブルへフォールバックするハードコードのロジックが存在する。
