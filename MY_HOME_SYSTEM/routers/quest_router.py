@@ -161,7 +161,7 @@ def admin_update_boss(action: AdminBossUpdate):
         sql = f"UPDATE party_state SET {', '.join(updates)} WHERE id = 1"
         cur.execute(sql, tuple(params))
         
-        logger.info(f"👮 Admin Boss Update: {action.dict()}")
+        logger.info(f"👮 Admin Boss Update: {action.model_dump()}")
         
     return {"status": "updated"}
 

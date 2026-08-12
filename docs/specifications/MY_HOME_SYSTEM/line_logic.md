@@ -1,3 +1,14 @@
+> **⚠️ 2026年更新: 一部機能を削除**
+> `handle_message()` / `ask_outing_question()` / `handle_child_record()` /
+> `handle_stomach_record()` および `USER_INPUT_STATE` ステートマシン（`models/line.py` の
+> `InputMode`/`UserInputState`含む）は削除された。これらは本番のLINE Webhook経路
+> （`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。
+> テキストメッセージの自由文処理は `handlers/line_handler.py` の
+> `_process_message_async()` → `services/ai_service.py` に一本化されている。
+> 本ドキュメント中、これらの関数に関する記述は現状のコードと一致しない（廃止済み）。
+> 現在このファイルに残るのは `handle_postback()`（ボタン操作のディスパッチ）と、
+> それが使うUI生成ヘルパー群のみ。詳細は `ai_logic.md` を参照。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |

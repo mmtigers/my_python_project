@@ -229,7 +229,7 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
         try:
             with open(file_path, "rb") as f:
                 files = {"file": (os.path.basename(file_path), f, "video/mp4")}
-                res = requests.post(webhook_url, data={"content": message}, files=files)
+                res = requests.post(webhook_url, data={"content": message}, files=files, timeout=60)
                 
                 # HTTPステータスコードが成功(200系)かチェック
                 if res.status_code not in [200, 204]:
@@ -259,7 +259,7 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
             try:
                 with open(split_file, "rb") as f:
                     files = {"file": (os.path.basename(split_file), f, "video/mp4")}
-                    res = requests.post(webhook_url, data={"content": part_msg}, files=files)
+                    res = requests.post(webhook_url, data={"content": part_msg}, files=files, timeout=60)
                     if res.status_code not in [200, 204]:
                         logger.error(f"❌ Discord送信エラー Part {i+1} (HTTP {res.status_code}): {res.text}")
                     else:
