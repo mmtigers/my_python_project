@@ -10,6 +10,7 @@
 ## 2. ファイルの概要
 
 * NASの死活監視（Ping疎通確認、マウント確認、書き込み権限確認）、ディスク使用量の取得、障害時のフォールバックへの自動切替検知、およびNAS復旧時のフォールバックデータ自動同期と通知を行う。
+* あわせて、NVR録画・カメラスナップショット・DBバックアップといった保持期間を超えたファイルを定期的（レポート時刻）に自動削除するリテンションクリーンアップ機能を持つ。
 
 ## 3. 外部依存関係
 
@@ -22,285 +23,332 @@
 | `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 3 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
 | `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 5 / 抜粋: "import sys") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得（レポート時間の判定） | 根拠: `from datetime import datetime` (行番号: 6 / 抜粋: "from datetime import datetime") |
-| `Dict, Optional, Any` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any` (行番号: 7 / 抜粋: "from typing import Dict...") |
-| `config` | 自作モジュール | NASのIP、マウント先、LINE IDなどの設定値取得 | 根拠: `import config` (行番号: 12 / 抜粋: "import config") |
-| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 14 / 抜粋: "from core.database import sav...") |
-| `get_now_iso` | 自作モジュール | 現在時刻のISOフォーマット取得 | 根拠: `get_now_iso` (行番号: 15 / 抜粋: "from core.utils import get_no...") |
-| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 16 / 抜粋: "from services.notification...") |
+| `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 6 / 抜粋: "import time") |
+| `datetime` | 標準ライブラリ | 現在時刻の取得（レポート時間の判定） | 根拠: `from datetime import datetime` (行番号: 7 / 抜粋: "from datetime import datetime") |
+| `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 8 / 抜粋: "from typing import Dict...") |
+| `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
+| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
+| `get_now_iso` | 自作モジュール | 現在時刻のISOフォーマット取得 | 根拠: `get_now_iso` (行番号: 16 / 抜粋: "from core.utils import get_no...") |
+| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`の各設定値 | 具体的な設定値や型、スキーマが不明 | 根拠: `config` (行番号: 12 / 抜粋: "import config") |
-| `setup_logging` | ログの出力先、フォーマット等の詳細が不明 | 根拠: `setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | データベースの接続情報やテーブルスキーマの詳細が不明 | 根拠: `save_log_generic` (行番号: 14 / 抜粋: "from core.database import sav...") |
-| `get_now_iso` | タイムゾーンや出力される正確な文字列フォーマットが不明 | 根拠: `get_now_iso` (行番号: 15 / 抜粋: "from core.utils import get_no...") |
-| `send_push` | 実際の送信先仕様（引数`LINE_USER_ID`と`target="discord"`の関連）が不明 | 根拠: `send_push` (行番号: 16 / 抜粋: "from services.notification...") |
-| 外部コマンド`ping` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 53 / 抜粋: "cmd = ["ping", "-c", "1"...]") |
-| 外部コマンド`rsync` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 91〜95 / 抜粋: "cmd = [") |
+| `config`の各設定値 | 具体的な設定値や型、スキーマ（NAS_IP、保持日数、バックアップ/録画ディレクトリ等）が不明 | 根拠: `config` (行番号: 13 / 抜粋: "import config") |
+| `setup_logging` | ログの出力先、フォーマット等の詳細が不明 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | データベースの接続情報やテーブルスキーマの詳細が不明 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
+| `get_now_iso` | タイムゾーンや出力される正確な文字列フォーマットが不明 | 根拠: `get_now_iso` (行番号: 16 / 抜粋: "from core.utils import get_no...") |
+| `send_push` | 実際の送信先仕様（引数`LINE_USER_ID`と`target="discord"`の関連）が不明 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
+| 外部コマンド`ping` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 54〜59 / 抜粋: "cmd = ["ping", "-c", "1"...]") |
+| 外部コマンド`rsync` | 実行環境に依存するためコマンドの正確な挙動が不明 | 根拠: `subprocess.run` (行番号: 92〜99 / 抜粋: "cmd = [") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### クラス `NasMonitor`
 
-* **役割**: NASの状態監視、ディスク使用量確認、および障害復旧時の自動切り戻し処理をまとめたクラス。
-* 根拠: `class NasMonitor:` (行番号: 21〜222 / 抜粋: "class NasMonitor:")
+* **役割**: NASの状態監視、ディスク使用量確認、障害復旧時の自動切り戻し処理、および保持期間超過ファイルの自動削除をまとめたクラス。
+* 根拠: `class NasMonitor:` (行番号: 22〜290 / 抜粋: "class NasMonitor:")
 
 
 
 ### 関数 `__init__`
 
 * **役割**: クラス内の設定値（IP、パス、タイムアウト時間、ステータス保存ファイルなど）を`config`等から初期化する。
-* 根拠: `def __init__(self) -> None:` (行番号: 24〜30 / 抜粋: "def **init**(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 25〜31 / 抜粋: "def __init__(self) -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def __init__(self) -> None:` (行番号: 24 / 抜粋: "def **init**(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 25 / 抜粋: "def __init__(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `def __init__(self) -> None:` (行番号: 24 / 抜粋: "def **init**(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 25 / 抜粋: "def __init__(self) -> None:")
 
 
 * **副作用**: クラスのインスタンス変数の定義。
-* 根拠: `self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")` (行番号: 25〜30 / 抜粋: "self.ip: str = getattr(co...")
+* 根拠: `self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")` (行番号: 26〜31 / 抜粋: "self.ip: str = getattr(co...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 24〜30 / 抜粋: "def **init**(self) -> None:")
+* 根拠: 関数内の処理全体 (行番号: 25〜31 / 抜粋: "def __init__(self) -> None:")
 
 
 
 ### 関数 `_load_state`
 
 * **役割**: 前回の監視状態（正常/異常）をJSONファイルから読み込む。存在しない場合は正常として扱う。
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 32〜40 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 33〜41 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 32 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 33 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **戻り値/レスポンス**: `Dict[str, bool]`（状態辞書）
-* 根拠: `return json.load(f)` および `return {"is_healthy": True}` (行番号: 37, 40 / 抜粋: "return {"is_healthy": True}")
+* 根拠: `return json.load(f)` および `return {"is_healthy": True}` (行番号: 38, 41 / 抜粋: "return {"is_healthy": True}")
 
 
 * **副作用**: ローカルファイルの読み込み。
-* 根拠: `with open(self.state_file, 'r', encoding='utf-8') as f:` (行番号: 36 / 抜粋: "with open(self.state_file...")
+* 根拠: `with open(self.state_file, 'r', encoding='utf-8') as f:` (行番号: 37 / 抜粋: "with open(self.state_file...")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後デフォルト値を返す。
-* 根拠: `except Exception as e:` (行番号: 38〜39 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 39〜40 / 抜粋: "except Exception as e:")
 
 
 
 ### 関数 `_save_state`
 
 * **役割**: 現在の監視状態をJSONファイルとして保存する。
-* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 42〜48 / 抜粋: "def _save_state(self, state...")
+* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 43〜49 / 抜粋: "def _save_state(self, state...")
 
 
 * **引数/リクエスト**: `state`: `Dict[str, bool]`
-* 根拠: `state: Dict[str, bool]` (行番号: 42 / 抜粋: "state: Dict[str, bool]")
+* 根拠: `state: Dict[str, bool]` (行番号: 43 / 抜粋: "state: Dict[str, bool]")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 42 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 43 / 抜粋: "-> None:")
 
 
 * **副作用**: ローカルファイルへの書き込み。
-* 根拠: `with open(self.state_file, 'w', encoding='utf-8') as f:` (行番号: 45〜46 / 抜粋: "json.dump(state, f)")
+* 根拠: `with open(self.state_file, 'w', encoding='utf-8') as f:` (行番号: 46〜47 / 抜粋: "json.dump(state, f)")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログを出力する。
-* 根拠: `except Exception as e:` (行番号: 47〜48 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 48〜49 / 抜粋: "except Exception as e:")
 
 
 
 ### 関数 `check_ping`
 
 * **役割**: `ping`コマンドを実行し、NASへのネットワーク疎通を確認する。
-* 根拠: `def check_ping(self) -> bool:` (行番号: 50〜62 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 51〜63 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_ping(self) -> bool:` (行番号: 50 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 51 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **戻り値/レスポンス**: `bool`（成功時True）
-* 根拠: `return res.returncode == 0` (行番号: 59 / 抜粋: "return res.returncode == 0")
+* 根拠: `return res.returncode == 0` (行番号: 60 / 抜粋: "return res.returncode == 0")
 
 
 * **副作用**: 外部プロセス(`ping`コマンド)の実行。
-* 根拠: `subprocess.run(cmd, ...)` (行番号: 54〜58 / 抜粋: "res = subprocess.run(")
+* 根拠: `subprocess.run(cmd, ...)` (行番号: 55〜59 / 抜粋: "res = subprocess.run(")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`False`を返す。
-* 根拠: `except Exception as e:` (行番号: 60〜62 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 61〜63 / 抜粋: "except Exception as e:")
 
 
 
 ### 関数 `check_mount`
 
 * **役割**: マウントポイントがシステム上に存在し、かつ正しくマウントされているか判定する。
-* 根拠: `def check_mount(self) -> bool:` (行番号: 64〜68 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_mount(self) -> bool:` (行番号: 64 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 65 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **戻り値/レスポンス**: `bool`（マウントされていればTrue）
-* 根拠: `return os.path.ismount(self.mount_point)` (行番号: 68 / 抜粋: "return os.path.ismount(self...")
+* 根拠: `return os.path.ismount(self.mount_point)` (行番号: 69 / 抜粋: "return os.path.ismount(self...")
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 64〜68 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 64〜68 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
 
 
 
 ### 関数 `check_write_permission`
 
 * **役割**: NASのマウント先にテストファイルを作成・削除し、書き込み権限を確認する。
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 70〜80 / 抜粋: "def check_write_permission...")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 71〜81 / 抜粋: "def check_write_permission...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 70 / 抜粋: "def check_write_permission...")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 71 / 抜粋: "def check_write_permission...")
 
 
 * **戻り値/レスポンス**: `bool`（書き込み・削除成功時True）
-* 根拠: `return True` または `return False` (行番号: 77, 80 / 抜粋: "return True")
+* 根拠: `return True` または `return False` (行番号: 78, 81 / 抜粋: "return True")
 
 
 * **副作用**: ファイルの作成および削除。
-* 根拠: `with open(test_file, 'w') as f:` および `os.remove(test_file)` (行番号: 74〜76 / 抜粋: "os.remove(test_file)")
+* 根拠: `with open(test_file, 'w') as f:` および `os.remove(test_file)` (行番号: 75〜77 / 抜粋: "os.remove(test_file)")
 
 
 * **エラーハンドリング**: `IOError`を捕捉し、エラーログ出力後`False`を返す。
-* 根拠: `except IOError as e:` (行番号: 78〜80 / 抜粋: "except IOError as e:")
+* 根拠: `except IOError as e:` (行番号: 79〜81 / 抜粋: "except IOError as e:")
 
 
 
 ### 関数 `sync_fallback_data`
 
 * **役割**: フォールバックディレクトリのデータを`rsync`コマンドを利用してNASへ同期・移動し、空ディレクトリを削除の上、復旧通知を送信する。
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 82〜114 / 抜粋: "def sync_fallback_data(self...")
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 83〜117 / 抜粋: "def sync_fallback_data(self...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 82 / 抜粋: "def sync_fallback_data(self...")
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 83 / 抜粋: "def sync_fallback_data(self...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 82 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 83 / 抜粋: "-> None:")
 
 
 * **副作用**: 外部プロセス(`rsync`コマンド)の実行、元ファイルの削除、外部APIによるプッシュ通知送信。
-* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 98, 103〜107 / 抜粋: "res = subprocess.run(cmd...")
+* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 99, 104〜108 / 抜粋: "res = subprocess.run(cmd...")
 
 
-* **エラーハンドリング**: 同期失敗時(`returncode != 0`)のエラーログ出力。および`Exception`を捕捉してのエラーログ出力。
-* 根拠: `if res.returncode == 0:` の `else:` ブロック、および `except Exception as e:` (行番号: 111〜114 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 同期失敗時(`returncode != 0`)のエラーログ出力。`rsync`が120秒でタイムアウトした場合(`subprocess.TimeoutExpired`)専用のエラーログ出力。および想定外の`Exception`を捕捉してのエラーログ出力。
+* 根拠: `if res.returncode == 0:` の `else:` ブロック (行番号: 112〜113)、`except subprocess.TimeoutExpired:` (行番号: 114〜115)、`except Exception as e:` (行番号: 116〜117)
 
 
 
 ### 関数 `_cleanup_empty_dirs`
 
 * **役割**: 指定されたディレクトリ配下の空ディレクトリを再帰的に削除する。
-* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 116〜124 / 抜粋: "def _cleanup_empty_dirs(sel...")
+* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 119〜127 / 抜粋: "def _cleanup_empty_dirs(sel...")
 
 
 * **引数/リクエスト**: `path`: `str`
-* 根拠: `path: str` (行番号: 116 / 抜粋: "path: str")
+* 根拠: `path: str` (行番号: 119 / 抜粋: "path: str")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 116 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 119 / 抜粋: "-> None:")
 
 
 * **副作用**: ディレクトリの削除（ファイルシステム操作）。
-* 根拠: `os.rmdir(dir_path)` (行番号: 122 / 抜粋: "os.rmdir(dir_path)")
+* 根拠: `os.rmdir(dir_path)` (行番号: 125 / 抜粋: "os.rmdir(dir_path)")
 
 
 * **エラーハンドリング**: `OSError`を捕捉し`pass`することで、空でないディレクトリの削除失敗を無視する。
-* 根拠: `except OSError:` と `pass` (行番号: 123〜124 / 抜粋: "except OSError:\n pass")
+* 根拠: `except OSError:` と `pass` (行番号: 126〜127 / 抜粋: "except OSError:\n pass")
 
 
 
 ### 関数 `get_disk_usage`
 
 * **役割**: マウントポイントのディスク容量（全体、使用量、空き容量をGB単位）と使用率を計算する。
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 126〜138 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 129〜141 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 126 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 129 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]`（容量情報を含む辞書、失敗時はNone）
-* 根拠: `return {...}` または `return None` (行番号: 130〜135, 138 / 抜粋: "return { "total_gb": ...}")
+* 根拠: `return {...}` または `return None` (行番号: 133〜138, 141 / 抜粋: "return { "total_gb": ...}")
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 126〜138 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: 関数内の処理全体 (行番号: 129〜141 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`None`を返す。
-* 根拠: `except Exception as e:` (行番号: 136〜138 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 139〜141 / 抜粋: "except Exception as e:")
+
+
+
+### 関数 `cleanup_old_files`
+
+* **役割**: 指定ディレクトリ配下を再帰的に走査し、保持日数（`retention_days`）を超えた対象拡張子（`extensions`）のファイルを削除し、削除件数と解放容量(GB)を返す。
+* 根拠: `def cleanup_old_files(self, directory: str, retention_days: int, extensions: Tuple[str, ...]) -> Dict[str, Any]:` (行番号: 143〜168 / 抜粋: "def cleanup_old_files(self...")
+
+
+* **引数/リクエスト**: `directory` (`str`), `retention_days` (`int`), `extensions` (`Tuple[str, ...]`)
+* 根拠: 定義部 (行番号: 143 / 抜粋: "def cleanup_old_files(self...")
+
+
+* **戻り値/レスポンス**: `Dict[str, Any]`（`{"deleted_count": int, "freed_gb": float}`。`directory`が未指定またはディレクトリでない場合は空の集計値を返す）
+* 根拠: `return result` (行番号: 148, 168 / 抜粋: "return result")
+
+
+* **副作用**: 保持期間を超えたファイルの削除（ファイルシステム操作）。
+* 根拠: `os.remove(path)` (行番号: 161 / 抜粋: "os.remove(path)")
+
+
+* **エラーハンドリング**: ファイルの`mtime`/`size`取得や削除時に発生した`OSError`を個別に捕捉し、警告ログを出力してそのファイルをスキップする（処理全体は継続）。
+* 根拠: `except OSError as e:` (行番号: 164〜165 / 抜粋: "logger.warning(f"Cleanup skip...")
+
+
+
+### 関数 `run_retention_cleanup`
+
+* **役割**: NVR録画・カメラスナップショット・DBバックアップの3種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 170〜198 / 抜粋: "def run_retention_cleanup(sel...")
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 170 / 抜粋: "def run_retention_cleanup(sel...")
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: `-> None:` (行番号: 170 / 抜粋: "-> None:")
+
+
+* **副作用**: `cleanup_old_files`経由のファイル削除、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
+* 根拠: `result = self.cleanup_old_files(...)` (行番号: 185), `send_push(...)` (行番号: 194〜198)
+
+
+* **エラーハンドリング**: なし（対象ディレクトリが未設定(`falsy`)の場合は`continue`でその対象をスキップするのみ）。
+* 根拠: `if not directory: continue` (行番号: 183〜184 / 抜粋: "if not directory:\n continue")
 
 
 
 ### 関数 `save_to_db`
 
 * **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。
-* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 140〜154 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 200〜214 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **引数/リクエスト**: `ping_ok: bool`, `mount_ok: bool`, `usage: Optional[Dict[str, float]]`
-* 根拠: 定義部 (行番号: 140 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 定義部 (行番号: 200 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 140 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 200 / 抜粋: "-> None:")
 
 
 * **副作用**: 外部ファイル(`core.database`)の関数呼び出しによるデータベース書き込み。
-* 根拠: `save_log_generic(...)` (行番号: 143〜154 / 抜粋: "save_log_generic(")
+* 根拠: `save_log_generic(...)` (行番号: 203〜214 / 抜粋: "save_log_generic(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 140〜154 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 関数内の処理全体 (行番号: 200〜214 / 抜粋: "def save_to_db(self, ping_...")
 
 
 
 ### 関数 `run`
 
-* **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化の判定と保存、データベースへの記録、および状況（容量不足・定時）に応じた通知を統括する。
-* 根拠: `def run(self) -> None:` (行番号: 156〜222 / 抜粋: "def run(self) -> None:")
+* **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
+* 根拠: `def run(self) -> None:` (行番号: 216〜286 / 抜粋: "def run(self) -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run(self) -> None:` (行番号: 156 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 216 / 抜粋: "def run(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 156 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 216 / 抜粋: "-> None:")
 
 
-* **副作用**: `save_to_db`呼び出し、`send_push`呼び出し、`sync_fallback_data`呼び出しによる外部影響およびステート保存。
-* 根拠: `self.save_to_db(...)`, `send_push(...)`, `self.sync_fallback_data()` (行番号: 170, 180, 185, 218 / 抜粋: "send_push(")
+* **副作用**: `save_to_db`呼び出し（毎回）、`send_push`呼び出し（異常検知時・容量不足時・定時レポート時）、`sync_fallback_data`呼び出し（復旧検知時）、`run_retention_cleanup`呼び出し（レポート時刻のみ、ファイル削除を伴う）、および`_save_state`によるステート保存。
+* 根拠: `self.save_to_db(...)` (行番号: 245), `send_push(...)` (行番号: 230〜234, 282〜286), `self.sync_fallback_data()` (行番号: 240), `self.run_retention_cleanup()` (行番号: 264)
 
 
-* **エラーハンドリング**: 異常継続時および容量情報取得失敗時は早期リターンし処理を中断する。
-* 根拠: `if not is_currently_healthy: return` および `if not usage: return` (行番号: 188〜189, 194〜195 / 抜粋: "if not is_currently_healthy...")
+* **エラーハンドリング**: 異常継続時はDB記録後に早期リターンし、以降のレポート・クリーンアップ処理には到達しない。ディスク使用量取得に失敗した場合（`usage`が`None`）も早期リターンする。
+* 根拠: `if not is_currently_healthy: return` (行番号: 248〜249) および `if not usage: return` (行番号: 254〜255)
 
 
 
@@ -309,50 +357,56 @@
 ```mermaid
 flowchart TD
     Start([Start]) --> Ping{Pingは成功?}
-    
+
     Ping -- Yes --> Mount{Mount確認成功?}
     Ping -- No --> Eval[is_currently_healthy = False]
-    
+
     Mount -- Yes --> Write{Write権限あり?}
     Mount -- No --> Eval
-    
+
     Write -- Yes --> Healthy[is_currently_healthy = True]
     Write -- No --> Eval
-    
+
     Eval --> LoadState
     Healthy --> LoadState
-    
+
     LoadState[前回状態の読込 : _load_state] --> CheckTransition1
-    
+
     CheckTransition1{正常 -> 異常?}
     CheckTransition1 -- Yes --> SaveErr[状態保存: False]
     SaveErr --> PushErr[外部：エラー通知送信]
     PushErr --> GetUsage
-    
+
     CheckTransition1 -- No --> CheckTransition2{異常 -> 正常?}
-    CheckTransition2 -- Yes --> Sync[外部：データ同期]
+    CheckTransition2 -- Yes --> Sync[外部：データ同期 sync_fallback_data]
     Sync --> SaveOK[状態保存: True]
     SaveOK --> GetUsage
     CheckTransition2 -- No --> GetUsage
-    
+
     GetUsage{現在正常?}
     GetUsage -- Yes --> CalcUsage[ディスク使用量取得]
     GetUsage -- No --> CalcUsageNull[使用量 = Null]
-    
+
     CalcUsage --> SaveDB
     CalcUsageNull --> SaveDB
-    
-    SaveDB[外部：DBへ状態保存] --> CheckStatus{現在正常?}
-    
+
+    SaveDB[DBへ状態保存: save_to_db] --> CheckStatus{現在正常?}
+
     CheckStatus -- No --> End([End])
     CheckStatus -- Yes --> UsageExist{使用量取得成功?}
-    
+
     UsageExist -- No --> End
-    UsageExist -- Yes --> CheckNotify{使用率>90% OR 8時?}
-    
-    CheckNotify -- Yes --> PushNotify[外部：通知送信]
+    UsageExist -- Yes --> CalcFlags[使用率>90%判定 & レポート時刻(8時)判定]
+
+    CalcFlags --> ReportTimeCheck{レポート時刻?}
+    ReportTimeCheck -- Yes --> RunRetention[保持期間超過ファイルの自動削除\nrun_retention_cleanup]
+    ReportTimeCheck -- No --> CheckNotify
+    RunRetention --> CheckNotify
+
+    CheckNotify{使用率>90% OR レポート時刻?}
+    CheckNotify -- Yes --> PushNotify[外部：状態通知送信]
     CheckNotify -- No --> End
-    
+
     PushNotify --> End
 
 ```
@@ -374,6 +428,7 @@ flowchart TD
         pingCmd["OS Command: ping"]
         rsyncCmd["OS Command: rsync"]
         stateFile["Local File: nas_monitor_state.json"]
+        retentionDirs["ファイルシステム: NVR録画/スナップショット/DBバックアップ ディレクトリ"]
     end
 
     NasMonitor --> config
@@ -384,6 +439,7 @@ flowchart TD
     NasMonitor --> pingCmd
     NasMonitor --> rsyncCmd
     NasMonitor --> stateFile
+    NasMonitor --> retentionDirs
 
 ```
 
@@ -391,22 +447,24 @@ flowchart TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | NASのIP、マウントポイント、LINE IDなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 25 / 抜粋: "getattr(config, "NAS_IP"...") |
-| 中 | `services/notification_service.py` | 引数として渡している`config.LINE_USER_ID`と、`target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (行番号: 103〜107 / 抜粋: "target="discord", channel="report"") |
-| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (行番号: 143〜154 / 抜粋: "save_log_generic(") |
+| 高 | `config.py` | NASのIP、マウントポイント、LINE ID、NVR録画/スナップショット/DBバックアップの各保持日数・ディレクトリなどの初期設定値全体を把握するため。 | 根拠: `getattr(config, "NAS_IP", ...)` (行番号: 26 / 抜粋: "getattr(config, "NAS_IP"...")、`getattr(config, "NVR_RECORD_DIR", ...)` (行番号: 173〜178) |
+| 中 | `services/notification_service.py` | 引数として渡している`config.LINE_USER_ID`と、`target="discord"`が内部でどのように処理・分岐されているか特定するため。 | 根拠: `send_push(...)` (行番号: 104〜108 / 抜粋: "target="discord", channel="report"") |
+| 中 | `core/database.py` | 引数で渡しているデータが実際にどのような型やテーブル構造で保存されているか確認するため。 | 根拠: `save_log_generic(...)` (行番号: 203〜214 / 抜粋: "save_log_generic(") |
 
 ## 8. 保守上の注意点
 
-* `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。
+* `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。加えて`timeout=120`が設定されており、NASマウントが応答不能になった場合は`subprocess.TimeoutExpired`として専用のエラーログが出力される。
 * `_cleanup_empty_dirs`関数内の`os.rmdir`実行時、`OSError`が全て`pass`されており、ディレクトリが空でない以外の予期せぬ権限エラー等も握りつぶされる。
+* `cleanup_old_files`はファイルの`mtime`（更新日時）のみで削除対象を判定するため、意図的にタイムスタンプが古いまま保持したいファイルも保持日数を超えていれば削除対象となる点に注意が必要。
+* `run_retention_cleanup`は`is_report_time`（毎日8時台）にのみ実行されるため、1日1回しか実行機会がない。8時台にスクリプトが実行されなかった場合、その日はクリーンアップがスキップされる。
 * `run`関数内において、`check_ping`、`check_mount`、`check_write_permission`はショートサーキット評価のように実装されており、前段が`False`の場合は後段は実行されず即座に`False`が代入される。
-* `run`関数内において、`is_currently_healthy`が`False`となった場合、以降のディスク使用量取得およびレポート通知ロジックには到達せず処理を終了する（早期リターン）。
+* `run`関数内において、`save_to_db`は正常・異常を問わず毎回呼び出されるが、`is_currently_healthy`が`False`の場合はそこで早期リターンし、以降のリテンションクリーンアップおよびレポート通知ロジックには到達しない。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 設定値の初期値と定義内容 | `config`モジュール内の変数が外部に依存しているため | `config.py` |
+| 設定値の初期値と定義内容 | `config`モジュール内の変数（`NAS_IP`、`NVR_RECORD_DIR`、`ASSETS_DIR`、`DB_BACKUPS_DIR`、各保持日数等）が外部に依存しているため | `config.py` |
 | プッシュ通知先の仕様 | `send_push`内で`target="discord"`と指定されているにも関わらず第1引数に`LINE_USER_ID`を渡しているため | `services/notification_service.py` |
 | DBのカラムの型定義 | `save_log_generic`がブラックボックスであり、`percent`や`mount_ok`がどう保存されるか不明なため | `core/database.py` |
 | ISO時刻のタイムゾーン | `get_now_iso`の戻り値のタイムゾーンの扱いが不明なため | `core/utils.py` |
@@ -420,3 +478,5 @@ flowchart TD
 * [x] 根拠漏れが0件である
 * [x] Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
 * [x] 不明事項を漏れなく列挙した
+
+完了

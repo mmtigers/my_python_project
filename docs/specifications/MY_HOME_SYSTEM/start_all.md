@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 62 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
 | `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 67 / 抜粋: "$PYTHON_EXEC unified_server.py") |
-| `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 71 / 抜粋: "run dashboard.py") |
+| `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 72 / 抜粋: "run dashboard.py") |
 | `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 51 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
 | 停止対象の各スクリプト群 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py`などプロセス停止対象の実装内容が不明なため | `pkill -f` コマンド群 (行番号: 28〜30 / 抜粋: "pkill -f camera_monitor.py") |
 
@@ -120,11 +120,11 @@
 
 
 * **副作用**: 3つのPythonスクリプトの実行（うち2つはバックグラウンドプロセスとして常駐）。`logs/webhook_fix.log`, `logs/server_boot.log`, `logs/dashboard_boot.log` ファイルの作成および上書き。
-* 根拠: 実行・リダイレクト処理 (行番号: 62, 67, 71 / 抜粋: "> logs/server_boot.log 2>&1 &")
+* 根拠: 実行・リダイレクト処理 (行番号: 62, 67, 72 / 抜粋: "> logs/server_boot.log 2>&1 &")
 
 
 * **エラーハンドリング**: なし（各Pythonスクリプト内のエラーはログファイルへ書き込まれるが、本スクリプト側でのプロセス起動失敗時のハンドリングはない）。
-* 根拠: バックグラウンド実行処理 (行番号: 67, 71 / 抜粋: "&")
+* 根拠: バックグラウンド実行処理 (行番号: 67, 72 / 抜粋: "&")
 
 
 
@@ -187,7 +187,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。 | `unified_server.py` (行番号: 67 / 抜粋: "$PYTHON_EXEC unified_server.py") |
-| 中 | `dashboard.py` | フロントエンド（ダッシュボード）の表示内容と、サーバーとの連携方法を把握するため。 | `dashboard.py` (行番号: 71 / 抜粋: "run dashboard.py") |
+| 中 | `dashboard.py` | フロントエンド（ダッシュボード）の表示内容と、サーバーとの連携方法を把握するため。 | `dashboard.py` (行番号: 72 / 抜粋: "run dashboard.py") |
 | 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 62 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
 | 低 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py` | クリーンアップ対象として記載されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 28〜30 / 抜粋: "pkill -f camera_monitor.py") |
 

@@ -35,23 +35,16 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内の具体的な変数（`CAMERAS`, `NVR_RECORD_DIR`, `TMP_VIDEO_DIR`, `DISCORD_WEBHOOK_REPORT`, `DISCORD_WEBHOOK_URL`）の構造や値が不明。 | `import config` (行番号: 12) |
+| `config` | モジュール内の具体的な変数（`NVR_RECORD_DIR`, `TMP_VIDEO_DIR`, `DISCORD_WEBHOOK_REPORT`, `DISCORD_WEBHOOK_URL`）の構造や値が不明。 | `import config` (行番号: 12) |
 | `core.database` | `get_db_cursor`の内部実装（接続先DB種別、トランザクション管理）や、`device_records`テーブルの正確なスキーマが不明。 | `from core.database import get_db_cursor` (行番号: 13) |
 | `core.logger` | `setup_logging`の内部実装（ログの出力形式や出力先）が不明。 | `from core.logger import setup_logging` (行番号: 14) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### グローバル変数: `TARGET_CAMERAS`
-
-* **役割**: 対象とするカメラのリストを定義する。`config.CAMERAS`が存在する場合はその`name`のリストを、存在しない場合は固定のリスト(`["garden", "parking"]`)を設定する。
-* 根拠: `TARGET_CAMERAS = ...` (行番号: 20 / 抜粋: "TARGET_CAMERAS = [cam["name"]...")
-
-
-
 ### 関数: `extract_video_clip`
 
 * **役割**: FFmpegコマンドを実行して動画ファイルからクリップを抽出する。最大リトライ回数までのExponential Backoffを用いたリトライ制御、及び致命的なエラー時のフェイルソフト処理を行う。
-* 根拠: `def extract_video_clip(...)` (行番号: 22〜73 / 抜粋: "subprocess.run(cmd, check=True...")
+* 根拠: `def extract_video_clip(...)` (行番号: 19〜70 / 抜粋: "subprocess.run(cmd, check=True...")
 
 
 * **引数/リクエスト**:
@@ -59,52 +52,52 @@
 * `input_path`: `str` - 入力動画ファイルのパス（ログ出力用）
 * `output_path`: `str` - 出力先ファイルのパス（ログ出力用）
 * `max_retries`: `int` - 最大リトライ回数 (デフォルト: 3)
-* 根拠: `def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:` (行番号: 22 / 抜粋: "cmd: List[str], input_path: s...")
+* 根拠: `def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:` (行番号: 19 / 抜粋: "cmd: List[str], input_path: s...")
 
 
 * **戻り値/レスポンス**: `bool` - 抽出に成功した場合はTrue、スキップ（失敗）した場合はFalse
-* 根拠: `return True` / `return False` (行番号: 49, 57, 73 / 抜粋: "return True")
+* 根拠: `return True` / `return False` (行番号: 46, 54, 70 / 抜粋: "return True")
 
 
 * **副作用**: `subprocess.run`による外部プロセス（FFmpeg等）の実行
-* 根拠: `subprocess.run(cmd, check=...` (行番号: 41〜47 / 抜粋: "subprocess.run( cmd, check=T...")
+* 根拠: `subprocess.run(cmd, check=...` (行番号: 38〜44 / 抜粋: "subprocess.run( cmd, check=T...")
 
 
 * **エラーハンドリング**: `subprocess.CalledProcessError` 及び `subprocess.TimeoutExpired` をキャッチし、エラー出力の内容に応じてリトライの継続または打ち切りを行う。
-* 根拠: `except subprocess.CalledProcessError as e:` / `except subprocess.TimeoutExpired:` (行番号: 51, 66 / 抜粋: "except subprocess.CalledProc...")
+* 根拠: `except subprocess.CalledProcessError as e:` / `except subprocess.TimeoutExpired:` (行番号: 48, 63 / 抜粋: "except subprocess.CalledProc...")
 
 
 
 ### 関数: `get_event_times`
 
 * **役割**: データベースから指定時間帯・指定デバイスのイベント検知時刻（`timestamp`）を取得し、`datetime`オブジェクトのリストとして返す。
-* 根拠: `def get_event_times(...)` (行番号: 75〜100 / 抜粋: "SELECT timestamp FROM device...")
+* 根拠: `def get_event_times(...)` (行番号: 72〜97 / 抜粋: "SELECT timestamp FROM device...")
 
 
 * **引数/リクエスト**:
 * `camera_name`: `str` - 対象のカメラ名
 * `start_time`: `str` - 取得開始時刻（ISOフォーマット風文字列）
 * `end_time`: `str` - 取得終了時刻（ISOフォーマット風文字列）
-* 根拠: `def get_event_times(camera_name: str, start_time: str, end_time: str) -> List[datetime.datetime]:` (行番号: 75 / 抜粋: "camera_name: str, start_time...")
+* 根拠: `def get_event_times(camera_name: str, start_time: str, end_time: str) -> List[datetime.datetime]:` (行番号: 72 / 抜粋: "camera_name: str, start_time...")
 
 
 * **戻り値/レスポンス**: `List[datetime.datetime]` - 変換された日時オブジェクトのリスト
-* 根拠: `return event_times` (行番号: 100 / 抜粋: "return event_times")
+* 根拠: `return event_times` (行番号: 97 / 抜粋: "return event_times")
 
 
 * **副作用**: DBからのデータ読み取り
-* 根拠: `cur.execute(query, ...)` (行番号: 88 / 抜粋: "cur.execute(query, (camera_n...")
+* 根拠: `cur.execute(query, ...)` (行番号: 85 / 抜粋: "cur.execute(query, (camera_n...")
 
 
 * **エラーハンドリング**: ISOフォーマットのパース失敗時（`ValueError`）はスキップ。全体の例外（`Exception`）発生時はエラーログを出力する。
-* 根拠: `except ValueError:` / `except Exception as e:` (行番号: 95, 97 / 抜粋: "except ValueError: pass")
+* 根拠: `except ValueError:` / `except Exception as e:` (行番号: 92, 94 / 抜粋: "except ValueError: pass")
 
 
 
 ### 関数: `process_video_clips`
 
 * **役割**: イベント時刻のリストから対象となる動画ファイルを検索・選択し、`extract_video_clip`を用いてタイムラプス用のクリップ（.ts）を抽出。その後、リストファイルを作成してFFmpegのconcatにより結合した単一の動画ファイル（.mp4）を生成する。
-* 根拠: `def process_video_clips(...)` (行番号: 102〜213 / 抜粋: "concat_cmd = [ "nice", "-n",...")
+* 根拠: `def process_video_clips(...)` (行番号: 99〜211 / 抜粋: "concat_cmd = [ "nice", "-n",...")
 
 
 * **引数/リクエスト**:
@@ -112,11 +105,11 @@
 * `nas_folder`: `str` - NASのフォルダ名
 * `event_times`: `List[datetime.datetime]` - イベント日時のリスト
 * `tmp_dir`: `str` - 一時ファイルの出力先ディレクトリ
-* 根拠: `def process_video_clips(camera_name: str, nas_folder: str, event_times: List[datetime.datetime], tmp_dir: str) -> str:` (行番号: 102 / 抜粋: "camera_name: str, nas_folder...")
+* 根拠: `def process_video_clips(camera_name: str, nas_folder: str, event_times: List[datetime.datetime], tmp_dir: str) -> str:` (行番号: 99 / 抜粋: "camera_name: str, nas_folder...")
 
 
 * **戻り値/レスポンス**: `str` - 生成された出力動画ファイルのパス（クリップがない場合は空文字列 `""`）
-* 根拠: `return output_video` / `return ""` (行番号: 213, 196 / 抜粋: "return output_video")
+* 根拠: `return output_video` / `return ""` (行番号: 211, 194 / 抜粋: "return output_video")
 
 
 * **副作用**:
@@ -124,61 +117,67 @@
 * スリープ処理（`time.sleep(0.5)`）
 * リストファイルの書き込み（`with open(...)`）
 * FFmpegプロセスの実行（`extract_video_clip`呼び出し、及び結合コマンドの`subprocess.run`）
-* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 124, 201, 211 / 抜粋: "subprocess.run(concat_cmd, s...")
+* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 121, 197, 209 / 抜粋: "subprocess.run(concat_cmd, s...")
 
 
 * **エラーハンドリング**: `strptime`によるファイル名のパース失敗時（`ValueError`）はスキップ。
-* 根拠: `except ValueError:` (行番号: 146 / 抜粋: "except ValueError: continue")
+* 根拠: `except ValueError:` (行番号: 143 / 抜粋: "except ValueError: continue")
 
 
 
 ### 関数: `upload_video_to_discord`
 
 * **役割**: 生成した動画ファイルをDiscordへアップロードする。ファイルサイズが閾値（8MB）を超える場合はFFmpegを用いて動画を分割（30秒間隔）し、順次アップロードする。
-* 根拠: `def upload_video_to_discord(...)` (行番号: 215〜271 / 抜粋: "res = requests.post(webhook_...")
+* 根拠: `def upload_video_to_discord(...)` (行番号: 213〜269 / 抜粋: "res = requests.post(webhook_...")
 
 
 * **引数/リクエスト**:
 * `file_path`: `str` - アップロードする動画ファイルのパス
 * `message`: `str` - Discordに送信するテキストメッセージ
-* 根拠: `def upload_video_to_discord(file_path: str, message: str) -> None:` (行番号: 215 / 抜粋: "file_path: str, message: str...")
+* 根拠: `def upload_video_to_discord(file_path: str, message: str) -> None:` (行番号: 213 / 抜粋: "file_path: str, message: str...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 215 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 213 / 抜粋: "-> None:")
 
 
 * **副作用**:
 * 外部APIへのHTTPリクエスト（`requests.post`）
 * ファイルサイズ取得・読み込み
 * FFmpegを用いた分割動画ファイルの生成
-* 根拠: `requests.post(webhook_url...` / `subprocess.run(split_cmd...` (行番号: 234, 256 / 抜粋: "res = requests.post(webhook_...")
+* 根拠: `requests.post(webhook_url...` / `subprocess.run(split_cmd...` (行番号: 232, 254 / 抜粋: "res = requests.post(webhook_...")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200または204でない場合のエラーログ出力。リクエスト時の例外（`Exception`）をキャッチしてエラーログ出力。
-* 根拠: `if res.status_code not in [200, 204]:` / `except Exception as e:` (行番号: 237, 241, 269 / 抜粋: "except Exception as e:")
+* 根拠: `if res.status_code not in [200, 204]:` / `except Exception as e:` (行番号: 235, 239, 267 / 抜粋: "except Exception as e:")
 
 
 
 ### 関数: `main`
 
-* **役割**: スクリプトのエントリポイント。コマンドライン引数の解析、対象日時・期間の決定、一時ディレクトリの作成を行い、定義されたカメラごとに一連の処理（イベント取得、動画生成、アップロード）を順に実行する。最後に一時ファイルを削除する。
-* 根拠: `def main():` (行番号: 273〜330 / 抜粋: "parser.parse_args()")
+* **役割**: スクリプトのエントリポイント。コマンドライン引数（`--date`, `--limit`）の解析、対象日時・期間の決定、一時ディレクトリの作成を行い、ハードコードされたカメラ対応表（`TARGET_CAM_MAP`、3台分）ごとに一連の処理（イベント取得、`--limit`指定時の件数制限、動画生成、アップロード）を順に実行する。最後に一時ファイルを削除する。
+* 根拠: `def main():` (行番号: 271〜328 / 抜粋: "parser.parse_args()")
 
 
-* **引数/リクエスト**: なし（コマンドライン引数 `sys.argv` に依存）
-* **戻り値/レスポンス**: なし
+* **引数/リクエスト**: なし（コマンドライン引数 `--date`, `--limit` に依存）
+* 根拠: `parser.add_argument("--date"...` / `parser.add_argument("--limit"...` (行番号: 273〜274 / 抜粋: "parser.add_argument("--limit"")
+
+
+* **戻り値/レスポンス**: なし（`--date` 不正時は途中で `return` する）
+* 根拠: `def main():` (行番号: 271〜328 / 抜粋: "return文なし（早期returnのみ）")
+
+
 * **副作用**:
 * コマンドライン引数の読み取り
 * ディレクトリの作成（`os.makedirs`）
 * コンソールへのログ出力
 * 一時ファイルの削除（`os.remove`）
 * 各関数呼び出しによる全体処理の実行
-* 根拠: `os.makedirs(config.TMP_VI...` / `os.remove(f)` (行番号: 292, 330 / 抜粋: "os.remove(f)")
+* 根拠: `os.makedirs(config.TMP_VI...` / `os.remove(f)` (行番号: 290, 328 / 抜粋: "os.remove(f)")
 
 
-* **エラーハンドリング**: `--date` 引数の形式が不正な場合（`ValueError`）、エラーログを出力して終了する。
-* 根拠: `except ValueError:` (行番号: 282 / 抜粋: "except ValueError: logger.er...")
+* **エラーハンドリング**: `--date` 引数の形式が不正な場合（`ValueError`）、エラーログを出力して関数を終了（`return`）する。
+* 根拠: `except ValueError:` (行番号: 280〜282 / 抜粋: "except ValueError: logger.er...")
 
 
 
@@ -193,12 +192,15 @@ flowchart TD
     ParseDate -- 成功 --> SetTime[対象日時の06:00-23:59を設定]
     UseToday --> SetTime
     SetTime --> MakeDir[一時ディレクトリ作成]
-    MakeDir --> LoopStart{対象カメラマップ\nループ}
+    MakeDir --> LoopStart{TARGET_CAM_MAP\n(固定3カメラ)ループ}
     
     LoopStart -- 次のカメラ --> GetEvents[イベント時刻取得: get_event_times]
     GetEvents --> CheckEvents{イベントが存在するか}
     CheckEvents -- No --> LoopStart
-    CheckEvents -- Yes --> ProcessClips[動画クリップ処理: process_video_clips]
+    CheckEvents -- Yes --> LimitCheck{"--limit > 0 ?"}
+    LimitCheck -- Yes --> TruncateEvents[event_timesを先頭limit件に切り詰め]
+    LimitCheck -- No --> ProcessClips[動画クリップ処理: process_video_clips]
+    TruncateEvents --> ProcessClips
     
     ProcessClips --> OutputCheck{生成された動画が存在するか}
     OutputCheck -- No --> LoopStart
@@ -220,7 +222,7 @@ graph TD
         process_video_clips["process_video_clips()"]
         extract_video_clip["extract_video_clip()"]
         upload_video_to_discord["upload_video_to_discord()"]
-        TARGET_CAMERAS["TARGET_CAMERAS"]
+        TARGET_CAM_MAP["TARGET_CAM_MAP (main内ローカル変数)"]
     end
 
     subgraph 外部依存
@@ -238,9 +240,8 @@ graph TD
     main --> config
     main --> logger
     main --> NAS
+    main --> TARGET_CAM_MAP
 
-    TARGET_CAMERAS --> config
-    
     get_event_times --> db
     get_event_times --> logger
 
@@ -264,17 +265,18 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` (または相当ファイル) | 設定値の構造や定義の全容（`CAMERAS`, 各種ディレクトリパス、Webhook URL）を把握するため。 | `import config` (行番号: 12) |
+| 高 | `config.py` (または相当ファイル) | 設定値の構造や定義の全容（各種ディレクトリパス、Webhook URL）を把握するため。 | `import config` (行番号: 12) |
 | 高 | `core/database.py` | `get_db_cursor`のコネクション管理の詳細および、DBの種類・スキーマを確認するため。 | `from core.database import get_db_cursor` (行番号: 13) |
 | 中 | `core/logger.py` | ログの出力レベル、出力先、ローテーションの有無などを確認するため。 | `from core.logger import setup_logging` (行番号: 14) |
 
 ## 8. 保守上の注意点
 
 * `math` モジュールおよび `send_push` 関数がインポートされているが、スクリプト内で使用されていない。
-* `config.CAMERAS` の真偽値判定が行われているが、`config`内に`CAMERAS`属性が存在しない場合は `AttributeError` となる可能性がある。
+* 対象カメラは `main`内のローカル辞書 `TARGET_CAM_MAP`（行番号: 292〜296）に「防犯カメラ」「駐車場カメラ」「玄関カメラ」の3台がハードコードされており、`config`側の設定には依存していない。カメラを追加・変更する際は本ファイルを直接編集する必要がある。
 * `process_video_clips` や `upload_video_to_discord` で `subprocess.run` を実行する際、`shell=False`（リスト形式の引数）であるためコマンドインジェクションの脆弱性は低いが、例外処理が設定されていない箇所がある（`stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL` で実行されている箇所の失敗が検知されない）。
 * `upload_video_to_discord` で `getattr(config, 'DISCORD_WEBHOOK_REPORT', getattr(config, 'DISCORD_WEBHOOK_URL', None))` としているため、2つめの `getattr` でも属性が存在しない場合は `None` となる。
 * `main` 内でのクリーンアップ処理（`os.remove(f)`）でエラー（使用中など）が発生した場合に例外がキャッチされずプロセスが終了する。
+* `--limit` 引数（検証用）は0より大きい場合のみ有効化され、`event_times` を先頭からその件数に切り詰める。本番運用では未指定（0）を想定した実装になっている。
 
 ## 9. 不明事項一覧
 

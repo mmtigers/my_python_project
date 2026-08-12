@@ -17,66 +17,66 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| React | モジュール | Reactコンポーネント定義と `forwardRef` の利用 | 根拠: `import React from "react";` (行番号取得不可 / 抜粋: "import React from "react";") |
-| Loader2 | コンポーネント | ローディング状態時のアイコン表示 | 根拠: `import { Loader2 } from "lucide-react";` (行番号取得不可 / 抜粋: "import { Loader2 } from...") |
-| cn | 関数 | コンポーネントのクラス名結合 | 根拠: `import { cn } from "@/lib/utils";` (行番号取得不可 / 抜粋: "import { cn } from "@/l...") |
-| motion | オブジェクト | アニメーション付きボタン要素（`motion.button`）の描画 | 根拠: `import { motion, HTMLMotionProps } from "framer-motion";` (行番号取得不可 / 抜粋: "import { motion, HTMLMot...") |
-| HTMLMotionProps | 型 | コンポーネントのProps型定義の拡張元 | 根拠: `import { motion, HTMLMotionProps } from "framer-motion";` (行番号取得不可 / 抜粋: "import { motion, HTMLMot...") |
-| useSound | フック | 音声再生関数の取得 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号取得不可 / 抜粋: "import { useSound } from...") |
+| React | モジュール | Reactコンポーネント定義と `forwardRef` の利用 | 根拠: `import React from "react";` (行番号: 1) |
+| Loader2 | コンポーネント | ローディング状態時のアイコン表示 | 根拠: `import { Loader2 } from "lucide-react";` (行番号: 2) |
+| cn | 関数 | コンポーネントのクラス名結合 | 根拠: `import { cn } from "@/lib/utils";` (行番号: 3) |
+| motion | オブジェクト | アニメーション付きボタン要素（`motion.button`）の描画 | 根拠: `import { motion, HTMLMotionProps } from "framer-motion";` (行番号: 4) |
+| HTMLMotionProps | 型 | コンポーネントのProps型定義の拡張元 | 根拠: `import { motion, HTMLMotionProps } from "framer-motion";` (行番号: 4) |
+| useSound | フック | 音声再生関数の取得 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号: 5) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| cn | クラス名の結合や重複排除などの具体的な処理ロジックが不明 | 根拠: `import { cn } from "@/lib/utils";` (行番号取得不可 / 抜粋: "import { cn } from "@/l...") |
-| useSound | 取得される `play` 関数の実装詳細および引数 `'tap'` の具体的な動作仕様が不明 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号取得不可 / 抜粋: "import { useSound } from...") |
-| lucide-react | `Loader2` アイコンの具体的な描画仕様が不明 | 根拠: `import { Loader2 } from "lucide-react";` (行番号取得不可 / 抜粋: "import { Loader2 } from...") |
+| cn | クラス名の結合や重複排除などの具体的な処理ロジックが不明 | 根拠: `import { cn } from "@/lib/utils";` (行番号: 3) |
+| useSound | 取得される `play` 関数の実装詳細および引数 `'tap'` の具体的な動作仕様が不明 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号: 5) |
+| lucide-react | `Loader2` アイコンの具体的な描画仕様が不明 | 根拠: `import { Loader2 } from "lucide-react";` (行番号: 2) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### Button
 
 * **役割**: 指定されたバリエーションとサイズに基づくスタイルを適用し、アニメーションと音声再生を伴うボタンを描画する。
-* 根拠: `export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...` (行番号取得不可 / 抜粋: "export const Button = Re...")
+* 根拠: `export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...` (行番号: 17〜71 / 抜粋: "export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(")
 
 
 * **引数/リクエスト**: `ButtonProps` 型（`HTMLMotionProps<"button">` から `ref` を除外し、`variant`, `size`, `isLoading`, `children` を追加）
-* 根拠: `interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {...` (行番号取得不可 / 抜粋: "interface ButtonProps ex...")
+* 根拠: `interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {...` (行番号: 10〜15 / 抜粋: "interface ButtonProps extends Omit<HTMLMotionProps<\"button\">, \"ref\"> {")
 
 
 * **戻り値/レスポンス**: `React.ReactNode`（`motion.button` コンポーネント）
-* 根拠: `return ( <motion.button...` (行番号取得不可 / 抜粋: "return ( <motion.button...")
+* 根拠: `return ( <motion.button...` (行番号: 54〜69 / 抜粋: "return ( <motion.button")
 
 
 * **副作用**: `useSound` の呼び出しによる初期化。
-* 根拠: `const { play } = useSound();` (行番号取得不可 / 抜粋: "const { play } = useSoun...")
+* 根拠: `const { play } = useSound();` (行番号: 19 / 抜粋: "const { play } = useSound();")
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号取得不可 / 抜粋: 判断不可)
+* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 17〜71 / 抜粋: 判断不可)
 
 
 
 ### handleClick (Buttonコンポーネント内部関数)
 
 * **役割**: クリックイベントをフックし、条件を満たす場合は音声再生を実行した上で、プロパティとして渡された `onClick` 関数を実行する。
-* 根拠: `const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {...` (行番号取得不可 / 抜粋: "const handleClick = (e: ...")
+* 根拠: `const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {...` (行番号: 44〜52 / 抜粋: "const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {")
 
 
 * **引数/リクエスト**: `e: React.MouseEvent<HTMLButtonElement>`
-* 根拠: `(e: React.MouseEvent<HTMLButtonElement>)` (行番号取得不可 / 抜粋: "const handleClick = (e: ...")
+* 根拠: `(e: React.MouseEvent<HTMLButtonElement>)` (行番号: 44 / 抜粋: "const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {")
 
 
 * **戻り値/レスポンス**: `void`
-* 根拠: 関数内に `return` ステートメントなし (行番号取得不可 / 抜粋: 判断不可)
+* 根拠: 関数内に `return` ステートメントなし (行番号: 44〜52)
 
 
 * **副作用**: コンソールへのログ出力、および外部関数 `play('tap')` の呼び出し。
-* 根拠: `console.log("Button clicked! Playing tap sound...");` および `play('tap');` (行番号取得不可 / 抜粋: "console.log("Button clic...")
+* 根拠: `console.log("Button clicked! Playing tap sound...");` (45行目) および `play('tap');` (47行目)
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号取得不可 / 抜粋: 判断不可)
+* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 44〜52 / 抜粋: 判断不可)
 
 
 
@@ -114,8 +114,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `@/hooks/useSound.ts` または `@/hooks/useSound.tsx` | 音声再生処理の詳細、利用しているAPI（Web Audio APIなど）、およびエラー時の挙動を特定するため。 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号取得不可 / 抜粋: "import { useSound } from...") |
-| 中 | `@/lib/utils.ts` | `cn` 関数の内部実装を確認し、クラス名の競合解決やマージのルールを把握するため。 | 根拠: `import { cn } from "@/lib/utils";` (行番号取得不可 / 抜粋: "import { cn } from "@/l...") |
+| 高 | `@/hooks/useSound.ts` または `@/hooks/useSound.tsx` | 音声再生処理の詳細、利用しているAPI（Web Audio APIなど）、およびエラー時の挙動を特定するため。 | 根拠: `import { useSound } from "@/hooks/useSound";` (行番号: 5) |
+| 中 | `@/lib/utils.ts` | `cn` 関数の内部実装を確認し、クラス名の競合解決やマージのルールを把握するため。 | 根拠: `import { cn } from "@/lib/utils";` (行番号: 3) |
 
 ## 8. 保守上の注意点
 

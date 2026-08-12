@@ -32,8 +32,8 @@
 
 ### `FamilyMileageCard`
 
-* **役割**: `mileage`の状態を評価し、未設定（`null`または`is_set`がfalsy）の場合は案内文を、設定済みの場合は進捗バーを含む目標カードのUIを描画する。また、目標達成時には紙吹雪アニメーションをトリガーする。
-* 根拠: [FamilyMileageCardコンポーネント] (行番号: 9〜55 / 抜粋: "export const FamilyMileageCard")
+* **役割**: `mileage`の状態を評価し、未設定（`is_set`がfalsy）の場合は案内文を、設定済みの場合は進捗バーを含む目標カードのUIを描画する。また、目標達成時には紙吹雪アニメーションをトリガーする。
+* 根拠: [FamilyMileageCardコンポーネント] (行番号: 9〜59 / 抜粋: "export const FamilyMileageCard")
 
 
 * **引数/リクエスト**: `{ mileage }` (型: `FamilyMileage | null`)
@@ -41,15 +41,15 @@
 
 
 * **戻り値/レスポンス**: JSX要素 (Reactノード)
-* 根拠: [return文] (行番号: 11〜16 / 抜粋: "return ( <div className="bg-gr") および (行番号: 35〜54 / 抜粋: "return ( <div className={`roun")
+* 根拠: [return文] (行番号: 31〜36 / 抜粋: "return ( <div className="bg-gr") および (行番号: 39〜58 / 抜粋: "return ( <div className={`roun")
 
 
 * **副作用**: `isCompleted`がtrueになった場合、外部関数`confetti`を呼び出して画面上に紙吹雪を描画する。
-* 根拠: [useEffect] (行番号: 24〜33 / 抜粋: "useEffect(() => { if (isComple")
+* 根拠: [useEffect] (行番号: 19〜28 / 抜粋: "useEffect(() => { if (isComple")
 
 
-* **エラーハンドリング**: 明示的なtry-catch等はなし。ただし、`mileage`が未定義や`is_set`がfalsyな場合は早期リターンにより、後続のプロパティ参照エラーを回避している。
-* 根拠: [if文] (行番号: 10〜17 / 抜粋: "if (!mileage || !mileage.is_se")
+* **エラーハンドリング**: 明示的なtry-catch等はなし。ただし、`isSet`がfalsyな場合（`mileage`が`null`または`is_set`がfalsyな場合を含む）は早期リターンにより、後続のプロパティ参照エラーを回避している。
+* 根拠: [if文] (行番号: 30〜37 / 抜粋: "if (!isSet) {")
 
 
 
@@ -57,19 +57,20 @@
 
 ```mermaid
 flowchart TD
-    Start([Start]) --> CheckMileage{"mileageが存在<br>かつ<br>mileage.is_setがtrue?"}
-    
-    CheckMileage -- False --> RenderUnset["未設定用のUIを描画"]
-    RenderUnset --> End([End])
-    
-    CheckMileage -- True --> Destructure["target_name, current_exp(初期値0),<br>target_exp(初期値1) を取得"]
+    Start([Start]) --> Destructure["isSet, target_name, current_exp(初期値0),<br>target_exp(初期値1) を算出"]
     Destructure --> CalcProgress["progress (最大100) と<br>isCompleted を計算"]
-    CalcProgress --> Effect{"useEffect:<br>isCompleted == true?"}
-    
+    CalcProgress --> RegisterEffect["useEffect を登録<br>(Hooksルール遵守のため早期returnより前で実行)"]
+    RegisterEffect --> Effect{"Effect本体:<br>isCompleted == true?"}
     Effect -- True --> ExecConfetti["外部：confetti()"]
-    ExecConfetti --> RenderCard["進捗バーとEXPを含む<br>目標カードUIを描画"]
-    
-    Effect -- False --> RenderCard
+    Effect -- False --> SkipConfetti["何もしない"]
+
+    ExecConfetti --> CheckSet{"isSet?"}
+    SkipConfetti --> CheckSet
+
+    CheckSet -- False --> RenderUnset["未設定用のUIを描画"]
+    RenderUnset --> End([End])
+
+    CheckSet -- True --> RenderCard["進捗バーとEXPを含む<br>目標カードUIを描画"]
     RenderCard --> End
 
 ```
@@ -95,17 +96,21 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `@/types`の実装ファイル (`types.ts`等) | `FamilyMileage`の完全なプロパティ構造とそれぞれの型を確認し、データモデルの全体像を把握するため。 | 根拠: [import文] (行番号: 3〜3 / 抜粋: "import { FamilyMileage } from ") |
-| 中 | 管理画面のコンポーネント | UI上で「管理画面から新しい目標を設定してください」と表示しているため、データの生成元・更新元となる設定画面の実装を確認し、整合性を担保するため。 | 根拠: [pタグのテキスト] (行番号: 14〜14 / 抜粋: "管理画面から新しい目標を設定してください。") |
+| 中 | 管理画面のコンポーネント | UI上で「管理画面から新しい目標を設定してください」と表示しているため、データの生成元・更新元となる設定画面の実装を確認し、整合性を担保するため。 | 根拠: [pタグのテキスト] (行番号: 34〜34 / 抜粋: "管理画面から新しい目標を設定してください。") |
 | 低 | 本コンポーネントの親コンポーネント | `mileage`のデータをどこからフェッチ・管理してPropsとして渡しているかを特定するため。 | 根拠: [コンポーネント引数] (行番号: 9〜9 / 抜粋: "= ({ mileage }) => {") |
 
 ## 8. 保守上の注意点
 
-* **副作用のトリガー条件**: `useEffect`の依存配列に`[isCompleted, current_exp]`が指定されています。`isCompleted`が`true`の状態で、`current_exp`のみが更新された場合（例：すでに達成している状態でさらに経験値が加算された場合）、その都度`confetti`が再実行される挙動となります。
-* 根拠: [useEffect依存配列] (行番号: 33〜33 / 抜粋: "}, [isCompleted, current_exp]);")
+* **Hooksルールの遵守**: `useEffect`は`isSet`による早期return（行30〜37）より前に呼び出されている。コード内コメントに「早期returnより前にHookを呼ぶ（React Hooksのルール違反を修正）」とあり、過去にHooks呼び出し順序のルール違反があったことを示唆している。今後の改修でこの呼び出し順序を崩さないよう注意が必要。
+* 根拠: [コメントおよびuseEffect定義] (行番号: 16〜19 / 抜粋: "★修正: 早期returnより前にHookを呼ぶ")
+
+
+* **副作用のトリガー条件**: `useEffect`の依存配列は`[isCompleted]`のみであり、`current_exp`は含まれていない。これはコメントにある通り、達成済み状態でポーリングにより`current_exp`が更新されるたびに`confetti`が再発火する不具合を修正するための意図的な設計である。
+* 根拠: [useEffect依存配列およびコメント] (行番号: 17〜18, 28 / 抜粋: "}, [isCompleted]);")
 
 
 * **ゼロ除算の可能性**: `target_exp`のデフォルト値は1に設定されていますが、渡された`mileage`オブジェクトで意図せず`target_exp = 0`が設定されていた場合、`current_exp / target_exp`の計算結果が`Infinity`等になり、`progress`の値（UIのゲージ幅）に影響する可能性があります。
-* 根拠: [progress計算] (行番号: 21〜21 / 抜粋: "Math.min((current_exp / target")
+* 根拠: [progress計算] (行番号: 13〜13 / 抜粋: "Math.min((current_exp / target")
 
 
 

@@ -19,72 +19,72 @@
 | --- | --- | --- | --- |
 | `React` | ライブラリ | Reactコンポーネントの構築 | `import React from 'react';` (行番号: 1) |
 | `Shield`, `Sword` | コンポーネント | UI上のアイコン表示用 | `import { Shield, Sword } from 'lucide-react';` (行番号: 2) |
-| `User`, `Equipment` | 型定義 | Propsの型定義用 | `import { User, Equipment } from '@/types';` (行番号: 3) |
+| `User`, `Equipment`, `OwnedEquipment` | 型定義 | Propsの型定義用 | `import { User, Equipment, OwnedEquipment } from '@/type` (行番号: 3) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `@/types`のモジュール詳細 | インポート先の実装が提供されていないため、`User`および`Equipment`の持つ全プロパティ構造が不明。 | `import { User, Equipment } from '@/types';` (行番号: 3) |
-| 親コンポーネント | このコンポーネントを呼び出し、Propsを渡している親コンポーネントの実装が存在しないため、渡されるデータの出所やコールバックの実装内容が不明。 | `export default EquipmentShop;` (行番号: 121) |
+| `@/types`のモジュール詳細 | インポート先の実装が提供されていないため、`User`・`Equipment`・`OwnedEquipment`の持つ全プロパティ構造が不明。 | `import { User, Equipment, OwnedEquipment } from '@/type` (行番号: 3) |
+| 親コンポーネント | このコンポーネントを呼び出し、Propsを渡している親コンポーネントの実装が存在しないため、渡されるデータの出所やコールバックの実装内容が不明。 | `export default EquipmentShop;` (行番号: 126) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `EquipmentShop`
 
 * **役割**: 装備品ショップ全体のUIを描画するメインコンポーネント。商品の在庫がない場合の表示、および武器・防具のセクションごとの表示判定を行う。
-* 根拠: `const EquipmentShop: React.FC<EquipmentShopProps> = ({...}) => {...}` (行番号: 13-119)
+* 根拠: `const EquipmentShop: React.FC<EquipmentShopProps> = ({` (行番号: 13-124)
 
 
 * **引数/リクエスト**: `EquipmentShopProps`型オブジェクト
 * `equipments`: `Equipment[]` (全装備品のリスト)
-* `ownedEquipments`: `any[]` (ユーザーの所持装備品リスト)
+* `ownedEquipments`: `OwnedEquipment[]` (ユーザーの所持装備品リスト)
 * `currentUser`: `User` (現在のユーザー情報)
 * `onBuy`: `(item: Equipment) => void` (購入処理のコールバック)
 * `onEquip`: `(item: Equipment) => void` (装備処理のコールバック)
-* 根拠: `interface EquipmentShopProps {...}` (行番号: 5-11) および 引数定義 (行番号: 14-20)
+* 根拠: `interface EquipmentShopProps {...}` (行番号: 5-11) および 引数定義 (行番号: 13-19)
 
 
 * **戻り値/レスポンス**: `React.ReactElement` (JSX要素)
-* 根拠: `return (<div ...>...</div>);` (行番号: 110, 113-118)
+* 根拠: `return (<div className="animate-in fade-in slide` (行番号: 118-123)
 
 
 * **副作用**: なし
-* 根拠: 関数内部で外部状態の直接変更や通信処理を行っていない (行番号: 21-119)
+* 根拠: 関数内部で外部状態の直接変更や通信処理を行っていない (行番号: 20-124)
 
 
 * **エラーハンドリング**: なし
-* 根拠: `try-catch`等のエラー捕捉処理の記述なし (行番号: 21-119)
+* 根拠: `try-catch`等のエラー捕捉処理の記述なし (行番号: 20-124)
 
 
 
 ### `getOwnedStatus` (内部関数)
 
 * **役割**: 引数で指定された装備品IDについて、現在のユーザーが所持しているかどうかを`ownedEquipments`から検索して返す。
-* 根拠: `const getOwnedStatus = (itemId: number) => {...}` (行番号: 22-26)
+* 根拠: `const getOwnedStatus = (itemId: number) => {` (行番号: 21-25)
 
 
 * **引数/リクエスト**: `itemId: number`
-* 根拠: `(itemId: number)` (行番号: 22)
+* 根拠: `(itemId: number)` (行番号: 21)
 
 
-* **戻り値/レスポンス**: 条件に一致する`ownedEquipments`内の要素 (`any`型)、または `undefined`
-* 根拠: `return ownedEquipments.find(...)` (行番号: 23-25)
+* **戻り値/レスポンス**: 条件に一致する`ownedEquipments`内の要素 (`OwnedEquipment`型)、または `undefined`
+* 根拠: `return ownedEquipments.find(` (行番号: 22-24)
 
 
 * **副作用**: なし
-* 根拠: 配列に対する`find`メソッドの実行のみ (行番号: 23-25)
+* 根拠: 配列に対する`find`メソッドの実行のみ (行番号: 22-24)
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー処理の記述なし (行番号: 22-26)
+* 根拠: エラー処理の記述なし (行番号: 21-25)
 
 
 
 ### `renderSection` (内部関数)
 
 * **役割**: 指定された種別(`type`)に合致する装備品を抽出し、セクションごとのUI（リストアイテム、アイコン、ステータス、アクションボタン）を生成する。該当する装備品がない場合は何も表示しない。
-* 根拠: `const renderSection = (title: string, type: string, icon: React.ReactNode) => {...}` (行番号: 28-107)
+* 根拠: `const renderSection = (title: string, type: string, icon: React.ReactNode) => {` (行番号: 28-112)
 
 
 * **引数/リクエスト**:
@@ -95,15 +95,15 @@
 
 
 * **戻り値/レスポンス**: `React.ReactElement` (JSX要素)、または `null`
-* 根拠: `if (items.length === 0) return null;` (行番号: 30) および `return (<div ...>...</div>);` (行番号: 32-106)
+* 根拠: `if (items.length === 0) return null;` (行番号: 30) および `return (<div className="mb-4">` (行番号: 32-111)
 
 
 * **副作用**: なし
-* 根拠: JSX要素の生成処理のみ (行番号: 29-106)
+* 根拠: JSX要素の生成処理のみ (行番号: 29-111)
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー処理の記述なし (行番号: 28-107)
+* 根拠: エラー処理の記述なし (行番号: 28-112)
 
 
 
@@ -165,6 +165,7 @@ graph TD
     subgraph "@/types"
         UserType["User (Type)"]
         EquipmentType["Equipment (Type)"]
+        OwnedEquipmentType["OwnedEquipment (Type)"]
     end
 
     EquipmentShop --> getOwnedStatus
@@ -172,6 +173,7 @@ graph TD
     renderSection --> getOwnedStatus
     EquipmentShop -.-> UserType
     EquipmentShop -.-> EquipmentType
+    EquipmentShop -.-> OwnedEquipmentType
     renderSection --> SwordIcon
     renderSection --> ShieldIcon
     
@@ -184,12 +186,11 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `src/types/index.ts` または `src/types.ts` | `User`および`Equipment`の完全なデータ構造を把握するため。 | `import { User, Equipment } from '@/types';` (行番号: 3) |
+| 高 | `src/types/index.ts` または `src/types.ts` | `User`・`Equipment`・`OwnedEquipment`の完全なデータ構造を把握するため。 | `import { User, Equipment, OwnedEquipment } from '@/type` (行番号: 3) |
 | 高 | `EquipmentShop`を呼び出している親コンポーネント (例: `ShopPage.tsx`) | `ownedEquipments`の取得元や、`onBuy`、`onEquip`の実際のロジック（API通信やグローバルステートの更新処理）を把握するため。 | `onBuy`, `onEquip` がProps経由で渡されているため (行番号: 9-10) |
 
 ## 8. 保守上の注意点
 
-* **型の安全性**: `ownedEquipments` が `any[]` で定義されており、内部で `oe.equipment_id`, `oe.user_id`, `oe.is_equipped` といったプロパティへのアクセスが発生しているため、実行時エラーのリスクが存在する。
 * **フォールバック処理**: `itemId`の取得において `item.equipment_id || item.id` と複数のプロパティを評価している。また、所持金判定において `(currentUser.gold || 0)` と未定義時のフォールバックが行われている。
 * **パフォーマンス**: `getOwnedStatus`関数において、`renderSection`内の`map`ループごとに`ownedEquipments.find`を実行しているため、データ量増加時に計算量が多くなる構造になっている。
 
@@ -199,7 +200,7 @@ graph TD
 | --- | --- | --- |
 | `Equipment`型の全プロパティ | `item.equipment_id`, `item.id`, `item.type`, `item.cost`, `item.icon`, `item.name`, `item.power`が使われているが、これ以外にプロパティが存在するか不明。 | `@/types`の定義ファイル |
 | `User`型の全プロパティ | `currentUser.user_id`, `currentUser.gold`が使われているが、それ以外の構造が不明。 | `@/types`の定義ファイル |
-| `ownedEquipments`の型詳細 | `any[]`型のため、オブジェクトの正確な型定義が不明。 | 親コンポーネントまたは対応する型定義ファイル |
+| `OwnedEquipment`型の全プロパティ | `oe.equipment_id`, `oe.user_id`, `oe.is_equipped` が使われているが、`@/types`の定義ファイルが提供されていないため、これ以外にプロパティが存在するか不明。 | `@/types`の定義ファイル |
 | `onBuy` / `onEquip` の実体ロジック | Propsとして注入されているだけであり、呼び出し後のDBへの保存や状態更新処理が不明。 | 親コンポーネント |
 
 ## 10. 自己検証結果
