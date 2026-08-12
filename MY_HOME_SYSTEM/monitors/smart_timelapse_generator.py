@@ -555,7 +555,8 @@ class Uploader:
                 response = requests.post(
                     webhook_url,
                     data={"content": message},
-                    files={"file": (file_name, f, "video/mp4")}
+                    files={"file": (file_name, f, "video/mp4")},
+                    timeout=60
                 )
             if response.status_code in [200, 204]:
                 logger.info(f"Discord送信成功: {file_name}")
@@ -566,7 +567,7 @@ class Uploader:
 
     def _send_completion_notice(self, webhook_url: str, count: int):
         try:
-            requests.post(webhook_url, data={"content": f"✅ {count}ファイルの送信が完了しました。"})
+            requests.post(webhook_url, data={"content": f"✅ {count}ファイルの送信が完了しました。"}, timeout=10)
         except Exception:
             pass
 
