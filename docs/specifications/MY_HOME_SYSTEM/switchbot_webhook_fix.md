@@ -193,7 +193,7 @@ graph TD
 
 * `sys.path.insert` を用いて親ディレクトリなどを強制的にシステムパスに追加(Path Injection)しており、ディレクトリ構造が変更された際にインポートエラーが発生する可能性が高い。
 * `update_switchbot_webhook` 関数内にて、古いWebhookを削除するループ処理に `time.sleep(1)` が含まれており、登録数が多い場合は関数全体の実行時間が著しく長くなる。
-* `requests.post` および `requests.get` の一部において `timeout` パラメータが指定されておらず（LINEのPUT処理にのみ `timeout=10` が設定されている）、外部APIの応答が遅延した場合にプロセスがハングするリスクがある。
+* すべての `requests` 呼び出し（SwitchBot/LINE双方）に `timeout=10` が明示的に設定されており、外部APIの応答遅延によるプロセスハングは一定範囲で防止されている。
 * `traceback` モジュールがインポートされているが、スクリプト内で使用されていない未使用コードが存在する。
 
 ## 9. 不明事項一覧

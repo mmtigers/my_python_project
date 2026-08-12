@@ -211,22 +211,29 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `@/lib/apiClient.ts` | API通信の認証方式やベースURL、共通のエラー処理などの実装仕様を確認するため。 | `import { apiClient } from '@/lib/apiClient';` |
-| 中 | バックエンドのルーティング/コントローラー群 | `/api/quest/analytics/weekly` の実処理と、型定義で `any` となっているデータ（`mvp` や `rankings` 内の要素）の正確な構造を特定するため。 | `apiClient.get('/api/quest/analytics/weekly')` および `interface TrendData`内の `any` 定義 |
+| 中 | バックエンドの `QuestService.get_weekly_analytics` / `make_rank()` | `/api/quest/analytics/weekly` の実処理と、`dailyStats`・`RankingEntry.label` が実際にどのような値で返り、なぜ本コンポーネントで未使用なのかを特定するため。 | コメント (行番号: 6 / 抜粋: "// ランキング/MVPの1エントリ (QuestService.get_weekly_analytics の make_rank() レスポンスに対応)") |
+| 低 | `@tanstack/react-query` の呼び出し元（QueryClientProvider設定箇所） | `staleTime`/`refetchInterval`のデフォルト値や、エラー時のリトライ・キャッシュ方針がアプリ全体でどう設定されているかを確認するため。 | `import { useQuery } from '@tanstack/react-query';` (行番号: 1) |
 
 ## 8. 保守上の注意点
 
-* `TrendData` インターフェースにおいて、`rankings.exp`、`rankings.gold`、`rankings.count` の配列要素型、および `mvp` の型が `any` として定義されている。
-* ローカル関数 `renderRankingCard` や MVP描画部において、APIレスポンスのオブジェクトに対し `topUser.user_name`、`topUser.value`、`data.mvp.user_name` などのプロパティアクセスを直接行っているが、型が `any` であるため、API側のレスポンス構造が変更された際に実行時エラーとなるリスクがある。
-* `data.startDate` および `data.endDate` に対して `slice(5).replace('-', '/')` という文字列操作を固定インデックスで行っているため、APIから返却される日付文字列のフォーマットが変わると表示が崩壊する可能性がある。
-* `AvatarDisplay` コンポーネントにおいて、画像かどうかの判定を `typeof avatar === 'string' && avatar.startsWith('/')` で行っているため、`http`等から始まる外部URLが渡された場合は文字列として描画されてしまう。
+* `TrendData.dailyStats`（日別統計）と `RankingEntry.label` は型として定義されているが、本コンポーネントのレンダリング処理内では一切参照されていない。未実装の機能の残骸か、今後利用予定のフィールドである可能性がある。
+* 根拠: [RankingEntry.label定義] (行番号: 12 / 抜粋: "label: string;") および [TrendData.dailyStats定義] (行番号: 18-22 / 抜粋: "dailyStats: Array<{")
+* `data.startDate` および `data.endDate` に対して `slice(5).replace('-', '/')` という文字列操作を固定インデックスで行っているため、APIから返却される日付文字列のフォーマット（想定: `YYYY-MM-DD`）が変わると表示が崩壊する可能性がある。
+* 根拠: [期間表示] (行番号: 165 / 抜粋: "集計期間: {data.startDate.slice(5).replace('-', '/')}")
+* `AvatarDisplay` コンポーネントにおいて、画像かどうかの判定を `typeof avatar === 'string' && avatar.startsWith('/')` で行っているため、`http`等から始まる外部URLが渡された場合は画像として描画されず、絵文字と同じ`<span>`テキストとして描画されてしまう。
+* 根拠: [AvatarDisplay] (行番号: 34 / 抜粋: "const isImagePath = avatar && typeof avatar === 'string' && avatar.startsWith('/');")
+* データ取得は `useState`/`useEffect` による手動フェッチから `@tanstack/react-query` の `useQuery` に置き換えられており、`staleTime: 60秒` と `refetchInterval: 30秒` が設定されている。`refetchInterval` が `staleTime` より短いため、実質的に30秒ごとにバックグラウンド再フェッチが走る。react-queryの標準動作により、2回目以降の再フェッチ中は`isLoading`が`true`に戻らない（＝ローディング表示に切り替わらない）ため、初回描画後は「データを集計中...」画面が再表示されることはない。
+* 根拠: [useQuery呼び出し] (行番号: 69-75 / 抜粋: "const { data, isLoading: loading } = useQuery<TrendData>({")
+* `useQuery`はエラー時の`onError`やtry-catchを持たないため、リクエスト失敗時は`data`が`undefined`のままとなり「データがありません」表示にフォールバックする。エラー内容自体（`error`オブジェクト）はUIに表示されない。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `apiClient`の内部実装 | インターセプターの有無やベースURL、リトライロジックなどが当ファイルから判断不可のため | `@/lib/apiClient.ts` |
-| ランキングおよびMVPデータの厳密なプロパティ構造 | `TrendData`内で `any` 型が用いられており、実態が判断不可のため | API側のスキーマ定義ファイル または バックエンドの実装ファイル |
+| `TrendData.dailyStats` と `RankingEntry.label` の実際の用途 | 型定義には存在するが本ファイルのレンダリング処理では未参照であり、利用意図が判断不可のため | バックエンド実装 (`QuestService.get_weekly_analytics`) または本コンポーネントを将来拡張した差分 |
 | `lucide-react`アイコンの詳細仕様 | コンポーネントのバージョンや内包するSVGの詳細が不明なため | `package.json` およびライブラリの実装 |
+| `useQuery`のグローバル設定（デフォルトの`retry`回数など） | `QueryClient`の初期化箇所が本ファイルに含まれていないため | `QueryClientProvider` を設定しているファイル（例: `main.tsx`） |
 
 ## 10. 自己検証結果
 
