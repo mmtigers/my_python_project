@@ -1,13 +1,15 @@
 # MY_HOME_SYSTEM/tests/test_webhook_router.py
 """
-routers/webhook_router.py の SwitchBot Webhook 共有シークレット検証のテスト。
+routers/webhook_router.py の SwitchBot Webhook 共有シークレット検証、および
+LINE Webhook (/callback/line) の署名検証結果によるレスポンス分岐のテスト。
 """
 import os
 import sys
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from linebot.v3.exceptions import InvalidSignatureError
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -76,3 +78,51 @@ async def test_no_token_required_when_not_configured():
         result = await webhook_router.switchbot_webhook(_make_body(), token=None)
 
     assert result["status"] == "success"
+
+
+class TestLineCallback:
+    """
+    /callback/line の署名検証結果によるレスポンス分岐。
+    実際のLINE SDKのWebhookHandlerは使わず、handleメソッドの呼び出し結果のみをモックする。
+    """
+
+    def test_returns_501_when_line_bot_not_configured(self, api_client, monkeypatch):
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", None)
+        res = api_client.post("/callback/line", content=b"{}", headers={"X-Line-Signature": "sig"})
+        assert res.status_code == 501
+
+    def test_returns_ok_when_signature_is_valid(self, api_client, monkeypatch):
+        fake_handler = MagicMock()
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b'{"events": []}', headers={"X-Line-Signature": "valid-sig"})
+
+        assert res.status_code == 200
+        assert res.text == '"OK"'
+        fake_handler.handle.assert_called_once()
+        called_body, called_sig = fake_handler.handle.call_args[0]
+        assert called_body == '{"events": []}'
+        assert called_sig == "valid-sig"
+
+    def test_returns_400_on_invalid_signature(self, api_client, monkeypatch):
+        fake_handler = MagicMock()
+        fake_handler.handle.side_effect = InvalidSignatureError("bad signature")
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b"{}", headers={"X-Line-Signature": "wrong-sig"})
+
+        assert res.status_code == 400
+
+    def test_unexpected_exception_is_logged_and_still_returns_ok(self, api_client, monkeypatch):
+        """
+        LINE側の一時的な処理エラーでWebhook全体を500にしてしまうと、LINEプラットフォーム側の
+        リトライ挙動に巻き込まれる可能性があるため、想定外の例外はログのみで200を返す設計。
+        """
+        fake_handler = MagicMock()
+        fake_handler.handle.side_effect = RuntimeError("unexpected internal error")
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b"{}", headers={"X-Line-Signature": "sig"})
+
+        assert res.status_code == 200
+        assert res.text == '"OK"'

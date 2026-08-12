@@ -402,7 +402,9 @@ def init_db() -> None:
                 start_date TEXT,
                 end_date TEXT,
                 pre_requisite_quest_id INTEGER,
-                occurrence_chance REAL DEFAULT 1.0
+                occurrence_chance REAL DEFAULT 1.0,
+                start_time TEXT,
+                end_time TEXT
             )
         ''')
         

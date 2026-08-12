@@ -15,6 +15,8 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import common
+import config
 from services import sensor_service
 
 
@@ -101,3 +103,74 @@ class TestProcessSensorDataContact:
                 "mac_door", "玄関ドア", "玄関", "Contact Sensor", "open"
             )
             assert mock_send.call_count == 1
+
+
+@pytest.mark.asyncio
+class TestProcessMeterData:
+    async def test_saves_temperature_and_humidity(self, isolated_db):
+        await sensor_service.process_meter_data("dev1", "リビング温湿度計", 25.5, 48.0)
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                f"SELECT * FROM {config.SQLITE_TABLE_SWITCHBOT_LOGS} WHERE device_id='dev1'"
+            ).fetchone()
+        assert row is not None
+        assert row["temperature"] == 25.5
+        assert row["humidity"] == 48.0
+
+
+@pytest.mark.asyncio
+class TestProcessPowerData:
+    async def test_first_reading_above_threshold_treats_prior_value_as_zero_and_notifies(self, isolated_db):
+        """DB に前回値が無い場合は prev_wattage=0.0 とみなされるため、
+        初回の値が閾値以上であれば OFF->ON の状態変化として通知される。"""
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {"threshold": 100})
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                f"SELECT * FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id='dev1'"
+            ).fetchone()
+        assert row is not None
+        assert row["wattage"] == 500
+        mock_send.assert_called_once()
+
+    async def test_no_notify_settings_threshold_skips_notification_entirely(self, isolated_db):
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {})
+        mock_send.assert_not_called()
+
+    async def test_crossing_threshold_upward_sends_on_notification(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
+            )
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {"threshold": 100})
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][1][0]["text"]
+        assert "使用開始" in msg
+
+    async def test_crossing_threshold_downward_sends_off_notification(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev1', 'エアコン', 500, '2026-01-01T00:00:00')"
+            )
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 5, {"threshold": 100})
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][1][0]["text"]
+        assert "使用終了" in msg
+
+    async def test_staying_below_threshold_does_not_notify(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
+            )
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_power_data("dev1", "エアコン", 10, {"threshold": 100})
+        mock_send.assert_not_called()

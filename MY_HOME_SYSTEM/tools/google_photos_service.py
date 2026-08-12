@@ -126,7 +126,7 @@ class GooglePhotosService:
                 # 画像データのダウンロード
                 # baseUrlにパラメータを付与してダウンロード (w=幅, h=高さ, d=ダウンロード)
                 download_url = f"{item['baseUrl']}=w1024-h1024" 
-                res = requests.get(download_url, headers={"Authorization": f"Bearer {self.creds.token}"})
+                res = requests.get(download_url, headers={"Authorization": f"Bearer {self.creds.token}"}, timeout=20)
                 
                 if res.status_code == 200:
                     img = Image.open(BytesIO(res.content))

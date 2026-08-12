@@ -48,8 +48,9 @@ assets/salary_images/
 DDD/split_results/
 DDD/*プロンプト*.md
 
-# ただし requirements.txt は含める
+# ただし requirements.txt / requirements-dev.txt は含める
 !requirements.txt
+!requirements-dev.txt
 
 *.zip
 *.mp3
@@ -66,3 +67,14 @@ family_events.json
 !family-quest/package.json
 !family-quest/package-lock.json
 !family-quest/tsconfig*.json
+
+# Test / Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.pytest_cache/
+tmp_nas/
+temp_fallback/
+temp_backups/
