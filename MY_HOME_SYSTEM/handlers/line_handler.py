@@ -6,7 +6,6 @@ import json
 import time
 from typing import Optional, List, Any, Dict
 
-from fastapi import Request, HTTPException
 import handlers.line_logic as line_logic
 
 # LINE Bot SDK v3
@@ -23,7 +22,6 @@ from linebot.v3.messaging import (
     MessageAction
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
-from linebot.v3.exceptions import InvalidSignatureError
 
 import config
 from core.logger import setup_logging
@@ -177,13 +175,3 @@ def handle_postback(event: PostbackEvent):
 if line_handler:
     line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)
     line_handler.add(PostbackEvent)(handle_postback)
-
-# 外部からの呼び出し用エントリーポイント
-def handle_request(request: Request, body: str, signature: str):
-    if not line_handler:
-        return
-    try:
-        line_handler.handle(body, signature)
-    except InvalidSignatureError:
-        logger.warning("Invalid Signature")
-        raise HTTPException(status_code=400, detail="Invalid signature")
