@@ -2,7 +2,7 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象ファイル | masterData.js (family-quest/src/constants/masterData.js) |
+| 対象ファイル | masterData.js (family-quest/src/lib/masterData.js) |
 | 言語 | JavaScript / React |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
@@ -35,7 +35,7 @@
 ### 定数：`INITIAL_USERS`
 
 * **役割**: 接続エラー時に使用されるゲストユーザーのフォールバックデータを定義する。
-* 根拠: [定数定義] (行番号: 4〜17 / 抜粋: "export const INITIAL_USERS = [")
+* 根拠: [定数定義] (行番号: 4〜18 / 抜粋: "export const INITIAL_USERS = [")
 
 
 * **引数/リクエスト**: なし
@@ -43,61 +43,61 @@
 
 
 * **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `user_id`, `name`, `job_class`, `level`, `exp`, `nextLevelExp`, `gold`, `hp`, `maxHp`, `avatar`, `inventory`）
-* 根拠: [定数の中身] (行番号: 5〜16 / 抜粋: "user_id: 'guest',")
+* 根拠: [定数の中身] (行番号: 6〜16 / 抜粋: "user_id: 'guest',")
 
 
 * **副作用**: なし
-* 根拠: [定数定義] (行番号: 4〜17 / 抜粋: "export const INITIAL_USERS = [")
+* 根拠: [定数定義] (行番号: 4〜18 / 抜粋: "export const INITIAL_USERS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数定義] (行番号: 4〜17 / 抜粋: "export const INITIAL_USERS = [")
+* 根拠: [定数定義] (行番号: 4〜18 / 抜粋: "export const INITIAL_USERS = [")
 
 
 
 ### 定数：`MASTER_QUESTS`
 
 * **役割**: 接続エラー時に使用される、エラー状態を伝えるダミークエストのフォールバックデータを定義する。
-* 根拠: [定数定義] (行番号: 19〜22 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [定数定義] (行番号: 19 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 20 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 * **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `id`, `title`, `exp`, `gold`, `type`, `days`, `icon`）
-* 根拠: [定数の中身] (行番号: 20〜21 / 抜粋: "{ id: 999, title: '⚠️ サーバ...")
+* 根拠: [定数の中身] (行番号: 21〜22 / 抜粋: "{ id: 999, title: '⚠️ サーバ...")
 
 
 * **副作用**: なし
-* 根拠: [定数定義] (行番号: 19〜22 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数定義] (行番号: 19〜22 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 
 ### 定数：`MASTER_REWARDS`
 
 * **役割**: 接続エラー時に使用される、データ取得失敗を伝えるダミー報酬のフォールバックデータを定義する。
-* 根拠: [定数定義] (行番号: 24〜26 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [定数定義] (行番号: 24 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 25 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 * **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `id`, `title`, `cost`, `category`, `icon`, `desc`）
-* 根拠: [定数の中身] (行番号: 25 / 抜粋: "{ id: 999, title: 'データ取得失敗...")
+* 根拠: [定数の中身] (行番号: 26 / 抜粋: "{ id: 999, title: 'データ取得失敗...")
 
 
 * **副作用**: なし
-* 根拠: [定数定義] (行番号: 24〜26 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数定義] (行番号: 24〜26 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 
@@ -131,11 +131,13 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | 不明（インポート元のファイル） | 本ファイルで定義した定数を読み込み、サーバー接続エラー時にどのようにUIへのデータ切り替えを実装しているかを把握するため。 | `export` キーワードにより、外部からの呼び出しが前提となっているため (行番号: 4, 19, 24 / 抜粋: "export const") |
+| 高 | 不明（インポート元のファイル） | 本ファイルで定義した定数を読み込み、サーバー接続エラー時にどのようにUIへのデータ切り替えを実装しているかを把握するため。 | `export` キーワードにより、外部からの呼び出しが前提となっているため (行番号: 4, 20, 25 / 抜粋: "export const") |
 
 ## 8. 保守上の注意点
 
 * 定数としてエクスポートされる各オブジェクトのスキーマ（プロパティ構成）はハードコードされている。アプリ全体でユーザー、クエスト、報酬のデータ構造に変更があった場合、このファイルのオブジェクト構造も手動で合わせる必要がある。
+* **ファイル冒頭コメントの記載パスが古い**: ファイル1行目のコメントに `// family-quest/src/constants/masterData.js` と記載されているが、実際の配置場所は `family-quest/src/lib/masterData.js` であり、ファイルが移動した際にコメントの更新が漏れている。
+* 根拠: [ファイル冒頭コメント] (行番号: 1 / 抜粋: "// family-quest/src/constants/masterData.js")
 
 ## 9. 不明事項一覧
 
@@ -152,3 +154,5 @@ graph TD
 * [x] 根拠漏れが0件である
 * [x] Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
 * [x] 不明事項を漏れなく列挙した
+
+完了

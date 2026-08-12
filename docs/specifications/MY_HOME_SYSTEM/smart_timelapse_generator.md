@@ -51,15 +51,15 @@
 ### `get_ffmpeg_stderr`
 
 * **役割**: `DEBUG_FFMPEG`設定が有効な場合は`sys.stderr`を、無効な場合は`subprocess.DEVNULL`を返す。FFmpeg実行時の標準エラー出力先を一元的に切り替えるためのヘルパー関数。
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def get_ffmpeg_stderr():\n    return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+* 根拠: 関数定義 (行番号: 68-69 / 抜粋: "def get_ffmpeg_stderr():\n    return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
 
 
 * **引数/リクエスト**: なし。
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "def get_ffmpeg_stderr():")
+* 根拠: 関数シグネチャ (行番号: 68 / 抜粋: "def get_ffmpeg_stderr():")
 
 
 * **戻り値/レスポンス**: `sys.stderr`または`subprocess.DEVNULL`（型ヒントなし）。
-* 根拠: 関数本体 (行番号取得不可 / 抜粋: "return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
+* 根拠: 関数本体 (行番号: 69 / 抜粋: "return sys.stderr if DEBUG_FFMPEG else subprocess.DEVNULL")
 
 
 * **副作用**: なし。

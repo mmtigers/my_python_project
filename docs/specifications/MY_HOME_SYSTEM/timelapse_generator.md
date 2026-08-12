@@ -117,7 +117,7 @@
 * スリープ処理（`time.sleep(0.5)`）
 * リストファイルの書き込み（`with open(...)`）
 * FFmpegプロセスの実行（`extract_video_clip`呼び出し、及び結合コマンドの`subprocess.run`）
-* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 121, 197, 209 / 抜粋: "subprocess.run(concat_cmd, s...")
+* 根拠: `glob.glob(pattern)` / `f.write(f"file '{clip}'\n")` / `subprocess.run(concat_cmd...` (行番号: 121, 199, 209 / 抜粋: "subprocess.run(concat_cmd, s...")
 
 
 * **エラーハンドリング**: `strptime`によるファイル名のパース失敗時（`ValueError`）はスキップ。
