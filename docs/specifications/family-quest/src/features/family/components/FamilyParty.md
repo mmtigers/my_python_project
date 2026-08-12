@@ -19,30 +19,30 @@
 | --- | --- | --- | --- |
 | `React`, `useMemo` | ライブラリ | コンポーネント定義およびステータス計算のメモ化 | 根拠: import文 (行番号: 1 / 抜粋: "`import React, { useMemo } ...`") |
 | `Crown`, `Sword`, `Shield` | アイコンコンポーネント | UIの装飾表示 | 根拠: import文 (行番号: 2 / 抜粋: "`import { Crown, Sword, ...`") |
-| `User`, `Equipment`, `Boss` | 型定義 | Propsおよび内部データの型指定 | 根拠: import文 (行番号: 3 / 抜粋: "`import { User, Equipment...`") |
-| `BossCard` | コンポーネント | ボス情報のUI表示 | 根拠: import文 (行番号: 4 / 抜粋: "`import BossCard from './...`") |
+| `User`, `Equipment`, `Boss`, `OwnedEquipment` | 型定義 | Propsおよび内部データの型指定 | 根拠: import文 (行番号: 3 / 抜粋: "`import { User, Equipment, Boss, OwnedEquipment } from '@/types';`") |
+| `BossCard` | コンポーネント | ボス情報のUI表示 | 根拠: import文 (行番号: 4 / 抜粋: "`import BossCard from './BossCard';`") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `@/types`の各型 (`User`, `Equipment`, `Boss`) | ファイル内に型定義の具体的な実装が提供されていないため、詳細なプロパティ構造は不明。 | 根拠: import文 (行番号: 3 / 抜粋: "`import { User, Equipment...`") |
-| `BossCard` コンポーネント | 実装ファイルが提供されておらず、内部でどのような処理やレンダリングが行われているか不明。 | 根拠: import文 (行番号: 4 / 抜粋: "`import BossCard from './...`") |
+| `@/types`の各型 (`User`, `Equipment`, `Boss`, `OwnedEquipment`) | ファイル内に型定義の具体的な実装が提供されていないため、詳細なプロパティ構造は不明。 | 根拠: import文 (行番号: 3 / 抜粋: "`import { User, Equipment, Boss, OwnedEquipment } from '@/types';`") |
+| `BossCard` コンポーネント | 実装ファイルが提供されておらず、内部でどのような処理やレンダリングが行われているか不明。 | 根拠: import文 (行番号: 4 / 抜粋: "`import BossCard from './BossCard';`") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `FamilyParty`
 
 * **役割**: 渡されたユーザーと装備の情報から各メンバーの実ステータスを計算し、ボス情報を含むパーティのUI一覧をレンダリングする。
-* 根拠: コンポーネント定義 (行番号: 12〜142 / 抜粋: "`const FamilyParty: React...`")
+* 根拠: コンポーネント定義 (行番号: 12〜146 / 抜粋: "`const FamilyParty: React...`")
 
 
-* **引数/リクエスト**: `FamilyPartyProps` (`users`: `User[]`, `ownedEquipments`: `any[]`, `boss`: `Boss | null`)
+* **引数/リクエスト**: `FamilyPartyProps` (`users`: `User[]`, `ownedEquipments`: `OwnedEquipment[]`, `boss`: `Boss | null`)
 * 根拠: Props型定義 (行番号: 6〜10 / 抜粋: "`interface FamilyPartyProps...`")
 
 
 * **戻り値/レスポンス**: JSX.Element (UI要素)
-* 根拠: return文 (行番号: 39〜140 / 抜粋: "`return ( <div className=...`")
+* 根拠: return文 (行番号: 39〜145 / 抜粋: "`return ( <div className=...`")
 
 
 * **副作用**: なし
@@ -57,15 +57,15 @@
 ### `partyData` (内部処理 / useMemo)
 
 * **役割**: `users`の各要素に対し、`ownedEquipments`から装備中の武器と防具を特定し、補正値を加算した新しいステータス情報を持つユーザーオブジェクトの配列を生成・キャッシュする。
-* 根拠: useMemoブロック (行番号: 14〜38 / 抜粋: "`const partyData = useMem...`")
+* 根拠: useMemoブロック (行番号: 14〜37 / 抜粋: "`const partyData = useMem...`")
 
 
 * **引数/リクエスト**: `users`, `ownedEquipments` (依存配列)
-* 根拠: 依存配列の定義 (行番号: 38 / 抜粋: "`}, [users, ownedEquipments...`")
+* 根拠: 依存配列の定義 (行番号: 37 / 抜粋: "`}, [users, ownedEquipments...`")
 
 
 * **戻り値/レスポンス**: 拡張されたユーザー情報の配列 (`hp`, `weapon`, `armor`, `stats` プロパティが追加されている)
-* 根拠: return文 (行番号: 30〜36 / 抜粋: "`return { ...user, hp: ma...`")
+* 根拠: return文 (行番号: 29〜35 / 抜粋: "`return { ...user, hp: ma...`")
 
 
 * **副作用**: なし
@@ -130,21 +130,22 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `@/types` に該当するファイル | コンポーネント内のデータ処理の正確な型安全性を確認し、`User`や`Equipment`の全プロパティ構造を把握するため。 | 根拠: import文 (行番号: 3 / 抜粋: "`import { User, Equipment...`") |
 | 中 | `./BossCard.tsx` | ボスの情報がどのように表示されるか、内部で必要なデータ要件などシステム全体のUI仕様を把握するため。 | 根拠: import文 (行番号: 4 / 抜粋: "`import BossCard from './...`") |
-| 中 | 本コンポーネントを呼び出す親ファイル | `ownedEquipments`の実際のデータ構造（現在`any[]`）の全貌を明確にするため。 | 根拠: Props定義 (行番号: 8 / 抜粋: "`ownedEquipments: any[];`") |
+| 中 | 本コンポーネントを呼び出す親ファイル | `ownedEquipments`（`OwnedEquipment[]`）の実際の供給元と、`boss`（`Boss | null`）の取得元を明確にするため。 | 根拠: Props定義 (行番号: 8〜9 / 抜粋: "`ownedEquipments: OwnedEquipment[]; boss: Boss | null;`") |
 
 ## 8. 保守上の注意点
 
-* `ownedEquipments` が `any[]` として型定義されており、内部処理で `e: any` としてアクセスされている。渡されるデータ構造が変更された場合、TypeScriptのコンパイルエラーでは検知できず、実行時エラーや計算ミスにつながる可能性が高い。
+* `ownedEquipments` は `OwnedEquipment[]` として型付けされているが、`@/types` に定義の実体がないため、実際のプロパティ構造（`user_id`, `is_equipped`, `type`, `power` など）はこのファイルの参照箇所からのみ推測可能である。
 * HPの計算式が `(user.level * 10) + 50` とハードコードされている。ゲームバランスの調整等で仕様変更が発生した場合、直接このコンポーネントを修正する必要がある。
 * アバター画像がない場合のフォールバックとして `member.icon || '🙂'` が使用されているが、これらのプロパティの存在保証（null安全性）は外部の型定義（`@/types`）に完全に依存している。
+* `boss` プロパティは `BossCard` にそのまま渡されているだけであり、ボスの表示ロジック自体は `BossCard` 側の責務である（本ファイルでは委譲のみ）。
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `User`, `Equipment`, `Boss`の正確なプロパティ定義 | インポート元の実装が提供されていないため | `@/types`の型定義ファイル |
+| `User`, `Equipment`, `Boss`, `OwnedEquipment`の正確なプロパティ定義 | インポート元の実装が提供されていないため | `@/types`の型定義ファイル |
 | `BossCard` コンポーネントの挙動と表示内容 | インポート元の実装が提供されていないため | `./BossCard.tsx` |
-| `ownedEquipments` の実際のデータ構造 | 現在 `any[]` で代用されており、親からの供給仕様が不明なため | 本コンポーネントを呼び出している親ファイル |
+| `ownedEquipments` の実際のデータ供給元 | `OwnedEquipment[]`型として定義されてはいるが、親からどのように取得・供給されているかは不明なため | 本コンポーネントを呼び出している親ファイル |
 
 ## 10. 自己検証結果
 

@@ -37,6 +37,14 @@
 * 根拠: [ディレクトリ自動作成ループ] (行番号取得不可 / 抜粋: `os.makedirs(d, exist_ok=True)`)
 
 
+* `FAMILY_SETTINGS["members"]` の実名キー自体は `handlers/line_handler.py` 等でのメッセージ文字列マッチングに機能的に使用されているためソース上に残しつつ、年齢などの個人情報は Git 管理対象外の `family_members.local.json` が存在すればそこから読み込んでマージする（存在しなくてもプレースホルダーのままアプリは起動できる）。
+* 根拠: [家族設定のローカルオーバーライド読み込み] (行番号取得不可 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
+
+
+* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、小児科予約監視URL（`CLINIC_MONITOR_URL`等）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。
+* 根拠: [Retention / TV Lock / Clinic Monitor 各セクションの定数群] (行番号取得不可 / 抜粋: `RECORDING_RETENTION_DAYS: int = int(os.getenv`)
+
+
 
 ## 3. 外部依存関係
 
@@ -60,6 +68,7 @@
 | `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号取得不可 / 抜粋: `load_dotenv()`) |
 | `devices.json` | システムに接続されるカメラやモニター等のデバイス設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(DEVICES_JSON_PATH, ` (行番号取得不可 / 抜粋: `with open(DEVICES_JSON_PATH, `) |
 | `family_events.json` | 家族の記念日・イベント設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(_events_path, "r", ` (行番号取得不可 / 抜粋: `with open(_events_path, "r", `) |
+| `family_members.local.json` | Git管理対象外(gitignore)の外部ファイルであり、`FAMILY_SETTINGS["styles"]` の年齢等の実データがどのような値・構造で上書きされるか不明なため。 | 根拠: `_family_local_path = os.path.join(...)` (行番号取得不可 / 抜粋: `family_members.local.json`) |
 | `Pydantic`の内部実装 | 外部ライブラリであり、バリデーションの厳密な挙動（例：エイリアスやデフォルトファクトリの処理詳細）は提供コードから読み取れないため。 | 根拠: `class CameraConfig(BaseModel):` (行番号取得不可 / 抜粋: `class CameraConfig(BaseModel):`) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -280,6 +289,8 @@ flowchart TD
 * `fallback_path`を作成する際のフェイルセーフで例外が発生した場合、エラーログを出力しつつ元の`preferred_path`を返す仕様になっているため、後続の処理で書き込みエラー(`PermissionError`等)が誘発される可能性がある。
 * モジュールロード時に外部の`devices.json`や`family_events.json`を読み込む仕様であり、JSONの構文エラーが発生した場合は例外をキャッチして警告を出すが、設定は空のまま処理が続行される。
 * メモリ使用率やストレージ等の警告通知に関連する定数（例：`MEMORY_ALERT_PERCENT`）が存在するが、このファイル単体では監視機構そのものは実装されていない。
+* `TV_UNLOCK_QUEST_IDS` は環境変数のカンマ区切り文字列から数字のみを抽出して`int`変換しており、`isdigit()`を満たさない値（不正なID等）は例外を送出せず黙って除外される仕様のため、設定ミスに気づきにくい。
+* `FAMILY_SETTINGS["members"]` の実名文字列自体は他モジュール（`handlers/line_handler.py`等）のメッセージマッチングロジックと結合しているため、この値を変更すると気づきにくい形で機能が壊れるリスクがある。年齢等の付随情報のみ`family_members.local.json`（gitignore対象）に切り出す設計になっている。
 
 ## 9. 不明事項一覧
 
@@ -289,6 +300,8 @@ flowchart TD
 | 各種APIの利用箇所とエンドポイント | SwitchBot、Nature Remo、LINE、Discord、Gemini等のキーが定義されているが、実際にどう通信しているかが不明であるため。 | API通信を行う各種Pythonモジュール |
 | Pydanticバリデーションエラー時のシステムの挙動 | `devices.json`のバリデーションエラーをキャッチしログを出力しているが、その後のシステム全体への影響が不明であるため。 | `config.py`をインポートするメインの実行ファイル |
 | 各テーブルの詳細なスキーマ定義 | テーブル名の文字列が定義されているのみで、カラム構成やリレーションが不明であるため。 | データベース操作を行うモジュール |
+| `family_members.local.json` の具体的な内容・スキーマ | Git管理対象外であり、実際にどの家族の年齢・表示情報がどう格納されているか本ファイルからは判別できないため。 | `family_members.local.json`（gitignore対象。`family_members.local.json.example`が参考になる可能性） |
+| `TV_UNLOCK_QUEST_IDS` が参照するクエストの実体 | クエストIDのリストのみが定義されており、対応するクエスト定義やTVロック解除の実処理は別ファイルにあるため。 | クエスト機能・TVロック機能を実装するモジュール |
 
 ## 10. 自己検証結果
 

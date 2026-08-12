@@ -17,65 +17,75 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `datetime` | 標準ライブラリ | 日付や時刻の操作・比較 | `import datetime` (行番号: 行番号取得不可 / 抜粋: "import datetime") |
-| `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 行番号取得不可 / 抜粋: "import importlib") |
-| `random` | 標準ライブラリ | クリティカルヒットの判定、ランダムクエスト発生判定 | `import random` (行番号: 行番号取得不可 / 抜粋: "import random") |
-| `math` | 標準ライブラリ | インポートされているが未使用 | `import math` (行番号: 行番号取得不可 / 抜粋: "import math") |
-| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理 | `import threading` (抜粋: "import threading") |
-| `pytz` | 外部ライブラリ | タイムゾーンの設定 | `import pytz` (行番号: 行番号取得不可 / 抜粋: "import pytz") |
-| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dic` (行番号: 行番号取得不可 / 抜粋: "from typing import List, Dict,") |
-| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPExcept` (行番号: 行番号取得不可 / 抜粋: "from fastapi import HTTPExcept") |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 行番号取得不可 / 抜粋: "import common") |
-| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 行番号取得不可 / 抜粋: "import config") |
-| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 行番号取得不可 / 抜粋: "import game_logic") |
-| `sound_manager` | 内部モジュール | 音声再生イベント発行 | `import sound_manager` (行番号: 行番号取得不可 / 抜粋: "import sound_manager") |
-| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notificat` (行番号: 行番号取得不可 / 抜粋: "from services import notificat") |
-| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_` (行番号: 行番号取得不可 / 抜粋: "from core.logger import setup_") |
-| `models.quest` (`MasterUser`等) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import Maste` (行番号: 行番号取得不可 / 抜粋: "from models.quest import Maste") |
-| `quest_data` | 内部モジュール(例外処理付き) | マスターデータのハードコードリスト | `import quest_data` (行番号: 行番号取得不可 / 抜粋: "import quest_data") |
+| `datetime` | 標準ライブラリ | 日付や時刻の操作・比較 | `import datetime` (行番号: 1 / 抜粋: "import datetime") |
+| `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 2 / 抜粋: "import importlib") |
+| `random` | 標準ライブラリ | クリティカルヒットの判定、ランダムクエスト発生判定 | `import random` (行番号: 3 / 抜粋: "import random") |
+| `math` | 標準ライブラリ | インポートされているが未使用 | `import math` (行番号: 4 / 抜粋: "import math") |
+| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理 | `import threading` (行番号: 5 / 抜粋: "import threading") |
+| `pytz` | 外部ライブラリ | タイムゾーンの設定 | `import pytz` (行番号: 6 / 抜粋: "import pytz") |
+| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dic` (行番号: 7 / 抜粋: "from typing import List, Dict,") |
+| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPExcept` (行番号: 9 / 抜粋: "from fastapi import HTTPExcept") |
+| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 10 / 抜粋: "import common") |
+| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 11 / 抜粋: "import config") |
+| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 12 / 抜粋: "import game_logic") |
+| `sound_manager` | 内部モジュール | 音声再生イベント発行 | `import sound_manager` (行番号: 13 / 抜粋: "import sound_manager") |
+| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notificat` (行番号: 14 / 抜粋: "from services import notificat") |
+| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_` (行番号: 15 / 抜粋: "from core.logger import setup_") |
+| `models.quest` (`MasterUser`等) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import Maste` (行番号: 18 / 抜粋: "from models.quest import Maste") |
+| `quest_data` | 内部モジュール(例外処理付き) | マスターデータのハードコードリスト | `import quest_data` (行番号: 25 / 抜粋: "import quest_data") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` | トランザクションスコープや接続の詳細不明 | `with common.get_db_cursor()` (行番号: 行番号取得不可 / 抜粋: "with common.get_db_cursor() as") |
-| `common.get_now_iso()` | タイムゾーンや秒精度のフォーマット詳細不明 | `common.get_now_iso()` (行番号: 行番号取得不可 / 抜粋: "common.get_now_iso()") |
-| `game_logic.GameLogic.*` | `calculate_drop_rewards` や `calc_level_progress` などの計算式・詳細仕様不明 | `game_logic.GameLogic.calculate` (行番号: 行番号取得不可 / 抜粋: "game_logic.GameLogic.calculate") |
-| `config.*` | `TV_UNLOCK_QUEST_IDS`, `ENABLE_BATTLE_EFFECT` などの実際の設定値不明 | `config.TV_UNLOCK_QUEST_IDS` (行番号: 行番号取得不可 / 抜粋: "config.TV_UNLOCK_QUEST_IDS and") |
-| `switchbot_service.send_device_command` | 引数の仕様、通信エラーの挙動、戻り値の構造が不明 | `switchbot_service.send_device_` (行番号: 行番号取得不可 / 抜粋: "switchbot_service.send_device_") |
-| DBの各テーブルスキーマ | カラムの型、制約(UNIQUE, NOT NULL等)、外部キー設定などが不明 | `cur.execute("SELECT level, go` (行番号: 行番号取得不可 / 抜粋: "cur.execute("SELECT level, gol") |
+| `common.get_db_cursor()` | トランザクションスコープや接続の詳細不明 | `with common.get_db_cursor()` (行番号: 60 / 抜粋: "with common.get_db_cursor() as") |
+| `common.get_now_iso()` | タイムゾーンや秒精度のフォーマット詳細不明 | `common.get_now_iso()` (行番号: 375 / 抜粋: "common.get_now_iso()") |
+| `game_logic.GameLogic.*` | `calculate_drop_rewards` や `calc_level_progress` などの計算式・詳細仕様不明 | `game_logic.GameLogic.calculate` (行番号: 541 / 抜粋: "game_logic.GameLogic.calculate") |
+| `config.*` | `TV_UNLOCK_QUEST_IDS`, `ENABLE_BATTLE_EFFECT` などの実際の設定値不明 | `config.TV_UNLOCK_QUEST_IDS` (行番号: 451 / 抜粋: "config.TV_UNLOCK_QUEST_IDS and") |
+| `switchbot_service.send_device_command` | 引数の仕様、通信エラーの挙動、戻り値の構造が不明 | `switchbot_service.send_device_` (行番号: 466 / 抜粋: "switchbot_service.send_device_") |
+| DBの各テーブルスキーマ | カラムの型、制約(UNIQUE, NOT NULL等)、外部キー設定などが不明 | `cur.execute("SELECT level, go` (行番号: 61 / 抜粋: "cur.execute("SELECT level, gol") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` (モジュールレベル変数)
 
 * **役割**: `(user_id, quest_id)` のタプルをキーとして `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）が競合すると報酬・ボスダメージが二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入された。
-* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}`, `def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:` (抜粋: "同一(user_id, quest_id)への同時リクエスト")
+* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}`, `def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:` (行番号: 41, 45〜51 / 抜粋: "同一(user_id, quest_id)への同時リクエスト")
 
 
 * **引数/リクエスト**: `key: Tuple[str, int]` (`user_id`と`quest_id`の組)
+* 根拠: 引数定義 (行番号: 45 / 抜粋: "def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:")
+
+
 * **戻り値/レスポンス**: `threading.Lock`
+* 根拠: 返り値アノテーションと`return`文 (行番号: 45, 51 / 抜粋: "return lock")
+
+
 * **副作用**: `_completion_locks`辞書への書き込み（キー未登録時のみ）
+* 根拠: 条件分岐と代入 (行番号: 48〜50 / 抜粋: "_completion_locks[key] = lock")
+
+
 * **エラーハンドリング**: なし
+* 根拠: 明示的な例外処理なし (行番号: 45〜51)
 
 
 
 ### `UserService.get_family_chronicle`
 
 * **役割**: クエスト、報酬交換などの履歴と全ユーザーのレベルから、家族のランクと冒険ログ一覧を生成する。
-* 根拠: `UserService.get_family_chronicle` (行番号: 行番号取得不可 / 抜粋: "def get_family_chronicle(self)")
+* 根拠: `UserService.get_family_chronicle` (行番号: 59〜77 / 抜粋: "def get_family_chronicle(self)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def get_family_chronicle(self)")
+* 根拠: 引数 `self` のみ (行番号: 59 / 抜粋: "def get_family_chronicle(self)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (統計情報と冒険ログのリスト)
-* 根拠: `UserService.get_family_chronicle` (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `UserService.get_family_chronicle` (行番号: 59 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照（`quest_users`, `quest_history`等）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("SELECT COUNT(*) a")
+* 根拠: クエリ実行 (行番号: 64 / 抜粋: "cur.execute("SELECT COUNT(*) a")
 
 
 * **エラーハンドリング**: なし
@@ -86,19 +96,19 @@
 ### `UserService._fetch_full_adventure_logs`
 
 * **役割**: クエスト承認履歴、報酬獲得履歴、装備購入履歴を取得・マージし、時系列降順にソート・整形する。
-* 根拠: `UserService._fetch_full_adventure_logs` (行番号: 行番号取得不可 / 抜粋: "def _fetch_full_adventure_logs")
+* 根拠: `UserService._fetch_full_adventure_logs` (行番号: 79〜104 / 抜粋: "def _fetch_full_adventure_logs")
 
 
 * **引数/リクエスト**: `cur`
-* 根拠: メソッド定義 (行番号: 行番号取得不可 / 抜粋: "(self, cur) -> List[dict]:")
+* 根拠: メソッド定義 (行番号: 79 / 抜粋: "(self, cur) -> List[dict]:")
 
 
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> List[dict]:")
+* 根拠: 返り値アノテーション (行番号: 79 / 抜粋: "-> List[dict]:")
 
 
 * **副作用**: DB参照
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "q_rows = cur.execute("SELECT '")
+* 根拠: クエリ実行 (行番号: 80 / 抜粋: "q_rows = cur.execute("SELECT '")
 
 
 * **エラーハンドリング**: なし
@@ -109,38 +119,38 @@
 ### `UserService.update_avatar`
 
 * **役割**: ユーザーのアバターURLを更新する。
-* 根拠: `UserService.update_avatar` (行番号: 行番号取得不可 / 抜粋: "def update_avatar(self, user_i")
+* 根拠: `UserService.update_avatar` (行番号: 106〜116 / 抜粋: "def update_avatar(self, user_i")
 
 
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, avatar_url: str")
+* 根拠: 引数定義 (行番号: 106 / 抜粋: "user_id: str, avatar_url: str")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 106 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新（`quest_users`）、ログ出力
-* 根拠: クエリ実行とロギング (行番号: 行番号取得不可 / 抜粋: "cur.execute("UPDATE quest_user")
+* 根拠: クエリ実行とロギング (行番号: 112〜113 / 抜粋: "cur.execute("UPDATE quest_user")
 
 
 * **エラーハンドリング**: ユーザー不在時に `HTTPException(404)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 110 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `QuestService.is_within_reset_period`
 
 * **役割**: 完了日時文字列とリセット周期（daily, weekly_monday, monthly_1st）から、現在期間内に完了しているかを判定する。
-* 根拠: `QuestService.is_within_reset_period` (行番号: 行番号取得不可 / 抜粋: "def is_within_reset_period(sel")
+* 根拠: `QuestService.is_within_reset_period` (行番号: 123〜153 / 抜粋: "def is_within_reset_period(sel")
 
 
 * **引数/リクエスト**: `completed_at_str: str`, `reset_period: str`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "completed_at_str: str, reset_p")
+* 根拠: 引数定義 (行番号: 123 / 抜粋: "completed_at_str: str, reset_p")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> bool:")
+* 根拠: 返り値アノテーション (行番号: 123 / 抜粋: "-> bool:")
 
 
 * **副作用**: なし
@@ -148,18 +158,18 @@
 
 
 * **エラーハンドリング**: ISOフォーマット変換失敗時に別のフォーマットでリトライする。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception:")
+* 根拠: `try-except` ブロック (行番号: 140〜144 / 抜粋: "except Exception:")
 
 
 
 ### `QuestService.__init__`
 
 * **役割**: インスタンス初期化時に `UserService` のインスタンスを生成する。
-* 根拠: `QuestService.__init__` (行番号: 行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: `QuestService.__init__` (行番号: 155〜156 / 抜粋: "def __init__(self):")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数なし (行番号: 行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: 引数なし (行番号: 155 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: なし
@@ -167,7 +177,7 @@
 
 
 * **副作用**: インスタンスプロパティの割り当て
-* 根拠: 代入文 (行番号: 行番号取得不可 / 抜粋: "self.user_service = UserServic")
+* 根拠: 代入文 (行番号: 156 / 抜粋: "self.user_service = UserServic")
 
 
 * **エラーハンドリング**: なし
@@ -178,34 +188,34 @@
 ### `QuestService._calculate_user_attack_power`
 
 * **役割**: ユーザーレベルと装着中装備の力から攻撃力を算出する。
-* 根拠: `QuestService._calculate_user_attack_power` (行番号: 行番号取得不可 / 抜粋: "def _calculate_user_attack_pow")
+* 根拠: `QuestService._calculate_user_attack_power` (行番号: 158〜171 / 抜粋: "def _calculate_user_attack_pow")
 
 
 * **引数/リクエスト**: `cur`, `user_id: str`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "cur, user_id: str")
+* 根拠: 引数定義 (行番号: 158 / 抜粋: "cur, user_id: str")
 
 
 * **戻り値/レスポンス**: `int`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> int:")
+* 根拠: 返り値アノテーション (行番号: 158 / 抜粋: "-> int:")
 
 
 * **副作用**: DB参照
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "user_row = cur.execute("SELECT")
+* 根拠: クエリ実行 (行番号: 159 / 抜粋: "user_row = cur.execute("SELECT")
 
 
 * **エラーハンドリング**: ユーザーレコードが存在しない場合は0を返す。
-* 根拠: 条件分岐 (行番号: 行番号取得不可 / 抜粋: "if not user_row: return 0")
+* 根拠: 条件分岐 (行番号: 160 / 抜粋: "if not user_row: return 0")
 
 
 
 ### `QuestService._check_and_reset_weekly_boss`
 
 * **役割**: ボスの出現記録が存在しない、または週が替わっている場合にパーティ状態(ボスのHPや種類)をリセット・初期化する。
-* 根拠: `QuestService._check_and_reset_weekly_boss` (行番号: 行番号取得不可 / 抜粋: "def _check_and_reset_weekly_bo")
+* 根拠: `QuestService._check_and_reset_weekly_boss` (行番号: 173〜227 / 抜粋: "def _check_and_reset_weekly_bo")
 
 
 * **引数/リクエスト**: `cur`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "(self, cur):")
+* 根拠: 引数定義 (行番号: 173 / 抜粋: "(self, cur):")
 
 
 * **戻り値/レスポンス**: なし
@@ -213,70 +223,80 @@
 
 
 * **副作用**: DB更新/挿入（`party_state`）、ログ出力
-* 根拠: クエリ実行とロギング (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO par")
+* 根拠: クエリ実行とロギング (行番号: 192〜195 / 抜粋: "cur.execute("""INSERT INTO par")
 
 
 * **エラーハンドリング**: レコード不在時の自己修復機能。
-* 根拠: 条件分岐 (行番号: 行番号取得不可 / 抜粋: "if not party_row:")
+* 根拠: 条件分岐 (行番号: 187 / 抜粋: "if not party_row:")
 
 
 
 ### `QuestService._apply_boss_damage`
 
 * **役割**: 計算されたダメージをボスに適用し、ボスのHP、合計ダメージ、撃破フラグを更新し効果音を鳴らす。
-* 根拠: `QuestService._apply_boss_damage` (行番号: 行番号取得不可 / 抜粋: "def _apply_boss_damage(self, c")
+* 根拠: `QuestService._apply_boss_damage` (行番号: 229〜282 / 抜粋: "def _apply_boss_damage(self, c")
 
 
 * **引数/リクエスト**: `cur`, `damage: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "cur, damage: int")
+* 根拠: 引数定義 (行番号: 229 / 抜粋: "cur, damage: int")
 
 
 * **戻り値/レスポンス**: `dict` (適用ダメージ量、残HP、撃破情報)
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> dict:")
+* 根拠: 返り値アノテーション (行番号: 229 / 抜粋: "-> dict:")
 
 
 * **副作用**: DB更新（`party_state`）、`sound_manager.play` 呼び出し、ログ出力
-* 根拠: メソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "sound_manager.play("boss_defea")
+* 根拠: メソッド呼び出し (行番号: 272 / 抜粋: "sound_manager.play("boss_defea")
 
 
 * **エラーハンドリング**: DBのレコードが取得できない場合はエラーログを出し結果を返す。
-* 根拠: 条件分岐とロギング (行番号: 行番号取得不可 / 抜粋: "if not party_row:")
+* 根拠: 条件分岐とロギング (行番号: 235〜242 / 抜粋: "if not party_row:")
 
 
 
 ### `QuestService.calculate_quest_boost`
 
 * **役割**: クエストの最終完了日からの経過日数に応じ、取得経験値とゴールドのボーナスを計算する。
-* 根拠: `QuestService.calculate_quest_boost` (行番号: 行番号取得不可 / 抜粋: "def calculate_quest_boost(self")
+* 根拠: `QuestService.calculate_quest_boost` (行番号: 284〜330 / 抜粋: "def calculate_quest_boost(self")
 
 
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "cur, user_id: str, quest: Any")
+* 根拠: 引数定義 (行番号: 284 / 抜粋: "cur, user_id: str, quest: Any")
 
 
 * **戻り値/レスポンス**: `Dict[str, int]` (追加のgoldとexp)
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, int]:")
+* 根拠: 返り値アノテーション (行番号: 284 / 抜粋: "-> Dict[str, int]:")
 
 
 * **副作用**: DB参照（`quest_history`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "last_hist = cur.execute("""SEL")
+* 根拠: クエリ実行 (行番号: 300〜304 / 抜粋: "last_hist = cur.execute("""SEL")
 
 
 * **エラーハンドリング**: 日時パースエラー時に `pass` で無視。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception: pass")
+* 根拠: `try-except` ブロック (行番号: 313〜314 / 抜粋: "except Exception: pass")
 
 
 
 ### `QuestService.process_complete_quest`
 
 * **役割**: `_get_completion_lock((user_id, quest_id))`でプロセス内ロックを取得したうえで、実処理を委譲した`_process_complete_quest_locked`を呼び出す薄いラッパー。ロックにより、同一ユーザー・同一クエストへの同時多重リクエストが「直近履歴を読む→報酬を書く」という手順の間で競合し二重加算されることを防ぐ。
-* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (抜粋: "with _get_completion_lock((user_id, quest_id)):")
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 332〜336 / 抜粋: "with _get_completion_lock((user_id, quest_id)):")
 
 
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
+* 根拠: 引数定義 (行番号: 332 / 抜粋: "def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:")
+
+
 * **戻り値/レスポンス**: `Dict[str, Any]` (`_process_complete_quest_locked`の戻り値をそのまま返却)
+* 根拠: 返り値アノテーションと`return`文 (行番号: 332, 336 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
+
+
 * **副作用**: ロックの取得・解放（`with`文によるスコープ管理）。実処理の副作用は`_process_complete_quest_locked`側。
+* 根拠: `with`文によるロック取得 (行番号: 335 / 抜粋: "with _get_completion_lock((user_id, quest_id)):")
+
+
 * **エラーハンドリング**: なし（`_process_complete_quest_locked`内の例外はそのまま伝播する）
+* 根拠: 明示的な例外処理なし (行番号: 332〜336)
 
 
 
@@ -287,53 +307,53 @@
 
 
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, quest_id: int")
+* 根拠: 引数定義 (行番号: 332 / 抜粋: "user_id: str, quest_id: int")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (ステータスや報酬情報)
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 332 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照/更新（`quest_history` 等）、`sound_manager.play` 呼び出し、`_apply_quest_rewards` / `_apply_boss_damage` の呼び出し
-* 根拠: メソッド呼び出しとクエリ (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO que")
+* 根拠: メソッド呼び出しとクエリ (行番号: 381〜384 / 抜粋: "cur.execute("""INSERT INTO que")
 
 
 * **エラーハンドリング**: データ不在時 `HTTPException(404)`、10秒以内の重複実行時 `HTTPException(429)`（このタイムベースのチェックに加え、呼び出し元の`process_complete_quest`のプロセス内ロックにより、ほぼ同時に到達した複数リクエストが直列化される点に注意）
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 344, 369 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `QuestService.process_approve_quest`
 
 * **役割**: 親権限を持つユーザーが子供のクエスト完了を承認し、報酬付与・ボスダメージ計算・（必要に応じて）TVロック解除を実行する。
-* 根拠: `QuestService.process_approve_quest` (行番号: 行番号取得不可 / 抜粋: "def process_approve_quest(self")
+* 根拠: `QuestService.process_approve_quest` (行番号: 415〜456 / 抜粋: "def process_approve_quest(self")
 
 
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "approver_id: str, history_id: ")
+* 根拠: 引数定義 (行番号: 415 / 抜粋: "approver_id: str, history_id: ")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 415 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照/更新、内部メソッド呼び出し、TVロック解除処理（別スレッド）
-* 根拠: メソッド呼び出しとクエリ (行番号: 行番号取得不可 / 抜粋: "self.*trigger_tv_unlock(quest*")
+* 根拠: メソッド呼び出しとクエリ (行番号: 453 / 抜粋: "self._trigger_tv_unlock(quest['quest_id'])")
 
 
 * **エラーハンドリング**: 権限なし `HTTPException(403)`、履歴なし `HTTPException(404)`、承認待ちでない `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 417, 421, 422 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `QuestService._trigger_tv_unlock`
 
 * **役割**: 別スレッドでTVロック解除のAPIリクエストを送信する。
-* 根拠: `QuestService._trigger_tv_unlock` (行番号: 行番号取得不可 / 抜粋: "def _trigger_tv_unlock(self, q")
+* 根拠: `QuestService._trigger_tv_unlock` (行番号: 458〜483 / 抜粋: "def _trigger_tv_unlock(self, q")
 
 
 * **引数/リクエスト**: `quest_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "quest_id: int")
+* 根拠: 引数定義 (行番号: 458 / 抜粋: "quest_id: int")
 
 
 * **戻り値/レスポンス**: なし
@@ -341,53 +361,53 @@
 
 
 * **副作用**: 別スレッド作成、外部API(`switchbot_service`)呼び出し、LINE通知(`notification_service`)呼び出し
-* 根拠: メソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "t = threading.Thread(target=un")
+* 根拠: メソッド呼び出し (行番号: 482〜483 / 抜粋: "t = threading.Thread(target=un")
 
 
 * **エラーハンドリング**: APIエラー時は例外をキャッチしログ出力およびLINEへ通知。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック (行番号: 471〜479 / 抜粋: "except Exception as e:")
 
 
 
 ### `QuestService.process_reject_quest`
 
 * **役割**: 親権限を持つユーザーが子供のクエスト完了を拒否し、履歴を削除する。
-* 根拠: `QuestService.process_reject_quest` (行番号: 行番号取得不可 / 抜粋: "def process_reject_quest(self,")
+* 根拠: `QuestService.process_reject_quest` (行番号: 485〜496 / 抜粋: "def process_reject_quest(self,")
 
 
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "approver_id: str, history_id: ")
+* 根拠: 引数定義 (行番号: 485 / 抜粋: "approver_id: str, history_id: ")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 485 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DB削除（`quest_history`）、ログ出力
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("DELETE FROM ques")
+* 根拠: クエリ実行 (行番号: 494 / 抜粋: "cur.execute("DELETE FROM ques")
 
 
 * **エラーハンドリング**: 権限なし `HTTPException(403)`、履歴なし `HTTPException(404)`、承認待ちでない `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 487, 491, 492 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `QuestService.get_family_mileage`
 
 * **役割**: ファミリーマイレージの現在の設定・進捗状況を取得する。
-* 根拠: `QuestService.get_family_mileage` (行番号: 行番号取得不可 / 抜粋: "def get_family_mileage(self) -")
+* 根拠: `QuestService.get_family_mileage` (行番号: 498〜508 / 抜粋: "def get_family_mileage(self) -")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def get_family_mileage(self) -")
+* 根拠: 引数 `self` のみ (行番号: 498 / 抜粋: "def get_family_mileage(self) -")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 498 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照（`family_mileage`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "row = cur.execute("SELECT * FR")
+* 根拠: クエリ実行 (行番号: 500 / 抜粋: "row = cur.execute("SELECT * FR")
 
 
 * **エラーハンドリング**: なし
@@ -398,19 +418,19 @@
 ### `QuestService.update_family_mileage`
 
 * **役割**: ファミリーマイレージの目標を新規設定または更新し、過去のデータを履歴テーブルに保存する。
-* 根拠: `QuestService.update_family_mileage` (行番号: 行番号取得不可 / 抜粋: "def update_family_mileage(self")
+* 根拠: `QuestService.update_family_mileage` (行番号: 510〜531 / 抜粋: "def update_family_mileage(self")
 
 
 * **引数/リクエスト**: `target_name: str`, `target_exp: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "target_name: str, target_exp: ")
+* 根拠: 引数定義 (行番号: 510 / 抜粋: "target_name: str, target_exp: ")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 510 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新/挿入（`family_mileage`, `family_mileage_history`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO fa")
+* 根拠: クエリ実行 (行番号: 516〜530 / 抜粋: "cur.execute("""INSERT INTO fa")
 
 
 * **エラーハンドリング**: なし
@@ -421,180 +441,180 @@
 ### `QuestService._apply_quest_rewards`
 
 * **役割**: ユーザーレベルや経験値の計算、マイレージの加算、クエスト履歴の更新等の報酬付与処理を実行する。
-* 根拠: `QuestService._apply_quest_rewards` (行番号: 行番号取得不可 / 抜粋: "def _apply_quest_rewards(self,")
+* 根拠: `QuestService._apply_quest_rewards` (行番号: 533〜590 / 抜粋: "def _apply_quest_rewards(self,")
 
 
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso`, `history_id=None`, `override_rewards=None`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "cur, user, quest, now_iso, his")
+* 根拠: 引数定義 (行番号: 533 / 抜粋: "cur, user, quest, now_iso, his")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 533 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新（`family_mileage`, `quest_users`, `quest_history`, `party_state`）、`sound_manager.play` 呼び出し
-* 根拠: クエリとメソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "cur.execute("UPDATE quest_user")
+* 根拠: クエリとメソッド呼び出し (行番号: 559〜563 / 抜粋: "cur.execute("UPDATE quest_user")
 
 
 * **エラーハンドリング**: `family_mileage` や `party_state` の更新時の例外をキャッチ・無視またはログ出力。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック (行番号: 549〜551 / 抜粋: "except Exception as e:")
 
 
 
 ### `QuestService.process_cancel_quest`
 
 * **役割**: クエストの完了を取り消し、獲得した経験値やゴールドを減算して履歴を削除する。
-* 根拠: `QuestService.process_cancel_quest` (行番号: 行番号取得不可 / 抜粋: "def process_cancel_quest(self,")
+* 根拠: `QuestService.process_cancel_quest` (行番号: 592〜616 / 抜粋: "def process_cancel_quest(self,")
 
 
 * **引数/リクエスト**: `user_id: str`, `history_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, history_id: int")
+* 根拠: 引数定義 (行番号: 592 / 抜粋: "user_id: str, history_id: int")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 592 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DB削除/更新（`quest_history`, `quest_users`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("DELETE FROM ques")
+* 根拠: クエリ実行 (行番号: 599, 613 / 抜粋: "cur.execute("DELETE FROM ques")
 
 
 * **エラーハンドリング**: 履歴不在 `HTTPException(404)`、権限なし `HTTPException(403)`、ユーザー不在 `HTTPException(404)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 595, 596, 603 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `QuestService.filter_active_quests`
 
 * **役割**: クエストの期間、曜日、時間帯、出現確率をもとに、現在の時刻に有効なクエスト一覧に絞り込む。
-* 根拠: `QuestService.filter_active_quests` (行番号: 行番号取得不可 / 抜粋: "def filter_active_quests(self,")
+* 根拠: `QuestService.filter_active_quests` (行番号: 618〜659 / 抜粋: "def filter_active_quests(self,")
 
 
 * **引数/リクエスト**: `quests: List[dict]`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "quests: List[dict]")
+* 根拠: 引数定義 (行番号: 618 / 抜粋: "quests: List[dict]")
 
 
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> List[dict]:")
+* 根拠: 返り値アノテーション (行番号: 618 / 抜粋: "-> List[dict]:")
 
 
 * **副作用**: リストの書き換え・フィルタリング（DBや外部通信はなし）
-* 根拠: ループ内のリスト操作 (行番号: 行番号取得不可 / 抜粋: "filtered.append(q)")
+* 根拠: ループ内のリスト操作 (行番号: 658 / 抜粋: "filtered.append(q)")
 
 
 * **エラーハンドリング**: 日付文字列のパースに失敗した場合、ログを出力してスキップ。
-* 根拠: `try-except ValueError` (行番号: 行番号取得不可 / 抜粋: "except ValueError as e:")
+* 根拠: `try-except ValueError` (行番号: 636〜638 / 抜粋: "except ValueError as e:")
 
 
 
 ### `QuestService.get_weekly_analytics`
 
 * **役割**: 過去1週間のクエスト・報酬履歴を集計し、日別の統計情報やランキングを作成する。
-* 根拠: `QuestService.get_weekly_analytics` (行番号: 行番号取得不可 / 抜粋: "def get_weekly_analytics(self)")
+* 根拠: `QuestService.get_weekly_analytics` (行番号: 661〜797 / 抜粋: "def get_weekly_analytics(self)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def get_weekly_analytics(self)")
+* 根拠: 引数 `self` のみ (行番号: 661 / 抜粋: "def get_weekly_analytics(self)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 661 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照（`quest_users`, `quest_history`, `user_inventory`等）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "sql_quest = """SELECT user_id")
+* 根拠: クエリ実行 (行番号: 674〜680 / 抜粋: "sql_quest = """SELECT user_id")
 
 
 * **エラーハンドリング**: 集計中のエラー時に空のデータを返すフォールバック処理。テーブル名変更のフォールバック処理。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック (行番号: 787〜797 / 抜粋: "except Exception as e:")
 
 
 
 ### `ShopService.process_purchase_reward`
 
 * **役割**: ユーザーがごほうび(アイテム)を購入し、ゴールドを消費してインベントリと履歴に追加する。
-* 根拠: `ShopService.process_purchase_reward` (行番号: 行番号取得不可 / 抜粋: "def process_purchase_reward(se")
+* 根拠: `ShopService.process_purchase_reward` (行番号: 801〜828 / 抜粋: "def process_purchase_reward(se")
 
 
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, reward_id: int")
+* 根拠: 引数定義 (行番号: 801 / 抜粋: "user_id: str, reward_id: int")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 801 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新/挿入（`quest_users`, `reward_history`, `user_inventory`）、ログ出力
-* 根拠: クエリ実行とロギング (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO re")
+* 根拠: クエリ実行とロギング (行番号: 816〜819 / 抜粋: "cur.execute("""INSERT INTO re")
 
 
 * **エラーハンドリング**: マスター不在・ユーザ不在 `HTTPException(404)`、ゴールド不足 `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: 条件分岐と `raise` (行番号: 806, 807, 808 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `ShopService.process_purchase_equipment`
 
 * **役割**: ユーザーが装備を購入し、ゴールドを消費して所持品に追加する。
-* 根拠: `ShopService.process_purchase_equipment` (行番号: 行番号取得不可 / 抜粋: "def process_purchase_equipment")
+* 根拠: `ShopService.process_purchase_equipment` (行番号: 830〜850 / 抜粋: "def process_purchase_equipment")
 
 
 * **引数/リクエスト**: `user_id: str`, `equipment_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, equipment_id: in")
+* 根拠: 引数定義 (行番号: 830 / 抜粋: "user_id: str, equipment_id: in")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 830 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新/挿入（`quest_users`, `user_equipments`）、ログ出力
-* 根拠: クエリ実行とロギング (行番号: 行番号取得不可 / 抜粋: "cur.execute("""INSERT INTO us")
+* 根拠: クエリ実行とロギング (行番号: 844〜847 / 抜粋: "cur.execute("""INSERT INTO us")
 
 
 * **エラーハンドリング**: アイテム・ユーザ不在 `HTTPException(404)`、所有済み・ゴールド不足 `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(400, "Alre")
+* 根拠: 条件分岐と `raise` (行番号: 835〜840 / 抜粋: "raise HTTPException(400, "Alre")
 
 
 
 ### `ShopService.process_change_equipment`
 
 * **役割**: 指定した装備の装着フラグを有効にし、同タイプの他の装備を外す状態へ更新する。
-* 根拠: `ShopService.process_change_equipment` (行番号: 行番号取得不可 / 抜粋: "def process_change_equipment(s")
+* 根拠: `ShopService.process_change_equipment` (行番号: 852〜872 / 抜粋: "def process_change_equipment(s")
 
 
 * **引数/リクエスト**: `user_id: str`, `equipment_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, equipment_id: in")
+* 根拠: 引数定義 (行番号: 852 / 抜粋: "user_id: str, equipment_id: in")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 852 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB更新（`user_equipments`）、ログ出力
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("""UPDATE user_eq")
+* 根拠: クエリ実行 (行番号: 863〜867, 869 / 抜粋: "cur.execute("""UPDATE user_eq")
 
 
 * **エラーハンドリング**: 対象アイテムの所持履歴がない場合 `HTTPException(404)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(404, "Equi")
+* 根拠: 条件分岐と `raise` (行番号: 860 / 抜粋: "raise HTTPException(404, "Equi")
 
 
 
 ### `InventoryService.get_user_inventory`
 
 * **役割**: 指定ユーザーの所有または保留中のインベントリアイテム一覧を取得する。
-* 根拠: `InventoryService.get_user_inventory` (行番号: 行番号取得不可 / 抜粋: "def get_user_inventory(self, u")
+* 根拠: `InventoryService.get_user_inventory` (行番号: 876〜887 / 抜粋: "def get_user_inventory(self, u")
 
 
 * **引数/リクエスト**: `user_id: str`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str")
+* 根拠: 引数定義 (行番号: 876 / 抜粋: "user_id: str")
 
 
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> List[dict]:")
+* 根拠: 返り値アノテーション (行番号: 876 / 抜粋: "-> List[dict]:")
 
 
 * **副作用**: DB参照（`user_inventory`, `reward_master`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "rows = cur.execute(sql, (user_")
+* 根拠: クエリ実行 (行番号: 886 / 抜粋: "rows = cur.execute(sql, (user_")
 
 
 * **エラーハンドリング**: なし
@@ -605,88 +625,88 @@
 ### `InventoryService.use_item`
 
 * **役割**: ユーザーがアイテムを使用し、消費状態の更新、LINE通知の送信、履歴の追加を行う。
-* 根拠: `InventoryService.use_item` (行番号: 行番号取得不可 / 抜粋: "def use_item(self, user_id: st")
+* 根拠: `InventoryService.use_item` (行番号: 889〜925 / 抜粋: "def use_item(self, user_id: st")
 
 
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, inventory_id: in")
+* 根拠: 引数定義 (行番号: 889 / 抜粋: "user_id: str, inventory_id: in")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 889 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DB更新/挿入（`user_inventory`, `quest_history`）、`notification_service.send_push`、`sound_manager.play`
-* 根拠: クエリ実行とメソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "notification_service.send_push")
+* 根拠: クエリ実行とメソッド呼び出し (行番号: 919〜922 / 抜粋: "notification_service.send_push")
 
 
 * **エラーハンドリング**: アイテム不在 `HTTPException(404)`、権限不一致 `HTTPException(403)`、状態不正 `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(400, "Cann")
+* 根拠: 条件分岐と `raise` (行番号: 900〜902 / 抜粋: "raise HTTPException(400, "Cann")
 
 
 
 ### `InventoryService.consume_item`
 
 * **役割**: 親権限のユーザーが保留中のアイテム使用を承認（消費）する。
-* 根拠: `InventoryService.consume_item` (行番号: 行番号取得不可 / 抜粋: "def consume_item(self, approve")
+* 根拠: `InventoryService.consume_item` (行番号: 927〜943 / 抜粋: "def consume_item(self, approve")
 
 
 * **引数/リクエスト**: `approver_id: str`, `inventory_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "approver_id: str, inventory_id")
+* 根拠: 引数定義 (行番号: 927 / 抜粋: "approver_id: str, inventory_id")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 927 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DB更新（`user_inventory`）、`sound_manager.play` 呼び出し
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("""UPDATE user_in")
+* 根拠: クエリ実行 (行番号: 935〜939 / 抜粋: "cur.execute("""UPDATE user_in")
 
 
 * **エラーハンドリング**: 親権限なし `HTTPException(403)`、アイテム不在 `HTTPException(404)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(403, "承認権限")
+* 根拠: 条件分岐と `raise` (行番号: 928〜929 / 抜粋: "raise HTTPException(403, "承認権限")
 
 
 
 ### `InventoryService.cancel_usage`
 
 * **役割**: 保留中のアイテム使用をキャンセルし、所有状態に戻す。
-* 根拠: `InventoryService.cancel_usage` (行番号: 行番号取得不可 / 抜粋: "def cancel_usage(self, user_id")
+* 根拠: `InventoryService.cancel_usage` (行番号: 945〜953 / 抜粋: "def cancel_usage(self, user_id")
 
 
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, inventory_id: in")
+* 根拠: 引数定義 (行番号: 945 / 抜粋: "user_id: str, inventory_id: in")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 945 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DB更新（`user_inventory`）
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "cur.execute("UPDATE user_inven")
+* 根拠: クエリ実行 (行番号: 952 / 抜粋: "cur.execute("UPDATE user_inven")
 
 
 * **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、保留中でない `HTTPException(400)`
-* 根拠: 条件分岐と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(400, "Not ")
+* 根拠: 条件分岐と `raise` (行番号: 950 / 抜粋: "raise HTTPException(400, "Not ")
 
 
 
 ### `InventoryService.get_pending_items`
 
 * **役割**: 承認待ち（保留中）の全アイテム一覧を取得する。
-* 根拠: `InventoryService.get_pending_items` (行番号: 行番号取得不可 / 抜粋: "def get_pending_items(self) ->")
+* 根拠: `InventoryService.get_pending_items` (行番号: 955〜968 / 抜粋: "def get_pending_items(self) ->")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def get_pending_items(self) ->")
+* 根拠: 引数 `self` のみ (行番号: 955 / 抜粋: "def get_pending_items(self) ->")
 
 
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> List[dict]:")
+* 根拠: 返り値アノテーション (行番号: 955 / 抜粋: "-> List[dict]:")
 
 
 * **副作用**: DB参照
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "rows = cur.execute(sql).fetcha")
+* 根拠: クエリ実行 (行番号: 967 / 抜粋: "rows = cur.execute(sql).fetcha")
 
 
 * **エラーハンドリング**: なし
@@ -697,11 +717,11 @@
 ### `GameSystem.__init__`
 
 * **役割**: クエスト、ユーザー、ショップ関連のサービスを初期化する。
-* 根拠: `GameSystem.__init__` (行番号: 行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: `GameSystem.__init__` (行番号: 972〜975 / 抜粋: "def __init__(self):")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数なし (行番号: 行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: 引数なし (行番号: 972 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: なし
@@ -709,7 +729,7 @@
 
 
 * **副作用**: インスタンス変数の割り当て
-* 根拠: 代入文 (行番号: 行番号取得不可 / 抜粋: "self.quest_service = QuestServ")
+* 根拠: 代入文 (行番号: 973 / 抜粋: "self.quest_service = QuestServ")
 
 
 * **エラーハンドリング**: なし
@@ -720,65 +740,65 @@
 ### `GameSystem.sync_master_data`
 
 * **役割**: ハードコードされたマスターデータモジュールを再読み込みし、DBとの同期および必要に応じたマイグレーション（カラム追加等）を行う。
-* 根拠: `GameSystem.sync_master_data` (行番号: 行番号取得不可 / 抜粋: "def sync_master_data(self) -> ")
+* 根拠: `GameSystem.sync_master_data` (行番号: 977〜1100 / 抜粋: "def sync_master_data(self) -> ")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def sync_master_data(self) -> ")
+* 根拠: 引数 `self` のみ (行番号: 977 / 抜粋: "def sync_master_data(self) -> ")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, str]:")
+* 根拠: 返り値アノテーション (行番号: 977 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: DBテーブルのスキーマ変更（ALTER）、DELETE・INSERT・UPDATE、`importlib.reload`、ログ出力
-* 根拠: クエリ実行とモジュール呼び出し (行番号: 行番号取得不可 / 抜粋: "cur.execute("ALTER TABLE ques")
+* 根拠: クエリ実行とモジュール呼び出し (行番号: 1005, 1014 / 抜粋: "cur.execute("ALTER TABLE ques")
 
 
 * **エラーハンドリング**: モジュールの再読み込み失敗などの例外時に `HTTPException(500)`
-* 根拠: `try-except` と `raise` (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: `try-except` と `raise` (行番号: 995〜997 / 抜粋: "raise HTTPException(status_cod")
 
 
 
 ### `GameSystem.get_all_view_data`
 
 * **役割**: フロントエンド描画に必要な全ての状態（ユーザー、クエスト、報酬、履歴、装備、ボス情報など）を一括で取得・整形する。
-* 根拠: `GameSystem.get_all_view_data` (行番号: 行番号取得不可 / 抜粋: "def get_all_view_data(self) ->")
+* 根拠: `GameSystem.get_all_view_data` (行番号: 1102〜1211 / 抜粋: "def get_all_view_data(self) ->")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数 `self` のみ (行番号: 行番号取得不可 / 抜粋: "def get_all_view_data(self) ->")
+* 根拠: 引数 `self` のみ (行番号: 1102 / 抜粋: "def get_all_view_data(self) ->")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 1102 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: DB参照、`_get_party_state` や `filter_active_quests` などの内部呼び出し
-* 根拠: メソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "boss_state = self._get_party_s")
+* 根拠: メソッド呼び出し (行番号: 1203 / 抜粋: "boss_state = self._get_party_s")
 
 
-* **エラーハンドリング**: なし
-* 根拠: 明示的な例外処理なし
+* **エラーハンドリング**: 関数全体を覆う`try-except`はないが、内部でJST（Asia/Tokyo）の基準日時算出に失敗した場合に備え、局所的な`try-except`でサーバーのローカル時刻にフォールバックする防御的処理を持つ。
+* 根拠: `try-except` ブロック (行番号: 1129〜1136 / 抜粋: "except Exception as jst_err:")
 
 
 
 ### `GameSystem._fetch_recent_logs`
 
 * **役割**: クエスト承認履歴とアイテム交換履歴から直近20件分を取得・整形する。
-* 根拠: `GameSystem._fetch_recent_logs` (行番号: 行番号取得不可 / 抜粋: "def _fetch_recent_logs(self, c")
+* 根拠: `GameSystem._fetch_recent_logs` (行番号: 1213〜1231 / 抜粋: "def _fetch_recent_logs(self, c")
 
 
 * **引数/リクエスト**: `cur`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "(self, cur) -> List[dict]:")
+* 根拠: 引数定義 (行番号: 1213 / 抜粋: "(self, cur) -> List[dict]:")
 
 
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> List[dict]:")
+* 根拠: 返り値アノテーション (行番号: 1213 / 抜粋: "-> List[dict]:")
 
 
 * **副作用**: DB参照
-* 根拠: クエリ実行 (行番号: 行番号取得不可 / 抜粋: "q_logs = cur.execute("""SELEC")
+* 根拠: クエリ実行 (行番号: 1214〜1217 / 抜粋: "q_logs = cur.execute("""SELEC")
 
 
 * **エラーハンドリング**: なし
@@ -789,23 +809,23 @@
 ### `GameSystem._get_party_state`
 
 * **役割**: パーティ情報とボス情報を取得し、マスターデータと照合して統合する。
-* 根拠: `GameSystem._get_party_state` (行番号: 行番号取得不可 / 抜粋: "def _get_party_state(self, cur")
+* 根拠: `GameSystem._get_party_state` (行番号: 1233〜1264 / 抜粋: "def _get_party_state(self, cur")
 
 
 * **引数/リクエスト**: `cur`
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "(self, cur) -> Dict[str, Any]:")
+* 根拠: 引数定義 (行番号: 1233 / 抜粋: "(self, cur) -> Dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (エラー時またはデータがない場合は `None`)
-* 根拠: 返り値アノテーション (行番号: 行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: 返り値アノテーション (行番号: 1233 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: `_check_and_reset_weekly_boss` によるDB更新、DB参照
-* 根拠: メソッド呼び出し (行番号: 行番号取得不可 / 抜粋: "self.quest_service.*check_and*")
+* 根拠: メソッド呼び出し (行番号: 1234 / 抜粋: "self.quest_service._check_and_reset_weekly_boss(cur)")
 
 
 * **エラーハンドリング**: 取得エラー時に例外をキャッチしログを出力して `None` を返す。
-* 根拠: `try-except` ブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック (行番号: 1262〜1264 / 抜粋: "except Exception as e:")
 
 
 
@@ -935,10 +955,10 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | トランザクションスコープの境界や日時フォーマットが、データの整合性に強く影響するため。 | `with common.get_db_cursor(commit=True)` (行番号: 行番号取得不可 / 抜粋: "with common.get_db_cursor(comm") |
-| 高 | `game_logic.py` | 報酬やレベルアップ等のコアドメインロジックを含むため。 | `game_logic.GameLogic.calc_leve` (行番号: 行番号取得不可 / 抜粋: "game_logic.GameLogic.calc_leve") |
-| 中 | `quest_data.py` | 同期時に読み込まれるリスト要素の型と構成が、テーブルの各カラム仕様に依存するため。 | `import quest_data` (行番号: 行番号取得不可 / 抜粋: "import quest_data") |
-| 中 | `services/switchbot_service.py` | 非同期のTVロック解除に失敗した場合の影響範囲・再送ロジックの有無を確認するため。 | `switchbot_service.send_device_` (行番号: 行番号取得不可 / 抜粋: "switchbot_service.send_device_") |
+| 高 | `common.py` | トランザクションスコープの境界や日時フォーマットが、データの整合性に強く影響するため。 | `with common.get_db_cursor(commit=True)` (行番号: 339 / 抜粋: "with common.get_db_cursor(comm") |
+| 高 | `game_logic.py` | 報酬やレベルアップ等のコアドメインロジックを含むため。 | `game_logic.GameLogic.calc_leve` (行番号: 553 / 抜粋: "game_logic.GameLogic.calc_leve") |
+| 中 | `quest_data.py` | 同期時に読み込まれるリスト要素の型と構成が、テーブルの各カラム仕様に依存するため。 | `import quest_data` (行番号: 25 / 抜粋: "import quest_data") |
+| 中 | `services/switchbot_service.py` | 非同期のTVロック解除に失敗した場合の影響範囲・再送ロジックの有無を確認するため。 | `switchbot_service.send_device_` (行番号: 466 / 抜粋: "switchbot_service.send_device_") |
 
 ## 8. 保守上の注意点
 
@@ -948,6 +968,8 @@ graph TD
 * `QuestService.get_weekly_analytics` にて `inventory` テーブル名が存在しない場合に、クエリ文字列を置換して `user_inventory` テーブルへフォールバックするハードコードのロジックが存在する。
 * `QuestService._trigger_tv_unlock` において `threading.Thread` による非同期実行が行われており、プロセス終了時のスレッド制御が実装されていない。
 * `CHILDREN_IDS` および `PARENT_IDS` が `QuestService` クラスの定数としてハードコードされている。
+* `QuestService._process_complete_quest_locked` の10秒以内重複実行チェック（行番号: 353〜373）は、`completed_at`のタイムゾーン情報（`tzinfo`）を保持したまま現在時刻と比較する実装になっている。これはサーバーのOSタイムゾーンがJST以外（例: UTC環境）でも正しく「実時間で10秒経過したか」を判定するための修正であり、`tzinfo`を落として比較するよう変更するとサーバー環境によっては約9時間もの間クエスト完了が429エラーでブロックされる不具合が再発する点に注意（詳細はコード中のコメント参照）。
+* `GameSystem.get_all_view_data` は、直近1ヶ月の完了履歴の閾値算出にJST（`Asia/Tokyo`）を用いているが、`pytz`によるタイムゾーン計算が例外を送出した場合はサーバーのローカル時刻（`datetime.datetime.now()`）へフォールバックする防御的な`try-except`を持つ（行番号: 1129〜1136）。
 
 ## 9. 不明事項一覧
 

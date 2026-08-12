@@ -20,59 +20,61 @@
 | --- | --- | --- | --- |
 | `React` | ライブラリ | Reactコンポーネントの定義のため | 根拠: [インポート宣言] (行番号: 1 / 抜粋: "import React from 'react';") |
 | `Trophy`, `Coins`, `History`, `Clock` | ライブラリ (`lucide-react`) | UI上のアイコン描画のため | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "import { Trophy, Coins, Histo...") |
+| `FamilyStats`, `ChronicleItem` | 型定義 (`@/hooks/useGameData`) | コンポーネントのProps（`stats`, `chronicle`）の型指定 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import { FamilyStats, Chronic...") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| 親コンポーネント | このコンポーネントを呼び出し、`stats` および `chronicle` のPropsを提供する要素の実装が不明。 | 根拠: [引数定義] (行番号: 9 / 抜粋: "const FamilyLog: React.FC<Fami...") |
-| 画像ホスティング環境 | アバター画像のURLが `/uploads` または `http` で始まることを前提とした判定があるが、実際の配信元環境や構成は不明。 | 根拠: [isImage判定] (行番号: 56 / 抜粋: "const isImage = avatarSrc && (...") |
+| `FamilyStats`, `ChronicleItem` | `@/hooks/useGameData` に定義されているため、本ファイルからは全プロパティ（必須・任意）や型定義の全容が把握不可。 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import { FamilyStats, Chronic...") |
+| 親コンポーネント | このコンポーネントを呼び出し、`stats` および `chronicle` のPropsを提供する要素の実装が不明。 | 根拠: [引数定義] (行番号: 10 / 抜粋: "const FamilyLog: React.FC<Fami...") |
+| 画像ホスティング環境 | アバター画像のURLが `/uploads` または `http` で始まることを前提とした判定があるが、実際の配信元環境や構成は不明。 | 根拠: [isImage判定] (行番号: 69 / 抜粋: "const isImage = avatarSrc && (...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `FamilyLog`
 
 * **役割**: 家族の統計情報と日付ごとのログをタイムラインとして描画する。
-* 根拠: [FamilyLog] (行番号: 9〜94 / 抜粋: "const FamilyLog: React.FC<Fami...")
+* 根拠: [FamilyLog] (行番号: 10〜113 / 抜粋: "const FamilyLog: React.FC<Fami...")
 
 
-* **引数/リクエスト**: `FamilyLogProps` (`stats`: any, `chronicle`: any[])
-* 根拠: [FamilyLogProps] (行番号: 4〜7 / 抜粋: "interface FamilyLogProps {...")
+* **引数/リクエスト**: `FamilyLogProps` (`stats`: `FamilyStats | null`, `chronicle`: `ChronicleItem[]`)
+* 根拠: [FamilyLogProps] (行番号: 5〜8 / 抜粋: "interface FamilyLogProps {...")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: [FamilyLog] (行番号: 27〜93 / 抜粋: "return ( <div className="space...")
+* 根拠: [FamilyLog] (行番号: 28〜112 / 抜粋: "return ( <div className="space...")
 
 
 * **副作用**: なし
-* 根拠: [FamilyLog] (行番号: 9〜94 / 抜粋: "const FamilyLog: React.FC<Fami...")
+* 根拠: [FamilyLog] (行番号: 10〜113 / 抜粋: "const FamilyLog: React.FC<Fami...")
 
 
 * **エラーハンドリング**: `stats` または `chronicle` が falsy な場合、読み込み中のメッセージを返す。
-* 根拠: [FamilyLog] (行番号: 10 / 抜粋: "if (!stats || !chronicle) retu...")
+* 根拠: [FamilyLog] (行番号: 11 / 抜粋: "if (!stats || !chronicle) retu...")
 
 
 
 ### `formatTime`
 
 * **役割**: 渡されたタイムスタンプを日本時間の `HH:mm` 形式の文字列に変換する。
-* 根拠: [formatTime] (行番号: 21〜25 / 抜粋: "const formatTime = (ts: string...")
+* 根拠: [formatTime] (行番号: 22〜26 / 抜粋: "const formatTime = (ts: string...")
 
 
-* **引数/リクエスト**: `ts` (string | number)
-* 根拠: [formatTime] (行番号: 21 / 抜粋: "const formatTime = (ts: string...")
+* **引数/リクエスト**: `ts` (string | number | undefined)
+* 根拠: [formatTime] (行番号: 22 / 抜粋: "const formatTime = (ts: string...")
 
 
 * **戻り値/レスポンス**: string
-* 根拠: [formatTime] (行番号: 24 / 抜粋: "return date.toLocaleTimeString...")
+* 根拠: [formatTime] (行番号: 25 / 抜粋: "return date.toLocaleTimeString...")
 
 
 * **副作用**: なし
-* 根拠: [formatTime] (行番号: 21〜25 / 抜粋: "const formatTime = (ts: string...")
+* 根拠: [formatTime] (行番号: 22〜26 / 抜粋: "const formatTime = (ts: string...")
 
 
 * **エラーハンドリング**: 引数 `ts` が falsy な場合は空文字列を返す。
-* 根拠: [formatTime] (行番号: 22 / 抜粋: "if (!ts) return '';")
+* 根拠: [formatTime] (行番号: 23 / 抜粋: "if (!ts) return '';")
 
 
 
@@ -99,6 +101,7 @@ graph TD
     ParentComponent["外部：親コンポーネント (不明)"] -->|stats, chronicle| FamilyLog
     FamilyLog --> React["外部：react"]
     FamilyLog --> LucideReact["外部：lucide-react"]
+    FamilyLog --> GameDataTypes["外部：@/hooks/useGameData (FamilyStats, ChronicleItem)"]
     FamilyLog --> FormatTime["内部処理：formatTime"]
 
 ```
@@ -107,21 +110,22 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | 親コンポーネント (例: `App.tsx` またはページコンポーネント) | `stats`と`chronicle`の具体的なデータ構造や取得元（API通信など）を把握するため。 | 根拠: [Props定義] (行番号: 4〜7 / 抜粋: "interface FamilyLogProps {...") |
-| 中 | APIクライアント / サービス層のファイル | `chronicle`配列内のオブジェクトが持つ一貫性のないプロパティ（`dateStr`と`date`、`text`と`message`など）の生成元を特定するため。 | 根拠: [プロパティ参照] (行番号: 14, 70 / 抜粋: "const date = item.dateStr |
+| 高 | `@/hooks/useGameData` | `FamilyStats`, `ChronicleItem` の完全なスキーマを把握し、`stats`と`chronicle`の具体的なデータ構造を確認するため。 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import { FamilyStats, Chronic...") |
+| 中 | 親コンポーネント (例: `App.tsx` またはページコンポーネント) | `stats`と`chronicle`の取得元（API通信など）を把握するため。 | 根拠: [Props定義] (行番号: 5〜8 / 抜粋: "interface FamilyLogProps {...") |
+| 中 | APIクライアント / サービス層のファイル | `chronicle`配列内のオブジェクトが持つ一貫性のないプロパティ（`dateStr`と`date`、`text`と`message`など）の生成元を特定するため。 | 根拠: [プロパティ参照] (行番号: 15, 89 / 抜粋: "const date = item.dateStr |
 
 ## 8. 保守上の注意点
 
-* `stats` および `chronicle` が `any` 型として定義されているため、コンパイル時に型の安全性が保証されていない。
-* 根拠: [Props定義] (行番号: 4〜7 / 抜粋: "stats: any; // 必要であれば...")
+* `stats` は `FamilyStats | null`、`chronicle` は `ChronicleItem[]`（いずれも `@/hooks/useGameData` からインポート）として型付けされているが、これらの型定義の実体は本ファイルにはなく、`@/hooks/useGameData` に依存する。
+* 根拠: [Props定義] (行番号: 3, 5〜8 / 抜粋: "import { FamilyStats, Chronic...")
 
 
-* `chronicle` の各要素において、プロパティ名に複数のパターン（例: `dateStr` と `date`、`userAvatar` と `avatar_url`、`text` と `message`、`exp` と `reward_exp`）が混在しており、フォールバック（`||`）による評価が行われている。
-* 根拠: [プロパティ評価] (行番号: 14, 55, 70, 77 / 抜粋: "const date = item.dateStr || i...")
+* `chronicle` の各要素において、プロパティ名に複数のパターン（例: `dateStr` と `date`、`userAvatar` と `avatar_url`、`text` と `message`、`exp` と `reward_exp`）が混在しており、フォールバック（`||`）による評価が行われている。型定義上は両方のプロパティが許容されていると推測されるが、これは移行期間中の仕様が混在している兆候である可能性がある。
+* 根拠: [プロパティ評価] (行番号: 15, 68, 89, 97 / 抜粋: "const date = item.dateStr || i...")
 
 
 * アバター画像かどうかの判定に、文字列の先頭一致（`startsWith('/uploads')` または `startsWith('http')`）を用いているため、ホスティング先やURLの仕様が変更された場合に表示が崩れる可能性がある。
-* 根拠: [isImage判定] (行番号: 56 / 抜粋: "const isImage = avatarSrc && (...")
+* 根拠: [isImage判定] (行番号: 69 / 抜粋: "const isImage = avatarSrc && (...")
 
 
 
@@ -129,8 +133,8 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `stats`の厳密なスキーマ | 型が `any` であり、コード内でのプロパティ参照（`partyRank`, `totalLevel`, `totalQuests`, `totalGold`）以外に含まれるデータが不明なため。 | 親コンポーネント、または型定義ファイル |
-| `chronicle`の厳密なスキーマ | 型が `any[]` であり、オブジェクトに混在する複数パターンのプロパティの正規の仕様が不明なため。 | 親コンポーネント、または型定義ファイル |
+| `FamilyStats`の厳密なスキーマ | `@/hooks/useGameData` からインポートされた型であり、コード内でのプロパティ参照（`partyRank`, `totalLevel`, `totalQuests`, `totalGold`）以外に含まれるデータが不明なため。 | `@/hooks/useGameData` |
+| `ChronicleItem`の厳密なスキーマ | `@/hooks/useGameData` からインポートされた型であり、オブジェクトに混在する複数パターンのプロパティの正規の仕様が不明なため。 | `@/hooks/useGameData` |
 
 ## 10. 自己検証結果
 
