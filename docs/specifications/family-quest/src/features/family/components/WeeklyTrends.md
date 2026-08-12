@@ -17,7 +17,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `useEffect`, `useState` | モジュール | コンポーネントの状態管理およびマウント時の副作用（API呼び出し）の制御 | `import { useEffect, useState } from 'react';` (行番号: 1) |
+| `useQuery` | モジュール (`@tanstack/react-query`) | サーバーデータのフェッチ、キャッシュ、ポーリング（`staleTime`/`refetchInterval`）の制御 | `import { useQuery } from '@tanstack/react-query';` (行番号: 1) |
 | `Trophy`, `Coins`, `Star`, `Crown`, `Medal` | コンポーネント | UIの装飾用アイコンの表示 | `import { Trophy, Coins, Star, Crown, Medal } from 'lucide-react';` (行番号: 2) |
 | `apiClient` | モジュール | 外部APIから週間トレンドデータを取得するためのHTTPクライアント | `import { apiClient } from '@/lib/apiClient';` (行番号: 3) |
 
@@ -26,105 +26,113 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `apiClient` | 提供されたファイル内に実装がなく、ベースURL、ヘッダー付与、エラーハンドリングなどの内部仕様が不明なため | `import { apiClient } from '@/lib/apiClient';` (行番号: 3) |
+| `useQuery` (`@tanstack/react-query`) | ライブラリの内部実装（キャッシュ管理、リトライ、エラー状態の扱いなど）が本ファイルには含まれていないため | `import { useQuery } from '@tanstack/react-query';` (行番号: 1) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `RankingEntry`
+
+* **役割**: ランキング/MVPの1エントリを表す型。コメントによれば `QuestService.get_weekly_analytics` の `make_rank()` レスポンスに対応する。
+* 根拠: `interface RankingEntry` (行番号: 7-13 / 抜粋: "interface RankingEntry {")
+
+
+
 ### `TrendData`
 
-* **役割**: APIから取得するトレンドデータの構造を定義するインターフェース
-* 根拠: `interface TrendData` (行番号: 6-21 / 抜粋: "interface TrendData {")
+* **役割**: APIから取得するトレンドデータの構造を定義するインターフェース。`rankings.exp/gold/count` と `mvp` は `RankingEntry`（配列または単体）として型付けされている。
+* 根拠: `interface TrendData` (行番号: 15-30 / 抜粋: "interface TrendData {")
 
 
 
 ### `AvatarDisplay`
 
 * **役割**: アバター画像または代替テキストを表示する。渡された値が画像パス（`/`から始まる文字列）の場合は`<img>`要素を、それ以外の場合は`<span>`要素をレンダリングする。
-* 根拠: `const AvatarDisplay` (行番号: 24-49 / 抜粋: "const isImagePath = avatar && ...")
+* 根拠: `const AvatarDisplay` (行番号: 33-58 / 抜粋: "const isImagePath = avatar && ...")
 
 
 * **引数/リクエスト**: `{ avatar: string, sizeClass: string, borderClass?: string }`
-* 根拠: 引数定義 (行番号: 24 / 抜粋: "({ avatar, sizeClass, borderClass")
+* 根拠: 引数定義 (行番号: 33 / 抜粋: "({ avatar, sizeClass, borderClass")
 
 
 * **戻り値/レスポンス**: JSX要素 (`<img>` または `<span>`)
-* 根拠: return文 (行番号: 39-45, 48 / 抜粋: "return ( <img ..." および "return <span...")
+* 根拠: return文 (行番号: 48-54, 57 / 抜粋: "return ( <img ..." および "return <span...")
 
 
 * **副作用**: なし
-* 根拠: 関数内に外部状態を変更する処理が存在しない (行番号: 24-49)
+* 根拠: 関数内に外部状態を変更する処理が存在しない (行番号: 33-58)
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー捕捉のロジックが存在しない (行番号: 24-49)
+* 根拠: エラー捕捉のロジックが存在しない (行番号: 33-58)
 
 
 
 ### `RankBadge`
 
 * **役割**: 順位の数値を受け取り、1位は`Crown`アイコン、2・3位は`Medal`アイコン、それ以外は数字のテキストを返す。
-* 根拠: `const RankBadge` (行番号: 52-57 / 抜粋: "if (rank === 1) return <Crown...")
+* 根拠: `const RankBadge` (行番号: 61-66 / 抜粋: "if (rank === 1) return <Crown...")
 
 
 * **引数/リクエスト**: `{ rank: number }`
-* 根拠: 引数定義 (行番号: 52 / 抜粋: "({ rank }: { rank: number })")
+* 根拠: 引数定義 (行番号: 61 / 抜粋: "({ rank }: { rank: number })")
 
 
 * **戻り値/レスポンス**: JSX要素 (`<Crown>`, `<Medal>`, または `<span>`)
-* 根拠: return文 (行番号: 53-56 / 抜粋: "return <Crown size={24}...")
+* 根拠: return文 (行番号: 62-65 / 抜粋: "return <Crown size={24}...")
 
 
 * **副作用**: なし
-* 根拠: 関数内に外部状態を変更する処理が存在しない (行番号: 52-57)
+* 根拠: 関数内に外部状態を変更する処理が存在しない (行番号: 61-66)
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー捕捉のロジックが存在しない (行番号: 52-57)
+* 根拠: エラー捕捉のロジックが存在しない (行番号: 61-66)
 
 
 
 ### `WeeklyTrends`
 
-* **役割**: 週間トレンドの全体UI（MVP表示、ランキング、人気クエスト）を構築するメインコンポーネント。APIからデータを取得し、ローディング・データなし・正常表示を切り替える。
-* 根拠: `export const WeeklyTrends` (行番号: 59-224 / 抜粋: "export const WeeklyTrends = () =>")
+* **役割**: 週間トレンドの全体UI（MVP表示、ランキング、人気クエスト）を構築するメインコンポーネント。`useQuery`でAPIからデータを取得し、ローディング・データなし・正常表示を切り替える。
+* 根拠: `export const WeeklyTrends` (行番号: 68-234 / 抜粋: "export const WeeklyTrends = () =>")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数定義 (行番号: 59 / 抜粋: "() => {")
+* 根拠: 引数定義 (行番号: 68 / 抜粋: "export const WeeklyTrends = () => {")
 
 
 * **戻り値/レスポンス**: JSX要素 (`<div>`)
-* 根拠: return文 (行番号: 70, 71, 153 / 抜粋: "return <div className=...")
+* 根拠: return文 (行番号: 77, 78, 159 / 抜粋: "return <div className=...")
 
 
-* **副作用**: コンポーネントマウント時に `apiClient.get('/api/quest/analytics/weekly')` を実行し、コンポーネントの内部ステート (`data`, `loading`) を更新する。
-* 根拠: `useEffect` ブロック (行番号: 63-68 / 抜粋: "useEffect(() => { apiClient...")
+* **副作用**: `useQuery`（`@tanstack/react-query`）を用いて `apiClient.get('/api/quest/analytics/weekly')` を実行し、結果をキャッシュ・ポーリング（`staleTime: 60秒`, `refetchInterval: 30秒`）する。コメントによれば `useGameData.ts` の他クエリと同様のポーリング方針を踏襲している。
+* 根拠: `useQuery` ブロック (行番号: 69-75 / 抜粋: "const { data, isLoading: loading } = useQuery<TrendData>({")
 
 
-* **エラーハンドリング**: APIリクエスト失敗時にコンソールへエラーを出力し、ローディング状態を解除する。
-* 根拠: Promiseチェーン (行番号: 66 / 抜粋: ".catch(console.error)")
+* **エラーハンドリング**: 明示的な`onError`やtry-catchは存在しない。APIリクエストが失敗した場合は`data`が`undefined`のままとなり、`!data`分岐（「データがありません」表示）が事実上のフォールバックとして機能する。
+* 根拠: `if (!data)` 分岐 (行番号: 78 / 抜粋: "if (!data) return <div className=\"p-12 text-center text-gray-500\">データがありません</div>;")
 
 
 
 ### `renderRankingCard` (WeeklyTrends内ローカル関数)
 
 * **役割**: タイトル、アイコン、ランキングデータの配列等を受け取り、1位を強調し、2位以下をリスト表示するランキングカードのJSXを生成する。
-* 根拠: `const renderRankingCard` (行番号: 74-150 / 抜粋: "const renderRankingCard = (")
+* 根拠: `const renderRankingCard` (行番号: 81-157 / 抜粋: "const renderRankingCard = (")
 
 
-* **引数/リクエスト**: `title: string, icon: React.ReactNode, rankData: any[], unit: string, colorTheme: 'amber' | 'blue'`
-* 根拠: 引数定義 (行番号: 75-79 / 抜粋: "title: string, icon: React.ReactNode...")
+* **引数/リクエスト**: `title: string, icon: React.ReactNode, rankData: RankingEntry[], unit: string, colorTheme: 'amber' | 'blue'`
+* 根拠: 引数定義 (行番号: 82-87 / 抜粋: "title: string, icon: React.ReactNode...")
 
 
 * **戻り値/レスポンス**: JSX要素 (`<div>`)
-* 根拠: return文 (行番号: 88-149 / 抜粋: "return ( <div className={`...")
+* 根拠: return文 (行番号: 100-156 / 抜粋: "return ( <div className={`...")
 
 
 * **副作用**: なし
-* 根拠: 純粋にJSXを組み立てる処理のみ (行番号: 74-150)
+* 根拠: 純粋にJSXを組み立てる処理のみ (行番号: 81-157)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当記述なし (行番号: 74-150)
+* 根拠: 該当記述なし (行番号: 81-157)
 
 
 

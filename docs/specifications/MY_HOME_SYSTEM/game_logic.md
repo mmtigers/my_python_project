@@ -17,84 +17,84 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `math` | 標準ライブラリ | 経験値計算における累乗と切り捨て処理 | `import math` (行番号取得不可 / 抜粋: "import math") |
-| `random` | 標準ライブラリ | ドロップ報酬のメダル獲得確率判定 | `import random` (行番号取得不可 / 抜粋: "import random") |
-| `Tuple`, `Dict`, `Any`, `Optional` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義 | `from typing import Tuple, Dict...` (行番号取得不可 / 抜粋: "from typing import Tuple, Dict") |
+| `math` | 標準ライブラリ | 経験値計算における累乗と切り捨て処理 | `import math` (行番号: 1 / 抜粋: "import math") |
+| `random` | 標準ライブラリ | ドロップ報酬のメダル獲得確率判定 | `import random` (行番号: 2 / 抜粋: "import random") |
+| `Tuple`, `Dict`, `Any`, `Optional` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義。ただし `Optional` はファイル内で一度も使用されていない（未使用インポート） | `from typing import Tuple, Dict, Any, Optional` (行番号: 3 / 抜粋: "from typing import Tuple, Dict, Any, Optional") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| 該当なし | 提供されたコード内で全ての計算ロジックが完結しているため。 | 全体コード (行番号取得不可 / 抜粋: "class GameLogic:") |
+| 該当なし | 提供されたコード内で全ての計算ロジックが完結しているため。 | 全体コード (行番号: 6 / 抜粋: "class GameLogic:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `GameLogic.calculate_next_level_exp`
 
 * **役割**: 次のレベルに必要な経験値を計算する（100 × 1.2の(レベル-1)乗の切り捨て）。
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13-15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 * **引数/リクエスト**: `level: int` (対象となるレベル)
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "def calculate_next_level_exp...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13 / 抜粋: "def calculate_next_level_exp(level: int) -> int:")
 
 
 * **戻り値/レスポンス**: `int` (必要経験値)
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "def calculate_next_level_exp...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13 / 抜粋: "def calculate_next_level_exp(level: int) -> int:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13-15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 
 ### `GameLogic.calculate_max_hp`
 
 * **役割**: レベルに応じた最大HPを計算する（レベル × 20 + 5）。
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18-20 / 抜粋: "return level * 20 + 5")
 
 
 * **引数/リクエスト**: `level: int` (対象となるレベル)
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "def calculate_max_hp(level: ...")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18 / 抜粋: "def calculate_max_hp(level: int) -> int:")
 
 
 * **戻り値/レスポンス**: `int` (最大HP)
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "def calculate_max_hp(level: ...")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18 / 抜粋: "def calculate_max_hp(level: int) -> int:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 20 / 抜粋: "return level * 20 + 5")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 20 / 抜粋: "return level * 20 + 5")
 
 
 
 ### `GameLogic.calc_level_progress`
 
 * **役割**: 経験値を加算し、必要経験値を満たす間レベルを上げ続け、最終的なレベルと余剰経験値、レベルアップ有無を判定する。
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "while total_exp >= req_exp:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 34-38 / 抜粋: "while total_exp >= req_exp:")
 
 
 * **引数/リクエスト**: `current_level: int`, `current_exp: int`, `added_exp: int`
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "def calc_level_progress(cls,...")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 23 / 抜粋: "def calc_level_progress(cls, current_level: int, current_exp: int, added_exp: int) -> Tuple[int, int, bool]:")
 
 
 * **戻り値/レスポンス**: `Tuple[int, int, bool]` (新しいレベル, 新しい経験値, レベルアップフラグ)
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "-> Tuple[int, int, bool]:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 23 / 抜粋: "-> Tuple[int, int, bool]:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "return new_level, total_exp,...")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 40 / 抜粋: "return new_level, total_exp, leveled_up")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "while total_exp >= req_exp:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 34 / 抜粋: "while total_exp >= req_exp:")
 
 
 

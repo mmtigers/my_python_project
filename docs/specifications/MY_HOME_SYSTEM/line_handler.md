@@ -1,22 +1,16 @@
-> **⚠️ 2026年更新: `handle_request` を削除**
-> `handle_request(request, body, signature)` は呼び出し元が皆無の未使用関数だったため削除した。
-> 実際のWebhookエントリーポイントは `routers/webhook_router.py` の `callback_line()` であり、
-> `line_handler.line_handler.handle(body, signature)` を直接呼び出している。
-> 本ドキュメント中、`handle_request` に関する記述は現状のコードと一致しない（削除済み）。
-
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |
 | --- | --- |
 | 対象ファイル | line_handler.py |
-| 言語 | Python (FastAPI関連要素含む) |
+| 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
 ## 2. ファイルの概要
 
-* LINE Bot API（v3）からのWebhookリクエストを受信し、発生したイベント（テキストメッセージ受信、ポストバック受信）を解析して、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるルーターおよびエントリーポイントとしての責務を担う。
-* 根拠: ファイル全体の構成および `handle_request`, `@line_handler.add(MessageEvent...`, `@line_handler.add(PostbackEvent)` の存在 (行番号: 行番号取得不可 / 抜粋: "@line_handler.add(MessageEvent")
+* LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を、SDKのイベントハンドラーとして解析し、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が署名検証込みで `line_handler.handle(body, signature)`（SDKの`WebhookHandler.handle`）を呼び出し、登録済みのイベントハンドラー（本ファイルの`handle_message`/`handle_postback`）をディスパッチする構成になっている。
+* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 176-177 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")
 
 
 
@@ -26,110 +20,108 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準ライブラリ | 非同期関数の同期的な実行(`asyncio.run`) | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import asyncio") |
-| `os`, `sys`, `json` | 標準ライブラリ | ファイル内での明示的な使用箇所なし | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import os") |
-| `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定用タイムスタンプ取得 | インポート宣言 (行番号: 5 / 抜粋: "import time") |
-| `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from typing import Optional") |
-| `Request`, `HTTPException` | 外部ライブラリ (FastAPI) | 型ヒントおよび例外送出 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from fastapi import Request") |
-| `handlers.line_logic` | 内部モジュール | ポストバックイベントの一部処理委譲 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import handlers.line_logic") |
-| `WebhookHandler`等 (linebot.v3) | 外部ライブラリ | LINE APIの初期化、イベントハンドリング、メッセージ送信 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from linebot.v3 import") |
-| `MessageEvent`等 (linebot.v3.webhooks) | 外部ライブラリ | Webhookイベントの型定義およびルーティング | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from linebot.v3.webhooks import") |
-| `InvalidSignatureError` | 外部ライブラリ | 署名検証エラーの捕捉 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from linebot.v3.exceptions") |
-| `config` | 内部モジュール | APIトークンや設定値（家族のメンバー等）の取得 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "import config") |
-| `setup_logging` (core.logger) | 内部モジュール | ロガーの初期化 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from core.logger import setup_logging") |
-| `LinePostbackData` (models.line) | 内部モジュール | ファイル内での明示的な使用箇所なし | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from models.line import") |
-| `line_service`, `ai_service` | 内部モジュール | ビジネスロジック、外部API、AI解析処理への委譲 | インポート宣言 (行番号: 行番号取得不可 / 抜粋: "from services import") |
+| `asyncio` | 標準ライブラリ | 非同期関数の同期的な実行(`asyncio.run`) | インポート宣言 (行番号: 2 / 抜粋: "import asyncio") |
+| `os`, `sys`, `json` | 標準ライブラリ | ファイル内での明示的な使用箇所なし（未使用インポート） | インポート宣言 (行番号: 3-5 / 抜粋: "import os") |
+| `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定用タイムスタンプ取得 | インポート宣言 (行番号: 6 / 抜粋: "import time") |
+| `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 7 / 抜粋: "from typing import Optional, List, Any, Dict") |
+| `handlers.line_logic` | 内部モジュール | ポストバックイベントの一部処理委譲 | インポート宣言 (行番号: 9 / 抜粋: "import handlers.line_logic as line_logic") |
+| `WebhookHandler` (linebot.v3) | 外部ライブラリ | LINE Webhookイベントの検証・ディスパッチ | インポート宣言 (行番号: 12 / 抜粋: "from linebot.v3 import WebhookHandler") |
+| `Configuration`等 (linebot.v3.messaging) | 外部ライブラリ | LINE APIクライアントの初期化、メッセージ送信オブジェクトの構築 | インポート宣言 (行番号: 13-23 / 抜粋: "from linebot.v3.messaging import (") |
+| `MessageEvent`等 (linebot.v3.webhooks) | 外部ライブラリ | Webhookイベントの型定義およびルーティング | インポート宣言 (行番号: 24 / 抜粋: "from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent") |
+| `config` | 内部モジュール | APIトークンや設定値（家族のメンバー等）の取得 | インポート宣言 (行番号: 26 / 抜粋: "import config") |
+| `setup_logging` (core.logger) | 内部モジュール | ロガーの初期化 | インポート宣言 (行番号: 27 / 抜粋: "from core.logger import setup_logging") |
+| `LinePostbackData` (models.line) | 内部モジュール | ファイル内での明示的な使用箇所なし（未使用インポート） | インポート宣言 (行番号: 28 / 抜粋: "from models.line import LinePostbackData") |
+| `line_service`, `ai_service` | 内部モジュール | ビジネスロジック、外部API、AI解析処理への委譲 | インポート宣言 (行番号: 29 / 抜粋: "from services import line_service, ai_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LINE_CHANNEL_ACCESS_TOKEN`<br>
-
-<br>`config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 行番号取得不可 / 抜粋: "line_conf = Configuration(") |
-| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 行番号取得不可 / 抜粋: "for child in config.FAMILY_SET") |
-| `line_service` 各種メソッド | 引数に対する具体的な処理内容および戻り値の型・形式が不明 | 該当要素の呼び出し (行番号: 行番号取得不可 / 抜粋: "resp = await line_service.") |
-| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 行番号取得不可 / 抜粋: "ai_resp_text = await ai_servic") |
-| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明 | 該当要素の呼び出し (行番号: 行番号取得不可 / 抜粋: "line_logic.handle_postback(") |
+| `config.LINE_CHANNEL_ACCESS_TOKEN` / `config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 38, 40, 42 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:") |
+| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 127 / 抜粋: "for child in config.FAMILY_SETTINGS["members"]:") |
+| `line_service` 各種メソッド | 引数に対する具体的な処理内容および戻り値の型・形式が不明 | 該当要素の呼び出し (行番号: 111 / 抜粋: "resp = await line_service.get_user_status_message(user_id)") |
+| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 136-138 / 抜粋: "ai_resp_text = await ai_service.analyze_text_and_execute(") |
+| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明 | 該当要素の呼び出し (行番号: 169 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
+| `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `_get_display_name`
 
 * **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。
-* 根拠: `def _get_display_name(user_id: str) -> str:` (抜粋: "def _get_display_name(user_id: str) -> str:")
+* 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 52-67 / 抜粋: "def _get_display_name(user_id: str) -> str:")
 
 
 * **引数/リクエスト**: `user_id`: `str`型
-* 根拠: 引数定義 (抜粋: "user_id: str")
+* 根拠: 引数定義 (行番号: 52 / 抜粋: "def _get_display_name(user_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (表示名。取得失敗時は`"Unknown"`)
-* 根拠: `return user_name` (抜粋: "return user_name")
+* 根拠: `return user_name` (行番号: 67 / 抜粋: "return user_name")
 
 
 * **副作用**: キャッシュヒット時はなし。キャッシュミス時は`line_bot_api.get_profile`呼び出しと`_profile_cache`への書き込み。
-* 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (抜粋: "profile = line_bot_api.get_profile(user_id)")
+* 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (行番号: 60-61 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
 
 
 * **エラーハンドリング**: `get_profile`失敗時は例外を無視し`"Unknown"`のまま続行（キャッシュにも`"Unknown"`が書き込まれ、TTL間は再試行されない）。
-* 根拠: `except Exception: pass` (抜粋: "except Exception: pass")
+* 根拠: `except Exception: pass` (行番号: 63-64 / 抜粋: "except Exception:")
 
 
 
 ### `reply_message`
 
-* **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。
-* 根拠: `reply_message` 関数定義 (行番号: 行番号取得不可 / 抜粋: "def reply_message(reply_token:")
+* **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。
+* 根拠: `def reply_message(reply_token: str, messages: List[Any]):` (行番号: 71-85 / 抜粋: "def reply_message(reply_token: str, messages: List[Any]):")
 
 
 * **引数/リクエスト**:
 * `reply_token`: `str`型 (LINE APIの返信用トークン)
 * `messages`: `List[Any]`型または単一のオブジェクト (送信するメッセージオブジェクト)
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "reply_token: str, messages: List[Any]")
+* 根拠: 引数定義 (行番号: 71 / 抜粋: "def reply_message(reply_token: str, messages: List[Any]):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: return文の記述がない (行番号: 行番号取得不可 / 抜粋: "line_bot_api.reply_message(")
+* 根拠: return文の記述がない (行番号: 71-85 / 抜粋: "line_bot_api.reply_message(")
 
 
 * **副作用**: LINE Platform経由でのユーザーへのメッセージ送信。
-* 根拠: 外部API呼び出し (行番号: 行番号取得不可 / 抜粋: "line_bot_api.reply_message(")
+* 根拠: 外部API呼び出し (行番号: 78-83 / 抜粋: "line_bot_api.reply_message(")
 
 
-* **エラーハンドリング**: 例外発生時は `logger.error` でログ出力を行い、処理を継続する。
-* 根拠: try-exceptブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e: logger")
+* **エラーハンドリング**: `line_bot_api` 未初期化時は早期return。それ以外の例外発生時は `logger.error` でログ出力を行い、処理を継続する。
+* 根拠: `if not line_bot_api: return` / `except Exception as e: logger.error(...)` (行番号: 73, 84-85 / 抜粋: "if not line_bot_api: return")
 
 
 
 ### `handle_message`
 
 * **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。
-* 根拠: `@line_handler.add` デコレータと関数定義 (行番号: 行番号取得不可 / 抜粋: "def handle_message(event: Mess")
+* 根拠: `def handle_message(event: MessageEvent):` (行番号: 92-104 / 抜粋: "def handle_message(event: MessageEvent):")
 
 
 * **引数/リクエスト**:
 * `event`: `MessageEvent`型 (LINEのWebhookイベントオブジェクト)
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "event: MessageEvent")
+* 根拠: 引数定義 (行番号: 92 / 抜粋: "def handle_message(event: MessageEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: return文が存在しない (行番号: 行番号取得不可 / 抜粋: "asyncio.run(")
+* 根拠: return文が存在しない (行番号: 92-104 / 抜粋: "asyncio.run(")
 
 
-* **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、および `_process_message_async` の実行に伴う副作用。
-* 根拠: 関数呼び出し (抜粋: "user_name = _get_display_name(user_id)")
+* **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、`logger.info`によるログ出力、および `_process_message_async` の実行に伴う副作用。
+* 根拠: 関数呼び出し (行番号: 98, 100, 102-104 / 抜粋: "user_name = _get_display_name(user_id)")
 
 
-* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。
-* 根拠: `_get_display_name`の呼び出し (抜粋: "user_name = _get_display_name(user_id)")
+* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。本関数自体にtry-exceptは存在しない。
+* 根拠: `_get_display_name`の呼び出し (行番号: 98 / 抜粋: "user_name = _get_display_name(user_id)")
 
 
 
 ### `_process_message_async`
 
 * **役割**: 受信したテキストメッセージの内容に応じた分岐（ステータス、クエスト、承認/却下、子供の体調記録）を行い、該当しない場合はAI解析に回す非同期処理ロジック。
-* 根拠: 関数定義および内部のif文 (行番号: 行番号取得不可 / 抜粋: "async def _process_message_asy")
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 106-143 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
 
 
 * **引数/リクエスト**:
@@ -137,86 +129,55 @@
 * `user_name`: `str`型 (ユーザーの表示名)
 * `msg_text`: `str`型 (受信したテキストメッセージ)
 * `reply_token`: `str`型 (返信用トークン)
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "user_id: str, user_name: str, ")
+* 根拠: 引数定義 (行番号: 106 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 行番号取得不可 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 113, 118, 123, 132 / 抜粋: "return")
 
 
 * **副作用**: `line_service`、`ai_service` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。
-* 根拠: サービス呼び出し (行番号: 行番号取得不可 / 抜粋: "await line_service.get_user_st")
+* 根拠: サービス呼び出し (行番号: 111, 116, 121, 130, 136-138 / 抜粋: "resp = await line_service.get_user_status_message(user_id)")
 
 
-* **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) で例外が発生した場合、エラーログを出力し、固定のエラーメッセージをユーザーに返信する。
-* 根拠: try-exceptブロック (行番号: 行番号取得不可 / 抜粋: "except Exception as e: logger")
+* **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) で例外が発生した場合、エラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。それ以外の分岐（ステータス/クエスト/承認却下/体調記録）にはtry-exceptがない。
+* 根拠: `except Exception as e: logger.error(...)` (行番号: 141-143 / 抜粋: "except Exception as e:")
 
 
 
 ### `handle_postback`
 
 * **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`data` 文字列が "approve:" または "reject:" で始まる場合は「承認/却下」コマンドに変換して `_process_message_async` を呼び出す。それ以外は `line_logic.handle_postback` へ処理を丸投げする。
-* 根拠: `@line_handler.add` デコレータと関数定義 (行番号: 行番号取得不可 / 抜粋: "def handle_postback(event: Pos")
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 145-173 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "event: PostbackEvent")
+* 根拠: 引数定義 (行番号: 145 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 行番号取得不可 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 163 / 抜粋: "return")
 
 
-* **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用。
-* 根拠: 関数呼び出し (行番号: 行番号取得不可 / 抜粋: "line_logic.handle_postback(eve")
+* **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`によるログ出力。
+* 根拠: 関数呼び出し (行番号: 151, 160, 169 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
 
 
 * **エラーハンドリング**:
 * "approve:/reject:" のパース失敗時 (`ValueError`) にはエラーログを出力し処理終了。
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
-* 根拠: try-exceptブロック (行番号: 行番号取得不可 / 抜粋: "except ValueError: logger.erro")
-
-
-
-### `handle_request`
-
-* **役割**: 外部 (おそらくFastAPIのルーター等) から呼び出されるWebhook受信用のエントリーポイント。署名の検証とハンドラーの呼び出しを行う。
-* 根拠: 関数定義と `line_handler.handle` の呼び出し (行番号: 行番号取得不可 / 抜粋: "def handle_request(request: Re")
-
-
-* **引数/リクエスト**:
-* `request`: `Request`型 (FastAPIのリクエストオブジェクト)
-* `body`: `str`型 (リクエストボディ文字列)
-* `signature`: `str`型 (LINEプラットフォームからの署名ヘッダ)
-* 根拠: 引数定義 (行番号: 行番号取得不可 / 抜粋: "request: Request, body: str, s")
-
-
-* **戻り値/レスポンス**: `line_handler` が初期化されていない場合は暗黙の `None` を返す。正常終了時も明示的な戻り値はない。
-* 根拠: if文による早期リターンとreturn欠如 (行番号: 行番号取得不可 / 抜粋: "if not line_handler: return")
-
-
-* **副作用**: `line_handler.handle` の実行による登録済みイベントハンドラーの同期呼び出し。
-* 根拠: ハンドラー呼び出し (行番号: 行番号取得不可 / 抜粋: "line_handler.handle(body, sign")
-
-
-* **エラーハンドリング**: `InvalidSignatureError` 発生時、警告ログを出力し `HTTPException(status_code=400)` をスローする。
-* 根拠: try-exceptブロック (行番号: 行番号取得不可 / 抜粋: "raise HTTPException(status_cod")
+* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` (行番号: 161-162, 170-173 / 抜粋: "except ValueError:")
 
 
 
 ## 5. 処理フロー図
 
+本ファイルはSDKのイベントハンドラー本体のみを定義する。署名検証と`line_handler.handle()`の呼び出しは`routers/webhook_router.py`の`callback_line()`（本ファイル外）が担う。SDK初期化に成功した場合のみ、モジュール末尾で`handle_message`/`handle_postback`がイベントハンドラーとして登録される。
+
 ```mermaid
 flowchart TD
-    Start([Start: Webhook Request]) --> HandleRequest["handle_request(body, signature)"]
-    HandleRequest --> Verify{line_handler初期化済み?}
-    Verify -- No --> End([End: None])
-    Verify -- Yes --> HandleBody["line_handler.handle()"]
-    
-    HandleBody --> CheckSig{署名検証}
-    CheckSig -- 失敗 --> Throw400([End: HTTPException 400])
-    CheckSig -- 成功 --> RouteEvent{イベント種別}
+    Start([Start: SDKがイベントをディスパッチ]) --> RouteEvent{イベント種別}
     
     RouteEvent -- MessageEvent --> HandleMsg["handle_message()"]
     HandleMsg --> GetDisplayName["_get_display_name()"]
@@ -266,12 +227,10 @@ graph TD
     ModelsLine[models.line]
     
     %% 外部ライブラリ
-    FastAPI[FastAPI]
     LineBotV3[linebot.v3]
     
     %% 依存関係
     LineHandler -->|Import / Use| LineBotV3
-    LineHandler -->|Import / Raise| FastAPI
     LineHandler -->|Import / Use| Config
     LineHandler -->|Import / Use| CoreLogger
     LineHandler -->|Import| ModelsLine
@@ -294,23 +253,23 @@ graph TD
 ## 8. 保守上の注意点
 
 * **プロフィール表示名のキャッシュ**: 従来は`handle_message`が受信メッセージ毎に`line_bot_api.get_profile`を直接呼び出しており、ログ表示用の名前取得だけのために毎回外部API通信が発生していた。現在は`_get_display_name`がTTL付き（3600秒）のインメモリキャッシュ(`_profile_cache`)を挟むため、キャッシュヒット時は外部API呼び出しが発生しない。プロセス再起動でキャッシュはクリアされる。
-* 根拠: `_profile_cache`, `_PROFILE_CACHE_TTL_SEC` (抜粋: "_profile_cache: Dict[str, tuple] = {}")
+* 根拠: `_profile_cache`, `_PROFILE_CACHE_TTL_SEC` (行番号: 48-49 / 抜粋: "_profile_cache: Dict[str, tuple] = {}")
 
 
-* **非同期処理の実行**: `handle_message` および `handle_postback` は同期関数として定義されており、内部で `asyncio.run()` を使用して非同期関数を呼び出している。FastAPIのイベントループ内でさらにイベントループを生成しようとする可能性があり、ASGIサーバーの実行環境によっては `RuntimeError` が発生するリスクがある。
-* 根拠: `asyncio.run` の使用 (行番号取得不可 / 抜粋: "asyncio.run( _process_message")
+* **非同期処理の実行**: `handle_message` および `handle_postback` は同期関数として定義されており、内部で `asyncio.run()` を使用して非同期関数を呼び出している。呼び出し元の`routers/webhook_router.py`の`callback_line()`は`asyncio.to_thread`経由で`line_handler.handle`（同期API）を別スレッドで実行しているため、ASGIのメインイベントループ内で`asyncio.run()`が呼ばれるわけではないが、この二重構造は把握しておく必要がある。
+* 根拠: `asyncio.run` の使用 (行番号: 102-104, 160 / 抜粋: "asyncio.run(")
 
 
-* **変数初期化の順序と依存**: `line_handler` と `line_bot_api` がグローバルスコープで定義され、条件付きで初期化されているが、`reply_message` などの関数内部でこれらの変数が `None` でないことを前提とするか、あるいは `if not line_bot_api: return` のように早期リターンする設計になっている。状態が環境変数に依存している。
-* 根拠: モジュールレベルの条件分岐 (行番号取得不可 / 抜粋: "if config.LINE_CHANNEL_ACCESS_")
+* **変数初期化の順序と依存**: `line_handler` と `line_bot_api` がグローバルスコープで定義され、`config.LINE_CHANNEL_ACCESS_TOKEN`/`config.LINE_CHANNEL_SECRET`が揃っている場合のみ条件付きで初期化される。`reply_message`は`if not line_bot_api: return`で早期returnするが、`handle_message`/`_get_display_name`は`line_bot_api`が`None`のままでも例外を出さずに動作継続する（`_get_display_name`は`try/except Exception: pass`で吸収）。
+* 根拠: モジュールレベルの条件分岐 (行番号: 38-45 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:")
 
 
-* **未使用のインポート**: `json`, `os`, `sys`, `models.line.LinePostbackData` などがインポートされているが、ファイル内で明示的に使用されていない。
-* 根拠: インポート宣言と使用箇所の不在 (行番号取得不可 / 抜粋: "import os", "from models.line")
+* **未使用のインポート**: `os`, `sys`, `json`, `models.line.LinePostbackData` がインポートされているが、ファイル内で明示的に使用されていない。
+* 根拠: インポート宣言と使用箇所の不在 (行番号: 3-5, 28 / 抜粋: "import os")
 
 
-* **引数の未使用**: `handle_request` に渡される `request: Request` は関数内部で使用されていない。
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def handle_request(request: Re")
+* **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。
+* 根拠: `if line_handler: line_handler.add(...)` (行番号: 175-177 / 抜粋: "if line_handler:")
 
 
 
