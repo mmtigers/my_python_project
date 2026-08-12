@@ -113,18 +113,18 @@ flowchart TD
         F3 -- Yes --> Keep["保持"]
     end
     
-    Keep --> Sort["ステータス・ボーナス・IDでソート"]
-    Sort --> MapList["sortedQuests を map 処理"]
+    Keep --> Sort["getQuestLockState()でスコア算出 → スコア・ボーナス合計・IDでソート"]
+    Sort --> MapList["sortedQuests を AnimatePresence + motion.div で map 処理"]
     
     MapList --> MapItem["QuestItem Render"]
     
     subgraph "QuestItem のクリック処理 (handleClick)"
         C_Start{"isCooldown?"}
         C_Start -- Yes --> C_End["処理中断(return)"]
-        C_Start -- No --> C_Lock{"isEffectivelyLocked?"}
+        C_Start -- No --> C_Lock{"isEffectivelyLocked? (isLocked または他者対応済み共有クエスト)"}
         C_Lock -- Yes --> C_End
         C_Lock -- No --> C_Status{"isDone または isPending?"}
-        C_Status -- No --> C_Sound{"isDaily または isInfinite?"}
+        C_Status -- No --> C_Sound{"quest.type === 'daily' または isInfinite?"}
         C_Sound -- Yes --> S1["外部：play('clear')"]
         C_Sound -- No --> S2["外部：play('submit')"]
         S1 --> C_Infinite{"isInfinite?"}
@@ -133,7 +133,7 @@ flowchart TD
         C_Infinite -- No --> C_Callback
         Cooldown --> C_Callback
         C_Status -- Yes --> C_Callback
-        C_Callback["onClickコールバック実行"] --> C_End
+        C_Callback["onClick({...quest, _isInfinite}) コールバック実行"] --> C_End
     end
     
     MapItem --> End["End: JSXを返却"]
@@ -149,15 +149,16 @@ graph TD
         QuestItem["QuestItem (Component)"]
     end
     
-    subgraph "External Hooks"
+    subgraph "External Hooks / Functions (../hooks/useQuestStatus)"
         useQuestStatus["useQuestStatus"]
+        getQuestLockState["getQuestLockState"]
         useSound["useSound"]
     end
     
     subgraph "External UI Components"
         Card["Card (Component)"]
         LucideIcons["lucide-react (Icons)"]
-        FramerMotion["framer-motion"]
+        FramerMotion["framer-motion (motion, AnimatePresence)"]
     end
     
     subgraph "Types (Blackbox)"
@@ -167,6 +168,7 @@ graph TD
     QuestList -->|import| Types
     QuestList -->|Render| QuestItem
     QuestList -->|Render| FramerMotion
+    QuestList -->|Call (sort comparator)| getQuestLockState
     
     QuestItem -->|Render| Card
     QuestItem -->|import| Types
@@ -180,32 +182,28 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `@/types` | `Quest` 型に対して `(quest as any).is_shared_completed_by` のようなキャストが行われており、実際のデータスキーマを把握しないと不具合の原因となるため。 | `const isSharedCompleted = !!(quest as any).is_shared_completed_by...` (行番号: 43) |
-| 高 | `../hooks/useQuestStatus` | クエストの表示状態（`isDone`, `isLocked`, `isPending` など）の算出ロジックが本ファイルから切り離されているため、表示不具合の調査にはこのフックの解析が必須。 | `const { isDone, isPending... } = useQuestStatus(...)` (行番号: 30〜33) |
+| 高 | `@/types` | `Quest` 型に対して `is_shared_completed_by`, `is_shared_pending_by`, `shared_completed_by_name`, `shared_pending_by_name` など共有クエスト関連のプロパティが参照されており、実際のデータスキーマを把握しないと不具合の原因となるため。 | (行番号: 46〜49 / 抜粋: "const isSharedCompleted = !!quest.is_shared_completed_by...") |
+| 高 | `../hooks/useQuestStatus` | クエストの表示状態（`isDone`, `isLocked`, `isPending`, `variant` など）の算出ロジックが本ファイルから切り離されているため、表示不具合の調査にはこのフックおよび`getQuestLockState`関数の解析が必須。 | `const { isDone, isPending... } = useQuestStatus(...)` (行番号: 30〜33) |
 | 中 | `@/components/ui/Card` | UIの基盤として利用されており、`variant` Props がどのようにスタイリングに影響するかを確認するため。 | `import { Card } from '@/components/ui/Card';` (行番号: 5) |
 | 低 | `@/hooks/useSound` | 音声再生の挙動や、どのような文字列引数を受け付けるかを特定するため。 | `const { play } = useSound();` (行番号: 27) |
 
 ## 8. 保守上の注意点
 
-* `QuestItem` 内で `(quest as any)` として型キャストを行っている箇所が複数存在し、TypeScriptの型安全性が失われている。
-* 根拠: `(quest as any).is_shared_completed_by` (行番号: 43)
-
-
-* `QuestList` 内のソート処理（`getStatusScore`）において、本来 `useQuestStatus` フックで行うべき判定（`isPending`, `isDone`, `isLocked` の判定）に類似するロジックを独自に再実装している。
-* 根拠: `const isPreReqCleared = !preReqId \|\| completedQuests.some(...)` (行番号: 199〜215)
-
-
-* `QuestItem` の `handleClick` において、`onClick` コールバックに渡すオブジェクトに動的に `_isInfinite` プロパティを追加している。
-* 根拠: `onClick({ ...quest, _isInfinite: !!isInfinite });` (行番号: 70)
-
-
+* `QuestList`内のソート用コンパレータ（`getStatusScore`、行番号236〜253）は、Reactのコールバック内（`Array.sort`）からはHooksを呼び出せないため、`useQuestStatus`フックと同じ判定ロジックを共有する素関数`getQuestLockState`を`../hooks/useQuestStatus`からインポートして直接呼び出している。ロック・申請中・完了の判定基準を変更する場合は、`useQuestStatus`と`getQuestLockState`の両方の実装（同一ファイル内であることが望ましい）を確認する必要がある。
+* 根拠: [コメント] (行番号: 234〜235 / 抜粋: "// ▼ ソート順のロジック（ロック/申請中/完了の判定は useQuestStatus と共通の")
+* `QuestItem` の `handleClick` において、`onClick` コールバックに渡すオブジェクトに動的に `_isInfinite` プロパティを追加している。`Quest`型に定義されているかは本ファイルからは不明。
+* 根拠: `onClick({ ...quest, _isInfinite: !!isInfinite });` (行番号: 72)
+* `isInfinite`クエストのクールダウン（60秒）はコンポーネントローカルな`useState`で管理されているため、画面遷移やコンポーネントの再マウントが起きると`isCooldown`はリセットされる。サーバー側でクールダウンを強制する仕組みがあるかは本ファイルからは不明。
+* 根拠: (行番号: 28, 63〜68 / 抜粋: "const [isCooldown, setIsCooldown] = useState(false);")
+* 共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`）が自分以外の値を持つ場合、`isEffectivelyLocked`が真となりクリック不可になる。この判定は`useQuestStatus`が返す`isLocked`とは別に本ファイル内で独自に算出されている。
+* 根拠: (行番号: 46〜50 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;")
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `Quest` オブジェクトの実態 | 型定義に存在しないプロパティ（`is_shared_completed_by`、`_isInfinite`など）が実行時にどう扱われているか不明なため。 | `@/types`, データをフェッチしているAPI側の実装 |
-| `useQuestStatus` の判定ロジック | 各ステータス（`isDone`, `isLocked`, `variant` など）をどのように決定しているか不明なため。 | `../hooks/useQuestStatus` |
+| `Quest` オブジェクトの実態 | 型定義に存在するかどうか不明なプロパティ（`is_shared_completed_by`、`_isInfinite`など）が実行時にどう扱われているか不明なため。 | `@/types`, データをフェッチしているAPI側の実装 |
+| `useQuestStatus` / `getQuestLockState` の判定ロジック | 各ステータス（`isDone`, `isLocked`, `variant` など）をどのように決定しているか不明なため。 | `../hooks/useQuestStatus` |
 | `Card` のスタイル仕様 | `variant` や `className` がどう合成されて描画されるか不明なため。 | `@/components/ui/Card` |
 | 音声再生の詳細 | `play('clear')` 等の引数が実際にどの音声を鳴らすか不明なため。 | `@/hooks/useSound` |
 
