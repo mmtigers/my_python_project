@@ -253,9 +253,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号取得不可 / 抜粋: "import config") |
-| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号取得不可 / 抜粋: "from core.database import save") |
-| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号取得不可 / 抜粋: "from services.notification_ser") |
+| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号: 6 / 抜粋: "import config") |
+| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号: 10 / 抜粋: "from core.database import save") |
+| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号: 11 / 抜粋: "from services.notification_ser") |
 
 ## 8. 保守上の注意点
 
