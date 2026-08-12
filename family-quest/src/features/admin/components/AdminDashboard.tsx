@@ -2,11 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { Settings, Save, } from 'lucide-react';
 import { Boss } from '@/types';
 import { Button } from '@/components/ui/Button';
+import MessageModal from '@/components/ui/MessageModal';
+
+// onUpdate/onUpdateMileage は useGameData.ts の adminUpdateBoss/adminUpdateFamilyMileage の
+// 戻り値の形（{success:true} または {success:false, detail?:string}）に対応
+interface AdminActionResult {
+    success: boolean;
+    detail?: string;
+}
 
 interface AdminDashboardProps {
     boss: Boss | null;
-    onUpdate: (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => Promise<any>;
-    onUpdateMileage: (targetName: string, targetExp: number) => Promise<any>;
+    onUpdate: (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => Promise<AdminActionResult>;
+    onUpdateMileage: (targetName: string, targetExp: number) => Promise<AdminActionResult>;
     onClose: () => void;
 }
 
@@ -14,6 +22,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
     const [maxHp, setMaxHp] = useState(1000);
     const [currentHp, setCurrentHp] = useState(1000);
     const [isDefeated, setIsDefeated] = useState(false);
+    // ★変更: 素の alert() を廃止し、アプリ標準の MessageModal で統一表示する。
+    // closeOnDismiss: true の場合、メッセージをOKで閉じたタイミングで管理画面自体も閉じる
+    // (alert() は呼び出しをブロックするため、旧実装では「OKを押す→画面が閉じる」の順序が
+    //  保証されていた。onClose() を即座に呼ぶと、この非同期モーダルは表示前にアンマウント
+    //  されてしまうため、ここで意図的に遅延させている)
+    const [message, setMessage] = useState<{ title: string; text: string; closeOnDismiss?: boolean } | null>(null);
 
     // 初期値セット
     useEffect(() => {
@@ -34,10 +48,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
 
         // 成功判定 (useGameData側で { success: true/false } を返しています)
         if (result && result.success) {
-            alert("設定を保存しました！");
-            onClose(); // 成功したら閉じる
+            setMessage({ title: "保存完了", text: "設定を保存しました！", closeOnDismiss: true });
         } else {
-            alert("保存に失敗しました。\n・バックエンドサーバーは再起動しましたか？\n・DBマイグレーションは完了していますか？");
+            setMessage({ title: "エラー", text: "保存に失敗しました。\n・バックエンドサーバーは再起動しましたか？\n・DBマイグレーションは完了していますか？" });
         }
     };
 
@@ -112,7 +125,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                 <div className="space-y-6 bg-gray-900 p-4 rounded-lg border border-gray-700 mt-8">
                     <h3 className="text-lg font-bold text-gray-400">共有目標（ファミリーマイレージ）</h3>
                     <div className="space-y-2">
-                        <label className="block text-sm">新しい目標名</label>
+                        <label className="block text-sm" htmlFor="mileageNameInput">新しい目標名</label>
                         <input
                             type="text"
                             id="mileageNameInput"
@@ -121,7 +134,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="block text-sm">目標EXP</label>
+                        <label className="block text-sm" htmlFor="mileageExpInput">目標EXP</label>
                         <input
                             type="number"
                             id="mileageExpInput"
@@ -138,13 +151,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                                 // ★ 実際のAPI処理を実行
                                 const res = await onUpdateMileage(name, exp);
                                 if (res && res.success) {
-                                    alert("新しい共有目標を設定しました！");
-                                    onClose(); // 成功したら管理画面を閉じる
+                                    setMessage({ title: "設定完了", text: "新しい共有目標を設定しました！", closeOnDismiss: true });
                                 } else {
-                                    alert("目標の設定に失敗しました");
+                                    setMessage({ title: "エラー", text: "目標の設定に失敗しました" });
                                 }
                             } else {
-                                alert("目標名と目標EXPの両方を入力してください");
+                                setMessage({ title: "入力エラー", text: "目標名と目標EXPの両方を入力してください" });
                             }
                         }}
                         className="w-full flex items-center justify-center gap-2 bg-blue-600"
@@ -153,6 +165,18 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ boss, onUpdate, onUpdat
                     </Button>
                 </div>
             </div>
+
+            {message && (
+                <MessageModal
+                    title={message.title}
+                    message={message.text}
+                    onClose={() => {
+                        const shouldCloseAdmin = message.closeOnDismiss;
+                        setMessage(null);
+                        if (shouldCloseAdmin) onClose();
+                    }}
+                />
+            )}
         </div>
     );
 };
