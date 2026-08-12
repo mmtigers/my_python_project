@@ -52,8 +52,10 @@ def perform_backup() -> Tuple[bool, str, float]:
             try:
                 os.makedirs(nas_backup_dir, exist_ok=True)
             except (PermissionError, OSError) as e:
-                _notify_and_log_error(f"NASディレクトリ作成失敗: {e}")
-                raise
+                # ここで通知すると、下の外側except節でも再度通知され二重送信になるため、
+                # ログのみ残してメッセージ付きで再送出し、通知は外側の1箇所に一本化する。
+                logger.error(f"❌ NASディレクトリ作成失敗: {e}")
+                raise OSError(f"NASディレクトリ作成失敗: {e}") from e
 
         shutil.copy2(temp_path, nas_final_path)
         

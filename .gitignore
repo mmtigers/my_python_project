@@ -44,10 +44,22 @@ assets/salary_images/
 *.mp4
 *.txt
 
-# ただし requirements.txt は含める
+# ただし requirements.txt / requirements-dev.txt は含める
 !requirements.txt
+!requirements-dev.txt
 
 *.zip
 *.mp3
 *.json
 family_events.json
+
+# Test / Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.pytest_cache/
+tmp_nas/
+temp_fallback/
+temp_backups/

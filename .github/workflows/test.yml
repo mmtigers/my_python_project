@@ -5,37 +5,135 @@ on:
     branches: [ "main", "master", "develop" ]
   pull_request:
     branches: [ "main", "master", "develop" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: ./MY_HOME_SYSTEM
 
 jobs:
-  test:
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: ./MY_HOME_SYSTEM
-
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-    - name: Set up Python 3.11
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.11"
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            MY_HOME_SYSTEM/requirements.txt
+            MY_HOME_SYSTEM/requirements-dev.txt
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
-    - name: Run Tests
-      run: |
-        # CI環境用の環境変数を設定
-        export SQLITE_DB_PATH=":memory:"
-        export NAS_MOUNT_POINT="./tmp_nas"  # <--- これを追加！(NASの場所を一時フォルダに変更)
-        export NOTIFICATION_TARGET="none"   # <--- ついでに通知も飛ばないように設定
+      - name: Ruff (correctness gate - blocking)
+        # 未定義名の参照・構文エラー等、明確なバグのみをブロッキング条件とする。
+        # 既存コードには多数のスタイル上の指摘(未使用import等)が残っているが、
+        # それらでPRを一律ブロックしないよう、次のステップでは警告のみに留める。
+        run: ruff check . --select F821,F822,F823,E9 --output-format=github
 
-        # テスト実行
-        # 旧 `unittest discover` はpytestスタイルのテスト(@pytest.mark.asyncio等)を
-        # 収集できず、実装と乖離したテストが検知されないまま放置される問題があったため、
-        # unittest.TestCase / pytestスタイルの両方を収集できる pytest に統一する。
-        python -m pytest tests/ -v
+      - name: Ruff (full report - non-blocking)
+        run: ruff check . --output-format=github
+        continue-on-error: true
+
+  test:
+    name: Test + Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            MY_HOME_SYSTEM/requirements.txt
+            MY_HOME_SYSTEM/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        env:
+          # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
+          SQLITE_DB_PATH: ":memory:"
+          NAS_MOUNT_POINT: "./tmp_nas"
+          NOTIFICATION_TARGET: "none"
+        run: |
+          python -m pytest tests/ -v \
+            --cov=. \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=html \
+            --cov-fail-under=45
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            MY_HOME_SYSTEM/coverage.xml
+            MY_HOME_SYSTEM/htmlcov/
+          retention-days: 14
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            MY_HOME_SYSTEM/requirements.txt
+            MY_HOME_SYSTEM/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Bandit (High severity - blocking)
+        # 現状 High severity の指摘は0件。Medium/Low(主にf-string SQL構築の誤検知含む)は
+        # 大量に残っているため、それらで一律ブロックはせず、次のステップで可視化のみ行う。
+        run: bandit -r . -x ./tests,./old,./monitors/old -lll
+
+      - name: Bandit (full report - non-blocking)
+        run: bandit -r . -x ./tests,./old,./monitors/old -f txt -o bandit-report.txt || true
+        continue-on-error: true
+
+      - name: pip-audit (known CVEs - non-blocking)
+        # requirements.txt に多数の既知CVEを持つバージョンが固定されている(2026年時点)。
+        # 依存関係の一括更新は影響範囲が大きく本タスクの範囲外のため、
+        # ここではPRごとに可視化することを優先し、ブロッキングにはしない。
+        run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
+        continue-on-error: true
+
+      - name: Upload security reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: |
+            MY_HOME_SYSTEM/bandit-report.txt
+            MY_HOME_SYSTEM/pip-audit-report.md
+          retention-days: 14
