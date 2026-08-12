@@ -11,7 +11,7 @@
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
 * ユーザー、クエスト、報酬、装備、ボス、インベントリ、ギルド依頼などのドメインモデルの型を網羅している。
-* 根拠: [全体] (抜粋: "// 共通の型定義")
+* 根拠: [全体] (行番号: 3 / 抜粋: "// 共通の型定義")
 
 ## 3. 外部依存関係
 
@@ -44,8 +44,8 @@
 
 ### `User`
 
-* **役割**: ユーザー情報のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 9〜21 / 抜粋: "export interface User {")
+* **役割**: ユーザー情報のデータ構造の定義。`hp`/`maxHp`はバックエンド(MY_HOME_SYSTEM)から送られてくる値であり、`maxHp`は`calculate_max_hp(level) = level * 20 + 5`で計算されるため、フロント側で独自に再計算してはならない旨がコメントで明記されている。
+* 根拠: [該当要素] (行番号: 9〜27 / 抜粋: "export interface User {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -55,8 +55,8 @@
 
 ### `Quest`
 
-* **役割**: クエスト情報のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 24〜48 / 抜粋: "export interface Quest {")
+* **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。
+* 根拠: [該当要素] (行番号: 30〜60 / 抜粋: "export interface Quest {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -67,7 +67,7 @@
 ### `QuestHistory`
 
 * **役割**: クエスト履歴のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 51〜62 / 抜粋: "export interface QuestHistory {")
+* 根拠: [該当要素] (行番号: 63〜74 / 抜粋: "export interface QuestHistory {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -78,7 +78,7 @@
 ### `Reward`
 
 * **役割**: 報酬アイテムのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 65〜77 / 抜粋: "export interface Reward {")
+* 根拠: [該当要素] (行番号: 77〜89 / 抜粋: "export interface Reward {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -88,8 +88,8 @@
 
 ### `Equipment`
 
-* **役割**: 装備アイテムのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 80〜89 / 抜粋: "export interface Equipment {")
+* **役割**: 装備アイテム（ショップで購入可能なマスターデータ側）のデータ構造の定義。
+* 根拠: [該当要素] (行番号: 92〜101 / 抜粋: "export interface Equipment {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -100,7 +100,18 @@
 ### `Boss`
 
 * **役割**: ボス情報のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 91〜102 / 抜粋: "export interface Boss {")
+* 根拠: [該当要素] (行番号: 103〜114 / 抜粋: "export interface Boss {")
+
+
+* **引数/リクエスト**: 該当なし
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+### `OwnedEquipment`
+
+* **役割**: ユーザーが所持している装備のデータ構造の定義。バックエンドの`user_equipments`テーブルと`equipment_master`テーブルのJOIN結果（`ue.*` + `em.name`/`type`/`power`/`icon_key`）に対応する旨がコメントで明記されている。`is_equipped`はSQLite上0/1の整数として扱われる。
+* 根拠: [該当要素] (行番号: 117〜127 / 抜粋: "export interface OwnedEquipment {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -111,7 +122,7 @@
 ### `InventoryItem`
 
 * **役割**: インベントリアイテムのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 105〜114 / 抜粋: "export interface InventoryItem {")
+* 根拠: [該当要素] (行番号: 130〜139 / 抜粋: "export interface InventoryItem {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -122,7 +133,7 @@
 ### `QuestResult`
 
 * **役割**: APIレスポンス用のクエスト完了結果のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 117〜126 / 抜粋: "export interface QuestResult {")
+* 根拠: [該当要素] (行番号: 142〜151 / 抜粋: "export interface QuestResult {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -133,7 +144,7 @@
 ### `BossEffect`
 
 * **役割**: ボスダメージ演出用のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 129〜135 / 抜粋: "export interface BossEffect {")
+* 根拠: [該当要素] (行番号: 154〜160 / 抜粋: "export interface BossEffect {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -144,7 +155,7 @@
 ### `FamilyMileage`
 
 * **役割**: ファミリーマイレージのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 137〜142 / 抜粋: "export interface FamilyMileage {")
+* 根拠: [該当要素] (行番号: 162〜167 / 抜粋: "export interface FamilyMileage {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -155,7 +166,7 @@
 ### `Bounty`
 
 * **役割**: ギルド依頼のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 145〜158 / 抜粋: "export interface Bounty {")
+* 根拠: [該当要素] (行番号: 170〜184 / 抜粋: "export interface Bounty {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -166,7 +177,7 @@
 ### `PendingInventory`
 
 * **役割**: 承認待ちインベントリアイテム用のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 161〜168 / 抜粋: "export interface PendingInventory {")
+* 根拠: [該当要素] (行番号: 187〜193 / 抜粋: "export interface PendingInventory {")
 
 
 * **引数/リクエスト**: 該当なし
@@ -198,6 +209,7 @@ graph TD
     Equipment["interface: Equipment"] --> ID
     QuestResult["interface: QuestResult"] --> BossEffect["interface: BossEffect"]
 
+    %% OwnedEquipmentはid/equipment_idともにnumber固定であり、ID型は参照していない
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -205,14 +217,18 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | これらをインポートしているコンポーネント・API群 | 定義された各型がどのように初期化され、操作されているかの実態を把握するため。 | [全体] 型定義のみであり、利用側が存在しないと機能しないため |
-| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 116 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
-| 中 | ApprovalListコンポーネント関連ファイル | `PendingInventory`の使用箇所として明記されており、承認フローの仕様を解明するため。 | [PendingInventory] (行番号: 160 / 抜粋: "// ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)") |
+| 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 141 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
+| 中 | ApprovalListコンポーネント関連ファイル | `PendingInventory`の使用箇所として明記されており、承認フローの仕様を解明するため。 | [PendingInventory] (行番号: 186 / 抜粋: "// ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)") |
+| 中 | `EquipmentShop.tsx` 等 `OwnedEquipment` を利用するコンポーネント | 所持装備データがどのようにJOINされ、UI上で装備中/未装備の判定に使われているかを確認するため。 | [OwnedEquipment] (行番号: 116 / 抜粋: "// 所持装備（バックエンドの user_equipments と equipment_master の JOIN 結果") |
 
 ## 8. 保守上の注意点
 
 * 多くのインターフェース（`Quest`, `Reward` など）において、`description` と `desc` のように類似した意味を持つプロパティが混在しており、オプショナル（`?`）指定されています。
 * `ID` 型が `number | string` のユニオン型となっているため、これらを参照する各インターフェース側のプロパティ（`id`, `quest_id`, `equipment_id` 等）を利用する際、厳密な型判定が必要になる場面が発生します。
 * `Quest` インターフェースの `days` プロパティの型が `number[] | string | null` と多岐にわたり、使用箇所で複雑な型チェックやパース処理が要求される構造になっています。
+* `User.maxHp` はバックエンドの `calculate_max_hp(level) = level * 20 + 5` で計算される値であり、フロントエンド側で独自に再計算してはならない旨がコメントで明記されています（過去に誤った式で再計算していた実装があったとの記述あり）。この制約はコメント上の申し合わせに過ぎず、型システムによる強制はありません。
+* `OwnedEquipment.is_equipped` は `boolean` ではなく `number`（SQLite上の0/1）として定義されており、真偽判定を行う利用側コードで `=== 1` のような比較が必要です（`boolean`との混同に注意）。
+* `Equipment`（ショップのマスターデータ）と `OwnedEquipment`（ユーザー所持データ、`user_equipments`と`equipment_master`のJOIN結果）は類似した`name`/`type`/`power`/`icon`系のプロパティを持つ別インターフェースであり、混同しやすい構造になっています。
 
 ## 9. 不明事項一覧
 
