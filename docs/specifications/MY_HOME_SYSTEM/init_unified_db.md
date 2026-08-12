@@ -17,76 +17,79 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sqlite3` | 標準ライブラリ | データベース接続および操作に使用 | 根拠: `import sqlite3` (行番号取得不可 / 抜粋: "import sqlite3") |
-| `logging` | 標準ライブラリ | ログ機能に関連するモジュール（※直接的な関数呼び出しはなし） | 根拠: `import logging` (行番号取得不可 / 抜粋: "import logging") |
-| `typing` | 標準ライブラリ | 型ヒント（List, Dict, Any, Optional）に使用 | 根拠: `from typing import List...` (行番号取得不可 / 抜粋: "from typing import List, Dict") |
-| `config` | カスタムモジュール | データベースのパスやテーブル名の定数を取得 | 根拠: `import config` (行番号取得不可 / 抜粋: "import config") |
-| `common` | カスタムモジュール | ロガーの初期化やDBカーソルの取得に使用 | 根拠: `import common` (行番号取得不可 / 抜粋: "import common") |
-| `core.migrations.apply_pending_migrations` | カスタムモジュール | `migrations/`配下のバージョン管理されたマイグレーションSQLの適用 | 根拠: `from core.migrations import apply_pending_migrations` (抜粋: "from core.migrations import apply_pending_migrations") |
+| `sqlite3` | 標準ライブラリ | データベース接続および操作に使用 | 根拠: `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
+| `logging` | 標準ライブラリ | ログ機能に関連するモジュール（※直接的な関数呼び出しはなく、未使用インポート） | 根拠: `import logging` (行番号: 3 / 抜粋: "import logging") |
+| `typing` | 標準ライブラリ | 型ヒント（`List`, `Dict`）に使用。ただし `Any`, `Optional` はファイル内で使用されていない（未使用インポート） | 根拠: `from typing import List, Dict, Any, Optional` (行番号: 4 / 抜粋: "from typing import List, Dict, Any, Optional") |
+| `config` | カスタムモジュール | データベースのパスやテーブル名の定数を取得 | 根拠: `import config` (行番号: 5 / 抜粋: "import config") |
+| `common` | カスタムモジュール | ロガーの初期化やDBカーソルの取得に使用 | 根拠: `import common` (行番号: 6 / 抜粋: "import common") |
+| `core.migrations.apply_pending_migrations` | カスタムモジュール | `migrations/`配下のバージョン管理されたマイグレーションSQLの適用 | 根拠: `from core.migrations import apply_pending_migrations` (行番号: 7 / 抜粋: "from core.migrations import apply_pending_migrations") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SQLITE_TABLE_*` 等の定数群 | 具体的なテーブル名の文字列値が本ファイル内では定義されていないため不明 | 根拠: `config.SQLITE_TABLE_DAILY_LOGS` (行番号取得不可 / 抜粋: "config.SQLITE_TABLE_DAILY_LOGS") |
-| `config.SQLITE_DB_PATH` | データベースファイルの保存先パスが不明 | 根拠: `config.SQLITE_DB_PATH` (行番号取得不可 / 抜粋: "config.SQLITE_DB_PATH") |
-| `common.setup_logging` | 引数 `"init_db"` を渡した際の具体的なログフォーマットや出力先が不明 | 根拠: `common.setup_logging` (行番号取得不可 / 抜粋: "logger = common.setup_logging") |
-| `common.get_db_cursor` | 引数 `commit=True` を渡した際のDB接続確立プロセスやトランザクション管理処理の実装が不明 | 根拠: `common.get_db_cursor` (行番号取得不可 / 抜粋: "with common.get_db_cursor(commi") |
+| `config.SQLITE_TABLE_*` 等の定数群 | 具体的なテーブル名の文字列値が本ファイル内では定義されていないため不明 | 根拠: `config.SQLITE_TABLE_DAILY_LOGS` (行番号: 21 / 抜粋: "config.SQLITE_TABLE_DAILY_LOGS: [\"category\", \"detail\", \"timestamp\"],") |
+| `config.SQLITE_DB_PATH` | データベースファイルの保存先パスが不明 | 根拠: `config.SQLITE_DB_PATH` (行番号: 61, 564 / 抜粋: "with sqlite3.connect(config.SQLITE_DB_PATH) as conn:") |
+| `common.setup_logging` | 引数 `"init_db"` を渡した際の具体的なログフォーマットや出力先が不明 | 根拠: `common.setup_logging` (行番号: 9 / 抜粋: "logger = common.setup_logging("init_db")") |
+| `common.get_db_cursor` | 引数 `commit=True` を渡した際のDB接続確立プロセスやトランザクション管理処理の実装が不明 | 根拠: `common.get_db_cursor` (行番号: 63 / 抜粋: "with common.get_db_cursor(commit=True) as cur:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### `logger`
+
+* **役割**: `init_db` という名前でセットアップされたロガーのインスタンスを保持する。
+* 根拠: `logger = common.setup_logging("init_db")` (行番号: 9 / 抜粋: "logger = common.setup_logging(\"init_db\")")
+
+
 
 ### `validate_schema_integrity`
 
 * **役割**: `expected_schemas` 辞書に定義された主要テーブルについて、`PRAGMA table_info` を実行してカラム情報を取得し、期待される必須カラムが存在するかどうかを検証し、結果をログ出力する。
-* 根拠: `def validate_schema_integrity(conn: sqlite3.Connection) -> None:` (行番号取得不可 / 抜粋: "def validate_schema_integrity(")
+* 根拠: `def validate_schema_integrity(conn: sqlite3.Connection) -> None:` (行番号: 11-54 / 抜粋: "設計書(3.1)に基づくスキーマ整合性の自動検証を行う。")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`): SQLiteデータベースへの接続オブジェクト。
-* 根拠: 引数定義 (行番号取得不可 / 抜粋: "conn: sqlite3.Connection")
+* 根拠: 引数定義 (行番号: 11 / 抜粋: "def validate_schema_integrity(conn: sqlite3.Connection) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型アノテーション (行番号取得不可 / 抜粋: "-> None:")
+* 根拠: 戻り値の型アノテーション (行番号: 11 / 抜粋: "def validate_schema_integrity(conn: sqlite3.Connection) -> None:")
 
 
 * **副作用**: `logger` を使用して、スキーマの欠損がある場合は `warning` レベルで、正常な場合は `info` レベルでログを出力する。
-* 根拠: `logger.warning` / `logger.info` 呼び出し (行番号取得不可 / 抜粋: "logger.warning(f"⚠️ Schema Int")
+* 根拠: `logger.warning` / `logger.info` 呼び出し (行番号: 52, 54 / 抜粋: "logger.warning(f\"⚠️ Schema Integrity Issue: {issue}\")")
 
 
 * **エラーハンドリング**: 各テーブルの `PRAGMA table_info` 実行時に発生した `Exception` をキャッチし、エラー内容を検証エラーのリスト (`issues`) に追加する。
-* 根拠: `try...except Exception as e:` (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `try...except Exception as e:` (行番号: 35, 47-48 / 抜粋: "except Exception as e:")
 
 
 
 ### `init_db`
 
 * **役割**: ロギング開始後、`common.get_db_cursor` でカーソルを取得し、WALモードを有効化。その後、アプリケーションで利用する全テーブル（Core, Legacy, Game/Quest等）の `CREATE TABLE IF NOT EXISTS` 文、高頻度書き込みテーブル向けの `CREATE INDEX IF NOT EXISTS` 文を実行し、`apply_pending_migrations(cur.connection)` でバージョン管理されたマイグレーションを適用したうえで、最後に `sqlite3.connect` を用いて `validate_schema_integrity` を呼び出す。
-* 根拠: `def init_db() -> None:` (行番号取得不可 / 抜粋: "def init_db() -> None:")、`apply_pending_migrations(cur.connection)` (抜粋: "apply_pending_migrations(cur.connection)")
+* 根拠: `def init_db() -> None:` (行番号: 56-569 / 抜粋: "アプリケーションで使用する全SQLiteテーブルを初期化する。")、`apply_pending_migrations(cur.connection)` (行番号: 560 / 抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数定義 (行番号取得不可 / 抜粋: "def init_db() -> None:")
+* 根拠: 引数定義 (行番号: 56 / 抜粋: "def init_db() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型アノテーション (行番号取得不可 / 抜粋: "-> None:")
+* 根拠: 戻り値の型アノテーション (行番号: 56 / 抜粋: "def init_db() -> None:")
 
 
-* **副作用**: データベースファイルへのテーブル作成（書き込み処理）、設定変更（`PRAGMA journal_mode=WAL;`）、`power_usage`/`switchbot_meter_logs`/`device_records`へのインデックス作成、`core.migrations.apply_pending_migrations`によるマイグレーションSQLの適用（`schema_migrations`テーブルへの記録を含む）、および標準出力を伴うログ記録。
-* 根拠: `cur.execute` によるSQL実行 (行番号取得不可 / 抜粋: "cur.execute('''")、インデックス作成 (抜粋: "CREATE INDEX IF NOT EXISTS idx_power_usage_device_ts")、マイグレーション適用 (抜粋: "apply_pending_migrations(cur.connection)")
+* **副作用**: データベースファイルへのテーブル作成（書き込み処理、行番号: 75-540）、設定変更（`PRAGMA journal_mode=WAL;`、行番号: 66）、`power_usage`/`switchbot_meter_logs`/`device_records`へのインデックス作成（行番号: 546-557）、`core.migrations.apply_pending_migrations`によるマイグレーションSQLの適用（`schema_migrations`テーブルへの記録を含む、行番号: 560）、および標準出力を伴うログ記録（行番号: 61, 569）。
+* 根拠: `cur.execute` によるSQL実行 (行番号: 66, 75-88 / 抜粋: "cur.execute(") 、インデックス作成 (行番号: 546-549 / 抜粋: "CREATE INDEX IF NOT EXISTS idx_power_usage_device_ts")、マイグレーション適用 (行番号: 560 / 抜粋: "apply_pending_migrations(cur.connection)")
 
 
 * **エラーハンドリング**:
 * WALモード設定失敗時の `Exception` をキャッチし `logger.warning` でログ出力。
-* 根拠: `except Exception as e:` (行番号取得不可 / 抜粋: "logger.warning(f"⚠️ WALモード設定失")
+* 根拠: `except Exception as e:` (行番号: 65-68 / 抜粋: "logger.warning(f\"⚠️ WALモード設定失敗: {e}\")")
 
 
-* `validate_schema_integrity` 実行時の `Exception` をキャッチし `logger.error` でログ出力。
-* 根拠: `except Exception as e:` (行番号取得不可 / 抜粋: "logger.error(f"Schema Validatio")
-
-
-
-
+* `validate_schema_integrity` 呼び出しを含む `sqlite3.connect` ブロック実行時の `Exception` をキャッチし `logger.error` でログ出力。
+* 根拠: `try: ... except Exception as e:` (行番号: 563-567 / 抜粋: "logger.error(f\"Schema Validation Failed: {e}\")")
 
 ## 5. 処理フロー図
 
@@ -170,8 +173,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `SQLITE_TABLE_*` の具体的なテーブル名や `SQLITE_DB_PATH` の実際の保存場所を特定し、本スクリプトがどこに影響を及ぼすかを正確に把握するため。 | 根拠: `config.SQLITE_DB_PATH` 等の参照 (行番号取得不可 / 抜粋: "import config") |
-| 中 | `common.py` | `get_db_cursor(commit=True)` の内部実装におけるトランザクション制御や排他制御の仕様を確認し、DB初期化時の安全性を評価するため。 | 根拠: `common.get_db_cursor` の呼び出し (行番号取得不可 / 抜粋: "import common") |
+| 高 | `config.py` | `SQLITE_TABLE_*` の具体的なテーブル名や `SQLITE_DB_PATH` の実際の保存場所を特定し、本スクリプトがどこに影響を及ぼすかを正確に把握するため。 | 根拠: `config.SQLITE_DB_PATH` 等の参照 (行番号: 5, 61, 564 / 抜粋: "import config") |
+| 中 | `common.py` | `get_db_cursor(commit=True)` の内部実装におけるトランザクション制御や排他制御の仕様を確認し、DB初期化時の安全性を評価するため。 | 根拠: `common.get_db_cursor` の呼び出し (行番号: 6, 63 / 抜粋: "import common") |
 
 ## 8. 保守上の注意点
 
