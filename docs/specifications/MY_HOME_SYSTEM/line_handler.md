@@ -1,3 +1,9 @@
+> **⚠️ 2026年更新: `handle_request` を削除**
+> `handle_request(request, body, signature)` は呼び出し元が皆無の未使用関数だったため削除した。
+> 実際のWebhookエントリーポイントは `routers/webhook_router.py` の `callback_line()` であり、
+> `line_handler.line_handler.handle(body, signature)` を直接呼び出している。
+> 本ドキュメント中、`handle_request` に関する記述は現状のコードと一致しない（削除済み）。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |

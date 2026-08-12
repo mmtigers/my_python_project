@@ -30,10 +30,8 @@ logger = setup_logging("line_logic")
 # ▲▲▲ ▲▲▲
 from core.utils import get_now_iso, get_today_date_str
 from core.database import save_log_async
-from models.line import LinePostbackData, UserInputState, InputMode
+from models.line import LinePostbackData
 
-# ユーザーの状態管理
-USER_INPUT_STATE = {}
 TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
 
 # --- Helper Functions ---
@@ -285,10 +283,7 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
             condition_text = status_map.get(pb.status or "", "その他")
             
             if pb.status == "other" and target_name:
-                USER_INPUT_STATE[user_id] = UserInputState(
-                    mode=InputMode.CHILD_HEALTH, 
-                    target_name=target_name
-                )
+                # 次の自由文メッセージは line_handler.py の AI フォールバック(ai_service)経由で処理される
                 send_reply_text(line_bot_api, reply_token, f"了解です。{target_name}の様子をメッセージで送ってください📝")
             
             elif target_name:
@@ -371,8 +366,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
 
         elif action == "food_manual":
             category = raw_dict.get("category", "その他")
-            USER_INPUT_STATE[user_id] = UserInputState(mode=InputMode.MEAL, category=category)
-            
+            # 次の自由文メッセージは line_handler.py の AI フォールバック(ai_service)経由で処理される
+
             if "外食" in category:
                 prompt_text = "お店の名前（または食べたもの）を入力してください 🍜"
             elif "自炊" in category:
@@ -395,4 +390,3 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
 
     except Exception as e:
         logger.error(f"Handle Postback Error: {e}", exc_info=True)
-
