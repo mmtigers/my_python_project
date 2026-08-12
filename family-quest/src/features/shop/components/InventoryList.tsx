@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
+import { Modal } from '../../../components/ui/Modal';
 import { useSound } from '../../../hooks/useSound';
 import { Loader2, PackageOpen, Clock, AlertCircle } from 'lucide-react';
 import { InventoryItem } from '../../../types';
@@ -17,6 +18,9 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
     const queryClient = useQueryClient();
     const { play } = useSound();
     const queryKey = ['inventory', userId]; // QueryKeyを定数化
+
+    // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「つかう」確認を行う
+    const [itemToUse, setItemToUse] = useState<InventoryItem | null>(null);
 
     // データ取得
     const { data: items, isLoading } = useQuery({
@@ -130,9 +134,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                         className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md active:scale-95 transition-all"
                                         onClick={() => {
                                             // ★変更: 「パパ・ママに通知がいきます」の文言を削除
-                                            if (confirm(`「${item.title}」を使いますか？`)) {
-                                                useMutationAction.mutate(item.id);
-                                            }
+                                            setItemToUse(item);
                                         }}
                                         disabled={useMutationAction.isPending}
                                     >
@@ -162,6 +164,28 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                     </Card>
                 );
             })}
+
+            <Modal
+                isOpen={!!itemToUse}
+                onClose={() => setItemToUse(null)}
+                title="つかう"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={() => setItemToUse(null)}>キャンセル</Button>
+                        <Button
+                            variant="primary"
+                            onClick={() => {
+                                if (itemToUse) useMutationAction.mutate(itemToUse.id);
+                                setItemToUse(null);
+                            }}
+                        >
+                            はい
+                        </Button>
+                    </>
+                }
+            >
+                <p className="text-center">「{itemToUse?.title}」を使いますか？</p>
+            </Modal>
         </div>
     );
 };

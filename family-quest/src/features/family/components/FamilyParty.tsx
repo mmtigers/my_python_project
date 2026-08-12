@@ -1,11 +1,11 @@
 import React, { useMemo } from 'react';
 import { Crown, Sword, Shield } from 'lucide-react';
-import { User, Equipment, Boss } from '@/types';
+import { User, Equipment, Boss, OwnedEquipment } from '@/types';
 import BossCard from './BossCard'; // ★追加
 
 interface FamilyPartyProps {
     users: User[];
-    ownedEquipments: any[]; // 型定義に合わせて調整 (例: Equipment & { is_equipped: number, user_id: string })
+    ownedEquipments: OwnedEquipment[];
     boss: Boss | null; // ★追加
 }
 
@@ -13,10 +13,9 @@ const FamilyParty: React.FC<FamilyPartyProps> = ({ users, ownedEquipments, boss 
     // ユーザーごとの詳細ステータスを計算
     const partyData = useMemo(() => {
         return users.map(user => {
-            // APIレスポンス構造によっては ownedEquipments の中身を any として扱うか、型定義を強化する
-            const myEquips = ownedEquipments.filter((e: any) => e.user_id === user.user_id && e.is_equipped === 1);
-            const weapon = myEquips.find((e: any) => e.type === 'weapon');
-            const armor = myEquips.find((e: any) => e.type === 'armor');
+            const myEquips = ownedEquipments.filter((e) => e.user_id === user.user_id && e.is_equipped === 1);
+            const weapon = myEquips.find((e) => e.type === 'weapon');
+            const armor = myEquips.find((e) => e.type === 'armor');
 
             // 攻撃力・守備力の計算
             const baseAtk = user.level * 3;

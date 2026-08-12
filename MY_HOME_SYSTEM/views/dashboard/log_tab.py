@@ -111,12 +111,15 @@ def render_system():
     st.markdown("---")
     col_reboot, _ = st.columns([1, 2])
     with col_reboot:
-        if st.button("🔄 システム再起動"):
-            try:
-                subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True)
-                st.success("再起動コマンド送信完了")
-            except Exception as e:
-                st.error(f"エラー: {e}")
+        st.warning("⚠️ この操作は本番サービスを再起動します。誤操作防止のため確認が必要です。")
+        confirm_reboot = st.checkbox("再起動することを理解しました", key="confirm_reboot_checkbox")
+        if confirm_reboot:
+            if st.button("🔄 システム再起動", type="primary"):
+                try:
+                    subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True)
+                    st.success("再起動コマンド送信完了")
+                except Exception as e:
+                    st.error(f"エラー: {e}")
     
     # バックアップ機能 (簡易実装)
     import config

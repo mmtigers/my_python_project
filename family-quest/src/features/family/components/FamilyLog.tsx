@@ -1,16 +1,17 @@
 import React from 'react';
 import { Trophy, Coins, History, Clock } from 'lucide-react';
+import { FamilyStats, ChronicleItem } from '@/hooks/useGameData';
 
 interface FamilyLogProps {
-    stats: any; // 必要であれば { partyRank: string, ... } 等の詳細型定義を推奨
-    chronicle: any[];
+    stats: FamilyStats | null;
+    chronicle: ChronicleItem[];
 }
 
 const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
     if (!stats || !chronicle) return <div className="text-center py-10">冒険の記録を読み込んでいます...</div>;
 
-    // 日付ごとにログをグループ化 (型定義が甘いため reduce の型を any で逃げるか詳細定義する)
-    const groupedChronicle = chronicle.reduce((groups: any, item: any) => {
+    // 日付ごとにログをグループ化
+    const groupedChronicle = chronicle.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
         const date = item.dateStr || item.date || '----/--/--';
         if (!groups[date]) groups[date] = [];
         groups[date].push(item);
@@ -18,7 +19,7 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
     }, {});
 
     // 時刻フォーマット関数
-    const formatTime = (ts: string | number) => {
+    const formatTime = (ts: string | number | undefined) => {
         if (!ts) return '';
         const date = new Date(ts);
         return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
@@ -56,13 +57,13 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
                     <h3 className="font-bold text-lg">冒険の記録</h3>
                 </div>
 
-                {Object.entries(groupedChronicle).map(([date, logs]: [string, any]) => (
+                {Object.entries(groupedChronicle).map(([date, logs]: [string, ChronicleItem[]]) => (
                     <div key={date} className="relative pl-4 border-l-2 border-gray-700">
                         <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-blue-500 border-4 border-black"></div>
                         <div className="text-xs text-gray-400 mb-2 font-bold">{date}</div>
 
                         <div className="space-y-2">
-                            {logs.map((log: any) => {
+                            {logs.map((log: ChronicleItem) => {
                                 // 画像アバター判定 (avatar_url または userAvatar プロパティをチェック)
                                 const avatarSrc = log.userAvatar || log.avatar_url;
                                 const isImage = avatarSrc && (avatarSrc.startsWith('/uploads') || avatarSrc.startsWith('http'));
@@ -88,12 +89,12 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
                                                 {log.text || log.message || `${log.quest_title} を達成！`}
                                             </div>
                                             <div className="flex gap-2 mt-1">
-                                                {(log.gold > 0 || log.reward_gold > 0) && (
+                                                {((log.gold || 0) > 0 || (log.reward_gold || 0) > 0) && (
                                                     <span className="text-[9px] text-yellow-400 font-bold bg-yellow-900/30 px-1 rounded">
                                                         +{log.gold || log.reward_gold} G
                                                     </span>
                                                 )}
-                                                {(log.exp > 0 || log.reward_exp > 0) && (
+                                                {((log.exp || 0) > 0 || (log.reward_exp || 0) > 0) && (
                                                     <span className="text-[9px] text-cyan-400 font-bold bg-cyan-900/30 px-1 rounded">
                                                         +{log.exp || log.reward_exp} Exp
                                                     </span>

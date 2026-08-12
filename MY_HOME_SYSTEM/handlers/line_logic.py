@@ -19,7 +19,7 @@ from linebot.v3.messaging import (
     MessageAction,
     PostbackAction
 )
-from linebot.v3.webhooks import MessageEvent, PostbackEvent
+from linebot.v3.webhooks import PostbackEvent
 # ▲▲▲ ▲▲▲
 
 # Local Modules
