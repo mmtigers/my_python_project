@@ -1,6 +1,6 @@
 // family-quest/src/lib/apiClient.ts
 
-import { Bounty, InventoryItem, PendingInventory } from "../types";
+import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from "../types";
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -47,6 +47,16 @@ class ApiClient {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(body),
+        });
+    }
+
+    // multipart/form-data 用のPOST。Content-Typeを明示的に指定しないことで、
+    // ブラウザにboundary付きのヘッダーを自動生成させる（手動指定するとboundaryが
+    // 欠落しリクエストが壊れるため）。
+    async postForm<T>(endpoint: string, formData: FormData): Promise<T> {
+        return this._request<T>(endpoint, {
+            method: 'POST',
+            body: formData,
         });
     }
 
@@ -106,8 +116,8 @@ class ApiClient {
         return this.get<PendingInventory[]>('/api/quest/inventory/admin/pending');
     }
 
-    async getFamilyMileage(): Promise<any> {
-        return this.get<any>('/api/quest/family-mileage');
+    async getFamilyMileage(): Promise<FamilyMileage> {
+        return this.get<FamilyMileage>('/api/quest/family-mileage');
     }
 
     async updateFamilyMileage(targetName: string, targetExp: number): Promise<ApiResponse> {

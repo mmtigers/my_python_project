@@ -7,20 +7,15 @@ interface FamilyMileageCardProps {
 }
 
 export const FamilyMileageCard: React.FC<FamilyMileageCardProps> = ({ mileage }) => {
-    if (!mileage || !mileage.is_set) {
-        return (
-            <div className="bg-gray-800 rounded-lg p-4 mb-4 border-2 border-dashed border-gray-600 text-center shadow-md">
-                <p className="text-gray-400 font-bold">共有目標が未設定です</p>
-                <p className="text-xs text-gray-500 mt-1">管理画面から新しい目標を設定してください。</p>
-            </div>
-        );
-    }
-
-    const { target_name, current_exp = 0, target_exp = 1 } = mileage;
+    const isSet = !!mileage?.is_set;
+    const { target_name, current_exp = 0, target_exp = 1 } = mileage ?? {};
     // B案: ゲージ幅は100%で止めるが、数値はそのまま表示する
     const progress = Math.min((current_exp / target_exp) * 100, 100);
-    const isCompleted = current_exp >= target_exp;
+    const isCompleted = isSet && current_exp >= target_exp;
 
+    // ★修正: 早期returnより前にHookを呼ぶ（React Hooksのルール違反を修正）。
+    // また依存配列を [isCompleted] のみにすることで、10秒ポーリングで current_exp が
+    // 変化するたびに（達成済みでも）紙吹雪が再発火してしまう問題を修正。
     useEffect(() => {
         if (isCompleted) {
             confetti({
@@ -30,7 +25,16 @@ export const FamilyMileageCard: React.FC<FamilyMileageCardProps> = ({ mileage })
                 zIndex: 100
             });
         }
-    }, [isCompleted, current_exp]);
+    }, [isCompleted]);
+
+    if (!isSet) {
+        return (
+            <div className="bg-gray-800 rounded-lg p-4 mb-4 border-2 border-dashed border-gray-600 text-center shadow-md">
+                <p className="text-gray-400 font-bold">共有目標が未設定です</p>
+                <p className="text-xs text-gray-500 mt-1">管理画面から新しい目標を設定してください。</p>
+            </div>
+        );
+    }
 
     return (
         <div className={`rounded-lg p-4 mb-4 border-2 shadow-lg transition-all ${isCompleted ? 'bg-yellow-900 border-yellow-500' : 'bg-gray-800 border-gray-600'}`}>
