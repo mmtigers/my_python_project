@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/models/line.py
 from pydantic import BaseModel, Field
 from typing import List, Optional, Any
-from enum import Enum
 
 # --- Webhookのエントリポイント用モデル (unified_server.py用) ---
 class LineSource(BaseModel):
@@ -36,17 +35,3 @@ class LinePostbackData(BaseModel):
     child: Optional[str] = None
     status: Optional[str] = None
     value: Optional[str] = None
-
-class InputMode(str, Enum):
-    """入力モードの定義。タイポを物理的に防ぎます。"""
-    CHILD_HEALTH = "child_health"
-    MEAL = "meal"
-    STOMACH = "stomach"
-
-class UserInputState(BaseModel):
-    """
-    ユーザーが今何を入力している最中かを保持するモデル
-    """
-    mode: InputMode
-    target_name: Optional[str] = None
-    category: Optional[str] = None  # 食事カテゴリ等で使用

@@ -1,12 +1,12 @@
 # MY_HOME_SYSTEM/tests/test_line_logic_postback.py
 """
-handlers/line_logic.py の handle_postback() (LINE会話ステートマシンの
-Postbackディスパッチ側) のテスト。
+handlers/line_logic.py の handle_postback() (LINE Postbackディスパッチ) のテスト。
 
-実際のLINE API・AIサービスへは一切アクセスしない。line_bot_apiはMagicMockで、
-handlers.ai_logic.analyze_text_and_execute はモックで代替する。
-グローバル可変状態 USER_INPUT_STATE はテスト前後でクリアし、他テストへの
-汚染を防ぐ。
+実際のLINE API・AIサービスへは一切アクセスしない。line_bot_apiはMagicMockで代替する。
+
+自由文フォローアップ入力(旧 USER_INPUT_STATE ステートマシン)は、line_handler.py の
+AIフォールバック(services/ai_service.py)経由の一本経路に統合済みのため、ここでは
+postbackが「状態を持たずに案内文だけを返す」ことのみを検証する。
 """
 import os
 import sys
@@ -19,14 +19,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import common
 import config
 from handlers import line_logic
-from models.line import InputMode
-
-
-@pytest.fixture(autouse=True)
-def _reset_user_input_state():
-    line_logic.USER_INPUT_STATE.clear()
-    yield
-    line_logic.USER_INPUT_STATE.clear()
 
 
 @pytest.fixture
@@ -79,18 +71,17 @@ class TestShowHealthInput:
 
 
 class TestChildCheck:
-    def test_status_other_enters_child_health_input_mode_without_saving(self, isolated_db, mock_line_api):
+    def test_status_other_prompts_for_free_text_without_saving(self, isolated_db, mock_line_api):
         event = fake_postback_event("action=child_check&child=智矢&status=other")
 
         line_logic.handle_postback(event, mock_line_api)
 
-        assert line_logic.USER_INPUT_STATE["U1"].mode == InputMode.CHILD_HEALTH
-        assert line_logic.USER_INPUT_STATE["U1"].target_name == "智矢"
+        assert "智矢" in _texts_from_reply(mock_line_api)[0]
         with common.get_db_cursor() as cur:
             count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
         assert count == 0
 
-    def test_status_genki_saves_directly_without_entering_input_mode(self, isolated_db, mock_line_api):
+    def test_status_genki_saves_directly(self, isolated_db, mock_line_api):
         event = fake_postback_event("action=child_check&child=智矢&status=genki")
 
         line_logic.handle_postback(event, mock_line_api)
@@ -101,7 +92,6 @@ class TestChildCheck:
             ).fetchone()
         assert row is not None
         assert "元気" in row["condition"]
-        assert "U1" not in line_logic.USER_INPUT_STATE
 
     def test_missing_child_param_is_a_silent_noop(self, isolated_db, mock_line_api):
         """child パラメータが無い場合、既存実装ではどの分岐にも入らず
@@ -171,15 +161,13 @@ class TestFoodManual:
             ("その他", "食べたもの"),
         ],
     )
-    def test_sets_meal_input_mode_with_category_specific_prompt(
+    def test_replies_with_category_specific_prompt(
         self, isolated_db, mock_line_api, category, expected_fragment
     ):
         event = fake_postback_event(f"action=food_manual&category={category}")
 
         line_logic.handle_postback(event, mock_line_api)
 
-        assert line_logic.USER_INPUT_STATE["U1"].mode == InputMode.MEAL
-        assert line_logic.USER_INPUT_STATE["U1"].category == category
         assert expected_fragment in _texts_from_reply(mock_line_api)[0]
 
 
