@@ -195,7 +195,9 @@ NAS_MOUNT_POINT: str = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")
 NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 
 # DB & Assets (バックオフ付きの安全なパス取得を適用)
-SQLITE_DB_PATH: str = os.path.join(BASE_DIR, "home_system.db")
+# CI/テストからは環境変数 SQLITE_DB_PATH でDBパスを上書きできるようにする
+# (未設定時は従来通りのデフォルトパスを使用)
+SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")
 
 ASSETS_DIR: str = ensure_safe_path_with_backoff(
     os.path.join(NAS_PROJECT_ROOT, "assets"), 

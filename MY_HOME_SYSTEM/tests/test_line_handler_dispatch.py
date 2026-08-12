@@ -1,0 +1,255 @@
+# MY_HOME_SYSTEM/tests/test_line_handler_dispatch.py
+"""
+handlers/line_handler.py のディスパッチロジック
+(_process_message_async / handle_message / handle_postback) のテスト。
+
+これらの関数は元々 `if line_handler:` ブロック内で条件付き定義されており、
+LINE_CHANNEL_ACCESS_TOKEN/SECRET が設定されていない環境(CI含む)では
+モジュール属性としてすら存在しないためテスト不能だった。
+本セッションでの修正で、SDKへの登録(line_handler.add)のみを条件付きにし、
+ロジック自体は常に定義されるよう分離したため、ここで直接テストできる。
+
+実際のLINE API・AI(Gemini)サービスへは一切アクセスせず、呼び出し先を
+全てモックし、主要な会話ステート遷移(コマンド分岐)が壊れていないことを検知する。
+"""
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from linebot.v3.messaging import TextMessage
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from handlers import line_handler
+
+
+@pytest.fixture(autouse=True)
+def _clean_profile_cache():
+    line_handler._profile_cache.clear()
+    yield
+    line_handler._profile_cache.clear()
+
+
+@pytest.mark.asyncio
+class TestProcessMessageAsyncDispatch:
+    async def test_status_command_dispatches_to_get_user_status_message(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="status-reply"))
+        monkeypatch.setattr(line_handler.line_service, "get_user_status_message", mock_fn)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "ステータス", "tok")
+
+        mock_fn.assert_called_once_with("U1")
+        assert mock_reply.call_args[0][0] == "tok"
+
+    async def test_quest_command_dispatches_to_get_active_quests_message(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="quest-reply"))
+        monkeypatch.setattr(line_handler.line_service, "get_active_quests_message", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "太郎", "クエスト", "tok")
+
+        mock_fn.assert_called_once_with("U1")
+
+    async def test_approve_prefix_dispatches_to_process_approval_command(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="approved"))
+        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "太郎", "承認 5", "tok")
+
+        mock_fn.assert_called_once_with("U1", "承認 5")
+
+    async def test_reject_prefix_dispatches_to_process_approval_command(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="rejected"))
+        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "太郎", "却下 5", "tok")
+
+        mock_fn.assert_called_once_with("U1", "却下 5")
+
+    async def test_child_health_message_detects_member_and_condition(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気", "tok")
+
+        mock_fn.assert_called_once_with("U1", "パパ", "智矢", "元気")
+
+    async def test_child_health_message_detects_unwell_condition(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "子供記録 涼花 風邪", "tok")
+
+        mock_fn.assert_called_once_with("U1", "パパ", "涼花", "風邪")
+
+    async def test_child_health_message_defaults_to_unknown_condition(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢", "tok")
+
+        mock_fn.assert_called_once_with("U1", "パパ", "智矢", "不明")
+
+    async def test_health_keyword_without_known_member_falls_back_to_ai(self, monkeypatch):
+        """「体調」を含んでいてもFAMILY_SETTINGSに無い名前ならAIフォールバックに委ねること。"""
+        mock_health = AsyncMock()
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_health)
+        mock_ai = AsyncMock(return_value="AI reply")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調どう？", "tok")
+
+        mock_health.assert_not_called()
+        mock_ai.assert_called_once()
+
+    async def test_falls_back_to_ai_when_no_known_command_matches(self, monkeypatch):
+        mock_ai = AsyncMock(return_value="AIからの返答")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "こんにちは", "tok")
+
+        mock_ai.assert_called_once_with("U1", "太郎", "こんにちは")
+        mock_reply.assert_called_once()
+        reply_arg = mock_reply.call_args[0][1]
+        assert reply_arg.text == "AIからの返答"
+
+    async def test_ai_returns_falsy_text_sends_no_reply(self, monkeypatch):
+        mock_ai = AsyncMock(return_value="")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "こんにちは", "tok")
+
+        mock_reply.assert_not_called()
+
+    async def test_ai_exception_sends_generic_error_reply_without_raising(self, monkeypatch):
+        mock_ai = AsyncMock(side_effect=Exception("Gemini API down"))
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "こんにちは", "tok")
+
+        mock_reply.assert_called_once()
+        reply_arg = mock_reply.call_args[0][1]
+        assert "うまく処理できませんでした" in reply_arg.text
+
+
+class TestReplyMessage:
+    def test_noop_when_line_api_not_configured(self, monkeypatch):
+        monkeypatch.setattr(line_handler, "line_bot_api", None)
+        # 例外を出さずに何もせず戻ること
+        line_handler.reply_message("tok", TextMessage(text="hi"))
+
+    def test_wraps_single_message_in_list_and_calls_api(self, monkeypatch):
+        fake_api = MagicMock()
+        monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+
+        single_message = TextMessage(text="hi")
+        line_handler.reply_message("tok", single_message)
+
+        fake_api.reply_message.assert_called_once()
+        request_arg = fake_api.reply_message.call_args[0][0]
+        assert request_arg.reply_token == "tok"
+        assert request_arg.messages == [single_message]
+
+    def test_sdk_exception_is_caught_and_does_not_raise(self, monkeypatch):
+        fake_api = MagicMock()
+        fake_api.reply_message.side_effect = Exception("LINE API down")
+        monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+
+        line_handler.reply_message("tok", TextMessage(text="hi"))  # 例外が外に漏れないこと
+
+
+class TestHandleMessageWrapper:
+    def test_parses_event_strips_text_and_dispatches(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="reply"))
+        monkeypatch.setattr(line_handler.line_service, "get_user_status_message", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.message.text = " ステータス "
+        event.reply_token = "tok"
+
+        line_handler.handle_message(event)
+
+        mock_fn.assert_called_once_with("U1")
+
+
+class TestHandlePostbackWrapper:
+    def test_approve_postback_dispatches_as_approve_command(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="approved"))
+        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.postback.data = "approve:42"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_fn.assert_called_once_with("U1", "承認 42")
+
+    def test_reject_postback_dispatches_as_reject_command(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="rejected"))
+        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.postback.data = "reject:7"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_fn.assert_called_once_with("U1", "却下 7")
+
+    def test_malformed_approval_postback_is_caught_without_raising(self, monkeypatch):
+        mock_fn = AsyncMock()
+        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.postback.data = "approve:1:extra"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_fn.assert_not_called()
+
+    def test_non_approval_postback_delegates_to_line_logic(self, monkeypatch):
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.postback.data = "show_health_input"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
+
+    def test_line_logic_delegation_exception_is_caught_silently(self, monkeypatch):
+        monkeypatch.setattr(
+            line_handler.line_logic, "handle_postback", MagicMock(side_effect=Exception("boom"))
+        )
+
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.postback.data = "some_other_action"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)  # 例外が外に漏れないこと
