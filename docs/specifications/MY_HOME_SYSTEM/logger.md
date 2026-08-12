@@ -28,8 +28,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 21 / 抜粋: "config.DISCORD_WEBHOOK_ERROR") |
-| `config.BASE_DIR` | `config`モジュールの実装が提供されておらず、ログディレクトリが作成されるベースとなるルートパスが不明であるため。 | 根拠: `[config.BASE_DIR]` (行番号: 61 / 抜粋: "config.BASE_DIR") |
+| `config.DISCORD_WEBHOOK_ERROR` | `config`モジュールの実装が提供されておらず、Webhook送信先の実際のURL文字列が不明であるため。 | 根拠: `[config.DISCORD_WEBHOOK_ERROR]` (行番号: 22 / 抜粋: "url = self.webhook_url or config.DISCORD_WEBHOOK_ERROR") |
+| `config.BASE_DIR` | `config`モジュールの実装が提供されておらず、ログディレクトリが作成されるベースとなるルートパスが不明であるため。 | 根拠: `[config.BASE_DIR]` (行番号: 63 / 抜粋: "log_dir = os.path.join(config.BASE_DIR, \"logs\")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -59,46 +59,46 @@
 ### `DiscordErrorHandler.emit`
 
 * **役割**: ロガーから渡されたレコードがERRORレベル以上かつメッセージに"Discord"が含まれない場合、スタックトレース（最大1000文字）を付与してWebhook URLへPOST送信する。
-* 根拠: `[emit]` (行番号: 16〜42 / 抜粋: "def emit(self, record):")
+* 根拠: `[emit]` (行番号: 17〜44 / 抜粋: "def emit(self, record):")
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
-* 根拠: `[emit]` (行番号: 16 / 抜粋: "def emit(self, record):")
+* 根拠: `[emit]` (行番号: 17 / 抜粋: "def emit(self, record):")
 
 
 * **戻り値/レスポンス**: なし (URLが存在しない場合は早期 `return`)
-* 根拠: `[return]` (行番号: 22〜23 / 抜粋: "if not url:\n    return")
+* 根拠: `[return]` (行番号: 23〜24 / 抜粋: "if not url:\n    return")
 
 
 * **副作用**: `requests.post`によるDiscord Webhookへの外部API通信。
-* 根拠: `[requests.post]` (行番号: 40 / 抜粋: "requests.post(url, json=payloa...")
+* 根拠: `[requests.post]` (行番号: 42 / 抜粋: "requests.post(url, json=payload, timeout=5)")
 
 
 * **エラーハンドリング**: `requests.post`等の処理中に発生した全ての例外(`Exception`)をキャッチし、`pass`で握りつぶす。
-* 根拠: `[except Exception]` (行番号: 41〜42 / 抜粋: "except Exception:\n    pass")
+* 根拠: `[except Exception]` (行番号: 43〜44 / 抜粋: "except Exception:\n    pass")
 
 
 
 ### `setup_logging`
 
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラをクリアした後、コンソール出力、ファイル出力（ローテーション設定）、Discord通知の3種のハンドラを登録して返す。
-* 根拠: `[setup_logging]` (行番号: 44〜84 / 抜粋: "def setup_logging(name: str, w...")
+* 根拠: `[setup_logging]` (行番号: 46〜86 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)
-* 根拠: `[setup_logging]` (行番号: 44 / 抜粋: "def setup_logging(name: str, w...")
+* 根拠: `[setup_logging]` (行番号: 46 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (セットアップが完了したロガーインスタンス)
-* 根拠: `[戻り値の型アノテーションおよびreturn]` (行番号: 44, 84 / 抜粋: "-> logging.Logger:\n    ...\n    return logger")
+* 根拠: `[戻り値の型アノテーションおよびreturn]` (行番号: 46, 86 / 抜粋: "-> logging.Logger:\n    ...\n    return logger")
 
 
 * **副作用**: `os.makedirs`によるローカルファイルシステムのディレクトリ作成（存在しない場合）、およびローカルファイル（`home_system.log`）への書き込みストリームの生成。
-* 根拠: `[os.makedirs]` (行番号: 61〜63 / 抜粋: "os.makedirs(log_dir, exist_ok=...")
+* 根拠: `[os.makedirs]` (行番号: 63〜64 / 抜粋: "os.makedirs(log_dir, exist_ok=True)")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `[setup_logging関数全体]` (行番号: 44〜84 / 抜粋: "def setup_logging(name: str, w...")
+* 根拠: `[setup_logging関数全体]` (行番号: 46〜86 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:")
 
 
 
@@ -188,7 +188,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `BASE_DIR`や`DISCORD_WEBHOOK_ERROR`など、システム構成の基幹となる設定値の具体的な内容を確認するため。 | 根拠: `[config.BASE_DIR, config.DISCORD_WEBHOOK_ERROR]` (行番号: 21, 61, 76 / 抜粋: "config.BASE_DIR") |
+| 高 | `config.py` | `BASE_DIR`や`DISCORD_WEBHOOK_ERROR`など、システム構成の基幹となる設定値の具体的な内容を確認するため。 | 根拠: `[config.BASE_DIR, config.DISCORD_WEBHOOK_ERROR]` (行番号: 22, 63, 78 / 抜粋: "config.BASE_DIR") |
 
 ## 8. 保守上の注意点
 
