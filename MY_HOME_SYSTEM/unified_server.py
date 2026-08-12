@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     logger.info("🚀 --- API Server Starting Up ---")
 
+    if not config.SWITCHBOT_WEBHOOK_TOKEN:
+        logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.")
+
     # スキーママイグレーションの適用 (migrations/ 配下、詳細は core/migrations.py 参照)
     try:
         migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)

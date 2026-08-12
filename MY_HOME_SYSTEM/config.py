@@ -433,15 +433,34 @@ SOUND_MAP: Dict[str, str] = {
     "boss_defeat_fanfare": "fanfare.mp3",
 }
 
+# 注意: "members" のキー名（実名）は LINE Bot 側のメッセージ文字列マッチング等
+# (例: handlers/line_handler.py の `if child in msg_text`) で機能的に使用されているため、
+# 安易に匿名化・外部化すると多数の呼び出し箇所を壊すリスクがある。
+# そのため名前自体はこのファイルに残しているが、年齢などの個人を特定しうる付加情報は
+# family_members.local.json (gitignore対象) から読み込み、tracked source には
+# プレースホルダーのみを置くようにしている。
 FAMILY_SETTINGS: Dict[str, Any] = {
     "members": ["智矢", "涼花", "将博", "春菜"],
     "styles": {
-        "智矢": {"color": "#1E90FF", "age": "5歳", "icon": "👦"},
-        "涼花": {"color": "#FF69B4", "age": "2歳", "icon": "👧"},
-        "将博": {"color": "#2E8B57", "age": "35歳", "icon": "👨"},
-        "春菜": {"color": "#FF8C00", "age": "ママ", "icon": "👩"},
+        "智矢": {"color": "#1E90FF", "age": None, "icon": "👦"},
+        "涼花": {"color": "#FF69B4", "age": None, "icon": "👧"},
+        "将博": {"color": "#2E8B57", "age": None, "icon": "👨"},
+        "春菜": {"color": "#FF8C00", "age": None, "icon": "👩"},
     }
 }
+
+# family_members.local.json が存在すれば、年齢等の表示専用データをマージする。
+# ファイルが無くても (CI・新規チェックアウト等) 上記プレースホルダーのままアプリは起動できる。
+_family_local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "family_members.local.json")
+if os.path.exists(_family_local_path):
+    try:
+        with open(_family_local_path, "r", encoding="utf-8") as _f:
+            _family_local_overrides = json.load(_f)
+        for _name, _overrides in _family_local_overrides.items():
+            if _name in FAMILY_SETTINGS["styles"] and isinstance(_overrides, dict):
+                FAMILY_SETTINGS["styles"][_name].update(_overrides)
+    except Exception as _e:
+        logger.warning(f"family_members.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}")
 
 ENABLE_BATTLE_EFFECT: bool = False
 

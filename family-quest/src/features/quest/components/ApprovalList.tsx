@@ -1,40 +1,28 @@
-import React from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, Package } from 'lucide-react'; // Packageアイコン追加
-import { QuestHistory, User } from '@/types';
+import { QuestHistory, User, PendingInventory } from '@/types';
 import { Button } from '../../../components/ui/Button';
+import { Modal } from '../../../components/ui/Modal';
 import { apiClient } from '../../../lib/apiClient';
 
 type Props = {
     pendingQuests: QuestHistory[];
+    pendingItems: PendingInventory[];
     users: User[];
+    currentUser: User;
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
 };
 
-// 承認待ちアイテムの型定義
-type PendingInventory = {
-    id: number;
-    user_id: string;
-    user_name: string;
-    title: string;
-    icon: string;
-    used_at: string;
-};
-
-const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject }) => {
+const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, currentUser, onApprove, onReject }) => {
     const queryClient = useQueryClient();
+    // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「アイテム使用承認」の確認を行う
+    const [itemToConsume, setItemToConsume] = useState<PendingInventory | null>(null);
 
-    // 1. アイテムの承認待ちリストを取得
-    const { data: pendingItems } = useQuery({
-        queryKey: ['pendingInventory'],
-        queryFn: () => apiClient.fetchPendingInventory(),
-        refetchInterval: 5000 // ポーリングで最新状態を維持
-    });
-
-    // 2. アイテム承認（消費）アクション
+    // アイテム承認（消費）アクション
     const consumeMutation = useMutation({
-        mutationFn: (inventoryId: number) => apiClient.consumeItem('dad', inventoryId), // 'dad'は仮。App.tsxから親IDを渡すのがベストですが一旦これで動作します
+        mutationFn: (inventoryId: number) => apiClient.consumeItem(currentUser.user_id, inventoryId),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
             // 必要に応じて親のインベントリリストなども更新
@@ -102,11 +90,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                             <Button
                                 variant="primary"
                                 size="sm"
-                                onClick={() => {
-                                    if (confirm(`${item.user_name}くんの「${item.title}」使用を承認しますか？`)) {
-                                        consumeMutation.mutate(item.id);
-                                    }
-                                }}
+                                onClick={() => setItemToConsume(item)}
                                 disabled={consumeMutation.isPending}
                             >
                                 <CheckCircle size={18} /> OK
@@ -115,6 +99,31 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                     </div>
                 ))}
             </div>
+
+            {itemToConsume && (
+                <Modal isOpen={true} onClose={() => setItemToConsume(null)} title="使用の承認">
+                    <div className="flex flex-col gap-4">
+                        <p className="text-gray-700">
+                            {itemToConsume.user_name}くんの「{itemToConsume.title}」使用を承認しますか？
+                        </p>
+                        <div className="flex gap-4">
+                            <Button variant="secondary" onClick={() => setItemToConsume(null)} className="flex-1">
+                                キャンセル
+                            </Button>
+                            <Button
+                                variant="primary"
+                                className="flex-1"
+                                onClick={() => {
+                                    consumeMutation.mutate(itemToConsume.id);
+                                    setItemToConsume(null);
+                                }}
+                            >
+                                承認する
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };

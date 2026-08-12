@@ -96,21 +96,23 @@ class NasMonitor:
         ]
         
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
                 logger.info("✅ NAS restored and fallback data synced.")
-                
+
                 # 通知（復旧および同期完了）
                 send_push(
-                    config.LINE_USER_ID, 
+                    config.LINE_USER_ID,
                     [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {self.mount_point}"}],
                     target="discord", channel="report"
                 )
-                
+
                 # rsync --remove-source-files は空ディレクトリを残すため、クリーンアップ
                 self._cleanup_empty_dirs(self.fallback_dir)
             else:
                 logger.error(f"Sync failed with rsync error: {res.stderr}")
+        except subprocess.TimeoutExpired:
+            logger.error("Sync process exception: rsync timed out after 120s (NAS mount unresponsive)")
         except Exception as e:
             logger.error(f"Sync process exception: {e}")
 

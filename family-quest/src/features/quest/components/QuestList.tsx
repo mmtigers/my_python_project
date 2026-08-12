@@ -3,7 +3,7 @@ import { Undo2, Clock, RotateCcw, Hourglass, TrendingUp, Lock } from 'lucide-rea
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
-import { useQuestStatus } from '../hooks/useQuestStatus';
+import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
 import { useSound } from '@/hooks/useSound';
 
 interface QuestListProps {
@@ -43,10 +43,10 @@ const QuestItem: React.FC<{
     const totalGold = baseGold + bonusGold;
     const totalExp = baseExp + bonusExp;
 
-    const isSharedCompleted = !!(quest as any).is_shared_completed_by && (quest as any).is_shared_completed_by !== currentUser.user_id;
-    const isSharedPending = !!(quest as any).is_shared_pending_by && (quest as any).is_shared_pending_by !== currentUser.user_id;
+    const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
+    const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
     const isSharedDoneByOther = isSharedCompleted || isSharedPending;
-    const sharedName = (quest as any).shared_completed_by_name || (quest as any).shared_pending_by_name;
+    const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
     const isEffectivelyLocked = isLocked || isSharedDoneByOther;
 
     const handleClick = () => {
@@ -231,26 +231,15 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
-            // ▼ ソート順のロジック更新
+            // ▼ ソート順のロジック（ロック/申請中/完了の判定は useQuestStatus と共通の
+            // getQuestLockState に集約。Hooksが使えないコンパレータからも直接呼べる）
             const getStatusScore = (quest: Quest) => {
-                const qId = quest.id || quest.quest_id;
+                const { isLocked, isInfinite, isPending, isDone } =
+                    getQuestLockState(quest, currentUser, completedQuests, pendingQuests);
 
-                // 1. ロック判定 (Hooksが使えないのでここで簡易判定)
-                const preReqId = quest.pre_requisite_quest_id;
-                const isPreReqCleared = !preReqId || completedQuests.some(cq =>
-                    cq.user_id === currentUser.user_id &&
-                    cq.quest_id === preReqId &&
-                    cq.status === 'approved'
-                );
-                const isLocked = !isPreReqCleared;
-
-                const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite' || (quest as any)._isInfinite;
                 if (isInfinite) return 0; // 無限は最優先(挑戦可能)
 
-                const isPending = pendingQuests.some(pq => pq.user_id === currentUser.user_id && pq.quest_id === qId);
-                const isDone = completedQuests.some(cq => cq.user_id === currentUser.user_id && cq.quest_id === qId && cq.status === 'approved');
-
-                // 優先順位: 
+                // 優先順位:
                 // 0: 未完了(挑戦可能)
                 // 1: 申請中 (目立つように上の方へ、または完了の前へ)
                 // 2: ロック済み (これからやるものだが今はできない -> 下へ)
@@ -276,7 +265,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             if (bonusA !== bonusB) return bonusB - bonusA;
             return (b.id as number) - (a.id as number);
         });
-    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
+    }, [quests, currentUser, currentDay, completedQuests, pendingQuests, isDaily]);
 
     return (
         <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">

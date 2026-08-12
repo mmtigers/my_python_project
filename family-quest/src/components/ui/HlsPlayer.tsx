@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 
 interface HlsPlayerProps {
@@ -19,6 +19,8 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
     onVideoRef
 }) => {
     const videoRef = useRef<HTMLVideoElement>(null);
+    // ★追加: HLS致命的エラー/ネイティブ再生エラー発生時にユーザーへ視覚的に知らせるためのフラグ
+    const [streamError, setStreamError] = useState(false);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -26,10 +28,25 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
 
         if (onVideoRef) onVideoRef(video);
 
+        // ★新しい streamUrl の読み込み開始時は、前回のエラー表示をリセットする
+        setStreamError(false);
+
         let hls: Hls;
 
         // ★追加: 無限ループ防止のための時間記録用変数
         let recoverDecodingErrorDate = 0;
+
+        // Safari用: ネイティブ再生時のエラーハンドラ（cleanup で解除できるよう名前付き関数にする）
+        const handleNativeError = () => {
+            console.error("Native video playback error (Safari HLS)");
+            setStreamError(true);
+        };
+
+        // Safari用: メタデータ読み込み完了時のハンドラ（cleanup で removeEventListener するため名前付き関数にする）
+        const handleLoadedMetadata = () => {
+            if (startPosition) video.currentTime = startPosition;
+            if (autoPlay) video.play().catch(e => console.error("Play failed:", e));
+        };
 
         if (Hls.isSupported()) {
             hls = new Hls({
@@ -37,7 +54,7 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
             });
             hls.loadSource(streamUrl);
             hls.attachMedia(video);
-            hls.on(Hls.Events.ERROR, (event, data) => {
+            hls.on(Hls.Events.ERROR, (_event, data) => {
                 if (data.fatal) {
                     console.error("HLS Fatal Error:", data);
                     if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -50,9 +67,11 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
                         } else {
                             console.error("致命的なメディアエラー: 回復できないためHLSを破棄します。");
                             hls.destroy();
+                            setStreamError(true);
                         }
                     } else {
                         hls.destroy();
+                        setStreamError(true);
                     }
                 }
             });
@@ -63,24 +82,36 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
             });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = streamUrl;
-            video.addEventListener('loadedmetadata', () => {
-                if (startPosition) video.currentTime = startPosition;
-                if (autoPlay) video.play().catch(e => console.error("Play failed:", e));
-            });
+            video.addEventListener('loadedmetadata', handleLoadedMetadata);
+            video.addEventListener('error', handleNativeError);
         }
 
         return () => {
-            if (hls) hls.destroy();
+            if (hls) {
+                hls.destroy();
+            } else {
+                // hls.js 未使用（Safariネイティブ再生）の場合のみ登録したリスナーなので、
+                // 対になるブランチでのみ解除する（毎回の再実行でリスナーが積み上がるのを防ぐ）
+                video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+                video.removeEventListener('error', handleNativeError);
+            }
         };
-    }, [streamUrl, autoPlay, startPosition]);
+    }, [streamUrl, autoPlay, startPosition, onVideoRef]);
 
     return (
-        <video
-            ref={videoRef}
-            muted={muted}
-            controls={controls}
-            className="w-full h-full object-contain bg-black"
-        />
+        <div className="relative w-full h-full">
+            <video
+                ref={videoRef}
+                muted={muted}
+                controls={controls}
+                className="w-full h-full object-contain bg-black"
+            />
+            {streamError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/80 text-white text-sm text-center p-4 pointer-events-none">
+                    映像を取得できませんでした
+                </div>
+            )}
+        </div>
     );
 };
 

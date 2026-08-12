@@ -13,6 +13,7 @@ import { Bounty } from '../../../types';
 import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
+import MessageModal from '../../../components/ui/MessageModal';
 import { useSound } from '../../../hooks/useSound';
 
 // 型定義
@@ -35,6 +36,10 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
 
     const [activeTab, setActiveTab] = useState<'OPEN' | 'MINE'>('OPEN');
     const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // ★変更: 素の alert()/confirm() を廃止し、アプリ標準の Modal で統一表示する
+    const [message, setMessage] = useState<{ title: string; text: string } | null>(null);
+    const [confirmAction, setConfirmAction] = useState<{ type: 'delete' | 'resign'; bountyId: number } | null>(null);
 
     // フォーム状態
     const [form, setForm] = useState<CreateBountyForm>({
@@ -59,7 +64,7 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
             // 小さな演出
             confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
         },
-        onError: (err: Error) => alert(err.message),
+        onError: (err: Error) => setMessage({ title: "エラー", text: err.message }),
     });
 
     const completeMutation = useMutation({
@@ -68,7 +73,7 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
             play('submit');
             queryClient.invalidateQueries({ queryKey: ['bounties'] });
         },
-        onError: (err: Error) => alert(err.message),
+        onError: (err: Error) => setMessage({ title: "エラー", text: err.message }),
     });
 
     const approveMutation = useMutation({
@@ -103,7 +108,7 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
                 }
             }());
         },
-        onError: (err: Error) => alert(err.message),
+        onError: (err: Error) => setMessage({ title: "エラー", text: err.message }),
     });
 
     const createMutation = useMutation({
@@ -137,16 +142,18 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
     // --- Helpers ---
 
     const handleDelete = (bountyId: number) => {
-        if (confirm("この依頼を取り下げますか？")) {
-            deleteMutation.mutate(bountyId);
-        }
+        setConfirmAction({ type: 'delete', bountyId });
     };
 
     const handleResign = (bountyId: number) => {
-        if (confirm("受注を辞退しますか？\n(ペナルティはありません)")) {
-            resignMutation.mutate(bountyId);
-        }
+        setConfirmAction({ type: 'resign', bountyId });
     };
+
+    // confirmAction の種別に応じた確認ダイアログの文言・実行アクション
+    const confirmActionMeta = confirmAction ? {
+        delete: { title: '取り下げ確認', text: 'この依頼を取り下げますか？', run: () => deleteMutation.mutate(confirmAction.bountyId) },
+        resign: { title: '辞退確認', text: '受注を辞退しますか？\n(ペナルティはありません)', run: () => resignMutation.mutate(confirmAction.bountyId) },
+    }[confirmAction.type] : null;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -363,7 +370,7 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
                             <select
                                 className="w-full bg-black border border-gray-500 rounded p-2"
                                 value={form.target_type}
-                                onChange={e => setForm({ ...form, target_type: e.target.value as any })}
+                                onChange={e => setForm({ ...form, target_type: e.target.value as CreateBountyForm['target_type'] })}
                             >
                                 <option value="ALL">全員</option>
                                 <option value="CHILDREN">子供たち</option>
@@ -381,6 +388,34 @@ export const GuildBoard: React.FC<GuildBoardProps> = ({ userId }) => {
                     </div>
                 </form>
             </Modal>
+
+            {message && (
+                <MessageModal
+                    title={message.title}
+                    message={message.text}
+                    onClose={() => setMessage(null)}
+                />
+            )}
+
+            {confirmActionMeta && (
+                <Modal isOpen={true} onClose={() => setConfirmAction(null)} title={confirmActionMeta.title}>
+                    <div className="p-2">
+                        <p className="whitespace-pre-wrap text-center mb-6 text-white">{confirmActionMeta.text}</p>
+                        <div className="flex gap-4 justify-center">
+                            <Button variant="secondary" onClick={() => setConfirmAction(null)}>キャンセル</Button>
+                            <Button
+                                variant="primary"
+                                onClick={() => {
+                                    confirmActionMeta.run();
+                                    setConfirmAction(null);
+                                }}
+                            >
+                                はい
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };

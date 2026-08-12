@@ -29,6 +29,10 @@ def split_prompts(input_file, output_dir):
         filename = f"{num}_{safe_title}.md"
         filepath = os.path.join(output_dir, filename)
 
+        # 同名ファイルが既に存在する場合は上書きになる旨を警告（元データの番号/タイトル重複の可能性）
+        if os.path.exists(filepath):
+            print(f"⚠️ 上書き: {filename} は既に存在します（元データの番号/タイトルが重複している可能性）")
+
         # 個別ファイルの書き出し
         with open(filepath, 'w', encoding='utf-8') as out_f:
             out_f.write(f"# {raw_title}\n\n")
