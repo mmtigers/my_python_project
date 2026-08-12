@@ -202,7 +202,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `check_special_events` 内において `except Exception: continue` が使用されており、`config.IMPORTANT_DATES` に日付フォーマットの誤りや必須キー(`date`, `type`)の欠損があった場合、エラーが一切ログに残らず暗黙的に無視される構造となっている。
-* `main` 内にて `Discord用のMarkdown強調()を除去する` というコメント通り `replace("", "")` を実行しているが、この処理はターゲットがDiscordかどうかにかかわらず無条件に実行され、LINE用のテキストペイロードとして追加されている。
+* `main` 内にて `Discord用のMarkdown強調(**)を除去する` というコメント通り `replace("**", "")` を実行しているが、この処理はターゲットがDiscordかどうかにかかわらず無条件に実行され、LINE用のテキストペイロードとして追加されている。
 * `common.send_push` に渡す `payloads` リストには、辞書型(`dict`)のテキストメッセージと、オブジェクト型(`FlexMessage`)が混在して格納されている。
 
 ## 9. 不明事項一覧

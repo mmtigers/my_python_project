@@ -39,7 +39,7 @@
 
 ### `TrendData`
 
-* **役割**: APIから取得するトレンドデータの構造を定義するインターフェース。`rankings.exp/gold/count` と `mvp` は `RankingEntry`（配列または単体）として型付けされている。
+* **役割**: APIから取得するトレンドデータの構造を定義するインターフェース。`dailyStats`（日別統計の配列）、`rankings.exp/gold/count`（`RankingEntry[]`）、`mvp`（`RankingEntry | null`）、`mostPopularQuest`（`string`）を持つ。ただし `dailyStats` はこのファイル内のレンダリング処理では参照されていない。
 * 根拠: `interface TrendData` (行番号: 15-30 / 抜粋: "interface TrendData {")
 
 
@@ -140,36 +140,44 @@
 
 ```mermaid
 flowchart TD
-    Start["Start Render WeeklyTrends"] --> Init["Initialize state: data=null, loading=true"]
-    Init --> Effect["useEffect() on mount"]
-    
-    Effect --> API{"外部: apiClient.get()"}
-    API -- Success --> SetData["setData(res), setLoading(false)"]
-    API -- Error --> Catch["console.error(), setLoading(false)"]
-    
-    SetData --> RenderCheck
-    Catch --> RenderCheck
+    Start["Start Render WeeklyTrends"] --> Query["useQuery(['weeklyTrends'], apiClient.get('/api/quest/analytics/weekly'), staleTime=60s, refetchInterval=30s)"]
 
-    RenderCheck{"loading === true?"}
-    RenderCheck -- Yes --> ShowLoading["Render 'データを集計中...'"]
-    RenderCheck -- No --> DataCheck{"!data ?"}
-    
-    DataCheck -- Yes --> ShowNoData["Render 'データがありません'"]
+    Query --> LoadingCheck{"isLoading (loading) === true?"}
+    LoadingCheck -- Yes --> ShowLoading["Render 'データを集計中...'"] --> End["End Render"]
+    LoadingCheck -- No --> DataCheck{"!data ?"}
+
+    DataCheck -- Yes --> ShowNoData["Render 'データがありません'"] --> End
     DataCheck -- No --> RenderMain["Render Main UI"]
 
-    RenderMain --> RenderPeriod["Render Period Info"]
-    RenderMain --> RenderMVP["Render MVP Card"]
-    RenderMain --> RenderGoldRanking["Call renderRankingCard(Gold)"]
-    RenderMain --> RenderCountRanking["Call renderRankingCard(Count)"]
-    RenderMain --> RenderPopularQuest["Render Popular Quest Info"]
-    
-    RenderPeriod --> End["End Render"]
+    RenderMain --> RenderPeriod["Render 期間表示 (startDate/endDate)"]
+    RenderMain --> MvpCheck{"data.mvp が truthy か?"}
+    MvpCheck -- Yes --> RenderMVP["Render MVPカード (AvatarDisplay含む)"]
+    MvpCheck -- No --> SkipMVP["MVPカードをスキップ"]
+    RenderMain --> RenderGoldRanking["renderRankingCard(お金持ちランキング, data.rankings.gold)"]
+    RenderMain --> RenderCountRanking["renderRankingCard(頑張りランキング, data.rankings.count)"]
+    RenderMain --> RenderPopularQuest["Render 今週一番人気のクエスト (data.mostPopularQuest)"]
+
+    subgraph renderRankingCard内部
+        RC_TopCheck{"rankData[0] が存在するか?"}
+        RC_TopCheck -- Yes --> RC_ShowTop["1位ユーザーをAvatarDisplay + 数値で表示"]
+        RC_TopCheck -- No --> RC_NoData["'データなし' を表示"]
+        RC_OtherCheck{"rankData.length > 1 か?"}
+        RC_OtherCheck -- Yes --> RC_ShowList["2位以下をRankBadge付きリストで表示"]
+        RC_OtherCheck -- No --> RC_SkipList["リストをスキップ"]
+    end
+
+    RenderGoldRanking --> RC_TopCheck
+    RenderCountRanking --> RC_TopCheck
+    RC_TopCheck --> RC_OtherCheck
+
+    RenderPeriod --> End
     RenderMVP --> End
-    RenderGoldRanking --> End
-    RenderCountRanking --> End
+    SkipMVP --> End
+    RC_ShowTop --> End
+    RC_NoData --> End
+    RC_ShowList --> End
+    RC_SkipList --> End
     RenderPopularQuest --> End
-    ShowLoading --> End
-    ShowNoData --> End
 
 ```
 
@@ -177,10 +185,10 @@ flowchart TD
 
 ```mermaid
 graph TD
-    WeeklyTrends["WeeklyTrends"] --> useState["useState (React)"]
-    WeeklyTrends --> useEffect["useEffect (React)"]
-    WeeklyTrends --> apiClient["apiClient (外部: @/lib/apiClient)"]
-    
+    WeeklyTrends["WeeklyTrends"] --> useQuery["useQuery (@tanstack/react-query)"]
+    WeeklyTrends --> apiClient["apiClient.get (外部: @/lib/apiClient)"]
+    useQuery --> apiClient
+
     WeeklyTrends --> AvatarDisplay["AvatarDisplay"]
     WeeklyTrends --> RankBadge["RankBadge"]
     WeeklyTrends --> renderRankingCard["renderRankingCard (Inner Function)"]

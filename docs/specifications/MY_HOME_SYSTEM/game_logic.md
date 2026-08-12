@@ -101,46 +101,46 @@
 ### `GameLogic.calc_level_down`
 
 * **役割**: 経験値を減算し、経験値がマイナスかつレベルが1より大きい場合はレベルを下げて前のレベルの最大経験値を足し戻す。最終的に経験値がマイナスの場合は0に補正する。
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "while new_exp < 0 and new_le...")
+* 根拠: `GameLogic.calc_level_down` (行番号: 53-56 / 抜粋: "while new_exp < 0 and new_level > 1:")
 
 
 * **引数/リクエスト**: `current_level: int`, `current_exp: int`, `removed_exp: int`
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "def calc_level_down(cls, cur...")
+* 根拠: `GameLogic.calc_level_down` (行番号: 43 / 抜粋: "def calc_level_down(cls, current_level: int, current_exp: int, removed_exp: int) -> Tuple[int, int]:")
 
 
 * **戻り値/レスポンス**: `Tuple[int, int]` (新しいレベル, 新しい経験値)
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "-> Tuple[int, int]:")
+* 根拠: `GameLogic.calc_level_down` (行番号: 43 / 抜粋: "-> Tuple[int, int]:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "return new_level, new_exp")
+* 根拠: `GameLogic.calc_level_down` (行番号: 61 / 抜粋: "return new_level, new_exp")
 
 
-* **エラーハンドリング**: なし
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "if new_exp < 0: new_exp = 0")
+* **エラーハンドリング**: なし（例外送出はせず、経験値が負のままレベル1に達した場合は`0`に補正するのみ）
+* 根拠: `GameLogic.calc_level_down` (行番号: 58-59 / 抜粋: "if new_exp < 0:")
 
 
 
 ### `GameLogic.calculate_drop_rewards`
 
 * **役割**: ベースの報酬に加え、5%の確率でメダルを付与するランダムドロップ判定を行う。
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "earned_medals = 1 if random....")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 72 / 抜粋: "earned_medals = 1 if random.random() < medal_chance else 0")
 
 
 * **引数/リクエスト**: `base_gold: int`, `base_exp: int`
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "def calculate_drop_rewards(b...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 64 / 抜粋: "def calculate_drop_rewards(base_gold: int, base_exp: int) -> Dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (gold, exp, medals, is_luckyを含む辞書)
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 64 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: なし (ただし内部で非決定的な `random.random()` を実行)
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "random.random() < medal_chan...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 72 / 抜粋: "random.random() < medal_chance")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "return { "gold": base_gold...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 74-79 / 抜粋: "return {")
 
 
 
@@ -198,14 +198,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services.py` または `controllers.py` | このクラスのメソッドを呼び出し、計算結果をDBに保存している処理フローとタイミングを確認するため。 | `GameLogic` のコメント `DB接続は行わず、純粋な入出力のみを扱う` (行番号取得不可 / 抜粋: "DB接続は行わず、純粋な入出力のみを扱う") |
-| 中 | 定数定義ファイル (例: `constants.py` など) | メダルドロップ確率の `0.05` など、ハードコードされたマジックナンバーが将来的に外部化される箇所を探るため。 | `calculate_drop_rewards` のコメント `将来的には引数で確率を変えられるようにする` (行番号取得不可 / 抜粋: "将来的には引数で確率を変えられるようにする") |
+| 高 | `services.py` または `controllers.py` | このクラスのメソッドを呼び出し、計算結果をDBに保存している処理フローとタイミングを確認するため。 | `GameLogic` のコメント `DB接続は行わず、純粋な入出力のみを扱う` (行番号: 9 / 抜粋: "DB接続は行わず、純粋な入出力のみを扱う") |
+| 中 | 定数定義ファイル (例: `constants.py` など) | メダルドロップ確率の `0.05` など、ハードコードされたマジックナンバーが将来的に外部化される箇所を探るため。 | `calculate_drop_rewards` のコメント `将来的には引数で確率を変えられるようにする` (行番号: 70 / 抜粋: "将来的には引数で確率を変えられるようにする") |
 
 ## 8. 保守上の注意点
 
-* `calculate_drop_rewards` の出力は `random.random()` に依存しており、非決定的である。
-* `calc_level_down` では、レベル1の状態で経験値減算により最終的な値がマイナスになった場合、`0`に強制リセットされる仕様が存在する。
+* `calculate_drop_rewards` の出力は `random.random()` に依存しており、非決定的である。（行番号: 72）
+* `calc_level_down` では、レベル1の状態で経験値減算により最終的な値がマイナスになった場合、`0`に強制リセットされる仕様が存在する。（行番号: 58-59）
 * メソッドに対する入力値のバリデーション（例: レベルが0以下の場合、引数 `removed_exp` に負の値が渡された場合など）を行う処理が存在しない。
+* `from typing import Tuple, Dict, Any, Optional`（行番号: 3）のうち `Optional` はファイル内で使用されておらず、未使用インポートである。
 
 ## 9. 不明事項一覧
 
