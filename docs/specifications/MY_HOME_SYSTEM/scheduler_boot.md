@@ -47,46 +47,46 @@
 ### `Task`
 
 * **役割**: 実行するスクリプトのパス、実行間隔、最終実行時刻、引数を保持するためのデータ構造を定義する。
-* 根拠: `class Task(TypedDict):` (行番号取得不可 / 抜粋: "実行タスクのデータ構造定義。")
+* 根拠: `class Task(TypedDict):` (行番号: 20-21 / 抜粋: "実行タスクのデータ構造定義。")
 
 
 * **引数/リクエスト**: 該当なし（型定義のため）
-* 根拠: `class Task(TypedDict):` (行番号取得不可 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: `class Task(TypedDict):` (行番号取得不可 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
 
 
 * **副作用**: なし
-* 根拠: 内部での状態変更なし (行番号取得不可 / 抜粋: "class Task(TypedDict):")
+* 根拠: 内部での状態変更なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー補足の記述なし (行番号取得不可 / 抜粋: "class Task(TypedDict):")
+* 根拠: エラー補足の記述なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
 
 
 
 ### `run_script`
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
-* 根拠: `def run_script` (行番号取得不可 / 抜粋: "指定されたスクリプトをサブプロセスとして実行")
+* 根拠: `def run_script` (行番号: 45, 47 / 抜粋: "指定されたスクリプトをサブプロセスとして実行")
 
 
 * **引数/リクエスト**: `script_path` (`str`): 実行するスクリプトの相対パス, `args` (`List[str]`): スクリプトに渡す引数
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "script_path: str, args: List")
+* 根拠: 関数定義 (行番号: 45 / 抜粋: "script_path: str, args: List")
 
 
 * **戻り値/レスポンス**: `bool`: 実行成功（returncode 0）ならTrue、それ以外はFalse
-* 根拠: return文 (行番号取得不可 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")
+* 根拠: return文 (行番号: 54 / 抜粋: "bool: 実行成功(returncode 0)ならTrue")
 
 
 * **副作用**: 外部プロセスの起動。標準出力および標準エラー出力のキャプチャとログ出力。
-* 根拠: `subprocess.run` (行番号取得不可 / 抜粋: "result = subprocess.run(")
+* 根拠: `subprocess.run` (行番号: 70 / 抜粋: "result = subprocess.run(")
 
 
 * **エラーハンドリング**: `subprocess.TimeoutExpired`（タイムアウト時）および一般的な `Exception` をキャッチしてログ出力し、`False` を返す。また、サブプロセスの返り値が0以外の場合もエラーログを出力し `False` を返す。
-* 根拠: try-except ブロック (行番号取得不可 / 抜粋: "except subprocess.TimeoutExpir")
+* 根拠: try-except ブロック (行番号: 87 / 抜粋: "except subprocess.TimeoutExpir")
 
 
 
@@ -116,23 +116,23 @@
 ### `__main__` 実行ブロック
 
 * **役割**: `main` 関数を呼び出してスケジューラを起動し、停止命令や予期せぬエラー時にプロセスを終了させる。
-* 根拠: `if __name__ == "__main__":` (行番号取得不可 / 抜粋: "if **name** == "**main**":")
+* 根拠: `if __name__ == "__main__":` (行番号: 128 / 抜粋: "if **name** == "**main**":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: ブロック定義 (行番号取得不可 / 抜粋: "if **name** == "**main**":")
+* 根拠: ブロック定義 (行番号: 128 / 抜粋: "if **name** == "**main**":")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: ブロック定義 (行番号取得不可 / 抜粋: "if **name** == "**main**":")
+* 根拠: ブロック定義 (行番号: 128 / 抜粋: "if **name** == "**main**":")
 
 
 * **副作用**: `sys.exit(1)` によるプロセスの終了。
-* 根拠: `sys.exit(1)` (行番号取得不可 / 抜粋: "sys.exit(1)")
+* 根拠: `sys.exit(1)` (行番号: 135 / 抜粋: "sys.exit(1)")
 
 
 * **エラーハンドリング**: `KeyboardInterrupt` をキャッチして停止ログを出力し正常終了する。それ以外の `Exception` をキャッチしてクリティカルログを出力し、`sys.exit(1)` で異常終了させる。
-* 根拠: try-except ブロック (行番号取得不可 / 抜粋: "except KeyboardInterrupt:")
+* 根拠: try-except ブロック (行番号: 131, 133 / 抜粋: "except KeyboardInterrupt:")
 
 
 

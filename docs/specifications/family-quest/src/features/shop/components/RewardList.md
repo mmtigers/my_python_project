@@ -36,7 +36,7 @@
 ### `RewardList`
 
 * **役割**: プロパティとして受け取った商品リストをユーザー情報（ターゲット属性、保有ゴールド）に基づきフィルタリング・ソートし、購入可否のステータス付きで一覧表示する。
-* 根拠: `RewardList`コンポーネント (行番号: 13〜98 / 抜粋: `const RewardList: React.FC<RewardListProps> = ...`)
+* 根拠: `RewardList`コンポーネント (行番号: 13〜101 / 抜粋: `const RewardList: React.FC<RewardListProps> = ...`)
 
 
 * **引数/リクエスト**: `RewardListProps` オブジェクト
@@ -48,15 +48,15 @@
 
 
 * **戻り値/レスポンス**: `JSX.Element`
-* 根拠: コンポーネント戻り値 (行番号: 39〜97 / 抜粋: `return ( <div className="space-y-2 ...`)
+* 根拠: コンポーネント戻り値 (行番号: 39〜100 / 抜粋: `return ( <div className="space-y-2 ...`)
 
 
 * **副作用**: なし (純粋なUIレンダリングのみ。実際の購入副作用は引数`onBuy`へ委譲)
-* 根拠: イベントハンドラ (行番号: 62 / 抜粋: `onClick={() => canAfford && onBuy(reward)}`)
+* 根拠: イベントハンドラ (行番号: 65 / 抜粋: `onClick={() => canAfford && onBuy(reward)}`)
 
 
 * **エラーハンドリング**: オブジェクトのプロパティ欠損に対して論理和(`||`)演算子を用いてデフォルト値へフォールバックしている。
-* 根拠: 変数代入 (行番号: 17, 33, 51, 54, 57, 73 / 抜粋: `const target = r.target || 'all';` など)
+* 根拠: 変数代入 (行番号: 17, 33〜34, 51, 57, 60, 76 / 抜粋: `const target = r.target || 'all';` など)
 
 
 
@@ -155,12 +155,12 @@ graph TD
 * 根拠: 条件式 (行番号: 21, 25, 26 / 抜粋: `const isAdult = currentUser.user_id === 'dad' || currentUser.user_id === 'mom';`)
 
 
-* **プロパティの非正規化（フォールバック）**: 一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`）が混在しており、データ構造が統一されていないことが窺える。
-* 根拠: 変数代入 (行番号: 33, 51, 54, 57, 73 / 抜粋: `const displayText = reward.description || reward.desc || reward.category || 'General';` など)
+* **プロパティの非正規化（フォールバック）**: 一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`、`icon`と`icon_key`）が混在しており、データ構造が統一されていないことが窺える。
+* 根拠: 変数代入 (行番号: 33〜34, 51, 57, 60, 76 / 抜粋: `const displayText = reward.description || reward.desc || reward.category || 'General';` など)
 
 
-* **リストのKey属性におけるインデックス使用**: 一意のID（`reward_id`や`id`）が存在しない場合、配列の`index`をフォールバックとしてReactの`key`に指定している。リストが動的に増減または並び替わる場合、レンダリングバグやパフォーマンス低下を引き起こす可能性がある。
-* 根拠: 変数代入およびJSX (行番号: 54, 61 / 抜粋: `const rId = reward.reward_id || reward.id || index;`, `key={rId}`)
+* **リストのKey属性におけるインデックス使用**: 一意のID（`reward_id`や`id`）が存在しない場合、配列の`index`をフォールバックとしてReactの`key`に指定している。コード上のコメントでは「バックエンドのデータ不備がある場合のみ発生するベストエフォートの保険」として意図的に残されているとされているが、リストが動的に増減または並び替わる場合はレンダリングバグやパフォーマンス低下を引き起こす可能性がある点は変わらない。
+* 根拠: 変数代入およびJSX (行番号: 54〜57, 64 / 抜粋: `const rId = reward.reward_id || reward.id || index;`, `key={rId}`)
 
 
 
