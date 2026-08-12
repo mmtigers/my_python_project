@@ -292,42 +292,42 @@
 ### `_analyze_weather_for_date`
 
 * **役割**: APIから取得したデータから対象日の情報を抽出し、最高/最低気温、降水確率、天気、傘の必要性を集計する。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "def _analyze_weather_for_date(")
+* 根拠: [_analyze_weather_for_date] (行番号: 262〜303 / 抜粋: "def _analyze_weather_for_date(")
 
 
 * **引数/リクエスト**: `data` (`Dict[str, Any]`), `location_name` (`str`), `target_date_str` (`str`)
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "def _analyze_weather_for_date(self, data: Dict[str, Any], location_name: str, target_date_str: str)")
+* 根拠: [_analyze_weather_for_date] (行番号: 262 / 抜粋: "def _analyze_weather_for_date(self, data: Dict[str, Any], location_name: str, target_date_str: str)")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (集計されたサマリー情報、データなし時 `None`)
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: [_analyze_weather_for_date] (行番号: 262 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: なし。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "return {")
+* 根拠: [_analyze_weather_for_date] (行番号: 295 / 抜粋: "return {")
 
 
 * **エラーハンドリング**: 対象日のデータがない場合、直近8件のデータを利用するフォールバック処理を行う。それでもない場合は `None` を返す。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "if not forecasts_for_target_date:")
+* 根拠: [_analyze_weather_for_date] (行番号: 271, 275 / 抜粋: "if not forecasts_for_target_date:")
 
 
 
 ### `_judge_umbrella_necessity`
 
 * **役割**: 最大降水確率と天気IDをもとに、傘の必要性を判定する。
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "def _judge_umbrella_necessity(")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305〜317 / 抜粋: "def _judge_umbrella_necessity(")
 
 
 * **引数/リクエスト**: `max_pop` (`int`), `weather_ids` (`List[int]`)
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "def _judge_umbrella_necessity(self, max_pop: int, weather_ids: List[int])")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305 / 抜粋: "def _judge_umbrella_necessity(self, max_pop: int, weather_ids: List[int])")
 
 
 * **戻り値/レスポンス**: `str` ("必須", "あるほうがいい", "不要" のいずれか)
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "-> str:")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305 / 抜粋: "-> str:")
 
 
 * **副作用**: なし。
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "return "必須"")
+* 根拠: [_judge_umbrella_necessity] (行番号: 313 / 抜粋: "return "必須"")
 
 
 * **エラーハンドリング**: なし。
@@ -335,19 +335,19 @@
 ### `_generate_advice_message`
 
 * **役割**: 集計された天気情報に基づいて、主婦向けのメッセージ文（傘や気温に関するアドバイス）を生成する。
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "def _generate_advice_message(se")
+* 根拠: [_generate_advice_message] (行番号: 319〜346 / 抜粋: "def _generate_advice_message(se")
 
 
 * **引数/リクエスト**: `summary` (`Dict[str, Any]`)
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "def _generate_advice_message(self, summary: Dict[str, Any]) -> str:")
+* 根拠: [_generate_advice_message] (行番号: 319 / 抜粋: "def _generate_advice_message(self, summary: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (アドバイス文)
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "return msg")
+* 根拠: [_generate_advice_message] (行番号: 346 / 抜粋: "return msg")
 
 
 * **副作用**: なし。
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "msg = "しっかりした傘を"")
+* 根拠: [_generate_advice_message] (行番号: 329 / 抜粋: "msg = "しっかりした傘を"")
 
 
 * **エラーハンドリング**: なし。
@@ -355,23 +355,23 @@
 ### `_save_to_db`
 
 * **役割**: 集計されたサマリー情報をSQLiteデータベースにUpsert処理（挿入または更新）で保存する。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "def _save_to_db(self, summary: ")
+* 根拠: [_save_to_db] (行番号: 348〜388 / 抜粋: "def _save_to_db(self, summary: ")
 
 
 * **引数/リクエスト**: `summary` (`Dict[str, Any]`)
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "def _save_to_db(self, summary: Dict[str, Any]) -> bool:")
+* 根拠: [_save_to_db] (行番号: 348 / 抜粋: "def _save_to_db(self, summary: Dict[str, Any]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (保存成功時 `True`, 失敗時 `False`)
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "-> bool:")
+* 根拠: [_save_to_db] (行番号: 348 / 抜粋: "-> bool:")
 
 
 * **副作用**: DBへのデータ書き込み実行、情報ログの出力。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "cursor.execute(sql, vals)")
+* 根拠: [_save_to_db] (行番号: 381 / 抜粋: "cursor.execute(sql, vals)")
 
 
 * **エラーハンドリング**: データベース操作で例外が発生した際、`_handle_error` を呼び出し `False` を返す。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: [_save_to_db] (行番号: 386 / 抜粋: "except Exception as e:")
 
 
 
