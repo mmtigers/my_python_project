@@ -6,7 +6,6 @@ import uuid
 import sys
 import aiofiles
 
-import common
 import config
 import sound_manager
 from core.logger import setup_logging
@@ -14,8 +13,8 @@ from core.logger import setup_logging
 # 分離したモジュールをインポート
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
-    QuestAction, ApproveAction, HistoryAction, RewardAction, EquipAction, 
-    UpdateUserAction, SoundTestRequest, AdminBossUpdate, UseItemAction, ConsumeItemAction, WeeklyReportResponse, FamilyMileageUpdate
+    QuestAction, ApproveAction, HistoryAction, RewardAction,
+    UpdateUserAction, SoundTestRequest, UseItemAction, ConsumeItemAction
 )
 from services.quest_service import (
     game_system, quest_service, shop_service, user_service, inventory_service
@@ -62,14 +61,6 @@ def cancel_quest(action: HistoryAction):
 @router.post("/reward/purchase", response_model=PurchaseResponse)
 def purchase_reward(action: RewardAction):
     return shop_service.process_purchase_reward(action.user_id, action.reward_id)
-
-@router.post("/equip/purchase", response_model=PurchaseResponse)
-def purchase_equipment(action: EquipAction):
-    return shop_service.process_purchase_equipment(action.user_id, action.equipment_id)
-
-@router.post("/equip/change")
-def change_equipment(action: EquipAction):
-    return shop_service.process_change_equipment(action.user_id, action.equipment_id)
 
 @router.get("/family/chronicle")
 def get_family_chronicle():
@@ -129,49 +120,9 @@ async def upload_image(file: UploadFile = File(...)):
 def test_sound(req: SoundTestRequest):
     if req.sound_key not in config.SOUND_MAP:
         raise HTTPException(status_code=400, detail=f"Invalid sound key. Options: {list(config.SOUND_MAP.keys())}")
-    
+
     sound_manager.play(req.sound_key)
     return {"status": "playing", "key": req.sound_key}
-
-@router.post("/admin/boss/update")
-def admin_update_boss(action: AdminBossUpdate):
-    """管理画面からボスのステータスを直接変更する"""
-    with common.get_db_cursor(commit=True) as cur:
-        updates = []
-        params = []
-        
-        if action.max_hp is not None:
-            updates.append("max_hp = ?")
-            params.append(action.max_hp)
-            
-        if action.current_hp is not None:
-            updates.append("current_hp = ?")
-            params.append(action.current_hp)
-            
-        if action.is_defeated is not None:
-            updates.append("is_defeated = ?")
-            params.append(1 if action.is_defeated else 0)
-            
-        if not updates:
-            return {"status": "no_change"}
-            
-        updates.append("updated_at = ?")
-        params.append(common.get_now_iso())
-        
-        sql = f"UPDATE party_state SET {', '.join(updates)} WHERE id = 1"
-        cur.execute(sql, tuple(params))
-        
-        logger.info(f"👮 Admin Boss Update: {action.model_dump()}")
-        
-    return {"status": "updated"}
-
-@router.get("/family-mileage")
-def get_family_mileage():
-    return quest_service.get_family_mileage()
-
-@router.put("/family-mileage")
-def update_family_mileage(action: FamilyMileageUpdate):
-    return quest_service.update_family_mileage(action.target_name, action.target_exp)
 
 @router.get("/inventory/{user_id}")
 def get_inventory(user_id: str):
@@ -192,7 +143,3 @@ def cancel_item_usage(action: UseItemAction):
 @router.get("/inventory/admin/pending")
 def get_admin_pending_inventory():
     return inventory_service.get_pending_items()
-
-@router.get("/analytics/weekly")
-def get_weekly_analytics():
-    return quest_service.get_weekly_analytics()
