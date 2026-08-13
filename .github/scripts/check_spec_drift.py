@@ -279,16 +279,21 @@ def render_report(report: Report, title: str) -> str:
 
 
 def main() -> int:
+    # --out はサブコマンドの後ろに置く呼び出し方(例: `full --out x.md`)をするため、
+    # トップレベルパーサーではなく各サブパーサーに個別に持たせる必要がある
+    # (argparseはサブコマンドより前の位置にしかトップレベル引数を許さない)。
+    out_parent = argparse.ArgumentParser(add_help=False)
+    out_parent.add_argument("--out", help="レポートの書き出し先。省略時は標準出力。")
+
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="mode", required=True)
 
-    pr_parser = sub.add_parser("pr", help="PR差分のみを対象に検知する")
+    pr_parser = sub.add_parser("pr", help="PR差分のみを対象に検知する", parents=[out_parent])
     pr_parser.add_argument("--base", required=True)
     pr_parser.add_argument("--head", required=True)
 
-    sub.add_parser("full", help="リポジトリ全体を対象に検知する")
+    sub.add_parser("full", help="リポジトリ全体を対象に検知する", parents=[out_parent])
 
-    parser.add_argument("--out", help="レポートの書き出し先。省略時は標準出力。")
     args = parser.parse_args()
 
     if args.mode == "pr":
