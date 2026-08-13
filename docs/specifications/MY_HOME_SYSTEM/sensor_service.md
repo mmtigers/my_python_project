@@ -17,162 +17,162 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準ライブラリ | 非同期処理、タスク作成、スリープ処理用。 | `[import asyncio]` (行番号取得不可 / 抜粋: "import asyncio") |
-| `time` | 標準ライブラリ | 現在時刻のタイムスタンプ取得用。 | `[import time]` (行番号取得不可 / 抜粋: "import time") |
-| `Dict, Optional, List, Any` | 標準ライブラリ (`typing`) | 型アノテーション用。 | `[from typing]` (行番号取得不可 / 抜粋: "from typing import Dict, Optio") |
-| `config` | 外部モジュール | 定数（LINE_USER_IDやDBテーブル名など）の参照用。 | `[import config]` (行番号取得不可 / 抜粋: "import config") |
-| `common` | 外部モジュール | データベースカーソル取得用（`get_db_cursor`）。 | `[import common]` (行番号取得不可 / 抜粋: "import common") |
-| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化用。 | `[from core.logger]` (行番号取得不可 / 抜粋: "from core.logger import setup_") |
-| `get_now_iso` | 外部モジュール (`core.utils`) | 現在時刻のISO形式文字列取得用。 | `[from core.utils]` (行番号取得不可 / 抜粋: "from core.utils import get_now") |
-| `save_log_async` | 外部モジュール (`core.database`) | 非同期でのデータベース保存処理用。 | `[from core.database]` (行番号取得不可 / 抜粋: "from core.database import save") |
-| `send_push` | 外部モジュール (`services.notification_service`) | プッシュ通知送信処理用。 | `[from services.notification...]` (行番号取得不可 / 抜粋: "from services.notification_ser") |
+| `asyncio` | 標準ライブラリ | 非同期処理、タスク作成、スリープ処理用。 | `[import asyncio]` (行番号: 2 / 抜粋: "import asyncio") |
+| `time` | 標準ライブラリ | 現在時刻のタイムスタンプ取得用。 | `[import time]` (行番号: 3 / 抜粋: "import time") |
+| `Dict, Optional, List, Any` | 標準ライブラリ (`typing`) | 型アノテーション用。 | `[from typing]` (行番号: 4 / 抜粋: "from typing import Dict, Optio") |
+| `config` | 外部モジュール | 定数（LINE_USER_IDやDBテーブル名など）の参照用。 | `[import config]` (行番号: 6 / 抜粋: "import config") |
+| `common` | 外部モジュール | データベースカーソル取得用（`get_db_cursor`）。 | `[import common]` (行番号: 7 / 抜粋: "import common") |
+| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化用。 | `[from core.logger]` (行番号: 8 / 抜粋: "from core.logger import setup_") |
+| `get_now_iso` | 外部モジュール (`core.utils`) | 現在時刻のISO形式文字列取得用。 | `[from core.utils]` (行番号: 9 / 抜粋: "from core.utils import get_now") |
+| `save_log_async` | 外部モジュール (`core.database`) | 非同期でのデータベース保存処理用。 | `[from core.database]` (行番号: 10 / 抜粋: "from core.database import save") |
+| `send_push` | 外部モジュール (`services.notification_service`) | プッシュ通知送信処理用。 | `[from services.notification...]` (行番号: 11 / 抜粋: "from services.notification_ser") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` 内の各定数 | `LINE_USER_ID`、`SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.LINE_USER_ID]` (行番号取得不可 / 抜粋: "config.LINE_USER_ID, ") |
-| `common.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[common.get_db_cursor]` (行番号取得不可 / 抜粋: "with common.get_db_cursor() as") |
-| `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号取得不可 / 抜粋: "await save_log_async(") |
-| `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号取得不可 / 抜粋: "send_push,") |
+| `config` 内の各定数 | `LINE_USER_ID`、`SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.LINE_USER_ID]` (行番号: 65 / 抜粋: "config.LINE_USER_ID, ") |
+| `common.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[common.get_db_cursor]` (行番号: 162 / 抜粋: "with common.get_db_cursor() as") |
+| `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号: 142 / 抜粋: "await save_log_async(") |
+| `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号: 64 / 抜粋: "send_push,") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `is_duplicate_webhook`
 
 * **役割**: インメモリキャッシュ（`EVENT_CACHE`）を参照し、直近イベントから `DEDUPE_TTL_SECONDS`（3秒）以内で同一ステータスの場合は重複と判定しキャッシュを更新する。
-* 根拠: `[is_duplicate_webhook]` (行番号取得不可 / 抜粋: "last_event['state'] == state a")
+* 根拠: `[is_duplicate_webhook]` (行番号: 43 / 抜粋: "last_event['state'] == state a")
 
 
 * **引数/リクエスト**: `mac: str`, `state: str`, `event_timestamp: float`
-* 根拠: `[is_duplicate_webhook]` (行番号取得不可 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `[is_duplicate_webhook]` (行番号取得不可 / 抜粋: ") -> bool:")
+* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: ") -> bool:")
 
 
 * **副作用**: グローバル変数 `EVENT_CACHE` への書き込みおよび更新。
-* 根拠: `[is_duplicate_webhook]` (行番号取得不可 / 抜粋: "EVENT_CACHE[mac] = {")
+* 根拠: `[is_duplicate_webhook]` (行番号: 47 / 抜粋: "EVENT_CACHE[mac] = {")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[is_duplicate_webhook]` (行番号取得不可 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 
 ### `send_inactive_notification`
 
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
-* 根拠: `[send_inactive_notification]` (行番号取得不可 / 抜粋: "msg: str = f"💤【{location}・見守")
+* 根拠: `[send_inactive_notification]` (行番号: 61 / 抜粋: "msg: str = f"💤【{location}・見守")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `timeout: int`
-* 根拠: `[send_inactive_notification]` (行番号取得不可 / 抜粋: "def send_inactive_notification")
+* 根拠: `[send_inactive_notification]` (行番号: 57 / 抜粋: "def send_inactive_notification")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[send_inactive_notification]` (行番号取得不可 / 抜粋: ") -> None:")
+* 根拠: `[send_inactive_notification]` (行番号: 57 / 抜粋: ") -> None:")
 
 
 * **副作用**: `asyncio.sleep` による待機、`send_push` による外部API呼び出し、グローバル変数 `IS_ACTIVE` の更新、`MOTION_TASKS` からの要素削除。
-* 根拠: `[send_inactive_notification]` (行番号取得不可 / 抜粋: "del MOTION_TASKS[mac]")
+* 根拠: `[send_inactive_notification]` (行番号: 73 / 抜粋: "del MOTION_TASKS[mac]")
 
 
 * **エラーハンドリング**: `asyncio.CancelledError` をキャッチし、デバッグログを出力する。
-* 根拠: `[send_inactive_notification]` (行番号取得不可 / 抜粋: "except asyncio.CancelledError:")
+* 根拠: `[send_inactive_notification]` (行番号: 75 / 抜粋: "except asyncio.CancelledError:")
 
 
 
 ### `process_sensor_data`
 
 * **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。
-* 根拠: `[process_sensor_data]` (行番号取得不可 / 抜粋: "if dev_type and 'Motion' in de")
+* 根拠: `[process_sensor_data]` (行番号: 90 / 抜粋: "if dev_type and 'Motion' in de")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `dev_type: str`, `state: str`
-* 根拠: `[process_sensor_data]` (行番号取得不可 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: "def process_sensor_data(mac: s")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_sensor_data]` (行番号取得不可 / 抜粋: ") -> None:")
+* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: ") -> None:")
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` のキャンセル・新規タスク追加、`IS_ACTIVE` および `LAST_NOTIFY_TIME` の更新、`send_push` を用いた外部API呼び出し。
-* 根拠: `[process_sensor_data]` (行番号取得不可 / 抜粋: "MOTION_TASKS[mac] = asyncio.cr")
+* 根拠: `[process_sensor_data]` (行番号: 105 / 抜粋: "MOTION_TASKS[mac] = asyncio.cr")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[process_sensor_data]` (行番号取得不可 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: "def process_sensor_data(mac: s")
 
 
 
 ### `cancel_all_tasks`
 
 * **役割**: 起動中のすべての見守りタイマータスクをキャンセルする。
-* 根拠: `[cancel_all_tasks]` (行番号取得不可 / 抜粋: "for t in MOTION_TASKS.values()")
+* 根拠: `[cancel_all_tasks]` (行番号: 127 / 抜粋: "for t in MOTION_TASKS.values()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[cancel_all_tasks]` (行番号取得不可 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[cancel_all_tasks]` (行番号取得不可 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` に保持されている各タスクの `cancel()` 実行。
-* 根拠: `[cancel_all_tasks]` (行番号取得不可 / 抜粋: "t.cancel()")
+* 根拠: `[cancel_all_tasks]` (行番号: 128 / 抜粋: "t.cancel()")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[cancel_all_tasks]` (行番号取得不可 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 
 ### `process_meter_data`
 
 * **役割**: 温湿度計のデータをDBに保存する。
-* 根拠: `[process_meter_data]` (行番号取得不可 / 抜粋: "await save_log_async(")
+* 根拠: `[process_meter_data]` (行番号: 142 / 抜粋: "await save_log_async(")
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `temp: float`, `humidity: float`
-* 根拠: `[process_meter_data]` (行番号取得不可 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "def process_meter_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_meter_data]` (行番号取得不可 / 抜粋: "-> None:")
+* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "-> None:")
 
 
 * **副作用**: `save_log_async` を介した外部DBへの書き込み。
-* 根拠: `[process_meter_data]` (行番号取得不可 / 抜粋: "await save_log_async(")
+* 根拠: `[process_meter_data]` (行番号: 142 / 抜粋: "await save_log_async(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[process_meter_data]` (行番号取得不可 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "def process_meter_data(device_")
 
 
 
 ### `process_power_data`
 
 * **役割**: 電力データをDBに保存し、前回記録された値と閾値を比較して閾値を跨いだ場合（ON/OFF）に使用開始/終了の通知を送信する。
-* 根拠: `[process_power_data]` (行番号取得不可 / 抜粋: "prev_wattage < threshold and w")
+* 根拠: `[process_power_data]` (行番号: 196 / 抜粋: "prev_wattage < threshold and w")
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`
-* 根拠: `[process_power_data]` (行番号取得不可 / 抜粋: "def process_power_data(device_")
+* 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "def process_power_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_power_data]` (行番号取得不可 / 抜粋: "-> None:")
+* 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "-> None:")
 
 
 * **副作用**: `common.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み、`send_push` による外部API呼び出し。
-* 根拠: `[process_power_data]` (行番号取得不可 / 抜粋: "await save_log_async(")
+* 根拠: `[process_power_data]` (行番号: 180 / 抜粋: "await save_log_async(")
 
 
 * **エラーハンドリング**: DBからの前回値取得時に発生する全ての `Exception` をキャッチし、ログに記録した上で前回値を `0.0` として処理を続行する。
-* 根拠: `[process_power_data]` (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `[process_power_data]` (行番号: 176 / 抜粋: "except Exception as e:")
 
 
 
@@ -190,6 +190,7 @@ flowchart TD
     F --> H["新たな無反応検知タイマーをセット"]
     G --> H
     H --> I{"通知メッセージがあるか?"}
+    C -- No --> I
 
     B -- No --> J{"stateが open または timeoutnotclose か?"}
     J -- Yes --> K{"前回通知から CONTACT_COOLDOWN 経過しているか?"}
@@ -252,9 +253,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号取得不可 / 抜粋: "import config") |
-| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号取得不可 / 抜粋: "from core.database import save") |
-| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号取得不可 / 抜粋: "from services.notification_ser") |
+| 高 | `config.py` | 通知先ユーザーIDや保存先DBテーブル名などの具体的な設定値・構造を把握するため。 | `[インポート]` (行番号: 6 / 抜粋: "import config") |
+| 中 | `core/database.py` | ログデータの具体的な保存形式、発行されるSQLクエリ、対応しているDBエンジンを特定するため。 | `[インポート]` (行番号: 10 / 抜粋: "from core.database import save") |
+| 中 | `services/notification_service.py` | 通知がどのように外部サービス（LINE, Discord等）へ送出されるかのロジックとエラー処理を確認するため。 | `[インポート]` (行番号: 11 / 抜粋: "from services.notification_ser") |
 
 ## 8. 保守上の注意点
 

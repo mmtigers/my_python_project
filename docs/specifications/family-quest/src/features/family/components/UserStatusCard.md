@@ -46,8 +46,8 @@
 
 ### `UserStatusCard`
 
-* **役割**: 渡された `user` 情報をもとに、次レベルまでのEXP、現在/最大HP、各プログレスバーの進捗率を計算し、ステータスカードUIをレンダリングする。
-* 根拠: [コンポーネント定義] (行番号: 11〜86 / 抜粋: "const UserStatusCard: React.FC<...")
+* **役割**: 渡された `user` 情報をもとに、次レベルまでのEXP、EXP進捗率、およびバックエンドから供給されたHP（`user.hp`, `user.maxHp`）を用いたHP進捗率を計算し、ステータスカードUIをレンダリングする。
+* 根拠: [コンポーネント定義] (行番号: 11〜101 / 抜粋: "const UserStatusCard: React.FC<...")
 
 
 * **引数/リクエスト**: `{ user, onAvatarClick }` (`UserStatusCardProps` 型)
@@ -55,11 +55,11 @@
 
 
 * **戻り値/レスポンス**: JSX.Element（`div`要素） または `null`
-* 根拠: [戻り値] (行番号: 12, 28〜85 / 抜粋: "return ( <div className=...")
+* 根拠: [戻り値] (行番号: 12, 31〜100 / 抜粋: "return ( <div className=...")
 
 
 * **副作用**: なし（純粋な描画処理。ただしクリック時の `onAvatarClick(user)` の発火により親コンポーネント側で副作用が生じる可能性あり）
-* 根拠: [イベントハンドラ] (行番号: 36 / 抜粋: "onClick={() => onAvatarClick(user)}")
+* 根拠: [イベントハンドラ] (行番号: 40 / 抜粋: "onClick={() => onAvatarClick(user)}")
 
 
 * **エラーハンドリング**: `user` オブジェクトが未定義（falsy）の場合、描画処理を行わず `null` を返却して早期リターン（クラッシュ回避）。
@@ -73,9 +73,9 @@
 flowchart TD
     Start([開始]) --> CheckUser{"userオブジェクトは\n存在するか(Truthyか)？"}
     CheckUser -- No --> ReturnNull["nullを返却"] --> End([終了])
-    CheckUser -- Yes --> CalcEXP["次レベルEXP計算:\n (user.level + 1) * 100\n現在EXP取得: user.exp または 0"]
+    CheckUser -- Yes --> CalcEXP["次レベルEXP計算:\n Math.floor(100 * 1.2^(level-1))\n現在EXP取得: user.exp または 0"]
     CalcEXP --> CalcEXPRate["EXP進捗率(最大100%)と\n残りEXPの計算"]
-    CalcEXPRate --> CalcHP["最大HP計算:\n (user.level * 10) + 50\n現在HP設定: maxHp\nHP進捗率設定: 100%"]
+    CalcEXPRate --> CalcHP["maxHp = user.maxHp\ncurrentHp = user.hp ?? maxHp ?? 0\nhpPercentage = maxHpがあれば(currentHp/maxHp)*100、なければ100"]
     CalcHP --> Render["JSXを描画\n(アバター、HP/EXPバー、所持金、メダル)"]
     Render --> End
 
@@ -96,26 +96,26 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `@/types` (または `types.ts` 等) | `User`オブジェクトが持つプロパティ（特に将来的に連携予定と思われる `hp`, `max_hp` 等のフィールドの有無）を正確に把握するため。 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import { User } from '@/types';") |
+| 高 | `@/types` (または `types.ts` 等) | `User`オブジェクトが持つ `hp`, `maxHp` フィールドの正確な型（optional/required、単位など）を把握するため。 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import { User } from '@/types';") |
 | 中 | `@/components/ui/CountUp` (または `CountUp.tsx` 等) | 描画時のアニメーション挙動の把握や、渡しているProps（`value`, `suffix`）の処理が正しく実装されているか確認するため。 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "import { CountUp } from '@/components/...") |
-| 中 | `UserStatusCard`を呼び出している親コンポーネント | `onAvatarClick` 時にどのようなデータフローが発生しているか、および実際の `user` データをどのように取得・渡与しているか確認するため。 | 根拠: [Props使用箇所] (行番号: 36 / 抜粋: "onClick={() => onAvatarClick(user)}") |
+| 中 | `UserStatusCard`を呼び出している親コンポーネント | `onAvatarClick` 時にどのようなデータフローが発生しているか、および実際の `user` データをどのように取得・渡与しているか確認するため。 | 根拠: [Props使用箇所] (行番号: 40 / 抜粋: "onClick={() => onAvatarClick(user)}") |
 
 ## 8. 保守上の注意点
 
-* **ハードコードされた計算ロジック**: 次のレベルまでの経験値計算（`(user.level + 1) * 100`）および最大HP計算（`(user.level * 10) + 50`）がコンポーネント内に直接記述されている。将来バックエンド側から値が提供されるようになった場合、二重管理による不整合が生じるリスクがある。
-* 根拠: [変数定義] (行番号: 15, 24 / 抜粋: "const maxHp = (user.level * 10) + 50;")
+* **フロント側で完結する経験値計算ロジック**: 次のレベルまでの経験値計算（`Math.floor(100 * Math.pow(1.2, user.level - 1))`、指数関数的な成長曲線）がコンポーネント内に直接記述されている。コメントには「APIデータがあればそれを使う」とあり、将来バックエンド側から値が提供されるようになった場合、二重管理による不整合が生じるリスクがある。
+* 根拠: [変数定義] (行番号: 14〜15 / 抜粋: "// 簡易計算: 次のレベルまで = (Lv+1)*100 とする")
 
 
-* **ダミーデータの固定値**: 現在HP（`currentHp`）が常に `maxHp` と同値に設定され、HP進捗率（`hpPercentage`）も常に `100` に固定されているため、ダメージを受けた状態などの動的なUI表現が現状機能していない。
-* 根拠: [変数定義] (行番号: 25〜26 / 抜粋: "const currentHp = maxHp; // とりあえず...")
+* **HPはバックエンド計算値に依存**: `maxHp`/`currentHp` はもはやフロント側でのハードコード計算ではなく、`user.maxHp`/`user.hp` というAPIレスポンスの値をそのまま利用する設計に変更されている。コメントによれば、バックエンド（`MY_HOME_SYSTEM`）側で `calculate_max_hp(level) = level*20+5` として算出される前提であり、フロント側では再計算しない。`maxHp` が欠けている（falsyな）場合は `hpPercentage` が `100`（満タン表示）にフォールバックするため、古いキャッシュ等でAPIレスポンスにHPフィールドが欠落していると、実際のダメージ状態を反映できない可能性がある。
+* 根拠: [コメントおよび変数定義] (行番号: 22〜29 / 抜粋: "// HPはバックエンド(MY_HOME_SYSTEM)が計算した値をそのまま使う。")
 
 
 * **フォールバック処理**: `user.exp`, `user.gold`, `user.medal_count` が存在しない（falsyな）場合、`0` にフォールバックされる仕様となっている。
-* 根拠: [変数定義・属性] (行番号: 16, 75, 81 / 抜粋: "const currentExp = user.exp || 0;")
+* 根拠: [変数定義・属性] (行番号: 16, 88, 94 / 抜粋: "const currentExp = user.exp || 0;")
 
 
 * **プロパティの欠損による表示不備リスク**: `user.job_class` が無い場合は `'冒険者'` にフォールバックするが、`user.avatar` と `user.icon` が両方未定義の場合はハードコードされた絵文字 `'🙂'` が表示される。
-* 根拠: [三項演算子] (行番号: 42〜44 / 抜粋: "user.icon || '🙂'")
+* 根拠: [三項演算子] (行番号: 43〜47 / 抜粋: "user.icon || '🙂'")
 
 
 
@@ -124,7 +124,7 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `User` 型の正確なスキーマ定義 | 外部ファイルにて定義されているため、存在しうる全プロパティが不明。 | `@/types` |
-| APIによるHP/EXPデータの提供予定 | コメントに「APIデータがあればそれを使う」とあるが、実際の実装状況やデータ構造が不明。 | API仕様書 または 親コンポーネント/型定義 |
+| バックエンドのHP計算ロジック (`calculate_max_hp`) の実装詳細 | コメントで `calculate_max_hp(level) = level*20+5` という計算式に言及されているが、実際にこの式でAPIが `user.maxHp`/`user.hp` を算出しているかは本ファイルからは検証不可能なため。 | `MY_HOME_SYSTEM` 側のバックエンド実装ファイル |
 | `CountUp` コンポーネントの仕様 | 外部コンポーネントであり、内部ロジックやサポートしているPropsが不明。 | `@/components/ui/CountUp` |
 | `onAvatarClick` の実行内容 | 親コンポーネント側で制御されているため、クリック時の副作用（画面遷移、モーダル表示など）が不明。 | 本コンポーネントを呼び出す親ファイル |
 

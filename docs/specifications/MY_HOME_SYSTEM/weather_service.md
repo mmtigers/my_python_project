@@ -31,36 +31,36 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LINE_USER_ID` | `config`モジュールの実装が提供されておらず、変数の値や型が不明 | 根拠: [common.send_push] (行番号取得不可 / 抜粋: "config.LINE_USER_ID,") |
-| `common.get_db_cursor` | トランザクション管理やエラー時のロールバック仕様が不明 | 根拠: [common.get_db_cursor] (行番号取得不可 / 抜粋: "with common.get_db_cursor") |
-| `common.send_push` | 通知失敗時の挙動や対応プラットフォームの全容が不明 | 根拠: [common.send_push] (行番号取得不可 / 抜粋: "common.send_push(") |
-| `common.get_now_iso` | 返却されるISOフォーマットの正確な形式（タイムゾーンの有無など）が不明 | 根拠: [common.get_now_iso] (行番号取得不可 / 抜粋: "common.get_now_iso()") |
+| `config.LINE_USER_ID` | `config`モジュールの実装が提供されておらず、変数の値や型が不明 | 根拠: [common.send_push] (行番号: 153 / 抜粋: "config.LINE_USER_ID,") |
+| `common.get_db_cursor` | トランザクション管理やエラー時のロールバック仕様が不明 | 根拠: [common.get_db_cursor] (行番号: 50, 351 / 抜粋: "with common.get_db_cursor") |
+| `common.send_push` | 通知失敗時の挙動や対応プラットフォームの全容が不明 | 根拠: [common.send_push] (行番号: 152, 226 / 抜粋: "common.send_push(") |
+| `common.get_now_iso` | 返却されるISOフォーマットの正確な形式（タイムゾーンの有無など）が不明 | 根拠: [common.get_now_iso] (行番号: 378 / 抜粋: "common.get_now_iso()") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `WeatherService`
 
 * **役割**: 天気予報を取得し、データベースへの保存とユーザーへの通知を行うクラス全体を定義。
-* 根拠: [WeatherService] (行番号取得不可 / 抜粋: "class WeatherService:")
+* 根拠: [WeatherService] (行番号: 16 / 抜粋: "class WeatherService:")
 
 
 
 ### `__init__`
 
 * **役割**: クラスの初期化。ベースディレクトリの設定、環境変数の読み込み、テーブルスキーマの確認を行う。
-* 根拠: [**init**] (行番号取得不可 / 抜粋: "def **init**(self) -> None:")
+* 根拠: [**init**] (行番号: 33〜37 / 抜粋: "def __init__(self) -> None:")
 
 
 * **引数/リクエスト**: `None` (`self` のみ)
-* 根拠: [**init**] (行番号取得不可 / 抜粋: "def **init**(self) -> None:")
+* 根拠: [**init**] (行番号: 33 / 抜粋: "def __init__(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [**init**] (行番号取得不可 / 抜粋: "def **init**(self) -> None:")
+* 根拠: [**init**] (行番号: 33 / 抜粋: "def __init__(self) -> None:")
 
 
 * **副作用**: `_ensure_table_schema` 経由でのDBスキーマ変更の可能性。
-* 根拠: [**init**] (行番号取得不可 / 抜粋: "self._ensure_table_schema()")
+* 根拠: [**init**] (行番号: 37 / 抜粋: "self._ensure_table_schema()")
 
 
 * **エラーハンドリング**: なし。
@@ -68,65 +68,65 @@
 ### `_load_environment`
 
 * **役割**: `.env` ファイルを読み込み、OpenWeatherMapのAPIキーを取得・保持する。
-* 根拠: [_load_environment] (行番号取得不可 / 抜粋: "def _load_environment(self)")
+* 根拠: [_load_environment] (行番号: 39〜45 / 抜粋: "def _load_environment(self)")
 
 
 * **引数/リクエスト**: `None`
-* 根拠: [_load_environment] (行番号取得不可 / 抜粋: "def _load_environment(self) -> None:")
+* 根拠: [_load_environment] (行番号: 39 / 抜粋: "def _load_environment(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_load_environment] (行番号取得不可 / 抜粋: "def _load_environment(self) -> None:")
+* 根拠: [_load_environment] (行番号: 39 / 抜粋: "def _load_environment(self) -> None:")
 
 
 * **副作用**: `self.api_key` に環境変数の値を代入。
-* 根拠: [_load_environment] (行番号取得不可 / 抜粋: "self.api_key = os.getenv(")
+* 根拠: [_load_environment] (行番号: 43 / 抜粋: "self.api_key = os.getenv(")
 
 
 * **エラーハンドリング**: APIキーがない場合、警告ログを出力する。
-* 根拠: [_load_environment] (行番号取得不可 / 抜粋: "logger.warning("OpenWeatherMap")
+* 根拠: [_load_environment] (行番号: 44〜45 / 抜粋: "logger.warning("OpenWeatherMap")
 
 
 
 ### `_ensure_table_schema`
 
 * **役割**: データベースに `weather_history` テーブルが存在するか確認し、未存在の場合は新規作成、構造が古い場合はマイグレーションまたはカラム追加を行う。
-* 根拠: [_ensure_table_schema] (行番号取得不可 / 抜粋: "def _ensure_table_schema(self)")
+* 根拠: [_ensure_table_schema] (行番号: 47〜74 / 抜粋: "def _ensure_table_schema(self)")
 
 
 * **引数/リクエスト**: `None`
-* 根拠: [_ensure_table_schema] (行番号取得不可 / 抜粋: "def _ensure_table_schema(self) -> None:")
+* 根拠: [_ensure_table_schema] (行番号: 47 / 抜粋: "def _ensure_table_schema(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_ensure_table_schema] (行番号取得不可 / 抜粋: "def _ensure_table_schema(self) -> None:")
+* 根拠: [_ensure_table_schema] (行番号: 47 / 抜粋: "def _ensure_table_schema(self) -> None:")
 
 
 * **副作用**: DBへのテーブル作成、スキーマ変更等のDDL実行。
-* 根拠: [_ensure_table_schema] (行番号取得不可 / 抜粋: "self._create_new_table(cursor)")
+* 根拠: [_ensure_table_schema] (行番号: 60 / 抜粋: "self._create_new_table(cursor)")
 
 
 * **エラーハンドリング**: 例外発生時、`_handle_error` メソッドを呼び出してエラーログと通知を行う。
-* 根拠: [_ensure_table_schema] (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: [_ensure_table_schema] (行番号: 73〜74 / 抜粋: "except Exception as e:")
 
 
 
 ### `_create_new_table`
 
 * **役割**: `weather_history` テーブルを新規作成するためのSQL文を実行する。
-* 根拠: [_create_new_table] (行番号取得不可 / 抜粋: "CREATE TABLE IF NOT EXISTS")
+* 根拠: [_create_new_table] (行番号: 78〜91 / 抜粋: "CREATE TABLE IF NOT EXISTS")
 
 
 * **引数/リクエスト**: `cursor` (`sqlite3.Cursor`)
-* 根拠: [_create_new_table] (行番号取得不可 / 抜粋: "def _create_new_table(self, cursor: sqlite3.Cursor)")
+* 根拠: [_create_new_table] (行番号: 76 / 抜粋: "def _create_new_table(self, cursor: sqlite3.Cursor)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_create_new_table] (行番号取得不可 / 抜粋: "def _create_new_table(self, cursor: sqlite3.Cursor) -> None:")
+* 根拠: [_create_new_table] (行番号: 76 / 抜粋: "def _create_new_table(self, cursor: sqlite3.Cursor) -> None:")
 
 
 * **副作用**: DBへのテーブル作成。
-* 根拠: [_create_new_table] (行番号取得不可 / 抜粋: "cursor.execute(sql)")
+* 根拠: [_create_new_table] (行番号: 92 / 抜粋: "cursor.execute(sql)")
 
 
 * **エラーハンドリング**: なし（呼び出し元に委譲）。
@@ -134,134 +134,134 @@
 ### `_add_missing_columns`
 
 * **役割**: `weather_history` テーブルの既存カラムを確認し、不足しているカラム（`location`, `max_pop`, `umbrella_level`）を追加する。
-* 根拠: [_add_missing_columns] (行番号取得不可 / 抜粋: "def _add_missing_columns(self,")
+* 根拠: [_add_missing_columns] (行番号: 94〜108 / 抜粋: "def _add_missing_columns(self,")
 
 
 * **引数/リクエスト**: `cursor` (`sqlite3.Cursor`)
-* 根拠: [_add_missing_columns] (行番号取得不可 / 抜粋: "def _add_missing_columns(self, cursor: sqlite3.Cursor)")
+* 根拠: [_add_missing_columns] (行番号: 94 / 抜粋: "def _add_missing_columns(self, cursor: sqlite3.Cursor)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_add_missing_columns] (行番号取得不可 / 抜粋: "def _add_missing_columns(self, cursor: sqlite3.Cursor) -> None:")
+* 根拠: [_add_missing_columns] (行番号: 94 / 抜粋: "def _add_missing_columns(self, cursor: sqlite3.Cursor) -> None:")
 
 
 * **副作用**: DBへのカラム追加（ALTER TABLE実行）。
-* 根拠: [_add_missing_columns] (行番号取得不可 / 抜粋: "cursor.execute("ALTER TABLE")
+* 根拠: [_add_missing_columns] (行番号: 102, 104, 106 / 抜粋: "cursor.execute("ALTER TABLE")
 
 
 * **エラーハンドリング**: 例外発生時、警告ログを出力して処理を続行する。
-* 根拠: [_add_missing_columns] (行番号取得不可 / 抜粋: "logger.warning(f"Column add")
+* 根拠: [_add_missing_columns] (行番号: 107〜108 / 抜粋: "logger.warning(f"Column add")
 
 
 
 ### `_migrate_table`
 
 * **役割**: 複合ユニーク制約を再設定するために、一時テーブルを利用してテーブルを再作成し、データを移行する。
-* 根拠: [_migrate_table] (行番号取得不可 / 抜粋: "def _migrate_table(self, cursor")
+* 根拠: [_migrate_table] (行番号: 110〜146 / 抜粋: "def _migrate_table(self, cursor")
 
 
 * **引数/リクエスト**: `cursor` (`sqlite3.Cursor`)
-* 根拠: [_migrate_table] (行番号取得不可 / 抜粋: "def _migrate_table(self, cursor: sqlite3.Cursor)")
+* 根拠: [_migrate_table] (行番号: 110 / 抜粋: "def _migrate_table(self, cursor: sqlite3.Cursor)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_migrate_table] (行番号取得不可 / 抜粋: "def _migrate_table(self, cursor: sqlite3.Cursor) -> None:")
+* 根拠: [_migrate_table] (行番号: 110 / 抜粋: "def _migrate_table(self, cursor: sqlite3.Cursor) -> None:")
 
 
 * **副作用**: テーブルのDROP、RENAME、CREATE、およびデータ移行のINSERT実行。
-* 根拠: [_migrate_table] (行番号取得不可 / 抜粋: "cursor.execute("DROP TABLE IF")
+* 根拠: [_migrate_table] (行番号: 115 / 抜粋: "cursor.execute("DROP TABLE IF")
 
 
 * **エラーハンドリング**: 例外発生時、そのまま例外を再送出（`raise e`）する。
-* 根拠: [_migrate_table] (行番号取得不可 / 抜粋: "raise e")
+* 根拠: [_migrate_table] (行番号: 144, 146 / 抜粋: "raise e")
 
 
 
 ### `_handle_error`
 
 * **役割**: エラーメッセージをログ出力し、Discordチャンネルへエラー通知を送信する。
-* 根拠: [_handle_error] (行番号取得不可 / 抜粋: "def _handle_error(self, message")
+* 根拠: [_handle_error] (行番号: 148〜159 / 抜粋: "def _handle_error(self, message")
 
 
 * **引数/リクエスト**: `message` (`str`)
-* 根拠: [_handle_error] (行番号取得不可 / 抜粋: "def _handle_error(self, message: str)")
+* 根拠: [_handle_error] (行番号: 148 / 抜粋: "def _handle_error(self, message: str)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [_handle_error] (行番号取得不可 / 抜粋: "def _handle_error(self, message: str) -> None:")
+* 根拠: [_handle_error] (行番号: 148 / 抜粋: "def _handle_error(self, message: str) -> None:")
 
 
 * **副作用**: エラーログの出力、外部モジュール経由でのDiscord通知。
-* 根拠: [_handle_error] (行番号取得不可 / 抜粋: "common.send_push(")
+* 根拠: [_handle_error] (行番号: 152 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: 通知の送信に失敗した場合は例外を握りつぶす（`pass`）。
-* 根拠: [_handle_error] (行番号取得不可 / 抜粋: "except Exception:\n            pass")
+* 根拠: [_handle_error] (行番号: 158〜159 / 抜粋: "except Exception:\n            pass")
 
 
 
 ### `get_weather_report_text`
 
 * **役割**: 各監視対象地域の天気を取得・解析・DB保存し、通知用のレポートテキストを生成する。
-* 根拠: [get_weather_report_text] (行番号取得不可 / 抜粋: "def get_weather_report_text(self")
+* 根拠: [get_weather_report_text] (行番号: 161〜210 / 抜粋: "def get_weather_report_text(self")
 
 
 * **引数/リクエスト**: `None`
-* 根拠: [get_weather_report_text] (行番号取得不可 / 抜粋: "def get_weather_report_text(self) -> str:")
+* 根拠: [get_weather_report_text] (行番号: 161 / 抜粋: "def get_weather_report_text(self) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (生成された天気レポートの文字列)
-* 根拠: [get_weather_report_text] (行番号取得不可 / 抜粋: "def get_weather_report_text(self) -> str:")
+* 根拠: [get_weather_report_text] (行番号: 161 / 抜粋: "def get_weather_report_text(self) -> str:")
 
 
 * **副作用**: 外部APIへのリクエスト送信（`_get_forecast_data`）、DBへのデータ書き込み（`_save_to_db`）、情報ログ出力。
-* 根拠: [get_weather_report_text] (行番号取得不可 / 抜粋: "if not self._save_to_db(summary)")
+* 根拠: [get_weather_report_text] (行番号: 189 / 抜粋: "if not self._save_to_db(summary)")
 
 
 * **エラーハンドリング**: 取得失敗時、保存失敗時、データなし時にそれぞれエラーログまたはレポート上のメッセージを追加して処理を継続する。
-* 根拠: [get_weather_report_text] (行番号取得不可 / 抜粋: "reports.append(f"❌ {name}: 情報取得に失敗")
+* 根拠: [get_weather_report_text] (行番号: 181 / 抜粋: "reports.append(f"❌ {name}: 情報取得に失敗")
 
 
 
 ### `notify_weather_info`
 
 * **役割**: `get_weather_report_text` で生成したレポートを外部サービス（デフォルトはLINE）へ通知する。
-* 根拠: [notify_weather_info] (行番号取得不可 / 抜粋: "def notify_weather_info(self,")
+* 根拠: [notify_weather_info] (行番号: 212〜230 / 抜粋: "def notify_weather_info(self,")
 
 
 * **引数/リクエスト**: `target` (`str`, デフォルト `"line"`)
-* 根拠: [notify_weather_info] (行番号取得不可 / 抜粋: "target: str = "line"")
+* 根拠: [notify_weather_info] (行番号: 212 / 抜粋: "target: str = "line"")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [notify_weather_info] (行番号取得不可 / 抜粋: "def notify_weather_info(self, target: str = "line") -> None:")
+* 根拠: [notify_weather_info] (行番号: 212 / 抜粋: "def notify_weather_info(self, target: str = "line") -> None:")
 
 
 * **副作用**: 外部へのPush通知。
-* 根拠: [notify_weather_info] (行番号取得不可 / 抜粋: "common.send_push(")
+* 根拠: [notify_weather_info] (行番号: 226 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: 通知送信失敗時、`_handle_error` でエラーログと通知を実行する。
-* 根拠: [notify_weather_info] (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: [notify_weather_info] (行番号: 229 / 抜粋: "except Exception as e:")
 
 
 
 ### `_determine_target_date`
 
 * **役割**: 実行時刻が17時以降であれば「明日」、それ以前であれば「今日」を対象日付として決定する。
-* 根拠: [_determine_target_date] (行番号取得不可 / 抜粋: "def _determine_target_date(self)")
+* 根拠: [_determine_target_date] (行番号: 232〜239 / 抜粋: "def _determine_target_date(self)")
 
 
 * **引数/リクエスト**: `None`
-* 根拠: [_determine_target_date] (行番号取得不可 / 抜粋: "def _determine_target_date(self) -> Tuple[datetime, str]:")
+* 根拠: [_determine_target_date] (行番号: 232 / 抜粋: "def _determine_target_date(self) -> Tuple[datetime, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[datetime, str]` (対象日時のオブジェクト、"今日"または"明日"のラベル文字列)
-* 根拠: [_determine_target_date] (行番号取得不可 / 抜粋: "return target_date, date_label")
+* 根拠: [_determine_target_date] (行番号: 239 / 抜粋: "return target_date, date_label")
 
 
 * **副作用**: 現在時刻の取得。
-* 根拠: [_determine_target_date] (行番号取得不可 / 抜粋: "now = datetime.now()")
+* 根拠: [_determine_target_date] (行番号: 234 / 抜粋: "now = datetime.now()")
 
 
 * **エラーハンドリング**: なし。
@@ -269,65 +269,65 @@
 ### `_get_forecast_data`
 
 * **役割**: OpenWeatherMap APIに対してHTTPリクエストを送信し、天気予報データをJSON形式で取得する。
-* 根拠: [_get_forecast_data] (行番号取得不可 / 抜粋: "def _get_forecast_data(self,")
+* 根拠: [_get_forecast_data] (行番号: 241〜260 / 抜粋: "def _get_forecast_data(self,")
 
 
 * **引数/リクエスト**: `lat` (`float`), `lon` (`float`)
-* 根拠: [_get_forecast_data] (行番号取得不可 / 抜粋: "def _get_forecast_data(self, lat: float, lon: float)")
+* 根拠: [_get_forecast_data] (行番号: 241 / 抜粋: "def _get_forecast_data(self, lat: float, lon: float)")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (APIのレスポンスデータ、または失敗時 `None`)
-* 根拠: [_get_forecast_data] (行番号取得不可 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: [_get_forecast_data] (行番号: 241 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: 外部APIへの通信。
-* 根拠: [_get_forecast_data] (行番号取得不可 / 抜粋: "res = requests.get(self.API_URL")
+* 根拠: [_get_forecast_data] (行番号: 255 / 抜粋: "res = requests.get(self.API_URL")
 
 
 * **エラーハンドリング**: APIキー未設定時は `None` を返す。通信エラーやステータスコードエラー時は `_handle_error` を呼び出し `None` を返す。
-* 根拠: [_get_forecast_data] (行番号取得不可 / 抜粋: "except requests.exceptions.RequestException")
+* 根拠: [_get_forecast_data] (行番号: 258〜260 / 抜粋: "except requests.exceptions.RequestException")
 
 
 
 ### `_analyze_weather_for_date`
 
 * **役割**: APIから取得したデータから対象日の情報を抽出し、最高/最低気温、降水確率、天気、傘の必要性を集計する。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "def _analyze_weather_for_date(")
+* 根拠: [_analyze_weather_for_date] (行番号: 262〜303 / 抜粋: "def _analyze_weather_for_date(")
 
 
 * **引数/リクエスト**: `data` (`Dict[str, Any]`), `location_name` (`str`), `target_date_str` (`str`)
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "def _analyze_weather_for_date(self, data: Dict[str, Any], location_name: str, target_date_str: str)")
+* 根拠: [_analyze_weather_for_date] (行番号: 262 / 抜粋: "def _analyze_weather_for_date(self, data: Dict[str, Any], location_name: str, target_date_str: str)")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (集計されたサマリー情報、データなし時 `None`)
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: [_analyze_weather_for_date] (行番号: 262 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: なし。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "return {")
+* 根拠: [_analyze_weather_for_date] (行番号: 295 / 抜粋: "return {")
 
 
 * **エラーハンドリング**: 対象日のデータがない場合、直近8件のデータを利用するフォールバック処理を行う。それでもない場合は `None` を返す。
-* 根拠: [_analyze_weather_for_date] (行番号取得不可 / 抜粋: "if not forecasts_for_target_date:")
+* 根拠: [_analyze_weather_for_date] (行番号: 271, 275 / 抜粋: "if not forecasts_for_target_date:")
 
 
 
 ### `_judge_umbrella_necessity`
 
 * **役割**: 最大降水確率と天気IDをもとに、傘の必要性を判定する。
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "def _judge_umbrella_necessity(")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305〜317 / 抜粋: "def _judge_umbrella_necessity(")
 
 
 * **引数/リクエスト**: `max_pop` (`int`), `weather_ids` (`List[int]`)
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "def _judge_umbrella_necessity(self, max_pop: int, weather_ids: List[int])")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305 / 抜粋: "def _judge_umbrella_necessity(self, max_pop: int, weather_ids: List[int])")
 
 
 * **戻り値/レスポンス**: `str` ("必須", "あるほうがいい", "不要" のいずれか)
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "-> str:")
+* 根拠: [_judge_umbrella_necessity] (行番号: 305 / 抜粋: "-> str:")
 
 
 * **副作用**: なし。
-* 根拠: [_judge_umbrella_necessity] (行番号取得不可 / 抜粋: "return "必須"")
+* 根拠: [_judge_umbrella_necessity] (行番号: 313 / 抜粋: "return "必須"")
 
 
 * **エラーハンドリング**: なし。
@@ -335,19 +335,19 @@
 ### `_generate_advice_message`
 
 * **役割**: 集計された天気情報に基づいて、主婦向けのメッセージ文（傘や気温に関するアドバイス）を生成する。
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "def _generate_advice_message(se")
+* 根拠: [_generate_advice_message] (行番号: 319〜346 / 抜粋: "def _generate_advice_message(se")
 
 
 * **引数/リクエスト**: `summary` (`Dict[str, Any]`)
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "def _generate_advice_message(self, summary: Dict[str, Any]) -> str:")
+* 根拠: [_generate_advice_message] (行番号: 319 / 抜粋: "def _generate_advice_message(self, summary: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (アドバイス文)
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "return msg")
+* 根拠: [_generate_advice_message] (行番号: 346 / 抜粋: "return msg")
 
 
 * **副作用**: なし。
-* 根拠: [_generate_advice_message] (行番号取得不可 / 抜粋: "msg = "しっかりした傘を"")
+* 根拠: [_generate_advice_message] (行番号: 329 / 抜粋: "msg = "しっかりした傘を"")
 
 
 * **エラーハンドリング**: なし。
@@ -355,23 +355,23 @@
 ### `_save_to_db`
 
 * **役割**: 集計されたサマリー情報をSQLiteデータベースにUpsert処理（挿入または更新）で保存する。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "def _save_to_db(self, summary: ")
+* 根拠: [_save_to_db] (行番号: 348〜388 / 抜粋: "def _save_to_db(self, summary: ")
 
 
 * **引数/リクエスト**: `summary` (`Dict[str, Any]`)
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "def _save_to_db(self, summary: Dict[str, Any]) -> bool:")
+* 根拠: [_save_to_db] (行番号: 348 / 抜粋: "def _save_to_db(self, summary: Dict[str, Any]) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (保存成功時 `True`, 失敗時 `False`)
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "-> bool:")
+* 根拠: [_save_to_db] (行番号: 348 / 抜粋: "-> bool:")
 
 
 * **副作用**: DBへのデータ書き込み実行、情報ログの出力。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "cursor.execute(sql, vals)")
+* 根拠: [_save_to_db] (行番号: 381 / 抜粋: "cursor.execute(sql, vals)")
 
 
 * **エラーハンドリング**: データベース操作で例外が発生した際、`_handle_error` を呼び出し `False` を返す。
-* 根拠: [_save_to_db] (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: [_save_to_db] (行番号: 386 / 抜粋: "except Exception as e:")
 
 
 

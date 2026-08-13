@@ -1,0 +1,95 @@
+name: Spec Drift Weekly Audit
+
+# docs/specifications/ 全体を対象に、ソースと仕様書のコミット日時を比較して
+# ドリフト・孤立ドキュメント・未文書化ファイルを週次で洗い出し、Issueとして報告する。
+# PR単位のチェック(spec-drift-pr-check.yml)では拾えない、direct push等による
+# ドリフトの取りこぼしをカバーするための定期監査。
+
+on:
+  schedule:
+    # 毎週月曜 09:00 JST (00:00 UTC)
+    - cron: "0 0 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: Full repository drift audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run full drift audit
+        run: python3 .github/scripts/check_spec_drift.py full --out drift-report.md
+
+      - name: Create or update tracking issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const title = "📋 仕様書ドリフト定期監査";
+            const report = fs.readFileSync("drift-report.md", "utf8");
+            const isClean = report.includes("検知事項なし");
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const date = new Date().toISOString().slice(0, 10);
+            const body = report + `\n\n---\n最終実行: ${date} ([ワークフロー実行結果](${runUrl}))`;
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: "spec-drift-audit",
+            });
+            const existing = issues.find((i) => i.title === title);
+
+            if (isClean) {
+              if (existing) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  body: `検知事項なしになったため、このIssueをクローズします。\n\n${body}`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existing.number,
+                  state: "closed",
+                });
+              }
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body,
+                state: "open",
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `再監査で内容を更新しました（${date}）。`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["spec-drift-audit"],
+              });
+            }
