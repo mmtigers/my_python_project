@@ -34,8 +34,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | 設定値（トークン、シークレット、ホストURL）が環境変数から取得されているか等の実装詳細が不明。 | 根拠: `config.SWITCHBOT_API_TOKEN` (行番号: 77 / 抜粋: "token = config.SWITCHBOT_API_TOKEN") |
-| `DeviceStatusResponse` | モデルのプロパティ定義や、`dict()`呼び出し時の挙動（シリアライズ仕様）が不明。 | 根拠: `DeviceStatusResponse` (行番号: 27 / 抜粋: "validated = DeviceStatusResponse(**raw_data)") |
+| `config` | 設定値（トークン、シークレット、ホストURL）が環境変数から取得されているか等の実装詳細が不明。 | 根拠: `config.SWITCHBOT_API_TOKEN` (行番号: 80 / 抜粋: "token = config.SWITCHBOT_API_TOKEN") |
+| `DeviceStatusResponse` | モデルのプロパティ定義や、`dict()`呼び出し時の挙動（シリアライズ仕様）が不明。 | 根拠: `DeviceStatusResponse` (行番号: 28 / 抜粋: "validated = DeviceStatusResponse(**raw_data)") |
 | `setup_logging` | 生成されるロガーの設定（出力先、フォーマット、ログレベルなど）の詳細が不明。 | 根拠: `setup_logging` (行番号: 16 / 抜粋: "logger = setup_logging("service.switchbot")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -43,7 +43,7 @@
 ### `request_switchbot_api`
 
 * **役割**: SwitchBot APIに対してGETリクエストを送信する。タイムアウトや接続エラー時にはExponential Backoffを用いて最大指定回数リトライする。取得したデータをモデルでバリデーションして返す。
-* 根拠: `request_switchbot_api` (行番号: 20〜46 / 抜粋: "def request_switchbot_api(url: str, ...")
+* 根拠: `request_switchbot_api` (行番号: 20〜48 / 抜粋: "def request_switchbot_api(url: str, ...")
 
 
 * **引数/リクエスト**:
@@ -58,47 +58,47 @@
 
 
 * **副作用**: ロガーへの出力（警告、エラー、デバッグ）
-* 根拠: `logger.warning`, `logger.error`, `logger.debug` (行番号: 32, 36, 42 / 抜粋: "logger.warning(f"⚠️ SwitchBot API ...")
+* 根拠: `logger.warning`, `logger.error`, `logger.debug` (行番号: 33, 37, 43 / 抜粋: "logger.warning(f"⚠️ SwitchBot API ...")
 
 
 * **エラーハンドリング**:
 * `requests.exceptions.Timeout`, `requests.exceptions.ConnectionError`: 警告ログを出力し、待機後にリトライ。
 * `requests.exceptions.RequestException`: エラーログを出力し、リトライを中断。
 * リトライ最大数到達時は警告ログを出力し `None` を返す（フェイルソフト）。
-* 根拠: `except` (行番号: 30〜46 / 抜粋: "except (requests.exceptions.Timeout, ...")
+* 根拠: `except` (行番号: 31〜48 / 抜粋: "except (requests.exceptions.Timeout, ...")
 
 
 
 ### `post_switchbot_api`
 
 * **役割**: SwitchBot APIに対してPOSTリクエストを送信する。モデルによるバリデーションは行わず生データを返す。
-* 根拠: `post_switchbot_api` (行番号: 48〜53 / 抜粋: "def post_switchbot_api(url: str, ...")
+* 根拠: `post_switchbot_api` (行番号: 51〜56 / 抜粋: "def post_switchbot_api(url: str, ...")
 
 
 * **引数/リクエスト**:
 * `url`: `str` (リクエスト先URL)
 * `headers`: `Dict[str, str]` (リクエストヘッダー)
 * `json_data`: `Dict[str, Any]` (POSTするJSONペイロード)
-* 根拠: `post_switchbot_api` (行番号: 48 / 抜粋: "url: str, headers: Dict[str, str], json_data: Dict[str, Any]")
+* 根拠: `post_switchbot_api` (行番号: 51 / 抜粋: "url: str, headers: Dict[str, str], json_data: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (APIレスポンスのJSONパース結果)
-* 根拠: `post_switchbot_api` (行番号: 48 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `post_switchbot_api` (行番号: 51 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: 外部APIへのデータ送信（デバイスの操作など）
-* 根拠: `requests.post` (行番号: 50 / 抜粋: "response = requests.post(url, ...")
+* 根拠: `requests.post` (行番号: 53 / 抜粋: "response = requests.post(url, ...")
 
 
 * **エラーハンドリング**: HTTPエラーステータスが返却された場合、`response.raise_for_status()` により例外を送出。
-* 根拠: `raise_for_status` (行番号: 51 / 抜粋: "response.raise_for_status()")
+* 根拠: `raise_for_status` (行番号: 54 / 抜粋: "response.raise_for_status()")
 
 
 
 ### `send_device_command`
 
 * **役割**: 指定されたデバイスIDに対し、エンドポイントURLと認証ヘッダー、ペイロードを構築し、コマンド送信リクエストを行う。
-* 根拠: `send_device_command` (行番号: 55〜73 / 抜粋: "def send_device_command(device_id: str, ...")
+* 根拠: `send_device_command` (行番号: 58〜76 / 抜粋: "def send_device_command(device_id: str, ...")
 
 
 * **引数/リクエスト**:
@@ -106,61 +106,61 @@
 * `command`: `str` (実行するコマンド名)
 * `parameter`: `str` (コマンドのパラメータ、デフォルト"default")
 * `command_type`: `str` (コマンドの種類、デフォルト"command")
-* 根拠: `send_device_command` (行番号: 55 / 抜粋: "device_id: str, command: str, parameter: str = "default", command_type: str = "command"")
+* 根拠: `send_device_command` (行番号: 58 / 抜粋: "device_id: str, command: str, parameter: str = "default", command_type: str = "command"")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (送信結果のレスポンス、失敗時はNone)
-* 根拠: `send_device_command` (行番号: 55 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `send_device_command` (行番号: 58 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: APIへのPOSTリクエスト呼び出し、失敗時のエラーログ出力
-* 根拠: `post_switchbot_api` (行番号: 69 / 抜粋: "response_data = post_switchbot_api(url, headers, payload)")
+* 根拠: `post_switchbot_api` (行番号: 72 / 抜粋: "response_data = post_switchbot_api(url, headers, payload)")
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
-* 根拠: `except Exception as e` (行番号: 71〜73 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 74〜76 / 抜粋: "except Exception as e:")
 
 
 
 ### `create_switchbot_auth_headers`
 
 * **役割**: トークン、タイムスタンプ、nonceを用いてHMAC-SHA256署名を生成し、APIリクエストに必要な認証ヘッダー群を構築する。
-* 根拠: `create_switchbot_auth_headers` (行番号: 75〜98 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
+* 根拠: `create_switchbot_auth_headers` (行番号: 78〜105 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `create_switchbot_auth_headers` (行番号: 75 / 抜粋: "def create_switchbot_auth_headers()")
+* 根拠: `create_switchbot_auth_headers` (行番号: 78 / 抜粋: "def create_switchbot_auth_headers()")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]` (認証情報の入ったヘッダー辞書、設定不備時は空辞書)
-* 根拠: `create_switchbot_auth_headers` (行番号: 75 / 抜粋: "-> Dict[str, str]:")
+* 根拠: `create_switchbot_auth_headers` (行番号: 78 / 抜粋: "-> Dict[str, str]:")
 
 
 * **副作用**: 警告ログ出力（トークンまたはシークレット欠如時）
-* 根拠: `logger.warning` (行番号: 81 / 抜粋: "logger.warning("SwitchBot Token/Secret is missing in config.")")
+* 根拠: `logger.warning` (行番号: 85 / 抜粋: "logger.warning("SwitchBot Token/Secret is missing in config.")")
 
 
 * **エラーハンドリング**: トークンまたはシークレットが設定されていない場合、警告を出力して空の辞書を返す。
-* 根拠: `if not token or not secret:` (行番号: 80〜82 / 抜粋: "if not token or not secret:")
+* 根拠: `if not token or not secret:` (行番号: 84〜86 / 抜粋: "if not token or not secret:")
 
 
 
 ### `fetch_device_name_cache`
 
 * **役割**: SwitchBot APIのデバイス一覧エンドポイントからデバイス情報を取得し、グローバル変数 `DEVICE_NAME_CACHE` にデバイスIDと名前のペアを格納する。
-* 根拠: `fetch_device_name_cache` (行番号: 100〜131 / 抜粋: "def fetch_device_name_cache() -> bool:")
+* 根拠: `fetch_device_name_cache` (行番号: 107〜142 / 抜粋: "def fetch_device_name_cache() -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `fetch_device_name_cache` (行番号: 100 / 抜粋: "def fetch_device_name_cache()")
+* 根拠: `fetch_device_name_cache` (行番号: 107 / 抜粋: "def fetch_device_name_cache()")
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
-* 根拠: `fetch_device_name_cache` (行番号: 100 / 抜粋: "-> bool:")
+* 根拠: `fetch_device_name_cache` (行番号: 107 / 抜粋: "-> bool:")
 
 
 * **副作用**: グローバル変数 `DEVICE_NAME_CACHE` の上書き・追加更新。インフォメーションおよびエラーログ出力。APIへのGETリクエスト。
-* 根拠: `global DEVICE_NAME_CACHE` (行番号: 102 / 抜粋: "global DEVICE_NAME_CACHE")
+* 根拠: `global DEVICE_NAME_CACHE` (行番号: 109 / 抜粋: "global DEVICE_NAME_CACHE")
 
 
 * **エラーハンドリング**:
@@ -168,53 +168,53 @@
 * APIレスポンスが `None` の場合（Fail-Soft時）は `False` を返す。
 * `statusCode` が100以外の場合はエラーログを出力し `False` を返す。
 * 任意の例外発生時はエラーログを出力し `False` を返す。
-* 根拠: `except Exception as e` (行番号: 129 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 140 / 抜粋: "except Exception as e:")
 
 
 
 ### `get_device_name_by_id`
 
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。
-* 根拠: `get_device_name_by_id` (行番号: 133〜135 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 144〜146 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
-* 根拠: `get_device_name_by_id` (行番号: 133 / 抜粋: "device_id: str")
+* 根拠: `get_device_name_by_id` (行番号: 144 / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかった場合はデバイス名、存在しない場合はNone)
-* 根拠: `get_device_name_by_id` (行番号: 133 / 抜粋: "-> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 144 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: なし
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 135 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 146 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 * **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 135 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 146 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 
 ### `get_device_status`
 
 * **役割**: 指定されたデバイスのステータス取得用URLを構築し、APIリクエストを送信して結果を取得する。
-* 根拠: `get_device_status` (行番号: 137〜150 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 148〜161 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (対象デバイスのID)
-* 根拠: `get_device_status` (行番号: 137 / 抜粋: "device_id: str")
+* 根拠: `get_device_status` (行番号: 148 / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (取得したステータス辞書、失敗時はNone)
-* 根拠: `get_device_status` (行番号: 137 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 148 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: APIへのGETリクエスト呼び出し、失敗時のエラーログ出力
-* 根拠: `request_switchbot_api` (行番号: 145 / 抜粋: "response_data = request_switchbot_api(url, headers)")
+* 根拠: `request_switchbot_api` (行番号: 157 / 抜粋: "response_data = request_switchbot_api(url, headers)")
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
-* 根拠: `except Exception as e` (行番号: 147〜149 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 159〜161 / 抜粋: "except Exception as e:")
 
 
 

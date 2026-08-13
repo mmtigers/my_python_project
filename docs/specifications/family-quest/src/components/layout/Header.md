@@ -10,7 +10,7 @@
 ## 2. ファイルの概要
 
 * ユーザー切り替え、パーティ表示、ランキング（トレンド）表示、および記録表示のナビゲーション機能を持つヘッダーUIを提供する。
-* タイトル部分に隠しボタンとして管理画面（Admin）を開くためのトリガーが組み込まれている。
+* タイトル部分に隠しボタンとして管理画面（Admin）を開くためのトリガーが組み込まれている。`onAdminOpen`はオプショナルなpropであり、渡された場合のみタイトルがクリック可能になる（保護者以外には見せないためのクライアント側UI上の配慮であり、セキュリティ境界ではない）。
 * コンポーネント自身は状態（State）を持たず、親から渡されたProps（表示データおよびコールバック関数）に基づいてレンダリングを行う純粋なプレゼンテーションコンポーネントである。
 
 ## 3. 外部依存関係
@@ -30,14 +30,14 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `User` (from `@/types`) | 外部ファイルで定義されており、プロパティの全容（`user_id`, `name`, `avatar`, `icon`以外に何を持つか）が本ファイルからは判断不可。 | `import { User } from '@/types';` (行番号: 2) |
-| 各種コールバック関数の処理内容 | 親コンポーネントから渡される関数であり、実行時に具体的にどのような処理（API呼び出しやルーティングなど）が行われるか判断不可。 | `onClick={onAdminOpen}` など各コールバック呼び出し (行番号: 32, 48, 88, 112, 138) |
+| 各種コールバック関数の処理内容 | 親コンポーネントから渡される関数であり、実行時に具体的にどのような処理（API呼び出しやルーティングなど）が行われるか判断不可。 | `onClick={onAdminOpen}` など各コールバック呼び出し (行番号: 35, 52, 94, 121, 150) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `HeaderProps`
 
 * **役割**: `Header` コンポーネントが受け取るプロパティの型定義。
-* 根拠: `interface HeaderProps {` (行番号: 5〜14 / 抜粋: "interface HeaderProps {")
+* 根拠: `interface HeaderProps {` (行番号: 5〜17 / 抜粋: "interface HeaderProps {")
 
 
 * **プロパティ一覧**:
@@ -48,30 +48,31 @@
 * `onPartySwitch`: `() => void`
 * `onLogSwitch`: `() => void`
 * `onTrendsSwitch`: `() => void`
-* `onAdminOpen`: `() => void`
+* `onAdminOpen`: `() => void`（オプショナル。未指定の場合は保護者ではないユーザーとして扱い、タイトルをクリック不可にする。13〜15行目のコメントによれば、これはクライアント側のUI上の配慮でありセキュリティ境界ではない）
+* 根拠: 16行目 `onAdminOpen?: () => void;`
 
 
 
 ### `Header`
 
 * **役割**: ナビゲーションおよびタイトルを含むヘッダーUIのレンダリング。
-* 根拠: `const Header: React.FC<HeaderProps> = ({...}) => { return (<header...` (行番号: 16〜162 / 抜粋: "const Header: React.FC<Heade...")
+* 根拠: `const Header: React.FC<HeaderProps> = ({...}) => { return (<header...` (行番号: 19〜178 / 抜粋: "const Header: React.FC<HeaderProps> = ({")
 
 
 * **引数/リクエスト**: `HeaderProps` で定義されたプロパティのオブジェクト
-* 根拠: `const Header: React.FC<HeaderProps> = ({ users, currentUserIdx, ... })` (行番号: 16〜25 / 抜粋: "const Header: React.FC<Heade...")
+* 根拠: `const Header: React.FC<HeaderProps> = ({ users, currentUserIdx, ... })` (行番号: 19〜28 / 抜粋: "const Header: React.FC<HeaderProps> = ({")
 
 
 * **戻り値/レスポンス**: JSX要素 (`<header>` タグをルートとするReact要素)
-* 根拠: `return ( <header className="bg-gradient-to-b...` (行番号: 26〜161 / 抜粋: "return ( <header classNa...")
+* 根拠: `return ( <header className="bg-gradient-to-b...` (行番号: 29〜177 / 抜粋: "return ( <header className=\"bg-gradient-to-b from-gray-900 to-black")
 
 
 * **副作用**: なし
-* 根拠: コンポーネント内に `useEffect` 等のフックや、外部状態を直接変更する処理が存在しない。 (行番号: 26〜161 / 抜粋: "return (")
+* 根拠: コンポーネント内に `useEffect` 等のフックや、外部状態を直接変更する処理が存在しない。 (行番号: 29〜177)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 例外を捕捉する `try-catch` ブロックやエラーバウンダリが存在しない。 (行番号: 16〜162 / 抜粋: "const Header: React.FC<Heade...")
+* 根拠: 例外を捕捉する `try-catch` ブロックやエラーバウンダリが存在しない。 (行番号: 19〜178)
 
 
 
@@ -135,8 +136,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `users.map` 内でユーザーのアイコンを表示する際、`user.avatar && user.avatar.startsWith('/')` という判定を用いている。`user.avatar` が文字列以外であった場合にランタイムエラーを防ぐ短絡評価が含まれているが、型定義上 `avatar` が文字列であることが保証されているかは不明。
-* 各コールバック（`onAdminOpen`, `onPartySwitch` など）はオプショナルチェーンなしで直接実行されている（例: `onClick={onAdminOpen}`）。親コンポーネントから関数が渡されなかった場合（TypeScriptの型定義上は必須だが、JSとして実行された場合）、実行時エラーとなる。
+* `users.map` 内でユーザーのアイコンを表示する際、`user.avatar && user.avatar.startsWith('/')` という判定を用いている（63行目）。`user.avatar` が文字列以外であった場合にランタイムエラーを防ぐ短絡評価が含まれているが、型定義上 `avatar` が文字列であることが保証されているかは不明。
+* `onAdminOpen` は型定義上オプショナル（`onAdminOpen?: () => void;`）であり、`onClick={onAdminOpen}`（35行目）に直接渡されている。React の仕様上 `onClick` に `undefined` を渡してもエラーにはならないため、この用法自体は安全である。一方、`onPartySwitch`/`onLogSwitch`/`onTrendsSwitch`/`onUserSwitch` は型定義上必須のため、親が正しく渡す前提に依存している。
 
 ## 9. 不明事項一覧
 

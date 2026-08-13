@@ -181,7 +181,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | `ASSETS_DIR`の実体が不明なため、対象となるディレクトリの物理パスやシステム全体のディレクトリ構造を把握するため。 | `import config` (行番号: 9) / `config.ASSETS_DIR` (行番号: 17) |
-| 中 | 画像生成元となるスクリプト (例: `camera_capture.py` など) | `snapshot_{id}_{YYYYMMDD}_{HHMMSS}.jpg` の命名規則で画像を生成している処理の流れと、ファイルの保存タイミングを把握するため。 | `f"*_{today_str}_*.jpg"` (行番号: 57) |
+| 中 | `monitors/camera_monitor.py` | コード内コメントによれば `{cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg` の命名規則で画像を生成しているのは同ファイルの `save_image_from_stream` とされており、実際の生成処理・保存タイミングを確認するため。 | `# パターン: {cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg (camera_monitor.py の save_image_from_stream が生成)` (行番号: 56) |
 | 低 | `core/logger.py` | ログがどこに出力されているか（標準出力、ファイル、外部サービス等）および設定レベルを確認するため。 | `from core.logger import setup_logging` (行番号: 11) |
 
 ## 8. 保守上の注意点

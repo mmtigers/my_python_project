@@ -35,7 +35,7 @@
 ### `BossCard`
 
 * **役割**: `boss`オブジェクトを受け取り、ボスのアイコン、名前、説明、HPバー、撃破状態のオーバーレイ、週間ターゲット期間を描画するReactコンポーネント。
-* 根拠: [BossCard] (行番号: 9〜71 / 抜粋: "const BossCard: React.FC<BossC...")
+* 根拠: [BossCard] (行番号: 9〜82 / 抜粋: "const BossCard: React.FC<BossC...")
 
 
 * **引数/リクエスト**: `{ boss }`: `Boss | null` 型。ボスの詳細情報を含むオブジェクト、またはnull。
@@ -47,7 +47,7 @@
 
 
 * **副作用**: なし
-* 根拠: [BossCard] (行番号: 9〜71 / 抜粋: "const BossCard: React.FC<BossC...")
+* 根拠: [BossCard] (行番号: 9〜82 / 抜粋: "const BossCard: React.FC<BossC...")
 
 
 * **エラーハンドリング**: `boss` が `null` の場合に早期リターンを行い、プロパティへのアクセスエラー（`Cannot read properties of null` など）を防止している。

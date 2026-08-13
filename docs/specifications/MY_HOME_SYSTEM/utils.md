@@ -108,7 +108,7 @@
 ### `with_exponential_backoff`
 
 * **役割**: 関数実行時の例外を捕捉し、指数関数的バックオフを用いて無限にリトライ処理を行うデコレータを返す。
-* 根拠: [with_exponential_backoff] (行番号: 33〜51 / 抜粋: "while True: ... except Excepti...")
+* 根拠: [with_exponential_backoff] (行番号: 39〜51 / 抜粋: "while True: ... except Excepti...")
 
 
 * **引数/リクエスト**:
@@ -123,18 +123,18 @@
 
 
 * **副作用**: 失敗回数に応じて `logger.warning` または `logger.error` によりログが出力され、`time.sleep` でスレッドが一時停止する。
-* 根拠: [wrapper内部] (行番号: 44〜49 / 抜粋: "logger.error(...) ... time.sle...")
+* 根拠: [wrapper内部] (行番号: 44〜51 / 抜粋: "logger.error(...) ... time.sle...")
 
 
 * **エラーハンドリング**: デコレートされた関数で発生したすべての `Exception` をキャッチし、リトライを行う。
-* 根拠: [wrapper内部] (行番号: 40 / 抜粋: "except Exception as e:")
+* 根拠: [wrapper内部] (行番号: 42 / 抜粋: "except Exception as e:")
 
 
 
 ### `wait_for_storage_warmup`
 
 * **役割**: 対象のファイルまたはディレクトリが存在し、読み書きアクセスが可能になるまで指数関数的バックオフを用いて待機する。
-* 根拠: [wait_for_storage_warmup] (行番号: 75〜90 / 抜粋: "if check_target.exists() and o...")
+* 根拠: [wait_for_storage_warmup] (行番号: 79〜84 / 抜粋: "if check_target.exists() and o...")
 
 
 * **引数/リクエスト**:
@@ -142,19 +142,19 @@
 * `max_retries` (`int`): 最大リトライ回数。デフォルトは5。
 * `base_delay` (`float`): 初回の待機時間（秒）。デフォルトは1.0。
 * `max_delay` (`float`): 最大の待機時間（秒）。デフォルトは16.0。
-* 根拠: [wait_for_storage_warmup] (行番号: 54〜58 / 抜粋: "target_path: Union[str, Path],...")
+* 根拠: [wait_for_storage_warmup] (行番号: 56〜60 / 抜粋: "target_path: Union[str, Path],...")
 
 
 * **戻り値/レスポンス**: `bool`。指定回数内にアクセス可能となった場合は `True`、不可の場合は `False`。
-* 根拠: [wait_for_storage_warmup] (行番号: 59 / 抜粋: ") -> bool:")
+* 根拠: [wait_for_storage_warmup] (行番号: 61 / 抜粋: ") -> bool:")
 
 
 * **副作用**: チェックプロセス中および失敗時に `logger.info`, `logger.debug`, `logger.error` でログが出力される。また `time.sleep` によりスレッドが一時停止する。
-* 根拠: [wait_for_storage_warmup] (行番号: 78〜91 / 抜粋: "logger.info(...) ... time.slee...")
+* 根拠: [wait_for_storage_warmup] (行番号: 83〜93 / 抜粋: "logger.info(...) ... time.slee...")
 
 
 * **エラーハンドリング**: 例外の捕捉は行われていない（`Path`の生成や`os.access`で発生する例外はそのままスローされる可能性がある）。パスが存在しない、あるいは権限がない場合はリトライを実施する。
-* 根拠: [wait_for_storage_warmup] (行番号: 75〜92 / 抜粋: "for attempt in range(max_retri...")
+* 根拠: [wait_for_storage_warmup] (行番号: 79〜93 / 抜粋: "for attempt in range(max_retri...")
 
 
 
@@ -247,9 +247,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜92 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
-| 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 40 / 抜粋: "except Exception as e:") |
-| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 54〜55 / 抜粋: "def wait_for_storage_warmup(ta...") |
+| 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
+| 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
+| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 56〜57 / 抜粋: "def wait_for_storage_warmup(ta...") |
 
 ## 8. 保守上の注意点
 
