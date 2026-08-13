@@ -27,11 +27,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.SOUND_MAP` | イベントキーとファイル名の具体的な対応が定義されているファイルが提供されていないため判断不可。 | `config.SOUND_MAP.get(event_key)` (行番号: 22 / 抜粋: "config.SOUND_MAP.get(event_k...") |
-| `config.SOUND_DIR` | 音声ファイルが格納されるべき具体的なディレクトリパスが不明。 | `os.path.join(config.SOUND_DIR` (行番号: 28 / 抜粋: "os.path.join(config.SOUND_DIR,") |
-| `config.SOUND_PLAYER_CMD` | 実行される具体的なプレイヤーコマンド（例: `aplay`, `afplay`など）が不明。 | `shutil.which(config.SOUND_P...` (行番号: 36 / 抜粋: "shutil.which(config.SOUND_PLAY...") |
-| `config.SOUND_PLAYER_ARGS` | コマンドに付与される具体的な引数が不明。 | `config.SOUND_PLAYER_ARGS` (行番号: 43 / 抜粋: "hasattr(config, "SOUND_PLAYER_") |
-| `config.DEFAULT_SOUND_SOURCE` | 復旧用の音声ファイルが格納されているデフォルトディレクトリのパスが不明。 | `config.DEFAULT_SOUND_SOURCE` (行番号: 87 / 抜粋: "os.path.join(config.DEFAULT_SO...") |
+| `config.SOUND_MAP` | イベントキーとファイル名の具体的な対応が定義されているファイルが提供されていないため判断不可。 | `config.SOUND_MAP.get(event_key)` (行番号: 23 / 抜粋: "config.SOUND_MAP.get(event_k...") |
+| `config.SOUND_DIR` | 音声ファイルが格納されるべき具体的なディレクトリパスが不明。 | `os.path.join(config.SOUND_DIR` (行番号: 29 / 抜粋: "os.path.join(config.SOUND_DIR,") |
+| `config.SOUND_PLAYER_CMD` | 実行される具体的なプレイヤーコマンド（例: `aplay`, `afplay`など）が不明。 | `shutil.which(config.SOUND_P...` (行番号: 37 / 抜粋: "shutil.which(config.SOUND_PLAY...") |
+| `config.SOUND_PLAYER_ARGS` | コマンドに付与される具体的な引数が不明。 | `config.SOUND_PLAYER_ARGS` (行番号: 44 / 抜粋: "hasattr(config, "SOUND_PLAYER_") |
+| `config.DEFAULT_SOUND_SOURCE` | 復旧用の音声ファイルが格納されているデフォルトディレクトリのパスが不明。 | `config.DEFAULT_SOUND_SOURCE` (行番号: 90 / 抜粋: "os.path.join(config.DEFAULT_SO...") |
 | `setup_logging`の実装 | 生成されるロガーの仕様（標準出力へのフォーマット、ログレベルなど）が不明。 | `setup_logging("sound_manager")` (行番号: 10 / 抜粋: "logger = setup_logging("sound") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -39,7 +39,7 @@
 ### `play`
 
 * **役割**: 指定されたイベントキーに対応する音声ファイルを外部プレイヤーコマンドを用いて非同期で再生する。コンソール出力を抑止する。
-* 根拠: `def play` (行番号: 12-62 / 抜粋: "def play(event_key: str) -> N...")
+* 根拠: `def play` (行番号: 12-63 / 抜粋: "def play(event_key: str) -> N...")
 
 
 * **引数/リクエスト**: `event_key: str` (再生する音声イベントを示すキー)
@@ -51,34 +51,34 @@
 
 
 * **副作用**: 外部プロセスの起動による音声再生（`subprocess.Popen`）、システムログへの書き込み。
-* 根拠: `subprocess.Popen` (行番号: 52-56 / 抜粋: "subprocess.Popen( cmd, st...")
+* 根拠: `subprocess.Popen` (行番号: 53-57 / 抜粋: "subprocess.Popen( cmd, st...")
 
 
 * **エラーハンドリング**: OSレベルのエラー(`OSError`)およびその他の予期せぬエラー(`Exception`)をキャッチし、ログに記録（システムを停止させないFail-Soft構成）。
-* 根拠: `try-except` ブロック (行番号: 57-62 / 抜粋: "except OSError as e:")
+* 根拠: `try-except` ブロック (行番号: 58-63 / 抜粋: "except OSError as e:")
 
 
 
 ### `check_and_restore_sounds`
 
 * **役割**: 指定された音声ディレクトリが存在しない場合は作成し、`config.SOUND_MAP`に定義されている全音声ファイルが存在するか確認。欠損している場合はデフォルトのディレクトリからコピーして復旧する。
-* 根拠: `def check_and_restore_sounds` (行番号: 65-110 / 抜粋: "def check_and_restore_sounds()...")
+* 根拠: `def check_and_restore_sounds` (行番号: 66-110 / 抜粋: "def check_and_restore_sounds()...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数定義 (行番号: 65 / 抜粋: "()")
+* 根拠: 引数定義 (行番号: 66 / 抜粋: "()")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 65 / 抜粋: "-> None:")
+* 根拠: 戻り値の型ヒント (行番号: 66 / 抜粋: "-> None:")
 
 
 * **副作用**: ディレクトリの新規作成（`os.makedirs`）、ファイルのコピー・上書き（`shutil.copy2`）、システムログへの書き込み。
-* 根拠: `os.makedirs`, `shutil.copy2` (行番号: 72, 91 / 抜粋: "os.makedirs(config.SOUND_DIR...")
+* 根拠: `os.makedirs`, `shutil.copy2` (行番号: 73, 94 / 抜粋: "os.makedirs(config.SOUND_DIR...")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の例外、およびファイルコピー時の例外を個別にキャッチし、ログに記録した上で後続の処理を継続する。
-* 根拠: `try-except` ブロック (行番号: 71-74, 90-93 / 抜粋: "except Exception as e:")
+* 根拠: `try-except` ブロック (行番号: 72-77, 93-99 / 抜粋: "except Exception as e:")
 
 
 

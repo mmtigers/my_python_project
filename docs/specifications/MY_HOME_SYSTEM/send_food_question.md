@@ -29,100 +29,100 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`の各定数 | `SQLITE_TABLE_FOOD`, `MENU_OPTIONS`, `LINE_USER_ID` の具体的な値や構造が本ファイル内に定義されていないため。 | 根拠: [config.xxx] (行番号: 51, 93, 179 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD}") |
-| `common`の各関数 | `setup_logging`, `get_db_cursor`, `send_push` の内部実装、接続先、認証仕様などが不明なため。 | 根拠: [common.xxx] (行番号: 12, 46, 179 / 抜粋: "with common.get_db_cursor() as cursor:") |
+| `config`の各定数 | `SQLITE_TABLE_FOOD`, `MENU_OPTIONS`, `LINE_USER_ID` の具体的な値や構造が本ファイル内に定義されていないため。 | 根拠: [config.xxx] (行番号: 58, 114, 223 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD}") |
+| `common`の各関数 | `setup_logging`, `get_db_cursor`, `send_push` の内部実装、接続先、認証仕様などが不明なため。 | 根拠: [common.xxx] (行番号: 12, 51, 223 / 抜粋: "with common.get_db_cursor() as cursor:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `fetch_frequent_menus`
 
 * **役割**: DBから過去の履歴を集計し、カテゴリ（自炊/外食）ごとの頻出メニューを取得・整形する。
-* 根拠: [fetch_frequent_menus] (行番号: 33〜38 / 抜粋: "DBから過去の履歴を集計し、カテゴリごとの頻出メニューを取得する。")
+* 根拠: [fetch_frequent_menus] (行番号: 35〜42 / 抜粋: "DBから過去の履歴を集計し、カテゴリごとの頻出メニューを取得する。")
 
 
 * **引数/リクエスト**: `days`: int （デフォルト値: 30。遡る日数を指定）
-* 根拠: [fetch_frequent_menus] (行番号: 33 / 抜粋: "def fetch_frequent_menus(days: int = 30) -> Dict")
+* 根拠: [fetch_frequent_menus] (行番号: 35 / 抜粋: "def fetch_frequent_menus(days: int = 30) -> Dict")
 
 
 * **戻り値/レスポンス**: `Dict[str, List[Tuple[str, int]]]` （カテゴリ名をキーとし、メニュー名と出現回数のタプルのリストを値とする辞書）
-* 根拠: [fetch_frequent_menus] (行番号: 33 / 抜粋: "-> Dict[str, List[Tuple[str, int]]]:")
+* 根拠: [fetch_frequent_menus] (行番号: 35 / 抜粋: "-> Dict[str, List[Tuple[str, int]]]:")
 
 
 * **副作用**: `common.get_db_cursor()`によるDB読み取り、およびロガーを通じた標準/ファイル出力（推定）。
-* 根拠: [fetch_frequent_menus] (行番号: 46 / 抜粋: "with common.get_db_cursor() as cursor:")
+* 根拠: [fetch_frequent_menus] (行番号: 51 / 抜粋: "with common.get_db_cursor() as cursor:")
 
 
 * **エラーハンドリング**: `Exception` をキャッチし、エラーログを出力した上でデフォルトの空リストを含む辞書を返す。
-* 根拠: [fetch_frequent_menus] (行番号: 80〜82 / 抜粋: "except Exception as e:")
+* 根拠: [fetch_frequent_menus] (行番号: 98〜99 / 抜粋: "except Exception as e:")
 
 
 
 ### `fill_defaults_from_config`
 
 * **役割**: DBから取得した頻出メニューのデータ不足分を、`config.MENU_OPTIONS`に定義されたデフォルト候補で指定上限数まで埋める。
-* 根拠: [fill_defaults_from_config] (行番号: 85〜88 / 抜粋: "データ不足分を config.MENU_OPTIONS の定義値で埋める。")
+* 根拠: [fill_defaults_from_config] (行番号: 104〜107 / 抜粋: "データ不足分を config.MENU_OPTIONS の定義値で埋める。")
 
 
 * **引数/リクエスト**: `ranked_data`: Dict[str, List[Tuple[str, int]]] （集計済みデータ）, `limit`: int （1カテゴリあたりの最大アイテム数）
-* 根拠: [fill_defaults_from_config] (行番号: 85 / 抜粋: "def fill_defaults_from_config(ranked_data: Dict[str, List[Tuple[str, int]]], limit: int)")
+* 根拠: [fill_defaults_from_config] (行番号: 104 / 抜粋: "def fill_defaults_from_config(ranked_data: Dict[str, List[Tuple[str, int]]], limit: int)")
 
 
 * **戻り値/レスポンス**: `Dict[str, List[Tuple[str, int]]]` （デフォルト値が補充されたデータ）
-* 根拠: [fill_defaults_from_config] (行番号: 85 / 抜粋: "-> Dict[str, List[Tuple[str, int]]]:")
+* 根拠: [fill_defaults_from_config] (行番号: 104 / 抜粋: "-> Dict[str, List[Tuple[str, int]]]:")
 
 
 * **副作用**: なし
-* 根拠: [fill_defaults_from_config] (行番号: 85〜101 / 抜粋: "return ranked_data")
+* 根拠: [fill_defaults_from_config] (行番号: 104〜122 / 抜粋: "return ranked_data")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [fill_defaults_from_config] (行番号: 85〜101 / 抜粋: "return ranked_data")
+* 根拠: [fill_defaults_from_config] (行番号: 104〜122 / 抜粋: "return ranked_data")
 
 
 
 ### `create_food_flex_container`
 
 * **役割**: ランキングデータをもとに、LINE Bot用のFlex Messageコンテナ（UI要素）を構築する。
-* 根拠: [create_food_flex_container] (行番号: 104〜105 / 抜粋: "Flex Messageのコンテナを構築 (UI生成)")
+* 根拠: [create_food_flex_container] (行番号: 125〜126 / 抜粋: "Flex Messageのコンテナを構築 (UI生成)")
 
 
 * **引数/リクエスト**: `ranked_data`: Dict[str, List[Tuple[str, int]]] （表示対象のメニューデータ）
-* 根拠: [create_food_flex_container] (行番号: 104 / 抜粋: "def create_food_flex_container(ranked_data: Dict[str, List[Tuple[str, int]]])")
+* 根拠: [create_food_flex_container] (行番号: 125 / 抜粋: "def create_food_flex_container(ranked_data: Dict[str, List[Tuple[str, int]]])")
 
 
 * **戻り値/レスポンス**: `FlexContainer` （linebot.v3.messagingのUIコンテナオブジェクト）
-* 根拠: [create_food_flex_container] (行番号: 104 / 抜粋: "-> FlexContainer:")
+* 根拠: [create_food_flex_container] (行番号: 125 / 抜粋: "-> FlexContainer:")
 
 
 * **副作用**: なし
-* 根拠: [create_food_flex_container] (行番号: 104〜164 / 抜粋: "return FlexContainer.from_dict(bubble)")
+* 根拠: [create_food_flex_container] (行番号: 125〜205 / 抜粋: "return FlexContainer.from_dict(bubble)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [create_food_flex_container] (行番号: 104〜164 / 抜粋: "return FlexContainer.from_dict(bubble)")
+* 根拠: [create_food_flex_container] (行番号: 125〜205 / 抜粋: "return FlexContainer.from_dict(bubble)")
 
 
 
 ### `main`
 
 * **役割**: データ取得、デフォルト値の充填、メッセージ構築、そして実際の送信処理までの一連のフローを制御する。
-* 根拠: [main] (行番号: 167〜189 / 抜粋: "1. データ取得 ... 2. デフォルト値充填 ... 3. Flex Message構築 ... 4. 送信")
+* 根拠: [main] (行番号: 208〜231 / 抜粋: "1. データ取得 ... 2. デフォルト値充填 ... 3. Flex Message構築 ... 4. 送信")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [main] (行番号: 167 / 抜粋: "def main():")
+* 根拠: [main] (行番号: 208 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: [main] (行番号: 167 / 抜粋: "def main():")
+* 根拠: [main] (行番号: 208 / 抜粋: "def main():")
 
 
 * **副作用**: `common.send_push()`の実行による外部API（LINE）への通信。システム終了（`sys.exit`）の実行。
-* 根拠: [main] (行番号: 179〜189 / 抜粋: "if common.send_push(config.LINE_USER_ID, [msg], target="line"):")
+* 根拠: [main] (行番号: 223 / 抜粋: "if common.send_push(config.LINE_USER_ID, [msg], target="line"):")
 
 
 * **エラーハンドリング**: `common.send_push()`が`False`を返した場合、および予期せぬ`Exception`が発生した場合にエラーログを出力し、`sys.exit(1)`でプロセスを異常終了する。
-* 根拠: [main] (行番号: 182〜188 / 抜粋: "sys.exit(1)")
+* 根拠: [main] (行番号: 227, 231 / 抜粋: "sys.exit(1)")
 
 
 
@@ -192,8 +192,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `SQLITE_TABLE_FOOD`や`MENU_OPTIONS`の定義が不明確だと、DBスキーマやデフォルト動作の全体像を正確に把握できないため。 | 根拠: [configの参照箇所] (行番号: 51, 93 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD}") |
-| 高 | `common.py` | `get_db_cursor`の実装（接続先DB、トランザクションの扱い）や、`send_push`の通信仕様（エラーリトライの有無など）がブラックボックスになっているため。 | 根拠: [commonの参照箇所] (行番号: 46, 179 / 抜粋: "with common.get_db_cursor() as cursor:") |
+| 高 | `config.py` | `SQLITE_TABLE_FOOD`や`MENU_OPTIONS`の定義が不明確だと、DBスキーマやデフォルト動作の全体像を正確に把握できないため。 | 根拠: [configの参照箇所] (行番号: 58, 114 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD}") |
+| 高 | `common.py` | `get_db_cursor`の実装（接続先DB、トランザクションの扱い）や、`send_push`の通信仕様（エラーリトライの有無など）がブラックボックスになっているため。 | 根拠: [commonの参照箇所] (行番号: 51, 223 / 抜粋: "with common.get_db_cursor() as cursor:") |
 
 ## 8. 保守上の注意点
 
@@ -211,10 +211,12 @@ graph TD
 
 ## 10. 自己検証結果
 
-* [x] 完了: 推測・外部ファイルの仕様を一切含んでいない
-* [x] 完了: 全関数・全クラス・全コンポーネントを列挙した
-* [x] 完了: 全てのインポート要素を列挙した
-* [x] 完了: すべての仕様説明に「根拠（行番号・抜粋）」を明記した
-* [x] 完了: 根拠漏れが0件である
-* [x] 完了: Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
-* [x] 完了: 不明事項を漏れなく列挙した
+* [x] 推測・外部ファイルの仕様を一切含んでいない
+* [x] 全関数・全クラス・全コンポーネントを列挙した
+* [x] 全てのインポート要素を列挙した
+* [x] すべての仕様説明に「根拠（行番号・抜粋）」を明記した
+* [x] 根拠漏れが0件である
+* [x] Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
+* [x] 不明事項を漏れなく列挙した
+
+完了

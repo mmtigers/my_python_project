@@ -138,7 +138,7 @@ flowchart TD
     CheckValid -- Yes --> FetchStatus[外部：fetch_device_status_sync\nをスレッド実行]
     
     FetchStatus --> CheckStatus{ステータス取得成功?}
-    CheckStatus -- No --> LoopNext
+    CheckStatus -- No --> Sleep
     CheckStatus -- Yes --> LogStateChange[log_device_state_change 実行]
     
     LogStateChange --> CheckDiff{前回状態から変化あり?}

@@ -17,130 +17,130 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `math` | 標準ライブラリ | 経験値計算における累乗と切り捨て処理 | `import math` (行番号取得不可 / 抜粋: "import math") |
-| `random` | 標準ライブラリ | ドロップ報酬のメダル獲得確率判定 | `import random` (行番号取得不可 / 抜粋: "import random") |
-| `Tuple`, `Dict`, `Any`, `Optional` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義 | `from typing import Tuple, Dict...` (行番号取得不可 / 抜粋: "from typing import Tuple, Dict") |
+| `math` | 標準ライブラリ | 経験値計算における累乗と切り捨て処理 | `import math` (行番号: 1 / 抜粋: "import math") |
+| `random` | 標準ライブラリ | ドロップ報酬のメダル獲得確率判定 | `import random` (行番号: 2 / 抜粋: "import random") |
+| `Tuple`, `Dict`, `Any`, `Optional` | 標準ライブラリ(型ヒント) | 関数の引数・戻り値の型定義。ただし `Optional` はファイル内で一度も使用されていない（未使用インポート） | `from typing import Tuple, Dict, Any, Optional` (行番号: 3 / 抜粋: "from typing import Tuple, Dict, Any, Optional") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| 該当なし | 提供されたコード内で全ての計算ロジックが完結しているため。 | 全体コード (行番号取得不可 / 抜粋: "class GameLogic:") |
+| 該当なし | 提供されたコード内で全ての計算ロジックが完結しているため。 | 全体コード (行番号: 6 / 抜粋: "class GameLogic:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `GameLogic.calculate_next_level_exp`
 
 * **役割**: 次のレベルに必要な経験値を計算する（100 × 1.2の(レベル-1)乗の切り捨て）。
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13-15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 * **引数/リクエスト**: `level: int` (対象となるレベル)
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "def calculate_next_level_exp...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13 / 抜粋: "def calculate_next_level_exp(level: int) -> int:")
 
 
 * **戻り値/レスポンス**: `int` (必要経験値)
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "def calculate_next_level_exp...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13 / 抜粋: "def calculate_next_level_exp(level: int) -> int:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_next_level_exp` (行番号取得不可 / 抜粋: "return math.floor(100 * math...")
+* 根拠: `GameLogic.calculate_next_level_exp` (行番号: 13-15 / 抜粋: "return math.floor(100 * math.pow(1.2, level - 1))")
 
 
 
 ### `GameLogic.calculate_max_hp`
 
 * **役割**: レベルに応じた最大HPを計算する（レベル × 20 + 5）。
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18-20 / 抜粋: "return level * 20 + 5")
 
 
 * **引数/リクエスト**: `level: int` (対象となるレベル)
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "def calculate_max_hp(level: ...")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18 / 抜粋: "def calculate_max_hp(level: int) -> int:")
 
 
 * **戻り値/レスポンス**: `int` (最大HP)
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "def calculate_max_hp(level: ...")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 18 / 抜粋: "def calculate_max_hp(level: int) -> int:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 20 / 抜粋: "return level * 20 + 5")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_max_hp` (行番号取得不可 / 抜粋: "return level * 20 + 5")
+* 根拠: `GameLogic.calculate_max_hp` (行番号: 20 / 抜粋: "return level * 20 + 5")
 
 
 
 ### `GameLogic.calc_level_progress`
 
 * **役割**: 経験値を加算し、必要経験値を満たす間レベルを上げ続け、最終的なレベルと余剰経験値、レベルアップ有無を判定する。
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "while total_exp >= req_exp:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 34-38 / 抜粋: "while total_exp >= req_exp:")
 
 
 * **引数/リクエスト**: `current_level: int`, `current_exp: int`, `added_exp: int`
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "def calc_level_progress(cls,...")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 23 / 抜粋: "def calc_level_progress(cls, current_level: int, current_exp: int, added_exp: int) -> Tuple[int, int, bool]:")
 
 
 * **戻り値/レスポンス**: `Tuple[int, int, bool]` (新しいレベル, 新しい経験値, レベルアップフラグ)
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "-> Tuple[int, int, bool]:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 23 / 抜粋: "-> Tuple[int, int, bool]:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "return new_level, total_exp,...")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 40 / 抜粋: "return new_level, total_exp, leveled_up")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calc_level_progress` (行番号取得不可 / 抜粋: "while total_exp >= req_exp:")
+* 根拠: `GameLogic.calc_level_progress` (行番号: 34 / 抜粋: "while total_exp >= req_exp:")
 
 
 
 ### `GameLogic.calc_level_down`
 
 * **役割**: 経験値を減算し、経験値がマイナスかつレベルが1より大きい場合はレベルを下げて前のレベルの最大経験値を足し戻す。最終的に経験値がマイナスの場合は0に補正する。
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "while new_exp < 0 and new_le...")
+* 根拠: `GameLogic.calc_level_down` (行番号: 53-56 / 抜粋: "while new_exp < 0 and new_level > 1:")
 
 
 * **引数/リクエスト**: `current_level: int`, `current_exp: int`, `removed_exp: int`
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "def calc_level_down(cls, cur...")
+* 根拠: `GameLogic.calc_level_down` (行番号: 43 / 抜粋: "def calc_level_down(cls, current_level: int, current_exp: int, removed_exp: int) -> Tuple[int, int]:")
 
 
 * **戻り値/レスポンス**: `Tuple[int, int]` (新しいレベル, 新しい経験値)
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "-> Tuple[int, int]:")
+* 根拠: `GameLogic.calc_level_down` (行番号: 43 / 抜粋: "-> Tuple[int, int]:")
 
 
 * **副作用**: なし
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "return new_level, new_exp")
+* 根拠: `GameLogic.calc_level_down` (行番号: 61 / 抜粋: "return new_level, new_exp")
 
 
-* **エラーハンドリング**: なし
-* 根拠: `GameLogic.calc_level_down` (行番号取得不可 / 抜粋: "if new_exp < 0: new_exp = 0")
+* **エラーハンドリング**: なし（例外送出はせず、経験値が負のままレベル1に達した場合は`0`に補正するのみ）
+* 根拠: `GameLogic.calc_level_down` (行番号: 58-59 / 抜粋: "if new_exp < 0:")
 
 
 
 ### `GameLogic.calculate_drop_rewards`
 
 * **役割**: ベースの報酬に加え、5%の確率でメダルを付与するランダムドロップ判定を行う。
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "earned_medals = 1 if random....")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 72 / 抜粋: "earned_medals = 1 if random.random() < medal_chance else 0")
 
 
 * **引数/リクエスト**: `base_gold: int`, `base_exp: int`
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "def calculate_drop_rewards(b...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 64 / 抜粋: "def calculate_drop_rewards(base_gold: int, base_exp: int) -> Dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` (gold, exp, medals, is_luckyを含む辞書)
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "-> Dict[str, Any]:")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 64 / 抜粋: "-> Dict[str, Any]:")
 
 
 * **副作用**: なし (ただし内部で非決定的な `random.random()` を実行)
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "random.random() < medal_chan...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 72 / 抜粋: "random.random() < medal_chance")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `GameLogic.calculate_drop_rewards` (行番号取得不可 / 抜粋: "return { "gold": base_gold...")
+* 根拠: `GameLogic.calculate_drop_rewards` (行番号: 74-79 / 抜粋: "return {")
 
 
 
@@ -198,14 +198,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services.py` または `controllers.py` | このクラスのメソッドを呼び出し、計算結果をDBに保存している処理フローとタイミングを確認するため。 | `GameLogic` のコメント `DB接続は行わず、純粋な入出力のみを扱う` (行番号取得不可 / 抜粋: "DB接続は行わず、純粋な入出力のみを扱う") |
-| 中 | 定数定義ファイル (例: `constants.py` など) | メダルドロップ確率の `0.05` など、ハードコードされたマジックナンバーが将来的に外部化される箇所を探るため。 | `calculate_drop_rewards` のコメント `将来的には引数で確率を変えられるようにする` (行番号取得不可 / 抜粋: "将来的には引数で確率を変えられるようにする") |
+| 高 | `services.py` または `controllers.py` | このクラスのメソッドを呼び出し、計算結果をDBに保存している処理フローとタイミングを確認するため。 | `GameLogic` のコメント `DB接続は行わず、純粋な入出力のみを扱う` (行番号: 9 / 抜粋: "DB接続は行わず、純粋な入出力のみを扱う") |
+| 中 | 定数定義ファイル (例: `constants.py` など) | メダルドロップ確率の `0.05` など、ハードコードされたマジックナンバーが将来的に外部化される箇所を探るため。 | `calculate_drop_rewards` のコメント `将来的には引数で確率を変えられるようにする` (行番号: 70 / 抜粋: "将来的には引数で確率を変えられるようにする") |
 
 ## 8. 保守上の注意点
 
-* `calculate_drop_rewards` の出力は `random.random()` に依存しており、非決定的である。
-* `calc_level_down` では、レベル1の状態で経験値減算により最終的な値がマイナスになった場合、`0`に強制リセットされる仕様が存在する。
+* `calculate_drop_rewards` の出力は `random.random()` に依存しており、非決定的である。（行番号: 72）
+* `calc_level_down` では、レベル1の状態で経験値減算により最終的な値がマイナスになった場合、`0`に強制リセットされる仕様が存在する。（行番号: 58-59）
 * メソッドに対する入力値のバリデーション（例: レベルが0以下の場合、引数 `removed_exp` に負の値が渡された場合など）を行う処理が存在しない。
+* `from typing import Tuple, Dict, Any, Optional`（行番号: 3）のうち `Optional` はファイル内で使用されておらず、未使用インポートである。
 
 ## 9. 不明事項一覧
 

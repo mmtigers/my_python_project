@@ -1,0 +1,88 @@
+name: Spec Drift Check (PR)
+
+# docs/specifications/ の仕様書は、対応するソースファイルと1:1で対応する規約になっている。
+# PRでソースを変更したときに対応する仕様書の更新を忘れると"ドリフト"が発生するため、
+# 2026-08の仕様書一斉監査(98件中44件がドリフトしていた)を踏まえて追加した検知ワークフロー。
+#
+# 方針: あくまで気付きを与えるだけの非ブロッキングチェック。
+# フォーマットのみの変更など、仕様書更新が不要なケースも多いためCIを赤くはしない。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: spec-drift-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check spec/source drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run drift check (non-blocking)
+        id: drift
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/check_spec_drift.py pr \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.sha }}" \
+            --out drift-report.md
+
+      - name: Read report
+        id: report
+        run: |
+          {
+            echo 'body<<SPEC_DRIFT_EOF'
+            if [ -f drift-report.md ]; then
+              cat drift-report.md
+            else
+              echo "## 仕様書ドリフトチェック（PR差分）"
+              echo ""
+              echo "チェック自体が失敗しました。Actionsのログを確認してください（このチェックはブロッキングではありません）。"
+            fi
+            echo 'SPEC_DRIFT_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upsert PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "<!-- spec-drift-check -->";
+            const body = marker + "\n" + ${{ toJSON(steps.report.outputs.body) }};
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
