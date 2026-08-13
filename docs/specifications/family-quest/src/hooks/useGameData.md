@@ -27,51 +27,71 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 103 / 抜粋: "queryFn: () => apiClient.ge...") |
-| 各APIエンドポイントの仕様 | リクエスト後のDBの挙動、トランザクション、外部影響が不明であるため。 | 根拠: [`/api/quest/complete` 等] (行番号: 143 / 抜粋: "return apiClient.post<Ques...") |
-| マスターデータの実体 | `INITIAL_USERS`, `MASTER_QUESTS` 等の具体的なオブジェクト構造・値が不明であるため。 | 根拠: [`INITIAL_USERS`] (行番号: 352 / 抜粋: "users: gameData?.users |
+| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。`apiClient.get`/`post`に加え、`fetchPendingInventory`, `getFamilyMileage`, `updateFamilyMileage`のような専用メソッドも存在するが、その実装は不明。 | 根拠: [`apiClient.get`] (行番号: 117 / 抜粋: "queryFn: () => apiClient.get('/api/quest/data'),") |
+| 各APIエンドポイントの仕様 | リクエスト後のDBの挙動、トランザクション、外部影響が不明であるため。 | 根拠: [`/api/quest/complete` 等] (行番号: 160 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete',") |
+| マスターデータの実体 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` 等の具体的なオブジェクト構造・値が不明であるため。 | 根拠: [`INITIAL_USERS`] (行番号: 393 / 抜粋: "users: gameData?.users || INITIAL_USERS,") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `useGameData` (カスタムフック本体)
 
 * **役割**: ゲームに関連する各種APIデータの取得（ポーリング含む）と、それらを更新するためのラッパー関数群をまとめたオブジェクトを返す。
-* 根拠: [`useGameData`] (行番号: 81 / 抜粋: "export const useGameData = (o...")
+* 根拠: [`useGameData`] (行番号: 85〜420 / 抜粋: "export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {")
 
 
 * **引数/リクエスト**: `onLevelUp?: (info: LevelUpInfo) => void` (レベルアップ時に発火するコールバック関数、省略可能)
-* 根拠: [`useGameData`引数] (行番号: 81 / 抜粋: "onLevelUp?: (info: LevelUp...")
+* 根拠: [`useGameData`引数] (行番号: 85 / 抜粋: "export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {")
 
 
-* **戻り値/レスポンス**: オブジェクト（`users`, `quests`, `rewards`, `isLoading` 等のデータ群と、`completeQuest` 等のミューテーション実行関数群）
-* 根拠: [`return`文] (行番号: 351〜381 / 抜粋: "return { users: gameData?.u...")
+* **戻り値/レスポンス**: オブジェクト（`users`, `quests`, `rewards`, `bounties`, `familyMileage`, `isLoading` 等のデータ群と、`completeQuest` 等のミューテーション実行関数群）
+* 根拠: [`return`文] (行番号: 392〜419 / 抜粋: "return { users: gameData?.users || INITIAL_USERS,")
 
 
 * **副作用**: コンポーネントマウント中、10秒〜15秒間隔で複数のAPIエンドポイントへポーリング通信（`refetchInterval`）を実行する。
-* 根拠: [`refetchInterval`] (行番号: 105, 119, 127, 135 / 抜粋: "refetchInterval: 1000 * 10")
+* 根拠: [`refetchInterval`] (行番号: 119, 133, 142, 150 / 抜粋: "refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限")
 
 
-* **エラーハンドリング**: 内部で `handleError` 関数を呼び出し、コンソールへエラーログを出力。
-* 根拠: [`handleError`] (行番号: 84〜86 / 抜粋: "console.error(`${actionName...")
+* **エラーハンドリング**: 内部で `handleError` 関数を呼び出しコンソールへエラーログを出力するほか、`extractErrorDetail` でバックエンドが返す具体的なエラーメッセージ（`{"detail": "..."}`）を取り出し、各ラッパー関数の返り値の`detail`として呼び出し元に渡す。
+* 根拠: [`handleError`, `extractErrorDetail`] (行番号: 88〜98 / 抜粋: "const extractErrorDetail = (error: unknown): string | undefined => {")
 
 
 
 ### `handleError` (内部関数)
 
-* **役割**: 各Mutationで発生したエラーをコンソールに出力する。
-* 根拠: [`handleError`] (行番号: 84 / 抜粋: "const handleError = (actionN...")
+* **役割**: 各Mutationの`onError`で発生したエラーをコンソールに出力する。
+* 根拠: [`handleError`] (行番号: 88〜90 / 抜粋: "const handleError = (actionName: string, error: unknown) => {")
 
 
 * **引数/リクエスト**: `actionName: string`, `error: unknown`
-* 根拠: [`handleError`引数] (行番号: 84 / 抜粋: "(actionName: string, error...")
+* 根拠: [`handleError`引数] (行番号: 88 / 抜粋: "(actionName: string, error: unknown) => {")
 
 
 * **戻り値/レスポンス**: `void`
-* 根拠: [`handleError`] (行番号: 84〜86 / 抜粋: "console.error(`${actionName...")
+* 根拠: [`handleError`] (行番号: 88〜90 / 抜粋: "console.error(`${actionName} failed:`, error);")
 
 
 * **副作用**: コンソールへのエラー出力。
-* 根拠: [`console.error`] (行番号: 85 / 抜粋: "console.error(`${actionName...")
+* 根拠: [`console.error`] (行番号: 89 / 抜粋: "console.error(`${actionName} failed:`, error);")
+
+
+* **エラーハンドリング**: なし
+
+### `extractErrorDetail` (内部関数)
+
+* **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。各ラッパー関数の`catch`節から呼ばれ、返り値の`detail`フィールドとしてApp.tsx側に渡ることで、汎用エラーメッセージではなくバックエンドの実際のエラー内容を表示できるようにする。
+* 根拠: [`extractErrorDetail`] (行番号: 96〜98 / 抜粋: "const extractErrorDetail = (error: unknown): string | undefined => {")
+
+
+* **引数/リクエスト**: `error: unknown`
+* 根拠: [`extractErrorDetail`引数] (行番号: 96 / 抜粋: "(error: unknown): string | undefined => {")
+
+
+* **戻り値/レスポンス**: `string | undefined`（`error`が`Error`インスタンスの場合は`error.message`、それ以外は`undefined`）
+* 根拠: [`return`] (行番号: 97 / 抜粋: "return error instanceof Error ? error.message : undefined;")
+
+
+* **副作用**: なし
+* 根拠: 純粋な変換処理のみ (行番号: 96〜98)
 
 
 * **エラーハンドリング**: なし
@@ -79,180 +99,180 @@
 ### `completeQuest` (ラッパー) & `completeQuestMutation`
 
 * **役割**: クエスト完了APIを呼び出し、成功時に状態キャッシュを無効化する。また、ペンディング状態の事前チェックを行い、レベルアップした場合は引数の `onLevelUp` を実行する。
-* 根拠: [`completeQuest`, `completeQuestMutation`] (行番号: 141〜159, 242〜261 / 抜粋: "return apiClient.post<Ques...")
+* 根拠: [`completeQuest`, `completeQuestMutation`] (行番号: 158〜177, 266〜291 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete',")
 
 
 * **引数/リクエスト**: `user: User`, `quest: Quest`
-* 根拠: [`completeQuest`引数] (行番号: 242 / 抜粋: "const completeQuest = async...")
+* 根拠: [`completeQuest`引数] (行番号: 266 / 抜粋: "const completeQuest = async (user: User, quest: Quest) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, earnedMedals?: number, leveledUp?: boolean, bossEffect?: any }`
-* 根拠: [`return`] (行番号: 251〜256 / 抜粋: "return { success: true, ear...")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, status?: string, message?: string, earnedMedals?: number, leveledUp?: boolean, bossEffect?: BossEffect, detail?: string }`
+* 根拠: [`return`] (行番号: 277〜287 / 抜粋: "return { success: true, status: res.status, message: res.message,")
 
 
 * **副作用**: `/api/quest/complete` へのPOSTリクエスト。`queryClient.invalidateQueries` によるキャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 148 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 166 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: `catch` 時に `{ success: false, reason: 'error' }` を返却し、Mutation側で `handleError` を呼ぶ。
-* 根拠: [`catch`] (行番号: 259 / 抜粋: "return { success: false, re...")
+* **エラーハンドリング**: `catch` 時に `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返却し、Mutation側の`onError`で `handleError` を呼ぶ。
+* 根拠: [`catch`] (行番号: 288〜290 / 抜粋: "} catch (e) { return { success: false, reason: 'error', detail: extractErrorDetail(e) }; }")
 
 
 
 ### `cancelQuest` (ラッパー) & `cancelQuestMutation`
 
 * **役割**: クエストをキャンセルするAPIを呼び出し、成功時に状態キャッシュを無効化する。
-* 根拠: [`cancelQuest`, `cancelQuestMutation`] (行番号: 161〜172, 263〜269 / 抜粋: "return apiClient.post('/ap...")
+* 根拠: [`cancelQuest`, `cancelQuestMutation`] (行番号: 180〜191, 293〜300 / 抜粋: "return apiClient.post('/api/quest/quest/cancel',")
 
 
 * **引数/リクエスト**: `user: User`, `historyItem: QuestHistory`
-* 根拠: [`cancelQuest`引数] (行番号: 263 / 抜粋: "const cancelQuest = async (...")
+* 根拠: [`cancelQuest`引数] (行番号: 293 / 抜粋: "const cancelQuest = async (user: User, historyItem: QuestHistory) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean }`
-* 根拠: [`return`] (行番号: 266 / 抜粋: "return { success: true };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string }`
+* 根拠: [`return`] (行番号: 296 / 抜粋: "return { success: true };")
 
 
 * **副作用**: `/api/quest/quest/cancel` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 169 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 188 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: `catch` 時に `{ success: false }` を返却し、Mutation側で `handleError` を呼ぶ。
-* 根拠: [`catch`] (行番号: 268 / 抜粋: "return { success: false };")
+* **エラーハンドリング**: `catch` 時に `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返却し、Mutation側の`onError`で `handleError` を呼ぶ。
+* 根拠: [`catch`] (行番号: 297〜299 / 抜粋: "} catch (e) { return { success: false, reason: 'error', detail: extractErrorDetail(e) }; }")
 
 
 
 ### `approveQuest` (ラッパー) & `approveQuestMutation`
 
 * **役割**: 特定のユーザー（'dad', 'mom'）のみがクエストを承認できる機能を提供する。
-* 根拠: [`approveQuest`, `approveQuestMutation`] (行番号: 174〜185, 271〜280 / 抜粋: "if (!['dad', 'mom'].include...")
+* 根拠: [`approveQuest`, `approveQuestMutation`] (行番号: 194〜205, 302〜314 / 抜粋: "if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };")
 
 
 * **引数/リクエスト**: `user: User`, `historyItem: QuestHistory`
-* 根拠: [`approveQuest`引数] (行番号: 271 / 抜粋: "const approveQuest = async...")
+* 根拠: [`approveQuest`引数] (行番号: 302 / 抜粋: "const approveQuest = async (user: User, historyItem: QuestHistory) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, bossEffect?: any }`
-* 根拠: [`return`] (行番号: 276〜277 / 抜粋: "return { success: true, bos...")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, bossEffect?: BossEffect, detail?: string }`
+* 根拠: [`return`] (行番号: 307〜310 / 抜粋: "return { success: true, bossEffect: res?.bossEffect };")
 
 
 * **副作用**: `/api/quest/approve` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 182 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 202 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: 権限外の場合は即座に `{ success: false, reason: 'permission' }` を返す。通信エラー時は `{ success: false }` を返す。
-* 根拠: [`if`ブロック] (行番号: 272 / 抜粋: "return { success: false, re...")
+* **エラーハンドリング**: 権限外の場合は即座に `{ success: false, reason: 'permission' }` を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返す。
+* 根拠: [`if`ブロック] (行番号: 303 / 抜粋: "if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };")
 
 
 
 ### `rejectQuest` (ラッパー) & `rejectQuestMutation`
 
 * **役割**: 特定のユーザー（'dad', 'mom'）のみがクエストを却下できる機能を提供する。
-* 根拠: [`rejectQuest`, `rejectQuestMutation`] (行番号: 187〜198, 282〜288 / 抜粋: "if (!['dad', 'mom'].include...")
+* 根拠: [`rejectQuest`, `rejectQuestMutation`] (行番号: 208〜219, 316〜324 / 抜粋: "if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };")
 
 
 * **引数/リクエスト**: `user: User`, `historyItem: QuestHistory`
-* 根拠: [`rejectQuest`引数] (行番号: 282 / 抜粋: "const rejectQuest = async (...")
+* 根拠: [`rejectQuest`引数] (行番号: 316 / 抜粋: "const rejectQuest = async (user: User, historyItem: QuestHistory) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string }`
-* 根拠: [`return`] (行番号: 286 / 抜粋: "return { success: true };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string }`
+* 根拠: [`return`] (行番号: 320 / 抜粋: "return { success: true };")
 
 
 * **副作用**: `/api/quest/reject` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 195 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 216 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: 権限外は事前弾き。通信エラー時は `{ success: false }` を返す。
-* 根拠: [`catch`] (行番号: 288 / 抜粋: "catch (e) { return { success...")
+* **エラーハンドリング**: 権限外は事前弾き。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返す。
+* 根拠: [`catch`] (行番号: 321〜323 / 抜粋: "} catch (e) { return { success: false, reason: 'error', detail: extractErrorDetail(e) }; }")
 
 
 
 ### `buyReward` (ラッパー) & `buyRewardMutation`
 
 * **役割**: 所持ゴールドが足りているか検証した上で、報酬の購入処理を行う。
-* 根拠: [`buyReward`, `buyRewardMutation`] (行番号: 200〜212, 290〜300 / 抜粋: "if ((user.gold || 0) < cost...")
+* 根拠: [`buyReward`, `buyRewardMutation`] (行番号: 222〜234, 327〜337 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };")
 
 
 * **引数/リクエスト**: `user: User`, `reward: Reward`
-* 根拠: [`buyReward`引数] (行番号: 291 / 抜粋: "const buyReward = async (us...")
+* 根拠: [`buyReward`引数] (行番号: 327 / 抜粋: "const buyReward = async (user: User, reward: Reward) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, newGold?: number, reward?: Reward }`
-* 根拠: [`return`] (行番号: 298 / 抜粋: "return { success: true, new...")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, newGold?: number, reward?: Reward, detail?: string }`
+* 根拠: [`return`] (行番号: 333 / 抜粋: "return { success: true, newGold: res.newGold, reward };")
 
 
 * **副作用**: `/api/quest/reward/purchase` へのPOST。キャッシュ破棄（全体データおよび対象ユーザーのインベントリ）。
-* 根拠: [`invalidateQueries`] (行番号: 209 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 230〜231 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });")
 
 
-* **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。通信エラー時は `{ success: false, reason: 'error' }`。
-* 根拠: [`if`ブロック] (行番号: 293 / 抜粋: "return { success: false, re...")
+* **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。
+* 根拠: [`if`ブロック] (行番号: 329 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };")
 
 
 
 ### `buyEquipment` (ラッパー) & `buyEquipmentMutation`
 
 * **役割**: 所持ゴールドを検証し、装備の購入処理を行う。
-* 根拠: [`buyEquipment`, `buyEquipmentMutation`] (行番号: 214〜225, 302〜309 / 抜粋: "if ((user.gold || 0) < item...")
+* 根拠: [`buyEquipment`, `buyEquipmentMutation`] (行番号: 237〜248, 339〜348 / 抜粋: "if ((user.gold || 0) < item.cost) return { success: false, reason: 'gold' };")
 
 
 * **引数/リクエスト**: `user: User`, `item: Equipment`
-* 根拠: [`buyEquipment`引数] (行番号: 302 / 抜粋: "const buyEquipment = async...")
+* 根拠: [`buyEquipment`引数] (行番号: 339 / 抜粋: "const buyEquipment = async (user: User, item: Equipment) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, item?: Equipment }`
-* 根拠: [`return`] (行番号: 307 / 抜粋: "return { success: true, ite...")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, item?: Equipment, detail?: string }`
+* 根拠: [`return`] (行番号: 344 / 抜粋: "return { success: true, item };")
 
 
 * **副作用**: `/api/quest/equip/purchase` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 222 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 245 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: ゴールド不足事前チェック、エラー時は `{ success: false, reason: 'error' }`。
-* 根拠: [`catch`] (行番号: 309 / 抜粋: "return { success: false, re...")
+* **エラーハンドリング**: ゴールド不足事前チェック、エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。
+* 根拠: [`catch`] (行番号: 345〜347 / 抜粋: "} catch (e) { return { success: false, reason: 'error', detail: extractErrorDetail(e) }; }")
 
 
 
 ### `changeEquipment` (ラッパー) & `changeEquipmentMutation`
 
 * **役割**: 装備の変更APIを呼び出す。
-* 根拠: [`changeEquipment`, `changeEquipmentMutation`] (行番号: 227〜238, 311〜316 / 抜粋: "return apiClient.post('/ap...")
+* 根拠: [`changeEquipment`, `changeEquipmentMutation`] (行番号: 251〜262, 350〜357 / 抜粋: "return apiClient.post('/api/quest/equip/change',")
 
 
 * **引数/リクエスト**: `user: User`, `item: Equipment`
-* 根拠: [`changeEquipment`引数] (行番号: 311 / 抜粋: "const changeEquipment = asy...")
+* 根拠: [`changeEquipment`引数] (行番号: 350 / 抜粋: "const changeEquipment = async (user: User, item: Equipment) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean }`
-* 根拠: [`return`] (行番号: 314 / 抜粋: "return { success: true };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string }`
+* 根拠: [`return`] (行番号: 353 / 抜粋: "return { success: true };")
 
 
 * **副作用**: `/api/quest/equip/change` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 235 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 259 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: 通信エラー時は `{ success: false }`。
-* 根拠: [`catch`] (行番号: 316 / 抜粋: "return { success: false };")
+* **エラーハンドリング**: 通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。
+* 根拠: [`catch`] (行番号: 354〜356 / 抜粋: "} catch (e) { return { success: false, reason: 'error', detail: extractErrorDetail(e) }; }")
 
 
 
 ### `refreshData`
 
 * **役割**: 手動で `gameData` と `inventory` のキャッシュを破棄し、再取得をトリガーする。
-* 根拠: [`refreshData`] (行番号: 318〜321 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`refreshData`] (行番号: 359〜362 / 抜粋: "const refreshData = () => {")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [`refreshData`引数] (行番号: 318 / 抜粋: "const refreshData = () => {")
+* 根拠: [`refreshData`引数] (行番号: 359 / 抜粋: "const refreshData = () => {")
 
 
 * **戻り値/レスポンス**: `void`
-* 根拠: [`refreshData`] (行番号: 318〜321 / 抜粋: "const refreshData = () => {")
+* 根拠: [`refreshData`] (行番号: 359〜362 / 抜粋: "const refreshData = () => {")
 
 
-* **副作用**: キャッシュ破棄（`['gameData']`, `['inventory']`）
-* 根拠: [`invalidateQueries`] (行番号: 319〜320 / 抜粋: "queryClient.invalidateQuer...")
+* **副作用**: キャッシュ破棄（`['gameData']`, `['inventory']`。`['inventory']`は前方一致的に全ユーザー分のインベントリを強制再取得する）
+* 根拠: [`invalidateQueries`] (行番号: 360〜361 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
 
 
 * **エラーハンドリング**: なし
@@ -260,46 +280,46 @@
 ### `adminUpdateBoss` (ラッパー) & `adminUpdateBossMutation`
 
 * **役割**: ボスの状態（最大HP、現在HP、討伐状態）を更新する管理用APIを呼び出す。
-* 根拠: [`adminUpdateBoss`, `adminUpdateBossMutation`] (行番号: 88〜98, 323〜330 / 抜粋: "return apiClient.post('/ap...")
+* 根拠: [`adminUpdateBoss`, `adminUpdateBossMutation`] (行番号: 101〜112, 364〜371 / 抜粋: "return apiClient.post('/api/quest/admin/boss/update',")
 
 
 * **引数/リクエスト**: `data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }`
-* 根拠: [`adminUpdateBoss`引数] (行番号: 323 / 抜粋: "(data: { maxHp?: number; c...")
+* 根拠: [`adminUpdateBoss`引数] (行番号: 364 / 抜粋: "const adminUpdateBoss = async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean }`
-* 根拠: [`return`] (行番号: 326 / 抜粋: "return { success: true };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, detail?: string }`
+* 根拠: [`return`] (行番号: 367 / 抜粋: "return { success: true };")
 
 
 * **副作用**: `/api/quest/admin/boss/update` へのPOSTリクエスト。キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 96 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 110 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });")
 
 
-* **エラーハンドリング**: エラー時は `{ success: false }` を返却。
-* 根拠: [`catch`] (行番号: 328 / 抜粋: "return { success: false };")
+* **エラーハンドリング**: エラー時は `{ success: false, detail: extractErrorDetail(e) }` を返却。
+* 根拠: [`catch`] (行番号: 368〜370 / 抜粋: "} catch (e) { return { success: false, detail: extractErrorDetail(e) }; }")
 
 
 
 ### `adminUpdateFamilyMileage` (ラッパー) & `adminUpdateFamilyMileageMutation`
 
 * **役割**: 家族のマイレージ情報を更新する管理用APIを呼び出す。
-* 根拠: [`adminUpdateFamilyMileage`, `adminUpdateFamilyMileageMutation`] (行番号: 332〜339, 341〜348 / 抜粋: "return apiClient.updateFam...")
+* 根拠: [`adminUpdateFamilyMileage`, `adminUpdateFamilyMileageMutation`] (行番号: 373〜380, 382〜389 / 抜粋: "return apiClient.updateFamilyMileage(targetName, targetExp);")
 
 
 * **引数/リクエスト**: `targetName: string`, `targetExp: number`
-* 根拠: [`adminUpdateFamilyMileage`引数] (行番号: 341 / 抜粋: "(targetName: string, targe...")
+* 根拠: [`adminUpdateFamilyMileage`引数] (行番号: 382 / 抜粋: "const adminUpdateFamilyMileage = async (targetName: string, targetExp: number) => {")
 
 
-* **戻り値/レスポンス**: Promise `{ success: boolean }`
-* 根拠: [`return`] (行番号: 344 / 抜粋: "return { success: true };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, detail?: string }`
+* 根拠: [`return`] (行番号: 385 / 抜粋: "return { success: true };")
 
 
 * **副作用**: `apiClient.updateFamilyMileage` の呼び出し。`['familyMileage']` キャッシュ破棄。
-* 根拠: [`invalidateQueries`] (行番号: 337 / 抜粋: "queryClient.invalidateQuer...")
+* 根拠: [`invalidateQueries`] (行番号: 378 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['familyMileage'] });")
 
 
-* **エラーハンドリング**: エラー時は `{ success: false }` を返却。
-* 根拠: [`catch`] (行番号: 346 / 抜粋: "return { success: false };")
+* **エラーハンドリング**: エラー時は `{ success: false, detail: extractErrorDetail(e) }` を返却。
+* 根拠: [`catch`] (行番号: 386〜388 / 抜粋: "} catch (e) { return { success: false, detail: extractErrorDetail(e) }; }")
 
 
 
@@ -313,11 +333,11 @@ flowchart TD
     CheckPending -- Yes --> ReturnPending["return { success: false, reason: 'pending' }"]
     CheckPending -- No --> MutateAsync["外部通信: apiClient.post('/api/quest/complete')"]
     MutateAsync --> CheckSuccess{"通信成功?"}
-    CheckSuccess -- No(catch) --> ReturnError["return { success: false, reason: 'error' }"]
+    CheckSuccess -- No(catch) --> ReturnError["return { success: false, reason: 'error', detail: extractErrorDetail(e) }"]
     CheckSuccess -- Yes --> InvalidateCache["キャッシュ破棄 (queryClient.invalidateQueries)"]
     InvalidateCache --> CheckLevelUp{"レスポンスのleveledUpがtrue\nかつ\nonLevelUpが定義されているか"}
     CheckLevelUp -- Yes --> CallOnLevelUp["onLevelUp({ user, level, job }) 実行"]
-    CallOnLevelUp --> ReturnSuccess["return { success: true, earnedMedals, ... }"]
+    CallOnLevelUp --> ReturnSuccess["return { success: true, status, message, earnedMedals, ... }"]
     CheckLevelUp -- No --> ReturnSuccess
     ReturnError --> End(["終了"])
     ReturnPending --> End
@@ -355,7 +375,8 @@ graph TD
 
     APIClient -.-> Endpoint_Data["GET /api/quest/data"]
     APIClient -.-> Endpoint_Chronicle["GET /api/quest/family/chronicle"]
-    APIClient -.-> Endpoint_Pending["GET /api/quest/inventory/admin/pending"]
+    APIClient -.-> Endpoint_FamilyMileage["apiClient.getFamilyMileage() / updateFamilyMileage()"]
+    APIClient -.-> Endpoint_Pending["apiClient.fetchPendingInventory()"]
     APIClient -.-> Endpoint_Bounties["GET /api/bounties/list"]
     APIClient -.-> Endpoint_Mutations["POST /api/quest/... (各種更新)"]
 
@@ -365,16 +386,16 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `../lib/apiClient.ts` | 通信のエラー詳細を握りつぶしている箇所があるため、クライアント側でのリトライ設定、タイムアウト、認証ロジックの実装を確認する必要がある。 | 根拠: [`apiClient`] (行番号: 2 / 抜粋: "import { apiClient } from '...") |
-| 中 | バックエンドのエンドポイント (例: `/api/quest/complete` のハンドラ等) | トランザクションや、クエスト完了時のレベルアップ計算処理（`leveledUp`の判定ロジック）などの仕様を確認するため。 | 根拠: [`/api/quest/complete`] (行番号: 143 / 抜粋: "return apiClient.post<Ques...") |
+| 高 | `../lib/apiClient.ts` | `fetchPendingInventory`, `getFamilyMileage`, `updateFamilyMileage`など専用メソッドの実際のエンドポイントや、`Error.message`に`detail`を詰める仕組みを確認する必要がある。 | 根拠: [`apiClient`] (行番号: 2 / 抜粋: "import { apiClient } from '...") |
+| 中 | バックエンドのエンドポイント (例: `/api/quest/complete` のハンドラ等) | トランザクションや、クエスト完了時のレベルアップ計算処理（`leveledUp`の判定ロジック）などの仕様を確認するため。 | 根拠: [`/api/quest/complete`] (行番号: 160 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete',") |
 | 低 | `../lib/masterData.ts` | 初期データの構成を確認し、API通信失敗時や初期表示時の画面挙動を特定するため。 | 根拠: [`INITIAL_USERS`] (行番号: 3 / 抜粋: "import { INITIAL_USERS, MA...") |
 
 ## 8. 保守上の注意点
 
-* **`any`型の残存**: `familyMileage` の `useQuery` ジェネリクスや、`ApproveResponse` インターフェースの `bossEffect` プロパティにおいて `any` 型が指定されている。
-* **過剰なポーリングの可能性**: `useQuery` で設定されている `refetchInterval` が、別々のエンドポイントに対して 10秒〜15秒間隔で同時に複数設定されており、マウント中の通信頻度が高い。
-* **詳細なエラーの握りつぶし**: ラッパー関数の `catch (e)` ブロック内でエラーオブジェクトの内容を伝播させず、固定の `{ success: false, reason: 'error' }` のみを返している。
-* **ハードコードされた権限チェック**: `approveQuest` と `rejectQuest` 内で `['dad', 'mom'].includes(user.user_id)` という特定文字列のIDによる権限チェックが行われている。
+* **過剰なポーリングの可能性**: `useQuery` で設定されている `refetchInterval` が、`gameData`・`familyMileage`・`pendingInventory`・`bounties`の4系統に対して 10秒〜15秒間隔で同時に設定されており、マウント中の通信頻度が高い。
+* **`approveQuestMutation` の戻り値キャスト**: `approveQuest` 内で `mutateAsync` の戻り値を `as unknown as ApproveResponse` として型キャストしている。`buyReward` 側も同様に `as unknown as PurchaseResponse` を使っており、`apiClient.post` 自体の戻り値の型（`unknown`または汎用型）と実際のレスポンス形状との整合はランタイムでは検証されない。
+* **ハードコードされた権限チェック**: `approveQuest` と `rejectQuest` 内で `['dad', 'mom'].includes(user.user_id)` という特定文字列のIDによる権限チェックが行われている。あくまでクライアント側の事前チェックであり、バックエンド側の認可を代替するものではない。
+* **`refreshData` のキャッシュ無効化範囲**: `queryClient.invalidateQueries({ queryKey: ['inventory'] })` はキー全体（`['inventory', userId]`形式のクエリすべて）を前方一致で無効化する設計であり、コメントで「全インベントリも強制再取得」と明示されている。
 
 ## 9. 不明事項一覧
 
@@ -383,6 +404,7 @@ graph TD
 | `apiClient`の具体的な通信設定 | URLのプレフィックス、認証トークンの付与方法がコード上に見当たらないため。 | `../lib/apiClient.ts` |
 | `INITIAL_USERS` や `MASTER_QUESTS` の中身 | 外部ファイルからインポートされており、値の構造が不明なため。 | `../lib/masterData.ts` |
 | 各種Typeの完全なプロパティ | `User`, `Quest`, `Reward` などのプロパティが本ファイル内では一部しか使用されていないため。 | `@/types.ts` 等 |
+| `apiClient.fetchPendingInventory`, `getFamilyMileage`, `updateFamilyMileage` の実エンドポイント | メソッド名のみが呼び出されており、実際に叩かれるURLやHTTPメソッドが本ファイルからは不明なため。 | `../lib/apiClient.ts` |
 
 ## 10. 自己検証結果
 

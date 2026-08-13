@@ -240,7 +240,7 @@ graph TD
     Job --> CoreEngine["外部: monitors.smart_timelapse_generator"]
     
     %% ファイルシステム・インフラ
-    Job --> NVR_Dir["ファイルシステム: /mnt/nas/home_system/nvr_recordings/"]
+    Job --> NVR_Dir["ファイルシステム: config.NVR_RECORD_DIR<br/>(未定義時 /mnt/nas/home_system/nvr_recordings/ にフォールバック)"]
     Job --> Work_Dir["ファイルシステム: setup_directories()の戻り値"]
 
 ```
@@ -291,10 +291,10 @@ graph TD
 
 
 
-* 録画ファイルの検索先ディレクトリが `/mnt/nas/home_system/nvr_recordings/{camera_name}` としてスクリプト内にハードコードされている。
+* 録画ファイルの検索先ディレクトリは `getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")` により `config.NVR_RECORD_DIR` を優先的に参照し、未定義時のみ同文字列にフォールバックする（以前はこのパスがハードコード直書きされておりバグの原因になっていたが、修正済み）。
 
 
-* 根拠: [NASディレクトリ指定] (行番号取得不可 / 抜粋: "nvr_dir = f"/mnt/nas/home_system/nvr_recordings/{camera_name}"")
+* 根拠: [NASディレクトリ指定] (行番号取得不可 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
 
 
 

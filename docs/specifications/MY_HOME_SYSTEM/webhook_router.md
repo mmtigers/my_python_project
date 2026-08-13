@@ -11,7 +11,7 @@
 
 * LINE BotおよびSwitchBotからのWebhookリクエストを受信・処理するためのFastAPIルーターの定義。
 * LINEからのリクエストをハンドラへ委譲し、SwitchBotからのセンサーイベント（対象デバイス限定、重複排除後）をログDBへ保存し、サービスロジックへ委譲する責務を持つ。
-* 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 16 / 抜粋: `router = APIRouter()`)、(行番号: 18 / 抜粋: `@router.post("/callback/line")`)、(行番号: 37 / 抜粋: `@router.post("/webhook/switchbot")`)
+* 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 17 / 抜粋: `router = APIRouter()`)、(行番号: 19 / 抜粋: `@router.post("/callback/line")`)、(行番号: 38 / 抜粋: `@router.post("/webhook/switchbot")`)
 
 
 
@@ -54,35 +54,35 @@
 ### エンドポイント `callback_line`
 
 * **役割**: LINE BotからのWebhookを受け取り、署名を検証した上で `line_handler` に処理を委譲する。
-* 根拠: `callback_line`関数定義と内部の`handle`呼び出し (行番号: 18〜32 / 抜粋: `@router.post("/callback/line")`)
+* 根拠: `callback_line`関数定義と内部の`handle`呼び出し (行番号: 19〜33 / 抜粋: `@router.post("/callback/line")`)
 
 
 * **引数/リクエスト**:
 * `request`: FastAPI `Request` オブジェクト (生のボディ取得用)
 * `x_line_signature`: 文字列 (HTTPヘッダーからの署名文字列)
-* 根拠: 関数の引数定義 (行番号: 19 / 抜粋: `async def callback_line(request...`)
+* 根拠: 関数の引数定義 (行番号: 20 / 抜粋: `async def callback_line(request...`)
 
 
 * **戻り値/レスポンス**: 正常時は `"OK"` (文字列)。
-* 根拠: return文とアノテーション (行番号: 19, 32 / 抜粋: `-> str:`、`return "OK"`)
+* 根拠: return文とアノテーション (行番号: 20, 33 / 抜粋: `-> str:`、`return "OK"`)
 
 
 * **副作用**: `line_handler.line_handler.handle` の実行による副作用（詳細不明）。エラー時にロガー経由での出力。
-* 根拠: 関数内の処理 (行番号: 27, 31 / 抜粋: `await asyncio.to_thread(...)`、`logger.error(...)`)
+* 根拠: 関数内の処理 (行番号: 28, 32 / 抜粋: `await asyncio.to_thread(...)`、`logger.error(...)`)
 
 
 * **エラーハンドリング**:
 * `line_handler.line_handler` が存在しない場合は HTTP 501 を返す。
 * `InvalidSignatureError` 発生時は HTTP 400 を返す。
 * その他例外時はロガーでエラー出力し、そのまま `"OK"` を返す（例外の再スローなし）。
-* 根拠: try-exceptブロックとif文 (行番号: 21, 28〜31 / 抜粋: `except InvalidSignatureError:`)
+* 根拠: try-exceptブロックとif文 (行番号: 22, 29〜32 / 抜粋: `except InvalidSignatureError:`)
 
 
 
 ### 変数 `TARGET_DEVICE_TYPES`
 
 * **役割**: SwitchBot Webhookで処理対象とするデバイスタイプのリスト定義。
-* 根拠: リストの定義 (行番号: 35 / 抜粋: `TARGET_DEVICE_TYPES = ["Contact...`)
+* 根拠: リストの定義 (行番号: 36 / 抜粋: `TARGET_DEVICE_TYPES = ["Contact...`)
 
 
 
@@ -229,7 +229,7 @@ graph TD
 
 
 * `switchbot_webhook` において、`sb_tool` と `config` 両方からの名前取得を試み、失敗した場合のフォールバック (`Unknown_{mac}`) が設定されている。
-* 根拠: `name` 変数の解決 (行番号: 62〜65)
+* 根拠: `name` 変数の解決 (行番号: 71〜75)
 
 
 * `switchbot_webhook` において、`ctx.brightness` が存在しない場合は空文字列として保存される。

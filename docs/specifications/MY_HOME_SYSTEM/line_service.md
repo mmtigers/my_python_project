@@ -20,8 +20,8 @@
 | `sqlite3` | 標準ライブラリ | データベース操作 | `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
 | `datetime` | 標準ライブラリ | 日付時刻処理 | `import datetime` (行番号: 3 / 抜粋: "import datetime") |
 | `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
-| `typing` | 標準ライブラリ | 型ヒントの提供 | `from typing import List...` (行番号: 5 / 抜粋: "from typing import List, Tupl...") |
-| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築 | `from linebot.v3.messaging...` (行番号: 8-14 / 抜粋: "from linebot.v3.messaging imp...") |
+| `typing` | 標準ライブラリ | 型ヒントの提供。実際に使用されているのは`Union`のみで、`List`, `Tuple`, `Optional`, `Dict`, `Any`はファイル内で使用されていない（未使用インポート） | `from typing import List...` (行番号: 5 / 抜粋: "from typing import List, Tupl...") |
+| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。実際に使用されているのは`TextMessage`と`FlexMessage`のみで、`QuickReply`, `QuickReplyItem`, `MessageAction`はファイル内で使用されていない（未使用インポート） | `from linebot.v3.messaging...` (行番号: 8-14 / 抜粋: "from linebot.v3.messaging imp...") |
 | `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 16 / 抜粋: "import config") |
 | `common` | 外部モジュール | DBカーソルの取得等 | `import common` (行番号: 17 / 抜粋: "import common") |
 | `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 18 / 抜粋: "from core.logger import setup...") |
@@ -341,6 +341,7 @@ graph TD
 * `process_approval_command` において、`hasattr(e, 'detail')` を用いて例外の詳細を取得しようとしているが、外部システム (`quest_service`) が投げる特定の例外構造に暗黙的に依存している。
 * `game_system.get_all_view_data` や `quest_service.process_approve_quest` が同期関数である前提で `asyncio.to_thread` を用いて非同期実行しているが、これらの関数内部でのDB書き込みや排他制御がスレッドセーフに行われているかの確認が必要。
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
+* **未使用インポート**: `typing`から`List`, `Tuple`, `Optional`, `Dict`, `Any`（行番号: 5）、`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`（行番号: 11-13）がインポートされているが、いずれもファイル内で使用されていない。
 
 ## 9. 不明事項一覧
 
