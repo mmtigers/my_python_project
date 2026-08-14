@@ -17,6 +17,7 @@ def _make_minimal_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE quest_users (user_id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE quest_master (quest_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE reward_master (reward_id INTEGER PRIMARY KEY, title TEXT);
+        CREATE TABLE quest_history (id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER);
     """)
     conn.commit()
 
@@ -39,6 +40,9 @@ def test_apply_pending_migrations_adds_expected_columns():
         cols = [row[1] for row in conn.execute("PRAGMA table_info(reward_master)").fetchall()]
         assert "description" in cols
 
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(quest_history)").fetchall()]
+        assert "linked_history_id" in cols
+
         role = conn.execute("SELECT role FROM quest_users WHERE user_id='dad'").fetchone()[0]
         assert role == "role_adult"
 
@@ -46,6 +50,7 @@ def test_apply_pending_migrations_adds_expected_columns():
         assert "0001_add_quest_users_role.sql" in applied
         assert "0002_add_quest_master_reset_period.sql" in applied
         assert "0003_add_reward_master_description.sql" in applied
+        assert "0004_add_coop_quest_link.sql" in applied
     finally:
         conn.close()
 
@@ -63,7 +68,7 @@ def test_apply_pending_migrations_is_idempotent():
         second_count = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()[0]
 
         assert first_count == second_count
-        assert first_count >= 3
+        assert first_count >= 4
     finally:
         conn.close()
 

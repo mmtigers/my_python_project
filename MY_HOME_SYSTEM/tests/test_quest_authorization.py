@@ -2,8 +2,8 @@
 """
 services/quest_service.py の承認・却下フローの権限チェックのテスト。
 
-process_approve_quest / process_reject_quest は approver_id が
-PARENT_IDS ('dad', 'mom') に含まれない場合は 403 を返す実装になっている。
+process_approve_quest / process_reject_quest は approver_id に対応する
+quest_users.role が 'role_adult' でない場合は 403 を返す実装になっている。
 """
 import os
 import sys
@@ -31,8 +31,12 @@ class TestApprovalAuthorization:
 
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
-                ("daughter", "Daughter", "Novice", 1, 0, 0),
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("dad", "Dad", "Warrior", 1, 0, 0, "role_adult"),
+            )
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("daughter", "Daughter", "Novice", 1, 0, 0, "role_child"),
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
