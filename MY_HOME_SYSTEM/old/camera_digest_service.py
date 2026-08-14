@@ -1,4 +1,4 @@
-# MY_HOME_SYSTEM/tools/camera_digest_service.py
+# MY_HOME_SYSTEM/old/camera_digest_service.py
 import os
 import glob
 from datetime import datetime
