@@ -20,8 +20,9 @@ import config
 def _seed_basic_data():
     with common.get_db_cursor(commit=True) as cur:
         cur.execute(
-            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-            "('dad', 'Dad', 'Warrior', 1, 0, 100), ('daughter', 'Daughter', 'Novice', 1, 0, 10)"
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult'), "
+            "('daughter', 'Daughter', 'Novice', 1, 0, 10, 'role_child')"
         )
         cur.execute(
             "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
