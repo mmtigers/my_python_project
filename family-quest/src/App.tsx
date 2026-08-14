@@ -3,7 +3,9 @@ import { Sword, ShoppingBag } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
+import { useLayoutMode } from './hooks/useLayoutMode';
 import RewardShop from './features/shop/components/RewardShop';
+import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
@@ -13,6 +15,13 @@ import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
 // セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、
 // 本当のアクセス制御はバックエンド側で別途実装される必要がある。
 const isParentUser = (user: User) => user.role === 'role_adult';
+
+// 承認・却下の記録名義に使う代表の親ユーザーを返す。誰が実際にボタンを押したかは
+// 区別せず「親」として固定で記録する(要件5)。
+const getRepresentativeParent = (allUsers: User[]): User => {
+  const adult = allUsers.find(u => u.role === 'role_adult');
+  return adult || allUsers[0] || INITIAL_USERS[0];
+};
 
 
 // UI Components
@@ -91,6 +100,7 @@ const ConfirmModal = ({
 
 function App() {
   const { play } = useSound();
+  const layoutMode = useLayoutMode();
   const [activeTab, setActiveTab] = useState<'quest' | 'shop'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
@@ -98,13 +108,16 @@ function App() {
   // モーダル状態
   const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'reject' | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
+  // クエスト完了/取消/購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
+  // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
+  const [confirmUser, setConfirmUser] = useState<User | null>(null);
 
   // 結果表示用
   const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
   const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error' } | null>(null);
 
-  // アバターアップロード
-  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  // アバターアップロード対象(nullなら非表示)
+  const [avatarUser, setAvatarUser] = useState<User | null>(null);
 
   const handleLevelUp = (info: LevelUpInfo) => {
     setLevelUpInfo(info);
@@ -129,9 +142,10 @@ function App() {
     play('tap');
   };
 
-  const handleQuestClick = (q: Quest | QuestHistory, isHistory: boolean) => {
+  const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
     // 1. 履歴タブなど、明示的に履歴として渡された場合
     if (isHistory) {
+      setConfirmUser(user);
       setConfirmTarget(q);
       setConfirmMode('cancel');
       play('select');
@@ -141,10 +155,11 @@ function App() {
     // 2. クエストリストから渡された場合 (q は Quest 型)
     // ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約
     const { isInfinite, pendingEntry, completedEntry } =
-      getQuestLockState(q as Quest, currentUser, completedQuests, pendingQuests);
+      getQuestLockState(q as Quest, user, completedQuests, pendingQuests);
 
     // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
     if (isInfinite) {
+      setConfirmUser(user);
       setConfirmTarget(q);
       setConfirmMode('complete');
       play('select');
@@ -154,6 +169,7 @@ function App() {
     // 3. 完了済み、または申請中リストにあるかを探す
     const historyEntry = pendingEntry || completedEntry;
 
+    setConfirmUser(user);
     if (historyEntry) {
       // 既に履歴がある（完了or申請中）なら「キャンセル（取り下げ）」モードにする
       // targetには Quest オブジェクトではなく、見つかった History オブジェクトを渡す
@@ -171,7 +187,8 @@ function App() {
     play('select');
   };
 
-  const handleBuyReward = (r: Reward) => {
+  const handleBuyReward = (user: User, r: Reward) => {
+    setConfirmUser(user);
     setConfirmTarget(r);
     setConfirmMode('purchase');
     play('select');
@@ -180,26 +197,28 @@ function App() {
   // --- Confirm Execution ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
+    const actingUser = confirmUser || currentUser;
 
     let res: ActionResult = { success: false };
 
     if (confirmMode === 'complete') {
-      res = await completeQuest(currentUser, confirmTarget as Quest);
+      res = await completeQuest(actingUser, confirmTarget as Quest);
       if (res.success) {
         if (res.status === 'pending') {
           setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
         }
       }
     } else if (confirmMode === 'cancel') {
-      res = await cancelQuest(currentUser, confirmTarget as QuestHistory);
+      res = await cancelQuest(actingUser, confirmTarget as QuestHistory);
     } else if (confirmMode === 'purchase') {
-      res = await buyReward(currentUser, confirmTarget as Reward);
+      res = await buyReward(actingUser, confirmTarget as Reward);
       if (res.success) {
         setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
         play('medal');
       }
     } else if (confirmMode === 'reject') {
-      res = await rejectQuest(currentUser, confirmTarget as QuestHistory);
+      // 却下の記録名義は「親」で固定する(要件5)
+      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory);
       if (res.success) {
         play('cancel');
       } else {
@@ -213,6 +232,7 @@ function App() {
         play('cancel');
         setConfirmMode(null);
         setConfirmTarget(null);
+        setConfirmUser(null);
         return;
       }
     }
@@ -232,11 +252,12 @@ function App() {
 
     setConfirmMode(null);
     setConfirmTarget(null);
+    setConfirmUser(null);
   };
 
-  // 承認・却下ハンドラ
+  // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
   const handleApprove = async (history: QuestHistory) => {
-    const res = await approveQuest(currentUser, history);
+    const res = await approveQuest(getRepresentativeParent(users), history);
     if (res.success) {
       play('approve');
     } else {
@@ -253,6 +274,7 @@ function App() {
   const handleReject = (history: QuestHistory) => {
     setConfirmTarget(history);
     setConfirmMode('reject');
+    setConfirmUser(null); // reject は getRepresentativeParent で親を確定するため不要
     play('select');
   };
 
@@ -271,17 +293,35 @@ function App() {
         viewMode={getHeaderViewMode()}
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
+        hideUserSwitcher={layoutMode === 'landscape'}
       />
 
-      {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
+      {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
+          横画面(4人表示)では画面幅をフルに使う */}
 
-      <div className="p-4 space-y-4 w-full max-w-md md:max-w-5xl mx-auto transition-all duration-300">
+      <div className={`p-4 space-y-4 w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'}`}>
 
-        {viewMode === 'main' && (
+        {viewMode === 'main' && layoutMode === 'landscape' && (
+          <FamilyDashboard
+            users={users}
+            quests={quests}
+            completedQuests={completedQuests}
+            pendingQuests={pendingQuests}
+            rewards={rewards}
+            pendingInventory={pendingInventory}
+            onQuestClick={(user, q) => handleQuestClick(user, q, false)}
+            onBuyReward={handleBuyReward}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onAvatarClick={(user) => setAvatarUser(user)}
+          />
+        )}
+
+        {viewMode === 'main' && layoutMode === 'portrait' && (
           <>
             <UserStatusCard
               user={currentUser}
-              onAvatarClick={() => setIsAvatarModalOpen(true)}
+              onAvatarClick={() => setAvatarUser(currentUser)}
             />
 
             {isParentUser(currentUser) && (
@@ -312,7 +352,7 @@ function App() {
                   completedQuests={completedQuests}
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(q, false)}
+                  onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
                 />
               )}
 
@@ -321,7 +361,7 @@ function App() {
                   <RewardShop
                     rewards={rewards}
                     currentUser={currentUser}
-                    onBuy={handleBuyReward}
+                    onBuy={(r) => handleBuyReward(currentUser, r)}
                   />
                 </div>
               )}
@@ -355,10 +395,10 @@ function App() {
         />
       )}
 
-      {isAvatarModalOpen && (
+      {avatarUser && (
         <AvatarUploader
-          user={currentUser}
-          onClose={() => setIsAvatarModalOpen(false)}
+          user={avatarUser}
+          onClose={() => setAvatarUser(null)}
           onUploadComplete={() => {
             refreshData();
             setMessageData({ title: "変更完了", text: "アバターを変更しました！", type: "success" });

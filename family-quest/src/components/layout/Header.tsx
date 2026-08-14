@@ -8,6 +8,10 @@ interface HeaderProps {
     viewMode: 'user' | 'familyLog';
     onUserSwitch: (idx: number) => void;
     onLogSwitch: () => void;
+    // 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の
+    // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。
+    // true の場合はユーザー切替行を省略し、タイトルと記録ボタンのみを表示する。
+    hideUserSwitcher?: boolean;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -16,6 +20,7 @@ const Header: React.FC<HeaderProps> = ({
     viewMode,
     onUserSwitch,
     onLogSwitch,
+    hideUserSwitcher,
 }) => {
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
@@ -32,7 +37,7 @@ const Header: React.FC<HeaderProps> = ({
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
                 {/* 1. Users */}
-                {users.map((user, idx) => {
+                {!hideUserSwitcher && users.map((user, idx) => {
                     const isActive = viewMode === 'user' && currentUserIdx === idx;
                     return (
                         <button
@@ -75,7 +80,9 @@ const Header: React.FC<HeaderProps> = ({
                 })}
 
                 {/* Divider (PCのみ表示) */}
-                <div className="w-px h-12 bg-gray-700 mx-1 self-center hidden sm:block"></div>
+                {!hideUserSwitcher && (
+                    <div className="w-px h-12 bg-gray-700 mx-1 self-center hidden sm:block"></div>
+                )}
 
                 {/* 2. Log Button */}
                 <button
