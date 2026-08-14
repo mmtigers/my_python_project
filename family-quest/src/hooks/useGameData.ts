@@ -300,7 +300,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
     };
 
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
-        if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };
+        if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
         try {
             // any キャストを排除し、型安全なレスポンスを定義
             const res = await approveQuestMutation.mutateAsync({ user, history: historyItem }) as unknown as ApproveResponse;
@@ -314,7 +314,7 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
     };
 
     const rejectQuest = async (user: User, historyItem: QuestHistory) => {
-        if (!['dad', 'mom'].includes(user.user_id)) return { success: false, reason: 'permission' };
+        if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
         try {
             await rejectQuestMutation.mutateAsync({ user, history: historyItem });
             return { success: true };
