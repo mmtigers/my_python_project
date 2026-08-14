@@ -248,11 +248,14 @@ class QuestService:
             total_gold = quest['gold_gain'] + boost['gold']
             
             if user['role'] == ROLE_CHILD:
+                if quest['target_user'] == 'siblings':
+                    return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)
+
                 cur.execute("""
                     INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
                 """, (user_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
-                
+
                 logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}, BonusG={boost['gold']}")
                 sound_manager.play("submit")
 
@@ -262,11 +265,53 @@ class QuestService:
                     "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
                     "message": "親の承認待ちです"
                 }
-            
+
             # 大人
             result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
             logger.info(f"Adult Quest Completed: User={user_id}, Exp={total_exp}, Gold={total_gold}")
             return result
+
+    def _get_sibling_partner_id(self, cur, user_id: str) -> str:
+        """
+        兄妹連携クエスト(target_user='siblings')の相方の user_id を返す。
+        現状の家族構成では role_child のユーザーがちょうど2人(兄・妹)いることを前提とする。
+        """
+        rows = cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,)).fetchall()
+        child_ids = [row['user_id'] for row in rows]
+        if user_id not in child_ids or len(child_ids) != 2:
+            raise HTTPException(status_code=400, detail="兄妹クエストの対象ユーザー構成が不正です")
+        return next(uid for uid in child_ids if uid != user_id)
+
+    def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:
+        """
+        兄妹連携クエスト: どちらか一方が完了報告すると、2人分の quest_history 行(共に pending)を
+        作成し、互いを linked_history_id で連結する。承認は1回のタップで2人分同時に確定する。
+        """
+        partner_id = self._get_sibling_partner_id(cur, user['user_id'])
+
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """, (user['user_id'], quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
+        reporter_history_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status, linked_history_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (partner_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso, reporter_history_id))
+        partner_history_id = cur.lastrowid
+
+        cur.execute("UPDATE quest_history SET linked_history_id = ? WHERE id = ?", (partner_history_id, reporter_history_id))
+
+        logger.info(f"Coop Quest Pending: Reporter={user['user_id']}, Partner={partner_id}, Quest={quest['title']}")
+        sound_manager.play("submit")
+
+        return {
+            "status": "pending",
+            "leveledUp": False, "newLevel": user['level'],
+            "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
+            "message": "親の承認待ちです（兄妹クエスト）"
+        }
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
@@ -290,6 +335,10 @@ class QuestService:
 
             attacker_id = hist['user_id']
 
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード承認 ---
+            if hist['linked_history_id'] is not None:
+                self._approve_linked_history(cur, hist['linked_history_id'])
+
             # --- TV Lock Feature ---
             if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
                 if user['role'] == ROLE_CHILD:
@@ -297,6 +346,21 @@ class QuestService:
 
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
             return result
+
+    def _approve_linked_history(self, cur, linked_history_id: int) -> None:
+        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。"""
+        linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_history_id,)).fetchone()
+        if not linked_hist or linked_hist['status'] != 'pending':
+            return
+
+        linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
+        linked_quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (linked_hist['quest_id'],)).fetchone()
+        if not linked_user:
+            return
+
+        override_rewards = {"gold": linked_hist['gold_earned'], "exp": linked_hist['exp_earned']}
+        self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
+        logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
 
     def _trigger_tv_unlock(self, quest_id: int):
         import threading
@@ -336,6 +400,12 @@ class QuestService:
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
             cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
+            if hist['linked_history_id'] is not None:
+                cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
+                logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
+
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
             return {"status": "rejected"}
 
@@ -393,25 +463,41 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['user_id'] != user_id: raise HTTPException(status_code=403, detail="User mismatch")
 
-            if hist['status'] == 'pending':
-                cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
-                return {"status": "cancelled"}
-
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user: raise HTTPException(status_code=404, detail="User not found")
-            
-            new_level, new_exp = game_logic.GameLogic.calc_level_down(
-                user['level'], user['exp'], hist['exp_earned']
-            )
-            
-            new_gold = max(0, user['gold'] - hist['gold_earned'])
-            
-            cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?", 
-                        (new_level, new_exp, new_gold, common.get_now_iso(), user_id))
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
-            
+
+            self._revert_and_delete_history(cur, hist, user)
+
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード取り消し ---
+            linked_id = hist['linked_history_id']
+            if linked_id is not None:
+                linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_id,)).fetchone()
+                if linked_hist:
+                    linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
+                    if linked_user:
+                        self._revert_and_delete_history(cur, linked_hist, linked_user)
+                        logger.info(f"Coop Partner Cancelled: HistoryID={linked_id}")
+
             logger.info(f"Quest Cancelled: User={user_id}, HistoryID={history_id}")
         return {"status": "cancelled"}
+
+    def _revert_and_delete_history(self, cur, hist, user) -> None:
+        """
+        quest_history 1行を取り消す。pending であれば単純に削除、approved であれば
+        付与済みの経験値・ゴールドをロールバックしてから削除する。
+        """
+        if hist['status'] == 'pending':
+            cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
+            return
+
+        new_level, new_exp = game_logic.GameLogic.calc_level_down(
+            user['level'], user['exp'], hist['exp_earned']
+        )
+        new_gold = max(0, user['gold'] - hist['gold_earned'])
+
+        cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?",
+                    (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))
+        cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
     def filter_active_quests(self, quests: List[dict]) -> List[dict]:
         filtered = []
