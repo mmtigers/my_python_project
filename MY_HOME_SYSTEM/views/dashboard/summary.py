@@ -4,7 +4,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from typing import Tuple, Optional, Dict
 
-import train_service
+from services import train_service
 from services import analysis_service
 from .common import render_status_card_html
 

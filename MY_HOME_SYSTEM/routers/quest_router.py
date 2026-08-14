@@ -7,7 +7,7 @@ import sys
 import aiofiles
 
 import config
-import sound_manager
+from core import sound_manager
 from core.logger import setup_logging
 
 # 分離したモジュールをインポート
