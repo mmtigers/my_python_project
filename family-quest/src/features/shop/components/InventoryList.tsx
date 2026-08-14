@@ -131,7 +131,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                 {item.status === 'owned' && (
                                     <Button
                                         size="md"
-                                        className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md active:scale-95 transition-all"
+                                        className="w-full min-h-[44px] bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md active:scale-95 transition-all"
                                         onClick={() => {
                                             // ★変更: 「パパ・ママに通知がいきます」の文言を削除
                                             setItemToUse(item);
@@ -151,7 +151,7 @@ export const InventoryList: React.FC<Props> = ({ userId }) => {
                                             <span>承認待ち...</span>
                                         </div>
                                         <button
-                                            className="text-xs text-slate-400 underline hover:text-slate-600 px-2 py-1"
+                                            className="min-h-[44px] min-w-[44px] text-xs text-slate-500 underline hover:text-slate-700 px-3"
                                             onClick={() => cancelMutation.mutate(item.id)}
                                             disabled={cancelMutation.isPending}
                                         >

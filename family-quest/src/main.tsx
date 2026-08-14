@@ -5,6 +5,8 @@ import CameraDashboard from './features/camera/components/CameraDashboard' // �
 import './index.css'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
+import { SettingsProvider } from './context/SettingsContext'
+import { ToastProvider } from './context/ToastContext'
 
 // getElementById は null を返す可能性があるため、! (Non-null assertion) またはチェックを入れる
 const rootElement = document.getElementById('root');
@@ -20,7 +22,13 @@ ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       {/* ★変更: URLパスによってマウントするアプリを根元から切り替える */}
-      {isCameraView ? <CameraDashboard /> : <App />}
+      {isCameraView ? <CameraDashboard /> : (
+        <SettingsProvider>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </SettingsProvider>
+      )}
     </QueryClientProvider>
   </React.StrictMode>,
 )
