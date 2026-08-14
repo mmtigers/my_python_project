@@ -45,6 +45,8 @@
 * `onBuy`: `(reward: Reward) => void` (商品購入時のコールバック関数)
 * `currentUser`: `User` (現在のユーザー情報)
 * 根拠: `RewardListProps`インターフェース (行番号: 6〜11 / 抜粋: `interface RewardListProps { ... }`)
+* フィルタリングにおける`target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`（`isAdult`、21行目）で行われ、`target === 'mom'`/`'dad'`の判定は引き続き`currentUser.user_id`の直接比較（25〜26行目）で行われる。
+* 根拠: (行番号: 21, 23〜26 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`)
 
 
 * **戻り値/レスポンス**: `JSX.Element`
@@ -76,8 +78,8 @@ flowchart TD
     TargetCheck -- "dad" --> TargetDad[対象: 父親]
     
     TargetAll --> FilterKeep[リストに残す]
-    TargetChildren --> IsAdultCheck1{user_idがdadかmom以外か?}
-    TargetAdults --> IsAdultCheck2{user_idがdadかmomか?}
+    TargetChildren --> IsAdultCheck1{currentUser.role が role_adult 以外か?}
+    TargetAdults --> IsAdultCheck2{currentUser.role が role_adult か?}
     TargetMom --> IsMomCheck{user_idがmomか?}
     TargetDad --> IsDadCheck{user_idがdadか?}
     
@@ -146,13 +148,13 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `@/types` (index.ts 等) | `Reward`および`User`型の完全なスキーマ（オプショナルなプロパティの全容）を把握するため。 | インポート文 (行番号: 3 / 抜粋: `import { Reward, User } from '@/types';`) |
-| 中 | 本コンポーネントを呼び出す親コンポーネント | `userGold`の管理方法や`onBuy`の具体的な副作用（DB更新やAPI呼び出しなど）を確認するため。 | Props定義 (行番号: 8, 9 / 抜粋: `userGold: number; onBuy: (reward: Reward) => void;`) |
+| 中 | `../RewardShop.tsx` (本コンポーネントの呼び出し元) | `userGold`の管理方法や`onBuy`の具体的な副作用（DB更新やAPI呼び出しなど）を確認するため。 | Props定義 (行番号: 8, 9 / 抜粋: `userGold: number; onBuy: (reward: Reward) => void;`) |
 | 低 | `@/components/ui/Card` | `Card`コンポーネントが`className`や`onClick`を正しくDOM要素に伝播させているか仕様を確認するため。 | インポートおよび使用箇所 (行番号: 4, 60 / 抜粋: `<Card key={rId} onClick={...} className={...}>`) |
 
 ## 8. 保守上の注意点
 
-* **ハードコードされたIDロジック**: `isAdult`の判定処理等において、`user_id`が `'dad'` または `'mom'` であるかを直接文字列で判定している。ユーザーIDの仕様が変更された場合、ロジックが破綻する。
-* 根拠: 条件式 (行番号: 21, 25, 26 / 抜粋: `const isAdult = currentUser.user_id === 'dad' || currentUser.user_id === 'mom';`)
+* **判定基準の混在**: `target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`という役割ベースの判定（`isAdult`）を用いる一方、`target === 'mom'`/`'dad'`の判定は依然として`currentUser.user_id`のハードコードされた文字列比較（`'mom'`/`'dad'`）を用いている。同じフィルタリング処理内で判定基準（role vs user_id）が統一されていない点に留意が必要。
+* 根拠: 条件式 (行番号: 21, 25, 26 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`, `if (target === 'dad') return currentUser.user_id === 'dad';`)
 
 
 * **プロパティの非正規化（フォールバック）**: 一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`、`icon`と`icon_key`）が混在しており、データ構造が統一されていないことが窺える。
@@ -174,11 +176,10 @@ graph TD
 
 ## 10. 自己検証結果
 
-* [x] 推測・外部ファイルの仕様を一切含んでいない
-* [x] 全関数・全クラス・全コンポーネントを列挙した
-* [x] 全てのインポート要素を列挙した
-* [x] すべての仕様説明に「根拠（行番号・抜粋）」を明記した
-* [x] 根拠漏れが0件である
-* [x] Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
-* [x] 不明事項を漏れなく列挙した
-完了
+* [x] 完了: 推測・外部ファイルの仕様を一切含んでいない
+* [x] 完了: 全関数・全クラス・全コンポーネントを列挙した
+* [x] 完了: 全てのインポート要素を列挙した
+* [x] 完了: すべての仕様説明に「根拠（行番号・抜粋）」を明記した
+* [x] 完了: 根拠漏れが0件である
+* [x] 完了: Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
+* [x] 完了: 不明事項を漏れなく列挙した
