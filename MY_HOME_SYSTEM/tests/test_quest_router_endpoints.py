@@ -100,7 +100,7 @@ class TestUpdateUserAvatar:
 
 class TestSound:
     def test_valid_sound_key_returns_200(self, seeded_client, monkeypatch):
-        import sound_manager
+        from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         res = seeded_client.post("/api/quest/test_sound", json={"sound_key": "level_up"})
         assert res.status_code == 200
@@ -130,7 +130,7 @@ class TestInventoryEndpoints:
         assert items[0]["status"] == "owned"
 
     def test_use_item_by_owner_succeeds(self, seeded_client, monkeypatch):
-        import sound_manager
+        from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         inventory_id = self._purchase_reward(seeded_client)
 
@@ -146,7 +146,7 @@ class TestInventoryEndpoints:
         assert res.status_code == 403
 
     def test_consume_item_requires_parent_approver(self, seeded_client, monkeypatch):
-        import sound_manager
+        from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         inventory_id = self._purchase_reward(seeded_client)
 
