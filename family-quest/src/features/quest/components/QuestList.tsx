@@ -12,6 +12,13 @@ interface QuestListProps {
     pendingQuests: QuestHistory[];
     currentUser: User;
     onQuestClick: (quest: Quest) => void;
+    // 横画面4人表示のパネル内で使うためのモード。
+    // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
+    // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
+    panelMode?: boolean;
+    // アイコン主体・文字量を絞った表示にするか(非識字年齢の子ども向け、要件10)。
+    // 説明文を非表示にし、アイコンをより大きく見せる。
+    iconFirst?: boolean;
 }
 
 // 個別のクエストアイテムコンポーネント
@@ -21,7 +28,9 @@ const QuestItem: React.FC<{
     pendingQuests: QuestHistory[];
     currentUser: User;
     onClick: (q: Quest) => void;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick }) => {
+    panelMode?: boolean;
+    iconFirst?: boolean;
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, panelMode, iconFirst }) => {
 
     const { play } = useSound();
     const [isCooldown, setIsCooldown] = useState(false);
@@ -71,13 +80,24 @@ const QuestItem: React.FC<{
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
+    // パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、
+    // 常に「狭い列でも崩れず、かつタップしやすい」固定サイズを使う。
+    const cardSizeClasses = panelMode ? 'p-3 min-h-[64px]' : 'md:p-6 md:h-full';
+    const layoutClasses = panelMode ? 'flex items-center gap-3' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6';
+    const iconSizeClasses = panelMode ? (iconFirst ? 'text-5xl' : 'text-3xl') : 'text-2xl md:text-5xl';
+    const titleSizeClasses = panelMode ? (iconFirst ? 'text-sm' : 'text-base') : 'text-sm md:text-xl';
+    const descSizeClasses = panelMode ? 'text-[11px] text-gray-400 leading-tight line-clamp-1' : 'text-xs md:text-sm text-gray-400 leading-tight md:leading-normal';
+    const badgeSizeClasses = panelMode ? 'text-[10px]' : 'text-[10px] md:text-xs';
+    const rewardSizeClasses = panelMode ? 'text-xs font-bold' : 'text-xs md:text-lg font-bold';
+    const statusTextClasses = panelMode ? 'text-xs' : 'text-xs md:text-sm';
+
     // ★ここで handleClick を終了し、コンポーネントの描画結果を return します
     return (
         <div className="relative h-full group">
             <Card
                 variant={variant}
                 onClick={handleClick}
-                className={`md:p-6 md:h-full transition-all duration-300
+                className={`${cardSizeClasses} transition-all duration-300
                     ${hasBonus && !isDone && !isPending && !isEffectivelyLocked ? 'border-2 border-red-400 animate-pulse-slow' : ''}
                     ${isEffectivelyLocked ? 'opacity-50 grayscale cursor-not-allowed bg-gray-200 border-gray-400' : ''}
                 `}
@@ -97,16 +117,16 @@ const QuestItem: React.FC<{
                     </div>
                 )}
 
-                <div className="flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6 relative z-10 w-full h-full">
+                <div className={`${layoutClasses} relative z-10 w-full h-full`}>
                     {/* 1. アイコンエリア */}
                     <div className="flex items-center justify-center min-w-[3rem]">
                         {/* ▼ ロック時は鍵アイコンを表示 */}
                         {isLocked ? (
-                            <span className="text-2xl md:text-5xl text-gray-400">
-                                <Lock size={32} />
+                            <span className={`${panelMode ? 'text-3xl' : 'text-2xl md:text-5xl'} text-gray-400`}>
+                                <Lock size={panelMode ? 24 : 32} />
                             </span>
                         ) : (
-                            <span className={`text-2xl md:text-5xl ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
+                            <span className={`${iconSizeClasses} ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
                                 {quest.icon || quest.icon_key}
                             </span>
                         )}
@@ -117,48 +137,48 @@ const QuestItem: React.FC<{
                         <div className="flex items-center gap-2 flex-wrap mb-1">
                             {/* ▼ 特別クエストバッジ */}
                             {quest.type === 'special' && (
-                                <span className="bg-purple-600 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">
+                                <span className={`bg-purple-600 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold`}>
                                     特別
                                 </span>
                             )}
                             {/* ▼ 共有クエスト(他者対応済み)バッジ */}
                             {isSharedDoneByOther && (
-                                <span className="bg-gray-600 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold border border-gray-400">
+                                <span className={`bg-gray-600 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold border border-gray-400`}>
                                     {sharedName}が対応済み
                                 </span>
                             )}
                             {/* ▼ ロックバッジ */}
                             {isLocked && !isSharedDoneByOther && (
-                                <span className="bg-gray-500 text-white text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5">
+                                <span className={`bg-gray-500 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}>
                                     <Lock size={10} /> 未開放
                                 </span>
                             )}
 
                             {/* ... (他のバッジ: 無限、時間制限、申請中) ... */}
                             {isInfinite && !isPending && !isLocked && (
-                                <span className="bg-cyan-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5"><RotateCcw size={10} /> 無限</span>
+                                <span className={`bg-cyan-600 ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}><RotateCcw size={10} /> 無限</span>
                             )}
                             {isTimeLimited && !isDone && !isPending && !isLocked && (
-                                <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1">
+                                <span className={`bg-yellow-500 text-black ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1`}>
                                     ⏰ {quest.start_time}~{quest.end_time}
                                 </span>
                             )}
                             {isLimited && !isDone && !isPending && !isLocked && (
-                                <span className="bg-red-600 text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold">期間限定</span>
+                                <span className={`bg-red-600 ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold`}>期間限定</span>
                             )}
                             {isPending && (
-                                <span className="bg-yellow-500 text-black text-[10px] md:text-xs px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1"><Clock size={10} /> 申請中</span>
+                                <span className={`bg-yellow-500 text-black ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1`}><Clock size={10} /> 申請中</span>
                             )}
                         </div>
 
                         {/* タイトル */}
-                        <div className={`font-bold text-sm md:text-xl leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : isLocked ? 'text-gray-500' : 'text-white'}`}>
+                        <div className={`font-bold ${titleSizeClasses} leading-snug mb-1 ${isDone ? 'text-gray-500 line-through decoration-2' : isLocked ? 'text-gray-500' : 'text-white'}`}>
                             {displayTitle}
                         </div>
 
-                        {/* 説明文: ロック時は「条件: 〇〇」と出しても親切だが、一旦そのまま表示 */}
-                        {(quest.desc || quest.description) && (
-                            <div className="text-xs md:text-sm text-gray-400 leading-tight md:leading-normal">
+                        {/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}
+                        {!iconFirst && (quest.desc || quest.description) && (
+                            <div className={descSizeClasses}>
                                 {quest.desc || quest.description}
                             </div>
                         )}
@@ -168,22 +188,22 @@ const QuestItem: React.FC<{
                     <div className="flex flex-col items-end justify-center gap-1 md:gap-2 min-w-[4rem]">
                         {/* ▼ ロック時の表示 */}
                         {isLocked ? (
-                            <span className="text-gray-400 text-xs md:text-sm whitespace-nowrap font-mono">
+                            <span className={`text-gray-400 ${statusTextClasses} whitespace-nowrap font-mono`}>
                                 LOCKED
                             </span>
                         ) : isDone ? (
-                            <span className="text-red-400 text-xs md:text-base border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap">
-                                <Undo2 size={12} className="md:w-4 md:h-4" /> 戻す
+                            <span className={`text-red-400 ${statusTextClasses} border border-red-500 px-2 py-1 rounded flex items-center gap-1 bg-red-950/30 whitespace-nowrap`}>
+                                <Undo2 size={panelMode ? 14 : 12} className="md:w-4 md:h-4" /> 戻す
                             </span>
                         ) : isPending ? (
-                            <span className="text-yellow-300 text-xs md:text-sm whitespace-nowrap">確認待ち</span>
+                            <span className={`text-yellow-300 ${statusTextClasses} whitespace-nowrap`}>確認待ち</span>
                         ) : (
                             <div className="flex flex-col items-end">
-                                <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
+                                <span className={`font-mono ${rewardSizeClasses} whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
                                     EXP +{totalExp}
                                 </span>
                                 {totalGold > 0 && (
-                                    <span className={`font-mono text-xs md:text-lg font-bold whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
+                                    <span className={`font-mono ${rewardSizeClasses} whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
                                         {totalGold} G
                                     </span>
                                 )}
@@ -204,7 +224,7 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
 
@@ -255,11 +275,20 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         });
     }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
 
+    const listContainerClass = panelMode
+        ? 'space-y-2 animate-in fade-in duration-300'
+        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20';
+    const headerClass = panelMode
+        ? 'text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-xs font-bold'
+        : 'md:col-span-2 text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm md:text-lg font-bold';
+
     return (
-        <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
-            <div className="md:col-span-2 text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm md:text-lg font-bold">
-                -- クエスト一覧 --
-            </div>
+        <div className={listContainerClass}>
+            {!panelMode && (
+                <div className={headerClass}>
+                    -- クエスト一覧 --
+                </div>
+            )}
 
             <AnimatePresence mode="popLayout">
                 {sortedQuests.map(q => (
@@ -278,13 +307,15 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                             pendingQuests={pendingQuests}
                             currentUser={currentUser}
                             onClick={onQuestClick}
+                            panelMode={panelMode}
+                            iconFirst={iconFirst}
                         />
                     </motion.div>
                 ))}
             </AnimatePresence>
 
             {sortedQuests.length === 0 && (
-                <div className="md:col-span-2 text-center text-gray-500 py-10 text-sm md:text-xl">
+                <div className={panelMode ? 'text-center text-gray-500 py-6 text-xs' : 'md:col-span-2 text-center text-gray-500 py-10 text-sm md:text-xl'}>
                     現在挑戦できるクエストはありません
                 </div>
             )}
