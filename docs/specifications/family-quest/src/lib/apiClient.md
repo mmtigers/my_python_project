@@ -11,7 +11,8 @@
 
 * 本ファイルは、アプリケーションからバックエンドAPIへ通信するためのHTTPクライアント（`ApiClient` クラスおよびそのインスタンス `apiClient`）を定義し、提供する責務を持つ。
 * 環境に応じたベースURLの解決、リクエストヘッダの共通設定（`application/json`）、JSONデータの送受信、およびHTTPエラー時の共通エラーハンドリング（例外送出）をカプセル化している。
-* `Inventory`（インベントリ）関連および `Guild Bounty`（ギルドバウンティ）関連の各APIエンドポイントを呼び出すためのラッパーメソッド・関数群を定義している。
+* `Inventory`（インベントリ）関連の各APIエンドポイントを呼び出すためのラッパーメソッド群を定義している。
+* 根拠: [ファイル冒頭コメント] (行番号: 1 / 抜粋: "// family-quest/src/lib/apiClient.ts")
 
 ## 3. 外部依存関係
 
@@ -19,10 +20,8 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `Bounty` | 型(Type/Interface) | APIレスポンスの型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from") |
-| `FamilyMileage` | 型(Type/Interface) | `getFamilyMileage`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from") |
-| `InventoryItem` | 型(Type/Interface) | APIレスポンスの型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from") |
-| `PendingInventory` | 型(Type/Interface) | APIレスポンスの型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from") |
+| `InventoryItem` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
+| `PendingInventory` | 型(Type/Interface) | `fetchPendingInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
 
 ### ブラックボックスとなる外部要素
 
@@ -59,8 +58,8 @@
 
 ### `ApiClient` (クラス)
 
-* **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ・マイレージ機能固有のメソッド群を提供する。
-* 根拠: [ApiClientクラス定義] (行番号: 32〜126 / 抜粋: "class ApiClient {")
+* **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ機能固有のメソッド群を提供する。
+* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
 
 
 * **引数/リクエスト**: コンストラクタにて `baseUrl: string`
@@ -68,15 +67,15 @@
 
 
 * **戻り値/レスポンス**: クラスインスタンス
-* 根拠: [ApiClientクラス定義] (行番号: 32〜126 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
 
 
 * **副作用**: なし（メソッド呼び出し時に発生）
-* 根拠: [ApiClientクラス定義] (行番号: 32〜126 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [ApiClientクラス定義] (行番号: 32〜126 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
 
 
 
@@ -151,56 +150,33 @@
 
 
 
-### インベントリ関連メソッド (`fetchInventory`, `useItem`, `cancelItemUsage`, `consumeItem`, `fetchPendingInventory`, `getFamilyMileage`, `updateFamilyMileage`)
+### インベントリ関連メソッド (`fetchInventory`, `useItem`, `cancelItemUsage`, `consumeItem`, `fetchPendingInventory`)
 
-* **役割**: `ApiClient` クラスに組み込まれた、各インベントリ・マイレージAPIの呼び出し専用メソッド群。
-* 根拠: [Inventory Methods セクション] (行番号: 97〜125 / 抜粋: "// --- Inventory Methods ---")
-
-
-* **引数/リクエスト**: メソッドに応じたパラメータ (`userId: string`, `inventoryId: number`, `approverId: string`, `targetName: string`, `targetExp: number`)
-* 根拠: [各メソッドの引数定義] (行番号: 99, 103, 107, 111, 115, 119, 123 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
+* **役割**: `ApiClient` クラスに組み込まれた、各インベントリAPIの呼び出し専用メソッド群。
+* 根拠: [Inventory Methods セクション] (行番号: 97〜117 / 抜粋: "// --- Inventory Methods ---")
 
 
-* **戻り値/レスポンス**: `Promise<InventoryItem[]>`, `Promise<ApiResponse>`, `Promise<PendingInventory[]>`, `Promise<FamilyMileage>` のいずれか
-* 根拠: [各メソッドの戻り値型定義] (行番号: 99, 103, 107, 111, 115, 119, 123 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryItem[]> {")
+* **引数/リクエスト**: メソッドに応じたパラメータ (`userId: string`, `inventoryId: number`, `approverId: string`)
+* 根拠: [各メソッドの引数定義] (行番号: 99, 103, 107, 111, 115 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
 
 
-* **副作用**: `get`/`post`/`put`（ひいては`_request`）を介したネットワーク通信
-* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116, 120, 124 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
+* **戻り値/レスポンス**: `Promise<InventoryItem[]>`, `Promise<ApiResponse>`, `Promise<PendingInventory[]>` のいずれか
+* 根拠: [各メソッドの戻り値型定義] (行番号: 99, 103, 107, 111, 115 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryItem[]> {")
+
+
+* **副作用**: `get`/`post`（ひいては`_request`）を介したネットワーク通信
+* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
 
 
 * **エラーハンドリング**: `_request` の実装に依存
-* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116, 120, 124 / 抜粋: "return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);")
+* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116 / 抜粋: "return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);")
 
 
 
 ### `apiClient` (インスタンス定数)
 
 * **役割**: `BASE_URL` を用いて初期化された `ApiClient` のシングルトンインスタンス。外部モジュールからのAPI呼び出しに使用される。
-* 根拠: [インスタンスのエクスポート] (行番号: 128 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
-
-
-
-### Guild Bounty API Wrappers (`fetchBounties`, `createBounty`, `acceptBounty`, `completeBounty`, `approveBounty`, `resignBounty`, `deleteBounty`)
-
-* **役割**: エクスポートされた `apiClient` インスタンスを用いて、ギルドバウンティ関連の各APIエンドポイントへのリクエストを行う関数群。
-* 根拠: [Guild Bounty API Wrappers セクション] (行番号: 130〜158 / 抜粋: "// --- Guild Bounty API Wrappers ---")
-
-
-* **引数/リクエスト**: 関数に応じたパラメータ (`userId: string`, `bountyId: number`, `bountyData: Record<string, unknown>`)
-* 根拠: [各関数の引数定義] (行番号: 132, 136, 140, 144, 148, 152, 156 / 抜粋: "export const acceptBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {")
-
-
-* **戻り値/レスポンス**: `Promise<Bounty[]>` または `Promise<ApiResponse>`
-* 根拠: [各関数の戻り値型定義] (行番号: 132, 136, 140, 144, 148, 152, 156 / 抜粋: "export const fetchBounties = async (userId: string): Promise<Bounty[]> => {")
-
-
-* **副作用**: `apiClient` を介したネットワーク通信
-* 根拠: [各関数の実装] (行番号: 133, 137, 141, 145, 149, 153, 157 / 抜粋: "return apiClient.post<ApiResponse>('api/bounties/create', bountyData);")
-
-
-* **エラーハンドリング**: `apiClient`（ひいては`_request`）の実装に依存
-* 根拠: [各関数の実装] (行番号: 133, 137, 141, 145, 149, 153, 157 / 抜粋: "return apiClient.get<Bounty[]>(`api/bounties/list?user_id=${userId}`);")
+* 根拠: [インスタンスのエクスポート] (行番号: 120 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
 
 
 
@@ -209,33 +185,33 @@
 ```mermaid
 flowchart TD
     Start([外部からのリクエストメソッド呼び出し]) --> CheckCleanEndpoint
-    
+
     subgraph "_request メソッド"
     CheckCleanEndpoint{endpointが '/' で始まるか?}
     CheckCleanEndpoint -- Yes --> FormatURL1["url = baseUrl + endpoint"]
     CheckCleanEndpoint -- No --> FormatURL2["url = baseUrl + '/' + endpoint"]
-    
+
     FormatURL1 --> FetchCall["外部: fetch(url, options)"]
     FormatURL2 --> FetchCall
-    
+
     FetchCall --> ResponseCheck{response.ok ?}
-    
+
     ResponseCheck -- Yes --> ParseJSONSuccess["response.json() をパース"]
     ParseJSONSuccess --> ReturnData([データ返却 / 正常終了])
-    
+
     ResponseCheck -- No --> ParseJSONError["エラー詳細取得: response.json().catch()"]
     ParseJSONError --> CheckDetail{errorData.detail が string か?}
-    
+
     CheckDetail -- Yes --> SetErrorMsg1["errorMessage = errorData.detail"]
     CheckDetail -- No --> SetErrorMsg2["errorMessage = 'API Error: ' + status"]
-    
+
     SetErrorMsg1 --> ThrowAPIError["throw new Error(errorMessage)"]
     SetErrorMsg2 --> ThrowAPIError
     end
-    
+
     ThrowAPIError -. "例外発生" .-> CatchBlock
     FetchCall -. "ネットワーク例外" .-> CatchBlock
-    
+
     CatchBlock["console.error('API Request Failed...', error)"] --> ThrowFinalError(["throw error (異常終了)"])
 
 ```
@@ -245,47 +221,44 @@ flowchart TD
 ```mermaid
 graph TD
     subgraph "外部ファイル (ブラックボックス)"
-        Types["../types (Bounty, FamilyMileage, InventoryItem, PendingInventory)"]
+        Types["../types (InventoryItem, PendingInventory)"]
     end
-    
+
     subgraph "環境依存"
         Env["import.meta.env.VITE_API_URL"]
         Window["window.location.origin"]
     end
-    
+
     subgraph "apiClient.ts"
         GetBaseUrl["getBaseUrl()"]
-        
+
         ApiClientClass["class ApiClient"]
         Request["_request()"]
         Get["get()"]
         Post["post()"]
+        PostForm["postForm()"]
         Put["put()"]
         Delete["delete()"]
         InventoryMethods["Inventory Methods (fetchInventory 等)"]
-        
+
         ApiClientInstance["const apiClient"]
-        
-        BountyWrappers["Guild Bounty Wrappers (fetchBounties 等)"]
     end
-    
+
     FetchAPI["外部: Browser fetch API"]
-    
+
     Types -. "型参照" .-> ApiClientClass
-    Types -. "型参照" .-> BountyWrappers
-    
+
     Env --> GetBaseUrl
     Window --> GetBaseUrl
     GetBaseUrl --> ApiClientInstance
-    
-    ApiClientClass --> Get & Post & Put & Delete & InventoryMethods
-    Get & Post & Put & Delete --> Request
-    InventoryMethods --> Get & Post & Put & Delete
-    
+
+    ApiClientClass --> Get & Post & PostForm & Put & Delete & InventoryMethods
+    Get & Post & PostForm & Put & Delete --> Request
+    InventoryMethods --> Get & Post
+
     Request --> FetchAPI
-    
+
     ApiClientInstance -- "インスタンス化" --> ApiClientClass
-    BountyWrappers --> ApiClientInstance
 
 ```
 
@@ -293,16 +266,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`Bounty`, `FamilyMileage`, `InventoryItem`, `PendingInventory`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from") |
+| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryItem`, `PendingInventory`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
 | 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 8 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
-| 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` や `api/bounties/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 104 / 抜粋: "'/api/quest/inventory/use'") |
+| 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 104 / 抜粋: "'/api/quest/inventory/use'") |
 
 ## 8. 保守上の注意点
 
 * **ベースURLとエンドポイントの結合**: `_request` 内で `cleanEndpoint` として先頭のスラッシュを付与・補完しているが、`this.baseUrl` の末尾のスラッシュの有無については検査・トリム処理がない。環境変数やオリジンの末尾にスラッシュが含まれていた場合、URLが `//` となる可能性がある。
 * **SSR環境の考慮**: `typeof window !== 'undefined'` の判定を行っているが、`undefined` (例: SSR/Node環境) かつ `.env` が未定義の場合、ベースURLが空文字 `''` となる。これによりリクエストが相対パスとして処理されるか、エラーになる。
 * **エラー時のJSONパース**: `response.json().catch(() => ({}))` と記載されており、APIが `text/html` 等の非JSONエラーレスポンスを返した場合、パースエラーは握りつぶされて常に空オブジェクトとして扱われる。
-* **Guild Bounty API Wrappersのエンドポイントに先頭スラッシュがない**: `fetchBounties`等の`apiClient.get`/`post`/`delete`呼び出しは `'api/bounties/list?...'` のように先頭が `/` ではない文字列を渡している。`_request`側で `cleanEndpoint = endpoint.startsWith('/') ? endpoint : \`/${endpoint}\`` により正規化されるため現状は動作するが、他のメソッド（Inventory系）はすべて `/api/...` と先頭スラッシュ付きで統一されており、この箇所だけ表記が不統一である。
 
 ## 9. 不明事項一覧
 
@@ -314,12 +286,10 @@ graph TD
 
 ## 10. 自己検証結果
 
-* [x] 推測・外部ファイルの仕様を一切含んでいない
-* [x] 全関数・全クラス・全コンポーネントを列挙した
-* [x] 全てのインポート要素を列挙した
-* [x] すべての仕様説明に「根拠（行番号・抜粋）」を明記した
-* [x] 根拠漏れが0件である
-* [x] Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
-* [x] 不明事項を漏れなく列挙した
-
-完了
+* [x] 完了: 推測・外部ファイルの仕様を一切含んでいない
+* [x] 完了: 全関数・全クラス・全コンポーネントを列挙した
+* [x] 完了: 全てのインポート要素を列挙した
+* [x] 完了: すべての仕様説明に「根拠（行番号・抜粋）」を明記した
+* [x] 完了: 根拠漏れが0件である
+* [x] 完了: Mermaid構文にエラーの原因となる記号（エスケープ漏れ）がない
+* [x] 完了: 不明事項を漏れなく列挙した
