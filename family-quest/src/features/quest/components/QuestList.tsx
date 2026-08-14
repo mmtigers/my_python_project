@@ -12,7 +12,6 @@ interface QuestListProps {
     pendingQuests: QuestHistory[];
     currentUser: User;
     onQuestClick: (quest: Quest) => void;
-    isDaily?: boolean; // ★追加
 }
 
 // 個別のクエストアイテムコンポーネント
@@ -205,16 +204,12 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, isDaily }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
 
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
-            // ★追加: タブの振り分け ('daily' と それ以外)
-            if (isDaily && q.type !== 'daily') return false;
-            if (!isDaily && q.type === 'daily') return false;
-
             // ★変更: ターゲット判定 (role プレフィックスの対応)
             if (q.target && q.target !== 'all') {
                 if (q.target.startsWith('role_')) {
@@ -231,25 +226,18 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             }
             return true;
         }).sort((a, b) => {
-            // ▼ ソート順のロジック（ロック/申請中/完了の判定は useQuestStatus と共通の
-            // getQuestLockState に集約。Hooksが使えないコンパレータからも直接呼べる）
+            // ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み
+            // （ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約。
+            //  Hooksが使えないコンパレータからも直接呼べる）
             const getStatusScore = (quest: Quest) => {
-                const { isLocked, isInfinite, isPending, isDone } =
+                const { isLocked, isPending, isDone } =
                     getQuestLockState(quest, currentUser, completedQuests, pendingQuests);
 
-                if (isInfinite) return 0; // 無限は最優先(挑戦可能)
-
-                // 優先順位:
-                // 0: 未完了(挑戦可能)
-                // 1: 申請中 (目立つように上の方へ、または完了の前へ)
-                // 2: ロック済み (これからやるものだが今はできない -> 下へ)
-                // 3: 完了済み (一番下)
-
-                if (isPending) return 1;
-                if (isLocked) return 2;  // ▼ ロックは未完了の後、完了の前
-                if (isDone) return 3;
-
-                return 0; // 未完了・挑戦可能
+                if (isDone) return 4;
+                if (isPending) return 3;
+                if (isLocked) return 2;
+                if (quest.type === 'limited') return 0; // 進行中の期間限定を最優先
+                return 1; // 通常(無限・ランダム・特別バッジ付き含む)
             };
 
             const scoreA = getStatusScore(a);
@@ -265,12 +253,12 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             if (bonusA !== bonusB) return bonusB - bonusA;
             return (b.id as number) - (a.id as number);
         });
-    }, [quests, currentUser, currentDay, completedQuests, pendingQuests, isDaily]);
+    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
 
     return (
         <div className="space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300 pb-20">
             <div className="md:col-span-2 text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm md:text-lg font-bold">
-                -- 本日の依頼 --
+                -- クエスト一覧 --
             </div>
 
             <AnimatePresence mode="popLayout">

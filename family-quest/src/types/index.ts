@@ -16,7 +16,6 @@ export interface User {
     medal_count?: number;
     job_class?: string;
     gold: number;
-    equipment_id?: ID;
     role?: string;
     // バックエンド(MY_HOME_SYSTEM)から送られてくるHP。個々のプレイヤーはダメージを
     // 受けない仕様のため hp は常に maxHp と等しいが、maxHp 自体は
@@ -88,44 +87,6 @@ export interface Reward {
     target?: string;
 }
 
-// 装備アイテム
-export interface Equipment {
-    id?: ID;
-    equipment_id?: ID;
-    name: string;
-    description?: string;
-    type: 'weapon' | 'armor' | string;
-    power: number;
-    cost: number;
-    icon?: string;
-}
-
-export interface Boss {
-    bossId: number;
-    bossName: string;
-    bossIcon: string;
-    maxHp: number;
-    currentHp: number;
-    hpPercentage: number;
-    charge: number;
-    desc: string;
-    isDefeated: boolean;
-    weekStartDate: string;
-}
-
-// 所持装備（バックエンドの user_equipments と equipment_master の JOIN 結果 = `ue.*` + em.name/type/power/icon_key）
-export interface OwnedEquipment {
-    id: number;
-    user_id: string;
-    equipment_id: number;
-    is_equipped: number; // SQLite上は 0/1 の整数
-    acquired_at?: string;
-    name: string;
-    type: 'weapon' | 'armor' | string;
-    power: number;
-    icon_key?: string;
-}
-
 // インベントリアイテム
 export interface InventoryItem {
     id: number;
@@ -147,40 +108,6 @@ export interface QuestResult {
     earnedExp: number;
     earnedMedals: number;
     message?: string;
-    bossEffect?: BossEffect;
-}
-
-// ★追加: ボスダメージ演出用
-export interface BossEffect {
-    damage: number;
-    remainingHp: number;
-    isDefeated: boolean;
-    isNewDefeat: boolean;
-    isCritical?: boolean;
-}
-
-export interface FamilyMileage {
-    is_set: boolean;
-    target_name?: string;
-    current_exp?: number;
-    target_exp?: number;
-}
-
-// ギルド依頼
-export interface Bounty {
-    id: number;
-    title: string;
-    description?: string;
-    reward_gold: number;
-    target_type: 'ALL' | 'ADULTS' | 'CHILDREN' | 'USER';
-    target_user_id?: string;
-    status: 'OPEN' | 'TAKEN' | 'PENDING_APPROVAL' | 'COMPLETED' | 'CANCELED';
-    created_by: string;
-    assignee_id?: string;
-    created_at: string;
-    is_mine: boolean;
-    is_assigned_to_me: boolean;
-    can_accept: boolean;
 }
 
 // ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)
