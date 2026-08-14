@@ -1,6 +1,6 @@
 // family-quest/src/lib/apiClient.ts
 
-import { Bounty, FamilyMileage, InventoryItem, PendingInventory } from "../types";
+import { InventoryItem, PendingInventory } from "../types";
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -115,44 +115,6 @@ class ApiClient {
     async fetchPendingInventory(): Promise<PendingInventory[]> {
         return this.get<PendingInventory[]>('/api/quest/inventory/admin/pending');
     }
-
-    async getFamilyMileage(): Promise<FamilyMileage> {
-        return this.get<FamilyMileage>('/api/quest/family-mileage');
-    }
-
-    async updateFamilyMileage(targetName: string, targetExp: number): Promise<ApiResponse> {
-        return this.put<ApiResponse>('/api/quest/family-mileage', { target_name: targetName, target_exp: targetExp });
-    }
 }
 
 export const apiClient = new ApiClient(BASE_URL);
-
-// --- Guild Bounty API Wrappers ---
-
-export const fetchBounties = async (userId: string): Promise<Bounty[]> => {
-    return apiClient.get<Bounty[]>(`api/bounties/list?user_id=${userId}`);
-};
-
-export const createBounty = async (bountyData: Record<string, unknown>): Promise<ApiResponse> => {
-    return apiClient.post<ApiResponse>('api/bounties/create', bountyData);
-};
-
-export const acceptBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {
-    return apiClient.post<ApiResponse>(`api/bounties/${bountyId}/accept`, { user_id: userId });
-};
-
-export const completeBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {
-    return apiClient.post<ApiResponse>(`api/bounties/${bountyId}/complete`, { user_id: userId });
-};
-
-export const approveBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {
-    return apiClient.post<ApiResponse>(`api/bounties/${bountyId}/approve`, { user_id: userId });
-};
-
-export const resignBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {
-    return apiClient.post<ApiResponse>(`api/bounties/${bountyId}/resign`, { user_id: userId });
-};
-
-export const deleteBounty = async (bountyId: number, userId: string): Promise<ApiResponse> => {
-    return apiClient.delete<ApiResponse>(`api/bounties/${bountyId}?user_id=${userId}`);
-};

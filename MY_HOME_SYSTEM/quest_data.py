@@ -94,6 +94,8 @@ QUESTS = [
     # {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
     {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
     {'id': 1009, 'title': '習い事： ピアノ / あこーでぃおん', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 100, 'icon': '🏫', 'desc': '先生とのお勉強やレッスン'},
+    # 九九クエスト(自己申告制チェックリスト方式。詳細な文言・段階分けは今後調整可能)
+    {'id': 1030, 'title': '今日の九九タイム', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 60, 'gold': 60, 'icon': '🔢', 'desc': '声に出して九九を練習しよう'},
 
     # ------------------------------------------
     # A-5. 通常：涼花 (Daughter)
@@ -101,6 +103,11 @@ QUESTS = [
     {'id': 301, 'title': '朝ごはんを食べる (完食)', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'D', 'exp': 20, 'gold': 10, 'icon': '🍳', 'start_time': '07:00', 'end_time': '08:30', 'desc': 'もぐもぐ食べて大きくなろう'},
     {'id': 303, 'title': '野菜を食べる', 'type': 'daily', 'target': 'daughter', 'category': 'health', 'difficulty': 'A', 'exp': 50, 'gold': 50, 'icon': '🥦', 'desc': '嫌いなものでも一口！'},
     {'id': 304, 'title': 'パジャマを自分で着る', 'type': 'daily', 'target': 'daughter', 'category': 'life', 'difficulty': 'C', 'exp': 30, 'gold': 20, 'icon': '👚', 'start_time': '19:00', 'end_time': '20:30', 'desc': 'ボタンも自分で留められるかな？'},
+
+    # ------------------------------------------
+    # A-6. 通常：兄妹連携 (Siblings) — どちらか一方が完了報告すると2人とも報酬を得る
+    # ------------------------------------------
+    {'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', 'category': 'house', 'difficulty': 'D', 'exp': 40, 'gold': 30, 'icon': '🧸', 'desc': 'おもちゃやえほんを2人で協力してもとの場所に戻そう'},
 
 
     # ==========================================
@@ -155,11 +162,20 @@ QUESTS = [
     {'id': 56, 'title': '自分の部屋の掃除・片付け', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 70, 'icon': '🧹', 'days': '5,6', 'desc': '週末は自分の城をきれいにしよう'},
     # {'id': 57, 'title': 'チャリティーコンサートで演奏', 'type': 'special', 'target': 'son', 'category': 'house', 'difficulty': 'A', 'exp': 300, 'gold': 2000, 'icon': '🧹', 'days': '5,6', 'desc': 'ふざけずに頑張ろう'},
     # {'id': 1022, 'title': '騎士のエスコート', 'type': 'infinite', 'target': 'son', 'category': 'moral', 'difficulty': 'C', 'exp': 50, 'gold': 20, 'icon': '🛡️', 'desc': '泣いている妹を慰める、守る'},
+    # 九九チャレンジ(何度でも挑戦できる無限クエスト版。前提クエストで段階を連結する方式は
+    # 採用しない=「当日中の完了」しか見られない実装のため、複数日にまたがる進行チェーンに
+    # 不向きと判断した。段階分けが必要になった場合はここに数を増やす形で調整する)
+    {'id': 1031, 'title': '九九チャレンジ', 'type': 'infinite', 'target': 'son', 'category': 'study', 'difficulty': 'D', 'exp': 40, 'gold': 30, 'icon': '🔢', 'desc': 'できるところまで何回でも挑戦しよう'},
 
     # ------------------------------------------
     # B-5. 特別：涼花 (Daughter)
     # ------------------------------------------
     {'id': 302, 'title': 'トイレでおしっこ成功', 'type': 'infinite', 'target': 'daughter', 'category': 'life', 'difficulty': 'B', 'exp': 50, 'gold': 30, 'icon': '🚽', 'desc': 'トイトレ頑張ろう！'},
+
+    # ------------------------------------------
+    # B-6. 特別：兄妹連携 (Siblings) — どちらか一方が完了報告すると2人とも報酬を得る
+    # ------------------------------------------
+    {'id': 1041, 'title': 'きょうだいでお手伝い', 'type': 'infinite', 'target': 'siblings', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 20, 'icon': '🤝', 'desc': 'パパやママに頼まれたことを2人で力を合わせてやろう'},
 ]
 
 # ==========================================
@@ -210,47 +226,4 @@ REWARDS = [
 
     # 追加: Switchゲーム (350G)
     {'id': 121, 'title': 'Switchのゲーム(45分)', 'category': 'small', 'cost_gold': 350, 'icon_key': '🎮', 'desc': '45分間ゲームで遊べる券。', 'target': 'children'},
-]
-
-# ==========================================
-# 4. 装備品定義 (Equipment)
-# ==========================================
-EQUIPMENTS = [
-    # --- 武器 (Weapon) ---
-    {'id': 1, 'name': 'ひのきのぼう', 'type': 'weapon', 'power': 2, 'cost': 30, 'icon': '🪵', 'desc': '旅立ちの第一歩。安い。'},
-    {'id': 2, 'name': '銅の剣', 'type': 'weapon', 'power': 10, 'cost': 200, 'icon': '🗡️', 'desc': '少し強くなった気がする剣。'},
-    {'id': 5, 'name': '鉄の槍', 'type': 'weapon', 'power': 18, 'cost': 450, 'icon': '🔱', 'desc': 'リーチが長い。'},
-    {'id': 3, 'name': '鋼の剣', 'type': 'weapon', 'power': 25, 'cost': 800, 'icon': '⚔️', 'desc': '一人前の証。'},
-    {'id': 6, 'name': 'はじゃのつるぎ', 'type': 'weapon', 'power': 35, 'cost': 1500, 'icon': '🎇', 'desc': '光り輝く刀身。'},
-    {'id': 7, 'name': 'ドラゴンキラー', 'type': 'weapon', 'power': 45, 'cost': 3000, 'icon': '🐉', 'desc': 'ドラゴン特攻がある気がする。'},
-    {'id': 4, 'name': '勇者の剣', 'type': 'weapon', 'power': 60, 'cost': 5000, 'icon': '✨', 'desc': '伝説の勇者が使っていた剣。'},
-    {'id': 8, 'name': 'メタルキングの剣', 'type': 'weapon', 'power': 100, 'cost': 15000, 'icon': '👑', 'desc': '最強の破壊力。'},
-
-    # --- 防具 (Armor) ---
-    {'id': 101, 'name': '布の服', 'type': 'armor', 'power': 3, 'cost': 50, 'icon': '👕', 'desc': 'ただの服。'},
-    {'id': 105, 'name': '旅人の服', 'type': 'armor', 'power': 6, 'cost': 100, 'icon': '🧥', 'desc': '動きやすい服。'},
-    {'id': 102, 'name': '皮の鎧', 'type': 'armor', 'power': 10, 'cost': 200, 'icon': '🦺', 'desc': '軽くて丈夫。'},
-    {'id': 106, 'name': 'みかわしの服', 'type': 'armor', 'power': 15, 'cost': 600, 'icon': '💃', 'desc': '攻撃をよけやすくなる。'},
-    {'id': 103, 'name': '鉄の鎧', 'type': 'armor', 'power': 25, 'cost': 800, 'icon': '🛡️', 'desc': '重いが防御力は高い。'},
-    {'id': 107, 'name': '魔法の鎧', 'type': 'armor', 'power': 35, 'cost': 2000, 'icon': '🔮', 'desc': '魔法耐性がつくかもしれない。'},
-    {'id': 104, 'name': '光の鎧', 'type': 'armor', 'power': 50, 'cost': 5000, 'icon': '🌟', 'desc': '歩くたびにHPが回復する気分になれる。'},
-    {'id': 108, 'name': 'メタルキングの鎧', 'type': 'armor', 'power': 90, 'cost': 12000, 'icon': '💎', 'desc': '全てを跳ね返す最強の鎧。'},
-]
-
-# ==========================================
-# 5. ボスモンスター定義 (Boss)
-# ==========================================
-# 子供の「敵」を具現化し、倒す（克服する）対象として設定
-BOSSES = [
-    {'id': 1, 'name': 'ホコリ・スライム', 'hp': 200, 'exp': 100, 'gold': 100, 'icon': '🦠', 'desc': '部屋の隅から生まれた魔物。弱い。'},
-    {'id': 2, 'name': 'ヌギッパ・ウルフ', 'hp': 600, 'exp': 300, 'gold': 300, 'icon': '🐺', 'desc': '服を脱ぎっぱなしにする獣。'},
-    {'id': 3, 'name': 'ゾンビ・ディッシュ', 'hp': 1500, 'exp': 800, 'gold': 800, 'icon': '🧟', 'desc': '洗い場に溜まった皿の怨念。'},
-    
-    {'id': 4, 'name': '散らかりドラゴン', 'hp': 3000, 'exp': 2000, 'gold': 2000, 'icon': '🐉', 'desc': '全てを散乱させる巨竜。'},
-    {'id': 5, 'name': '魔王カジ・ホウキ', 'hp': 10000, 'exp': 10000, 'gold': 10000, 'icon': '😈', 'desc': '家事の根源にしてラスボス。'},
-    
-    # 【NEW】生活習慣の敵
-    {'id': 6, 'name': 'ネボウ・ノ・魔神', 'hp': 500, 'exp': 200, 'gold': 100, 'icon': '😪', 'desc': '朝の布団から出られない呪いをかける。倒して早起きだ！'},
-    {'id': 7, 'name': 'シュクダイ・イーター', 'hp': 800, 'exp': 400, 'gold': 200, 'icon': '📝', 'desc': 'やる気を食べるモンスター。プリント学習でダメージを与えろ！'},
-    {'id': 8, 'name': 'ゲンカン・クツ・バラバーラ', 'hp': 300, 'exp': 150, 'gold': 50, 'icon': '👞', 'desc': '靴を脱ぎ散らかす小悪魔。揃えて封印しよう。'}
 ]
