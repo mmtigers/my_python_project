@@ -275,7 +275,11 @@ def render_report(report: Report, title: str) -> str:
     lines.append(
         "> このチェックは非ブロッキングです。意図的な変更（フォーマットのみ等）であれば無視して構いません。"
     )
-    return "\n".join(lines)
+    # 末尾に改行を付けないと、CIのヒアドキュメント(`cat drift-report.md` を
+    # `body<<SPEC_DRIFT_EOF` ... `SPEC_DRIFT_EOF` で$GITHUB_OUTPUTへ書き込む処理)で
+    # 終端デリミタが最終行に連結されてしまい、"Matching delimiter not found" で
+    # ジョブ自体が失敗する(本来は非ブロッキング運用のはずが赤くなる)。
+    return "\n".join(lines) + "\n"
 
 
 def main() -> int:
