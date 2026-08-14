@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, Equipment, Boss, QuestResult, PendingInventory, FamilyMileage, OwnedEquipment, BossEffect } from '@/types';
+import { User, Quest, QuestHistory, Reward, QuestResult, PendingInventory } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
 interface AdventureLog {
@@ -47,13 +47,6 @@ export interface LevelUpInfo {
     job: string;
 }
 
-interface Bounty {
-    id: string | number;
-    title: string;
-    reward: number;
-    status: string;
-}
-
 // APIレスポンスの型定義
 interface GameDataResponse {
     users: User[];
@@ -62,19 +55,11 @@ interface GameDataResponse {
     completedQuests: QuestHistory[];
     pendingQuests: QuestHistory[];
     logs: AdventureLog[];
-    equipments: Equipment[];
-    ownedEquipments: OwnedEquipment[];
-    boss: Boss | null;
 }
 
 interface ChronicleResponse {
     stats: FamilyStats;
     chronicle: ChronicleItem[];
-}
-
-interface ApproveResponse {
-    success: boolean;
-    bossEffect?: BossEffect;
 }
 
 interface PurchaseResponse {
@@ -97,20 +82,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         return error instanceof Error ? error.message : undefined;
     };
 
-    // 管理用Mutation
-    const adminUpdateBossMutation = useMutation({
-        mutationFn: async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
-            return apiClient.post('/api/quest/admin/boss/update', {
-                max_hp: data.maxHp,
-                current_hp: data.currentHp,
-                is_defeated: data.isDefeated
-            });
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['gameData'] });
-        },
-    });
-
     // 1. メインデータの取得
     const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
@@ -126,13 +97,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         staleTime: 1000 * 60 * 5,
     });
 
-    const { data: familyMileage } = useQuery<FamilyMileage>({
-        queryKey: ['familyMileage'],
-        queryFn: () => apiClient.getFamilyMileage(),
-        staleTime: 1000 * 30,
-        refetchInterval: 1000 * 10,
-    });
-
     // 承認待ちインベントリの取得（無限ループ防止のための安全なポーリング）
     // ★このクエリがアプリ内で唯一の登録元。ApprovalList側では独自クエリを持たず、
     // ここから props で受け取る（重複登録の解消）。
@@ -140,14 +104,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         queryKey: ['pendingInventory'],
         queryFn: () => apiClient.fetchPendingInventory(),
         refetchInterval: 1000 * 10,
-        staleTime: 1000 * 5,
-    });
-
-    // 追加: バウンティリストの取得（無限ループ防止のための安全なポーリング）
-    const { data: bounties } = useQuery<Bounty[]>({
-        queryKey: ['bounties'],
-        queryFn: () => apiClient.get('/api/bounties/list'),
-        refetchInterval: 1000 * 15, // 15秒間隔
         staleTime: 1000 * 5,
     });
 
@@ -233,34 +189,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         onError: (err) => handleError('購入', err),
     });
 
-    // 装備購入
-    const buyEquipmentMutation = useMutation({
-        mutationFn: async ({ user, item }: { user: User; item: Equipment }) => {
-            return apiClient.post('/api/quest/equip/purchase', {
-                user_id: user.user_id,
-                equipment_id: item.id || item.equipment_id,
-            });
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['gameData'] });
-        },
-        onError: (err) => handleError('装備購入', err),
-    });
-
-    // 装備変更
-    const changeEquipmentMutation = useMutation({
-        mutationFn: async ({ user, item }: { user: User; item: Equipment }) => {
-            return apiClient.post('/api/quest/equip/change', {
-                user_id: user.user_id,
-                equipment_id: item.id || item.equipment_id,
-            });
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['gameData'] });
-        },
-        onError: (err) => handleError('装備変更', err),
-    });
-
     // --- ラッパー関数 (Async/Await対応) ---
 
     const completeQuest = async (user: User, quest: Quest) => {
@@ -283,7 +211,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
                 message: res.message,
                 earnedMedals: res.earnedMedals,
                 leveledUp: res.leveledUp,
-                bossEffect: res.bossEffect
             };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
@@ -302,12 +229,8 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
         if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
         try {
-            // any キャストを排除し、型安全なレスポンスを定義
-            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem }) as unknown as ApproveResponse;
-            return {
-                success: true,
-                bossEffect: res?.bossEffect
-            };
+            await approveQuestMutation.mutateAsync({ user, history: historyItem });
+            return { success: true };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
         }
@@ -336,58 +259,10 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         }
     };
 
-    const buyEquipment = async (user: User, item: Equipment) => {
-        if ((user.gold || 0) < item.cost) return { success: false, reason: 'gold' };
-
-        try {
-            await buyEquipmentMutation.mutateAsync({ user, item });
-            return { success: true, item };
-        } catch (e) {
-            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
-        }
-    };
-
-    const changeEquipment = async (user: User, item: Equipment) => {
-        try {
-            await changeEquipmentMutation.mutateAsync({ user, item });
-            return { success: true };
-        } catch (e) {
-            return { success: false, reason: 'error', detail: extractErrorDetail(e) };
-        }
-    };
-
     const refreshData = () => {
         queryClient.invalidateQueries({ queryKey: ['gameData'] });
         queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得
     };
-
-    const adminUpdateBoss = async (data: { maxHp?: number; currentHp?: number; isDefeated?: boolean }) => {
-        try {
-            await adminUpdateBossMutation.mutateAsync(data);
-            return { success: true };
-        } catch (e) {
-            return { success: false, detail: extractErrorDetail(e) };
-        }
-    };
-
-    const adminUpdateFamilyMileageMutation = useMutation({
-        mutationFn: async ({ targetName, targetExp }: { targetName: string, targetExp: number }) => {
-            return apiClient.updateFamilyMileage(targetName, targetExp);
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['familyMileage'] });
-        },
-    });
-
-    const adminUpdateFamilyMileage = async (targetName: string, targetExp: number) => {
-        try {
-            await adminUpdateFamilyMileageMutation.mutateAsync({ targetName, targetExp });
-            return { success: true };
-        } catch (e) {
-            return { success: false, detail: extractErrorDetail(e) };
-        }
-    };
-
 
     return {
         users: gameData?.users || INITIAL_USERS,
@@ -396,14 +271,9 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         completedQuests: gameData?.completedQuests || [],
         pendingQuests: gameData?.pendingQuests || [],
         adventureLogs: gameData?.logs || [],
-        equipments: gameData?.equipments || [],
-        ownedEquipments: gameData?.ownedEquipments || [],
         familyStats: chronicleData?.stats || null,
         chronicle: chronicleData?.chronicle || [],
-        boss: gameData?.boss || null,
         pendingInventory: pendingInventory || [],
-        bounties: bounties || [],
-        familyMileage: familyMileage || { is_set: false },
         isLoading: isGameDataLoading,
 
         completeQuest,
@@ -411,10 +281,6 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         rejectQuest,
         cancelQuest,
         buyReward,
-        buyEquipment,
-        changeEquipment,
         refreshData,
-        adminUpdateBoss,
-        adminUpdateFamilyMileage,
     };
 };
