@@ -389,7 +389,7 @@ class QuestService:
         t = threading.Thread(target=unlock_task, daemon=True)
         t.start()
     
-    def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
+    def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -406,7 +406,7 @@ class QuestService:
                 cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
                 logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
 
-            logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
+            logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}, Reason={reason or '(未指定)'}")
             return {"status": "rejected"}
 
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:
