@@ -87,7 +87,7 @@ QUESTS = [
     # ------------------------------------------
     # {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},
     # {'id': 101, 'title': '幼稚園に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'A', 'exp': 100, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '今日も元気に登園しよう'},
-    # {'id': 44, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
+    # {'id': 1023, 'title': '靴を並べる', 'type': 'daily', 'target': 'son', 'category': 'moral', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '👞', 'desc': '玄関をきれいに'},
     # {'id': 1020, 'title': '基地のセキュリティチェック', 'type': 'daily', 'target': 'son', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔒', 'desc': '寝る前に戸締まりを確認して報告せよ', 'start_time': '19:00', 'end_time': '20:30'},
     {'id': 1021, 'title': '宿題と明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '🎒', 'days': '0,1,2,3,4','desc': '宿題をクリアして明日必要なものをランドセルに入れよう'},
     # {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
@@ -142,9 +142,9 @@ QUESTS = [
     {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
     {'id': 1011, 'title': '女神のメンテナンス', 'type': 'special', 'target': 'mom', 'category': 'health', 'difficulty': 'D', 'exp': 40, 'gold': 20, 'icon': '🧖‍♀️', 'desc': 'パックやスキンケアで美を高める'},
     {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
-    {'id': 15, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
-    {'id': 16, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
-    {'id': 17, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
+    {'id': 1050, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
+    {'id': 1051, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
+    {'id': 1052, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
 
 
     # ------------------------------------------
@@ -210,7 +210,6 @@ REWARDS = [
     # --- Premium (夢の報酬) ---
     {'id': 99, 'title': 'ユニバのチケット (ペア)', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🎢', 'desc': 'ハリポタで最高の一日を', 'target': 'mom'},
     {'id': 103, 'title': 'ディズニーのチケット (ペア)', 'category': 'special', 'cost_gold': 60000, 'icon_key': '🐭', 'desc': '夢の国で最高の一日を', 'target': 'mom'},
-    # {'id': 101, 'title': '映画のチケット＆半日自由時間', 'category': 'special', 'cost_gold': 20000, 'icon_key': '🎥', 'desc': '好きな映画を見てリフレッシュ'},
     {'id': 100, 'title': 'ホテルに宿泊 (家族旅行)', 'category': 'special', 'cost_gold': 50000, 'icon_key': '🏨', 'desc': '日常を忘れて優雅な滞在', 'target': 'children'},
     {'id': 102, 'title': 'SHARP ヘルシオ ホットクック', 'category': 'item', 'cost_gold': 60000, 'icon_key': '🍲', 'desc': '家事の時間を減らして家族の時間を増やす魔法の鍋', 'target': 'mom'},
     {'id': 104, 'title': '鈴鹿サーキットのチケット', 'category': 'special', 'cost_gold': 30000, 'icon_key': '🏎️', 'desc': '遊園地と車のアトラクションで遊び尽くす！', 'target': 'children'},
