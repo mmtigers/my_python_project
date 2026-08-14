@@ -115,8 +115,9 @@ class TestProcessApprovalCommand:
     async def _seed_pending_history(self):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-                "('daughter', 'Daughter', 'Novice', 1, 0, 0)"
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "

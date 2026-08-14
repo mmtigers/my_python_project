@@ -1,21 +1,27 @@
 import { useState } from 'react';
-import { Sword, Shirt, ShoppingBag, Backpack, Scroll, Sparkles } from 'lucide-react'; // Sparkles追加
+import { Sword, ShoppingBag } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
-import AdminDashboard from './features/admin/components/AdminDashboard';
-import RewardList from './features/shop/components/RewardList';
-import { InventoryList } from './features/shop/components/InventoryList';
-import { GuildBoard } from './features/guild/components/GuildBoard';
+import { useLayoutMode } from './hooks/useLayoutMode';
+import RewardShop from './features/shop/components/RewardShop';
+import FamilyDashboard from './features/family/components/FamilyDashboard';
 
-import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
+import { Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
 
-// 保護者ユーザーID一覧（MY_HOME_SYSTEM/services/quest_service.py の PARENT_IDS と一致させる）
+// 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
 // ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
 // セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、
 // 本当のアクセス制御はバックエンド側で別途実装される必要がある。
-const PARENT_USER_IDS = ['dad', 'mom'];
+const isParentUser = (user: User) => user.role === 'role_adult';
+
+// 承認・却下の記録名義に使う代表の親ユーザーを返す。誰が実際にボタンを押したかは
+// 区別せず「親」として固定で記録する(要件5)。
+const getRepresentativeParent = (allUsers: User[]): User => {
+  const adult = allUsers.find(u => u.role === 'role_adult');
+  return adult || allUsers[0] || INITIAL_USERS[0];
+};
 
 
 // UI Components
@@ -25,24 +31,19 @@ import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
-import { FamilyMileageCard } from './features/family/components/FamilyMileageCard'; // ★これを追加
-
-
 
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
 import ApprovalList from './features/quest/components/ApprovalList';
-import EquipmentShop from './features/shop/components/EquipmentShop';
 import FamilyLog from './features/family/components/FamilyLog';
-import FamilyParty from './features/family/components/FamilyParty';
-import BattleEffect from './components/ui/BattleEffect';
-import { WeeklyTrends } from './features/family/components/WeeklyTrends';
 
 // ConfirmModal の target に渡りうる型。モードごとに実際に持っているプロパティが異なるため、
 // メッセージ生成はモードごとに個別にキャストして組み立てる（getMessage 内）。
-type ConfirmTarget = Quest | QuestHistory | Reward | Equipment;
+// ★要件9: クエストの完了/取り消しは確認ダイアログを挟まないワンタップ操作に変更したため、
+// ここで確認を挟むのはゴールドを消費する「購入」と、親向けの「却下」のみ(誤操作の影響が大きいため)。
+type ConfirmTarget = QuestHistory | Reward;
 
-// useGameData.ts の completeQuest/cancelQuest/buyReward/buyEquipment/changeEquipment/rejectQuest
+// useGameData.ts の completeQuest/cancelQuest/buyReward/rejectQuest
 // ラッパー関数群の戻り値をまとめて受け取るための型（各関数は success 以外のフィールドが少しずつ異なる）
 interface ActionResult {
   success: boolean;
@@ -50,18 +51,27 @@ interface ActionResult {
   message?: string;
   earnedMedals?: number;
   leveledUp?: boolean;
-  bossEffect?: BossEffect;
   newGold?: number;
   reward?: Reward;
-  item?: Equipment;
   reason?: string;
   detail?: string;
 }
 
+const ERROR_REASON_MESSAGES: { [key: string]: string } = {
+  gold: "お金が足りません！",
+  pending: "すでに申請中です",
+  permission: "権限がありません",
+  error: "エラーが発生しました",
+};
+
+// バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
+const resolveErrorText = (res: ActionResult, fallback: string): string =>
+  res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
+
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
 }: {
-  mode: 'cancel' | 'purchase' | 'complete' | 'equip_buy' | 'equip' | 'reject' | null,
+  mode: 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
   onConfirm: () => void,
   onCancel: () => void
@@ -70,25 +80,9 @@ const ConfirmModal = ({
 
   const getMessage = (): { title: string; text: string } => {
     switch (mode) {
-      case 'cancel': {
-        const t = target as QuestHistory;
-        return { title: 'クエストをやめる', text: `「${t.quest_title}」をやめますか？\n（ペナルティはありません）` };
-      }
       case 'purchase': {
         const t = target as Reward;
         return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
-      }
-      case 'equip_buy': {
-        const t = target as Equipment;
-        return { title: '装備の購入', text: `「${t.name}」を ${t.cost}G で買いますか？` };
-      }
-      case 'complete': {
-        const t = target as Quest;
-        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };
-      }
-      case 'equip': {
-        const t = target as Equipment;
-        return { title: '装備変更', text: `「${t.name}」を装備しますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -111,21 +105,24 @@ const ConfirmModal = ({
 
 function App() {
   const { play } = useSound();
-  const [activeTab, setActiveTab] = useState<'quest' | 'special_quest' | 'shop' | 'equip' | 'inventory' | 'guild'>('quest');
-  const [viewMode, setViewMode] = useState<'main' | 'admin' | 'familyLog' | 'party' | 'trends'>('main');
+  const layoutMode = useLayoutMode();
+  const [activeTab, setActiveTab] = useState<'quest' | 'shop'>('quest');
+  const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
-  // モーダル状態
-  const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'equip_buy' | 'equip' | 'reject' | null>(null);
+  // モーダル状態 (購入・却下のみ。完了・取消はワンタップ即時実行のため確認を挟まない)
+  const [confirmMode, setConfirmMode] = useState<'purchase' | 'reject' | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
+  // 購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
+  // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
+  const [confirmUser, setConfirmUser] = useState<User | null>(null);
 
   // 結果表示用
   const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
-  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error' } | null>(null);
-  const [bossEffect, setBossEffect] = useState<BossEffect | null>(null);
+  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error', icon?: string } | null>(null);
 
-  // アバターアップロード
-  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  // アバターアップロード対象(nullなら非表示)
+  const [avatarUser, setAvatarUser] = useState<User | null>(null);
 
   const handleLevelUp = (info: LevelUpInfo) => {
     setLevelUpInfo(info);
@@ -133,11 +130,11 @@ function App() {
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
-    equipments, ownedEquipments, familyStats, chronicle, boss,
-    familyMileage, pendingInventory,
+    familyStats, chronicle,
+    pendingInventory,
     isLoading,
-    completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward, buyEquipment, changeEquipment,
-    refreshData, adminUpdateBoss, adminUpdateFamilyMileage
+    completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
+    refreshData,
   } = useGameData(handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
@@ -150,25 +147,48 @@ function App() {
     play('tap');
   };
 
-  const handleQuestClick = (q: Quest | QuestHistory, isHistory: boolean) => {
-    // 1. 履歴タブなど、明示的に履歴として渡された場合
+  // ★要件9: クエストの完了・取り消しは確認ダイアログを挟まないワンタップ操作。
+  // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。
+  const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
+    const res: ActionResult = mode === 'complete'
+      ? await completeQuest(user, target as Quest)
+      : await cancelQuest(user, target as QuestHistory);
+
+    if (res.success) {
+      if (mode === 'complete') {
+        if (res.status === 'pending') {
+          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
+        } else if ((res.earnedMedals ?? 0) > 0) {
+          // ★バグ修正(要件8): サーバーは正しくメダルを付与していたが、以前はフロントが
+          // res.earnedMedals を一切参照しておらず無反応だった。leveledUpと同様に扱う。
+          play('medal');
+          setMessageData({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, type: "success", icon: "🏅" });
+        }
+      }
+      return;
+    }
+
+    setMessageData({ title: "エラー", text: resolveErrorText(res, "失敗しました"), type: "error" });
+    play('cancel');
+  };
+
+  const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
+    play('select');
+
+    // 1. 履歴タブなど、明示的に履歴として渡された場合 → ワンタップで取り消し
     if (isHistory) {
-      setConfirmTarget(q);
-      setConfirmMode('cancel');
-      play('select');
+      runQuestAction(user, 'cancel', q);
       return;
     }
 
     // 2. クエストリストから渡された場合 (q は Quest 型)
     // ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約
     const { isInfinite, pendingEntry, completedEntry } =
-      getQuestLockState(q as Quest, currentUser, completedQuests, pendingQuests);
+      getQuestLockState(q as Quest, user, completedQuests, pendingQuests);
 
-    // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
+    // 無限クエストは常に「完了」扱い
     if (isInfinite) {
-      setConfirmTarget(q);
-      setConfirmMode('complete');
-      play('select');
+      runQuestAction(user, 'complete', q);
       return;
     }
 
@@ -176,124 +196,73 @@ function App() {
     const historyEntry = pendingEntry || completedEntry;
 
     if (historyEntry) {
-      // 既に履歴がある（完了or申請中）なら「キャンセル（取り下げ）」モードにする
+      // 既に履歴がある（完了or申請中）ならワンタップで取り消し。
       // targetには Quest オブジェクトではなく、見つかった History オブジェクトを渡す
-      // (ConfirmModalで target.quest_title を参照するため)
       // ※Historyオブジェクトに quest_title が結合されている前提ですが、
       //  もし不足している場合は q.title を補完する必要があります。
-      setConfirmTarget({ ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
-      setConfirmMode('cancel');
+      runQuestAction(user, 'cancel', { ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
     } else {
-      // 未実施なら「完了」モード
-      setConfirmTarget(q);
-      setConfirmMode('complete');
+      // 未実施ならワンタップで完了
+      runQuestAction(user, 'complete', q);
     }
-
-    play('select');
   };
 
-  const handleBuyReward = (r: Reward) => {
+  const handleBuyReward = (user: User, r: Reward) => {
+    setConfirmUser(user);
     setConfirmTarget(r);
     setConfirmMode('purchase');
     play('select');
   };
 
-  const handleBuyEquipment = (e: Equipment) => {
-    setConfirmTarget(e);
-    setConfirmMode('equip_buy');
-    play('select');
-  };
-
-  const handleEquip = (e: Equipment) => {
-    setConfirmTarget(e);
-    setConfirmMode('equip');
-    play('select');
-  };
-
-  // --- Confirm Execution ---
+  // --- Confirm Execution (購入・却下のみ。誤操作の影響が大きいため確認を維持する: 要件9) ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
+    const actingUser = confirmUser || currentUser;
 
     let res: ActionResult = { success: false };
 
-    if (confirmMode === 'complete') {
-      res = await completeQuest(currentUser, confirmTarget as Quest);
-      if (res.success) {
-        if (res.status === 'pending') {
-          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
-        } else {
-          if (res.bossEffect) setBossEffect(res.bossEffect);
-        }
-      }
-    } else if (confirmMode === 'cancel') {
-      res = await cancelQuest(currentUser, confirmTarget as QuestHistory);
-    } else if (confirmMode === 'purchase') {
-      res = await buyReward(currentUser, confirmTarget as Reward);
+    if (confirmMode === 'purchase') {
+      res = await buyReward(actingUser, confirmTarget as Reward);
       if (res.success) {
         setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
-        play('medal');
-      }
-    } else if (confirmMode === 'equip_buy') {
-      res = await buyEquipment(currentUser, confirmTarget as Equipment);
-      if (res.success) {
-        setMessageData({ title: "購入完了", text: "装備を手に入れました！", type: "success" });
-        play('medal');
-      }
-    } else if (confirmMode === 'equip') {
-      res = await changeEquipment(currentUser, confirmTarget as Equipment);
-      if (res.success) {
-        setMessageData({ title: "装備変更", text: "装備を変更しました！", type: "success" });
-        play('select');
+        // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
+        play('clear');
       }
     } else if (confirmMode === 'reject') {
-      res = await rejectQuest(currentUser, confirmTarget as QuestHistory);
+      // 却下の記録名義は「親」で固定する(要件5)
+      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory);
       if (res.success) {
         play('cancel');
       } else {
         // ★却下専用のエラー文言（元の handleReject の window.confirm/reasons ロジックを踏襲）
-        const reasons: { [key: string]: string } = {
-          permission: "権限がありません",
-          error: "エラーが発生しました"
-        };
-        const text = res.detail || (res.reason && reasons[res.reason]) || "却下に失敗しました";
+        const text = resolveErrorText(res, "却下に失敗しました");
         setMessageData({ title: "エラー", text, type: "error" });
         play('cancel');
         setConfirmMode(null);
         setConfirmTarget(null);
+        setConfirmUser(null);
         return;
       }
     }
 
     if (!res.success) {
-      const reasons: { [key: string]: string } = {
-        gold: "お金が足りません！",
-        pending: "すでに申請中です",
-        permission: "権限がありません",
-        error: "エラーが発生しました"
-      };
-      // バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
-      const text = res.detail || (res.reason && reasons[res.reason]) || "失敗しました";
+      const text = resolveErrorText(res, "失敗しました");
       setMessageData({ title: "エラー", text, type: "error" });
       play('cancel');
     }
 
     setConfirmMode(null);
     setConfirmTarget(null);
+    setConfirmUser(null);
   };
 
-  // 承認・却下ハンドラ
+  // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
   const handleApprove = async (history: QuestHistory) => {
-    const res = await approveQuest(currentUser, history);
+    const res = await approveQuest(getRepresentativeParent(users), history);
     if (res.success) {
       play('approve');
-      if (res.bossEffect) setBossEffect(res.bossEffect);
     } else {
-      const reasons: { [key: string]: string } = {
-        permission: "権限がありません",
-        error: "エラーが発生しました"
-      };
-      const text = res.detail || (res.reason && reasons[res.reason]) || "承認に失敗しました";
-      setMessageData({ title: "エラー", text, type: "error" });
+      setMessageData({ title: "エラー", text: resolveErrorText(res, "承認に失敗しました"), type: "error" });
       play('cancel');
     }
   };
@@ -301,13 +270,12 @@ function App() {
   const handleReject = (history: QuestHistory) => {
     setConfirmTarget(history);
     setConfirmMode('reject');
+    setConfirmUser(null); // reject は getRepresentativeParent で親を確定するため不要
     play('select');
   };
 
   const getHeaderViewMode = () => {
     if (viewMode === 'familyLog') return 'familyLog';
-    if (viewMode === 'party') return 'party';
-    if (viewMode === 'trends') return 'trends';
     return 'user';
   };
 
@@ -320,41 +288,39 @@ function App() {
         currentUserIdx={currentUserIdx}
         viewMode={getHeaderViewMode()}
         onUserSwitch={handleUserChange}
-        onPartySwitch={() => { setViewMode('party'); play('select'); }}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
-        onTrendsSwitch={() => { setViewMode('trends'); play('select'); }}
-        onAdminOpen={
-          PARENT_USER_IDS.includes(currentUser.user_id)
-            ? () => { setViewMode('admin'); play('select'); }
-            : undefined
-        }
+        hideUserSwitcher={layoutMode === 'landscape'}
       />
 
-      {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする */}
+      {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
+          横画面(4人表示)では画面幅をフルに使う */}
 
-      <div className="p-4 space-y-4 w-full max-w-md md:max-w-5xl mx-auto transition-all duration-300">
+      <div className={`p-4 space-y-4 w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'}`}>
 
-        {viewMode === 'admin' && (
-          <AdminDashboard
-            boss={boss}
-            onUpdate={adminUpdateBoss}
-            onUpdateMileage={adminUpdateFamilyMileage}
-            onClose={() => setViewMode('main')}
+        {viewMode === 'main' && layoutMode === 'landscape' && (
+          <FamilyDashboard
+            users={users}
+            quests={quests}
+            completedQuests={completedQuests}
+            pendingQuests={pendingQuests}
+            rewards={rewards}
+            pendingInventory={pendingInventory}
+            onQuestClick={(user, q) => handleQuestClick(user, q, false)}
+            onBuyReward={handleBuyReward}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
 
-        {viewMode === 'main' && (
+        {viewMode === 'main' && layoutMode === 'portrait' && (
           <>
-            {/* 共有目標（ファミリーマイレージ）表示領域 */}
-            {/* ★ 修正: ダミーデータ(window.__familyMileageData)ではなく、実際の familyMileage を渡す */}
-            <FamilyMileageCard mileage={familyMileage} />
-
             <UserStatusCard
               user={currentUser}
-              onAvatarClick={() => setIsAvatarModalOpen(true)}
+              onAvatarClick={() => setAvatarUser(currentUser)}
             />
 
-            {PARENT_USER_IDS.includes(currentUser.user_id) && (
+            {isParentUser(currentUser) && (
               <ApprovalList
                 pendingQuests={pendingQuests}
                 pendingItems={pendingInventory}
@@ -367,29 +333,11 @@ function App() {
 
             <div className="flex gap-2 mb-4 bg-black p-2 rounded-lg border-2 border-white shadow-lg sticky top-16 z-10 overflow-x-auto">
               <button onClick={() => setActiveTab('quest')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-800'}`}>
-                <Sword size={20} className="mb-1" /> 通常クエスト
-              </button>
-              {/* ★追加: 特別クエストタブ */}
-              <button onClick={() => setActiveTab('special_quest')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'special_quest' ? 'bg-purple-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-800'}`}>
-                <Sparkles size={20} className="mb-1" /> 特別クエスト
+                <Sword size={20} className="mb-1" /> クエスト
               </button>
 
               <button onClick={() => setActiveTab('shop')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
                 <ShoppingBag size={20} className="mb-1" /> ごほうび
-              </button>
-              <button onClick={() => setActiveTab('equip')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'equip' ? 'bg-green-600 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
-                <Shirt size={20} className="mb-1" /> そうび
-              </button>
-              <button onClick={() => setActiveTab('inventory')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'inventory' ? 'bg-yellow-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
-                <Backpack size={20} className="mb-1" /> もちもの
-              </button>
-              {/* ★追加: ギルドタブ */}
-              <button
-                onClick={() => { play('tap'); setActiveTab('guild'); }} // cursor -> tap に変更
-                className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'guild' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:bg-gray-700'
-                  }`}
-              >
-                <Scroll size={20} className="mb-1" /> ギルド（開発中）
               </button>
             </div>
 
@@ -400,58 +348,17 @@ function App() {
                   completedQuests={completedQuests}
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(q, false)}
-                  isDaily={true} // ★追加: 日常クエストのみ
+                  onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
                 />
-              )}
-              {activeTab === 'special_quest' && (
-                <QuestList
-                  quests={quests}
-                  completedQuests={completedQuests}
-                  pendingQuests={pendingQuests}
-                  currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(q, false)}
-                  isDaily={false} // ★追加: 特別クエストのみ
-                />
-              )}
-
-              {/* ★追加: ギルド画面の表示 */}
-              {activeTab === 'guild' && (
-                <div className="animate-fade-in">
-                  {/* userId プロパティを追加 */}
-                  <GuildBoard userId={currentUser.user_id} />
-                </div>
               )}
 
               {activeTab === 'shop' && (
                 <div className="animate-slide-in-right">
-
-                  <RewardList
+                  <RewardShop
                     rewards={rewards}
-                    userGold={currentUser.gold}
-                    onBuy={handleBuyReward}
                     currentUser={currentUser}
+                    onBuy={(r) => handleBuyReward(currentUser, r)}
                   />
-                </div>
-              )}
-
-              {activeTab === 'equip' && (
-                <div className="animate-slide-in-right">
-
-                  <EquipmentShop
-                    equipments={equipments}
-                    ownedEquipments={ownedEquipments}
-                    currentUser={currentUser}
-                    onBuy={handleBuyEquipment}
-                    onEquip={handleEquip}
-                  />
-                </div>
-              )}
-
-              {activeTab === 'inventory' && (
-                <div className="animate-slide-in-right">
-
-                  <InventoryList userId={currentUser.user_id} />
                 </div>
               )}
             </div>
@@ -460,14 +367,6 @@ function App() {
 
         {viewMode === 'familyLog' && (
           <FamilyLog stats={familyStats} chronicle={chronicle} />
-        )}
-
-        {viewMode === 'party' && (
-          <FamilyParty users={users} ownedEquipments={ownedEquipments} boss={boss} />
-        )}
-
-        {viewMode === 'trends' && (
-          <WeeklyTrends />
         )}
 
       </div>
@@ -488,28 +387,18 @@ function App() {
         <MessageModal
           title={messageData.title}
           message={messageData.text}
+          icon={messageData.icon}
           onClose={() => setMessageData(null)}
         />
       )}
 
-      {isAvatarModalOpen && (
+      {avatarUser && (
         <AvatarUploader
-          user={currentUser}
-          onClose={() => setIsAvatarModalOpen(false)}
+          user={avatarUser}
+          onClose={() => setAvatarUser(null)}
           onUploadComplete={() => {
             refreshData();
             setMessageData({ title: "変更完了", text: "アバターを変更しました！", type: "success" });
-          }}
-        />
-      )}
-
-      {bossEffect && (
-        <BattleEffect
-          effect={bossEffect}
-          boss={boss}
-          onClose={() => {
-            setBossEffect(null);
-            refreshData();
           }}
         />
       )}

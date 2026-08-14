@@ -18,7 +18,7 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
 
       if (target === 'all') return true;
 
-      const isAdult = currentUser.user_id === 'dad' || currentUser.user_id === 'mom';
+      const isAdult = currentUser.role === 'role_adult';
 
       if (target === 'children') return !isAdult;
       if (target === 'adults') return isAdult;
