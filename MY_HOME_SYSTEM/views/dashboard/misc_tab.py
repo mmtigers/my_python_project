@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import pytz
 
 import config
-import train_service
+from services import train_service
 from .common import render_status_card_html
 
 def render_traffic():
