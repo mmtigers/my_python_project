@@ -4,7 +4,6 @@ services/quest_service.py の未テストだった分岐を補うテスト:
 - process_reject_quest の成功パス(親による却下)
 - is_within_reset_period の daily/weekly/不明種別/不正日付文字列
 - calculate_quest_boost のボーナス計算・上限クランプ
-- _apply_boss_damage のボス撃破(is_new_defeat)分岐
 - get_all_view_data の対象者限定クエストにおけるボーナス計算分岐
 """
 import datetime
@@ -12,7 +11,7 @@ import os
 import sys
 import threading
 import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -43,8 +42,9 @@ class TestProcessRejectQuest:
     def test_parent_can_reject_pending_quest(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-                "('daughter', 'Daughter', 'Novice', 1, 0, 0)"
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
@@ -65,6 +65,11 @@ class TestProcessRejectQuest:
         assert row is None
 
     def test_reject_nonexistent_history_returns_404(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
+            )
         quest_service = QuestService()
         with pytest.raises(HTTPException) as exc_info:
             quest_service.process_reject_quest("dad", 999999)
@@ -73,8 +78,9 @@ class TestProcessRejectQuest:
     def test_reject_already_processed_history_returns_400(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-                "('daughter', 'Daughter', 'Novice', 1, 0, 0)"
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
             )
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -181,61 +187,6 @@ class TestCalculateQuestBoost:
         assert boost == {"gold": 100, "exp": 100}
 
 
-def _this_weeks_monday_str() -> str:
-    """
-    _apply_boss_damage は内部で _check_and_reset_weekly_boss を呼び、
-    week_start_date が「今週の月曜日」と一致しないと自動リセットしてしまうため、
-    テストでは過去の固定日付ではなく実行時点の週初めを使う必要がある。
-    """
-    today = datetime.datetime.now().date()
-    monday = today - datetime.timedelta(days=today.weekday())
-    return str(monday)
-
-
-class TestBossDefeatBranch:
-    def _seed_low_hp_boss(self):
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute("""
-                INSERT INTO party_state (id, current_boss_id, current_hp, max_hp, week_start_date, is_defeated, total_damage, charge_gauge, updated_at)
-                VALUES (1, 1, 10, 1000, ?, 0, 0, 0, '2026-01-01T00:00:00')
-            """, (_this_weeks_monday_str(),))
-
-    def test_lethal_damage_triggers_new_defeat_and_plays_fanfare(self, isolated_db):
-        self._seed_low_hp_boss()
-        quest_service = QuestService()
-        with patch("services.quest_service.sound_manager.play") as mock_play, \
-             common.get_db_cursor(commit=True) as cur:
-            result = quest_service._apply_boss_damage(cur, damage=999)
-
-        assert result["isDefeated"] is True
-        assert result["isNewDefeat"] is True
-        mock_play.assert_called_once_with("boss_defeat_fanfare")
-
-    def test_non_lethal_damage_plays_attack_hit_sound(self, isolated_db):
-        self._seed_low_hp_boss()
-        quest_service = QuestService()
-        with patch("services.quest_service.sound_manager.play") as mock_play, \
-             common.get_db_cursor(commit=True) as cur:
-            result = quest_service._apply_boss_damage(cur, damage=1)
-
-        assert result["isDefeated"] is False
-        assert result["isNewDefeat"] is False
-        mock_play.assert_called_once_with("attack_hit")
-
-    def test_already_defeated_boss_ignores_further_damage(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute("""
-                INSERT INTO party_state (id, current_boss_id, current_hp, max_hp, week_start_date, is_defeated, total_damage, charge_gauge, updated_at)
-                VALUES (1, 1, 0, 1000, ?, 1, 1000, 0, '2026-01-01T00:00:00')
-            """, (_this_weeks_monday_str(),))
-        quest_service = QuestService()
-        with common.get_db_cursor(commit=True) as cur:
-            result = quest_service._apply_boss_damage(cur, damage=50)
-
-        assert result["isDefeated"] is True
-        assert result["isNewDefeat"] is False
-
-
 class TestGetAllViewDataTargetedQuestBoost:
     def test_targeted_quest_includes_bonus_fields(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
@@ -331,12 +282,11 @@ class TestSyncMasterData:
 
     def test_empty_master_lists_delete_all_existing_rows(self, isolated_db, monkeypatch):
         """quest_data側の各マスタが空の場合、対象idによる絞り込みDELETEではなく
-        テーブル全件を削除する分岐(quest_master/reward_master/equipment_masterそれぞれ)を通ること。"""
+        テーブル全件を削除する分岐(quest_master/reward_masterそれぞれ)を通ること。"""
         fake_quest_data = types.SimpleNamespace(
             USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
             QUESTS=[],
             REWARDS=[],
-            EQUIPMENTS=[],
         )
         monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
         monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
@@ -349,10 +299,6 @@ class TestSyncMasterData:
             cur.execute(
                 "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
             )
-            cur.execute(
-                "INSERT INTO equipment_master (equipment_id, name, type, power, cost_gold) "
-                "VALUES (999, 'Stale Sword', 'weapon', 1, 1)"
-            )
 
         game_system = GameSystem()
         result = game_system.sync_master_data()
@@ -361,10 +307,8 @@ class TestSyncMasterData:
         with common.get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) c FROM quest_master").fetchone()["c"]
             reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
-            equipment_count = cur.execute("SELECT COUNT(*) c FROM equipment_master").fetchone()["c"]
         assert quest_count == 0
         assert reward_count == 0
-        assert equipment_count == 0
 
 
 class TestTriggerTvUnlock:
@@ -461,47 +405,3 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
-
-
-class TestGetWeeklyAnalyticsExceptionFallback:
-    """
-    QuestService.get_weekly_analytics() は集計中に何らかの例外が起きても
-    500を返さず、空データのフォールバックを返す設計になっている。
-    このフォールバック分岐(except節)をDBアクセス自体を失敗させて再現する。
-    """
-
-    def test_db_error_returns_empty_fallback_payload_instead_of_raising(self, monkeypatch):
-        monkeypatch.setattr(
-            quest_service_module.common,
-            "get_db_cursor",
-            MagicMock(side_effect=Exception("simulated DB failure")),
-        )
-
-        quest_service = QuestService()
-        result = quest_service.get_weekly_analytics()
-
-        assert result["startDate"] == ""
-        assert result["endDate"] == ""
-        assert result["dailyStats"] == []
-        assert result["rankings"] == {"exp": [], "gold": [], "count": [], "shopping": []}
-        assert result["mvp"] is None
-        assert result["mostPopularQuest"] == "エラー"
-
-    def test_normal_case_still_returns_populated_payload(self, isolated_db):
-        """フォールバックと対比するための正常系: 実データがあれば集計値が返ること。"""
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO quest_users (user_id, name, avatar) VALUES ('dad', 'Dad', '⚔️')"
-            )
-            cur.execute(
-                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                "VALUES ('dad', 1, 'Test Quest', 10, 5, ?, 'approved')",
-                (common.get_now_iso(),),
-            )
-
-        quest_service = QuestService()
-        result = quest_service.get_weekly_analytics()
-
-        assert result["startDate"] != ""
-        assert result["mostPopularQuest"] == "Test Quest"
-        assert result["rankings"]["exp"][0]["user_id"] == "dad"

@@ -429,8 +429,6 @@ SOUND_MAP: Dict[str, str] = {
     "medal_get": "medal_get.mp3",
     "submit": "submit.mp3",
     "approve": "approve.mp3",
-    "attack_hit": "attack.mp3",
-    "boss_defeat_fanfare": "fanfare.mp3",
 }
 
 # 注意: "members" のキー名（実名）は LINE Bot 側のメッセージ文字列マッチング等
@@ -461,8 +459,6 @@ if os.path.exists(_family_local_path):
                 FAMILY_SETTINGS["styles"][_name].update(_overrides)
     except Exception as _e:
         logger.warning(f"family_members.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}")
-
-ENABLE_BATTLE_EFFECT: bool = False
 
 # ==========================================
 # 8. 外部サイト監視設定 (Monitor Settings)

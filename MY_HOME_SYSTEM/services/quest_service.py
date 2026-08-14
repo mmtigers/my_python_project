@@ -15,10 +15,14 @@ from services import notification_service
 from core.logger import setup_logging
 
 # モデル定義のインポート (型ヒント用)
-from models.quest import MasterUser, MasterQuest, MasterReward, MasterEquipment
+from models.quest import MasterUser, MasterQuest, MasterReward
 
 # ロガー設定
 logger = setup_logging("quest_service")
+
+# quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)
+ROLE_ADULT = 'role_adult'
+ROLE_CHILD = 'role_child'
 
 # quest_data import fallback
 try:
@@ -79,12 +83,8 @@ class UserService:
     def _fetch_full_adventure_logs(self, cur) -> List[dict]:
         q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' ORDER BY completed_at DESC LIMIT 100").fetchall()
         r_rows = cur.execute("SELECT 'reward' as type, user_id, reward_title as title, cost_gold as gold, 0 as exp, redeemed_at as ts FROM reward_history ORDER BY redeemed_at DESC LIMIT 100").fetchall()
-        e_rows = cur.execute("""
-            SELECT 'equip' as type, ue.user_id, em.name as title, em.cost_gold as gold, 0 as exp, ue.acquired_at as ts 
-            FROM user_equipments ue JOIN equipment_master em ON ue.equipment_id = em.equipment_id ORDER BY acquired_at DESC LIMIT 100
-        """).fetchall()
 
-        all_events = sorted(q_rows + r_rows + e_rows, key=lambda x: x['ts'], reverse=True)[:100]
+        all_events = sorted(q_rows + r_rows, key=lambda x: x['ts'], reverse=True)[:100]
         user_info = {row['user_id']: {"name": row['name'], "avatar": row['avatar']} for row in cur.execute("SELECT user_id, name, avatar FROM quest_users")}
 
         formatted = []
@@ -93,7 +93,6 @@ class UserService:
             text = ""
             if ev['type'] == 'quest': text = f"{u['name']}は {ev['title']} を達成した！"
             elif ev['type'] == 'reward': text = f"{u['name']}は {ev['title']} を獲得した！"
-            elif ev['type'] == 'equip': text = f"{u['name']}は {ev['title']} を購入した！"
 
             formatted.append({
                 "type": ev['type'], "userName": u['name'], "userAvatar": u['avatar'],
@@ -117,9 +116,6 @@ class UserService:
 
 
 class QuestService:
-    CHILDREN_IDS = ['daughter', 'son', 'child']
-    PARENT_IDS = ['dad', 'mom']
-
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
         
@@ -154,132 +150,6 @@ class QuestService:
 
     def __init__(self):
         self.user_service = UserService()
-    
-    def _calculate_user_attack_power(self, cur, user_id: str) -> int:
-        user_row = cur.execute("SELECT level FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
-        if not user_row: return 0
-        level = user_row['level']
-        
-        row = cur.execute("""
-            SELECT SUM(em.power) as total_power
-            FROM user_equipments ue
-            JOIN equipment_master em ON ue.equipment_id = em.equipment_id
-            WHERE ue.user_id = ? AND ue.is_equipped = 1
-        """, (user_id,)).fetchone()
-        
-        equip_power = row['total_power'] if row and row['total_power'] else 0
-        return (level * 3) + equip_power
-
-    def _check_and_reset_weekly_boss(self, cur):
-        """
-        週次ボスのリセット判定を行い、party_stateレコードが存在しない場合は初期化する。
-        """
-        party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-        
-        now = datetime.datetime.now()
-        today_date = now.date()
-        this_monday = today_date - datetime.timedelta(days=today_date.weekday())
-        this_monday_str = str(this_monday)
-        
-        # ---------------------------------------------------------
-        # FIX: レコードが存在しない場合の自己修復 (Auto-Healing)
-        # ---------------------------------------------------------
-        if not party_row:
-            logger.warning("⚠️ party_state record not found. Initializing new record...")
-            initial_boss_id = 1
-            initial_hp = 1000
-            
-            cur.execute("""
-                INSERT INTO party_state (id, current_boss_id, current_hp, max_hp, week_start_date, is_defeated, total_damage, charge_gauge, updated_at)
-                VALUES (1, ?, ?, ?, ?, 0, 0, 0, ?)
-            """, (initial_boss_id, initial_hp, initial_hp, this_monday_str, common.get_now_iso()))
-            
-            # 初期化後に再度取得
-            party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-
-        party = {k: party_row[k] for k in party_row.keys()}
-        db_week_start = party.get('week_start_date')
-        
-        # 週替わり判定
-        if db_week_start != this_monday_str:
-            logger.info(f"🔄 New Week Detected! Resetting Boss... (Old: {db_week_start}, New: {this_monday_str})")
-            
-            boss_list = getattr(quest_data, "BOSSES", [])
-            total_bosses = len(boss_list) if boss_list else 5
-
-            next_boss_id = party['current_boss_id'] + 1
-            if next_boss_id > total_bosses:
-                next_boss_id = 1
-                
-            new_max_hp = 1000
-            
-            cur.execute("""
-                UPDATE party_state 
-                SET current_boss_id = ?, 
-                    current_hp = ?, 
-                    max_hp = ?,
-                    week_start_date = ?,
-                    is_defeated = 0,
-                    total_damage = 0,
-                    charge_gauge = 0,
-                    updated_at = ?
-                WHERE id = 1
-            """, (next_boss_id, new_max_hp, new_max_hp, this_monday_str, common.get_now_iso()))
-
-    def _apply_boss_damage(self, cur, damage: int) -> dict:
-        # ここで修復ロジックが走るため、以降は party_row が確実に取得できる
-        self._check_and_reset_weekly_boss(cur)
-        
-        party_row = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-        # 万が一のSafety Check
-        if not party_row:
-            logger.error("CRITICAL: Failed to initialize party_state even after check.")
-            return {
-                "damage": damage,
-                "remainingHp": 0,
-                "isDefeated": False,
-                "isNewDefeat": False
-            }
-
-        party = {k: party_row[k] for k in party_row.keys()}
-
-        current_hp = party['current_hp']
-        is_defeated = party['is_defeated']
-        
-        if is_defeated:
-            return {
-                "damage": damage,
-                "remainingHp": 0,
-                "isDefeated": True,
-                "isNewDefeat": False
-            }
-            
-        new_hp = max(0, current_hp - damage)
-        new_defeated = 1 if new_hp == 0 else 0
-        
-        cur.execute("""
-            UPDATE party_state 
-            SET current_hp = ?, 
-                total_damage = total_damage + ?, 
-                is_defeated = ?,
-                updated_at = ?
-            WHERE id = 1
-        """, (new_hp, damage, new_defeated, common.get_now_iso()))
-        
-        is_new_defeat = (new_defeated == 1 and is_defeated == 0)
-        
-        if is_new_defeat:
-            sound_manager.play("boss_defeat_fanfare")
-            logger.info("🎉 WEEKLY BOSS DEFEATED!")
-        else:
-            sound_manager.play("attack_hit")
-            
-        return {
-            "damage": damage,
-            "remainingHp": new_hp,
-            "isDefeated": bool(new_defeated),
-            "isNewDefeat": is_new_defeat
-        }
 
     def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:
         # 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる
@@ -377,12 +247,15 @@ class QuestService:
             total_exp = quest['exp_gain'] + boost['exp']
             total_gold = quest['gold_gain'] + boost['gold']
             
-            if user_id in self.CHILDREN_IDS:
+            if user['role'] == ROLE_CHILD:
+                if quest['target_user'] == 'siblings':
+                    return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)
+
                 cur.execute("""
                     INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
                 """, (user_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
-                
+
                 logger.info(f"Quest Pending: User={user_id}, Quest={quest['title']}, BonusG={boost['gold']}")
                 sound_manager.play("submit")
 
@@ -392,68 +265,102 @@ class QuestService:
                     "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
                     "message": "親の承認待ちです"
                 }
-            
+
             # 大人
             result = self._apply_quest_rewards(cur, user, quest, now_iso, override_rewards={"gold": total_gold, "exp": total_exp})
-            
-            atk_power = self._calculate_user_attack_power(cur, user_id)
-            is_critical = random.random() < 0.1
-            crit_multiplier = 1.5 if is_critical else 1.0
-            damage_value = int((total_exp + atk_power) * crit_multiplier)
-            
-            boss_effect = self._apply_boss_damage(cur, damage_value)
-            
-            # Safety Guard
-            if boss_effect:
-                boss_effect['isCritical'] = is_critical
-                if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
-                    result['bossEffect'] = boss_effect
-            
-            logger.info(f"Adult Attack: User={user_id}, Base={total_exp}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
+            logger.info(f"Adult Quest Completed: User={user_id}, Exp={total_exp}, Gold={total_gold}")
             return result
 
-    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
-        if approver_id not in self.PARENT_IDS:
-            raise HTTPException(status_code=403, detail="承認権限がありません")
+    def _get_sibling_partner_id(self, cur, user_id: str) -> str:
+        """
+        兄妹連携クエスト(target_user='siblings')の相方の user_id を返す。
+        現状の家族構成では role_child のユーザーがちょうど2人(兄・妹)いることを前提とする。
+        """
+        rows = cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,)).fetchall()
+        child_ids = [row['user_id'] for row in rows]
+        if user_id not in child_ids or len(child_ids) != 2:
+            raise HTTPException(status_code=400, detail="兄妹クエストの対象ユーザー構成が不正です")
+        return next(uid for uid in child_ids if uid != user_id)
 
+    def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:
+        """
+        兄妹連携クエスト: どちらか一方が完了報告すると、2人分の quest_history 行(共に pending)を
+        作成し、互いを linked_history_id で連結する。承認は1回のタップで2人分同時に確定する。
+        """
+        partner_id = self._get_sibling_partner_id(cur, user['user_id'])
+
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """, (user['user_id'], quest['quest_id'], quest['title'], total_exp, total_gold, now_iso))
+        reporter_history_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status, linked_history_id)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (partner_id, quest['quest_id'], quest['title'], total_exp, total_gold, now_iso, reporter_history_id))
+        partner_history_id = cur.lastrowid
+
+        cur.execute("UPDATE quest_history SET linked_history_id = ? WHERE id = ?", (partner_history_id, reporter_history_id))
+
+        logger.info(f"Coop Quest Pending: Reporter={user['user_id']}, Partner={partner_id}, Quest={quest['title']}")
+        sound_manager.play("submit")
+
+        return {
+            "status": "pending",
+            "leveledUp": False, "newLevel": user['level'],
+            "earnedGold": 0, "earnedExp": 0, "earnedMedals": 0,
+            "message": "親の承認待ちです（兄妹クエスト）"
+        }
+
+    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(status_code=403, detail="承認権限がありません")
+
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
-            
+
             override_rewards = {
                 "gold": hist['gold_earned'],
                 "exp": hist['exp_earned']
             }
 
             result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
-            
+
             attacker_id = hist['user_id']
-            atk_power = self._calculate_user_attack_power(cur, attacker_id)
-            is_critical = random.random() < 0.1
-            crit_multiplier = 1.5 if is_critical else 1.0
-            
-            base_damage = override_rewards['exp']
-            damage_value = int((base_damage + atk_power) * crit_multiplier)
-            
-            boss_effect = self._apply_boss_damage(cur, damage_value)
-            
-            # Safety Guard
-            if boss_effect:
-                boss_effect['isCritical'] = is_critical
-                if getattr(config, 'ENABLE_BATTLE_EFFECT', True):
-                    result['bossEffect'] = boss_effect
-            
+
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード承認 ---
+            if hist['linked_history_id'] is not None:
+                self._approve_linked_history(cur, hist['linked_history_id'])
+
             # --- TV Lock Feature ---
             if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
-                if hist['user_id'] in self.CHILDREN_IDS:
+                if user['role'] == ROLE_CHILD:
                     self._trigger_tv_unlock(quest['quest_id'])
 
-            logger.info(f"Child Attack Approved: Attacker={attacker_id}, Atk={atk_power}, Crit={is_critical}, Dmg={damage_value}")
+            logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
             return result
+
+    def _approve_linked_history(self, cur, linked_history_id: int) -> None:
+        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。"""
+        linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_history_id,)).fetchone()
+        if not linked_hist or linked_hist['status'] != 'pending':
+            return
+
+        linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
+        linked_quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (linked_hist['quest_id'],)).fetchone()
+        if not linked_user:
+            return
+
+        override_rewards = {"gold": linked_hist['gold_earned'], "exp": linked_hist['exp_earned']}
+        self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
+        logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
 
     def _trigger_tv_unlock(self, quest_id: int):
         import threading
@@ -483,52 +390,24 @@ class QuestService:
         t.start()
     
     def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
-        if approver_id not in self.PARENT_IDS:
-            raise HTTPException(status_code=403, detail="承認権限がありません")
-
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(status_code=403, detail="承認権限がありません")
+
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
             cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
+            if hist['linked_history_id'] is not None:
+                cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
+                logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
+
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}")
             return {"status": "rejected"}
-    
-    def get_family_mileage(self) -> Dict[str, Any]:
-        with common.get_db_cursor() as cur:
-            row = cur.execute("SELECT * FROM family_mileage WHERE id = 1").fetchone()
-            if not row:
-                return {"is_set": False}
-            return {
-                "is_set": True,
-                "target_name": row['target_name'],
-                "current_exp": row['current_exp'],
-                "target_exp": row['target_exp']
-            }
-
-    def update_family_mileage(self, target_name: str, target_exp: int) -> Dict[str, Any]:
-        now_iso = common.get_now_iso()
-        with common.get_db_cursor(commit=True) as cur:
-            row = cur.execute("SELECT * FROM family_mileage WHERE id = 1").fetchone()
-            if row:
-                # 履歴に保存
-                cur.execute("""
-                    INSERT INTO family_mileage_history (target_name, achieved_exp, target_exp, completed_at)
-                    VALUES (?, ?, ?, ?)
-                """, (row['target_name'], row['current_exp'], row['target_exp'], now_iso))
-                
-                cur.execute("""
-                    UPDATE family_mileage 
-                    SET target_name = ?, current_exp = 0, target_exp = ?, updated_at = ?
-                    WHERE id = 1
-                """, (target_name, target_exp, now_iso))
-            else:
-                cur.execute("""
-                    INSERT INTO family_mileage (id, target_name, current_exp, target_exp, updated_at)
-                    VALUES (1, ?, 0, ?, ?)
-                """, (target_name, target_exp, now_iso))
-        return {"status": "updated"}
 
     def _apply_quest_rewards(self, cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:
         if override_rewards:
@@ -543,12 +422,6 @@ class QuestService:
         earned_exp = rewards['exp']
         earned_medals = rewards['medals']
         is_lucky = rewards['is_lucky']
-
-        # ★ ファミリーマイレージへのEXP加算 (レコードが存在する場合のみ)
-        try:
-            cur.execute("UPDATE family_mileage SET current_exp = current_exp + ?, updated_at = ? WHERE id = 1", (earned_exp, now_iso))
-        except Exception as e:
-            logger.error(f"Failed to update family mileage: {e}")
 
         new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(
             user['level'], user['exp'], earned_exp
@@ -570,11 +443,6 @@ class QuestService:
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, ?, ?, ?, ?, ?, 'approved')
             """, (user['user_id'], quest['quest_id'], quest['title'], earned_exp, earned_gold, now_iso))
-        
-        try:
-            cur.execute("UPDATE party_state SET charge_gauge = charge_gauge + 1 WHERE id = 1")
-        except Exception:
-            pass
 
         if leveled_up:
             sound_manager.play("level_up")
@@ -595,25 +463,41 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['user_id'] != user_id: raise HTTPException(status_code=403, detail="User mismatch")
 
-            if hist['status'] == 'pending':
-                cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
-                return {"status": "cancelled"}
-
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user: raise HTTPException(status_code=404, detail="User not found")
-            
-            new_level, new_exp = game_logic.GameLogic.calc_level_down(
-                user['level'], user['exp'], hist['exp_earned']
-            )
-            
-            new_gold = max(0, user['gold'] - hist['gold_earned'])
-            
-            cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?", 
-                        (new_level, new_exp, new_gold, common.get_now_iso(), user_id))
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
-            
+
+            self._revert_and_delete_history(cur, hist, user)
+
+            # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード取り消し ---
+            linked_id = hist['linked_history_id']
+            if linked_id is not None:
+                linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_id,)).fetchone()
+                if linked_hist:
+                    linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
+                    if linked_user:
+                        self._revert_and_delete_history(cur, linked_hist, linked_user)
+                        logger.info(f"Coop Partner Cancelled: HistoryID={linked_id}")
+
             logger.info(f"Quest Cancelled: User={user_id}, HistoryID={history_id}")
         return {"status": "cancelled"}
+
+    def _revert_and_delete_history(self, cur, hist, user) -> None:
+        """
+        quest_history 1行を取り消す。pending であれば単純に削除、approved であれば
+        付与済みの経験値・ゴールドをロールバックしてから削除する。
+        """
+        if hist['status'] == 'pending':
+            cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
+            return
+
+        new_level, new_exp = game_logic.GameLogic.calc_level_down(
+            user['level'], user['exp'], hist['exp_earned']
+        )
+        new_gold = max(0, user['gold'] - hist['gold_earned'])
+
+        cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?",
+                    (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))
+        cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
     def filter_active_quests(self, quests: List[dict]) -> List[dict]:
         filtered = []
@@ -658,144 +542,6 @@ class QuestService:
             filtered.append(q)
         return filtered
     
-    def get_weekly_analytics(self) -> Dict[str, Any]:
-        try:
-            with common.get_db_cursor() as cur:
-                # 1. 期間計算 (今週の月曜〜現在)
-                now = datetime.datetime.now()
-                today_date = now.date()
-                start_date = today_date - datetime.timedelta(days=today_date.weekday()) # Monday
-                start_str = start_date.strftime("%Y-%m-%d")
-                
-                # 2. ユーザー情報の取得
-                users = {row['user_id']: dict(row) for row in cur.execute("SELECT user_id, name, avatar FROM quest_users").fetchall()}
-                
-                # 3. クエスト履歴データの取得 (承認済み)
-                sql_quest = """
-                    SELECT user_id, exp_earned, gold_earned, completed_at, quest_title
-                    FROM quest_history 
-                    WHERE status = 'approved' AND date(completed_at) >= ?
-                    ORDER BY completed_at ASC
-                """
-                quest_logs = cur.execute(sql_quest, (start_str,)).fetchall()
-
-                # 4. ごほうび購入履歴の取得
-                sql_inv = """
-                    SELECT user_id, count(*) as count
-                    FROM inventory
-                    WHERE date(purchased_at) >= ?
-                    GROUP BY user_id
-                """
-                try:
-                    inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
-                except Exception:
-                    # inventory テーブル名変更対応 (user_inventoryの場合あり)
-                    sql_inv = sql_inv.replace("FROM inventory", "FROM user_inventory")
-                    inv_rows = cur.execute(sql_inv, (start_str,)).fetchall()
-
-                shopping_counts = {uid: 0 for uid in users.keys()}
-                for row in inv_rows:
-                    if row['user_id'] in shopping_counts:
-                        shopping_counts[row['user_id']] = row['count']
-
-                # 5. データ集計
-                daily_map = {}
-                for i in range(7):
-                    d = start_date + datetime.timedelta(days=i)
-                    d_str = d.strftime("%Y-%m-%d")
-                    daily_map[d_str] = {uid: {"exp": 0, "gold": 0} for uid in users.keys()}
-
-                total_stats = {uid: {"exp": 0, "gold": 0, "count": 0, "shopping": 0} for uid in users.keys()}
-                quest_counts = {}
-
-                for log in quest_logs:
-                    ts = log['completed_at']
-                    date_part = ts.split('T')[0] if 'T' in ts else ts.split(' ')[0]
-                    uid = log['user_id']
-                    
-                    if uid not in users: continue
-                    
-                    if date_part in daily_map:
-                        daily_map[date_part][uid]['exp'] += log['exp_earned']
-                        daily_map[date_part][uid]['gold'] += log['gold_earned']
-                    
-                    total_stats[uid]['exp'] += log['exp_earned']
-                    total_stats[uid]['gold'] += log['gold_earned']
-                    total_stats[uid]['count'] += 1
-                    
-                    q_title = log['quest_title']
-                    quest_counts[q_title] = quest_counts.get(q_title, 0) + 1
-
-                for uid, count in shopping_counts.items():
-                    if uid in total_stats:
-                        total_stats[uid]['shopping'] = count
-
-                # 6. レスポンス整形
-                daily_stats_list = []
-                weekdays = ["月", "火", "水", "木", "金", "土", "日"]
-                cumulative = {uid: {"exp": 0, "gold": 0} for uid in users.keys()}
-                
-                for i in range(7):
-                    d = start_date + datetime.timedelta(days=i)
-                    d_str = d.strftime("%Y-%m-%d")
-                    day_data = daily_map.get(d_str, {})
-                    
-                    current_snapshot = {}
-                    for uid in users.keys():
-                        val = day_data.get(uid, {"exp": 0, "gold": 0})
-                        cumulative[uid]['exp'] += val['exp']
-                        cumulative[uid]['gold'] += val['gold']
-                        current_snapshot[uid] = cumulative[uid].copy()
-                    
-                    daily_stats_list.append({
-                        "date": d_str,
-                        "day_label": weekdays[i],
-                        "users": current_snapshot
-                    })
-
-                def make_rank(key, label_suffix):
-                    sorted_users = sorted(total_stats.items(), key=lambda x: x[1][key], reverse=True)
-                    return [
-                        {
-                            "user_id": uid, 
-                            "user_name": users[uid]['name'], 
-                            "avatar": users[uid]['avatar'], 
-                            "value": data[key],
-                            "label": f"{data[key]}{label_suffix}"
-                        } 
-                        for uid, data in sorted_users if data[key] > 0
-                    ]
-
-                rankings = {
-                    "exp": make_rank("exp", " XP"),
-                    "gold": make_rank("gold", " G"),
-                    "count": make_rank("count", " クエスト"),
-                    "shopping": make_rank("shopping", " 個")
-                }
-
-                mvp_data = rankings['exp'][0] if rankings['exp'] else None
-                popular_quest = max(quest_counts.items(), key=lambda x: x[1])[0] if quest_counts else "なし"
-
-                return {
-                    "startDate": start_str,
-                    "endDate": datetime.datetime.now().strftime("%Y-%m-%d"),
-                    "dailyStats": daily_stats_list,
-                    "rankings": rankings,
-                    "mvp": mvp_data,
-                    "mostPopularQuest": popular_quest
-                }
-        except Exception as e:
-            logger.error(f"Weekly Analytics Error: {e}")
-            # エラー時も空データを返すことで500を防ぐ
-            return {
-                "startDate": "",
-                "endDate": "",
-                "dailyStats": [],
-                "rankings": {"exp": [], "gold": [], "count": [], "shopping": []},
-                "mvp": None,
-                "mostPopularQuest": "エラー"
-            }
-
 
 class ShopService:
     def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:
@@ -826,50 +572,6 @@ class ShopService:
             logger.info(f"Reward Purchased & Stored: User={user_id}, Item={reward['title']}")
             
         return {"status": "purchased", "newGold": new_gold}
-
-    def process_purchase_equipment(self, user_id: str, equipment_id: int) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
-            item = cur.execute("SELECT * FROM equipment_master WHERE equipment_id=?", (equipment_id,)).fetchone()
-            user = cur.execute("SELECT * FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
-            
-            if not item: raise HTTPException(404, "Item not found")
-            if not user: raise HTTPException(404, "User not found")
-            
-            owned = cur.execute("SELECT * FROM user_equipments WHERE user_id=? AND equipment_id=?", (user_id, equipment_id)).fetchone()
-            if owned: raise HTTPException(400, "Already owned")
-            if user['gold'] < item['cost_gold']: raise HTTPException(400, "Not enough gold")
-            
-            new_gold = user['gold'] - item['cost_gold']
-            cur.execute("UPDATE quest_users SET gold=? WHERE user_id=?", (new_gold, user_id))
-            cur.execute("""
-                INSERT INTO user_equipments (user_id, equipment_id, is_equipped, acquired_at)
-                VALUES (?, ?, 0, ?)
-            """, (user_id, equipment_id, common.get_now_iso()))
-            
-            logger.info(f"Equip Purchased: User={user_id}, Item={item['name']}")
-            return {"status": "purchased", "newGold": new_gold}
-
-    def process_change_equipment(self, user_id: str, equipment_id: int) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
-            target_item = cur.execute("""
-                SELECT ue.*, em.type FROM user_equipments ue
-                JOIN equipment_master em ON ue.equipment_id = em.equipment_id
-                WHERE ue.user_id=? AND ue.equipment_id=?
-            """, (user_id, equipment_id)).fetchone()
-            
-            if not target_item: raise HTTPException(404, "Equipment not owned")
-            
-            item_type = target_item['type']
-            cur.execute("""
-                UPDATE user_equipments SET is_equipped = 0
-                WHERE user_id = ? AND equipment_id IN (
-                      SELECT em.equipment_id FROM equipment_master em WHERE em.type = ?)
-            """, (user_id, item_type))
-            
-            cur.execute("UPDATE user_equipments SET is_equipped = 1 WHERE user_id = ? AND equipment_id = ?", (user_id, equipment_id))
-            
-            logger.info(f"Equip Changed: User={user_id}, ItemID={equipment_id}")
-            return {"status": "equipped", "equipment_id": equipment_id}
 
 
 class InventoryService:
@@ -925,10 +627,11 @@ class InventoryService:
             return {"status": "consumed", "message": "アイテムを使いました！"}
     
     def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
-        if approver_id not in QuestService.PARENT_IDS:
-             raise HTTPException(403, "承認権限がありません")
-
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(403, "承認権限がありません")
+
             item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
             if not item: raise HTTPException(404, "Item not found")
             
@@ -988,7 +691,6 @@ class GameSystem:
                     valid_quests.append(MasterQuest(**q_data))
                     
                 valid_rewards = [MasterReward(**r) for r in quest_data.REWARDS]
-                valid_equipments = [MasterEquipment(**e) for e in quest_data.EQUIPMENTS]
             else:
                 logger.error("Quest data module not available for sync.")
                 raise ImportError("quest_data module missing")
@@ -1080,22 +782,6 @@ class GameSystem:
                         description = excluded.description
                 """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc))
 
-            active_e_ids = [e.id for e in valid_equipments]
-            if active_e_ids:
-                ph = ','.join(['?'] * len(active_e_ids))
-                cur.execute(f"DELETE FROM equipment_master WHERE equipment_id NOT IN ({ph})", active_e_ids)
-            else:
-                cur.execute("DELETE FROM equipment_master")
-
-            for e in valid_equipments:
-                cur.execute("""
-                    INSERT INTO equipment_master (equipment_id, name, type, power, cost_gold, icon_key)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(equipment_id) DO UPDATE SET
-                        name = excluded.name, type = excluded.type, power = excluded.power,
-                        cost_gold = excluded.cost_gold, icon_key = excluded.icon_key
-                """, (e.id, e.name, e.type, e.power, e.cost, e.icon))
-        
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
 
@@ -1186,28 +872,13 @@ class GameSystem:
                             q['shared_pending_by_name'] = user_map.get(pending_by_someone['user_id'], '誰か')
 
             completed = valid_completed
-           
+
             logs = self._fetch_recent_logs(cur)
-
-            equipments = [dict(row) for row in cur.execute("SELECT * FROM equipment_master")]
-            for e in equipments:
-                e['icon'] = e['icon_key']
-                e['cost'] = e['cost_gold']
-
-            owned_equipments = [dict(row) for row in cur.execute("""
-                SELECT ue.*, em.name, em.type, em.power, em.icon_key 
-                FROM user_equipments ue
-                JOIN equipment_master em ON ue.equipment_id = em.equipment_id
-            """)]
-            
-            boss_state = self._get_party_state(cur)
 
         return {
             "users": users, "quests": filtered_quests, "rewards": rewards,
             "completedQuests": completed, "logs": logs,
-            "pendingQuests": pending, 
-            "equipments": equipments, "ownedEquipments": owned_equipments,
-            "boss": boss_state
+            "pendingQuests": pending,
         }
 
     def _fetch_recent_logs(self, cur) -> List[dict]:
@@ -1229,39 +900,6 @@ class GameSystem:
             text = f"{name}は {l['title']} を{'クリアした！' if l['type']=='quest' else '手に入れた！'}"
             formatted.append({"id": f"{l['type']}_{l['id']}", "text": text, "dateStr": date_str, "timestamp": ts_str})
         return formatted
-
-    def _get_party_state(self, cur) -> Dict[str, Any]:
-        self.quest_service._check_and_reset_weekly_boss(cur)
-        
-        try:
-            row_obj = cur.execute("SELECT * FROM party_state WHERE id = 1").fetchone()
-            if not row_obj: return None
-            
-            row = {k: row_obj[k] for k in row_obj.keys()}
-            
-            boss_list = getattr(quest_data, "BOSSES", [])
-            boss_def = next((b for b in boss_list if b['id'] == row['current_boss_id']), None)
-            
-            if not boss_def:
-                boss_def = {"id": 99, "name": "謎の影", "icon": "❓", "desc": "正体不明の敵", "hp": 1000}
-
-            current_max_hp = row.get('max_hp', boss_def['hp'])
-
-            return {
-                "bossId": boss_def['id'],
-                "bossName": boss_def['name'],
-                "bossIcon": boss_def['icon'],
-                "maxHp": current_max_hp,
-                "currentHp": row['current_hp'],
-                "hpPercentage": (row['current_hp'] / current_max_hp) * 100 if current_max_hp > 0 else 0,
-                "charge": row['charge_gauge'],
-                "desc": boss_def['desc'],
-                "isDefeated": bool(row.get('is_defeated', 0)),
-                "weekStartDate": row.get('week_start_date')
-            }
-        except Exception as e:
-            logger.error(f"Error getting party state: {e}")
-            return None
 
 # ==========================================
 # Singleton Instances
