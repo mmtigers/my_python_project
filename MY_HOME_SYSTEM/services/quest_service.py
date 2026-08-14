@@ -10,7 +10,7 @@ from fastapi import HTTPException
 import common
 import config
 import game_logic
-import sound_manager
+from core import sound_manager
 from services import notification_service
 from core.logger import setup_logging
 
