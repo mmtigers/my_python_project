@@ -39,7 +39,9 @@ import FamilyLog from './features/family/components/FamilyLog';
 
 // ConfirmModal の target に渡りうる型。モードごとに実際に持っているプロパティが異なるため、
 // メッセージ生成はモードごとに個別にキャストして組み立てる（getMessage 内）。
-type ConfirmTarget = Quest | QuestHistory | Reward;
+// ★要件9: クエストの完了/取り消しは確認ダイアログを挟まないワンタップ操作に変更したため、
+// ここで確認を挟むのはゴールドを消費する「購入」と、親向けの「却下」のみ(誤操作の影響が大きいため)。
+type ConfirmTarget = QuestHistory | Reward;
 
 // useGameData.ts の completeQuest/cancelQuest/buyReward/rejectQuest
 // ラッパー関数群の戻り値をまとめて受け取るための型（各関数は success 以外のフィールドが少しずつ異なる）
@@ -55,10 +57,21 @@ interface ActionResult {
   detail?: string;
 }
 
+const ERROR_REASON_MESSAGES: { [key: string]: string } = {
+  gold: "お金が足りません！",
+  pending: "すでに申請中です",
+  permission: "権限がありません",
+  error: "エラーが発生しました",
+};
+
+// バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
+const resolveErrorText = (res: ActionResult, fallback: string): string =>
+  res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
+
 const ConfirmModal = ({
   mode, target, onConfirm, onCancel
 }: {
-  mode: 'cancel' | 'purchase' | 'complete' | 'reject' | null,
+  mode: 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
   onConfirm: () => void,
   onCancel: () => void
@@ -67,17 +80,9 @@ const ConfirmModal = ({
 
   const getMessage = (): { title: string; text: string } => {
     switch (mode) {
-      case 'cancel': {
-        const t = target as QuestHistory;
-        return { title: 'クエストをやめる', text: `「${t.quest_title}」をやめますか？\n（ペナルティはありません）` };
-      }
       case 'purchase': {
         const t = target as Reward;
         return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
-      }
-      case 'complete': {
-        const t = target as Quest;
-        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -105,16 +110,16 @@ function App() {
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
-  // モーダル状態
-  const [confirmMode, setConfirmMode] = useState<'cancel' | 'purchase' | 'complete' | 'reject' | null>(null);
+  // モーダル状態 (購入・却下のみ。完了・取消はワンタップ即時実行のため確認を挟まない)
+  const [confirmMode, setConfirmMode] = useState<'purchase' | 'reject' | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
-  // クエスト完了/取消/購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
+  // 購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
   // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
 
   // 結果表示用
   const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
-  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error' } | null>(null);
+  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error', icon?: string } | null>(null);
 
   // アバターアップロード対象(nullなら非表示)
   const [avatarUser, setAvatarUser] = useState<User | null>(null);
@@ -142,13 +147,37 @@ function App() {
     play('tap');
   };
 
+  // ★要件9: クエストの完了・取り消しは確認ダイアログを挟まないワンタップ操作。
+  // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。
+  const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
+    const res: ActionResult = mode === 'complete'
+      ? await completeQuest(user, target as Quest)
+      : await cancelQuest(user, target as QuestHistory);
+
+    if (res.success) {
+      if (mode === 'complete') {
+        if (res.status === 'pending') {
+          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
+        } else if ((res.earnedMedals ?? 0) > 0) {
+          // ★バグ修正(要件8): サーバーは正しくメダルを付与していたが、以前はフロントが
+          // res.earnedMedals を一切参照しておらず無反応だった。leveledUpと同様に扱う。
+          play('medal');
+          setMessageData({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, type: "success", icon: "🏅" });
+        }
+      }
+      return;
+    }
+
+    setMessageData({ title: "エラー", text: resolveErrorText(res, "失敗しました"), type: "error" });
+    play('cancel');
+  };
+
   const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
-    // 1. 履歴タブなど、明示的に履歴として渡された場合
+    play('select');
+
+    // 1. 履歴タブなど、明示的に履歴として渡された場合 → ワンタップで取り消し
     if (isHistory) {
-      setConfirmUser(user);
-      setConfirmTarget(q);
-      setConfirmMode('cancel');
-      play('select');
+      runQuestAction(user, 'cancel', q);
       return;
     }
 
@@ -157,34 +186,25 @@ function App() {
     const { isInfinite, pendingEntry, completedEntry } =
       getQuestLockState(q as Quest, user, completedQuests, pendingQuests);
 
-    // まず、無限クエストかどうかを判定（無限なら常に「完了」モードでOK）
+    // 無限クエストは常に「完了」扱い
     if (isInfinite) {
-      setConfirmUser(user);
-      setConfirmTarget(q);
-      setConfirmMode('complete');
-      play('select');
+      runQuestAction(user, 'complete', q);
       return;
     }
 
     // 3. 完了済み、または申請中リストにあるかを探す
     const historyEntry = pendingEntry || completedEntry;
 
-    setConfirmUser(user);
     if (historyEntry) {
-      // 既に履歴がある（完了or申請中）なら「キャンセル（取り下げ）」モードにする
+      // 既に履歴がある（完了or申請中）ならワンタップで取り消し。
       // targetには Quest オブジェクトではなく、見つかった History オブジェクトを渡す
-      // (ConfirmModalで target.quest_title を参照するため)
       // ※Historyオブジェクトに quest_title が結合されている前提ですが、
       //  もし不足している場合は q.title を補完する必要があります。
-      setConfirmTarget({ ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
-      setConfirmMode('cancel');
+      runQuestAction(user, 'cancel', { ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
     } else {
-      // 未実施なら「完了」モード
-      setConfirmTarget(q);
-      setConfirmMode('complete');
+      // 未実施ならワンタップで完了
+      runQuestAction(user, 'complete', q);
     }
-
-    play('select');
   };
 
   const handleBuyReward = (user: User, r: Reward) => {
@@ -194,27 +214,19 @@ function App() {
     play('select');
   };
 
-  // --- Confirm Execution ---
+  // --- Confirm Execution (購入・却下のみ。誤操作の影響が大きいため確認を維持する: 要件9) ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
     const actingUser = confirmUser || currentUser;
 
     let res: ActionResult = { success: false };
 
-    if (confirmMode === 'complete') {
-      res = await completeQuest(actingUser, confirmTarget as Quest);
-      if (res.success) {
-        if (res.status === 'pending') {
-          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
-        }
-      }
-    } else if (confirmMode === 'cancel') {
-      res = await cancelQuest(actingUser, confirmTarget as QuestHistory);
-    } else if (confirmMode === 'purchase') {
+    if (confirmMode === 'purchase') {
       res = await buyReward(actingUser, confirmTarget as Reward);
       if (res.success) {
         setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
-        play('medal');
+        // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
+        play('clear');
       }
     } else if (confirmMode === 'reject') {
       // 却下の記録名義は「親」で固定する(要件5)
@@ -223,11 +235,7 @@ function App() {
         play('cancel');
       } else {
         // ★却下専用のエラー文言（元の handleReject の window.confirm/reasons ロジックを踏襲）
-        const reasons: { [key: string]: string } = {
-          permission: "権限がありません",
-          error: "エラーが発生しました"
-        };
-        const text = res.detail || (res.reason && reasons[res.reason]) || "却下に失敗しました";
+        const text = resolveErrorText(res, "却下に失敗しました");
         setMessageData({ title: "エラー", text, type: "error" });
         play('cancel');
         setConfirmMode(null);
@@ -238,14 +246,7 @@ function App() {
     }
 
     if (!res.success) {
-      const reasons: { [key: string]: string } = {
-        gold: "お金が足りません！",
-        pending: "すでに申請中です",
-        permission: "権限がありません",
-        error: "エラーが発生しました"
-      };
-      // バックエンドが具体的なエラー内容(detail)を返している場合はそれを優先表示する
-      const text = res.detail || (res.reason && reasons[res.reason]) || "失敗しました";
+      const text = resolveErrorText(res, "失敗しました");
       setMessageData({ title: "エラー", text, type: "error" });
       play('cancel');
     }
@@ -261,12 +262,7 @@ function App() {
     if (res.success) {
       play('approve');
     } else {
-      const reasons: { [key: string]: string } = {
-        permission: "権限がありません",
-        error: "エラーが発生しました"
-      };
-      const text = res.detail || (res.reason && reasons[res.reason]) || "承認に失敗しました";
-      setMessageData({ title: "エラー", text, type: "error" });
+      setMessageData({ title: "エラー", text: resolveErrorText(res, "承認に失敗しました"), type: "error" });
       play('cancel');
     }
   };
@@ -391,6 +387,7 @@ function App() {
         <MessageModal
           title={messageData.title}
           message={messageData.text}
+          icon={messageData.icon}
           onClose={() => setMessageData(null)}
         />
       )}
