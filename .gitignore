@@ -2,6 +2,9 @@
 *.pyc
 __pycache__/
 
+# Node (no root-level Node project; family-quest/ has its own .gitignore)
+/node_modules/
+
 # Virtual Environments (Anywhere)
 venv/
 .venv/

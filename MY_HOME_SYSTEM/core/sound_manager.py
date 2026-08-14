@@ -1,4 +1,4 @@
-# MY_HOME_SYSTEM/sound_manager.py
+# MY_HOME_SYSTEM/core/sound_manager.py
 import os
 import subprocess
 import shutil
