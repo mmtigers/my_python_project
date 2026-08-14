@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from weather_service import WeatherService
 from news_service import NewsService
 from menu_service import MenuService
-import tools.camera_digest_service as camera_digest_service
+import camera_digest_service
 from core import logger as core_logger # 規約に従いcoreからインポート
 
 # ロガーの初期化 
