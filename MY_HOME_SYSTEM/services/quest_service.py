@@ -20,6 +20,10 @@ from models.quest import MasterUser, MasterQuest, MasterReward
 # ロガー設定
 logger = setup_logging("quest_service")
 
+# quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)
+ROLE_ADULT = 'role_adult'
+ROLE_CHILD = 'role_child'
+
 # quest_data import fallback
 try:
     import quest_data
@@ -112,9 +116,6 @@ class UserService:
 
 
 class QuestService:
-    CHILDREN_IDS = ['daughter', 'son', 'child']
-    PARENT_IDS = ['dad', 'mom']
-
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
         
@@ -246,7 +247,7 @@ class QuestService:
             total_exp = quest['exp_gain'] + boost['exp']
             total_gold = quest['gold_gain'] + boost['gold']
             
-            if user_id in self.CHILDREN_IDS:
+            if user['role'] == ROLE_CHILD:
                 cur.execute("""
                     INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                     VALUES (?, ?, ?, ?, ?, ?, 'pending')
@@ -268,17 +269,18 @@ class QuestService:
             return result
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
-        if approver_id not in self.PARENT_IDS:
-            raise HTTPException(status_code=403, detail="承認権限がありません")
-
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(status_code=403, detail="承認権限がありません")
+
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
-            
+
             override_rewards = {
                 "gold": hist['gold_earned'],
                 "exp": hist['exp_earned']
@@ -290,7 +292,7 @@ class QuestService:
 
             # --- TV Lock Feature ---
             if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
-                if hist['user_id'] in self.CHILDREN_IDS:
+                if user['role'] == ROLE_CHILD:
                     self._trigger_tv_unlock(quest['quest_id'])
 
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
@@ -324,10 +326,11 @@ class QuestService:
         t.start()
     
     def process_reject_quest(self, approver_id: str, history_id: int) -> Dict[str, str]:
-        if approver_id not in self.PARENT_IDS:
-            raise HTTPException(status_code=403, detail="承認権限がありません")
-
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(status_code=403, detail="承認権限がありません")
+
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
@@ -538,10 +541,11 @@ class InventoryService:
             return {"status": "consumed", "message": "アイテムを使いました！"}
     
     def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
-        if approver_id not in QuestService.PARENT_IDS:
-             raise HTTPException(403, "承認権限がありません")
-
         with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(403, "承認権限がありません")
+
             item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
             if not item: raise HTTPException(404, "Item not found")
             
