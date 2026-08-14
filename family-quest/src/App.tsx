@@ -11,11 +11,11 @@ import { GuildBoard } from './features/guild/components/GuildBoard';
 import { Quest, QuestHistory, Reward, Equipment, BossEffect } from '@/types';
 import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
 
-// 保護者ユーザーID一覧（MY_HOME_SYSTEM/services/quest_service.py の PARENT_IDS と一致させる）
+// 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
 // ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
 // セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、
 // 本当のアクセス制御はバックエンド側で別途実装される必要がある。
-const PARENT_USER_IDS = ['dad', 'mom'];
+const isParentUser = (user: { role?: string }) => user.role === 'role_adult';
 
 
 // UI Components
@@ -324,7 +324,7 @@ function App() {
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onTrendsSwitch={() => { setViewMode('trends'); play('select'); }}
         onAdminOpen={
-          PARENT_USER_IDS.includes(currentUser.user_id)
+          isParentUser(currentUser)
             ? () => { setViewMode('admin'); play('select'); }
             : undefined
         }
@@ -354,7 +354,7 @@ function App() {
               onAvatarClick={() => setIsAvatarModalOpen(true)}
             />
 
-            {PARENT_USER_IDS.includes(currentUser.user_id) && (
+            {isParentUser(currentUser) && (
               <ApprovalList
                 pendingQuests={pendingQuests}
                 pendingItems={pendingInventory}

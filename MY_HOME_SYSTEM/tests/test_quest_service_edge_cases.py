@@ -42,8 +42,9 @@ class TestProcessRejectQuest:
     def test_parent_can_reject_pending_quest(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-                "('daughter', 'Daughter', 'Novice', 1, 0, 0)"
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
@@ -64,6 +65,11 @@ class TestProcessRejectQuest:
         assert row is None
 
     def test_reject_nonexistent_history_returns_404(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
+            )
         quest_service = QuestService()
         with pytest.raises(HTTPException) as exc_info:
             quest_service.process_reject_quest("dad", 999999)
@@ -72,8 +78,9 @@ class TestProcessRejectQuest:
     def test_reject_already_processed_history_returns_400(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
-                "('daughter', 'Daughter', 'Novice', 1, 0, 0)"
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
             )
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
