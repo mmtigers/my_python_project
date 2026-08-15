@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [switchbot.md](./switchbot.md) — `models.switchbot.DeviceStatusResponse`(バリデーション用モデル)を提供
+- [config.md](./config.md) — 設定値(`SWITCHBOT_API_TOKEN`等)を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [switchbot_power_monitor.md](./switchbot_power_monitor.md) — 呼び出し元(`get_device_status`を利用)
+- [webhook_router.md](./webhook_router.md) — 呼び出し元(`get_device_name_by_id`を利用)
+- [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) — 呼び出し元(`create_switchbot_auth_headers`を利用)
+- [tv_lock_monitor.md](./tv_lock_monitor.md) — 呼び出し元(`send_device_command`を利用)
+
 ## 2. ファイルの概要
 
 * SwitchBot APIとのHTTP通信（GET/POSTリクエスト、Exponential Backoffによるリトライ処理、HMAC認証ヘッダーの生成）を担う。
