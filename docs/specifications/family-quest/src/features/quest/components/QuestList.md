@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [useQuestStatus.md](../hooks/useQuestStatus.md) — `useQuestStatus`/`getQuestLockState`の実装元。クエストのロック・完了・保留判定ロジックを提供する。
+- [types/index.md](../../../types/index.md) — `User`/`Quest`/`QuestHistory`型定義の提供元。
+- [Card.md](../../../components/ui/Card.md) — `QuestItem`がラップして使用するカードUIコンポーネント。
+- [useSound.md](../../../hooks/useSound.md) — クエストクリック時の効果音再生フックの実装元。
+- [FamilyDashboard.md](../../family/components/FamilyDashboard.md) — `panelMode`/`iconFirst` propsを実際に渡す横画面パネル表示側の呼び出し元。
+
 ## 2. ファイルの概要
 
 このファイルは、クエストのリスト（`QuestList`）および個別のクエスト（`QuestItem`）を画面に描画するUIコンポーネントを提供する。`QuestList`は`quests`をターゲット（役割/ユーザー個別）・曜日で絞り込み、共通フック由来の`getQuestLockState`でステータススコアを算出してソートしたうえで、`framer-motion`によるアニメーション付きで`QuestItem`のリストとして描画する。`panelMode`propが真の場合、横画面4人表示（`FamilyDashboard`）のパネル内で使うことを想定し、ビューポート幅基準の`md:`ブレークポイントに依存しない、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示に切り替える。`iconFirst`propが真の場合、非識字年齢の子ども向けにアイコンを大きく・説明文を非表示にした表示にする。
@@ -224,6 +232,16 @@ graph TD
 | `panelMode`/`iconFirst`の実際の呼び出し条件 | 本ファイルはpropsを受け取って表示を切り替えるのみであり、どのユーザー・どの画面幅で真になるかは呼び出し元次第で不明なため。 | `../../family/components/FamilyDashboard.tsx`, `App.tsx` |
 | `Card` のスタイル仕様 | `variant` や `className` がどう合成されて描画されるか不明なため。 | `@/components/ui/Card` |
 | 音声再生の詳細 | `play('clear')` 等の引数が実際にどの音声を鳴らすか不明なため。 | `@/hooks/useSound` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `Quest` オブジェクトの実態 | `types/index.md`の解析によれば、`Quest`型には`is_shared_completed_by`等の共有クエスト判定用フィールドが含まれており、これらはバックエンドの`get_available_quests`が付与するものとされている。ただしこれは`types/index.md`側の解析結果からの補足であり、実データの検証は行っていない。 | `../../../types/index.md` |
+| `useQuestStatus` / `getQuestLockState` の判定ロジック | `useQuestStatus.md`の解析によれば、`getQuestLockState`は前提クエストの完了有無から`isLocked`を、当日の承認済み履歴件数から`isDone`を算出する純粋関数であり、`useQuestStatus`はその結果と`isRandom`/`isTimeLimited`/`isLimited`等のフラグから優先順位付きで`variant`を決定するとされている。 | `../hooks/useQuestStatus.md` |
+| `panelMode`/`iconFirst`の実際の呼び出し条件 | `FamilyDashboard.md`の解析によれば、`FamilyPanel`は`QuestList`に`panelMode`を常に渡し、`iconFirst`は`ICON_FIRST_USER_IDS.includes(user.user_id)`という判定で個別ユーザーごとに決定しているとされている。ただしこれは横画面（landscape）レイアウトからの呼び出しに関する補足であり、縦画面側（`App.tsx`）での呼び出し条件は本ファイルからも他ドキュメントからも確認できていない。 | `../../family/components/FamilyDashboard.md` |
+| `Card` のスタイル仕様 | `Card.md`の解析によれば、`Card`は`variant`（`default`/`completed`/`pending`/`infinite`/`timeLimit`/`random`/`limited`/`locked`）に応じてスタイルクラスを切り替えるコンポーネントであるとされている。`Card.md`側でも、本ファイル(`QuestList.tsx`)が実際にどの`variant`値を渡しているかは推測に留まると記載されている。 | `../../../components/ui/Card.md` |
+| 音声再生の詳細 | `useSound.md`の解析によれば、`play`は`SOUNDS`定義のキーに対応する`HTMLAudioElement`をキャッシュしつつ再生し、再生失敗時は`console.warn`で警告を出すのみで例外は投げない構造とされている。ただし`SOUNDS`に`'clear'`/`'submit'`キーが実際に含まれるかは`useSound.md`側でも全キーの列挙が行われておらず断定できない。 | `../../../hooks/useSound.md` |
 
 ## 10. 自己検証結果
 

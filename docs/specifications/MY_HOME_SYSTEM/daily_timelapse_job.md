@@ -9,6 +9,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [smart_timelapse_generator.md](./smart_timelapse_generator.md) - `monitors.smart_timelapse_generator`の実体。`MotionDetector`, `EventBuilder`, `VideoBuilder`, `Uploader`, `check_dependencies`, `setup_directories`, `get_video_info`, `get_video_start_dt`等を提供
+* [notification_service.md](./notification_service.md) - `services.notification_service.send_push`の実体(`smart_timelapse_generator.md`経由でも参照される)
+* [config.md](./config.md) - `LINE_USER_ID`, `NVR_RECORD_DIR`等の設定値を提供
+* [logger.md](./logger.md) - `core.logger.setup_logging`の実体
+
 ## 2. ファイルの概要
 
 指定されたカメラのNAS上の録画ディレクトリから、特定の日付および時間帯に該当する動画チャンクファイルを検索し、動き検知に基づいたタイムラプス（サマリー）動画の生成・結合・サムネイル生成を行い、Discordへ通知およびアップロードを実行する日次・時間指定バッチ処理スクリプトである。
@@ -318,6 +325,15 @@ graph TD
 | ディレクトリ構造とパス定義 | `setup_directories` 関数が返す `work, out, rec` の具体的なディレクトリパス構成が不明であるため。 | `monitors/smart_timelapse_generator.py`<br> |
 | 動画メタ情報の構造 | `get_video_info` 関数が返す辞書（`info.get('format', {}).get('duration', 0)` を含む）の完全なスキーマが不明であるため。 | `monitors/smart_timelapse_generator.py`<br> |
 | 通知連携の詳細 | `send_push` の `messages` フォーマットや `target="discord"` 指定時の動作仕様が不明であるため。 | `services/notification_service.py`<br> |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 各種機能エンジンの詳細仕様 | `smart_timelapse_generator.md`の解析によれば、`MotionDetector`はOpenCVの背景差分で動体を検知し`MotionRecord`のリストを生成、`EventBuilder`はそれらをグルーピングして`EventRecord`のリストを生成、`VideoBuilder`はイベントに基づき動画クリップを切り出し結合、`Uploader`はファイルサイズに応じて分割しDiscord Webhookへ送信するとされる。ただし`_build_clip`等の非公開メソッドの正確な引数・戻り値までは`smart_timelapse_generator.md`でも一部推測に留まる。 | smart_timelapse_generator.md |
+| ディレクトリ構造とパス定義 | `smart_timelapse_generator.md`の解析によれば、`setup_directories`は作業用・出力用・記録用の3ディレクトリを作成し`Tuple[str, str, str]`(`work_dir`, `output_dir`, `records_dir`)を返す関数であることが判明したが、実際のパス文字列(既定値)自体は`smart_timelapse_generator.md`でも未確認とされている。 | smart_timelapse_generator.md |
+| 動画メタ情報の構造 | `smart_timelapse_generator.md`の解析によれば、`get_video_info`は`ffprobe`コマンドの実行結果をJSON解析した`Dict[str, Any]`を返す関数であり、リトライ機構(最大3回)を持つとされるが、返却される辞書の完全なキー構成までは確認できていない。 | smart_timelapse_generator.md |
+| 通知連携の詳細 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord WebhookおよびLINE Messaging APIへメッセージを送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | notification_service.md |
 
 ## 10. 自己検証結果
 

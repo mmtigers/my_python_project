@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `get_db_cursor`, `send_push`, `get_now_iso`を再エクスポートするFacadeモジュール
+- [database.md](./database.md) — `common.get_db_cursor`の実体(`core.database.get_db_cursor`)
+- [notification_service.md](./notification_service.md) — `common.send_push`の実体(`services.notification_service.send_push`)
+- [config.md](./config.md) — `LINE_USER_ID`等の設定値を提供
+- [logger.md](./logger.md) — ロガー実装元(`common`経由)
+
 ## 2. ファイルの概要
 
 このファイルは、指定された地域（伊丹、高砂、奈良）の天気予報データをOpenWeatherMap APIから取得し、降水確率や気温などの情報を解析してSQLiteデータベースに保存する役割を持つ。さらに、取得したデータをもとに主婦向けの天気アドバイスを生成し、外部モジュールを通じてLINEやDiscord等のプラットフォームへ通知を送信する機能を担っている。
@@ -474,6 +482,14 @@ graph TD
 | DB接続・トランザクションの詳細 | `common.get_db_cursor(commit=True)` の実装が不明であるため、エラー発生時に正しくロールバックされるか、接続が安全に閉じられるか判断不可。 | `common.py` |
 | 外部通知 (`send_push`) の仕様 | `target="discord"` や `target="line"` 以外の指定可能な値、失敗時のリトライ有無やエラーコード処理などが不明。 | `common.py` |
 | 設定値の詳細と型 | `config.LINE_USER_ID` にセットされている値やデータ型が不明。 | `config.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DB接続・トランザクションの詳細 | `database.md`の解析によれば、`common.get_db_cursor`の実体である`core.database.get_db_cursor`は`sqlite3.OperationalError`(locked)時に最大5回リトライし、それ以外の例外時は`conn.rollback()`を実行してから例外を再送出するコンテキストマネージャであることが判明した。 | database.md |
+| 外部通知 (`send_push`) の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する関数(戻り値`bool`)であることが判明した。 | notification_service.md |
+| 設定値の詳細と型 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`LINE_USER_ID`個別の値自体は`config.md`側でも確認できていない。 | config.md |
 
 ## 10. 自己検証結果
 

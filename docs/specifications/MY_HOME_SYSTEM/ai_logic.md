@@ -2,6 +2,12 @@
 
 `handlers/ai_logic.py` は削除された。
 
+## 関連ドキュメント
+
+- [ai_service.md](./ai_service.md) — 後継実装。現在のAI解析（Gemini Function Calling）はこちらに一本化されている。
+- [line_handler.md](./line_handler.md) — 実際にLINE Webhookのテキストメッセージ処理を担っている呼び出し元（`_process_message_async()`）。
+- [line_logic.md](./line_logic.md) — 本ファイルを呼び出していたが、同時に到達不能なデッドコードとして削除された `handlers/line_logic.py` の仕様書。
+
 ## 廃止理由
 
 このファイルが定義していた `declare_child_health` / `declare_shopping` / `declare_defecation`

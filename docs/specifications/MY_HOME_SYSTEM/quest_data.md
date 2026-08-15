@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest_service.md](./quest_service.md) - `USERS`/`QUESTS`/`REWARDS`を読み込みDBと同期する`GameSystem.sync_master_data`、および`target: 'siblings'`のカスケード処理(`_process_coop_quest_completion`等)を実装するサービス層
+* [quest.md](./quest.md) - `MasterUser`/`MasterQuest`/`MasterReward`として本データの型を定義するモデル
+* [game_logic.md](./game_logic.md) - `USERS`の`level`/`exp`/`gold`に対する計算ロジック(`calc_level_progress`等)
+* [reset_game.md](./reset_game.md) - `quest_users`テーブルの`user_id`(dad/mom/son/daughter)を対象にゲームデータをリセットするスクリプト
+* [family-quest/src/lib/masterData.md](../family-quest/src/lib/masterData.md) - フロントエンド側のフォールバック用マスターデータ(`INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS`)
+
 ## 2. ファイルの概要
 
 * 「Family Quest」システムのマスターデータを定義する、実行ロジックを一切含まない純粋なデータ定義モジュール。
@@ -184,6 +192,14 @@ graph TD
 | DBスキーマとの対応関係 | `USERS` の `user_id` が `reset_game.py` で言及される `quest_users` テーブルの `user_id` と対応するかは、本ファイル単体からは確認できるが、テーブルの完全なスキーマ（`medal_count` 等）は不明。 | `current_schema.sql`, `init_unified_db.py` |
 | コメントアウトされたクエストの無効化理由 | 各コメントアウト行（例: 88〜94, 156, 163〜164行目）がなぜ無効化されたか（バランス調整、廃止、一時停止等）の理由は記載されていない。 | 変更履歴（Git blame）またはプロジェクト外のドキュメント |
 | `target: 'siblings'` の実処理 | 「どちらか一方が完了報告すると2人とも報酬を得る」という挙動を実現する具体的なロジック（対象ユーザーの解決方法、保留行の作成・カスケード処理等）は本ファイルからは読み取れない。 | `services/quest_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| このデータを消費するロジックの実体 | `quest_service.md`の解析によれば、`GameSystem.sync_master_data`が`quest_data`モジュールを`importlib.reload`で再読み込みし、DBとの同期(マイグレーションを含む)を行っているとされる。 | quest_service.md |
+| DBスキーマとの対応関係 | `reset_game.md`の解析によれば、`quest_users`テーブルには`user_id`, `name`, `level`, `exp`, `gold`, `medal_count`カラムが存在することが判明しているが、完全なスキーマ(他カラムや制約)は`reset_game.md`自体でも不明とされている。 | reset_game.md |
+| `target: 'siblings'` の実処理 | `quest_service.md`の解析によれば、`QuestService._get_sibling_partner_id`が`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人であることを前提に相方を解決し、`_process_coop_quest_completion`が両者に`pending`の`quest_history`行を作成して`linked_history_id`で相互連結、承認・却下・取消の3箇所でカスケード処理を行う設計であることが判明した。 | quest_service.md |
 
 ## 10. 自己検証結果
 

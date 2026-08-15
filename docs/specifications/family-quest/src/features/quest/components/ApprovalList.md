@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [../../../lib/apiClient.md](../../../lib/apiClient.md) — `consumeItem`など、本ファイルが呼び出すAPIクライアントの実装仕様。
+- [../../../../MY_HOME_SYSTEM/quest_router.md](../../../../../MY_HOME_SYSTEM/quest_router.md) — `consumeItem`が呼び出すと推測される対応バックエンドAPI(`POST /inventory/consume`)。
+- [../../../types/index.md](../../../types/index.md) — `QuestHistory`, `User`, `PendingInventory`の型定義を提供する元ファイル。
+- [../../../components/ui/Button.md](../../../components/ui/Button.md) — 承認・拒否・OKボタンとして利用するUIコンポーネント。
+- [../../../components/ui/Modal.md](../../../components/ui/Modal.md) — アイテム使用承認の確認ダイアログとして利用するUIコンポーネント。
+- [../../family/components/FamilyDashboard.md](../../family/components/FamilyDashboard.md) — 横画面レイアウトにおける利用元コンポーネント(メイン画面上部に常時統合表示)。
+- [../../../../App.md](../../../../App.md) — 縦画面レイアウトにおける利用元コンポーネント(保護者のみ表示)。
+
 ## 2. ファイルの概要
 
 * 承認待ちのクエストおよびアイテム使用申請のリストを表示し、ユーザーがそれぞれの承認・拒否（クエスト）／承認（アイテム）のアクションを実行するためのUIコンポーネントを提供するファイル。クエストとアイテムのデータはいずれも親コンポーネントからPropsとして渡され、本ファイル内でのAPIポーリングは行わない。アイテム使用の承認確認は、ブラウザ標準の`confirm()`ではなくアプリ標準の`Modal`コンポーネントで行う。
@@ -194,6 +204,14 @@ graph TD
 | APIの詳細仕様（エンドポイント・ペイロード） | `apiClient`の実装が別ファイルに依存しているため。 | `../../../lib/apiClient.ts` |
 | `pendingInventory`, `inventory` キャッシュの初期設定・取得元 | QueryClientのキャッシュ管理ポリシーや`pendingQuests`/`pendingItems`の取得元が本ファイルからは判断不可のため。 | 本コンポーネントを呼び出している親コンポーネント |
 | Propsとして渡される `onApprove`, `onReject` の具体的な処理 | 親コンポーネントで定義された関数を受け取って実行しているだけのため。 | `ApprovalList`を呼び出している親コンポーネントファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| APIの詳細仕様（エンドポイント・ペイロード） | `apiClient.md`の解析によれば、`ApiClient`クラスにはインベントリ関連メソッド群（`fetchInventory`, `useItem`, `cancelItemUsage`, `consumeItem`, `fetchPendingInventory`）がまとめて実装されており、いずれも内部の`get`/`post`ラッパー経由で`_request`（`fetch`ベース）を呼び出すと記載されている。また`quest_router.md`の解析によれば、バックエンド側には`POST /inventory/consume`エンドポイントが存在し、`ConsumeItemAction`（`approver_id`, `inventory_id`）を受け取ると記載されている。`consumeItem(currentUser.user_id, inventoryId)`という呼び出し引数の対応関係から、このエンドポイントに対応する可能性が高いと推測されるが、`apiClient.ts`側の`consumeItem`メソッドの正確な実装（送信するフィールド名等）自体はapiClient.mdからも断定できず、あくまで両ドキュメントの記載を突き合わせた推測に留まる。 | `apiClient.md`, `quest_router.md` |
+| `pendingInventory`, `inventory` キャッシュの初期設定・取得元 | `useGameData.md`の解析によれば、`pendingInventory`はカスタムフック`useGameData`内で`apiClient.fetchPendingInventory()`を10秒間隔でポーリングして取得しており、`quest_router.md`によれば対応するバックエンドAPIは`GET /inventory/admin/pending`と推測される。`FamilyDashboard.md`/`App.md`の解析によれば、`ApprovalList`はこの`pendingInventory`をProps（`pendingItems`）として親コンポーネント（横画面では`FamilyDashboard`、縦画面では`App.tsx`）から受け取る構造であり、いずれも`useGameData`が返すデータをそのまま伝播していると記載されている。ただし本コンポーネント自体からこの経路を検証したわけではなく、あくまで他ドキュメントの解析結果からの補足である。 | `useGameData.md`, `quest_router.md`, `family/components/FamilyDashboard.md`, `App.md` |
+| Propsとして渡される `onApprove`, `onReject` の具体的な処理 | `App.md`の解析によれば、縦画面での呼び出し元`App.tsx`には`handleApprove`（`useGameData`の`approveQuest`を即座に呼び出す）と`handleReject`（確認モーダルを開き、実際の却下処理は確認後に行われる想定で`play('select')`のみを実行し、この時点では却下APIを呼んでいない）という2つの関数が定義されている。`FamilyDashboard.md`の解析によれば、横画面では`FamilyDashboard`が受け取った同名のProps（`onApprove`/`onReject`）をそのまま`ApprovalList`へ中継しているのみで、実体は同じく`App.tsx`側にあると記載されている。ただし`handleReject`確定後の実際の却下API呼び出し処理そのものはApp.mdの当該箇所からは確認できておらず、あくまで他ドキュメントの解析結果からの補足である。 | `App.md`, `family/components/FamilyDashboard.md` |
 
 ## 10. 自己検証結果
 

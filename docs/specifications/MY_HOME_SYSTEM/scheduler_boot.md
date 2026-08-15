@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [switchbot_power_monitor.md](./switchbot_power_monitor.md) — 呼び出し先の可能性がある監視スクリプト(推定。scheduler_boot.py自身の解析では`TASKS`の全内容までは確認できていない)
+- [weekly_analyze_report.md](./weekly_analyze_report.md) — 呼び出し先の可能性がある週次レポートスクリプト(推定。scheduler_boot.mdの不明事項一覧で関連ファイルとして言及されている)
+- [logger.md](./logger.md) — `core.logger.setup_logging`(ロガー初期化)を提供
+- [config.md](./config.md) — `config`モジュール(設定値)を提供
+- [unified_server.md](./unified_server.md) — 呼び出し元。FastAPIアプリの`lifespan`起動時に本スクリプトをサブプロセスとして起動する
+
 ## 2. ファイルの概要
 
 * 指定された間隔（秒）で、プロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行し管理する無限ループのスケジューラ。
@@ -233,6 +241,13 @@ graph TD
 | `config` モジュールの役割 | 明示的な呼び出しがないがインポートされており、副作用の有無が判断できないため | `config.py` (または同名のパッケージ) |
 | ログの出力仕様 | 初期化関数 `setup_logging` の詳細な設定（コンソール出力、ファイル出力先など）が不明なため | `core/logger.py` |
 | 各監視スクリプトの詳細仕様 | `TASKS` で呼び出される各Pythonスクリプトが行う具体的な処理内容（API通信やDB操作の有無など）が不明なため | `monitors/*.py`, `weekly_analyze_report.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| ログの出力仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力(StreamHandler)、日次ローテーションのファイル出力(`TimedRotatingFileHandler`、ログファイル名`home_system.log`固定)、ERRORレベル以上をDiscord Webhookへ送信する`DiscordErrorHandler`の3種のハンドラを登録するとされる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)やDiscord Webhook URLの実際の値は`logger.md`自体でも未確認(config.py未読)とされている。 | logger.md |
+| 各監視スクリプトの詳細仕様 | `switchbot_power_monitor.md`の解析によれば、SwitchBotデバイスのステータスを定期的にAPI取得し電力/温湿度データを`sensor_service`に連携する監視スクリプトとされる。`weekly_analyze_report.md`の解析によれば、週次(月曜朝)で食事・車利用・電気代・子供の体調データを集計しLINE/Discordへ通知するスクリプトとされる。ただし、これらのスクリプトがscheduler_boot.pyの`TASKS`リストに実際にどのような間隔・引数で登録されているかは、scheduler_boot.py自身のソース(`TASKS`定義部)を再確認しないと断定できない。 | switchbot_power_monitor.md, weekly_analyze_report.md |
 
 ## 10. 自己検証結果
 

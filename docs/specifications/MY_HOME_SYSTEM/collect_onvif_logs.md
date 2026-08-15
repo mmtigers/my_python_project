@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `BASE_DIR`、`CAMERAS`、`DISCORD_WEBHOOK_ERROR_CAM`等の設定を提供する。
+- [common.md](./common.md) — `setup_logging`、`get_today_date_str`を提供するFacadeモジュール。
+- [utils.md](./utils.md) — `common.get_today_date_str`の実装元（`core/utils.py`）。
+- [logger.md](./logger.md) — `common.setup_logging`の実装元（`core/logger.py`）。
+- [camera_monitor.md](./camera_monitor.md) — 同様にONVIFカメラのイベント監視・PullPointSubscription処理を行う姉妹スクリプト（常時稼働の動体検知監視版）。
+
 ## 2. ファイルの概要
 
 ONVIF対応カメラからイベントログ（PullPointSubscriptionBindingを利用したメッセージ）を収集し、ローカルのファイルに保存するためのスクリプト。複数カメラに対する非同期ポーリング処理、通信切断時の自発的な再接続制御（セッションライフタイムの管理）、およびエラーハンドリングを含んでいる。
@@ -287,6 +295,13 @@ graph TD
 | `config.CAMERAS` のリスト構造と要素数 | 外部モジュールで定義されており、カメラの台数や設定値の仕様が不明なため | `config.py` |
 | `common.setup_logging` の詳細な実装 | 外部モジュールで定義されており、出力されるログフォーマットやWebhookの挙動が不明なため | `common.py` |
 | `common.get_today_date_str` の日付フォーマット | 外部モジュールで定義されており、返却される文字列の形式が不明なため | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.setup_logging` の詳細な実装 | `common.md`の解析によれば`common.py`は非推奨のFacadeモジュールであり、`setup_logging`は`core/logger.py`からの再エクスポートと推測される。`logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録する実装と推測される。 | common.md, logger.md |
+| `common.get_today_date_str` の日付フォーマット | `utils.md`の解析によれば、`get_today_date_str`（`core/utils.py`）は"Asia/Tokyo"タイムゾーンの現在日時を"YYYY-MM-DD"形式の文字列で返す関数と推測される。`common.get_today_date_str`はこの関数の再エクスポートと推測されるが、`common.py`側の実装自体は未確認。 | utils.md, common.md |
 
 ## 10. 自己検証結果
 

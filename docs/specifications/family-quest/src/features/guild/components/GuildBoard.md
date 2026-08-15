@@ -1,5 +1,11 @@
 # GuildBoard.tsx (廃止)
 
+## 関連ドキュメント
+
+- [bounty_router.md](../../../../../MY_HOME_SYSTEM/bounty_router.md) — 同じくギルド機能廃止に伴い削除された、対応するバックエンド側ルーター(廃止notice)。本ファイルへの相互リンクが同ドキュメント側にも既に存在する。
+- [types/index.md](../../../types/index.md) — フロントエンドの型定義ファイル。ギルド討伐依頼関連の型(`Bounty`等)がギルド機能廃止に伴い削除されている旨が明記されている。
+- [全体設計書.md](../../../../../全体設計書.md) — `GuildBoard.tsx`がかつて`window.confirm()`/`alert()`から`Modal`ベースの確認・通知UIへ置き換えられていた経緯（機能廃止前の状態）に言及している。
+
 ## 廃止notice
 
 このファイルが対応していたソース `family-quest/src/features/guild/components/GuildBoard.tsx` は、ギルド機能の廃止に伴い削除されました(2026-08 Family Quest大改修)。

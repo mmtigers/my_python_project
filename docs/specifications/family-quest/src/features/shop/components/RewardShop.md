@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [RewardList.md](RewardList.md) — 購入可能な報酬一覧を描画する子コンポーネントの実装元。
+- [InventoryList.md](InventoryList.md) — 所持品一覧・使用申請を描画する子コンポーネントの実装元。
+- [CountUp.md](../../../components/ui/CountUp.md) — 所持ゴールドのカウントアップ表示コンポーネントの実装元。
+- [types/index.md](../../../types/index.md) — `Reward`/`User`型定義の提供元。
+- [App.md](../../../../App.md) — 縦画面（portrait）側で本コンポーネントを直接呼び出す呼び出し元。
+- [FamilyDashboard.md](../../family/components/FamilyDashboard.md) — 横画面（landscape）側、`FamilyPanel`経由で本コンポーネントを呼び出す呼び出し元。
+
 ## 2. ファイルの概要
 
 「ごほうび」画面を構成するコンポーネント。所持ゴールド表示 → 購入可能な報酬一覧（`RewardList`） → 所持品（`InventoryList`、使用申請ボタン付き）の順に画面を構成する。コメントにより、`RewardList`（購入）と`InventoryList`（所持品・使用申請）を1画面にまとめ、以前存在した「もちもの」独立タブは廃止された旨が明記されている。
@@ -148,6 +157,15 @@ graph TD
 | `InventoryList`の内部実装 | `userId`のみを受け取った後のデータ取得方法（API呼び出し等）や使用申請フローが本ファイルからは不明なため。 | `./InventoryList.tsx` |
 | `CountUp`のアニメーション仕様 | `value`/`suffix`以外のPropsや、値変化時のアニメーション挙動の詳細が不明なため。 | `@/components/ui/CountUp.tsx` |
 | `onBuy`実行後の具体的な挙動 | 呼び出し元（`FamilyDashboard`/`App.tsx`）でどのように処理されるか（確認モーダルの有無等）は本ファイルからは不明なため。 | `../../family/components/FamilyDashboard.tsx`, `App.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `RewardList`の内部実装 | `RewardList.md`の解析によれば、`RewardList`は`rewards`を`target`属性（`all`/`children`/`adults`/`mom`/`dad`）で絞り込み、`children`/`adults`は`currentUser.role`、`mom`/`dad`は`currentUser.user_id`の直接比較で判定した上で、コスト昇順にソートして表示するとされている。 | `RewardList.md` |
+| `InventoryList`の内部実装 | `InventoryList.md`の解析によれば、`InventoryList`は`useQuery`で5秒間隔のポーリングを行い所持品一覧を取得し、`useMutation`による使用・キャンセル操作時に楽観的キャッシュ更新（`queryClient.setQueryData`）を行うとされている。 | `InventoryList.md` |
+| `CountUp`のアニメーション仕様 | `CountUp.md`の解析によれば、`CountUp`は`framer-motion`の`useSpring`/`useMotionValue`/`useTransform`を用いてバネ物理モデルに基づくカウントアップアニメーションを実現するコンポーネントであるとされている。 | `../../../components/ui/CountUp.md` |
+| `onBuy`実行後の具体的な挙動 | `App.md`の解析によれば、縦画面側では購入確認モーダルで「はい」が選ばれた際に`useGameData`の`buyReward`が呼ばれ成功時に`clear`音を再生するとされ、`FamilyDashboard.md`の解析によれば、横画面側では`FamilyPanel`の`onBuy`が親の`onBuyReward(user, reward)`として伝播されるとされている。 | `../../../../App.md`, `../../family/components/FamilyDashboard.md` |
 
 ## 10. 自己検証結果
 
