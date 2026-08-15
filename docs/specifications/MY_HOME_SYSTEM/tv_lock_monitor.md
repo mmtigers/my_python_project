@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`等の設定値を提供(`TV_UNLOCK_QUEST_IDS`関連のクエスト連携定数も定義)
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [switchbot_service.md](./switchbot_service.md) — `send_device_command`の実装元
+
 ## 2. ファイルの概要
 
 * 深夜の特定時間帯（2:00〜2:05）にTVプラグデバイスの電源をオフにする制御を行うスクリプトです。
@@ -165,6 +171,13 @@ graph TD
 | `TV_PLUG_DEVICE_ID` および `FALLBACK_ROOT` の具体的な値 | 外部モジュールの定数に依存しているため | `config.py` |
 | `send_device_command`の完全なレスポンス構造とエラー発生条件 | 外部モジュールの実装に依存しているため | `services/switchbot_service.py` |
 | このスクリプトがどのように定期実行されるか（Cron等の呼び出し元） | コード上に実行スケジューラーの記述が存在しないため | インフラ設定ファイル（cron等）、または呼び出し元のPythonスクリプト |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `TV_PLUG_DEVICE_ID` および `FALLBACK_ROOT` の具体的な値 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`TV_PLUG_DEVICE_ID`/`FALLBACK_ROOT`個別の値自体は`config.md`側でも確認できていない。なお`config.md`では`TV_UNLOCK_QUEST_IDS`というTVロック解除に関連するクエストID群の定数の存在が確認されており、本ファイルの機能と連携する可能性がある。 | config.md |
+| `send_device_command`の完全なレスポンス構造とエラー発生条件 | `switchbot_service.md`の解析によれば、`send_device_command`はSwitchBot APIへのPOSTリクエストを行い、成功時は`Optional[Dict[str, Any]]`のレスポンス、任意の`Exception`発生時はエラーログを出力して`None`を返すフェイルソフト設計であることが判明した。 | switchbot_service.md |
 
 ## 10. 自己検証結果
 

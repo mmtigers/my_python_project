@@ -7,6 +7,19 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest.md](./quest.md) - `MasterUser`/`MasterQuest`/`MasterReward`モデル定義
+* [quest_data.md](./quest_data.md) - `sync_master_data`が読み込むマスターデータ(`USERS`/`QUESTS`/`REWARDS`)の実体
+* [quest_router.md](./quest_router.md) - 本ファイルの各サービスを呼び出すFastAPIルーター(呼び出し元)
+* [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`を提供するFacadeモジュール
+* [database.md](./database.md) - `common.get_db_cursor`の実体(`core.database.get_db_cursor`。リトライ・WALモード・外部キー制約有効化)
+* [game_logic.md](./game_logic.md) - `GameLogic.calc_level_progress`/`calc_level_down`/`calculate_drop_rewards`の実装
+* [sound_manager.md](./sound_manager.md) - `sound_manager.play`の実体
+* [notification_service.md](./notification_service.md) - `notification_service.send_push`の実体
+* [switchbot_service.md](./switchbot_service.md) - `switchbot_service.send_device_command`の実体(TVロック解除)
+* [init_unified_db.md](./init_unified_db.md) - DBスキーマ初期化・マイグレーション適用を行うスクリプト
+
 ## 2. ファイルの概要
 
 データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。

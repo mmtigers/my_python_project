@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `NVR_RECORD_DIR`, `TMP_VIDEO_DIR`, `DISCORD_WEBHOOK_*`等の設定値を提供
+- [database.md](./database.md) — `core.database.get_db_cursor`の実体
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体(本ファイル内では未使用のままインポートされている)
+- [timelapse_runner.md](./timelapse_runner.md) — 本スクリプトを定時または`--force`でサブプロセス起動する呼び出し元
+- [daily_timelapse_job.md](./daily_timelapse_job.md) — 同種のタイムラプス動画生成を行う姉妹バッチ(動き検知ベースのアプローチを採用する点で処理方式が異なる)
+- [smart_timelapse_generator.md](./smart_timelapse_generator.md) — 同種のタイムラプス生成コアエンジン(OpenCVによる動体検知を用いる点で本ファイルの単純なイベント時刻ベース抽出と異なる)
+
 ## 2. ファイルの概要
 
 データベースから取得したイベント検知時刻に基づき、特定の時間帯のNVR録画ファイル（動画）からクリップを抽出し、それらを結合してタイムラプス動画を生成、最終的にDiscordへアップロードする処理を担うスクリプト。
@@ -285,6 +295,14 @@ graph TD
 | `config`の具体的な設定内容 | 外部モジュールで定義されており、本ファイルからはパスやURLの実態が読み取れないため。 | `config.py`等の設定モジュール |
 | データベースのスキーマ・仕様 | `device_records`テーブルの実在カラムや、`get_db_cursor`のDBエンジン（SQLite/PostgreSQL等）が読み取れないため。 | `core/database.py` および スキーマ定義 |
 | ロガーの仕様 | `setup_logging`の出力仕様（ファイル出力の有無、フォーマット等）が不明なため。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config`の具体的な設定内容 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込み、NAS等外部ストレージのマウント遅延に対応した検証・作成処理を提供する設計であることが判明した。ただし`NVR_RECORD_DIR`や`TMP_VIDEO_DIR`個別の値自体は`config.md`側でも確認できていない。 | config.md |
+| データベースのスキーマ・仕様 | `database.md`の解析によれば、`core.database.get_db_cursor`は`sqlite3`ベースの接続コンテキストマネージャ(リトライ機能付き、`PRAGMA journal_mode=WAL`/`PRAGMA foreign_keys=ON`を発行)であることが判明した。ただし`device_records`テーブルの正確なカラム定義は`database.md`側でも「呼び出し元依存」として不明とされている。 | database.md |
+| ロガーの仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
 
 ## 10. 自己検証結果
 
