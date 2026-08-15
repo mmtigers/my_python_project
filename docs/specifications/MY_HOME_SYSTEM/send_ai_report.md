@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(GEMINI_API_KEY、家族構成等)を提供
+- [common.md](./common.md) — DB接続・ログ・通知送信などの共通処理を提供(Facadeモジュール)
+- [weather_service.md](./weather_service.md) — 天気レポート取得先(`WeatherService.get_weather_report_text`)
+- [news_service.md](./news_service.md) — ニュース取得先
+- [menu_service.md](./menu_service.md) — 献立取得先
+- [camera_digest_service.md](./camera_digest_service.md) — カメラ画像取得先(`get_todays_highlight_images`)
+- [scheduler_boot.md](./scheduler_boot.md) — 呼び出し元の可能性(推定。scheduler_boot.py自身の`TASKS`定義内容は未確認のため断定不可)
+
 ## 2. ファイルの概要
 
 * 自宅のデータベース、センサー、外部サービス（天気、ニュース、メニュー、カメラなど）から日次データを収集し、Gemini APIを利用して家族向けの状況レポートテキストを生成する。
@@ -370,6 +380,14 @@ graph TD
 | `common.get_db_cursor`の仕様 | コンテキストマネージャとして動作しているが、トランザクション管理の有無が不明。 | `common.py` |
 | 各種DBテーブルのスキーマ構造 | `SELECT`文のカラム名から推測は可能だが、厳密なデータ型やリレーションが不明。 | DBのDDL文 または `config.py` |
 | 各種Serviceが返すオブジェクトの形式 | `get_top_news`, `get_weather_report_text`などの正確な戻り値構造が不明。 | `news_service.py`, `weather_service.py` 等 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.send_push`の仕様 | `common.md`の解析によれば、`common.py`は非推奨のFacadeモジュールであり、`send_push`は実体として`services.notification_service.send_push`を再エクスポートしているとされる。`notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知するとされ、戻り値は`bool`(いずれか1つでも成功すれば`True`)とされる。 | common.md, notification_service.md |
+| `common.get_db_cursor`の仕様 | `common.md`の解析によれば、`get_db_cursor`は実体として`core.database.get_db_cursor`を再エクスポートしているとされる。`database.md`の解析によれば、SQLiteの`sqlite3.OperationalError`(locked)発生時に最大5回リトライするコンテキストマネージャで、WALモードおよび外部キー制約を有効化し、`commit=True`指定時のみコミットするとされる。ただし厳密なトランザクション分離レベルまでは`database.md`でも確認されていない。 | common.md, database.md |
+| 各種Serviceが返すオブジェクトの形式 | `weather_service.md`の解析によれば`get_weather_report_text`は`str`(レポートテキスト)を返すとされる。`news_service.md`の解析によれば`get_top_news`/`get_local_news`は`{"title": str, "link": str}`形式の辞書のリストを返すとされる。`menu_service.md`の解析によれば`MenuService.get_recent_menus`は`"YYYY-MM-DD: メニュー名"`形式の文字列リストを、`get_special_day_info`は特別な日の名称文字列または`None`を返すとされる。`camera_digest_service.md`の解析によれば`get_todays_highlight_images`は検証済み画像ファイルパスの`List[str]`を返すとされる。 | weather_service.md, news_service.md, menu_service.md, camera_digest_service.md |
 
 ## 10. 自己検証結果
 

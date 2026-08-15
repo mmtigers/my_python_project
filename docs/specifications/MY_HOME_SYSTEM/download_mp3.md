@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../family-quest/src/hooks/useSound.md](../family-quest/src/hooks/useSound.md) - 本ファイルの保存先(`DEFAULT_OUTPUT_DIR = family-quest/src/assets/sounds`)にダウンロードされた音声ファイルを、フロントエンド側で`SOUNDS`マップ(`/quest/*.mp3`)経由で再生している可能性がある消費側候補。ただし`useSound.md`側のパスは`/quest/...`という公開URLパスであり、本ファイルの`assets/sounds`という配置場所とビルド成果物としてどう対応するかは両ドキュメントからは確認できていない
+* [sound_manager.md](./sound_manager.md) - 同じく音声再生に関わるが、対象が異なる(本ファイルはfamily-quest用のBGM/効果音素材のダウンロード、`sound_manager.py`はサーバー側OSの音声デバイスでの直接再生)ため、直接のコード上の依存関係はない
+
 ## 2. ファイルの概要
 
 * YouTubeの動画URLを元に音声をダウンロードし、MP3形式へ変換して特定のディレクトリへ保存するための単一のCLI（コマンドラインインターフェース）スクリプトである。

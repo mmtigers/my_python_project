@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md) — 本ファイルがインポートを試みる`core.nas_utils.get_managed_target_directory`の実装候補（同名関数のシグネチャ・実装が確認できる）。
+* [../MY_HOME_SYSTEM/utils.md](../MY_HOME_SYSTEM/utils.md) — 本ファイルがインポートを試みる`core.utils.wait_for_storage_warmup`の実装候補（同名関数のシグネチャ・実装が確認できる）。
+* [../MY_HOME_SYSTEM/logger.md](../MY_HOME_SYSTEM/logger.md) — `core.logger`配下のロガー実装（`setup_logging`, `DiscordErrorHandler`）に関する参考情報。ただし本ファイルがインポートする`get_logger`関数自体はこのドキュメントでは文書化されていない。
+* [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) — Discord Webhook通知の別実装パターンとの比較参考（本ファイルは`services.notification_service`を使わず`requests.post`を直接呼び出す独自実装）。
+* [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS監視・容量管理という運用文脈での関連。
+
 ## 2. ファイルの概要
 
 * モジュールDocstring上「NewFace Monitor System (Refactored for MY_HOME_SYSTEM)」と称される、対象Webサイト（`https://petitpetit-dream.com/newface/`）の新人キャスト紹介ページを定期巡回し、新規キャストの追加をDiscord Webhookで通知するバッチスクリプトである。
@@ -585,6 +593,13 @@ graph TD
 | 対象Webサイトの実際のHTML構造 | `SELECTOR_CONTAINER`等のセレクタが対応する正確なマークアップ構造は本ファイルのコードからは分からない。 | 対象サイトの実際のHTMLソース（コード外） |
 | Discord Webhook APIの詳細仕様 | ペイロード形式以外の認証方式、レート制限、エラーレスポンスの詳細仕様が本ファイルからは不明。 | Discord公式APIドキュメント（コード外） |
 | 本ファイルの実行方法（cron設定等） | `if __name__ == "__main__":`で直接実行される想定だが、定期実行のスケジューリング方法（cron、systemdタイマー等）は本ファイルからは不明。 | デプロイ設定・cron定義ファイル等 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `core.nas_utils.get_managed_target_directory`の実際の実装 | 関連ドキュメント（`nas_utils.md`）の解析結果によれば、同名関数`get_managed_target_directory(nas_dir_str, fallback_dir_str, mount_point="/mnt/nas")`が存在し、マウント確認・書き込み権限チェック→未マウント時は`sudo mount`による再マウント試行→復旧時はフォールバックデータをNASへ同期→最終手段としてローカルのフォールバックパスを返す、という実装であることが分かった。引数名（`nas_dir_str`, `fallback_dir_str`, `mount_point`）は本ファイルの呼び出し箇所（`cls.NAS_DIR_STR`, `cls.LOCAL_DIR_STR`, `cls.MOUNT_POINT`）と一致しており、関連性が高いと考えられる。ただしこれはあくまで別ファイルの解析結果に基づく補足情報であり、本ファイルおよび`core/nas_utils.py`のソースコードを直接確認したものではなく、両者が完全に同一の実装であるという確証はない。 | [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md) |
+| `core.utils.wait_for_storage_warmup`の実際の実装 | 関連ドキュメント（`utils.md`）の解析結果によれば、同名関数`wait_for_storage_warmup(target_path, max_retries=5, base_delay=1.0, max_delay=16.0)`が存在し、対象パス（ディレクトリでなければ親ディレクトリ）への読み書きアクセス可否を指数関数的バックオフで確認する実装であることが分かった。本ファイルのフォールバック実装（`target_dir, max_retries=5, base_delay=1.0`で、テストファイルの書き込み・削除により確認する方式）とは思想が似ているが、引数名・`max_delay`引数の有無・具体的な確認方法（アクセス権確認 vs テストファイル書き込み）に差異があり、完全に同一の実装であるとは確認できない。あくまで別ファイルの解析結果に基づく補足情報である。 | [../MY_HOME_SYSTEM/utils.md](../MY_HOME_SYSTEM/utils.md) |
 
 ## 10. 自己検証結果
 

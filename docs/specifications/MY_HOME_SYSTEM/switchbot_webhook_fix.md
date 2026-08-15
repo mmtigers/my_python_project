@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `setup_logging`・`send_push`を再エクスポートするFacadeモジュール
+- [logger.md](./logger.md) — `common.setup_logging`の実体(`core.logger.setup_logging`)
+- [notification_service.md](./notification_service.md) — `common.send_push`の実体(`services.notification_service.send_push`)
+- [config.md](./config.md) — `LINE_CHANNEL_ACCESS_TOKEN`/`LINE_USER_ID`等の設定値を提供
+- [switchbot_service.md](./switchbot_service.md) — `create_switchbot_auth_headers`(SwitchBot API認証ヘッダー生成)の実装元
+- [webhook_router.md](./webhook_router.md) — 同じSwitchBot/LINE Webhookエコシステムに属する、Webhook受信側のルーター
+
 ## 2. ファイルの概要
 
 * 環境変数に設定されたベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。更新が行われた場合はプッシュ通知を送信して報告する。
@@ -205,6 +214,15 @@ graph TD
 | `config` 内の変数定義方法 | `LINE_CHANNEL_ACCESS_TOKEN` 等が環境変数から取得されているのか、ファイルに直書きされているのか不明のため。 | `config.py` |
 | API認証ヘッダーの生成ロジック | SwitchBot API仕様に準拠したハッシュ生成などがどのように実装されているか不明のため。 | `services/switchbot_service.py` |
 | 外部APIの例外レスポンス構造 | API側で想定外のエラーが発生した場合のステータスコードやJSON構造の詳細が不明のため。 | 各外部API仕様書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.setup_logging` の詳細仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`TimedRotatingFileHandler`、ログファイル名`home_system.log`固定)に加え、ERRORレベル以上のログをDiscord Webhookへ通知する`DiscordErrorHandler`を登録する設計であることが判明した。 | logger.md |
+| `common.send_push` の詳細仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する関数(戻り値`bool`)と推測される。 | notification_service.md |
+| `config` 内の変数定義方法 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`LINE_CHANNEL_ACCESS_TOKEN`個別の値は`config.md`側でも確認できていない。 | config.md |
+| API認証ヘッダーの生成ロジック | `switchbot_service.md`の解析によれば、`create_switchbot_auth_headers`はトークン・タイムスタンプ・nonceを用いてHMAC-SHA256署名を生成し認証ヘッダー辞書を構築する関数であり、トークンまたはシークレット未設定時は警告ログを出力して空辞書を返すことが判明した。 | switchbot_service.md |
 
 ## 10. 自己検証結果
 

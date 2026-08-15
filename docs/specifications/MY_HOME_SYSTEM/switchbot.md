@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [switchbot_service.md](./switchbot_service.md) — 利用元。`request_switchbot_api`がGETレスポンスを`DeviceStatusResponse`でバリデーションする
+- [webhook_router.md](./webhook_router.md) — 利用元。`SwitchBotWebhookBody`を`/webhook/switchbot`エンドポイントのリクエストボディ型として使用する
+- [switchbot_power_monitor.md](./switchbot_power_monitor.md) — 関連モジュール。`sb_tool.get_device_status`の戻り値(`DeviceStatusResponse`相当)から電力・温湿度・電源状態を抽出している
+
 ## 2. ファイルの概要
 
 SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス状態レスポンスのデータ構造を、Pydanticのデータモデルとして定義している。
@@ -161,6 +167,13 @@ graph TD
 | --- | --- | --- |
 | `DeviceStatusResponse.body` の正確なデータ構造と内訳 | 「デバイスにより中身が激しく変わるため一旦Any」と記述されており、本ファイル単独では各デバイスの具体的なプロパティ名や型が判明しないため。 | 各デバイスの仕様が記載された公式ドキュメント、またはAPIレスポンスの処理ロジック実装ファイル |
 | モデルの利用用途（実際のビジネスロジック） | 本ファイルはデータモデルの定義のみであり、これらがどこでインスタンス化され、どのようにデータベース等に保存・利用されるか不明なため。 | ルーター、サービス、コントローラーなどの機能実装ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `DeviceStatusResponse.body` の正確なデータ構造と内訳 | `switchbot_power_monitor.md`の解析によれば、`body`からは電力(`power`)、温度・湿度、電源ON/OFF状態などのキーが取り出されているとされる。ただし、これは`switchbot_power_monitor.py`側のコードが参照しているキー名からの限定的な把握であり、`DeviceStatusResponse.body`自体の完全なスキーマ(全デバイス種別分)が判明したわけではない。 | switchbot_power_monitor.md |
+| モデルの利用用途（実際のビジネスロジック） | `switchbot_service.md`の解析によれば、`request_switchbot_api`関数(SwitchBot APIへの全GETリクエストの共通処理)がレスポンスを`DeviceStatusResponse`でバリデーションしてから返しているとされる。`webhook_router.md`の解析によれば、`SwitchBotWebhookBody`はFastAPIの`/webhook/switchbot`エンドポイントのリクエストボディの型として使用され、`context.deviceMac`等のフィールドからデバイス種別・状態を判定するために利用されているとされる。 | switchbot_service.md, webhook_router.md |
 
 ## 10. 自己検証結果
 

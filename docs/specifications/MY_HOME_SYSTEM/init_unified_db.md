@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `config.SQLITE_TABLE_*`定数群および`config.SQLITE_DB_PATH`を提供
+* [common.md](./common.md) - `common.setup_logging`, `common.get_db_cursor`のFacade再エクスポート元
+* [database.md](./database.md) - `common.get_db_cursor`の実体(`core.database.get_db_cursor`)。WALモード・外部キー制約(`PRAGMA foreign_keys=ON`)の有効化やリトライ機構を提供
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [quest_service.md](./quest_service.md) - 本ファイルが作成する`quest_history.linked_history_id`等のカラムを実際に利用する呼び出し元
+
 ## 2. ファイルの概要
 
 本ファイルは、SQLiteデータベースの初期化とスキーマの整合性検証を行うスクリプトです。システムの稼働に必要な各種テーブル群（Core Tables、Legacy Tables、Game & Quest System等のトランジション用テーブル）を `CREATE TABLE IF NOT EXISTS` 文を用いて作成し、高頻度書き込みテーブル（`power_usage`, `switchbot_meter_logs`, `device_records`）へのインデックスを`CREATE INDEX IF NOT EXISTS`で作成し、バージョン管理されたマイグレーション（`migrations/`配下）を適用したうえで、主要なテーブルに期待されるカラムが正しく定義されているかを `PRAGMA table_info` を使用して自動検証します。
@@ -192,6 +200,13 @@ graph TD
 | データベースの物理保存パス | `SQLITE_DB_PATH` で指定されているが実際の文字列が不明なため。 | `config.py` |
 | `get_db_cursor` の詳細挙動 | 例外発生時のロールバック処理などがどのように行われているか不明なため。 | `common.py` |
 | `migrations/`配下のSQL内容 | 実際にどのようなマイグレーションが登録されているか（対象テーブル・カラム）が本ファイルからは不明なため。 | `migrations/*.sql`, `core/migrations.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `get_db_cursor` の詳細挙動 | `database.md`の解析によれば、`get_db_cursor`(`common.get_db_cursor`の実体)は最大5回・1秒間隔のリトライ機構を備え、接続時に`PRAGMA journal_mode=WAL;`と`PRAGMA foreign_keys=ON;`を実行するコンテキストマネージャであり、`OperationalError`(locked)以外の例外発生時はロールバックして再送出するとされる。 | database.md |
+| 各テーブルの実際のテーブル名／データベースの物理保存パス | `config.md`の解析によれば、`config.SQLITE_TABLE_*`および`config.SQLITE_DB_PATH`は環境変数等から初期化される定数であることが判明したが、実際の文字列値自体は`config.md`でも確認できていない。 | config.md |
 
 ## 10. 自己検証結果
 

@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`SQLITE_TABLE_FOOD`, `MENU_OPTIONS`, `LINE_USER_ID`等)を提供
+- [common.md](./common.md) — ロガー・DBカーソル取得・通知送信の共通処理を提供(Facadeモジュール)
+- [notification_service.md](./notification_service.md) — `common.send_push`の実体
+- [database.md](./database.md) — `common.get_db_cursor`の実体
+- [menu_service.md](./menu_service.md) — 同じ夕食メニュー領域を扱う別サービス(`food_records`テーブルを参照。テーブル名やデータ形式の関連性は未確認)
+
 ## 2. ファイルの概要
 
 夕食のメニュー（自炊・外食）に関する過去の履歴データをデータベースから集計し、頻出メニューのランキングとデフォルト候補を組み合わせたLINE Flex Messageを構築して、特定のユーザーへプッシュ通知を送信するためのスクリプト。
@@ -208,6 +216,13 @@ graph TD
 | DBの正確なスキーマ | `timestamp`, `menu_category`カラムの存在はコードから確認できるが、その他のカラム定義やテーブル名が不明なため。 | `config.py` および DBマイグレーションファイル |
 | `MENU_OPTIONS`のデータ構造 | デフォルトメニューを埋める処理で`getattr(config, "MENU_OPTIONS", {}).get(cat, [])`と呼び出しているが、中身の具体値が不明なため。 | `config.py` |
 | プッシュ通知の送信仕様 | `common.send_push`がどのようなプロトコルでLINE APIを叩いているか、再送処理を含んでいるかが不明なため。 | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| プッシュ通知の送信仕様 | `notification_service.md`の解析によれば、`common.send_push`の実体は`services.notification_service.send_push`であり、LINE向けには`linebot.v3.messaging`の`push_message`(明示的なリトライ処理なし)を用いるとされる。送信失敗時は例外を捕捉して`False`を返すのみで、自動再送処理は実装されていないとされる。 | common.md, notification_service.md |
+| `common.get_db_cursor`の接続先・トランザクション仕様(推測補足) | `database.md`の解析によれば、`common.get_db_cursor`の実体は`core.database.get_db_cursor`であり、`sqlite3.OperationalError`(locked)発生時に最大5回リトライするコンテキストマネージャで、WALモードおよび外部キー制約を有効化するとされる。ただしDBファイルの正確なパスや対象テーブルの列定義までは`database.md`でも判明していない。 | common.md, database.md |
 
 ## 10. 自己検証結果
 

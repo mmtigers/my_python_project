@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`MONITOR_DEVICES`)を提供
+- [switchbot_service.md](./switchbot_service.md) — `sb_tool.get_device_status`の実体
+- [switchbot.md](./switchbot.md) — `get_device_status`の戻り値のバリデーションに使われる`DeviceStatusResponse`モデルを定義
+- [sensor_service.md](./sensor_service.md) — 呼び出し先。`process_power_data`, `process_meter_data`に処理を委譲
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [scheduler_boot.md](./scheduler_boot.md) — 呼び出し元の可能性(推定。scheduler_boot.mdの次のステップで本ファイルが`TASKS`関連候補として挙げられている)
+- [webhook_router.md](./webhook_router.md) — `config.MONITOR_DEVICES`を参照する別モジュール(`id`, `name`, `location`キーの存在を裏付け)
+
 ## 2. ファイルの概要
 
 本ファイルは、設定された監視対象のSwitchBotデバイスからAPI経由で定期的にステータス（電力、温湿度、電源状態など）を取得し、状態変化の有無に応じて適切なログを出力するとともに、取得したセンサーデータを後続の処理サービス（電力データ処理、温湿度データ処理）へ連携するためのデバイス監視スクリプトである。
@@ -230,6 +240,15 @@ graph TD
 | SwitchBot APIのレスポンス仕様 | `sb_tool.get_device_status()` が返す `body` の構造詳細、およびエラー時の具体的な `message` 仕様が不明なため。 | `services/switchbot_service.py` |
 | データ処理時のエラー制御 | `sensor_service.process_power_data` および `process_meter_data` 側でエラーが発生した場合の例外送出有無や再試行ロジックが不明なため。 | `services/sensor_service.py` |
 | ログの出力先・フォーマット | `logger.info` などの出力がコンソールのみか、ファイルや外部監視サービスへ転送されているかが不明なため。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 設定デバイスの構造定義 | `webhook_router.md`の解析によれば、`config.MONITOR_DEVICES`の各要素は少なくとも`id`, `name`, `location`キーを持つとされる。本ファイル自身のコードからは`notify_settings`キーの存在も確認できる。ただし、これ以外にどのようなキーが存在するかを含む完全なスキーマは、`config.py`自体が未確認のため依然として不明である。 | webhook_router.md |
+| SwitchBot APIのレスポンス仕様 | `switchbot_service.md`の解析によれば、`sb_tool.get_device_status`(=`get_device_status`)は`request_switchbot_api`経由でGETリクエストを送り、レスポンスを`models.switchbot.DeviceStatusResponse`でバリデーションした辞書を返すとされ、失敗時は`None`を返すフェイルソフト設計とされる。`switchbot.md`の解析によれば、`DeviceStatusResponse`は`statusCode`, `message`, `body`(型は`Dict[str, Any]`)を持つモデルで、`body`の中身はデバイス種別により大きく異なり厳密な型定義はされていないとされる。 | switchbot_service.md, switchbot.md |
+| データ処理時のエラー制御 | `sensor_service.md`の解析によれば、`process_meter_data`は明示的な例外処理を持たず、`process_power_data`はDBからの前回値取得時の例外を`except Exception`で捕捉し前回値を`0.0`として処理を継続する(例外を再送出しない)とされる。 | sensor_service.md |
+| ログの出力先・フォーマット | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録するとされる。 | logger.md |
 
 ## 10. 自己検証結果
 

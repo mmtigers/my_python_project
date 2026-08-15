@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../../hooks/useGameData.md](../../../hooks/useGameData.md) - `FamilyStats`/`ChronicleItem`型のインポート元、`stats`/`chronicle`データの取得元
+* [../../../../App.md](../../../../App.md) - 呼び出し元（`viewMode === 'familyLog'`時に本コンポーネントを描画）
+
 ## 2. ファイルの概要
 
 * 家族のステータス情報（ランク、レベル、クエスト数、所持金）および冒険の記録（タイムライン形式のログ）を描画・表示するためのReactコンポーネントである。
@@ -135,6 +140,12 @@ graph TD
 | --- | --- | --- |
 | `FamilyStats`の厳密なスキーマ | `@/hooks/useGameData` からインポートされた型であり、コード内でのプロパティ参照（`partyRank`, `totalLevel`, `totalQuests`, `totalGold`）以外に含まれるデータが不明なため。 | `@/hooks/useGameData` |
 | `ChronicleItem`の厳密なスキーマ | `@/hooks/useGameData` からインポートされた型であり、オブジェクトに混在する複数パターンのプロパティの正規の仕様が不明なため。 | `@/hooks/useGameData` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `FamilyStats`/`ChronicleItem`の厳密なスキーマ | `useGameData.md`の解析によれば、`useGameData`フックは`familyStats`と`chronicle`を含むデータ群を返すオブジェクトを提供するとされているが、`useGameData.md`本文中に`FamilyStats`/`ChronicleItem`インターフェース自体の詳細なプロパティ一覧は記載されておらず、フィールドの存在自体は裏付けられるものの、厳密なスキーマ（各プロパティの型・必須/任意）は`useGameData.md`側の解析結果からも判明していない。ただしこれは`useGameData.md`側の解析結果からの補足であり、`useGameData.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../hooks/useGameData.md |
 
 ## 10. 自己検証結果
 
