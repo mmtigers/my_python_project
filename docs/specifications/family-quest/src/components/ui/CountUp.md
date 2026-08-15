@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../features/family/components/UserStatusCard.md](../../features/family/components/UserStatusCard.md) - 利用元の一例（HP/ゴールド/メダル等の数値表示）
+* [../../features/shop/components/RewardShop.md](../../features/shop/components/RewardShop.md) - 利用元の一例（所持ゴールドのアニメーション表示）
+
 ## 2. ファイルの概要
 
 * `framer-motion`ライブラリのフックとコンポーネントを利用し、受け取った数値（`value`）に対してバネ物理モデルに基づいたカウントアップアニメーションを適用し、プレフィックス・サフィックス・カンマ区切りを付与してテキストとして描画するコンポーネントである。
@@ -127,6 +132,12 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 本コンポーネントに渡される実際のプロパティ値（特に `value` の桁数・更新頻度や `className` によるスタイリング） | このファイルはコンポーネントの定義のみであり、呼び出し側のコンテキストが含まれていないため | 本コンポーネントを呼び出している親ファイル群 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 本コンポーネントに渡される実際のプロパティ値 | `UserStatusCard.md`の解析によれば、`UserStatusCard`はHP・所持ゴールド・獲得メダル等の数値表示に`CountUp`を利用しているとされ、`RewardShop.md`の解析によれば、`RewardShop`は`<CountUp value={currentUser.gold || 0} suffix=" G" />`という形で所持ゴールドの表示に利用しているとされている。これにより`value`には数値型（HP・ゴールド・メダル枚数等）が、`suffix`には単位文字列（例: `" G"`）が渡される実例が確認できる。ただしこれらは`UserStatusCard.md`・`RewardShop.md`側の解析結果からの補足であり、`UserStatusCard.tsx`/`RewardShop.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../features/family/components/UserStatusCard.md`, `../../features/shop/components/RewardShop.md` |
 
 ## 10. 自己検証結果
 

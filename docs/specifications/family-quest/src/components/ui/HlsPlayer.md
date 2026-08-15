@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../features/camera/components/LiveView.md](../../features/camera/components/LiveView.md) - 呼び出し元（ライブ映像表示、`streamUrl`に`/api/cameras/live/{id}/stream.m3u8`を渡す）
+* [../../features/camera/components/RecordView.md](../../features/camera/components/RecordView.md) - 呼び出し元（録画再生、`streamUrl`/`startPosition`/`onVideoRef`を渡す）
+* [../../../../MY_HOME_SYSTEM/camera_router.md](../../../../MY_HOME_SYSTEM/camera_router.md) - `streamUrl`が指すHLSマニフェスト・セグメント配信エンドポイントの実装元
+
 ## 2. ファイルの概要
 
 * `hls.js` ライブラリを用いてHLS（HTTP Live Streaming）形式の映像ストリームを`<video>`要素に再生させる汎用UIコンポーネント。
@@ -170,6 +176,12 @@ graph TD
 | `hls.js`（`Hls`クラス）の内部実装詳細 | 本ファイルからは呼び出しているAPI（`isSupported`, `loadSource`, `attachMedia`, `recoverMediaError`, `destroy`等）のみが確認でき、内部ロジックは不明なため | `hls.js`ライブラリ本体のソース、または`node_modules/hls.js/package.json` |
 | `streamUrl`として渡される実際のHLSマニフェストの仕様（セグメント長、更新頻度など） | 本ファイルはURLを受け取って再生するのみで、マニフェストの生成側の情報を持たないため | バックエンドの`/api/cameras/live/...`・`/api/cameras/record/...`エンドポイント実装 |
 | Hls非対応かつネイティブ非対応ブラウザでの実際のユーザー体験 | コード上は無反応（サイレント失敗）になると読めるが、実機・実ブラウザでの検証情報がないため | 該当なし（実機検証が必要） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `streamUrl`として渡される実際のHLSマニフェストの仕様 | `camera_router.md`の解析によれば、`GET /live/{camera_id}/stream.m3u8`はカメラ未検出時404、`camera_service.start_hls_stream`失敗時500、プレイリスト生成が最大5秒（0.5秒間隔×10回）待っても完了しない場合は503を返すとされている。また`GET /record/{camera_id}/{target_date}/{filename}`は拡張子で`.m3u8`（プレイリスト生成）と`.ts`（セグメント配信）を分岐し、対応するカメラや録画ファイルが無い場合は404を返すとされている。ただし実際のセグメント長やマニフェストの更新頻度といった詳細は`camera_service`側（`camera_router.md`でもブラックボックス扱い）に委譲されており、`camera_router.md`の解析結果からも判明していない。これらはあくまで`camera_router.md`側の解析結果からの補足であり、`camera_router.py`/`camera_service.py`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../../../MY_HOME_SYSTEM/camera_router.md` |
 
 ## 10. 自己検証結果
 

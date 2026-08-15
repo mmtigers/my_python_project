@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [sensor_service.md](./sensor_service.md) - データ処理の委譲先(`process_power_data`, `process_meter_data`)
+* [config.md](./config.md) - アクセストークン設定値の提供元
+* [logger.md](./logger.md) - `setup_logging`の実体
+
 ## 2. ファイルの概要
 
 このファイルは、指定された複数拠点（伊丹、高砂）のNature Remo APIへ定期的にリクエストを送信し、稼働中のアプライアンス（スマートメーター）の瞬時電力データと、デバイス（センサー）の温湿度データを取得する役割を担う。取得したデータは解析され、外部のセンサーデータ処理サービスへ非同期で委譲される。
@@ -233,6 +239,13 @@ graph TD
 | APIトークンの管理とスコープ | `config` モジュールから読み取っているトークンがどのような権限を持っているのか、本ファイルからは判断不可。 | `config.py` または環境変数定義ファイル |
 | ロギング機構の詳細 | ログがコンソールのみに出力されるのか、ファイルにも保存されるのか、外部に転送されるのかが不明。 | `core/logger.py` |
 | APIの完全なデータ構造 | 取得結果 `res_app.json()` および `res_dev.json()` のうち、本ファイルで参照していないキーが含まれているか不明。 | 実際のAPIレスポンスログ または Nature Remo API仕様書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 外部委譲されたデータの永続化処理 | `sensor_service.md`の解析によれば、`process_meter_data`は`save_log_async`を介して温湿度データをDBへ保存し、`process_power_data`は`common.get_db_cursor`で前回値を取得したうえで`save_log_async`により現在値を保存し、閾値を跨いだ場合に`send_push`で通知する設計であることが判明した。 | `sensor_service.md` |
+| ロギング機構の詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
 
 ## 10. 自己検証結果
 

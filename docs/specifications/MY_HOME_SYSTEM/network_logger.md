@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `LOG_DIR`, カメラ設定(`CAMERAS`)の提供元
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [camera_monitor.md](./camera_monitor.md) - 同じ`config.CAMERAS`設定を参照する別モジュール(ONVIF動体検知を担当。本ファイルはPing/TCP死活監視を担当という役割分担と推測される)
+
 ## 2. ファイルの概要
 
 指定されたカメラのIPアドレスに対し、定期的にICMP Pingによる死活監視とRTSPポートへのTCP接続（ハンドシェイク）試行を行い、レイテンシとステータスを計測してCSVファイルに記録するネットワーク監視機能を提供している。
@@ -254,6 +260,13 @@ graph TD
 | --- | --- | --- |
 | 設定値の詳細構造 | `config.CAMERAS`の要素が持つキー（"name", "ip"以外に何があるか）や`LOG_DIR`の値が不明。 | `config.py` |
 | ロガーの仕様 | `setup_logging`関数がどのような設定（出力先、ローテーション、フォーマット等）でロガーを初期化しているか不明。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| ロガーの仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
+| 設定値の詳細構造 | `config.md`の解析によれば、`config.py`はPydanticの`CameraConfig`モデルで`devices.json`由来のカメラ設定を検証する仕組みを持ち、`camera_monitor.md`の解析でも`config.CAMERAS`が同様に参照されていることが判明した。ただし`"name"`, `"ip"`以外の具体的なキー構成や`LOG_DIR`の値そのものは`config.py`本体からは確認できていない。 | `config.md`, `camera_monitor.md` |
 
 ## 10. 自己検証結果
 
