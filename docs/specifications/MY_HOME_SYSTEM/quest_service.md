@@ -901,6 +901,16 @@ graph TD
 | 非同期通信のエラー処理 | `switchbot_service.send_device_command` が返すレスポンス構造が不明。 | `services/switchbot_service.py` |
 | 兄妹連携クエストの対象ユーザー拡張時の挙動 | `_get_sibling_partner_id`は`role_child`がちょうど2人であることを前提としているが、3人以上に拡張する場合の相方選択ロジック（誰と誰を連結するか）の仕様は本ファイルには存在しない。 | 将来的な仕様変更に関するドキュメントまたは`quest_data.py`のtarget値設計 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DB各テーブルのスキーマ(`quest_history.linked_history_id`カラムを含む) | `init_unified_db.md`の解析によれば、`init_unified_db.py`は`CREATE TABLE IF NOT EXISTS`によるテーブル作成後、`core.migrations.apply_pending_migrations`により`migrations/`配下の未適用SQLをファイル名昇順で適用しバージョン管理する設計であることが判明したが、`quest_history.linked_history_id`カラムがどのマイグレーションファイルで追加されたかは`init_unified_db.md`自体でも特定できていない。 | init_unified_db.md |
+| `common.get_now_iso`の形式 | `common.md`の解析によれば、`common.py`は下位互換のためのFacadeであり`get_now_iso`は`core.utils`から再エクスポートされているとされるが、具体的なフォーマット(ミリ秒・タイムゾーンの有無)は`common.md`自体でも未確認とされている。 | common.md |
+| 各種定数の値(TVロック解除に使用されるID) | `config.md`の解析によれば、`TV_UNLOCK_QUEST_IDS`は環境変数のカンマ区切り文字列から`isdigit()`を満たす値のみを抽出して`int`に変換する実装であることが判明したが、実際に設定されているID値自体は`config.md`でも確認できていない。 | config.md |
+| ゲーム計算ロジック | `game_logic.md`の解析によれば、`GameLogic.calc_level_progress`は次レベル必要経験値を`100 × 1.2^(レベル-1)`の切り捨てで算出しレベルアップを繰り返し判定する処理、`calc_level_down`は経験値減算時にレベルが1より大きい範囲で前レベルの必要経験値を足し戻す処理であることが判明した。 | game_logic.md |
+| 非同期通信のエラー処理 | `switchbot_service.md`の解析によれば、`send_device_command`はPOSTリクエスト送信時の任意の例外を`except Exception`で捕捉しエラーログを出力して`None`を返すFail-Soft設計であることが判明した。 | switchbot_service.md |
+
 ## 10. 自己検証結果
 
 * [x] 完了: 推測・外部ファイルの仕様を一切含んでいない
