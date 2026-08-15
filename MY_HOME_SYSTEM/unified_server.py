@@ -266,11 +266,17 @@ if quest_dist_dir and os.path.exists(quest_dist_dir):
 
     # SPA用ルーティング (ファイルが存在すればそれを、なければindex.htmlを返す)
     # ★変更: /camera 配下のパスもSPAのルーティングに含める
+    quest_dist_dir_real = os.path.realpath(quest_dist_dir)
+
     @app.get("/quest/{full_path:path}")
     @app.get("/camera/{full_path:path}")
     async def serve_quest_spa(full_path: str):
-        target_file = os.path.join(quest_dist_dir, full_path)
-        
+        target_file = os.path.realpath(os.path.join(quest_dist_dir, full_path))
+
+        # ディレクトリトラバーサル対策: 解決後のパスが quest_dist_dir 配下であることを検証
+        if os.path.commonpath([quest_dist_dir_real, target_file]) != quest_dist_dir_real:
+            return JSONResponse(status_code=404, content={"error": "Not found"})
+
         # ファイル実体があればそれを返す (画像やJSなど)
         if os.path.isfile(target_file):
             return FileResponse(target_file)
