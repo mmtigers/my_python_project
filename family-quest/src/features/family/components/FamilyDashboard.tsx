@@ -5,14 +5,14 @@ import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
 import RewardShop from '../../shop/components/RewardShop';
+import { useSettings } from '@/context/useSettings';
+import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
+import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
 
 // 表示順(パパ・ママ・兄・妹)を固定するための並び替えキー(要件5)。
 // 権限判定(quest_users.role)とは別の「画面上の並び順」の関心事のため、ここでのみ
 // user_id を直接使う(Family Questの家族構成は固定のため妥当と判断)。
 const FAMILY_ORDER = ['dad', 'mom', 'son', 'daughter'];
-
-// まだ文字を十分読めない年齢の子ども向けに、アイコン主体・文字量を絞った表示にする対象(要件10)。
-const ICON_FIRST_USER_IDS = ['daughter'];
 
 function sortByFamilyOrder(users: User[]): User[] {
     return [...users].sort((a, b) => {
@@ -36,6 +36,7 @@ interface FamilyDashboardProps {
     onBuyReward: (user: User, reward: Reward) => void;
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
+    onApproveAll: () => void;
     onAvatarClick: (user: User) => void;
 }
 
@@ -45,12 +46,33 @@ interface FamilyDashboardProps {
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     users, quests, completedQuests, pendingQuests, rewards, pendingInventory,
-    onQuestClick, onBuyReward, onApprove, onReject, onAvatarClick,
+    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, onAvatarClick,
 }) => {
+    const { iconFirstUserIds, userThemeColors } = useSettings();
     const orderedUsers = sortByFamilyOrder(users);
     // 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは
     // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。
     const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];
+
+    // 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも
+    // 「今どこを触っているか」が一目でわかるようにする。
+    const [activeUserId, setActiveUserId] = useState<string | null>(null);
+
+    // 今日やることが1件もない人は、パネル自体は残しつつ視覚的な優先度を下げる
+    // (角度⑥と隣接する着想: 空パネルに余計な視線誘導をしない)
+    const hasNothingToDo = (user: User) => {
+        return !quests.some(q => {
+            if (q.target && q.target !== 'all') {
+                if (q.target.startsWith('role_')) {
+                    if (user.role !== q.target) return false;
+                } else if (q.target !== user.user_id) {
+                    return false;
+                }
+            }
+            const { isLocked, isDone } = getQuestLockState(q, user, completedQuests, pendingQuests);
+            return !isLocked && !isDone;
+        });
+    };
 
     return (
         <div className="flex flex-col gap-4 animate-in fade-in duration-300">
@@ -62,6 +84,7 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                     currentUser={representativeParent}
                     onApprove={onApprove}
                     onReject={onReject}
+                    onApproveAll={onApproveAll}
                 />
             )}
 
@@ -74,7 +97,11 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                         completedQuests={completedQuests}
                         pendingQuests={pendingQuests}
                         rewards={rewards}
-                        iconFirst={ICON_FIRST_USER_IDS.includes(user.user_id)}
+                        iconFirst={iconFirstUserIds.includes(user.user_id)}
+                        isActive={activeUserId === user.user_id}
+                        themeColorKey={userThemeColors[user.user_id]}
+                        isIdle={hasNothingToDo(user)}
+                        onInteract={() => setActiveUserId(user.user_id)}
                         onQuestClick={(q) => onQuestClick(user, q)}
                         onBuyReward={(r) => onBuyReward(user, r)}
                         onAvatarClick={() => onAvatarClick(user)}
@@ -92,19 +119,33 @@ interface FamilyPanelProps {
     pendingQuests: QuestHistory[];
     rewards: Reward[];
     iconFirst: boolean;
+    isActive: boolean;
+    themeColorKey?: keyof typeof THEME_BORDER_CLASSES;
+    isIdle: boolean;
+    onInteract: () => void;
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
     onAvatarClick: () => void;
 }
 
 const FamilyPanel: React.FC<FamilyPanelProps> = ({
-    user, quests, completedQuests, pendingQuests, rewards, iconFirst,
-    onQuestClick, onBuyReward, onAvatarClick,
+    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
+    onInteract, onQuestClick, onBuyReward, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop'>('quest');
 
+    const borderClass = isActive
+        ? (themeColorKey ? THEME_BORDER_CLASSES[themeColorKey] : 'border-yellow-400')
+        : 'border-gray-700';
+    const ringClass = isActive
+        ? `ring-2 ${themeColorKey ? THEME_RING_CLASSES[themeColorKey] : 'ring-yellow-400/50'}`
+        : '';
+
     return (
-        <div className="flex flex-col bg-black/30 border-2 border-gray-700 rounded-xl overflow-hidden min-w-0">
+        <div
+            onClickCapture={onInteract}
+            className={`flex flex-col bg-black/30 border-2 rounded-xl overflow-hidden min-w-0 transition-all duration-300 ${borderClass} ${ringClass} ${isIdle ? 'opacity-70' : ''}`}
+        >
             <div className="p-2 border-b border-gray-700">
                 <UserStatusCard user={user} onAvatarClick={onAvatarClick} />
             </div>

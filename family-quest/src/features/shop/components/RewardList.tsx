@@ -44,7 +44,7 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
       </div>
 
       {sortedRewards.length === 0 && (
-        <div className="text-center text-gray-500 py-4 text-xs">商品が入荷待ちです...</div>
+        <div className="text-center text-gray-400 py-4 text-xs">商品が入荷待ちです...</div>
       )}
 
       {sortedRewards.map((reward, index) => {

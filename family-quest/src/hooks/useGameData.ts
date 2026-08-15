@@ -162,10 +162,11 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
 
     // 却下
     const rejectQuestMutation = useMutation({
-        mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
+        mutationFn: async ({ user, history, reason }: { user: User; history: QuestHistory; reason?: string }) => {
             return apiClient.post('/api/quest/reject', {
                 approver_id: user.user_id,
                 history_id: history.id ?? history.history_id,
+                reason,
             });
         },
         onSuccess: () => {
@@ -236,10 +237,10 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         }
     };
 
-    const rejectQuest = async (user: User, historyItem: QuestHistory) => {
+    const rejectQuest = async (user: User, historyItem: QuestHistory, rejectReason?: string) => {
         if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
         try {
-            await rejectQuestMutation.mutateAsync({ user, history: historyItem });
+            await rejectQuestMutation.mutateAsync({ user, history: historyItem, reason: rejectReason });
             return { success: true };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
