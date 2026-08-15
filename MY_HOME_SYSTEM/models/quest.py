@@ -62,6 +62,9 @@ class HistoryAction(BaseModel):
 class ApproveAction(BaseModel):
     approver_id: str
     history_id: int
+    # 却下理由(プリセット選択、フロントエンドのみで完結していたUXにログ用の裏付けを追加)。
+    # 任意項目なので既存クライアント(未送信)との後方互換は崩さない。
+    reason: Optional[str] = None
 
 class UpdateUserAction(BaseModel):
     user_id: str

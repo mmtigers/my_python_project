@@ -54,5 +54,19 @@ export default defineConfig({
         changeOrigin: true,
       }
     }
-  }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // 変更頻度の低いベンダーライブラリをアプリコードと別チャンクに分離する。
+        // hls.js はカメラ機能(/camera)専用で重いため、main.tsx側のdynamic importと
+        // あわせて通常のFamily Quest画面のバンドルから完全に除外する。
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-query': ['@tanstack/react-query'],
+        },
+      },
+    },
+  },
 })

@@ -7,18 +7,36 @@ interface MessageModalProps {
     message: string;
     icon?: string;
     onClose: () => void;
+    // 角度⑨: エラー時にその場でもう一度同じ操作をやり直せるようにするための再試行ボタン。
+    // 渡された場合のみ、OKボタンの隣に表示する。
+    onRetry?: () => void;
 }
 
-const MessageModal: React.FC<MessageModalProps> = ({ title, message, icon, onClose }) => {
+const MessageModal: React.FC<MessageModalProps> = ({ title, message, icon, onClose, onRetry }) => {
     return (
         <Modal
             isOpen={true}
             onClose={onClose}
             title={<span className="text-yellow-400">{title}</span>}
             footer={
-                <Button onClick={onClose} variant="primary" className="w-full">
-                    OK
-                </Button>
+                onRetry ? (
+                    <>
+                        <Button onClick={onClose} variant="secondary" className="flex-1">
+                            閉じる
+                        </Button>
+                        <Button
+                            onClick={() => { onRetry(); onClose(); }}
+                            variant="primary"
+                            className="flex-1"
+                        >
+                            再試行
+                        </Button>
+                    </>
+                ) : (
+                    <Button onClick={onClose} variant="primary" className="w-full">
+                        OK
+                    </Button>
+                )
             }
         >
             <div className="text-center space-y-4">

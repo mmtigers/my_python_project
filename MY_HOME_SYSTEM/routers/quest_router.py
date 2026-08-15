@@ -52,7 +52,7 @@ def approve_quest(action: ApproveAction):
 
 @router.post("/reject", response_model=CancelResponse)
 def reject_quest(action: ApproveAction):
-    return quest_service.process_reject_quest(action.approver_id, action.history_id)
+    return quest_service.process_reject_quest(action.approver_id, action.history_id, action.reason)
 
 @router.post("/quest/cancel", response_model=CancelResponse)
 def cancel_quest(action: HistoryAction):
