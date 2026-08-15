@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等)を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [quest_router.md](./quest_router.md) — 呼び出し元。`POST /test_sound`エンドポイントから`sound_manager.play()`を呼び出す
+
 ## 2. ファイルの概要
 
 指定されたイベントキーに基づいた音声ファイルの非同期再生、および音声ファイルの欠損確認とデフォルトディレクトリからの復旧（コピー）を行うことで、システムの効果音・通知音等の状態を管理する。

@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - 各種閾値・通知先設定を提供
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [notification_service.md](./notification_service.md) - `send_push`の実体
+* [scheduler_boot.md](./scheduler_boot.md) - 定期実行の呼び出し元の可能性(TASKSリストで監視系スクリプトを定期実行する仕組みを持つが、本ファイル自体が登録されているかは確認できず)
+
 ## 2. ファイルの概要
 
 * システム全体のメモリ使用率、および特定の対象プロセス（MY_HOME_SYSTEM関連）のメモリ消費量を監視する。
@@ -256,6 +263,13 @@ graph TD
 | --- | --- | --- |
 | `config`の各設定値の実態 | `getattr` の第2引数としてデフォルト値が設定されているものの、本番環境での実際の値や環境変数からのマッピング方法が不明 | `config.py` |
 | `send_push`の通信成否条件 | 戻り値 `success` が `True` となる条件（HTTP 200 OK に限定されるか等）やエラー時の再送処理の有無が不明 | `services/notification_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `send_push`の通信成否条件 | `notification_service.md`の解析によれば、`send_push`は`target`引数(discord/line/both)に応じて`_send_discord_webhook`（HTTPステータス200/204判定）および`_send_line_push`（LINE API呼び出しの例外有無で判定）を呼び出し、いずれかが失敗した場合は`success`フラグを`False`にする設計であることが判明した。LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知される。 | `notification_service.md` |
+| `config`の各設定値の実態 | `config.md`の解析によれば、`config.py`はメモリ監視閾値（`MEMORY_ALERT_PERCENT`等）を含む多数の設定値・環境変数を一元管理するモジュールであることが判明したが、`MEMORY_ALERT_PERCENT`等の具体的なデフォルト値・環境変数マッピング自体は`config.py`本体からは確認できていない。 | `config.md` |
 
 ## 10. 自己検証結果
 

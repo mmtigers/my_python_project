@@ -7,6 +7,28 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [main.md](main.md) - 本コンポーネントをルートとしてマウントする呼び出し元（`/camera`以外のパスで`<App />`を描画）
+* [src/hooks/useGameData.md](src/hooks/useGameData.md) - ユーザー/クエスト/報酬データの取得・更新関数（`completeQuest`等）を提供するカスタムフック
+* [src/hooks/useLayoutMode.md](src/hooks/useLayoutMode.md) - `landscape`/`portrait`のレイアウトモード判定フック
+* [src/hooks/useSound.md](src/hooks/useSound.md) - 効果音再生フック
+* [src/lib/masterData.md](src/lib/masterData.md) - `INITIAL_USERS`フォールバックデータの提供元
+* [src/types/index.md](src/types/index.md) - `Quest`/`QuestHistory`/`Reward`/`User`型の定義元
+* [src/features/quest/hooks/useQuestStatus.md](src/features/quest/hooks/useQuestStatus.md) - `getQuestLockState`関数の実装元
+* [src/components/layout/Header.md](src/components/layout/Header.md) - 子コンポーネント（ヘッダー、`hideUserSwitcher`propを渡す）
+* [src/components/ui/AvatarUploader.md](src/components/ui/AvatarUploader.md) - 子コンポーネント（アバター変更モーダル）
+* [src/components/ui/MessageModal.md](src/components/ui/MessageModal.md) - 子コンポーネント（結果/エラーメッセージモーダル）
+* [src/components/ui/Button.md](src/components/ui/Button.md) - 子コンポーネント（各種ボタン）
+* [src/components/ui/Modal.md](src/components/ui/Modal.md) - 子コンポーネント（`ConfirmModal`が内部で利用する汎用モーダル）
+* [src/components/ui/LevelUpModal.md](src/components/ui/LevelUpModal.md) - 子コンポーネント（レベルアップ演出モーダル）
+* [src/features/family/components/FamilyDashboard.md](src/features/family/components/FamilyDashboard.md) - 横画面（landscape）時のメイン表示コンポーネント
+* [src/features/family/components/UserStatusCard.md](src/features/family/components/UserStatusCard.md) - 縦画面（portrait）時のユーザーステータス表示コンポーネント
+* [src/features/family/components/FamilyLog.md](src/features/family/components/FamilyLog.md) - 子コンポーネント（`viewMode === 'familyLog'`時の記録表示）
+* [src/features/quest/components/QuestList.md](src/features/quest/components/QuestList.md) - 縦画面時のクエスト一覧表示コンポーネント
+* [src/features/quest/components/ApprovalList.md](src/features/quest/components/ApprovalList.md) - 縦画面時の承認待ち一覧表示コンポーネント
+* [src/features/shop/components/RewardShop.md](src/features/shop/components/RewardShop.md) - 「ごほうび」タブの実体コンポーネント
+
 ## 2. ファイルの概要
 
 このファイルはReactアプリケーションのメインコンポーネント（ルートに近い層）を定義している。アプリケーションの全体的な状態管理（アクティブなタブ、表示モード、選択中のユーザー、確認モーダルの状態、メッセージ等のUI状態）を行い、`useLayoutMode`フックが返すレイアウトモード（`landscape`/`portrait`）に応じて、横画面用の`FamilyDashboard`（4人常時表示）または縦画面用の単一ユーザー切替UI（`QuestList`/`RewardShop`のタブ切替）のいずれかを条件分岐で描画する。各種カスタムフック（`useSound`、`useGameData`、`useLayoutMode`）から取得したデータや関数を各子コンポーネントへ渡すルーティング的な責務を持つ。
@@ -438,6 +460,15 @@ graph TD
 | `useLayoutMode` の判定基準の詳細 | `landscape`/`portrait`の閾値やメディアクエリの具体的な条件が本ファイルからは不明 | `./hooks/useLayoutMode.ts` |
 | `getQuestLockState` の判定ロジック | 無限クエストの判定条件や`pendingEntry`/`completedEntry`の検索方法の具体的な実装が不明 | `./features/quest/hooks/useQuestStatus.ts` |
 | `FamilyDashboard`/`RewardShop` の内部実装 | Propsとして渡しているデータがどのように描画され、内部でどのようなイベントが発火するか不明 | 各コンポーネントファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `useGameData` の各関数の戻り値構造の詳細 | `useGameData.md`の解析によれば、`completeQuest`は`{ success, status?, message?, earnedMedals?, leveledUp?, detail? }`、`cancelQuest`/`approveQuest`/`rejectQuest`は`{ success, reason?, detail? }`、`buyReward`は`{ success, reason?, newGold?, reward?, detail? }`を返すとされている。App.tsx側の`ActionResult`型のフィールド構成とおおむね一致するが、この対応関係はあくまで`useGameData.md`側の解析結果からの推測であり、`useGameData.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/hooks/useGameData.md` |
+| `useLayoutMode` の判定基準の詳細 | `useLayoutMode.md`の解析によれば、判定には`window.matchMedia('(min-width: 900px) and (orientation: landscape)')`というメディアクエリが使われており、Echo Show 15等の常設デバイスを想定した閾値であるとされている。ただしこれは`useLayoutMode.md`側の解析結果からの補足であり、`useLayoutMode.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/hooks/useLayoutMode.md` |
+| `getQuestLockState` の判定ロジック | `useQuestStatus.md`の解析によれば、`getQuestLockState`は`quest`, `currentUser`, `completedQuests`, `pendingQuests`を引数に取り、前提クエストの完了判定・無限クエスト判定・保留/完了履歴の検索を行う純粋関数であるとされている。ただしこれは`useQuestStatus.md`側の解析結果からの補足であり、`useQuestStatus.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/features/quest/hooks/useQuestStatus.md` |
+| `FamilyDashboard`/`RewardShop` の内部実装 | `FamilyDashboard.md`の解析によれば、`FamilyDashboard`は`users`を固定順（`dad`,`mom`,`son`,`daughter`）に並び替えたうえでユーザーごとの`FamilyPanel`をグリッド表示し、`RewardShop.md`の解析によれば、`RewardShop`は所持ゴールド表示・`RewardList`（購入）・`InventoryList`（所持品）を縦に並べるコンテナであるとされている。ただしこれらは各ドキュメント側の解析結果からの補足であり、`FamilyDashboard.tsx`/`RewardShop.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/features/family/components/FamilyDashboard.md`, `src/features/shop/components/RewardShop.md` |
 
 ## 10. 自己検証結果
 
