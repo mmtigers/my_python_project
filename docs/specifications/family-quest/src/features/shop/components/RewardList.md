@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [types/index.md](../../../types/index.md) — `Reward`/`User`型定義の提供元。
+- [Card.md](../../../components/ui/Card.md) — 商品カードのUIコンポーネント。
+- [RewardShop.md](RewardShop.md) — 呼び出し元。`userGold`/`onBuy`/`currentUser`を渡すコンテナ。
+
 ## 2. ファイルの概要
 
 * ユーザー情報と保有ゴールドに基づいて、購入可能な商品のリストをフィルタリングおよび価格順にソートして表示するUIコンポーネント。
@@ -173,6 +179,14 @@ graph TD
 | `Reward` / `User`の詳細なデータ構造 | 型の完全なインターフェースがこのファイル内には記述されていないため。 | `@/types` 内の該当ファイル |
 | `onBuy` 実行時の具体的なシステム挙動 | 状態管理やサーバーへの通信処理などの実装が親コンポーネントに委譲されているため。 | 親コンポーネント |
 | `Card` コンポーネントの内部実装 | クリックイベントの伝播仕様や、デフォルトで適用されるスタイルが不明なため。 | `@/components/ui/Card` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `Reward` / `User`の詳細なデータ構造 | `types/index.md`の解析によれば、`Reward`インターフェースは`description`と`desc`のような類似プロパティが混在してオプショナル定義されているとされ、この点は本ファイルが`reward.description || reward.desc || reward.category`というフォールバックを行っている状況と符合する。 | `../../../types/index.md` |
+| `onBuy` 実行時の具体的なシステム挙動 | `RewardShop.md`の解析によれば、`onBuy`は`RewardShop`からもそのまま素通しされ呼び出し元（縦画面では`App.tsx`、横画面では`FamilyDashboard`経由）に委譲されるとされ、さらに`App.md`の解析によれば、購入確認モーダルで「はい」が選択された際に`useGameData`の`buyReward`が呼ばれ、成功時に`clear`音を再生するとされている。 | `RewardShop.md`, `../../../../App.md` |
+| `Card` コンポーネントの内部実装 | `Card.md`の解析によれば、`Card`は`variant`propに応じてスタイルクラスを切り替えるコンポーネントであるとされている。 | `../../../components/ui/Card.md` |
 
 ## 10. 自己検証結果
 
