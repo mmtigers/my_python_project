@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [nas_utils.md](./nas_utils.md) - 類似目的の別モジュール(本ファイルはNAS死活監視・リテンション削除を担当、`nas_utils.py`は他モジュール向けのNASフォールバック管理ユーティリティを提供する役割分担と推測される)
+* [config.md](./config.md) - `NAS_IP`, 各保持日数等の設定値を提供
+* [database.md](./database.md) - `save_log_generic`の実体
+* [notification_service.md](./notification_service.md) - `send_push`の実体
+* [utils.md](./utils.md) - `get_now_iso`の実体
+
 ## 2. ファイルの概要
 
 * NASの死活監視（Ping疎通確認、マウント確認、書き込み権限確認）、ディスク使用量の取得、障害時のフォールバックへの自動切替検知、およびNAS復旧時のフォールバックデータ自動同期と通知を行う。
@@ -468,6 +476,15 @@ flowchart TD
 | プッシュ通知先の仕様 | `send_push`内で`target="discord"`と指定されているにも関わらず第1引数に`LINE_USER_ID`を渡しているため | `services/notification_service.py` |
 | DBのカラムの型定義 | `save_log_generic`がブラックボックスであり、`percent`や`mount_ok`がどう保存されるか不明なため | `core/database.py` |
 | ISO時刻のタイムゾーン | `get_now_iso`の戻り値のタイムゾーンの扱いが不明なため | `core/utils.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| プッシュ通知先の仕様 | `notification_service.md`の解析によれば、`send_push(user_id, messages, target="discord", channel=...)`は`target`引数で送信先プラットフォームを切り替える設計であり、`target="discord"`の場合は`channel`引数(error/report/notify)によってDiscord Webhook URLが決定される（第一引数の`user_id`はLINE送信時にのみ使用される）ことが判明した。 | `notification_service.md` |
+| DBのカラムの型定義 | `database.md`の解析によれば、`save_log_generic`はテーブル名・カラムリスト・値のタプルから動的にINSERT文を構築する汎用関数であることが判明した。ただし`percent`や`mount_ok`等の個別カラムの型定義自体は`database.py`側にはなく、DB初期化スクリプト側にあると推測される。 | `database.md` |
+| ISO時刻のタイムゾーン | `utils.md`の解析によれば、`get_now_iso()`は"Asia/Tokyo"タイムゾーン(`pytz`)の現在日時をISO 8601形式の文字列で返す関数であることが判明した。 | `utils.md` |
+| 設定値の初期値と定義内容 | `config.md`の解析によれば、`config.py`はNVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）等の定数を保持する一元管理モジュールであることが判明したが、`NAS_IP`や`NVR_RECORD_DIR`等の具体的な値自体は`config.py`本体からは確認できていない。 | `config.md` |
 
 ## 10. 自己検証結果
 

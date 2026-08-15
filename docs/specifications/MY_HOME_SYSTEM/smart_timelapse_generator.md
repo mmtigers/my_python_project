@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(解像度・しきい値・Webhook URL等)を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体
+- [daily_timelapse_job.md](./daily_timelapse_job.md) — 呼び出し元。`from monitors.smart_timelapse_generator import ...` で本ファイルのコアエンジン(`MotionDetector`, `EventBuilder`, `VideoBuilder`, `Uploader`等)を利用している
+
 ## 2. ファイルの概要
 
 * 動画ファイルを入力として受け取り、OpenCVの背景差分を用いて動き（モーション）のある領域を検出する。
@@ -776,6 +783,13 @@ graph TD
 | 設定値の初期化と実体 | `config`内に設定値が直接記述されているか、.envなどから読み込んでいるか不明。 | `config.py` |
 | ロギング仕様 | `setup_logging`関数によるログのフォーマットや保存先が不明。 | `core/logger.py` |
 | プッシュ通知基盤の仕様 | `send_push`関数が利用しているメッセージング基盤と、パラメータのマッピング仕様が不明。 | `services/notification_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| ロギング仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`TimedRotatingFileHandler`、`home_system.log`固定)・ERRORレベル以上をDiscord Webhookへ通知する`DiscordErrorHandler`の3種のハンドラを登録するとされる。ただしログ保存先ディレクトリの実際の値(`config.BASE_DIR`)は`logger.md`自体でも未確認。 | logger.md |
+| プッシュ通知基盤の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、画像添付時はLINE側には注記のみ追加してDiscordにのみ画像を送るとされる。LINE失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | notification_service.md |
 
 ## 10. 自己検証結果
 

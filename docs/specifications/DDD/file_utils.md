@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。ただし関連ドキュメント側にも、実際にどのような文字列（動画タイトル等）に対して呼び出しているかの具体的な呼び出し箇所は明記されていない。
+* `extract_youtube_urls.py`についても本モジュールDocstring上の呼び出し元候補として記載されているが、対応する仕様書は`docs/specifications/`配下に見つからなかった。
+
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。
