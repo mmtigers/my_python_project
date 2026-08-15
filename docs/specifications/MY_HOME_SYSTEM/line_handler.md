@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [webhook_router.md](./webhook_router.md) - 呼び出し元(`callback_line()`が本ファイルの`line_handler.handle`を`asyncio.to_thread`経由で実行)
+* [line.md](./line.md) - 型定義を提供(`LinePostbackData`は本ファイルでは未使用インポート)
+* [line_logic.md](./line_logic.md) - Postbackイベントの委譲先
+* [line_service.md](./line_service.md) - コマンド処理(ステータス確認・クエスト・承認却下・体調記録)の委譲先
+* [ai_service.md](./ai_service.md) - フォールバック時(未定義コマンド)のAI解析委譲先
+* [config.md](./config.md) - 認証情報・`FAMILY_SETTINGS`等の設定値を提供
+
 ## 2. ファイルの概要
 
 * LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を、SDKのイベントハンドラーとして解析し、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が署名検証込みで `line_handler.handle(body, signature)`（SDKの`WebhookHandler.handle`）を呼び出し、登録済みのイベントハンドラー（本ファイルの`handle_message`/`handle_postback`）をディスパッチする構成になっている。
@@ -283,6 +292,17 @@ graph TD
 | `ai_service` のAI処理仕様 | 外部のLLM APIを叩いているのか、独自の解析ロジックか判断できないため。 | `services/ai_service.py` |
 | Postback未処理の挙動 | `line_logic.handle_postback` に渡された後、どのようにレスポンスが形成されるのか不明なため。 | `handlers/line_logic.py` |
 | `LinePostbackData` の用途 | 本ファイル内でインポートされているが使用されていないため、本来どこで使用されるべきモデルだったか不明。 | `models/line.py` (または過去のコミット) |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.LINE_CHANNEL...` の取得元 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`LINE_CHANNEL_ACCESS_TOKEN`/`LINE_CHANNEL_SECRET`個別の値や取得元記述自体は`config.py`のソースコード上では確認できていない。 | `config.md` |
+| `FAMILY_SETTINGS["members"]` の構造 | `config.md`の解析によれば、`FAMILY_SETTINGS`の実名キー自体は`handlers/line_handler.py`等でのメッセージ文字列マッチングに機能的に使用されるため保持されており、年齢等の個人情報はGit管理対象外の`family_members.local.json`が存在すればそこからマージされる設計であることが判明した。ただし`members`配列の正確な型・キー構造そのものは`config.py`自体のソースコードでは未確認。 | `config.md` |
+| `line_service` の戻り値の型 | `line_service.md`の解析によれば、`get_user_status_message`や`get_active_quests_message`等は`linebot.v3.messaging`の`TextMessage`または`FlexMessage`（`Union[TextMessage, FlexMessage]`）を返す設計であることが判明した。 | `line_service.md` |
+| `ai_service` のAI処理仕様 | `ai_service.md`の解析によれば、Google Gemini API（`google.generativeai`）を利用し、レート制限・リトライ制御を行いながらツール呼び出し（`tool_record_child_health`, `tool_record_food`, `tool_search_db`）を介して`line_service`の記録関数等に処理を委譲する設計であることが判明した。 | `ai_service.md` |
+| Postback未処理の挙動 | `line_logic.md`の解析によれば、`line_logic.handle_postback`は`action`ごとにDB保存とLINE Flex/テキストメッセージの返信を行う設計であり、未定義の`action`の場合は警告ログを出力した上で警告テキストを返信することが判明した。 | `line_logic.md` |
+| `LinePostbackData` の用途 | `line.md`の解析によれば、`LinePostbackData`はPostbackデータをパースした後の構造（`action`, `child`, `status`, `value`）を保持するモデルであり、`line_logic.md`の解析によれば実際の利用元は`handlers/line_logic.py`（`handle_postback`関数）であることが判明した。 | `line.md`, `line_logic.md` |
 
 ## 10. 自己検証結果
 

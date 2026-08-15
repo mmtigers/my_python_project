@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `BASE_DIR`, `DISCORD_WEBHOOK_ERROR`等の設定値を提供
+* [common.md](./common.md) - `setup_logging`を再エクスポートする呼び出し元(Facade)
+* システム内のほぼ全モジュール(`line_handler.md`, `nas_monitor.md`, `sensor_service.md`等多数)が`setup_logging`の呼び出し元
+
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、日付単位でローテーションされるファイルへのログ保存、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。
