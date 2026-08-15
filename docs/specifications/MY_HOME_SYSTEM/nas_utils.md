@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [nas_monitor.md](./nas_monitor.md) - 類似目的の別モジュール(`nas_monitor.py`はNASの死活監視・リテンション削除を担当するのに対し、本ファイルは他モジュール向けの汎用フォールバック管理ユーティリティを提供)
+* [config.md](./config.md) - `LINE_USER_ID`等の設定値を提供
+* [logger.md](./logger.md) - ロガー機能の提供元候補(ただし関数名`get_logger`との対応関係は不明瞭)
+* [notification_service.md](./notification_service.md) - `send_push`の実体
+
 ## 2. ファイルの概要
 
 NASディレクトリへのアクセス状態の確認、マウント外れ時の再マウント試行、アクセス不可時のローカルディレクトリへのフォールバック、および復旧時のフォールバックデータからNASへの同期機能を提供するユーティリティ。
@@ -204,6 +211,14 @@ graph TD
 | `config`モジュールの全容 | 実装が提供されておらず、どのような変数が定義されているか不明 | `config.py` |
 | `get_logger`の仕様 | 実装が提供されておらず、ログ出力先やフォーマットが不明 | `core/logger.py` |
 | `send_push`の仕様 | 実装が提供されておらず、通知処理の成功可否やエラーハンドリングが不明 | `services/notification_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `get_logger`の仕様 | `logger.md`の解析によれば、`core/logger.py`には`setup_logging(name, webhook_url=None)`という名前の関数のみが定義されており、`get_logger`という名前の関数は`logger.md`の解析結果内には確認できなかった。本ファイルの`from core.logger import get_logger`が実際に`core/logger.py`のどの要素に対応するかは、この補足だけでは特定できない。 | `logger.md` |
+| `send_push`の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`"discord"`/`"line"`/`"both"`)に応じてDiscord WebhookまたはLINE Push APIへ送信し、送信成否を`bool`で返す設計であり、LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知する仕組みを持つことが判明した。 | `notification_service.md` |
+| `config`モジュールの全容 | `config.md`の解析によれば、`config.py`は`LINE_USER_ID`以外にも多数の設定値（NAS関連、閾値、Webhook URL等）を一元管理するモジュールであることが判明した。 | `config.md` |
 
 ## 10. 自己検証結果
 

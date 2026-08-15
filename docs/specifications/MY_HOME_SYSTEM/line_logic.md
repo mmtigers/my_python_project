@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [line_handler.md](./line_handler.md) - 呼び出し元(`handle_postback`が承認/却下以外のPostbackを本ファイルの`handle_postback`に委譲)
+* [line.md](./line.md) - 型定義を提供(`LinePostbackData`)
+* [config.md](./config.md) - `FAMILY_SETTINGS`, `SQLITE_DB_PATH`等の設定値を提供
+* [database.md](./database.md) - `save_log_async`の実体を提供
+
 ## 2. ファイルの概要
 
 * LINE Messaging APIを利用し、Webhookの **PostbackEvent（ボタン操作）専用**の処理ロジックを提供するファイル。
@@ -330,6 +337,14 @@ graph TD
 | 設定値の構造と中身 | `FAMILY_SETTINGS["styles"]` の内容が不明なため。 | `config.py` |
 | Postbackモデルのプロパティ | `LinePostbackData` の必須/任意フィールド（`child`, `status` の存在等）が不明なため。 | `models/line.py` |
 | `create_quick_reply` / `get_quota_text` の本来の呼び出し元 | 現在ファイル内・他ファイルのいずれからも呼び出されていないが、削除されずに残っている理由（将来の再利用予定か、削除漏れか）は本ファイル単体では判断できないため。 | 過去のコミット履歴、または開発者への確認 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| データベースのスキーマ構造 | `database.md`の解析によれば、`save_log_async`は`save_log_generic`の非同期ラッパーであり、テーブル名・カラムリスト・値のタプルを引数に取り動的にINSERT文を構築する汎用関数であることが判明した。ただし`CHILD`/`FOOD`テーブル自体の正確なカラム定義は`database.py`側にはなく、`config.py`のテーブル名定数やDB初期化スクリプト側にあると推測される（`database.md`側でも「テーブル名・スキーマは呼び出し元依存」とされている）。 | `database.md` |
+| Postbackモデルのプロパティ | `line.md`の解析によれば、`LinePostbackData`は`action: str`, `child: Optional[str]`, `status: Optional[str]`, `value: Optional[str]`のフィールドを持つPydanticモデルであることが判明した。 | `line.md` |
+| `create_quick_reply` / `get_quota_text` の本来の呼び出し元 | `line_handler.md`の解析でもこれらの関数への言及・呼び出しは確認できず、本補足の範囲では解決に至らなかった。 | `line_handler.md` |
 
 ## 10. 自己検証結果
 

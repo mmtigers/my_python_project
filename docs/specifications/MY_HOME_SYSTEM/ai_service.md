@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `GEMINI_API_KEY` や `SQLITE_TABLE_*` など、本ファイルが参照する各種定数・共通設定を提供する。
+- [common.md](./common.md) — `line_service` は直接importしているが、`common.execute_read_query` 相当のDB読み取り処理を提供するFacadeモジュール。
+- [database.md](./database.md) — `common.execute_read_query` の実体（`core/database.py`）の仕様書。
+- [line_service.md](./line_service.md) — `tool_record_child_health`/`tool_record_food` の呼び出し先（`log_child_health`/`log_food_record`）。
+- [logger.md](./logger.md) — `setup_logging` の実装元。
+- [utils.md](./utils.md) — `get_now_iso` の実装元。
+
 ## 2. ファイルの概要
 
 * AI（Gemini API）を利用してユーザーからのテキスト入力を解析し、適切な会話応答の生成や、登録されたツール（機能呼び出し）を通じて外部サービスへの記録・DB検索の実行を仲介・制御する。
@@ -401,6 +410,15 @@ graph TD
 | --- | --- | --- |
 | 外部モジュールの詳細仕様 | DBアクセス、設定定数、ログ出力、LINE連携の厳密な型・挙動が現在のファイルからは判別できないため。 | `config.py`, `common.py`, `services/line_service.py`, `core/logger.py`, `core/utils.py` |
 | Gemini APIレスポンスの詳細なオブジェクト構造 | `response.parts[0].function_call.args` 等でアクセスしているが、APIライブラリのバージョンや仕様によるためコード単体では確定できない。 | 外部ライブラリ (`google-generativeai`) の公式ドキュメント |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 外部モジュールの詳細仕様（`line_service.log_child_health`/`log_food_record` の戻り値） | `line_service.md`の解析によれば、`log_child_health`と`log_food_record`はいずれも`linebot.v3.messaging`の`TextMessage`オブジェクトを返す関数と推測される。本ファイルが参照する`msg_obj.text`はこの`TextMessage`が持つ属性に対応すると考えられるが、`line_service.py`および`linebot`ライブラリ自体のソースコードは未確認。 | line_service.md |
+| 外部モジュールの詳細仕様（`common.execute_read_query`） | `common.md`の解析によれば`common.py`は非推奨のFacadeモジュールであり、`execute_read_query`は`core/database.py`からの再エクスポートと推測される。`database.md`の解析によれば、`execute_read_query`は読み取り専用モード(`?mode=ro`)でSELECTクエリを実行し、結果をJSON文字列として返す、または例外発生時も例外を送出せずエラーメッセージ文字列を返す実装と推測される。ただし`config.SQLITE_DB_PATH`の実際の値や`common.py`側の再エクスポート実装自体は未確認。 | common.md, database.md |
+| 外部モジュールの詳細仕様（`setup_logging`） | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ただしWebhook URL等の設定値（`config.DISCORD_WEBHOOK_ERROR`）自体は未確認。 | logger.md |
+| 外部モジュールの詳細仕様（`get_now_iso`） | `utils.md`の解析によれば、`get_now_iso`は"Asia/Tokyo"タイムゾーンの現在日時をISO 8601形式の文字列で返す関数と推測される。 | utils.md |
 
 ## 10. 自己検証結果
 
