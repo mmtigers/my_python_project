@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Production Grade Batch Downloader (v2.2.0 Universal Support)
+Production Grade Batch Downloader (v2.3.0 Universal Support)
 -------------------------------------------------
 Features:
 - Multi-List Support: Automatically processes all files in 'list/' directory.
@@ -13,12 +13,16 @@ Features:
 - Schedule: 02:00 - 06:00.
 - Universal Support: Uses yt-dlp for ALL supported sites (not just YouTube).
 - Specialized Scraping: Specific logic for 'missav'.
+- Bot Detection Safeguards: Jittered per-task delays (extra-conservative for
+  YouTube), yt-dlp request throttling, optional cookies file, and an
+  immediate session abort on 429 / "Sign in to confirm" style errors.
 """
 
 import os
 import sys
 import time
 import re
+import random
 import shutil
 import datetime
 import logging
@@ -78,6 +82,21 @@ except ImportError:
     def _send_discord_webhook(messages, image_data=None, channel="notify"):
         pass
 
+def _resolve_cookies_file() -> Optional[Path]:
+    """YouTube等のボット検知回避用Cookieファイルを解決する。
+
+    環境変数 YOUTUBE_COOKIES_FILE が設定されていてもファイルが存在しない場合は
+    警告ログを出し、Cookie無し（未設定）の状態にフォールバックする。
+    """
+    cookies_env = os.getenv("YOUTUBE_COOKIES_FILE")
+    if not cookies_env:
+        return None
+    cookies_path = Path(cookies_env)
+    if not cookies_path.exists():
+        logger.warning(f"⚠️ YOUTUBE_COOKIES_FILE で指定されたファイルが見つかりません: {cookies_path}")
+        return None
+    return cookies_path
+
 # ==========================================
 # 1. コンフィグレーション
 # ==========================================
@@ -86,9 +105,8 @@ class AppConfig:
     RESTRICT_TIME: bool = not FORCE_MODE
     START_HOUR: int = 2
     END_HOUR: int = 6
-    SHORT_SLEEP_SECONDS: int = 5
     MIN_FREE_SPACE_GB: int = 50
-    
+
     # 【追加】機能フラグ: 環境変数で制御可能にする (デフォルトはFalse=無効のまま維持)
     ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"
     BASE_SAVE_DIR: Path = Path(os.getenv("VIDEO_SAVE_DIR", "/mnt/nas/ddd"))
@@ -98,14 +116,37 @@ class AppConfig:
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
-    
+
     REQUEST_TIMEOUT: int = 20
     MAX_RETRIES: int = 3
-    
+
+    # 【追加】ボット検知/レート制限対策
+    # タスク間隔: 固定秒数だと機械的なアクセスパターンとして検知されやすいため、
+    # サイトごとにランダムなジッターを持たせる（YouTubeはより保守的な間隔にする）。
+    DEFAULT_SLEEP_RANGE: Tuple[float, float] = (5.0, 10.0)
+    YOUTUBE_SLEEP_RANGE: Tuple[float, float] = (8.0, 20.0)
+    # 連続失敗数がこの値に達したら、レート制限/ブロックの可能性を疑って処理全体を中断する
+    CONSECUTIVE_FAILURE_THRESHOLD: int = 3
+    # yt-dlp自体のリクエスト間スリープ（メタデータ取得等、内部リクエストの間隔を空ける）
+    YTDLP_SLEEP_INTERVAL: float = 3.0
+    YTDLP_MAX_SLEEP_INTERVAL: float = 8.0
+    # Cookie未設定のままだと多くの動画で「Sign in to confirm you're not a bot」に
+    # 遭遇しやすくなる。環境変数 YOUTUBE_COOKIES_FILE でブラウザからエクスポートした
+    # cookies.txt（Netscape形式）を指定可能（未設定ならCookie無しで動作する）。
+    YOUTUBE_COOKIES_FILE: Optional[Path] = field(default_factory=_resolve_cookies_file)
+    # yt-dlpの例外メッセージにこれらの文字列が含まれる場合、ボット検知/レート制限と
+    # 判断し、個別タスクのスキップではなくセッション全体を即座に中断する。
+    BOT_DETECTION_MARKERS: Tuple[str, ...] = (
+        "sign in to confirm",
+        "confirm you're not a bot",
+        "429",
+        "too many requests",
+    )
+
     # 抽出パターン (Specialized Scraping)
     # missavはm3u8形式かつJS難読化されているため、正規表現のリストではなく専用関数で解析します
     URL_PATTERNS: List[Tuple[str, str]] = field(default_factory=list)
-    
+
     SHOW_PROGRESS_BAR: bool = sys.stdout.isatty()
 
     @property
@@ -113,6 +154,21 @@ class AppConfig:
         return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE
 
 CONFIG = AppConfig()
+
+
+class BotDetectionError(Exception):
+    """YouTube等からボット検知/レート制限（429やSign-in要求等）を検知した際に送出する。
+
+    通常のダウンロード失敗（そのタスクだけスキップして続行）とは区別し、
+    セッション全体を即座に中断すべき明確なシグナルとして扱う。
+    """
+    pass
+
+
+def _is_bot_detection_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in CONFIG.BOT_DETECTION_MARKERS)
+
 
 class DownloadTask(NamedTuple):
     url: str
@@ -254,13 +310,20 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             # 動画タイトルがそのままファイル名になるため、極端に長いタイトルで
             # ext4等のファイル名長制限（255バイト）に抵触して失敗するのを防ぐ。
             'trim_file_name': 150,
+            # ボット検知対策: yt-dlp自身が発行する内部リクエスト（メタデータ取得等）の
+            # 間にもランダムなスリープを挟み、機械的なアクセスパターンを避ける。
+            'sleep_interval_requests': CONFIG.YTDLP_SLEEP_INTERVAL,
+            'sleep_interval': CONFIG.YTDLP_SLEEP_INTERVAL,
+            'max_sleep_interval': CONFIG.YTDLP_MAX_SLEEP_INTERVAL,
         }
+        if CONFIG.YOUTUBE_COOKIES_FILE is not None:
+            ydl_opts['cookiefile'] = str(CONFIG.YOUTUBE_COOKIES_FILE)
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(task.url, download=False)
                 filename = Path(ydl.prepare_filename(info)).with_suffix('.mp4')
-                
+
                 if self._should_skip(filename): return True
 
                 logger.info(f"📥 DL開始: {info.get('title')}")
@@ -269,6 +332,10 @@ class UniversalYtDlpStrategy(DownloadStrategy):
                 return True
         except Exception as e:
             logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)
+            if _is_bot_detection_error(e):
+                # 429やSign-in要求はこのタスクだけの問題ではなくIP/アカウント単位の
+                # 制限である可能性が高いため、通常の失敗として握りつぶさず上位へ伝播させる。
+                raise BotDetectionError(f"{task.url}: {e}") from e
             return False
 
 # ★スクレイピングが必要な特定サイト専用 (missav用)
@@ -360,6 +427,8 @@ class ScrapingStrategy(DownloadStrategy):
         except Exception as e:
             logger.error(f"⚠️ M3U8 DL エラー: {e}", exc_info=True)
             if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除
+            if _is_bot_detection_error(e):
+                raise BotDetectionError(f"{page_url}: {e}") from e
             return False
 
 # ==========================================
@@ -484,6 +553,18 @@ class BatchDownloader:
 
         logger.info(f"🧹 期限切れ（無効）のタスク {deleted_count} 件をパージしました。")
 
+    def _sleep_between_tasks(self, url: str) -> None:
+        """次のタスクまで待機する。
+
+        固定間隔だと機械的なアクセスパターンとして検知されやすいため、ランダムな
+        ジッターを持たせる。YouTubeはボット検知が特に厳しいため、より保守的な
+        （長め・幅広の）間隔を使う。
+        """
+        is_youtube = "youtube.com" in url or "youtu.be" in url
+        low, high = CONFIG.YOUTUBE_SLEEP_RANGE if is_youtube else CONFIG.DEFAULT_SLEEP_RANGE
+        delay = random.uniform(low, high)
+        logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")
+        time.sleep(delay)
 
     def run(self) -> None:
         # 【追加】多重起動防止ロック: cron等での実行が重複した場合に
@@ -544,11 +625,12 @@ class BatchDownloader:
             return
 
         logger.info("="*60)
-        logger.info("   🚀 Smart Pipeline Downloader (v2.2.0)")
+        logger.info("   🚀 Smart Pipeline Downloader (v2.3.0)")
         logger.info(f"   Schedule: {CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00")
         logger.info(f"   Tasks: {len(tasks)}")
         logger.info("="*60)
 
+        consecutive_failures = 0
         for i, task in enumerate(tasks):
             if self._shutdown_requested: break
             if not SystemHealthChecker.is_within_time_window() and not FORCE_MODE:
@@ -556,22 +638,43 @@ class BatchDownloader:
                 break
 
             logger.info(f"\n[{i+1}/{len(tasks)}] 開始: {task.url}")
-            
+
             try:
                 strategy = self._get_strategy(task.url)
-                
+
                 # 【追加】YouTube等のスキップ対象（None）だった場合は次へ
                 if strategy is None:
                     continue
 
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+            except BotDetectionError as e:
+                # 429やSign-in要求はIP/アカウント単位の制限である可能性が高く、
+                # 残りのタスクを続けても状況を悪化させるだけなので即座に中断する。
+                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")
+                DiscordNotifier.send(
+                    "🚨 CRITICAL: ボット検知/レート制限の兆候（429・Sign-in要求等）を検知したため、"
+                    f"残りのタスクを中断します。\n詳細: {e}",
+                    is_error=True
+                )
+                break
             except Exception as e:
                 logger.error(f"エラー: {e}", exc_info=True)
+                consecutive_failures += 1
 
-            if i < len(tasks) - 1:
-                if not self._shutdown_requested:
-                    time.sleep(CONFIG.SHORT_SLEEP_SECONDS)
+            if consecutive_failures >= CONFIG.CONSECUTIVE_FAILURE_THRESHOLD:
+                logger.error(f"⚠️ 連続{consecutive_failures}回失敗したため、レート制限の可能性を考慮し処理を中断します。")
+                DiscordNotifier.send(
+                    f"⚠️ 連続{consecutive_failures}回のダウンロード失敗を検知したため、以降のタスクをスキップします。",
+                    is_error=True
+                )
+                break
+
+            if i < len(tasks) - 1 and not self._shutdown_requested:
+                self._sleep_between_tasks(task.url)
 
         logger.info("🎉 全処理終了")
 
