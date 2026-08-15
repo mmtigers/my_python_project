@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`LINE_USER_ID`, `SQLITE_TABLE_SWITCHBOT_LOGS`, `SQLITE_TABLE_POWER_USAGE`等)を提供
+- [database.md](./database.md) — `core.database.save_log_async`の実体
+- [utils.md](./utils.md) — `core.utils.get_now_iso`の実体
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [switchbot_power_monitor.md](./switchbot_power_monitor.md) — 呼び出し元(`process_power_data`, `process_meter_data`を呼び出す)
+- [webhook_router.md](./webhook_router.md) — 呼び出し元(`is_duplicate_webhook`, `process_sensor_data`を呼び出す)
+
 ## 2. ファイルの概要
 
 * センサーおよび電力計からのデータ受信（Webhook・ポーリング）を処理し、重複排除、状態管理、ログ保存、条件に応じた通知送信を行う責務を持つ。
@@ -273,6 +283,13 @@ graph TD
 | データベースへの接続および保存の実態 | `common.get_db_cursor` と `save_log_async` の内部実装が不明であるため。 | `common.py`, `core/database.py` |
 | `send_push` の送信先プラットフォーム仕様 | `target_platform` として "discord" や "notify" が指定されているが、それぞれの連携先や実際の送信フォーマットが不明であるため。 | `services/notification_service.py` |
 | `notify_settings` の全容 | `process_power_data` の引数として渡される辞書に `threshold` や `target` 以外のキーが存在するか不明であるため。 | 呼び出し元のファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| データベースへの接続および保存の実態 | `database.md`の解析によれば、`common.get_db_cursor`の実体は`core.database.get_db_cursor`であり、`sqlite3.OperationalError`(locked)時に最大5回リトライし、WALモード・外部キー制約を有効化するコンテキストマネージャとされる。`save_log_async`は`core.database.save_log_generic`を`asyncio.to_thread`(内部的には`loop.run_in_executor`)経由で非同期実行するラッパーで、テーブル名・カラムリスト・値を渡して動的にINSERT文を構築するとされる。 | database.md |
+| `send_push` の送信先プラットフォーム仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging API(v3)へ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。`"discord"`や`"notify"`は主にDiscordの送信先チャンネル(`channel`引数、`error`/`report`/`notify`)を指すと推測される。 | notification_service.md |
 
 ## 10. 自己検証結果
 

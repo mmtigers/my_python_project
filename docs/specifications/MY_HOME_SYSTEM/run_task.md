@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [scheduler_boot.md](./scheduler_boot.md) - 同システム内の別のタスク実行機構(`ThreadPoolExecutor`による常駐プロセス型スケジューラ)。`run_task.sh`が外部スケジューラ(cron等)から都度起動される薄いラッパーであるのに対し、こちらは`unified_server.py`のライフサイクルでサブプロセス起動される常駐型であり、対照的な位置づけ
+* [start_all.md](./start_all.md) - システム起動時に各種Pythonスクリプトを直接起動するスクリプト。`run_task.sh`とは別の起動経路
+* [cron_reporter.md](./cron_reporter.md) - `crontab -l`の設定内容を解析してLINE/Discordへ報告するツール。`run_task.sh`が実際にどのスクリプトに対しどのcron設定で呼ばれているかを推測する手がかりになりうるが、`cron_reporter.md`自体に`run_task.sh`固有の記述は確認できなかった
+
 ## 2. ファイルの概要
 
 * 指定されたPythonスクリプトを、所定のディレクトリ（`PROJECT_ROOT`）および仮想環境下で実行する。

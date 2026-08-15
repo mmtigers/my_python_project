@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `config.GOOGLE_PHOTOS_TOKEN`, `GOOGLE_PHOTOS_SCOPES`, `GOOGLE_PHOTOS_CREDENTIALS`, `GEMINI_API_KEY`, `LINE_USER_ID`等の設定値を提供
+* [common.md](./common.md) - `common.setup_logging`, `common.send_push`のFacade再エクスポート元
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [notification_service.md](./notification_service.md) - `send_push`の実体(Facade経由)
+
 ## 2. ファイルの概要
 
 このファイルは、Google Photos APIとGoogle Gemini APIを連携させ、直近の写真を自動で取得し、その内容をAIに分析・要約させて「家族の思い出記録」としてのレポートを生成する機能を提供する。また、テスト実行時には生成されたレポートを外部サービス（Discordなど）にプッシュ通知する機能を持つ。
@@ -288,6 +295,13 @@ graph TD
 | 定数値の実体 | トークンファイルのパス、OAuthのクライアントシークレットファイルパス、認証スコープ（`config.GOOGLE_PHOTOS_SCOPES`）、各種APIキーの実体が不明。 | `config.py` |
 | プッシュ通知の仕様 | `common.send_push` の具体的なプロトコル、再試行処理の有無、エラーハンドリングの仕様が不明。 | `common.py` |
 | ロガーの設定内容 | `common.setup_logging` で設定されるログの出力先（標準出力、ファイル、外部監視サービスなど）やフォーマットが不明。 | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| プッシュ通知の仕様 | `common.md`/`notification_service.md`の解析によれば、`common.send_push`は`services.notification_service.send_push`へのFacadeであり、`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhook/LINE Messaging APIへ送信、LINE失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | common.md, notification_service.md |
+| ロガーの設定内容 | `common.md`/`logger.md`の解析によれば、`common.setup_logging`は`core.logger.setup_logging`へのFacadeであり、コンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録するとされる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)の実際の値は`logger.md`でも未確認とされている。 | common.md, logger.md |
 
 ## 10. 自己検証結果
 

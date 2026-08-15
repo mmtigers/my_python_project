@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [logger.md](./logger.md) - `core.logger`の実体。`setup_logging`, `DiscordErrorHandler`を提供
+* [network.md](./network.md) - `core.network`の実体。`get_retry_session`, `create_resilient_session`, `retry_api_call`を提供
+* [database.md](./database.md) - `core.database`の実体。`get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async`を提供
+* [utils.md](./utils.md) - `core.utils`の実体。`get_now_iso`, `get_today_date_str`, `get_display_date`を提供
+* [notification_service.md](./notification_service.md) - `services.notification_service`の実体。`send_push`, `send_reply`, `get_line_message_quota`, `_send_discord_webhook`, `_send_line_push`を提供
+* 呼び出し元(`import common`で本Facadeを利用): [dashboard.md](./dashboard.md), [financial_service.md](./financial_service.md), [google_photos_service.md](./google_photos_service.md), [init_unified_db.md](./init_unified_db.md), [quest_service.md](./quest_service.md)
+
 ## 2. ファイルの概要
 
 * 下位互換性のために維持されているFacadeパターンのモジュールである。
@@ -143,6 +152,14 @@ graph TD
 | `setup_logging` の詳細な挙動・副作用・戻り値 | 外部モジュールであり、本コード上に実装がないため。 | `core/logger.py` |
 | インポートされている全外部関数の詳細なシグネチャと挙動 | 本ファイルは単なるFacadeであり、実装が一切記載されていないため。 | `core/*.py` および `services/notification_service.py` |
 | `sys.path.append` によって追加されるパスの正確な解決結果 | 実行環境に依存して `__file__` が決定されるため。 | 実行環境のパス構成とエントリーポイント |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `setup_logging` の詳細な挙動・副作用・戻り値 | `logger.md`の解析によれば、`setup_logging`はコンソール出力(StreamHandler)、日次ローテーションのファイル出力(`TimedRotatingFileHandler`、ログファイル名`home_system.log`固定)、ERRORレベル以上をDiscord Webhookへ通知する`DiscordErrorHandler`の3種のハンドラを登録し、`logging.Logger`を返すとされる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)の実際の値は`logger.md`自体でも未確認とされている。 | logger.md |
+| インポートされている全外部関数の詳細なシグネチャと挙動 | `network.md`, `database.md`, `notification_service.md`, `utils.md`の解析によれば、`get_retry_session`/`create_resilient_session`/`retry_api_call`はHTTPリトライ用セッション/デコレータ、`get_db_cursor`/`execute_read_query`/`save_log_generic`/`save_log_async`はSQLite接続・クエリ実行のユーティリティ、`send_push`/`send_reply`はLINE/Discordへの通知送信、`get_now_iso`等は現在時刻文字列取得の関数であることが判明したが、いずれも`common.py`自体からの呼び出し実績（本ファイル内での使用箇所）は確認されていない（Facadeとして再エクスポートされているのみ）。 | network.md, database.md, notification_service.md, utils.md |
+| `sys.path.append` によって追加されるパスの正確な解決結果 | 相互参照した範囲では実行環境のパス構成に関する追加情報は確認できておらず、未解決のままである。 | 該当なし |
 
 ## 10. 自己検証結果
 

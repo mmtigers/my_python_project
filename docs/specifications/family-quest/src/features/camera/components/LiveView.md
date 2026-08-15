@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../../components/ui/HlsPlayer.md](../../../components/ui/HlsPlayer.md) - ライブ映像再生の実体コンポーネント
+* [./CameraDashboard.md](./CameraDashboard.md) - 呼び出し元（`cameras` propの供給元）
+* [../types/index.md](../types/index.md) - `CameraConfig`型の定義元
+* [../../../../../MY_HOME_SYSTEM/camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md) - `/api/cameras/live/{camera_id}/stream.m3u8`エンドポイントのバックエンド実装
+
 ## 2. ファイルの概要
 
 * 複数の監視カメラのライブ映像を一覧表示するコンポーネント。
@@ -132,6 +139,14 @@ graph TD
 | `cameras`プロパティの生成元・取得タイミング | `LiveView`自体はプロパティとして受け取るのみで、取得ロジックを持たないため | `CameraDashboard.tsx` |
 | `/api/cameras/live/{id}/stream.m3u8`の実際のレスポンス仕様 | バックエンド実装が本ファイルに含まれないため | バックエンドのカメラAPI実装ファイル |
 | `HlsPlayer`未指定Props（`muted`, `autoPlay`, `startPosition`, `onVideoRef`）が省略された場合のデフォルト挙動 | 本ファイルの呼び出し側では明示的に指定していないため、`HlsPlayer`側のデフォルト値定義を確認する必要がある | `family-quest/src/components/ui/HlsPlayer.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `cameras`プロパティの生成元・取得タイミング | `CameraDashboard.md`の解析によれば、`cameras`は`CameraDashboard`のマウント時（`useEffect`、依存配列は空）に`apiClient.get('/api/cameras/settings')`で取得し、`enabled`が`true`のカメラのみを`order`昇順でソートした配列であるとされている。ただしこれは`CameraDashboard.md`側の解析結果からの補足であり、`CameraDashboard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./CameraDashboard.md |
+| `/api/cameras/live/{id}/stream.m3u8`の実際のレスポンス仕様 | `camera_router.md`の解析によれば、`GET /live/{camera_id}/stream.m3u8`は`camera_service.start_hls_stream`にストリーム生成を依頼し、プレイリストファイルが生成されるまで最大5秒（0.5秒間隔×10回）待機したうえで返却する。カメラ未検出時は404、ストリーム初期化失敗時は500、生成タイムアウト時は503を返すとされている。ただしこれは`camera_router.md`側の解析結果からの補足であり、`camera_router.py`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md |
+| `HlsPlayer`未指定Props（`muted`, `autoPlay`, `startPosition`, `onVideoRef`）が省略された場合のデフォルト挙動 | `HlsPlayer.md`の解析によれば、`HlsPlayerProps`のデフォルト値は`muted = true`, `autoPlay = true`であり、`startPosition`・`onVideoRef`は未指定の場合は単に使用されない（`onVideoRef`が渡されない場合はコールバックが呼ばれないのみ、`startPosition`未指定時はネイティブ再生分岐で`currentTime`設定処理がスキップされる）とされている。ただしこれは`HlsPlayer.md`側の解析結果からの補足であり、`HlsPlayer.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../components/ui/HlsPlayer.md |
 
 ## 10. 自己検証結果
 

@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [main.md](../../main.md) — `QueryClientProvider`に`queryClient`インスタンスを渡すエントリーポイント。
+- [useGameData.md](../hooks/useGameData.md) — `useQuery`/`useMutation`を通じて本インスタンスの既定設定（`staleTime`, `retry`等）の影響を受ける主要な利用元。
+
 ## 2. ファイルの概要
 
 * `@tanstack/react-query` ライブラリの `QueryClient` を初期化し、システム全体で適用されるデータフェッチングのデフォルト動作（再試行回数、キャッシュ期限、ウィンドウフォーカス時の動作）を定義したインスタンスをエクスポートする。
@@ -112,6 +117,12 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `queryClient`の利用箇所 | このファイルはエクスポートのみを行っており、どこでプロバイダーとして適用されているか不明であるため。 | アプリケーションのルートコンポーネントまたはエントリーポイントとなるファイル（例: `App.tsx`, `index.tsx` など） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `queryClient`の利用箇所 | `main.md`の解析によれば、`queryClient`は`main.tsx`のエントリーポイントで`QueryClientProvider`に渡され、`window.location.pathname`が`/camera`を含むかどうかで`CameraDashboard`または`App`のいずれかをラップする形でアプリ全体に適用されているとされている。 | `../../main.md` |
 
 ## 10. 自己検証結果
 

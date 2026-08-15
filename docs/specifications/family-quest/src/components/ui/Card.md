@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../features/quest/components/QuestList.md](../../features/quest/components/QuestList.md) - 本コンポーネントの利用元の一例（`QuestItem`が`Card`をレンダリング）
+* [../../features/quest/hooks/useQuestStatus.md](../../features/quest/hooks/useQuestStatus.md) - `variant`（`locked`/`completed`/`pending`/`infinite`/`timeLimit`/`random`/`limited`/`default`）を算出するロジックの実装元
+
 ## 2. ファイルの概要
 
 * 汎用的なカード型のUIコンポーネントを定義している。
@@ -141,6 +146,12 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 各`variant`の実際の利用シナリオと表示内容 | UIコンポーネントの定義のみであり、実際にどの画面・状態でどのバリエーションが使われるかは不明。 | `Card`コンポーネントをインポートし、表示ロジックを構成している親コンポーネントのファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 各`variant`の実際の利用シナリオと表示内容 | `QuestList.md`の解析によれば、`QuestItem`コンポーネントが`Card`をレンダリングしているとされている。また`useQuestStatus.md`の解析によれば、`useQuestStatus`フックは優先度順に`locked`（ロック中）→`completed`（完了済み）→`pending`（承認待ち）→`infinite`（無限クエスト）→`timeLimit`（期間限定）→`random`（ランダム）→`limited`（回数限定）→`default`（その他）という`variant`値を算出するとされており、本ファイルの`CardVariant`型（`'default' | 'completed' | 'pending' | 'infinite' | 'timeLimit' | 'random' | 'limited' | 'locked'`、推測）の各値と対応している可能性が高い。ただしこれは`QuestList.md`・`useQuestStatus.md`側の解析結果からの推測であり、`QuestList.tsx`/`useQuestStatus.ts`および本ファイル自体の`variant`一覧の完全な突き合わせは行っておらず、実際に`Card`へどの値が渡されているかのソースコード上の確認はできていない。 | `../../features/quest/components/QuestList.md`, `../../features/quest/hooks/useQuestStatus.md` |
 
 ## 10. 自己検証結果
 

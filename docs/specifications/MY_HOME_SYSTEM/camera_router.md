@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [camera_service.md](./camera_service.md) — 呼び出し先（委譲先）。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `HLS_LIVE_DIR`, `HLS_VOD_DIR`を提供する。
+- [config.md](./config.md) — `CAMERAS`設定を提供する。
+- [CameraDashboard.md](../family-quest/src/features/camera/components/CameraDashboard.md) — フロントエンド側の対応コンポーネント（`/settings`エンドポイントの利用元と推測される）。
+- [LiveView.md](../family-quest/src/features/camera/components/LiveView.md) — フロントエンド側の対応コンポーネント（ライブ配信エンドポイントの利用元と推測される）。
+- [RecordView.md](../family-quest/src/features/camera/components/RecordView.md) — フロントエンド側の対応コンポーネント（録画配信エンドポイントの利用元と推測される）。
+- [index.md](../family-quest/src/features/camera/types/index.md) — `get_camera_settings`が返す`id`/`name`/`order`/`enabled`に対応する`CameraConfig`型定義。
+- [HlsPlayer.md](../family-quest/src/components/ui/HlsPlayer.md) — `.m3u8`/`.ts`エンドポイントが配信するHLSストリームを実際に再生するプレイヤーコンポーネント。
+
 ## 2. ファイルの概要
 
 * FastAPIの `APIRouter` を用いて、カメラのライブ配信・録画再生に関するHTTPエンドポイントを定義するルーターモジュールである。
@@ -256,6 +266,12 @@ graph TD
 | --- | --- | --- |
 | `camera_service` の各関数の内部実装 | `start_hls_stream`, `get_record_start_offset`, `generate_record_playlist` の処理内容、`HLS_VOD_DIR`/`HLS_LIVE_DIR` の実際の値が本ファイルからは不明。 | `services/camera_service.py` |
 | `config.CAMERAS` のデータ構造 | 各カメラ辞書のキー一覧や設定ファイルの読み込み元が不明。 | `config.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `camera_service` の各関数の内部実装 | `camera_service.md`の解析によれば、`start_hls_stream`はffmpegプロセスをカメラID単位で起動しHLSライブ配信用プレイリストパス（`str`、RTSP URL取得失敗時は空文字列）を返し、`get_record_start_offset`は指定日最初の録画ファイル名から算出した0時からの経過秒数（`int`、失敗時は`0`）を返し、`generate_record_playlist`は10分単位に分割されたmp4群を`ffconcat`で結合したVOD用HLSプレイリストパス（`Optional[str]`、保存先ディレクトリ不在時や対象ファイルなし時は`None`）を返すと推測される。ただし`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実際のパス値自体は`camera_service.md`側でも本文中に明記が確認できず、依然として不明。 | camera_service.md |
 
 ## 10. 自己検証結果
 

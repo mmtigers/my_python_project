@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [unified_server.md](./unified_server.md) — 呼び出し先(バックグラウンド起動)。起動後、内部で`scheduler_boot.py`と`monitors/camera_monitor.py`をさらにサブプロセス起動する
+- [dashboard.md](./dashboard.md) — 呼び出し先(バックグラウンド起動、Streamlitダッシュボード)
+- [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) — 呼び出し先(フォアグラウンド実行)
+- [scheduler_boot.md](./scheduler_boot.md) — 間接的な起動対象。`unified_server.py`のライフサイクル内でサブプロセスとして起動される
+
 ## 2. ファイルの概要
 
 * システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、既存プロセスの終了（および強制終了フォールバック）、NASのマウント確認、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
@@ -207,6 +214,15 @@ graph TD
 | `dashboard.py`の仕様 | Streamlitで立ち上がるポート8501のダッシュボード機能詳細が不明 | `dashboard.py` |
 | 未起動スクリプトの用途 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py`がクリーンアップ対象にあるが、起動処理が存在しないため、いつどこで起動されるか不明 | 全体アーキテクチャ資料 または 各該当スクリプト |
 | `QUEST_DIR`の用途 | 変数が宣言されているが使用されていないため、本来の用途が不明 | 不明 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `switchbot_webhook_fix.py`の仕様 | `switchbot_webhook_fix.md`の解析によれば、環境変数`WEBHOOK_BASE_URL`を用いてSwitchBotおよびLINE BotのWebhookエンドポイントURLを問い合わせ、現状と異なる場合のみ削除・再登録(SwitchBot)または更新(LINE)を行い、実際に更新が発生した場合のみ`common.send_push`で通知するスクリプトとされる。 | switchbot_webhook_fix.md |
+| `unified_server.py`の仕様 | `unified_server.md`の解析によれば、FastAPI製のAPIサーバーであり、`lifespan`内で`monitors/camera_monitor.py`と`scheduler_boot.py`をサブプロセスとして起動し、終了時にはそれらを停止させる構成になっているとされる。ただし`camera_monitor.py`の起動は`try-except`で保護されておらず、起動失敗時はアプリ全体が起動できない可能性がある点が`unified_server.md`の保守上の注意点として挙げられている。 | unified_server.md, scheduler_boot.md |
+| `dashboard.py`の仕様 | `dashboard.md`の解析によれば、Streamlit製のダッシュボードアプリであり、`services.analysis_service`からセンサー・子供・食事等のデータを読み込み、11個のタブ(クエスト、電車遅延、防犯カメラ等)を`views.dashboard`配下の各ビューモジュールに委譲してレンダリングするとされる。 | dashboard.md |
+| 未起動スクリプトの用途 | `unified_server.md`の解析によれば、`camera_monitor.py`は`start_all.sh`自体ではなく`unified_server.py`の`lifespan`によってサブプロセスとして起動されることが判明した(`start_all.sh`側の`pkill`対象と`unified_server.py`側の起動元が一致)。一方`bluetooth_monitor.py`と`scheduler.py`(`scheduler_boot.py`とは別名)については、今回参照した仕様書群の中に対応する起動元の記述が見つからず、依然として不明である。 | unified_server.md |
 
 ## 10. 自己検証結果
 

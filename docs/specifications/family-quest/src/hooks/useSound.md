@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [App.md](../../App.md) — `play('tap')`/`play('medal')`/`play('select')`/`play('clear')`/`play('cancel')`等を呼び出す利用元。
+- [Button.md](../components/ui/Button.md) — クリック時に`play('tap')`を呼び出す利用元。
+- [LevelUpModal.md](../components/ui/LevelUpModal.md) — 表示時に`play('levelUp')`を呼び出す利用元。
+- [QuestList.md](../features/quest/components/QuestList.md) — クエスト完了操作時に`play('clear')`/`play('submit')`を呼び出す利用元。
+- [InventoryList.md](../features/shop/components/InventoryList.md) — アイテム使用・キャンセル時に`play('clear')`/`play('cancel')`を呼び出す利用元。
+
 ## 2. ファイルの概要
 
 * Reactコンポーネント内で効果音を再生するためのカスタムフック `useSound` を提供する。
@@ -156,6 +164,12 @@ graph TD
 | --- | --- | --- |
 | 音声ファイルの配置場所と存在有無 | コード内ではパス文字列を指定しているのみで、実際のアセットの配置はコードから確認できないため。 | 対象の `.mp3` ファイル（`/quest/*.mp3`） |
 | フックの呼び出し元と実行タイミング | 本ファイルはフックの定義のみであり、実際にどのコンポーネントでどのキーの音声が再生されるかは不明なため。 | `useSound` をインポート・使用しているコンポーネントファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| フックの呼び出し元と実行タイミング | `Button.md`の解析によれば`Button`はクリック時に`play('tap')`を、`LevelUpModal.md`の解析によれば表示時（`useEffect`）に`play('levelUp')`を実行するとされている。`App.md`の解析によれば、`play('tap')`（ユーザー切替時）、`play('medal')`（メダル獲得時）、`play('select')`（確認モーダル表示時）、`play('clear')`（購入等成功時）、`play('cancel')`（却下・エラー時）が使われているとされ、`QuestList.md`/`InventoryList.md`の解析によれば、クエスト完了・アイテム使用/キャンセル時にも`play('clear')`/`play('submit')`/`play('cancel')`が呼ばれているとされている。これらを総合すると`SOUNDS`には少なくとも`tap`/`levelUp`/`medal`/`select`/`clear`/`cancel`/`submit`に相当するキーが定義されている可能性が高いと考えられるが、`SOUNDS`オブジェクトの完全なキー一覧は`useSound.ts`のソース自体を確認しないと断定できない。 | `../../App.md`, `../components/ui/Button.md`, `../components/ui/LevelUpModal.md`, `../features/quest/components/QuestList.md`, `../features/shop/components/InventoryList.md` |
 
 ## 10. 自己検証結果
 
