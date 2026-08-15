@@ -3,10 +3,11 @@
 
 """
 NewFace Monitor System (Refactored for MY_HOME_SYSTEM)
-Target: https://petitpetit-dream.com/newface/
+Targets: MonitorConfig.SITES に登録された複数サイト
 
 Description:
-    Webサイトの新人紹介ページを定期巡回し、新規キャストの追加を検知してDiscordに通知する。
+    複数のWebサイトの新人紹介ページを定期巡回し、新規キャストの追加を検知してDiscordに通知する。
+    監視対象サイトは MonitorConfig.SITES に SiteConfig を追加するだけで拡張できる。
     MY_HOME_SYSTEMのエコシステムに統合されたバージョン。
 """
 
@@ -99,17 +100,61 @@ logger = get_logger("newface_monitor")
 # Configuration & Constants
 # ==========================================
 
+@dataclass(frozen=True)
+class SiteConfig:
+    """監視対象サイト1件分の設定。
+
+    新しいサイトを監視対象に加える場合は、このデータクラスのインスタンスを
+    MonitorConfig.SITES に追加するだけでよい（コード本体の変更は不要）。
+
+    Attributes:
+        site_id (str): サイトを一意に識別するID（データファイル名等に使用）。
+        name (str): 通知等に表示するサイトの表示名。
+        target_url (str): 巡回対象ページのURL。
+        selector_container (str): キャスト一覧の各要素を囲むコンテナのCSSセレクタ。
+        selector_name (str): キャスト名を取得するCSSセレクタ（コンテナ基準）。
+        selector_link (str): 詳細ページへのリンクを取得するCSSセレクタ（コンテナ基準）。
+        selector_image (str): サムネイル画像を取得するCSSセレクタ（コンテナ基準）。
+        data_filename (str): 既知キャストの保存先ファイル名。未指定時は
+            'known_casts_{site_id}.json' を用いる。
+    """
+    site_id: str
+    name: str
+    target_url: str
+    selector_container: str
+    selector_name: str
+    selector_link: str
+    selector_image: str
+    data_filename: str = ""
+
+    def get_data_filename(self) -> str:
+        """既知キャストの保存先ファイル名を返す。
+
+        Returns:
+            str: data_filename が指定されていればそれを、なければ
+                site_id から導出したデフォルトファイル名を返す。
+        """
+        return self.data_filename or f"known_casts_{self.site_id}.json"
+
+
 class MonitorConfig:
     """モニタリング設定および定数管理クラス。"""
 
-    # Target Settings
-    TARGET_URL: str = 'https://petitpetit-dream.com/newface/'
-    
-    # Selectors (HTML構造に依存)
-    SELECTOR_CONTAINER: str = 'ul.gallist li'
-    SELECTOR_NAME: str = 'article h3 a'
-    SELECTOR_LINK: str = 'article h3 a'
-    SELECTOR_IMAGE: str = 'div.ph img:not(.list_today)'
+    # Target Sites
+    # 新規サイトを監視対象に追加する場合は、このリストに SiteConfig を追記する。
+    SITES: List[SiteConfig] = [
+        SiteConfig(
+            site_id='petitpetit_dream',
+            name='ぷちぷちどりーむ',
+            target_url='https://petitpetit-dream.com/newface/',
+            selector_container='ul.gallist li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            # 既存運用データ（known_casts.json）との後方互換のためファイル名を明示指定
+            data_filename='known_casts.json',
+        ),
+    ]
 
     # File Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
@@ -147,13 +192,16 @@ class MonitorConfig:
         )
 
     @classmethod
-    def get_data_file(cls) -> Path:
-        """保存先JSONファイルのパスを取得する。
-        
+    def get_data_file(cls, site: SiteConfig) -> Path:
+        """指定サイトの既知キャスト保存先JSONファイルのパスを取得する。
+
+        Args:
+            site (SiteConfig): 対象サイトの設定。
+
         Returns:
-            Path: known_casts.json の完全なパス
+            Path: サイトごとの既知キャストデータファイルの完全なパス。
         """
-        return cls.get_data_dir() / 'known_casts.json'
+        return cls.get_data_dir() / site.get_data_filename()
 
 
 # ==========================================
@@ -206,22 +254,26 @@ class DiscordNotifier:
         """
         self.webhook_url = webhook_url
 
-    def notify(self, new_casts: List[CastMember]) -> None:
+    def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:
         """新規キャスト情報をDiscordに通知する。
 
         Args:
             new_casts (List[CastMember]): 通知対象の新規キャストリスト。
+            site_name (str): 通知元サイトの表示名。複数サイト運用時に
+                どのサイトの新着かを区別できるよう埋め込みタイトルに付与する。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping notification.")
             return
+
+        site_prefix = f"【{site_name}】" if site_name else ""
 
         for cast in new_casts:
             payload = {
                 "username": "New Face Monitor",
                 "embeds": [
                     {
-                        "title": f"✨ 新人キャスト情報: {cast.name}",
+                        "title": f"✨ 新人キャスト情報{site_prefix}: {cast.name}",
                         "description": "新しいキャストが追加されました！",
                         "url": cast.detail_url,
                         "color": 16738740,  # Pinkish
@@ -258,15 +310,18 @@ class DataManager:
     """データの永続化と読み込みを担当するクラス。"""
 
     @staticmethod
-    def load_known_casts() -> Set[CastMember]:
-        """保存済みのキャストデータを読み込む。
+    def load_known_casts(site: SiteConfig) -> Set[CastMember]:
+        """指定サイトの保存済みキャストデータを読み込む。
+
+        Args:
+            site (SiteConfig): 対象サイトの設定。
 
         Returns:
             Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。
         """
-        data_file = MonitorConfig.get_data_file()
+        data_file = MonitorConfig.get_data_file(site)
         if not data_file.exists():
-            logger.debug("No existing data found. Starting with empty state.")
+            logger.debug(f"No existing data found for site '{site.site_id}'. Starting with empty state.")
             return set()
 
         try:
@@ -279,13 +334,14 @@ class DataManager:
             return set()
 
     @staticmethod
-    def save_known_casts(casts: Set[CastMember]) -> None:
-        """キャストデータをJSONファイルに保存する。
+    def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:
+        """指定サイトのキャストデータをJSONファイルに保存する。
 
         Args:
+            site (SiteConfig): 対象サイトの設定。
             casts (Set[CastMember]): 保存対象のキャスト集合。
         """
-        data_file = MonitorConfig.get_data_file()
+        data_file = MonitorConfig.get_data_file(site)
         try:
             data_file.parent.mkdir(parents=True, exist_ok=True)
             data = [c.to_dict() for c in casts]
@@ -329,8 +385,11 @@ class WebMonitor:
         session.headers.update({'User-Agent': MonitorConfig.USER_AGENT})
         return session
 
-    def fetch_current_casts(self) -> Set[CastMember]:
-        """ターゲットURLから現在のキャスト一覧を取得する。
+    def fetch_current_casts(self, site: SiteConfig) -> Set[CastMember]:
+        """指定サイトのターゲットURLから現在のキャスト一覧を取得する。
+
+        Args:
+            site (SiteConfig): 対象サイトの設定。
 
         Returns:
             Set[CastMember]: 現在掲載されているキャストの集合。
@@ -342,51 +401,52 @@ class WebMonitor:
             # Bot検知回避のためのランダム待機
             time.sleep(random.uniform(1.0, 3.0))
 
-            logger.debug(f"Fetching URL: {MonitorConfig.TARGET_URL}")
-            response = self.session.get(MonitorConfig.TARGET_URL, timeout=MonitorConfig.TIMEOUT)
+            logger.debug(f"Fetching URL: {site.target_url}")
+            response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)
             response.raise_for_status()
 
             soup = BeautifulSoup(response.content, 'html.parser')
-            return self._parse_html(soup)
+            return self._parse_html(soup, site)
 
         except requests.RequestException as e:
             # 呼び出し元でハンドリングするために再送出、ただしログは記録する
-            logger.error(f"Network error during scraping: {e}")
+            logger.error(f"Network error during scraping of site '{site.site_id}': {e}")
             raise
 
-    def _parse_html(self, soup: BeautifulSoup) -> Set[CastMember]:
+    def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:
         """HTMLスープからキャスト情報を抽出する。
 
         Args:
             soup (BeautifulSoup): 解析対象のHTML。
+            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。
 
         Returns:
             Set[CastMember]: 抽出されたキャストの集合。
         """
         casts = set()
-        containers = soup.select(MonitorConfig.SELECTOR_CONTAINER)
+        containers = soup.select(site.selector_container)
 
         if not containers:
             logger.warning(
-                f"No elements found matching selector: {MonitorConfig.SELECTOR_CONTAINER}. "
-                "Layout might have changed."
+                f"No elements found matching selector: {site.selector_container} "
+                f"(site: '{site.site_id}'). Layout might have changed."
             )
             return casts
 
         for div in containers:
             try:
                 # Name Extraction
-                name_elem = div.select_one(MonitorConfig.SELECTOR_NAME)
+                name_elem = div.select_one(site.selector_name)
                 name = name_elem.get_text(strip=True) if name_elem else "Unknown"
 
                 # Link & ID Extraction
-                link_elem = div.select_one(MonitorConfig.SELECTOR_LINK)
+                link_elem = div.select_one(site.selector_link)
                 detail_url = ""
                 cast_id = ""
 
                 if link_elem and link_elem.get('href'):
                     href = link_elem.get('href')
-                    detail_url = urljoin(MonitorConfig.TARGET_URL, href)
+                    detail_url = urljoin(site.target_url, href)
                     # パスからIDを生成 (例: /prof/123 -> 123)
                     # クエリ文字列(?utm=...等)が付与されるとcast_idが実行ごとに
                     # ブレて「新規キャスト」の誤検知を招くため、先に除去する
@@ -399,10 +459,10 @@ class WebMonitor:
                     cast_id = f"name_{name}"
 
                 # Image Extraction
-                img_elem = div.select_one(MonitorConfig.SELECTOR_IMAGE)
+                img_elem = div.select_one(site.selector_image)
                 image_url = ""
                 if img_elem and img_elem.get('src'):
-                    image_url = urljoin(MonitorConfig.TARGET_URL, img_elem.get('src'))
+                    image_url = urljoin(site.target_url, img_elem.get('src'))
 
                 cast = CastMember(
                     id=cast_id,
@@ -414,10 +474,10 @@ class WebMonitor:
 
             except Exception as e:
                 # 個別のパースエラーで全体を止めない
-                logger.warning(f"Error parsing specific cast element: {e}")
+                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")
                 continue
 
-        logger.debug(f"Successfully parsed {len(casts)} casts.")
+        logger.debug(f"Successfully parsed {len(casts)} casts for site '{site.site_id}'.")
         return casts
 
     def close(self):
@@ -430,55 +490,79 @@ class WebMonitor:
 # Main Execution Flow
 # ==========================================
 
+def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:
+    """1サイト分の巡回・差分検知・通知・保存を行う。
+
+    サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が
+    他サイトの監視処理に波及しないようにする。
+
+    Args:
+        monitor (WebMonitor): 使い回すWebMonitorインスタンス。
+        notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
+        site (SiteConfig): 処理対象のサイト設定。
+    """
+    logger.debug(f"--- Checking site '{site.site_id}' ({site.name}) ---")
+
+    # 1. Load Data
+    known_casts = DataManager.load_known_casts(site)
+
+    # 2. Fetch Data
+    try:
+        current_casts = monitor.fetch_current_casts(site)
+    except requests.RequestException:
+        logger.error(f"Aborting monitor run for site '{site.site_id}' due to network failure.")
+        return
+
+    if not current_casts:
+        logger.debug(
+            f"No casts found via scraping for site '{site.site_id}'. "
+            "Verify selectors or site availability."
+        )
+        return
+
+    # 3. Detect Diff
+    new_casts_set = current_casts - known_casts
+    new_casts = list(new_casts_set)
+
+    # 4. Notify & Update
+    if new_casts:
+        logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
+        notifier.notify(new_casts, site_name=site.name)
+
+        updated_casts = known_casts.union(current_casts)
+        DataManager.save_known_casts(site, updated_casts)
+    else:
+        logger.debug(f"No new casts detected for site '{site.site_id}'.")
+        DataManager.save_known_casts(site, current_casts)
+
+
 def run_monitor() -> None:
-    """モニタープロセスのメインロジック。"""
+    """モニタープロセスのメインロジック。MonitorConfig.SITESに登録された全サイトを順に処理する。"""
     logger.debug("=== NewFace Monitor Started ===")
 
     data_dir = MonitorConfig.get_data_dir()
-    
+
     # フェイルソフト: ストレージが利用できない場合は安全にタスクを終了（Exit）
     if not wait_for_storage_warmup(data_dir):
         logger.error("NASストレージへのアクセスが確立できないため、当該バッチ処理を安全に中断します。")
         return
-    
+
     monitor = None
     try:
         # リソースを必要とするインスタンス化はウォームアップ確認後に実行
         monitor = WebMonitor()
         notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
-        
-        # 1. Load Data
-        known_casts = DataManager.load_known_casts()
 
-        # 2. Fetch Data
-        try:
-            current_casts = monitor.fetch_current_casts()
-        except requests.RequestException:
-            logger.error("Aborting monitor run due to network failure.")
-            return
-
-        if not current_casts:
-            logger.debug("No casts found via scraping. Verify selectors or site availability.")
-            return
-
-        # 3. Detect Diff
-        new_casts_set = current_casts - known_casts
-        new_casts = list(new_casts_set)
-
-        # 4. Notify & Update
-        if new_casts:
-            logger.info(f"Detected {len(new_casts)} new casts.")
-            notifier.notify(new_casts)
-            
-            updated_casts = known_casts.union(current_casts)
-            DataManager.save_known_casts(updated_casts)
-        else:
-            logger.debug("No new casts detected.")
-            DataManager.save_known_casts(current_casts)
+        for site in MonitorConfig.SITES:
+            try:
+                _check_site(monitor, notifier, site)
+            except Exception as e:
+                # 1サイトの予期しない例外で他サイトの処理を止めない
+                logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
 
     except Exception as e:
         logger.critical(f"Critical error in NewFace Monitor: {e}", exc_info=True)
-    
+
     finally:
         # 終了時のリソース解放: tryブロック内でエラーが起きても確実にCloseする
         if monitor is not None:
