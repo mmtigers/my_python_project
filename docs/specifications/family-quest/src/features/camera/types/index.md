@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../components/CameraDashboard.md](../components/CameraDashboard.md) - `CameraConfig[]`を取得・フィルタ（`enabled`）・ソート（`order`昇順）して利用するコンポーネント
+* [../components/LiveView.md](../components/LiveView.md) - `CameraConfig[]`を`cameras` propとして受け取るコンポーネント
+* [../components/RecordView.md](../components/RecordView.md) - `CameraConfig[]`を`cameras` propとして受け取るコンポーネント
+* [../../../../../MY_HOME_SYSTEM/camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md) - `CameraConfig`に対応するレスポンス（`id`/`name`/`order`/`enabled`）を生成する`GET /settings`エンドポイントの実装元
+
 ## 2. ファイルの概要
 
 * カメラ機能（`features/camera`）配下で共有される、カメラ設定情報のデータ構造 `CameraConfig` を定義する型定義ファイル。
@@ -79,6 +86,12 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `CameraConfig`の各フィールドの実際の値の生成元・制約 | 本ファイルには型定義のみが存在し、生成・利用ロジックが含まれないため | `CameraDashboard.tsx`、バックエンドの`/api/cameras/settings`実装 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `CameraConfig`の各フィールドの実際の値の生成元・制約 | `camera_router.md`の解析によれば、バックエンドの`GET /settings`は`config.CAMERAS`から一覧を読み出し、`id`/`name`は`config.CAMERAS`の各要素からそのまま、`order`は配列インデックス+1、`enabled`は常に`True`固定値として返すとされている。また`CameraDashboard.md`の解析によれば、フロントエンド側では取得後に`enabled === true`のカメラのみを`order`昇順でソートして利用するとされている。ただしこれらは`camera_router.md`・`CameraDashboard.md`側の解析結果からの補足であり、`camera_router.py`/`CameraDashboard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md, ../components/CameraDashboard.md |
 
 ## 10. 自己検証結果
 
