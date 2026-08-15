@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [./UserStatusCard.md](./UserStatusCard.md) - 各パネル上部のユーザーステータス表示コンポーネント
+* [../../quest/components/QuestList.md](../../quest/components/QuestList.md) - パネル内クエスト一覧表示コンポーネント（`panelMode`/`iconFirst`付き）
+* [../../quest/components/ApprovalList.md](../../quest/components/ApprovalList.md) - メイン画面上部の承認待ち一覧表示コンポーネント
+* [../../shop/components/RewardShop.md](../../shop/components/RewardShop.md) - パネル内「ごほうび」表示コンポーネント
+* [../../../types/index.md](../../../types/index.md) - `User`/`Quest`/`QuestHistory`/`Reward`/`PendingInventory`型の定義元
+* [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）
+
 ## 2. ファイルの概要
 
 横画面（Echo Show 15等の常設デバイス）用のメインレイアウトコンポーネント`FamilyDashboard`と、その内部で使われるユーザー単位のパネルコンポーネント`FamilyPanel`を定義する。パパ・ママ・兄・妹（`FAMILY_ORDER`で固定された順序）を1行4列のグリッドで常時表示し、各パネル内でそのユーザーのステータスと、その日のクエスト一覧またはごほうび画面が完結する（別画面への誘導をしない）。親向けの承認機能は独立画面を持たず、メイン画面上部に常時統合表示される。
@@ -203,6 +212,15 @@ graph TD
 | `ApprovalList`の内部実装 | `pendingQuests`/`pendingItems`/`users`/`currentUser`をどう描画し、`onApprove`/`onReject`をどう発火させるかが不明なため。 | `../../quest/components/ApprovalList.tsx` |
 | `RewardShop`の内部実装 | パネル内「ごほうび」タブの描画内容・購入フローの詳細が不明なため。 | `../../shop/components/RewardShop.tsx` |
 | `User.role`の取りうる値の全容 | `'role_adult'`以外の値（子ども側の`role`文字列）が本ファイルからは特定できないため。 | `@/types` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `UserStatusCard`の内部実装 | `UserStatusCard.md`の解析によれば、`UserStatusCard`は`user`が渡されない場合`null`を返し、次レベルまでのEXP・EXP進捗率をフロント側で計算する一方、HP（`user.hp`/`user.maxHp`）はバックエンド計算値をそのまま用い、`CountUp`でHP・ゴールド・メダル数をアニメーション表示し、アバタークリックで`onAvatarClick(user)`を呼び出すとされている。ただしこれは`UserStatusCard.md`側の解析結果からの補足であり、`UserStatusCard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./UserStatusCard.md |
+| `ApprovalList`の内部実装 | `ApprovalList.md`の解析によれば、`ApprovalList`はクエストの承認・拒否ボタン押下時に親から渡された`onApprove`/`onReject`をそのまま実行し（API通信は行わない）、アイテム使用承認のみ内部で`consumeItem`のAPI呼び出しとアプリ標準`Modal`による確認ダイアログを持つとされている。`pendingQuests`/`pendingItems`が共に空の場合は`null`を返すとされている。ただしこれは`ApprovalList.md`側の解析結果からの補足であり、`ApprovalList.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../quest/components/ApprovalList.md |
+| `RewardShop`の内部実装 | `RewardShop.md`の解析によれば、`RewardShop`は所持ゴールド表示（`CountUp`）→購入可能な報酬一覧（`RewardList`）→所持品一覧（`InventoryList`）の順に画面を構成する「ごほうび」画面全体のコンテナであり、購入処理自体は`onBuy`経由で呼び出し元へ委譲されるとされている。ただしこれは`RewardShop.md`側の解析結果からの補足であり、`RewardShop.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../shop/components/RewardShop.md |
+| `User.role`の取りうる値の全容 | `types/index.md`の解析でも`role`フィールドが取りうる全ての文字列値までは明記されていないが、`App.md`の解析によれば`isParentUser`関数が`user.role === 'role_adult'`で保護者判定を行っているとされており、少なくとも`'role_adult'`が実在の値であることは複数ドキュメントの記載から確認できる。子ども側の具体的な値（`'role_child'`等）は依然として特定できていない。 | ../../../types/index.md, ../../../../App.md |
 
 ## 10. 自己検証結果
 
