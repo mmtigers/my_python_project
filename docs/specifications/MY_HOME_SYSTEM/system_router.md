@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [backup_service.md](./backup_service.md) — `perform_backup`の実装元。DBバックアップとNAS転送を行い、失敗時は`Tuple[bool, str, float]`を返す
+- [unified_server.md](./unified_server.md) — 呼び出し元。本ルーターを`/api/system`等のプレフィックスで`app.include_router`する
+
 ## 2. ファイルの概要
 
 * FastAPIのルーターオブジェクトを生成し、手動バックアップをトリガーするためのPOSTエンドポイントを提供する。
@@ -123,6 +128,13 @@ graph TD
 | --- | --- | --- |
 | `backup_service.perform_backup()` の具体的な処理内容 | 実装が別ファイルに存在するため、どのようなデータをどこにバックアップしているか判断不可 | `services/backup_service.py` |
 | 戻り値の `size` 変数の実際の型や単位 | レスポンスキーは `"size_mb"` だが、`perform_backup` 関数からの戻り値 `size` が数値型か文字列型か、実際にメガバイト単位で返されているかが判断不可 | `services/backup_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `backup_service.perform_backup()` の具体的な処理内容 | `backup_service.md`の解析によれば、`perform_backup`はSQLiteデータベースをローカルにバックアップした後NASへ`shutil.copy2`で転送し、NASへの転送失敗時（権限エラー・接続断等）は管理者への即時通知(`_notify_and_log_error`経由の`send_push`)を行う設計であることが判明した。 | backup_service.md |
+| 戻り値の `size` 変数の実際の型や単位 | `backup_service.md`の解析によれば、`perform_backup`の戻り値は`Tuple[bool, str, float]`であり、成功時は`(True, "バックアップ完了", local_size_mb)`という形でMB単位の`float`を返すことが判明した。これは`manual_backup`が返す`size_mb`キーの値と対応する。 | backup_service.md |
 
 ## 10. 自己検証結果
 

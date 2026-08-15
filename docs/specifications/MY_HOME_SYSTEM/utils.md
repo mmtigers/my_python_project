@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `get_now_iso`, `get_today_date_str`, `get_display_date`を`core.utils`から再エクスポートするFacadeモジュール
+- [sensor_service.md](./sensor_service.md) — `core.utils.get_now_iso`の直接の利用元
+- [weather_service.md](./weather_service.md) — `common.get_now_iso`経由での利用元
+- [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
+
 ## 2. ファイルの概要
 
 * システム全体で共通して使用されるユーティリティ関数群を提供する。
@@ -263,6 +270,12 @@ graph TD
 | --- | --- | --- |
 | 呼び出し元モジュールの特定 | ファイル単体では、どの箇所でこれらのユーティリティが使用されているか判断できない。 | プロジェクト全体のソースコード、またはインポートを追跡できる依存関係ツリー |
 | 実行環境とパッケージのバージョン | `pytz`など外部パッケージのバージョン指定がなく、動作環境のPythonバージョンも特定できない。 | `requirements.txt`, `Pipfile`, `pyproject.toml` などの依存管理ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 呼び出し元モジュールの特定 | 他バッチで解析済みの複数ドキュメントの記載により、`common.md`が`get_now_iso`/`get_today_date_str`/`get_display_date`を`core.utils`から再エクスポートするFacadeであること、`sensor_service.md`が`core.utils`から`get_now_iso`を直接インポートして利用していること、`weather_service.md`が`common.get_now_iso`経由で本モジュールの機能を利用している(コメントにて言及)ことがそれぞれ判明した。ただし全ての呼び出し元を網羅的に特定できたわけではない。 | common.md, sensor_service.md, weather_service.md |
 
 ## 10. 自己検証結果
 
