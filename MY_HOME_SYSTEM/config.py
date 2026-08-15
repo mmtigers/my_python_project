@@ -1,4 +1,26 @@
 # MY_HOME_SYSTEM/config.py
+"""
+アプリケーション設定モジュール。
+
+目次:
+    1.  環境・機能フラグ設定
+    2.  認証・API設定 (Secrets)
+    3.  システム・パス設定
+    4.  デバイス・ルール設定
+    5.  給与(Salary)設定
+    6.  ショッピング・美容院予約 監視設定
+    7.  土地価格監視設定
+    8.  Google Photos 連携設定
+    9.  不動産情報(REINFOLIB)設定
+    10. NAS & Network設定
+    11. 動画処理(タイムラプス・NVR録画)設定
+    12. 保持期間・クリーンアップ設定
+    13. Sound & Family設定
+    14. 外部サイト監視設定 (SUUMO)
+    15. 小児科予約監視設定 (Clinic Monitor)
+    16. メモリ監視設定
+    17. TVロック機能設定
+"""
 import os
 import sys
 import json
@@ -10,7 +32,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 
 # ==========================================
-# Logger Initialization
+# Bootstrap Helpers (Logger / Storage)
 # ==========================================
 # 起動シーケンス初期の段階で循環参照を避けるため、標準のloggingで名前空間を合わせる
 logger = logging.getLogger("config_init")
@@ -39,13 +61,13 @@ def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
             # ディレクトリが存在しても、マウント直後の不安定な状態や権限不足をここで検知
             with open(test_file, 'w') as f:
                 f.write("test")
-            
+
             # テストファイルのクリーンアップ
             os.remove(test_file)
 
             if attempt > 0:
                 logger.info(f"✅ Retry {attempt}: Successfully accessed '{base_path}'.")
-            
+
             return True
 
         except (OSError, PermissionError, IOError) as e:
@@ -63,7 +85,7 @@ def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
                     f"Failed to access or initialize storage at '{base_path}'. Reason: {e}"
                 )
                 return False
-                
+
     return False
 
 if not logger.handlers:
@@ -74,8 +96,8 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 def ensure_safe_path_with_backoff(
-    preferred_path: str, 
-    fallback_name: str, 
+    preferred_path: str,
+    fallback_name: str,
     max_retries: int = 5
 ) -> str:
     """
@@ -92,7 +114,7 @@ def ensure_safe_path_with_backoff(
     """
     # 新設した検証・初期化関数に処理を委譲
     is_valid: bool = verify_and_initialize_storage(preferred_path, max_retries)
-    
+
     if is_valid:
         return preferred_path
 
@@ -100,7 +122,7 @@ def ensure_safe_path_with_backoff(
     base_dir: str = os.path.dirname(os.path.abspath(__file__))
     fallback_root: str = os.path.join(base_dir, "temp_fallback")
     fallback_path: str = os.path.join(fallback_root, fallback_name)
-    
+
     try:
         os.makedirs(fallback_path, exist_ok=True)
         logger.error(
@@ -143,14 +165,14 @@ class DeviceConfig(BaseModel):
     notify_settings: NotifySettings = Field(default_factory=NotifySettings)
 
 # ==========================================
-# 0. 環境・機能フラグ設定
+# 1. 環境・機能フラグ設定
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
 ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
 ENABLE_BLUETOOTH: bool = False
 
 # ==========================================
-# 1. 認証・API設定 (Secrets)
+# 2. 認証・API設定 (Secrets)
 # ==========================================
 SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")
 SWITCHBOT_API_SECRET: Optional[str] = os.getenv("SWITCHBOT_API_SECRET")
@@ -181,11 +203,11 @@ GMAIL_APP_PASSWORD: Optional[str] = os.getenv("GMAIL_APP_PASSWORD")
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
 SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")
 
-# 不動産情報
+# 不動産情報 (WebURLは 9. 不動産情報(REINFOLIB)設定 を参照)
 REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
 
 # ==========================================
-# 2. システム・パス設定
+# 3. システム・パス設定
 # ==========================================
 BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
 FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")
@@ -200,16 +222,16 @@ NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")
 
 ASSETS_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(NAS_PROJECT_ROOT, "assets"), 
+    os.path.join(NAS_PROJECT_ROOT, "assets"),
     "assets"
 )
 LOG_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(BASE_DIR, "logs"), 
+    os.path.join(BASE_DIR, "logs"),
     "logs"
 )
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json")
 
-# DBテーブル名定義
+# --- DBテーブル名定義 ---
 SQLITE_TABLE_SENSOR: str = "device_records"
 SQLITE_TABLE_SWITCHBOT_LOGS: str = "switchbot_meter_logs"
 SQLITE_TABLE_POWER_USAGE: str = "power_usage"
@@ -234,11 +256,11 @@ DEFAULT_ASSETS_DIR: str = os.path.join(BASE_DIR, "defaults")
 DEFAULT_SOUND_SOURCE: str = os.path.join(DEFAULT_ASSETS_DIR, "sounds")
 
 # ==========================================
-# 3. デバイス・ルール設定 (Externalized)
+# 4. デバイス・ルール設定
 # ==========================================
 NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "discord")
 
-# 子供設定
+# --- 子供設定 ---
 _children_str: str = os.getenv("CHILDREN_NAMES", "")
 CHILDREN_NAMES: List[str] = _children_str.split(",") if _children_str else []
 CHILD_SYMPTOMS: List[str] = ["😊 元気いっぱい", "🤒 お熱がある", "🤧 鼻水・咳", "🤮 お腹の調子が悪い", "🤕 怪我した", "✏️ その他"]
@@ -253,7 +275,7 @@ MENU_OPTIONS: Dict[str, List[str]] = {
     "その他": ["スーパーの惣菜", "コンビニ", "冷凍食品", "カップ麺"]
 }
 
-# 記念日・イベント設定
+# --- 記念日・イベント設定 ---
 IMPORTANT_DATES: List[Dict[str, Any]] = []
 _events_path: str = os.path.join(BASE_DIR, "family_events.json")
 if os.path.exists(_events_path):
@@ -265,13 +287,13 @@ if os.path.exists(_events_path):
 
 CHECK_ZOROME: bool = True
 
-# 車検知キーワード
+# --- 車検知キーワード ---
 CAR_RULE_KEYWORDS: Dict[str, List[str]] = {
     "LEAVE": ["Exit", "Leave", "Out"],
     "RETURN": ["Enter", "In", "Arrive"]
 }
 
-# デバイス設定の読み込み (devices.json)
+# --- デバイス設定の読み込み (devices.json) ---
 CAMERAS: List[Dict[str, Any]] = []
 MONITOR_DEVICES: List[Dict[str, Any]] = []
 
@@ -302,8 +324,9 @@ else:
 # デフォルトは60秒。.envで上書き可能。
 MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))
 
-
-# 給与PDFパスワード
+# ==========================================
+# 5. 給与(Salary)設定
+# ==========================================
 _passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
 SALARY_PDF_PASSWORDS: List[str] = [p.strip() for p in _passwords_str.split(",") if p.strip()]
 
@@ -312,7 +335,10 @@ SALARY_DATA_DIR: str = os.path.join(BASE_DIR, "data")
 SALARY_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
 BONUS_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
 
-# ショッピング解析設定
+# ==========================================
+# 6. ショッピング・美容院予約 監視設定
+# ==========================================
+# --- ショッピング解析設定 ---
 SHOPPING_TARGETS: List[Dict[str, Any]] = [
     {
         "platform": "Amazon",
@@ -326,7 +352,7 @@ SHOPPING_TARGETS: List[Dict[str, Any]] = [
     }
 ]
 
-# 美容院・散髪予約の設定
+# --- 美容院・散髪予約の設定 ---
 HAIRCUT_TARGETS: List[Dict[str, Any]] = [
     {
         "platform": "HotPepperBeauty",
@@ -336,11 +362,11 @@ HAIRCUT_TARGETS: List[Dict[str, Any]] = [
 ]
 HAIRCUT_CYCLE_DAYS: int = 60
 
-# 自転車駐車場
+# --- 自転車駐車場 ---
 BICYCLE_PARKING_URL: str = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php"
 
 # ==========================================
-# 4. 土地価格監視設定
+# 7. 土地価格監視設定
 # ==========================================
 LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
     {
@@ -364,16 +390,20 @@ LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
 ]
 
 # ==========================================
-# 5. 不動産情報ライブラリ
+# 8. Google Photos 連携設定
 # ==========================================
 GOOGLE_PHOTOS_CREDENTIALS: str = os.path.join(BASE_DIR, "google_photos_credentials.json")
 GOOGLE_PHOTOS_TOKEN: str = os.path.join(BASE_DIR, "google_photos_token.json")
 GOOGLE_PHOTOS_SCOPES: List[str] = ['https://www.googleapis.com/auth/photoslibrary']
 
+# ==========================================
+# 9. 不動産情報(REINFOLIB)設定
+# ==========================================
+# APIキー(REINFOLIB_API_KEY)は 2. 認証・API設定 (Secrets) を参照
 REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
 
 # ==========================================
-# 6. NAS & Network
+# 10. NAS & Network設定
 # ==========================================
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
 NAS_CHECK_TIMEOUT: int = 5
@@ -394,20 +424,19 @@ if ALLOW_ALL_ORIGINS:
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 
 # ==========================================
-# Video Processing (Timelapse)
+# 11. 動画処理(タイムラプス・NVR録画)設定
 # ==========================================
 # テンポラリ動画保存先ディレクトリ (バックオフ付きの安全なパス取得を適用)
 TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(NAS_PROJECT_ROOT, "tmp_video"), 
+    os.path.join(NAS_PROJECT_ROOT, "tmp_video"),
     "tmp_video"
 )
 
 # NVR録画ファイルのベースディレクトリ
-if 'NVR_RECORD_DIR' not in locals():
-    NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
+NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
 # ==========================================
-# Retention / Cleanup Settings
+# 12. 保持期間・クリーンアップ設定
 # ==========================================
 # NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
 RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
@@ -416,7 +445,7 @@ DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
 # ==========================================
-# 7. Sound & Family
+# 13. Sound & Family設定
 # ==========================================
 SOUND_DIR: str = os.path.join(ASSETS_DIR, "sounds")
 
@@ -461,18 +490,19 @@ if os.path.exists(_family_local_path):
         logger.warning(f"family_members.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}")
 
 # ==========================================
-# 8. 外部サイト監視設定 (Monitor Settings)
+# 14. 外部サイト監視設定 (SUUMO)
 # ==========================================
 SUUMO_SEARCH_URL: Optional[str] = os.getenv("SUUMO_SEARCH_URL")
 SUUMO_MAX_BUDGET: int = 70000
 SUUMO_MONITOR_INTERVAL: int = 3600
 
 # ==========================================
-# 9. 小児科予約監視設定 (Clinic Monitor)
+# 15. 小児科予約監視設定 (Clinic Monitor)
 # ==========================================
 CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
 CLINIC_HTML_DIR: str = os.path.join(ASSETS_DIR, "clinic_html")
 CLINIC_STATS_CSV: str = os.path.join(ASSETS_DIR, "clinic_stats.csv")
+CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
 
 CLINIC_MONITOR_START_HOUR: int = int(os.getenv("CLINIC_MONITOR_START_HOUR", "8"))
 CLINIC_MONITOR_END_HOUR: int = int(os.getenv("CLINIC_MONITOR_END_HOUR", "19"))
@@ -487,11 +517,8 @@ for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DI
     except Exception as e:
         logger.warning(f"⚠️ Warning: Failed to ensure directory existence '{d}': {e}")
 
-# グラフ画像の保存先
-CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
-
 # ==========================================
-# 10. Memory Monitor Settings
+# 16. メモリ監視設定
 # ==========================================
 # システム全体のメモリ使用率警告閾値 (%)
 MEMORY_ALERT_PERCENT: float = 85.0
@@ -503,7 +530,7 @@ MEMORY_ALERT_COOLDOWN_SEC: int = 7200
 MEMORY_ALERT_LAST_NOTIFY_FILE: str = os.path.join(FALLBACK_ROOT, "last_memory_alert.txt")
 
 # ==========================================
-# 11. TV Lock Feature Settings
+# 17. TVロック機能設定
 # ==========================================
 _tv_unlock_quest_ids_str: str = os.getenv("TV_UNLOCK_QUEST_IDS", "")
 TV_UNLOCK_QUEST_IDS: List[int] = []
