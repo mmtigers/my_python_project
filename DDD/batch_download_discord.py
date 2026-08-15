@@ -35,7 +35,7 @@ import requests
 import glob
 from collections import defaultdict
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple, Any, Set, NamedTuple
+from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable
 from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
@@ -140,10 +140,18 @@ class AppConfig:
     YOUTUBE_COOKIES_FILE: Optional[Path] = field(default_factory=_resolve_cookies_file)
     # yt-dlpの例外メッセージにこれらの文字列が含まれる場合、ボット検知/レート制限と
     # 判断し、個別タスクのスキップではなくセッション全体を即座に中断する。
+    # 注: "429"/"403"/"503" は生のステータスコードとしての一致だが、
+    # NetworkManagerのセッションはstatus_forcelist=[500,502,503,504]で
+    # 自動リトライするため、503が続いた場合ここに届く例外メッセージは
+    # 実際には requests.exceptions.RetryError の
+    # "too many 503 error responses" のような文言になる。"503"を含めておくことで
+    # このリトライ尽き後のメッセージもボット検知として拾えるようにしている。
     BOT_DETECTION_MARKERS: Tuple[str, ...] = (
         "sign in to confirm",
         "confirm you're not a bot",
         "429",
+        "403",
+        "503",
         "too many requests",
     )
     # missav等、requestsで直接HTMLを取得するスクレイピング先向け。
@@ -195,6 +203,24 @@ class BotDetectionError(Exception):
 def _is_bot_detection_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return any(marker in message for marker in CONFIG.BOT_DETECTION_MARKERS)
+
+
+def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:
+    """複数グループのリストを、グループ順ではなくラウンドロビンで1本のリストに平坦化する。
+
+    MAX_TASKS_PER_RUNで先頭から打ち切る前提の呼び出し元があるため、単純に
+    グループを連結すると「収集順が先のリストファイルだけが毎回上限を使い切り、
+    他のリストファイルが慢性的に後回しになる」飢餓状態が起こり得る。各グループから
+    1件ずつ順番に取り出すことで、上限で打ち切られてもソース間で公平に分配される。
+    """
+    result: List["DownloadTask"] = []
+    materialized = [list(g) for g in groups]
+    max_len = max((len(g) for g in materialized), default=0)
+    for i in range(max_len):
+        for g in materialized:
+            if i < len(g):
+                result.append(g[i])
+    return result
 
 
 def _looks_like_block_page(html: str) -> bool:
@@ -267,7 +293,12 @@ class CooldownManager:
     def trigger_cooldown() -> None:
         until = datetime.datetime.now() + datetime.timedelta(hours=CONFIG.BOT_DETECTION_COOLDOWN_HOURS)
         try:
-            CONFIG.BOT_DETECTION_COOLDOWN_FILE.write_text(until.isoformat(), encoding="utf-8")
+            # アトミック書き込み: 書き込み中断で壊れたファイルが残ると
+            # is_in_cooldown() 側のパース失敗＝安全側（クールダウンしない）に倒れて
+            # しまうため、他の状態ファイルと同じtmp経由replaceパターンにしておく。
+            tmp_path = CONFIG.BOT_DETECTION_COOLDOWN_FILE.with_suffix('.tmp')
+            tmp_path.write_text(until.isoformat(), encoding="utf-8")
+            tmp_path.replace(CONFIG.BOT_DETECTION_COOLDOWN_FILE)
             logger.info(f"🧊 クールダウンを設定しました（解除予定: {until.strftime('%Y-%m-%d %H:%M:%S')}）")
         except OSError as e:
             logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)
@@ -575,33 +606,42 @@ class BatchDownloader:
             return UniversalYtDlpStrategy(CONFIG.BASE_SAVE_DIR, self.session)
 
     def _collect_tasks(self) -> List[DownloadTask]:
-        tasks = []
-        
+        # ソースファイルごとにグループ化して集める。MAX_TASKS_PER_RUNで先頭から
+        # 打ち切られる際に、収集順が先のリストファイルだけが毎回上限を使い切り、
+        # 他のリストファイルが慢性的に後回しにされる（飢餓状態になる）のを防ぐため、
+        # 最後にラウンドロビンで平坦化する。
+        tasks_by_source: Dict[str, List[DownloadTask]] = {}
+        seen_urls: Set[str] = set()
+
+        def _add(url: str, source_name: str) -> None:
+            if url in seen_urls:
+                return
+            seen_urls.add(url)
+            tasks_by_source.setdefault(source_name, []).append(DownloadTask(url, source_name))
+
         if CONFIG.LIST_FILE_PATH.exists():
             with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
                 for line in f:
                     url = line.strip()
                     if url and not url.startswith("#") and url not in self.history:
-                        tasks.append(DownloadTask(url, "list"))
-        
+                        _add(url, "list")
+
         if CONFIG.LIST_DIR_PATH.exists():
-            for list_file in CONFIG.LIST_DIR_PATH.glob("*.txt"):
+            # glob()の順序はOS/ファイルシステム依存で不定なため、実行毎に順序が
+            # ぶれないようソートしておく（ラウンドロビンの公平性とは別に、挙動の
+            # 再現性・デバッグしやすさのため）。
+            for list_file in sorted(CONFIG.LIST_DIR_PATH.glob("*.txt")):
                 source_name = list_file.stem
                 try:
                     with open(list_file, "r", encoding="utf-8") as f:
                         for line in f:
                             url = line.strip()
                             if url and not url.startswith("#") and url not in self.history:
-                                tasks.append(DownloadTask(url, source_name))
+                                _add(url, source_name)
                 except Exception as e:
                     logger.error(f"リスト読み込みエラー ({list_file.name}): {e}", exc_info=True)
 
-        unique_tasks = {}
-        for t in tasks:
-            if t.url not in unique_tasks:
-                unique_tasks[t.url] = t
-        
-        return list(unique_tasks.values())
+        return _round_robin_flatten(tasks_by_source.values())
 
     def _purge_skipped_tasks(self, skipped_tasks: List[DownloadTask]) -> None:
         """
