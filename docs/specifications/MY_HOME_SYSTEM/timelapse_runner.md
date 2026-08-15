@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [timelapse_generator.md](./timelapse_generator.md) — 本ランナーがサブプロセスとして起動する実行対象スクリプト
+- [config.md](./config.md) — `LOG_DIR`等の設定値を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [daily_timelapse_job.md](./daily_timelapse_job.md) — 同じタイムラプス生成システム群に属する姉妹バッチ
+- [smart_timelapse_generator.md](./smart_timelapse_generator.md) — 同じタイムラプス生成システム群に属するコアエンジン
+
 ## 2. ファイルの概要
 
 タイムラプス生成スクリプト（`timelapse_generator.py`）を、定時（17:30〜17:34）または手動による強制実行（`--force`）の条件に基づいてサブプロセスとして起動・管理するランナースクリプト。重複実行を防ぐためのフラグファイル制御と、処理遅延に対するタイムアウト処理を担っている。
@@ -176,6 +184,14 @@ graph TD
 | `LOG_DIR`の具体的なパス | `config`モジュール内の変数を参照しているが、定義が提供されていないため。 | `config.py` |
 | タイムラプス生成の具体的な処理 | `timelapse_generator.py`がサブプロセスとして実行される事実しか分からず、ロジック自体が提供されていないため。 | `monitors/timelapse_generator.py` |
 | ロガーの設定内容 | `setup_logging`関数の内部実装が提供されていないため。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `LOG_DIR`の具体的なパス | `config.md`の解析によれば、`config.py`は各種ディレクトリパスをNAS等外部ストレージのマウント遅延を考慮して検証・作成する設計であることが判明した。ただし`LOG_DIR`個別の値自体は`config.md`側でも確認できていない。 | config.md |
+| タイムラプス生成の具体的な処理 | `timelapse_generator.md`の解析によれば、`timelapse_generator.py`はDBから取得したイベント検知時刻を基にNVR録画ファイルからクリップを抽出・結合し、Discordへアップロードする処理であることが判明した。ハードコードされた3台のカメラ(`TARGET_CAM_MAP`)を対象とする。 | timelapse_generator.md |
+| ロガーの設定内容 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録する設計であることが判明した。 | logger.md |
 
 ## 10. 自己検証結果
 

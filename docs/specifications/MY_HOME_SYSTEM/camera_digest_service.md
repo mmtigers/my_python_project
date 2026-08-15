@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `ASSETS_DIR`の設定値を提供する。
+- [camera_monitor.md](./camera_monitor.md) — 本ファイルが読み込むスナップショット画像（`{cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg`）の生成元（`save_image_from_stream`/`capture_snapshot_from_nvr`）。
+- [logger.md](./logger.md) — `setup_logging`の実装元。
+
 ## 2. ファイルの概要
 
 本ファイルは、設定されたディレクトリから当日のスナップショット画像を取得し、画像の破損や読み込み可否を検証した上で、指定枚数に均等サンプリングして有効な画像のファイルパス一覧を提供する機能を持つ。
@@ -210,6 +216,13 @@ graph TD
 | 画像ファイルの生成元とライフサイクル | このファイルはファイルの読み取りのみを行っており、画像がいつ、どのようなプロセスで生成・削除されるかが不明。 | 画像キャプチャやクリーンアップを担う実装ファイル |
 | `ASSETS_DIR` の物理パス | 設定ファイルからの読み込みとなっているため、ローカルパスかネットワークマウントか等のインフラ仕様が不明。 | `config.py` |
 | ログの運用仕様 | `logger` の実装が外部化されているため、ログレベル（DEBUG, INFOなど）が環境ごとにどう制御されているか不明。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 画像ファイルの生成元とライフサイクル | `camera_monitor.md`の解析によれば、`camera_monitor.py`の`save_image_from_stream`（内部で`capture_snapshot_from_nvr`を呼び出す）が動体検知時にNVR録画からFFmpegでスナップショットを切り出し、`ASSETS_DIR`配下へ`{cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg`という命名規則で保存すると推測され、本ファイルのコメントとも一致する。ただし画像の削除・クリーンアップ処理については`camera_monitor.md`側でも言及がなく、依然として不明。 | camera_monitor.md |
+| ログの運用仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ただしログレベルの環境ごとの切り替え仕様自体は`logger.md`側でも明記されておらず不明。 | logger.md |
 
 ## 10. 自己検証結果
 

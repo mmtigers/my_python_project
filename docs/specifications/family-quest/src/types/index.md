@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [useGameData.md](../hooks/useGameData.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`/`PendingInventory`型の主要な利用元。
+- [apiClient.md](../lib/apiClient.md) — `InventoryItem`/`PendingInventory`型の利用元。
+- [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
+- [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
+- [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。`description`/`desc`混在プロパティの実際の参照パターンを確認できる。
+- [game_logic.md](../../../MY_HOME_SYSTEM/game_logic.md) — `User.maxHp`の計算式（`calculate_max_hp(level) = level * 20 + 5`）を実装するバックエンド側のロジック実装元。
+- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与するバックエンドAPIの実装元。
+
 ## 2. ファイルの概要
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
@@ -168,6 +178,13 @@ graph TD
 | --- | --- | --- |
 | プロパティの使い分け | `Quest`の`description`と`desc`、`exp`と`exp_gain`など、類似プロパティの具体的な使われ方が不明 | 本ファイルをインポートしているコンポーネントやロジックの実装ファイル |
 | DB上のデータ構造との差異 | オプショナル(`?`)が多用されているが、これがDBのNULL許容を反映しているか、フロントエンド特有の処理上の都合か不明 | バックエンドのDBスキーマ定義ファイルやAPIの実装ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| プロパティの使い分け | `RewardList.md`の解析によれば、`RewardList`側では`reward.description || reward.desc || reward.category || 'General'`のようなフォールバック順で参照しており、`Reward`型の複数の類似プロパティがいずれも実データ上使われうる前提でハンドリングされているとされている。また`RewardShop.md`の解析によれば、`RewardShop`は`currentUser.gold`（`User.gold`）を直接参照しているとされている。 | `../features/shop/components/RewardList.md`, `../features/shop/components/RewardShop.md` |
+| DB上のデータ構造との差異 | `quest_service.md`の解析によれば、バックエンドはユーザー情報取得時に`SELECT level, gold ...`のようなSQLクエリを実行しているとされ、DBカラム名（`level`, `gold`等）は`User`型のプロパティ名とおおむね対応しているように見える。ただしDBスキーマの型・NULL許容等の制約自体は`quest_service.md`側でも不明と記載されており、この不明事項を完全に解消するものではない。 | `../../../MY_HOME_SYSTEM/quest_service.md` |
 
 ## 10. 自己検証結果
 

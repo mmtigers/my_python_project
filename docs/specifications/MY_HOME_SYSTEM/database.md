@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `config.SQLITE_DB_PATH`(DBファイルパス設定値)の提供元
+* [common.md](./common.md) - 本ファイル(`core.database`)を`get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async`としてFacade再エクスポートする呼び出し元
+* [init_unified_db.md](./init_unified_db.md) - `common.get_db_cursor(commit=True)`経由で本ファイルの接続処理(WALモード・外部キー制約有効化を含む)を利用してテーブル初期化を行う呼び出し元
+* [webhook_router.md](./webhook_router.md) - `core.database.save_log_async`を直接インポートして利用する呼び出し元
+* [quest_service.md](./quest_service.md) - `common.get_db_cursor`経由で本ファイルの接続処理を利用する呼び出し元
+* [analysis_service.md](./analysis_service.md) - 対照的な設計。本ファイルの`get_db_cursor`は使わず`get_ro_db_connection`による直接の`sqlite3.connect`を独自に用いている
+
 ## 2. ファイルの概要
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
@@ -241,6 +250,13 @@ graph TD
 | --- | --- | --- |
 | 対象データベースのファイルパス | `config` モジュールに依存しており、実際の値が読み取れないため | `config.py` または関連設定ファイル |
 | 操作対象のテーブル名・スキーマ | 実行時に引数で受け取る仕様であり、本ファイル内にテーブル定義の記述がないため | このモジュールを呼び出す外部ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 対象データベースのファイルパス | `config.md`の解析によれば`config.SQLITE_DB_PATH`という環境変数由来の定数が存在するとされるが、実際のパス文字列自体は`config.md`でも確認できていない。 | config.md |
+| 操作対象のテーブル名・スキーマ | `init_unified_db.md`の解析によれば、`common.get_db_cursor(commit=True)`を通じて多数の`CREATE TABLE IF NOT EXISTS`文が実行されテーブル群(Core Tables、Legacy Tables、Game & Quest System等)が初期化され、`PRAGMA table_info`による主要テーブルのスキーマ整合性検証が行われるとされる。ただし各テーブルの完全なカラム定義は`init_unified_db.md`でも一部のみ(検証対象カラムのみ)しか確認できていない。 | init_unified_db.md |
 
 ## 10. 自己検証結果
 

@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [unified_server.md](./unified_server.md) — 呼び出し元。本ルーターを`app.include_router`し、Webhook例外パス(`/webhook/switchbot`, `/callback/line`)を認識するミドルウェアを持つ
+- [config.md](./config.md) — `MONITOR_DEVICES`, `SQLITE_TABLE_DAILY_LOGS`, `SWITCHBOT_WEBHOOK_TOKEN`等の設定値を提供
+- [database.md](./database.md) — `core.database.save_log_async`の実体
+- [sensor_service.md](./sensor_service.md) — `is_duplicate_webhook`, `process_sensor_data`の実装元
+- [switchbot_service.md](./switchbot_service.md) — `get_device_name_by_id`の実装元
+- [line_handler.md](./line_handler.md) — `line_handler.line_handler.handle`(LINE SDKのイベントディスパッチャ)の実装元
+- [system_router.md](./system_router.md), [camera_router.md](./camera_router.md), [quest_router.md](./quest_router.md) — 同じFastAPIアプリにマウントされる姉妹ルーター群
+
 ## 2. ファイルの概要
 
 * LINE BotおよびSwitchBotからのWebhookリクエストを受信・処理するためのFastAPIルーターの定義。
@@ -252,6 +262,15 @@ graph TD
 | `line_handler` の処理内容 | 同期処理をスレッドに回して処理する実装の詳細と副作用が不明なため。 | `handlers/line_handler.py` |
 | 重複排除の仕組み | `is_duplicate_webhook` 関数がどのように状態を管理し、重複と判断しているかが不明なため。 | `services/sensor_service.py` |
 | センサーデータ処理の副作用 | `process_sensor_data` で何が行われているか不明なため。 | `services/sensor_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `SWITCHBOT_WEBHOOK_TOKEN` の値・設定有無 | `config.md`の解析によれば、`config.py`は`SWITCHBOT_WEBHOOK_TOKEN`を環境変数から読み込み、未設定時は検証をスキップする後方互換設計であることが明記されている。ただし実際の値自体は`config.md`側でも確認できていない。 | config.md |
+| `line_handler` の処理内容 | `line_handler.md`の解析によれば、`line_handler.line_handler`はLINE SDKの`WebhookHandler`インスタンスであり、`handle`メソッドは登録済みのイベントハンドラー(`handle_message`/`handle_postback`)へディスパッチし、内部で`asyncio.run()`により非同期処理を同期的に実行する設計であることが判明した。 | line_handler.md |
+| 重複排除の仕組み | `sensor_service.md`の解析によれば、`is_duplicate_webhook`はインメモリキャッシュ(`EVENT_CACHE`)を参照し、直近イベントから`DEDUPE_TTL_SECONDS`(3秒)以内で同一ステータスの場合に重複と判定する関数であることが判明した。 | sensor_service.md |
+| センサーデータ処理の副作用 | `sensor_service.md`の解析によれば、`process_sensor_data`はモーション/開閉センサーの状態変化に応じて無反応検知タイマー(`MOTION_TASKS`)のセット・キャンセルや`send_push`による通知送信を行う関数であることが判明した。 | sensor_service.md |
 
 ## 10. 自己検証結果
 

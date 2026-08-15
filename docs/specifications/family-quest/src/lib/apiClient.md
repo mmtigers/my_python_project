@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [types/index.md](../types/index.md) — `InventoryItem`/`PendingInventory`型定義の提供元。
+- [useGameData.md](../hooks/useGameData.md) — 本クライアントを利用してクエスト関連APIを呼び出す上位フック。
+- [InventoryList.md](../features/shop/components/InventoryList.md) — インベントリ関連メソッドの利用元。
+- [ApprovalList.md](../features/quest/components/ApprovalList.md) — `consumeItem`メソッドの利用元。
+- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/inventory/*`等、バックエンド側APIエンドポイントの実装元。
+
 ## 2. ファイルの概要
 
 * 本ファイルは、アプリケーションからバックエンドAPIへ通信するためのHTTPクライアント（`ApiClient` クラスおよびそのインスタンス `apiClient`）を定義し、提供する責務を持つ。
@@ -283,6 +291,13 @@ graph TD
 | APIレスポンスの具体的なデータ構造 | 各データモデルの実装が別ファイルに依存しているため。 | `../types` ファイル |
 | バックエンド側の具体的な仕様・制約 | リクエストボディの必須パラメータ、バリデーションルールがクライアント側のコードのみでは特定できないため。 | バックエンドのAPI実装ファイル |
 | APIのベースURL | 環境変数または実行時環境に依存して動的に決定されるため。 | `.env` または実行環境のドメイン情報 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| APIレスポンスの具体的なデータ構造 | `types/index.md`の解析によれば、`InventoryItem`と`PendingInventory`はいずれも`@/types`内でインターフェースとして定義されているとされているが、`types/index.md`側でも各プロパティの網羅的な列挙は行われていない。 | `../types/index.md` |
+| バックエンド側の具体的な仕様・制約 | `quest_router.md`の解析によれば、インベントリ関連には`get_inventory`(`GET /inventory/{user_id}`)、`use_item`(`POST /inventory/use`)、`consume_item`(`POST /inventory/consume`)、`cancel_item_usage`(`POST /inventory/cancel`)、`get_admin_pending_inventory`(`GET /inventory/admin/pending`)という対応するエンドポイントが存在するとされている。ただし本ファイル側の抜粋（`/api/quest/inventory/use`等）と`quest_router.md`側のパス表記（`/inventory/use`等、プレフィックスなし）が完全に一致するかは、ルーター側のマウント方法（プレフィックス設定）を確認しないと断定できない。 | `../../../MY_HOME_SYSTEM/quest_router.md` |
 
 ## 10. 自己検証結果
 
