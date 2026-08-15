@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { WifiOff } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
@@ -33,12 +33,15 @@ const REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '�
 // UI Components
 import Header from './components/layout/Header';
 import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
-import AvatarUploader from './components/ui/AvatarUploader';
 import MessageModal from './components/ui/MessageModal';
-import SettingsModal from './components/ui/SettingsModal';
-import NotificationHistoryPanel from './components/ui/NotificationHistoryPanel';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
+
+// 初期表示には不要なモーダル類は動的importで分離し、初回バンドルを軽くする
+// (実際に開かれるまでチャンクを読み込まない)
+const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));
+const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));
+const NotificationHistoryPanel = lazy(() => import('./components/ui/NotificationHistoryPanel'));
 
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
@@ -487,19 +490,25 @@ function App() {
         />
       )}
 
-      {avatarUser && (
-        <AvatarUploader
-          user={avatarUser}
-          onClose={() => setAvatarUser(null)}
-          onUploadComplete={() => {
-            refreshData();
-            showToast({ title: "変更完了", text: "アバターを変更しました！", icon: '🖼️' });
-          }}
-        />
-      )}
+      <Suspense fallback={null}>
+        {avatarUser && (
+          <AvatarUploader
+            user={avatarUser}
+            onClose={() => setAvatarUser(null)}
+            onUploadComplete={() => {
+              refreshData();
+              showToast({ title: "変更完了", text: "アバターを変更しました！", icon: '🖼️' });
+            }}
+          />
+        )}
 
-      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
-      <NotificationHistoryPanel isOpen={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
+        {settingsOpen && (
+          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
+        )}
+        {notificationsOpen && (
+          <NotificationHistoryPanel isOpen={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
+        )}
+      </Suspense>
 
     </div>
   );
