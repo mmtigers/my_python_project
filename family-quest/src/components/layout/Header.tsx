@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '@/types';
-import { Scroll } from 'lucide-react';
+import { Scroll, Settings, Bell } from 'lucide-react';
 
 interface HeaderProps {
     users: User[];
@@ -8,10 +8,15 @@ interface HeaderProps {
     viewMode: 'user' | 'familyLog';
     onUserSwitch: (idx: number) => void;
     onLogSwitch: () => void;
+    onSettingsClick: () => void;
+    onNotificationsClick: () => void;
     // 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の
     // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。
     // true の場合はユーザー切替行を省略し、タイトルと記録ボタンのみを表示する。
     hideUserSwitcher?: boolean;
+    // 縦画面ではフッターナビ(BottomNav)に「記録」タブが統合されたため、
+    // ヘッダー側の記録ボタンは二重導線になる。true の場合は非表示にする。
+    hideLogSwitcher?: boolean;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -20,17 +25,38 @@ const Header: React.FC<HeaderProps> = ({
     viewMode,
     onUserSwitch,
     onLogSwitch,
+    onSettingsClick,
+    onNotificationsClick,
     hideUserSwitcher,
+    hideLogSwitcher,
 }) => {
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
+
+            {/* 設定・おしらせボタン */}
+            <div className="absolute top-2 right-2 flex gap-1 z-30">
+                <button
+                    onClick={onNotificationsClick}
+                    aria-label="おしらせ履歴"
+                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                >
+                    <Bell size={18} />
+                </button>
+                <button
+                    onClick={onSettingsClick}
+                    aria-label="表示せってい"
+                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
+                >
+                    <Settings size={18} />
+                </button>
+            </div>
 
             {/* Title Area */}
             <div className="pt-4 pb-2 text-center relative">
                 <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: '"Press Start 2P", cursive, sans-serif' }}>
                     FAMILY QUEST
                 </h1>
-                <p className="text-[10px] text-gray-500 font-mono">我が家の冒険譚</p>
+                <p className="text-[10px] text-gray-400 font-mono">我が家の冒険譚</p>
             </div>
 
             {/* Unified Navigation Area (Users + Log) */}
@@ -80,36 +106,38 @@ const Header: React.FC<HeaderProps> = ({
                 })}
 
                 {/* Divider (PCのみ表示) */}
-                {!hideUserSwitcher && (
+                {!hideUserSwitcher && !hideLogSwitcher && (
                     <div className="w-px h-12 bg-gray-700 mx-1 self-center hidden sm:block"></div>
                 )}
 
-                {/* 2. Log Button */}
-                <button
-                    onClick={onLogSwitch}
-                    className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'familyLog' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
-                        }`}
-                >
-                    <div className={`
-            w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 shadow-lg flex items-center justify-center relative transition-colors
-            ${viewMode === 'familyLog'
-                            ? 'border-purple-400 ring-4 ring-purple-500/30 bg-gray-800 text-purple-400'
-                            : 'border-gray-600 bg-gray-900 text-gray-500'}
-          `}>
-                        <Scroll size={32} />
-                    </div>
-                    <div className={`
-            mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md transition-colors whitespace-nowrap
-            ${viewMode === 'familyLog'
-                            ? 'bg-purple-600 text-white border border-purple-300 transform scale-110'
-                            : 'bg-gray-800 text-gray-400 border border-gray-600'}
-          `}>
-                        記録
-                    </div>
-                    {viewMode === 'familyLog' && (
-                        <div className="absolute -bottom-2 text-purple-400 animate-bounce text-xs">▲</div>
-                    )}
-                </button>
+                {/* 2. Log Button (縦画面ではフッターナビに統合済みのため非表示) */}
+                {!hideLogSwitcher && (
+                    <button
+                        onClick={onLogSwitch}
+                        className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'familyLog' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
+                            }`}
+                    >
+                        <div className={`
+                w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 shadow-lg flex items-center justify-center relative transition-colors
+                ${viewMode === 'familyLog'
+                                ? 'border-purple-400 ring-4 ring-purple-500/30 bg-gray-800 text-purple-400'
+                                : 'border-gray-600 bg-gray-900 text-gray-400'}
+              `}>
+                            <Scroll size={32} />
+                        </div>
+                        <div className={`
+                mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md transition-colors whitespace-nowrap
+                ${viewMode === 'familyLog'
+                                ? 'bg-purple-600 text-white border border-purple-300 transform scale-110'
+                                : 'bg-gray-800 text-gray-400 border border-gray-600'}
+              `}>
+                            記録
+                        </div>
+                        {viewMode === 'familyLog' && (
+                            <div className="absolute -bottom-2 text-purple-400 animate-bounce text-xs">▲</div>
+                        )}
+                    </button>
+                )}
 
             </div>
         </header>

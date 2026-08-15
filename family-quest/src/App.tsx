@@ -1,9 +1,13 @@
-import { useState } from 'react';
-import { Sword, ShoppingBag } from 'lucide-react';
+import { useState, lazy, Suspense } from 'react';
+import { motion } from 'framer-motion';
+import { WifiOff } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
 import { useLayoutMode } from './hooks/useLayoutMode';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useSettings } from './context/useSettings';
+import { useToast } from './context/useToast';
 import RewardShop from './features/shop/components/RewardShop';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
@@ -23,14 +27,21 @@ const getRepresentativeParent = (allUsers: User[]): User => {
   return adult || allUsers[0] || INITIAL_USERS[0];
 };
 
+// 却下理由のプリセット。自由入力の手間を省き、あとで見返した時にも理由がわかるようにする。
+const REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '重複している', 'その他'];
 
 // UI Components
-import LevelUpModal from './components/ui/LevelUpModal';
 import Header from './components/layout/Header';
-import AvatarUploader from './components/ui/AvatarUploader';
+import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
 import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
+
+// 初期表示には不要なモーダル類は動的importで分離し、初回バンドルを軽くする
+// (実際に開かれるまでチャンクを読み込まない)
+const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));
+const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));
+const NotificationHistoryPanel = lazy(() => import('./components/ui/NotificationHistoryPanel'));
 
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
@@ -69,10 +80,12 @@ const resolveErrorText = (res: ActionResult, fallback: string): string =>
   res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
 
 const ConfirmModal = ({
-  mode, target, onConfirm, onCancel
+  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel
 }: {
   mode: 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
+  rejectReason: string | null,
+  onSelectRejectReason: (reason: string) => void,
   onConfirm: () => void,
   onCancel: () => void
 }) => {
@@ -93,7 +106,26 @@ const ConfirmModal = ({
   return (
     <Modal isOpen={true} onClose={onCancel} title={msg.title}>
       <div className="p-4">
-        <p className="whitespace-pre-wrap text-center mb-6">{msg.text}</p>
+        <p className="whitespace-pre-wrap text-center mb-4">{msg.text}</p>
+
+        {/* 角度⑫: 却下理由をプリセットからワンタップで選べるようにし、自由入力の手間を省く */}
+        {mode === 'reject' && (
+          <div className="flex flex-wrap gap-2 justify-center mb-6">
+            {REJECT_REASONS.map(r => (
+              <button
+                key={r}
+                onClick={() => onSelectRejectReason(r)}
+                className={`min-h-[36px] px-3 py-1.5 rounded-full text-xs font-bold border-2 transition-colors ${rejectReason === r
+                  ? 'bg-red-600 border-red-400 text-white'
+                  : 'bg-slate-800 border-slate-600 text-slate-300 hover:border-slate-400'
+                  }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-4 justify-center">
           <Button variant="secondary" onClick={onCancel}>キャンセル</Button>
           <Button variant="primary" onClick={onConfirm}>はい</Button>
@@ -106,6 +138,10 @@ const ConfirmModal = ({
 function App() {
   const { play } = useSound();
   const layoutMode = useLayoutMode();
+  const isOnline = useOnlineStatus();
+  const { density, iconFirstUserIds } = useSettings();
+  const { showToast } = useToast();
+
   const [activeTab, setActiveTab] = useState<'quest' | 'shop'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
@@ -116,16 +152,22 @@ function App() {
   // 購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
   // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
+  const [rejectReason, setRejectReason] = useState<string | null>(null);
 
-  // 結果表示用
-  const [levelUpInfo, setLevelUpInfo] = useState<LevelUpInfo | null>(null);
-  const [messageData, setMessageData] = useState<{ title: string, text: string, type?: 'success' | 'error', icon?: string } | null>(null);
+  // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
+  const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
 
   // アバターアップロード対象(nullなら非表示)
   const [avatarUser, setAvatarUser] = useState<User | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
+  // 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから
+  // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。
+  // 見逃した通知はトースト履歴パネル(ヘッダーのベルアイコン)からあとでまとめて見返せる。
   const handleLevelUp = (info: LevelUpInfo) => {
-    setLevelUpInfo(info);
+    play('levelUp');
+    showToast({ title: 'LEVEL UP!', text: `${info.user}は Lv.${info.level} になった！`, icon: '⚡' });
   };
 
   const {
@@ -157,18 +199,22 @@ function App() {
     if (res.success) {
       if (mode === 'complete') {
         if (res.status === 'pending') {
-          setMessageData({ title: "申請完了", text: res.message || "親の承認待ちになりました", type: "success" });
+          showToast({ title: "申請完了", text: res.message || "親の承認待ちになりました", icon: '📨' });
         } else if ((res.earnedMedals ?? 0) > 0) {
           // ★バグ修正(要件8): サーバーは正しくメダルを付与していたが、以前はフロントが
           // res.earnedMedals を一切参照しておらず無反応だった。leveledUpと同様に扱う。
           play('medal');
-          setMessageData({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, type: "success", icon: "🏅" });
+          showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
         }
       }
       return;
     }
 
-    setMessageData({ title: "エラー", text: resolveErrorText(res, "失敗しました"), type: "error" });
+    setMessageData({
+      title: "エラー",
+      text: resolveErrorText(res, "失敗しました"),
+      onRetry: () => runQuestAction(user, mode, target),
+    });
     play('cancel');
   };
 
@@ -224,36 +270,31 @@ function App() {
     if (confirmMode === 'purchase') {
       res = await buyReward(actingUser, confirmTarget as Reward);
       if (res.success) {
-        setMessageData({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", type: "success" });
+        showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
         // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
         play('clear');
       }
     } else if (confirmMode === 'reject') {
       // 却下の記録名義は「親」で固定する(要件5)
-      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory);
+      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);
       if (res.success) {
         play('cancel');
-      } else {
-        // ★却下専用のエラー文言（元の handleReject の window.confirm/reasons ロジックを踏襲）
-        const text = resolveErrorText(res, "却下に失敗しました");
-        setMessageData({ title: "エラー", text, type: "error" });
-        play('cancel');
-        setConfirmMode(null);
-        setConfirmTarget(null);
-        setConfirmUser(null);
-        return;
       }
     }
 
     if (!res.success) {
-      const text = resolveErrorText(res, "失敗しました");
-      setMessageData({ title: "エラー", text, type: "error" });
+      const fallback = confirmMode === 'reject' ? "却下に失敗しました" : "失敗しました";
+      setMessageData({ title: "エラー", text: resolveErrorText(res, fallback) });
       play('cancel');
+      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で
+      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)
+      return;
     }
 
     setConfirmMode(null);
     setConfirmTarget(null);
     setConfirmUser(null);
+    setRejectReason(null);
   };
 
   // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
@@ -262,7 +303,36 @@ function App() {
     if (res.success) {
       play('approve');
     } else {
-      setMessageData({ title: "エラー", text: resolveErrorText(res, "承認に失敗しました"), type: "error" });
+      setMessageData({
+        title: "エラー",
+        text: resolveErrorText(res, "承認に失敗しました"),
+        onRetry: () => handleApprove(history),
+      });
+      play('cancel');
+    }
+  };
+
+  // 角度⑩: 承認待ちが複数あるとき、1件ずつ承認する手間を減らす一括承認
+  const handleApproveAll = async () => {
+    const targets = [...pendingQuests];
+    if (targets.length === 0) return;
+
+    let successCount = 0;
+    for (const history of targets) {
+      const res = await approveQuest(getRepresentativeParent(users), history);
+      if (res.success) successCount++;
+    }
+
+    if (successCount > 0) play('approve');
+
+    if (successCount === targets.length) {
+      showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
+    } else {
+      setMessageData({
+        title: "エラー",
+        text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
+        onRetry: handleApproveAll,
+      });
       play('cancel');
     }
   };
@@ -271,6 +341,7 @@ function App() {
     setConfirmTarget(history);
     setConfirmMode('reject');
     setConfirmUser(null); // reject は getRepresentativeParent で親を確定するため不要
+    setRejectReason(null);
     play('select');
   };
 
@@ -279,23 +350,46 @@ function App() {
     return 'user';
   };
 
+  // 角度⑦: 縦画面はフッターナビ(クエスト/ごほうび/記録)に一本化する
+  const handleBottomNavChange = (tab: BottomNavTab) => {
+    play('tap');
+    if (tab === 'familyLog') {
+      setViewMode('familyLog');
+    } else {
+      setViewMode('main');
+      setActiveTab(tab);
+    }
+  };
+
+  // 角度⑧: 表示密度設定を反映する余白のクラス
+  const densityWrapperClass = density === 'compact' ? 'p-2 space-y-2' : 'p-4 space-y-4';
+
   if (isLoading) return <div className="p-10 text-center">Loading Family Quest...</div>;
 
   return (
     <div className="min-h-screen bg-gray-900 pb-20 font-sans text-gray-100">
+      {!isOnline && (
+        <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
+          <WifiOff size={14} /> オフラインです。最新の情報ではない可能性があります
+        </div>
+      )}
+
       <Header
         users={users}
         currentUserIdx={currentUserIdx}
         viewMode={getHeaderViewMode()}
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
+        onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
+        onNotificationsClick={() => { setNotificationsOpen(true); play('tap'); }}
         hideUserSwitcher={layoutMode === 'landscape'}
+        hideLogSwitcher={layoutMode === 'portrait'}
       />
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
           横画面(4人表示)では画面幅をフルに使う */}
 
-      <div className={`p-4 space-y-4 w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'}`}>
+      <div className={`${densityWrapperClass} w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'}`}>
 
         {viewMode === 'main' && layoutMode === 'landscape' && (
           <FamilyDashboard
@@ -309,6 +403,7 @@ function App() {
             onBuyReward={handleBuyReward}
             onApprove={handleApprove}
             onReject={handleReject}
+            onApproveAll={handleApproveAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
@@ -328,20 +423,18 @@ function App() {
                 currentUser={currentUser}
                 onApprove={handleApprove}
                 onReject={handleReject}
+                onApproveAll={handleApproveAll}
               />
             )}
 
-            <div className="flex gap-2 mb-4 bg-black p-2 rounded-lg border-2 border-white shadow-lg sticky top-16 z-10 overflow-x-auto">
-              <button onClick={() => setActiveTab('quest')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'quest' ? 'bg-blue-600 text-white shadow-md transform scale-105' : 'text-gray-400 hover:bg-gray-800'}`}>
-                <Sword size={20} className="mb-1" /> クエスト
-              </button>
-
-              <button onClick={() => setActiveTab('shop')} className={`flex-1 min-w-[4rem] py-2 text-xs font-bold rounded-lg flex flex-col items-center transition-all ${activeTab === 'shop' ? 'bg-orange-500 text-white shadow-md transform scale-105' : 'text-gray-200 hover:bg-gray-900'}`}>
-                <ShoppingBag size={20} className="mb-1" /> ごほうび
-              </button>
-            </div>
-
-            <div className="min-h-[300px] animate-fade-in">
+            {/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}
+            <motion.div
+              className="min-h-[300px] animate-fade-in"
+              onPanEnd={(_e, info) => {
+                if (info.offset.x < -60 && activeTab === 'quest') setActiveTab('shop');
+                else if (info.offset.x > 60 && activeTab === 'shop') setActiveTab('quest');
+              }}
+            >
               {activeTab === 'quest' && (
                 <QuestList
                   quests={quests}
@@ -349,6 +442,7 @@ function App() {
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
+                  iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
                 />
               )}
 
@@ -361,7 +455,7 @@ function App() {
                   />
                 </div>
               )}
-            </div>
+            </motion.div>
           </>
         )}
 
@@ -371,37 +465,50 @@ function App() {
 
       </div>
 
+      {layoutMode === 'portrait' && (
+        <BottomNav
+          active={viewMode === 'familyLog' ? 'familyLog' : activeTab}
+          onChange={handleBottomNavChange}
+        />
+      )}
+
       <ConfirmModal
         mode={confirmMode}
         target={confirmTarget}
+        rejectReason={rejectReason}
+        onSelectRejectReason={setRejectReason}
         onConfirm={executeConfirm}
-        onCancel={() => { setConfirmMode(null); play('cancel'); }}
-      />
-
-      <LevelUpModal
-        info={levelUpInfo}
-        onClose={() => setLevelUpInfo(null)}
+        onCancel={() => { setConfirmMode(null); setRejectReason(null); play('cancel'); }}
       />
 
       {messageData && (
         <MessageModal
           title={messageData.title}
           message={messageData.text}
-          icon={messageData.icon}
+          onRetry={messageData.onRetry}
           onClose={() => setMessageData(null)}
         />
       )}
 
-      {avatarUser && (
-        <AvatarUploader
-          user={avatarUser}
-          onClose={() => setAvatarUser(null)}
-          onUploadComplete={() => {
-            refreshData();
-            setMessageData({ title: "変更完了", text: "アバターを変更しました！", type: "success" });
-          }}
-        />
-      )}
+      <Suspense fallback={null}>
+        {avatarUser && (
+          <AvatarUploader
+            user={avatarUser}
+            onClose={() => setAvatarUser(null)}
+            onUploadComplete={() => {
+              refreshData();
+              showToast({ title: "変更完了", text: "アバターを変更しました！", icon: '🖼️' });
+            }}
+          />
+        )}
+
+        {settingsOpen && (
+          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
+        )}
+        {notificationsOpen && (
+          <NotificationHistoryPanel isOpen={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
+        )}
+      </Suspense>
 
     </div>
   );
