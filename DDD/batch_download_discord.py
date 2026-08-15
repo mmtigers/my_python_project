@@ -125,9 +125,10 @@ class AppConfig:
 
     # 【追加】ボット検知/レート制限対策
     # タスク間隔: 固定秒数だと機械的なアクセスパターンとして検知されやすいため、
-    # サイトごとにランダムなジッターを持たせる（YouTubeはより保守的な間隔にする）。
+    # サイトごとにランダムなジッターを持たせる（YouTube/missavはより保守的な間隔にする）。
     DEFAULT_SLEEP_RANGE: Tuple[float, float] = (5.0, 10.0)
     YOUTUBE_SLEEP_RANGE: Tuple[float, float] = (8.0, 20.0)
+    MISSAV_SLEEP_RANGE: Tuple[float, float] = (8.0, 20.0)
     # 連続失敗数がこの値に達したら、レート制限/ブロックの可能性を疑って処理全体を中断する
     CONSECUTIVE_FAILURE_THRESHOLD: int = 3
     # yt-dlp自体のリクエスト間スリープ（メタデータ取得等、内部リクエストの間隔を空ける）
@@ -144,6 +145,17 @@ class AppConfig:
         "confirm you're not a bot",
         "429",
         "too many requests",
+    )
+    # missav等、requestsで直接HTMLを取得するスクレイピング先向け。
+    # これらのステータスコードやページ内マーカーはCloudflare等のボット対策サービスが
+    # 典型的に返す応答であり、通常の「ページ構成変更で抽出失敗」とは区別して扱う。
+    SCRAPING_BLOCK_STATUS_CODES: Tuple[int, ...] = (403, 429, 503)
+    SCRAPING_BLOCK_PAGE_MARKERS: Tuple[str, ...] = (
+        "just a moment",
+        "checking your browser",
+        "attention required! | cloudflare",
+        "cf-browser-verification",
+        "access denied",
     )
     # 1回の実行で処理するタスク数の上限。ジッターを入れても「1晩で数百件」のような
     # 突発的な大量アクセスそのものが異常なパターンとして見えてしまうため、実行あたりの
@@ -183,6 +195,16 @@ class BotDetectionError(Exception):
 def _is_bot_detection_error(exc: Exception) -> bool:
     message = str(exc).lower()
     return any(marker in message for marker in CONFIG.BOT_DETECTION_MARKERS)
+
+
+def _looks_like_block_page(html: str) -> bool:
+    """取得したHTMLがCloudflare等のボット検知チャレンジページかを判定する。
+
+    このようなページはHTTPステータス200で返ってくることも多く、
+    ステータスコードだけでは検知できないためページ本文の内容で判定する。
+    """
+    lowered = html.lower()
+    return any(marker in lowered for marker in CONFIG.SCRAPING_BLOCK_PAGE_MARKERS)
 
 
 class DownloadTask(NamedTuple):
@@ -441,9 +463,21 @@ class ScrapingStrategy(DownloadStrategy):
         try:
             self.session.headers['Referer'] = url
             res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)
+
+            if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:
+                raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")
+            res.raise_for_status()
+
+            if _looks_like_block_page(res.text):
+                raise BotDetectionError(f"{url}: 応答内容がボット検知ページ（Cloudflare等）のパターンに一致")
+
             return res.text
+        except BotDetectionError:
+            raise
         except Exception as e:
             logger.error(f"HTML取得エラー: {e}", exc_info=True)
+            if _is_bot_detection_error(e):
+                raise BotDetectionError(f"{url}: {e}") from e
             return None
 
     def _extract_m3u8_url(self, html: str) -> Optional[str]:
@@ -485,6 +519,10 @@ class ScrapingStrategy(DownloadStrategy):
 
     def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
         # HLS(m3u8)はyt-dlpに処理を委譲してダウンロードと結合を行う
+        # 注: UniversalYtDlpStrategyと異なり、ここに sleep_interval_requests は
+        # 設定しない。HLSは1本の動画で数百のセグメントリクエストが発生するため、
+        # リクエスト毎にスリープすると現実的な時間で終わらなくなる。
+        # ボット検知対策は「ページ取得側（_fetch_html）の間隔・検知」で担保する。
         ydl_opts = {
             'format': 'best',
             'outtmpl': str(final_path),
@@ -632,11 +670,15 @@ class BatchDownloader:
         """次のタスクまで待機する。
 
         固定間隔だと機械的なアクセスパターンとして検知されやすいため、ランダムな
-        ジッターを持たせる。YouTubeはボット検知が特に厳しいため、より保守的な
-        （長め・幅広の）間隔を使う。
+        ジッターを持たせる。YouTube/missavはボット検知が特に厳しいため、より
+        保守的な（長め・幅広の）間隔を使う。
         """
-        is_youtube = "youtube.com" in url or "youtu.be" in url
-        low, high = CONFIG.YOUTUBE_SLEEP_RANGE if is_youtube else CONFIG.DEFAULT_SLEEP_RANGE
+        if "youtube.com" in url or "youtu.be" in url:
+            low, high = CONFIG.YOUTUBE_SLEEP_RANGE
+        elif "missav" in url:
+            low, high = CONFIG.MISSAV_SLEEP_RANGE
+        else:
+            low, high = CONFIG.DEFAULT_SLEEP_RANGE
         delay = random.uniform(low, high)
         logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")
         time.sleep(delay)
