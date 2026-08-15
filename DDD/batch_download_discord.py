@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Production Grade Batch Downloader (v2.3.0 Universal Support)
+Production Grade Batch Downloader (v2.4.0 Universal Support)
 -------------------------------------------------
 Features:
 - Multi-List Support: Automatically processes all files in 'list/' directory.
@@ -14,8 +14,11 @@ Features:
 - Universal Support: Uses yt-dlp for ALL supported sites (not just YouTube).
 - Specialized Scraping: Specific logic for 'missav'.
 - Bot Detection Safeguards: Jittered per-task delays (extra-conservative for
-  YouTube), yt-dlp request throttling, optional cookies file, and an
-  immediate session abort on 429 / "Sign in to confirm" style errors.
+  YouTube), yt-dlp request throttling, optional cookies file, a per-run task
+  cap so a single run can't burst through a huge backlog, a cross-run
+  cooldown once bot detection is suspected, a startup warning when yt-dlp
+  itself is stale, and an immediate session abort on 429 / "Sign in to
+  confirm" style errors.
 """
 
 import os
@@ -142,6 +145,18 @@ class AppConfig:
         "429",
         "too many requests",
     )
+    # 1回の実行で処理するタスク数の上限。ジッターを入れても「1晩で数百件」のような
+    # 突発的な大量アクセスそのものが異常なパターンとして見えてしまうため、実行あたりの
+    # 総量を絞り、残りは（パージされない限り）翌回の実行へ持ち越す。0以下で上限なし。
+    MAX_TASKS_PER_RUN: int = 30
+    # ボット検知を検知した場合、その晩だけでなく一定時間はNASクールダウンさせる。
+    # cron等で「毎晩同じ時刻に再試行→また検知される」を防ぐための実行間クールダウン。
+    BOT_DETECTION_COOLDOWN_HOURS: float = 12.0
+    BOT_DETECTION_COOLDOWN_FILE: Path = CURRENT_DIR / ".bot_detection_cooldown"
+    # yt-dlpのバージョンは YYYY.MM.DD 形式。YouTube側の変更に追従できていない
+    # （＝古い）yt-dlpは、ボット検知云々以前にダウンロード失敗の最大要因になるため、
+    # この日数を超えて更新されていなければ起動時に警告する。
+    YTDLP_STALENESS_WARN_DAYS: int = 45
 
     # 抽出パターン (Specialized Scraping)
     # missavはm3u8形式かつJS難読化されているため、正規表現のリストではなく専用関数で解析します
@@ -205,6 +220,43 @@ class HistoryManager:
                 f.write(f"{url}\n")
         except Exception: pass
 
+class CooldownManager:
+    """ボット検知発生後の実行間クールダウンを管理するクラス。
+
+    cron等で毎晩同じ時刻に実行される運用を想定し、検知直後の1回だけでなく
+    「クールダウン期限」をファイルへ永続化することで、次回以降の実行が
+    期限内であれば処理そのものをスキップするようにする。
+    """
+
+    @staticmethod
+    def is_in_cooldown() -> Optional[datetime.datetime]:
+        """クールダウン中であれば解除予定時刻を、そうでなければNoneを返す。"""
+        path = CONFIG.BOT_DETECTION_COOLDOWN_FILE
+        if not path.exists():
+            return None
+        try:
+            until = datetime.datetime.fromisoformat(path.read_text(encoding="utf-8").strip())
+        except (ValueError, OSError):
+            # 壊れたクールダウンファイルは安全側（＝クールダウンしない）に倒す
+            return None
+        return until if datetime.datetime.now() < until else None
+
+    @staticmethod
+    def trigger_cooldown() -> None:
+        until = datetime.datetime.now() + datetime.timedelta(hours=CONFIG.BOT_DETECTION_COOLDOWN_HOURS)
+        try:
+            CONFIG.BOT_DETECTION_COOLDOWN_FILE.write_text(until.isoformat(), encoding="utf-8")
+            logger.info(f"🧊 クールダウンを設定しました（解除予定: {until.strftime('%Y-%m-%d %H:%M:%S')}）")
+        except OSError as e:
+            logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)
+
+    @staticmethod
+    def clear() -> None:
+        try:
+            CONFIG.BOT_DETECTION_COOLDOWN_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+
 class NetworkManager:
     @staticmethod
     def create_session() -> requests.Session:
@@ -262,6 +314,29 @@ class SystemHealthChecker:
     def check_dependencies() -> None:
         if shutil.which("ffmpeg") is None:
             logger.warning("⚠️ ffmpeg not found.")
+        SystemHealthChecker.check_yt_dlp_freshness()
+
+    @staticmethod
+    def check_yt_dlp_freshness() -> None:
+        """yt-dlpのバージョン（YYYY.MM.DD形式）が古すぎないか警告する。
+
+        YouTube側の仕様変更への追従が遅れたyt-dlpは、ボット検知以前に
+        単純な抽出失敗（403等）の最大要因になるため、更新を促す。
+        バージョン文字列が想定形式でない場合は判定せず静かにスキップする。
+        """
+        try:
+            installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")
+        except (ValueError, AttributeError):
+            return
+
+        age_days = (datetime.datetime.now() - installed).days
+        if age_days > CONFIG.YTDLP_STALENESS_WARN_DAYS:
+            logger.warning(
+                f"⚠️ yt-dlpのバージョンが古い可能性があります "
+                f"({yt_dlp.version.__version__} / 約{age_days}日前)。"
+                "YouTube側の仕様変更に伴う抽出失敗やブロックのリスクが上がるため、"
+                "'pip install -U yt-dlp' での更新を推奨します。"
+            )
 
 # ==========================================
 # 3. ダウンロード戦略 (Strategy Pattern)
@@ -587,7 +662,15 @@ class BatchDownloader:
 
     def _run_locked(self) -> None:
         SystemHealthChecker.check_dependencies()
-        
+
+        cooldown_until = CooldownManager.is_in_cooldown()
+        if cooldown_until is not None:
+            logger.info(
+                f"🧊 ボット検知クールダウン中のため今回の実行をスキップします "
+                f"（解除予定: {cooldown_until.strftime('%Y-%m-%d %H:%M:%S')}）"
+            )
+            return
+
         if not SystemHealthChecker.is_within_time_window():
             if FORCE_MODE: 
                 logger.debug("⚠️ FORCEモード: 時間制限無視")
@@ -624,8 +707,19 @@ class BatchDownloader:
             logger.debug("パージ処理の結果、実行可能なタスクがなくなりました。")
             return
 
+        # 1回の実行あたりのタスク数を制限する。ジッター付きの間隔を空けていても、
+        # 「1回の起動で数百件を一気に処理する」こと自体が異常なアクセス量になり得るため、
+        # 残りは次回の実行（履歴・リストとも未消費のまま）に自然と持ち越される。
+        total_pending = len(tasks)
+        if CONFIG.MAX_TASKS_PER_RUN > 0 and total_pending > CONFIG.MAX_TASKS_PER_RUN:
+            tasks = tasks[:CONFIG.MAX_TASKS_PER_RUN]
+            logger.info(
+                f"📉 1回あたりの上限（{CONFIG.MAX_TASKS_PER_RUN}件）に合わせて "
+                f"{total_pending}件中{len(tasks)}件のみ処理します（残りは次回以降に持ち越し）。"
+            )
+
         logger.info("="*60)
-        logger.info("   🚀 Smart Pipeline Downloader (v2.3.0)")
+        logger.info("   🚀 Smart Pipeline Downloader (v2.4.0)")
         logger.info(f"   Schedule: {CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00")
         logger.info(f"   Tasks: {len(tasks)}")
         logger.info("="*60)
@@ -655,9 +749,11 @@ class BatchDownloader:
                 # 429やSign-in要求はIP/アカウント単位の制限である可能性が高く、
                 # 残りのタスクを続けても状況を悪化させるだけなので即座に中断する。
                 logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")
+                CooldownManager.trigger_cooldown()
                 DiscordNotifier.send(
-                    "🚨 CRITICAL: ボット検知/レート制限の兆候（429・Sign-in要求等）を検知したため、"
-                    f"残りのタスクを中断します。\n詳細: {e}",
+                    f"🚨 CRITICAL: ボット検知/レート制限の兆候（429・Sign-in要求等）を検知したため、"
+                    f"残りのタスクを中断し、{CONFIG.BOT_DETECTION_COOLDOWN_HOURS:.0f}時間の"
+                    f"クールダウンに入ります。\n詳細: {e}",
                     is_error=True
                 )
                 break
