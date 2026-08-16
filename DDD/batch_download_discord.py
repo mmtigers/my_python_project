@@ -14,11 +14,13 @@ Features:
 - Universal Support: Uses yt-dlp for ALL supported sites (not just YouTube).
 - Specialized Scraping: Specific logic for 'missav'.
 - Bot Detection Safeguards: Jittered per-task delays (extra-conservative for
-  YouTube), yt-dlp request throttling, optional cookies file, a per-run task
-  cap so a single run can't burst through a huge backlog, a cross-run
-  cooldown once bot detection is suspected, a startup warning when yt-dlp
-  itself is stale, and an immediate session abort on 429 / "Sign in to
-  confirm" style errors.
+  YouTube/missav), yt-dlp request throttling, optional cookies file, a
+  per-run task cap so a single run can't burst through a huge backlog
+  (round-robin across source lists so no single list starves the others),
+  a cross-run cooldown once bot detection is suspected (manually clearable
+  with --clear-cooldown), a startup warning when yt-dlp itself is stale,
+  and an immediate session abort on 403/429/503 / "Sign in to confirm"
+  style errors or Cloudflare-style challenge pages.
 """
 
 import os
@@ -32,7 +34,6 @@ import logging
 import signal
 import fcntl
 import requests
-import glob
 from collections import defaultdict
 from abc import ABC, abstractmethod
 from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable
@@ -44,7 +45,6 @@ from pathlib import Path
 # External Libraries
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from tqdm import tqdm
 import yt_dlp
 
 # ==========================================
@@ -58,6 +58,7 @@ logging.basicConfig(
 logger = logging.getLogger("Downloader")
 
 FORCE_MODE = "--force" in sys.argv
+CLEAR_COOLDOWN_MODE = "--clear-cooldown" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
 _env_root = os.getenv("MY_HOME_SYSTEM_ROOT")
@@ -857,4 +858,11 @@ class BatchDownloader:
         logger.info("🎉 全処理終了")
 
 if __name__ == "__main__":
+    if CLEAR_COOLDOWN_MODE:
+        # 手動運用向け: ボット検知を誤検知だと判断した場合や、原因を解消済みの場合に
+        # クールダウン期限を待たずに手動で解除するためのエントリーポイント。
+        CooldownManager.clear()
+        logger.info("🧊 クールダウンを解除しました。")
+        sys.exit(0)
+
     BatchDownloader().run()
