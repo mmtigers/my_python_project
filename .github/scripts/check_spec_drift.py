@@ -2,7 +2,7 @@
 """docs/specifications/ 配下の仕様書と実ソースの対応をチェックするツール。
 
 このリポジトリの docs/specifications/ には、ソースファイル1つにつき
-Markdown仕様書が1つ対応する規約がある（例外: 全体設計書.md）。
+Markdown仕様書が1つ対応する規約がある（例外: 全体設計書.md、各ディレクトリのREADME.md）。
 2026-08の仕様書一斉監査で「ソース更新後に仕様書が古いまま残る」ドリフトが
 98件中44件見つかったことを受け、再発防止のために作成した。
 
@@ -240,7 +240,7 @@ def cmd_full() -> Report:
     # 2. 仕様書起点: 孤立ドキュメント(対応ソースが存在しない)
     for doc in SPEC_ROOT.rglob("*.md"):
         rel = doc.relative_to(REPO_ROOT)
-        if rel.name == "全体設計書.md":
+        if rel.name in {"全体設計書.md", "README.md"}:
             continue
         candidates = doc_to_source_candidates(doc)
         if candidates and not any((REPO_ROOT / c).exists() for c in candidates):
