@@ -159,7 +159,12 @@ class YouTubeExtractor:
         channel_name = "unknown_channel"
 
         try:
-            with yt_dlp.YoutubeDL(AppConfig.YDL_OPTS) as ydl:
+            # yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える
+            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、
+            # AppConfig.YDL_OPTSというクラス属性の共有辞書をそのまま渡すと、
+            # このメソッドが繰り返し呼ばれる（チャンネル毎・プレイリスト毎）うちに
+            # 呼び出し間で状態が汚染されるリスクがある。呼び出しごとにコピーを渡す。
+            with yt_dlp.YoutubeDL(dict(AppConfig.YDL_OPTS)) as ydl:
                 info = ydl.extract_info(target_url, download=False)
                 if not info:
                     return None
@@ -229,7 +234,8 @@ class YouTubeExtractor:
 
             # Phase 2: Playlists
             try:
-                with yt_dlp.YoutubeDL(AppConfig.YDL_OPTS) as ydl:
+                # 呼び出し間の状態汚染を避けるためコピーを渡す（理由は上のコメント参照）
+                with yt_dlp.YoutubeDL(dict(AppConfig.YDL_OPTS)) as ydl:
                     pl_tab = ydl.extract_info(f"{base_url}/playlists", download=False)
                     if pl_tab and 'entries' in pl_tab:
                         playlists = list(pl_tab['entries'])
