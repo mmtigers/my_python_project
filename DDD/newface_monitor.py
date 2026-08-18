@@ -253,6 +253,69 @@ class MonitorConfig:
             selector_image='div.ph img',
             id_query_param='id',
         ),
+        SiteConfig(
+            site_id='aura',
+            name='AURA（オーラ）',
+            target_url='https://aura-takatsuki.com/itemList.html',
+            selector_container='li.itemData',
+            selector_name='a.itemName',
+            selector_link='a.itemName',
+            # ホバー用の2枚目画像(layerHover)より先に通常表示用の画像がDOM順で
+            # 出現するため、select_one（最初の一致）で正しく通常画像を取得できる
+            selector_image='a.imageLink img.castImage',
+        ),
+        SiteConfig(
+            site_id='viaura',
+            name='ミセス美オーラ',
+            target_url='https://mrs-viaura.com/model.html',
+            # 各キャストを囲むdivにはclass指定が無いため、
+            # プロフィールへのリンクを直接の子に持つdivをコンテナとする
+            selector_container='div:has(> a[href^="model_profile"])',
+            selector_name='h3.model_name',
+            selector_link='a[href^="model_profile"]',
+            # div.model_image内の最初のimgはランクアイコンのため、
+            # 直接の子要素のimgのみに絞って実際の写真を取得する
+            # （写真未登録のキャストは "no_image.webp" プレースホルダーになる）
+            selector_image='div.model_image > img',
+            # このサイトはShift-JISでエンコードされているが、
+            # BeautifulSoupがmetaタグから自動判定するためコード側の対応は不要
+        ),
+        SiteConfig(
+            site_id='kitty',
+            name='kitty',
+            target_url='https://spa-kt.com/girl',
+            selector_container='div.c-panel',
+            selector_name='p.c-panel__name',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            # 詳細URLが 'profile?lid=23' 形式のため 'lid'パラメータをIDとして使う
+            id_query_param='lid',
+        ),
+        SiteConfig(
+            site_id='bellica',
+            name='Bellica',
+            target_url='https://bellica-osaka.com/news.php',
+            selector_container='ul.newsList li',
+            selector_name='h2.title',
+            # このサイトの新人情報一覧は個別プロフィールページへのリンクを
+            # 持たないブログ形式のため、リンクは常に見つからない
+            # （detail_urlは一覧ページURLへ、cast_idは名前ベースへフォールバックする）
+            selector_link='a',
+            selector_image='span.thumb img',
+        ),
+        SiteConfig(
+            site_id='osaka_mkd',
+            name='もくきん堂',
+            target_url='https://www.osaka-mkd.com/newface/',
+            selector_container='ul.newface_list li',
+            # 同じ<li>内に複数の<p>があり名前用のclass指定が無いため、
+            # 出現順（1番目:入店日, 2番目:名前, 3番目:年齢）で位置指定する
+            selector_name='p:nth-of-type(2)',
+            selector_link='a.list-girl-image',
+            # <a>内には実写真imgの後にプレミアムバッジ用imgもあるが、
+            # 実写真が先に出現するためselect_one（最初の一致）で問題ない
+            selector_image='a.list-girl-image img',
+        ),
     ]
 
     # File Paths
@@ -565,6 +628,12 @@ class WebMonitor:
                 if not cast_id:
                     # フォールバック: 名前をIDとする
                     cast_id = f"name_{name}"
+
+                if not detail_url:
+                    # 個別プロフィールページへのリンクを持たないサイト向けのフォールバック:
+                    # Discord通知のembed urlが空文字のまま送信されるのを避けるため、
+                    # 一覧ページ自体のURLを代わりに使う
+                    detail_url = site.target_url
 
                 # Image Extraction
                 img_elem = div.select_one(site.selector_image)
