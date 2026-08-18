@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [apiClient.md](../lib/apiClient.md) — 全APIリクエストの実行元。エンドポイントの共通処理・エラーハンドリングの実装元。
+- [masterData.md](../lib/masterData.md) — `INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`フォールバックデータの実装元。
+- [types/index.md](../types/index.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`/`PendingInventory`型定義の提供元。
+- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/complete`/`/approve`/`/reject`/`/quest/cancel`/`/reward/purchase`/`/data`/`/family/chronicle`等、本フックが呼び出すバックエンドAPIエンドポイントの実装元。
+- [quest_service.md](../../../MY_HOME_SYSTEM/quest_service.md) — クエスト完了・購入等のビジネスロジック（`process_complete_quest`等）の実装元。
+- [game_logic.md](../../../MY_HOME_SYSTEM/game_logic.md) — `earnedMedals`/`leveledUp`算出に使われるレベル・報酬計算ロジックの実装元。
+
 ## 2. ファイルの概要
 
 * React Queryを活用し、ゲーム内の各種データ（ユーザー、クエスト、報酬、年代記、承認待ちインベントリなど）の取得、定期更新（ポーリング）、および状態変更（完了・承認・却下・取消・購入）のAPIリクエストを統合管理するカスタムフック `useGameData` を提供する。
@@ -321,6 +330,16 @@ graph TD
 | 各種Typeの完全なプロパティ | `User`, `Quest`, `Reward` などのプロパティが本ファイル内では一部しか使用されていないため。 | `@/types.ts` 等 |
 | `apiClient.fetchPendingInventory` の実エンドポイント | メソッド名のみが呼び出されており、実際に叩かれるURLやHTTPメソッドが本ファイルからは不明なため。 | `../lib/apiClient.ts` |
 | `earnedMedals`の付与条件 | サーバー側(`QuestResult.earnedMedals`)の算出ロジックが本ファイルからは不明なため。 | バックエンドの`/api/quest/complete`ハンドラ実装 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `apiClient`の具体的な通信設定 | `apiClient.md`の解析によれば、`getBaseUrl`関数が環境変数`import.meta.env.VITE_API_URL`が定義されていればそれを、未定義なら`window.location.origin`をベースURLとして使うとされている。認証トークンの付与処理は`apiClient.md`側でも確認されていない。 | `../lib/apiClient.md` |
+| `INITIAL_USERS` や `MASTER_QUESTS` の中身 | `masterData.md`の解析によれば、`INITIAL_USERS`はゲストユーザー1件（`user_id: 'guest'`等）、`MASTER_QUESTS`/`MASTER_REWARDS`はいずれも「サーバー接続エラー」を伝えるダミーデータ1件のみで構成されているとされている。 | `../lib/masterData.md` |
+| 各種Typeの完全なプロパティ | `types/index.md`の解析によれば、`User`/`Quest`/`QuestHistory`/`Reward`/`InventoryItem`/`QuestResult`/`PendingInventory`の各インターフェースが定義されているとされているが、`description`/`desc`のような類似プロパティの併存が多く、`types/index.md`側でも完全な使い分けの理由は特定されていない。 | `../types/index.md` |
+| `apiClient.fetchPendingInventory` の実エンドポイント | `apiClient.md`の解析では`fetchPendingInventory`メソッドの存在自体は確認されているが具体的なURLは抜粋されておらず、`quest_router.md`の解析によれば`GET /inventory/admin/pending`という管理者向けエンドポイントが存在するとされている。両者を突き合わせると対応している可能性が高いが、これはあくまで推測であり断定はできない。 | `../lib/apiClient.md`, `../../../MY_HOME_SYSTEM/quest_router.md` |
+| `earnedMedals`の付与条件 | `game_logic.md`の解析によれば、`GameLogic.calculate_drop_rewards`内で`earned_medals = 1 if random.random() < medal_chance else 0`という確率判定でメダル付与を決定しているとされている。ただしこれは`game_logic.md`側の解析結果からの補足であり、`quest_service.py`/`quest_router.py`が実際にこの値を`QuestResult.earnedMedals`としてどう返しているかまでは確認できていない。 | `../../../MY_HOME_SYSTEM/game_logic.md` |
 
 ## 10. 自己検証結果
 

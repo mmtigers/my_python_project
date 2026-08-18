@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [App.md](App.md) - `/camera`を含まないパスでマウントされる通常時のルートコンポーネント
+* [src/features/camera/components/CameraDashboard.md](src/features/camera/components/CameraDashboard.md) - `/camera`パスでマウントされるカメラビューワのルートコンポーネント
+* [src/lib/queryClient.md](src/lib/queryClient.md) - `QueryClientProvider`に渡す`queryClient`インスタンスの定義元
+
 ## 2. ファイルの概要
 
 * DOMから特定のルート要素（`id="root"`）を取得し、Reactのコンテキスト（厳格モード、React Queryのプロバイダ）でラップした上で、URLのパス（`window.location.pathname`）に`/camera`が含まれるかどうかに応じて、`CameraDashboard`（カメラビューワ）または`App`（通常のFamily Questアプリ）のいずれかをルートとしてマウント・レンダリングするためのエントリーポイントファイルである。
@@ -102,6 +108,14 @@ graph TD
 | グローバルスタイルの定義内容 | CSSファイルがインポートされているのみであり、スタイルの衝突や適用範囲が不明であるため。 | `./index.css` |
 | HTML側のDOM構造 | `document.getElementById('root')` の対象となる要素が定義されているHTMLファイルが提供されていないため。 | `index.html` (エントリーポイントに対応するHTMLファイル) |
 | `/camera` 以外のルーティング設計の有無 | `window.location.pathname`の単純な文字列一致でしか分岐していないため、他にルーティングライブラリや設定が存在するか不明。 | ルーティング関連の設定ファイル（存在する場合） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `App` コンポーネントの詳細な機能 | `App.md`の解析によれば、`App`はユーザー切替・確認モーダル・クエスト完了/取消・報酬購入等を統括するFamily Questのメイン画面コンポーネントであるとされている。ただしこれは`App.md`側の解析結果からの補足であり、`App.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `App.md` |
+| `CameraDashboard` コンポーネントの詳細な機能 | `CameraDashboard.md`の解析によれば、`CameraDashboard`はマウント時に`/api/cameras/settings`からカメラ設定一覧を取得し、「ライブ映像」（`LiveView`）と「録画再生」（`RecordView`）のタブ切り替えを提供する独立した全画面レイアウトのコンポーネントであるとされている。ただしこれは`CameraDashboard.md`側の解析結果からの補足であり、`CameraDashboard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/features/camera/components/CameraDashboard.md` |
+| データフェッチ機構のグローバル設定 | `queryClient.md`の解析によれば、`queryClient`は`retry: 1`（失敗時1回再試行）、`staleTime: 1000 * 60`（60秒）、`refetchOnWindowFocus: false`という既定オプションを持つ`QueryClient`インスタンスであるとされている。ただしこれは`queryClient.md`側の解析結果からの補足であり、`queryClient.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `src/lib/queryClient.md` |
 
 ## 10. 自己検証結果
 

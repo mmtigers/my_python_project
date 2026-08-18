@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../lib/utils.md](../../lib/utils.md) - `cn`関数の実装元
+* [./Button.md](./Button.md) - ヘッダー部の閉じるボタンとして利用するコンポーネント
+* [./MessageModal.md](./MessageModal.md) - 本コンポーネントの利用例（結果/エラーメッセージモーダル）
+* [./LevelUpModal.md](./LevelUpModal.md) - 本コンポーネントの利用例（レベルアップ演出モーダル）
+* [../../../App.md](../../../App.md) - 呼び出し元の一例（`ConfirmModal`が内部で汎用モーダルとして利用）
+
 ## 2. ファイルの概要
 
 * 画面上にモーダルウィンドウ（ダイアログ）を表示し、ユーザーのアクション（ESCキー押下、背景クリック、閉じるボタンクリック）に応じて非表示（閉じる）処理を呼び出す責務を持つ。
@@ -126,6 +134,13 @@ graph TD
 | --- | --- | --- |
 | `cn`関数の詳細な挙動 | 外部インポートであり、引数に渡したクラス名の競合時等における結合仕様が不明 | `@/lib/utils.ts` |
 | `Button`コンポーネントの仕様 | 外部インポートであり、`variant="ghost"`, `size="icon"`時の具体的なDOM構造やスタイルが不明 | `./Button.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `cn`関数の詳細な挙動 | `utils.md`の解析によれば、`cn`は`export function cn(...inputs: ClassValue[])`として定義され、`return twMerge(clsx(inputs));`という実装、すなわち`clsx`でクラス名を結合した結果を`tailwind-merge`の`twMerge`に渡してTailwindクラスの競合を解決する関数であるとされている。ただしこれは`utils.md`側の解析結果からの補足であり、`utils.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../lib/utils.md |
+| `Button`コンポーネントの仕様 | `Button.md`の解析によれば、`Button`は`framer-motion`の`motion.button`をベースに`variant`・`size`・`isLoading`等をPropsとして受け取る実装であるとされているが、`variant="ghost"`や`size="icon"`が実際にどのクラス名・DOM構造に対応するかまでは`Button.md`の解析結果からも特定できていない。ただしこれは`Button.md`側の解析結果からの補足であり、`Button.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./Button.md |
 
 ## 10. 自己検証結果
 

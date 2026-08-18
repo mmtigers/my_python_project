@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`IMPORTANT_DATES`, `CHECK_ZOROME`, `LINE_USER_ID`等)を提供
+- [common.md](./common.md) — ロガー設定・通知送信(`send_push`)の共通処理を提供(Facadeモジュール)
+- [notification_service.md](./notification_service.md) — `common.send_push`の実体
+- [scheduler_boot.md](./scheduler_boot.md) — 呼び出し元の可能性(推定。scheduler_boot.py自身の`TASKS`定義内容は未確認のため断定不可)
+
 ## 2. ファイルの概要
 
 * システムにおいて、朝の子供の体調確認と、当日の記念日（誕生日・周年記念など）やゾロ目の日をチェックし、LINEまたはDiscordの指定された通知先へメッセージ（テキストおよびFlex Message）を送信する責務を持つ。
@@ -211,6 +218,13 @@ graph TD
 | --- | --- | --- |
 | 記念日設定のデータ構造 | `config.IMPORTANT_DATES`に定義されている要素が持つべきキー構成(`date`, `name`, `type`等)の全容が不明。 | `config.py` |
 | Discord向け通知の挙動 | `create_start_check_flex`で生成されたLINE専用の`FlexMessage`オブジェクトが、`--target discord`の際に`common.send_push`内でどのように処理・変換されるか不明。 | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 記念日設定のデータ構造 | `config.md`の解析によれば、`config.py`は家族の記念日・イベント設定情報を持つ外部JSONファイル`family_events.json`を読み込み、グローバル変数へパース結果を格納する処理を持つとされる。`config.IMPORTANT_DATES`という変数名自体への直接の言及は`config.md`にはないが、記念日情報を扱う外部ファイルとして`family_events.json`が存在することから、その読み込み結果である可能性が推測される。ただし`family_events.json`自体の構造や`IMPORTANT_DATES`との対応関係は、`config.py`のソースコード自体が未確認のため確定できない。 | config.md |
+| Discord向け通知の挙動 | `notification_service.md`の解析によれば、`common.send_push`の実体である`send_push`は`target`引数に応じて`_send_discord_webhook`または`_send_line_push`を呼び分けるとされ、また`_send_line_push`では辞書型で`type: "flex"`のメッセージを変換する処理が未実装(`pass`)であり、呼び出し元が既にv3 SDKオブジェクト化していることを前提としているとされる。もっとも、`_send_discord_webhook`が`FlexMessage`オブジェクトをどのようにテキスト化・送信するかについては`notification_service.md`自体でも明記されておらず、この点は依然として不明である。 | notification_service.md |
 
 ## 10. 自己検証結果
 

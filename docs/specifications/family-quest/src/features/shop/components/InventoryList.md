@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [apiClient.md](../../../lib/apiClient.md) — `fetchInventory`/`useItem`/`cancelItemUsage`等、本ファイルが呼び出すAPIクライアントメソッドの実装元。
+- [types/index.md](../../../types/index.md) — `InventoryItem`型定義の提供元。
+- [Card.md](../../../components/ui/Card.md) — アイテムカードのUIコンポーネント。
+- [Button.md](../../../components/ui/Button.md) — 「つかう！」ボタンのUIコンポーネント。
+- [Modal.md](../../../components/ui/Modal.md) — 使用確認ダイアログのUIコンポーネント。
+- [useSound.md](../../../hooks/useSound.md) — 使用・キャンセル時の効果音再生フックの実装元。
+- [RewardShop.md](RewardShop.md) — 呼び出し元。`userId`のみを渡す「ごほうび」画面コンテナ。
+
 ## 2. ファイルの概要
 
 * ユーザーの所持アイテム（インベントリ）一覧を取得・表示し、アイテムの「使用」および「キャンセル」を行うUIコンポーネント。
@@ -180,6 +190,14 @@ graph TD
 | API通信エラー時のデフォルトの挙動 | グローバルなエラーハンドラーの有無がこのファイル単独では不明なため。 | `../../../lib/apiClient` または親コンポーネント群 |
 | `play('clear')`等の音声の有無 | 指定されたキーに対応する音声が確実に存在するかが不明なため。 | `../../../hooks/useSound` |
 | `Modal`コンポーネントの内部実装 | `isOpen`/`onClose`/`title`/`footer`のprops以外にどのような機能（フォーカストラップ、アニメーション等）を持つか不明なため。 | `../../../components/ui/Modal` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| API通信エラー時のデフォルトの挙動 | `apiClient.md`の解析によれば、`_request`メソッドは`!response.ok`の際にレスポンスのJSON（`detail`フィールド優先）または汎用メッセージから`Error`を生成してスローし、`catch`節で`console.error`によるログ出力を行った上で再スローするのみで、`apiClient.ts`内にグローバルなエラー通知の仕組みは実装されていないとされている。 | `../../../lib/apiClient.md` |
+| `play('clear')`等の音声の有無 | `useSound.md`の解析によれば、`play`は`SOUNDS`定義のキーに対応する`HTMLAudioElement`をキャッシュしつつ再生し、再生失敗時は`console.warn`のみで例外は投げないとされている。ただし`SOUNDS`に`'clear'`/`'cancel'`キーが実際に含まれるかは`useSound.md`側でも全キーの列挙が行われておらず断定できない。 | `../../../hooks/useSound.md` |
+| `Modal`コンポーネントの内部実装 | `Modal.md`の解析によれば、`Modal`は`isOpen`/`onClose`/`title`/`children`/`footer`/`maxWidth`をpropsとして受け取り、`isOpen`が真の間はESCキー押下時に`onClose`を呼ぶ`keydown`リスナーを登録・解除するとされている。 | `../../../components/ui/Modal.md` |
 
 ## 10. 自己検証結果
 

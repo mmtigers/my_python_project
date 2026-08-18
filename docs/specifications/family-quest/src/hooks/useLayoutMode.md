@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [App.md](../../App.md) — `layoutMode`の戻り値を実際に画面分岐（`FamilyDashboard`/縦画面UI）に使う呼び出し元。
+- [Header.md](../components/layout/Header.md) — `hideUserSwitcher`propが`layoutMode === 'landscape'`と連動する利用先。
+
 ## 2. ファイルの概要
 
 横画面（Echo Show 15等の常設デバイス）/縦画面（スマホ）のレイアウト判定を行うカスタムフック`useLayoutMode`を提供する。`window.matchMedia`によるメディアクエリ（`(min-width: 900px) and (orientation: landscape)`）の一致状況を購読し、ウィンドウのリサイズや画面回転にリアルタイムに追従して`'landscape' | 'portrait'`のいずれかを返す。
@@ -171,6 +176,12 @@ graph TD
 | --- | --- | --- |
 | `layoutMode`の実際の利用箇所・分岐条件 | 本フックは判定結果を返すのみであり、`'landscape'`/`'portrait'`それぞれの場合にどのUIが描画されるかは呼び出し元次第で不明なため。 | `App.tsx` |
 | `900px`という閾値の決定根拠 | コメントで「実機での見え方を見て調整可」とあるのみで、具体的な検証データやEcho Show 15以外の対応デバイスの有無は本ファイルからは不明なため。 | 本ファイル外（デザイン仕様書等、存在すれば） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `layoutMode`の実際の利用箇所・分岐条件 | `App.md`の解析によれば、`App`コンポーネントは`useLayoutMode()`の戻り値を`layoutMode`として保持し、`viewMode==='main' && layoutMode==='landscape'`のとき`FamilyDashboard`（4人常時表示）を、`viewMode==='main' && layoutMode==='portrait'`のとき`UserStatusCard`＋（保護者なら）`ApprovalList`＋タブ切替（`quest`/`shop`）＋`QuestList`/`RewardShop`を描画し、`Header`へは`hideUserSwitcher={layoutMode === 'landscape'}`を渡し、コンテナの最大幅も`layoutMode`によって`max-w-7xl`/`max-w-md md:max-w-5xl`と切り替えているとされている。 | `../../App.md` |
 
 ## 10. 自己検証結果
 

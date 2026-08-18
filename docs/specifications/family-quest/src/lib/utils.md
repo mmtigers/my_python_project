@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [Button.md](../components/ui/Button.md) — `cn`関数の利用元の一つ。
+- [Modal.md](../components/ui/Modal.md) — `cn`関数の利用元の一つ（`maxWidth`のクラス名結合に使用）。
+
 ## 2. ファイルの概要
 
 * Tailwind CSSのクラス名をマージ（結合・競合解決）するためのユーティリティ関数 `cn` を提供する。

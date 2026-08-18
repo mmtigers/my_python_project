@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [DDD/batch_download_discord.md](../DDD/batch_download_discord.md) - 同じく動画ダウンロード機能を持つ別スクリプト(DDDサブシステム)。本ファイルの保存先`/mnt/nas/ddd`のディレクトリ名は`DDD`サブシステムの名称と一致するが、`batch_download_discord.py`側は環境変数`VIDEO_SAVE_DIR`で保存先を指定する設計であり、両者が同一ディレクトリを対象としているかは推測の域を出ず、本ファイル・`batch_download_discord.md`のいずれからもimport等の直接的なコード上の依存関係は確認できていない
+* 他に直接的なimport・呼び出し関係を持つ仕様書は見つからなかった(本ファイルはPython標準ライブラリと`requests`/`tqdm`のみに依存する独立したCLIスクリプトであり、`config.py`や`common.py`等のMY_HOME_SYSTEM共通基盤へのインポートを持たない)
+
 ## 2. ファイルの概要
 
 * 指定されたURLからHTMLを取得し、正規表現を用いて動画ファイルのURLを抽出し、ローカル環境（NAS等の指定ディレクトリ）へダウンロードを実行するCLIダウンローダープログラム。
