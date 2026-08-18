@@ -20,7 +20,7 @@ import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Set, Dict, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qs
 
 # プロジェクトルート（DDDの親ディレクトリ）をパスに追加
 CURRENT_DIR = Path(__file__).resolve().parent # ~/develop/DDD
@@ -117,6 +117,10 @@ class SiteConfig:
         selector_image (str): サムネイル画像を取得するCSSセレクタ（コンテナ基準）。
         data_filename (str): 既知キャストの保存先ファイル名。未指定時は
             'known_casts_{site_id}.json' を用いる。
+        id_query_param (Optional[str]): 詳細ページURLがクエリパラメータで
+            キャストを識別する形式（例: 'profile.php?id=931'）のサイト向け。
+            指定した場合、そのクエリパラメータの値をキャストIDとして使用する
+            （未指定時はURLパスの末尾セグメントからIDを生成する従来ロジックを使う）。
     """
     site_id: str
     name: str
@@ -126,6 +130,7 @@ class SiteConfig:
     selector_link: str
     selector_image: str
     data_filename: str = ""
+    id_query_param: Optional[str] = None
 
     def get_data_filename(self) -> str:
         """既知キャストの保存先ファイル名を返す。
@@ -153,6 +158,29 @@ class MonitorConfig:
             selector_image='div.ph img:not(.list_today)',
             # 既存運用データ（known_casts.json）との後方互換のためファイル名を明示指定
             data_filename='known_casts.json',
+        ),
+        SiteConfig(
+            site_id='merci_spa',
+            name='Mrs.Merci SPA',
+            target_url='https://merci-spa.com/girllist',
+            selector_container='div.therapist_list > div',
+            selector_name='h3.therapist_name',
+            selector_link='a.therapist_meta',
+            selector_image='p.therapist_img img',
+        ),
+        SiteConfig(
+            site_id='osaka_milktea',
+            name='ミルクティー -milktea-',
+            target_url='https://osakamilktea.com/sp/newface.php',
+            selector_container='main#newface section > ul',
+            selector_name='div.name',
+            # div.photo 内にSNSアイコンへのリンク/画像も混在しているため、
+            # プロフィールページへのリンクをhrefで明示的に絞り込む
+            selector_link='a[href*="profile.php"]',
+            selector_image='a[href*="profile.php"] img',
+            # 詳細URLが './profile.php?id=931' のようにクエリパラメータで
+            # キャストを識別する形式のため、'id'パラメータの値をIDとして使う
+            id_query_param='id',
         ),
     ]
 
@@ -447,12 +475,21 @@ class WebMonitor:
                 if link_elem and link_elem.get('href'):
                     href = link_elem.get('href')
                     detail_url = urljoin(site.target_url, href)
-                    # パスからIDを生成 (例: /prof/123 -> 123)
-                    # クエリ文字列(?utm=...等)が付与されるとcast_idが実行ごとに
-                    # ブレて「新規キャスト」の誤検知を招くため、先に除去する
-                    href_no_query = href.split('?')[0]
-                    clean_path = href_no_query.rstrip('/')
-                    cast_id = os.path.basename(clean_path)
+
+                    if site.id_query_param:
+                        # 'profile.php?id=931' のようにクエリパラメータでキャストを
+                        # 識別するサイト向け: 指定パラメータの値をそのままIDとする
+                        query_values = parse_qs(urlparse(href).query).get(site.id_query_param)
+                        if query_values:
+                            cast_id = query_values[0]
+
+                    if not cast_id:
+                        # パスからIDを生成 (例: /prof/123 -> 123)
+                        # クエリ文字列(?utm=...等)が付与されるとcast_idが実行ごとに
+                        # ブレて「新規キャスト」の誤検知を招くため、先に除去する
+                        href_no_query = href.split('?')[0]
+                        clean_path = href_no_query.rstrip('/')
+                        cast_id = os.path.basename(clean_path)
 
                 if not cast_id:
                     # フォールバック: 名前をIDとする
