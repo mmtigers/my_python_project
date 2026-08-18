@@ -138,6 +138,11 @@ class SiteConfig:
             名前の要素内に年齢バッジ等が兄弟の子要素として同居しており、
             get_text()では "さな(27)" のように汚染されてしまうサイト向け
             （未指定時は要素全体のget_text()を使う従来ロジック）。
+        name_strip_after_tab (bool): Trueの場合、名前取得後にタブ文字(\t)で
+            分割し先頭部分のみを採用する。年齢等の付加情報が兄弟要素ではなく
+            同一テキストノード内にタブ区切りで同居しているサイト向け
+            （例: "芹沢\t\t\t(40歳)"）。全角スペース区切りの姓名（例:
+            "神谷　しおり"）は対象外のため、空白ではなくタブのみで判定する。
     """
     site_id: str
     name: str
@@ -151,6 +156,7 @@ class SiteConfig:
     image_attr: str = "src"
     image_from_style: bool = False
     name_first_text_only: bool = False
+    name_strip_after_tab: bool = False
 
     def get_data_filename(self) -> str:
         """既知キャストの保存先ファイル名を返す。
@@ -962,6 +968,69 @@ class MonitorConfig:
             selector_link='a[href*="/cast/"]',
             selector_image='a[href*="/cast/"] img',
         ),
+        SiteConfig(
+            site_id='goodrad',
+            name='グッドラッド',
+            target_url='https://goodrad.men-es.jp/therapist.html',
+            # men-es.jp系CMSテンプレート(cecile/restpiaと同一構造)。レイアウト
+            # 調整用の空divが混在するため、リンクを持つ要素のみに絞る
+            selector_container='div.staff-box:has(a)',
+            selector_name='ul.box-inner li',
+            selector_link='div.staff-image01 a',
+            selector_image='div.staff-image01 a',
+            image_from_style=True,
+            id_query_param='sid',
+        ),
+        SiteConfig(
+            site_id='spade',
+            name='SPADE～スペード～',
+            target_url='https://esthe-spade.com/cast/',
+            # gallist系テンプレート(Pure White等と同一構造)
+            selector_container='ul.gallist li.list__item',
+            selector_name='article h3',
+            selector_link='a',
+            selector_image='div.ph img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='momoten',
+            name='桃色天使2.0',
+            target_url='https://momotenestama.com/therapist/',
+            # 新規パターン。ページ上部の「PICK UP」プレビューと「THERAPIST LIST」
+            # 本編セクションに同じキャストが重複掲載されるため、本編セクションの
+            # みに絞る。name要素内には年齢が兄弟の<span>として同居するため
+            # name_first_text_only=Trueを使用
+            selector_container='section.p-therapist-list-section div.c-therapist-cards__item',
+            selector_name='span.c-therapist-cards__name',
+            selector_link='a.c-therapist-cards__link',
+            selector_image='img',
+            name_first_text_only=True,
+        ),
+        SiteConfig(
+            site_id='yurikago',
+            name='ゆりかご京都',
+            target_url='https://yurikago-kyoto.com/therapist/',
+            # 新規パターン。WordPress製。name要素内には入店日等の付加情報の後に
+            # 年齢が兄弟の<span>として同居するため name_first_text_only=True
+            selector_container='li.therapistbox',
+            selector_name='p.therapist_name',
+            selector_link='a',
+            selector_image='img',
+            name_first_text_only=True,
+        ),
+        SiteConfig(
+            site_id='bimajo',
+            name='The 美魔女',
+            target_url='https://kyoto-esthe.com/casts/',
+            # 新規パターン。name要素内の年齢が兄弟要素ではなく同一テキスト
+            # ノード内にタブ文字区切りで同居する("芹沢\t\t\t(40歳)")ため、
+            # name_strip_after_tab=Trueでタブ以降を除去
+            selector_container='div.cast__item',
+            selector_name='span.cast__name',
+            selector_link='div.cast__thumb a',
+            selector_image='div.cast__thumb img',
+            name_strip_after_tab=True,
+        ),
     ]
 
     # File Paths
@@ -1252,6 +1321,10 @@ class WebMonitor:
                     name = name_elem.get_text(strip=True)
                 else:
                     name = "Unknown"
+                if site.name_strip_after_tab and '\t' in name:
+                    # "芹沢\t\t\t(40歳)" のように、年齢等の付加情報が兄弟要素では
+                    # なく同一テキストノード内にタブ区切りで同居しているサイト向け
+                    name = name.split('\t')[0].strip()
 
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
