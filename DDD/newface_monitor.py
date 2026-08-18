@@ -13,9 +13,10 @@ Description:
 
 import os
 import json
+import re
 import time
 import random
-import sys 
+import sys
 import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -121,6 +122,14 @@ class SiteConfig:
             キャストを識別する形式（例: 'profile.php?id=931'）のサイト向け。
             指定した場合、そのクエリパラメータの値をキャストIDとして使用する
             （未指定時はURLパスの末尾セグメントからIDを生成する従来ロジックを使う）。
+        image_attr (str): サムネイル画像URLを取得する際に、selector_imageで
+            マッチした要素から読み取る属性名。lazyload実装のサイトでは実URLが
+            'src'ではなく'data-original'等に入っていることがあるため指定する
+            （image_from_style=Trueの場合は無視される）。
+        image_from_style (bool): Trueの場合、selector_imageでマッチした要素の
+            'style'属性から "background-image:url(...)" 形式で画像URLを抽出する。
+            サムネイルが<img src>ではなく要素のインラインCSSで指定されている
+            サイト向け（この場合 image_attr は使用しない）。
     """
     site_id: str
     name: str
@@ -131,6 +140,8 @@ class SiteConfig:
     selector_image: str
     data_filename: str = ""
     id_query_param: Optional[str] = None
+    image_attr: str = "src"
+    image_from_style: bool = False
 
     def get_data_filename(self) -> str:
         """既知キャストの保存先ファイル名を返す。
@@ -180,6 +191,66 @@ class MonitorConfig:
             selector_image='a[href*="profile.php"] img',
             # 詳細URLが './profile.php?id=931' のようにクエリパラメータで
             # キャストを識別する形式のため、'id'パラメータの値をIDとして使う
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='itadaki',
+            name='ITADAKI（イタダキ）',
+            target_url='https://www.itadaki-top.com/staff/',
+            selector_container='div#companion ul li',
+            selector_name='div.txt a',
+            selector_link='div.txt a',
+            selector_image='div.img img',
+            # 画像がlazyload実装のため、実URLは src ではなく data-original に入っている
+            image_attr='data-original',
+        ),
+        SiteConfig(
+            site_id='cecile',
+            name='Cecile セシル',
+            target_url='https://cecile.men-este.com/therapist.html',
+            # レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る
+            selector_container='div.staff-box:has(a)',
+            selector_name='li.staff-name',
+            selector_link='div.staff-image a',
+            selector_image='div.staff-image a',
+            # サムネイルが<img src>ではなく<a>のインラインCSS背景画像で指定されている
+            image_from_style=True,
+            # 詳細URLが './profile.html?sid=83' 形式のため 'sid'パラメータをIDとして使う
+            id_query_param='sid',
+        ),
+        SiteConfig(
+            site_id='restpia',
+            name='Restpia レストピア',
+            target_url='https://restpia-es.com/therapist.html',
+            # レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る
+            selector_container='div.staff-box:has(a)',
+            # box-inner内の最初のliが名前（class指定がないため先頭要素で取得）
+            selector_name='ul.box-inner li',
+            selector_link='div.staff-image01 a',
+            selector_image='div.staff-image01 a',
+            image_from_style=True,
+            id_query_param='sid',
+        ),
+        SiteConfig(
+            site_id='anju_spa',
+            name='Anju spa（アンジュスパ）',
+            target_url='https://anjuspa.com/cast/',
+            selector_container='ul.gallist li',
+            # petitpetit-dreamと異なり、名前が<a>で囲まれていないためarticle h3のみで取得
+            selector_name='article h3',
+            selector_link='a[href*="/profile?id="]',
+            selector_image='div.ph img',
+            # 詳細URLが '/profile?id=191' 形式のため 'id'パラメータをIDとして使う
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='sr_himawari',
+            name='シークレットルームヒマワリ',
+            target_url='https://sr-himawari.com/cast/',
+            selector_container='ul.gallist li',
+            selector_name='article h3',
+            selector_link='a[href*="/profile?id="]',
+            selector_image='div.ph img',
             id_query_param='id',
         ),
     ]
@@ -498,8 +569,16 @@ class WebMonitor:
                 # Image Extraction
                 img_elem = div.select_one(site.selector_image)
                 image_url = ""
-                if img_elem and img_elem.get('src'):
-                    image_url = urljoin(site.target_url, img_elem.get('src'))
+                if img_elem:
+                    if site.image_from_style:
+                        # 'background-image:url(...)' 形式のインラインCSSから抽出
+                        # (<img src> ではなくCSSで背景画像として指定されるサイト向け)
+                        style_match = re.search(r'url\(([^)]+)\)', img_elem.get('style', ''))
+                        image_src = style_match.group(1).strip('\'"') if style_match else ""
+                    else:
+                        image_src = img_elem.get(site.image_attr, '')
+                    if image_src:
+                        image_url = urljoin(site.target_url, image_src)
 
                 cast = CastMember(
                     id=cast_id,
