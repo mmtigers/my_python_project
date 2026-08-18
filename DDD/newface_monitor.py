@@ -721,6 +721,66 @@ class MonitorConfig:
             selector_image='img.profile_thum',
             id_query_param='sid',
         ),
+        SiteConfig(
+            site_id='highspec_osaka',
+            name='SPAハイスペ',
+            target_url='https://highspec-osaka.net/newface/',
+            # KNZ系listTypeJ(ALYO等と同一テンプレート)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='femme_fatale_osaka',
+            name='Femme Fatale（ファムファタール）',
+            target_url='https://femmefatale-osaka.net/newface/',
+            # KNZ系listTypeJ。既存のmrs_femmefatale(Mrs.Femme Fatale/
+            # mrs-femmefatale.com)とは別ドメインの別店舗のため区別して登録
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='kifujinclub',
+            name='貴婦人倶楽部',
+            target_url='https://kifujinclub.com/newface/',
+            # KNZ系listTypeJ
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='busty_osaka',
+            name='Busty Osaka（バスティオオサカ）',
+            target_url='https://busty-osaka.com/therapist.php',
+            # grandluxe_osakaと同一テンプレート系列(ul#list、profile.php?id=形式)
+            selector_container='ul#list > li',
+            selector_name='div.name',
+            selector_link='a[href*="profile.php"]',
+            selector_image='div.image img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='moonr_osaka',
+            name='ミセス・ムーンR',
+            target_url='https://www.moonr.jp/newface/',
+            # KNZ系listTypeJ
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
     ]
 
     # File Paths
