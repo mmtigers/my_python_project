@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../../types/index.md](../../../types/index.md) - `User`型の定義元（`hp`/`maxHp`をバックエンド計算値として扱う旨のコメントを含む）
+* [../../../components/ui/CountUp.md](../../../components/ui/CountUp.md) - HP/ゴールド/メダル数値のアニメーション表示コンポーネント
+* [./FamilyDashboard.md](./FamilyDashboard.md) - 呼び出し元の一例（横画面レイアウトの各パネル上部）
+* [../../../../App.md](../../../../App.md) - 呼び出し元の一例（縦画面レイアウト時）
+* [../../../../../MY_HOME_SYSTEM/game_logic.md](../../../../../MY_HOME_SYSTEM/game_logic.md) - `calculate_max_hp`の実装元（バックエンドHP計算ロジック）
+
 ## 2. ファイルの概要
 
 * ユーザー（冒険者）のレベル、HP、EXP（経験値）、所持ゴールド、獲得メダルなどのステータス情報を可視化し、RPGのステータスカードのようなUIとして描画するコンポーネント。
@@ -127,6 +135,15 @@ graph TD
 | バックエンドのHP計算ロジック (`calculate_max_hp`) の実装詳細 | コメントで `calculate_max_hp(level) = level*20+5` という計算式に言及されているが、実際にこの式でAPIが `user.maxHp`/`user.hp` を算出しているかは本ファイルからは検証不可能なため。 | `MY_HOME_SYSTEM` 側のバックエンド実装ファイル |
 | `CountUp` コンポーネントの仕様 | 外部コンポーネントであり、内部ロジックやサポートしているPropsが不明。 | `@/components/ui/CountUp` |
 | `onAvatarClick` の実行内容 | 親コンポーネント側で制御されているため、クリック時の副作用（画面遷移、モーダル表示など）が不明。 | 本コンポーネントを呼び出す親ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| バックエンドのHP計算ロジック（`calculate_max_hp`）の実装詳細 | `game_logic.md`の解析によれば、`GameLogic.calculate_max_hp(level)`は`level * 20 + 5`を返す実装であるとされており、本ファイルのコメントに記載された計算式と一致する。`types/index.md`の解析でも同様の式がコメントとして明記されているとされている。ただしこれらは`game_logic.md`・`types/index.md`側の解析結果からの補足であり、`game_logic.py`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/game_logic.md, ../../../types/index.md |
+| `User` 型の正確なスキーマ定義 | `types/index.md`の解析によれば、`User`インターフェースは`hp`/`maxHp`をバックエンド（MY_HOME_SYSTEM）から送られてくる値としてそのまま利用し、フロント側で再計算してはならない旨がコメントされているとされている。ただし全プロパティの一覧までは`types/index.md`側の解析結果本文からは確認できていない。ただしこれは`types/index.md`側の解析結果からの補足であり、`types/index.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../types/index.md |
+| `CountUp` コンポーネントの仕様 | `CountUp.md`の解析によれば、`CountUp`は`framer-motion`の`useSpring`/`useMotionValue`/`useTransform`を用い、`value`が変わるたびにバネ物理モデルでアニメーションしながら数値を整数に丸めて`toLocaleString()`でカンマ区切り表示するコンポーネントであり、`prefix`/`suffix`で前後に文字列を付与できるとされている。ただしこれは`CountUp.md`側の解析結果からの補足であり、`CountUp.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../components/ui/CountUp.md |
+| `onAvatarClick` の実行内容 | `App.md`の解析によれば、`App.tsx`は`avatarUser`という状態を持ち、`AvatarUploader`（アバター変更モーダル）の表示制御に用いているとされている。`UserStatusCard`が受け取る`onAvatarClick`はこの`avatarUser`状態を設定するためのハンドラである可能性が推測されるが、`onAvatarClick`の実装自体が`avatarUser`を更新していると明記した記述は`App.md`の解析結果本文からは確認できておらず、あくまで推測の域を出ない。 | ../../../../App.md |
 
 ## 10. 自己検証結果
 

@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `setup_logging`, `get_db_cursor`, `send_push`を再エクスポートするFacadeモジュール
+- [database.md](./database.md) — `common.get_db_cursor`の実体
+- [notification_service.md](./notification_service.md) — `common.send_push`の実体
+- [config.md](./config.md) — `SQLITE_TABLE_FOOD`, `LINE_USER_ID`等の設定値を提供
+- [scheduler_boot.md](./scheduler_boot.md) — 週次実行のスケジューラ候補(本ファイルのコメントで言及される「scheduler.pyが月曜に実行する」呼び出し元)
+
 ## 2. ファイルの概要
 
 指定された期間（週、月、年）の食事、車利用、電気代、家族の体調に関するデータをデータベースから集計し、整形したレポートテキストを作成して、外部システム（LINE/Discord）へプッシュ通知を送信する週間レポート生成スクリプトである。
@@ -233,6 +241,13 @@ graph TD
 | `common` モジュールの実装詳細 | DBカーソルの仕様（ディクショナリ的アクセス可否）、プッシュ通知の実際の宛先と送信仕様、ロガーの設定内容が不明なため。 | `common.py` |
 | データベースのスキーマ定義 | クエリ内で呼び出しているテーブルのカラムのデータ型や制約が不明なため。 | DBマイグレーションファイルまたはスキーマ定義書 |
 | 実行スケジューラ（Cron等）の設定 | コード上のコメントに「scheduler.pyが月曜に実行することを前提」とあるが、実際の設定や呼び出し元の処理が不明なため。 | `scheduler.py` またはシステムのCron設定ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common` モジュールの実装詳細 | `database.md`の解析によれば、`common.get_db_cursor`の実体は`sqlite3`ベースの接続コンテキストマネージャ(リトライ機能付き)であり、`notification_service.md`の解析によれば`common.send_push`の実体は`target`引数に応じてDiscord/LINEへ送信しLINE失敗時はDiscordへフォールバックする関数であることが判明した。 | database.md, notification_service.md |
+| 実行スケジューラ（Cron等）の設定 | `scheduler_boot.md`の解析によれば、`scheduler_boot.py`は`TASKS`リストに登録されたスクリプトを`ThreadPoolExecutor`で定期実行する無限ループのスケジューラであり、本ファイル(`weekly_analyze_report.py`)がそのタスク候補として言及されている。ただし実際に`TASKS`に登録されているか、どの間隔・引数で呼び出されるかは`scheduler_boot.md`側でも「再確認が必要」として断定されていない。 | scheduler_boot.md |
 
 ## 10. 自己検証結果
 

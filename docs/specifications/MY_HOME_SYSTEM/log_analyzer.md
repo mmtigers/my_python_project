@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `LOG_DIR`, `LINE_USER_ID`等の設定値を提供
+* [common.md](./common.md) - `setup_logging`, `send_push`を再エクスポートするFacade
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [notification_service.md](./notification_service.md) - `send_push`の実体
+
 ## 2. ファイルの概要
 
 このファイルは、指定された過去の日数分のアプリケーションログディレクトリおよび特定のシステムログファイル（`/var/log/syslog`, `/var/log/auth.log`）を走査し、特定のエラーキーワードが含まれる行を検知・集計した上で、外部の通知機能を利用してレポートを送信する責務を担っている。
@@ -303,6 +310,14 @@ graph TD
 | `LINE_USER_ID` の値とデータ型 | 外部ファイルに定義されているため | `config.py` |
 | `setup_logging` の詳細仕様 | ログフォーマットや出力先などの設定が不明なため | `common.py` |
 | `send_push` の詳細仕様 | 引数（`target="discord"`, `channel="report"`）の意味や、通信エラー時の挙動が不明なため | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `setup_logging` の詳細仕様 | `common.md`の解析によれば、`common.setup_logging`は`core.logger.setup_logging`を再エクスポートするFacadeであり、`logger.md`の解析によれば実体はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する関数であることが判明した。 | `common.md`, `logger.md` |
+| `send_push` の詳細仕様 | `common.md`の解析によれば、`common.send_push`は`services.notification_service.send_push`を再エクスポートするFacadeであり、`notification_service.md`の解析によれば、`target`引数(`"discord"`/`"line"`/`"both"`)に応じてDiscord Webhook（`channel`引数でerror/report/notifyのURLを切替）またはLINE Push APIへ送信し、LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知する設計であることが判明した。 | `common.md`, `notification_service.md` |
+| `LINE_USER_ID` の値とデータ型 | `config.md`の解析でも具体的な値は確認できなかったが、`config.py`がシステム全体の環境変数・定数を一元管理するモジュールであることは判明した。 | `config.md` |
 
 ## 10. 自己検証結果
 

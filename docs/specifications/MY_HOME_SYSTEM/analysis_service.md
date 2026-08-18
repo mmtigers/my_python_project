@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `SQLITE_DB_PATH`、`MONITOR_DEVICES`、各種`SQLITE_TABLE_*`などの設定値を提供する。
+- [logger.md](./logger.md) — `setup_logging`の実装元。
+- [dashboard.md](./dashboard.md) — 本ファイルの`load_*`関数群・`get_ngrok_url`/`get_disk_usage`/`get_memory_usage`/`get_system_logs`等を呼び出す主要な呼び出し元（Streamlitダッシュボード）。
+- [database.md](./database.md) — 同じくSQLiteへの読み取りアクセスを提供するが、本ファイルは`get_ro_db_connection`による直接の`sqlite3.connect`を用いており、`database.md`が扱う`core/database.py`の`get_db_cursor`等とは別経路であることに留意。
+
 ## 2. ファイルの概要
 
 * このファイルは、データベース（SQLite）やOSシステム情報（ディスク、メモリ、システムログ）、外部API（ngrok）からデータを取得し、Pandas DataFrame等を用いて加工・集計（タイムゾーン変換、デバイス名のマッピング、月額コスト計算など）を行うデータ分析・取得用のサービス層（Service層）を担っている。

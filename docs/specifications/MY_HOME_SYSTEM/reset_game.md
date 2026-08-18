@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest_data.md](./quest_data.md) - `NAME_MAP`のuser_id(dad/mom/son/daughter)に対応する`USERS`マスターデータ定義
+* [quest_service.md](./quest_service.md) - リセット対象と同じ`quest_users`テーブル(`role`, `level`, `exp`, `gold`)を操作するサービス層
+* [database.md](./database.md), [init_unified_db.md](./init_unified_db.md) - `quest_users`テーブルを含むDBスキーマの初期化・接続処理
+* [start_all.md](./start_all.md) - システム全体の起動スクリプト(実行時のカレントディレクトリ・環境変数設定の参考)
+
 ## 2. ファイルの概要
 
 * コマンドラインから対話的に実行する、Family QuestのSQLite DB（`home_system.db`）上のユーザーゲームデータ（レベル・経験値・ゴールド・メダル数）をリセットするスクリプト。
@@ -285,6 +292,13 @@ graph TD
 | `quest_users` テーブルの完全なスキーマ | `medal_count` を含む全カラム定義、制約、他テーブルとの関連が本ファイルからは不明。 | `current_schema.sql`, `init_unified_db.py` |
 | `DB_PATH = "home_system.db"` の実行時の解決パス | 相対パスとして定義されており、スクリプトの実行カレントディレクトリに依存する。実運用でどこから実行されるかは不明。 | 実行方法に関するドキュメントや起動スクリプト（`start_all.sh` 等） |
 | リセット後の他システムへの影響 | `quest_data.py` や `unified_server.py` 等、他のコンポーネントが本リセット操作の影響をどう受けるかは不明。 | `unified_server.py`, `services/quest_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `quest_users` テーブルの完全なスキーマ | `quest_service.md`の解析によれば、`quest_users`テーブルは少なくとも`user_id`, `role`(`role_adult`/`role_child`), `level`, `exp`, `gold`カラムを持つことが判明しているが、`medal_count`を含む完全なカラム定義・制約は`quest_service.md`自体でも不明とされている。`init_unified_db.md`の解析でも本テーブルの`CREATE TABLE`定義への直接の言及は確認できなかった。 | quest_service.md, init_unified_db.md |
+| リセット後の他システムへの影響 | `quest_service.md`の解析によれば、`quest_users.level`/`exp`/`gold`は`process_complete_quest`等の完了処理や`GameLogic`の計算結果で更新される値であるため、本スクリプトによるリセット後は次回のクエスト完了処理時にリセット後の値を基準として計算が行われることになると考えられる。 | quest_service.md |
 
 ## 10. 自己検証結果
 

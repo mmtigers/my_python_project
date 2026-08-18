@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../hooks/useSound.md](../../hooks/useSound.md) - `play`関数の実装元
+* [../../lib/utils.md](../../lib/utils.md) - `cn`関数の実装元
+* [./Modal.md](./Modal.md) - 本コンポーネントを利用する側の一例（ヘッダー部の閉じるボタン）
+* [./MessageModal.md](./MessageModal.md) - 本コンポーネントを利用する側の一例（OKボタン）
+
 ## 2. ファイルの概要
 
 Framer Motionを利用したアニメーション付きのボタンコンポーネントを提供する。バリエーション（色・見た目）、サイズ、ローディング状態をプロパティで制御し、クリック時に外部フックを用いた音声再生処理と元のクリックイベントハンドラを実行する責務を持つ。
@@ -131,6 +138,13 @@ graph TD
 | `useSound` および `play` の実装仕様 | 外部ファイルに実装が存在するため | `@/hooks/useSound.ts` (または `.tsx` / `.js`) |
 | `lucide-react` の `Loader2` アイコン仕様 | 外部ライブラリであるため | `lucide-react` パッケージの実装 |
 | `framer-motion` の動作仕様 | 外部ライブラリであるため | `framer-motion` パッケージの実装 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `cn` の処理仕様 | `utils.md`の解析によれば、`cn`は`twMerge(clsx(inputs))`という実装であり、`clsx`で処理した結果を`tailwind-merge`のクラス競合解決に渡す関数であるとされている。ただしこれは`utils.md`側の解析結果からの補足であり、`utils.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../lib/utils.md` |
+| `useSound` および `play` の実装仕様 | `useSound.md`の解析によれば、`play`はキー（例: `tap`, `submit`等）に対応する音声ファイルパスを`SOUNDS`定数から取得し、`audioCache`（モジュールスコープの`HTMLAudioElement`キャッシュ）を再利用しながら再生し、`tap`の場合のみ音量を`0.5`に設定するとされている。`audio.play()`失敗時は`console.warn`で警告を出すのみで例外は投げないとされている。ただしこれは`useSound.md`側の解析結果からの補足であり、`useSound.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../hooks/useSound.md` |
 
 ## 10. 自己検証結果
 

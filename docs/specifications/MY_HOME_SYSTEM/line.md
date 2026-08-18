@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [line_handler.md](./line_handler.md) - 型のインポート元だがLinePostbackDataは未使用。Webhookの実処理を行うイベントハンドラー
+* [line_logic.md](./line_logic.md) - LinePostbackDataの実利用元(Postbackデータのパースに使用)
+* [webhook_router.md](./webhook_router.md) - 実際のWebhook HTTPエントリポイント(callback_line())
+
 ## 2. ファイルの概要
 
 * LINEシステムとの連携において、データ構造を定義し型安全性を担保するためのPydanticモデル群を提供するファイル。
@@ -212,6 +218,14 @@ graph TD
 | 各モデルのインスタンス化・利用箇所 | 本ファイルは定義のみであり、実際のデータの受け渡しや検証がどこで行われているか不明なため。 | `unified_server.py`, `handlers/line_logic.py` 等の呼び出し元ファイル |
 | `LineEvent.postback` のデータ構造 | 型が `Any` として定義されているため、Webhookから具体的にどのような形式のデータが渡ってくるかが不明なため。 | `unified_server.py` または LINE Webhook APIの仕様書 |
 | Postbackデータのパース処理 | `LinePostbackData` のコメントにある文字列をパースするロジックの実装が不明なため。 | `handlers/line_logic.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 各モデルのインスタンス化・利用箇所 | `line_handler.md`の解析によれば、実際のWebhook HTTPエンドポイントは本ファイルのコメントにある`unified_server.py`ではなく、`routers/webhook_router.py`の`callback_line()`であると推測される。`webhook_router.md`の解析でも同エンドポイントが`line_handler.line_handler.handle`を呼び出す構成であることが確認できる。ただし`unified_server.py`/`webhook_router.py`自体のソースコードにおける`models.line`の直接的なインスタンス化箇所までは確認できていない。 | `line_handler.md`, `webhook_router.md` |
+| Postbackデータのパース処理 | `line_logic.md`の解析によれば、`handlers/line_logic.py`の`handle_postback`関数内で`parse_qsl(event.postback.data)`によりクエリ文字列を辞書化した後、`LinePostbackData(**raw_dict)`でモデルに変換しており、変換に失敗した場合は`action`のみでフォールバックする設計と推測される。 | `line_logic.md` |
+| `LinePostbackData` の用途 | `line_logic.md`の解析によれば、`LinePostbackData`は`handlers/line_logic.py`側で実際にPostbackデータのバリデーションに使用されている（`line_handler.py`側では未使用インポートである）ことが判明した。 | `line_logic.md` |
 
 ## 10. 自己検証結果
 

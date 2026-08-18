@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../../App.md](../../../App.md) - 呼び出し元。`hideUserSwitcher`/`onUserSwitch`/`onLogSwitch`等のPropsを供給する
+* [../../types/index.md](../../types/index.md) - `User`型の定義元
+* [../../hooks/useLayoutMode.md](../../hooks/useLayoutMode.md) - `hideUserSwitcher`が真になる条件（`layoutMode === 'landscape'`）の判定元
+
 ## 2. ファイルの概要
 
 * ユーザー切り替えおよび記録（家族の年代記）表示への切り替えナビゲーション機能を持つヘッダーUIを提供する。
@@ -141,6 +147,13 @@ graph TD
 | `User` 型の正確な定義 | `user_id`, `name`, `avatar`, `icon` が使われていることはコードから読み取れるが、その他のプロパティの有無が不明なため。 | `@/types` |
 | コールバック実行後の実際の挙動 | 本コンポーネントは表示のみを担当しており、ルーティングの変更やデータフェッチ等の具体的なアクションが不明なため。 | このコンポーネントを呼び出している親ファイル |
 | `hideUserSwitcher`が渡される条件の詳細 | 本ファイル単体では「横画面(4人常時表示レイアウト)」という利用意図がコメントで示されているのみで、具体的な判定条件（ビューポート幅等）は不明なため。 | 呼び出し元 (`App.tsx`)、`./hooks/useLayoutMode.ts` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `hideUserSwitcher`が渡される条件の詳細 | `App.md`の解析によれば、`App`コンポーネントは`<Header hideUserSwitcher={layoutMode === 'landscape'} ... />`という形で呼び出しており、`layoutMode`は`useLayoutMode`フックの戻り値であるとされている。さらに`useLayoutMode.md`の解析によれば、`landscape`判定は`window.matchMedia('(min-width: 900px) and (orientation: landscape)')`によって行われるとされている。ただしこれらは`App.md`・`useLayoutMode.md`側の解析結果からの補足であり、`App.tsx`/`useLayoutMode.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../../App.md`, `../../hooks/useLayoutMode.md` |
+| `User` 型の正確な定義 | `types/index.md`の解析によれば、`User`は`family-quest/src/types/index.ts`内に`interface User`として定義されており、`hp`/`maxHp`はバックエンド（MY_HOME_SYSTEM）側で計算された値をそのまま使う旨がコメントされているとされている。ただし同ドキュメントの解析結果本文には全プロパティ名の一覧までは記載されておらず、`user_id`/`name`/`avatar`/`icon`以外の詳細な構成は依然として不明である。 | `../../types/index.md` |
 
 ## 10. 自己検証結果
 

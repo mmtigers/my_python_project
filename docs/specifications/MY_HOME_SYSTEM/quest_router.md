@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest.md](./quest.md) - 本ファイルが使用するRequest/Responseモデル(`SyncResponse`, `CompleteResponse`, `QuestAction`等)の定義
+* [quest_service.md](./quest_service.md) - `game_system`, `quest_service`, `shop_service`, `user_service`, `inventory_service`の実装本体
+* [config.md](./config.md) - `UPLOAD_DIR`, `SOUND_MAP`等の設定値を提供
+* [sound_manager.md](./sound_manager.md) - `sound_manager.play()`の実体(`sound_manager.md`側にも本ファイルが呼び出し元として記載済み)
+* [unified_server.md](./unified_server.md) - 本ルーターを`/api/quest`プレフィックスで`include_router`する呼び出し元
+
 ## 2. ファイルの概要
 
 * FastAPIを使用したクエスト管理システム（MY_HOME_SYSTEM）のルーティング定義（コントローラー）ファイル。
@@ -583,6 +591,15 @@ graph TD
 | 画像アップロード先のパス | 保存先ディレクトリが変数で指定されているため。 | `config.py` |
 | 許可されている音声キー一覧 | サウンドマップが別ファイルで定義されているため。 | `config.py` |
 | 音声再生処理の挙動 | 再生時のエラー有無や非同期・同期の挙動が不明なため。 | `sound_manager.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| APIリクエスト/レスポンスのスキーマ | `quest.md`の解析によれば、`QuestAction`(`user_id`, `quest_id`)、`SyncResponse`(`status`, `message`)等、本ファイルがインポートする全モデルのフィールド構成が判明した。 | quest.md |
+| ビジネスロジックの詳細 | `quest_service.md`の解析によれば、`quest_service.process_complete_quest`はプロセス内ロックで二重加算を防止し、子供ユーザーの完了報告は`pending`状態で保存(兄妹連携クエストの場合はカスケード処理)、大人ユーザーは即時報酬適用となる設計であることが判明した。 | quest_service.md |
+| 画像アップロード先のパス / 許可されている音声キー一覧 | `config.md`の解析によれば、`config.py`はディレクトリ検証・作成を行う`verify_and_initialize_storage`等の関数を持つモジュールであることが判明したが、`UPLOAD_DIR`や`SOUND_MAP`個々の実際の値は`config.md`自体でも確認できていない。 | config.md |
+| 音声再生処理の挙動 | `sound_manager.md`の解析によれば、`sound_manager.play`は`subprocess.Popen`による非同期再生を行い、`OSError`/`Exception`発生時もログ出力のみでシステムを停止させないFail-Soft設計であることが判明した。 | sound_manager.md |
 
 ## 10. 自己検証結果
 

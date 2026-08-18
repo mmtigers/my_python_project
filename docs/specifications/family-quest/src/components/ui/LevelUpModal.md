@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [./Modal.md](./Modal.md) - モーダルの外枠・共通レイアウトを提供する基盤コンポーネント
+* [./Button.md](./Button.md) - 「最高だぜ！」閉じるボタンの実装元
+* [../../hooks/useSound.md](../../hooks/useSound.md) - `play('levelUp')`の実装元
+* [../../hooks/useGameData.md](../../hooks/useGameData.md) - `LevelUpInfo`型のエクスポート元、`onLevelUp`コールバックの呼び出し元
+* [../../../App.md](../../../App.md) - 本コンポーネントの呼び出し元（`handleLevelUp`で`levelUpInfo`状態を更新し`info`として渡す）
+
 ## 2. ファイルの概要
 
 * ユーザーのレベルアップ情報を画面に表示し、同時に効果音を再生するためのUIモーダルコンポーネント。
@@ -192,6 +200,14 @@ graph TD
 | `play('levelUp')` の実際の音声ファイルと再生ロジック | 音声ファイルのロードエラー時の挙動や、連続呼び出し時の制御が実装上不明。 | `@/hooks/useSound.ts` |
 | `Modal` のアクセシビリティおよびオーバーレイ制御 | 背景クリックでの `onClose` 発火や、フォーカストラップの実装有無が不明。 | `@/components/ui/Modal.tsx` |
 | `Button` の `variant="primary"` / `size="lg"` のスタイル詳細 | 具体的な色味やホバー時のアクション制御が不明。 | `@/components/ui/Button.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `play('levelUp')` の実際の音声ファイルと再生ロジック | `useSound.md`の解析によれば、`play`は`SOUNDS`定数（キーと`/quest/*.mp3`形式のパスのマッピング）とモジュールスコープの`audioCache`（`HTMLAudioElement`のキャッシュ）を用いて再生し、`audio.play()`が失敗した場合は`console.warn`を出力するのみで例外は投げないとされている（音量調整は`tap`キーのみが対象で`levelUp`には適用されないとされている）。ただしこれは`useSound.md`側の解析結果からの補足であり、`useSound.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../hooks/useSound.md |
+| `Modal` のアクセシビリティおよびオーバーレイ制御 | `Modal.md`の解析によれば、`Modal`は背景（バックドロップ）のクリックで`onClose`を呼び出し、`useEffect`内で`window`への`keydown`イベントリスナーを登録してESCキー押下時にも`onClose`を呼び出す実装であるが、フォーカストラップ等の明示的なアクセシビリティ対応は`Modal.md`の解析結果からは確認されていないとされている。ただしこれは`Modal.md`側の解析結果からの補足であり、`Modal.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./Modal.md |
+| `Button` の `variant="primary"` / `size="lg"` のスタイル詳細 | `Button.md`の解析によれば、`Button`は`framer-motion`の`motion.button`をベースに`variant`・`size`・`isLoading`等をPropsとして受け取り、クリック時に`useSound`の`play('tap')`を実行する実装であるとされているが、`variant`/`size`ごとの具体的な配色・寸法（例:`primary`や`lg`が対応する実際のクラス名や色値）までは`Button.md`の解析結果からも特定できていない。ただしこれは`Button.md`側の解析結果からの補足であり、`Button.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./Button.md |
 
 ## 10. 自己検証結果
 

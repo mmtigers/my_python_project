@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest_service.md](./quest_service.md) - 呼び出し元。`game_logic.GameLogic.calc_level_progress`, `calc_level_down`, `calculate_drop_rewards`等をクエスト完了処理(`_apply_quest_rewards`)や取消処理(`_revert_and_delete_history`)から呼び出す
+* [quest_data.md](./quest_data.md) - `USERS`初期データが`level`/`exp`/`gold`キーを持ち、本ファイルの計算ロジックの対象となるデータ構造を定義
+* [../family-quest/src/hooks/useGameData.md](../family-quest/src/hooks/useGameData.md) - フロントエンド側。バックエンドの`calc_level_progress`が返す`leveledUp`フラグを受け取り`onLevelUp`コールバックを実行する
+* [../family-quest/src/utils/gameHelpers.md](../family-quest/src/utils/gameHelpers.md) - フロントエンド(JavaScript)側に`getNextLevelExp = Math.floor(100 * Math.pow(1.2, level - 1))`という、本ファイルの`calculate_next_level_exp`(`math.floor(100 * math.pow(1.2, level - 1))`)と同一の計算式が別言語で重複実装されている
+
 ## 2. ファイルの概要
 
 ゲームルールの計算ロジック（レベルアップの必要経験値、最大HPの算出、経験値増減に伴うレベルの変動、ドロップ報酬の決定）を担当するクラスを定義している。データベース接続は行わず、純粋な入出力のみを扱う。
@@ -214,6 +221,12 @@ graph TD
 | --- | --- | --- |
 | メソッドの呼び出し元と実行タイミング | 当該コードにはコアの計算ロジックしか含まれておらず、ゲームシステム全体のライフサイクルにおいてどの時点で各メソッドが実行されるかが判断できないため。 | このモジュールをインポートしている各実装ファイル |
 | メダルドロップ確率の変更仕様の詳細 | 「将来的には引数で確率を変えられるようにする」というコメントがあるが、どのような条件下で確率が変動するかの仕様が存在しないため。 | 要件定義書、または関連する機能の仕様書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| メソッドの呼び出し元と実行タイミング | `quest_service.md`の解析によれば、`QuestService._apply_quest_rewards`(クエスト報酬付与)や`QuestService._revert_and_delete_history`(取消時のロールバック)から`game_logic.GameLogic.calc_level_progress`/`calc_level_down`が呼び出されるとされる。またフロントエンド側(`useGameData.md`)では、これらの結果である`leveledUp`フラグを受けて`onLevelUp`コールバックを実行する設計になっているとされる。 | quest_service.md, useGameData.md |
 
 ## 10. 自己検証結果
 
