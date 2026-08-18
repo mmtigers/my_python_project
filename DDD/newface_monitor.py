@@ -464,6 +464,52 @@ class MonitorConfig:
             selector_link='a.name-link',
             selector_image='img.therapist-image',
         ),
+        SiteConfig(
+            site_id='rose_gentleman',
+            name='薔薇と紳士',
+            target_url='https://www.rose-gentleman.com/therapist.php',
+            selector_container='ul#list li',
+            selector_name='div.name',
+            selector_link='a[href*="profile.php?id="]',
+            selector_image='div.image img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='royal_thoroughb',
+            name='Royal Thoroughb（ロイヤルサラブ）',
+            target_url='https://royalthoroughb.com/newface/',
+            # LA BELLA / ミセスの子守唄 / DEAR Premiumと同一テンプレート(KNZ系)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='dear_premium',
+            name='DEAR Premium（ディアープレミアム）',
+            target_url='https://dear-premium.net/newface/',
+            # LA BELLA / ミセスの子守唄 / Royal Thoroughbと同一テンプレート(KNZ系)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='kakurega',
+            name='隠れ家',
+            target_url='https://kakurega-iyashi.com/girllist',
+            # Mrs.Merci SPA / Restpia / Mrs.AUBE SPA / Mrs.OnlyOneと同一テンプレート系列。
+            # このサイトはdiv.therapist_list_wrapperという追加のラッパーが挟まるが、
+            # selector_name等は子孫探索のため影響を受けない
+            selector_container='div.therapist_list > div',
+            selector_name='h3.therapist_name',
+            selector_link='a.therapist_meta',
+            selector_image='p.therapist_img img',
+        ),
     ]
 
     # File Paths
