@@ -373,6 +373,39 @@ class MonitorConfig:
             selector_link='a.therapist_meta',
             selector_image='p.therapist_img img',
         ),
+        SiteConfig(
+            site_id='mrs_luxe',
+            name='Mrs.Luxe（ミセスリュクス）',
+            target_url='https://luxe-mrs.com/lady.php',
+            selector_container='ul.ladyList li',
+            selector_name='h2.ladyName',
+            selector_link='a[href*="lady_num="]',
+            selector_image='span.thumb img',
+            id_query_param='lady_num',
+        ),
+        SiteConfig(
+            site_id='mrs_onlyone',
+            name='Mrs.OnlyOne（ミセスオンリーワン）',
+            target_url='https://mrs-onlyone.com/girllist',
+            # Mrs.Merci SPA / Restpia / Mrs.AUBE SPAと同一テンプレート系列
+            selector_container='div.therapist_list > div',
+            selector_name='h3.therapist_name',
+            selector_link='a.therapist_meta',
+            selector_image='p.therapist_img img',
+        ),
+        SiteConfig(
+            site_id='tropical_spa',
+            name='トロピカルSPA',
+            target_url='https://tropical-osaka.com/news.php',
+            # Bellicaと同一テンプレート系列。新人情報一覧が個別プロフィール
+            # ページへのリンクを持たないブログ形式のため、リンクは常に
+            # 見つからない（detail_urlは一覧ページURLへ、cast_idは名前ベース
+            # へフォールバックする）
+            selector_container='ul.newsList li',
+            selector_name='h2.title',
+            selector_link='a',
+            selector_image='span.thumb img',
+        ),
     ]
 
     # File Paths
