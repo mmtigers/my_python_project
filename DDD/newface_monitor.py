@@ -665,6 +665,62 @@ class MonitorConfig:
             selector_link='a.name-link',
             selector_image='img.therapist-image',
         ),
+        SiteConfig(
+            site_id='esthe_aromaone',
+            name='Aroma One（アロマワン）',
+            target_url='https://esthe-aromaone.com/cast/',
+            # WordPress製のキャストアーカイブ(新規パターン)
+            selector_container='ul.castlist > li',
+            selector_name='h3.name',
+            selector_link='a[href*="/cast/"]',
+            selector_image='div.photo img',
+        ),
+        SiteConfig(
+            site_id='mrs_holic',
+            name='Mrs.HOLIC（ミセスホリック）',
+            target_url='https://mrs-holic.com/newface.html',
+            # 新規パターン: 個別の<li>ではなく<div class="onebox">がカードの単位。
+            # カード全体を1つの<a>が包んでいるため直下のaをそのままリンクとして使う
+            selector_container='div.newgirlbox > div.onebox',
+            selector_name='div.name',
+            selector_link='a',
+            selector_image='div.img img',
+        ),
+        SiteConfig(
+            site_id='iyashinadeshiko',
+            name='癒しなでしこ',
+            target_url='https://iyashinadeshiko.com/newface/',
+            # とろりんタイム/aqua SPA等と同一テンプレート(gallist/article/h3系)
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='zenith_osaka',
+            name='ZENITH OSAKA（ゼニス大阪）',
+            target_url='https://zenithosaka.net/newface/',
+            # ALYO等と同一テンプレート(KNZ系listTypeJ)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='ore_no_ie',
+            name='俺の家（おれのいえ）',
+            target_url='https://ore-no-ie.com/staff.php',
+            # 新規パターン: カード全体を1つの<a>が包む構造(Mrs.HOLICと同系統)。
+            # サムネイル画像はNEW/体験入店バッジ用のimgと区別するためclassを明示指定
+            selector_container='ul.cast_box > li',
+            selector_name='p.name',
+            selector_link='a',
+            selector_image='img.profile_thum',
+            id_query_param='sid',
+        ),
     ]
 
     # File Paths
