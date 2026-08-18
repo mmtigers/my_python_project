@@ -781,6 +781,64 @@ class MonitorConfig:
             image_attr='data-original',
             id_query_param='uid',
         ),
+        SiteConfig(
+            site_id='mrs_lavons',
+            name='Mrs．LAVONS（ラボン）',
+            target_url='https://mrs-lavons.com/girl',
+            # kitty/Chaton/spaMAYBEと同一テンプレート系列(c-panel系)
+            selector_container='div.c-panel',
+            selector_name='p.c-panel__name',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            id_query_param='lid',
+        ),
+        SiteConfig(
+            site_id='jukumadam',
+            name='道頓堀の熟マダム',
+            target_url='https://jukumadam.net/model.html',
+            # 新規パターン(Shift-JISサイト。BeautifulSoupが生バイト列から
+            # 自動的にエンコーディングを検出するためコード側の対応は不要)
+            selector_container='div.model_list',
+            selector_name='div.model_name',
+            selector_link='a',
+            selector_image='img.listimg',
+        ),
+        SiteConfig(
+            site_id='pinkcompltion',
+            name='pinkcompltion（ピンクコンプリ―ション）',
+            target_url='https://pinkcompltion.net/model.html',
+            # jukumadamと同一テンプレート(model_list系、Shift-JIS)
+            selector_container='div.model_list',
+            selector_name='div.model_name',
+            selector_link='a',
+            selector_image='img.listimg',
+        ),
+        SiteConfig(
+            site_id='naniwajoshi',
+            name='なにわ女子',
+            target_url='https://naniwajoshi.com/cast/',
+            # gallist系だが、petitpetit_dream等と異なりカード全体を1つの<a>が
+            # 包む構造(h3に子孫の<a>は無い)。list_todayバッジ画像はdiv.phの
+            # 外側の兄弟要素として配置されているため、除外指定なしでも
+            # div.ph img の子孫探索で自動的に対象外となる
+            selector_container='ul.gallist > li',
+            selector_name='h3',
+            selector_link='a',
+            selector_image='div.ph img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='mrs_luxia',
+            name='Mrs.LUXIA',
+            target_url='https://nipponbashi-mrsluxia.com/newface/',
+            # petitpetit_dreamと同一テンプレート(umihey.sakura.ne.jp系、
+            # gallist/article/h3系)
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
     ]
 
     # File Paths
