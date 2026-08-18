@@ -907,6 +907,61 @@ class MonitorConfig:
             id_query_param='id',
             name_first_text_only=True,
         ),
+        SiteConfig(
+            site_id='milk_parfait',
+            name='みるくぱふぇ',
+            target_url='https://milk-parfait.com/girl',
+            # c-panel系テンプレート(kitty等と類似)。ただしp.c-panel__nameは
+            # "りこ(21)"のように年齢を含むため、代わりにp.js-eng_name span
+            # (年齢を含まない<span>要素)を名前として採用
+            selector_container='div.c-panel',
+            selector_name='p.js-eng_name span',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            id_query_param='lid',
+        ),
+        SiteConfig(
+            site_id='arrow_kyoto',
+            name='ARROW京都',
+            target_url='https://www.arrowkyoto.com/p/9/',
+            # 新規パターン。カード全体を1つの<a>が包む構造で、詳細ページは
+            # 外部サイト(estama.jp)。掲載枠によって画像が通常の<img src>と
+            # lazyload用<img data-lazy-src>のどちらかに分かれているため、
+            # image_attr='data-lazy-src'を指定(未指定時は自動的に'src'を
+            # 試すフォールバックが働く)
+            selector_container='li.grid_imgbd',
+            selector_name='p',
+            selector_link='a',
+            selector_image='img',
+            image_attr='data-lazy-src',
+        ),
+        SiteConfig(
+            site_id='purewhite',
+            name='Pure White（ピュアホワイト）',
+            target_url='https://purewhite-aroma.com/cast/',
+            # gallist系テンプレート(カード全体を1つの<a>が包む構造)。姉妹店
+            # 「ピンクパンサー」のキャストが同一一覧に混在し、そちらは
+            # pinkpanther-esthe.com側のprofile?id=を使うため、自サイトの
+            # IDと衝突しうる(id_query_param使用時のドメイン別プレフィックス
+            # 付与ロジックにより自動的に区別される)
+            selector_container='ul.gallist li.list__item',
+            selector_name='article h3',
+            selector_link='a',
+            selector_image='div.ph img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='kyo_spa',
+            name='京spa',
+            target_url='https://esthe-kyospa.com/cast/',
+            # WordPress製のキャストアーカイブ(esthe_aromaoneと同一テンプレート)。
+            # div.photo内にはSNSアイコン画像も存在するため、selector_imageは
+            # 詳細ページへのリンク配下のimgに絞り込む
+            selector_container='ul.castlist > li',
+            selector_name='h3.name',
+            selector_link='a[href*="/cast/"]',
+            selector_image='a[href*="/cast/"] img',
+        ),
     ]
 
     # File Paths
@@ -1218,6 +1273,13 @@ class WebMonitor:
                         query_values = parse_qs(urlparse(href).query).get(site.id_query_param)
                         if query_values:
                             cast_id = query_values[0]
+                            # 姉妹店等、自サイトとは別ドメインへのリンクが同じ一覧に
+                            # 混在するサイト向け: 別ドメインの場合はIDが自サイト内の
+                            # 採番と衝突しうるため、ドメイン名を付与して区別する
+                            link_domain = urlparse(href).netloc
+                            site_domain = urlparse(site.target_url).netloc
+                            if link_domain and link_domain != site_domain:
+                                cast_id = f"{link_domain}_{cast_id}"
 
                     if not cast_id:
                         # 'profile.html?12199' のようにキー=値形式ではなく、
@@ -1228,10 +1290,12 @@ class WebMonitor:
 
                     if not cast_id:
                         # パスからIDを生成 (例: /prof/123 -> 123)
-                        # クエリ文字列(?utm=...等)が付与されるとcast_idが実行ごとに
-                        # ブレて「新規キャスト」の誤検知を招くため、先に除去する
+                        # クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与
+                        # されるとcast_idが実行ごとにブレて「新規キャスト」の
+                        # 誤検知を招くため、先に除去する
                         href_no_query = href.split('?')[0]
-                        clean_path = href_no_query.rstrip('/')
+                        href_no_fragment = href_no_query.split('#')[0]
+                        clean_path = href_no_fragment.rstrip('/')
                         cast_id = os.path.basename(clean_path)
 
                 if not cast_id:
@@ -1255,6 +1319,11 @@ class WebMonitor:
                         image_src = style_match.group(1).strip('\'"') if style_match else ""
                     else:
                         image_src = img_elem.get(site.image_attr, '')
+                        if not image_src and site.image_attr != 'src':
+                            # 一部の掲載枠のみ通常の<img src>を使い、他の枠は
+                            # lazyload用属性を使う、といった混在サイト向けの
+                            # フォールバック(指定属性が無い場合のみ'src'を試す)
+                            image_src = img_elem.get('src', '')
                     if image_src:
                         image_url = urljoin(site.target_url, image_src)
 
