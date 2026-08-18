@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [config.md](./config.md) - `LINE_CHANNEL_ACCESS_TOKEN`, `DISCORD_WEBHOOK_*`等の設定値を提供
+* [logger.md](./logger.md) - `setup_logging`の実体
+* [common.md](./common.md) - `send_push`, `send_reply`等を再エクスポートするFacade
+* 呼び出し元多数: [memory_monitor.md](./memory_monitor.md), [nas_monitor.md](./nas_monitor.md), [nas_utils.md](./nas_utils.md), [sensor_service.md](./sensor_service.md), [post_boot_health_check.md](./post_boot_health_check.md), [quest_service.md](./quest_service.md)(`InventoryService.use_item`経由)
+
 ## 2. ファイルの概要
 
 DiscordおよびLINEプラットフォームへのメッセージ（テキスト・画像）通知を行うためのサービスモジュール。WebhookやPush API/Reply APIを利用し、指定されたプラットフォームへメッセージを送信する責務を持つ。LINE送信失敗時にDiscordへフォールバックする統合通知機能も備えている。
@@ -297,6 +304,13 @@ graph TD
 | --- | --- | --- |
 | 環境変数・定数群の定義 | `LINE_CHANNEL_ACCESS_TOKEN`, `DISCORD_WEBHOOK_ERROR`, `DISCORD_WEBHOOK_REPORT`, `DISCORD_WEBHOOK_NOTIFY`, `DISCORD_WEBHOOK_URL` の実際の値や取得元が不明。 | `config.py` または `.env` ファイル等 |
 | ロガーの実装詳細 | `setup_logging` 関数がどのような設定（コンソール出力、ファイル出力など）を行っているか不明。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| ロガーの実装詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`、メッセージに"Discord"を含む場合は除外)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
+| 環境変数・定数群の定義 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明したが、`LINE_CHANNEL_ACCESS_TOKEN`や`DISCORD_WEBHOOK_*`個々の値自体は`config.py`本体からは確認できていない。 | `config.md` |
 
 ## 10. 自己検証結果
 

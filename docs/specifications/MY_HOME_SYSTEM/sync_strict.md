@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `setup_logging`・`get_db_cursor`を再エクスポートするFacadeモジュール
+- [database.md](./database.md) — `common.get_db_cursor`の実体(`core.database.get_db_cursor`)
+- [quest_data.md](./quest_data.md) — 同期元マスターデータ`QUESTS`/`REWARDS`/`USERS`の定義元
+- [init_unified_db.md](./init_unified_db.md) — `quest_master`/`reward_master`テーブルのスキーマ定義元
+
 ## 2. ファイルの概要
 
 * マスターデータ (`QUESTS`, `REWARDS`) とデータベースのマスターテーブル (`quest_master`, `reward_master`) を完全に同期（厳密な同期）する責務を持つ。
@@ -213,6 +220,15 @@ graph TD
 | `QUESTS`, `REWARDS` の全プロパティ構造 | コード上には `.get()` で参照されているキーしか表れていないため、実際のマスターデータの全容が不明。 | `quest_data.py` |
 | DBの正確なテーブルスキーマ | カラムの型や `NOT NULL` 制約、デフォルト値が現在のファイルからは判断できないため。 | `init_unified_db.py` または DBスキーマ定義ファイル |
 | トランザクションの挙動 | `get_db_cursor(commit=True)` が例外発生時に自動でロールバックを行うかどうかが不明なため。 | `common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 対象データベースの種類 | `database.md`の解析によれば、`common.get_db_cursor`の実体である`core.database.get_db_cursor`は`sqlite3`を用いた接続コンテキストマネージャであり、`PRAGMA journal_mode=WAL`および`PRAGMA foreign_keys=ON`を発行することが判明した。これによりSQLiteであることが裏付けられる。 | database.md |
+| `QUESTS`, `REWARDS` の全プロパティ構造 | `quest_data.md`の解析によれば、`QUESTS`は`id`/`title`/`type`/`target`/`category`/`difficulty`/`exp`/`gold`/`icon`/`desc`を基本キーとし任意で`days`/`start_time`/`end_time`/`chance`を持つ辞書のリスト(有効53件)、`REWARDS`は`id`/`title`/`category`/`cost_gold`/`icon_key`/`desc`を基本キーとし任意で`target`を持つ辞書のリスト(23件)であることが判明した。 | quest_data.md |
+| DBの正確なテーブルスキーマ | `init_unified_db.md`の解析によれば、`init_unified_db.py`が`CREATE TABLE IF NOT EXISTS`文でテーブルを作成し、マイグレーション適用と`PRAGMA table_info`によるスキーマ整合性検証を行う設計であることが判明した。ただし個々のカラム定義の詳細自体は`init_unified_db.md`側でも「テーブル名は`config.py`依存」として一部未確認とされている。 | init_unified_db.md |
+| トランザクションの挙動 | `database.md`の解析によれば、`get_db_cursor(commit=True)`は`OperationalError`(locked)発生時は最大5回リトライし、それ以外の例外時は`conn.rollback()`を実行してから例外を再送出する設計であることが判明した。 | database.md |
 
 ## 10. 自己検証結果
 

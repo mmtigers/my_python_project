@@ -7,6 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [scheduler_boot.md](./scheduler_boot.md) - 同じくPythonスクリプトの定期実行を担う仕組みだが、`crontab`ではなく`ThreadPoolExecutor`を用いた独自の常駐スケジューラである点で対照的(`cron_reporter.py`が監視対象とする`crontab -l`の設定とは別経路)
+* [run_task.md](./run_task.md) - `crontab`から呼び出される際のラッパースクリプトである可能性がある(`cron_reporter.py`が解析するコマンド文字列にラッパー経由の呼び出しが含まれる可能性)
+
 ## 2. ファイルの概要
 
 * 現在のCrontab設定を解析し、分かりやすい日本語レポートとしてLINEおよびDiscordに送信する。
@@ -386,6 +391,12 @@ graph TD
 | 環境変数の具体的な値 | `.env`から読み込んでいるが、本コード内には値が定義されていないため | `.env` |
 | Crontabに設定されている実行コマンドの全容 | コマンド実行結果を動的に取得するため、実行時まで内容が確定しないため | 実行環境のcrontab設定 |
 | 抽出される個別のPythonスクリプトの実装内容 | 正規表現でファイル名を抽出しているが、そのスクリプトファイル群のコードが提供されていないため | Crontabに登録された各 `.py` ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| Crontabに設定されている実行コマンドの全容 | `scheduler_boot.md`の解析によれば、本システムには`crontab`とは別に`scheduler_boot.py`という`ThreadPoolExecutor`ベースの独自スケジューラが存在し、`switchbot_power_monitor.py`等のスクリプトを定期実行しているとされる。ただしこれは`cron_reporter.py`が読み取る`crontab -l`の設定そのものではなく、別の実行経路であるため、実際のcrontab登録内容自体は依然として不明である。 | scheduler_boot.md |
 
 ## 10. 自己検証結果
 

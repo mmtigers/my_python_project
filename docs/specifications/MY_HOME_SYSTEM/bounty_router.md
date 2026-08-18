@@ -1,5 +1,10 @@
 # bounty_router.py (廃止)
 
+## 関連ドキュメント
+
+- [quest_router.md](./quest_router.md) — 同じ2026-08のFamily Quest大改修で、ボス戦闘・装備・ファミリーマイレージ・週間ランキング等のエンドポイントも合わせて削除されたルーター。
+- [GuildBoard.md](../family-quest/src/features/guild/components/GuildBoard.md) — 同じくギルド機能廃止に伴い削除された、フロントエンド側の対応コンポーネント（廃止notice）。
+
 ## 廃止notice
 
 このファイルが対応していたソース `MY_HOME_SYSTEM/routers/bounty_router.py` は、ギルド討伐依頼機能の廃止に伴い削除されました(2026-08 Family Quest大改修)。

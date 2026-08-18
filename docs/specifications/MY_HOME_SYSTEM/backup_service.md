@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `SQLITE_DB_PATH`、`BASE_DIR`、`NAS_PROJECT_ROOT`、`NAS_MOUNT_POINT`、`LINE_USER_ID`等の設定を提供する。
+- [common.md](./common.md) — `send_push`をFacade経由でインポートしている実体（`services.notification_service`の再エクスポート）。
+- [notification_service.md](./notification_service.md) — `common.send_push`の実装元。
+- [logger.md](./logger.md) — `setup_logging`の実装元。
+
 ## 2. ファイルの概要
 
 * データベースのバックアップを実行し、NASへ転送する。
@@ -188,6 +195,13 @@ graph TD
 | プッシュ通知の仕様 | `send_push` が同期処理か非同期処理か、通知失敗時に例外が発生するか不明なため。 | `common.py` |
 | ロガーの仕様 | ログレベルの設定値、出力先、ローテーションの有無が不明なため。 | `core/logger.py` |
 | データベースの仕様 | バックアップ対象のDB（home_system）のテーブル構造やデータ量が不明なため。 | `config.SQLITE_DB_PATH` の参照先ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| プッシュ通知の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数（"discord"/"line"/"both"）に応じて送信先を振り分け、LINE送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う関数で、戻り値は`bool`（成功可否）と推測される。内部で発生した例外は関数内で捕捉され、呼び出し元へは送出されない（＝同期処理で、失敗時も例外は発生しないと推測される）実装と考えられる。ただし`common.py`側での再エクスポート実装自体は未確認。 | notification_service.md |
+| ロガーの仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ログファイル名は`home_system.log`固定と推測される。ただし`config.BASE_DIR`の実際の値は未確認。 | logger.md |
 
 ## 10. 自己検証結果
 

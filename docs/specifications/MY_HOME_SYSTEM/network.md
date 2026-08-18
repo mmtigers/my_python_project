@@ -7,6 +7,10 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [common.md](./common.md) - `get_retry_session`, `create_resilient_session`, `retry_api_call`を再エクスポートするFacade(呼び出し元候補)
+
 ## 2. ファイルの概要
 
 API通信時の障害に対する耐性を持たせるため、HTTPエラーに対するリトライ設定を組み込んだHTTPセッション（`requests.Session`）の構築機能、および特定のAPI呼び出し関数に対して例外発生時のリトライ処理を付与するデコレータを提供する。
@@ -178,6 +182,12 @@ flowchart TD
 | --- | --- | --- |
 | `core.network`ロガーの設定詳細 | モジュール内でロガーの設定（出力レベルの閾値、ハンドラ、フォーマット）が定義されておらず、外部に依存しているため。 | ログ設定ファイルまたは`core/network.py`周辺の初期化スクリプト |
 | 対象システムの全体的なAPI依存先 | 本ファイルは汎用的なネットワーク機能を提供しているだけであり、実際にどの外部APIと通信しているかが不明なため。 | `requests.Session`や`retry_api_call`を使用しているファイル群 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 対象システムの全体的なAPI依存先 | `common.md`の解析によれば、`common.py`は`core.network`から`get_retry_session`, `create_resilient_session`, `retry_api_call`を再エクスポートしているが、`common.py`自体はそれらをFacadeとして提供するのみで直接使用していない。今回相互参照した範囲（`switchbot_service.md`, `nature_remo_monitor.md`, `news_service.md`等）では、いずれも`requests`/`tenacity`を個別に実装しており、`network.py`の関数を直接呼び出している箇所は確認できなかった。そのため実際の呼び出し元は未解析のファイル群に存在する可能性が残る。 | `common.md` |
 
 ## 10. 自己検証結果
 

@@ -7,6 +7,16 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [common.md](./common.md) - `common.setup_logging`/`common.send_push`を提供するFacadeモジュール(実体は`core.logger`/`services.notification_service`)
+* [logger.md](./logger.md) - `setup_logging`の実体。コンソール出力・日次ローテーションファイル出力・ERRORレベルのDiscord通知(`DiscordErrorHandler`)を提供
+* [notification_service.md](./notification_service.md) - `common.send_push`の実体。Discord/LINEへの統合通知処理
+* [config.md](./config.md) - `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`等の設定値を提供する`config.py`の解析結果
+* [database.md](./database.md), [init_unified_db.md](./init_unified_db.md) - チェック対象DBの接続・初期化・スキーマ検証を行うモジュール
+* [unified_server.md](./unified_server.md) - `check_services`がチェックする「Backend Server」に相当すると推測されるFastAPIサーバー
+* [switchbot_service.md](./switchbot_service.md) - `check_network_and_apis`が疎通確認するSwitchBot APIのクライアント実装
+
 ## 2. ファイルの概要
 
 * システム起動直後にハードウェア・ネットワーク・データベース・周辺機器・各種サービス・直近ログの健全性を一括チェックするスクリプト。
@@ -559,6 +569,14 @@ graph TD
 | `config` の各設定値の実体 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID` の実際の値が不明。 | `config.py` |
 | 実行環境の前提 | `vcgencmd`, `bluetoothctl`, `aplay` 等のコマンドが利用可能なOS・ハードウェア（Raspberry Pi等）を前提としているかは本ファイルのみからは断定できない。 | 実行環境のセットアップ資料 or `start_all.sh` 等の起動スクリプト |
 | DBスキーマ | `PRAGMA quick_check` の対象となるSQLite DBの構造・想定サイズが不明。 | `config.SQLITE_DB_PATH` が指すDBファイル、または `current_schema.sql` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.setup_logging` / `common.send_push` の実装 | `common.md`の解析によれば、`common.py`は下位互換のためのFacadeモジュールであり、`setup_logging`は`core.logger`から、`send_push`は`services.notification_service`から再エクスポートされているとされる。さらに`logger.md`の解析によれば`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計、`notification_service.md`の解析によれば`send_push`はDiscord Webhookおよび LINE Messaging APIへの送信を行い、LINE失敗時はDiscordへフォールバック通知する設計であるとされる。 | common.md, logger.md, notification_service.md |
+| `config` の各設定値の実体 | `config.md`の解析によれば、`config.py`は`.env`からの環境変数読み込みやNAS等ディレクトリの検証・作成を行うモジュールであることが判明したが、`LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID` 個々の実際の値自体は`config.md`本体からも確認できていない。 | config.md |
+| DBスキーマ | `init_unified_db.md`の解析によれば、`config.SQLITE_DB_PATH`が指すSQLite DBに対して`CREATE TABLE IF NOT EXISTS`によるテーブル初期化と`PRAGMA table_info`によるスキーマ整合性の自動検証が別スクリプト(`init_unified_db.py`)で行われているとされるが、対象DBの完全なスキーマ定義自体は一部主要テーブルの検証に留まり全容は`init_unified_db.md`でも確認できていない。 | init_unified_db.md, database.md |
 
 ## 10. 自己検証結果
 

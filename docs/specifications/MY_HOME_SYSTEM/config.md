@@ -7,6 +7,18 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [logger.md](./logger.md) - `config.BASE_DIR`, `config.DISCORD_WEBHOOK_ERROR`を参照する呼び出し元
+* [database.md](./database.md) / [init_unified_db.md](./init_unified_db.md) - `config.SQLITE_DB_PATH`, `SQLITE_TABLE_*`定数群を参照する呼び出し元
+* [notification_service.md](./notification_service.md) - `config.LINE_CHANNEL_ACCESS_TOKEN`, `config.DISCORD_WEBHOOK_*`を参照する呼び出し元
+* [webhook_router.md](./webhook_router.md) - `config.SWITCHBOT_WEBHOOK_TOKEN`(SwitchBot Webhook共有シークレット検証)を参照する呼び出し元
+* [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)を参照する呼び出し元
+* [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
+* [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
+* [google_photos_service.md](./google_photos_service.md) - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
+* [financial_service.md](./financial_service.md) - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
+
 ## 2. ファイルの概要
 
 * システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。
@@ -302,6 +314,14 @@ flowchart TD
 | 各テーブルの詳細なスキーマ定義 | テーブル名の文字列が定義されているのみで、カラム構成やリレーションが不明であるため。 | データベース操作を行うモジュール |
 | `family_members.local.json` の具体的な内容・スキーマ | Git管理対象外であり、実際にどの家族の年齢・表示情報がどう格納されているか本ファイルからは判別できないため。 | `family_members.local.json`（gitignore対象。`family_members.local.json.example`が参考になる可能性） |
 | `TV_UNLOCK_QUEST_IDS` が参照するクエストの実体 | クエストIDのリストのみが定義されており、対応するクエスト定義やTVロック解除の実処理は別ファイルにあるため。 | クエスト機能・TVロック機能を実装するモジュール |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 各種APIの利用箇所とエンドポイント | `notification_service.md`の解析によれば`config.LINE_CHANNEL_ACCESS_TOKEN`/`DISCORD_WEBHOOK_*`はLINE Messaging API v3およびDiscord Webhookへの送信に使用され、`google_photos_service.md`の解析によれば`config.GOOGLE_PHOTOS_TOKEN`等はGoogle Photos API/Gemini APIの認証に使用されることが判明した。ただしいずれも`config.py`本体からは値そのものは確認できていない。 | notification_service.md, google_photos_service.md |
+| 各テーブルの詳細なスキーマ定義 | `init_unified_db.md`の解析によれば、テーブル名定数に対応する`CREATE TABLE IF NOT EXISTS`文および主要テーブルの必須カラムを検証する`validate_schema_integrity`関数が存在するとされるが、`init_unified_db.md`自体でも各テーブル名の実際の文字列値(`config.SQLITE_TABLE_*`)は未確認とされている。 | init_unified_db.md |
+| `TV_UNLOCK_QUEST_IDS` が参照するクエストの実体 | `quest_service.md`の解析によれば、`QuestService._trigger_tv_unlock`が`config.TV_UNLOCK_QUEST_IDS`を参照し、別スレッドで`switchbot_service`経由のTVロック解除APIリクエストを送信するとされる。ただし対応する具体的なクエストID・クエスト定義の内容自体は`quest_service.md`でも確認できていない。 | quest_service.md |
 
 ## 10. 自己検証結果
 
