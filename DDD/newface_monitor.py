@@ -620,6 +620,51 @@ class MonitorConfig:
             selector_image='div.c-panel__image img',
             id_query_param='lid',
         ),
+        SiteConfig(
+            site_id='alyo',
+            name='ALYO（アルヨ）',
+            target_url='https://alyo.net/newface/',
+            # la_bella等と同一テンプレート(KNZ系listTypeJ)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='club_leggenda',
+            name='CLUB LEGGENDA（クラブレジェンダ）',
+            target_url='https://club-leggenda.com/list/',
+            # ALYO/la_bella等と同一テンプレート(KNZ系listTypeJ)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='grandluxe_osaka',
+            name='Grand Luxe（グランリュクス）',
+            target_url='https://www.grandluxe-osaka.com/therapist.php',
+            selector_container='ul#list > li',
+            selector_name='div.name',
+            selector_link='a[href*="profile.php"]',
+            selector_image='div.image img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='yoluspa_osaka',
+            name='YOLU SPA 大阪店',
+            target_url='https://yoluspa-osaka.net/%e3%82%b9%e3%82%b1%e3%82%b8%e3%83%a5%e3%83%bc%e3%83%ab/',
+            # 既存のyolu_spa(mrs-yoluspa.net)とはドメインが異なる別店舗だが、
+            # 同一テンプレート(クラス名体系)のためセレクタは流用
+            selector_container='div.therapist-item',
+            selector_name='a.name-link',
+            selector_link='a.name-link',
+            selector_image='img.therapist-image',
+        ),
     ]
 
     # File Paths
