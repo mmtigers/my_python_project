@@ -406,6 +406,64 @@ class MonitorConfig:
             selector_link='a',
             selector_image='span.thumb img',
         ),
+        SiteConfig(
+            site_id='tenjoubito_premium',
+            name='天上人PREMIUM',
+            target_url='https://www.tenjoubitopr.com/staff/',
+            # 各キャストの<li>等のラッパーが無く、カード自体が<a>要素のため、
+            # 子孫に<a>は存在しない（selector_linkは常にマッチしない）。
+            # コンテナ自体をリンクとして使うフォールバック(_parse_html側で対応)を利用する
+            selector_container='div#staff a.cbox',
+            selector_name='p.name',
+            selector_link='a',
+            selector_image='div.img img',
+            # 画像がlazyload実装のため、実URLはsrcではなくdata-original属性に入っている
+            image_attr='data-original',
+        ),
+        SiteConfig(
+            site_id='restspa_premium',
+            name='REST SPA PREMIUM（レストスパプレミアム）',
+            target_url='https://restspa-premium.com/newface/',
+            # petitpetit-dreamと同一テンプレート系列だが、article内にタグ一覧の
+            # <ul><li>が入れ子であるため、子孫セレクタだとそのliまで拾って
+            # しまう。直接の子要素(>)のみをコンテナとする
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            # 詳細URLが '/profile?id=220' 形式のため 'id'パラメータをIDとして使う
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='firstclass_osaka',
+            name='ファーストクラス',
+            target_url='https://firstclass-osaka.net/rookie',
+            selector_container='div.cast_post',
+            selector_name='footer h3',
+            selector_link='a.cast_image',
+            selector_image='a.cast_image img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='chaton',
+            name='Chaton〜シャトン〜',
+            target_url='https://spa-chaton.com/girl',
+            # kittyと同一テンプレート系列
+            selector_container='div.c-panel',
+            selector_name='p.c-panel__name',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            id_query_param='lid',
+        ),
+        SiteConfig(
+            site_id='yolu_spa',
+            name='YOLU SPA Mrs.',
+            target_url='https://mrs-yoluspa.net/%e3%82%bb%e3%83%a9%e3%83%94%e3%82%b9%e3%83%88%e4%b8%80%e8%a6%a7/',
+            selector_container='div.therapist-item',
+            selector_name='a.name-link',
+            selector_link='a.name-link',
+            selector_image='img.therapist-image',
+        ),
     ]
 
     # File Paths
@@ -693,6 +751,11 @@ class WebMonitor:
 
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
+                if not link_elem and div.name == 'a' and div.get('href'):
+                    # コンテナ自体が<a>で、詳細ページへのリンクを子孫ではなく
+                    # 自分自身が持っているサイト向けのフォールバック
+                    # （個別の<li>等でラップされずカードそのものが<a>になっている構造）
+                    link_elem = div
                 detail_url = ""
                 cast_id = ""
 
