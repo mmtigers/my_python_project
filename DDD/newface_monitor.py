@@ -122,6 +122,9 @@ class SiteConfig:
             キャストを識別する形式（例: 'profile.php?id=931'）のサイト向け。
             指定した場合、そのクエリパラメータの値をキャストIDとして使用する
             （未指定時はURLパスの末尾セグメントからIDを生成する従来ロジックを使う）。
+            なお、'profile.html?12199' のようにキー=値ではなくクエリ文字列自体が
+            IDを表すサイトについては、id_query_param未設定でも自動的に
+            クエリ文字列全体（'='を含まない場合）をIDとして採用する。
         image_attr (str): サムネイル画像URLを取得する際に、selector_imageで
             マッチした要素から読み取る属性名。lazyload実装のサイトでは実URLが
             'src'ではなく'data-original'等に入っていることがあるため指定する
@@ -571,6 +574,52 @@ class MonitorConfig:
             selector_image='a.expand-link img',
             id_query_param='author',
         ),
+        SiteConfig(
+            site_id='aquaspa_osaka',
+            name='aqua SPA(アクアスパ)',
+            target_url='https://aquaspa-osaka.com/newface/',
+            # とろりんタイム/ぷちぷちどりーむと同一テンプレート(gallist/article/h3系)
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='genie',
+            name='genie(ジーニー)',
+            target_url='https://genie-osaka.com/staff.html',
+            # 詳細URLが 'profile.html?12199' のようにキー=値ではなくクエリ文字列
+            # 自体でIDを表す新規パターン。id_query_paramは指定不要（_parse_html側の
+            # 汎用フォールバックでクエリ文字列全体を自動的にIDとして採用する）。
+            # サムネイルはfigure直下の<img>のみを対象とし、内側にネストされた
+            # NEWバッジ用<img>は子要素セレクタ(>)で除外する
+            selector_container='ul.c-list-therapist > li',
+            selector_name='div.c-list-therapist__name',
+            selector_link='a[href*="profile.html"]',
+            selector_image='figure.c-list-therapist__img > img',
+        ),
+        SiteConfig(
+            site_id='amaou_therapi',
+            name='ミセスあまおうセラピ',
+            target_url='https://amaou-therapi.jp/lady.php',
+            selector_container='ul.ladyList > li',
+            selector_name='h2.ladyName',
+            selector_link='a[href*="lady_detail.php"]',
+            selector_image='span.thumb img',
+            id_query_param='lady_num',
+        ),
+        SiteConfig(
+            site_id='spamaybe',
+            name='spaMAYBE',
+            target_url='https://spamaybe.com/girl',
+            # kitty/Chatonと同一テンプレート系列(c-panel系)
+            selector_container='div.c-panel',
+            selector_name='p.c-panel__name',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            id_query_param='lid',
+        ),
     ]
 
     # File Paths
@@ -876,6 +925,13 @@ class WebMonitor:
                         query_values = parse_qs(urlparse(href).query).get(site.id_query_param)
                         if query_values:
                             cast_id = query_values[0]
+
+                    if not cast_id:
+                        # 'profile.html?12199' のようにキー=値形式ではなく、
+                        # クエリ文字列自体（'='を含まない）がIDを表すサイト向け
+                        raw_query = urlparse(href).query
+                        if raw_query and '=' not in raw_query:
+                            cast_id = raw_query
 
                     if not cast_id:
                         # パスからIDを生成 (例: /prof/123 -> 123)
