@@ -510,6 +510,67 @@ class MonitorConfig:
             selector_link='a.therapist_meta',
             selector_image='p.therapist_img img',
         ),
+        SiteConfig(
+            site_id='tororintime',
+            name='とろりんタイム',
+            target_url='https://tororintime.com/newface/',
+            # ぷちぷちどりーむと同一テンプレート(gallist/article/h3系)。
+            # div.type内に別のul>liのタグ一覧が入れ子になっているため、
+            # コンテナは子要素セレクタ(>)で直下のliのみに絞り込む
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='osaka_milktea_therapist',
+            name='ミルクティー -milktea-（セラピスト一覧）',
+            target_url='https://osakamilktea.com/therapist.php',
+            # 既存のosaka_milktea(newface.php/新人情報)とは別ページ(therapist.php/在籍一覧)のため、
+            # 別サイトとして独立管理する
+            selector_container='main#therapist ul > li.box',
+            selector_name='div.name',
+            selector_link='a[href*="profile.php"]',
+            selector_image='a[href*="profile.php"] img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='mrs_femmefatale',
+            name='Mrs.Femme Fatale（ミセスファムファタール）',
+            target_url='https://mrs-femmefatale.com/newface/',
+            # LA BELLA / ミセスの子守唄 / Royal Thoroughb / DEAR Premiumと同一テンプレート(KNZ系)
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='yudanete',
+            name='ゆだねて',
+            target_url='https://www.yudanete.com/therapist.html',
+            # サムネイル画像は<img>ではなく、リンク(<a>)自体のstyle属性に
+            # background-imageとして埋め込まれている。また、グリッドレイアウト用の
+            # 空のdiv.staff-box（余白調整用）が末尾に混在するため:has()で除外する
+            selector_container='div.staff-wrap > div.staff-box:has(li.staff-name)',
+            selector_name='li.staff-name',
+            selector_link='a[href*="profile.html"]',
+            selector_image='div.staff-image a',
+            image_from_style=True,
+            id_query_param='sid',
+        ),
+        SiteConfig(
+            site_id='aromade_skit',
+            name='すきっと',
+            target_url='https://aromade-skit.com/therapists/',
+            selector_container='ul.therapists-boxwrap > li.therapists-box',
+            selector_name='h3.name',
+            selector_link='a.expand-link',
+            selector_image='a.expand-link img',
+            id_query_param='author',
+        ),
     ]
 
     # File Paths
