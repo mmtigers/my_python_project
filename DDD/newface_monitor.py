@@ -133,6 +133,11 @@ class SiteConfig:
             'style'属性から "background-image:url(...)" 形式で画像URLを抽出する。
             サムネイルが<img src>ではなく要素のインラインCSSで指定されている
             サイト向け（この場合 image_attr は使用しない）。
+        name_first_text_only (bool): Trueの場合、selector_nameでマッチした要素
+            直下の最初のテキストノードのみを名前として使用する（子要素は無視）。
+            名前の要素内に年齢バッジ等が兄弟の子要素として同居しており、
+            get_text()では "さな(27)" のように汚染されてしまうサイト向け
+            （未指定時は要素全体のget_text()を使う従来ロジック）。
     """
     site_id: str
     name: str
@@ -145,6 +150,7 @@ class SiteConfig:
     id_query_param: Optional[str] = None
     image_attr: str = "src"
     image_from_style: bool = False
+    name_first_text_only: bool = False
 
     def get_data_filename(self) -> str:
         """既知キャストの保存先ファイル名を返す。
@@ -839,6 +845,68 @@ class MonitorConfig:
             selector_image='div.ph img:not(.list_today)',
             id_query_param='id',
         ),
+        SiteConfig(
+            site_id='karisome_bekkan',
+            name='かりそめ別館',
+            target_url='https://karisome-bekkan.net/newface/',
+            # KNZ(planKNZ CMS)系テンプレート。la_bella等と同一構造
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='toroten',
+            name='とろてんSPA',
+            target_url='https://toroten.net/newface/',
+            # KNZ(planKNZ CMS)系テンプレート。la_bella等と同一構造
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='yuraku_tei',
+            name='優楽亭',
+            target_url='https://yuraku-tei.net/newface/',
+            # petitpetit_dreamと同一テンプレート(tarao.sakura.ne.jp系、
+            # gallist/article/h3系)
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='luxy_osaka',
+            name='LUXY（ラグジー）',
+            target_url='https://luxy-spa.com/therapist.php',
+            # Grand Luxe系テンプレート(grandluxe_osaka等と同一構造。姉妹店として
+            # ヘッダーからgrandluxe-osaka.comへ相互リンクしており同一運営と判明)
+            selector_container='ul#list > li',
+            selector_name='div.name',
+            selector_link='a[href*="profile.php"]',
+            selector_image='div.image img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='atarispa',
+            name='当たりスパ',
+            target_url='https://atarispa.net/therapist/newface.php',
+            # 新規パターン。name要素(article h3)内に年齢バッジ<span>が
+            # 兄弟要素として同居しており、get_text()では "さな(27)" のように
+            # 汚染されるため name_first_text_only=True で直下テキストのみ採用
+            selector_container='li.animation',
+            selector_name='article h3',
+            selector_link='a[href*="/therapist/detail.php"]',
+            selector_image='div.ph img',
+            id_query_param='id',
+            name_first_text_only=True,
+        ),
     ]
 
     # File Paths
@@ -1122,7 +1190,13 @@ class WebMonitor:
             try:
                 # Name Extraction
                 name_elem = div.select_one(site.selector_name)
-                name = name_elem.get_text(strip=True) if name_elem else "Unknown"
+                if name_elem and site.name_first_text_only:
+                    first_text = name_elem.find(string=True, recursive=False)
+                    name = first_text.strip() if first_text else name_elem.get_text(strip=True)
+                elif name_elem:
+                    name = name_elem.get_text(strip=True)
+                else:
+                    name = "Unknown"
 
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
