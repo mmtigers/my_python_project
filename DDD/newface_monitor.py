@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 
 # MY_HOME_SYSTEM Core Imports
 try:
@@ -134,9 +134,12 @@ class SiteConfig:
             サムネイルが<img src>ではなく要素のインラインCSSで指定されている
             サイト向け（この場合 image_attr は使用しない）。
         name_first_text_only (bool): Trueの場合、selector_nameでマッチした要素
-            直下の最初のテキストノードのみを名前として使用する（子要素は無視）。
-            名前の要素内に年齢バッジ等が兄弟の子要素として同居しており、
-            get_text()では "さな(27)" のように汚染されてしまうサイト向け
+            直下のテキストノードのうち、前後の空白を除いて最初に空でなくなる
+            ものを名前として使用する（子要素・空白のみのテキストノードは
+            読み飛ばす）。名前の要素内に年齢バッジ等が兄弟の子要素として
+            同居しており、get_text()では "さな(27)" のように汚染されて
+            しまうサイトや、"<small>Name</small>実際の名前" のように
+            ラベル用の子要素の後ろに実テキストが続くサイト向け
             （未指定時は要素全体のget_text()を使う従来ロジック）。
         name_strip_after_tab (bool): Trueの場合、名前取得後にタブ文字(\t)で
             分割し先頭部分のみを採用する。年齢等の付加情報が兄弟要素ではなく
@@ -1031,6 +1034,76 @@ class MonitorConfig:
             selector_image='div.cast__thumb img',
             name_strip_after_tab=True,
         ),
+        SiteConfig(
+            site_id='mrs_coquettish',
+            name='ミセスコケティッシュ',
+            target_url='https://mrs-coquettish.com/staff.php',
+            # 新規パターン。p.name内は<small>Name</small>ラベルの後ろに
+            # 実際の名前がテキストノードとして続く構造のため、
+            # name_first_text_only=Trueで(空白のみでない)最初のテキスト
+            # ノードを採用
+            selector_container='ul.cast_box li',
+            selector_name='p.name',
+            selector_link='a',
+            selector_image='img.staff',
+            image_attr='data-src',
+            id_query_param='sid',
+            name_first_text_only=True,
+        ),
+        SiteConfig(
+            site_id='tensai_spa',
+            name='天才スパ',
+            target_url='https://tensai-spa.com/girl',
+            # c-panel系テンプレート(milk_parfait等と同一構造)。一部キャストは
+            # 詳細ページが外部サイト(estama.jp)でlidクエリパラメータを
+            # 持たないが、その場合はパス末尾から自動的にIDを生成する
+            # 既存のフォールバックで対応可能
+            selector_container='div.c-panel',
+            selector_name='p.js-eng_name span',
+            selector_link='div.c-panel__image a',
+            selector_image='div.c-panel__image img',
+            id_query_param='lid',
+        ),
+        SiteConfig(
+            site_id='only_kyoto',
+            name='ONLY～オンリー～',
+            target_url='https://only-kyoto.net/staff.php',
+            # 新規パターン。name要素内には年齢の後にSNSアイコン用の<object>が
+            # 兄弟要素として同居するため name_first_text_only=True
+            selector_container='ul.cast_box li',
+            selector_name='dl.name p',
+            selector_link='a',
+            selector_image='img.staff_img',
+            id_query_param='sid',
+            name_first_text_only=True,
+        ),
+        SiteConfig(
+            site_id='tiana_esthe',
+            name='Ti.ana～ティアナ～',
+            target_url='https://tiana-esthe.com/staff.php',
+            # only_kyotoと同一運営・同一テンプレート(相互リンクあり)。
+            # 画像はlazyload実装で実URLがdata-srcに入っている点が異なる
+            selector_container='ul.cast_box li',
+            selector_name='div.name',
+            selector_link='a',
+            selector_image='img.staff_img',
+            image_attr='data-src',
+            id_query_param='sid',
+            name_first_text_only=True,
+        ),
+        SiteConfig(
+            site_id='flowerspa_kyoto',
+            name='Mrs.FlowerSpa京都・滋賀',
+            target_url='https://flowerspa-kyoto.com/girllist',
+            # 新規パターン。コンテナはclass指定のない裸の<div>のため親要素
+            # 経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の
+            # <a class="therapist_meta">がオーバーレイとして機能する
+            selector_container='div.therapist_list > div',
+            selector_name='h3.therapist_name',
+            selector_link='a.therapist_meta',
+            selector_image='p.therapist_img img',
+            name_first_text_only=True,
+        ),
     ]
 
     # File Paths
@@ -1315,8 +1388,15 @@ class WebMonitor:
                 # Name Extraction
                 name_elem = div.select_one(site.selector_name)
                 if name_elem and site.name_first_text_only:
-                    first_text = name_elem.find(string=True, recursive=False)
-                    name = first_text.strip() if first_text else name_elem.get_text(strip=True)
+                    name = ""
+                    for child in name_elem.contents:
+                        if isinstance(child, NavigableString):
+                            candidate = child.strip()
+                            if candidate:
+                                name = candidate
+                                break
+                    if not name:
+                        name = name_elem.get_text(strip=True)
                 elif name_elem:
                     name = name_elem.get_text(strip=True)
                 else:
