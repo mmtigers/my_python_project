@@ -316,6 +316,63 @@ class MonitorConfig:
             # 実写真が先に出現するためselect_one（最初の一致）で問題ない
             selector_image='a.list-girl-image img',
         ),
+        SiteConfig(
+            site_id='la_bella',
+            name='LA BELLA（ラベーラ）',
+            target_url='https://labella-osaka.net/newface/',
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            # 画像がlazyload実装のため、実URLはsrcではなくdata-original属性に入っている
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='mrs_komoriuta',
+            name='ミセスの子守唄',
+            target_url='https://mrs-komoriuta.com/newface/',
+            # LA BELLAと同一テンプレート（KNZ系）のため設定内容も同様
+            selector_container='div.listTypeJ li',
+            selector_name='h3',
+            selector_link='a[href*="profile?uid="]',
+            selector_image='img.myPhoto',
+            image_attr='data-original',
+            id_query_param='uid',
+        ),
+        SiteConfig(
+            site_id='milkspa_a',
+            name='みるくSPAα（ミルクスパアルファ）',
+            target_url='https://milkspa-a.com/newface.html',
+            # ul#newface-wrapper の子孫セレクタで単純にliを取ると、各キャスト内の
+            # ul.state（出勤アイコン等）配下のliまで拾ってしまうため、
+            # 直接の子要素(>)のみをコンテナとする
+            selector_container='ul#newface-wrapper > li',
+            selector_name='p.name',
+            selector_link='div.thum a',
+            selector_image='div.thum a img',
+        ),
+        SiteConfig(
+            site_id='yui_mrstei',
+            name='結-YUI-ミセス邸',
+            target_url='https://yui-mrstei.com/cast/',
+            # Anju spa / シークレットルームヒマワリと同一テンプレート系列
+            selector_container='ul.gallist li',
+            selector_name='article h3',
+            selector_link='a[href*="/profile?id="]',
+            selector_image='div.ph img',
+            id_query_param='id',
+        ),
+        SiteConfig(
+            site_id='aube_spa',
+            name='Mrs.AUBE SPA（オーブスパ）',
+            target_url='https://aube-spa.com/girllist',
+            # Mrs.Merci SPA / Restpiaと同一テンプレート系列
+            selector_container='div.therapist_list > div',
+            selector_name='h3.therapist_name',
+            selector_link='a.therapist_meta',
+            selector_image='p.therapist_img img',
+        ),
     ]
 
     # File Paths
