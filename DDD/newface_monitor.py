@@ -1104,6 +1104,42 @@ class MonitorConfig:
             selector_image='p.therapist_img img',
             name_first_text_only=True,
         ),
+        SiteConfig(
+            site_id='mulala',
+            name='MULALA（ムララ）',
+            target_url='https://www.mulala-kyoto.com/therapist',
+            # 新規パターン(caskan CMS)。詳細ページへのリンクがパス末尾に
+            # そのままIDを含む構造のため、id_query_paramなしでも既存の
+            # パス末尾フォールバックで正しくIDを取得できる
+            selector_container='ul.therapist-datas > li',
+            selector_name='a.therapist-datas-name',
+            selector_link='div.therapist-datas-tmb a',
+            selector_image='div.therapist-datas-tmb img',
+        ),
+        SiteConfig(
+            site_id='bijuku_maria',
+            name='美熟MARIA',
+            target_url='https://bijuku-maria.com/newface.php',
+            # 既存のo-pack.jp系CMSテンプレートに完全一致(mrs_luxe/
+            # amaou_therapiと同一構造)
+            selector_container='ul.ladyList li',
+            selector_name='h2.ladyName',
+            selector_link='a[href*="lady_detail.php"]',
+            selector_image='span.thumb img',
+            id_query_param='lady_num',
+        ),
+        SiteConfig(
+            site_id='esthegame_kyoto',
+            name='エステゲーム京都',
+            target_url='https://esthegame.com/newface/',
+            # 既存のgallist/article/h3系テンプレートに完全一致(mrs_luxia等
+            # と同一構造)。list_todayバッジ画像がdiv.ph内に同居するため除外
+            selector_container='ul.gallist > li',
+            selector_name='article h3 a',
+            selector_link='article h3 a',
+            selector_image='div.ph img:not(.list_today)',
+            id_query_param='id',
+        ),
     ]
 
     # File Paths
