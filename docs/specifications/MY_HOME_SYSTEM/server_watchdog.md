@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — 設定値(`BASE_DIR`, `LINE_USER_ID`等)を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [notification_service.md](./notification_service.md) — `services.notification_service.send_push`の実体
+- [unified_server.md](./unified_server.md) — 監視対象プロセス(`WATCH_PROCESS_NAME`で言及される`unified_server.py`)
+
 ## 2. ファイルの概要
 
 * システムのサービス（`home_system.service`）、関連プロセス（`unified_server.py`）、およびハードウェア（Raspberry Piのスロットリングや電圧低下）の死活と健全性を監視するスクリプトです。
@@ -261,6 +268,14 @@ flowchart TD
 | LINEおよびDiscordへの通知先ID | `config.LINE_USER_ID` の設定値が不明なため。 | `config.py` |
 | 外部への通知仕様 | `send_push`内部における外部APIとの通信仕様やフォーマット変換処理が不明なため。 | `services/notification_service.py` |
 | ログの出力仕様 | `setup_logging`関数が生成するロガーの出力先やログローテーションの有無が不明なため。 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 外部への通知仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE失敗時はDiscordの`error`チャンネルへフォールバック通知する仕組みとされる。 | notification_service.md |
+| ログの出力仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`TimedRotatingFileHandler`、`home_system.log`固定)・ERRORレベル以上をDiscord Webhookへ通知する`DiscordErrorHandler`の3種のハンドラを登録するとされる。これは`check_throttling_status`が`send_push`を直接呼ばず`logger.error`のみで済ませている設計(コメント「修正点2」)の裏付けとなる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)の実際の値は`logger.md`自体でも未確認。 | logger.md |
+| ロックファイルの絶対パス | `config.md`の解析でも`BASE_DIR`の実際のパス文字列は不明とされているが、同変数は`logger.py`(ログ保存先)や`backup_service.py`(一時ディレクトリ)など複数モジュールから共通のベースディレクトリとして参照されていることが判明した。具体的なパス値自体は`config.py`のソースコード未確認のため依然として不明。 | config.md, logger.md, backup_service.md |
 
 ## 10. 自己検証結果
 

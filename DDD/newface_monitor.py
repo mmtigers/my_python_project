@@ -18,6 +18,7 @@ import time
 import random
 import sys
 import logging
+import hashlib
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Set, Dict, Optional
@@ -1488,8 +1489,16 @@ class WebMonitor:
                         cast_id = os.path.basename(clean_path)
 
                 if not cast_id:
-                    # フォールバック: 名前をIDとする
-                    cast_id = f"name_{name}"
+                    # フォールバック: 名前をIDとする。ただし同一ページ内で複数件が
+                    # 同時にこのフォールバックに落ちた場合（例: 名前も"Unknown"に
+                    # なる要素が複数存在する）、IDが完全に同一になり
+                    # Set[CastMember]内で衝突して片方が黙って失われてしまう
+                    # （id/hashともにidのみに依拠しているため）。
+                    # コンテナの生HTML（get_text()ではなくstr()）のフィンガープリントを
+                    # 付与することで、テキストが同一/空でも画像src等の属性差異が
+                    # あれば別要素として区別できるようにする。
+                    fingerprint = hashlib.sha1(str(div).encode('utf-8')).hexdigest()[:10]
+                    cast_id = f"name_{name}_{fingerprint}"
 
                 if not detail_url:
                     # 個別プロフィールページへのリンクを持たないサイト向けのフォールバック:

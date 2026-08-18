@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [quest_router.md](./quest_router.md) - 本ファイルのRequest/Responseモデルを実際にエンドポイントの型として使用するルーター
+* [quest_service.md](./quest_service.md) - `MasterUser`, `MasterQuest`, `MasterReward`をインポートし、DB操作・ビジネスロジックで使用するサービス層
+* [quest_data.md](./quest_data.md) - `MasterUser`/`MasterQuest`/`MasterReward`のフィールド構成に対応するハードコードされたマスターデータ定義
+* [family-quest/src/types/index.md](../family-quest/src/types/index.md) - フロントエンド側の対応する型定義(`User`, `Quest`, `Reward`等)
+
 ## 2. ファイルの概要
 
 * このファイルは、システム内で使用される各種データ構造（ドメインモデル、リクエストモデル、レスポンスモデル、インベントリモデル）を定義する責務を持っている。
@@ -495,6 +502,14 @@ graph TD
 | モデルの実際の使用箇所 | このファイルはデータ構造の定義のみであり、どのルーターや関数から呼び出されているか読み取れない。 | これらをインポートしているFastAPIのエンドポイントファイルやサービス層のファイル |
 | データベーススキーマとのマッピング | SQLAlchemyなどのORMモデルが存在するか、あるいはこれらのPydanticモデルをそのままNoSQL等に保存しているかが不明。 | データベースモデル定義ファイルやCRUD操作の実装ファイル |
 | Enumの未利用理由 | `status` (例: "owned, pending, consumed") や `reset_period` (例: "daily") が単なる `str` として定義されている。システム全体の仕様として固定文字列の検証をどこで行っているか不明。 | バリデーション処理やビジネスロジックを実装しているファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| モデルの実際の使用箇所 | `quest_router.md`の解析によれば、`routers/quest_router.py`が`models.quest`から`SyncResponse`, `CompleteResponse`, `QuestAction`等を全てインポートしエンドポイントの引数・レスポンス型として使用しているとされる。また`quest_service.md`の解析によれば、`services/quest_service.py`が`MasterUser`, `MasterQuest`, `MasterReward`をインポートしているとされる。 | quest_router.md, quest_service.md |
+| データベーススキーマとのマッピング | `quest_service.md`の解析によれば、DBアクセスは生SQLで行われる設計であり、Pydanticモデルとテーブルスキーマとの明示的なORMマッピングは確認されていないが、各テーブルの完全なスキーマ自体は`quest_service.md`でも不明とされている。 | quest_service.md |
+| Enumの未利用理由 | `quest_service.md`の解析によれば、`role`に相当する値は`quest_users.role`カラムであり、`ROLE_ADULT`('role_adult')/`ROLE_CHILD`('role_child')というモジュールレベルの文字列定数のみで判定されている(Enum型は使われていない)とされる。`reset_period`については`quest_data.md`の解析で`'daily'`等の固定文字列がハードコードされたマスターデータとして定義されていることが判明しているが、値の実行時検証機構は依然として確認できていない。 | quest_service.md, quest_data.md |
 
 ## 10. 自己検証結果
 

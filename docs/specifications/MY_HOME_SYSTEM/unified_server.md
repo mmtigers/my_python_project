@@ -7,6 +7,19 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `QUEST_DIST_DIR`, `SQLITE_DB_PATH`等の設定値を提供
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体
+- [database.md](./database.md) / [init_unified_db.md](./init_unified_db.md) — 起動時に呼び出される`apply_pending_migrations`関連のマイグレーション機構
+- [sensor_service.md](./sensor_service.md) — シャットダウン時に呼ばれる`cancel_all_tasks()`の実装元
+- [camera_monitor.md](./camera_monitor.md) — 起動時にサブプロセスとして起動されるカメラ監視スクリプト
+- [scheduler_boot.md](./scheduler_boot.md) — 起動時にサブプロセスとして起動されるスケジューラスクリプト
+- [quest_router.md](./quest_router.md) — `/api/quest`にマウントされるルーター
+- [webhook_router.md](./webhook_router.md) — Webhook例外パス(`/webhook/switchbot`, `/callback/line`)を持つルーター
+- [system_router.md](./system_router.md) — `/api/system`にマウントされるルーター(手動バックアップ)
+- [camera_router.md](./camera_router.md) — `/api/cameras`にマウントされ、SPAルーティング(`/camera/*`)とも連動するルーター
+
 ## 2. ファイルの概要
 
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
@@ -348,6 +361,16 @@ graph TD
 | キャンセルされるタスク | `sensor_service.cancel_all_tasks()`の対象タスク仕様が不明 | `services/sensor_service.py` |
 | サブプロセスの処理仕様 | カメラの監視仕様および定期実行されるスケジューラ仕様が不明 | `monitors/camera_monitor.py`, `scheduler_boot.py` |
 | ログ設定の詳細 | `setup_logging`内で設定されるハンドラやフォーマッタの実装が不明 | `core/logger.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 設定値の内容 | `config.md`の解析によれば、`config.py`は`load_dotenv()`による環境変数読み込みに加え、NASなど外部ストレージのマウント遅延を考慮したディレクトリ検証・作成関数を提供する設計であることが判明した。ただし`QUEST_DIST_DIR`個別の値自体は`config.md`側でも確認できていない。 | config.md |
+| APIルーティング詳細 | `quest_router.md`の解析によれば`/api/quest`配下はゲームデータ同期・クエスト完了・承認・報酬購入・画像アップロード等のエンドポイント群、`webhook_router.md`の解析によれば`/callback/line`・`/webhook/switchbot`はLINE署名検証とSwitchBotイベントの重複排除・DB保存を行うエンドポイント群、`camera_router.md`の解析によれば`/api/cameras`配下はカメラ設定一覧・ライブHLS配信・録画配信のエンドポイント群であることがそれぞれ判明した。`system_router.md`(本バッチ内)の解析によれば`/api/system`配下は手動バックアップの単一エンドポイントであることが判明している。 | quest_router.md, webhook_router.md, camera_router.md |
+| キャンセルされるタスク | `sensor_service.md`の解析によれば、`cancel_all_tasks()`はグローバル変数`MOTION_TASKS`(モーションセンサーの無反応検知タイマー用の非同期タスク群)を全てキャンセルする関数であることが判明した。 | sensor_service.md |
+| サブプロセスの処理仕様 | `camera_monitor.md`の解析によれば、`monitors/camera_monitor.py`はONVIFプロトコルでカメラの動体検知イベントを監視しDB保存・スナップショット保存を行うスクリプトであることが判明した。`scheduler_boot.md`の解析によれば、`scheduler_boot.py`は`ThreadPoolExecutor`で複数の定期タスクスクリプトを並列実行する無限ループのスケジューラであることが判明した。 | camera_monitor.md, scheduler_boot.md |
+| ログ設定の詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
 
 ## 10. 自己検証結果
 

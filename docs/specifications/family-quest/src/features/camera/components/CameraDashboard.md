@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [./LiveView.md](./LiveView.md) - 「ライブ映像」タブの実体コンポーネント
+* [./RecordView.md](./RecordView.md) - 「録画再生」タブの実体コンポーネント
+* [../types/index.md](../types/index.md) - `CameraConfig`型の定義元
+* [../../../lib/apiClient.md](../../../lib/apiClient.md) - `/api/cameras/settings`呼び出しに使うAPIクライアントの実装元
+* [../../../../main.md](../../../../main.md) - 本コンポーネントを`/camera`パスでルートとしてマウントする呼び出し元
+* [../../../../../MY_HOME_SYSTEM/camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md) - `/api/cameras/settings`エンドポイントのバックエンド実装
+
 ## 2. ファイルの概要
 
 * 監視カメラ機能全体のエントリーポイントとなる、独立した全画面レイアウトのダッシュボードコンポーネント。
@@ -158,6 +167,14 @@ graph TD
 | `/api/cameras/settings`の実際のレスポンス仕様・カメラ設定の永続化方法 | バックエンド実装が本ファイルに含まれないため | バックエンドのカメラ設定API実装ファイル |
 | 本コンポーネントがアプリ全体のどのルート／導線からマウントされるか | ルーティング定義ファイルが本ファイルに含まれないため | ルーティング設定ファイル（例: `App.tsx`, ルーター定義ファイル） |
 | `document.title`のデフォルト値`"Family Quest"`が他画面と一致しているか | 他画面のタイトル設定ロジックが本ファイルに含まれないため | アプリ全体のエントリーポイント（例: `App.tsx`, `index.html`） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `apiClient`の内部実装（認証・共通エラー処理） | `apiClient.md`の解析によれば、`apiClient.get`は内部の`_request`（`fetch`ベース）を呼び出し、`response.ok`が偽の場合は`errorData.detail`またはステータスコードを用いたメッセージで`Error`をスローする実装であるとされている。ただしこれは`apiClient.md`側の解析結果からの補足であり、`apiClient.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../lib/apiClient.md |
+| `/api/cameras/settings`の実際のレスポンス仕様・カメラ設定の永続化方法 | `camera_router.md`の解析によれば、`GET /settings`は`config.CAMERAS`から一覧を読み出し、各カメラについて`id`・`name`・`order`（配列インデックス+1）・`enabled`（常に`True`固定値）を含む辞書のリストを返すとされている。カメラの有効/無効を実際に切り替える仕組みはこのエンドポイント自体には見当たらないとされている。ただしこれは`camera_router.md`側の解析結果からの補足であり、`camera_router.py`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md |
+| 本コンポーネントがアプリ全体のどのルート／導線からマウントされるか | `main.md`の解析によれば、`main.tsx`は`window.location.pathname.includes('/camera')`の判定により、`/camera`を含むパスの場合は`App`を介さず`CameraDashboard`を直接ルートコンポーネントとしてマウントするとされている。ただしこれは`main.md`側の解析結果からの補足であり、`main.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../main.md |
 
 ## 10. 自己検証結果
 

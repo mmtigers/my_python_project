@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [line_handler.md](./line_handler.md) - 呼び出し元(ステータス確認・クエスト・承認却下・体調記録コマンドの委譲先として本ファイルを呼び出す)
+* [quest_service.md](./quest_service.md) - 委譲先(`game_system`, `quest_service`によるクエスト・ユーザー状態の処理実体)
+* [common.md](./common.md) - `get_db_cursor`等を再エクスポートするFacade
+* [database.md](./database.md) - `save_log_async`の実体を提供
+* [config.md](./config.md) - `FAMILY_SETTINGS`等の設定値を提供
+
 ## 2. ファイルの概要
 
 このファイルは、システムにおいてLINEメッセージからの情報を記録および取得し、LINE Messaging APIのメッセージモデル（`TextMessage`など）を生成して返す責務を持つ。日常の健康・食事・行動ログの記録と、ゲーム化されたクエストのステータス照会、受注可能クエストの表示、およびクエストの承認・却下処理を担当している。
@@ -350,6 +358,13 @@ graph TD
 | `TARGET_MEMBERS` の具体的な要素数と型 | 外部の設定ファイルから読み込まれるため。 | `config.py` |
 | DBの各テーブルの正確なスキーマ | 実行時に指定されるテーブルのカラム定義が本ファイル内に存在しないため。 | `core/database.py` またはマイグレーションファイル |
 | `game_system.get_all_view_data()` の返却値のスキーマ | 返却される辞書のキー (`level`, `gold`, `quests` など) が存在するかどうかの保証が不明なため。 | `services/quest_service.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DBの各テーブルの正確なスキーマ | `database.md`の解析によれば、DBアクセスは`common.get_db_cursor`（実体は`core/database.py`の`get_db_cursor`）を介した汎用的なSQLite接続コンテキストマネージャで提供され、WALモードと外部キー制約が有効化される設計であることが判明した。ただしテーブルごとの正確なカラム定義そのものは`database.py`側にはなく、DB初期化スクリプト側にあると推測される。 | `database.md` |
+| `game_system.get_all_view_data()` の返却値のスキーマ | `quest_service.md`の解析によれば、`GameSystem.get_all_view_data`は`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`をキーとする辞書（`Dict[str, Any]`）を返す設計であることが判明した。 | `quest_service.md` |
 
 ## 10. 自己検証結果
 

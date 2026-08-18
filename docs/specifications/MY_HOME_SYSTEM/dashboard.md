@@ -7,6 +7,13 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [analysis_service.md](./analysis_service.md) - `services.analysis_service`の実体。`load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `load_ai_report`, `apply_friendly_names`等を提供。同ドキュメントでも本ファイル(`dashboard.py`)を主要な呼び出し元として明記している
+* [common.md](./common.md) - `common.send_push`の実体(Facade経由で`services.notification_service.send_push`に委譲)
+* [config.md](./config.md) - `SQLITE_TABLE_CHILD`等のテーブル名定数、`LINE_USER_ID`を提供
+* [start_all.md](./start_all.md) - 呼び出し元。`start_all.sh`が`streamlit run dashboard.py`をバックグラウンドで起動する
+
 ## 2. ファイルの概要
 
 * Streamlit製ダッシュボードアプリケーションのエントリーポイント。ページ設定・ロガー設定などアプリ全体の初期化を行う。
@@ -232,6 +239,14 @@ graph TD
 | `config` の設定値の実体 | `SQLITE_TABLE_CHILD` 等のテーブル名や `LINE_USER_ID` の具体的な値が不明。 | `config.py` |
 | `common.send_push` の仕様 | Discord通知の送信方式や失敗時の挙動（例外を送出するか等）が不明。 | `common.py` |
 | `view_common.CUSTOM_CSS` の内容 | 具体的なスタイル定義が不明。 | `views/dashboard/common.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `analysis_service` の各読み込み関数の仕様 | `analysis_service.md`の解析によれば、`load_sensor_data`は`device_records`・SwitchBotログ・電力使用量の3テーブルを統合し`apply_friendly_names`で表示名を適用したDataFrameを返し、`load_generic_data`は指定テーブルから汎用的に取得、`load_nas_status`/`load_ai_report`は最新1件を`Optional[pd.Series]`で返す設計とされる。いずれも`get_ro_db_connection`による読み取り専用接続(`?mode=ro`)を用いており、`database.md`が扱う`core/database.py`の`get_db_cursor`とは別経路であるとされる。`st.cache_data`によるキャッシュの有無は`analysis_service.md`でも確認できていない。 | analysis_service.md |
+| `common.send_push` の仕様 | `common.md`の解析によれば`send_push`は`services.notification_service.send_push`のFacade再エクスポートであり、`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhook/LINE Messaging APIへ送信し、LINE失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | common.md, notification_service.md |
+| `config` の設定値の実体 | `config.md`の解析によれば`config.py`は環境変数・JSON設定ファイルからテーブル名定数等を初期化するモジュールであることが判明したが、`SQLITE_TABLE_CHILD`や`LINE_USER_ID`の具体的な値自体は`config.md`でも確認できていない。 | config.md |
 
 ## 10. 自己検証結果
 

@@ -50,6 +50,8 @@ assets/salary_images/
 # DDD: personal generated content, not source
 DDD/split_results/
 DDD/*プロンプト*.md
+DDD/.batch_download_discord.lock
+DDD/.bot_detection_cooldown
 
 # ただし requirements.txt / requirements-dev.txt は含める
 !requirements.txt

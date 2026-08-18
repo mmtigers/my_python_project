@@ -7,6 +7,14 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+* [../../../components/ui/HlsPlayer.md](../../../components/ui/HlsPlayer.md) - 録画映像再生の実体コンポーネント
+* [./CameraDashboard.md](./CameraDashboard.md) - 呼び出し元（`cameras` propの供給元）
+* [../types/index.md](../types/index.md) - `CameraConfig`型の定義元
+* [../../../lib/apiClient.md](../../../lib/apiClient.md) - `/api/cameras/record/{id}/{date}/info`呼び出しに使うAPIクライアントの実装元
+* [../../../../../MY_HOME_SYSTEM/camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md) - 録画情報取得・録画ファイル配信エンドポイントのバックエンド実装
+
 ## 2. ファイルの概要
 
 * 指定した日付・時刻の録画映像を、複数カメラ分同期して再生する画面のコンポーネント。
@@ -256,6 +264,15 @@ graph TD
 | `/api/cameras/record/{id}/{date}/info`の`offset_seconds`の算出方法 | バックエンド実装が本ファイルに含まれないため | バックエンドのカメラ録画API実装ファイル |
 | `cameras`プロパティの生成元・取得タイミング | `RecordView`自体はプロパティとして受け取るのみで取得ロジックを持たないため | `CameraDashboard.tsx` |
 | 録画ファイルが日をまたぐ場合や複数ファイルに分割される場合の挙動 | `record_{dateStr}.m3u8`という単一ファイル名のみを組み立てており、分割時の扱いが本ファイルからは不明なため | バックエンドの録画ファイル管理・生成処理 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `apiClient`の内部実装（認証・共通エラー処理） | `apiClient.md`の解析によれば、`apiClient.get`は内部の`_request`（`fetch`ベース）を呼び出し、`response.ok`が偽の場合は`errorData.detail`またはステータスコードを用いたメッセージで`Error`をスローする実装であるとされている。ただしこれは`apiClient.md`側の解析結果からの補足であり、`apiClient.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../lib/apiClient.md |
+| `/api/cameras/record/{id}/{date}/info`の`offset_seconds`の算出方法 | `camera_router.md`の解析によれば、`GET /record/{camera_id}/{target_date}/info`は`camera_service.get_record_start_offset`を呼び出して`offset_seconds`を算出しているとされ、`camera_router.md`側の相互参照情報ではこの関数は「指定日最初の録画ファイル名から算出した0時からの経過秒数（失敗時は0）」を返すと推測される、と記載されている。ただしこれは`camera_router.md`側の解析結果（さらにその先の`camera_service.md`からの推測）を経由した補足であり、`camera_service.py`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md |
+| `cameras`プロパティの生成元・取得タイミング | `CameraDashboard.md`の解析によれば、`cameras`は`CameraDashboard`のマウント時（`useEffect`、依存配列は空）に`apiClient.get('/api/cameras/settings')`で取得し、`enabled`が`true`のカメラのみを`order`昇順でソートした配列であるとされている。ただしこれは`CameraDashboard.md`側の解析結果からの補足であり、`CameraDashboard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ./CameraDashboard.md |
+| 録画ファイルが日をまたぐ場合や複数ファイルに分割される場合の挙動 | `camera_router.md`の相互参照情報によれば、録画プレイリストの生成（`generate_record_playlist`）は「10分単位に分割されたmp4群を`ffconcat`で結合したVOD用HLSプレイリスト」を生成すると推測されているが、日をまたぐ場合の具体的な扱い（前日分との連結有無等）については`camera_router.md`側の解析結果からも確認できていない。ただしこれは`camera_router.md`側の解析結果（さらにその先の`camera_service.md`からの推測）を経由した補足であり、`camera_service.py`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md |
 
 ## 10. 自己検証結果
 

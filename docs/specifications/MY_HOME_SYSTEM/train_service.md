@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [common.md](./common.md) — `setup_logging`を再エクスポートするFacadeモジュール
+- [logger.md](./logger.md) — `common.setup_logging`の実体(`core.logger.setup_logging`)
+- [dashboard.md](./dashboard.md) — 呼び出し元候補。Streamlitダッシュボードの`views/dashboard/misc_tab.py`(`render_traffic`)が本ファイルの機能を利用すると推測される
+
 ## 2. ファイルの概要
 
 * JR西日本の運行情報API（JSON）から、宝塚線・神戸線の運行状況を取得する機能を提供する。
@@ -241,6 +247,13 @@ graph TD
 | JR西日本APIのレスポンス完全仕様 | `lines` オブジェクト内に `G`, `A` 以外にどのような路線IDが存在するか、`status`/`text` 以外のフィールドの有無が不明。 | JR西日本APIの公式仕様書（本リポジトリ外） |
 | Yahoo!路線情報の現在のHTML構造 | コード中のCSSセレクタが現在のサイト構造と一致しているかは、本ファイルの解析のみでは検証できない。 | 対象サイトの実際のHTML（本リポジトリ外） |
 | 呼び出し元の利用方法 | `get_jr_traffic_status` と `get_route_info` がどの画面・どの頻度で呼び出されるかが不明。 | `views/dashboard/misc_tab.py` 等の呼び出し元 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.setup_logging` の仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
+| 呼び出し元の利用方法 | `dashboard.md`の解析によれば、`dashboard.py`は`views.dashboard.misc_tab`モジュールの`render_traffic()`関数を電車遅延タブとして呼び出しており、この関数が本ファイルの`get_jr_traffic_status`/`get_route_info`を利用する可能性が高いと推測される。ただし`misc_tab.py`自体は未解析のため確定情報ではない。 | dashboard.md |
 
 ## 10. 自己検証結果
 

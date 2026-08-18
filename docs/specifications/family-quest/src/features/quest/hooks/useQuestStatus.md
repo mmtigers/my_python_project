@@ -7,6 +7,12 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [QuestList.md](../components/QuestList.md) — `getQuestLockState`をソート比較関数から直接呼び出す利用元。
+- [types/index.md](../../../types/index.md) — `User`/`Quest`/`QuestHistory`型定義の提供元。
+- [App.md](../../../../App.md) — コメントで言及されている「以前の3箇所の重複実装」のうち、クエストクリックハンドラ側の現状の実装を確認できる呼び出し元。
+
 ## 2. ファイルの概要
 
 * 現在のユーザー情報、対象クエストの詳細情報、および完了・保留クエストの履歴データを基に、該当クエストの現在の進行状態（完了、保留、ロック、無限クエストなど）を判定する純粋関数 `getQuestLockState` と、それをラップして表示用タイトル・UI表示用バリエーション（`variant`）まで算出するCustom Hook `useQuestStatus` を提供する。
@@ -187,6 +193,13 @@ graph TD
 | `Quest` オブジェクトの完全なスキーマ | ファイル内で使われている `quest_id`, `id`, `type`, `quest_type`, `_isInfinite`, `pre_requisite_quest_id` などのプロパティがなぜ複数存在するのか、本来どの値が正なのかを特定するため。 | `@/types` 関連ファイル |
 | 履歴データ（`completedQuests`）の取得・抽出ロジック | 本当に「今日」の承認済みデータだけがHook/関数に渡されているかを客観的に確認するため。 | 本Hook/関数の呼び出し元コンポーネント（`QuestList.tsx`, `App.tsx`など） |
 | `App.tsx`のクリックハンドラにおける現状の実装 | コメントで言及されている「以前の3箇所の重複実装」のうち、`App.tsx`側が現在も共通化前のロジックを残しているか、`getQuestLockState`に置き換わっているかが本ファイルからは不明。 | `App.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `Quest` オブジェクトの完全なスキーマ | `types/index.md`の解析によれば、`Quest`インターフェースには共有クエスト判定用のフィールド（`is_shared_completed_by`等、バックエンドの`get_available_quests`が付与）が含まれるとされている。ただし`quest_id`/`id`や`type`/`quest_type`が併存する理由自体は`types/index.md`側でも特定されていない。 | `../../../types/index.md` |
+| `App.tsx`のクリックハンドラにおける現状の実装 | `App.md`の解析によれば、`App.tsx`は`import { getQuestLockState } from './features/quest/hooks/useQuestStatus';`として本ファイルの`getQuestLockState`を直接インポートし、`handleQuestClick`内で無限クエスト判定や保留・完了履歴の検索に使用しているとされている。これにより、コメントで言及されていた「以前の3箇所の重複実装」のうち`App.tsx`側は共通化後の`getQuestLockState`に置き換わっている（少なくとも重複したロジックがそのまま残ってはいない）と推測される。ただしこれは`App.md`側の解析結果からの補足であり、`App.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../../../App.md` |
 
 ## 10. 自己検証結果
 

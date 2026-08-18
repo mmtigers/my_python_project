@@ -7,6 +7,15 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
+## 関連ドキュメント
+
+- [config.md](./config.md) — `CAMERAS`、`ASSETS_DIR`、`MOTION_COOLDOWN_SEC`、`LINE_USER_ID`、`NVR_RECORD_DIR`等の設定を提供する。
+- [database.md](./database.md) — `save_log_generic`の実装元（`core/database.py`）。
+- [notification_service.md](./notification_service.md) — `send_push`の実装元。
+- [camera_digest_service.md](./camera_digest_service.md) — 本ファイルが生成するスナップショット画像の消費先。
+- [camera_service.md](./camera_service.md) — 同様のONVIF/WSDL動的探索ロジック（`find_wsdl_path`）を持つ姉妹モジュール（ライブ配信・録画用）。
+- [collect_onvif_logs.md](./collect_onvif_logs.md) — 同様にONVIFイベント（PullPointSubscription）を収集する別スクリプト。
+
 ## 2. ファイルの概要
 
 このファイルは、ONVIFプロトコルを用いてネットワークカメラ（防犯カメラ）に接続し、動体検知イベントを監視するシステムの一部である。
@@ -424,6 +433,13 @@ graph TD
 | DBの保存先とスキーマ | 動体検知ログ（`device_records` テーブル）の物理構造およびDBエンジンが不明。 | `core/database.py` |
 | プッシュ通知の仕様 | アラート通知のルーティングロジック、フォーマット変換の仕組みが不明。 | `services/notification_service.py` |
 | NVR上の動画ファイル保存規則 | NAS上に保存される `*.mp4` ファイルの命名規則やディレクトリ階層が不明であり、`glob` 検索時のパフォーマンスに影響する可能性がある。 | 環境または外部仕様書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DBの保存先とスキーマ | `database.md`の解析によれば、`save_log_generic`は`core/database.py`が提供する汎用INSERT関数で、指定されたテーブル・カラム・値からSQLを動的に構築しSQLiteへ書き込むと推測される。ただし`device_records`テーブル自体の正確なカラム定義は`database.md`側でも「呼び出し元依存で不明」とされており、依然として不明。 | database.md |
+| プッシュ通知の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数（"discord"/"line"/"both"）に応じて通知先を振り分け、LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知を行う関数（戻り値`bool`）と推測される。 | notification_service.md |
 
 ## 10. 自己検証結果
 
