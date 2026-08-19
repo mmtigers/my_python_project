@@ -1247,6 +1247,36 @@ class DiscordNotifier:
             webhook_url (Optional[str]): DiscordのWebhook URL。
         """
         self.webhook_url = webhook_url
+        self.session = self._create_rate_limited_session()
+
+    def _create_rate_limited_session(self) -> requests.Session:
+        """Discordのレート制限(429)に自動追従するHTTPセッションを作成する。
+
+        Discord WebhookはバーストしたPOSTに対して429を返すことがあり、
+        毎回1秒待つだけの固定sleepでは足りずに大量のリクエストが失敗して
+        通知が失われる問題があった(新人一括検知時など)。urllib3のRetryは
+        429応答に付与される'Retry-After'ヘッダーを尊重して自動的に
+        バックオフ・リトライするため、これに委譲する。
+
+        Returns:
+            requests.Session: 429/5xx時に自動リトライするセッション。
+        """
+        session = requests.Session()
+        retries = Retry(
+            total=MonitorConfig.RETRY_TOTAL,
+            backoff_factor=MonitorConfig.RETRY_BACKOFF,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["POST"],
+            respect_retry_after_header=True,
+        )
+        adapter = HTTPAdapter(max_retries=retries)
+        session.mount('https://', adapter)
+        return session
+
+    def close(self) -> None:
+        """保持しているHTTPセッションのリソースを明示的に解放する。"""
+        if self.session:
+            self.session.close()
 
     def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:
         """新規キャスト情報をDiscordに通知する。
@@ -1280,14 +1310,17 @@ class DiscordNotifier:
                 ]
             }
             try:
-                # レート制限回避のための待機
+                # レート制限回避のための待機（429時のバックオフはself.sessionのRetryに委譲）
                 time.sleep(1)
-                response = requests.post(self.webhook_url, json=payload, timeout=10)
+                response = self.session.post(self.webhook_url, json=payload, timeout=10)
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
-                logger.error(f"Failed to send notification for {cast.name}: {e}")
+                # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
+                # 含まれるため、原因究明用にログへ残す
+                body = e.response.text[:300] if e.response is not None else ""
+                logger.error(f"Failed to send notification for {cast.name}: {e} | body: {body}")
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
                     # 無駄なだけなので打ち切る（サーキットブレーカー）。
@@ -1616,6 +1649,7 @@ def run_monitor() -> None:
         return
 
     monitor = None
+    notifier = None
     try:
         # リソースを必要とするインスタンス化はウォームアップ確認後に実行
         monitor = WebMonitor()
@@ -1635,6 +1669,8 @@ def run_monitor() -> None:
         # 終了時のリソース解放: tryブロック内でエラーが起きても確実にCloseする
         if monitor is not None:
             monitor.close()
+        if notifier is not None:
+            notifier.close()
         logger.debug("=== NewFace Monitor Finished ===")
 
 
