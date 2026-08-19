@@ -51,7 +51,14 @@ except ImportError:
     def get_logger(name: str) -> logging.Logger: 
         return logging.getLogger(name)
         
-    def get_managed_target_directory(*args, **kwargs) -> Path: 
+    def get_managed_target_directory(*args, **kwargs) -> Path:
+        # 呼び出し元(get_data_dir)はfallback_dir_str（BASE_DIR/'data'の絶対パス）を
+        # 渡してくる想定。これを無視してカレントディレクトリ相対の"./data"を返すと、
+        # 実行時のカレントディレクトリ次第で保存先が毎回変わってしまい、
+        # known_casts_*.jsonが見つからず全キャストを新人として誤検知する原因になる。
+        fallback_dir_str = kwargs.get("fallback_dir_str")
+        if fallback_dir_str:
+            return Path(fallback_dir_str)
         return Path("./data")
 
     def wait_for_storage_warmup(target_dir: Path, max_retries: int = 5, base_delay: float = 1.0) -> bool:
