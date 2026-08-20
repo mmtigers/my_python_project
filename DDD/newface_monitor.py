@@ -20,6 +20,7 @@ import sys
 import logging
 import hashlib
 from dataclasses import dataclass, asdict
+from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Dict, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
@@ -1332,6 +1333,46 @@ class DiscordNotifier:
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {e}")
 
+    def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> None:
+        """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
+
+        個別キャスト通知(embed形式)とは異なり、1日分の件数をまとめた
+        テキストメッセージ(content)として1件だけ送信する。
+
+        Args:
+            counts (Dict[str, int]): site_id -> 新規検知件数 の集計。
+            site_names (Dict[str, str]): site_id -> 表示名 の対応表。
+            date_str (str): サマリ対象日（'YYYY-MM-DD'）。
+        """
+        if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
+            logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")
+            return
+
+        if counts:
+            total = sum(counts.values())
+            lines = [
+                f"・{site_names.get(site_id, site_id)}: {count}名"
+                for site_id, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)
+            ]
+            content = (
+                f"📊 **本日の新人検知サマリ ({date_str})**\n"
+                f"新規検知: 合計{total}名\n\n" + "\n".join(lines)
+            )
+        else:
+            content = f"📊 **本日の新人検知サマリ ({date_str})**\n新規検知はありませんでした。"
+
+        # Discordのcontentは2000文字制限があるため、超過分は安全側で切り詰める
+        if len(content) > 1900:
+            content = content[:1900] + "\n...(以下省略)"
+
+        payload = {"username": "New Face Monitor", "content": content}
+        try:
+            response = self.session.post(self.webhook_url, json=payload, timeout=10)
+            response.raise_for_status()
+            logger.info(f"Daily summary notification sent successfully for {date_str}.")
+        except requests.RequestException as e:
+            logger.error(f"Failed to send daily summary notification: {e}")
+
 
 class DataManager:
     """データの永続化と読み込みを担当するクラス。"""
@@ -1384,6 +1425,79 @@ class DataManager:
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except IOError as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
+
+    @staticmethod
+    def _daily_summary_file() -> Path:
+        """日次サマリの集計状態を保存するファイルのパスを返す。
+
+        全サイト共通で1ファイルに集計するため、サイト単位のknown_casts_*.json
+        とは別にトップレベルのファイルとして管理する。
+        """
+        return MonitorConfig.get_data_dir() / 'daily_summary.json'
+
+    @staticmethod
+    def load_daily_summary() -> Dict:
+        """日次サマリの集計状態を読み込む。
+
+        Returns:
+            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},
+                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。
+                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
+        """
+        summary_file = DataManager._daily_summary_file()
+        if not summary_file.exists():
+            return {}
+
+        try:
+            with open(summary_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.error(f"Failed to load daily summary from {summary_file}: {e}")
+            return {}
+
+    @staticmethod
+    def save_daily_summary(data: Dict) -> None:
+        """日次サマリの集計状態をJSONファイルに保存する。
+
+        Args:
+            data (Dict): 保存対象の集計状態。
+        """
+        summary_file = DataManager._daily_summary_file()
+        try:
+            summary_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # アトミック書き込み: save_known_castsと同じパターン
+            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            tmp_path.replace(summary_file)
+        except IOError as e:
+            logger.error(f"Failed to save daily summary: {e}", exc_info=True)
+
+    @staticmethod
+    def record_daily_new_casts(site_id: str, count: int) -> None:
+        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。
+
+        cron等により1時間毎に別プロセスとして実行される前提のため、
+        実行毎にファイルを読み書きして状態を永続化する。集計中の日付が
+        当日と異なる場合（日付が変わった後の最初の検知）は、集計を
+        リセットしてから加算する。
+
+        Args:
+            site_id (str): 検知元サイトのID。
+            count (int): 当該サイトで新たに検知した件数。
+        """
+        if count <= 0:
+            return
+
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        data = DataManager.load_daily_summary()
+        if data.get('date') != today_str:
+            data = {'date': today_str, 'counts': {}, 'last_sent_date': data.get('last_sent_date', '')}
+
+        counts = data.setdefault('counts', {})
+        counts[site_id] = counts.get(site_id, 0) + count
+        DataManager.save_daily_summary(data)
 
 
 class WebMonitor:
@@ -1629,12 +1743,44 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
         notifier.notify(new_casts, site_name=site.name)
+        DataManager.record_daily_new_casts(site.site_id, len(new_casts))
 
         updated_casts = known_casts.union(current_casts)
         DataManager.save_known_casts(site, updated_casts)
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
         DataManager.save_known_casts(site, current_casts)
+
+
+def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
+    """21時台の実行のときだけ、その日の新規検知サマリをDiscordへテキスト通知する。
+
+    このスクリプトはcron等により1時間毎に別プロセスとして起動される前提
+    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは
+    実行時刻の時(hour)が21かどうかで判定する。同日中に複数回21時台の実行が
+    走った場合の重複送信を避けるため、送信済み日付をdaily_summary.jsonに
+    永続化して判定に用いる。
+
+    Args:
+        notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
+    """
+    now = datetime.now()
+    if now.hour != 21:
+        return
+
+    today_str = now.strftime('%Y-%m-%d')
+    data = DataManager.load_daily_summary()
+    if data.get('last_sent_date') == today_str:
+        return
+
+    counts = data.get('counts', {}) if data.get('date') == today_str else {}
+    site_names = {site.site_id: site.name for site in MonitorConfig.SITES}
+    notifier.notify_daily_summary(counts, site_names, today_str)
+
+    data['date'] = data.get('date', today_str)
+    data.setdefault('counts', {})
+    data['last_sent_date'] = today_str
+    DataManager.save_daily_summary(data)
 
 
 def run_monitor() -> None:
@@ -1661,6 +1807,8 @@ def run_monitor() -> None:
             except Exception as e:
                 # 1サイトの予期しない例外で他サイトの処理を止めない
                 logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
+
+        _maybe_send_daily_summary(notifier)
 
     except Exception as e:
         logger.critical(f"Critical error in NewFace Monitor: {e}", exc_info=True)
