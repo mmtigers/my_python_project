@@ -681,7 +681,17 @@ class MonitorConfig:
         SiteConfig(
             site_id='yoluspa_osaka',
             name='YOLU SPA 大阪店',
-            target_url='https://yoluspa-osaka.net/%e3%82%b9%e3%82%b1%e3%82%b8%e3%83%a5%e3%83%bc%e3%83%ab/',
+            # 旧設定ではスケジュール(SCHEDULE)ページを巡回対象にしていたが、
+            # このページは「その日の出勤シフト」を表示するものであり、シフトに
+            # 入っていないキャストは掲載されない。そのため既存在籍者でも、たまたま
+            # まだシフト表に登場していない間はknown_castsに載らず、初めて
+            # シフトに入った日に毎回「新規キャスト」として誤検知されてしまう
+            # (実際、シフト表の運用開始から数日で50名超の既存在籍者が次々
+            # "新規"扱いされる異常な検知が続いた)。姉妹店yolu_spa
+            # (mrs-yoluspa.net)と同じURLパターンの「セラピスト一覧」
+            # (全キャスト常設ページ)に変更し、シフトに関わらず安定して
+            # 全在籍者を検知できるようにする
+            target_url='https://yoluspa-osaka.net/%e3%82%bb%e3%83%a9%e3%83%94%e3%82%b9%e3%83%88%e4%b8%80%e8%a6%a7/',
             # 既存のyolu_spa(mrs-yoluspa.net)とはドメインが異なる別店舗だが、
             # 同一テンプレート(クラス名体系)のためセレクタは流用
             selector_container='div.therapist-item',
