@@ -50,6 +50,11 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
             // 念のためサーバーとも同期
             queryClient.invalidateQueries({ queryKey: queryKey });
 
+            // ★バグ修正: アイテム使用はバックエンド側で quest_history に記録され
+            // 冒険の記録に載る仕組みだったが、chronicleクエリを無効化していなかったため
+            // staleTime(5分)が切れるまで反映されなかった。
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
+
             // ★変更: 承認不要なので常にクリア音を再生
             play('clear');
         }
