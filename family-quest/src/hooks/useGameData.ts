@@ -121,6 +121,10 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         },
         onSuccess: (res, variables) => {
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
+            // ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は
+            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため
+            // staleTime(5分)が切れるまで反映されなかった。
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
             // res は QuestResult 型になるためアクセス可能
             if (res.leveledUp && onLevelUp) {
                 onLevelUp({
@@ -143,6 +147,9 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
+            // 取消は承認済みの完了もロールバックしうる(quest_historyの行ごと削除される)ため、
+            // 既に冒険の記録に載っていた場合に備えてこちらも無効化する
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
         },
         onError: (err) => handleError('キャンセル', err),
     });
@@ -157,6 +164,8 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
+            // 承認によりクエストが approved になり、冒険の記録に載るようになる
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
         },
         onError: (err) => handleError('承認', err),
     });
@@ -187,6 +196,8 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         onSuccess: (_data, variables) => { // data -> _data
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
             queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });
+            // 購入は reward_history に記録され冒険の記録に載る
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
         },
         onError: (err) => handleError('購入', err),
     });

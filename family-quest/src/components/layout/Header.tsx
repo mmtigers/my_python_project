@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '@/types';
-import { Scroll, Settings, Bell, Home } from 'lucide-react';
+import { Scroll, Settings, Home } from 'lucide-react';
 
 interface HeaderProps {
     users: User[];
@@ -9,7 +9,6 @@ interface HeaderProps {
     onUserSwitch: (idx: number) => void;
     onLogSwitch: () => void;
     onSettingsClick: () => void;
-    onNotificationsClick: () => void;
     // 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の
     // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。
     // true の場合はユーザー切替行を省略し、タイトルと記録ボタンのみを表示する。
@@ -32,7 +31,6 @@ const Header: React.FC<HeaderProps> = ({
     onUserSwitch,
     onLogSwitch,
     onSettingsClick,
-    onNotificationsClick,
     hideUserSwitcher,
     hideLogSwitcher,
     showBackToMain,
@@ -41,15 +39,8 @@ const Header: React.FC<HeaderProps> = ({
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
 
-            {/* 設定・おしらせボタン */}
+            {/* 表示せっていボタン */}
             <div className="absolute top-2 right-2 flex gap-1 z-30">
-                <button
-                    onClick={onNotificationsClick}
-                    aria-label="おしらせ履歴"
-                    className="w-10 h-10 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full bg-gray-800/80 border border-gray-600 text-gray-300 hover:text-white hover:bg-gray-700 transition-colors"
-                >
-                    <Bell size={18} />
-                </button>
                 <button
                     onClick={onSettingsClick}
                     aria-label="表示せってい"
@@ -71,18 +62,31 @@ const Header: React.FC<HeaderProps> = ({
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
                 {/* 1. ホームボタン(横画面のみ)。トップ画面でも表示して統一感を持たせる
-                    (トップ画面では押しても画面遷移は起きない: 既にメイン画面のため) */}
+                    (トップ画面では押しても画面遷移は起きない: 既にメイン画面のため)。
+                    ★バグ修正: 以前はスタイルが常に「選択中」固定だったため、記録画面に
+                    遷移したあともホームボタンだけフォーカスされたままに見えていた。
+                    他のボタン同様、viewMode に応じて選択中/非選択を切り替える */}
                 {showBackToMain && (
                     <button
                         onClick={onBackToMain}
-                        className="relative transition-all duration-300 flex flex-col items-center group p-1 scale-110"
+                        className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'user' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
+                            }`}
                     >
-                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 border-yellow-400 ring-4 ring-yellow-500/30 bg-gray-800 shadow-lg flex items-center justify-center text-yellow-400">
+                        <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 shadow-lg flex items-center justify-center relative transition-colors ${viewMode === 'user'
+                            ? 'border-yellow-400 ring-4 ring-yellow-500/30 bg-gray-800 text-yellow-400'
+                            : 'border-gray-600 bg-gray-900 text-gray-400'
+                            }`}>
                             <Home size={32} />
                         </div>
-                        <div className="mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md bg-yellow-600 text-white border border-yellow-300 whitespace-nowrap">
+                        <div className={`mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md transition-colors whitespace-nowrap ${viewMode === 'user'
+                            ? 'bg-yellow-600 text-white border border-yellow-300 transform scale-110'
+                            : 'bg-gray-800 text-gray-400 border border-gray-600'
+                            }`}>
                             ホーム
                         </div>
+                        {viewMode === 'user' && (
+                            <div className="absolute -bottom-2 text-yellow-400 animate-bounce text-xs">▲</div>
+                        )}
                     </button>
                 )}
 
