@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Undo2, Clock, RotateCcw, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
+import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
@@ -107,11 +107,13 @@ const QuestItem: React.FC<{
 
     // パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、
     // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。
-    const cardSizeClasses = panelMode ? 'p-3 min-h-[64px]' : 'min-h-[56px] md:p-6 md:h-full';
-    const layoutClasses = panelMode ? 'flex items-center gap-3' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6';
-    const iconSizeClasses = panelMode ? (iconFirst ? 'text-5xl' : 'text-3xl') : 'text-2xl md:text-5xl';
-    const titleSizeClasses = panelMode ? (iconFirst ? 'text-sm' : 'text-base') : 'text-sm md:text-xl';
-    const descSizeClasses = panelMode ? 'text-[11px] text-gray-400 leading-tight line-clamp-1' : 'text-xs md:text-sm text-gray-400 leading-tight md:leading-normal';
+    // ★バグ修正: 1件あたりの表示が大きすぎた(アイコン・文字サイズ・カード高さ)ため、
+    // 全体的にコンパクトにする。説明文は line-clamp を外し、見切れず全文表示する。
+    const cardSizeClasses = panelMode ? 'p-2 min-h-[56px]' : 'min-h-[56px] md:p-6 md:h-full';
+    const layoutClasses = panelMode ? 'flex items-center gap-2' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6';
+    const iconSizeClasses = panelMode ? (iconFirst ? 'text-4xl' : 'text-xl') : 'text-2xl md:text-5xl';
+    const titleSizeClasses = panelMode ? (iconFirst ? 'text-xs' : 'text-sm') : 'text-sm md:text-xl';
+    const descSizeClasses = panelMode ? 'text-[10px] text-gray-400 leading-tight' : 'text-xs md:text-sm text-gray-400 leading-tight md:leading-normal';
     const badgeSizeClasses = panelMode ? 'text-[10px]' : 'text-xs';
     const rewardSizeClasses = panelMode ? 'text-xs font-bold' : 'text-xs md:text-lg font-bold';
     const statusTextClasses = panelMode ? 'text-xs' : 'text-xs md:text-sm';
@@ -158,22 +160,6 @@ const QuestItem: React.FC<{
                 <span key="timeLimited" className={`bg-yellow-500 text-black ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-1`}>
                     ⏰ {quest.start_time}~{quest.end_time}
                 </span>
-            )
-        });
-    }
-    if (quest.type === 'special') {
-        badgeCandidates.push({
-            key: 'special', priority: 5, node: (
-                <span key="special" className={`bg-purple-600 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold`}>
-                    特別
-                </span>
-            )
-        });
-    }
-    if (isInfinite && !isPending && !isLocked) {
-        badgeCandidates.push({
-            key: 'infinite', priority: 6, node: (
-                <span key="infinite" className={`bg-cyan-600 ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}><RotateCcw size={10} /> 無限</span>
             )
         });
     }

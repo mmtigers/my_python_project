@@ -375,9 +375,9 @@ function App() {
         </div>
       )}
 
-      {/* ★バグ修正: 横画面では記録(familyLog)表示中もユーザー切替行を隠したままにしていたため、
-          メイン画面へ戻る手段が一切なくなっていた。familyLog表示中は隠さず、
-          ユーザーアイコンをタップすればメイン画面へ戻れるようにする */}
+      {/* ★バグ修正: 横画面で記録(familyLog)表示中、以前はユーザー切替行(4人分のボタン)を
+          そのまま出しており「ホームに戻る」という意図が伝わらなかった。
+          代わりに単一の「ホームに戻る」ボタンを表示する */}
       <Header
         users={users}
         currentUserIdx={currentUserIdx}
@@ -386,8 +386,10 @@ function App() {
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
         onNotificationsClick={() => { setNotificationsOpen(true); play('tap'); }}
-        hideUserSwitcher={layoutMode === 'landscape' && viewMode !== 'familyLog'}
+        hideUserSwitcher={layoutMode === 'landscape'}
         hideLogSwitcher={layoutMode === 'portrait'}
+        showBackToMain={layoutMode === 'landscape' && viewMode === 'familyLog'}
+        onBackToMain={() => { setViewMode('main'); play('tap'); }}
       />
 
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
