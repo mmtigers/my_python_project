@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された42件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された53件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 「(廃止)」の付いた仕様書は、2026-08のFamily Quest大改修等で対応するソースファイル自体が削除済みのものです。削除された記録として残置されているのみで、新規の実装・参照の対象ではありません。
 
@@ -16,6 +16,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [Header.md](./src/components/layout/Header.md) | ユーザー切替および記録（家族の年代記）表示へのナビゲーション機能を持つヘッダーUI。状態を持たないプレゼンテーションコンポーネントで、`hideUserSwitcher`が真の場合はユーザー切替行を省略する。 |
+| [BottomNav.md](./src/components/layout/BottomNav.md) | 画面下部固定のフッターナビゲーション。「クエスト」「ごほうび」「もちもの」「記録」の4タブで構成される。 |
 
 ## src/components/ui
 
@@ -25,11 +26,24 @@
 | [BattleEffect.md](./src/components/ui/BattleEffect.md) | (廃止) ボス機能の廃止に伴い削除。クエスト完了（ボス攻撃時）の視覚演出を担っていたコンポーネント。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
+| [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
 | [CountUp.md](./src/components/ui/CountUp.md) | `framer-motion`のバネ物理モデルを用いて数値をカウントアップ表示するコンポーネント。プレフィックス・サフィックス・カンマ区切りに対応。 |
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
 | [LevelUpModal.md](./src/components/ui/LevelUpModal.md) | ユーザーのレベルアップ情報を表示し、同時に効果音を再生するモーダルコンポーネント。 |
 | [MessageModal.md](./src/components/ui/MessageModal.md) | タイトル・メッセージ・任意アイコンと「OK」ボタンのみを持つ、状態を持たないシンプルなモーダルダイアログ。 |
 | [Modal.md](./src/components/ui/Modal.md) | ESCキー・背景クリック・閉じるボタンに応じて非表示処理を呼び出す汎用モーダルウィンドウ。 |
+| [SettingsModal.md](./src/components/ui/SettingsModal.md) | 表示密度・非識字モード対象ユーザー・ユーザー別パネルアクセントカラーをまとめて設定するモーダル画面。`useSettings`フック経由でContext状態を操作する。 |
+
+## src/context
+
+| 仕様書 | 概要 |
+| --- | --- |
+| [SettingsContext.md](./src/context/SettingsContext.md) | アプリ全体の表示設定（表示密度・非識字モード対象・テーマカラー）を`localStorage`に永続化して管理する`SettingsProvider`コンポーネント。 |
+| [ToastContext.md](./src/context/ToastContext.md) | レベルアップ等の通知をブロッキングモーダルではなく自動で消えるトーストとして表示する`ToastProvider`コンポーネント。 |
+| [settingsShared.md](./src/context/settingsShared.md) | `SettingsContext.tsx`/`useSettings.ts`から参照される型・定数・React Contextオブジェクトを集約するモジュール。 |
+| [toastShared.md](./src/context/toastShared.md) | `ToastContext.tsx`/`useToast.ts`から参照される型定義とReact Contextオブジェクトを集約するモジュール。 |
+| [useSettings.md](./src/context/useSettings.md) | `SettingsContext`から値を取得するカスタムフック。Provider外で呼ばれた場合は例外を投げる。 |
+| [useToast.md](./src/context/useToast.md) | `ToastContext`から値を取得するカスタムフック。Provider外で呼ばれた場合は例外を投げる。 |
 
 ## src/features/admin/components
 
@@ -90,7 +104,7 @@
 | [InventoryList.md](./src/features/shop/components/InventoryList.md) | ユーザーの所持アイテム（インベントリ）一覧を取得・表示し、アイテムの「使用」「キャンセル」を行うUIコンポーネント。React Queryでのポーリングと楽観的UI更新を行う。 |
 | [RewardList.md](./src/features/shop/components/RewardList.md) | ユーザー情報と保有ゴールドに基づき、購入可能な商品を価格順にソートして表示するUIコンポーネント。購入可否に応じて見た目を切り替える。 |
 | [RewardShop.md](./src/features/shop/components/RewardShop.md) | 「ごほうび」画面のコンポーネント。所持ゴールド表示 → 購入可能な報酬一覧（`RewardList`） → 所持品（`InventoryList`）の順に構成し、旧「もちもの」独立タブは廃止された。 |
-| [ShopContainer.md](./src/features/shop/components/ShopContainer.md) | (廃止) デッドコードとして削除済み。「お店」「もちもの」タブ切り替えUIは本コンポーネントに集約されておらず、現在は`App.tsx`が`EquipmentShop`／`RewardList`／`InventoryList`を直接マウントする。 |
+| [ShopContainer.md](./src/features/shop/components/ShopContainer.md) | (廃止) デッドコードとして削除済み。「お店」「もちもの」タブ切り替えUIは本コンポーネントに集約されておらず、現在は`App.tsx`が`RewardShop`／`InventoryList`を直接マウントする。 |
 
 ## src/hooks
 
@@ -98,6 +112,8 @@
 | --- | --- |
 | [useGameData.md](./src/hooks/useGameData.md) | React Queryを用いて、ユーザー・クエスト・報酬・年代記・承認待ちインベントリ等のデータ取得・定期更新（ポーリング）と、完了・承認・却下・取消・購入のAPIリクエストを統合管理するカスタムフック。 |
 | [useLayoutMode.md](./src/hooks/useLayoutMode.md) | 横画面／縦画面のレイアウト判定を行うカスタムフック。`window.matchMedia`の一致状況を購読し、リサイズや画面回転にリアルタイムに追従する。 |
+| [useLongPress.md](./src/hooks/useLongPress.md) | クエスト取り消し操作の誤タップ防止のための長押しジェスチャーを提供するカスタムフック。 |
+| [useOnlineStatus.md](./src/hooks/useOnlineStatus.md) | `navigator.onLine`と`online`/`offline`イベントを利用してオンライン／オフライン状態を検知するカスタムフック。 |
 | [useSound.md](./src/hooks/useSound.md) | 効果音を再生するためのカスタムフック。音声ファイルパスを一元管理し、`HTMLAudioElement`インスタンスをキャッシュする。 |
 
 ## src/lib
