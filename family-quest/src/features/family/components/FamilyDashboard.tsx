@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Sword, ShoppingBag } from 'lucide-react';
+import { Sword, ShoppingBag, Package } from 'lucide-react';
 import { User, Quest, QuestHistory, Reward, PendingInventory } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
 import RewardShop from '../../shop/components/RewardShop';
+import { InventoryList } from '../../shop/components/InventoryList';
 import { useSettings } from '@/context/useSettings';
 import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
 import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
@@ -132,7 +133,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
     user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
     onInteract, onQuestClick, onBuyReward, onAvatarClick,
 }) => {
-    const [tab, setTab] = useState<'quest' | 'shop'>('quest');
+    const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
 
     const borderClass = isActive
         ? (themeColorKey ? THEME_BORDER_CLASSES[themeColorKey] : 'border-yellow-400')
@@ -150,7 +151,8 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                 <UserStatusCard user={user} onAvatarClick={onAvatarClick} />
             </div>
 
-            {/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保 */}
+            {/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。
+                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す */}
             <div className="flex gap-1 p-2 bg-black/40">
                 <button
                     onClick={() => setTab('quest')}
@@ -166,11 +168,18 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                 >
                     <ShoppingBag size={18} className="mb-0.5" /> ごほうび
                 </button>
+                <button
+                    onClick={() => setTab('inventory')}
+                    className={`flex-1 min-h-[44px] py-2 text-xs font-bold rounded-lg flex flex-col items-center justify-center transition-all ${tab === 'inventory' ? 'bg-green-600 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
+                        }`}
+                >
+                    <Package size={18} className="mb-0.5" /> もちもの
+                </button>
             </div>
 
             {/* パネルごとに独立スクロール(要件5) */}
             <div className="p-2 overflow-y-auto max-h-[60vh]">
-                {tab === 'quest' ? (
+                {tab === 'quest' && (
                     <QuestList
                         quests={quests}
                         completedQuests={completedQuests}
@@ -180,12 +189,16 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                         panelMode
                         iconFirst={iconFirst}
                     />
-                ) : (
+                )}
+                {tab === 'shop' && (
                     <RewardShop
                         rewards={rewards}
                         currentUser={user}
                         onBuy={onBuyReward}
                     />
+                )}
+                {tab === 'inventory' && (
+                    <InventoryList userId={user.user_id} panelMode />
                 )}
             </div>
         </div>

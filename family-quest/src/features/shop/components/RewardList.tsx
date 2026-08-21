@@ -1,5 +1,4 @@
 import React, { useMemo } from 'react';
-import { ShoppingBag } from 'lucide-react';
 import { Reward, User } from '@/types';
 import { Card } from '@/components/ui/Card';
 
@@ -38,11 +37,6 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
 
   return (
     <div className="space-y-2 animate-in fade-in slide-in-from-bottom-2 duration-300">
-      <div className="text-center border-b border-gray-600 pb-1 mb-2 text-yellow-300 text-sm font-bold flex items-center justify-center gap-2">
-        <ShoppingBag size={16} />
-        <span>-- 商品一覧 --</span>
-      </div>
-
       {sortedRewards.length === 0 && (
         <div className="text-center text-gray-400 py-4 text-xs">商品が入荷待ちです...</div>
       )}
