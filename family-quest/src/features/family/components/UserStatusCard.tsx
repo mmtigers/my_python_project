@@ -1,5 +1,4 @@
 import React from 'react';
-import { Crown } from 'lucide-react';
 import { User } from '@/types';
 import { CountUp } from '@/components/ui/CountUp';
 
@@ -13,10 +12,6 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
 
     return (
         <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-2 shadow-xl relative animate-in fade-in duration-300">
-            <div className="absolute top-2 right-2 opacity-10 pointer-events-none">
-                <Crown size={60} />
-            </div>
-
             <div className="flex items-center gap-3 relative z-10">
                 {/* アバター */}
                 <div
