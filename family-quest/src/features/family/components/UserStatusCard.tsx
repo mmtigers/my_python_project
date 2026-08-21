@@ -11,86 +11,43 @@ interface UserStatusCardProps {
 const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {
     if (!user) return null;
 
-    // 簡易計算: 次のレベルまで = (Lv+1)*100 とする (APIデータがあればそれを使う)
-    const nextLevelExp = Math.floor(100 * Math.pow(1.2, user.level - 1));
-    const currentExp = user.exp || 0;
-
-    // 進捗率と残りEXP
-    const expPercentage = Math.min(100, (currentExp / nextLevelExp) * 100);
-    const expRemaining = nextLevelExp - currentExp;
-
-    // HPはバックエンド(MY_HOME_SYSTEM)が計算した値をそのまま使う。
-    // 個々のプレイヤーはダメージを受けない仕様のため hp は常に maxHp と等しいが、
-    // maxHp の値自体は calculate_max_hp(level) = level*20+5 で決まるため、
-    // フロント側で再計算せずAPIレスポンスの値を信頼する。
-    // 古いキャッシュ等でフィールドが欠けている場合は100%満タン表示にフォールバックする。
-    const maxHp = user.maxHp;
-    const currentHp = user.hp ?? maxHp ?? 0;
-    const hpPercentage = maxHp ? (currentHp / maxHp) * 100 : 100;
-
     return (
-        <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-3 shadow-xl relative animate-in fade-in duration-300">
+        <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-2 shadow-xl relative animate-in fade-in duration-300">
             <div className="absolute top-2 right-2 opacity-10 pointer-events-none">
-                <Crown size={80} />
+                <Crown size={60} />
             </div>
 
-            <div className="flex items-start gap-4 relative z-10">
+            <div className="flex items-center gap-3 relative z-10">
                 {/* アバター */}
                 <div
                     onClick={() => onAvatarClick(user)}
-                    className="text-5xl bg-blue-900 p-2 rounded border-2 border-white shadow-inner cursor-pointer hover:brightness-110 active:scale-95 transition-all w-[70px] h-[70px] flex items-center justify-center overflow-hidden"
+                    className="text-4xl bg-blue-900 p-1 rounded border-2 border-white shadow-inner cursor-pointer hover:brightness-110 active:scale-95 transition-all w-[52px] h-[52px] flex items-center justify-center overflow-hidden flex-shrink-0"
                 >
-                    {user.avatar ? (
+                    {/* ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、
+                        未設定時の絵文字デフォルト値の場合がある。パス以外を<img src>に渡すと
+                        壊れた画像アイコンになるため、Header.tsxと同様にパス形式かどうかを判定する */}
+                    {user.avatar && user.avatar.startsWith('/') ? (
                         <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
                     ) : (
-                        user.icon || '🙂'
+                        user.avatar || user.icon || '🙂'
                     )}
                 </div>
 
                 {/* ステータス詳細 */}
-                <div className="flex-1 space-y-1">
+                <div className="flex-1 min-w-0 space-y-1">
                     <div className="flex justify-between items-baseline border-b border-blue-600 pb-1">
-                        <span className="text-lg font-bold text-yellow-300 tracking-widest truncate">{user.name}</span>
-                        <span className="text-sm text-cyan-200 whitespace-nowrap">{user.job_class || '冒険者'} Lv.{user.level}</span>
+                        <span className="text-base font-bold text-yellow-300 tracking-widest truncate">{user.name}</span>
+                        <span className="text-xs text-cyan-200 whitespace-nowrap">{user.job_class || '冒険者'} Lv.{user.level}</span>
                     </div>
 
-                    <div className="grid grid-cols-[30px_1fr] items-center text-sm gap-2">
-
-                        {/* HPバー */}
-                        <span className="font-bold text-red-300">HP</span>
-                        <div className="w-full bg-gray-900 h-3 rounded border border-gray-600 overflow-hidden relative">
-                            <div
-                                className="bg-gradient-to-r from-green-500 to-green-400 h-full transition-all duration-700"
-                                style={{ width: `${hpPercentage}%` }}
-                            />
-                            <div className="absolute inset-0 text-[8px] flex items-center justify-center text-white/80 font-bold leading-none">
-                                <span className="flex gap-0.5">
-                                    <CountUp value={currentHp} /> / {maxHp ?? '-'}
-                                </span>
-                            </div>
-                        </div>
-
-                        {/* EXPバー */}
-                        <span className="font-bold text-orange-300">EXP</span>
-                        <div className="w-full bg-gray-900 h-3 rounded border border-gray-600 overflow-hidden relative">
-                            <div
-                                className="bg-gradient-to-r from-orange-500 to-yellow-400 h-full transition-all duration-700"
-                                style={{ width: `${expPercentage}%` }}
-                            />
-                            <div className="absolute inset-0 text-[8px] flex items-center justify-center text-white/80 font-bold leading-none">
-                                あと {expRemaining}
-                            </div>
-                        </div>
-
-                        {/* ゴールド */}
-                        <span className="font-bold text-yellow-300">G</span>
-                        <div className="text-right font-bold text-yellow-300 tabular-nums">
+                    {/* ゴールドとメダルは1行にまとめる(カードの縦幅を抑えるため) */}
+                    <div className="flex items-center justify-between text-sm gap-2">
+                        <div className="flex items-center gap-1 font-bold text-yellow-300 tabular-nums">
+                            <span>G</span>
                             <CountUp value={user.gold || 0} suffix=" G" />
                         </div>
-
-                        {/* メダル */}
-                        <span className="font-bold text-yellow-500">🏅</span>
-                        <div className="text-right font-bold text-yellow-500 tabular-nums">
+                        <div className="flex items-center gap-1 font-bold text-yellow-500 tabular-nums">
+                            <span>🏅</span>
                             <CountUp value={user.medal_count || 0} suffix=" 枚" />
                         </div>
                     </div>
