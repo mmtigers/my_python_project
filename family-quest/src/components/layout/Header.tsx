@@ -70,7 +70,8 @@ const Header: React.FC<HeaderProps> = ({
             {/* Unified Navigation Area (Users + Log) */}
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
-                {/* 1. ホームに戻るボタン(横画面で記録表示中のみ) */}
+                {/* 1. ホームボタン(横画面のみ)。トップ画面でも表示して統一感を持たせる
+                    (トップ画面では押しても画面遷移は起きない: 既にメイン画面のため) */}
                 {showBackToMain && (
                     <button
                         onClick={onBackToMain}
@@ -80,7 +81,7 @@ const Header: React.FC<HeaderProps> = ({
                             <Home size={32} />
                         </div>
                         <div className="mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md bg-yellow-600 text-white border border-yellow-300 whitespace-nowrap">
-                            ホームに戻る
+                            ホーム
                         </div>
                     </button>
                 )}
