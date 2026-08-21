@@ -4,20 +4,16 @@ import { ToastContext, ToastItem } from './toastShared';
 
 // レベルアップ/メダル獲得などの「成功の演出」を、作業を止めるブロッキングモーダルではなく
 // 自動で消える軽量トーストとして表示するための仕組み。
-// 見逃した通知は history に残るので、あとから通知履歴パネルでまとめて確認できる。
 // 型・Context object・useToast フックは toastShared.ts / useToast.ts に分離している。
 
 const AUTO_DISMISS_MS = 4000;
-const MAX_HISTORY = 30;
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [toasts, setToasts] = useState<ToastItem[]>([]);
-    const [history, setHistory] = useState<ToastItem[]>([]);
 
     const showToast = useCallback((toast: Omit<ToastItem, 'id' | 'createdAt'>) => {
         const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };
         setToasts(prev => [...prev, item]);
-        setHistory(prev => [item, ...prev].slice(0, MAX_HISTORY));
 
         setTimeout(() => {
             setToasts(prev => prev.filter(t => t.id !== item.id));
@@ -28,9 +24,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setToasts(prev => prev.filter(t => t.id !== id));
     }, []);
 
-    const clearHistory = useCallback(() => setHistory([]), []);
-
-    const value = useMemo(() => ({ showToast, history, clearHistory }), [showToast, history, clearHistory]);
+    const value = useMemo(() => ({ showToast }), [showToast]);
 
     return (
         <ToastContext.Provider value={value}>
