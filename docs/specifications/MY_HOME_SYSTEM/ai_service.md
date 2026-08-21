@@ -60,92 +60,92 @@
 ### `SimpleRateLimiter` (クラス)
 
 * **役割**: 指定された期間（1分）内のリクエスト数を制限する状態管理を行う。
-* 根拠: `class SimpleRateLimiter:` (行番号取得不可 / 抜粋: "class SimpleRateLimiter:")
+* 根拠: `class SimpleRateLimiter:` (行番号: 52 / 抜粋: "class SimpleRateLimiter:")
 
 
 * **引数/リクエスト**: `limit: int` (デフォルト: `REQUESTS_PER_MINUTE_LIMIT`)
-* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号取得不可 / 抜粋: "def **init**(self, limit: int")
+* 根拠: `def __init__(self, limit: int = REQUESTS_PER_MINUTE_LIMIT):` (行番号: 57 / 抜粋: "def **init**(self, limit: int")
 
 
 * **戻り値/レスポンス**: オブジェクトインスタンス
-* 根拠: コンストラクタ定義による (行番号取得不可 / 抜粋: "def **init**")
+* 根拠: コンストラクタ定義による (行番号: 57 / 抜粋: "def **init**")
 
 
 * **副作用**: なし
-* 根拠: インスタンス変数の初期化のみ (行番号取得不可 / 抜粋: "self.limit = limit")
+* 根拠: インスタンス変数の初期化のみ (行番号: 58 / 抜粋: "self.limit = limit")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 例外処理の記述なし (行番号取得不可 / 抜粋: "self._lock = asyncio.Lock()")
+* 根拠: 例外処理の記述なし (行番号: 61 / 抜粋: "self._lock = asyncio.Lock()")
 
 
 
 ### `SimpleRateLimiter.allow_request` (メソッド)
 
 * **役割**: リクエストが許可されるかどうかを判定し、1分経過時のカウンタリセットと許可時のカウンタ加算を行う。
-* 根拠: `async def allow_request(self) -> bool:` (行番号取得不可 / 抜粋: "async def allow_request(self) -> bool:")
+* 根拠: `async def allow_request(self) -> bool:` (行番号: 63 / 抜粋: "async def allow_request(self) -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def allow_request(self)` (行番号取得不可 / 抜粋: "async def allow_request(self)")
+* 根拠: `def allow_request(self)` (行番号: 63 / 抜粋: "async def allow_request(self)")
 
 
 * **戻り値/レスポンス**: `bool` (許可ならTrue、制限超過ならFalse)
-* 根拠: `return True` / `return False` (行番号取得不可 / 抜粋: "return True")
+* 根拠: `return True` / `return False` (行番号: 78, 81 / 抜粋: "return True")
 
 
 * **副作用**: `self.count` および `self.last_reset_time` の更新
-* 根拠: `self.count += 1` (行番号取得不可 / 抜粋: "self.count += 1")
+* 根拠: `self.count += 1` (行番号: 80 / 抜粋: "self.count += 1")
 
 
 * **エラーハンドリング**: 非同期ロック (`asyncio.Lock`) により並行処理時の競合を防止。
-* 根拠: `async with self._lock:` (行番号取得不可 / 抜粋: "async with self._lock:")
+* 根拠: `async with self._lock:` (行番号: 70 / 抜粋: "async with self._lock:")
 
 
 
 ### `tool_record_child_health` (関数)
 
 * **役割**: 子供の体調を記録するため `line_service.log_child_health` を呼び出し、結果メッセージを返す。
-* 根拠: `async def tool_record_child_health` (行番号取得不可 / 抜粋: "async def tool_record_child_health")
+* 根拠: `async def tool_record_child_health` (行番号: 91 / 抜粋: "async def tool_record_child_health")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (行番号: 91 / 抜粋: "user_id: str, user_name: str")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号取得不可 / 抜粋: "return f"記録完了: {msg_obj.text}"")
+* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号: 110 / 抜粋: "return f"記録完了: {msg_obj.text}"")
 
 
 * **副作用**: `line_service.log_child_health` の呼び出し（外部サービス・DB操作の可能性）
-* 根拠: `await line_service.log_child_health` (行番号取得不可 / 抜粋: "await line_service.log_child_health")
+* 根拠: `await line_service.log_child_health` (行番号: 109 / 抜粋: "await line_service.log_child_health")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号取得不可 / 抜粋: "msg_obj = await line_service")
+* 根拠: try-except構文なし (行番号: 109 / 抜粋: "msg_obj = await line_service")
 
 
 
 ### `tool_record_food` (関数)
 
 * **役割**: 食事の内容を記録するため `line_service.log_food_record` を呼び出し、結果メッセージを返す。
-* 根拠: `async def tool_record_food` (行番号取得不可 / 抜粋: "async def tool_record_food")
+* 根拠: `async def tool_record_food` (行番号: 113 / 抜粋: "async def tool_record_food")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (行番号: 113 / 抜粋: "user_id: str, user_name: str")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号取得不可 / 抜粋: "return f"記録完了: {msg_obj.text}"")
+* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号: 129 / 抜粋: "return f"記録完了: {msg_obj.text}"")
 
 
 * **副作用**: `line_service.log_food_record` の呼び出し（外部サービス・DB操作の可能性）
-* 根拠: `await line_service.log_food_record` (行番号取得不可 / 抜粋: "await line_service.log_food_record")
+* 根拠: `await line_service.log_food_record` (行番号: 128 / 抜粋: "await line_service.log_food_record")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号取得不可 / 抜粋: "msg_obj = await line_service")
+* 根拠: try-except構文なし (行番号: 128 / 抜粋: "msg_obj = await line_service")
 
 
 
@@ -206,65 +206,65 @@
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号取得不可 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 245 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "retry_state")
+* 根拠: 関数シグネチャ (行番号: 245 / 抜粋: "retry_state")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: return文なし (行番号取得不可 / 抜粋: "logger.warning(")
+* 根拠: return文なし (行番号: 248〜252 / 抜粋: "logger.warning(")
 
 
 * **副作用**: `logger.warning` によるログ書き込み
-* 根拠: `logger.warning(...)` (行番号取得不可 / 抜粋: "logger.warning(")
+* 根拠: `logger.warning(...)` (行番号: 248〜252 / 抜粋: "logger.warning(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号取得不可 / 抜粋: "exception = retry_state")
+* 根拠: try-except構文なし (行番号: 247 / 抜粋: "exception = retry_state")
 
 
 
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを別スレッドで実行し、`ResourceExhausted` 例外発生時に指数バックオフによるリトライを行う。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号取得不可 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 254〜261 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "chat_session, prompt: str")
+* 根拠: 関数シグネチャ (行番号: 261 / 抜粋: "chat_session, prompt: str")
 
 
 * **戻り値/レスポンス**: APIレスポンスオブジェクト
-* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号取得不可 / 抜粋: "return await asyncio.to_thread")
+* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 273 / 抜粋: "return await asyncio.to_thread")
 
 
 * **副作用**: APIへのネットワーク通信
-* 根拠: `chat_session.send_message` (行番号取得不可 / 抜粋: "chat_session.send_message")
+* 根拠: `chat_session.send_message` (行番号: 273 / 抜粋: "chat_session.send_message")
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
-* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号取得不可 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
+* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 255 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
 
 
 
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。
-* 根拠: `async def analyze_text_and_execute` (行番号取得不可 / 抜粋: "async def analyze_text_and_execute")
+* 根拠: `async def analyze_text_and_execute` (行番号: 280 / 抜粋: "async def analyze_text_and_execute")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号取得不可 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 280 / 抜粋: "user_id: str, user_name: str, text: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号取得不可 / 抜粋: "-> Optional[str]:")
+* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 280 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: API通信、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号取得不可 / 抜粋: "await _call_gemini_api_with_retry")
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 297, 326, 368 / 抜粋: "await _call_gemini_api_with_retry")
 
 
 * **エラーハンドリング**:
@@ -275,7 +275,7 @@
 * 空のレスポンス時はエラーメッセージを返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 327, 330, 378 / 抜粋: "except Exception as e:")
 
 
 
@@ -409,16 +409,17 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 外部モジュールの詳細仕様 | DBアクセス、設定定数、ログ出力、LINE連携の厳密な型・挙動が現在のファイルからは判別できないため。 | `config.py`, `common.py`, `services/line_service.py`, `core/logger.py`, `core/utils.py` |
-| Gemini APIレスポンスの詳細なオブジェクト構造 | `response.parts[0].function_call.args` 等でアクセスしているが、APIライブラリのバージョンや仕様によるためコード単体では確定できない。 | 外部ライブラリ (`google-generativeai`) の公式ドキュメント |
+| Gemini APIレスポンスの詳細なオブジェクト構造 | `response.parts[0].function_call.args` 等でアクセスしているが、APIライブラリのバージョンや仕様によるためコード単体では確定できない（リポジトリ内を検索したが`google-generativeai`/`google.generativeai`パッケージのソースコード自体は存在せず、解消不可）。 | 外部ライブラリ (`google-generativeai`) の公式ドキュメント |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 外部モジュールの詳細仕様（`line_service.log_child_health`/`log_food_record` の戻り値） | `line_service.md`の解析によれば、`log_child_health`と`log_food_record`はいずれも`linebot.v3.messaging`の`TextMessage`オブジェクトを返す関数と推測される。本ファイルが参照する`msg_obj.text`はこの`TextMessage`が持つ属性に対応すると考えられるが、`line_service.py`および`linebot`ライブラリ自体のソースコードは未確認。 | line_service.md |
-| 外部モジュールの詳細仕様（`common.execute_read_query`） | `common.md`の解析によれば`common.py`は非推奨のFacadeモジュールであり、`execute_read_query`は`core/database.py`からの再エクスポートと推測される。`database.md`の解析によれば、`execute_read_query`は読み取り専用モード(`?mode=ro`)でSELECTクエリを実行し、結果をJSON文字列として返す、または例外発生時も例外を送出せずエラーメッセージ文字列を返す実装と推測される。ただし`config.SQLITE_DB_PATH`の実際の値や`common.py`側の再エクスポート実装自体は未確認。 | common.md, database.md |
-| 外部モジュールの詳細仕様（`setup_logging`） | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ただしWebhook URL等の設定値（`config.DISCORD_WEBHOOK_ERROR`）自体は未確認。 | logger.md |
-| 外部モジュールの詳細仕様（`get_now_iso`） | `utils.md`の解析によれば、`get_now_iso`は"Asia/Tokyo"タイムゾーンの現在日時をISO 8601形式の文字列で返す関数と推測される。 | utils.md |
+| 外部モジュールの詳細仕様（`config`, `FAMILY_SETTINGS`） | `MY_HOME_SYSTEM/config.py`を直接確認した。`GEMINI_API_KEY`（203行目、`os.getenv("GEMINI_API_KEY")`）、`SQLITE_TABLE_CHILD`（245行目、値`"child_health_records"`）、`SQLITE_TABLE_FOOD`（242行目、値`"food_records"`）、`SQLITE_TABLE_SHOPPING`（248行目、値`"shopping_records"`）、`SQLITE_TABLE_POWER_USAGE`（237行目、値`"power_usage"`）がいずれもモジュールレベルの単純な定数として定義されていることを確認した。`FAMILY_SETTINGS`（469〜477行目）は`{"members": [...], "styles": {...}}`という辞書であり、本ファイル(ai_service.py)が参照する`config.FAMILY_SETTINGS.get('members', [])`（ai_service.py:197）は実在する4名（智矢・涼花・将博・春菜）の氏名リストを返すことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:203, 237, 242, 245, 248, 469-477` |
+| 外部モジュールの詳細仕様（`common.execute_read_query`） | `MY_HOME_SYSTEM/common.py:22-27`を直接確認したところ、`execute_read_query`は`core.database`からの再エクスポートであることが確定した。実体である`MY_HOME_SYSTEM/core/database.py:52-65`の`execute_read_query(query: str, params: tuple = ()) -> str`を直接確認した結果、`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)`により読み取り専用モードで接続し、`cursor.execute(query, params)`でクエリを実行、結果が空なら`"該当するデータはありませんでした。"`という文字列を、結果があれば`json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)`によるJSON文字列を返す。例外発生時は`except Exception as e:`で捕捉し、例外を送出せず`f"検索エラー: {str(e)}"`という文字列を返す実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27`, `MY_HOME_SYSTEM/core/database.py:52-65` |
+| 外部モジュールの詳細仕様（`setup_logging`） | `MY_HOME_SYSTEM/core/logger.py:46-86`の`setup_logging(name: str, webhook_url: str = None) -> logging.Logger`を直接確認した。`logging.getLogger(name)`を取得後、既存ハンドラをクリアしログレベルを`INFO`に設定、コンソール出力用の`StreamHandler`と、`logs/home_system.log`への日次ローテーション（`TimedRotatingFileHandler`, `when='midnight'`, `backupCount=7`）を行う`FileHandler`を追加する。さらに`webhook_url`引数（未指定時は`config.DISCORD_WEBHOOK_ERROR`、78行目）が設定されている場合、`DiscordErrorHandler`を`logging.ERROR`レベルで追加し、ERROR以上のログをDiscordへ自動通知する構成であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86` |
+| 外部モジュールの詳細仕様（`get_now_iso`） | `MY_HOME_SYSTEM/core/utils.py:12-13`を直接確認した。`get_now_iso() -> str`は`datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`を返すのみの実装であり、"Asia/Tokyo"タイムゾーンの現在時刻をISO 8601形式の文字列で返すことを確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:12-13` |
+| 外部モジュールの詳細仕様（`line_service.log_child_health`/`log_food_record` の戻り値） | `MY_HOME_SYSTEM/services/line_service.py:8-9, 34-41, 43-51`を直接確認した。8〜9行目で`from linebot.v3.messaging import (TextMessage, ...)`をインポートしており、`log_child_health`（34〜41行目）は`return TextMessage(text=f"【{child_name}】{condition} を記録しました！🏥")`、`log_food_record`（43〜51行目）は`return TextMessage(text=f"🍽️ {category}「{item}」を記録しました！")`を返す実装であることを確認した。本ファイル(ai_service.py)が参照する`msg_obj.text`（109〜110行目, 128〜129行目）は、この`TextMessage`インスタンスの`text`属性（コンストラクタ引数としてセットされたメッセージ文字列）に対応することが確定した。ただし`linebot`ライブラリ自体（`TextMessage`クラスの定義）はリポジトリ内には存在しない（外部パッケージ）。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:8-9, 34-41, 43-51` |
 
 ## 10. 自己検証結果
 

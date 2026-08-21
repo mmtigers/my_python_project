@@ -482,16 +482,17 @@ graph TD
 | --- | --- | --- |
 | `core.logger.get_logger`の実際の実装 | ログの出力フォーマット、出力先、ログレベルの詳細が本ファイルからは不明（フォールバック実装のみ確認可能）。 | `core/logger.py` |
 | `core.nas_utils.get_managed_target_directory`の実際の実装 | NASマウント確認・自動修復ロジックの詳細な挙動が不明（フォールバック実装は単純なローカルパス返却のみ）。 | `core/nas_utils.py` |
-| `youtube_subscriptions`テーブルへのレコード登録手段 | 本ファイルはSELECT（読み取り専用）のみを行っており、チャンネルURLがどのプロセス・手段で登録・有効化(`is_active=1`)されるかが不明。 | DB登録を行う別スクリプトまたは運用手順書 |
-| `yt_dlp.extract_info`が返す辞書の完全な構造 | `entries`, `channel`, `uploader`等の各キーが常に存在するか、`yt_dlp`のバージョンによって変化しうるかは本ファイルのコードからは分からない。 | `yt_dlp`本体のソースまたは公式ドキュメント（コード外） |
-| 本ファイルの実行方法（cron設定等） | `--cron`引数での自動巡回モードが存在するが、実際にどのスケジュール（cron、systemdタイマー等）で起動されるかは本ファイルからは不明。 | デプロイ設定・cron定義ファイル等 |
+| `youtube_subscriptions`テーブルへのレコード登録手段 | 本ファイルはSELECT（読み取り専用）のみを行っており、チャンネルURLがどのプロセス・手段で登録・有効化(`is_active=1`)されるかが不明。 | DB登録を行う別スクリプトまたは運用手順書（リポジトリ全体を`youtube_subscriptions`という文字列で`grep`検索したが、`INSERT`または`UPDATE`によりこのテーブルへ書き込む箇所は本ファイル自身にも他のどのファイルにも見つからず、解消不可。`MY_HOME_SYSTEM/current_schema.sql:327-332`に同名テーブルのスキーマ定義自体は存在するが、これはDBスキーマのダンプであり登録処理の実装ではない） |
+| `yt_dlp.extract_info`が返す辞書の完全な構造 | `entries`, `channel`, `uploader`等の各キーが常に存在するか、`yt_dlp`のバージョンによって変化しうるかは本ファイルのコードからは分からない。 | `yt_dlp`本体のソースまたは公式ドキュメント（コード外。実行環境で`import yt_dlp`を試みたところ`ModuleNotFoundError`であり、リポジトリ内にも`yt_dlp`パッケージ自体のソースは存在せず、解消不可） |
+| 本ファイルの実行方法（cron設定等） | `--cron`引数での自動巡回モードが存在するが、実際にどのスケジュール（cron、systemdタイマー等）で起動されるかは本ファイルからは不明。 | デプロイ設定・cron定義ファイル等（リポジトリ全体を`cron`/`systemd`/`docker-compose`関連のファイル名・記述で検索したが、本ファイルの実行スケジュールを定義する設定ファイルはリポジトリ内に見つからず、解消不可） |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `sanitize_filename`の詳細ルール | 関連ドキュメント（`file_utils.md`）の解析結果によれば、`sanitize_filename(filename, max_length=200)`は禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し、前後の空白を除去したうえで`max_length`（既定200文字）まで切り詰め、さらに末尾のピリオド・空白を除去する実装であることが分かった。これはあくまで別ファイルの解析結果に基づく補足情報である。 | [file_utils.md](./file_utils.md) |
-| `core.nas_utils.get_managed_target_directory`の実際の実装 | 関連ドキュメント（`nas_utils.md`）の解析結果によれば、同名関数`get_managed_target_directory(nas_dir_str, fallback_dir_str, mount_point="/mnt/nas")`が存在し、マウント確認・書き込み権限チェック→未マウント時は`sudo mount`による再マウント試行→復旧時はフォールバックデータをNASへ同期→最終手段としてローカルのフォールバックパスを返す、という実装であることが分かった。引数名は本ファイルの呼び出し箇所（`nas_dir_str`, `fallback_dir_str`, `mount_point`）と一致しており、関連性が高いと考えられる。ただしこれはあくまで別ファイルの解析結果に基づく補足情報であり、本ファイルおよび`core/nas_utils.py`のソースコードを直接確認したものではない。 | [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md) |
+| `core.logger.get_logger`の実際の実装 | `MY_HOME_SYSTEM/core/logger.py`を直接確認したところ、同ファイルには`get_logger`という名前の関数は一切定義されていない（定義されているのは`setup_logging(name, webhook_url=None)`関数(46〜86行目)と`DiscordErrorHandler`クラス(9〜44行目)のみ）。したがって`from core.logger import get_logger`（本ファイル36行目）は実行環境によらず常に`ImportError`となり、本ファイルは常に39〜43行目のフォールバック分岐（`logging.getLogger("UrlExtractor")`）を使用する設計であることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py`（全86行、`get_logger`定義なし） |
+| `core.nas_utils.get_managed_target_directory`の実際の実装 | `MY_HOME_SYSTEM/core/nas_utils.py:87-126`を直接確認した。シグネチャは`get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path`であり、本ファイルの呼び出し箇所（`nas_dir_str`, `fallback_dir_str`, `mount_point`）と引数名が完全に一致することを確認した。実装は、(1) `is_mounted_and_writable`（74〜85行目）でマウント状態と書き込み権限を確認し正常なら`sync_fallback_to_nas`でフォールバックデータをNASへ同期して`nas_dir`を返す、(2) 異常時は`attempt_remount`（19〜45行目、`sudo mount`コマンド呼び出し）で再マウントを試行し成功すれば同様に同期して`nas_dir`を返す、(3) それでも復旧しない場合はエラーログ出力と`config.LINE_USER_ID`宛の`send_push`通知を行った上でローカルの`fallback_dir`を作成して返す、というフェイルソフト設計である。関連ドキュメント`nas_utils.md`が示していた内容と一致することも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/nas_utils.py:87-126`（参考: [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md)） |
 
 ## 10. 自己検証結果
 
