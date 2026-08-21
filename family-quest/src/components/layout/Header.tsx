@@ -1,6 +1,6 @@
 import React from 'react';
 import { User } from '@/types';
-import { Scroll, Settings, Bell } from 'lucide-react';
+import { Scroll, Settings, Bell, Home } from 'lucide-react';
 
 interface HeaderProps {
     users: User[];
@@ -17,6 +17,12 @@ interface HeaderProps {
     // 縦画面ではフッターナビ(BottomNav)に「記録」タブが統合されたため、
     // ヘッダー側の記録ボタンは二重導線になる。true の場合は非表示にする。
     hideLogSwitcher?: boolean;
+    // ★バグ修正: 横画面(4人並び)で記録画面を表示中は、ユーザー切替行の代わりに
+    // 単一の「ホームに戻る」ボタンを表示する。以前はユーザー切替行をそのまま
+    // 出していたため、4人分のボタンが並んでしまい「ホームに戻る」という意図が
+    // 伝わらなかった。
+    showBackToMain?: boolean;
+    onBackToMain?: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -29,6 +35,8 @@ const Header: React.FC<HeaderProps> = ({
     onNotificationsClick,
     hideUserSwitcher,
     hideLogSwitcher,
+    showBackToMain,
+    onBackToMain,
 }) => {
     return (
         <header className="bg-gradient-to-b from-gray-900 to-black border-b-4 border-gray-800 pb-4 shadow-2xl relative z-20">
@@ -62,7 +70,22 @@ const Header: React.FC<HeaderProps> = ({
             {/* Unified Navigation Area (Users + Log) */}
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
-                {/* 1. Users */}
+                {/* 1. ホームに戻るボタン(横画面で記録表示中のみ) */}
+                {showBackToMain && (
+                    <button
+                        onClick={onBackToMain}
+                        className="relative transition-all duration-300 flex flex-col items-center group p-1 scale-110"
+                    >
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-4 border-yellow-400 ring-4 ring-yellow-500/30 bg-gray-800 shadow-lg flex items-center justify-center text-yellow-400">
+                            <Home size={32} />
+                        </div>
+                        <div className="mt-2 px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold shadow-md bg-yellow-600 text-white border border-yellow-300 whitespace-nowrap">
+                            ホームに戻る
+                        </div>
+                    </button>
+                )}
+
+                {/* 2. Users */}
                 {!hideUserSwitcher && users.map((user, idx) => {
                     const isActive = viewMode === 'user' && currentUserIdx === idx;
                     return (
@@ -106,11 +129,11 @@ const Header: React.FC<HeaderProps> = ({
                 })}
 
                 {/* Divider (PCのみ表示) */}
-                {!hideUserSwitcher && !hideLogSwitcher && (
+                {(!hideUserSwitcher || showBackToMain) && !hideLogSwitcher && (
                     <div className="w-px h-12 bg-gray-700 mx-1 self-center hidden sm:block"></div>
                 )}
 
-                {/* 2. Log Button (縦画面ではフッターナビに統合済みのため非表示) */}
+                {/* 3. Log Button (縦画面ではフッターナビに統合済みのため非表示) */}
                 {!hideLogSwitcher && (
                     <button
                         onClick={onLogSwitch}
