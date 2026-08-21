@@ -85,7 +85,6 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
             {/* ★変更: 右側の価格エリア (flex-shrink-0で価格が潰れるのを防ぐ) */}
             <div className={`flex-shrink-0 flex items-center gap-1 font-bold pl-2 ${canAfford ? 'text-yellow-300' : 'text-red-400'}`}>
               {cost.toLocaleString()} <span className="text-[10px]">G</span>
-              {!canAfford && <span className="text-[10px] ml-1">(不足)</span>}
             </div>
           </Card>
         );

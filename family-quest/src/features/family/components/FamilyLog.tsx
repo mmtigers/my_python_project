@@ -1,17 +1,29 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Trophy, Coins, History, Clock } from 'lucide-react';
 import { FamilyStats, ChronicleItem } from '@/hooks/useGameData';
+import { User } from '@/types';
 
 interface FamilyLogProps {
     stats: FamilyStats | null;
     chronicle: ChronicleItem[];
+    users: User[];
 }
 
-const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
+// ★バグ修正: 冒険の記録(タイムライン)は家族全員分が1本にまとまって表示されており、
+// 誰の記録か分かりにくかった。ユーザーを選んで、その人だけの記録を表示できるようにする。
+// 家族の総力(統計エリア)は家族全体の集計値のため、こちらは従来通り共通表示のまま。
+const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle, users }) => {
+    const [selectedUserId, setSelectedUserId] = useState<string | undefined>(users[0]?.user_id);
+
     if (!stats || !chronicle) return <div className="text-center py-10">冒険の記録を読み込んでいます...</div>;
 
+    const selectedUser = users.find(u => u.user_id === selectedUserId);
+    const userChronicle = selectedUserId
+        ? chronicle.filter(item => item.userId === selectedUserId)
+        : chronicle;
+
     // 日付ごとにログをグループ化
-    const groupedChronicle = chronicle.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
+    const groupedChronicle = userChronicle.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
         const date = item.dateStr || item.date || '----/--/--';
         if (!groups[date]) groups[date] = [];
         groups[date].push(item);
@@ -50,12 +62,45 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ stats, chronicle }) => {
                 </div>
             </div>
 
-            {/* 2. 冒険の記録（タイムライン） */}
+            {/* 2. 冒険の記録（タイムライン、ユーザーごとに切替） */}
             <div className="space-y-4">
                 <div className="flex items-center gap-2 text-white border-b border-gray-700 pb-2">
                     <History className="text-blue-400" />
-                    <h3 className="font-bold text-lg">冒険の記録</h3>
+                    <h3 className="font-bold text-lg">
+                        {selectedUser ? `${selectedUser.name}の冒険の記録` : '冒険の記録'}
+                    </h3>
                 </div>
+
+                {/* ユーザー選択タブ */}
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                    {users.map(user => {
+                        const isSelected = user.user_id === selectedUserId;
+                        const hasAvatarImage = !!user.avatar && user.avatar.startsWith('/');
+                        return (
+                            <button
+                                key={user.user_id}
+                                onClick={() => setSelectedUserId(user.user_id)}
+                                className={`flex-shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border-2 transition-all ${isSelected
+                                    ? 'border-yellow-400 bg-yellow-900/30 text-white'
+                                    : 'border-gray-700 bg-gray-900/40 text-gray-400 opacity-70 hover:opacity-100'
+                                    }`}
+                            >
+                                <span className="w-5 h-5 rounded-full overflow-hidden flex items-center justify-center bg-gray-800 text-xs flex-shrink-0">
+                                    {hasAvatarImage ? (
+                                        <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                        user.avatar || user.icon || '🙂'
+                                    )}
+                                </span>
+                                <span className="text-xs font-bold whitespace-nowrap">{user.name}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {Object.keys(groupedChronicle).length === 0 && (
+                    <div className="text-center text-gray-400 py-6 text-sm">まだ記録がありません</div>
+                )}
 
                 {Object.entries(groupedChronicle).map(([date, logs]: [string, ChronicleItem[]]) => (
                     <div key={date} className="relative pl-4 border-l-2 border-gray-700">
