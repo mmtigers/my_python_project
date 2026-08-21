@@ -135,9 +135,13 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
 
-    const borderClass = isActive
-        ? (themeColorKey ? THEME_BORDER_CLASSES[themeColorKey] : 'border-yellow-400')
-        : 'border-gray-700';
+    // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
+    // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
+    // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを
+    // 「直前に操作した」ことの一時的なハイライトとして使う。
+    const borderClass = themeColorKey
+        ? THEME_BORDER_CLASSES[themeColorKey]
+        : (isActive ? 'border-yellow-400' : 'border-gray-700');
     const ringClass = isActive
         ? `ring-2 ${themeColorKey ? THEME_RING_CLASSES[themeColorKey] : 'ring-yellow-400/50'}`
         : '';
@@ -152,28 +156,32 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
             </div>
 
             {/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。
-                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す */}
+                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。
+                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}
             <div className="flex gap-1 p-2 bg-black/40">
                 <button
                     onClick={() => setTab('quest')}
-                    className={`flex-1 min-h-[44px] py-2 text-xs font-bold rounded-lg flex flex-col items-center justify-center transition-all ${tab === 'quest' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
+                    aria-label="クエスト"
+                    className={`flex-1 min-h-[44px] py-2 rounded-lg flex items-center justify-center transition-all ${tab === 'quest' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
                         }`}
                 >
-                    <Sword size={18} className="mb-0.5" /> クエスト
+                    <Sword size={20} />
                 </button>
                 <button
                     onClick={() => setTab('shop')}
-                    className={`flex-1 min-h-[44px] py-2 text-xs font-bold rounded-lg flex flex-col items-center justify-center transition-all ${tab === 'shop' ? 'bg-orange-500 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
+                    aria-label="ごほうび"
+                    className={`flex-1 min-h-[44px] py-2 rounded-lg flex items-center justify-center transition-all ${tab === 'shop' ? 'bg-orange-500 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
                         }`}
                 >
-                    <ShoppingBag size={18} className="mb-0.5" /> ごほうび
+                    <ShoppingBag size={20} />
                 </button>
                 <button
                     onClick={() => setTab('inventory')}
-                    className={`flex-1 min-h-[44px] py-2 text-xs font-bold rounded-lg flex flex-col items-center justify-center transition-all ${tab === 'inventory' ? 'bg-green-600 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
+                    aria-label="もちもの"
+                    className={`flex-1 min-h-[44px] py-2 rounded-lg flex items-center justify-center transition-all ${tab === 'inventory' ? 'bg-green-600 text-white shadow-md' : 'text-gray-400 bg-gray-900/60'
                         }`}
                 >
-                    <Package size={18} className="mb-0.5" /> もちもの
+                    <Package size={20} />
                 </button>
             </div>
 
