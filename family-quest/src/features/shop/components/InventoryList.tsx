@@ -5,7 +5,7 @@ import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { useSound } from '../../../hooks/useSound';
-import { Loader2, PackageOpen, Clock, AlertCircle } from 'lucide-react';
+import { Loader2, PackageOpen, AlertCircle } from 'lucide-react';
 import { InventoryItem } from '../../../types';
 
 
@@ -93,89 +93,58 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     // panelMode(PC横画面の4人並びパネル内)では、実際に使える幅が狭い(約300px)。
     // sm:grid-cols-2 はビューポート幅基準のため、狭いパネルに埋め込まれていても
     // (ビューポート自体はPCなので)2カラム化してアイコン・ボタンが見切れてしまう。
-    // panelMode時は常に1カラム・コンパクトな寸法にする。
-    const gridClass = panelMode ? 'grid-cols-1 gap-2' : 'grid-cols-1 sm:grid-cols-2 gap-4';
-    const iconBoxClass = panelMode ? 'text-2xl w-10 h-10' : 'text-4xl w-16 h-16';
-    const titleClass = panelMode ? 'text-sm' : 'text-lg';
+    // panelMode時は常に1カラムにする。
+    const gridClass = panelMode ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';
+    const iconBoxClass = panelMode ? 'text-xl w-9 h-9' : 'text-2xl w-11 h-11';
 
     return (
-        <div className={`grid ${gridClass} pb-20`}>
+        <div className={`grid ${gridClass} gap-2 pb-20`}>
             {items.map((item: InventoryItem) => {
                 const isPending = item.status === 'pending';
+                const isOwned = item.status === 'owned';
 
                 return (
                     <Card
                         key={item.id}
-                        className={`relative overflow-hidden transition-all duration-300 transform hover:scale-[1.02] ${isPending
-                            ? 'bg-amber-50 border-amber-300 shadow-amber-100 ring-2 ring-amber-200'
-                            : 'bg-white border-slate-200 shadow-sm hover:shadow-md'
+                        // ★バグ修正: 「つかう」ボタンを廃止し、カード自体をタップしたら
+                        // つかう確認モーダルを開くようにする(1行のコンパクト表示にするため)
+                        onClick={isOwned ? () => setItemToUse(item) : undefined}
+                        className={`flex items-center gap-2 p-2 transition-all ${isPending
+                            ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200'
+                            : 'bg-white border-slate-200 shadow-sm hover:shadow-md active:scale-[0.98] cursor-pointer'
                             }`}
                     >
-                        {/* 背景装飾: 狭いパネルでは見た目のノイズになるため非表示にする */}
-                        {!panelMode && (
-                            <div className="absolute -right-4 -top-4 text-9xl opacity-5 select-none pointer-events-none">
-                                {item.icon}
-                            </div>
-                        )}
-
-                        <div className="relative z-10 p-1">
-                            {/* ヘッダー: アイコンとタイトル */}
-                            <div className="flex items-start gap-3 mb-3">
-                                <div className={`
-                                    ${iconBoxClass} flex items-center justify-center rounded-2xl shadow-inner flex-shrink-0
-                                    ${isPending ? 'bg-amber-100' : 'bg-slate-100'}
-                                `}>
-                                    {item.icon}
-                                </div>
-                                <div className="flex-1 min-w-0 pt-1">
-                                    <h3 className={`font-bold ${titleClass} text-slate-800 leading-tight truncate`}>
-                                        {item.title}
-                                    </h3>
-                                    <p className="text-xs text-slate-500 mt-1 line-clamp-2">
-                                        {item.desc || '説明はありません'}
-                                    </p>
-                                    <p className="text-[10px] text-slate-400 mt-2 flex items-center gap-1">
-                                        <Clock size={10} />
-                                        購入: {new Date(item.purchased_at).toLocaleDateString()}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* フッター: アクション */}
-                            <div className="mt-2 pt-2 border-t border-slate-100/50">
-                                {item.status === 'owned' && (
-                                    <Button
-                                        size="md"
-                                        className="w-full min-h-[44px] bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white shadow-md active:scale-95 transition-all"
-                                        onClick={() => {
-                                            // ★変更: 「パパ・ママに通知がいきます」の文言を削除
-                                            setItemToUse(item);
-                                        }}
-                                        disabled={useMutationAction.isPending}
-                                    >
-                                        <PackageOpen size={18} className="mr-2" />
-                                        つかう！
-                                    </Button>
-                                )}
-
-                                {/* 既存機能維持: 過去データ等でpendingのものがあれば表示する */}
-                                {isPending && (
-                                    <div className="flex items-center justify-between bg-amber-100/50 p-2 rounded-lg">
-                                        <div className="flex items-center gap-2 text-amber-700 text-sm font-bold animate-pulse">
-                                            <AlertCircle size={16} />
-                                            <span>承認待ち...</span>
-                                        </div>
-                                        <button
-                                            className="min-h-[44px] min-w-[44px] text-xs text-slate-500 underline hover:text-slate-700 px-3"
-                                            onClick={() => cancelMutation.mutate(item.id)}
-                                            disabled={cancelMutation.isPending}
-                                        >
-                                            やめる
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
+                        <div className={`
+                            ${iconBoxClass} flex items-center justify-center rounded-xl flex-shrink-0
+                            ${isPending ? 'bg-amber-100' : 'bg-slate-100'}
+                        `}>
+                            {item.icon}
                         </div>
+                        <div className="flex-1 min-w-0">
+                            <h3 className="font-bold text-sm text-slate-800 leading-tight truncate">
+                                {item.title}
+                            </h3>
+                            <p className="text-[10px] text-slate-500 truncate">
+                                {item.desc || '説明はありません'}
+                            </p>
+                        </div>
+
+                        {isPending ? (
+                            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                                <span className="text-[10px] text-amber-700 font-bold flex items-center gap-0.5 animate-pulse">
+                                    <AlertCircle size={11} />承認待ち
+                                </span>
+                                <button
+                                    className="min-h-[32px] text-[10px] text-slate-500 underline hover:text-slate-700 px-2"
+                                    onClick={(e) => { e.stopPropagation(); cancelMutation.mutate(item.id); }}
+                                    disabled={cancelMutation.isPending}
+                                >
+                                    やめる
+                                </button>
+                            </div>
+                        ) : (
+                            <PackageOpen size={18} className="text-blue-500 flex-shrink-0" />
+                        )}
                     </Card>
                 );
             })}
