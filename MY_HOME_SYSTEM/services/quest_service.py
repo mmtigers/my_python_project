@@ -744,11 +744,11 @@ class GameSystem:
             for q in valid_quests:
                 cur.execute("""
                     INSERT INTO quest_master (
-                        quest_id, title, description, quest_type, target_user, exp_gain, gold_gain, 
+                        quest_id, title, description, quest_type, target_user, exp_gain, gold_gain,
                         icon_key, day_of_week, start_date, end_date, occurrence_chance,
-                        start_time, end_time, pre_requisite_quest_id
+                        start_time, end_time, pre_requisite_quest_id, reset_period
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(quest_id) DO UPDATE SET
                         title = excluded.title,
                         description = excluded.description,
@@ -756,13 +756,14 @@ class GameSystem:
                         exp_gain = excluded.exp_gain, gold_gain = excluded.gold_gain, icon_key = excluded.icon_key,
                         day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time,
                         start_date = excluded.start_date, end_date = excluded.end_date, occurrence_chance = excluded.occurrence_chance,
-                        pre_requisite_quest_id = excluded.pre_requisite_quest_id
+                        pre_requisite_quest_id = excluded.pre_requisite_quest_id,
+                        reset_period = excluded.reset_period
                 """, (
                     q.id, q.title, q.desc, q.type, q.target, q.exp, q.gold, q.icon,
-                    q.days, 
-                    q.start_date, q.end_date, 
+                    q.days,
+                    q.start_date, q.end_date,
                     q.chance, q.start_time, q.end_time,
-                    q.pre_requisite_quest_id
+                    q.pre_requisite_quest_id, q.reset_period
                 ))
             
             try:
