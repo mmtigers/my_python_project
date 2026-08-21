@@ -54,11 +54,16 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
         setUploading(true);
         setErrorMessage(null);
         const formData = new FormData();
-        formData.append('avatar', fileInputRef.current.files[0]);
-        formData.append('user_id', user.user_id);
+        formData.append('file', fileInputRef.current.files[0]);
 
         try {
-            await apiClient.postForm('/api/quest/upload_avatar', formData);
+            // ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており
+            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。
+            // さらにアップロードするだけではユーザーのアバターには反映されないため、
+            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。
+            const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);
+            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });
+
             // ★変更: 素の alert() を廃止し、アプリ標準のモーダル内メッセージで完了を伝える。
             // データ更新自体は即座に行い、モーダルはユーザーが「閉じる」を押すまで残す。
             onUploadComplete();

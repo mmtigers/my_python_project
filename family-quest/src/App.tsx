@@ -9,6 +9,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useSettings } from './context/useSettings';
 import { useToast } from './context/useToast';
 import RewardShop from './features/shop/components/RewardShop';
+import { InventoryList } from './features/shop/components/InventoryList';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { Quest, QuestHistory, Reward, User } from '@/types';
@@ -142,7 +143,7 @@ function App() {
   const { density, iconFirstUserIds } = useSettings();
   const { showToast } = useToast();
 
-  const [activeTab, setActiveTab] = useState<'quest' | 'shop'>('quest');
+  const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
@@ -374,6 +375,9 @@ function App() {
         </div>
       )}
 
+      {/* ★バグ修正: 横画面では記録(familyLog)表示中もユーザー切替行を隠したままにしていたため、
+          メイン画面へ戻る手段が一切なくなっていた。familyLog表示中は隠さず、
+          ユーザーアイコンをタップすればメイン画面へ戻れるようにする */}
       <Header
         users={users}
         currentUserIdx={currentUserIdx}
@@ -382,7 +386,7 @@ function App() {
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
         onNotificationsClick={() => { setNotificationsOpen(true); play('tap'); }}
-        hideUserSwitcher={layoutMode === 'landscape'}
+        hideUserSwitcher={layoutMode === 'landscape' && viewMode !== 'familyLog'}
         hideLogSwitcher={layoutMode === 'portrait'}
       />
 
@@ -431,8 +435,10 @@ function App() {
             <motion.div
               className="min-h-[300px] animate-fade-in"
               onPanEnd={(_e, info) => {
-                if (info.offset.x < -60 && activeTab === 'quest') setActiveTab('shop');
-                else if (info.offset.x > 60 && activeTab === 'shop') setActiveTab('quest');
+                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];
+                const idx = order.indexOf(activeTab);
+                if (info.offset.x < -60 && idx < order.length - 1) setActiveTab(order[idx + 1]);
+                else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);
               }}
             >
               {activeTab === 'quest' && (
@@ -453,6 +459,12 @@ function App() {
                     currentUser={currentUser}
                     onBuy={(r) => handleBuyReward(currentUser, r)}
                   />
+                </div>
+              )}
+
+              {activeTab === 'inventory' && (
+                <div className="animate-slide-in-right">
+                  <InventoryList userId={currentUser.user_id} />
                 </div>
               )}
             </motion.div>

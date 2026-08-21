@@ -58,11 +58,9 @@ const QuestItem: React.FC<{
     const bonusExp = quest.bonus_exp || 0;
     const hasBonus = bonusGold > 0 || bonusExp > 0;
 
-    // 合計報酬
+    // 合計報酬(ゴールドのみ画面表示する。EXPは表示不要のため計算しない)
     const baseGold = quest.gold_gain || quest.gold || 0;
-    const baseExp = quest.exp_gain || quest.exp || 0;
     const totalGold = baseGold + bonusGold;
-    const totalExp = baseExp + bonusExp;
 
     const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
     const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
@@ -275,16 +273,13 @@ const QuestItem: React.FC<{
                                 <span className="text-[9px] text-gray-400 whitespace-nowrap">長押しで取消</span>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-end">
-                                <span className={`font-mono ${rewardSizeClasses} whitespace-nowrap ${hasBonus ? 'text-orange-400 scale-110' : 'text-orange-300'}`}>
-                                    EXP +{totalExp}
-                                </span>
-                                {totalGold > 0 && (
+                            totalGold > 0 && (
+                                <div className="flex flex-col items-end">
                                     <span className={`font-mono ${rewardSizeClasses} whitespace-nowrap ${hasBonus ? 'text-yellow-200 scale-110' : 'text-yellow-300'}`}>
                                         {totalGold} G
                                     </span>
-                                )}
-                            </div>
+                                </div>
+                            )
                         )}
                     </div>
                 </div>
