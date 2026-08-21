@@ -9,11 +9,11 @@ interface Props {
 }
 
 // ★バグ修正: ごほうび画面へのもちもの統合をやめ、「クエスト/ごほうび/もちもの/記録」の
-// 4タブ構成に戻す。
-const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeColor: string }[] = [
-    { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400' },
-    { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400' },
-    { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400' },
+// 4タブ構成に戻す。クエスト/ごほうび/もちものはアイコンのみ表示(iconOnly)にする。
+const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeColor: string; iconOnly?: boolean }[] = [
+    { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400', iconOnly: true },
+    { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400', iconOnly: true },
+    { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400', iconOnly: true },
     { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400' },
 ];
 
@@ -32,10 +32,11 @@ const BottomNav: React.FC<Props> = ({ active, onChange }) => {
                     <button
                         key={tab.key}
                         onClick={() => onChange(tab.key)}
+                        aria-label={tab.label}
                         className={`flex-1 min-h-[56px] flex flex-col items-center justify-center gap-0.5 transition-all ${isActive ? tab.activeColor : 'text-gray-400'}`}
                     >
                         <Icon size={22} className={`transition-transform ${isActive ? 'scale-110' : ''}`} />
-                        <span className="text-[10px] font-bold">{tab.label}</span>
+                        {!tab.iconOnly && <span className="text-[10px] font-bold">{tab.label}</span>}
                     </button>
                 );
             })}
