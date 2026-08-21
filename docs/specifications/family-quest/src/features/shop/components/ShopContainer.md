@@ -2,10 +2,10 @@
 
 ## 関連ドキュメント
 
-- [EquipmentShop.md](./EquipmentShop.md) — 本ファイルが「現在の実装」として言及しているコンポーネントの一つ。ただし`EquipmentShop.md`自身の廃止noticeによれば、装備機能廃止(2026-08)に伴い`EquipmentShop.tsx`自体も別途削除されており、`../../../../App.md`（App.tsxの解析結果）にも`Equipment`関連の記述が見当たらない。本ファイルの「現在の実装」節の記述は、EquipmentShop廃止前の時点の内容のまま更新されていない可能性がある（ドキュメント同士の記載を突き合わせた限りでの指摘であり、実際のソースやコミット履歴は未確認）。
-- [RewardList.md](./RewardList.md) — 本ファイルが「現在の実装」として言及している、購入可能な報酬一覧コンポーネント。
+- [EquipmentShop.md](./EquipmentShop.md) — かつて「現在の実装」として言及していたコンポーネントの一つ。装備機能廃止(2026-08)に伴い`EquipmentShop.tsx`自体も別途削除されており、現在の`App.tsx`では参照されていない。
+- [RewardList.md](./RewardList.md) — 現在`RewardShop`経由で描画される、購入可能な報酬一覧コンポーネント。
 - [InventoryList.md](./InventoryList.md) — 本ファイルが「現在の実装」として言及している、所持品一覧コンポーネント。
-- [RewardShop.md](./RewardShop.md) — `RewardList`と`InventoryList`を1画面に統合する現行の「ごほうび」画面コンテナ。ShopContainer.md本文には登場しないが、RewardShop.mdの解析結果によれば、以前独立していた「もちもの」タブ（本ファイルが担っていたタブ切替の一部）は廃止され、購入と所持品表示が`RewardShop`に統合されている。
+- [RewardShop.md](./RewardShop.md) — `RewardList`と所持ゴールド表示を1画面にまとめる現行の「ごほうび」画面コンテナ。以前独立していた「もちもの」タブ（本ファイルが担っていたタブ切替の一部）は廃止され、購入UIが`RewardShop`に統合されている。
 - [../../../../App.md](../../../../App.md) — 「お店」画面を実際に描画している現在の呼び出し元。
 
 `family-quest/src/features/shop/components/ShopContainer.tsx` は削除された。
@@ -19,12 +19,14 @@ ShopContainer.tsx and a stray .lnk file leaking an internal IP" を参照）。
 ## 現在の実装
 
 「お店」「もちもの」タブの切り替えUIは `ShopContainer` に集約されていたのではなく、
-呼び出し元の `family-quest/src/App.tsx` が `EquipmentShop` / `RewardList` /
-`InventoryList` の各コンポーネントを直接importし、レンダリングしている。
+呼び出し元の `family-quest/src/App.tsx` が `RewardShop` / `InventoryList` の各コンポーネントを
+直接importし、レンダリングしている（2026-08時点、`family-quest/src/App.tsx`のimport文で確認）。
+本節はShopContainer廃止直後（装備機能廃止前）の状態を記していたが、その後の装備機能廃止
+(2026-08 Family Quest大改修)により`EquipmentShop`/`RewardList`の直接呼び出しは
+`RewardShop`経由の呼び出しに置き換わっており、本節はその変更を反映して更新した。
 
-* `family-quest/src/features/shop/components/EquipmentShop.tsx`
-* `family-quest/src/features/shop/components/RewardList.tsx`
+* `family-quest/src/features/shop/components/RewardShop.tsx`
 * `family-quest/src/features/shop/components/InventoryList.tsx`
 
-これらの仕様は、それぞれ対応する `docs/specifications/family-quest/src/features/shop/components/EquipmentShop.md` /
-`RewardList.md` / `InventoryList.md` を参照。
+これらの仕様は、それぞれ対応する `docs/specifications/family-quest/src/features/shop/components/RewardShop.md` /
+`InventoryList.md` を参照。
