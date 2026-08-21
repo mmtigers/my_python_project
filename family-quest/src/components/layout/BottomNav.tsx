@@ -1,21 +1,24 @@
 import React from 'react';
-import { Sword, ShoppingBag, Scroll } from 'lucide-react';
+import { Sword, ShoppingBag, Package, Scroll } from 'lucide-react';
 
-export type BottomNavTab = 'quest' | 'shop' | 'familyLog';
+export type BottomNavTab = 'quest' | 'shop' | 'inventory' | 'familyLog';
 
 interface Props {
     active: BottomNavTab;
     onChange: (tab: BottomNavTab) => void;
 }
 
+// ★バグ修正: ごほうび画面へのもちもの統合をやめ、「クエスト/ごほうび/もちもの/記録」の
+// 4タブ構成に戻す。
 const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeColor: string }[] = [
     { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400' },
     { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400' },
+    { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400' },
     { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400' },
 ];
 
 // 角度⑦: 縦画面での「上部stickyタブ(クエスト/ごほうび)」+「ヘッダーの記録ボタン」という
-// 二重のナビゲーション構造を廃止し、フッター1本の3タブに統一する。
+// 二重のナビゲーション構造を廃止し、フッター1本の4タブに統一する。
 const BottomNav: React.FC<Props> = ({ active, onChange }) => {
     return (
         <nav
