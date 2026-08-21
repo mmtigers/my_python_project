@@ -377,7 +377,8 @@ function App() {
 
       {/* ★バグ修正: 横画面で記録(familyLog)表示中、以前はユーザー切替行(4人分のボタン)を
           そのまま出しており「ホームに戻る」という意図が伝わらなかった。
-          代わりに単一の「ホームに戻る」ボタンを表示する */}
+          代わりに単一のホームボタンを表示する。トップ画面でも同じボタンを表示し統一感を持たせる
+          (トップ画面では押しても画面遷移は起きない: 既にメイン画面のため) */}
       <Header
         users={users}
         currentUserIdx={currentUserIdx}
@@ -388,7 +389,7 @@ function App() {
         onNotificationsClick={() => { setNotificationsOpen(true); play('tap'); }}
         hideUserSwitcher={layoutMode === 'landscape'}
         hideLogSwitcher={layoutMode === 'portrait'}
-        showBackToMain={layoutMode === 'landscape' && viewMode === 'familyLog'}
+        showBackToMain={layoutMode === 'landscape'}
         onBackToMain={() => { setViewMode('main'); play('tap'); }}
       />
 
@@ -474,7 +475,7 @@ function App() {
         )}
 
         {viewMode === 'familyLog' && (
-          <FamilyLog stats={familyStats} chronicle={chronicle} />
+          <FamilyLog stats={familyStats} chronicle={chronicle} users={users} />
         )}
 
       </div>
