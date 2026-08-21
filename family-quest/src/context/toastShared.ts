@@ -14,8 +14,6 @@ export interface ToastItem {
 
 export interface ToastContextValue {
     showToast: (toast: Omit<ToastItem, 'id' | 'createdAt'>) => void;
-    history: ToastItem[];
-    clearHistory: () => void;
 }
 
 export const ToastContext = createContext<ToastContextValue | null>(null);
