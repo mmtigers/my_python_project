@@ -38,6 +38,9 @@ tmp/
 # Backups
 MY_HOME_SYSTEM/db_backup/
 
+# MY_HOME_SYSTEM: runtime lock files (created by monitors at runtime, not source)
+MY_HOME_SYSTEM/watchdog_alert_sent.lock
+
 # Private Assets (Images, PDFs)
 assets/snapshots/
 assets/salary_images/
