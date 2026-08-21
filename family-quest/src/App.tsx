@@ -42,7 +42,6 @@ import { Modal } from './components/ui/Modal';
 // (実際に開かれるまでチャンクを読み込まない)
 const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));
 const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));
-const NotificationHistoryPanel = lazy(() => import('./components/ui/NotificationHistoryPanel'));
 
 import UserStatusCard from './features/family/components/UserStatusCard';
 import QuestList from './features/quest/components/QuestList';
@@ -161,11 +160,9 @@ function App() {
   // アバターアップロード対象(nullなら非表示)
   const [avatarUser, setAvatarUser] = useState<User | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   // 角度⑤: レベルアップ/メダル獲得などの「成功の演出」は、作業を止めるブロッキングモーダルから
   // 自動で消えるトーストへ変更(連続してクエストを完了する際にテンポが悪かったため)。
-  // 見逃した通知はトースト履歴パネル(ヘッダーのベルアイコン)からあとでまとめて見返せる。
   const handleLevelUp = (info: LevelUpInfo) => {
     play('levelUp');
     showToast({ title: 'LEVEL UP!', text: `${info.user}は Lv.${info.level} になった！`, icon: '⚡' });
@@ -173,7 +170,7 @@ function App() {
 
   const {
     users, quests, rewards, completedQuests, pendingQuests,
-    familyStats, chronicle,
+    chronicle,
     pendingInventory,
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
@@ -386,7 +383,6 @@ function App() {
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
-        onNotificationsClick={() => { setNotificationsOpen(true); play('tap'); }}
         hideUserSwitcher={layoutMode === 'landscape'}
         hideLogSwitcher={layoutMode === 'portrait'}
         showBackToMain={layoutMode === 'landscape'}
@@ -475,7 +471,7 @@ function App() {
         )}
 
         {viewMode === 'familyLog' && (
-          <FamilyLog stats={familyStats} chronicle={chronicle} users={users} />
+          <FamilyLog chronicle={chronicle} users={users} />
         )}
 
       </div>
@@ -519,9 +515,6 @@ function App() {
 
         {settingsOpen && (
           <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
-        )}
-        {notificationsOpen && (
-          <NotificationHistoryPanel isOpen={notificationsOpen} onClose={() => setNotificationsOpen(false)} />
         )}
       </Suspense>
 
