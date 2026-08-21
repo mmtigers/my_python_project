@@ -110,6 +110,15 @@ logger = get_logger("newface_monitor")
 # Configuration & Constants
 # ==========================================
 
+# 名前要素のテキストから年齢を抽出するための正規表現。
+# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、
+# 括弧付き数字(全角/半角どちらも)、または「歳」「才」が数字に続く形式の
+# いずれかを年齢表記とみなす。実在の年齢は2桁のため誤検知を避けるため
+# 桁数を2桁に限定する(例: ランキングバッジ等の"(1)"のような1桁の
+# 括弧数字を誤って年齢と判定しないようにする)。
+AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(?:歳|才)?\s*[）)]|(\d{2})\s*(?:歳|才)')
+
+
 @dataclass(frozen=True)
 class SiteConfig:
     """監視対象サイト1件分の設定。
@@ -681,7 +690,17 @@ class MonitorConfig:
         SiteConfig(
             site_id='yoluspa_osaka',
             name='YOLU SPA 大阪店',
-            target_url='https://yoluspa-osaka.net/%e3%82%b9%e3%82%b1%e3%82%b8%e3%83%a5%e3%83%bc%e3%83%ab/',
+            # 旧設定ではスケジュール(SCHEDULE)ページを巡回対象にしていたが、
+            # このページは「その日の出勤シフト」を表示するものであり、シフトに
+            # 入っていないキャストは掲載されない。そのため既存在籍者でも、たまたま
+            # まだシフト表に登場していない間はknown_castsに載らず、初めて
+            # シフトに入った日に毎回「新規キャスト」として誤検知されてしまう
+            # (実際、シフト表の運用開始から数日で50名超の既存在籍者が次々
+            # "新規"扱いされる異常な検知が続いた)。姉妹店yolu_spa
+            # (mrs-yoluspa.net)と同じURLパターンの「セラピスト一覧」
+            # (全キャスト常設ページ)に変更し、シフトに関わらず安定して
+            # 全在籍者を検知できるようにする
+            target_url='https://yoluspa-osaka.net/%e3%82%bb%e3%83%a9%e3%83%94%e3%82%b9%e3%83%88%e4%b8%80%e8%a6%a7/',
             # 既存のyolu_spa(mrs-yoluspa.net)とはドメインが異なる別店舗だが、
             # 同一テンプレート(クラス名体系)のためセレクタは流用
             selector_container='div.therapist-item',
@@ -1212,11 +1231,14 @@ class CastMember:
         name (str): キャスト名。
         detail_url (str): 詳細プロフィールのURL。
         image_url (str): サムネイル画像のURL。
+        age (str): 年齢（数字のみ、例: "23"）。一覧ページ上に年齢表記が
+            見つからないサイト・キャストでは空文字となる。
     """
     id: str
     name: str
     detail_url: str
     image_url: str
+    age: str = ""
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -1294,6 +1316,13 @@ class DiscordNotifier:
         site_prefix = f"【{site_name}】" if site_name else ""
 
         for cast in new_casts:
+            fields = [{"name": "Name", "value": cast.name, "inline": True}]
+            if cast.age:
+                # 一覧ページ上に年齢表記が見つかったキャストのみ追加
+                # (見つからない場合はフィールド自体を省略する)
+                fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})
+            fields.append({"name": "Link", "value": f"[詳細ページへ]({cast.detail_url})", "inline": True})
+
             payload = {
                 "username": "New Face Monitor",
                 "embeds": [
@@ -1302,10 +1331,7 @@ class DiscordNotifier:
                         "description": "新しいキャストが追加されました！",
                         "url": cast.detail_url,
                         "color": 16738740,  # Pinkish
-                        "fields": [
-                            {"name": "Name", "value": cast.name, "inline": True},
-                            {"name": "Link", "value": f"[詳細ページへ]({cast.detail_url})", "inline": True}
-                        ],
+                        "fields": fields,
                         "thumbnail": {"url": cast.image_url} if cast.image_url else {}
                     }
                 ]
@@ -1597,6 +1623,17 @@ class WebMonitor:
                     # なく同一テキストノード内にタブ区切りで同居しているサイト向け
                     name = name.split('\t')[0].strip()
 
+                # Age Extraction
+                # name_first_text_only/name_strip_after_tab で名前から年齢表記を
+                # 切り離しているサイトでも年齢自体は失わずに取得できるよう、
+                # 上記の絞り込み前のname_elem全体のテキスト(年齢の兄弟要素・
+                # タブ区切り部分を含む)から抽出する
+                age = ""
+                if name_elem:
+                    age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
+                    if age_match:
+                        age = age_match.group(1) or age_match.group(2)
+
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
                 if not link_elem and div.name == 'a' and div.get('href'):
@@ -1683,7 +1720,8 @@ class WebMonitor:
                     id=cast_id,
                     name=name,
                     detail_url=detail_url,
-                    image_url=image_url
+                    image_url=image_url,
+                    age=age
                 )
                 casts.add(cast)
 
