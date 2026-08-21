@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全69件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全102件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -29,6 +29,15 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [switchbot.md](./switchbot.md) | SwitchBot関連のWebhookペイロード・API状態レスポンスのデータ構造を定義するPydanticモデル群。 |
 | [switchbot_power_monitor.md](./switchbot_power_monitor.md) | 監視対象のSwitchBotデバイスから電力・温湿度・電源状態を定期取得し、後続の処理サービスへ連携するデバイス監視スクリプト。 |
 | [sensor_service.md](./sensor_service.md) | センサーおよび電力計からのデータ受信（Webhook・ポーリング）を処理し、重複排除・状態管理・ログ保存・通知送信を行う。 |
+| [keep_alive_anker.md](./keep_alive_anker.md) | Anker SoundCore Bluetoothスピーカーがオートパワーオフでスリープしないよう、可聴域外の無音波(15Hz)を定期再生してキープアライブするシェルスクリプト。 |
+| [keep_alive_speaker.md](./keep_alive_speaker.md) | 無音MP3ファイルを定期再生し、Bluetoothスピーカー等のオーディオ経路を維持する「ハートビート」送信用シェルスクリプト。 |
+| [clinic_monitor.md](./clinic_monitor.md) | 伊丹たかの小児科の予約ページHTMLを定期取得し、前回とのハッシュ差分がある場合のみ保存する監視スクリプト。 |
+| [clinic_analyzer.md](./clinic_analyzer.md) | 蓄積された小児科予約ページHTML群を解析し、午前・午後の予約人数／院内待ち人数をCSVへ抽出するバッチスクリプト。 |
+| [clinic_visualizer.md](./clinic_visualizer.md) | `clinic_analyzer.py`が出力したCSVから、直近日数分の予約総数・院内待ち人数の推移を折れ線グラフ画像として保存するモジュール。 |
+| [car_presence_checker.md](./car_presence_checker.md) | RTSPカメラ映像の画像処理（輝度／色比率）により車庫内の車の有無を判定し、状態変化時にDB記録・Discord通知するバッチスクリプト。 |
+| [bicycle_parking_monitor.md](./bicycle_parking_monitor.md) | 近鉄系駐輪場の定期利用待機状況ページをスクレイピングし、特定エリアの待機人数をDBに記録するモニタースクリプト。 |
+| [bluetooth_monitor.md](./bluetooth_monitor.md) | 指定Bluetoothデバイスの接続状態を常時監視し、切断時は自動再接続を試みDiscordへ通知する常駐スクリプト。 |
+| [suumo_monitor.md](./suumo_monitor.md) | SUUMOの新着賃貸物件情報をスクレイピングし、Gemini APIで評価した上でLINE/Discordへ通知するモニタースクリプト。 |
 
 ## C. 外部サービス・通知連携
 
@@ -45,6 +54,13 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [train_service.md](./train_service.md) | JR西日本の運行情報API、およびYahoo!路線情報から運行状況・最短経路を取得する（フェイルソフト設計）。 |
 | [send_child_health_check.md](./send_child_health_check.md) | 朝の子供の体調確認と当日の記念日等をチェックし、LINE/Discordへ通知を送信する。 |
 | [send_food_question.md](./send_food_question.md) | 夕食メニューの過去履歴を集計し、頻出メニューのランキングを含むLINE Flex Messageを送信する。 |
+| [line_flex.md](./line_flex.md) | LINE Botで使用するFlex Message（体調選択カルーセル・記録確認・サマリー表示）を構築するビュー専用モジュール。 |
+| [haircut_advisor.md](./haircut_advisor.md) | 散髪予約履歴から次回の散髪推奨日を計算し、通知時期になるとLINE/Discordへ提案メッセージを送信するスクリプト。 |
+| [haircut_monitor.md](./haircut_monitor.md) | Gmail(IMAP)を監視しHotPepper Beautyの予約確定メールを検知してDB記録・LINE/Discord通知するモジュール。 |
+| [shopping_monitor.md](./shopping_monitor.md) | Gmail(IMAP)のAmazon・楽天注文確認メールを解析して商品名・金額をDB記録し、LINE/Discordへ要約通知するモジュール。 |
+| [land_price_service.md](./land_price_service.md) | 国土交通省「不動産情報ライブラリ」APIから指定エリアの土地取引価格情報を取得・DB記録し、新規取引をDiscord通知するサービス。 |
+| [app_ranking_service.md](./app_ranking_service.md) | Apple App Store公式RSSフィードから日次アプリランキングを取得・DB記録し、新着・急上昇等を分析してLINE/Discord通知するサービス。 |
+| [salary_analyzer.md](./salary_analyzer.md) | Gmail(IMAP)から給与明細PDF付きメールを取得し、パスワード解除の上1ページ目を画像化して保存するクラス（AI解析は行わずアーカイブに特化）。 |
 
 ## D. AI・分析エンジン
 
@@ -68,6 +84,12 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [quest_data.md](./quest_data.md) | Family Questのマスターデータ（ユーザー情報、クエスト定義、報酬定義）を定義する純粋なデータ定義モジュール。 |
 | [reset_game.md](./reset_game.md) | Family QuestのDB上のユーザーゲームデータ（レベル・経験値・ゴールド・メダル数）をリセットするCLIスクリプト。 |
 | [sync_strict.md](./sync_strict.md) | マスターデータ（QUESTS, REWARDS）とDBのマスターテーブルを完全同期する。 |
+| [recover_mom.md](./recover_mom.md) | `quest_users`テーブルに'mom'ユーザーのレコードが存在しない場合、固定値で復旧INSERTする単発スクリプト。 |
+| [fix_quest_reset_period.md](./fix_quest_reset_period.md) | `quest_master`の`reset_period`が特定条件に一致するレコードを'daily'へ一括更新するワンショット修正スクリプト。 |
+| [add_quest_columns.md](./add_quest_columns.md) | `quest_master`テーブルに`days`/`description`カラムを未追加の場合のみ追加するマイグレーションスクリプト。 |
+| [migrate_boss_columns.md](./migrate_boss_columns.md) | `party_state`テーブルにボス戦用カラム（`max_hp`等4種）を追加し、初期レコードがなければ挿入するマイグレーションスクリプト。 |
+| [migrate_bounty.md](./migrate_bounty.md) | `bounties`テーブルが存在しない場合にのみ作成するマイグレーションスクリプト（`init_unified_db.py`と同一定義）。 |
+| [quest_admin_tool.md](./quest_admin_tool.md) | 対話式コマンドラインでプレイヤーの所持金・経験値・メダル数を選択・変更するDB管理ツール。 |
 
 ## F. インフラ・監視タスク (フェイルソフト機構)
 
@@ -107,3 +129,14 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [timelapse_generator.md](./timelapse_generator.md) | DBのイベント検知時刻をもとにNVR録画からクリップを抽出・結合してタイムラプス動画を生成し、Discordへアップロードする。 |
 | [timelapse_runner.md](./timelapse_runner.md) | timelapse_generator.pyを定時または手動実行の条件に基づきサブプロセスとして起動・管理するランナースクリプト。 |
 | [utils.md](./utils.md) | システム全体で共通して使用されるユーティリティ関数群（タイムゾーン処理、指数バックオフによるリトライ機能等）を提供する。 |
+| [migrations.md](./migrations.md) | `migrations/`配下の`*.sql`ファイルを順に適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量マイグレーションランナー。 |
+| [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各タブから共通利用されるCSSスタイル定義とステータスカードHTML生成関数を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
+| [quest_tab.md](./quest_tab.md) | Streamlitダッシュボードの「Family Quest」タブ。家族メンバーの経験値・ゴールドとランキング・達成ログを表示する。 |
+| [log_tab.md](./log_tab.md) | Streamlitダッシュボードの「ログ分析」「トレンド」「システム管理」の3タブを描画するモジュール。 |
+| [misc_tab.md](./misc_tab.md) | Streamlitダッシュボードの「電車遅延」「防犯カメラ」「駐輪場」タブを描画するモジュール。 |
+| [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
+| [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
+| [summary.md](./summary.md) | Streamlitダッシュボードのトップ画面の9個のステータスカード（在宅状況・電気代・NAS死活等）を判定・描画するモジュール。 |
+| [db_fix.md](./db_fix.md) | `device_records`テーブルに`battery_level`カラムを追加するワンショットのDB修正スクリプト。 |
+| [update_schema.md](./update_schema.md) | `quest_history`への`status`カラム、食事記録テーブルへの`menu_category`/`meal_time_category`カラムを不足時のみ追加するスクリプト。 |
+| [scheduled_timelapse.md](./scheduled_timelapse.md) | 監視カメラ録画から指定時間帯のタイムラプス動画をFFmpegで生成し、Discordへ通知送信するスケジュール実行スクリプト。 |
