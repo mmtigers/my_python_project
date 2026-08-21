@@ -13,7 +13,7 @@ const formatTime = (ts: number) =>
 // トーストとして流れて消えた通知(レベルアップ・メダル獲得・購入完了など)を、
 // あとからまとめて見返せるようにする一覧パネル。
 const NotificationHistoryPanel: React.FC<Props> = ({ isOpen, onClose }) => {
-    const { history, clearHistory } = useToast();
+    const { history } = useToast();
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="おしらせ履歴" maxWidth="md">
@@ -34,15 +34,6 @@ const NotificationHistoryPanel: React.FC<Props> = ({ isOpen, onClose }) => {
                         </div>
                     ))}
                 </div>
-            )}
-
-            {history.length > 0 && (
-                <button
-                    onClick={clearHistory}
-                    className="mt-4 w-full text-center text-xs text-slate-400 underline hover:text-slate-200"
-                >
-                    履歴を消す
-                </button>
             )}
         </Modal>
     );
