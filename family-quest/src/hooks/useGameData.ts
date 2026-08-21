@@ -27,6 +27,7 @@ export interface ChronicleItem {
     dateStr?: string;
     date?: string;
     id?: string | number;
+    userId?: string;
     userName?: string;
     userAvatar?: string;
     avatar_url?: string;
