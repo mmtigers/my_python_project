@@ -95,7 +95,7 @@ class UserService:
             elif ev['type'] == 'reward': text = f"{u['name']}は {ev['title']} を獲得した！"
 
             formatted.append({
-                "type": ev['type'], "userName": u['name'], "userAvatar": u['avatar'],
+                "type": ev['type'], "userId": ev['user_id'], "userName": u['name'], "userAvatar": u['avatar'],
                 "title": ev['title'], "text": text, "gold": ev['gold'], "exp": ev['exp'],
                 "timestamp": ev['ts'],
                 "dateStr": ev['ts'].split('T')[0] if 'T' in ev['ts'] else ev['ts'].split(' ')[0]
