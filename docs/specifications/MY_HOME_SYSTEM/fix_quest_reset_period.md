@@ -126,7 +126,14 @@ graph TD
 | --- | --- | --- |
 | `get_db_cursor`関数の実装詳細 | `core.database`モジュールのソースコードが当ファイル内に存在しないため、接続先DBや`commit`引数の具体的挙動が不明。 | `core/database.py` |
 | `quest_master`テーブルの完全なスキーマ | `reset_period`・`quest_id`カラム以外の構成が当ファイルからは判断できないため。 | `init_unified_db.py`等のスキーマ定義ファイル |
-| 本スクリプトの想定実行タイミング | 手動実行か、定期バッチ実行かなど、呼び出しコンテキストが当ファイル内に記述されていないため。 | 呼び出し元スクリプトまたは運用手順書 |
+| 本スクリプトの想定実行タイミング | 手動実行か、定期バッチ実行かなど、呼び出しコンテキストが当ファイル内に記述されていないため。（リポジトリ全体を`crontab`/`systemd`/`.service`等のファイル名・記述で検索したが該当ファイルは存在せず、また対象ファイルの格納先`MY_HOME_SYSTEM/old/README.md`にも実行スケジュールの記述はなく、解消不可） | 呼び出し元スクリプトまたは運用手順書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `get_db_cursor`関数の実装詳細 | `MY_HOME_SYSTEM/core/database.py`(全84行)を直接確認した。`get_db_cursor(commit: bool = False)`(12〜50行目)は`@contextmanager`デコレータ付きのコンテキストマネージャで、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`(21行目)により`config.SQLITE_DB_PATH`が指す単一のDBファイルへ接続し、`conn.row_factory = sqlite3.Row`(22行目)、`PRAGMA journal_mode=WAL;`・`PRAGMA foreign_keys=ON;`(23〜24行目)を実行してから`conn.cursor()`をyieldする。`sqlite3.OperationalError`で`"locked"`を含む場合は最大5回・1秒間隔でリトライし(16〜17行目, 31〜35行目)、それ以外の例外では`conn.rollback()`後に再送出する(36〜39行目)。`commit`引数がTrueの場合のみ、`yield`後(正常終了時)に`conn.commit()`を呼ぶ(28〜29行目)。本ファイル(`fix_quest_reset_period.py`)10行目の`with get_db_cursor(commit=True) as cursor:`は、この`commit=True`の分岐に該当し、`UPDATE`文実行後に自動コミットされる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:12-50` |
+| `quest_master`テーブルの完全なスキーマ | `MY_HOME_SYSTEM/init_unified_db.py`392〜408行目の`CREATE TABLE IF NOT EXISTS quest_master`を直接確認した。列構成は`quest_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, quest_type TEXT DEFAULT 'daily', exp_gain INTEGER DEFAULT 10, gold_gain INTEGER DEFAULT 5, icon_key TEXT, day_of_week TEXT, target_user TEXT DEFAULT 'all', start_date TEXT, end_date TEXT, pre_requisite_quest_id INTEGER, occurrence_chance REAL DEFAULT 1.0, start_time TEXT, end_time TEXT`である。本ファイルが操作する`reset_period`列はこの初期`CREATE TABLE`文には含まれておらず、`MY_HOME_SYSTEM/migrations/0002_add_quest_master_reset_period.sql`の`ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'`で後から追加されたものであることを確認した(その後`0005_fix_quest_master_reset_period_default.sql`が既定値`'weekly_monday'`のデータを`'daily'`へ補正しており、本ファイル(`fix_quest_reset_period.py`)はこのマイグレーション以前、あるいはこれと同種の一括修正を個別スクリプトとして実行していたものと考えられる)。なお`quest_id`は`init_unified_db.py`上は`INTEGER PRIMARY KEY AUTOINCREMENT`と定義されているが、本ファイル20行目の`WHERE`句は`quest_id NOT LIKE 'boss_%'`という文字列パターンマッチを用いており、この整合性(実データにおける`quest_id`の実際の型・値)は`init_unified_db.py`単体からは確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:392-408`, `MY_HOME_SYSTEM/migrations/0002_add_quest_master_reset_period.sql`, `MY_HOME_SYSTEM/migrations/0005_fix_quest_master_reset_period_default.sql` |
 
 ## 10. 自己検証結果
 
