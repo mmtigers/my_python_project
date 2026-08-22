@@ -31,6 +31,28 @@ class TestProcessDataframe:
         result = analysis_service.process_dataframe(df)
         assert str(result["timestamp"].dt.tz) == "Asia/Tokyo"
 
+    def test_naive_timestamp_is_interpreted_as_jst_not_utc(self):
+        """M-1-4回帰防止: tzinfoの無いレガシーレコードは、保存規約
+        (core.utils.get_now_iso)に合わせてJSTとして記録されているとみなす。
+        以前はpd.to_datetime(..., utc=True)で一律UTCとみなしていたため、
+        9時間先の時刻にズレていた。"""
+        df = pd.DataFrame({"timestamp": ["2026-01-01 09:00:00"], "value": [1]})
+        result = analysis_service.process_dataframe(df)
+        ts = result["timestamp"].iloc[0]
+        assert (ts.hour, ts.minute) == (9, 0)
+
+    def test_aware_and_naive_timestamps_can_coexist_in_the_same_column(self):
+        """実データはget_now_iso導入前後で naive/aware が混在しうるため、
+        混在カラムでも例外にならず両方とも正しくJSTへ変換されること。"""
+        df = pd.DataFrame({
+            "timestamp": ["2026-01-01 09:00:00", "2026-01-01T00:00:00Z"],
+            "value": [1, 2],
+        })
+        result = analysis_service.process_dataframe(df)
+        assert str(result["timestamp"].dt.tz) == "Asia/Tokyo"
+        assert result["timestamp"].iloc[0].hour == 9
+        assert result["timestamp"].iloc[1].hour == 9
+
 
 class TestApplyFriendlyNames:
     def test_empty_dataframe_passes_through(self):
