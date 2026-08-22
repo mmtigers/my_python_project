@@ -26,9 +26,12 @@ from file_utils import sanitize_filename as _shared_sanitize_filename
 # ==========================================
 # 0. 環境設定 & ロギング (Unified Logging)
 # ==========================================
-# プロジェクトルートへのパス解決 (DDD/ から core/ を参照するため)
-CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent
+# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)
+# newface_monitor.py と同じ方式: core/ は develop/MY_HOME_SYSTEM/core に実在する
+# (develop/core ではない)。DDDの単なる親ディレクトリではImportErrorになり、
+# 常にローカルフォールバック用スタブへ落ちてしまっていた。
+CURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD
+PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM"  # ~/develop/MY_HOME_SYSTEM
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
@@ -41,7 +44,16 @@ except ImportError:
     import logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("UrlExtractor")
-    def get_managed_target_directory(*args, **kwargs): return Path("./data")
+
+    def get_managed_target_directory(*args, **kwargs) -> Path:
+        # 呼び出し元(get_output_base_dir)はfallback_dir_str(BASE_DIR/'data'の絶対パス)を
+        # 渡してくる想定。これを無視してカレントディレクトリ相対の"./data"を返すと、
+        # 実行時のカレントディレクトリ次第で保存先・DBパスが毎回変わってしまう
+        # (newface_monitor.pyで修正済みの同一バグ)。
+        fallback_dir_str = kwargs.get("fallback_dir_str")
+        if fallback_dir_str:
+            return Path(fallback_dir_str)
+        return Path("./data")
 
 # ==========================================
 # 1. コンフィグレーション (Configuration)
@@ -332,8 +344,12 @@ class SubscriptionManager:
             bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False
         """
         current_base = AppConfig.get_output_base_dir()
-        if AppConfig.LOCAL_DIR_STR in str(current_base):
-            logger.error("🚨 NASがアンマウント状態（ローカルフォールバック中）を検知しました。")
+        # 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して
+        # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが
+        # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。
+        # パス正規化した上での比較にすることで、表記揺れに関わらず確実に検知する。
+        if current_base.resolve() == Path(AppConfig.LOCAL_DIR_STR).resolve():
+            logger.error("🚨 NASがアンマウント状態(ローカルフォールバック中)を検知しました。")
             logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")
             return False
         return True
