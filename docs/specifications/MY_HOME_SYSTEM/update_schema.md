@@ -161,6 +161,14 @@ graph TD
 | `quest_history`テーブルおよび食事記録テーブルの完全なスキーマ | 対象カラムの存在確認のみが行われており、テーブル全体の定義が当ファイル内には存在しないため。 | `init_unified_db.py`等のスキーマ定義ファイル |
 | 追加された`status`・`menu_category`・`meal_time_category`カラムの実際の利用箇所 | どのモジュールがこれらのカラムを読み書きするかは当ファイルからは判断できないため。 | `quest_service.py`、`weekly_analyze_report.py`等 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.SQLITE_DB_PATH`・`config.SQLITE_TABLE_FOOD`の実際の値 | `config.py`を直接確認した。222行目で`SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`(環境変数未設定時は`BASE_DIR`直下の`home_system.db`)、242行目で`SQLITE_TABLE_FOOD: str = "food_records"`という固定文字列であることが判明した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:222, 242` |
+| `quest_history`テーブルおよび食事記録テーブルの完全なスキーマ | `init_unified_db.py`を直接確認した。`quest_history`テーブル(109〜119行目)は`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, quest_id INTEGER, quest_title TEXT, status TEXT DEFAULT 'approved', completed_at DATETIME NOT NULL, exp_earned INTEGER, gold_earned INTEGER`の8カラムを持ち、`status`カラムは`update_schema.py`の想定通り既定値`'approved'`で最初から定義されている(＝`init_unified_db.py`による新規作成時は追加不要、`update_schema.py`は既存DBに対する後方互換マイグレーション用)。`food_records`テーブル(195〜204行目、`{config.SQLITE_TABLE_FOOD}`で参照)は`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, meal_date TEXT, meal_time_category TEXT, menu_category TEXT, timestamp DATETIME`の7カラムを持ち、`menu_category`/`meal_time_category`も同様に最初から定義されている。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:109-119, 195-204` |
+| 追加された`status`・`menu_category`・`meal_time_category`カラムの実際の利用箇所 | `services/quest_service.py`を直接確認した。`status`カラムは承認フローの中核として使われており、例えば84行目のダッシュボード集計クエリは`WHERE status='approved'`で絞り込み、255行目・293行目・299行目・443行目・624行目の`INSERT INTO quest_history`は`status`カラムを含めて挿入し(263行目・310行目で新規作成時`"status": "pending"`)、324行目・353行目・400行目は`hist['status'] != 'pending'`を承認待ちチェックに使い、439行目の`UPDATE quest_history SET status='approved', ...`で承認処理を行う。`menu_category`・`meal_time_category`は`weekly_analyze_report.py`(62〜79行目)が`SELECT menu_category FROM {config.SQLITE_TABLE_FOOD}`で週次レポート集計(「自炊」「外食」「その他」の件数カウント)に読み出す一方、`meal_time_category`はそのSELECT文には含まれておらず`weekly_analyze_report.py`内では未使用であることを確認した。書き込み側は`services/line_service.py`の`log_food_record`(43〜51行目)と`handlers/line_logic.py`(360行目付近の同様の`INSERT`)がLINE経由の食事記録受付時に両カラムへ値(`meal_time_category`は固定値`"Dinner"`、`menu_category`はユーザー入力に基づく文字列)を書き込むことを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:84, 255-324, 353-443, 624`, `MY_HOME_SYSTEM/weekly_analyze_report.py:59-79`, `MY_HOME_SYSTEM/services/line_service.py:43-51`, `MY_HOME_SYSTEM/handlers/line_logic.py:360` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）
