@@ -13,6 +13,8 @@
 * [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) — 本ファイルがフォールバック的にインポートするDiscord Webhook通知処理（`_send_discord_webhook`）の実装元。
 * [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS容量監視との関連（全体設計書によれば、DDDのダウンロード活動によるNAS容量逼迫を`nas_monitor.py`側が監視する運用連携があるとされる。ただし本ファイルは`nas_monitor.py`を直接importしておらず、独自の簡易的な容量チェック（`FileSystemManager.check_disk_space`）を実装している点に注意）。
 * [../全体設計書.md](../全体設計書.md) — DDDサブシステム全体の位置付けおよびMY_HOME_SYSTEMとのNASリソース協調に関する記述。
+* [newface_monitor.md](./newface_monitor.md) — `run_monitor`の多重起動防止ロックは、本ファイルの`BatchDownloader.run`が既に採用している`fcntl.flock`による同種のロックパターンを踏襲したものである（`newface_monitor.py`のコメントで直接言及されている）。
+* [test_batch_download_discord_fixes.md](./test_batch_download_discord_fixes.md) — 本ファイルの履歴I/Oエラーログ出力・ボット検知マーカーの単語境界判定・`noplaylist`設定を検証する回帰テストの解析ドキュメント。
 
 ## 2. ファイルの概要
 
@@ -63,7 +65,7 @@
 | `services.notification_service._send_discord_webhook` | 実装が別ファイルに存在し、Webhook URLや認証方式、`image_data`引数の扱いなど詳細が不明。見つからない場合はダミー関数(`pass`)にフォールバックする実装のみがこのファイルからは確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 83, 86〜87 / 抜粋: "from services.notification_service import _send_discord_webhook") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）が本ファイルからは不明。 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
 | `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 64〜77 / 抜粋: "_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")") |
-| `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 382, 452〜453, 568〜569 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")") |
+| `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 403, 478〜479, 594〜595 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -139,8 +141,8 @@
 
 ### `_is_bot_detection_error`
 
-* **役割**: 例外オブジェクトの文字列表現（小文字化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが含まれるかを判定する関数。
-* 根拠: [関数定義] (行番号: 204〜206 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    message = str(exc).lower()\n    return any(marker in message for marker in CONFIG.BOT_DETECTION_MARKERS)")
+* **役割**: 例外オブジェクトの文字列表現（小文字化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが含まれるかを判定する関数。マーカーが数字のみ（"403"/"429"/"503"）の場合は正規表現の単語境界(`\b`)で厳密に一致するかを判定し、フレーズマーカー（"sign in to confirm"等）は従来通り部分文字列一致(`in`)で判定する。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正である。
+* 根拠: [関数定義とコメント] (行番号: 204〜210 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し、\n    # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って\n    # 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
 
 
 * **引数/リクエスト**: `exc: Exception`
@@ -148,25 +150,28 @@
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒント] (行番号: 204 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
+* 根拠: [戻り値ヒントと各return] (行番号: 204, 215, 217, 218 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
 
 
 * **副作用**: なし
-* **エラーハンドリング**: なし
+* 根拠: [処理内容] (行番号: 211〜218 / 抜粋: "message = str(exc).lower()\n    for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            if re.search(rf"\\b{re.escape(marker)}\\b", message):")
+
+
+* **エラーハンドリング**: なし（判定ロジックのみで例外は送出しない）
 
 
 ### `_round_robin_flatten`
 
 * **役割**: 複数グループ（ソース別タスクリスト）を、グループ順の単純連結ではなくラウンドロビン（各グループから1件ずつ順番に取り出す）で1本のリストへ平坦化する関数。`MAX_TASKS_PER_RUN`で先頭から打ち切られても特定のソースだけが上限を独占しないようにする。
-* 根拠: [関数定義とDocstring] (行番号: 209〜216 / 抜粋: "def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:\n    """複数グループのリストを、グループ順ではなくラウンドロビンで1本のリストに平坦化する。")
+* 根拠: [関数定義とDocstring] (行番号: 221〜228 / 抜粋: "def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:\n    """複数グループのリストを、グループ順ではなくラウンドロビンで1本のリストに平坦化する。")
 
 
 * **引数/リクエスト**: `groups: Iterable[List["DownloadTask"]]`
-* 根拠: [引数定義] (行番号: 209 / 抜粋: "def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:")
+* 根拠: [引数定義] (行番号: 221 / 抜粋: "def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:")
 
 
 * **戻り値/レスポンス**: `List["DownloadTask"]`（ラウンドロビン順に平坦化された結果）
-* 根拠: [戻り値ヒントとreturn文] (行番号: 209, 224 / 抜粋: "return result")
+* 根拠: [戻り値ヒントとreturn文] (行番号: 221, 236 / 抜粋: "return result")
 
 
 * **副作用**: なし（純粋なリスト変換処理）
@@ -176,15 +181,15 @@
 ### `_looks_like_block_page`
 
 * **役割**: 取得したHTMLがCloudflare等のボット検知チャレンジページかどうかを、本文中の特定マーカー文字列（小文字化して照合）の有無で判定する関数。HTTPステータス200で返る場合もあるため、ステータスコードだけに頼らない判定を行う。
-* 根拠: [関数定義とDocstring] (行番号: 227〜233 / 抜粋: "def _looks_like_block_page(html: str) -> bool:\n    """取得したHTMLがCloudflare等のボット検知チャレンジページかを判定する。")
+* 根拠: [関数定義とDocstring] (行番号: 239〜245 / 抜粋: "def _looks_like_block_page(html: str) -> bool:\n    """取得したHTMLがCloudflare等のボット検知チャレンジページかを判定する。")
 
 
 * **引数/リクエスト**: `html: str`
-* 根拠: [引数定義] (行番号: 227 / 抜粋: "def _looks_like_block_page(html: str) -> bool:")
+* 根拠: [引数定義] (行番号: 239 / 抜粋: "def _looks_like_block_page(html: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒント] (行番号: 227 / 抜粋: "def _looks_like_block_page(html: str) -> bool:")
+* 根拠: [戻り値ヒント] (行番号: 239 / 抜粋: "def _looks_like_block_page(html: str) -> bool:")
 
 
 * **副作用**: なし
@@ -194,11 +199,11 @@
 ### `DownloadTask`
 
 * **役割**: ダウンロード対象のURLと、その取得元リスト名（サブフォルダ振り分けに使用）を保持する `NamedTuple`。
-* 根拠: [DownloadTaskクラス] (行番号: 237〜239 / 抜粋: "class DownloadTask(NamedTuple):\n    url: str\n    source_name: str")
+* 根拠: [DownloadTaskクラス] (行番号: 249〜251 / 抜粋: "class DownloadTask(NamedTuple):\n    url: str\n    source_name: str")
 
 
 * **引数/リクエスト**: `url: str`, `source_name: str`
-* 根拠: [フィールド定義] (行番号: 238〜239 / 抜粋: "url: str\n    source_name: str")
+* 根拠: [フィールド定義] (行番号: 250〜251 / 抜粋: "url: str\n    source_name: str")
 
 
 * **戻り値/レスポンス**: 該当なし

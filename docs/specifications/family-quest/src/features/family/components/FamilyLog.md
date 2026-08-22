@@ -60,20 +60,20 @@
 
 ### `UserLogColumn`
 
-* **役割**: 1ユーザー分のタイムラインカラムを描画する。アバター画像（`/`で始まるパスの場合は`<img>`、それ以外はアバター文字列/アイコン/デフォルト絵文字`🙂`）とユーザー名を上部に表示し、`entries`を日付（`dateStr`優先、無ければ`date`、両方無ければ`'----/--/--'`）でグループ化して、日付ごとにタイムライン風のリストとして表示する。`entries`が空の場合は「まだ記録がありません」を表示する。各ログ項目では時刻（`timestamp`優先、無ければ`created_at`）、本文（`text`優先、無ければ`message`、無ければ`` `${quest_title} を達成！` ``）、獲得ゴールド（`gold`または`reward_gold`が正の場合のみバッジ表示）を描画する。
-* 根拠: (行番号: 18〜78 / 抜粋: "// 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、\n// タブで選ばせるのではなく最初から全員分を並べて表示する。\nconst UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {")
-* 根拠: アバター判定 (行番号: 21, 35〜39 / 抜粋: "const hasAvatarImage = !!user.avatar && user.avatar.startsWith('/');", "{hasAvatarImage ? (\n                        <img src={user.avatar} alt={user.name} className=\"w-full h-full object-cover\" />\n                    ) : (\n                        user.avatar || user.icon || '🙂'\n                    )}")
-* 根拠: グループ化 (行番号: 24〜29 / 抜粋: "const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {\n        const date = item.dateStr || item.date || '----/--/--';\n        if (!groups[date]) groups[date] = [];\n        groups[date].push(item);\n        return groups;\n    }, {});")
-* 根拠: 空表示 (行番号: 44〜46 / 抜粋: "{entries.length === 0 && (\n                <div className=\"text-center text-gray-500 text-xs py-4\">まだ記録がありません</div>\n            )}")
-* 根拠: ログ本文と獲得ゴールド (行番号: 58, 62, 65〜69 / 抜粋: "{formatTime(log.timestamp || log.created_at)}", "{log.text || log.message || `${log.quest_title} を達成！`}", "{((log.gold || 0) > 0 || (log.reward_gold || 0) > 0) && (")
+* **役割**: 1ユーザー分のタイムラインカラムを描画する。アバター画像（`isSameOriginAvatarPath(user.avatar)`が真の場合は`<img>`、それ以外はアバター文字列/アイコン/デフォルト絵文字`🙂`）とユーザー名を上部に表示し、`entries`を日付（`dateStr`優先、無ければ`date`、両方無ければ`'----/--/--'`）でグループ化して、日付ごとにタイムライン風のリストとして表示する。`entries`が空の場合は「まだ記録がありません」を表示する。各ログ項目では時刻（`timestamp`優先、無ければ`created_at`）、本文（`text`優先、無ければ`message`、無ければ`` `${quest_title} を達成！` ``）、獲得/消費ゴールド（`gold`または`reward_gold`が正の場合のみバッジ表示）を描画する。**バグ修正(M-6-4)**: `log.type === 'reward'`（報酬購入）の場合は消費として赤色で`-N G`、それ以外（クエスト達成等）は獲得として黄色で`+N G`と表示するようになった。以前は購入によるゴールド消費も一律`+N G`（獲得）として表示されていた。
+* 根拠: (行番号: 19〜87 / 抜粋: "// 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、\n// タブで選ばせるのではなく最初から全員分を並べて表示する。\nconst UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {")
+* 根拠: アバター判定 (行番号: 22, 36〜40 / 抜粋: "const hasAvatarImage = isSameOriginAvatarPath(user.avatar);", "{hasAvatarImage ? (\n                        <img src={user.avatar} alt={user.name} className=\"w-full h-full object-cover\" />\n                    ) : (\n                        user.avatar || user.icon || '🙂'\n                    )}")
+* 根拠: グループ化 (行番号: 25〜30 / 抜粋: "const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {\n        const date = item.dateStr || item.date || '----/--/--';\n        if (!groups[date]) groups[date] = [];\n        groups[date].push(item);\n        return groups;\n    }, {});")
+* 根拠: 空表示 (行番号: 45〜47 / 抜粋: "{entries.length === 0 && (\n                <div className=\"text-center text-gray-500 text-xs py-4\">まだ記録がありません</div>\n            )}")
+* 根拠: ログ本文と獲得/消費ゴールド (行番号: 59, 63, 66, 76 / 抜粋: "{formatTime(log.timestamp || log.created_at)}", "{log.text || log.message || `${log.quest_title} を達成！`}", "{((log.gold || 0) > 0 || (log.reward_gold || 0) > 0) && (", "{log.type === 'reward' ? '-' : '+'}{log.gold || log.reward_gold} G")
 
 
 * **引数/リクエスト**: `{ user: User; entries: ChronicleItem[] }`
-* 根拠: (行番号: 20 / 抜粋: "const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {")
+* 根拠: (行番号: 21 / 抜粋: "const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 31〜77 / 抜粋: "return (\n        <div className=\"bg-black/20 border border-gray-700 rounded-xl p-3 space-y-3 min-w-0\">")
+* 根拠: (行番号: 32〜86 / 抜粋: "return (\n        <div className=\"bg-black/20 border border-gray-700 rounded-xl p-3 space-y-3 min-w-0\">")
 
 
 * **副作用**: なし
@@ -83,31 +83,31 @@
 ### `FamilyLogProps` (型定義)
 
 * **役割**: `FamilyLog`コンポーネントが受け取るPropsの型定義。
-* 根拠: (行番号: 6〜9 / 抜粋: "interface FamilyLogProps {\n    chronicle: ChronicleItem[];\n    users: User[];\n}")
+* 根拠: (行番号: 7〜10 / 抜粋: "interface FamilyLogProps {\n    chronicle: ChronicleItem[];\n    users: User[];\n}")
 
 
 ### `FamilyLog`
 
 * **役割**: `chronicle`が未取得（falsy）の間はローディングメッセージを返す。取得済みの場合は見出し（`History`アイコン＋「冒険の記録」）を表示したのち、`users`を`map`し、各ユーザーについて`chronicle`を`item.userId === user.user_id`でフィルタリングした結果を`UserLogColumn`に渡してグリッド表示する。
-* 根拠: (行番号: 83〜104 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {")
-* 根拠: ローディング分岐 (行番号: 84 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
-* 根拠: ユーザーごとのフィルタリングと描画 (行番号: 93〜101 / 抜粋: "{users.map(user => (\n                    <UserLogColumn\n                        key={user.user_id}\n                        user={user}\n                        entries={chronicle.filter(item => item.userId === user.user_id)}\n                    />\n                ))}")
+* 根拠: (行番号: 92〜113 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {")
+* 根拠: ローディング分岐 (行番号: 93 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
+* 根拠: ユーザーごとのフィルタリングと描画 (行番号: 102〜110 / 抜粋: "{users.map(user => (\n                    <UserLogColumn\n                        key={user.user_id}\n                        user={user}\n                        entries={chronicle.filter(item => item.userId === user.user_id)}\n                    />\n                ))}")
 
 
 * **引数/リクエスト**: `FamilyLogProps` (`chronicle`: `ChronicleItem[]`, `users`: `User[]`)
-* 根拠: (行番号: 83 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {")
+* 根拠: (行番号: 92 / 抜粋: "const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 84, 86〜103 / 抜粋: "if (!chronicle) return <div", "return (\n        <div className=\"space-y-3 animate-in fade-in duration-500 pb-6\">")
+* 根拠: (行番号: 93, 95〜112 / 抜粋: "if (!chronicle) return <div", "return (\n        <div className=\"space-y-3 animate-in fade-in duration-500 pb-6\">")
 
 
 * **副作用**: なし
-* 根拠: `useEffect`等の記述なし (行番号: 83〜104)
+* 根拠: `useEffect`等の記述なし (行番号: 92〜113)
 
 
 * **エラーハンドリング**: `chronicle`が falsy な場合、読み込み中のメッセージを返して早期リターンする。
-* 根拠: (行番号: 84 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
+* 根拠: (行番号: 93 / 抜粋: "if (!chronicle) return <div className=\"text-center py-10\">冒険の記録を読み込んでいます...</div>;")
 
 
 
@@ -123,13 +123,13 @@ flowchart TD
 
     subgraph "UserLogColumn (userごと)"
         LoopUsers --> FilterEntries["chronicleをitem.userId===user.user_idでフィルタ"]
-        FilterEntries --> RenderAvatar["アバター判定: user.avatarが'/'始まりならimg、\nそれ以外はavatar/icon/🙂"]
+        FilterEntries --> RenderAvatar["アバター判定: isSameOriginAvatarPath(user.avatar)なら\nimg、それ以外はavatar/icon/🙂"]
         RenderAvatar --> CheckEmpty{"entries.length === 0 か？"}
         CheckEmpty -- Yes --> RenderEmptyMsg["「まだ記録がありません」を表示"]
         CheckEmpty -- No --> GroupByDate["dateStr||date||'----/--/--'でグループ化"]
         GroupByDate --> LoopDates["日付ごとにループ"]
         LoopDates --> LoopLogs["各ログをループ"]
-        LoopLogs --> FormatEntry["formatTime(timestamp||created_at)\ntext||message||quest_title達成\ngold||reward_goldが正なら+Gバッジ表示"]
+        LoopLogs --> FormatEntry["formatTime(timestamp||created_at)\ntext||message||quest_title達成\ngold||reward_goldが正なら\ntype==='reward'は-G(赤)、それ以外は+G(黄)でバッジ表示"]
     end
 
     RenderEmptyMsg --> End
@@ -146,9 +146,11 @@ graph TD
     FamilyLog --> LucideReact["外部：lucide-react (History, Clock)"]
     FamilyLog --> GameDataTypes["外部：@/hooks/useGameData (ChronicleItem)"]
     FamilyLog --> UserType["外部：@/types (User)"]
+    FamilyLog --> AvatarUtil["外部：../../../lib/utils (isSameOriginAvatarPath)"]
     FamilyLog --> FormatTime["内部処理：formatTime"]
     FamilyLog -->|userごとにRender| UserLogColumn["内部コンポーネント：UserLogColumn"]
     UserLogColumn --> FormatTime
+    UserLogColumn --> AvatarUtil
 
 ```
 
@@ -157,25 +159,26 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `@/hooks/useGameData` | `ChronicleItem`の完全なスキーマを把握し、`chronicle`の具体的なデータ構造（`dateStr`/`date`、`text`/`message`等の混在フィールド）を確認するため。 | `import { ChronicleItem } from '@/hooks/useGameData';` (行番号: 3) |
-| 中 | `../../../../App.tsx` (親コンポーネント) | `chronicle`と`users`の取得元（API通信など）、および`viewMode`に応じた本コンポーネントの表示制御を把握するため。 | `const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {` (行番号: 83) |
+| 中 | `../../../../App.tsx` (親コンポーネント) | `chronicle`と`users`の取得元（API通信など）、および`viewMode`に応じた本コンポーネントの表示制御を把握するため。 | `const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {` (行番号: 92) |
 | 低 | `@/types` | `User`の`avatar`/`icon`/`user_id`の正確な型・必須任意を確認するため。 | `import { User } from '@/types';` (行番号: 4) |
+| 低 | `../../../lib/utils.ts` | `isSameOriginAvatarPath`の判定ロジックの詳細を確認するため。 | `import { isSameOriginAvatarPath } from '../../../lib/utils';` (行番号: 5) |
 
 ## 8. 保守上の注意点
 
 * `chronicle` は `ChronicleItem[]`（`@/hooks/useGameData` からインポート）、`users` は `User[]`（`@/types` からインポート）として型付けされているが、これらの型定義の実体は本ファイルにはなく外部ファイルに依存する。
-* 根拠: (行番号: 3〜4, 6〜9)
+* 根拠: (行番号: 3〜4, 7〜10)
 
 
 * `ChronicleItem` の各要素において、プロパティ名に複数のパターン（例: `dateStr` と `date`、`timestamp` と `created_at`、`text` と `message`、`gold` と `reward_gold`）が混在しており、フォールバック（`||`）による評価が行われている。型定義上は両方のプロパティが許容されていると推測されるが、移行期間中の仕様が混在している兆候である可能性がある。
-* 根拠: (行番号: 25, 58, 62, 65〜69 / 抜粋: "const date = item.dateStr || item.date || '----/--/--';")
+* 根拠: (行番号: 26, 59, 63, 66, 76 / 抜粋: "const date = item.dateStr || item.date || '----/--/--';")
 
 
-* アバター画像かどうかの判定に、文字列の先頭一致（`startsWith('/')`）のみを用いているため、ホスティング先やURLの仕様が変更された場合（例: 絶対URLに`http`を使う運用に変わった場合）に表示が崩れる可能性がある。
-* 根拠: (行番号: 21 / 抜粋: "const hasAvatarImage = !!user.avatar && user.avatar.startsWith('/');")
+* アバター画像かどうかの判定は共通ヘルパー`isSameOriginAvatarPath`（`../../../lib/utils`）に委譲されている。**バグ修正**: 以前は本ファイル内で`user.avatar && user.avatar.startsWith('/')`という文字列の先頭一致のみを直接判定していたため、プロトコル相対URL（`"//evil.example/x"`）も`startsWith('/')`がtrueになり素通りしてしまう脆弱性があった。共通ヘルパーへの置き換えにより`"//"`始まりが明示的に除外されるようになったが、ヘルパー自体の実装は本ファイルからは不明（`../../../lib/utils`に依存）。
+* 根拠: (行番号: 5, 22 / 抜粋: "import { isSameOriginAvatarPath } from '../../../lib/utils';", "const hasAvatarImage = isSameOriginAvatarPath(user.avatar);")
 
 
 * 以前存在した「家族の総力（パーティランク・総レベルなど）」の集計表示（`FamilyStats`関連のUI）は、コメントにより意図的に廃止されたことが明記されている。復活させる場合は`stats`相当のPropsを再度受け取る必要がある。
-* 根拠: (行番号: 80〜82 / 抜粋: "// 家族の総力(パーティランク・\n// 総レベルなど)の集計表示は不要とのことなので廃止した。")
+* 根拠: (行番号: 89〜91 / 抜粋: "// 家族の総力(パーティランク・\n// 総レベルなど)の集計表示は不要とのことなので廃止した。")
 
 
 ## 9. 不明事項一覧
