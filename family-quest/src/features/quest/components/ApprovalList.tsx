@@ -6,6 +6,13 @@ import { QuestHistory, User, PendingInventory } from '@/types';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { apiClient } from '../../../lib/apiClient';
+import { useToast } from '../../../context/useToast';
+
+// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す
+// {"detail": "..."} の内容が入っている(apiClient.ts参照)。
+const extractErrorDetail = (error: unknown): string => {
+    return error instanceof Error && error.message ? error.message : '操作に失敗しました';
+};
 
 type Props = {
     pendingQuests: QuestHistory[];
@@ -56,6 +63,7 @@ const SwipeableRow: React.FC<{
 
 const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, currentUser, onApprove, onReject, onApproveAll }) => {
     const queryClient = useQueryClient();
+    const { showToast } = useToast();
     // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「アイテム使用承認」の確認を行う
     const [itemToConsume, setItemToConsume] = useState<PendingInventory | null>(null);
     // 承認待ちが多いときに折りたためるように(デフォルトは開いた状態)
@@ -68,6 +76,14 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, cur
             queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
             // 必要に応じて親のインベントリリストなども更新
             queryClient.invalidateQueries({ queryKey: ['inventory'] });
+            // H-5: アイテム使用の確定(quest_historyへの記録)はconsume_item時に
+            // 行われるため、冒険の記録(chronicle)もここで無効化する。
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
+        },
+        // M-6-3: 以前はonErrorが無く、承認失敗(通信エラー等)がユーザーに
+        // 一切通知されないサイレント失敗になっていた。
+        onError: (error) => {
+            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
         }
     });
 

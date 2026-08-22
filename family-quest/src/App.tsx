@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { WifiOff } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
@@ -99,7 +99,9 @@ const ConfirmModal = ({
       }
       case 'purchase': {
         const t = target as Reward;
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
+        // Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず
+        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -182,6 +184,14 @@ function App() {
   } = useGameData(handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
+
+  // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
+  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして
+  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。
+  const pendingQuestsRef = useRef(pendingQuests);
+  useEffect(() => {
+    pendingQuestsRef.current = pendingQuests;
+  }, [pendingQuests]);
 
   // --- Handlers ---
   const handleUserChange = (idx: number) => {
@@ -321,6 +331,12 @@ function App() {
     const res = await approveQuest(getRepresentativeParent(users), history);
     if (res.success) {
       play('approve');
+      // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
+      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
+      if ((res.earnedMedals ?? 0) > 0) {
+        play('medal');
+        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+      }
     } else {
       setMessageData({
         title: "エラー",
@@ -333,16 +349,26 @@ function App() {
 
   // 角度⑩: 承認待ちが複数あるとき、1件ずつ承認する手間を減らす一括承認
   const handleApproveAll = async () => {
-    const targets = [...pendingQuests];
+    // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
+    // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
+    const targets = [...pendingQuestsRef.current];
     if (targets.length === 0) return;
 
     let successCount = 0;
+    let totalEarnedMedals = 0;
     for (const history of targets) {
       const res = await approveQuest(getRepresentativeParent(users), history);
-      if (res.success) successCount++;
+      if (res.success) {
+        successCount++;
+        totalEarnedMedals += res.earnedMedals ?? 0;
+      }
     }
 
     if (successCount > 0) play('approve');
+    if (totalEarnedMedals > 0) {
+      play('medal');
+      showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
+    }
 
     if (successCount === targets.length) {
       showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
@@ -350,7 +376,7 @@ function App() {
       setMessageData({
         title: "エラー",
         text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
-        onRetry: handleApproveAll,
+        onRetry: () => handleApproveAll(),
       });
       play('cancel');
     }

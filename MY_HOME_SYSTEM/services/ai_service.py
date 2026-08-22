@@ -139,8 +139,37 @@ ALLOWED_SEARCH_TABLES = {
 
 
 def _extract_referenced_tables(sql: str) -> List[str]:
-    """SQL文中の FROM / JOIN の直後に現れるテーブル名を抽出する（簡易パーサ）"""
-    return re.findall(r"(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*)", sql, flags=re.IGNORECASE)
+    """
+    SQL文中で FROM / JOIN が参照するテーブル名をすべて抽出する（簡易パーサ）。
+
+    以下のバイパス経路を塞ぐため、単純な「FROM/JOINの直後の1識別子」だけでなく:
+    - `FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル
+    - `FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の FROM/JOIN
+      (re.finditer はSQL全文を走査するため、サブクエリ内の FROM/JOIN も
+      自然に検出される)
+    も対象にする。
+    """
+    tables: List[str] = []
+    for m in re.finditer(
+        r"(?:FROM|JOIN)\s+([A-Za-z_][A-Za-z0-9_]*|\()",
+        sql,
+        flags=re.IGNORECASE,
+    ):
+        token = m.group(1)
+        if token == "(":
+            # サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。
+            continue
+        tables.append(token)
+
+        # 同じFROM/JOIN句内で `, テーブル名` と続く暗黙CROSS JOINを拾う
+        pos = m.end()
+        while True:
+            comma_match = re.match(r"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", sql[pos:], flags=re.IGNORECASE)
+            if not comma_match:
+                break
+            tables.append(comma_match.group(1))
+            pos += comma_match.end()
+    return tables
 
 
 async def tool_search_db(args: Dict[str, Any]) -> str:

@@ -1,6 +1,7 @@
 import React from 'react';
 import { User } from '@/types';
 import { Scroll, Settings, Home } from 'lucide-react';
+import { isSameOriginAvatarPath } from '../../lib/utils';
 
 interface HeaderProps {
     users: User[];
@@ -107,7 +108,7 @@ const Header: React.FC<HeaderProps> = ({
                                     ? 'border-yellow-400 ring-4 ring-yellow-500/30 bg-gray-800'
                                     : 'border-gray-600 bg-gray-900'}
               `}>
-                                {user.avatar && user.avatar.startsWith('/') ? (
+                                {isSameOriginAvatarPath(user.avatar) ? (
                                     <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center text-3xl">
