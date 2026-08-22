@@ -334,13 +334,13 @@
 ### `UrlExtractorApp.__init__`
 
 * **役割**: `YouTubeExtractor`, `FileManager`, `SubscriptionManager`の各インスタンスを生成・保持するコンストラクタ。
-* 根拠: [メソッド定義] (行番号: 415〜418 / 抜粋: "def __init__(self):\n        self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
+* 根拠: [メソッド定義] (行番号: 431〜434 / 抜粋: "def __init__(self):\n        self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: 3つのインスタンス属性への代入（間接的に`SubscriptionManager.__init__`のNASアクセス確認等の副作用を誘発しうる）。
-* 根拠: [属性代入] (行番号: 416〜418 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
+* 根拠: [属性代入] (行番号: 432〜434 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
 
 
 * **エラーハンドリング**: なし
