@@ -333,7 +333,11 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
             const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
             if (bonusA !== bonusB) return bonusB - bonusA;
-            return (b.id as number) - (a.id as number);
+            // M-6-5バグ修正: 実カラムはquest_idであり、idは常にundefinedのため
+            // (b.id as number) - (a.id as number) は常にNaNになり並び順が不定だった。
+            const idA = Number(a.quest_id ?? a.id ?? 0);
+            const idB = Number(b.quest_id ?? b.id ?? 0);
+            return idB - idA;
         });
     }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
 
