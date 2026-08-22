@@ -33,6 +33,8 @@
 * 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1795〜1806 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
 * 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。
 * 根拠: [DataManager.save_known_castsのコメント] (行番号: 1445〜1447 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ")
+* `run_monitor`はモニタープロセスのエントリポイントとして、`fcntl.flock`による多重起動防止ロック（`_MONITOR_LOCK_FILE_PATH`）を非ブロッキングで取得してから処理本体`_run_monitor_locked`を呼び出す。cronの1回の実行が想定より長引く（1時間超）と新旧プロセスが並行実行され、既知キャストリスト・サマリファイルの読み書きが競合しうる問題への対策であり、`batch_download_discord.py`が既に採用している同種のロックパターンを踏襲している。
+* 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1825〜1836 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
 
 ## 3. 外部依存関係
 
@@ -48,6 +50,7 @@
 | `sys` | 標準ライブラリ | `sys.path`へのプロジェクトルート追加 | 根拠: [import文] (行番号: 19 / 抜粋: "import sys") |
 | `logging` | 標準ライブラリ | フォールバック時のロガー基本設定・生成 | 根拠: [import文] (行番号: 20 / 抜粋: "import logging") |
 | `hashlib` | 標準ライブラリ | ID未取得時のフォールバックIDを生成するためのフィンガープリント(sha1)算出 | 根拠: [import文] (行番号: 21 / 抜粋: "import hashlib") |
+| `fcntl` | 標準ライブラリ | 多重起動防止ロックファイルへの排他ロック(`flock`)取得・解放 | 根拠: [import文] (行番号: 22 / 抜粋: "import fcntl") |
 | `dataclasses.dataclass`, `asdict` | 標準ライブラリ | `SiteConfig`/`CastMember`データクラスの定義、辞書変換 | 根拠: [import文] (行番号: 24 / 抜粋: "from dataclasses import dataclass, asdict") |
 | `datetime.datetime` | 標準ライブラリ | 現在時刻の取得（日次サマリの日付判定、21時台判定） | 根拠: [import文] (行番号: 25 / 抜粋: "from datetime import datetime") |
 | `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作全般 | 根拠: [import文] (行番号: 26 / 抜粋: "from pathlib import Path") |
@@ -721,11 +724,16 @@
 
 ## 5. 処理フロー図
 
-`run_monitor`のメインロジックのフローを示します。
+`run_monitor`（多重起動防止ロック）と、その内部で呼び出される`_run_monitor_locked`のメインロジックのフローを示します。
 
 ```mermaid
 flowchart TD
-    Start["Start: run_monitor"] --> Warmup["外部：wait_for_storage_warmup(data_dir)"]
+    Start["Start: run_monitor"] --> LockTry["fcntl.flock(lock_fd, LOCK_EX|LOCK_NB)"]
+    LockTry --> LockOk{"ロック取得成功?"}
+    LockOk -- No --> LockBusyLog["情報ログ出力<br>(他インスタンスが実行中)"] --> EndLock["End (今回はスキップ)"]
+
+    LockOk -- Yes --> RunLocked["外部：_run_monitor_locked()"]
+    RunLocked --> Warmup["外部：wait_for_storage_warmup(data_dir)"]
     Warmup --> WarmupOk{"ストレージアクセス確立成功?"}
     WarmupOk -- No --> ErrLog1["エラーログ出力"] --> End1["End (処理中断)"]
 
@@ -756,7 +764,8 @@ flowchart TD
     SiteLoopEnd -- Yes --> DailySummary["外部：_maybe_send_daily_summary(notifier)<br>(21時台のみDiscordへ送信)"]
 
     DailySummary --> Finally["finally: monitor.close() / notifier.close()"]
-    Finally --> End3["End (正常終了)"]
+    Finally --> ReleaseLock["run_monitor: finally でロック解放<br>(flock LOCK_UN) + ディスクリプタclose"]
+    ReleaseLock --> End3["End (正常終了)"]
 ```
 
 ## 6. 依存関係図
@@ -773,10 +782,16 @@ graph TD
         WebMonitor["WebMonitor"]
         check_site["_check_site()"]
         daily_summary["_maybe_send_daily_summary()"]
-        run_monitor["run_monitor()"]
+        run_monitor["run_monitor()<br>(多重起動防止ロック)"]
+        run_locked["_run_monitor_locked()"]
+        lock_path["_MONITOR_LOCK_FILE_PATH"]
         get_logger_fb["get_logger() (fallback)"]
         get_managed_dir_fb["get_managed_target_directory() (fallback)"]
         wait_warmup_fb["wait_for_storage_warmup() (fallback)"]
+    end
+
+    subgraph "外部依存（標準ライブラリ）"
+        fcntl_mod["fcntl.flock"]
     end
 
     subgraph "外部依存（コアモジュール、try節）"
@@ -795,6 +810,7 @@ graph TD
         TargetSites["80件の対象Webサイト<br>(MonitorConfig.SITES)"]
         DiscordAPI["Discord Webhook API"]
         Storage["NAS/ローカルストレージ"]
+        LockFile["ロックファイル<br>(.newface_monitor.lock)"]
     end
 
     logger -.->|"インポート成功時"| core_logger
@@ -804,13 +820,18 @@ graph TD
     MonitorConfig -.->|"インポート失敗時"| get_managed_dir_fb
     MonitorConfig --> SiteConfig
 
-    run_monitor --> wait_warmup_fb
-    run_monitor -.->|"インポート成功時"| core_utils
-    run_monitor --> WebMonitor
-    run_monitor --> DiscordNotifier
-    run_monitor --> MonitorConfig
-    run_monitor --> check_site
-    run_monitor --> daily_summary
+    run_monitor --> lock_path
+    run_monitor --> fcntl_mod
+    lock_path --> LockFile
+    run_monitor -->|"ロック取得成功時"| run_locked
+
+    run_locked --> wait_warmup_fb
+    run_locked -.->|"インポート成功時"| core_utils
+    run_locked --> WebMonitor
+    run_locked --> DiscordNotifier
+    run_locked --> MonitorConfig
+    run_locked --> check_site
+    run_locked --> daily_summary
 
     check_site --> WebMonitor
     check_site --> DiscordNotifier
