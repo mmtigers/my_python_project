@@ -38,9 +38,12 @@ send_discord() {
         escaped_message="${escaped_message#\"}"
         escaped_message="${escaped_message%\"}"
         
+        # M-8-3バグ修正: 上でエスケープしたescaped_messageではなく未エスケープの
+        # $messageを埋め込んでいたため、メッセージに"や改行が含まれるとJSON
+        # ペイロードが壊れていた(エスケープ処理自体が死にコードになっていた)。
         curl -H "Content-Type: application/json" \
              -X POST \
-             -d "{\"content\": \"$message\"}" \
+             -d "{\"content\": \"$escaped_message\"}" \
              "$WEBHOOK_URL" >/dev/null 2>&1
     fi
 }
