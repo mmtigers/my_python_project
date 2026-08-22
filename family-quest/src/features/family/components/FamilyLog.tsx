@@ -2,6 +2,7 @@ import React from 'react';
 import { History, Clock } from 'lucide-react';
 import { ChronicleItem } from '@/hooks/useGameData';
 import { User } from '@/types';
+import { isSameOriginAvatarPath } from '../../../lib/utils';
 
 interface FamilyLogProps {
     chronicle: ChronicleItem[];
@@ -18,7 +19,7 @@ const formatTime = (ts: string | number | undefined) => {
 // 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、
 // タブで選ばせるのではなく最初から全員分を並べて表示する。
 const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {
-    const hasAvatarImage = !!user.avatar && user.avatar.startsWith('/');
+    const hasAvatarImage = isSameOriginAvatarPath(user.avatar);
 
     // 日付ごとにログをグループ化
     const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
