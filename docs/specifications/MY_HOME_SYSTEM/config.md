@@ -22,7 +22,7 @@
 ## 2. ファイルの概要
 
 * システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。
-* 根拠: [環境変数読み込み処理] (行番号: 170 / 抜粋: `ENV: str = os.getenv("ENV"`)
+* 根拠: [環境変数読み込み処理] (行番号: 171 / 抜粋: `ENV: str = os.getenv("ENV"`)
 
 
 * SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照。未設定時は検証をスキップする後方互換設計)。
@@ -46,15 +46,27 @@
 
 
 * ログ用、アセット用などの必須ディレクトリが存在しない場合、自動的に作成する。
-* 根拠: [ディレクトリ自動作成ループ] (行番号: 516 / 抜粋: `os.makedirs(d, exist_ok=True)`)
+* 根拠: [ディレクトリ自動作成ループ] (行番号: 565 / 抜粋: `os.makedirs(d, exist_ok=True)`)
 
 
 * `FAMILY_SETTINGS["members"]` の実名キー自体は `handlers/line_handler.py` 等でのメッセージ文字列マッチングに機能的に使用されているためソース上に残しつつ、年齢などの個人情報は Git 管理対象外の `family_members.local.json` が存在すればそこから読み込んでマージする（存在しなくてもプレースホルダーのままアプリは起動できる）。
-* 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 481 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
+* 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 530 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
 
 
 * NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、小児科予約監視URL（`CLINIC_MONITOR_URL`等）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。
-* 根拠: [Retention / TV Lock / Clinic Monitor 各セクションの定数群] (行番号: 442 / 抜粋: `RECORDING_RETENTION_DAYS: int = int(os.getenv`)
+* 根拠: [Retention / TV Lock / Clinic Monitor 各セクションの定数群] (行番号: 491 / 抜粋: `RECORDING_RETENTION_DAYS: int = int(os.getenv`)
+
+
+* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、Streamlitダッシュボード・LAN内開発サーバー・Cloudflare Tunnel公開ドメインを含む形でこちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。
+* 根拠: [CORS許可オリジン定義] (行番号: 419 / 抜粋: `CORS_ORIGINS: List[str] = [`)
+
+
+* クエスト機能のファイルアップロード(`/api/quest/upload`)におけるアップロード可能な最大ファイルサイズ(MB単位、環境変数で上書き可、既定10MB)を定義する。
+* 根拠: [アップロード上限設定] (行番号: 434 / 抜粋: `UPLOAD_MAX_FILE_SIZE_MB: int = `)
+
+
+* タイムラプス動画生成(`monitors/smart_timelapse_generator.py`, `monitors/scheduled_timelapse.py`)が`getattr(config, "TIMELAPSE_...", デフォルト値)`の形で参照する解像度・背景差分検出パラメータ・監視対象カメラフォルダ(`TIMELAPSE_CAMERAS`)・実行スケジュール(`TIMELAPSE_SCHEDULES`)・エンコード設定等の定数群を定義する。以前は対応する定数が本ファイルに存在せず、常にハードコードされたデフォルト値へフォールバックしていた。
+* 根拠: [タイムラプス生成設定] (行番号: 448 / 抜粋: `# タイムラプス生成設定`)
 
 
 
@@ -72,6 +84,7 @@
 | `Optional`, `List`, `Dict`, `Any` | 標準ライブラリ(`typing`) | 型ヒントの定義 | 根拠: `from typing import Optional, L` (行番号: 29 / 抜粋: `from typing import Optional, L`) |
 | `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み処理 | 根拠: `from dotenv import load_dotenv` (行番号: 31 / 抜粋: `from dotenv import load_dotenv`) |
 | `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 32 / 抜粋: `from pydantic import BaseModel`) |
+| `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 452 / 抜粋: `from datetime import time as _`) |
 
 ### ブラックボックスとなる外部要素
 
@@ -134,69 +147,69 @@
 ### `CameraConfig`
 
 * **役割**: カメラ設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 144〜153 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 144〜153 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 144〜153 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 144〜153 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 144〜153 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [Pydanticの継承] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 
 ### `NotifySettings`
 
 * **役割**: 通知設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 155〜158 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 155〜158 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 155〜158 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 155〜158 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 155〜158 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [Pydanticの継承] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 
 ### `DeviceConfig`
 
 * **役割**: デバイス設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 160〜165 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 160〜165 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 160〜165 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 160〜165 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 160〜165 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [Pydanticの継承] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 
@@ -319,7 +332,7 @@ flowchart TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `devices.json` の全体スキーマ | 実体の`devices.json`はリポジトリ内を検索したが存在せず(`.gitignore`66行目の`*.json`規則により追跡対象外、ランタイム生成ファイル)、実データそのものの解消はできなかった。ただし期待されるスキーマは`config.py`のPydanticモデルから直接確認できる。`CameraConfig`(144〜153行目)は`id, name, nas_folder(任意), location, ip, port(既定2020), user(任意), password(エイリアス"pass", 任意), rtsp_url(任意)`を持ち、`DeviceConfig`(160〜165行目)は`id, type, location, name, notify_settings(NotifySettings, default_factory)`を持つ(`NotifySettings`は155〜158行目で`power_threshold_watts, notify_mode(既定"LOG_ONLY"), target`)。`config.py`304〜307行目より、`devices.json`のトップレベルは`{"cameras": [...], "monitor_devices": [...]}`という2キー構造であることも確認した。下流では`routers/camera_router.py`35〜36行目が`cam["id"]`/`cam["name"]`を、`services/analysis_service.py`75〜76行目が`d["id"]`/`d.get("name")`/`d.get("location")`を実際に参照している。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-165, 300-313`（参考: `MY_HOME_SYSTEM/routers/camera_router.py:33-36`, `MY_HOME_SYSTEM/services/analysis_service.py:75-76`） |
+| `devices.json` の全体スキーマ | 実体の`devices.json`はリポジトリ内を検索したが存在せず(`.gitignore`66行目の`*.json`規則により追跡対象外、ランタイム生成ファイル)、実データそのものの解消はできなかった。ただし期待されるスキーマは`config.py`のPydanticモデルから直接確認できる。`CameraConfig`(144〜154行目)は`id, name, nas_folder(任意), location, ip, port(既定2020), user(任意), password(エイリアス"pass", 任意), rtsp_url(任意), enabled(既定True。E-3でカメラのライブ/録画表示のON・OFF永続化用に追加)`を持ち、`DeviceConfig`(161〜166行目)は`id, type, location, name, notify_settings(NotifySettings, default_factory)`を持つ(`NotifySettings`は156〜159行目で`power_threshold_watts, notify_mode(既定"LOG_ONLY"), target`)。`config.py`304〜307行目より、`devices.json`のトップレベルは`{"cameras": [...], "monitor_devices": [...]}`という2キー構造であることも確認した。下流では`routers/camera_router.py`35〜36行目が`cam["id"]`/`cam["name"]`を、`services/analysis_service.py`75〜76行目が`d["id"]`/`d.get("name")`/`d.get("location")`を実際に参照している。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-166, 300-313`（参考: `MY_HOME_SYSTEM/routers/camera_router.py:33-36`, `MY_HOME_SYSTEM/services/analysis_service.py:75-76`） |
 | 各種APIの利用箇所とエンドポイント | 5種のAPIについて、`config`定数を実際に参照する箇所を直接確認した。(1) SwitchBot: `services/switchbot_service.py`の`send_device_command(device_id, command, parameter="default", command_type="command")`(58〜60行目)が`config.SWITCHBOT_API_HOST`(`https://api.switch-bot.com`)を使って`{HOST}/v1.1/devices/{device_id}/commands`へPOSTし、`create_switchbot_auth_headers()`(78〜81行目)が`config.SWITCHBOT_API_TOKEN`/`SWITCHBOT_API_SECRET`から認証ヘッダーを生成する。(2) Nature Remo: `monitors/nature_remo_monitor.py`の`main()`(146〜148行目)が伊丹=`config.NATURE_REMO_ACCESS_TOKEN`、高砂=`config.NATURE_REMO_ACCESS_TOKEN_TAKASAGO`のトークンをそれぞれ`process_location(loc, token)`に渡す。(3) LINE: `services/notification_service.py`27〜28行目で`config.LINE_CHANNEL_ACCESS_TOKEN`をLINE Messaging API v3の`Configuration(access_token=...)`に設定する。(4) Discord: 同ファイル30〜37行目の`_send_discord_webhook(messages, image_data=None, channel="notify", filename="snapshot.jpg")`が`channel`引数(`"error"`/`"report"`/既定`"notify"`)に応じて`config.DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_REPORT`/`DISCORD_WEBHOOK_NOTIFY or DISCORD_WEBHOOK_URL`のいずれかへ`requests.post`する。(5) Gemini: `services/ai_service.py`34〜35行目で`config.GEMINI_API_KEY`が設定されていれば`genai.configure(api_key=...)`しモデル名`gemini-2.0-flash`を使用、未設定時は39〜40行目でAI機能を無効化する。加えて`tools/google_photos_service.py`31〜71行目は`config.GOOGLE_PHOTOS_TOKEN`(認証トークンファイルパス)と`config.GOOGLE_PHOTOS_CREDENTIALS`(OAuthクライアント資格情報パス)をGoogle Photos Library APIの認証フローに使用している。 | 直接ソース確認: `MY_HOME_SYSTEM/services/switchbot_service.py:58-81`, `MY_HOME_SYSTEM/monitors/nature_remo_monitor.py:146-148`, `MY_HOME_SYSTEM/services/notification_service.py:27-37`, `MY_HOME_SYSTEM/services/ai_service.py:34-40`, `MY_HOME_SYSTEM/tools/google_photos_service.py:31-71` |
 | Pydanticバリデーションエラー時のシステムの挙動 | `config.py`300〜313行目で`devices.json`のパースを`try`し、`except ValidationError as ve:`(308〜309行目)は`logger.error`でログ出力するのみで例外を再送出せず、`CAMERAS`/`MONITOR_DEVICES`は297〜298行目で初期化された空リスト`[]`のままモジュールのロード自体は正常に完了する。呼び出し元の`unified_server.py`は27行目で`import config`しているのみで、この種のエラーに対する特別なハンドリングは行っていない(エラー処理は`config.py`内で完結している)。下流の消費側も直接確認した: `routers/camera_router.py`28〜40行目の`GET /settings`は`config.CAMERAS`が空でも例外を出さず空配列`[]`を返し、42〜47行目の`GET /live/{camera_id}/stream.m3u8`は該当カメラが見つからないため`HTTPException(status_code=404, detail="Camera not found")`を送出する。`monitors/switchbot_power_monitor.py`132行目も`config.MONITOR_DEVICES`が空の場合は警告ログ(`"⚠️ No devices found in config.MONITOR_DEVICES."`)を出すのみで処理を継続する設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:296-313`, `MY_HOME_SYSTEM/unified_server.py:27`, `MY_HOME_SYSTEM/routers/camera_router.py:28-47`, `MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py:132` |
 | 各テーブルの詳細なスキーマ定義 | `init_unified_db.py`を直接確認した。`config.SQLITE_TABLE_DAILY_LOGS`(実体は`"daily_logs"`、config.py 238行目)は122〜130行目の`CREATE TABLE IF NOT EXISTS`文で`id, user_id, category TEXT NOT NULL, detail, timestamp DATETIME NOT NULL`列を持つ。`config.SQLITE_TABLE_SWITCHBOT_LOGS`(`"switchbot_meter_logs"`)は133〜142行目で`id, device_id, device_name, temperature REAL, humidity REAL, timestamp`列。`config.SQLITE_TABLE_POWER_USAGE`(`"power_usage"`)は145〜153行目で`id, device_id, device_name, wattage REAL, timestamp`列。さらに11〜29行目の`validate_schema_integrity(conn)`関数が、これら`config.SQLITE_TABLE_*`定数を含む主要テーブル群について`PRAGMA table_info(table)`で必須カラムの存在を検証する仕組みを持つことを確認した。また`core/migrations.py`49〜75行目の`apply_pending_migrations(conn)`は`migrations/`配下の`*.sql`ファイルをファイル名昇順で適用し、適用済みバージョンを`schema_migrations`テーブル(28〜34行目で`CREATE TABLE IF NOT EXISTS`定義)で追跡する、`init_unified_db.py`の初期スキーマ作成とは別系統のバージョン管理されたマイグレーション機構であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:11-29, 121-153`, `MY_HOME_SYSTEM/core/migrations.py:28-75` |

@@ -30,8 +30,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `.env` の内容 | スクリプト外で定義されており、具体的なURLや他の設定値が存在するかどうか不明なため | 変数定義と読み込み (行番号: 8, 18 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
-| Discord API (Webhook) | 外部のAPIであり、リクエスト成功後の詳細な振る舞いやAPI仕様（レートリミット等）が不明なため | `send_discord`関数 (行番号: 41〜44 / 抜粋: `curl -H "Content-Type: applic...`) |
-| 各種Linuxコマンド | `bluetoothctl`, `pactl`, `rfkill`, `systemctl`等は外部コマンドであり、内部の実装やOS環境による挙動の違いは判断不可なため | `run_diagnostics`関数等 (行番号: 53, 59, 65 / 抜粋: `bluetoothctl info "$MAC"`) |
+| Discord API (Webhook) | 外部のAPIであり、リクエスト成功後の詳細な振る舞いやAPI仕様（レートリミット等）が不明なため | `send_discord`関数 (行番号: 44〜47 / 抜粋: `curl -H "Content-Type: applic...`) |
+| 各種Linuxコマンド | `bluetoothctl`, `pactl`, `rfkill`, `systemctl`等は外部コマンドであり、内部の実装やOS環境による挙動の違いは判断不可なため | `run_diagnostics`関数等 (行番号: 56, 62, 68 / 抜粋: `bluetoothctl info "$MAC"`) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -61,7 +61,7 @@
 ### `send_discord`
 
 * **役割**: メッセージを簡易JSONエスケープし、`$WEBHOOK_URL`が設定されている場合にDiscordへHTTP POSTリクエストを送信する
-* 根拠: `send_discord` (行番号: 32〜46 / 抜粋: `curl -H "Content-Type: applic...`)
+* 根拠: `send_discord` (行番号: 32〜49 / 抜粋: `curl -H "Content-Type: applic...`)
 
 
 * **引数/リクエスト**: 文字列（Discordへ送信する通知メッセージ）
@@ -69,38 +69,38 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `send_discord`関数定義 (行番号: 32〜46 / 抜粋: `send_discord() { ... }`)
+* 根拠: `send_discord`関数定義 (行番号: 32〜49 / 抜粋: `send_discord() { ... }`)
 
 
 * **副作用**: 外部API（Discord Webhook）への通信、Python3によるサブプロセスの実行
-* 根拠: コマンド実行 (行番号: 37〜44 / 抜粋: `escaped_message=$(python3 -c...`)
+* 根拠: コマンド実行 (行番号: 37〜47 / 抜粋: `escaped_message=$(python3 -c...`)
 
 
 * **エラーハンドリング**: `$WEBHOOK_URL`が空の場合は送信をスキップする。また、`curl`実行時の標準出力と標準エラー出力を破棄し、エラーでスクリプトが停止しないようにしている。
-* 根拠: 条件分岐・リダイレクト (行番号: 35, 44 / 抜粋: `if [ -n "$WEBHOOK_URL" ]; then`, `>/dev/null 2>&1`)
+* 根拠: 条件分岐・リダイレクト (行番号: 35, 47 / 抜粋: `if [ -n "$WEBHOOK_URL" ]; then`, `>/dev/null 2>&1`)
 
 
 
 ### `run_diagnostics`
 
 * **役割**: システムのBluetoothサービス状態、RFKill状態、デバイス情報、カーネルログ、PulseAudioシンクおよびプロセス情報を取得し、ログファイルへ追記する
-* 根拠: `run_diagnostics` (行番号: 49〜71 / 抜粋: `systemctl status bluetooth ...`)
+* 根拠: `run_diagnostics` (行番号: 52〜74 / 抜粋: `systemctl status bluetooth ...`)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `run_diagnostics`関数定義 (行番号: 49〜71 / 抜粋: `run_diagnostics() { ... }`)
+* 根拠: `run_diagnostics`関数定義 (行番号: 52〜74 / 抜粋: `run_diagnostics() { ... }`)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `run_diagnostics`関数定義 (行番号: 49〜71 / 抜粋: `run_diagnostics() { ... }`)
+* 根拠: `run_diagnostics`関数定義 (行番号: 52〜74 / 抜粋: `run_diagnostics() { ... }`)
 
 
 * **副作用**: 各種システムコマンド（`systemctl`, `rfkill`, `bluetoothctl`, `dmesg`, `pactl`, `pgrep`）の実行、およびログファイルへの一括書き込み
-* 根拠: ブロックリダイレクト (行番号: 51〜69 / 抜粋: `} >> "$LOGFILE" 2>&1`)
+* 根拠: ブロックリダイレクト (行番号: 54〜72 / 抜粋: `} >> "$LOGFILE" 2>&1`)
 
 
 * **エラーハンドリング**: ブロック全体の標準エラー出力を標準出力に統合してファイルに書き込むことで、各コマンドの実行エラー情報もログに残るようにしている。
-* 根拠: ブロックリダイレクト (行番号: 69〜69 / 抜粋: `} >> "$LOGFILE" 2>&1`)
+* 根拠: ブロックリダイレクト (行番号: 72〜72 / 抜粋: `} >> "$LOGFILE" 2>&1`)
 
 
 
@@ -199,6 +199,7 @@ graph TD
 * 通知メッセージのエスケープ処理に `python3` のワンライナーを使用しているため、実行環境に Python3 がインストールされていない場合、構文エラーが発生し通知内容が破損・未送信になる可能性がある。
 * `send_discord` 関数内の `curl` コマンドで標準出力・標準エラー出力を `/dev/null` にリダイレクトしているため、ネットワークエラーやDiscord側のAPI仕様変更（400番台エラー等）による送信失敗時にエラーログが一切残らない。
 * リトライ時の接続待機時間が `sleep 5` と固定されているため、ハードウェアやBluetoothスタックの応答遅延によっては、接続が完了しているにもかかわらずタイムアウト判定を受けるリスクがある。
+* **修正済み: JSONエスケープの死にコード化**: 以前は`send_discord`関数内で`escaped_message`を`python3`経由で正しく生成していたにもかかわらず、`curl`に渡すJSONペイロード側では未エスケープの`$message`をそのまま埋め込んでいたため、エスケープ処理自体が死にコードになっており、メッセージに二重引用符や改行・バックスラッシュが含まれるとJSONペイロードが壊れ通知が失敗し得た。現在はペイロード生成が`$escaped_message`参照に修正されている(46行目)。
 
 ## 9. 不明事項一覧
 

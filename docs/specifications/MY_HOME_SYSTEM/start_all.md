@@ -16,8 +16,8 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、既存プロセスの終了（および強制終了フォールバック）、NASのマウント確認、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
-* 根拠: スクリプト全体 (行番号: 4〜74 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
+* 根拠: スクリプト全体 (行番号: 4〜94 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
 
@@ -25,17 +25,17 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| 該当なし | 該当なし | Bashスクリプト内のコマンド実行のみであり、`source`等による外部ファイルのインポートはない | ファイル全体に該当構文なし (行番号: 1-75 / 抜粋: 該当行なし) |
+| 該当なし | 該当なし | Bashスクリプト内のコマンド実行のみであり、`source`等による外部ファイルのインポートはない | ファイル全体に該当構文なし (行番号: 1-94 / 抜粋: 該当行なし) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 62 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
-| `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 67 / 抜粋: "$PYTHON_EXEC unified_server.py") |
-| `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 72 / 抜粋: "run dashboard.py") |
-| `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 51 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
-| 停止対象の各スクリプト群 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py`などプロセス停止対象の実装内容が不明なため | `pkill -f` コマンド群 (行番号: 28〜30 / 抜粋: "pkill -f camera_monitor.py") |
+| `switchbot_webhook_fix.py` | スクリプト内で実行されているが、処理内容の実装が提供されていないため | `switchbot_webhook_fix.py` (行番号: 81 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
+| `unified_server.py` | スクリプト内で実行および停止対象となっているが、実装内容が不明なため | `unified_server.py` (行番号: 86 / 抜粋: "$PYTHON_EXEC unified_server.py") |
+| `dashboard.py` | スクリプト内で実行されているが、実装内容が不明なため | `dashboard.py` (行番号: 91 / 抜粋: "run dashboard.py") |
+| `/mnt/nas` | マウント状況の確認先となっているが、システム上の具体的なNAS構成が不明なため | `MOUNT_POINT` (行番号: 70 / 抜粋: "MOUNT_POINT="/mnt/nas"") |
+| 停止対象の各スクリプト群 | `camera_monitor.py`, `scheduler_boot.py`など`CLEANUP_TARGETS`配列に列挙されたプロセス停止対象の実装内容が不明なため | `CLEANUP_TARGETS`配列定義 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -68,70 +68,70 @@
 
 ### [要素名2：Phase 0: クリーンアップ処理]
 
-* **役割**: `unified_server.py`, `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py`, `streamlit run`のプロセスに対して`pkill`で停止シグナルを送る。最大5秒間`unified_server.py`の終了を監視し、停止していない場合は強制終了(`pkill -9`)を実行する。
-* 根拠: クリーンアップ処理ブロック (行番号: 25〜47 / 抜粋: "echo "--- Cleanup Old Processes ---"")
+* **役割**: 停止対象プロセス名の配列`CLEANUP_TARGETS`(`unified_server.py`, `camera_monitor.py`, `scheduler_boot.py`, `streamlit run`)を定義し、各対象へ`pkill`でSIGTERMを送って優しく停止させる。以前は`scheduler.py`という実在しないプロセス名を対象にしており実体の`scheduler_boot.py`にマッチしないため旧schedulerプロセスが再起動のたびに生き残っていた点と、存在しない`bluetooth_monitor.py`を対象にしていた点を修正し、実ファイル名の配列に置き換えている。
+* 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 24〜36 / 抜粋: "CLEANUP_TARGETS=(")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 25-47)
+* 根拠: 引数受け取り処理なし (行番号: 24-66)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 25-47)
+* 根拠: 戻り値返却なし (行番号: 24-66)
 
 
-* **副作用**: 実行中の一連のプロセスを停止・強制終了させる。標準出力へのログ表示。
-* 根拠: `pkill`および`echo`コマンド (行番号: 27〜46 / 抜粋: "pkill -9 -f unified_server.py")
+* **副作用**: `CLEANUP_TARGETS`内の各プロセスを停止・強制終了させる。標準出力へのログ表示。
+* 根拠: `for target in "${CLEANUP_TARGETS[@]}"; do pkill -f "$target"; done` (行番号: 39〜41 / 抜粋: "pkill -f "$target"")
 
 
-* **エラーハンドリング**: プロセスが通常の`pkill`で終了しない場合のフォールバックとして強制終了(`-9`)を実施。
-* 根拠: 強制終了処理 (行番号: 44〜47 / 抜粋: "if pgrep -f unified_server.py")
+* **エラーハンドリング**: 最大5秒間、`CLEANUP_TARGETS`内のいずれかがまだ実行中かを`pgrep`でループ確認し、5秒経過後もなお生存している対象に対しては、対象ごとに個別に強制終了(`pkill -9 -f "$target"`)を実施する（以前は強制終了ループが`unified_server.py`のみを対象としており、他プロセスが生き残る余地があった）。
+* 根拠: 待機ループおよび強制終了ループ (行番号: 43〜66 / 抜粋: "pkill -9 -f "$target"")
 
 
 
 ### [要素名3：Phase 1: NASマウント確認]
 
 * **役割**: `mountpoint`コマンドが存在するか確認し、存在する場合は指定したマウントポイント（`/mnt/nas`）が正しくマウントされているかをチェックする。
-* 根拠: NASマウント確認ブロック (行番号: 50〜58 / 抜粋: "echo "--- Check NAS Mount ---"")
+* 根拠: NASマウント確認ブロック (行番号: 68〜77 / 抜粋: "echo "--- Check NAS Mount ---"")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 50-58)
+* 根拠: 引数受け取り処理なし (行番号: 68-77)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 50-58)
+* 根拠: 戻り値返却なし (行番号: 68-77)
 
 
 * **副作用**: 標準出力へのマウント状態の警告・確認メッセージ出力のみ。
-* 根拠: `echo`コマンド (行番号: 54, 56 / 抜粋: "echo "✅ NAS Mounted."")
+* 根拠: `echo`コマンド (行番号: 73, 75 / 抜粋: "echo "✅ NAS Mounted."")
 
 
 * **エラーハンドリング**: マウントされていない場合でも警告文を表示するだけで、スクリプトの実行停止（異常終了）は行わない。
-* 根拠: if分岐内 (行番号: 54 / 抜粋: "echo "⚠️ NAS is NOT mounted."")
+* 根拠: if分岐内 (行番号: 73 / 抜粋: "echo "⚠️ NAS is NOT mounted."")
 
 
 
 ### [要素名4：Phase 3 & 4: 初期化およびサーバー起動]
 
 * **役割**: Webhook修正スクリプト(`switchbot_webhook_fix.py`)を実行し、その後`unified_server.py`と`dashboard.py`(Streamlit)をバックグラウンドで起動する。各プロセスの標準出力・標準エラー出力は`logs/`ディレクトリ内のログファイルにリダイレクトする。
-* 根拠: 起動処理ブロック (行番号: 61〜74 / 抜粋: "echo "--- Start Home System Server ---"")
+* 根拠: 起動処理ブロック (行番号: 79〜94 / 抜粋: "echo "--- Start Home System Server ---"")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 61-74)
+* 根拠: 引数受け取り処理なし (行番号: 79-94)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 61-74)
+* 根拠: 戻り値返却なし (行番号: 79-94)
 
 
 * **副作用**: 3つのPythonスクリプトの実行（うち2つはバックグラウンドプロセスとして常駐）。`logs/webhook_fix.log`, `logs/server_boot.log`, `logs/dashboard_boot.log` ファイルの作成および上書き。
-* 根拠: 実行・リダイレクト処理 (行番号: 62, 67, 72 / 抜粋: "> logs/server_boot.log 2>&1 &")
+* 根拠: 実行・リダイレクト処理 (行番号: 81, 86, 91 / 抜粋: "> logs/server_boot.log 2>&1 &")
 
 
 * **エラーハンドリング**: なし（各Pythonスクリプト内のエラーはログファイルへ書き込まれるが、本スクリプト側でのプロセス起動失敗時のハンドリングはない）。
-* 根拠: バックグラウンド実行処理 (行番号: 67, 72 / 抜粋: "&")
+* 根拠: バックグラウンド実行処理 (行番号: 86, 91 / 抜粋: "&")
 
 
 
@@ -147,10 +147,10 @@ flowchart TD
     PyCheck -- No --> SetSysPy["PYTHON_EXEC=python3"]
     SetVenv --> MkdirLogs[logsディレクトリ作成]
     SetSysPy --> MkdirLogs
-    MkdirLogs --> PkillSoft[既存プロセスのpkill実行]
-    PkillSoft --> WaitLoop{最大5秒待機・unified_server終了確認}
-    WaitLoop -- "終了確認" --> CheckNAS
-    WaitLoop -- "5秒経過でも残存" --> PkillHard[pkill -9 で強制終了]
+    MkdirLogs --> PkillSoft["CLEANUP_TARGETS配列の各対象へpkill(SIGTERM)実行"]
+    PkillSoft --> WaitLoop{最大5秒待機・CLEANUP_TARGETS全対象の終了確認}
+    WaitLoop -- "全対象終了確認" --> CheckNAS
+    WaitLoop -- "5秒経過でも残存" --> PkillHard["残存する対象ごとにpkill -9で強制終了"]
     PkillHard --> CheckNAS[NASマウントポイント確認]
     CheckNAS --> WebhookFix["外部：switchbot_webhook_fix.py()"]
     WebhookFix --> ServerBoot["外部：unified_server.py() バックグラウンド起動"]
@@ -170,9 +170,9 @@ graph TD
     Dashboard["dashboard.py"]
     NAS["/mnt/nas"]
     Logs["logs/"]
+    Targets["CLEANUP_TARGETS配列"]
     Proc1["camera_monitor.py"]
-    Proc2["bluetooth_monitor.py"]
-    Proc3["scheduler.py"]
+    Proc3["scheduler_boot.py"]
     Proc4["streamlit run"]
 
     start_all -->|設定| PYTHONPATH
@@ -181,11 +181,11 @@ graph TD
     start_all -->|バックグラウンド実行| Dashboard
     start_all -->|状態確認| NAS
     start_all -->|ファイル出力| Logs
-    start_all -->|プロセス停止| Proc1
-    start_all -->|プロセス停止| Proc2
-    start_all -->|プロセス停止| Proc3
-    start_all -->|プロセス停止| Proc4
-    start_all -.->|プロセス停止・強制終了| Server
+    start_all -->|定義| Targets
+    Targets -->|プロセス停止・強制終了| Server
+    Targets -->|プロセス停止・強制終了| Proc1
+    Targets -->|プロセス停止・強制終了| Proc3
+    Targets -->|プロセス停止・強制終了| Proc4
 
 ```
 
@@ -193,10 +193,10 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。 | `unified_server.py` (行番号: 67 / 抜粋: "$PYTHON_EXEC unified_server.py") |
-| 中 | `dashboard.py` | フロントエンド（ダッシュボード）の表示内容と、サーバーとの連携方法を把握するため。 | `dashboard.py` (行番号: 72 / 抜粋: "run dashboard.py") |
-| 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 62 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
-| 低 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py` | クリーンアップ対象として記載されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 28〜30 / 抜粋: "pkill -f camera_monitor.py") |
+| 高 | `unified_server.py` | システム全体のコアとしてバックグラウンドで起動され、コメント上で`scheduler_boot.py`の起動も担うと記載されているため、全体ロジックの把握に必須。 | `unified_server.py` (行番号: 86 / 抜粋: "$PYTHON_EXEC unified_server.py") |
+| 中 | `dashboard.py` | フロントエンド（ダッシュボード）の表示内容と、サーバーとの連携方法を把握するため。 | `dashboard.py` (行番号: 91 / 抜粋: "run dashboard.py") |
+| 中 | `switchbot_webhook_fix.py` | 起動時に毎回実行されており、外部API(SwitchBot/Cloudflare Tunnel)との通信や設定更新を担っていると推測されるため。 | `switchbot_webhook_fix.py` (行番号: 81 / 抜粋: "$PYTHON_EXEC switchbot_webhook_fix.py") |
+| 低 | `camera_monitor.py`, `scheduler_boot.py` | `CLEANUP_TARGETS`配列に列挙されているプロセス。システムの一部を構成している可能性がある。 | クリーンアップ処理 (行番号: 31〜36 / 抜粋: "CLEANUP_TARGETS=(") |
 
 ## 8. 保守上の注意点
 
@@ -204,6 +204,7 @@ graph TD
 * **未使用変数**: `QUEST_DIR` 変数が定義されているが、スクリプト内で一度も参照されていない。
 * **影響範囲の広いプロセス停止 (`pkill -f`)**: `pkill -f "streamlit run"` などは部分一致でプロセスを終了させるため、このシステムとは無関係の別プロジェクトのStreamlitプロセスが実行中の場合、巻き込んで終了させてしまう危険性がある。
 * **プロセスの起動監視漏れ**: `unified_server.py` および `dashboard.py` をバックグラウンドで起動しているが、プロセスが正常に立ち上がったかどうか（即座にクラッシュしていないか）の死活監視・エラー検知のロジックは存在しない。
+* **修正済み: pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
 
 ## 9. 不明事項一覧
 
@@ -212,7 +213,7 @@ graph TD
 | `switchbot_webhook_fix.py`の仕様 | 当該スクリプト内でどのような修正・通信処理が行われているか不明 | `switchbot_webhook_fix.py` |
 | `unified_server.py`の仕様 | サーバーの責務、提供エンドポイント、およびコメントにある`scheduler_boot.py`起動処理の実態が不明 | `unified_server.py`, `scheduler_boot.py` |
 | `dashboard.py`の仕様 | Streamlitで立ち上がるポート8501のダッシュボード機能詳細が不明 | `dashboard.py` |
-| 未起動スクリプトの用途 | `camera_monitor.py`, `bluetooth_monitor.py`, `scheduler.py`がクリーンアップ対象にあるが、起動処理が存在しないため、いつどこで起動されるか不明 | 全体アーキテクチャ資料 または 各該当スクリプト |
+| 未起動スクリプトの用途 | `camera_monitor.py`が`CLEANUP_TARGETS`(クリーンアップ対象)にあるが、本ファイル自体には起動処理が存在しないため、いつどこで起動されるか不明（`scheduler_boot.py`は85行目のコメントで`unified_server.py`が内部で起動する旨が本ファイル上でも明記されている） | 全体アーキテクチャ資料 または `camera_monitor.py`起動元のスクリプト |
 | `QUEST_DIR`の用途 | 変数が宣言されているが使用されていないため、本来の用途が不明 | 不明 |
 
 ## 相互参照による補足情報
@@ -222,7 +223,7 @@ graph TD
 | `switchbot_webhook_fix.py`の仕様 | `switchbot_webhook_fix.md`の解析によれば、環境変数`WEBHOOK_BASE_URL`を用いてSwitchBotおよびLINE BotのWebhookエンドポイントURLを問い合わせ、現状と異なる場合のみ削除・再登録(SwitchBot)または更新(LINE)を行い、実際に更新が発生した場合のみ`common.send_push`で通知するスクリプトとされる。 | switchbot_webhook_fix.md |
 | `unified_server.py`の仕様 | `unified_server.md`の解析によれば、FastAPI製のAPIサーバーであり、`lifespan`内で`monitors/camera_monitor.py`と`scheduler_boot.py`をサブプロセスとして起動し、終了時にはそれらを停止させる構成になっているとされる。ただし`camera_monitor.py`の起動は`try-except`で保護されておらず、起動失敗時はアプリ全体が起動できない可能性がある点が`unified_server.md`の保守上の注意点として挙げられている。 | unified_server.md, scheduler_boot.md |
 | `dashboard.py`の仕様 | `dashboard.md`の解析によれば、Streamlit製のダッシュボードアプリであり、`services.analysis_service`からセンサー・子供・食事等のデータを読み込み、11個のタブ(クエスト、電車遅延、防犯カメラ等)を`views.dashboard`配下の各ビューモジュールに委譲してレンダリングするとされる。 | dashboard.md |
-| 未起動スクリプトの用途 | `unified_server.md`の解析によれば、`camera_monitor.py`は`start_all.sh`自体ではなく`unified_server.py`の`lifespan`によってサブプロセスとして起動されることが判明した(`start_all.sh`側の`pkill`対象と`unified_server.py`側の起動元が一致)。一方`bluetooth_monitor.py`と`scheduler.py`(`scheduler_boot.py`とは別名)については、今回参照した仕様書群の中に対応する起動元の記述が見つからず、依然として不明である。 | unified_server.md |
+| 未起動スクリプトの用途 | `unified_server.md`の解析によれば、`camera_monitor.py`は`start_all.sh`自体ではなく`unified_server.py`の`lifespan`によってサブプロセスとして起動されることが判明した(`start_all.sh`側の`pkill`対象と`unified_server.py`側の起動元が一致)。以前は`bluetooth_monitor.py`と`scheduler.py`(`scheduler_boot.py`とは別名で実在しないプロセス名)についても対応する起動元の記述が見つからず不明であったが、修正コミット(`fix(H-9)`)により`start_all.sh`の`CLEANUP_TARGETS`から存在しない`bluetooth_monitor.py`は削除され、`scheduler.py`は本ファイル85行目のコメント("unified_server.py が内部で scheduler_boot.py を起動します")および`unified_server.md`の解析結果と一致する実名`scheduler_boot.py`に修正されたため、この2点の不明点は解消された。 | unified_server.md |
 
 ## 10. 自己検証結果
 
