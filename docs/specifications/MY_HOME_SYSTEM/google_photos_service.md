@@ -300,6 +300,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
+| 定数値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`GOOGLE_PHOTOS_CREDENTIALS`(395行目)は`os.path.join(BASE_DIR, "google_photos_credentials.json")`、`GOOGLE_PHOTOS_TOKEN`(396行目)は`os.path.join(BASE_DIR, "google_photos_token.json")`と、いずれも`config.BASE_DIR`(212行目、`os.path.dirname(os.path.abspath(__file__))`＝`MY_HOME_SYSTEM/`)直下のファイル名を組み立てる形で定義されている。`GOOGLE_PHOTOS_SCOPES`(397行目)は`['https://www.googleapis.com/auth/photoslibrary']`という単一要素のリストである。また本ファイル(`tools/google_photos_service.py`)が参照する他のAPIキーとして、`GEMINI_API_KEY`(config.py 203行目、`os.getenv("GEMINI_API_KEY")`)が85〜86行目・156行目で、`LINE_USER_ID`(config.py 185行目、`os.getenv("LINE_USER_ID")`)が198行目で使われている。いずれも環境変数から取得する`Optional[str]`型の定義であり、実際のトークン・キーの文字列値自体はリポジトリ内に存在しない(`.env`はgitignore対象)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185, 203, 212, 395-397`, `MY_HOME_SYSTEM/tools/google_photos_service.py:31-71, 85-86, 156, 198` |
 | プッシュ通知の仕様 | `common.md`/`notification_service.md`の解析によれば、`common.send_push`は`services.notification_service.send_push`へのFacadeであり、`target`引数(`discord`/`line`/`both`)に応じてDiscord Webhook/LINE Messaging APIへ送信、LINE失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | common.md, notification_service.md |
 | ロガーの設定内容 | `common.md`/`logger.md`の解析によれば、`common.setup_logging`は`core.logger.setup_logging`へのFacadeであり、コンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録するとされる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)の実際の値は`logger.md`でも未確認とされている。 | common.md, logger.md |
 
