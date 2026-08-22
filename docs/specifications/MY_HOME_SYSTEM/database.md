@@ -19,8 +19,8 @@
 ## 2. ファイルの概要
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
-* 接続のリトライ機構（ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。
-* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 12-84 / 抜粋: "DB接続コンテキストマネージャ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")
+* 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。
+* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 12-78 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")
 
 
 
@@ -56,8 +56,8 @@
 
 ### `get_db_cursor`
 
-* **役割**: リトライ機能（最大5回、1秒間隔）を備えたデータベース接続を提供するコンテキストマネージャ。WALモードおよび外部キー制約(`PRAGMA foreign_keys=ON`)を有効化し、カーソルを `yield` する。
-* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 12-26 / 抜粋: "DB接続コンテキストマネージャ (リトライ機能付き)")
+* **役割**: リトライ機能（最大5回、DB接続の確立時のみ、"locked"エラー時に1秒間隔で再試行）を備えたデータベース接続を提供するコンテキストマネージャ。WALモードおよび外部キー制約(`PRAGMA foreign_keys=ON`)を有効化し、接続確立後は `with` 文本体に対して必ず1回だけカーソルを `yield` する（H-1で書き直し。従来は`for`ループの中で`yield`しており、with本体実行中にDBロック等の例外が発生すると`raise e`後に再度ループ・`yield`しようとして`RuntimeError("generator didn't stop after throw()")`に、接続リトライが尽きた場合も`RuntimeError("generator didn't yield")`に化けて、呼び出し元(`save_log_generic`等)が想定しない例外で処理ごと落ちる不具合があった）。
+* 根拠: `def get_db_cursor(commit: bool = False):` (行番号: 12-45 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)")
 
 
 * **引数/リクエスト**: `commit` (bool, デフォルト `False`): コンテキスト終了時にコミットを実行するかどうか。
@@ -65,93 +65,93 @@
 
 
 * **戻り値/レスポンス**: `sqlite3.Cursor` (yieldにより返却)
-* 根拠: `yield conn.cursor()` (行番号: 26 / 抜粋: "yield conn.cursor()")
+* 根拠: `yield conn.cursor()` (行番号: 38 / 抜粋: "yield conn.cursor()")
 
 
-* **副作用**: DB接続の確立、`PRAGMA journal_mode=WAL;` および `PRAGMA foreign_keys=ON;` の実行、指定時のコミット、接続のクローズ。
-* 根拠: `conn.execute("PRAGMA journal_mode=WAL;")`, `conn.execute("PRAGMA foreign_keys=ON;")`, `if commit: conn.commit()`, `conn.close()` (行番号: 23, 24, 29, 49 / 抜粋: "conn.execute("PRAGMA foreign_keys=ON;")")
+* **副作用**: DB接続の確立、`PRAGMA journal_mode=WAL;` および `PRAGMA foreign_keys=ON;` の実行、指定時のコミット、with本体で例外発生時のロールバック、`finally`での必ずの接続クローズ。
+* 根拠: `conn.execute("PRAGMA journal_mode=WAL;")`, `conn.execute("PRAGMA foreign_keys=ON;")`, `if commit: conn.commit()`, `conn.rollback()`, `conn.close()` (行番号: 23, 24, 39-40, 42, 45 / 抜粋: "conn.execute("PRAGMA foreign_keys=ON;")")
 
 
-* **エラーハンドリング**: `sqlite3.OperationalError` (locked) 発生時は最大5回リトライする。その他のエラーはロールバックして例外を再送出する。
-* 根拠: `except sqlite3.OperationalError as e:` (行番号: 31-43 / 抜粋: "if "locked" in str(e):")
+* **エラーハンドリング**: 接続確立時に発生した `sqlite3.OperationalError` のうち、メッセージに"locked"を含みリトライ残回数がある場合のみ最大5回まで再試行する。それ以外（ロック以外の`OperationalError`、またはリトライ上限到達時）はエラーログを出力し、その例外をそのまま再送出する（接続は必ず閉じてから）。接続確立後、`with`文本体の実行中に例外が発生した場合はリトライを行わず、ロールバックしてから例外を再送出する。いずれの場合も呼び出し元には元の例外がそのまま伝播し、以前のような`RuntimeError`への化けは発生しない。
+* 根拠: `except sqlite3.OperationalError as e:` (行番号: 26-35 / 抜粋: "if "locked" in str(e) and attempt < max_retries - 1:"), `except Exception: conn.rollback(); raise` (行番号: 41-43 / 抜粋: "conn.rollback()")
 
 
 
 ### `execute_read_query`
 
 * **役割**: 読み取り専用モード (`?mode=ro`) で指定されたSELECTクエリを実行し、結果をJSON形式の文字列で返す。データが存在しない場合は専用のメッセージを返す。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 52-65 / 抜粋: "読み取り専用モードで安全にSELECTを実行する")
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 47-60 / 抜粋: "読み取り専用モードで安全にSELECTを実行する")
 
 
 * **引数/リクエスト**:
 * `query` (str): 実行するSQLクエリ文字列。
 * `params` (tuple, デフォルト `()`): SQLクエリにバインドするパラメータ。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 52 / 抜粋: "query: str, params: tuple = ()")
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 47 / 抜粋: "query: str, params: tuple = ()")
 
 
 * **戻り値/レスポンス**: `str`: JSON形式の検索結果文字列、該当データなしメッセージ、またはエラーメッセージ。
-* 根拠: `-> str:` (行番号: 52 / 抜粋: "-> str:")
-* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 62 / 抜粋: "return "該当するデータはありませんでした。"")
-* 根拠: `return json.dumps(...)` (行番号: 63 / 抜粋: "return json.dumps([dict(r) for r in rows]")
+* 根拠: `-> str:` (行番号: 47 / 抜粋: "-> str:")
+* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 57 / 抜粋: "return "該当するデータはありませんでした。"")
+* 根拠: `return json.dumps(...)` (行番号: 58 / 抜粋: "return json.dumps([dict(r) for r in rows]")
 
 
 * **副作用**: データベースからのデータ読み取り。
-* 根拠: `cursor.execute(query, params)` (行番号: 58 / 抜粋: "cursor.execute(query, params)")
+* 根拠: `cursor.execute(query, params)` (行番号: 53 / 抜粋: "cursor.execute(query, params)")
 
 
 * **エラーハンドリング**: 例外 (`Exception`) をキャッチし、例外を送出せずにエラーメッセージの文字列として返す。
-* 根拠: `except Exception as e: return f"検索エラー: {str(e)}"` (行番号: 64-65 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e: return f"検索エラー: {str(e)}"` (行番号: 59-60 / 抜粋: "except Exception as e:")
 
 
 
 ### `save_log_generic`
 
-* **役割**: 指定されたテーブル、カラム、値を用いてINSERTクエリを動的に構築し、データを保存する。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 67-79 / 抜粋: "汎用データ保存関数")
+* **役割**: 指定されたテーブル、カラム、値を用いてINSERTクエリを動的に構築し、`get_db_cursor`経由でデータを保存する。H-1の`get_db_cursor`書き直しに伴い、返るカーソルが常に有効になったため、以前存在した`if cur:`チェックは削除された。`get_db_cursor`自体が送出する例外（接続確立失敗・with本体内のDBエラー等）も含めて関数全体を`try/except`で捕捉する構成に整理されている。
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 62-73 / 抜粋: "汎用データ保存関数")
 
 
 * **引数/リクエスト**:
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト。
 * `values_list` (tuple): 保存する値のタプル。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 67 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 62 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: 保存成功時は `True`、失敗時は `False`。
-* 根拠: `-> bool:` (行番号: 67 / 抜粋: "-> bool:")
-* 根拠: `return True` / `return False` (行番号: 76, 79 / 抜粋: "return True")
+* 根拠: `-> bool:` (行番号: 62 / 抜粋: "-> bool:")
+* 根拠: `return True` / `return False` (行番号: 70, 73 / 抜粋: "return True")
 
 
 * **副作用**: DBへのINSERT実行（データ書き込み）。
-* 根拠: `cur.execute(sql, values_list)` (行番号: 75 / 抜粋: "cur.execute(sql, values_list)")
+* 根拠: `cur.execute(sql, values_list)` (行番号: 69 / 抜粋: "cur.execute(sql, values_list)")
 
 
-* **エラーハンドリング**: 例外 (`Exception`) をキャッチし、ロガーにエラーを出力して `False` を返す。
-* 根拠: `except Exception as e: logger.error(...)` (行番号: 77-78 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `get_db_cursor`のwith文全体を囲む`try/except Exception`で、接続エラー・SQL実行エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して `False` を返す。
+* 根拠: `except Exception as e: logger.error(...); return False` (行番号: 71-73 / 抜粋: "except Exception as e:")
 
 
 
 ### `save_log_async`
 
 * **役割**: `save_log_generic` を非同期で実行するためのラッパー関数。
-* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 81-84 / 抜粋: "save_log_generic の非同期ラッパー")
+* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 75-78 / 抜粋: "save_log_generic の非同期ラッパー")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (tuple) （`save_log_generic` と同等）
-* 根拠: `async def save_log_async(...)` (行番号: 81 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `async def save_log_async(...)` (行番号: 75 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: `save_log_generic` の実行結果。
-* 根拠: `-> bool:` (行番号: 81 / 抜粋: "-> bool:")
-* 根拠: `return await loop.run_in_executor(...)` (行番号: 84 / 抜粋: "return await loop.run_in_executor")
+* 根拠: `-> bool:` (行番号: 75 / 抜粋: "-> bool:")
+* 根拠: `return await loop.run_in_executor(...)` (行番号: 78 / 抜粋: "return await loop.run_in_executor")
 
 
 * **副作用**: 非同期スレッドプールでの `save_log_generic` の実行。
-* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 84 / 抜粋: "loop.run_in_executor(None, save_log_generic")
+* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 78 / 抜粋: "loop.run_in_executor(None, save_log_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_log_generic` のエラーハンドリングに依存）。
-* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 81-84 / 抜粋: "loop = asyncio.get_running_loop()")
+* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 75-78 / 抜粋: "loop = asyncio.get_running_loop()")
 
 
 
@@ -159,34 +159,30 @@
 
 ## 5. 処理フロー図
 
-`get_db_cursor` のDB接続とリトライのロジックを示すフローチャート。
+`get_db_cursor` のDB接続とリトライのロジックを示すフローチャート。H-1でリトライ対象を「接続確立のみ」に限定し、`yield`は接続成功後にループの外で必ず1回だけ行うよう書き直された。
 
 ```mermaid
 flowchart TD
     Start([Start]) --> Init[attempt = 0]
     Init --> LoopCheck{attempt < max_retries?}
-    LoopCheck -- Yes --> Connect[外部：sqlite3.connect]
-    Connect -- 成功 --> PRAGMA[PRAGMA journal_mode=WAL 実行]
-    PRAGMA --> PRAGMA_FK[PRAGMA foreign_keys=ON 実行]
-    PRAGMA_FK --> Yield[yield cursor]
-    Yield --> CommitCheck{commit == True?}
+    LoopCheck -- Yes --> Connect[外部：sqlite3.connect + PRAGMA設定]
+    Connect -- 成功 --> BreakLoop[break でループ脱出]
+    BreakLoop --> TryYield[try: yield cursor]
+
+    Connect -- "OperationalError" --> CloseConn[conn.close / conn = None]
+    CloseConn --> LockedCheck{"'locked' を含み<br/>リトライ残回数あり?"}
+    LockedCheck -- Yes --> Wait[外部：time.sleep] --> Inc[attempt += 1] --> LoopCheck
+    LockedCheck -- No --> LogConnErr[❌ DB接続エラー ログ出力]
+    LogConnErr --> RaiseConnErr[例外再送出] --> End([End])
+
+    TryYield --> CommitCheck{commit == True?}
     CommitCheck -- Yes --> DoCommit[conn.commit]
-    CommitCheck -- No --> Break[ループ終了]
-    DoCommit --> Break
-    Break --> CloseTry[try: conn.close]
-    CloseTry --> End([End])
+    CommitCheck -- No --> FinallyClose
+    DoCommit --> FinallyClose[finally: conn.close]
+    FinallyClose --> End
 
-    Connect -- "OperationalError (locked)" --> Wait[外部：time.sleep]
-    Wait --> Inc[attempt += 1]
-    Inc --> LoopCheck
-
-    Connect -- "その他のエラー" --> Rollback[conn.rollback]
-    Rollback --> Raise[例外再送出]
-    Raise --> End
-
-    LoopCheck -- No --> MaxRetryLog[リトライ上限到達ログ]
-    MaxRetryLog --> CloseConn2[conn.close]
-    CloseConn2 --> End
+    TryYield -- "with本体で例外発生" --> Rollback[conn.rollback]
+    Rollback --> RaiseBodyErr[例外再送出] --> FinallyClose
 
 ```
 
@@ -234,15 +230,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `SQLITE_DB_PATH` の定義を確認し、対象DBの特定をするため。 | `config.SQLITE_DB_PATH` を参照している (行番号: 21, 55) |
-| 中 | 呼び出し元ファイル (不明) | どのテーブルに対して `save_log_generic` が呼び出されているか、どんなクエリが `execute_read_query` に渡されているかを確認するため。 | 各関数が引数としてクエリやテーブル名を受け取る汎用関数であるため (行番号: 52, 67) |
+| 高 | `config.py` | `SQLITE_DB_PATH` の定義を確認し、対象DBの特定をするため。 | `config.SQLITE_DB_PATH` を参照している (行番号: 21, 50) |
+| 中 | 呼び出し元ファイル (不明) | どのテーブルに対して `save_log_generic` が呼び出されているか、どんなクエリが `execute_read_query` に渡されているかを確認するため。 | 各関数が引数としてクエリやテーブル名を受け取る汎用関数であるため (行番号: 47, 62) |
 
 ## 8. 保守上の注意点
 
-* `get_db_cursor` において、`OperationalError` 以外の例外が発生した場合はロールバックされた後に例外が再送出 (`raise e`) されるため、呼び出し元で適切なエラーハンドリングを行う必要がある。
+* `get_db_cursor` の `with` 文本体（`yield`後）で例外が発生した場合はロールバックされた後に例外が再送出される (行番号: 41-43) ため、呼び出し元で適切なエラーハンドリングを行う必要がある（H-1で書き直され、以前存在した「本体例外がリトライされ`RuntimeError`に化ける」不具合は解消されている）。
 * `execute_read_query` で例外が発生した場合、例外を送出せず文字列 (`検索エラー: ...`) を返す。呼び出し元が戻り値を常にJSON文字列としてパースしようとすると、パースエラー（`JSONDecodeError`など）が発生する可能性が高い。
 * `save_log_generic` は `values_list` に対してプレースホルダー（`?`）を用いているが、`table` と `columns_list` は文字列展開でSQL文に直接埋め込まれている。これらに外部入力が渡される場合、SQLインジェクションのリスクが存在する。
-* `get_db_cursor` の `else` ブロック（リトライ上限到達時）で `if conn: conn.close()` が実行された後、`finally` のような後続の `if conn:` ブロックでも再度 `try: conn.close()` が実行される冗長な設計になっている。
+* `get_db_cursor` は接続確立時に`sqlite3.OperationalError`以外の例外（例: PRAGMA実行時のエラー）が発生した場合、`except sqlite3.OperationalError`節では捕捉されずリトライされないまま例外がそのまま送出される（`conn`は開いたままクローズされない）。この経路は本ファイル内に専用の例外処理を持たない。
 
 ## 9. 不明事項一覧
 
