@@ -300,8 +300,10 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `common.setup_logging` の詳細な実装 | `common.md`の解析によれば`common.py`は非推奨のFacadeモジュールであり、`setup_logging`は`core/logger.py`からの再エクスポートと推測される。`logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録する実装と推測される。 | common.md, logger.md |
-| `common.get_today_date_str` の日付フォーマット | `utils.md`の解析によれば、`get_today_date_str`（`core/utils.py`）は"Asia/Tokyo"タイムゾーンの現在日時を"YYYY-MM-DD"形式の文字列で返す関数と推測される。`common.get_today_date_str`はこの関数の再エクスポートと推測されるが、`common.py`側の実装自体は未確認。 | utils.md, common.md |
+| `config.BASE_DIR` の設定パス | `MY_HOME_SYSTEM/config.py:212`を直接確認した。`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`であり、`config.py`自身が配置されているディレクトリ（`MY_HOME_SYSTEM/`）の絶対パスが実行環境依存で設定される。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212` |
+| `config.CAMERAS` のリスト構造と要素数 | `MY_HOME_SYSTEM/config.py:296-319`を直接確認した。`CAMERAS`は起動時に`DEVICES_JSON_PATH`(`os.path.join(BASE_DIR, "devices.json")`、232行目)が存在すればそのJSONの`"cameras"`キーを`CameraConfig`(Pydanticモデル)でパースしたリストとして構築され、存在しない場合は空リスト`[]`のまま(297行目)となる。台数は`devices.json`の実データに依存するため本ファイル単体では確定できないが、`devices.json`自体はリポジトリ内に実体ファイルが存在せず(`.gitignore`の`*.json`規則により追跡対象外)、実データの確認はできなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:232, 296-319`（`devices.json`実体はリポジトリ内に存在せず、解消不可） |
+| `common.setup_logging` の詳細な実装 | `MY_HOME_SYSTEM/common.py:15`が`core.logger`から`setup_logging`を再インポートしているFacadeであることを直接確認した上で、`MY_HOME_SYSTEM/core/logger.py:46-85`の実装を直接確認した。`setup_logging(name, webhook_url=None)`はコンソール出力用`StreamHandler`(58〜60行目)、日次ローテーションのファイル出力用`TimedRotatingFileHandler`(ログファイル名`home_system.log`固定、`config.BASE_DIR/logs`配下、63〜74行目、`backupCount=7`)、および`webhook_url`引数または`config.DISCORD_WEBHOOK_ERROR`が設定されていればERRORレベル以上を通知する`DiscordErrorHandler`(76〜84行目)の3種のハンドラを登録した`logging.Logger`を返す。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:15`, `MY_HOME_SYSTEM/core/logger.py:46-85` |
+| `common.get_today_date_str` の日付フォーマット | `MY_HOME_SYSTEM/common.py:16`が`core.utils`から`get_today_date_str`を再インポートしているFacadeであることを直接確認した上で、`MY_HOME_SYSTEM/core/utils.py:15-16`の実装を直接確認した。`get_today_date_str() -> str`は`datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%Y-%m-%d")`を返す、"Asia/Tokyo"タイムゾーンの現在日付を`"YYYY-MM-DD"`形式の文字列で返す関数であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:16`, `MY_HOME_SYSTEM/core/utils.py:15-16` |
 
 ## 10. 自己検証結果
 

@@ -265,8 +265,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| ロガーの仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
-| 設定値の詳細構造 | `config.md`の解析によれば、`config.py`はPydanticの`CameraConfig`モデルで`devices.json`由来のカメラ設定を検証する仕組みを持ち、`camera_monitor.md`の解析でも`config.CAMERAS`が同様に参照されていることが判明した。ただし`"name"`, `"ip"`以外の具体的なキー構成や`LOG_DIR`の値そのものは`config.py`本体からは確認できていない。 | `config.md`, `camera_monitor.md` |
+| ロガーの仕様 | `MY_HOME_SYSTEM/core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)を直接確認した。(1)コンソール出力用の`logging.StreamHandler`(58〜60行目)、(2)`config.BASE_DIR/logs/home_system.log`への`TimedRotatingFileHandler(when='midnight', interval=1, backupCount=7)`(63〜74行目)、(3)`webhook_url`引数または`config.DISCORD_WEBHOOK_ERROR`が設定されていればERRORレベル以上を対象とする`DiscordErrorHandler`(76〜84行目)、の3種のハンドラを登録する設計であることを確認した。フォーマットは共通で`'%(asctime)s [%(levelname)s] %(name)s: %(message)s'`(55行目)。`DiscordErrorHandler.emit`(17〜44行目)はメッセージに`"Discord"`を含む場合は通知をスキップし、Webhook送信自体が失敗しても例外を握りつぶす(43〜44行目)フェイルソフト設計であることも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86` |
+| 設定値の詳細構造 | `MY_HOME_SYSTEM/config.py`を直接確認した。`CameraConfig`(144〜153行目)は`id, name, nas_folder(任意), location, ip, port(既定2020), user(任意), password(エイリアス"pass", 任意), rtsp_url(任意)`の8フィールドを持ち、`config.CAMERAS`(297〜305行目)は`devices.json`の`"cameras"`配列を`CameraConfig(**c).model_dump(by_alias=True)`で検証・変換した辞書のリストであることを確認した。すなわち`"name"`, `"ip"`以外に`id`, `nas_folder`, `location`, `port`, `user`, `pass`, `rtsp_url`が存在しうる。`LOG_DIR`(228〜231行目)は`ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`の戻り値であり、通常は`{BASE_DIR}/logs`となる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-153, 228-231, 297-305` |
 
 ## 10. 自己検証結果
 

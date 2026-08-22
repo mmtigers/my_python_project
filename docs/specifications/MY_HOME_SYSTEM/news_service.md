@@ -206,13 +206,13 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | セッションの具体的な振る舞い | `common.get_retry_session()` の戻り値が持つ実装（リトライのトリガーとなるHTTPステータスコード、リトライ間隔など）が現在のファイル内には存在しないため。 | `common.py` |
-| レスポンスオブジェクトの構造 | `feedparser.parse` が返すオブジェクトの正確なプロパティ定義が不明なため（`e.title` や `e.link` の存在は推測できるが、欠損時の挙動が不明）。 | 対象外部ライブラリのドキュメント |
+| レスポンスオブジェクトの構造 | `feedparser.parse` が返すオブジェクトの正確なプロパティ定義が不明なため（`e.title` や `e.link` の存在は推測できるが、欠損時の挙動が不明）。（リポジトリ内を`feedparser`で検索したが、パッケージ本体（vendoring含む）は存在せず、Python実行環境にもインストールされていないことを確認した。外部ライブラリのため解消不可） | 対象外部ライブラリのドキュメント |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| セッションの具体的な振る舞い | `common.md`の解析によれば、`common.get_retry_session`は`core.network.get_retry_session`を再エクスポートするFacadeであり、`network.md`の解析によれば、デフォルトでリトライ3回・バックオフ係数1.0、対象HTTPステータスコード500/502/503/504の`requests.Session`を返す設計であることが判明した。 | `common.md`, `network.md` |
+| セッションの具体的な振る舞い | `MY_HOME_SYSTEM/common.py`15〜21行目を直接確認したところ、`from core.network import (get_retry_session, ...)`によって`core.network.get_retry_session`をそのまま再エクスポートするFacadeであることを確認した。実体である`MY_HOME_SYSTEM/core/network.py`の`get_retry_session(retries=3, backoff_factor=1.0)`(8〜20行目)を直接確認したところ、`requests.Session()`に対し`urllib3.util.retry.Retry(total=retries, backoff_factor=backoff_factor, status_forcelist=[500, 502, 503, 504], allowed_methods=["HEAD","GET","POST","PUT","DELETE","OPTIONS","TRACE"])`を`HTTPAdapter`経由で`http://`/`https://`両方にマウントする設計であり、デフォルトはリトライ3回・バックオフ係数1.0・対象HTTPステータスコード500/502/503/504であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:15-21`, `MY_HOME_SYSTEM/core/network.py:8-20` |
 
 ## 10. 自己検証結果
 
