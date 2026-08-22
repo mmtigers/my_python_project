@@ -200,8 +200,12 @@ graph TD
     clearTimers --> WindowTimer2["外部: window.clearInterval / window.clearTimeout"]
 
     useLongPress --> ReactUseCallback["外部: react useCallback"]
+    useLongPress --> ReactUseEffect["外部: react useEffect"]
     useLongPress --> ReactUseRef["外部: react useRef"]
     useLongPress --> ReactUseState["外部: react useState"]
+
+    UnmountEffect["useEffect(アンマウント時クリーンアップ)"] --> clearTimers
+    useLongPress --> UnmountEffect
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -217,23 +221,21 @@ graph TD
 * `firedRef`は`useRef`によるミュータブルな値であり、再レンダリングをトリガーしない。`onPointerDown`のたびに`false`へリセットされ、`onLongPress`発火時のみ`true`になる。この値により、長押し発火後に指を離した際の`endPress(true)`が誤って`onShortTap`を呼ばないよう防いでいる。
 * 根拠: `firedRef.current = false;` (行番号: 54), `firedRef.current = true;` (行番号: 64), `if (triggerShortTap && !firedRef.current && onShortTap) {` (行番号: 76)
 * `onPointerLeave`/`onPointerCancel`にはハンドラの引数として渡される`PointerEvent`に対して`stopPropagation()`が呼ばれていない（`onPointerDown`/`onPointerUp`のみ呼ばれている）。要素外へポインターが離脱した際にイベントが親要素へ伝播する可能性がある。
-* 根拠: `const onPointerLeave = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 86〜88)
-* `clearTimers`のクリーンアップは`onPointerUp`/`onPointerLeave`/`onPointerCancel`または`thresholdMs`到達時にのみ呼ばれ、フック自体のアンマウント時に呼び出す`useEffect`のクリーンアップ関数は定義されていない。コンポーネントが押下状態のままアンマウントされた場合、タイマーが残り続ける可能性がある。
-* 根拠: ファイル全体に`useEffect`の記述がない (行番号: 1〜99)
+* 根拠: `const onPointerLeave = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 88〜90)
+* **バグ修正: アンマウント時のタイマークリーンアップ漏れ**: 以前は`clearTimers`の呼び出しが`onPointerUp`/`onPointerLeave`/`onPointerCancel`または`thresholdMs`到達時にのみ発生し、フック自体のアンマウント時に呼び出す`useEffect`のクリーンアップ関数が定義されていなかった。押下状態のままコンポーネント（クエストカード等）がアンマウントされた場合、`setTimeout`/`setInterval`が残存し、アンマウント後に`onLongPress`が発火したり破棄済みコンポーネントに対する`setState`が呼ばれたりする可能性があった。`useEffect(() => clearTimers, [clearTimers])`を追加し、アンマウント時に`clearTimers`を確実に呼び出すよう修正した。
+* 根拠: (行番号: 1, 81 / 抜粋: "import { useCallback, useEffect, useRef, useState } from 'react';", "useEffect(() => clearTimers, [clearTimers]);")
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | 本ファイルはフックの定義のみであり、呼び出し側のコンテキストが含まれていないため | `../features/quest/components/QuestList.tsx` |
-| コンポーネントが押下状態のままアンマウントされた場合の実際の影響（メモリリーク等の顕在化有無） | 本ファイル単体の静的解析では実行時の挙動までは判定できないため | 実行時の動作確認、または呼び出し元のライフサイクル管理コード |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(95〜99行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel, thresholdMs: 550 })`として呼び出されており、`onShortTap`は渡されていない（＝短タップでは何も起きない）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(179行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`div`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:95-99,179` |
-| コンポーネントが押下状態のままアンマウントされた場合の実際の影響（メモリリーク等の顕在化有無） | 唯一の呼び出し元である`family-quest/src/features/quest/components/QuestList.tsx`を直接確認したが、`useEffect`のインポートおよび使用箇所は存在せず（本ファイル自身の`import`文にも`useEffect`は含まれない）、呼び出し側でも本フックのタイマーをアンマウント時に明示的にクリーンアップする実装は見当たらなかった。したがって、押下状態のままカードがアンマウントされた場合に`setInterval`/`setTimeout`が残存する可能性を打ち消す仕組みは、フック側・呼び出し側のいずれにも存在しないことを直接ソース確認できた。ただし、これが実際にメモリリークとして顕在化するか（Reactが内部的に破棄済みコンポーネントへの`setState`を無視して実害がないかなど）はランタイムでの動作確認が必要であり、静的なソースコード解析だけでは断定できない。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:1-9`（`useEffect`不使用を確認） |
 
 ## 10. 自己検証結果
 

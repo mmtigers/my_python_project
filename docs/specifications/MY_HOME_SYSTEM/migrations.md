@@ -16,7 +16,8 @@
 
 ## 2. ファイルの概要
 
-`migrations/`ディレクトリ配下の`*.sql`ファイルをファイル名の昇順で適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量なマイグレーションランナー。モジュールdocstringによれば、従来は`services/quest_service.py`の`sync_master_data()`内で「SELECTを試して失敗したらALTER TABLE」という実行時チェックとして場当たり的にスキーマ変更が追加されており、変更の追跡や複数プロセス同時実行時のレース懸念があったため、本モジュールが導入された(根拠: `[モジュールdocstring]` (行番号: 3〜15 / 抜粋: "これまでスキーマ変更は services/quest_service.py の sync_master_data() 内で"))。`MIGRATIONS_DIR`は本ファイル(`core/`配下)の親ディレクトリを基準に`migrations`サブディレクトリとして解決される(根拠: `[MIGRATIONS_DIR]` (行番号: 25 / 抜粋: "MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), \"migrations\")"))。中心となる`apply_pending_migrations`は、追跡用テーブルの作成、適用済みバージョン一覧の取得、未適用の`.sql`ファイルの検出・順次実行という流れで処理を行い、`sqlite3.OperationalError`(例えば既に別経路で列が追加済みの場合の「duplicate column」等)を警告ログのみで許容し、適用済みとして記録したうえで処理を継続する設計になっている(根拠: `[apply_pending_migrations docstring]` (行番号: 50〜57 / 抜粋: "「duplicate column」のような sqlite3.OperationalError は、"))。
+`migrations/`ディレクトリ配下の`*.sql`ファイルをファイル名の昇順で適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量なマイグレーションランナー。モジュールdocstringによれば、従来は`services/quest_service.py`の`sync_master_data()`内で「SELECTを試して失敗したらALTER TABLE」という実行時チェックとして場当たり的にスキーマ変更が追加されており、変更の追跡や複数プロセス同時実行時のレース懸念があったため、本モジュールが導入された(根拠: `[モジュールdocstring]` (行番号: 3〜15 / 抜粋: "これまでスキーマ変更は services/quest_service.py の sync_master_data() 内で"))。`MIGRATIONS_DIR`は本ファイル(`core/`配下)の親ディレクトリを基準に`migrations`サブディレクトリとして解決される(根拠: `[MIGRATIONS_DIR]` (行番号: 25 / 抜粋: "MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), \"migrations\")"))。中心となる`apply_pending_migrations`は、追跡用テーブルの作成、適用済みバージョン一覧の取得、未適用の`.sql`ファイルの検出・順次実行という流れで処理を行う。`sqlite3.OperationalError`発生時は、モジュールレベルの定数`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言の場合のみ「既に別経路で適用済み」とみなして警告ログを出し適用済みとして記録するが、それ以外の`OperationalError`(DBロック・ディスクフル・SQL誤り等、原因不明のもの)は`conn.rollback()`のうえバージョンを記録せずそのまま再送出する(M-2で修正。以前は`OperationalError`を種類を問わず一律「適用済み」とみなして握りつぶしていたため、本来失敗すべきマイグレーションのスキーマドリフトを見逃す可能性があった)。
+* 根拠: `[_ALREADY_APPLIED_ERROR_PATTERNS]` (行番号: 27〜29 / 抜粋: "_ALREADY_APPLIED_ERROR_PATTERNS = (\"duplicate column\", \"already exists\")"), `[apply_pending_migrations docstring]` (行番号: 54〜64 / 抜粋: "「duplicate column」「already exists」のように「既に別経路（旧来の実行時チェック等）で"), `[except節の分岐]` (行番号: 82〜95 / 抜粋: "if any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):")
 
 ## 3. 外部依存関係
 
@@ -33,97 +34,97 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `migrations/*.sql`ファイルの内容 | 各マイグレーションファイル自体は本ファイルの解析範囲外であり、実際にどのようなDDL/DML(ALTER TABLE等)が実行されるかは提供されていないため。 | 根拠: `[sql読み込み・実行]` (行番号: 67〜72 / 抜粋: "with open(path, \"r\", encoding=\"utf-8\") as f:\n            sql = f.read()") |
-| `conn`(呼び出し元から渡される`sqlite3.Connection`) | 接続オブジェクトがどのDBファイルに対して開かれているか、どのようなisolation_level等の設定かは呼び出し元の実装に依存し、本ファイルからは不明であるため。 | 根拠: `[apply_pending_migrations引数]` (行番号: 49 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:") |
+| `migrations/*.sql`ファイルの内容 | 各マイグレーションファイル自体は本ファイルの解析範囲外であり、実際にどのようなDDL/DML(ALTER TABLE等)が実行されるかは提供されていないため。 | 根拠: `[sql読み込み・実行]` (行番号: 73〜78 / 抜粋: "with open(path, \"r\", encoding=\"utf-8\") as f:\n            sql = f.read()") |
+| `conn`(呼び出し元から渡される`sqlite3.Connection`) | 接続オブジェクトがどのDBファイルに対して開かれているか、どのようなisolation_level等の設定かは呼び出し元の実装に依存し、本ファイルからは不明であるため。 | 根拠: `[apply_pending_migrations引数]` (行番号: 53 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `_ensure_tracking_table`
 
 * **役割**: マイグレーション適用履歴を記録する`schema_migrations`テーブルが存在しない場合に作成する。
-* 根拠: `[_ensure_tracking_table]` (行番号: 28〜35 / 抜粋: "CREATE TABLE IF NOT EXISTS schema_migrations (\n            version TEXT PRIMARY KEY,\n            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP\n        )")
+* 根拠: `[_ensure_tracking_table]` (行番号: 32〜39 / 抜粋: "CREATE TABLE IF NOT EXISTS schema_migrations (\n            version TEXT PRIMARY KEY,\n            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP\n        )")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。テーブル作成対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 28 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数シグネチャ]` (行番号: 32 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[戻り値の型アノテーション]` (行番号: 28 / 抜粋: "-> None:")
+* 根拠: `[戻り値の型アノテーション]` (行番号: 32 / 抜粋: "-> None:")
 
 
 * **副作用**: `CREATE TABLE IF NOT EXISTS`の実行および`conn.commit()`によるコミット。
-* 根拠: `[conn.execute, conn.commit]` (行番号: 29〜35 / 抜粋: "conn.commit()")
+* 根拠: `[conn.execute, conn.commit]` (行番号: 33〜39 / 抜粋: "conn.commit()")
 
 
 * **エラーハンドリング**: なし(例外捕捉は行われていない)
-* 根拠: `[関数本体]` (行番号: 28〜35 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数本体]` (行番号: 32〜39 / 抜粋: "def _ensure_tracking_table(conn: sqlite3.Connection) -> None:")
 
 
 ### `_applied_versions`
 
 * **役割**: `schema_migrations`テーブルから適用済みバージョン(ファイル名)の集合を取得する。
-* 根拠: `[_applied_versions]` (行番号: 38〜40 / 抜粋: "rows = conn.execute(\"SELECT version FROM schema_migrations\").fetchall()\n    return {row[0] for row in rows}")
+* 根拠: `[_applied_versions]` (行番号: 42〜44 / 抜粋: "rows = conn.execute(\"SELECT version FROM schema_migrations\").fetchall()\n    return {row[0] for row in rows}")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。問い合わせ対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 38 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数シグネチャ]` (行番号: 42 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 * **戻り値/レスポンス**: `Set[str]`(適用済みマイグレーションファイル名の集合)
-* 根拠: `[戻り値]` (行番号: 40 / 抜粋: "return {row[0] for row in rows}")
+* 根拠: `[戻り値]` (行番号: 44 / 抜粋: "return {row[0] for row in rows}")
 
 
 * **副作用**: なし(読み取り専用のクエリ実行)
-* 根拠: `[関数本体]` (行番号: 38〜40 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数本体]` (行番号: 42〜44 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[関数本体]` (行番号: 38〜40 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
+* 根拠: `[関数本体]` (行番号: 42〜44 / 抜粋: "def _applied_versions(conn: sqlite3.Connection) -> Set[str]:")
 
 
 ### `_discover_migration_files`
 
 * **役割**: `MIGRATIONS_DIR`配下の`.sql`拡張子ファイルをファイル名昇順でリストアップする。ディレクトリが存在しない場合は空リストを返す。
-* 根拠: `[_discover_migration_files]` (行番号: 43〜46 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* 根拠: `[_discover_migration_files]` (行番号: 47〜50 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[関数シグネチャ]` (行番号: 43 / 抜粋: "def _discover_migration_files() -> List[str]:")
+* 根拠: `[関数シグネチャ]` (行番号: 47 / 抜粋: "def _discover_migration_files() -> List[str]:")
 
 
 * **戻り値/レスポンス**: `List[str]`(ファイル名昇順の`.sql`ファイル名リスト、ディレクトリ不在時は`[]`)
-* 根拠: `[戻り値]` (行番号: 44〜46 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []\n    return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* 根拠: `[戻り値]` (行番号: 48〜50 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []\n    return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 
 
 * **副作用**: なし(ファイルシステムの読み取りのみ)
-* 根拠: `[関数本体]` (行番号: 43〜46 / 抜粋: "def _discover_migration_files() -> List[str]:")
+* 根拠: `[関数本体]` (行番号: 47〜50 / 抜粋: "def _discover_migration_files() -> List[str]:")
 
 
 * **エラーハンドリング**: `MIGRATIONS_DIR`が存在しない場合は例外を発生させず空リストを返す。それ以外の例外(パーミッションエラー等)は捕捉されない。
-* 根拠: `[os.path.isdir分岐]` (行番号: 44〜45 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []")
+* 根拠: `[os.path.isdir分岐]` (行番号: 48〜49 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []")
 
 
 ### `apply_pending_migrations`
 
-* **役割**: 追跡テーブルの確保、適用済みバージョンの取得を行った上で、未適用の`.sql`ファイルをファイル名昇順で1件ずつ読み込み・実行し、成功時は`schema_migrations`に記録する。`sqlite3.OperationalError`発生時は警告ログを出したうえで適用済みとして記録し、処理を継続する。
-* 根拠: `[apply_pending_migrations]` (行番号: 49〜82 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
+* **役割**: 追跡テーブルの確保、適用済みバージョンの取得を行った上で、未適用の`.sql`ファイルをファイル名昇順で1件ずつ読み込み・実行し、成功時は`schema_migrations`に記録する。`sqlite3.OperationalError`発生時は、モジュールレベルの`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言の場合のみ警告ログを出して適用済みとして記録し次のファイルへ処理を継続する。それ以外の`OperationalError`は`conn.rollback()`したうえでエラーログを出力し、バージョンを記録せずそのまま再送出して起動処理自体を失敗させる（M-2で書き直し。以前は`OperationalError`の種類を問わず一律「適用済み」とみなして握りつぶしていた）。
+* 根拠: `[apply_pending_migrations]` (行番号: 53〜95 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。マイグレーションを適用する対象のDB接続)
-* 根拠: `[関数シグネチャ]` (行番号: 49 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
+* 根拠: `[関数シグネチャ]` (行番号: 53 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[戻り値の型アノテーション]` (行番号: 49 / 抜粋: "-> None:")
+* 根拠: `[戻り値の型アノテーション]` (行番号: 53 / 抜粋: "-> None:")
 
 
-* **副作用**: `_ensure_tracking_table`によるテーブル作成、`conn.executescript`によるSQL実行(DDL/DML)、`schema_migrations`テーブルへのINSERT、`conn.commit()`によるコミット、`.sql`ファイル読み込み(`open`)、ログ出力(`logger.info`/`logger.warning`)。
-* 根拠: `[副作用一式]` (行番号: 59, 67〜68, 72〜75, 81〜82 / 抜粋: "conn.executescript(sql)\n            conn.execute(\"INSERT INTO schema_migrations (version) VALUES (?)\", (filename,))\n            conn.commit()")
+* **副作用**: `_ensure_tracking_table`によるテーブル作成、`conn.executescript`によるSQL実行(DDL/DML)、`schema_migrations`テーブルへのINSERT、`conn.commit()`によるコミット、`.sql`ファイル読み込み(`open`)、ログ出力(`logger.info`/`logger.warning`/`logger.error`)、既知パターン以外の`OperationalError`発生時の`conn.rollback()`。
+* 根拠: `[副作用一式]` (行番号: 65, 73〜74, 78〜81, 89〜90, 93 / 抜粋: "conn.executescript(sql)\n            conn.execute(\"INSERT INTO schema_migrations (version) VALUES (?)\", (filename,))\n            conn.commit()")
 
 
-* **エラーハンドリング**: 各マイグレーションの実行を`try`ブロックで囲み、`sqlite3.OperationalError`のみを捕捉して`logger.warning`でログを出し、`INSERT OR IGNORE`で適用済みとして記録した上で次のファイルへ処理を継続する(起動を止めない設計)。`OperationalError`以外の例外については捕捉されず、呼び出し元に伝播する。
-* 根拠: `[except sqlite3.OperationalError]` (行番号: 76〜82 / 抜粋: "except sqlite3.OperationalError as e:\n            logger.warning(\n                f\"⚠️ Migration '{filename}' could not be fully applied \"")
+* **エラーハンドリング**: 各マイグレーションの実行を`try`ブロックで囲み、`sqlite3.OperationalError`を捕捉したうえでエラーメッセージを小文字化し(`message = str(e).lower()`)、`_ALREADY_APPLIED_ERROR_PATTERNS`のいずれかを含む場合のみ`logger.warning`でログを出し`INSERT OR IGNORE`で適用済みとして記録して次のファイルへ`continue`する(起動を止めない)。それ以外の`OperationalError`(DBロック・ディスクフル・SQL誤り等)は`conn.rollback()`のうえ`logger.error`でログを出し、バージョンを記録せずに`raise`で再送出する。`OperationalError`以外の例外については本関数では捕捉されず、そのまま呼び出し元に伝播する。
+* 根拠: `[except sqlite3.OperationalError]` (行番号: 82〜95 / 抜粋: "if any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):"), `[既知パターン以外の再送出]` (行番号: 93〜95 / 抜粋: "conn.rollback()\n            logger.error(f\"❌ Migration '{filename}' failed and was not recorded as applied: {e}\")\n            raise")
 
 
 ## 5. 処理フロー図
