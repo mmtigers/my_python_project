@@ -58,6 +58,11 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upsert PR comment
+        # Low: フォークからのPRではGITHUB_TOKENが強制的に読み取り専用になり、
+        # このステップは403で失敗する。このワークフローは「気付きを与えるだけの
+        # 非ブロッキングチェック」(冒頭コメント参照)であり、上のdrift-checkステップ
+        # 同様、コメント投稿の失敗でCI全体を赤くすべきではない。
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           script: |
