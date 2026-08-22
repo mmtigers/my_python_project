@@ -8,7 +8,7 @@
 LOGFILE="/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log"
 TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 SPEAKER_MAC="F4:4E:FC:B6:65:D4" # Anker SoundCore 2 MAC Address
-CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh"
+CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"
 
 # --- Environment Setup for PipeWire/PulseAudio (CRUCIAL) ---
 # cron実行時でもPipeWireソケットを見つけられるようにする
