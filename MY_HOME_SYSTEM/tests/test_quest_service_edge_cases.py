@@ -11,7 +11,7 @@ import os
 import sys
 import threading
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -492,3 +492,33 @@ class TestProcessApproveQuestWithDeletedMasterQuest:
             ).fetchone()["gold"]
         assert hist_after["status"] == "approved"
         assert son_gold == 20
+
+
+class TestFilterActiveQuestsDateParseErrorLogging:
+    """
+    Low: filter_active_quests の日付パースエラー時のログが、実在しない 'id' キーを
+    参照していたため常に None を出力していた("Date parse error for quest None: ...")。
+    実際のキーは 'quest_id'。
+    """
+
+    def test_date_parse_error_log_includes_the_actual_quest_id(self, monkeypatch):
+        quest_service = QuestService()
+        bad_quest = {
+            "quest_id": 4242,
+            "quest_type": "limited",
+            "start_date": "not-a-date",
+            "end_date": None,
+            "target_user": "all",
+            "day_of_week": None,
+        }
+
+        with patch.object(quest_service_module, "logger") as mock_logger:
+            result = quest_service.filter_active_quests([bad_quest])
+
+        assert result == []  # パースエラー時は除外される(既存挙動)
+        mock_logger.warning.assert_called_once()
+        logged_message = mock_logger.warning.call_args[0][0]
+        assert "4242" in logged_message, (
+            f"log message should reference the quest_id (4242), got: {logged_message!r}"
+        )
+        assert "None" not in logged_message
