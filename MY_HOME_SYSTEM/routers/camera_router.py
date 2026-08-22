@@ -2,11 +2,16 @@ import os
 import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from typing import List, Dict, Any
 import config
 from services import camera_service
 
 router = APIRouter()
+
+
+class CameraSettingsUpdate(BaseModel):
+    enabled: bool
 
 
 def _resolve_segment_path(base_dir: str, camera_id: str, filename: str) -> str:
@@ -35,9 +40,17 @@ def get_camera_settings():
             "id": cam["id"],
             "name": cam["name"],
             "order": idx + 1,  # 配列の順序を表示順とする
-            "enabled": True
+            "enabled": cam.get("enabled", True)
         })
     return settings
+
+@router.put("/settings/{camera_id}")
+def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):
+    """カメラの有効/無効を切り替え、devices.json に永続化する"""
+    if not camera_service.set_camera_enabled(camera_id, payload.enabled):
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    return {"id": camera_id, "enabled": payload.enabled}
 
 @router.get("/live/{camera_id}/stream.m3u8")
 def get_live_stream(camera_id: str):
