@@ -223,6 +223,7 @@ graph TD
 | --- | --- | --- |
 | 画像ファイルの生成元とライフサイクル | `camera_monitor.md`の解析によれば、`camera_monitor.py`の`save_image_from_stream`（内部で`capture_snapshot_from_nvr`を呼び出す）が動体検知時にNVR録画からFFmpegでスナップショットを切り出し、`ASSETS_DIR`配下へ`{cam_name}_{event_type}_{YYYYMMDD}_{HHMMSS}.jpg`という命名規則で保存すると推測され、本ファイルのコメントとも一致する。ただし画像の削除・クリーンアップ処理については`camera_monitor.md`側でも言及がなく、依然として不明。 | camera_monitor.md |
 | ログの運用仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ただしログレベルの環境ごとの切り替え仕様自体は`logger.md`側でも明記されておらず不明。 | logger.md |
+| `ASSETS_DIR` の物理パス | `config.py`を直接確認した。`ASSETS_DIR`は224〜227行目で`ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`として定義されており、`NAS_PROJECT_ROOT`は217行目で`os.path.join(NAS_MOUNT_POINT, "home_system")`、`NAS_MOUNT_POINT`は216行目で`os.getenv("NAS_MOUNT_POINT", "/mnt/nas")`である。つまり優先パスは`{NAS_MOUNT_POINT}/home_system/assets`（既定値`/mnt/nas/home_system/assets`というネットワークマウントポイント配下）である。`ensure_safe_path_with_backoff`(98〜128行目)は内部で`verify_and_initialize_storage`(40行目〜)を呼び出し、対象パスへのディレクトリ作成・書き込みテストを最大5回リトライし、それでも失敗する場合のみ`os.path.join(BASE_DIR, "temp_fallback", "assets")`（`config.py`と同じディレクトリ配下のローカルパス）にフォールバックする仕組みであることを確認した。すなわち`ASSETS_DIR`は「NASマウントが正常な場合はネットワークパス、異常時はローカルパス」という2系統のいずれかを実行時に動的に取りうる設計である。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:40-128, 212, 216-217, 224-227` |
 
 ## 10. 自己検証結果
 
