@@ -130,6 +130,14 @@ graph TD
 | `common.get_db_cursor`の実装詳細 | `common`モジュールのソースコードが当ファイル内に存在しないため、接続先DBや`commit`引数の具体的挙動が不明。 | `common.py` |
 | `init_unified_db.py`内の`bounties`テーブル定義との異同 | コメントで「同じSQL」と述べられているが、実際の`init_unified_db.py`の内容が当ファイル内には存在しないため一致を確認できない。 | `init_unified_db.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.SQLITE_DB_PATH`の実際の値 | `MY_HOME_SYSTEM/config.py`220〜222行目を直接確認した。`SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`と定義されており、環境変数`SQLITE_DB_PATH`が設定されていればその値を、未設定であれば`config.py`が置かれたディレクトリ(`BASE_DIR`)直下の`home_system.db`をデフォルトのDBファイルパスとして使用することを確認した(220行目のコメントに「CI/テストからは環境変数`SQLITE_DB_PATH`でDBパスを上書きできるようにする」と明記)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:220-222` |
+| `common.get_db_cursor`の実装詳細 | `MY_HOME_SYSTEM/common.py`23行目で`core.database`の`get_db_cursor`を再エクスポートしているだけのFacadeであることを確認した上で、実体の`MY_HOME_SYSTEM/core/database.py`12〜50行目を直接確認した。`get_db_cursor(commit: bool = False)`は`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`(21行目)で接続先を`config.SQLITE_DB_PATH`に固定し、`conn.row_factory = sqlite3.Row`(22行目)、`PRAGMA journal_mode=WAL`/`PRAGMA foreign_keys=ON`(23〜24行目)を設定するコンテキストマネージャである。`sqlite3.OperationalError`で`"locked"`を検知した場合は最大5回・1秒間隔でリトライし(19〜35行目)、`commit`引数が`True`の場合のみ`yield`後に`conn.commit()`を呼ぶ(28〜29行目)ため、本ファイル(`old/migrate_bounty.py`)8行目の`common.get_db_cursor(commit=True)`呼び出しは`CREATE TABLE`実行後に確実にコミットされる設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:23`, `MY_HOME_SYSTEM/core/database.py:12-50` |
+| `init_unified_db.py`内の`bounties`テーブル定義との異同 | `MY_HOME_SYSTEM/init_unified_db.py`510〜527行目の`CREATE TABLE IF NOT EXISTS bounties`定義を直接確認した。列構成は`id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, reward_gold INTEGER DEFAULT 0, reward_exp INTEGER DEFAULT 0, target_type TEXT NOT NULL, target_user_id TEXT, status TEXT DEFAULT 'OPEN', created_by TEXT NOT NULL, assignee_id TEXT, created_at DATETIME NOT NULL, updated_at DATETIME, completed_at DATETIME`であり、本ファイル(`old/migrate_bounty.py`)11〜25行目の`CREATE TABLE`文と列名・型・デフォルト値・順序まで完全に一致することを確認した。したがってコード内コメント「`init_unified_db.py`と同じSQLを実行」(本ファイル9行目)は正確であり、両者は同一スキーマを重複定義していることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:510-527`, `MY_HOME_SYSTEM/old/migrate_bounty.py:9-26` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）

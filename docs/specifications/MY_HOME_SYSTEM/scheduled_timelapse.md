@@ -312,8 +312,16 @@ graph TD
 | --- | --- | --- |
 | `config.NVR_RECORD_DIR`等の実際の設定値 | `config`モジュールの実装が提供されていないため。 | `config.py` |
 | `send_push`の送信成功/失敗判定・Discordチャンネル振り分けの詳細 | `services/notification_service.py`の実装が提供されていないため。 | `services/notification_service.py` |
-| 本スクリプトの実際の定期実行契機(cron/systemd等)と実行間隔 | 定期実行設定ファイルは本ファイルの解析範囲外であるため。 | crontab設定またはsystemdユニットファイル(ファイル名不明) |
+| 本スクリプトの実際の定期実行契機(cron/systemd等)と実行間隔 | 定期実行設定ファイルは本ファイルの解析範囲外であるため。（リポジトリ内に`crontab`や`*.service`ファイルは存在せず、`scheduler_boot.py`の`TASKS`リストにも`scheduled_timelapse.py`という文字列は登場しない。`monitors/scheduled_timelapse`という文字列自体も本ファイル自身以外からは検索でヒットせず、実際の起動契機は解消不可。関連する`timelapse_runner.py`は`scheduler_boot.py`36〜37行目でコメントアウトされて無効化されていることのみ確認できた） | crontab設定またはsystemdユニットファイル(ファイル名不明) |
 | 他のタイムラプス関連スクリプト(`timelapse_generator.py`等)との役割分担 | それらのファイルの実装内容自体は本ファイルの解析範囲外であるため。 | `timelapse_generator.py`、`smart_timelapse_generator.py`、`daily_timelapse_job.py`、`timelapse_runner.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.NVR_RECORD_DIR`等の実際の設定値 | `config.py`436行目に`NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")`が実在することを確認した(`NAS_MOUNT_POINT`はデフォルト`/mnt/nas`)。一方、本ファイルが`getattr(config, ..., デフォルト値)`で参照する他の設定名`TIMELAPSE_CAMERAS`, `TIMELAPSE_SCHEDULES`, `TIMELAPSE_FPS`, `TIMELAPSE_BITRATE`, `TIMELAPSE_MAXRATE`, `TIMELAPSE_SEGMENT_TIME`は`config.py`全体を検索しても一つも定義されていないことを確認した。つまり現状ではこれら6設定は常に本ファイル21〜47行目に書かれたハードコードのデフォルト値（カメラ`entrance`/`garden`/`parking`、`morning`(7:50-8:30)/`evening`(15:00-16:00)スケジュール、FPS=15、ビットレート1500k/2000k、セグメント時間40秒）で動作する。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:436`（`TIMELAPSE_*`系変数はconfig.py全体で未定義） |
+| `send_push`の送信成功/失敗判定・Discordチャンネル振り分けの詳細 | `services/notification_service.py`116〜140行目の`send_push`と30〜59行目の`_send_discord_webhook`を直接確認した。本ファイルは`channel="error"`(150〜153行目、エラー通知用)と`channel="notify"`(244行目、生成動画の送信用)の2種類を使用しており、`_send_discord_webhook`内の分岐(32〜37行目)により`channel="error"`は`config.DISCORD_WEBHOOK_ERROR`へ、`channel="notify"`は`config.DISCORD_WEBHOOK_NOTIFY`(未設定時は`DISCORD_WEBHOOK_URL`)へ送信される。成功判定はHTTPステータスコードが200または204の場合に`True`、それ以外は`logger.error`でレスポンス内容を出力したうえで`False`を返す(63〜66行目)。`target="discord"`固定で呼び出しているためLINE送信は行われない。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/scheduled_timelapse.py:150-153, 244`, `MY_HOME_SYSTEM/services/notification_service.py:30-66, 116-140` |
+| 他のタイムラプス関連スクリプト(`timelapse_generator.py`等)との役割分担 | 4ファイルすべてを直接確認した。`timelapse_generator.py`(argparse説明「タイムラプス生成スクリプト」、271〜330行目に`main`)はFFmpegベースの単純なタイムラプス生成処理で、`timelapse_runner.py`(18〜66行目の`main`)が17:30台の時刻トリガーと`.done`フラグによる冪等性制御を行ったうえで`subprocess.run`で`timelapse_generator.py`を呼び出す、という「ランナー+ワーカー」構成になっている（ただし前述の通り`timelapse_runner.py`自体は`scheduler_boot.py`でコメントアウトされ現在無効）。`smart_timelapse_generator.py`はモーション検知ベースの高度なタイムラプス生成エンジンで、`MotionDetector`/`EventBuilder`/`VideoBuilder`/`Uploader`(75〜551行目)等のクラス群をライブラリとして提供する。`daily_timelapse_job.py`(argparse説明「日次/時間指定タイムラプスバッチ処理」)はこの`smart_timelapse_generator`からクラス・関数をインポート(24〜30行目)して利用するバッチジョブである。これに対し本ファイル(`scheduled_timelapse.py`)はNVR録画ファイルを対象に、カメラ×複数スケジュール(morning/evening等)でループしてFFmpegクリップ抽出・結合を行う独自実装であり、`smart_timelapse_generator`のクラス群には依存していない（`scheduled_timelapse.py`内に`from monitors.smart_timelapse_generator import`のような記述は存在しない）。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/timelapse_generator.py:271-330`, `MY_HOME_SYSTEM/monitors/timelapse_runner.py:1-66`, `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:75-551`, `MY_HOME_SYSTEM/monitors/daily_timelapse_job.py:24-30, 251-252`, `MY_HOME_SYSTEM/scheduler_boot.py:36-37` |
 
 ## 10. 自己検証結果
 

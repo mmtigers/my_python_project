@@ -226,9 +226,17 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `config.CLINIC_HTML_DIR` / `config.CLINIC_STATS_CSV` / `config.ASSETS_DIR`の実際の設定値 | `config`モジュールの実装が本ファイルに含まれていないため。 | `config.py` |
-| 対象Webサイトの実際のHTML構造(`smpcurrent`, `aroundline10/7`等) | 監視対象Webサイトが出力する実HTMLの内容そのものは本ファイルからは確認できないため。 | `clinic_monitor.py`が保存した実際のHTMLサンプルファイル |
+| 対象Webサイトの実際のHTML構造(`smpcurrent`, `aroundline10/7`等) | 監視対象Webサイトが出力する実HTMLの内容そのものは本ファイルからは確認できないため。（リポジトリ内を`*.html`および`clinic`で検索したが、該当するHTMLサンプルファイルは存在せず、解消不可。監視対象は外部Webサイトの動的な出力であるため） | `clinic_monitor.py`が保存した実際のHTMLサンプルファイル |
 | 本ファイルの実行トリガー（cron/スケジューラ設定） | `__main__`ブロックが1回のみの実行を行う設計であり、定期実行の仕組みが本ファイルからは不明であるため。 | スケジューラ関連ファイル(`scheduler_boot.py`等) |
 | `monitors/old/`ディレクトリの位置づけ（現行版との関係） | ディレクトリ名から旧版の可能性が示唆されるが、本ファイル単体では現行版の有無や移行状況を判断できないため。 | `monitors/`配下の他ファイル一覧 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.CLINIC_HTML_DIR` / `config.CLINIC_STATS_CSV` / `config.ASSETS_DIR`の実際の設定値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`ASSETS_DIR`(224〜227行目)は`ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`で、`NAS_PROJECT_ROOT`は`os.path.join(NAS_MOUNT_POINT, "home_system")`(217行目、`NAS_MOUNT_POINT`は環境変数`NAS_MOUNT_POINT`、既定`/mnt/nas`、216行目)。`CLINIC_HTML_DIR`(503行目)は`os.path.join(ASSETS_DIR, "clinic_html")`、`CLINIC_STATS_CSV`(504行目)は`os.path.join(ASSETS_DIR, "clinic_stats.csv")`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212-227, 503-504` |
+| 本ファイルの実行トリガー（cron/スケジューラ設定） | `MY_HOME_SYSTEM/scheduler_boot.py`を直接確認した。29〜43行目の`TASKS`リスト（定期実行対象スクリプトの一覧）に`clinic_analyzer.py`を含む`monitors/old/`配下のスクリプトは1件も含まれておらず、本ファイルは同スケジューラによる定期実行対象になっていないことを確認した。リポジトリ全体を`clinic_analyzer`で検索しても、本ファイルを呼び出す箇所は自分自身（`monitors/old/clinic_analyzer.py`）以外に見つからず、実際の実行トリガーは特定できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43` |
+| `monitors/old/`ディレクトリの位置づけ（現行版との関係） | `MY_HOME_SYSTEM/monitors/`配下のファイル一覧を直接確認した。`monitors/`直下には`camera_monitor.py`, `nas_monitor.py`, `nature_remo_monitor.py`, `memory_monitor.py`, `server_watchdog.py`, `switchbot_power_monitor.py`, `timelapse_generator.py`, `timelapse_runner.py`, `scheduled_timelapse.py`, `daily_timelapse_job.py`, `smart_timelapse_generator.py`, `tv_lock_monitor.py`等が存在するが、`clinic_`で始まるファイルは`monitors/old/`配下の`clinic_analyzer.py`, `clinic_monitor.py`, `clinic_visualizer.py`の3件のみであり、現行の`monitors/`直下に後継版は存在しないことを確認した。またリポジトリ全体を`clinic`で検索しても、この3ファイルと`config.py`（設定値定義のみ）以外に`clinic`関連の記述は見つからず、後継モジュールの実体は確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/`配下のディレクトリ一覧（`monitors/old/clinic_analyzer.py`, `monitors/old/clinic_monitor.py`, `monitors/old/clinic_visualizer.py`のみ該当） |
 
 ## 10. 自己検証結果
 

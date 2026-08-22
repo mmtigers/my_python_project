@@ -309,8 +309,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| ロガーの実装詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`、メッセージに"Discord"を含む場合は除外)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
-| 環境変数・定数群の定義 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明したが、`LINE_CHANNEL_ACCESS_TOKEN`や`DISCORD_WEBHOOK_*`個々の値自体は`config.py`本体からは確認できていない。 | `config.md` |
+| ロガーの実装詳細 | `MY_HOME_SYSTEM/core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)を直接確認した。(1)コンソール出力用の`logging.StreamHandler`(58〜60行目)、(2)`config.BASE_DIR/logs/home_system.log`への`TimedRotatingFileHandler(when='midnight', interval=1, backupCount=7)`(63〜74行目)、(3)`webhook_url`引数または`config.DISCORD_WEBHOOK_ERROR`が設定されていればERRORレベル以上を対象とする`DiscordErrorHandler`(76〜84行目、メッセージに`"Discord"`を含む場合はスキップ)、の3種のハンドラを登録する設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86` |
+| 環境変数・定数群の定義 | `MY_HOME_SYSTEM/config.py`を直接確認した。139行目で`load_dotenv()`により`.env`ファイルから環境変数を読み込み、183行目で`LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")`、194〜198行目で`DISCORD_WEBHOOK_ERROR = os.getenv("DISCORD_WEBHOOK_ERROR")`、`DISCORD_WEBHOOK_ERROR_CAM = os.getenv("DISCORD_WEBHOOK_ERROR_CAM")`、`DISCORD_WEBHOOK_REPORT = os.getenv("DISCORD_WEBHOOK_REPORT")`、`DISCORD_WEBHOOK_NOTIFY = os.getenv("DISCORD_WEBHOOK_NOTIFY")`、`DISCORD_WEBHOOK_URL = DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")`とそれぞれ定義されていることを確認した。ただし実際の`.env`ファイルはリポジトリ内に存在せず(`.gitignore`13行目の`.env`規則により追跡対象外)、`MY_HOME_SYSTEM/.env.example`（プレースホルダのみ）にもこれらのキーは含まれていないため、各値そのものは確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:139, 183, 194-198`（`.env`は`.gitignore:13`により追跡対象外、`.env.example`にも当該キーの記載なし） |
 
 ## 10. 自己検証結果
 

@@ -342,7 +342,15 @@ graph TD
 | `config.LINE_USER_ID`の実際の値 | 通知先ユーザーIDの実値が本ファイル内で定義されていないため。 | `config.py` |
 | `common.get_db_cursor()`（引数なし呼び出し時）の挙動 | `commit`引数を省略した場合のデフォルト動作、および返却される`cursor.connection`がPandasの`read_sql_query`に安全に渡せる実装かが不明であるため。 | `common.py` |
 | `AppRankingService`用ロガーのハンドラ構成 | `logging.getLogger('AppRankingService')`のみでは、実際にログがどこに出力されるか（コンソール/ファイル/通知）が本ファイル単体では確認できないため。 | 起動元スクリプト、`common.py` / ロギング設定箇所 |
-| Apple App Store RSSフィードの完全なJSON構造 | 本ファイルで参照されているフィールド以外の構造・バージョン変更の可能性が不明であるため。 | Apple公式のRSS Generator API仕様書 |
+| Apple App Store RSSフィードの完全なJSON構造 | 本ファイルで参照されているフィールド以外の構造・バージョン変更の可能性が不明であるため。（リポジトリ内を検索したが、Apple公式のRSS Generator API仕様書に相当するファイルは存在せず、解消不可。外部サービスの公式ドキュメントであるため） | Apple公式のRSS Generator API仕様書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.LINE_USER_ID`の実際の値 | `config.py`を直接確認した。185行目で`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`と定義されており、実値は環境変数`LINE_USER_ID`から取得される仕組みである。`.env`ファイル自体はリポジトリの`.gitignore`13行目の`.env`規則により追跡対象外(バージョン管理外)であり、また`MY_HOME_SYSTEM/.env.example`にはこのキーの記載がなかった。したがって実際の値そのものは解消できなかったが、値の取得元が環境変数`LINE_USER_ID`であることは直接確認できた。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185`（`.env`は`.gitignore:13`により追跡対象外） |
+| `common.get_db_cursor()`（引数なし呼び出し時）の挙動 | `common.py`および`core/database.py`を直接確認した。`common.py`22〜27行目で`from core.database import (get_db_cursor, execute_read_query, save_log_generic, save_log_async)`としており、`common.get_db_cursor`の実体は`core/database.py`13行目の`@contextmanager\ndef get_db_cursor(commit: bool = False):`である。引数なし呼び出し時は`commit=False`がデフォルトとなり、21〜26行目で`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`のうえ`conn.row_factory = sqlite3.Row`を設定し`yield conn.cursor()`する(28〜30行目の`if commit: conn.commit()`はスキップされる、つまりSELECT専用として安全に使える設計)。また`sqlite3.Cursor`はPython標準ライブラリの仕様として親コネクションを指す`.connection`属性を持つため、`app_ranking_service.py`170〜178行目の`with common.get_db_cursor() as cursor: ... pd.read_sql_query(..., cursor.connection)`は`cursor.connection`経由で有効な`sqlite3.Connection`を安全にPandasへ渡せる実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27`, `MY_HOME_SYSTEM/core/database.py:12-30` |
+| `AppRankingService`用ロガーのハンドラ構成 | `old/app_ranking_service.py`、`common.py`、`core/logger.py`を直接確認した。`app_ranking_service.py`15行目は`logger = logging.getLogger('AppRankingService')`のみで、`core.logger.setup_logging`をこの名前に対して呼び出す処理は本ファイル内に存在しない。`common.py`40行目は`logger = setup_logging("common")`を実行するが、`core/logger.py`46〜60行目の`setup_logging(name)`は`logging.getLogger(name)`（＝引数で渡された名前そのもの）に対してのみハンドラを追加・`propagate = False`を設定する実装であるため、`"common"`という名前のロガーが設定されるだけであり、`'AppRankingService'`という別名のロガーには一切影響しない。リポジトリ内を`grep`で検索した限り、`'AppRankingService'`という名前に対して`setup_logging`や`logging.basicConfig`を呼び出している箇所は見つからなかった。したがって`'AppRankingService'`ロガーはPython標準のデフォルト状態（`propagate=True`、ハンドラなし）のまま使われており、ルートロガーにもハンドラが追加される処理が呼び出し連鎖内に見当たらないため、実際にはPython標準ロギングの`lastResort`ハンドラ（WARNING以上を標準エラー出力へ出力）に委ねられる可能性が高いことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/old/app_ranking_service.py:15`, `MY_HOME_SYSTEM/common.py:40`, `MY_HOME_SYSTEM/core/logger.py:46-60` |
 
 ## 10. 自己検証結果
 

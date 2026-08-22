@@ -191,10 +191,10 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 環境設定値の全貌 | パス（DB, ベース, NAS）や通知先IDの実際の設定値が不明なため。 | `config.py` |
+| 環境設定値の全貌 | パス（DB, ベース, NAS）や通知先IDの実際の設定値が不明なため。（`config.py`のパス定義自体は下記の相互参照で直接確認できたが、`.env`が`.gitignore`により追跡対象外のため、環境変数由来の実値そのものは依然として解消不可） | `config.py` |
 | プッシュ通知の仕様 | `send_push` が同期処理か非同期処理か、通知失敗時に例外が発生するか不明なため。 | `common.py` |
 | ロガーの仕様 | ログレベルの設定値、出力先、ローテーションの有無が不明なため。 | `core/logger.py` |
-| データベースの仕様 | バックアップ対象のDB（home_system）のテーブル構造やデータ量が不明なため。 | `config.SQLITE_DB_PATH` の参照先ファイル |
+| データベースの仕様 | バックアップ対象のDB（home_system）のテーブル構造やデータ量が不明なため。（テーブル構造は下記の相互参照で`current_schema.sql`から直接確認できたが、実データの量自体は`home_system.db`本体が`.gitignore`の`*.db`規則により追跡対象外のため解消不可） | `config.SQLITE_DB_PATH` の参照先ファイル |
 
 ## 相互参照による補足情報
 
@@ -202,6 +202,10 @@ graph TD
 | --- | --- | --- |
 | プッシュ通知の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数（"discord"/"line"/"both"）に応じて送信先を振り分け、LINE送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う関数で、戻り値は`bool`（成功可否）と推測される。内部で発生した例外は関数内で捕捉され、呼び出し元へは送出されない（＝同期処理で、失敗時も例外は発生しないと推測される）実装と考えられる。ただし`common.py`側での再エクスポート実装自体は未確認。 | notification_service.md |
 | ロガーの仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力に加え、ERRORレベル以上のログをDiscord Webhookへ自動通知するハンドラを登録すると推測される。ログファイル名は`home_system.log`固定と推測される。ただし`config.BASE_DIR`の実際の値は未確認。 | logger.md |
+| プッシュ通知の仕様 | `common.py`および`services/notification_service.py`を直接確認した。`common.py`31〜37行目で`send_push`は`services.notification_service`から`from ... import (send_push, ...)`として再エクスポートされているのみで、`common.py`自体には独自ロジックはない。実体の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(`notification_service.py`116〜140行目)は同期関数(`async def`ではない通常の`def`)であり、Discord送信は`_send_discord_webhook`内の`try/except Exception as e: logger.error(...); return False`(69〜71行目)で、LINE送信は`_send_line_push`内で例外を捕捉して`bool`を返す設計のため、`send_push`自体から例外が呼び出し元へ送出されることはない（失敗時は戻り値`False`とログ出力のみ）ことを確認した。`backup_service.py`側の`_notify_and_log_error`(77〜85行目)は`send_push`の戻り値を特に確認せず呼び出すのみの実装であることも合わせて確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:30-71, 116-140`, `MY_HOME_SYSTEM/services/backup_service.py:77-85` |
+| ロガーの仕様 | `core/logger.py`を直接確認した。`setup_logging(name, webhook_url=None)`(46〜86行目)は、渡された`name`のロガーに対し`propagate = False`を設定したうえで既存ハンドラをクリアし(51〜52行目)、`logging.INFO`レベル(54行目)で(1)`StreamHandler`によるコンソール出力(58〜60行目)、(2)`TimedRotatingFileHandler(filename=os.path.join(config.BASE_DIR, "logs", "home_system.log"), when='midnight', interval=1, backupCount=7)`による日次ローテーション・7世代保持のファイル出力(63〜74行目、ログファイル名は`home_system.log`で全ロガー共通)、(3)`config.DISCORD_WEBHOOK_ERROR`（または引数指定分）が設定されていれば`DiscordErrorHandler`(ERRORレベル以上のみ発火)、の3種のハンドラを追加する実装であることを確認した。`backup_service.py`15行目は`logger = setup_logging("backup")`のためこの仕組みがそのまま適用される。`config.BASE_DIR`は`config.py`212行目で`os.path.dirname(os.path.abspath(__file__))`（＝`MY_HOME_SYSTEM/`ディレクトリ自身）と定義されている。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86`, `MY_HOME_SYSTEM/services/backup_service.py:15`, `MY_HOME_SYSTEM/config.py:212` |
+| 環境設定値の全貌 | `config.py`を直接確認した。`SQLITE_DB_PATH`は222行目で`os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`、`BASE_DIR`は212行目で`os.path.dirname(os.path.abspath(__file__))`（`config.py`自身のディレクトリ、すなわち`MY_HOME_SYSTEM/`）、`NAS_MOUNT_POINT`は216行目で`os.getenv("NAS_MOUNT_POINT", "/mnt/nas")`、`NAS_PROJECT_ROOT`は217行目で`os.path.join(NAS_MOUNT_POINT, "home_system")`と定義されており、`backup_service.py`34行目の`nas_root = getattr(config, "NAS_PROJECT_ROOT", ...)`が参照する値と一致することを確認した。通知先である`LINE_USER_ID`(185行目)は`os.getenv("LINE_USER_ID")`。これらの定義式（パスの組み立てロジック）自体は確認できたが、`.env`ファイルはリポジトリの`.gitignore`13行目の`.env`規則により追跡対象外(バージョン管理外)であり、`MY_HOME_SYSTEM/.env.example`にもこれらのキーの記載はなかったため、実際の環境変数の値そのものは解消できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185, 212, 216-217, 222`, `MY_HOME_SYSTEM/services/backup_service.py:34`（`.env`は`.gitignore:13`により追跡対象外） |
+| データベースの仕様 | `config.SQLITE_DB_PATH`が指す`home_system.db`本体は`.gitignore`の`*.db`規則により追跡対象外でリポジトリ内に存在しないため、実データそのもの（データ量等）は解消できなかった。ただしテーブル構造については、リポジトリ内の`current_schema.sql`（DBスキーマのダンプと見られるテキストファイル）を直接確認したところ、`sqlite_sequence`を含めて計40件の`CREATE TABLE`文が記録されており(`device_records`, `ohayo_records`, `daily_records`, `health_records`, `car_records`, `quest_master`, `quest_history`, `app_rankings`, `bicycle_parking_records`など計39実テーブル)、`backup_service.py`は個別テーブルを選ばず`sqlite3.Connection.backup(dst_conn, pages=-1)`(45行目)によりDBファイル全体を丸ごとバックアップする実装であるため、これら全テーブルがバックアップ対象に含まれることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`CREATE TABLE`文の一覧、全40件）, `MY_HOME_SYSTEM/services/backup_service.py:27-45`（`home_system.db`本体は`.gitignore`の`*.db`規則により追跡対象外） |
 
 ## 10. 自己検証結果
 
