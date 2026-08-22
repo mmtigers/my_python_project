@@ -405,3 +405,45 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+class TestProcessApproveQuestWithDeletedMasterQuest:
+    """
+    M-1-1: sync_master_data のDELETE(マスタから削除されたクエスト)後も
+    quest_history の pending 行は残るため、そのクエストを承認しようとすると
+    quest_master 側の行が見つからず quest=None になる。
+    process_approve_quest はこの状態でも quest['quest_id'] のsubscriptで
+    落ちず(TypeError→500にならず)、承認自体は成立すること。
+    """
+
+    def _seed_child_and_adult(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+        )
+
+    def test_approve_succeeds_when_quest_was_removed_from_master(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_child_and_adult(cur)
+            # quest_masterには一切登録せず、削除済みクエストのpending履歴のみを再現する
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
+                "completed_at, status) VALUES ('son', 9999, 'DeletedQuest', 10, 20, ?, 'pending')",
+                (common.get_now_iso(),),
+            )
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        result = quest_service.process_approve_quest("dad", history_id)
+
+        assert result["status"] == "success"
+        with common.get_db_cursor() as cur:
+            hist_after = cur.execute(
+                "SELECT status FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+            son_gold = cur.execute(
+                "SELECT gold FROM quest_users WHERE user_id = 'son'"
+            ).fetchone()["gold"]
+        assert hist_after["status"] == "approved"
+        assert son_gold == 20
