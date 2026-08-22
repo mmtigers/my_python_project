@@ -68,6 +68,9 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, cur
             queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
             // 必要に応じて親のインベントリリストなども更新
             queryClient.invalidateQueries({ queryKey: ['inventory'] });
+            // H-5: アイテム使用の確定(quest_historyへの記録)はconsume_item時に
+            // 行われるため、冒険の記録(chronicle)もここで無効化する。
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
         }
     });
 
