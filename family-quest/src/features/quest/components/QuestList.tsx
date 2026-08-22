@@ -291,7 +291,10 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
             if (q.target && q.target !== 'all') {
-                if (q.target.startsWith('role_')) {
+                if (q.target === 'siblings') {
+                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
+                    if (currentUser.role !== 'role_child') return false;
+                } else if (q.target.startsWith('role_')) {
                     if (currentUser.role !== q.target) return false;
                 } else if (q.target !== currentUser?.user_id) {
                     return false;
