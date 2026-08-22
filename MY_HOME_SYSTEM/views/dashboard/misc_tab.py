@@ -19,8 +19,13 @@ def render_traffic():
 
     c_t1, c_t2 = st.columns(2)
     for col, line, name in [(c_t1, line_g, "JR 宝塚線"), (c_t2, line_a, "JR 神戸線")]:
-        bg_color = "#ffebee" if line["is_delay"] else "#e8f5e9"
-        status_color = "#d32f2f" if line["is_delay"] else "#2e7d32"
+        if line["is_delay"]:
+            bg_color, status_color = "#ffebee", "#d32f2f"
+        elif line.get("is_unavailable"):
+            # Low修正: 取得不可を平常運転と同じ緑色で表示しない(遅延見逃し防止)
+            bg_color, status_color = "#f5f5f5", "#757575"
+        else:
+            bg_color, status_color = "#e8f5e9", "#2e7d32"
         with col:
             st.markdown(f"""
             <div style="background-color:{bg_color}; padding:15px; border-radius:10px; border:1px solid #ccc;">
