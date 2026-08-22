@@ -16,10 +16,10 @@ DBに保存されたJST付きタイムスタンプ(tzinfoを剥がした後)を�
 なお、CODE_REVIEW_REPORT.md 4.2 が本来指摘していた
 「10秒を超えたリトライでは報酬が何度でも加算されてしまう」という論点(=同日内に
 同じクエストを何度でも完了してよいかというビジネスルール)については、
-コードからは意図を断定できず「仕様不明のため判断不能」。
-このテストでは、そのビジネスルールを「バグ」として断定せず、
-現状の挙動を記録するcharacterization testとして残す(下記
-TestRepeatedCompletionAfterGuardWindow を参照)。
+残件対応(M-1-3)でユーザーへ確認のうえ「1周期(daily/weekly)につき1回に制限する」
+ことが確定した。'infinite' タイプ(「何回でも挑戦しよう」等、仕様上多重完了が
+前提のクエスト)は対象外とする。下記 TestRepeatedCompletionAfterGuardWindow /
+TestResetPeriodEnforcement を参照。
 """
 import os
 import sys
@@ -44,8 +44,8 @@ def _seed_quest(user_id: str = "dad", quest_id: int = 9001):
             (user_id, "Test", "Warrior", 1, 0, 0),
         )
         cur.execute(
-            "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
-            (quest_id, "TestQuest", "daily", 10, 5),
+            "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period) VALUES (?, ?, ?, ?, ?, ?)",
+            (quest_id, "TestQuest", "daily", 10, 5, "daily"),
         )
 
 
@@ -89,8 +89,20 @@ class TestSpamGuardIsTimezoneSafe:
         """
         回帰対象のバグそのもの: 修正前は、この呼び出しがサーバーのOSタイムゾーンが
         JST以外(UTC等)の場合に約9時間ぶんズレて誤って429を返し続けていた。
+
+        'infinite' タイプ(M-1-3のサーバー側周期リセット強制の対象外)を使い、
+        このテストが検証したい「10秒スパムガードの境界判定」を、M-1-3で新設した
+        「周期内の再完了禁止」チェックと分離する。
         """
-        _seed_quest()
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0),
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
+                (9001, "TestQuest", "infinite", 10, 5),
+            )
         quest_service = QuestService()
         quest_service.process_complete_quest("dad", 9001)
         _set_last_completed_at("dad", 9001, seconds_ago=10.5)
@@ -101,14 +113,15 @@ class TestSpamGuardIsTimezoneSafe:
 
 class TestRepeatedCompletionAfterGuardWindow:
     """
-    仕様不明のため判断不能: 10秒ガードを超えた「本当のリトライ」で、
-    同一クエストの報酬が(意図通りかはコードから断定できないが)再度加算される
-    現状の挙動を記録するcharacterization test。
-    このテストが失敗する = 挙動が変わった、という検知のみを目的とし、
-    「これが正しい仕様である」とは主張しない。
+    M-1-3: 10秒ガードを超えた「本当のリトライ」であっても、同一周期(daily)内の
+    再完了はサーバー側で拒否され、報酬は多重加算されないことの回帰テスト。
+
+    修正前は10秒スパムチェックしか無く、is_within_reset_period は表示用途
+    (completedQuests算出)にしか使われていなかったため、API直叩き等で同一dailyクエストを
+    1日に何度でも完了・多重報酬できてしまっていた。
     """
 
-    def test_completion_after_guard_window_grants_reward_again(self, isolated_db):
+    def test_completion_after_guard_window_is_rejected_same_day(self, isolated_db):
         _seed_quest()
         quest_service = QuestService()
         first = quest_service.process_complete_quest("dad", 9001)
@@ -116,15 +129,60 @@ class TestRepeatedCompletionAfterGuardWindow:
 
         _set_last_completed_at("dad", 9001, seconds_ago=11)
 
-        second = quest_service.process_complete_quest("dad", 9001)
-
-        # 現状の実装では、同日内であっても再度報酬が加算される。
-        # (これが意図的な「何度でもこなせるお手伝い」なのか、防ぐべき二重加算なのかは
-        #  ビジネスルールとしてコードから断定できないため、最終報告書の
-        #  「残っているリスク」に明記する)
-        assert second["status"] == "success"
-        assert second["earnedGold"] == 5
+        with pytest.raises(HTTPException) as exc_info:
+            quest_service.process_complete_quest("dad", 9001)
+        assert exc_info.value.status_code == 400
 
         with common.get_db_cursor() as cur:
             user = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'dad'").fetchone()
-        assert user["gold"] == 10  # 5 + 5: 二重加算されている
+        assert user["gold"] == 5  # 二重加算されていない
+
+
+class TestResetPeriodEnforcement:
+    """M-1-3: reset_period に応じたサーバー側の完了回数制限。"""
+
+    def test_daily_quest_can_be_completed_again_next_day(self, isolated_db):
+        _seed_quest()
+        quest_service = QuestService()
+        quest_service.process_complete_quest("dad", 9001)
+        # 前日に完了したことにする -> 本日はまだ未完了のはず
+        _set_last_completed_at("dad", 9001, seconds_ago=25 * 3600)
+
+        result = quest_service.process_complete_quest("dad", 9001)
+        assert result["status"] == "success"
+
+    def test_weekly_quest_rejected_within_same_week(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0),
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (9002, "WeeklyQuest", "daily", 10, 5, "weekly"),
+            )
+        quest_service = QuestService()
+        quest_service.process_complete_quest("dad", 9002)
+        _set_last_completed_at("dad", 9002, seconds_ago=2 * 24 * 3600)
+
+        with pytest.raises(HTTPException) as exc_info:
+            quest_service.process_complete_quest("dad", 9002)
+        assert exc_info.value.status_code == 400
+
+    def test_infinite_quest_type_is_exempt_from_reset_period(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0),
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
+                (9003, "InfiniteQuest", "infinite", 10, 5),
+            )
+        quest_service = QuestService()
+        quest_service.process_complete_quest("dad", 9003)
+        _set_last_completed_at("dad", 9003, seconds_ago=11)
+
+        result = quest_service.process_complete_quest("dad", 9003)
+        assert result["status"] == "success"

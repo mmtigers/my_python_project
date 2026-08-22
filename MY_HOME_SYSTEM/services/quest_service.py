@@ -268,6 +268,17 @@ class QuestService:
                 except Exception:
                     pass
 
+            # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
+            # is_within_reset_period は元々 get_all_view_data の表示専用
+            # (completedQuests算出)にしか使われておらず、上の10秒スパムチェックだけでは
+            # API直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていた。
+            # 'infinite' タイプ(「何回でも挑戦しよう」等)は仕様上多重完了が前提のため対象外。
+            if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
+                reset_period = quest['reset_period'] or 'daily'
+                if self.is_within_reset_period(last_hist['completed_at'], reset_period):
+                    period_label = "今週" if reset_period == 'weekly' else "本日"
+                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
+
             now_iso = common.get_now_iso()
             boost = self.calculate_quest_boost(cur, user_id, quest)
             total_exp = quest['exp_gain'] + boost['exp']
