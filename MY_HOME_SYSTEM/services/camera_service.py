@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 import subprocess
@@ -248,3 +249,29 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
         time.sleep(0.5)
     
     return playlist_path if os.path.exists(playlist_path) else None
+
+
+def set_camera_enabled(camera_id: str, enabled: bool) -> bool:
+    """devices.json 上の該当カメラの enabled フラグを更新し、config.CAMERAS にも反映する。
+    devices.json が存在しない、または該当カメラが見つからない場合は False を返す。"""
+    if not os.path.exists(config.DEVICES_JSON_PATH):
+        return False
+
+    with open(config.DEVICES_JSON_PATH, "r", encoding="utf-8") as f:
+        devices_data = json.load(f)
+
+    cameras = devices_data.get("cameras", [])
+    target = next((c for c in cameras if c.get("id") == camera_id), None)
+    if target is None:
+        return False
+
+    target["enabled"] = enabled
+    with open(config.DEVICES_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(devices_data, f, ensure_ascii=False, indent=2)
+
+    for cam in config.CAMERAS:
+        if cam.get("id") == camera_id:
+            cam["enabled"] = enabled
+            break
+
+    return True
