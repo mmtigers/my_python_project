@@ -22,8 +22,34 @@ TARGET_DEVICE_TYPES: List[str] = [
     "Nature Remo E Lite"
 ]
 
-# 状態変化検知用のインメモリキャッシュ
+# 状態変化検知用のキャッシュ。
+# M-4-5: このスクリプトは scheduler_boot.py により5分ごとに subprocess.run(...) で
+# 毎回新しいプロセスとして起動される(run_scriptは実行完了を待機してから次のタスクへ
+# 進む使い捨てプロセスモデル)。プロセス内メモリのみのキャッシュだと実行のたびに
+# 空の辞書から始まってしまい、log_device_state_change() は常に「初回取得」として
+# 扱うため、ON/OFF等のデジタル状態変化が INFO ログとして一度も記録されない
+# (構造的に機能しない)不具合があった。ディスク上のJSONファイルへ永続化することで
+# プロセス再起動をまたいでも前回状態を復元できるようにする。
 _last_device_states: Dict[str, Dict[str, Any]] = {}
+_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")
+
+
+def _load_persisted_states() -> Dict[str, Dict[str, Any]]:
+    try:
+        if os.path.exists(_STATE_FILE):
+            with open(_STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to load persisted device states: {e}")
+    return {}
+
+
+def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        with open(_STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(states, f)
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to persist device states: {e}")
 
 def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """SwitchBot APIからステータスを取得する（同期処理ラッパー）。"""
@@ -124,7 +150,11 @@ def log_device_state_change(
 async def main() -> None:
     # 定常起動はDEBUGに降格
     logger.debug("🚀 --- SwitchBot Monitor Started (Fixed Architecture v2) ---")
-    
+
+    # M-4-5: 前回実行(別プロセス)時点の状態をディスクから復元する。
+    _last_device_states.clear()
+    _last_device_states.update(_load_persisted_states())
+
     devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])
     processed_count: int = 0
 
@@ -174,6 +204,10 @@ async def main() -> None:
                 processed_count += 1
 
         await asyncio.sleep(2)
+
+    # M-4-5: 次回実行(次の新規プロセス)でも状態変化を検知できるよう、
+    # プロセス終了前に最新状態をディスクへ永続化する。
+    _save_persisted_states(_last_device_states)
 
     if processed_count == 0:
         logger.warning("⚠️ --- Monitor Completed but 0 devices were processed. Check 'type' in devices.json ---")
