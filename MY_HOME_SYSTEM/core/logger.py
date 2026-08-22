@@ -84,3 +84,8 @@ def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
         logger.addHandler(discord_handler)
 
     return logger
+
+
+def get_logger(name: str) -> logging.Logger:
+    """setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。"""
+    return setup_logging(name)

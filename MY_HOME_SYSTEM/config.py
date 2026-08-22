@@ -435,6 +435,45 @@ TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
 # NVR録画ファイルのベースディレクトリ
 NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
+# タイムラプス生成設定
+# (monitors/smart_timelapse_generator.py, monitors/scheduled_timelapse.py が
+#  getattr(config, "TIMELAPSE_...", デフォルト値) で参照する。以前はここに対応する
+#  定数が定義されておらず、常にハードコードされたデフォルト値へフォールバックしていた)
+from datetime import time as _dt_time
+
+TIMELAPSE_FPS_ANALYZE: int = 1
+TIMELAPSE_WIDTH: int = 320
+TIMELAPSE_HEIGHT: int = 180
+TIMELAPSE_BG_HISTORY: int = 120
+TIMELAPSE_BG_VAR_THRESH: int = 16
+TIMELAPSE_MORPH_KERNEL_SIZE: int = 3
+TIMELAPSE_MIN_AREA_THRESHOLD: int = 300
+TIMELAPSE_ROI_X: int = 0
+TIMELAPSE_ROI_Y: int = 0
+TIMELAPSE_ROI_W: int = TIMELAPSE_WIDTH
+TIMELAPSE_ROI_H: int = TIMELAPSE_HEIGHT
+TIMELAPSE_GAP_THRESH: int = 5
+TIMELAPSE_BUFFER_SEC: int = 3
+TIMELAPSE_SPEEDUP_FACTOR: int = 4
+TIMELAPSE_DEBUG_FFMPEG: bool = False
+TIMELAPSE_FAST_STREAM_COPY_MODE: bool = False
+TIMELAPSE_FONT_FILE: str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+TIMELAPSE_MAX_FILE_SIZE_MB: int = 22
+
+TIMELAPSE_CAMERAS: Dict[str, str] = {
+    "entrance": os.path.join(NVR_RECORD_DIR, "entrance"),
+    "garden": os.path.join(NVR_RECORD_DIR, "garden"),
+    "parking": os.path.join(NVR_RECORD_DIR, "parking"),
+}
+TIMELAPSE_SCHEDULES: Dict[str, tuple] = {
+    "morning": (_dt_time(7, 50), _dt_time(8, 30), _dt_time(8, 30), _dt_time(9, 0)),
+    "evening": (_dt_time(15, 0), _dt_time(16, 0), _dt_time(16, 0), _dt_time(16, 30)),
+}
+TIMELAPSE_FPS: str = "15"
+TIMELAPSE_BITRATE: str = "1500k"
+TIMELAPSE_MAXRATE: str = "2000k"
+TIMELAPSE_SEGMENT_TIME: str = "40"
+
 # ==========================================
 # 12. 保持期間・クリーンアップ設定
 # ==========================================

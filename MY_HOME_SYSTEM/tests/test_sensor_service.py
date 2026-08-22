@@ -124,7 +124,7 @@ class TestProcessPowerData:
         """DB に前回値が無い場合は prev_wattage=0.0 とみなされるため、
         初回の値が閾値以上であれば OFF->ON の状態変化として通知される。"""
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
-            await sensor_service.process_power_data("dev1", "エアコン", 500, {"threshold": 100})
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
 
         with common.get_db_cursor() as cur:
             row = cur.execute(
@@ -146,7 +146,7 @@ class TestProcessPowerData:
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
             )
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
-            await sensor_service.process_power_data("dev1", "エアコン", 500, {"threshold": 100})
+            await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][1][0]["text"]
@@ -159,7 +159,7 @@ class TestProcessPowerData:
                 "VALUES ('dev1', 'エアコン', 500, '2026-01-01T00:00:00')"
             )
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
-            await sensor_service.process_power_data("dev1", "エアコン", 5, {"threshold": 100})
+            await sensor_service.process_power_data("dev1", "エアコン", 5, {"power_threshold_watts": 100})
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][1][0]["text"]
@@ -172,5 +172,5 @@ class TestProcessPowerData:
                 "VALUES ('dev1', 'エアコン', 5, '2026-01-01T00:00:00')"
             )
         with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
-            await sensor_service.process_power_data("dev1", "エアコン", 10, {"threshold": 100})
+            await sensor_service.process_power_data("dev1", "エアコン", 10, {"power_threshold_watts": 100})
         mock_send.assert_not_called()
