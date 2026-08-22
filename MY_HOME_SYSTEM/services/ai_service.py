@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
 import re
+import threading
 import time
 import json
 import traceback
@@ -58,7 +59,14 @@ class SimpleRateLimiter:
         self.limit = limit
         self.count = 0
         self.last_reset_time = time.time()
-        self._lock = asyncio.Lock()
+        # M-5-3: handlers/line_handler.py の handle_message は着信メッセージごとに
+        # asyncio.run(...) で新しいイベントループを生成する。このインスタンスは
+        # モジュールレベルの単一シングルトンとして全リクエストで共有されるため、
+        # asyncio.Lock だと複数スレッドの別イベントループから同時にロック獲得を
+        # 試みた際、コンテンション時に生成される待機Futureが解決不能になり
+        # 無期限にハングしうる(該当スレッドの応答が永久に返らなくなる)。
+        # スレッドを跨いでも正しく機能する threading.Lock を使う。
+        self._lock = threading.Lock()
 
     async def allow_request(self) -> bool:
         """
@@ -67,7 +75,7 @@ class SimpleRateLimiter:
         Returns:
             bool: リクエスト許可ならTrue, 制限超過ならFalse
         """
-        async with self._lock:
+        with self._lock:
             now = time.time()
             # 1分経過していればリセット
             if now - self.last_reset_time > 60:
@@ -214,6 +222,14 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
 # 2. Tool Definitions (Schema)
 # ==========================================
 
+# M-5-1: 下記 search_db スキーマの timestamp 形式説明用のサンプル。
+# 実データ(child_health_records等)は本ファイル冒頭で import している
+# get_now_iso() でそのまま保存されており、'YYYY-MM-DD HH:MM:SS' のような
+# スペース区切りではなく ISO8601 + JSTオフセット('T'区切り, '+09:00') である。
+# 説明文とデータの実形式が食い違うと、AIが生成する BETWEEN 等の文字列比較検索が
+# ズレて意図した範囲の行を取りこぼす。
+_TIMESTAMP_FORMAT_EXAMPLE = get_now_iso()
+
 tools_schema = [
     {
         "function_declarations": [
@@ -255,7 +271,7 @@ tools_schema = [
                             - {config.SQLITE_TABLE_FOOD} (timestamp, menu_category)
                             - {config.SQLITE_TABLE_SHOPPING} (order_date, item_name, price)
                             - {config.SQLITE_TABLE_POWER_USAGE} (timestamp, device_name, wattage)
-                            ※ timestampは 'YYYY-MM-DD HH:MM:SS' 形式の文字列。
+                            ※ timestampはISO8601形式の文字列 (JSTオフセット付き。例: '{_TIMESTAMP_FORMAT_EXAMPLE}')。
                             """
                         }
                     },
