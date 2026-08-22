@@ -19,6 +19,7 @@ import random
 import sys
 import logging
 import hashlib
+import fcntl
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -1821,7 +1822,33 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
     DataManager.save_daily_summary(data)
 
 
+# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや
+# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる
+# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。
+# cronの1回が想定より長く(1時間超)かかるとこの多重起動が起きやすい。
+_MONITOR_LOCK_FILE_PATH = CURRENT_DIR / ".newface_monitor.lock"
+
+
 def run_monitor() -> None:
+    """モニタープロセスのエントリポイント。多重起動防止ロックを取得してから本処理を実行する。"""
+    lock_fd = os.open(str(_MONITOR_LOCK_FILE_PATH), os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")
+        os.close(lock_fd)
+        return
+
+    try:
+        _run_monitor_locked()
+    finally:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
+
+
+def _run_monitor_locked() -> None:
     """モニタープロセスのメインロジック。MonitorConfig.SITESに登録された全サイトを順に処理する。"""
     logger.debug("=== NewFace Monitor Started ===")
 
