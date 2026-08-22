@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
 import re
+import threading
 import time
 import json
 import traceback
@@ -58,7 +59,14 @@ class SimpleRateLimiter:
         self.limit = limit
         self.count = 0
         self.last_reset_time = time.time()
-        self._lock = asyncio.Lock()
+        # M-5-3: handlers/line_handler.py の handle_message は着信メッセージごとに
+        # asyncio.run(...) で新しいイベントループを生成する。このインスタンスは
+        # モジュールレベルの単一シングルトンとして全リクエストで共有されるため、
+        # asyncio.Lock だと複数スレッドの別イベントループから同時にロック獲得を
+        # 試みた際、コンテンション時に生成される待機Futureが解決不能になり
+        # 無期限にハングしうる(該当スレッドの応答が永久に返らなくなる)。
+        # スレッドを跨いでも正しく機能する threading.Lock を使う。
+        self._lock = threading.Lock()
 
     async def allow_request(self) -> bool:
         """
@@ -67,7 +75,7 @@ class SimpleRateLimiter:
         Returns:
             bool: リクエスト許可ならTrue, 制限超過ならFalse
         """
-        async with self._lock:
+        with self._lock:
             now = time.time()
             # 1分経過していればリセット
             if now - self.last_reset_time > 60:

@@ -14,8 +14,12 @@ services/ai_service.py のテスト。
 _call_gemini_api_with_retry自体を直接差し替えることで、analyze_text_and_execute
 の分岐ロジックをgoogle.generativeaiの内部構造から切り離してテストする。
 """
+import asyncio
 import os
+import queue
 import sys
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -513,3 +517,88 @@ class TestToolSchemaTimestampFormatMatchesActualData:
             f"schema description does not contain a timestamp example matching "
             f"get_now_iso() shape: {sample!r}"
         )
+
+
+class TestRateLimiterLockIsThreadSafeAcrossEventLoops:
+    """
+    M-5-3: SimpleRateLimiter の内部ロック(_lock)は、handlers/line_handler.py の
+    handle_message が着信メッセージごとに `asyncio.run(...)` で新しいイベントループを
+    生成する運用を前提にすると、別スレッド上の別イベントループから同時に
+    ロック獲得を試みる状況が発生しうる。
+
+    asyncio.Lock はコンテンション時、獲得待ちのFutureをその時点の実行中ループに
+    紐付ける。別スレッドの別ループがそのFutureの解決を待つと、Futureを解決する
+    はずのループ側コールバックは永遠に呼ばれず、レート制限チェック自体が
+    無期限にハングしてしまう(=リクエストが応答不能になる)。
+    threading.Lock であればスレッドを跨いでも正しくブロック/解放される。
+    """
+
+    @staticmethod
+    def _hold_lock_from_this_thread(lock, acquired_event: threading.Event, released_event: threading.Event):
+        """lockの型(threading.Lock / asyncio.Lock)を問わず、このスレッド上でlockを
+        保持し続けるヘルパー。修正前後どちらの実装でも同じテストコードで検証できるように、
+        型に応じて獲得方法を切り替える。"""
+        if isinstance(lock, type(threading.Lock())):
+            lock.acquire()
+            try:
+                acquired_event.set()
+                released_event.wait(timeout=5)
+            finally:
+                lock.release()
+        else:
+            async def _hold():
+                async with lock:
+                    acquired_event.set()
+                    while not released_event.is_set():
+                        await asyncio.sleep(0.01)
+            asyncio.run(_hold())
+
+    def test_lock_is_a_threading_lock_not_an_asyncio_lock(self):
+        limiter = ai_service.SimpleRateLimiter()
+        assert isinstance(limiter._lock, type(threading.Lock())), (
+            "SimpleRateLimiter._lock should be threading.Lock, not asyncio.Lock, "
+            "because it is shared across the per-request asyncio.run() event loops "
+            "created by handlers/line_handler.py:handle_message"
+        )
+
+    def test_allow_request_does_not_hang_when_contended_from_another_threads_loop(self):
+        limiter = ai_service.SimpleRateLimiter()
+        released_event = threading.Event()
+        acquired_event = threading.Event()
+
+        holder = threading.Thread(
+            target=self._hold_lock_from_this_thread,
+            args=(limiter._lock, acquired_event, released_event),
+            daemon=True,  # 万一ハングしても後続テスト・プロセス終了をブロックしない
+        )
+        holder.start()
+        assert acquired_event.wait(timeout=2), "holder thread failed to acquire the lock"
+
+        result_queue = queue.Queue()
+
+        def requester():
+            try:
+                result_queue.put(("ok", asyncio.run(limiter.allow_request())))
+            except Exception as e:  # noqa: BLE001
+                result_queue.put(("error", e))
+
+        req_thread = threading.Thread(target=requester, daemon=True)
+        req_thread.start()
+        # requester が実際にロック獲得待ちで止まる時間を作ってから解放する。
+        # (解放前に結果を待つと、単に「保持時間分だけ遅い」だけで区別できないため)
+        time.sleep(0.2)
+        released_event.set()
+        holder.join(timeout=2)
+
+        try:
+            outcome = result_queue.get(timeout=2)
+        except queue.Empty:
+            pytest.fail(
+                "allow_request() did not return within 2s of the lock being released by "
+                "another thread's event loop (asyncio.Lock cross-loop wakeup is not "
+                "thread-safe, so the waiting thread's loop never notices the release)"
+            )
+
+        kind, value = outcome
+        assert kind == "ok", f"allow_request() raised: {value!r}"
+        assert value is True
