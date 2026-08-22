@@ -151,6 +151,7 @@ class CameraConfig(BaseModel):
     user: Optional[str] = None
     password: Optional[str] = Field(None, alias="pass")
     rtsp_url: Optional[str] = None
+    enabled: bool = True
 
 class NotifySettings(BaseModel):
     power_threshold_watts: Optional[float] = None
