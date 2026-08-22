@@ -362,6 +362,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | ロガーの設定内容 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上をDiscord Webhookへ通知する`DiscordErrorHandler`の3種のハンドラを登録するとされる。ただしログ保存先ディレクトリ(`config.BASE_DIR`)の実際の値は`logger.md`自体でも未確認とされている。 | logger.md |
+| 環境変数の正確な設定値・フォーマット | `MY_HOME_SYSTEM/.env.example`(全30行、コピーして`.env`として使う旨のコメント付き)を直接確認した。6〜21行目が本ファイル向けの設定で、`FINANCIAL_START_DATE=2024-01-01`、`FINANCIAL_TOTAL_AMOUNT=50000000`、`FINANCIAL_TOTAL_MONTHS=420`、`FINANCIAL_INITIAL_PAYMENT=140000`、`FINANCIAL_RATE_SCHEDULE=[["2024-01-01","2024-12-31",0.5],["2025-01-01",null,0.7]]`(`[start_date, end_date_or_null, annual_rate_percent]`のタプルを要素とするJSON配列)、`FINANCIAL_PROJECTION_BASE_RATE=0.9`、`FINANCIAL_PROJECTION_BASE_DATE=2026-01-01`という例示値が確認できた。23〜30行目は資産内訳のデフォルト値で、`FINANCIAL_ASSET_CASH=1000000`、`FINANCIAL_ASSET_STOCK=1000000`、`FINANCIAL_ASSET_TRUST=1000000`、`FINANCIAL_ASSET_PENSION=1000000`、`FINANCIAL_ASSET_POINT=10000`の5項目が、コメント(24〜25行目)によれば「すべて任意、未設定時は0扱い」とされている。 | 直接ソース確認: `MY_HOME_SYSTEM/.env.example:6-30` |
 
 ## 10. 自己検証結果
 
