@@ -464,3 +464,52 @@ class TestCallGeminiApiWithRetry:
             await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
         assert chat_session.send_message.call_count == 1
+
+
+class TestToolSchemaTimestampFormatMatchesActualData:
+    """
+    M-5-1: search_db ツールschemaのtimestamp列の説明が実データの保存形式と
+    一致していることの回帰テスト。
+
+    従来 tools_schema の sql_query 説明は「'YYYY-MM-DD HH:MM:SS' 形式の文字列」と
+    書かれていたが、実データ(child_health_records等)は core.utils.get_now_iso() で
+    保存されており、実際は ISO8601 + JSTオフセット('T'区切り、'+09:00'付き)である。
+    説明と実データの形式が食い違うと、AIが生成する BETWEEN 等の文字列比較検索が
+    ズレて意図した範囲の行を取りこぼす。
+    """
+
+    def test_schema_description_reflects_iso8601_format_not_space_separated(self):
+        sql_query_desc = (
+            ai_service.tools_schema[0]["function_declarations"][2]["parameters"]
+            ["properties"]["sql_query"]["description"]
+        )
+        assert ai_service.tools_schema[0]["function_declarations"][2]["name"] == "search_db"
+
+        # 実データが実際に使っている形式(ISO8601, 'T'区切り, +09:00オフセット)への
+        # 言及があること。
+        assert "T" in sql_query_desc
+        assert "+09:00" in sql_query_desc
+
+        # 修正前に書かれていた、実データと矛盾するスペース区切り形式の表記が
+        # 残っていないこと。
+        assert "YYYY-MM-DD HH:MM:SS" not in sql_query_desc
+
+    def test_schema_description_example_matches_get_now_iso_shape(self):
+        """
+        スキーマ説明文中に埋め込まれた例示フォーマットが、実際の
+        get_now_iso() の出力形状(ISO8601 + マイクロ秒 + '+09:00')と
+        一致することを、実際の出力を正規表現化して検証する。
+        """
+        import re
+        from core.utils import get_now_iso
+
+        sql_query_desc = (
+            ai_service.tools_schema[0]["function_declarations"][2]["parameters"]
+            ["properties"]["sql_query"]["description"]
+        )
+        sample = get_now_iso()
+        shape_pattern = re.sub(r"\d", r"\\d", re.escape(sample))
+        assert re.search(shape_pattern, sql_query_desc), (
+            f"schema description does not contain a timestamp example matching "
+            f"get_now_iso() shape: {sample!r}"
+        )

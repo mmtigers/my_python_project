@@ -214,6 +214,14 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
 # 2. Tool Definitions (Schema)
 # ==========================================
 
+# M-5-1: 下記 search_db スキーマの timestamp 形式説明用のサンプル。
+# 実データ(child_health_records等)は本ファイル冒頭で import している
+# get_now_iso() でそのまま保存されており、'YYYY-MM-DD HH:MM:SS' のような
+# スペース区切りではなく ISO8601 + JSTオフセット('T'区切り, '+09:00') である。
+# 説明文とデータの実形式が食い違うと、AIが生成する BETWEEN 等の文字列比較検索が
+# ズレて意図した範囲の行を取りこぼす。
+_TIMESTAMP_FORMAT_EXAMPLE = get_now_iso()
+
 tools_schema = [
     {
         "function_declarations": [
@@ -255,7 +263,7 @@ tools_schema = [
                             - {config.SQLITE_TABLE_FOOD} (timestamp, menu_category)
                             - {config.SQLITE_TABLE_SHOPPING} (order_date, item_name, price)
                             - {config.SQLITE_TABLE_POWER_USAGE} (timestamp, device_name, wattage)
-                            ※ timestampは 'YYYY-MM-DD HH:MM:SS' 形式の文字列。
+                            ※ timestampはISO8601形式の文字列 (JSTオフセット付き。例: '{_TIMESTAMP_FORMAT_EXAMPLE}')。
                             """
                         }
                     },
