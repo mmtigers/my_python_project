@@ -137,7 +137,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 本コンポーネントに渡される実際のプロパティ値 | `UserStatusCard.md`の解析によれば、`UserStatusCard`はHP・所持ゴールド・獲得メダル等の数値表示に`CountUp`を利用しているとされ、`RewardShop.md`の解析によれば、`RewardShop`は`<CountUp value={currentUser.gold || 0} suffix=" G" />`という形で所持ゴールドの表示に利用しているとされている。これにより`value`には数値型（HP・ゴールド・メダル枚数等）が、`suffix`には単位文字列（例: `" G"`）が渡される実例が確認できる。ただしこれらは`UserStatusCard.md`・`RewardShop.md`側の解析結果からの補足であり、`UserStatusCard.tsx`/`RewardShop.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../features/family/components/UserStatusCard.md`, `../../features/shop/components/RewardShop.md` |
+| 本コンポーネントに渡される実際のプロパティ値 | `family-quest/src/features/family/components/UserStatusCard.tsx`を直接確認した。リポジトリ全体を`CountUp`で検索したところ、`import`および使用箇所は本ファイルのみであり(3, 42, 46行目)、`RewardShop.tsx`（同ディレクトリ配下）では`CountUp`は使用されていない（`RewardShop.tsx`はゴールド表示を持たず`RewardList`のみを描画する）ことも直接確認した。実際の使用例は`<CountUp value={user.gold || 0} suffix=" G" />`(42行目、`User.gold`は必須の`number`型だがフォールバックとして`|| 0`)と`<CountUp value={user.medal_count || 0} suffix=" 枚" />`(46行目、`User.medal_count`は任意の`number`型)の2箇所で、いずれも`className`/`prefix`は指定されず既定値のまま使われている。`value`には常に整数のゲーム内数値（ゴールド・メダル枚数）が、`suffix`には単位を表す文字列（半角スペース＋"G"、または"枚"）が渡されることを確認した。なお42行目の直前(41行目)には静的な`<span>G</span>`が別途あり、画面上は「G」ラベルと`CountUp`の`suffix=" G"`が並んで表示される構成になっている。 | 直接ソース確認: `family-quest/src/features/family/components/UserStatusCard.tsx:1-55`（参考: `family-quest/src/features/shop/components/RewardShop.tsx:1-27`、`CountUp`不使用を確認） |
 
 ## 10. 自己検証結果
 
