@@ -24,7 +24,12 @@
 
 データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。クエスト完了処理（`process_complete_quest`）は同一`(user_id, quest_id)`へのプロセス内`threading.Lock`による直列化で、報酬購入処理（`process_purchase_reward`）はDBレベルの単一アトミックUPDATE（`WHERE gold >= ?`＋`rowcount`判定）で、それぞれ同時多重リクエストによる二重加算・二重購入のレースコンディションを防ぐ設計になっている。
 * 根拠: (行番号: 40〜46 / 抜粋: "同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）\n# 別スレッドでほぼ同時に到達すると、どちらも「直近の完了履歴なし」を読んでしまい、\n# 経験値・ゴールド・ボスダメージが二重に加算されるレースコンディションが発生しうる。")
-* 根拠: (行番号: 555〜557 / 抜粋: "# 残高チェックと減算を単一のアトミックなUPDATEにすることで、\n# 同時多重リクエストによる read-then-write のレースコンディション\n# (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。")
+* 根拠: (行番号: 600〜602 / 抜粋: "# 残高チェックと減算を単一のアトミックなUPDATEにすることで、\n# 同時多重リクエストによる read-then-write のレースコンディション\n# (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。")
+
+
+H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_users`のgold/exp/levelをread-modify-writeで更新する経路）も、対象ユーザー単位のプロセス内ロック（`_get_user_balance_lock`）で直列化され、同一ユーザーへの承認×承認・承認×取消の並行実行によるgold/exp消失レースを防ぐようになった。また`InventoryService`のアイテム使用は、H-5の修正により即時消費（`'consumed'`）ではなく`'pending'`状態での申請とし、`ROLE_ADULT`による`consume_item`の承認で初めて消費を確定する2段階の承認フローに変更された（子供のクエスト完了が`ROLE_ADULT`の承認を要する仕組みと同様のパターン）。
+* 根拠: (行番号: 59〜66 / 抜粋: "process_approve_quest / process_cancel_quest は「quest_usersをSELECT →")
+* 根拠: (行番号: 645〜649 / 抜粋: "アイテム使用を「申請」する。即時消費はせず status='pending' にし、")
 
 ## 3. 外部依存関係
 
@@ -48,24 +53,24 @@
 | `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 15) |
 | `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 18) |
 | `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`) | `import quest_data` / `from .. import quest_data` (行番号: 29, 32) |
-| `datetime` (ローカル再インポート) | 標準ライブラリ | `is_within_reset_period`内でトップレベルの`datetime`を再度インポート(冗長) | `import datetime` (行番号: 122) |
-| `threading` (ローカル再インポート) | 標準ライブラリ | `_trigger_tv_unlock`内でトップレベルの`threading`を再度インポート(冗長) | `import threading` (行番号: 366) |
-| `services.switchbot_service` | 内部モジュール(関数内ローカルインポート) | TVプラグのON操作コマンド送信 | `from services import switchbot_service` (行番号: 367) |
-| `services.notification_service` (ローカル再インポート) | 内部モジュール | `_trigger_tv_unlock`内でモジュールレベルと同じものを再度インポート(冗長) | `from services import notification_service` (行番号: 368) |
+| `datetime` (ローカル再インポート) | 標準ライブラリ | `is_within_reset_period`内でトップレベルの`datetime`を再度インポート(冗長) | `import datetime` (行番号: 144) |
+| `threading` (ローカル再インポート) | 標準ライブラリ | `_trigger_tv_unlock`内でトップレベルの`threading`を再度インポート(冗長) | `import threading` (行番号: 407) |
+| `services.switchbot_service` | 内部モジュール(関数内ローカルインポート) | TVプラグのON操作コマンド送信 | `from services import switchbot_service` (行番号: 408) |
+| `services.notification_service` (ローカル再インポート) | 内部モジュール | `_trigger_tv_unlock`内でモジュールレベルと同じものを再度インポート(冗長) | `from services import notification_service` (行番号: 409) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマット(ミリ秒・タイムゾーンの有無)が不明 | `with common.get_db_cursor() as cur:` (行番号: 64) |
-| `game_logic.GameLogic.*` | `calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`, `calculate_next_level_exp`, `calculate_max_hp` の計算式・詳細仕様が不明 | `game_logic.GameLogic.calculate_drop_rewards(base_gold, base_exp)` (行番号: 420) |
-| `config.*` | `TV_UNLOCK_QUEST_IDS`, `TV_PLUG_DEVICE_ID`, `LINE_PARENTS_GROUP_ID`, `LINE_USER_ID` の実際の設定値が不明 | `config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID` (行番号: 343) |
-| `switchbot_service.send_device_command` | 引数の完全な仕様、通信エラー時の挙動、戻り値の構造が不明 | `switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")` (行番号: 373) |
-| `notification_service.send_push` | 送信先・ペイロード形式以外のリトライ仕様等が不明 | `notification_service.send_push(user_id=config.LINE_PARENTS_GROUP_ID, ...)` (行番号: 383〜386) |
-| `sound_manager.play` | 再生される音声の実体・失敗時の挙動が不明 | `sound_manager.play("submit")` (行番号: 260) |
-| `quest_data.USERS` / `.QUESTS` / `.REWARDS` の構造 | 定義ファイルが提供されておらず、辞書のキー構成が本ファイルの参照(`q_data['start_time']`等)からのみ推測可能 | `valid_users = [MasterUser(**u) for u in quest_data.USERS]` (行番号: 693) |
-| `models.quest.MasterUser` / `MasterQuest` / `MasterReward` | フィールドのバリデーションルールが不明 | `MasterQuest(**q_data)` (行番号: 699) |
-| DBの各テーブルスキーマ | カラムの型、制約(UNIQUE, NOT NULL等)、外部キー設定などが不明。特に `quest_history.linked_history_id` の型・制約は本ファイルからは確認できない | `cur.execute("SELECT level, gold FROM quest_users")` (行番号: 65), `hist['linked_history_id']` (行番号: 339) |
+| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマット(ミリ秒・タイムゾーンの有無)が不明 | `with common.get_db_cursor() as cur:` (行番号: 86) |
+| `game_logic.GameLogic.*` | `calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`, `calculate_next_level_exp`, `calculate_max_hp` の計算式・詳細仕様が不明 | `game_logic.GameLogic.calculate_drop_rewards(base_gold, base_exp)` (行番号: 461) |
+| `config.*` | `TV_UNLOCK_QUEST_IDS`, `TV_PLUG_DEVICE_ID`, `LINE_PARENTS_GROUP_ID`, `LINE_USER_ID` の実際の設定値が不明 | `config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID` (行番号: 384) |
+| `switchbot_service.send_device_command` | 引数の完全な仕様、通信エラー時の挙動、戻り値の構造が不明 | `switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")` (行番号: 414) |
+| `notification_service.send_push` | 送信先・ペイロード形式以外のリトライ仕様等が不明 | `notification_service.send_push(user_id=config.LINE_PARENTS_GROUP_ID, ...)` (行番号: 424〜427) |
+| `sound_manager.play` | 再生される音声の実体・失敗時の挙動が不明 | `sound_manager.play("submit")` (行番号: 286) |
+| `quest_data.USERS` / `.QUESTS` / `.REWARDS` の構造 | 定義ファイルが提供されておらず、辞書のキー構成が本ファイルの参照(`q_data['start_time']`等)からのみ推測可能 | `valid_users = [MasterUser(**u) for u in quest_data.USERS]` (行番号: 760) |
+| `models.quest.MasterUser` / `MasterQuest` / `MasterReward` | フィールドのバリデーションルールが不明 | `MasterQuest(**q_data)` (行番号: 766) |
+| DBの各テーブルスキーマ | カラムの型、制約(UNIQUE, NOT NULL等)、外部キー設定などが不明。特に `quest_history.linked_history_id` の型・制約は本ファイルからは確認できない | `cur.execute("SELECT level, gold FROM quest_users")` (行番号: 87), `hist['linked_history_id']` (行番号: 378) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -89,136 +94,150 @@
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 49〜55)
 
+### `_get_user_balance_lock` (モジュールレベル関数) と `_user_balance_locks` / `_user_balance_locks_guard` (モジュールレベル変数)
+
+* **役割**: `user_id`をキーとして`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`と同様の構造）。`process_approve_quest`/`process_cancel_quest`は「`quest_users`をSELECT→Pythonでgold/exp/levelを計算→UPDATE」というread-modify-write処理のため、同一ユーザーへの承認×承認・承認×取消が並行実行される（例: 親が承認一覧を連続タップする`handleApproveAll`）と一方の更新が消失するレースコンディションが起こりうる（H-3）。`quest_users`(gold/exp/level)を書き換える処理を対象ユーザー単位でプロセス内直列化するために導入された。
+* 根拠: `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 67), `def _get_user_balance_lock(user_id: str) -> threading.Lock:` (行番号: 71〜77)
+* **引数/リクエスト**: `user_id: str`
+* 根拠: (行番号: 71)
+* **戻り値/レスポンス**: `threading.Lock`
+* 根拠: (行番号: 71, 77 / 抜粋: "return lock")
+* **副作用**: `_user_balance_locks`辞書への書き込み（キー未登録時のみ）。`_completion_locks`と同様、エントリを削除する処理は存在せず辞書は増え続ける。
+* 根拠: (行番号: 74〜76 / 抜粋: "_user_balance_locks[user_id] = lock")
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 71〜77)
+
 ### `UserService.get_family_chronicle`
 
 * **役割**: `quest_users`の合計レベル・合計ゴールド、`quest_history`の総件数から家族のランク（4段階のしきい値）を判定し、`_fetch_full_adventure_logs`で取得した冒険ログとともに返す。
-* 根拠: `def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 63〜81)
+* 根拠: `def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 85〜103)
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: (行番号: 63)
+* 根拠: (行番号: 85)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`stats: {totalLevel, totalGold, totalQuests, partyRank}` と `chronicle`）
-* 根拠: (行番号: 63, 78〜81 / 抜粋: "return {\n            \"stats\": {\"totalLevel\": total_level,")
+* 根拠: (行番号: 85, 100〜103 / 抜粋: "return {\n            \"stats\": {\"totalLevel\": total_level,")
 * **副作用**: DB参照（`quest_users`, `quest_history`）
-* 根拠: (行番号: 65, 68 / 抜粋: "users = cur.execute(\"SELECT level, gold FROM quest_users\").fetchall()")
+* 根拠: (行番号: 87, 90 / 抜粋: "users = cur.execute(\"SELECT level, gold FROM quest_users\").fetchall()")
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 63〜81)
+* 根拠: (行番号: 85〜103)
 
 ### `UserService._fetch_full_adventure_logs`
 
 * **役割**: `quest_history`（`status='approved'`、最大100件）と`reward_history`（最大100件）を取得しマージ、`ts`降順で先頭100件に切り詰めたうえで、各ユーザーの名前・アバターを付与し、種別ごとの表示テキストと日付文字列を整形して返す。
-* 根拠: `def _fetch_full_adventure_logs(self, cur) -> List[dict]:` (行番号: 83〜103)
+* 根拠: `def _fetch_full_adventure_logs(self, cur) -> List[dict]:` (行番号: 105〜125)
 * **引数/リクエスト**: `cur`
-* 根拠: (行番号: 83)
+* 根拠: (行番号: 105)
 * **戻り値/レスポンス**: `List[dict]`（各要素は`type`, `userId`, `userName`, `userAvatar`, `title`, `text`, `gold`, `exp`, `timestamp`, `dateStr`）
-* 根拠: (行番号: 83, 90〜103)
+* 根拠: (行番号: 105, 112〜125)
 * **副作用**: DB参照（`quest_history`, `reward_history`, `quest_users`）
-* 根拠: (行番号: 84〜85, 88)
+* 根拠: (行番号: 106〜107, 110)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 83〜103)
+* 根拠: (行番号: 105〜125)
 
 ### `UserService.update_avatar`
 
 * **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 105〜115)
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 127〜137)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
-* 根拠: (行番号: 105)
+* 根拠: (行番号: 127)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "updated", "avatar": avatar_url}`）
-* 根拠: (行番号: 105, 115)
+* 根拠: (行番号: 127, 137)
 * **副作用**: DB更新（`quest_users`）、ログ出力
-* 根拠: (行番号: 111〜114)
+* 根拠: (行番号: 133〜136)
 * **エラーハンドリング**: ユーザー不在時に `HTTPException(status_code=404)`
-* 根拠: (行番号: 108〜109 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
+* 根拠: (行番号: 130〜131 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
 
 ### `QuestService.is_within_reset_period`
 
-* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければUTCとみなしてJSTへ変換する（変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列（例えば`sync_master_data`がデフォルト値として設定する`'weekly_monday'`）が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する。
-* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 119〜149)
-* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 142〜149)
+* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列（例えば`sync_master_data`がデフォルト値として設定する`'weekly_monday'`）が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する。
+* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 141〜175)
+* 根拠: `if dt.tzinfo is None: dt = dt.replace(tzinfo=JST)` (行番号: 153〜159 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
+* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 168〜175)
 * **引数/リクエスト**: `completed_at_str: str`, `reset_period: str`
-* 根拠: (行番号: 119)
+* 根拠: (行番号: 141)
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 119)
+* 根拠: (行番号: 141)
 * **副作用**: なし
-* 根拠: (行番号: 119〜149、DBアクセスや外部呼び出しなし)
+* 根拠: (行番号: 141〜175、DBアクセスや外部呼び出しなし)
 * **エラーハンドリング**: `completed_at_str`が空なら早期`False`。ISOパース失敗時は`"%Y-%m-%d"`形式でリトライし、それも失敗すれば`False`を返す（例外は送出しない）。
-* 根拠: (行番号: 120, 136〜140 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
+* 根拠: (行番号: 142, 162〜166 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
 
 ### `QuestService.__init__`
 
 * **役割**: インスタンス初期化時に `UserService` のインスタンスを生成する。
-* 根拠: `def __init__(self):` (行番号: 151〜152)
+* 根拠: `def __init__(self):` (行番号: 177〜178)
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 151)
+* 根拠: (行番号: 177)
 * **戻り値/レスポンス**: なし
 * **副作用**: インスタンスプロパティの割り当て（`self.user_service`）
-* 根拠: (行番号: 152 / 抜粋: "self.user_service = UserService()")
+* 根拠: (行番号: 178 / 抜粋: "self.user_service = UserService()")
 * **エラーハンドリング**: なし
 
 ### `QuestService.calculate_quest_boost`
 
 * **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」はサーバーのローカル時刻（`datetime.datetime.now()`）であり、`is_within_reset_period`のようなJST変換は行われない。
-* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 154〜200)
-* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 159〜160), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 166〜167)
-* 根拠: `now = datetime.datetime.now()` (行番号: 176)
+* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 180〜226)
+* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 185〜186), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 192〜193)
+* 根拠: `now = datetime.datetime.now()` (行番号: 202)
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
-* 根拠: (行番号: 154〜155 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
+* 根拠: (行番号: 180〜181 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
 * **戻り値/レスポンス**: `Dict[str, int]`（`gold`, `exp`の追加ボーナス）
-* 根拠: (行番号: 154, 200)
+* 根拠: (行番号: 180, 226)
 * **副作用**: DB参照（`quest_history`）
-* 根拠: (行番号: 170〜174)
+* 根拠: (行番号: 196〜200)
 * **エラーハンドリング**: 日時パースエラー時に`pass`で無視し、ボーナスなし扱いとする。
-* 根拠: (行番号: 183〜184 / 抜粋: "except Exception:\n                pass")
+* 根拠: (行番号: 209〜210 / 抜粋: "except Exception:\n                pass")
 
 ### `QuestService.process_complete_quest`
 
 * **役割**: `_get_completion_lock((user_id, quest_id))`でプロセス内ロックを取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。
-* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 202〜206)
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 228〜232)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 202)
+* 根拠: (行番号: 228)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_process_complete_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 206 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
+* 根拠: (行番号: 232 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
 * **副作用**: ロックの取得・解放（`with`文）
-* 根拠: (行番号: 205)
+* 根拠: (行番号: 231)
 * **エラーハンドリング**: なし（内部の例外はそのまま伝播）
-* 根拠: (行番号: 202〜206)
+* 根拠: (行番号: 228〜232)
 
 ### `QuestService._process_complete_quest_locked`
 
 * **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行い、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 208〜272)
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 234〜298)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 208)
+* 根拠: (行番号: 234)
 * **戻り値/レスポンス**: `Dict[str, Any]`（ステータスや報酬情報）
-* 根拠: (行番号: 208, 262〜267, 272)
+* 根拠: (行番号: 234, 288〜293, 298)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し、ログ出力、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し
-* 根拠: (行番号: 210〜211, 254〜260, 270)
+* 根拠: (行番号: 236〜237, 280〜286, 296)
 * **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`completed_at`の`tzinfo`を保持したまま`datetime.datetime.now(last_time.tzinfo)`と比較することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する。`tzinfo`が無い古いデータはJST(+9時間)とみなす）。この時間ベースのチェックに加え、呼び出し元`process_complete_quest`のプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
-* 根拠: (行番号: 213〜214, 223〜239 / 抜粋: "if (now_check - last_time).total_seconds() < 10:\n                        raise HTTPException(status_code=429, ...)")
+* 根拠: (行番号: 239〜240, 249〜265 / 抜粋: "if (now_check - last_time).total_seconds() < 10:\n                        raise HTTPException(status_code=429, ...)")
 
 ### `QuestService._get_sibling_partner_id`
 
 * **役割**: 兄妹連携クエスト（`target_user == 'siblings'`）の完了報告者に対する「相方」の`user_id`を返す。`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人（兄・妹）いることを前提とし、報告者自身を除いたもう一方のIDを返す。
-* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 274〜283 / 抜粋: "現状の家族構成では role_child のユーザーがちょうど2人")
+* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 300〜309 / 抜粋: "現状の家族構成では role_child のユーザーがちょうど2人")
 * **引数/リクエスト**: `cur`, `user_id: str`
-* 根拠: (行番号: 274)
+* 根拠: (行番号: 300)
 * **戻り値/レスポンス**: `str`（相方の`user_id`）
-* 根拠: (行番号: 274, 283)
+* 根拠: (行番号: 300, 309)
 * **副作用**: DB参照（`quest_users`）
-* 根拠: (行番号: 279)
+* 根拠: (行番号: 305)
 * **エラーハンドリング**: `role_child`のユーザーが対象ユーザーに含まれない、または人数がちょうど2人でない場合は`HTTPException(400)`
-* 根拠: (行番号: 281〜282 / 抜粋: "raise HTTPException(status_code=400, detail=\"兄妹クエストの対象ユーザー構成が不正です\")")
+* 根拠: (行番号: 307〜308 / 抜粋: "raise HTTPException(status_code=400, detail=\"兄妹クエストの対象ユーザー構成が不正です\")")
 
 ### `QuestService._process_coop_quest_completion`
 
 * **役割**: 兄妹連携クエストの完了報告処理。`_get_sibling_partner_id`で相方を特定し、報告者・相方双方の`pending`な`quest_history`行を作成、後から報告者側の行に`linked_history_id`を`UPDATE`で設定して相互連結する。
-* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 285〜314)
+* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 311〜340)
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso: str`, `total_exp: int`, `total_gold: int`
-* 根拠: (行番号: 285)
+* 根拠: (行番号: 311)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`status: "pending"`、`message`に「兄妹クエスト」の旨を含む）
-* 根拠: (行番号: 309〜314)
+* 根拠: (行番号: 335〜340)
 * **副作用**: DB挿入・更新（`quest_history`に2行挿入、うち1行を`UPDATE`）、`sound_manager.play("submit")`呼び出し、ログ出力
-* 根拠: (行番号: 292〜307)
+* 根拠: (行番号: 318〜333)
 * **エラーハンドリング**: なし（`_get_sibling_partner_id`から送出される`HTTPException`はそのまま伝播）
-* 根拠: (行番号: 285〜314)
+* 根拠: (行番号: 311〜340)
 
 ### `QuestService.process_approve_quest`
 
