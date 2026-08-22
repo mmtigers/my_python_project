@@ -142,8 +142,12 @@ flowchart TD
     A7 --> A8["外部: conn.executescript(sql) でSQLを実行"]
     A8 --> A10{"例外(sqlite3.OperationalError)が発生したか"}
     A10 -- No --> A11["schema_migrationsにINSERT / commit / 成功ログ"]
-    A10 -- Yes --> A12["警告ログ出力(既に別経路で適用済みとみなす)"]
+    A10 -- Yes --> A14{"エラー文言が_ALREADY_APPLIED_ERROR_PATTERNS<br/>('duplicate column'/'already exists')を含むか"}
+    A14 -- Yes --> A12["警告ログ出力(既に別経路で適用済みとみなす)"]
     A12 --> A13["schema_migrationsにINSERT OR IGNORE / commit"]
+    A14 -- No --> A15["conn.rollback() / エラーログ出力"]
+    A15 --> A16["例外を再送出(バージョンは記録しない)"]
+    A16 --> A17(["呼び出し元へ伝播: 起動失敗"])
     A11 --> A5
     A13 --> A5
 ```
@@ -187,16 +191,16 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `migrations/0001_add_quest_users_role.sql`ほか`migrations/`配下の各`.sql`ファイル | 実際に適用されるDDL/DML内容を確認し、`apply_pending_migrations`が処理する対象の実体を把握するため。 | 根拠: `[sql読み込み]` (行番号: 66〜68 / 抜粋: "path = os.path.join(MIGRATIONS_DIR, filename)\n        with open(path, \"r\", encoding=\"utf-8\") as f:") |
+| 高 | `migrations/0001_add_quest_users_role.sql`ほか`migrations/`配下の各`.sql`ファイル | 実際に適用されるDDL/DML内容を確認し、`apply_pending_migrations`が処理する対象の実体を把握するため。 | 根拠: `[sql読み込み]` (行番号: 72〜74 / 抜粋: "path = os.path.join(MIGRATIONS_DIR, filename)\n        with open(path, \"r\", encoding=\"utf-8\") as f:") |
 | 高 | `unified_server.py` | `apply_pending_migrations`の実際の呼び出しタイミング(起動シーケンス上の位置)と渡される`conn`の生成元を確認するため。 | 根拠: `[モジュールdocstring, MIGRATIONS_DIR]` (行番号: 1〜15 / 抜粋: "本モジュールは migrations/ 配下の *.sql ファイルをファイル名の昇順で適用し") |
 | 中 | `services/quest_service.py` | モジュールdocstringで言及されている、従来の場当たり的なスキーマ変更処理(`sync_master_data()`)との後方互換関係を確認するため。 | 根拠: `[モジュールdocstring]` (行番号: 5〜8, 12〜15 / 抜粋: "既存の quest_service.py 側の実行時チェックは、init_db() を経由しない\n既存の本番運用パス") |
 
 ## 8. 保守上の注意点
 
-* **`OperationalError`の一律許容**: `apply_pending_migrations`は`sqlite3.OperationalError`を「既に別経路で適用済み」とみなして常に警告ログのみで処理を継続する設計であり、実際には別の原因(SQL構文エラー、テーブル不存在等)による`OperationalError`であっても同様に「適用済み」として記録されてしまう可能性がある。 根拠: `[except sqlite3.OperationalError]` (行番号: 76〜82 / 抜粋: "「既に別経路（旧来の実行時チェック等）で適用済み」とみなして警告ログのみ出力し")
-* **`OperationalError`以外の例外は未捕捉**: マイグレーションSQL実行時に`sqlite3.IntegrityError`など`OperationalError`以外の例外が発生した場合は捕捉されず、そのまま呼び出し元(`unified_server.py`等の起動処理)に伝播し、起動処理自体を止める可能性がある。 根拠: `[except節がOperationalErrorのみ]` (行番号: 76 / 抜粋: "except sqlite3.OperationalError as e:")
+* **`OperationalError`の選別許容（M-2で修正済み）**: `apply_pending_migrations`は`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言のみを「既に別経路で適用済み」とみなして警告ログで許容し、それ以外の`OperationalError`はロールバックのうえ再送出して起動を失敗させる設計に書き直された。以前存在した「`OperationalError`を種類を問わず一律『適用済み』とみなす」問題は解消されているが、`_ALREADY_APPLIED_ERROR_PATTERNS`の文言判定は`str(e).lower()`への部分一致(`in`演算子)であるため、無関係なエラーメッセージにたまたま`"already exists"`等の文字列が含まれる場合は依然として誤って「適用済み」とみなされ得る。 根拠: `[except sqlite3.OperationalError]` (行番号: 82〜95 / 抜粋: "if any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):")
+* **`OperationalError`以外の例外は未捕捉**: マイグレーションSQL実行時に`sqlite3.IntegrityError`など`OperationalError`以外の例外が発生した場合は捕捉されず、そのまま呼び出し元(`unified_server.py`等の起動処理)に伝播し、起動処理自体を止める可能性がある。 根拠: `[except節がOperationalErrorのみ]` (行番号: 82 / 抜粋: "except sqlite3.OperationalError as e:")
 * **旧来のスキーマ変更経路との併存**: モジュールdocstringで明言されている通り、`quest_service.py`側の実行時チェック(SELECT失敗時のALTER TABLE)は後方互換のためあえて残されており、スキーマ変更の経路が本モジュールと旧来の仕組みの2系統に分かれている。将来的な整合性維持には注意が必要。 根拠: `[モジュールdocstring]` (行番号: 12〜15 / 抜粋: "既存の quest_service.py 側の実行時チェックは、init_db() を経由しない\n既存の本番運用パス（sync_master_data の初回呼び出し時にのみ列が追加される\n運用）との後方互換のため、あえて残している。")
-* **ファイル名の辞書式ソートに依存**: マイグレーションの適用順序は`sorted()`によるファイル名の辞書式ソートに完全依存しており(行番号46)、ファイル名の命名規則(`0001_`, `0002_`等の連番プレフィックス)が崩れると適用順序が意図と異なる可能性がある。 根拠: `[sorted]` (行番号: 46 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
+* **ファイル名の辞書式ソートに依存**: マイグレーションの適用順序は`sorted()`によるファイル名の辞書式ソートに完全依存しており(行番号50)、ファイル名の命名規則(`0001_`, `0002_`等の連番プレフィックス)が崩れると適用順序が意図と異なる可能性がある。 根拠: `[sorted]` (行番号: 50 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 
 ## 9. 不明事項一覧
 
@@ -212,7 +216,7 @@ graph TD
 | --- | --- | --- |
 | 各マイグレーションファイルの実際のSQL内容 | `MY_HOME_SYSTEM/migrations/`配下の全5ファイルを直接確認した。`0001_add_quest_users_role.sql`は`quest_users`に`role TEXT`列を追加し、`user_id`が`dad`/`mom`なら`'role_adult'`、`daughter`/`son`/`child`なら`'role_child'`を設定する。`0002_add_quest_master_reset_period.sql`は`quest_master`に`reset_period TEXT DEFAULT 'weekly_monday'`列を追加する。`0003_add_reward_master_description.sql`は`reward_master`に`description TEXT`列を追加する。`0004_add_coop_quest_link.sql`は`quest_history`に`linked_history_id INTEGER DEFAULT NULL`列を追加し、コメントによれば兄妹連携クエスト(`target_user='siblings'`)の2行を相互連結するためのものである。`0005_fix_quest_master_reset_period_default.sql`は、コメントによれば0002で追加した`reset_period`の初期値`'weekly_monday'`が`is_within_reset_period()`未対応値でありクエスト完了判定が常に`False`になるバグを引き起こしていたため、既存の`NULL`または`'weekly_monday'`の行を`'daily'`へ補正する`UPDATE`文である。 | 直接ソース確認: `MY_HOME_SYSTEM/migrations/0001_add_quest_users_role.sql`, `0002_add_quest_master_reset_period.sql`, `0003_add_reward_master_description.sql`, `0004_add_coop_quest_link.sql`, `0005_fix_quest_master_reset_period_default.sql`（全文） |
 | `apply_pending_migrations`の実際の呼び出しタイミング・渡される`conn`の生成方法 | `MY_HOME_SYSTEM/unified_server.py`と`MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`unified_server.py`は29行目で`from core.migrations import apply_pending_migrations`をインポートし、FastAPIの`lifespan(app)`(90行目〜)内、起動時ログ出力の直後・カメラプロセス起動処理より前に、`migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)`(102行目)で新規接続を生成して`apply_pending_migrations(migration_conn)`(105行目)を呼び出し、`finally`節で確実に`migration_conn.close()`する(106〜107行目)。呼び出し全体は`try`/`except Exception as e:`(101, 108〜109行目)で囲まれ、失敗してもログ出力のみで起動処理を継続する。`init_unified_db.py`側は560行目で`apply_pending_migrations(cur.connection)`と、既存の`with`ブロックで開かれた接続(`cur.connection`)をそのまま渡している。`migrations/README.md`にもこの2箇所（`init_unified_db.init_db()`と`unified_server.py`起動時）が実行タイミングとして明記されていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:29, 101-109`, `MY_HOME_SYSTEM/init_unified_db.py:558-560`（参考: `MY_HOME_SYSTEM/migrations/README.md`） |
-| `quest_service.py`側の実行時チェックとの具体的な整合性(競合の有無) | `MY_HOME_SYSTEM/services/quest_service.py`の`sync_master_data`メソッド(688行目〜)を直接確認した。同メソッドは`SELECT role FROM quest_users LIMIT 1`を試み例外発生時のみ`ALTER TABLE quest_users ADD COLUMN role TEXT`等を実行する実行時チェックを3箇所持つ: (1) 710〜717行目の`role`列追加(`migrations/0001`と同一のUPDATE条件)、(2) 719〜724行目の`reset_period`列追加(`migrations/0002`と同一のデフォルト値`'weekly_monday'`)、(3) 770〜773行目の`description`列追加(`migrations/0003`と同一)。列が既に存在する場合は`SELECT`が例外を出さず`ALTER TABLE`はスキップされるため、`apply_pending_migrations`が先に列を追加済みであれば`quest_service.py`側のチェックは単に無害な`SELECT`一発で終わり、`OperationalError`は発生しない。逆に`apply_pending_migrations`が未実行またはDBがマイグレーション未適用の状態で`sync_master_data`が先に呼ばれた場合は、`quest_service.py`側が先に列を追加してしまうため、後から`apply_pending_migrations`が同じ`ALTER TABLE`を実行すると`sqlite3.OperationalError`(duplicate column)が発生するが、本ファイル(`core/migrations.py`)76〜82行目の設計通りこれは「既に適用済み」とみなされ警告ログのみで処理が継続される。したがって両者は列追加に関しては非破壊的に共存できる設計であることを確認した。ただし0004・0005に対応する実行時チェックは`sync_master_data`には存在しない（`linked_history_id`・`reset_period`のデフォルト値修正は正式マイグレーション経由でのみ適用される）ことも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:688-786`, `MY_HOME_SYSTEM/core/migrations.py:76-82` |
+| `quest_service.py`側の実行時チェックとの具体的な整合性(競合の有無) | `MY_HOME_SYSTEM/services/quest_service.py`の`sync_master_data`メソッド(688行目〜)を直接確認した。同メソッドは`SELECT role FROM quest_users LIMIT 1`を試み例外発生時のみ`ALTER TABLE quest_users ADD COLUMN role TEXT`等を実行する実行時チェックを3箇所持つ: (1) 710〜717行目の`role`列追加(`migrations/0001`と同一のUPDATE条件)、(2) 719〜724行目の`reset_period`列追加(`migrations/0002`と同一のデフォルト値`'weekly_monday'`)、(3) 770〜773行目の`description`列追加(`migrations/0003`と同一)。列が既に存在する場合は`SELECT`が例外を出さず`ALTER TABLE`はスキップされるため、`apply_pending_migrations`が先に列を追加済みであれば`quest_service.py`側のチェックは単に無害な`SELECT`一発で終わり、`OperationalError`は発生しない。逆に`apply_pending_migrations`が未実行またはDBがマイグレーション未適用の状態で`sync_master_data`が先に呼ばれた場合は、`quest_service.py`側が先に列を追加してしまうため、後から`apply_pending_migrations`が同じ`ALTER TABLE`を実行すると`sqlite3.OperationalError`(duplicate column)が発生するが、本ファイル(`core/migrations.py`)82〜91行目の設計通り、このエラー文言は`_ALREADY_APPLIED_ERROR_PATTERNS`の`"duplicate column"`に一致するため「既に適用済み」とみなされ警告ログのみで処理が継続される(M-2で導入された選別ロジックの下でも、この`duplicate column`ケース自体は従来通り許容される既知パターンのまま)。したがって両者は列追加に関しては非破壊的に共存できる設計であることを確認した。ただし0004・0005に対応する実行時チェックは`sync_master_data`には存在しない（`linked_history_id`・`reset_period`のデフォルト値修正は正式マイグレーション経由でのみ適用される）ことも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:688-786`, `MY_HOME_SYSTEM/core/migrations.py:82-91` |
 
 ## 10. 自己検証結果
 
