@@ -161,6 +161,29 @@
 
 ## 5. 処理フロー図
 
+`get_jr_traffic_status` における、取得不可状態の扱いを示します（Low修正後）。
+
+```mermaid
+flowchart TD
+    JStart(["Start: get_jr_traffic_status()"]) --> JInit["results を両路線とも<br>is_unavailable=True<br>('⚪ 情報取得不可')で初期化"]
+    JInit --> JTry(["Tryブロック開始"])
+    JTry --> JHttpGet["外部: requests.get(JR_WEST_JSON_URL)"]
+    JHttpGet --> JCheckStatus{"status_code == 200 か"}
+    JCheckStatus -- No --> JReturnUnavailable(["End: 情報取得不可のままresultsを返す"])
+    JCheckStatus -- Yes --> JMarkOk["両路線を is_unavailable=False<br>'🟢 平常運転' に更新"]
+    JMarkOk --> JLoop["APIのlines応答をループし<br>該当路線を上書き"]
+    JLoop --> JCheckLine{"路線ID が G/A か"}
+    JCheckLine -- Yes --> JSetDelay["status/detail/is_delay/is_suspended を更新<br>(is_unavailableはFalseのまま)"]
+    JCheckLine -- No --> JLoop
+    JSetDelay --> JLoop
+    JLoop -- ループ終了 --> JReturnResults(["End: 更新済みresultsを返す"])
+
+    JTry -. 例外発生 .-> JCatch(["except Exception as e"])
+    JHttpGet -. 例外発生 .-> JCatch
+    JCatch --> JErrLog["logger.error(...)"]
+    JErrLog --> JReturnUnavailable
+```
+
 `get_route_info` における、Yahoo!路線情報のスクレイピングとフォールバックの流れを示します。
 
 ```mermaid
@@ -175,11 +198,11 @@ flowchart TD
 
     CheckStatus -- Yes --> ParseHtml["外部: BeautifulSoup でHTML解析"]
     ParseHtml --> FindRoute{"route_elm が\n見つかったか"}
-    FindRoute -- No --> SetSuccess["summary = '取得成功'（詳細は未設定）"] --> ReturnSuccess(["End: route_dataを返す"])
+    FindRoute -- No --> ReturnNoRoute(["End: route_dataを返す<br>(summaryは初期値'取得失敗'のまま)"])
 
     FindRoute -- Yes --> ExtractTime["時間・所要時間・運賃・乗換を抽出"]
     ExtractTime --> ExtractDetail["詳細ルート(駅・乗換路線)を抽出"]
-    ExtractDetail --> SetSuccess
+    ExtractDetail --> SetSuccess["summary = '取得成功'"] --> ReturnSuccess(["End: route_dataを返す"])
 
     TryStart -. 例外発生 .-> Catch(["except Exception as e"])
     HttpGet -. 例外発生 .-> Catch
