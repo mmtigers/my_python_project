@@ -25,9 +25,10 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| useCallback | フック | `onPointerDown`, `endPress`, `onPointerUp`, `onPointerLeave`, `onPointerCancel`, `clearTimers`各関数の参照を安定化するために使用 | 根拠: `import { useCallback, useRef, useState } from 'react';` (行番号: 1) |
-| useRef | フック | タイマーID(`timeoutRef`, `intervalRef`)および長押し発火済みフラグ(`firedRef`)の、再レンダリングを引き起こさないミュータブルな保持 | 根拠: `import { useCallback, useRef, useState } from 'react';` (行番号: 1) |
-| useState | フック | `pressProgress`（経過割合）と`isPressing`（押下中フラグ）のローカル状態管理 | 根拠: `import { useCallback, useRef, useState } from 'react';` (行番号: 1) |
+| useCallback | フック | `onPointerDown`, `endPress`, `onPointerUp`, `onPointerLeave`, `onPointerCancel`, `clearTimers`各関数の参照を安定化するために使用 | 根拠: `import { useCallback, useEffect, useRef, useState } from 'react';` (行番号: 1) |
+| useEffect | フック | フックのマウント〜アンマウント間で、アンマウント時に`clearTimers`を実行するクリーンアップ副作用を登録するために使用 | 根拠: `import { useCallback, useEffect, useRef, useState } from 'react';` (行番号: 1) |
+| useRef | フック | タイマーID(`timeoutRef`, `intervalRef`)および長押し発火済みフラグ(`firedRef`)の、再レンダリングを引き起こさないミュータブルな保持 | 根拠: `import { useCallback, useEffect, useRef, useState } from 'react';` (行番号: 1) |
+| useState | フック | `pressProgress`（経過割合）と`isPressing`（押下中フラグ）のローカル状態管理 | 根拠: `import { useCallback, useEffect, useRef, useState } from 'react';` (行番号: 1) |
 
 ### ブラックボックスとなる外部要素
 
@@ -59,7 +60,7 @@
 ### `useLongPress`
 
 * **役割**: 引数(`onLongPress`, `onShortTap`, `thresholdMs`, `disabled`)を受け取り、ポインターダウン〜アップ/リーブ/キャンセルまでの一連の状態管理と、長押し/短タップの判定・コールバック呼び出しを行うフック本体。内部で`clearTimers`, `onPointerDown`, `endPress`, `onPointerUp`, `onPointerLeave`, `onPointerCancel`の6つの関数を`useCallback`で定義し、`handlers`オブジェクトとしてまとめて返す。
-* 根拠: `export function useLongPress({\n    onLongPress,\n    onShortTap,\n    thresholdMs = 600,\n    disabled = false,\n}: UseLongPressOptions): UseLongPressResult {` (行番号: 28〜99)
+* 根拠: `export function useLongPress({\n    onLongPress,\n    onShortTap,\n    thresholdMs = 600,\n    disabled = false,\n}: UseLongPressOptions): UseLongPressResult {` (行番号: 28〜101)
 
 
 * **引数/リクエスト**: `UseLongPressOptions`型（`{ onLongPress: () => void; onShortTap?: () => void; thresholdMs?: number; disabled?: boolean }`）
@@ -67,7 +68,7 @@
 
 
 * **戻り値/レスポンス**: `UseLongPressResult`型（`{ pressProgress: number; isPressing: boolean; handlers: {...} }`）
-* 根拠: `return {\n        pressProgress,\n        isPressing,\n        handlers: { onPointerDown, onPointerUp, onPointerLeave, onPointerCancel },\n    };` (行番号: 94〜98)
+* 根拠: `return {\n        pressProgress,\n        isPressing,\n        handlers: { onPointerDown, onPointerUp, onPointerLeave, onPointerCancel },\n    };` (行番号: 96〜100)
 
 
 * **副作用**:
@@ -84,11 +85,17 @@
 
 
   - `onPointerUp`/`onPointerDown`では`e.stopPropagation()`によりイベントの親要素への伝播を止める
-  - 根拠: `e.stopPropagation();` (行番号: 53, 82)
+  - 根拠: `e.stopPropagation();` (行番号: 53, 84)
+
+  - フックのマウント時に`useEffect`を登録し、そのクリーンアップ関数として`clearTimers`自身を返す（`() => clearTimers`ではなく`clearTimers`関数の参照をそのままクリーンアップとして渡す形）。これによりコンポーネントが押下状態のままアンマウントされても、残存していた`setTimeout`/`setInterval`がアンマウント時に確実に停止される（バグ修正: 詳細は後述）。
+  - 根拠: `useEffect(() => clearTimers, [clearTimers]);` (行番号: 81)
 
 
 * **エラーハンドリング**: `disabled`が`true`の場合、`onPointerDown`は何もせず即座に`return`する（長押し判定自体を無効化する形の防御）。それ以外に`try-catch`等の例外処理は存在しない。
 * 根拠: `if (disabled) return;` (行番号: 52)
+
+* **バグ修正の記録**: 以前は`useEffect`によるアンマウント時クリーンアップが存在せず、押下状態のままコンポーネントがアンマウントされた場合、`onPointerDown`で開始した`setTimeout`/`setInterval`がクリアされずに残存し、アンマウント後に`onLongPress`が発火したり存在しないコンポーネントに対して`setState`（`setPressProgress`/`setIsPressing`）が呼ばれたりする可能性があった。`useEffect(() => clearTimers, [clearTimers])`を追加し、アンマウント時に`clearTimers`を確実に呼び出すよう修正した。
+* 根拠: (行番号: 1, 81 / 抜粋: "import { useCallback, useEffect, useRef, useState } from 'react';", "useEffect(() => clearTimers, [clearTimers]);")
 
 
 
@@ -118,23 +125,23 @@
 ### `onPointerUp` / `onPointerLeave` / `onPointerCancel` (内部関数)
 
 * **役割**: いずれも`endPress`を呼び出すラッパー。`onPointerUp`のみ`triggerShortTap`に`true`を渡し（正常に指を離した場合は短タップ判定を行う）、`onPointerLeave`/`onPointerCancel`は`false`を渡す（要素外へのドラッグやキャンセル時は短タップとして扱わない）。
-* 根拠: `const onPointerUp = useCallback((e: React.PointerEvent) => {\n        e.stopPropagation();\n        endPress(true);\n    }, [endPress]);` (行番号: 81〜84), `const onPointerLeave = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 86〜88), `const onPointerCancel = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 90〜92)
+* 根拠: `const onPointerUp = useCallback((e: React.PointerEvent) => {\n        e.stopPropagation();\n        endPress(true);\n    }, [endPress]);` (行番号: 83〜86), `const onPointerLeave = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 88〜90), `const onPointerCancel = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 92〜94)
 
 
 * **引数/リクエスト**: `onPointerUp`のみ`e: React.PointerEvent`（`e.stopPropagation()`のため）、`onPointerLeave`/`onPointerCancel`は引数なし
-* 根拠: `(e: React.PointerEvent) => {` (行番号: 81), `() => {` (行番号: 86, 90)
+* 根拠: `(e: React.PointerEvent) => {` (行番号: 83), `() => {` (行番号: 88, 92)
 
 
 * **戻り値/レスポンス**: いずれも`void`
-* 根拠: `endPress(true);` / `endPress(false);` の呼び出しのみで値を返さない (行番号: 83, 87, 91)
+* 根拠: `endPress(true);` / `endPress(false);` の呼び出しのみで値を返さない (行番号: 85, 89, 93)
 
 
 * **副作用**: `endPress`の呼び出しによる状態リセットおよび（`onPointerUp`のみ）短タップ判定
-* 根拠: `endPress(true);` (行番号: 83)
+* 根拠: `endPress(true);` (行番号: 85)
 
 
 * **エラーハンドリング**: なし
-* 根拠: いずれの関数にも`try-catch`等が存在しない (行番号: 81〜92)
+* 根拠: いずれの関数にも`try-catch`等が存在しない (行番号: 83〜94)
 
 
 
