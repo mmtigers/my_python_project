@@ -204,38 +204,47 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     
     # 設計書「エラーハンドリングと自動復旧」準拠: NVRのバッファフラッシュ遅延を考慮したリトライ
     max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            # 最新の動画の「最後から1秒前」のフレームを抽出（動体検知直後の映像）
-            # 実際には target_time と最新mp4のタイムスタンプを比較して -ss のシーク時間を計算するのが理想的です
-            cmd = [
-                "ffmpeg", "-y",
-                "-sseof", "-1", # ファイル末尾から1秒前
-                "-i", latest_mp4,
-                "-vframes", "1",
-                "-q:v", "2",    # 高画質
-                output_tmp
-            ]
-            
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
-            
-            if os.path.exists(output_tmp):
-                with open(output_tmp, "rb") as f:
-                    image_data = f.read()
-                os.remove(output_tmp)
-                return image_data
-                
-        except subprocess.TimeoutExpired:
-            logger.warning(f"⏳ [{cam_conf['name']}] FFmpeg timeout on NVR file (Attempt {attempt}/{max_retries})")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"⚠️ [{cam_conf['name']}] FFmpeg extraction failed: {e} (Attempt {attempt}/{max_retries})")
-        except Exception as e:
-            logger.error(f"❌ [{cam_conf['name']}] Unexpected error in NVR extraction: {e}")
-            break
-            
-        time.sleep(2 ** attempt)  # Exponential Backoff
+    try:
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 最新の動画の「最後から1秒前」のフレームを抽出（動体検知直後の映像）
+                # 実際には target_time と最新mp4のタイムスタンプを比較して -ss のシーク時間を計算するのが理想的です
+                cmd = [
+                    "ffmpeg", "-y",
+                    "-sseof", "-1", # ファイル末尾から1秒前
+                    "-i", latest_mp4,
+                    "-vframes", "1",
+                    "-q:v", "2",    # 高画質
+                    output_tmp
+                ]
 
-    return None
+                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=True)
+
+                if os.path.exists(output_tmp):
+                    with open(output_tmp, "rb") as f:
+                        image_data = f.read()
+                    return image_data
+
+            except subprocess.TimeoutExpired:
+                logger.warning(f"⏳ [{cam_conf['name']}] FFmpeg timeout on NVR file (Attempt {attempt}/{max_retries})")
+            except subprocess.CalledProcessError as e:
+                logger.warning(f"⚠️ [{cam_conf['name']}] FFmpeg extraction failed: {e} (Attempt {attempt}/{max_retries})")
+            except Exception as e:
+                logger.error(f"❌ [{cam_conf['name']}] Unexpected error in NVR extraction: {e}")
+                break
+
+            time.sleep(2 ** attempt)  # Exponential Backoff
+
+        return None
+    finally:
+        # Low: タイムアウトや異常終了でffmpegが output_tmp に部分書き込みしたファイルを
+        # 残したまま関数を抜けると、/tmp に snapshot_*.jpg の残骸が蓄積し続けていた。
+        # 成功時に読み取った後の削除も含め、どの終了経路でも確実にクリーンアップする。
+        try:
+            if os.path.exists(output_tmp):
+                os.remove(output_tmp)
+        except OSError:
+            pass
 
 
 def save_image_from_stream(cam_name: str, event_type: str = "motion") -> Optional[str]:
@@ -483,12 +492,14 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
                     # ... (ログ出力等は省略せず元の通り) ...
                     if events:
-                        # ★ここを info に変更（玄関カメラのみログを出す）
+                        # Low: 元々はデバッグ目的で玄関カメラのみ info に変更されていたが、
+                        # 全イベント属性(dir(events))・全ペイロードを本番ログに残す設計上の
+                        # 意図はなく、ノイズ・情報量ともに大きいため debug に降格する。
                         if cam_name == "玄関カメラ":
-                            logger.info(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
+                            logger.debug(f"🔬 [RAW EVENTS] {cam_name}: Type={type(events)}, Attrs={dir(events)}")
                             if hasattr(events, 'NotificationMessage'):
-                                logger.info(f"📦 [EVENT PAYLOAD] {cam_name}: 含まれるメッセージ数: {len(events.NotificationMessage)}")
-                                logger.info(f"📝 [PAYLOAD DETAIL] {events.NotificationMessage}")
+                                logger.debug(f"📦 [EVENT PAYLOAD] {cam_name}: 含まれるメッセージ数: {len(events.NotificationMessage)}")
+                                logger.debug(f"📝 [PAYLOAD DETAIL] {events.NotificationMessage}")
                 except Exception as e:
                     # --- 修正: 玄関カメラのみ例外ハンドリングを強化し、他は既存ロジックを維持 ---
                     if cam_name == "玄関カメラ":

@@ -268,6 +268,17 @@ class QuestService:
                 except Exception:
                     pass
 
+            # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
+            # is_within_reset_period は元々 get_all_view_data の表示専用
+            # (completedQuests算出)にしか使われておらず、上の10秒スパムチェックだけでは
+            # API直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていた。
+            # 'infinite' タイプ(「何回でも挑戦しよう」等)は仕様上多重完了が前提のため対象外。
+            if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
+                reset_period = quest['reset_period'] or 'daily'
+                if self.is_within_reset_period(last_hist['completed_at'], reset_period):
+                    period_label = "今週" if reset_period == 'weekly' else "本日"
+                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
+
             now_iso = common.get_now_iso()
             boost = self.calculate_quest_boost(cur, user_id, quest)
             total_exp = quest['exp_gain'] + boost['exp']
@@ -563,7 +574,7 @@ class QuestService:
                         end_dt = datetime.date(y, m, d)
                         if today_date > end_dt: continue
                 except ValueError as e:
-                    logger.warning(f"Date parse error for quest {q.get('id')}: {e}")
+                    logger.warning(f"Date parse error for quest {q.get('quest_id')}: {e}")
                     continue
             if q['quest_type'] == 'random':
                 seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
@@ -799,7 +810,7 @@ class GameSystem:
                         name = excluded.name, 
                         job_class = excluded.job_class,
                         role = COALESCE(excluded.role, quest_users.role)
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, datetime.datetime.now()))
+                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, common.get_now_iso()))
             
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
