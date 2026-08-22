@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface UseLongPressOptions {
     onLongPress: () => void;
@@ -77,6 +77,8 @@ export function useLongPress({
             onShortTap();
         }
     }, [clearTimers, onShortTap]);
+
+    useEffect(() => clearTimers, [clearTimers]);
 
     const onPointerUp = useCallback((e: React.PointerEvent) => {
         e.stopPropagation();
