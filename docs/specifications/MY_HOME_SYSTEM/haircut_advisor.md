@@ -350,8 +350,14 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `haircut_history`テーブルのスキーマおよびデータ挿入元 | 本ファイルは`SELECT`のみを行い、テーブル定義やレコード挿入処理は含まれていないため。 | DBスキーマ定義ファイル(`current_schema.sql`等)、および`haircut_history`へINSERTする実装 |
-| `.env`ファイルに実際に設定される値(`LINE_ACCESS_TOKEN`、`DISCORD_WEBHOOK_NOTIFY`) | `.env`の中身自体は本ファイルの解析範囲外であるため。 | `tools/.env`(実運用ファイル、非公開) |
-| 本スクリプトの実際の定期実行方法・スケジュール | `__main__`ブロックが常時`force_notify=True`のテスト実行相当であり、本番運用時の呼び出しコマンドや引数は本ファイルからは判断できないため。 | crontab設定またはタスクスケジューラ関連ファイル(ファイル名不明) |
+| `.env`ファイルに実際に設定される値(`LINE_ACCESS_TOKEN`、`DISCORD_WEBHOOK_NOTIFY`) | `.env`の中身自体は本ファイルの解析範囲外であるため。（`MY_HOME_SYSTEM/tools/`配下を検索したが`.env`実体ファイルは存在せず、解消不可。リポジトリ直下`.gitignore`13行目の`.env`規則により追跡対象外と判明） | `tools/.env`(実運用ファイル、非公開) |
+| 本スクリプトの実際の定期実行方法・スケジュール | `__main__`ブロックが常時`force_notify=True`のテスト実行相当であり、本番運用時の呼び出しコマンドや引数は本ファイルからは判断できないため。（リポジトリ全体を`crontab`/`systemd`/`.service`等のファイル名・記述で検索したが該当ファイルは存在せず、解消不可） | crontab設定またはタスクスケジューラ関連ファイル(ファイル名不明) |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `haircut_history`テーブルのスキーマおよびデータ挿入元 | `MY_HOME_SYSTEM/current_schema.sql`89〜93行目の`CREATE TABLE haircut_history (id INTEGER PRIMARY KEY AUTOINCREMENT, reservation_date TEXT UNIQUE, created_at TEXT)`を直接確認した。データ挿入元は`MY_HOME_SYSTEM/old/haircut_monitor.py`(全216行)であり、`_init_db`メソッド内の`CREATE TABLE IF NOT EXISTS haircut_history`(70〜75行目、`current_schema.sql`と同一の列構成)と、`_save_reservation(self, dt: datetime)`メソッド内の`INSERT OR IGNORE INTO haircut_history (reservation_date, created_at) VALUES (?, ?)`(92〜94行目)が実際のINSERT処理であることを確認した。`reservation_date`列に`UNIQUE`制約があるため、同一日時の重複予約は`INSERT OR IGNORE`により無視される(`conn.total_changes`が0のままとなり、`_save_reservation`は`False`を返す、100〜105行目)。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:89-93`, `MY_HOME_SYSTEM/old/haircut_monitor.py:70-75, 90-105` |
 
 ## 10. 自己検証結果
 
