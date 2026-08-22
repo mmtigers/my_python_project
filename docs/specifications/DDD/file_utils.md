@@ -102,6 +102,12 @@ graph TD
 | --- | --- | --- |
 | 実際の呼び出し箇所・呼び出しパターン | `batch_download_discord.py`や`extract_youtube_urls.py`が本関数をどのような文字列（動画タイトル、URL由来の文字列等）に対して呼び出しているかは、本ファイル単体からは不明。 | `batch_download_discord.py`, `extract_youtube_urls.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 実際の呼び出し箇所・呼び出しパターン | `DDD/batch_download_discord.py`と`DDD/extract_youtube_urls.py`を直接確認した。(1) `batch_download_discord.py`では、`FileSystemManager.sanitize_filename`（326〜327行目、本関数への委譲ラッパー）が487行目で`video_id`（`task.url.split('?')[0].rstrip('/').split('/')[-1]`により対象ページのURL末尾セグメントから生成した文字列。取得できない場合は`f"vid_{int(time.time())}"`にフォールバック）を引数に呼び出され、戻り値に`.mp4`を付与してファイル名としている。(2) `extract_youtube_urls.py`では、`FileManager._sanitize_filename`（267〜276行目、同じく本関数への委譲ラッパー）が295〜296行目で`result.channel_name`（チャンネル名）と`result.title`（動画タイトル）の2種類の文字列に対しそれぞれ呼び出され、`{safe_channel}_{safe_title}.txt`（`safe_channel`が`"unknown_channel"`の場合は`{safe_title}.txt`）というファイル名を構成している。いずれの呼び出しもキーワード引数`max_length`を指定しておらず、既定値200文字が使用される。 | 直接ソース確認: `DDD/batch_download_discord.py:326-327, 487`, `DDD/extract_youtube_urls.py:267-276, 295-296` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -112,9 +112,15 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 本スクリプトの実行契機(定期実行の間隔・トリガー) | crontabやsystemdタイマー等の設定が本ファイルには含まれていないため。 | crontab設定ファイルまたはsystemdユニットファイル(ファイル名不明) |
-| `silent.mp3`の実体(長さ・フォーマット・生成方法) | 音源ファイル自体は本ファイルの解析範囲外であるため。 | `/mnt/nas/home_system/assets/sounds/silent.mp3` |
-| `keep_alive_anker.sh`との使い分け基準 | 両スクリプトが同一ログを共有しつつ異なる方式でキープアライブを行っているが、どちらがどのデバイス/環境で使われるかは本ファイルからは判断できないため。 | 呼び出し元のcrontab/systemd設定、または`keep_alive_anker.sh` |
+| 本スクリプトの実行契機(定期実行の間隔・トリガー) | crontabやsystemdタイマー等の設定が本ファイルには含まれていないため。（リポジトリ内を`crontab`/`*.service`/`*.timer`等で検索したが該当ファイルは存在せず、解消不可） | crontab設定ファイルまたはsystemdユニットファイル(ファイル名不明) |
+| `silent.mp3`の実体(長さ・フォーマット・生成方法) | 音源ファイル自体は本ファイルの解析範囲外であるため。（リポジトリ内を検索したが実体ファイルは存在せず、解消不可。`.gitignore`64行目の`*.mp3`規則により追跡対象外と判明） | `/mnt/nas/home_system/assets/sounds/silent.mp3` |
+| `keep_alive_anker.sh`との使い分け基準 | 両スクリプトが同一ログを共有しつつ異なる方式でキープアライブを行っているが、どちらがどのデバイス/環境で使われるかは本ファイルからは判断できないため。（`keep_alive_anker.sh`自体は直接確認できたが、呼び出し元のcrontab/systemd設定がリポジトリ内に存在しないため、使い分け基準そのものは解消不可） | 呼び出し元のcrontab/systemd設定、または`keep_alive_anker.sh` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `keep_alive_anker.sh`との使い分け基準 | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認した。本ファイル(`keep_alive_speaker.sh`)は`/usr/bin/mpg123 -o pulse "$SOUND_FILE"`(20行目)で無音に近い音源ファイル`silent.mp3`をPulseAudio出力で再生するだけの単純な方式であるのに対し、`keep_alive_anker.sh`は(1)`pactl list sinks short`でAnker SoundCoreのMACアドレス(`F4:4E:FC:B6:65:D4`、10行目)がシンク一覧に含まれるかを先に確認し(24〜28行目)、未接続なら`connect_speaker.sh`を呼び出して再接続を試みた上で(35〜46行目)、(2)接続確認後に`sox`で15Hzの可聴域外の正弦波を音量0.01で2秒間生成し`paplay`にパイプで渡す(59〜61行目)という、接続監視・自動再接続・無音信号生成を組み合わせたより高機能な方式である点が直接確認できた。ただし両スクリプトのうちどちらが実際にどのデバイス/環境向けのcrontab等に登録されているかは、該当するcrontab/systemd設定がリポジトリ内に存在しないため確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:8-61`(参考: `MY_HOME_SYSTEM/tools/keep_alive_speaker.sh:8,20`) |
 
 ## 10. 自己検証結果
 

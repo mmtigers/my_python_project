@@ -289,8 +289,16 @@ graph TD
 | --- | --- | --- |
 | `analysis_service`各関数の戻り値スキーマ・DB/取得元 | `services.analysis_service`の実装が提供されていないため。 | `services/analysis_service.py` |
 | `backup_service.perform_backup`の戻り値の詳細（`res`の意味等） | `services.backup_service`の実装が提供されていないため。 | `services/backup_service.py` |
-| `config`が`render_system`内でインポートされているにも関わらず未使用である理由（将来使用予定/削除漏れ等） | 本ファイル単体では設計意図が判断できないため。 | `config.py` およびGitの変更履歴 |
-| `home_system` systemdサービスの定義内容 | 再起動対象サービスの構成が本ファイルからは不明。 | サーバー環境のsystemdユニットファイル |
+| `config`が`render_system`内でインポートされているにも関わらず未使用である理由（将来使用予定/削除漏れ等） | 本ファイル単体では設計意図が判断できないため。（`git log -S`で調査したが、初回コミット以来変更履歴がなく、意図を示すコミットメッセージは確認できず解消不可） | `config.py` およびGitの変更履歴 |
+| `home_system` systemdサービスの定義内容 | 再起動対象サービスの構成が本ファイルからは不明。（リポジトリ内を`*.service`/`systemd`等で検索したが該当ユニットファイルは存在せず、解消不可） | サーバー環境のsystemdユニットファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `analysis_service`各関数の戻り値スキーマ・DB/取得元 | `MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`load_ranking_dates(limit=3) -> List[str]`(349行目)は`app_rankings`テーブルの`DISTINCT date`列を降順取得。`load_ranking_data(date_str, ranking_type) -> pd.DataFrame`(363行目)は`app_rankings`テーブルから`rank, title, app_id`列を`date`/`ranking_type`条件で取得。`get_ngrok_url() -> Dict[str, str]`(383行目)は`http://127.0.0.1:4040/api/tunnels`にHTTP GETしポート8000/8501宛のトンネルURLを`{"server":..., "dashboard":...}`として返す。`get_disk_usage() -> Optional[Dict[str, float]]`(401行目)は`shutil.disk_usage("/")`から`total_gb, used_gb, free_gb, percent`を算出。`get_memory_usage() -> Optional[Dict[str, float]]`(415行目)は`free -m`コマンドの出力をパースし`total_mb, used_mb, available_mb, percent`を返す。`load_nas_status() -> Optional[pd.Series]`(133行目)は`config.SQLITE_TABLE_NAS`(既定`"nas_records"`)テーブルの最新1件を`timestamp`降順で取得する。`get_system_logs(lines=50, priority=None, target_date=None) -> str`(436行目)は`journalctl -u home_system.service --no-pager`を実行しログ文字列を返す。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:133-148,349-448` |
+| `backup_service.perform_backup`の戻り値の詳細（`res`の意味等） | `MY_HOME_SYSTEM/services/backup_service.py`17〜71行目を直接確認した。`perform_backup() -> Tuple[bool, str, float]`は`(成功フラグ, メッセージ, バックアップサイズMB)`のタプルを返す（19〜25行目のdocstringにも明記）。成功時は66行目で`return True, "バックアップ完了", local_size_mb`を返し、`log_tab.py`側の`success, res, size = backup_service.perform_backup()`における`res`は成功/失敗いずれの場合もこのメッセージ文字列(成功時`"バックアップ完了"`、失敗時は70〜71行目付近の`error_msg`相当の文字列)であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/backup_service.py:17-71` |
+| `config`が`render_system`内でインポートされているにも関わらず未使用である理由（将来使用予定/削除漏れ等） | `MY_HOME_SYSTEM/views/dashboard/log_tab.py`125〜131行目を直接確認した。125行目で`import config`しているが、以降130行目までの関数本体(`backup_service`のインポート、`st.subheader`、`st.button`、`backup_service.perform_backup()`呼び出し)では`config`モジュールへの参照は一切なく、未使用インポートであることを直接確認した。`git log -S"import config" -- MY_HOME_SYSTEM/views/dashboard/log_tab.py`で調査したところ、このインポート行はリポジトリの初回コミット（コミットメッセージ「一旦コミットします」）時点から存在し、以後変更されておらず、削除漏れか将来使用予定かを示す追加のコミットメッセージは見つからなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/log_tab.py:125-131`, `git log -S`によるコミット履歴確認 |
 
 ## 10. 自己検証結果
 

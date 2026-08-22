@@ -15,7 +15,7 @@
 ## 2. ファイルの概要
 
 * 現在のCrontab設定を解析し、分かりやすい日本語レポートとしてLINEおよびDiscordに送信する。
-* 根拠: クラス `CronReporter` のドキュメントストリング (行番号取得不可 / 抜粋: "現在のCrontab設定を解析し、分かりやすい日本語レポー...")
+* 根拠: クラス `CronReporter` のドキュメントストリング (行番号: 18〜21 / 抜粋: "現在のCrontab設定を解析し、分かりやすい日本語レポー...")
 
 
 
@@ -25,33 +25,33 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | パス操作や環境変数の取得 | `import os` (行番号取得不可 / 抜粋: "import os") |
-| `subprocess` | 標準ライブラリ | `crontab -l`コマンドの実行 | `import subprocess` (行番号取得不可 / 抜粋: "import subprocess") |
-| `logging` | 標準ライブラリ | ログ出力 | `import logging` (行番号取得不可 / 抜粋: "import logging") |
-| `requests` | 外部ライブラリ | DiscordおよびLINEへのHTTPリクエスト送信 | `import requests` (行番号取得不可 / 抜粋: "import requests") |
-| `re` | 標準ライブラリ | 正規表現によるスクリプト名抽出 | `import re` (行番号取得不可 / 抜粋: "import re") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得 | `from datetime import datetime` (行番号取得不可 / 抜粋: "from datetime import datetime") |
-| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み | `from dotenv import load_dotenv` (行番号取得不可 / 抜粋: "from dotenv import load_dotenv") |
+| `os` | 標準ライブラリ | パス操作や環境変数の取得 | `import os` (行番号: 1 / 抜粋: "import os") |
+| `subprocess` | 標準ライブラリ | `crontab -l`コマンドの実行 | `import subprocess` (行番号: 2 / 抜粋: "import subprocess") |
+| `logging` | 標準ライブラリ | ログ出力 | `import logging` (行番号: 3 / 抜粋: "import logging") |
+| `requests` | 外部ライブラリ | DiscordおよびLINEへのHTTPリクエスト送信 | `import requests` (行番号: 4 / 抜粋: "import requests") |
+| `re` | 標準ライブラリ | 正規表現によるスクリプト名抽出 | `import re` (行番号: 5 / 抜粋: "import re") |
+| `datetime` | 標準ライブラリ | 現在時刻の取得 | `from datetime import datetime` (行番号: 6 / 抜粋: "from datetime import datetime") |
+| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み | `from dotenv import load_dotenv` (行番号: 7 / 抜粋: "from dotenv import load_dotenv") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `crontabコマンド` | OSに設定されたCronジョブを管理するコマンドであり、出力フォーマットや実行可否は実行環境(OS)に依存するため | `subprocess.run(['crontab', '-l']...` (行番号取得不可 / 抜粋: "subprocess.run(['crontab', '-l'") |
-| `Discord Webhook API` | 外部APIであり、通信先の仕様やレスポンス内容は本コード外で定義されているため | `requests.post(self.discord_webhook...)` (行番号取得不可 / 抜粋: "res = requests.post(") |
-| `LINE Notify API` | 外部APIであり、通信先の仕様やレスポンス内容は本コード外で定義されているため | `requests.post(url, headers...)` (行番号取得不可 / 抜粋: "res = requests.post(") |
-| `.envファイル` | 環境変数が定義されたファイルであり、ファイルの実体や内容は本コードに含まれていないため | `dotenv_path = os.path.join(...)` (行番号取得不可 / 抜粋: "dotenv_path = os.path.join(sel") |
+| `crontabコマンド` | OSに設定されたCronジョブを管理するコマンドであり、出力フォーマットや実行可否は実行環境(OS)に依存するため | `subprocess.run(['crontab', '-l']...` (行番号: 46 / 抜粋: "subprocess.run(['crontab', '-l'") |
+| `Discord Webhook API` | 外部APIであり、通信先の仕様やレスポンス内容は本コード外で定義されているため | `requests.post(self.discord_webhook...)` (行番号: 186〜190 / 抜粋: "res = requests.post(") |
+| `LINE Notify API` | 外部APIであり、通信先の仕様やレスポンス内容は本コード外で定義されているため | `requests.post(url, headers...)` (行番号: 203 / 抜粋: "res = requests.post(") |
+| `.envファイル` | 環境変数が定義されたファイルであり、ファイルの実体や内容は本コードに含まれていないため | `dotenv_path = os.path.join(...)` (行番号: 31 / 抜粋: "dotenv_path = os.path.join(sel") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `CronReporter`
 
 * **役割**: 現在のCrontab設定を解析し、分かりやすい日本語レポートとしてLINEおよびDiscordに送信するクラス
-* 根拠: クラス定義ドキュメント (行番号取得不可 / 抜粋: "現在のCrontab設定を解析し、分かりやすい日本語レポー...")
+* 根拠: クラス定義ドキュメント (行番号: 18〜21 / 抜粋: "現在のCrontab設定を解析し、分かりやすい日本語レポー...")
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: クラス定義 (行番号取得不可 / 抜粋: "class CronReporter:")
+* 根拠: クラス定義 (行番号: 17 / 抜粋: "class CronReporter:")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -70,19 +70,19 @@
 ### `__init__`
 
 * **役割**: インスタンスの初期化、ベースディレクトリの設定と環境変数のロードを行う
-* 根拠: `__init__` 定義 (行番号取得不可 / 抜粋: "self.base_dir = os.path.dirnam...")
+* 根拠: `__init__` 定義 (行番号: 26 / 抜粋: "self.base_dir = os.path.dirnam...")
 
 
 * **引数/リクエスト**: なし (selfのみ)
-* 根拠: `__init__` 定義 (行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: `__init__` 定義 (行番号: 25 / 抜粋: "def **init**(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `__init__` 定義 (行番号取得不可 / 抜粋: "def **init**(self):")
+* 根拠: `__init__` 定義 (行番号: 25 / 抜粋: "def **init**(self):")
 
 
 * **副作用**: `self.base_dir` の設定および `_load_environment()` の呼び出しによるインスタンス状態の変更
-* 根拠: プロパティ代入 (行番号取得不可 / 抜粋: "self.base_dir = os.path.dirnam...")
+* 根拠: プロパティ代入 (行番号: 26 / 抜粋: "self.base_dir = os.path.dirnam...")
 
 
 * **エラーハンドリング**: なし
@@ -93,61 +93,61 @@
 ### `_load_environment`
 
 * **役割**: `.env`ファイルをロードし、通知先設定（LINE、Discord）をインスタンス変数に設定する
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "環境変数をロード")
+* 根拠: 関数定義ドキュメント (行番号: 30 / 抜粋: "環境変数をロード")
 
 
 * **引数/リクエスト**: なし (selfのみ)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _load_environment(self):")
+* 根拠: 関数定義 (行番号: 29 / 抜粋: "def _load_environment(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _load_environment(self):")
+* 根拠: 関数定義 (行番号: 29 / 抜粋: "def _load_environment(self):")
 
 
 * **副作用**: `.env` ファイルの読み込み、`self.line_token`、`self.discord_webhook` への値設定。通知先が未設定の場合に警告ログを出力。
-* 根拠: `load_dotenv` 実行 (行番号取得不可 / 抜粋: "load_dotenv(dotenv_path)")
+* 根拠: `load_dotenv` 実行 (行番号: 32 / 抜粋: "load_dotenv(dotenv_path)")
 
 
 * **エラーハンドリング**: なし (設定漏れ時に警告ログ出力のみ)
-* 根拠: `logger.warning` 実行 (行番号取得不可 / 抜粋: "logger.warning("⚠️ 通知先(LINE_ACC")
+* 根拠: `logger.warning` 実行 (行番号: 40 / 抜粋: "logger.warning("⚠️ 通知先(LINE_ACC")
 
 
 
 ### `_get_crontab_raw`
 
 * **役割**: `crontab -l` の結果を行リストで取得する
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "crontab -l の結果を行リストで取得")
+* 根拠: 関数定義ドキュメント (行番号: 43 / 抜粋: "crontab -l の結果を行リストで取得")
 
 
 * **引数/リクエスト**: なし (selfのみ)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _get_crontab_raw(self) -> ")
+* 根拠: 関数定義 (行番号: 42 / 抜粋: "def _get_crontab_raw(self) -> ")
 
 
 * **戻り値/レスポンス**: `list` 型 (文字列のリスト)
-* 根拠: 戻り値の型ヒントと `return` (行番号取得不可 / 抜粋: "-> list:")
+* 根拠: 戻り値の型ヒントと `return` (行番号: 42 / 抜粋: "-> list:")
 
 
 * **副作用**: OSコマンド(`crontab -l`)の実行。エラー時のログ出力とDiscordへのエラー送信。
-* 根拠: `subprocess.run` 実行 (行番号取得不可 / 抜粋: "subprocess.run(['crontab', '-l'")
+* 根拠: `subprocess.run` 実行 (行番号: 46 / 抜粋: "subprocess.run(['crontab', '-l'")
 
 
 * **エラーハンドリング**: `subprocess.CalledProcessError` を捕捉し空リストを返す。他の例外 (`Exception`) を捕捉しエラーログ出力および `_send_error_log` を呼び出し空リストを返す。
-* 根拠: `except` ブロック (行番号取得不可 / 抜粋: "except subprocess.CalledProces")
+* 根拠: `except` ブロック (行番号: 48 / 抜粋: "except subprocess.CalledProces")
 
 
 
 ### `_human_readable_time`
 
 * **役割**: Cronの時間を自然な日本語に変換する
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "Cronの時間を自然な日本語に変換する")
+* 根拠: 関数定義ドキュメント (行番号: 57 / 抜粋: "Cronの時間を自然な日本語に変換する")
 
 
 * **引数/リクエスト**: `min_str`, `hour_str`, `day`, `month`, `wday` (すべてCronの書式文字列)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _human_readable_time(self,")
+* 根拠: 関数定義 (行番号: 56 / 抜粋: "def _human_readable_time(self,")
 
 
 * **戻り値/レスポンス**: 文字列 (日本語に変換されたスケジュールの文字列)
-* 根拠: `return` (行番号取得不可 / 抜粋: "return f"⏱️ {interval}分ごと"")
+* 根拠: `return` (行番号: 62 / 抜粋: "return f"⏱️ {interval}分ごと"")
 
 
 * **副作用**: なし
@@ -155,41 +155,41 @@
 
 
 * **エラーハンドリング**: `Exception` を捕捉し、解析不能な場合は引数をそのまま結合した文字列を返す。
-* 根拠: `except Exception:` ブロック (行番号取得不可 / 抜粋: "except Exception:")
+* 根拠: `except Exception:` ブロック (行番号: 90 / 抜粋: "except Exception:")
 
 
 
 ### `_analyze_jobs`
 
 * **役割**: 設定行を解析して構造化データを返す
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "設定行を解析して構造化データを返す")
+* 根拠: 関数定義ドキュメント (行番号: 95 / 抜粋: "設定行を解析して構造化データを返す")
 
 
 * **引数/リクエスト**: なし (selfのみ)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _analyze_jobs(self):")
+* 根拠: 関数定義 (行番号: 94 / 抜粋: "def _analyze_jobs(self):")
 
 
 * **戻り値/レスポンス**: 辞書のリスト (`schedule`, `script`, `raw_cmd` キーを含む)
-* 根拠: `return parsed_jobs` (行番号取得不可 / 抜粋: "return parsed_jobs")
+* 根拠: `return parsed_jobs` (行番号: 127 / 抜粋: "return parsed_jobs")
 
 
 * **副作用**: `_get_crontab_raw` の呼び出し
-* 根拠: 関数呼び出し (行番号取得不可 / 抜粋: "lines = self._get_crontab_raw()")
+* 根拠: 関数呼び出し (行番号: 96 / 抜粋: "lines = self._get_crontab_raw()")
 
 
 * **エラーハンドリング**: なし (条件を満たさない行は `continue` でスキップ)
-* 根拠: `if` 条件 (行番号取得不可 / 抜粋: "continue")
+* 根拠: `if` 条件 (行番号: 103, 107 / 抜粋: "continue")
 
 
 
 ### `report`
 
 * **役割**: レポート作成と送信のメイン処理
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "レポート作成と送信のメイン処理")
+* 根拠: 関数定義ドキュメント (行番号: 130 / 抜粋: "レポート作成と送信のメイン処理")
 
 
 * **引数/リクエスト**: なし (selfのみ)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def report(self):")
+* 根拠: 関数定義 (行番号: 129 / 抜粋: "def report(self):")
 
 
 * **戻り値/レスポンス**: なし
@@ -197,22 +197,22 @@
 
 
 * **副作用**: `_analyze_jobs`呼び出し、Discordへのメッセージ送信 (`_send_discord`)、ログ出力。
-* 根拠: `self._send_discord` 呼び出し (行番号取得不可 / 抜粋: "self._send_discord(discord_msg")
+* 根拠: `self._send_discord` 呼び出し (行番号: 172 / 抜粋: "self._send_discord(discord_msg")
 
 
 * **エラーハンドリング**: `Exception` を捕捉し、エラーログ出力および `_send_error_log` を呼び出す。
-* 根拠: `except` ブロック (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `except` ブロック (行番号: 177 / 抜粋: "except Exception as e:")
 
 
 
 ### `_send_discord`
 
 * **役割**: Discordへの送信処理
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "Discord送信")
+* 根拠: 関数定義ドキュメント (行番号: 182 / 抜粋: "Discord送信")
 
 
 * **引数/リクエスト**: `message` (送信する文字列)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _send_discord(self, messag")
+* 根拠: 関数定義 (行番号: 181 / 抜粋: "def _send_discord(self, messag")
 
 
 * **戻り値/レスポンス**: なし
@@ -220,22 +220,22 @@
 
 
 * **副作用**: 外部APIへのHTTP POSTリクエスト送信。エラー時のログ出力。
-* 根拠: `requests.post` 呼び出し (行番号取得不可 / 抜粋: "res = requests.post(")
+* 根拠: `requests.post` 呼び出し (行番号: 186 / 抜粋: "res = requests.post(")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200, 204以外の場合にエラーログ出力。`Exception` を捕捉し通信エラーログを出力。
-* 根拠: `except` ブロック (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `except` ブロック (行番号: 193 / 抜粋: "except Exception as e:")
 
 
 
 ### `_send_line`
 
 * **役割**: LINEへの送信処理
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "LINE送信")
+* 根拠: 関数定義ドキュメント (行番号: 197 / 抜粋: "LINE送信")
 
 
 * **引数/リクエスト**: `message` (送信する文字列)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _send_line(self, message):")
+* 根拠: 関数定義 (行番号: 196 / 抜粋: "def _send_line(self, message):")
 
 
 * **戻り値/レスポンス**: なし
@@ -243,22 +243,22 @@
 
 
 * **副作用**: 外部APIへのHTTP POSTリクエスト送信。エラー時のログ出力。
-* 根拠: `requests.post` 呼び出し (行番号取得不可 / 抜粋: "res = requests.post(")
+* 根拠: `requests.post` 呼び出し (行番号: 203 / 抜粋: "res = requests.post(")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200以外の場合にエラーログ出力。`Exception` を捕捉し通信エラーログを出力。
-* 根拠: `except` ブロック (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: `except` ブロック (行番号: 211 / 抜粋: "except Exception as e:")
 
 
 
 ### `_send_error_log`
 
 * **役割**: エラー発生時の緊急通知（Discordのみ）を送信する
-* 根拠: 関数定義ドキュメント (行番号取得不可 / 抜粋: "エラー発生時の緊急通知（Discordのみ）")
+* 根拠: 関数定義ドキュメント (行番号: 215 / 抜粋: "エラー発生時の緊急通知（Discordのみ）")
 
 
 * **引数/リクエスト**: `error_message` (送信するエラー文字列)
-* 根拠: 関数定義 (行番号取得不可 / 抜粋: "def _send_error_log(self, erro")
+* 根拠: 関数定義 (行番号: 214 / 抜粋: "def _send_error_log(self, erro")
 
 
 * **戻り値/レスポンス**: なし
@@ -266,11 +266,11 @@
 
 
 * **副作用**: 外部APIへのHTTP POSTリクエスト送信。
-* 根拠: `requests.post` 呼び出し (行番号取得不可 / 抜粋: "requests.post(self.discord_web")
+* 根拠: `requests.post` 呼び出し (行番号: 220 / 抜粋: "requests.post(self.discord_web")
 
 
 * **エラーハンドリング**: `Exception` を捕捉するが、無視(`pass`)する。
-* 根拠: `except` ブロック (行番号取得不可 / 抜粋: "except Exception:\n            p")
+* 根拠: `except` ブロック (行番号: 221〜222 / 抜粋: "except Exception:\n            p")
 
 
 
@@ -374,8 +374,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `.env` | 環境変数の設定値（LINEトークン、Discord Webhook URL）を確認し、実際の通知先を特定するため | `dotenv_path = os.path.join(self.base_dir, '.env')` (行番号取得不可 / 抜粋: "dotenv_path = os.path.join(sel") |
-| 中 | Crontabに登録されている各`.py`スクリプト | 本システムが監視対象としている自動タスクの実体および動作内容を把握するため | `match = re.search(r'([\w_]+\.py)', command_full)` (行番号取得不可 / 抜粋: "match = re.search(r'([\w_]+.p") |
+| 高 | `.env` | 環境変数の設定値（LINEトークン、Discord Webhook URL）を確認し、実際の通知先を特定するため | `dotenv_path = os.path.join(self.base_dir, '.env')` (行番号: 31 / 抜粋: "dotenv_path = os.path.join(sel") |
+| 中 | Crontabに登録されている各`.py`スクリプト | 本システムが監視対象としている自動タスクの実体および動作内容を把握するため | `match = re.search(r'([\w_]+\.py)', command_full)` (行番号: 117 / 抜粋: "match = re.search(r'([\w_]+.p") |
 
 ## 8. 保守上の注意点
 
@@ -388,9 +388,9 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 環境変数の具体的な値 | `.env`から読み込んでいるが、本コード内には値が定義されていないため | `.env` |
+| 環境変数の具体的な値 | `.env`から読み込んでいるが、本コード内には値が定義されていないため（リポジトリ内を検索したが実際の`.env`は存在せず、`.gitignore`で除外されている。`MY_HOME_SYSTEM/.env.example`は存在するが`LINE_CHANNEL_ACCESS_TOKEN`・`DISCORD_WEBHOOK_REPORT`の記載はなく、解消不可） | `.env` |
 | Crontabに設定されている実行コマンドの全容 | コマンド実行結果を動的に取得するため、実行時まで内容が確定しないため | 実行環境のcrontab設定 |
-| 抽出される個別のPythonスクリプトの実装内容 | 正規表現でファイル名を抽出しているが、そのスクリプトファイル群のコードが提供されていないため | Crontabに登録された各 `.py` ファイル |
+| 抽出される個別のPythonスクリプトの実装内容 | 正規表現でファイル名を抽出しているが、そのスクリプトファイル群のコードが提供されていないため（どの`.py`が実際にcrontabへ登録されているか自体が上記の理由により不明であり、リポジトリ内を検索しても実行環境のcrontab設定に相当するファイルは見つからず、解消不可） | Crontabに登録された各 `.py` ファイル |
 
 ## 相互参照による補足情報
 

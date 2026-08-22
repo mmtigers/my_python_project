@@ -241,8 +241,16 @@ graph TD
 | --- | --- | --- |
 | `config.BICYCLE_PARKING_URL` / `config.SQLITE_TABLE_BICYCLE`の実際の設定値 | `config`モジュールの実装が本ファイルに含まれていないため。 | `config.py` |
 | `save_log_generic`の内部実装（DBスキーマ含む） | `core.database`モジュールの実装が本ファイルに含まれていないため。 | `core/database.py` |
-| 監視対象Webサイトの実際のHTML構造 | 外部サイトの内容は本ファイルからは確認できないため。 | 対象Webサイトの実際のレスポンス（動的にしか取得不可） |
+| 監視対象Webサイトの実際のHTML構造 | 外部サイトの内容は本ファイルからは確認できないため。（リポジトリ内を検索したが、対象Webサイト`https://www.midi-kintetsu.com/...`のレスポンス自体はリポジトリ外の外部リソースであり、解消不可） | 対象Webサイトの実際のレスポンス（動的にしか取得不可） |
 | `monitors/old/`ディレクトリの位置づけ（現行版との関係） | ディレクトリ名から旧版の可能性が示唆されるが、本ファイル単体では現行版の有無や移行状況を判断できないため。 | `monitors/`配下の他ファイル一覧 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.BICYCLE_PARKING_URL` / `config.SQLITE_TABLE_BICYCLE`の実際の設定値 | `config.py`を直接確認した。250行目で`SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"`、366行目で`BICYCLE_PARKING_URL: str = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php"`という固定値(ハードコード)で定義されていることを確認した。本ファイル38行目の`getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_logs")`のフォールバック値`"bicycle_parking_logs"`は実際には使われず、常に`config.py`で定義済みの`"bicycle_parking_records"`が使用される。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:250, 366` |
+| `save_log_generic`の内部実装（DBスキーマ含む） | `core/database.py`を直接確認した。`save_log_generic(table, columns_list, values_list)`(67〜79行目)は`get_db_cursor(commit=True)`を使い、`INSERT INTO {table} ({columns}) VALUES ({placeholders})`という動的SQLを構築・実行するだけの汎用関数で、成功時`True`・例外発生時はログを出力して`False`を返す(戻り値`bool`)。テーブル自体のスキーマ定義はこの関数には含まれないため`init_unified_db.py`も確認したところ、327〜334行目の`CREATE TABLE IF NOT EXISTS {config.SQLITE_TABLE_BICYCLE} (id INTEGER PRIMARY KEY AUTOINCREMENT, area_name TEXT, status_text TEXT, waiting_count INTEGER, timestamp DATETIME NOT NULL)`という定義を確認した。さらに`current_schema.sql`132〜138行目にも同一構造の`CREATE TABLE bicycle_parking_records`が記録されており、本ファイル133行目の`cols = ["timestamp", "area_name", "status_text", "waiting_count"]`という保存時のカラム順序と実スキーマが一致することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:12-13, 67-79`, `MY_HOME_SYSTEM/init_unified_db.py:327-334`, `MY_HOME_SYSTEM/current_schema.sql:132-138` |
+| `monitors/old/`ディレクトリの位置づけ（現行版との関係） | `monitors/`ディレクトリを直接確認したところ、`bicycle_parking_monitor.py`という同名ファイルは`monitors/old/`配下にのみ存在し、`monitors/`直下（現行版が置かれる場所）には存在しなかった(`monitors/`直下の一覧: `camera_monitor.py`, `daily_timelapse_job.py`, `memory_monitor.py`, `nas_monitor.py`, `nature_remo_monitor.py`, `scheduled_timelapse.py`, `server_watchdog.py`, `smart_timelapse_generator.py`, `switchbot_power_monitor.py`, `timelapse_generator.py`, `timelapse_runner.py`, `tv_lock_monitor.py`のみ)。さらに起動スクリプト`start_all.sh`および`scheduler_boot.py`を直接確認したが、いずれも`bicycle_parking_monitor.py`を起動・参照する記述は見つからなかった。以上より、少なくとも現在の起動パイプライン(`start_all.sh`→`unified_server.py`/`scheduler_boot.py`)からは呼び出されておらず、後継の非`old`版も存在しないことを確認した。ただし、他の手段(手動実行やcron等)で使われている可能性までは本調査の範囲では排除できない。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/`ディレクトリ一覧, `MY_HOME_SYSTEM/monitors/old/`ディレクトリ一覧, `MY_HOME_SYSTEM/start_all.sh`（全75行）, `MY_HOME_SYSTEM/scheduler_boot.py`（`grep`による該当箇所なしを確認） |
 
 ## 10. 自己検証結果
 
