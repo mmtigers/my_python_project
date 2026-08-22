@@ -91,6 +91,9 @@ def get_traffic_status() -> Tuple[str, str]:
         return "⛔ 運休発生", "theme-red"
     elif line_g["is_delay"] or line_a["is_delay"]:
         return "⚠️ 遅延あり", "theme-yellow"
+    elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):
+        # Low修正: 取得不可を「平常運転」と偽らず区別する(遅延見逃し防止)
+        return "⚪ 情報取得不可", "theme-gray"
     else:
         return "🟢 平常運転", "theme-green"
 
