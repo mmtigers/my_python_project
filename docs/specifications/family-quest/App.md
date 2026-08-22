@@ -462,22 +462,27 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **確認モーダル失敗時に状態がクリアされない**: `executeConfirm`は`confirmMode`が`'purchase'`/`'reject'`いずれの場合でも、共通の`if (!res.success)`ブロックでエラーメッセージを設定するのみで`return`し、`setConfirmMode(null)`等のクリア処理を実行しない。これはコメント（角度⑨）により、エラーを閉じたあと確認モーダルを再度開き直すことなく「はい」で再試行できるようにするための意図的な設計である。
-* 根拠: (283〜290行目 / 抜粋: "if (!res.success) {\n      const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n      setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n      play('cancel');\n      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n      return;\n    }")
-* **成功通知はトースト、失敗通知はモーダルに統一**: レベルアップ・メダル獲得・申請完了・購入完了・一括承認成功はすべて`useToast`の`showToast`で通知され、`messageData`/`MessageModal`はエラー専用になっている。新しい成功系フィードバックを追加する際はトースト経由に統一する必要がある。
-* 根拠: 164〜169行目のコメント、および`showToast`呼び出し箇所全体 (168, 200, 203, 271, 327行目)
-* **ワンタップ化と確認モーダルの使い分け**: 要件9により、クエストの完了/取消は`runQuestAction`によるワンタップ即時実行に変更され、確認ダイアログを挟まなくなった。一方、ゴールドを消費する「購入」と親向けの「却下」は誤操作の影響が大きいため、引き続き`ConfirmModal`（`confirmMode`が`'purchase'`/`'reject'`のみ）を経由する。
-* 根拠: (53〜54行目 / 抜粋: "// ★要件9: クエストの完了/取り消しは確認ダイアログを挟まないワンタップ操作に変更したため、\n// ここで確認を挟むのはゴールドを消費する「購入」と、親向けの「却下」のみ(誤操作の影響が大きいため)。")
-* **メダル獲得演出のバグ修正**: 以前はサーバー側で計算されていた`earnedMedals`をフロントが一切参照していなかったため無反応だった。現在は`runQuestAction`内で`(res.earnedMedals ?? 0) > 0`を判定し、`medal`音とトーストを表示する（要件8）。
-* 根拠: (201〜204行目 / 抜粋: "} else if ((res.earnedMedals ?? 0) > 0) {\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", ...")
+* **確認モーダル失敗時に状態がクリアされない（purchase/rejectのみ）**: `executeConfirm`は`confirmMode`が`'purchase'`/`'reject'`いずれの場合でも、共通の`if (!res.success)`ブロックでエラーメッセージを設定するのみで`return`し、`setConfirmMode(null)`等のクリア処理を実行しない。これはコメント（角度⑨）により、エラーを閉じたあと確認モーダルを再度開き直すことなく「はい」で再試行できるようにするための意図的な設計である。一方`'complete'`の場合は確認モーダルの状態を`runQuestAction`呼び出し前に既にクリアしているため、この「モーダルを残す」再試行パターンの対象外である。
+* 根拠: (314〜321行目 / 抜粋: "if (!res.success) {\n      const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n      setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n      play('cancel');\n      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n      return;\n    }")
+* **成功通知はトースト、失敗通知はモーダルに統一**: レベルアップ・メダル獲得（完了/承認/一括承認いずれの経路でも）・申請完了・購入完了・一括承認成功はすべて`useToast`の`showToast`で通知され、`messageData`/`MessageModal`はエラー専用になっている。新しい成功系フィードバックを追加する際はトースト経由に統一する必要がある。
+* 根拠: 170〜175行目のコメント、および`showToast`呼び出し箇所全体 (174, 214, 219, 302, 338, 370, 374行目)
+* **クエスト完了の確認ダイアログ復活とワンタップ取消の使い分け**: クエストの完了はかつて要件9によりワンタップ即時実行だったが、実機で子どもが操作する様子を見ると誤操作（意図しないクリア）につながりやすかったため、`ConfirmModal`（`confirmMode === 'complete'`）による確認ダイアログを再び挟むように変更された。取消は`QuestList`側の長押し（`useLongPress`）によってのみ発火するため、引き続き確認なしのワンタップ（`runQuestAction`）のままである。ゴールドを消費する「購入」と親向けの「却下」も引き続き`ConfirmModal`（`confirmMode`が`'purchase'`/`'reject'`）を経由する。
+* 根拠: (53〜54行目 / 抜粋: "// ★実機検証で子どもの誤操作が多かったため、クエスト完了(クリア)には確認ダイアログを復活させた。\n// 取り消しは長押しでのみ発火する(QuestList側のuseLongPress)ため、引き続き確認なしのワンタップとする。")
+* **メダル獲得演出のバグ修正（完了・承認・一括承認の3経路）**: 以前はサーバー側で計算されていた`earnedMedals`をフロントが一切参照していなかったため無反応だった。現在は`runQuestAction`内（クエスト完了時、215〜220行目）に加え、`handleApprove`（個別承認、334〜339行目、バグ修正M-6-1）と`handleApproveAll`（一括承認、367〜371行目）でも`(res.earnedMedals ?? 0) > 0`（一括承認は合計値`totalEarnedMedals`）を判定し、`medal`音とトーストを表示する。以前は承認経由のメダル獲得演出が一切反映されていなかった。
+* 根拠: (215〜220行目 / 抜粋: "} else if ((res.earnedMedals ?? 0) > 0) {\n          // ★バグ修正(要件8): サーバーは正しくメダルを付与していたが、以前はフロントが\n          // res.earnedMedals を一切参照しておらず無反応だった。leveledUpと同様に扱う。\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", ...")
+* 根拠: `handleApprove`のバグ修正コメント (334〜335行目 / 抜粋: "// ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と\n      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。")
+* **`pendingQuestsRef`によるクロージャバグの修正**: `handleApproveAll`は以前、失敗時点の古い`pendingQuests`をクロージャで掴んだ`onRetry`（自身の再呼び出し）を`messageData`に設定していたため、再試行すると既に承認済みの項目まで再承認しようとして400エラーが続く不具合があった(M-6-2)。修正後は`pendingQuestsRef`（`useRef`+`useEffect`で常に最新の`pendingQuests`に同期）の`current`値を対象にすることで解消されている。新たに`pendingQuests`を参照するハンドラーを追加する際、`onRetry`等でクロージャとして再実行されうる場合は同様に`pendingQuestsRef`経由の参照を検討する必要がある。
+* 根拠: (188〜194行目 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
 * **一括承認の逐次実行**: `handleApproveAll`は`for...of`ループで`approveQuest`を1件ずつ`await`しており、並列実行（`Promise.all`等）ではない。対象件数が多い場合の実行時間はAPIレイテンシに比例する。
-* 根拠: (319〜322行目 / 抜粋: "for (const history of targets) {\n      const res = await approveQuest(getRepresentativeParent(users), history);\n      if (res.success) successCount++;\n    }")
+* 根拠: (359〜365行目 / 抜粋: "for (const history of targets) {\n      const res = await approveQuest(getRepresentativeParent(users), history);\n      if (res.success) {\n        successCount++;\n        totalEarnedMedals += res.earnedMedals ?? 0;\n      }\n    }")
+* **`cost_gold`欠落時のフォールバック**: 購入確認モーダルの金額表示は以前`Reward.cost_gold`のみを参照しており、`masterData.js`のフォールバック報酬（`cost_gold`を持たず`cost`のみ）が選択されると「undefinedG」と表示されるLowバグがあった。他の参照箇所（`RewardList.tsx`）と同様に`cost_gold ?? cost`のフォールバックで修正済み。
+* 根拠: (100〜105行目 / 抜粋: "// Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず\n        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。\n        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };")
 * **PARENT判定はUI上の配慮に過ぎない**: `isParentUser`（`quest_users.role`基準）はクライアント側の表示制御のみに使われ、セキュリティ境界ではない。実際のアクセス制御はバックエンド側で別途行う必要がある。
 * 根拠: (18〜21行目 / 抜粋: "// ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、\n// セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、")
 * **承認・却下の記録名義固定**: `getRepresentativeParent`により、承認・却下の記録名義は常に代表の親1名に固定される（要件5）。横画面の4人表示では「今アクティブなユーザー」概念が存在しないための設計である。
 * 根拠: (24〜25行目 / 抜粋: "// 承認・却下の記録名義に使う代表の親ユーザーを返す。誰が実際にボタンを押したかは\n// 区別せず「親」として固定で記録する(要件5)。")
 * **タブ切替の二重導線**: 縦画面の`activeTab`（`quest`/`shop`/`inventory`）は`BottomNav`のタップと、`motion.div`の`onPanEnd`による左右スワイプ（角度⑯）の両方で切り替え可能。スワイプの閾値は`info.offset.x`が`-60`未満／`60`超で判定している。
-* 根拠: (433〜441行目 / 抜粋: "onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];\n                const idx = order.indexOf(activeTab);\n                if (info.offset.x < -60 && idx < order.length - 1) setActiveTab(order[idx + 1]);\n                else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);\n              }}")
+* 根拠: (480〜489行目 / 抜粋: "onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];\n                const idx = order.indexOf(activeTab);\n                if (info.offset.x < -60 && idx < order.length - 1) setActiveTab(order[idx + 1]);\n                else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);\n              }}")
 
 ## 9. 不明事項一覧
 

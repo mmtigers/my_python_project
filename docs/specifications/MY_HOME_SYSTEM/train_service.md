@@ -39,8 +39,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = common.setup_logging("train_service")` (行番号: 14 / 抜粋: "logger = common.setup_logging("train_service")") |
-| JR西日本 運行情報API (`JR_WEST_JSON_URL`) | レスポンスJSONの完全な構造（`lines`キー以下の全路線ID一覧や、`status`/`text`以外のフィールドの有無）が本ファイルからは不明。 | `resp = requests.get(JR_WEST_JSON_URL, timeout=5)` (行番号: 35 / 抜粋: "resp = requests.get(JR_WEST_JSON_URL, timeout=5)") |
-| Yahoo!路線情報 (`YAHOO_SEARCH_URL`) | 検索結果HTMLのDOM構造（CSSセレクタが対象とする要素の完全な仕様）や、将来的なサイト構造変更への耐性が不明。 | `resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)` (行番号: 100 / 抜粋: "resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)") |
+| JR西日本 運行情報API (`JR_WEST_JSON_URL`) | レスポンスJSONの完全な構造（`lines`キー以下の全路線ID一覧や、`status`/`text`以外のフィールドの有無）が本ファイルからは不明。 | `resp = requests.get(JR_WEST_JSON_URL, timeout=5)` (行番号: 39 / 抜粋: "resp = requests.get(JR_WEST_JSON_URL, timeout=5)") |
+| Yahoo!路線情報 (`YAHOO_SEARCH_URL`) | 検索結果HTMLのDOM構造（CSSセレクタが対象とする要素の完全な仕様）や、将来的なサイト構造変更への耐性が不明。 | `resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)` (行番号: 110 / 抜粋: "resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -92,70 +92,70 @@
 
 ### `get_jr_traffic_status`
 
-* **役割**: JR西日本の運行情報APIから宝塚線（`G`）・神戸線（`A`）の運行状況を取得し、遅延・運休の有無を含む辞書を返す。APIが平常運転の路線を返さない場合はデフォルトの「平常運転」を維持する。
-* 根拠: `def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:` (行番号: 22〜60 / 抜粋: "def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:\n    """\n    JR西日本の運行状況を取得する")
+* **役割**: JR西日本の運行情報APIから宝塚線（`G`）・神戸線（`A`）の運行状況を取得し、遅延・運休の有無を含む辞書を返す。取得できなかった場合を「平常運転」と偽らないよう、`is_unavailable`フラグで明示的に区別する（Low修正: 以前はAPI取得失敗時にもデフォルトの「🟢 平常運転」を返しており、実際には確認できていないだけなのに画面上は異常なしに見えてしまい遅延見逃しに直結していた）。APIから200応答が得られた時点で一旦両路線を「確認済み・平常運転」（`is_unavailable=False`）に更新し、遅延情報が含まれる路線のみ後続ループで上書きする。
+* 根拠: 関数冒頭のコメント (行番号: 29〜32 / 抜粋: "Low修正: 取得失敗時に「平常運転」をデフォルトとして返すと、実際には")
 
 
 * **引数/リクエスト**: なし
 * 根拠: (行番号: 22 / 抜粋: "def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:")
 
 
-* **戻り値/レスポンス**: `Dict[str, Dict[str, Any]]`。キーは `"宝塚線"`, `"神戸線"`。各値は `status`（絵文字付き状態文字列）, `detail`（詳細説明）, `is_delay`（bool）, `is_suspended`（bool）を持つ。
-* 根拠: `results: Dict[str, Dict[str, Any]] = {\n        "宝塚線": {"status": "🟢 平常運転", "detail": "遅れはありません", "is_delay": False, "is_suspended": False},` (行番号: 29〜31 / 抜粋: "results: Dict[str, Dict[str, Any]] = {"), `return results` (行番号: 60 / 抜粋: "return results")
+* **戻り値/レスポンス**: `Dict[str, Dict[str, Any]]`。キーは `"宝塚線"`, `"神戸線"`。各値は `status`（絵文字付き状態文字列）, `detail`（詳細説明）, `is_delay`（bool）, `is_suspended`（bool）, `is_unavailable`（bool。取得できていない場合`True`）を持つ。
+* 根拠: `results: Dict[str, Dict[str, Any]] = {\n        "宝塚線": {"status": "⚪ 情報取得不可", ...` (行番号: 33〜36 / 抜粋: "\"宝塚線\": {\"status\": \"⚪ 情報取得不可\", \"detail\": \"運行情報を確認できませんでした\""), `return results` (行番号: 70 / 抜粋: "return results")
 
 
 * **副作用**: JR西日本APIへのHTTP GETリクエスト送信、失敗時のエラーログ出力（`logger.error`）。
-* 根拠: `resp = requests.get(JR_WEST_JSON_URL, timeout=5)` (行番号: 35 / 抜粋: "resp = requests.get(JR_WEST_JSON_URL, timeout=5)")
+* 根拠: `resp = requests.get(JR_WEST_JSON_URL, timeout=5)` (行番号: 39 / 抜粋: "resp = requests.get(JR_WEST_JSON_URL, timeout=5)")
 
 
-* **エラーハンドリング**: 任意の `Exception` を捕捉し、エラーログを出力した上で、初期化済みのデフォルト値（両路線とも平常運転）をそのまま返す（フェイルソフト）。
-* 根拠: `except Exception as e:\n        logger.error(f"JR Traffic API Error: {e}")\n        # エラー時はデフォルト(平常運転)を返すことでシステムを止めない` (行番号: 56〜58 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 任意の `Exception` を捕捉し、エラーログを出力した上で、初期化時のデフォルト値（両路線とも`is_unavailable=True`の「⚪ 情報取得不可」）をそのまま返す（フェイルソフトだが「平常運転」を偽らない設計）。HTTPステータスが200以外の場合は`try`ブロック内で分岐せず素通りし、同じく初期化時のデフォルト値（情報取得不可）のまま返る。
+* 根拠: `except Exception as e:\n        logger.error(f"JR Traffic API Error: {e}")\n        # フェイルソフト: 取得不可のままデフォルト(is_unavailable=True)を返す。` (行番号: 65〜68 / 抜粋: "フェイルソフト: 取得不可のままデフォルト(is_unavailable=True)を返す。")
 
 
 
 ### `get_route_info`
 
 * **役割**: Yahoo!路線情報から、指定区間の最短経路（現在時刻+20分を出発時刻として検索）をスクレイピングし、出発・到着時刻、所要時間、運賃、乗換回数、詳細経路のリストを含む辞書を返す。
-* 根拠: `def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:` (行番号: 62〜158 / 抜粋: "def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:")
+* 根拠: `def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:` (行番号: 72〜168 / 抜粋: "def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:")
 
 
 * **引数/リクエスト**: `from_station: str`（デフォルト `"伊丹(兵庫県)"`）, `to_station: str`（デフォルト `"長岡京"`）
-* 根拠: (行番号: 62 / 抜粋: "def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:")
+* 根拠: (行番号: 72 / 抜粋: "def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`。`label`, `departure`, `arrival`, `duration`, `transfer`, `cost`, `details`（`list[str]`）, `url`, `summary`（`"取得成功"` / `"取得失敗"` / `"エラー: ..."`）を持つ。取得失敗時は初期化時のプレースホルダー値（`"--:--"` 等）のまま返る。
-* 根拠: `route_data: Dict[str, Any] = {\n        "label": f"{from_station} → {to_station}",\n        "departure": "--:--",` (行番号: 70〜72 / 抜粋: "route_data: Dict[str, Any] = {"), `return route_data` (行番号: 158 / 抜粋: "return route_data")
+* 根拠: `route_data: Dict[str, Any] = {\n        "label": f"{from_station} → {to_station}",\n        "departure": "--:--",` (行番号: 80〜82 / 抜粋: "route_data: Dict[str, Any] = {"), `return route_data` (行番号: 168 / 抜粋: "return route_data")
 
 
 * **副作用**: Yahoo!路線情報へのHTTP GETリクエスト送信、レスポンスHTMLのBeautifulSoupによる解析、ステータス異常時の警告ログ出力、例外発生時のエラーログ出力。
-* 根拠: `resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)` (行番号: 100 / 抜粋: "resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)"), `soup = BeautifulSoup(resp.text, 'html.parser')` (行番号: 107 / 抜粋: "soup = BeautifulSoup(resp.text, 'html.parser')")
+* 根拠: `resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)` (行番号: 110 / 抜粋: "resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)"), `soup = BeautifulSoup(resp.text, 'html.parser')` (行番号: 117 / 抜粋: "soup = BeautifulSoup(resp.text, 'html.parser')")
 
 
 * **エラーハンドリング**: HTTPステータスコードが200以外の場合、警告ログを出力しプレースホルダー値のままの `route_data` を返す。処理全体を `try...except Exception as e:` で囲み、例外発生時はエラーログを出力し `route_data["summary"]` にエラー内容を設定した上で `route_data` を返す（例外を外部に送出しない）。
-* 根拠: `if resp.status_code != 200:\n            logger.warning(f"Yahoo Route Search failed with status: {resp.status_code}")\n            return route_data` (行番号: 103〜105 / 抜粋: "if resp.status_code != 200:"), `except Exception as e:\n        logger.error(f"Route scrape error: {e}")\n        route_data["summary"] = f"エラー: {str(e)}"` (行番号: 154〜156 / 抜粋: "except Exception as e:")
+* 根拠: `if resp.status_code != 200:\n            logger.warning(f"Yahoo Route Search failed with status: {resp.status_code}")\n            return route_data` (行番号: 113〜115 / 抜粋: "if resp.status_code != 200:"), `except Exception as e:\n        logger.error(f"Route scrape error: {e}")\n        route_data["summary"] = f"エラー: {str(e)}"` (行番号: 164〜166 / 抜粋: "except Exception as e:")
 
 
 
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に、`get_jr_traffic_status()` と `get_route_info()` をそれぞれ呼び出し結果を標準出力へ表示する簡易テスト実行部。
-* 根拠: `if __name__ == "__main__":\n    # テスト実行用の設定` (行番号: 160〜167 / 抜粋: "if __name__ == "__main__":\n    # テスト実行用の設定\n    # common.setup_logging済みなのでコンソールにも出るはずだが念のため")
+* 根拠: `if __name__ == "__main__":\n    # テスト実行用の設定` (行番号: 170〜177 / 抜粋: "if __name__ == "__main__":\n    # テスト実行用の設定\n    # common.setup_logging済みなのでコンソールにも出るはずだが念のため")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 160〜167 / 抜粋: "print("--- JR Status ---")")
+* 根拠: (行番号: 170〜177 / 抜粋: "print("--- JR Status ---")")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 160〜167 / 抜粋: "print(get_jr_traffic_status())")
+* 根拠: (行番号: 170〜177 / 抜粋: "print(get_jr_traffic_status())")
 
 
 * **副作用**: `get_jr_traffic_status()` と `get_route_info()` の呼び出し（それぞれAPI通信・スクレイピングを含む）、結果の標準出力への表示。
-* 根拠: `print(get_jr_traffic_status())` (行番号: 164 / 抜粋: "print(get_jr_traffic_status())"), `print(get_route_info())` (行番号: 167 / 抜粋: "print(get_route_info())")
+* 根拠: `print(get_jr_traffic_status())` (行番号: 174 / 抜粋: "print(get_jr_traffic_status())"), `print(get_route_info())` (行番号: 177 / 抜粋: "print(get_route_info())")
 
 
 * **エラーハンドリング**: なし（呼び出す各関数が内部でフェイルソフトに例外を処理する設計のため）
-* 根拠: (行番号: 160〜167 / 抜粋: "print("\n--- Route Info ---")")
+* 根拠: (行番号: 170〜177 / 抜粋: "print("\n--- Route Info ---")")
 
 
 
@@ -235,9 +235,9 @@ graph TD
 ## 8. 保守上の注意点
 
 * **未使用インポート**: `traceback`（4行目）と `logging`（6行目）がインポートされているが、本ファイル内で `traceback.*` や `logging.*` の呼び出しは一切なく（ロガーは `common.setup_logging` 経由で取得）、未使用のインポートとなっている。
-* **HTMLスクレイピングへの依存**: `get_route_info` はYahoo!路線情報のHTML構造（CSSセレクタ `#rsltlst li.el`, `.routeSummary`, `.time`, `.fare`, `.transfer`, `.routeDetail` 等）に強く依存しており、対象サイトのマークアップ変更によって静かに（例外を出さずに）情報が取得できなくなるリスクがある（`route_elm` が見つからない場合、108〜110行目のロジックにより `summary` は "取得成功" のまま詳細情報だけが空になる）。
-* **広範な例外キャッチによるフェイルソフト設計**: 両関数とも `except Exception as e:` で全例外を捕捉し、デフォルト値やエラーメッセージ入りの辞書を返す設計になっている。呼び出し側から見ると成功と「部分的な失敗（デフォルト値のまま）」の区別が難しい場合がある（特に `get_jr_traffic_status` は例外時にも初期化済みの「平常運転」データをそのまま返すため、実際にAPIが失敗しているのか本当に平常運転なのかが `results` の中身だけでは判別できない）。
-* **固定のタイムアウト値**: 両関数とも `timeout=5` 秒がハードコードされており（35, 100行目）、設定ファイル等で外部から調整する仕組みがない。
+* **HTMLスクレイピングへの依存**: `get_route_info` はYahoo!路線情報のHTML構造（CSSセレクタ `#rsltlst li.el`, `.routeSummary`, `.time`, `.fare`, `.transfer`, `.routeDetail` 等）に強く依存しており、対象サイトのマークアップ変更によって静かに（例外を出さずに）情報が取得できなくなるリスクがある。`route_data["summary"] = "取得成功"`（162行目）は`if route_elm:`ブロック（120行目）の内側で実行されるため、`route_elm` が見つからない場合は`summary`が初期値の"取得失敗"のまま返る。
+* **広範な例外キャッチによるフェイルソフト設計**: 両関数とも `except Exception as e:` で全例外を捕捉し、デフォルト値やエラーメッセージ入りの辞書を返す設計になっている。`get_jr_traffic_status`はLow修正（`is_unavailable`フラグの導入）により、取得失敗と平常運転を`results`の中身から区別できるようになったが、`get_route_info`は依然として「取得失敗（プレースホルダーのまま）」と「一部項目だけ空のまま`summary`は成功扱い」を`route_data`の中身だけで機械的に判別する専用フラグを持たない。
+* **固定のタイムアウト値**: 両関数とも `timeout=5` 秒がハードコードされており（39, 110行目）、設定ファイル等で外部から調整する仕組みがない。
 
 ## 9. 不明事項一覧
 
