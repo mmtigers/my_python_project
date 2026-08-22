@@ -135,6 +135,14 @@ graph TD
 | 追加された`days`・`description`カラムの実際の利用箇所 | どのモジュールがこれらのカラムを読み書きするかは当ファイルからは判断できないため。 | `quest_service.py`等、`quest_master`を参照するモジュール |
 | 本スクリプトの想定実行ディレクトリ | 相対パス`home_system.db`がどのディレクトリを基準に解決される想定かが当ファイル内には明記されていないため。 | 運用手順書または呼び出し元スクリプト |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `quest_master`テーブルの完全なスキーマ | `init_unified_db.py`を直接確認した。392〜409行目の`CREATE TABLE IF NOT EXISTS quest_master`文により、`quest_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, quest_type TEXT DEFAULT 'daily', exp_gain INTEGER DEFAULT 10, gold_gain INTEGER DEFAULT 5, icon_key TEXT, day_of_week TEXT, target_user TEXT DEFAULT 'all', start_date TEXT, end_date TEXT, pre_requisite_quest_id INTEGER, occurrence_chance REAL DEFAULT 1.0, start_time TEXT, end_time TEXT`という初期スキーマであることが判明した。注目すべき点として、この初期スキーマには`description`カラムが最初から含まれており(395行目)、本ファイル(`add_quest_columns.py`)による`ALTER TABLE ... ADD COLUMN description`(37行目)は`init_unified_db.py`実行済みの環境では冗長な処理となる。一方`days`という名前のカラムはこの初期スキーマに存在せず、代わりに`day_of_week`カラムが存在する。さらに`services/quest_service.py`723〜724行目には、実行時に`reset_period`カラムが存在しなければ`ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'`を自動追加するマイグレーション処理があり、`quest_master`は複数のスクリプト・処理により段階的にカラムが追加されていく設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:392-409`, `MY_HOME_SYSTEM/services/quest_service.py:719-724` |
+| 追加された`days`・`description`カラムの実際の利用箇所 | `services/quest_service.py`を直接確認した。`description`カラムは744〜767行目の`INSERT INTO quest_master (..., description, ...) ... ON CONFLICT(quest_id) DO UPDATE SET ... description = excluded.description`により、クエストマスタデータ同期処理で実際に読み書きされていることを確認した。一方、`add_quest_columns.py`が追加する`days`という名前のカラムについては、`quest_master`を参照する箇所を検索したが、直接読み書きしている箇所は見つからなかった。むしろ163〜166行目のコメント「原因: DB生データには 'days' キーがなく、'day_of_week' カラムが存在する」および166行目`if quest['day_of_week']:`という実装が示す通り、コード側は`day_of_week`カラムを参照しており、`q['days']`という辞書キーは535〜541行目で`day_of_week`カラムの値から実行時に動的に生成される派生値(Pythonの辞書上のみに存在するキー)であって、DBの`days`という物理カラムそのものを参照するコードはリポジトリ内に見当たらなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:162-166, 535-541, 744-767` |
+| 本スクリプトの想定実行ディレクトリ | 明確な運用手順書はリポジトリ内に見当たらなかったが、関連する複数のソースを直接確認した。`config.py`212行目の`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`（`config.py`自身の存在ディレクトリ、すなわち`MY_HOME_SYSTEM/`）を基準に、222行目で`SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`と定義されている。また同様に相対パス`DB_PATH = "home_system.db"`を用いる`MY_HOME_SYSTEM/old/db_fix.py`は、4行目のコメント「修正点: configに依存せず、直接絶対パスを指定します」に続き、5行目で`DB_PATH = "/home/masahiro/develop/MY_HOME_SYSTEM/home_system.db"`という絶対パスを直書きしており、これは`MY_HOME_SYSTEM/`ディレクトリ自体を指している。以上から、`add_quest_columns.py`の相対パス`home_system.db`も同様に、`MY_HOME_SYSTEM/`ディレクトリ（`config.BASE_DIR`と同じ場所）をカレントディレクトリとして実行される想定であると判断できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212, 222`, `MY_HOME_SYSTEM/old/db_fix.py:5` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）

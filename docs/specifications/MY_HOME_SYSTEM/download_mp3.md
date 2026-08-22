@@ -184,6 +184,12 @@ graph TD
 | --- | --- | --- |
 | 保存先ディレクトリに求められる運用要件 | `DEFAULT_OUTPUT_DIR` (`family-quest/src/assets/sounds`) に保存された音声データが、システム全体でどのようにロードされ、ファイル名やビットレートにどのような制約があるかが本ファイル単独では不明である。 | `family-quest` アプリケーション側の音声ロード・再生処理を実装しているソースコード。 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 保存先ディレクトリに求められる運用要件 | `family-quest/src/hooks/useSound.ts`(全49行)を直接確認した。フロントエンド側は`SOUNDS`定数(4〜13行目)で`submit/approve/clear/levelUp/medal/tap/select/cancel`の8キーそれぞれに`/quest/*.mp3`形式の文字列パスを対応させ、`play(key)`(21〜46行目)は`new Audio(path)`(27行目)にそのパスをそのまま渡して`audio.play()`(38行目)するのみで、ファイル名やビットレートに関する検証・変換処理は一切行っていないことを確認した。また`family-quest/vite.config.ts`39行目の`base: '/quest/'`設定から、`/quest/*.mp3`という絶対パスはビルド成果物のベースパス配下に配置されたファイルを指すと分かるが、`family-quest/public/`ディレクトリを直接確認したところ`vite.svg`のみが存在し音声ファイルはなく、本ファイル(download_mp3.py)の保存先である`family-quest/src/assets/sounds/`ディレクトリもリポジトリ内には実在しない(未作成)。加えてリポジトリ直下`.gitignore`64行目に`*.mp3`規則があり、mp3実体ファイル自体が追跡対象外であることを確認した。以上より、`src/assets/sounds`に保存されたファイルが実際にどのようにして`/quest/*.mp3`という公開パスへ配置されるか(ビルド時のコピー処理等)を示すスクリプトはリポジトリ内に見つからず、この対応関係自体は解消できなかった。 | 直接ソース確認: `family-quest/src/hooks/useSound.ts:1-49`, `family-quest/vite.config.ts:39`, `.gitignore:64`（参考: `family-quest/src/hooks/useSound.md`） |
+
 ## 10. 自己検証結果
 
 * [x] 完了 推測・外部ファイルの仕様を一切含んでいない
