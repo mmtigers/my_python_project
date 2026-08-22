@@ -158,39 +158,43 @@
 
 ### `_extract_referenced_tables` (関数)
 
-* **役割**: SQL文字列から `FROM` / `JOIN` 直後に現れるテーブル名を正規表現で抽出する簡易パーサ。
-* 根拠: `def _extract_referenced_tables(sql: str) -> List[str]:` (行番号: 141 / 抜粋: "def _extract_referenced_tables")
+* **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。
+* 根拠: 関数Docstring (行番号: 143〜150 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: 関数シグネチャ (行番号: 141)
+* 根拠: 関数シグネチャ (行番号: 141 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
 
 
-* **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト)
-* 根拠: `return re.findall(...)` (行番号: 143)
+* **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト。同一テーブルが複数回参照されれば重複を含みうる)
+* 根拠: `return tables` (行番号: 172 / 抜粋: "return tables")
 
 
 * **副作用**: なし
-* **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）
+* 根拠: `tables: List[str] = []` へのローカル追加のみ (行番号: 152 / 抜粋: "tables: List[str] = []")
+
+
+* **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）。`(` トークンにマッチした場合（サブクエリの開始）は `continue` でスキップし、テーブル名として追加しない。
+* 根拠: `if token == "(":` (行番号: 159〜161 / 抜粋: "サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。")
 
 
 
 ### `tool_search_db` (関数)
 
 * **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。
-* 根拠: `async def tool_search_db` (行番号: 146 / 抜粋: "async def tool_search_db")
+* 根拠: `async def tool_search_db` (行番号: 175 / 抜粋: "async def tool_search_db")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 146 / 抜粋: "args: Dict[str, Any]")
+* 根拠: 関数シグネチャ (行番号: 175 / 抜粋: "args: Dict[str, Any]")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号: 179 / 抜粋: "return str(rows)[:2000]")
+* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号: 208 / 抜粋: "return str(rows)[:2000]")
 
 
 * **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行を`logger.warning`で記録。
-* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 175 / 抜粋: "common.execute_read_query, sql")
+* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 204 / 抜粋: "common.execute_read_query, sql")
 
 
 * **エラーハンドリング**:
@@ -199,72 +203,72 @@
 * `_extract_referenced_tables` で参照テーブルを特定できない場合はエラーメッセージを返却。
 * 参照テーブルのいずれかが `ALLOWED_SEARCH_TABLES` に含まれない場合は、警告ログを出力しエラーメッセージを返却（実行しない）。
 * DB検索時のあらゆる例外を捕捉し、エラーメッセージとして返却。
-* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 161) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 168) / `except Exception as e:` (行番号: 180)
+* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 190) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 197) / `except Exception as e:` (行番号: 209)
 
 
 
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 245 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 274 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
-* 根拠: 関数シグネチャ (行番号: 245 / 抜粋: "retry_state")
+* 根拠: 関数シグネチャ (行番号: 274 / 抜粋: "retry_state")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: return文なし (行番号: 248〜252 / 抜粋: "logger.warning(")
+* 根拠: return文なし (行番号: 277〜281 / 抜粋: "logger.warning(")
 
 
 * **副作用**: `logger.warning` によるログ書き込み
-* 根拠: `logger.warning(...)` (行番号: 248〜252 / 抜粋: "logger.warning(")
+* 根拠: `logger.warning(...)` (行番号: 277〜281 / 抜粋: "logger.warning(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 247 / 抜粋: "exception = retry_state")
+* 根拠: try-except構文なし (行番号: 276 / 抜粋: "exception = retry_state")
 
 
 
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを別スレッドで実行し、`ResourceExhausted` 例外発生時に指数バックオフによるリトライを行う。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 254〜261 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 283〜290 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
-* 根拠: 関数シグネチャ (行番号: 261 / 抜粋: "chat_session, prompt: str")
+* 根拠: 関数シグネチャ (行番号: 290 / 抜粋: "chat_session, prompt: str")
 
 
 * **戻り値/レスポンス**: APIレスポンスオブジェクト
-* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 273 / 抜粋: "return await asyncio.to_thread")
+* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 302 / 抜粋: "return await asyncio.to_thread")
 
 
 * **副作用**: APIへのネットワーク通信
-* 根拠: `chat_session.send_message` (行番号: 273 / 抜粋: "chat_session.send_message")
+* 根拠: `chat_session.send_message` (行番号: 302 / 抜粋: "chat_session.send_message")
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
-* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 255 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
+* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 284 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
 
 
 
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。
-* 根拠: `async def analyze_text_and_execute` (行番号: 280 / 抜粋: "async def analyze_text_and_execute")
+* 根拠: `async def analyze_text_and_execute` (行番号: 309 / 抜粋: "async def analyze_text_and_execute")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 280 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 309 / 抜粋: "user_id: str, user_name: str, text: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 280 / 抜粋: "-> Optional[str]:")
+* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 309 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: API通信、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 297, 326, 368 / 抜粋: "await _call_gemini_api_with_retry")
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 326, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
 
 
 * **エラーハンドリング**:
@@ -275,7 +279,7 @@
 * 空のレスポンス時はエラーメッセージを返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 327, 330, 378 / 抜粋: "except Exception as e:")
+* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 356, 359, 407 / 抜粋: "except Exception as e:")
 
 
 
@@ -396,8 +400,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。ただし `_extract_referenced_tables` は正規表現による簡易パーサであり、サブクエリ内の`FROM`/`JOIN`や複雑なSQL構文を網羅的に解析するものではない点に留意。
-* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES` (行番号: 132-143, 164-171)
+* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。またSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になる。
+* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES` (行番号: 132-138, 141-172)
 
 
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。
