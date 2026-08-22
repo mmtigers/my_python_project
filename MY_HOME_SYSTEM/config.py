@@ -169,7 +169,6 @@ class DeviceConfig(BaseModel):
 # 1. 環境・機能フラグ設定
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
-ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
 ENABLE_BLUETOOTH: bool = False
 
 # ==========================================
@@ -413,9 +412,16 @@ _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "di
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# M-8-2: 以前はここ(config.py)と unified_server.py の両方に別々のCORS許可
+# オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
+# だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
+# CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8501",   # Streamlitダッシュボード
+    "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
+    "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
     FRONTEND_URL,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
@@ -423,6 +429,9 @@ if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
+# M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
+# ディスクを圧迫し得た。アバター画像用途を想定し余裕を持って10MBとする。
+UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))
 
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定

@@ -5,6 +5,9 @@ core/migrations.py (バージョン管理されたスキーママイグレーシ
 import os
 import sqlite3
 import sys
+from unittest.mock import patch
+
+import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -18,6 +21,7 @@ def _make_minimal_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE quest_master (quest_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE reward_master (reward_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE quest_history (id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER);
+        CREATE TABLE device_records (id INTEGER PRIMARY KEY, device_id TEXT);
     """)
     conn.commit()
 
@@ -90,5 +94,29 @@ def test_apply_pending_migrations_tolerates_column_already_added_elsewhere():
 
         applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
         assert "0001_add_quest_users_role.sql" in applied
+    finally:
+        conn.close()
+
+
+def test_apply_pending_migrations_reraises_and_does_not_record_unknown_errors(tmp_path):
+    """
+    M-2: "duplicate column"/"already exists" のような既知の「適用済み」パターン以外の
+    OperationalError(SQL誤り・ロック・ディスクフル等)は、適用済みとして追認せず、
+    バージョンも記録せずにそのまま例外を再送出すること。
+    """
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_broken.sql").write_text(
+        "ALTER TABLE this_table_does_not_exist ADD COLUMN foo TEXT;"
+    )
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        with patch("core.migrations.MIGRATIONS_DIR", str(migrations_dir)):
+            with pytest.raises(sqlite3.OperationalError):
+                apply_pending_migrations(conn)
+
+        applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
+        assert "0001_broken.sql" not in applied
     finally:
         conn.close()

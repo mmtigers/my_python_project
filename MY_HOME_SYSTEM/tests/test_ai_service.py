@@ -76,6 +76,27 @@ def test_extract_referenced_tables_with_join():
     assert "quest_users" in tables
 
 
+def test_extract_referenced_tables_comma_join_catches_second_table():
+    """H-6: 暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブルも抽出できること"""
+    sql = "SELECT * FROM child_health_records, quest_users"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "child_health_records" in tables
+    assert "quest_users" in tables
+
+
+def test_extract_referenced_tables_comma_join_three_tables():
+    sql = "SELECT * FROM a, b, c WHERE a.id = b.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert tables == ["a", "b", "c"]
+
+
+def test_extract_referenced_tables_subquery_is_detected():
+    """H-6: サブクエリ内のFROMも抽出できること(隠れたテーブル参照のバイパス防止)"""
+    sql = "SELECT * FROM (SELECT * FROM quest_users) AS hidden"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "quest_users" in tables
+
+
 @pytest.mark.asyncio
 async def test_tool_search_db_rejects_non_select():
     result = await ai_service.tool_search_db({"sql_query": "DELETE FROM quest_users"})
@@ -86,6 +107,24 @@ async def test_tool_search_db_rejects_non_select():
 async def test_tool_search_db_blocks_disallowed_table():
     # quest_users はドキュメント記載の許可テーブル(child/food/shopping/power_usage)に含まれない
     result = await ai_service.tool_search_db({"sql_query": "SELECT * FROM quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_comma_joined_disallowed_table():
+    """H-6の回帰防止: 許可テーブルとのカンマ結合で quest_users を素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}, quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_subquery_disallowed_table():
+    """H-6の回帰防止: サブクエリ経由で quest_users を素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db(
+        {"sql_query": f"SELECT * FROM (SELECT * FROM quest_users) AS hidden, {table}"}
+    )
     assert "許可されていない" in result
 
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { History, Clock } from 'lucide-react';
 import { ChronicleItem } from '@/hooks/useGameData';
 import { User } from '@/types';
+import { isSameOriginAvatarPath } from '../../../lib/utils';
 
 interface FamilyLogProps {
     chronicle: ChronicleItem[];
@@ -18,7 +19,7 @@ const formatTime = (ts: string | number | undefined) => {
 // 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、
 // タブで選ばせるのではなく最初から全員分を並べて表示する。
 const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {
-    const hasAvatarImage = !!user.avatar && user.avatar.startsWith('/');
+    const hasAvatarImage = isSameOriginAvatarPath(user.avatar);
 
     // 日付ごとにログをグループ化
     const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
@@ -63,8 +64,16 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
                                 </div>
                                 <div className="flex gap-1.5 mt-0.5">
                                     {((log.gold || 0) > 0 || (log.reward_gold || 0) > 0) && (
-                                        <span className="text-[9px] text-yellow-400 font-bold bg-yellow-900/30 px-1 rounded">
-                                            +{log.gold || log.reward_gold} G
+                                        // M-6-4バグ修正: 報酬購入(type='reward')はゴールドを消費した記録のため
+                                        // "-N G"、クエスト達成(type='quest')は獲得のため"+N G"と表示する。
+                                        // 以前は購入も一律"+N G"(獲得)表示になっていた。
+                                        <span
+                                            className={`text-[9px] font-bold px-1 rounded ${log.type === 'reward'
+                                                ? 'text-red-400 bg-red-900/30'
+                                                : 'text-yellow-400 bg-yellow-900/30'
+                                                }`}
+                                        >
+                                            {log.type === 'reward' ? '-' : '+'}{log.gold || log.reward_gold} G
                                         </span>
                                     )}
                                 </div>
