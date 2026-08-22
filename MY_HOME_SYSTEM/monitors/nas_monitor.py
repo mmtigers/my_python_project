@@ -25,7 +25,7 @@ class NasMonitor:
     def __init__(self) -> None:
         self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
-        self.fallback_dir: str = getattr(config, "FALLBACK_DIR", "/tmp/temp_fallback")
+        self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.device_name: str = "BUFFALO LS720D"
         self.state_file: str = "/tmp/nas_monitor_state.json"
@@ -202,14 +202,14 @@ class NasMonitor:
         percent = usage['percent'] if usage else 0
         save_log_generic(
             config.SQLITE_TABLE_SENSOR,
-            ["timestamp", "device_name", "device_id", "device_type", "contact_state", "battery_level"],
+            ["timestamp", "device_name", "device_id", "device_type", "contact_state", "nas_usage_percent"],
             (
                 get_now_iso(),
                 "NAS_Monitor",
                 self.ip,
                 "Server",
                 "mounted" if mount_ok else "unmounted",
-                percent 
+                percent
             )
         )
 

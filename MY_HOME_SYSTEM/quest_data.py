@@ -142,9 +142,9 @@ QUESTS = [
     {'id': 504, 'title': 'アクセ装着と片付け', 'type': 'special', 'target': 'mom', 'days': '5,6', 'exp': 15, 'gold': 20, 'icon': '💍', 'desc': '週末のおしゃれを楽しみ、定位置に戻す'},
     {'id': 1011, 'title': '女神のメンテナンス', 'type': 'special', 'target': 'mom', 'category': 'health', 'difficulty': 'D', 'exp': 40, 'gold': 20, 'icon': '🧖‍♀️', 'desc': 'パックやスキンケアで美を高める'},
     {'id': 500, 'title': '昨夜の寝かしつけ', 'type': 'special', 'target': 'mom', 'exp': 300, 'gold': 200, 'icon': '💤', 'desc': '子供を寝かしつけた（翌朝申請用）'},
-    {'id': 15, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
-    {'id': 16, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
-    {'id': 17, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
+    {'id': 505, 'title': '洗濯物を干す', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '☀️', 'desc': '日光の力で装備を浄化する'},
+    {'id': 506, 'title': '洗濯物を畳む', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'C', 'exp': 40, 'gold': 30, 'icon': '👕', 'desc': '装備品を整理整頓する'},
+    {'id': 507, 'title': '洗濯物をしまう', 'type': 'special', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 20, 'icon': '🧺', 'desc': 'それぞれのクローゼットへ格納'},
 
 
     # ------------------------------------------
