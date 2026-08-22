@@ -429,6 +429,9 @@ if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
+# M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
+# ディスクを圧迫し得た。アバター画像用途を想定し余裕を持って10MBとする。
+UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))
 
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定
