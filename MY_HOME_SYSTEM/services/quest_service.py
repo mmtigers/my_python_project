@@ -150,10 +150,14 @@ class QuestService:
         try:
             # DBの文字列をdatetimeオブジェクトへ変換
             dt = datetime.datetime.fromisoformat(completed_at_str)
-            # タイムゾーン情報がない（UTCとして記録されている）場合、UTCとみなしてJSTに変換
+            # M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている
+            # とみなしていたが、保存規約(common.get_now_iso)は常にJSTで記録する
+            # ため、tzinfo無しの古いデータも実際はJSTで記録されている。
+            # このファイル内の他の日時比較(スパムチェック等)もJSTとして扱っており、
+            # UTCとみなす本実装だけが矛盾して9時間ズレていた。
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            
+                dt = dt.replace(tzinfo=JST)
+
             completed_date = dt.astimezone(JST).date()
         except Exception:
             try:

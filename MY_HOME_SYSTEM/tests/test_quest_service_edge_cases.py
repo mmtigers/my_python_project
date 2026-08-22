@@ -130,6 +130,15 @@ class TestIsWithinResetPeriod:
     def test_completely_unparseable_string_returns_false(self):
         assert self.quest_service.is_within_reset_period("not-a-date-at-all", "daily") is False
 
+    def test_naive_timestamp_late_at_night_is_interpreted_as_jst_not_utc(self):
+        """M-1-4回帰防止: tzinfoの無いレガシー完了時刻は、保存規約
+        (common.get_now_iso)に合わせてJSTとして記録されているとみなす。
+        以前はUTCとみなして変換していたため、日付境界付近(夜遅く)の
+        naiveタイムスタンプが日付跨ぎで誤判定されていた
+        (23:00をUTCとみなして+9hすると翌日05:00になってしまう)。"""
+        today_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d")
+        assert self.quest_service.is_within_reset_period(f"{today_jst}T23:00:00", "daily") is True
+
 
 class TestCalculateQuestBoost:
     def setup_method(self):
