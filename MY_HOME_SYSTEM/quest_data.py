@@ -23,24 +23,24 @@ Family Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)
 # ==========================================
 USERS = [
     {
-        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',
-        'info': '35歳 / INTJ / 通勤電車を書斎に変える男 / 住宅ローン5,400万の守護者' 
+        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員',
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', 'role': 'role_adult',
+        'info': '35歳 / INTJ / 通勤電車を書斎に変える男 / 住宅ローン5,400万の守護者'
     },
     {
-        'user_id': 'mom', 'name': 'はるな', 'job_class': '専業主婦', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄',
-        'info': '32歳 / 育児・家庭運営責任者 / 伝説の秘宝「アルハンブラ」を目指す者' 
+        'user_id': 'mom', 'name': 'はるな', 'job_class': '専業主婦',
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄', 'role': 'role_adult',
+        'info': '32歳 / 育児・家庭運営責任者 / 伝説の秘宝「アルハンブラ」を目指す者'
     },
     {
-        'user_id': 'son', 'name': 'ともや', 'job_class': 'ピカピカの1年生', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦',
-        'info': '5歳 / 文武両道・早起きのヒーロー / YouTubeより稼げる仕事を探求中' 
+        'user_id': 'son', 'name': 'ともや', 'job_class': 'ピカピカの1年生',
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦', 'role': 'role_child',
+        'info': '5歳 / 文武両道・早起きのヒーロー / YouTubeより稼げる仕事を探求中'
     },
     {
-        'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人', 
-        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶',
-        'info': '2歳 / イヤイヤ期の妖精' 
+        'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',
+        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', 'role': 'role_child',
+        'info': '2歳 / イヤイヤ期の妖精'
     }
 ]
 

@@ -1,13 +1,13 @@
 # MY_HOME_SYSTEM/tests/test_core_database.py
 """
-core/database.py の get_db_cursor (リトライ・ロールバック) と
+core/database.py の get_db_cursor (接続リトライ・単発yield・ロールバック) と
 save_log_generic / save_log_async / execute_read_query のテスト。
 
 既存 tests/test_core_database.py は PRAGMA foreign_keys=ON の確認のみを
 行っていたが、本ファイルはそれに加えて以下のDB操作そのものの挙動を検証する:
-- "database is locked" 時のリトライ・最終的な成功
-- リトライ上限到達時の挙動(既知の粗さ: contextmanagerがyieldせず
-  RuntimeErrorになる。callerはこれを想定していないため、記録目的でテストする)
+- "database is locked" 時の接続リトライ・最終的な成功
+- 接続リトライ上限到達時に元のOperationalErrorがそのまま伝播すること
+- with文本体実行中(接続確立後)のlockedエラーはリトライされずrollback+再送出されること
 - "locked" 以外のOperationalError・想定外の例外でのrollback
 - save_log_generic の成功/失敗、save_log_asyncのラッパー動作
 """
@@ -71,26 +71,49 @@ class TestGetDbCursorRetry:
             row = cur.execute("SELECT * FROM quest_users WHERE user_id='dad'").fetchone()
         assert row is not None
 
-    def test_retry_limit_reached_raises_runtime_error(self, isolated_db):
+    def test_retry_limit_reached_raises_operational_error(self, isolated_db):
         """
-        既知の粗さの記録: "locked"が5回連続すると、contextmanagerが一度もyieldせずに
-        終了するため、Pythonの仕様により RuntimeError("generator didn't yield") になる。
-        呼び出し元(save_log_generic等)はこれを想定した例外処理をしていない。
-        この挙動が変わった場合に気付けるよう、現状を固定するテストとして残す。
+        接続確立が5回連続で"locked"になった場合、contextmanagerは一度もyieldせず、
+        本文中でRuntimeErrorに化けることなく、元のOperationalErrorがそのまま
+        呼び出し元に伝播すること(H-1修正の回帰防止)。
         """
+        call_count = {"n": 0}
+
         def _always_locked(*args, **kwargs):
+            call_count["n"] += 1
             raise sqlite3.OperationalError("database is locked")
 
         with patch("core.database.time.sleep", return_value=None), \
              patch("core.database.sqlite3.connect", side_effect=_always_locked):
-            with pytest.raises(RuntimeError):
-                with db.get_db_cursor() as cur:
+            with pytest.raises(sqlite3.OperationalError):
+                with db.get_db_cursor():
                     pass  # pragma: no cover - 到達しない
+
+        assert call_count["n"] == 5
 
     def test_non_lock_operational_error_rolls_back_and_reraises_immediately(self, isolated_db):
         with pytest.raises(sqlite3.OperationalError):
             with db.get_db_cursor(commit=True) as cur:
                 cur.execute("SELECT * FROM this_table_does_not_exist")
+
+    def test_locked_error_inside_with_block_does_not_retry_and_reraises(self, isolated_db):
+        """
+        with文本体の実行中(接続確立後)に発生したlockedエラーは、以前は2回目のyieldを
+        試みてRuntimeError("generator didn't stop after throw()")になっていた。
+        修正後は本文はリトライせず、rollbackした上でそのまま再送出されること。
+        """
+        with db.get_db_cursor(commit=True) as cur:
+            _seed_table(cur)
+
+        with pytest.raises(sqlite3.OperationalError):
+            with db.get_db_cursor(commit=True) as cur:
+                cur.execute("SELECT 1")
+                raise sqlite3.OperationalError("database is locked")
+
+        # rollbackされているため元のレコードは変化していないこと
+        with db.get_db_cursor() as cur:
+            row = cur.execute("SELECT name FROM quest_users WHERE user_id='dad'").fetchone()
+        assert row["name"] == "Dad"
 
     def test_exception_inside_with_block_rolls_back_and_reraises(self, isolated_db):
         """with文内(呼び出し元)で発生した例外もrollbackされた上で再送出されること"""

@@ -33,7 +33,14 @@ async def callback_line(request: Request, x_line_signature: str = Header(None)) 
     return "OK"
 
 # 対象とするセンサーのデバイスタイプ（温湿度計やプラグ等は除外）
-TARGET_DEVICE_TYPES = ["Contact Sensor", "Motion Sensor"]
+# "Contact Sensor"/"Motion Sensor" はデバイス一覧API(GET /devices)の語彙で、
+# SwitchBot公式Webhookの context.deviceType はこれとは異なる語彙
+# ("WoContact"/"WoPresence"等)を使う。両方を許容することで、
+# Webhook本来の形式が来ても「対象外デバイス」として黙って捨てられないようにする。
+TARGET_DEVICE_TYPES = {
+    "Contact Sensor", "Motion Sensor",  # デバイス一覧APIの語彙(後方互換)
+    "WoContact", "WoPresence",  # 公式Webhookペイロードの語彙
+}
 
 @router.post("/webhook/switchbot")
 async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
@@ -48,7 +55,10 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     ctx = body.context
     mac = ctx.deviceMac
     
-    device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))
+    # ctx.deviceType は Optional フィールドとして常に存在するため、getattr の
+    # デフォルト値は「未定義時のみ」で「Noneの時」には効かない。公式形式
+    # (context.deviceType)を優先しつつ、Noneの場合はトップレベルへフォールバックする。
+    device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"
 
     # ガード節 1: 対象外デバイス (Fail-Fast)
     if device_type not in TARGET_DEVICE_TYPES:
