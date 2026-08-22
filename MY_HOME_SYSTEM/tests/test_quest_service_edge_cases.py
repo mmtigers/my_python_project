@@ -130,6 +130,15 @@ class TestIsWithinResetPeriod:
     def test_completely_unparseable_string_returns_false(self):
         assert self.quest_service.is_within_reset_period("not-a-date-at-all", "daily") is False
 
+    def test_naive_timestamp_late_at_night_is_interpreted_as_jst_not_utc(self):
+        """M-1-4回帰防止: tzinfoの無いレガシー完了時刻は、保存規約
+        (common.get_now_iso)に合わせてJSTとして記録されているとみなす。
+        以前はUTCとみなして変換していたため、日付境界付近(夜遅く)の
+        naiveタイムスタンプが日付跨ぎで誤判定されていた
+        (23:00をUTCとみなして+9hすると翌日05:00になってしまう)。"""
+        today_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d")
+        assert self.quest_service.is_within_reset_period(f"{today_jst}T23:00:00", "daily") is True
+
 
 class TestCalculateQuestBoost:
     def setup_method(self):
@@ -310,6 +319,42 @@ class TestSyncMasterData:
         assert quest_count == 0
         assert reward_count == 0
 
+    def test_reward_still_owned_by_user_inventory_is_not_deleted(self, isolated_db, monkeypatch):
+        """M-1-2: user_inventory(reward_master(reward_id)へのFK)が参照している報酬を
+        マスタから削除しようとすると、以前はIntegrityErrorでsync_master_data全体が
+        失敗していた。参照が残っている報酬は削除をスキップし、sync自体は成功すること。"""
+        fake_quest_data = types.SimpleNamespace(
+            USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
+            QUESTS=[],
+            REWARDS=[],  # マスタからは全報酬を削除する想定
+        )
+        monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
+        monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Owned Reward', 100)"
+            )
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('dad', 999, 'owned', ?)",
+                (common.get_now_iso(),),
+            )
+
+        game_system = GameSystem()
+        result = game_system.sync_master_data()
+
+        assert result["status"] == "synced"
+        with common.get_db_cursor() as cur:
+            reward_row = cur.execute(
+                "SELECT reward_id FROM reward_master WHERE reward_id = 999"
+            ).fetchone()
+            inventory_row = cur.execute(
+                "SELECT id FROM user_inventory WHERE reward_id = 999"
+            ).fetchone()
+        assert reward_row is not None, "参照が残っている報酬は削除されずに残ること"
+        assert inventory_row is not None
+
 
 class TestTriggerTvUnlock:
     """
@@ -405,3 +450,45 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+class TestProcessApproveQuestWithDeletedMasterQuest:
+    """
+    M-1-1: sync_master_data のDELETE(マスタから削除されたクエスト)後も
+    quest_history の pending 行は残るため、そのクエストを承認しようとすると
+    quest_master 側の行が見つからず quest=None になる。
+    process_approve_quest はこの状態でも quest['quest_id'] のsubscriptで
+    落ちず(TypeError→500にならず)、承認自体は成立すること。
+    """
+
+    def _seed_child_and_adult(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+        )
+
+    def test_approve_succeeds_when_quest_was_removed_from_master(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_child_and_adult(cur)
+            # quest_masterには一切登録せず、削除済みクエストのpending履歴のみを再現する
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
+                "completed_at, status) VALUES ('son', 9999, 'DeletedQuest', 10, 20, ?, 'pending')",
+                (common.get_now_iso(),),
+            )
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        result = quest_service.process_approve_quest("dad", history_id)
+
+        assert result["status"] == "success"
+        with common.get_db_cursor() as cur:
+            hist_after = cur.execute(
+                "SELECT status FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+            son_gold = cur.execute(
+                "SELECT gold FROM quest_users WHERE user_id = 'son'"
+            ).fetchone()["gold"]
+        assert hist_after["status"] == "approved"
+        assert son_gold == 20

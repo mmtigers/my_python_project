@@ -41,11 +41,13 @@ def sync_run(coro):
     スレッドプール内で非同期関数(DB保存等)を実行するためのヘルパー。
     Webhookハンドラは別スレッドで動いているため、asyncio.run()で
     新しいイベントループを作って実行して完了を待機する。
+    戻り値はコルーチンの戻り値。実行時に例外が発生した場合はFalseを返す。
     """
     try:
         return asyncio.run(coro)
     except Exception as e:
         logger.error(f"Sync execution error: {e}")
+        return False
 
 def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):
     """テキストメッセージ返信のショートカット"""
@@ -221,43 +223,49 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
         # === 1. 全員元気 (一括記録) ===
         if action == "all_genki":
             timestamp = get_now_iso()
-            
+
             # 全対象メンバーのログを保存
-            for name in TARGET_MEMBERS:
+            save_results = [
                 sync_run(save_log_async(
                     config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
                     (user_id, user_name, name, "😊 元気いっぱい", timestamp)
                 ))
-            
-            # 完了メッセージの生成
-            reply_text = "✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨"
-            
-            # 確認用ボタン付きメッセージ（Flex Message）
-            button_flex = {
-                "type": "bubble",
-                "body": {
-                    "type": "box", 
-                    "layout": "vertical",
-                    "contents": [{"type": "text", "text": reply_text, "wrap": True}]
-                },
-                "footer": {
-                    "type": "box", 
-                    "layout": "vertical",
-                    "contents": [
-                        {
-                            "type": "button", 
-                            "action": {"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}
-                        }
-                    ]
+                for name in TARGET_MEMBERS
+            ]
+
+            if not all(save_results):
+                logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")
+                send_reply_text(line_bot_api, reply_token, "⚠️ 記録に失敗しました。もう一度お試しください。")
+            else:
+                # 完了メッセージの生成
+                reply_text = "✅ 全員の「元気」を記録しました！\n今日も一日頑張りましょう✨"
+
+                # 確認用ボタン付きメッセージ（Flex Message）
+                button_flex = {
+                    "type": "bubble",
+                    "body": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [{"type": "text", "text": reply_text, "wrap": True}]
+                    },
+                    "footer": {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "button",
+                                "action": {"type": "postback", "label": "📊 記録を確認・修正", "data": "action=check_status"}
+                            }
+                        ]
+                    }
                 }
-            }
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    replyToken=reply_token,
-                    messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        replyToken=reply_token,
+                        messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                    )
                 )
-            )
 
         # === 2. 詳細入力パネル表示 ===
         elif action == "show_health_input":
@@ -287,29 +295,33 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                 send_reply_text(line_bot_api, reply_token, f"了解です。{target_name}の様子をメッセージで送ってください📝")
             
             elif target_name:
-                sync_run(save_log_async(
+                save_ok = sync_run(save_log_async(
                     config.SQLITE_TABLE_CHILD,
                     ["user_id", "user_name", "child_name", "condition", "timestamp"],
                     (user_id, user_name, target_name, condition_text, get_now_iso())
                 ))
-                            
-                reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
-                
-                # サマリ確認ボタン
-                button_flex = {
-                    "type": "bubble",
-                    "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": reply_text}]},
-                    "footer": {
-                        "type": "box", "layout": "vertical",
-                        "contents": [{"type": "button", "action": {"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}}]
+
+                if not save_ok:
+                    logger.error(f"child_check の記録保存に失敗しました (user_id={user_id}, child={target_name})")
+                    send_reply_text(line_bot_api, reply_token, "⚠️ 記録に失敗しました。もう一度お試しください。")
+                else:
+                    reply_text = f"📝 {target_name}: {condition_text}\n記録しました。"
+
+                    # サマリ確認ボタン
+                    button_flex = {
+                        "type": "bubble",
+                        "body": {"type": "box", "layout": "vertical", "contents": [{"type": "text", "text": reply_text}]},
+                        "footer": {
+                            "type": "box", "layout": "vertical",
+                            "contents": [{"type": "button", "action": {"type": "postback", "label": "📊 今日の記録確認", "data": "action=check_status"}}]
+                        }
                     }
-                }
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        replyToken=reply_token,
-                        messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                    line_bot_api.reply_message(
+                        ReplyMessageRequest(
+                            replyToken=reply_token,
+                            messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
+                        )
                     )
-                )
 
         # === 4. 記録確認 & 修正 ===
         elif action == "check_status":
@@ -354,15 +366,19 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
             item = raw_dict.get("item", "").strip() or "不明なメニュー"
             
             final_rec = f"{category}: {item}"
-            
-            sync_run(save_log_async(
+
+            save_ok = sync_run(save_log_async(
                 config.SQLITE_TABLE_FOOD,
                 ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
                 (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())
             ))
-            
-            reply_text = f"🍽️ 記録しました！\n【{category}】{item}\n\n今日も一日お疲れ様でした🍵"
-            send_reply_text(line_bot_api, reply_token, reply_text)
+
+            if not save_ok:
+                logger.error(f"food_record_direct の記録保存に失敗しました (user_id={user_id})")
+                send_reply_text(line_bot_api, reply_token, "⚠️ 記録に失敗しました。もう一度お試しください。")
+            else:
+                reply_text = f"🍽️ 記録しました！\n【{category}】{item}\n\n今日も一日お疲れ様でした🍵"
+                send_reply_text(line_bot_api, reply_token, reply_text)
 
         elif action == "food_manual":
             category = raw_dict.get("category", "その他")

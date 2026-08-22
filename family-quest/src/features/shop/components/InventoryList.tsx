@@ -5,8 +5,15 @@ import { Card } from '../../../components/ui/Card';
 import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { useSound } from '../../../hooks/useSound';
+import { useToast } from '../../../context/useToast';
 import { Loader2, PackageOpen, AlertCircle } from 'lucide-react';
 import { InventoryItem } from '../../../types';
+
+// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す
+// {"detail": "..."} の内容が入っている(apiClient.ts参照)。
+const extractErrorDetail = (error: unknown): string => {
+    return error instanceof Error && error.message ? error.message : '操作に失敗しました';
+};
 
 
 
@@ -22,6 +29,7 @@ type Props = {
 export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const queryClient = useQueryClient();
     const { play } = useSound();
+    const { showToast } = useToast();
     const queryKey = ['inventory', userId]; // QueryKeyを定数化
 
     // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「つかう」確認を行う
@@ -37,26 +45,31 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const useMutationAction = useMutation({
         mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),
         onSuccess: (_data, variables) => {
-            const usedInventoryId = variables; // 使用したアイテムID
+            const usedInventoryId = variables; // 使用申請したアイテムID
 
-            // ★追加: 即時反映処理 (Optimistic Update like behavior)
-            // サーバーからの応答を待たず、または応答直後にキャッシュを書き換えてアイテムを消す
+            // H-5: use_itemはバックエンド側で即時消費(consumed)ではなく承認待ち
+            // (pending)にするため、リストから消さずステータスのみ更新する。
+            // 実際の消費確定(quest_historyへの記録・chronicle反映)は親の承認
+            // (consume_item)時に行われる。
             queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
                 if (!oldItems) return [];
-                // consumed(使用済み)になったアイテムをリストから除外
-                return oldItems.filter(item => item.id !== usedInventoryId);
+                return oldItems.map(item =>
+                    item.id === usedInventoryId ? { ...item, status: 'pending' } : item
+                );
             });
 
-            // 念のためサーバーとも同期
+            // 念のためサーバーとも同期(承認待ち一覧のポーリングにも反映される)
             queryClient.invalidateQueries({ queryKey: queryKey });
+            queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
 
-            // ★バグ修正: アイテム使用はバックエンド側で quest_history に記録され
-            // 冒険の記録に載る仕組みだったが、chronicleクエリを無効化していなかったため
-            // staleTime(5分)が切れるまで反映されなかった。
-            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
-
-            // ★変更: 承認不要なので常にクリア音を再生
-            play('clear');
+            // 承認待ちになったことを示す申請音(quest完了時のpending相当)を再生
+            play('submit');
+        },
+        // M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が
+        // ユーザーに一切通知されないサイレント失敗になっていた。
+        onError: (error) => {
+            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
+            play('cancel');
         }
     });
 
@@ -73,6 +86,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
             });
             queryClient.invalidateQueries({ queryKey: queryKey });
             play('cancel');
+        },
+        onError: (error) => {
+            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
         }
     });
 

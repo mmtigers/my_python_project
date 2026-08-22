@@ -38,19 +38,31 @@ def get_ro_db_connection() -> sqlite3.Connection:
         f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0
     )
 
+def _parse_timestamp_to_jst(value) -> pd.Timestamp:
+    """
+    タイムスタンプ文字列をJSTのTimestampへ変換する。
+
+    M-1-4: オフセット付き(aware)の文字列はそのオフセットを尊重してJSTへ変換する。
+    tzinfoが無い(naive)文字列は、保存規約(core.utils.get_now_iso)に合わせて
+    「元からJSTで記録されている」とみなしてlocalizeする。以前は
+    pd.to_datetime(..., utc=True) で一律UTCとみなしていたため、tzinfoの無い
+    レガシーレコード(get_now_iso導入以前のデータ)がグラフ・電気代集計で
+    9時間ズレる原因になっていた。
+    """
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return ts.tz_localize("Asia/Tokyo")
+    return ts.tz_convert("Asia/Tokyo")
+
+
 def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """DataFrameのタイムスタンプを日本時間に変換し、表示名を適用する共通処理"""
     if df.empty or "timestamp" not in df.columns:
         return df
 
     df = df.copy()
-    
-    # 【最終修正】format="mixed" を確実に追加し、以降の冗長なapply処理を削除
-    df["timestamp"] = pd.to_datetime(
-        df["timestamp"], 
-        format="mixed", 
-        utc=True
-    ).dt.tz_convert("Asia/Tokyo")
+
+    df["timestamp"] = df["timestamp"].apply(_parse_timestamp_to_jst)
 
     return df
 
