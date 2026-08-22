@@ -310,6 +310,42 @@ class TestSyncMasterData:
         assert quest_count == 0
         assert reward_count == 0
 
+    def test_reward_still_owned_by_user_inventory_is_not_deleted(self, isolated_db, monkeypatch):
+        """M-1-2: user_inventory(reward_master(reward_id)へのFK)が参照している報酬を
+        マスタから削除しようとすると、以前はIntegrityErrorでsync_master_data全体が
+        失敗していた。参照が残っている報酬は削除をスキップし、sync自体は成功すること。"""
+        fake_quest_data = types.SimpleNamespace(
+            USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
+            QUESTS=[],
+            REWARDS=[],  # マスタからは全報酬を削除する想定
+        )
+        monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
+        monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Owned Reward', 100)"
+            )
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('dad', 999, 'owned', ?)",
+                (common.get_now_iso(),),
+            )
+
+        game_system = GameSystem()
+        result = game_system.sync_master_data()
+
+        assert result["status"] == "synced"
+        with common.get_db_cursor() as cur:
+            reward_row = cur.execute(
+                "SELECT reward_id FROM reward_master WHERE reward_id = 999"
+            ).fetchone()
+            inventory_row = cur.execute(
+                "SELECT id FROM user_inventory WHERE reward_id = 999"
+            ).fetchone()
+        assert reward_row is not None, "参照が残っている報酬は削除されずに残ること"
+        assert inventory_row is not None
+
 
 class TestTriggerTvUnlock:
     """
