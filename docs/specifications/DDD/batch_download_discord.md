@@ -214,129 +214,129 @@
 ### `DiscordNotifier.send`
 
 * **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。エラー通知フラグに応じて送信先チャンネル(`error`/`notify`)を切り替える。
-* 根拠: [DiscordNotifier.send] (行番号: 245〜252 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [DiscordNotifier.send] (行番号: 257〜264 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **引数/リクエスト**: `text: str` (通知内容), `is_error: bool = False` (エラー通知フラグ)
-* 根拠: [引数定義] (行番号: 246 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [引数定義] (行番号: 258 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 246 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (行番号: 258 / 抜粋: "-> None:")
 
 
 * **副作用**: `_send_discord_webhook` の呼び出しによる外部APIへの通知送信。
-* 根拠: [API呼び出し] (行番号: 250 / 抜粋: "_send_discord_webhook([message], channel=channel)")
+* 根拠: [API呼び出し] (行番号: 262 / 抜粋: "_send_discord_webhook([message], channel=channel)")
 
 
 * **エラーハンドリング**: 送信時の例外を捕捉し、`exc_info=True` 付きでエラーログを出力（例外は再送出しない）。
-* 根拠: [try-exceptブロック] (行番号: 249〜252 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (行番号: 261〜264 / 抜粋: "except Exception as e:")
 
 
 ### `HistoryManager.load_history`
 
-* **役割**: 履歴ファイル(`history.txt`)からダウンロード済みURLの集合を読み込む静的メソッド。
-* 根拠: [HistoryManager.load_history] (行番号: 255〜263 / 抜粋: "def load_history() -> Set[str]:")
+* **役割**: 履歴ファイル(`history.txt`)からダウンロード済みURLの集合を読み込む静的メソッド。読み込み失敗時は安全側（空の履歴として続行）に倒しつつ、`logger.error`で必ずログに残す。以前は`except Exception: pass`で読み込み失敗をログにすら残さず握りつぶしており、既にダウンロード済みのURLが全て「未ダウンロード」扱いになる再ダウンロード・再通知の嵐を引き起こしても原因調査ができない問題があったための修正である。
+* 根拠: [HistoryManager.load_historyとコメント] (行番号: 268〜279 / 抜粋: "def load_history() -> Set[str]:\n        history = set()\n        if CONFIG.HISTORY_FILE_PATH.exists():\n            try:\n                with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:\n                    history = {line.strip() for line in f if line.strip()}\n            except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Set[str]`（ファイルが存在しない場合や例外時は空集合）
-* 根拠: [戻り値ヒント] (行番号: 256 / 抜粋: "def load_history() -> Set[str]:")
+* 根拠: [戻り値ヒント] (行番号: 268 / 抜粋: "def load_history() -> Set[str]:")
 
 
-* **副作用**: 履歴ファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 260〜261 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:")
+* **副作用**: 履歴ファイルの読み込み、読み込み失敗時のエラーログ出力(`exc_info=True`)。
+* 根拠: [ファイル読み込みとエラーログ] (行番号: 272〜273, 279 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:", "logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)")
 
 
-* **エラーハンドリング**: 読み込み時の例外を無視（`pass`）し、その時点までに読めた履歴（空集合）を返す。
-* 根拠: [try-exceptブロック] (行番号: 262 / 抜粋: "except Exception: pass")
+* **エラーハンドリング**: 例外発生時は`exc_info=True`付きでエラーログを出力し、その時点までに読めた履歴（空集合）を安全側の結果として返す（例外は再送出しない）。
+* 根拠: [try-exceptブロックとコメント] (行番号: 274〜279 / 抜粋: "except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが\n                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の\n                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、\n                # 原因調査ができるよう必ずログには残す。\n                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)")
 
 
 ### `HistoryManager.add_history`
 
-* **役割**: ダウンロード完了URLを履歴ファイルへ追記する静的メソッド。
-* 根拠: [HistoryManager.add_history] (行番号: 265〜270 / 抜粋: "def add_history(url: str) -> None:")
+* **役割**: ダウンロード完了URLを履歴ファイルへ追記する静的メソッド。書き込み失敗時は処理自体は継続しつつ、`logger.error`で必ずログに残す。以前は`except Exception: pass`で書き込み失敗を握りつぶしており、当該URLが次回実行時も「未ダウンロード」のままになり再ダウンロード・再通知が続いても原因調査ができない問題があったための修正である。
+* 根拠: [HistoryManager.add_historyとコメント] (行番号: 283〜291 / 抜粋: "def add_history(url: str) -> None:\n        try:\n            with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")\n        except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も")
 
 
 * **引数/リクエスト**: `url: str`
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数定義] (行番号: 266 / 抜粋: "def add_history(url: str) -> None:")
+* 根拠: [関数定義] (行番号: 283 / 抜粋: "def add_history(url: str) -> None:")
 
 
-* **副作用**: 履歴ファイルへの追記書き込み。
-* 根拠: [ファイル書き込み] (行番号: 268〜269 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:")
+* **副作用**: 履歴ファイルへの追記書き込み、書き込み失敗時のエラーログ出力(`exc_info=True`)。
+* 根拠: [ファイル書き込みとエラーログ] (行番号: 285〜286, 291 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:", "logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)")
 
 
-* **エラーハンドリング**: 書き込み時の例外を無視（`pass`）。
-* 根拠: [try-exceptブロック] (行番号: 270 / 抜粋: "except Exception: pass")
+* **エラーハンドリング**: 例外発生時は`exc_info=True`付きでエラーログを出力する（処理は継続し、例外は再送出しない）。
+* 根拠: [try-exceptブロックとコメント] (行番号: 287〜291 / 抜粋: "except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も\n            # 「未ダウンロード」のままになり再ダウンロード・再通知が続く。\n            # ここで処理自体を止めるほどではないため続行するが、ログには残す。\n            logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)")
 
 
 ### `CooldownManager.is_in_cooldown`
 
 * **役割**: クールダウンファイル(`.bot_detection_cooldown`)から解除予定時刻を読み込み、現在時刻がその前であれば解除予定時刻を、そうでなければ`None`を返す静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 280〜282 / 抜粋: "def is_in_cooldown() -> Optional[datetime.datetime]:\n        """クールダウン中であれば解除予定時刻を、そうでなければNoneを返す。"""")
+* 根拠: [メソッド定義とDocstring] (行番号: 302〜303 / 抜粋: "def is_in_cooldown() -> Optional[datetime.datetime]:\n        """クールダウン中であれば解除予定時刻を、そうでなければNoneを返す。"""")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Optional[datetime.datetime]`
-* 根拠: [戻り値ヒント] (行番号: 281 / 抜粋: "def is_in_cooldown() -> Optional[datetime.datetime]:")
+* 根拠: [戻り値ヒント] (行番号: 302 / 抜粋: "def is_in_cooldown() -> Optional[datetime.datetime]:")
 
 
 * **副作用**: クールダウンファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 287 / 抜粋: "until = datetime.datetime.fromisoformat(path.read_text(encoding="utf-8").strip())")
+* 根拠: [ファイル読み込み] (行番号: 308 / 抜粋: "until = datetime.datetime.fromisoformat(path.read_text(encoding="utf-8").strip())")
 
 
 * **エラーハンドリング**: ファイルが壊れている場合（`ValueError`/`OSError`）は安全側（＝クールダウンしない）に倒して`None`を返す。
-* 根拠: [try-exceptブロックとコメント] (行番号: 288〜290 / 抜粋: "except (ValueError, OSError):\n            # 壊れたクールダウンファイルは安全側（＝クールダウンしない）に倒す\n            return None")
+* 根拠: [try-exceptブロックとコメント] (行番号: 309〜311 / 抜粋: "except (ValueError, OSError):\n            # 壊れたクールダウンファイルは安全側（＝クールダウンしない）に倒す\n            return None")
 
 
 ### `CooldownManager.trigger_cooldown`
 
 * **役割**: 現在時刻から`BOT_DETECTION_COOLDOWN_HOURS`（既定12時間）後を解除予定時刻として算出し、一時ファイル経由のアトミックな`replace`でクールダウンファイルへ書き込む静的メソッド。
-* 根拠: [メソッド定義とコメント] (行番号: 293〜303 / 抜粋: "def trigger_cooldown() -> None:\n        until = datetime.datetime.now() + datetime.timedelta(hours=CONFIG.BOT_DETECTION_COOLDOWN_HOURS)")
+* 根拠: [メソッド定義とコメント] (行番号: 315〜323 / 抜粋: "def trigger_cooldown() -> None:\n        until = datetime.datetime.now() + datetime.timedelta(hours=CONFIG.BOT_DETECTION_COOLDOWN_HOURS)")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 293 / 抜粋: "def trigger_cooldown() -> None:")
+* 根拠: [戻り値ヒント] (行番号: 315 / 抜粋: "def trigger_cooldown() -> None:")
 
 
 * **副作用**: 一時ファイルへの書き込みとアトミックな`replace`によるクールダウンファイルの更新、情報ログ出力。
-* 根拠: [アトミック書き込み] (行番号: 300〜303 / 抜粋: "tmp_path = CONFIG.BOT_DETECTION_COOLDOWN_FILE.with_suffix('.tmp')\n            tmp_path.write_text(until.isoformat(), encoding="utf-8")\n            tmp_path.replace(CONFIG.BOT_DETECTION_COOLDOWN_FILE)")
+* 根拠: [アトミック書き込み] (行番号: 321〜324 / 抜粋: "tmp_path = CONFIG.BOT_DETECTION_COOLDOWN_FILE.with_suffix('.tmp')\n            tmp_path.write_text(until.isoformat(), encoding="utf-8")\n            tmp_path.replace(CONFIG.BOT_DETECTION_COOLDOWN_FILE)")
 
 
 * **エラーハンドリング**: 書き込み失敗時(`OSError`)はエラーログを出力する（例外の再送出はしない）。
-* 根拠: [try-exceptブロック] (行番号: 304〜305 / 抜粋: "except OSError as e:\n            logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)")
+* 根拠: [try-exceptブロック] (行番号: 325〜326 / 抜粋: "except OSError as e:\n            logger.error(f"⚠️ クールダウンファイルの書き込みに失敗しました: {e}", exc_info=True)")
 
 
 ### `CooldownManager.clear`
 
 * **役割**: クールダウンファイルを削除し、クールダウン状態を手動解除する静的メソッド。
-* 根拠: [メソッド定義] (行番号: 307〜312 / 抜粋: "def clear() -> None:\n        try:\n            CONFIG.BOT_DETECTION_COOLDOWN_FILE.unlink(missing_ok=True)")
+* 根拠: [メソッド定義] (行番号: 329〜333 / 抜粋: "def clear() -> None:\n        try:\n            CONFIG.BOT_DETECTION_COOLDOWN_FILE.unlink(missing_ok=True)")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 307 / 抜粋: "def clear() -> None:")
+* 根拠: [戻り値ヒント] (行番号: 329 / 抜粋: "def clear() -> None:")
 
 
 * **副作用**: クールダウンファイルの削除(`unlink`)。
-* 根拠: [削除処理] (行番号: 310 / 抜粋: "CONFIG.BOT_DETECTION_COOLDOWN_FILE.unlink(missing_ok=True)")
+* 根拠: [削除処理] (行番号: 331 / 抜粋: "CONFIG.BOT_DETECTION_COOLDOWN_FILE.unlink(missing_ok=True)")
 
 
 * **エラーハンドリング**: `OSError`を捕捉して無視（`pass`）。
-* 根拠: [try-exceptブロック] (行番号: 311〜312 / 抜粋: "except OSError:\n            pass")
+* 根拠: [try-exceptブロック] (行番号: 332〜333 / 抜粋: "except OSError:\n            pass")
 
 
 ### `NetworkManager.create_session`
 
 * **役割**: リトライポリシー（総リトライ回数、バックオフ、対象ステータスコード）とUser-Agentを設定した `requests.Session` を生成する静的メソッド。
-* 根拠: [NetworkManager.create_session] (行番号: 315〜322 / 抜粋: "def create_session() -> requests.Session:")
+* 根拠: [NetworkManager.create_session] (行番号: 337〜343 / 抜粋: "def create_session() -> requests.Session:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `requests.Session`
-* 根拠: [戻り値ヒント] (行番号: 316 / 抜粋: "def create_session() -> requests.Session:")
+* 根拠: [戻り値ヒント] (行番号: 337 / 抜粋: "def create_session() -> requests.Session:")
 
 
 * **副作用**: なし（セッションオブジェクトの生成のみ）
@@ -346,12 +346,12 @@
 ### `FileSystemManager.sanitize_filename`
 
 * **役割**: 外部モジュール `file_utils.sanitize_filename` へファイル名のサニタイズ処理を委譲するラッパー静的メソッド。
-* 根拠: [FileSystemManager.sanitize_filename] (行番号: 325〜327 / 抜粋: "def sanitize_filename(filename: str) -> str:\n        return _shared_sanitize_filename(filename)")
+* 根拠: [FileSystemManager.sanitize_filename] (行番号: 346〜348 / 抜粋: "def sanitize_filename(filename: str) -> str:\n        return _shared_sanitize_filename(filename)")
 
 
 * **引数/リクエスト**: `filename: str`
 * **戻り値/レスポンス**: `str`
-* 根拠: [関数定義] (行番号: 326 / 抜粋: "def sanitize_filename(filename: str) -> str:")
+* 根拠: [関数定義] (行番号: 347 / 抜粋: "def sanitize_filename(filename: str) -> str:")
 
 
 * **副作用**: なし
@@ -361,50 +361,50 @@
 ### `FileSystemManager.ensure_dir`
 
 * **役割**: 指定パスのディレクトリを（親ディレクトリを含め）作成する静的メソッド。
-* 根拠: [FileSystemManager.ensure_dir] (行番号: 329〜336 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* 根拠: [FileSystemManager.ensure_dir] (行番号: 350〜357 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
 * **引数/リクエスト**: `path: Path`
 * **戻り値/レスポンス**: `bool`（成功時`True`、権限エラー時`False`）
-* 根拠: [戻り値ヒント] (行番号: 330 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* 根拠: [戻り値ヒント] (行番号: 351 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
 * **副作用**: ディレクトリ作成(`mkdir`)、権限エラー時のDiscord通知。
-* 根拠: [mkdir呼び出し] (行番号: 332 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
+* 根拠: [mkdir呼び出し] (行番号: 353 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
 
 
 * **エラーハンドリング**: `PermissionError` を捕捉し、エラー通知を送信して `False` を返す。
-* 根拠: [try-exceptブロック] (行番号: 334〜336 / 抜粋: "except PermissionError:")
+* 根拠: [try-exceptブロック] (行番号: 355〜357 / 抜粋: "except PermissionError:")
 
 
 ### `FileSystemManager.check_disk_space`
 
 * **役割**: 対象パス（存在しない場合は存在する親ディレクトリまで遡って）のディスク空き容量を確認し、設定値(`MIN_FREE_SPACE_GB`)を下回る場合は警告通知を送信する静的メソッド。
-* 根拠: [FileSystemManager.check_disk_space] (行番号: 338〜352 / 抜粋: "def check_disk_space(path: Path) -> bool:")
+* 根拠: [FileSystemManager.check_disk_space] (行番号: 360〜373 / 抜粋: "def check_disk_space(path: Path) -> bool:")
 
 
 * **引数/リクエスト**: `path: Path`
 * **戻り値/レスポンス**: `bool`（容量十分なら`True`、不足時`False`、例外時は安全側に倒して`False`）
-* 根拠: [戻り値ヒント と例外時のreturn] (行番号: 339, 352 / 抜粋: "def check_disk_space(path: Path) -> bool:", "return False")
+* 根拠: [戻り値ヒント と例外時のreturn] (行番号: 360, 373 / 抜粋: "def check_disk_space(path: Path) -> bool:", "return False")
 
 
 * **副作用**: `DiscordNotifier.send` による容量不足時の警告通知、例外時のエラーログ出力。
-* 根拠: [通知送信] (行番号: 347 / 抜粋: "DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)")
+* 根拠: [通知送信] (行番号: 368 / 抜粋: "DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)")
 
 
 * **エラーハンドリング**: `shutil.disk_usage` 等での例外を捕捉し、エラーログを出力した上で `False`（＝ダウンロード中断）を返す。
-* 根拠: [try-exceptブロック] (行番号: 350〜352 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (行番号: 371〜373 / 抜粋: "except Exception as e:")
 
 
 ### `SystemHealthChecker.is_within_time_window`
 
 * **役割**: 現在時刻が実行許可時間帯(`START_HOUR`〜`END_HOUR`)内かを判定する静的メソッド。`RESTRICT_TIME`が無効（`--force`実行時）であれば常に`True`。
-* 根拠: [SystemHealthChecker.is_within_time_window] (行番号: 355〜358 / 抜粋: "def is_within_time_window() -> bool:")
+* 根拠: [SystemHealthChecker.is_within_time_window] (行番号: 377〜379 / 抜粋: "def is_within_time_window() -> bool:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒント] (行番号: 356 / 抜粋: "def is_within_time_window() -> bool:")
+* 根拠: [戻り値ヒント] (行番号: 377 / 抜粋: "def is_within_time_window() -> bool:")
 
 
 * **副作用**: なし
@@ -414,16 +414,16 @@
 ### `SystemHealthChecker.verify_nas_mount`
 
 * **役割**: NASのマウントポイントおよびマーカーファイル(`nas_marker_path`)の存在を確認し、未マウントであればCRITICAL通知を送信する静的メソッド。
-* 根拠: [SystemHealthChecker.verify_nas_mount] (行番号: 360〜365 / 抜粋: "def verify_nas_mount() -> bool:")
+* 根拠: [SystemHealthChecker.verify_nas_mount] (行番号: 381〜386 / 抜粋: "def verify_nas_mount() -> bool:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒント] (行番号: 361 / 抜粋: "def verify_nas_mount() -> bool:")
+* 根拠: [戻り値ヒント] (行番号: 382 / 抜粋: "def verify_nas_mount() -> bool:")
 
 
 * **副作用**: 未マウント時のDiscord通知(`is_error=True`)。
-* 根拠: [通知送信] (行番号: 363 / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)")
+* 根拠: [通知送信] (行番号: 384 / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)")
 
 
 * **エラーハンドリング**: なし（例外は捕捉されず呼び出し元に伝播しうる）
@@ -432,16 +432,16 @@
 ### `SystemHealthChecker.check_dependencies`
 
 * **役割**: `ffmpeg` コマンドの存在を確認して見つからない場合は警告ログを出力し、続けて`check_yt_dlp_freshness`を呼び出す静的メソッド。
-* 根拠: [SystemHealthChecker.check_dependencies] (行番号: 367〜371 / 抜粋: "def check_dependencies() -> None:")
+* 根拠: [SystemHealthChecker.check_dependencies] (行番号: 389〜392 / 抜粋: "def check_dependencies() -> None:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 368 / 抜粋: "def check_dependencies() -> None:")
+* 根拠: [戻り値ヒント] (行番号: 389 / 抜粋: "def check_dependencies() -> None:")
 
 
 * **副作用**: `logger.warning` によるログ出力、`check_yt_dlp_freshness`の呼び出し。
-* 根拠: [ログ出力と呼び出し] (行番号: 369〜371 / 抜粋: "logger.warning("⚠️ ffmpeg not found.")\n        SystemHealthChecker.check_yt_dlp_freshness()")
+* 根拠: [ログ出力と呼び出し] (行番号: 390〜392 / 抜粋: "logger.warning("⚠️ ffmpeg not found.")\n        SystemHealthChecker.check_yt_dlp_freshness()")
 
 
 * **エラーハンドリング**: なし（`ffmpeg`未検出時も処理を継続する＝警告のみ）
@@ -450,64 +450,64 @@
 ### `SystemHealthChecker.check_yt_dlp_freshness`
 
 * **役割**: `yt_dlp`のバージョン文字列（`YYYY.MM.DD`形式）を解析し、`YTDLP_STALENESS_WARN_DAYS`（既定45日）を超えて更新されていなければ警告ログを出力する静的メソッド。バージョン文字列が想定形式でない場合は静かにスキップする。
-* 根拠: [メソッド定義とDocstring] (行番号: 373〜380 / 抜粋: "def check_yt_dlp_freshness() -> None:\n        """yt-dlpのバージョン（YYYY.MM.DD形式）が古すぎないか警告する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 395〜401 / 抜粋: "def check_yt_dlp_freshness() -> None:\n        """yt-dlpのバージョン（YYYY.MM.DD形式）が古すぎないか警告する。")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 374 / 抜粋: "def check_yt_dlp_freshness() -> None:")
+* 根拠: [戻り値ヒント] (行番号: 395 / 抜粋: "def check_yt_dlp_freshness() -> None:")
 
 
 * **副作用**: バージョンが古い場合の警告ログ出力。
-* 根拠: [警告ログ] (行番号: 387〜393 / 抜粋: "logger.warning(\n                f"⚠️ yt-dlpのバージョンが古い可能性があります ")")
+* 根拠: [警告ログ] (行番号: 409〜414 / 抜粋: "logger.warning(\n                f"⚠️ yt-dlpのバージョンが古い可能性があります ")")
 
 
 * **エラーハンドリング**: バージョン文字列の解析失敗(`ValueError`/`AttributeError`)時は判定をスキップして即座に`return`する（警告や例外なし）。
-* 根拠: [try-exceptブロック] (行番号: 381〜384 / 抜粋: "except (ValueError, AttributeError):\n            return")
+* 根拠: [try-exceptブロック] (行番号: 402〜405 / 抜粋: "except (ValueError, AttributeError):\n            return")
 
 
 ### `DownloadStrategy` (抽象基底クラス)
 
 * **役割**: `UniversalYtDlpStrategy` と `ScrapingStrategy` に共通する保存先ディレクトリ決定・重複スキップ判定ロジックを提供する抽象基底クラス。`download`メソッドはサブクラスでの実装を強制する。
-* 根拠: [DownloadStrategyクラス] (行番号: 398〜421 / 抜粋: "class DownloadStrategy(ABC):")
+* 根拠: [DownloadStrategyクラス] (行番号: 419〜442 / 抜粋: "class DownloadStrategy(ABC):")
 
 
 * **引数/リクエスト**: `__init__(self, save_base_dir: Path, session: requests.Session)`
-* 根拠: [__init__定義] (行番号: 399〜401 / 抜粋: "def __init__(self, save_base_dir: Path, session: requests.Session):")
+* 根拠: [__init__定義] (行番号: 420〜422 / 抜粋: "def __init__(self, save_base_dir: Path, session: requests.Session):")
 
 
 * **戻り値/レスポンス**: `download`は`bool`を返す抽象メソッド（`@abstractmethod`）。`_determine_save_dir`は`Optional[Path]`、`_should_skip`は`bool`を返す。
-* 根拠: [各メソッドの戻り値ヒント] (行番号: 404, 407, 417 / 抜粋: "-> bool:", "-> Optional[Path]:", "-> bool:")
+* 根拠: [各メソッドの戻り値ヒント] (行番号: 425, 428, 438 / 抜粋: "-> bool:", "-> Optional[Path]:", "-> bool:")
 
 
 * **副作用**: `_determine_save_dir` は `FileSystemManager.ensure_dir`/`check_disk_space` を呼び出し、ディレクトリ作成や通知等の副作用を間接的に引き起こす。
-* 根拠: [_determine_save_dir内] (行番号: 413〜414 / 抜粋: "if not FileSystemManager.ensure_dir(target_dir): return None")
+* 根拠: [_determine_save_dir内] (行番号: 434〜435 / 抜粋: "if not FileSystemManager.ensure_dir(target_dir): return None")
 
 
 * **エラーハンドリング**: `_determine_save_dir`はディレクトリ作成/容量チェックに失敗した場合`None`を返す。
-* 根拠: [ガード節] (行番号: 413〜415 / 抜粋: "if not FileSystemManager.check_disk_space(target_dir): return None")
+* 根拠: [ガード節] (行番号: 434〜436 / 抜粋: "if not FileSystemManager.check_disk_space(target_dir): return None")
 
 
 ### `UniversalYtDlpStrategy.download`
 
-* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。
-* 根拠: [UniversalYtDlpStrategy.download] (行番号: 424〜468 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。
+* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 446〜464 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
-* 根拠: [引数定義] (行番号: 425 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [引数定義] (行番号: 446 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功・スキップ時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 456, 461, 468 / 抜粋: "if self._should_skip(filename): return True")
+* 根拠: [return文] (行番号: 482, 487, 494 / 抜粋: "if self._should_skip(filename): return True")
 
 
 * **副作用**: 保存先ディレクトリの決定・作成、`yt_dlp`によるメタデータ取得とダウンロード、成功時のDiscord通知。
-* 根拠: [ダウンロード実行と通知] (行番号: 459〜460 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
+* 根拠: [ダウンロード実行と通知] (行番号: 485〜486 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を捕捉してエラーログを出力し、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 462〜468 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
+* 根拠: [try-exceptブロック] (行番号: 488〜494 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
 
 
 ### `ScrapingStrategy.download`

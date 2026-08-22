@@ -21,7 +21,9 @@
 
 * LINE BotおよびSwitchBotからのWebhookリクエストを受信・処理するためのFastAPIルーターの定義。
 * LINEからのリクエストをハンドラへ委譲し、SwitchBotからのセンサーイベント（対象デバイス限定、重複排除後）をログDBへ保存し、サービスロジックへ委譲する責務を持つ。
-* 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 17 / 抜粋: `router = APIRouter()`)、(行番号: 19 / 抜粋: `@router.post("/callback/line")`)、(行番号: 38 / 抜粋: `@router.post("/webhook/switchbot")`)
+* 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 17 / 抜粋: `router = APIRouter()`)、(行番号: 19 / 抜粋: `@router.post("/callback/line")`)、(行番号: 45 / 抜粋: `@router.post("/webhook/switchbot")`)
+* コミット`94c2198`（H-4修正）により、SwitchBot公式Webhookペイロード形式（`context.deviceType`に`"WoContact"`/`"WoPresence"`等が入る形式）に対応した。`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙（`"Contact Sensor"`, `"Motion Sensor"`）と公式Webhookの語彙（`"WoContact"`, `"WoPresence"`）を併存させたsetに変更され、`device_type`の解決ロジックも`ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更された（修正前の`getattr(ctx, "deviceType", ...)`はモデル上`deviceType`が常に定義済みの`Optional`フィールドだったため、デフォルト値が効かず常に`None`になるバグがあった）。
+* 根拠: `TARGET_DEVICE_TYPES = {` (行番号: 40-43 / 抜粋: "TARGET_DEVICE_TYPES = {"), `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (行番号: 61 / 抜粋: "device_type = ctx.deviceType or getattr")
 
 
 
@@ -32,32 +34,32 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 同期ハンドラをスレッドで実行 | 行番号: 2, 28 / 抜粋: `import asyncio` |
-| `hmac` | 標準ライブラリ | SwitchBot Webhookの共有シークレット比較(タイミング攻撃耐性のある比較) | 行番号: 3, 45 / 抜粋: `import hmac` |
-| `time` | 標準ライブラリ | 現在時刻（Unixタイムスタンプ）の取得 | 行番号: 4, 59 / 抜粋: `import time` |
+| `hmac` | 標準ライブラリ | SwitchBot Webhookの共有シークレット比較(タイミング攻撃耐性のある比較) | 行番号: 3, 52 / 抜粋: `import hmac` |
+| `time` | 標準ライブラリ | 現在時刻（Unixタイムスタンプ）の取得 | 行番号: 4, 69 / 抜粋: `import time` |
 | `APIRouter` | 外部ライブラリ | ルーターのインスタンス化 | 行番号: 5, 17 / 抜粋: `from fastapi import APIRouter...` |
 | `Request` | 外部ライブラリ | リクエストオブジェクトの受け取り | 行番号: 5, 20 / 抜粋: `from fastapi import APIRouter...` |
 | `Header` | 外部ライブラリ | ヘッダー値の取得 | 行番号: 5, 20 / 抜粋: `from fastapi import APIRouter...` |
 | `HTTPException` | 外部ライブラリ | HTTPエラー例外の送出 | 行番号: 5, 23 / 抜粋: `from fastapi import APIRouter...` |
 | `InvalidSignatureError` | 外部ライブラリ | LINEの署名検証エラーの捕捉 | 行番号: 6, 29 / 抜粋: `from linebot.v3.exceptions...` |
-| `config` | 内部モジュール | 設定値、デバイス情報、SwitchBot Webhook共有シークレットの参照 | 行番号: 8, 44, 72 / 抜粋: `import config` |
+| `config` | 内部モジュール | 設定値、デバイス情報、SwitchBot Webhook共有シークレットの参照 | 行番号: 8, 51, 82 / 抜粋: `import config` |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | 行番号: 9, 16 / 抜粋: `from core.logger import...` |
-| `save_log_async` | 内部モジュール | 非同期でのログ保存 | 行番号: 10, 78 / 抜粋: `from core.database import...` |
-| `get_now_iso` | 内部モジュール | 現在時刻のISO文字列取得 | 行番号: 11, 80 / 抜粋: `from core.utils import...` |
-| `sensor_service` | 内部モジュール | 重複判定とセンサーデータの処理 | 行番号: 12, 63 / 抜粋: `from services import...` |
-| `switchbot_service` | 内部モジュール (エイリアス `sb_tool`) | デバイス名の取得 | 行番号: 12, 71 / 抜粋: `from services import...` |
+| `save_log_async` | 内部モジュール | 非同期でのログ保存 | 行番号: 10, 88 / 抜粋: `from core.database import...` |
+| `get_now_iso` | 内部モジュール | 現在時刻のISO文字列取得 | 行番号: 11, 90 / 抜粋: `from core.utils import...` |
+| `sensor_service` | 内部モジュール | 重複判定とセンサーデータの処理 | 行番号: 12, 73 / 抜粋: `from services import...` |
+| `switchbot_service` | 内部モジュール (エイリアス `sb_tool`) | デバイス名の取得 | 行番号: 12, 81 / 抜粋: `from services import...` |
 | `line_handler` | 内部モジュール | LINEリクエストの処理移譲 | 行番号: 13, 22 / 抜粋: `from handlers import...` |
-| `SwitchBotWebhookBody` | 内部モジュール | SwitchBotリクエストボディの型定義 | 行番号: 14, 39 / 抜粋: `from models.switchbot...` |
+| `SwitchBotWebhookBody` | 内部モジュール | SwitchBotリクエストボディの型定義 | 行番号: 14, 46 / 抜粋: `from models.switchbot...` |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `line_handler.line_handler.handle` | 具体的な処理内容、副作用が提供ファイル内に記述されていないため。 | 行番号: 28 / 抜粋: `await asyncio.to_thread(...)` |
-| `config.SWITCHBOT_WEBHOOK_TOKEN` | 実際のトークン値が`config.py`側の環境変数読み込みに依存し、本ファイルからは不明なため。 | 行番号: 44 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:` |
-| `sensor_service.is_duplicate_webhook` | 重複判定の具体的なキャッシュやDBアクセス機構が不明なため。 | 行番号: 63 / 抜粋: `if sensor_service.is_duplicate...` |
-| `sb_tool.get_device_name_by_id` | デバイス名取得の実装詳細（外部API通信かローカルDBか）が不明なため。 | 行番号: 71 / 抜粋: `api_name = sb_tool.get_device...` |
-| `save_log_async` | 保存先のDBスキーマや具体的な書き込み機構が不明なため。 | 行番号: 78 / 抜粋: `await save_log_async(...)` |
-| `sensor_service.process_sensor_data` | センサーデータ処理の具体的な実装や副作用が不明なため。 | 行番号: 92 / 抜粋: `await sensor_service.process...` |
+| `config.SWITCHBOT_WEBHOOK_TOKEN` | 実際のトークン値が`config.py`側の環境変数読み込みに依存し、本ファイルからは不明なため。 | 行番号: 51 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:` |
+| `sensor_service.is_duplicate_webhook` | 重複判定の具体的なキャッシュやDBアクセス機構が不明なため。 | 行番号: 73 / 抜粋: `if sensor_service.is_duplicate...` |
+| `sb_tool.get_device_name_by_id` | デバイス名取得の実装詳細（外部API通信かローカルDBか）が不明なため。 | 行番号: 81 / 抜粋: `api_name = sb_tool.get_device...` |
+| `save_log_async` | 保存先のDBスキーマや具体的な書き込み機構が不明なため。 | 行番号: 88 / 抜粋: `await save_log_async(...)` |
+| `sensor_service.process_sensor_data` | センサーデータ処理の具体的な実装や副作用が不明なため。 | 行番号: 102 / 抜粋: `await sensor_service.process...` |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -91,37 +93,37 @@
 
 ### 変数 `TARGET_DEVICE_TYPES`
 
-* **役割**: SwitchBot Webhookで処理対象とするデバイスタイプのリスト定義。
-* 根拠: リストの定義 (行番号: 36 / 抜粋: `TARGET_DEVICE_TYPES = ["Contact...`)
+* **役割**: SwitchBot Webhookで処理対象とするデバイスタイプの集合(`set`)定義。デバイス一覧API(`GET /devices`)の語彙(`"Contact Sensor"`, `"Motion Sensor"`)と、SwitchBot公式Webhookペイロードの語彙(`"WoContact"`, `"WoPresence"`)の両方を許容する（コミット`94c2198`, H-4修正で後者を追加。従来は前者のみのリストだったため、公式Webhook形式のペイロードが全て「対象外デバイス」として黙って捨てられていた）。
+* 根拠: 集合の定義 (行番号: 40-43 / 抜粋: `TARGET_DEVICE_TYPES = {`)
 
 
 
 ### エンドポイント `switchbot_webhook`
 
-* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。
-* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 38〜94 / 抜粋: `@router.post("/webhook/switchbot")`)
+* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。
+* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜104 / 抜粋: `@router.post("/webhook/switchbot")`)
 
 
 * **引数/リクエスト**: `body`: `SwitchBotWebhookBody` (Pydanticモデルなどの型)、`token`: `str`（省略可、デフォルト`None`。クエリパラメータ `?token=...`）
-* 根拠: 関数の引数定義 (行番号: 39 / 抜粋: `async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):`)
+* 根拠: 関数の引数定義 (行番号: 46 / 抜粋: `async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):`)
 
 
 * **戻り値/レスポンス**: JSON形式の辞書 (ステータスと理由を含む)。
-* 根拠: 各return文 (行番号: 56, 66, 94 / 抜粋: `return {"status": "success"}`)
+* 根拠: 各return文 (行番号: 66, 76, 104 / 抜粋: `return {"status": "success"}`)
 
 
 * **副作用**:
 * `device_records` へのログ保存 (`save_log_async`)。
 * 特定のステータスの場合、`config.SQLITE_TABLE_DAILY_LOGS` へのログ保存 (`save_log_async`)。
 * `sensor_service.process_sensor_data` の実行による副作用。
-* 根拠: 関数内の処理呼び出し (行番号: 78, 86, 92 / 抜粋: `await save_log_async(...)`)
+* 根拠: 関数内の処理呼び出し (行番号: 88, 96, 102 / 抜粋: `await save_log_async(...)`)
 
 
 * **エラーハンドリング**:
 * `config.SWITCHBOT_WEBHOOK_TOKEN` が設定されている場合、クエリパラメータ `token` が一致しなければ HTTP 401 を送出する(`hmac.compare_digest`によるタイミング攻撃耐性のある比較)。未設定時は従来通り検証をスキップする(後方互換)。
 * 対象外デバイスや重複イベントの場合は早期リターン。
 * 明示的な `try-except` ブロックはそれ以外にはなし。
-* 根拠: トークン検証 (行番号: 44〜46 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 54, 63 / 抜粋: `if device_type not in...`)
+* 根拠: トークン検証 (行番号: 51〜53 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 64, 73 / 抜粋: `if device_type not in...`)
 
 
 
@@ -215,39 +217,43 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/sensor_service.py` | SwitchBotからのイベントの重複判定と、センサーデータのメインロジックの副作用を把握するため。 | 行番号: 63, 92 / 抜粋: `sensor_service.is_duplicate...`、`await sensor_service.process...` |
-| 高 | `core/database.py` | ログデータの保存先スキーマ、実際に保存されるテーブル構造を確認し、永続化層の仕様を明確化するため。 | 行番号: 78 / 抜粋: `await save_log_async(...)` |
+| 高 | `services/sensor_service.py` | SwitchBotからのイベントの重複判定と、センサーデータのメインロジックの副作用を把握するため。 | 行番号: 73, 102 / 抜粋: `sensor_service.is_duplicate...`、`await sensor_service.process...` |
+| 高 | `core/database.py` | ログデータの保存先スキーマ、実際に保存されるテーブル構造を確認し、永続化層の仕様を明確化するため。 | 行番号: 88 / 抜粋: `await save_log_async(...)` |
 | 中 | `handlers/line_handler.py` | LINEのメッセージ処理の全体像を把握するため。 | 行番号: 28 / 抜粋: `line_handler.line_handler.handle` |
-| 中 | `config.py` | 登録されているデバイス情報（`MONITOR_DEVICES`）の構造やデータベーステーブル名、`SWITCHBOT_WEBHOOK_TOKEN`などの定数を確認するため。 | 行番号: 44, 72, 86 / 抜粋: `config.SWITCHBOT_WEBHOOK_TOKEN`、`config.MONITOR_DEVICES`、`config.SQLITE_TABLE_DAILY_LOGS` |
+| 中 | `config.py` | 登録されているデバイス情報（`MONITOR_DEVICES`）の構造やデータベーステーブル名、`SWITCHBOT_WEBHOOK_TOKEN`などの定数を確認するため。 | 行番号: 51, 82, 96 / 抜粋: `config.SWITCHBOT_WEBHOOK_TOKEN`、`config.MONITOR_DEVICES`、`config.SQLITE_TABLE_DAILY_LOGS` |
 
 ## 8. 保守上の注意点
 
 * `switchbot_webhook` は `config.SWITCHBOT_WEBHOOK_TOKEN` が未設定の場合、トークン検証を行わず従来通り動作する（後方互換のためのオプトイン設計）。設定時のみ `?token=...` クエリパラメータとの一致を `hmac.compare_digest` で検証し、不一致・未指定であれば HTTP 401 を返す。
-* 根拠: トークン検証ブロック (行番号: 44〜46)
+* 根拠: トークン検証ブロック (行番号: 51〜53)
 
 
 * `callback_line` において、`InvalidSignatureError` 以外の例外が発生した場合、ロガーには出力されるが例外は再スローされず `"OK"` が返却される。
 * 根拠: `except Exception as e:` 内の処理 (行番号: 31〜32)
 
 
-* `switchbot_webhook` 内のデバイスタイプ判定において、`ctx` (context) または `body` から `deviceType` を取得し、対象外の場合は辞書形式のリターンを行う。
-* 根拠: ガード節1の処理 (行番号: 51〜56)
+* **(コミット`94c2198`, H-4修正で解消)** 修正前は `device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))` という実装だったが、`SwitchBotContext.deviceType` がPydanticの`Optional`フィールドとして常に定義済みだったため`getattr`のデフォルト値が効かず、`ctx.deviceType`が未設定(`None`)の場合でも`getattr`は`None`をそのまま返し、`body.deviceType`側へのフォールバックが機能しなかった。加えて`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙のみだったため、SwitchBot公式Webhookのペイロード（`context.deviceType`に`"WoContact"`等が入る形式）は常に「対象外デバイス」として黙って捨てられていた。現在は`device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更され、`TARGET_DEVICE_TYPES`も公式Webhook語彙を含むsetに拡張されている。
+* 根拠: `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (行番号: 61 / 抜粋: "device_type = ctx.deviceType or getattr"), `TARGET_DEVICE_TYPES = {` (行番号: 40-43 / 抜粋: "TARGET_DEVICE_TYPES = {")
+
+
+* `switchbot_webhook` 内のデバイスタイプ判定において、`ctx.deviceType`（優先）または`body.deviceType`から`deviceType`を取得し、対象外の場合は辞書形式のリターンを行う。
+* 根拠: ガード節1の処理 (行番号: 58〜66)
 
 
 * イベント重複排除ロジックはインメモリで処理されているかなど詳細不明だが、この関数の処理に依存している。
-* 根拠: ガード節2の処理 (行番号: 63〜66)
+* 根拠: ガード節2の処理 (行番号: 73〜76)
 
 
 * `switchbot_webhook` において、`sb_tool` と `config` 両方からの名前取得を試み、失敗した場合のフォールバック (`Unknown_{mac}`) が設定されている。
-* 根拠: `name` 変数の解決 (行番号: 71〜75)
+* 根拠: `name` 変数の解決 (行番号: 81〜85)
 
 
 * `switchbot_webhook` において、`ctx.brightness` が存在しない場合は空文字列として保存される。
-* 根拠: `save_log_async` の引数 (行番号: 80)
+* 根拠: `save_log_async` の引数 (行番号: 90)
 
 
 * `switchbot_webhook` 内での明示的な例外処理（`try-except`）が存在しないため、`save_log_async` 等で例外が発生した場合、デフォルトのエラーレスポンスとなる。
-* 根拠: 関数全体の構造 (行番号: 38〜94)
+* 根拠: 関数全体の構造 (行番号: 45〜104)
 
 
 
