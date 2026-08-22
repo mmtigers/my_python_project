@@ -84,3 +84,27 @@ class TestFreshDbApprovalFlowE2E:
 
         assert son_row["gold"] > son_gold_before
         assert hist_after["status"] == "approved"
+
+
+class TestSyncMasterDataTimestampFormatIsConsistent:
+    """
+    Low: sync_master_data() の quest_users upsert だけが updated_at に
+    naive な datetime.datetime.now() (例: '2026-08-22 19:30:00.123456') を
+    書き込んでおり、ファイル内の他の全ての箇所(avatar更新等)は
+    common.get_now_iso() (ISO8601 + JSTオフセット, 例: '...T...+09:00') を
+    使っていて形式が不統一だった。
+    """
+
+    def test_updated_at_uses_get_now_iso_format_not_naive_datetime_str(self, isolated_db):
+        game_system = GameSystem()
+        game_system.sync_master_data()
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute("SELECT updated_at FROM quest_users WHERE user_id='dad'").fetchone()
+
+        updated_at = row["updated_at"]
+        assert "T" in updated_at and "+09:00" in updated_at, (
+            f"quest_users.updated_at should use the ISO8601+JST format produced by "
+            f"common.get_now_iso() (like every other timestamp column in this file), "
+            f"got: {updated_at!r}"
+        )

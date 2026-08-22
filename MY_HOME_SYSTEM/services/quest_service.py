@@ -574,7 +574,7 @@ class QuestService:
                         end_dt = datetime.date(y, m, d)
                         if today_date > end_dt: continue
                 except ValueError as e:
-                    logger.warning(f"Date parse error for quest {q.get('id')}: {e}")
+                    logger.warning(f"Date parse error for quest {q.get('quest_id')}: {e}")
                     continue
             if q['quest_type'] == 'random':
                 seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
@@ -810,7 +810,7 @@ class GameSystem:
                         name = excluded.name, 
                         job_class = excluded.job_class,
                         role = COALESCE(excluded.role, quest_users.role)
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, datetime.datetime.now()))
+                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, common.get_now_iso()))
             
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
