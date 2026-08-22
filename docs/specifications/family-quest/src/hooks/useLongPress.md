@@ -218,6 +218,13 @@ graph TD
 | `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | 本ファイルはフックの定義のみであり、呼び出し側のコンテキストが含まれていないため | `../features/quest/components/QuestList.tsx` |
 | コンポーネントが押下状態のままアンマウントされた場合の実際の影響（メモリリーク等の顕在化有無） | 本ファイル単体の静的解析では実行時の挙動までは判定できないため | 実行時の動作確認、または呼び出し元のライフサイクル管理コード |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(95〜99行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel, thresholdMs: 550 })`として呼び出されており、`onShortTap`は渡されていない（＝短タップでは何も起きない）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(179行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`div`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:95-99,179` |
+| コンポーネントが押下状態のままアンマウントされた場合の実際の影響（メモリリーク等の顕在化有無） | 唯一の呼び出し元である`family-quest/src/features/quest/components/QuestList.tsx`を直接確認したが、`useEffect`のインポートおよび使用箇所は存在せず（本ファイル自身の`import`文にも`useEffect`は含まれない）、呼び出し側でも本フックのタイマーをアンマウント時に明示的にクリーンアップする実装は見当たらなかった。したがって、押下状態のままカードがアンマウントされた場合に`setInterval`/`setTimeout`が残存する可能性を打ち消す仕組みは、フック側・呼び出し側のいずれにも存在しないことを直接ソース確認できた。ただし、これが実際にメモリリークとして顕在化するか（Reactが内部的に破棄済みコンポーネントへの`setState`を無視して実害がないかなど）はランタイムでの動作確認が必要であり、静的なソースコード解析だけでは断定できない。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:1-9`（`useEffect`不使用を確認） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない
