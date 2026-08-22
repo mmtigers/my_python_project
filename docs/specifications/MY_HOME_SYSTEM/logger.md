@@ -208,7 +208,14 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `BASE_DIR` の実体パス | ディレクトリパスの起点となる変数の値が当ファイル内では定義されていないため。 | `config.py` |
-| `DISCORD_WEBHOOK_ERROR` のURL値 | DiscordのWebhook送信先のエンドポイント文字列が当ファイル内では定義されていないため。 | `config.py` |
+| `DISCORD_WEBHOOK_ERROR` のURL値 | DiscordのWebhook送信先のエンドポイント文字列が当ファイル内では定義されていないため。（`config.py`は直接確認できたが、実値は環境変数由来のためリポジトリ内には存在せず解消不可） | `config.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `BASE_DIR` の実体パス | `MY_HOME_SYSTEM/config.py`212行目を直接確認した。`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`と定義されており、`config.py`自身が配置されているディレクトリ、すなわち`MY_HOME_SYSTEM`ディレクトリの絶対パスであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212` |
+| `DISCORD_WEBHOOK_ERROR` のURL値 | `MY_HOME_SYSTEM/config.py`194行目を直接確認した。`DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")`と定義されており、環境変数から取得する`Optional[str]`型であることを確認した。実際のWebhook URL文字列そのものは環境変数由来のためリポジトリ内には存在しない。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:194` |
 
 ## 10. 自己検証結果
 
