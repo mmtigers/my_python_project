@@ -11,7 +11,7 @@ logger = logging.getLogger("core.database")
 
 @contextmanager
 def get_db_cursor(commit: bool = False):
-    """DB接続コンテキストマネージャ (リトライ機能付き)"""
+    """DB接続コンテキストマネージャ (接続確立のみリトライ。yieldは必ず1回だけ行う)"""
     conn = None
     max_retries = 5
     retry_delay = 1.0
@@ -22,32 +22,27 @@ def get_db_cursor(commit: bool = False):
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA foreign_keys=ON;")
-
-            yield conn.cursor()
-            
-            if commit:
-                conn.commit()
-            break 
+            break
         except sqlite3.OperationalError as e:
-            if "locked" in str(e):
-                logger.warning(f"⚠️ DB is locked. Retrying... ({attempt+1}/{max_retries})")
-                if conn: conn.close()
+            if conn:
+                conn.close()
+                conn = None
+            if "locked" in str(e) and attempt < max_retries - 1:
+                logger.warning(f"⚠️ DB is locked. Retrying connection... ({attempt+1}/{max_retries})")
                 time.sleep(retry_delay)
-            else:
-                logger.error(f"データベース操作エラー: {e}")
-                if conn: conn.rollback()
-                raise e
-        except Exception as e:
-            logger.error(f"予期せぬDBエラー: {e}")
-            if conn: conn.rollback()
-            raise e
-    else:
-        logger.error("❌ DB Retry limit reached.")
-        if conn: conn.close()
-    
-    if conn:
-        try: conn.close()
-        except: pass
+                continue
+            logger.error(f"❌ DB接続エラー: {e}")
+            raise
+
+    try:
+        yield conn.cursor()
+        if commit:
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def execute_read_query(query: str, params: tuple = ()) -> str:
     """読み取り専用モードで安全にSELECTを実行する"""
@@ -66,17 +61,16 @@ def execute_read_query(query: str, params: tuple = ()) -> str:
 
 def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """汎用データ保存関数"""
-    with get_db_cursor(commit=True) as cur:
-        if cur:
-            try:
-                placeholders = ", ".join(["?"] * len(values_list))
-                columns = ", ".join(columns_list)
-                sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
-                cur.execute(sql, values_list)
-                return True
-            except Exception as e:
-                logger.error(f"データ保存失敗 ({table}): {e}")
-    return False
+    try:
+        with get_db_cursor(commit=True) as cur:
+            placeholders = ", ".join(["?"] * len(values_list))
+            columns = ", ".join(columns_list)
+            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+            cur.execute(sql, values_list)
+        return True
+    except Exception as e:
+        logger.error(f"データ保存失敗 ({table}): {e}")
+        return False
 
 async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """save_log_generic の非同期ラッパー"""
