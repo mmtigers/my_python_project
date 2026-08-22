@@ -99,7 +99,9 @@ const ConfirmModal = ({
       }
       case 'purchase': {
         const t = target as Reward;
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
+        // Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず
+        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
