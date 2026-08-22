@@ -513,95 +513,95 @@
 ### `ScrapingStrategy.download`
 
 * **役割**: `missav`サイト専用のダウンロード処理。対象ページのHTMLを取得し、JS難読化されたm3u8 URLを抽出したうえで`yt_dlp`経由でダウンロードする。ファイル名はURLパス末尾（取得できなければタイムスタンプ由来のフォールバックID）をサニタイズして生成する。
-* 根拠: [ScrapingStrategy.download] (行番号: 471〜492 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [ScrapingStrategy.download] (行番号: 498〜518 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
-* 根拠: [引数定義] (行番号: 472 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [引数定義] (行番号: 498 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功・スキップ時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 475, 478, 481〜483, 490, 492 / 抜粋: "if not target_dir: return False")
+* 根拠: [return文] (行番号: 501, 504, 507〜509, 516, 518 / 抜粋: "if not target_dir: return False")
 
 
 * **副作用**: HTML取得のHTTPリクエスト、URLから生成したファイル名でのファイル保存、`_download_with_ytdlp`経由のyt-dlp実行。
-* 根拠: [ダウンロード委譲] (行番号: 492 / 抜粋: "return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)")
+* 根拠: [ダウンロード委譲] (行番号: 518 / 抜粋: "return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)")
 
 
 * **エラーハンドリング**: HTML取得失敗時や m3u8 URL抽出失敗時は警告ログを出力して`False`を返す（例外送出なし）。`_fetch_html`が`BotDetectionError`を送出した場合はそのまま呼び出し元に伝播する。
-* 根拠: [ガード節] (行番号: 478, 481〜483 / 抜粋: "if not m3u8_url:")
+* 根拠: [ガード節] (行番号: 504, 507〜509 / 抜粋: "if not m3u8_url:")
 
 
 ### `ScrapingStrategy._fetch_html`
 
 * **役割**: 対象URLの `Referer` ヘッダーを自身に設定したうえでHTMLを取得する。HTTPステータスがボット検知/レート制限系（403/429/503）の場合や、応答本文がCloudflare等のチャレンジページパターンに一致する場合は`BotDetectionError`を送出する。
-* 根拠: [_fetch_html] (行番号: 494〜513 / 抜粋: "def _fetch_html(self, url: str) -> Optional[str]:")
+* 根拠: [_fetch_html] (行番号: 520〜539 / 抜粋: "def _fetch_html(self, url: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `url: str`
 * **戻り値/レスポンス**: `Optional[str]`（取得成功時はHTML文字列、失敗時`None`）
-* 根拠: [戻り値ヒント] (行番号: 494 / 抜粋: "def _fetch_html(self, url: str) -> Optional[str]:")
+* 根拠: [戻り値ヒント] (行番号: 520 / 抜粋: "def _fetch_html(self, url: str) -> Optional[str]:")
 
 
 * **副作用**: 対象URLへのHTTP GETリクエスト。
-* 根拠: [HTTPリクエスト] (行番号: 497 / 抜粋: "res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)")
+* 根拠: [HTTPリクエスト] (行番号: 523 / 抜粋: "res = self.session.get(url, timeout=CONFIG.REQUEST_TIMEOUT)")
 
 
 * **エラーハンドリング**: ボット検知ステータスコード/ブロックページ検知時は`BotDetectionError`を送出してそのまま再送出。それ以外の例外はエラーログを出力し、ボット検知マーカーに一致すれば`BotDetectionError`へ変換して送出、一致しなければ`None`を返す。
-* 根拠: [try-exceptブロック] (行番号: 499〜513 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n                raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")")
+* 根拠: [try-exceptブロック] (行番号: 525〜539 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n                raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")")
 
 
 ### `ScrapingStrategy._extract_m3u8_url`
 
 * **役割**: missavページに埋め込まれたJS難読化コード（p,a,c,k,e,d形式のパッカー）を正規表現とbase36変換で解除し、m3u8動画URLを抽出する。複数の変数名候補（`source1280`等）を順に試行し、いずれも失敗した場合は`.m3u8`パターンへのフォールバック抽出を行う。
-* 根拠: [_extract_m3u8_url] (行番号: 515〜550 / 抜粋: "def _extract_m3u8_url(self, html: str) -> Optional[str]:")
+* 根拠: [_extract_m3u8_url] (行番号: 541〜576 / 抜粋: "def _extract_m3u8_url(self, html: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `html: str`
 * **戻り値/レスポンス**: `Optional[str]`（抽出できたm3u8 URL、失敗時`None`）
-* 根拠: [戻り値ヒント と末尾return] (行番号: 515, 550 / 抜粋: "def _extract_m3u8_url(self, html: str) -> Optional[str]:", "return None")
+* 根拠: [戻り値ヒント と末尾return] (行番号: 541, 576 / 抜粋: "def _extract_m3u8_url(self, html: str) -> Optional[str]:", "return None")
 
 
 * **副作用**: なし（純粋な文字列解析処理）
-* 根拠: [処理内容] (行番号: 517〜548 / 抜粋: "match = re.search(r"eval\\(function\\(p,a,c,k,e,d\\).*?return p}\\('(.*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([^']*)'\\.split\\('\\|'\\)", html)")
+* 根拠: [処理内容] (行番号: 543〜574 / 抜粋: "match = re.search(r"eval\\(function\\(p,a,c,k,e,d\\).*?return p}\\('(.*?)',\\s*(\\d+),\\s*(\\d+),\\s*'([^']*)'\\.split\\('\\|'\\)", html)")
 
 
 * **エラーハンドリング**: 難読化コードのマッチ失敗時は即座に`None`を返す（例外処理なし）。
-* 根拠: [ガード節] (行番号: 518 / 抜粋: "if not match: return None")
+* 根拠: [ガード節] (行番号: 544 / 抜粋: "if not match: return None")
 
 
 ### `ScrapingStrategy._download_with_ytdlp`
 
 * **役割**: 抽出したm3u8 URLを`yt_dlp`（HLS処理・並列フラグメントダウンロード対応）に渡してダウンロード・結合し、成功時にDiscord通知を送信する。
-* 根拠: [_download_with_ytdlp] (行番号: 552〜577 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
+* 根拠: [_download_with_ytdlp] (行番号: 578〜603 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
 
 
 * **引数/リクエスト**: `m3u8_url: str`, `final_path: Path`, `page_url: str`, `save_dir: Path`
-* 根拠: [引数定義] (行番号: 552 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
+* 根拠: [引数定義] (行番号: 578 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 571, 577 / 抜粋: "return True")
+* 根拠: [return文] (行番号: 597, 603 / 抜粋: "return True")
 
 
 * **副作用**: `yt_dlp`によるダウンロード実行、成功時のDiscord通知、失敗時の中途半端なファイルの削除(`unlink`)。
-* 根拠: [ダウンロードと通知] (行番号: 568〜570 / 抜粋: "ydl.download([m3u8_url])")
+* 根拠: [ダウンロードと通知] (行番号: 594〜596 / 抜粋: "ydl.download([m3u8_url])")
 
 
 * **エラーハンドリング**: 例外を捕捉してエラーログを出力し、既に生成された不完全なファイルが存在すれば削除したうえで、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 572〜577 / 抜粋: "if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除\n            if _is_bot_detection_error(e):\n                raise BotDetectionError(f"{page_url}: {e}") from e")
+* 根拠: [try-exceptブロック] (行番号: 598〜603 / 抜粋: "if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除\n            if _is_bot_detection_error(e):\n                raise BotDetectionError(f"{page_url}: {e}") from e")
 
 
 ### `BatchDownloader.__init__`
 
 * **役割**: HTTPセッションの生成、シグナルハンドラ(`SIGINT`/`SIGTERM`)の登録、ダウンロード履歴の読み込みを行うコンストラクタ。
-* 根拠: [__init__] (行番号: 583〜588 / 抜粋: "def __init__(self):")
+* 根拠: [__init__] (行番号: 609〜614 / 抜粋: "def __init__(self):")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`（暗黙）
 * **副作用**: `signal.signal`によるシグナルハンドラ登録、`NetworkManager.create_session`と`HistoryManager.load_history`の呼び出し。
-* 根拠: [シグナル登録] (行番号: 586〜587 / 抜粋: "signal.signal(signal.SIGINT, self._signal_handler)")
+* 根拠: [シグナル登録] (行番号: 612〜613 / 抜粋: "signal.signal(signal.SIGINT, self._signal_handler)")
 
 
 * **エラーハンドリング**: なし
@@ -610,16 +610,16 @@
 ### `BatchDownloader._signal_handler`
 
 * **役割**: `SIGINT`/`SIGTERM`受信時に停止フラグ(`_shutdown_requested`)を立て、メインループを安全に終了させるためのハンドラ。
-* 根拠: [_signal_handler] (行番号: 590〜592 / 抜粋: "def _signal_handler(self, signum: int, frame: Any) -> None:")
+* 根拠: [_signal_handler] (行番号: 616〜618 / 抜粋: "def _signal_handler(self, signum: int, frame: Any) -> None:")
 
 
 * **引数/リクエスト**: `signum: int`, `frame: Any`
 * **戻り値/レスポンス**: `None`
-* 根拠: [引数と戻り値ヒント] (行番号: 590 / 抜粋: "def _signal_handler(self, signum: int, frame: Any) -> None:")
+* 根拠: [引数と戻り値ヒント] (行番号: 616 / 抜粋: "def _signal_handler(self, signum: int, frame: Any) -> None:")
 
 
 * **副作用**: `self._shutdown_requested` を`True`に変更、ログ出力。
-* 根拠: [フラグ変更] (行番号: 591〜592 / 抜粋: "self._shutdown_requested = True")
+* 根拠: [フラグ変更] (行番号: 617〜618 / 抜粋: "self._shutdown_requested = True")
 
 
 * **エラーハンドリング**: なし
@@ -628,7 +628,7 @@
 ### `BatchDownloader._get_strategy`
 
 * **役割**: URLの内容（YouTubeドメインか、`missav`を含むか）に応じて使用するダウンロード戦略インスタンスを決定する。YouTubeで機能フラグが無効の場合は`None`を返しスキップさせる。
-* 根拠: [_get_strategy] (行番号: 594〜607 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
+* 根拠: [_get_strategy] (行番号: 620〜633 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
 
 
 * **引数/リクエスト**: `url: str`
