@@ -269,7 +269,14 @@ graph TD
 | --- | --- | --- |
 | `game_logic.GameLogic`本来の実装 | `game_logic`モジュールのソースコードが当ファイル内に存在せず、フォールバック実装との挙動差異が不明であるため。 | `game_logic.py` |
 | `quest_users`テーブルの完全なスキーマ | `user_id`・`name`・`level`・`gold`・`medal_count`・`exp`・`updated_at`以外のカラム構成が当ファイル内には存在しないため。 | `init_unified_db.py`等のスキーマ定義ファイル |
-| 本ツールの想定実行者・実行頻度 | 対話式CLIツールとしての運用ルール（誰が、どのような場面で実行するか）が当ファイル内に記述されていないため。 | 運用手順書 |
+| 本ツールの想定実行者・実行頻度 | 対話式CLIツールとしての運用ルール（誰が、どのような場面で実行するか）が当ファイル内に記述されていないため。（リポジトリ内を`quest_admin_tool`で検索したところ`docs/specifications/MY_HOME_SYSTEM/README.md`に概要説明があるのみで、運用ルール（実行者・実行頻度）を定めた文書は見つからず、解消不可） | 運用手順書 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `game_logic.GameLogic`本来の実装 | `MY_HOME_SYSTEM/game_logic.py`を直接確認した。`GameLogic`クラス(6〜79行目)は`calc_level_progress(current_level, current_exp, added_exp)`(23〜40行目、`total_exp = current_exp + added_exp`を`calculate_next_level_exp(level) = floor(100 * 1.2^(level-1))`が返す閾値と比較しながらレベルアップを判定し`(new_level, new_exp, leveled_up)`を返す)と`calc_level_down(current_level, current_exp, removed_exp)`(43〜61行目、経験値がマイナスになった場合にレベルを1まで下げつつ前レベルの必要経験値を繰り戻す)を持つ、DB接続を行わない純粋な計算クラスであることを確認した。`quest_admin_tool.py`10〜14行目のフォールバック実装（`import`失敗時に警告を出すダミークラス）とは異なり、実体は本物のレベル計算式を持つことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/game_logic.py:6-61` |
+| `quest_users`テーブルの完全なスキーマ | `MY_HOME_SYSTEM/current_schema.sql`164〜171行目の`CREATE TABLE quest_users`を直接確認した。`user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, updated_at DATETIME, avatar TEXT DEFAULT '🙂', medal_count INTEGER DEFAULT 0, role TEXT`という10カラム構成であり、`quest_admin_tool.py`が参照する`user_id`・`name`・`level`・`gold`・`medal_count`・`exp`・`updated_at`に加えて`job_class`, `avatar`, `role`カラムが存在することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:164-171` |
 
 ## 10. 自己検証結果
 

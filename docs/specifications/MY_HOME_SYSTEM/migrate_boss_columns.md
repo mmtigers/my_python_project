@@ -155,6 +155,14 @@ graph TD
 | `party_state`テーブルの既存カラム構成（`current_boss_id`、`current_hp`等） | `INSERT`文に登場するが、当ファイル内でのテーブル定義自体が存在しないため。 | `init_unified_db.py`等のスキーマ定義ファイル |
 | `config`モジュールが本ファイルで実際に必要とされる理由 | インポートされているが直接の参照箇所が見当たらず、真に不要なのか副作用目的なのか当ファイルからは判断できないため。 | `config.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `common.get_db_cursor`および`common.setup_logging`の実装 | `MY_HOME_SYSTEM/common.py`は冒頭のdocstring(3〜6行目)に「Deprecated: This module is kept for backward compatibility. Please import from 'core.*' or 'services.*' directly」と明記されたFacadeモジュールであり、`get_db_cursor`は`core.database`から(23行目)、`setup_logging`は`core.logger`から(15行目)、それぞれ再エクスポートされているだけであることを確認した。実体を直接確認したところ、`core/database.py`の`get_db_cursor(commit: bool = False)`(12〜50行目)は`sqlite3.connect`で接続し`conn.row_factory = sqlite3.Row`を設定、`PRAGMA journal_mode=WAL`/`PRAGMA foreign_keys=ON`を有効化するコンテキストマネージャで、`sqlite3.OperationalError`で`"locked"`を検知した場合は最大5回・1秒間隔でリトライし、`commit=True`の場合のみ`conn.commit()`する。`core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)はコンソール出力・`TimedRotatingFileHandler`によるファイル出力(`logs/home_system.log`、日次ローテーション、7世代保持)に加え、`webhook_url`または`config.DISCORD_WEBHOOK_ERROR`が設定されていればERRORレベル以上をDiscordへ通知する`DiscordErrorHandler`(9〜44行目)を追加する設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:3-26`, `MY_HOME_SYSTEM/core/database.py:12-50`, `MY_HOME_SYSTEM/core/logger.py:9-86` |
+| `party_state`テーブルの既存カラム構成（`current_boss_id`、`current_hp`等） | `MY_HOME_SYSTEM/init_unified_db.py`460〜473行目の`CREATE TABLE IF NOT EXISTS party_state`定義を直接確認した。現行スキーマは`id INTEGER PRIMARY KEY CHECK (id = 1), current_boss_id INTEGER DEFAULT 1, current_hp INTEGER DEFAULT 0, max_hp INTEGER DEFAULT 100, week_start_date TEXT, is_defeated INTEGER DEFAULT 0, total_damage INTEGER DEFAULT 0, charge_gauge INTEGER DEFAULT 0, updated_at TEXT`という9列を持つ。本ファイル(`old/migrate_boss_columns.py`)が追加しようとしていた`max_hp`/`week_start_date`/`is_defeated`/`total_damage`の4列(18〜23行目)は、現行の`init_unified_db.py`側では初回作成時点のスキーマに既に含まれており、本ファイルは（`ALTER TABLE`が失敗しても構わない）冪等なワンショット移行スクリプトとして、旧スキーマ（これら4列を持たない`party_state`）を新スキーマへ追従させるためのものだったと判断できる。ただし`charge_gauge`と`updated_at`の2列は本ファイルの`new_columns`にも`INSERT`文にも含まれておらず、これらがいつ追加されたかを示す情報は本ファイル・`init_unified_db.py`のいずれにも見当たらなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:460-473`, `MY_HOME_SYSTEM/old/migrate_boss_columns.py:9-45` |
+| `config`モジュールが本ファイルで実際に必要とされる理由 | `MY_HOME_SYSTEM/old/migrate_boss_columns.py`全50行を改めて直接確認したが、2行目の`import config`以降、`config.`という参照は本ファイル中に一度も出現しないことを再確認した（`common.setup_logging`/`common.get_db_cursor`の呼び出しのみで完結しており、副作用目的の記述も見当たらない）。真に不要なインポートなのか、あるいは呼び出し先の`common.py`が内部で`config`を利用するための暗黙的な初期化順序を意図したものなのかは、本ファイル単体からは判別できず、これ以上の解消はできなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/old/migrate_boss_columns.py:1-50`（該当参照なしを確認） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）

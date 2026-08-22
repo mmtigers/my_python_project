@@ -432,7 +432,7 @@ graph TD
 | 設定値の構造と中身 | 監視対象のカメラ設定リストやNASのパス、クールダウンの秒数などの実際の設定値が不明。 | `config.py` |
 | DBの保存先とスキーマ | 動体検知ログ（`device_records` テーブル）の物理構造およびDBエンジンが不明。 | `core/database.py` |
 | プッシュ通知の仕様 | アラート通知のルーティングロジック、フォーマット変換の仕組みが不明。 | `services/notification_service.py` |
-| NVR上の動画ファイル保存規則 | NAS上に保存される `*.mp4` ファイルの命名規則やディレクトリ階層が不明であり、`glob` 検索時のパフォーマンスに影響する可能性がある。 | 環境または外部仕様書 |
+| NVR上の動画ファイル保存規則 | NAS上に保存される `*.mp4` ファイルの命名規則やディレクトリ階層が不明であり、`glob` 検索時のパフォーマンスに影響する可能性がある。（リポジトリ内を検索したが、NAS/NVR機器側のファイル命名規則を記載した仕様書は存在せず、解消不可。外部NVR機器が管理するストレージ仕様のため。なお`camera_monitor.py`自体は195〜196行目で`os.path.join(nas_folder, "**", "*.mp4")`という再帰globパターンをファイル更新時刻`os.path.getmtime`でソートして使用しており、特定の命名規則には依存しない実装であることは直接確認できた） | 環境または外部仕様書 |
 
 ## 相互参照による補足情報
 
@@ -440,6 +440,7 @@ graph TD
 | --- | --- | --- |
 | DBの保存先とスキーマ | `database.md`の解析によれば、`save_log_generic`は`core/database.py`が提供する汎用INSERT関数で、指定されたテーブル・カラム・値からSQLを動的に構築しSQLiteへ書き込むと推測される。ただし`device_records`テーブル自体の正確なカラム定義は`database.md`側でも「呼び出し元依存で不明」とされており、依然として不明。 | database.md |
 | プッシュ通知の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数（"discord"/"line"/"both"）に応じて通知先を振り分け、LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知を行う関数（戻り値`bool`）と推測される。 | notification_service.md |
+| 設定値の構造と中身 | `config.py`および`monitors/camera_monitor.py`を直接確認した。`config.CAMERAS`は`devices.json`（リポジトリ内に実体なし、`.gitignore`の`*.json`規則により追跡対象外）から297〜305行目でPydanticモデル`CameraConfig`（`id, name, nas_folder, location, ip, port(既定2020), user, password(エイリアス"pass"), rtsp_url`、144〜153行目）としてロードされるリストで、`camera_monitor.py`242行目の`next((c for c in config.CAMERAS if c["name"] == cam_name), None)`および610〜611行目の`ThreadPoolExecutor(max_workers=len(config.CAMERAS))`で実際に利用されている。NASのパスは`config.py`216〜217行目の`NAS_MOUNT_POINT = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")` / `NAS_PROJECT_ROOT = os.path.join(NAS_MOUNT_POINT, "home_system")`が起点であり、`camera_monitor.py`47行目の`ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")`はさらにそのサブディレクトリを指す。クールダウン秒数は`camera_monitor.py`63行目の`MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)`により参照され、実体は`config.py`325行目の`MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))`（環境変数未設定時は既定60秒）であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-153, 216-217, 297-305, 325`, `MY_HOME_SYSTEM/monitors/camera_monitor.py:47, 63, 242, 610-611` |
 
 ## 10. 自己検証結果
 

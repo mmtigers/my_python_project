@@ -142,6 +142,14 @@ graph TD
 | `quest_users`テーブルの正規スキーマ（現行版） | except節が示唆する「旧スキーマ(idカラム)」との差分や、`user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `updated_at`以外のカラムの有無が本ファイル内では確認できないため。 | `quest_router.py`, データベースのマイグレーション/DDL定義ファイル |
 | `seed_data`関数（quest_router.py）との実際の値の一致有無 | コメント上「同じ内容」とされるが、本ファイル単体では`seed_data`の実装内容を確認できないため。 | `routers/quest_router.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.SQLITE_DB_PATH`の実際の値 | `config.py`222行目で`SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`と定義されている。環境変数`SQLITE_DB_PATH`が未設定の場合のデフォルト値は`BASE_DIR/home_system.db`であり、`BASE_DIR`は212行目で`os.path.dirname(os.path.abspath(__file__))`（`config.py`自身が置かれているディレクトリ、すなわち`MY_HOME_SYSTEM/`）と定義されている。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212, 222` |
+| `quest_users`テーブルの正規スキーマ（現行版） | `init_unified_db.py`377〜388行目の`CREATE TABLE IF NOT EXISTS quest_users`定義により、`user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, medal_count INTEGER DEFAULT 0, avatar TEXT DEFAULT '🙂', updated_at DATETIME`の9カラムであることを確認した。さらに`role`カラムはこの初期スキーマには含まれておらず、`migrations/0001_add_quest_users_role.sql`（`ALTER TABLE quest_users ADD COLUMN role TEXT`、既存の`dad`/`mom`には`role_adult`、`daughter`/`son`/`child`には`role_child`を初期設定）で追加される後発カラムであることを確認した。同様の`ALTER TABLE ... ADD COLUMN role`処理は`services/quest_service.py`714〜717行目の`sync_master_data`内にも（旧スキーマDB向けの実行時フォールバックとして）存在する。recover_mom.py自身のINSERT文（30〜35行目）は`role`と`medal_count`を含まない7カラムのみを指定してINSERTしており、これらのカラムはデフォルト値（`role`はNULL、`medal_count`は0）のまま残る。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:375-388`, `MY_HOME_SYSTEM/migrations/0001_add_quest_users_role.sql:1-6`, `MY_HOME_SYSTEM/services/quest_service.py:711-717` |
+| `seed_data`関数（quest_router.py）との実際の値の一致有無 | 実際には**一致していない**ことを確認した。`routers/quest_router.py`70〜71行目の`seed_data()`は`game_system.sync_master_data()`を呼び出すだけのエイリアスであり、固定タプルではなく`quest_data.py`24〜34行目の`USERS`リストにある`{'user_id': 'mom', 'name': 'はるな', 'job_class': '専業主婦', 'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄', ...}`を`services/quest_service.py`688〜735行目の`sync_master_data`が`INSERT ... ON CONFLICT(user_id) DO UPDATE`でDBへ反映する仕組みになっている。recover_mom.py 30行目の固定タプル`('mom', 'はるな', '魔法使い', 1, 0, 150, ...)`とは、`job_class`(「魔法使い」対「専業主婦」)と`gold`(150対0)が異なっており、コード内コメント「quest_router.pyのseed_dataと同じ内容」は現行のquest_data.py内容とは一致しない（コメント記述時点の古い値、または誤記の可能性がある）。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:69-71`, `MY_HOME_SYSTEM/quest_data.py:24-34`, `MY_HOME_SYSTEM/services/quest_service.py:688-735` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

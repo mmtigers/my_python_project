@@ -91,7 +91,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `CameraConfig`の各フィールドの実際の値の生成元・制約 | `camera_router.md`の解析によれば、バックエンドの`GET /settings`は`config.CAMERAS`から一覧を読み出し、`id`/`name`は`config.CAMERAS`の各要素からそのまま、`order`は配列インデックス+1、`enabled`は常に`True`固定値として返すとされている。また`CameraDashboard.md`の解析によれば、フロントエンド側では取得後に`enabled === true`のカメラのみを`order`昇順でソートして利用するとされている。ただしこれらは`camera_router.md`・`CameraDashboard.md`側の解析結果からの補足であり、`camera_router.py`/`CameraDashboard.tsx`のソースコード自体は本ファイルの解析時点では確認していない。 | ../../../../../MY_HOME_SYSTEM/camera_router.md, ../components/CameraDashboard.md |
+| `CameraConfig`の各フィールドの実際の値の生成元・制約 | `MY_HOME_SYSTEM/routers/camera_router.py`と`family-quest/src/features/camera/components/CameraDashboard.tsx`を直接確認した。バックエンドの`GET /settings`(`camera_router.py`28〜40行目、関数`get_camera_settings`)は`config.CAMERAS`（`devices.json`由来）を`enumerate`でループし(33行目)、`id`(35行目、`cam["id"]`をそのまま)・`name`(36行目、`cam["name"]`をそのまま)・`order`(37行目、配列インデックス+1)・`enabled`(38行目、常に`True`固定値)を含む辞書のリストを返す。フロントエンド側は`CameraDashboard.tsx`の`useEffect`(13〜19行目)で`apiClient.get<CameraConfig[]>('/api/cameras/settings')`を呼び出し、`data.filter((c) => c.enabled)`(17行目)で`enabled`が`true`のカメラのみへ絞り込んだうえで`activeCameras.sort((a, b) => a.order - b.order)`(18行目)により`order`昇順にソートしてから`cameras`ステートへ格納する。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/camera_router.py:28-40`, `family-quest/src/features/camera/components/CameraDashboard.tsx:13-19` |
 
 ## 10. 自己検証結果
 

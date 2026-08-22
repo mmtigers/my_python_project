@@ -405,7 +405,16 @@ graph TD
 | `config.SALARY_PDF_PASSWORDS`の実際の値・件数 | PDF解除に使うパスワード候補が本ファイル内で定義されていないため。 | `config.py` |
 | `config.BASE_DIR` / `config.SALARY_IMAGE_DIR`の実際のパス | 画像保存先の実パスが本ファイル内では確定できないため。 | `config.py` |
 | `common.send_push`の`image_data`引数の仕様 | バイナリ画像データを渡した際の実際の送信方式（Discord添付ファイルAPI等）が本ファイル内では確認できないため。 | `common.py`, `services/notification_service.py` |
-| 実行環境でのPoppler（`pdf2image`の依存ツール）の有無 | `convert_from_path`が内部的に外部コマンドへ依存しているかどうかは本ファイル単体では判別できないため。 | 実行環境のセットアップ手順、`requirements.txt`等 |
+| 実行環境でのPoppler（`pdf2image`の依存ツール）の有無 | `convert_from_path`が内部的に外部コマンドへ依存しているかどうかは本ファイル単体では判別できないため。（`MY_HOME_SYSTEM/requirements.txt`61行目にPythonラッパーの`pdf2image==1.17.0`は記載されているが、その内部が依存するシステムレベルのバイナリ`poppler-utils`自体はpipパッケージではないため`requirements.txt`には記載されず、リポジトリ内にDockerfileやOSセットアップスクリプトも存在しないため、実行環境への実際のインストール有無は解消不可） | 実行環境のセットアップ手順、`requirements.txt`等 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.SALARY_MAIL_SENDER`の実際の値 | `config.py`204行目で`SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")`と定義されており、環境変数`SALARY_MAIL_SENDER`から読み込まれる（`.env`未確認のためリポジトリからは実際のメールアドレス文字列自体は判明しない）。デフォルト値は指定されておらず未設定時は`None`となる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:204` |
+| `config.SALARY_PDF_PASSWORDS`の実際の値・件数 | `config.py`330〜331行目で`_passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")`および`SALARY_PDF_PASSWORDS: List[str] = [p.strip() for p in _passwords_str.split(",") if p.strip()]`と定義されており、環境変数`SALARY_PDF_PASSWORDS`にカンマ区切りで指定された文字列をトリム・空要素除去したリストとして読み込まれる。デフォルトは空文字列のため未設定時は空リスト（0件）になる。実際のパスワード文字列自体は`.env`（本リポジトリ未追跡）に依存するため確認できない。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:330-331` |
+| `config.BASE_DIR` / `config.SALARY_IMAGE_DIR`の実際のパス | `config.py`212行目で`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`（`config.py`自身が置かれる`MY_HOME_SYSTEM/`ディレクトリの絶対パス）と定義されている。`SALARY_IMAGE_DIR`は333行目で`os.path.join(ASSETS_DIR, "salary_images")`と定義され、`ASSETS_DIR`は224〜227行目で`ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`（NASの`{NAS_MOUNT_POINT}/home_system/assets`への書き込みを検証し、失敗時はローカルの`assets`ディレクトリへフォールバックする関数）の戻り値である。したがって`SALARY_IMAGE_DIR`は通常時`{NAS_MOUNT_POINT}/home_system/assets/salary_images`（`NAS_MOUNT_POINT`のデフォルトは216行目で`/mnt/nas`）、NASアクセス失敗時はローカルの`assets/salary_images`となる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212, 216-217, 224-227, 333`（`ensure_safe_path_with_backoff`の定義箇所は`config.md`参照） |
+| `common.send_push`の`image_data`引数の仕様 | `services/notification_service.py`116〜140行目の`send_push`を直接確認した。`image_data`(バイナリ)は`target`が`"discord"`/`"both"`のとき`_send_discord_webhook(messages, image_data, channel, filename)`(122行目)へ渡され、同ファイル30〜59行目の`_send_discord_webhook`内で`image_data`が真の場合は`files = {'file': (filename, image_data)}`としてDiscord Webhookへ`multipart/form-data`形式(`requests.post(url, files=files, data={'content': text_content}, timeout=60)`)で送信される(MIMEタイプは指定せずファイル拡張子でDiscord側に自動判定させる設計)。一方`target`が`"line"`/`"both"`の場合は127〜131行目の分岐により`image_data`はLINEには送信されず、`image_data`が真であれば「※画像はDiscordを確認してください」という注記テキストメッセージが追加されるのみである。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:116-140`（Discord送信の実装は`MY_HOME_SYSTEM/services/notification_service.py:30-59`） |
 
 ## 10. 自己検証結果
 

@@ -236,16 +236,17 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 外部委譲されたデータの永続化処理 | `sensor_service` がデータを受け取った後の挙動が本ファイル内には記載されていないため。 | `services/sensor_service.py` |
-| APIトークンの管理とスコープ | `config` モジュールから読み取っているトークンがどのような権限を持っているのか、本ファイルからは判断不可。 | `config.py` または環境変数定義ファイル |
+| APIトークンの管理とスコープ | `config` モジュールから読み取っているトークンがどのような権限を持っているのか、本ファイルからは判断不可。（`config.py`側の格納方法はリポジトリ内で確認できたが、Nature Remo Cloud側で当該トークンに実際に付与されている権限範囲・スコープ自体はリポジトリ内に記録がなく、解消不可） | `config.py` または環境変数定義ファイル |
 | ロギング機構の詳細 | ログがコンソールのみに出力されるのか、ファイルにも保存されるのか、外部に転送されるのかが不明。 | `core/logger.py` |
-| APIの完全なデータ構造 | 取得結果 `res_app.json()` および `res_dev.json()` のうち、本ファイルで参照していないキーが含まれているか不明。 | 実際のAPIレスポンスログ または Nature Remo API仕様書 |
+| APIの完全なデータ構造 | 取得結果 `res_app.json()` および `res_dev.json()` のうち、本ファイルで参照していないキーが含まれているか不明。（リポジトリ内を`nature`関連ファイル名・実際のAPIレスポンスログで検索したが、Nature Remo APIのレスポンスサンプルや仕様書に相当するファイルはリポジトリ内に存在せず、解消不可。Nature Remo公式APIドキュメントというリポジトリ外部の情報を要する） | 実際のAPIレスポンスログ または Nature Remo API仕様書 |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 外部委譲されたデータの永続化処理 | `sensor_service.md`の解析によれば、`process_meter_data`は`save_log_async`を介して温湿度データをDBへ保存し、`process_power_data`は`common.get_db_cursor`で前回値を取得したうえで`save_log_async`により現在値を保存し、閾値を跨いだ場合に`send_push`で通知する設計であることが判明した。 | `sensor_service.md` |
-| ロギング機構の詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | `logger.md` |
+| 外部委譲されたデータの永続化処理 | `MY_HOME_SYSTEM/services/sensor_service.py`を直接確認した。`process_meter_data(device_id, device_name, temp, humidity)`(135〜147行目)は`save_log_async(config.SQLITE_TABLE_SWITCHBOT_LOGS, ["device_id", "device_name", "temperature", "humidity", "timestamp"], ...)`で温湿度データをDBへ保存するのみ（通知処理なし）。`process_power_data(device_id, device_name, wattage, notify_settings)`(149行目〜)は、まず`common.get_db_cursor()`で`config.SQLITE_TABLE_POWER_USAGE`テーブルから当該`device_id`の直近`wattage`を取得し(158〜177行目)、続いて`save_log_async`で現在値を保存(180〜184行目)した後、`notify_settings.get("threshold")`(188行目)を用いて前回値と現在値が閾値をまたいだかを判定し通知する設計であることを確認した（188行目以降のロジックまで確認）。 | 直接ソース確認: `MY_HOME_SYSTEM/services/sensor_service.py:135-189` |
+| ロギング機構の詳細 | `MY_HOME_SYSTEM/core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)を直接確認した。(1) コンソール出力用の`logging.StreamHandler`(58〜60行目)、(2) `TimedRotatingFileHandler`による`logs/home_system.log`への日次ローテーションファイル出力（`when='midnight', interval=1, backupCount=7`、62〜74行目）、(3) `webhook_url`引数または`config.DISCORD_WEBHOOK_ERROR`が設定されていれば、ERRORレベル以上のログのみをDiscordへ転送する`DiscordErrorHandler`(9〜44行目、76〜84行目)、の3種のハンドラを登録する設計であることを確認した。本ファイル(`monitors/nature_remo_monitor.py`)は`setup_logging("nature_remo_monitor")`のように`webhook_url`を省略して呼び出しているため、Discord転送は`config.DISCORD_WEBHOOK_ERROR`が設定されている場合のみ有効になる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:9-86` |
+| APIトークンの管理とスコープ（判明した範囲） | `MY_HOME_SYSTEM/config.py`180〜181行目を直接確認した。`NATURE_REMO_ACCESS_TOKEN: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN")`、`NATURE_REMO_ACCESS_TOKEN_TAKASAGO: Optional[str] = os.getenv("NATURE_REMO_ACCESS_TOKEN_TAKASAGO")`と定義されており、いずれも環境変数から読み込む単純な文字列（未設定時は`None`）で、本ファイル147〜148行目で伊丹用・高砂用の2トークンとしてそれぞれ`process_location`に渡されていることを確認した。ただしトークン自体に付与されている権限スコープ（Nature Remo Cloud API側の設定）はリポジトリ内のどこにも記録がなく、これ以上は解消できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:180-181`（参考: `MY_HOME_SYSTEM/monitors/nature_remo_monitor.py:147-148`） |
 
 ## 10. 自己検証結果
 

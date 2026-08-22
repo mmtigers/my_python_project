@@ -101,6 +101,13 @@ graph TD
 | `SettingsContext`に実際に設定される値（`setDensity`等の実装、永続化方法） | 本ファイルは`useContext`による値の取得のみを行っており、値を`Provider`する側の実装は含まれないため。 | `family-quest/src/context/SettingsContext.tsx` |
 | 本フックの呼び出し元・呼び出しタイミング、戻り値の具体的な利用方法 | 本ファイルはフックの定義のみであり、実際にどのコンポーネントで使用されるかはコードから確認できないため。 | `useSettings`をインポート・使用しているコンポーネントファイル |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `SettingsContext`に実際に設定される値（`setDensity`等の実装、永続化方法） | `family-quest/src/context/SettingsContext.tsx`を直接確認した。`SettingsProvider`（28〜59行目）は初回マウント時に`loadSettings()`（12〜26行目）で`window.localStorage.getItem(SETTINGS_STORAGE_KEY)`（キーは`settingsShared.ts:56`の`'familyQuest.settings.v1'`）から状態を復元し、`settings`が変化するたび（`useEffect`31〜37行目）に`window.localStorage.setItem`で即時永続化する。`setDensity`/`toggleIconFirstUser`/`setUserThemeColor`（41〜51行目）はいずれも`setSettings`によるイミュータブルな状態更新のみを行う。 | 直接ソース確認: `family-quest/src/context/SettingsContext.tsx:12-59` |
+| 本フックの呼び出し元・呼び出しタイミング、戻り値の具体的な利用方法 | `family-quest/src`配下を`useSettings()`で検索し、呼び出し箇所3件を直接確認した。(1) `App.tsx`142行目`const { density, iconFirstUserIds } = useSettings();` — `density`は363行目`densityWrapperClass = density === 'compact' ? 'p-2 space-y-2' : 'p-4 space-y-4'`としてレイアウトの余白クラス切り替えに、`iconFirstUserIds`は450行目`iconFirst={iconFirstUserIds.includes(currentUser.user_id)}`として利用される。(2) `FamilyDashboard.tsx`52行目`const { iconFirstUserIds, userThemeColors } = useSettings();` — 101行目`iconFirst={iconFirstUserIds.includes(user.user_id)}`、103行目`themeColorKey={userThemeColors[user.user_id]}`として各`FamilyPanel`へ渡される。(3) `SettingsModal.tsx`18行目`const { density, setDensity, iconFirstUserIds, toggleIconFirstUser, userThemeColors, setUserThemeColor } = useSettings();` — 設定変更UIの操作元（更新関数群）として6項目すべてを取得・利用する。 | 直接ソース確認: `family-quest/src/App.tsx:142, 363, 450`, `family-quest/src/features/family/components/FamilyDashboard.tsx:52, 101, 103`, `family-quest/src/components/ui/SettingsModal.tsx:18` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

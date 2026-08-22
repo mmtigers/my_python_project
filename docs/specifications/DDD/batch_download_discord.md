@@ -884,14 +884,16 @@ flowchart TD
 | --- | --- | --- |
 | Webhook送信処理の仕様 | `_send_discord_webhook` の具体的な実装（エンドポイント、認証方法、引数 `image_data` の扱いなど）が本ファイルには存在しないため。 | `services/notification_service.py` |
 | `sanitize_filename` の詳細ルール | ファイル名から除去・置換される文字や長さ制限の具体的な仕様が本ファイルからは不明なため。 | `file_utils.py` |
-| `MY_HOME_SYSTEM_ROOT` の運用実態 | 環境変数が設定される前提の運用（本番/開発でどちらの探索ロジックが使われるか）が不明なため。 | デプロイ設定・`.env`等 |
+| `MY_HOME_SYSTEM_ROOT` の運用実態 | 環境変数が設定される前提の運用（本番/開発でどちらの探索ロジックが使われるか）が不明なため。 | デプロイ設定・`.env`等（リポジトリを検索したところ`.env`は`.gitignore:13`でバージョン管理対象外とされておりリポジトリ内に実体は存在しない。`MY_HOME_SYSTEM/.env.example`は存在するが`MY_HOME_SYSTEM_ROOT`という変数名の記載はなく、解消不可） |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | Webhook送信処理の仕様 | 関連ドキュメント（`notification_service.md`）の解析結果によれば、`_send_discord_webhook(messages, image_data=None, channel="notify", filename="snapshot.jpg")`という関数シグネチャで、`channel`引数（`error`/`report`/`notify`）に応じて異なるWebhook URLへPOST送信を行い、画像添付時は`files`パラメータでアップロードし、HTTPステータスコードが200/204以外の場合や例外発生時はFalseを返す実装であることが分かった。本ファイルの`DiscordNotifier.send`は`text`と`is_error`のみを渡しており、`image_data`引数は使用していないと見られる。これはあくまで別ファイルの解析結果に基づく補足情報であり、本ファイル（`batch_download_discord.py`）や`notification_service.py`のソースコードを直接確認したものではない。 | [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) |
+| Webhook送信処理の仕様（直接ソース確認による追補） | `MY_HOME_SYSTEM/services/notification_service.py:30-71`を直接確認した。シグネチャは`_send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool`。`channel`引数に応じて`config.DISCORD_WEBHOOK_ERROR`（"error"）／`config.DISCORD_WEBHOOK_REPORT`（"report"）／`config.DISCORD_WEBHOOK_NOTIFY`または`config.DISCORD_WEBHOOK_URL`（それ以外）のいずれかのURLを選択し、URL未設定なら`False`を返す。`image_data`指定時は`files={'file': (filename, image_data)}`で`requests.post(..., files=files, data={'content': text_content}, timeout=60)`、未指定時は`requests.post(url, json={"content": text_content}, timeout=10)`を送信し、レスポンスの`status_code`が200/204以外または例外発生時は`logger.error`を出力して`False`を返す。本ファイル（`batch_download_discord.py`）の呼び出し箇所(83, 246-250行目)は`_send_discord_webhook([message], channel=channel)`という形で呼んでおり`image_data`は渡していないことを確認し、既存の間接推定と一致した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-71`, `DDD/batch_download_discord.py:83, 246-250` |
 | `sanitize_filename` の詳細ルール | 関連ドキュメント（`file_utils.md`）の解析結果によれば、`sanitize_filename(filename, max_length=200)`は禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し、前後の空白を除去したうえで`max_length`（既定200文字、拡張子は含まない前提）まで切り詰め、さらに末尾のピリオド・空白を除去する実装であることが分かった。これはあくまで別ファイルの解析結果に基づく補足情報である。 | [file_utils.md](./file_utils.md) |
+| `sanitize_filename` の詳細ルール（直接ソース確認による追補） | `DDD/file_utils.py:9-21`を直接確認した。`sanitize_filename(filename: str, max_length: int = 200) -> str`は`re.sub(r'[\\/*?:"<>|]', '_', filename).strip()`で禁止文字をアンダースコアに置換して前後空白を除去し、`[:max_length].strip('. ')`で切り詰めと末尾のピリオド・空白除去を行う実装であることを確認した。本ファイル（`batch_download_discord.py`）では326〜327行目の`FileSystemManager.sanitize_filename`（本関数への委譲ラッパー）が487行目で`video_id`（対象ページURLの末尾セグメント、取得不可時は`f"vid_{int(time.time())}"`）を引数に呼び出しており、`max_length`は既定値200文字のまま使用されている。 | 直接ソース確認: `DDD/file_utils.py:9-21`, `DDD/batch_download_discord.py:326-327, 487` |
 
 ## 10. 自己検証結果
 
