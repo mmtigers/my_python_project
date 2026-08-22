@@ -633,11 +633,11 @@
 
 * **引数/リクエスト**: `url: str`
 * **戻り値/レスポンス**: `Optional[DownloadStrategy]`（`ScrapingStrategy`、`UniversalYtDlpStrategy`、またはスキップ対象時`None`）
-* 根拠: [戻り値ヒント] (行番号: 594 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
+* 根拠: [戻り値ヒント] (行番号: 620 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
 
 
 * **副作用**: 無効化されたYouTube URLに対するログ出力。
-* 根拠: [ログ出力] (行番号: 598 / 抜粋: "logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")")
+* 根拠: [ログ出力] (行番号: 624 / 抜粋: "logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")")
 
 
 * **エラーハンドリング**: なし
@@ -646,60 +646,60 @@
 ### `BatchDownloader._collect_tasks`
 
 * **役割**: `list.txt`と`list/*.txt`の全ファイルからURLを読み込み、コメント行(`#`始まり)・空行・履歴済みURL・重複URLを除外したうえでソース名ごとにグループ化し、`_round_robin_flatten`でラウンドロビン順に平坦化した`DownloadTask`一覧を生成する。
-* 根拠: [_collect_tasks] (行番号: 609〜645 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* 根拠: [_collect_tasks] (行番号: 635〜671 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `List[DownloadTask]`
-* 根拠: [戻り値ヒント] (行番号: 609 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* 根拠: [戻り値ヒント] (行番号: 635 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **副作用**: `list.txt`および`list/`配下の`*.txt`ファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 623〜624, 634, 637 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
+* 根拠: [ファイル読み込み] (行番号: 649〜650, 660, 663 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
 
 
 * **エラーハンドリング**: 個別リストファイルの読み込み失敗時は例外を捕捉してエラーログを出力し、他ファイルの処理を継続する。
-* 根拠: [try-exceptブロック] (行番号: 642〜643 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロック] (行番号: 668〜669 / 抜粋: "except Exception as e:")
 
 
 ### `BatchDownloader._purge_skipped_tasks`
 
 * **役割**: YouTube機能無効化等でスキップ対象となったタスクをアーカイブファイル(`archived_tasks.txt`)へ追記したうえで、元のリストファイル（`list.txt`または`list/{source_name}.txt`）から該当URLを物理削除する。ファイル上書きは一時ファイル(`.tmp`)経由のアトミックな`replace`で行う。
-* 根拠: [_purge_skipped_tasks Docstring] (行番号: 647〜653 / 抜粋: "スキップ対象となったタスクを元リストから物理削除し、アーカイブへ退避する。")
+* 根拠: [_purge_skipped_tasks Docstring] (行番号: 673〜679 / 抜粋: "スキップ対象となったタスクを元リストから物理削除し、アーカイブへ退避する。")
 
 
 * **引数/リクエスト**: `skipped_tasks: List[DownloadTask]`
-* 根拠: [引数定義] (行番号: 647 / 抜粋: "def _purge_skipped_tasks(self, skipped_tasks: List[DownloadTask]) -> None:")
+* 根拠: [引数定義] (行番号: 673 / 抜粋: "def _purge_skipped_tasks(self, skipped_tasks: List[DownloadTask]) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 647 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (行番号: 673 / 抜粋: "-> None:")
 
 
 * **副作用**: アーカイブファイルへの追記、各リストファイルのアトミックな上書き更新。
-* 根拠: [アトミック上書き] (行番号: 699〜703 / 抜粋: "temp_path.replace(file_path)")
+* 根拠: [アトミック上書き] (行番号: 725〜729 / 抜粋: "temp_path.replace(file_path)")
 
 
 * **エラーハンドリング**: アーカイブファイルへの書き込み失敗時は、データロスト防止のため元ファイルの削除処理へ進まずに`return`で中断する。個別リストファイルのパージ失敗時は例外を捕捉してエラーログを出力し、他のリストファイルの処理を継続する。
-* 根拠: [try-exceptブロック] (行番号: 671〜673, 705〜706 / 抜粋: "return # アーカイブ失敗時は元ファイルの削除も中断（データロスト防止）")
+* 根拠: [try-exceptブロック] (行番号: 697〜699, 731〜732 / 抜粋: "return # アーカイブ失敗時は元ファイルの削除も中断（データロスト防止）")
 
 
 ### `BatchDownloader._sleep_between_tasks`
 
 * **役割**: 次のタスクまで待機する。固定間隔だと機械的なアクセスパターンとして検知されやすいため、URLの種類（YouTube/missav/その他）に応じたランダムなジッター範囲から待機時間を決定する。
-* 根拠: [メソッド定義とDocstring] (行番号: 710〜716 / 抜粋: "def _sleep_between_tasks(self, url: str) -> None:\n        """次のタスクまで待機する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 736〜742 / 抜粋: "def _sleep_between_tasks(self, url: str) -> None:\n        """次のタスクまで待機する。")
 
 
 * **引数/リクエスト**: `url: str`
-* 根拠: [引数定義とDocstring] (行番号: 710 / 抜粋: "def _sleep_between_tasks(self, url: str) -> None:")
+* 根拠: [引数定義とDocstring] (行番号: 736 / 抜粋: "def _sleep_between_tasks(self, url: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 710 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (行番号: 736 / 抜粋: "-> None:")
 
 
 * **副作用**: `time.sleep`による待機、デバッグログ出力。
-* 根拠: [待機処理] (行番号: 723〜725 / 抜粋: "delay = random.uniform(low, high)\n        logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")\n        time.sleep(delay)")
+* 根拠: [待機処理] (行番号: 749〜751 / 抜粋: "delay = random.uniform(low, high)\n        logger.debug(f"💤 次のタスクまで {delay:.1f} 秒待機します")\n        time.sleep(delay)")
 
 
 * **エラーハンドリング**: なし
@@ -708,39 +708,39 @@
 ### `BatchDownloader.run`
 
 * **役割**: ロックファイル(`fcntl.flock`)による多重起動防止を行ったうえで`_run_locked`を呼び出す、実行のエントリーポイント。ロック取得に失敗した場合は即座に終了する。
-* 根拠: [run] (行番号: 727〜744 / 抜粋: "def run(self) -> None:")
+* 根拠: [run] (行番号: 753〜770 / 抜粋: "def run(self) -> None:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 727 / 抜粋: "def run(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 753 / 抜粋: "def run(self) -> None:")
 
 
 * **副作用**: ロックファイルのオープン・排他ロック取得・解放、`_run_locked`の呼び出し。
-* 根拠: [ロック処理] (行番号: 730, 732 / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
+* 根拠: [ロック処理] (行番号: 756, 758 / 抜粋: "fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)")
 
 
 * **エラーハンドリング**: ロック取得に失敗（`BlockingIOError`/`OSError`）した場合、多重起動と判断してログを出力し`sys.exit(1)`で終了する。`finally`ブロックでロックの解放とファイルディスクリプタのクローズを保証する。
-* 根拠: [try-exceptとfinally] (行番号: 733〜736, 738〜744 / 抜粋: "except (BlockingIOError, OSError):")
+* 根拠: [try-exceptとfinally] (行番号: 759〜762, 764〜770 / 抜粋: "except (BlockingIOError, OSError):")
 
 
 ### `BatchDownloader._run_locked`
 
 * **役割**: ロック取得後のメイン処理本体。依存関係チェック、クールダウン確認、時間帯・NASマウント確認、タスク収集、YouTube機能無効時のフィルタリング＆パージ、1回あたりのタスク数上限適用、各タスクの逐次ダウンロード実行（ボット検知時は即座にクールダウンをトリガーして中断）を行う。
-* 根拠: [_run_locked] (行番号: 746〜858 / 抜粋: "def _run_locked(self) -> None:")
+* 根拠: [_run_locked] (行番号: 772〜884 / 抜粋: "def _run_locked(self) -> None:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 746 / 抜粋: "def _run_locked(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 772 / 抜粋: "def _run_locked(self) -> None:")
 
 
 * **副作用**: 依存関係・クールダウン・時間帯・NASマウントの各チェック、`_collect_tasks`/`_purge_skipped_tasks`の呼び出し、`MAX_TASKS_PER_RUN`によるタスク数制限、各`DownloadStrategy.download`の実行によるファイル保存とDiscord通知、`HistoryManager.add_history`への追記、`CooldownManager.trigger_cooldown`の呼び出し、タスク間の`_sleep_between_tasks`。
-* 根拠: [メインループ] (行番号: 811〜856 / 抜粋: "for i, task in enumerate(tasks):")
+* 根拠: [メインループ] (行番号: 837〜882 / 抜粋: "for i, task in enumerate(tasks):")
 
 
 * **エラーハンドリング**: `BotDetectionError`を捕捉した場合はクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。
-* 根拠: [try-exceptとbreak] (行番号: 831〜853 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")\n                CooldownManager.trigger_cooldown()")
+* 根拠: [try-exceptとbreak] (行番号: 857〜879 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")\n                CooldownManager.trigger_cooldown()")
 
 
 ## 5. 処理フロー図
@@ -880,8 +880,13 @@ flowchart TD
 * **missav専用ロジックの脆弱性**: `_extract_m3u8_url` はmissavサイト側のJS難読化パターン（`eval(function(p,a,c,k,e,d)...`）や変数名（`source1280`等）にハードコードで依存しており、サイト構造の変更時に抽出が失敗する可能性がある（フォールバック抽出パターンは用意されている）。
 * **状態のミスマッチ**: プログラム実行中に手動で `history.txt` やリストファイルが編集された場合、インメモリのタスク一覧とディスク上の状態に乖離が生じる可能性がある。
 * **クールダウンファイルの信頼性**: `CooldownManager.is_in_cooldown`はクールダウンファイルの内容が壊れている場合、安全側（＝クールダウンしない）に倒す設計であり、意図せずクールダウンが無効化されるリスクがある一方、システム停止よりは優先される設計判断となっている。
-* **`BOT_DETECTION_MARKERS`の"429"/"403"/"503"は部分一致判定**: これらは生のステータスコード文字列としての一致に加え、リトライ尽き後の`requests.exceptions.RetryError`メッセージ（例:「too many 503 error responses」）等、広い文字列パターンに部分一致するため、無関係なエラーメッセージにたまたま同じ数字列が含まれる場合に誤検知するリスクがある。
-* 根拠: [BOT_DETECTION_MARKERSのコメント] (行番号: 142〜149 / 抜粋: "# 注: "429"/"403"/"503" は生のステータスコードとしての一致だが、")
+* **`BOT_DETECTION_MARKERS`の数字マーカーは単語境界一致、フレーズマーカーは部分一致**: `_is_bot_detection_error`は"429"/"403"/"503"のような数字のみのマーカーを正規表現の単語境界(`\b`)で厳密に判定するよう修正済みであり、動画IDなどに埋め込まれた偶然の数字列（例:「AbC403XyZ」）への誤検知は解消されている。一方で"sign in to confirm"等のフレーズマーカーは引き続き部分文字列一致(`in`)で判定されるため、無関係なログメッセージにたまたま同じフレーズが含まれる場合の誤検知リスクは残る。
+* 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 205〜217 / 抜粋: "# 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
+* **履歴ファイルI/O失敗の可視化**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録するよう修正済みである。読み込み失敗時は安全側（空の履歴として続行）に倒すため、失敗が続くと既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある点自体は変わらない。
+* 根拠: [HistoryManager.load_history/add_historyのコメント] (行番号: 275〜279, 288〜291 / 抜粋: "# M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
+* **`noplaylist`によるプレイリスト一括ダウンロードの防止**: `UniversalYtDlpStrategy.download`の`ydl_opts`に`noplaylist: True`が追加され、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回される問題が修正されている。
+* 根拠: [ydl_optsのコメント] (行番号: 460〜464 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")
+* **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
 
 ## 9. 不明事項一覧
 
@@ -896,9 +901,9 @@ flowchart TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | Webhook送信処理の仕様 | 関連ドキュメント（`notification_service.md`）の解析結果によれば、`_send_discord_webhook(messages, image_data=None, channel="notify", filename="snapshot.jpg")`という関数シグネチャで、`channel`引数（`error`/`report`/`notify`）に応じて異なるWebhook URLへPOST送信を行い、画像添付時は`files`パラメータでアップロードし、HTTPステータスコードが200/204以外の場合や例外発生時はFalseを返す実装であることが分かった。本ファイルの`DiscordNotifier.send`は`text`と`is_error`のみを渡しており、`image_data`引数は使用していないと見られる。これはあくまで別ファイルの解析結果に基づく補足情報であり、本ファイル（`batch_download_discord.py`）や`notification_service.py`のソースコードを直接確認したものではない。 | [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) |
-| Webhook送信処理の仕様（直接ソース確認による追補） | `MY_HOME_SYSTEM/services/notification_service.py:30-71`を直接確認した。シグネチャは`_send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool`。`channel`引数に応じて`config.DISCORD_WEBHOOK_ERROR`（"error"）／`config.DISCORD_WEBHOOK_REPORT`（"report"）／`config.DISCORD_WEBHOOK_NOTIFY`または`config.DISCORD_WEBHOOK_URL`（それ以外）のいずれかのURLを選択し、URL未設定なら`False`を返す。`image_data`指定時は`files={'file': (filename, image_data)}`で`requests.post(..., files=files, data={'content': text_content}, timeout=60)`、未指定時は`requests.post(url, json={"content": text_content}, timeout=10)`を送信し、レスポンスの`status_code`が200/204以外または例外発生時は`logger.error`を出力して`False`を返す。本ファイル（`batch_download_discord.py`）の呼び出し箇所(83, 246-250行目)は`_send_discord_webhook([message], channel=channel)`という形で呼んでおり`image_data`は渡していないことを確認し、既存の間接推定と一致した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-71`, `DDD/batch_download_discord.py:83, 246-250` |
+| Webhook送信処理の仕様（直接ソース確認による追補） | `MY_HOME_SYSTEM/services/notification_service.py:30-71`を直接確認した。シグネチャは`_send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = None, channel: str = "notify", filename: str = "snapshot.jpg") -> bool`。`channel`引数に応じて`config.DISCORD_WEBHOOK_ERROR`（"error"）／`config.DISCORD_WEBHOOK_REPORT`（"report"）／`config.DISCORD_WEBHOOK_NOTIFY`または`config.DISCORD_WEBHOOK_URL`（それ以外）のいずれかのURLを選択し、URL未設定なら`False`を返す。`image_data`指定時は`files={'file': (filename, image_data)}`で`requests.post(..., files=files, data={'content': text_content}, timeout=60)`、未指定時は`requests.post(url, json={"content": text_content}, timeout=10)`を送信し、レスポンスの`status_code`が200/204以外または例外発生時は`logger.error`を出力して`False`を返す。本ファイル（`batch_download_discord.py`）の呼び出し箇所(83, 258-264行目)は`_send_discord_webhook([message], channel=channel)`という形で呼んでおり`image_data`は渡していないことを確認し、既存の間接推定と一致した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-71`, `DDD/batch_download_discord.py:83, 258-264` |
 | `sanitize_filename` の詳細ルール | 関連ドキュメント（`file_utils.md`）の解析結果によれば、`sanitize_filename(filename, max_length=200)`は禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し、前後の空白を除去したうえで`max_length`（既定200文字、拡張子は含まない前提）まで切り詰め、さらに末尾のピリオド・空白を除去する実装であることが分かった。これはあくまで別ファイルの解析結果に基づく補足情報である。 | [file_utils.md](./file_utils.md) |
-| `sanitize_filename` の詳細ルール（直接ソース確認による追補） | `DDD/file_utils.py:9-21`を直接確認した。`sanitize_filename(filename: str, max_length: int = 200) -> str`は`re.sub(r'[\\/*?:"<>|]', '_', filename).strip()`で禁止文字をアンダースコアに置換して前後空白を除去し、`[:max_length].strip('. ')`で切り詰めと末尾のピリオド・空白除去を行う実装であることを確認した。本ファイル（`batch_download_discord.py`）では326〜327行目の`FileSystemManager.sanitize_filename`（本関数への委譲ラッパー）が487行目で`video_id`（対象ページURLの末尾セグメント、取得不可時は`f"vid_{int(time.time())}"`）を引数に呼び出しており、`max_length`は既定値200文字のまま使用されている。 | 直接ソース確認: `DDD/file_utils.py:9-21`, `DDD/batch_download_discord.py:326-327, 487` |
+| `sanitize_filename` の詳細ルール（直接ソース確認による追補） | `DDD/file_utils.py:9-21`を直接確認した。`sanitize_filename(filename: str, max_length: int = 200) -> str`は`re.sub(r'[\\/*?:"<>|]', '_', filename).strip()`で禁止文字をアンダースコアに置換して前後空白を除去し、`[:max_length].strip('. ')`で切り詰めと末尾のピリオド・空白除去を行う実装であることを確認した。本ファイル（`batch_download_discord.py`）では346〜348行目の`FileSystemManager.sanitize_filename`（本関数への委譲ラッパー）が513行目で`video_id`（対象ページURLの末尾セグメント、取得不可時は`f"vid_{int(time.time())}"`）を引数に呼び出しており、`max_length`は既定値200文字のまま使用されている。 | 直接ソース確認: `DDD/file_utils.py:9-21`, `DDD/batch_download_discord.py:346-348, 513` |
 
 ## 10. 自己検証結果
 
