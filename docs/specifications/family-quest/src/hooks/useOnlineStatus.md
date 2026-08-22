@@ -124,6 +124,13 @@ graph TD
 | 戻り値`isOnline`の具体的な利用方法（バナー表示のUI等） | 本ファイルはフックの定義のみであり、呼び出し元でのUI表現はコードから確認できないため。 | 本フックをインポート・使用しているコンポーネントファイル（例: `App.tsx`） |
 | react-queryのキャッシュ表示との連携方法 | コメントに言及があるのみで、実際の連携実装（react-queryの設定等）はファイル内に存在しないため。 | react-queryの設定ファイルおよび関連コンポーネント |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 戻り値`isOnline`の具体的な利用方法（バナー表示のUI等） | `family-quest/src/App.tsx`を直接確認した。`const isOnline = useOnlineStatus();`(141行目)として呼び出し、`{!isOnline && (...)}`(369〜373行目)の条件付きレンダリングで、画面最上部固定(`fixed top-0 inset-x-0`)の赤背景バナーに`WifiOff`アイコンと「オフラインです。最新の情報ではない可能性があります」というテキストを表示する。それ以外の箇所（データ取得の抑制やUIの無効化等）では`isOnline`は参照されていないことを確認した。 | 直接ソース確認: `family-quest/src/App.tsx:141,369-373` |
+| react-queryのキャッシュ表示との連携方法 | `family-quest/src/lib/queryClient.ts`を直接確認した。`QueryClient`の`defaultOptions.queries`(4〜9行目)は`retry: 1`, `staleTime: 1000 * 60`, `refetchOnWindowFocus: false`のみが設定されており、`navigator.onLine`や本フックの`isOnline`と明示的に連携する設定（`networkMode`のカスタム設定等）は存在しないことを確認した。本フックのコメント(4行目)が言う「オフライン時は最後に取得できたデータを表示し続ける」という挙動は、react-query自体のデフォルトの仕様（クエリが失敗・停止してもそれまでにキャッシュされたデータをそのまま表示し続ける）に由来するものであり、`queryClient.ts`側に本フックと明示的に連動する独自コードは無いことが直接ソース確認により判明した。 | 直接ソース確認: `family-quest/src/lib/queryClient.ts:1-11` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない
