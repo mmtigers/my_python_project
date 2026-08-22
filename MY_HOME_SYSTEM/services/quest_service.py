@@ -56,6 +56,28 @@ def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:
 
 
 # ==========================================
+# User Balance Lock (Race Condition Guard for approve/cancel)
+# ==========================================
+# process_approve_quest / process_cancel_quest は「quest_usersをSELECT →
+# Pythonでgold/exp/levelを計算 → UPDATE」というread-modify-writeのため、
+# 同一ユーザーへの承認×承認・承認×取消が並行実行されると(例: 親が承認一覧を
+# 連続タップするhandleApproveAll)、一方の更新が消失するレースが起こりうる。
+# quest_users(gold/exp/level)を書き換える処理は、対象ユーザー単位でプロセス内
+# 直列化する。
+_user_balance_locks: Dict[str, threading.Lock] = {}
+_user_balance_locks_guard = threading.Lock()
+
+
+def _get_user_balance_lock(user_id: str) -> threading.Lock:
+    with _user_balance_locks_guard:
+        lock = _user_balance_locks.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _user_balance_locks[user_id] = lock
+        return lock
+
+
+# ==========================================
 # Service Classes
 # ==========================================
 
@@ -314,6 +336,19 @@ class QuestService:
         }
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
+        # 先に特定してから、そのユーザー単位でロックを取得する。
+        with common.get_db_cursor() as cur:
+            hist_peek = cur.execute(
+                "SELECT user_id FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+        if not hist_peek:
+            raise HTTPException(status_code=404, detail="History not found")
+
+        with _get_user_balance_lock(hist_peek['user_id']):
+            return self._process_approve_quest_locked(approver_id, history_id)
+
+    def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -460,6 +495,10 @@ class QuestService:
         }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
+        with _get_user_balance_lock(user_id):
+            return self._process_cancel_quest_locked(user_id, history_id)
+
+    def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
