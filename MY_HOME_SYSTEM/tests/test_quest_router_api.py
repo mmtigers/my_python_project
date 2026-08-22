@@ -174,6 +174,21 @@ class TestImageUpload:
         assert len(saved_files) == 1
         assert saved_files[0].parent == _clean_upload_dir
 
+    def test_oversized_upload_is_rejected_and_no_partial_file_remains(
+        self, api_client, _clean_upload_dir, monkeypatch
+    ):
+        """M-9-3: ファイルサイズ上限を超えるアップロードは413で拒否され、
+        書きかけのファイルもディスクに残らないこと。"""
+        monkeypatch.setattr(config, "UPLOAD_MAX_FILE_SIZE_MB", 0)  # 実質どんなサイズでも超過扱いにする
+
+        res = api_client.post(
+            "/api/quest/upload",
+            files={"file": ("photo.jpg", io.BytesIO(self.JPEG_MAGIC + b"\x00" * 100), "image/jpeg")},
+        )
+
+        assert res.status_code == 413
+        assert list(_clean_upload_dir.iterdir()) == []
+
     def test_valid_upload_saves_a_genuinely_decodable_image(self, api_client, _clean_upload_dir):
         """
         マジックバイトチェックを通した実データが、保存後もPillowで正しくデコードできる
