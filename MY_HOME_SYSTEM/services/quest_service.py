@@ -777,9 +777,28 @@ class GameSystem:
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
-                cur.execute(f"DELETE FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids)
+                stale_rewards = cur.execute(
+                    f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids
+                ).fetchall()
             else:
-                cur.execute("DELETE FROM reward_master")
+                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
+
+            # user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、
+            # 所持者がいる(所有中/申請中/使用済問わずuser_inventoryに行が残る)報酬を削除すると
+            # IntegrityErrorでsync_master_data全体が失敗する。参照が残っている報酬は削除をスキップし、
+            # 警告ログのみ出す(マスタからは消えているが所持データは保持される)。
+            for row in stale_rewards:
+                stale_reward_id = row['reward_id']
+                still_referenced = cur.execute(
+                    "SELECT 1 FROM user_inventory WHERE reward_id = ? LIMIT 1", (stale_reward_id,)
+                ).fetchone()
+                if still_referenced:
+                    logger.warning(
+                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
+                        "user_inventoryに参照が残っているため削除をスキップします。"
+                    )
+                    continue
+                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
             
             for r in valid_rewards:
                 cur.execute("""
