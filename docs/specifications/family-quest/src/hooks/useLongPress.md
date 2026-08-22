@@ -173,6 +173,9 @@ flowchart TD
     CheckShortTap -- はい --> CallShortTap["外部 onShortTap を実行"]
     CheckShortTap -- いいえ --> EndPressDone["終了"]
     CallShortTap --> EndPressDone
+
+    Mount(["フック マウント (useEffect登録)"]) --> Unmount{"コンポーネント アンマウント"}
+    Unmount -- はい --> CleanupClearTimers["clearTimers 実行 (setTimeout/setIntervalを停止)"]
 ```
 
 ## 6. 依存関係図
