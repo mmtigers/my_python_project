@@ -13,19 +13,25 @@
 * [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md) — 本ファイルがインポートを試みる`core.nas_utils.get_managed_target_directory`の実装候補（同名関数のシグネチャ・実装が確認できる）。
 * [../MY_HOME_SYSTEM/logger.md](../MY_HOME_SYSTEM/logger.md) — 本ファイルがインポートを試みる`core.logger.get_logger`の実装候補に関する参考情報。
 * [batch_download_discord.md](./batch_download_discord.md) — 同じDDDサブシステム内で`yt_dlp`と`file_utils.sanitize_filename`を併用する類似スクリプトとの比較参考。
+* [newface_monitor.md](./newface_monitor.md) — 本ファイルの`PROJECT_ROOT`解決方式（`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`）と`get_managed_target_directory`フォールバックの`fallback_dir_str`尊重パターンは、同じDDDサブシステム内で先行して修正済みのnewface_monitor.pyの同一パターンを踏襲したものである（コード内コメントで直接言及されている）。
+* [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) — 本ファイルの`PROJECT_ROOT`解決・`core.*`インポート可否・フォールバックスタブの引数尊重・`_verify_environment`のフォールバック検知を検証する回帰テストの解析ドキュメント。
 
 ## 2. ファイルの概要
 
 * モジュールDocstring上「YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)」と称される、指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプトである。
 * 根拠: [モジュールDocstring] (行番号: 4〜9 / 抜粋: "YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)\n------------------------------------------------------\n指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプト。\nMY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に準拠。")
-* `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、固定`./data`を返すディレクトリ解決関数）を用意している。
-* 根拠: [try-exceptブロック] (行番号: 35〜44 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError:")
+* `PROJECT_ROOT`は`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`（`newface_monitor.py`と同じ方式）として解決される。`core/`の実体は`MY_HOME_SYSTEM/core`配下にあり、DDDの単なる親ディレクトリ（リポジトリルート）を指す実装では`core.*`のインポートが常に失敗し、常にファイル内フォールバックスタブへ落ちてしまう不具合があったための修正である。
+* 根拠: [PROJECT_ROOT定義とコメント] (行番号: 29〜34 / 抜粋: "# newface_monitor.py と同じ方式: core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)。DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまっていた。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM"  # ~/develop/MY_HOME_SYSTEM")
+* `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。
+* 根拠: [try-exceptブロック] (行番号: 38〜42 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError:")
+* `SubscriptionManager._verify_environment`によるNASフォールバック検知は、出力先ベースディレクトリと`AppConfig.LOCAL_DIR_STR`（絶対パス）を`Path.resolve()`で正規化した上で完全一致比較する。フォールバック関数が想定外の相対パスを返す場合でも検知漏れが起きないようにするための修正であることがコメントで明記されている。
+* 根拠: [_verify_environmentの比較処理とコメント] (行番号: 347〜351 / 抜粋: "# 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して\n        # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが\n        # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。\n        # パス正規化した上での比較にすることで、表記揺れに関わらず確実に検知する。\n        if current_base.resolve() == Path(AppConfig.LOCAL_DIR_STR).resolve():")
 * `yt_dlp`を用いて対象URL（チャンネル・プレイリスト・単一動画）から動画URLを抽出する`YouTubeExtractor`、抽出結果をテキストファイルへ保存する`FileManager`、SQLite DBに登録されたチャンネルを定期巡回する`SubscriptionManager`、およびコマンドライン引数を解析してこれらを統括する`UrlExtractorApp`の4クラスで構成される。
-* 根拠: [各クラス定義] (行番号: 110〜111, 263〜264, 314〜318, 412〜413 / 抜粋: "class YouTubeExtractor:\n    """YouTubeからURL情報を抽出するクラス。"""")
+* 根拠: [各クラス定義] (行番号: 122〜123, 275〜276, 326〜330, 428〜429 / 抜粋: "class YouTubeExtractor:\n    """YouTubeからURL情報を抽出するクラス。"""")
 * チャンネルURLが指定された場合は`/videos`と`/playlists`の両方を自動探索し、通常動画一覧に加えて各プレイリストも個別に抽出する。
-* 根拠: [extract_iterメソッド] (行番号: 207〜219 / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
+* 根拠: [extract_iterメソッド] (行番号: 219〜229 / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
 * `--cron`引数指定時は、SQLite DB（`home_system.db`）の`youtube_subscriptions`テーブルに登録されたアクティブなチャンネルURLを順次巡回する自動サブスクリプションモードで動作する。レート制限対策としてリクエスト間のジッター付き待機と、連続失敗時のサーキットブレーカーを備える。
-* 根拠: [SubscriptionManager.process_subscriptionsとrunメソッド] (行番号: 355〜407, 429〜432 / 抜粋: "if args.cron:\n            self.sub_manager.process_subscriptions()")
+* 根拠: [SubscriptionManager.process_subscriptionsとrunメソッド] (行番号: 371〜423, 445〜448 / 抜粋: "if args.cron:\n            self.sub_manager.process_subscriptions()")
 
 ## 3. 外部依存関係
 
@@ -45,32 +51,35 @@
 | `contextlib.closing` | 標準ライブラリ | SQLite接続・カーソルの確実なクローズ（`with closing(...)`） | 根拠: [import文] (行番号: 20 / 抜粋: "from contextlib import closing") |
 | `yt_dlp` | サードパーティ | YouTubeチャンネル/プレイリスト/動画のメタデータ抽出(`extract_info`) | 根拠: [import文] (行番号: 22 / 抜粋: "import yt_dlp") |
 | `file_utils.sanitize_filename` (as `_shared_sanitize_filename`) | ローカルモジュール | 保存ファイル名のサニタイズ処理の委譲先 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装（`logging.getLogger`ベース）を使用 | 根拠: [import文] (行番号: 36 / 抜粋: "from core.logger import get_logger") |
-| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルの出力先ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装（固定で`Path("./data")`を返す）を使用 | 根拠: [import文] (行番号: 37 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装（`logging.getLogger`ベース）を使用 | 根拠: [import文] (行番号: 39 / 抜粋: "from core.logger import get_logger") |
+| `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルの出力先ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装（`fallback_dir_str`引数があればそれを、なければ`Path("./data")`を返す）を使用 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `core.logger.get_logger` | インポート成功時に実際に使用される実装（フォーマット、出力先、ログレベル等）の詳細が本ファイルからは不明。フォールバック実装のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 36, 41〜43 / 抜粋: "from core.logger import get_logger") |
-| `core.nas_utils.get_managed_target_directory` | インポート成功時の実際の実装（NASマウント確認・自動修復ロジックの詳細）が不明。フォールバック実装は単に`Path("./data")`を返すのみ。 | 根拠: [import文とフォールバック定義] (行番号: 37, 44 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
-| `yt_dlp.YoutubeDL` | `extract_info`が返す辞書の詳細な構造（`entries`, `url`, `webpage_url`, `id`, `title`, `channel`, `uploader`等のキーの完全な仕様）は`yt_dlp`本体の実装に依存し、本ファイルからは分からない。 | 根拠: [YoutubeDL利用箇所] (行番号: 167〜168 / 抜粋: "with yt_dlp.YoutubeDL(dict(AppConfig.YDL_OPTS)) as ydl:\n                info = ydl.extract_info(target_url, download=False)") |
+| `core.logger.get_logger` | インポート成功時に実際に使用される実装（フォーマット、出力先、ログレベル等）の詳細が本ファイルからは不明。フォールバック実装のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 39, 44〜46 / 抜粋: "from core.logger import get_logger") |
+| `core.nas_utils.get_managed_target_directory` | インポート成功時の実際の実装（NASマウント確認・自動修復ロジックの詳細）が不明。フォールバック実装は`fallback_dir_str`があればそれを、なければ`Path("./data")`を返す簡易実装のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 40, 48〜56 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
+| `yt_dlp.YoutubeDL` | `extract_info`が返す辞書の詳細な構造（`entries`, `url`, `webpage_url`, `id`, `title`, `channel`, `uploader`等のキーの完全な仕様）は`yt_dlp`本体の実装に依存し、本ファイルからは分からない。 | 根拠: [YoutubeDL利用箇所] (行番号: 179〜180 / 抜粋: "with yt_dlp.YoutubeDL(dict(AppConfig.YDL_OPTS)) as ydl:\n                info = ydl.extract_info(target_url, download=False)") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）は本ファイル単体からは不明。ただし関連ドキュメント`file_utils.md`に実装の解析結果が存在する。 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| `home_system.db`（SQLite DB） | `youtube_subscriptions`テーブル以外にどのようなテーブル・データが存在するか、他プロセスとの共有スキーマの全体像は本ファイルからは不明（本ファイルは`CREATE TABLE IF NOT EXISTS`で自テーブルのみ関知）。 | 根拠: [_init_db] (行番号: 341〜353 / 抜粋: "CREATE TABLE IF NOT EXISTS youtube_subscriptions (") |
+| `home_system.db`（SQLite DB） | `youtube_subscriptions`テーブル以外にどのようなテーブル・データが存在するか、他プロセスとの共有スキーマの全体像は本ファイルからは不明（本ファイルは`CREATE TABLE IF NOT EXISTS`で自テーブルのみ関知）。 | 根拠: [_init_db] (行番号: 357〜369 / 抜粋: "CREATE TABLE IF NOT EXISTS youtube_subscriptions (") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `get_managed_target_directory` (フォールバック実装)
 
-* **役割**: `core.nas_utils`のインポートに失敗した場合に使用される、常に固定のローカルディレクトリ`./data`を返す簡易フォールバック関数。
-* 根拠: [関数定義] (行番号: 44 / 抜粋: "def get_managed_target_directory(*args, **kwargs): return Path("./data")")
+* **役割**: `core.nas_utils`のインポートに失敗した場合に使用される簡易フォールバック関数。呼び出し元(`get_output_base_dir`)が渡す`fallback_dir_str`（`BASE_DIR/'data'`の絶対パス）があればそれを、なければカレントディレクトリ相対の`./data`を返す。カレントディレクトリ相対パスを無条件に返すと実行時のカレントディレクトリ次第で保存先・DBパスが毎回変わってしまう不具合につながるため、絶対パスの`fallback_dir_str`を優先する設計であることがコメントで明記されている（`newface_monitor.py`で修正済みの同一バグの踏襲）。
+* 根拠: [関数定義とコメント] (行番号: 48〜56 / 抜粋: "def get_managed_target_directory(*args, **kwargs) -> Path:\n        # 呼び出し元(get_output_base_dir)はfallback_dir_str(BASE_DIR/'data'の絶対パス)を\n        # 渡してくる想定。これを無視してカレントディレクトリ相対の"./data"を返すと、\n        # 実行時のカレントディレクトリ次第で保存先・DBパスが毎回変わってしまう\n        # (newface_monitor.pyで修正済みの同一バグ)。")
 
 
-* **引数/リクエスト**: `*args`, `**kwargs`（本フォールバック実装では未使用、シグネチャ互換のためのみ受け取る）
-* 根拠: [関数定義] (行番号: 44 / 抜粋: "def get_managed_target_directory(*args, **kwargs): return Path("./data")")
+* **引数/リクエスト**: `*args`, `**kwargs`（本フォールバック実装では`kwargs.get("fallback_dir_str")`のみを参照する）
+* 根拠: [引数定義と参照箇所] (行番号: 48, 53 / 抜粋: "fallback_dir_str = kwargs.get("fallback_dir_str")")
 
 
-* **戻り値/レスポンス**: `Path`（常に`Path("./data")`）
+* **戻り値/レスポンス**: `Path`（`fallback_dir_str`が渡されていればそれを`Path`化した値、なければ`Path("./data")`）
+* 根拠: [各return文] (行番号: 54〜56 / 抜粋: "if fallback_dir_str:\n            return Path(fallback_dir_str)\n        return Path("./data")")
+
+
 * **副作用**: なし
 * **エラーハンドリング**: なし
 
@@ -78,11 +87,11 @@
 ### `AppConfig`
 
 * **役割**: 出力先ディレクトリ、NASパス、サブディレクトリ名、レート制限対策のスリープ範囲、`yt_dlp`オプションなど、アプリケーション全体の設定値を保持する定数クラス（インスタンス化不要、クラス変数と`classmethod`のみで構成）。
-* 根拠: [クラス定義とDocstring] (行番号: 49〜50 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")
+* 根拠: [クラス定義とDocstring] (行番号: 61〜62 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")
 
 
 * **引数/リクエスト**: なし（クラス変数として静的に定義）
-* 根拠: [クラス変数定義群] (行番号: 52〜71 / 抜粋: "BASE_DIR: Path = CURRENT_DIR")
+* 根拠: [クラス変数定義群] (行番号: 64〜83 / 抜粋: "BASE_DIR: Path = CURRENT_DIR")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -93,19 +102,19 @@
 ### `AppConfig.get_output_base_dir`
 
 * **役割**: NASアクセスを検証・修復し、動的に出力先ベースディレクトリを解決するクラスメソッド。クラスロード時ではなく実際のファイル処理が必要になったタイミング（遅延評価）で呼び出す設計。
-* 根拠: [メソッド定義とDocstring] (行番号: 73〜82 / 抜粋: "def get_output_base_dir(cls) -> Path:\n        """NASアクセスを検証・修復し、動的にベースディレクトリを解決する（遅延評価）。")
+* 根拠: [メソッド定義とDocstring] (行番号: 85〜94 / 抜粋: "def get_output_base_dir(cls) -> Path:\n        """NASアクセスを検証・修復し、動的にベースディレクトリを解決する（遅延評価）。")
 
 
 * **引数/リクエスト**: なし（`cls`のみ、`@classmethod`）
-* 根拠: [デコレータと引数] (行番号: 73〜74 / 抜粋: "@classmethod\n    def get_output_base_dir(cls) -> Path:")
+* 根拠: [デコレータと引数] (行番号: 85〜86 / 抜粋: "@classmethod\n    def get_output_base_dir(cls) -> Path:")
 
 
 * **戻り値/レスポンス**: `Path`（利用可能なディレクトリパス）
-* 根拠: [Docstringと戻り値] (行番号: 80〜82 / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
+* 根拠: [Docstringと戻り値] (行番号: 92〜95 / 抜粋: "Returns:\n            Path: 利用可能なディレクトリパス\n        """\n        return get_managed_target_directory(")
 
 
 * **副作用**: `get_managed_target_directory`（インポート成功時は`core.nas_utils`、失敗時はフォールバック実装）の呼び出し。
-* 根拠: [呼び出し] (行番号: 83〜87 / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
+* 根拠: [呼び出し] (行番号: 95〜99 / 抜粋: "return get_managed_target_directory(\n            nas_dir_str=cls.NAS_DIR_STR,\n            fallback_dir_str=cls.LOCAL_DIR_STR,\n            mount_point=cls.MOUNT_POINT\n        )")
 
 
 * **エラーハンドリング**: なし（本メソッド自体には例外処理なし。委譲先の実装に依存）
@@ -114,11 +123,11 @@
 ### `ExtractionResult`
 
 * **役割**: 1件の抽出結果（動画リスト/プレイリストのタイトル、URLリスト、抽出元URL、チャンネル名、プレイリストか否か）を保持するデータクラス。
-* 根拠: [クラス定義とDocstring] (行番号: 90〜100 / 抜粋: "@dataclass\nclass ExtractionResult:\n    """抽出結果を格納するデータクラス。")
+* 根拠: [クラス定義とDocstring] (行番号: 102〜112 / 抜粋: "@dataclass\nclass ExtractionResult:\n    """抽出結果を格納するデータクラス。")
 
 
 * **引数/リクエスト**: `title: str`, `urls: List[str]`, `source_url: str`, `channel_name: str = "unknown_channel"`, `is_playlist: bool = False`
-* 根拠: [フィールド定義] (行番号: 101〜105 / 抜粋: "title: str\n    urls: List[str]\n    source_url: str\n    channel_name: str = "unknown_channel"\n    is_playlist: bool = False")
+* 根拠: [フィールド定義] (行番号: 113〜117 / 抜粋: "title: str\n    urls: List[str]\n    source_url: str\n    channel_name: str = "unknown_channel"\n    is_playlist: bool = False")
 
 
 * **戻り値/レスポンス**: 該当なし（データクラスのフィールド定義自体）
@@ -129,15 +138,15 @@
 ### `YouTubeExtractor._normalize_url`
 
 * **役割**: `yt_dlp`のエントリ辞書から正規化されたYouTube動画URLを生成する静的メソッド。`video_id`があれば`watch?v=`形式のURLを優先的に構築し、なければ既存の`url`/`webpage_url`をYouTubeドメインかどうか判定した上で採用する。
-* 根拠: [メソッド定義とDocstring] (行番号: 113〜131 / 抜粋: "def _normalize_url(entry: Dict[str, Any]) -> Optional[str]:\n        """エントリ情報から正規化されたYouTube URLを生成する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 125〜143 / 抜粋: "def _normalize_url(entry: Dict[str, Any]) -> Optional[str]:\n        """エントリ情報から正規化されたYouTube URLを生成する。")
 
 
 * **引数/リクエスト**: `entry: Dict[str, Any]`（`yt-dlp`から取得したエントリ辞書）
-* 根拠: [引数定義とDocstring] (行番号: 114, 117〜118 / 抜粋: "entry (Dict[str, Any]): yt-dlp から取得したエントリ辞書。")
+* 根拠: [引数定義とDocstring] (行番号: 126, 129〜130 / 抜粋: "entry (Dict[str, Any]): yt-dlp から取得したエントリ辞書。")
 
 
 * **戻り値/レスポンス**: `Optional[str]`（正規化されたURL。生成できない場合は`None`）
-* 根拠: [Docstringと各return] (行番号: 120〜121, 127, 130, 131 / 抜粋: "Returns:\n            Optional[str]: 正規化されたURL。生成できない場合は None。")
+* 根拠: [Docstringと各return] (行番号: 132〜133, 139, 142, 143 / 抜粋: "Returns:\n            Optional[str]: 正規化されたURL。生成できない場合は None。")
 
 
 * **副作用**: なし（純粋な文字列生成処理）
@@ -147,15 +156,15 @@
 ### `YouTubeExtractor._is_channel_url`
 
 * **役割**: 指定URLが末尾クエリを除去・末尾スラッシュを除去した上で、チャンネルトップページ（`@handle`, `channel/`, `c/`, `user/`形式）のURLパターンに一致するかを正規表現で判定するインスタンスメソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 133〜143 / 抜粋: "def _is_channel_url(self, url: str) -> bool:\n        """指定されたURLがチャンネルトップページのURLかを判定する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 145〜155 / 抜粋: "def _is_channel_url(self, url: str) -> bool:\n        """指定されたURLがチャンネルトップページのURLかを判定する。")
 
 
 * **引数/リクエスト**: `url: str`
-* 根拠: [引数定義とDocstring] (行番号: 133, 136〜137 / 抜粋: "url (str): 判定対象のURL。")
+* 根拠: [引数定義とDocstring] (行番号: 145, 148〜149 / 抜粋: "url (str): 判定対象のURL。")
 
 
 * **戻り値/レスポンス**: `bool`（チャンネルURLであれば`True`）
-* 根拠: [Docstringと戻り値] (行番号: 139〜140, 143 / 抜粋: "Returns:\n            bool: チャンネルURLであれば True。")
+* 根拠: [Docstringと戻り値] (行番号: 151〜152, 155 / 抜粋: "Returns:\n            bool: チャンネルURLであれば True。")
 
 
 * **副作用**: なし
@@ -165,59 +174,59 @@
 ### `YouTubeExtractor._extract_single_list`
 
 * **役割**: 単一のURL（動画リストまたはプレイリスト）を`yt_dlp`で解析し、含まれる全動画URLを正規化・重複排除した`ExtractionResult`を構築するインスタンスメソッド。`AppConfig.YDL_OPTS`は呼び出し間の状態汚染を避けるためコピーして渡される。
-* 根拠: [メソッド定義とコメント] (行番号: 145〜167 / 抜粋: "def _extract_single_list(self, target_url: str, force_title: str = "") -> Optional[ExtractionResult]:")
+* 根拠: [メソッド定義とコメント] (行番号: 157〜179 / 抜粋: "def _extract_single_list(self, target_url: str, force_title: str = "") -> Optional[ExtractionResult]:")
 
 
 * **引数/リクエスト**: `target_url: str`（対象のURL）, `force_title: str = ""`（タイトルを強制指定する場合に使用）
-* 根拠: [引数定義とDocstring] (行番号: 145, 148〜150 / 抜粋: "target_url (str): 対象のURL。\n            force_title (str, optional): タイトルを強制指定する場合に使用。")
+* 根拠: [引数定義とDocstring] (行番号: 157, 160〜162 / 抜粋: "target_url (str): 対象のURL。\n            force_title (str, optional): タイトルを強制指定する場合に使用。")
 
 
 * **戻り値/レスポンス**: `Optional[ExtractionResult]`（抽出結果オブジェクト。失敗時（`yt_dlp`が情報を返さない、例外発生、URLが1件も抽出できない）は`None`）
-* 根拠: [Docstringと各return] (行番号: 152〜153, 170, 194, 198, 200〜205 / 抜粋: "Returns:\n            Optional[ExtractionResult]: 抽出結果オブジェクト。失敗時は None。")
+* 根拠: [Docstringと各return] (行番号: 164〜165, 181〜182, 203〜206, 209〜210 / 抜粋: "Returns:\n            Optional[ExtractionResult]: 抽出結果オブジェクト。失敗時は None。")
 
 
 * **副作用**: `yt_dlp.YoutubeDL.extract_info`によるネットワークアクセス、進捗・エラーのログ出力。
-* 根拠: [extract_info呼び出しとログ] (行番号: 155, 167〜168 / 抜粋: "logger.info(f"🔍 解析開始: {target_url}")", "info = ydl.extract_info(target_url, download=False)")
+* 根拠: [extract_info呼び出しとログ] (行番号: 167, 180 / 抜粋: "logger.info(f"🔍 解析開始: {target_url}")", "info = ydl.extract_info(target_url, download=False)")
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を`except Exception`で捕捉し、スタックトレース付き(`exc_info=True`)でエラーログを出力して`None`を返す。抽出結果のURLが0件の場合も`None`を返す。
-* 根拠: [try-exceptブロック] (行番号: 191〜194 / 抜粋: "except Exception:\n            # Error Handling: スタックトレースを含めてログ出力\n            logger.error(f"❌ 抽出失敗 ({target_url})", exc_info=True)\n            return None")
+* 根拠: [try-exceptブロック] (行番号: 203〜206 / 抜粋: "except Exception:\n            # Error Handling: スタックトレースを含めてログ出力\n            logger.error(f"❌ 抽出失敗 ({target_url})", exc_info=True)\n            return None")
 
 
 ### `YouTubeExtractor.extract_iter`
 
 * **役割**: URLの種類に応じて抽出方式を切り替えるイテレータメソッド。チャンネルURLの場合は`/videos`（全動画）と`/playlists`（各プレイリスト）を自動探索して複数の`ExtractionResult`を`yield`し、それ以外（プレイリストURLや単一動画URL）の場合は単発で`_extract_single_list`を呼び出す。
-* 根拠: [メソッド定義とDocstring] (行番号: 207〜217 / 抜粋: "def extract_iter(self, target_url: str) -> Iterator[ExtractionResult]:\n        """URLの種類に応じて再帰的または単発で抽出を行うイテレータ。")
+* 根拠: [メソッド定義とDocstring] (行番号: 219〜229 / 抜粋: "def extract_iter(self, target_url: str) -> Iterator[ExtractionResult]:\n        """URLの種類に応じて再帰的または単発で抽出を行うイテレータ。")
 
 
 * **引数/リクエスト**: `target_url: str`（開始URL）
-* 根拠: [引数定義とDocstring] (行番号: 207, 212〜213 / 抜粋: "target_url (str): 開始URL。")
+* 根拠: [引数定義とDocstring] (行番号: 219, 224〜225 / 抜粋: "target_url (str): 開始URL。")
 
 
 * **戻り値/レスポンス**: `Iterator[ExtractionResult]`（抽出結果を順次`yield`）
-* 根拠: [Docstringと戻り値ヒント] (行番号: 207, 215〜216 / 抜粋: "Yields:\n            Iterator[ExtractionResult]: 抽出結果を順次返す。")
+* 根拠: [Docstringと戻り値ヒント] (行番号: 219, 227〜228 / 抜粋: "Yields:\n            Iterator[ExtractionResult]: 抽出結果を順次返す。")
 
 
 * **副作用**: チャンネルURLの場合、`/videos`・`/playlists`双方への`yt_dlp`アクセス（ネットワーク通信）、進捗ログ出力。
-* 根拠: [チャンネル探索処理] (行番号: 218〜254 / 抜粋: "if self._is_channel_url(target_url):\n            logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")")
+* 根拠: [チャンネル探索処理] (行番号: 230〜266 / 抜粋: "if self._is_channel_url(target_url):\n            logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")")
 
 
 * **エラーハンドリング**: プレイリスト一覧取得時（`/playlists`）の例外を`except Exception`で捕捉し、スタックトレース付きでエラーログを出力（処理は中断されるがメソッド自体は正常終了）。個々の`_extract_single_list`呼び出しの失敗（`None`が返る場合）は単に`yield`をスキップする。
-* 根拠: [try-exceptブロック] (行番号: 253〜254 / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)")
+* 根拠: [try-exceptブロック] (行番号: 265〜266 / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)")
 
 
 ### `FileManager._sanitize_filename`
 
 * **役割**: 外部モジュール`file_utils.sanitize_filename`へファイル名のサニタイズ処理を委譲する静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 266〜276 / 抜粋: "def _sanitize_filename(filename: str) -> str:\n        """ファイル名として使用できない文字を置換する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 278〜288 / 抜粋: "def _sanitize_filename(filename: str) -> str:\n        """ファイル名として使用できない文字を置換する。")
 
 
 * **引数/リクエスト**: `filename: str`（元の文字列）
-* 根拠: [引数定義とDocstring] (行番号: 267, 270〜271 / 抜粋: "filename (str): 元の文字列。")
+* 根拠: [引数定義とDocstring] (行番号: 279, 282〜283 / 抜粋: "filename (str): 元の文字列。")
 
 
 * **戻り値/レスポンス**: `str`（安全なファイル名文字列）
-* 根拠: [Docstringと戻り値] (行番号: 273〜274, 276 / 抜粋: "Returns:\n            str: 安全なファイル名文字列。\n        """\n        return _shared_sanitize_filename(filename)")
+* 根拠: [Docstringと戻り値] (行番号: 285〜286, 288 / 抜粋: "Returns:\n            str: 安全なファイル名文字列。\n        """\n        return _shared_sanitize_filename(filename)")
 
 
 * **副作用**: なし
@@ -227,38 +236,38 @@
 ### `FileManager.save`
 
 * **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。保存先ディレクトリは`AppConfig.get_output_base_dir()`を遅延評価で取得する。
-* 根拠: [メソッド定義とDocstring] (行番号: 278〜286 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 290〜298 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")
 
 
 * **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）
-* 根拠: [引数定義とDocstring] (行番号: 278, 281〜282 / 抜粋: "result (ExtractionResult): 保存対象の抽出データ。")
+* 根拠: [引数定義とDocstring] (行番号: 290, 293〜294 / 抜粋: "result (ExtractionResult): 保存対象の抽出データ。")
 
 
 * **戻り値/レスポンス**: `bool`（保存に成功した場合`True`。ディレクトリ作成失敗時・ファイル書き込み失敗時は`False`）
-* 根拠: [Docstringと各return] (行番号: 284〜285, 293, 309, 312 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
+* 根拠: [Docstringと各return] (行番号: 296〜297, 305, 321, 324 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
 
 
 * **副作用**: 保存先ディレクトリの作成(`mkdir`)、テキストファイルへの書き込み(`open(..., "w")`)、成功/失敗・上書き時のログ出力。
-* 根拠: [ディレクトリ作成とファイル書き込み] (行番号: 289〜290, 304〜307 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "with output_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")")
+* 根拠: [ディレクトリ作成とファイル書き込み] (行番号: 301〜302, 316〜319 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "with output_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する。
-* 根拠: [try-exceptブロック] (行番号: 289〜293, 304〜312 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False")
+* 根拠: [try-exceptブロック] (行番号: 301〜305, 316〜324 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False")
 
 
 ### `SubscriptionManager.__init__`
 
 * **役割**: `YouTubeExtractor`と`FileManager`のインスタンスを保持し、サブスクリプション管理用SQLite DB（`home_system.db`）のパスを（NASベースディレクトリの1階層上として）決定するコンストラクタ。
-* 根拠: [クラス定義とDocstringおよび__init__] (行番号: 314〜325 / 抜粋: "class SubscriptionManager:\n    """\n    定期巡回（サブスクリプション）を管理するクラス。\n    SSOTポリシーに基づき、SQLite DBを用いて状態を管理する。\n    """")
+* 根拠: [クラス定義とDocstringおよび__init__] (行番号: 326〜337 / 抜粋: "class SubscriptionManager:\n    """\n    定期巡回（サブスクリプション）を管理するクラス。\n    SSOTポリシーに基づき、SQLite DBを用いて状態を管理する。\n    """")
 
 
 * **引数/リクエスト**: `extractor: YouTubeExtractor`, `file_manager: FileManager`
-* 根拠: [引数定義] (行番号: 320 / 抜粋: "def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):")
+* 根拠: [引数定義] (行番号: 332 / 抜粋: "def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):")
 
 
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `self.extractor`, `self.file_manager`, `self.db_path`への属性代入。`self.db_path`決定時に`AppConfig.get_output_base_dir()`の呼び出し（間接的にNASアクセス確認等の副作用を誘発しうる）。
-* 根拠: [属性代入] (行番号: 321〜325 / 抜粋: "self.extractor = extractor\n        self.file_manager = file_manager\n        \n        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置\n        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"")
+* 根拠: [属性代入] (行番号: 333〜337 / 抜粋: "self.extractor = extractor\n        self.file_manager = file_manager\n        \n        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置\n        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"")
 
 
 * **エラーハンドリング**: なし
@@ -266,20 +275,20 @@
 
 ### `SubscriptionManager._verify_environment`
 
-* **役割**: 現在の出力先ベースディレクトリがローカルフォールバック（`LOCAL_DIR_STR`）中でないか（＝NASが正常にマウントされているか）を検証するインスタンスメソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 327〜334 / 抜粋: "def _verify_environment(self) -> bool:\n        """\n        NASのマウント状態（フォールバック中ではないか）を検証する。")
+* **役割**: 現在の出力先ベースディレクトリが`AppConfig.LOCAL_DIR_STR`（ローカルフォールバック用パス）と一致するか（＝NASが正常にマウントされているか）を検証するインスタンスメソッド。`Path.resolve()`によるパス正規化を行った上で完全一致比較する。フォールバック関数が想定外の相対パスを返した場合でも検知漏れが起きないよう、絶対パスの文字列包含チェック(旧実装)ではなく正規化パスの完全一致比較を用いる設計であることがコメントで明記されている。
+* 根拠: [メソッド定義とDocstringおよび比較処理のコメント] (行番号: 339〜351 / 抜粋: "def _verify_environment(self) -> bool:\n        """\n        NASのマウント状態（フォールバック中ではないか）を検証する。")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: [引数定義] (行番号: 327 / 抜粋: "def _verify_environment(self) -> bool:")
+* 根拠: [引数定義] (行番号: 339 / 抜粋: "def _verify_environment(self) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（正常なNAS環境であれば`True`、ローカルフォールバック中であれば`False`）
-* 根拠: [Docstringと各return] (行番号: 335〜337, 339 / 抜粋: "Returns:\n            bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False\n        """)
+* 根拠: [Docstringと各return] (行番号: 343〜345, 355 / 抜粋: "Returns:\n            bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False\n        """)
 
 
 * **副作用**: フォールバック検知時のエラーログ出力（2行）。
-* 根拠: [ログ出力] (行番号: 336〜337 / 抜粋: "logger.error("🚨 NASがアンマウント状態（ローカルフォールバック中）を検知しました。")\n            logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")")
+* 根拠: [ログ出力] (行番号: 352〜353 / 抜粋: "logger.error("🚨 NASがアンマウント状態(ローカルフォールバック中)を検知しました。")\n            logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")")
 
 
 * **エラーハンドリング**: なし
@@ -288,16 +297,16 @@
 ### `SubscriptionManager._init_db`
 
 * **役割**: サブスクリプション管理用テーブル(`youtube_subscriptions`)が存在しない場合に作成するインスタンスメソッド。`id`, `channel_url`（一意制約）, `is_active`, `added_at`の各カラムを持つ。
-* 根拠: [メソッド定義とDocstring] (行番号: 341〜353 / 抜粋: "def _init_db(self) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
+* 根拠: [メソッド定義とDocstring] (行番号: 357〜369 / 抜粋: "def _init_db(self) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 341 / 抜粋: "def _init_db(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 357 / 抜粋: "def _init_db(self) -> None:")
 
 
 * **副作用**: SQLite DB接続、テーブル作成用DDL実行(`CREATE TABLE IF NOT EXISTS`)、コミット。
-* 根拠: [DDL実行] (行番号: 343〜353 / 抜粋: "with closing(sqlite3.connect(self.db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
+* 根拠: [DDL実行] (行番号: 359〜369 / 抜粋: "with closing(sqlite3.connect(self.db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
 
 
 * **エラーハンドリング**: なし（本メソッド自体には例外処理なし。呼び出し元の`process_subscriptions`が`sqlite3.Error`を捕捉する）
@@ -306,20 +315,20 @@
 ### `SubscriptionManager.process_subscriptions`
 
 * **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。
-* 根拠: [メソッド定義とDocstring] (行番号: 355〜356 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""")
+* 根拠: [メソッド定義とDocstring] (行番号: 371〜372 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 355 / 抜粋: "def process_subscriptions(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 371 / 抜粋: "def process_subscriptions(self) -> None:")
 
 
 * **副作用**: 環境検証・DB初期化・DBからのSELECT、URL巡回ごとの`time.sleep`、`extractor.extract_iter`によるネットワークアクセス、`file_manager.save`によるファイル書き込み、各段階でのログ出力。
-* 根拠: [メイン処理フロー] (行番号: 357〜407 / 抜粋: "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
+* 根拠: [メイン処理フロー] (行番号: 373〜423 / 抜粋: "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
 
 
 * **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
-* 根拠: [各種ガード節とbreak] (行番号: 357〜359, 365〜367, 378〜380, 382〜384, 405〜407 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
+* 根拠: [各種ガード節とbreak] (行番号: 374〜375, 381〜383, 394〜396, 398〜400, 421〜423 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
 
 
 ### `UrlExtractorApp.__init__`

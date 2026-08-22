@@ -38,8 +38,8 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 ### `SwitchBotContext`
 
-* **役割**: Webhookで送られてくる詳細コンテキストのデータ構造を定義するPydanticモデル。
-* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-15 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""')
+* **役割**: Webhookで送られてくる詳細コンテキストのデータ構造を定義するPydanticモデル。SwitchBot公式Webhookのペイロードでは`deviceType`(例: `"WoContact"`, `"WoPresence"`)がトップレベルではなくこのcontext内に入るため、当該フィールドを保持する(以前は未定義フィールドでpydanticに黙って捨てられ、常にNoneにフォールバックしていた)。
+* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-20 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""'); `deviceType: Optional[str] = None` (行番号: 12 / 抜粋: "deviceType: Optional[str] = None")
 
 
 * **引数/リクエスト**: 該当なし（クラス定義のため）
@@ -51,57 +51,57 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 5-15 / 抜粋: "class SwitchBotContext(BaseMod")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 5-20 / 抜粋: "class SwitchBotContext(BaseMod")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 5-15 / 抜粋: "class SwitchBotContext(BaseMod")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 5-20 / 抜粋: "class SwitchBotContext(BaseMod")
 
 
 
 ### `SwitchBotWebhookBody`
 
 * **役割**: SwitchBot Webhookのエントリポイントのデータ構造を定義するPydanticモデル。
-* 根拠: `class SwitchBotWebhookBody(BaseModel):` (行番号: 17-22 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""')
+* 根拠: `class SwitchBotWebhookBody(BaseModel):` (行番号: 22-27 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""')
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 17 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 22 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 17 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 22 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 17-22 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 22-27 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 17-22 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 22-27 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 
 ### `DeviceStatusResponse`
 
 * **役割**: API経由で取得したデバイス状態のデータ構造を定義するPydanticモデル。
-* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 24-28 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
+* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 29-33 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 24 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 29 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 24 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 29 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 24-28 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 29-33 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 24-28 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 29-33 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 
