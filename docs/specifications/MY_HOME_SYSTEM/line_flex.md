@@ -177,6 +177,14 @@ graph TD
 | 本ファイルの各関数の実際の呼び出し元 | 呼び出し箇所は本ファイルに含まれていないため。 | `webhook_router.py`、`line_handler.py`、`line_logic.py`等のハンドラ/ルーター群 |
 | `line_logic.py`の`create_health_carousel_flex`との関係(重複実装か、置き換え途中か) | `line_logic.py`の実装内容自体は本ファイルの解析範囲外であるため。 | `line_logic.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.FAMILY_SETTINGS`の実際の構造(メンバー数・スタイル定義) | `MY_HOME_SYSTEM/config.py`を直接確認した。469〜477行目で`Dict[str, Any]`型として定義されており、`members`キーは`["智矢", "涼花", "将博", "春菜"]`という4名の文字列リスト、`styles`キーは各名前をキーとして`{"color": "#1E90FF", "age": None, "icon": "👦"}`のような`color`(16進カラーコード文字列)・`age`(初期値`None`)・`icon`(絵文字文字列)を持つ辞書であることを確認した。なお479〜488行目で`family_members.local.json`が存在する場合、`styles`内の既存キーに対して`age`等の値がマージされる設計であることも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:469-488` |
+| 本ファイルの各関数の実際の呼び出し元 | `MY_HOME_SYSTEM/views/line_flex.py`の3関数(`create_health_carousel`, `create_record_confirm_bubble`, `create_summary_bubble`)について、リポジトリ全体を`line_flex`および各関数名で`grep`した結果、`views/line_flex.py`自身の定義箇所以外にインポート・呼び出しが一切見つからなかった。`routers/webhook_router.py`、`handlers/line_handler.py`、`handlers/line_logic.py`のいずれにも`line_flex`のインポート文は存在せず、本ファイルはリポジトリ内のどこからも呼び出されていない未使用モジュールであることを確認した。 | 直接ソース確認: リポジトリ全体`grep`（`MY_HOME_SYSTEM/views/line_flex.py`, `MY_HOME_SYSTEM/routers/webhook_router.py`, `MY_HOME_SYSTEM/handlers/line_handler.py`, `MY_HOME_SYSTEM/handlers/line_logic.py`にインポート記述なし） |
+| `line_logic.py`の`create_health_carousel_flex`との関係(重複実装か、置き換え途中か) | `MY_HOME_SYSTEM/handlers/line_logic.py`104〜143行目の`create_health_carousel_flex()`と、本ファイル`views/line_flex.py`5〜51行目の`create_health_carousel()`を直接比較した。両者はbubbleの`header`/`body`/`footer`構造、ボタンのpostbackデータ形式(`action=child_check&child={name}&status=...`)まで含めてほぼ同一の実装であり、唯一の差異は対象メンバーの取得元で、`line_logic.py`側は`TARGET_MEMBERS`という同ファイル内の定数を使うのに対し、`line_flex.py`側は`config.FAMILY_SETTINGS["members"]`を直接参照する点であった。かつ`line_logic.create_health_carousel_flex`は`handlers/line_logic.py`264行目で実際に呼び出されているのに対し、`line_flex.create_health_carousel`は前項の通りどこからも呼び出されていない。この状況から、`line_flex.py`は`line_logic.py`側に実装が移された（または統合された）後に削除されずに残った重複・未使用の実装であると直接確認できる差異から判断できるが、開発の経緯(どちらが先に書かれたか)自体はソースコードからは判断できない。 | 直接ソース確認: `MY_HOME_SYSTEM/views/line_flex.py:5-51`, `MY_HOME_SYSTEM/handlers/line_logic.py:104-143,264` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）

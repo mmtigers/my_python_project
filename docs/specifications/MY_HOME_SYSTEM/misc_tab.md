@@ -275,6 +275,14 @@ graph TD
 | `config.ASSETS_DIR`の実際のパス | `config`モジュールの実装が提供されていないため。 | `config.py` |
 | `render_status_card_html`が未使用インポートである理由 | 本ファイル単体では設計意図（将来使用予定か削除漏れか）が判断できないため。 | `views/dashboard/common.py` およびGitの変更履歴 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `train_service.get_jr_traffic_status`, `get_route_info`の実装・データ取得元 | `MY_HOME_SYSTEM/services/train_service.py`を直接確認した。`get_jr_traffic_status()`(22〜60行目)はJR西日本の運行情報API(`JR_WEST_JSON_URL = "https://www.train-guide.westjr.co.jp/api/v3/area_kinki_trafficinfo.json"`、17行目)へ`requests.get(timeout=5)`し、レスポンスJSONの`lines`辞書のうち路線ID`"G"`(宝塚線)/`"A"`(神戸線)のみを対象に、ステータス文字列に「見合」または「運休」を含めば`is_suspended=True`とする。API呼び出しが例外を送出した場合は`except Exception`(56〜57行目)で捕捉し、初期値の「🟢 平常運転」を返すフェイルソフト設計であることを確認した。`get_route_info(from_station="伊丹(兵庫県)", to_station="長岡京")`(62行目〜)はYahoo!路線情報(`YAHOO_SEARCH_URL = "https://transit.yahoo.co.jp/search/result"`、20行目)を、現在時刻の20分後を出発時刻として`requests.get`し、`BeautifulSoup`で`#rsltlst li.el`または`.routeSummary`セレクタからHTMLをスクレイピングする設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/train_service.py:17-60, 62-108` |
+| `config.ASSETS_DIR`の実際のパス | `MY_HOME_SYSTEM/config.py`224〜227行目を直接確認した。`ASSETS_DIR: str = ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`と定義されており、`NAS_PROJECT_ROOT`(217行目)は`os.path.join(NAS_MOUNT_POINT, "home_system")`(既定`NAS_MOUNT_POINT="/mnt/nas"`)であるため、本来のパスは`/mnt/nas/home_system/assets`である。`ensure_safe_path_with_backoff`(98〜136行目)は`verify_and_initialize_storage`によるNASマウント確認・初期化を試み(116行目)、失敗した場合は`config.py`と同じディレクトリ配下の`temp_fallback/assets`をローカルフォールバックとして作成・返却するフェイルソフト設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:98-136, 216-227` |
+| `render_status_card_html`が未使用インポートである理由 | `MY_HOME_SYSTEM/views/dashboard/common.py`50〜57行目を直接確認した。`render_status_card_html(title, value, theme)`はステータスカードのHTML断片（`<div class="status-card {theme}">...`）を返す関数であり、本ファイル(`misc_tab.py`)内では`from .common import render_status_card_html`(12行目)でインポートされているものの、`render_traffic`/`render_photos`/`render_bicycle`のいずれからも呼び出されていないことを再確認した。一方でリポジトリ内を検索したところ、同じ関数は`MY_HOME_SYSTEM/views/dashboard/summary.py`9行目でも同様にインポートされ、222〜234行目で「高砂」「伊丹」「車」「炊飯器」「電気代」「駐輪場待機」「JR運行情報」「サーバー」「NAS」の9件のステータスカード描画に実際に使用されていることを確認した。`misc_tab.py`と`summary.py`の両方に同一インポート文が存在することから、`summary.py`用に導入した共通関数を`misc_tab.py`側にもコピー（または将来の共通化を見越して先行追加）した後、`misc_tab.py`側では結局呼び出しコードを書かなかった（削除し忘れた）可能性が高いと考えられるが、`git log --oneline`で本ファイルの履歴を確認したところ記録されているコミットは2件（いずれもリポジトリ全体のリファクタリング・一括コミットで、本ファイル単体の変更意図を示す粒度のログではない）のみであり、真の設計意図（将来使用予定か削除漏れか）を示す記録は見つからず、確定的な結論には至らなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/common.py:50-57`, `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:12`, `MY_HOME_SYSTEM/views/dashboard/summary.py:9, 222-234`（`git log --oneline -- MY_HOME_SYSTEM/views/dashboard/misc_tab.py`は2コミットのみで詳細な経緯の記録なしを確認） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

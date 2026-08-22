@@ -176,8 +176,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `TV_PLUG_DEVICE_ID` および `FALLBACK_ROOT` の具体的な値 | `config.md`の解析によれば、`config.py`は`load_dotenv()`により`.env`ファイルから環境変数を読み込む設計であることが判明した。ただし`TV_PLUG_DEVICE_ID`/`FALLBACK_ROOT`個別の値自体は`config.md`側でも確認できていない。なお`config.md`では`TV_UNLOCK_QUEST_IDS`というTVロック解除に関連するクエストID群の定数の存在が確認されており、本ファイルの機能と連携する可能性がある。 | config.md |
+| `TV_PLUG_DEVICE_ID` および `FALLBACK_ROOT` の具体的な値 | `config.py`を直接確認した。544行目で`TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")`と定義されており、`.env`ファイル由来の環境変数(静的な埋め込み値ではない)であることが判明した。実際のデバイスID文字列自体は`.env`(gitignore対象)に格納されるため本リポジトリからは確認不能。`FALLBACK_ROOT`は213行目で`FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")`と定義されており、`BASE_DIR`直下の`temp_fallback`ディレクトリを指す固定パスであることが判明した(530行目で`MEMORY_ALERT_LAST_NOTIFY_FILE`の生成にも使われている)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:213, 530, 544` |
 | `send_device_command`の完全なレスポンス構造とエラー発生条件 | `switchbot_service.md`の解析によれば、`send_device_command`はSwitchBot APIへのPOSTリクエストを行い、成功時は`Optional[Dict[str, Any]]`のレスポンス、任意の`Exception`発生時はエラーログを出力して`None`を返すフェイルソフト設計であることが判明した。 | switchbot_service.md |
+| このスクリプトがどのように定期実行されるか（Cron等の呼び出し元） | `scheduler_boot.py`を直接確認した。36行目の`TASKS`リストに`{"script": "monitors/tv_lock_monitor.py", "interval": 300, "last_run": 0, "args": []}`というエントリがあり、`ThreadPoolExecutor`ベースの自作スケジューラ(`run_script`関数、45行目〜)によって300秒(5分)間隔でサブプロセスとして定期実行される設計であることが判明した。OS側のcron/systemdタイマーではなく、アプリケーション内蔵のスケジューラである。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43` |
 
 ## 10. 自己検証結果
 

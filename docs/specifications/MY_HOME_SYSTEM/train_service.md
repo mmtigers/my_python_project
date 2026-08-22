@@ -244,8 +244,8 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `common.setup_logging` の仕様 | ロガーの出力先・フォーマット・ログレベルが不明。 | `common.py` |
-| JR西日本APIのレスポンス完全仕様 | `lines` オブジェクト内に `G`, `A` 以外にどのような路線IDが存在するか、`status`/`text` 以外のフィールドの有無が不明。 | JR西日本APIの公式仕様書（本リポジトリ外） |
-| Yahoo!路線情報の現在のHTML構造 | コード中のCSSセレクタが現在のサイト構造と一致しているかは、本ファイルの解析のみでは検証できない。 | 対象サイトの実際のHTML（本リポジトリ外） |
+| JR西日本APIのレスポンス完全仕様 | `lines` オブジェクト内に `G`, `A` 以外にどのような路線IDが存在するか、`status`/`text` 以外のフィールドの有無が不明。（リポジトリ内を検索したが該当する仕様書ファイルは存在せず、解消不可。JR西日本公式APIドキュメントを要参照） | JR西日本APIの公式仕様書（本リポジトリ外） |
+| Yahoo!路線情報の現在のHTML構造 | コード中のCSSセレクタが現在のサイト構造と一致しているかは、本ファイルの解析のみでは検証できない。（リポジトリ内を検索したが対象サイトのHTMLファイルは存在せず、解消不可。外部サイトの実際の構造を要確認） | 対象サイトの実際のHTML（本リポジトリ外） |
 | 呼び出し元の利用方法 | `get_jr_traffic_status` と `get_route_info` がどの画面・どの頻度で呼び出されるかが不明。 | `views/dashboard/misc_tab.py` 等の呼び出し元 |
 
 ## 相互参照による補足情報
@@ -253,7 +253,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `common.setup_logging` の仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
-| 呼び出し元の利用方法 | `dashboard.md`の解析によれば、`dashboard.py`は`views.dashboard.misc_tab`モジュールの`render_traffic()`関数を電車遅延タブとして呼び出しており、この関数が本ファイルの`get_jr_traffic_status`/`get_route_info`を利用する可能性が高いと推測される。ただし`misc_tab.py`自体は未解析のため確定情報ではない。 | dashboard.md |
+| 呼び出し元の利用方法 | `views/dashboard/misc_tab.py`を直接確認した。`render_traffic()`関数(14〜46行目)が16行目で`train_service.get_jr_traffic_status()`を呼び出し、戻り値の`jr_status["宝塚線"]`/`jr_status["神戸線"]`をStreamlitの画面(「🚃 JR宝塚線・神戸線 運行状況」セクション)に表示する。また`_render_route_search(col, from_st, to_st, label_icon)`関数(48行目〜)が51行目で`train_service.get_route_info(from_st, to_st)`を呼び出し、`render_traffic()`内で現在時刻(4〜11時: 伊丹→長岡京の出勤ルート、12〜23時および深夜帯: 長岡京→伊丹の帰宅ルート)に応じて呼び出される。呼び出し頻度自体（Streamlit画面の再描画タイミング依存)は`misc_tab.py`単体からは確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:11, 14-51` |
 
 ## 10. 自己検証結果
 

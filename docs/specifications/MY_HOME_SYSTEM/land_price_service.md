@@ -356,9 +356,17 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `config.LAND_PRICE_TARGETS`の実際の内容 | 監視対象エリア（`city_code`, `city_name`, `districts`, `filter_chome`）の一覧が本ファイル内で定義されていないため。 | `config.py` |
-| `config.REINFOLIB_API_KEY` / `config.REINFOLIB_WEB_URL`の値 | APIキーおよびWeb URLの実値が本ファイル内で定義されていないため。 | `config.py` |
-| 不動産情報ライブラリAPI (`XIT001`) の完全なレスポンス仕様 | 本ファイルのコードから使用フィールド（`DistrictName`, `TradePrice`等）は判明するが、公式のAPI仕様書は本ファイル内に含まれないため全容は不明。 | 外部API仕様書（国土交通省提供） |
+| `config.REINFOLIB_API_KEY` / `config.REINFOLIB_WEB_URL`の値 | APIキーおよびWeb URLの実値が本ファイル内で定義されていないため。（`REINFOLIB_WEB_URL`は直接確認できたが、`REINFOLIB_API_KEY`は`os.getenv("REINFOLIB_API_KEY")`により環境変数から取得される設計であり、実値自体はリポジトリ内には存在せず解消不可） | `config.py` |
+| 不動産情報ライブラリAPI (`XIT001`) の完全なレスポンス仕様 | 本ファイルのコードから使用フィールド（`DistrictName`, `TradePrice`等）は判明するが、公式のAPI仕様書は本ファイル内に含まれないため全容は不明。（リポジトリ内を`XIT001`で検索したが、`old/land_price_service.py`自身以外に該当する外部API仕様書は存在せず、解消不可。国土交通省が公開する外部APIの公式仕様のため） | 外部API仕様書（国土交通省提供） |
 | `land_price_records`テーブルの完全なスキーマ | INSERT文からカラム名は判明するが、型・制約・インデックスの定義は本ファイル内では確認できないため。 | データベースのマイグレーション/DDL定義ファイル |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `config.LAND_PRICE_TARGETS`の実際の内容 | `MY_HOME_SYSTEM/config.py`を直接確認した。371〜390行目で`List[Dict[str, Any]]`型のリストとして定義されており、要素は3件。(1)`{"city_code": "28207", "city_name": "伊丹市", "districts": ["鈴原町"], "filter_chome": list(range(1, 9))}`、(2)`{"city_code": "28216", "city_name": "高砂市", "districts": ["西畑", "鍵町"], "filter_chome": [1]}`、(3)`{"city_code": "29201", "city_name": "奈良市", "districts": ["西九条町"], "filter_chome": [1]}`という構造であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:371-390` |
+| `config.REINFOLIB_API_KEY` / `config.REINFOLIB_WEB_URL`の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。207行目で`REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")`と定義されており、実値は環境変数から取得するためリポジトリ内には存在しない。一方`REINFOLIB_WEB_URL`は403行目で`REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"`という固定文字列として直接定義されていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:207, 403` |
+| `land_price_records`テーブルの完全なスキーマ | `MY_HOME_SYSTEM/current_schema.sql`と`MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。両ファイルで一致するスキーマが定義されており、`id INTEGER PRIMARY KEY AUTOINCREMENT, trade_id TEXT UNIQUE, prefecture TEXT, city TEXT, district TEXT, type TEXT, price INTEGER, area_m2 INTEGER, price_per_m2 INTEGER, transaction_period TEXT, recorded_at DATETIME NOT NULL`という11カラム構成であることを確認した。`trade_id`に`UNIQUE`制約が付与されている以外、明示的なインデックス定義は両ファイルとも確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:139-150`, `MY_HOME_SYSTEM/init_unified_db.py:340-351` |
 
 ## 10. 自己検証結果
 

@@ -209,6 +209,14 @@ graph TD
 | 本スクリプトの実行トリガー（cron/スケジューラ設定） | `__main__`ブロックが1回のみの実行を行う設計であり、定期実行の仕組みが本ファイルからは不明であるため。 | スケジューラ関連ファイル(`scheduler_boot.py`等) |
 | `monitors/old/`ディレクトリの位置づけ（現行版との関係） | ディレクトリ名から旧版の可能性が示唆されるが、本ファイル単体では現行版の有無や移行状況を判断できないため。 | `monitors/`配下の他ファイル一覧 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `CLINIC_MONITOR_URL`等の実際の設定値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`CLINIC_MONITOR_URL`(502行目)は`os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")`で環境変数未設定時はこのURLが既定値となる。同ファイル507〜510行目には`CLINIC_MONITOR_START_HOUR`(既定8)、`CLINIC_MONITOR_END_HOUR`(既定19)、`CLINIC_REQUEST_TIMEOUT`(既定10)、`CLINIC_USER_AGENT`(既定`"MyHomeSystem/1.0 (Family Health Monitor)"`)も定義されていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:502, 507-510` |
+| 本スクリプトの実行トリガー（cron/スケジューラ設定） | `MY_HOME_SYSTEM/scheduler_boot.py`を直接確認した。29〜43行目の`TASKS`リスト（定期実行対象スクリプトの一覧）に`clinic_monitor.py`を含む`monitors/old/`配下のスクリプトは1件も含まれておらず、本ファイルは同スケジューラによる定期実行対象になっていないことを確認した。リポジトリ全体を`clinic_monitor`で検索しても、本ファイルを呼び出す箇所は自分自身（`monitors/old/clinic_monitor.py`）以外に見つからず、実際の実行トリガーは特定できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43` |
+| `monitors/old/`ディレクトリの位置づけ（現行版との関係） | `MY_HOME_SYSTEM/monitors/`配下のファイル一覧を直接確認した。`monitors/`直下には`camera_monitor.py`, `nas_monitor.py`, `nature_remo_monitor.py`, `memory_monitor.py`, `server_watchdog.py`, `switchbot_power_monitor.py`, `timelapse_generator.py`, `timelapse_runner.py`, `scheduled_timelapse.py`, `daily_timelapse_job.py`, `smart_timelapse_generator.py`, `tv_lock_monitor.py`等が存在するが、`clinic_`で始まるファイルは`monitors/old/`配下の`clinic_analyzer.py`, `clinic_monitor.py`, `clinic_visualizer.py`の3件のみであり、現行の`monitors/`直下に後継版は存在しないことを確認した。またリポジトリ全体を`clinic`で検索しても、この3ファイルと`config.py`（設定値定義のみ）以外に`clinic`関連の記述は見つからず、後継モジュールの実体は確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/`配下のディレクトリ一覧（`monitors/old/clinic_analyzer.py`, `monitors/old/clinic_monitor.py`, `monitors/old/clinic_visualizer.py`のみ該当） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）
