@@ -9,5 +9,8 @@
 | [newface_monitor.md](./newface_monitor.md) | `newface_monitor.py` | 対象サイトの新人キャスト紹介ページを定期巡回し、新規追加をDiscord Webhookで通知するバッチスクリプト。 |
 | [split_prompts.md](./split_prompts.md) | `split_prompts.py` | 「番号. タイトル」+「Prompt: 内容」形式で列挙されたMarkdownファイルを、項目ごとの個別Markdownファイルへ分割するスクリプト。 |
 | [extract_youtube_urls.md](./extract_youtube_urls.md) | `extract_youtube_urls.py` | 指定されたYouTubeチャンネル・プレイリストから動画URLを抽出するスクリプト。MY_HOME_SYSTEMの共通コア機能に準拠しつつ単体実行時はフォールバック実装を用いる。 |
+| [test_batch_download_discord_fixes.md](./test_batch_download_discord_fixes.md) | `test_batch_download_discord_fixes.py` | `batch_download_discord.py`のボット検知マーカー判定・履歴I/Oエラーのログ出力・`noplaylist`指定に関する回帰テスト。 |
+| [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) | `test_extract_youtube_urls_paths.py` | `extract_youtube_urls.py`の`PROJECT_ROOT`解決・NASフォールバック検知に関する回帰テスト。 |
+| [test_newface_monitor_lock.md](./test_newface_monitor_lock.md) | `test_newface_monitor_lock.py` | `newface_monitor.py`の多重起動防止ロック機構に関する回帰テスト。 |
 
 > 各仕様書には「関連ドキュメント」セクションがあり、他サブシステム(MY_HOME_SYSTEMのNAS監視系等)との相互参照リンクを含みます。全体像は[全体設計書.md](../全体設計書.md)を参照してください。
