@@ -206,7 +206,14 @@ graph TD
 | --- | --- | --- |
 | スクリプトの実行契機（トリガー） | ファイル単体にループ処理等の常駐機能が含まれておらず、実行元が把握できないため。 | `crontab`、`systemd` ユニットファイル等の実行スケジュール定義 |
 | Webhook URLの実際の設定内容と使い分け | `DISCORD_WEBHOOK_ERROR` と `DISCORD_WEBHOOK_NOTIFY` が変数として参照されているが、それぞれの具体的なURLや、利用環境における使い分けの意図が外部依存のため。 | `/home/masahiro/develop/MY_HOME_SYSTEM/.env` |
-| `bluetoothctl trust` の影響範囲 | MACアドレスの信頼設定を行っているが、これが実行環境のBluetoothデーモン設定にどのように永続化・影響を及ぼしているか確認できないため。 | `/var/lib/bluetooth/` 配下のデバイス設定ファイル等 |
+| `bluetoothctl trust` の影響範囲 | MACアドレスの信頼設定を行っているが、これが実行環境のBluetoothデーモン設定にどのように永続化・影響を及ぼしているか確認できないため（リポジトリ内・実行環境ともに`/var/lib/bluetooth/`に相当するディレクトリ・設定ファイルは見つからず、解消不可）。 | `/var/lib/bluetooth/` 配下のデバイス設定ファイル等 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| スクリプトの実行契機（トリガー） | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認したところ、同スクリプトは11行目で`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh"`を定義し、35〜42行目でスピーカー切断検知時（`pactl list sinks short`にMACアドレスが含まれない場合）に`"$CONNECT_SCRIPT" >> "$LOGFILE" 2>&1`として`connect_speaker.sh`を呼び出していることを確認した。すなわち`keep_alive_anker.sh`が`connect_speaker.sh`の実行元（呼び出し元）の一つであることが直接ソースから判明した。ただし`keep_alive_anker.sh`自体も14行目のコメント「# cron実行時でもPipeWireソケットを見つけられるようにする」からcron等の定期実行を前提とした設計であることは読み取れるが、その`crontab`設定自体・実行間隔はリポジトリ内に見つからず（`keep_alive_anker.md`の不明事項一覧でも同様に未解決とされている）、最終的な実行契機（定期実行のスケジュール）自体は依然として不明である。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11, 14, 35〜42`（参考: [keep_alive_anker.md](./keep_alive_anker.md)の不明事項一覧） |
+| Webhook URLの実際の設定内容と使い分け | 実際のURL値は`.env`が存在しないため依然不明だが、「使い分けの意図」についてはリポジトリ内の直接ソースから判明した。`MY_HOME_SYSTEM/config.py:193〜198`は`DISCORD_WEBHOOK_ERROR`（194行目）、`DISCORD_WEBHOOK_REPORT`（196行目）、`DISCORD_WEBHOOK_NOTIFY`（197行目）、`DISCORD_WEBHOOK_URL`（198行目、`DISCORD_WEBHOOK_NOTIFY`が未設定なら`DISCORD_WEBHOOK_URL`環境変数にフォールバック）という4種類のDiscord Webhook用環境変数を個別に定義しており、これらはシステム全体で「エラー通知チャンネル」「定期レポートチャンネル」「通常通知チャンネル」を使い分けるためのものであることが`MY_HOME_SYSTEM/services/notification_service.py:32〜37`の`_send_discord_webhook`関数（`channel`引数が`"error"`なら`DISCORD_WEBHOOK_ERROR`、`"report"`なら`DISCORD_WEBHOOK_REPORT`、それ以外は`DISCORD_WEBHOOK_NOTIFY`または`DISCORD_WEBHOOK_URL`を選択）から確認できる。`connect_speaker.sh`自身も22行目で`WEBHOOK_URL="${DISCORD_WEBHOOK_ERROR:-$DISCORD_WEBHOOK_NOTIFY}"`としており、まず`DISCORD_WEBHOOK_ERROR`（エラー通知チャンネル）を優先し、未設定であれば`DISCORD_WEBHOOK_NOTIFY`（通常通知チャンネル）にフォールバックするという使い分けであることが直接確認できた。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:193〜198`, `MY_HOME_SYSTEM/services/notification_service.py:32〜37`, `MY_HOME_SYSTEM/tools/connect_speaker.sh:22` |
 
 ## 10. 自己検証結果
 

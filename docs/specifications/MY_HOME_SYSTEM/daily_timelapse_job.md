@@ -28,22 +28,22 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | パス操作、ファイル存在確認、リネーム、削除 | `import os` (行番号取得不可 / 抜粋: "import os") |
-| `sys` | 標準ライブラリ | システムパス (`sys.path`) へのプロジェクトルート追加 | `import sys` (行番号取得不可 / 抜粋: "import sys") |
-| `datetime` | 標準ライブラリ | 日付・時刻のパース、計算、フォーマット | `import datetime` (行番号取得不可 / 抜粋: "import datetime") |
-| `time` | 標準ライブラリ | スリープ処理 (`time.sleep`)、処理時間計測 (`time.perf_counter`) | `import time` (行番号取得不可 / 抜粋: "import time") |
-| `glob` | 標準ライブラリ | 指定パターンに一致するファイルの検索 | `import glob` (行番号取得不可 / 抜粋: "import glob") |
-| `json` | 標準ライブラリ | サマリー情報のJSON形式でのファイル保存 | `import json` (行番号取得不可 / 抜粋: "import json") |
-| `tempfile` | 標準ライブラリ | 一時ディレクトリの作成 (`TemporaryDirectory`) | `import tempfile` (行番号取得不可 / 抜粋: "import tempfile") |
-| `traceback` | 標準ライブラリ | エラー発生時のスタックトレース取得 | `import traceback` (行番号取得不可 / 抜粋: "import traceback") |
-| `argparse` | 標準ライブラリ | コマンドライン引数の解析 | `import argparse` (行番号取得不可 / 抜粋: "import argparse") |
-| `re` | 標準ライブラリ | ファイル名からの時刻文字列の正規表現抽出 | `import re` (行番号取得不可 / 抜粋: "import re") |
-| `Path` | 標準ライブラリ | （インポートされているが未使用） | `from pathlib import Path` (行番号取得不可 / 抜粋: "from pathlib import Path") |
-| `asdict` | 標準ライブラリ | データクラスの辞書化（JSON保存時） | `from dataclasses import asdict` (行番号取得不可 / 抜粋: "from dataclasses import asdict") |
-| `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号取得不可 / 抜粋: "import config") |
-| `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号取得不可 / 抜粋: "from core.logger import setup_logging") |
-| `send_push` | 内部モジュール | Discordへの通知メッセージ送信 | `from services.notification_service import send_push` (行番号取得不可 / 抜粋: "from services.notification_service import send_push") |
-| `monitors.smart_timelapse_generator` の各要素 | 内部モジュール | 動き検知、イベント構築、クリップ生成、結合、Discordへのアップロードなどコア処理の実行 | `from monitors.smart_timelapse_generator import ...` (行番号取得不可 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| `os` | 標準ライブラリ | パス操作、ファイル存在確認、リネーム、削除 | `import os` (行番号: 1 / 抜粋: "import os") |
+| `sys` | 標準ライブラリ | システムパス (`sys.path`) へのプロジェクトルート追加 | `import sys` (行番号: 2 / 抜粋: "import sys") |
+| `datetime` | 標準ライブラリ | 日付・時刻のパース、計算、フォーマット | `import datetime` (行番号: 3 / 抜粋: "import datetime") |
+| `time` | 標準ライブラリ | スリープ処理 (`time.sleep`)、処理時間計測 (`time.perf_counter`) | `import time` (行番号: 4 / 抜粋: "import time") |
+| `glob` | 標準ライブラリ | 指定パターンに一致するファイルの検索 | `import glob` (行番号: 5 / 抜粋: "import glob") |
+| `json` | 標準ライブラリ | サマリー情報のJSON形式でのファイル保存 | `import json` (行番号: 6 / 抜粋: "import json") |
+| `tempfile` | 標準ライブラリ | 一時ディレクトリの作成 (`TemporaryDirectory`) | `import tempfile` (行番号: 7 / 抜粋: "import tempfile") |
+| `traceback` | 標準ライブラリ | エラー発生時のスタックトレース取得 | `import traceback` (行番号: 8 / 抜粋: "import traceback") |
+| `argparse` | 標準ライブラリ | コマンドライン引数の解析 | `import argparse` (行番号: 9 / 抜粋: "import argparse") |
+| `re` | 標準ライブラリ | ファイル名からの時刻文字列の正規表現抽出 | `import re` (行番号: 10 / 抜粋: "import re") |
+| `Path` | 標準ライブラリ | （インポートされているが未使用） | `from pathlib import Path` (行番号: 11 / 抜粋: "from pathlib import Path") |
+| `asdict` | 標準ライブラリ | データクラスの辞書化（JSON保存時） | `from dataclasses import asdict` (行番号: 12 / 抜粋: "from dataclasses import asdict") |
+| `config` | 内部モジュール | LINEのユーザーID取得など設定情報の参照 | `import config` (行番号: 19 / 抜粋: "import config") |
+| `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 20 / 抜粋: "from core.logger import setup_logging") |
+| `send_push` | 内部モジュール | Discordへの通知メッセージ送信 | `from services.notification_service import send_push` (行番号: 21 / 抜粋: "from services.notification_service import send_push") |
+| `monitors.smart_timelapse_generator` の各要素 | 内部モジュール | 動き検知、イベント構築、クリップ生成、結合、Discordへのアップロードなどコア処理の実行 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ### ブラックボックスとなる外部要素
 
@@ -51,10 +51,10 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, "LINE_USER_ID", "")` (行番号取得不可 / 抜粋: "getattr(config, "LINE_USER_ID", "")") |
-| `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号取得不可 / 抜粋: "logger = setup_logging(**name**)") |
-| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号取得不可 / 抜粋: "send_push(user_id=user_id, messages=...)") |
-| `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号取得不可 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, "LINE_USER_ID", "")` (行番号: 55 / 抜粋: "getattr(config, "LINE_USER_ID", "")") |
+| `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
+| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 58〜63, 206〜211, 244〜249 / 抜粋: "send_push(user_id=user_id, messages=...)") |
+| `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -65,7 +65,7 @@
 * **役割**: HH:MM またはコロンなしの HHMM, HHMMSS, HH 形式の文字列を `datetime.time` オブジェクトに変換する。
 
 
-* 根拠: [関数定義およびコメント] (行番号取得不可 / 抜粋: "def parse_time(time_str: str) -> datetime.time:")
+* 根拠: [関数定義およびコメント] (行番号: 39 / 抜粋: "def parse_time(time_str: str) -> datetime.time:")
 
 
 
@@ -73,14 +73,14 @@
 * **引数/リクエスト**: `time_str: str` (時刻を表す文字列)
 
 
-* 根拠: [関数の引数定義] (行番号取得不可 / 抜粋: "time_str: str")
+* 根拠: [関数の引数定義] (行番号: 39 / 抜粋: "time_str: str")
 
 
 
 
 * **戻り値/レスポンス**: `datetime.time` または入力がFalsyな場合は `None`
 
-* 根拠: [関数の戻り値型ヒントと初期分岐] (行番号取得不可 / 抜粋: "return None")
+* 根拠: [関数の戻り値型ヒントと初期分岐] (行番号: 42 / 抜粋: "return None")
 
 
 
@@ -88,7 +88,7 @@
 * **副作用**: なし
 
 
-* 根拠: [関数内部処理] (行番号取得不可 / 抜粋: "return datetime.time(...)")
+* 根拠: [関数内部処理] (行番号: 45, 47, 49 / 抜粋: "return datetime.time(...)")
 
 
 
@@ -96,7 +96,7 @@
 * **エラーハンドリング**: フォーマットが想定された長さ（2, 4, 6桁）に合致しない場合、`ValueError` を発生させる。
 
 
-* 根拠: [else句の処理] (行番号取得不可 / 抜粋: "raise ValueError(f"時刻のフォーマットが...")")
+* 根拠: [else句の処理] (行番号: 51 / 抜粋: "raise ValueError(f"時刻のフォーマットが...")")
 
 
 
@@ -107,7 +107,7 @@
 * **役割**: 対象カメラの録画ディレクトリから、指定日付および時間帯の動画ファイルを取得・フィルタリングし、動き検知エンジンのパイプライン（検知・イベント構築・クリップ生成・結合・サムネイル作成）を実行して結果をDiscordへアップロード・通知する。
 
 
-* 根拠: [関数定義] (行番号取得不可 / 抜粋: "def run_daily_timelapse(...) -> None:")
+* 根拠: [関数定義] (行番号: 53 / 抜粋: "def run_daily_timelapse(...) -> None:")
 
 
 
@@ -125,14 +125,14 @@
 * `end_time_str: str = None`: フィルタリングの終了時刻
 
 
-* 根拠: [関数の引数定義] (行番号取得不可 / 抜粋: "camera_name: str, target_date_str: str = None...")
+* 根拠: [関数の引数定義] (行番号: 53 / 抜粋: "camera_name: str, target_date_str: str = None...")
 
 
 
 
 * **戻り値/レスポンス**: `None`
 
-* 根拠: [関数の戻り値型ヒント] (行番号取得不可 / 抜粋: "-> None:")
+* 根拠: [関数の戻り値型ヒント] (行番号: 53 / 抜粋: "-> None:")
 
 
 
@@ -153,7 +153,7 @@
 * サマリー情報のJSONファイル (`.done`) のディスクへの保存
 
 
-* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号取得不可 / 抜粋: "os.rename(src_csv, dst_csv)")
+* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 188 / 抜粋: "os.rename(src_csv, dst_csv)")
 
 
 
@@ -168,7 +168,7 @@
 * 処理全体を `try...except Exception as e:` で囲み、予期せぬエラーが発生した場合はスタックトレースをログ出力し、Discordへエラー通知を送信する。
 
 
-* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号取得不可 / 抜粋: "except Exception as e:")
+* 根拠: [try-exceptブロックおよび早期リターン処理] (行番号: 241 / 抜粋: "except Exception as e:")
 
 
 
@@ -258,9 +258,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `monitors/smart_timelapse_generator.py` | コアロジックとなる動き検知、クリップ切り出し、結合などのアルゴリズムや、隠蔽メソッド（`_build_clip`等）の正確な副作用と戻り値を把握するため。 | `from monitors.smart_timelapse_generator import ...` (行番号取得不可 / 抜粋: "from monitors.smart_timelapse_generator import") |
-| 中 | `services/notification_service.py` | エラー時や処理完了時に呼ばれる `send_push` の引数（`target="discord"`等）がどのように処理され、実際にどのようなメッセージが飛ぶのかを確認するため。 | `from services.notification_service import send_push` (行番号取得不可 / 抜粋: "from services.notification_service import send_push") |
-| 低 | `config.py` | `LINE_USER_ID` 以外にシステム全体の動作に影響を与える環境変数や設定値が存在するか確認するため。 | `import config` (行番号取得不可 / 抜粋: "import config") |
+| 高 | `monitors/smart_timelapse_generator.py` | コアロジックとなる動き検知、クリップ切り出し、結合などのアルゴリズムや、隠蔽メソッド（`_build_clip`等）の正確な副作用と戻り値を把握するため。 | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
+| 中 | `services/notification_service.py` | エラー時や処理完了時に呼ばれる `send_push` の引数（`target="discord"`等）がどのように処理され、実際にどのようなメッセージが飛ぶのかを確認するため。 | `from services.notification_service import send_push` (行番号: 21 / 抜粋: "from services.notification_service import send_push") |
+| 低 | `config.py` | `LINE_USER_ID` 以外にシステム全体の動作に影響を与える環境変数や設定値が存在するか確認するため。 | `import config` (行番号: 19 / 抜粋: "import config") |
 
 ## 8. 保守上の注意点
 
@@ -269,7 +269,7 @@ graph TD
 * 動画処理ループ内でハードコードされた `time.sleep(1)` が存在し、チャンク数に比例して固定の遅延が発生する仕様になっている。
 
 
-* 根拠: [ループ内処理] (行番号取得不可 / 抜粋: "for filepath in target_files: time.sleep(1)")
+* 根拠: [ループ内処理] (行番号: 163〜164 / 抜粋: "for filepath in target_files: time.sleep(1)")
 
 
 
@@ -277,7 +277,7 @@ graph TD
 * チャンクファイルの長さを最大15分と仮定し、ハードコードされた固定値(`datetime.timedelta(minutes=15)`)を使用して時間帯フィルタリングの終了時刻を算出しているため、カメラ側の設定変更により録画時間が15分を超えた場合にフィルタリング漏れが発生する可能性がある。
 
 
-* 根拠: [フィルタリング処理] (行番号取得不可 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
+* 根拠: [フィルタリング処理] (行番号: 113 / 抜粋: "file_end_dt = file_start_dt + datetime.timedelta(minutes=15)")
 
 
 
@@ -285,7 +285,7 @@ graph TD
 * `VideoBuilder` クラスのインスタンスに対し、`_build_clip`, `_build_concat`, `_generate_thumbnail` のようにアンダースコア始まりのメソッド（Pythonの慣例における非公開/内部メソッド）を直接呼び出している。
 
 
-* 根拠: [クリップ生成・結合処理] (行番号取得不可 / 抜粋: "clip_path = video_builder._build_clip(...)")
+* 根拠: [クリップ生成・結合処理] (行番号: 199 / 抜粋: "clip_path = video_builder._build_clip(...)")
 
 
 
@@ -293,7 +293,7 @@ graph TD
 * 既存のsummary動画ファイルを削除する処理において、`OSError` をキャッチしているが `pass` 処理となっており、削除失敗時（権限不足や使用中など）の原因が握りつぶされる実装となっている。
 
 
-* 根拠: [既存ファイル削除処理] (行番号取得不可 / 抜粋: "except OSError: pass")
+* 根拠: [既存ファイル削除処理] (行番号: 157〜158 / 抜粋: "except OSError: pass")
 
 
 
@@ -301,7 +301,7 @@ graph TD
 * 録画ファイルの検索先ディレクトリは `getattr(config, 'NVR_RECORD_DIR', "/mnt/nas/home_system/nvr_recordings")` により `config.NVR_RECORD_DIR` を優先的に参照し、未定義時のみ同文字列にフォールバックする（以前はこのパスがハードコード直書きされておりバグの原因になっていたが、修正済み）。
 
 
-* 根拠: [NASディレクトリ指定] (行番号取得不可 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
+* 根拠: [NASディレクトリ指定] (行番号: 82 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...")
 
 
 
@@ -309,7 +309,7 @@ graph TD
 * `LINE_USER_ID` という変数名で `config` から値を取得しているが、`send_push` の引数には `target="discord"` を指定しており、変数名と通知先が一致していない。
 
 
-* 根拠: [通知送信処理] (行番号取得不可 / 抜粋: "user_id=user_id, ..., target="discord"")
+* 根拠: [通知送信処理] (行番号: 58〜63, 206〜211, 244〜249 / 抜粋: "user_id=user_id, ..., target="discord"")
 
 
 
@@ -330,10 +330,10 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 各種機能エンジンの詳細仕様 | `smart_timelapse_generator.md`の解析によれば、`MotionDetector`はOpenCVの背景差分で動体を検知し`MotionRecord`のリストを生成、`EventBuilder`はそれらをグルーピングして`EventRecord`のリストを生成、`VideoBuilder`はイベントに基づき動画クリップを切り出し結合、`Uploader`はファイルサイズに応じて分割しDiscord Webhookへ送信するとされる。ただし`_build_clip`等の非公開メソッドの正確な引数・戻り値までは`smart_timelapse_generator.md`でも一部推測に留まる。 | smart_timelapse_generator.md |
-| ディレクトリ構造とパス定義 | `smart_timelapse_generator.md`の解析によれば、`setup_directories`は作業用・出力用・記録用の3ディレクトリを作成し`Tuple[str, str, str]`(`work_dir`, `output_dir`, `records_dir`)を返す関数であることが判明したが、実際のパス文字列(既定値)自体は`smart_timelapse_generator.md`でも未確認とされている。 | smart_timelapse_generator.md |
-| 動画メタ情報の構造 | `smart_timelapse_generator.md`の解析によれば、`get_video_info`は`ffprobe`コマンドの実行結果をJSON解析した`Dict[str, Any]`を返す関数であり、リトライ機構(最大3回)を持つとされるが、返却される辞書の完全なキー構成までは確認できていない。 | smart_timelapse_generator.md |
-| 通知連携の詳細 | `notification_service.md`の解析によれば、`send_push`は`target`引数(`discord`/`line`/`both`)に応じてDiscord WebhookおよびLINE Messaging APIへメッセージを送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知するとされる。 | notification_service.md |
+| 各種機能エンジンの詳細仕様 | `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py`を直接確認した。`MotionDetector.__init__`(241〜244行目)はOpenCVの`cv2.createBackgroundSubtractorMOG2`で背景差分器を初期化する。`MotionDetector.detect(input_path, work_dir, duration_sec) -> List[MotionRecord]`(246〜326行目)は`ffmpeg`をrawvideoパイプで起動しフレームごとに背景差分・輪郭検出を行い、最大輪郭面積が`MIN_AREA_THRESHOLD`を超えた秒に`MotionRecord(time_sec, largest_area, contour_count)`を追加、`motion.csv`へ書き出した上でリストを返す。`EventBuilder.build(motion_records, work_dir) -> List[EventRecord]`(332〜391行目)は`GAP_THRESH`以内の記録をグルーピングし前後に`BUFFER_SEC`のバッファを付与、重複区間を結合して`EventRecord`のリストを生成、`events.csv`/`events_enriched.csv`へ書き出す。`VideoBuilder._build_clip(input_path, ev, temp_dir, video_start_dt) -> str`(431〜447行目)は`_build_ffmpeg_command`で組み立てたffmpegコマンドを`subprocess.run`実行し、成功時はクリップパスを、`CalledProcessError`/`TimeoutExpired`発生時はエラーログを出力し空文字列`""`を返す。`VideoBuilder._build_concat(clip_files, output_path, temp_dir) -> bool`(476〜494行目)は`concat.txt`を生成しffmpegのconcatデマクサで結合、成功で`True`、例外で`False`を返す。`VideoBuilder._generate_thumbnail`(496〜501行目)は`ffmpeg`で1フレーム抽出、失敗しても例外を送出せず警告ログのみ出力(`-> None`)。`Uploader.split_and_send(summary, base_filename) -> None`(507行目〜)は`summary.output_path`の存在確認後、`config.DISCORD_WEBHOOK_URL`をWebhook URLとして参照する。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:241-244, 246-326, 332-391, 431-447, 476-501, 507` |
+| ディレクトリ構造とパス定義 | `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:205-225`の`setup_directories() -> Tuple[str, str, str]`を直接確認した。`base_dir = getattr(config, "BASE_DIR", PROJECT_ROOT)`を基準に、`work_dir = base_dir/work/timelapse`、`output_dir = base_dir/assets/timelapse`、`records_dir = base_dir/data/timelapse_records`の3ディレクトリパスを`os.makedirs(..., exist_ok=True)`で作成する。さらに`work_dir`配下の既存ファイル・ディレクトリは呼び出しの都度削除(クリーンアップ)されてから、`(work_dir, output_dir, records_dir)`のタプルとして返される実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:205-225` |
+| 動画メタ情報の構造 | `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:139-161`の`get_video_info(input_path: str, retries: int = 3) -> Dict[str, Any]`を直接確認した。`ffprobe -v quiet -print_format json -show_format -show_streams`をサブプロセス実行し、標準出力を`json.loads`でパースした辞書（ffprobe標準の`format`/`streams`キーを含む構造）をそのまま返す。デフォルトで最大3回リトライし、`subprocess.TimeoutExpired`発生時はリトライ間に`time.sleep(5)`を挟む（タイムアウトは1回あたり120秒）。`returncode != 0`、標準出力が空、または最終リトライでも失敗した場合はエラーログを出力し空辞書`{}`を返す実装であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/smart_timelapse_generator.py:139-161` |
+| 通知連携の詳細 | `MY_HOME_SYSTEM/services/notification_service.py:116-140`の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg") -> bool`を直接確認した。`target`が`"discord"`または`"both"`の場合は`_send_discord_webhook(messages, image_data, channel, filename)`を、`"line"`または`"both"`の場合は`_send_line_push(user_id, line_msgs)`を呼び出し、LINE送信失敗時は`_send_discord_webhook(fallback, None, 'error')`でDiscordの`error`チャンネルへフォールバック通知する。`_send_discord_webhook`(30〜71行目)は`channel`引数に応じて`config.DISCORD_WEBHOOK_ERROR`(`"error"`)/`config.DISCORD_WEBHOOK_REPORT`(`"report"`)/`config.DISCORD_WEBHOOK_NOTIFY`または`config.DISCORD_WEBHOOK_URL`(それ以外)のいずれかのWebhook URLを選択し、`messages`内の各要素から`text`/`alt_text`属性または辞書の`text`/`altText`キーを取り出して連結したテキストを`requests.post`でWebhookへ送信し、ステータスコードが200/204以外またはリクエスト例外時は`False`を返す。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:116-140, 30-71` |
 
 ## 10. 自己検証結果
 

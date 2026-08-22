@@ -134,6 +134,14 @@ graph TD
 | `battery_level`カラムの実際の利用箇所 | 追加されたカラムがどのモジュールで書き込み・読み取りされるかは当ファイルからは判断できないため。 | `nas_monitor.py`等、`device_records`を参照するモジュール |
 | 本スクリプトの実行契機（手動実行か自動実行か） | `if __name__ == "__main__":`のガードがなく常に実行される構造だが、呼び出し元やスケジューリングの記述が当ファイル内に存在しないため。 | 呼び出し元スクリプトまたは運用手順書 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `device_records`テーブルの既存カラム構成 | `MY_HOME_SYSTEM/init_unified_db.py:163-178`の`CREATE TABLE IF NOT EXISTS device_records`定義を直接確認したところ、`id, timestamp, device_name, device_id, device_type, power_watts, temperature_celsius, humidity_percent, contact_state, movement_state, brightness_state, hub_onoff, cam_onoff, threshold_watts`の14列のみで`battery_level`列は含まれていないことを確認した。一方、リポジトリ内の`MY_HOME_SYSTEM/current_schema.sql:1-16`（実DBのスキーマダンプと見られるファイル）を直接確認したところ、`CREATE TABLE device_records (...)`の末尾に`, battery_level INTEGER)`という形で列が付加されており、これは`ALTER TABLE ... ADD COLUMN`実行後のSQLite特有の表記と一致する。以上より、`init_unified_db.py`の初期スキーマには存在しない`battery_level`列が、本ファイル(`db_fix.py`)の`ALTER TABLE`によって実際のDBに追加された状態であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:163-178`, `MY_HOME_SYSTEM/current_schema.sql:1-16` |
+| `battery_level`カラムの実際の利用箇所 | `MY_HOME_SYSTEM/monitors/nas_monitor.py:200-214`の`save_to_db(self, ping_ok, mount_ok, usage)`メソッドを直接確認した。`config.SQLITE_TABLE_SENSOR`（`config.py:235`で`"device_records"`と定義）に対し、`save_log_generic`で`["timestamp", "device_name", "device_id", "device_type", "contact_state", "battery_level"]`の6列へ書き込んでおり、`battery_level`列には`usage['percent']`（NASのディスク使用率、202行目の`percent = usage['percent'] if usage else 0`）が格納されている。すなわち`battery_level`という列名だが、実際の利用箇所ではバッテリー残量ではなくNASのディスク使用率(%)を格納する目的で流用されていることを確認した。リポジトリ全体を`battery_level`で検索した範囲では、これ以外の書き込み・読み取り箇所は見つからなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/monitors/nas_monitor.py:200-214`, `MY_HOME_SYSTEM/config.py:235` |
+| 本スクリプトの実行契機（手動実行か自動実行か） | `MY_HOME_SYSTEM/scheduler_boot.py:29-43`の`TASKS`リストを直接確認したが、`db_fix.py`を含む`MY_HOME_SYSTEM/old/`配下のスクリプトは1件も登録されていないことを確認した。またリポジトリ全体を`db_fix`で検索しても、本ファイル自身(`MY_HOME_SYSTEM/old/db_fix.py`)以外に呼び出し箇所は見つからなかった。`DB_PATH`が特定開発者のローカル環境パス(`/home/masahiro/develop/MY_HOME_SYSTEM/home_system.db`)にハードコードされている点、および`duplicate column name`エラーを無視する冪等な作りになっている点も踏まえると、開発者が手元で1回限り（またはDB再構築のたびに）手動実行した保守用スクリプトであると考えられるが、自動実行の仕組みは本リポジトリ内には確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43`（`db_fix.py`の記載なしを確認） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない（完了）
