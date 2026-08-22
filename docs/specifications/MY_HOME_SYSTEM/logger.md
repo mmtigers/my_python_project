@@ -11,6 +11,7 @@
 
 * [config.md](./config.md) - `BASE_DIR`, `DISCORD_WEBHOOK_ERROR`等の設定値を提供
 * [common.md](./common.md) - `setup_logging`を再エクスポートする呼び出し元(Facade)
+* [nas_utils.md](./nas_utils.md) - `from core.logger import get_logger`で本ファイルの`get_logger`を利用する呼び出し元(`ImportError`時は`logging.getLogger`ベースの簡易フォールバック定義で代替する)
 * システム内のほぼ全モジュール(`line_handler.md`, `nas_monitor.md`, `sensor_service.md`等多数)が`setup_logging`の呼び出し元
 
 ## 2. ファイルの概要
