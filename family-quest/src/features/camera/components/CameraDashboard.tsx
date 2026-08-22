@@ -1,30 +1,34 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import LiveView from './LiveView';
 import RecordView from './RecordView';
+import CameraSettingsModal from './CameraSettingsModal';
 import { CameraConfig } from '../types';
-import { Camera } from 'lucide-react';
+import { Camera, Settings } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 
 const CameraDashboard: React.FC = () => {
-    const [cameras, setCameras] = useState<CameraConfig[]>([]);
+    const [allCameras, setAllCameras] = useState<CameraConfig[]>([]);
     const [activeTab, setActiveTab] = useState<'live' | 'record'>('live');
     const [loading, setLoading] = useState(true);
+    const [settingsOpen, setSettingsOpen] = useState(false);
 
-    useEffect(() => {
-        document.title = "ホーム監視カメラ";
-        apiClient.get<CameraConfig[]>('/api/cameras/settings')
+    const fetchSettings = useCallback(() => {
+        return apiClient.get<CameraConfig[]>('/api/cameras/settings')
             .then(data => {
-                const activeCameras = data.filter((c: CameraConfig) => c.enabled);
-                activeCameras.sort((a: CameraConfig, b: CameraConfig) => a.order - b.order);
-                setCameras(activeCameras);
-                setLoading(false);
+                setAllCameras([...data].sort((a, b) => a.order - b.order));
             })
             .catch(err => {
                 console.error("Failed to fetch camera settings:", err);
-                setLoading(false);
             });
-        return () => { document.title = "Family Quest"; };
     }, []);
+
+    useEffect(() => {
+        document.title = "ホーム監視カメラ";
+        fetchSettings().finally(() => setLoading(false));
+        return () => { document.title = "Family Quest"; };
+    }, [fetchSettings]);
+
+    const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);
 
     if (loading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-8">読み込み中...</div>;
 
@@ -38,6 +42,13 @@ const CameraDashboard: React.FC = () => {
                         <Camera size={28} className="text-blue-500" />
                         ホーム監視カメラ
                     </h1>
+                    <button
+                        aria-label="カメラ設定"
+                        className="p-2 rounded-full text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+                        onClick={() => setSettingsOpen(true)}
+                    >
+                        <Settings size={22} />
+                    </button>
                 </header>
 
                 <div className="flex gap-2 mb-6 pb-2">
@@ -61,6 +72,13 @@ const CameraDashboard: React.FC = () => {
                     <RecordView cameras={cameras} />
                 )}
             </div>
+
+            <CameraSettingsModal
+                isOpen={settingsOpen}
+                onClose={() => setSettingsOpen(false)}
+                cameras={allCameras}
+                onToggled={fetchSettings}
+            />
         </div>
     );
 };
