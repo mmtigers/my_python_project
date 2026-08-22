@@ -185,7 +185,7 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
     logger.debug(f"⚡ [Analog] Power data saved: {device_name} ({wattage}W)")
     
     # 3. 通知判定 (閾値クロス検知)
-    threshold: Optional[float] = notify_settings.get("threshold")
+    threshold: Optional[float] = notify_settings.get("power_threshold_watts")
     if threshold is None:
         return
 
