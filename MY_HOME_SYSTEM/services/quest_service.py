@@ -340,7 +340,9 @@ class QuestService:
                 self._approve_linked_history(cur, hist['linked_history_id'])
 
             # --- TV Lock Feature ---
-            if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
+            # quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る
+            # (sync_master_data の DELETE ... NOT IN でマスタ行が消えても quest_history は残るため)。
+            if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
                 if user['role'] == ROLE_CHILD:
                     self._trigger_tv_unlock(quest['quest_id'])
 
