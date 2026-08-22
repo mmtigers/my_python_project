@@ -169,7 +169,6 @@ class DeviceConfig(BaseModel):
 # 1. 環境・機能フラグ設定
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
-ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
 ENABLE_BLUETOOTH: bool = False
 
 # ==========================================

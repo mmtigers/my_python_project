@@ -638,6 +638,12 @@ class InventoryService:
             return [dict(row) for row in rows]
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        """
+        アイテム使用を「申請」する。即時消費はせず status='pending' にし、
+        親の consume_item による承認で初めて確定(consumed)する
+        (H-5: consume_item/cancel_usage/get_pending_items/フロントの
+        pending UI・ポーリングは全てこの承認フローの存在を前提に実装済みだった)。
+        """
         with common.get_db_cursor(commit=True) as cur:
             sql = """
                 SELECT ui.*, rm.title, qu.name as user_name
@@ -653,10 +659,45 @@ class InventoryService:
             if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
 
             now_iso = common.get_now_iso()
-            
+
             cur.execute("""
-                UPDATE user_inventory 
-                SET status = 'consumed', used_at = ? 
+                UPDATE user_inventory
+                SET status = 'pending', used_at = ?
+                WHERE id = ?
+            """, (now_iso, inventory_id))
+
+            msg = f"🎒 {item['user_name']}が「{item['title']}」の使用を申請しました。承認をお願いします。"
+            notification_service.send_push(
+                user_id=config.LINE_USER_ID,
+                messages=[{"type": "text", "text": msg}]
+            )
+            sound_manager.play("submit")
+
+            return {"status": "pending", "message": "使用を申請しました！おうちの人の確認を待とう。"}
+
+    def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
+        """親がアイテム使用申請を承認し、消費を確定する。"""
+        with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(403, "承認権限がありません")
+
+            sql = """
+                SELECT ui.*, rm.title, qu.name as user_name
+                FROM user_inventory ui
+                JOIN reward_master rm ON ui.reward_id = rm.reward_id
+                JOIN quest_users qu ON ui.user_id = qu.user_id
+                WHERE ui.id = ?
+            """
+            item = cur.execute(sql, (inventory_id,)).fetchone()
+            if not item: raise HTTPException(404, "Item not found")
+            if item['status'] != 'pending': raise HTTPException(400, "承認待ちではありません")
+
+            now_iso = common.get_now_iso()
+
+            cur.execute("""
+                UPDATE user_inventory
+                SET status = 'consumed', used_at = ?
                 WHERE id = ?
             """, (now_iso, inventory_id))
 
@@ -664,34 +705,15 @@ class InventoryService:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, 0, ?, 0, 0, ?, 'approved')
-            """, (user_id, log_title, now_iso))
+            """, (item['user_id'], log_title, now_iso))
 
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
             notification_service.send_push(
-                user_id=config.LINE_USER_ID, 
+                user_id=config.LINE_USER_ID,
                 messages=[{"type": "text", "text": msg}]
             )
             sound_manager.play("quest_clear")
 
-            return {"status": "consumed", "message": "アイテムを使いました！"}
-    
-    def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
-        with common.get_db_cursor(commit=True) as cur:
-            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
-            if not approver or approver['role'] != ROLE_ADULT:
-                raise HTTPException(403, "承認権限がありません")
-
-            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
-            if not item: raise HTTPException(404, "Item not found")
-            
-            cur.execute("""
-                UPDATE user_inventory 
-                SET status = 'consumed', used_at = ? 
-                WHERE id = ?
-            """, (common.get_now_iso(), inventory_id))
-
-            sound_manager.play("quest_clear") 
-            
             return {"status": "consumed", "message": "承認しました"}
 
     def cancel_usage(self, user_id: str, inventory_id: int) -> Dict[str, str]:
