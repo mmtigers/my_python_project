@@ -1,0 +1,25 @@
+[Unit]
+Description=Post Boot Health Check Service
+After=network-online.target unified-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=masahiro
+Group=masahiro
+
+# 1. 作業ディレクトリ
+# スクリプト内で 'import config' 等を行うため、MY_HOME_SYSTEM直下を起点にします
+WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
+
+# 2. 実行コマンド (修正ポイント)
+# システムのpython3ではなく、仮想環境(.venv)のpython3を絶対パスで指定します
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 post_boot_health_check.py
+
+# 3. ログ出力
+# 出力先ディレクトリが存在しないとエラーになるため、後述の手順で確認します
+StandardOutput=append:/home/masahiro/develop/MY_HOME_SYSTEM/logs/health_check.log
+StandardError=append:/home/masahiro/develop/MY_HOME_SYSTEM/logs/health_check.log
+
+[Install]
+WantedBy=multi-user.target
