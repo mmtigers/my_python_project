@@ -164,7 +164,15 @@ class TestResetPeriodEnforcement:
             )
         quest_service = QuestService()
         quest_service.process_complete_quest("dad", 9002)
-        _set_last_completed_at("dad", 9002, seconds_ago=2 * 24 * 3600)
+        # 固定の「2日前」だと実行日が週の月・火曜の場合に前週へまたいでしまい
+        # 週境界をランダムに踏んでflakyになるため、必ず「今週の月曜0時」を
+        # 完了日時とすることで実行日に関わらず「今週内」を保証する。
+        now_jst = datetime.datetime.now(JST)
+        monday_this_week_start = (now_jst - datetime.timedelta(days=now_jst.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        seconds_ago = max(0, (now_jst - monday_this_week_start).total_seconds())
+        _set_last_completed_at("dad", 9002, seconds_ago=seconds_ago)
 
         with pytest.raises(HTTPException) as exc_info:
             quest_service.process_complete_quest("dad", 9002)
