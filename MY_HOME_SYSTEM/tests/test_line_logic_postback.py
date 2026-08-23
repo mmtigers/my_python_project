@@ -59,6 +59,23 @@ class TestAllGenki:
         assert saved_names == set(config.FAMILY_SETTINGS["members"])
         mock_line_api.reply_message.assert_called_once()
 
+    def test_save_failure_replies_with_failure_text_not_success(
+        self, isolated_db, mock_line_api, monkeypatch
+    ):
+        """H-7: 保存が失敗した場合、成功の「✅ 記録しました」ではなく
+        失敗を知らせる返信をすること。"""
+        async def _failing_save_log_async(*args, **kwargs):
+            return False
+
+        monkeypatch.setattr(line_logic, "save_log_async", _failing_save_log_async)
+        event = fake_postback_event("action=all_genki")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        texts = _texts_from_reply(mock_line_api)
+        assert any("失敗" in t for t in texts)
+        assert not any("記録しました" in t for t in texts)
+
 
 class TestShowHealthInput:
     def test_replies_with_text_and_flex_carousel(self, isolated_db, mock_line_api):
@@ -92,6 +109,25 @@ class TestChildCheck:
             ).fetchone()
         assert row is not None
         assert "元気" in row["condition"]
+
+    def test_save_failure_replies_with_failure_text_not_success(
+        self, isolated_db, mock_line_api, monkeypatch
+    ):
+        """H-7: 個別記録保存に失敗した場合、成功メッセージを返さないこと。"""
+        async def _failing_save_log_async(*args, **kwargs):
+            return False
+
+        monkeypatch.setattr(line_logic, "save_log_async", _failing_save_log_async)
+        event = fake_postback_event("action=child_check&child=智矢&status=genki")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        texts = _texts_from_reply(mock_line_api)
+        assert any("失敗" in t for t in texts)
+        assert not any("記録しました" in t for t in texts)
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
 
     def test_missing_child_param_is_a_silent_noop(self, isolated_db, mock_line_api):
         """child パラメータが無い場合、既存実装ではどの分岐にも入らず
@@ -150,6 +186,25 @@ class TestFoodRecordDirect:
         with common.get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "不明なメニュー" in row["menu_category"]
+
+    def test_save_failure_replies_with_failure_text_not_success(
+        self, isolated_db, mock_line_api, monkeypatch
+    ):
+        """H-7: 食事記録の保存に失敗した場合、成功メッセージを返さないこと。"""
+        async def _failing_save_log_async(*args, **kwargs):
+            return False
+
+        monkeypatch.setattr(line_logic, "save_log_async", _failing_save_log_async)
+        event = fake_postback_event("action=food_record_direct&category=麺類&item=ラーメン")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        texts = _texts_from_reply(mock_line_api)
+        assert any("失敗" in t for t in texts)
+        assert not any("記録しました" in t for t in texts)
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_FOOD}").fetchone()["c"]
+        assert count == 0
 
 
 class TestFoodManual:

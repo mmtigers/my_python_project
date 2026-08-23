@@ -25,10 +25,17 @@ class NasMonitor:
     def __init__(self) -> None:
         self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
-        self.fallback_dir: str = getattr(config, "FALLBACK_DIR", "/tmp/temp_fallback")
+        self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.device_name: str = "BUFFALO LS720D"
-        self.state_file: str = "/tmp/nas_monitor_state.json"
+        # /tmp はコンテナ/プロセス再起動で消える環境があり、そこに状態を置くと
+        # 再起動のたびにヘルス状態がデフォルト(正常)へリセットされてしまう
+        # (実際は障害中でも「正常」とみなされ、真の復旧時にフォールバック同期が
+        # 行われなくなる)。永続化のためBASE_DIR配下のdataディレクトリに置く。
+        self.state_file: str = os.path.join(
+            getattr(config, "BASE_DIR", os.path.dirname(os.path.abspath(__file__))),
+            "data", "nas_monitor_state.json"
+        )
 
     def _load_state(self) -> Dict[str, bool]:
         """前回の監視状態をファイルから読み込む"""
@@ -43,6 +50,7 @@ class NasMonitor:
     def _save_state(self, state: Dict[str, bool]) -> None:
         """現在の監視状態をファイルへ保存する"""
         try:
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f)
         except Exception as e:
@@ -69,14 +77,30 @@ class NasMonitor:
         return os.path.ismount(self.mount_point)
 
     def check_write_permission(self) -> bool:
-        """NASへの実際の書き込み・削除が可能かテストする"""
+        """NASへの実際の書き込み・削除が可能かテストする。
+        CIFSマウントがストールしていると open()/write()/remove() がブロックしたまま
+        戻らず監視プロセスごとハングする恐れがあるため、別プロセスでI/Oを実行し
+        タイムアウト付きで待ち受ける(タイムアウト時はプロセスをkillして戻る)。"""
         test_file = os.path.join(self.mount_point, '.write_test')
+        script = (
+            "import os, sys\n"
+            "path = sys.argv[1]\n"
+            "with open(path, 'w') as f:\n"
+            "    f.write('health_check')\n"
+            "os.remove(path)\n"
+        )
         try:
-            with open(test_file, 'w') as f:
-                f.write('health_check')
-            os.remove(test_file)
+            subprocess.run(
+                [sys.executable, "-c", script, test_file],
+                timeout=self.timeout,
+                check=True,
+                capture_output=True,
+            )
             return True
-        except IOError as e:
+        except subprocess.TimeoutExpired:
+            logger.error(f"Write permission check timed out after {self.timeout}s (NAS mount possibly stalled)")
+            return False
+        except (subprocess.CalledProcessError, OSError) as e:
             logger.error(f"Write permission check error: {e}")
             return False
 
@@ -174,6 +198,8 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
+            ("タイムラプス動画", os.path.join(getattr(config, "ASSETS_DIR", ""), "timelapse"),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4", ".jpg")),
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
              getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
         ]
@@ -202,14 +228,14 @@ class NasMonitor:
         percent = usage['percent'] if usage else 0
         save_log_generic(
             config.SQLITE_TABLE_SENSOR,
-            ["timestamp", "device_name", "device_id", "device_type", "contact_state", "battery_level"],
+            ["timestamp", "device_name", "device_id", "device_type", "contact_state", "nas_usage_percent"],
             (
                 get_now_iso(),
                 "NAS_Monitor",
                 self.ip,
                 "Server",
                 "mounted" if mount_ok else "unmounted",
-                percent 
+                percent
             )
         )
 

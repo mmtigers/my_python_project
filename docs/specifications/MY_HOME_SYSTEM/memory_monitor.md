@@ -268,8 +268,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `send_push`の通信成否条件 | `notification_service.md`の解析によれば、`send_push`は`target`引数(discord/line/both)に応じて`_send_discord_webhook`（HTTPステータス200/204判定）および`_send_line_push`（LINE API呼び出しの例外有無で判定）を呼び出し、いずれかが失敗した場合は`success`フラグを`False`にする設計であることが判明した。LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知される。 | `notification_service.md` |
-| `config`の各設定値の実態 | `config.md`の解析によれば、`config.py`はメモリ監視閾値（`MEMORY_ALERT_PERCENT`等）を含む多数の設定値・環境変数を一元管理するモジュールであることが判明したが、`MEMORY_ALERT_PERCENT`等の具体的なデフォルト値・環境変数マッピング自体は`config.py`本体からは確認できていない。 | `config.md` |
+| `send_push`の通信成否条件 | `MY_HOME_SYSTEM/services/notification_service.py`を直接確認した。`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(116〜140行目)は`success = True`で始まり(118行目)、`target`が`"discord"`/`"both"`のとき`_send_discord_webhook`が`False`を返せば`success = False`にする(121〜124行目)。`_send_discord_webhook`(30〜71行目)はHTTPステータスコードが`[200, 204]`以外の場合(64行目)、または`requests.post`が例外を送出した場合(69〜71行目)に`False`を返す（=通信失敗）。`target`が`"line"`/`"both"`のときは`_send_line_push`が`False`を返せば`success = False`にし、さらにDiscordのerrorチャンネルへフォールバック通知を行う(133〜138行目)。`_send_line_push`(73〜114行目)は`line_configuration`未設定時(75〜76行目)、送信可能なメッセージが0件の場合(97〜99行目)、またはLINE API呼び出しで例外が発生した場合(112〜114行目)に`False`を返す。再送処理（リトライ）は実装されていないことも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-140` |
+| `config`の各設定値の実態 | `MY_HOME_SYSTEM/config.py`を直接確認した。本ファイルが`getattr`で参照する設定値はすべて実在し、デフォルト引数と一致する。`MEMORY_ALERT_PERCENT: float = 85.0`(524行目)、`PROCESS_MEMORY_LIMIT_MB: float = 500.0`(526行目)、`MEMORY_ALERT_COOLDOWN_SEC: int = 7200`(528行目)、`MEMORY_ALERT_LAST_NOTIFY_FILE: str = os.path.join(FALLBACK_ROOT, "last_memory_alert.txt")`(530行目、いずれも環境変数ではなくハードコードされた定数)。`FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")`(213行目)。`NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "discord")`(261行目)、`LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")`(186行目)は環境変数からのマッピングであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:186, 213, 261, 524-530` |
 
 ## 10. 自己検証結果
 

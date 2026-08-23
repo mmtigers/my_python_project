@@ -214,6 +214,13 @@ graph TD
 | `analysis_service.load_yearly_temperature_stats`の実装・スキーマ | `services.analysis_service`の実装が提供されていないため。 | `services/analysis_service.py` |
 | `df_sensor`の`device_type`列に実際に含まれる値の一覧 | センサーデータの生成元・スキーマ定義が本ファイルからは不明。 | `services/analysis_service.py` およびDBスキーマ定義 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `analysis_service.load_yearly_temperature_stats`の実装・スキーマ | `MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.DataFrame`(267-326行目)は、`weather_history`テーブルから`location`・年範囲に該当する`date, max_temp as out_max, min_temp as out_min`を取得し(274-279行目)、`config.MONITOR_DEVICES`から該当`location`のデバイスIDを抽出した上で(281-285行目)、新テーブル`config.SQLITE_TABLE_SWITCHBOT_LOGS`(287-292行目)と旧テーブル`device_records`の`temperature_celsius`列(293-297行目)の双方から日次`MAX/MIN`を集計し、両方に結果があれば`pd.concat`後に`groupby("date")`で再集計、片方のみなら片方を採用する(308-313行目)。最終的に気象データとセンサーデータを`date`列で外部結合(`how="outer"`)して返す(317-319行目)。DB取得やクエリで例外が発生した場合は`except Exception`で捕捉しログ出力の上、空の`pd.DataFrame()`を返すフェイルソフト設計であることも確認した(322-324行目)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:267-326` |
+| `df_sensor`の`device_type`列に実際に含まれる値の一覧 | `MY_HOME_SYSTEM/services/analysis_service.py`の`load_sensor_data(limit: int = 5000) -> pd.DataFrame`(155-209行目)を直接確認した。`device_type`列は3系統から構成される。(1) 旧`device_records`テーブル(160-168行目)は`device_type`列をそのままSELECTしており、値そのものはDB内の既存データに依存するため本関数のコードからは全列挙できない。(2) `config.SQLITE_TABLE_SWITCHBOT_LOGS`由来の`df_meter`は180行目で一律`"Meter"`に設定される。(3) `config.SQLITE_TABLE_POWER_USAGE`由来の`df_power`は191-192行目で`device_name`に`"Remo"`を含めば`"Nature Remo E Lite"`、含まなければ`"Plug"`を設定した後、194行目で`df_power["device_type"] = df_power["device_type"].replace("Plug", "Nature Remo E Lite")`により列内の`"Plug"`という値を全て`"Nature Remo E Lite"`に置換しているため、`df_power`由来の行の`device_type`は結果的に常に`"Nature Remo E Lite"`となり、`"Plug"`という値自体は最終的なDataFrameには残らないことを確認した。旧`device_records`由来の値については、`MY_HOME_SYSTEM/views/dashboard/summary.py`(46-47行目)が`device_type`列に対し`"Motion"`(部分一致)および`"Webhook"`(完全一致)の判定を行っているコードを直接確認しており、これらの値がコード上で参照されている根拠として存在する。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:155-209`（参考: `MY_HOME_SYSTEM/views/dashboard/sensor_tab.py:46-47`, `MY_HOME_SYSTEM/views/dashboard/summary.py:46-47`） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

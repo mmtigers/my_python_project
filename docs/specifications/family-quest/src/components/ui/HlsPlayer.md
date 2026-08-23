@@ -173,15 +173,17 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `hls.js`（`Hls`クラス）の内部実装詳細 | 本ファイルからは呼び出しているAPI（`isSupported`, `loadSource`, `attachMedia`, `recoverMediaError`, `destroy`等）のみが確認でき、内部ロジックは不明なため | `hls.js`ライブラリ本体のソース、または`node_modules/hls.js/package.json` |
+| `hls.js`（`Hls`クラス）の内部実装詳細 | 本ファイルからは呼び出しているAPI（`isSupported`, `loadSource`, `attachMedia`, `recoverMediaError`, `destroy`等）のみが確認でき、内部ロジックは不明なため（リポジトリ内を`node_modules/hls.js`で検索したが、`node_modules`は`.gitignore`規則により追跡対象外で実体は存在せず、解消不可。`package.json`上のバージョン指定`^1.5.17`のみ確認できる） | `hls.js`ライブラリ本体のソース、または`node_modules/hls.js/package.json` |
 | `streamUrl`として渡される実際のHLSマニフェストの仕様（セグメント長、更新頻度など） | 本ファイルはURLを受け取って再生するのみで、マニフェストの生成側の情報を持たないため | バックエンドの`/api/cameras/live/...`・`/api/cameras/record/...`エンドポイント実装 |
-| Hls非対応かつネイティブ非対応ブラウザでの実際のユーザー体験 | コード上は無反応（サイレント失敗）になると読めるが、実機・実ブラウザでの検証情報がないため | 該当なし（実機検証が必要） |
+| Hls非対応かつネイティブ非対応ブラウザでの実際のユーザー体験 | コード上は無反応（サイレント失敗）になると読めるが、実機・実ブラウザでの検証情報がないため（リポジトリ内に実機検証記録・E2Eテスト等は見つからず、解消不可） | 該当なし（実機検証が必要） |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `streamUrl`として渡される実際のHLSマニフェストの仕様 | `camera_router.md`の解析によれば、`GET /live/{camera_id}/stream.m3u8`はカメラ未検出時404、`camera_service.start_hls_stream`失敗時500、プレイリスト生成が最大5秒（0.5秒間隔×10回）待っても完了しない場合は503を返すとされている。また`GET /record/{camera_id}/{target_date}/{filename}`は拡張子で`.m3u8`（プレイリスト生成）と`.ts`（セグメント配信）を分岐し、対応するカメラや録画ファイルが無い場合は404を返すとされている。ただし実際のセグメント長やマニフェストの更新頻度といった詳細は`camera_service`側（`camera_router.md`でもブラックボックス扱い）に委譲されており、`camera_router.md`の解析結果からも判明していない。これらはあくまで`camera_router.md`側の解析結果からの補足であり、`camera_router.py`/`camera_service.py`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../../../MY_HOME_SYSTEM/camera_router.md` |
+| `streamUrl`として渡される実際のHLSマニフェストの仕様（セグメント長、更新頻度など） | `MY_HOME_SYSTEM/services/camera_service.py`を直接確認した。ライブ配信の`start_hls_stream`（84〜119行目）は`ffmpeg`を`-hls_time 2`（セグメント長2秒）・`-hls_list_size 5`（プレイリストに保持するセグメント数5件）・`-hls_flags delete_segments`（再生済みセグメントを自動削除）で起動し、`stream.m3u8`へ出力する。録画再生用の`generate_record_playlist`（143〜242行目）は10分単位のmp4ファイル群を`ffconcat`で結合したうえで`-hls_time 4`・`-hls_playlist_type vod`のVOD形式で`record_{target_date}.m3u8`を生成し、当日分は毎回再生成、過去日付分は既存ファイルをキャッシュとして返す（184〜189行目）設計であることを確認した。またルーティング側の`MY_HOME_SYSTEM/routers/camera_router.py`も直接確認し、`GET /live/{camera_id}/stream.m3u8`（42〜60行目）と`GET /record/{camera_id}/{target_date}/{filename}`（72〜101行目、拡張子で`.m3u8`生成と`.ts`セグメント配信を分岐）の実体を確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/camera_service.py:84-119, 143-242`, `MY_HOME_SYSTEM/routers/camera_router.py:42-101` |
+| `hls.js`（`Hls`クラス）の内部実装詳細 | リポジトリ内を`node_modules/hls.js`で検索したが、`family-quest/.gitignore`10行目・リポジトリルート`.gitignore`6行目の`node_modules`規則により依存パッケージの実体はリポジトリに存在せず、解消不可であることを確認した。`family-quest/package.json`にはバージョン`"hls.js": "^1.5.17"`という指定のみが確認できる。 | 直接ソース確認: `family-quest/package.json`（`hls.js`バージョン指定行）、`family-quest/.gitignore:10`（`node_modules`の追跡除外を確認、`node_modules/hls.js`自体はリポジトリ内に存在せず） |
+| Hls非対応かつネイティブ非対応ブラウザでの実際のユーザー体験 | リポジトリ内に実機・実ブラウザでの検証結果やE2Eテストの記録が存在するか`family-quest`配下を検索したが、該当するテストファイル・検証記録は見つからず、解消不可であることを確認した。 | 該当ファイルなし（リポジトリ内を検索したが実機検証記録は存在せず、解消不可） |
 
 ## 10. 自己検証結果
 

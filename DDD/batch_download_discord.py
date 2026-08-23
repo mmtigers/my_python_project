@@ -202,8 +202,20 @@ class BotDetectionError(Exception):
 
 
 def _is_bot_detection_error(exc: Exception) -> bool:
+    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列
+    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の
+    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し、
+    # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って
+    # 引き起こし得た。数字のみのマーカーは単語境界(\b)で厳密に判定し、
+    # フレーズマーカーは従来通り部分文字列一致とする。
     message = str(exc).lower()
-    return any(marker in message for marker in CONFIG.BOT_DETECTION_MARKERS)
+    for marker in CONFIG.BOT_DETECTION_MARKERS:
+        if marker.isdigit():
+            if re.search(rf"\b{re.escape(marker)}\b", message):
+                return True
+        elif marker in message:
+            return True
+    return False
 
 
 def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["DownloadTask"]:
@@ -259,7 +271,12 @@ class HistoryManager:
             try:
                 with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:
                     history = {line.strip() for line in f if line.strip()}
-            except Exception: pass
+            except Exception as e:
+                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが
+                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の
+                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、
+                # 原因調査ができるよう必ずログには残す。
+                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)
         return history
 
     @staticmethod
@@ -267,7 +284,11 @@ class HistoryManager:
         try:
             with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:
                 f.write(f"{url}\n")
-        except Exception: pass
+        except Exception as e:
+            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も
+            # 「未ダウンロード」のままになり再ダウンロード・再通知が続く。
+            # ここで処理自体を止めるほどではないため続行するが、ログには残す。
+            logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)
 
 class CooldownManager:
     """ボット検知発生後の実行間クールダウンを管理するクラス。
@@ -436,6 +457,11 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             'outtmpl': f'{str(target_dir)}/%(title)s.%(ext)s',
             'merge_output_format': 'mp4',
             'quiet': True, 'no_warnings': True, 'nopart': False,
+            # M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、
+            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード
+            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが
+            # まるごと迂回されてしまう。単一動画のみを対象にする。
+            'noplaylist': True,
             # 動画タイトルがそのままファイル名になるため、極端に長いタイトルで
             # ext4等のファイル名長制限（255バイト）に抵触して失敗するのを防ぐ。
             'trim_file_name': 150,

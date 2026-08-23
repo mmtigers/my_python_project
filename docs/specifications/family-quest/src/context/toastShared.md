@@ -148,6 +148,13 @@ graph TD
 | `showToast`の実際の実装内容（トーストの表示方法、自動消去の有無・タイミング等） | 本ファイルは型とContextオブジェクトの定義のみであり、Providerの実装は別ファイルにあるため。 | `family-quest/src/context/ToastContext.tsx` |
 | `useToast`フックの具体的な実装（`useContext`の呼び出し方、null時の挙動等） | 本ファイルにはフックの実装が存在しないため。 | `family-quest/src/context/useToast.ts` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `showToast`の実際の実装内容（トーストの表示方法、自動消去の有無・タイミング等） | `family-quest/src/context/ToastContext.tsx`を直接確認した。`AUTO_DISMISS_MS`（9行目）は`4000`（4秒）。`showToast`（14〜20行目）は`Date.now() + Math.random()`をidとする新規`ToastItem`を`toasts`配列に追加し、`AUTO_DISMISS_MS`後に同idのトーストを`setTimeout`で自動除去する。表示はトーストスタック（29〜31行目付近、`AnimatePresence`+`motion.div`で`toasts`を描画）としてマウントされ、要素クリック時は`dismiss(t.id)`（23〜25行目）で即座に除去される。除去用の`setTimeout`のタイマーIDはクリアされず、手動`dismiss`後もタイマー自体は生存し続ける。 | 直接ソース確認: `family-quest/src/context/ToastContext.tsx:9, 14-25` |
+| `useToast`フックの具体的な実装（`useContext`の呼び出し方、null時の挙動等） | `family-quest/src/context/useToast.ts:4-8`（全9行）を直接確認した。`export function useToast(): ToastContextValue`は`useContext(ToastContext)`を呼び出し、結果が`null`（本ファイルの`ToastContext`初期値、19行目）の場合は`throw new Error('useToast は ToastProvider の内側で使ってください');`という日本語メッセージの例外を送出する。`null`でなければそのまま`ctx`（`ToastContextValue`）を返す。 | 直接ソース確認: `family-quest/src/context/useToast.ts:4-8` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -11,11 +11,13 @@
 
 * [config.md](./config.md) - `BASE_DIR`, `DISCORD_WEBHOOK_ERROR`等の設定値を提供
 * [common.md](./common.md) - `setup_logging`を再エクスポートする呼び出し元(Facade)
+* [nas_utils.md](./nas_utils.md) - `from core.logger import get_logger`で本ファイルの`get_logger`を利用する呼び出し元(`ImportError`時は`logging.getLogger`ベースの簡易フォールバック定義で代替する)
 * システム内のほぼ全モジュール(`line_handler.md`, `nas_monitor.md`, `sensor_service.md`等多数)が`setup_logging`の呼び出し元
 
 ## 2. ファイルの概要
 
-システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、日付単位でローテーションされるファイルへのログ保存、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。
+システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、日付単位でローテーションされるファイルへのログ保存、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。
+* 根拠: `[get_logger]` (行番号: 89〜91 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 ## 3. 外部依存関係
 
@@ -108,6 +110,29 @@
 
 
 
+### `get_logger`
+
+* **役割**: `setup_logging()`のエイリアス。`from core.logger import get_logger`という形で本関数を参照する呼び出し元向けに、`webhook_url`を渡さず`setup_logging(name)`をそのまま呼び出して結果を返す。
+* 根拠: `[get_logger]` (行番号: 89〜91 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
+
+
+* **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前。`setup_logging`と異なり`webhook_url`引数は受け取らない)
+* 根拠: `[関数シグネチャ]` (行番号: 89 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+
+
+* **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
+* 根拠: `[return]` (行番号: 91 / 抜粋: "return setup_logging(name)")
+
+
+* **副作用**: `setup_logging(name)`の呼び出しに伴う副作用（ハンドラの登録、ログディレクトリの作成等）と同一。
+* 根拠: `[return setup_logging(name)]` (行番号: 91 / 抜粋: "return setup_logging(name)")
+
+
+* **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）
+* 根拠: `[get_logger関数全体]` (行番号: 89〜91 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+
+
+
 ## 5. 処理フロー図
 
 ```mermaid
@@ -190,6 +215,8 @@ graph TD
 
 ```
 
+`LoggerPY`ノードは`setup_logging`と、それをそのまま呼び出す`get_logger`(89〜91行目)の両方を含むファイル全体を表す。`get_logger`は`setup_logging`と同じ外部依存関係(上記の各ノード)をそのまま利用するため、依存関係図としては別ノードを追加していない。
+
 ## 7. 次のステップ（リバースエンジニアリングの提案）
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
@@ -208,7 +235,14 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `BASE_DIR` の実体パス | ディレクトリパスの起点となる変数の値が当ファイル内では定義されていないため。 | `config.py` |
-| `DISCORD_WEBHOOK_ERROR` のURL値 | DiscordのWebhook送信先のエンドポイント文字列が当ファイル内では定義されていないため。 | `config.py` |
+| `DISCORD_WEBHOOK_ERROR` のURL値 | DiscordのWebhook送信先のエンドポイント文字列が当ファイル内では定義されていないため。（`config.py`は直接確認できたが、実値は環境変数由来のためリポジトリ内には存在せず解消不可） | `config.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `BASE_DIR` の実体パス | `MY_HOME_SYSTEM/config.py`212行目を直接確認した。`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`と定義されており、`config.py`自身が配置されているディレクトリ、すなわち`MY_HOME_SYSTEM`ディレクトリの絶対パスであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212` |
+| `DISCORD_WEBHOOK_ERROR` のURL値 | `MY_HOME_SYSTEM/config.py`194行目を直接確認した。`DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")`と定義されており、環境変数から取得する`Optional[str]`型であることを確認した。実際のWebhook URL文字列そのものは環境変数由来のためリポジトリ内には存在しない。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:194` |
 
 ## 10. 自己検証結果
 

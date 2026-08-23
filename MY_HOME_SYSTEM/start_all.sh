@@ -23,27 +23,47 @@ mkdir -p logs
 
 # --- Phase 0: 徹底的なクリーンアップ ---
 echo "--- Cleanup Old Processes ---"
-# まずは優しく停止
-pkill -f unified_server.py
-pkill -f camera_monitor.py
-pkill -f scheduler.py
-pkill -f "streamlit run"
+
+# 停止対象プロセスのパターン一覧
+# (旧 'scheduler.py' は実体 'scheduler_boot.py' と一致せず、再起動のたびに
+#  古いschedulerが生き残って二重起動する原因になっていた。
+#  存在しない 'bluetooth_monitor.py' の行は削除。)
+CLEANUP_TARGETS=(
+  "unified_server.py"
+  "camera_monitor.py"
+  "scheduler_boot.py"
+  "streamlit run"
+)
+
+# まずは優しく停止 (SIGTERM)
+for target in "${CLEANUP_TARGETS[@]}"; do
+  pkill -f "$target"
+done
 
 # プロセスが消えるまで最大5秒待機 (10秒は長いので短縮)
 for i in {1..5}; do
-  if ! pgrep -f unified_server.py > /dev/null; then
-    echo "✅ Old server stopped."
+  still_running=false
+  for target in "${CLEANUP_TARGETS[@]}"; do
+    if pgrep -f "$target" > /dev/null; then
+      still_running=true
+      break
+    fi
+  done
+  if [ "$still_running" = false ]; then
+    echo "✅ Old processes stopped."
     break
   fi
   echo "⏳ Waiting for shutdown... ($i/5)"
   sleep 1
 done
 
-# まだ生きていたら強制終了
-if pgrep -f unified_server.py > /dev/null; then
-  echo "💀 Force killing server..."
-  pkill -9 -f unified_server.py
-fi
+# まだ生きていたら対象ごとに強制終了 (SIGKILL)
+for target in "${CLEANUP_TARGETS[@]}"; do
+  if pgrep -f "$target" > /dev/null; then
+    echo "💀 Force killing: $target ..."
+    pkill -9 -f "$target"
+  fi
+done
 
 # --- Phase 1: NASマウント確認 ---
 echo "--- Check NAS Mount ---"
@@ -63,12 +83,16 @@ $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 # --- Phase 4: サーバー起動 (ここだけにする) ---
 echo "--- Start Home System Server ---"
 # unified_server.py が内部で scheduler_boot.py を起動します
-$PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
+# ★修正: '&'のみのバックグラウンド化はSSHログアウト時にシェルからSIGHUPが
+# 送られて死ぬ余地があるため、nohupでSIGHUPを無視しdisownでジョブ管理からも外す
+nohup $PYTHON_EXEC unified_server.py < /dev/null > logs/server_boot.log 2>&1 &
+disown
 echo "🚀 System started. Check logs/server_boot.log for details."
 
 # ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
 # (必要な場合は信頼できるリバースプロキシ経由でアクセスすること)
-$PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 > logs/dashboard_boot.log 2>&1 &
+nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 < /dev/null > logs/dashboard_boot.log 2>&1 &
+disown
 echo "📊 Dashboard started."
 
 echo "✅ All systems go!"
