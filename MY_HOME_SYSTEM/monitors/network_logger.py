@@ -7,8 +7,9 @@ import time
 from typing import Dict, Any, List, Optional
 
 # プロジェクトルートのパス設定
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
 
 # 正規のコンフィグとロガーの読み込み
 import config

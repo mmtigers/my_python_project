@@ -26,7 +26,6 @@ echo "--- Cleanup Old Processes ---"
 # まずは優しく停止
 pkill -f unified_server.py
 pkill -f camera_monitor.py
-pkill -f bluetooth_monitor.py
 pkill -f scheduler.py
 pkill -f "streamlit run"
 
