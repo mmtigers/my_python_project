@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/monitors/timelapse_generator.py
 import os
 import glob
+import shutil
 import time
 import datetime
 import subprocess
@@ -324,8 +325,18 @@ def main():
             logger.info(f"✨ {db_name} のアップロードが完了しました。")
             
     # クリーンアップ
-    for f in glob.glob(os.path.join(config.TMP_VIDEO_DIR, "*")):
-        os.remove(f)
+    cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)
+
+def cleanup_tmp_video_dir(tmp_dir: str) -> None:
+    """一時動画ディレクトリ配下を全て削除する(ファイル・ディレクトリ混在でもクラッシュしない)"""
+    for f in glob.glob(os.path.join(tmp_dir, "*")):
+        try:
+            if os.path.isfile(f) or os.path.islink(f):
+                os.remove(f)
+            elif os.path.isdir(f):
+                shutil.rmtree(f)
+        except OSError as e:
+            logger.warning(f"一時ファイルのクリーンアップに失敗しました: {f}: {e}")
 
 if __name__ == "__main__":
     main()
