@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from pathlib import Path
+from urllib.parse import urljoin
 
 # External Libraries
 from requests.adapters import HTTPAdapter
@@ -575,12 +576,85 @@ class ScrapingStrategy(DownloadStrategy):
             
         return None
 
+    def _fetch_m3u8_manifest(self, m3u8_url: str, page_url: str) -> Optional[str]:
+        """m3u8マニフェスト本体を、ブラウザ偽装(impersonate)付きで直接取得する。
+
+        missavのm3u8はsurrit.com等、CloudflareのボットチャレンジがかかったCDNで
+        配信されていることが多い。yt-dlpのgenericエクストラクタにextractor_argsで
+        impersonateを指定しても、それが効くのは最初のURL判定用リクエストのみで、
+        その後内部的に発生する「m3u8情報のダウンロード」という再取得リクエストには
+        impersonate設定が引き継がれない(yt-dlp側の制限。実機検証で403の再現を確認済み)。
+        そのためマニフェスト自体はcurl_cffiで直接ブラウザ偽装して取得し、
+        結果をローカルファイル経由でyt-dlpに渡す(_download_with_ytdlp参照)。
+        """
+        try:
+            import curl_cffi.requests as curl_requests
+        except ImportError:
+            logger.error(
+                "⚠️ curl_cffiが見つかりません。missavのCloudflare対策CDNからのm3u8取得には"
+                "必須です。'pip install -r DDD/requirements.txt' でインストールしてください。"
+            )
+            return None
+
+        try:
+            res = curl_requests.get(
+                m3u8_url,
+                headers={'Referer': page_url},
+                impersonate="chrome",
+                timeout=CONFIG.REQUEST_TIMEOUT,
+            )
+            if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:
+                raise BotDetectionError(f"{m3u8_url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")
+            res.raise_for_status()
+            return res.text
+        except BotDetectionError:
+            raise
+        except Exception as e:
+            logger.error(f"⚠️ m3u8マニフェスト取得エラー: {e}", exc_info=True)
+            if _is_bot_detection_error(e):
+                raise BotDetectionError(f"{m3u8_url}: {e}") from e
+            return None
+
+    @staticmethod
+    def _localize_m3u8_manifest(manifest_text: str, base_url: str) -> str:
+        """m3u8内の相対URI(セグメント/サブプレイリスト/鍵URI等)を絶対URLへ書き換える。
+
+        マニフェストをローカルファイルとしてyt-dlpに渡すため、相対URIが
+        (取得元のCDN URLではなく)ローカルファイルパス基準で誤って解決される
+        のを防ぐ。
+        """
+        def _absolutize_uri_attr(match: "re.Match") -> str:
+            return f'URI="{urljoin(base_url, match.group(1))}"'
+
+        lines = []
+        for line in manifest_text.splitlines():
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                lines.append(re.sub(r'URI="([^"]+)"', _absolutize_uri_attr, line))
+            elif stripped:
+                lines.append(urljoin(base_url, stripped))
+            else:
+                lines.append(line)
+        return "\n".join(lines)
+
     def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
         # HLS(m3u8)はyt-dlpに処理を委譲してダウンロードと結合を行う
         # 注: UniversalYtDlpStrategyと異なり、ここに sleep_interval_requests は
         # 設定しない。HLSは1本の動画で数百のセグメントリクエストが発生するため、
         # リクエスト毎にスリープすると現実的な時間で終わらなくなる。
         # ボット検知対策は「ページ取得側（_fetch_html）の間隔・検知」で担保する。
+        manifest_text = self._fetch_m3u8_manifest(m3u8_url, page_url)
+        if manifest_text is None:
+            return False
+
+        localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
+        tmp_manifest_path = final_path.with_name(final_path.name + ".manifest.m3u8.tmp")
+        try:
+            tmp_manifest_path.write_text(localized_manifest, encoding="utf-8")
+        except OSError as e:
+            logger.error(f"⚠️ 一時m3u8マニフェストの書き込みに失敗しました: {e}", exc_info=True)
+            return False
+
         ydl_opts = {
             'format': 'best',
             'outtmpl': str(final_path),
@@ -588,18 +662,16 @@ class ScrapingStrategy(DownloadStrategy):
             'quiet': not CONFIG.SHOW_PROGRESS_BAR,
             'no_warnings': True,
             'concurrent_fragment_downloads': 5, # チャンク分割DLの高速化
-            # missavのm3u8はsurrit.com等、Cloudflareのボット対策下にあるCDNで
-            # 配信されていることが多く、yt-dlpのgenericエクストラクタはデフォルトで
-            # ブラウザ偽装(impersonate)をしないため、マニフェスト取得が403で
-            # 弾かれることがある(実機検証で再現・確認済み)。extractor_argsで明示的に
-            # 有効化する。curl_cffi未インストール環境では明確なエラーメッセージで
-            # 失敗するため、DDD/requirements.txtにcurl_cffiを追加している。
-            'extractor_args': {'generic': {'impersonate': ['chrome']}},
+            # マニフェスト自体は上でcurl_cffi経由(ブラウザ偽装済み)で取得済みのため、
+            # yt-dlpにはローカルファイルとして渡す(file://URL)。これによりyt-dlpが
+            # マニフェストを再取得する内部リクエスト(impersonateが引き継がれない)を
+            # 経由せずに済む。
+            'enable_file_urls': True,
         }
         try:
             logger.info(f"📥 M3U8 DL開始 (yt-dlp): {final_path.name}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([m3u8_url])
+                ydl.download([tmp_manifest_path.resolve().as_uri()])
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
             return True
         except Exception as e:
@@ -608,6 +680,8 @@ class ScrapingStrategy(DownloadStrategy):
             if _is_bot_detection_error(e):
                 raise BotDetectionError(f"{page_url}: {e}") from e
             return False
+        finally:
+            tmp_manifest_path.unlink(missing_ok=True)
 
 # ==========================================
 # 4. メインコントローラー
