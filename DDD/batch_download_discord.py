@@ -686,24 +686,29 @@ class ScrapingStrategy(DownloadStrategy):
         def _fetch_one(idx: int, url: str) -> Tuple[int, str]:
             suffix = Path(url.split('?')[0]).suffix or '.bin'
             local_name = f"seg_{idx:06d}{suffix}"
+            local_path = tmp_dir / local_name
             content = self._download_segment(url, page_url)
-            (tmp_dir / local_name).write_bytes(content)
-            return idx, local_name
+            local_path.write_bytes(content)
+            # 相対ファイル名のままだと、yt-dlp側でfile://の基準URLに対する
+            # 相対URI解決が(特にWindowsのドライブレター付きfile://パスで)
+            # うまくいかず"url must be a string"のエラーになることを実機で
+            # 確認したため、各セグメントの絶対file:// URIを書き込む。
+            return idx, local_path.resolve().as_uri()
 
         resolved: Dict[int, str] = {}
         with ThreadPoolExecutor(max_workers=self._FRAGMENT_DOWNLOAD_WORKERS) as executor:
             futures = {executor.submit(_fetch_one, idx, url): idx for idx, url in targets.items()}
             for future in as_completed(futures):
-                idx, local_name = future.result()  # 例外はそのまま呼び出し元へ伝播させる
-                resolved[idx] = local_name
+                idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
+                resolved[idx] = local_uri
 
         new_lines = list(lines)
         for idx, _url in targets.items():
-            local_name = resolved[idx]
+            local_uri = resolved[idx]
             if lines[idx].strip().startswith('#'):
-                new_lines[idx] = re.sub(r'URI="[^"]+"', f'URI="{local_name}"', lines[idx])
+                new_lines[idx] = re.sub(r'URI="[^"]+"', f'URI="{local_uri}"', lines[idx])
             else:
-                new_lines[idx] = local_name
+                new_lines[idx] = local_uri
         return "\n".join(new_lines)
 
     def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
