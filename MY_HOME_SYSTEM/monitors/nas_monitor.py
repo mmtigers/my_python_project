@@ -28,7 +28,14 @@ class NasMonitor:
         self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.device_name: str = "BUFFALO LS720D"
-        self.state_file: str = "/tmp/nas_monitor_state.json"
+        # /tmp はコンテナ/プロセス再起動で消える環境があり、そこに状態を置くと
+        # 再起動のたびにヘルス状態がデフォルト(正常)へリセットされてしまう
+        # (実際は障害中でも「正常」とみなされ、真の復旧時にフォールバック同期が
+        # 行われなくなる)。永続化のためBASE_DIR配下のdataディレクトリに置く。
+        self.state_file: str = os.path.join(
+            getattr(config, "BASE_DIR", os.path.dirname(os.path.abspath(__file__))),
+            "data", "nas_monitor_state.json"
+        )
 
     def _load_state(self) -> Dict[str, bool]:
         """前回の監視状態をファイルから読み込む"""
@@ -43,6 +50,7 @@ class NasMonitor:
     def _save_state(self, state: Dict[str, bool]) -> None:
         """現在の監視状態をファイルへ保存する"""
         try:
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
             with open(self.state_file, 'w', encoding='utf-8') as f:
                 json.dump(state, f)
         except Exception as e:

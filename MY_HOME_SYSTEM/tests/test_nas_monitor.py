@@ -57,6 +57,32 @@ class TestNasMonitorCleanup(unittest.TestCase):
         self.assertTrue(os.path.exists(old_other))
 
 
+class TestNasMonitorStatePersistence(unittest.TestCase):
+    """M-4-6の回帰テスト(状態ファイルの/tmp配置分のみ):
+    状態ファイルが/tmp配下にあると、プロセス/コンテナ再起動(/tmpがtmpfs等で
+    消える環境)のたびにヘルス状態が既定値のTrueへ戻ってしまい、実際には
+    NAS障害中でも「正常」とみなされ、真の復旧時にフォールバックデータの
+    同期が行われなくなる。"""
+
+    def test_state_file_is_not_under_tmp(self):
+        monitor = NasMonitor()
+        self.assertFalse(
+            monitor.state_file.startswith("/tmp"),
+            "状態ファイルが/tmpにあると再起動でヘルス状態がリセットされる"
+        )
+
+    def test_state_round_trips_across_new_instances(self):
+        """プロセス再起動を模して、新しいNasMonitorインスタンスでも
+        直前に保存した状態を読み込めること。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                m1 = NasMonitor()
+                m1._save_state({"is_healthy": False})
+
+                m2 = NasMonitor()
+                self.assertEqual(m2._load_state(), {"is_healthy": False})
+
+
 class TestNasMonitorRetentionTargets(unittest.TestCase):
     """M-4-4の回帰テスト: assets/timelapse配下の生成物が保持期間クリーンアップの
     対象に含まれておらず無限に蓄積してしまう不具合。"""
