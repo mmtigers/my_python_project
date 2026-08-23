@@ -31,7 +31,8 @@ from monitors.smart_timelapse_generator import (
     get_video_start_dt,
     setup_directories,
     check_dependencies,
-    get_ffmpeg_version
+    get_ffmpeg_version,
+    timelapse_job_lock
 )
 
 logger = setup_logging(__name__)
@@ -125,128 +126,133 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
 
     logger.info(f"対象チャンクファイル数: {len(target_files)} 件")
 
-    # コアエンジンのディレクトリセットアップを流用
-    work, out, rec = setup_directories()
+    with timelapse_job_lock() as acquired:
+        if not acquired:
+            logger.warning("別のタイムラプス処理が実行中のため、今回の処理をスキップします。")
+            return
 
-    sum_info = SummaryInfo(
-        target_date=target_date_str,
-        ffmpeg_version=get_ffmpeg_version()
-    )
+        # コアエンジンのディレクトリセットアップを流用
+        work, out, rec = setup_directories()
 
-    # 各処理エンジンのインスタンス化
-    motion_detector = MotionDetector()
-    event_builder = EventBuilder()
-    video_builder = VideoBuilder()
-    uploader = Uploader()
-
-    all_clip_files = []
-    global_event_idx = 0
-    total_event_duration = 0
-
-    # 出力ファイル名に時間帯を付与: 例 entrance_2026-07-15_0600-0900_summary.mp4
-    time_suffix = ""
-    if start_time_str or end_time_str:
-        s_str = start_time.strftime('%H%M') if start_time else "start"
-        e_str = end_time.strftime('%H%M') if end_time else "end"
-        time_suffix = f"_{s_str}-{e_str}"
-
-    sum_info.output_path = os.path.join(out, f"{camera_name}_{target_date_str}{time_suffix}_summary.mp4")
-    if os.path.exists(sum_info.output_path):
-        try:
-            os.remove(sum_info.output_path)
-        except OSError:
-            pass
-
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # チャンクファイルを順番に解析
-            for filepath in target_files:
-                time.sleep(1)
-                base_name = os.path.basename(filepath)
-                logger.info(f"--- チャンク処理開始: {base_name} ---")
-                
-                info = get_video_info(filepath)
-                start_dt = get_video_start_dt(filepath, info)
-                duration = float(info.get('format', {}).get('duration', 0))
-                
-                if duration <= 0:
-                    logger.warning(f"動画長が不正なためスキップします: {base_name}")
-                    continue
-
-                # 1. 動き検知
-                records = motion_detector.detect(filepath, work, duration)
-                
-                # 2. イベント構築
-                events = event_builder.build(records, work)
-                
-                # CSVファイルの退避 (次チャンクでの上書きを防止)
-                file_no_ext = os.path.splitext(base_name)[0]
-                for csv_name in ["motion.csv", "events.csv", "events_enriched.csv"]:
-                    src_csv = os.path.join(work, csv_name)
-                    if os.path.exists(src_csv):
-                        dst_csv = os.path.join(work, f"{os.path.splitext(csv_name)[0]}_{file_no_ext}.csv")
-                        os.rename(src_csv, dst_csv)
-                
-                if events:
-                    # 3. 各イベントごとにクリップを切り出し
-                    for ev in events:
-                        global_event_idx += 1
-                        # 1日通して一意のEvent IDを再採番 (Event001, Event002...)
-                        ev.event_id = f"Event{global_event_idx:03d}"
-                        total_event_duration += ev.duration
-                        
-                        # エンジンの隠蔽メソッドを直接利用してクリップを生成
-                        clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)
-                        if clip_path:
-                            all_clip_files.append(clip_path)
-
-            # 全ファイルの解析ループ終了
-            if not all_clip_files:
-                logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
-                send_push(
-                    user_id=user_id,
-                    messages=[{"type": "text", "text": f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。"}],
-                    target="discord",
-                    channel="report"
-                )
-                return
-
-            logger.info(f"全 {len(target_files)} ファイルの解析完了。有効クリップ総数: {len(all_clip_files)} 件")
-            logger.info(f"クリップの一括結合と全体サムネイル生成を開始します...")
-            
-            # 4. 全クリップを1本の動画に結合
-            if video_builder._build_concat(all_clip_files, sum_info.output_path, temp_dir):
-                video_builder._generate_thumbnail(sum_info.output_path)
-                logger.info(f"日次タイムラプス動画の生成完了: {sum_info.output_path}")
-                
-                # サマリー情報の更新
-                sum_info.total_processing_time = time.perf_counter() - t_start
-                sum_info.events = global_event_idx
-                sum_info.summary_duration = total_event_duration
-                sum_info.file_size_bytes = os.path.getsize(sum_info.output_path)
-                
-                # 完了ファイルの保存
-                done_filename = f"{camera_name}_{target_date_str}{time_suffix}"
-                record_file = os.path.join(rec, f"{done_filename}.done")
-                with open(record_file, "w", encoding="utf-8") as f:
-                    json.dump(asdict(sum_info), f, indent=2, ensure_ascii=False)
-                
-                # 5. Discordへ一括アップロード
-                base_filename = os.path.basename(sum_info.output_path)
-                uploader.split_and_send(sum_info, base_filename)
-                
-            else:
-                logger.error("クリップの一括結合フェーズでエラーが発生しました。")
-                
-    except Exception as e:
-        err_msg = traceback.format_exc()
-        logger.error(f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}")
-        send_push(
-            user_id=user_id,
-            messages=[{"type": "text", "text": f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}"}],
-            target="discord",
-            channel="error"
+        sum_info = SummaryInfo(
+            target_date=target_date_str,
+            ffmpeg_version=get_ffmpeg_version()
         )
+
+        # 各処理エンジンのインスタンス化
+        motion_detector = MotionDetector()
+        event_builder = EventBuilder()
+        video_builder = VideoBuilder()
+        uploader = Uploader()
+
+        all_clip_files = []
+        global_event_idx = 0
+        total_event_duration = 0
+
+        # 出力ファイル名に時間帯を付与: 例 entrance_2026-07-15_0600-0900_summary.mp4
+        time_suffix = ""
+        if start_time_str or end_time_str:
+            s_str = start_time.strftime('%H%M') if start_time else "start"
+            e_str = end_time.strftime('%H%M') if end_time else "end"
+            time_suffix = f"_{s_str}-{e_str}"
+
+        sum_info.output_path = os.path.join(out, f"{camera_name}_{target_date_str}{time_suffix}_summary.mp4")
+        if os.path.exists(sum_info.output_path):
+            try:
+                os.remove(sum_info.output_path)
+            except OSError:
+                pass
+
+        try:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # チャンクファイルを順番に解析
+                for filepath in target_files:
+                    time.sleep(1)
+                    base_name = os.path.basename(filepath)
+                    logger.info(f"--- チャンク処理開始: {base_name} ---")
+
+                    info = get_video_info(filepath)
+                    start_dt = get_video_start_dt(filepath, info)
+                    duration = float(info.get('format', {}).get('duration', 0))
+
+                    if duration <= 0:
+                        logger.warning(f"動画長が不正なためスキップします: {base_name}")
+                        continue
+
+                    # 1. 動き検知
+                    records = motion_detector.detect(filepath, work, duration)
+
+                    # 2. イベント構築
+                    events = event_builder.build(records, work)
+
+                    # CSVファイルの退避 (次チャンクでの上書きを防止)
+                    file_no_ext = os.path.splitext(base_name)[0]
+                    for csv_name in ["motion.csv", "events.csv", "events_enriched.csv"]:
+                        src_csv = os.path.join(work, csv_name)
+                        if os.path.exists(src_csv):
+                            dst_csv = os.path.join(work, f"{os.path.splitext(csv_name)[0]}_{file_no_ext}.csv")
+                            os.rename(src_csv, dst_csv)
+
+                    if events:
+                        # 3. 各イベントごとにクリップを切り出し
+                        for ev in events:
+                            global_event_idx += 1
+                            # 1日通して一意のEvent IDを再採番 (Event001, Event002...)
+                            ev.event_id = f"Event{global_event_idx:03d}"
+                            total_event_duration += ev.duration
+
+                            # エンジンの隠蔽メソッドを直接利用してクリップを生成
+                            clip_path = video_builder._build_clip(filepath, ev, temp_dir, start_dt)
+                            if clip_path:
+                                all_clip_files.append(clip_path)
+
+                # 全ファイルの解析ループ終了
+                if not all_clip_files:
+                    logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
+                    send_push(
+                        user_id=user_id,
+                        messages=[{"type": "text", "text": f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。"}],
+                        target="discord",
+                        channel="report"
+                    )
+                    return
+
+                logger.info(f"全 {len(target_files)} ファイルの解析完了。有効クリップ総数: {len(all_clip_files)} 件")
+                logger.info(f"クリップの一括結合と全体サムネイル生成を開始します...")
+
+                # 4. 全クリップを1本の動画に結合
+                if video_builder._build_concat(all_clip_files, sum_info.output_path, temp_dir):
+                    video_builder._generate_thumbnail(sum_info.output_path)
+                    logger.info(f"日次タイムラプス動画の生成完了: {sum_info.output_path}")
+
+                    # サマリー情報の更新
+                    sum_info.total_processing_time = time.perf_counter() - t_start
+                    sum_info.events = global_event_idx
+                    sum_info.summary_duration = total_event_duration
+                    sum_info.file_size_bytes = os.path.getsize(sum_info.output_path)
+
+                    # 完了ファイルの保存
+                    done_filename = f"{camera_name}_{target_date_str}{time_suffix}"
+                    record_file = os.path.join(rec, f"{done_filename}.done")
+                    with open(record_file, "w", encoding="utf-8") as f:
+                        json.dump(asdict(sum_info), f, indent=2, ensure_ascii=False)
+
+                    # 5. Discordへ一括アップロード
+                    base_filename = os.path.basename(sum_info.output_path)
+                    uploader.split_and_send(sum_info, base_filename)
+
+                else:
+                    logger.error("クリップの一括結合フェーズでエラーが発生しました。")
+
+        except Exception as e:
+            err_msg = traceback.format_exc()
+            logger.error(f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}")
+            send_push(
+                user_id=user_id,
+                messages=[{"type": "text", "text": f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}"}],
+                target="discord",
+                channel="error"
+            )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="日次/時間指定タイムラプスバッチ処理")
