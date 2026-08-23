@@ -17,6 +17,7 @@ sys.path.append(BASE_DIR)
 try:
     import config
     import common
+    from services import switchbot_service
 except ImportError as e:
     print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)
     sys.exit(1)
@@ -27,7 +28,7 @@ logger = common.setup_logging("health_check")
 # ==========================================
 # ユーザー設定
 # ==========================================
-TARGET_BLUETOOTH_MAC = None 
+TARGET_BLUETOOTH_MAC = getattr(config, "SPEAKER_BLUETOOTH_MAC", None)
 # ==========================================
 
 # ステータスレベル定数
@@ -58,9 +59,9 @@ class PostBootHealthCheck:
         except (socket.timeout, ConnectionRefusedError, OSError):
             return False
 
-    def _check_http(self, url: str, timeout=5) -> bool:
+    def _check_http(self, url: str, timeout=5, headers=None) -> bool:
         try:
-            res = requests.get(url, timeout=timeout)
+            res = requests.get(url, headers=headers, timeout=timeout)
             return 200 <= res.status_code < 400
         except Exception:
             return False
@@ -121,14 +122,12 @@ class PostBootHealthCheck:
 
         # API
         api_targets = [
-            ("SwitchBot", "https://api.switch-bot.com/v1.0/devices"),
-            ("NatureRemo", "https://api.nature.global/1/users/me"),
+            ("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),
+            ("NatureRemo", "https://api.nature.global/1/users/me", {"Authorization": f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"}),
         ]
         api_ngs = []
-        for name, url in api_targets:
-            try:
-                requests.get(url, timeout=5) 
-            except Exception:
+        for name, url, headers in api_targets:
+            if not self._check_http(url, headers=headers):
                 api_ngs.append(name)
 
         if not api_ngs:
@@ -246,7 +245,7 @@ class PostBootHealthCheck:
             
             cam_msg = f"{ok_cam}/{len(cameras)} Online"
         else:
-            cam_status = STATUS_OK
+            cam_status = STATUS_WARN
             cam_msg = "No Config"
 
         self.results.append(CheckResult("Cameras", cam_status, cam_msg))
@@ -293,27 +292,29 @@ class PostBootHealthCheck:
 
         try:
             res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")
-            for line in res.splitlines():
-                if "ERROR" in line or "CRITICAL" in line:
-                    # タイムスタンプ判定 (例: 2026-01-10 06:54:15 ...)
-                    try:
-                        # 先頭19文字を日付としてパース
-                        log_time_str = line[:19]
-                        log_time = datetime.strptime(log_time_str, "%Y-%m-%d %H:%M:%S")
-                        
-                        # 基準時間より古いログはスキップ
-                        if log_time < time_threshold:
-                            continue
-                    except ValueError:
-                        # 日付パースに失敗した場合（フォーマット違いなど）は安全のためスキップ、
-                        # もしくは厳密にチェックしたい場合は含める。ここではノイズ低減のためスキップ。
-                        continue
-
-                    clean_line = line.strip()[:80] + "..." if len(line) > 80 else line.strip()
-                    error_lines.append(clean_line)
-
         except Exception as e:
             logger.error(f"Log check failed: {e}")
+            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))
+            return
+
+        for line in res.splitlines():
+            if "ERROR" in line or "CRITICAL" in line:
+                # タイムスタンプ判定 (例: 2026-01-10 06:54:15 ...)
+                try:
+                    # 先頭19文字を日付としてパース
+                    log_time_str = line[:19]
+                    log_time = datetime.strptime(log_time_str, "%Y-%m-%d %H:%M:%S")
+
+                    # 基準時間より古いログはスキップ
+                    if log_time < time_threshold:
+                        continue
+                except ValueError:
+                    # 日付パースに失敗した場合（フォーマット違いなど）は安全のためスキップ、
+                    # もしくは厳密にチェックしたい場合は含める。ここではノイズ低減のためスキップ。
+                    continue
+
+                clean_line = line.strip()[:80] + "..." if len(line) > 80 else line.strip()
+                error_lines.append(clean_line)
 
         if error_lines:
             display_errors = error_lines[-2:]

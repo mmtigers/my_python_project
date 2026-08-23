@@ -170,6 +170,8 @@ class DeviceConfig(BaseModel):
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
 ENABLE_BLUETOOTH: bool = False
+# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)
+SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "F4:4E:FC:B6:65:D4")
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
