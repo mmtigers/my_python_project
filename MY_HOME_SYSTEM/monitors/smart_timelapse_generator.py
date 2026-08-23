@@ -491,7 +491,12 @@ class VideoBuilder:
         try:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=get_ffmpeg_stderr(), check=True, timeout=3600)
             return True
-        except Exception: return False
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg結合エラー (returncode={e.returncode})")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg結合処理がタイムアウトしました")
+            return False
 
     def _generate_thumbnail(self, video_path: str, output_path: Optional[str] = None) -> None:
         out = output_path or video_path.replace(".mp4", ".jpg")
