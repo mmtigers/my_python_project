@@ -588,6 +588,13 @@ class ScrapingStrategy(DownloadStrategy):
             'quiet': not CONFIG.SHOW_PROGRESS_BAR,
             'no_warnings': True,
             'concurrent_fragment_downloads': 5, # チャンク分割DLの高速化
+            # missavのm3u8はsurrit.com等、Cloudflareのボット対策下にあるCDNで
+            # 配信されていることが多く、yt-dlpのgenericエクストラクタはデフォルトで
+            # ブラウザ偽装(impersonate)をしないため、マニフェスト取得が403で
+            # 弾かれることがある(実機検証で再現・確認済み)。extractor_argsで明示的に
+            # 有効化する。curl_cffi未インストール環境では明確なエラーメッセージで
+            # 失敗するため、DDD/requirements.txtにcurl_cffiを追加している。
+            'extractor_args': {'generic': {'impersonate': ['chrome']}},
         }
         try:
             logger.info(f"📥 M3U8 DL開始 (yt-dlp): {final_path.name}")
