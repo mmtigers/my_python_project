@@ -87,7 +87,9 @@ class UserService:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
             total_level = sum(u['level'] for u in users) if users else 0
             total_gold = sum(u['gold'] for u in users) if users else 0
-            res = cur.execute("SELECT COUNT(*) as count FROM quest_history").fetchone()
+            # process_reject_quest が却下履歴を残す(status='rejected')ようになったため、
+            # 却下された申請を「達成したクエスト数」に含めないよう明示的に除外する。
+            res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status != 'rejected'").fetchone()
             total_quests = res['count'] if res else 0
             
             if total_level < 10: rank = "駆け出しの家族"
@@ -451,11 +453,14 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+            # 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には
+            # 生成されず、process_complete_quest のスパムチェック `status != 'rejected'`
+            # が常に成立する死に条件になっていた)。
+            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
             if hist['linked_history_id'] is not None:
-                cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
+                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
                 logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
 
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}, Reason={reason or '(未指定)'}")
