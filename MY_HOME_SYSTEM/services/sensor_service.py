@@ -58,22 +58,29 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
     """無反応検知通知 (動きがない場合に通知を送る)"""
     try:
         await asyncio.sleep(timeout)
-        msg: str = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
-        
+    except asyncio.CancelledError:
+        logger.debug(f"動きなしタイマーキャンセル: {name}")
+        return
+
+    # ここに到達した時点で実際に無反応状態になっているため、
+    # 通知の送信に失敗してもIS_ACTIVE/MOTION_TASKSは必ずクリーンアップする。
+    # そうしないと「動きが再開した」通知が二度と出なくなる。
+    msg: str = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
+    try:
         await asyncio.to_thread(
             send_push,
-            config.LINE_USER_ID, 
-            [{"type": "text", "text": msg}], 
+            config.LINE_USER_ID,
+            [{"type": "text", "text": msg}],
             None, "discord", "notify"
         )
         # 状態の大きな変化（タイムアウト）なので INFO を維持
         logger.info(f"通知送信 [Digital Event]: {msg}")
+    except Exception as e:
+        logger.error(f"無反応通知の送信に失敗しました: {name} ({e})")
+    finally:
         IS_ACTIVE[mac] = False
         if mac in MOTION_TASKS:
             del MOTION_TASKS[mac]
-            
-    except asyncio.CancelledError:
-        logger.debug(f"動きなしタイマーキャンセル: {name}")
 
 async def process_sensor_data(mac: str, name: str, location: str, dev_type: str, state: str) -> None:
     """
