@@ -1,3 +1,7 @@
+import json
+import logging
+import os
+
 """
 Family Quest Master Data - Phase 4.1 (Complete Descriptions)
 [2026-01-14 更新]
@@ -13,6 +17,8 @@ Family Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)
 - パパのアルコール報酬削除
 """
 
+logger = logging.getLogger(__name__)
+
 # ==========================================
 # 0. 定数・設定 (Constants)
 # ==========================================
@@ -21,28 +27,50 @@ Family Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)
 # ==========================================
 # 1. ユーザー定義 (Users)
 # ==========================================
+# 注意: info は年齢・具体的な金額など個人を特定しうる情報を含みうるため、
+# tracked source にはプレースホルダーのみを置き、実際の値は
+# quest_users.local.json (gitignore対象、*.local.json) から読み込む。
+# config.py の FAMILY_SETTINGS / family_members.local.json と同じ方針。
 USERS = [
     {
         'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員',
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', 'role': 'role_adult',
-        'info': '35歳 / INTJ / 通勤電車を書斎に変える男 / 住宅ローン5,400万の守護者'
+        'info': '家族の生活基盤を守る冒険者'
     },
     {
         'user_id': 'mom', 'name': 'はるな', 'job_class': '専業主婦',
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '🪄', 'role': 'role_adult',
-        'info': '32歳 / 育児・家庭運営責任者 / 伝説の秘宝「アルハンブラ」を目指す者'
+        'info': '育児・家庭運営責任者 / 伝説の秘宝「アルハンブラ」を目指す者'
     },
     {
         'user_id': 'son', 'name': 'ともや', 'job_class': 'ピカピカの1年生',
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👦', 'role': 'role_child',
-        'info': '5歳 / 文武両道・早起きのヒーロー / YouTubeより稼げる仕事を探求中'
+        'info': '文武両道・早起きのヒーロー / YouTubeより稼げる仕事を探求中'
     },
     {
         'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',
         'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', 'role': 'role_child',
-        'info': '2歳 / イヤイヤ期の妖精'
+        'info': 'イヤイヤ期の妖精'
     }
 ]
+
+# quest_users.local.json が存在すれば、年齢等の表示専用データを user_id 単位で
+# 上書きする。ファイルが無くても (CI・新規チェックアウト等) 上記プレースホルダーの
+# ままで動作する。QUEST_USERS_LOCAL_PATH 環境変数でパスを差し替え可能 (テスト用)。
+_QUEST_USERS_LOCAL_PATH = os.environ.get(
+    "QUEST_USERS_LOCAL_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "quest_users.local.json"),
+)
+if os.path.exists(_QUEST_USERS_LOCAL_PATH):
+    try:
+        with open(_QUEST_USERS_LOCAL_PATH, "r", encoding="utf-8") as _f:
+            _quest_users_overrides = json.load(_f)
+        _users_by_id = {_u['user_id']: _u for _u in USERS}
+        for _user_id, _overrides in _quest_users_overrides.items():
+            if _user_id in _users_by_id and isinstance(_overrides, dict):
+                _users_by_id[_user_id].update(_overrides)
+    except Exception as _e:
+        logger.warning(f"quest_users.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}")
 
 # ==========================================
 # 2. クエスト定義 (Quests)
