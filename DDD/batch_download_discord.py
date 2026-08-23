@@ -660,14 +660,16 @@ class ScrapingStrategy(DownloadStrategy):
             'outtmpl': str(final_path),
             'http_headers': {
                 'Referer': page_url, # ホットリンク防止の回避
-                # yt-dlpのデフォルトヘッダーはChromeを騙るUser-Agent
-                # (+ Sec-Fetch-Mode: navigate等)を付与するが、実際のTLS指紋(JA3)は
-                # Chromeと一致しないため、その不一致自体をWAFに検知され403で
-                # 弾かれることを実機検証で確認した(素直にrequestsを名乗るUAでは
-                # 同じセグメントが問題なく取得できた)。フラグメント取得では
-                # ブラウザを騙らない、requestsライブラリ本来のUser-Agentで上書きする。
                 'User-Agent': requests.utils.default_user_agent(),
                 'Accept': '*/*',
+                # yt-dlpのHTTPダウンローダーはフラグメント取得時に
+                # "Accept-Encoding: identity" を既定で強制する
+                # (yt_dlp/downloader/http.py参照)。実機の生トラフィック検証で、
+                # この値がWAFにボットの特徴として検知され403で弾かれる一方、
+                # 同一セグメントへの"Accept-Encoding: gzip, deflate"付きリクエストは
+                # 問題なく通ることを確認した。http_headersで明示的に上書きすることで
+                # yt-dlp既定のidentity指定より優先させる(HTTPHeaderDictは後勝ち)。
+                'Accept-Encoding': 'gzip, deflate',
             },
             'quiet': not CONFIG.SHOW_PROGRESS_BAR,
             'no_warnings': True,
