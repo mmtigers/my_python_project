@@ -7,6 +7,7 @@ services/sensor_service.py のテスト。
 CIの `unittest discover` にも収集されずに放置されていた。
 本ファイルは現在の実装(services/sensor_service.py)を対象に書き直したもの。
 """
+import asyncio
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -87,6 +88,50 @@ class TestProcessSensorDataMotion:
         mock_send.assert_not_called()
         # 継続検知でも「無反応監視タイマー」は再セットされる
         assert "mac_motion" in sensor_service.MOTION_TASKS
+
+
+@pytest.mark.asyncio
+class TestSendInactiveNotification:
+    async def test_notification_success_resets_active_state_and_task(self):
+        sensor_service.IS_ACTIVE["mac_motion"] = True
+        sensor_service.MOTION_TASKS["mac_motion"] = MagicMock()
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)):
+            await sensor_service.send_inactive_notification("mac_motion", "テスト", "リビング", 0)
+
+        assert sensor_service.IS_ACTIVE["mac_motion"] is False
+        assert "mac_motion" not in sensor_service.MOTION_TASKS
+
+    async def test_notification_failure_still_resets_active_state_and_task(self):
+        """通知送信(send_push)が例外を送出しても、実際の無反応状態は変わらないため
+        IS_ACTIVE/MOTION_TASKSのクリーンアップは行われるべき(M-5-2の回帰テスト)。
+        従来はCancelledErrorしか捕捉していなかったため、この後片付けに到達せず、
+        IS_ACTIVEがTrueのまま残り「動きが再開した」通知が二度と出なくなっていた。"""
+        sensor_service.IS_ACTIVE["mac_motion"] = True
+        sensor_service.MOTION_TASKS["mac_motion"] = MagicMock()
+        with patch.object(sensor_service, "send_push", MagicMock(side_effect=RuntimeError("network down"))):
+            await sensor_service.send_inactive_notification("mac_motion", "テスト", "リビング", 0)
+
+        assert sensor_service.IS_ACTIVE["mac_motion"] is False
+        assert "mac_motion" not in sensor_service.MOTION_TASKS
+
+    async def test_cancellation_leaves_active_state_untouched(self):
+        """タイムアウト前に動きが検知されてキャンセルされた場合は、
+        実際にアクティブなままなのでIS_ACTIVEを書き換えてはいけない。"""
+        sensor_service.IS_ACTIVE["mac_motion"] = True
+
+        async def _run_and_cancel():
+            task = asyncio.create_task(
+                sensor_service.send_inactive_notification("mac_motion", "テスト", "リビング", 10)
+            )
+            await asyncio.sleep(0)
+            task.cancel()
+            await task
+
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await _run_and_cancel()
+
+        mock_send.assert_not_called()
+        assert sensor_service.IS_ACTIVE["mac_motion"] is True
 
 
 @pytest.mark.asyncio
