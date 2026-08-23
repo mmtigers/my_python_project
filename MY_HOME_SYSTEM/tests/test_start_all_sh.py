@@ -67,3 +67,34 @@ class TestStartAllShCleanupTargets:
             "scheduler_boot.py",
             "streamlit run",
         }
+
+
+class TestStartAllShBackgroundProcessesSurviveLogout:
+    """M-8-4の一部: バックグラウンド起動('&'のみ)がSSHログアウト時にシェルから
+    SIGHUPを受けて終了してしまう余地があった問題。nohupでSIGHUPを無視し、
+    disownでシェルのジョブ管理からも外していることを検証する。"""
+
+    def _background_launch_lines(self) -> list:
+        script = _read_script()
+        return [line for line in script.splitlines() if line.rstrip().endswith("&")]
+
+    def test_background_launches_use_nohup(self):
+        launch_lines = self._background_launch_lines()
+        assert launch_lines, "バックグラウンド起動('&')の行が見つかりません"
+        for line in launch_lines:
+            assert "nohup" in line, (
+                f"バックグラウンド起動にnohupが付いておらず、SSHログアウトで"
+                f"SIGHUP終了する余地がある: {line!r}"
+            )
+
+    def test_background_launches_are_disowned(self):
+        script = _read_script()
+        launch_lines = self._background_launch_lines()
+        lines = script.splitlines()
+        for line in launch_lines:
+            idx = lines.index(line)
+            following = "\n".join(lines[idx + 1: idx + 3])
+            assert "disown" in following, (
+                f"バックグラウンド起動の直後にdisownが無く、シェルのジョブ管理から"
+                f"外れていない: {line!r}"
+            )
