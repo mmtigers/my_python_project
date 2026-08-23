@@ -20,7 +20,22 @@ from starlette.testclient import TestClient
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import config
 import unified_server
+
+
+def test_cors_middleware_uses_config_cors_origins():
+    """
+    M-8-2回帰防止: 以前はunified_server.py側にハードコードされた別のCORS許可
+    オリジンリストがあり、config.CORS_ORIGINS(ALLOW_ALL_ORIGINS環境変数の
+    反映先)を変更しても実際のCORS設定には一切反映されなかった。
+    CORSMiddlewareがconfig.CORS_ORIGINSをそのまま使っていることを確認する。
+    """
+    cors_middlewares = [
+        m for m in unified_server.app.user_middleware if m.cls.__name__ == "CORSMiddleware"
+    ]
+    assert len(cors_middlewares) == 1
+    assert cors_middlewares[0].kwargs.get("allow_origins") == config.CORS_ORIGINS
 
 
 def test_root_health_check(api_client):

@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/routers/quest_router.py
 from fastapi import APIRouter, HTTPException, File, UploadFile
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 import uuid
 import sys
@@ -35,9 +35,9 @@ def sync_master_data():
     return game_system.sync_master_data()
 
 @router.get("/data")
-def get_all_data() -> Dict[str, Any]:
+def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
-        return game_system.get_all_view_data()
+        return game_system.get_all_view_data(viewer_user_id)
     except Exception as e:
         logger.error(f"Data Fetch Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch data")
@@ -103,10 +103,28 @@ async def upload_image(file: UploadFile = File(...)):
         new_filename = f"{uuid.uuid4()}{file_ext}"
         file_path = os.path.join(config.UPLOAD_DIR, new_filename)
 
+        # M-9-3: ファイルサイズ上限を設けず、チャンクを読めるだけ書き込み続けると
+        # 巨大アップロードでディスクを圧迫し得た。書き込みながら累計サイズを
+        # 追跡し、上限超過時は書きかけのファイルを削除して413を返す。
+        max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024
+        total_bytes = 0
+        too_large = False
         async with aiofiles.open(file_path, "wb") as buffer:
             while content := await file.read(1024 * 1024):
+                total_bytes += len(content)
+                if total_bytes > max_bytes:
+                    too_large = True
+                    break
                 await buffer.write(content)
-            
+
+        if too_large:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise HTTPException(
+                status_code=413,
+                detail=f"ファイルサイズが上限({config.UPLOAD_MAX_FILE_SIZE_MB}MB)を超えています",
+            )
+
         logger.info(f"Image Uploaded: {new_filename}")
         return {"url": f"/uploads/{new_filename}"}
 

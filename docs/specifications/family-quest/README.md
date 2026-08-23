@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された53件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された54件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 「(廃止)」の付いた仕様書は、2026-08のFamily Quest大改修等で対応するソースファイル自体が削除済みのものです。削除された記録として残置されているのみで、新規の実装・参照の対象ではありません。
 
@@ -55,7 +55,8 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
-| [CameraDashboard.md](./src/features/camera/components/CameraDashboard.md) | 監視カメラ機能全体のエントリーポイントとなる全画面ダッシュボード。「ライブ映像」「録画再生」タブを切り替え、それぞれ`LiveView`・`RecordView`へ描画を委譲する。 |
+| [CameraDashboard.md](./src/features/camera/components/CameraDashboard.md) | 監視カメラ機能全体のエントリーポイントとなる全画面ダッシュボード。「ライブ映像」「録画再生」タブを切り替え、それぞれ`LiveView`・`RecordView`へ描画を委譲する。設定歯車ボタンから`CameraSettingsModal`を開ける。 |
+| [CameraSettingsModal.md](./src/features/camera/components/CameraSettingsModal.md) | カメラ単位の有効/無効を切り替えるモーダル。`PUT /api/cameras/settings/{camera_id}`で永続化し、成功時に`onToggled`経由で`CameraDashboard`側の一覧を再取得させる。 |
 | [LiveView.md](./src/features/camera/components/LiveView.md) | 複数の監視カメラのライブ映像を一覧表示するコンポーネント。サムネイルのグリッド表示と、1台を大きく表示するシングルビューを切り替えられる。 |
 | [RecordView.md](./src/features/camera/components/RecordView.md) | 指定した日付・時刻の録画映像を複数カメラ分同期して再生する画面。同期再生・一時停止・再生速度の一括変更に対応する。 |
 

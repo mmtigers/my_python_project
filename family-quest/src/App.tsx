@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
 import { WifiOff } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
@@ -50,9 +50,9 @@ import FamilyLog from './features/family/components/FamilyLog';
 
 // ConfirmModal の target に渡りうる型。モードごとに実際に持っているプロパティが異なるため、
 // メッセージ生成はモードごとに個別にキャストして組み立てる（getMessage 内）。
-// ★要件9: クエストの完了/取り消しは確認ダイアログを挟まないワンタップ操作に変更したため、
-// ここで確認を挟むのはゴールドを消費する「購入」と、親向けの「却下」のみ(誤操作の影響が大きいため)。
-type ConfirmTarget = QuestHistory | Reward;
+// ★実機検証で子どもの誤操作が多かったため、クエスト完了(クリア)には確認ダイアログを復活させた。
+// 取り消しは長押しでのみ発火する(QuestList側のuseLongPress)ため、引き続き確認なしのワンタップとする。
+type ConfirmTarget = Quest | QuestHistory | Reward;
 
 // useGameData.ts の completeQuest/cancelQuest/buyReward/rejectQuest
 // ラッパー関数群の戻り値をまとめて受け取るための型（各関数は success 以外のフィールドが少しずつ異なる）
@@ -82,7 +82,7 @@ const resolveErrorText = (res: ActionResult, fallback: string): string =>
 const ConfirmModal = ({
   mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel
 }: {
-  mode: 'purchase' | 'reject' | null,
+  mode: 'complete' | 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
   rejectReason: string | null,
   onSelectRejectReason: (reason: string) => void,
@@ -93,9 +93,15 @@ const ConfirmModal = ({
 
   const getMessage = (): { title: string; text: string } => {
     switch (mode) {
+      case 'complete': {
+        const t = target as Quest;
+        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };
+      }
       case 'purchase': {
         const t = target as Reward;
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
+        // Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず
+        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -146,10 +152,10 @@ function App() {
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
 
-  // モーダル状態 (購入・却下のみ。完了・取消はワンタップ即時実行のため確認を挟まない)
-  const [confirmMode, setConfirmMode] = useState<'purchase' | 'reject' | null>(null);
+  // モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)
+  const [confirmMode, setConfirmMode] = useState<'complete' | 'purchase' | 'reject' | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<ConfirmTarget | null>(null);
-  // 購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
+  // クエスト完了/購入を実行する当人。横画面の4人表示では「今アクティブなユーザー」が
   // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
   const [rejectReason, setRejectReason] = useState<string | null>(null);
@@ -175,9 +181,17 @@ function App() {
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
     refreshData,
-  } = useGameData(handleLevelUp);
+  } = useGameData(currentUserIdx, handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
+
+  // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
+  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして
+  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。
+  const pendingQuestsRef = useRef(pendingQuests);
+  useEffect(() => {
+    pendingQuestsRef.current = pendingQuests;
+  }, [pendingQuests]);
 
   // --- Handlers ---
   const handleUserChange = (idx: number) => {
@@ -187,7 +201,7 @@ function App() {
     play('tap');
   };
 
-  // ★要件9: クエストの完了・取り消しは確認ダイアログを挟まないワンタップ操作。
+  // 完了(confirmMode='complete'の確認後)・取り消し(長押しでワンタップ)の実行本体。
   // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。
   const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
     const res: ActionResult = mode === 'complete'
@@ -231,8 +245,12 @@ function App() {
       getQuestLockState(q as Quest, user, completedQuests, pendingQuests);
 
     // 無限クエストは常に「完了」扱い
+    // ★実機検証で子どもの誤操作(意図しない完了)が多かったため、完了(クリア)には
+    // 確認ダイアログを挟む(取り消しは長押しで保護されているため対象外)。
     if (isInfinite) {
-      runQuestAction(user, 'complete', q);
+      setConfirmUser(user);
+      setConfirmTarget(q);
+      setConfirmMode('complete');
       return;
     }
 
@@ -246,8 +264,10 @@ function App() {
       //  もし不足している場合は q.title を補完する必要があります。
       runQuestAction(user, 'cancel', { ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
     } else {
-      // 未実施ならワンタップで完了
-      runQuestAction(user, 'complete', q);
+      // 未実施なら確認ダイアログを挟んでから完了
+      setConfirmUser(user);
+      setConfirmTarget(q);
+      setConfirmMode('complete');
     }
   };
 
@@ -258,10 +278,21 @@ function App() {
     play('select');
   };
 
-  // --- Confirm Execution (購入・却下のみ。誤操作の影響が大きいため確認を維持する: 要件9) ---
+  // --- Confirm Execution (完了・購入・却下。子どもの誤操作対策として確認を挟む) ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
     const actingUser = confirmUser || currentUser;
+
+    if (confirmMode === 'complete') {
+      // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
+      // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
+      const target = confirmTarget as Quest;
+      setConfirmMode(null);
+      setConfirmTarget(null);
+      setConfirmUser(null);
+      await runQuestAction(actingUser, 'complete', target);
+      return;
+    }
 
     let res: ActionResult = { success: false };
 
@@ -300,6 +331,12 @@ function App() {
     const res = await approveQuest(getRepresentativeParent(users), history);
     if (res.success) {
       play('approve');
+      // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
+      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
+      if ((res.earnedMedals ?? 0) > 0) {
+        play('medal');
+        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+      }
     } else {
       setMessageData({
         title: "エラー",
@@ -312,16 +349,26 @@ function App() {
 
   // 角度⑩: 承認待ちが複数あるとき、1件ずつ承認する手間を減らす一括承認
   const handleApproveAll = async () => {
-    const targets = [...pendingQuests];
+    // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
+    // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
+    const targets = [...pendingQuestsRef.current];
     if (targets.length === 0) return;
 
     let successCount = 0;
+    let totalEarnedMedals = 0;
     for (const history of targets) {
       const res = await approveQuest(getRepresentativeParent(users), history);
-      if (res.success) successCount++;
+      if (res.success) {
+        successCount++;
+        totalEarnedMedals += res.earnedMedals ?? 0;
+      }
     }
 
     if (successCount > 0) play('approve');
+    if (totalEarnedMedals > 0) {
+      play('medal');
+      showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
+    }
 
     if (successCount === targets.length) {
       showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
@@ -329,7 +376,7 @@ function App() {
       setMessageData({
         title: "エラー",
         text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
-        onRetry: handleApproveAll,
+        onRetry: () => handleApproveAll(),
       });
       play('cancel');
     }

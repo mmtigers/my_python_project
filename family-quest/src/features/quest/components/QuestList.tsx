@@ -291,7 +291,10 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
             if (q.target && q.target !== 'all') {
-                if (q.target.startsWith('role_')) {
+                if (q.target === 'siblings') {
+                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
+                    if (currentUser.role !== 'role_child') return false;
+                } else if (q.target.startsWith('role_')) {
                     if (currentUser.role !== q.target) return false;
                 } else if (q.target !== currentUser?.user_id) {
                     return false;
@@ -330,7 +333,11 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             const bonusA = (a.bonus_gold || 0) + (a.bonus_exp || 0);
             const bonusB = (b.bonus_gold || 0) + (b.bonus_exp || 0);
             if (bonusA !== bonusB) return bonusB - bonusA;
-            return (b.id as number) - (a.id as number);
+            // M-6-5バグ修正: 実カラムはquest_idであり、idは常にundefinedのため
+            // (b.id as number) - (a.id as number) は常にNaNになり並び順が不定だった。
+            const idA = Number(a.quest_id ?? a.id ?? 0);
+            const idB = Number(b.quest_id ?? b.id ?? 0);
+            return idB - idA;
         });
     }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
 

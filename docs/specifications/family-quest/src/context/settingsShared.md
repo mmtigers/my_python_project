@@ -332,6 +332,14 @@ graph TD
 | `useSettings`フックの具体的な実装（`useContext`の呼び出し方、null時の挙動等） | 本ファイルにはフックの実装が存在しないため。 | `family-quest/src/context/useSettings.ts` |
 | `FamilyDashboard.tsx`における以前の`'daughter'`ハードコードの詳細と、現在の`iconFirstUserIds`利用方法 | コメントで言及があるのみで、当該コンポーネントのコード自体は本ファイルには含まれないため。 | `family-quest/src/features/family/components/FamilyDashboard.tsx` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `setDensity`/`toggleIconFirstUser`/`setUserThemeColor`の実際の実装内容（永続化の有無・方法を含む） | `family-quest/src/context/SettingsContext.tsx`を直接確認した。`SettingsProvider`（28〜59行目）は初回マウント時に`loadSettings()`（12〜26行目）で`window.localStorage.getItem(SETTINGS_STORAGE_KEY)`から状態を復元し、`settings`が変化するたび（`useEffect`31〜37行目）に`window.localStorage.setItem`で即時永続化する。`setDensity`/`toggleIconFirstUser`/`setUserThemeColor`（41〜51行目）はいずれも`setSettings`によるイミュータブルな状態更新（スプレッド構文）のみを行い、他の副作用（サーバー通信等）は行わない。 | 直接ソース確認: `family-quest/src/context/SettingsContext.tsx:12-59` |
+| `useSettings`フックの具体的な実装（`useContext`の呼び出し方、null時の挙動等） | `family-quest/src/context/useSettings.ts:4-8`（全9行）を直接確認した。`export function useSettings(): SettingsContextValue`は`useContext(SettingsContext)`を呼び出し、結果が`null`（本ファイルの`SettingsContext`初期値、64行目）の場合は`throw new Error('useSettings は SettingsProvider の内側で使ってください');`という日本語メッセージの例外を送出する。`null`でなければそのまま`ctx`（`SettingsContextValue`）を返す。 | 直接ソース確認: `family-quest/src/context/useSettings.ts:4-8` |
+| `FamilyDashboard.tsx`における以前の`'daughter'`ハードコードの詳細と、現在の`iconFirstUserIds`利用方法 | `family-quest/src/features/family/components/FamilyDashboard.tsx`を直接確認した。現在の実装は52行目で`const { iconFirstUserIds, userThemeColors } = useSettings();`により`useSettings`経由で取得し、101行目`iconFirst={iconFirstUserIds.includes(user.user_id)}`という形で各`FamilyPanel`にPropsとして渡している。なお同ファイル16行目には`const FAMILY_ORDER = ['dad', 'mom', 'son', 'daughter'];`という配列が別途存在するが、これは13〜15行目のコメントにある通り「画面上の並び順」専用の定数（`sortByFamilyOrder`関数で使用）であり、`iconFirstUserIds`とは無関係である。以前`'daughter'`が「アイコン主体表示」の対象としてハードコードされていた具体的なコード（Git履歴上の旧実装）自体は、現在のファイル内容からは確認できなかった。 | 直接ソース確認: `family-quest/src/features/family/components/FamilyDashboard.tsx:9-10, 13-16, 52, 101` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

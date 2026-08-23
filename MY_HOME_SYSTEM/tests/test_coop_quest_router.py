@@ -136,7 +136,7 @@ class TestCoopQuestApproval:
 
 
 class TestCoopQuestRejection:
-    def test_reject_one_side_removes_both_pending_rows(self, seeded_client):
+    def test_reject_one_side_marks_both_rows_rejected(self, seeded_client):
         histories = _complete_coop_quest(seeded_client, reporter="son")
         son_history_id = histories["son"]["id"]
         daughter_history_id = histories["daughter"]["id"]
@@ -147,12 +147,16 @@ class TestCoopQuestRejection:
         assert res.status_code == 200
         assert res.json()["status"] == "rejected"
 
+        # 却下しても行は削除されず、双方とも status='rejected' として残ること
         with common.get_db_cursor() as cur:
-            remaining = cur.execute(
-                "SELECT id FROM quest_history WHERE id IN (?, ?)",
-                (son_history_id, daughter_history_id),
-            ).fetchall()
-        assert remaining == []
+            remaining = {
+                row["id"]: row["status"]
+                for row in cur.execute(
+                    "SELECT id, status FROM quest_history WHERE id IN (?, ?)",
+                    (son_history_id, daughter_history_id),
+                ).fetchall()
+            }
+        assert remaining == {son_history_id: "rejected", daughter_history_id: "rejected"}
 
         with common.get_db_cursor() as cur:
             son = cur.execute("SELECT * FROM quest_users WHERE user_id='son'").fetchone()

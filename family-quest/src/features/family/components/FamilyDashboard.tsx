@@ -64,7 +64,10 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     const hasNothingToDo = (user: User) => {
         return !quests.some(q => {
             if (q.target && q.target !== 'all') {
-                if (q.target.startsWith('role_')) {
+                if (q.target === 'siblings') {
+                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
+                    if (user.role !== 'role_child') return false;
+                } else if (q.target.startsWith('role_')) {
                     if (user.role !== q.target) return false;
                 } else if (q.target !== user.user_id) {
                     return false;

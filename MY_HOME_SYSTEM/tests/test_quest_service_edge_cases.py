@@ -11,7 +11,7 @@ import os
 import sys
 import threading
 import types
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -62,7 +62,12 @@ class TestProcessRejectQuest:
         assert result["status"] == "rejected"
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
-        assert row is None
+        # 却下しても履歴行は削除されず、status='rejected' として残ること。
+        # (以前はDELETEしていたため status='rejected' は実際には生成されず、
+        # process_complete_quest のスパムチェック `status != 'rejected'` が
+        # 常に成立する死に条件になっていた)
+        assert row is not None
+        assert row["status"] == "rejected"
 
     def test_reject_nonexistent_history_returns_404(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
@@ -92,6 +97,39 @@ class TestProcessRejectQuest:
         with pytest.raises(HTTPException) as exc_info:
             quest_service.process_reject_quest("dad", history_id)
         assert exc_info.value.status_code == 400
+
+    def test_rejected_history_is_excluded_from_family_chronicle_total_quests(self, isolated_db):
+        """process_reject_quest が却下履歴を残す(DELETEではなくUPDATE)ようになった
+        ことで、UserService.get_family_chronicle の totalQuests(COUNT(*) FROM
+        quest_history)が却下された申請まで「達成したクエスト数」として誤集計しない
+        よう明示的な除外が必要になった。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+                "(101, 'Test', 'daily', 10, 5)"
+            )
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'approved')
+            """)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-02T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        quest_service.process_reject_quest("dad", history_id)
+
+        game_system = GameSystem()
+        chronicle = game_system.user_service.get_family_chronicle()
+        # approved 1件のみが「達成したクエスト数」に含まれ、却下された1件は含まれない
+        assert chronicle["stats"]["totalQuests"] == 1
 
 
 class TestIsWithinResetPeriod:
@@ -129,6 +167,15 @@ class TestIsWithinResetPeriod:
 
     def test_completely_unparseable_string_returns_false(self):
         assert self.quest_service.is_within_reset_period("not-a-date-at-all", "daily") is False
+
+    def test_naive_timestamp_late_at_night_is_interpreted_as_jst_not_utc(self):
+        """M-1-4回帰防止: tzinfoの無いレガシー完了時刻は、保存規約
+        (common.get_now_iso)に合わせてJSTとして記録されているとみなす。
+        以前はUTCとみなして変換していたため、日付境界付近(夜遅く)の
+        naiveタイムスタンプが日付跨ぎで誤判定されていた
+        (23:00をUTCとみなして+9hすると翌日05:00になってしまう)。"""
+        today_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d")
+        assert self.quest_service.is_within_reset_period(f"{today_jst}T23:00:00", "daily") is True
 
 
 class TestCalculateQuestBoost:
@@ -205,6 +252,56 @@ class TestGetAllViewDataTargetedQuestBoost:
         targeted = next(q for q in data["quests"] if q["quest_id"] == 101)
         assert "bonus_gold" in targeted
         assert "bonus_exp" in targeted
+
+
+class TestGetAllViewDataSharedQuestBoostViewer:
+    """
+    quest_master.target_user は実在の quest_users.user_id (例:'dad')の他に
+    'siblings' のようなグループ指定も取りうる。以前は target_user をそのまま
+    calculate_quest_boost へ user_id として渡していたため、'siblings' 指定の
+    共有クエストでは quest_history に一致するuser_id行が存在せず、実際の完了
+    履歴に関わらずボーナスが常に0になっていた(実害はないが意味が誤り)。
+    viewer_user_id(閲覧中のユーザー)を渡した場合は、そのユーザーの履歴を
+    代表として使うことを検証する。
+    """
+    def _seed_shared_quest_with_history(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child'), "
+            "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+        )
+        cur.execute(
+            "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
+            "VALUES (101, 'Shared Quest', 'daily', 'siblings', 100, 100)"
+        )
+        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+            VALUES ('son', 101, 'Shared Quest', 100, 100, ?, 'approved')
+        """, (three_days_ago,))
+
+    def test_boost_is_always_zero_without_a_viewer(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_shared_quest_with_history(cur)
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data()
+
+        quest = next(q for q in data["quests"] if q["quest_id"] == 101)
+        assert quest["bonus_gold"] == 0
+        assert quest["bonus_exp"] == 0
+
+    def test_boost_uses_viewers_own_history_when_target_user_is_not_a_real_user(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_shared_quest_with_history(cur)
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data(viewer_user_id="son")
+
+        # days_diff=3 -> missed_days=2 -> bonus_ratio=0.2 -> 100 * 0.2 = 20
+        quest = next(q for q in data["quests"] if q["quest_id"] == 101)
+        assert quest["bonus_gold"] == 20
+        assert quest["bonus_exp"] == 20
 
 
 class TestSyncMasterData:
@@ -310,6 +407,42 @@ class TestSyncMasterData:
         assert quest_count == 0
         assert reward_count == 0
 
+    def test_reward_still_owned_by_user_inventory_is_not_deleted(self, isolated_db, monkeypatch):
+        """M-1-2: user_inventory(reward_master(reward_id)へのFK)が参照している報酬を
+        マスタから削除しようとすると、以前はIntegrityErrorでsync_master_data全体が
+        失敗していた。参照が残っている報酬は削除をスキップし、sync自体は成功すること。"""
+        fake_quest_data = types.SimpleNamespace(
+            USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
+            QUESTS=[],
+            REWARDS=[],  # マスタからは全報酬を削除する想定
+        )
+        monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
+        monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Owned Reward', 100)"
+            )
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('dad', 999, 'owned', ?)",
+                (common.get_now_iso(),),
+            )
+
+        game_system = GameSystem()
+        result = game_system.sync_master_data()
+
+        assert result["status"] == "synced"
+        with common.get_db_cursor() as cur:
+            reward_row = cur.execute(
+                "SELECT reward_id FROM reward_master WHERE reward_id = 999"
+            ).fetchone()
+            inventory_row = cur.execute(
+                "SELECT id FROM user_inventory WHERE reward_id = 999"
+            ).fetchone()
+        assert reward_row is not None, "参照が残っている報酬は削除されずに残ること"
+        assert inventory_row is not None
+
 
 class TestTriggerTvUnlock:
     """
@@ -405,3 +538,75 @@ class TestTriggerTvUnlock:
 
         assert len(captured_threads) == 1
         assert captured_threads[0].daemon is True
+
+
+class TestProcessApproveQuestWithDeletedMasterQuest:
+    """
+    M-1-1: sync_master_data のDELETE(マスタから削除されたクエスト)後も
+    quest_history の pending 行は残るため、そのクエストを承認しようとすると
+    quest_master 側の行が見つからず quest=None になる。
+    process_approve_quest はこの状態でも quest['quest_id'] のsubscriptで
+    落ちず(TypeError→500にならず)、承認自体は成立すること。
+    """
+
+    def _seed_child_and_adult(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+        )
+
+    def test_approve_succeeds_when_quest_was_removed_from_master(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_child_and_adult(cur)
+            # quest_masterには一切登録せず、削除済みクエストのpending履歴のみを再現する
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
+                "completed_at, status) VALUES ('son', 9999, 'DeletedQuest', 10, 20, ?, 'pending')",
+                (common.get_now_iso(),),
+            )
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        result = quest_service.process_approve_quest("dad", history_id)
+
+        assert result["status"] == "success"
+        with common.get_db_cursor() as cur:
+            hist_after = cur.execute(
+                "SELECT status FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+            son_gold = cur.execute(
+                "SELECT gold FROM quest_users WHERE user_id = 'son'"
+            ).fetchone()["gold"]
+        assert hist_after["status"] == "approved"
+        assert son_gold == 20
+
+
+class TestFilterActiveQuestsDateParseErrorLogging:
+    """
+    Low: filter_active_quests の日付パースエラー時のログが、実在しない 'id' キーを
+    参照していたため常に None を出力していた("Date parse error for quest None: ...")。
+    実際のキーは 'quest_id'。
+    """
+
+    def test_date_parse_error_log_includes_the_actual_quest_id(self, monkeypatch):
+        quest_service = QuestService()
+        bad_quest = {
+            "quest_id": 4242,
+            "quest_type": "limited",
+            "start_date": "not-a-date",
+            "end_date": None,
+            "target_user": "all",
+            "day_of_week": None,
+        }
+
+        with patch.object(quest_service_module, "logger") as mock_logger:
+            result = quest_service.filter_active_quests([bad_quest])
+
+        assert result == []  # パースエラー時は除外される(既存挙動)
+        mock_logger.warning.assert_called_once()
+        logged_message = mock_logger.warning.call_args[0][0]
+        assert "4242" in logged_message, (
+            f"log message should reference the quest_id (4242), got: {logged_message!r}"
+        )
+        assert "None" not in logged_message

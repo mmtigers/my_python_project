@@ -7,6 +7,8 @@ import math
 import time
 import json
 import tempfile
+import fcntl
+import threading
 import numpy as np
 import cv2
 import traceback
@@ -16,6 +18,7 @@ import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field, asdict
+from contextlib import contextmanager
 
 try:
     import psutil
@@ -224,6 +227,35 @@ def setup_directories() -> Tuple[str, str, str]:
             
     return work_dir, output_dir, records_dir
 
+@contextmanager
+def timelapse_job_lock():
+    """
+    タイムラプス処理の多重実行を防ぐためのファイルロック。
+    work/timelapse ディレクトリは複数のエントリポイント
+    (run_smart_timelapse_job / daily_timelapse_job.run_daily_timelapse)から
+    共有され、setup_directories()で全消去されるため、複数ジョブが同時実行
+    されると互いの作業ファイル(motion.csv等)を破壊し合う(M-4-1)。
+    ロックが取得できなかった場合はFalseをyieldするので、呼び出し側は
+    処理をスキップすること。
+    """
+    base_dir = getattr(config, "BASE_DIR", PROJECT_ROOT)
+    lock_dir = os.path.join(base_dir, "work")
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, "timelapse.lock")
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_file.close()
+        yield False
+        return
+
+    try:
+        yield True
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
+
 def mark_as_done(records_dir: str, base_filename: str, summary: SummaryInfo):
     os.makedirs(records_dir, exist_ok=True)
     record_file = os.path.join(records_dir, f"{os.path.splitext(base_filename)[0]}.done")
@@ -268,36 +300,55 @@ class MotionDetector:
         frame_size = WIDTH * HEIGHT
         total_expected_frames = int(duration_sec * FPS_ANALYZE) if duration_sec else 0
 
+        # stdoutのフレーム読み取りループ中にstderrを読まないと、ffmpegがstderrへ
+        # 大量出力した際にパイプバッファ(通常64KB)が満杯になりffmpeg側がブロックし、
+        # 結果としてstdout側も進まなくなりデッドロックする。stderrは別スレッドで
+        # 並行してドレインしておく。
+        stderr_chunks: List[bytes] = []
+
+        def _drain_stderr() -> None:
+            try:
+                while True:
+                    chunk = process.stderr.read(4096)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+            except (ValueError, OSError):
+                # 呼び出し元でstderrがcloseされた後の読み取りは無視する
+                pass
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
         try:
             while True:
                 raw_frame = process.stdout.read(frame_size)
                 if len(raw_frame) != frame_size:
                     break
-                    
+
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH))
                 roi_frame = frame[ROI_Y:ROI_Y+ROI_H, ROI_X:ROI_X+ROI_W]
                 fgmask = self.fgbg.apply(roi_frame)
                 fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, self.kernel)
                 fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, self.kernel)
-                
+
                 contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if contours:
                     largest_contour = max(contours, key=cv2.contourArea)
                     largest_area = cv2.contourArea(largest_contour)
                     if largest_area > MIN_AREA_THRESHOLD:
                         records.append(MotionRecord(current_sec, largest_area, len(contours)))
-                        
+
                 current_sec += 1
                 if total_expected_frames > 0 and current_sec % max(1, int(total_expected_frames / 10)) == 0:
                     logger.info(f"解析進捗: {(current_sec / total_expected_frames) * 100:.0f}%")
-            
+
             process.wait(timeout=60)
             if process.returncode != 0:
-                err_msg = ""
-                if process.stderr is not None:
-                    err_msg = process.stderr.read().decode('utf-8', errors='ignore')
-                    if DEBUG_FFMPEG:
-                        logger.error(f"FFmpeg stderr:\n{err_msg}")
+                stderr_thread.join(timeout=5)
+                err_msg = b"".join(stderr_chunks).decode('utf-8', errors='ignore')
+                if DEBUG_FFMPEG:
+                    logger.error(f"FFmpeg stderr:\n{err_msg}")
                 raise subprocess.CalledProcessError(process.returncode, cmd, stderr=err_msg)
 
         except Exception as e:
@@ -306,8 +357,6 @@ class MotionDetector:
         finally:
             if process.stdout:
                 process.stdout.close()
-            if process.stderr:
-                process.stderr.close()
             try:
                 if process.poll() is None:
                     process.wait(timeout=5)
@@ -315,6 +364,11 @@ class MotionDetector:
                 logger.error("FFmpegプロセスの終了がタイムアウトしました。強制終了します。")
                 process.kill()
                 process.wait()
+            # プロセス終了後にstderrがEOFするのを待ってからcloseする
+            # (逆順にするとドレインスレッドがclosed fileを読んでクラッシュする)
+            stderr_thread.join(timeout=5)
+            if process.stderr:
+                process.stderr.close()
 
         motion_csv = os.path.join(work_dir, "motion.csv")
         with open(motion_csv, "w", newline="", encoding="utf-8") as f:
@@ -491,7 +545,12 @@ class VideoBuilder:
         try:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=get_ffmpeg_stderr(), check=True, timeout=3600)
             return True
-        except Exception: return False
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg結合エラー (returncode={e.returncode})")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg結合処理がタイムアウトしました")
+            return False
 
     def _generate_thumbnail(self, video_path: str, output_path: Optional[str] = None) -> None:
         out = output_path or video_path.replace(".mp4", ".jpg")
@@ -575,6 +634,13 @@ class Uploader:
 # Main
 # ==========================================
 def run_smart_timelapse_job(input_video: str) -> None:
+    with timelapse_job_lock() as acquired:
+        if not acquired:
+            logger.warning("別のタイムラプス処理が実行中のため、今回の処理をスキップします。")
+            return
+        _run_smart_timelapse_job_locked(input_video)
+
+def _run_smart_timelapse_job_locked(input_video: str) -> None:
     t_start = time.perf_counter()
     user_id = getattr(config, "LINE_USER_ID", "")
     if not check_dependencies(): return

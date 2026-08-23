@@ -65,16 +65,16 @@
 
 ### `USERS`
 
-* **役割**: 家族4人（dad, mom, son, daughter）の初期ユーザー情報（`user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `info`）を定義するリスト。
-* 根拠: `USERS = [` (行番号: 24〜45 / 抜粋: "USERS = [\n    {\n        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員', \n        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',")
+* **役割**: 家族4人（dad, mom, son, daughter）の初期ユーザー情報（`user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `role`, `info`）を定義するリスト。`role`は各ユーザーに`role_adult`（dad, mom）または`role_child`（son, daughter）を明示する（H-2で追加。`services/quest_service.py`の`sync_master_data`が持つ`INSERT ... ON CONFLICT DO UPDATE`は元々`role`をDBへ反映する実装だったが、マスタ側に`role`キーが無かったため新規/空DBでの初回INSERT時に常に`NULL`となり、`_process_complete_quest_locked`の`user['role'] == ROLE_CHILD`判定が全員`False`になって子供も大人扱いで承認スキップの即時報酬付与になる不具合があった）。
+* 根拠: `USERS = [` (行番号: 24〜45 / 抜粋: "USERS = [\n    {\n        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員',\n        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', 'role': 'role_adult',")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
 * 根拠: (行番号: 24 / 抜粋: "USERS = [")
 
 
-* **戻り値/レスポンス**: `list[dict]`。4件のユーザー辞書（dad, mom, son, daughter）を含む。各辞書は `user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `info` キーを持つ。
-* 根拠: `'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',` (行番号: 41 / 抜粋: "'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人', ")
+* **戻り値/レスポンス**: `list[dict]`。4件のユーザー辞書（dad, mom, son, daughter）を含む。各辞書は `user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `role`, `info` キーを持つ。`role`の値はdad/momが`'role_adult'`、son/daughterが`'role_child'`。
+* 根拠: `'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',` (行番号: 41 / 抜粋: "'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',"), `'role': 'role_child'` (行番号: 42 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', 'role': 'role_child',")
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
@@ -176,7 +176,7 @@ graph TD
 
 * **二重docstringによる無駄な式文**: ファイル冒頭に2つの独立したdocstringが連続して記述されており（1〜7行目、8〜14行目）、Pythonの言語仕様上、実際にモジュールの `__doc__` として保持されるのは最初の1つのみである。2つ目（Phase 5.1の更新履歴）は評価されるだけで破棄され、実質的に「無視される」ドキュメントコメントとなっている。
 * **コメントアウトされたクエストの残存**: `QUESTS` 内に9件のコメントアウトされた要素（例: 88〜94行目、156行目、163〜164行目）が残っており、有効なクエストと無効なクエストが同一ファイル内に混在している。将来のメンテナンス時にコメントを外し忘れる／意図せず有効化するリスクがある。
-* **`id` の重複**: `id` フィールドはリスト内で必ずしもグローバルに一意ではない。例えば `QUESTS` 内で `id: 15/16/17`（洗濯物関連クエスト）が `target: 'dad'`（133〜135行目）と `target: 'mom'`（145〜147行目）の双方に同じ `id` で重複して存在する。`id` の一意性がどの範囲（グローバル／対象者ごと）で保証されるべきかはコードコメントからは読み取れない。
+* **`id` の重複（修正済み）**: かつて `QUESTS` 内で `id: 15/16/17`（洗濯物関連クエスト）が `target: 'dad'`（133〜135行目）と `target: 'mom'`（145〜147行目）の双方に同じ `id` で重複しており、`sync_master_data`側の`quest_id`主キー競合で`dad`向けの定義が`mom`向けの定義に上書きされ実質無効化される不具合があったが、`mom`側は `id: 505/506/507` に採番し直され（145〜147行目）、重複は解消されている。`id` の一意性がグローバル（`QUESTS`全体で一意）であるべきという前提がこの修正から確認できる。
 * **バリデーションの不在**: `category`, `difficulty`, `type`, `target` 等の値がコメント（19, 50〜51行目）で列挙された想定値と一致しているかを検証する仕組みはファイル内に存在しない。誤字や想定外の値が入っても実行時エラーにはならない。
 * **ハードコードされた金額バランス**: 報酬の `cost_gold` が50から1,100,000まで大きく開きがあり（184〜229行目）、ゲームバランスの調整はすべて本ファイルの手動編集に依存している。
 * **兄妹連携クエスト (`target: 'siblings'`)**: `id: 1040`（行番号: 110）と `id: 1041`（行番号: 178）の2件が定義されている。コメント（行番号: 108, 176）に「どちらか一方が完了報告すると2人とも報酬を得る」と明記されているが、その実処理（片方の完了で両者へ保留行を作成しカスケード承認する等のロジック）は本ファイルには存在せず、消費側（推定: `services/quest_service.py`）に委ねられている。
@@ -190,16 +190,17 @@ graph TD
 | このデータを消費するロジックの実体 | 本ファイルは他モジュールを一切importしておらず、`USERS`/`QUESTS`/`REWARDS` がどのファイルでどのように読み込まれ、DBとどう同期されるかが不明。 | `game_logic.py`, `services/quest_service.py`, `views/dashboard/quest_tab.py` 等の消費側ファイル |
 | `id` の一意性制約の仕様 | `QUESTS` 内で同一 `id` が異なる `target` に対して重複して存在するが、これが意図した設計か単なる見落としかは本ファイルのみからは判断できない。 | 消費側ロジック（`id` を主キーとして扱っているファイル） |
 | DBスキーマとの対応関係 | `USERS` の `user_id` が `reset_game.py` で言及される `quest_users` テーブルの `user_id` と対応するかは、本ファイル単体からは確認できるが、テーブルの完全なスキーマ（`medal_count` 等）は不明。 | `current_schema.sql`, `init_unified_db.py` |
-| コメントアウトされたクエストの無効化理由 | 各コメントアウト行（例: 88〜94, 156, 163〜164行目）がなぜ無効化されたか（バランス調整、廃止、一時停止等）の理由は記載されていない。 | 変更履歴（Git blame）またはプロジェクト外のドキュメント |
+| コメントアウトされたクエストの無効化理由 | 各コメントアウト行（例: 88〜94, 156, 163〜164行目）がなぜ無効化されたか（バランス調整、廃止、一時停止等）の理由は記載されていない。（`git blame`で該当行を確認したところ、いずれも同一コミット`16bdea7`(コミットメッセージ「一旦コミットします」、2026-06-28)由来であり、既にコメントアウトされた状態でリポジトリに追加されていることが判明した。それ以前の状態を示す履歴は本リポジトリのgit履歴からは追跡できず、無効化理由そのものは解消不可） | 変更履歴（Git blame）またはプロジェクト外のドキュメント |
 | `target: 'siblings'` の実処理 | 「どちらか一方が完了報告すると2人とも報酬を得る」という挙動を実現する具体的なロジック（対象ユーザーの解決方法、保留行の作成・カスケード処理等）は本ファイルからは読み取れない。 | `services/quest_service.py` |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| このデータを消費するロジックの実体 | `quest_service.md`の解析によれば、`GameSystem.sync_master_data`が`quest_data`モジュールを`importlib.reload`で再読み込みし、DBとの同期(マイグレーションを含む)を行っているとされる。 | quest_service.md |
-| DBスキーマとの対応関係 | `reset_game.md`の解析によれば、`quest_users`テーブルには`user_id`, `name`, `level`, `exp`, `gold`, `medal_count`カラムが存在することが判明しているが、完全なスキーマ(他カラムや制約)は`reset_game.md`自体でも不明とされている。 | reset_game.md |
-| `target: 'siblings'` の実処理 | `quest_service.md`の解析によれば、`QuestService._get_sibling_partner_id`が`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人であることを前提に相方を解決し、`_process_coop_quest_completion`が両者に`pending`の`quest_history`行を作成して`linked_history_id`で相互連結、承認・却下・取消の3箇所でカスケード処理を行う設計であることが判明した。 | quest_service.md |
+| このデータを消費するロジックの実体 | `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.sync_master_data`(688〜704行目)を直接確認した。`importlib.reload(quest_data)`(692行目)で再読み込みした上で、`quest_data.USERS`を`[MasterUser(**u) for u in quest_data.USERS]`(693行目)、`quest_data.QUESTS`を`MasterQuest(**q_data)`(694〜699行目)、`quest_data.REWARDS`を`[MasterReward(**r) for r in quest_data.REWARDS]`(701行目)でそれぞれPydanticモデルにバリデーションした後、`quest_users`/`quest_master`テーブルへ`INSERT ... ON CONFLICT DO UPDATE`で同期する設計であることを確認した。一方`MY_HOME_SYSTEM/game_logic.py`と`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`を直接確認したが、いずれも`quest_data`を一切importしておらず、`quest_data`を直接消費するのは`quest_service.py`のみであることを確認した(`game_logic.py`は純粋な計算ロジックのみ、`quest_tab.py`は`game_system.get_all_view_data()`経由でDB化後のデータを参照する設計)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:688-704`（`MY_HOME_SYSTEM/game_logic.py`, `MY_HOME_SYSTEM/views/dashboard/quest_tab.py`は`quest_data`のimportなしを確認） |
+| `id` の一意性制約の仕様（修正済み） | `MY_HOME_SYSTEM/quest_data.py`のQUESTS配列(53〜179行目)を直接確認した。かつては`id: 15`(133行目`target: 'dad'`, 旧145行目`target: 'mom'`、いずれも「洗濯物を干す」)、`id: 16`(134行目`dad`, 旧146行目`mom`、「洗濯物を畳む」)、`id: 17`(135行目`dad`, 旧147行目`mom`、「洗濯物をしまう」)が、それぞれ異なる`target`で重複して存在していた。DB側は`MY_HOME_SYSTEM/current_schema.sql`174行目で`quest_master.quest_id INTEGER PRIMARY KEY AUTOINCREMENT`であり、`sync_master_data`(`services/quest_service.py`744〜761行目)は`INSERT INTO quest_master (quest_id, ...) VALUES (...) ON CONFLICT(quest_id) DO UPDATE SET ...`という形でリスト順に処理するため、同一`id`の2件目(`target: 'mom'`側、ファイル内でより後方に定義)が1件目(`target: 'dad'`側)を上書きし、DB上には後勝ちで1行しか残らず`dad`向けの「洗濯物を干す/畳む/しまう」クエストが実質的に無効化される不具合だった。現在は`mom`側が`id: 505/506/507`(145〜147行目)に採番し直されており、この重複・上書きは解消されている。したがって`id`はQUESTS配列全体でグローバルに一意であるべき、という設計意図が確認できる。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:133-135, 145-147`, `MY_HOME_SYSTEM/services/quest_service.py:737-761`, `MY_HOME_SYSTEM/current_schema.sql:174` |
+| DBスキーマとの対応関係 | `MY_HOME_SYSTEM/current_schema.sql`164〜171行目の`CREATE TABLE quest_users`を直接確認した。`user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, updated_at DATETIME, avatar TEXT DEFAULT '🙂', medal_count INTEGER DEFAULT 0, role TEXT`という10カラム構成であることを確認した。`quest_data.py`の`USERS`(24〜52行目)の`user_id`キーはこのテーブルの`user_id`列と一致し、`sync_master_data`(`services/quest_service.py`726〜735行目)の`INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role, updated_at) VALUES (...) ON CONFLICT(user_id) DO UPDATE ...`で実際に同期されることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:164-171`, `MY_HOME_SYSTEM/services/quest_service.py:726-735` |
+| `target: 'siblings'` の実処理 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`_get_sibling_partner_id(self, cur, user_id)`(274〜283行目)は`cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,))`(279行目)により`role = 'role_child'`のユーザーがちょうど2人(281行目`len(child_ids) != 2`で検証、それ以外は`HTTPException(400)`)であることを前提に相方の`user_id`を解決する設計であることを確認した。`_process_coop_quest_completion(self, cur, user, quest, now_iso, total_exp, total_gold)`(285〜314行目)は、報告者本人の`quest_history`行(状態`pending`)を`INSERT`(292〜296行目)した後、相方分の`quest_history`行を`linked_history_id`付きで`INSERT`(298〜302行目)し、さらに報告者側の行にも相手の`id`を`UPDATE`で書き戻す(304行目)ことで双方向にリンクする設計であることを確認した。承認処理`process_approve_quest`(316〜340行目)では`hist['linked_history_id'] is not None`の場合に`_approve_linked_history`(339〜340行目)で連結先も同一トランザクション内でカスケード承認することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:274-340` |
 
 ## 10. 自己検証結果
 

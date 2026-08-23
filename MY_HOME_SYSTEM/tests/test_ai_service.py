@@ -14,8 +14,12 @@ services/ai_service.py のテスト。
 _call_gemini_api_with_retry自体を直接差し替えることで、analyze_text_and_execute
 の分岐ロジックをgoogle.generativeaiの内部構造から切り離してテストする。
 """
+import asyncio
 import os
+import queue
 import sys
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -76,6 +80,27 @@ def test_extract_referenced_tables_with_join():
     assert "quest_users" in tables
 
 
+def test_extract_referenced_tables_comma_join_catches_second_table():
+    """H-6: 暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブルも抽出できること"""
+    sql = "SELECT * FROM child_health_records, quest_users"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "child_health_records" in tables
+    assert "quest_users" in tables
+
+
+def test_extract_referenced_tables_comma_join_three_tables():
+    sql = "SELECT * FROM a, b, c WHERE a.id = b.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert tables == ["a", "b", "c"]
+
+
+def test_extract_referenced_tables_subquery_is_detected():
+    """H-6: サブクエリ内のFROMも抽出できること(隠れたテーブル参照のバイパス防止)"""
+    sql = "SELECT * FROM (SELECT * FROM quest_users) AS hidden"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "quest_users" in tables
+
+
 @pytest.mark.asyncio
 async def test_tool_search_db_rejects_non_select():
     result = await ai_service.tool_search_db({"sql_query": "DELETE FROM quest_users"})
@@ -86,6 +111,24 @@ async def test_tool_search_db_rejects_non_select():
 async def test_tool_search_db_blocks_disallowed_table():
     # quest_users はドキュメント記載の許可テーブル(child/food/shopping/power_usage)に含まれない
     result = await ai_service.tool_search_db({"sql_query": "SELECT * FROM quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_comma_joined_disallowed_table():
+    """H-6の回帰防止: 許可テーブルとのカンマ結合で quest_users を素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}, quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_subquery_disallowed_table():
+    """H-6の回帰防止: サブクエリ経由で quest_users を素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db(
+        {"sql_query": f"SELECT * FROM (SELECT * FROM quest_users) AS hidden, {table}"}
+    )
     assert "許可されていない" in result
 
 
@@ -425,3 +468,137 @@ class TestCallGeminiApiWithRetry:
             await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
         assert chat_session.send_message.call_count == 1
+
+
+class TestToolSchemaTimestampFormatMatchesActualData:
+    """
+    M-5-1: search_db ツールschemaのtimestamp列の説明が実データの保存形式と
+    一致していることの回帰テスト。
+
+    従来 tools_schema の sql_query 説明は「'YYYY-MM-DD HH:MM:SS' 形式の文字列」と
+    書かれていたが、実データ(child_health_records等)は core.utils.get_now_iso() で
+    保存されており、実際は ISO8601 + JSTオフセット('T'区切り、'+09:00'付き)である。
+    説明と実データの形式が食い違うと、AIが生成する BETWEEN 等の文字列比較検索が
+    ズレて意図した範囲の行を取りこぼす。
+    """
+
+    def test_schema_description_reflects_iso8601_format_not_space_separated(self):
+        sql_query_desc = (
+            ai_service.tools_schema[0]["function_declarations"][2]["parameters"]
+            ["properties"]["sql_query"]["description"]
+        )
+        assert ai_service.tools_schema[0]["function_declarations"][2]["name"] == "search_db"
+
+        # 実データが実際に使っている形式(ISO8601, 'T'区切り, +09:00オフセット)への
+        # 言及があること。
+        assert "T" in sql_query_desc
+        assert "+09:00" in sql_query_desc
+
+        # 修正前に書かれていた、実データと矛盾するスペース区切り形式の表記が
+        # 残っていないこと。
+        assert "YYYY-MM-DD HH:MM:SS" not in sql_query_desc
+
+    def test_schema_description_example_matches_get_now_iso_shape(self):
+        """
+        スキーマ説明文中に埋め込まれた例示フォーマットが、実際の
+        get_now_iso() の出力形状(ISO8601 + マイクロ秒 + '+09:00')と
+        一致することを、実際の出力を正規表現化して検証する。
+        """
+        import re
+        from core.utils import get_now_iso
+
+        sql_query_desc = (
+            ai_service.tools_schema[0]["function_declarations"][2]["parameters"]
+            ["properties"]["sql_query"]["description"]
+        )
+        sample = get_now_iso()
+        shape_pattern = re.sub(r"\d", r"\\d", re.escape(sample))
+        assert re.search(shape_pattern, sql_query_desc), (
+            f"schema description does not contain a timestamp example matching "
+            f"get_now_iso() shape: {sample!r}"
+        )
+
+
+class TestRateLimiterLockIsThreadSafeAcrossEventLoops:
+    """
+    M-5-3: SimpleRateLimiter の内部ロック(_lock)は、handlers/line_handler.py の
+    handle_message が着信メッセージごとに `asyncio.run(...)` で新しいイベントループを
+    生成する運用を前提にすると、別スレッド上の別イベントループから同時に
+    ロック獲得を試みる状況が発生しうる。
+
+    asyncio.Lock はコンテンション時、獲得待ちのFutureをその時点の実行中ループに
+    紐付ける。別スレッドの別ループがそのFutureの解決を待つと、Futureを解決する
+    はずのループ側コールバックは永遠に呼ばれず、レート制限チェック自体が
+    無期限にハングしてしまう(=リクエストが応答不能になる)。
+    threading.Lock であればスレッドを跨いでも正しくブロック/解放される。
+    """
+
+    @staticmethod
+    def _hold_lock_from_this_thread(lock, acquired_event: threading.Event, released_event: threading.Event):
+        """lockの型(threading.Lock / asyncio.Lock)を問わず、このスレッド上でlockを
+        保持し続けるヘルパー。修正前後どちらの実装でも同じテストコードで検証できるように、
+        型に応じて獲得方法を切り替える。"""
+        if isinstance(lock, type(threading.Lock())):
+            lock.acquire()
+            try:
+                acquired_event.set()
+                released_event.wait(timeout=5)
+            finally:
+                lock.release()
+        else:
+            async def _hold():
+                async with lock:
+                    acquired_event.set()
+                    while not released_event.is_set():
+                        await asyncio.sleep(0.01)
+            asyncio.run(_hold())
+
+    def test_lock_is_a_threading_lock_not_an_asyncio_lock(self):
+        limiter = ai_service.SimpleRateLimiter()
+        assert isinstance(limiter._lock, type(threading.Lock())), (
+            "SimpleRateLimiter._lock should be threading.Lock, not asyncio.Lock, "
+            "because it is shared across the per-request asyncio.run() event loops "
+            "created by handlers/line_handler.py:handle_message"
+        )
+
+    def test_allow_request_does_not_hang_when_contended_from_another_threads_loop(self):
+        limiter = ai_service.SimpleRateLimiter()
+        released_event = threading.Event()
+        acquired_event = threading.Event()
+
+        holder = threading.Thread(
+            target=self._hold_lock_from_this_thread,
+            args=(limiter._lock, acquired_event, released_event),
+            daemon=True,  # 万一ハングしても後続テスト・プロセス終了をブロックしない
+        )
+        holder.start()
+        assert acquired_event.wait(timeout=2), "holder thread failed to acquire the lock"
+
+        result_queue = queue.Queue()
+
+        def requester():
+            try:
+                result_queue.put(("ok", asyncio.run(limiter.allow_request())))
+            except Exception as e:  # noqa: BLE001
+                result_queue.put(("error", e))
+
+        req_thread = threading.Thread(target=requester, daemon=True)
+        req_thread.start()
+        # requester が実際にロック獲得待ちで止まる時間を作ってから解放する。
+        # (解放前に結果を待つと、単に「保持時間分だけ遅い」だけで区別できないため)
+        time.sleep(0.2)
+        released_event.set()
+        holder.join(timeout=2)
+
+        try:
+            outcome = result_queue.get(timeout=2)
+        except queue.Empty:
+            pytest.fail(
+                "allow_request() did not return within 2s of the lock being released by "
+                "another thread's event loop (asyncio.Lock cross-loop wakeup is not "
+                "thread-safe, so the waiting thread's loop never notices the release)"
+            )
+
+        kind, value = outcome
+        assert kind == "ok", f"allow_request() raised: {value!r}"
+        assert value is True
