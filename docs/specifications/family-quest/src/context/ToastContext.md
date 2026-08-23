@@ -145,6 +145,15 @@ graph TD
 | `ToastProvider`がアプリ内でどの階層・順序でマウントされているか | 本ファイルはコンポーネント定義のみで呼び出し元の情報を含まないため | `../../main.tsx` |
 | `showToast`に実際に渡される`title`/`text`/`icon`の実データ | 呼び出し元のコンテキストが本ファイルには含まれないため | `showToast`を呼び出している各画面ファイル |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `ToastItem`の完全なプロパティ一覧 | `family-quest/src/context/toastShared.ts:7-13`を直接確認した。`ToastItem`インターフェースは`id: number`, `title: string`, `text?: string`, `icon?: string`, `createdAt: number`の5プロパティを持つ。`showToast`の引数型は`Omit<ToastItem, 'id' | 'createdAt'>`（`toastShared.ts:16`）であり、呼び出し側は`title`（必須）・`text`（任意）・`icon`（任意）のみを渡し、`id`と`createdAt`は`ToastProvider`側で自動付与される。 | 直接ソース確認: `family-quest/src/context/toastShared.ts:7-16` |
+| `useToast`フック側でProviderの外から呼び出された場合の挙動 | `family-quest/src/context/useToast.ts:4-8`を直接確認した。`useToast()`は`useContext(ToastContext)`の結果が`null`（`ToastContext`は`toastShared.ts:19`で`createContext<ToastContextValue \| null>(null)`と定義されており、Provider外では`null`のまま）の場合、`throw new Error('useToast は ToastProvider の内側で使ってください');`という日本語メッセージの例外を送出する。`SettingsContext.md`で確認済みの`useSettings`と同一のパターンである。 | 直接ソース確認: `family-quest/src/context/useToast.ts:4-8`（参考: `family-quest/src/context/toastShared.ts:19`） |
+| `ToastProvider`がアプリ内でどの階層・順序でマウントされているか | `family-quest/src/main.tsx`を直接確認した。URLパスが`/camera`を含まない通常のFamily Quest本体（22, 28, 32〜38行目の分岐）では、`<SettingsProvider><ToastProvider><App /></ToastProvider></SettingsProvider>`という順序でネストされ、`ToastProvider`は`SettingsProvider`の内側・`App`の外側にマウントされる。URLパスに`/camera`を含む場合（12, 28〜31行目）は`CameraDashboard`のみがレンダリングされ、`ToastProvider`はマウントされない。 | 直接ソース確認: `family-quest/src/main.tsx:12, 22, 28-38` |
+| `showToast`に実際に渡される`title`/`text`/`icon`の実データ | `family-quest/src/App.tsx`を直接確認した。`showToast`の呼び出しは5箇所すべてが本ファイル内に存在する: レベルアップ時（168行目、`{ title: 'LEVEL UP!', text: ..., icon: '⚡' }`）、クエスト申請が承認待ちになった時（200行目、`{ title: "申請完了", ..., icon: '📨' }`）、メダル獲得時（205行目、`{ title: "ちいさなメダル獲得！", ..., icon: "🏅" }`）、報酬購入完了時（271行目、`{ title: "購入完了", ..., icon: '🛍️' }`）、クエスト一括承認成功時（327行目、`{ title: "一括承認", ..., icon: '✅' }`）、アバター変更完了時（511行目、`{ title: "変更完了", ..., icon: '🖼️' }`）の計6箇所である。`family-quest/src`配下を`showToast(`で検索した限り、これら以外の呼び出し箇所は存在しない。 | 直接ソース確認: `family-quest/src/App.tsx:168, 200, 205, 271, 327, 511` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

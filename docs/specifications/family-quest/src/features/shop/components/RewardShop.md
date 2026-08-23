@@ -129,6 +129,15 @@ graph TD
 | `Reward`/`User`型の完全な構造 | `@/types`の実体が本ファイルには含まれていないため、`gold`フィールドが必須か否か等が不明。 | `@/types` (`index.ts`) |
 | 所持ゴールド表示・所持品表示の現在の実装場所 | かつて本コンポーネントが担っていたこれら2機能が、現在具体的にどのコンポーネントへ移管されたかはコメントの記述以上には本ファイルから確認できないため。 | ステータスカード相当のコンポーネント、`InventoryList.tsx`の呼び出し元 |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `RewardList`の内部実装 | `family-quest/src/features/shop/components/RewardList.tsx`を直接確認した。`sortedRewards`(13〜36行目)は`useMemo`で`reward.target`(`'all'`/`'children'`/`'adults'`/`'mom'`/`'dad'`)によるフィルタリングと、`reward.cost_gold || reward.cost`昇順ソートを行う。各カードは`userGold >= cost`で`canAfford`を判定し(46行目)、`onClick={() => canAfford && onBuy(reward)}`(59行目)で購入可能な場合のみ`onBuy`を呼び出す（購入不可時はクリックしても何も起きない）。 | 直接ソース確認: `family-quest/src/features/shop/components/RewardList.tsx:13-65` |
+| `onBuy`実行後の具体的な挙動 | `family-quest/src/App.tsx`を直接確認した。`handleBuyReward`(254〜259行目)は`confirmUser`/`confirmTarget`/`confirmMode('purchase')`をセットして購入確認モーダル(`ConfirmModal`)を開き、モーダルで「はい」が選択されると`executeConfirm`(262〜296行目)内で`useGameData`の`buyReward(actingUser, confirmTarget as Reward)`(269行目)が呼ばれる。成功時はトースト表示と`'clear'`音再生(271〜274行目)、失敗時は`resolveErrorText`によるエラーメッセージ表示と`'cancel'`音再生(283〜286行目)を行う。横画面側は`family-quest/src/features/family/components/FamilyDashboard.tsx`の`FamilyPanel`が`onBuyReward={(r) => onBuyReward(user, r)}`(107行目)として同じ`handleBuyReward`に委譲しており、確認モーダルの経路は縦横で共通である。 | 直接ソース確認: `family-quest/src/App.tsx:254-296`, `family-quest/src/features/family/components/FamilyDashboard.tsx:107` |
+| `Reward`/`User`型の完全な構造 | `family-quest/src/types/index.ts`を直接確認した。`Reward`(76〜88行目)は`cost: number`が必須、`cost_gold?`/`id?`/`reward_id?`/`desc?`/`description?`/`icon?`/`icon_key?`が任意という構造。`User`(9〜26行目)は`gold: number`が必須(18行目)であり、本ファイルが`RewardList`へフォールバックなしで渡している`currentUser.gold`(19行目)は型定義上`undefined`になり得ないことを確認した。 | 直接ソース確認: `family-quest/src/types/index.ts:9-26,76-88` |
+| 所持ゴールド表示・所持品表示の現在の実装場所 | `family-quest/src/features/family/components/UserStatusCard.tsx`と`family-quest/src/App.tsx`、`family-quest/src/features/family/components/FamilyDashboard.tsx`を直接確認した。所持ゴールド表示は`UserStatusCard.tsx`(38〜43行目)が`CountUp`でアニメーション付き表示しており、縦画面では`App.tsx`(416〜419行目)、横画面では`FamilyDashboard.tsx`の`FamilyPanel`(155行目)がそれぞれ`<UserStatusCard user={user} .../>`として描画する。所持品(もちもの)表示は独立タブの`InventoryList`が担い、縦画面は`App.tsx`の`activeTab === 'inventory'`(464〜468行目)、横画面は`FamilyPanel`の`tab === 'inventory'`(208〜210行目)がそれぞれ`InventoryList`を描画する（横画面では`panelMode`付き）。 | 直接ソース確認: `family-quest/src/features/family/components/UserStatusCard.tsx:38-43`, `family-quest/src/App.tsx:416-419,464-468`, `family-quest/src/features/family/components/FamilyDashboard.tsx:155,208-210` |
+
 ## 10. 自己検証結果
 
 * [x] 完了: 推測・外部ファイルの仕様を一切含んでいない

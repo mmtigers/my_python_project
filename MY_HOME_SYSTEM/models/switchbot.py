@@ -5,6 +5,11 @@ from typing import Optional, Union, Dict, Any
 class SwitchBotContext(BaseModel):
     """Webhookで送られてくる詳細コンテキスト"""
     deviceMac: str
+    # SwitchBot公式Webhookのペイロードでは deviceType はトップレベルではなく
+    # この context 内に入る(例: "WoContact", "WoPresence")。以前はここに
+    # フィールドが無く、pydanticが未定義フィールドを黙って捨てるため
+    # ctx.deviceType が常にフォールバック(トップレベルのNone)になっていた。
+    deviceType: Optional[str] = None
     detectionState: Optional[str] = None
     brightness: Optional[str] = None
     timeOfSample: Optional[int] = None

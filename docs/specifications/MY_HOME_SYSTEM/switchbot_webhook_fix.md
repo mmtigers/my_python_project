@@ -213,7 +213,7 @@ graph TD
 | `common.send_push` の詳細仕様 | 引数の `target="discord"` や `channel="report"` がどのように処理されるか不明のため。 | `common.py` |
 | `config` 内の変数定義方法 | `LINE_CHANNEL_ACCESS_TOKEN` 等が環境変数から取得されているのか、ファイルに直書きされているのか不明のため。 | `config.py` |
 | API認証ヘッダーの生成ロジック | SwitchBot API仕様に準拠したハッシュ生成などがどのように実装されているか不明のため。 | `services/switchbot_service.py` |
-| 外部APIの例外レスポンス構造 | API側で想定外のエラーが発生した場合のステータスコードやJSON構造の詳細が不明のため。 | 各外部API仕様書 |
+| 外部APIの例外レスポンス構造 | API側で想定外のエラーが発生した場合のステータスコードやJSON構造の詳細が不明のため。（リポジトリ内を「API仕様」「openapi」等で検索したが該当ファイルは存在せず、解消不可。SwitchBot/LINE等の公式APIドキュメントを要参照） | 各外部API仕様書 |
 
 ## 相互参照による補足情報
 

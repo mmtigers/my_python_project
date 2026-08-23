@@ -151,6 +151,7 @@ class CameraConfig(BaseModel):
     user: Optional[str] = None
     password: Optional[str] = Field(None, alias="pass")
     rtsp_url: Optional[str] = None
+    enabled: bool = True
 
 class NotifySettings(BaseModel):
     power_threshold_watts: Optional[float] = None
@@ -168,7 +169,6 @@ class DeviceConfig(BaseModel):
 # 1. 環境・機能フラグ設定
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
-ENABLE_APPROVAL_FLOW: bool = os.getenv("ENABLE_APPROVAL_FLOW", "False").lower() == "true"
 ENABLE_BLUETOOTH: bool = False
 
 # ==========================================
@@ -412,9 +412,16 @@ _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "di
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# M-8-2: 以前はここ(config.py)と unified_server.py の両方に別々のCORS許可
+# オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
+# だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
+# CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8501",   # Streamlitダッシュボード
+    "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
+    "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
     FRONTEND_URL,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
@@ -422,6 +429,9 @@ if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
+# M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
+# ディスクを圧迫し得た。アバター画像用途を想定し余裕を持って10MBとする。
+UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))
 
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定
@@ -434,6 +444,45 @@ TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
 
 # NVR録画ファイルのベースディレクトリ
 NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
+
+# タイムラプス生成設定
+# (monitors/smart_timelapse_generator.py, monitors/scheduled_timelapse.py が
+#  getattr(config, "TIMELAPSE_...", デフォルト値) で参照する。以前はここに対応する
+#  定数が定義されておらず、常にハードコードされたデフォルト値へフォールバックしていた)
+from datetime import time as _dt_time
+
+TIMELAPSE_FPS_ANALYZE: int = 1
+TIMELAPSE_WIDTH: int = 320
+TIMELAPSE_HEIGHT: int = 180
+TIMELAPSE_BG_HISTORY: int = 120
+TIMELAPSE_BG_VAR_THRESH: int = 16
+TIMELAPSE_MORPH_KERNEL_SIZE: int = 3
+TIMELAPSE_MIN_AREA_THRESHOLD: int = 300
+TIMELAPSE_ROI_X: int = 0
+TIMELAPSE_ROI_Y: int = 0
+TIMELAPSE_ROI_W: int = TIMELAPSE_WIDTH
+TIMELAPSE_ROI_H: int = TIMELAPSE_HEIGHT
+TIMELAPSE_GAP_THRESH: int = 5
+TIMELAPSE_BUFFER_SEC: int = 3
+TIMELAPSE_SPEEDUP_FACTOR: int = 4
+TIMELAPSE_DEBUG_FFMPEG: bool = False
+TIMELAPSE_FAST_STREAM_COPY_MODE: bool = False
+TIMELAPSE_FONT_FILE: str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+TIMELAPSE_MAX_FILE_SIZE_MB: int = 22
+
+TIMELAPSE_CAMERAS: Dict[str, str] = {
+    "entrance": os.path.join(NVR_RECORD_DIR, "entrance"),
+    "garden": os.path.join(NVR_RECORD_DIR, "garden"),
+    "parking": os.path.join(NVR_RECORD_DIR, "parking"),
+}
+TIMELAPSE_SCHEDULES: Dict[str, tuple] = {
+    "morning": (_dt_time(7, 50), _dt_time(8, 30), _dt_time(8, 30), _dt_time(9, 0)),
+    "evening": (_dt_time(15, 0), _dt_time(16, 0), _dt_time(16, 0), _dt_time(16, 30)),
+}
+TIMELAPSE_FPS: str = "15"
+TIMELAPSE_BITRATE: str = "1500k"
+TIMELAPSE_MAXRATE: str = "2000k"
+TIMELAPSE_SEGMENT_TIME: str = "40"
 
 # ==========================================
 # 12. 保持期間・クリーンアップ設定

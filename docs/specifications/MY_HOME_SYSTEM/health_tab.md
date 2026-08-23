@@ -119,6 +119,12 @@ graph TD
 | --- | --- | --- |
 | `df_child`, `df_poop`, `df_food`の生成元・正確なスキーマ | 呼び出し元でどのように`DataFrame`が構築されるか（テーブル名、取得件数、フィルタ条件）が本ファイルからは不明。 | `dashboard.py`, `services/analysis_service.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `df_child`, `df_poop`, `df_food`の生成元・正確なスキーマ | `MY_HOME_SYSTEM/dashboard.py`と`MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`dashboard.py`60〜62行目で`df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)`、`df_poop = analysis_service.load_generic_data(config.SQLITE_TABLE_DEFECATION)`、`df_food = analysis_service.load_generic_data(config.SQLITE_TABLE_FOOD)`が呼ばれ、121行目で`health_tab.render(df_child, df_poop, df_food)`に渡される。`analysis_service.load_generic_data(table_name, limit=500)`(150〜153行目)は`SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}`を実行するのみの汎用関数であり、フィルタ条件は特になく最新500件を取得する。テーブル名は`config.py`の`SQLITE_TABLE_CHILD = "child_health_records"`(245行目)、`SQLITE_TABLE_DEFECATION = "defecation_records"`(246行目)、`SQLITE_TABLE_FOOD = "food_records"`(242行目)である。`MY_HOME_SYSTEM/current_schema.sql`で各テーブルの実スキーマを直接確認した。`child_health_records`(48〜55行目)は`id, user_id, user_name, child_name, condition, timestamp DATETIME NOT NULL`。`defecation_records`(56〜64行目)は`id, user_id, user_name, record_type("排便" or "症状"), condition, note, timestamp DATETIME NOT NULL`。`food_records`(94〜99行目)は`id, date, menu, created_at, menu_category, meal_date, meal_time_category, user_id, user_name, timestamp DATETIME`という列構成である。本ファイル(`health_tab.py`)5〜17行目の`render`関数が参照する列(`df_child`の`timestamp/child_name/condition`、`df_poop`の`timestamp/user_name/condition`、`df_food`の`timestamp/menu_category`)は、いずれもこれらのスキーマに実在する列であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/dashboard.py:60-62, 121`, `MY_HOME_SYSTEM/services/analysis_service.py:150-153`, `MY_HOME_SYSTEM/config.py:242, 245-246`, `MY_HOME_SYSTEM/current_schema.sql:48-64, 94-99` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

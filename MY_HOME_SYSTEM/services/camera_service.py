@@ -1,6 +1,8 @@
+import json
 import os
 import sys
 import subprocess
+import threading
 import time
 import urllib.parse
 import glob
@@ -24,6 +26,47 @@ HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")
 _active_processes: Dict[str, subprocess.Popen] = {}
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
+
+# VOD生成のcheck-then-act競合(同一cam_id・日付への同時リクエストで
+# ffmpegが二重起動し同一ファイルへ書き込む)を防ぐための、process_key単位ロック。
+_vod_generation_locks: Dict[str, threading.Lock] = {}
+_vod_generation_locks_guard = threading.Lock()
+
+
+def _get_vod_generation_lock(process_key: str) -> threading.Lock:
+    with _vod_generation_locks_guard:
+        lock = _vod_generation_locks.get(process_key)
+        if lock is None:
+            lock = threading.Lock()
+            _vod_generation_locks[process_key] = lock
+        return lock
+
+
+def _prune_finished_vod_processes() -> None:
+    """完了済み(poll()がNoneでない)プロセスを_active_vod_processesから除去する。
+    キーがcam_id×target_dateの組み合わせのため、剪定しないと日々増え続けて
+    無限に蓄積してしまう。"""
+    finished_keys = [key for key, proc in _active_vod_processes.items() if proc.poll() is not None]
+    for key in finished_keys:
+        _active_vod_processes.pop(key, None)
+
+
+def _mask_rtsp_url_for_log(url: str) -> str:
+    """RTSP URLの認証情報(user:pass)をログ出力用にマスクする。
+    パスワードが空文字の場合、str.replace('', '***')は文字列の全文字間に
+    '***'を挿入して破壊する(Pythonの仕様)ため、urlparseでnetloc部分のみ
+    安全に再構築する。"""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if not parsed.username and not parsed.password:
+            return url
+        host_part = parsed.hostname or ""
+        if parsed.port:
+            host_part = f"{host_part}:{parsed.port}"
+        masked_netloc = f"***:***@{host_part}" if parsed.password else f"***@{host_part}"
+        return parsed._replace(netloc=masked_netloc).geturl()
+    except Exception:
+        return "***"
 
 def init_output_dir(base_dir: str, camera_id: str) -> str:
     cam_dir = os.path.join(base_dir, camera_id)
@@ -94,13 +137,16 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
     except Exception:
         return ""
 
-    # ログ出力時のマスク処理もエンコード済みのパスワード文字列を対象とする
-    safe_pass_for_log = urllib.parse.quote(cam_conf.get('pass', ''), safe='')
-    logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始 (RTSP: {rtsp_url.replace(safe_pass_for_log, '***')})")
+    logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始 (RTSP: {_mask_rtsp_url_for_log(rtsp_url)})")
 
     cmd = [
         "nice", "-n", "15",
         "ffmpeg", "-y",
+        # -hide_banner/-loglevel error: 認証情報込みのRTSP URLが
+        # ffmpeg自身の起動バナー("Input #0, rtsp, from 'rtsp://user:pass@...'")
+        # 経由でffmpeg.logに平文出力されるのを防ぐ。
+        "-hide_banner",
+        "-loglevel", "error",
         "-rtsp_transport", "tcp",
         "-i", rtsp_url,
         "-c:v", "copy",
@@ -112,9 +158,21 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
         playlist_path
     ]
 
-    # FFmpegのエラーを追えるようにログファイルへ出力
-    log_file = open(os.path.join(cam_dir, "ffmpeg.log"), "w")
-    process = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+    # FFmpegのエラーを追えるようにログファイルへ出力。
+    # 他ローカルユーザーからの閲覧を防ぐため所有者のみ読み書き可能にする。
+    log_path = os.path.join(cam_dir, "ffmpeg.log")
+    log_file = open(log_path, "w")
+    try:
+        os.chmod(log_path, 0o600)
+    except OSError:
+        pass
+    try:
+        process = subprocess.Popen(cmd, stdout=log_file, stderr=subprocess.STDOUT)
+    finally:
+        # 子プロセスがdup()で自分のfdを持つため、親側はPopen呼び出し後に
+        # 閉じてよい。閉じないと、プロセスがクラッシュして再起動されるたびに
+        # ファイルハンドルがプロセス内に蓄積してリークする。
+        log_file.close()
     _active_processes[cam_id] = process
     return playlist_path
 
@@ -146,12 +204,23 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
     target_date 形式: YYYYMMDD (例: 20260716)
     """
     cam_id = cam_conf['id']
+    process_key = f"{cam_id}_{target_date}"
+
+    # process_key単位でロックし、以降の「実行中チェック→未実行ならPopen起動・登録」を
+    # 単一の原子的な区間にする。ロック無しだと、同一カメラ・日付への同時リクエストが
+    # どちらも「実行中でない」と判定してffmpegを二重起動し、同一ファイルへ競合書き込みし得た。
+    with _get_vod_generation_lock(process_key):
+        return _generate_record_playlist_locked(cam_conf, target_date, process_key)
+
+
+def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:
+    cam_id = cam_conf['id']
     nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
-    
+
     # NVRの保存ディレクトリ (config.NVR_RECORD_DIR が未定義の場合は環境変数やフォールバックを使用)
     nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
     search_dir = os.path.join(nvr_base_dir, nas_folder_name)
-    
+
     if not os.path.exists(search_dir):
         logger.warning(f"⚠️ [{cam_conf['name']}] 録画保存先が存在しません: {search_dir}")
         return None
@@ -168,8 +237,8 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
     concat_file_path = os.path.join(cam_dir, f"concat_{target_date}.txt")
     playlist_path = os.path.join(cam_dir, f"record_{target_date}.m3u8")
 
-    # キャッシュ：既にその日のプレイリストが存在し、ファイル更新日時が新しければそれを返す
-    process_key = f"{cam_id}_{target_date}"
+    # 完了済みプロセスを剪定してから登録状況を確認する(無限蓄積の防止)
+    _prune_finished_vod_processes()
 
     # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中の場合は処理をスキップ
     if process_key in _active_vod_processes and _active_vod_processes[process_key].poll() is None:
@@ -248,3 +317,33 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
         time.sleep(0.5)
     
     return playlist_path if os.path.exists(playlist_path) else None
+
+
+def set_camera_enabled(camera_id: str, enabled: bool) -> bool:
+    """devices.json 上の該当カメラの enabled フラグを更新し、config.CAMERAS にも反映する。
+    devices.json が存在しない、または該当カメラが見つからない場合は False を返す。"""
+    if not os.path.exists(config.DEVICES_JSON_PATH):
+        return False
+
+    with open(config.DEVICES_JSON_PATH, "r", encoding="utf-8") as f:
+        devices_data = json.load(f)
+
+    cameras = devices_data.get("cameras", [])
+    target = next((c for c in cameras if c.get("id") == camera_id), None)
+    if target is None:
+        return False
+
+    target["enabled"] = enabled
+    # temp+renameでアトミックに書き込む。直接上書きだと、書き込み途中の
+    # クラッシュ・電源断でdevices.jsonが壊れ、全カメラ設定が失われ得る。
+    tmp_path = f"{config.DEVICES_JSON_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(devices_data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, config.DEVICES_JSON_PATH)
+
+    for cam in config.CAMERAS:
+        if cam.get("id") == camera_id:
+            cam["enabled"] = enabled
+            break
+
+    return True
