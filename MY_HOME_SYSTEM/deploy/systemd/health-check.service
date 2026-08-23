@@ -1,6 +1,6 @@
 [Unit]
 Description=Post Boot Health Check Service
-After=network-online.target unified-server.service
+After=network-online.target home_system.service
 Wants=network-online.target
 
 [Service]
