@@ -16,11 +16,10 @@ sudo systemctl daemon-reload
 sudo systemctl enable health-check.service
 ```
 
-> **既知の不具合**: `After=` に指定されている `unified-server.service` というユニットは
-> 実機に存在しない(存在するのは `home_system.service`)。おそらく `home_system.service`
-> へリネームされた際に追従漏れした死んだ依存関係で、systemdはエラーにせず順序制約を
-> 無視するだけのため気づかれずに残っていた。`After=network-online.target home_system.service`
-> に修正して実機に反映し、このファイルもそれに合わせて更新すること。
+> **（修正済み）** 以前 `After=` に `unified-server.service` という実機に存在しないユニット名
+> (おそらく `home_system.service` へのリネーム前の旧名)が指定されており、死んだ依存関係に
+> なっていた(systemdはエラーにせず順序制約を無視するだけのため気づかれずに残っていた)。
+> 実機・本ファイルともに `After=network-online.target home_system.service` へ修正済み。
 
 ## home_system.service
 
