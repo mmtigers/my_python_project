@@ -8,6 +8,7 @@ import time
 import json
 import tempfile
 import fcntl
+import threading
 import numpy as np
 import cv2
 import traceback
@@ -299,36 +300,55 @@ class MotionDetector:
         frame_size = WIDTH * HEIGHT
         total_expected_frames = int(duration_sec * FPS_ANALYZE) if duration_sec else 0
 
+        # stdoutのフレーム読み取りループ中にstderrを読まないと、ffmpegがstderrへ
+        # 大量出力した際にパイプバッファ(通常64KB)が満杯になりffmpeg側がブロックし、
+        # 結果としてstdout側も進まなくなりデッドロックする。stderrは別スレッドで
+        # 並行してドレインしておく。
+        stderr_chunks: List[bytes] = []
+
+        def _drain_stderr() -> None:
+            try:
+                while True:
+                    chunk = process.stderr.read(4096)
+                    if not chunk:
+                        break
+                    stderr_chunks.append(chunk)
+            except (ValueError, OSError):
+                # 呼び出し元でstderrがcloseされた後の読み取りは無視する
+                pass
+
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
+
         try:
             while True:
                 raw_frame = process.stdout.read(frame_size)
                 if len(raw_frame) != frame_size:
                     break
-                    
+
                 frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((HEIGHT, WIDTH))
                 roi_frame = frame[ROI_Y:ROI_Y+ROI_H, ROI_X:ROI_X+ROI_W]
                 fgmask = self.fgbg.apply(roi_frame)
                 fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_OPEN, self.kernel)
                 fgmask = cv2.morphologyEx(fgmask, cv2.MORPH_CLOSE, self.kernel)
-                
+
                 contours, _ = cv2.findContours(fgmask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 if contours:
                     largest_contour = max(contours, key=cv2.contourArea)
                     largest_area = cv2.contourArea(largest_contour)
                     if largest_area > MIN_AREA_THRESHOLD:
                         records.append(MotionRecord(current_sec, largest_area, len(contours)))
-                        
+
                 current_sec += 1
                 if total_expected_frames > 0 and current_sec % max(1, int(total_expected_frames / 10)) == 0:
                     logger.info(f"解析進捗: {(current_sec / total_expected_frames) * 100:.0f}%")
-            
+
             process.wait(timeout=60)
             if process.returncode != 0:
-                err_msg = ""
-                if process.stderr is not None:
-                    err_msg = process.stderr.read().decode('utf-8', errors='ignore')
-                    if DEBUG_FFMPEG:
-                        logger.error(f"FFmpeg stderr:\n{err_msg}")
+                stderr_thread.join(timeout=5)
+                err_msg = b"".join(stderr_chunks).decode('utf-8', errors='ignore')
+                if DEBUG_FFMPEG:
+                    logger.error(f"FFmpeg stderr:\n{err_msg}")
                 raise subprocess.CalledProcessError(process.returncode, cmd, stderr=err_msg)
 
         except Exception as e:
@@ -337,8 +357,6 @@ class MotionDetector:
         finally:
             if process.stdout:
                 process.stdout.close()
-            if process.stderr:
-                process.stderr.close()
             try:
                 if process.poll() is None:
                     process.wait(timeout=5)
@@ -346,6 +364,11 @@ class MotionDetector:
                 logger.error("FFmpegプロセスの終了がタイムアウトしました。強制終了します。")
                 process.kill()
                 process.wait()
+            # プロセス終了後にstderrがEOFするのを待ってからcloseする
+            # (逆順にするとドレインスレッドがclosed fileを読んでクラッシュする)
+            stderr_thread.join(timeout=5)
+            if process.stderr:
+                process.stderr.close()
 
         motion_csv = os.path.join(work_dir, "motion.csv")
         with open(motion_csv, "w", newline="", encoding="utf-8") as f:
