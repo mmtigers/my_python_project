@@ -62,7 +62,12 @@ class TestProcessRejectQuest:
         assert result["status"] == "rejected"
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
-        assert row is None
+        # 却下しても履歴行は削除されず、status='rejected' として残ること。
+        # (以前はDELETEしていたため status='rejected' は実際には生成されず、
+        # process_complete_quest のスパムチェック `status != 'rejected'` が
+        # 常に成立する死に条件になっていた)
+        assert row is not None
+        assert row["status"] == "rejected"
 
     def test_reject_nonexistent_history_returns_404(self, isolated_db):
         with common.get_db_cursor(commit=True) as cur:
@@ -92,6 +97,39 @@ class TestProcessRejectQuest:
         with pytest.raises(HTTPException) as exc_info:
             quest_service.process_reject_quest("dad", history_id)
         assert exc_info.value.status_code == 400
+
+    def test_rejected_history_is_excluded_from_family_chronicle_total_quests(self, isolated_db):
+        """process_reject_quest が却下履歴を残す(DELETEではなくUPDATE)ようになった
+        ことで、UserService.get_family_chronicle の totalQuests(COUNT(*) FROM
+        quest_history)が却下された申請まで「達成したクエスト数」として誤集計しない
+        よう明示的な除外が必要になった。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+                "(101, 'Test', 'daily', 10, 5)"
+            )
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'approved')
+            """)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-02T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        quest_service.process_reject_quest("dad", history_id)
+
+        game_system = GameSystem()
+        chronicle = game_system.user_service.get_family_chronicle()
+        # approved 1件のみが「達成したクエスト数」に含まれ、却下された1件は含まれない
+        assert chronicle["stats"]["totalQuests"] == 1
 
 
 class TestIsWithinResetPeriod:
