@@ -87,7 +87,9 @@ class UserService:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
             total_level = sum(u['level'] for u in users) if users else 0
             total_gold = sum(u['gold'] for u in users) if users else 0
-            res = cur.execute("SELECT COUNT(*) as count FROM quest_history").fetchone()
+            # process_reject_quest が却下履歴を残す(status='rejected')ようになったため、
+            # 却下された申請を「達成したクエスト数」に含めないよう明示的に除外する。
+            res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status != 'rejected'").fetchone()
             total_quests = res['count'] if res else 0
             
             if total_level < 10: rank = "駆け出しの家族"
@@ -451,11 +453,14 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+            # 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には
+            # 生成されず、process_complete_quest のスパムチェック `status != 'rejected'`
+            # が常に成立する死に条件になっていた)。
+            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
             if hist['linked_history_id'] is not None:
-                cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
+                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
                 logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
 
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}, Reason={reason or '(未指定)'}")
@@ -891,7 +896,7 @@ class GameSystem:
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
 
-    def get_all_view_data(self) -> Dict[str, Any]:
+    def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
             for u in users:
@@ -902,11 +907,24 @@ class GameSystem:
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
 
+            # quest_master.target_user は実際の quest_users.user_id (例: 'dad')の他に、
+            # 'siblings' のようなグループ指定も取りうる。後者を calculate_quest_boost に
+            # そのまま user_id として渡すと quest_history に一致行が存在しないため、
+            # 実際の履歴に関わらずボーナスが常に0固定になっていた(実害はないが意味が誤り)。
+            # target_user が実在ユーザーでない場合は、閲覧中のユーザー(viewer_user_id)の
+            # 履歴を代表として使う。
+            known_user_ids = {u['user_id'] for u in users}
+
             for q in filtered_quests:
                 if q['target_user'] and q['target_user'] != 'all':
-                    boost = self.quest_service.calculate_quest_boost(cur, q['target_user'], q)
-                    q['bonus_gold'] = boost['gold']
-                    q['bonus_exp'] = boost['exp']
+                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
+                    if boost_user_id:
+                        boost = self.quest_service.calculate_quest_boost(cur, boost_user_id, q)
+                        q['bonus_gold'] = boost['gold']
+                        q['bonus_exp'] = boost['exp']
+                    else:
+                        q['bonus_gold'] = 0
+                        q['bonus_exp'] = 0
                 else:
                     q['bonus_gold'] = 0
                     q['bonus_exp'] = 0
