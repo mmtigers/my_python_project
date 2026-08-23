@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/routers/quest_router.py
 from fastapi import APIRouter, HTTPException, File, UploadFile
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import os
 import uuid
 import sys
@@ -35,9 +35,9 @@ def sync_master_data():
     return game_system.sync_master_data()
 
 @router.get("/data")
-def get_all_data() -> Dict[str, Any]:
+def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
-        return game_system.get_all_view_data()
+        return game_system.get_all_view_data(viewer_user_id)
     except Exception as e:
         logger.error(f"Data Fetch Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch data")

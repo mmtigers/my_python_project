@@ -254,6 +254,56 @@ class TestGetAllViewDataTargetedQuestBoost:
         assert "bonus_exp" in targeted
 
 
+class TestGetAllViewDataSharedQuestBoostViewer:
+    """
+    quest_master.target_user は実在の quest_users.user_id (例:'dad')の他に
+    'siblings' のようなグループ指定も取りうる。以前は target_user をそのまま
+    calculate_quest_boost へ user_id として渡していたため、'siblings' 指定の
+    共有クエストでは quest_history に一致するuser_id行が存在せず、実際の完了
+    履歴に関わらずボーナスが常に0になっていた(実害はないが意味が誤り)。
+    viewer_user_id(閲覧中のユーザー)を渡した場合は、そのユーザーの履歴を
+    代表として使うことを検証する。
+    """
+    def _seed_shared_quest_with_history(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child'), "
+            "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+        )
+        cur.execute(
+            "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
+            "VALUES (101, 'Shared Quest', 'daily', 'siblings', 100, 100)"
+        )
+        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        cur.execute("""
+            INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+            VALUES ('son', 101, 'Shared Quest', 100, 100, ?, 'approved')
+        """, (three_days_ago,))
+
+    def test_boost_is_always_zero_without_a_viewer(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_shared_quest_with_history(cur)
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data()
+
+        quest = next(q for q in data["quests"] if q["quest_id"] == 101)
+        assert quest["bonus_gold"] == 0
+        assert quest["bonus_exp"] == 0
+
+    def test_boost_uses_viewers_own_history_when_target_user_is_not_a_real_user(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_shared_quest_with_history(cur)
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data(viewer_user_id="son")
+
+        # days_diff=3 -> missed_days=2 -> bonus_ratio=0.2 -> 100 * 0.2 = 20
+        quest = next(q for q in data["quests"] if q["quest_id"] == 101)
+        assert quest["bonus_gold"] == 20
+        assert quest["bonus_exp"] == 20
+
+
 class TestSyncMasterData:
     """
     GameSystem.sync_master_data() の未テストだった分岐:
