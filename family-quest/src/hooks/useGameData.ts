@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
@@ -68,7 +69,7 @@ interface PurchaseResponse {
     success: boolean;
 }
 
-export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
+export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpInfo) => void) => {
     const queryClient = useQueryClient();
 
     const handleError = (actionName: string, error: unknown) => {
@@ -83,13 +84,33 @@ export const useGameData = (onLevelUp?: (info: LevelUpInfo) => void) => {
         return error instanceof Error ? error.message : undefined;
     };
 
+    // 共有クエスト(target_user='siblings'等)のボーナス計算はサーバー側で
+    // 「閲覧中のユーザー」の履歴を代表として使うため、直近の応答から現在の
+    // currentUserIdxに対応するuser_idを控えておき、次回フェッチ時に送る。
+    // (初回フェッチ時点ではまだユーザー一覧が無いため viewer 無しで取得し、
+    // 応答が届き次第このrefを更新する。queryKeyには含めないため、ユーザー切替の
+    // 度に即時再フェッチはされないが、既存のポーリングや他の操作による
+    // invalidateQueriesで数秒以内に反映される)
+    const viewerUserIdRef = useRef<string | undefined>(undefined);
+
     // 1. メインデータの取得
     const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
-        queryFn: () => apiClient.get('/api/quest/data'),
+        queryFn: () => {
+            const viewerUserId = viewerUserIdRef.current;
+            const endpoint = viewerUserId
+                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`
+                : '/api/quest/data';
+            return apiClient.get(endpoint);
+        },
         staleTime: 1000 * 30,
         refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限
     });
+
+    useEffect(() => {
+        const viewer = gameData?.users?.[currentUserIdx];
+        if (viewer) viewerUserIdRef.current = viewer.user_id;
+    }, [gameData, currentUserIdx]);
 
     // 2. 年代記データの取得
     const { data: chronicleData } = useQuery<ChronicleResponse>({
