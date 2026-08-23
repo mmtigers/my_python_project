@@ -136,15 +136,15 @@ graph TD
 | --- | --- | --- |
 | `cn` の処理仕様 | 外部ファイルに実装が存在するため | `@/lib/utils.ts` (または `.js`) |
 | `useSound` および `play` の実装仕様 | 外部ファイルに実装が存在するため | `@/hooks/useSound.ts` (または `.tsx` / `.js`) |
-| `lucide-react` の `Loader2` アイコン仕様 | 外部ライブラリであるため | `lucide-react` パッケージの実装 |
-| `framer-motion` の動作仕様 | 外部ライブラリであるため | `framer-motion` パッケージの実装 |
+| `lucide-react` の `Loader2` アイコン仕様 | 外部ライブラリであるため（`family-quest/package.json`17〜18行目付近で`"lucide-react": "^0.451.0"`への依存を確認したが、`node_modules`がリポジトリ内に存在せず`npm install`前の状態であるため、実際のアイコン実装コードはリポジトリ内を検索しても見つからず解消不可） | `lucide-react` パッケージの実装 |
+| `framer-motion` の動作仕様 | 外部ライブラリであるため（`family-quest/package.json`16行目で`"framer-motion": "^11.11.9"`への依存を確認したが、`node_modules`がリポジトリ内に存在せず`npm install`前の状態であるため、実際の実装コードはリポジトリ内を検索しても見つからず解消不可） | `framer-motion` パッケージの実装 |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `cn` の処理仕様 | `utils.md`の解析によれば、`cn`は`twMerge(clsx(inputs))`という実装であり、`clsx`で処理した結果を`tailwind-merge`のクラス競合解決に渡す関数であるとされている。ただしこれは`utils.md`側の解析結果からの補足であり、`utils.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../lib/utils.md` |
-| `useSound` および `play` の実装仕様 | `useSound.md`の解析によれば、`play`はキー（例: `tap`, `submit`等）に対応する音声ファイルパスを`SOUNDS`定数から取得し、`audioCache`（モジュールスコープの`HTMLAudioElement`キャッシュ）を再利用しながら再生し、`tap`の場合のみ音量を`0.5`に設定するとされている。`audio.play()`失敗時は`console.warn`で警告を出すのみで例外は投げないとされている。ただしこれは`useSound.md`側の解析結果からの補足であり、`useSound.ts`のソースコード自体は本ファイルの解析時点では確認していない。 | `../../hooks/useSound.md` |
+| `cn` の処理仕様 | `family-quest/src/lib/utils.ts`(全9行)を直接確認した。`cn`は`export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }`(8〜9行目)という実装であり、`clsx`で複数のクラス名候補（文字列・条件付き値等）を1つの文字列にまとめた結果を、`tailwind-merge`の`twMerge`でTailwind CSSのクラス競合解決（例: `cn("bg-red-500", "p-4", "p-2")`は末尾の`p-2`が優先され`p-4`は消える）に渡す関数であることを確認した。 | 直接ソース確認: `family-quest/src/lib/utils.ts:1-9` |
+| `useSound` および `play` の実装仕様 | `family-quest/src/hooks/useSound.ts`(全49行)を直接確認した。`SOUNDS`定数(4〜13行目)がキー（`submit`/`approve`/`clear`/`levelUp`/`medal`/`tap`/`select`/`cancel`、`select`は`submit`と、`cancel`は`tap`と同じ音声ファイルを指す）と`/quest/`配下の音声ファイルパスを対応付けており、`play`(21〜46行目)はモジュールスコープの`audioCache`（`Partial<Record<SoundKey, HTMLAudioElement>>`、18行目）にキャッシュがなければ`new Audio(path)`を生成し、`audio.currentTime = 0`で連続再生用にリセットしたうえで`audio.play()`を呼ぶ。`key === 'tap'`の場合のみ`audio.volume = 0.5`に設定する(35行目)。`audio.play()`が失敗した場合(`.catch`、38〜41行目)は`console.warn('Sound play failed:', e)`で警告を出すのみで例外は投げず、`try`ブロック自体が失敗した場合も`console.error('Audio setup error:', error)`(44行目)でログを出すのみである。 | 直接ソース確認: `family-quest/src/hooks/useSound.ts:1-49` |
 
 ## 10. 自己検証結果
 

@@ -24,6 +24,10 @@ logger = setup_logging("core.migrations")
 
 MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "migrations")
 
+# 「既に別経路(旧来の実行時ALTER等)で適用済み」と断定できる、既知のSQLiteエラー文言のみ。
+# それ以外のOperationalError(DBロック・ディスクフル・SQL誤り等)は失敗として扱う。
+_ALREADY_APPLIED_ERROR_PATTERNS = ("duplicate column", "already exists")
+
 
 def _ensure_tracking_table(conn: sqlite3.Connection) -> None:
     conn.execute("""
@@ -52,9 +56,11 @@ def apply_pending_migrations(conn: sqlite3.Connection) -> None:
 
     各マイグレーションファイルは、既に適用済みの環境（列が既に存在する等）に対して
     再実行されても致命的にならないよう ALTER TABLE を先頭に書くことを想定している。
-    「duplicate column」のような sqlite3.OperationalError は、
-    「既に別経路（旧来の実行時チェック等）で適用済み」とみなして警告ログのみ出力し、
-    バージョンを適用済みとして記録したうえで処理を継続する（起動を止めない）。
+    「duplicate column」「already exists」のように「既に別経路（旧来の実行時チェック等）で
+    適用済み」と断定できる既知のエラー文言のみ警告ログを出して適用済み扱いにする。
+    それ以外の OperationalError（DBロック・ディスクフル・SQL誤り等）は、原因不明なまま
+    「適用済み」と記録してしまうとスキーマドリフトを見逃すため、起動失敗として
+    バージョンを記録せず再送出する。
     """
     _ensure_tracking_table(conn)
     applied = _applied_versions(conn)
@@ -74,9 +80,16 @@ def apply_pending_migrations(conn: sqlite3.Connection) -> None:
             conn.commit()
             logger.info(f"✅ Migration applied: {filename}")
         except sqlite3.OperationalError as e:
-            logger.warning(
-                f"⚠️ Migration '{filename}' could not be fully applied "
-                f"(likely already applied via a different path): {e}"
-            )
-            conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (filename,))
-            conn.commit()
+            message = str(e).lower()
+            if any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):
+                logger.warning(
+                    f"⚠️ Migration '{filename}' could not be fully applied "
+                    f"(likely already applied via a different path): {e}"
+                )
+                conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (filename,))
+                conn.commit()
+                continue
+
+            conn.rollback()
+            logger.error(f"❌ Migration '{filename}' failed and was not recorded as applied: {e}")
+            raise

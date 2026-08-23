@@ -314,6 +314,14 @@ graph TD
 | 認証情報の取得ロジック | `config.SWITCHBOT_API_TOKEN` 等が静的定数なのか、動的な環境変数読み込みなのかが不明。 | `config.py` |
 | ロガーの仕様 | 出力フォーマットやログレベルが不明。 | `core/logger.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `DeviceStatusResponse` の仕様 | `models/switchbot.py`を直接確認した。`DeviceStatusResponse`(24〜28行目)は`statusCode: int`、`message: str`、`body: Dict[str, Any]`(デバイスにより中身が変わるため`Any`)の3フィールドを持つPydanticモデルであることが判明した。バリデーションエラー時に投げられる例外の型については本モデル自体には明記がなく、Pydanticの標準動作(`pydantic.ValidationError`)に依拠する設計と考えられるが、これを明示するコードは`models/switchbot.py`内には存在しない。 | 直接ソース確認: `MY_HOME_SYSTEM/models/switchbot.py:24-28` |
+| 認証情報の取得ロジック | `config.py`を直接確認した。139行目の`load_dotenv()`実行後、177〜178行目で`SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")`、`SWITCHBOT_API_SECRET: Optional[str] = os.getenv("SWITCHBOT_API_SECRET")`と定義されており、静的定数ではなく`.env`ファイル由来の環境変数を動的に読み込む設計であることが判明した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:139, 177-178` |
+| ロガーの仕様 | `core/logger.py`を直接確認した。`setup_logging(name, webhook_url=None)`(46〜86行目)は、(1) `logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')`形式のコンソール出力用`StreamHandler`(57〜60行目)、(2) `config.BASE_DIR/logs/home_system.log`に対し`TimedRotatingFileHandler(when='midnight', interval=1, backupCount=7, encoding='utf-8')`で日次ローテーションするファイル出力(62〜74行目)、(3) `ERROR`レベル以上を`config.DISCORD_WEBHOOK_ERROR`(または引数指定URL)へPOST通知する`DiscordErrorHandler`(76〜84行目、レベル`logging.ERROR`)の3種のハンドラを登録することが判明した。ロガー自体の基本レベルは`logging.INFO`(54行目)。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:46-86` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

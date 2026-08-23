@@ -19,7 +19,8 @@
 
 * FastAPIを使用したクエスト管理システム（MY_HOME_SYSTEM）のルーティング定義（コントローラー）ファイル。
 * ゲームデータ同期、クエストの完了・承認・却下・キャンセル、報酬の購入、画像アップロード、音声テスト、インベントリ管理などの各エンドポイントを提供する。
-* ビジネスロジックの大部分を外部サービス（`services.quest_service` など）に委譲しているが、画像アップロードのファイル検証・保存などは本ファイル内に実装されている。
+* ビジネスロジックの大部分を外部サービス（`services.quest_service` など）に委譲しているが、画像アップロードのファイル検証・保存などは本ファイル内に実装されている。画像アップロード(`upload_image`)は拡張子・マジックバイト検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB）を上限としたファイルサイズチェックを行い、上限超過時は書きかけのファイルを削除してHTTP 413を返す（コミット`4f3a8a1`, M-9-3修正）。
+* 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB"), `raise HTTPException(\n                status_code=413,` (行番号: 123-124 / 抜粋: "status_code=413,")
 * 装備品の購入・変更、ボスのステータス直接更新（DBへのSQL実行）、ファミリーマイレージの取得・更新、週間分析データ取得の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。これに伴い、本ファイルが直接DBアクセスを行う`common`モジュールへの依存も無くなっている。
 
 ## 3. 外部依存関係
@@ -51,8 +52,9 @@
 | `models.quest` 内の全モデル | 内部のプロパティ（スキーマ）が不明なため。 | インポート (行番号: 14-18 / 抜粋: "from models.quest import ...") |
 | `services.quest_service` 内の各サービス | 内部の実装ロジックや副作用、戻り値の型が不明なため。 | インポート (行番号: 19-21 / 抜粋: "from services.quest_service") |
 | `config.UPLOAD_DIR` | 保存先ディレクトリの具体的なパスが不明なため。 | 変数参照 (行番号: 104 / 抜粋: "config.UPLOAD_DIR") |
-| `config.SOUND_MAP` | 許可されている音声キーのリスト（マップの内容）が不明なため。 | 変数参照 (行番号: 121 / 抜粋: "req.sound_key not in ...") |
-| `sound_manager.play` | 音声再生の具体的な手段やエラー発生有無が不明なため。 | メソッド呼び出し (行番号: 124 / 抜粋: "sound_manager.play(") |
+| `config.UPLOAD_MAX_FILE_SIZE_MB` | アップロードファイルサイズ上限(MB)の実際の値・環境変数上書きの有無が不明なため。 | 変数参照 (行番号: 109 / 抜粋: "config.UPLOAD_MAX_FILE_SIZE_MB") |
+| `config.SOUND_MAP` | 許可されている音声キーのリスト（マップの内容）が不明なため。 | 変数参照 (行番号: 139 / 抜粋: "req.sound_key not in ...") |
+| `sound_manager.play` | 音声再生の具体的な手段やエラー発生有無が不明なため。 | メソッド呼び出し (行番号: 142 / 抜粋: "sound_manager.play(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -334,8 +336,8 @@
 
 ### `upload_image`
 
-* **役割**: 画像ファイルをサーバーにアップロードし、保存するエンドポイント。拡張子チェックとマジックナンバー検証を行う。
-* 根拠: ルーティング定義 (行番号: 89-117 / 抜粋: "@router.post("/upload")")
+* **役割**: 画像ファイルをサーバーにアップロードし、保存するエンドポイント。拡張子チェック、マジックナンバー検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB）を上限としたファイルサイズ検証を行う（コミット`4f3a8a1`, M-9-3修正で追加）。
+* 根拠: ルーティング定義 (行番号: 89-135 / 抜粋: "@router.post("/upload")")
 
 
 * **引数/リクエスト**: `file` (`UploadFile` 型、FastAPIの `File(...)` によりフォームデータとして受信)
@@ -343,158 +345,160 @@
 
 
 * **戻り値/レスポンス**: アップロードされた画像のURL（`{"url": "/uploads/<新しいファイル名>"}`）
-* 根拠: 戻り値 (行番号: 111 / 抜粋: "return {"url": f"/uploads/...")
+* 根拠: 戻り値 (行番号: 129 / 抜粋: "return {"url": f"/uploads/...")
 
 
 * **副作用**:
-* `config.UPLOAD_DIR` に指定されたディレクトリへのファイル書き込み（非同期ストリームチャンク書き込み）。
+* `config.UPLOAD_DIR` に指定されたディレクトリへのファイル書き込み（非同期ストリームチャンク書き込み。1MBチャンクごとに累計サイズ`total_bytes`を追跡）。
+* 累計サイズが`max_bytes`（`config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`）を超えた場合、書き込みを打ち切り、書きかけのファイルが存在すれば`os.remove`で削除する。
 * ロガーへの情報・警告・エラーログの書き込み。
-* 根拠: ファイル操作 (行番号: 106-108 / 抜粋: "async with aiofiles.open(file_path, "wb")")
+* 根拠: ファイル操作 (行番号: 109-118 / 抜粋: "async with aiofiles.open(file_path, "wb")"), `if too_large:\n            if os.path.exists(file_path):\n                os.remove(file_path)` (行番号: 120-122 / 抜粋: "os.remove(file_path)")
 
 
 * **エラーハンドリング**:
 * 拡張子が許可リスト外の場合、HTTP 400エラー送出。
 * ヘッダー検証（`validate_image_header`）に失敗した場合、HTTP 400エラー送出。
+* 累計書き込みサイズが`config.UPLOAD_MAX_FILE_SIZE_MB`を超えた場合、書きかけのファイルを削除しHTTP 413エラー送出。
 * ファイル保存中の予期せぬ例外はキャッチし、HTTP 500エラー送出。
-* 根拠: 例外処理 (行番号: 95, 100, 113-117 / 抜粋: "raise HTTPException(status_code=400...")
+* 根拠: 例外処理 (行番号: 95, 100 / 抜粋: "raise HTTPException(status_code=400..."), `raise HTTPException(\n                status_code=413,\n                detail=f"ファイルサイズが上限({config.UPLOAD_MAX_FILE_SIZE_MB}MB)を超えています",\n            )` (行番号: 120-126 / 抜粋: "status_code=413,"), `except HTTPException as he:\n        raise he\n    except Exception as e:\n        logger.error(...)\n        raise HTTPException(status_code=500...)` (行番号: 131-135 / 抜粋: "raise HTTPException(status_code=500")
 
 
 
 ### `test_sound`
 
 * **役割**: 指定されたキーに基づく音声再生テストを行うエンドポイント。
-* 根拠: ルーティング定義 (行番号: 119-125 / 抜粋: "@router.post("/test_sound")")
+* 根拠: ルーティング定義 (行番号: 137-143 / 抜粋: "@router.post("/test_sound")")
 
 
 * **引数/リクエスト**: `SoundTestRequest` (フィールドとして `sound_key` を持つ)
-* 根拠: 引数定義 (行番号: 120 / 抜粋: "req: SoundTestRequest")
+* 根拠: 引数定義 (行番号: 138 / 抜粋: "req: SoundTestRequest")
 
 
 * **戻り値/レスポンス**: 再生ステータスと再生キー（`{"status": "playing", "key": <指定キー>}`）
-* 根拠: 戻り値 (行番号: 125 / 抜粋: "return {"status": "playing"...")
+* 根拠: 戻り値 (行番号: 143 / 抜粋: "return {"status": "playing"...")
 
 
 * **副作用**: 外部関数 `sound_manager.play()` による音声の再生。
-* 根拠: メソッド呼び出し (行番号: 124 / 抜粋: "sound_manager.play(req.sound_")
+* 根拠: メソッド呼び出し (行番号: 142 / 抜粋: "sound_manager.play(req.sound_")
 
 
 * **エラーハンドリング**: `req.sound_key` が `config.SOUND_MAP` に存在しない場合、HTTP 400エラーを送出。
-* 根拠: 例外処理 (行番号: 121-122 / 抜粋: "raise HTTPException(status_code=400")
+* 根拠: 例外処理 (行番号: 139-140 / 抜粋: "raise HTTPException(status_code=400")
 
 
 
 ### `get_inventory`
 
 * **役割**: 特定ユーザーのインベントリ（所持品）情報を取得するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 127-129 / 抜粋: "@router.get("/inventory/{user_id}")")
+* 根拠: ルーティング定義 (行番号: 145-147 / 抜粋: "@router.get("/inventory/{user_id}")")
 
 
 * **引数/リクエスト**: `user_id` (`str` 型, パスパラメータ)
-* 根拠: 引数定義 (行番号: 128 / 抜粋: "def get_inventory(user_id: str):")
+* 根拠: 引数定義 (行番号: 146 / 抜粋: "def get_inventory(user_id: str):")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 129 / 抜粋: "return inventory_service.get_user")
+* 根拠: メソッド呼び出し (行番号: 147 / 抜粋: "return inventory_service.get_user")
 
 
 * **副作用**: 不明（外部関数 `inventory_service.get_user_inventory()` に依存）
-* 根拠: メソッド呼び出し (行番号: 129 / 抜粋: "return inventory_service.get_user")
+* 根拠: メソッド呼び出し (行番号: 147 / 抜粋: "return inventory_service.get_user")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 127-129 / 抜粋: "def get_inventory")
+* 根拠: 該当関数 (行番号: 145-147 / 抜粋: "def get_inventory")
 
 
 
 ### `use_item`
 
 * **役割**: アイテムを使用するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 131-133 / 抜粋: "@router.post("/inventory/use")")
+* 根拠: ルーティング定義 (行番号: 149-151 / 抜粋: "@router.post("/inventory/use")")
 
 
 * **引数/リクエスト**: `UseItemAction` (フィールドとして `user_id`, `inventory_id` を持つ)
-* 根拠: 引数定義 (行番号: 132-133 / 抜粋: "action: UseItemAction")
+* 根拠: 引数定義 (行番号: 150-151 / 抜粋: "action: UseItemAction")
 
 
 * **戻り値/レスポンス**: `UseItemResponse`
-* 根拠: レスポンス型指定 (行番号: 131 / 抜粋: "response_model=UseItemResponse")
+* 根拠: レスポンス型指定 (行番号: 149 / 抜粋: "response_model=UseItemResponse")
 
 
 * **副作用**: 不明（外部関数 `inventory_service.use_item()` に依存）
-* 根拠: メソッド呼び出し (行番号: 133 / 抜粋: "return inventory_service.use_item")
+* 根拠: メソッド呼び出し (行番号: 151 / 抜粋: "return inventory_service.use_item")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 131-133 / 抜粋: "def use_item")
+* 根拠: 該当関数 (行番号: 149-151 / 抜粋: "def use_item")
 
 
 
 ### `consume_item`
 
 * **役割**: アイテムを消費（承認者が処理）するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 135-137 / 抜粋: "@router.post("/inventory/consume")")
+* 根拠: ルーティング定義 (行番号: 153-155 / 抜粋: "@router.post("/inventory/consume")")
 
 
 * **引数/リクエスト**: `ConsumeItemAction` (フィールドとして `approver_id`, `inventory_id` を持つ)
-* 根拠: 引数定義 (行番号: 136-137 / 抜粋: "action: ConsumeItemAction")
+* 根拠: 引数定義 (行番号: 154-155 / 抜粋: "action: ConsumeItemAction")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 137 / 抜粋: "return inventory_service.consume_")
+* 根拠: メソッド呼び出し (行番号: 155 / 抜粋: "return inventory_service.consume_")
 
 
 * **副作用**: 不明（外部関数 `inventory_service.consume_item()` に依存）
-* 根拠: メソッド呼び出し (行番号: 137 / 抜粋: "return inventory_service.consume_")
+* 根拠: メソッド呼び出し (行番号: 155 / 抜粋: "return inventory_service.consume_")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 135-137 / 抜粋: "def consume_item")
+* 根拠: 該当関数 (行番号: 153-155 / 抜粋: "def consume_item")
 
 
 
 ### `cancel_item_usage`
 
 * **役割**: アイテムの使用をキャンセルするエンドポイント。
-* 根拠: ルーティング定義 (行番号: 139-141 / 抜粋: "@router.post("/inventory/cancel")")
+* 根拠: ルーティング定義 (行番号: 157-159 / 抜粋: "@router.post("/inventory/cancel")")
 
 
 * **引数/リクエスト**: `UseItemAction` (フィールドとして `user_id`, `inventory_id` を持つ)
-* 根拠: 引数定義 (行番号: 140-141 / 抜粋: "action: UseItemAction")
+* 根拠: 引数定義 (行番号: 158-159 / 抜粋: "action: UseItemAction")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 141 / 抜粋: "return inventory_service.cancel_")
+* 根拠: メソッド呼び出し (行番号: 159 / 抜粋: "return inventory_service.cancel_")
 
 
 * **副作用**: 不明（外部関数 `inventory_service.cancel_usage()` に依存）
-* 根拠: メソッド呼び出し (行番号: 141 / 抜粋: "return inventory_service.cancel_")
+* 根拠: メソッド呼び出し (行番号: 159 / 抜粋: "return inventory_service.cancel_")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 139-141 / 抜粋: "def cancel_item_usage")
+* 根拠: 該当関数 (行番号: 157-159 / 抜粋: "def cancel_item_usage")
 
 
 
 ### `get_admin_pending_inventory`
 
 * **役割**: 管理者向けに、承認待ちのインベントリアイテム一覧を取得するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 143-145 / 抜粋: "@router.get("/inventory/admin/pending")")
+* 根拠: ルーティング定義 (行番号: 161-163 / 抜粋: "@router.get("/inventory/admin/pending")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 144 / 抜粋: "def get_admin_pending_inventory():")
+* 根拠: 関数定義 (行番号: 162 / 抜粋: "def get_admin_pending_inventory():")
 
 
 * **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 145 / 抜粋: "return inventory_service.get_")
+* 根拠: メソッド呼び出し (行番号: 163 / 抜粋: "return inventory_service.get_")
 
 
 * **副作用**: 不明（外部関数 `inventory_service.get_pending_items()` に依存）
-* 根拠: メソッド呼び出し (行番号: 145 / 抜粋: "return inventory_service.get_")
+* 根拠: メソッド呼び出し (行番号: 163 / 抜粋: "return inventory_service.get_")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 143-145 / 抜粋: "def get_admin_pending_inventory():")
+* 根拠: 該当関数 (行番号: 161-163 / 抜粋: "def get_admin_pending_inventory():")
 
 
 
@@ -516,12 +520,19 @@ flowchart TD
         D -- False --> G("HTTP 400エラー(画像として認識不可)")
         F --> H("UUIDで新しいファイル名を生成")
         H --> I("保存先パス(config.UPLOAD_DIR)を作成")
-        I --> J("チャンク(1MB)単位で<br>非同期書き込み")
-        J --> K(ロガーに書き込み)
+        I --> J{"次のチャンク(1MB)を<br>読み込めるか?"}
+        J -- No(EOF) --> O{"too_large?"}
+        J -- Yes --> N("total_bytes += チャンク長")
+        N --> N2{"total_bytes ><br>config.UPLOAD_MAX_FILE_SIZE_MB?"}
+        N2 -- Yes --> N3("too_large = True") --> O
+        N2 -- No --> K2("チャンクを非同期書き込み") --> J
+        O -- Yes --> P("書きかけファイルを削除<br>(os.remove)") --> Q("HTTP 413エラー(サイズ超過)")
+        O -- No --> K(ロガーに書き込み)
         K --> L(画像のURLを返却)
         L --> M(End: upload_image)
         E --> M
         G --> M
+        Q --> M
     end
 
 ```
@@ -549,6 +560,7 @@ graph TD
     subgraph Config ["config"]
         CF1("UPLOAD_DIR")
         CF2("SOUND_MAP")
+        CF3("UPLOAD_MAX_FILE_SIZE_MB")
     end
 
     subgraph Sound ["sound_manager"]
@@ -565,6 +577,7 @@ graph TD
     Router -->|Play Sound| Sound
     
     Router -->|Direct Write| FS
+    Router -->|Direct Delete<br>(サイズ超過時)| FS
 
 ```
 
@@ -574,12 +587,13 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `services/quest_service.py` | ルーターの各エンドポイントの大部分がこのファイル内のサービス（`game_system`, `quest_service` など）に処理を委譲しており、実際のビジネスロジックや副作用、DBへの書き込み処理を特定するために必須であるため。 | インポート (行番号: 19-21) および各メソッドの呼び出し |
 | 高 | `models/quest.py` | エンドポイントの引数と戻り値の型定義（Pydanticモデル）が含まれており、APIが要求するペイロード構造と返却するレスポンス構造を明確にするために必要なため。 | インポート (行番号: 14-18) |
-| 中 | `config.py` | 画像の保存先パス（`UPLOAD_DIR`）や、テスト可能な音声キー（`SOUND_MAP`）の具体的な内容を確認するため。 | インポート (行番号: 9) および利用 (行番号: 104, 121) |
+| 中 | `config.py` | 画像の保存先パス（`UPLOAD_DIR`）、アップロードサイズ上限（`UPLOAD_MAX_FILE_SIZE_MB`）や、テスト可能な音声キー（`SOUND_MAP`）の具体的な内容を確認するため。 | インポート (行番号: 9) および利用 (行番号: 104, 109, 139) |
 
 ## 8. 保守上の注意点
 
 * `get_all_data` において広範な `Exception` でエラーをキャッチしており、捕捉した例外をそのままHTTP 500エラーとして送出している。
-* `upload_image` において、`File(...)` を使用してメモリと一時ファイル間でストリーミング書き込み（`1024 * 1024` バイトのチャンクサイズ）を行っている。
+* `upload_image` において、`File(...)` を使用してメモリと一時ファイル間でストリーミング書き込み（`1024 * 1024` バイトのチャンクサイズ）を行っている。コミット`4f3a8a1`（M-9-3修正）以降は書き込みながら累計サイズ`total_bytes`を追跡し、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可）を超えた時点で書き込みを打ち切り、書きかけのファイルを削除してHTTP 413を返す。判定はチャンク単位の累計値のみで行われ、`Content-Length`ヘッダ等によるアップロード開始前の事前拒否は行っていない。
+* 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `common.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
 
 ## 9. 不明事項一覧
@@ -589,6 +603,7 @@ graph TD
 | APIリクエスト/レスポンスのスキーマ | `QuestAction` や `SyncResponse` などのプロパティ構造がファイル内に定義されていないため。 | `models/quest.py` |
 | ビジネスロジックの詳細 | 各エンドポイントにおけるDB操作や外部連携などの実際の処理が別モジュールに委譲されているため。 | `services/quest_service.py` および内部で利用されているモジュール |
 | 画像アップロード先のパス | 保存先ディレクトリが変数で指定されているため。 | `config.py` |
+| アップロードファイルサイズ上限(MB)の実際の値 | `config.UPLOAD_MAX_FILE_SIZE_MB`が変数で指定されているため。 | `config.py` |
 | 許可されている音声キー一覧 | サウンドマップが別ファイルで定義されているため。 | `config.py` |
 | 音声再生処理の挙動 | 再生時のエラー有無や非同期・同期の挙動が不明なため。 | `sound_manager.py` |
 
@@ -596,10 +611,12 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| APIリクエスト/レスポンスのスキーマ | `quest.md`の解析によれば、`QuestAction`(`user_id`, `quest_id`)、`SyncResponse`(`status`, `message`)等、本ファイルがインポートする全モデルのフィールド構成が判明した。 | quest.md |
-| ビジネスロジックの詳細 | `quest_service.md`の解析によれば、`quest_service.process_complete_quest`はプロセス内ロックで二重加算を防止し、子供ユーザーの完了報告は`pending`状態で保存(兄妹連携クエストの場合はカスケード処理)、大人ユーザーは即時報酬適用となる設計であることが判明した。 | quest_service.md |
-| 画像アップロード先のパス / 許可されている音声キー一覧 | `config.md`の解析によれば、`config.py`はディレクトリ検証・作成を行う`verify_and_initialize_storage`等の関数を持つモジュールであることが判明したが、`UPLOAD_DIR`や`SOUND_MAP`個々の実際の値は`config.md`自体でも確認できていない。 | config.md |
-| 音声再生処理の挙動 | `sound_manager.md`の解析によれば、`sound_manager.play`は`subprocess.Popen`による非同期再生を行い、`OSError`/`Exception`発生時もログ出力のみでシステムを停止させないFail-Soft設計であることが判明した。 | sound_manager.md |
+| APIリクエスト/レスポンスのスキーマ | `MY_HOME_SYSTEM/models/quest.py`(全118行)を直接確認した。`QuestAction`(50〜52行目、`user_id: str, quest_id: int`)、`SyncResponse`(77〜79行目、`status: str, message: str`)、`CompleteResponse`(81〜88行目、`status, leveledUp, newLevel, earnedGold, earnedExp, earnedMedals=0, message`)、`ApproveAction`(62〜67行目、`approver_id, history_id, reason(任意)`)等、本ファイルがインポートする全13モデル(14〜17行目)のフィールド構成を確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/models/quest.py:9-118` |
+| ビジネスロジックの詳細 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`process_complete_quest`(202〜206行目)は`_get_completion_lock((user_id, quest_id))`(45〜54行目で定義される`Dict[Tuple[str,int], threading.Lock]`ベースのプロセス内ロック)を取得してから`_process_complete_quest_locked`(208〜261行目)を実行し、同一ユーザー・同一クエストへの多重リクエストによる二重加算を防止する設計であることを確認した。`_process_complete_quest_locked`内では、`user['role'] == ROLE_CHILD`の場合(250行目)、`target_user == 'siblings'`ならカスケード処理の`_process_coop_quest_completion`(252行目)、それ以外は`status='pending'`で`quest_history`へ`INSERT`(254〜257行目)する。大人ユーザーの場合の即時報酬適用パスは261行目以降(本抜粋範囲外)に続くことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:45-54, 202-261` |
+| 画像アップロード先のパス | `MY_HOME_SYSTEM/routers/quest_router.py`104行目の`file_path = os.path.join(config.UPLOAD_DIR, new_filename)`が参照する`config.UPLOAD_DIR`を`MY_HOME_SYSTEM/config.py`431行目で直接確認した。`UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")`であり、保存先は`{BASE_DIR}/uploads`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:431`（参考: `MY_HOME_SYSTEM/routers/quest_router.py:104`） |
+| アップロードファイルサイズ上限(MB)の実際の値 | `MY_HOME_SYSTEM/routers/quest_router.py`109行目の`max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`が参照する`config.UPLOAD_MAX_FILE_SIZE_MB`を`MY_HOME_SYSTEM/config.py`432〜434行目で直接確認した。`UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))`であり、既定値10MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可能であることを確認した。直前のコメント(432〜433行目)に「アバター画像用途を想定し余裕を持って10MBとする」との設計意図の記載があることも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:432-434`（参考: `MY_HOME_SYSTEM/routers/quest_router.py:109`） |
+| 許可されている音声キー一覧 | `MY_HOME_SYSTEM/routers/quest_router.py`139〜140行目の`if req.sound_key not in config.SOUND_MAP:`が参照する`config.SOUND_MAP`を`MY_HOME_SYSTEM/config.py`504〜510行目で直接確認した。`{"level_up": "level_up.mp3", "quest_clear": "quest_clear.mp3", "medal_get": "medal_get.mp3", "submit": "submit.mp3", "approve": "approve.mp3"}`の5キーであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:504-510`（参考: `MY_HOME_SYSTEM/routers/quest_router.py:139-140`） |
+| 音声再生処理の挙動 | `MY_HOME_SYSTEM/core/sound_manager.py`の`play(event_key)`(12〜63行目)を直接確認した。`config.SOUND_MAP.get(event_key)`でファイル名を解決し、`config.SOUND_DIR`配下の存在確認・`config.SOUND_PLAYER_CMD`の存在確認(`shutil.which`)を経た上で、`subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)`(53〜57行目)により非同期(Fire and Forget、戻り値を待たない)で再生することを確認した。`OSError`(58〜60行目)および`Exception`全般(61〜63行目)を捕捉してログ出力のみに留め、例外を上位に伝播させないFail-Soft設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/sound_manager.py:12-63` |
 
 ## 10. 自己検証結果
 

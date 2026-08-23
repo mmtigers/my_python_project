@@ -157,16 +157,12 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:8501",
-    "http://192.168.1.200:5173", 
-    "https://m-mhts.com"        # 👈 Cloudflareの公開ドメインを追加
-]
-
+# M-8-2: 許可オリジンのリストは config.CORS_ORIGINS に一本化した
+# (以前はここに別のハードコードされたリストがあり、config.py側の設定や
+# ALLOW_ALL_ORIGINS環境変数を変更してもCORS設定に反映されなかった)。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=config.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

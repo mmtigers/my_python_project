@@ -26,37 +26,47 @@ def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict: 路線名をキーとしたステータス情報
     """
+    # Low修正: 取得失敗時に「平常運転」をデフォルトとして返すと、実際には
+    # 遅延情報を確認できていないだけなのに画面上は「異常なし」に見えてしまい、
+    # 遅延見逃しに直結する。取得できていない状態(is_unavailable=True)を
+    # 明示的に区別し、呼び出し元で「情報取得不可」として表示できるようにする。
     results: Dict[str, Dict[str, Any]] = {
-        "宝塚線": {"status": "🟢 平常運転", "detail": "遅れはありません", "is_delay": False, "is_suspended": False},
-        "神戸線": {"status": "🟢 平常運転", "detail": "遅れはありません", "is_delay": False, "is_suspended": False}
+        "宝塚線": {"status": "⚪ 情報取得不可", "detail": "運行情報を確認できませんでした", "is_delay": False, "is_suspended": False, "is_unavailable": True},
+        "神戸線": {"status": "⚪ 情報取得不可", "detail": "運行情報を確認できませんでした", "is_delay": False, "is_suspended": False, "is_unavailable": True}
     }
-    
+
     try:
         resp = requests.get(JR_WEST_JSON_URL, timeout=5)
         if resp.status_code == 200:
             data = resp.json()
+            # APIから正常に応答が得られた時点で、各路線を一旦「確認済み・平常運転」に
+            # 更新する(遅延情報が含まれる路線は下のループで上書きされる)。
+            for name in results:
+                results[name] = {"status": "🟢 平常運転", "detail": "遅れはありません", "is_delay": False, "is_suspended": False, "is_unavailable": False}
+
             # APIレスポンス構造: {"lines": { "G": {...}, "A": {...} }}
             lines = data.get("lines", {})
-            
+
             for line_id, info in lines.items():
                 target_name: str = ""
                 if line_id == "G": target_name = "宝塚線"
                 elif line_id == "A": target_name = "神戸線"
-                
+
                 if target_name:
                     status_text: str = info.get("status", "情報あり")
                     detail_text: str = info.get("text", "詳細情報なし")
                     is_suspended: bool = "見合" in status_text or "運休" in status_text
-                    
+
                     results[target_name]["status"] = "🔴 " + status_text
                     results[target_name]["detail"] = detail_text
                     results[target_name]["is_delay"] = True
                     results[target_name]["is_suspended"] = is_suspended
-                    
+
     except Exception as e:
         logger.error(f"JR Traffic API Error: {e}")
-        # エラー時はデフォルト(平常運転)を返すことでシステムを止めない
-        
+        # フェイルソフト: 取得不可のままデフォルト(is_unavailable=True)を返す。
+        # 「平常運転」と偽らないことで遅延見逃しを防ぐ。
+
     return results
 
 def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "長岡京") -> Dict[str, Any]:

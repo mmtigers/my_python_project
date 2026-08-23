@@ -59,7 +59,12 @@ def sync_fallback_to_nas(local_dir: Path, nas_dir: Path) -> None:
         for item in local_dir.iterdir():
             target_path = nas_dir / item.name
             
-            # 既存データの上書きを防ぐための簡単なマージ処理
+            # Low: 以前は「既存データの上書きを防ぐための簡単なマージ処理」とコメントされて
+            # いたが、実際には copy2()/copytree(..., dirs_exist_ok=True) はいずれも
+            # target_path に同名の既存データがあっても無条件に上書きする(上書きを
+            # 防ぐ判定はしていない)。フォールバック中に書かれたローカルデータの方が
+            # NAS側の対応データより新しい前提のため、この上書き自体は意図した挙動。
+            # コメントを実際の挙動に合わせて修正する。
             if item.is_file():
                 shutil.copy2(item, target_path)
                 item.unlink()

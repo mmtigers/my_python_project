@@ -174,6 +174,16 @@ graph TD
 | `useSettings`フック側でProviderの外から呼び出された場合の挙動 | 本ファイルには`useSettings`の実装が存在しないため | `./useSettings.ts` |
 | `SettingsProvider`がアプリ内でどの階層・順序でマウントされているか | 本ファイルはコンポーネント定義のみで呼び出し元の情報を含まないため | `../../main.tsx` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `DEFAULT_SETTINGS`の具体的な値 | `family-quest/src/context/settingsShared.ts:50-54`を直接確認した。`DEFAULT_SETTINGS`は`{ density: 'comfortable', iconFirstUserIds: [], userThemeColors: {} }`という値である。 | 直接ソース確認: `family-quest/src/context/settingsShared.ts:50-54` |
+| `SettingsState`/`SettingsContextValue`の完全な型形状 | `family-quest/src/context/settingsShared.ts:41-62`を直接確認した。`SettingsState`（41〜48行目）は`density: Density`（`'comfortable' \| 'compact'`、8行目）、`iconFirstUserIds: string[]`、`userThemeColors: Record<string, ThemeColorKey>`（`ThemeColorKey`は19行目で`THEME_COLORS`のkeyのユニオン型）を持つ。`SettingsContextValue`（58〜62行目）は`SettingsState`を継承し、`setDensity: (density: Density) => void`、`toggleIconFirstUser: (userId: string) => void`、`setUserThemeColor: (userId: string, color: ThemeColorKey) => void`の3関数を追加で持つ。 | 直接ソース確認: `family-quest/src/context/settingsShared.ts:8-19, 41-62` |
+| `SETTINGS_STORAGE_KEY`の実際の文字列値 | `family-quest/src/context/settingsShared.ts:56`を直接確認した。`export const SETTINGS_STORAGE_KEY = 'familyQuest.settings.v1';`である。 | 直接ソース確認: `family-quest/src/context/settingsShared.ts:56` |
+| `useSettings`フック側でProviderの外から呼び出された場合の挙動 | `family-quest/src/context/useSettings.ts:4-8`を直接確認した。`useSettings()`は`useContext(SettingsContext)`の結果が`null`（`SettingsContext`は`settingsShared.ts:64`で`createContext<SettingsContextValue \| null>(null)`と定義されており、Provider外では`null`のまま）の場合、`throw new Error('useSettings は SettingsProvider の内側で使ってください');`という日本語メッセージの例外を送出する。 | 直接ソース確認: `family-quest/src/context/useSettings.ts:4-8`（参考: `family-quest/src/context/settingsShared.ts:64`） |
+| `SettingsProvider`がアプリ内でどの階層・順序でマウントされているか | `family-quest/src/main.tsx`を直接確認した。URLパスが`/camera`を含まない通常のFamily Quest本体（22, 28, 32〜38行目の分岐）では、`<SettingsProvider><ToastProvider><App /></ToastProvider></SettingsProvider>`という順序でネストされ、`SettingsProvider`が最も外側（`ToastProvider`より外）にマウントされる。一方、URLパスに`/camera`を含む場合（12, 28〜31行目）は`CameraDashboard`のみが`Suspense`でレンダリングされ、`SettingsProvider`/`ToastProvider`のいずれもマウントされない。 | 直接ソース確認: `family-quest/src/main.tsx:12, 22, 28-38` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

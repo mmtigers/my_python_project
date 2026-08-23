@@ -161,6 +161,13 @@ graph TD
 | `active`/`onChange`に実際渡される値・処理内容（タブ切り替え時にどの画面コンポーネントが表示されるか） | 本ファイルはpropsの受け取り側のみであり、呼び出しコンテキストは含まれていないため | `../../../App.tsx` |
 | 旧「上部stickyタブ」「ヘッダーの記録ボタン」実装が他ファイルに残存しているか | 本ファイルのコメント内で言及されているのみで、他ファイルの現状は確認できないため | `../../../App.tsx`, `./Header.tsx` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `active`/`onChange`に実際渡される値・処理内容（タブ切り替え時にどの画面コンポーネントが表示されるか） | `family-quest/src/App.tsx`を直接確認した。`BottomNav`は`layoutMode === 'portrait'`の場合のみレンダリングされ(479〜484行目)、`active={viewMode === 'familyLog' ? 'familyLog' : activeTab}`（`viewMode`は`'main'|'familyLog'`、`activeTab`は`'quest'|'shop'|'inventory'`の状態）、`onChange={handleBottomNavChange}`が渡される。`handleBottomNavChange(tab: BottomNavTab)`(352〜360行目)は`play('tap')`を鳴らしたうえで、`tab === 'familyLog'`なら`setViewMode('familyLog')`（`FamilyLog`コンポーネントが描画される）、それ以外は`setViewMode('main')`かつ`setActiveTab(tab)`とし、`quest`/`shop`/`inventory`いずれかのタブに応じて`QuestList`/`RewardShop`/`InventoryList`が縦画面メイン領域(443〜468行目)に切り替え表示される。 | 直接ソース確認: `family-quest/src/App.tsx:352-360, 443-484` |
+| 旧「上部stickyタブ」「ヘッダーの記録ボタン」実装が他ファイルに残存しているか | `family-quest/src/App.tsx`(全526行)および`family-quest/src/components/layout/Header.tsx`(全176行)を直接確認したが、いずれのファイルにも「上部stickyタブ」に相当するsticky配置のタブUIや、`BottomNav`とは別に独立した「記録」ボタンの実装は見つからなかった。`Header.tsx`にはユーザー切替行(94〜134行目)・記録ボタン(`onLogSwitch`、142〜168行目、`hideLogSwitcher`propで縦画面時は非表示)・ホームボタン(69〜91行目、`showBackToMain`prop)が存在するが、いずれも現行の統一ナビゲーション設計(コメント12〜14, 16〜18, 19〜22行目)の一部として実装されており、旧構造の残存コードは確認できなかった。 | 直接ソース確認: `family-quest/src/App.tsx:1-526`, `family-quest/src/components/layout/Header.tsx:1-176` |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

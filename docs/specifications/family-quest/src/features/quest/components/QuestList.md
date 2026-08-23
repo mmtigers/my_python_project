@@ -19,11 +19,13 @@
 
 ## 2. ファイルの概要
 
-このファイルは、クエストのリスト（`QuestList`）および個別のクエスト（`QuestItem`）を画面に描画するUIコンポーネントを提供する。`QuestList`は`quests`をターゲット（役割/ユーザー個別）・曜日で絞り込み、共通関数`getQuestLockState`によるステータススコアとボーナス量・IDでソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に振り分け、`framer-motion`によるアニメーション付きで`QuestItem`のリストとして描画する。完了済み・未開放クエストは既定で折りたたまれ、`showDoneAndLocked`ステートのトグルボタンで開閉できる。`panelMode`propが真の場合、横画面4人表示（`FamilyDashboard`）のパネル内で使うことを想定し、ビューポート幅基準の`md:`ブレークポイントに依存しない、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示に切り替える。`iconFirst`propが真の場合、非識字年齢の子ども向けにアイコンを大きく・説明文を非表示にした表示にする。`QuestItem`側では、完了済み・申請中クエストの取消は誤操作防止のため「長押し」（`useLongPress`）でのみ発火し、通常タップは新規の完了操作にのみ作用する。
+このファイルは、クエストのリスト（`QuestList`）および個別のクエスト（`QuestItem`）を画面に描画するUIコンポーネントを提供する。`QuestList`は`quests`をターゲット（役割/ユーザー個別/`siblings`＝子ども全員）・曜日で絞り込み、共通関数`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に振り分け、`framer-motion`によるアニメーション付きで`QuestItem`のリストとして描画する。完了済み・未開放クエストは既定で折りたたまれ、`showDoneAndLocked`ステートのトグルボタンで開閉できる。`panelMode`propが真の場合、横画面4人表示（`FamilyDashboard`）のパネル内で使うことを想定し、ビューポート幅基準の`md:`ブレークポイントに依存しない、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示に切り替える。`iconFirst`propが真の場合、非識字年齢の子ども向けにアイコンを大きく・説明文を非表示にした表示にする。`QuestItem`側では、完了済み・申請中クエストの取消は誤操作防止のため「長押し」（`useLongPress`）でのみ発火し、通常タップは新規の完了操作にのみ作用する。
 * 根拠: `export default function QuestList` (行番号: 285 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {")
 * 根拠: `const QuestItem: React.FC` (行番号: 37 / 抜粋: "const QuestItem: React.FC<{")
 * 根拠: `panelMode`/`iconFirst`のコメント (行番号: 17〜23 / 抜粋: "// 横画面4人表示のパネル内で使うためのモード。\n    // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には\n    // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。\n    panelMode?: boolean;\n    // アイコン主体・文字量を絞った表示にするか(非識字年齢の子ども向け)。\n    // 説明文を非表示にし、アイコンをより大きく見せる。\n    iconFirst?: boolean;")
-* 根拠: 完了済み/申請中の折りたたみと長押し取消 (行番号: 71〜73, 337〜338行目 / 抜粋: "// 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;", "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。")
+* 根拠: 完了済み/申請中の折りたたみと長押し取消 (行番号: 71〜73, 344〜345行目 / 抜粋: "// 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;", "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。")
+* 根拠: `siblings`ターゲット対応 (行番号: 293〜302行目、H-8バグ修正 / 抜粋: "if (q.target === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (currentUser.role !== 'role_child') return false;\n                } else if (q.target.startsWith('role_')) {")
+* 根拠: ソートの最終タイブレーク修正 (行番号: 336〜340行目、M-6-5バグ修正 / 抜粋: "// M-6-5バグ修正: 実カラムはquest_idであり、idは常にundefinedのため\n            // (b.id as number) - (a.id as number) は常にNaNになり並び順が不定だった。\n            const idA = Number(a.quest_id ?? a.id ?? 0);\n            const idB = Number(b.quest_id ?? b.id ?? 0);\n            return idB - idA;")
 
 ## 3. 外部依存関係
 
@@ -94,20 +96,20 @@
 
 ### `QuestList`
 
-* **役割**: 受け取ったクエスト一覧を（ターゲット、曜日で）フィルタリングし、`getQuestLockState`によるステータススコアとボーナス量・IDでソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。
-* 根拠: `export default function QuestList` (行番号: 285〜427 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {")
-* 根拠: `activeQuests`/`doneOrLockedQuests`への振り分け (行番号: 337〜351 / 抜粋: "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。\n    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。\n    const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
-* 根拠: `listContainerClass`/`headerClass`の分岐 (行番号: 353〜358 / 抜粋: "const listContainerClass = panelMode\n        ? 'space-y-2 animate-in fade-in duration-300'\n        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 ...';")
-* 根拠: 折りたたみボタン (行番号: 408〜416 / 抜粋: "<button\n                        onClick={() => setShowDoneAndLocked(v => !v)}\n                        className=\"w-full min-h-[44px] flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-black/20 hover:bg-black/30 rounded-lg py-2 transition-colors\"\n                    >")
+* **役割**: 受け取ったクエスト一覧を（ターゲット、曜日で）フィルタリングし、`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。
+* 根拠: `export default function QuestList` (行番号: 285〜434 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {")
+* 根拠: `activeQuests`/`doneOrLockedQuests`への振り分け (行番号: 344〜358 / 抜粋: "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。\n    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。\n    const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
+* 根拠: `listContainerClass`/`headerClass`の分岐 (行番号: 360〜365 / 抜粋: "const listContainerClass = panelMode\n        ? 'space-y-2 animate-in fade-in duration-300'\n        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 ...';")
+* 根拠: 折りたたみボタン (行番号: 415〜423 / 抜粋: "<button\n                        onClick={() => setShowDoneAndLocked(v => !v)}\n                        className=\"w-full min-h-[44px] flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-black/20 hover:bg-black/30 rounded-lg py-2 transition-colors\"\n                    >")
 
 * **引数/リクエスト**: `QuestListProps` (`{ quests: Quest[], completedQuests: QuestHistory[], pendingQuests: QuestHistory[], currentUser: User, onQuestClick: (quest: Quest) => void, panelMode?: boolean, iconFirst?: boolean }`)
 * 根拠: インターフェース定義および引数 (行番号: 11〜24, 285 / 抜粋: "interface QuestListProps {")
 
 * **戻り値/レスポンス**: ReactElement（JSX）
-* 根拠: `return` 文 (行番号: 386〜426 / 抜粋: "return (\n        <div className={listContainerClass}>")
+* 根拠: `return` 文 (行番号: 393〜433 / 抜粋: "return (\n        <div className={listContainerClass}>")
 
 * **副作用**: なし（`useMemo`によるフィルタ・ソート・振り分け結果のメモ化と、`useState`による`showDoneAndLocked`（折りたたみ開閉）の管理のみで、外部API呼び出しやDOM直接操作は存在しない）
-* 根拠: `useMemo` ブロック (行番号: 290〜335, 339〜351 / 抜粋: "const sortedQuests = useMemo(() => {", "const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
+* 根拠: `useMemo` ブロック (行番号: 290〜342, 346〜358 / 抜粋: "const sortedQuests = useMemo(() => {", "const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
 
 * **エラーハンドリング**: なし
 * 根拠: 関数内に `try-catch` ブロック等が存在しない。
@@ -233,8 +235,12 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `QuestList`内のソート用コンパレータ（`getStatusScore`、行番号311〜320）および`activeQuests`/`doneOrLockedQuests`への振り分け（行番号339〜351）は、Reactのコールバック内（`Array.sort`や単純なfor-of的処理）からはHooksを呼び出せないため、`useQuestStatus`フックと同じ判定ロジックを共有する素関数`getQuestLockState`を`../hooks/useQuestStatus`からインポートして直接呼び出している。ロック・申請中・完了の判定基準を変更する場合は、`useQuestStatus`と`getQuestLockState`の両方の実装（同一ファイル内であることが望ましい）を確認する必要がある。
-* 根拠: [コメント] (行番号: 308〜310 / 抜粋: "// ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み\n            // （ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約。\n            //  Hooksが使えないコンパレータからも直接呼べる）")
+* `QuestList`内のソート用コンパレータ（`getStatusScore`、行番号314〜323）および`activeQuests`/`doneOrLockedQuests`への振り分け（行番号346〜358）は、Reactのコールバック内（`Array.sort`や単純なfor-of的処理）からはHooksを呼び出せないため、`useQuestStatus`フックと同じ判定ロジックを共有する素関数`getQuestLockState`を`../hooks/useQuestStatus`からインポートして直接呼び出している。ロック・申請中・完了の判定基準を変更する場合は、`useQuestStatus`と`getQuestLockState`の両方の実装（同一ファイル内であることが望ましい）を確認する必要がある。
+* 根拠: [コメント] (行番号: 311〜313 / 抜粋: "// ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み\n            // （ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約。\n            //  Hooksが使えないコンパレータからも直接呼べる）")
+* ソートの最終タイブレーク（同一ステータススコア・同一ボーナス合計の場合）は以前`(b.id as number) - (a.id as number)`という実カラムに存在しない`id`を参照しており、実際には`quest_id`カラムを使うべきところ`id`が常に`undefined`のため`NaN`になり並び順が不定だったバグ（M-6-5）があった。修正後は`quest_id`（無ければ`id`にフォールバック）を`Number()`で数値化して比較するようになった。
+* 根拠: (行番号: 336〜340行目 / 抜粋: "// M-6-5バグ修正: 実カラムはquest_idであり、idは常にundefinedのため\n            // (b.id as number) - (a.id as number) は常にNaNになり並び順が不定だった。\n            const idA = Number(a.quest_id ?? a.id ?? 0);\n            const idB = Number(b.quest_id ?? b.id ?? 0);\n            return idB - idA;")
+* ターゲットフィルタ（`q.target`）は`'all'`/`role_`プレフィックス/ユーザーID完全一致に加え、`'siblings'`（対象は`role_child`全員）を明示的に分岐している。以前は`'siblings'`がどの条件にも一致せず全ユーザーから除外され、バックエンドに完了報告〜承認・却下・取消のカスケードまで実装済みの兄妹連携クエスト機能が画面に表示されず起動不能だったバグ（H-8）の修正。同一ロジックが`FamilyDashboard.tsx`側にも存在するため、ターゲット判定を変更する際は両ファイルを確認する必要がある。
+* 根拠: (行番号: 293〜302行目 / 抜粋: "if (q.target === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (currentUser.role !== 'role_child') return false;\n                } else if (q.target.startsWith('role_')) {")
 * `QuestItem` の `runComplete`/`runCancel` において、`onClick` コールバックに渡すオブジェクトに動的に `_isInfinite` プロパティを追加している。`Quest`型に定義されているかは本ファイルからは不明。
 * 根拠: `onClick({ ...quest, _isInfinite: !!isInfinite });` (行番号: 86, 92)
 * `isInfinite`クエストのクールダウン（`COOLDOWN_MS` = 60000ms）はコンポーネントローカルな`useState`で管理されているため、画面遷移やコンポーネントの再マウントが起きると`isCooldown`はリセットされる。サーバー側でクールダウンを強制する仕組みがあるかは本ファイルからは不明。
@@ -263,11 +269,12 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `Quest` オブジェクトの実態 | `types/index.md`の解析によれば、`Quest`型には`is_shared_completed_by`等の共有クエスト判定用フィールドが含まれており、これらはバックエンドの`get_available_quests`が付与するものとされている。ただしこれは`types/index.md`側の解析結果からの補足であり、実データの検証は行っていない。 | `../../../types/index.md` |
-| `useQuestStatus` / `getQuestLockState` の判定ロジック | `useQuestStatus.md`の解析によれば、`getQuestLockState`は前提クエストの完了有無から`isLocked`を、当日の承認済み履歴件数から`isDone`を算出する純粋関数であり、`useQuestStatus`はその結果と`isRandom`/`isTimeLimited`/`isLimited`等のフラグから優先順位付きで`variant`を決定するとされている。 | `../hooks/useQuestStatus.md` |
-| `panelMode`/`iconFirst`の実際の呼び出し条件 | `FamilyDashboard.md`の解析によれば、`FamilyPanel`は`QuestList`に`panelMode`を常に渡し、`iconFirst`は`ICON_FIRST_USER_IDS.includes(user.user_id)`という判定で個別ユーザーごとに決定しているとされている。ただしこれは横画面（landscape）レイアウトからの呼び出しに関する補足であり、縦画面側（`App.tsx`）での`iconFirst`は`useSettings`が返す`iconFirstUserIds`を用いる点は本ファイルの解析にあたり`App.tsx`を直接確認して判明したものである。 | `../../family/components/FamilyDashboard.md` |
-| `Card` のスタイル仕様 | `Card.md`の解析によれば、`Card`は`variant`（`default`/`completed`/`pending`/`infinite`/`timeLimit`/`random`/`limited`/`locked`）に応じてスタイルクラスを切り替えるコンポーネントであるとされている。`Card.md`側でも、本ファイル(`QuestList.tsx`)が実際にどの`variant`値を渡しているかは推測に留まると記載されている。 | `../../../components/ui/Card.md` |
-| 音声再生の詳細 | `useSound.md`の解析によれば、`play`は`SOUNDS`定義のキーに対応する`HTMLAudioElement`をキャッシュしつつ再生し、再生失敗時は`console.warn`で警告を出すのみで例外は投げない構造とされている。ただし`SOUNDS`に`'clear'`/`'submit'`/`'cancel'`キーが実際に含まれるかは`useSound.md`側でも全キーの列挙が行われておらず断定できない。 | `../../../hooks/useSound.md` |
+| `Quest` オブジェクトの実態 | `family-quest/src/types/index.ts`を直接確認した。`Quest`インターフェース(29〜59行目)には共有クエスト判定用の`is_shared_completed_by`(55行目)、`shared_completed_by_name`(56行目)、`is_shared_pending_by`(57行目)、`shared_pending_by_name`(58行目)が定義されており、54行目のコメントで「バックエンドの`get_available_quests`が付与するフィールド」と明記されている。また`_isInfinite?: boolean`(46行目)も`Quest`型に定義済みであることを確認した。本ファイルの解析時点では「型に定義されているかどうか不明」としていたが、`QuestItem`の`runComplete`/`runCancel`が`onClick`コールバックへ動的付与している`_isInfinite`プロパティ(本ファイル86, 92行目)は、実際には型定義済みのオプショナルフィールドへの代入であったことが判明した。ただしバックエンド側でこれらのフィールドが実際にどのAPIレスポンスにどう付与されるかまでは`types/index.ts`単体では確認できない。 | 直接ソース確認: `family-quest/src/types/index.ts:29-59` |
+| `useQuestStatus` / `getQuestLockState` の判定ロジック | `family-quest/src/features/quest/hooks/useQuestStatus.ts`を直接確認した。`getQuestLockState`(30〜81行目)は`quest.pre_requisite_quest_id`が未設定、または当日の`completedQuests`(ステータス`'approved'`)に前提クエストIDが含まれる場合に`isPreReqCleared`を真とし、`isLocked = !isPreReqCleared`(54行目)で算出する。`isDone`は自分の承認済み完了履歴件数(`myCompletions.length > 0`、57〜64行目)から求めるが、無限クエスト(`isInfinite`)の場合は常に`false`に上書きされる(65行目)。`useQuestStatus`(83〜124行目)はこの結果に`isRandom`(`quest.type === 'random'`)、`isLimited`(`quest.type === 'limited'`)、`isTimeLimited`(`!!quest.start_time`)を加え、`isLocked`→`isDone`→`isPending`→`isInfinite`→`isTimeLimited`→`isRandom`→`isLimited`→デフォルトの優先順位(102〜108行目)で`variant`を決定する。 | 直接ソース確認: `family-quest/src/features/quest/hooks/useQuestStatus.ts:30-124` |
+| `useLongPress` の実装詳細 | `family-quest/src/hooks/useLongPress.ts`を直接確認した。`onPointerDown`(51〜70行目)で`PROGRESS_TICK_MS`(30ms、23行目)間隔の`setInterval`により`pressProgress`を更新しつつ、`thresholdMs`到達時に`setTimeout`(63〜69行目)で`firedRef.current = true`とし`onLongPress`を呼ぶ。`onPointerUp`は`endPress(true)`(83行目)を呼び、`firedRef.current`が偽（長押しが発火していない）かつ`onShortTap`が渡されていれば短タップとして`onShortTap`を呼ぶ(76〜78行目)。呼び出し元の`QuestList.tsx`(95〜99行目)は`onLongPress: runCancel`、`disabled: !canCancel`、`thresholdMs: 550`のみを渡し、`onShortTap`は渡していないため、`canCancel`が真のカード(完了済み/申請中)で長押しに満たない短タップは何も起きない。`longPressHandlers`は`canCancel`が真の場合のみカードのルート要素に展開される(179行目)。 | 直接ソース確認: `family-quest/src/hooks/useLongPress.ts:23,51-98`（呼び出し側: `family-quest/src/features/quest/components/QuestList.tsx:95-99,179`） |
+| `panelMode`/`iconFirst`の実際の呼び出し条件 | `family-quest/src/features/family/components/FamilyDashboard.tsx`と`family-quest/src/App.tsx`を直接確認した。横画面(landscape)側は`FamilyDashboard.tsx`の`FamilyPanel`が`<QuestList ... panelMode iconFirst={iconFirst} />`(191〜199行目)という形で`panelMode`を常に真で渡し、`iconFirst`は`FamilyDashboard`の`iconFirstUserIds.includes(user.user_id)`(101行目、`useSettings()`由来)をユーザーごとに評価した値をpropsとして渡している。縦画面(portrait)側は`App.tsx`の`<QuestList ... iconFirst={iconFirstUserIds.includes(currentUser.user_id)} />`(490〜498行目)が`panelMode`を渡さない（＝`undefined`で偽扱い）まま、`iconFirst`のみを同じ`useSettings().iconFirstUserIds`から算出して渡している。 | 直接ソース確認: `family-quest/src/features/family/components/FamilyDashboard.tsx:101,191-199`, `family-quest/src/App.tsx:490-498` |
+| `Card`/`CooldownRing` のスタイル仕様 | `family-quest/src/components/ui/Card.tsx`と`family-quest/src/components/ui/CooldownRing.tsx`を直接確認した。`Card`(11〜49行目)は`variant`prop(`default`/`completed`/`pending`/`infinite`/`timeLimit`/`random`/`limited`/`locked`のいずれか)に応じて`variantStyle`(border色・背景色等のTailwindクラス)を`switch`文(17〜40行目)で切り替え、`baseStyle`・`interactiveStyle`（`onClick`が渡されていれば`cursor-pointer`等）・`className`と結合して描画する。`CooldownRing`(10〜53行目)は`durationMs`/`size`(既定40)をpropsとして受け取り、`useEffect`内の`setInterval`(13〜22行目、100ms間隔)で残り時間の割合(`remainingFraction`)を計算し、SVGの`circle`要素の`strokeDashoffset`をアニメーションさせる円形プログレスリングである。 | 直接ソース確認: `family-quest/src/components/ui/Card.tsx:11-49`, `family-quest/src/components/ui/CooldownRing.tsx:10-53` |
+| 音声再生の詳細 | `family-quest/src/hooks/useSound.ts`を直接確認した。`SOUNDS`定義(4〜13行目)には本ファイルが使用する`'clear'`(7行目、`quest_clear.mp3`)、`'submit'`(5行目、`submit.mp3`)、`'cancel'`(12行目、`tap.mp3`と同一音源)の3キーがすべて実在する。`play`(21〜46行目)は`audioCache`にキャッシュされた`HTMLAudioElement`を`currentTime = 0`にリセットしてから再生し、`audio.play()`が失敗した場合は`console.warn`のみで例外を投げない(38〜41行目)。 | 直接ソース確認: `family-quest/src/hooks/useSound.ts:4-13,21-46` |
 
 ## 10. 自己検証結果
 

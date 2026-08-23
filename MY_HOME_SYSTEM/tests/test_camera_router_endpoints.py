@@ -5,6 +5,7 @@ routers/camera_router.py の成功パス(TestClient経由)。
 存在しないカメラの異常系を中心にカバーしているため、本ファイルは正常系を補う。
 実際のffmpeg実行は行わず、services.camera_service の関数をモックする。
 """
+import json
 import os
 import sys
 
@@ -23,6 +24,18 @@ def one_camera(monkeypatch):
     return cam
 
 
+@pytest.fixture
+def devices_json_camera(monkeypatch, tmp_path, one_camera):
+    """devices.json 経由の永続化をテストするため、config.DEVICES_JSON_PATH を
+    tmp_path 上のファイルに差し替え、one_camera と同じ内容を書き込んでおく。"""
+    devices_path = tmp_path / "devices.json"
+    devices_path.write_text(
+        json.dumps({"cameras": [one_camera]}, ensure_ascii=False), encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "DEVICES_JSON_PATH", str(devices_path))
+    return devices_path
+
+
 def test_get_camera_settings_lists_configured_cameras(api_client, one_camera):
     res = api_client.get("/api/cameras/settings")
     assert res.status_code == 200
@@ -31,6 +44,28 @@ def test_get_camera_settings_lists_configured_cameras(api_client, one_camera):
     assert body[0]["id"] == "cam1"
     assert body[0]["order"] == 1
     assert body[0]["enabled"] is True
+
+
+def test_update_camera_settings_persists_enabled_to_devices_json(api_client, devices_json_camera):
+    res = api_client.put("/api/cameras/settings/cam1", json={"enabled": False})
+    assert res.status_code == 200
+    assert res.json() == {"id": "cam1", "enabled": False}
+
+    # config.CAMERAS (in-memory) にも反映されていること
+    assert config.CAMERAS[0]["enabled"] is False
+
+    # devices.json (ファイル) にも永続化されていること
+    persisted = json.loads(devices_json_camera.read_text(encoding="utf-8"))
+    assert persisted["cameras"][0]["enabled"] is False
+
+    # GET /settings が更新後の値を反映すること
+    res = api_client.get("/api/cameras/settings")
+    assert res.json()[0]["enabled"] is False
+
+
+def test_update_camera_settings_unknown_camera_returns_404(api_client, one_camera):
+    res = api_client.put("/api/cameras/settings/unknown_cam", json={"enabled": False})
+    assert res.status_code == 404
 
 
 def test_get_live_stream_returns_playlist_once_ready(api_client, one_camera, tmp_path, monkeypatch):

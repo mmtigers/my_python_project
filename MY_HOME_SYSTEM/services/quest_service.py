@@ -56,6 +56,28 @@ def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:
 
 
 # ==========================================
+# User Balance Lock (Race Condition Guard for approve/cancel)
+# ==========================================
+# process_approve_quest / process_cancel_quest は「quest_usersをSELECT →
+# Pythonでgold/exp/levelを計算 → UPDATE」というread-modify-writeのため、
+# 同一ユーザーへの承認×承認・承認×取消が並行実行されると(例: 親が承認一覧を
+# 連続タップするhandleApproveAll)、一方の更新が消失するレースが起こりうる。
+# quest_users(gold/exp/level)を書き換える処理は、対象ユーザー単位でプロセス内
+# 直列化する。
+_user_balance_locks: Dict[str, threading.Lock] = {}
+_user_balance_locks_guard = threading.Lock()
+
+
+def _get_user_balance_lock(user_id: str) -> threading.Lock:
+    with _user_balance_locks_guard:
+        lock = _user_balance_locks.get(user_id)
+        if lock is None:
+            lock = threading.Lock()
+            _user_balance_locks[user_id] = lock
+        return lock
+
+
+# ==========================================
 # Service Classes
 # ==========================================
 
@@ -65,7 +87,9 @@ class UserService:
             users = cur.execute("SELECT level, gold FROM quest_users").fetchall()
             total_level = sum(u['level'] for u in users) if users else 0
             total_gold = sum(u['gold'] for u in users) if users else 0
-            res = cur.execute("SELECT COUNT(*) as count FROM quest_history").fetchone()
+            # process_reject_quest が却下履歴を残す(status='rejected')ようになったため、
+            # 却下された申請を「達成したクエスト数」に含めないよう明示的に除外する。
+            res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status != 'rejected'").fetchone()
             total_quests = res['count'] if res else 0
             
             if total_level < 10: rank = "駆け出しの家族"
@@ -128,10 +152,14 @@ class QuestService:
         try:
             # DBの文字列をdatetimeオブジェクトへ変換
             dt = datetime.datetime.fromisoformat(completed_at_str)
-            # タイムゾーン情報がない（UTCとして記録されている）場合、UTCとみなしてJSTに変換
+            # M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている
+            # とみなしていたが、保存規約(common.get_now_iso)は常にJSTで記録する
+            # ため、tzinfo無しの古いデータも実際はJSTで記録されている。
+            # このファイル内の他の日時比較(スパムチェック等)もJSTとして扱っており、
+            # UTCとみなす本実装だけが矛盾して9時間ズレていた。
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            
+                dt = dt.replace(tzinfo=JST)
+
             completed_date = dt.astimezone(JST).date()
         except Exception:
             try:
@@ -242,6 +270,17 @@ class QuestService:
                 except Exception:
                     pass
 
+            # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
+            # is_within_reset_period は元々 get_all_view_data の表示専用
+            # (completedQuests算出)にしか使われておらず、上の10秒スパムチェックだけでは
+            # API直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていた。
+            # 'infinite' タイプ(「何回でも挑戦しよう」等)は仕様上多重完了が前提のため対象外。
+            if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
+                reset_period = quest['reset_period'] or 'daily'
+                if self.is_within_reset_period(last_hist['completed_at'], reset_period):
+                    period_label = "今週" if reset_period == 'weekly' else "本日"
+                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
+
             now_iso = common.get_now_iso()
             boost = self.calculate_quest_boost(cur, user_id, quest)
             total_exp = quest['exp_gain'] + boost['exp']
@@ -314,6 +353,19 @@ class QuestService:
         }
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
+        # 先に特定してから、そのユーザー単位でロックを取得する。
+        with common.get_db_cursor() as cur:
+            hist_peek = cur.execute(
+                "SELECT user_id FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+        if not hist_peek:
+            raise HTTPException(status_code=404, detail="History not found")
+
+        with _get_user_balance_lock(hist_peek['user_id']):
+            return self._process_approve_quest_locked(approver_id, history_id)
+
+    def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -340,7 +392,9 @@ class QuestService:
                 self._approve_linked_history(cur, hist['linked_history_id'])
 
             # --- TV Lock Feature ---
-            if quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
+            # quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る
+            # (sync_master_data の DELETE ... NOT IN でマスタ行が消えても quest_history は残るため)。
+            if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
                 if user['role'] == ROLE_CHILD:
                     self._trigger_tv_unlock(quest['quest_id'])
 
@@ -399,11 +453,14 @@ class QuestService:
             if not hist: raise HTTPException(status_code=404, detail="History not found")
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
-            cur.execute("DELETE FROM quest_history WHERE id = ?", (history_id,))
+            # 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には
+            # 生成されず、process_complete_quest のスパムチェック `status != 'rejected'`
+            # が常に成立する死に条件になっていた)。
+            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
             if hist['linked_history_id'] is not None:
-                cur.execute("DELETE FROM quest_history WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
+                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))
                 logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")
 
             logger.info(f"Quest Rejected: Approver={approver_id}, Target={hist['user_id']}, Reason={reason or '(未指定)'}")
@@ -458,6 +515,10 @@ class QuestService:
         }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
+        with _get_user_balance_lock(user_id):
+            return self._process_cancel_quest_locked(user_id, history_id)
+
+    def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist: raise HTTPException(status_code=404, detail="History not found")
@@ -518,7 +579,7 @@ class QuestService:
                         end_dt = datetime.date(y, m, d)
                         if today_date > end_dt: continue
                 except ValueError as e:
-                    logger.warning(f"Date parse error for quest {q.get('id')}: {e}")
+                    logger.warning(f"Date parse error for quest {q.get('quest_id')}: {e}")
                     continue
             if q['quest_type'] == 'random':
                 seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
@@ -597,6 +658,12 @@ class InventoryService:
             return [dict(row) for row in rows]
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        """
+        アイテム使用を「申請」する。即時消費はせず status='pending' にし、
+        親の consume_item による承認で初めて確定(consumed)する
+        (H-5: consume_item/cancel_usage/get_pending_items/フロントの
+        pending UI・ポーリングは全てこの承認フローの存在を前提に実装済みだった)。
+        """
         with common.get_db_cursor(commit=True) as cur:
             sql = """
                 SELECT ui.*, rm.title, qu.name as user_name
@@ -612,10 +679,45 @@ class InventoryService:
             if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
 
             now_iso = common.get_now_iso()
-            
+
             cur.execute("""
-                UPDATE user_inventory 
-                SET status = 'consumed', used_at = ? 
+                UPDATE user_inventory
+                SET status = 'pending', used_at = ?
+                WHERE id = ?
+            """, (now_iso, inventory_id))
+
+            msg = f"🎒 {item['user_name']}が「{item['title']}」の使用を申請しました。承認をお願いします。"
+            notification_service.send_push(
+                user_id=config.LINE_USER_ID,
+                messages=[{"type": "text", "text": msg}]
+            )
+            sound_manager.play("submit")
+
+            return {"status": "pending", "message": "使用を申請しました！おうちの人の確認を待とう。"}
+
+    def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
+        """親がアイテム使用申請を承認し、消費を確定する。"""
+        with common.get_db_cursor(commit=True) as cur:
+            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
+            if not approver or approver['role'] != ROLE_ADULT:
+                raise HTTPException(403, "承認権限がありません")
+
+            sql = """
+                SELECT ui.*, rm.title, qu.name as user_name
+                FROM user_inventory ui
+                JOIN reward_master rm ON ui.reward_id = rm.reward_id
+                JOIN quest_users qu ON ui.user_id = qu.user_id
+                WHERE ui.id = ?
+            """
+            item = cur.execute(sql, (inventory_id,)).fetchone()
+            if not item: raise HTTPException(404, "Item not found")
+            if item['status'] != 'pending': raise HTTPException(400, "承認待ちではありません")
+
+            now_iso = common.get_now_iso()
+
+            cur.execute("""
+                UPDATE user_inventory
+                SET status = 'consumed', used_at = ?
                 WHERE id = ?
             """, (now_iso, inventory_id))
 
@@ -623,34 +725,15 @@ class InventoryService:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
                 VALUES (?, 0, ?, 0, 0, ?, 'approved')
-            """, (user_id, log_title, now_iso))
+            """, (item['user_id'], log_title, now_iso))
 
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
             notification_service.send_push(
-                user_id=config.LINE_USER_ID, 
+                user_id=config.LINE_USER_ID,
                 messages=[{"type": "text", "text": msg}]
             )
             sound_manager.play("quest_clear")
 
-            return {"status": "consumed", "message": "アイテムを使いました！"}
-    
-    def consume_item(self, approver_id: str, inventory_id: int) -> Dict[str, str]:
-        with common.get_db_cursor(commit=True) as cur:
-            approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
-            if not approver or approver['role'] != ROLE_ADULT:
-                raise HTTPException(403, "承認権限がありません")
-
-            item = cur.execute("SELECT * FROM user_inventory WHERE id = ?", (inventory_id,)).fetchone()
-            if not item: raise HTTPException(404, "Item not found")
-            
-            cur.execute("""
-                UPDATE user_inventory 
-                SET status = 'consumed', used_at = ? 
-                WHERE id = ?
-            """, (common.get_now_iso(), inventory_id))
-
-            sound_manager.play("quest_clear") 
-            
             return {"status": "consumed", "message": "承認しました"}
 
     def cancel_usage(self, user_id: str, inventory_id: int) -> Dict[str, str]:
@@ -732,7 +815,7 @@ class GameSystem:
                         name = excluded.name, 
                         job_class = excluded.job_class,
                         role = COALESCE(excluded.role, quest_users.role)
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, datetime.datetime.now()))
+                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, common.get_now_iso()))
             
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
@@ -775,9 +858,28 @@ class GameSystem:
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
-                cur.execute(f"DELETE FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids)
+                stale_rewards = cur.execute(
+                    f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({ph})", active_r_ids
+                ).fetchall()
             else:
-                cur.execute("DELETE FROM reward_master")
+                stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
+
+            # user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、
+            # 所持者がいる(所有中/申請中/使用済問わずuser_inventoryに行が残る)報酬を削除すると
+            # IntegrityErrorでsync_master_data全体が失敗する。参照が残っている報酬は削除をスキップし、
+            # 警告ログのみ出す(マスタからは消えているが所持データは保持される)。
+            for row in stale_rewards:
+                stale_reward_id = row['reward_id']
+                still_referenced = cur.execute(
+                    "SELECT 1 FROM user_inventory WHERE reward_id = ? LIMIT 1", (stale_reward_id,)
+                ).fetchone()
+                if still_referenced:
+                    logger.warning(
+                        f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
+                        "user_inventoryに参照が残っているため削除をスキップします。"
+                    )
+                    continue
+                cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
             
             for r in valid_rewards:
                 cur.execute("""
@@ -794,7 +896,7 @@ class GameSystem:
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
 
-    def get_all_view_data(self) -> Dict[str, Any]:
+    def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
             for u in users:
@@ -805,11 +907,24 @@ class GameSystem:
             all_quests = [dict(row) for row in cur.execute("SELECT * FROM quest_master")]
             filtered_quests = self.quest_service.filter_active_quests(all_quests)
 
+            # quest_master.target_user は実際の quest_users.user_id (例: 'dad')の他に、
+            # 'siblings' のようなグループ指定も取りうる。後者を calculate_quest_boost に
+            # そのまま user_id として渡すと quest_history に一致行が存在しないため、
+            # 実際の履歴に関わらずボーナスが常に0固定になっていた(実害はないが意味が誤り)。
+            # target_user が実在ユーザーでない場合は、閲覧中のユーザー(viewer_user_id)の
+            # 履歴を代表として使う。
+            known_user_ids = {u['user_id'] for u in users}
+
             for q in filtered_quests:
                 if q['target_user'] and q['target_user'] != 'all':
-                    boost = self.quest_service.calculate_quest_boost(cur, q['target_user'], q)
-                    q['bonus_gold'] = boost['gold']
-                    q['bonus_exp'] = boost['exp']
+                    boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
+                    if boost_user_id:
+                        boost = self.quest_service.calculate_quest_boost(cur, boost_user_id, q)
+                        q['bonus_gold'] = boost['gold']
+                        q['bonus_exp'] = boost['exp']
+                    else:
+                        q['bonus_gold'] = 0
+                        q['bonus_exp'] = 0
                 else:
                     q['bonus_gold'] = 0
                     q['bonus_exp'] = 0

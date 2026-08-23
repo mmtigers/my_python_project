@@ -11,6 +11,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# M-10-1: 他2ワークフロー(spec-drift-*.yml)は最小権限を明示しているが、
+# 本ワークフローには permissions ブロックが無く、リポジトリ設定次第で
+# write-all トークンが供給される余地があった。読み取り専用に固定する。
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: ./MY_HOME_SYSTEM
@@ -20,10 +26,10 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
@@ -46,14 +52,25 @@ jobs:
         run: ruff check . --output-format=github
         continue-on-error: true
 
+      - name: Ruff DDD (correctness gate - blocking)
+        # H-11: MY_HOME_SYSTEM以外(DDD)は従来CI対象外だった。
+        # 同じ「明確なバグのみブロッキング」方針をDDDにも適用する。
+        working-directory: ./DDD
+        run: ruff check . --select F821,F822,F823,E9 --output-format=github
+
+      - name: Ruff DDD (full report - non-blocking)
+        working-directory: ./DDD
+        run: ruff check . --output-format=github
+        continue-on-error: true
+
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
@@ -83,7 +100,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-report
           path: |
@@ -95,10 +112,10 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
           cache: pip
@@ -121,6 +138,15 @@ jobs:
         run: bandit -r . -x ./tests,./old,./monitors/old -f txt -o bandit-report.txt || true
         continue-on-error: true
 
+      - name: Bandit DDD (full report - non-blocking)
+        # H-11: DDDは従来CI対象外だった。MY_HOME_SYSTEMと異なり既存のHigh
+        # severity指摘(SHA1使用等)が残っているため、いきなりブロッキングには
+        # せず、まず可視化を優先する(MY_HOME_SYSTEM側のBandit Medium/Lowの
+        # 扱いと同様の方針)。
+        working-directory: ./DDD
+        run: bandit -r . -f txt -o bandit-report-ddd.txt || true
+        continue-on-error: true
+
       - name: pip-audit (known CVEs - non-blocking)
         # requirements.txt に多数の既知CVEを持つバージョンが固定されている(2026年時点)。
         # 依存関係の一括更新は影響範囲が大きく本タスクの範囲外のため、
@@ -130,10 +156,36 @@ jobs:
 
       - name: Upload security reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: security-reports
           path: |
             MY_HOME_SYSTEM/bandit-report.txt
             MY_HOME_SYSTEM/pip-audit-report.md
+            DDD/bandit-report-ddd.txt
           retention-days: 14
+
+  frontend:
+    name: Frontend Build (family-quest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./family-quest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: family-quest/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc -b && vite build)
+        # H-11: 以前はfamily-quest側にCIが一切無く、H-8のようなフロントエンドの
+        # フィルタ不具合やTSの型エラーがマージまで検出できなかった。
+        # 最小限としてまずビルド検証(tsc型チェック含む)をブロッキング条件にする。
+        run: npm run build

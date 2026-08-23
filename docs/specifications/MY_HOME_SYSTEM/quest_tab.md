@@ -163,6 +163,13 @@ graph TD
 | `game_system.get_all_view_data()`の正確な戻り値スキーマ | `services.quest_service`の実装が提供されていないため、`users`・`logs`以外のキーの有無や各フィールドの型が不明。 | `services/quest_service.py` |
 | `logs`要素の正しいキー名 | コード上のコメントと実際の参照キー（`timestamp`）に不一致があり、どちらが正しい仕様か本ファイル単体では判断できない。 | `services/quest_service.py` |
 
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `game_system.get_all_view_data()`の正確な戻り値スキーマ | `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data(self)`(797〜891行目)を直接確認した。戻り値は887〜891行目で`return {"users": users, "quests": filtered_quests, "rewards": rewards, "completedQuests": completed, "logs": logs, "pendingQuests": pending}`という6キーの辞書であることを確認した。各値は、`users`が`quest_users`テーブルの全行に`nextLevelExp`/`maxHp`/`hp`を追加した辞書のリスト(799〜803行目)、`quests`が`quest_master`の全行を`filter_active_quests`でフィルタし`bonus_gold`/`bonus_exp`(共有クエストの場合`is_shared_completed_by`等も)を付加したリスト(805〜816行目, 870〜881行目)、`rewards`が`reward_master`の全行に`icon`/`cost`を付加したリスト(817〜820行目)、`completedQuests`が直近1ヶ月の`quest_history`から`is_within_reset_period`でリセット周期内のもののみを抽出したリスト(822〜883行目)、`pendingQuests`が`status='pending'`の`quest_history`全行(838〜840行目)、`logs`が`_fetch_recent_logs(cur)`(893〜911行目)の戻り値であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:797-891` |
+| `logs`要素の正しいキー名 | `MY_HOME_SYSTEM/services/quest_service.py`の`_fetch_recent_logs(self, cur)`(893〜911行目)を直接確認した。`quest_history`(status='approved')と`reward_history`をそれぞれ最大20件取得して`ts`(`completed_at`または`redeemed_at`のエイリアス)でソートした後、910行目の`formatted.append({"id": f"{l['type']}_{l['id']}", "text": text, "dateStr": date_str, "timestamp": ts_str})`により、各要素は`id`, `text`, `dateStr`, `timestamp`の4キーを持つ辞書として整形されることを確認した。すなわち`logs`要素の正しいキー名は`timestamp`であり、`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`60行目の`log['timestamp']`という実際の参照が正しい仕様と一致することを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:893-911`（参考: `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:60`） |
+
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -175,13 +175,13 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `layoutMode`の実際の利用箇所・分岐条件 | 本フックは判定結果を返すのみであり、`'landscape'`/`'portrait'`それぞれの場合にどのUIが描画されるかは呼び出し元次第で不明なため。 | `App.tsx` |
-| `900px`という閾値の決定根拠 | コメントで「実機での見え方を見て調整可」とあるのみで、具体的な検証データやEcho Show 15以外の対応デバイスの有無は本ファイルからは不明なため。 | 本ファイル外（デザイン仕様書等、存在すれば） |
+| `900px`という閾値の決定根拠 | コメントで「実機での見え方を見て調整可」とあるのみで、具体的な検証データやEcho Show 15以外の対応デバイスの有無は本ファイルからは不明なため。（リポジトリ内を`900px`/`Echo Show`で検索したが、デザイン仕様書等の根拠ファイルは存在せず、解消不可。当該コメント以上の記述はコード上に見当たらない） | 本ファイル外（デザイン仕様書等、存在すれば） |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `layoutMode`の実際の利用箇所・分岐条件 | `App.md`の解析によれば、`App`コンポーネントは`useLayoutMode()`の戻り値を`layoutMode`として保持し、`viewMode==='main' && layoutMode==='landscape'`のとき`FamilyDashboard`（4人常時表示）を、`viewMode==='main' && layoutMode==='portrait'`のとき`UserStatusCard`＋（保護者なら）`ApprovalList`＋タブ切替（`quest`/`shop`）＋`QuestList`/`RewardShop`を描画し、`Header`へは`hideUserSwitcher={layoutMode === 'landscape'}`を渡し、コンテナの最大幅も`layoutMode`によって`max-w-7xl`/`max-w-md md:max-w-5xl`と切り替えているとされている。 | `../../App.md` |
+| `layoutMode`の実際の利用箇所・分岐条件 | `family-quest/src/App.tsx`を直接確認した。`App`コンポーネント(140行目)は`useLayoutMode()`の戻り値を`layoutMode`として保持し、`viewMode==='main' && layoutMode==='landscape'`(397行目)のとき`FamilyDashboard`（4人常時表示）を、`viewMode==='main' && layoutMode==='portrait'`(414行目)のとき`UserStatusCard`＋（`isParentUser`なら421行目で）`ApprovalList`＋左右スワイプ対応タブ切替（`quest`/`shop`/`inventory`）を描画する。`Header`へは`hideUserSwitcher={layoutMode === 'landscape'}`(386行目)と`hideLogSwitcher={layoutMode === 'portrait'}`(387行目)、`showBackToMain={layoutMode === 'landscape'}`(388行目)を渡し、コンテナの最大幅も`layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'`(395行目)と切り替えている。縦画面時のみ`BottomNav`を表示する分岐(479行目、`layoutMode === 'portrait'`)も確認した。 | 直接ソース確認: `family-quest/src/App.tsx:140,386-388,395,397,414,421,479` |
 
 ## 10. 自己検証結果
 
