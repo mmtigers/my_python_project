@@ -256,20 +256,17 @@ def main(args):
                         # APIのレートリミットを回避するためのインターバル
                         if idx < total_parts:
                             time_module.sleep(5)
+                    # 実行完了を記録 (成功時のみ。失敗時は当日中の再試行を可能にするためtouchしない)
+                    Path(record_file).touch()
+
+                    # 容量節約のため生成動画を削除
+                    for part_file in generated_files:
+                        if os.path.exists(part_file):
+                            os.remove(part_file)
                 else:
                     # FFmpegの生成に失敗した場合
                     logger.error(f"[{camera_name}] {schedule_name} の動画生成に失敗しました。")
                     notify_error(f"⚠️ 【エラー】[{camera_name}] {schedule_name} のタイムラプス動画生成（FFmpeg）に失敗しました。詳細はサーバーログを確認してください。")
-
-                
-                # 実行完了を記録
-                Path(record_file).touch()
-                
-                # 容量節約のため生成動画を削除
-                if generated_files:
-                    for part_file in generated_files:
-                        if os.path.exists(part_file):
-                            os.remove(part_file)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="監視カメラタイムラプス生成スクリプト")
