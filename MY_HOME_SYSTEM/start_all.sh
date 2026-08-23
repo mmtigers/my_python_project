@@ -83,12 +83,16 @@ $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
 # --- Phase 4: サーバー起動 (ここだけにする) ---
 echo "--- Start Home System Server ---"
 # unified_server.py が内部で scheduler_boot.py を起動します
-$PYTHON_EXEC unified_server.py > logs/server_boot.log 2>&1 &
+# ★修正: '&'のみのバックグラウンド化はSSHログアウト時にシェルからSIGHUPが
+# 送られて死ぬ余地があるため、nohupでSIGHUPを無視しdisownでジョブ管理からも外す
+nohup $PYTHON_EXEC unified_server.py < /dev/null > logs/server_boot.log 2>&1 &
+disown
 echo "🚀 System started. Check logs/server_boot.log for details."
 
 # ★修正: ダッシュボードは認証なしのため、外部公開せずローカルホストのみに限定する
 # (必要な場合は信頼できるリバースプロキシ経由でアクセスすること)
-$PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 > logs/dashboard_boot.log 2>&1 &
+nohup $PYTHON_EXEC -m streamlit run dashboard.py --server.port 8501 --server.address 127.0.0.1 < /dev/null > logs/dashboard_boot.log 2>&1 &
+disown
 echo "📊 Dashboard started."
 
 echo "✅ All systems go!"
