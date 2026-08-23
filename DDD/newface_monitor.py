@@ -1404,6 +1404,22 @@ class DiscordNotifier:
 class DataManager:
     """データの永続化と読み込みを担当するクラス。"""
 
+    # 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく
+    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる
+    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を
+    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。
+    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)
+
+    @staticmethod
+    def _read_casts_file(data_file: Path) -> Set[CastMember]:
+        """JSONファイルを読み込み、CastMemberの集合に変換する。
+
+        パース失敗時は例外をそのまま送出する（呼び出し側でハンドリングする前提）。
+        """
+        with open(data_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return {CastMember(**item) for item in data}
+
     @staticmethod
     def load_known_casts(site: SiteConfig) -> Set[CastMember]:
         """指定サイトの保存済みキャストデータを読み込む。
@@ -1420,13 +1436,36 @@ class DataManager:
             return set()
 
         try:
-            with open(data_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return {CastMember(**item) for item in data}
-        except (json.JSONDecodeError, IOError) as e:
+            return DataManager._read_casts_file(data_file)
+        except DataManager._LOAD_ERRORS as e:
             logger.error(f"Failed to load data from {data_file}: {e}")
-            # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
-            return set()
+
+        # 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける
+        # ため、退避してから復旧を試みる。
+        quarantine_path = data_file.with_name(
+            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
+        )
+        try:
+            data_file.rename(quarantine_path)
+            logger.error(f"Quarantined corrupted cache file: {data_file} -> {quarantine_path}")
+        except OSError as e:
+            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}")
+
+        # 直近の正常データがバックアップとして残っていれば、そこから復旧する
+        # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。
+        backup_file = data_file.with_suffix(data_file.suffix + '.bak')
+        if backup_file.exists():
+            try:
+                casts = DataManager._read_casts_file(backup_file)
+                logger.warning(
+                    f"Recovered {len(casts)} casts from backup {backup_file} after cache corruption."
+                )
+                return casts
+            except DataManager._LOAD_ERRORS as e:
+                logger.error(f"Backup file {backup_file} is also unusable: {e}")
+
+        # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
+        return set()
 
     @staticmethod
     def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:
@@ -1447,10 +1486,27 @@ class DataManager:
             tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+
+            # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
+            # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
+            # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
+            DataManager._read_casts_file(tmp_path)
+
+            # 直前の正常データをバックアップとして残す。次回読み込み失敗時、
+            # 空集合へのフォールバック（全キャスト再通知）を避けるために使う。
+            # コピー元(data_file)は最後のreplaceまで保持したままにすることで、
+            # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。
+            if data_file.exists():
+                backup_path = data_file.with_suffix(data_file.suffix + '.bak')
+                try:
+                    backup_path.write_bytes(data_file.read_bytes())
+                except OSError as e:
+                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
+
             tmp_path.replace(data_file)
 
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
-        except IOError as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
 
     @staticmethod
