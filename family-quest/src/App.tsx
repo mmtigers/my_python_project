@@ -181,7 +181,7 @@ function App() {
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
     refreshData,
-  } = useGameData(handleLevelUp);
+  } = useGameData(currentUserIdx, handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
 
