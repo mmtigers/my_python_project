@@ -658,7 +658,17 @@ class ScrapingStrategy(DownloadStrategy):
         ydl_opts = {
             'format': 'best',
             'outtmpl': str(final_path),
-            'http_headers': {'Referer': page_url}, # ホットリンク防止の回避
+            'http_headers': {
+                'Referer': page_url, # ホットリンク防止の回避
+                # yt-dlpのデフォルトヘッダーはChromeを騙るUser-Agent
+                # (+ Sec-Fetch-Mode: navigate等)を付与するが、実際のTLS指紋(JA3)は
+                # Chromeと一致しないため、その不一致自体をWAFに検知され403で
+                # 弾かれることを実機検証で確認した(素直にrequestsを名乗るUAでは
+                # 同じセグメントが問題なく取得できた)。フラグメント取得では
+                # ブラウザを騙らない、requestsライブラリ本来のUser-Agentで上書きする。
+                'User-Agent': requests.utils.default_user_agent(),
+                'Accept': '*/*',
+            },
             'quiet': not CONFIG.SHOW_PROGRESS_BAR,
             'no_warnings': True,
             'concurrent_fragment_downloads': 5, # チャンク分割DLの高速化
