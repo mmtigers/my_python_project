@@ -1423,7 +1423,7 @@ class DataManager:
             with open(data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return {CastMember(**item) for item in data}
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, IOError, UnicodeDecodeError) as e:
             logger.error(f"Failed to load data from {data_file}: {e}")
             # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
             return set()
