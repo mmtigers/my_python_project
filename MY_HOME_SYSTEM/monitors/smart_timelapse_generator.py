@@ -7,6 +7,7 @@ import math
 import time
 import json
 import tempfile
+import fcntl
 import numpy as np
 import cv2
 import traceback
@@ -16,6 +17,7 @@ import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, field, asdict
+from contextlib import contextmanager
 
 try:
     import psutil
@@ -223,6 +225,35 @@ def setup_directories() -> Tuple[str, str, str]:
             logger.warning(f"作業ディレクトリのクリーンアップに失敗しました: {e}")
             
     return work_dir, output_dir, records_dir
+
+@contextmanager
+def timelapse_job_lock():
+    """
+    タイムラプス処理の多重実行を防ぐためのファイルロック。
+    work/timelapse ディレクトリは複数のエントリポイント
+    (run_smart_timelapse_job / daily_timelapse_job.run_daily_timelapse)から
+    共有され、setup_directories()で全消去されるため、複数ジョブが同時実行
+    されると互いの作業ファイル(motion.csv等)を破壊し合う(M-4-1)。
+    ロックが取得できなかった場合はFalseをyieldするので、呼び出し側は
+    処理をスキップすること。
+    """
+    base_dir = getattr(config, "BASE_DIR", PROJECT_ROOT)
+    lock_dir = os.path.join(base_dir, "work")
+    os.makedirs(lock_dir, exist_ok=True)
+    lock_path = os.path.join(lock_dir, "timelapse.lock")
+    lock_file = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock_file.close()
+        yield False
+        return
+
+    try:
+        yield True
+    finally:
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 def mark_as_done(records_dir: str, base_filename: str, summary: SummaryInfo):
     os.makedirs(records_dir, exist_ok=True)
@@ -491,7 +522,12 @@ class VideoBuilder:
         try:
             subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=get_ffmpeg_stderr(), check=True, timeout=3600)
             return True
-        except Exception: return False
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg結合エラー (returncode={e.returncode})")
+            return False
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg結合処理がタイムアウトしました")
+            return False
 
     def _generate_thumbnail(self, video_path: str, output_path: Optional[str] = None) -> None:
         out = output_path or video_path.replace(".mp4", ".jpg")
@@ -575,6 +611,13 @@ class Uploader:
 # Main
 # ==========================================
 def run_smart_timelapse_job(input_video: str) -> None:
+    with timelapse_job_lock() as acquired:
+        if not acquired:
+            logger.warning("別のタイムラプス処理が実行中のため、今回の処理をスキップします。")
+            return
+        _run_smart_timelapse_job_locked(input_video)
+
+def _run_smart_timelapse_job_locked(input_video: str) -> None:
     t_start = time.perf_counter()
     user_id = getattr(config, "LINE_USER_ID", "")
     if not check_dependencies(): return
