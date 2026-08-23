@@ -17,6 +17,18 @@ from services.notification_service import send_push
 
 logger = setup_logging("timelapse_generator")
 
+def run_ffmpeg_simple(cmd: List[str], timeout: int = 300) -> bool:
+    """タイムアウトと終了コードを確認しつつFFmpegコマンドを実行する(リトライなし)。"""
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        if res.returncode != 0:
+            logger.error(f"FFmpegエラー (returncode={res.returncode}): {res.stderr}")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error(f"FFmpeg処理がタイムアウトしました({timeout}秒)")
+        return False
+
 def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:
     """
     FFmpegを使用して動画ファイルからクリップを抽出する。
@@ -207,8 +219,9 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         "-c", "copy",
         output_video
     ]
-    subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+    if not run_ffmpeg_simple(concat_cmd):
+        return ""
+
     return output_video
 
 def upload_video_to_discord(file_path: str, message: str) -> None:
@@ -252,8 +265,9 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
             "-reset_timestamps", "1",
             split_pattern
         ]
-        subprocess.run(split_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
+        if not run_ffmpeg_simple(split_cmd):
+            return
+
         split_files = sorted(glob.glob(file_path.replace(".mp4", "_part*.mp4")))
         for i, split_file in enumerate(split_files):
             part_msg = f"{message} (Part {i+1}/{len(split_files)})"
