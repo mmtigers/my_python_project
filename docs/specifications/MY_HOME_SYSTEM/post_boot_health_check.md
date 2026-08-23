@@ -51,10 +51,10 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = common.setup_logging("health_check")` (行番号: 26 / 抜粋: "logger = common.setup_logging("health_check")") |
-| `common.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `common.send_push(` (行番号: 221 / 抜粋: "common.send_push(") |
+| `common.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `common.send_push(` (行番号: 231 / 抜粋: "common.send_push(") |
 | `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 51 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
 | `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` コマンド | 実行環境（Raspberry Pi等）にこれらのコマンドが存在する前提のコードだが、コマンドの実装自体は本ファイル外。 | `subprocess.check_output(["vcgencmd", "measure_temp"])` (行番号: 86 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")") |
-| SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 125 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
+| SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 135 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -130,7 +130,7 @@
 ### `PostBootHealthCheck` (クラス概要)
 
 * **役割**: システム起動直後の健全性チェックをまとめて実行するメインクラス。リソース・ネットワーク・DB・サービス・周辺機器・ログの各チェックメソッドと、結果集約・通知送信メソッドを持つ。
-* 根拠: `class PostBootHealthCheck:` (行番号: 45〜372 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: `class PostBootHealthCheck:` (行番号: 45〜382 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **引数/リクエスト**: なし（コンストラクタは引数なし）
@@ -244,8 +244,8 @@
 
 ### `PostBootHealthCheck.check_system_resources`
 
-* **役割**: CPU温度（`vcgencmd measure_temp`）とディスク使用率（`shutil.disk_usage`）を取得し、閾値（温度75°C、ディスク使用率90%）に基づきステータスを判定して結果に追加する。
-* 根拠: `def check_system_resources(self):` (行番号: 83〜113 / 抜粋: "def check_system_resources(self):")
+* **役割**: CPU温度（`vcgencmd measure_temp`）とディスク使用率（`shutil.disk_usage`）を取得し、3段階の閾値（温度: 75°C未満OK/75〜85°C未満WARN/85°C以上ERR、ディスク使用率: 90%以下OK/90〜95%WARN/95%超ERR）に基づきステータスを判定して結果に追加する。いずれかがERRなら全体もERR、いずれかがWARN(かつERRなし)ならWARNとする。
+* 根拠: `def check_system_resources(self):` (行番号: 83〜123 / 抜粋: "def check_system_resources(self):")
 
 
 * **引数/リクエスト**: `self` のみ
@@ -253,7 +253,7 @@
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加）
-* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (行番号: 111〜113 / 抜粋: "self.results.append(CheckResult(")
+* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (行番号: 121〜123 / 抜粋: "self.results.append(CheckResult(")
 
 
 * **副作用**: `vcgencmd` サブプロセス実行、`shutil.disk_usage` によるディスク情報取得、`self.results` への追加。
@@ -261,191 +261,191 @@
 
 
 * **エラーハンドリング**: 温度取得・ディスク取得それぞれを個別の `try/except:`（bare except）で保護し、失敗時は `STATUS_WARN` と `"Unknown"` を設定して処理を継続する。
-* 根拠: `except:` (行番号: 90, 103 / 抜粋: "except:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
+* 根拠: `except:` (行番号: 95, 110 / 抜粋: "except:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
 
 
 
 ### `PostBootHealthCheck.check_network_and_apis`
 
 * **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
-* 根拠: `def check_network_and_apis(self):` (行番号: 115〜136 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: `def check_network_and_apis(self):` (行番号: 125〜146 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 115 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: (行番号: 125 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ping失敗時は途中で `return` して以降のAPIチェックを行わない）
-* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 120〜121 / 抜粋: "return ")
+* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 130〜131 / 抜粋: "return ")
 
 
 * **副作用**: `ping` コマンドのサブプロセス実行、`switchbot_service.create_switchbot_auth_headers()`呼び出し、SwitchBot/NatureRemo APIへの認証ヘッダー付きHTTP GETリクエスト（`_check_http`経由）、`self.results` への追加。
-* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)` (行番号: 118 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)")
+* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)` (行番号: 128 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)")
 
 
 * **エラーハンドリング**: ping失敗時（bare except）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except:` (行番号: 119 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 130 / 抜粋: "if not self._check_http(url, headers=headers):")
+* 根拠: `except:` (行番号: 129 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 140 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 
 ### `PostBootHealthCheck.check_database`
 
 * **役割**: SQLite DBファイルの存在確認と `PRAGMA quick_check` による整合性チェックを行う。
-* 根拠: `def check_database(self):` (行番号: 139〜160 / 抜粋: "def check_database(self):")
+* 根拠: `def check_database(self):` (行番号: 149〜170 / 抜粋: "def check_database(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 139 / 抜粋: "def check_database(self):")
+* 根拠: (行番号: 149 / 抜粋: "def check_database(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ファイル不在時は途中で `return`）
-* 根拠: `self.results.append(CheckResult("Database", STATUS_ERR, "File Not Found"))\n            return` (行番号: 145〜146 / 抜粋: "return")
+* 根拠: `self.results.append(CheckResult("Database", STATUS_ERR, "File Not Found"))\n            return` (行番号: 155〜156 / 抜粋: "return")
 
 
 * **副作用**: 読み取り専用モード（`mode=ro`）でのSQLite接続・クエリ実行・接続クローズ、`self.results` への追加。
-* 根拠: `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 149 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)")
+* 根拠: `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 159 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)")
 
 
 * **エラーハンドリング**: DBファイル不在時は `STATUS_ERR` を追加して `return`。接続・クエリ実行中の任意の `Exception` を捕捉し `STATUS_ERR` とエラー内容を結果に追加する。
-* 根拠: `except Exception as e:` (行番号: 159 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 169 / 抜粋: "except Exception as e:")
 
 
 
 ### `PostBootHealthCheck.check_services`
 
-* **役割**: バックエンドサーバー、Family Quest（フロントエンド）、ダッシュボードの各サービスが起動するまで、最大 `max_retries` 回・`retry_interval` 秒間隔でポート/HTTP疎通を再試行し、結果を判定する。
-* 根拠: `def check_services(self):` (行番号: 163〜198 / 抜粋: "def check_services(self):")
+* **役割**: バックエンドサーバー、Family Quest（フロントエンド）、ダッシュボードの各サービスが起動するまで、最大 `max_retries` 回・`retry_interval` 秒間隔でポート/HTTP疎通を再試行し、結果を判定する。3対象すべてが `critical=True` として扱われる。
+* 根拠: `def check_services(self):` (行番号: 173〜208 / 抜粋: "def check_services(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 163 / 抜粋: "def check_services(self):")
+* 根拠: (行番号: 173 / 抜粋: "def check_services(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ各サービスの `CheckResult` を追加）
-* 根拠: `self.results.append(CheckResult(target["name"], status, msg))` (行番号: 198 / 抜粋: "self.results.append(CheckResult(target["name"], status, msg))")
+* 根拠: `self.results.append(CheckResult(target["name"], status, msg))` (行番号: 208 / 抜粋: "self.results.append(CheckResult(target["name"], status, msg))")
 
 
 * **副作用**: 各対象への `_check_port` / `_check_http` 呼び出し、リトライ間の `time.sleep(self.retry_interval)`、`logger.info` によるログ出力、`self.results` への追加。
-* 根拠: `time.sleep(self.retry_interval)` (行番号: 185 / 抜粋: "time.sleep(self.retry_interval)")
+* 根拠: `time.sleep(self.retry_interval)` (行番号: 195 / 抜粋: "time.sleep(self.retry_interval)")
 
 
-* **エラーハンドリング**: 明示的な例外捕捉はなし。`critical=True` の対象（Backend Server, Family Quest）が全リトライ失敗した場合は `STATUS_ERR`、`critical=False`（Dashboard）の場合は `STATUS_WARN` として結果に反映する。
-* 根拠: `if target["critical"]:\n                    status = STATUS_ERR\n                    msg = "Failed"\n                else:\n                    status = STATUS_WARN` (行番号: 191〜195 / 抜粋: "if target["critical"]:")
+* **エラーハンドリング**: 明示的な例外捕捉はなし。`critical=True` の対象（Backend Server, Family Quest, Dashboard の3件すべて）が全リトライ失敗した場合は `STATUS_ERR` として結果に反映する（`critical=False` の対象は現状存在しないため `STATUS_WARN` に倒れる分岐は到達しない）。
+* 根拠: `{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},` (行番号: 180 / 抜粋: "{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},"), `if target["critical"]:\n                    status = STATUS_ERR\n                    msg = "Failed"\n                else:\n                    status = STATUS_WARN` (行番号: 201〜205 / 抜粋: "if target["critical"]:")
 
 
 
 ### `PostBootHealthCheck.check_peripherals`
 
 * **役割**: NASのマウント状況と書き込み権限、防犯カメラ群のポート疎通、スピーカー（サウンドカードまたはBluetooth接続）の状態をチェックする。NAS書き込み権限エラー時は即座にDiscord通知を送信する。カメラは `config.CAMERAS` が空（`devices.json` 読み込み失敗等）の場合 `STATUS_WARN "No Config"` とする。スピーカーは `TARGET_BLUETOOTH_MAC`（モジュールレベルで `config.SPEAKER_BLUETOOTH_MAC` から取得）が設定されていれば `bluetoothctl info` による実際のBluetooth接続確認を行う。
-* 根拠: `def check_peripherals(self) -> None:` (行番号: 201〜280 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: `def check_peripherals(self) -> None:` (行番号: 211〜290 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 201 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: (行番号: 211 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`（`self.results` へNAS・カメラ・スピーカーの各 `CheckResult` を追加）
-* 根拠: `-> None:` および `self.results.append(CheckResult("Speaker", spk_status, spk_msg))` (行番号: 201, 280 / 抜粋: "-> None:")
+* 根拠: `-> None:` および `self.results.append(CheckResult("Speaker", spk_status, spk_msg))` (行番号: 211, 290 / 抜粋: "-> None:")
 
 
 * **副作用**: `os.path.ismount` によるマウント確認、テストファイルの書き込み・削除（NAS書き込みテスト）、`logger.error` 出力、`common.send_push` によるDiscord即時通知（権限エラー時）、カメラへのポート疎通確認、`aplay -l` / `bluetoothctl info` のサブプロセス実行、`self.results` への3件（NAS, Cameras, Speaker）の追加。
-* 根拠: `common.send_push(\n                    user_id=getattr(config, "LINE_USER_ID", None),` (行番号: 221〜222 / 抜粋: "common.send_push(")
+* 根拠: `common.send_push(\n                    user_id=getattr(config, "LINE_USER_ID", None),` (行番号: 231〜232 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。サウンドカード検出・Bluetooth接続確認処理は個別に bare `except:` で保護されている。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 216 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 247〜249 / 抜粋: "else:"), `except: pass` (行番号: 261 / 抜粋: "except: pass")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 226 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 257〜259 / 抜粋: "else:"), `except: pass` (行番号: 271 / 抜粋: "except: pass")
 
 
 
 ### `PostBootHealthCheck.check_recent_logs`
 
 * **役割**: ログファイルの末尾200行を取得し、直近10分以内に出力された `ERROR` または `CRITICAL` を含む行のみを抽出して結果を判定する。`tail` サブプロセス実行自体が失敗した場合は、ログを読めていない旨を `STATUS_WARN` として明示し、以降の行走査には進まない（旧実装では例外を捕捉してログ出力するのみで `error_lines` が空のまま `STATUS_OK "Clean"` に落ちていたが、修正済み）。
-* 根拠: `def check_recent_logs(self):` (行番号: 283〜325 / 抜粋: "def check_recent_logs(self):")
+* 根拠: `def check_recent_logs(self):` (行番号: 293〜335 / 抜粋: "def check_recent_logs(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 283 / 抜粋: "def check_recent_logs(self):")
+* 根拠: (行番号: 293 / 抜粋: "def check_recent_logs(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加。ログファイル未存在時・`tail` 失敗時はいずれも途中で `return`）
-* 根拠: `self.results.append(CheckResult("Logs", STATUS_WARN, "No log file yet"))\n            return` (行番号: 286〜287 / 抜粋: "return")
+* 根拠: `self.results.append(CheckResult("Logs", STATUS_WARN, "No log file yet"))\n            return` (行番号: 296〜297 / 抜粋: "return")
 
 
 * **副作用**: `tail -n 200` サブプロセス実行によるログファイル読み取り、`logger.error` 出力（`tail` 失敗時）、`self.results` への追加。
-* 根拠: `res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")` (行番号: 294 / 抜粋: "res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")")
+* 根拠: `res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")` (行番号: 304 / 抜粋: "res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")")
 
 
 * **エラーハンドリング**: ログファイル未存在時は `STATUS_WARN` を追加して `return`。`tail` コマンド実行失敗など全体の `Exception` を捕捉した場合は `logger.error` 出力に加え `STATUS_WARN` を結果に追加して `return`（行の走査自体を行わない）。各行の日時パース失敗（`ValueError`）はその行をスキップする。
-* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 295〜298 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 311 / 抜粋: "except ValueError:")
+* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 305〜308 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 321 / 抜粋: "except ValueError:")
 
 
 
 ### `PostBootHealthCheck.run`
 
 * **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 328〜336 / 抜粋: "def run(self):")
+* 根拠: `def run(self):` (行番号: 338〜346 / 抜粋: "def run(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 328 / 抜粋: "def run(self):")
+* 根拠: (行番号: 338 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 328〜336 / 抜粋: "def run(self):")
+* 根拠: (行番号: 338〜346 / 抜粋: "def run(self):")
 
 
 * **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。
-* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 330〜336 / 抜粋: "self._send_report()")
+* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 340〜346 / 抜粋: "self._send_report()")
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 328〜336 / 抜粋: "def run(self):")
+* 根拠: (行番号: 338〜346 / 抜粋: "def run(self):")
 
 
 
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 338〜372 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 348〜382 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 338 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 348 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 338〜372 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 348〜382 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`common.send_push` によるDiscord通知送信。
-* 根拠: `common.send_push(\n            user_id=getattr(config, "LINE_USER_ID", None),\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 367〜372 / 抜粋: "common.send_push(")
+* 根拠: `common.send_push(\n            user_id=getattr(config, "LINE_USER_ID", None),\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 377〜382 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 338〜372 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 348〜382 / 抜粋: "def _send_report(self):")
 
 
 
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に `PostBootHealthCheck` をインスタンス化し `run()` を呼び出す。
-* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 374〜376 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 384〜386 / 抜粋: "if __name__ == "__main__":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 374〜376 / 抜粋: "checker = PostBootHealthCheck()")
+* 根拠: (行番号: 384〜386 / 抜粋: "checker = PostBootHealthCheck()")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 374〜376 / 抜粋: "checker.run()")
+* 根拠: (行番号: 384〜386 / 抜粋: "checker.run()")
 
 
 * **副作用**: `PostBootHealthCheck` インスタンスの生成、`run()` を通じた全チェックの実行とレポート送信。
-* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 375〜376 / 抜粋: "checker.run()")
+* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 385〜386 / 抜粋: "checker.run()")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 374〜376 / 抜粋: "if __name__ == "__main__":")
+* 根拠: (行番号: 384〜386 / 抜粋: "if __name__ == "__main__":")
 
 
 
@@ -554,17 +554,19 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `common.py` | `setup_logging` と `send_push` の実装が本ファイルの全チェック結果通知・NAS権限エラー即時通知の挙動を左右するため。 | `import common` (行番号: 19 / 抜粋: "import common") |
-| 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 140 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
-| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 149 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)") |
+| 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 150 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
+| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 159 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)") |
 
 ## 8. 保守上の注意点
 
-* **多数の bare `except:`**: `_get_uptime`（79行目）、`check_system_resources`（90, 103行目）、`check_network_and_apis`（119行目）、`check_peripherals`（261, 271行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
-* **（修正済み）`check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（295〜298行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
+* **多数の bare `except:`**: `_get_uptime`（79行目）、`check_system_resources`（95, 110行目）、`check_network_and_apis`（129行目）、`check_peripherals`（271, 281行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
+* **（修正済み）`check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（305〜308行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
 * **（修正済み）`TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、現在は `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)`（31行目）から取得するよう修正済みで、`config.SPEAKER_BLUETOOTH_MAC` が設定されていれば実際のBluetooth接続状態を確認する経路が有効になる。
-* **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（221〜226行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。
+* **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（231〜236行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。
 * **`check_services` のブロッキング待機**: 各サービスにつき最大12回×10秒（最大2分/サービス）の同期的な `time.sleep` が発生し、対象が複数（3つ）ある場合は最悪ケースで合計6分間スクリプトがブロックされる。
-* **SwitchBot/NatureRemo APIの認証はするが応答内容は見ていない**: `check_network_and_apis`（115〜136行目）は認証ヘッダー付与とステータスコード検証（`_check_http`経由）まで行うようになったが、レスポンス本文の内容（デバイス一覧の妥当性等）までは検証していないため、200番台を返すが実質的に空/不正なレスポンスのケースは検知できない。
+* **SwitchBot/NatureRemo APIの認証はするが応答内容は見ていない**: `check_network_and_apis`（125〜146行目）は認証ヘッダー付与とステータスコード検証（`_check_http`経由）まで行うようになったが、レスポンス本文の内容（デバイス一覧の妥当性等）までは検証していないため、200番台を返すが実質的に空/不正なレスポンスのケースは検知できない。
+* **（修正済み）`check_system_resources` の危険域判定**: 以前はCPU温度・ディスク使用率がどれだけ閾値を超過しても `STATUS_WARN` までしか上がらず、危険域でもタイトルアイコンが🔴（`_send_report` の `has_err` 判定）にならなかったが、現在は温度85°C以上・ディスク使用率95%超で `STATUS_ERR` に昇格するよう修正済み（88〜91, 103〜106行目）。
+* **（修正済み）`check_services` のDashboard扱い**: 以前は `Dashboard` のみ `critical=False` でポート未応答でも `STATUS_WARN` までしか上がらなかったが、現在は3対象すべて `critical=True`（180行目）に統一され、Dashboard未起動時も `STATUS_ERR` として報告される。
 
 ## 9. 不明事項一覧
 
@@ -580,8 +582,8 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `common.setup_logging` / `common.send_push` の実装 | `MY_HOME_SYSTEM/common.py`15行目・31〜37行目を直接確認したところ、`setup_logging`は`core.logger`から、`send_push`は`services.notification_service`からそのまま再エクスポートされるFacadeであることを確認した。実体の`core/logger.py`の`setup_logging(name, webhook_url=None)`(46〜86行目)はコンソール出力・`config.BASE_DIR/logs/home_system.log`への日次ローテーションファイル出力・ERRORレベルログのDiscord通知(`DiscordErrorHandler`)の3種のハンドラを登録する。実体の`services/notification_service.py`の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(116〜140行目)は`target`に応じてDiscord Webhook(`_send_discord_webhook`)およびLINE Messaging API(`_send_line_push`)へ送信し、LINE送信失敗時は135〜137行目で`_send_discord_webhook(fallback, None, 'error')`によりDiscordのエラーチャンネルへフォールバック通知する設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:15, 31-37`, `MY_HOME_SYSTEM/core/logger.py:46-86`, `MY_HOME_SYSTEM/services/notification_service.py:116-140` |
-| `config` の各設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`LOG_DIR`(230〜233行目)は`ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`の戻り値(通常`{BASE_DIR}/logs`)。`SQLITE_DB_PATH`(224行目)は`os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`。`NAS_IP`(410行目)は既定`"192.168.1.20"`(環境変数`NAS_IP`で上書き可)。`NAS_MOUNT_POINT`(218行目)は既定`"/mnt/nas"`。`FRONTEND_URL`(416行目)は既定`"http://192.168.1.200:8000/quest"`。`CAMERAS`(299〜307行目)は`devices.json`の`"cameras"`配列を`CameraConfig`で検証したリスト。`LINE_USER_ID`(187行目)は`os.getenv("LINE_USER_ID")`で値そのものは`.env`(gitignore対象)依存のため未確認。`NATURE_REMO_ACCESS_TOKEN`(182行目)は`os.getenv("NATURE_REMO_ACCESS_TOKEN")`。`SPEAKER_BLUETOOTH_MAC`(174行目)は既定`"F4:4E:FC:B6:65:D4"`(環境変数`SPEAKER_BLUETOOTH_MAC`で上書き可。`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一のAnker SoundCore 2のMACアドレス)。なお`BACKEND_URL`は`config.py`内に定義が一切存在せず、`post_boot_health_check.py`164行目の`getattr(config, "BACKEND_URL", "http://localhost:8000")`により常に既定値`"http://localhost:8000"`が使われることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:174, 182, 187, 218, 224, 230-233, 299-307, 410, 416`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py:164`） |
-| DBスキーマ | `config.SQLITE_DB_PATH`(既定`{BASE_DIR}/home_system.db`)の初期化を担う`MY_HOME_SYSTEM/init_unified_db.py`、および実際のスキーマダンプである`MY_HOME_SYSTEM/current_schema.sql`(全346行)を直接確認した。`current_schema.sql`には`device_records`, `ohayo_records`, `daily_records`, `health_records`, `quest_users`, `quest_master`, `quest_history`, `reward_master`, `switchbot_meter_logs`, `power_usage`等、計36個の`CREATE TABLE`文が存在することを確認した。本ファイルの`PRAGMA quick_check;`(151行目)はテーブル単位ではなくDBファイル全体の整合性チェックであり、対象サイズそのものはDBファイルの実データ量に依存するため本ファイル・スキーマ定義からは判断できない。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:1-346`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py:139-159`, `MY_HOME_SYSTEM/init_unified_db.py`） |
+| `config` の各設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`LOG_DIR`(230〜233行目)は`ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`の戻り値(通常`{BASE_DIR}/logs`)。`SQLITE_DB_PATH`(224行目)は`os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`。`NAS_IP`(410行目)は既定`"192.168.1.20"`(環境変数`NAS_IP`で上書き可)。`NAS_MOUNT_POINT`(218行目)は既定`"/mnt/nas"`。`FRONTEND_URL`(416行目)は既定`"http://192.168.1.200:8000/quest"`。`CAMERAS`(299〜307行目)は`devices.json`の`"cameras"`配列を`CameraConfig`で検証したリスト。`LINE_USER_ID`(187行目)は`os.getenv("LINE_USER_ID")`で値そのものは`.env`(gitignore対象)依存のため未確認。`NATURE_REMO_ACCESS_TOKEN`(182行目)は`os.getenv("NATURE_REMO_ACCESS_TOKEN")`。`SPEAKER_BLUETOOTH_MAC`(174行目)は既定`"F4:4E:FC:B6:65:D4"`(環境変数`SPEAKER_BLUETOOTH_MAC`で上書き可。`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一のAnker SoundCore 2のMACアドレス)。なお`BACKEND_URL`は`config.py`内に定義が一切存在せず、`post_boot_health_check.py`174行目の`getattr(config, "BACKEND_URL", "http://localhost:8000")`により常に既定値`"http://localhost:8000"`が使われることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:174, 182, 187, 218, 224, 230-233, 299-307, 410, 416`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py:174`） |
+| DBスキーマ | `config.SQLITE_DB_PATH`(既定`{BASE_DIR}/home_system.db`)の初期化を担う`MY_HOME_SYSTEM/init_unified_db.py`、および実際のスキーマダンプである`MY_HOME_SYSTEM/current_schema.sql`(全346行)を直接確認した。`current_schema.sql`には`device_records`, `ohayo_records`, `daily_records`, `health_records`, `quest_users`, `quest_master`, `quest_history`, `reward_master`, `switchbot_meter_logs`, `power_usage`等、計36個の`CREATE TABLE`文が存在することを確認した。本ファイルの`PRAGMA quick_check;`(161行目)はテーブル単位ではなくDBファイル全体の整合性チェックであり、対象サイズそのものはDBファイルの実データ量に依存するため本ファイル・スキーマ定義からは判断できない。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:1-346`（参考: `MY_HOME_SYSTEM/post_boot_health_check.py:149-169`, `MY_HOME_SYSTEM/init_unified_db.py`） |
 | 実行環境の前提 | `MY_HOME_SYSTEM/start_all.sh`(全75行)を直接確認したが`vcgencmd`/`bluetoothctl`/`aplay`への言及やハードウェア種別の明記はなかった。ただし`MY_HOME_SYSTEM/old/README.md`4行目に`- **Raspberry Pi IP**: Fixed (Static IP) via NetworkManager.`という記載があることを直接確認し、本システムがRaspberry Pi上で運用されていることが別ファイルから判明した(ただし`post_boot_health_check.py`自体との直接的な結び付きを示す記述ではない)。 | 直接ソース確認: `MY_HOME_SYSTEM/old/README.md:4`（参考: `MY_HOME_SYSTEM/start_all.sh:1-75`） |
 
 ## 10. 自己検証結果

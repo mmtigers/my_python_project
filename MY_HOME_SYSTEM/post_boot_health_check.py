@@ -85,7 +85,12 @@ class PostBootHealthCheck:
         try:
             res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")
             temp = float(res.replace("temp=", "").replace("'C\n", ""))
-            temp_status = STATUS_OK if temp < 75 else STATUS_WARN
+            if temp >= 85:
+                temp_status = STATUS_ERR
+            elif temp >= 75:
+                temp_status = STATUS_WARN
+            else:
+                temp_status = STATUS_OK
             temp_msg = f"{temp:.1f}°C"
         except:
             temp_status = STATUS_WARN
@@ -95,7 +100,9 @@ class PostBootHealthCheck:
         try:
             total, used, free = shutil.disk_usage("/")
             disk_percent = (used / total) * 100
-            if disk_percent > 90:
+            if disk_percent > 95:
+                disk_status = STATUS_ERR
+            elif disk_percent > 90:
                 disk_status = STATUS_WARN
             else:
                 disk_status = STATUS_OK
@@ -104,10 +111,13 @@ class PostBootHealthCheck:
             disk_status = STATUS_WARN
             disk_msg = "Unknown"
 
-        final_status = STATUS_OK
-        if temp_status != STATUS_OK or disk_status != STATUS_OK:
+        if temp_status == STATUS_ERR or disk_status == STATUS_ERR:
+            final_status = STATUS_ERR
+        elif temp_status != STATUS_OK or disk_status != STATUS_OK:
             final_status = STATUS_WARN
-            
+        else:
+            final_status = STATUS_OK
+
         self.results.append(CheckResult(
             "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"
         ))
@@ -167,7 +177,7 @@ class PostBootHealthCheck:
         targets = [
             {"name": "Backend Server", "type": "port", "val": 8000, "critical": True},
             {"name": "Family Quest",   "type": "http", "val": frontend_url, "critical": True},
-            {"name": "Dashboard",      "type": "port", "val": 8501, "critical": False},
+            {"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},
         ]
 
         logger.info("⏳ Waiting for services to startup...")
