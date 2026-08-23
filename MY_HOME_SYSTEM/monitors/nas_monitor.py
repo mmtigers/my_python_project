@@ -174,6 +174,8 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
+            ("タイムラプス動画", os.path.join(getattr(config, "ASSETS_DIR", ""), "timelapse"),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4", ".jpg")),
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
              getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
         ]
