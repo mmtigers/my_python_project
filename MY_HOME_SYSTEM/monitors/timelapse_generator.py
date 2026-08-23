@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/monitors/timelapse_generator.py
 import os
 import glob
+import shutil
 import time
 import datetime
 import subprocess
@@ -15,6 +16,18 @@ from core.logger import setup_logging
 from services.notification_service import send_push
 
 logger = setup_logging("timelapse_generator")
+
+def run_ffmpeg_simple(cmd: List[str], timeout: int = 300) -> bool:
+    """タイムアウトと終了コードを確認しつつFFmpegコマンドを実行する(リトライなし)。"""
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        if res.returncode != 0:
+            logger.error(f"FFmpegエラー (returncode={res.returncode}): {res.stderr}")
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.error(f"FFmpeg処理がタイムアウトしました({timeout}秒)")
+        return False
 
 def extract_video_clip(cmd: List[str], input_path: str, output_path: str, max_retries: int = 3) -> bool:
     """
@@ -206,8 +219,9 @@ def process_video_clips(camera_name: str, nas_folder: str, event_times: List[dat
         "-c", "copy",
         output_video
     ]
-    subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
+    if not run_ffmpeg_simple(concat_cmd):
+        return ""
+
     return output_video
 
 def upload_video_to_discord(file_path: str, message: str) -> None:
@@ -251,8 +265,9 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
             "-reset_timestamps", "1",
             split_pattern
         ]
-        subprocess.run(split_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
+        if not run_ffmpeg_simple(split_cmd):
+            return
+
         split_files = sorted(glob.glob(file_path.replace(".mp4", "_part*.mp4")))
         for i, split_file in enumerate(split_files):
             part_msg = f"{message} (Part {i+1}/{len(split_files)})"
@@ -324,8 +339,18 @@ def main():
             logger.info(f"✨ {db_name} のアップロードが完了しました。")
             
     # クリーンアップ
-    for f in glob.glob(os.path.join(config.TMP_VIDEO_DIR, "*")):
-        os.remove(f)
+    cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)
+
+def cleanup_tmp_video_dir(tmp_dir: str) -> None:
+    """一時動画ディレクトリ配下を全て削除する(ファイル・ディレクトリ混在でもクラッシュしない)"""
+    for f in glob.glob(os.path.join(tmp_dir, "*")):
+        try:
+            if os.path.isfile(f) or os.path.islink(f):
+                os.remove(f)
+            elif os.path.isdir(f):
+                shutil.rmtree(f)
+        except OSError as e:
+            logger.warning(f"一時ファイルのクリーンアップに失敗しました: {f}: {e}")
 
 if __name__ == "__main__":
     main()
