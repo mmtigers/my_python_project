@@ -2,6 +2,7 @@
 import unittest
 import sys
 import os
+import threading
 import time
 import tempfile
 import shutil
@@ -126,6 +127,45 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         self.assertFalse(os.path.exists(old_summary))
         self.assertFalse(os.path.exists(old_part))
         self.assertTrue(os.path.exists(new_summary))
+
+
+class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
+    """M-4-6残り: check_write_permission()の書き込みI/O(open/write/remove)に
+    タイムアウトが無く、CIFSマウントがストールした場合にkillできず監視プロセス
+    ごとハングしてしまう不具合。実CIFS/NAS環境の代わりに、名前付きパイプ(FIFO)を
+    書き込み対象ファイルとして使い、open()がリーダー不在でブロックし続ける
+    状況を再現する。"""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_check_write_permission_times_out_instead_of_hanging(self):
+        monitor = NasMonitor()
+        monitor.mount_point = self.tmp_dir
+        monitor.timeout = 1
+        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        os.mkfifo(fifo_path)
+
+        result = {}
+
+        def run():
+            result["value"] = monitor.check_write_permission()
+
+        t = threading.Thread(target=run, daemon=True)
+        start = time.monotonic()
+        t.start()
+        t.join(timeout=10)
+        elapsed = time.monotonic() - start
+
+        self.assertFalse(
+            t.is_alive(),
+            "check_write_permission()がNASストール(FIFOブロック)でハングした"
+        )
+        self.assertLess(elapsed, 10, "タイムアウトが機能せず長時間ブロックした")
+        self.assertEqual(result.get("value"), False)
 
 
 if __name__ == "__main__":

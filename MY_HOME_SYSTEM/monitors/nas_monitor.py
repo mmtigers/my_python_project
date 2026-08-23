@@ -77,14 +77,30 @@ class NasMonitor:
         return os.path.ismount(self.mount_point)
 
     def check_write_permission(self) -> bool:
-        """NASへの実際の書き込み・削除が可能かテストする"""
+        """NASへの実際の書き込み・削除が可能かテストする。
+        CIFSマウントがストールしていると open()/write()/remove() がブロックしたまま
+        戻らず監視プロセスごとハングする恐れがあるため、別プロセスでI/Oを実行し
+        タイムアウト付きで待ち受ける(タイムアウト時はプロセスをkillして戻る)。"""
         test_file = os.path.join(self.mount_point, '.write_test')
+        script = (
+            "import os, sys\n"
+            "path = sys.argv[1]\n"
+            "with open(path, 'w') as f:\n"
+            "    f.write('health_check')\n"
+            "os.remove(path)\n"
+        )
         try:
-            with open(test_file, 'w') as f:
-                f.write('health_check')
-            os.remove(test_file)
+            subprocess.run(
+                [sys.executable, "-c", script, test_file],
+                timeout=self.timeout,
+                check=True,
+                capture_output=True,
+            )
             return True
-        except IOError as e:
+        except subprocess.TimeoutExpired:
+            logger.error(f"Write permission check timed out after {self.timeout}s (NAS mount possibly stalled)")
+            return False
+        except (subprocess.CalledProcessError, OSError) as e:
             logger.error(f"Write permission check error: {e}")
             return False
 
