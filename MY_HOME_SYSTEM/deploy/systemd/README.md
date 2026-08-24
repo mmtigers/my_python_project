@@ -16,4 +16,41 @@ sudo systemctl daemon-reload
 sudo systemctl enable health-check.service
 ```
 
+> **（修正済み）** 以前 `After=` に `unified-server.service` という実機に存在しないユニット名
+> (おそらく `home_system.service` へのリネーム前の旧名)が指定されており、死んだ依存関係に
+> なっていた(systemdはエラーにせず順序制約を無視するだけのため気づかれずに残っていた)。
+> 実機・本ファイルともに `After=network-online.target home_system.service` へ修正済み。
+
+## home_system.service
+
+`start_all.sh` を `ExecStart` で実行するoneshotユニット(`RemainAfterExit=yes`)。
+`start_all.sh` が内部で `unified_server.py` を `nohup` バックグラウンド起動し、
+`unified_server.py` がさらに `scheduler_boot.py` 等を起動する。
+
+導入手順(実機側):
+
+```bash
+sudo cp deploy/systemd/home_system.service /etc/systemd/system/home_system.service
+sudo systemctl daemon-reload
+sudo systemctl enable home_system.service
+```
+
+## network_logger.service
+
+`monitors/network_logger.py` を常駐実行し、カメラ群のネットワーク状態をログ記録する。
+
+導入手順(実機側):
+
+```bash
+sudo cp deploy/systemd/network_logger.service /etc/systemd/system/network_logger.service
+sudo systemctl daemon-reload
+sudo systemctl enable network_logger.service
+```
+
+## pi-monitor.service
+
+Raspberry Pi本体の汎用モニタリングサービス。`ExecStart` が指す `/opt/monitoring/monitor.py`
+は本リポジトリの外(`MY_HOME_SYSTEM` 対象外)にあるスクリプトであり、このリポジトリでは
+管理していない。ユニットファイル自体の変更履歴管理のみを目的として配置している。
+
 実機の設定を変更した場合は、このファイルにも反映してコミットすること。
