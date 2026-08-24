@@ -1190,6 +1190,11 @@ class MonitorConfig:
     # Notification Settings
     DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
 
+    # Detection Settings
+    # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
+    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値
+    MASS_DETECTION_WARNING_THRESHOLD: int = 20
+
     @classmethod
     def get_data_dir(cls) -> Path:
         """NASアクセスを検証・修復し、動的にデータディレクトリを解決する。
@@ -1324,6 +1329,12 @@ class DiscordNotifier:
                 fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})
             fields.append({"name": "Link", "value": f"[詳細ページへ]({cast.detail_url})", "inline": True})
 
+            # DiscordのembedはURL系フィールドにhttp(s)の絶対URLを要求しており、
+            # data:URIや相対パス等が渡ると400 Bad Requestで通知全体が拒否される。
+            # 遅延読み込み(lazyload)画像のプレースホルダー(data:image/gif;base64,...等)を
+            # 誤ってimage_urlとして拾ってしまうサイトがあるため、ここで弾く。
+            thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else ""
+
             payload = {
                 "username": "New Face Monitor",
                 "embeds": [
@@ -1333,7 +1344,7 @@ class DiscordNotifier:
                         "url": cast.detail_url,
                         "color": 16738740,  # Pinkish
                         "fields": fields,
-                        "thumbnail": {"url": cast.image_url} if cast.image_url else {}
+                        "thumbnail": {"url": thumbnail_url} if thumbnail_url else {}
                     }
                 ]
             }
@@ -1346,9 +1357,13 @@ class DiscordNotifier:
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
-                # 含まれるため、原因究明用にログへ残す
+                # 含まれるため、原因究明用にログへ残す。あわせて送信元のURL系フィールドも
+                # 出力し、原因切り分け（不正URL/文字数超過等）を後から追えるようにする
                 body = e.response.text[:300] if e.response is not None else ""
-                logger.error(f"Failed to send notification for {cast.name}: {e} | body: {body}")
+                logger.error(
+                    f"Failed to send notification for {cast.name}: {e} | body: {body} | "
+                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}"
+                )
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
                     # 無駄なだけなので打ち切る（サーキットブレーカー）。
@@ -1843,6 +1858,17 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
     # 3. Detect Diff
     new_casts_set = current_casts - known_casts
     new_casts = list(new_casts_set)
+
+    # 既知キャストが存在するのに新規検知が大量発生した場合、known_castsの喪失/
+    # 巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・
+    # 再通知の可能性がある（過去にyoluspa_osakaのシフトページ誤設定で同様の事象が
+    # 発生した実績あり）。通知自体は止めずに、調査の手がかりとして警告を残す。
+    if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:
+        logger.warning(
+            f"Unusually large diff for site '{site.site_id}': "
+            f"{len(new_casts)} new casts vs {len(known_casts)} previously known. "
+            "This may indicate known_casts data loss/rollback rather than genuine new casts."
+        )
 
     # 4. Notify & Update
     if new_casts:
