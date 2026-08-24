@@ -182,7 +182,11 @@
 
 * **戻り値/レスポンス**: 該当なし
 * **副作用**: `DISCORD_WEBHOOK_URL`のクラス変数定義時に環境変数`DISCORD_WEBHOOK_URL`を読み込む。
-* 根拠: [環境変数読み込み] (行番号: 1192 / 抜粋: "DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')")
+* 根拠: [環境変数読み込み] (行番号: 1191 / 抜粋: "DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')")
+
+
+* **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
+* 根拠: [定数定義とコメント] (行番号: 1193〜1196 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
 
 
 * **エラーハンドリング**: なし
@@ -354,23 +358,23 @@
 ### `DiscordNotifier.notify`
 
 * **役割**: 新規キャストのリストを受け取り、各キャストごとにDiscord埋め込みメッセージ(embed)を構築してWebhook経由で送信する。`site_name`が指定されている場合はどのサイトの新着かを区別できるよう埋め込みタイトルに`【サイト名】`のプレフィックスを付与する。Webhook URL未設定時は送信をスキップし、認証エラー(401/404)発生時は残りの通知処理を打ち切る（サーキットブレーカー）。
-* 根拠: [メソッド定義とDocstring] (行番号: 1306〜1313 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:\n        """新規キャスト情報をDiscordに通知する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1310〜1317 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:\n        """新規キャスト情報をDiscordに通知する。")
 
 
 * **引数/リクエスト**: `new_casts: List[CastMember]`（通知対象の新規キャストリスト）, `site_name: str = ""`（通知元サイトの表示名）
-* 根拠: [引数定義とDocstring] (行番号: 1306, 1310〜1312 / 抜粋: "new_casts (List[CastMember]): 通知対象の新規キャストリスト。\n            site_name (str): 通知元サイトの表示名。")
+* 根拠: [引数定義とDocstring] (行番号: 1310, 1314〜1316 / 抜粋: "new_casts (List[CastMember]): 通知対象の新規キャストリスト。\n            site_name (str): 通知元サイトの表示名。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1306 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1310 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:")
 
 
-* **副作用**: Webhook URL未設定時の警告ログ出力、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。
-* 根拠: [送信処理] (行番号: 1322〜1326, 1342〜1346 / 抜粋: "if cast.age:\n                fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})")
+* **副作用**: Webhook URL未設定時の警告ログ出力、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。`cast.image_url`が`http://`/`https://`で始まらない場合（lazyload画像のプレースホルダーとして`data:`URIや相対パスが混入したケース等）は、embedの`thumbnail`を送信せず空オブジェクトにする（Discord側のURL形式バリデーション失敗による`400 Bad Request`を避けるため）。
+* 根拠: [送信処理・thumbnail URL検証] (行番号: 1326〜1329, 1332〜1336, 1347 / 抜粋: "if cast.age:\n                fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})" / "thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else \"\"")
 
 
-* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し即座に処理を中断(`return`)。`requests.HTTPError`発生時はレスポンス本文の先頭300文字を含めてエラーログを出力し、ステータスコードが401または404であればさらにエラーログを出力したうえで通知ループを`break`で打ち切る。それ以外の`requests.RequestException`発生時はエラーログを出力し次のキャストの処理を継続する。
-* 根拠: [各エラー分岐] (行番号: 1314〜1316, 1347〜1362 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping notification.")\n            return")
+* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し即座に処理を中断(`return`)。`requests.HTTPError`発生時はレスポンス本文の先頭300文字に加え、原因切り分け用として`detail_url`/`image_url`を含めてエラーログを出力し、ステータスコードが401または404であればさらにエラーログを出力したうえで通知ループを`break`で打ち切る。それ以外の`requests.RequestException`発生時はエラーログを出力し次のキャストの処理を継続する。
+* 根拠: [各エラー分岐] (行番号: 1318〜1320, 1357〜1376 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping notification.")\n            return" / "logger.error(\n                    f\"Failed to send notification for {cast.name}: {e} | body: {body} | \"\n                    f\"detail_url: {cast.detail_url} | image_url: {cast.image_url}\"\n                )")
 
 
 ### `DiscordNotifier.notify_daily_summary`
@@ -623,8 +627,8 @@
 * 根拠: [戻り値ヒント] (行番号: 1748 / 抜粋: "def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:")
 
 
-* **副作用**: `DataManager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`DataManager.record_daily_new_casts`による日次集計更新。
-* 根拠: [メイン処理フロー] (行番号: 1762, 1766, 1783〜1792 / 抜粋: "known_casts = DataManager.load_known_casts(site)")
+* **副作用**: `DataManager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`DataManager.record_daily_new_casts`による日次集計更新。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。
+* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1842, 1846, 1862〜1870 / 抜粋: "known_casts = DataManager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")
 
 
 * **エラーハンドリング**: `monitor.fetch_current_casts`での`requests.RequestException`発生時はエラーログを出力して`return`（当該サイトのみ中断、他サイトへは影響しない）。取得キャストが0件の場合はデバッグログを出力して`return`。
