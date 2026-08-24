@@ -408,7 +408,9 @@ REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
 # 10. NAS & Network設定
 # ==========================================
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
-NAS_CHECK_TIMEOUT: int = 5
+# CIFSのoplock解放待ちなど、正常範囲でも書き込みチェックが10秒台に伸びることが
+# 実機ログ調査(2026-08-23 22:00頃の障害)で確認されたため、誤検知を避けられる値にしている。
+NAS_CHECK_TIMEOUT: int = 20
 
 _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "dist")
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
