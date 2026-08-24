@@ -10,6 +10,7 @@ import dataclasses
 import logging
 import sys
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -161,6 +162,65 @@ class TestCollectTasksNormalizesMissavSearchUrls:
 
         assert len(tasks) == 1
         assert tasks[0].url == "https://missav.live/dm18/ja/dvdms-079"
+
+
+class TestScrapingStrategyFragmentStaging:
+    """missavのHLSフラグメント(数千個の小ファイル)を、NASの保存先ディレクトリ
+    ではなくローカルディスク(CONFIG.LOCAL_TMP_DIR)へ一時保存することを確認する
+    回帰テスト。NAS上に大量の小ファイルを書き込むと、autofsの再マウント遅延等
+    により一部フラグメントがyt-dlpから"fragment not found"として欠落する問題が
+    実機で発生したための対応。"""
+
+    def test_fragments_are_staged_under_local_tmp_dir_not_save_dir(self, tmp_path, monkeypatch):
+        nas_save_dir = tmp_path / "nas_save"
+        nas_save_dir.mkdir()
+        local_tmp_dir = tmp_path / "local_tmp"
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+
+        manifest = (
+            "#EXTM3U\n"
+            "#EXT-X-TARGETDURATION:10\n"
+            "https://cdn.example.com/seg0.ts\n"
+            "https://cdn.example.com/seg1.ts\n"
+            "#EXT-X-ENDLIST\n"
+        )
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", lambda m3u8_url, page_url: manifest)
+        monkeypatch.setattr(strategy, "_download_segment", lambda url, page_url: b"dummy-bytes")
+
+        captured = {}
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                captured["opts"] = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def download(self, urls):
+                captured["download_url"] = urls[0]
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+
+        final_path = nas_save_dir / "dvdms-079.mp4"
+        result = strategy._download_with_ytdlp(
+            "https://cdn.example.com/playlist.m3u8",
+            final_path,
+            "https://missav.live/dm18/ja/dvdms-079",
+            nas_save_dir,
+        )
+
+        assert result is True
+        download_url = captured["download_url"]
+        local_manifest_path = str(Path(unquote(urlsplit(download_url).path)))
+        assert str(local_tmp_dir) in local_manifest_path
+        assert str(nas_save_dir) not in local_manifest_path
 
 
 if __name__ == "__main__":
