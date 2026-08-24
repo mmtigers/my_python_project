@@ -2,6 +2,7 @@
 import unittest
 import sys
 import os
+import subprocess
 import threading
 import time
 import tempfile
@@ -147,7 +148,12 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         monitor.mount_point = self.tmp_dir
         monitor.timeout = 1
         monitor.write_check_retries = 2  # リトライ待機を短縮してテストを高速化
-        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        # 各試行は本来ファイル名を毎回変えるが(自己永続的な失敗ループ回避のため)、
+        # このテストは「同じ箇所が全リトライを通じて塞がり続けるケース」を
+        # 検証したいので、あえて固定名に差し替える。
+        fixed_name = ".write_test_fixed_for_test"
+        monitor._write_test_filename = lambda: fixed_name
+        fifo_path = os.path.join(self.tmp_dir, fixed_name)
         os.mkfifo(fifo_path)
 
         result = {}
@@ -175,7 +181,9 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         monitor.mount_point = self.tmp_dir
         monitor.timeout = 1
         monitor.write_check_retries = 3
-        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        fixed_name = ".write_test_fixed_for_test"
+        monitor._write_test_filename = lambda: fixed_name
+        fifo_path = os.path.join(self.tmp_dir, fixed_name)
         os.mkfifo(fifo_path)
 
         def clear_stall_after_delay():
@@ -201,7 +209,9 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         monitor.mount_point = self.tmp_dir
         monitor.timeout = 1
         monitor.write_check_retries = 1
-        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        fixed_name = ".write_test_fixed_for_test"
+        monitor._write_test_filename = lambda: fixed_name
+        fifo_path = os.path.join(self.tmp_dir, fixed_name)
         os.mkfifo(fifo_path)
 
         with patch.object(monitor, "check_ping", return_value=True) as mock_ping, \
@@ -216,6 +226,63 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
             any("ping=True, mount=True" in message for message in cm.output),
             f"診断結果がログに含まれていない: {cm.output}"
         )
+
+
+class TestNasMonitorWriteTestFilenameUniqueness(unittest.TestCase):
+    """本番調査(2026-08-23)で判明した不具合の回帰テスト:
+    固定ファイル名だと、タイムアウトでkillされた際の残留ファイル/CIFSハンドル
+    不整合が原因で、以降のチェックが毎回同じ理由で失敗し続けるループに陥っていた。
+    呼び出しごとに異なるファイル名を使うことでこれを回避する。"""
+
+    def test_filename_differs_between_calls(self):
+        monitor = NasMonitor()
+        name1 = monitor._write_test_filename()
+        name2 = monitor._write_test_filename()
+        self.assertNotEqual(name1, name2)
+
+    def test_write_permission_check_does_not_reuse_stale_file(self):
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            monitor = NasMonitor()
+            monitor.mount_point = tmp_dir
+            # 過去に(タイムアウトでkillされて)取り残された残留ファイルを再現
+            stale_path = os.path.join(tmp_dir, ".write_test.99999.123")
+            with open(stale_path, "w") as f:
+                f.write("")
+
+            self.assertTrue(monitor.check_write_permission())
+            # 残留ファイルには触れず、そのまま残っているはず
+            self.assertTrue(os.path.exists(stale_path))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def test_each_retry_attempt_uses_a_different_filename(self):
+        """リトライ機構(write_check_retries)と一意ファイル名は組み合わさって
+        初めて効果がある。同一呼び出し内の各試行が同じファイル名を使い回すと、
+        1回目のkillで残った不整合を2回目以降も踏み続け、結局リトライしても
+        毎回失敗し続けてしまうため、試行ごとにファイル名が変わることを確認する。"""
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            monitor = NasMonitor()
+            monitor.mount_point = tmp_dir
+            monitor.timeout = 1
+            monitor.write_check_retries = 3
+            used_paths = []
+
+            def spy_run(cmd, **kwargs):
+                # 最終失敗時の診断用ping呼び出し等、書き込みテスト以外のsubprocess.run
+                # 呼び出しも同じモックを通るため、書き込みテストの呼び出しだけを対象にする。
+                if cmd[0] == sys.executable:
+                    used_paths.append(cmd[-1])
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+            with patch("monitors.nas_monitor.subprocess.run", side_effect=spy_run):
+                monitor.check_write_permission()
+
+            self.assertEqual(len(used_paths), monitor.write_check_retries)
+            self.assertEqual(len(set(used_paths)), len(used_paths))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
