@@ -409,6 +409,11 @@ REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
 # ==========================================
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
 NAS_CHECK_TIMEOUT: int = 5
+# 書き込みテストがタイムアウトした際の再試行回数。
+# autofsのアイドルアンマウント後の初回アクセスやNAS本体のディスクスピンアップは
+# NAS_CHECK_TIMEOUT(5秒)を超えることがあるため、単発のタイムアウトで即座に
+# 障害と判定せず、Exponential Backoffで再試行する。
+NAS_WRITE_CHECK_RETRIES: int = 3
 
 _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "dist")
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
