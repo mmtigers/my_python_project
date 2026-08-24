@@ -115,9 +115,16 @@ class NasMonitor:
                     )
                     time.sleep(wait_time)
                     continue
+                # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
+                # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
+                # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
+                # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
+                diag_ping_ok = self.check_ping()
+                diag_mount_ok = self.check_mount() if diag_ping_ok else False
                 logger.error(
                     f"Write permission check timed out after {self.timeout}s "
-                    f"x {self.write_check_retries} attempts (NAS mount possibly stalled)"
+                    f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
+                    f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
                 )
                 return False
             except (subprocess.CalledProcessError, OSError) as e:
