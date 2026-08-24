@@ -29,6 +29,7 @@ import time
 import re
 import random
 import shutil
+import tempfile
 import datetime
 import logging
 import signal
@@ -122,6 +123,14 @@ class AppConfig:
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
+    # missavのHLSフラグメント(数千個の小ファイル)を一時保存する先。NAS上の
+    # BASE_SAVE_DIR配下に置くと、autofsのアイドルアンマウント後の再マウント遅延
+    # やNAS本体側の応答遅延（本リポジトリのnas_monitor関連の過去の調査で
+    # 判明済み）が、大量の小ファイルへの書き込み直後の読み込みで顕在化し、
+    # yt-dlp側で"fragment not found"として一部フラグメントが欠落する実害が
+    # 実機で確認された。ローカルディスク（NASを経由しない）に隔離することで
+    # この種のマウント遅延の影響を受けないようにする。
+    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", tempfile.gettempdir())) / "ddd_missav_fragments"
 
     REQUEST_TIMEOUT: int = 20
     MAX_RETRIES: int = 3
@@ -737,7 +746,10 @@ class ScrapingStrategy(DownloadStrategy):
 
         localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
 
-        tmp_dir = final_path.with_name(final_path.name + ".fragments.tmp")
+        # フラグメントはNAS上のsave_dirではなくローカルディスクに一時保存する
+        # (理由はCONFIG.LOCAL_TMP_DIRのコメント参照)。結合済みの最終ファイルの
+        # みNAS上のfinal_pathへ書き出す。
+        tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")
         try:
             tmp_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
