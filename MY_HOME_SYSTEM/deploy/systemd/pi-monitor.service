@@ -1,0 +1,15 @@
+[Unit]
+Description=Raspberry Pi Custom Monitoring Service
+After=network.target
+
+[Service]
+Type=simple
+User=masahiro
+# ユーザー名はご自身の環境に合わせて変更してください（デフォルトは pi ではない場合があります）
+# `whoami` で確認したユーザー名を指定してください
+ExecStart=/opt/monitoring/monitor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

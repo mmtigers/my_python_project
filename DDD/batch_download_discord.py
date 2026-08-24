@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from pathlib import Path
 from urllib.parse import urljoin
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # External Libraries
 from requests.adapters import HTTPAdapter
@@ -637,43 +638,124 @@ class ScrapingStrategy(DownloadStrategy):
                 lines.append(line)
         return "\n".join(lines)
 
+    _FRAGMENT_DOWNLOAD_WORKERS = 5
+
+    def _download_segment(self, url: str, page_url: str) -> bytes:
+        import curl_cffi.requests as curl_requests
+
+        res = curl_requests.get(
+            url,
+            headers={'Referer': page_url},
+            impersonate="chrome",
+            timeout=CONFIG.REQUEST_TIMEOUT,
+        )
+        if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:
+            raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")
+        res.raise_for_status()
+        return res.content
+
+    def _download_segments_and_localize_manifest(
+        self, localized_manifest: str, page_url: str, tmp_dir: Path
+    ) -> str:
+        """絶対URL化済みのm3u8マニフェストの各セグメント(および#EXT-X-KEYのURI等)を
+        curl_cffi(ブラウザ偽装)で自前ダウンロードし、ローカルファイル名に
+        差し替えたマニフェストを返す。
+
+        yt-dlp自身にセグメント取得をさせると、yt-dlpの"requests"ネットワーク
+        ハンドラが独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequests
+        とは異なり、User-Agent等のヘッダーを完全に一致させてもWAFに403で
+        ブロックされ続けることを実機の生トラフィック検証(debug_printtraffic)で
+        確認した。一方、curl_cffiでのブラウザ偽装リクエストはページ本体・
+        m3u8マニフェスト・個別セグメントいずれも問題なく通ることを確認済み。
+        そのためセグメント取得自体もcurl_cffi経由で行い、yt-dlp/ffmpegには
+        取得済みのローカルファイルのみを渡す(ネットワークアクセスさせない)。
+        """
+        lines = localized_manifest.splitlines()
+        targets: Dict[int, str] = {}
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith('#'):
+                m = re.search(r'URI="([^"]+)"', stripped)
+                if m:
+                    targets[i] = m.group(1)
+            else:
+                targets[i] = stripped
+
+        def _fetch_one(idx: int, url: str) -> Tuple[int, str]:
+            suffix = Path(url.split('?')[0]).suffix or '.bin'
+            local_name = f"seg_{idx:06d}{suffix}"
+            local_path = tmp_dir / local_name
+            content = self._download_segment(url, page_url)
+            local_path.write_bytes(content)
+            # 相対ファイル名のままだと、yt-dlp側でfile://の基準URLに対する
+            # 相対URI解決が(特にWindowsのドライブレター付きfile://パスで)
+            # うまくいかず"url must be a string"のエラーになることを実機で
+            # 確認したため、各セグメントの絶対file:// URIを書き込む。
+            return idx, local_path.resolve().as_uri()
+
+        resolved: Dict[int, str] = {}
+        with ThreadPoolExecutor(max_workers=self._FRAGMENT_DOWNLOAD_WORKERS) as executor:
+            futures = {executor.submit(_fetch_one, idx, url): idx for idx, url in targets.items()}
+            for future in as_completed(futures):
+                idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
+                resolved[idx] = local_uri
+
+        new_lines = list(lines)
+        for idx, _url in targets.items():
+            local_uri = resolved[idx]
+            if lines[idx].strip().startswith('#'):
+                new_lines[idx] = re.sub(r'URI="[^"]+"', f'URI="{local_uri}"', lines[idx])
+            else:
+                new_lines[idx] = local_uri
+        return "\n".join(new_lines)
+
     def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
-        # HLS(m3u8)はyt-dlpに処理を委譲してダウンロードと結合を行う
-        # 注: UniversalYtDlpStrategyと異なり、ここに sleep_interval_requests は
-        # 設定しない。HLSは1本の動画で数百のセグメントリクエストが発生するため、
-        # リクエスト毎にスリープすると現実的な時間で終わらなくなる。
-        # ボット検知対策は「ページ取得側（_fetch_html）の間隔・検知」で担保する。
+        # HLS(m3u8)は「マニフェスト・全セグメントをcurl_cffi(ブラウザ偽装)で
+        # 自前取得してローカルに保存 → yt-dlpにはローカルファイルのみを渡して
+        # 結合させる」方式で処理する(理由は_download_segments_and_localize_manifest
+        # のdocstring参照)。
         manifest_text = self._fetch_m3u8_manifest(m3u8_url, page_url)
         if manifest_text is None:
             return False
 
         localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
-        tmp_manifest_path = final_path.with_name(final_path.name + ".manifest.m3u8.tmp")
+
+        tmp_dir = final_path.with_name(final_path.name + ".fragments.tmp")
         try:
-            tmp_manifest_path.write_text(localized_manifest, encoding="utf-8")
+            tmp_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            logger.error(f"⚠️ 一時m3u8マニフェストの書き込みに失敗しました: {e}", exc_info=True)
+            logger.error(f"⚠️ 一時フラグメント用ディレクトリの作成に失敗しました: {e}", exc_info=True)
             return False
 
-        ydl_opts = {
-            'format': 'best',
-            'outtmpl': str(final_path),
-            'http_headers': {'Referer': page_url}, # ホットリンク防止の回避
-            'quiet': not CONFIG.SHOW_PROGRESS_BAR,
-            'no_warnings': True,
-            'concurrent_fragment_downloads': 5, # チャンク分割DLの高速化
-            # マニフェスト自体は上でcurl_cffi経由(ブラウザ偽装済み)で取得済みのため、
-            # yt-dlpにはローカルファイルとして渡す(file://URL)。これによりyt-dlpが
-            # マニフェストを再取得する内部リクエスト(impersonateが引き継がれない)を
-            # 経由せずに済む。
-            'enable_file_urls': True,
-        }
         try:
-            logger.info(f"📥 M3U8 DL開始 (yt-dlp): {final_path.name}")
+            logger.info(f"📥 セグメント取得開始 (curl_cffi): {final_path.name}")
+            local_manifest = self._download_segments_and_localize_manifest(
+                localized_manifest, page_url, tmp_dir
+            )
+
+            tmp_manifest_path = tmp_dir / "playlist.m3u8"
+            tmp_manifest_path.write_text(local_manifest, encoding="utf-8")
+
+            ydl_opts = {
+                'format': 'best',
+                'outtmpl': str(final_path),
+                'quiet': not CONFIG.SHOW_PROGRESS_BAR,
+                'no_warnings': True,
+                # セグメントは既にローカルへ取得済みのため、yt-dlpにはローカル
+                # ファイルとして渡す(file://URL)。結合処理のみyt-dlp/ffmpegに
+                # 任せ、ネットワークアクセスは一切発生させない。
+                'enable_file_urls': True,
+            }
+            logger.info(f"📥 結合開始 (yt-dlp): {final_path.name}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([tmp_manifest_path.resolve().as_uri()])
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
             return True
+        except BotDetectionError:
+            if final_path.exists(): final_path.unlink()
+            raise
         except Exception as e:
             logger.error(f"⚠️ M3U8 DL エラー: {e}", exc_info=True)
             if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除
@@ -681,7 +763,7 @@ class ScrapingStrategy(DownloadStrategy):
                 raise BotDetectionError(f"{page_url}: {e}") from e
             return False
         finally:
-            tmp_manifest_path.unlink(missing_ok=True)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 # ==========================================
 # 4. メインコントローラー
