@@ -63,8 +63,8 @@
 
 ### 関数 `__init__`
 
-* **役割**: クラス内の設定値（IP、パス、タイムアウト時間、ステータス保存ファイルなど）を`config`等から初期化する。
-* 根拠: `def __init__(self) -> None:` (行番号: 25〜31 / 抜粋: "def __init__(self) -> None:")
+* **役割**: クラス内の設定値（IP、パス、タイムアウト時間、書き込みチェックのリトライ回数、ステータス保存ファイルなど）を`config`等から初期化する。
+* 根拠: `def __init__(self) -> None:` (行番号: 25〜39 / 抜粋: "def __init__(self) -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -75,12 +75,12 @@
 * 根拠: `def __init__(self) -> None:` (行番号: 25 / 抜粋: "def __init__(self) -> None:")
 
 
-* **副作用**: クラスのインスタンス変数の定義。
-* 根拠: `self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")` (行番号: 26〜31 / 抜粋: "self.ip: str = getattr(co...")
+* **副作用**: クラスのインスタンス変数の定義。`self.write_check_retries`は`config.NAS_WRITE_CHECK_RETRIES`（未設定時デフォルト3）から`check_write_permission`のリトライ回数として初期化される。
+* 根拠: `self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")` (行番号: 26〜30 / 抜粋: "self.ip: str = getattr(co...")、`self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)` (行番号: 30 / 抜粋: "self.write_check_retries: int = getattr(config, \"NAS_WRITE_CHECK_RETRIES\", 3)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 25〜31 / 抜粋: "def __init__(self) -> None:")
+* 根拠: 関数内の処理全体 (行番号: 25〜39 / 抜粋: "def __init__(self) -> None:")
 
 
 
@@ -178,24 +178,24 @@
 
 ### 関数 `check_write_permission`
 
-* **役割**: NASのマウント先にテストファイルを作成・削除し、書き込み権限を確認する。
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 71〜81 / 抜粋: "def check_write_permission...")
+* **役割**: NASのマウント先(`self.mount_point`直下の`.write_test`)に対し、別プロセス(`sys.executable -c`)でopen/write/close/removeを実行して書き込み権限を確認する。CIFSマウントのストールで本体プロセスが巻き込まれてハングしないよう、サブプロセスをタイムアウト付きで待ち受ける。タイムアウト発生時は最大`self.write_check_retries`回までExponential Backoff（`2 ** attempt`秒、0-indexed）で再試行する。
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 80〜132 / 抜粋: "def check_write_permission(self) -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 71 / 抜粋: "def check_write_permission...")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 80 / 抜粋: "def check_write_permission(self) -> bool:")
 
 
-* **戻り値/レスポンス**: `bool`（書き込み・削除成功時True）
-* 根拠: `return True` または `return False` (行番号: 78, 81 / 抜粋: "return True")
+* **戻り値/レスポンス**: `bool`（書き込み・削除成功時True。全リトライを使い切ってタイムアウトした場合、または`CalledProcessError`/`OSError`発生時はFalse）
+* 根拠: `return True` (行番号: 107)、`return False` (行番号: 129, 132) / 抜粋: "return True"
 
 
-* **副作用**: ファイルの作成および削除。
-* 根拠: `with open(test_file, 'w') as f:` および `os.remove(test_file)` (行番号: 75〜77 / 抜粋: "os.remove(test_file)")
+* **副作用**: サブプロセス(`sys.executable -c <script>`)の起動によるテストファイルの作成・削除。タイムアウト時は`time.sleep(wait_time)`によるリトライ待機。最終リトライでもタイムアウトした場合は診断のため`self.check_ping()`・`self.check_mount()`を追加で実行する。
+* 根拠: `subprocess.run([sys.executable, "-c", script, test_file], timeout=self.timeout, check=True, capture_output=True)` (行番号: 101〜106)、`time.sleep(wait_time)` (行番号: 116)、`diag_ping_ok = self.check_ping()` / `diag_mount_ok = self.check_mount() if diag_ping_ok else False` (行番号: 122〜123)
 
 
-* **エラーハンドリング**: `IOError`を捕捉し、エラーログ出力後`False`を返す。
-* 根拠: `except IOError as e:` (行番号: 79〜81 / 抜粋: "except IOError as e:")
+* **エラーハンドリング**: `subprocess.TimeoutExpired`発生時は、最終試行でなければ`2 ** attempt`秒待機して再試行（警告ログ出力）。最終試行でタイムアウトした場合は`self.check_ping()`/`self.check_mount()`の結果を添えてエラーログを出力し`False`を返す。`subprocess.CalledProcessError`または`OSError`はリトライせずエラーログ出力後`False`を返す（この経路ではping/mount診断ログは出力されない）。
+* 根拠: `except subprocess.TimeoutExpired:` (行番号: 108〜129)、`except (subprocess.CalledProcessError, OSError) as e:` (行番号: 130〜132)
 
 
 
@@ -469,6 +469,7 @@ flowchart TD
 * `run`関数内において、`save_to_db`は正常・異常を問わず毎回呼び出されるが、`is_currently_healthy`が`False`の場合はそこで早期リターンし、以降のリテンションクリーンアップおよびレポート通知ロジックには到達しない。
 * `__init__`の`self.fallback_dir`は以前存在しない属性名`FALLBACK_DIR`を参照しており常に`getattr`のデフォルト値へフォールバックしていたが、`config.FALLBACK_ROOT`(実属性名)を参照するよう修正された(28行目)。ただし`config.FALLBACK_ROOT`の実際の値(`BASE_DIR/temp_fallback`)と`getattr`のフォールバック文字列(`"/tmp/temp_fallback"`)は異なるパスである点に注意。
 * `save_to_db`が`device_records`テーブルへ書き込むNAS使用率は、以前は電池残量用に後付けされた`battery_level`列へ誤って流用されていたが、マイグレーション`migrations/0006_add_device_records_nas_usage_percent.sql`で新設された専用列`nas_usage_percent`へ書き込み先が切り替えられた(205行目)。過去に`battery_level`へ書き込まれた行はマイグレーション対象外でそのまま残る。
+* `check_write_permission`のリトライは`subprocess.TimeoutExpired`（108〜129行目）でのみ発動し、`subprocess.CalledProcessError`や`OSError`（130〜132行目、例: マウント未確立直後のENOENTでサブプロセス側の`open()`が失敗し非ゼロ終了コードになるケース）はリトライされず即座に`False`を返す。`config.py`の`verify_and_initialize_storage`が`(OSError, PermissionError, IOError)`を包括的にリトライ対象としているのとは非対称であり、両者のNAS I/Oリトライポリシーは別々に実装されたまま一元化されていない（`docs/reports/MY_HOME_SYSTEM/NAS_TIMEOUT_INVESTIGATION_2026-08-24.md`参照）。
 
 ## 9. 不明事項一覧
 
