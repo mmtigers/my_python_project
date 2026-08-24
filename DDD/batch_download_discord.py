@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # External Libraries
@@ -236,6 +236,21 @@ def _round_robin_flatten(groups: Iterable[List["DownloadTask"]]) -> List["Downlo
             if i < len(g):
                 result.append(g[i])
     return result
+
+
+def _normalize_url(url: str) -> str:
+    """URLのフラグメント(#以降)を除去して正規化する。
+
+    MissAVの検索結果画面からURLをコピーすると
+    'https://missav.live/dm18/ja/xxx-000#<検索セッションのハッシュ>_search' の
+    ようにフラグメントが付与される。フラグメントはHTTPリクエストには送信され
+    ず動画ページ自体は同一だが、素の文字列比較をしている履歴管理・重複排除・
+    保存ファイル名生成がこれを別URL/別名として扱ってしまう。そのためlist.txt
+    等から読み込む時点でフラグメントを取り除き、検索画面URLと実際の動画URLを
+    同一のものとして扱えるようにする。
+    """
+    scheme, netloc, path, query, _fragment = urlsplit(url)
+    return urlunsplit((scheme, netloc, path, query, ""))
 
 
 def _looks_like_block_page(html: str) -> bool:
@@ -813,8 +828,10 @@ class BatchDownloader:
             with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
                 for line in f:
                     url = line.strip()
-                    if url and not url.startswith("#") and url not in self.history:
-                        _add(url, "list")
+                    if url and not url.startswith("#"):
+                        url = _normalize_url(url)
+                        if url not in self.history:
+                            _add(url, "list")
 
         if CONFIG.LIST_DIR_PATH.exists():
             # glob()の順序はOS/ファイルシステム依存で不定なため、実行毎に順序が
@@ -826,8 +843,10 @@ class BatchDownloader:
                     with open(list_file, "r", encoding="utf-8") as f:
                         for line in f:
                             url = line.strip()
-                            if url and not url.startswith("#") and url not in self.history:
-                                _add(url, source_name)
+                            if url and not url.startswith("#"):
+                                url = _normalize_url(url)
+                                if url not in self.history:
+                                    _add(url, source_name)
                 except Exception as e:
                     logger.error(f"リスト読み込みエラー ({list_file.name}): {e}", exc_info=True)
 
@@ -878,7 +897,8 @@ class BatchDownloader:
                 # パージ対象外の行だけを残す
                 retained_lines = []
                 for line in lines:
-                    url = line.strip()
+                    stripped_line = line.strip()
+                    url = _normalize_url(stripped_line) if stripped_line else stripped_line
                     if url in urls_to_remove:
                         deleted_count += 1
                         logger.debug(f"🗑️ パージ実行: {url} (from {source_name})")
