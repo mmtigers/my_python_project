@@ -255,3 +255,45 @@ mount | grep /mnt/nas
 
 これらの出力を共有してもらえれば、4章の仮説A/Bのどちらが実際の原因かを確定し、
 4.2の恒久対策(NAS側設定変更)の要否を判断できる。
+
+---
+
+## 7. 続報 (2026-08-24): PR #56 との突き合わせ
+
+本報告書は PR #54 としてマージ済み。その後、別PR #56
+「fix(nas): ENOENT/タイムアウト切り分け結果を踏まえNAS復旧待ちのリトライを追加」
+(コミット `402dc48`) が独立に master へマージされており、4.1節で提案した対策と
+重なる内容だったため、突き合わせた結果を記録する。
+
+### 7.1 カバー済み
+
+- **4.1-1 (`check_write_permission()`へのリトライ/バックオフ追加)**: ✅ カバー済み。
+  `config.NAS_WRITE_CHECK_RETRIES`(デフォルト3、初回+2回リトライ=提案の「初回5秒+失敗時のみ追加で
+  2回程度リトライ」と一致)を追加し、各attemptは従来通りsubprocessの`timeout=self.timeout`を維持した
+  ままExponential Backoff(1s, 2s)で再試行するよう変更された(`nas_monitor.py:99-126`)。
+  本来の目的(CIFSストール時にプロセスがハングしないこと)を壊さない設計になっている。
+- 追加で `start_all.sh` のNASマウント確認(Phase 1)にも同種のリトライが入り、起動直後の
+  automountタイミング競合を緩和している。これは本報告書では提案していなかったが、同じ根本原因
+  (autofsの再トリガー遅延)に対する追加の対策として妥当。
+
+### 7.2 未カバー(次のアクション候補)
+
+- **4.1-3 (診断ログの追加)**: 元は未カバーだったため、本セッションで追記した。
+  `check_write_permission()`が全リトライを使い切って異常確定する際、`check_ping()`/`check_mount()`
+  の結果を `[diagnostic: ping=..., mount=...]` としてERRORログに残すようにした
+  (`nas_monitor.py`、対応するテスト `test_final_timeout_logs_ping_and_mount_diagnostic` を追加)。
+  ping/mountが両方OKで書き込みだけ失敗する場合はディスク起床待ち(仮説A)を、pingすら失敗する場合は
+  ネットワーク/NAS本体側の障害を疑う材料になる。
+- **4.3 (NAS I/Oリトライポリシーの一元化)**: 未カバーのまま。PR #56は `nas_monitor.py` 側の
+  リトライ回数・待機時間を独自に実装しており、`config.py`の`verify_and_initialize_storage`とは
+  今も別々のExponential Backoff実装が並存している(前者は3回・1s/2s、後者は最大5回・1s/2s/4s/8s/16s)。
+  将来的に`core/nas_utils.py`等へ共通化する余地は残っている。実装の必要性・優先度は次のアクション時に
+  ユーザーと相談のうえ判断すること。
+- **細かい差異**: `check_write_permission()`のリトライは`subprocess.TimeoutExpired`発生時のみ働く。
+  マウント未確立直後に`open()`が`FileNotFoundError`(ENOENT)を投げて`CalledProcessError`になるケースは
+  リトライされず即座に失敗として扱われる(`nas_monitor.py:123-125`)。一方`config.py`側は
+  `(OSError, PermissionError, IOError)`を包括的にリトライ対象にしている。今回の8/8失敗ログはいずれも
+  「タイムアウト」であり「ENOENTでの即失敗」ではなかったため実害は確認されていないが、非対称性としては
+  残っている。
+- **4.2 (NAS本体側のスピンダウン設定変更)・仮説A/Bの確定**: 引き続き実機作業が必要。本セッションも
+  自宅LANへの経路を持たない隔離環境のままであり、未着手。§6の手順を実機で実行し結果を持ち込んでほしい。
