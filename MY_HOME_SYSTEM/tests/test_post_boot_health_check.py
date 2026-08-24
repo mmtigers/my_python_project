@@ -24,7 +24,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 import post_boot_health_check as health_check_module
-from post_boot_health_check import PostBootHealthCheck, STATUS_OK, STATUS_WARN
+from post_boot_health_check import PostBootHealthCheck, STATUS_ERR, STATUS_OK, STATUS_WARN
 
 
 class TestCheckNetworkAndApis:
@@ -112,6 +112,68 @@ class TestCheckPeripheralsCameras:
         cam_result = next(r for r in checker.results if r.name == "Cameras")
         assert cam_result.status == STATUS_WARN
         assert cam_result.message == "No Config"
+
+
+class TestCheckSystemResources:
+    def test_high_temp_is_err_not_warn(self, monkeypatch):
+        """危険域(85℃以上)の温度でもWARNどまりだったが、ERRに昇格させる"""
+        checker = PostBootHealthCheck()
+        with patch.object(
+            health_check_module.subprocess,
+            "check_output",
+            return_value=b"temp=87.0'C\n",
+        ):
+            with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 10, 90)):
+                checker.check_system_resources()
+
+        result = checker.results[-1]
+        assert result.name == "System Resource"
+        assert result.status == STATUS_ERR
+        assert "87.0" in result.message
+
+    def test_high_disk_usage_is_err_not_warn(self, monkeypatch):
+        """危険域(95%超)のディスク使用率でもWARNどまりだったが、ERRに昇格させる"""
+        checker = PostBootHealthCheck()
+        with patch.object(
+            health_check_module.subprocess,
+            "check_output",
+            return_value=b"temp=50.0'C\n",
+        ):
+            with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 96, 4)):
+                checker.check_system_resources()
+
+        result = checker.results[-1]
+        assert result.status == STATUS_ERR
+        assert "96.0" in result.message
+
+    def test_normal_temp_and_disk_is_ok(self, monkeypatch):
+        checker = PostBootHealthCheck()
+        with patch.object(
+            health_check_module.subprocess,
+            "check_output",
+            return_value=b"temp=50.0'C\n",
+        ):
+            with patch.object(health_check_module.shutil, "disk_usage", return_value=(100, 10, 90)):
+                checker.check_system_resources()
+
+        result = checker.results[-1]
+        assert result.status == STATUS_OK
+
+
+class TestCheckServicesDashboard:
+    def test_dashboard_down_is_err_not_warn(self, monkeypatch):
+        """Dashboardは以前はcritical=FalseでWARNどまりだったが、ERRに昇格させる"""
+        checker = PostBootHealthCheck()
+        checker.max_retries = 1
+        checker.retry_interval = 0
+
+        with patch.object(health_check_module.time, "sleep"):
+            with patch.object(checker, "_check_port", return_value=False):
+                with patch.object(checker, "_check_http", return_value=False):
+                    checker.check_services()
+
+        dashboard_result = next(r for r in checker.results if r.name == "Dashboard")
+        assert dashboard_result.status == STATUS_ERR
 
 
 class TestTargetBluetoothMac:

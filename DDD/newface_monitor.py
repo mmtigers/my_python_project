@@ -1423,7 +1423,7 @@ class DataManager:
             with open(data_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 return {CastMember(**item) for item in data}
-        except (json.JSONDecodeError, IOError) as e:
+        except (json.JSONDecodeError, IOError, UnicodeDecodeError) as e:
             logger.error(f"Failed to load data from {data_file}: {e}")
             # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
             return set()
@@ -1623,6 +1623,16 @@ class WebMonitor:
                     # "芹沢\t\t\t(40歳)" のように、年齢等の付加情報が兄弟要素では
                     # なく同一テキストノード内にタブ区切りで同居しているサイト向け
                     name = name.split('\t')[0].strip()
+
+                if not name:
+                    # selector_nameはヒットしたが、テキストが空の要素だった場合
+                    # (画像のみのカード等)。name_elemが見つからない場合の"Unknown"と
+                    # 挙動を揃え、空文字のまま通知が送られるのを防ぐ
+                    logger.warning(
+                        f"Empty name extracted for a cast on site '{site.site_id}' "
+                        f"(selector: {site.selector_name}). Falling back to 'Unknown'."
+                    )
+                    name = "Unknown"
 
                 # Age Extraction
                 # name_first_text_only/name_strip_after_tab で名前から年齢表記を
