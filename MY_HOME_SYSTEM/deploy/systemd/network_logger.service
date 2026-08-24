@@ -1,0 +1,14 @@
+[Unit]
+Description=Network Logger for MY_HOME_SYSTEM Cameras
+After=network.target
+
+[Service]
+Type=simple
+User=masahiro
+WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python /home/masahiro/develop/MY_HOME_SYSTEM/monitors/network_logger.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

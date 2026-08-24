@@ -1680,6 +1680,16 @@ class WebMonitor:
                     # なく同一テキストノード内にタブ区切りで同居しているサイト向け
                     name = name.split('\t')[0].strip()
 
+                if not name:
+                    # selector_nameはヒットしたが、テキストが空の要素だった場合
+                    # (画像のみのカード等)。name_elemが見つからない場合の"Unknown"と
+                    # 挙動を揃え、空文字のまま通知が送られるのを防ぐ
+                    logger.warning(
+                        f"Empty name extracted for a cast on site '{site.site_id}' "
+                        f"(selector: {site.selector_name}). Falling back to 'Unknown'."
+                    )
+                    name = "Unknown"
+
                 # Age Extraction
                 # name_first_text_only/name_strip_after_tab で名前から年齢表記を
                 # 切り離しているサイトでも年齢自体は失わずに取得できるよう、
