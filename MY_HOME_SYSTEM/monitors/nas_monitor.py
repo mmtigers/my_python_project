@@ -77,6 +77,15 @@ class NasMonitor:
             return False
         return os.path.ismount(self.mount_point)
 
+    def _write_test_filename(self) -> str:
+        """書き込みテスト用のファイル名を毎回一意に生成する。
+        固定名を使い回すと、タイムアウトでサブプロセスをkillした際にremove()まで
+        到達できずファイルが残留し、CIFS側のオープンハンドルが不整合な状態になる。
+        次回以降のチェックが同じファイル名に対してこの不整合の解消待ち(oplock解放待ち)
+        で再び時間がかかり、またkillされて残留する…という自己永続的な失敗ループに
+        陥ることが実機調査で判明したため、毎回異なる名前を使って回避する。"""
+        return f".write_test.{os.getpid()}.{time.time_ns()}"
+
     def check_write_permission(self) -> bool:
         """NASへの実際の書き込み・削除が可能かテストする。
         CIFSマウントがストールしていると open()/write()/remove() がブロックしたまま
@@ -87,8 +96,14 @@ class NasMonitor:
         NAS本体のディスクスピンアップにより発生することがあり、これは一過性の
         遅延であって恒久障害とは限らない(ENOENTでリトライ後に成功する
         config_init側の遅延と同種の事象)。そのため単発のタイムアウトで
-        即座に「異常」と判定せず、Exponential Backoffで再試行する。"""
-        test_file = os.path.join(self.mount_point, '.write_test')
+        即座に「異常」と判定せず、Exponential Backoffで再試行する。
+
+        各試行では毎回異なるファイル名を使う(_write_test_filename())。固定名を
+        使い回すと、タイムアウトでサブプロセスをkillした際にremove()まで到達
+        できずファイルが残留し、CIFS側のオープンハンドルが不整合な状態になる。
+        次の試行(リトライ内・次回実行時のいずれも)が同じファイル名に対して
+        この不整合の解消待ち(oplock解放待ち)で再び時間がかかり、またkillされて
+        残留する…という自己永続的な失敗ループに陥ることが実機調査で判明した。"""
         script = (
             "import os, sys\n"
             "path = sys.argv[1]\n"
@@ -97,6 +112,7 @@ class NasMonitor:
             "os.remove(path)\n"
         )
         for attempt in range(self.write_check_retries):
+            test_file = os.path.join(self.mount_point, self._write_test_filename())
             try:
                 subprocess.run(
                     [sys.executable, "-c", script, test_file],
