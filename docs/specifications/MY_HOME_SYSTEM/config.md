@@ -37,6 +37,10 @@
 * 根拠: [ストレージ検証関数] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
 
 
+* NAS死活監視(`monitors/nas_monitor.py`)の書き込みテストがタイムアウトした際の再試行回数(`NAS_WRITE_CHECK_RETRIES`、既定3)を定義する。`verify_and_initialize_storage`と同様、autofsのアイドルアンマウント後の再トリガーやNAS本体のディスクスピンアップによる一過性の遅延を、単発のタイムアウトで即座に障害と判定せずExponential Backoffで吸収する目的で追加された。
+* 根拠: [NAS & Network設定セクション] (行番号: 412〜416 / 抜粋: `NAS_WRITE_CHECK_RETRIES: int = 3`)
+
+
 * `Pydantic`を用いてデバイスやカメラの設定スキーマを定義する。
 * 根拠: [Pydanticモデル定義] (行番号: 144 / 抜粋: `class CameraConfig(BaseModel):`)
 
@@ -316,6 +320,7 @@ flowchart TD
 * メモリ使用率やストレージ等の警告通知に関連する定数（例：`MEMORY_ALERT_PERCENT`）が存在するが、このファイル単体では監視機構そのものは実装されていない。
 * `TV_UNLOCK_QUEST_IDS` は環境変数のカンマ区切り文字列から数字のみを抽出して`int`変換しており、`isdigit()`を満たさない値（不正なID等）は例外を送出せず黙って除外される仕様のため、設定ミスに気づきにくい。
 * `FAMILY_SETTINGS["members"]` の実名文字列自体は他モジュール（`handlers/line_handler.py`等）のメッセージマッチングロジックと結合しているため、この値を変更すると気づきにくい形で機能が壊れるリスクがある。年齢等の付随情報のみ`family_members.local.json`（gitignore対象）に切り出す設計になっている。
+* `NAS_WRITE_CHECK_RETRIES`(416行目)は本ファイル内では未使用で、`monitors/nas_monitor.py`の`NasMonitor.__init__`が`getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)`で参照する消費専用の設定値である。本ファイル単体を見ても実際の再試行ロジック(Exponential Backoff)は確認できない点に注意。
 
 ## 9. 不明事項一覧
 
