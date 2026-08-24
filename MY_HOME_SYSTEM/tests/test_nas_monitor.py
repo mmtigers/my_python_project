@@ -146,6 +146,7 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         monitor = NasMonitor()
         monitor.mount_point = self.tmp_dir
         monitor.timeout = 1
+        monitor.write_check_retries = 2  # リトライ待機を短縮してテストを高速化
         fifo_path = os.path.join(self.tmp_dir, ".write_test")
         os.mkfifo(fifo_path)
 
@@ -166,6 +167,32 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         )
         self.assertLess(elapsed, 10, "タイムアウトが機能せず長時間ブロックした")
         self.assertEqual(result.get("value"), False)
+
+    def test_check_write_permission_recovers_after_transient_timeout(self):
+        """一過性のストール(autofsの再トリガー遅延やNASのディスクスピンアップ想定)は
+        単発のタイムアウトで即座に異常とせず、リトライで復旧を検知できること。"""
+        monitor = NasMonitor()
+        monitor.mount_point = self.tmp_dir
+        monitor.timeout = 1
+        monitor.write_check_retries = 3
+        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        os.mkfifo(fifo_path)
+
+        def clear_stall_after_delay():
+            time.sleep(1.5)
+            os.remove(fifo_path)
+
+        threading.Thread(target=clear_stall_after_delay, daemon=True).start()
+
+        start = time.monotonic()
+        result = monitor.check_write_permission()
+        elapsed = time.monotonic() - start
+
+        self.assertTrue(
+            result,
+            "一過性のストールが解消した後は書き込みチェックが成功として扱われるべき"
+        )
+        self.assertLess(elapsed, 10)
 
 
 if __name__ == "__main__":
