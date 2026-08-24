@@ -194,6 +194,29 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         )
         self.assertLess(elapsed, 10)
 
+    def test_final_timeout_logs_ping_and_mount_diagnostic(self):
+        """リトライを使い切って異常確定する際、起床待ちか本当に無応答かを
+        切り分けられるよう、ping/mountの結果がログに残ること。"""
+        monitor = NasMonitor()
+        monitor.mount_point = self.tmp_dir
+        monitor.timeout = 1
+        monitor.write_check_retries = 1
+        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        os.mkfifo(fifo_path)
+
+        with patch.object(monitor, "check_ping", return_value=True) as mock_ping, \
+             patch.object(monitor, "check_mount", return_value=True) as mock_mount, \
+             self.assertLogs("nas_monitor", level="ERROR") as cm:
+            result = monitor.check_write_permission()
+
+        self.assertFalse(result)
+        mock_ping.assert_called_once()
+        mock_mount.assert_called_once()
+        self.assertTrue(
+            any("ping=True, mount=True" in message for message in cm.output),
+            f"診断結果がログに含まれていない: {cm.output}"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
