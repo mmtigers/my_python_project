@@ -69,10 +69,27 @@ done
 echo "--- Check NAS Mount ---"
 MOUNT_POINT="/mnt/nas"
 if command -v mountpoint >/dev/null 2>&1; then
-  if ! mountpoint -q "$MOUNT_POINT"; then
-    echo "⚠️ NAS is NOT mounted. Skipping checks to avoid hang."
-  else
+  # autofsのアイドルアンマウント直後は、起動直後にアクセスしても自動マウントの
+  # トリガーからマウント完了までに数秒かかることがある(config.pyの
+  # verify_and_initialize_storageが遭遇するENOENTと同種の一過性の遅延)。
+  # 1回チェックして即座に諦めるのではなく、パスへのアクセスで自動マウントを
+  # トリガーしつつExponential Backoffで数回リトライする。
+  MOUNT_WAIT=1
+  mounted=false
+  for i in 1 2 3 4 5; do
+    ls "$MOUNT_POINT" >/dev/null 2>&1  # autofsの自動マウントをトリガー
+    if mountpoint -q "$MOUNT_POINT"; then
+      mounted=true
+      break
+    fi
+    echo "⏳ NAS not mounted yet (attempt $i/5). Retrying in ${MOUNT_WAIT}s..."
+    sleep "$MOUNT_WAIT"
+    MOUNT_WAIT=$((MOUNT_WAIT * 2))
+  done
+  if [ "$mounted" = true ]; then
     echo "✅ NAS Mounted."
+  else
+    echo "⚠️ NAS is still NOT mounted after retries. Continuing anyway (app-level backoff/fallback will handle it)."
   fi
 fi
 
