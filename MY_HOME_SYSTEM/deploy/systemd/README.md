@@ -47,10 +47,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable network_logger.service
 ```
 
-## pi-monitor.service
-
-Raspberry Pi本体の汎用モニタリングサービス。`ExecStart` が指す `/opt/monitoring/monitor.py`
-は本リポジトリの外(`MY_HOME_SYSTEM` 対象外)にあるスクリプトであり、このリポジトリでは
-管理していない。ユニットファイル自体の変更履歴管理のみを目的として配置している。
-
 実機の設定を変更した場合は、このファイルにも反映してコミットすること。
+
+## (削除済み) pi-monitor.service
+
+以前は「Raspberry Pi本体の汎用モニタリングサービス」としてユニットファイルのみを
+本リポジトリで管理していたが、実機で調査した結果 `disabled`・`inactive (dead)` で、
+`ExecStart` が指す `/opt/monitoring/monitor.py` および `/opt/monitoring/` ディレクトリ
+自体が実機に存在せず、journalにも起動履歴が一切残っていないことを確認した。実質的に
+使われていない(または一度もデプロイされなかった)ユニットと判断し、リポジトリからは
+削除した。
