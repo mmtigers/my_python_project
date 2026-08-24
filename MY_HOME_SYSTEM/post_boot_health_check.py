@@ -9,6 +9,7 @@ import sqlite3
 from typing import List
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 # --- パス設定 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -181,31 +182,38 @@ class PostBootHealthCheck:
         ]
 
         logger.info("⏳ Waiting for services to startup...")
-        
-        for target in targets:
-            is_ok = False
-            for i in range(self.max_retries):
-                if target["type"] == "port":
-                    is_ok = self._check_port("localhost", target["val"])
-                elif target["type"] == "http":
-                    is_ok = self._check_http(target["val"])
-                
-                if is_ok:
-                    break
-                time.sleep(self.retry_interval)
-            
-            if is_ok:
-                status = STATUS_OK
-                msg = "Running"
-            else:
-                if target["critical"]:
-                    status = STATUS_ERR
-                    msg = "Failed"
-                else:
-                    status = STATUS_WARN
-                    msg = "Not Running (Optional)"
 
-            self.results.append(CheckResult(target["name"], status, msg))
+        # 各サービスの起動待ちリトライループを直列に回すと、全滅時に
+        # 待ち時間が積み上がってしまう(3サービス x 最大2分 = 最大6分)ため、
+        # ターゲットごとに独立したスレッドで並列に待ち、通知までの最悪時間を
+        # 単一サービスのリトライ時間(最大2分)まで縮める。
+        with ThreadPoolExecutor(max_workers=len(targets)) as executor:
+            self.results.extend(executor.map(self._wait_for_service, targets))
+
+    def _wait_for_service(self, target: dict) -> CheckResult:
+        is_ok = False
+        for i in range(self.max_retries):
+            if target["type"] == "port":
+                is_ok = self._check_port("localhost", target["val"])
+            elif target["type"] == "http":
+                is_ok = self._check_http(target["val"])
+
+            if is_ok:
+                break
+            time.sleep(self.retry_interval)
+
+        if is_ok:
+            status = STATUS_OK
+            msg = "Running"
+        else:
+            if target["critical"]:
+                status = STATUS_ERR
+                msg = "Failed"
+            else:
+                status = STATUS_WARN
+                msg = "Not Running (Optional)"
+
+        return CheckResult(target["name"], status, msg)
 
     # --- 4. Peripherals ---
     def check_peripherals(self) -> None:
