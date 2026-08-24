@@ -76,12 +76,21 @@ class NasMonitor:
             return False
         return os.path.ismount(self.mount_point)
 
+    def _write_test_filename(self) -> str:
+        """書き込みテスト用のファイル名を毎回一意に生成する。
+        固定名を使い回すと、タイムアウトでサブプロセスをkillした際にremove()まで
+        到達できずファイルが残留し、CIFS側のオープンハンドルが不整合な状態になる。
+        次回以降のチェックが同じファイル名に対してこの不整合の解消待ち(oplock解放待ち)
+        で再び時間がかかり、またkillされて残留する…という自己永続的な失敗ループに
+        陥ることが実機調査で判明したため、毎回異なる名前を使って回避する。"""
+        return f".write_test.{os.getpid()}.{time.time_ns()}"
+
     def check_write_permission(self) -> bool:
         """NASへの実際の書き込み・削除が可能かテストする。
         CIFSマウントがストールしていると open()/write()/remove() がブロックしたまま
         戻らず監視プロセスごとハングする恐れがあるため、別プロセスでI/Oを実行し
         タイムアウト付きで待ち受ける(タイムアウト時はプロセスをkillして戻る)。"""
-        test_file = os.path.join(self.mount_point, '.write_test')
+        test_file = os.path.join(self.mount_point, self._write_test_filename())
         script = (
             "import os, sys\n"
             "path = sys.argv[1]\n"

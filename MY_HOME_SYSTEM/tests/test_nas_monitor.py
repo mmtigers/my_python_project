@@ -146,7 +146,9 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         monitor = NasMonitor()
         monitor.mount_point = self.tmp_dir
         monitor.timeout = 1
-        fifo_path = os.path.join(self.tmp_dir, ".write_test")
+        fixed_name = ".write_test_fixed_for_test"
+        monitor._write_test_filename = lambda: fixed_name
+        fifo_path = os.path.join(self.tmp_dir, fixed_name)
         os.mkfifo(fifo_path)
 
         result = {}
@@ -166,6 +168,35 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         )
         self.assertLess(elapsed, 10, "タイムアウトが機能せず長時間ブロックした")
         self.assertEqual(result.get("value"), False)
+
+
+class TestNasMonitorWriteTestFilenameUniqueness(unittest.TestCase):
+    """本番調査(2026-08-23)で判明した不具合の回帰テスト:
+    固定ファイル名だと、タイムアウトでkillされた際の残留ファイル/CIFSハンドル
+    不整合が原因で、以降のチェックが毎回同じ理由で失敗し続けるループに陥っていた。
+    呼び出しごとに異なるファイル名を使うことでこれを回避する。"""
+
+    def test_filename_differs_between_calls(self):
+        monitor = NasMonitor()
+        name1 = monitor._write_test_filename()
+        name2 = monitor._write_test_filename()
+        self.assertNotEqual(name1, name2)
+
+    def test_write_permission_check_does_not_reuse_stale_file(self):
+        tmp_dir = tempfile.mkdtemp()
+        try:
+            monitor = NasMonitor()
+            monitor.mount_point = tmp_dir
+            # 過去に(タイムアウトでkillされて)取り残された残留ファイルを再現
+            stale_path = os.path.join(tmp_dir, ".write_test.99999.123")
+            with open(stale_path, "w") as f:
+                f.write("")
+
+            self.assertTrue(monitor.check_write_permission())
+            # 残留ファイルには触れず、そのまま残っているはず
+            self.assertTrue(os.path.exists(stale_path))
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
