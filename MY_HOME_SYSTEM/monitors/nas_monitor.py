@@ -27,6 +27,7 @@ class NasMonitor:
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
+        self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)
         self.device_name: str = "BUFFALO LS720D"
         # /tmp はコンテナ/プロセス再起動で消える環境があり、そこに状態を置くと
         # 再起動のたびにヘルス状態がデフォルト(正常)へリセットされてしまう
@@ -89,8 +90,20 @@ class NasMonitor:
         """NASへの実際の書き込み・削除が可能かテストする。
         CIFSマウントがストールしていると open()/write()/remove() がブロックしたまま
         戻らず監視プロセスごとハングする恐れがあるため、別プロセスでI/Oを実行し
-        タイムアウト付きで待ち受ける(タイムアウト時はプロセスをkillして戻る)。"""
-        test_file = os.path.join(self.mount_point, self._write_test_filename())
+        タイムアウト付きで待ち受ける(タイムアウト時はプロセスをkillして戻る)。
+
+        タイムアウトは、autofsがアイドル中にアンマウントした直後の再トリガーや
+        NAS本体のディスクスピンアップにより発生することがあり、これは一過性の
+        遅延であって恒久障害とは限らない(ENOENTでリトライ後に成功する
+        config_init側の遅延と同種の事象)。そのため単発のタイムアウトで
+        即座に「異常」と判定せず、Exponential Backoffで再試行する。
+
+        各試行では毎回異なるファイル名を使う(_write_test_filename())。固定名を
+        使い回すと、タイムアウトでサブプロセスをkillした際にremove()まで到達
+        できずファイルが残留し、CIFS側のオープンハンドルが不整合な状態になる。
+        次の試行(リトライ内・次回実行時のいずれも)が同じファイル名に対して
+        この不整合の解消待ち(oplock解放待ち)で再び時間がかかり、またkillされて
+        残留する…という自己永続的な失敗ループに陥ることが実機調査で判明した。"""
         script = (
             "import os, sys\n"
             "path = sys.argv[1]\n"
@@ -98,20 +111,42 @@ class NasMonitor:
             "    f.write('health_check')\n"
             "os.remove(path)\n"
         )
-        try:
-            subprocess.run(
-                [sys.executable, "-c", script, test_file],
-                timeout=self.timeout,
-                check=True,
-                capture_output=True,
-            )
-            return True
-        except subprocess.TimeoutExpired:
-            logger.error(f"Write permission check timed out after {self.timeout}s (NAS mount possibly stalled)")
-            return False
-        except (subprocess.CalledProcessError, OSError) as e:
-            logger.error(f"Write permission check error: {e}")
-            return False
+        for attempt in range(self.write_check_retries):
+            test_file = os.path.join(self.mount_point, self._write_test_filename())
+            try:
+                subprocess.run(
+                    [sys.executable, "-c", script, test_file],
+                    timeout=self.timeout,
+                    check=True,
+                    capture_output=True,
+                )
+                return True
+            except subprocess.TimeoutExpired:
+                if attempt < self.write_check_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(
+                        f"⚠️ [Attempt {attempt + 1}/{self.write_check_retries}] "
+                        f"Write permission check timed out after {self.timeout}s "
+                        f"(NAS mount possibly still waking up). Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+                # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
+                # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
+                # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
+                # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
+                diag_ping_ok = self.check_ping()
+                diag_mount_ok = self.check_mount() if diag_ping_ok else False
+                logger.error(
+                    f"Write permission check timed out after {self.timeout}s "
+                    f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
+                    f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
+                )
+                return False
+            except (subprocess.CalledProcessError, OSError) as e:
+                logger.error(f"Write permission check error: {e}")
+                return False
+        return False
 
     def sync_fallback_data(self) -> None:
         """フォールバックディレクトリのデータをNASへ安全に同期・移動する"""
