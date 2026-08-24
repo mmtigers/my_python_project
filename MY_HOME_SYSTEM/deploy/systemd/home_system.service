@@ -1,0 +1,17 @@
+[Unit]
+Description=My Home System Server
+After=network.target ngrok.service
+RequiresMountsFor=/mnt/nas
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=masahiro
+WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM
+ExecStart=/home/masahiro/develop/MY_HOME_SYSTEM/start_all.sh
+#Restart=always
+RestartSec=10
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+
+[Install]
+WantedBy=multi-user.target
