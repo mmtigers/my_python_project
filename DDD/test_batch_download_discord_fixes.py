@@ -116,5 +116,52 @@ class TestUniversalYtDlpStrategyNoPlaylist:
         assert captured_opts.get("noplaylist") is True
 
 
+class TestNormalizeUrl:
+    """MissAVの検索結果画面でコピーしたURL(#...検索セッションのハッシュ付き)が
+    実際の動画URLと別物として扱われてしまう問題の回帰テスト。"""
+
+    def test_strips_missav_search_fragment(self):
+        search_url = "https://missav.live/dm18/ja/dvdms-079#fa517d7cc2ba4000f26c00d7ac352d33_search"
+        assert module._normalize_url(search_url) == "https://missav.live/dm18/ja/dvdms-079"
+
+    def test_leaves_fragment_less_url_unchanged(self):
+        url = "https://tktube.com/ja/videos/336349/dvmm-259-sex-vol-03/"
+        assert module._normalize_url(url) == url
+
+    def test_keeps_query_string_but_drops_fragment(self):
+        url = "https://example.com/watch?v=abc#frag"
+        assert module._normalize_url(url) == "https://example.com/watch?v=abc"
+
+
+class TestCollectTasksNormalizesMissavSearchUrls:
+    """検索画面からコピーしたフラグメント付きURLをlist.txtに貼った場合でも、
+    実際の動画URLと同一のタスクとして読み込まれることを確認する回帰テスト。"""
+
+    def test_fragment_is_stripped_when_loading_list_file(self, tmp_path, monkeypatch):
+        list_file = tmp_path / "list.txt"
+        list_file.write_text(
+            "https://missav.live/dm18/ja/dvdms-079#fa517d7cc2ba4000f26c00d7ac352d33_search\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            module,
+            "CONFIG",
+            dataclasses.replace(
+                module.CONFIG,
+                LIST_FILE_PATH=list_file,
+                LIST_DIR_PATH=tmp_path / "list",
+                HISTORY_FILE_PATH=tmp_path / "history.txt",
+            ),
+        )
+
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader.history = set()
+
+        tasks = downloader._collect_tasks()
+
+        assert len(tasks) == 1
+        assert tasks[0].url == "https://missav.live/dm18/ja/dvdms-079"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
