@@ -18,6 +18,7 @@ post_boot_health_check.py の回帰テスト。
 import os
 import subprocess
 import sys
+import time
 from unittest.mock import MagicMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -158,6 +159,31 @@ class TestCheckSystemResources:
 
         result = checker.results[-1]
         assert result.status == STATUS_OK
+
+
+class TestCheckServicesParallelism:
+    def test_service_checks_run_in_parallel_not_sequentially(self):
+        """check_servicesはBackend/Family Quest/Dashboardを順番にリトライして
+        おり、全滅時は最悪ケースで(サービス数)x(1サービスの最大待ち時間)だけ
+        通知が遅延しえた(実運用値では最大6分)。並列化により、遅延を単一サービス
+        のリトライ時間程度に抑える。
+        """
+        checker = PostBootHealthCheck()
+        checker.max_retries = 3
+        checker.retry_interval = 0.1
+
+        with patch.object(checker, "_check_port", return_value=False):
+            with patch.object(checker, "_check_http", return_value=False):
+                start = time.monotonic()
+                checker.check_services()
+                elapsed = time.monotonic() - start
+
+        single_target_worst_case = checker.max_retries * checker.retry_interval
+        assert elapsed < single_target_worst_case * 2
+
+        names = {r.name for r in checker.results}
+        assert names == {"Backend Server", "Family Quest", "Dashboard"}
+        assert all(r.status == STATUS_ERR for r in checker.results)
 
 
 class TestCheckServicesDashboard:
