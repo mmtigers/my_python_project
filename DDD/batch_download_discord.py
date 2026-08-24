@@ -967,15 +967,15 @@ class BatchDownloader:
             if FORCE_MODE: 
                 logger.debug("⚠️ FORCEモード: 時間制限無視")
             else:
-                logger.debug(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了")
+                logger.info(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了（--forceで無視可能）")
                 return
 
-        if not SystemHealthChecker.verify_nas_mount(): 
+        if not SystemHealthChecker.verify_nas_mount():
             return
 
         tasks = self._collect_tasks()
         if not tasks:
-            logger.debug("処理対象のURLがありません。")
+            logger.info("処理対象のURLがありません。")
             return
         
         # YouTube無効時はタスクを除外し、パージ処理へ回す
@@ -996,7 +996,7 @@ class BatchDownloader:
 
         # パージ後、タスクが0になった場合は終了
         if not tasks:
-            logger.debug("パージ処理の結果、実行可能なタスクがなくなりました。")
+            logger.info("パージ処理の結果、実行可能なタスクがなくなりました。")
             return
 
         # 1回の実行あたりのタスク数を制限する。ジッター付きの間隔を空けていても、
