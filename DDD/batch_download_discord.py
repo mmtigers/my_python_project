@@ -29,7 +29,6 @@ import time
 import re
 import random
 import shutil
-import tempfile
 import datetime
 import logging
 import signal
@@ -123,14 +122,22 @@ class AppConfig:
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
-    # missavのHLSフラグメント(数千個の小ファイル)を一時保存する先。NAS上の
-    # BASE_SAVE_DIR配下に置くと、autofsのアイドルアンマウント後の再マウント遅延
-    # やNAS本体側の応答遅延（本リポジトリのnas_monitor関連の過去の調査で
-    # 判明済み）が、大量の小ファイルへの書き込み直後の読み込みで顕在化し、
+    # missavのHLSフラグメント(数千個の小ファイル、動画1本あたり数GB)を一時保存
+    # する先。NAS上のBASE_SAVE_DIR配下に置くと、autofsのアイドルアンマウント後の
+    # 再マウント遅延やNAS本体側の応答遅延（本リポジトリのnas_monitor関連の過去の
+    # 調査で判明済み）が、大量の小ファイルへの書き込み直後の読み込みで顕在化し、
     # yt-dlp側で"fragment not found"として一部フラグメントが欠落する実害が
     # 実機で確認された。ローカルディスク（NASを経由しない）に隔離することで
     # この種のマウント遅延の影響を受けないようにする。
-    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", tempfile.gettempdir())) / "ddd_missav_fragments"
+    # なお、tempfile.gettempdir()(多くの環境で/tmp)をそのまま既定値にすると、
+    # /tmpがtmpfs(RAMディスク)で運用されているシステム（一部のRaspberry Pi OS
+    # 構成を含む）では、動画1本分(数GB)の書き込みでメモリを圧迫し、OOMや
+    # SSH切断を引き起こしうる。そのためCURRENT_DIR（本スクリプトの設置先、
+    # list.txt/history.txt等と同じ実ディスク上のディレクトリ）を既定値とする。
+    LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))
+    # LOCAL_TMP_DIRの空き容量がこれを下回る場合、フラグメント書き込みで
+    # ディスクを圧迫する前に安全側でダウンロードを中断する。
+    LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))
 
     REQUEST_TIMEOUT: int = 20
     MAX_RETRIES: int = 3
@@ -383,15 +390,16 @@ class FileSystemManager:
             return False
 
     @staticmethod
-    def check_disk_space(path: Path) -> bool:
+    def check_disk_space(path: Path, min_free_gb: Optional[int] = None) -> bool:
+        threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb
         try:
             check_path = path
             while not check_path.exists():
                 check_path = check_path.parent
                 if check_path == check_path.parent: break
             total, used, free = shutil.disk_usage(check_path)
-            if (free // (2**30)) < CONFIG.MIN_FREE_SPACE_GB:
-                DiscordNotifier.send(f"⚠️ DISK FULL: 残り {free // (2**30)}GB", is_error=True)
+            if (free // (2**30)) < threshold_gb:
+                DiscordNotifier.send(f"⚠️ DISK FULL ({path}): 残り {free // (2**30)}GB", is_error=True)
                 return False
             return True
         except Exception as e:
@@ -754,6 +762,13 @@ class ScrapingStrategy(DownloadStrategy):
             tmp_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
             logger.error(f"⚠️ 一時フラグメント用ディレクトリの作成に失敗しました: {e}", exc_info=True)
+            return False
+
+        # 動画1本あたり数GBのフラグメントを書き込むため、事前に空き容量を確認する。
+        # ここを怠ると、ローカルディスクを圧迫してシステム全体（他プロセスや
+        # SSHセッション等）に影響しかねない。
+        if not FileSystemManager.check_disk_space(tmp_dir, min_free_gb=CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             return False
 
         try:

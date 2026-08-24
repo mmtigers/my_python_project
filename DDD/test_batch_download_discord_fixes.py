@@ -178,6 +178,7 @@ class TestScrapingStrategyFragmentStaging:
 
         monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
         monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda *a, **k: True))
 
         strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
 
@@ -221,6 +222,44 @@ class TestScrapingStrategyFragmentStaging:
         local_manifest_path = str(Path(unquote(urlsplit(download_url).path)))
         assert str(local_tmp_dir) in local_manifest_path
         assert str(nas_save_dir) not in local_manifest_path
+
+
+class TestScrapingStrategyLocalTmpDiskSpaceGuard:
+    """LOCAL_TMP_DIRの空き容量が不足している場合、フラグメント書き込みで
+    ローカルディスクを圧迫する前にダウンロードを中断することを確認する回帰
+    テスト。ローカルディスクを使い切ると、システム全体（他プロセスやSSH
+    セッション等）に影響しかねないため。"""
+
+    def test_aborts_without_downloading_when_local_disk_is_low(self, tmp_path, monkeypatch):
+        nas_save_dir = tmp_path / "nas_save"
+        nas_save_dir.mkdir()
+        local_tmp_dir = tmp_path / "local_tmp"
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda *a, **k: False))
+
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        fetch_called = []
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", lambda m3u8_url, page_url: "#EXTM3U\n")
+
+        def _fail_if_called(*a, **k):
+            fetch_called.append(True)
+            raise AssertionError("空き容量不足時にセグメント取得が呼ばれてはならない")
+
+        monkeypatch.setattr(strategy, "_download_segment", _fail_if_called)
+
+        final_path = nas_save_dir / "dvdms-079.mp4"
+        result = strategy._download_with_ytdlp(
+            "https://cdn.example.com/playlist.m3u8",
+            final_path,
+            "https://missav.live/dm18/ja/dvdms-079",
+            nas_save_dir,
+        )
+
+        assert result is False
+        assert fetch_called == []
+        assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
 
 
 if __name__ == "__main__":
