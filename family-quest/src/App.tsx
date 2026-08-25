@@ -12,7 +12,7 @@ import RewardShop from './features/shop/components/RewardShop';
 import { InventoryList } from './features/shop/components/InventoryList';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
-import { Quest, QuestHistory, Reward, User } from '@/types';
+import { ID, Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
 
 // 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
@@ -356,11 +356,21 @@ function App() {
 
     let successCount = 0;
     let totalEarnedMedals = 0;
+    // 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。
+    // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。
+    const cascadedIds = new Set<ID>();
     for (const history of targets) {
+      if (history.id != null && cascadedIds.has(history.id)) {
+        successCount++;
+        continue;
+      }
       const res = await approveQuest(getRepresentativeParent(users), history);
       if (res.success) {
         successCount++;
         totalEarnedMedals += res.earnedMedals ?? 0;
+        if (history.linked_history_id != null) {
+          cascadedIds.add(history.linked_history_id);
+        }
       }
     }
 
