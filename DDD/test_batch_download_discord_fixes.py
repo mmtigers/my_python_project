@@ -285,6 +285,64 @@ class TestScrapingStrategyMergeStaysOffNasOnFailure:
         assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
 
 
+class TestScrapingStrategyPreMergeDiskSpaceGuard:
+    """セグメント取得完了後、重い結合(yt-dlp)/後処理(FixupM3u8)を始める前に
+    もう一度ローカルディスクの空き容量を確認し、不足していれば無駄な処理を
+    せず早期に中断することを確認する回帰テスト。実機では、この確認が無いと
+    数十分かけてセグメントを取得した後、結合〜後処理の終盤でディスクフルに
+    より要領を得ない"Conversion failed!"エラーで失敗し、それまでの時間と
+    帯域が丸ごと無駄になる事象が発生した。"""
+
+    def test_aborts_before_merge_when_local_disk_headroom_is_insufficient(self, tmp_path, monkeypatch):
+        nas_save_dir = tmp_path / "nas_save"
+        nas_save_dir.mkdir()
+        local_tmp_dir = tmp_path / "local_tmp"
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda *a, **k: True))
+
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        manifest = "#EXTM3U\nhttps://cdn.example.com/seg0.ts\n#EXT-X-ENDLIST\n"
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", lambda m3u8_url, page_url: manifest)
+        monkeypatch.setattr(strategy, "_download_segment", lambda url, page_url: b"dummy-bytes")
+
+        # 実際の空き容量に依存せず判定を再現できるよう、disk_usage()の戻り値を
+        # 「空きほぼ0」に固定する。
+        monkeypatch.setattr(module.shutil, "disk_usage", lambda path: (10**12, 10**12, 0))
+
+        merge_invoked = []
+
+        class _ShouldNotBeCalledYoutubeDL:
+            def __init__(self, opts):
+                merge_invoked.append(True)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def download(self, urls):
+                raise AssertionError("空き容量不足時に結合(yt-dlp)が呼ばれてはならない")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _ShouldNotBeCalledYoutubeDL)
+
+        final_path = nas_save_dir / "dvdms-079.mp4"
+        result = strategy._download_with_ytdlp(
+            "https://cdn.example.com/playlist.m3u8",
+            final_path,
+            "https://missav.live/dm18/ja/dvdms-079",
+            nas_save_dir,
+        )
+
+        assert result is False
+        assert merge_invoked == []
+        assert not final_path.exists()
+        assert list(nas_save_dir.iterdir()) == []
+        assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
+
+
 class TestScrapingStrategyStaleArtifactCleanup:
     """以前の実装がNAS上に残した`.part`/`.part-FragN.part`/`.ytdl`/旧版の
     `.fragments.tmp`ディレクトリ等の残骸を、次回試行前に一掃することを

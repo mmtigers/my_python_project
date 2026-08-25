@@ -830,6 +830,30 @@ class ScrapingStrategy(DownloadStrategy):
             tmp_manifest_path = tmp_dir / "playlist.m3u8"
             tmp_manifest_path.write_text(local_manifest, encoding="utf-8")
 
+            # セグメント取得完了時点の実サイズをもとに、この先の結合
+            # (yt-dlpによるフラグメント連結)と、その後のFixupM3u8
+            # (タイムスタンプ補正のためのffmpeg再多重化。別ファイルへの
+            # 書き出しを伴う)でさらに同程度のディスク使用が発生することを
+            # 見込み、重い処理を始める前にもう一度空き容量を確認する。
+            # これを怠ると、数十分かけてセグメントを取得した後、結合〜後処理の
+            # 終盤でディスクフルにより"Conversion failed!"のような要領を
+            # 得ないエラーで失敗し、それまでの時間と帯域が丸ごと無駄になる
+            # (実機で確認)。
+            downloaded_bytes = sum(f.stat().st_size for f in tmp_dir.iterdir() if f.is_file())
+            _, _, free_bytes = shutil.disk_usage(tmp_dir)
+            # 結合済みファイル本体 + FixupM3u8が新たに書き出す修正版ファイルの
+            # 分として、取得済みセグメント合計の約2.2倍の空きを要求する。
+            required_bytes = int(downloaded_bytes * 2.2)
+            if free_bytes < required_bytes:
+                logger.error(
+                    f"⚠️ ローカルディスクの空き容量不足のため結合処理を中断します "
+                    f"(取得済み: 約{downloaded_bytes // (2**30)}GB, "
+                    f"必要目安: 約{required_bytes // (2**30)}GB, "
+                    f"空き: {free_bytes // (2**30)}GB)。"
+                    f"{CONFIG.LOCAL_TMP_DIR} の空き容量を増やしてから再実行してください。"
+                )
+                return False
+
             ydl_opts = {
                 'format': 'best',
                 'outtmpl': str(local_merged_path),
