@@ -547,9 +547,42 @@ class ScrapingStrategy(DownloadStrategy):
         filename = FileSystemManager.sanitize_filename(video_id) + ".mp4"
         final_path = target_dir / filename
 
+        # 過去の中断（クラッシュ、ボット検知による中断等）でNAS上に残った可能性のある
+        # yt-dlpの中間生成物（.part本体、.part-FragN.part、.ytdl）を今回の試行前に
+        # 一掃する。ダウンロード完了済み（final_pathが存在しスキップする）場合でも、
+        # 隣に残った断片ファイルはそのままだと永遠にクリーンアップされないため実行する。
+        self._cleanup_stale_ytdlp_artifacts(final_path)
+
         if self._should_skip(final_path): return True
-        
+
         return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)
+
+    @staticmethod
+    def _cleanup_stale_ytdlp_artifacts(final_path: Path) -> None:
+        """final_pathと同名で始まる中間生成物（NAS上に残った古い`.part`/
+        `.part-FragN.part`/`.ytdl`/旧版の`.fragments.tmp`ディレクトリ等）を削除する。
+
+        以前の実装は結合(merge)処理をNAS上のfinal_pathへ直接outtmplさせていたため、
+        処理が中断すると数百〜数千個のフラグメント断片がNAS上に残留し続けていた
+        （実機で確認）。_download_with_ytdlpの修正により今後はこの種の残骸は
+        発生しなくなるが、修正前に残った既存の残骸や、今回このメソッド自身が
+        発見できなかった残骸を安全側で一掃する。
+        """
+        try:
+            if not final_path.parent.exists():
+                return
+            for stale in final_path.parent.iterdir():
+                if stale == final_path or not stale.name.startswith(final_path.name):
+                    continue
+                try:
+                    if stale.is_dir():
+                        shutil.rmtree(stale, ignore_errors=True)
+                    else:
+                        stale.unlink()
+                except OSError as e:
+                    logger.warning(f"⚠️ 残留中間ファイルの削除に失敗しました ({stale}): {e}")
+        except OSError as e:
+            logger.warning(f"⚠️ 残留中間ファイルのスキャンに失敗しました ({final_path.parent}): {e}")
 
     def _fetch_html(self, url: str) -> Optional[str]:
         try:
@@ -758,6 +791,10 @@ class ScrapingStrategy(DownloadStrategy):
         # (理由はCONFIG.LOCAL_TMP_DIRのコメント参照)。結合済みの最終ファイルの
         # みNAS上のfinal_pathへ書き出す。
         tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")
+        # 前回実行がクラッシュ等で中断した場合、同名のtmp_dirが未クリーンアップの
+        # まま残っている可能性がある。古いフラグメント/結合途中ファイルが今回の
+        # 試行に混入しないよう、開始前に必ず削除してから作り直す。
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         try:
             tmp_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -771,6 +808,19 @@ class ScrapingStrategy(DownloadStrategy):
             shutil.rmtree(tmp_dir, ignore_errors=True)
             return False
 
+        # yt-dlpによる結合(merge)先もローカルディスクにする。以前はここに
+        # final_path(NAS上)を直接指定していたが、HLSのhlsnativeダウンローダーは
+        # ローカルfile://の入力であっても出力先(outtmpl)に対して
+        # 「フラグメント毎に`<name>.part-FragN.part`を書き込んでから結合」という
+        # 動作をするため、結局NAS上に数百〜数千個の小ファイルを書き込むことになり、
+        # セグメント取得側で修正したのと全く同じNASマウント遅延由来の問題
+        # (書き込み直後の読み込みでのfragment not found、長時間のハング)を
+        # 結合段階で再発させてしまっていた（実機のNAS上に大量の
+        # `*.part-FragN.part`/`*.ytdl`が残留する形で確認）。結合はローカル
+        # ディスク上で完結させ、完成した1ファイルのみを最後にNASへ移す。
+        local_merged_path = tmp_dir / final_path.name
+        nas_tmp_path = final_path.with_name(final_path.name + ".nastmp")
+
         try:
             logger.info(f"📥 セグメント取得開始 (curl_cffi): {final_path.name}")
             local_manifest = self._download_segments_and_localize_manifest(
@@ -782,7 +832,7 @@ class ScrapingStrategy(DownloadStrategy):
 
             ydl_opts = {
                 'format': 'best',
-                'outtmpl': str(final_path),
+                'outtmpl': str(local_merged_path),
                 'quiet': not CONFIG.SHOW_PROGRESS_BAR,
                 'no_warnings': True,
                 # セグメントは既にローカルへ取得済みのため、yt-dlpにはローカル
@@ -790,17 +840,30 @@ class ScrapingStrategy(DownloadStrategy):
                 # 任せ、ネットワークアクセスは一切発生させない。
                 'enable_file_urls': True,
             }
-            logger.info(f"📥 結合開始 (yt-dlp): {final_path.name}")
+            logger.info(f"📥 結合開始 (yt-dlp, ローカルディスク上): {final_path.name}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([tmp_manifest_path.resolve().as_uri()])
+
+            # 完成した1ファイルのみをNASへ書き出す。同一ファイルシステム間の
+            # os.replace()は原子的だが、ローカルディスク→NASという異なる
+            # ファイルシステム間の移動は原子的にできない。そこで
+            # 「save_dir内の一時名へコピー→save_dir内でos.replace()」の2段階に
+            # することで、コピー中に中断してもfinal_path自体は書き換わらず、
+            # _should_skip()が中途半端なファイルを完成済みと誤認しないようにする。
+            logger.info(f"📤 NASへ転送中: {final_path.name}")
+            shutil.copy2(str(local_merged_path), str(nas_tmp_path))
+            nas_tmp_path.replace(final_path)
+
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
             return True
         except BotDetectionError:
             if final_path.exists(): final_path.unlink()
+            nas_tmp_path.unlink(missing_ok=True)
             raise
         except Exception as e:
             logger.error(f"⚠️ M3U8 DL エラー: {e}", exc_info=True)
             if final_path.exists(): final_path.unlink() # 失敗した一時ファイルの削除
+            nas_tmp_path.unlink(missing_ok=True)
             if _is_bot_detection_error(e):
                 raise BotDetectionError(f"{page_url}: {e}") from e
             return False
