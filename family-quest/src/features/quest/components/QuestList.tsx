@@ -109,8 +109,10 @@ const QuestItem: React.FC<{
     // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。
     // ★バグ修正: 1件あたりの表示が大きすぎた(アイコン・文字サイズ・カード高さ)ため、
     // 全体的にコンパクトにする。説明文は line-clamp を外し、見切れず全文表示する。
-    const cardSizeClasses = panelMode ? 'p-2 min-h-[56px]' : 'min-h-[56px] md:p-6 md:h-full';
-    const layoutClasses = panelMode ? 'flex items-center gap-2' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-3 md:gap-6';
+    // ★修正: アイコン周り(カード全体のp-2/md:p-6・列間のgap)の余白を半分程度に縮め、
+    // 浮いた分をクエスト名(タイトル)・ゴールド表示エリアに回す。
+    const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';
+    const layoutClasses = panelMode ? 'flex items-center gap-1' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-1.5 md:gap-3';
     const iconSizeClasses = panelMode ? (iconFirst ? 'text-4xl' : 'text-xl') : 'text-2xl md:text-5xl';
     const titleSizeClasses = panelMode ? (iconFirst ? 'text-xs' : 'text-sm') : 'text-sm md:text-xl';
     const descSizeClasses = panelMode ? 'text-[10px] text-gray-400 leading-tight' : 'text-xs md:text-sm text-gray-400 leading-tight md:leading-normal';
@@ -205,7 +207,7 @@ const QuestItem: React.FC<{
 
                 <div className={`${layoutClasses} relative z-10 w-full h-full`}>
                     {/* 1. アイコンエリア */}
-                    <div className="flex items-center justify-center min-w-[3rem]">
+                    <div className="flex items-center justify-center min-w-[1.5rem]">
                         {/* ▼ ロック時は鍵アイコンを表示 */}
                         {isLocked ? (
                             <span className={`${panelMode ? 'text-3xl' : 'text-2xl md:text-5xl'} text-gray-400`}>
