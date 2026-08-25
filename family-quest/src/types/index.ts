@@ -70,6 +70,9 @@ export interface QuestHistory {
     // ★追加: 型エラー修正
     gold_earned?: number;
     exp_earned?: number;
+    // 兄妹連携クエストの相方側 quest_history.id。承認/却下がサーバー側で
+    // この行にもカスケードされる(services/quest_service.py参照)。
+    linked_history_id?: ID | null;
 }
 
 // 報酬アイテム
