@@ -196,6 +196,7 @@ class TestScrapingStrategyFragmentStaging:
 
         class _FakeYoutubeDL:
             def __init__(self, opts):
+                self._opts = opts
                 captured["opts"] = opts
 
             def __enter__(self):
@@ -206,6 +207,8 @@ class TestScrapingStrategyFragmentStaging:
 
             def download(self, urls):
                 captured["download_url"] = urls[0]
+                # 実際のyt-dlpはこの時点でouttmplの位置にファイルを書き出す。
+                Path(self._opts["outtmpl"]).write_bytes(b"dummy-merged-video")
 
         monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
 
@@ -222,6 +225,95 @@ class TestScrapingStrategyFragmentStaging:
         local_manifest_path = str(Path(unquote(urlsplit(download_url).path)))
         assert str(local_tmp_dir) in local_manifest_path
         assert str(nas_save_dir) not in local_manifest_path
+
+        # 結合(merge)先もNASではなくローカルディスクだったこと、かつ完成した
+        # ファイルは最終的にNAS上のfinal_pathへ届いていることを確認する。
+        assert str(local_tmp_dir) in captured["opts"]["outtmpl"]
+        assert str(nas_save_dir) not in captured["opts"]["outtmpl"]
+        assert final_path.exists()
+        assert final_path.read_bytes() == b"dummy-merged-video"
+        # NAS側の一時ファイル(.nastmp)やローカルの一時ディレクトリは残らないこと。
+        assert not final_path.with_name(final_path.name + ".nastmp").exists()
+        assert not (local_tmp_dir / (final_path.name + ".fragments.tmp")).exists()
+
+
+class TestScrapingStrategyMergeStaysOffNasOnFailure:
+    """結合(yt-dlp)またはNASへの転送が失敗した場合に、NAS上に中途半端な
+    final_pathや`.nastmp`一時ファイルが残らないことを確認する回帰テスト。"""
+
+    def test_final_path_not_left_behind_when_merge_raises(self, tmp_path, monkeypatch):
+        nas_save_dir = tmp_path / "nas_save"
+        nas_save_dir.mkdir()
+        local_tmp_dir = tmp_path / "local_tmp"
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda *a, **k: True))
+
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        manifest = "#EXTM3U\nhttps://cdn.example.com/seg0.ts\n#EXT-X-ENDLIST\n"
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", lambda m3u8_url, page_url: manifest)
+        monkeypatch.setattr(strategy, "_download_segment", lambda url, page_url: b"dummy-bytes")
+
+        class _FailingYoutubeDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def download(self, urls):
+                raise RuntimeError("simulated merge failure")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FailingYoutubeDL)
+
+        final_path = nas_save_dir / "dvdms-079.mp4"
+        result = strategy._download_with_ytdlp(
+            "https://cdn.example.com/playlist.m3u8",
+            final_path,
+            "https://missav.live/dm18/ja/dvdms-079",
+            nas_save_dir,
+        )
+
+        assert result is False
+        assert not final_path.exists()
+        assert not final_path.with_name(final_path.name + ".nastmp").exists()
+        assert list(nas_save_dir.iterdir()) == []
+        assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
+
+
+class TestScrapingStrategyStaleArtifactCleanup:
+    """以前の実装がNAS上に残した`.part`/`.part-FragN.part`/`.ytdl`/旧版の
+    `.fragments.tmp`ディレクトリ等の残骸を、次回試行前に一掃することを
+    確認する回帰テスト。"""
+
+    def test_removes_stale_siblings_but_keeps_final_path(self, tmp_path):
+        save_dir = tmp_path / "nas_save"
+        save_dir.mkdir()
+        final_path = save_dir / "dvdms-079.mp4"
+        final_path.write_bytes(b"already-downloaded")
+
+        stale_part = save_dir / "dvdms-079.mp4.part-Frag30.part"
+        stale_part.write_bytes(b"stale")
+        stale_ytdl = save_dir / "dvdms-079.mp4.ytdl"
+        stale_ytdl.write_text("stale")
+        stale_dir = save_dir / "dvdms-079.mp4.fragments.tmp"
+        stale_dir.mkdir()
+        (stale_dir / "seg_000000.ts").write_bytes(b"stale")
+        unrelated = save_dir / "other-video.mp4"
+        unrelated.write_bytes(b"keep-me")
+
+        module.ScrapingStrategy._cleanup_stale_ytdlp_artifacts(final_path)
+
+        assert final_path.exists()
+        assert final_path.read_bytes() == b"already-downloaded"
+        assert not stale_part.exists()
+        assert not stale_ytdl.exists()
+        assert not stale_dir.exists()
+        assert unrelated.exists()
 
 
 class TestScrapingStrategyLocalTmpDiskSpaceGuard:
