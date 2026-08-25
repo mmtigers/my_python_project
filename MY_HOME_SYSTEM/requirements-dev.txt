@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # MY_HOME_SYSTEM/requirements-dev.txt
 # テスト・Lint・セキュリティスキャン専用の依存関係。
 # 本番実行には不要なため requirements.txt とは分離している。
