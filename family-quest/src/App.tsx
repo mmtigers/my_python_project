@@ -439,7 +439,11 @@ function App() {
       {/* ★修正①: max-w-md (スマホ幅) 固定を廃止し、md以上で幅広にする。
           横画面(4人表示)では画面幅をフルに使う */}
 
-      <div className={`${densityWrapperClass} w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-7xl' : 'max-w-md md:max-w-5xl'}`}>
+      {/* ★修正②: 横画面のコンテナ幅を固定px(max-w-7xl=1280px)から画面幅比率(vw)ベースに変更。
+          Echo Show 15(1280px)相当ではほぼ従来通りの見え方を維持しつつ、より横幅の広い画面
+          (PCブラウザ等)では左右の余白が画面幅に対して一定割合(約4%ずつ)に収まるようにし、
+          各プレイヤーパネルの表示幅を広げる。超ワイド画面での間延びを防ぐため上限も併設する。 */}
+      <div className={`${densityWrapperClass} w-full mx-auto transition-all duration-300 ${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}`}>
 
         {viewMode === 'main' && layoutMode === 'landscape' && (
           <FamilyDashboard
