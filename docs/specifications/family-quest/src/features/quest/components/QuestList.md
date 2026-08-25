@@ -72,7 +72,7 @@
 
 * **役割**: 個別のクエストカードを描画し、状態に応じたバッジ表示（優先度順に上位`MAX_VISIBLE_BADGES`件＋「+N」）やクリック時の音声再生、コールバック実行を担う。`panelMode`が真のときはビューポート幅基準の`md:`拡大・2カラム化に乗らず、常に「狭い列でも崩れず、かつタップしやすい」固定サイズのクラス群（`cardSizeClasses`等、8種類）を使う。`iconFirst`が真のときはアイコンサイズを拡大しつつ説明文（`quest.desc`/`quest.description`）を非表示にする。共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`が自分以外）は`isEffectivelyLocked`として扱われクリック不可になる。完了済み/申請中の取消は`useLongPress`による長押しでのみ発火し、通常タップは新規完了（`handleTapComplete`）にのみ作用する。無限クエストの完了操作後は`isCooldown`ステートで60秒間クールダウンし、`CooldownRing`をオーバーレイ表示する。
 * 根拠: `const QuestItem: React.FC` (行番号: 37〜283 / 抜粋: "const QuestItem: React.FC<{")
-* 根拠: パネルモード時のクラス切り替え (行番号: 108〜119 / 抜粋: "// パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、\n    // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。\n    const cardSizeClasses = panelMode ? 'p-2 min-h-[56px]' : 'min-h-[56px] md:p-6 md:h-full';")
+* 根拠: パネルモード時のクラス切り替え (行番号: 108〜115 / 抜粋: "// パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、\n    // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。\n    const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
 * 根拠: 説明文の非表示条件 (行番号: 235〜240 / 抜粋: "{/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}\n                        {!iconFirst && (quest.desc || quest.description) && (")
 * 根拠: `isEffectivelyLocked`と長押し取消 (行番号: 65〜73行目 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;\n\n    // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;")
 * 根拠: クールダウン処理 (行番号: 82〜85行目 / 抜粋: "if (isInfinite) {\n            setIsCooldown(true);\n            setTimeout(() => setIsCooldown(false), COOLDOWN_MS);\n        }")
@@ -250,7 +250,9 @@ graph TD
 * 完了済み・申請中クエストの取消操作は、以前存在した確認クリックではなく`useLongPress`による550msの長押し（`canCancel`が真のときのみ有効）に統一されている。通常タップは`canCancel`または`isCooldown`のときには何も起きない（`handleTapComplete`が早期リターン）。
 * 根拠: (行番号: 71〜73, 95〜106 / 抜粋: "// 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;", "const handleTapComplete = () => {\n        if (canCancel || isCooldown) return;")
 * `panelMode`/`iconFirst`はいずれもレイアウト・表示切り替え専用のオプショナルpropで、クエストの判定ロジック自体（`isDone`/`isLocked`等）には影響しない。表示クラスの選択（`cardSizeClasses`, `layoutClasses`, `iconSizeClasses`等、8種類のスタイル変数）が`panelMode`/`iconFirst`の値ごとに個別に分岐しており、いずれか一方のモードのみを追加・変更する際は該当する全変数を漏れなく確認する必要がある。
-* 根拠: (行番号: 108〜119 / 抜粋: "const cardSizeClasses = panelMode ? 'p-2 min-h-[56px]' : 'min-h-[56px] md:p-6 md:h-full';")
+* 根拠: (行番号: 108〜115 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
+* アイコンエリア（`min-w-[1.5rem]`で幅を確保する`<div>`）とカード全体のpadding（`cardSizeClasses`）・列間のgap（`layoutClasses`）は、クエスト名・ゴールド表示エリアをより広く取るため、アイコン周りの余白を半分程度に縮小する形で調整されている（`p-2`→`p-1`、`md:p-6`→`md:p-3`、`gap-2`→`gap-1`、`gap-3 md:gap-6`→`gap-1.5 md:gap-3`、`min-w-[3rem]`→`min-w-[1.5rem]`）。
+* 根拠: (行番号: 114〜115, 210 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';\n    const layoutClasses = panelMode ? 'flex items-center gap-1' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-1.5 md:gap-3';", "<div className=\"flex items-center justify-center min-w-[1.5rem]\">")
 * バッジ表示は`badgeCandidates`に優先度（`priority`が小さいほど優先: 未開放0 < 対応済み1 < 申請中2 < 期間限定3 < 時間限定4）を付けてソートし、上位`MAX_VISIBLE_BADGES`（2件）のみ表示、残りは「+N」でまとめられる。バッジ種別を追加する際はこの優先度体系に組み込む必要がある。
 * 根拠: (行番号: 121〜168 / 抜粋: "// ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)\n    const badgeCandidates: BadgeCandidate[] = [];")
 
