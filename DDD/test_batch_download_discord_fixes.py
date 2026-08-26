@@ -285,6 +285,66 @@ class TestScrapingStrategyMergeStaysOffNasOnFailure:
         assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
 
 
+class TestScrapingStrategyNasCopyIntegrityCheck:
+    """NAS(CIFS)への転送が静かに欠損した場合に、成功扱いにせず失敗として
+    扱うことを確認する回帰テスト。実機のdmesgで観測されたNAS接続不安定
+    ("stuck for 15 seconds"、"No writable handle in writepages")により、
+    shutil.copy2自体は例外を出さないまま末尾が欠損した"moov atom not found"
+    (=再生不能)のmp4がNAS上に生成される実害が発生したための対応。"""
+
+    def test_size_mismatch_after_copy_is_treated_as_failure(self, tmp_path, monkeypatch):
+        nas_save_dir = tmp_path / "nas_save"
+        nas_save_dir.mkdir()
+        local_tmp_dir = tmp_path / "local_tmp"
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda *a, **k: True))
+
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        manifest = "#EXTM3U\nhttps://cdn.example.com/seg0.ts\n#EXT-X-ENDLIST\n"
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", lambda m3u8_url, page_url: manifest)
+        monkeypatch.setattr(strategy, "_download_segment", lambda url, page_url: b"dummy-bytes")
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                self._opts = opts
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def download(self, urls):
+                Path(self._opts["outtmpl"]).write_bytes(b"complete-merged-video-bytes")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+
+        # NASへのコピーが末尾で欠損した状況を再現する: 実際より短いバイト列
+        # だけを書き込むが、shutil.copy2としては例外を出さず正常終了する。
+        def _truncated_copy2(src, dst):
+            with open(src, "rb") as f:
+                data = f.read()
+            with open(dst, "wb") as f:
+                f.write(data[: len(data) // 2])
+
+        monkeypatch.setattr(module.shutil, "copy2", _truncated_copy2)
+
+        final_path = nas_save_dir / "sdmm-018.mp4"
+        result = strategy._download_with_ytdlp(
+            "https://cdn.example.com/playlist.m3u8",
+            final_path,
+            "https://missav.live/dm31/ja/sdmm-018",
+            nas_save_dir,
+        )
+
+        assert result is False
+        assert not final_path.exists()
+        assert not final_path.with_name(final_path.name + ".nastmp").exists()
+        assert list(nas_save_dir.iterdir()) == []
+
+
 class TestScrapingStrategyPreMergeDiskSpaceGuard:
     """セグメント取得完了後、重い結合(yt-dlp)/後処理(FixupM3u8)を始める前に
     もう一度ローカルディスクの空き容量を確認し、不足していれば無駄な処理を

@@ -876,6 +876,25 @@ class ScrapingStrategy(DownloadStrategy):
             # _should_skip()が中途半端なファイルを完成済みと誤認しないようにする。
             logger.info(f"📤 NASへ転送中: {final_path.name}")
             shutil.copy2(str(local_merged_path), str(nas_tmp_path))
+
+            # NAS(CIFS)は接続が不安定な場合があり、実機のdmesgでも
+            # "sends on sock ... stuck for 15 seconds"や"No writable handle
+            # in writepages"(バッファ済み書き込みをサーバーへ反映できな
+            # かったことを示す)が確認されている。この場合shutil.copy2自体は
+            # 例外を送出せず「見かけ上成功」してしまうことがあり、末尾の
+            # moov atomが丸ごと欠落した再生不能なmp4が生成される実害を確認
+            # した。コピー元とコピー先のファイルサイズを比較し、転送が
+            # 不完全だった場合は成功扱いにしない。
+            local_size = local_merged_path.stat().st_size
+            nas_size = nas_tmp_path.stat().st_size
+            if nas_size != local_size:
+                nas_tmp_path.unlink(missing_ok=True)
+                raise OSError(
+                    f"NASへの転送後にファイルサイズが一致しませんでした "
+                    f"(ローカル: {local_size} bytes, NAS: {nas_size} bytes)。"
+                    "NASの接続不安定による転送不良の可能性があります。"
+                )
+
             nas_tmp_path.replace(final_path)
 
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
