@@ -549,5 +549,34 @@ class TestStandaloneDiscordWebhookFallback:
         assert calls == ["https://discord.example.com/error"]
 
 
+class TestConfigurableRequestTimeout:
+    """単身赴任先PC等、自宅回線より低速な環境向けにREQUEST_TIMEOUTを
+    DDD_REQUEST_TIMEOUT環境変数で調整可能にする変更の回帰テスト。"""
+
+    def _request_timeout_with_env(self, monkeypatch, value):
+        # importlib.reload()はmoduleオブジェクトをin-placeで書き換えるため、
+        # reload直後に必要な値だけをコピーして取り出す(moduleオブジェクト自体を
+        # 返すと、後始末の再reloadで値が上書きされてテストが壊れるため)。
+        if value is None:
+            monkeypatch.delenv("DDD_REQUEST_TIMEOUT", raising=False)
+        else:
+            monkeypatch.setenv("DDD_REQUEST_TIMEOUT", value)
+        import importlib
+
+        try:
+            importlib.reload(module)
+            return module.CONFIG.REQUEST_TIMEOUT
+        finally:
+            # 他のテストに影響しないよう、環境変数を戻した上で再度reloadしておく。
+            monkeypatch.undo()
+            importlib.reload(module)
+
+    def test_defaults_to_20_when_unset(self, monkeypatch):
+        assert self._request_timeout_with_env(monkeypatch, None) == 20
+
+    def test_uses_env_override_when_set(self, monkeypatch):
+        assert self._request_timeout_with_env(monkeypatch, "90") == 90
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
