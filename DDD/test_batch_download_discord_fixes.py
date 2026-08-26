@@ -472,5 +472,82 @@ class TestScrapingStrategyLocalTmpDiskSpaceGuard:
         assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
 
 
+class TestVerifyNasMount:
+    """NASを持たない単独環境(外付けHDD等への直接保存)向けのNASマウント確認バイパス。"""
+
+    def test_skips_check_when_nas_not_required(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            module,
+            "CONFIG",
+            dataclasses.replace(
+                module.CONFIG,
+                REQUIRE_NAS_MOUNT=False,
+                NAS_MOUNT_POINT=tmp_path / "does-not-exist",
+            ),
+        )
+        assert module.SystemHealthChecker.verify_nas_mount() is True
+
+    def test_still_enforced_by_default(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            module,
+            "CONFIG",
+            dataclasses.replace(
+                module.CONFIG,
+                REQUIRE_NAS_MOUNT=True,
+                NAS_MOUNT_POINT=tmp_path / "does-not-exist",
+            ),
+        )
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+        assert module.SystemHealthChecker.verify_nas_mount() is False
+
+
+class TestStandaloneDiscordWebhookFallback:
+    """MY_HOME_SYSTEM(LINE Bot SDK/config.py/DB)を持たない単独環境向けの
+    簡易Discord通知フォールバック(_standalone_send_discord_webhook)の回帰テスト。"""
+
+    def test_returns_false_without_error_when_no_webhook_configured(self, monkeypatch):
+        for name in ("DISCORD_WEBHOOK_ERROR", "DISCORD_WEBHOOK_NOTIFY", "DISCORD_WEBHOOK_URL"):
+            monkeypatch.delenv(name, raising=False)
+        assert module._standalone_send_discord_webhook([{"type": "text", "text": "hi"}]) is False
+
+    def test_posts_to_notify_webhook_for_default_channel(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", "https://discord.example.com/notify")
+        monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+        calls = []
+
+        class _FakeResponse:
+            def raise_for_status(self):
+                pass
+
+        def _fake_post(url, json, timeout):
+            calls.append((url, json))
+            return _FakeResponse()
+
+        monkeypatch.setattr(module.requests, "post", _fake_post)
+        result = module._standalone_send_discord_webhook([{"type": "text", "text": "hello"}], channel="notify")
+
+        assert result is True
+        assert calls == [("https://discord.example.com/notify", {"content": "hello"})]
+
+    def test_posts_to_error_webhook_for_error_channel(self, monkeypatch):
+        monkeypatch.setenv("DISCORD_WEBHOOK_ERROR", "https://discord.example.com/error")
+        monkeypatch.delenv("DISCORD_WEBHOOK_URL", raising=False)
+        calls = []
+
+        class _FakeResponse:
+            def raise_for_status(self):
+                pass
+
+        def _fake_post(url, json, timeout):
+            calls.append(url)
+            return _FakeResponse()
+
+        monkeypatch.setattr(module.requests, "post", _fake_post)
+        result = module._standalone_send_discord_webhook([{"type": "text", "text": "boom"}], channel="error")
+
+        assert result is True
+        assert calls == ["https://discord.example.com/error"]
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
