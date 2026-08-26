@@ -81,12 +81,38 @@ else:
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
+def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:
+    """MY_HOME_SYSTEM(LINE Bot SDKやconfig.py、DBを要する)を持たない単独環境向けの
+    簡易Discord Webhook送信フォールバック。DISCORD_WEBHOOK_ERROR/DISCORD_WEBHOOK_NOTIFY
+    (未設定時はDISCORD_WEBHOOK_URL)を直接参照し、追加の依存関係なしでテキスト通知のみ送る。
+    """
+    url = None
+    if channel == "error":
+        url = os.getenv("DISCORD_WEBHOOK_ERROR") or os.getenv("DISCORD_WEBHOOK_URL")
+    else:
+        url = os.getenv("DISCORD_WEBHOOK_NOTIFY") or os.getenv("DISCORD_WEBHOOK_URL")
+    if not url:
+        return False
+    text = "\n".join(
+        (m.get("text", "") if isinstance(m, dict) else str(m)) for m in messages
+    )
+    try:
+        resp = requests.post(url, json={"content": text[:2000]}, timeout=CONFIG.REQUEST_TIMEOUT)
+        resp.raise_for_status()
+        return True
+    except Exception as e:
+        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {e}")
+        return False
+
 try:
     from services.notification_service import _send_discord_webhook
 except ImportError:
-    logger.warning("⚠️ Notification Service not found. Discord notification disabled.")
-    def _send_discord_webhook(messages, image_data=None, channel="notify"):
-        pass
+    logger.warning(
+        "⚠️ Notification Service not found. "
+        "DISCORD_WEBHOOK_NOTIFY/DISCORD_WEBHOOK_ERROR(またはDISCORD_WEBHOOK_URL)による"
+        "簡易Discord通知にフォールバックします（いずれも未設定なら通知は送信されません）。"
+    )
+    _send_discord_webhook = _standalone_send_discord_webhook
 
 def _resolve_cookies_file() -> Optional[Path]:
     """YouTube等のボット検知回避用Cookieファイルを解決する。
@@ -122,6 +148,9 @@ class AppConfig:
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
     NAS_MOUNT_POINT: Path = Path("/mnt/nas")
     NAS_MARKER_FILE: str = ".mounted"
+    # NASを経由せずローカルディスク(外付けHDD等)に直接保存する単独環境向け。
+    # falseにするとverify_nas_mount()自体をスキップし、NAS未マウントでも起動できる。
+    REQUIRE_NAS_MOUNT: bool = os.getenv("DDD_REQUIRE_NAS_MOUNT", "true").lower() == "true"
     # missavのHLSフラグメント(数千個の小ファイル、動画1本あたり数GB)を一時保存
     # する先。NAS上のBASE_SAVE_DIR配下に置くと、autofsのアイドルアンマウント後の
     # 再マウント遅延やNAS本体側の応答遅延（本リポジトリのnas_monitor関連の過去の
@@ -414,6 +443,8 @@ class SystemHealthChecker:
 
     @staticmethod
     def verify_nas_mount() -> bool:
+        if not CONFIG.REQUIRE_NAS_MOUNT:
+            return True
         if not CONFIG.NAS_MOUNT_POINT.exists() or not CONFIG.nas_marker_path.exists():
             DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)
             return False
