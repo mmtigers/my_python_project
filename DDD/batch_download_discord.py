@@ -168,7 +168,11 @@ class AppConfig:
     # ディスクを圧迫する前に安全側でダウンロードを中断する。
     LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))
 
-    REQUEST_TIMEOUT: int = 20
+    # セグメント取得等のHTTPタイムアウト(秒)。単身赴任先PC等、自宅回線より
+    # 低速な回線では既定の20秒だと大きめのHLSセグメントが間に合わずタイムアウト
+    # →連続失敗でレート制限とみなされ処理中断、が起きうるため環境変数で調整可能にする
+    # (未設定時は従来通り20秒=自宅ラズパイ側の挙動は変わらない)。
+    REQUEST_TIMEOUT: int = int(os.getenv("DDD_REQUEST_TIMEOUT", "20"))
     MAX_RETRIES: int = 3
 
     # 【追加】ボット検知/レート制限対策
