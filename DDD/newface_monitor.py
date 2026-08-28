@@ -165,6 +165,11 @@ class SiteConfig:
             同一テキストノード内にタブ区切りで同居しているサイト向け
             （例: "芹沢\t\t\t(40歳)"）。全角スペース区切りの姓名（例:
             "神谷　しおり"）は対象外のため、空白ではなくタブのみで判定する。
+        skip_unnamed_casts (bool): Trueの場合、名前が取得できなかったカード
+            （selector_name不一致・テキスト空の両方）を通知・登録の対象から
+            除外する。一覧に名前空・身長0cm等のプレースホルダーカードが
+            混ざるサイト向け（例: yui_mrsteiのprofile?id=81）。未指定時は
+            従来どおり'Unknown'として扱う。
     """
     site_id: str
     name: str
@@ -179,6 +184,7 @@ class SiteConfig:
     image_from_style: bool = False
     name_first_text_only: bool = False
     name_strip_after_tab: bool = False
+    skip_unnamed_casts: bool = False
 
     def get_data_filename(self) -> str:
         """既知キャストの保存先ファイル名を返す。
@@ -399,6 +405,9 @@ class MonitorConfig:
             selector_link='a[href*="/profile?id="]',
             selector_image='div.ph img',
             id_query_param='id',
+            # 一覧末尾に名前空・身長0cmのプレースホルダーカード
+            # (例: profile?id=81) が混ざるため、名前が取れないカードは除外する
+            skip_unnamed_casts=True,
         ),
         SiteConfig(
             site_id='aube_spa',
@@ -1689,20 +1698,31 @@ class WebMonitor:
                 elif name_elem:
                     name = name_elem.get_text(strip=True)
                 else:
-                    name = "Unknown"
+                    name = ""
                 if site.name_strip_after_tab and '\t' in name:
                     # "芹沢\t\t\t(40歳)" のように、年齢等の付加情報が兄弟要素では
                     # なく同一テキストノード内にタブ区切りで同居しているサイト向け
                     name = name.split('\t')[0].strip()
 
                 if not name:
-                    # selector_nameはヒットしたが、テキストが空の要素だった場合
-                    # (画像のみのカード等)。name_elemが見つからない場合の"Unknown"と
-                    # 挙動を揃え、空文字のまま通知が送られるのを防ぐ
-                    logger.warning(
-                        f"Empty name extracted for a cast on site '{site.site_id}' "
-                        f"(selector: {site.selector_name}). Falling back to 'Unknown'."
-                    )
+                    if site.skip_unnamed_casts:
+                        # 名前空のプレースホルダーカード（未公開キャスト枠等）が
+                        # 一覧に混ざるサイトでは、'Unknown'として通知・登録せず
+                        # カードごと読み飛ばす。後日名前付きで公開された時点で
+                        # 通常の新人として検知される
+                        logger.debug(
+                            f"Skipping unnamed cast card on site '{site.site_id}' "
+                            f"(selector: {site.selector_name})."
+                        )
+                        continue
+                    if name_elem is not None:
+                        # selector_nameはヒットしたが、テキストが空の要素だった場合
+                        # (画像のみのカード等)。name_elemが見つからない場合の"Unknown"と
+                        # 挙動を揃え、空文字のまま通知が送られるのを防ぐ
+                        logger.warning(
+                            f"Empty name extracted for a cast on site '{site.site_id}' "
+                            f"(selector: {site.selector_name}). Falling back to 'Unknown'."
+                        )
                     name = "Unknown"
 
                 # Age Extraction
