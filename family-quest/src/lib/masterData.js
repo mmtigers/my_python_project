@@ -1,4 +1,4 @@
-// family-quest/src/constants/masterData.js
+// family-quest/src/lib/masterData.js
 // サーバー接続エラー時のみ使用されるフォールバックデータ
 
 export const INITIAL_USERS = [
