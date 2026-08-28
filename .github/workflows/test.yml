@@ -132,10 +132,10 @@ jobs:
       - name: Bandit (High severity - blocking)
         # 現状 High severity の指摘は0件。Medium/Low(主にf-string SQL構築の誤検知含む)は
         # 大量に残っているため、それらで一律ブロックはせず、次のステップで可視化のみ行う。
-        run: bandit -r . -x ./tests,./old,./monitors/old -lll
+        run: bandit -r . -x ./tests -lll
 
       - name: Bandit (full report - non-blocking)
-        run: bandit -r . -x ./tests,./old,./monitors/old -f txt -o bandit-report.txt || true
+        run: bandit -r . -x ./tests -f txt -o bandit-report.txt || true
         continue-on-error: true
 
       - name: Bandit DDD (full report - non-blocking)
