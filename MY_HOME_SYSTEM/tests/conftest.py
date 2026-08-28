@@ -11,6 +11,16 @@ config.SQLITE_DB_PATH を書き換えて init_unified_db.init_db() を呼ぶ、
 import os
 import sys
 
+# core.logger.setup_logging() は import された時点で config.DISCORD_WEBHOOK_ERROR を
+# DiscordErrorHandler に焼き込む(以降 config を monkeypatch しても効果がない)。
+# 各サービスモジュールの `logger = setup_logging(...)` はテストファイルの import
+# (collection)時点で実行されるため、個々のテストの setUp/monkeypatch では
+# 手遅れになる。`import config` より前に環境変数そのものを潰しておくことで、
+# どのテストファイルが最初に import されても実際のDiscord Webhookが
+# 発火しないようにする(load_dotenv は既存の環境変数を上書きしないため有効)。
+os.environ["DISCORD_WEBHOOK_ERROR"] = ""
+os.environ["DISCORD_WEBHOOK_ERROR_CAM"] = ""
+
 import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
