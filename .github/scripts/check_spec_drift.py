@@ -33,7 +33,7 @@ PY_EXTENSIONS = {".py", ".sh"}
 FQ_SOURCE_ROOT = "family-quest/src"
 FQ_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 
-EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations"}
+EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup"}
 EXCLUDE_SUFFIXES = {".d.ts"}
 
 
@@ -106,9 +106,12 @@ def doc_to_source_candidates(doc_path: Path) -> list[Path]:
 
     if parts and parts[0] in PY_SOURCE_DIRS:
         # フラット命名なので、ディレクトリ内のどこにあるか探索が必要。
+        # .venv/db_backup 等はgitignore対象でも実ファイルシステム上は存在するため、
+        # rglobが誤って拾ってしまわないようここでも明示的に除外する。
         matches = list((REPO_ROOT / parts[0]).rglob(f"{stem}.py"))
         matches += list((REPO_ROOT / parts[0]).rglob(f"{stem}.sh"))
-        return [m.relative_to(REPO_ROOT) for m in matches]
+        rels = [m.relative_to(REPO_ROOT) for m in matches]
+        return [rel for rel in rels if not is_excluded(rel)]
 
     if parts and parts[0] == "family-quest":
         candidates = []
