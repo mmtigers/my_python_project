@@ -83,6 +83,9 @@ family_events.json
 !family-quest/package.json
 !family-quest/package-lock.json
 !family-quest/tsconfig*.json
+# family-quest: the blanket *.mp3 rule above targets personal media, not this
+# app's own sound-effect assets referenced by useSound.ts.
+!family-quest/public/*.mp3
 
 # Test / Coverage artifacts
 .coverage
