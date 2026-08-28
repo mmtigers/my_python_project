@@ -8,6 +8,10 @@ Type=oneshot
 User=masahiro
 Group=masahiro
 
+# サービス起動待ちリトライ(最大2分)を考慮しても10分あれば完了する。
+# スクリプト内のsubprocessがハングしても、ここで強制的に打ち切る(最終防衛線)
+TimeoutStartSec=600
+
 # 1. 作業ディレクトリ
 # スクリプト内で 'import config' 等を行うため、MY_HOME_SYSTEM直下を起点にします
 WorkingDirectory=/home/masahiro/develop/MY_HOME_SYSTEM

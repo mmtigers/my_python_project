@@ -84,7 +84,7 @@ class PostBootHealthCheck:
     def check_system_resources(self):
         # 温度
         try:
-            res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")
+            res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")
             temp = float(res.replace("temp=", "").replace("'C\n", ""))
             if temp >= 85:
                 temp_status = STATUS_ERR
@@ -126,7 +126,7 @@ class PostBootHealthCheck:
     def check_network_and_apis(self):
         # Ping
         try:
-            subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)
+            subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)
         except:
             self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))
             return 
@@ -274,13 +274,18 @@ class PostBootHealthCheck:
         
         has_card = False
         try:
-            if "card" in subprocess.check_output(["aplay", "-l"], stderr=subprocess.DEVNULL).decode():
+            if "card" in subprocess.check_output(["aplay", "-l"], stderr=subprocess.DEVNULL, timeout=10).decode():
                 has_card = True
         except: pass
 
         if TARGET_BLUETOOTH_MAC:
             try:
-                res = subprocess.check_output(["bluetoothctl", "info", TARGET_BLUETOOTH_MAC]).decode()
+                # bluetoothctlはBluetoothデーモン不調時に応答を返さず無限に待つことが
+                # あるため、stdinを閉じてtimeoutで打ち切る(超過時はexceptでBT Error扱い)
+                res = subprocess.check_output(
+                    ["bluetoothctl", "info", TARGET_BLUETOOTH_MAC],
+                    stdin=subprocess.DEVNULL, timeout=15,
+                ).decode()
                 if "Connected: yes" in res:
                     spk_msg = "Connected (BT)"
                 else:
@@ -309,7 +314,7 @@ class PostBootHealthCheck:
         time_threshold = datetime.now() - timedelta(minutes=10)
 
         try:
-            res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")
+            res = subprocess.check_output(["tail", "-n", "200", self.log_file_path], timeout=10).decode("utf-8", errors="ignore")
         except Exception as e:
             logger.error(f"Log check failed: {e}")
             self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))
