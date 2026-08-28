@@ -439,20 +439,6 @@ ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "tr
 if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
-# --- Cloudflare Access (Zero Trust) JWT検証 ---
-# m-mhts.com はCloudflare Tunnelで公開し、エッジ側でCloudflare Accessの認証を
-# 必須にしている。オリジン側(unified_server)でも Cf-Access-Jwt-Assertion ヘッダーの
-# JWTを検証することで、エッジ設定のミスやトンネル迂回時に無認証で到達される事故を防ぐ。
-# AUDタグはAccessアプリケーション毎の公開識別子(シークレットではない)。
-# Zero Trustダッシュボード: Access > Applications > 対象アプリ > Overview で確認できる。
-CF_ACCESS_TEAM_DOMAIN: str = os.getenv(
-    "CF_ACCESS_TEAM_DOMAIN", "myhomesystem.cloudflareaccess.com"
-)
-CF_ACCESS_AUD: str = os.getenv(
-    "CF_ACCESS_AUD",
-    "fbdd0f77186285bfd685ed5cb906e9e9cd3ba80187c022232b156140cc815287",
-)
-
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
 # ディスクを圧迫し得た。アバター画像用途を想定し余裕を持って10MBとする。

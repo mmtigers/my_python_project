@@ -71,9 +71,7 @@ class TestGlobalExceptionHandler:
             unified_server.quest_router.game_system, "sync_master_data", lambda: _boom()
         )
 
-        client = TestClient(
-            unified_server.app, raise_server_exceptions=False, client=("127.0.0.1", 50000)
-        )
+        client = TestClient(unified_server.app, raise_server_exceptions=False)
         res = client.post("/api/quest/sync_master")
 
         assert res.status_code == 500
@@ -81,12 +79,12 @@ class TestGlobalExceptionHandler:
         assert secret_detail not in res.text
 
 
-class TestAccessControlMiddlewareBasics:
+class TestIpRestrictionMiddlewareCurrentBehavior:
     """
-    access_control_middleware の基本挙動。
-    (旧 ip_restriction_middleware は全リクエストを通過させていたが、
-    Cloudflare AccessのJWT検証を実装した際に fail-closed に変更した。
-    外部アクセス経路・JWT検証の詳細は tests/test_cf_access_middleware.py を参照)
+    現状の ip_restriction_middleware は、プライベートIP判定に失敗した場合でも
+    最終的に call_next(request) を呼んで通過させる実装になっており、
+    実質的な遮断機能を持たない(2.2参照)。将来この挙動を意図的に厳格化した際に
+    「Webhookパスだけは常に通す」という前提が壊れていないかを検知するためのテスト。
     """
 
     def test_webhook_paths_bypass_without_ip_parsing(self, api_client, monkeypatch):
@@ -104,15 +102,15 @@ class TestAccessControlMiddlewareBasics:
         api_client.post("/callback/line", content=b"{}")
         assert calls == []
 
-    def test_lan_request_is_allowed_without_jwt(self, api_client):
-        """接続元がプライベート/ループバックならJWTなしで通過する(家庭内LANの通常利用)"""
+    def test_normal_path_is_currently_always_allowed(self, api_client):
+        """スプーフィング可能なヘッダーを一切付けなくても現状は必ず通過する(既知の未解決リスク)"""
         res = api_client.get("/health")
         assert res.status_code == 200
 
-    def test_spoofed_forwarded_for_header_is_ignored(self, api_client):
+    def test_spoofed_forwarded_for_header_is_also_allowed(self, api_client):
         """
-        信頼判定は実際のTCP接続元で行うため、X-Forwarded-For の詐称は
-        許可にも拒否にも影響しない(LAN内からなら通過したままになる)。
+        X-Forwarded-For を詐称しても(現状は)拒否されない。
+        これは修正すべき既知のセキュリティリスクとして最終報告書に記録する。
         """
         res = api_client.get("/health", headers={"X-Forwarded-For": "203.0.113.5"})
         assert res.status_code == 200
@@ -152,7 +150,7 @@ class TestLifespan:
             unified_server, "apply_pending_migrations", lambda conn: migration_calls.append(conn)
         )
 
-        with TestClient(unified_server.app, client=("127.0.0.1", 50000)) as client:
+        with TestClient(unified_server.app) as client:
             res = client.get("/health")
             assert res.status_code == 200
             assert len(spawned) == 2  # camera_monitor.py, scheduler_boot.py
