@@ -169,6 +169,10 @@ class DeviceConfig(BaseModel):
 # 1. 環境・機能フラグ設定
 # ==========================================
 ENV: str = os.getenv("ENV", "development")
+# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが
+# BT確認をスキップしサウンドカード確認にフォールバックする。
+# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`
+# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。
 ENABLE_BLUETOOTH: bool = False
 # Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)
 SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "F4:4E:FC:B6:65:D4")

@@ -29,7 +29,17 @@ logger = common.setup_logging("health_check")
 # ==========================================
 # ユーザー設定
 # ==========================================
-TARGET_BLUETOOTH_MAC = getattr(config, "SPEAKER_BLUETOOTH_MAC", None)
+def resolve_target_bluetooth_mac():
+    """BT運用が有効(config.ENABLE_BLUETOOTH=True)な場合のみスピーカーMACを返す。
+
+    無効時はNoneを返し、Speakerチェックはサウンドカード確認にフォールバックする
+    (bluetooth.serviceが停止した環境でBT WARNを出し続けないため)。
+    """
+    if not getattr(config, "ENABLE_BLUETOOTH", False):
+        return None
+    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)
+
+TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()
 # ==========================================
 
 # ステータスレベル定数
