@@ -3,7 +3,7 @@ import threading
 import traceback
 import os
 import requests
-from logging.handlers import TimedRotatingFileHandler
+from logging.handlers import WatchedFileHandler
 import config
 
 # === ロギング設定 ===
@@ -78,13 +78,12 @@ def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
     log_dir = os.path.join(config.BASE_DIR, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "home_system.log")
-    file_handler = TimedRotatingFileHandler(
-        filename=log_file,
-        when='midnight',
-        interval=1,
-        backupCount=7,
-        encoding='utf-8'
-    )
+    # home_system.log は unified_server / monitors / cronスクリプト等の複数プロセスが
+    # 同時に開くため、各プロセスが独自にrenameするTimedRotatingFileHandlerでは
+    # ローテーションが壊れる(旧backupへ書き込み続ける)。書き込み専用の
+    # WatchedFileHandlerにし、ローテーションはlogrotate側
+    # (deploy/logrotate/home_system → /etc/logrotate.d/home_system)に一元化する。
+    file_handler = WatchedFileHandler(filename=log_file, encoding='utf-8')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 
