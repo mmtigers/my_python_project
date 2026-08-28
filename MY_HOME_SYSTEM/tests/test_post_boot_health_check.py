@@ -203,7 +203,24 @@ class TestCheckServicesDashboard:
 
 
 class TestTargetBluetoothMac:
-    def test_defaults_to_configured_speaker_mac_not_none(self):
-        """以前はNoneがハードコードされ、BT確認ロジックが常にデッドコードだった"""
-        assert health_check_module.TARGET_BLUETOOTH_MAC == config.SPEAKER_BLUETOOTH_MAC
-        assert health_check_module.TARGET_BLUETOOTH_MAC
+    def test_none_when_bluetooth_disabled(self, monkeypatch):
+        """ENABLE_BLUETOOTH=Falseの間はBTチェックをスキップする(bluetooth.service停止
+        環境で毎回BT WARNが出るノイズを防ぐ)"""
+        monkeypatch.setattr(config, "ENABLE_BLUETOOTH", False, raising=False)
+        assert health_check_module.resolve_target_bluetooth_mac() is None
+
+    def test_uses_configured_speaker_mac_when_enabled(self, monkeypatch):
+        """再有効化時は設定済みMACでBT接続を確認する"""
+        monkeypatch.setattr(config, "ENABLE_BLUETOOTH", True, raising=False)
+        assert (
+            health_check_module.resolve_target_bluetooth_mac()
+            == config.SPEAKER_BLUETOOTH_MAC
+        )
+        assert health_check_module.resolve_target_bluetooth_mac()
+
+    def test_module_default_matches_current_config(self):
+        """import時に解決されるTARGET_BLUETOOTH_MACは現在のconfigと整合する"""
+        expected = (
+            config.SPEAKER_BLUETOOTH_MAC if config.ENABLE_BLUETOOTH else None
+        )
+        assert health_check_module.TARGET_BLUETOOTH_MAC == expected
