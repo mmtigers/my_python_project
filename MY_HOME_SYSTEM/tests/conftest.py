@@ -18,8 +18,20 @@ import sys
 # 手遅れになる。`import config` より前に環境変数そのものを潰しておくことで、
 # どのテストファイルが最初に import されても実際のDiscord Webhookが
 # 発火しないようにする(load_dotenv は既存の環境変数を上書きしないため有効)。
+#
+# 2026-08-28: DISCORD_WEBHOOK_ERROR系のみをマスクしていたため、報酬の申請/使用
+# 通知が使う DISCORD_WEBHOOK_NOTIFY 経路がノーマークになっており、ローカルの
+# .env に本番の認証情報が入った状態で test_quest_router_endpoints.py 等の
+# inventory系テスト(実際にHTTP経由でuse_item/consume_itemを叩く)を実行すると
+# 本物のDiscord/LINEに通知が飛ぶ事故が発生した。notification_service経由で
+# 送信されうる認証情報は全てここでマスクする。
 os.environ["DISCORD_WEBHOOK_ERROR"] = ""
 os.environ["DISCORD_WEBHOOK_ERROR_CAM"] = ""
+os.environ["DISCORD_WEBHOOK_REPORT"] = ""
+os.environ["DISCORD_WEBHOOK_NOTIFY"] = ""
+os.environ["DISCORD_WEBHOOK_URL"] = ""
+os.environ["LINE_CHANNEL_ACCESS_TOKEN"] = ""
+os.environ["LINE_USER_ID"] = ""
 
 import pytest
 
