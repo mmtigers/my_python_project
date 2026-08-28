@@ -42,7 +42,6 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
         // ★ラップ関数: 音を鳴らしてから元のonClickを実行
         const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
-            console.log("Button clicked! Playing tap sound...");
             if (!disabled && !isLoading) {
                 play('tap');
             }
