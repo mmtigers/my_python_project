@@ -34,7 +34,7 @@ def spa_client(tmp_path, monkeypatch):
     importlib.reload(config)
     importlib.reload(unified_server)
 
-    client = TestClient(unified_server.app)
+    client = TestClient(unified_server.app, client=("127.0.0.1", 50000))
     try:
         yield client
     finally:
@@ -81,7 +81,7 @@ def test_routes_are_not_registered_when_quest_dist_dir_missing(tmp_path, monkeyp
     importlib.reload(config)
     importlib.reload(unified_server)
     try:
-        client = TestClient(unified_server.app)
+        client = TestClient(unified_server.app, client=("127.0.0.1", 50000))
         res = client.get("/quest")
         assert res.status_code == 404
     finally:
