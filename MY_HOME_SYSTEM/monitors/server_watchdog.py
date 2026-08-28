@@ -19,6 +19,8 @@ WATCH_PROCESS_NAME: str = "unified_server.py"
 REMINDER_INTERVAL_SEC: int = 6 * 3600  # 6時間
 
 LOCK_FILE: Path = Path(config.BASE_DIR) / "watchdog_alert_sent.lock"
+# スロットリング履歴の通知済み状態 ("<boot_id> <hex値>" を1行保存)
+THROTTLE_STATE_FILE: Path = Path(config.BASE_DIR) / "watchdog_throttle_history.state"
 logger = setup_logging("watchdog")
 
 # === メッセージ (主婦向け) ===
@@ -66,6 +68,38 @@ def is_process_alive(process_keyword: str) -> bool:
     except Exception:
         return False
 
+def _get_boot_id() -> str:
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    except Exception:
+        return "unknown"
+
+def _is_new_history(history_issues: int) -> bool:
+    """
+    スロットリング履歴ビットが「このブートで未通知の内容」かどうかを判定する。
+
+    get_throttled の履歴ビット(Bit 16-19)は再起動までクリアされないため、
+    毎回 WARNING を出すと10分毎のノイズになる。ブートIDと通知済みビットを
+    状態ファイルに記録し、新しいビットが立った時だけ True を返す。
+    """
+    boot_id = _get_boot_id()
+    notified_bits = 0
+    try:
+        saved_boot_id, saved_hex = THROTTLE_STATE_FILE.read_text().split()
+        if saved_boot_id == boot_id:
+            notified_bits = int(saved_hex, 16)
+    except Exception:
+        pass  # 状態ファイルなし・壊れている場合は未通知扱い
+
+    if history_issues & ~notified_bits == 0:
+        return False
+
+    try:
+        THROTTLE_STATE_FILE.write_text(f"{boot_id} {hex(history_issues | notified_bits)}")
+    except Exception as e:
+        logger.debug(f"Failed to save throttle state: {e}")
+    return True
+
 def check_throttling_status():
     """
     Raspberry Piのハードウェア健全性（スロットリングや電圧低下）を確認する。
@@ -101,8 +135,12 @@ def check_throttling_status():
                 logger.error(f"⚠️ System Alert: {msg}")
                 
             # 2. 過去の履歴のみの場合 (自動復旧済み)
+            #    履歴ビットは再起動までスティッキーなので、ブート毎に1回だけ警告する
             elif history_issues != 0:
-                logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")
+                if _is_new_history(history_issues):
+                    logger.warning(f"Hardware Throttling History (Recovered): {hex(val)}")
+                else:
+                    logger.debug(f"Throttling history already reported this boot: {hex(val)}")
                 
     except FileNotFoundError:
         logger.debug("vcgencmd not found, skipping throttling check.")
