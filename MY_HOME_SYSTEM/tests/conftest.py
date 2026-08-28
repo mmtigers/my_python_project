@@ -48,4 +48,8 @@ def api_client(isolated_db):
     from starlette.testclient import TestClient
     import unified_server
 
-    return TestClient(unified_server.app)
+    # client=("127.0.0.1", ...) を明示: access_control_middleware は実際の接続元IPで
+    # 信頼判定するため、デフォルトの ("testclient", 50000) のままだと非内部扱いとなり
+    # Cloudflare AccessのJWTが要求されて全APIテストが403になる。
+    # 外部アクセス経路の検証は tests/test_cf_access_middleware.py が担当する。
+    return TestClient(unified_server.app, client=("127.0.0.1", 50000))
