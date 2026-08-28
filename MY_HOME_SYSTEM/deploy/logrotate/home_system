@@ -1,0 +1,23 @@
+# MY_HOME_SYSTEM / DDD ログのローテーション設定
+# 管理元: MY_HOME_SYSTEM/deploy/logrotate/home_system (実機側: /etc/logrotate.d/home_system)
+#
+# ローテーションはここ(logrotate)に一元化する。Python側(core/logger.py)は
+# WatchedFileHandlerで追記するだけで、自前のローテーションは行わない。
+#
+# 対象ログは複数プロセスからの同時追記と、シェルの >> リダイレクトで
+# 掴みっぱなしのfd(start_all.sh, run_task.sh, cron, systemdのappend:)が混在する。
+# rename方式だと旧inodeへ書き込み続けるプロセスが出るため copytruncate を使う。
+# (copy〜truncate間の数行が失われうるが、家庭用途のログでは許容する)
+
+/home/masahiro/develop/MY_HOME_SYSTEM/logs/*.log
+/home/masahiro/develop/DDD/logs/newface_monitor.log
+{
+    su masahiro masahiro
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
