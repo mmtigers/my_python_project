@@ -804,7 +804,7 @@ class GameSystem:
                 cur.execute("SELECT reset_period FROM quest_master LIMIT 1")
             except Exception:
                 logger.info("⚠️ 'reset_period' column missing in quest_master. Adding it now...")
-                cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'")
+                cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")
 
             for u in valid_users:
                 role_val = getattr(u, 'role', None)
