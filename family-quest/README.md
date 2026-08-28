@@ -1,16 +1,26 @@
-# React + Vite
+# family-quest
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+家族向けクエスト管理アプリのフロントエンド(React + Vite + PWA)。
+ビルド成果物 `dist/` は MY_HOME_SYSTEM の unified_server (:8000) が `/quest/` で配信する。
 
-Currently, two official plugins are available:
+## デプロイ
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+`dist/` はディスク直読みで配信されるため、**ビルド完了 = デプロイ完了**(サーバー再起動不要)。
 
-## React Compiler
+- 自動: リポジトリルートの `git pull` で family-quest に変更があると、post-merge フック(`.git/hooks/post-merge`)が `deploy.sh` を自動実行する
+- 手動:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```bash
+./deploy.sh
+```
 
-## Expanding the ESLint configuration
+フックはローカル設定のため、リポジトリを clone し直した場合は `.git/hooks/post-merge` の再設置が必要
+(family-quest の変更を検知して `bash family-quest/deploy.sh` を呼ぶだけの薄いスクリプト)。
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 開発
+
+```bash
+npm run dev      # 開発サーバー (HMR)
+npm run build    # 本番ビルド → dist/
+npm run lint     # ESLint
+```
