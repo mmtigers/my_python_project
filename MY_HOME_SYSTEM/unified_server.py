@@ -24,7 +24,10 @@ if PROJECT_ROOT not in sys.path:
 
 import sqlite3
 
+import jwt
+
 import config
+from core.cf_access import CloudflareAccessVerifier
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
 from services import sensor_service
@@ -168,58 +171,86 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+cf_access_verifier = CloudflareAccessVerifier(
+    config.CF_ACCESS_TEAM_DOMAIN, config.CF_ACCESS_AUD
+)
+
+
 @app.middleware("http")
-async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+async def access_control_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """
-    リクエスト元のIPアドレスを検証し、許可されたネットワークからのアクセスのみを後続へ渡すミドルウェア。
-    Cloudflare等のリバースプロキシ環境に対応し、CF-Connecting-IP または X-Forwarded-For ヘッダーから
-    実クライアントIPを取得して判定する。
+    アクセス制御ミドルウェア。
 
-    例外として、外部からのWebhook受信が必要な以下のパスは全IPからアクセスを許可する:
-    - /webhook/switchbot
-    - /callback/line
+    信頼判定には、クライアントが自由に詐称できるヘッダー(CF-Connecting-IP /
+    X-Forwarded-For)ではなく、実際のTCP接続元 (request.client.host) を使う。
 
-    許可ネットワーク:
-    - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
-    - ローカルホスト (127.0.0.1, ::1)
+    1. Webhook例外パス (/webhook/switchbot, /callback/line) は通過させる。
+       それぞれのハンドラが署名/トークン検証を行う(Cloudflare Access側でも
+       これらのパスはBypassポリシーで素通しになっている前提)。
+    2. 接続元がプライベート/ループバックで、かつCloudflare Tunnel経由の痕跡
+       (cf-connecting-ipヘッダー)がなければ、LAN内・ローカルプロセスとして通過。
+       ※Tunnel経由のリクエストは同居するcloudflaredからループバックで届くため、
+         「ループバック=内部」とは判定できない。cloudflaredは必ず
+         cf-connecting-ip を付与するので、その有無で区別する。
+    3. それ以外(Tunnel経由の外部アクセス等)は Cf-Access-Jwt-Assertion の
+       JWT検証を必須とする(fail-closed)。Cloudflare Accessのエッジ認証を通過した
+       リクエストにはこのヘッダーが必ず付与される。検証失敗・欠如は403。
     """
     allowed_webhook_paths = {
         "/webhook/switchbot",
         "/callback/line"
     }
 
-    # 1. 例外パスの判定（Webhook関連は無条件で許可）
     if request.url.path in allowed_webhook_paths:
         return await call_next(request)
 
-    # 2. クライアントIPの取得 (リバースプロキシ対応)
-    # Cloudflareの独自ヘッダーを最優先、次に一般的な X-Forwarded-For を確認
-    client_ip: str | None = request.headers.get("cf-connecting-ip")
-    
-    if not client_ip:
-        x_forwarded_for = request.headers.get("x-forwarded-for")
-        if x_forwarded_for:
-            # X-Forwarded-Forはカンマ区切りで複数IPが入る場合があるため、先頭（元のクライアント）を取得
-            client_ip = x_forwarded_for.split(",")[0].strip()
-        else:
-            # ヘッダーがない場合は直接の接続元IPを取得
-            client_ip = request.client.host if request.client else "0.0.0.0"
+    peer_host = request.client.host if request.client else ""
+    try:
+        peer_ip = ipaddress.ip_address(peer_host)
+        peer_is_internal = peer_ip.is_loopback or peer_ip.is_private
+    except ValueError:
+        # 接続元が解釈できない場合は内部扱いしない(fail-closed)
+        peer_is_internal = False
+
+    via_cloudflare_tunnel = "cf-connecting-ip" in request.headers
+
+    if peer_is_internal and not via_cloudflare_tunnel:
+        return await call_next(request)
+
+    token = request.headers.get("cf-access-jwt-assertion")
+    if not token or not cf_access_verifier.configured:
+        logger.warning(
+            f"🚫 Rejected external request without Cloudflare Access JWT - "
+            f"peer: {peer_host}, cf-connecting-ip: {request.headers.get('cf-connecting-ip')}, "
+            f"path: {request.url.path}"
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Cloudflare Access authentication required"},
+        )
 
     try:
-        ip_obj = ipaddress.ip_address(client_ip)
-        
-        if ip_obj.is_loopback or ip_obj.is_private:
-            return await call_next(request)
-            
-    except ValueError:
-        pass
+        # JWKS取得(初回/キャッシュ切れ時)がブロッキングI/Oのためスレッドへ逃がす
+        claims = await asyncio.to_thread(cf_access_verifier.verify, token)
+    except jwt.PyJWTError as e:
+        logger.warning(
+            f"🚫 Rejected request with invalid Cloudflare Access JWT - "
+            f"path: {request.url.path}, reason: {e}"
+        )
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Invalid Cloudflare Access token"},
+        )
+    except Exception as e:
+        # JWKS取得失敗などの検証基盤エラー。攻撃とは区別し503で返す(fail-closed)
+        logger.error(f"🔥 Cloudflare Access JWT verification unavailable: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication service temporarily unavailable"},
+        )
 
-    # 🌟 変更: Cloudflare Access (Zero Trust) を導入したため、IPベースの遮断を無効化し、
-    # 認証はCloudflareのエッジネットワークに委譲する。
-    # ※もしCloudflare経由であることを厳密に担保したい場合は、将来的に
-    # `Cf-Access-Jwt-Assertion` ヘッダーの検証をここに追加する。
-    
-    logger.debug(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    # 後続処理やログで利用できるよう、エッジで認証されたユーザーを記録
+    request.state.cf_access_email = claims.get("email")
     return await call_next(request)
 
 @app.exception_handler(Exception)
