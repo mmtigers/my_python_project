@@ -14,6 +14,10 @@ venv/
 
 # Editor
 .vscode/
+*.code-workspace
+
+# Claude Code local state
+.claude/worktrees/
 
 # Logs
 *.log
@@ -41,6 +45,8 @@ MY_HOME_SYSTEM/db_backup/
 # MY_HOME_SYSTEM: runtime lock files (created by monitors at runtime, not source)
 MY_HOME_SYSTEM/watchdog_alert_sent.lock
 MY_HOME_SYSTEM/watchdog_throttle_history.state
+# MY_HOME_SYSTEM: timelapse runtime working dir (frames/lock, not source)
+MY_HOME_SYSTEM/work/
 
 # Private Assets (Images, PDFs)
 assets/snapshots/
@@ -55,6 +61,7 @@ assets/salary_images/
 DDD/split_results/
 DDD/*プロンプト*.md
 DDD/.batch_download_discord.lock
+DDD/.newface_monitor.lock
 DDD/.bot_detection_cooldown
 
 # ただし requirements.txt / requirements-dev.txt は含める
