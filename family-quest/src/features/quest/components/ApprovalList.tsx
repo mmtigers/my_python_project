@@ -1,24 +1,12 @@
 import React, { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, XCircle, Package, ChevronDown, ChevronUp, CheckCheck } from 'lucide-react';
+import { CheckCircle, XCircle, ChevronDown, ChevronUp, CheckCheck } from 'lucide-react';
 import { motion, useMotionValue, useTransform, PanInfo } from 'framer-motion';
-import { QuestHistory, User, PendingInventory } from '@/types';
+import { QuestHistory, User } from '@/types';
 import { Button } from '../../../components/ui/Button';
-import { Modal } from '../../../components/ui/Modal';
-import { apiClient } from '../../../lib/apiClient';
-import { useToast } from '../../../context/useToast';
-
-// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す
-// {"detail": "..."} の内容が入っている(apiClient.ts参照)。
-const extractErrorDetail = (error: unknown): string => {
-    return error instanceof Error && error.message ? error.message : '操作に失敗しました';
-};
 
 type Props = {
     pendingQuests: QuestHistory[];
-    pendingItems: PendingInventory[];
     users: User[];
-    currentUser: User;
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
@@ -61,42 +49,17 @@ const SwipeableRow: React.FC<{
     );
 };
 
-const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, currentUser, onApprove, onReject, onApproveAll }) => {
-    const queryClient = useQueryClient();
-    const { showToast } = useToast();
-    // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「アイテム使用承認」の確認を行う
-    const [itemToConsume, setItemToConsume] = useState<PendingInventory | null>(null);
+const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll }) => {
     // 承認待ちが多いときに折りたためるように(デフォルトは開いた状態)
     const [collapsed, setCollapsed] = useState(false);
-
-    // アイテム承認（消費）アクション
-    const consumeMutation = useMutation({
-        mutationFn: (inventoryId: number) => apiClient.consumeItem(currentUser.user_id, inventoryId),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
-            // 必要に応じて親のインベントリリストなども更新
-            queryClient.invalidateQueries({ queryKey: ['inventory'] });
-            // H-5: アイテム使用の確定(quest_historyへの記録)はconsume_item時に
-            // 行われるため、冒険の記録(chronicle)もここで無効化する。
-            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
-        },
-        // M-6-3: 以前はonErrorが無く、承認失敗(通信エラー等)がユーザーに
-        // 一切通知されないサイレント失敗になっていた。
-        onError: (error) => {
-            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
-        }
-    });
 
     const getUserName = (userId: string) => {
         return users.find(u => u.user_id === userId)?.name || userId;
     };
 
-    const hasQuests = pendingQuests.length > 0;
-    const hasItems = pendingItems && pendingItems.length > 0;
+    if (pendingQuests.length === 0) return null;
 
-    if (!hasQuests && !hasItems) return null;
-
-    const totalCount = pendingQuests.length + (pendingItems?.length || 0);
+    const totalCount = pendingQuests.length;
 
     return (
         <div className="bg-yellow-50 border-l-4 border-yellow-400 rounded shadow-sm animate-fade-in overflow-hidden">
@@ -154,67 +117,8 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, pendingItems, users, cur
                                 </div>
                             </SwipeableRow>
                         ))}
-
-                        {/* --- アイテム承認リスト (新規追加) --- */}
-                        {pendingItems?.map((item: PendingInventory) => (
-                            <SwipeableRow
-                                key={item.id}
-                                onSwipeApprove={() => setItemToConsume(item)}
-                            >
-                                <div className="bg-white p-3 rounded shadow-sm flex justify-between items-center border-l-4 border-green-400 gap-2">
-                                    <div className="min-w-0">
-                                        <p className="font-bold text-gray-800 flex items-center gap-2">
-                                            <span className="text-sm bg-green-100 text-green-800 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                                <Package size={12} /> アイテム
-                                            </span>
-                                            {item.title}
-                                        </p>
-                                        <p className="text-sm text-gray-500">
-                                            申請: {item.user_name} ({new Date(item.used_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
-                                        </p>
-                                    </div>
-                                    <div className="flex gap-2 flex-shrink-0">
-                                        {/* アイテム使用の拒否(キャンセル)は現状APIがないため、一旦承認のみ実装 */}
-                                        <Button
-                                            variant="primary"
-                                            size="sm"
-                                            className="min-h-[44px]"
-                                            onClick={() => setItemToConsume(item)}
-                                            disabled={consumeMutation.isPending}
-                                        >
-                                            <CheckCircle size={18} /> OK
-                                        </Button>
-                                    </div>
-                                </div>
-                            </SwipeableRow>
-                        ))}
                     </div>
                 </div>
-            )}
-
-            {itemToConsume && (
-                <Modal isOpen={true} onClose={() => setItemToConsume(null)} title="使用の承認">
-                    <div className="flex flex-col gap-4">
-                        <p className="text-gray-700">
-                            {itemToConsume.user_name}くんの「{itemToConsume.title}」使用を承認しますか？
-                        </p>
-                        <div className="flex gap-4">
-                            <Button variant="secondary" onClick={() => setItemToConsume(null)} className="flex-1">
-                                キャンセル
-                            </Button>
-                            <Button
-                                variant="primary"
-                                className="flex-1"
-                                onClick={() => {
-                                    consumeMutation.mutate(itemToConsume.id);
-                                    setItemToConsume(null);
-                                }}
-                            >
-                                承認する
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
             )}
         </div>
     );

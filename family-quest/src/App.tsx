@@ -177,7 +177,6 @@ function App() {
   const {
     users, quests, rewards, completedQuests, pendingQuests,
     chronicle,
-    pendingInventory,
     isLoading,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
     refreshData,
@@ -462,7 +461,6 @@ function App() {
             completedQuests={completedQuests}
             pendingQuests={pendingQuests}
             rewards={rewards}
-            pendingInventory={pendingInventory}
             onQuestClick={(user, q) => handleQuestClick(user, q, false)}
             onBuyReward={handleBuyReward}
             onApprove={handleApprove}
@@ -482,9 +480,7 @@ function App() {
             {isParentUser(currentUser) && (
               <ApprovalList
                 pendingQuests={pendingQuests}
-                pendingItems={pendingInventory}
                 users={users}
-                currentUser={currentUser}
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onApproveAll={handleApproveAll}

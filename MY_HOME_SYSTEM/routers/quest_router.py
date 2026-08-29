@@ -14,7 +14,7 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction,
-    UpdateUserAction, SoundTestRequest, UseItemAction, ConsumeItemAction
+    UpdateUserAction, SoundTestRequest, UseItemAction
 )
 from services.quest_service import (
     game_system, quest_service, shop_service, user_service, inventory_service
@@ -149,15 +149,3 @@ def get_inventory(user_id: str):
 @router.post("/inventory/use", response_model=UseItemResponse)
 def use_item(action: UseItemAction):
     return inventory_service.use_item(action.user_id, action.inventory_id)
-
-@router.post("/inventory/consume")
-def consume_item(action: ConsumeItemAction):
-    return inventory_service.consume_item(action.approver_id, action.inventory_id)
-
-@router.post("/inventory/cancel")
-def cancel_item_usage(action: UseItemAction):
-    return inventory_service.cancel_usage(action.user_id, action.inventory_id)
-
-@router.get("/inventory/admin/pending")
-def get_admin_pending_inventory():
-    return inventory_service.get_pending_items()

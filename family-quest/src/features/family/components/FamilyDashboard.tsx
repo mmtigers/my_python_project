@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { User, Quest, QuestHistory, Reward, PendingInventory } from '@/types';
+import { User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -32,7 +32,6 @@ interface FamilyDashboardProps {
     completedQuests: QuestHistory[];
     pendingQuests: QuestHistory[];
     rewards: Reward[];
-    pendingInventory: PendingInventory[];
     onQuestClick: (user: User, quest: Quest) => void;
     onBuyReward: (user: User, reward: Reward) => void;
     onApprove: (history: QuestHistory) => void;
@@ -46,7 +45,7 @@ interface FamilyDashboardProps {
 // その日のクエスト一覧が完結する(別画面への誘導をしない)。親向けの承認機能は
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
-    users, quests, completedQuests, pendingQuests, rewards, pendingInventory,
+    users, quests, completedQuests, pendingQuests, rewards,
     onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
@@ -83,9 +82,7 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
             {representativeParent && (
                 <ApprovalList
                     pendingQuests={pendingQuests}
-                    pendingItems={pendingInventory}
                     users={users}
-                    currentUser={representativeParent}
                     onApprove={onApprove}
                     onReject={onReject}
                     onApproveAll={onApproveAll}
