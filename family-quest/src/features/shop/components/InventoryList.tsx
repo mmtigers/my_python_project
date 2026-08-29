@@ -6,7 +6,7 @@ import { Button } from '../../../components/ui/Button';
 import { Modal } from '../../../components/ui/Modal';
 import { useSound } from '../../../hooks/useSound';
 import { useToast } from '../../../context/useToast';
-import { Loader2, PackageOpen, AlertCircle } from 'lucide-react';
+import { Loader2, PackageOpen } from 'lucide-react';
 import { InventoryItem } from '../../../types';
 
 // M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す
@@ -45,50 +45,25 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const useMutationAction = useMutation({
         mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),
         onSuccess: (_data, variables) => {
-            const usedInventoryId = variables; // 使用申請したアイテムID
-
-            // H-5: use_itemはバックエンド側で即時消費(consumed)ではなく承認待ち
-            // (pending)にするため、リストから消さずステータスのみ更新する。
-            // 実際の消費確定(quest_historyへの記録・chronicle反映)は親の承認
-            // (consume_item)時に行われる。
+            // アイテム使用は即座に消費が確定する(親の承認は不要)ため、
+            // リストからも即座に取り除く。
+            const usedInventoryId = variables;
             queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
                 if (!oldItems) return [];
-                return oldItems.map(item =>
-                    item.id === usedInventoryId ? { ...item, status: 'pending' } : item
-                );
+                return oldItems.filter(item => item.id !== usedInventoryId);
             });
 
-            // 念のためサーバーとも同期(承認待ち一覧のポーリングにも反映される)
+            // 念のためサーバーとも同期
             queryClient.invalidateQueries({ queryKey: queryKey });
-            queryClient.invalidateQueries({ queryKey: ['pendingInventory'] });
+            queryClient.invalidateQueries({ queryKey: ['chronicle'] });
 
-            // 承認待ちになったことを示す申請音(quest完了時のpending相当)を再生
-            play('submit');
+            play('clear');
         },
         // M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が
         // ユーザーに一切通知されないサイレント失敗になっていた。
         onError: (error) => {
             showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
             play('cancel');
-        }
-    });
-
-    const cancelMutation = useMutation({
-        mutationFn: (inventoryId: number) => apiClient.cancelItemUsage(userId, inventoryId),
-        onSuccess: (_data, variables) => {
-            // キャンセル時も即座にステータスを戻す
-            const targetId = variables;
-            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {
-                if (!oldItems) return [];
-                return oldItems.map(item =>
-                    item.id === targetId ? { ...item, status: 'owned' } : item
-                );
-            });
-            queryClient.invalidateQueries({ queryKey: queryKey });
-            play('cancel');
-        },
-        onError: (error) => {
-            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
         }
     });
 
@@ -120,55 +95,29 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
 
     return (
         <div className={`grid ${gridClass} gap-2 pb-20`}>
-            {items.map((item: InventoryItem) => {
-                const isPending = item.status === 'pending';
-                const isOwned = item.status === 'owned';
+            {items.map((item: InventoryItem) => (
+                <Card
+                    key={item.id}
+                    // ★バグ修正: 「つかう」ボタンを廃止し、カード自体をタップしたら
+                    // つかう確認モーダルを開くようにする(1行のコンパクト表示にするため)
+                    onClick={() => setItemToUse(item)}
+                    className="flex items-center gap-2 p-2 transition-all bg-white border-slate-200 shadow-sm hover:shadow-md active:scale-[0.98] cursor-pointer"
+                >
+                    <div className={`${iconBoxClass} flex items-center justify-center rounded-xl flex-shrink-0 bg-slate-100`}>
+                        {item.icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h3 className="font-bold text-sm text-slate-800 leading-tight truncate">
+                            {item.title}
+                        </h3>
+                        <p className="text-[10px] text-slate-500 truncate">
+                            {item.desc || '説明はありません'}
+                        </p>
+                    </div>
 
-                return (
-                    <Card
-                        key={item.id}
-                        // ★バグ修正: 「つかう」ボタンを廃止し、カード自体をタップしたら
-                        // つかう確認モーダルを開くようにする(1行のコンパクト表示にするため)
-                        onClick={isOwned ? () => setItemToUse(item) : undefined}
-                        className={`flex items-center gap-2 p-2 transition-all ${isPending
-                            ? 'bg-amber-50 border-amber-300 ring-2 ring-amber-200'
-                            : 'bg-white border-slate-200 shadow-sm hover:shadow-md active:scale-[0.98] cursor-pointer'
-                            }`}
-                    >
-                        <div className={`
-                            ${iconBoxClass} flex items-center justify-center rounded-xl flex-shrink-0
-                            ${isPending ? 'bg-amber-100' : 'bg-slate-100'}
-                        `}>
-                            {item.icon}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <h3 className="font-bold text-sm text-slate-800 leading-tight truncate">
-                                {item.title}
-                            </h3>
-                            <p className="text-[10px] text-slate-500 truncate">
-                                {item.desc || '説明はありません'}
-                            </p>
-                        </div>
-
-                        {isPending ? (
-                            <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                                <span className="text-[10px] text-amber-700 font-bold flex items-center gap-0.5 animate-pulse">
-                                    <AlertCircle size={11} />承認待ち
-                                </span>
-                                <button
-                                    className="min-h-[32px] text-[10px] text-slate-500 underline hover:text-slate-700 px-2"
-                                    onClick={(e) => { e.stopPropagation(); cancelMutation.mutate(item.id); }}
-                                    disabled={cancelMutation.isPending}
-                                >
-                                    やめる
-                                </button>
-                            </div>
-                        ) : (
-                            <PackageOpen size={18} className="text-blue-500 flex-shrink-0" />
-                        )}
-                    </Card>
-                );
-            })}
+                    <PackageOpen size={18} className="text-blue-500 flex-shrink-0" />
+                </Card>
+            ))}
 
             <Modal
                 isOpen={!!itemToUse}
