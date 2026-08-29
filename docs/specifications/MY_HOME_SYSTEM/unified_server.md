@@ -23,8 +23,8 @@
 ## 2. ファイルの概要
 
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
-* システムのルートディレクトリ解決、CORS設定、Cloudflare AccessのJWT検証によるアクセス制御（fail-closed。棚卸し課題4で実装）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
-* 根拠: [CORSミドルウェア設定] (行番号: 166-172 / 抜粋: "allow_origins=config.CORS_ORIGINS,"), [アクセス制御ミドルウェア] (行番号: 179-254 / 抜粋: "async def access_control_middleware")
+* システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
+* 根拠: [CORSミドルウェア設定] (行番号: 163-169 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
 * アプリケーション起動・終了時（ライフサイクル）に連動して、サブプロセス（カメラ監視スクリプト、スケジューラースクリプト）の起動と終了管理、およびセンサー関連タスクのキャンセル処理を行う。
 * 未捕捉例外のグローバルハンドリングを担う。
@@ -46,8 +46,6 @@
 | `contextlib.asynccontextmanager` | 標準ライブラリ | 非同期コンテキストマネージャー（未使用だがインポート有。`lifespan`にデコレータとして付与されていない） | 根拠: `[asynccontextmanager]` (行番号: 9 / 抜粋: "from contextlib import asynccon") |
 | `ipaddress` | 標準ライブラリ | IPアドレスのパースと検証 | 根拠: `[ipaddress]` (行番号: 10 / 抜粋: "import ipaddress") |
 | `typing` (AsyncGenerator, Optional, Callable, Awaitable) | 標準ライブラリ | 型ヒントの定義 | 根拠: `[typing]` (行番号: 12 / 抜粋: "from typing import AsyncGenerat") |
-| `jwt` | 外部パッケージ(PyJWT) | Cloudflare Access JWTの検証時に送出される`PyJWTError`系例外の捕捉 | 根拠: `[jwt]` (行番号: 27 / 抜粋: "import jwt") |
-| `core.cf_access.CloudflareAccessVerifier` | ローカルモジュール | Cloudflare Access発行のJWT(`Cf-Access-Jwt-Assertion`)の検証本体 | 根拠: `[CloudflareAccessVerifier]` (行番号: 30 / 抜粋: "from core.cf_access import CloudflareAccessVerifier") |
 | `fastapi` | 外部パッケージ | Webフレームワーク基本機能 | 根拠: `[FastAPI]` (行番号: 14 / 抜粋: "from fastapi import FastAPI, Re") |
 | `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 15 / 抜粋: "from fastapi.staticfiles import") |
 | `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
@@ -55,12 +53,12 @@
 | `fastapi.exceptions` | 外部パッケージ | リクエスト検証例外（未使用だが有） | 根拠: `[RequestValidationError]` (行番号: 18 / 抜粋: "from fastapi.exceptions import ") |
 | `uvicorn` | 外部パッケージ | ASGIサーバーの起動と設定取得 | 根拠: `[uvicorn]` (行番号: 316 / 抜粋: "import uvicorn") |
 | `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 25 / 抜粋: "import sqlite3") |
-| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`, `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`等)の取得 | 根拠: `[config]` (行番号: 29 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 31 / 抜粋: "from core.logger import setup_l") |
-| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 32 / 抜粋: "from core.migrations import apply_pending_migrations") |
-| `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 33 / 抜粋: "from services import sensor_ser") |
-| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`) | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 36 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router") |
-| `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 39 / 抜粋: "from handlers import line_handl") |
+| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 27 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 28 / 抜粋: "from core.logger import setup_l") |
+| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 29 / 抜粋: "from core.migrations import apply_pending_migrations") |
+| `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 30 / 抜粋: "from services import sensor_ser") |
+| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`) | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router") |
+| `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 36 / 抜粋: "from handlers import line_handl") |
 
 ### ブラックボックスとなる外部要素
 
@@ -122,26 +120,26 @@
 
 
 
-### `access_control_middleware`
+### `ip_restriction_middleware`
 
-* **役割**: 全リクエストに適用されるアクセス制御ミドルウェア（棚卸し課題4でリニューアル。旧`ip_restriction_middleware`を置き換え）。Webhook例外パス(`/webhook/switchbot`, `/callback/line`)は各ハンドラの署名/トークン検証に委ねて通過させる。それ以外は詐称可能な`cf-connecting-ip`/`x-forwarded-for`ヘッダーではなく実TCP接続元(`request.client.host`)で内部/外部を判定し、「プライベート/ループバックかつCloudflare Tunnel経由の痕跡(`cf-connecting-ip`ヘッダー)なし」の場合のみLAN内アクセスとして通過させる。それ以外(Tunnel経由の外部アクセス等)は`Cf-Access-Jwt-Assertion`ヘッダーのJWTを`CloudflareAccessVerifier.verify()`で検証し、**トークン欠如・検証失敗時は403を返してリクエストを拒否する(fail-closed)**。旧実装と異なり、最終的に全リクエストを無条件で後続へ通す分岐は存在しない。
-* 根拠: `async def access_control_middlewar` (行番号: 179-254 / 抜粋: "async def access_control_middleware")
+* **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス以外では、`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。例外時はデバッグログのみ出力する。
+* 根拠: `async def ip_restriction_middle` (行番号: 172-223 / 抜粋: "async def ip_restriction_middle")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def access_control_middlewar` (行番号: 180 / 抜粋: "async def access_control_middleware")
+* 根拠: `async def ip_restriction_middle` (行番号: 172 / 抜粋: "async def ip_restriction_middle")
 
 
-* **戻り値/レスポンス**: `Response` (通過時は後続処理結果、拒否時は`JSONResponse`)。判定に応じて3種のレスポンスがあり得る: (1) トークン欠如/`cf_access_verifier.configured`が偽 → HTTP 403 `{"detail": "Cloudflare Access authentication required"}`、(2) JWT検証失敗(`jwt.PyJWTError`) → HTTP 403 `{"detail": "Invalid Cloudflare Access token"}`、(3) JWKS取得失敗等の検証基盤エラー → HTTP 503 `{"detail": "Authentication service temporarily unavailable"}`。
-* 根拠: `-> Response:` (行番号: 180 / 抜粋: "-> Response:"), `return JSONResponse(status_code=403, ...)` (行番号: 227-230, 240-243 / 抜粋: "Cloudflare Access authentication required", "Invalid Cloudflare Access token"), `return JSONResponse(status_code=503, ...)` (行番号: 247-250 / 抜粋: "Authentication service temporarily unavailable")
+* **戻り値/レスポンス**: `Response` (後続の処理結果)
+* 根拠: `-> Response:` (行番号: 172 / 抜粋: "-> Response:")
 
 
-* **副作用**: JWT検証（JWKS取得時）を`asyncio.to_thread`でスレッドに逃がして実行。検証成功時、後続処理向けに`request.state.cf_access_email`へ検証済みメールアドレスを記録。拒否時は`logger.warning`、検証基盤エラー時は`logger.error`でログ出力。
-* 根拠: `claims = await asyncio.to_thread(cf_access_verifier.verify, token)` (行番号: 234 / 抜粋: "asyncio.to_thread(cf_access_verifier.verify"), `request.state.cf_access_email = claims.get("email")` (行番号: 253 / 抜粋: "request.state.cf_access_email")
+* **副作用**: 外部ネットワークからのアクセス判定時(`logger.debug`)のログ出力。
+* 根拠: `logger.debug(f"Allowed extern` (行番号: 222 / 抜粋: "logger.debug(f"Allowed extern")
 
 
-* **エラーハンドリング**: 接続元IPが解析不能な場合(`ipaddress.ip_address`の`ValueError`)は内部扱いにしない(fail-closed)。JWT検証時の`jwt.PyJWTError`は403、それ以外の例外(JWKS取得失敗等)は503として区別して処理する。
-* 根拠: `except ValueError:` (行番号: 211-213 / 抜粋: "接続元が解釈できない場合は内部扱いにしない"), `except jwt.PyJWTError as e:` (行番号: 235-243 / 抜粋: "except jwt.PyJWTError as e:"), `except Exception as e:` (行番号: 244-250 / 抜粋: "JWKS取得失敗などの検証基盤エラー")
+* **エラーハンドリング**: IPアドレス解析時(`ipaddress.ip_address`)の`ValueError`を補足し無視(`pass`)する。
+* 根拠: `except ValueError: pass` (行番号: 214-215 / 抜粋: "except ValueError: pass")
 
 
 
@@ -262,33 +260,31 @@
 
 ## 5. 処理フロー図
 
-※主要なロジックである `access_control_middleware` におけるアクセス検証のフローを可視化。
+※主要なロジックである `ip_restriction_middleware` におけるアクセス検証のフローを可視化。
 
 ```mermaid
 flowchart TD
     Start["リクエスト受信"] --> CheckWebhook{"パスは例外のWebhookか?"}
-
+    
     CheckWebhook -- Yes --> CallNext["後続処理へ(call_next)"]
-    CheckWebhook -- No --> ParsePeerIP["接続元IP(request.client.host)を解析"]
-
-    ParsePeerIP --> TryParse{"IPの解析(ValueError捕捉)"}
-    TryParse -- エラー発生 --> NotInternal["内部扱いにしない(fail-closed)"]
+    CheckWebhook -- No --> GetCFIP["CF-Connecting-IPヘッダーを取得"]
+    
+    GetCFIP --> HasCFIP{"取得できたか?"}
+    HasCFIP -- Yes --> ValidateIP["IPアドレスを検証"]
+    HasCFIP -- No --> GetXFF["X-Forwarded-Forヘッダーを取得"]
+    
+    GetXFF --> HasXFF{"取得できたか?"}
+    HasXFF -- Yes --> ExtractFirstIP["先頭のIPを抽出"] --> ValidateIP
+    HasXFF -- No --> GetHostIP["直接の接続元IPを取得"] --> ValidateIP
+    
+    ValidateIP --> TryParse{"IPの解析(ValueError捕捉)"}
+    TryParse -- エラー発生 --> LogExternal["外部からの許可としてログ出力"]
     TryParse -- 成功 --> CheckLocalPrivate{"プライベートIPまたはループバックか?"}
-
-    CheckLocalPrivate -- No --> NotInternal
-    CheckLocalPrivate -- Yes --> CheckTunnel{"cf-connecting-ipヘッダーあり?(Tunnel経由の痕跡)"}
-
-    CheckTunnel -- No --> CallNext
-    CheckTunnel -- Yes --> NotInternal
-
-    NotInternal --> HasToken{"Cf-Access-Jwt-Assertionトークンあり?かつ検証器は設定済みか?"}
-    HasToken -- No --> Reject403a["403: Cloudflare Access authentication required"]
-    HasToken -- Yes --> VerifyJWT["JWTを検証(JWKS取得はスレッドへ逃がす)"]
-
-    VerifyJWT -- PyJWTError --> Reject403b["403: Invalid Cloudflare Access token"]
-    VerifyJWT -- その他の例外(JWKS取得失敗等) --> Reject503["503: Authentication service temporarily unavailable"]
-    VerifyJWT -- 検証成功 --> RecordEmail["request.state.cf_access_emailに記録"] --> CallNext
-
+    
+    CheckLocalPrivate -- Yes --> CallNext
+    CheckLocalPrivate -- No --> LogExternal
+    
+    LogExternal --> CallNext
     CallNext --> End["レスポンス返却"]
 
 ```
@@ -300,7 +296,7 @@ graph TD
     subgraph "unified_server.py"
         App["FastAPI App (app)"]
         Lifespan["Lifespan (lifespan)"]
-        Middleware["Access Control (access_control_middleware)"]
+        Middleware["IP Restriction (ip_restriction_middleware)"]
         ExceptionH["Exception Handler (global_exception_handler)"]
         LogFilter["SilencePolicyFilter"]
         Endpoints["Endpoints (/, /health, /quest/*, /camera/*)"]
@@ -317,7 +313,6 @@ graph TD
         Migrations["core.migrations (apply_pending_migrations)"]
         Sensors["services.sensor_service"]
         Routers["routers (quest, webhook, system, camera)"]
-        CFAccess["core.cf_access.CloudflareAccessVerifier"]
     end
 
     subgraph "Subprocesses (Black Box)"
@@ -329,7 +324,6 @@ graph TD
     Lifespan --> Sensors
     Lifespan --> Migrations
     App --> Routers
-    Middleware --> CFAccess
     
     Lifespan --> Camera
     Lifespan --> Scheduler
@@ -350,7 +344,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `access_control_middleware`はfail-closed設計であり、Webhook例外パスとLAN内アクセス以外は`Cf-Access-Jwt-Assertion`のJWT検証に成功しない限り403/503で拒否される。`cf_access_verifier.configured`が偽(`config.CF_ACCESS_TEAM_DOMAIN`/`CF_ACCESS_AUD`が未設定)の場合も、外部からのリクエストはトークン欠如と同じ扱いで403拒否となる点に注意(未設定=素通りではない)。
+* `ip_restriction_middleware` 内でIP制限のロジックが実装されているが、現状は `return await call_next(request)` が分岐の最終地点で必ず呼ばれるため、事実上すべてのIPからのアクセスが遮断されずに後続処理へ流れる状態となっている。
 * モジュール `handlers.line_handler` はインポートされているが、ファイル内で一度も使用されていない（未使用インポート）。
 * `contextlib.asynccontextmanager` もインポートされているが、`lifespan`関数には`@asynccontextmanager`デコレータが付与されておらず（`FastAPI(lifespan=lifespan)`に直接渡されている）、ファイル内で一度も使用されていない（未使用インポート）。
 * サブプロセス（`camera_process`, `scheduler_process`）はグローバル変数として定義および管理されており、プロセス停止処理（`terminate()`や`kill()`）で状態変異（副作用）を伴う。
