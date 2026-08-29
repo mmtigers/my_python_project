@@ -1,6 +1,6 @@
 // family-quest/src/lib/apiClient.ts
 
-import { InventoryItem, PendingInventory } from "../types";
+import { InventoryItem } from "../types";
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -102,18 +102,6 @@ class ApiClient {
 
     async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {
         return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });
-    }
-
-    async cancelItemUsage(userId: string, inventoryId: number): Promise<ApiResponse> {
-        return this.post<ApiResponse>('/api/quest/inventory/cancel', { user_id: userId, inventory_id: inventoryId });
-    }
-
-    async consumeItem(approverId: string, inventoryId: number): Promise<ApiResponse> {
-        return this.post<ApiResponse>('/api/quest/inventory/consume', { approver_id: approverId, inventory_id: inventoryId });
-    }
-
-    async fetchPendingInventory(): Promise<PendingInventory[]> {
-        return this.get<PendingInventory[]>('/api/quest/inventory/admin/pending');
     }
 }
 

@@ -130,18 +130,18 @@ class TestInventoryEndpoints:
         assert items[0]["status"] == "owned"
 
     def test_use_item_by_owner_succeeds(self, seeded_client, monkeypatch):
-        """H-5: use_itemは即時消費ではなく承認待ち(pending)にする"""
+        """アイテム使用は親の承認を待たず即座に消費が確定する"""
         from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         inventory_id = self._purchase_reward(seeded_client)
 
         res = seeded_client.post("/api/quest/inventory/use", json={"user_id": "dad", "inventory_id": inventory_id})
         assert res.status_code == 200
-        assert res.json()["status"] == "pending"
+        assert res.json()["status"] == "consumed"
 
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT status FROM user_inventory WHERE id=?", (inventory_id,)).fetchone()
-        assert row["status"] == "pending"
+        assert row["status"] == "consumed"
 
     def test_use_item_by_non_owner_returns_403(self, seeded_client):
         inventory_id = self._purchase_reward(seeded_client, user_id="dad")
@@ -150,57 +150,20 @@ class TestInventoryEndpoints:
         )
         assert res.status_code == 403
 
-    def test_consume_item_requires_parent_approver(self, seeded_client, monkeypatch):
+    def test_use_item_rejects_already_consumed_item(self, seeded_client, monkeypatch):
+        """一度使用したアイテムを再度使用しようとすると400になること"""
         from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         inventory_id = self._purchase_reward(seeded_client)
         seeded_client.post("/api/quest/inventory/use", json={"user_id": "dad", "inventory_id": inventory_id})
 
-        res_denied = seeded_client.post(
-            "/api/quest/inventory/consume", json={"approver_id": "daughter", "inventory_id": inventory_id}
-        )
-        assert res_denied.status_code == 403
-
-        res_ok = seeded_client.post(
-            "/api/quest/inventory/consume", json={"approver_id": "dad", "inventory_id": inventory_id}
-        )
-        assert res_ok.status_code == 200
-        assert res_ok.json()["status"] == "consumed"
-
-    def test_consume_item_rejects_non_pending_item(self, seeded_client, monkeypatch):
-        """H-5回帰防止: use_itemを経ずowned状態のままconsumeしようとすると400になること"""
-        from core import sound_manager
-        monkeypatch.setattr(sound_manager, "play", lambda key: None)
-        inventory_id = self._purchase_reward(seeded_client)
-
         res = seeded_client.post(
-            "/api/quest/inventory/consume", json={"approver_id": "dad", "inventory_id": inventory_id}
+            "/api/quest/inventory/use", json={"user_id": "dad", "inventory_id": inventory_id}
         )
         assert res.status_code == 400
 
-    def test_cancel_usage_returns_item_to_owned_status(self, seeded_client):
-        inventory_id = self._purchase_reward(seeded_client)
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute("UPDATE user_inventory SET status='pending' WHERE id=?", (inventory_id,))
-
-        res = seeded_client.post(
-            "/api/quest/inventory/cancel", json={"user_id": "dad", "inventory_id": inventory_id}
-        )
-        assert res.status_code == 200
-        assert res.json()["status"] == "owned"
-
-    def test_admin_pending_inventory_lists_pending_items(self, seeded_client):
-        inventory_id = self._purchase_reward(seeded_client)
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute("UPDATE user_inventory SET status='pending' WHERE id=?", (inventory_id,))
-
-        res = seeded_client.get("/api/quest/inventory/admin/pending")
-        assert res.status_code == 200
-        assert len(res.json()) == 1
-
-    def test_full_pending_approval_lifecycle_use_then_consume(self, seeded_client, monkeypatch):
-        """H-5: use → pending一覧に出る → consume → pending一覧から消え、
-        冒険の記録(chronicle)に記録されること。"""
+    def test_used_item_disappears_from_inventory_and_is_recorded_in_chronicle(self, seeded_client, monkeypatch):
+        """use → 即座に消費が確定し、もちもの一覧から消えつつ冒険の記録(chronicle)に載ること。"""
         from core import sound_manager
         monkeypatch.setattr(sound_manager, "play", lambda key: None)
         inventory_id = self._purchase_reward(seeded_client)
@@ -209,43 +172,13 @@ class TestInventoryEndpoints:
             "/api/quest/inventory/use", json={"user_id": "dad", "inventory_id": inventory_id}
         )
         assert use_res.status_code == 200
-        assert use_res.json()["status"] == "pending"
+        assert use_res.json()["status"] == "consumed"
 
-        pending_res = seeded_client.get("/api/quest/inventory/admin/pending")
-        assert pending_res.status_code == 200
-        assert any(item["id"] == inventory_id for item in pending_res.json())
-
-        consume_res = seeded_client.post(
-            "/api/quest/inventory/consume", json={"approver_id": "dad", "inventory_id": inventory_id}
-        )
-        assert consume_res.status_code == 200
-        assert consume_res.json()["status"] == "consumed"
-
-        pending_after = seeded_client.get("/api/quest/inventory/admin/pending")
-        assert pending_after.json() == []
+        inventory_res = seeded_client.get("/api/quest/inventory/dad")
+        assert inventory_res.status_code == 200
+        assert inventory_res.json() == []
 
         chronicle_res = seeded_client.get("/api/quest/family/chronicle")
         assert chronicle_res.status_code == 200
         titles = [c["title"] for c in chronicle_res.json()["chronicle"]]
         assert any("TestReward" in t for t in titles)
-
-    def test_full_pending_lifecycle_use_then_cancel_restores_owned(self, seeded_client, monkeypatch):
-        """H-5: use → cancel でリュックに戻り、pending一覧から消えること。"""
-        from core import sound_manager
-        monkeypatch.setattr(sound_manager, "play", lambda key: None)
-        inventory_id = self._purchase_reward(seeded_client)
-
-        seeded_client.post("/api/quest/inventory/use", json={"user_id": "dad", "inventory_id": inventory_id})
-
-        cancel_res = seeded_client.post(
-            "/api/quest/inventory/cancel", json={"user_id": "dad", "inventory_id": inventory_id}
-        )
-        assert cancel_res.status_code == 200
-        assert cancel_res.json()["status"] == "owned"
-
-        pending_after = seeded_client.get("/api/quest/inventory/admin/pending")
-        assert pending_after.json() == []
-
-        with common.get_db_cursor() as cur:
-            row = cur.execute("SELECT status FROM user_inventory WHERE id=?", (inventory_id,)).fetchone()
-        assert row["status"] == "owned"

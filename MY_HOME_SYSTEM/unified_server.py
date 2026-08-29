@@ -60,7 +60,6 @@ class SilencePolicyFilter(logging.Filter):
             # ログ出力を抑制するパスやキーワードのリスト
             silenced_keywords = [
                 # ポーリング/定常アクセス
-                "/api/quest/inventory/admin/pending",
                 "/api/quest/data",
                 # ヘルスチェック
                 "GET /health ",
