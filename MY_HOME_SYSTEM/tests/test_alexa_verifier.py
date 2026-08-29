@@ -1,0 +1,157 @@
+# MY_HOME_SYSTEM/tests/test_alexa_verifier.py
+"""
+core/alexa_verifier.py の署名・証明書・タイムスタンプ検証ロジックのテスト。
+
+ask-sdk-webservice-support 同梱の検証器(certvalidator/oscrypto依存)を使わず、
+`cryptography` だけで自前実装した検証ロジックが、Amazon公式ドキュメント記載の
+手順どおりに正しい署名を受理し、不正なもの(改ざん/不正なURL/期限切れ証明書/
+リプレイ)を確実に拒否することを確認する。
+"""
+import os
+import sys
+import base64
+import datetime
+from unittest.mock import MagicMock, patch
+
+import pytest
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from core import alexa_verifier as av
+
+VALID_CERT_URL = "https://s3.amazonaws.com/echo.api/cert.pem"
+
+
+def _make_cert(key, san="echo-api.amazon.com", not_before_delta=-1, not_after_delta=1):
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, san)])
+    now = datetime.datetime.now(datetime.timezone.utc)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(name).issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now + datetime.timedelta(days=not_before_delta))
+        .not_valid_after(now + datetime.timedelta(days=not_after_delta))
+    )
+    if san:
+        builder = builder.add_extension(
+            x509.SubjectAlternativeName([x509.DNSName(san)]), critical=False
+        )
+    return builder.sign(key, hashes.SHA256())
+
+
+@pytest.fixture
+def rsa_key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+@pytest.fixture(autouse=True)
+def _clear_cert_cache():
+    av._cert_cache.clear()
+    yield
+    av._cert_cache.clear()
+
+
+def _sign_and_encode(key, body: bytes) -> str:
+    signature = key.sign(body, padding.PKCS1v15(), hashes.SHA1())
+    return base64.b64encode(signature).decode()
+
+
+def _mock_get(pem_bytes: bytes):
+    resp = MagicMock()
+    resp.content = pem_bytes
+    resp.status_code = 200
+    resp.raise_for_status = lambda: None
+    return resp
+
+
+class TestVerifySignature:
+    def test_accepts_valid_signature(self, rsa_key):
+        cert = _make_cert(rsa_key)
+        pem = cert.public_bytes(serialization.Encoding.PEM)
+        body = b'{"request":{"type":"LaunchRequest"}}'
+        sig_b64 = _sign_and_encode(rsa_key, body)
+
+        with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
+            av.verify_signature(body, sig_b64, VALID_CERT_URL)  # raises on failure
+
+    def test_rejects_tampered_body(self, rsa_key):
+        cert = _make_cert(rsa_key)
+        pem = cert.public_bytes(serialization.Encoding.PEM)
+        body = b'{"request":{"type":"LaunchRequest"}}'
+        sig_b64 = _sign_and_encode(rsa_key, body)
+
+        with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"tampered body", sig_b64, VALID_CERT_URL)
+
+    def test_rejects_missing_headers(self):
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_signature(b"body", "", VALID_CERT_URL)
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_signature(b"body", "sig", "")
+
+    @pytest.mark.parametrize("bad_url", [
+        "https://evil.com/echo.api/cert.pem",
+        "http://s3.amazonaws.com/echo.api/cert.pem",
+        "https://s3.amazonaws.com/not-echo-api/cert.pem",
+        "https://s3.amazonaws.com:8443/echo.api/cert.pem",
+    ])
+    def test_rejects_invalid_cert_chain_url(self, bad_url):
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_signature(b"body", "sig", bad_url)
+
+    def test_rejects_expired_certificate(self, rsa_key):
+        cert = _make_cert(rsa_key, not_before_delta=-10, not_after_delta=-1)
+        pem = cert.public_bytes(serialization.Encoding.PEM)
+        body = b'{"request":{"type":"LaunchRequest"}}'
+        sig_b64 = _sign_and_encode(rsa_key, body)
+
+        with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
+            with pytest.raises(av.AlexaVerificationError, match="expired"):
+                av.verify_signature(body, sig_b64, VALID_CERT_URL)
+
+    def test_rejects_certificate_missing_required_san(self, rsa_key):
+        cert = _make_cert(rsa_key, san="not-alexa.example.com")
+        pem = cert.public_bytes(serialization.Encoding.PEM)
+        body = b'{"request":{"type":"LaunchRequest"}}'
+        sig_b64 = _sign_and_encode(rsa_key, body)
+
+        with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
+            with pytest.raises(av.AlexaVerificationError, match="SAN"):
+                av.verify_signature(body, sig_b64, VALID_CERT_URL)
+
+    def test_rejects_signature_from_wrong_key(self, rsa_key):
+        cert = _make_cert(rsa_key)
+        pem = cert.public_bytes(serialization.Encoding.PEM)
+        body = b'{"request":{"type":"LaunchRequest"}}'
+        other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        sig_b64 = _sign_and_encode(other_key, body)
+
+        with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(body, sig_b64, VALID_CERT_URL)
+
+
+class TestVerifyTimestamp:
+    def test_accepts_current_timestamp(self):
+        now = datetime.datetime.now(datetime.timezone.utc)
+        av.verify_timestamp(now.isoformat().replace("+00:00", "Z"))
+
+    def test_rejects_stale_timestamp(self):
+        old = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=500)
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_timestamp(old.isoformat().replace("+00:00", "Z"))
+
+    def test_rejects_future_timestamp_beyond_tolerance(self):
+        future = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=500)
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_timestamp(future.isoformat().replace("+00:00", "Z"))
+
+    def test_rejects_malformed_timestamp(self):
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_timestamp("not-a-timestamp")

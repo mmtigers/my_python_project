@@ -1,0 +1,122 @@
+{
+  "type": "APL",
+  "version": "2023.3",
+  "theme": "dark",
+  "mainTemplate": {
+    "parameters": ["payload"],
+    "item": {
+      "type": "Container",
+      "width": "100vw",
+      "height": "100vh",
+      "backgroundColor": "#1b1f3b",
+      "items": [
+        {
+          "type": "Container",
+          "paddingLeft": "40dp",
+          "paddingRight": "40dp",
+          "paddingTop": "24dp",
+          "paddingBottom": "12dp",
+          "items": [
+            {
+              "type": "Text",
+              "text": "${payload.familyData.title}",
+              "fontSize": "48dp",
+              "fontWeight": "bold",
+              "color": "#ffffff"
+            },
+            {
+              "type": "Text",
+              "text": "${payload.familyData.pendingTotal > 0 ? '承認待ち ' + payload.familyData.pendingTotal + '件' : 'すべて承認済み'}",
+              "fontSize": "22dp",
+              "color": "#f6c453",
+              "paddingTop": "4dp"
+            }
+          ]
+        },
+        {
+          "type": "Sequence",
+          "scrollDirection": "horizontal",
+          "grow": 1,
+          "paddingLeft": "24dp",
+          "paddingRight": "24dp",
+          "data": "${payload.familyData.users}",
+          "items": [
+            {
+              "type": "Frame",
+              "width": "300dp",
+              "height": "420dp",
+              "marginLeft": "16dp",
+              "marginRight": "16dp",
+              "backgroundColor": "#2b2f5b",
+              "borderRadius": "24dp",
+              "item": {
+                "type": "Container",
+                "alignItems": "center",
+                "paddingTop": "24dp",
+                "items": [
+                  {
+                    "type": "Text",
+                    "text": "${data.avatar}",
+                    "fontSize": "80dp"
+                  },
+                  {
+                    "type": "Text",
+                    "text": "${data.name}",
+                    "fontSize": "32dp",
+                    "fontWeight": "bold",
+                    "color": "#ffffff",
+                    "paddingTop": "8dp"
+                  },
+                  {
+                    "type": "Text",
+                    "text": "Lv.${data.level}",
+                    "fontSize": "26dp",
+                    "color": "#8be9fd",
+                    "paddingTop": "4dp"
+                  },
+                  {
+                    "type": "Frame",
+                    "width": "220dp",
+                    "height": "16dp",
+                    "backgroundColor": "#12142b",
+                    "borderRadius": "8dp",
+                    "marginTop": "12dp",
+                    "item": {
+                      "type": "Frame",
+                      "width": "${data.expPercent}%",
+                      "height": "16dp",
+                      "backgroundColor": "#50fa7b",
+                      "borderRadius": "8dp"
+                    }
+                  },
+                  {
+                    "type": "Text",
+                    "text": "EXP ${data.exp}/${data.nextLevelExp}",
+                    "fontSize": "16dp",
+                    "color": "#cccccc",
+                    "paddingTop": "4dp"
+                  },
+                  {
+                    "type": "Text",
+                    "text": "💰 ${data.gold} G",
+                    "fontSize": "26dp",
+                    "color": "#f1fa8c",
+                    "paddingTop": "16dp"
+                  },
+                  {
+                    "type": "Text",
+                    "when": "${data.pendingCount > 0}",
+                    "text": "承認待ち ${data.pendingCount}件",
+                    "fontSize": "20dp",
+                    "color": "#ff5555",
+                    "paddingTop": "12dp"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
