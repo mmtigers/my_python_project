@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { User, Quest, QuestHistory, Reward, QuestResult, PendingInventory } from '@/types';
+import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
 interface AdventureLog {
@@ -117,16 +117,6 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         queryKey: ['chronicle'],
         queryFn: () => apiClient.get('/api/quest/family/chronicle'),
         staleTime: 1000 * 60 * 5,
-    });
-
-    // 承認待ちインベントリの取得（無限ループ防止のための安全なポーリング）
-    // ★このクエリがアプリ内で唯一の登録元。ApprovalList側では独自クエリを持たず、
-    // ここから props で受け取る（重複登録の解消）。
-    const { data: pendingInventory } = useQuery<PendingInventory[]>({
-        queryKey: ['pendingInventory'],
-        queryFn: () => apiClient.fetchPendingInventory(),
-        refetchInterval: 1000 * 10,
-        staleTime: 1000 * 5,
     });
 
     // --- Actions (Mutations) ---
@@ -322,7 +312,6 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         adventureLogs: gameData?.logs || [],
         familyStats: chronicleData?.stats || null,
         chronicle: chronicleData?.chronicle || [],
-        pendingInventory: pendingInventory || [],
         isLoading: isGameDataLoading,
 
         completeQuest,

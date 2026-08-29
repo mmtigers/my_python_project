@@ -101,7 +101,7 @@ class InventoryItem(BaseModel):
     title: str
     desc: Optional[str] = None
     icon: str
-    status: str         # owned, pending, consumed
+    status: str         # owned, consumed
     purchased_at: str
     used_at: Optional[str] = None
 
@@ -111,8 +111,4 @@ class UseItemResponse(BaseModel):
 
 class UseItemAction(BaseModel):
     user_id: str
-    inventory_id: int
-
-class ConsumeItemAction(BaseModel):
-    approver_id: str    # 親のID
     inventory_id: int

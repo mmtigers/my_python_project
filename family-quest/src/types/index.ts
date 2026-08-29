@@ -97,7 +97,7 @@ export interface InventoryItem {
     title: string;
     icon: string;
     desc: string;
-    status: 'owned' | 'pending' | 'consumed';
+    status: 'owned' | 'consumed';
     purchased_at: string;
     category?: string;
 }
@@ -111,14 +111,4 @@ export interface QuestResult {
     earnedExp: number;
     earnedMedals: number;
     message?: string;
-}
-
-// ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)
-export interface PendingInventory {
-    id: number;
-    user_id: string;
-    user_name: string;
-    title: string;
-    icon: string;
-    used_at: string;
 }
