@@ -14,7 +14,7 @@ const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeC
     { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400', iconOnly: true },
     { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400', iconOnly: true },
     { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400', iconOnly: true },
-    { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400' },
+    { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400', iconOnly: true },
 ];
 
 // 角度⑦: 縦画面での「上部stickyタブ(クエスト/ごほうび)」+「ヘッダーの記録ボタン」という
