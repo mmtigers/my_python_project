@@ -20,6 +20,7 @@
     15. 小児科予約監視設定 (Clinic Monitor)
     16. メモリ監視設定
     17. TVロック機能設定
+    18. Alexaスキル設定
 """
 import os
 import sys
@@ -602,3 +603,12 @@ if _tv_unlock_quest_ids_str:
         logger.warning(f"⚠️ TV_UNLOCK_QUEST_IDS parse error: {e}")
 
 TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
+
+# ==========================================
+# 18. Alexaスキル設定
+# ==========================================
+# Alexa Developer Consoleでスキルを作成すると発行される "amzn1.ask.skill.xxxx" 形式のID。
+# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId
+# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。
+# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。
+ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")

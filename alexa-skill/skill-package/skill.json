@@ -1,0 +1,44 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "ja-JP": {
+          "name": "ファミクエ",
+          "summary": "家族向けクエスト管理アプリ Family Quest のメイン画面をEcho Showに表示します。",
+          "description": "「アレクサ、ファミクエを開いて」と話しかけると、家族それぞれのレベル・経験値・ゴールド・承認待ちクエスト件数をEcho Showの画面に表示します。",
+          "examplePhrases": [
+            "アレクサ、ファミクエを開いて",
+            "アレクサ、ファミクエを起動して",
+            "アレクサ、ファミクエを開いてくれる?"
+          ],
+          "keywords": ["家族", "クエスト", "ゲーミフィケーション"]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["JP"]
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://YOUR_PUBLIC_DOMAIN_HERE/webhook/alexa"
+        },
+        "interfaces": [
+          { "type": "ALEXA_PRESENTATION_APL" }
+        ]
+      }
+    },
+    "manifestVersion": "1.0",
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "ja-JP": {
+          "privacyPolicyUrl": ""
+        }
+      }
+    }
+  }
+}
