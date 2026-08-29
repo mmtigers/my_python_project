@@ -472,10 +472,20 @@ function App() {
 
         {viewMode === 'main' && layoutMode === 'portrait' && (
           <>
-            <UserStatusCard
-              user={currentUser}
-              onAvatarClick={() => setAvatarUser(currentUser)}
-            />
+            {/* 角度⑰: ステータスカードを左右スワイプすると、ヘッダーのアバターをタップした時と
+                同様にプレイヤー(家族)を切り替えられるようにする。末尾/先頭では折り返さない
+                (タブ切替スワイプと同じ挙動に揃える)。 */}
+            <motion.div
+              onPanEnd={(_e, info) => {
+                if (info.offset.x < -60 && currentUserIdx < users.length - 1) handleUserChange(currentUserIdx + 1);
+                else if (info.offset.x > 60 && currentUserIdx > 0) handleUserChange(currentUserIdx - 1);
+              }}
+            >
+              <UserStatusCard
+                user={currentUser}
+                onAvatarClick={() => setAvatarUser(currentUser)}
+              />
+            </motion.div>
 
             {isParentUser(currentUser) && (
               <ApprovalList
