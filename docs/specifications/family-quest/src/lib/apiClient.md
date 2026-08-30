@@ -9,10 +9,9 @@
 
 ## 関連ドキュメント
 
-- [types/index.md](../types/index.md) — `InventoryItem`/`PendingInventory`型定義の提供元。
+- [types/index.md](../types/index.md) — `InventoryItem`型定義の提供元。
 - [useGameData.md](../hooks/useGameData.md) — 本クライアントを利用してクエスト関連APIを呼び出す上位フック。
 - [InventoryList.md](../features/shop/components/InventoryList.md) — インベントリ関連メソッドの利用元。
-- [ApprovalList.md](../features/quest/components/ApprovalList.md) — `consumeItem`メソッドの利用元。
 - [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/inventory/*`等、バックエンド側APIエンドポイントの実装元。
 
 ## 2. ファイルの概要
@@ -28,8 +27,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `InventoryItem` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
-| `PendingInventory` | 型(Type/Interface) | `fetchPendingInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
+| `InventoryItem` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem } from \"../types\";") |
 
 ### ブラックボックスとなる外部要素
 
@@ -67,7 +65,7 @@
 ### `ApiClient` (クラス)
 
 * **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ機能固有のメソッド群を提供する。
-* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
 
 
 * **引数/リクエスト**: コンストラクタにて `baseUrl: string`
@@ -75,15 +73,15 @@
 
 
 * **戻り値/レスポンス**: クラスインスタンス
-* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
 
 
 * **副作用**: なし（メソッド呼び出し時に発生）
-* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [ApiClientクラス定義] (行番号: 32〜118 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
 
 
 
@@ -158,33 +156,33 @@
 
 
 
-### インベントリ関連メソッド (`fetchInventory`, `useItem`, `cancelItemUsage`, `consumeItem`, `fetchPendingInventory`)
+### インベントリ関連メソッド (`fetchInventory`, `useItem`)
 
-* **役割**: `ApiClient` クラスに組み込まれた、各インベントリAPIの呼び出し専用メソッド群。
-* 根拠: [Inventory Methods セクション] (行番号: 97〜117 / 抜粋: "// --- Inventory Methods ---")
-
-
-* **引数/リクエスト**: メソッドに応じたパラメータ (`userId: string`, `inventoryId: number`, `approverId: string`)
-* 根拠: [各メソッドの引数定義] (行番号: 99, 103, 107, 111, 115 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
+* **役割**: `ApiClient` クラスに組み込まれた、インベントリAPIの呼び出し専用メソッド群。`fetchInventory` は指定ユーザーの所持アイテム一覧を取得し、`useItem` は指定アイテムの使用をバックエンドへ要求する。承認待ち状態を経由せず、呼び出し即座に使用リクエストを送信する。
+* 根拠: [Inventory Methods セクション] (行番号: 97〜105 / 抜粋: "// --- Inventory Methods ---")
 
 
-* **戻り値/レスポンス**: `Promise<InventoryItem[]>`, `Promise<ApiResponse>`, `Promise<PendingInventory[]>` のいずれか
-* 根拠: [各メソッドの戻り値型定義] (行番号: 99, 103, 107, 111, 115 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryItem[]> {")
+* **引数/リクエスト**: メソッドに応じたパラメータ (`fetchInventory`: `userId: string`。`useItem`: `userId: string`, `inventoryId: number`)
+* 根拠: [各メソッドの引数定義] (行番号: 99, 103 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
 
 
-* **副作用**: `get`/`post`（ひいては`_request`）を介したネットワーク通信
-* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
+* **戻り値/レスポンス**: `fetchInventory`は`Promise<InventoryItem[]>`、`useItem`は`Promise<ApiResponse>`
+* 根拠: [各メソッドの戻り値型定義] (行番号: 99, 103 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryItem[]> {")
+
+
+* **副作用**: `get`/`post`（ひいては`_request`）を介したネットワーク通信。`fetchInventory`は`GET /api/quest/inventory/{userId}`、`useItem`は`POST /api/quest/inventory/use`を呼び出す。
+* 根拠: [各メソッドの実装] (行番号: 100, 104 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
 
 
 * **エラーハンドリング**: `_request` の実装に依存
-* 根拠: [各メソッドの実装] (行番号: 100, 104, 108, 112, 116 / 抜粋: "return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);")
+* 根拠: [各メソッドの実装] (行番号: 100, 104 / 抜粋: "return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);")
 
 
 
 ### `apiClient` (インスタンス定数)
 
 * **役割**: `BASE_URL` を用いて初期化された `ApiClient` のシングルトンインスタンス。外部モジュールからのAPI呼び出しに使用される。
-* 根拠: [インスタンスのエクスポート] (行番号: 120 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
+* 根拠: [インスタンスのエクスポート] (行番号: 108 / 抜粋: "export const apiClient = new ApiClient(BASE_URL);")
 
 
 
@@ -229,7 +227,7 @@ flowchart TD
 ```mermaid
 graph TD
     subgraph "外部ファイル (ブラックボックス)"
-        Types["../types (InventoryItem, PendingInventory)"]
+        Types["../types (InventoryItem)"]
     end
 
     subgraph "環境依存"
@@ -274,7 +272,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryItem`, `PendingInventory`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem, PendingInventory } from \"../types\";") |
+| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryItem`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem } from \"../types\";") |
 | 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 8 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
 | 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 104 / 抜粋: "'/api/quest/inventory/use'") |
 
@@ -296,8 +294,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| APIレスポンスの具体的なデータ構造 | `types/index.md`の解析によれば、`InventoryItem`と`PendingInventory`はいずれも`@/types`内でインターフェースとして定義されているとされているが、`types/index.md`側でも各プロパティの網羅的な列挙は行われていない。 | `../types/index.md` |
-| バックエンド側の具体的な仕様・制約 | `quest_router.md`の解析によれば、インベントリ関連には`get_inventory`(`GET /inventory/{user_id}`)、`use_item`(`POST /inventory/use`)、`consume_item`(`POST /inventory/consume`)、`cancel_item_usage`(`POST /inventory/cancel`)、`get_admin_pending_inventory`(`GET /inventory/admin/pending`)という対応するエンドポイントが存在するとされている。ただし本ファイル側の抜粋（`/api/quest/inventory/use`等）と`quest_router.md`側のパス表記（`/inventory/use`等、プレフィックスなし）が完全に一致するかは、ルーター側のマウント方法（プレフィックス設定）を確認しないと断定できない。 | `../../../MY_HOME_SYSTEM/quest_router.md` |
+| APIレスポンスの具体的なデータ構造 | `types/index.md`の解析によれば、`InventoryItem`は`@/types`内でインターフェースとして定義されているとされているが、`types/index.md`側でも各プロパティの網羅的な列挙は行われていない。 | `../types/index.md` |
+| バックエンド側の具体的な仕様・制約 | `quest_router.md`は`get_inventory`(`GET /inventory/{user_id}`)、`use_item`(`POST /inventory/use`)に加え`consume_item`(`POST /inventory/consume`)、`cancel_item_usage`(`POST /inventory/cancel`)、`get_admin_pending_inventory`(`GET /inventory/admin/pending`)という3つの追加エンドポイントも記載しているが、`MY_HOME_SYSTEM/routers/quest_router.py`を直接確認したところ実装されているのは`GET /inventory/{user_id}`と`POST /inventory/use`の2つのみであり、後者3つは現存しない（`quest_router.md`側の未反映のドリフトと見られる。本ファイル`apiClient.ts`側にもこの3つに対応する呼び出しは存在しない）。本ファイル側の抜粋（`/api/quest/inventory/use`等）と実装側のパス表記（`/inventory/use`等、プレフィックスなし）が完全に一致するかは、ルーター側のマウント方法（プレフィックス設定）を確認しないと断定できない。 | `../../../MY_HOME_SYSTEM/quest_router.md`、`MY_HOME_SYSTEM/routers/quest_router.py`(直接確認) |
 
 ## 10. 自己検証結果
 
