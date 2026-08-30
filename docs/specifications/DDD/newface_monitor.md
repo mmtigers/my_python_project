@@ -31,8 +31,8 @@
 * 根拠: [_check_site Docstring] (行番号: 1748〜1757 / 抜粋: "サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が\n    他サイトの監視処理に波及しないようにする。")
 * 各サイトの新規検知件数はサイト単位のJSONに加え、`daily_summary.json`にも当日分として累積され、21時台の実行時に1日分の集計をテキスト形式でDiscordへ別途通知する（重複送信は送信済み日付の永続化で防止）。
 * 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1795〜1806 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
-* 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。
-* 根拠: [DataManager.save_known_castsのコメント] (行番号: 1445〜1447 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ")
+* 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。
+* 根拠: [DataManager.save_known_castsのコメント] (行番号: 1507〜1509 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)")
 * `run_monitor`はモニタープロセスのエントリポイントとして、`fcntl.flock`による多重起動防止ロック（`_MONITOR_LOCK_FILE_PATH`）を非ブロッキングで取得してから処理本体`_run_monitor_locked`を呼び出す。cronの1回の実行が想定より長引く（1時間超）と新旧プロセスが並行実行され、既知キャストリスト・サマリファイルの読み書きが競合しうる問題への対策であり、`batch_download_discord.py`が既に採用している同種のロックパターンを踏襲している。
 * 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1825〜1836 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
 
@@ -399,59 +399,91 @@
 * 根拠: [try-exceptブロック] (行番号: 1397〜1402 / 抜粋: "except requests.RequestException as e:\n            logger.error(f"Failed to send daily summary notification: {e}")")
 
 
+### `DataManager._LOAD_ERRORS` (クラス定数)
+
+* **役割**: `_read_casts_file`の読み込み失敗とみなす例外群をまとめたクラス定数。`UnicodeDecodeError`は`IOError`/`OSError`のサブクラスではなく`ValueError`のサブクラスであるため、`IOError`のみを捕捉する実装では非UTF-8データによる破損（例:「'utf-8' codec can't decode byte ... : invalid start byte」）を検知できず、同一の破損ファイルへの読み込み失敗が繰り返され続けてしまう問題を踏まえ、`OSError`, `ValueError`, `TypeError`, `KeyError`をまとめて捕捉対象としている。
+* 根拠: [定義とコメント] (行番号: 1431〜1435 / 抜粋: "# 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく\n    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる\n    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を\n    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。\n    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)")
+
+
+* **副作用**: なし（タプルの定義のみ）
+* **エラーハンドリング**: 該当なし（例外を捕捉する側で使われる定数そのもの）
+
+
+### `DataManager._read_casts_file`
+
+* **役割**: 指定されたJSONファイルを読み込み、`CastMember`の集合に変換する内部ヘルパーの静的メソッド。`load_known_casts`（通常読み込みおよび`.bak`バックアップからの復旧読み込み）と`save_known_casts`（書き込み直後の読み戻し検証）の両方から共通で呼び出される。
+* 根拠: [メソッド定義とDocstring] (行番号: 1438〜1442 / 抜粋: "def _read_casts_file(data_file: Path) -> Set[CastMember]:\n        """JSONファイルを読み込み、CastMemberの集合に変換する。\n\n        パース失敗時は例外をそのまま送出する（呼び出し側でハンドリングする前提）。\n        """")
+
+
+* **引数/リクエスト**: `data_file: Path`（読み込み対象のJSONファイルパス）
+* 根拠: [引数定義] (行番号: 1438 / 抜粋: "def _read_casts_file(data_file: Path) -> Set[CastMember]:")
+
+
+* **戻り値/レスポンス**: `Set[CastMember]`
+* 根拠: [戻り値ヒントとreturn文] (行番号: 1438, 1445 / 抜粋: "return {CastMember(**item) for item in data}")
+
+
+* **副作用**: JSONファイルのオープン・パース(`open`, `json.load`)。
+* 根拠: [処理内容] (行番号: 1443〜1445 / 抜粋: "with open(data_file, 'r', encoding='utf-8') as f:\n            data = json.load(f)\n            return {CastMember(**item) for item in data}")
+
+
+* **エラーハンドリング**: なし。Docstringに明記の通り、パース失敗時（JSON構文エラー・非UTF-8データ・想定外のフィールド欠落等）は例外を握りつぶさずそのまま呼び出し元へ送出する設計であり、呼び出し元(`load_known_casts`/`save_known_casts`)側が`DataManager._LOAD_ERRORS`等で捕捉してハンドリングする。
+* 根拠: [Docstring] (行番号: 1441 / 抜粋: "パース失敗時は例外をそのまま送出する（呼び出し側でハンドリングする前提）。")
+
+
 ### `DataManager.load_known_casts`
 
-* **役割**: 指定サイトの保存済みキャストデータ(`MonitorConfig.get_data_file(site)`)をJSONファイルから読み込み、`CastMember`の集合として返す静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 1408〜1416 / 抜粋: "def load_known_casts(site: SiteConfig) -> Set[CastMember]:\n        """指定サイトの保存済みキャストデータを読み込む。")
+* **役割**: 指定サイトの保存済みキャストデータ(`MonitorConfig.get_data_file(site)`)を`_read_casts_file`経由でJSONファイルから読み込み、`CastMember`の集合として返す静的メソッド。読み込みに失敗した場合、単純に空集合を返すのではなく、(1)破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離することで同じ破損ファイルへの読み込み失敗が繰り返され続けるのを防ぎ、(2)`.bak`バックアップファイルが存在すればそこからの復旧を試み、(3)復旧にも失敗した場合にのみ空集合へフォールバックする、という多段の復旧ロジックを持つ。
+* 根拠: [メソッド定義とDocstring] (行番号: 1448〜1456 / 抜粋: "def load_known_casts(site: SiteConfig) -> Set[CastMember]:\n        """指定サイトの保存済みキャストデータを読み込む。")
 
 
 * **引数/リクエスト**: `site: SiteConfig`
-* 根拠: [引数定義とDocstring] (行番号: 1409, 1412〜1413 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
+* 根拠: [引数定義とDocstring] (行番号: 1448, 1452 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
 
 
-* **戻り値/レスポンス**: `Set[CastMember]`（ファイル不在時・読み込み失敗時は空集合）
-* 根拠: [Docstringと各return] (行番号: 1415〜1416, 1421, 1426, 1430 / 抜粋: "Returns:\n            Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。")
+* **戻り値/レスポンス**: `Set[CastMember]`（ファイル不在時、または破損＋`.bak`バックアップからの復旧も失敗した場合は空集合）
+* 根拠: [Docstringと各return] (行番号: 1454〜1456, 1460, 1463, 1487, 1492 / 抜粋: "Returns:\n            Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。")
 
 
-* **副作用**: JSONファイルの読み込み(`open`, `json.load`)、デバッグ/エラーログ出力。
-* 根拠: [ファイル読み込み] (行番号: 1424〜1426 / 抜粋: "with open(data_file, 'r', encoding='utf-8') as f:\n                data = json.load(f)\n                return {CastMember(**item) for item in data}")
+* **副作用**: `DataManager._read_casts_file`経由でのJSONファイル読み込み、デバッグ/エラー/警告ログ出力。読み込み失敗時は破損ファイルのリネーム(`data_file.rename(quarantine_path)`)、`.bak`バックアップファイルが存在する場合はその読み込み。
+* 根拠: [処理内容] (行番号: 1457, 1469〜1471, 1473, 1480, 1483 / 抜粋: "data_file = MonitorConfig.get_data_file(site)" / "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )" / "data_file.rename(quarantine_path)" / "backup_file = data_file.with_suffix(data_file.suffix + '.bak')" / "casts = DataManager._read_casts_file(backup_file)")
 
 
-* **エラーハンドリング**: データファイルが存在しない場合はデバッグログを出力し空集合を返す。`json.JSONDecodeError`または`IOError`発生時はエラーログを出力し、安全側に倒して空集合を返す（コメントに「データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）」と明記）。
-* 根拠: [try-exceptブロックとコメント] (行番号: 1427〜1430 / 抜粋: "except (json.JSONDecodeError, IOError) as e:\n            logger.error(f"Failed to load data from {data_file}: {e}")\n            # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）\n            return set()")
+* **エラーハンドリング**: データファイルが存在しない場合はデバッグログを出力し空集合を返す。`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）発生時はエラーログを出力したうえで、破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離する（リネーム自体が`OSError`で失敗した場合もエラーログを出力するのみで処理は継続）。続けて`.bak`バックアップファイルが存在すれば`_read_casts_file`で読み込みを試み、成功すれば復旧件数を警告ログに出力してそれを返す（バックアップも`DataManager._LOAD_ERRORS`で失敗した場合はエラーログを出力）。バックアップが存在しない、またはバックアップも読み込めない場合は、コメントに明記の通り「データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）」として空集合を返す。
+* 根拠: [try-exceptブロックと隔離・復旧処理] (行番号: 1464〜1465, 1467〜1468, 1475〜1476, 1478〜1479, 1488〜1489, 1491〜1492 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            logger.error(f"Failed to load data from {data_file}: {e}")" / "# 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける\n        # ため、退避してから復旧を試みる。" / "except OSError as e:\n            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}")" / "# 直近の正常データがバックアップとして残っていれば、そこから復旧する\n        # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。" / "except DataManager._LOAD_ERRORS as e:\n                logger.error(f"Backup file {backup_file} is also unusable: {e}")" / "# データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）\n        return set()")
 
 
 ### `DataManager.save_known_casts`
 
-* **役割**: 指定サイトのキャスト集合をJSONファイルへアトミックに保存する静的メソッド。一時ファイルへ書き出したのち`replace`で置き換えることで、書き込み中断時の既存データ破損/消失を防ぐ。
-* 根拠: [メソッド定義とDocstring] (行番号: 1432〜1439 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")
+* **役割**: 指定サイトのキャスト集合をJSONファイルへアトミックに保存する静的メソッド。一時ファイルへ書き出したのち`replace`で置き換えることで書き込み中断時の既存データ破損/消失を防ぐ従来のアトミック書き込みパターンに加え、(1)一時ファイルを本番ファイルへ置き換える前に`_read_casts_file`で一時ファイルを読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に現在の本番ファイルの内容を`.bak`としてバックアップする、という2つの安全策を追加している。
+* 根拠: [メソッド定義とDocstring] (行番号: 1495〜1501 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")
 
 
 * **引数/リクエスト**: `site: SiteConfig`, `casts: Set[CastMember]`（保存対象のキャスト集合）
-* 根拠: [引数定義とDocstring] (行番号: 1433, 1436〜1438 / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
+* 根拠: [引数定義とDocstring] (行番号: 1495, 1498〜1500 / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1433 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1495 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:")
 
 
-* **副作用**: 保存先ディレクトリの作成(`mkdir`)、一時ファイル(`.tmp`)への書き込み、`tmp_path.replace(data_file)`によるアトミックな置換、デバッグログ出力。
-* 根拠: [アトミック書き込み処理とコメント] (行番号: 1445〜1451 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)\n            tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')")
+* **副作用**: 保存先ディレクトリの作成(`mkdir`)、一時ファイル(`.tmp`)への書き込み、`DataManager._read_casts_file`による一時ファイルの読み戻し検証、本番ファイルが存在する場合はその内容を`.bak`ファイルへコピー(`backup_path.write_bytes(data_file.read_bytes())`)、`tmp_path.replace(data_file)`によるアトミックな置換、デバッグログ出力。バックアップの更新は最後の`replace`より前に行われるが、これはコメントに明記の通り「万一この途中でプロセスが中断しても本番ファイル(`data_file`)は無傷のまま残る」ようにするための意図的な順序である。
+* 根拠: [処理順序とコメント] (行番号: 1504, 1507〜1509, 1514〜1516, 1521〜1522, 1524, 1530 / 抜粋: "data_file.parent.mkdir(parents=True, exist_ok=True)" / "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)" / "# 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。\n            # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を\n            # ここで検知できれば、破損データへの置き換え自体を未然に防げる。" / "# コピー元(data_file)は最後のreplaceまで保持したままにすることで、\n            # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。" / "backup_path = data_file.with_suffix(data_file.suffix + '.bak')" / "tmp_path.replace(data_file)")
 
 
-* **エラーハンドリング**: `IOError`発生時は`exc_info=True`付きでエラーログを出力する（例外の再送出はしない）。
-* 根拠: [try-exceptブロック] (行番号: 1454〜1455 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save data: {e}", exc_info=True)")
+* **エラーハンドリング**: `(OSError, ValueError, TypeError)`発生時は`exc_info=True`付きでエラーログを出力する（例外の再送出はしない）。この例外タプルには一時ファイルの読み戻し検証(`_read_casts_file`)が送出しうる`ValueError`/`TypeError`（JSON破損・想定外の型）も含まれ、検証失敗時も同じ`except`節で捕捉されて処理が打ち切られる（`tmp_path.replace(data_file)`より前に検証しているため、検証失敗時に本番ファイルが破損データで上書きされることはない）。`.bak`バックアップファイルへの書き込み(`backup_path.write_bytes`)のみが失敗した場合は、内側の`try`/`except OSError`で警告ログを出力するに留め、後続のアトミック置換自体は中断せず継続する。
+* 根拠: [外側try-exceptと内側try-except] (行番号: 1533〜1534, 1525〜1528 / 抜粋: "except (OSError, ValueError, TypeError) as e:\n            logger.error(f"Failed to save data: {e}", exc_info=True)" / "try:\n                    backup_path.write_bytes(data_file.read_bytes())\n                except OSError as e:\n                    logger.warning(f"Failed to update backup file {backup_path}: {e}")")
 
 
 ### `DataManager._daily_summary_file`
 
 * **役割**: 日次サマリの集計状態を保存するファイル(`daily_summary.json`)のパスを返す静的メソッド。サイト単位の`known_casts_*.json`とは別にトップレベルのファイルとして管理される。
-* 根拠: [メソッド定義とDocstring] (行番号: 1457〜1463 / 抜粋: "def _daily_summary_file() -> Path:\n        """日次サマリの集計状態を保存するファイルのパスを返す。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1536〜1542 / 抜粋: "def _daily_summary_file() -> Path:\n        """日次サマリの集計状態を保存するファイルのパスを返す。")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Path`
-* 根拠: [戻り値] (行番号: 1464 / 抜粋: "return MonitorConfig.get_data_dir() / 'daily_summary.json'")
+* 根拠: [戻り値] (行番号: 1543 / 抜粋: "return MonitorConfig.get_data_dir() / 'daily_summary.json'")
 
 
 * **副作用**: なし
@@ -461,60 +493,60 @@
 ### `DataManager.load_daily_summary`
 
 * **役割**: 日次サマリの集計状態（`{'date': ..., 'counts': {...}, 'last_sent_date': ...}`形式）をJSONファイルから読み込む静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 1466〜1474 / 抜粋: "def load_daily_summary() -> Dict:\n        """日次サマリの集計状態を読み込む。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1545〜1553 / 抜粋: "def load_daily_summary() -> Dict:\n        """日次サマリの集計状態を読み込む。")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Dict`（ファイル不在・読み込み失敗時は空辞書）
-* 根拠: [Docstring] (行番号: 1470〜1474 / 抜粋: "Returns:\n            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},\n                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
+* 根拠: [Docstring] (行番号: 1549〜1553 / 抜粋: "Returns:\n            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},\n                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
 
 
 * **副作用**: JSONファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 1480〜1481 / 抜粋: "with open(summary_file, 'r', encoding='utf-8') as f:\n                return json.load(f)")
+* 根拠: [ファイル読み込み] (行番号: 1559〜1560 / 抜粋: "with open(summary_file, 'r', encoding='utf-8') as f:\n                return json.load(f)")
 
 
 * **エラーハンドリング**: `json.JSONDecodeError`または`IOError`発生時はエラーログを出力し空辞書を返す。
-* 根拠: [try-exceptブロック] (行番号: 1482〜1484 / 抜粋: "except (json.JSONDecodeError, IOError) as e:\n            logger.error(f"Failed to load daily summary from {summary_file}: {e}")\n            return {}")
+* 根拠: [try-exceptブロック] (行番号: 1561〜1563 / 抜粋: "except (json.JSONDecodeError, IOError) as e:\n            logger.error(f"Failed to load daily summary from {summary_file}: {e}")\n            return {}")
 
 
 ### `DataManager.save_daily_summary`
 
 * **役割**: 日次サマリの集計状態を、`save_known_casts`と同じ一時ファイル経由のアトミックパターンでJSONファイルに保存する静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 1486〜1492 / 抜粋: "def save_daily_summary(data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1565〜1571 / 抜粋: "def save_daily_summary(data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")
 
 
 * **引数/リクエスト**: `data: Dict`（保存対象の集計状態）
-* 根拠: [引数定義とDocstring] (行番号: 1487, 1490〜1491 / 抜粋: "data (Dict): 保存対象の集計状態。")
+* 根拠: [引数定義とDocstring] (行番号: 1566, 1569〜1570 / 抜粋: "data (Dict): 保存対象の集計状態。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1487 / 抜粋: "def save_daily_summary(data: Dict) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1566 / 抜粋: "def save_daily_summary(data: Dict) -> None:")
 
 
 * **副作用**: 保存先ディレクトリの作成、一時ファイルへの書き込みとアトミックな`replace`。
-* 根拠: [アトミック書き込みとコメント] (行番号: 1497〜1501 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')")
+* 根拠: [アトミック書き込みとコメント] (行番号: 1576〜1580 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')")
 
 
 * **エラーハンドリング**: `IOError`発生時は`exc_info=True`付きでエラーログを出力する。
-* 根拠: [try-exceptブロック] (行番号: 1502〜1503 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save daily summary: {e}", exc_info=True)")
+* 根拠: [try-exceptブロック] (行番号: 1581〜1582 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save daily summary: {e}", exc_info=True)")
 
 
 ### `DataManager.record_daily_new_casts`
 
 * **役割**: サイト単位で検知した新規キャスト件数を、当日分の集計に加算する静的メソッド。cron等により1時間毎に別プロセスとして実行される前提のため、実行毎にファイルを読み書きして状態を永続化する。集計中の日付が当日と異なる場合（日付が変わった後の最初の検知）は集計をリセットしてから加算する。
-* 根拠: [メソッド定義とDocstring] (行番号: 1505〜1517 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:\n        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1584〜1596 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:\n        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。")
 
 
 * **引数/リクエスト**: `site_id: str`（検知元サイトのID）, `count: int`（当該サイトで新たに検知した件数）
-* 根拠: [引数定義とDocstring] (行番号: 1506, 1514〜1516 / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
+* 根拠: [引数定義とDocstring] (行番号: 1585, 1593〜1595 / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1506 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1585 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:")
 
 
 * **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し（ファイル読み書き）。`count <= 0`の場合は何もせず即座に`return`する。
-* 根拠: [ガード節と呼び出し] (行番号: 1518〜1519, 1522, 1528 / 抜粋: "if count <= 0:\n            return")
+* 根拠: [ガード節と呼び出し] (行番号: 1597〜1598, 1601, 1607 / 抜粋: "if count <= 0:\n            return")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す`load_daily_summary`/`save_daily_summary`側のエラーハンドリングに依存）
@@ -772,6 +804,38 @@ flowchart TD
     ReleaseLock --> End3["End (正常終了)"]
 ```
 
+上記の`DataManager.load_known_casts`/`DataManager.save_known_casts`は、上のフロー図では単一ノードとして扱っていますが、内部には破損データの隔離・復旧および書き込み検証・バックアップという多段のロジックがあります。以下にその内部フローを示します。
+
+```mermaid
+flowchart TD
+    subgraph LKC["DataManager.load_known_casts"]
+        LStart["Start"] --> LExists{"data_file.exists()?"}
+        LExists -- No --> LEmpty1["デバッグログ出力<br>空集合を返す"]
+        LExists -- Yes --> LRead["_read_casts_file(data_file)"]
+        LRead -- 成功 --> LReturn["読み込んだSet[CastMember]を返す"]
+        LRead -- "_LOAD_ERRORS<br>(OSError/ValueError/TypeError/KeyError)" --> LErrLog["エラーログ出力"]
+        LErrLog --> LQuarantine["破損ファイルを<br>name.corrupted-timestamp へrename<br>(隔離。失敗してもログのみで継続)"]
+        LQuarantine --> LBakExists{".bakファイルが存在?"}
+        LBakExists -- No --> LEmpty2["空集合を返す<br>(安全側フォールバック)"]
+        LBakExists -- Yes --> LReadBak["_read_casts_file(backup_file)"]
+        LReadBak -- 成功 --> LRecovered["復旧件数を警告ログ出力<br>復旧したSetを返す"]
+        LReadBak -- "_LOAD_ERRORS" --> LBakErrLog["エラーログ出力"] --> LEmpty2
+    end
+
+    subgraph SKC["DataManager.save_known_casts"]
+        SStart["Start"] --> SMkdir["保存先ディレクトリmkdir"]
+        SMkdir --> STmpWrite["一時ファイル(.tmp)へJSON書き込み"]
+        STmpWrite --> SVerify["_read_casts_file(tmp_path)で読み戻し検証"]
+        SVerify -- "検証失敗<br>(OSError/ValueError/TypeError)" --> SErrLog["エラーログ出力(exc_info=True)<br>replaceせず終了"]
+        SVerify -- 成功 --> SBakCheck{"data_file.exists()?"}
+        SBakCheck -- No --> SReplace["tmp_path.replace(data_file)"]
+        SBakCheck -- Yes --> SBakWrite["現data_fileの内容を<br>.bakへwrite_bytes"]
+        SBakWrite -- "OSError" --> SBakWarn["警告ログ出力<br>(バックアップ失敗しても継続)"] --> SReplace
+        SBakWrite -- 成功 --> SReplace
+        SReplace --> SDebugLog["デバッグログ出力 End"]
+    end
+```
+
 ## 6. 依存関係図
 
 ```mermaid
@@ -878,6 +942,8 @@ graph TD
 * **80サイトを1プロセスで逐次処理する構成**: `run_monitor`は`MonitorConfig.SITES`の全80件を単一プロセス内で順次処理するため、1回の実行時間はサイト数に比例して増大する。各サイト間の待機は`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`のみであり、サイト単位の並列化やレート制限の個別調整は行われていない。
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
+* **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
+* 根拠: [load_known_castsの隔離処理] (行番号: 1469〜1471 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")
 
 ## 9. 不明事項一覧
 
@@ -889,6 +955,7 @@ graph TD
 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のセレクタが対応する正確なマークアップ構造は本ファイルのコードからは分からない。 | 各対象サイトの実際のHTMLソース（コード外） |
 | Discord Webhook APIの詳細仕様 | ペイロード形式以外の認証方式、レート制限、エラーレスポンスの詳細仕様が本ファイルからは不明。 | Discord公式APIドキュメント（コード外） |
 | 本ファイルの実行方法（cron設定等） | `if __name__ == "__main__":`で直接実行される想定だが、定期実行のスケジューリング方法（cron、systemdタイマー等、および1時間毎という前提の根拠）は本ファイルからは不明。リポジトリ全体を`newface_monitor`および`cron`/`systemd`/`docker-compose`関連のファイル名・記述で検索したが、本ファイルの実行スケジュールを定義する設定ファイルはリポジトリ内に見つからなかった（デプロイ環境側の設定である可能性が高い）。 | デプロイ設定・cron定義ファイル等（リポジトリ内には存在せず） |
+| `.corrupted-*`隔離ファイルの外部クリーンアップ機構の有無 | `DataManager.load_known_casts`は破損ファイルを`.corrupted-{タイムスタンプ}`として退避するのみで、本ファイル内にはこれを削除・アーカイブする処理が存在しない。デプロイ環境側で別途cron等による定期削除が行われているかは本ファイルのコードからは不明。 | デプロイ設定・cron定義ファイル等（リポジトリ内には存在せず） |
 
 ## 相互参照による補足情報
 
