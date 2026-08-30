@@ -35,7 +35,7 @@
 | --- | --- | --- | --- |
 | `React`, `useState` | ライブラリ | コンポーネント定義とパネルごとのタブ状態・直前操作パネルの状態管理 | `import React, { useState } from 'react';` (行番号: 1) |
 | `Sword`, `ShoppingBag`, `Package` | アイコンコンポーネント | パネル内タブ（クエスト/ごほうび/もちもの）ボタンのアイコン表示 | `import { Sword, ShoppingBag, Package } from 'lucide-react';` (行番号: 2) |
-| `User`, `Quest`, `QuestHistory`, `Reward`, `PendingInventory` | 型定義 | Propsおよび内部変数の型指定 | `import { User, Quest, QuestHistory, Reward, PendingInventory } from '@/types';` (行番号: 3) |
+| `ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `PendingInventory` | 型定義 | Propsおよび内部変数の型指定。`ID`はIssue #102で追加された`completedSignal`（`{ id: ID; nonce: number } \| null`）の型に使う。 | `import { ID, User, Quest, QuestHistory, Reward, PendingInventory } from '@/types';` (行番号: 3) |
 | `UserStatusCard` | コンポーネント | 各パネル上部のユーザーステータス表示 | `import UserStatusCard from './UserStatusCard';` (行番号: 4) |
 | `QuestList` | コンポーネント | パネル内のクエスト一覧表示（`panelMode`/`iconFirst`付き） | `import QuestList from '../../quest/components/QuestList';` (行番号: 5) |
 | `ApprovalList` | コンポーネント | メイン画面上部の承認待ち一覧表示 | `import ApprovalList from '../../quest/components/ApprovalList';` (行番号: 6) |
@@ -75,32 +75,33 @@
 
 ### `FamilyDashboardProps` (型定義)
 
-* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。
-* 根拠: (行番号: 29〜42 / 抜粋: "interface FamilyDashboardProps {\n    users: User[];\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    pendingInventory: PendingInventory[];\n    onQuestClick: (user: User, quest: Quest) => void;\n    onBuyReward: (user: User, reward: Reward) => void;\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n    onAvatarClick: (user: User) => void;\n}")
+* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。Issue #102で、完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるための通知`completedSignal: { id: ID; nonce: number } | null`が追加された（呼び出し元の`App.tsx`から渡され、各`FamilyPanel`へそのまま転送される）。
+* 根拠: (行番号: 29〜44 / 抜粋: "interface FamilyDashboardProps {\n    users: User[];\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    onQuestClick: (user: User, quest: Quest) => void;\n    onBuyReward: (user: User, reward: Reward) => void;\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの\n    // クールダウンを発火させるための通知(App側で管理)。\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: (user: User) => void;\n}")
 
 
 ### `FamilyDashboard`
 
-* **役割**: `users`を`sortByFamilyOrder`で並び替え、代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、並び替え済みユーザーごとに`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。
-* 根拠: (行番号: 48〜117 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
-* 根拠: 代表の親のコメント (行番号: 54〜56 / 抜粋: "// 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは\n    // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。\n    const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];")
-* 根拠: `activeUserId`のコメント (行番号: 58〜60 / 抜粋: "// 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも\n    // 「今どこを触っているか」が一目でわかるようにする。\n    const [activeUserId, setActiveUserId] = useState<string | null>(null);")
+* **役割**: `users`を`sortByFamilyOrder`で並び替え、代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、並び替え済みユーザーごとに`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。Issue #102で追加された`completedSignal`（Propsで受け取る）はここでは判定に一切関与せず、そのまま各`FamilyPanel`へ転送するだけである。
+* 根拠: (行番号: 50〜118 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
+* 根拠: 代表の親のコメント (行番号: 56〜58 / 抜粋: "// 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは\n    // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。\n    const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];")
+* 根拠: `activeUserId`のコメント (行番号: 60〜62 / 抜粋: "// 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも\n    // 「今どこを触っているか」が一目でわかるようにする。\n    const [activeUserId, setActiveUserId] = useState<string | null>(null);")
+* 根拠: `FamilyPanel`への`completedSignal`転送 (行番号: 111 / 抜粋: "completedSignal={completedSignal}")
 
 
 * **引数/リクエスト**: `FamilyDashboardProps`
-* 根拠: (行番号: 48〜51 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({\n    users, quests, completedQuests, pendingQuests, rewards, pendingInventory,\n    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, onAvatarClick,\n}) => {")
+* 根拠: (行番号: 50〜53 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({\n    users, quests, completedQuests, pendingQuests, rewards,\n    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal, onAvatarClick,\n}) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 81〜116 / 抜粋: "return (\n        <div className=\"flex flex-col gap-4 animate-in fade-in duration-300\">")
+* 根拠: (行番号: 83〜117 / 抜粋: "return (\n        <div className=\"flex flex-col gap-4 animate-in fade-in duration-300\">")
 
 
 * **副作用**: `activeUserId`ローカルステートの更新（`onInteract`経由）。それ以外は描画のみで、実際の副作用は`onQuestClick`/`onBuyReward`/`onApprove`/`onReject`/`onApproveAll`/`onAvatarClick`のコールバック経由で親コンポーネントに委譲される。
-* 根拠: (行番号: 60, 108 / 抜粋: "const [activeUserId, setActiveUserId] = useState<string | null>(null);", "onInteract={() => setActiveUserId(user.user_id)}")
+* 根拠: (行番号: 62, 108 / 抜粋: "const [activeUserId, setActiveUserId] = useState<string | null>(null);", "onInteract={() => setActiveUserId(user.user_id)}")
 
 
 * **エラーハンドリング**: `representativeParent`が存在する場合のみ`ApprovalList`を描画する（`orderedUsers`が空配列で`representativeParent`が`undefined`になった場合は`ApprovalList`を描画しない）。
-* 根拠: (行番号: 83 / 抜粋: "{representativeParent && (")
+* 根拠: (行番号: 85 / 抜粋: "{representativeParent && (")
 
 
 
@@ -118,30 +119,31 @@
 
 ### `FamilyPanelProps` (型定義)
 
-* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。
-* 根拠: (行番号: 116〜130 / 抜粋: "interface FamilyPanelProps {\n    user: User;\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    iconFirst: boolean;\n    isActive: boolean;\n    themeColorKey?: keyof typeof THEME_BORDER_CLASSES;\n    isIdle: boolean;\n    onInteract: () => void;\n    onQuestClick: (quest: Quest) => void;\n    onBuyReward: (reward: Reward) => void;\n    onAvatarClick: () => void;\n}")
+* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。Issue #102で、`FamilyDashboard`から転送される`completedSignal: { id: ID; nonce: number } | null`が追加された。
+* 根拠: (行番号: 120〜135 / 抜粋: "interface FamilyPanelProps {\n    user: User;\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    iconFirst: boolean;\n    isActive: boolean;\n    themeColorKey?: keyof typeof THEME_BORDER_CLASSES;\n    isIdle: boolean;\n    onInteract: () => void;\n    onQuestClick: (quest: Quest) => void;\n    onBuyReward: (reward: Reward) => void;\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: () => void;\n}")
 
 
 ### `FamilyPanel`
 
-* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じて`QuestList`（`panelMode`固定、`iconFirst`はProps経由）、`RewardShop`、または`InventoryList`（`panelMode`固定）を表示する。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
-* 根拠: (行番号: 135〜217 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
-* 根拠: ボーダー/リングのバグ修正コメント (行番号: 141〜144)
-* 根拠: 独立スクロールのコメント (行番号: 191 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
-* 根拠: タブ切替コメント (行番号: 161〜163 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
-* 根拠: `onClickCapture={onInteract}` (行番号: 154)
+* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じて`QuestList`（`panelMode`固定、`iconFirst`とIssue #102で追加された`completedSignal`をProps経由でそのまま転送）、`RewardShop`、または`InventoryList`（`panelMode`固定）を表示する。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
+* 根拠: (行番号: 137〜220 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
+* 根拠: ボーダー/リングのバグ修正コメント (行番号: 143〜146)
+* 根拠: 独立スクロールのコメント (行番号: 193 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
+* 根拠: タブ切替コメント (行番号: 163〜165 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
+* 根拠: `onClickCapture={onInteract}` (行番号: 156)
+* 根拠: `QuestList`への`completedSignal`転送 (行番号: 202 / 抜粋: "completedSignal={completedSignal}")
 
 
 * **引数/リクエスト**: `FamilyPanelProps`
-* 根拠: (行番号: 135〜138 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({\n    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,\n    onInteract, onQuestClick, onBuyReward, onAvatarClick,\n}) => {")
+* 根拠: (行番号: 137〜140 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({\n    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,\n    onInteract, onQuestClick, onBuyReward, completedSignal, onAvatarClick,\n}) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 152〜216 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
+* 根拠: (行番号: 154〜219 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
 * **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。
-* 根拠: (行番号: 139 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
+* 根拠: (行番号: 141 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
 
 
 * **エラーハンドリング**: なし
@@ -167,7 +169,7 @@ flowchart TD
     subgraph "FamilyPanel 内部"
         PanelRender --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
         BorderCalc --> TabState{"tab の値は？(初期値 'quest')"}
-        TabState -- "quest" --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id))"]
+        TabState -- "quest" --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal をそのまま転送 #102)"]
         TabState -- "shop" --> RenderRewardShop["RewardShop を描画"]
         TabState -- "inventory" --> RenderInventoryList["InventoryList を panelMode 付きで描画"]
         TabClickQuest["「クエスト」ボタンクリック"] --> SetTabQuest["setTab('quest')"]
@@ -208,7 +210,7 @@ graph TD
     Const_settingsShared["THEME_BORDER_CLASSES/THEME_RING_CLASSES (@/context/settingsShared)"]
     Hook_useQuestStatus["getQuestLockState (../../quest/hooks/useQuestStatus)"]
 
-    Types["@/types (User, Quest, QuestHistory, Reward, PendingInventory)"]
+    Types["@/types (ID, User, Quest, QuestHistory, Reward, PendingInventory)"]
 
     FamilyDashboard -->|import| Types
     FamilyDashboard --> sortByFamilyOrder
@@ -255,6 +257,8 @@ graph TD
 * 根拠: (行番号: 62〜63, 155 / 抜粋: "// 今日やることが1件もない人は、パネル自体は残しつつ視覚的な優先度を下げる", "${isIdle ? 'opacity-70' : ''}")
 * **兄妹連携クエスト(`target === 'siblings'`)対応（バグ修正済み）**: `hasNothingToDo`内の対象判定は以前`all`/`role_`プレフィックス一致/`user_id`完全一致のみに対応しており、`target === 'siblings'`のクエストはどの分岐にも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）。`target === 'siblings'`の場合は`user.role === 'role_child'`であれば対象とする分岐を追加した。同種の対象判定ロジックは`QuestList.tsx`側にも存在する（本ファイルの管轄外）。
 * 根拠: (行番号: 67〜69 / 抜粋: "if (q.target === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (user.role !== 'role_child') return false;\n                } else if (q.target.startsWith('role_')) {")
+* **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
+* 根拠: (行番号: 111, 202 / 抜粋: "completedSignal={completedSignal}")
 
 ## 9. 不明事項一覧
 

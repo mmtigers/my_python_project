@@ -167,9 +167,10 @@
 * **戻り値/レスポンス**: JSX要素。`isLoading`が真の間はローディング表示のみを返す。
 * 根拠: (440, 442行目 / 抜粋: "if (isLoading) return <div className=\"p-10 text-center\">Loading Family Quest...</div>;", "return (\n    <div className=\"min-h-screen bg-gray-900 pb-20 font-sans text-gray-100\">")
 
-* **副作用**: `App`は`useEffect`を1つ定義している（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。確認モーダルの連打防止用に`isConfirming`(state)/`isConfirmingRef`(ref)も保持する（Issue #101、`executeConfirm`の項を参照）。
+* **副作用**: `App`は`useEffect`を1つ定義している（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。確認モーダルの連打防止用に`isConfirming`(state)/`isConfirmingRef`(ref)も保持する（Issue #101、`executeConfirm`の項を参照）。Issue #102で追加された`completedSignal`(state)は、クエスト完了APIが実際に成功した時点でのみ完了音・無限クエストのクールダウンを発火させるため、対象クエストのidと発火のたびに変わるnonceを`QuestList`/`QuestItem`側へ通知する用途で保持する（`runQuestAction`の項を参照）。
 * 根拠: (194〜200行目 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
 * 根拠: `isConfirming`/`isConfirmingRef`の宣言 (163〜168行目 / 抜粋: "// #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。\n  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、\n  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には\n  // 対になるstateを使う。\n  const [isConfirming, setIsConfirming] = useState(false);\n  const isConfirmingRef = useRef(false);")
+* 根拠: `completedSignal`の宣言 (170〜175行目 / 抜粋: "// #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は\n  // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで\n  // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。\n  // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに\n  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。\n  const [completedSignal, setCompletedSignal] = useState<{ id: ID; nonce: number } | null>(null);")
 
 * **エラーハンドリング**: `useGameData`から取得した各更新関数(`completeQuest`等)のレスポンスが`!res.success`の場合、`resolveErrorText`により`res.detail`または`res.reason`に対応するメッセージ（なければ既定文言）を`messageData`にセットし、`cancel`音を鳴らす。
 * 根拠: `runQuestAction`・`executeConfirm`・`handleApprove`・`handleApproveAll`内の分岐 (231〜236, 328〜335, 358〜365, 404〜410行目)
@@ -196,20 +197,21 @@
 
 ### `runQuestAction` (App内の関数)
 
-* **役割**: クエストの完了/取消の実行本体。完了は`ConfirmModal`（`confirmMode === 'complete'`）での確認後に`executeConfirm`から、取消は`QuestList`側の長押し操作をきっかけに`handleQuestClick`からワンタップで呼び出される。`mode`に応じて`completeQuest`または`cancelQuest`を呼び出し、成功時かつ`mode === 'complete'`の場合のみ、`res.status === 'pending'`なら申請完了トースト、`(res.earnedMedals ?? 0) > 0`ならメダル獲得演出（`medal`音＋トースト）を表示する（要件8のバグ修正: 以前フロントが`res.earnedMedals`を参照しておらず無反応だった）。
-* 根拠: (204〜231行目 / 抜粋: "// 完了(confirmMode='complete'の確認後)・取り消し(長押しでワンタップ)の実行本体。\n  // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。\n  const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {")
+* **役割**: クエストの完了/取消の実行本体。完了は`ConfirmModal`（`confirmMode === 'complete'`）での確認後に`executeConfirm`から、取消は`QuestList`側の長押し操作をきっかけに`handleQuestClick`からワンタップで呼び出される。`mode`に応じて`completeQuest`または`cancelQuest`を呼び出し、成功時かつ`mode === 'complete'`の場合、**Issue #102の修正により**、完了APIが実際に成功したこの時点で完了音を再生（`completedQuest.type === 'daily'`または`completedQuest._isInfinite`なら`clear`、それ以外は`submit`）し、対象クエストの`id`（無ければ`quest_id`）と発火のたびに変わる`nonce`(`Date.now()`)を`completedSignal`にセットする。子ども（`role_child`）の完了報告は親の承認待ち（`status: 'pending'`）になるのが常だが、それでも「提出」自体は完了しているため、鳴動・クールダウン対象から`pending`は除外しない（除外すると子どもに対しては常に無音・無クールダウンになり、無限クエストを連打で何度も申請できてしまうため）。以前はこの完了音・クールダウン開始のトリガーが`QuestList`側の`QuestItem`でタップ即時（確認モーダルを開く前）に発火していたため、確認モーダルで「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になる不具合があった。その後、`res.status === 'pending'`なら申請完了トースト、`(res.earnedMedals ?? 0) > 0`ならメダル獲得演出（`medal`音＋トースト）を表示する（要件8のバグ修正: 以前フロントが`res.earnedMedals`を参照しておらず無反応だった）。
+* 根拠: (217〜219行目 / 抜粋: "// 完了(confirmMode='complete'の確認後)・取り消し(長押しでワンタップ)の実行本体。\n  // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。\n  const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {")
+* 根拠: Issue #102のコメントと完了音・`completedSignal`更新 (226〜239行目 / 抜粋: "const completedQuest = target as Quest;\n        // #102: 完了音・無限クエストのクールダウンは、確認モーダルでの「はい」タップ\n        // 時点ではなく、実際に完了APIが成功したこの時点で発火させる(以前はQuestList側で\n        // タップ即時に鳴らしていたため、モーダルを「キャンセル」しても完了音が鳴り、\n        // 無限クエストはクールダウンに入ってしまっていた)。\n        // 子ども(role_child)の完了報告は親の承認待ち(status: 'pending')になるのが常だが、\n        // それでも「提出」自体は完了しているため、鳴らす対象・クールダウン対象から\n        // pending を除外しない(除外すると子どもに対しては常に無音・無クールダウンになり、\n        // 無限クエストを連打で何度も申請できてしまう)。\n        play(completedQuest.type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');\n        const idForSignal = completedQuest.id ?? completedQuest.quest_id;\n        if (idForSignal !== undefined) {\n          setCompletedSignal({ id: idForSignal, nonce: Date.now() });\n        }")
 
 * **引数/リクエスト**: `user: User`, `mode: 'complete' | 'cancel'`, `target: Quest | QuestHistory`
-* 根拠: (206行目)
+* 根拠: (219行目)
 
 * **戻り値/レスポンス**: `Promise<void>`
-* 根拠: `async`関数で明示的な戻り値なし (206行目)
+* 根拠: `async`関数で明示的な戻り値なし (219行目)
 
-* **副作用**: `completeQuest`/`cancelQuest`の呼び出し、`showToast`によるトースト表示、`medal`/`cancel`音の再生、失敗時の`messageData`更新
-* 根拠: (211〜230行目)
+* **副作用**: `completeQuest`/`cancelQuest`の呼び出し、`showToast`によるトースト表示、`clear`/`submit`/`medal`/`cancel`音の再生、`mode === 'complete'`成功時の`completedSignal`更新（Issue #102）、失敗時の`messageData`更新
+* 根拠: (224〜250行目)
 
 * **エラーハンドリング**: `!res.success`の場合、`resolveErrorText(res, "失敗しました")`をエラーメッセージとして`messageData`にセットし（`onRetry`に同じ引数で`runQuestAction`を再実行するコールバックを含む）、`cancel`音を再生する。
-* 根拠: (225〜230行目 / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
+* 根拠: (252〜257行目 / 抜粋: "setMessageData({\n      title: \"エラー\",\n      text: resolveErrorText(res, \"失敗しました\"),\n      onRetry: () => runQuestAction(user, mode, target),\n    });\n    play('cancel');")
 
 ### `handleQuestClick` (App内の関数)
 
@@ -305,8 +307,8 @@
 
 ### `App` のレンダリング分岐（JSX本体）
 
-* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、`Header`（`hideUserSwitcher={layoutMode === 'landscape'}`, `hideLogSwitcher={layoutMode === 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた`QuestList`/`RewardShop`/`InventoryList`、`viewMode === 'familyLog'`なら`FamilyLog`を描画する。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`（画面幅の92%、上限1800px。横画面での左右余白を画面幅に対する一定割合に抑えプレイヤーパネルの表示幅を広げるための修正）、それ以外は`max-w-md md:max-w-5xl`に切り替わる。
-* 根拠: (448〜528行目 / 抜粋: "{viewMode === 'main' && layoutMode === 'landscape' && (\n          <FamilyDashboard", "{viewMode === 'main' && layoutMode === 'portrait' && (", "${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}")
+* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、`Header`（`hideUserSwitcher={layoutMode === 'landscape'}`, `hideLogSwitcher={layoutMode === 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた`QuestList`/`RewardShop`/`InventoryList`、`viewMode === 'familyLog'`なら`FamilyLog`を描画する。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`（画面幅の92%、上限1800px。横画面での左右余白を画面幅に対する一定割合に抑えプレイヤーパネルの表示幅を広げるための修正）、それ以外は`max-w-md md:max-w-5xl`に切り替わる。Issue #102で追加された`completedSignal`（state）は、`FamilyDashboard`（横画面）と`QuestList`（縦画面）の両方のJSX使用箇所に共通のpropとしてそのまま渡される。
+* 根拠: (495, 497〜511, 552〜560行目 / 抜粋: "${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}", "{viewMode === 'main' && layoutMode === 'landscape' && (\n          <FamilyDashboard", "completedSignal={completedSignal}")
 * 根拠: スワイプ操作 (480〜489行目 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
 
 * **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。
@@ -356,7 +358,8 @@ flowchart TD
     QSuccess -- No --> QError["messageData設定(resolveErrorText, onRetryで再実行) & play(cancel)"]
     QSuccess -- Yes --> QMode{"mode === complete ?"}
     QMode -- No --> QEnd["終了(取消完了、演出なし)"]
-    QMode -- Yes --> QPending{"res.status === pending ?"}
+    QMode -- Yes --> QSoundSignal["play(clear/submit) & setCompletedSignal({id, nonce}) (#102: 完了API成功時のみ発火。pendingでも除外しない)"]
+    QSoundSignal --> QPending{"res.status === pending ?"}
     QPending -- Yes --> QPendingMsg["showToast(申請完了)"]
     QPending -- No --> QMedal{"(res.earnedMedals ?? 0) が 0より大きいか"}
     QMedal -- Yes --> QMedalFx["play(medal) & showToast(メダル獲得)"]
@@ -475,6 +478,8 @@ graph TD
 * 根拠: 170〜175行目のコメント、および`showToast`呼び出し箇所全体 (174, 214, 219, 302, 338, 370, 374行目)
 * **クエスト完了の確認ダイアログ復活とワンタップ取消の使い分け**: クエストの完了はかつて要件9によりワンタップ即時実行だったが、実機で子どもが操作する様子を見ると誤操作（意図しないクリア）につながりやすかったため、`ConfirmModal`（`confirmMode === 'complete'`）による確認ダイアログを再び挟むように変更された。取消は`QuestList`側の長押し（`useLongPress`）によってのみ発火するため、引き続き確認なしのワンタップ（`runQuestAction`）のままである。ゴールドを消費する「購入」と親向けの「却下」も引き続き`ConfirmModal`（`confirmMode`が`'purchase'`/`'reject'`）を経由する。
 * 根拠: (53〜54行目 / 抜粋: "// ★実機検証で子どもの誤操作が多かったため、クエスト完了(クリア)には確認ダイアログを復活させた。\n// 取り消しは長押しでのみ発火する(QuestList側のuseLongPress)ため、引き続き確認なしのワンタップとする。")
+* **完了音・無限クエストのクールダウン発火タイミングの修正（Issue #102）**: 以前は`QuestList.tsx`の`QuestItem`が、タップ即時（`ConfirmModal`を開く前）に完了音の再生と（無限クエストの場合の）60秒クールダウンの開始を行っていた。そのため確認モーダルで「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になる不具合があった。修正後は、`runQuestAction`が`completeQuest`の成功レスポンスを受け取った時点で初めて完了音（`clear`/`submit`）を再生し、対象クエストの`id`（無ければ`quest_id`）と発火のたびに変わる`nonce`(`Date.now()`)を`completedSignal`(state)にセットする。`completedSignal`は`FamilyDashboard`（横画面）・`QuestList`（縦画面、直接使用）の両方のJSXへpropとして渡され、`FamilyDashboard`→`FamilyPanel`→`QuestList`→`QuestItem`まで転送されたのち、`QuestItem`側の`useEffect`が`completedSignal.id`と自身のクエストIDの一致・`isInfinite`を条件にクールダウンを開始する（判定ロジック自体は`QuestList.tsx`側の管轄）。子どもの完了報告（`status: 'pending'`）も鳴動・クールダウン対象から除外されない。
+* 根拠: `completedSignal`宣言・更新箇所 (170〜175, 226〜239行目)、JSXへの受け渡し (495, 497〜511, 552〜560行目)
 * **メダル獲得演出のバグ修正（完了・承認・一括承認の3経路）**: 以前はサーバー側で計算されていた`earnedMedals`をフロントが一切参照していなかったため無反応だった。現在は`runQuestAction`内（クエスト完了時、215〜220行目）に加え、`handleApprove`（個別承認、334〜339行目、バグ修正M-6-1）と`handleApproveAll`（一括承認、367〜371行目）でも`(res.earnedMedals ?? 0) > 0`（一括承認は合計値`totalEarnedMedals`）を判定し、`medal`音とトーストを表示する。以前は承認経由のメダル獲得演出が一切反映されていなかった。
 * 根拠: (215〜220行目 / 抜粋: "} else if ((res.earnedMedals ?? 0) > 0) {\n          // ★バグ修正(要件8): サーバーは正しくメダルを付与していたが、以前はフロントが\n          // res.earnedMedals を一切参照しておらず無反応だった。leveledUpと同様に扱う。\n          play('medal');\n          showToast({ title: \"ちいさなメダル獲得！\", ...")
 * 根拠: `handleApprove`のバグ修正コメント (334〜335行目 / 抜粋: "// ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と\n      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。")
