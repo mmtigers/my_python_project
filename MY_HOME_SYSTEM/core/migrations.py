@@ -50,14 +50,33 @@ def _discover_migration_files() -> List[str]:
     return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql"))
 
 
+def _split_statements(sql: str) -> List[str]:
+    """
+    マイグレーションSQLを ';' 区切りのステートメント単位に分割する。
+
+    このリポジトリのマイグレーション規約(migrations/README.md)は「ALTER TABLE ...
+    ADD COLUMN を先頭に、後続はシンプルなUPDATE」という単純な構成のみを前提として
+    いるため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は想定しない
+    単純な ';' 分割で足りる（行コメント `-- ...` はステートメント本体の前に残っても
+    SQLiteのパーサが読み飛ばすため問題ない）。
+    """
+    return [s.strip() for s in sql.split(";") if s.strip()]
+
+
 def apply_pending_migrations(conn: sqlite3.Connection) -> None:
     """
     migrations/ 配下の未適用 *.sql をファイル名昇順で適用する。
 
     各マイグレーションファイルは、既に適用済みの環境（列が既に存在する等）に対して
     再実行されても致命的にならないよう ALTER TABLE を先頭に書くことを想定している。
-    「duplicate column」「already exists」のように「既に別経路（旧来の実行時チェック等）で
-    適用済み」と断定できる既知のエラー文言のみ警告ログを出して適用済み扱いにする。
+    ファイルはステートメント単位(`_split_statements`)で1文ずつ実行する。以前は
+    `conn.executescript()` でスクリプト全体を一度に実行していたため、先頭の
+    ALTER TABLE が「duplicate column」で失敗すると、その時点でスクリプト全体の
+    実行が中断され、後続のデータ移行文(UPDATE等)が1文も実行されないまま
+    マイグレーション全体が適用済み記録されてしまっていた(#99)。ステートメントごとに
+    実行することで、「duplicate column」「already exists」のように「既に別経路
+    （旧来の実行時チェック等）で適用済み」と断定できる既知のエラー文言が出た
+    ステートメントのみを警告ログとともにスキップし、後続の文の実行を継続する。
     それ以外の OperationalError（DBロック・ディスクフル・SQL誤り等）は、原因不明なまま
     「適用済み」と記録してしまうとスキーマドリフトを見逃すため、起動失敗として
     バージョンを記録せず再送出する。
@@ -75,21 +94,22 @@ def apply_pending_migrations(conn: sqlite3.Connection) -> None:
 
         logger.info(f"🔧 Applying migration: {filename}")
         try:
-            conn.executescript(sql)
+            for statement in _split_statements(sql):
+                try:
+                    conn.execute(statement)
+                except sqlite3.OperationalError as e:
+                    message = str(e).lower()
+                    if not any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):
+                        raise
+                    logger.warning(
+                        f"⚠️ Migration '{filename}': statement skipped "
+                        f"(likely already applied via a different path): {e}\n  SQL: {statement}"
+                    )
+
             conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (filename,))
             conn.commit()
             logger.info(f"✅ Migration applied: {filename}")
         except sqlite3.OperationalError as e:
-            message = str(e).lower()
-            if any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):
-                logger.warning(
-                    f"⚠️ Migration '{filename}' could not be fully applied "
-                    f"(likely already applied via a different path): {e}"
-                )
-                conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (filename,))
-                conn.commit()
-                continue
-
             conn.rollback()
             logger.error(f"❌ Migration '{filename}' failed and was not recorded as applied: {e}")
             raise
