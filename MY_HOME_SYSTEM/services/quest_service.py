@@ -786,10 +786,10 @@ class InventoryService:
         with common.get_db_cursor() as cur:
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
-                       rm.title, rm.icon_key as icon, rm.category
+                       rm.title, rm.description as desc, rm.icon_key as icon, rm.category
                 FROM user_inventory ui
                 JOIN reward_master rm ON ui.reward_id = rm.reward_id
-                WHERE ui.user_id = ? AND ui.status IN ('owned', 'pending')
+                WHERE ui.user_id = ? AND ui.status = 'owned'
                 ORDER BY ui.purchased_at DESC
             """
             rows = cur.execute(sql, (user_id,)).fetchall()
