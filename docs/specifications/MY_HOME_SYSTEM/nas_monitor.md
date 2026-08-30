@@ -201,24 +201,24 @@
 
 ### 関数 `sync_fallback_data`
 
-* **役割**: フォールバックディレクトリのデータを`rsync`コマンドを利用してNASへ同期・移動し、空ディレクトリを削除の上、復旧通知を送信する。
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 83〜117 / 抜粋: "def sync_fallback_data(self...")
+* **役割**: フォールバックディレクトリ(`self.fallback_dir`)配下の`assets`サブディレクトリのみを対象に、`rsync`コマンドを利用してNAS側の`self.nas_project_root`配下`assets`(=`NAS_PROJECT_ROOT/assets`。通常のNAS疎通時に`config.ASSETS_DIR`が指すパスと同一)へ同期・移動し、空ディレクトリを削除の上、復旧通知を送信する。`fallback_dir`直下には`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)など、本来ローカル専用でNASに属さない他モニターの状態ファイルも同居しているため、同期対象を`assets`サブディレクトリに明示的に限定し、これらを巻き込んで移動・削除しないようにしている。
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 157〜199 / 抜粋: "def sync_fallback_data(self...")、`fallback_assets_dir = os.path.join(self.fallback_dir, "assets")` (行番号: 165)、`nas_assets_dir = os.path.join(self.nas_project_root, "assets")` (行番号: 170)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 83 / 抜粋: "def sync_fallback_data(self...")
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 157 / 抜粋: "def sync_fallback_data(self...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 83 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 157 / 抜粋: "-> None:")
 
 
-* **副作用**: 外部プロセス(`rsync`コマンド)の実行、元ファイルの削除、外部APIによるプッシュ通知送信。
-* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 99, 104〜108 / 抜粋: "res = subprocess.run(cmd...")
+* **副作用**: 外部プロセス(`rsync`コマンド)の実行、元ファイル(`fallback_dir/assets`配下のみ)の削除、外部APIによるプッシュ通知送信。
+* 根拠: `subprocess.run(cmd, ...)` および `send_push(...)` (行番号: 181, 186〜190 / 抜粋: "res = subprocess.run(cmd...")
 
 
 * **エラーハンドリング**: 同期失敗時(`returncode != 0`)のエラーログ出力。`rsync`が120秒でタイムアウトした場合(`subprocess.TimeoutExpired`)専用のエラーログ出力。および想定外の`Exception`を捕捉してのエラーログ出力。
-* 根拠: `if res.returncode == 0:` の `else:` ブロック (行番号: 112〜113)、`except subprocess.TimeoutExpired:` (行番号: 114〜115)、`except Exception as e:` (行番号: 116〜117)
+* 根拠: `if res.returncode == 0:` の `else:` ブロック (行番号: 194〜195)、`except subprocess.TimeoutExpired:` (行番号: 196〜197)、`except Exception as e:` (行番号: 198〜199)
 
 
 
@@ -462,6 +462,7 @@ flowchart TD
 ## 8. 保守上の注意点
 
 * `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。加えて`timeout=120`が設定されており、NASマウントが応答不能になった場合は`subprocess.TimeoutExpired`として専用のエラーログが出力される。
+* `sync_fallback_data`の同期先は以前`self.mount_point`(=`config.NAS_MOUNT_POINT`直下、例`/mnt/nas/`)を直接指定しており、アプリが実際に読み書きする`NAS_PROJECT_ROOT`(=`NAS_MOUNT_POINT/home_system`)の1階層下に配置されないため退避データが参照されない場所へ移動されてしまい、さらに同期元も`self.fallback_dir`全体だったため`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)などローカル専用の状態ファイルまで巻き込んで移動・削除していた(Issue #162)。修正により、`__init__`で新設された`self.nas_project_root`(=`getattr(config, "NAS_PROJECT_ROOT", ...)`、31〜33行目)配下の`assets`を同期先に、`self.fallback_dir`配下の`assets`サブディレクトリのみを同期元に限定している(165, 170行目)。
 * `_cleanup_empty_dirs`関数内の`os.rmdir`実行時、`OSError`が全て`pass`されており、ディレクトリが空でない以外の予期せぬ権限エラー等も握りつぶされる。
 * `cleanup_old_files`はファイルの`mtime`（更新日時）のみで削除対象を判定するため、意図的にタイムスタンプが古いまま保持したいファイルも保持日数を超えていれば削除対象となる点に注意が必要。
 * `run_retention_cleanup`は`is_report_time`（毎日8時台）にのみ実行されるため、1日1回しか実行機会がない。8時台にスクリプトが実行されなかった場合、その日はクリーンアップがスキップされる。
