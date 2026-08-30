@@ -4,6 +4,7 @@ import { apiClient } from "@/lib/apiClient";
 import { User } from "@/types";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
+import { isSameOriginAvatarPath } from "@/lib/utils";
 
 interface AvatarUploaderProps {
     user: User;
@@ -88,15 +89,20 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
                     className="w-32 h-32 rounded-full border-4 border-slate-600 bg-slate-800 overflow-hidden relative cursor-pointer group shadow-xl"
                     onClick={triggerSelect}
                 >
-                    {preview || user.avatar ? (
+                    {preview || isSameOriginAvatarPath(user.avatar) ? (
                         <img
+                            // ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、
+                            // 未設定時の絵文字デフォルト値('⚔️'等)の場合がある。preview(選択直後の
+                            // data:URLプレビュー)以外は、isSameOriginAvatarPathでパス形式かどうかを
+                            // 判定してから<img src>に渡さないと、絵文字を渡した際に壊れた画像アイコンに
+                            // なってしまう(UserStatusCard.tsx/Header.tsxと同じ判定に合わせる)。
                             src={preview || user.avatar}
                             alt="Avatar"
                             className="w-full h-full object-cover transition-opacity group-hover:opacity-50"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-4xl group-hover:opacity-50">
-                            {user.icon || '👤'}
+                            {user.avatar || user.icon || '👤'}
                         </div>
                     )}
 
