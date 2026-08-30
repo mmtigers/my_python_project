@@ -301,14 +301,22 @@ def init_db() -> None:
         ''')
 
         # Weather
+        # current_schema.sql（実運用スキーマ）に合わせたカラム構成。
+        # services/analysis_service.py の load_weather_history/load_yearly_temperature_stats が
+        # SELECTするlocation/umbrella_level列が以前は定義されておらず、新規DB(init_db)では
+        # OperationalErrorが握りつぶされて天気関連の表示が無言で空になっていた(Issue #114)。
         cur.execute('''
             CREATE TABLE IF NOT EXISTS weather_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT UNIQUE,
+                date TEXT NOT NULL,
+                location TEXT DEFAULT '伊丹',
                 min_temp REAL,
                 max_temp REAL,
                 weather_desc TEXT,
-                recorded_at TEXT
+                max_pop INTEGER,
+                umbrella_level TEXT,
+                recorded_at TEXT,
+                UNIQUE(date, location)
             )
         ''')
         
