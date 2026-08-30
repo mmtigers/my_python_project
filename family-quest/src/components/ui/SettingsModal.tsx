@@ -5,6 +5,7 @@ import { useSettings } from '@/context/useSettings';
 import { THEME_COLORS } from '@/context/settingsShared';
 import { User } from '@/types';
 import { LayoutGrid, Rows3 } from 'lucide-react';
+import { isSameOriginAvatarPath } from '@/lib/utils';
 
 interface Props {
     isOpen: boolean;
@@ -61,7 +62,16 @@ const SettingsModal: React.FC<Props> = ({ isOpen, onClose, users }) => {
                                         onChange={() => toggleIconFirstUser(user.user_id)}
                                         className="w-5 h-5 accent-yellow-500"
                                     />
-                                    <span className="text-xl">{user.icon || '🙂'}</span>
+                                    {/* ★バグ修正: バックエンド(quest_users)にicon列は存在せずavatar列のみのため、
+                                        user.iconは常にundefinedで全ユーザーが'🙂'固定表示になっていた。
+                                        user.avatarを参照するよう修正(絵文字デフォルト値または、写真アップロード済み
+                                        なら/uploads/...のパスなので、AvatarUploader.tsx等と同じisSameOriginAvatarPath
+                                        判定でパス形式なら<img>、それ以外は絵文字テキストとして表示する) */}
+                                    {isSameOriginAvatarPath(user.avatar) ? (
+                                        <img src={user.avatar} alt={user.name} className="w-6 h-6 rounded-full object-cover flex-shrink-0" />
+                                    ) : (
+                                        <span className="text-xl">{user.avatar || '🙂'}</span>
+                                    )}
                                     <span className="text-white font-bold text-sm">{user.name}</span>
                                 </label>
                             );
