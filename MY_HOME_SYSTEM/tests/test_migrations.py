@@ -22,6 +22,7 @@ def _make_minimal_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE reward_master (reward_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE quest_history (id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER);
         CREATE TABLE device_records (id INTEGER PRIMARY KEY, device_id TEXT);
+        CREATE TABLE weather_history (id INTEGER PRIMARY KEY, date TEXT UNIQUE, min_temp REAL, max_temp REAL, weather_desc TEXT, recorded_at TEXT);
     """)
     conn.commit()
 
@@ -47,6 +48,11 @@ def test_apply_pending_migrations_adds_expected_columns():
         cols = [row[1] for row in conn.execute("PRAGMA table_info(quest_history)").fetchall()]
         assert "linked_history_id" in cols
 
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(weather_history)").fetchall()]
+        assert "location" in cols
+        assert "max_pop" in cols
+        assert "umbrella_level" in cols
+
         role = conn.execute("SELECT role FROM quest_users WHERE user_id='dad'").fetchone()[0]
         assert role == "role_adult"
 
@@ -55,6 +61,7 @@ def test_apply_pending_migrations_adds_expected_columns():
         assert "0002_add_quest_master_reset_period.sql" in applied
         assert "0003_add_reward_master_description.sql" in applied
         assert "0004_add_coop_quest_link.sql" in applied
+        assert "0007_add_weather_history_location_columns.sql" in applied
     finally:
         conn.close()
 
