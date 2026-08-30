@@ -4,6 +4,7 @@ import random
 import math
 import threading
 import pytz
+from contextlib import ExitStack
 from typing import List, Dict, Any, Optional, Tuple
 
 from fastapi import HTTPException
@@ -75,6 +76,20 @@ def _get_user_balance_lock(user_id: str) -> threading.Lock:
             lock = threading.Lock()
             _user_balance_locks[user_id] = lock
         return lock
+
+
+def _acquire_user_balance_locks(user_ids) -> ExitStack:
+    # 兄妹連携クエストの承認/取消は、報告者だけでなく相方の quest_users
+    # (gold/exp/level)も同一トランザクションで書き換える(Issue #98)。報告者の
+    # ロックしか取得しないと、相方を対象とする別の承認/取消と並行実行された
+    # 場合に相方側でlost updateが起こりうるため、関係する全ユーザーのロックを
+    # まとめて取得する。複数ユーザーを同時にロックする際は、常に同じ順序
+    # (user_idの昇順)で取得することで、対向のカスケード処理同士が互いの
+    # ロックを取り合うデッドロックを防ぐ。
+    stack = ExitStack()
+    for uid in sorted(set(user_ids)):
+        stack.enter_context(_get_user_balance_lock(uid))
+    return stack
 
 
 # ==========================================
@@ -370,15 +385,26 @@ class QuestService:
 
     def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
         # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
-        # 先に特定してから、そのユーザー単位でロックを取得する。
+        # 先に特定してから、そのユーザー単位でロックを取得する。兄妹連携クエスト
+        # (linked_history_id あり)の場合は、承認時に相方の quest_users も
+        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。
         with common.get_db_cursor() as cur:
             hist_peek = cur.execute(
-                "SELECT user_id FROM quest_history WHERE id = ?", (history_id,)
+                "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()
         if not hist_peek:
             raise HTTPException(status_code=404, detail="History not found")
 
-        with _get_user_balance_lock(hist_peek['user_id']):
+        lock_user_ids = [hist_peek['user_id']]
+        if hist_peek['linked_history_id'] is not None:
+            with common.get_db_cursor() as cur:
+                linked_peek = cur.execute(
+                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
+                ).fetchone()
+            if linked_peek:
+                lock_user_ids.append(linked_peek['user_id'])
+
+        with _acquire_user_balance_locks(lock_user_ids):
             return self._process_approve_quest_locked(approver_id, history_id)
 
     def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:
@@ -535,7 +561,24 @@ class QuestService:
         }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
-        with _get_user_balance_lock(user_id):
+        # 兄妹連携クエスト(linked_history_id あり)の場合は、取消時に相方の
+        # quest_users もカスケードしてロールバックするため、相方のユーザーIDも
+        # 合わせてロックする(#98)。history_id が不正/他人の履歴の場合の404/403は
+        # 従来どおり _process_cancel_quest_locked 側で検出される。
+        lock_user_ids = [user_id]
+        with common.get_db_cursor() as cur:
+            hist_peek = cur.execute(
+                "SELECT linked_history_id FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+        if hist_peek and hist_peek['linked_history_id'] is not None:
+            with common.get_db_cursor() as cur:
+                linked_peek = cur.execute(
+                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
+                ).fetchone()
+            if linked_peek:
+                lock_user_ids.append(linked_peek['user_id'])
+
+        with _acquire_user_balance_locks(lock_user_ids):
             return self._process_cancel_quest_locked(user_id, history_id)
 
     def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:
