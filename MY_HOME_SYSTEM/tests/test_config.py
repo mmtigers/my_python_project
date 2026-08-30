@@ -100,6 +100,28 @@ class TestAllowAllOrigins:
             assert cfg.CORS_ORIGINS != ["*"]
 
 
+class TestFrontendUrlOriginInCorsOrigins:
+    """Issue #112回帰防止: ブラウザのOriginヘッダーはscheme://host[:port]のみで
+    パスを含まないため(Starlette CORSMiddlewareは完全一致比較)、パス付きの
+    FRONTEND_URLをそのままCORS_ORIGINSに入れると永久に一致しない死にエントリに
+    なっていた。"""
+
+    def test_frontend_url_with_path_is_stripped_to_origin_only(self):
+        with _with_env(FRONTEND_URL="http://192.168.1.200:8000/quest", ALLOW_ALL_ORIGINS=None) as cfg:
+            assert "http://192.168.1.200:8000/quest" not in cfg.CORS_ORIGINS
+            assert "http://192.168.1.200:8000" in cfg.CORS_ORIGINS
+
+    def test_frontend_url_attribute_itself_keeps_its_path(self):
+        """FRONTEND_URL自体はpost_boot_health_check.py等が実際にHTTPリクエストを
+        送る完全なURLとして使われるため、パスを保持したままであること。"""
+        with _with_env(FRONTEND_URL="http://192.168.1.200:8000/quest", ALLOW_ALL_ORIGINS=None) as cfg:
+            assert cfg.FRONTEND_URL == "http://192.168.1.200:8000/quest"
+
+    def test_frontend_url_without_path_is_unaffected(self):
+        with _with_env(FRONTEND_URL="https://example.com", ALLOW_ALL_ORIGINS=None) as cfg:
+            assert "https://example.com" in cfg.CORS_ORIGINS
+
+
 class TestChildrenNamesParsing:
     def test_empty_string_produces_empty_list_not_list_with_empty_string(self):
         """''.split(',') は [''] になってしまうため、空文字を明示的にハンドリングしているか"""
