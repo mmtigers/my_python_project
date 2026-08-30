@@ -617,6 +617,17 @@ class ShopService:
             if not reward: raise HTTPException(status_code=404, detail="Reward not found")
             if not user: raise HTTPException(status_code=404, detail="User not found")
 
+            target = reward['target'] or 'all'
+            if target != 'all':
+                is_adult = user['role'] == ROLE_ADULT
+                allowed = (
+                    (target == 'children' and not is_adult) or
+                    (target == 'adults' and is_adult) or
+                    (target == user_id)
+                )
+                if not allowed:
+                    raise HTTPException(status_code=403, detail="This reward is not available for you")
+
             # 残高チェックと減算を単一のアトミックなUPDATEにすることで、
             # 同時多重リクエストによる read-then-write のレースコンディション
             # (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。
@@ -824,15 +835,16 @@ class GameSystem:
             
             for r in valid_rewards:
                 cur.execute("""
-                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(reward_id) DO UPDATE SET
-                        title = excluded.title, 
+                        title = excluded.title,
                         category = excluded.category,
-                        cost_gold = excluded.cost_gold, 
+                        cost_gold = excluded.cost_gold,
                         icon_key = excluded.icon_key,
-                        description = excluded.description
-                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc))
+                        description = excluded.description,
+                        target = excluded.target
+                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc, r.target))
 
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
