@@ -98,6 +98,45 @@ def test_apply_pending_migrations_tolerates_column_already_added_elsewhere():
         conn.close()
 
 
+def test_apply_pending_migrations_still_runs_data_migration_after_duplicate_column(tmp_path):
+    """
+    #99: ALTER TABLE ADD COLUMN が「既に別経路で列だけ追加済み」により
+    duplicate column で失敗しても、同一マイグレーションファイル内の後続の
+    データ移行文(UPDATE)は実行され、そのバージョンが適用済み記録されること。
+
+    以前は conn.executescript() でスクリプト全体を一度に実行していたため、
+    ALTER TABLE の失敗でスクリプト全体の実行が即座に中断され、後続のUPDATE文が
+    1文も実行されないまま「適用済み」と記録され、恒久的にデータ移行が
+    行われなくなっていた。
+    """
+    migrations_dir = tmp_path / "migrations"
+    migrations_dir.mkdir()
+    (migrations_dir / "0001_add_role.sql").write_text(
+        "ALTER TABLE quest_users ADD COLUMN role TEXT;\n"
+        "UPDATE quest_users SET role = 'role_adult' WHERE user_id = 'dad';\n"
+    )
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        conn.execute("CREATE TABLE quest_users (user_id TEXT PRIMARY KEY, name TEXT)")
+        conn.execute("INSERT INTO quest_users (user_id, name) VALUES ('dad', 'Dad')")
+        # 別経路(旧来の実行時ALTER等)で role カラムだけ先に追加済みの状態を再現
+        conn.execute("ALTER TABLE quest_users ADD COLUMN role TEXT")
+        conn.commit()
+
+        with patch("core.migrations.MIGRATIONS_DIR", str(migrations_dir)):
+            apply_pending_migrations(conn)
+
+        # ALTERはduplicate columnで失敗するが、後続のUPDATEは実行されていること
+        role = conn.execute("SELECT role FROM quest_users WHERE user_id='dad'").fetchone()[0]
+        assert role == "role_adult"
+
+        applied = {row[0] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
+        assert "0001_add_role.sql" in applied
+    finally:
+        conn.close()
+
+
 def test_apply_pending_migrations_reraises_and_does_not_record_unknown_errors(tmp_path):
     """
     M-2: "duplicate column"/"already exists" のような既知の「適用済み」パターン以外の
