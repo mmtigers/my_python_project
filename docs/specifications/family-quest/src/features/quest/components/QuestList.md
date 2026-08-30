@@ -33,10 +33,10 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `React`, `useMemo`, `useState` | モジュール | Reactの基本機能およびフック | `import React, { useMemo, useState } from 'react';` (行番号: 1) |
+| `React`, `useEffect`, `useMemo`, `useState` | モジュール | Reactの基本機能およびフック。`useEffect`はIssue #102で、`QuestItem`が`completedSignal`propの変化を監視し無限クエストのクールダウンを開始するために追加された。 | `import React, { useEffect, useMemo, useState } from 'react';` (行番号: 1) |
 | `Undo2`, `Clock`, `TrendingUp`, `Lock`, `ChevronDown`, `ChevronUp` | モジュール | アイコンの描画（取消、申請中、ボーナス上昇、ロック、折りたたみ開閉） | `import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';` (行番号: 2) |
 | `motion`, `AnimatePresence` | モジュール | アニメーションの制御 | `import { motion, AnimatePresence } from 'framer-motion';` (行番号: 3) |
-| `User`, `Quest`, `QuestHistory` | 型 | コンポーネントのPropsおよび内部変数の型定義 | `import { User, Quest, QuestHistory } from '@/types';` (行番号: 4) |
+| `ID`, `User`, `Quest`, `QuestHistory` | 型 | コンポーネントのPropsおよび内部変数の型定義。`ID`はIssue #102で追加された`completedSignal`プロパティ（`{ id: ID; nonce: number } \| null`）の型に使う。 | `import { ID, User, Quest, QuestHistory } from '@/types';` (行番号: 4) |
 | `Card` | コンポーネント | UIのカード型コンテナとして使用 | `import { Card } from '@/components/ui/Card';` (行番号: 5) |
 | `CooldownRing` | コンポーネント | 無限クエストのクールダウン中に残り時間を円形プログレスで表示 | `import { CooldownRing } from '@/components/ui/CooldownRing';` (行番号: 6) |
 | `useQuestStatus`, `getQuestLockState` | カスタムフック / 関数 | クエストの状態（完了、申請中、ロック済みなど）の取得。`getQuestLockState`はソート用コンパレータや`activeQuests`/`doneOrLockedQuests`振り分けからHooksを使わずに同じ判定ロジックを呼び出すための素関数。 | `import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';` (行番号: 7) |
@@ -47,7 +47,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `@/types` の各型 (`User`, `Quest`, `QuestHistory`) | プロパティの完全な構造が本ファイル内では定義されていないため | `import { User, Quest, QuestHistory } from '@/types';` (行番号: 4) |
+| `@/types` の各型 (`ID`, `User`, `Quest`, `QuestHistory`) | プロパティの完全な構造が本ファイル内では定義されていないため | `import { ID, User, Quest, QuestHistory } from '@/types';` (行番号: 4) |
 | `Card` コンポーネント | 内部の描画ロジックや `variant` などのPropsの仕様が不明なため | `import { Card } from '@/components/ui/Card';` (行番号: 5) |
 | `CooldownRing` コンポーネント | `durationMs`/`size` 以外に受け取るPropsや内部の描画方式が不明なため | `import { CooldownRing } from '@/components/ui/CooldownRing';` (行番号: 6) |
 | `useQuestStatus`, `getQuestLockState` | 内部の判定ロジック（`isDone`, `isLocked`, `variant` などの算出方法）が不明なため | `import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';` (行番号: 7) |
@@ -58,58 +58,60 @@
 
 ### `QuestListProps` / `BadgeCandidate` / `QuestItem`のprops型
 
-* **役割**: `QuestList`が受け取るProps型定義(`QuestListProps`)。`panelMode`（パネル内固定レイアウト用）と`iconFirst`（アイコン主体・非識字年齢向け表示用）がオプショナルで含まれる。`BadgeCandidate`はバッジ表示の優先度付け（`key`, `priority`, `node`）に使う内部型。`QuestItem`側にも`panelMode?: boolean`, `iconFirst?: boolean`を含むprops型が個別に定義され、`QuestList`から素通しで渡される。
-* 根拠: `interface QuestListProps {` (行番号: 11〜24 / 抜粋: "panelMode?: boolean;", "iconFirst?: boolean;")
-* 根拠: `BadgeCandidate` (行番号: 26〜32 / 抜粋: "interface BadgeCandidate {\n    key: string;\n    priority: number;\n    node: React.ReactNode;\n}")
-* 根拠: `QuestItem`のprops型 (行番号: 37〜45 / 抜粋: "panelMode?: boolean;\n    iconFirst?: boolean;\n}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, panelMode, iconFirst }) => {")
+* **役割**: `QuestList`が受け取るProps型定義(`QuestListProps`)。`panelMode`（パネル内固定レイアウト用）と`iconFirst`（アイコン主体・非識字年齢向け表示用）に加え、Issue #102で`completedSignal: { id: ID; nonce: number } | null`が追加された（完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるため、`App`側から通知される）。`BadgeCandidate`はバッジ表示の優先度付け（`key`, `priority`, `node`）に使う内部型。`QuestItem`側にも同じ`completedSignal`を含む、`panelMode?: boolean`, `iconFirst?: boolean`を含むprops型が個別に定義され、`QuestList`から素通しで渡される。
+* 根拠: `interface QuestListProps {` (行番号: 11〜27 / 抜粋: "onQuestClick: (quest: Quest) => void;\n    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの\n    // クールダウンを発火させるための通知(App側で管理)。\n    completedSignal: { id: ID; nonce: number } | null;")
+* 根拠: `BadgeCandidate` (行番号: 31〜35 / 抜粋: "interface BadgeCandidate {\n    key: string;\n    priority: number;\n    node: React.ReactNode;\n}")
+* 根拠: `QuestItem`のprops型 (行番号: 40〜49 / 抜粋: "completedSignal: { id: ID; nonce: number } | null;\n    panelMode?: boolean;\n    iconFirst?: boolean;\n}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {")
 
 ### `MAX_VISIBLE_BADGES` (モジュールレベル定数)
 
 * **役割**: バッジ（ロック・共有対応済み・申請中・期間限定・時間限定）を優先度順に並べたときに、同時表示する上限件数（2件）を定義する。上位2件を超える分は「+N」表示にまとめられる。
-* 根拠: (行番号: 26〜34 / 抜粋: "// バッジは種類が多く同時に出すと読みづらいため、優先度順に並べて\n// 上位2件だけを表示する。優先度が低いものは「+N」でまとめて示す。\ninterface BadgeCandidate {...}\nconst MAX_VISIBLE_BADGES = 2;")
+* 根拠: (行番号: 29〜37 / 抜粋: "// バッジは種類が多く同時に出すと読みづらいため、優先度順に並べて\n// 上位2件だけを表示する。優先度が低いものは「+N」でまとめて示す。\ninterface BadgeCandidate {...}\nconst MAX_VISIBLE_BADGES = 2;")
 
 ### `QuestItem`
 
-* **役割**: 個別のクエストカードを描画し、状態に応じたバッジ表示（優先度順に上位`MAX_VISIBLE_BADGES`件＋「+N」）やクリック時の音声再生、コールバック実行を担う。`panelMode`が真のときはビューポート幅基準の`md:`拡大・2カラム化に乗らず、常に「狭い列でも崩れず、かつタップしやすい」固定サイズのクラス群（`cardSizeClasses`等、8種類）を使う。`iconFirst`が真のときはアイコンサイズを拡大しつつ説明文（`quest.desc`/`quest.description`）を非表示にする。共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`が自分以外）は`isEffectivelyLocked`として扱われクリック不可になる。完了済み/申請中の取消は`useLongPress`による長押しでのみ発火し、通常タップは新規完了（`handleTapComplete`）にのみ作用する。無限クエストの完了操作後は`isCooldown`ステートで60秒間クールダウンし、`CooldownRing`をオーバーレイ表示する。
-* 根拠: `const QuestItem: React.FC` (行番号: 37〜283 / 抜粋: "const QuestItem: React.FC<{")
-* 根拠: パネルモード時のクラス切り替え (行番号: 108〜115 / 抜粋: "// パネルモードでは viewport幅基準の md: 拡大/2カラム化には乗らず、\n    // 常に「狭い列でも崩れず、かつタップしやすい(44px以上)」固定サイズを使う。\n    const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
-* 根拠: 説明文の非表示条件 (行番号: 235〜240 / 抜粋: "{/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}\n                        {!iconFirst && (quest.desc || quest.description) && (")
-* 根拠: `isEffectivelyLocked`と長押し取消 (行番号: 65〜73行目 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;\n\n    // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;")
-* 根拠: クールダウン処理 (行番号: 82〜85行目 / 抜粋: "if (isInfinite) {\n            setIsCooldown(true);\n            setTimeout(() => setIsCooldown(false), COOLDOWN_MS);\n        }")
+* **役割**: 個別のクエストカードを描画し、状態に応じたバッジ表示（優先度順に上位`MAX_VISIBLE_BADGES`件＋「+N」）やタップ/長押し操作に応じたコールバック実行を担う。`panelMode`が真のときはビューポート幅基準の`md:`拡大・2カラム化に乗らず、常に「狭い列でも崩れず、かつタップしやすい」固定サイズのクラス群（`cardSizeClasses`等、8種類）を使う。`iconFirst`が真のときはアイコンサイズを拡大しつつ説明文（`quest.desc`/`quest.description`）を非表示にする。共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`が自分以外）は`isEffectivelyLocked`として扱われクリック不可になる。完了済み/申請中の取消は`useLongPress`による長押しでのみ発火し、通常タップは新規完了（`handleTapComplete`）にのみ作用する。**Issue #102の修正**: 無限クエストのクールダウン（60秒、`isCooldown`ステート）は、以前はタップ直後（確認モーダルを開く前）に`runComplete`内で完了音の再生とともに開始しており、確認モーダルで「キャンセル」しても音が鳴りクールダウンに入ってしまう不具合があった。修正後は、`App`側から渡される`completedSignal`（完了APIが実際に成功した時点でのみ`{ id, nonce }`がセットされる）を監視する`useEffect`でのみ、`isInfinite`かつ`completedSignal.id === questId`（`questId = quest.id ?? quest.quest_id`）のときに限りクールダウンを開始するようになった。`runComplete`自体は現在、`isCooldown`/`isEffectivelyLocked`のガード判定と`onClick`（確認モーダルを開く）呼び出しのみを行い、音声再生は行わない。完了音の再生（`clear`/`submit`）も同じ理由で`App.tsx`の`runQuestAction`側に移動しており、本コンポーネントの`useSound().play()`は取消時（`runCancel`）の`'cancel'`音のみに使われる。
+* 根拠: `const QuestItem: React.FC` (行番号: 40〜294 / 抜粋: "const QuestItem: React.FC<{")
+* 根拠: パネルモード時のクラス切り替え (行番号: 123〜124 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
+* 根拠: 説明文の非表示条件 (行番号: 246〜251 / 抜粋: "{/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}\n                        {!iconFirst && (quest.desc || quest.description) && (")
+* 根拠: `isEffectivelyLocked`と長押し取消 (行番号: 85〜89行目 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;\n\n    // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;")
+* 根拠: Issue #102コメントと`completedSignal`監視の`useEffect` (行番号: 60〜70行目 / 抜粋: "const questId = quest.id ?? quest.quest_id;\n    useEffect(() => {\n        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;\n        setIsCooldown(true);\n        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);\n        return () => clearTimeout(timer);\n    }, [completedSignal, isInfinite, questId]);")
+* 根拠: 修正後の`runComplete` (行番号: 91〜96行目 / 抜粋: "const runComplete = () => {\n        // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。\n        // ここではあくまで確認モーダルを開く(onClick)のみを行う。\n        if (isCooldown || isEffectivelyLocked) return;\n        onClick({ ...quest, _isInfinite: !!isInfinite });\n    };")
 
-* **引数/リクエスト**: オブジェクト `{ quest, completedQuests, pendingQuests, currentUser, onClick, panelMode, iconFirst }`
-* 根拠: Propsの型定義 (行番号: 37〜45 / 抜粋: "quest: Quest;\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    currentUser: User;\n    onClick: (q: Quest) => void;\n    panelMode?: boolean;\n    iconFirst?: boolean;")
+* **引数/リクエスト**: オブジェクト `{ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }`
+* 根拠: Propsの型定義 (行番号: 40〜49 / 抜粋: "quest: Quest;\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    currentUser: User;\n    onClick: (q: Quest) => void;\n    completedSignal: { id: ID; nonce: number } | null;\n    panelMode?: boolean;\n    iconFirst?: boolean;")
 
 * **戻り値/レスポンス**: ReactElement（JSX）
-* 根拠: `return` 文 (行番号: 170〜282 / 抜粋: "return (\n        <div className=\"relative h-full group\">")
+* 根拠: `return` 文 (行番号: 181〜293 / 抜粋: "return (\n        <div className=\"relative h-full group\">")
 
 * **副作用**:
-  * `useSound().play()` による音声再生（`quest.type === 'daily'`または`isInfinite`の場合は`'clear'`、それ以外は`'submit'`。取消時は`'cancel'`）
-  * 根拠: `play('clear');`, `play('submit');`, `play('cancel');` (行番号: 78, 80, 91 / 抜粋: "if (quest.type === 'daily' || isInfinite) {\n            play('clear');\n        } else {\n            play('submit');\n        }")
-  * `isInfinite`の場合、`setIsCooldown(true)`後に`setTimeout`でローカルステート (`isCooldown`) を`COOLDOWN_MS`（60000ms）後に`false`へ戻す
-  * 根拠: (行番号: 82〜85 / 抜粋: "if (isInfinite) {\n            setIsCooldown(true);\n            setTimeout(() => setIsCooldown(false), COOLDOWN_MS);\n        }")
-  * `onClick`コールバックを、対象クエストに`_isInfinite`プロパティを動的付与したオブジェクトとともに呼び出す
-  * 根拠: (行番号: 86, 92 / 抜粋: "onClick({ ...quest, _isInfinite: !!isInfinite });")
+  * `useEffect`により、`isInfinite`かつ`completedSignal?.id === questId`（`questId = quest.id ?? quest.quest_id`）のときのみ`setIsCooldown(true)`後、`COOLDOWN_MS`（60000ms）後の`setTimeout`で`isCooldown`を`false`に戻す（クリーンアップ関数で`clearTimeout`）。Issue #102で新規追加。
+  * 根拠: (行番号: 64〜70行目 / 抜粋: "const questId = quest.id ?? quest.quest_id;\n    useEffect(() => {\n        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;\n        setIsCooldown(true);\n        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);\n        return () => clearTimeout(timer);\n    }, [completedSignal, isInfinite, questId]);")
+  * `useSound().play('cancel')`による取消時の音声再生（`runCancel`内）。完了時の音声再生（`clear`/`submit`）はIssue #102の修正で`App.tsx`側（`runQuestAction`）に移動しており、本コンポーネントは行わなくなった。
+  * 根拠: `play('cancel');` (行番号: 100行目 / 抜粋: "play('cancel');")
+  * `onClick`コールバックを、対象クエストに`_isInfinite`プロパティを動的付与したオブジェクトとともに呼び出す（`runComplete`は確認モーダルを開くため、`runCancel`は取消実行のため）
+  * 根拠: (行番号: 95, 101 / 抜粋: "onClick({ ...quest, _isInfinite: !!isInfinite });")
 
 * **エラーハンドリング**: なし。`runComplete`は`isCooldown`または`isEffectivelyLocked`の場合、`runCancel`は`isEffectivelyLocked`の場合にそれぞれ冒頭で処理を中断する。`handleTapComplete`は`canCancel`（長押し対象）または`isCooldown`の場合はタップでは何もしない。
-* 根拠: (行番号: 76, 90, 104行目 / 抜粋: "if (isCooldown || isEffectivelyLocked) return;", "if (isEffectivelyLocked) return;", "if (canCancel || isCooldown) return; // 長押し対象/クールダウン中はタップでは何もしない")
+* 根拠: (行番号: 94, 99, 113行目 / 抜粋: "if (isCooldown || isEffectivelyLocked) return;", "if (isEffectivelyLocked) return;", "if (canCancel || isCooldown) return; // 長押し対象/クールダウン中はタップでは何もしない")
 
 ### `QuestList`
 
-* **役割**: 受け取ったクエスト一覧を（ターゲット、曜日で）フィルタリングし、`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。
-* 根拠: `export default function QuestList` (行番号: 285〜434 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {")
-* 根拠: `activeQuests`/`doneOrLockedQuests`への振り分け (行番号: 344〜358 / 抜粋: "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。\n    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。\n    const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
-* 根拠: `listContainerClass`/`headerClass`の分岐 (行番号: 360〜365 / 抜粋: "const listContainerClass = panelMode\n        ? 'space-y-2 animate-in fade-in duration-300'\n        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 ...';")
-* 根拠: 折りたたみボタン (行番号: 415〜423 / 抜粋: "<button\n                        onClick={() => setShowDoneAndLocked(v => !v)}\n                        className=\"w-full min-h-[44px] flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-black/20 hover:bg-black/30 rounded-lg py-2 transition-colors\"\n                    >")
+* **役割**: 受け取ったクエスト一覧を（ターゲット、曜日で）フィルタリングし、`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。Issue #102で追加された`completedSignal`はここでは判定に一切関与せず、各`QuestItem`へそのまま素通しするのみである。
+* 根拠: `export default function QuestList` (行番号: 296〜446 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {")
+* 根拠: `activeQuests`/`doneOrLockedQuests`への振り分け (行番号: 355〜369 / 抜粋: "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。\n    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。\n    const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
+* 根拠: `listContainerClass`/`headerClass`の分岐 (行番号: 371〜376 / 抜粋: "const listContainerClass = panelMode\n        ? 'space-y-2 animate-in fade-in duration-300'\n        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 ...';")
+* 根拠: 折りたたみボタン (行番号: 429〜435 / 抜粋: "<button\n                        onClick={() => setShowDoneAndLocked(v => !v)}\n                        className=\"w-full min-h-[44px] flex items-center justify-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 bg-black/20 hover:bg-black/30 rounded-lg py-2 transition-colors\"\n                    >")
+* 根拠: `QuestItem`への`completedSignal`転送 (行番号: 396 / 抜粋: "completedSignal={completedSignal}")
 
-* **引数/リクエスト**: `QuestListProps` (`{ quests: Quest[], completedQuests: QuestHistory[], pendingQuests: QuestHistory[], currentUser: User, onQuestClick: (quest: Quest) => void, panelMode?: boolean, iconFirst?: boolean }`)
-* 根拠: インターフェース定義および引数 (行番号: 11〜24, 285 / 抜粋: "interface QuestListProps {")
+* **引数/リクエスト**: `QuestListProps` (`{ quests: Quest[], completedQuests: QuestHistory[], pendingQuests: QuestHistory[], currentUser: User, onQuestClick: (quest: Quest) => void, completedSignal: { id: ID; nonce: number } | null, panelMode?: boolean, iconFirst?: boolean }`)
+* 根拠: インターフェース定義および引数 (行番号: 11〜27, 296 / 抜粋: "interface QuestListProps {")
 
 * **戻り値/レスポンス**: ReactElement（JSX）
-* 根拠: `return` 文 (行番号: 393〜433 / 抜粋: "return (\n        <div className={listContainerClass}>")
+* 根拠: `return` 文 (行番号: 405〜445 / 抜粋: "return (\n        <div className={listContainerClass}>")
 
 * **副作用**: なし（`useMemo`によるフィルタ・ソート・振り分け結果のメモ化と、`useState`による`showDoneAndLocked`（折りたたみ開閉）の管理のみで、外部API呼び出しやDOM直接操作は存在しない）
-* 根拠: `useMemo` ブロック (行番号: 290〜342, 346〜358 / 抜粋: "const sortedQuests = useMemo(() => {", "const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
+* 根拠: `useMemo` ブロック (行番号: 301〜353, 357〜369 / 抜粋: "const sortedQuests = useMemo(() => {", "const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
 
 * **エラーハンドリング**: なし
 * 根拠: 関数内に `try-catch` ブロック等が存在しない。
@@ -145,21 +147,20 @@ flowchart TD
     ToggleState -- No --> MapItem
     RenderDoneLocked --> MapItem["QuestItem Render (panelMode/iconFirstに応じたクラス選択)"]
 
-    subgraph "QuestItem のタップ完了処理 (runComplete/handleTapComplete)"
+    subgraph "QuestItem のタップ完了処理 (runComplete/handleTapComplete, Issue #102で音・クールダウン開始を分離)"
         C_Start{"canCancel === true または isCooldown === true?"}
         C_Start -- Yes --> C_NoOp["タップでは何もしない"]
         C_Start -- No --> C_Run["runComplete() 実行"]
         C_Run --> C_Lock{"isCooldown または isEffectivelyLocked?"}
         C_Lock -- Yes --> C_End["処理中断(return)"]
-        C_Lock -- No --> C_Sound{"quest.type === 'daily' または isInfinite?"}
-        C_Sound -- Yes --> S1["外部：play('clear')"]
-        C_Sound -- No --> S2["外部：play('submit')"]
-        S1 --> C_Infinite{"isInfinite?"}
-        S2 --> C_Infinite
-        C_Infinite -- Yes --> Cooldown["setIsCooldown(true) / setTimeout(60秒)"]
-        C_Infinite -- No --> C_Callback
-        Cooldown --> C_Callback
-        C_Callback["onClick({...quest, _isInfinite}) コールバック実行"] --> C_End
+        C_Lock -- No --> C_Callback["onClick({...quest, _isInfinite}) 呼び出し(確認モーダルを開くのみ。音は鳴らさない)"]
+        C_Callback --> C_End
+    end
+
+    subgraph "完了音・クールダウン開始 (App.runQuestAction成功後のcompletedSignal → QuestItemのuseEffect, Issue #102)"
+        E_External["外部(App.tsx runQuestAction): 完了API成功後にplay('clear'/'submit')実行 & completedSignal({id, nonce})を更新"] --> E_Effect{"isInfinite かつ completedSignal.id === questId (=quest.id ?? quest.quest_id) ?"}
+        E_Effect -- Yes --> E_Cooldown["setIsCooldown(true) / setTimeout(60秒)でfalseへ(クリーンアップでclearTimeout)"]
+        E_Effect -- No --> E_NoOp["何もしない"]
     end
 
     subgraph "QuestItem の長押し取消処理 (useLongPress → runCancel)"
@@ -242,9 +243,11 @@ graph TD
 * ターゲットフィルタ（`q.target`）は`'all'`/`role_`プレフィックス/ユーザーID完全一致に加え、`'siblings'`（対象は`role_child`全員）を明示的に分岐している。以前は`'siblings'`がどの条件にも一致せず全ユーザーから除外され、バックエンドに完了報告〜承認・却下・取消のカスケードまで実装済みの兄妹連携クエスト機能が画面に表示されず起動不能だったバグ（H-8）の修正。同一ロジックが`FamilyDashboard.tsx`側にも存在するため、ターゲット判定を変更する際は両ファイルを確認する必要がある。
 * 根拠: (行番号: 293〜302行目 / 抜粋: "if (q.target === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (currentUser.role !== 'role_child') return false;\n                } else if (q.target.startsWith('role_')) {")
 * `QuestItem` の `runComplete`/`runCancel` において、`onClick` コールバックに渡すオブジェクトに動的に `_isInfinite` プロパティを追加している。`Quest`型に定義されているかは本ファイルからは不明。
-* 根拠: `onClick({ ...quest, _isInfinite: !!isInfinite });` (行番号: 86, 92)
-* `isInfinite`クエストのクールダウン（`COOLDOWN_MS` = 60000ms）はコンポーネントローカルな`useState`で管理されているため、画面遷移やコンポーネントの再マウントが起きると`isCooldown`はリセットされる。サーバー側でクールダウンを強制する仕組みがあるかは本ファイルからは不明。
-* 根拠: (行番号: 48〜49, 82〜85 / 抜粋: "const [isCooldown, setIsCooldown] = useState(false);\n    const COOLDOWN_MS = 60000;")
+* 根拠: `onClick({ ...quest, _isInfinite: !!isInfinite });` (行番号: 95, 101)
+* **完了音・クールダウン発火タイミングの変更（Issue #102バグ修正）**: 以前は`runComplete`がタップ即時（確認モーダルを開く前）に完了音の再生と`isCooldown`のセット（無限クエストの場合）を行っていたため、確認モーダルで「キャンセル」しても音が鳴り、無限クエストは60秒間タップ不能になる不具合があった。修正後は、完了音の再生（`clear`/`submit`）と発火対象クエストの`id`/`nonce`の通知は`App.tsx`の`runQuestAction`（完了APIが実際に成功した後）に移動し、`completedSignal` propとして`FamilyDashboard`（または`App`直下）→`FamilyPanel`→`QuestList`→`QuestItem`まで素通しされる。`QuestItem`は`completedSignal.id === questId`（`questId = quest.id ?? quest.quest_id`）かつ`isInfinite`のときのみ`useEffect`でクールダウンを開始する。`runComplete`自体は現在ガード判定と`onClick`呼び出しのみを行い、音声再生は一切行わない。`isCooldown`はコンポーネントローカルな`useState`のままであるため、画面遷移やコンポーネントの再マウントが起きるとリセットされる点は変わらない。サーバー側でクールダウンを強制する仕組みがあるかは本ファイルからは不明。
+* 根拠: (行番号: 51〜52, 60〜70, 91〜96 / 抜粋: "const [isCooldown, setIsCooldown] = useState(false);\n    const COOLDOWN_MS = 60000;", "const questId = quest.id ?? quest.quest_id;\n    useEffect(() => {\n        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;\n        setIsCooldown(true);")
+* **`questId`算出順序の非対称性**: `QuestItem`内の`questId = quest.id ?? quest.quest_id`（Issue #102で追加）は`id`を`quest_id`より優先する順序だが、同ファイル内`QuestList`のソート比較（M-6-5バグ修正、`Number(a.quest_id ?? a.id ?? 0)`）は`quest_id`を優先する逆順である。`Quest.id`は実カラムに存在せず常に`undefined`という既知の事実（M-6-5の注記を参照）に依存する限り両者は等価に振る舞うが、将来`id`が実際に値を持つようになった場合はこの非対称な優先順位が挙動差を生む可能性がある。
+* 根拠: (行番号: 64 / 抜粋: "const questId = quest.id ?? quest.quest_id;") と (行番号: 349〜350 / 抜粋: "const idA = Number(a.quest_id ?? a.id ?? 0);\n            const idB = Number(b.quest_id ?? b.id ?? 0);")
 * 共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`）が自分以外の値を持つ場合、`isEffectivelyLocked`が真となりクリック不可・長押し無効になる。この判定は`useQuestStatus`が返す`isLocked`とは別に本ファイル内で独自に算出されている。
 * 根拠: (行番号: 65〜69 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;")
 * 完了済み・申請中クエストの取消操作は、以前存在した確認クリックではなく`useLongPress`による550msの長押し（`canCancel`が真のときのみ有効）に統一されている。通常タップは`canCancel`または`isCooldown`のときには何も起きない（`handleTapComplete`が早期リターン）。
