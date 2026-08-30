@@ -54,9 +54,25 @@ def is_excluded(rel_path: Path) -> bool:
     return any(rel_path.name.endswith(suf) for suf in EXCLUDE_SUFFIXES)
 
 
+def is_test_file(rel_path: Path) -> bool:
+    """pytestの標準的な命名規則(test_*.py)に一致するテストファイルかどうか。
+
+    MY_HOME_SYSTEMのテストは`tests/`ディレクトリ配下に置かれるため
+    EXCLUDE_PARTSのディレクトリ名ベースの除外で捕捉できるが、DDDには
+    pytest基盤となる`tests/`ディレクトリが無く、DDD直下に`test_*.py`を
+    フラット配置する規約になっている(Issue #124)。ディレクトリ名だけでは
+    検知できないため、ファイル名の命名規則でも判定する。
+    is_excluded とは別関数にしているのは、doc_to_source_candidates の
+    逆引き(仕様書→ソース)ではこの判定を適用したくないため
+    (適用すると、既存のtest_*.md仕様書が対応ソースを見失い、孤立ドキュメント
+    判定の候補から外れてしまう副作用がある)。
+    """
+    return rel_path.suffix == ".py" and rel_path.stem.startswith("test_")
+
+
 def is_tracked_source(rel_path: Path) -> bool:
     """このスクリプトが「仕様書があるべき」と見なす対象かどうか。"""
-    if is_excluded(rel_path):
+    if is_excluded(rel_path) or is_test_file(rel_path):
         return False
     if rel_path.name == "__init__.py":
         # パッケージマーカーで実体を持たないことが大半のため対象外。
