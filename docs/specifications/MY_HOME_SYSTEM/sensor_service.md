@@ -96,8 +96,8 @@
 
 ### `process_sensor_data`
 
-* **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。
-* 根拠: `[process_sensor_data]` (行番号: 90 / 抜粋: "if dev_type and 'Motion' in de")
+* **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。モーション判定は`dev_type`が`"Motion"`を部分一致で含む場合（デバイス一覧APIの語彙`"Motion Sensor"`向け）に加え、`dev_type`がSwitchBot公式Webhookの語彙`"WoPresence"`と完全一致する場合にも成立する（#94修正: 以前は`"Motion" in dev_type`のみだったため、公式Webhook形式(`context.deviceType="WoPresence"`)のモーションイベントがこの分岐に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。
+* 根拠: `[process_sensor_data]` (行番号: 101 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `dev_type: str`, `state: str`
@@ -191,7 +191,7 @@
 ```mermaid
 flowchart TD
   subgraph process_sensor_data_flow [process_sensor_dataのフロー]
-    A[Start] --> B{"dev_typeに Motion が含まれるか?"}
+    A[Start] --> B{"dev_typeに Motion が含まれるか、<br>または WoPresence と完全一致するか?"}
     B -- Yes --> C{"state == detected ?"}
     C -- Yes --> D["既存のMOTION_TASKSをキャンセル"]
     D --> E{"IS_ACTIVEがFalseか?"}

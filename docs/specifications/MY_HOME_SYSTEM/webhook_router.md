@@ -100,8 +100,8 @@
 
 ### エンドポイント `switchbot_webhook`
 
-* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。
-* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜104 / 抜粋: `@router.post("/webhook/switchbot")`)
+* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。この解決済みの`device_type`変数は、`sensor_service.process_sensor_data`の第4引数にもそのまま渡される（#94修正: 以前はここで未解決の`body.deviceType`（公式Webhook形式では`context`側にのみ値が入るため常に`None`）を渡していたため、公式形式のモーションイベントが`process_sensor_data`側のMotion判定に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。
+* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜107 / 抜粋: `@router.post("/webhook/switchbot")`), `await sensor_service.process_sensor_data(mac, name, location, device_type, state)` (行番号: 105)
 
 
 * **引数/リクエスト**: `body`: `SwitchBotWebhookBody` (Pydanticモデルなどの型)、`token`: `str`（省略可、デフォルト`None`。クエリパラメータ `?token=...`）
@@ -109,14 +109,14 @@
 
 
 * **戻り値/レスポンス**: JSON形式の辞書 (ステータスと理由を含む)。
-* 根拠: 各return文 (行番号: 66, 76, 104 / 抜粋: `return {"status": "success"}`)
+* 根拠: 各return文 (行番号: 66, 76, 107 / 抜粋: `return {"status": "success"}`)
 
 
 * **副作用**:
 * `device_records` へのログ保存 (`save_log_async`)。
 * 特定のステータスの場合、`config.SQLITE_TABLE_DAILY_LOGS` へのログ保存 (`save_log_async`)。
-* `sensor_service.process_sensor_data` の実行による副作用。
-* 根拠: 関数内の処理呼び出し (行番号: 88, 96, 102 / 抜粋: `await save_log_async(...)`)
+* `sensor_service.process_sensor_data` の実行による副作用（第4引数には61行目で解決済みの`device_type`を渡す。#94修正）。
+* 根拠: 関数内の処理呼び出し (行番号: 88, 96, 105 / 抜粋: `await save_log_async(...)`)
 
 
 * **エラーハンドリング**:
