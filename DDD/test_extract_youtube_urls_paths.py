@@ -15,10 +15,11 @@ get_managed_target_directory が使われるが、これが引数を無視して
 同一バグ)。
 """
 import importlib
+import sqlite3
 import sys
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -114,6 +115,81 @@ class TestVerifyEnvironmentDetectsFallback:
         with patch.object(module.AppConfig, "get_output_base_dir", return_value=messy_path):
             manager = module.SubscriptionManager.__new__(module.SubscriptionManager)
             assert manager._verify_environment() is False
+
+
+class TestProcessSubscriptionsUsesFreshDbPath:
+    """
+    Issue #123回帰テスト: アプリ起動(SubscriptionManager構築)時点ではNASが
+    フォールバック中でも、process_subscriptions()の実行時までにNASが復帰して
+    いれば(autofsの再マウント遅延はこのリポジトリで既知の事象)、NAS側の
+    home_system.dbを正しく参照してサブスクリプションを処理できること。
+
+    修正前は db_path が __init__ 時点のNAS状態(フォールバック中)で固定され、
+    process_subscriptions() 側の環境検証だけが最新状態(復帰済み)を見るため、
+    検証は通過するのにDBはローカルの空DBを新規作成してしまい、NAS側に登録
+    済みのサブスクリプションが1件も読み込まれず「無言のno-op」になっていた。
+    """
+
+    def test_recovers_and_reads_nas_db_when_nas_comes_back_before_processing(self, tmp_path):
+        nas_base = tmp_path / "nas" / "youtube_extractor" / "data"
+        local_base = tmp_path / "local" / "data"
+        nas_base.mkdir(parents=True)
+        local_base.mkdir(parents=True)
+
+        nas_db_path = nas_base.parent / "home_system.db"
+        # NAS側DBに事前にアクティブなサブスクリプションを1件登録しておく
+        # (プロセス起動より前の巡回で既に登録済み、という状況を再現)
+        with closing(sqlite3.connect(nas_db_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE youtube_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_url TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO youtube_subscriptions (channel_url, is_active) VALUES (?, 1)",
+                ("https://example.test/channel/known",),
+            )
+            conn.commit()
+
+        class _RecoverableBaseDir:
+            """NASフォールバック→復帰、という時間経過をシミュレートするコールバック。"""
+
+            def __init__(self, local_dir, nas_dir):
+                self.local_dir = local_dir
+                self.nas_dir = nas_dir
+                self.recovered = False
+
+            def __call__(self):
+                return self.nas_dir if self.recovered else self.local_dir
+
+        base_dir_resolver = _RecoverableBaseDir(local_base, nas_base)
+
+        extractor = MagicMock()
+        extractor.extract_iter.return_value = iter([])
+        file_manager = MagicMock()
+
+        with patch.object(module.AppConfig, "get_output_base_dir", side_effect=base_dir_resolver), \
+                patch.object(module.AppConfig, "LOCAL_DIR_STR", str(local_base)):
+            # UrlExtractorApp.__init__と同じタイミングでSubscriptionManagerを構築する
+            # (この時点ではまだNASはフォールバック中)
+            manager = module.SubscriptionManager(extractor, file_manager)
+
+            # その後、巡回開始までにNASが復帰する
+            base_dir_resolver.recovered = True
+
+            manager.process_subscriptions()
+
+        # NAS側に事前登録されていたサブスクリプションが実際に処理されたこと
+        # (ローカルの空DBが使われていれば、ここは一度も呼ばれない)
+        extractor.extract_iter.assert_called_once_with("https://example.test/channel/known")
+
+        # ローカル側にはゴミの空DBが作られていないこと
+        assert not (local_base.parent / "home_system.db").exists()
 
 
 if __name__ == "__main__":
