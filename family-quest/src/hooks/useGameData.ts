@@ -5,10 +5,17 @@ import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData'
 import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
+// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。
+// ★バグ修正(Issue #120): 以前はmessage/created_atという実際には存在しない
+// フィールド名を宣言しており、_fetch_recent_logsの実際のレスポンス形状
+// {id, text, dateStr, timestamp}と不一致だった。adventureLogsはどの
+// コンポーネントからも消費されていないため現状は実害がなかったが、
+// 将来利用する際に誤った型に気づかず参照してしまう不具合の種だった)
 interface AdventureLog {
-    id: string | number;
-    message: string;
-    created_at: string;
+    id: string;
+    text: string;
+    dateStr: string;
+    timestamp: string;
 }
 
 // 家族全体の統計情報 (UserService.get_family_chronicle の "stats" レスポンスに対応)
