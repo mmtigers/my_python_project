@@ -641,24 +641,25 @@
 
 ### `ScrapingStrategy._download_segments_and_localize_manifest`
 
-* **役割**: 絶対URL化済みのm3u8マニフェスト内の各セグメント（および`#EXT-X-KEY`等の`URI`属性）を、`ThreadPoolExecutor`（`_FRAGMENT_DOWNLOAD_WORKERS`=5並列）で`_download_segment`により並行ダウンロードし、ローカルファイルの絶対`file://` URIに差し替えたマニフェストを返すインスタンスメソッド。`yt-dlp`自身にセグメント取得をさせるとTLS指紋の違いによりWAFに403でブロックされ続けることを実機の生トラフィック検証(`debug_printtraffic`)で確認したため、セグメント取得自体も`curl_cffi`経由で行い、`yt-dlp`/`ffmpeg`には取得済みのローカルファイルのみを渡す。
-* 根拠: [_download_segments_and_localize_manifestとDocstring] (行番号: 657〜672 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
+* **役割**: 絶対URL化済みのm3u8マニフェスト内の各セグメント（および`#EXT-X-KEY`等の`URI`属性）を、`ThreadPoolExecutor`（`_FRAGMENT_DOWNLOAD_WORKERS`=5並列）で`_download_segment`により並行ダウンロードし、ローカルファイルの絶対`file://` URIに差し替えたマニフェストを返すインスタンスメソッド。`yt-dlp`自身にセグメント取得をさせるとTLS指紋の違いによりWAFに403でブロックされ続けることを実機の生トラフィック検証(`debug_printtraffic`)で確認したため、セグメント取得自体も`curl_cffi`経由で行い、`yt-dlp`/`ffmpeg`には取得済みのローカルファイルのみを渡す。**Issue #104の修正**により、いずれかのセグメントで例外（`BotDetectionError`含む）が発生した場合は、まだ実行が始まっていない残りのキュー済みセグメント取得を明示的にキャンセルしてから例外を再送出するようになった。
+* 根拠: [_download_segments_and_localize_manifestとDocstring] (行番号: 757〜772 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
 
 
 * **引数/リクエスト**: `localized_manifest: str`（絶対URL化済みマニフェスト）, `page_url: str`（Refererヘッダー設定用）, `tmp_dir: Path`（セグメント保存先の一時ディレクトリ）
-* 根拠: [引数定義] (行番号: 657〜659 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
+* 根拠: [引数定義] (行番号: 757〜759 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（セグメントURIをローカル`file://`パスへ差し替え済みのマニフェスト本文）
-* 根拠: [戻り値ヒントと末尾return] (行番号: 659, 712 / 抜粋: "return "\\n".join(new_lines)")
+* 根拠: [戻り値ヒントと末尾return] (行番号: 759, 822 / 抜粋: "return "\\n".join(new_lines)")
 
 
-* **副作用**: マニフェスト内の各セグメントURLを`_download_segment`で並行ダウンロードし`tmp_dir`配下へファイル書き込み（`ThreadPoolExecutor`, 最大5ワーカー）。
-* 根拠: [並行ダウンロードとファイル書き込み] (行番号: 686〜703 / 抜粋: "def _fetch_one(idx: int, url: str) -> Tuple[int, str]:\n            suffix = Path(url.split('?')[0]).suffix or '.bin'\n            local_name = f"seg_{idx:06d}{suffix}"\n            local_path = tmp_dir / local_name\n            content = self._download_segment(url, page_url)\n            local_path.write_bytes(content)")
+* **副作用**: マニフェスト内の各セグメントURLを`_download_segment`で並行ダウンロードし`tmp_dir`配下へファイル書き込み（`ThreadPoolExecutor`, 最大5ワーカー）。いずれかのセグメントで例外が発生した場合は、`executor.shutdown(wait=True, cancel_futures=True)`により、まだ実行が始まっていないキュー済みのセグメント取得（＝HTTP GETリクエスト自体）をキャンセルする（Issue #104の修正、後述のエラーハンドリング参照）。
+* 根拠: [並行ダウンロードとファイル書き込み] (行番号: 786〜796 / 抜粋: "def _fetch_one(idx: int, url: str) -> Tuple[int, str]:\n            suffix = Path(url.split('?')[0]).suffix or '.bin'\n            local_name = f"seg_{idx:06d}{suffix}"\n            local_path = tmp_dir / local_name\n            content = self._download_segment(url, page_url)\n            local_path.write_bytes(content)")
 
 
-* **エラーハンドリング**: 個別セグメントのダウンロード失敗（`_download_segment`が送出する例外、`BotDetectionError`含む）は`future.result()`の呼び出し元でそのまま伝播し、本メソッド内で個別に捕捉されることはない（コメントで明記）。
-* 根拠: [コメント] (行番号: 702 / 抜粋: "idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる")
+* **エラーハンドリング**: 個別セグメントのダウンロード失敗（`_download_segment`が送出する例外、`BotDetectionError`含む）は`future.result()`の呼び出し元でそのまま伝播する。**Issue #104の修正（`with ThreadPoolExecutor(...) as executor:`ブロック終了時の暗黙のshutdownがキュー済み残り全件の完走を待ってしまい、モジュールDocstring/仕様書が謳う「即時セッション中断」が事実上機能していなかった不具合の修正）**により、`as_completed`ループを`try`/`except Exception:`で囲み、例外捕捉時に`executor.shutdown(wait=True, cancel_futures=True)`を明示的に呼んで未着手のキュー済みセグメントをキャンセルしたうえで、同じ例外を`raise`により再送出する（実行中だった最大`_FRAGMENT_DOWNLOAD_WORKERS`件分の完了は待つ）。
+* 根拠: [コメント] (行番号: 803 / 抜粋: "idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる")
+* 根拠: [Issue #104修正のtry/except] (行番号: 801〜815 / 抜粋: "try:\n                for future in as_completed(futures):\n                    idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる\n                    resolved[idx] = local_uri\n            except Exception:", "executor.shutdown(wait=True, cancel_futures=True)\n                raise")
 
 
 ### `ScrapingStrategy._download_with_ytdlp`

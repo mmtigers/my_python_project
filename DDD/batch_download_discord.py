@@ -798,9 +798,21 @@ class ScrapingStrategy(DownloadStrategy):
         resolved: Dict[int, str] = {}
         with ThreadPoolExecutor(max_workers=self._FRAGMENT_DOWNLOAD_WORKERS) as executor:
             futures = {executor.submit(_fetch_one, idx, url): idx for idx, url in targets.items()}
-            for future in as_completed(futures):
-                idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
-                resolved[idx] = local_uri
+            try:
+                for future in as_completed(futures):
+                    idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
+                    resolved[idx] = local_uri
+            except Exception:
+                # ボット検知(403/429/503)等で一部セグメントが例外を出した場合、
+                # 「即時セッション中断」を実際に機能させるため、まだ実行が
+                # 始まっていない残りのセグメント取得をキャンセルする。
+                # `with`ブロックの終了時に暗黙で呼ばれる shutdown(wait=True) には
+                # cancel_futuresを指定できず、数百〜数千件のキュー済みセグメントが
+                # ブロック中のCDNへのHTTP GETを完走し終えるまで例外の伝播が
+                # 遅延してしまっていた(実行中の最大_FRAGMENT_DOWNLOAD_WORKERS件は
+                # 完了を待つが、キュー済みの残りはリクエスト自体を送らずに済む)。
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
 
         new_lines = list(lines)
         for idx, _url in targets.items():
