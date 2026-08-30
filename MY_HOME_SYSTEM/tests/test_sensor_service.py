@@ -89,6 +89,21 @@ class TestProcessSensorDataMotion:
         # 継続検知でも「無反応監視タイマー」は再セットされる
         assert "mac_motion" in sensor_service.MOTION_TASKS
 
+    async def test_official_woresence_device_type_also_triggers_motion_logic(self):
+        """#94回帰防止: SwitchBot公式Webhookの語彙("WoPresence")は
+        "Motion" の部分一致に合致しないため、以前はこの分岐に到達せず
+        通知・無反応タイマーが一切発火しなかった。"""
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)) as mock_send:
+            await sensor_service.process_sensor_data(
+                "mac_motion", "人感センサー", "玄関", "WoPresence", "detected"
+            )
+
+        assert sensor_service.IS_ACTIVE["mac_motion"] is True
+        assert "mac_motion" in sensor_service.MOTION_TASKS
+        mock_send.assert_called_once()
+        args = mock_send.call_args[0]
+        assert "動きがありました" in args[1][0]["text"]
+
 
 @pytest.mark.asyncio
 class TestSendInactiveNotification:

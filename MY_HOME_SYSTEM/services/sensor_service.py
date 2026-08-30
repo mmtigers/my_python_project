@@ -94,7 +94,11 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
     now: float = time.time()
     
     # Motion Sensor Logic
-    if dev_type and "Motion" in dev_type:
+    # "Motion" 部分一致はデバイス一覧API語彙("Motion Sensor")向け。
+    # SwitchBot公式Webhookの語彙("WoPresence")はこの部分一致に合致しないため、
+    # 完全一致で追加している(#94: 以前はWoPresence形式のイベントがこの分岐に
+    # 到達せず、見守り通知・無反応タイマーが発火しなかった)。
+    if dev_type and ("Motion" in dev_type or dev_type == "WoPresence"):
         if state == "detected":
             if mac in MOTION_TASKS: 
                 MOTION_TASKS[mac].cancel()

@@ -99,6 +99,9 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
         )
 
     # 3. センサーロジック (Service呼び出し)
-    await sensor_service.process_sensor_data(mac, name, location, body.deviceType, state)
+    # device_type(61行目で context.deviceType/トップレベルから解決済み)を渡す。
+    # 以前はここで未解決の body.deviceType(公式Webhook形式では常にNone)を渡していたため、
+    # process_sensor_data のMotion判定に到達せず通知・無反応タイマーが発火しなかった(#94)。
+    await sensor_service.process_sensor_data(mac, name, location, device_type, state)
     
     return {"status": "success"}
