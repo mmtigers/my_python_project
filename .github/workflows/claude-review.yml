@@ -1,0 +1,91 @@
+name: Claude Code Review
+
+# PR作成/更新時にClaude Code Actionでこのリポジトリの規約(CLAUDE.md)を踏まえた
+# 自動コードレビューを行うワークフロー。
+#
+# 認証には Anthropic API の従量課金キーではなく、Claude Pro/Max/Team サブスクリプション
+# 由来のOAuthトークンを使う。リポジトリ管理者がローカルで `claude setup-token` を実行して
+# 発行したトークンを、Secrets `CLAUDE_CODE_OAUTH_TOKEN` として登録しておくこと
+# (詳細: https://github.com/anthropics/claude-code-action の Setup Guide)。
+# このシークレットが未設定の間は本ジョブは失敗する。
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    name: Claude PR review
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 1
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+          track_progress: true
+
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            リポジトリルートの CLAUDE.md に記載された規約を踏まえて、このPRの差分を
+            レビューしてください。特に以下の観点を重視してください。
+
+            1. 正しさ/バグ
+               - ロジックの誤り、境界条件・エラーハンドリングの見落とし
+               - MY_HOME_SYSTEM 配下で生の sqlite3.connect() を直接開いていないか
+                 (core/database.py の get_db_cursor() 経由が標準)
+               - 新規マイグレーション(migrations/NNNN_*.sql)がある場合、
+                 ALTER TABLE ... ADD COLUMN が先頭にあり、既に適用済みのDBに対して
+                 再実行しても安全か(冪等性。README: MY_HOME_SYSTEM/migrations/README.md)
+
+            2. アーキテクチャ/レイヤリング
+               - routers/*.py にロジックを直接書かず services/*.py に委譲しているか
+               - unified_server.py に新たなハードコードされたCORSオリジンリスト等、
+                 config.py を唯一のソースとすべき設定の重複を作っていないか
+               - family-quest側で window.confirm()/alert() を使っていないか
+                 (ConfirmModal/MessageModal を使う規約)
+               - 全体設計書(docs/specifications/全体設計書.md)に「削除済み」と記載された
+                 機能(ボス戦・装備・ギルド・マイレージ・週間ランキング)を復活させたり、
+                 存在する前提で参照していないか
+
+            3. 設定/認証情報
+               - 新しい外部連携を追加した場合、config.py の番号付きセクション構成に
+                 従って追加し、.env.example にもプレースホルダーを追加しているか
+               - シークレットや認証情報をハードコードしていないか
+
+            4. テスト
+               - 新規テストが tests/conftest.py の isolated_db/api_client フィクスチャを
+                 使っているか
+               - notification_service/line_service 経路のテストで、conftest.py の
+                 webhook/トークン環境変数の空文字化モックを回避していないか
+
+            5. その他の規約
+               - Python/シェルスクリプトのコメント・docstringは日本語か(既存ファイル編集時)
+               - docs/specifications/ 配下に対応する仕様書があるソースファイルを変更した
+                 場合、同じPR内で仕様書側も更新されているか(非ブロッキングのspec-drift
+                 チェックを補足する目的の指摘。無くても致命的ではない旨を明記すること)
+               - 不要な抽象化・過剰な将来対応・目的外のリファクタが混ざっていないか
+
+            指摘は具体的な行にインラインコメントで付け、全体的な所見はトップレベルの
+            コメントにまとめてください。実際にバグや規約違反になる箇所を優先し、
+            好みの範囲のnitを過剰に指摘しないでください。問題が見つからなければ、
+            その旨を一言で報告してください。
+
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
