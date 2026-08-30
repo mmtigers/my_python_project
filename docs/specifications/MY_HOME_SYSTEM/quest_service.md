@@ -361,16 +361,16 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._revert_and_delete_history`
 
-* **役割**: `quest_history`1行を取り消すヘルパー。`pending`であれば単純に削除するのみ、`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除する（ゴールドは`max(0, ...)`で負値化を防止）。
-* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 529〜545 / 抜粋: "quest_history 1行を取り消す。pending であれば単純に削除")
+* **役割**: `quest_history`1行を取り消すヘルパー。`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除し（ゴールドは`max(0, ...)`で負値化を防止）、`approved`以外（`pending`・`rejected`）は報酬が付与されていないため残高には触れず単純に削除する（Issue #97: 以前は`status == 'pending'`以外を一律「付与済み」とみなしてロールバックしていたため、`rejected`履歴を`cancel`すると、もらっていない経験値・ゴールドが残高から減算される不具合があった）。
+* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 565〜584 / 抜粋: "if hist['status'] != 'approved':\n            cur.execute(\"DELETE FROM quest_history WHERE id = ?\", (hist['id'],))\n            return")
 * **引数/リクエスト**: `cur`, `hist`, `user`
-* 根拠: (行番号: 529)
+* 根拠: (行番号: 565)
 * **戻り値/レスポンス**: なし（`-> None`）
-* 根拠: (行番号: 529)
+* 根拠: (行番号: 565)
 * **副作用**: DB更新（`quest_users`。`approved`時のみ）、DB削除（`quest_history`）
-* 根拠: (行番号: 543〜545)
+* 根拠: (行番号: 582〜584)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 529〜545)
+* 根拠: (行番号: 565〜584)
 
 ### `QuestService.filter_active_quests`
 

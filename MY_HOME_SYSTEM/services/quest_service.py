@@ -564,10 +564,13 @@ class QuestService:
 
     def _revert_and_delete_history(self, cur, hist, user) -> None:
         """
-        quest_history 1行を取り消す。pending であれば単純に削除、approved であれば
-        付与済みの経験値・ゴールドをロールバックしてから削除する。
+        quest_history 1行を取り消す。approved であれば付与済みの経験値・ゴールドを
+        ロールバックしてから削除する。pending / rejected は報酬がまだ付与されて
+        いないため、残高には触れず単純に削除する(#97: 以前は status == 'pending'
+        以外を一律「付与済み」とみなしてロールバックしていたため、rejected 履歴を
+        cancel すると、もらっていない経験値・ゴールドが残高から減算されていた)。
         """
-        if hist['status'] == 'pending':
+        if hist['status'] != 'approved':
             cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
             return
 
