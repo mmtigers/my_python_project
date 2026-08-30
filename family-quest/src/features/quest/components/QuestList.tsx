@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Quest, QuestHistory } from '@/types';
+import { ID, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
 import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
@@ -14,6 +14,9 @@ interface QuestListProps {
     pendingQuests: QuestHistory[];
     currentUser: User;
     onQuestClick: (quest: Quest) => void;
+    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
+    // クールダウンを発火させるための通知(App側で管理)。
+    completedSignal: { id: ID; nonce: number } | null;
     // 横画面4人表示のパネル内で使うためのモード。
     // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
     // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
@@ -40,18 +43,31 @@ const QuestItem: React.FC<{
     pendingQuests: QuestHistory[];
     currentUser: User;
     onClick: (q: Quest) => void;
+    completedSignal: { id: ID; nonce: number } | null;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {
 
-    const { play } = useSound();
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
+    const { play } = useSound();
 
     const {
         isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited, isLocked,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
+
+    // #102: 完了音・クールダウンは、タップ時点(確認モーダルが開く前)ではなく、
+    // 完了APIが実際に成功した時点(App側からのcompletedSignal)でのみ発火させる。
+    // 以前はタップ即時に鳴らしていたため、確認モーダルで「キャンセル」しても完了音が鳴り、
+    // 無限クエストは60秒間タップ不能になっていた。
+    const questId = quest.id ?? quest.quest_id;
+    useEffect(() => {
+        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;
+        setIsCooldown(true);
+        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
+        return () => clearTimeout(timer);
+    }, [completedSignal, isInfinite, questId]);
 
     // ボーナス計算
     const bonusGold = quest.bonus_gold || 0;
@@ -73,16 +89,9 @@ const QuestItem: React.FC<{
     const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;
 
     const runComplete = () => {
+        // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。
+        // ここではあくまで確認モーダルを開く(onClick)のみを行う。
         if (isCooldown || isEffectivelyLocked) return;
-        if (quest.type === 'daily' || isInfinite) {
-            play('clear');
-        } else {
-            play('submit');
-        }
-        if (isInfinite) {
-            setIsCooldown(true);
-            setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
-        }
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
@@ -284,7 +293,7 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
     const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
@@ -384,6 +393,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         pendingQuests={pendingQuests}
                         currentUser={currentUser}
                         onClick={onQuestClick}
+                        completedSignal={completedSignal}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />

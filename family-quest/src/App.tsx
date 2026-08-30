@@ -167,6 +167,13 @@ function App() {
   const [isConfirming, setIsConfirming] = useState(false);
   const isConfirmingRef = useRef(false);
 
+  // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
+  // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
+  // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。
+  // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに
+  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。
+  const [completedSignal, setCompletedSignal] = useState<{ id: ID; nonce: number } | null>(null);
+
   // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
   const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
 
@@ -216,6 +223,20 @@ function App() {
 
     if (res.success) {
       if (mode === 'complete') {
+        const completedQuest = target as Quest;
+        // #102: 完了音・無限クエストのクールダウンは、確認モーダルでの「はい」タップ
+        // 時点ではなく、実際に完了APIが成功したこの時点で発火させる(以前はQuestList側で
+        // タップ即時に鳴らしていたため、モーダルを「キャンセル」しても完了音が鳴り、
+        // 無限クエストはクールダウンに入ってしまっていた)。
+        // 子ども(role_child)の完了報告は親の承認待ち(status: 'pending')になるのが常だが、
+        // それでも「提出」自体は完了しているため、鳴らす対象・クールダウン対象から
+        // pending を除外しない(除外すると子どもに対しては常に無音・無クールダウンになり、
+        // 無限クエストを連打で何度も申請できてしまう)。
+        play(completedQuest.type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
+        const idForSignal = completedQuest.id ?? completedQuest.quest_id;
+        if (idForSignal !== undefined) {
+          setCompletedSignal({ id: idForSignal, nonce: Date.now() });
+        }
         if (res.status === 'pending') {
           showToast({ title: "申請完了", text: res.message || "親の承認待ちになりました", icon: '📨' });
         } else if ((res.earnedMedals ?? 0) > 0) {
@@ -485,6 +506,7 @@ function App() {
             onApprove={handleApprove}
             onReject={handleReject}
             onApproveAll={handleApproveAll}
+            completedSignal={completedSignal}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
@@ -533,6 +555,7 @@ function App() {
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
+                  completedSignal={completedSignal}
                   iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
                 />
               )}
