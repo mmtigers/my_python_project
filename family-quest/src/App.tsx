@@ -167,6 +167,16 @@ function App() {
   const [isConfirming, setIsConfirming] = useState(false);
   const isConfirmingRef = useRef(false);
 
+  // #119: 承認待ちカードは「スワイプ承認」と「承認ボタン」が併存し、確認モーダルを
+  // 挟まず即座にAPIを叩くため、#101のisConfirmingRefと同じ連打対策が無かった。
+  // 連打・スワイプ+ボタンのほぼ同時操作で同一履歴に2回目の承認POSTが飛ぶと、
+  // サーバー側は1回目で既に承認済みのため400(「承認待ちではありません」)を返し、
+  // 実際は成功しているのに「承認に失敗しました」というエラーモーダルが出てしまっていた。
+  // 承認は複数のクエストを並行して処理できる必要があるため、単一のbooleanではなく
+  // 処理中の履歴idの集合で個別に多重送信を防ぐ。
+  const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
+  const isApprovingAllRef = useRef(false);
+
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
   // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。
@@ -367,67 +377,87 @@ function App() {
 
   // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
   const handleApprove = async (history: QuestHistory) => {
-    const res = await approveQuest(getRepresentativeParent(users), history);
-    if (res.success) {
-      play('approve');
-      // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
-      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
-      if ((res.earnedMedals ?? 0) > 0) {
-        play('medal');
-        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+    // #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは
+    // 1回分として扱い、エラー表示を出さない)。
+    if (history.id != null) {
+      if (approvingHistoryIdsRef.current.has(history.id)) return;
+      approvingHistoryIdsRef.current.add(history.id);
+    }
+    try {
+      const res = await approveQuest(getRepresentativeParent(users), history);
+      if (res.success) {
+        play('approve');
+        // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
+        // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
+        if ((res.earnedMedals ?? 0) > 0) {
+          play('medal');
+          showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+        }
+      } else {
+        setMessageData({
+          title: "エラー",
+          text: resolveErrorText(res, "承認に失敗しました"),
+          onRetry: () => handleApprove(history),
+        });
+        play('cancel');
       }
-    } else {
-      setMessageData({
-        title: "エラー",
-        text: resolveErrorText(res, "承認に失敗しました"),
-        onRetry: () => handleApprove(history),
-      });
-      play('cancel');
+    } finally {
+      if (history.id != null) {
+        approvingHistoryIdsRef.current.delete(history.id);
+      }
     }
   };
 
   // 角度⑩: 承認待ちが複数あるとき、1件ずつ承認する手間を減らす一括承認
   const handleApproveAll = async () => {
-    // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
-    // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
-    const targets = [...pendingQuestsRef.current];
-    if (targets.length === 0) return;
+    // #119: 一括承認ボタンの連打で、1回目のループが終わる前に2回目が
+    // 同じ履歴を並行して承認しようとし400になるのを防ぐ。
+    if (isApprovingAllRef.current) return;
+    isApprovingAllRef.current = true;
+    try {
+      // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
+      // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
+      const targets = [...pendingQuestsRef.current];
+      if (targets.length === 0) return;
 
-    let successCount = 0;
-    let totalEarnedMedals = 0;
-    // 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。
-    // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。
-    const cascadedIds = new Set<ID>();
-    for (const history of targets) {
-      if (history.id != null && cascadedIds.has(history.id)) {
-        successCount++;
-        continue;
-      }
-      const res = await approveQuest(getRepresentativeParent(users), history);
-      if (res.success) {
-        successCount++;
-        totalEarnedMedals += res.earnedMedals ?? 0;
-        if (history.linked_history_id != null) {
-          cascadedIds.add(history.linked_history_id);
+      let successCount = 0;
+      let totalEarnedMedals = 0;
+      // 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。
+      // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。
+      const cascadedIds = new Set<ID>();
+      for (const history of targets) {
+        if (history.id != null && cascadedIds.has(history.id)) {
+          successCount++;
+          continue;
+        }
+        const res = await approveQuest(getRepresentativeParent(users), history);
+        if (res.success) {
+          successCount++;
+          totalEarnedMedals += res.earnedMedals ?? 0;
+          if (history.linked_history_id != null) {
+            cascadedIds.add(history.linked_history_id);
+          }
         }
       }
-    }
 
-    if (successCount > 0) play('approve');
-    if (totalEarnedMedals > 0) {
-      play('medal');
-      showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
-    }
+      if (successCount > 0) play('approve');
+      if (totalEarnedMedals > 0) {
+        play('medal');
+        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
+      }
 
-    if (successCount === targets.length) {
-      showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
-    } else {
-      setMessageData({
-        title: "エラー",
-        text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
-        onRetry: () => handleApproveAll(),
-      });
-      play('cancel');
+      if (successCount === targets.length) {
+        showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
+      } else {
+        setMessageData({
+          title: "エラー",
+          text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
+          onRetry: () => handleApproveAll(),
+        });
+        play('cancel');
+      }
+    } finally {
+      isApprovingAllRef.current = false;
     }
   };
 
