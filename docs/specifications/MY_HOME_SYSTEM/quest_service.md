@@ -22,8 +22,9 @@
 
 ## 2. ファイルの概要
 
-データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。クエスト完了処理（`process_complete_quest`）は同一`(user_id, quest_id)`へのプロセス内`threading.Lock`による直列化で、報酬購入処理（`process_purchase_reward`）はDBレベルの単一アトミックUPDATE（`WHERE gold >= ?`＋`rowcount`判定）で、それぞれ同時多重リクエストによる二重加算・二重購入のレースコンディションを防ぐ設計になっている。
+データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。クエスト完了処理（`process_complete_quest`）は`_get_completion_lock_key`が算出するキーへのプロセス内`threading.Lock`による直列化で二重加算を防ぐ。このキーは通常`(user_id, quest_id)`だが、対象クエストの`target_user`が`'siblings'`（兄妹連携クエスト）の場合は報告者(`user_id`)に依存しない共通キー`('__coop__', quest_id)`になる（Issue #96: 以前は兄妹連携クエストでも`(user_id, quest_id)`のままだったため、兄の報告は`(兄, quest_id)`、妹の報告は`(妹, quest_id)`と別ロックとなって直列化されず、ほぼ同時報告で`_process_coop_quest_completion`によるpendingペア生成が二重に走り、承認時に報酬が2倍になる不具合があった）。報酬購入処理（`process_purchase_reward`）はDBレベルの単一アトミックUPDATE（`WHERE gold >= ?`＋`rowcount`判定）で、それぞれ同時多重リクエストによる二重加算・二重購入のレースコンディションを防ぐ設計になっている。
 * 根拠: (行番号: 40〜46 / 抜粋: "同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）\n# 別スレッドでほぼ同時に到達すると、どちらも「直近の完了履歴なし」を読んでしまい、\n# 経験値・ゴールド・ボスダメージが二重に加算されるレースコンディションが発生しうる。")
+* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 236〜250 / 抜粋: "if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)")
 * 根拠: (行番号: 600〜602 / 抜粋: "# 残高チェックと減算を単一のアトミックなUPDATEにすることで、\n# 同時多重リクエストによる read-then-write のレースコンディション\n# (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。")
 
 
@@ -83,7 +84,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` / `_completion_locks_guard` (モジュールレベル変数)
 
-* **役割**: `(user_id, quest_id)` のタプルをキーとして `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一(user_id, quest_id)への同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。
+* **役割**: `Tuple[str, int]` のキーを受け取り `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一キーへの同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。渡されるキー自体は本関数の関知するところではなく、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出する（通常クエストは`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）。
 * 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 45), `def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:` (行番号: 49〜55)
 * **引数/リクエスト**: `key: Tuple[str, int]` (`user_id`と`quest_id`の組)
 * 根拠: (行番号: 49)
@@ -189,55 +190,69 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.process_complete_quest`
 
-* **役割**: `_get_completion_lock((user_id, quest_id))`でプロセス内ロックを取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。
-* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 228〜232)
+* **役割**: `_get_completion_lock_key(user_id, quest_id)`で算出したキーを`_get_completion_lock`に渡してプロセス内ロックを取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 230〜234)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 228)
+* 根拠: (行番号: 230)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_process_complete_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 232 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
-* **副作用**: ロックの取得・解放（`with`文）
-* 根拠: (行番号: 231)
+* 根拠: (行番号: 234 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
+* **副作用**: `_get_completion_lock_key`によるDB参照（`quest_master`）、ロックの取得・解放（`with`文）
+* 根拠: (行番号: 233)
 * **エラーハンドリング**: なし（内部の例外はそのまま伝播）
-* 根拠: (行番号: 228〜232)
+* 根拠: (行番号: 230〜234)
+
+### `QuestService._get_completion_lock_key`
+
+* **役割**: `process_complete_quest`が使用する完了ロックのキーを算出する。対象クエストの`target_user`をDBから参照し、`'siblings'`（兄妹連携クエスト）であれば`user_id`に依存しない共通キー`('__coop__', quest_id)`を返し、それ以外は従来どおり`(user_id, quest_id)`を返す。兄妹連携クエストは「どちらが報告しても2人分のpending行を作成する」ため、報告者ごとに異なるキーで直列化すると兄・妹の同時報告がどちらもロック未取得のまま`_process_coop_quest_completion`まで進み、pendingペアが二重生成されてしまう（Issue #96）。共通キーにすることで、兄妹どちらの報告であっても同一ロックで直列化され、先に処理された側が作成した相方分のpending行を、後から来た側が`_process_complete_quest_locked`内のスパムチェック（直近10秒以内の完了履歴）または周期リセット判定で検出してブロックする。
+* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 236〜250)
+* 根拠: (行番号: 248〜250 / 抜粋: "if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)")
+* **引数/リクエスト**: `user_id: str`, `quest_id: int`
+* 根拠: (行番号: 236)
+* **戻り値/レスポンス**: `Tuple[str, int]`
+* 根拠: (行番号: 236, 249〜250)
+* **副作用**: DB参照（`quest_master`から`target_user`のみSELECT。`process_complete_quest`本体のロック取得より前に、別トランザクションとして実行される）
+* 根拠: (行番号: 244〜247 / 抜粋: "with common.get_db_cursor() as cur:\n            quest = cur.execute(\n                \"SELECT target_user FROM quest_master WHERE quest_id = ?\", (quest_id,)\n            ).fetchone()")
+* **エラーハンドリング**: なし。対象`quest_id`がマスタに存在しない場合は`quest`が`None`となり`(user_id, quest_id)`にフォールバックする（クエスト不在自体は後続の`_process_complete_quest_locked`で`HTTPException(404)`として扱われる）。
+* 根拠: (行番号: 248 / 抜粋: "if quest and quest['target_user'] == 'siblings':")
 
 ### `QuestService._process_complete_quest_locked`
 
 * **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行い、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 234〜298)
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 252〜327)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 234)
+* 根拠: (行番号: 252)
 * **戻り値/レスポンス**: `Dict[str, Any]`（ステータスや報酬情報）
-* 根拠: (行番号: 234, 288〜293, 298)
+* 根拠: (行番号: 252, 317〜322, 327)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し、ログ出力、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し
-* 根拠: (行番号: 236〜237, 280〜286, 296)
-* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`completed_at`の`tzinfo`を保持したまま`datetime.datetime.now(last_time.tzinfo)`と比較することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する。`tzinfo`が無い古いデータはJST(+9時間)とみなす）。この時間ベースのチェックに加え、呼び出し元`process_complete_quest`のプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
-* 根拠: (行番号: 239〜240, 249〜265 / 抜粋: "if (now_check - last_time).total_seconds() < 10:\n                        raise HTTPException(status_code=429, ...)")
+* 根拠: (行番号: 254〜255, 296〜302, 312)
+* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`completed_at`の`tzinfo`を保持したまま`datetime.datetime.now(last_time.tzinfo)`と比較することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する。`tzinfo`が無い古いデータはJST(+9時間)とみなす）。この時間ベースのチェックに加え、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
+* 根拠: (行番号: 282〜283 / 抜粋: "if (now_check - last_time).total_seconds() < 10:\n                        raise HTTPException(status_code=429, ...)")
 
 ### `QuestService._get_sibling_partner_id`
 
 * **役割**: 兄妹連携クエスト（`target_user == 'siblings'`）の完了報告者に対する「相方」の`user_id`を返す。`quest_users.role = ROLE_CHILD`のユーザーがちょうど2人（兄・妹）いることを前提とし、報告者自身を除いたもう一方のIDを返す。
-* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 300〜309 / 抜粋: "現状の家族構成では role_child のユーザーがちょうど2人")
+* 根拠: `def _get_sibling_partner_id(self, cur, user_id: str) -> str:` (行番号: 329〜338 / 抜粋: "現状の家族構成では role_child のユーザーがちょうど2人")
 * **引数/リクエスト**: `cur`, `user_id: str`
-* 根拠: (行番号: 300)
+* 根拠: (行番号: 329)
 * **戻り値/レスポンス**: `str`（相方の`user_id`）
-* 根拠: (行番号: 300, 309)
+* 根拠: (行番号: 329, 338)
 * **副作用**: DB参照（`quest_users`）
-* 根拠: (行番号: 305)
+* 根拠: (行番号: 334)
 * **エラーハンドリング**: `role_child`のユーザーが対象ユーザーに含まれない、または人数がちょうど2人でない場合は`HTTPException(400)`
-* 根拠: (行番号: 307〜308 / 抜粋: "raise HTTPException(status_code=400, detail=\"兄妹クエストの対象ユーザー構成が不正です\")")
+* 根拠: (行番号: 336〜337 / 抜粋: "raise HTTPException(status_code=400, detail=\"兄妹クエストの対象ユーザー構成が不正です\")")
 
 ### `QuestService._process_coop_quest_completion`
 
-* **役割**: 兄妹連携クエストの完了報告処理。`_get_sibling_partner_id`で相方を特定し、報告者・相方双方の`pending`な`quest_history`行を作成、後から報告者側の行に`linked_history_id`を`UPDATE`で設定して相互連結する。
-* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 311〜340)
+* **役割**: 兄妹連携クエストの完了報告処理。`_get_sibling_partner_id`で相方を特定し、報告者・相方双方の`pending`な`quest_history`行を作成、後から報告者側の行に`linked_history_id`を`UPDATE`で設定して相互連結する。呼び出し元`process_complete_quest`が兄妹連携クエストを共通ロックキーで直列化するため、兄・妹がほぼ同時に完了報告しても本関数は排他的に1回ずつしか実行されない（Issue #96）。
+* 根拠: `def _process_coop_quest_completion(self, cur, user, quest, now_iso: str, total_exp: int, total_gold: int) -> Dict[str, Any]:` (行番号: 340〜369)
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso: str`, `total_exp: int`, `total_gold: int`
-* 根拠: (行番号: 311)
+* 根拠: (行番号: 340)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`status: "pending"`、`message`に「兄妹クエスト」の旨を含む）
-* 根拠: (行番号: 335〜340)
+* 根拠: (行番号: 364〜369)
 * **副作用**: DB挿入・更新（`quest_history`に2行挿入、うち1行を`UPDATE`）、`sound_manager.play("submit")`呼び出し、ログ出力
-* 根拠: (行番号: 318〜333)
+* 根拠: (行番号: 347〜359)
 * **エラーハンドリング**: なし（`_get_sibling_partner_id`から送出される`HTTPException`はそのまま伝播）
-* 根拠: (行番号: 311〜340)
+* 根拠: (行番号: 340〜369)
 
 ### `QuestService.process_approve_quest`
 
@@ -521,7 +536,12 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ```mermaid
 flowchart TD
-    Start[Start: process_complete_quest] --> AcquireLock["_get_completion_lock((user_id, quest_id))で<br>プロセス内ロックを取得"]
+    Start[Start: process_complete_quest] --> ResolveKey["_get_completion_lock_key(user_id, quest_id):<br>quest_masterのtarget_userを参照"]
+    ResolveKey --> IsCoop{"target_user == 'siblings'か"}
+    IsCoop -- Yes --> CoopKey["ロックキー = ('__coop__', quest_id)<br>(報告者に依存しない共通キー)"]
+    IsCoop -- No --> NormalKey["ロックキー = (user_id, quest_id)"]
+    CoopKey --> AcquireLock["_get_completion_lock(key)で<br>プロセス内ロックを取得"]
+    NormalKey --> AcquireLock
     AcquireLock --> CallLocked["_process_complete_quest_locked を呼び出し"]
     CallLocked --> DB_Select{"DBからユーザとクエストを取得できるか"}
     DB_Select -- No --> Err404[HTTPException 404: Not found]
@@ -613,6 +633,7 @@ graph TD
         GameSystem
         game_system_inst["game_system / quest_service / shop_service /<br>user_service / inventory_service (モジュール変数)"]
         get_completion_lock["_get_completion_lock()"]
+        get_completion_lock_key["_get_completion_lock_key()"]
         completion_locks["_completion_locks (dict)"]
         get_user_balance_lock["_get_user_balance_lock()"]
         user_balance_locks["_user_balance_locks (dict)"]
@@ -625,6 +646,8 @@ graph TD
     GameSystem --> UserService
     GameSystem --> ShopService
     QuestService --> UserService
+    QuestService -->|process_complete_quest| get_completion_lock_key
+    get_completion_lock_key -.->|target_userを参照| quest_master
     QuestService -->|process_complete_quest| get_completion_lock
     get_completion_lock --> completion_locks
     QuestService -->|"process_approve_quest /<br>process_cancel_quest"| get_user_balance_lock
@@ -714,6 +737,8 @@ graph TD
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 147), `now = datetime.datetime.now()` (行番号: 202)
 * **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）も同様に`threading.Lock`のみを対象とし、`_user_balance_locks`辞書もエントリを削除しない同じ設計である。
 * 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 45), `_completion_locks[key] = lock` (行番号: 54), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 67), `_user_balance_locks[user_id] = lock` (行番号: 76)
+* **`_get_completion_lock_key`はロック取得前にDBへ1回問い合わせる**: 兄妹連携クエストかどうかを判定するために`quest_master`をSELECTする処理が、ロック取得そのものより前・かつ別の`get_db_cursor`トランザクションとして実行される。この問い合わせと実際のロック取得の間にはわずかな非アトミックな隙間があるが、判定対象は`target_user`という更新されることがほぼ無いマスタ値であり、ここでのTOCTOU（read-then-lock間のズレ）が実害あるレースを生む経路は確認できていない（Issue #96の修正で導入）。
+* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 236〜250)
 * **`process_purchase_reward`はDBレベルのアトミックUPDATEで二重購入を防ぐ**: `process_complete_quest`/`process_approve_quest`/`process_cancel_quest`のプロセス内ロックとは異なり、`WHERE user_id = ? AND gold >= ?`条件付きの単一`UPDATE`文と`rowcount`判定によって、複数プロセス/複数ワーカー構成でも成立する形でレースコンディションを防いでいる。同じ「gold/expを扱う」処理群の中で採用している防御の粒度・方式が異なる点に留意が必要。
 * 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ? , updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 603〜608)
 * **冗長なローカルインポート**: `is_within_reset_period`内の`import datetime`（行144）、`_trigger_tv_unlock`内の`import threading`（行407）と`from services import notification_service`（行409）は、いずれもモジュール冒頭で既にインポート済みのモジュールを関数内で再度インポートしており、実害はないが冗長である。
