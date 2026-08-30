@@ -28,6 +28,7 @@ import json
 import time
 import logging
 from typing import Optional, List, Dict, Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
@@ -424,6 +425,12 @@ _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "di
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# ブラウザが送信する Origin ヘッダーは scheme://host[:port] のみでパスを含まない
+# (Starlette の CORSMiddleware は allow_origins との完全一致で比較する)。
+# FRONTEND_URL は post_boot_health_check.py 等で実際にHTTPリクエストを送る
+# 完全なURL(パス込み)として使われているためパスを保持したままにし、
+# CORS_ORIGINSに追加する際だけ scheme+netloc のみを取り出す。
+_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # M-8-2: 以前はここ(config.py)と unified_server.py の両方に別々のCORS許可
 # オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
 # だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
@@ -434,7 +441,7 @@ CORS_ORIGINS: List[str] = [
     "http://localhost:8501",   # Streamlitダッシュボード
     "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
     "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
-    FRONTEND_URL,
+    _frontend_origin,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:
