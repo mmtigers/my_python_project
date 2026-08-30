@@ -113,3 +113,83 @@ def test_full_audit_no_longer_ignores_dashboard_common_doc():
     report = module.cmd_full()
     orphaned_str = "\n".join(report.orphaned)
     assert "dashboard_common.md" not in orphaned_str
+
+
+# --- Issue #124の回帰テスト ---
+#
+# MY_HOME_SYSTEMのテストは tests/ ディレクトリ配下に置かれるため
+# EXCLUDE_PARTS のディレクトリ名ベースの除外で捕捉できるが、DDDには
+# pytest基盤となる tests/ ディレクトリが無く、DDD直下に test_*.py を
+# フラット配置する規約になっている。ディレクトリ名だけでは検知できず、
+# is_tracked_source が DDD の test_*.py を「仕様書があるべきソース」と
+# 誤認して、未文書化・ドリフトの偽陽性を報告していた。
+
+
+def test_ddd_flat_test_file_is_not_a_tracked_source():
+    """
+    DDD直下にフラット配置されたtest_*.pyは、tests/ディレクトリ配下に
+    置かれていなくてもis_tracked_sourceの対象外(=仕様書不要)になること。
+    修正前は True を返し、「仕様書が見つからないファイル」として
+    誤検知されていた。
+    """
+    rel_path = Path("DDD/test_newface_monitor_datamanager.py")
+    assert module.is_tracked_source(rel_path) is False
+
+
+def test_my_home_system_nested_test_file_is_still_not_tracked():
+    """
+    回帰防止: MY_HOME_SYSTEM/tests/配下のテストファイルは、従来通り
+    EXCLUDE_PARTSのディレクトリ名ベースの除外で対象外のままであること
+    (今回の命名規則ベースの判定を追加しても、既存の除外経路を壊していない)。
+    """
+    rel_path = Path("MY_HOME_SYSTEM/tests/test_backup_service.py")
+    assert module.is_tracked_source(rel_path) is False
+
+
+def test_non_test_ddd_source_file_is_still_tracked():
+    """
+    回帰防止: test_*.py以外のDDDソースファイルは、引き続き
+    is_tracked_sourceの対象(=仕様書が必要)のままであること。
+    """
+    rel_path = Path("DDD/extract_youtube_urls.py")
+    assert module.is_tracked_source(rel_path) is True
+
+
+def test_doc_to_source_candidates_still_resolves_existing_test_doc_to_its_source():
+    """
+    is_test_fileによる除外はis_tracked_source側のみに適用され、
+    doc_to_source_candidates(仕様書→ソースの逆引き、孤立ドキュメント判定に
+    使われる)には影響しないこと。これが壊れると、既存の
+    docs/specifications/DDD/test_*.md が対応ソースを見失い、
+    孤立ドキュメントとして誤検知されるようになってしまう。
+    """
+    doc_path = module.SPEC_ROOT / "DDD" / "test_newface_monitor_lock.md"
+    candidates = module.doc_to_source_candidates(doc_path)
+
+    expected = Path("DDD/test_newface_monitor_lock.py")
+    assert expected in candidates
+    assert any((module.REPO_ROOT / c).exists() for c in candidates), (
+        "test_newface_monitor_lock.md に対応する実ソースファイルが見つからず、"
+        "孤立ドキュメントとして誤検知されうる状態になっている。"
+    )
+
+
+def test_full_audit_no_longer_flags_ddd_test_files_as_undocumented():
+    """
+    cmd_full()を実行しても、DDD配下のtest_*.pyが「仕様書が見つからない
+    ファイル」として報告されないこと(Issue #124で報告された実際の症状の
+    回帰確認)。
+    """
+    report = module.cmd_full()
+    undocumented_str = "\n".join(report.undocumented)
+    assert "DDD/test_" not in undocumented_str
+
+
+def test_full_audit_no_longer_flags_existing_ddd_test_docs_as_orphaned():
+    """
+    既存のdocs/specifications/DDD/test_*.md群が、cmd_full()の孤立ドキュメント
+    検知で誤って「対応ソースが見つからない」と報告されないこと。
+    """
+    report = module.cmd_full()
+    orphaned_str = "\n".join(report.orphaned)
+    assert "DDD/test_" not in orphaned_str
