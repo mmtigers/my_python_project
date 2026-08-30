@@ -162,3 +162,51 @@ class TestRunSyncDestructiveDeleteIsGated:
             kept = cur.execute("SELECT title FROM quest_master WHERE quest_id = 1").fetchone()
         assert stale == 0, "confirmed sync should still delete rows not present in the master data"
         assert kept["title"] == "Kept Quest"
+
+
+class TestSyncQuestsResetPeriod:
+    """
+    #100: sync_quests() の INSERT 列に reset_period が無く、quest_master.reset_period の
+    DB列デフォルト('weekly_monday'。current_schema.sql/migrations/0002由来でALTER TABLEでは
+    変更不能)がそのまま入ってしまい、is_within_reset_period() が扱えない値のため
+    周期内多重完了ガードが機能しなくなる不具合(0005で一度修正済み)の回帰テスト。
+    """
+
+    def test_new_quest_gets_daily_reset_period_not_db_column_default(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(
+            sync_strict, "QUESTS",
+            [{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            reset_period = cur.execute(
+                "SELECT reset_period FROM quest_master WHERE quest_id = 1"
+            ).fetchone()["reset_period"]
+        assert reset_period == "daily"
+
+    def test_reupserted_existing_quest_is_corrected_to_daily(self, isolated_db, monkeypatch):
+        """既に不正値('weekly_monday')になっている既存行も、再UPSERT時に補正されること。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period) "
+                "VALUES (1, 'Old Quest', 'daily', 1, 1, 'weekly_monday')"
+            )
+
+        monkeypatch.setattr(
+            sync_strict, "QUESTS",
+            [{"id": 1, "title": "New Quest", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            reset_period = cur.execute(
+                "SELECT reset_period FROM quest_master WHERE quest_id = 1"
+            ).fetchone()["reset_period"]
+        assert reset_period == "daily"

@@ -54,13 +54,22 @@ def sync_quests(cur, dry_run: bool = False):
         # `days` カラムを参照していたため実行すると必ず sqlite3.OperationalError
         # になっていた(テスト作成時に発覚)。
 
+        # #100: reset_period 列を明示的にINSERTしないと、quest_master.reset_period の
+        # DB列デフォルト('weekly_monday'。current_schema.sql/migrations/0002で焼き付いており
+        # ALTER TABLEでは変更不能)がそのまま入ってしまう。'weekly_monday' は
+        # is_within_reset_period() が扱えない値のため、周期内多重完了ガードが機能せず、
+        # クリアしても未クリア表示になる不具合(0005で一度修正済み)が新規/再UPSERT行で
+        # 再発する。quest_data.py の各クエストは reset_period キーを持たないため、
+        # models.quest.MasterQuest.reset_period のデフォルトと同じ 'daily' を使う。
+        reset_period_val = q.get('reset_period', 'daily')
+
         cur.execute("""
             INSERT INTO quest_master (
                 quest_id, title, quest_type, target_user,
                 exp_gain, gold_gain, icon_key,
-                day_of_week, description
+                day_of_week, description, reset_period
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(quest_id) DO UPDATE SET
                 title = excluded.title,
                 quest_type = excluded.quest_type,
@@ -69,7 +78,8 @@ def sync_quests(cur, dry_run: bool = False):
                 gold_gain = excluded.gold_gain,
                 icon_key = excluded.icon_key,
                 day_of_week = excluded.day_of_week,
-                description = excluded.description
+                description = excluded.description,
+                reset_period = excluded.reset_period
         """, (
             q['id'],
             q['title'],
@@ -79,7 +89,8 @@ def sync_quests(cur, dry_run: bool = False):
             gold_val,
             icon_val,
             q.get('days'),              # days (0,1,2...)
-            q.get('desc')               # desc -> description
+            q.get('desc'),              # desc -> description
+            reset_period_val
         ))
     logger.info(f"Upserted {len(QUESTS)} quests.")
 
