@@ -216,18 +216,18 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.calculate_quest_boost`
 
-* **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」はサーバーのローカル時刻（`datetime.datetime.now()`）であり、`is_within_reset_period`のようなJST変換は行われない。
-* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 180〜226)
-* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 185〜186), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 192〜193)
-* 根拠: `now = datetime.datetime.now()` (行番号: 202)
+* **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」は、Issue #108の修正により`is_within_reset_period`と同じJST基準（`datetime.timezone(+9時間)`）に統一された（以前はサーバーのローカル時刻`datetime.datetime.now()`を使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の判定で`days_diff`が1小さくなる不具合があった）。
+* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 247〜298)
+* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 252〜253), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 259〜260)
+* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')\n        now_jst = datetime.datetime.now(JST)` (行番号: 273〜274)
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
-* 根拠: (行番号: 180〜181 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
+* 根拠: (行番号: 247〜248 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
 * **戻り値/レスポンス**: `Dict[str, int]`（`gold`, `exp`の追加ボーナス）
-* 根拠: (行番号: 180, 226)
+* 根拠: (行番号: 247, 298)
 * **副作用**: DB参照（`quest_history`）
-* 根拠: (行番号: 196〜200)
+* 根拠: (行番号: 263〜267)
 * **エラーハンドリング**: 日時パースエラー時に`pass`で無視し、ボーナスなし扱いとする。
-* 根拠: (行番号: 209〜210 / 抜粋: "except Exception:\n                pass")
+* 根拠: (行番号: 281〜282 / 抜粋: "except Exception:\n                pass")
 
 ### `QuestService.process_complete_quest`
 
@@ -767,8 +767,8 @@ graph TD
 
 * **`is_within_reset_period`が扱うリセット周期は`'daily'`と`'weekly'`のみ**: `sync_master_data`が`quest_master.reset_period`列を（列が存在しない旧DBに対して）追加する際のデフォルト値は現在`'daily'`であり、`is_within_reset_period`が扱う2値と一致するよう修正されている。ただし`current_schema.sql`側のテーブル定義自体（DBを新規作成する経路のCREATE TABLE文）は`reset_period`列のDEFAULTが依然`'weekly_monday'`のままで、この2つのデフォルト値は食い違っている。`reset_period`が`'weekly_monday'`のまま（または`'daily'`/`'weekly'`以外の任意の値）であるクエストは、`is_within_reset_period`のいずれの分岐にも一致せず`get_all_view_data`内での有効性判定で常に`False`を返し、`completedQuests`（および共有クエストの他者完了状況）へ反映されない可能性が残る。
 * 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242), `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 877)
-* **`calculate_quest_boost`と`is_within_reset_period`で「現在時刻」の基準が異なる**: `is_within_reset_period`はJST（+9時間、標準ライブラリのみで定義）に厳密に変換して比較する一方、`calculate_quest_boost`は`datetime.datetime.now()`（サーバーのOSローカル時刻）をそのまま使用している。サーバーのOSタイムゾーンがJST以外（例: UTC環境）の場合、連続日ボーナスの判定基準日がずれる可能性がある（M-1-4は`is_within_reset_period`のtzinfo無し値の解釈をUTCからJSTへ修正したのみで、この2関数間の基準不一致自体は解消されていない）。
-* 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 147), `now = datetime.datetime.now()` (行番号: 202)
+* **`calculate_quest_boost`と`is_within_reset_period`の「現在時刻」基準不一致（Issue #108で解消済み）**: 以前は`is_within_reset_period`がJST（+9時間、標準ライブラリのみで定義）に厳密に変換して比較する一方、`calculate_quest_boost`は`datetime.datetime.now()`（サーバーのOSローカル時刻）をそのまま使用しており、サーバーのOSタイムゾーンがJST以外（例: UTC環境）の場合、JST 0時〜9時の間の判定で連続日ボーナスの`days_diff`が1小さくなる不具合があった（M-1-4は`is_within_reset_period`のtzinfo無し値の解釈をUTCからJSTへ修正したのみで、この2関数間の基準不一致自体は未解消のまま残っていた）。Issue #108で`calculate_quest_boost`も同じJST基準（`datetime.timezone(+9時間)`）に統一され解消済み。
+* 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 214, 274)
 * **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`辞書もエントリを削除しない同じ設計である。
 * 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `_completion_locks[key] = lock` (行番号: 81), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `_user_balance_locks[user_id] = lock` (行番号: 103), `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `_purchase_locks[key] = lock` (行番号: 141)
 * **`_get_completion_lock_key`はロック取得前にDBへ1回問い合わせる**: 兄妹連携クエストかどうかを判定するために`quest_master`をSELECTする処理が、ロック取得そのものより前・かつ別の`get_db_cursor`トランザクションとして実行される。この問い合わせと実際のロック取得の間にはわずかな非アトミックな隙間があるが、判定対象は`target_user`という更新されることがほぼ無いマスタ値であり、ここでのTOCTOU（read-then-lock間のズレ）が実害あるレースを生む経路は確認できていない（Issue #96の修正で導入）。

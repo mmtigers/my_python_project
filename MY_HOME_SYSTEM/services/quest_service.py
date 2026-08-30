@@ -266,7 +266,12 @@ class QuestService:
             ORDER BY completed_at DESC LIMIT 1
         """, (user_id, quest['quest_id'])).fetchone()
 
-        now = datetime.datetime.now()
+        # M-1-3系: is_within_reset_periodと同様、経過日数の判定はJST基準で
+        # 行う必要がある。以前はdatetime.datetime.now()(OSローカル時刻)を
+        # 使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の
+        # 判定でdays_diffが1小さくなる不具合があった。
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        now_jst = datetime.datetime.now(JST)
         last_date = None
 
         if last_hist:
@@ -275,11 +280,11 @@ class QuestService:
                 last_date = dt.date()
             except Exception:
                 pass
-        
+
         if not last_date:
             return {"gold": 0, "exp": 0}
 
-        today_date = now.date()
+        today_date = now_jst.date()
         days_diff = (today_date - last_date).days
 
         if days_diff <= 1:

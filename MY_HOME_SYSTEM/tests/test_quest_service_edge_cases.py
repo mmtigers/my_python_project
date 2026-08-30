@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -232,6 +233,31 @@ class TestCalculateQuestBoost:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 100, "exp": 100}
+
+    def test_missed_days_is_computed_in_jst_not_os_local_timezone(self, isolated_db):
+        """Issue #108回帰防止: is_within_reset_periodと異なり、以前は
+        datetime.datetime.now()(OSローカル時刻、tzinfoなし)を「今日」の
+        基準にしていたため、サーバーOSのタイムゾーンがJST以外だと
+        JST 0時〜9時の間の判定でdays_diffが1小さくなっていた。
+
+        サーバーOSがUTC(tz_offset=0)の状態で、JST基準では
+        2026-08-20 03:00(=UTC 2026-08-19 18:00)を「現在時刻」として固定する。
+        completed_atはJST 2026-08-17 12:00(3日前)。
+        JST基準で正しく判定されれば days_diff=3 -> missed_days=2 -> ratio=0.2。
+        OSローカル(UTC)の日付(08-19)を誤って使うと days_diff=2 ->
+        missed_days=1 -> ratio=0.1 になってしまう(修正前の不具合)。
+        """
+        _seed_user_and_quest(gold_gain=100, exp_gain=100)
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('dad', 101, 'DailyQuest', 100, 100, '2026-08-17T12:00:00', 'approved')
+            """)
+        with freeze_time("2026-08-19 18:00:00", tz_offset=0):
+            with common.get_db_cursor() as cur:
+                quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
+                boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
+        assert boost == {"gold": 20, "exp": 20}
 
 
 class TestGetAllViewDataTargetedQuestBoost:
