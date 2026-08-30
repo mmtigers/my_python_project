@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 import { Card } from '../../../components/ui/Card';
@@ -34,6 +34,11 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
 
     // ★変更: 素の confirm() を廃止し、アプリ標準の Modal で「つかう」確認を行う
     const [itemToUse, setItemToUse] = useState<InventoryItem | null>(null);
+    // #119: 「はい」の連打(ダブルタップ)による同一アイテムへの多重使用リクエストを防ぐガード。
+    // モーダルを閉じるsetItemToUse(null)による再レンダーを待たずに2回目のクリックが
+    // 発火しうるため(#101のisConfirmingRefと同じ理由)、reactiveなuseMutationAction.isPending
+    // ではなくrefで同期的に判定する。
+    const isUsingItemRef = useRef(false);
 
     // データ取得
     const { data: items, isLoading } = useQuery({
@@ -64,6 +69,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         onError: (error) => {
             showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
             play('cancel');
+        },
+        onSettled: () => {
+            isUsingItemRef.current = false;
         }
     });
 
@@ -129,7 +137,14 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
                         <Button
                             variant="primary"
                             onClick={() => {
-                                if (itemToUse) useMutationAction.mutate(itemToUse.id);
+                                // #119: 連打(ダブルタップ)で同一アイテムに対する使用リクエストが
+                                // 二重送信されると、2回目はサーバー側でstatus!='owned'により
+                                // 400「Cannot use this item」となり、実際は成功しているのに
+                                // エラートーストが出ていた。isUsingItemRefで同期的に多重送信を防ぐ。
+                                if (itemToUse && !isUsingItemRef.current) {
+                                    isUsingItemRef.current = true;
+                                    useMutationAction.mutate(itemToUse.id);
+                                }
                                 setItemToUse(null);
                             }}
                         >
