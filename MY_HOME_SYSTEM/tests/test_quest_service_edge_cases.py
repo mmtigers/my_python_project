@@ -610,3 +610,109 @@ class TestFilterActiveQuestsDateParseErrorLogging:
             f"log message should reference the quest_id (4242), got: {logged_message!r}"
         )
         assert "None" not in logged_message
+
+
+class TestSyncMasterDataSyncsRewardTarget:
+    """
+    Issue #95: sync_master_data の reward_master への UPSERT が target 列を
+    含んでいなかったため、対象者制限(target='children'/'adults' 等)がDBへ
+    一切反映されず、全報酬が全ユーザーに表示・購入可能になっていた。
+    """
+
+    def test_reward_target_is_synced_to_db(self, isolated_db):
+        game_system = GameSystem()
+        game_system.sync_master_data()
+
+        with common.get_db_cursor() as cur:
+            children_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 10"
+            ).fetchone()
+            adults_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 120"
+            ).fetchone()
+
+        assert children_reward["target"] == "children"
+        assert adults_reward["target"] == "adults"
+
+    def test_reward_target_is_updated_on_resync(self, isolated_db):
+        game_system = GameSystem()
+        game_system.sync_master_data()
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("UPDATE reward_master SET target = 'all' WHERE reward_id = 120")
+
+        game_system.sync_master_data()
+
+        with common.get_db_cursor() as cur:
+            adults_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 120"
+            ).fetchone()
+
+        assert adults_reward["target"] == "adults"
+
+
+class TestProcessPurchaseRewardTargetRestriction:
+    """
+    Issue #95: 対象者制限のある報酬(target != 'all')は、フロントの表示フィルタだけ
+    でなくサーバー側の購入処理でも制限されるべき。API直叩きによるバイパスを防ぐ。
+    """
+
+    def _seed_users(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 10000, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 10000, 'role_child')"
+        )
+
+    def _seed_reward(self, cur, target):
+        cur.execute(
+            "INSERT INTO reward_master (reward_id, title, cost_gold, target) VALUES "
+            "(500, 'Restricted Reward', 100, ?)",
+            (target,),
+        )
+
+    def test_child_cannot_purchase_adults_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "adults")
+
+        with pytest.raises(HTTPException) as exc_info:
+            ShopService().process_purchase_reward("son", 500)
+
+        assert exc_info.value.status_code == 403
+
+    def test_adult_can_purchase_adults_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "adults")
+
+        result = ShopService().process_purchase_reward("dad", 500)
+
+        assert result["status"] == "purchased"
+
+    def test_adult_cannot_purchase_children_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "children")
+
+        with pytest.raises(HTTPException) as exc_info:
+            ShopService().process_purchase_reward("dad", 500)
+
+        assert exc_info.value.status_code == 403
+
+    def test_all_target_reward_is_purchasable_by_anyone(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "all")
+
+        result = ShopService().process_purchase_reward("son", 500)
+
+        assert result["status"] == "purchased"
