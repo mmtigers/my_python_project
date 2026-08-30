@@ -93,10 +93,24 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog):
 
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="newface_monitor"):
-        module.DataManager.load_known_casts = MagicMock(return_value=known_casts)
-        module.DataManager.save_known_casts = MagicMock()
-        module.DataManager.record_daily_new_casts = MagicMock()
-        module._check_site(monitor, notifier, site)
+    # ★バグ修正(Issue #122): モノレポ環境ではMY_HOME_SYSTEMがインポート可能なため、
+    # newface_monitor.logger は core.logger.setup_logging() が返すロガーになる。
+    # このロガーは propagate=False で、独自のStreamHandler/FileHandler等で直接
+    # stderr等に出力する設計のため、caplogが依拠するrootロガーへの伝播が起きず、
+    # 実際にはログ出力されているのに caplog.records には一切記録されない
+    # (DDD単体デプロイ時のフォールバックロガーは logging.getLogger で
+    # propagate=Trueが既定のため、このモノレポ環境でのみ恒常的に再現していた)。
+    # caplogはロガーのpropagateに依存するため、テスト実行中だけ強制的にTrueへ
+    # 切り替え、終了後に元の値へ戻す。
+    original_propagate = module.logger.propagate
+    module.logger.propagate = True
+    try:
+        with caplog.at_level(logging.WARNING, logger="newface_monitor"):
+            module.DataManager.load_known_casts = MagicMock(return_value=known_casts)
+            module.DataManager.save_known_casts = MagicMock()
+            module.DataManager.record_daily_new_casts = MagicMock()
+            module._check_site(monitor, notifier, site)
+    finally:
+        module.logger.propagate = original_propagate
 
     assert any("Unusually large diff" in record.message for record in caplog.records)
