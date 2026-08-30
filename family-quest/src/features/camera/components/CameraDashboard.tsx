@@ -6,19 +6,34 @@ import { CameraConfig } from '../types';
 import { Camera, Settings } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 
+// ★バグ修正(Issue #121): apiClient側でスローされるErrorのmessageには、バックエンドが
+// 返す{"detail": "..."}の内容が入っている(apiClient.ts参照)。CameraDashboardは
+// main.tsxでToastProvider配下ではなく独立してマウントされるため(/cameraは
+// Family Quest本体と同時に使われない専用ビューア)、他画面のようにuseToast()の
+// showToastは使えない。代わりにローカルなfetchErrorステートで画面内にエラー表示する。
+const extractErrorDetail = (error: unknown): string => {
+    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';
+};
+
 const CameraDashboard: React.FC = () => {
     const [allCameras, setAllCameras] = useState<CameraConfig[]>([]);
     const [activeTab, setActiveTab] = useState<'live' | 'record'>('live');
     const [loading, setLoading] = useState(true);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    // ★バグ修正(Issue #121): 以前はcatchがconsole.errorのみで、バックエンド停止・
+    // ネットワーク断時にライブタブが「無言で」空のグリッドを表示していた
+    // (障害の原因がユーザーに一切伝わらない)。取得失敗を画面上のバナーで通知する。
+    const [fetchError, setFetchError] = useState<string | null>(null);
 
     const fetchSettings = useCallback(() => {
         return apiClient.get<CameraConfig[]>('/api/cameras/settings')
             .then(data => {
                 setAllCameras([...data].sort((a, b) => a.order - b.order));
+                setFetchError(null);
             })
             .catch(err => {
                 console.error("Failed to fetch camera settings:", err);
+                setFetchError(extractErrorDetail(err));
             });
     }, []);
 
@@ -50,6 +65,18 @@ const CameraDashboard: React.FC = () => {
                         <Settings size={22} />
                     </button>
                 </header>
+
+                {fetchError && (
+                    <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+                        <span>⚠️ カメラ設定の取得に失敗しました: {fetchError}</span>
+                        <button
+                            onClick={() => { setLoading(true); fetchSettings().finally(() => setLoading(false)); }}
+                            className="shrink-0 rounded bg-red-800 px-3 py-1 font-bold text-white hover:bg-red-700 transition-colors"
+                        >
+                            再試行
+                        </button>
+                    </div>
+                )}
 
                 <div className="flex gap-2 mb-6 pb-2">
                     <button
