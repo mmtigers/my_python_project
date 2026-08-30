@@ -9,14 +9,17 @@
 
 ## 関連ドキュメント
 
-* [App.md](App.md) - `/camera`を含まないパスでマウントされる通常時のルートコンポーネント
-* [src/features/camera/components/CameraDashboard.md](src/features/camera/components/CameraDashboard.md) - `/camera`パスでマウントされるカメラビューワのルートコンポーネント
+* [App.md](App.md) - `/camera`を含まないパスでマウントされる通常時のルートコンポーネント（`SettingsProvider`/`ToastProvider`配下でマウントされる）
+* [src/features/camera/components/CameraDashboard.md](src/features/camera/components/CameraDashboard.md) - `/camera`パスで`lazy()`+`Suspense`によりマウントされるカメラビューワのルートコンポーネント（`SettingsProvider`/`ToastProvider`の外側でマウントされる）
 * [src/lib/queryClient.md](src/lib/queryClient.md) - `QueryClientProvider`に渡す`queryClient`インスタンスの定義元
+* [src/context/SettingsContext.md](src/context/SettingsContext.md) - `App`分岐のみをラップする`SettingsProvider`の実装元
+* [src/context/ToastContext.md](src/context/ToastContext.md) - `App`分岐のみをラップする`ToastProvider`の実装元
 
 ## 2. ファイルの概要
 
-* DOMから特定のルート要素（`id="root"`）を取得し、Reactのコンテキスト（厳格モード、React Queryのプロバイダ）でラップした上で、URLのパス（`window.location.pathname`）に`/camera`が含まれるかどうかに応じて、`CameraDashboard`（カメラビューワ）または`App`（通常のFamily Questアプリ）のいずれかをルートとしてマウント・レンダリングするためのエントリーポイントファイルである。
-* 根拠: `ReactDOM.createRoot(rootElement).render(...)` と `isCameraView` による分岐 (行番号: 17, 19-26 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera'); ... {isCameraView ? <CameraDashboard /> : <App />}")
+* DOMから特定のルート要素（`id="root"`）を取得し、`React.StrictMode`と`QueryClientProvider`（React Query）でラップした上で、URLのパス（`window.location.pathname`）に`/camera`が含まれるかどうか（`isCameraView`）に応じて、マウントするツリーをルート直下で丸ごと切り替えるエントリーポイントファイルである。`isCameraView`が`true`の場合は`CameraDashboard`（カメラビューワ、`lazy()`による動的importで別チャンクに分離され`Suspense`でラップされる）を、`false`の場合は`App`（通常のFamily Questアプリ）を`SettingsProvider`・`ToastProvider`でラップしてレンダリングする。`CameraDashboard`は`SettingsProvider`/`ToastProvider`の**外側**でマウントされるため、`App`側のみが使えるこれら2つのコンテキスト（`useSettings`/`useToast`）を利用できない設計になっている。
+* 根拠: `ReactDOM.createRoot(rootElement).render(...)` と `isCameraView` による分岐 (行番号: 22, 24-41 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera'); ... {isCameraView ? (\n        <Suspense fallback={null}>\n          <CameraDashboard />\n        </Suspense>\n      ) : (\n        <SettingsProvider>\n          <ToastProvider>\n            <App />\n          </ToastProvider>\n        </SettingsProvider>\n      )}")
+* 根拠: [CameraDashboardのlazy import化とコメント] (行番号: 10〜12 / 抜粋: "// CameraDashboard(hls.js含む)は /camera 専用でFamily Quest本体とは同時に使われないため、\n// 動的importで別チャンクに分離し、通常のクエスト画面の初回読み込みバンドルから除外する。\nconst CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))")
 
 ## 3. 外部依存関係
 
@@ -24,24 +27,28 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `React` | 外部ライブラリ | JSXおよびReactの基本機能 | 根拠: `React` (行番号: 1 / 抜粋: "import React from 'react'") |
+| `React`, `lazy`, `Suspense` | 外部ライブラリ | JSXおよびReactの基本機能。`lazy`は`CameraDashboard`の動的import、`Suspense`はその読み込み待機中のフォールバック表示に使用 | 根拠: `React` (行番号: 1 / 抜粋: "import React, { lazy, Suspense } from 'react'") |
 | `ReactDOM` | 外部ライブラリ | DOMへのルート作成とレンダリング | 根拠: `ReactDOM` (行番号: 2 / 抜粋: "import ReactDOM from 'react-dom/client'") |
-| `App` | 内部モジュール | アプリケーションのルートコンポーネント（通常時） | 根拠: `App` (行番号: 3 / 抜粋: "import App from './App' // 拡張子は省略可能") |
-| `CameraDashboard` | 内部モジュール | カメラビューワのルートコンポーネント（`/camera`パス時） | 根拠: `CameraDashboard` (行番号: 4 / 抜粋: "import CameraDashboard from './features/camera/components/CameraDashboard' // ★追加") |
-| 該当なし(CSS) | スタイルシート | グローバルなスタイルの適用 | 根拠: `index.css` (行番号: 5 / 抜粋: "import './index.css'") |
-| `QueryClientProvider` | 外部ライブラリ | React Queryのクライアントをツリーに提供 | 根拠: `QueryClientProvider` (行番号: 6 / 抜粋: "import { QueryClientProvider } from '@tanstack/react-query'") |
-| `queryClient` | 内部モジュール | React Queryのクライアントインスタンス | 根拠: `queryClient` (行番号: 7 / 抜粋: "import { queryClient } from './lib/queryClient'") |
+| `App` | 内部モジュール | アプリケーションのルートコンポーネント（通常時、`SettingsProvider`/`ToastProvider`配下でマウント） | 根拠: `App` (行番号: 3 / 抜粋: "import App from './App' // 拡張子は省略可能") |
+| 該当なし(CSS) | スタイルシート | グローバルなスタイルの適用 | 根拠: `index.css` (行番号: 4 / 抜粋: "import './index.css'") |
+| `QueryClientProvider` | 外部ライブラリ | React Queryのクライアントをツリーに提供 | 根拠: `QueryClientProvider` (行番号: 5 / 抜粋: "import { QueryClientProvider } from '@tanstack/react-query'") |
+| `queryClient` | 内部モジュール | React Queryのクライアントインスタンス | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
+| `SettingsProvider` | 内部モジュール | `App`分岐のみをラップする設定コンテキストのプロバイダ（`CameraDashboard`側では利用不可） | 根拠: `SettingsProvider` (行番号: 7 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'") |
+| `ToastProvider` | 内部モジュール | `App`分岐のみをラップするトースト通知コンテキストのプロバイダ（`CameraDashboard`側では利用不可） | 根拠: `ToastProvider` (行番号: 8 / 抜粋: "import { ToastProvider } from './context/ToastContext'") |
+| `CameraDashboard` | 内部モジュール（`lazy`による動的import） | カメラビューワのルートコンポーネント（`/camera`パス時。静的importではなく`lazy()`で別チャンクに分離される） | 根拠: `CameraDashboard` (行番号: 12 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `App` | 内部実装が提供されていないため、どのようなUIやロジックを持つか不明（`./App`ファイルに依存のため要確認）。 | 根拠: `App` (行番号: 3 / 抜粋: "import App from './App'") |
-| `CameraDashboard` | 内部実装が提供されていないため、どのようなUIやロジックを持つか不明（`./features/camera/components/CameraDashboard`ファイルに依存のため要確認）。 | 根拠: `CameraDashboard` (行番号: 4 / 抜粋: "import CameraDashboard from './features/camera/components/CameraDashboard'") |
-| `./index.css` | 具体的なスタイリング内容や影響範囲が不明（該当ファイルに依存のため要確認）。 | 根拠: `index.css` (行番号: 5 / 抜粋: "import './index.css'") |
-| `queryClient` | 初期化時の設定（キャッシュ設定、リトライ回数など）が不明（`./lib/queryClient`ファイルに依存のため要確認）。 | 根拠: `queryClient` (行番号: 7 / 抜粋: "import { queryClient } from './lib/queryClient'") |
-| `document` API | `root`というIDを持つ要素がDOM上に存在するかどうかはHTML側の実装に依存するため不明。 | 根拠: `document.getElementById` (行番号: 10 / 抜粋: "const rootElement = document.getElementById('root');") |
-| `window.location` API | 実行時のURLパスに依存するため、どのタイミングで`/camera`パスになるか（ルーティング全体の設計）は本ファイルからは不明。 | 根拠: `window.location.pathname` (行番号: 17 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');") |
+| `CameraDashboard` | 内部実装が提供されていないため、どのようなUIやロジックを持つか不明（`./features/camera/components/CameraDashboard`ファイルに依存のため要確認）。 | 根拠: `CameraDashboard` (行番号: 12 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
+| `./index.css` | 具体的なスタイリング内容や影響範囲が不明（該当ファイルに依存のため要確認）。 | 根拠: `index.css` (行番号: 4 / 抜粋: "import './index.css'") |
+| `queryClient` | 初期化時の設定（キャッシュ設定、リトライ回数など）が不明（`./lib/queryClient`ファイルに依存のため要確認）。 | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
+| `SettingsProvider` | 内部実装が提供されていないため、どのような設定コンテキストを提供するか不明（`./context/SettingsContext`ファイルに依存のため要確認）。 | 根拠: `SettingsProvider` (行番号: 7 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'") |
+| `ToastProvider` | 内部実装が提供されていないため、どのようなトースト通知機構を提供するか不明（`./context/ToastContext`ファイルに依存のため要確認）。 | 根拠: `ToastProvider` (行番号: 8 / 抜粋: "import { ToastProvider } from './context/ToastContext'") |
+| `document` API | `root`というIDを持つ要素がDOM上に存在するかどうかはHTML側の実装に依存するため不明。 | 根拠: `document.getElementById` (行番号: 15 / 抜粋: "const rootElement = document.getElementById('root');") |
+| `window.location` API | 実行時のURLパスに依存するため、どのタイミングで`/camera`パスになるか（ルーティング全体の設計）は本ファイルからは不明。 | 根拠: `window.location.pathname` (行番号: 22 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -58,8 +65,8 @@ flowchart TD
     CheckNull -- No --> CheckCamera["外部：window.location.pathname.includes('/camera')"]
     CheckCamera --> CreateRoot["外部：ReactDOM.createRoot(rootElement)"]
     CreateRoot --> IsCameraView{"isCameraView === true?"}
-    IsCameraView -- Yes --> RenderCamera["render() 呼び出し<br>(React.StrictMode, QueryClientProvider, CameraDashboard をネスト)"]
-    IsCameraView -- No --> RenderApp["render() 呼び出し<br>(React.StrictMode, QueryClientProvider, App をネスト)"]
+    IsCameraView -- Yes --> RenderCamera["render() 呼び出し<br>(React.StrictMode → QueryClientProvider → Suspense → CameraDashboardをネスト<br>lazy()により初回描画時に動的import)"]
+    IsCameraView -- No --> RenderApp["render() 呼び出し<br>(React.StrictMode → QueryClientProvider → SettingsProvider → ToastProvider → Appをネスト)"]
     RenderCamera --> End([End])
     RenderApp --> End
 
@@ -72,12 +79,14 @@ graph TD
     Main["main.tsx (本ファイル)"] --> Document["外部：ブラウザAPI (document)"]
     Main --> Location["外部：ブラウザAPI (window.location)"]
     Main --> ReactDOM["外部モジュール：react-dom/client"]
-    Main --> React["外部モジュール：react"]
+    Main --> React["外部モジュール：react (lazy, Suspense含む)"]
     Main --> ReactQuery["外部モジュール：@tanstack/react-query"]
     Main --> QueryClient["外部ファイル：./lib/queryClient (ブラックボックス)"]
     Main --> App["外部ファイル：./App (ブラックボックス)"]
-    Main --> CameraDashboard["外部ファイル：./features/camera/components/CameraDashboard (ブラックボックス)"]
+    Main -.->|lazy動的import| CameraDashboard["外部ファイル：./features/camera/components/CameraDashboard (ブラックボックス)"]
     Main --> CSS["外部ファイル：./index.css (ブラックボックス)"]
+    Main --> SettingsProvider["外部ファイル：./context/SettingsContext (ブラックボックス)<br>Appのみラップ"]
+    Main --> ToastProvider["外部ファイル：./context/ToastContext (ブラックボックス)<br>Appのみラップ"]
 
 ```
 
@@ -86,17 +95,20 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `./App.tsx` | アプリケーションのルートであり、画面の描画内容やルーティング等の主要な機能の全体像を把握するために必須であるため。 | 根拠: `App` (行番号: 3 / 抜粋: "import App from './App'") |
-| 高 | `./features/camera/components/CameraDashboard.tsx` | `/camera`パスでマウントされるもう一方のルートコンポーネントであり、カメラ機能の全体像を把握するために必須であるため。 | 根拠: `CameraDashboard` (行番号: 4 / 抜粋: "import CameraDashboard from './features/camera/components/CameraDashboard'") |
-| 中 | `./lib/queryClient.ts` または `.js` | React Queryによるデータフェッチのグローバルなキャッシュ戦略やエラーハンドリングの設定内容を確認するため。 | 根拠: `queryClient` (行番号: 7 / 抜粋: "import { queryClient } from './lib/queryClient'") |
-| 中 | `index.html` | マウント対象となる `<div id="root"></div>` 要素が確実に定義されているか、およびメタデータ等を確認するため。 | 根拠: `document.getElementById` (行番号: 10 / 抜粋: "document.getElementById('root'); ") |
-| 低 | `./index.css` | アプリケーション全体に適用されているベーススタイルやCSS変数の定義状況を把握するため。 | 根拠: `index.css` (行番号: 5 / 抜粋: "import './index.css'") |
+| 高 | `./features/camera/components/CameraDashboard.tsx` | `/camera`パスでマウントされるもう一方のルートコンポーネントであり、カメラ機能の全体像を把握するために必須であるため。 | 根拠: `CameraDashboard` (行番号: 12 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
+| 中 | `./context/SettingsContext.tsx`, `./context/ToastContext.tsx` | `App`分岐のみをラップするコンテキストの実装内容（`CameraDashboard`側で利用不可な理由の裏付け）を確認するため。 | 根拠: `SettingsProvider`, `ToastProvider` (行番号: 7-8 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'\nimport { ToastProvider } from './context/ToastContext'") |
+| 中 | `./lib/queryClient.ts` または `.js` | React Queryによるデータフェッチのグローバルなキャッシュ戦略やエラーハンドリングの設定内容を確認するため。 | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
+| 中 | `index.html` | マウント対象となる `<div id="root"></div>` 要素が確実に定義されているか、およびメタデータ等を確認するため。 | 根拠: `document.getElementById` (行番号: 15 / 抜粋: "document.getElementById('root'); ") |
+| 低 | `./index.css` | アプリケーション全体に適用されているベーススタイルやCSS変数の定義状況を把握するため。 | 根拠: `index.css` (行番号: 4 / 抜粋: "import './index.css'") |
 
 ## 8. 保守上の注意点
 
 * `document.getElementById('root')` が `null` を返した場合、意図的に `Error` がスローされ後続のレンダリング処理が完全に停止する。呼び出し元のHTMLファイルに `id="root"` を持つ要素が存在しない場合にクリティカルな影響が出る。
-* 根拠: `if (!rootElement) { throw new Error('Failed to find the root element'); }` (行番号: 12-14)
+* 根拠: `if (!rootElement) { throw new Error('Failed to find the root element'); }` (行番号: 17-19)
+* **`CameraDashboard`は`SettingsProvider`/`ToastProvider`の外側でマウントされる**: `App`分岐のみが`SettingsProvider`・`ToastProvider`でラップされており、`CameraDashboard`（および配下のコンポーネント）はこれらのコンテキストの外でマウントされる。そのため`CameraDashboard`側では`useSettings`/`useToast`フックを使用できない設計上の制約がある（`CameraDashboard`側でトースト通知的なUIが必要な場合は、コンテキストに依存しないローカルstateでの実装が必要になる）。
+* 根拠: [レンダーツリー構造] (行番号: 28-38 / 抜粋: "{isCameraView ? (\n        <Suspense fallback={null}>\n          <CameraDashboard />\n        </Suspense>\n      ) : (\n        <SettingsProvider>\n          <ToastProvider>\n            <App />\n          </ToastProvider>\n        </SettingsProvider>\n      )}")
 * **ルーティングがURLパスの文字列一致のみで判定されている**: `isCameraView` は `window.location.pathname.includes('/camera')` という単純な部分一致で決定されており、専用のルーティングライブラリを使っていない。将来的に`/camera`を含む別の意図しないパス（例: `/settings/camera-help`）が追加された場合、意図せず`CameraDashboard`がマウントされる可能性がある。
-* 根拠: (17行目 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');")
+* 根拠: (22行目 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');")
 
 ## 9. 不明事項一覧
 
