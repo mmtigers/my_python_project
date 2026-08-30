@@ -65,6 +65,46 @@ def test_perform_backup_notifies_and_returns_false_on_nas_dir_creation_failure(m
     assert all("🚨" in n["messages"][0]["text"] for n in notified)
 
 
+class TestBackupFilesConfigCopy:
+    """Issue #113回帰防止: config.BACKUP_FILESに列挙された設定ファイル
+    (config.py/.env/devices.json)は、以前はどのコードからも参照されず
+    バックアップ対象になっていなかった(DBファイル単体しか転送されなかった)。"""
+
+    def test_additional_files_in_backup_files_are_copied_to_nas(self, monkeypatch):
+        for name, content in (
+            ("config.py", "# dummy config"),
+            (".env", "SOME_KEY=1"),
+            ("devices.json", "{}"),
+        ):
+            with open(os.path.join(config.BASE_DIR, name), "w", encoding="utf-8") as f:
+                f.write(content)
+        monkeypatch.setattr(
+            config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
+        )
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is True
+        nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        backups = os.listdir(nas_backup_dir)
+        # DBファイル1件 + 設定ファイル3件
+        assert len(backups) == 4
+        assert any(name.startswith("config_") and name.endswith(".py") for name in backups)
+        assert any(name.startswith(".env_") for name in backups)
+        assert any(name.startswith("devices_") and name.endswith(".json") for name in backups)
+
+    def test_missing_additional_file_is_skipped_without_failing_backup(self, monkeypatch):
+        """BACKUP_FILESに存在しないファイルが列挙されていても、DBバックアップ自体は成功すること"""
+        monkeypatch.setattr(config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "nonexistent.json"])
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is True
+        nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        backups = os.listdir(nas_backup_dir)
+        assert len(backups) == 1
+
+
 def test_perform_backup_detects_transfer_integrity_mismatch(monkeypatch):
     """
     shutil.copy2 自体は成功しても、転送後のサイズ検証で不一致が検出された場合は
