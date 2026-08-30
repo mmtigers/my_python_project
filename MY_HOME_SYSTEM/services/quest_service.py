@@ -230,8 +230,24 @@ class QuestService:
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         # 同一ユーザー・同一クエストへの同時多重リクエストによる二重加算を防ぐため、
         # DBトランザクションの外側でプロセス内ロックを取得して処理全体を直列化する。
-        with _get_completion_lock((user_id, quest_id)):
+        with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):
             return self._process_complete_quest_locked(user_id, quest_id)
+
+    def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:
+        # 兄妹連携クエスト(target_user='siblings')は、兄・妹どちらが完了報告しても
+        # 同じロックキーで直列化する必要がある。ここを (user_id, quest_id) のままにすると
+        # 報告者ごとにロックキーが分かれてしまい、兄妹がほぼ同時に報告した場合、双方の
+        # 処理が互いのロック取得を待たずに _process_coop_quest_completion まで進んでしまい、
+        # pendingペア(quest_history 2行×2組)が二重生成されて承認時に報酬が2倍になる。
+        # そのため、対象クエストが兄妹連携クエストの場合はユーザーIDに依存しない
+        # 共通キーを使って直列化する。
+        with common.get_db_cursor() as cur:
+            quest = cur.execute(
+                "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)
+            ).fetchone()
+        if quest and quest['target_user'] == 'siblings':
+            return ('__coop__', quest_id)
+        return (user_id, quest_id)
 
     def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
