@@ -155,3 +155,14 @@ class TestVerifyTimestamp:
     def test_rejects_malformed_timestamp(self):
         with pytest.raises(av.AlexaVerificationError):
             av.verify_timestamp("not-a-timestamp")
+
+    def test_rejects_timestamp_without_timezone_as_verification_error_not_typeerror(self):
+        """Issue #110回帰防止: datetime.fromisoformat はタイムゾーン情報のない
+        ISO文字列(例: "2026-08-30T00:00:00")もパース成功として受理してしまう
+        (ValueError/AttributeErrorにならない)ため、以前はその後の
+        `now(aware) - ts(naive)` がTypeErrorを送出していた。ルーターは
+        AlexaVerificationErrorのみを捕捉するため、この経路だけ400ではなく
+        500になっていた(グローバル例外ハンドラ経由)。"""
+        naive_timestamp = datetime.datetime.now().isoformat()
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_timestamp(naive_timestamp)
