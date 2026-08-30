@@ -138,39 +138,41 @@
 
 ### `ConfirmModal`
 
-* **役割**: 完了確認・購入確認・却下確認用のモーダルを表示する。渡された`mode`（`'complete' | 'purchase' | 'reject' | null`）に応じて`getMessage`内の`switch`文でタイトルとメッセージテキストを切り替える。`mode === 'complete'`のときは「クエスト完了」というタイトルで「「タイトル」を完了にしますか？」を表示し（実機検証で子どもの誤操作が多かったため復活）、`mode === 'purchase'`では報酬の`cost_gold`（無ければ`cost`にフォールバック）を使って金額を表示する。`mode === 'reject'`のときのみ、`REJECT_REASONS`をワンタップで選べるボタン群を表示する。
-* 根拠: (82〜142行目 / 抜粋: "const ConfirmModal = ({\n  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel\n}: {")
-* 根拠: `getMessage`の`switch`文 (94〜109行目 / 抜粋: "const getMessage = (): { title: string; text: string } => {\n    switch (mode) {")
-* 根拠: `complete`ケース (96〜99行目 / 抜粋: "case 'complete': {\n        const t = target as Quest;\n        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };\n      }")
-* 根拠: `purchase`ケースの`cost_gold`フォールバック (100〜105行目 / 抜粋: "// Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず\n        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。\n        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };")
-* 根拠: 却下理由選択UI (117〜133行目 / 抜粋: "{mode === 'reject' && (\n          <div className=\"flex flex-wrap gap-2 justify-center mb-6\">")
+* **役割**: 完了確認・購入確認・却下確認用のモーダルを表示する。渡された`mode`（`'complete' | 'purchase' | 'reject' | null`）に応じて`getMessage`内の`switch`文でタイトルとメッセージテキストを切り替える。`mode === 'complete'`のときは「クエスト完了」というタイトルで「「タイトル」を完了にしますか？」を表示し（実機検証で子どもの誤操作が多かったため復活）、`mode === 'purchase'`では報酬の`cost_gold`（無ければ`cost`にフォールバック）を使って金額を表示する。`mode === 'reject'`のときのみ、`REJECT_REASONS`をワンタップで選べるボタン群を表示する。呼び出し元（`App`）から渡される`isConfirming`が`true`の間、「キャンセル」ボタンは`disabled`、「はい」ボタンは`isLoading`（`Button`コンポーネントのローディング表示＋disabled）になる（Issue #101: 確認ボタンの連打による二重実行防止のため追加）。
+* 根拠: (82〜143行目 / 抜粋: "const ConfirmModal = ({\n  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel, isConfirming\n}: {")
+* 根拠: `getMessage`の`switch`文 (95〜110行目 / 抜粋: "const getMessage = (): { title: string; text: string } => {\n    switch (mode) {")
+* 根拠: `complete`ケース (97〜100行目 / 抜粋: "case 'complete': {\n        const t = target as Quest;\n        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };\n      }")
+* 根拠: `purchase`ケースの`cost_gold`フォールバック (101〜106行目 / 抜粋: "// Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず\n        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。\n        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };")
+* 根拠: 却下理由選択UI (118〜134行目 / 抜粋: "{mode === 'reject' && (\n          <div className=\"flex flex-wrap gap-2 justify-center mb-6\">")
+* 根拠: `isConfirming`によるボタン制御 (137〜138行目 / 抜粋: "<Button variant=\"secondary\" onClick={onCancel} disabled={isConfirming}>キャンセル</Button>\n          <Button variant=\"primary\" onClick={onConfirm} isLoading={isConfirming}>はい</Button>")
 
-* **引数/リクエスト**: オブジェクト `{ mode: 'complete' | 'purchase' | 'reject' | null, target: ConfirmTarget | null, rejectReason: string | null, onSelectRejectReason: (reason: string) => void, onConfirm: () => void, onCancel: () => void }`
-* 根拠: (82〜91行目)
+* **引数/リクエスト**: オブジェクト `{ mode: 'complete' | 'purchase' | 'reject' | null, target: ConfirmTarget | null, rejectReason: string | null, onSelectRejectReason: (reason: string) => void, onConfirm: () => void, onCancel: () => void, isConfirming: boolean }`
+* 根拠: (82〜92行目)
 
 * **戻り値/レスポンス**: JSX要素、または`mode`/`target`が偽値の場合は`null`
-* 根拠: (92行目 / 抜粋: "if (!mode || !target) return null;")
+* 根拠: (93行目 / 抜粋: "if (!mode || !target) return null;")
 
 * **副作用**: なし（`onSelectRejectReason`/`onConfirm`/`onCancel`は親（`App`）から渡されたコールバックを呼ぶのみ）
 * **エラーハンドリング**: `mode`または`target`がFalsyな場合は何も描画せず`null`を返す。
-* 根拠: (92行目 / 抜粋: "if (!mode || !target) return null;")
+* 根拠: (93行目 / 抜粋: "if (!mode || !target) return null;")
 
 ### `App`
 
 * **役割**: アプリケーションのルートコンポーネント。各種フックからデータ・関数を取得し、UI状態を管理し、各種ハンドラー関数を定義・子コンポーネントへ渡す。`useLayoutMode()`の結果に応じて`FamilyDashboard`（横画面）または縦画面用のUI一式を条件分岐で描画する。
-* 根拠: `App` コンポーネント定義全体 (144〜570行目 / 抜粋: "function App() {")
+* 根拠: `App` コンポーネント定義全体 (145〜610行目 / 抜粋: "function App() {")
 
 * **引数/リクエスト**: なし
-* 根拠: (144行目 / 抜粋: "function App() {")
+* 根拠: (145行目 / 抜粋: "function App() {")
 
 * **戻り値/レスポンス**: JSX要素。`isLoading`が真の間はローディング表示のみを返す。
-* 根拠: (412, 414行目 / 抜粋: "if (isLoading) return <div className=\"p-10 text-center\">Loading Family Quest...</div>;", "return (\n    <div className=\"min-h-screen bg-gray-900 pb-20 font-sans text-gray-100\">")
+* 根拠: (440, 442行目 / 抜粋: "if (isLoading) return <div className=\"p-10 text-center\">Loading Family Quest...</div>;", "return (\n    <div className=\"min-h-screen bg-gray-900 pb-20 font-sans text-gray-100\">")
 
-* **副作用**: `App`は`useEffect`を1つ定義している（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。
-* 根拠: (188〜194行目 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
+* **副作用**: `App`は`useEffect`を1つ定義している（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。確認モーダルの連打防止用に`isConfirming`(state)/`isConfirmingRef`(ref)も保持する（Issue #101、`executeConfirm`の項を参照）。
+* 根拠: (194〜200行目 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
+* 根拠: `isConfirming`/`isConfirmingRef`の宣言 (163〜168行目 / 抜粋: "// #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。\n  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、\n  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には\n  // 対になるstateを使う。\n  const [isConfirming, setIsConfirming] = useState(false);\n  const isConfirmingRef = useRef(false);")
 
 * **エラーハンドリング**: `useGameData`から取得した各更新関数(`completeQuest`等)のレスポンスが`!res.success`の場合、`resolveErrorText`により`res.detail`または`res.reason`に対応するメッセージ（なければ既定文言）を`messageData`にセットし、`cancel`音を鳴らす。
-* 根拠: `runQuestAction`・`executeConfirm`・`handleApprove`・`handleApproveAll`内の分岐 (225〜230, 314〜321, 340〜347, 376〜382行目)
+* 根拠: `runQuestAction`・`executeConfirm`・`handleApprove`・`handleApproveAll`内の分岐 (231〜236, 328〜335, 358〜365, 404〜410行目)
 
 ### `handleLevelUp` (App内の関数)
 
@@ -233,17 +235,19 @@
 
 ### `executeConfirm` (App内の関数)
 
-* **役割**: `confirmMode`（`'complete'`/`'purchase'`/`'reject'`）に応じた処理を実行する。`confirmMode === 'complete'`の場合は確認モーダルの状態を先にクリアしたうえで`runQuestAction(actingUser, 'complete', target)`に処理を委譲し、成功/失敗の通知や演出はすべて`runQuestAction`側で行う。`'purchase'`/`'reject'`の場合は`buyReward`/`rejectQuest`を実行し、結果に応じてトースト（成功時）またはエラーメッセージ（失敗時）を設定する。購入成功時は`clear`音（要件8: メダル音は「メダル獲得時」専用に戻し、購入時に誤って鳴っていたのを削除）、却下成功時は`cancel`音を再生する。
-* 根拠: (282〜327行目 / 抜粋: "const executeConfirm = async () => {")
-* 根拠: `complete`モードの委譲 (286〜295行目 / 抜粋: "if (confirmMode === 'complete') {\n      // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。\n      // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。\n      const target = confirmTarget as Quest;\n      setConfirmMode(null);\n      setConfirmTarget(null);\n      setConfirmUser(null);\n      await runQuestAction(actingUser, 'complete', target);\n      return;\n    }")
+* **役割**: `confirmMode`（`'complete'`/`'purchase'`/`'reject'`）に応じた処理を実行する。先頭で`isConfirmingRef.current`が`true`なら即座に`return`し、確認ボタンの連打による二重実行を防ぐ（Issue #101）。判定には`useState`ではなく`isConfirmingRef`（`useRef`）を使っているのは、連打によるほぼ同期的な2回目の呼び出しが、1回目の`setIsConfirming(true)`による再レンダーを待たずに発生しうるため（`useState`の値はクロージャに閉じ込められ、再レンダーまで更新後の値を参照できない）。ガードを通過すると`isConfirmingRef.current`/`isConfirming`(state)の両方を`true`にし、`try`ブロックで本処理を行い、`finally`で必ず両方を`false`に戻す。`confirmMode === 'complete'`の場合は確認モーダルの状態を先にクリアしたうえで`runQuestAction(actingUser, 'complete', target)`に処理を委譲し、成功/失敗の通知や演出はすべて`runQuestAction`側で行う。`'purchase'`/`'reject'`の場合は`buyReward`/`rejectQuest`を実行し、結果に応じてトースト（成功時）またはエラーメッセージ（失敗時）を設定する。購入成功時は`clear`音（要件8: メダル音は「メダル獲得時」専用に戻し、購入時に誤って鳴っていたのを削除）、却下成功時は`cancel`音を再生する。
+* 根拠: (288〜345行目 / 抜粋: "const executeConfirm = async () => {")
+* 根拠: 連打ガード (289〜295行目 / 抜粋: "if (!confirmMode || !confirmTarget) return;\n    // #101: 「はい」の連打で、1回目のレスポンス前に2回目の実行が発火するのを防ぐ。\n    // (サーバー側にもスパムチェック/ロックを追加済みだが、フロント側でも連打そのものを\n    // 抑止し、連打の2回目がエラートーストになるのを防ぐ)\n    if (isConfirmingRef.current) return;\n    isConfirmingRef.current = true;\n    setIsConfirming(true);")
+* 根拠: `try`/`finally`によるガード解除 (297, 341〜344行目 / 抜粋: "try {", "} finally {\n      isConfirmingRef.current = false;\n      setIsConfirming(false);\n    }")
+* 根拠: `complete`モードの委譲 (300〜309行目 / 抜粋: "if (confirmMode === 'complete') {\n        // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。\n        // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。\n        const target = confirmTarget as Quest;\n        setConfirmMode(null);\n        setConfirmTarget(null);\n        setConfirmUser(null);\n        await runQuestAction(actingUser, 'complete', target);\n        return;\n      }")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `Promise<void>`
-* **副作用**: `confirmMode === 'complete'`の場合は確認モーダル状態を先にクリアしたうえで`runQuestAction`を呼び出す。`'purchase'`/`'reject'`の場合は`buyReward`/`rejectQuest`の呼び出し、成功時の`showToast`/音再生、失敗時の`messageData`更新、成功時のみ実行される確認モーダル状態のクリア(`setConfirmMode`, `setConfirmTarget`, `setConfirmUser`, `setRejectReason`)
-* 根拠: (286〜295, 299〜312, 323〜326行目)
+* **副作用**: `isConfirmingRef.current`/`isConfirming`(state)の設定・解除（`finally`で必ず解除）。`confirmMode === 'complete'`の場合は確認モーダル状態を先にクリアしたうえで`runQuestAction`を呼び出す。`'purchase'`/`'reject'`の場合は`buyReward`/`rejectQuest`の呼び出し、成功時の`showToast`/音再生、失敗時の`messageData`更新、成功時のみ実行される確認モーダル状態のクリア(`setConfirmMode`, `setConfirmTarget`, `setConfirmUser`, `setRejectReason`)
+* 根拠: (293〜295, 300〜309, 313〜326, 341〜344行目)
 
-* **エラーハンドリング**: `'purchase'`/`'reject'`の場合、`!res.success`のとき`confirmMode === 'reject'`かどうかでフォールバック文言（「却下に失敗しました」/「失敗しました」）を切り替えつつ`resolveErrorText(res, fallback)`を`messageData`にセットし`cancel`音を再生して`return`する。このとき購入・却下いずれの失敗でも確認モーダルの状態（`confirmMode`/`confirmTarget`等）はクリアされず、モーダルは開いたまま残る（角度⑨: エラーを閉じたあと状態を失わずに「はい」で再試行できるようにするため）。`'complete'`の場合のエラー処理は`runQuestAction`側に委譲され、`executeConfirm`自身はモーダルを閉じるのみで成否を判定しない。
-* 根拠: (314〜321行目 / 抜粋: "if (!res.success) {\n      const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n      setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n      play('cancel');\n      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n      return;\n    }")
+* **エラーハンドリング**: `'purchase'`/`'reject'`の場合、`!res.success`のとき`confirmMode === 'reject'`かどうかでフォールバック文言（「却下に失敗しました」/「失敗しました」）を切り替えつつ`resolveErrorText(res, fallback)`を`messageData`にセットし`cancel`音を再生して`return`する。このとき購入・却下いずれの失敗でも確認モーダルの状態（`confirmMode`/`confirmTarget`等）はクリアされず、モーダルは開いたまま残る（角度⑨: エラーを閉じたあと状態を失わずに「はい」で再試行できるようにするため）。`'complete'`の場合のエラー処理は`runQuestAction`側に委譲され、`executeConfirm`自身はモーダルを閉じるのみで成否を判定しない。いずれの分岐でも`finally`により連打ガード（`isConfirmingRef`/`isConfirming`）は必ず解除される。
+* 根拠: (328〜335行目 / 抜粋: "if (!res.success) {\n        const fallback = confirmMode === 'reject' ? \"却下に失敗しました\" : \"失敗しました\";\n        setMessageData({ title: \"エラー\", text: resolveErrorText(res, fallback) });\n        play('cancel');\n        // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で\n        // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)\n        return;\n      }")
 
 ### `handleApprove` (App内の関数)
 
@@ -332,10 +336,13 @@ flowchart TD
     SetModal --> ShowConfirmModal
 
     ShowConfirmModal --> WaitAction{"ユーザーの操作"}
-    WaitAction -- キャンセル --> CloseModal["setConfirmMode(null) & play(cancel)"]
+    WaitAction -- キャンセル --> CloseModal["setConfirmMode(null) & play(cancel)<br>(isConfirming中はキャンセルボタンもdisabled)"]
     WaitAction -- はい --> ExecuteConfirm["executeConfirm() 実行"]
 
-    ExecuteConfirm --> CheckMode{"confirmMode の値"}
+    ExecuteConfirm --> GuardCheck{"isConfirmingRef.current<br>(連打ガード, Issue #101)"}
+    GuardCheck -- true --> GuardReturn["即return(何もしない)"]
+    GuardCheck -- false --> SetGuard["isConfirmingRef/isConfirming を true に<br>(ConfirmModalの「はい」がisLoading表示に)"]
+    SetGuard --> CheckMode{"confirmMode の値"}
     CheckMode -- complete --> CloseThenComplete["確認モーダルの状態を先にクリア"]
     CloseThenComplete --> RunCompleteConfirmed["runQuestAction(actingUser, complete, target)"]
     CheckMode -- purchase --> CallBuyReward["外部: buyReward(actingUser, target)"]

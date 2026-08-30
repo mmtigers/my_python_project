@@ -80,14 +80,15 @@ const resolveErrorText = (res: ActionResult, fallback: string): string =>
   res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
 
 const ConfirmModal = ({
-  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel
+  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel, isConfirming
 }: {
   mode: 'complete' | 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
   rejectReason: string | null,
   onSelectRejectReason: (reason: string) => void,
   onConfirm: () => void,
-  onCancel: () => void
+  onCancel: () => void,
+  isConfirming: boolean
 }) => {
   if (!mode || !target) return null;
 
@@ -133,8 +134,8 @@ const ConfirmModal = ({
         )}
 
         <div className="flex gap-4 justify-center">
-          <Button variant="secondary" onClick={onCancel}>キャンセル</Button>
-          <Button variant="primary" onClick={onConfirm}>はい</Button>
+          <Button variant="secondary" onClick={onCancel} disabled={isConfirming}>キャンセル</Button>
+          <Button variant="primary" onClick={onConfirm} isLoading={isConfirming}>はい</Button>
         </div>
       </div>
     </Modal>
@@ -159,6 +160,12 @@ function App() {
   // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
   const [rejectReason, setRejectReason] = useState<string | null>(null);
+  // #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。
+  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、
+  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には
+  // 対になるstateを使う。
+  const [isConfirming, setIsConfirming] = useState(false);
+  const isConfirmingRef = useRef(false);
 
   // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
   const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
@@ -280,49 +287,61 @@ function App() {
   // --- Confirm Execution (完了・購入・却下。子どもの誤操作対策として確認を挟む) ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
-    const actingUser = confirmUser || currentUser;
+    // #101: 「はい」の連打で、1回目のレスポンス前に2回目の実行が発火するのを防ぐ。
+    // (サーバー側にもスパムチェック/ロックを追加済みだが、フロント側でも連打そのものを
+    // 抑止し、連打の2回目がエラートーストになるのを防ぐ)
+    if (isConfirmingRef.current) return;
+    isConfirmingRef.current = true;
+    setIsConfirming(true);
 
-    if (confirmMode === 'complete') {
-      // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
-      // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
-      const target = confirmTarget as Quest;
+    try {
+      const actingUser = confirmUser || currentUser;
+
+      if (confirmMode === 'complete') {
+        // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
+        // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
+        const target = confirmTarget as Quest;
+        setConfirmMode(null);
+        setConfirmTarget(null);
+        setConfirmUser(null);
+        await runQuestAction(actingUser, 'complete', target);
+        return;
+      }
+
+      let res: ActionResult = { success: false };
+
+      if (confirmMode === 'purchase') {
+        res = await buyReward(actingUser, confirmTarget as Reward);
+        if (res.success) {
+          showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
+          // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
+          play('clear');
+        }
+      } else if (confirmMode === 'reject') {
+        // 却下の記録名義は「親」で固定する(要件5)
+        res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);
+        if (res.success) {
+          play('cancel');
+        }
+      }
+
+      if (!res.success) {
+        const fallback = confirmMode === 'reject' ? "却下に失敗しました" : "失敗しました";
+        setMessageData({ title: "エラー", text: resolveErrorText(res, fallback) });
+        play('cancel');
+        // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で
+        // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)
+        return;
+      }
+
       setConfirmMode(null);
       setConfirmTarget(null);
       setConfirmUser(null);
-      await runQuestAction(actingUser, 'complete', target);
-      return;
+      setRejectReason(null);
+    } finally {
+      isConfirmingRef.current = false;
+      setIsConfirming(false);
     }
-
-    let res: ActionResult = { success: false };
-
-    if (confirmMode === 'purchase') {
-      res = await buyReward(actingUser, confirmTarget as Reward);
-      if (res.success) {
-        showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
-        // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
-        play('clear');
-      }
-    } else if (confirmMode === 'reject') {
-      // 却下の記録名義は「親」で固定する(要件5)
-      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);
-      if (res.success) {
-        play('cancel');
-      }
-    }
-
-    if (!res.success) {
-      const fallback = confirmMode === 'reject' ? "却下に失敗しました" : "失敗しました";
-      setMessageData({ title: "エラー", text: resolveErrorText(res, fallback) });
-      play('cancel');
-      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で
-      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)
-      return;
-    }
-
-    setConfirmMode(null);
-    setConfirmTarget(null);
-    setConfirmUser(null);
-    setRejectReason(null);
   };
 
   // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
@@ -557,6 +576,7 @@ function App() {
         onSelectRejectReason={setRejectReason}
         onConfirm={executeConfirm}
         onCancel={() => { setConfirmMode(null); setRejectReason(null); play('cancel'); }}
+        isConfirming={isConfirming}
       />
 
       {messageData && (
