@@ -1,4 +1,7 @@
 aenum==3.1.16
+ask-sdk-core==1.19.0
+ask-sdk-model==1.82.0
+ask-sdk-runtime==1.19.0
 aiohappyeyeballs==2.6.1
 aiohttp==3.13.2
 aiosignal==1.4.0

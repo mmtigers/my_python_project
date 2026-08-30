@@ -82,6 +82,12 @@ family_events.json
 !family-quest/**/*.ts
 !family-quest/package.json
 !family-quest/package-lock.json
+
+# alexa-skill / MY_HOME_SYSTEM/alexa: this project's own committed Alexa skill
+# config (interaction model, skill manifest, APL document), not personal data —
+# same reasoning as the family-quest exception above.
+!alexa-skill/**/*.json
+!MY_HOME_SYSTEM/alexa/**/*.json
 !family-quest/tsconfig*.json
 # family-quest: the blanket *.mp3 rule above targets personal media, not this
 # app's own sound-effect assets referenced by useSound.ts.
