@@ -35,6 +35,32 @@ except ImportError:
         logger.warning("quest_data module not found via relative import.")
         quest_data = None
 
+
+def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
+    """
+    common.get_now_iso() で保存されたISOタイムスタンプ文字列から、現在までの
+    経過秒数(実時間)を返す。パース失敗時・空文字/Noneの場合は None を返す。
+
+    completed_at/redeemed_at 等は common.get_now_iso() によりJST付きで保存される。
+    tzinfoを切り捨てて datetime.datetime.now()(サーバーのOSローカル時刻)と比較すると、
+    サーバーのOSタイムゾーンがJST以外(例: GitHub ActionsのUTC)の場合に実時間で
+    数秒しか経っていなくても差分が約9時間分ズレて算出されてしまう。tzinfoを
+    保持したまま比較することで、サーバーのOSタイムゾーンに依存せず常に
+    「実時間で何秒経過したか」を正しく判定する。
+    """
+    if not timestamp_str:
+        return None
+    try:
+        last_time = datetime.datetime.fromisoformat(timestamp_str)
+        if last_time.tzinfo is None:
+            # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
+            last_time = last_time.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+        now_check = datetime.datetime.now(last_time.tzinfo)
+        return (now_check - last_time).total_seconds()
+    except Exception:
+        return None
+
+
 # ==========================================
 # Completion Lock (Race Condition Guard)
 # ==========================================
@@ -90,6 +116,30 @@ def _acquire_user_balance_locks(user_ids) -> ExitStack:
     for uid in sorted(set(user_ids)):
         stack.enter_context(_get_user_balance_lock(uid))
     return stack
+
+
+# ==========================================
+# Purchase Lock (Race Condition Guard)
+# ==========================================
+# process_purchase_reward は残高チェックと減算を単一のアトミックなUPDATEで行うため
+# read-then-writeのレースコンディション自体は起きないが、「直近の購入履歴を読む→
+# 履歴を書く」というスパムチェック(#101)は他のスパムチェックと同様のTOCTOUを持つ。
+# 購入確認モーダルの「はい」連打で、1回目のレスポンス前に2回目のリクエストが
+# ほぼ同時に到達すると、どちらも「直近の購入履歴なし」を読んでしまいスパムチェックを
+# すり抜け、残高が足りる限り2回とも独立した正当な購入として成立してしまう
+# (ゴールド二重消費+アイテム二重取得)。process_complete_quest の完了ロックと
+# 同様に、同一(user_id, reward_id)への処理をプロセス内で直列化する。
+_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}
+_purchase_locks_guard = threading.Lock()
+
+
+def _get_purchase_lock(key: Tuple[str, int]) -> threading.Lock:
+    with _purchase_locks_guard:
+        lock = _purchase_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _purchase_locks[key] = lock
+        return lock
 
 
 # ==========================================
@@ -280,26 +330,9 @@ class QuestService:
             """, (user_id, quest['quest_id'])).fetchone()
 
             if last_hist and last_hist['completed_at']:
-                try:
-                    last_time = datetime.datetime.fromisoformat(last_hist['completed_at'])
-                    # completed_at は common.get_now_iso() によりJST付きで保存される。
-                    # 以前はここで tzinfo を切り捨てた上で datetime.datetime.now()(サーバーのOSローカル時刻)
-                    # と比較していたため、サーバーのOSタイムゾーンがJST以外(例: GitHub ActionsのUTC)だと
-                    # 実時間で10秒経過しても差分が約9時間分ズレたままになり、同じクエストが
-                    # 約9時間もの間 429 (「少し時間を空けてから」)で完了できなくなる不具合があった。
-                    # tzinfoを保持したまま比較することで、サーバーのOSタイムゾーンに依存せず
-                    # 常に「実時間で10秒経過したか」を正しく判定する。
-                    if last_time.tzinfo is None:
-                        # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
-                        last_time = last_time.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
-                    now_check = datetime.datetime.now(last_time.tzinfo)
-
-                    if (now_check - last_time).total_seconds() < 10:
-                        raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass
+                elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])
+                if elapsed is not None and elapsed < 10:
+                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
 
             # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
             # is_within_reset_period は元々 get_all_view_data の表示専用
@@ -672,12 +705,35 @@ class QuestService:
 
 class ShopService:
     def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:
+        # 同一ユーザー・同一報酬への同時多重リクエスト(購入確認モーダルの連打等)による
+        # 二重購入を防ぐため、DBトランザクションの外側でプロセス内ロックを取得して
+        # 処理全体を直列化する(#101)。
+        with _get_purchase_lock((user_id, reward_id)):
+            return self._process_purchase_reward_locked(user_id, reward_id)
+
+    def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             reward = cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (reward_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
 
             if not reward: raise HTTPException(status_code=404, detail="Reward not found")
             if not user: raise HTTPException(status_code=404, detail="User not found")
+
+            # スパムチェック(#101): 購入確認モーダルの「はい」連打で、1回目のレスポンス前に
+            # 2回目のリクエストが送られると、ロックが無ければサーバー側は各リクエストを
+            # 独立した正当な購入として処理してしまい、残高が足りれば2回とも成功して
+            # 二重購入(ゴールド二重消費+アイテム二重取得)が成立する。process_complete_quest
+            # と同じ「直近10秒以内の同一操作は拒否」というスパムチェックを行う。
+            last_purchase = cur.execute("""
+                SELECT redeemed_at FROM reward_history
+                WHERE user_id = ? AND reward_id = ?
+                ORDER BY redeemed_at DESC LIMIT 1
+            """, (user_id, reward_id)).fetchone()
+
+            if last_purchase and last_purchase['redeemed_at']:
+                elapsed = _seconds_since_iso_timestamp(last_purchase['redeemed_at'])
+                if elapsed is not None and elapsed < 10:
+                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
 
             target = reward['target'] or 'all'
             if target != 'all':
