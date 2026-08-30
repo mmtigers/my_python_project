@@ -90,3 +90,57 @@ class TestOfficialPayloadContract:
         body = SwitchBotWebhookBody(**OFFICIAL_CONTACT_SENSOR_PAYLOAD)
         device_type = getattr(body.context, "deviceType", getattr(body, "deviceType", "Unknown"))
         assert device_type == "WoContact"
+
+    @pytest.mark.asyncio
+    async def test_official_motion_payload_calls_process_sensor_data_with_resolved_device_type(self):
+        """#94回帰防止: switchbot_webhookがprocess_sensor_dataへ渡すdevice_typeが、
+        61行目で解決済みの値("WoPresence")であり、常にNoneになる未解決の
+        body.deviceType(トップレベル)ではないことを検証する。
+        以前は未解決のbody.deviceTypeが渡っていたため、公式形式のモーション
+        イベントがsensor_service側のMotion判定に一切到達しなかった。"""
+        body = SwitchBotWebhookBody(**OFFICIAL_MOTION_SENSOR_PAYLOAD)
+        assert body.deviceType is None  # トップレベルは常に未設定(公式形式)
+
+        with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+             patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)) as mock_process, \
+             patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="人感センサー"):
+            await webhook_router.switchbot_webhook(body, token=None)
+
+        mock_process.assert_awaited_once()
+        called_dev_type = mock_process.await_args.args[3]
+        assert called_dev_type == "WoPresence"
+
+
+class TestOfficialMotionPayloadTriggersNotification:
+    """#94回帰防止: 公式Webhook形式("WoPresence")のモーション検知が、
+    process_sensor_data内のMotion判定分岐(通知送信+無反応タイマー起動)に
+    実際に到達することをエンドツーエンドで検証する(process_sensor_dataをモックしない)。"""
+
+    @pytest.mark.asyncio
+    async def test_official_motion_event_triggers_notification_and_timer(self):
+        from services import sensor_service as svc
+
+        svc.IS_ACTIVE.pop("AA:BB:CC:DD:EE:02", None)
+        if "AA:BB:CC:DD:EE:02" in svc.MOTION_TASKS:
+            svc.MOTION_TASKS["AA:BB:CC:DD:EE:02"].cancel()
+            del svc.MOTION_TASKS["AA:BB:CC:DD:EE:02"]
+
+        body = SwitchBotWebhookBody(**OFFICIAL_MOTION_SENSOR_PAYLOAD)
+
+        with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+             patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="人感センサー"), \
+             patch("services.sensor_service.send_push") as mock_send_push:
+            result = await webhook_router.switchbot_webhook(body, token=None)
+
+        try:
+            assert result["status"] == "success"
+            assert svc.IS_ACTIVE.get("AA:BB:CC:DD:EE:02") is True
+            assert "AA:BB:CC:DD:EE:02" in svc.MOTION_TASKS
+            mock_send_push.assert_called_once()
+            sent_msg = mock_send_push.call_args.args[1][0]["text"]
+            assert "動きがありました" in sent_msg
+        finally:
+            if "AA:BB:CC:DD:EE:02" in svc.MOTION_TASKS:
+                svc.MOTION_TASKS["AA:BB:CC:DD:EE:02"].cancel()
+                del svc.MOTION_TASKS["AA:BB:CC:DD:EE:02"]
+            svc.IS_ACTIVE.pop("AA:BB:CC:DD:EE:02", None)
