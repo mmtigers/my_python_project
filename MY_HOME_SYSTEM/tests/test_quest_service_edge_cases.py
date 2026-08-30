@@ -208,8 +208,16 @@ class TestCalculateQuestBoost:
         assert boost == {"gold": 0, "exp": 0}
 
     def test_missed_days_grants_proportional_bonus(self, isolated_db):
+        """Issue #176回帰防止: このテストは以前 datetime.datetime.now()(naive、
+        OSローカル時刻)で3日前を計算してseedしていたが、calculate_quest_boostは
+        JST基準(datetime.datetime.now(JST))で「今日」を判定するため、CI実行環境
+        (UTC)かつ実行時刻がJST 0時〜9時に相当する時間帯(UTC 15時〜24時)だと、
+        OSローカルの日付とJSTの日付がずれてdays_diffが期待値と食い違い、決定的に
+        失敗していた。calculate_quest_boostと同じJST基準のtimezone-awareな
+        「今」を使ってseedすることで、実行環境・実行時刻に依存しないようにする。"""
         _seed_user_and_quest(gold_gain=100, exp_gain=100)
-        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        three_days_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=3)).isoformat()
         with common.get_db_cursor(commit=True) as cur:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -300,7 +308,11 @@ class TestGetAllViewDataSharedQuestBoostViewer:
             "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
             "VALUES (101, 'Shared Quest', 'daily', 'siblings', 100, 100)"
         )
-        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        # calculate_quest_boostはJST基準(datetime.datetime.now(JST))で「今日」を
+        # 判定するため、seed側もnaiveなOSローカル時刻ではなく同じJST基準の
+        # timezone-awareな「今」を使う(Issue #176回帰防止)。
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        three_days_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=3)).isoformat()
         cur.execute("""
             INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
             VALUES ('son', 101, 'Shared Quest', 100, 100, ?, 'approved')
@@ -318,6 +330,11 @@ class TestGetAllViewDataSharedQuestBoostViewer:
         assert quest["bonus_exp"] == 0
 
     def test_boost_uses_viewers_own_history_when_target_user_is_not_a_real_user(self, isolated_db):
+        """Issue #176回帰防止: _seed_shared_quest_with_historyは以前naiveなOS
+        ローカル時刻で3日前をseedしており、calculate_quest_boostのJST基準の
+        「今日」判定とずれてCI実行環境(UTC)かつ実行時刻がJST 0時〜9時に相当する
+        時間帯だとdays_diffが決定的にずれていた。_seed_shared_quest_with_history
+        自体をJST基準のtimezone-awareな「今」でseedするよう修正済み。"""
         with common.get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
 
