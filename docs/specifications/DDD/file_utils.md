@@ -10,13 +10,14 @@
 ## 関連ドキュメント
 
 * [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。ただし関連ドキュメント側にも、実際にどのような文字列（動画タイトル等）に対して呼び出しているかの具体的な呼び出し箇所は明記されていない。
-* `extract_youtube_urls.py`についても本モジュールDocstring上の呼び出し元候補として記載されているが、対応する仕様書は`docs/specifications/`配下に見つからなかった。
+* [../DDD/extract_youtube_urls.md](./extract_youtube_urls.md) — 本モジュールDocstring上のもう一方の呼び出し元候補。`FileManager._sanitize_filename`が本関数への委譲ラッパーとして存在する（Issue #126で修正: 過去の解析時点では対応する仕様書が`docs/specifications/`配下に見つからなかったが、現在は`extract_youtube_urls.md`として存在する）。
 
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`のみである。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`のみである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
+* 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
 
 ## 3. 外部依存関係
 
@@ -34,24 +35,24 @@
 
 ### `sanitize_filename`
 
-* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定文字数以内に切り詰め、さらに末尾のピリオドと空白を除去した安全なファイル名文字列を生成する。
-* 根拠: [関数定義とDocstring] (行番号: 9〜21 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")
+* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定文字数以内に切り詰め、さらに末尾のピリオドと空白を除去した安全なファイル名文字列を生成する。変換結果が空文字列になった場合は`"untitled"`にフォールバックする。
+* 根拠: [関数定義とDocstring] (行番号: 9〜19 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")
 
 
 * **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成するファイル名の最大文字数。拡張子は含まない前提。ext4等の255バイト制限に対する安全マージンとして既定200文字）
 * 根拠: [引数定義とDocstring] (行番号: 9, 12〜15 / 抜粋: "max_length: 生成するファイル名の最大文字数（拡張子は含まない前提）。\n            ext4等の255バイト制限に対する安全マージンとして既定200文字。")
 
 
-* **戻り値/レスポンス**: `str`（安全なファイル名文字列）
-* 根拠: [戻り値ヒントとDocstring] (行番号: 9, 17〜18 / 抜粋: "Returns:\n        安全なファイル名文字列。")
+* **戻り値/レスポンス**: `str`（安全なファイル名文字列。変換結果が空文字列であれば`"untitled"`）
+* 根拠: [戻り値ヒントとDocstringおよびフォールバック] (行番号: 9, 17〜18, 22, 28〜29 / 抜粋: "Returns:\n        安全なファイル名文字列。", "if not safe:", "safe = \"untitled\"\n    return safe")
 
 
 * **副作用**: なし（純粋な文字列変換処理。ファイルシステムへのアクセスは行わない）
-* 根拠: [関数本体] (行番号: 20〜21 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    return safe[:max_length].strip('. ')")
+* 根拠: [関数本体] (行番号: 20〜29 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    safe = safe[:max_length].strip('. ')\n    if not safe:\n        safe = \"untitled\"\n    return safe")
 
 
 * **エラーハンドリング**: なし（例外を送出する処理は含まれていない。`filename`が文字列でない場合の型チェックも存在しない）
-* 根拠: [関数本体] (行番号: 20〜21 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    return safe[:max_length].strip('. ')")
+* 根拠: [関数本体] (行番号: 20〜29 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    safe = safe[:max_length].strip('. ')\n    if not safe:\n        safe = \"untitled\"\n    return safe")
 
 
 ## 5. 処理フロー図
@@ -64,7 +65,10 @@ flowchart TD
     Replace --> Strip1["前後の空白を除去 (strip)"]
     Strip1 --> Truncate["max_length文字数で切り詰め"]
     Truncate --> Strip2["末尾のピリオド・空白を除去 (strip('. '))"]
-    Strip2 --> Return["戻り値: 安全なファイル名文字列"]
+    Strip2 --> EmptyCheck{"空文字列になったか?"}
+    EmptyCheck -- Yes --> Untitled["'untitled'にフォールバック"]
+    EmptyCheck -- No --> Return["戻り値: 安全なファイル名文字列"]
+    Untitled --> Return
     Return --> End["End"]
 ```
 

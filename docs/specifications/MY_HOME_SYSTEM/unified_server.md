@@ -19,6 +19,7 @@
 - [webhook_router.md](./webhook_router.md) — Webhook例外パス(`/webhook/switchbot`, `/callback/line`)を持つルーター
 - [system_router.md](./system_router.md) — `/api/system`にマウントされるルーター(手動バックアップ)
 - [camera_router.md](./camera_router.md) — `/api/cameras`にマウントされ、SPAルーティング(`/camera/*`)とも連動するルーター
+- `routers/alexa_router.py`(Issue #126で追記: 対応する仕様書は現時点で未作成) — タグ`alexa`でマウントされるルーター（33, 237行目）
 
 ## 2. ファイルの概要
 
@@ -57,7 +58,7 @@
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 28 / 抜粋: "from core.logger import setup_l") |
 | `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 29 / 抜粋: "from core.migrations import apply_pending_migrations") |
 | `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 30 / 抜粋: "from services import sensor_ser") |
-| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`) | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router") |
+| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`) | ローカルモジュール | 各APIエンドポイントのルーター（Issue #126で修正: 過去の解析時点では未記載だった`alexa_router`を追加） | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router") |
 | `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 36 / 抜粋: "from handlers import line_handl") |
 
 ### ブラックボックスとなる外部要素
@@ -67,7 +68,7 @@
 | `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 255 / 抜粋: "quest_dist_dir = getattr(config") |
 | `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 39 / 抜粋: "logger = setup_logging("unifie") |
 | `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 150 / 抜粋: "sensor_service.cancel_all_tasks") |
-| 各ルーター (`webhook`, `quest`, `system`, `camera`) | 各パス配下の具体的なルーティング定義が不明 | `app.include_router(...)` (行番号: 234-237 / 抜粋: "app.include_router(webhook_rout") |
+| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明） | `app.include_router(...)` (行番号: 233-237 / 抜粋: "app.include_router(webhook_router.router)") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 114 / 抜粋: "camera_process = subprocess.Po") |
 | `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 121 / 抜粋: "scheduler_process = subprocess.") |
 | `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 106 / 抜粋: "apply_pending_migrations(migration_conn)") |
@@ -99,8 +100,9 @@
 
 ### `lifespan`
 
-* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
-* 根拠: `async def lifespan(app: FastA` (行番号: 91-151 / 抜粋: "async def lifespan(app: FastA")
+* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
+* 根拠: `async def lifespan(app: FastA` (行番号: 90-151 / 抜粋: "async def lifespan(app: FastA")
+* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 98-99 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
 
 
 * **引数/リクエスト**: `app: FastAPI`
@@ -111,8 +113,8 @@
 * 根拠: `-> AsyncGenerator[None, None]:` (行番号: 91 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
-* **副作用**: Uvicornロガー設定の変更、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
-* 根拠: 該当関数内処理 (行番号: 103-110, 112-114, 117-126, 132-139, 141-148 / 抜粋: "apply_pending_migrations(migration_conn)", "scheduler_process.terminate()")
+* **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
+* 根拠: 該当関数内処理 (行番号: 98-99, 103-110, 112-114, 117-126, 132-139, 141-148 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "apply_pending_migrations(migration_conn)", "scheduler_process.terminate()")
 
 
 * **エラーハンドリング**: マイグレーション適用失敗時の例外(`Exception`)を捕捉しエラーログ出力のうえ起動は継続する。スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を捕捉し、フォールバック（エラーログ出力や強制kill）を実行する。カメラ監視サブプロセス(`camera_process`)の起動自体には例外処理がなく、失敗時はそのまま例外が送出される。

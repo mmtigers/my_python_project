@@ -35,7 +35,7 @@ Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けの�
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `connect_speaker.sh`(`$CONNECT_SCRIPT`) | 本ファイルには呼び出し箇所のみが存在し、実際の再接続ロジック(実装内容)は提供されていないため。 | 根拠: `[CONNECT_SCRIPT定義・実行]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh\"") |
+| `connect_speaker.sh`(`$CONNECT_SCRIPT`) | 本ファイルには呼び出し箇所のみが存在し、実際の再接続ロジック(実装内容)は提供されていないため。 | 根拠: `[CONNECT_SCRIPT定義・実行]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -163,7 +163,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh\"") |
+| 高 | `connect_speaker.sh` | 本スクリプトが切断検知時に実行する再接続処理の実装を確認するため。 | 根拠: `[CONNECT_SCRIPT]` (行番号: 11, 37 / 抜粋: "CONNECT_SCRIPT=\"/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh\"") |
 | 中 | `keep_alive_speaker.sh` | 同一ログファイルを使う類似目的のスクリプトとの役割分担(対象デバイスの違い)を確認するため。 | 根拠: `[LOGFILE]` (行番号: 8 / 抜粋: "LOGFILE=\"/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log\"") |
 | 中 | crontab設定または systemd タイマー定義(ファイル名不明・推測) | 本スクリプトが定期実行される仕組み(実行間隔・実行ユーザー)を確認するため。本ファイル単体では実行契機が不明。 | 根拠: `[cron実行を前提としたコメント]` (行番号: 14 / 抜粋: "# cron実行時でもPipeWireソケットを見つけられるようにする") |
 
@@ -188,7 +188,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `connect_speaker.sh`の再接続ロジックの詳細 | `MY_HOME_SYSTEM/tools/connect_speaker.sh`(全156行)を直接確認した。対象MACアドレス`F4:4E:FC:B6:65:D4`(6行目、本ファイルの`SPEAKER_MAC`と同一値)に対し、`bluetoothctl info "$MAC"`の出力を`grep -q "Connected: yes"`で判定する処理(86行目)で接続状態を判定する。切断時は`bluetoothctl trust "$MAC"`(118行目)で信頼設定を念押しした上で、`MAX_RETRIES=3`(11行目)回、`bluetoothctl connect "$MAC"`→`sleep 5`(124〜125行目)を繰り返す再接続ループ(120〜140行目)を実行し、成功時は`pactl set-default-sink`/`set-sink-volume`(134〜135行目)で出力先を再設定してDiscordへ成功通知(131行目)、全リトライ失敗時は`run_diagnostics`(49〜71行目、`systemctl status bluetooth`・`rfkill list`・`bluetoothctl info`・`dmesg`・`pactl list sinks`・`pgrep pulse`の出力をログに追記)を実行した上で失敗通知(152行目)を送る、という設計であることを確認した。また、本ファイル(`keep_alive_anker.sh`)11行目の`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh"`は`tools/`を含まないパスを指しているが、実際の配置は`MY_HOME_SYSTEM/tools/connect_speaker.sh`であり、両者のパスが一致しないことも直接確認した(本番デプロイ時のディレクトリ構成がリポジトリと異なる可能性があるが、この差異自体はリポジトリの内容からは解消できない)。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/connect_speaker.sh:1-156`（参考: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11`） |
+| `connect_speaker.sh`の再接続ロジックの詳細 | `MY_HOME_SYSTEM/tools/connect_speaker.sh`(全156行)を直接確認した。対象MACアドレス`F4:4E:FC:B6:65:D4`(6行目、本ファイルの`SPEAKER_MAC`と同一値)に対し、`bluetoothctl info "$MAC"`の出力を`grep -q "Connected: yes"`で判定する処理(86行目)で接続状態を判定する。切断時は`bluetoothctl trust "$MAC"`(118行目)で信頼設定を念押しした上で、`MAX_RETRIES=3`(11行目)回、`bluetoothctl connect "$MAC"`→`sleep 5`(124〜125行目)を繰り返す再接続ループ(120〜140行目)を実行し、成功時は`pactl set-default-sink`/`set-sink-volume`(134〜135行目)で出力先を再設定してDiscordへ成功通知(131行目)、全リトライ失敗時は`run_diagnostics`(49〜71行目、`systemctl status bluetooth`・`rfkill list`・`bluetoothctl info`・`dmesg`・`pactl list sinks`・`pgrep pulse`の出力をログに追記)を実行した上で失敗通知(152行目)を送る、という設計であることを確認した。また、本ファイル(`keep_alive_anker.sh`)11行目の`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"`は`tools/`を含む実際の配置(`MY_HOME_SYSTEM/tools/connect_speaker.sh`)と一致するパスを指しており、両者のパスに不一致は無いことを直接確認した(Issue #126で指摘された、旧版のCONNECT_SCRIPTが`tools/`を含まないパスを指していた時期のパス不一致は既に修正済みである)。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/connect_speaker.sh:1-156`（参考: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11`） |
 | `logs/`ディレクトリの作成主体 | リポジトリ全体を`makedirs`/`mkdir`と`logs`の組み合わせで検索した結果、`logs/`ディレクトリを作成している箇所は`MY_HOME_SYSTEM/core/logger.py`63〜64行目の`log_dir = os.path.join(config.BASE_DIR, "logs")` / `os.makedirs(log_dir, exist_ok=True)`(`setup_logging`関数内)の1箇所のみであった。これは`config.BASE_DIR`(`MY_HOME_SYSTEM/`直下)配下に`logs/`を作成するもので、`setup_logging`はほぼ全てのPythonモジュールから呼び出されている。本ファイル(`keep_alive_anker.sh`)および`connect_speaker.sh`はbashスクリプトであり、ログファイルへは`>>`によるリダイレクトで追記するのみでディレクトリ自体を作成する処理は無い(8行目の`LOGFILE`、および`connect_speaker.sh`9行目の`LOGFILE`はいずれも`.../MY_HOME_SYSTEM/logs/bluetooth_monitor.log`を指しており、`core/logger.py`が作成する`MY_HOME_SYSTEM/logs/`と同じディレクトリである)。したがって、リポジトリ内で確認できる限り、`logs/`ディレクトリは`core/logger.py`の`setup_logging`が(Python側のいずれかのモジュール実行時に)作成しているという可能性が最も高いが、本シェルスクリプト自体との明示的な依存関係(呼び出し順序の保証)はリポジトリ内には見つからず、確実な断定はできなかった。リポジトリ直下`.gitignore`21行目に`logs/`規則があり、`logs/`ディレクトリ自体もgit追跡対象外であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:63-65`, `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:8`, `MY_HOME_SYSTEM/tools/connect_speaker.sh:9`, `.gitignore:21` |
 
 ## 10. 自己検証結果
