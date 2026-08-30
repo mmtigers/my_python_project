@@ -126,6 +126,15 @@ def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_
     except (ValueError, AttributeError) as exc:
         raise AlexaVerificationError(f"Invalid request timestamp: {request_timestamp!r}") from exc
 
+    if ts.tzinfo is None:
+        # datetime.fromisoformat はタイムゾーン情報のないISO文字列(例: "2026-08-30T00:00:00")
+        # もパース成功として受理してしまう(ValueErrorにならない)。Alexaのrequest.timestampは
+        # 常にタイムゾーン付き(Z or +00:00)のISO 8601形式のため、これは仕様外の不正な形式として
+        # AlexaVerificationErrorを送出する。ここでガードしないと、後続の
+        # `now(aware) - ts(naive)` がTypeErrorを送出し、ルーターがAlexaVerificationErrorのみを
+        # 捕捉するため500(本来返すべきは400)になっていた。
+        raise AlexaVerificationError(f"Request timestamp missing timezone info: {request_timestamp!r}")
+
     now = datetime.now(timezone.utc)
     delta = abs((now - ts).total_seconds())
     if delta > tolerance_seconds:
