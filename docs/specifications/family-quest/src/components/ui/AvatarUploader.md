@@ -12,6 +12,7 @@
 * [../../../App.md](../../../App.md) - 呼び出し元。`avatarUser`が設定されたときに`React.lazy`で動的importされた本コンポーネントを描画し、`onUploadComplete`で`refreshData()`とトースト表示（`showToast`）を行う
 * [../../lib/apiClient.md](../../lib/apiClient.md) - `postForm`/`post`メソッドの実装元
 * [../../types/index.md](../../types/index.md) - `User`型の定義元
+* [../../lib/utils.md](../../lib/utils.md) - `isSameOriginAvatarPath`の実装元
 * [./Modal.md](./Modal.md) - 利用するモーダルコンポーネント
 * [./Button.md](./Button.md) - 利用するボタンコンポーネント
 * [../../../../MY_HOME_SYSTEM/quest_router.md](../../../../MY_HOME_SYSTEM/quest_router.md) - Family Quest系バックエンドのルーター定義（アップロード・ユーザー更新系エンドポイントを提供）
@@ -19,7 +20,7 @@
 ## 2. ファイルの概要
 
 このファイルは、ユーザーが自分のアバター画像を選択・プレビューし、サーバーへアップロードするためのUIコンポーネントである。モーダル画面として表示され、ファイルシステムからの画像選択、クライアント側でのファイル形式・サイズのバリデーション、選択画像のプレビュー表示、API経由でのアップロードと2段階のリクエスト（画像アップロード→ユーザーのアバターURL更新）、およびキャンセル機能を提供する。エラーおよび成功メッセージは（ブラウザ標準の`alert`ではなく）モーダル内のインラインUIとして表示され、アップロード成功後もモーダルは自動的には閉じず、ユーザーが「閉じる」ボタンを押すまで表示され続ける。
-* 根拠: `AvatarUploader`コンポーネント定義とアップロード処理 (16, 51〜77行目 / 抜粋: "const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {", "const handleUpload = async () => {")
+* 根拠: `AvatarUploader`コンポーネント定義とアップロード処理 (17, 52〜78行目 / 抜粋: "const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {", "const handleUpload = async () => {")
 
 ## 3. 外部依存関係
 
@@ -33,24 +34,25 @@
 | `User` | 型定義 | コンポーネントが受け取るユーザー情報の型 | `import { User } from "@/types";` (行番号: 4) |
 | `Modal` | UIコンポーネント | モーダルウィンドウの表示 | `import { Modal } from "@/components/ui/Modal";` (行番号: 5) |
 | `Button` | UIコンポーネント | キャンセルおよび保存/閉じる用ボタンの表示 | `import { Button } from "@/components/ui/Button";` (行番号: 6) |
+| `isSameOriginAvatarPath` | 外部モジュール | `user.avatar`が自サーバーの画像パスか(絵文字等の非パス値ではないか)を判定するための型ガード関数 | `import { isSameOriginAvatarPath } from "@/lib/utils";` (行番号: 7) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient` | APIリクエストの実装詳細（`postForm`/`post`メソッドの内部実装、認証ヘッダーの自動付与、ベースURL、共通エラー処理など）が不明。 | `await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);` (行番号: 64)、`await apiClient.post('/api/quest/user/update', { ... });` (行番号: 65) |
-| `User` | `user_id`, `avatar`, `icon` 以外のプロパティ構成が不明。 | `user: User;` (行番号: 9) |
-| `Modal` | モーダルの正確な動作仕様（内部イベント、アクセシビリティ対応など）が不明。 | `<Modal isOpen={true} onClose={onClose} title="アバター変更">` (行番号: 84) |
-| `Button` | ボタンの正確な動作仕様（`variant`, `isLoading`, `disabled` 指定時の内部的な挙動変化など）が不明。 | `<Button variant="secondary" ...>` (行番号: 135, 140, 143) |
-| エンドポイント `/api/quest/upload` | サーバー側のバリデーション、レスポンス形式（`{ url }`）の詳細が不明。 | `'/api/quest/upload'` (行番号: 64) |
-| エンドポイント `/api/quest/user/update` | サーバー側でユーザーレコードがどう更新されるか不明。 | `'/api/quest/user/update'` (行番号: 65) |
+| `apiClient` | APIリクエストの実装詳細（`postForm`/`post`メソッドの内部実装、認証ヘッダーの自動付与、ベースURL、共通エラー処理など）が不明。 | `await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);` (行番号: 65)、`await apiClient.post('/api/quest/user/update', { ... });` (行番号: 66) |
+| `User` | `user_id`, `avatar`, `icon` 以外のプロパティ構成が不明。 | `user: User;` (行番号: 10) |
+| `Modal` | モーダルの正確な動作仕様（内部イベント、アクセシビリティ対応など）が不明。 | `<Modal isOpen={true} onClose={onClose} title="アバター変更">` (行番号: 85) |
+| `Button` | ボタンの正確な動作仕様（`variant`, `isLoading`, `disabled` 指定時の内部的な挙動変化など）が不明。 | `<Button variant="secondary" ...>` (行番号: 141, 146, 149) |
+| エンドポイント `/api/quest/upload` | サーバー側のバリデーション、レスポンス形式（`{ url }`）の詳細が不明。 | `'/api/quest/upload'` (行番号: 65) |
+| エンドポイント `/api/quest/user/update` | サーバー側でユーザーレコードがどう更新されるか不明。 | `'/api/quest/user/update'` (行番号: 66) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `AvatarUploaderProps`
 
 * **役割**: `AvatarUploader` コンポーネントがPropsとして受け取る値の型定義。
-* 根拠: `interface AvatarUploaderProps { ... }` (行番号: 8〜12 / 抜粋: "interface AvatarUploaderProps {\n    user: User;\n    onClose: () => void;\n    onUploadComplete: () => void;\n}")
+* 根拠: `interface AvatarUploaderProps { ... }` (行番号: 9〜13 / 抜粋: "interface AvatarUploaderProps {\n    user: User;\n    onClose: () => void;\n    onUploadComplete: () => void;\n}")
 
 * **引数/リクエスト**: なし（インターフェース定義のため）
 * **戻り値/レスポンス**: なし
@@ -60,70 +62,71 @@
 ### `MAX_AVATAR_SIZE_BYTES` (モジュールレベル定数)
 
 * **役割**: アップロード可能な画像ファイルサイズの上限（5MB）を定義する。`handleFileChange`のバリデーションで参照される。
-* 根拠: (行番号: 14 / 抜粋: "const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB")
+* 根拠: (行番号: 15 / 抜粋: "const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB")
 
 ### `AvatarUploader`
 
-* **役割**: アバターの選択、クライアント側バリデーション、プレビュー、アップロードを実行するReact関数コンポーネント。内部状態として `uploading`（送信中）, `preview`（プレビュー画像のData URL）, `errorMessage`（バリデーション/通信エラー文言）, `uploadDone`（アップロード完了フラグ）を持つ。
-* 根拠: `const AvatarUploader: React.FC<AvatarUploaderProps>` (行番号: 16〜158 / 抜粋: "const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {")
+* **役割**: アバターの選択、クライアント側バリデーション、プレビュー、アップロードを実行するReact関数コンポーネント。内部状態として `uploading`（送信中）, `preview`（プレビュー画像のData URL）, `errorMessage`（バリデーション/通信エラー文言）, `uploadDone`（アップロード完了フラグ）を持つ。プレビューエリアの表示は、`preview`（選択直後のdata:URL）が存在するか、または`isSameOriginAvatarPath(user.avatar)`が`true`（自サーバーのアップロード画像パス）の場合のみ`<img>`を描画し、それ以外（未アップロード時の絵文字デフォルト値等）は`user.avatar || user.icon || '👤'`をテキストとして描画する（Issue #117: 以前は`preview || user.avatar`が真であれば無条件に`<img src={user.avatar}>`をレンダリングしており、`user.avatar`が絵文字の場合に壊れた画像アイコンになっていた）。
+* 根拠: `const AvatarUploader: React.FC<AvatarUploaderProps>` (行番号: 17〜164 / 抜粋: "const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {")
+* 根拠: `{preview || isSameOriginAvatarPath(user.avatar) ? ( <img ... /> ) : ( <div>{user.avatar || user.icon || '👤'}</div> )}` (行番号: 92〜107 / 抜粋: "{preview || isSameOriginAvatarPath(user.avatar) ? (")
 
 * **引数/リクエスト**: `AvatarUploaderProps` オブジェクト（`user`, `onClose`, `onUploadComplete` を分割代入で取得）
-* 根拠: `({ user, onClose, onUploadComplete })` (行番号: 16 / 抜粋: "= ({ user, onClose, onUploadComplete }) => {")
+* 根拠: `({ user, onClose, onUploadComplete })` (行番号: 17 / 抜粋: "= ({ user, onClose, onUploadComplete }) => {")
 
 * **戻り値/レスポンス**: `Modal` コンポーネントでラップされたJSX要素。`uploadDone`が`true`の場合は「閉じる」ボタンのみ、それ以外は「キャンセル」「保存する」ボタンを表示する。
-* 根拠: `return ( <Modal...` (行番号: 83〜157 / 抜粋: "return (\n        <Modal isOpen={true} onClose={onClose} title=\"アバター変更\">")、条件分岐 (133〜153行目)
+* 根拠: `return ( <Modal...` (行番号: 84〜163 / 抜粋: "return (\n        <Modal isOpen={true} onClose={onClose} title=\"アバター変更\">")、条件分岐 (139〜159行目)
 
 * **副作用**: API経由での画像データの送信（`apiClient.postForm`）とユーザーレコードの更新（`apiClient.post`）。成功・失敗いずれもモーダル内のインラインUI（`errorMessage`/`uploadDone`）で通知する（ブラウザ標準の`alert`は使用しない）。
-* 根拠: (行番号: 64〜65, 73 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
+* 根拠: (行番号: 65〜66, 74 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
 
 * **エラーハンドリング**: APIリクエスト時の例外をキャッチし、コンソールにエラーを出力し、`errorMessage`状態にセットしてインライン表示する。
-* 根拠: `catch (error) { ... }` (行番号: 71〜73 / 抜粋: "console.error('Upload failed:', error);\n            setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
+* 根拠: `catch (error) { ... }` (行番号: 72〜74 / 抜粋: "console.error('Upload failed:', error);\n            setErrorMessage(error instanceof Error ? error.message : \"アップロードに失敗しました\");")
 
 ### `handleFileChange` (内部関数)
 
 * **役割**: ファイル選択時に発火し、選択されたファイルが画像形式（`image/`で始まるMIMEタイプ）かつ`MAX_AVATAR_SIZE_BYTES`（5MB）以下であることをクライアント側で検証する。検証に失敗した場合は`errorMessage`をセットして入力値・プレビューをクリアし、成功した場合は`FileReader`で画像をData URL形式で非同期に読み込みローカル状態(`preview`)にセットする。
-* 根拠: `const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>)` (行番号: 23〜49 / 抜粋: "if (!file.type.startsWith('image/')) {\n            setErrorMessage(\"画像ファイルを選択してください\");")
+* 根拠: `const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>)` (行番号: 24〜50 / 抜粋: "if (!file.type.startsWith('image/')) {\n            setErrorMessage(\"画像ファイルを選択してください\");")
 
 * **引数/リクエスト**: `React.ChangeEvent<HTMLInputElement>` (ファイル入力のチェンジイベント)
-* 根拠: `(e: React.ChangeEvent<HTMLInputElement>)` (行番号: 23 / 抜粋: "const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {")
+* 根拠: `(e: React.ChangeEvent<HTMLInputElement>)` (行番号: 24 / 抜粋: "const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {")
 
 * **戻り値/レスポンス**: なし (void)
 * **副作用**: `setErrorMessage`, `setPreview` によるコンポーネントの再レンダリングのトリガー。
-* 根拠: (行番号: 27, 31, 33, 37, 39, 46 / 抜粋: "setErrorMessage(...)", "setPreview(...)")
+* 根拠: (行番号: 28, 32, 34, 38, 40, 47 / 抜粋: "setErrorMessage(...)", "setPreview(...)")
 
 * **エラーハンドリング**: 選択されたファイルが存在しない場合、画像形式でない場合、サイズ上限（5MB）を超える場合の3パターンで早期リターンし、後者2つは`errorMessage`をセットして`input`の値と`preview`をクリアする。
-* 根拠: `if (!file) return;` (24〜25行目), `if (!file.type.startsWith('image/')) { ... return; }` (30〜35行目), `if (file.size > MAX_AVATAR_SIZE_BYTES) { ... return; }` (36〜41行目)
+* 根拠: `if (!file) return;` (25〜26行目), `if (!file.type.startsWith('image/')) { ... return; }` (31〜36行目), `if (file.size > MAX_AVATAR_SIZE_BYTES) { ... return; }` (37〜42行目)
 
 ### `handleUpload` (内部関数)
 
 * **役割**: 選択されたファイルを`FormData`（フィールド名`file`）に格納し、`/api/quest/upload`へアップロードして返ってきたURLを`/api/quest/user/update`へ明示的に紐付ける2段階のアップロード処理を行う。成功時は`onUploadComplete`を呼び出し`uploadDone`を`true`にするが、`onClose`は呼ばない（モーダルは自動では閉じない）。以前は存在しない`/api/quest/upload_avatar`にPOSTしており常に失敗していたバグの修正が施されている。
-* 根拠: `const handleUpload = async () =>` (行番号: 51〜77 / 抜粋: "const handleUpload = async () => {")
-* 根拠: バグ修正のコメント (行番号: 60〜63 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
+* 根拠: `const handleUpload = async () =>` (行番号: 52〜78 / 抜粋: "const handleUpload = async () => {")
+* 根拠: バグ修正のコメント (行番号: 61〜64 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
 
 * **引数/リクエスト**: なし
-* 根拠: `() =>` (行番号: 51 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `() =>` (行番号: 52 / 抜粋: "const handleUpload = async () => {")
 
 * **戻り値/レスポンス**: `Promise<void>`
-* 根拠: `async` の指定 (行番号: 51 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `async` の指定 (行番号: 52 / 抜粋: "const handleUpload = async () => {")
 
 * **副作用**: `setUploading` によるローディング状態変更、`setErrorMessage(null)`によるエラー表示クリア、`apiClient.postForm`（画像アップロード）と`apiClient.post`（アバターURL紐付け）による2回のネットワーク通信、成功時の `onUploadComplete` 呼び出しと `setUploadDone(true)`、`finally`での`setUploading(false)`。
-* 根拠: `setUploading(true);`, `await apiClient.postForm(...)`, `await apiClient.post(...)`, `onUploadComplete();`, `setUploadDone(true);` (行番号: 54〜70)
+* 根拠: `setUploading(true);`, `await apiClient.postForm(...)`, `await apiClient.post(...)`, `onUploadComplete();`, `setUploadDone(true);` (行番号: 55〜71)
 
 * **エラーハンドリング**: `try-catch-finally` 構文で通信エラーをキャッチし`errorMessage`にセットする（`Error`インスタンスなら`error.message`、それ以外は既定文言）。成否に関わらず `finally` ブロックでローディング状態を解除する。ファイル未選択時は早期リターンする。
-* 根拠: `if (!fileInputRef.current?.files?.[0]) return;`, `try { ... } catch (error) { ... } finally { ... }` (行番号: 52, 59〜76 / 抜粋: "try {\n            const { url } = await apiClient.postForm...")
+* 根拠: `if (!fileInputRef.current?.files?.[0]) return;`, `try { ... } catch (error) { ... } finally { ... }` (行番号: 53, 60〜77 / 抜粋: "try {\n            const { url } = await apiClient.postForm...")
 
 ### `triggerSelect` (内部関数)
 
 * **役割**: 非表示のファイル入力用 `input` 要素に対し、プログラムからクリックイベントを発火させる。
-* 根拠: `const triggerSelect = () =>` (行番号: 79〜81 / 抜粋: "const triggerSelect = () => {\n        fileInputRef.current?.click();\n    };")
+* 根拠: `const triggerSelect = () =>` (行番号: 80〜82 / 抜粋: "const triggerSelect = () => {\n        fileInputRef.current?.click();\n    };")
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: なし (void)
 * **副作用**: ブラウザのファイル選択ダイアログの表示。
-* 根拠: `fileInputRef.current?.click();` (行番号: 80)
+* 根拠: `fileInputRef.current?.click();` (行番号: 81)
 
 * **エラーハンドリング**: オプショナルチェーニング (`?.`) を使用し、参照が `null` の場合のエラーを回避。
-* 根拠: `?.click()` (行番号: 80)
+* 根拠: `?.click()` (行番号: 81)
 
 ## 5. 処理フロー図
 
@@ -212,18 +215,19 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `@/lib/apiClient.ts` | `postForm`/`post` メソッドの共通処理（認証情報の付与、`multipart/form-data`ヘッダーの扱いなど）やエラー仕様がフロントエンド全体に影響するため。 | `await apiClient.postForm(...)`, `await apiClient.post(...)` (行番号: 64〜65) |
-| 中 | バックエンドの`/api/quest/upload`・`/api/quest/user/update`処理ファイル（コントローラー層） | UI上で「正方形にトリミングされます」と記載があるが、コンポーネント内にトリミング処理が存在しないため、サーバー側で実装されているか確認する必要がある。また2エンドポイントの整合性（アップロードとユーザー更新の間で不整合が起きた場合の扱い）を確認する必要がある。 | `'/api/quest/upload'`, `'/api/quest/user/update'` (行番号: 64〜65) および `(正方形にトリミングされます)` (行番号: 118) |
-| 低 | `@/components/ui/Button.tsx` | `isLoading`/`disabled` プロパティの振る舞い（ボタンの非活性化やスピナー表示などの視覚的変化）を確認するため。 | `<Button ... isLoading={uploading}>` (行番号: 143〜149) |
+| 高 | `@/lib/apiClient.ts` | `postForm`/`post` メソッドの共通処理（認証情報の付与、`multipart/form-data`ヘッダーの扱いなど）やエラー仕様がフロントエンド全体に影響するため。 | `await apiClient.postForm(...)`, `await apiClient.post(...)` (行番号: 65〜66) |
+| 中 | バックエンドの`/api/quest/upload`・`/api/quest/user/update`処理ファイル（コントローラー層） | UI上で「正方形にトリミングされます」と記載があるが、コンポーネント内にトリミング処理が存在しないため、サーバー側で実装されているか確認する必要がある。また2エンドポイントの整合性（アップロードとユーザー更新の間で不整合が起きた場合の扱い）を確認する必要がある。 | `'/api/quest/upload'`, `'/api/quest/user/update'` (行番号: 65〜66) および `(正方形にトリミングされます)` (行番号: 124) |
+| 低 | `@/components/ui/Button.tsx` | `isLoading`/`disabled` プロパティの振る舞い（ボタンの非活性化やスピナー表示などの視覚的変化）を確認するため。 | `<Button ... isLoading={uploading}>` (行番号: 149〜155) |
 
 ## 8. 保守上の注意点
 
-* **アップロード成功後にモーダルが自動で閉じない**: `handleUpload` 成功時は `onUploadComplete()` を呼び出して `uploadDone` を `true` にするのみで、`onClose()` は呼ばれない（69〜70行目）。親コンポーネント（`App.tsx`）の `onUploadComplete` は独自に `refreshData()` と `showToast` による成功トーストを表示するため、アバター変更成功時は本コンポーネントの成功メッセージ表示とトーストが同時に発生する構成になっている点に注意が必要。
+* **アップロード成功後にモーダルが自動で閉じない**: `handleUpload` 成功時は `onUploadComplete()` を呼び出して `uploadDone` を `true` にするのみで、`onClose()` は呼ばれない（70〜71行目）。親コンポーネント（`App.tsx`）の `onUploadComplete` は独自に `refreshData()` と `showToast` による成功トーストを表示するため、アバター変更成功時は本コンポーネントの成功メッセージ表示とトーストが同時に発生する構成になっている点に注意が必要。
 * **アップロード先が2エンドポイントに分かれている**: 画像自体のアップロード（`POST /api/quest/upload`）と、ユーザーレコードへのアバターURL紐付け（`POST /api/quest/user/update`）が別々のリクエストとして順に実行される。1つ目が成功し2つ目が失敗した場合、画像はサーバーにアップロード済みだがユーザーには反映されない状態になりうる（本ファイルからはロールバック処理の有無は判断できない）。
-* 根拠: (行番号: 64〜65 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });")
-* **`FormData` 送信時のファイル参照**: `handleUpload` 関数内で送信するファイルを `fileInputRef.current.files[0]` から直接参照している（57行目）。状態管理されている `preview` に紐づくファイルオブジェクトを使用していない。
+* 根拠: (行番号: 65〜66 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });")
+* **`FormData` 送信時のファイル参照**: `handleUpload` 関数内で送信するファイルを `fileInputRef.current.files[0]` から直接参照している（58行目）。状態管理されている `preview` に紐づくファイルオブジェクトを使用していない。
 * **クライアント側バリデーションはあるがサーバー側の検証内容は不明**: 画像形式（`image/`プレフィックス）とサイズ上限（5MB, `MAX_AVATAR_SIZE_BYTES`）はクライアント側で検証されているが、サーバー側で同等の検証が行われているかは本ファイルからは判断できない。
 * **トリミング処理の不在**: テキストに「正方形にトリミングされます」とあるが、本ファイル内（クライアントサイド）に画像をトリミング・クロップする処理はない。
+* **Issue #117で修正: `preview`/`user.avatar`の`<img src>`直接使用**: 以前はプレビューエリアの表示条件が`preview || user.avatar`（真偽値のみで判定）で、真であれば無条件に`<img src={preview || user.avatar}>`をレンダリングしていた。`user.avatar`はアップロード画像パス（`/uploads/...`）だけでなく未設定時の絵文字デフォルト値（`'⚔️'`等）も取りうるため、絵文字が渡ると壊れた画像アイコンになっていた。`Header.tsx`/`UserStatusCard.tsx`/`FamilyLog.tsx`で既に使われている`isSameOriginAvatarPath`（`@/lib/utils`）による同一オリジンパス判定を導入し、`preview`（選択直後のdata:URL、常に画像として妥当）またはパス形式の`user.avatar`のときのみ`<img>`を描画するよう修正した。
 
 ## 9. 不明事項一覧
 
