@@ -11,7 +11,7 @@
 
 * [nas_monitor.md](./nas_monitor.md) - 類似目的の別モジュール(`nas_monitor.py`はNASの死活監視・リテンション削除を担当するのに対し、本ファイルは他モジュール向けの汎用フォールバック管理ユーティリティを提供)
 * [config.md](./config.md) - `LINE_USER_ID`等の設定値を提供
-* [logger.md](./logger.md) - ロガー機能の提供元候補(ただし関数名`get_logger`との対応関係は不明瞭)
+* [logger.md](./logger.md) - `core.logger.get_logger`(`setup_logging`のエイリアス)の実装元。本ファイル8行目の`from core.logger import get_logger`はこのエイリアスにより正常にインポートできる（詳細は本ファイル「相互参照による補足情報」参照）
 * [notification_service.md](./notification_service.md) - `send_push`の実体
 
 ## 2. ファイルの概要
@@ -217,9 +217,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `get_logger`の仕様 | `MY_HOME_SYSTEM/core/logger.py`全85行を直接確認したところ、同ファイルには`get_logger`という名前の関数は一切定義されていない（定義されているのは`setup_logging(name, webhook_url=None)`関数(46〜86行目)と`DiscordErrorHandler`クラス(9〜44行目)のみ）ことを確認した。したがって本ファイル(`core/nas_utils.py`)8行目の`from core.logger import get_logger`は実行環境によらず常に`ImportError`となり、6〜21行目の`try...except ImportError`により、常に20行目のフォールバック定義`def get_logger(name): return logging.getLogger(name)`（標準`logging`モジュールへの単純な委譲）が使用される設計であることが確定した。（`docs/specifications/DDD/newface_monitor.md`での同一調査結果と一致することも確認した。） | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py`（全85行、`get_logger`定義なし）, `MY_HOME_SYSTEM/core/nas_utils.py:6-23` |
+| `get_logger`の仕様 | `MY_HOME_SYSTEM/core/logger.py`を直接確認した。同ファイル103〜105行目に`def get_logger(name: str) -> logging.Logger: return setup_logging(name)`という、`setup_logging`のエイリアスとして`get_logger`が明示的に定義されている（Issue #126で修正: 過去の解析時点では未定義だったが、現在は定義済み）。したがって本ファイル(`core/nas_utils.py`)8行目の`from core.logger import get_logger`は正常にインポートに成功し、6〜9行目の`try`節がそのまま実行される。10〜21行目の`except ImportError`フォールバック（`def get_logger(name): return logging.getLogger(name)`という標準`logging`モジュールへの単純な委譲）は、`core`/`services`パッケージ自体がインポート不可能な環境（DDD単体デプロイ等）でのみ使用される設計であることを確認した。実際に使われる`core.logger.get_logger`は`setup_logging(name)`をそのまま呼び出すため、`propagate=False`・コンソール出力・`WatchedFileHandler`によるファイル出力・条件付きDiscord通知という`setup_logging`の全機能を伴う（詳細は[logger.md](./logger.md)参照）。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:103-105`, `MY_HOME_SYSTEM/core/nas_utils.py:6-23`（参考: [logger.md](./logger.md)） |
 | `send_push`の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(116〜140行目)を直接確認した。`success = True`で始まり、`target`が`"discord"`/`"both"`のとき`_send_discord_webhook`(30〜71行目、HTTPステータスが`[200, 204]`以外または`requests`例外発生時に`False`)が失敗すれば`success = False`、`target`が`"line"`/`"both"`のとき`_send_line_push`(73〜114行目、`line_configuration`未設定・送信メッセージ0件・LINE API例外のいずれかで`False`)が失敗すれば`success = False`にした上でDiscordのerrorチャンネルへフォールバック通知(133〜138行目)する。戻り値は`bool`(140行目)であり、本ファイル(`core/nas_utils.py`)127行目で`config.LINE_USER_ID`宛にこの関数を呼び出していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-140`（参考: `MY_HOME_SYSTEM/core/nas_utils.py:127`） |
-| `config`モジュールの全容 | `MY_HOME_SYSTEM/core/nas_utils.py`を直接確認したところ、本ファイルが実際に参照する`config`属性は`getattr(config, "LINE_USER_ID", None)`(127行目)の1箇所のみであることを確認した。対応する`MY_HOME_SYSTEM/config.py`185行目を直接確認したところ`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`と定義されており、環境変数`LINE_USER_ID`が未設定であれば`None`になるオプショナル文字列であることを確認した。`config.py`全体（全500行超）には他に多数の設定値（NAS関連、各種閾値、Webhook URL等）が定義されているが、本ファイルが実際に依存しているのは`LINE_USER_ID`のみであることが確定した。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が19行目に追加された。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185`, `MY_HOME_SYSTEM/core/nas_utils.py:127`, `MY_HOME_SYSTEM/core/nas_utils.py:19` |
+| `config`モジュールの全容 | `MY_HOME_SYSTEM/core/nas_utils.py`を直接確認したところ、本ファイルが実際に参照する`config`属性は`getattr(config, "LINE_USER_ID", None)`(127行目)の1箇所のみであることを確認した。対応する`MY_HOME_SYSTEM/config.py`193行目を直接確認したところ`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`と定義されており、環境変数`LINE_USER_ID`が未設定であれば`None`になるオプショナル文字列であることを確認した。`config.py`全体（全500行超）には他に多数の設定値（NAS関連、各種閾値、Webhook URL等）が定義されているが、本ファイルが実際に依存しているのは`LINE_USER_ID`のみであることが確定した。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が19行目に追加された。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:193`, `MY_HOME_SYSTEM/core/nas_utils.py:127`, `MY_HOME_SYSTEM/core/nas_utils.py:19` |
 
 ## 10. 自己検証結果
 
