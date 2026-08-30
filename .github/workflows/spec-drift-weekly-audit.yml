@@ -29,7 +29,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run full drift audit
+      - name: Run full drift audit (non-blocking)
+        # Issue #125: check_spec_drift.py はgitコマンド自体の失敗時(shallow clone
+        # での参照エラー等)は「検知漏れを黙って見逃さない」ための意図的な設計として
+        # 例外を送出し非0で終了する(スクリプト冒頭のdocstring参照)。
+        # spec-drift-pr-check.yml と同様に continue-on-error でジョブ全体を
+        # 非ブロッキングに保ち、drift-report.md が生成されなかった場合は次のステップ側で
+        # フォールバック文言を使う。
+        continue-on-error: true
         run: python3 .github/scripts/check_spec_drift.py full --out drift-report.md
 
       - name: Create or update tracking issue
@@ -38,7 +45,13 @@ jobs:
           script: |
             const fs = require("fs");
             const title = "📋 仕様書ドリフト定期監査";
-            const report = fs.readFileSync("drift-report.md", "utf8");
+            let report;
+            try {
+              report = fs.readFileSync("drift-report.md", "utf8");
+            } catch (e) {
+              report = "## 仕様書ドリフト定期監査（リポジトリ全体）\n\n" +
+                "チェック自体が失敗しました。Actionsのログを確認してください（このチェックはブロッキングではありません）。";
+            }
             const isClean = report.includes("検知事項なし");
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const date = new Date().toISOString().slice(0, 10);
