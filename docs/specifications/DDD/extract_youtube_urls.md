@@ -14,7 +14,7 @@
 * [../MY_HOME_SYSTEM/logger.md](../MY_HOME_SYSTEM/logger.md) — 本ファイルがインポートを試みる`core.logger.get_logger`の実装候補に関する参考情報。
 * [batch_download_discord.md](./batch_download_discord.md) — 同じDDDサブシステム内で`yt_dlp`と`file_utils.sanitize_filename`を併用する類似スクリプトとの比較参考。
 * [newface_monitor.md](./newface_monitor.md) — 本ファイルの`PROJECT_ROOT`解決方式（`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`）と`get_managed_target_directory`フォールバックの`fallback_dir_str`尊重パターンは、同じDDDサブシステム内で先行して修正済みのnewface_monitor.pyの同一パターンを踏襲したものである（コード内コメントで直接言及されている）。
-* [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) — 本ファイルの`PROJECT_ROOT`解決・`core.*`インポート可否・フォールバックスタブの引数尊重・`_verify_environment`のフォールバック検知を検証する回帰テストの解析ドキュメント。
+* [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) — 本ファイルの`PROJECT_ROOT`解決・`core.*`インポート可否・フォールバックスタブの引数尊重・`_verify_environment`のフォールバック検知・（Issue #123回帰テストとして追加された）`process_subscriptions`のNAS状態再評価タイミングを検証する回帰テストの解析ドキュメント。
 
 ## 2. ファイルの概要
 
@@ -25,13 +25,15 @@
 * `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。
 * 根拠: [try-exceptブロック] (行番号: 38〜42 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError:")
 * `SubscriptionManager._verify_environment`によるNASフォールバック検知は、出力先ベースディレクトリと`AppConfig.LOCAL_DIR_STR`（絶対パス）を`Path.resolve()`で正規化した上で完全一致比較する。フォールバック関数が想定外の相対パスを返す場合でも検知漏れが起きないようにするための修正であることがコメントで明記されている。
-* 根拠: [_verify_environmentの比較処理とコメント] (行番号: 347〜351 / 抜粋: "# 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して\n        # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが\n        # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。\n        # パス正規化した上での比較にすることで、表記揺れに関わらず確実に検知する。\n        if current_base.resolve() == Path(AppConfig.LOCAL_DIR_STR).resolve():")
+* 根拠: [_verify_environmentの比較処理とコメント] (行番号: 355〜359 / 抜粋: "# 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して\n        # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが\n        # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。\n        # パス正規化した上での比較にすることで、表記揺れに関わらず確実に検知する。\n        if current_base.resolve() == Path(AppConfig.LOCAL_DIR_STR).resolve():")
 * `yt_dlp`を用いて対象URL（チャンネル・プレイリスト・単一動画）から動画URLを抽出する`YouTubeExtractor`、抽出結果をテキストファイルへ保存する`FileManager`、SQLite DBに登録されたチャンネルを定期巡回する`SubscriptionManager`、およびコマンドライン引数を解析してこれらを統括する`UrlExtractorApp`の4クラスで構成される。
-* 根拠: [各クラス定義] (行番号: 122〜123, 275〜276, 326〜330, 428〜429 / 抜粋: "class YouTubeExtractor:\n    """YouTubeからURL情報を抽出するクラス。"""")
+* 根拠: [各クラス定義] (行番号: 122〜123, 275〜276, 326〜330, 449〜450 / 抜粋: "class YouTubeExtractor:\n    """YouTubeからURL情報を抽出するクラス。"""")
 * チャンネルURLが指定された場合は`/videos`と`/playlists`の両方を自動探索し、通常動画一覧に加えて各プレイリストも個別に抽出する。
 * 根拠: [extract_iterメソッド] (行番号: 219〜229 / 抜粋: "チャンネルURLの場合は `/videos` と `/playlists` を自動探索する。")
 * `--cron`引数指定時は、SQLite DB（`home_system.db`）の`youtube_subscriptions`テーブルに登録されたアクティブなチャンネルURLを順次巡回する自動サブスクリプションモードで動作する。レート制限対策としてリクエスト間のジッター付き待機と、連続失敗時のサーキットブレーカーを備える。
-* 根拠: [SubscriptionManager.process_subscriptionsとrunメソッド] (行番号: 371〜423, 445〜448 / 抜粋: "if args.cron:\n            self.sub_manager.process_subscriptions()")
+* 根拠: [SubscriptionManager.process_subscriptionsとrunメソッド] (行番号: 379〜444, 466〜469 / 抜粋: "if args.cron:\n            self.sub_manager.process_subscriptions()")
+* **(Issue #123バグ修正)** `SubscriptionManager`のサブスクリプション用DBパス(`db_path`)は、以前は`__init__`時点で一度だけ確定していたため、アプリ起動時にNASがフォールバック中で、その後`process_subscriptions()`実行時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、NAS状態の検証自体は最新状態で通過するのに`db_path`だけ古いローカルパスのまま取り残され、ローカルに空DBが新規作成されてサブスクリプションが1件も読み込まれない（無言のno-op）という不具合があった。現在は`process_subscriptions()`実行のたびに`AppConfig.get_output_base_dir()`を1回呼び出し、その同一時点の値から環境検証と`db_path`の導出を両方行うことで、評価タイミングのズレを解消している。
+* 根拠: [process_subscriptions冒頭のコメントとdb_path導出] (行番号: 381〜396 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")
 
 ## 3. 外部依存関係
 
@@ -62,7 +64,7 @@
 | `core.nas_utils.get_managed_target_directory` | インポート成功時の実際の実装（NASマウント確認・自動修復ロジックの詳細）が不明。フォールバック実装は`fallback_dir_str`があればそれを、なければ`Path("./data")`を返す簡易実装のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 40, 48〜56 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | `yt_dlp.YoutubeDL` | `extract_info`が返す辞書の詳細な構造（`entries`, `url`, `webpage_url`, `id`, `title`, `channel`, `uploader`等のキーの完全な仕様）は`yt_dlp`本体の実装に依存し、本ファイルからは分からない。 | 根拠: [YoutubeDL利用箇所] (行番号: 179〜180 / 抜粋: "with yt_dlp.YoutubeDL(dict(AppConfig.YDL_OPTS)) as ydl:\n                info = ydl.extract_info(target_url, download=False)") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）は本ファイル単体からは不明。ただし関連ドキュメント`file_utils.md`に実装の解析結果が存在する。 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| `home_system.db`（SQLite DB） | `youtube_subscriptions`テーブル以外にどのようなテーブル・データが存在するか、他プロセスとの共有スキーマの全体像は本ファイルからは不明（本ファイルは`CREATE TABLE IF NOT EXISTS`で自テーブルのみ関知）。 | 根拠: [_init_db] (行番号: 357〜369 / 抜粋: "CREATE TABLE IF NOT EXISTS youtube_subscriptions (") |
+| `home_system.db`（SQLite DB） | `youtube_subscriptions`テーブル以外にどのようなテーブル・データが存在するか、他プロセスとの共有スキーマの全体像は本ファイルからは不明（本ファイルは`CREATE TABLE IF NOT EXISTS`で自テーブルのみ関知）。 | 根拠: [_init_db] (行番号: 365〜377 / 抜粋: "CREATE TABLE IF NOT EXISTS youtube_subscriptions (") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -257,7 +259,7 @@
 
 ### `SubscriptionManager.__init__`
 
-* **役割**: `YouTubeExtractor`と`FileManager`のインスタンスを保持し、サブスクリプション管理用SQLite DB（`home_system.db`）のパスを（NASベースディレクトリの1階層上として）決定するコンストラクタ。
+* **役割**: `YouTubeExtractor`と`FileManager`のインスタンスを保持するコンストラクタ。**(Issue #123バグ修正)** 以前はここでサブスクリプション管理用SQLite DB（`home_system.db`）のパスを`self.db_path`として一度だけ決定していたが、`process_subscriptions()`実行のたびに評価し直す方式に変更したため、`db_path`はインスタンス属性として持たない（詳細は`process_subscriptions`の項を参照）。
 * 根拠: [クラス定義とDocstringおよび__init__] (行番号: 326〜337 / 抜粋: "class SubscriptionManager:\n    """\n    定期巡回（サブスクリプション）を管理するクラス。\n    SSOTポリシーに基づき、SQLite DBを用いて状態を管理する。\n    """")
 
 
@@ -266,8 +268,8 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* **副作用**: `self.extractor`, `self.file_manager`, `self.db_path`への属性代入。`self.db_path`決定時に`AppConfig.get_output_base_dir()`の呼び出し（間接的にNASアクセス確認等の副作用を誘発しうる）。
-* 根拠: [属性代入] (行番号: 333〜337 / 抜粋: "self.extractor = extractor\n        self.file_manager = file_manager\n        \n        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置\n        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"")
+* **副作用**: `self.extractor`, `self.file_manager`への属性代入のみ。（Issue #123修正前は`self.db_path`決定時に`AppConfig.get_output_base_dir()`の呼び出しがここにあったが、現在は存在しない。）
+* 根拠: [属性代入とコメント] (行番号: 333〜337 / 抜粋: "self.extractor = extractor\n        self.file_manager = file_manager\n        # ★バグ修正(Issue #123): db_pathは以前ここ(__init__時点)で一度だけ確定していたが、\n        # process_subscriptions()実行のたびに評価し直す方式に変更したため、インスタンス\n        # 属性としては持たない(詳細はprocess_subscriptions()のコメント参照)。")
 
 
 * **エラーハンドリング**: なし
@@ -275,20 +277,20 @@
 
 ### `SubscriptionManager._verify_environment`
 
-* **役割**: 現在の出力先ベースディレクトリが`AppConfig.LOCAL_DIR_STR`（ローカルフォールバック用パス）と一致するか（＝NASが正常にマウントされているか）を検証するインスタンスメソッド。`Path.resolve()`によるパス正規化を行った上で完全一致比較する。フォールバック関数が想定外の相対パスを返した場合でも検知漏れが起きないよう、絶対パスの文字列包含チェック(旧実装)ではなく正規化パスの完全一致比較を用いる設計であることがコメントで明記されている。
-* 根拠: [メソッド定義とDocstringおよび比較処理のコメント] (行番号: 339〜351 / 抜粋: "def _verify_environment(self) -> bool:\n        """\n        NASのマウント状態（フォールバック中ではないか）を検証する。")
+* **役割**: 出力先ベースディレクトリが`AppConfig.LOCAL_DIR_STR`（ローカルフォールバック用パス）と一致するか（＝NASが正常にマウントされているか）を検証するインスタンスメソッド。`Path.resolve()`によるパス正規化を行った上で完全一致比較する。フォールバック関数が想定外の相対パスを返した場合でも検知漏れが起きないよう、絶対パスの文字列包含チェック(旧実装)ではなく正規化パスの完全一致比較を用いる設計であることがコメントで明記されている。**(Issue #123バグ修正)** 引数`current_base`が追加され、省略時のみ内部で`AppConfig.get_output_base_dir()`を呼び出す。`get_output_base_dir()`はマウント確認・自己修復・障害通知を伴う重い処理のため、呼び出し元（`process_subscriptions`）が既に取得済みの値を渡して使い回すことで、環境検証と`db_path`導出を同一時点のNAS状態から行えるようにするための変更である。
+* 根拠: [メソッド定義とDocstringおよび比較処理のコメント] (行番号: 339〜359 / 抜粋: "def _verify_environment(self, current_base: Optional[Path] = None) -> bool:\n        """\n        NASのマウント状態（フォールバック中ではないか）を検証する。")
 
 
-* **引数/リクエスト**: なし（`self`のみ）
-* 根拠: [引数定義] (行番号: 339 / 抜粋: "def _verify_environment(self) -> bool:")
+* **引数/リクエスト**: `current_base: Optional[Path] = None`（省略時は`AppConfig.get_output_base_dir()`を呼び出して取得する）
+* 根拠: [引数定義とDocstring] (行番号: 339, 343〜348 / 抜粋: "def _verify_environment(self, current_base: Optional[Path] = None) -> bool:", "current_base (Optional[Path]): 検証対象のベースディレクトリ。省略時は\n                AppConfig.get_output_base_dir()を呼び出して取得する。")
 
 
 * **戻り値/レスポンス**: `bool`（正常なNAS環境であれば`True`、ローカルフォールバック中であれば`False`）
-* 根拠: [Docstringと各return] (行番号: 343〜345, 355 / 抜粋: "Returns:\n            bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False\n        """)
+* 根拠: [Docstringと各return] (行番号: 350〜352, 363 / 抜粋: "Returns:\n            bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False\n        """)
 
 
-* **副作用**: フォールバック検知時のエラーログ出力（2行）。
-* 根拠: [ログ出力] (行番号: 352〜353 / 抜粋: "logger.error("🚨 NASがアンマウント状態(ローカルフォールバック中)を検知しました。")\n            logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")")
+* **副作用**: `current_base`省略時のみ`AppConfig.get_output_base_dir()`呼び出し（間接的にNASアクセス確認等の副作用を誘発しうる）。フォールバック検知時のエラーログ出力（2行）。
+* 根拠: [current_base取得とログ出力] (行番号: 353〜354, 360〜361 / 抜粋: "if current_base is None:\n            current_base = AppConfig.get_output_base_dir()", "logger.error("🚨 NASがアンマウント状態(ローカルフォールバック中)を検知しました。")\n            logger.error("データの不整合・上書きを防ぐため、サブスクリプション処理をFail-Softで中断します。")")
 
 
 * **エラーハンドリング**: なし
@@ -296,17 +298,20 @@
 
 ### `SubscriptionManager._init_db`
 
-* **役割**: サブスクリプション管理用テーブル(`youtube_subscriptions`)が存在しない場合に作成するインスタンスメソッド。`id`, `channel_url`（一意制約）, `is_active`, `added_at`の各カラムを持つ。
-* 根拠: [メソッド定義とDocstring] (行番号: 357〜369 / 抜粋: "def _init_db(self) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
+* **役割**: サブスクリプション管理用テーブル(`youtube_subscriptions`)が存在しない場合に作成するインスタンスメソッド。`id`, `channel_url`（一意制約）, `is_active`, `added_at`の各カラムを持つ。**(Issue #123バグ修正)** 以前は`self.db_path`を参照していたが、呼び出し元(`process_subscriptions`)から渡された`db_path`引数を使うように変更された。
+* 根拠: [メソッド定義とDocstring] (行番号: 365〜377 / 抜粋: "def _init_db(self, db_path: Path) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
 
 
-* **引数/リクエスト**: なし（`self`のみ）
+* **引数/リクエスト**: `db_path: Path`（接続先のDBファイルパス。呼び出し元が同一時点で解決した値を渡す）
+* 根拠: [引数定義] (行番号: 365 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
+
+
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 357 / 抜粋: "def _init_db(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 365 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
 
 
 * **副作用**: SQLite DB接続、テーブル作成用DDL実行(`CREATE TABLE IF NOT EXISTS`)、コミット。
-* 根拠: [DDL実行] (行番号: 359〜369 / 抜粋: "with closing(sqlite3.connect(self.db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
+* 根拠: [DDL実行] (行番号: 367〜377 / 抜粋: "with closing(sqlite3.connect(db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
 
 
 * **エラーハンドリング**: なし（本メソッド自体には例外処理なし。呼び出し元の`process_subscriptions`が`sqlite3.Error`を捕捉する）
@@ -314,33 +319,33 @@
 
 ### `SubscriptionManager.process_subscriptions`
 
-* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。
-* 根拠: [メソッド定義とDocstring] (行番号: 371〜372 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""")
+* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。
+* 根拠: [メソッド定義とDocstringおよびIssue #123修正コメント] (行番号: 379〜396 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""\n        # 1. 環境検証（データロスト防止の防波堤）\n        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 371 / 抜粋: "def process_subscriptions(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 379 / 抜粋: "def process_subscriptions(self) -> None:")
 
 
-* **副作用**: 環境検証・DB初期化・DBからのSELECT、URL巡回ごとの`time.sleep`、`extractor.extract_iter`によるネットワークアクセス、`file_manager.save`によるファイル書き込み、各段階でのログ出力。
-* 根拠: [メイン処理フロー] (行番号: 373〜423 / 抜粋: "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
+* **副作用**: `AppConfig.get_output_base_dir()`の呼び出し（NASアクセス確認等の副作用を誘発しうる）、環境検証・DB初期化・DBからのSELECT、URL巡回ごとの`time.sleep`、`extractor.extract_iter`によるネットワークアクセス、`file_manager.save`によるファイル書き込み、各段階でのログ出力。
+* 根拠: [メイン処理フロー] (行番号: 393, 423 / 抜粋: "current_base = AppConfig.get_output_base_dir()", "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
 
 
 * **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
-* 根拠: [各種ガード節とbreak] (行番号: 374〜375, 381〜383, 394〜396, 398〜400, 421〜423 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
+* 根拠: [各種ガード節とbreak] (行番号: 394〜395, 402〜404, 415〜417, 419〜421, 442〜444 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
 
 
 ### `UrlExtractorApp.__init__`
 
 * **役割**: `YouTubeExtractor`, `FileManager`, `SubscriptionManager`の各インスタンスを生成・保持するコンストラクタ。
-* 根拠: [メソッド定義] (行番号: 431〜434 / 抜粋: "def __init__(self):\n        self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
+* 根拠: [メソッド定義] (行番号: 452〜455 / 抜粋: "def __init__(self):\n        self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: 該当なし
-* **副作用**: 3つのインスタンス属性への代入（間接的に`SubscriptionManager.__init__`のNASアクセス確認等の副作用を誘発しうる）。
-* 根拠: [属性代入] (行番号: 432〜434 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
+* **副作用**: 3つのインスタンス属性への代入。**(Issue #123バグ修正)** 以前は`SubscriptionManager.__init__`がここでNASアクセス確認（`db_path`決定）を間接的に誘発していたが、修正後はその副作用がなくなり、本メソッドの副作用はインスタンス生成のみになった。
+* 根拠: [属性代入] (行番号: 453〜455 / 抜粋: "self.extractor = YouTubeExtractor()\n        self.file_manager = FileManager()\n        self.sub_manager = SubscriptionManager(self.extractor, self.file_manager)")
 
 
 * **エラーハンドリング**: なし
@@ -349,23 +354,23 @@
 ### `UrlExtractorApp.run`
 
 * **役割**: コマンドライン引数（`url`位置引数、`--cron`フラグ）を解析し、`--cron`指定時はサブスクリプション巡回、それ以外はURL引数（未指定時は対話的に`input()`で取得）を`extract_iter`で処理・保存するエントリーポイントメソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 436〜437 / 抜粋: "def run(self) -> None:\n        """コマンドライン引数を解析し、メイン処理を実行する。"""")
+* 根拠: [メソッド定義とDocstring] (行番号: 457〜458 / 抜粋: "def run(self) -> None:\n        """コマンドライン引数を解析し、メイン処理を実行する。"""")
 
 
 * **引数/リクエスト**: なし（`self`のみ、`sys.argv`経由で`argparse`が解析）
-* 根拠: [argparse定義] (行番号: 440〜443 / 抜粋: "parser = argparse.ArgumentParser(description="Extract YouTube URLs from channels or playlists.")\n        parser.add_argument("url", nargs="?", help="Target YouTube URL")\n        parser.add_argument("--cron", action="store_true", help="Auto-subscription mode")")
+* 根拠: [argparse定義] (行番号: 461〜464 / 抜粋: "parser = argparse.ArgumentParser(description="Extract YouTube URLs from channels or playlists.")\n        parser.add_argument("url", nargs="?", help="Target YouTube URL")\n        parser.add_argument("--cron", action="store_true", help="Auto-subscription mode")")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 436 / 抜粋: "def run(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 457 / 抜粋: "def run(self) -> None:")
 
 
 * **副作用**: 起動・完了ログ出力、`--cron`時は`sub_manager.process_subscriptions()`呼び出し、URL未指定時の対話的`input()`呼び出し、`extractor.extract_iter`によるネットワークアクセスと`file_manager.save`によるファイル保存。
-* 根拠: [メイン処理フロー] (行番号: 438, 445〜448, 450〜468 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")
+* 根拠: [メイン処理フロー] (行番号: 459, 466〜469, 471〜489 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")
 
 
 * **エラーハンドリング**: 対話的URL入力時の`KeyboardInterrupt`を捕捉し、情報ログを出力して`sys.exit(0)`で正常終了する。それ以外の例外処理はこのメソッド自体にはない。
-* 根拠: [try-exceptブロック] (行番号: 453〜458 / 抜粋: "except KeyboardInterrupt:\n                logger.info("ユーザーにより中断されました")\n                sys.exit(0)")
+* 根拠: [try-exceptブロック] (行番号: 474〜479 / 抜粋: "except KeyboardInterrupt:\n                logger.info("ユーザーにより中断されました")\n                sys.exit(0)")
 
 
 ## 5. 処理フロー図
@@ -468,14 +473,16 @@ graph TD
 | 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`があればそれを返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 39 / 抜粋: "from core.logger import get_logger") |
 | 中 | `file_utils.py` | `sanitize_filename`の具体的なサニタイズルールを確認するため（既に`docs/specifications/DDD/file_utils.md`として解析済み）。 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| 低 | `home_system.db`を書き込む他のプロセス/スクリプト | `youtube_subscriptions`テーブルへどのようにチャンネルURLが登録・アクティブ化されるか（本ファイルはSELECTのみで、INSERT/UPDATEを行う箇所が存在しない）を確認するため。 | 根拠: [process_subscriptions] (行番号: 391 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")") |
+| 低 | `home_system.db`を書き込む他のプロセス/スクリプト | `youtube_subscriptions`テーブルへどのようにチャンネルURLが登録・アクティブ化されるか（本ファイルはSELECTのみで、INSERT/UPDATEを行う箇所が存在しない）を確認するため。 | 根拠: [process_subscriptions] (行番号: 412 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")") |
 
 ## 8. 保守上の注意点
 
 * **フォールバック実装と本番実装の差異リスク**: `core.logger`, `core.nas_utils`のインポートに失敗した場合、ファイル内の簡易フォールバック実装に切り替わる。`get_managed_target_directory`のフォールバック実装は`fallback_dir_str`（`AppConfig.LOCAL_DIR_STR`、`BASE_DIR/'data'`の絶対パス）を尊重するよう修正済みだが、本番環境で意図せずインポートが失敗した場合、依然としてNASではなくローカルディスクにデータが保存される点は変わらない。
 * 根拠: [フォールバック定義] (行番号: 42〜56 / 抜粋: "except ImportError:\n    # 開発環境や単体実行時のフォールバック")
 * **`youtube_subscriptions`テーブルへの書き込み手段が本ファイルに存在しない**: `_init_db`はテーブル作成のみを行い、`process_subscriptions`はSELECTのみを実行する。チャンネルURLの登録・有効化（INSERT/UPDATE）を行う手段が本ファイル内に見当たらず、外部プロセスまたは手動でのDB操作が前提と見られる。
-* 根拠: [process_subscriptions] (行番号: 391 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")")
+* 根拠: [process_subscriptions] (行番号: 412 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")")
+* **(Issue #123バグ修正の背景)** `SubscriptionManager`は`db_path`をインスタンス属性として保持せず、`process_subscriptions()`実行のたびに`AppConfig.get_output_base_dir()`から再導出する設計に変更された。これは、NASのマウント状態がプロセスの生存期間中に変化しうる（autofsの再マウント遅延等）ことを前提とした設計であり、今後同様に「起動時に一度だけ解決した値」をNAS関連の状態判定と組み合わせて使う実装を追加する際は、両者の評価タイミングを揃える（同一の`get_output_base_dir()`呼び出し結果を使い回す）よう注意すること。
+* 根拠: [process_subscriptions冒頭のコメント] (行番号: 382〜392 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証\n        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り\n        # 残されていた。")
 * **YDL_OPTS共有辞書のコピー渡し**: `yt_dlp.YoutubeDL.__init__`が渡された`params`辞書を直接書き換えるため、`AppConfig.YDL_OPTS`（クラス属性の共有辞書）をそのまま渡すと繰り返し呼び出し時に状態汚染が起きるリスクがあり、コード内コメントで明示的に`dict(AppConfig.YDL_OPTS)`によるコピー渡しが行われている。
 * 根拠: [コメントとコピー渡し] (行番号: 174〜179, 249〜250 / 抜粋: "# yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える\n            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、")
 * **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。
