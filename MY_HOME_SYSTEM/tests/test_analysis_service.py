@@ -7,7 +7,9 @@ DB操作そのもの。テーブルが存在しない・カラムが一致しな
 空データを返すFail-Soft設計になっているため、その両方を検証する。
 """
 import os
+import sqlite3
 import sys
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -188,18 +190,56 @@ class TestLoadRankingData:
 
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:
     """
-    weather_history テーブルの実カラムと load_weather_history/load_yearly_temperature_stats が
-    要求するカラム(location, umbrella_level等)が一致していない既知の問題があるが、
-    いずれも例外を外に投げず空のDataFrameを返すFail-Soft設計になっていることを確認する。
+    Issue #114で修正済み: 以前はweather_historyテーブルの実カラムと
+    load_weather_history/load_yearly_temperature_stats が要求するカラム
+    (location, umbrella_level等)が一致しておらず、新規DB(init_db)では
+    "no such column: location" のOperationalErrorがexceptで握りつぶされ、
+    常に空のDataFrameが返っていた(天気関連の表示・年間気温統計が無言で空になるバグ)。
+    例外を投げないこと自体は引き続き保証しつつ、修正後は実際に投入したデータが
+    正しく返ってくることも検証する。
     """
+
+    @staticmethod
+    def _insert_weather_row(db_path, date, location, min_temp=1.0, max_temp=10.0,
+                             weather_desc="晴れ", max_pop=10, umbrella_level="不要"):
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO weather_history "
+                "(date, location, min_temp, max_temp, weather_desc, max_pop, umbrella_level, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (date, location, min_temp, max_temp, weather_desc, max_pop, umbrella_level, date),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_load_weather_history_does_not_raise_and_returns_dataframe(self, isolated_db):
         result = analysis_service.load_weather_history()
         assert isinstance(result, pd.DataFrame)
 
+    def test_load_weather_history_returns_rows_matching_location(self, isolated_db):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self._insert_weather_row(isolated_db, today, location="伊丹")
+        self._insert_weather_row(isolated_db, today, location="東京")
+
+        result = analysis_service.load_weather_history(location="伊丹")
+
+        assert len(result) == 1
+        assert result.iloc[0]["date"] == today
+
     def test_load_yearly_temperature_stats_does_not_raise(self, isolated_db):
         result = analysis_service.load_yearly_temperature_stats(2026)
         assert isinstance(result, pd.DataFrame)
+
+    def test_load_yearly_temperature_stats_returns_weather_data_for_matching_location(self, isolated_db):
+        self._insert_weather_row(isolated_db, "2026-03-15", location="伊丹", max_temp=15.0, min_temp=5.0)
+
+        result = analysis_service.load_yearly_temperature_stats(2026, location="伊丹")
+
+        assert len(result) == 1
+        assert result.iloc[0]["out_max"] == 15.0
+        assert result.iloc[0]["out_min"] == 5.0
 
 
 class TestSystemStats:
