@@ -109,6 +109,37 @@ class TestGetActiveQuestsMessage:
         result = await line_service.get_active_quests_message("dad")
         assert "ありません" in result.text
 
+    async def test_siblings_target_quest_is_shown_to_child_user(self, isolated_db):
+        """Issue #109回帰防止: target='siblings'は特定のuser_idと一致しない
+        ため、旧実装(target != 'all' and target != user_id)では兄妹連携
+        クエストが常にスキップされ、どの子供にも表示されなかった。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
+                "VALUES (1040, 'いっしょにおかたづけ', 'daily', 'siblings', 40, 30)"
+            )
+        result = await line_service.get_active_quests_message("son")
+        assert "いっしょにおかたづけ" in result.text
+
+    async def test_siblings_target_quest_is_hidden_from_adult_user(self, isolated_db):
+        """兄妹連携クエストの対象は子供(role_child)全員であり、親には
+        表示されないこと(家族画面側の対象判定と同じ意味付け)。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
+                "VALUES (1040, 'いっしょにおかたづけ', 'daily', 'siblings', 40, 30)"
+            )
+        result = await line_service.get_active_quests_message("dad")
+        assert "いっしょにおかたづけ" not in result.text
+
 
 @pytest.mark.asyncio
 class TestProcessApprovalCommand:
