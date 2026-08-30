@@ -460,7 +460,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `InventoryService.get_user_inventory`
 
-* **役割**: 指定ユーザーの`'owned'`または`'pending'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する。`'pending'`はSQLのフィルタ条件としては残っているが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い、本ファイル内で`user_inventory.status`を`'pending'`へ設定する処理はもはや存在しない（`ShopService.process_purchase_reward`は`'owned'`で挿入し、`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新する）ため、事実上到達しない条件になっている。
+* **役割**: 指定ユーザーの`'owned'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する（`reward_master.description`を`desc`として、`reward_master.icon_key`を`icon`として別名取得する）。Issue #116で修正: 以前はSQLのフィルタ条件に`'pending'`も含まれていたが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い`ShopService.process_purchase_reward`は`'owned'`でのみ挿入し`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新するため、`'pending'`は新規購入では到達しない値になっていた。しかし廃止前の旧承認フロー由来で`'pending'`のまま残っている既存データが存在する環境では、この行が一覧に含まれてしまい、タップすると`use_item`が`status != 'owned'`により`HTTPException(400)`を返す「押せないアイテム」としてUIに表示されてしまう不具合があったため、`'pending'`をフィルタから除外し`'owned'`のみを返すよう修正した。あわせて、以前はSELECT対象に`reward_master.description`が含まれておらず、レスポンスに`desc`キー自体が存在しなかった（フロントエンドが常に「説明はありません」というフォールバック文言を表示していた）ため、`rm.description as desc`を追加した。
 * 根拠: `def get_user_inventory(self, user_id: str) -> List[dict]:` (行番号: 780〜791)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 780)
