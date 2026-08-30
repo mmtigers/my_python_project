@@ -12,7 +12,13 @@ Markdown仕様書が1つ対応する規約がある（例外: 全体設計書.md
   full  - リポジトリ全体を対象に、コミット日時ベースでドリフト・孤立ドキュメント・
           未文書化ファイルを洗い出す（週次の定期監査用）
 
-いずれも exit code は常に 0 固定（非ブロッキング運用のため）。
+いずれも、正常に完走した場合(検知結果の有無を問わず)は exit code が常に
+0 固定（非ブロッキング運用のため）。ただし git コマンド自体が失敗した場合
+（shallow cloneでの参照エラー等）は例外を送出し非0で終了する — 「差分取得
+失敗=ドリフトなし」と黙って誤解しないよう意図的な設計であり(run()参照)、
+呼び出し側のCIワークフロー（`.github/workflows/spec-drift-pr-check.yml`・
+`spec-drift-weekly-audit.yml`）側で `continue-on-error: true` 等により
+ジョブ全体は非ブロッキングに保つ前提になっている。
 検知結果はMarkdownレポートとして標準出力、または --out 指定先に書き出す。
 """
 from __future__ import annotations
