@@ -332,18 +332,26 @@ class SubscriptionManager:
     def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):
         self.extractor = extractor
         self.file_manager = file_manager
-        
-        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置
-        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"
+        # ★バグ修正(Issue #123): db_pathは以前ここ(__init__時点)で一度だけ確定していたが、
+        # process_subscriptions()実行のたびに評価し直す方式に変更したため、インスタンス
+        # 属性としては持たない(詳細はprocess_subscriptions()のコメント参照)。
 
-    def _verify_environment(self) -> bool:
+    def _verify_environment(self, current_base: Optional[Path] = None) -> bool:
         """
         NASのマウント状態（フォールバック中ではないか）を検証する。
-        
+
+        Args:
+            current_base (Optional[Path]): 検証対象のベースディレクトリ。省略時は
+                AppConfig.get_output_base_dir()を呼び出して取得する。
+                get_output_base_dir()はマウント確認・自己修復・障害通知を伴う重い
+                処理のため、呼び出し元が既に同一時点の値を取得済みの場合はそれを
+                渡して使い回すこと(process_subscriptions()参照)。
+
         Returns:
             bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False
         """
-        current_base = AppConfig.get_output_base_dir()
+        if current_base is None:
+            current_base = AppConfig.get_output_base_dir()
         # 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して
         # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが
         # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。
@@ -354,9 +362,9 @@ class SubscriptionManager:
             return False
         return True
 
-    def _init_db(self) -> None:
+    def _init_db(self, db_path: Path) -> None:
         """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""
-        with closing(sqlite3.connect(self.db_path)) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             with closing(conn.cursor()) as cur:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS youtube_subscriptions (
@@ -371,22 +379,35 @@ class SubscriptionManager:
     def process_subscriptions(self) -> None:
         """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""
         # 1. 環境検証（データロスト防止の防波堤）
-        if not self._verify_environment():
+        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、
+        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰
+        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証
+        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り
+        # 残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり、「アク
+        # ティブなサブスクリプションが登録されていません」で無言のno-op終了していた
+        # (巡回1回分が静かにスキップされ、ゴミの空DDD/home_system.dbが残る)。
+        # get_output_base_dir()の呼び出し結果を1回だけ取得し、検証とdb_path導出の
+        # 両方をその同一時点の値から行うことで、評価タイミングのズレを無くす
+        # (get_output_base_dir()はNASの自己修復・障害通知を伴う重い処理のため、
+        # 呼び出し回数も1回に抑える)。
+        current_base = AppConfig.get_output_base_dir()
+        if not self._verify_environment(current_base):
             return
+        db_path = current_base.parent / "home_system.db"
 
         # 2. DB初期化
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db()
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db(db_path)
         except sqlite3.Error as e:
             logger.error(f"❌ DB初期化エラー: {e}", exc_info=True)
             return
 
         urls: List[str] = []
-        
+
         # 3. DBからアクティブなサブスクリプションを取得
         try:
-            with closing(sqlite3.connect(self.db_path)) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 with closing(conn.cursor()) as cur:
                     cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")
                     rows = cur.fetchall()
