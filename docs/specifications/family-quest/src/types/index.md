@@ -9,8 +9,8 @@
 
 ## 関連ドキュメント
 
-- [useGameData.md](../hooks/useGameData.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`/`PendingInventory`型の主要な利用元。
-- [apiClient.md](../lib/apiClient.md) — `InventoryItem`/`PendingInventory`型の利用元。
+- [useGameData.md](../hooks/useGameData.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`型の主要な利用元。
+- [apiClient.md](../lib/apiClient.md) — `InventoryItem`型の利用元。
 - [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
 - [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
 - [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。`description`/`desc`混在プロパティの実際の参照パターンを確認できる。
@@ -20,7 +20,8 @@
 ## 2. ファイルの概要
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
-* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果、承認待ちインベントリのドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。
+* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。
+* 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜114 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `QuestResult`の7件のみで`PendingInventory`は存在しないことを確認)
 * 根拠: [全体] (行番号: 3 / 抜粋: "// 共通の型定義")
 
 ## 3. 外部依存関係
@@ -118,17 +119,6 @@
 * **副作用**: なし
 * **エラーハンドリング**: なし
 
-### `PendingInventory`
-
-* **役割**: 承認待ちインベントリアイテム用のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 114〜121 / 抜粋: "export interface PendingInventory {")
-
-
-* **引数/リクエスト**: 該当なし
-* **戻り値/レスポンス**: 該当なし
-* **副作用**: なし
-* **エラーハンドリング**: なし
-
 ## 5. 処理フロー図
 
 ※本ファイルは型定義のみであり、実行されるロジック（関数等）が存在しないため、処理フロー図は該当なし。
@@ -151,7 +141,7 @@ graph TD
     QuestHistory["interface: QuestHistory"] --> ID
     Reward["interface: Reward"] --> ID
 
-    %% QuestResult, InventoryItem, PendingInventory はいずれも ID 型を参照していない
+    %% QuestResult, InventoryItem はいずれも ID 型を参照していない
     %% (id, reward_id 等は number/string に固定されている)
 ```
 
@@ -161,7 +151,6 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | これらをインポートしているコンポーネント・API群 | 定義された各型がどのように初期化され、操作されているかの実態を把握するため。 | [全体] 型定義のみであり、利用側が存在しないと機能しないため |
 | 中 | APIクライアントの実装ファイル | `QuestResult`などがAPIレスポンス用と明記されており、通信周りの処理を追う必要があるため。 | [QuestResult] (行番号: 102 / 抜粋: "// ★追加: クエスト完了結果 (APIレスポンス用)") |
-| 中 | ApprovalListコンポーネント関連ファイル | `PendingInventory`の使用箇所として明記されており、承認フローの仕様を解明するため。 | [PendingInventory] (行番号: 113 / 抜粋: "// ★追加: 承認待ちインベントリアイテム用 (ApprovalListで使用)") |
 
 ## 8. 保守上の注意点
 

@@ -29,9 +29,9 @@
 * 根拠: `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)` (行番号: 733〜736)
 
 
-H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_users`のgold/exp/levelをread-modify-writeで更新する経路）も、対象ユーザー単位のプロセス内ロック（`_get_user_balance_lock`）で直列化され、同一ユーザーへの承認×承認・承認×取消の並行実行によるgold/exp消失レースを防ぐようになった。また`InventoryService`のアイテム使用は、H-5の修正により即時消費（`'consumed'`）ではなく`'pending'`状態での申請とし、`ROLE_ADULT`による`consume_item`の承認で初めて消費を確定する2段階の承認フローに変更された（子供のクエスト完了が`ROLE_ADULT`の承認を要する仕組みと同様のパターン）。
-* 根拠: (行番号: 62〜67 / 抜粋: "process_approve_quest / process_cancel_quest は「quest_usersをSELECT →")
-* 根拠: (行番号: 645〜649 / 抜粋: "アイテム使用を「申請」する。即時消費はせず status='pending' にし、")
+H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_users`のgold/exp/levelをread-modify-writeで更新する経路）も、対象ユーザー単位のプロセス内ロック（`_get_user_balance_lock`）で直列化され、同一ユーザーへの承認×承認・承認×取消の並行実行によるgold/exp消失レースを防ぐようになった。また`InventoryService.use_item`によるアイテム使用は、`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・状態(`'owned'`)確認後に即座に消費を確定する（親の承認は不要な）単一ステップの処理である（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: (行番号: 88〜91 / 抜粋: "process_approve_quest / process_cancel_quest は「quest_usersをSELECT →")
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 793〜796 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
 
 ## 3. 外部依存関係
 
@@ -79,7 +79,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `ROLE_ADULT` / `ROLE_CHILD` (モジュールレベル定数)
 
-* **役割**: `quest_users.role` カラムに格納される値のうち、親権限（`role_adult`）と子供権限（`role_child`）を表す文字列定数。本ファイル内の全ての権限判定（クエスト完了時の即時反映/承認待ち分岐、承認・却下・アイテム消費承認の権限チェック）はこの2値を唯一の基準として行われる。
+* **役割**: `quest_users.role` カラムに格納される値のうち、親権限（`role_adult`）と子供権限（`role_child`）を表す文字列定数。本ファイル内の全ての権限判定（クエスト完了時の即時反映/承認待ち分岐、クエスト完了の承認・却下の権限チェック）はこの2値を唯一の基準として行われる。`InventoryService`のアイテム使用（`use_item`）は所有者・所有状態の確認のみで完結し、この2値による権限チェックは経由しない。
 * 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 24〜25)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの文字列定数）
 * 根拠: (行番号: 23〜25 / 抜粋: "# quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
@@ -190,18 +190,18 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.is_within_reset_period`
 
-* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列（例えば`sync_master_data`がデフォルト値として設定する`'weekly_monday'`）が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する。
-* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 141〜175)
-* 根拠: `if dt.tzinfo is None: dt = dt.replace(tzinfo=JST)` (行番号: 153〜159 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
-* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 168〜175)
+* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する（`'weekly_monday'`はこれに該当する値の一例で、`quest_master`のテーブル定義(`current_schema.sql`)側の`reset_period`列DEFAULTとして残存するが、`sync_master_data`が列追加マイグレーション時に設定するデフォルト値は現在`'daily'`であり`sync_master_data`自身が`'weekly_monday'`を設定することはない。詳細は8節を参照）。
+* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 208〜242)
+* 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 225〜226 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
+* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242)
 * **引数/リクエスト**: `completed_at_str: str`, `reset_period: str`
-* 根拠: (行番号: 141)
+* 根拠: (行番号: 208)
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 141)
+* 根拠: (行番号: 208)
 * **副作用**: なし
-* 根拠: (行番号: 141〜175、DBアクセスや外部呼び出しなし)
+* 根拠: (行番号: 208〜242、DBアクセスや外部呼び出しなし)
 * **エラーハンドリング**: `completed_at_str`が空なら早期`False`。ISOパース失敗時は`"%Y-%m-%d"`形式でリトライし、それも失敗すれば`False`を返す（例外は送出しない）。
-* 根拠: (行番号: 142, 162〜166 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
+* 根拠: (行番号: 209, 229〜233 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
 
 ### `QuestService.__init__`
 
@@ -258,16 +258,17 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._process_complete_quest_locked`
 
-* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行い、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた（判定内容自体は変更なし）。
+* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行う。続けて、`quest['quest_type']`が`'infinite'`以外かつ直近の完了履歴がある場合、`is_within_reset_period`でその履歴が現在の`reset_period`（`quest_master.reset_period`が未設定なら`'daily'`）の期間内かどうかを判定し、期間内であれば`400`エラーとするサーバー側の周期リセットガード（M-1-3）を行う。このガードは、`is_within_reset_period`が元々`get_all_view_data`の表示専用（`completedQuests`算出）にしか使われておらず、上記10秒スパムチェックだけではAPI直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていたことへの対策として追加された。`'infinite'`タイプ（「何回でも挑戦しよう」等）は仕様上多重完了が前提のため、このガードの対象外。ガードを通過後、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた（判定内容自体は変更なし）。
 * 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 317〜375)
+* 根拠: `# M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。` (行番号: 337), `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = "今週" if reset_period == 'weekly' else "本日"\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 342〜346)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
 * 根拠: (行番号: 317)
 * **戻り値/レスポンス**: `Dict[str, Any]`（ステータスや報酬情報）
 * 根拠: (行番号: 317, 365〜370, 375)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し、ログ出力、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し
 * 根拠: (行番号: 319〜320, 355, 363, 373)
-* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する）。この時間ベースのチェックに加え、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
-* 根拠: (行番号: 332〜335 / 抜粋: "elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)")
+* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する）。この時間ベースのチェックに加え、`quest_type`が`'infinite'`以外のクエストが現在の`reset_period`内に既に完了済みの場合は`HTTPException(400)`（M-1-3の周期リセットガード）。さらに呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
+* 根拠: (行番号: 332〜335 / 抜粋: "elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)"), (行番号: 342〜346 / 抜粋: "if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):")
 
 ### `QuestService._get_sibling_partner_id`
 
@@ -350,16 +351,18 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.process_reject_quest`
 
-* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を却下し、履歴を削除する。連結された相方の履歴が`pending`であればカスケードして削除する。
-* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 433〜451)
+* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を却下する。履歴は`DELETE`せず、`quest_history`該当行の`status`列を`'rejected'`へ`UPDATE`することで却下履歴を残す（ソースコメントには、以前はDELETEしていたため`status='rejected'`という値自体が実際には生成されず、`process_complete_quest`のスパムチェック`status != 'rejected'`が常に成立する死に条件になっていた、という経緯が記されている）。連結された相方の履歴が`pending`であれば、同一トランザクション内で相方側の`status`も同様に`'rejected'`へカスケード更新する。
+* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 521〜542)
+* 根拠: `# 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には\n            # 生成されず、...)` ... `cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))` (行番号: 531〜534)
+* 根拠: `if hist['linked_history_id'] is not None:\n                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))` (行番号: 537〜538)
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
-* 根拠: (行番号: 433)
+* 根拠: (行番号: 521)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "rejected"}`）
-* 根拠: (行番号: 433, 451)
-* **副作用**: DB削除（`quest_history`。連結された相方の`pending`行も含む）、ログ出力
-* 根拠: (行番号: 443, 446〜448, 450)
+* 根拠: (行番号: 521, 542)
+* **副作用**: DB更新（`quest_history`の`status`列を`'rejected'`へ`UPDATE`。連結された相方の`pending`行も含む）、ログ出力
+* 根拠: (行番号: 534, 538〜539, 541)
 * **エラーハンドリング**: 承認者が`role_adult`でない場合 `HTTPException(403)`、履歴なし `HTTPException(404)`、承認待ちでない場合 `HTTPException(400)`
-* 根拠: (行番号: 436〜437, 440, 441)
+* 根拠: (行番号: 524〜525, 528, 529)
 
 ### `QuestService._apply_quest_rewards`
 
@@ -457,68 +460,29 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `InventoryService.get_user_inventory`
 
-* **役割**: 指定ユーザーの`'owned'`または`'pending'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する。
-* 根拠: `def get_user_inventory(self, user_id: str) -> List[dict]:` (行番号: 631〜642)
+* **役割**: 指定ユーザーの`'owned'`または`'pending'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する。`'pending'`はSQLのフィルタ条件としては残っているが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い、本ファイル内で`user_inventory.status`を`'pending'`へ設定する処理はもはや存在しない（`ShopService.process_purchase_reward`は`'owned'`で挿入し、`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新する）ため、事実上到達しない条件になっている。
+* 根拠: `def get_user_inventory(self, user_id: str) -> List[dict]:` (行番号: 780〜791)
 * **引数/リクエスト**: `user_id: str`
-* 根拠: (行番号: 631)
+* 根拠: (行番号: 780)
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: (行番号: 631, 642)
+* 根拠: (行番号: 780, 791)
 * **副作用**: DB参照（`user_inventory`, `reward_master`）
-* 根拠: (行番号: 641)
+* 根拠: (行番号: 782〜790)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 631〜642)
+* 根拠: (行番号: 780〜791)
 
 ### `InventoryService.use_item`
 
-* **役割**: アイテム使用を「申請」する（H-5）。所有者・状態(`'owned'`)を確認したうえで、対象アイテムの状態を即座に`'consumed'`にはせず`'pending'`へ更新し（`used_at`に現在時刻を記録）、`config.LINE_USER_ID`宛に「使用を申請しました。承認をお願いします。」というLINE通知を送り、`"submit"`サウンドを再生する。消費の確定（`quest_history`への記録・LINE通知・効果音）は`consume_item`による承認時に行われる（H-5: 以前は即座に`'consumed'`にしその場で`quest_history`へ記録・通知していたため、`consume_item`/`cancel_usage`/`get_pending_items`やフロントのpending UI・ポーリングが到達不能なデッドコードになっていた）。
-* 根拠: 関数Docstring (行番号: 645〜649 / 抜粋: "アイテム使用を「申請」する。即時消費はせず status='pending' にし、")
+* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。続けて`config.LINE_USER_ID`宛に使用を知らせるLINE通知を送り、`"quest_clear"`サウンドを再生する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: 関数Docstring `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 793〜796 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: (行番号: 644)
-* **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "pending", "message": "使用を申請しました！おうちの人の確認を待とう。"}`）
-* 根拠: (行番号: 644, 680)
-* **副作用**: DB参照（`reward_master`/`quest_users`とのJOIN）/更新（`user_inventory`の状態を`'pending'`に）、`notification_service.send_push`、`sound_manager.play("submit")`
-* 根拠: (行番号: 667〜671, 674〜678)
-* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない `HTTPException(400)`
-* 根拠: (行番号: 661〜663)
-
-### `InventoryService.consume_item`
-
-* **役割**: `ROLE_ADULT`のユーザーが、保留中（`pending`）のアイテム使用申請を承認し消費を確定する（H-5）。承認者の`role`検証、対象アイテムが`'pending'`であることの確認後、状態を`'consumed'`に更新し、`quest_history`への記録（`quest_id=0`のログ行）・`config.LINE_USER_ID`宛のLINE通知・`"quest_clear"`サウンド再生を行う（これらの確定処理は元々`use_item`内で即時消費時に行われていたが、承認フロー復活に伴い`consume_item`側に移設された）。
-* 根拠: 関数Docstring (行番号: 683 / 抜粋: "親がアイテム使用申請を承認し、消費を確定する。")
-* **引数/リクエスト**: `approver_id: str`, `inventory_id: int`
-* 根拠: (行番号: 682)
-* **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "consumed", "message": "承認しました"}`）
-* 根拠: (行番号: 682, 721)
-* **副作用**: DB参照（`role`および`reward_master`/`quest_users`とのJOINでアイテム取得）/更新（`user_inventory`を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
-* 根拠: (行番号: 702〜706, 709〜712, 715〜719)
-* **エラーハンドリング**: 承認者が`role_adult`でない場合 `HTTPException(403)`、アイテム不在 `HTTPException(404)`、`'pending'`でない場合 `HTTPException(400)`
-* 根拠: (行番号: 686〜687, 697, 698)
-
-### `InventoryService.cancel_usage`
-
-* **役割**: 保留中（`pending`）のアイテム使用申請をキャンセルし、所有(`'owned'`)状態に戻す（`used_at`をクリア）。
-* 根拠: `def cancel_usage(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 723〜731)
-* **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: (行番号: 723)
-* **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "owned", "message": "リュックに戻しました"}`）
-* 根拠: (行番号: 723, 731)
-* **副作用**: DB更新（`user_inventory`）
-* 根拠: (行番号: 730)
-* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、`pending`でない場合 `HTTPException(400)`
-* 根拠: (行番号: 726〜728)
-
-### `InventoryService.get_pending_items`
-
-* **役割**: 全ユーザーの`pending`状態のアイテムを、使用申請日時の昇順で取得する（承認待ちキュー用）。
-* 根拠: `def get_pending_items(self) -> List[dict]:` (行番号: 733〜746)
-* **引数/リクエスト**: なし（`self`のみ）
-* 根拠: (行番号: 733)
-* **戻り値/レスポンス**: `List[dict]`
-* 根拠: (行番号: 733, 746)
-* **副作用**: DB参照
-* 根拠: (行番号: 745)
-* **エラーハンドリング**: なし
-* 根拠: (行番号: 733〜746)
+* 根拠: (行番号: 793)
+* **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "consumed", "message": "つかいました！"}`）
+* 根拠: (行番号: 793, 832)
+* **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
+* 根拠: (行番号: 813〜817, 819〜823, 826〜829, 830)
+* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`
+* 根拠: (行番号: 807〜809 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")
 
 ### `GameSystem.__init__`
 
@@ -533,34 +497,34 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `GameSystem.sync_master_data`
 
-* **役割**: `quest_data`モジュールを`importlib.reload`で再読み込みし、`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションしたうえで、DBスキーマの簡易マイグレーション（`quest_users.role`列、`quest_master.reset_period`列(デフォルト値`'weekly_monday'`)、`reward_master.description`列を、存在しなければ`ALTER TABLE`で追加）を行い、`quest_users`/`quest_master`を`ON CONFLICT ... DO UPDATE`によるUPSERTと、マスターに存在しないIDの`DELETE`で同期する。`reward_master`へのUPSERTは`target`列(対象者制限。`MasterReward.target`、デフォルト`'all'`)を含み、`ON CONFLICT DO UPDATE`でも`target = excluded.target`により更新する（Issue #95: 以前はINSERT/UPDATE列リストに`target`が含まれておらず、`reward_master.target`は列DEFAULTの`'all'`に固定されたまま`quest_data.REWARDS`側の`target`指定（`'children'`/`'mom'`/`'adults'`等）が一切反映されなかったため、フロントエンドの対象者フィルタが常に素通しになり、対象者制限のある報酬が全ユーザーに表示・購入可能になっていた）。`reward_master`の同期については、削除候補を一括`DELETE`せず`SELECT`で取得したうえで1件ずつ検討し、`user_inventory`に参照が残っている（所有中/申請中/使用済問わず）報酬は削除をスキップして警告ログのみ出す（M-1-2: `user_inventory`は`reward_master(reward_id)`へのFK(`PRAGMA foreign_keys=ON`)を持つため、以前のように対象を一括`DELETE`すると所持者がいる報酬の削除時に`IntegrityError`となり`sync_master_data`全体が失敗していた）。
-* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 723〜850)
-* 根拠: `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 759)
-* 根拠: `INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target) ... ON CONFLICT(reward_id) DO UPDATE SET ... target = excluded.target` (行番号: 836〜847)
-* 根拠: `user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、` (行番号: 819〜822), `if still_referenced: ... continue` (行番号: 828〜834)
+* **役割**: `quest_data`モジュールを`importlib.reload`で再読み込みし、`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションしたうえで、DBスキーマの簡易マイグレーション（`quest_users.role`列、`quest_master.reset_period`列(デフォルト値`'daily'`)、`reward_master.description`列を、存在しなければ`ALTER TABLE`で追加）を行い、`quest_users`/`quest_master`を`ON CONFLICT ... DO UPDATE`によるUPSERTと、マスターに存在しないIDの`DELETE`で同期する。`reward_master`へのUPSERTは`target`列(対象者制限。`MasterReward.target`、デフォルト`'all'`)を含み、`ON CONFLICT DO UPDATE`でも`target = excluded.target`により更新する（Issue #95: 以前はINSERT/UPDATE列リストに`target`が含まれておらず、`reward_master.target`は列DEFAULTの`'all'`に固定されたまま`quest_data.REWARDS`側の`target`指定（`'children'`/`'mom'`/`'adults'`等）が一切反映されなかったため、フロントエンドの対象者フィルタが常に素通しになり、対象者制限のある報酬が全ユーザーに表示・購入可能になっていた）。`reward_master`の同期については、削除候補を一括`DELETE`せず`SELECT`で取得したうえで1件ずつ検討し、`user_inventory`に参照が残っている（所有中/申請中/使用済問わず）報酬は削除をスキップして警告ログのみ出す（M-1-2: `user_inventory`は`reward_master(reward_id)`へのFK(`PRAGMA foreign_keys=ON`)を持つため、以前のように対象を一括`DELETE`すると所持者がいる報酬の削除時に`IntegrityError`となり`sync_master_data`全体が失敗していた）。なお、`quest_master.reset_period`列そのもののテーブル定義(`current_schema.sql`のCREATE TABLE)側のDEFAULTは依然`'weekly_monday'`であり、このマイグレーションのALTER TABLE時デフォルト値`'daily'`とは食い違っている（8節参照）。
+* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 841〜968)
+* 根拠: `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 877)
+* 根拠: `INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target) ... ON CONFLICT(reward_id) DO UPDATE SET ... target = excluded.target` (行番号: 955〜965)
+* 根拠: `# user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、` (行番号: 937〜940), `if still_referenced: ... continue` (行番号: 946〜951)
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: (行番号: 723)
+* 根拠: (行番号: 841)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "synced", "message": "Master data updated."}`）
-* 根拠: (行番号: 723, 850)
+* 根拠: (行番号: 841, 968)
 * **副作用**: DBテーブルのスキーマ変更（`ALTER TABLE`）、`SELECT`による削除候補の抽出と1件ずつの条件付き`DELETE`、`INSERT ... ON CONFLICT DO UPDATE`（`target`列含む）、`importlib.reload`、ログ出力
-* 根拠: (行番号: 759, 810〜834, 836〜847)
+* 根拠: (行番号: 877, 941〜952, 955〜965)
 * **エラーハンドリング**: `quest_data`未読込または`MasterUser`/`MasterQuest`/`MasterReward`のバリデーション失敗時に例外を捕捉し`HTTPException(status_code=500)`
-* 根拠: (行番号: 774 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")")
+* 根拠: (行番号: 860 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")")
 
 ### `GameSystem.get_all_view_data`
 
-* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
-* 根拠: `def get_all_view_data(self) -> Dict[str, Any]:` (行番号: 883〜977)
-* 根拠: `if q['target_user'] and q['target_user'] != 'all':` (行番号: 895〜901)
-* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 910〜917)
-* **引数/リクエスト**: なし（`self`のみ）
-* 根拠: (行番号: 883)
+* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 970)
+* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 987), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 991)
+* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1010〜1017)
+* **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（省略時は`None`。`target_user`が実在ユーザーでない共有クエストのボーナス計算で、閲覧中ユーザーの代表IDとして使われる）
+* 根拠: (行番号: 970)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）
-* 根拠: (行番号: 973〜977)
+* 根拠: (行番号: 1073〜1077)
 * **副作用**: DB参照、`filter_active_quests`/`calculate_quest_boost`/`is_within_reset_period`/`_fetch_recent_logs`の呼び出し
-* 根拠: (行番号: 892, 896, 942, 971)
+* 根拠: (行番号: 979, 993, 1042, 1051, 1071)
 * **エラーハンドリング**: JST基準日時の算出に失敗した場合、サーバーのローカル時刻へフォールバックする局所的な`try-except`（防御的処理、ログに`logger.error`）
-* 根拠: (行番号: 910〜917 / 抜粋: "except Exception as jst_err:\n                logger.error(f\"❌ Failed to calculate JST time for analytics: {jst_err}\")")
+* 根拠: (行番号: 1010〜1017 / 抜粋: "except Exception as jst_err:\n                logger.error(f\"❌ Failed to calculate JST time for analytics: {jst_err}\")")
 
 ### `GameSystem._fetch_recent_logs`
 
@@ -602,7 +566,9 @@ flowchart TD
     DB_Select -- No --> Err404[HTTPException 404: Not found]
     DB_Select -- Yes --> SpamCheck{"直近10秒以内に完了履歴があるか<br>(tzinfoを保持したまま比較)"}
     SpamCheck -- Yes --> Err429[HTTPException 429: 少し時間を空けてください]
-    SpamCheck -- No --> CalcBoost["クエストボーナスの計算<br>(サーバーローカル時刻を使用)"]
+    SpamCheck -- No --> ResetGuard{"M-1-3: quest_typeが'infinite'以外 かつ<br>直近履歴が現在のreset_period内か<br>(is_within_reset_periodで判定)"}
+    ResetGuard -- Yes --> Err400G[HTTPException 400: 本日/今週は完了済みです]
+    ResetGuard -- No --> CalcBoost["クエストボーナスの計算<br>(サーバーローカル時刻を使用)"]
     CalcBoost --> CheckChild{"対象ユーザのroleはROLE_CHILDか"}
 
     CheckChild -- Yes --> CheckSiblings{"クエストのtarget_userは'siblings'か"}
@@ -665,26 +631,17 @@ flowchart TD
     CCallLocked --> CEnd[End]
 ```
 
-以下は、アイテム使用の承認フロー（`use_item` → `consume_item`、H-5で復活）です。
+以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。
 
 ```mermaid
 flowchart TD
-    UStart[Start: use_item] --> UCheck{"所有者一致 かつ<br>status == 'owned' か"}
+    UStart[Start: use_item] --> UCheck{"アイテムが存在し、<br>所有者一致 かつ<br>status == 'owned' か"}
     UCheck -- No --> UErr[HTTPException 400/403/404]
-    UCheck -- Yes --> USetPending["user_inventory.status = 'pending'<br>(used_atに現在時刻)"]
-    USetPending --> UNotify["外部: notification_service.send_push<br>「使用を申請しました」"]
-    UNotify --> UPlaySound["外部: sound_manager.play 'submit'"]
-    UPlaySound --> UReturn["戻り値: status=pending"]
-
-    CoStart[Start: consume_item] --> CoAuth{"承認者がROLE_ADULTか"}
-    CoAuth -- No --> CoErr403[HTTPException 403]
-    CoAuth -- Yes --> CoCheck{"対象アイテムがstatus == 'pending'か"}
-    CoCheck -- No --> CoErr[HTTPException 400/404]
-    CoCheck -- Yes --> CoSetConsumed["user_inventory.status = 'consumed'"]
-    CoSetConsumed --> CoInsertHistory["quest_historyへquest_id=0のログ行を挿入"]
-    CoInsertHistory --> CoNotify["外部: notification_service.send_push<br>「使用しました」"]
-    CoNotify --> CoPlaySound["外部: sound_manager.play 'quest_clear'"]
-    CoPlaySound --> CoReturn["戻り値: status=consumed"]
+    UCheck -- Yes --> USetConsumed["user_inventory.status = 'consumed'<br>(used_atに現在時刻)"]
+    USetConsumed --> UInsertHistory["quest_historyへ quest_id=0・<br>status='approved'のログ行を挿入"]
+    UInsertHistory --> UNotify["外部: notification_service.send_push<br>「使用しました」"]
+    UNotify --> UPlaySound["外部: sound_manager.play 'quest_clear'"]
+    UPlaySound --> UReturn["戻り値: status=consumed"]
 ```
 
 ## 6. 依存関係図
@@ -731,7 +688,6 @@ graph TD
     QuestService -.->|スパムチェックの経過秒数判定| seconds_since_iso_timestamp
     ShopService -.->|スパムチェックの経過秒数判定| seconds_since_iso_timestamp
     QuestService -.-> role_consts
-    InventoryService -.-> role_consts
 
     subgraph External Modules
         common
@@ -801,16 +757,16 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `common.py` | トランザクションスコープの境界や`get_now_iso`の日時フォーマットが、データの整合性・タイムゾーン判定の正しさに強く影響するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 235) |
 | 高 | `game_logic.py` | 報酬やレベルアップ等のコアドメインロジック（`calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`）を含むため。 | `game_logic.GameLogic.calc_level_progress(...)` (行番号: 467) |
-| 高 | `quest_data.py` | `sync_master_data`で読み込まれる`USERS`/`QUESTS`/`REWARDS`の実データの型・値が、DBテーブルの各カラム仕様と`reset_period`の実際の分布に直接影響するため。特に`reset_period`列のデフォルト値`'weekly_monday'`が実データにどの程度残っているかを確認する必要がある。 | `import quest_data` (行番号: 29), `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'")` (行番号: 791) |
-| 中 | `fix_quest_reset_period.py` | `quest_master.reset_period`が`'weekly_monday'`から`'daily'`へ一括変換されるワンショットスクリプトであり、`is_within_reset_period`が`'daily'`/`'weekly'`のみを扱う設計との整合性（未実行環境や`'boss_'`接頭辞クエストでの挙動）を確認するため。 | `is_within_reset_period`の`if reset_period == 'daily': ... elif reset_period == 'weekly': ...` (行番号: 168〜173) |
+| 高 | `quest_data.py` | `sync_master_data`で読み込まれる`USERS`/`QUESTS`/`REWARDS`の実データの型・値が、DBテーブルの各カラム仕様と`reset_period`の実際の分布に直接影響するため。`sync_master_data`の列追加マイグレーション自体は現在デフォルト値`'daily'`を使うが、個々のクエスト定義に`reset_period`キーが無い場合に`quest_data.py`側で実際にどの値が使われているかを確認する必要がある。 | `import quest_data` (行番号: 30, 33), `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 877) |
+| 中 | `fix_quest_reset_period.py` | `quest_master.reset_period`が`'weekly_monday'`から`'daily'`へ一括変換されるワンショットスクリプトであり、`is_within_reset_period`が`'daily'`/`'weekly'`のみを扱う設計との整合性（未実行環境や`'boss_'`接頭辞クエストでの挙動）を確認するため。 | `is_within_reset_period`の`if reset_period == 'daily': ... elif reset_period == 'weekly': ...` (行番号: 235〜241) |
 | 中 | `services/switchbot_service.py` | 非同期のTVロック解除に失敗した場合の影響範囲・再送ロジックの有無を確認するため。 | `switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")` (行番号: 414) |
 | 中 | マイグレーション定義ファイル (例: `core/migrations.py` またはその配下のスクリプト) | `quest_history.linked_history_id`カラムの型・制約・追加時期が本ファイルからは確認できないため。 | `hist['linked_history_id']` (行番号: 378) |
 | 低 | `models/quest.py` | `MasterUser`/`MasterQuest`/`MasterReward`のバリデーションルール（`role`フィールドの扱い等）を確認するため。 | `role_val = getattr(u, 'role', None)` (行番号: 794) |
 
 ## 8. 保守上の注意点
 
-* **`is_within_reset_period`が扱うリセット周期は`'daily'`と`'weekly'`のみ**: `sync_master_data`が`quest_master.reset_period`列を新規追加する際のデフォルト値は`'weekly_monday'`だが、`is_within_reset_period`はこの文字列を判定条件に含んでいない。そのため、`reset_period`が`'weekly_monday'`のまま（または`'daily'`/`'weekly'`以外の任意の値）であるクエストは、`get_all_view_data`内での有効性判定で常に`False`を返し、`completedQuests`（および共有クエストの他者完了状況）へ反映されない可能性がある。
-* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 168〜175), `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'weekly_monday'")` (行番号: 791)
+* **`is_within_reset_period`が扱うリセット周期は`'daily'`と`'weekly'`のみ**: `sync_master_data`が`quest_master.reset_period`列を（列が存在しない旧DBに対して）追加する際のデフォルト値は現在`'daily'`であり、`is_within_reset_period`が扱う2値と一致するよう修正されている。ただし`current_schema.sql`側のテーブル定義自体（DBを新規作成する経路のCREATE TABLE文）は`reset_period`列のDEFAULTが依然`'weekly_monday'`のままで、この2つのデフォルト値は食い違っている。`reset_period`が`'weekly_monday'`のまま（または`'daily'`/`'weekly'`以外の任意の値）であるクエストは、`is_within_reset_period`のいずれの分岐にも一致せず`get_all_view_data`内での有効性判定で常に`False`を返し、`completedQuests`（および共有クエストの他者完了状況）へ反映されない可能性が残る。
+* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242), `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 877)
 * **`calculate_quest_boost`と`is_within_reset_period`で「現在時刻」の基準が異なる**: `is_within_reset_period`はJST（+9時間、標準ライブラリのみで定義）に厳密に変換して比較する一方、`calculate_quest_boost`は`datetime.datetime.now()`（サーバーのOSローカル時刻）をそのまま使用している。サーバーのOSタイムゾーンがJST以外（例: UTC環境）の場合、連続日ボーナスの判定基準日がずれる可能性がある（M-1-4は`is_within_reset_period`のtzinfo無し値の解釈をUTCからJSTへ修正したのみで、この2関数間の基準不一致自体は解消されていない）。
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 147), `now = datetime.datetime.now()` (行番号: 202)
 * **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`辞書もエントリを削除しない同じ設計である。
@@ -829,8 +785,8 @@ graph TD
 * 根拠: `if user_id not in child_ids or len(child_ids) != 2: raise HTTPException(status_code=400, ...)` (行番号: 307〜308)
 * **兄妹連携クエストのカスケード処理は3箇所に個別実装**: 承認（`_process_approve_quest_locked`内、`_approve_linked_history`呼び出し）・却下（`process_reject_quest`内）・取消（`_process_cancel_quest_locked`内、`_revert_and_delete_history`経由）のそれぞれで`hist['linked_history_id']`の有無を個別にチェックしており、共通ヘルパーに統合されていない（H-3による`process_approve_quest`/`process_cancel_quest`のロック委譲分割後も、この重複自体は解消されていない）。
 * 根拠: (行番号: 378, 446〜448, 516〜524)
-* **アイテム使用申請・承認は共に`LINE_USER_ID`宛へ通知される（H-5で対称化）**: `use_item`は「使用を申請しました」、`consume_item`は「使用しました」という通知をいずれも`config.LINE_USER_ID`宛に送信するようになった（H-5以前は`consume_item`側に対応する通知呼び出しが無く非対称だったが、承認フロー復活に伴い解消された）。ただし承認権限を持つ`ROLE_ADULT`ユーザー個別への「承認待ちがある」というプッシュ通知は無く、`get_pending_items`のポーリングに依存する設計のままである。
-* 根拠: `notification_service.send_push(user_id=config.LINE_USER_ID, ...)` (行番号: 674〜677、`use_item`内), (行番号: 715〜718、`consume_item`内)
+* **アイテム使用の通知は`LINE_USER_ID`宛に1回のみ**: `use_item`はアイテム使用を即座に消費として確定し、`config.LINE_USER_ID`宛に「使用しました」という通知を1回送信する。アイテム使用に親の承認は不要なため、承認待ちを知らせる通知や、承認権限を持つユーザー個別への「承認待ちがある」というプッシュ通知は存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: `notification_service.send_push(user_id=config.LINE_USER_ID, ...)` (行番号: 826〜829、`use_item`内)
 
 ## 9. 不明事項一覧
 
