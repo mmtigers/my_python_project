@@ -25,6 +25,12 @@ class NasMonitor:
     def __init__(self) -> None:
         self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
+        # NAS_PROJECT_ROOT は mount_point 配下のアプリ専用ディレクトリ(home_system)。
+        # ASSETS_DIR 等はNAS未マウント時にフォールバックパスへ動的に切り替わるため、
+        # 同期先には(現在値に依存しない)固定のNAS_PROJECT_ROOTを使う。
+        self.nas_project_root: str = getattr(
+            config, "NAS_PROJECT_ROOT", os.path.join(self.mount_point, "home_system")
+        )
         self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)
@@ -149,20 +155,28 @@ class NasMonitor:
         return False
 
     def sync_fallback_data(self) -> None:
-        """フォールバックディレクトリのデータをNASへ安全に同期・移動する"""
-        if not os.path.exists(self.fallback_dir) or not os.listdir(self.fallback_dir):
+        """フォールバックディレクトリの assets データをNASへ安全に同期・移動する。
+
+        FALLBACK_ROOT直下には last_memory_alert.txt / last_tv_lock.txt など、
+        他モニターがローカル専用の状態管理に使うファイルも同居している。
+        同期対象は本来NAS(ASSETS_DIR)に属するデータである assets サブディレクトリに限定し、
+        それら無関係な状態ファイルを巻き込んで移動・削除しないようにする。
+        """
+        fallback_assets_dir = os.path.join(self.fallback_dir, "assets")
+        if not os.path.exists(fallback_assets_dir) or not os.listdir(fallback_assets_dir):
             logger.debug("フォールバックディレクトリに同期対象のデータはありません。")
             return
 
-        logger.info(f"Starting fallback data sync from {self.fallback_dir} to {self.mount_point}")
-        
+        nas_assets_dir = os.path.join(self.nas_project_root, "assets")
+        logger.info(f"Starting fallback data sync from {fallback_assets_dir} to {nas_assets_dir}")
+
         # rsyncを使用して安全に転送。--remove-source-filesで転送完了したファイルのみ元から削除
         cmd = [
-            "rsync", "-av", "--remove-source-files", 
-            f"{self.fallback_dir}/", 
-            f"{self.mount_point}/"
+            "rsync", "-av", "--remove-source-files",
+            f"{fallback_assets_dir}/",
+            f"{nas_assets_dir}/"
         ]
-        
+
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
@@ -171,12 +185,12 @@ class NasMonitor:
                 # 通知（復旧および同期完了）
                 send_push(
                     config.LINE_USER_ID,
-                    [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {self.mount_point}"}],
+                    [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {nas_assets_dir}"}],
                     target="discord", channel="report"
                 )
 
                 # rsync --remove-source-files は空ディレクトリを残すため、クリーンアップ
-                self._cleanup_empty_dirs(self.fallback_dir)
+                self._cleanup_empty_dirs(fallback_assets_dir)
             else:
                 logger.error(f"Sync failed with rsync error: {res.stderr}")
         except subprocess.TimeoutExpired:
