@@ -83,7 +83,21 @@ def source_to_doc_candidates(rel_path: Path) -> list[Path]:
     if parts[0] in PY_SOURCE_DIRS:
         # MY_HOME_SYSTEM/**/name.py 、DDD/name.py はいずれもフラットに
         # docs/specifications/<dir>/name.md へ対応する規約。
-        return [SPEC_ROOT / parts[0] / f"{stem}.md"]
+        candidates = []
+        # Issue #105: フラット規約はサブディレクトリ構造を畳むため、同名stem
+        # (例: MY_HOME_SYSTEM/common.py と MY_HOME_SYSTEM/views/dashboard/common.py)
+        # が衝突しうる。ソースディレクトリ直下より2階層以上深いファイルについては、
+        # 直近の親ディレクトリ名を接頭辞にしたdisambiguation名(例: dashboard_common.md。
+        # 既存の docs/specifications/MY_HOME_SYSTEM/dashboard_common.md が実際に
+        # この命名規則を採用している)を優先候補として先に返す。該当する
+        # disambiguation済み仕様書が存在しない大多数のケースでは、呼び出し側が
+        # existing(実在するファイルのみ)でフィルタするため、通常のフラット規約
+        # (<stem>.md)へ自然にフォールバックする。
+        if len(parts) > 2:
+            parent_dir = parts[-2]
+            candidates.append(SPEC_ROOT / parts[0] / f"{parent_dir}_{stem}.md")
+        candidates.append(SPEC_ROOT / parts[0] / f"{stem}.md")
+        return candidates
 
     if str(rel_path).startswith(FQ_SOURCE_ROOT + "/"):
         sub = rel_path.relative_to(FQ_SOURCE_ROOT)  # 例: App.tsx / hooks/useGameData.ts
@@ -110,7 +124,22 @@ def doc_to_source_candidates(doc_path: Path) -> list[Path]:
         # rglobが誤って拾ってしまわないようここでも明示的に除外する。
         matches = list((REPO_ROOT / parts[0]).rglob(f"{stem}.py"))
         matches += list((REPO_ROOT / parts[0]).rglob(f"{stem}.sh"))
-        rels = [m.relative_to(REPO_ROOT) for m in matches]
+        # Issue #105: source_to_doc_candidates の disambiguation規則(直近の親
+        # ディレクトリ名を接頭辞にした <parent>_<stem>.md)の逆写像。stemの先頭の
+        # アンダースコアで(親ディレクトリ名, 残りのstem)に分割し、
+        # "**/<親ディレクトリ名>/<残りのstem>.py(.sh)" というパターンで探索する
+        # (例: dashboard_common.md → **/dashboard/common.py)。
+        if "_" in stem:
+            parent_dir, _, remainder = stem.partition("_")
+            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.py"))
+            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.sh"))
+        rels = []
+        seen = set()
+        for m in matches:
+            rel = m.relative_to(REPO_ROOT)
+            if rel not in seen:
+                seen.add(rel)
+                rels.append(rel)
         return [rel for rel in rels if not is_excluded(rel)]
 
     if parts and parts[0] == "family-quest":
