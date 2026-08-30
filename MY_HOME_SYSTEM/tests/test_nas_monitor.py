@@ -130,6 +130,81 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         self.assertTrue(os.path.exists(new_summary))
 
 
+class TestNasMonitorFallbackSync(unittest.TestCase):
+    """Issue #162 の回帰テスト: sync_fallback_dataの同期先がmount_point直下になっており、
+    本来の NAS_PROJECT_ROOT/assets ではなく誤った場所へ移動されていた不具合。
+    また、同期対象を assets サブディレクトリに限定せず fallback_dir 全体を対象と
+    していたため、last_memory_alert.txt 等の無関係なローカル状態ファイルまで
+    巻き込んで移動・削除されていた不具合。"""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.mount_point = os.path.join(self.tmp_dir, "mnt_nas")
+        self.fallback_dir = os.path.join(self.tmp_dir, "temp_fallback")
+        self.nas_project_root = os.path.join(self.mount_point, "home_system")
+        os.makedirs(self.mount_point, exist_ok=True)
+        os.makedirs(self.fallback_dir, exist_ok=True)
+
+        with patch.object(config, "NAS_MOUNT_POINT", self.mount_point), \
+             patch.object(config, "FALLBACK_ROOT", self.fallback_dir), \
+             patch.object(config, "NAS_PROJECT_ROOT", self.nas_project_root):
+            self.monitor = NasMonitor()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_sync_targets_nas_project_root_assets_not_mount_root(self):
+        assets_dir = os.path.join(self.fallback_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        with open(os.path.join(assets_dir, "snapshot.jpg"), "w") as f:
+            f.write("dummy")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            self.monitor.sync_fallback_data()
+
+        cmd = mock_run.call_args.args[0]
+        src, dst = cmd[-2], cmd[-1]
+        expected_dst = os.path.join(self.nas_project_root, "assets") + "/"
+        self.assertEqual(src, assets_dir + "/")
+        self.assertEqual(dst, expected_dst)
+
+    def test_sync_does_not_touch_unrelated_fallback_state_files(self):
+        assets_dir = os.path.join(self.fallback_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        with open(os.path.join(assets_dir, "snapshot.jpg"), "w") as f:
+            f.write("dummy")
+
+        unrelated_state_file = os.path.join(self.fallback_dir, "last_memory_alert.txt")
+        with open(unrelated_state_file, "w") as f:
+            f.write("2026-08-30T00:00:00")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            self.monitor.sync_fallback_data()
+
+        # rsyncの対象パスが assets サブディレクトリに限定され、
+        # fallback_dir直下の無関係な状態ファイルを含んでいないこと
+        cmd = mock_run.call_args.args[0]
+        src = cmd[-2]
+        self.assertEqual(src, assets_dir + "/")
+        self.assertTrue(os.path.exists(unrelated_state_file), "無関係な状態ファイルは移動・削除されないこと")
+
+    def test_sync_skipped_when_only_unrelated_state_files_exist(self):
+        """assetsサブディレクトリが存在しない(=同期すべきNASデータがない)場合は、
+        fallback_dir直下の状態ファイルの有無に関わらず同期処理自体を行わないこと。"""
+        with open(os.path.join(self.fallback_dir, "last_tv_lock.txt"), "w") as f:
+            f.write("2026-08-30")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            self.monitor.sync_fallback_data()
+
+        mock_run.assert_not_called()
+
+
 class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
     """M-4-6残り: check_write_permission()の書き込みI/O(open/write/remove)に
     タイムアウトが無く、CIFSマウントがストールした場合にkillできず監視プロセス
