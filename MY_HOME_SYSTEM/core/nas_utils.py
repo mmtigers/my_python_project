@@ -11,6 +11,12 @@ except ImportError:
     # 単体テスト用フォールバック
     import logging
     logging.basicConfig(level=logging.INFO)
+    # get_managed_target_directory は getattr(config, "LINE_USER_ID", None) で
+    # config の存在を安全に確認しているつもりだったが、これは属性欠如は防げても
+    # 名前 config 自体の未束縛(NameError)は防げない。config が未定義のままだと
+    # NAS復旧失敗時にNameErrorで例外が送出され、本来フェイルソフトであるべき
+    # この関数がフォールバックディレクトリ作成(Fail-Softロジック)に到達しない。
+    config = None
     def get_logger(name): return logging.getLogger(name)
     def send_push(*args, **kwargs): pass
 
