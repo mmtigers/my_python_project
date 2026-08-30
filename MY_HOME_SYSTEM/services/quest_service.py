@@ -493,8 +493,12 @@ class QuestService:
         """, (new_level, new_exp_val, final_gold, earned_medals, now_iso, user['user_id']))
         
         if history_id:
-            cur.execute("UPDATE quest_history SET status='approved', completed_at=?, gold_earned=?, exp_earned=? WHERE id=?", 
-                       (now_iso, earned_gold, earned_exp, history_id))
+            # completed_at は子供が完了報告した時刻のまま維持する(承認時刻で上書きしない)。
+            # 上書きしていた旧実装では、承認が翌日(weeklyなら翌週)にずれた場合に
+            # process_complete_quest のスパムチェック/周期リセット判定が「本日(今週)完了済み」
+            # と誤判定し、翌日分の完了報告ができなくなる不具合があった(#93)。
+            cur.execute("UPDATE quest_history SET status='approved', gold_earned=?, exp_earned=? WHERE id=?",
+                       (earned_gold, earned_exp, history_id))
         else:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
