@@ -46,18 +46,25 @@ def get_db_cursor(commit: bool = False):
 
 def execute_read_query(query: str, params: tuple = ()) -> str:
     """読み取り専用モードで安全にSELECTを実行する"""
+    # #178: conn.close()が正常経路にしかなくtry/finallyが無かったため、
+    # cursor.execute()が例外を送出する(不正なSQL等)たびに接続がGC任せで
+    # 残りリークしていた。connをtry節の前で初期化し、finallyで確実に
+    # closeする。
+    conn = None
     try:
         conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         cursor.execute(query, params)
         rows = cursor.fetchall()
-        conn.close()
 
         if not rows: return "該当するデータはありませんでした。"
         return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
     except Exception as e:
         return f"検索エラー: {str(e)}"
+    finally:
+        if conn:
+            conn.close()
 
 def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """汎用データ保存関数"""
