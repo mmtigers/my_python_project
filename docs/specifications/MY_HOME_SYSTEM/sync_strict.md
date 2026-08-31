@@ -28,6 +28,9 @@
 Issue #164の修正により、`quest_master`へのUpsert対象は`start_time`/`end_time`(時間帯)・`start_date`/`end_date`(期間)・`occurrence_chance`(出現率)・`pre_requisite_quest_id`(前提クエスト)を含む全16列に拡張された。修正前はこれら6列がINSERT/UPDATE列リストから欠落しており、`services/quest_service.py`の`sync_master_data()`(全16列を同期)と非対称な「不完全な同期」になっていた。この結果、`quest_data.py`側で`start_time`/`end_time`を持つ時間帯限定クエスト(朝ミッション等)が、`sync_strict.py`経由の新規登録時はNULL(=`filter_active_quests()`で終日扱い)になり、既存行への時間帯変更も永久に反映されない不具合があった。
 * 根拠: `INSERT INTO quest_master (... start_time, end_time, start_date, end_date, occurrence_chance, pre_requisite_quest_id)` (行番号: 66〜114 / 抜粋: "#164: 時間帯(start_time/end_time)・期間(start_date/end_date)・出現率")
 
+Issue #165の修正により、`sync_rewards`にも2つの改善が加わった。(1) `reward_master`の削除処理が、`user_inventory`(`reward_master(reward_id)`へのFK、`PRAGMA foreign_keys=ON`)に参照が残る報酬(所持実績あり)を無条件でDELETEしIntegrityErrorで`run_sync`全体を失敗させていた問題を、`sync_master_data()`(M-1-2)と同じ「参照が残っている報酬は削除をスキップし警告ログのみ出す」方式に修正。(2) Upsert対象に`description`列を追加し、レガシー列`desc`のみ書き込んでいた状態から、アプリが実際に読む`description`列(`InventoryService.get_user_inventory`の`rm.description as desc`)も同じ値で同期するよう修正。
+* 根拠: `for row in stale_rewards: ... still_referenced = cur.execute("SELECT 1 FROM user_inventory ...")` (行番号: 145〜156 / 抜粋: "#165: user_inventory は reward_master(reward_id) へのFK")、`INSERT INTO reward_master (... desc, description)` (行番号: 173〜195 / 抜粋: "#165: 従来はレガシー列の desc のみ書き込んでおり")
+
 ## 3. 外部依存関係
 
 ### インポート一覧
@@ -79,16 +82,16 @@ Issue #164の修正により、`quest_master`へのUpsert対象は`start_time`/`
 
 ### `sync_rewards`
 
-* **役割**: `quest_data.REWARDS`を元に`reward_master`テーブルを完全同期する。`sync_quests`と同様の`dry_run`分岐・削除・Upsertの構造を持つが、`master_ids`が空の場合の全件削除ログが`sync_quests`と異なりUpsertループ手前のみで、`_count_rows_to_delete`と実処理の`else`分岐名は共通の構造。
-* 根拠: `def sync_rewards(cur, dry_run: bool = False):` (行番号: 97〜146)
+* **役割**: `quest_data.REWARDS`を元に`reward_master`テーブルを完全同期する。`sync_quests`と同様の`dry_run`分岐・削除・Upsertの構造を持つ。Issue #165の修正により、削除は無条件の一括`DELETE`ではなく、まず削除候補行(`master_ids`に存在しないID)を`SELECT`で抽出したうえで1行ずつループし、`user_inventory`に参照が残る(所持実績のある)報酬は`DELETE`をスキップして警告ログを出す方式に変更された(`services/quest_service.py`の`sync_master_data()`のM-1-2対策と同じ方式)。Upsert対象列にも`description`が追加され、レガシー列`desc`と同じ値を書き込むようになった。
+* 根拠: `def sync_rewards(cur, dry_run: bool = False):` (行番号: 118〜196)
 * **引数/リクエスト**: `cur`(DBカーソル), `dry_run: bool = False`
-* 根拠: (行番号: 97)
+* 根拠: (行番号: 118)
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 97〜146、明示的な`return`は`dry_run`時のみ)
-* **副作用**: `dry_run=False`時、`reward_master`テーブルへの`DELETE`文および`INSERT ... ON CONFLICT DO UPDATE`文の発行、ログ出力
-* 根拠: (行番号: 109〜114 / 抜粋: "DELETE FROM reward_master"), (行番号: 125〜145 / 抜粋: "INSERT INTO reward_master (")
-* **エラーハンドリング**: なし
-* 根拠: (行番号: 97〜146、try-exceptなし)
+* 根拠: (行番号: 118〜196、明示的な`return`は`dry_run`時のみ)
+* **副作用**: `dry_run=False`時、`reward_master`テーブルへの行単位`DELETE`(`user_inventory`参照チェック付き)、`user_inventory`テーブルへの`SELECT`(参照確認)、`reward_master`への`INSERT ... ON CONFLICT DO UPDATE`文の発行、ログ出力
+* 根拠: (行番号: 129〜156 / 抜粋: "for row in stale_rewards: ... still_referenced = cur.execute(\"SELECT 1 FROM user_inventory..."), (行番号: 173〜195 / 抜粋: "INSERT INTO reward_master (")
+* **エラーハンドリング**: なし(呼び出し元の`run_sync`/`common.get_db_cursor`に依存)。ただし`user_inventory`に参照が残る報酬の削除は例外を送出せずスキップに変換される(#165)
+* 根拠: (行番号: 118〜196、try-exceptなし。スキップ処理は行番号150〜155 / 抜粋: "if still_referenced:\n            logger.warning(")
 
 ### `build_arg_parser`
 
@@ -183,12 +186,15 @@ flowchart TD
     CallRewards --> R_DryCheck{"dry_run か"}
     R_DryCheck -- Yes --> R_Count["_count_rows_to_delete で件数ログのみ出力"]
     R_Count --> Success
-    R_DryCheck -- No --> R_Check{"master_idsが存在するか"}
-    R_Check -- Yes --> R_DelPartial["不要な報酬データを削除"]
-    R_Check -- No --> R_DelAll["全報酬データを削除"]
-    R_DelPartial --> R_Loop{"REWARDSの全要素をループ"}
-    R_DelAll --> R_Loop
-    R_Loop -- 要素あり --> R_Upsert["reward_masterへUpsert"]
+    R_DryCheck -- No --> R_SelectStale["削除候補IDをSELECTで抽出<br/>(master_idsが空なら全件)"]
+    R_SelectStale --> R_FkLoop{"削除候補を1件ずつループ"}
+    R_FkLoop -- 候補あり --> R_FkCheck{"user_inventoryに参照が残っているか(#165)"}
+    R_FkCheck -- Yes --> R_SkipDelete["削除をスキップ・警告ログ出力"]
+    R_SkipDelete --> R_FkLoop
+    R_FkCheck -- No --> R_DoDelete["reward_masterから該当行をDELETE"]
+    R_DoDelete --> R_FkLoop
+    R_FkLoop -- 完了 --> R_Loop{"REWARDSの全要素をループ"}
+    R_Loop -- 要素あり --> R_Upsert["reward_masterへUpsert<br/>(desc/description両列を同期 #165)"]
     R_Upsert --> R_Loop
     R_Loop -- 完了 --> Success["run_sync: 完了ログ出力"]
     Success --> End([End])
@@ -241,6 +247,7 @@ graph TD
     sync_rewards --> logger
     sync_rewards --> Ext_Rewards["外部: quest_data.REWARDS"]
     sync_rewards --> DB_reward_master[(DB: reward_master)]
+    sync_rewards --> DB_user_inventory[(DB: user_inventory, FK参照チェック #165)]
 
     Ext_SetupLogging["外部: common.setup_logging"] --> logger
 ```
@@ -257,7 +264,11 @@ graph TD
 ## 8. 保守上の注意点
 
 * **破壊的な削除操作**: 実行時(`dry_run=False`)に`quest_master`および`reward_master`テーブルのデータが物理削除(DELETE)され、その後Upsertされる。マスタデータ(`QUESTS`/`REWARDS`)が空、または想定より少ないと、DBの対応テーブルの内容が意図せず失われる。M-9-6でこのリスクに対する安全ガード(`confirm_or_abort`)が導入されている。
-* 根拠: `DELETE`処理 (行番号: 38〜43, 109〜114 / 抜粋: "DELETE FROM quest_master")
+* 根拠: `DELETE`処理 (行番号: 38〜43 / 抜粋: "DELETE FROM quest_master"), `sync_rewards`内の行単位DELETE (行番号: 145〜156)
+* **（Issue #165で解消）reward_masterの一括DELETEによるIntegrityError**: `sync_rewards`は以前、`user_inventory`(`reward_master(reward_id)`へのFK、`PRAGMA foreign_keys=ON`)への参照を考慮せず`DELETE FROM reward_master WHERE reward_id NOT IN (...)`を一括実行しており、所持実績のある報酬をマスタから削除した状態で実行すると`IntegrityError`となり`run_sync`全体がexit 1していた。現在は削除候補を1件ずつ`user_inventory`参照チェックしたうえで、参照が残っている行のみ削除をスキップする(`sync_master_data()`のM-1-2と同じ方式)。
+* 根拠: (行番号: 139〜156 / 抜粋: "#165: user_inventory は reward_master(reward_id) へのFK")
+* **（Issue #165で解消）description列の未同期**: `sync_rewards`のUpsertは以前レガシー列`desc`のみを書き込んでおり、`InventoryService.get_user_inventory`が実際に読む`description`列(`services/quest_service.py:848`の`rm.description as desc`)が更新されないままだった。所持済みアイテム一覧で説明が空表示になる不具合があったが、現在は`desc`/`description`両列を同じ値で同期する。
+* 根拠: (行番号: 167〜195 / 抜粋: "#165: 従来はレガシー列の desc のみ書き込んでおり")
 * **`quest_master`へのUpsertは全カラムを明示指定する必要がある(Issue #100、#164)**: `reset_period`のようにINSERT対象から漏れた列は、SQLiteの列デフォルト値(`current_schema.sql`/`migrations/0002`由来の`'weekly_monday'`)がそのまま入り、`is_within_reset_period()`が扱えない値のため周期内多重完了ガードが機能しなくなる。`ALTER TABLE`では列のデフォルト値自体を変更できない(列を再作成しない限り残り続ける)ため、アプリケーション側で明示的に値を指定する必要がある。実際にIssue #164では、`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`/`pre_requisite_quest_id`の6列が`sync_quests`のUpsert列リストから欠落したまま長期間残っており、`services/quest_service.py`の`sync_master_data()`(全16列)と非対称な不完全同期になっていた(時間帯限定クエストが`sync_strict.py`経由だと終日扱いになる不具合)。今後`quest_master`に新しい列を追加する場合も、`sync_quests`のINSERT/UPDATE列リストへの追加を忘れずに行う必要がある。
 * 根拠: `reset_period_val = q.get('reset_period', 'daily')` (行番号: 57〜64), `INSERT INTO quest_master (... reset_period, start_time, end_time, start_date, end_date, occurrence_chance, pre_requisite_quest_id)` (行番号: 66〜114)
 * **削除処理の非対称性**: `sync_quests`と`sync_rewards`はいずれも`master_ids`が空の場合に全データを削除する`else`分岐を持つ点は共通しているが、`dry_run`時の件数カウント(`_count_rows_to_delete`)は両者で共通ヘルパーに統合されている一方、実削除・Upsertのロジック自体はほぼ重複したコードとして個別に実装されている。
