@@ -342,7 +342,14 @@ function App() {
       let res: ActionResult = { success: false };
 
       if (confirmMode === 'purchase') {
-        res = await buyReward(actingUser, confirmTarget as Reward);
+        // #245: actingUser(confirmUser)はモーダルを開いた時点のスナップショットであり、
+        // 背景ポーリング(useGameDataの10秒間隔)によるゴールド残高の更新に追従しない。
+        // buyReward内のローカル事前チェック((user.gold || 0) < cost)がこの古い残高で
+        // 判定してしまうと、実際には購入可能な状況でも誤って「お金が足りません」と
+        // なりAPIコール自体がブロックされる。実行直前にusersから同一user_idの最新
+        // オブジェクトを引き直し、鮮度の高い残高でチェック・購入を行う。
+        const freshActingUser = users.find(u => u.user_id === actingUser.user_id) || actingUser;
+        res = await buyReward(freshActingUser, confirmTarget as Reward);
         if (res.success) {
           showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
           // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
