@@ -553,6 +553,34 @@ class QuestService:
         t.start()
     
     def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
+        # #228: process_approve_quest と同じユーザー単位ロックに参加させる。
+        # 以前はここでロックを一切取得していなかったため、同一history_idに対する
+        # 承認と却下がほぼ同時に実行されると、承認側が先にquest_usersへgold/expを
+        # 加算・コミットした後に却下のUPDATEがコミットされ、quest_history.statusは
+        # 'rejected'になるのに付与済みの報酬は一切ロールバックされない不整合が
+        # 生じていた。兄妹連携クエスト(linked_history_id あり)の場合は、相方の
+        # quest_users もカスケードして書き換えるため相方のユーザーIDも合わせて
+        # ロックする(process_approve_quest/process_cancel_questと同じ理由、#98)。
+        with common.get_db_cursor() as cur:
+            hist_peek = cur.execute(
+                "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+        if not hist_peek:
+            raise HTTPException(status_code=404, detail="History not found")
+
+        lock_user_ids = [hist_peek['user_id']]
+        if hist_peek['linked_history_id'] is not None:
+            with common.get_db_cursor() as cur:
+                linked_peek = cur.execute(
+                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
+                ).fetchone()
+            if linked_peek:
+                lock_user_ids.append(linked_peek['user_id'])
+
+        with _acquire_user_balance_locks(lock_user_ids):
+            return self._process_reject_quest_locked(approver_id, history_id, reason)
+
+    def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -565,7 +593,12 @@ class QuestService:
             # 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には
             # 生成されず、process_complete_quest のスパムチェック `status != 'rejected'`
             # が常に成立する死に条件になっていた)。
-            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))
+            # #228: 主対象のUPDATEにも AND status = 'pending' を付ける(連結相方向けの
+            # 更新には元々付いていたが主対象には無い非対称な実装だった)。ロック取得に
+            # よりこの行の承認/却下は既に直列化されているため二重の安全策ではあるが、
+            # UPDATE自体を「pendingのままなら却下」という条件付きにすることで、
+            # 万一チェックとUPDATEの間に状態が変化しても却下確定を防ぐ。
+            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (history_id,))
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
             if hist['linked_history_id'] is not None:

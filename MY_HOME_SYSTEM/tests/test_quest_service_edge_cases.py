@@ -10,6 +10,7 @@ import datetime
 import os
 import sys
 import threading
+import time
 import types
 from unittest.mock import MagicMock, patch
 
@@ -131,6 +132,97 @@ class TestProcessRejectQuest:
         chronicle = game_system.user_service.get_family_chronicle()
         # approved 1件のみが「達成したクエスト数」に含まれ、却下された1件は含まれない
         assert chronicle["stats"]["totalQuests"] == 1
+
+
+class TestProcessRejectQuestConcurrentWithApprove:
+    """Issue #228の回帰テスト。
+
+    process_reject_quest は以前ロックを一切取得していなかったため、同一
+    history_idに対する承認と却下がほぼ同時に実行されると、承認側が先に
+    quest_usersへgold/expを加算・コミットした後に却下のUPDATEがコミットされ、
+    quest_history.statusは'rejected'になるのに付与済みの報酬は一切ロール
+    バックされないという不整合が実機で確認されていた。process_reject_quest を
+    process_approve_quest と同じユーザー単位ロックに参加させることで、
+    この2つの操作を直列化し、上記の不整合を防ぐ。
+    """
+
+    def test_reject_loses_race_cleanly_when_approve_completes_first(self, isolated_db, monkeypatch):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 100, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+                "(101, 'Test', 'daily', 50, 50)"
+            )
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 50, 50, '2026-01-01T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+
+        # 承認処理がquest_usersへの報酬加算(_apply_quest_rewards)後、コミット前に
+        # 少し待機するようにする。承認はロック取得後この時間だけロックを保持し
+        # 続けるため、その間に却下側がロック取得を試みてブロックされることを
+        # 利用し、確実に「承認が先にロックを取得して完走し終えてから却下が
+        # 動き出す」という、Issueが報告した不整合が起きうる順序を再現する。
+        original_apply_rewards = quest_service._apply_quest_rewards
+
+        def _slow_apply_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None):
+            result = original_apply_rewards(
+                cur, user, quest, now_iso, history_id=history_id, override_rewards=override_rewards
+            )
+            time.sleep(0.2)
+            return result
+
+        monkeypatch.setattr(quest_service, "_apply_quest_rewards", _slow_apply_rewards)
+
+        results = {}
+        errors = {}
+
+        def _approve():
+            try:
+                results["approve"] = quest_service.process_approve_quest("dad", history_id)
+            except Exception as e:  # noqa: BLE001 - スレッド内例外を主スレッドへ伝える
+                errors["approve"] = e
+
+        def _reject():
+            try:
+                results["reject"] = quest_service.process_reject_quest("dad", history_id)
+            except Exception as e:  # noqa: BLE001
+                errors["reject"] = e
+
+        t_approve = threading.Thread(target=_approve)
+        t_reject = threading.Thread(target=_reject)
+        t_approve.start()
+        time.sleep(0.05)  # 承認が先にロックを取得できるよう、わずかに先行させる
+        t_reject.start()
+        t_approve.join(timeout=5)
+        t_reject.join(timeout=5)
+
+        assert not t_approve.is_alive() and not t_reject.is_alive()
+
+        with common.get_db_cursor() as cur:
+            hist = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
+
+        # 承認が確定した場合、却下はロック取得後の再チェックで「承認待ちでは
+        # ありません」(400)として弾かれ、statusは'approved'のまま
+        # (以前のバグのように'rejected'へ上書きされない)こと。
+        assert "approve" not in errors
+        assert "reject" in errors
+        assert isinstance(errors["reject"], HTTPException)
+        assert errors["reject"].status_code == 400
+
+        assert hist["status"] == "approved"
+        # 報酬が実際に加算されており、かつ却下によってロールバックされていないこと
+        # (statusが'rejected'なのに報酬が残る、という以前のバグの逆に、
+        # statusが'approved'であることと報酬が加算済みであることが一致している)
+        assert user["gold"] == 150
 
 
 class TestIsWithinResetPeriod:
