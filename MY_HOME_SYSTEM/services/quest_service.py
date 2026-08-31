@@ -1008,7 +1008,14 @@ class GameSystem:
                 ph = ','.join(['?'] * len(active_q_ids))
                 cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)
             else:
-                cur.execute("DELETE FROM quest_master")
+                # #242: quest_data.QUESTSが空(コーディングミス等)になった瞬間、
+                # 以前は無条件でDELETE FROM quest_masterを実行し全クエストマスタが
+                # 消えていた。reward_master側の「参照が残っている行は削除をスキップする」
+                # 安全弁と同様、意図しない全消去を防ぐため削除自体をスキップする。
+                logger.warning(
+                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
+                    "スキップしました(意図しない全消去を防ぐための安全弁)。"
+                )
 
             for q in valid_quests:
                 cur.execute("""
