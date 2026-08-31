@@ -12,7 +12,7 @@
 * [common.md](./common.md) - `common.setup_logging`/`common.send_push`を提供するFacadeモジュール(実体は`core.logger`/`services.notification_service`)
 * [logger.md](./logger.md) - `setup_logging`の実体。コンソール出力・日次ローテーションファイル出力・ERRORレベルのDiscord通知(`DiscordErrorHandler`)を提供
 * [notification_service.md](./notification_service.md) - `common.send_push`の実体。Discord/LINEへの統合通知処理
-* [config.md](./config.md) - `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `SPEAKER_BLUETOOTH_MAC`等の設定値を提供する`config.py`の解析結果
+* [config.md](./config.md) - `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH`等の設定値を提供する`config.py`の解析結果
 * [database.md](./database.md), [init_unified_db.md](./init_unified_db.md) - チェック対象DBの接続・初期化・スキーマ検証を行うモジュール
 * [unified_server.md](./unified_server.md) - `check_services`がチェックする「Backend Server」に相当すると推測されるFastAPIサーバー
 * [switchbot_service.md](./switchbot_service.md) - `check_network_and_apis`が`create_switchbot_auth_headers()`を直接呼び出して疎通確認するSwitchBot APIのクライアント実装
@@ -43,7 +43,7 @@
 | `dataclasses.dataclass` | 標準ライブラリ | `CheckResult` クラスの定義 | `from dataclasses import dataclass` (行番号: 10 / 抜粋: "from dataclasses import dataclass") |
 | `datetime`, `timedelta` | 標準ライブラリ | ログの時刻フィルタリング（直近10分判定） | `from datetime import datetime, timedelta` (行番号: 11 / 抜粋: "from datetime import datetime, timedelta") |
 | `concurrent.futures.ThreadPoolExecutor` | 標準ライブラリ | `check_services`でのサービス起動待ちリトライを対象ごとに並列実行する | `from concurrent.futures import ThreadPoolExecutor` (行番号: 12 / 抜粋: "from concurrent.futures import ThreadPoolExecutor") |
-| `config` | 内部モジュール | 各種設定値（`LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`）の取得 | `import config` (行番号: 19 / 抜粋: "import config") |
+| `config` | 内部モジュール | 各種設定値（`LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH`）の取得 | `import config` (行番号: 19 / 抜粋: "import config") |
 | `common` | 内部モジュール | ロガー生成（`setup_logging`）、通知送信（`send_push`） | `import common` (行番号: 20 / 抜粋: "import common") |
 | `services.switchbot_service` | 内部モジュール | SwitchBot API疎通確認用の認証ヘッダー生成（`create_switchbot_auth_headers`） | `from services import switchbot_service` (行番号: 21 / 抜粋: "from services import switchbot_service") |
 
@@ -52,10 +52,10 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = common.setup_logging("health_check")` (行番号: 27 / 抜粋: "logger = common.setup_logging("health_check")") |
-| `common.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `common.send_push(` (行番号: 239 / 抜粋: "common.send_push(") |
-| `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 52 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
-| `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` コマンド | 実行環境（Raspberry Pi等）にこれらのコマンドが存在する前提のコードだが、コマンドの実装自体は本ファイル外。 | `subprocess.check_output(["vcgencmd", "measure_temp"])` (行番号: 87 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")") |
-| SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 136 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
+| `common.send_push` | 通知の実際の送信方式や失敗時の挙動（例外送出の有無等）が不明。 | `common.send_push(` (行番号: 249 / 抜粋: "common.send_push(") |
+| `config` の各設定値 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実際の値・存在有無が不明（`LOG_DIR`等は `getattr` によるデフォルト値付きアクセス。`NATURE_REMO_ACCESS_TOKEN`は直接参照）。 | `getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))` (行番号: 62 / 抜粋: "log_dir = getattr(config, 'LOG_DIR', os.path.join(BASE_DIR, 'logs'))") |
+| `vcgencmd`, `ping`, `tail`, `aplay`, `bluetoothctl` コマンド | 実行環境（Raspberry Pi等）にこれらのコマンドが存在する前提のコードだが、コマンドの実装自体は本ファイル外。いずれの呼び出しにも`timeout`引数（`bluetoothctl`のみ`stdin=subprocess.DEVNULL`も併用）が付与され、応答なく無限待機する事態を防いでいる。 | `subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10)` (行番号: 97 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")") |
+| SwitchBot / NatureRemo API | ステータスコードによる疎通確認と認証ヘッダーの送信は行うが、レスポンス本文の内容までは見ていないため、応答スキーマの詳細は不明。 | `("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers())` (行番号: 146 / 抜粋: "("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
