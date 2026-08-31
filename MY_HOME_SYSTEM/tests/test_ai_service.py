@@ -476,6 +476,32 @@ class TestAnalyzeTextAndExecute:
         assert "記録完了: カレー" in result
         assert "制限を超過" in result
 
+    @pytest.mark.asyncio
+    async def test_generic_google_api_error_during_final_response_returns_tool_result_with_note(
+        self, ai_configured, monkeypatch
+    ):
+        """Issue #232の回帰テスト: 1回目呼び出しにはGoogleAPIError専用メッセージが
+        あるが、ツール実行後の2回目呼び出しは以前ResourceExhausted用フォールバック
+        しか持たず、それ以外のGoogleAPIErrorは関数末尾の汎用except Exception
+        (「処理中にエラーが発生しました」)まで伝播していた。この時点でツール(DB書き込み)は
+        既に成功しているため、ユーザーには保存が失敗したかのように見え、再送信による
+        重複記録を誘発しうる不具合があった。ResourceExhaustedと同様にtool_resultを
+        返し、実行結果を正しく伝えることを確認する。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        mock_retry = AsyncMock(
+            side_effect=[make_response(function_call=fc), GoogleAPIError("fatal, non-retryable")]
+        )
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(
+            ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー")
+        )
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+        assert "処理中にエラーが発生しました" not in result
+
 
 class TestCallGeminiApiWithRetry:
     @pytest.mark.asyncio
