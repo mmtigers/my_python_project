@@ -21,7 +21,10 @@
 * ゲームデータ同期、クエストの完了・承認・却下・キャンセル、報酬の購入、画像アップロード、音声テスト、インベントリ管理などの各エンドポイントを提供する。
 * ビジネスロジックの大部分を外部サービス（`services.quest_service` など）に委譲しているが、画像アップロードのファイル検証・保存などは本ファイル内に実装されている。画像アップロード(`upload_image`)は拡張子・マジックバイト検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB）を上限としたファイルサイズチェックを行い、上限超過時は書きかけのファイルを削除してHTTP 413を返す（コミット`4f3a8a1`, M-9-3修正）。
 * 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB"), `raise HTTPException(\n                status_code=413,` (行番号: 123-124 / 抜粋: "status_code=413,")
+* `get_all_data`はクエリパラメータ`viewer_user_id`（任意、`Optional[str]`）を受け取り、`game_system.get_all_view_data()`へそのまま透過して渡す。
+* 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 40 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 * 装備品の購入・変更、ボスのステータス直接更新（DBへのSQL実行）、ファミリーマイレージの取得・更新、週間分析データ取得の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。これに伴い、本ファイルが直接DBアクセスを行う`common`モジュールへの依存も無くなっている。
+* アイテム使用の承認待ちフローに関連していた`consume_item`(旧`POST /inventory/consume`)、`cancel_item_usage`(旧`POST /inventory/cancel`)、`get_admin_pending_inventory`(旧`GET /inventory/admin/pending`)の各エンドポイントは削除されている（コミット`9d5edec`、アイテム使用時の親承認フロー廃止）。これに伴い、インポートしていた`ConsumeItemAction`モデルも削除されている。現在の`use_item`(`POST /inventory/use`)エンドポイント自体のコードは変更されていない。
 
 ## 3. 外部依存関係
 
@@ -35,6 +38,7 @@
 | `fastapi.UploadFile` | 型/クラス | アップロードファイルの型定義 | インポート (行番号: 2 / 抜粋: "from fastapi import ...") |
 | `typing.Dict` | 型 | 型アノテーション（辞書） | インポート (行番号: 3 / 抜粋: "from typing import Dict") |
 | `typing.Any` | 型 | 型アノテーション（任意） | インポート (行番号: 3 / 抜粋: "from typing import ... Any") |
+| `typing.Optional` | 型 | 型アノテーション（Noneを許容する値。`get_all_data`のクエリパラメータ`viewer_user_id`で使用） | インポート (行番号: 3 / 抜粋: "from typing import Dict, Any, Optional") |
 | `os` | モジュール | パス操作、拡張子取得 | インポート (行番号: 4 / 抜粋: "import os") |
 | `uuid` | モジュール | 画像ファイル名の一意な生成 | インポート (行番号: 5 / 抜粋: "import uuid") |
 | `sys` | モジュール | モジュール検索パスの追加 | インポート (行番号: 6 / 抜粋: "import sys") |
@@ -42,7 +46,7 @@
 | `config` | モジュール | アップロード先パス、音声マップ設定 | インポート (行番号: 9 / 抜粋: "import config") |
 | `sound_manager` | モジュール | 音声の再生処理 | インポート (行番号: 10 / 抜粋: "import sound_manager") |
 | `core.logger.setup_logging` | 関数 | ロガーのセットアップ | インポート (行番号: 11 / 抜粋: "from core.logger import ...") |
-| `models.quest.*` (`SyncResponse`, `CompleteResponse`, `CancelResponse`, `PurchaseResponse`, `UseItemResponse`, `QuestAction`, `ApproveAction`, `HistoryAction`, `RewardAction`, `UpdateUserAction`, `SoundTestRequest`, `UseItemAction`, `ConsumeItemAction`) | Pydanticモデル | リクエスト/レスポンスの型定義 | インポート (行番号: 14-18 / 抜粋: "from models.quest import (") |
+| `models.quest.*` (`SyncResponse`, `CompleteResponse`, `CancelResponse`, `PurchaseResponse`, `UseItemResponse`, `QuestAction`, `ApproveAction`, `HistoryAction`, `RewardAction`, `UpdateUserAction`, `SoundTestRequest`, `UseItemAction`) | Pydanticモデル | リクエスト/レスポンスの型定義 | インポート (行番号: 14-18 / 抜粋: "from models.quest import (") |
 | `services.quest_service.*` (`game_system`, `quest_service`, `shop_service`, `user_service`, `inventory_service`) | サービスモジュール | 各ビジネスロジックの実行 | インポート (行番号: 19-21 / 抜粋: "from services.quest_service") |
 
 ### ブラックボックスとなる外部要素
@@ -83,20 +87,20 @@
 
 ### `get_all_data`
 
-* **役割**: ビュー描画に必要な全データを取得するエンドポイント。
+* **役割**: ビュー描画に必要な全データを取得するエンドポイント。クエリパラメータ`viewer_user_id`（任意）を受け取り、そのまま`game_system.get_all_view_data()`に渡す。
 * 根拠: ルーティング定義 (行番号: 37-43 / 抜粋: "@router.get("/data")")
 
 
-* **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data() -> Dict")
+* **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（クエリパラメータ、省略可能）
+* 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict")
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]`（`game_system.get_all_view_data()` の戻り値）
-* 根拠: 型アノテーション (行番号: 38 / 抜粋: "-> Dict[str, Any]:")
+* **戻り値/レスポンス**: `Dict[str, Any]`（`game_system.get_all_view_data(viewer_user_id)` の戻り値）
+* 根拠: 型アノテーション (行番号: 38 / 抜粋: "-> Dict[str, Any]:"), メソッド呼び出し (行番号: 40 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 
 
-* **副作用**: 不明（外部関数 `game_system.get_all_view_data()` に依存）
-* 根拠: メソッド呼び出し (行番号: 40 / 抜粋: "return game_system.get_all_view")
+* **副作用**: 不明（外部関数 `game_system.get_all_view_data(viewer_user_id)` に依存。`viewer_user_id`が内部でどう使われるかは本ファイルからは不明）
+* 根拠: メソッド呼び出し (行番号: 40 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 
 
 * **エラーハンドリング**: 内部で発生した例外をキャッチし、ログにエラーを出力後、HTTP 500エラーを送出する。
@@ -433,75 +437,6 @@
 
 
 
-### `consume_item`
-
-* **役割**: アイテムを消費（承認者が処理）するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 153-155 / 抜粋: "@router.post("/inventory/consume")")
-
-
-* **引数/リクエスト**: `ConsumeItemAction` (フィールドとして `approver_id`, `inventory_id` を持つ)
-* 根拠: 引数定義 (行番号: 154-155 / 抜粋: "action: ConsumeItemAction")
-
-
-* **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 155 / 抜粋: "return inventory_service.consume_")
-
-
-* **副作用**: 不明（外部関数 `inventory_service.consume_item()` に依存）
-* 根拠: メソッド呼び出し (行番号: 155 / 抜粋: "return inventory_service.consume_")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 153-155 / 抜粋: "def consume_item")
-
-
-
-### `cancel_item_usage`
-
-* **役割**: アイテムの使用をキャンセルするエンドポイント。
-* 根拠: ルーティング定義 (行番号: 157-159 / 抜粋: "@router.post("/inventory/cancel")")
-
-
-* **引数/リクエスト**: `UseItemAction` (フィールドとして `user_id`, `inventory_id` を持つ)
-* 根拠: 引数定義 (行番号: 158-159 / 抜粋: "action: UseItemAction")
-
-
-* **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 159 / 抜粋: "return inventory_service.cancel_")
-
-
-* **副作用**: 不明（外部関数 `inventory_service.cancel_usage()` に依存）
-* 根拠: メソッド呼び出し (行番号: 159 / 抜粋: "return inventory_service.cancel_")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 157-159 / 抜粋: "def cancel_item_usage")
-
-
-
-### `get_admin_pending_inventory`
-
-* **役割**: 管理者向けに、承認待ちのインベントリアイテム一覧を取得するエンドポイント。
-* 根拠: ルーティング定義 (行番号: 161-163 / 抜粋: "@router.get("/inventory/admin/pending")")
-
-
-* **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 162 / 抜粋: "def get_admin_pending_inventory():")
-
-
-* **戻り値/レスポンス**: 不明（外部関数の戻り値）
-* 根拠: メソッド呼び出し (行番号: 163 / 抜粋: "return inventory_service.get_")
-
-
-* **副作用**: 不明（外部関数 `inventory_service.get_pending_items()` に依存）
-* 根拠: メソッド呼び出し (行番号: 163 / 抜粋: "return inventory_service.get_")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 161-163 / 抜粋: "def get_admin_pending_inventory():")
-
-
-
 ---
 
 ## 5. 処理フロー図
@@ -595,6 +530,9 @@ graph TD
 * `upload_image` において、`File(...)` を使用してメモリと一時ファイル間でストリーミング書き込み（`1024 * 1024` バイトのチャンクサイズ）を行っている。コミット`4f3a8a1`（M-9-3修正）以降は書き込みながら累計サイズ`total_bytes`を追跡し、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可）を超えた時点で書き込みを打ち切り、書きかけのファイルを削除してHTTP 413を返す。判定はチャンク単位の累計値のみで行われ、`Content-Length`ヘッダ等によるアップロード開始前の事前拒否は行っていない。
 * 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `common.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
+* かつて存在した `consume_item` (`POST /inventory/consume`), `cancel_item_usage` (`POST /inventory/cancel`), `get_admin_pending_inventory` (`GET /inventory/admin/pending`) の各エンドポイントは、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い削除されている。これに伴い、インポートしていた `ConsumeItemAction` モデルも削除されている。`use_item` (`POST /inventory/use`) 自体のルーティング・実装コードは変更されていない。
+* `get_all_data` は `viewer_user_id`（`Optional[str]`、クエリパラメータ、既定`None`）を新たに受け取り、`game_system.get_all_view_data()` へそのまま渡すようになっている。本ファイルからは、この値が閲覧者スコープの絞り込み以外にどう使われるかは不明。
+* 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:")
 
 ## 9. 不明事項一覧
 
@@ -611,7 +549,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| APIリクエスト/レスポンスのスキーマ | `MY_HOME_SYSTEM/models/quest.py`(全118行)を直接確認した。`QuestAction`(50〜52行目、`user_id: str, quest_id: int`)、`SyncResponse`(77〜79行目、`status: str, message: str`)、`CompleteResponse`(81〜88行目、`status, leveledUp, newLevel, earnedGold, earnedExp, earnedMedals=0, message`)、`ApproveAction`(62〜67行目、`approver_id, history_id, reason(任意)`)等、本ファイルがインポートする全13モデル(14〜17行目)のフィールド構成を確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/models/quest.py:9-118` |
+| APIリクエスト/レスポンスのスキーマ | `MY_HOME_SYSTEM/models/quest.py`(全118行)を直接確認した。`QuestAction`(50〜52行目、`user_id: str, quest_id: int`)、`SyncResponse`(77〜79行目、`status: str, message: str`)、`CompleteResponse`(81〜88行目、`status, leveledUp, newLevel, earnedGold, earnedExp, earnedMedals=0, message`)、`ApproveAction`(62〜67行目、`approver_id, history_id, reason(任意)`)等、本ファイルがインポートする全12モデル(14〜17行目)のフィールド構成を確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/models/quest.py:9-118` |
 | ビジネスロジックの詳細 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`process_complete_quest`(202〜206行目)は`_get_completion_lock((user_id, quest_id))`(45〜54行目で定義される`Dict[Tuple[str,int], threading.Lock]`ベースのプロセス内ロック)を取得してから`_process_complete_quest_locked`(208〜261行目)を実行し、同一ユーザー・同一クエストへの多重リクエストによる二重加算を防止する設計であることを確認した。`_process_complete_quest_locked`内では、`user['role'] == ROLE_CHILD`の場合(250行目)、`target_user == 'siblings'`ならカスケード処理の`_process_coop_quest_completion`(252行目)、それ以外は`status='pending'`で`quest_history`へ`INSERT`(254〜257行目)する。大人ユーザーの場合の即時報酬適用パスは261行目以降(本抜粋範囲外)に続くことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:45-54, 202-261` |
 | 画像アップロード先のパス | `MY_HOME_SYSTEM/routers/quest_router.py`104行目の`file_path = os.path.join(config.UPLOAD_DIR, new_filename)`が参照する`config.UPLOAD_DIR`を`MY_HOME_SYSTEM/config.py`431行目で直接確認した。`UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")`であり、保存先は`{BASE_DIR}/uploads`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:431`（参考: `MY_HOME_SYSTEM/routers/quest_router.py:104`） |
 | アップロードファイルサイズ上限(MB)の実際の値 | `MY_HOME_SYSTEM/routers/quest_router.py`109行目の`max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`が参照する`config.UPLOAD_MAX_FILE_SIZE_MB`を`MY_HOME_SYSTEM/config.py`432〜434行目で直接確認した。`UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))`であり、既定値10MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可能であることを確認した。直前のコメント(432〜433行目)に「アバター画像用途を想定し余裕を持って10MBとする」との設計意図の記載があることも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:432-434`（参考: `MY_HOME_SYSTEM/routers/quest_router.py:109`） |
