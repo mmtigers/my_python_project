@@ -530,19 +530,20 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `GameSystem.sync_master_data`
 
-* **役割**: `quest_data`モジュールを`importlib.reload`で再読み込みし、`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションしたうえで、DBスキーマの簡易マイグレーション（`quest_users.role`列、`quest_master.reset_period`列(デフォルト値`'daily'`)、`reward_master.description`列を、存在しなければ`ALTER TABLE`で追加）を行い、`quest_users`/`quest_master`を`ON CONFLICT ... DO UPDATE`によるUPSERTと、マスターに存在しないIDの`DELETE`で同期する。`reward_master`へのUPSERTは`target`列(対象者制限。`MasterReward.target`、デフォルト`'all'`)を含み、`ON CONFLICT DO UPDATE`でも`target = excluded.target`により更新する（Issue #95: 以前はINSERT/UPDATE列リストに`target`が含まれておらず、`reward_master.target`は列DEFAULTの`'all'`に固定されたまま`quest_data.REWARDS`側の`target`指定（`'children'`/`'mom'`/`'adults'`等）が一切反映されなかったため、フロントエンドの対象者フィルタが常に素通しになり、対象者制限のある報酬が全ユーザーに表示・購入可能になっていた）。`reward_master`の同期については、削除候補を一括`DELETE`せず`SELECT`で取得したうえで1件ずつ検討し、`user_inventory`に参照が残っている（所有中/申請中/使用済問わず）報酬は削除をスキップして警告ログのみ出す（M-1-2: `user_inventory`は`reward_master(reward_id)`へのFK(`PRAGMA foreign_keys=ON`)を持つため、以前のように対象を一括`DELETE`すると所持者がいる報酬の削除時に`IntegrityError`となり`sync_master_data`全体が失敗していた）。なお、`quest_master.reset_period`列そのもののテーブル定義(`current_schema.sql`のCREATE TABLE)側のDEFAULTは依然`'weekly_monday'`であり、このマイグレーションのALTER TABLE時デフォルト値`'daily'`とは食い違っている（8節参照）。
-* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 841〜968)
-* 根拠: `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 877)
-* 根拠: `INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target) ... ON CONFLICT(reward_id) DO UPDATE SET ... target = excluded.target` (行番号: 955〜965)
-* 根拠: `# user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、` (行番号: 937〜940), `if still_referenced: ... continue` (行番号: 946〜951)
+* **役割**: `quest_data`モジュールを`importlib.reload`で再読み込みし、`MasterUser`/`MasterQuest`/`MasterReward`でバリデーションしたうえで、DBスキーマの簡易マイグレーション（`quest_users.role`列、`quest_master.reset_period`列(デフォルト値`'daily'`)、`reward_master.description`列を、存在しなければ`ALTER TABLE`で追加）を行い、`quest_users`/`quest_master`を`ON CONFLICT ... DO UPDATE`によるUPSERTと、マスターに存在しないIDの`DELETE`で同期する。**（Issue #242で修正）** `quest_master`側の削除は、`quest_data.QUESTS`から得た有効なquest_idリスト(`active_q_ids`)が1件以上あれば`DELETE ... WHERE quest_id NOT IN (...)`で絞り込み削除するが、`active_q_ids`が空（`quest_data.QUESTS`が空リストになるコーディングミス等）の場合は、以前のように`DELETE FROM quest_master`で全件削除する代わりに、警告ログを出力して削除自体をスキップし既存行を保持する（`reward_master`側の`user_inventory`参照チェックと同種の、意図しない全消去を防ぐ安全弁）。`reward_master`へのUPSERTは`target`列(対象者制限。`MasterReward.target`、デフォルト`'all'`)を含み、`ON CONFLICT DO UPDATE`でも`target = excluded.target`により更新する（Issue #95: 以前はINSERT/UPDATE列リストに`target`が含まれておらず、`reward_master.target`は列DEFAULTの`'all'`に固定されたまま`quest_data.REWARDS`側の`target`指定（`'children'`/`'mom'`/`'adults'`等）が一切反映されなかったため、フロントエンドの対象者フィルタが常に素通しになり、対象者制限のある報酬が全ユーザーに表示・購入可能になっていた）。`reward_master`の同期については、削除候補を一括`DELETE`せず`SELECT`で取得したうえで1件ずつ検討し、`user_inventory`に参照が残っている（所有中/申請中/使用済問わず）報酬は削除をスキップして警告ログのみ出す（M-1-2: `user_inventory`は`reward_master(reward_id)`へのFK(`PRAGMA foreign_keys=ON`)を持つため、以前のように対象を一括`DELETE`すると所持者がいる報酬の削除時に`IntegrityError`となり`sync_master_data`全体が失敗していた）。ただし`reward_master`側は`active_r_ids`(`quest_data.REWARDS`由来)が空の場合、`quest_master`とは異なりテーブル全件が削除候補になる点は変わらない（個々の行はuser_inventory参照があれば個別にスキップされる）。なお、`quest_master.reset_period`列そのもののテーブル定義(`current_schema.sql`のCREATE TABLE)側のDEFAULTは依然`'weekly_monday'`であり、このマイグレーションのALTER TABLE時デフォルト値`'daily'`とは食い違っている（8節参照）。
+* 根拠: `def sync_master_data(self) -> Dict[str, str]:` (行番号: 957〜1084)
+* 根拠: `cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")` (行番号: 993)
+* 根拠: `quest_master`削除の安全弁 (行番号: 1006〜1017 / 抜粋: "active_q_ids = [q.id for q in valid_quests]\n            if active_q_ids:\n                ...\n            else:\n                logger.warning(...)")
+* 根拠: `INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target) ... ON CONFLICT(reward_id) DO UPDATE SET ... target = excluded.target` (行番号: 1071〜1081)
+* 根拠: `# user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON)を持つため、` (行番号: 1053〜1056), `if still_referenced: ... continue` (行番号: 1062〜1067)
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: (行番号: 841)
+* 根拠: (行番号: 957)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "synced", "message": "Master data updated."}`）
-* 根拠: (行番号: 841, 968)
-* **副作用**: DBテーブルのスキーマ変更（`ALTER TABLE`）、`SELECT`による削除候補の抽出と1件ずつの条件付き`DELETE`、`INSERT ... ON CONFLICT DO UPDATE`（`target`列含む）、`importlib.reload`、ログ出力
-* 根拠: (行番号: 877, 941〜952, 955〜965)
+* 根拠: (行番号: 957, 1084)
+* **副作用**: DBテーブルのスキーマ変更（`ALTER TABLE`）、`quest_master`の絞り込み`DELETE`(または安全弁による削除スキップ)、`reward_master`の`SELECT`による削除候補抽出と1件ずつの条件付き`DELETE`、`INSERT ... ON CONFLICT DO UPDATE`（`target`列含む）、`importlib.reload`、ログ出力
+* 根拠: (行番号: 993, 1006〜1017, 1057〜1067, 1071〜1081)
 * **エラーハンドリング**: `quest_data`未読込または`MasterUser`/`MasterQuest`/`MasterReward`のバリデーション失敗時に例外を捕捉し`HTTPException(status_code=500)`
-* 根拠: (行番号: 860 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")")
+* 根拠: (行番号: 976 / 抜粋: "raise HTTPException(status_code=500, detail=f\"Master Data Error: {str(e)}\")")
 
 ### `GameSystem.get_all_view_data`
 
