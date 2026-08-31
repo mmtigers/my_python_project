@@ -176,6 +176,71 @@ class TestSaveLogAsync:
         assert row is not None
 
 
+class TestSaveLogsBatchGeneric:
+    """Issue #231の回帰テスト。
+
+    save_log_generic を複数回呼ぶ実装(handlers/line_logic.py の all_genki等)
+    では、各呼び出しがそれぞれ独立にcommitされるため、途中の1件が失敗しても
+    既に成功した分はコミット済みのまま残ってしまう。呼び出し元は「1件でも
+    失敗すれば全体を失敗扱いとする」と案内し再試行を促す(H-7)が、実際には
+    成功済み分が残ったままのため、再試行すると重複して保存されていた。
+    save_logs_batch_generic は複数行を単一トランザクションでまとめて保存し、
+    1件でも失敗すれば全件をロールバックすることでこれを防ぐ。
+    """
+
+    def test_saves_all_rows_successfully(self, isolated_db):
+        result = db.save_logs_batch_generic(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [
+                ("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+                ("U1", "テスト太郎", "次男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+            ],
+        )
+        assert result is True
+        with db.get_db_cursor() as cur:
+            rows = cur.execute(f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD}").fetchall()
+        assert {r["child_name"] for r in rows} == {"長男", "次男"}
+
+    def test_partial_failure_rolls_back_entire_batch(self, isolated_db):
+        """1件目は正常な行、2件目は列数不一致でINSERTが失敗する行を与えた場合、
+        1件目分も含めて全件がロールバックされテーブルに一切残らないこと
+        (真のall-or-nothing)。以前の実装(save_log_genericの複数回呼び出し)
+        であれば1件目だけがコミット済みのまま残っていたはずのケース。"""
+        result = db.save_logs_batch_generic(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [
+                ("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+                ("U1", "テスト太郎", "次男"),  # 列数不一致で2件目のINSERTが失敗する
+            ],
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
+
+    def test_returns_false_on_invalid_table(self, isolated_db):
+        result = db.save_logs_batch_generic("table_that_does_not_exist", ["col"], [("value",)])
+        assert result is False
+
+
+class TestSaveLogsBatchAsync:
+    @pytest.mark.asyncio
+    async def test_delegates_to_save_logs_batch_generic(self, isolated_db):
+        result = await db.save_logs_batch_async(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00")],
+        )
+        assert result is True
+        with db.get_db_cursor() as cur:
+            row = cur.execute(
+                f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='長男'"
+            ).fetchone()
+        assert row is not None
+
+
 class TestExecuteReadQuery:
     def test_returns_no_data_message_when_empty(self, isolated_db):
         result = db.execute_read_query("SELECT * FROM quest_users WHERE user_id = ?", ("nobody",))
