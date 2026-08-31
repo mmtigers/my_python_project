@@ -50,8 +50,8 @@
   * `onBuy`: `(reward: Reward) => void` (商品購入時のコールバック関数)
   * `currentUser`: `User` (現在のユーザー情報)
 * 根拠: `RewardListProps`インターフェース (行番号: 5〜10 / 抜粋: `interface RewardListProps {\n  rewards: Reward[];\n  userGold: number;\n  onBuy: (reward: Reward) => void;\n  currentUser: User;\n}`)
-* フィルタリングにおける`target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`（`isAdult`、20行目）で行われ、`target === 'mom'`/`'dad'`の判定は引き続き`currentUser.user_id`の直接比較（24〜25行目）で行われる。
-* 根拠: (行番号: 20, 22〜25 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`)
+* フィルタリングにおける`target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`（`isAdult`、20行目）で行われる。**（Issue #239で修正）** それ以外の`target`値（具体的なuser_id宛て、または将来追加されうる未知の値）は、以前は`'mom'`/`'dad'`のみを個別に`if`分岐でハードコード比較し、それ以外は無条件で`true`（全員へ表示）を返す安全でないフォールバックになっていた。修正後は`QuestList.tsx`のターゲット判定（`q.target !== currentUser?.user_id`）と同様の安全側（deny-by-default）に統一し、`target === currentUser.user_id`の完全一致でのみ表示する。これにより`'mom'`/`'dad'`以外の任意のuser_id宛てtarget（例: `'son'`/`'daughter'`）も正しく本人以外には表示されなくなった。
+* 根拠: (行番号: 20, 22〜23, 29 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'children') return !isAdult;`, `return target === currentUser.user_id;`)
 
 
 * **戻り値/レスポンス**: `JSX.Element`
@@ -79,23 +79,19 @@ flowchart TD
     TargetCheck -- "all"または未指定 --> TargetAll[対象: 全員]
     TargetCheck -- "children" --> TargetChildren[対象: 子供]
     TargetCheck -- "adults" --> TargetAdults[対象: 大人]
-    TargetCheck -- "mom" --> TargetMom[対象: 母親]
-    TargetCheck -- "dad" --> TargetDad[対象: 父親]
+    TargetCheck -- "上記以外(具体的なuser_id宛て等)" --> TargetSpecific["対象: target値と一致するuser_id<br>(#239で安全側フォールバックに変更)"]
 
     TargetAll --> FilterKeep[リストに残す]
     TargetChildren --> IsAdultCheck1{currentUser.role が role_adult 以外か?}
     TargetAdults --> IsAdultCheck2{currentUser.role が role_adult か?}
-    TargetMom --> IsMomCheck{user_idがmomか?}
-    TargetDad --> IsDadCheck{user_idがdadか?}
+    TargetSpecific --> IsSpecificCheck{"target === currentUser.user_id か?"}
 
     IsAdultCheck1 -- Yes --> FilterKeep
     IsAdultCheck1 -- No --> FilterDrop[除外]
     IsAdultCheck2 -- Yes --> FilterKeep
     IsAdultCheck2 -- No --> FilterDrop
-    IsMomCheck -- Yes --> FilterKeep
-    IsMomCheck -- No --> FilterDrop
-    IsDadCheck -- Yes --> FilterKeep
-    IsDadCheck -- No --> FilterDrop
+    IsSpecificCheck -- Yes --> FilterKeep
+    IsSpecificCheck -- "No(#239修正前は無条件でYes扱いだった)" --> FilterDrop
 
     FilterKeep --> SortProcess[フィルタリング済リストのソート]
     FilterDrop --> SortProcess
@@ -156,8 +152,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **判定基準の混在**: `target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`という役割ベースの判定（`isAdult`）を用いる一方、`target === 'mom'`/`'dad'`の判定は依然として`currentUser.user_id`のハードコードされた文字列比較（`'mom'`/`'dad'`）を用いている。同じフィルタリング処理内で判定基準（role vs user_id）が統一されていない点に留意が必要。
-* 根拠: 条件式 (行番号: 20, 24, 25 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`, `if (target === 'dad') return currentUser.user_id === 'dad';`)
+* **安全側フォールバックへの統一（Issue #239で修正）**: 以前は`target === 'mom'`/`'dad'`のみを個別にハードコード比較し、それ以外の`target`値（`'son'`/`'daughter'`等の具体的なuser_id宛て、または将来追加されうる未知の値）はどの`if`分岐にも一致せず`return true`（無条件で全員へ表示）に落ちる安全でない実装だった。`quest_data.py`のREWARDSに該当targetが存在しなかったため実データでは未発火だったが、個人宛て報酬が追加された時点で顕在化する潜在バグだった。修正後は`QuestList.tsx`のターゲット判定（`q.target !== currentUser?.user_id`なら除外）と同様の安全側（deny-by-default）に統一し、`'children'`/`'adults'`以外は`target === currentUser.user_id`の完全一致でのみ表示する。
+* 根拠: 条件式 (行番号: 20, 22〜23, 29 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'children') return !isAdult;`, `return target === currentUser.user_id;`)
 
 
 * **プロパティの非正規化（フォールバック）**: 一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`、`icon`と`icon_key`）が混在しており、データ構造が統一されていないことが窺える。
