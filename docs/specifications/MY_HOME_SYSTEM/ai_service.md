@@ -261,7 +261,7 @@
 
 ### `analyze_text_and_execute` (関数)
 
-* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。
+* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #232で修正）** 1回目のGemini呼び出しは`ResourceExhausted`/`GoogleAPIError`をそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前`ResourceExhausted`用のフォールバックしか持たず、それ以外の`GoogleAPIError`は関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも`except GoogleAPIError`を追加し、`ResourceExhausted`と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。
 * 根拠: `async def analyze_text_and_execute` (行番号: 334 / 抜粋: "async def analyze_text_and_execute")
 
 
@@ -280,12 +280,12 @@
 * **エラーハンドリング**:
 * `MODEL_NAME` や APIキーが不在の場合は早期リターン (`None`)。
 * レート制限超過時はフォールバックメッセージを返却。
-* `ResourceExhausted` 時はフォールバックメッセージ（ツール実行後の場合はツール結果と警告文）を返却。
-* `GoogleAPIError` 時は特定のエラーメッセージを返却。
+* 1回目のGemini呼び出しで`ResourceExhausted`発生時はフォールバックメッセージ(`FALLBACK_MESSAGE`)を、`GoogleAPIError`発生時は「AIサービスで予期せぬエラーが発生しました」を返却。
+* **（Issue #232で修正）** ツール実行後の2回目のGemini呼び出し（最終応答生成）で`ResourceExhausted`発生時はツール結果(`tool_result`)に「制限を超過したため、実行結果のみ表示します」という注記を添えて返却する。同様に`GoogleAPIError`（`ResourceExhausted`以外）発生時も、以前は捕捉されず末尾の汎用`except Exception`まで伝播していたが、現在は`tool_result`に「エラーが発生したため、実行結果のみ表示します」という注記を添えて返却する（ツール実行=DB書き込みは既に成功しているため、その結果を正しくユーザーへ伝える）。
 * 空のレスポンス時はエラーメッセージを返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 381, 359, 407 / 抜粋: "except Exception as e:")
+* 根拠: 1回目呼び出しの分岐 (行番号: 409, 412 / 抜粋: "except ResourceExhausted:", "except GoogleAPIError as e:")、2回目呼び出しの分岐 (行番号: 452, 456 / 抜粋: "except ResourceExhausted:\n                # ツール実行は成功しているが、最終回答生成でコケた場合", "except GoogleAPIError as e:\n                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は")、末尾の汎用ハンドラ (行番号: 470 / 抜粋: "except Exception as e:")
 
 
 
@@ -332,6 +332,7 @@ flowchart TD
     CallAPI2 --> CheckException2{例外発生?}
     
     CheckException2 -- "ResourceExhausted" --> EndToolOnly([End: Return Tool Result + Warning Msg])
+    CheckException2 -- "GoogleAPIError(#232で追加)" --> EndToolOnlyApiErr([End: Return Tool Result + Error Msg])
     CheckException2 -- "Other Exception" --> EndGeneralError
     CheckException2 -- "No Error" --> ReturnFinalText([End: Return final_res.text])
 
@@ -411,7 +412,7 @@ graph TD
 
 
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。
-* `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。
+* `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。**（Issue #232で対応範囲を縮小）** 以前はツール実行後の2回目Gemini呼び出しで`ResourceExhausted`以外の`GoogleAPIError`が発生した場合もこの汎用ハンドラまで伝播し、ツール(DB書き込み)は既に成功しているにもかかわらず「処理中にエラーが発生しました」という一般エラーになっていた。ユーザーが保存失敗と誤解して再送信すると、冪等性チェックの無い記録処理(`tool_record_child_health`/`tool_record_food`)が重複登録を起こしうる状態だった。2回目呼び出し専用の`except GoogleAPIError`を追加し、この経路がこの汎用ハンドラに到達しないようにした。
 * `json` と `datetime` モジュールがインポートされているが、ファイル内で一度も使用されていない。
 
 ## 9. 不明事項一覧
