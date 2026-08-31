@@ -12,7 +12,7 @@
 * [line_handler.md](./line_handler.md) - 呼び出し元(`handle_postback`が承認/却下以外のPostbackを本ファイルの`handle_postback`に委譲)
 * [line.md](./line.md) - 型定義を提供(`LinePostbackData`)
 * [config.md](./config.md) - `FAMILY_SETTINGS`, `SQLITE_DB_PATH`等の設定値を提供
-* [database.md](./database.md) - `save_log_async`の実体を提供
+* [database.md](./database.md) - `save_log_async`/`save_logs_batch_async`(Issue #231で追加)の実体を提供
 
 ## 2. ファイルの概要
 
@@ -20,8 +20,8 @@
 * 子供の体調記録（一括/個別）、記録サマリ確認、食事アンケート回答などのボタン操作を解析し、SQLiteデータベースへの非同期保存処理を呼び出す。
 * LINEプラットフォームへ返すテキスト、QuickReply、FlexMessageなどのUIコンポーネントを生成・送信するヘルパー関数群も提供する。
 * 2026年のリファクタリング（コミット `1ecbe3b`）により、`handle_message`、`ask_outing_question`、`handle_child_record`、`handle_stomach_record` および `USER_INPUT_STATE` ステートマシンは削除された。これらは本番のLINE Webhook経路（`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。テキストメッセージの自由文処理は現在 `handlers/line_handler.py` の `_process_message_async()` → `services/ai_service.py` に一本化されている。
-* コミット `8525dc2`（H-7修正）により、`all_genki`・`child_check`・`food_record_direct`の3記録フローは`sync_run(save_log_async(...))`の戻り値（保存成否のbool）を検査するようになった。保存に失敗した場合は成功メッセージを返さず「⚠️ 記録に失敗しました。もう一度お試しください。」を返信しエラーログを出力する。これに伴い`sync_run`自体も、内部で例外が発生した場合に暗黙の`None`ではなく明示的に`False`を返すよう変更された。
-* 根拠: `if not all(save_results):\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 237-239 / 抜粋: "if not all(save_results):"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 48-50 / 抜粋: "return False")
+* コミット `8525dc2`（H-7修正）により、`all_genki`・`child_check`・`food_record_direct`の3記録フローは`sync_run(save_log_async(...))`(または`all_genki`は後述の`save_logs_batch_async`)の戻り値（保存成否のbool）を検査するようになった。保存に失敗した場合は成功メッセージを返さず「⚠️ 記録に失敗しました。もう一度お試しください。」を返信しエラーログを出力する。これに伴い`sync_run`自体も、内部で例外が発生した場合に暗黙の`None`ではなく明示的に`False`を返すよう変更された。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼びリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、一部だけ失敗しても既に成功していた分がコミット済みのまま残った。案内どおりユーザーが再試行すると成功済み分まで重複INSERTされていた。現在は`save_logs_batch_async`(単一トランザクションで全件保存)を1回呼び出す方式に変更し、1件でも失敗すれば全件ロールバックされる真のall-or-nothingにしている。
+* 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 240-242 / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 48-50 / 抜粋: "return False")
 * 根拠: [ファイル全体の構成] (行番号: 1-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 
 ## 3. 外部依存関係
@@ -41,7 +41,7 @@
 | `PostbackEvent` | 外部ライブラリ (`linebot.v3.webhooks`) | LINE Webhookイベントの型定義 | `from linebot.v3.webhooks import PostbackEvent` (行番号: 22 / 抜粋: "from linebot.v3.webhooks import PostbackEvent") |
 | `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 28 / 抜粋: "from core.logger import setup_logging") |
 | `get_now_iso` / `get_today_date_str` | 外部モジュール (`core.utils`) | 現在日時の取得 | `from core.utils import get_now_iso, get_today_date_str` (行番号: 31 / 抜粋: "from core.utils import get_now_iso, get_today_date_str") |
-| `save_log_async` | 外部モジュール (`core.database`) | ログの非同期DB保存 | `from core.database import save_log_async` (行番号: 32 / 抜粋: "from core.database import save_log_async") |
+| `save_log_async` / `save_logs_batch_async`（Issue #231で追加） | 外部モジュール (`core.database`) | ログの非同期DB保存(単発/複数行を単一トランザクションで一括保存) | `from core.database import save_log_async, save_logs_batch_async` (行番号: 32 / 抜粋: "from core.database import save_log_async, save_logs_batch_async") |
 | `LinePostbackData` | 外部モジュール (`models.line`) | Postbackデータパース用モデル | `from models.line import LinePostbackData` (行番号: 33 / 抜粋: "from models.line import LinePostbackData") |
 
 ### ブラックボックスとなる外部要素
@@ -49,7 +49,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` | 定義内容（`FAMILY_SETTINGS`, `SQLITE_DB_PATH`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`など）の実装がないため | `TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]` (行番号: 35 / 抜粋: "TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]") |
-| `core.database.save_log_async` | 引数仕様やDB接続の実装詳細が不明なため | `sync_run(save_log_async(` (行番号: 229 / 抜粋: "sync_run(save_log_async(") |
+| `core.database.save_log_async` / `save_logs_batch_async` | 引数仕様やDB接続の実装詳細が不明なため([database.md](./database.md)に別途解析結果あり) | `sync_run(save_logs_batch_async(` (行番号: 234 / 抜粋: "sync_run(save_logs_batch_async(") |
 | `models.line.LinePostbackData` | モデルのプロパティ定義やバリデーションルールが不明なため | `pb = LinePostbackData(**raw_dict)` (行番号: 214 / 抜粋: "pb = LinePostbackData(**raw_dict)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -226,9 +226,9 @@
 
 ### 関数 `handle_postback`
 
-* **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。
+* **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。
 * 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 194-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
-* 根拠: `if not all(save_results):` (行番号: 237 / 抜粋: "if not all(save_results):"), `if not save_ok:` (行番号: 304, 376 / 抜粋: "if not save_ok:")
+* 根拠: `if not save_all_ok:` (行番号: 234-240 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(\n                config.SQLITE_TABLE_CHILD,\n                ..." / "if not save_all_ok:"), `if not save_ok:` (行番号: 307, 379 / 抜粋: "if not save_ok:")
 
 
 * **引数/リクエスト**: `event` (PostbackEvent), `line_bot_api` (MessagingApi)
@@ -240,9 +240,9 @@
 
 
 * **副作用**:
-* `save_log_async` を用いたDBへの書き込み処理（`sync_run`で同期化）。保存結果は`all_genki`ではリスト内包表記で全件収集し`all()`で判定、`child_check`/`food_record_direct`では単一の戻り値を`save_ok`として判定する。
+* `save_log_async`/`save_logs_batch_async`（Issue #231以降、`all_genki`は`save_logs_batch_async`）を用いたDBへの書き込み処理（`sync_run`で同期化）。保存結果は`all_genki`では`save_logs_batch_async`の単一の戻り値を`save_all_ok`として判定、`child_check`/`food_record_direct`では単一の戻り値を`save_ok`として判定する。
 * LINE APIを通じたリプライ送信（テキスト・FlexMessage）。保存失敗時は`send_reply_text`で失敗テキストのみ返信し、成功時のみ従来のFlexMessage/テキストを送信する。
-* 根拠: `sync_run(save_log_async(` / `line_bot_api.reply_message(` (行番号: 229-233, 263-268 / 抜粋: "sync_run(save_log_async(")
+* 根拠: `sync_run(save_logs_batch_async(` (行番号: 234-238 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(") / `line_bot_api.reply_message(` (行番号: 266-271)
 
 
 * **エラーハンドリング**:
@@ -251,7 +251,7 @@
 * `all_genki`/`child_check`/`food_record_direct`はDB保存結果が偽の場合、成功メッセージを送らずエラーログ出力＋失敗テキスト返信を行う。
 * 全体の処理エラーをキャッチしログ出力する。
 * 根拠: `except Exception: pb = LinePostbackData(...)` / `else: logger.warning(...)` / `except Exception as e: logger.error(...)` (行番号: 213-217, 397-405, 407-408 / 抜粋: "except Exception:")
-* 根拠: `logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")` (行番号: 238 / 抜粋: "の記録保存に失敗しました")
+* 根拠: `logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")` (行番号: 241 / 抜粋: "の記録保存に失敗しました")
 
 
 
@@ -265,7 +265,7 @@ flowchart TD
     ModelParse -- 成功 --> ActionCheck{"action?"}
     ModelParse -- 失敗 --> Fallback["actionのみでフォールバック生成"] --> ActionCheck
 
-    ActionCheck -->|"all_genki"| PB_AllGenki["全メンバー分DB保存: 元気<br>(リスト内包表記でsave_results収集)"] --> PB_AllGenkiCheck{"all(save_results)?"}
+    ActionCheck -->|"all_genki"| PB_AllGenki["全メンバー分DB保存: 元気<br>(save_logs_batch_asyncで単一トランザクション保存、#231)"] --> PB_AllGenkiCheck{"save_all_ok?"}
     PB_AllGenkiCheck -->|No| PB_AllGenkiFail["エラーログ出力"] --> PB_Reply1b["失敗テキスト送信"]
     PB_AllGenkiCheck -->|Yes| PB_Reply1["完了Flex送信"]
     ActionCheck -->|"show_health_input"| PB_Show["create_health_carousel_flex()"] --> PB_Reply2["入力パネル送信"]
@@ -331,7 +331,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `config.py` | `TARGET_MEMBERS`, `FAMILY_SETTINGS`, `SQLITE_DB_PATH`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD` など、ロジック内で多用される定数やDB設定の実態を把握する必要があるため。 | `config.FAMILY_SETTINGS["members"]` 等 (行番号: 35) |
-| 中 | `core/database.py` | `save_log_async` 関数の非同期DB保存のトランザクション管理やエラーハンドリング詳細の確認が必要なため。 | `save_log_async(...)` (行番号: 32, 229) |
+| 中 | `core/database.py` | `save_log_async`/`save_logs_batch_async` 関数の非同期DB保存のトランザクション管理やエラーハンドリング詳細の確認が必要なため（[database.md](./database.md)に解析結果あり）。 | `save_log_async(...)` / `save_logs_batch_async(...)` (行番号: 32, 234) |
 | 中 | `handlers/line_handler.py` | 自由文メッセージ（AIフォールバック）が本ファイルの案内テキスト送信後にどう処理へ接続されるかを確認するため。 | `_process_message_async()` への一本化に関する記述 (概要セクション参照) |
 | 低 | `models/line.py` | `LinePostbackData` のバリデーションルールが、Postback処理の挙動にどう影響しているかを理解するため。 | `from models.line import LinePostbackData` (行番号: 33) |
 
@@ -342,7 +342,7 @@ graph TD
 * `get_user_name` や `get_quota_text` において、`except Exception:` で例外の握り潰し（`pass` または 空文字返却）が行われており、通信エラー時の追跡が困難になる可能性がある。
 * Postbackデータパース時、`LinePostbackData` の変換に失敗した場合に、未定義パラメータのみを取得するフォールバック処理を行っている。
 * **未使用の関数・インポート**: `create_quick_reply`、`get_quota_text` はファイル内・他ファイルのいずれからも呼び出し箇所がなく、現状デッドコードになっている。同様に `json` (標準ライブラリ)、`PushMessageRequest`、`PostbackAction` (`linebot.v3.messaging`) もインポートされているが未使用。
-* **保存失敗チェックの実装が箇所ごとにやや不統一**: `all_genki`はリスト内包表記で全員分の保存結果を集め`all()`で判定する（1件でも失敗すれば全体を失敗扱いとし、成功した分もユーザーには「失敗」としか伝わらない）のに対し、`child_check`/`food_record_direct`は単一の`save_ok`変数で判定する。3フローともロジック自体は`sync_run(save_log_async(...))`の直後にチェックする形で個別に実装されており、共通ヘルパー化はされていない。
+* **保存失敗チェックの実装が箇所ごとにやや不統一**: `all_genki`は`save_logs_batch_async`(単一トランザクションでの一括保存、Issue #231で導入)の単一の戻り値を`save_all_ok`として判定するのに対し、`child_check`/`food_record_direct`は単一行の`save_log_async`の戻り値を`save_ok`変数で判定する。3フローともロジック自体は`sync_run(...)`の直後にチェックする形で個別に実装されており、共通ヘルパー化はされていない。**（Issue #231で修正）** 以前の`all_genki`はリスト内包表記で全員分の`save_log_async`の結果を集め`all()`で判定していたが、これは「1件でも失敗すれば全体を失敗扱いとする」という判定自体は正しくても、各`save_log_async`呼び出しが独立にcommitされるため、失敗扱いにした後も既に成功した分がDBに残ってしまう不整合があった。判定ロジックの統一自体は本Issueのスコープ外で未解消のまま残っている。
 * 根拠: `save_results = [\n                sync_run(save_log_async(\n ...\n                for name in TARGET_MEMBERS\n            ]\n\n            if not all(save_results):` (行番号: 228-237 / 抜粋: "if not all(save_results):")
 
 ## 9. 不明事項一覧
