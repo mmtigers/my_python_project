@@ -86,6 +86,13 @@ class CompleteResponse(BaseModel):
     earnedExp: int
     earnedMedals: int = 0
     message: Optional[str] = None
+    # #238: 兄妹連携クエストのカスケード承認時、相方(自分でタップしなかった方の
+    # 子ども)のレベルアップ/メダル獲得演出をフロント側が出せるようにするための
+    # フィールド。連携クエストでない承認・完了報告時は常に既定値のまま。
+    partnerUserId: Optional[str] = None
+    partnerLeveledUp: bool = False
+    partnerNewLevel: Optional[int] = None
+    partnerEarnedMedals: int = 0
 
 class CancelResponse(BaseModel):
     status: str

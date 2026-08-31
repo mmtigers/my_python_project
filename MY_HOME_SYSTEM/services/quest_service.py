@@ -497,8 +497,16 @@ class QuestService:
             attacker_id = hist['user_id']
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード承認 ---
+            # #238: _approve_linked_historyは相方のgold/exp/level/medalを正しく
+            # 付与していたが戻り値が無く(-> None)、レスポンスに一切含まれないため
+            # フロント側は相方のレベルアップ/メダル獲得演出を出しようがなかった。
             if hist['linked_history_id'] is not None:
-                self._approve_linked_history(cur, hist['linked_history_id'])
+                partner_result = self._approve_linked_history(cur, hist['linked_history_id'])
+                if partner_result:
+                    result['partnerUserId'] = partner_result['user_id']
+                    result['partnerLeveledUp'] = partner_result['leveledUp']
+                    result['partnerNewLevel'] = partner_result['newLevel']
+                    result['partnerEarnedMedals'] = partner_result['earnedMedals']
 
             # --- TV Lock Feature ---
             # quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る
@@ -510,20 +518,27 @@ class QuestService:
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
             return result
 
-    def _approve_linked_history(self, cur, linked_history_id: int) -> None:
-        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。"""
+    def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:
+        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。
+
+        #238: 戻り値で相方のuser_idと_apply_quest_rewardsの結果(leveledUp/newLevel/
+        earnedMedals等)を返す。呼び出し元(_process_approve_quest_locked)がこれを
+        レスポンスへ含めることで、フロント側が相方のレベルアップ/メダル獲得演出を
+        出せるようにするため。
+        """
         linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_history_id,)).fetchone()
         if not linked_hist or linked_hist['status'] != 'pending':
-            return
+            return None
 
         linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
         linked_quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (linked_hist['quest_id'],)).fetchone()
         if not linked_user:
-            return
+            return None
 
         override_rewards = {"gold": linked_hist['gold_earned'], "exp": linked_hist['exp_earned']}
-        self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
+        reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
         logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
+        return {"user_id": linked_hist['user_id'], **reward_result}
 
     def _trigger_tv_unlock(self, quest_id: int):
         import threading
