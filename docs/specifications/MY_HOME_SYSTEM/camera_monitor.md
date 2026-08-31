@@ -51,9 +51,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 611 / 抜粋: "for cam in config.CAMERAS") |
-| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 356 / 抜粋: "save_log_generic("device_records") |
-| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push(config.LINE_USER_ID...` (行番号: 553 / 抜粋: "send_push(") |
+| `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "for cam in config.CAMERAS") |
+| `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 365 / 抜粋: "save_log_generic("device_records") |
+| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push(config.LINE_USER_ID...` (行番号: 564 / 抜粋: "send_push(") |
 | NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 186 / 抜粋: "nas_folder_name = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -173,7 +173,7 @@
 ### `capture_snapshot_from_nvr`
 
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
-* 根拠: `capture_snapshot_from_nvr` (行番号: 171〜238 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 171〜247 / 抜粋: "def capture_snapshot_from_nvr(")
 
 
 * **引数/リクエスト**: `cam_conf: dict` (カメラ設定), `target_time: dt_class = None` (対象時刻・現在未使用)
@@ -185,57 +185,57 @@
 
 
 * **副作用**: NASフォルダの走査(`glob.glob`)、一時ファイルの作成(`uuid`使用)と削除、外部コマンド(`ffmpeg`)の実行。
-* 根拠: `subprocess.run(cmd` (行番号: 220 / 抜粋: "subprocess.run(cmd,")
+* 根拠: `subprocess.run(cmd` (行番号: 221 / 抜粋: "subprocess.run(cmd,")
 
 
-* **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。
-* 根拠: `except subprocess.TimeoutExpired` (行番号: 228 / 抜粋: "except subprocess.TimeoutExpire")
+* **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は`/tmp`に`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 228 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 239 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 245 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 246 / 抜粋: "except OSError:")
 
 
 
 ### `save_image_from_stream`
 
 * **役割**: `capture_snapshot_from_nvr` を呼び出してスナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。
-* 根拠: `save_image_from_stream` (行番号: 241〜267 / 抜粋: "def save_image_from_stream(")
+* 根拠: `save_image_from_stream` (行番号: 250〜276 / 抜粋: "def save_image_from_stream(")
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
-* 根拠: `save_image_from_stream` (行番号: 241 / 抜粋: "(cam_name: str, event_type:")
+* 根拠: `save_image_from_stream` (行番号: 250 / 抜粋: "(cam_name: str, event_type:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (保存されたファイルのパス、失敗時はNone)
-* 根拠: `save_image_from_stream` (行番号: 241 / 抜粋: "-> Optional[str]:")
+* 根拠: `save_image_from_stream` (行番号: 250 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: ファイルシステムへの画像ファイル書き込み。
-* 根拠: `f.write(image_data)` (行番号: 263 / 抜粋: "f.write(image_data)")
+* 根拠: `f.write(image_data)` (行番号: 272 / 抜粋: "f.write(image_data)")
 
 
 * **エラーハンドリング**: ファイル保存時の例外をキャッチし、ログ出力してNoneを返す。
-* 根拠: `except Exception as e` (行番号: 265 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 274 / 抜粋: "except Exception as e:")
 
 
 
 ### `force_close_session`
 
 * **役割**: さまざまなパターンのオブジェクト（ONVIFService, ONVIFCamera, zeep_client等）からHTTPセッションを探し出して強制的にクローズし、ファイル記述子を解放する。
-* 根拠: `force_close_session` (行番号: 269〜292 / 抜粋: "def force_close_session(")
+* 根拠: `force_close_session` (行番号: 278〜301 / 抜粋: "def force_close_session(")
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
-* 根拠: `force_close_session` (行番号: 269 / 抜粋: "(service_obj: Any) -> None:")
+* 根拠: `force_close_session` (行番号: 278 / 抜粋: "(service_obj: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `force_close_session` (行番号: 269 / 抜粋: "-> None:")
+* 根拠: `force_close_session` (行番号: 278 / 抜粋: "-> None:")
 
 
 * **副作用**: HTTPセッション(`requests.Session`)の解放。
-* 根拠: `session.close()` (行番号: 281 / 抜粋: "service_obj.zeep_client.tran")
+* 根拠: `session.close()` (行番号: 290 / 抜粋: "service_obj.zeep_client.tran")
 
 
 * **エラーハンドリング**: 全ての例外をキャッチし、警告ログ（debugレベル）を出力。
-* 根拠: `except Exception` (行番号: 291 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception` (行番号: 300 / 抜粋: "except Exception as e:")
 
 
 
