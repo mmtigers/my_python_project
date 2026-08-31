@@ -73,6 +73,12 @@ class AppConfig:
     # レート制限対策: チャンネル/URLごとの巡回間隔とサーキットブレーカー閾値
     SUBSCRIPTION_SLEEP_RANGE: tuple = (2.0, 5.0)
     CONSECUTIVE_FAILURE_THRESHOLD: int = 3
+
+    # #227: レート制限対策はチャンネルURL間の間隔(SUBSCRIPTION_SLEEP_RANGE)にしか
+    # 及んでおらず、1チャンネル内部で発行される /videos -> /playlists -> 各プレイリスト
+    # という複数リクエストは間隔なしで連射されていた。これらの内部リクエスト間にも
+    # 同種のジッター待機を挟む。
+    INTRA_CHANNEL_SLEEP_RANGE: tuple = (1.0, 3.0)
     
     # yt-dlp オプション: 高速化のため extract_flat を使用
     YDL_OPTS: Dict[str, Any] = {
@@ -121,6 +127,15 @@ class ExtractionResult:
 # ==========================================
 class YouTubeExtractor:
     """YouTubeからURL情報を抽出するクラス。"""
+
+    def __init__(self) -> None:
+        # #227: extract_iter内部(1チャンネルにつき/videos・/playlists・各プレイリスト
+        # という複数リクエスト)で発生した失敗件数。extract_iterが1件でも結果をyield
+        # すれば呼び出し元(process_subscriptions)は「成功」扱いにしていたため、大量の
+        # プレイリストが失敗してもサーキットブレーカーの連続失敗カウントが常に0に
+        # リセットされていた。extract_iterの呼び出しごとにリセットし、呼び出し元が
+        # 参照できるようにする。
+        self.last_extract_internal_failures: int = 0
 
     @staticmethod
     def _normalize_url(entry: Dict[str, Any]) -> Optional[str]:
@@ -227,6 +242,8 @@ class YouTubeExtractor:
         Yields:
             Iterator[ExtractionResult]: 抽出結果を順次返す。
         """
+        self.last_extract_internal_failures = 0
+
         if self._is_channel_url(target_url):
             logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")
             base_url = target_url.split('?')[0].rstrip('/')
@@ -244,6 +261,10 @@ class YouTubeExtractor:
                     is_playlist=False
                 )
 
+            # #227: /videos と /playlists は同一チャンネルに対する連続リクエストで
+            # あり、間隔を空けずに連射するとレート制限/Bot検知を誘発しうる。
+            time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))
+
             # Phase 2: Playlists
             try:
                 # 呼び出し間の状態汚染を避けるためコピーを渡す（理由は上のコメント参照）
@@ -252,18 +273,28 @@ class YouTubeExtractor:
                     if pl_tab and 'entries' in pl_tab:
                         playlists = list(pl_tab['entries'])
                         logger.info(f"📂 {len(playlists)} 個のプレイリストが見つかりました。")
-                        for pl in playlists:
+                        for i, pl in enumerate(playlists):
                             if not pl:
                                 continue
                             pl_url = pl.get('url')
                             pl_title = pl.get('title', 'Unknown Playlist')
                             if pl_url:
+                                if i > 0:
+                                    # #227: 検出した各プレイリストへの逐次リクエストが
+                                    # sleep無しで連続発行されていたため、ここにも
+                                    # ジッター待機を挟む。
+                                    time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))
                                 res = self._extract_single_list(pl_url, force_title=pl_title)
                                 if res:
                                     res.is_playlist = True
                                     yield res
+                                else:
+                                    # #227: 個々のプレイリスト取得失敗を呼び出し元の
+                                    # サーキットブレーカーが検知できるよう記録する。
+                                    self.last_extract_internal_failures += 1
             except Exception:
                 logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)
+                self.last_extract_internal_failures += 1
         else:
             res = self._extract_single_list(target_url)
             if res:
@@ -444,11 +475,23 @@ class SubscriptionManager:
                 self.file_manager.save(result)
                 got_result = True
 
-            if got_result:
+            # #227: 以前はgot_result(1件でも結果を取得できたか)だけを見ていたため、
+            # あるチャンネルの大量プレイリストが軒並み失敗しても、/videos等の一部が
+            # 成功しさえすればconsecutive_failuresが0にリセットされ、サーキット
+            # ブレーカーが内部の失敗を検知できなかった。extract_iter内部の失敗件数
+            # (last_extract_internal_failures)も合わせて確認する。
+            internal_failures = getattr(self.extractor, "last_extract_internal_failures", 0)
+            if got_result and not internal_failures:
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
-                logger.warning(f"⚠️ 抽出結果を取得できませんでした ({url}) — 連続失敗数: {consecutive_failures}")
+                if not got_result:
+                    logger.warning(f"⚠️ 抽出結果を取得できませんでした ({url}) — 連続失敗数: {consecutive_failures}")
+                else:
+                    logger.warning(
+                        f"⚠️ チャンネル内で{internal_failures}件のリクエストが失敗しました "
+                        f"({url}) — 連続失敗数: {consecutive_failures}"
+                    )
                 if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:
                     logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")
                     break
