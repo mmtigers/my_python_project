@@ -39,7 +39,7 @@
 | `config` 内の各種定数 | `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `SQLITE_TABLE_CHILD`, `LINE_USER_ID`, `SQLITE_TABLE_POWER_USAGE`（未定義時のフォールバックあり）などの具体的な値や型が不明 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "FROM {config.SQLITE_TABLE_FOOD") |
 | `common.setup_logging` | 戻り値の正確な型や内部でのログ設定の詳細が不明 | 根拠: `logger = common.setup_logging("weekly_report")` (行番号: 9 / 抜粋: "logger = common.setup_logging") |
 | `common.get_db_cursor` | 接続先DBの種類（SQLite等）や取得されるカーソルオブジェクトの振る舞い（辞書型アクセスが可能かどうか）が不明 | 根拠: `with common.get_db_cursor() as cursor:` (行番号: 49 / 抜粋: "with common.get_db_cursor() as") |
-| `common.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `common.send_push(config.LINE_USER_ID, ...)` (行番号: 258 / 抜粋: "if common.send_push(config.LIN") |
+| `common.send_push` | 引数 `target="discord"` の挙動、送信先の実態、戻り値が `True`/`False` になる条件が不明 | 根拠: `common.send_push([...], target="discord")` (行番号: 278 / 抜粋: "if common.send_push([{"type"...") |
 | データベースのスキーマ | 各テーブルの正確なカラム定義やデータ型が不明 | 根拠: `SELECT menu_category FROM ...` (行番号: 62 / 抜粋: "SELECT menu_category") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -155,7 +155,7 @@
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `common.send_push` を呼び出し外部システムへ通知を送信。
 * 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。
-* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push(config.LINE_U")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
+* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
 
 
 * **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
@@ -228,8 +228,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 使用されている各種テーブル名、ユーザーIDの実態、定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD`, `config.LINE_USER_ID` など (行番号: 63, 258 / 抜粋: "config.SQLITE_TABLE_FOOD", "config.LINE_USER_ID") |
-| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `common.get_db_cursor`, `common.send_push` (行番号: 49, 258 / 抜粋: "common.get_db_cursor()", "common.send_push(config.LINE_U") |
+| 高 | `config.py` | 使用されている各種テーブル名や定数値（`SQLITE_TABLE_POWER_USAGE` など）を特定するため。 | 根拠: `config.SQLITE_TABLE_FOOD` (行番号: 63 / 抜粋: "config.SQLITE_TABLE_FOOD") |
+| 高 | `common.py` | DB接続先やクエリ結果を扱うカーソルの仕様、およびプッシュ通知の実際の送信先・処理内容を把握するため。 | 根拠: `common.get_db_cursor`, `common.send_push` (行番号: 49, 278 / 抜粋: "common.get_db_cursor()", "common.send_push([{"type": ") |
 | 中 | （データベーススキーマ定義ファイル） | `menu_category`、`action`、`wattage`、`condition` カラムのデータ型や格納形式、制約を確認するため。 | 根拠: DBクエリ実行部 (行番号: 62, 101 / 抜粋: "SELECT menu_category FROM", "SELECT AVG(wattage)") |
 
 ## 8. 保守上の注意点
@@ -237,7 +237,7 @@ graph TD
 * `get_analysis_data` 内の `elapsed_hours` の計算において、現在時刻(`now`)と開始日時(`start_dt`)の差分から経過時間を求めているが、データベース内に存在するデータの実際の記録範囲ではなく、現在時刻に基づく実行タイミング依存の計算となっている。
 * `get_analysis_data` の例外処理では `except Exception as e:` と広範な例外をキャッチしており、`None` を返す仕様になっている。一時的なDBエラーと致命的な構文エラーの区別がつかない。
 * `table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")` において、`config.py` に変数が存在しない場合のフォールバック値 `"power_usage"` がハードコードされている。
-* `run_report` におけるプッシュ通知処理 `common.send_push` の引数で、`config.LINE_USER_ID` を使用しつつ `target="discord"` と指定されており、通知先の実態がコード上からは自明ではない。
+* Issue #289で`common.send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)引数が不要になった。これに伴い`run_report`のプッシュ通知処理からは、以前存在した`config.LINE_USER_ID`と`target="discord"`の不一致な組み合わせ渡しが解消されている。
 * Issue #234修正前は月曜8時台判定(`is_monday and is_morning`)のみに依存しており、実行済みを記録する永続フラグが存在しなかったため、外部cron(リポジトリ管理外)が同一時間枠内で本スクリプトを複数回起動すると重複送信され得た。`monitors/tv_lock_monitor.py`の`LAST_RUN_FILE`方式(日付文字列をテキストファイルへ記録)を踏襲し、`config.FALLBACK_ROOT`配下にフラグファイルを追加した。フラグは送信成功時のみ書き込まれる(送信失敗時に書き込むと再試行が永久にブロックされるため)。`--force`実行時はこのフラグチェック自体をバイパスし、かつフラグへの書き込みも行わない(手動テスト実行が本番の定時実行を妨げないようにするための挙動で、`monitors/timelapse_runner.py`の`--force`時の扱いと同様)。
 
 ## 9. 不明事項一覧

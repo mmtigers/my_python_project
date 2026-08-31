@@ -396,7 +396,8 @@
 
 
 * **副作用**: `os.path.ismount` によるマウント確認、テストファイルの書き込み・削除（NAS書き込みテスト）、`logger.error` 出力、`common.send_push` によるDiscord即時通知（権限エラー時）、カメラへのポート疎通確認、`aplay -l`（`timeout=10`）/ `bluetoothctl info`（`stdin=subprocess.DEVNULL`, `timeout=15`）のサブプロセス実行、`self.results` への3件（NAS, Cameras, Speaker）の追加。
-* 根拠: `common.send_push(\n                    user_id=getattr(config, "LINE_USER_ID", None),` (行番号: 249〜250 / 抜粋: "common.send_push(")
+* 根拠: `common.send_push(\n                    messages=[...], target="discord",` (行番号: 249〜252 / 抜粋: "common.send_push(")
+* Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になったため、以前渡していた`user_id=getattr(config, "LINE_USER_ID", None)`は撤去された。
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。サウンドカード検出・Bluetooth接続確認処理は個別に bare `except:` で保護されている。
@@ -465,7 +466,7 @@
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`common.send_push` によるDiscord通知送信。
-* 根拠: `common.send_push(\n            user_id=getattr(config, "LINE_USER_ID", None),\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 400〜405 / 抜粋: "common.send_push(")
+* 根拠: `common.send_push(\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 400〜404 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: なし
