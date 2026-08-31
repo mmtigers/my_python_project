@@ -18,8 +18,8 @@
 
 ## 2. ファイルの概要
 
-* 環境変数に設定されたベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。更新が行われた場合はプッシュ通知を送信して報告する。
-* 根拠: [関数 `fix_all_webhooks` の処理内容、およびログ文字列] (行番号: 102〜117 / 抜粋: "🚀 Webhook自動修復ツール起動")
+* 環境変数に設定されたベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。更新が行われた場合はプッシュ通知を送信して報告する。加えて、SwitchBot側で旧設定を削除した後に新規登録が失敗した(Webhookが未設定のまま残る)危険な状態を検知した場合は、更新の成否に関わらず必ずエラー通知を送信する(Issue #166)。
+* 根拠: [関数 `fix_all_webhooks` の処理内容、およびログ文字列] (行番号: 120〜148 / 抜粋: "🚀 Webhook自動修復ツール起動")
 
 
 
@@ -53,26 +53,27 @@
 ### `update_switchbot_webhook`
 
 * **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。
-* 根拠: [関数定義およびDocstring] (行番号: 28〜29 / 抜粋: "SwitchBotのWebhook URLを更新")
+* 根拠: [関数定義およびDocstring] (行番号: 28〜37 / 抜粋: "SwitchBotのWebhook URLを更新")
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
 * 根拠: [関数定義] (行番号: 28 / 抜粋: "def update_switchbot_webhook(base_url):")
 
 
-* **戻り値/レスポンス**: `bool` (更新が成功した場合は `True`、設定済み・更新不要・失敗時は `False`)
-* 根拠: [return文] (行番号: 41, 59, 66 / 抜粋: "return True", "return False")
+* **戻り値/レスポンス**: `Optional[bool]` — `True`: 新しいURLの登録に成功した(変更あり)。`False`: 既に設定済み、またはURL照会自体に失敗し何も変更していない。`None`: 旧URLを削除した後、新URLの登録に失敗した(Issue #166。SwitchBotのWebhookが未設定のまま残っている危険な状態を、「既に設定済みで変更不要」の`False`と区別するために導入された)。
+* 根拠: [return文] (行番号: 48, 52, 74, 84 / 抜粋: "return False", "return True", "return None")
+* 根拠: [Docstringの戻り値説明] (行番号: 30〜36 / 抜粋: "True  - 新しいURLの登録に成功した(変更あり)")
 
 
 * **副作用**:
 * 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/queryWebhook` へのPOSTリクエスト
-* 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/deleteWebhook` へのPOSTリクエスト
+* 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/deleteWebhook` へのPOSTリクエスト（旧URLごとに1回、失敗しても他の旧URLの削除・後続の新規登録は続行する）
 * 外部API呼び出し: `https://api.switch-bot.com/v1.1/webhook/setupWebhook` へのPOSTリクエスト
-* 根拠: [requestsメソッド] (行番号: 36, 46, 51 / 抜粋: "requests.post(...)")
+* 根拠: [requestsメソッド] (行番号: 44, 58, 66 / 抜粋: "requests.post(...)")
 
 
-* **エラーハンドリング**: 例外(`Exception`)発生時にエラーログを出力し、`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 35, 63〜66 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: URL照会(`queryWebhook`)の例外は`False`を返して処理を打ち切る(何も変更していないため)。旧URL削除(`deleteWebhook`)の例外は個々にログ出力するのみで処理を継続する(次の旧URLの削除・新規登録を試みる)。新規登録(`setupWebhook`)の例外、または`statusCode != 100`はエラーログを出力し、関数末尾の`return None`に到達する(Issue #166の修正前は暗黙的に`False`が返り、「変更なし」と区別できなかった)。
+* 根拠: [try-exceptブロック] (行番号: 43, 46〜48, 57, 59〜60, 65, 78〜79 / 抜粋: "except Exception as e:")
 
 
 
@@ -103,27 +104,28 @@
 
 ### `fix_all_webhooks`
 
-* **役割**: 実行環境の環境変数からベースURLを取得し、SwitchBotとLINEのWebhook更新処理を実行する。いずれかが更新された場合のみ通知を送信する。
-* 根拠: [関数定義およびコメント] (行番号: 102〜117 / 抜粋: "実際に更新が走った時のみ通知を送信")
+* **役割**: 実行環境の環境変数からベースURLを取得し、SwitchBotとLINEのWebhook更新処理を実行する。`update_switchbot_webhook`が`None`(旧設定削除後に新規登録が失敗した危険な状態、Issue #166)を返した場合は、更新の成否に関わらず必ずエラー通知(`channel="error"`)を送信する。そのうえで、SwitchBot側の更新有無(`bool(sb_result)`)またはLINE側の更新有無のいずれかが真の場合のみ、従来通り成功通知(`channel="report"`)を送信する。
+* 根拠: [関数定義およびコメント] (行番号: 120〜148 / 抜粋: "実際に更新が走った時のみ通知を送信")
+* 根拠: `if sb_result is None:` (行番号: 136〜142 / 抜粋: "update_switchbot_webhook が None(=旧設定を削除した後に新規登録が失敗し、")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 102 / 抜粋: "def fix_all_webhooks():")
+* 根拠: [関数定義] (行番号: 120 / 抜粋: "def fix_all_webhooks():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: [return文の不在] (行番号: 102〜117 / 抜粋: "return文なし")
+* 根拠: [return文の不在] (行番号: 120〜148 / 抜粋: "return文なし")
 
 
 * **副作用**:
 * 環境変数取得: `os.environ.get("WEBHOOK_BASE_URL")`
-* 外部モジュール呼び出し: `common.send_push` によるプッシュ通知送信
+* 外部モジュール呼び出し: `common.send_push` によるプッシュ通知送信(SwitchBot側が危険な状態(`None`)の場合のエラー通知、および更新成功時の完了通知の最大2回)
 * システム終了: 設定がない場合の `sys.exit(1)`
-* 根拠: [処理内容] (行番号: 106, 109, 117 / 抜粋: "sys.exit(1)", "common.send_push(...)")
+* 根拠: [処理内容] (行番号: 124, 127, 142, 148 / 抜粋: "sys.exit(1)", "common.send_push(...)")
 
 
-* **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。
-* 根拠: [ifブロック] (行番号: 107〜109 / 抜粋: "if not base_url:")
+* **エラーハンドリング**: `WEBHOOK_BASE_URL` が取得できない場合、エラーログを出力して `sys.exit(1)` でプロセスを終了させる。`update_switchbot_webhook`が例外を送出することはない(関数内で`Exception`を捕捉し`False`/`None`を返す設計のため)。
+* 根拠: [ifブロック] (行番号: 125〜127 / 抜粋: "if not base_url:")
 
 
 
@@ -145,19 +147,25 @@ flowchart TD
     
     SBCond -- No --> DeleteSB[外部: API deleteWebhook]
     DeleteSB --> SetupSB[外部: API setupWebhook]
-    SetupSB --> CallLINE
-    
+    SetupSB --> SetupCond{statusCode == 100?}
+    SetupCond -- Yes --> CallLINE
+    SetupCond -- No --> CallLINE
+
     CallLINE --> CheckToken{LINE Token\n設定あり?}
-    CheckToken -- No --> CheckUpdate{sb_updated OR\nline_updated ?}
+    CheckToken -- No --> CheckDanger{"sb_result is None?\n(Issue #166: 旧URL削除後に\n新規登録が失敗した危険な状態)"}
     
     CheckToken -- Yes --> QueryLINE[外部: API GET endpoint]
     QueryLINE --> LINECond{target_url\n設定済み?}
     
-    LINECond -- Yes --> CheckUpdate
+    LINECond -- Yes --> CheckDanger
     LINECond -- No --> PutLINE[外部: API PUT endpoint]
-    PutLINE --> CheckUpdate
-    
-    CheckUpdate -- Yes --> SendPush[外部: common.send_push]
+    PutLINE --> CheckDanger
+
+    CheckDanger -- Yes --> SendErrorAlert["外部: common.send_push\n(channel=error)"]
+    CheckDanger -- No --> CheckUpdate
+    SendErrorAlert --> CheckUpdate{sb_updated(=bool(sb_result))\nOR line_updated ?}
+
+    CheckUpdate -- Yes --> SendPush["外部: common.send_push\n(channel=report)"]
     SendPush --> End
     
     CheckUpdate -- No --> End
@@ -204,6 +212,7 @@ graph TD
 * `update_switchbot_webhook` 関数内にて、古いWebhookを削除するループ処理に `time.sleep(1)` が含まれており、登録数が多い場合は関数全体の実行時間が著しく長くなる。
 * すべての `requests` 呼び出し（SwitchBot/LINE双方）に `timeout=10` が明示的に設定されており、外部APIの応答遅延によるプロセスハングは一定範囲で防止されている。
 * `traceback` モジュールがインポートされているが、スクリプト内で使用されていない未使用コードが存在する。
+* `update_switchbot_webhook`の戻り値は`True`/`False`/`None`の3値であり、`fix_all_webhooks`側は必ず`is None`で危険な状態を判定し、成功通知の判定には`bool(sb_result)`で真偽値化してから使う必要がある(Issue #166)。単純な`if sb_result:`ではなく`is None`チェックを省略・誤読すると、旧設定削除後の新規登録失敗が再び無通知のまま埋もれる。
 
 ## 9. 不明事項一覧
 
