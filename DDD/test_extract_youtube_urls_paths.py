@@ -15,6 +15,7 @@ get_managed_target_directory が使われるが、これが引数を無視して
 同一バグ)。
 """
 import importlib
+import logging
 import sqlite3
 import sys
 from contextlib import closing, contextmanager
@@ -219,6 +220,41 @@ class TestProcessSubscriptionsUsesFreshDbPath:
 
         # ローカル側にはゴミの空DBが作られていないこと
         assert not (local_base.parent / "home_system.db").exists()
+
+
+class TestProcessSubscriptionsHandlesMkdirOSError:
+    """Issue #185の回帰テスト: db_path.parent.mkdir()が送出しうるOSError
+    (権限エラー・読み取り専用マウント等)はsqlite3.Errorのサブクラスでは
+    ないため、以前は`except sqlite3.Error`節で捕捉されず--cron実行全体が
+    未処理例外で異常終了していた。process_subscriptions内の他の失敗経路
+    (エラーログ出力+安全なreturn)と同じフェイルソフト方針に統一されている
+    ことを確認する。"""
+
+    def test_mkdir_permission_error_is_caught_and_logged_not_raised(self, tmp_path, caplog):
+        base = tmp_path / "data"
+        base.mkdir(parents=True)
+
+        extractor = MagicMock()
+        file_manager = MagicMock()
+        manager = module.SubscriptionManager(extractor, file_manager)
+
+        # core.logger.setup_logging() は propagate=False で設定するため、
+        # rootロガーに依拠するcaplogがそのままでは記録できない
+        # (test_newface_monitor_notifier.pyの同種コメント参照)。
+        # テスト実行中だけ強制的にTrueへ切り替え、終了後に元の値へ戻す。
+        original_propagate = module.logger.propagate
+        module.logger.propagate = True
+        try:
+            with patch.object(module.AppConfig, "get_output_base_dir", return_value=base), \
+                    patch("pathlib.Path.mkdir", side_effect=PermissionError("Permission denied")), \
+                    caplog.at_level(logging.ERROR, logger=module.logger.name):
+                # 例外を送出せずに完走すること自体が回帰確認の対象
+                manager.process_subscriptions()
+        finally:
+            module.logger.propagate = original_propagate
+
+        extractor.extract_iter.assert_not_called()
+        assert any("DB初期化エラー" in r.message for r in caplog.records)
 
 
 if __name__ == "__main__":
