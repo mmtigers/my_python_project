@@ -533,7 +533,14 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             'noplaylist': True,
             # 動画タイトルがそのままファイル名になるため、極端に長いタイトルで
             # ext4等のファイル名長制限（255バイト）に抵触して失敗するのを防ぐ。
-            'trim_file_name': 150,
+            # #175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の
+            # 単純なスライス)であり、バイト数を保証しない。UTF-8で1文字3バイトの
+            # 日本語では、以前の150文字は最大450バイトとなり255バイト上限を
+            # 容易に超過しうる不十分な値だった(約85文字超で失敗)。拡張子
+            # (merge_output_formatで固定される".mp4"等、最大5バイト程度)分の
+            # 余白を見込み、日本語(3バイト/文字)でも255バイトに収まる80文字に
+            # 変更する(80*3+5=245バイト、安全マージンあり)。
+            'trim_file_name': 80,
             # ボット検知対策: yt-dlp自身が発行する内部リクエスト（メタデータ取得等）の
             # 間にもランダムなスリープを挟み、機械的なアクセスパターンを避ける。
             'sleep_interval_requests': CONFIG.YTDLP_SLEEP_INTERVAL,
