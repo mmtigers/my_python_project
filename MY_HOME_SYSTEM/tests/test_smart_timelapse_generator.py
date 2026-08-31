@@ -6,12 +6,13 @@ VideoBuilder._build_concat の `except Exception: return False` が
 エラー内容を一切ログに残さず握りつぶしていたため、結合失敗の原因が
 サーバーログから追跡できなかった不具合。
 """
+import datetime
 import os
 import subprocess
 import sys
 import textwrap
 import threading
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -114,3 +115,67 @@ class TestMotionDetectorStderrDeadlock:
             "(stderrを読まずに大量出力を書かせるとstdout側も停止する)"
         )
         assert "error" not in result, f"detect()が例外で終了した: {result.get('error')}"
+
+
+class TestSendPushUsesKeywordArguments:
+    """Issue #167の回帰テスト: _run_smart_timelapse_job_locked内の2箇所の
+    send_push呼び出しが send_push(user_id, messages, "discord", "report"/"error")
+    という位置引数になっていた。実シグネチャは
+    send_push(user_id, messages, image_data=None, target="both", channel="notify", ...)
+    のため、"discord" が image_data に、"report"/"error" が target に渡ってしまい、
+    target が discord/line/both のいずれにも一致せずどこにも送信されないまま
+    True が返っていた(沈黙的な通知喪失)。send_pushをモックし、target/channelが
+    キーワード引数として渡されていることを検証する。"""
+
+    def _patch_no_motion_pipeline(self, monkeypatch):
+        monkeypatch.setattr(stg, "check_dependencies", lambda: True)
+        monkeypatch.setattr(stg, "setup_directories", lambda: ("work", "out", "rec"))
+        monkeypatch.setattr(stg, "get_video_info", lambda path, retries=3: {"format": {"duration": "10"}})
+        monkeypatch.setattr(
+            stg, "get_video_start_dt",
+            lambda path, info: datetime.datetime(2026, 8, 30, 12, 0, 0)
+        )
+        monkeypatch.setattr(stg, "get_ffmpeg_version", lambda: "test")
+        monkeypatch.setattr(
+            stg, "MotionDetector",
+            lambda: type("StubMotionDetector", (), {"detect": lambda self, *a, **k: []})()
+        )
+        # eventsを空にすることで「動きなし」通知の分岐を通す
+        monkeypatch.setattr(
+            stg, "EventBuilder",
+            lambda: type("StubEventBuilder", (), {"build": lambda self, *a, **k: []})()
+        )
+
+    def test_no_motion_notification_uses_keyword_target_and_channel(self, monkeypatch, tmp_path):
+        self._patch_no_motion_pipeline(monkeypatch)
+        mock_send_push = MagicMock(return_value=True)
+        monkeypatch.setattr(stg, "send_push", mock_send_push)
+
+        stg._run_smart_timelapse_job_locked(str(tmp_path / "input.mp4"))
+
+        mock_send_push.assert_called_once()
+        args, kwargs = mock_send_push.call_args
+        # 修正前は positional (user_id, messages, "discord", "report") の4引数呼び出しで、
+        # kwargsにtarget/channelが含まれていなかった。
+        assert len(args) == 2, "user_id/messages以外は必ずキーワード引数で渡すこと"
+        assert kwargs.get("target") == "discord"
+        assert kwargs.get("channel") == "report"
+
+    def test_exception_notification_uses_keyword_target_and_channel(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(stg, "check_dependencies", lambda: True)
+        monkeypatch.setattr(stg, "setup_directories", lambda: ("work", "out", "rec"))
+
+        def _raise(*args, **kwargs):
+            raise ValueError("boom")
+
+        monkeypatch.setattr(stg, "get_video_info", _raise)
+        mock_send_push = MagicMock(return_value=True)
+        monkeypatch.setattr(stg, "send_push", mock_send_push)
+
+        stg._run_smart_timelapse_job_locked(str(tmp_path / "input.mp4"))
+
+        mock_send_push.assert_called_once()
+        args, kwargs = mock_send_push.call_args
+        assert len(args) == 2, "user_id/messages以外は必ずキーワード引数で渡すこと"
+        assert kwargs.get("target") == "discord"
+        assert kwargs.get("channel") == "error"
