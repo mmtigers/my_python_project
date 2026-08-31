@@ -389,9 +389,13 @@ function App() {
         play('approve');
         // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
         // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
-        if ((res.earnedMedals ?? 0) > 0) {
+        // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認では相方
+        // (自分でタップしなかった方の子ども)側もメダルを獲得しうるため、
+        // partnerEarnedMedalsも合算して演出に反映する。
+        const totalEarnedMedals = (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);
+        if (totalEarnedMedals > 0) {
           play('medal');
-          showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+          showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
         }
       } else {
         setMessageData({
@@ -433,7 +437,8 @@ function App() {
         const res = await approveQuest(getRepresentativeParent(users), history);
         if (res.success) {
           successCount++;
-          totalEarnedMedals += res.earnedMedals ?? 0;
+          // #238: 兄妹連携クエストのカスケード承認では相方側もメダルを獲得しうる
+          totalEarnedMedals += (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);
           if (history.linked_history_id != null) {
             cascadedIds.add(history.linked_history_id);
           }

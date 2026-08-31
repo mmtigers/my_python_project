@@ -146,24 +146,28 @@
 
 ### `approveQuest` (ラッパー) & `approveQuestMutation`
 
-* **役割**: `role_adult`ロールを持つユーザーのみがクエストを承認できる機能を提供する。承認によりクエストが`approved`になり冒険の記録に載るようになるため、`gameData`に加え`chronicle`も無効化する。承認APIのレスポンスは`QuestResult`型として受け取り、`leveledUp`が真の場合は承認した親ではなく完了報告した子ども（`history.user_id`）本人の名義で`onLevelUp`を実行する（バグ修正M-6-1）。
-* 根拠: (行番号: 176〜201, 272〜283 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
+* **役割**: `role_adult`ロールを持つユーザーのみがクエストを承認できる機能を提供する。承認によりクエストが`approved`になり冒険の記録に載るようになるため、`gameData`に加え`chronicle`も無効化する。承認APIのレスポンスは`QuestResult`型として受け取り、`leveledUp`が真の場合は承認した親ではなく完了報告した子ども（`history.user_id`）本人の名義で`onLevelUp`を実行する（バグ修正M-6-1）。**（Issue #238で修正）** 兄妹連携クエストのカスケード承認では相方（自分でタップしなかった方の子ども）側もレベルアップ/メダル獲得しうるため、`res.partnerLeveledUp`が真の場合は`res.partnerUserId`で特定した相方の名義でも`onLevelUp`を実行する。
+* 根拠: (行番号: 176〜201, 285〜302 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
 * 根拠: `M-6-1`バグ修正コメント (行番号: 187〜190 / 抜粋: "// ★バグ修正(M-6-1): 承認APIのレスポンスにも leveledUp/newLevel が\n            // 含まれるが、以前は破棄しており、子どもの承認経由レベルアップ演出が\n            // 一切出なかった。レベルアップしたのは承認した親ではなく、クエストを\n            // 完了報告した子ども(history.user_id)なので、その本人の情報で通知する。")
+* 根拠: `Issue #238`修正のパートナー通知 (行番号: 199〜207 / 抜粋: "// ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認では、相方\n            // (自分でタップしなかった方の子ども)側もgold/exp/level/medalが同時に\n            // 付与されるが、以前はAPIレスポンスにその情報が一切含まれておらず、\n            // 相方のレベルアップ演出を出す手段が無かった。")
 
 * **引数/リクエスト**: `user: User`, `historyItem: QuestHistory`
-* 根拠: (行番号: 272 / 抜粋: "const approveQuest = async (user: User, historyItem: QuestHistory) => {")
+* 根拠: (行番号: 285 / 抜粋: "const approveQuest = async (user: User, historyItem: QuestHistory) => {")
 
-* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string, earnedMedals?: number, leveledUp?: boolean }`
-* 根拠: (行番号: 279 / 抜粋: "return { success: true, earnedMedals: res.earnedMedals, leveledUp: res.leveledUp };")
+* **戻り値/レスポンス**: Promise `{ success: boolean, reason?: string, detail?: string, earnedMedals?: number, leveledUp?: boolean, partnerEarnedMedals?: number }`
+* 根拠: (行番号: 296〜301 / 抜粋: "return {\n                success: true,\n                earnedMedals: res.earnedMedals,\n                leveledUp: res.leveledUp,\n                partnerEarnedMedals: res.partnerEarnedMedals ?? 0,\n            };")
 
-* **副作用**: `/api/quest/approve` へのPOSTリクエスト（`QuestResult`型で受信）。キャッシュ破棄（`['gameData']`および`['chronicle']`）。`res.leveledUp`が真かつ`onLevelUp`が渡されていれば、`gameData?.users`から`variables.history.user_id`に一致するユーザー（完了報告した子ども）を探し、その`name`/`job_class`（無ければ`'無職'`）で`onLevelUp`を実行する。
-* 根拠: (行番号: 184〜198 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            // 承認によりクエストが approved になり、冒険の記録に載るようになる\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });", "if (res.leveledUp && onLevelUp) {\n                const completer = gameData?.users.find(u => u.user_id === variables.history.user_id);\n                onLevelUp({\n                    user: completer?.name || variables.history.user_id,\n                    level: res.newLevel,\n                    job: completer?.job_class || '無職',\n                });\n            }")
+* **副作用**: `/api/quest/approve` へのPOSTリクエスト（`QuestResult`型で受信）。キャッシュ破棄（`['gameData']`および`['chronicle']`）。`res.leveledUp`が真かつ`onLevelUp`が渡されていれば、`gameData?.users`から`variables.history.user_id`に一致するユーザー（完了報告した子ども）を探し、その`name`/`job_class`（無ければ`'無職'`）で`onLevelUp`を実行する。加えて`res.partnerLeveledUp`が真かつ`res.partnerNewLevel`が非nullかつ`onLevelUp`が渡されていれば、`gameData?.users`から`res.partnerUserId`に一致するユーザー（連携クエストの相方）を探し、同様に`onLevelUp`を実行する（Issue #238）。
+* 根拠: (行番号: 184〜198 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            // 承認によりクエストが approved になり、冒険の記録に載るようになる\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });", "if (res.leveledUp && onLevelUp) {\n                const completer = gameData?.users.find(u => u.user_id === variables.history.user_id);\n                onLevelUp({\n                    user: completer?.name || variables.history.user_id,\n                    level: res.newLevel,\n                    job: completer?.job_class || '無職',\n                });\n            }")、パートナー通知 (行番号: 199〜207 / 抜粋: "if (res.partnerLeveledUp && res.partnerNewLevel != null && onLevelUp) {\n                const partner = gameData?.users.find(u => u.user_id === res.partnerUserId);\n                onLevelUp({\n                    user: partner?.name || res.partnerUserId || '',\n                    level: res.partnerNewLevel,\n                    job: partner?.job_class || '無職',\n                });\n            }")
 
 * **エラーハンドリング**: 権限外（`user.role !== 'role_adult'`）の場合は即座に `{ success: false, reason: 'permission' }` を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }` を返す。
-* 根拠: (行番号: 273 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
+* 根拠: (行番号: 286 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
 
 * **バグ修正の記録（M-6-1）**: 承認APIのレスポンスには`leveledUp`/`newLevel`/`earnedMedals`が含まれるが、以前は`approveQuestMutation`のレスポンスを`() => {}`（引数なし）で破棄しており、子どもの承認経由レベルアップ演出・メダル獲得演出が一切表示されなかった。`completeQuest`と同様に`onSuccess`側で`res`/`variables`を受け取り、`approveQuest`ラッパーの戻り値にも`earnedMedals`/`leveledUp`を含めるよう修正した。
-* 根拠: (行番号: 187〜190, 275〜277 / 抜粋: "// ★バグ修正(M-6-1): 承認APIのレスポンスにも leveledUp/newLevel が\n            // 含まれるが、以前は破棄しており、子どもの承認経由レベルアップ演出が\n            // 一切出なかった。", "// ★バグ修正(M-6-1): 以前はレスポンスを破棄しており、承認画面側で\n            // メダル獲得演出(earnedMedals)を出す手段が無かった。leveledUp通知は\n            // approveQuestMutationのonSuccess側で行うため、ここではearnedMedalsのみ返す。")
+* 根拠: (行番号: 187〜190, 288〜294 / 抜粋: "// ★バグ修正(M-6-1): 承認APIのレスポンスにも leveledUp/newLevel が\n            // 含まれるが、以前は破棄しており、子どもの承認経由レベルアップ演出が\n            // 一切出なかった。", "// ★バグ修正(M-6-1): 以前はレスポンスを破棄しており、承認画面側で\n            // メダル獲得演出(earnedMedals)を出す手段が無かった。leveledUp通知は\n            // approveQuestMutationのonSuccess側で行うため、ここではearnedMedalsのみ返す。")
+
+* **バグ修正の記録（Issue #238）**: 兄妹連携クエスト(`target: 'siblings'`)の承認では、タップされた側だけでなく相方（カスケードされた側）のgold/exp/level/medalもサーバー側で同時に付与されるが、以前は`_approve_linked_history`が`-> None`で戻り値を返さなかったためAPIレスポンスに一切含まれず、相方のレベルアップ/メダル獲得演出を出す手段が無かった。バックエンド側で`CompleteResponse`に`partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`を追加し、`approveQuestMutation`の`onSuccess`と`approveQuest`ラッパーの双方でこれらを消費するよう修正した。連携クエストでない通常の承認・完了報告では、これらのフィールドは常に既定値（`undefined`/`false`/`0`相当）のままとなる。
+* 根拠: パートナー通知の追加 (行番号: 199〜207)、`approveQuest`ラッパーの戻り値拡張 (行番号: 288〜301)
 
 ### `rejectQuest` (ラッパー) & `rejectQuestMutation`
 

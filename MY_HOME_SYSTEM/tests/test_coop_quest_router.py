@@ -14,6 +14,7 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import common
+import game_logic
 
 
 def _seed_family(cur):
@@ -133,6 +134,85 @@ class TestCoopQuestApproval:
             "/api/quest/approve", json={"approver_id": "daughter", "history_id": histories["son"]["id"]}
         )
         assert res.status_code == 403
+
+
+class TestCoopQuestApprovalPartnerRewardInfo:
+    """Issue #238の回帰テスト: カスケード承認されるパートナー(自分でタップしなかった
+    方の子ども)側のgold/exp/level/medalはDB上正しく付与されるものの、以前は
+    承認APIのレスポンスに一切含まれず、フロント側がパートナーのレベルアップ/
+    メダル獲得演出を出す手段が無かった。レスポンスにpartnerUserId/partnerLeveledUp/
+    partnerNewLevel/partnerEarnedMedalsが含まれることを検証する。"""
+
+    def test_response_includes_partner_level_up_info(self, seeded_client, monkeypatch):
+        # daughterのexpを事前に積んでおき、今回の20exp加算で確実にレベルアップさせる
+        # (calculate_next_level_exp(1) == 100 のため、95+20=115 >= 100 でレベルアップ確定)
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("UPDATE quest_users SET exp = 95 WHERE user_id = 'daughter'")
+        # メダルドロップ(5%)を無効化して結果を決定的にする
+        monkeypatch.setattr(game_logic.random, "random", lambda: 0.99)
+
+        histories = _complete_coop_quest(seeded_client, reporter="son")
+        son_history_id = histories["son"]["id"]
+
+        res = seeded_client.post(
+            "/api/quest/approve", json={"approver_id": "dad", "history_id": son_history_id}
+        )
+        assert res.status_code == 200
+        body = res.json()
+
+        assert body["partnerUserId"] == "daughter"
+        assert body["partnerLeveledUp"] is True
+        assert body["partnerNewLevel"] == 2
+        assert body["partnerEarnedMedals"] == 0
+
+        with common.get_db_cursor() as cur:
+            daughter = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
+        assert daughter["level"] == 2
+
+    def test_response_includes_partner_earned_medals(self, seeded_client, monkeypatch):
+        # メダルドロップ(5%)を強制的に発生させる
+        monkeypatch.setattr(game_logic.random, "random", lambda: 0.0)
+
+        histories = _complete_coop_quest(seeded_client, reporter="son")
+        son_history_id = histories["son"]["id"]
+
+        res = seeded_client.post(
+            "/api/quest/approve", json={"approver_id": "dad", "history_id": son_history_id}
+        )
+        assert res.status_code == 200
+        body = res.json()
+
+        assert body["partnerUserId"] == "daughter"
+        assert body["partnerEarnedMedals"] == 1
+
+    def test_response_has_no_partner_fields_for_non_coop_quest(self, isolated_db, api_client):
+        """連携クエストでない(linked_history_idがNULLの)通常の承認では、
+        partner系フィールドは既定値のままであること。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult'), "
+                "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) VALUES "
+                "(601, 'おてつだい', 'daily', 'son', 20, 10)"
+            )
+            cur.execute(
+                "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
+                "VALUES ('son', 601, 'おてつだい', 20, 10, datetime('now'), 'pending')"
+            )
+            history_id = cur.lastrowid
+
+        approve_res = api_client.post(
+            "/api/quest/approve", json={"approver_id": "dad", "history_id": history_id}
+        )
+        assert approve_res.status_code == 200
+        body = approve_res.json()
+        assert body["partnerUserId"] is None
+        assert body["partnerLeveledUp"] is False
+        assert body["partnerNewLevel"] is None
+        assert body["partnerEarnedMedals"] == 0
 
 
 class TestCoopQuestRejection:
