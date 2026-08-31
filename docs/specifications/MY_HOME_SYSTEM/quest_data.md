@@ -192,8 +192,16 @@
 flowchart TD
     Start(["Start: import quest_data"]) --> Doc1["1つ目のdocstring文字列を評価（__doc__に設定）"]
     Doc1 --> Doc2["2つ目のdocstring文字列を評価（未使用の式文として破棄）"]
-    Doc2 --> BuildUsers["USERS リストを構築 (4件)"]
-    BuildUsers --> BuildQuests["QUESTS リストを構築 (有効53件 / コメントアウト9件)"]
+    Doc2 --> InitLogger["logger = logging.getLogger(__name__)"]
+    InitLogger --> BuildUsers["USERS リストを構築 (4件、infoはプレースホルダー)"]
+    BuildUsers --> CheckLocal{"quest_users.local.json は存在するか?"}
+    CheckLocal -- No --> BuildQuests["QUESTS リストを構築 (有効53件 / コメントアウト9件)"]
+    CheckLocal -- Yes --> LoadLocal["外部: quest_users.local.json を読み込みJSONパース"]
+    LoadLocal --> MergeCheck{"読み込み・パースは成功したか?"}
+    MergeCheck -- Yes --> MergeUsers["user_id が一致しdict型のoverrideを USERS に dict.update でマージ"]
+    MergeCheck -- No（例外発生） --> LogWarn["logger.warning() でログ出力（プレースホルダーのまま続行）"]
+    MergeUsers --> BuildQuests
+    LogWarn --> BuildQuests
     BuildQuests --> BuildRewards["REWARDS リストを構築 (23件)"]
     BuildRewards --> End(["End: モジュール属性として公開"])
 ```
@@ -203,10 +211,28 @@ flowchart TD
 ```mermaid
 graph TD
     subgraph "quest_data.py"
+        logger["logger"]
         USERS["USERS (list)"]
+        LocalLoad["quest_users.local.json 読み込み処理<br/>(モジュールレベルコード)"]
         QUESTS["QUESTS (list)"]
         REWARDS["REWARDS (list)"]
     end
+
+    subgraph "標準ライブラリ"
+        json
+        logging
+        os
+    end
+
+    LocalJson["quest_users.local.json<br/>（gitignore対象、任意）"]
+
+    logging --> logger
+    USERS --> LocalLoad
+    LocalLoad --> os
+    LocalLoad --> json
+    LocalLoad --> LocalJson
+    LocalLoad -. 失敗時 .-> logger
+    LocalLoad -.-> USERS
 
     Consumer["外部: 本データをインポートする未特定のモジュール群<br/>（本ファイルからは特定不可）"]
 
@@ -219,10 +245,10 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `game_logic.py` | 同ディレクトリ内に存在するファイルであり、`QUESTS` の `type`（daily/special/infinite）や `USERS` の `level`/`exp`/`gold` 等、ゲーム進行ロジックが必要とするキーが本ファイルに定義されているため、これらを消費する実装が存在すると推測される。 | `'level': 1, 'exp': 0, 'gold': 0` (行番号: 27 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',") |
-| 高 | `services/quest_service.py` | 同ディレクトリの `services/` 配下に存在するファイルであり、命名から `QUESTS`/`REWARDS` データを用いたクエスト管理サービスである可能性が高い。`target: 'siblings'` を消費する兄妹連携ロジックの実体を確認する必要がある。 | `QUESTS = [` (行番号: 53 / 抜粋: "QUESTS = ["), `'target': 'siblings'` (行番号: 110) |
-| 中 | `views/dashboard/quest_tab.py` | `dashboard.py` の解析より、クエストタブの描画を担当するモジュールであることが判明しており、本データがどう画面表示に使われるかを確認するため。 | `QUESTS = [` (行番号: 53 / 抜粋: "QUESTS = [")（`quest_data.py` 自体からの直接参照ではなく、周辺ファイル調査から得た推測） |
-| 低 | `current_schema.sql` | `USERS` の `user_id`, `level`, `exp`, `gold` 等がDBの `quest_users` テーブル等と対応している可能性があり、データモデルの一致を確認するため。 | `'user_id': 'dad'` (行番号: 26 / 抜粋: "'user_id': 'dad', 'name': 'まさひろ',") |
+| 高 | `game_logic.py` | 同ディレクトリ内に存在するファイルであり、`QUESTS` の `type`（daily/special/infinite）や `USERS` の `level`/`exp`/`gold` 等、ゲーム進行ロジックが必要とするキーが本ファイルに定義されているため、これらを消費する実装が存在すると推測される。 | `'level': 1, 'exp': 0, 'gold': 0` (行番号: 37 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',") |
+| 高 | `services/quest_service.py` | 同ディレクトリの `services/` 配下に存在するファイルであり、命名から `QUESTS`/`REWARDS` データを用いたクエスト管理サービスである可能性が高い。`target: 'siblings'` を消費する兄妹連携ロジックの実体を確認する必要がある。 | `QUESTS = [` (行番号: 81 / 抜粋: "QUESTS = ["), `'target': 'siblings'` (行番号: 138) |
+| 中 | `views/dashboard/quest_tab.py` | `dashboard.py` の解析より、クエストタブの描画を担当するモジュールであることが判明しており、本データがどう画面表示に使われるかを確認するため。 | `QUESTS = [` (行番号: 81 / 抜粋: "QUESTS = [")（`quest_data.py` 自体からの直接参照ではなく、周辺ファイル調査から得た推測） |
+| 低 | `current_schema.sql` | `USERS` の `user_id`, `level`, `exp`, `gold` 等がDBの `quest_users` テーブル等と対応している可能性があり、データモデルの一致を確認するため。 | `'user_id': 'dad'` (行番号: 36 / 抜粋: "'user_id': 'dad', 'name': 'まさひろ',") |
 
 ## 8. 保守上の注意点
 
