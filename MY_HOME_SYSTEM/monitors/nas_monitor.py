@@ -222,8 +222,15 @@ class NasMonitor:
             logger.error(f"Disk usage check error: {e}")
             return None
 
-    def cleanup_old_files(self, directory: str, retention_days: int, extensions: Tuple[str, ...]) -> Dict[str, Any]:
-        """指定ディレクトリ配下を再帰的に走査し、保持日数を超えた対象拡張子のファイルを削除する。"""
+    def cleanup_old_files(
+        self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]
+    ) -> Dict[str, Any]:
+        """指定ディレクトリ配下を再帰的に走査し、保持日数を超えたファイルを削除する。
+
+        extensions が None の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを対象とする
+        (ディレクトリ自体がバックアップ専用など、単一種類の成果物しか置かれないことが
+        保証されている場合に使う。Issue #191)。
+        """
         result: Dict[str, Any] = {"deleted_count": 0, "freed_gb": 0.0}
 
         if not directory or not os.path.isdir(directory):
@@ -234,7 +241,7 @@ class NasMonitor:
 
         for root, _dirs, files in os.walk(directory):
             for name in files:
-                if not name.lower().endswith(extensions):
+                if extensions is not None and not name.lower().endswith(extensions):
                     continue
                 path = os.path.join(root, name)
                 try:
@@ -264,8 +271,16 @@ class NasMonitor:
             # (Issue #171)。生成先と同じローカルパスに修正する。
             ("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4", ".jpg")),
+            # DB_BACKUPS_DIR は services/backup_service.py の Phase 2 (DBダンプ)と
+            # _backup_config_files (config.BACKUP_FILES 中のDB以外のファイル、例:
+            # config.py/.env/devices.json) の両方の出力専用ディレクトリであり、
+            # 拡張子は .db に限らない (.env はコピー時に拡張子なしのファイル名になる)。
+            # 以前は .db のみを削除対象としていたため、設定ファイルのバックアップ
+            # コピーは一切削除されず無限に蓄積していた(Issue #191)。このディレクトリは
+            # バックアップ専用でバックアップ以外のファイルが置かれることはないため、
+            # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
-             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
+             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None),
         ]
 
         summary_lines = []
