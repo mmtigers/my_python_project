@@ -165,6 +165,29 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
         res = api_client.get("/health", headers={"X-Forwarded-For": "203.0.113.5"})
         assert res.status_code == 200
 
+    def test_external_access_is_actually_logged(self, api_client, monkeypatch):
+        """Issue #182の回帰テスト: core/logger.pyのsetup_logging()はロガーレベルを
+        INFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、
+        以前はlogger.debug()での「外部アクセスの記録」が常に抑制され、CLAUDE.mdが
+        明記する「非プライベートネットワークからのリクエストをログに記録する」という
+        意図した挙動が事実上機能していなかった。実際にロガーへ記録されることを確認する
+        (INFOレベルで確実に出力されるINFOメソッド経由での呼び出しを検証)。"""
+        info_calls = []
+        monkeypatch.setattr(unified_server.logger, "info", lambda msg: info_calls.append(msg))
+        debug_calls = []
+        monkeypatch.setattr(unified_server.logger, "debug", lambda msg: debug_calls.append(msg))
+
+        # 203.0.113.0/24(TEST-NET-3)はPythonのipaddressモジュール上ではis_private=True
+        # 判定される(ドキュメント用として非公開ネットワーク扱い)ため、8.8.8.8のような
+        # 確実に非プライベートと判定されるIPを使う。
+        res = api_client.get("/health", headers={"X-Forwarded-For": "8.8.8.8"})
+
+        assert res.status_code == 200
+        assert any("Allowed external access via Cloudflare" in m for m in info_calls), (
+            "外部アクセスがlogger.info経由で記録されていない"
+        )
+        assert debug_calls == [], "外部アクセスの記録がlogger.debugのまま(常に抑制される)になっている"
+
 
 class _FakeProcess:
     def __init__(self):
