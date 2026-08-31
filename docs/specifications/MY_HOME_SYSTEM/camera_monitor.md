@@ -242,69 +242,69 @@
 ### `process_camera_event`
 
 * **役割**: ONVIFイベントメッセージをパースし、動体検知イベントであるかを判定。クールダウン判定後、DB保存とスナップショット保存を実行する。
-* 根拠: `process_camera_event` (行番号: 294〜364 / 抜粋: "def process_camera_event(")
+* 根拠: `process_camera_event` (行番号: 303〜373 / 抜粋: "def process_camera_event(")
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
-* 根拠: `process_camera_event` (行番号: 294 / 抜粋: "(msg: Any, cam_conf: Dict")
+* 根拠: `process_camera_event` (行番号: 303 / 抜粋: "(msg: Any, cam_conf: Dict")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `process_camera_event` (行番号: 294 / 抜粋: "-> None:")
+* 根拠: `process_camera_event` (行番号: 303 / 抜粋: "-> None:")
 
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
-* 根拠: `save_log_generic` (行番号: 356 / 抜粋: "save_log_generic("device_record")
+* 根拠: `save_log_generic` (行番号: 365 / 抜粋: "save_log_generic("device_record")
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。
-* 根拠: `except Exception as e` (行番号: 359 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 368 / 抜粋: "except Exception as e:")
 
 
 
 ### `monitor_single_camera`
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
-* 根拠: `monitor_single_camera` (行番号: 367〜605 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 376〜616 / 抜粋: "def monitor_single_camera(")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]` (対象カメラ設定)
-* 根拠: `monitor_single_camera` (行番号: 367 / 抜粋: "(cam_conf: Dict[str, Any]) -> ")
+* 根拠: `monitor_single_camera` (行番号: 376 / 抜粋: "(cam_conf: Dict[str, Any]) -> ")
 
 
 * **戻り値/レスポンス**: `None` (無限ループ)
-* 根拠: `monitor_single_camera` (行番号: 367 / 抜粋: "-> None:")
+* 根拠: `monitor_single_camera` (行番号: 376 / 抜粋: "-> None:")
 
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
-* 根拠: `send_push` (行番号: 553 / 抜粋: "send_push(")
+* 根拠: `send_push` (行番号: 564 / 抜粋: "send_push(")
 
 
 * **エラーハンドリング**: 一時的障害（`RemoteDisconnected`等）と、致命的障害（その他例外）を分けて処理。連続エラー回数に基づくExponential Backoff（最大3600秒）、特定条件（5回・12の倍数回失敗時）での管理者への通知を行う。
-* 根拠: `except (RemoteDisconnected...` (行番号: 509 / 抜粋: "except (RemoteDisconnected, Pro")
+* 根拠: `except (RemoteDisconnected...` (行番号: 520 / 抜粋: "except (RemoteDisconnected, Pro")
 
 
 
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 607〜611 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 618〜622 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 607 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 618 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `main` (行番号: 607 / 抜粋: "-> None:")
+* 根拠: `main` (行番号: 618 / 抜粋: "-> None:")
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 610 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 621 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 608 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 619 / 抜粋: "if not WSDL_DIR: return logger")
 
 
 
