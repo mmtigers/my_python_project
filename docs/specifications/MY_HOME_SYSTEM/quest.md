@@ -293,12 +293,12 @@
 
 ### `CompleteResponse`
 
-* **役割**: Response Modelsとして完了時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 78 / 抜粋: "class CompleteResponse(BaseModel):")
+* **役割**: Response Modelsとして完了時のレスポンスを定義する。`/api/quest/complete`と`/api/quest/approve`の両エンドポイントで共有される。
+* 根拠: クラス名と継承元 (行番号: 81 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
-* **引数/リクエスト (フィールド)**: `status` (str), `leveledUp` (bool), `newLevel` (int), `earnedGold` (int), `earnedExp` (int), `earnedMedals` (int, 初期値: 0), `message` (Optional[str], 初期値: None)
-* 根拠: フィールド定義 (行番号: 79〜85 / 抜粋: "message: Optional[str] = None" など)
+* **引数/リクエスト (フィールド)**: `status` (str), `leveledUp` (bool), `newLevel` (int), `earnedGold` (int), `earnedExp` (int), `earnedMedals` (int, 初期値: 0), `message` (Optional[str], 初期値: None)、**(Issue #238で追加)** `partnerUserId` (Optional[str], 初期値: None), `partnerLeveledUp` (bool, 初期値: False), `partnerNewLevel` (Optional[int], 初期値: None), `partnerEarnedMedals` (int, 初期値: 0)。追加された4フィールドは、兄妹連携クエストのカスケード承認(`quest_service.QuestService._process_approve_quest_locked`)時のみ相方(自分でタップしなかった方の子ども)の情報で埋まり、それ以外(通常の完了報告・単独クエストの承認)では常に既定値のままとなる。
+* 根拠: フィールド定義 (行番号: 82〜95 / 抜粋: "message: Optional[str] = None" など)
 
 
 * **戻り値/レスポンス**: 該当なし

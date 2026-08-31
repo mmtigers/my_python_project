@@ -196,6 +196,19 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
                     job: completer?.job_class || '無職',
                 });
             }
+            // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認では、相方
+            // (自分でタップしなかった方の子ども)側もgold/exp/level/medalが同時に
+            // 付与されるが、以前はAPIレスポンスにその情報が一切含まれておらず、
+            // 相方のレベルアップ演出を出す手段が無かった。partnerUserIdで相方を
+            // 特定し、本人と同様にonLevelUpを呼ぶ。
+            if (res.partnerLeveledUp && res.partnerNewLevel != null && onLevelUp) {
+                const partner = gameData?.users.find(u => u.user_id === res.partnerUserId);
+                onLevelUp({
+                    user: partner?.name || res.partnerUserId || '',
+                    level: res.partnerNewLevel,
+                    job: partner?.job_class || '無職',
+                });
+            }
         },
         onError: (err) => handleError('承認', err),
     });
@@ -275,8 +288,16 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
             // ★バグ修正(M-6-1): 以前はレスポンスを破棄しており、承認画面側で
             // メダル獲得演出(earnedMedals)を出す手段が無かった。leveledUp通知は
             // approveQuestMutationのonSuccess側で行うため、ここではearnedMedalsのみ返す。
+            // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認時は相方の
+            // earnedMedalsもpartnerEarnedMedalsとして返し、呼び出し元でトースト表示の
+            // 合算に使えるようにする。
             const res = await approveQuestMutation.mutateAsync({ user, history: historyItem });
-            return { success: true, earnedMedals: res.earnedMedals, leveledUp: res.leveledUp };
+            return {
+                success: true,
+                earnedMedals: res.earnedMedals,
+                leveledUp: res.leveledUp,
+                partnerEarnedMedals: res.partnerEarnedMedals ?? 0,
+            };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
         }

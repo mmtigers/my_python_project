@@ -111,4 +111,10 @@ export interface QuestResult {
     earnedExp: number;
     earnedMedals: number;
     message?: string;
+    // 兄妹連携クエストのカスケード承認時のみ、相方(自分でタップしなかった方の
+    // 子ども)のレベルアップ/メダル獲得情報が入る。連携クエストでない場合は無し。
+    partnerUserId?: string;
+    partnerLeveledUp?: boolean;
+    partnerNewLevel?: number;
+    partnerEarnedMedals?: number;
 }
