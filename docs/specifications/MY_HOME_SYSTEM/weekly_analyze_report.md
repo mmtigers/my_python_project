@@ -139,26 +139,27 @@
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 181〜261 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 192〜287 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `run_report` 引数部 (行番号: 181 / 抜粋: "()")
+* 根拠: `run_report` 引数部 (行番号: 192 / 抜粋: "()")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_report` 戻り値ヒント (行番号: 181 / 抜粋: "-> None:")
+* 根拠: `run_report` 戻り値ヒント (行番号: 192 / 抜粋: "-> None:")
 
 
 * **副作用**:
 * `sys.argv` の読み取り。
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `common.send_push` を呼び出し外部システムへ通知を送信。
-* 根拠: 各種処理部 (行番号: 186, 197, 258 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push(config.LINE_U")
+* 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。
+* 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push(config.LINE_U")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
 
 
-* **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。
-* 根拠: エラーチェック部 (行番号: 206, 213 / 抜粋: "if not start_week or not start", "if not stats_week:")
+* **エラーハンドリング**: 日付計算失敗時（`start_week` 等が `None`）、および週間データ取得失敗時（`stats_week` が `None`）はエラーログを出力し、処理を中断（`return`）する。`--force`が指定されていない場合、`LAST_RUN_FILE`に本日日付が既に記録されていれば、月曜8時台であっても処理を中断する(Issue #234で追加。外部cronの多重起動による重複送信を防止)。
+* 根拠: エラーチェック部 (行番号: 226, 233 / 抜粋: "if not start_week or not start", "if not stats_week:")、実行済みフラグチェック (行番号: 209〜215 / 抜粋: "if not is_force and os.path.ex...")
 
 
 
@@ -167,10 +168,12 @@
 ```mermaid
 flowchart TD
     Start([Start: run_report]) --> CheckArg{"sys.argvに <br> '--force' があるか?"}
-    CheckArg -- Yes --> LogStart[ログ: レポートプロセス開始]
+    CheckArg -- Yes --> CheckFlag
     CheckArg -- No --> CheckTime{"月曜の8時台か?"}
     CheckTime -- No --> LogSkip[ログ: Skip] --> End([End])
-    CheckTime -- Yes --> LogStart
+    CheckTime -- Yes --> CheckFlag{"LAST_RUN_FILEに本日日付が<br>記録済みか?(#234で追加)"}
+    CheckFlag -- "Yes(--force時は常にNo扱い)" --> LogAlreadySent[ログ: 送信済みのためSkip] --> End
+    CheckFlag -- No --> LogStart[ログ: レポートプロセス開始]
     LogStart --> CalcDates["start_week, start_month の算出 <br> (get_start_date)"]
     CalcDates --> CheckDatesValid{"日付計算に成功したか?"}
     CheckDatesValid -- No --> LogErrorDates[ログ: 日付計算失敗] --> End
@@ -185,7 +188,10 @@ flowchart TD
     CheckMonthEnd -- No --> FinalizeMsg
     FinalizeMsg --> SendPush["外部: common.send_push()"]
     SendPush --> CheckSendResult{"送信成功か?"}
-    CheckSendResult -- Yes --> LogSendSuccess[ログ: 送信完了] --> End
+    CheckSendResult -- Yes --> LogSendSuccess[ログ: 送信完了]
+    LogSendSuccess --> WriteFlag{"--forceでないか?(#234で追加)"}
+    WriteFlag -- Yes --> SaveFlag["LAST_RUN_FILEへ本日日付を記録"] --> End
+    WriteFlag -- No --> End
     CheckSendResult -- No --> LogSendFail[ログ: 送信失敗] --> End
 
 ```
@@ -232,6 +238,7 @@ graph TD
 * `get_analysis_data` の例外処理では `except Exception as e:` と広範な例外をキャッチしており、`None` を返す仕様になっている。一時的なDBエラーと致命的な構文エラーの区別がつかない。
 * `table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")` において、`config.py` に変数が存在しない場合のフォールバック値 `"power_usage"` がハードコードされている。
 * `run_report` におけるプッシュ通知処理 `common.send_push` の引数で、`config.LINE_USER_ID` を使用しつつ `target="discord"` と指定されており、通知先の実態がコード上からは自明ではない。
+* Issue #234修正前は月曜8時台判定(`is_monday and is_morning`)のみに依存しており、実行済みを記録する永続フラグが存在しなかったため、外部cron(リポジトリ管理外)が同一時間枠内で本スクリプトを複数回起動すると重複送信され得た。`monitors/tv_lock_monitor.py`の`LAST_RUN_FILE`方式(日付文字列をテキストファイルへ記録)を踏襲し、`config.FALLBACK_ROOT`配下にフラグファイルを追加した。フラグは送信成功時のみ書き込まれる(送信失敗時に書き込むと再試行が永久にブロックされるため)。`--force`実行時はこのフラグチェック自体をバイパスし、かつフラグへの書き込みも行わない(手動テスト実行が本番の定時実行を妨げないようにするための挙動で、`monitors/timelapse_runner.py`の`--force`時の扱いと同様)。
 
 ## 9. 不明事項一覧
 
