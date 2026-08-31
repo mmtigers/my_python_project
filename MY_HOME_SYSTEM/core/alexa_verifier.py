@@ -79,8 +79,17 @@ def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     if cached and cached[1] > now:
         return cached[0]
 
-    resp = requests.get(cert_chain_url, timeout=5)
-    resp.raise_for_status()
+    # #179: requests.get/raise_for_status が送出する例外(Timeout/ConnectionError/
+    # HTTPError等の requests.exceptions.RequestException)はAlexaVerificationErrorでは
+    # ないため、router側の`except AlexaVerificationError`を素通りしFastAPIのグローバル
+    # 例外ハンドラに届いて500になっていた(証明書キャッシュミス時にAmazon S3側が一時的に
+    # 遅延・障害の場合に発生しうる)。ここで捕捉しAlexaVerificationErrorに変換することで
+    # routerが本来意図している400を返せるようにする。
+    try:
+        resp = requests.get(cert_chain_url, timeout=5)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as exc:
+        raise AlexaVerificationError(f"Failed to fetch certificate chain: {exc}") from exc
 
     certs = x509.load_pem_x509_certificates(resp.content)
     if not certs:
