@@ -297,6 +297,29 @@ class NasMonitor:
             )
         )
 
+        # ダッシュボードのNASステータスカード(views/dashboard/summary.py)・
+        # NAS状態パネル(views/dashboard/log_tab.py)は device_records ではなく
+        # config.SQLITE_TABLE_NAS(=nas_records)を読むが、以前はこのテーブルへ
+        # INSERTする本番コードが存在せず、常に「データなし」表示のままだった
+        # (Issue #168)。nas_records のスキーマ(status_ping/status_mount は
+        # 'OK'/'NG' の文字列)に合わせて書き込む。
+        save_log_generic(
+            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),
+            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",
+             "total_gb", "used_gb", "free_gb", "percent"],
+            (
+                get_now_iso(),
+                self.device_name,
+                self.ip,
+                "OK" if ping_ok else "NG",
+                "OK" if mount_ok else "NG",
+                usage['total_gb'] if usage else None,
+                usage['used_gb'] if usage else None,
+                usage['free_gb'] if usage else None,
+                percent
+            )
+        )
+
     def run(self) -> None:
         """NASの状態監視、復旧検知、およびディスク使用量の確認を実行する。"""
         

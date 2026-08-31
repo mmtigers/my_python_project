@@ -14,6 +14,7 @@
 * [database.md](./database.md) - `save_log_generic`の実体
 * [notification_service.md](./notification_service.md) - `send_push`の実体
 * [utils.md](./utils.md) - `get_now_iso`の実体
+* [analysis_service.md](./analysis_service.md) - `save_to_db`が書き込む`nas_records`テーブルを`load_nas_status`で読み、ダッシュボードのNASステータスカード・NAS状態パネルへ供給する読み手側(Issue #168)
 
 ## 2. ファイルの概要
 
@@ -316,24 +317,25 @@
 
 ### 関数 `save_to_db`
 
-* **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。
-* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 200〜214 / 抜粋: "def save_to_db(self, ping_...")
+* **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。`config.SQLITE_TABLE_SENSOR`(=`device_records`)への書き込みに加えて、`config.SQLITE_TABLE_NAS`(=`nas_records`)へも書き込む(Issue #168)。以前は`device_records`にしか書き込んでおらず、ダッシュボードのNASステータスカード(`views/dashboard/summary.py`の`get_nas_status_simple`)・NAS状態パネル(`views/dashboard/log_tab.py`)が読む`analysis_service.load_nas_status`は`nas_records`テーブルを対象にしているため、これらの表示が常に「データなし」のままだった。`nas_records`側のスキーマ(`status_ping`/`status_mount`列は文字列`'OK'`/`'NG'`)に合わせ、bool引数`ping_ok`/`mount_ok`をそれぞれ`"OK"`/`"NG"`の文字列へ変換して書き込む。`usage`が`None`(NAS到達不能時)の場合、`total_gb`/`used_gb`/`free_gb`列には`None`を書き込む(`percent`列は`device_records`向けと同じく`usage`が`None`のとき`0`を使う既存のロジックをそのまま流用する)。
+* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 284〜321 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: `save_log_generic(\n            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),\n            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",\n             "total_gb", "used_gb", "free_gb", "percent"],\n            (\n                get_now_iso(),\n                self.device_name,\n                self.ip,\n                "OK" if ping_ok else "NG",\n                "OK" if mount_ok else "NG",\n                usage['total_gb'] if usage else None,\n                usage['used_gb'] if usage else None,\n                usage['free_gb'] if usage else None,\n                percent\n            )\n        )` (行番号: 306〜321)
 
 
 * **引数/リクエスト**: `ping_ok: bool`, `mount_ok: bool`, `usage: Optional[Dict[str, float]]`
-* 根拠: 定義部 (行番号: 200 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 定義部 (行番号: 284 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 200 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 284 / 抜粋: "-> None:")
 
 
-* **副作用**: 外部ファイル(`core.database`)の関数呼び出しによるデータベース書き込み。
-* 根拠: `save_log_generic(...)` (行番号: 203〜214 / 抜粋: "save_log_generic(")
+* **副作用**: 外部ファイル(`core.database`)の関数呼び出しによるデータベース書き込み(`device_records`・`nas_records`の2テーブルへ、それぞれ独立した`save_log_generic`呼び出しで書き込む)。
+* 根拠: `save_log_generic(...)` (行番号: 287〜298, 306〜321)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 200〜214 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 関数内の処理全体 (行番号: 284〜321 / 抜粋: "def save_to_db(self, ping_...")
 
 
 
@@ -470,6 +472,7 @@ flowchart TD
 * `run`関数内において、`save_to_db`は正常・異常を問わず毎回呼び出されるが、`is_currently_healthy`が`False`の場合はそこで早期リターンし、以降のリテンションクリーンアップおよびレポート通知ロジックには到達しない。
 * `__init__`の`self.fallback_dir`は以前存在しない属性名`FALLBACK_DIR`を参照しており常に`getattr`のデフォルト値へフォールバックしていたが、`config.FALLBACK_ROOT`(実属性名)を参照するよう修正された(28行目)。ただし`config.FALLBACK_ROOT`の実際の値(`BASE_DIR/temp_fallback`)と`getattr`のフォールバック文字列(`"/tmp/temp_fallback"`)は異なるパスである点に注意。
 * `save_to_db`が`device_records`テーブルへ書き込むNAS使用率は、以前は電池残量用に後付けされた`battery_level`列へ誤って流用されていたが、マイグレーション`migrations/0006_add_device_records_nas_usage_percent.sql`で新設された専用列`nas_usage_percent`へ書き込み先が切り替えられた(205行目)。過去に`battery_level`へ書き込まれた行はマイグレーション対象外でそのまま残る。
+* `save_to_db`は以前`device_records`テーブルにしか書き込んでおらず、`nas_records`テーブル(`config.SQLITE_TABLE_NAS`)を読むダッシュボードのNASステータスカード・NAS状態パネルは常に「データなし」だった(Issue #168、`analysis_service.load_nas_status`参照)。修正後は`nas_records`へも独立した`save_log_generic`呼び出しで書き込む。`device_records`側の書き込みは、この修正時点で他にこの行を読む本番コードが見当たらなかったため、削除はせずそのまま残してある(両テーブルへ同じ監視結果を重複して記録する構成になった)。
 * `check_write_permission`のリトライは`subprocess.TimeoutExpired`（108〜129行目）でのみ発動し、`subprocess.CalledProcessError`や`OSError`（130〜132行目、例: マウント未確立直後のENOENTでサブプロセス側の`open()`が失敗し非ゼロ終了コードになるケース）はリトライされず即座に`False`を返す。`config.py`の`verify_and_initialize_storage`が`(OSError, PermissionError, IOError)`を包括的にリトライ対象としているのとは非対称であり、両者のNAS I/Oリトライポリシーは別々に実装されたまま一元化されていない（`docs/reports/MY_HOME_SYSTEM/NAS_TIMEOUT_INVESTIGATION_2026-08-24.md`参照）。
 
 ## 9. 不明事項一覧
