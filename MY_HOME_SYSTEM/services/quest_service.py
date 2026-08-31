@@ -1,5 +1,6 @@
 import datetime
 import importlib
+import os
 import random
 import math
 import threading
@@ -34,6 +35,12 @@ except ImportError:
     except ImportError:
         logger.warning("quest_data module not found via relative import.")
         quest_data = None
+
+
+# _process_complete_quest_locked のスパムチェック間隔(秒)。infiniteクエストのみ
+# フロントエンド(family-quest QuestList.tsx)のクールダウン表示(60秒)と揃える(B2)。
+SPAM_CHECK_INTERVAL_SECONDS = 10
+INFINITE_QUEST_COOLDOWN_SECONDS = 60
 
 
 def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
@@ -196,12 +203,38 @@ class UserService:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
-            
-            cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?", 
+
+            old_avatar = user['avatar']
+
+            cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?",
                        (avatar_url, common.get_now_iso(), user_id))
-            
+
             logger.info(f"Avatar Updated: User={user_id}, URL={avatar_url}")
-            return {"status": "updated", "avatar": avatar_url}
+
+        self._delete_orphaned_avatar(old_avatar, avatar_url)
+        return {"status": "updated", "avatar": avatar_url}
+
+    def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:
+        """アップロード済みの旧アバターファイルが差し替え後にディスクへ残り続けるのを防ぐ。
+        絵文字などアップロードファイル以外の値や、他ユーザーと共有され得ない
+        /uploads/ 配下のファイルのみを対象とし、パストラバーサルを避けるため
+        ファイル名部分のみをUPLOAD_DIR基準で解決する。"""
+        if not old_avatar or old_avatar == new_avatar:
+            return
+        if not old_avatar.startswith("/uploads/"):
+            return
+
+        filename = os.path.basename(old_avatar)
+        file_path = os.path.join(config.UPLOAD_DIR, filename)
+        if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):
+            return
+
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Orphaned avatar removed: {file_path}")
+        except OSError as e:
+            logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")
 
 
 class QuestService:
@@ -365,7 +398,12 @@ class QuestService:
 
             if last_hist and last_hist['completed_at']:
                 elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])
-                if elapsed is not None and elapsed < 10:
+                # B2: infiniteクエストはフロントエンド(QuestList.tsx)が60秒のクールダウンを
+                # UIとして提示しているが、サーバー側は全クエスト共通の10秒間隔しか強制していなかった
+                # ため、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていた。
+                # infiniteのみフロントの意図(60秒)に合わせてサーバー側の下限も引き上げる。
+                min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS
+                if elapsed is not None and elapsed < min_interval_seconds:
                     raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
 
             # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。

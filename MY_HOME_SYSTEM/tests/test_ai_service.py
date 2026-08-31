@@ -101,6 +101,47 @@ def test_extract_referenced_tables_subquery_is_detected():
     assert "quest_users" in tables
 
 
+def test_strip_sql_comments_removes_block_and_line_comments():
+    sql = "SELECT * FROM/**/quest_users--trailing comment\nWHERE 1=1"
+    stripped = ai_service._strip_sql_comments(sql)
+    assert "/*" not in stripped
+    assert "--" not in stripped
+    assert "quest_users" in stripped
+
+
+def test_extract_referenced_tables_bypass_via_block_comment_is_closed():
+    """
+    B3: `FROM/**/tablename` のようにFROM直後を空白なしのブロックコメントで埋めると、
+    旧実装は `FROM\\s+テーブル名` を要求する正規表現がマッチせずテーブル名を検出
+    できなかった(=許可テーブル判定を素通りするバイパス)。tool_search_dbは実行前に
+    _strip_sql_comments でコメントを除去するため、そちらを通した文字列であれば
+    検出できることを確認する。
+    """
+    sql = "SELECT secret FROM child_health_records WHERE 1=0 UNION SELECT pwd FROM/**/secret_admin_table--"
+    stripped = ai_service._strip_sql_comments(sql)
+    tables = ai_service._extract_referenced_tables(stripped)
+    assert "child_health_records" in tables
+    assert "secret_admin_table" in tables
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_disallowed_table_hidden_behind_block_comment():
+    """B3の回帰防止: FROM直後のブロックコメントで隠された許可外テーブルを素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    sql = f"SELECT * FROM {table} WHERE 1=0 UNION SELECT * FROM/**/quest_users--"
+    result = await ai_service.tool_search_db({"sql_query": sql})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_allows_documented_table_with_harmless_comment(monkeypatch):
+    """コメント除去は誤検知(許可テーブルのみの正常クエリの拒否)を起こさないこと"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table} /* comment */ WHERE 1=1"})
+    assert result == "OK"
+
+
 def test_extract_referenced_tables_comma_join_with_alias_catches_second_table():
     """Issue #224: 1つ目のテーブルにエイリアスが付いたカンマ結合(暗黙CROSS JOIN)
     でも2つ目のテーブルを抽出できること。エイリアスが無い場合(H-6)は直後がカンマ
