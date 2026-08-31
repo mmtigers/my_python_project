@@ -658,7 +658,12 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
         events = EventBuilder().build(records, work)
         
         if not events:
-            send_push(user_id, [{"type": "text", "text": f"ℹ️ {sum_info.target_date} の動きなし"}], "discord", "report")
+            send_push(
+                user_id,
+                [{"type": "text", "text": f"ℹ️ {sum_info.target_date} の動きなし"}],
+                target="discord",
+                channel="report"
+            )
             return
 
         sum_info.output_path = os.path.join(out, os.path.basename(input_video).replace(".mp4", "_summary.mp4"))
@@ -680,7 +685,12 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
             
     except Exception as e:
         logger.error(f"エラー: {traceback.format_exc()}")
-        send_push(user_id, [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}], "discord", "error")
+        send_push(
+            user_id,
+            [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}],
+            target="discord",
+            channel="error"
+        )
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]): sys.exit(1)
