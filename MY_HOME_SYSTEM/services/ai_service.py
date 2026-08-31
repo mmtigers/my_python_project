@@ -209,13 +209,22 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
 
     try:
         # 読み取り専用で実行
-        rows = await asyncio.to_thread(common.execute_read_query, sql)
-        if not rows:
-            return "該当するデータは見つかりませんでした。"
-        # 結果を文字列化して返す（長すぎる場合はカット）
-        return str(rows)[:2000]
+        result = await asyncio.to_thread(common.execute_read_query, sql)
     except Exception as e:
         return f"DB検索エラー: {e}"
+
+    # #180: common.execute_read_query は例外発生時も"検索エラー: ..."という非空文字列を
+    # 返す設計(core/database.py参照)のため、以前の`if not rows:`は常に偽となり
+    # 到達しないデッドコードだった。加えて、SQL実行時エラーの文字列がそのまま
+    # 正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。
+    # execute_read_queryの内部エラープレフィックスで判定し、警告ログを残した上で
+    # エラーであることが分かる形でAIへ返す。
+    if result.startswith("検索エラー:"):
+        logger.warning(f"⚠️ search_db query failed: {result} (sql={sql!r})")
+        return f"DB検索エラー: {result[len('検索エラー:'):].strip()}"
+
+    # 結果を長すぎる場合はカットして返す
+    return result[:2000]
 
 
 # ==========================================
