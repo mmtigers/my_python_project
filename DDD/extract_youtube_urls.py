@@ -276,16 +276,17 @@ class FileManager:
     """ファイル保存に関する責務を持つクラス。"""
     
     @staticmethod
-    def _sanitize_filename(filename: str) -> str:
+    def _sanitize_filename(filename: str, max_length: int = 200) -> str:
         """ファイル名として使用できない文字を置換する。
 
         Args:
             filename (str): 元の文字列。
+            max_length (int): 生成する文字列の最大バイト数（UTF-8エンコード後）。
 
         Returns:
             str: 安全なファイル名文字列。
         """
-        return _shared_sanitize_filename(filename)
+        return _shared_sanitize_filename(filename, max_length=max_length)
 
     def save(self, result: ExtractionResult) -> bool:
         """抽出結果をテキストファイルに保存する。
@@ -304,9 +305,14 @@ class FileManager:
             logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)
             return False
 
-        safe_channel = self._sanitize_filename(result.channel_name)
-        safe_title = self._sanitize_filename(result.title)
-        
+        # #175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると、
+        # "{safe_channel}_{safe_title}.txt" は最大 200+1+200+4=405 バイトとなり
+        # ext4等の255バイト上限を確実に超過する。チャンネル名と動画タイトルの
+        # 両方を含めても合計が255バイトに収まるよう、それぞれの上限を100バイトに
+        # 抑える(100+1(区切り)+100+4(".txt")=205バイト、安全マージンあり)。
+        safe_channel = self._sanitize_filename(result.channel_name, max_length=100)
+        safe_title = self._sanitize_filename(result.title, max_length=100)
+
         filename = f"{safe_title}.txt" if safe_channel == "unknown_channel" else f"{safe_channel}_{safe_title}.txt"
         output_path = target_dir / filename
 

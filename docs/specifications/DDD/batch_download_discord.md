@@ -516,24 +516,24 @@
 
 ### `UniversalYtDlpStrategy.download`
 
-* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。
-* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 448〜466 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")
+* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。また`trim_file_name`（yt-dlp自身が持つ、拡張子を除いたファイル名を指定文字数に切り詰めるオプション）でファイル名長を制限しているが、これは`no_ext[:trim_file_name]`という単純な文字数ベースのスライスであり、UTF-8で1文字複数バイトになる文字（日本語等）に対してバイト数を保証しない。**（Issue #175で修正）** 以前の`150`文字は、日本語（UTF-8で3バイト/文字）のタイトルでは約85文字を超えるとext4等の255バイト制限を超過しうる不十分な値だったため、拡張子分の余白を見込んで日本語でも255バイトに収まる`80`文字に変更された。
+* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 515〜533 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (行番号: 534〜543 / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
-* 根拠: [引数定義] (行番号: 448 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [引数定義] (行番号: 515 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功・スキップ時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 484, 489, 494 / 抜粋: "if self._should_skip(filename): return True")
+* 根拠: [return文] (行番号: 522, 558, 563, 570 / 抜粋: "if self._should_skip(filename): return True")
 
 
 * **副作用**: 保存先ディレクトリの決定・作成、`yt_dlp`によるメタデータ取得とダウンロード、成功時のDiscord通知。
-* 根拠: [ダウンロード実行と通知] (行番号: 487〜488 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
+* 根拠: [ダウンロード実行と通知] (行番号: 561〜562 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を捕捉してエラーログを出力し、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 490〜494 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
+* 根拠: [try-exceptブロック] (行番号: 564〜570 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
 
 
 ### `ScrapingStrategy.download`
