@@ -182,6 +182,70 @@ class TestSendPushUsesKeywordArguments:
         assert kwargs.get("channel") == "error"
 
 
+class TestVideoBuildFailureNotifiesUser:
+    """Issue #233の回帰テスト: VideoBuilder().build()が例外を出さずFalseを返した場合、
+    以前はif分岐にもelseにも入らず関数がそのまま正常終了し、動き検知イベントが
+    あったにもかかわらず通知が一切送られなかった不具合。"""
+
+    def _patch_pipeline_with_events(self, monkeypatch, build_return_value):
+        monkeypatch.setattr(stg, "check_dependencies", lambda: True)
+        monkeypatch.setattr(stg, "setup_directories", lambda: ("work", "out", "rec"))
+        monkeypatch.setattr(stg, "get_video_info", lambda path, retries=3: {"format": {"duration": "10"}})
+        monkeypatch.setattr(
+            stg, "get_video_start_dt",
+            lambda path, info: datetime.datetime(2026, 8, 30, 12, 0, 0)
+        )
+        monkeypatch.setattr(stg, "get_ffmpeg_version", lambda: "test")
+        monkeypatch.setattr(
+            stg, "MotionDetector",
+            lambda: type("StubMotionDetector", (), {"detect": lambda self, *a, **k: []})()
+        )
+        fake_event = type("FakeEvent", (), {"duration": 5.0})()
+        monkeypatch.setattr(
+            stg, "EventBuilder",
+            lambda: type("StubEventBuilder", (), {"build": lambda self, *a, **k: [fake_event]})()
+        )
+        monkeypatch.setattr(
+            stg, "VideoBuilder",
+            lambda: type("StubVideoBuilder", (), {"build": lambda self, *a, **k: build_return_value})()
+        )
+        monkeypatch.setattr(stg, "mark_as_done", MagicMock())
+
+    def test_build_failure_sends_error_notification(self, monkeypatch, tmp_path):
+        self._patch_pipeline_with_events(monkeypatch, build_return_value=False)
+        mock_send_push = MagicMock(return_value=True)
+        monkeypatch.setattr(stg, "send_push", mock_send_push)
+        mock_uploader_send = MagicMock()
+        monkeypatch.setattr(
+            stg, "Uploader",
+            lambda: type("StubUploader", (), {"split_and_send": mock_uploader_send})()
+        )
+
+        stg._run_smart_timelapse_job_locked(str(tmp_path / "input.mp4"))
+
+        mock_send_push.assert_called_once()
+        args, kwargs = mock_send_push.call_args
+        assert kwargs.get("target") == "discord"
+        assert kwargs.get("channel") == "error"
+        mock_uploader_send.assert_not_called()
+
+    def test_build_success_still_uploads_and_does_not_send_error(self, monkeypatch, tmp_path):
+        self._patch_pipeline_with_events(monkeypatch, build_return_value=True)
+        mock_send_push = MagicMock(return_value=True)
+        monkeypatch.setattr(stg, "send_push", mock_send_push)
+        mock_uploader_send = MagicMock()
+        monkeypatch.setattr(
+            stg, "Uploader",
+            lambda: type("StubUploader", (), {"split_and_send": mock_uploader_send})()
+        )
+        monkeypatch.setattr(stg.os.path, "getsize", lambda path: 1234)
+
+        stg._run_smart_timelapse_job_locked(str(tmp_path / "input.mp4"))
+
+        mock_send_push.assert_not_called()
+        mock_uploader_send.assert_called_once()
+
+
 class TestSplitAndSendCleansUpPartFiles:
     """Issue #171の回帰テスト: Uploader.split_and_sendが、Discord送信用に生成した
     分割ファイル(*_part_*.mp4)を送信後も削除せず、元動画(summary.output_path)とは
