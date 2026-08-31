@@ -200,3 +200,9 @@ jobs:
         # フィルタ不具合やTSの型エラーがマージまで検出できなかった。
         # 最小限としてまずビルド検証(tsc型チェック含む)をブロッキング条件にする。
         run: npm run build
+
+      - name: Test (vitest)
+        # family-questにはテストが1件も無かった。まずgetQuestLockState
+        # (ロック/完了/申請中判定の共通ロジック)・isSameOriginAvatarPath
+        # (M-9-5のアバターURL検証)・useOnlineStatusの回帰テストで土台を作る。
+        run: npm test
