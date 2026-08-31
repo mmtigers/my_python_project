@@ -38,8 +38,8 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 ### `SwitchBotContext`
 
-* **役割**: Webhookで送られてくる詳細コンテキストのデータ構造を定義するPydanticモデル。SwitchBot公式Webhookのペイロードでは`deviceType`(例: `"WoContact"`, `"WoPresence"`)がトップレベルではなくこのcontext内に入るため、当該フィールドを保持する(以前は未定義フィールドでpydanticに黙って捨てられ、常にNoneにフォールバックしていた)。
-* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-20 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""'); `deviceType: Optional[str] = None` (行番号: 12 / 抜粋: "deviceType: Optional[str] = None")
+* **役割**: Webhookで送られてくる詳細コンテキストのデータ構造を定義するPydanticモデル。SwitchBot公式Webhookのペイロードでは`deviceType`(例: `"WoContact"`, `"WoPresence"`)がトップレベルではなくこのcontext内に入るため、当該フィールドを保持する(以前は未定義フィールドでpydanticに黙って捨てられ、常にNoneにフォールバックしていた)。また、WoContact(開閉センサー)の実際の開閉状態を表す`openState`("open"/"close"/"timeOutNotClose")フィールドを保持する。同デバイスの`detectionState`は内蔵PIRのモーション検知結果("DETECTED"/"NOT_DETECTED")であり開閉状態ではないため、両者は別フィールドとして区別されている(Issue #251)。
+* 根拠: `class SwitchBotContext(BaseModel):` (行番号: 5-26 / 抜粋: '"""Webhookで送られてくる詳細コンテキスト"""'); `deviceType: Optional[str] = None` (行番号: 12 / 抜粋: "deviceType: Optional[str] = None"); `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")
 
 
 * **引数/リクエスト**: 該当なし（クラス定義のため）
@@ -51,57 +51,57 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 5-20 / 抜粋: "class SwitchBotContext(BaseMod")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 5-26 / 抜粋: "class SwitchBotContext(BaseMod")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 5-20 / 抜粋: "class SwitchBotContext(BaseMod")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 5-26 / 抜粋: "class SwitchBotContext(BaseMod")
 
 
 
 ### `SwitchBotWebhookBody`
 
 * **役割**: SwitchBot Webhookのエントリポイントのデータ構造を定義するPydanticモデル。
-* 根拠: `class SwitchBotWebhookBody(BaseModel):` (行番号: 22-27 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""')
+* 根拠: `class SwitchBotWebhookBody(BaseModel):` (行番号: 28-33 / 抜粋: '"""SwitchBot Webhookのエントリポイント"""')
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 22 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 28 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 22 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 28 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 22-27 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 28-33 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 22-27 / 抜粋: "class SwitchBotWebhookBody(Bas")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 28-33 / 抜粋: "class SwitchBotWebhookBody(Bas")
 
 
 
 ### `DeviceStatusResponse`
 
 * **役割**: API経由で取得したデバイス状態のデータ構造を定義するPydanticモデル。
-* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 29-33 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
+* 根拠: `class DeviceStatusResponse(BaseModel):` (行番号: 35-39 / 抜粋: '"""API経由で取得したデバイス状態（GET /v1.1/')
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 29 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 35 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデルの定義であり関数ではないため (行番号: 29 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: データモデルの定義であり関数ではないため (行番号: 35 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **副作用**: なし
-* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 29-33 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: ロジックを持たないデータモデルの定義であるため (行番号: 35-39 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理が存在しないため (行番号: 29-33 / 抜粋: "class DeviceStatusResponse(Bas")
+* 根拠: クラス内に例外処理が存在しないため (行番号: 35-39 / 抜粋: "class DeviceStatusResponse(Bas")
 
 
 
@@ -160,6 +160,8 @@ graph TD
 
 * **未使用コード**: `pydantic` からの `Field`、および `typing` からの `Union` のインポート文が存在するが、ファイル内で一度も使用されていない。
 * **型定義の曖昧さ**: `DeviceStatusResponse` の `body` プロパティは `Any` を含んで定義されており、デバイスによって中身が大きく変わるため、利用側で動的な型判定やキーの存在チェック（安全なアクセス）が必要になる構造となっている。
+* **`detectionState`と`openState`の混同に注意**: `SwitchBotContext`は両フィールドを別々に持つが、名前が似ているため混同しやすい。`detectionState`はWoContact/WoPresence共通で内蔵PIRのモーション検知結果("DETECTED"/"NOT_DETECTED")を表し、`openState`はWoContact固有の実際の開閉状態("open"/"close"/"timeOutNotClose")を表す。利用側(`webhook_router.py`)がこの2つを取り違えると、実機からのWebhookでは開閉検知の通知が正しく発火しない(Issue #251)。
+* 根拠: `detectionState: Optional[str] = None` (行番号: 13 / 抜粋: "detectionState: Optional[str] = None"), `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")
 
 ## 9. 不明事項一覧
 
