@@ -453,6 +453,16 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 # ツール実行は成功しているが、最終回答生成でコケた場合
                 logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
                 return f"{tool_result}\n(AIの応答生成が制限を超過したため、実行結果のみ表示します)"
+            except GoogleAPIError as e:
+                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
+                # 既に成功しているにもかかわらず、最終応答生成でResourceExhausted以外の
+                # GoogleAPIErrorが発生すると、以前はここで捕捉されず関数末尾の汎用
+                # except Exceptionまで伝播し「処理中にエラーが発生しました」という
+                # 一般エラーになっていた。ユーザーは保存に失敗したと誤解して同じ内容を
+                # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
+                # ResourceExhaustedと同様にtool_resultを返し、実行結果を正しく伝える。
+                logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
+                return f"{tool_result}\n(AIの応答生成でエラーが発生したため、実行結果のみ表示します)"
 
         # --- Normal Chat ---
         return response.text
