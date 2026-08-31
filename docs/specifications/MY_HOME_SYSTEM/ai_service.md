@@ -156,10 +156,15 @@
 
 
 
+### `_skip_optional_alias` (関数、Issue #224で追加)
+
+* **役割**: `_extract_referenced_tables`が使う内部ヘルパー。指定位置に続くテーブルエイリアス（`AS name`または`name`）があれば読み飛ばした位置を返す。次の識別子が`_SQL_KEYWORDS_NOT_ALIAS`に含まれるSQLキーワード（`WHERE`/`JOIN`等、テーブル参照の終端を示すもの）の場合はエイリアスとみなさず元の位置をそのまま返す。**導入経緯**: `_extract_referenced_tables`はカンマ結合(暗黙CROSS JOIN)の2つ目以降のテーブルを、直前のテーブル名の直後にカンマが続くかで判定していたが、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと識別子の直後がカンマではなくエイリアス文字列になり、カンマ判定が即座に失敗して2つ目のテーブルが検出漏れしていた。
+* 根拠: 関数定義 (行番号: 155〜162 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
+
 ### `_extract_referenced_tables` (関数)
 
-* **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。
-* 根拠: 関数Docstring (行番号: 143〜150 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")
+* **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。**（Issue #224で修正）** カンマ結合の各テーブル名の直後で`_skip_optional_alias`によりエイリアスを読み飛ばしてからカンマ判定を行うようになり、`FROM power_usage c, quest_users s`のようにエイリアス付きの1つ目のテーブルに続く2つ目のテーブルも検出できるようになった。
+* 根拠: 関数Docstring (行番号: 143〜150 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")、エイリアス読み飛ばし (行番号: 190, 197 / 抜粋: "pos = _skip_optional_alias(sql, m.end())")
 
 
 * **引数/リクエスト**: `sql: str`
@@ -401,8 +406,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。またSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になる。
-* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES` (行番号: 132-138, 141-172)
+* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。またSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になる。**（Issue #224で強化）** H-6のカンマ結合対応後も、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと、識別子の直後がカンマではなくエイリアス文字列になるため、2つ目以降のテーブルが検出漏れし許可テーブルチェックを回避しうる状態だった(読み取り専用接続のため直接的なデータ改ざんはないが、非公開テーブルの内容がAI応答経由で漏洩しうる)。`_skip_optional_alias`でエイリアス(`AS name`または`name`。ただし`WHERE`/`JOIN`等のSQLキーワードはエイリアスとみなさない)を読み飛ばしてからカンマ判定するよう修正した。
+* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES`, `_skip_optional_alias` (行番号: 132-138, 141-172, 155-162)
 
 
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。

@@ -146,12 +146,38 @@ ALLOWED_SEARCH_TABLES = {
 }
 
 
+# Issue #224: テーブル名/エイリアスの直後に続きうるSQLキーワード。カンマ結合の
+# 各テーブルの直後にエイリアス(`AS name`または`name`)が付くと、次の識別子が
+# エイリアスなのかキーワード(WHERE等、テーブル参照の終端)なのかを区別する必要が
+# あるため、テーブル参照の終端を示すキーワードをここに列挙しエイリアスとの
+# 誤認識を防ぐ。
+_SQL_KEYWORDS_NOT_ALIAS = {
+    "WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET",
+    "UNION", "EXCEPT", "INTERSECT", "JOIN", "INNER", "LEFT",
+    "RIGHT", "FULL", "OUTER", "CROSS", "ON", "USING",
+    "SET", "VALUES", "RETURNING", "WITH", "INTO", "FOR",
+}
+
+
+def _skip_optional_alias(sql: str, pos: int) -> int:
+    """`pos`の位置にテーブルエイリアス(`AS name`または`name`)があれば読み飛ばした
+    位置を返す。次の識別子がSQLキーワード(WHERE/JOIN等、テーブル参照の終端を示す
+    もの)の場合はエイリアスとみなさず読み飛ばさない。"""
+    alias_match = re.match(r"\s+(?:AS\s+)?([A-Za-z_][A-Za-z0-9_]*)", sql[pos:], flags=re.IGNORECASE)
+    if alias_match and alias_match.group(1).upper() not in _SQL_KEYWORDS_NOT_ALIAS:
+        return pos + alias_match.end()
+    return pos
+
+
 def _extract_referenced_tables(sql: str) -> List[str]:
     """
     SQL文中で FROM / JOIN が参照するテーブル名をすべて抽出する（簡易パーサ）。
 
     以下のバイパス経路を塞ぐため、単純な「FROM/JOINの直後の1識別子」だけでなく:
     - `FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル
+      (Issue #224: 1つ目のテーブルに`FROM a x, b y`のようなエイリアスが付くと、
+      識別子の直後がカンマではなくエイリアス文字列になるため、エイリアスを
+      読み飛ばしてからカンマ判定する必要がある)
     - `FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の FROM/JOIN
       (re.finditer はSQL全文を走査するため、サブクエリ内の FROM/JOIN も
       自然に検出される)
@@ -169,14 +195,16 @@ def _extract_referenced_tables(sql: str) -> List[str]:
             continue
         tables.append(token)
 
-        # 同じFROM/JOIN句内で `, テーブル名` と続く暗黙CROSS JOINを拾う
-        pos = m.end()
+        # 同じFROM/JOIN句内で `, テーブル名` と続く暗黙CROSS JOINを拾う。
+        # 各テーブル名の直後にエイリアスが付きうるため、カンマ判定の前に
+        # エイリアスを読み飛ばす。
+        pos = _skip_optional_alias(sql, m.end())
         while True:
             comma_match = re.match(r"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)", sql[pos:], flags=re.IGNORECASE)
             if not comma_match:
                 break
             tables.append(comma_match.group(1))
-            pos += comma_match.end()
+            pos = _skip_optional_alias(sql, pos + comma_match.end())
     return tables
 
 
