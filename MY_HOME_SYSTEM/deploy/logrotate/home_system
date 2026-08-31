@@ -21,3 +21,21 @@
     notifempty
     copytruncate
 }
+
+# Issue #190: network_logger.py(monitors/network_logger.py)がCHECK_INTERVAL
+# (60秒)毎に無期限で追記し続けるCSVで、ローテーション・削除経路が存在せず
+# 長期稼働(systemd常駐、deploy/systemd/network_logger.service)でディスクを
+# 消費し続けていた。*.log群と同じcopytruncate方式でここに一元化する
+# (network_logger.py側は毎サイクルopen/closeするだけで自前のローテーションは
+# 行わない。copytruncate後は次回書き込みサイクルでヘッダー行が再作成される)。
+/home/masahiro/develop/MY_HOME_SYSTEM/logs/network_stats.csv
+{
+    su masahiro masahiro
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
