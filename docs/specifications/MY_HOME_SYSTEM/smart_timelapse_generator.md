@@ -50,7 +50,7 @@
 | --- | --- | --- |
 | `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 41 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
 | `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 36 / 抜粋: "logger = setup_logging(**name**)") |
-| `services.notification_service.send_push` | 引数の詳細仕様および実際の送信先プラットフォームの実装内容が不明なため。 | `send_push(user_id, [...], "discord", "report")` (行番号: 595, 617 / 抜粋: "send_push(user_id, [{"type":") |
+| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`または`"error"`をキーワード引数で渡すよう修正済み(Issue #167)。 | `send_push(user_id, [...], target="discord", channel="report")` (行番号: 661〜666, 688〜693 / 抜粋: "send_push(\n                user_id,") |
 | `ffmpeg`, `ffprobe` (外部コマンド) | システム上にインストールされた実行バイナリに依存しており、バージョンごとの挙動差異が保証されないため。 | `subprocess.run(["ffmpeg"...])` (行番号: 125 / 抜粋: "subprocess.run(["ffmpeg", "-ve...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -630,7 +630,7 @@
 * **副作用**: 他クラスの呼び出しによるすべての副作用、完了記録ファイル（`.done`）の生成、プッシュ通知送信。
 
 
-* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 612, 613, 595, 617 / 抜粋: "mark_as_done(rec, os.path.base...")
+* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 683, 661〜666, 688〜693 / 抜粋: "mark_as_done(rec, os.path.base...")
 
 
 
@@ -638,7 +638,7 @@
 * **エラーハンドリング**: 全体処理を`try-except`で囲み、例外発生時にはスタックトレースをログに出力し、外部API経由でエラー通知を送信する。
 
 
-* 根拠: `except Exception as e:` (行番号: 615-617 / 抜粋: "send_push(user_id, [{"type": "...")
+* 根拠: `except Exception as e:` (行番号: 686〜693 / 抜粋: "send_push(\n            user_id,")
 
 
 
