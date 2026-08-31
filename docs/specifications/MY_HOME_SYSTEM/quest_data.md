@@ -134,7 +134,7 @@
 
 
 * **エラーハンドリング**: `open`・`json.load`・マージ処理全体を`try/except Exception`で包み、あらゆる例外（ファイル破損、JSON構文エラー等）を捕捉して`logger.warning`を出力するのみで、モジュールのロード自体は継続する（例外を再送出しない）。
-* 根拠: [例外処理] (行番号: 65, 72〜73 / 抜粋: "try:\n        with open(_QUEST_USERS_LOCAL_PATH, \"r\", encoding=\"utf-8\") as _f:", "except Exception as _e:\n        logger.warning(...)")
+* 根拠: [例外処理] (行番号: 65〜66, 72〜73 / 抜粋: "try:\n        with open(_QUEST_USERS_LOCAL_PATH, \"r\", encoding=\"utf-8\") as _f:", "except Exception as _e:\n        logger.warning(...)")
 
 
 
