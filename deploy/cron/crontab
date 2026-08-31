@@ -1,0 +1,26 @@
+# 週間ログ分析 (日曜 08:50)
+50 8 * * 0 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/log_analyzer.py
+
+# データベースバックアップ (毎日 04:00)
+# Note: 元コメントは日曜03:00でしたが、コードは毎日04:00でした。コードを優先しています。
+0 4 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/MY_HOME_SYSTEM/services/backup_service.py
+
+# 毎日 AM 4:00 に、30日(mtime +30)より古いmp4ファイルをNASから削除する
+0 4 * * * find /mnt/nas/home_system/nvr_recordings -type f -name "*.mp4" -mtime +30 -delete
+
+# 2. 一括ダウンロード (毎日 2:00 に変更)
+0 2 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/DDD/batch_download_discord.py
+
+0 3 * * * /usr/bin/rclone sync /home/masahiro/develop/docs gdrive:お家開発/docs > /dev/null 2>&1
+
+# 毎日 09:15 に当日の 07:30～09:00 の entranceタイムラプスを生成
+15 9 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 07:30 --end 09:00
+
+# 毎日 15:15 に当日の 13:00～15:00 の entranceタイムラプスを生成
+15 15 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
+
+# newface monitor per 1hour
+0 * * * * cd /home/masahiro/develop/DDD &&  /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
+
+# 毎日 04:00 に、30日(mtime +30)より古いカメラ録画VODキャッシュ(HLS)をローカルディスクから削除する
+0 4 * * * find /home/masahiro/develop/MY_HOME_SYSTEM/data/hls_streams/vod -type f -mtime +30 -delete
