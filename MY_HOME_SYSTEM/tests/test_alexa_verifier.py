@@ -112,11 +112,21 @@ class TestVerifySignature:
         "https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem",
         "https://s3.amazonaws.com/echo.api/../../etc/passwd",
         "https://s3.amazonaws.com/echo.api/a/../../evil-bucket/cert.pem",
+        # Issue #223: パーセントエンコードされた".."はurlparse().pathの時点では
+        # デコードされないため、normpathへ渡す前にデコードしないと素通りしてしまう。
+        # requestsは送信前にこれらを実際に".."へデコードするため、検証と取得先が
+        # 食い違ってしまう。
+        "https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/%2E%2E/evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/%2e%2e/%2e%2e/etc/passwd",
+        "https://s3.amazonaws.com/echo.api/a/%2e%2e/%2e%2e/evil-bucket/cert.pem",
     ])
     def test_rejects_cert_chain_url_with_path_traversal(self, traversal_url):
-        """Issue #173の回帰テスト: Amazon公式の検証手順はURLパスを正規化した後に
+        """Issue #173/#223の回帰テスト: Amazon公式の検証手順はURLパスを正規化した後に
         /echo.api/で始まることを要求するが、以前は生のparsed.pathへのstartswith判定
-        のみだったため、".."を含むURLがチェックを素通りしていた。"""
+        のみだったため、".."を含むURLがチェックを素通りしていた(#173)。その後の修正でも
+        parsed.pathはパーセントデコードされないままnormpathへ渡していたため、
+        "%2e%2e"のようなエンコード済みの".."がチェックを素通りしていた(#223)。"""
         with pytest.raises(av.AlexaVerificationError):
             av.verify_signature(b"body", "sig", traversal_url)
 

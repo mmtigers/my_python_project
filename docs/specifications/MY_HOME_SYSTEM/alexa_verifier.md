@@ -29,7 +29,7 @@
 | `posixpath`（Issue #173で追加） | 標準ライブラリ | `SignatureCertChainUrl`のパス（`parsed.path`）を`normpath`で正規化し、`".."`によるパストラバーサルを解決してからprefix判定するため | 根拠: [import文] (行番号: 30 / 抜粋: "import posixpath") |
 | `datetime`, `timezone`（`datetime`モジュール） | 標準ライブラリ | 証明書有効期限・タイムスタンプ許容範囲のUTC基準時刻比較 | 根拠: [import文] (行番号: 31 / 抜粋: "from datetime import datetime, timezone") |
 | `Dict`, `Tuple`（`typing`） | 標準ライブラリ | `_cert_cache`の型ヒント | 根拠: [import文] (行番号: 32 / 抜粋: "from typing import Dict, Tuple") |
-| `urlparse`（`urllib.parse`） | 標準ライブラリ | `SignatureCertChainUrl`のURL形式検証 | 根拠: [import文] (行番号: 33 / 抜粋: "from urllib.parse import urlparse") |
+| `urlparse`, `unquote`（`urllib.parse`、`unquote`はIssue #223で追加） | 標準ライブラリ | `SignatureCertChainUrl`のURL形式検証。`unquote`は`parsed.path`をパーセントデコードしてから`posixpath.normpath`に渡すために使用 | 根拠: [import文] (行番号: 33 / 抜粋: "from urllib.parse import urlparse, unquote") |
 | `requests` | サードパーティ | 証明書チェーンのHTTPS取得 | 根拠: [import文] (行番号: 35 / 抜粋: "import requests") |
 | `x509`（`cryptography`） | サードパーティ | PEM証明書チェーンのパース、SAN拡張の読み取り | 根拠: [import文] (行番号: 36 / 抜粋: "from cryptography import x509") |
 | `hashes`（`cryptography.hazmat.primitives`） | サードパーティ | 署名検証時のハッシュアルゴリズム（SHA1）指定 | 根拠: [import文] (行番号: 37 / 抜粋: "from cryptography.hazmat.primitives import hashes") |
@@ -75,8 +75,8 @@
 
 ### `_validate_cert_chain_url`
 
-* **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。
-* 根拠: (行番号: 59〜71 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(parsed.path)\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
+* **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。**（Issue #223で修正）** `urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のため、`https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem`のようなパーセントエンコード済みの`".."`は`normpath`でも検知できず素通りしていた。一方、後段の`_fetch_leaf_certificate`が同じURL文字列を`requests.get()`に渡すと`requests`が送信前に`%2e%2e`を`".."`へデコードするため、検証結果と実際の取得先が食い違っていた。現在は`normpath`へ渡す前に`unquote`で一度パーセントデコードしてから判定する。
+* 根拠: (行番号: 59〜73 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
 
 
 * **引数/リクエスト**: `url: str`（`SignatureCertChainUrl`ヘッダの値）
@@ -87,8 +87,8 @@
 * 根拠: (行番号: 59)
 
 
-* **副作用**: なし（`urlparse`によるURL解析と`posixpath.normpath`によるパス正規化のみ）
-* 根拠: (行番号: 60 / 抜粋: "parsed = urlparse(url)")、(行番号: 69 / 抜粋: "normalized_path = posixpath.normpath(parsed.path)")
+* **副作用**: なし（`urlparse`によるURL解析、`unquote`によるパーセントデコード、`posixpath.normpath`によるパス正規化のみ）
+* 根拠: (行番号: 60 / 抜粋: "parsed = urlparse(url)")、(行番号: 69 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))")
 
 
 * **エラーハンドリング**: scheme/hostname/pathプレフィックス（正規化後）/portのいずれかが期待値と異なる場合、それぞれ`AlexaVerificationError`を送出する。
@@ -213,6 +213,7 @@ graph TD
         datetime_mod["datetime / timezone"]
         typing_mod["typing"]
         urlparse_mod["urllib.parse.urlparse"]
+        unquote_mod["urllib.parse.unquote(Issue #223で追加)"]
     end
 
     subgraph "サードパーティ"
@@ -228,6 +229,7 @@ graph TD
     end
 
     ValidateCertUrl --> urlparse_mod
+    ValidateCertUrl --> unquote_mod
     ValidateCertUrl --> posixpath_mod
     FetchLeafCert --> time_mod
     FetchLeafCert --> requests_mod
@@ -261,7 +263,7 @@ graph TD
 
 * **`oscrypto`起因の依存回避という設計判断**: モジュールDocstringに明記の通り、本来使えるはずの`ask-sdk-webservice-support`の検証器を使わず、署名・タイムスタンプ検証を`cryptography`と`requests`のみで自前実装している。これはRaspberry Pi OS Bookworm等のOpenSSL 3.x環境で`oscrypto`のロードに失敗する既知の未解決issueを回避するためであり、`ask-sdk-webservice-support`側でこの問題が解消されても、本ファイルの自前実装への依存自体は自動的には解消されない。
 * 根拠: [モジュールDocstring] (行番号: 6〜10 / 抜粋: "ask-sdk-webservice-support 同梱の検証器は certvalidator -> oscrypto 経由で\nlibcrypto を動的ロードしようとするが")
-* **ルートCAまでの証明書チェーン検証を行っていない**: モジュールDocstringに明記の通り、証明書チェーンの取得自体がHTTPS（通常のCA検証あり）経由かつAmazon管理下のURLパスに固定されるという前提のもとで、ルートCAまでのフルパス検証(full path validation)は意図的に省略されている。この前提（`_validate_cert_chain_url`によるURL形式チェック）が破られた場合の防御は、このURL形式チェック自体に一元的に依存する。**（Issue #173で強化）** 以前はこのURL形式チェック自体に、正規化前の生パスへの`startswith`判定という抜け穴があり（`".."`によるパストラバーサルURLが通過しうる）、「URLがAmazon管理下のパスに固定される」という前提を崩しうる状態だった。`posixpath.normpath`による正規化後判定への変更でこの抜け穴は塞がれたが、この関数（URL形式チェック）に防御が一元的に依存する設計自体は変わっていない。
+* **ルートCAまでの証明書チェーン検証を行っていない**: モジュールDocstringに明記の通り、証明書チェーンの取得自体がHTTPS（通常のCA検証あり）経由かつAmazon管理下のURLパスに固定されるという前提のもとで、ルートCAまでのフルパス検証(full path validation)は意図的に省略されている。この前提（`_validate_cert_chain_url`によるURL形式チェック）が破られた場合の防御は、このURL形式チェック自体に一元的に依存する。**（Issue #173で強化）** 以前はこのURL形式チェック自体に、正規化前の生パスへの`startswith`判定という抜け穴があり（`".."`によるパストラバーサルURLが通過しうる）、「URLがAmazon管理下のパスに固定される」という前提を崩しうる状態だった。`posixpath.normpath`による正規化後判定への変更でこの抜け穴は塞がれたが、この関数（URL形式チェック）に防御が一元的に依存する設計自体は変わっていない。**（Issue #223で再強化）** #173の修正後も、`urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のままであり、`%2e%2e`のようなパーセントエンコード済みの`".."`は`normpath`による正規化でも検知できず素通りしていた。一方`requests`は送信前にこれを実際に`".."`へデコードするため、検証時のパスと実際に取得されるパスが食い違っていた。`normpath`へ渡す前に`unquote`で一度デコードすることで、`requests`が実際に送信するパスと検証対象のパスを一致させた。
 * 根拠: [モジュールDocstring] (行番号: 23〜25 / 抜粋: "なお、証明書チェーンの取得自体はHTTPS(s3.amazonaws.com、通常のCA検証あり)経由で\n行われ、かつURLがAmazon管理下のパスに固定されるため")
 * **`_fetch_leaf_certificate`のHTTP取得失敗を`AlexaVerificationError`へ変換（Issue #179で修正）**: 以前は`resp.raise_for_status()`が送出する`requests`例外（`requests.exceptions.HTTPError`等）がそのまま呼び出し元へ伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしてFastAPIのグローバル例外ハンドラに届き、Amazon側の証明書チェーンURLが一時的に応答不能になっただけで意図しない500が返っていた（Issue #110で`verify_timestamp`側の同種の問題が修正された際、この`_fetch_leaf_certificate`側の経路はスコープ外として未修正のまま残っていた）。`requests.get`/`resp.raise_for_status()`を`try/except requests.exceptions.RequestException`で囲み、捕捉した例外を`AlexaVerificationError`へ変換するよう修正した。
 * 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
