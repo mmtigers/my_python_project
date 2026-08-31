@@ -29,7 +29,7 @@
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
 * アプリケーション起動・終了時（ライフサイクル）に連動して、サブプロセス（カメラ監視スクリプト、スケジューラースクリプト）の起動と終了管理、およびセンサー関連タスクのキャンセル処理を行う。
 * 未捕捉例外のグローバルハンドリングを担う。
-* 根拠: `app = FastAPI(...)` (行番号: 159-164 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 339 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 159-164 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 344 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
@@ -52,7 +52,7 @@
 | `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
 | `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
 | `fastapi.exceptions` | 外部パッケージ | リクエスト検証例外（未使用だが有） | 根拠: `[RequestValidationError]` (行番号: 18 / 抜粋: "from fastapi.exceptions import ") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動と設定取得 | 根拠: `[uvicorn]` (行番号: 330 / 抜粋: "import uvicorn") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動 | 根拠: `[uvicorn]` (行番号: 341 / 抜粋: "import uvicorn") |
 | `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 25 / 抜粋: "import sqlite3") |
 | `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 27 / 抜粋: "import config") |
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 28 / 抜粋: "from core.logger import setup_l") |
@@ -259,6 +259,28 @@
 * 根拠: 該当関数内処理 (行番号: 326-327 / 抜粋: "async def health_check():")
 
 
+### `_run_uvicorn_server`（Issue #229で追加）
+
+* **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
+* 根拠: [関数定義とコメント] (行番号: 329-344 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+
+
+* **引数/リクエスト**: なし
+* 根拠: (行番号: 329)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: (行番号: 329)
+
+
+* **副作用**: `uvicorn.run`の呼び出し（ASGIサーバーの起動。呼び出しはブロッキングでプロセスの生存期間中戻らない）
+* 根拠: (行番号: 344 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
+
+
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 329-344)
+
+
 
 ## 5. 処理フロー図
 
@@ -354,6 +376,7 @@ graph TD
 * カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`、行番号: 127）の起動は、スケジューラー起動処理（行番号: 130-139）とは異なり `try-except` で囲まれていないため、起動に失敗した場合は `lifespan` 全体が例外で停止し、アプリケーションが起動できない可能性がある。
 * `config.QUEST_DIST_DIR` が未定義またはパスに存在しない場合、システムは例外終了せず警告ログのみを出力する（null安全性/フォールバック）。
 * Webhook受信の例外パス（`/webhook/switchbot`, `/callback/line`）はハードコードで定義されている。
+* **本番起動経路が`uvicorn.access`ロガーのレベルを固定し`SilencePolicyFilter`を無効化していた（Issue #229で修正）**: `_run_uvicorn_server`（本番起動経路、`if __name__ == "__main__":`から呼ばれる）は以前、`uvicorn.config.LOGGING_CONFIG`を書き換えて`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコード自体が作られず、`lifespan()`が登録する`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されない状態になっていた。既存の単体テスト（`SilencePolicyFilter.filter()`を直接呼び出すもの）はこの「ロガーのレベルチェックでレコードが作られない」経路を検知できない設計だったため、この不具合はテストがグリーンのまま本番のみで発生していた。現在は本番起動経路がデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使うよう修正されている。
 
 ## 9. 不明事項一覧
 
