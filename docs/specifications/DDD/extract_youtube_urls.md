@@ -299,41 +299,41 @@
 ### `SubscriptionManager._init_db`
 
 * **役割**: サブスクリプション管理用テーブル(`youtube_subscriptions`)が存在しない場合に作成するインスタンスメソッド。`id`, `channel_url`（一意制約）, `is_active`, `added_at`の各カラムを持つ。**(Issue #123バグ修正)** 以前は`self.db_path`を参照していたが、呼び出し元(`process_subscriptions`)から渡された`db_path`引数を使うように変更された。
-* 根拠: [メソッド定義とDocstring] (行番号: 365〜377 / 抜粋: "def _init_db(self, db_path: Path) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
+* 根拠: [メソッド定義とDocstring] (行番号: 371〜383 / 抜粋: "def _init_db(self, db_path: Path) -> None:\n        """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""")
 
 
 * **引数/リクエスト**: `db_path: Path`（接続先のDBファイルパス。呼び出し元が同一時点で解決した値を渡す）
-* 根拠: [引数定義] (行番号: 365 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
+* 根拠: [引数定義] (行番号: 371 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 365 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 371 / 抜粋: "def _init_db(self, db_path: Path) -> None:")
 
 
 * **副作用**: SQLite DB接続、テーブル作成用DDL実行(`CREATE TABLE IF NOT EXISTS`)、コミット。
-* 根拠: [DDL実行] (行番号: 367〜377 / 抜粋: "with closing(sqlite3.connect(db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
+* 根拠: [DDL実行] (行番号: 373〜383 / 抜粋: "with closing(sqlite3.connect(db_path)) as conn:\n            with closing(conn.cursor()) as cur:\n                cur.execute(\"\"\"\n                    CREATE TABLE IF NOT EXISTS youtube_subscriptions (")
 
 
-* **エラーハンドリング**: なし（本メソッド自体には例外処理なし。呼び出し元の`process_subscriptions`が`sqlite3.Error`を捕捉する）
+* **エラーハンドリング**: なし（本メソッド自体には例外処理なし。呼び出し元の`process_subscriptions`が`sqlite3.Error`/`OSError`を捕捉する。Issue #185修正前は`OSError`が捕捉されていなかった）
 
 
 ### `SubscriptionManager.process_subscriptions`
 
-* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。
-* 根拠: [メソッド定義とDocstringおよびIssue #123修正コメント] (行番号: 379〜396 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""\n        # 1. 環境検証（データロスト防止の防波堤）\n        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")
+* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。**(Issue #185バグ修正)** DB初期化ブロック内の`db_path.parent.mkdir(parents=True, exist_ok=True)`が送出しうる`OSError`（権限エラー・読み取り専用マウント等）は`sqlite3.Error`のサブクラスではないため、以前は`except sqlite3.Error`節で捕捉されず、本メソッド内の他の失敗経路（エラーログ出力+安全な`return`）というフェイルソフト方針に反して`--cron`実行全体が未処理例外で異常終了していた。`except`節を`(sqlite3.Error, OSError)`に拡張し、`OSError`も同じフェイルソフト方針で処理するよう修正した。
+* 根拠: [メソッド定義とDocstringおよびIssue #123修正コメント] (行番号: 385〜402 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""\n        # 1. 環境検証（データロスト防止の防波堤）\n        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")、Issue #185修正のコメントとexcept節 (行番号: 405〜412 / 抜粋: "# #185: db_path.parent.mkdir()が送出しうるOSError(権限エラー・読み取り専用\n        # マウント等)は sqlite3.Error のサブクラスではないため捕捉されず", "except (sqlite3.Error, OSError) as e:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 379 / 抜粋: "def process_subscriptions(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 385 / 抜粋: "def process_subscriptions(self) -> None:")
 
 
 * **副作用**: `AppConfig.get_output_base_dir()`の呼び出し（NASアクセス確認等の副作用を誘発しうる）、環境検証・DB初期化・DBからのSELECT、URL巡回ごとの`time.sleep`、`extractor.extract_iter`によるネットワークアクセス、`file_manager.save`によるファイル書き込み、各段階でのログ出力。
-* 根拠: [メイン処理フロー] (行番号: 393, 423 / 抜粋: "current_base = AppConfig.get_output_base_dir()", "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
+* 根拠: [メイン処理フロー] (行番号: 399, 433 / 抜粋: "current_base = AppConfig.get_output_base_dir()", "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
 
 
-* **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
-* 根拠: [各種ガード節とbreak] (行番号: 394〜395, 402〜404, 415〜417, 419〜421, 442〜444 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
+* **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`, `OSError`。Issue #185で`OSError`を追加)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
+* 根拠: [各種ガード節とbreak] (行番号: 400〜401, 412〜414, 425〜427, 429〜431, 452〜454 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
 
 
 ### `UrlExtractorApp.__init__`
@@ -473,16 +473,16 @@ graph TD
 | 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`があればそれを返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 39 / 抜粋: "from core.logger import get_logger") |
 | 中 | `file_utils.py` | `sanitize_filename`の具体的なサニタイズルールを確認するため（既に`docs/specifications/DDD/file_utils.md`として解析済み）。 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| 低 | `home_system.db`を書き込む他のプロセス/スクリプト | `youtube_subscriptions`テーブルへどのようにチャンネルURLが登録・アクティブ化されるか（本ファイルはSELECTのみで、INSERT/UPDATEを行う箇所が存在しない）を確認するため。 | 根拠: [process_subscriptions] (行番号: 412 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")") |
+| 低 | `home_system.db`を書き込む他のプロセス/スクリプト | `youtube_subscriptions`テーブルへどのようにチャンネルURLが登録・アクティブ化されるか（本ファイルはSELECTのみで、INSERT/UPDATEを行う箇所が存在しない）を確認するため。 | 根拠: [process_subscriptions] (行番号: 422 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")") |
 
 ## 8. 保守上の注意点
 
 * **フォールバック実装と本番実装の差異リスク**: `core.logger`, `core.nas_utils`のインポートに失敗した場合、ファイル内の簡易フォールバック実装に切り替わる。`get_managed_target_directory`のフォールバック実装は`fallback_dir_str`（`AppConfig.LOCAL_DIR_STR`、`BASE_DIR/'data'`の絶対パス）を尊重するよう修正済みだが、本番環境で意図せずインポートが失敗した場合、依然としてNASではなくローカルディスクにデータが保存される点は変わらない。
 * 根拠: [フォールバック定義] (行番号: 42〜56 / 抜粋: "except ImportError:\n    # 開発環境や単体実行時のフォールバック")
 * **`youtube_subscriptions`テーブルへの書き込み手段が本ファイルに存在しない**: `_init_db`はテーブル作成のみを行い、`process_subscriptions`はSELECTのみを実行する。チャンネルURLの登録・有効化（INSERT/UPDATE）を行う手段が本ファイル内に見当たらず、外部プロセスまたは手動でのDB操作が前提と見られる。
-* 根拠: [process_subscriptions] (行番号: 412 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")")
+* 根拠: [process_subscriptions] (行番号: 422 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")")
 * **(Issue #123バグ修正の背景)** `SubscriptionManager`は`db_path`をインスタンス属性として保持せず、`process_subscriptions()`実行のたびに`AppConfig.get_output_base_dir()`から再導出する設計に変更された。これは、NASのマウント状態がプロセスの生存期間中に変化しうる（autofsの再マウント遅延等）ことを前提とした設計であり、今後同様に「起動時に一度だけ解決した値」をNAS関連の状態判定と組み合わせて使う実装を追加する際は、両者の評価タイミングを揃える（同一の`get_output_base_dir()`呼び出し結果を使い回す）よう注意すること。
-* 根拠: [process_subscriptions冒頭のコメント] (行番号: 382〜392 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証\n        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り\n        # 残されていた。")
+* 根拠: [process_subscriptions冒頭のコメント] (行番号: 388〜392 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証\n        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り\n        # 残されていた。")
 * **YDL_OPTS共有辞書のコピー渡し**: `yt_dlp.YoutubeDL.__init__`が渡された`params`辞書を直接書き換えるため、`AppConfig.YDL_OPTS`（クラス属性の共有辞書）をそのまま渡すと繰り返し呼び出し時に状態汚染が起きるリスクがあり、コード内コメントで明示的に`dict(AppConfig.YDL_OPTS)`によるコピー渡しが行われている。
 * 根拠: [コメントとコピー渡し] (行番号: 174〜179, 249〜250 / 抜粋: "# yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える\n            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、")
 * **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。
