@@ -43,6 +43,35 @@ def test_core_module_is_importable_with_fixed_project_root():
     import core.logger  # noqa: F401  (ImportErrorにならないこと自体が検証)
 
 
+class TestFileManagerSaveFilenameByteLength:
+    """Issue #175の回帰テスト: FileManager.saveは
+    "{safe_channel}_{safe_title}.txt" という形式でファイル名を組み立てるが、
+    以前は各コンポーネントがそれぞれ既定のmax_length(200文字)で切り詰められる
+    だけだったため、日本語のチャンネル名・タイトルでは(3バイト/文字として)
+    最大200*3*2+5=1205バイトとなり、ext4等の255バイト上限を大幅に超過して
+    ENAMETOOLONGでファイル保存が失敗しうる不具合があった。"""
+
+    def test_long_japanese_channel_and_title_still_saves_successfully(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module.AppConfig, "get_output_base_dir", staticmethod(lambda: tmp_path))
+
+        result = module.ExtractionResult(
+            title="あ" * 200,
+            urls=["https://example.test/1"],
+            source_url="https://example.test/list",
+            channel_name="い" * 200,
+            is_playlist=True,
+        )
+
+        manager = module.FileManager()
+        assert manager.save(result) is True
+
+        saved_files = list((tmp_path / module.AppConfig.SUB_DIR_NAME).glob("*.txt"))
+        assert len(saved_files) == 1
+        # ファイル名(拡張子込み)自体がファイルシステムのNAME_MAX(255バイト)に
+        # 収まっていること。
+        assert len(saved_files[0].name.encode("utf-8")) <= 255
+
+
 class TestFallbackStubRespectsExplicitPath:
     """
     core.* のimportが何らかの理由で失敗した場合に使われるローカルスタブ
