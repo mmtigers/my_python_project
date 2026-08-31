@@ -294,24 +294,25 @@
 
 ### 関数 `run_retention_cleanup`
 
-* **役割**: NVR録画・カメラスナップショット・DBバックアップの3種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 170〜198 / 抜粋: "def run_retention_cleanup(sel...")
+* **役割**: NVR録画・カメラスナップショット・タイムラプス動画・DBバックアップの4種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。タイムラプス動画の削除対象パスは以前`config.ASSETS_DIR/timelapse`(NAS側)を指しており、実際の生成先(`monitors/smart_timelapse_generator.py`の`setup_directories`)であるローカルの`config.BASE_DIR/assets/timelapse`と食い違っていたため、誰も書かないNAS側ディレクトリを掃除し、誰も掃除しないローカルディレクトリにファイルが無限蓄積していた(Issue #171)。生成先と同じローカルパスに修正済み。
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 252〜288 / 抜粋: "def run_retention_cleanup(sel...")
+* 根拠: `("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"), ...)` (行番号: 259〜266)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 170 / 抜粋: "def run_retention_cleanup(sel...")
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 252 / 抜粋: "def run_retention_cleanup(sel...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 170 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 252 / 抜粋: "-> None:")
 
 
 * **副作用**: `cleanup_old_files`経由のファイル削除、および削除件数が1件以上あった場合の外部APIへのプッシュ通知送信。
-* 根拠: `result = self.cleanup_old_files(...)` (行番号: 185), `send_push(...)` (行番号: 194〜198)
+* 根拠: `result = self.cleanup_old_files(...)` (行番号: 275), `send_push(...)` (行番号: 284〜288)
 
 
 * **エラーハンドリング**: なし（対象ディレクトリが未設定(`falsy`)の場合は`continue`でその対象をスキップするのみ）。
-* 根拠: `if not directory: continue` (行番号: 183〜184 / 抜粋: "if not directory:\n continue")
+* 根拠: `if not directory: continue` (行番号: 273〜274 / 抜粋: "if not directory:\n continue")
 
 
 

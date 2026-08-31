@@ -105,7 +105,11 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         return path
 
     def test_old_timelapse_outputs_are_cleaned_up(self):
-        timelapse_dir = os.path.join(self.tmp_dir, "timelapse")
+        """タイムラプス動画の実際の生成先(monitors/smart_timelapse_generator.pyの
+        setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
+        config.BASE_DIR/assets/timelapse であるため、リテンション対象も
+        同じローカルパスを見る必要がある(Issue #171)。"""
+        timelapse_dir = os.path.join(self.tmp_dir, "assets", "timelapse")
         os.makedirs(timelapse_dir, exist_ok=True)
         old_summary = self._make_file(
             os.path.join(timelapse_dir, "20250101_summary.mp4"), age_days=40
@@ -117,7 +121,7 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
             os.path.join(timelapse_dir, "20260101_summary.mp4"), age_days=5
         )
 
-        with patch.object(config, "ASSETS_DIR", self.tmp_dir), \
+        with patch.object(config, "BASE_DIR", self.tmp_dir), \
              patch.object(self.monitor, "cleanup_old_files", wraps=self.monitor.cleanup_old_files) as spy, \
              patch("monitors.nas_monitor.send_push"):
             self.monitor.run_retention_cleanup()

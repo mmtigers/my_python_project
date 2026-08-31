@@ -12,6 +12,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -179,3 +180,66 @@ class TestSendPushUsesKeywordArguments:
         assert len(args) == 2, "user_id/messages以外は必ずキーワード引数で渡すこと"
         assert kwargs.get("target") == "discord"
         assert kwargs.get("channel") == "error"
+
+
+class TestSplitAndSendCleansUpPartFiles:
+    """Issue #171の回帰テスト: Uploader.split_and_sendが、Discord送信用に生成した
+    分割ファイル(*_part_*.mp4)を送信後も削除せず、元動画(summary.output_path)とは
+    別にローカルディスクへ重複して残り続けていた不具合。"""
+
+    def _setup_split_pipeline(self, monkeypatch, tmp_path):
+        output_path = tmp_path / "20260830_summary.mp4"
+        output_path.write_bytes(b"x" * 100)
+
+        summary = stg.SummaryInfo(target_date="2026-08-30")
+        summary.output_path = str(output_path)
+
+        # split_and_send は冒頭で summary.file_size_bytes を os.path.getsize で
+        # 上書きするため、実ファイルサイズを大きくする代わりに閾値
+        # (MAX_FILE_SIZE_BYTES)を実ファイルサイズ未満に下げて分割分岐を強制する。
+        monkeypatch.setattr(stg, "MAX_FILE_SIZE_BYTES", 10)
+        monkeypatch.setattr(stg.config, "DISCORD_WEBHOOK_URL", "https://discord.example.com/webhook")
+        monkeypatch.setattr(stg.shutil, "which", lambda name: None)  # ioniceなし分岐で単純化
+
+        part_files = [
+            tmp_path / "20260830_summary_part_000.mp4",
+            tmp_path / "20260830_summary_part_001.mp4",
+        ]
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == "ffprobe":
+                return subprocess.CompletedProcess(cmd, 0, stdout="120.0\n", stderr="")
+            # ffmpeg分割コマンドの代わりに、実際にダミーの分割ファイルを生成する
+            for p in part_files:
+                p.write_bytes(b"y" * 10)
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(stg.subprocess, "run", fake_run)
+
+        return summary, part_files
+
+    def test_part_files_are_deleted_after_successful_send(self, monkeypatch, tmp_path):
+        summary, part_files = self._setup_split_pipeline(monkeypatch, tmp_path)
+
+        uploader = stg.Uploader()
+        monkeypatch.setattr(uploader, "_send_to_discord", MagicMock())
+        monkeypatch.setattr(uploader, "_send_completion_notice", MagicMock())
+
+        uploader.split_and_send(summary, "20260830_summary.mp4")
+
+        for p in part_files:
+            assert not p.exists(), f"分割ファイルが送信成功後も削除されていない: {p}"
+        # 元動画自体はここでは削除されない(リテンションクリーンアップに委ねる)
+        assert Path(summary.output_path).exists()
+
+    def test_part_files_are_deleted_even_when_send_fails(self, monkeypatch, tmp_path):
+        summary, part_files = self._setup_split_pipeline(monkeypatch, tmp_path)
+
+        uploader = stg.Uploader()
+        monkeypatch.setattr(uploader, "_send_to_discord", MagicMock(side_effect=Exception("network down")))
+        monkeypatch.setattr(uploader, "_send_completion_notice", MagicMock())
+
+        uploader.split_and_send(summary, "20260830_summary.mp4")  # 例外は内部でログに握りつぶされる
+
+        for p in part_files:
+            assert not p.exists(), f"送信失敗時も分割ファイルは削除されるべき: {p}"
