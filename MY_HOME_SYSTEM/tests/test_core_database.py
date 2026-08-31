@@ -191,3 +191,45 @@ class TestExecuteReadQuery:
     def test_returns_error_message_on_malformed_sql(self, isolated_db):
         result = db.execute_read_query("SELECT * FROM nonexistent_table_xyz")
         assert result.startswith("検索エラー:")
+
+
+class TestExecuteReadQueryConnectionCleanup:
+    """Issue #178の回帰テスト: execute_read_queryはconn.close()が正常経路にしか
+    無くtry/finallyが無かったため、cursor.execute()が例外を送出する
+    (不正なSQL等)たびに接続がGC任せで残りリークしていた。"""
+
+    def _spy_on_close(self, monkeypatch):
+        # sqlite3.Connectionはインスタンス単位の属性代入(conn.close = ...)や
+        # クラスメソッドの直接上書き(sqlite3.Connection.close = ...)を許可
+        # しない('immutable type')C拡張型のため、sqlite3.connect()の
+        # factory引数でサブクラスを注入しclose()呼び出しを記録する。
+        close_calls = []
+
+        class SpyConnection(sqlite3.Connection):
+            def close(self):
+                close_calls.append(True)
+                super().close()
+
+        real_connect = sqlite3.connect
+
+        def spy_connect(*args, **kwargs):
+            kwargs["factory"] = SpyConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(db.sqlite3, "connect", spy_connect)
+        return close_calls
+
+    def test_connection_is_closed_when_query_raises(self, isolated_db, monkeypatch):
+        close_calls = self._spy_on_close(monkeypatch)
+
+        result = db.execute_read_query("SELECT * FROM nonexistent_table_xyz")
+
+        assert result.startswith("検索エラー:")
+        assert close_calls == [True], "cursor.execute()が例外を送出した場合も接続はcloseされるべき"
+
+    def test_connection_is_closed_on_success(self, isolated_db, monkeypatch):
+        close_calls = self._spy_on_close(monkeypatch)
+
+        db.execute_read_query("SELECT * FROM quest_users WHERE user_id = ?", ("nobody",))
+
+        assert close_calls == [True]

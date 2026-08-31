@@ -20,7 +20,7 @@
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
 * 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。
-* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 12-78 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")
+* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 12-85 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")
 
 
 
@@ -79,8 +79,8 @@
 
 ### `execute_read_query`
 
-* **役割**: 読み取り専用モード (`?mode=ro`) で指定されたSELECTクエリを実行し、結果をJSON形式の文字列で返す。データが存在しない場合は専用のメッセージを返す。
-* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 47-60 / 抜粋: "読み取り専用モードで安全にSELECTを実行する")
+* **役割**: 読み取り専用モード (`?mode=ro`) で指定されたSELECTクエリを実行し、結果をJSON形式の文字列で返す。データが存在しない場合は専用のメッセージを返す。**（Issue #178で修正）** 以前は`conn.close()`が正常経路にしか無く`try/finally`が無かったため、`cursor.execute()`が例外を送出する（不正なSQL等）たびに接続がクローズされずGC任せで残り、長期稼働プロセスでのfd/接続リークを招いていた。`conn`を`try`節の前で`None`初期化し、`finally`節で確実に`close()`するよう修正した。
+* 根拠: `def execute_read_query(query: str, params: tuple = ()) -> str:` (行番号: 47-67 / 抜粋: "読み取り専用モードで安全にSELECTを実行する")、接続クリーンアップの修正 (行番号: 65-67 / 抜粋: "finally:\n        if conn:\n            conn.close()")
 
 
 * **引数/リクエスト**:
@@ -91,67 +91,67 @@
 
 * **戻り値/レスポンス**: `str`: JSON形式の検索結果文字列、該当データなしメッセージ、またはエラーメッセージ。
 * 根拠: `-> str:` (行番号: 47 / 抜粋: "-> str:")
-* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 57 / 抜粋: "return "該当するデータはありませんでした。"")
-* 根拠: `return json.dumps(...)` (行番号: 58 / 抜粋: "return json.dumps([dict(r) for r in rows]")
+* 根拠: `if not rows: return "該当するデータはありませんでした。"` (行番号: 61 / 抜粋: "return "該当するデータはありませんでした。"")
+* 根拠: `return json.dumps(...)` (行番号: 62 / 抜粋: "return json.dumps([dict(r) for r in rows]")
 
 
-* **副作用**: データベースからのデータ読み取り。
-* 根拠: `cursor.execute(query, params)` (行番号: 53 / 抜粋: "cursor.execute(query, params)")
+* **副作用**: データベースからのデータ読み取り。接続は正常終了・例外終了のいずれの経路でも`finally`節で必ずクローズされる。
+* 根拠: `cursor.execute(query, params)` (行番号: 58 / 抜粋: "cursor.execute(query, params)")、`finally: if conn: conn.close()` (行番号: 65-67 / 抜粋: "finally:\n        if conn:\n            conn.close()")
 
 
-* **エラーハンドリング**: 例外 (`Exception`) をキャッチし、例外を送出せずにエラーメッセージの文字列として返す。
-* 根拠: `except Exception as e: return f"検索エラー: {str(e)}"` (行番号: 59-60 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 例外 (`Exception`) をキャッチし、例外を送出せずにエラーメッセージの文字列として返す。接続の後始末は`except`節ではなく`finally`節が担う。
+* 根拠: `except Exception as e: return f"検索エラー: {str(e)}"` (行番号: 63-64 / 抜粋: "except Exception as e:")
 
 
 
 ### `save_log_generic`
 
 * **役割**: 指定されたテーブル、カラム、値を用いてINSERTクエリを動的に構築し、`get_db_cursor`経由でデータを保存する。H-1の`get_db_cursor`書き直しに伴い、返るカーソルが常に有効になったため、以前存在した`if cur:`チェックは削除された。`get_db_cursor`自体が送出する例外（接続確立失敗・with本体内のDBエラー等）も含めて関数全体を`try/except`で捕捉する構成に整理されている。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 62-73 / 抜粋: "汎用データ保存関数")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 69-80 / 抜粋: "汎用データ保存関数")
 
 
 * **引数/リクエスト**:
 * `table` (str): 保存対象のテーブル名。
 * `columns_list` (List[str]): 保存対象のカラム名のリスト。
 * `values_list` (tuple): 保存する値のタプル。
-* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 62 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 69 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: 保存成功時は `True`、失敗時は `False`。
-* 根拠: `-> bool:` (行番号: 62 / 抜粋: "-> bool:")
-* 根拠: `return True` / `return False` (行番号: 70, 73 / 抜粋: "return True")
+* 根拠: `-> bool:` (行番号: 69 / 抜粋: "-> bool:")
+* 根拠: `return True` / `return False` (行番号: 77, 80 / 抜粋: "return True")
 
 
 * **副作用**: DBへのINSERT実行（データ書き込み）。
-* 根拠: `cur.execute(sql, values_list)` (行番号: 69 / 抜粋: "cur.execute(sql, values_list)")
+* 根拠: `cur.execute(sql, values_list)` (行番号: 76 / 抜粋: "cur.execute(sql, values_list)")
 
 
 * **エラーハンドリング**: `get_db_cursor`のwith文全体を囲む`try/except Exception`で、接続エラー・SQL実行エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して `False` を返す。
-* 根拠: `except Exception as e: logger.error(...); return False` (行番号: 71-73 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e: logger.error(...); return False` (行番号: 78-80 / 抜粋: "except Exception as e:")
 
 
 
 ### `save_log_async`
 
 * **役割**: `save_log_generic` を非同期で実行するためのラッパー関数。
-* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 75-78 / 抜粋: "save_log_generic の非同期ラッパー")
+* 根拠: `async def save_log_async(table: str, columns_list: List[str], values_list: tuple) -> bool:` (行番号: 82-85 / 抜粋: "save_log_generic の非同期ラッパー")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (tuple) （`save_log_generic` と同等）
-* 根拠: `async def save_log_async(...)` (行番号: 75 / 抜粋: "table: str, columns_list: List[str]")
+* 根拠: `async def save_log_async(...)` (行番号: 82 / 抜粋: "table: str, columns_list: List[str]")
 
 
 * **戻り値/レスポンス**: `bool`: `save_log_generic` の実行結果。
-* 根拠: `-> bool:` (行番号: 75 / 抜粋: "-> bool:")
-* 根拠: `return await loop.run_in_executor(...)` (行番号: 78 / 抜粋: "return await loop.run_in_executor")
+* 根拠: `-> bool:` (行番号: 82 / 抜粋: "-> bool:")
+* 根拠: `return await loop.run_in_executor(...)` (行番号: 85 / 抜粋: "return await loop.run_in_executor")
 
 
 * **副作用**: 非同期スレッドプールでの `save_log_generic` の実行。
-* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 78 / 抜粋: "loop.run_in_executor(None, save_log_generic")
+* 根拠: `loop.run_in_executor(None, save_log_generic, ...)` (行番号: 85 / 抜粋: "loop.run_in_executor(None, save_log_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_log_generic` のエラーハンドリングに依存）。
-* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 75-78 / 抜粋: "loop = asyncio.get_running_loop()")
+* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 82-85 / 抜粋: "loop = asyncio.get_running_loop()")
 
 
 
@@ -230,8 +230,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `SQLITE_DB_PATH` の定義を確認し、対象DBの特定をするため。 | `config.SQLITE_DB_PATH` を参照している (行番号: 21, 50) |
-| 中 | 呼び出し元ファイル (不明) | どのテーブルに対して `save_log_generic` が呼び出されているか、どんなクエリが `execute_read_query` に渡されているかを確認するため。 | 各関数が引数としてクエリやテーブル名を受け取る汎用関数であるため (行番号: 47, 62) |
+| 高 | `config.py` | `SQLITE_DB_PATH` の定義を確認し、対象DBの特定をするため。 | `config.SQLITE_DB_PATH` を参照している (行番号: 21, 55) |
+| 中 | 呼び出し元ファイル (不明) | どのテーブルに対して `save_log_generic` が呼び出されているか、どんなクエリが `execute_read_query` に渡されているかを確認するため。 | 各関数が引数としてクエリやテーブル名を受け取る汎用関数であるため (行番号: 47, 69) |
 
 ## 8. 保守上の注意点
 
