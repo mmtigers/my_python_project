@@ -16,6 +16,7 @@ import logging
 import os
 import subprocess
 import sys
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
@@ -72,6 +73,38 @@ class TestSilencePolicyFilterMatchesRealUvicornLogFormat:
         record = _make_uvicorn_access_record("POST", "/api/quest/data", 200)
         filt = unified_server.SilencePolicyFilter()
         assert filt.filter(record) is True
+
+
+class TestRunUvicornServerDoesNotSilenceAccessLoggerLevel:
+    """Issue #229の回帰テスト。
+
+    以前は本番起動経路(__main__)が uvicorn.config.LOGGING_CONFIG を書き換え、
+    "uvicorn.access" ロガー自体のレベルを WARNING に固定していた。uvicornの
+    アクセスログは常に logger.info()(レベル20)で出力されるため、ロガーの
+    レベルチェックの時点でログレコードが作られず、lifespan()内で登録される
+    SilencePolicyFilter(GETの200/304ポーリングのみを選別して抑制し、POST・
+    エラーは残す設計)が一度も呼び出されなかった。上記のfilter()単体テスト
+    (TestSilencePolicyFilterMatchesRealUvicornLogFormat)はfilter()を直接呼び出す
+    だけなので、この「ロガーのレベルチェックでレコード自体が作られない」という
+    不具合を検知できない。本テストは、実際の起動エントリポイントが
+    uvicorn.run()へどのようなlog_configを渡すかを検証することで、この経路を
+    直接カバーする。
+    """
+
+    def test_uvicorn_run_is_not_given_a_log_config_that_silences_access_logger(self):
+        with patch("uvicorn.run") as mock_run:
+            unified_server._run_uvicorn_server()
+
+        assert mock_run.call_count == 1
+        _, kwargs = mock_run.call_args
+        log_config = kwargs.get("log_config")
+        if log_config is not None:
+            access_level = log_config.get("loggers", {}).get("uvicorn.access", {}).get("level")
+            assert access_level != "WARNING", (
+                "uvicorn.run()に渡されたlog_configがuvicorn.accessロガーの"
+                "レベルをWARNINGへ固定しており、SilencePolicyFilterに"
+                "アクセスログが一切到達しなくなる"
+            )
 
 
 def test_cors_middleware_uses_config_cors_origins():

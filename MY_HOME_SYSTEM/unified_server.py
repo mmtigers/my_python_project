@@ -326,14 +326,23 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-if __name__ == "__main__":
+def _run_uvicorn_server() -> None:
+    """本番起動経路のエントリポイント(`python unified_server.py`)。
+
+    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。
+    uvicornのアクセスログは常にlogger.info()(レベル20)で出力されるため、
+    ロガーのレベルチェックの時点でログレコードが作られず、lifespan()内で
+    登録しているSilencePolicyFilter(GETの200/304ポーリングのみを選別して抑制し、
+    POST・エラーは残す設計)が一度も呼び出されなかった。結果、POST等の状態変更
+    リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない
+    状態になっていた。デフォルトのlog_config(uvicorn.access=INFO)をそのまま使い、
+    レコード生成自体は妨げず、SilencePolicyFilterに選別を委ねる。
+    """
     import uvicorn
-    import logging
-    
-    # 【改修】Uvicornのデフォルトログ設定を取得し、アクセスログのレベルを WARNING に変更
-    # これにより、正常なAPIポーリングやWebhook受信時の INFO ログスパムを抑止する
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
 
     # 0.0.0.0 で起動することで外部（192.168.1.xxx等）からのアクセスを許可します
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=log_config)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    _run_uvicorn_server()
