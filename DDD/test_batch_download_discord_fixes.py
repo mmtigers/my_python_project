@@ -629,5 +629,75 @@ class TestConfigurableRequestTimeout:
         assert self._request_timeout_with_env(monkeypatch, "90") == 90
 
 
+class TestFileSystemManagerEnsureDirCatchesGenericOSError:
+    """Issue #236の回帰テスト: ensure_dirがPermissionError以外のOSError
+    (読み取り専用マウントのErrno 30、NAS切断時のErrno 5、ディスクフル時の
+    Errno 28等)を捕捉せず、専用のDiscord通知を経由しないまま呼び出し元へ
+    伝播していた不具合。extract_youtube_urls.pyのprocess_subscriptions(#185)と
+    同様にOSError全般を捕捉するよう修正した。"""
+
+    def test_permission_error_still_sends_dedicated_notification_and_returns_false(
+        self, monkeypatch, tmp_path
+    ):
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_permission_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False
+        assert len(calls) == 1
+        assert "権限エラー" in calls[0][0]
+        assert calls[0][1] is True
+
+    def test_read_only_filesystem_oserror_sends_notification_and_returns_false(
+        self, monkeypatch, tmp_path
+    ):
+        """読み取り専用マウント(Errno 30)のような、PermissionError以外のOSErrorの回帰テスト。"""
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_read_only_error(*args, **kwargs):
+            raise OSError(30, "Read-only file system")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_read_only_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False, "PermissionError以外のOSErrorも呼び出し元へ伝播させず捕捉すべき"
+        assert len(calls) == 1, "OSError発生時も専用のDiscord通知を送るべき"
+        assert calls[0][1] is True
+
+    def test_disk_full_oserror_sends_notification_and_returns_false(self, monkeypatch, tmp_path):
+        """ディスクフル(Errno 28)のような、PermissionError以外のOSErrorの回帰テスト。"""
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_disk_full_error(*args, **kwargs):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_disk_full_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False
+        assert len(calls) == 1
+        assert calls[0][1] is True
+
+    def test_success_returns_true_and_sends_no_notification(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "new_sub_dir")
+
+        assert result is True
+        assert calls == []
+        assert (tmp_path / "new_sub_dir").is_dir()
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
