@@ -141,8 +141,8 @@ graph TD
 ## 8. 保守上の注意点
 
 * 定数としてエクスポートされる各オブジェクトのスキーマ（プロパティ構成）はハードコードされている。アプリ全体でユーザー、クエスト、報酬のデータ構造に変更があった場合、このファイルのオブジェクト構造も手動で合わせる必要がある。
-* **ファイル冒頭コメントの記載パスが古い**: ファイル1行目のコメントに `// family-quest/src/constants/masterData.js` と記載されているが、実際の配置場所は `family-quest/src/lib/masterData.js` であり、ファイルが移動した際にコメントの更新が漏れている。
-* 根拠: [ファイル冒頭コメント] (行番号: 1 / 抜粋: "// family-quest/src/constants/masterData.js")
+* ファイル冒頭コメントの記載パスは実際の配置場所 (`family-quest/src/lib/masterData.js`) と一致している。
+* 根拠: [ファイル冒頭コメント] (行番号: 1 / 抜粋: "// family-quest/src/lib/masterData.js")
 
 ## 9. 不明事項一覧
 
