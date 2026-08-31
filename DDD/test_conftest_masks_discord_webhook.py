@@ -90,7 +90,13 @@ def _run_probe_and_count_webhook_posts(*, conftest_active: bool) -> list:
             [sys.executable, "-m", "pytest", str(probe_path), "-q"],
             cwd=str(DDD_DIR),
             env=env,
-            timeout=30,
+            # このサブプロセスはnewface_monitor経由でcore.logger/configの重い
+            # importチェーンをコールドスタートで走らせる(モジュールimportの
+            # キャッシュを外側のpytestプロセスと共有できないため)。ローカルの
+            # コールドキャッシュ実測で約10秒だったが、CI初回実行(依存インストール
+            # 直後でディスクキャッシュも無い状態)では30秒を超えて
+            # TimeoutExpiredになることを確認したため、余裕を持たせる。
+            timeout=120,
             capture_output=True,
         )
     finally:
