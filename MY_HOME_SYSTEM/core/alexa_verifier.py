@@ -27,6 +27,7 @@ https://developer.amazon.com/en-US/docs/alexa/custom-skills/host-a-custom-skill-
 import time
 import base64
 import logging
+import posixpath
 from datetime import datetime, timezone
 from typing import Dict, Tuple
 from urllib.parse import urlparse
@@ -61,7 +62,12 @@ def _validate_cert_chain_url(url: str) -> None:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}")
     if (parsed.hostname or "").lower() != CERT_CHAIN_URL_HOSTNAME:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl host: {parsed.hostname!r}")
-    if not parsed.path.startswith(CERT_CHAIN_URL_PATH_PREFIX):
+    # #173: Amazon公式の検証手順は「URLパスを正規化した後に/echo.api/で始まること」を
+    # 要求している(公式SDKの検証器も正規化を実施)。生のparsed.pathへのstartswith判定
+    # のみだと、"/echo.api/../<別バケット>/cert.pem" のような".."を含むパスがこの
+    # チェックを素通りしてしまう。posixpath.normpathで正規化してから判定する。
+    normalized_path = posixpath.normpath(parsed.path)
+    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl path: {parsed.path!r}")
     if (parsed.port or CERT_CHAIN_URL_PORT) != CERT_CHAIN_URL_PORT:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl port: {parsed.port!r}")

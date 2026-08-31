@@ -105,6 +105,20 @@ class TestVerifySignature:
         with pytest.raises(av.AlexaVerificationError):
             av.verify_signature(b"body", "sig", bad_url)
 
+    @pytest.mark.parametrize("traversal_url", [
+        # Issue #173: 正規化前は "/echo.api/" で始まるためstartswithを素通りしてしまうが、
+        # ".." を解決すると /echo.api/ の外側を指す
+        "https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/../../etc/passwd",
+        "https://s3.amazonaws.com/echo.api/a/../../evil-bucket/cert.pem",
+    ])
+    def test_rejects_cert_chain_url_with_path_traversal(self, traversal_url):
+        """Issue #173の回帰テスト: Amazon公式の検証手順はURLパスを正規化した後に
+        /echo.api/で始まることを要求するが、以前は生のparsed.pathへのstartswith判定
+        のみだったため、".."を含むURLがチェックを素通りしていた。"""
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_signature(b"body", "sig", traversal_url)
+
     def test_rejects_expired_certificate(self, rsa_key):
         cert = _make_cert(rsa_key, not_before_delta=-10, not_after_delta=-1)
         pem = cert.public_bytes(serialization.Encoding.PEM)
