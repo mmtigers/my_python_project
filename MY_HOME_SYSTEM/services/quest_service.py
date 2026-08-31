@@ -338,6 +338,24 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
+            # 対象者・出現条件のサーバー側検証(Issue #163)。
+            # filter_active_quests(GET /dataの表示整形専用)にしか無かった判定を、
+            # API直叩きでバイパスして他人向けクエスト・時間帯外・曜日外・
+            # 未出現のrandomクエストを完了できてしまう穴を塞ぐ。報酬購入側は
+            # Issue #95で同種のサーバー側targetチェックを追加済みだったが、
+            # 完了側には未展開のまま残っていた。
+            # target_user は 'all'/本人のuser_id/'siblings'(role_childのみ)の
+            # いずれかのみ許可する。'siblings'をrole_adultが完了すると、
+            # _process_coop_quest_completionを経由せず単独即時報酬になってしまう
+            # (兄妹連携クエストの前提を破る)ため、これも合わせて拒否する。
+            is_sibling_target = quest['target_user'] == 'siblings'
+            if quest['target_user'] not in ('all', user_id) and not (
+                is_sibling_target and user['role'] == ROLE_CHILD
+            ):
+                raise HTTPException(status_code=403, detail="This quest is not available for you")
+            if not self._is_quest_currently_active(quest):
+                raise HTTPException(status_code=403, detail="This quest is not currently available")
+
             # スパムチェック
             last_hist = cur.execute("""
                 SELECT completed_at FROM quest_history 
@@ -675,46 +693,63 @@ class QuestService:
                     (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))
         cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
+    def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:
+        """quest_master 1行(dict/sqlite3.Row。どちらも `[]` でのアクセスに対応)が
+        「今」出現・実行可能な条件(limited型の期間・random型の出現抽選・時間帯・曜日)を
+        満たすかを判定する。filter_active_quests(GET /dataの表示フィルタ)と
+        _process_complete_quest_locked(完了APIのサーバー側検証、Issue #163)の
+        両方から呼ばれる共通ロジック。表示上出現していないクエストがAPI直叩きで
+        完了できてしまう食い違いを防ぐため、判定基準を完全に一致させている。"""
+        now = now or datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        today_date = now.date()
+        current_time_str = now.strftime("%H:%M")
+
+        if quest['quest_type'] == 'limited':
+            try:
+                if quest['start_date']:
+                    y, m, d = map(int, quest['start_date'].split('-'))
+                    if today_date < datetime.date(y, m, d):
+                        return False
+                if quest['end_date']:
+                    y, m, d = map(int, quest['end_date'].split('-'))
+                    if today_date > datetime.date(y, m, d):
+                        return False
+            except ValueError as e:
+                logger.warning(f"Date parse error for quest {quest['quest_id']}: {e}")
+                return False
+
+        if quest['quest_type'] == 'random':
+            seed = f"{now.strftime('%Y-%m-%d')}_{quest['quest_id']}"
+            if random.Random(seed).random() > quest['occurrence_chance']:
+                return False
+
+        if quest['start_time'] and quest['end_time']:
+            if quest['start_time'] <= quest['end_time']:
+                if not (quest['start_time'] <= current_time_str <= quest['end_time']):
+                    return False
+            else:
+                if not (current_time_str >= quest['start_time'] or current_time_str <= quest['end_time']):
+                    return False
+
+        if quest['day_of_week']:
+            days_list = [int(d) for d in quest['day_of_week'].split(',')]
+            if today_date.weekday() not in days_list:
+                return False
+
+        return True
+
     def filter_active_quests(self, quests: List[dict]) -> List[dict]:
         filtered = []
         now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-        today_date = now.date()
-        current_time_str = now.strftime("%H:%M")
-        current_weekday = today_date.weekday()
 
         for q in quests:
-            if q['quest_type'] == 'limited':
-                try:
-                    if q.get('start_date'):
-                        y, m, d = map(int, q['start_date'].split('-'))
-                        start_dt = datetime.date(y, m, d)
-                        if today_date < start_dt: continue
-                    if q.get('end_date'):
-                        y, m, d = map(int, q['end_date'].split('-'))
-                        end_dt = datetime.date(y, m, d)
-                        if today_date > end_dt: continue
-                except ValueError as e:
-                    logger.warning(f"Date parse error for quest {q.get('quest_id')}: {e}")
-                    continue
-            if q['quest_type'] == 'random':
-                seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
-                if random.Random(seed).random() > q['occurrence_chance']: continue
-            if q.get('start_time') and q.get('end_time'):
-                if q['start_time'] <= q['end_time']:
-                    if not (q['start_time'] <= current_time_str <= q['end_time']): continue
-                else:
-                    if not (current_time_str >= q['start_time'] or current_time_str <= q['end_time']): continue
+            if not self._is_quest_currently_active(q, now):
+                continue
 
             q['icon'] = q['icon_key']
             q['type'] = q['quest_type']
             q['target'] = q['target_user']
-            if q['day_of_week']:
-                days_list = [int(d) for d in q['day_of_week'].split(',')]
-                q['days'] = days_list
-                if current_weekday not in days_list:
-                    continue
-            else:
-                q['days'] = None
+            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None
             filtered.append(q)
         return filtered
     
