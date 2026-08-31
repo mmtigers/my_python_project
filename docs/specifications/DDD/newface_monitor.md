@@ -379,20 +379,24 @@
 
 ### `DiscordNotifier.notify_daily_summary`
 
-* **役割**: その日に新規検知したサイト別件数を、個別キャスト通知(embed形式)とは異なるテキスト形式(content)で1件だけDiscordへ通知する。
-* 根拠: [メソッド定義とDocstring] (行番号: 1364〜1373 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> None:\n        """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。")
+* **役割**: その日に新規検知したサイト別件数を、個別キャスト通知(embed形式)とは異なるテキスト形式(content)で1件だけDiscordへ通知する。**（Issue #226で修正）** 以前は戻り値が常に`None`で送信成否を呼び出し元へ伝える手段が無く、呼び出し元`_maybe_send_daily_summary`は送信の成否を確認せず無条件に集計をクリアしていたため、Webhook未設定時やDiscordへの送信失敗時にも集計が失われ、同日中の再送もできなくなっていた。送信成否を`bool`で返すよう修正し、呼び出し元が成功時のみ集計をクリアできるようにした。
+* 根拠: [メソッド定義とDocstring] (行番号: 1387〜1403 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:\n        """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。")
 
 
 * **引数/リクエスト**: `counts: Dict[str, int]`（site_id→新規検知件数）, `site_names: Dict[str, str]`（site_id→表示名）, `date_str: str`（サマリ対象日）
-* 根拠: [引数定義とDocstring] (行番号: 1364, 1370〜1373 / 抜粋: "counts (Dict[str, int]): site_id -> 新規検知件数 の集計。\n            site_names (Dict[str, str]): site_id -> 表示名 の対応表。\n            date_str (str): サマリ対象日（'YYYY-MM-DD'）。")
+* 根拠: [引数定義とDocstring] (行番号: 1387, 1393〜1396 / 抜粋: "counts (Dict[str, int]): site_id -> 新規検知件数 の集計。\n            site_names (Dict[str, str]): site_id -> 表示名 の対応表。\n            date_str (str): サマリ対象日（'YYYY-MM-DD'）。")
 
 
-* **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1364 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> None:")
+* **戻り値/レスポンス**: `bool`（Issue #226で`None`から変更）。送信に成功した場合`True`、Webhook未設定または送信失敗の場合`False`。
+* 根拠: [戻り値ヒントとDocstring] (行番号: 1387, 1398〜1402 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:" / "Returns:\n            bool: 送信に成功した場合True。Webhook未設定または送信失敗の場合False。")
 
 
 * **副作用**: 件数降順でのサマリ文字列組み立て、2000文字制限に対する安全な切り詰め（1900文字超過分）、Webhookへの`session.post`呼び出し、成功/失敗ログ出力。
-* 根拠: [文字数制限処理] (行番号: 1392〜1394 / 抜粋: "# Discordのcontentは2000文字制限があるため、超過分は安全側で切り詰める\n        if len(content) > 1900:\n            content = content[:1900] + "\\n...(以下省略)"")
+* 根拠: [文字数制限処理] (行番号: 1415〜1417 / 抜粋: "# Discordのcontentは2000文字制限があるため、超過分は安全側で切り詰める\n        if len(content) > 1900:\n            content = content[:1900] + "\\n...(以下省略)"")
+
+
+* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し`False`を返す（Issue #226以前は`None`を返して`return`するのみで、呼び出し元から失敗として検知できなかった）。`requests.RequestException`発生時はエラーログを出力し`False`を返す。送信成功時は`True`を返す。
+* 根拠: [送信成否分岐] (行番号: 1398〜1400, 1420〜1426 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")\n            return False" / "except requests.RequestException as e:\n            logger.error(f"Failed to send daily summary notification: {e}")\n            return False")
 
 
 * **エラーハンドリング**: Webhook URL未設定時は警告ログを出力して`return`。`requests.RequestException`発生時はエラーログを出力する（例外は再送出しない）。
@@ -669,20 +673,20 @@
 
 ### `_maybe_send_daily_summary`
 
-* **役割**: 21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する関数。cron等による1時間毎の別プロセス実行を前提に、実行時刻の時(hour)が21かどうかで時刻トリガーを判定し、同日中の重複送信は送信済み日付(`last_sent_date`)の永続化で防止する。**（Issue #183で修正）** `record_daily_new_casts`側がカレンダー日付によるリセットを行わなくなったため、ここで送信するのは「厳密な当日分」ではなく「前回この関数が実際に送信してから今までに累積した全件数」になる。21時台の実行がまる1日以上飛んだ場合(cron欠落・ロック競合)も、次に成功した21時台の実行で未送信分がまとめて送られる(取りこぼしなし)。送信が成功した場合のみ集計をクリアする。
-* 根拠: [関数定義とDocstring] (行番号: 1917〜1935 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:\n        """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。")
+* **役割**: 21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する関数。cron等による1時間毎の別プロセス実行を前提に、実行時刻の時(hour)が21かどうかで時刻トリガーを判定し、同日中の重複送信は送信済み日付(`last_sent_date`)の永続化で防止する。**（Issue #183で修正）** `record_daily_new_casts`側がカレンダー日付によるリセットを行わなくなったため、ここで送信するのは「厳密な当日分」ではなく「前回この関数が実際に送信してから今までに累積した全件数」になる。21時台の実行がまる1日以上飛んだ場合(cron欠落・ロック競合)も、次に成功した21時台の実行で未送信分がまとめて送られる(取りこぼしなし)。**（Issue #226で修正）** 以前は`notify_daily_summary`の戻り値(常に`None`)を確認せず、送信の成否にかかわらず無条件に`counts`をクリアし`last_sent_date`を当日にセットしていたため、Webhook未設定やDiscordへの送信失敗時にもその日の集計が失われ、かつ`last_sent_date`が当日にセットされることで本関数冒頭のガード節により同日中の再送機会も失われていた。`notify_daily_summary`が返す`bool`を確認し、送信成功時のみ集計クリア・`last_sent_date`更新を行うよう修正した。失敗時は何も保存せず、次回実行時に再送を試みられるようにする。
+* 根拠: [関数定義とDocstring] (行番号: 1925〜1943 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:\n        """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。")、送信成否分岐 (行番号: 1955, 1957〜1966 / 抜粋: "sent = notifier.notify_daily_summary(counts, site_names, today_str)" / "if sent:\n        DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})\n    else:\n        logger.error(")
 
 
 * **引数/リクエスト**: `notifier: DiscordNotifier`（使い回すインスタンス）
-* 根拠: [引数定義とDocstring] (行番号: 1917, 1933〜1934 / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。")
+* 根拠: [引数定義とDocstring] (行番号: 1925, 1941〜1942 / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1917 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1925 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:")
 
 
-* **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し、条件成立時の`notifier.notify_daily_summary`呼び出し。送信成功時は`counts`を`{}`にクリアして保存する（Issue #183）。
-* 根拠: [メイン処理] (行番号: 1945, 1947, 1949 / 抜粋: "notifier.notify_daily_summary(counts, site_names, today_str)")
+* **副作用**: `DataManager.load_daily_summary`の呼び出し、条件成立時の`notifier.notify_daily_summary`呼び出し。**（Issue #226で修正）** 送信成功時(`notify_daily_summary`が`True`を返した場合)のみ`DataManager.save_daily_summary`を呼び出し`counts`を`{}`にクリアして`last_sent_date`を更新する。送信失敗時(`False`)は`save_daily_summary`を呼び出さず、エラーログのみ出力する。
+* 根拠: [メイン処理と送信成否分岐] (行番号: 1955, 1957〜1966 / 抜粋: "sent = notifier.notify_daily_summary(counts, site_names, today_str)" / "if sent:\n        DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})\n    else:\n        logger.error(\n            "Daily summary notification failed; keeping accumulated counts for retry "")
 
 
 * **エラーハンドリング**: 現在時刻が21時台でない場合、または当日分が送信済みの場合は早期`return`する（例外処理は本関数にはない）。

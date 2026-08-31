@@ -258,6 +258,57 @@ class TestDailySummaryLateCountsNotLost:
         assert sent_counts == {"restpia_test": 3}
 
 
+class TestDailySummarySendFailureDoesNotLoseCounts:
+    """Issue #226の回帰テスト: notify_daily_summaryがWebhook未設定/送信失敗で
+    Falseを返した場合、_maybe_send_daily_summaryは集計をクリアせず、
+    last_sent_dateも更新しないこと(同日中の再送機会を残すため)。"""
+
+    def test_send_failure_keeps_counts_and_allows_retry_same_day(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
+
+        DataManager.record_daily_new_casts("restpia_test", 3)
+
+        notifier = MagicMock()
+        notifier.notify_daily_summary.return_value = False  # Webhook失敗を模す
+
+        module._maybe_send_daily_summary(notifier)
+
+        # 送信失敗時は集計がクリアされず、last_sent_dateも更新されないこと
+        result = DataManager.load_daily_summary()
+        assert result["counts"] == {"restpia_test": 3}
+        assert result.get("last_sent_date") != "2026-08-30"
+
+        # 送信失敗時はガード節(last_sent_date==today_str)に引っかからず、
+        # 同日中の再実行で再送を試みられること
+        notifier.notify_daily_summary.return_value = True
+        module._maybe_send_daily_summary(notifier)
+
+        assert notifier.notify_daily_summary.call_count == 2
+        sent_counts = notifier.notify_daily_summary.call_args.args[0]
+        assert sent_counts == {"restpia_test": 3}
+
+        result = DataManager.load_daily_summary()
+        assert result["counts"] == {}
+        assert result["last_sent_date"] == "2026-08-30"
+
+    def test_send_success_still_clears_counts(self, tmp_path, monkeypatch):
+        """回帰防止: Falseケースの追加が成功時の既存挙動(#183)を壊していないこと。"""
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
+
+        DataManager.record_daily_new_casts("restpia_test", 3)
+
+        notifier = MagicMock()
+        notifier.notify_daily_summary.return_value = True
+
+        module._maybe_send_daily_summary(notifier)
+
+        result = DataManager.load_daily_summary()
+        assert result["counts"] == {}
+        assert result["last_sent_date"] == "2026-08-30"
+
+
 if __name__ == "__main__":
     import pytest
 
