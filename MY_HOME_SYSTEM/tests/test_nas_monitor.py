@@ -12,6 +12,7 @@ from unittest.mock import patch
 # プロジェクトルートにパスを通す
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import common
 import config
 from monitors.nas_monitor import NasMonitor
 
@@ -358,6 +359,65 @@ class TestNasMonitorWriteTestFilenameUniqueness(unittest.TestCase):
             self.assertEqual(len(set(used_paths)), len(used_paths))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+class TestNasMonitorSaveToDbWritesNasRecords:
+    """Issue #168の回帰テスト: save_to_dbは以前device_recordsにしか書き込んで
+    おらず、ダッシュボードのNASステータスカード(views/dashboard/summary.py)・
+    NAS状態パネル(views/dashboard/log_tab.py)が読むconfig.SQLITE_TABLE_NAS
+    (=nas_records)には何も書き込まれず、常に「データなし」表示のままだった。"""
+
+    def test_healthy_state_is_recorded_in_nas_records(self, isolated_db):
+        monitor = NasMonitor()
+        usage = {"total_gb": 100.0, "used_gb": 40.0, "free_gb": 60.0, "percent": 40.0}
+
+        monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None, "nas_recordsに何も書き込まれていない"
+        # views/dashboard/summary.py・log_tab.pyはstatus_ping/status_mountを
+        # 文字列 'OK' と直接比較するため、真偽値ではなくこの文字列である必要がある。
+        assert row["status_ping"] == "OK"
+        assert row["status_mount"] == "OK"
+        assert row["total_gb"] == 100.0
+        assert row["used_gb"] == 40.0
+        assert row["free_gb"] == 60.0
+        assert row["percent"] == 40.0
+
+    def test_unhealthy_state_is_recorded_as_ng(self, isolated_db):
+        monitor = NasMonitor()
+
+        monitor.save_to_db(ping_ok=False, mount_ok=False, usage=None)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None
+        assert row["status_ping"] == "NG"
+        assert row["status_mount"] == "NG"
+
+    def test_device_records_write_is_unaffected(self, isolated_db):
+        """既存のdevice_records書き込み(他のNAS使用率グラフ等が依存する可能性が
+        あるため)は、nas_records書き込みの追加によって壊れていないこと。"""
+        monitor = NasMonitor()
+        usage = {"total_gb": 100.0, "used_gb": 40.0, "free_gb": 60.0, "percent": 40.0}
+
+        monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM device_records WHERE device_name='NAS_Monitor' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None
+        assert row["contact_state"] == "mounted"
+        assert row["nas_usage_percent"] == 40.0
 
 
 if __name__ == "__main__":
