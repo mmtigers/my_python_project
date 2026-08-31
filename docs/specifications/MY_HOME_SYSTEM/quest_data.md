@@ -94,70 +94,93 @@
 
 ### `USERS`
 
-* **役割**: 家族4人（dad, mom, son, daughter）の初期ユーザー情報（`user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `role`, `info`）を定義するリスト。`role`は各ユーザーに`role_adult`（dad, mom）または`role_child`（son, daughter）を明示する（H-2で追加。`services/quest_service.py`の`sync_master_data`が持つ`INSERT ... ON CONFLICT DO UPDATE`は元々`role`をDBへ反映する実装だったが、マスタ側に`role`キーが無かったため新規/空DBでの初回INSERT時に常に`NULL`となり、`_process_complete_quest_locked`の`user['role'] == ROLE_CHILD`判定が全員`False`になって子供も大人扱いで承認スキップの即時報酬付与になる不具合があった）。
-* 根拠: `USERS = [` (行番号: 24〜45 / 抜粋: "USERS = [\n    {\n        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員',\n        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', 'role': 'role_adult',")
+* **役割**: 家族4人（dad, mom, son, daughter）の初期ユーザー情報（`user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `role`, `info`）を定義するリスト。`role`は各ユーザーに`role_adult`（dad, mom）または`role_child`（son, daughter）を明示する（H-2で追加。`services/quest_service.py`の`sync_master_data`が持つ`INSERT ... ON CONFLICT DO UPDATE`は元々`role`をDBへ反映する実装だったが、マスタ側に`role`キーが無かったため新規/空DBでの初回INSERT時に常に`NULL`となり、`_process_complete_quest_locked`の`user['role'] == ROLE_CHILD`判定が全員`False`になって子供も大人扱いで承認スキップの即時報酬付与になる不具合があった）。`info`の値は年齢等の個人情報を含まないプレースホルダー文字列であり（M-9-1）、後続の`quest_users.local.json`読み込み処理により実行時に上書きされうる。
+* 根拠: `USERS = [` (行番号: 34〜55 / 抜粋: "USERS = [\n    {\n        'user_id': 'dad', 'name': 'まさひろ', 'job_class': '会社員',\n        'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️', 'role': 'role_adult',"), `'info': '家族の生活基盤を守る冒険者'` (行番号: 38 / 抜粋: "'info': '家族の生活基盤を守る冒険者'")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
-* 根拠: (行番号: 24 / 抜粋: "USERS = [")
+* 根拠: (行番号: 34 / 抜粋: "USERS = [")
 
 
 * **戻り値/レスポンス**: `list[dict]`。4件のユーザー辞書（dad, mom, son, daughter）を含む。各辞書は `user_id`, `name`, `job_class`, `level`, `exp`, `gold`, `avatar`, `role`, `info` キーを持つ。`role`の値はdad/momが`'role_adult'`、son/daughterが`'role_child'`。
-* 根拠: `'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',` (行番号: 41 / 抜粋: "'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',"), `'role': 'role_child'` (行番号: 42 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', 'role': 'role_child',")
+* 根拠: `'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',` (行番号: 51 / 抜粋: "'user_id': 'daughter', 'name': 'すずか', 'job_class': '遊び人',"), `'role': 'role_child'` (行番号: 52 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '👶', 'role': 'role_child',")
 
 
-* **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 24〜45 / 抜粋: "USERS = [")
+* **副作用**: モジュールインポート時にメモリ上へリストが構築される。直後の`quest_users.local.json`読み込み処理（下記参照）から、この段階で構築された各辞書がin-placeで更新（`dict.update`）されうる。
+* 根拠: (行番号: 34〜55 / 抜粋: "USERS = ["), (行番号: 71 / 抜粋: "_users_by_id[_user_id].update(_overrides)")
 
 
 * **エラーハンドリング**: なし（バリデーションロジックを含まない）
-* 根拠: (行番号: 24〜45 / 抜粋: "USERS = [")
+* 根拠: (行番号: 34〜55 / 抜粋: "USERS = [")
+
+
+
+### `quest_users.local.json` 読み込み処理（モジュールレベルコード）
+
+* **役割**: `QUEST_USERS_LOCAL_PATH`環境変数（未設定時はファイルと同じディレクトリの`quest_users.local.json`）が指すファイルが存在すれば、その内容をJSONとして読み込み、`user_id`をキーに`USERS`内の対応する辞書を`dict.update`で上書きする。ファイルが存在しなければ何もせず、`USERS`はプレースホルダーのまま維持される。
+* 根拠: [モジュールレベルコード] (行番号: 60〜73 / 抜粋: "_QUEST_USERS_LOCAL_PATH = os.environ.get(\n    \"QUEST_USERS_LOCAL_PATH\",")
+
+
+* **引数/リクエスト**: 該当なし（関数ではないモジュールレベルコード）。実質的な入力は環境変数`QUEST_USERS_LOCAL_PATH`（テスト用のパス差し替えに使用）と、ファイルシステム上の`quest_users.local.json`の内容。
+* 根拠: (行番号: 60〜63 / 抜粋: "_QUEST_USERS_LOCAL_PATH = os.environ.get(\n    \"QUEST_USERS_LOCAL_PATH\",\n    os.path.join(os.path.dirname(os.path.abspath(__file__)), \"quest_users.local.json\"),\n)")
+
+
+* **戻り値/レスポンス**: 該当なし。副作用として`USERS`内の辞書がin-placeで更新される。
+* 根拠: (行番号: 68〜71 / 抜粋: "_users_by_id = {_u['user_id']: _u for _u in USERS}\n        for _user_id, _overrides in _quest_users_overrides.items():\n            if _user_id in _users_by_id and isinstance(_overrides, dict):\n                _users_by_id[_user_id].update(_overrides)")
+
+
+* **副作用**: ファイルが存在する場合、JSONパース結果のうち`USERS`に存在する`user_id`かつ値が`dict`である要素についてのみ、対応するユーザー辞書へ`update`をマージする（未知の`user_id`や非dict値は無視される）。読み込み失敗時は`logger.warning`でログ出力する。
+* 根拠: (行番号: 69〜70 / 抜粋: "if _user_id in _users_by_id and isinstance(_overrides, dict):"), (行番号: 73 / 抜粋: "logger.warning(f\"quest_users.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}\")")
+
+
+* **エラーハンドリング**: `open`・`json.load`・マージ処理全体を`try/except Exception`で包み、あらゆる例外（ファイル破損、JSON構文エラー等）を捕捉して`logger.warning`を出力するのみで、モジュールのロード自体は継続する（例外を再送出しない）。
+* 根拠: [例外処理] (行番号: 65, 72〜73 / 抜粋: "try:\n        with open(_QUEST_USERS_LOCAL_PATH, \"r\", encoding=\"utf-8\") as _f:", "except Exception as _e:\n        logger.warning(...)")
 
 
 
 ### `QUESTS`
 
 * **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。
-* 根拠: `QUESTS = [` (行番号: 53〜179 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 110, 178 / 抜粋: "'target': 'siblings'")
+* 根拠: `QUESTS = [` (行番号: 81〜207 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 138, 206 / 抜粋: "'target': 'siblings'")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
-* 根拠: (行番号: 53 / 抜粋: "QUESTS = [")
+* 根拠: (行番号: 81 / 抜粋: "QUESTS = [")
 
 
 * **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が53件、コメントアウトされ無効化された定義が9件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
-* 根拠: 最初の要素 (行番号: 61 / 抜粋: "{'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},"), コメントアウトされた要素の例 (行番号: 88 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 110 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 98 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}")
+* 根拠: 最初の要素 (行番号: 89 / 抜粋: "{'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},"), コメントアウトされた要素の例 (行番号: 116 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 138 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 126 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}")
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 53〜179 / 抜粋: "QUESTS = [")
+* 根拠: (行番号: 81〜207 / 抜粋: "QUESTS = [")
 
 
-* **エラーハンドリング**: なし（バリデーションロジックを含まない。またコメント行50〜51に `category` と `difficulty` の凡例が記されているのみで、実行時の値チェックは行われていない）
-* 根拠: `# category: life(生活), study(学習), house(家事), work(仕事), health(健康), moral(徳育), sport(体育)` (行番号: 50 / 抜粋: "# category: life(生活), study(学習), house(家事), work(仕事), health(健康), moral(徳育), sport(体育)")
+* **エラーハンドリング**: なし（バリデーションロジックを含まない。またコメント行78〜79に `category` と `difficulty` の凡例が記されているのみで、実行時の値チェックは行われていない）
+* 根拠: `# category: life(生活), study(学習), house(家事), work(仕事), health(健康), moral(徳育), sport(体育)` (行番号: 78 / 抜粋: "# category: life(生活), study(学習), house(家事), work(仕事), health(健康), moral(徳育), sport(体育)")
 
 
 
 ### `REWARDS`
 
 * **役割**: ゴールド（`cost_gold`）と交換できる報酬アイテムの定義リスト。各要素は `id`, `title`, `category`, `cost_gold`, `icon_key`, `desc` を基本キーとし、任意で `target`（対象者制限）を持つ。
-* 根拠: `REWARDS = [` (行番号: 184〜229 / 抜粋: "REWARDS = [\n    # --- Small (消費型) ---\n    {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦', 'desc': '頑張った自分へのご褒美デザート'},")
+* 根拠: `REWARDS = [` (行番号: 212〜257 / 抜粋: "REWARDS = [\n    # --- Small (消費型) ---\n    {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦', 'desc': '頑張った自分へのご褒美デザート'},")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
-* 根拠: (行番号: 184 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 212 / 抜粋: "REWARDS = [")
 
 
 * **戻り値/レスポンス**: `list[dict]`。有効な報酬定義23件を含む。`cost_gold` は 50〜1,100,000 まで幅広く設定されている（最高額は "アルハンブラ" の1,100,000）。
-* 根拠: `{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},` (行番号: 219 / 抜粋: "{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000,")
+* 根拠: `{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},` (行番号: 247 / 抜粋: "{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000,")
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 184〜229 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 212〜257 / 抜粋: "REWARDS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 184〜229 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 212〜257 / 抜粋: "REWARDS = [")
 
 
 
