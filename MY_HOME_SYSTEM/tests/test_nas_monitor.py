@@ -134,6 +134,32 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         self.assertFalse(os.path.exists(old_part))
         self.assertTrue(os.path.exists(new_summary))
 
+    def test_old_config_file_backups_are_cleaned_up(self):
+        """Issue #191の回帰テスト: services/backup_service.py の _backup_config_files が
+        config.BACKUP_FILES 中のDB以外のファイル(config.py, .env, devices.json)を
+        DB_BACKUPS_DIR へ拡張子付き/なしでコピーするが、以前のリテンションは
+        DBバックアップ対象の拡張子を ".db" のみに限定していたため、設定ファイルの
+        バックアップコピーは一切削除されず無限蓄積していた。"""
+        db_backups_dir = os.path.join(self.tmp_dir, "db_backups")
+        os.makedirs(db_backups_dir, exist_ok=True)
+        old_db = self._make_file(os.path.join(db_backups_dir, "home_system_20250101_000000.db"), age_days=40)
+        old_config = self._make_file(os.path.join(db_backups_dir, "config_20250101_000000.py"), age_days=40)
+        old_devices = self._make_file(os.path.join(db_backups_dir, "devices_20250101_000000.json"), age_days=40)
+        # Path(".env").stem == ".env", Path(".env").suffix == "" のため
+        # 実際のコピー結果は拡張子なしのファイル名になる
+        old_env = self._make_file(os.path.join(db_backups_dir, ".env_20250101_000000"), age_days=40)
+        new_db = self._make_file(os.path.join(db_backups_dir, "home_system_20260101_000000.db"), age_days=5)
+
+        with patch.object(config, "DB_BACKUPS_DIR", db_backups_dir), \
+             patch("monitors.nas_monitor.send_push"):
+            self.monitor.run_retention_cleanup()
+
+        self.assertFalse(os.path.exists(old_db))
+        self.assertFalse(os.path.exists(old_config))
+        self.assertFalse(os.path.exists(old_devices))
+        self.assertFalse(os.path.exists(old_env))
+        self.assertTrue(os.path.exists(new_db))
+
 
 class TestNasMonitorFallbackSync(unittest.TestCase):
     """Issue #162 の回帰テスト: sync_fallback_dataの同期先がmount_point直下になっており、
