@@ -210,3 +210,92 @@ class TestSyncQuestsResetPeriod:
                 "SELECT reset_period FROM quest_master WHERE quest_id = 1"
             ).fetchone()["reset_period"]
         assert reset_period == "daily"
+
+
+class TestSyncQuestsFullColumnSync:
+    """Issue #164の回帰テスト: sync_quests() のINSERT/UPDATE対象が10列のみで、
+    start_time/end_time/start_date/end_date/occurrence_chance/pre_requisite_quest_id
+    が欠落しており、services/quest_service.py の sync_master_data() (全16列)と
+    同等の完全同期になっていなかった。時間帯限定クエストが sync_strict 経由だと
+    終日扱いになってしまう不具合。"""
+
+    def test_new_quest_time_window_and_period_columns_are_synced(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(
+            sync_strict, "QUESTS",
+            [{
+                "id": 1, "title": "朝ミッション", "type": "daily", "target": "all",
+                "exp": 1, "gold": 1,
+                "start_time": "06:00", "end_time": "09:30",
+                "start_date": "2026-01-01", "end_date": "2026-12-31",
+                "chance": 0.5,
+                "pre_requisite_quest_id": 42,
+            }],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT start_time, end_time, start_date, end_date, occurrence_chance, "
+                "pre_requisite_quest_id FROM quest_master WHERE quest_id = 1"
+            ).fetchone()
+        assert row["start_time"] == "06:00"
+        assert row["end_time"] == "09:30"
+        assert row["start_date"] == "2026-01-01"
+        assert row["end_date"] == "2026-12-31"
+        assert row["occurrence_chance"] == 0.5
+        assert row["pre_requisite_quest_id"] == 42
+
+    def test_existing_quest_time_window_is_updated_not_left_stale(self, isolated_db, monkeypatch):
+        """既存行のstart_time/end_timeが変更された場合、再UPSERT時に反映されること
+        (欠落列だったため、以前は永久にDB側の古い値のまま反映されなかった)。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, "
+                "start_time, end_time) VALUES (1, 'Old Quest', 'daily', 1, 1, '05:00', '06:00')"
+            )
+
+        monkeypatch.setattr(
+            sync_strict, "QUESTS",
+            [{
+                "id": 1, "title": "New Quest", "type": "daily", "target": "all",
+                "exp": 1, "gold": 1, "start_time": "06:00", "end_time": "09:30",
+            }],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT start_time, end_time FROM quest_master WHERE quest_id = 1"
+            ).fetchone()
+        assert row["start_time"] == "06:00"
+        assert row["end_time"] == "09:30"
+
+    def test_quest_without_time_window_keys_syncs_as_null(self, isolated_db, monkeypatch):
+        """start_time/end_time等のキーを持たないクエストは、NULL(終日扱い)としてそのまま
+        同期されること(occurrence_chanceのみデフォルト1.0)。"""
+        monkeypatch.setattr(
+            sync_strict, "QUESTS",
+            [{"id": 1, "title": "終日クエスト", "type": "daily", "target": "all", "exp": 1, "gold": 1}],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT start_time, end_time, start_date, end_date, occurrence_chance, "
+                "pre_requisite_quest_id FROM quest_master WHERE quest_id = 1"
+            ).fetchone()
+        assert row["start_time"] is None
+        assert row["end_time"] is None
+        assert row["start_date"] is None
+        assert row["end_date"] is None
+        assert row["occurrence_chance"] == 1.0
+        assert row["pre_requisite_quest_id"] is None
