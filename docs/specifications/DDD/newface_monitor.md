@@ -29,12 +29,12 @@
 * 根拠: [WebMonitor._parse_htmlとCastMember] (行番号: 1585〜1736, 1227〜1243 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:")
 * 1サイトの通信障害・レイアウト変更・パースエラーが他サイトの監視処理に波及しないよう、サイト単位の処理は`_check_site`関数として分離され、例外は`run_monitor`内でサイトごとに個別捕捉される。
 * 根拠: [_check_site Docstring] (行番号: 1748〜1757 / 抜粋: "サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が\n    他サイトの監視処理に波及しないようにする。")
-* 各サイトの新規検知件数はサイト単位のJSONに加え、`daily_summary.json`にも当日分として累積され、21時台の実行時に1日分の集計をテキスト形式でDiscordへ別途通知する（重複送信は送信済み日付の永続化で防止）。
-* 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1795〜1806 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
+* 各サイトの新規検知件数はサイト単位のJSONに加え、`daily_summary.json`にも累積され、21時台の実行時にこれまでの累積分をテキスト形式でDiscordへ別途通知する（重複送信は送信済み日付の永続化で防止）。**（Issue #183で修正）** 以前はカレンダー日付が変わると集計が無条件にリセットされていたため、21時台送信後(22時〜24時)の検知や21時台の実行自体が無かった日の検知がどのサマリにも計上されないまま失われていたが、現在は実際に送信された時にのみ累積がクリアされ、日付をまたいでも未送信分は必ず次回送信に引き継がれる。
+* 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1917〜1935 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
 * 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。
 * 根拠: [DataManager.save_known_castsのコメント] (行番号: 1507〜1509 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)")
 * `run_monitor`はモニタープロセスのエントリポイントとして、`fcntl.flock`による多重起動防止ロック（`_MONITOR_LOCK_FILE_PATH`）を非ブロッキングで取得してから処理本体`_run_monitor_locked`を呼び出す。cronの1回の実行が想定より長引く（1時間超）と新旧プロセスが並行実行され、既知キャストリスト・サマリファイルの読み書きが競合しうる問題への対策であり、`batch_download_discord.py`が既に採用している同種のロックパターンを踏襲している。
-* 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1825〜1836 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
+* 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1952〜1959 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
 
 ## 3. 外部依存関係
 
@@ -492,13 +492,13 @@
 
 ### `DataManager.load_daily_summary`
 
-* **役割**: 日次サマリの集計状態（`{'date': ..., 'counts': {...}, 'last_sent_date': ...}`形式）をJSONファイルから読み込む静的メソッド。**（Issue #174で修正）** 以前は`load_known_casts`と同じ「非UTF-8破損によるファイル読み込み失敗」に対する例外捕捉が`(json.JSONDecodeError, IOError)`という狭いパターンのままで、`UnicodeDecodeError`(`IOError`のサブクラスではなく`ValueError`のサブクラス)を捕捉できなかった。この結果、破損した`daily_summary.json`を読もうとすると例外が未捕捉のまま`record_daily_new_casts`経由で`_check_site`を脱出し、`save_known_casts`が実行されないまま処理が中断していた。次回(毎時)実行でも同じ既知キャストが「新規」として再検知されDiscordへ再通知され続ける、という無限反復を招いていた。現在は`load_known_casts`と同じ`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）で捕捉する。
+* **役割**: 日次サマリの集計状態（`{'counts': {...}, 'last_sent_date': ...}`形式）をJSONファイルから読み込む静的メソッド。**（Issue #174で修正）** 以前は`load_known_casts`と同じ「非UTF-8破損によるファイル読み込み失敗」に対する例外捕捉が`(json.JSONDecodeError, IOError)`という狭いパターンのままで、`UnicodeDecodeError`(`IOError`のサブクラスではなく`ValueError`のサブクラス)を捕捉できなかった。この結果、破損した`daily_summary.json`を読もうとすると例外が未捕捉のまま`record_daily_new_casts`経由で`_check_site`を脱出し、`save_known_casts`が実行されないまま処理が中断していた。次回(毎時)実行でも同じ既知キャストが「新規」として再検知されDiscordへ再通知され続ける、という無限反復を招いていた。現在は`load_known_casts`と同じ`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）で捕捉する。**（Issue #183で修正）** 集計状態のスキーマから`'date'`キーを廃止した（後述の`record_daily_new_casts`参照）。
 * 根拠: [メソッド定義とDocstring] (行番号: 1546〜1554 / 抜粋: "def load_daily_summary() -> Dict:\n        """日次サマリの集計状態を読み込む。")
 
 
 * **引数/リクエスト**: なし
-* **戻り値/レスポンス**: `Dict`（ファイル不在・読み込み失敗時は空辞書）
-* 根拠: [Docstring] (行番号: 1550〜1554 / 抜粋: "Returns:\n            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},\n                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
+* **戻り値/レスポンス**: `Dict`（ファイル不在・読み込み失敗時は空辞書）。`'counts'`は直近の送信以降に累積した未送信件数であり、カレンダー日付ではなく「前回送信からの累積」で管理される（Issue #183）。
+* 根拠: [Docstring] (行番号: 1549〜1554 / 抜粋: "Returns:\n            Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}\n                形式の集計状態。'counts'は直近の送信以降に累積した未送信件数\n                (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
 
 
 * **副作用**: JSONファイルの読み込み。
@@ -506,47 +506,47 @@
 
 
 * **エラーハンドリング**: `DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`。`UnicodeDecodeError`は`ValueError`のサブクラスとして捕捉される）発生時はエラーログを出力し空辞書を返す。
-* 根拠: [try-exceptブロック(#174修正後)] (行番号: 1561〜1569 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError\n            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま\n            # 伝播する」バグが本メソッドにも残っていた。")
+* 根拠: [try-exceptブロック(#174修正後)] (行番号: 1562〜1570 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError\n            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま\n            # 伝播する」バグが本メソッドにも残っていた。")
 
 
 ### `DataManager.save_daily_summary`
 
 * **役割**: 日次サマリの集計状態を、`save_known_casts`と同じ一時ファイル経由のアトミックパターンでJSONファイルに保存する静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 1565〜1571 / 抜粋: "def save_daily_summary(data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")
+* 根拠: [メソッド定義とDocstring] (行番号: 1573〜1578 / 抜粋: "def save_daily_summary(data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")
 
 
 * **引数/リクエスト**: `data: Dict`（保存対象の集計状態）
-* 根拠: [引数定義とDocstring] (行番号: 1566, 1569〜1570 / 抜粋: "data (Dict): 保存対象の集計状態。")
+* 根拠: [引数定義とDocstring] (行番号: 1573, 1576〜1577 / 抜粋: "data (Dict): 保存対象の集計状態。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1566 / 抜粋: "def save_daily_summary(data: Dict) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1573 / 抜粋: "def save_daily_summary(data: Dict) -> None:")
 
 
 * **副作用**: 保存先ディレクトリの作成、一時ファイルへの書き込みとアトミックな`replace`。
-* 根拠: [アトミック書き込みとコメント] (行番号: 1576〜1580 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')")
+* 根拠: [アトミック書き込みとコメント] (行番号: 1583〜1587 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')")
 
 
 * **エラーハンドリング**: `IOError`発生時は`exc_info=True`付きでエラーログを出力する。
-* 根拠: [try-exceptブロック] (行番号: 1581〜1582 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save daily summary: {e}", exc_info=True)")
+* 根拠: [try-exceptブロック] (行番号: 1588〜1589 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save daily summary: {e}", exc_info=True)")
 
 
 ### `DataManager.record_daily_new_casts`
 
-* **役割**: サイト単位で検知した新規キャスト件数を、当日分の集計に加算する静的メソッド。cron等により1時間毎に別プロセスとして実行される前提のため、実行毎にファイルを読み書きして状態を永続化する。集計中の日付が当日と異なる場合（日付が変わった後の最初の検知）は集計をリセットしてから加算する。
-* 根拠: [メソッド定義とDocstring] (行番号: 1584〜1596 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:\n        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。")
+* **役割**: サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する静的メソッド。cron等により1時間毎に別プロセスとして実行される前提のため、実行毎にファイルを読み書きして状態を永続化する。**（Issue #183で修正）** 以前は集計中の日付が当日と異なる場合（日付が変わった後の最初の検知）に集計をリセットしてから加算していたが、この無条件のカレンダー日付リセットには2つの過少報告経路があった: (1) 21時台のサマリ送信後(22時〜24時)に検知した件数が、送信済みにもかかわらず加算され続けた挙げ句、翌日最初の検知時のリセットでどのサマリにも計上されないまま消える、(2) 21時台に実行自体が無かった日(cron欠落・ロック競合)は日付リセットにより追い付き送信もできずその日の集計が丸ごと失われる。日付によるリセットを廃止し、`_maybe_send_daily_summary`が実際に送信した直後にのみ集計をクリアすることで、未送信の件数が日付をまたいでも必ず次回送信に引き継がれるようにした。
+* 根拠: [メソッド定義とDocstring] (行番号: 1592〜1611 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:\n        """サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する。")
 
 
 * **引数/リクエスト**: `site_id: str`（検知元サイトのID）, `count: int`（当該サイトで新たに検知した件数）
-* 根拠: [引数定義とDocstring] (行番号: 1585, 1593〜1595 / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
+* 根拠: [引数定義とDocstring] (行番号: 1592, 1609〜1610 / 抜粋: "site_id (str): 検知元サイトのID。\n            count (int): 当該サイトで新たに検知した件数。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1585 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1592 / 抜粋: "def record_daily_new_casts(site_id: str, count: int) -> None:")
 
 
 * **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し（ファイル読み書き）。`count <= 0`の場合は何もせず即座に`return`する。
-* 根拠: [ガード節と呼び出し] (行番号: 1597〜1598, 1601, 1607 / 抜粋: "if count <= 0:\n            return")
+* 根拠: [ガード節と呼び出し] (行番号: 1612〜1613, 1615, 1618 / 抜粋: "if count <= 0:\n            return")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す`load_daily_summary`/`save_daily_summary`側のエラーハンドリングに依存）
@@ -669,24 +669,24 @@
 
 ### `_maybe_send_daily_summary`
 
-* **役割**: 21時台の実行のときだけ、その日の新規検知サマリをDiscordへテキスト通知する関数。cron等による1時間毎の別プロセス実行を前提に、実行時刻の時(hour)が21かどうかで時刻トリガーを判定し、同日中の重複送信は送信済み日付(`last_sent_date`)の永続化で防止する。
-* 根拠: [関数定義とDocstring] (行番号: 1795〜1806 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:\n        """21時台の実行のときだけ、その日の新規検知サマリをDiscordへテキスト通知する。")
+* **役割**: 21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する関数。cron等による1時間毎の別プロセス実行を前提に、実行時刻の時(hour)が21かどうかで時刻トリガーを判定し、同日中の重複送信は送信済み日付(`last_sent_date`)の永続化で防止する。**（Issue #183で修正）** `record_daily_new_casts`側がカレンダー日付によるリセットを行わなくなったため、ここで送信するのは「厳密な当日分」ではなく「前回この関数が実際に送信してから今までに累積した全件数」になる。21時台の実行がまる1日以上飛んだ場合(cron欠落・ロック競合)も、次に成功した21時台の実行で未送信分がまとめて送られる(取りこぼしなし)。送信が成功した場合のみ集計をクリアする。
+* 根拠: [関数定義とDocstring] (行番号: 1917〜1935 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:\n        """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。")
 
 
 * **引数/リクエスト**: `notifier: DiscordNotifier`（使い回すインスタンス）
-* 根拠: [引数定義とDocstring] (行番号: 1795, 1804〜1805 / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。")
+* 根拠: [引数定義とDocstring] (行番号: 1917, 1933〜1934 / 抜粋: "notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1795 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1917 / 抜粋: "def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:")
 
 
-* **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し、条件成立時の`notifier.notify_daily_summary`呼び出し。
-* 根拠: [メイン処理] (行番号: 1812, 1818, 1822 / 抜粋: "notifier.notify_daily_summary(counts, site_names, today_str)")
+* **副作用**: `DataManager.load_daily_summary`/`save_daily_summary`の呼び出し、条件成立時の`notifier.notify_daily_summary`呼び出し。送信成功時は`counts`を`{}`にクリアして保存する（Issue #183）。
+* 根拠: [メイン処理] (行番号: 1945, 1947, 1949 / 抜粋: "notifier.notify_daily_summary(counts, site_names, today_str)")
 
 
 * **エラーハンドリング**: 現在時刻が21時台でない場合、または当日分が送信済みの場合は早期`return`する（例外処理は本関数にはない）。
-* 根拠: [ガード節] (行番号: 1808〜1809, 1813〜1814 / 抜粋: "if now.hour != 21:\n        return")
+* 根拠: [ガード節] (行番号: 1937〜1938, 1942〜1943 / 抜粋: "if now.hour != 21:\n        return")
 
 
 ### `_MONITOR_LOCK_FILE_PATH` (モジュール定数)
@@ -944,8 +944,8 @@ graph TD
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
 * **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
 * 根拠: [load_known_castsの隔離処理] (行番号: 1469〜1471 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")
-* **（Issue #174で一部解消・一部残存）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消された。ただし`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みは`load_daily_summary`/`save_daily_summary`には無いままであり、破損時は単にその日の集計カウントが失われ`0`から再カウントされる（`record_daily_new_casts`が`date`不一致とみなしリセットするため）。これは「無限反復の停止」を優先した最小修正であり、日次サマリの集計データ自体の耐障害性向上は本Issueのスコープ外。
-* 根拠: [load_daily_summaryの#174修正] (行番号: 1561〜1569), [record_daily_new_castsの日付リセット] (行番号: 1607〜1608 / 抜粋: "if data.get('date') != today_str:\n            data = {'date': today_str, 'counts': {}, 'last_sent_date': data.get('last_sent_date', '')}")
+* **（Issue #174で一部解消・一部残存）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消された。ただし`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みは`load_daily_summary`/`save_daily_summary`には無いままであり、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされる（読み込み失敗時に`load_daily_summary`が返す空辞書に対し`record_daily_new_casts`が新規`counts`辞書を作成するため）。これは「無限反復の停止」を優先した最小修正であり、日次サマリの集計データ自体の耐障害性向上は本Issueのスコープ外。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。ファイル破損時のみ、上記の理由でカウントが失われうる。
+* 根拠: [load_daily_summaryの#174修正] (行番号: 1562〜1570), [record_daily_new_castsの累積] (行番号: 1615〜1616 / 抜粋: "data = DataManager.load_daily_summary()\n        counts = data.setdefault('counts', {})")
 
 ## 9. 不明事項一覧
 
