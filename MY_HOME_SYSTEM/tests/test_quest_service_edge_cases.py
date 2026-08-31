@@ -445,7 +445,8 @@ class TestSyncMasterData:
     - quest_data モジュール不在時に HTTPException(500) を送出すること
     - 新規DBに欠けている旧カラム(role/reset_period/description)を
       ALTER TABLEで自動追加するレガシーマイグレーション分岐
-    - マスタ側の対象idリストが空の場合に全件DELETEする分岐
+    - reward_master側の対象idリストが空の場合に全件DELETEする分岐
+    - quest_master側は対象idリストが空でも全件DELETEしない安全弁(Issue #242)
     実際の外部サービス呼び出しは無く、quest_data はリポジトリ同梱の静的データなので
     実データを使っても決定的(deterministic)である。
     """
@@ -512,9 +513,40 @@ class TestSyncMasterData:
 
         assert result["status"] == "synced"
 
-    def test_empty_master_lists_delete_all_existing_rows(self, isolated_db, monkeypatch):
-        """quest_data側の各マスタが空の場合、対象idによる絞り込みDELETEではなく
-        テーブル全件を削除する分岐(quest_master/reward_masterそれぞれ)を通ること。"""
+    def test_empty_reward_master_list_deletes_all_existing_rows(self, isolated_db, monkeypatch):
+        """quest_data.REWARDSが空の場合、reward_masterはuser_inventoryの参照が
+        残っていない限りテーブル全件を削除する既存の分岐を通ること(この安全弁は
+        Issue #242以前から存在しており、quest_master側とは異なり据え置き)。"""
+        fake_quest_data = types.SimpleNamespace(
+            USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
+            QUESTS=[],
+            REWARDS=[],
+        )
+        monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
+        monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
+            )
+
+        game_system = GameSystem()
+        result = game_system.sync_master_data()
+
+        assert result["status"] == "synced"
+        with common.get_db_cursor() as cur:
+            reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
+        assert reward_count == 0
+
+    def test_empty_quest_master_list_skips_deletion_and_preserves_existing_rows(
+        self, isolated_db, monkeypatch
+    ):
+        """Issue #242の回帰テスト: 以前はquest_data.QUESTSが空の場合、
+        quest_masterに対しても対象idによる絞り込みDELETEではなくテーブル全件を
+        削除する分岐を通っていた。reward_master側にはuser_inventory参照チェック
+        という安全弁があるのに対し、quest_master側には同種の安全弁が一切なく、
+        QUESTSが空になった瞬間(コーディングミス等)に無条件で全クエストマスタが
+        消えていた。修正後は削除自体をスキップし、既存行を保持する。"""
         fake_quest_data = types.SimpleNamespace(
             USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
             QUESTS=[],
@@ -528,19 +560,19 @@ class TestSyncMasterData:
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) "
                 "VALUES (999, 'Stale Quest', 'daily', 1, 1)"
             )
-            cur.execute(
-                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
-            )
 
         game_system = GameSystem()
-        result = game_system.sync_master_data()
+        with patch.object(quest_service_module, "logger") as mock_logger:
+            result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
         with common.get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) c FROM quest_master").fetchone()["c"]
-            reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
-        assert quest_count == 0
-        assert reward_count == 0
+        assert quest_count == 1, "quest_data.QUESTSが空でもquest_masterの既存行を無条件削除してはならない"
+        mock_logger.warning.assert_any_call(
+            "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
+            "スキップしました(意図しない全消去を防ぐための安全弁)。"
+        )
 
     def test_reward_still_owned_by_user_inventory_is_not_deleted(self, isolated_db, monkeypatch):
         """M-1-2: user_inventory(reward_master(reward_id)へのFK)が参照している報酬を
