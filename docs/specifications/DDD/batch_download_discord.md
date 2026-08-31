@@ -786,21 +786,21 @@
 
 ### `BatchDownloader._collect_tasks`
 
-* **役割**: `list.txt`と`list/*.txt`の全ファイルからURLを読み込み、コメント行(`#`始まり)・空行・履歴済みURL・重複URLを除外したうえでソース名ごとにグループ化し、`_round_robin_flatten`でラウンドロビン順に平坦化した`DownloadTask`一覧を生成する。
-* 根拠: [_collect_tasks] (行番号: 798〜834 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* **役割**: `list.txt`と`list/*.txt`の全ファイルからURLを読み込み、コメント行(`#`始まり)・空行・履歴済みURL・重複URLを除外したうえでソース名ごとにグループ化し、`_round_robin_flatten`でラウンドロビン順に平坦化した`DownloadTask`一覧を生成する。**（Issue #184で修正）** 以前は`list/*.txt`側の読み込みのみ`try/except`で保護されており、`list.txt`側にはこの保護が無かった。`list.txt`が非UTF-8バイト等で読み込み失敗すると未処理例外が`_collect_tasks`全体を中断させ、本来は独立して処理されるはずの`list/*.txt`側のタスクまで巻き添えで処理されなくなっていた。`list.txt`の読み込みも`list/*.txt`側と同じ`try/except`パターンで保護し、失敗時はエラーログを出力したうえで`list/*.txt`側の処理を継続するよう修正した。
+* 根拠: [_collect_tasks] (行番号: 1000〜1046 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `List[DownloadTask]`
-* 根拠: [戻り値ヒント] (行番号: 798 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* 根拠: [戻り値ヒント] (行番号: 1000 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **副作用**: `list.txt`および`list/`配下の`*.txt`ファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 812〜813, 823, 826 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
+* 根拠: [ファイル読み込み] (行番号: 1021, 1038 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
 
 
-* **エラーハンドリング**: 個別リストファイルの読み込み失敗時は例外を捕捉してエラーログを出力し、他ファイルの処理を継続する。
-* 根拠: [try-exceptブロック] (行番号: 831〜832 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `list.txt`・`list/*.txt`のいずれについても、個別リストファイルの読み込み失敗時は例外を捕捉してエラーログを出力し、他ファイルの処理を継続する（Issue #184修正後は両者とも同一パターンで保護される）。
+* 根拠: [try-exceptブロック(list.txt側)] (行番号: 1020, 1028〜1029 / 抜粋: "try:\n                with open(CONFIG.LIST_FILE_PATH"), [try-exceptブロック(list/*.txt側)] (行番号: 1037, 1045〜1046 / 抜粋: "except Exception as e:\n                    logger.error(f\"リスト読み込みエラー ({list_file.name}): {e}\", exc_info=True)")
 
 
 ### `BatchDownloader._purge_skipped_tasks`
