@@ -91,6 +91,41 @@ class TestGetAnalysisData:
         assert result["elec_bill"] >= 0
 
 
+class TestGetAnalysisDataElectricityCostExcludesPlugs:
+    """Issue #170の回帰テスト: get_analysis_dataの電気代計算(sql_power)が
+    デバイス無差別にSELECT AVG(wattage)しており、プラグ(個別家電。既に
+    スマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの
+    平均値を希釈していた不具合。"""
+
+    def test_plug_readings_do_not_affect_elec_bill(self, isolated_db):
+        start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                "('remo1', '伊丹_Nature Remo E Lite', 1000, datetime('now'))"
+            )
+
+        meter_only = report.get_analysis_data(start)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # アイドル時の小さいwattage(1W)を持つプラグを大量に追加しても、
+            # スマートメーター単独の場合と結果が変わらないべき
+            for _ in range(5):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                    "('plug1', 'Plug_TV', 1, datetime('now'))"
+                )
+
+        with_plugs = report.get_analysis_data(start)
+
+        assert meter_only is not None and with_plugs is not None
+        assert with_plugs["elec_bill"] == meter_only["elec_bill"], (
+            "プラグのアイドル値が電気代計算(AVG(wattage))を希釈している: "
+            f"meter_only={meter_only['elec_bill']}, with_plugs={with_plugs['elec_bill']}"
+        )
+
+
 class TestGenerateTextSection:
     def test_returns_empty_string_when_no_data(self):
         assert report.generate_text_section("test", None) == ""

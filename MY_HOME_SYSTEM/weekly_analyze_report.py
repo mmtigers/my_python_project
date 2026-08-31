@@ -96,11 +96,17 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
             # 修正: 設計書 3.2 に基づき power_usage テーブルと wattage カラムを使用 
             # 注意: config.SQLITE_TABLE_POWER_USAGE が未定義の場合は config.py への追加が必要
             table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")
-            
+
+            # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
+            # 同居しており、プラグの消費電力はスマートメーターの計測値に既に含まれる
+            # 部分集合である。デバイスを絞らずAVG(wattage)を取るとプラグのアイドル値が
+            # スマートメーター値を希釈してしまうため、services/analysis_service.pyの
+            # load_sensor_data()と同じ分類基準(device_nameに"Remo"を含む)で
+            # スマートメーターの行のみに絞る。
             sql_power = f"""
                 SELECT AVG(wattage)
                 FROM {table_power}
-                WHERE timestamp >= ?
+                WHERE timestamp >= ? AND device_name LIKE '%Remo%'
             """
             cursor.execute(sql_power, (start_str,))
             row_pow = cursor.fetchone()

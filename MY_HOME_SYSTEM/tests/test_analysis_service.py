@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+import pytz
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -179,6 +180,79 @@ class TestLoadSensorDataPowerDeviceTypeClassification:
 class TestCalculateMonthlyCostCumulative:
     def test_returns_zero_when_no_power_data(self, isolated_db):
         assert analysis_service.calculate_monthly_cost_cumulative() == 0
+
+    def test_plug_readings_are_excluded_from_smart_meter_cost(self, isolated_db):
+        """Issue #170の回帰テスト: power_usageにはスマートメーター(全体消費)と
+        各プラグ(個別家電)が同居しているが、以前はデバイスを絞らず全行を
+        diff()ベースで合算していたため、プラグの消費電力がスマートメーターの
+        計測値(既にプラグ分を含む)へ二重計上されていた。プラグの読み取り値が
+        時系列上にどれだけ混在していても、計算結果はスマートメーター単独の
+        場合と一致するべき。"""
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        # start_of_monthはマイクロ秒+タイムゾーンオフセット付きのisoformat()文字列
+        # ("...T00:00:00.xxxxxx+09:00")で、SQL側は単純な文字列比較(>=)を行うため、
+        # ちょうど月初(second=0)ちょうどのタイムスタンプは境界で除外されうる。
+        # 1秒後を基準にして安全にstart_of_month以降になるようにする。
+        base = now.replace(day=1, hour=0, minute=0, second=1)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # スマートメーター: 1時間おきに1000Wで2点(1.0kWh分)
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{base.strftime('%Y-%m-%dT%H:%M:%S')}')"
+            )
+            ts2 = base.replace(hour=1).strftime("%Y-%m-%dT%H:%M:%S")
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{ts2}')"
+            )
+            # プラグ: スマートメーターの間に挟まる形で大電力(5000W)を1点記録
+            ts_plug = base.replace(minute=30).strftime("%Y-%m-%dT%H:%M:%S")
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('plug1', 'Plug_TV', 5000, '{ts_plug}')"
+            )
+
+        with_plug_result = analysis_service.calculate_monthly_cost_cumulative()
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DELETE FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = 'plug1'")
+        meter_only_result = analysis_service.calculate_monthly_cost_cumulative()
+
+        assert with_plug_result == meter_only_result, (
+            "プラグの読み取り値がスマートメーターの電気代計算に混入している: "
+            f"with_plug={with_plug_result}, meter_only={meter_only_result}"
+        )
+
+    def test_diff_is_computed_per_device_not_across_interleaved_devices(self, isolated_db):
+        """Issue #170の回帰テスト: 複数device_id(例: 複数拠点のスマートメーター)の行が
+        時系列で混在したままdiff()を取ると、直前行が別デバイスの場合に誤った時間幅が
+        計算に使われる。device_idごとにグループ化してdiff()を取ることで、各デバイスの
+        経過時間はそのデバイス自身の直前レコードとの差分になるべき。"""
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        # (前テストと同じ理由で)月初ちょうどの境界を避けて1秒後を基準にする
+        base = now.replace(day=1, hour=0, minute=0, second=1)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # デバイスA(伊丹)とデバイスB(高砂)が10分ずれで交互に記録される
+            rows = [
+                ("remo_itami", "伊丹_Nature Remo E Lite", 1000, base),
+                ("remo_takasago", "高砂_Nature Remo E Lite", 2000, base.replace(minute=10)),
+                ("remo_itami", "伊丹_Nature Remo E Lite", 1000, base.replace(hour=1)),
+                ("remo_takasago", "高砂_Nature Remo E Lite", 2000, base.replace(hour=1, minute=10)),
+            ]
+            for device_id, device_name, watts, ts in rows:
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                    f"('{device_id}', '{device_name}', {watts}, '{ts.strftime('%Y-%m-%dT%H:%M:%S')}')"
+                )
+
+        result = analysis_service.calculate_monthly_cost_cumulative()
+
+        # 正しい計算: 伊丹=1000W×1h=1.0kWh, 高砂=2000W×1h=2.0kWh, 合計3.0kWh -> 31倍で93
+        # (device_idでグループ化せず時系列のまま混在diff()を取ると、10分/50分単位の
+        # 誤った時間幅が使われ、異なる(98)結果になっていた)
+        assert result == int(3.0 * 31)
 
 
 class TestLoadBicycleData:

@@ -233,24 +233,24 @@
 
 ### `calculate_monthly_cost_cumulative`
 
-* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。
-* 根拠: `calculate_monthly_cost_cumulative` (行番号: 257 / 抜粋: "return int(df["kwh"].sum() * 31)")
+* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。
+* 根拠: `calculate_monthly_cost_cumulative` (行番号: 224〜271 / 抜粋: "return int(df["kwh"].sum() * 31)")、デバイス絞り込み (行番号: 230〜236 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 260〜264 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 225 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 224 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
-* 根拠: `-> int:` (行番号: 225 / 抜粋: "-> int:")
+* 根拠: `-> int:` (行番号: 224 / 抜粋: "-> int:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 238 / 抜粋: "df = load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 242 / 抜粋: "df = load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 260 / 抜粋: "return 0")
+* 根拠: `except Exception as e:` (行番号: 269〜271 / 抜粋: "return 0")
 
 
 
@@ -595,6 +595,7 @@ graph TD
 
 * `process_dataframe` は `timestamp` カラムの各値へ `_parse_timestamp_to_jst` を `.apply()` で1件ずつ適用する実装であり、ベクトル化された `pd.to_datetime` に比べて大量データでは処理速度が低下する可能性がある。また `_parse_timestamp_to_jst` はtzinfoの無い(naive)値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`するため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う新たな前提）。
 * `calculate_monthly_cost_cumulative` では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `31` を掛けて月額概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。
+* **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側で`device_name LIKE '%Remo%'`によりスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ`device_name LIKE '%Remo%'`条件で修正済み。
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。
 * `get_system_logs` で `subprocess.run` に引数を渡す際、`target_date` などが外部から未検証のまま渡されると意図しないコマンド引数として解釈される可能性がある。
 * SQLiteの接続時に `?mode=ro` (Read Only) と URI オプションを使用しているため、SQLiteのバージョンやコンパイルオプションによっては URI がサポートされず接続エラーになる可能性がある。
