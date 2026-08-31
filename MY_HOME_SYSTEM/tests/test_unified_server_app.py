@@ -12,6 +12,7 @@ unified_server.py のアプリレベルのテスト。
 - lifespan (起動/終了) が監視プロセスの起動・終了を正しく行うこと
   (実サブプロセスは起動せず subprocess.Popen をモックする)
 """
+import logging
 import os
 import subprocess
 import sys
@@ -22,6 +23,55 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 import unified_server
+
+
+def _make_uvicorn_access_record(method: str, path: str, status_code: int) -> logging.LogRecord:
+    """uvicorn(h11_impl.py/httptools_impl.py)の実際のアクセスログフォーマット
+    ('%s - "%s %s HTTP/%s" %d')を再現したLogRecordを生成する。
+    ステータスコードは%位置引数の最後にあり、前方スペースのみで末尾に
+    スペースは付かない点が本テストの要。"""
+    return logging.LogRecord(
+        name="uvicorn.access", level=logging.INFO, pathname=__file__, lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:12345", method, path, "1.1", status_code),
+        exc_info=None,
+    )
+
+
+class TestSilencePolicyFilterMatchesRealUvicornLogFormat:
+    """Issue #177の回帰テスト: SilencePolicyFilterは" 200 "/" 304 "という
+    前後スペース付きの部分文字列でステータスコードを判定していたが、実際の
+    uvicornアクセスログはステータスコードがメッセージ末尾にあり後方スペースが
+    付かない('... HTTP/1.1" 200'のように末尾が"200"で終わる)ため、この判定は
+    常にFalseとなり抑制対象キーワード判定に到達しなかった(死にコード)。"""
+
+    def test_polling_endpoint_200_is_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/data", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is False, (
+            "ポーリングエンドポイントへの200応答が抑制されていない: "
+            f"{record.getMessage()!r}"
+        )
+
+    def test_static_asset_304_is_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/assets/app.js", 304)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is False
+
+    def test_non_silenced_path_with_200_still_passes_through(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/complete", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
+
+    def test_error_status_is_never_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/data", 500)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
+
+    def test_post_request_is_never_suppressed_even_with_200(self):
+        record = _make_uvicorn_access_record("POST", "/api/quest/data", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
 
 
 def test_cors_middleware_uses_config_cors_origins():

@@ -48,13 +48,20 @@ class SilencePolicyFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             msg = record.getMessage()
-            
+
             # GETリクエスト以外(POST, PUT, DELETE等)はフィルタリングせず出力
             if "GET " not in msg:
                 return True
-                
+
             # 正常系 (200 OK) または キャッシュ (304 Not Modified) 以外はエラー/警告として出力
-            if " 200 " not in msg and " 304 " not in msg:
+            # #177: uvicornのアクセスログフォーマット('%s - "%s %s HTTP/%s" %d'、
+            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に
+            # 前方スペースのみで出力され、後方にはスペースが付かない
+            # (例: '127.0.0.1 - "GET /path HTTP/1.1" 200')。" 200 "/" 304 " という
+            # 前後スペース付きの部分文字列判定では決して一致せず、抑制が常に無効化
+            # されていた。末尾の空白を除去したうえで、末尾一致(endswith)で判定する。
+            stripped_msg = msg.rstrip()
+            if not stripped_msg.endswith(" 200") and not stripped_msg.endswith(" 304"):
                 return True
 
             # ログ出力を抑制するパスやキーワードのリスト
