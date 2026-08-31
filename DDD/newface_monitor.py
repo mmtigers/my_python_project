@@ -1384,7 +1384,7 @@ class DiscordNotifier:
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {e}")
 
-    def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> None:
+    def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
 
         個別キャスト通知(embed形式)とは異なり、1日分の件数をまとめた
@@ -1394,10 +1394,16 @@ class DiscordNotifier:
             counts (Dict[str, int]): site_id -> 新規検知件数 の集計。
             site_names (Dict[str, str]): site_id -> 表示名 の対応表。
             date_str (str): サマリ対象日（'YYYY-MM-DD'）。
+
+        Returns:
+            bool: 送信に成功した場合True。Webhook未設定または送信失敗の場合False。
+                (#226) 呼び出し元の_maybe_send_daily_summaryはこの戻り値を見て、
+                成功時のみ集計をクリアする(失敗時に無条件でクリアすると、その日の
+                集計がサイレントに失われ再送もできなくなるため)。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")
-            return
+            return False
 
         if counts:
             total = sum(counts.values())
@@ -1421,8 +1427,10 @@ class DiscordNotifier:
             response = self.session.post(self.webhook_url, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Daily summary notification sent successfully for {date_str}.")
+            return True
         except requests.RequestException as e:
             logger.error(f"Failed to send daily summary notification: {e}")
+            return False
 
 
 class DataManager:
@@ -1944,9 +1952,20 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
 
     counts = data.get('counts', {})
     site_names = {site.site_id: site.name for site in MonitorConfig.SITES}
-    notifier.notify_daily_summary(counts, site_names, today_str)
+    sent = notifier.notify_daily_summary(counts, site_names, today_str)
 
-    DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
+    # #226: 送信が失敗した(Webhook未設定/ネットワーク障害等)場合にここへ進むと、
+    # 集計がクリアされ last_sent_date も当日にセットされてしまい、その日の集計が
+    # 失われた上に本関数冒頭のガードで同日中の再送機会も失われる。送信成功時のみ
+    # クリア・last_sent_date更新を行い、失敗時は次回実行時に再送を試みられるよう
+    # 何も保存しない。
+    if sent:
+        DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
+    else:
+        logger.error(
+            "Daily summary notification failed; keeping accumulated counts for retry "
+            "on the next run instead of clearing them."
+        )
 
 
 # M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや
