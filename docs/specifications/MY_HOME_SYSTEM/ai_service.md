@@ -49,7 +49,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` の各種プロパティ | APIキーや各種定数の具体的な値や構造が不明なため | `config.GEMINI_API_KEY` 等 (抜粋: "if config.GEMINI_API_KEY:") |
-| `common.execute_read_query` | 内部のDB接続仕様、戻り値の正確なデータ構造、発生しうる例外が不明なため | `common.execute_read_query` (抜粋: "common.execute_read_query, sql") |
+| `common.execute_read_query` | 内部のDB接続仕様は不明なため。戻り値については、Issue #180の修正で`tool_search_db`側が`"検索エラー:"`プレフィックス付き文字列（エラー時）という部分的な構造を前提とするようになったが、それ以外（正常時のJSON形式データ・該当なしメッセージの厳密な形式）の詳細は本ファイルからは分からない（[database.md](./database.md)参照） | `common.execute_read_query` (抜粋: "common.execute_read_query, sql") |
 | `line_service.log_child_health` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_child_health` (抜粋: "await line_service.log_child_health") |
 | `line_service.log_food_record` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_food_record` (抜粋: "await line_service.log_food_record") |
 | `setup_logging` | ロガーの具体的な出力先やフォーマット仕様が不明なため | `setup_logging("ai_service")` (抜粋: "setup_logging("ai_service")") |
@@ -181,20 +181,20 @@
 
 ### `tool_search_db` (関数)
 
-* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。
-* 根拠: `async def tool_search_db` (行番号: 175 / 抜粋: "async def tool_search_db")
+* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #180で修正）** `common.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
+* 根拠: `async def tool_search_db` (行番号: 183 / 抜粋: "async def tool_search_db")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 175 / 抜粋: "args: Dict[str, Any]")
+* 根拠: 関数シグネチャ (行番号: 183 / 抜粋: "args: Dict[str, Any]")
 
 
-* **戻り値/レスポンス**: `str`
-* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号: 208 / 抜粋: "return str(rows)[:2000]")
+* **戻り値/レスポンス**: `str`。正常時は`common.execute_read_query`の戻り値文字列（該当データなしメッセージまたはJSON形式の検索結果文字列、2000文字でカット）をそのまま返す。`execute_read_query`内部でエラーが発生した場合（`"検索エラー:"`プレフィックスで検出）は`"DB検索エラー: ..."`という別形式のエラー文字列に変換して返す。
+* 根拠: `return result[:2000]` (行番号: 227 / 抜粋: "return result[:2000]")、エラー変換 (行番号: 222〜224 / 抜粋: "if result.startswith(\"検索エラー:\"):\n        logger.warning(f\"⚠️ search_db query failed: {result} (sql={sql!r})\")\n        return f\"DB検索エラー: {result[len('検索エラー:'):].strip()}\"")
 
 
-* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行を`logger.warning`で記録。
-* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 204 / 抜粋: "common.execute_read_query, sql")
+* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行、および`execute_read_query`が内部エラー文字列を返した場合を`logger.warning`で記録。
+* 根拠: `result = await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 212 / 抜粋: "common.execute_read_query, sql")、エラー時の警告ログ (行番号: 223 / 抜粋: "logger.warning(f\"⚠️ search_db query failed: {result} (sql={sql!r})\")")
 
 
 * **エラーハンドリング**:
@@ -202,73 +202,74 @@
 * クエリが "SELECT" で始まらない場合は実行をブロックしエラーメッセージを返却。
 * `_extract_referenced_tables` で参照テーブルを特定できない場合はエラーメッセージを返却。
 * 参照テーブルのいずれかが `ALLOWED_SEARCH_TABLES` に含まれない場合は、警告ログを出力しエラーメッセージを返却（実行しない）。
-* DB検索時のあらゆる例外を捕捉し、エラーメッセージとして返却。
-* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 190) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 197) / `except Exception as e:` (行番号: 209)
+* `asyncio.to_thread`自体が送出しうる例外（`common.execute_read_query`自体は内部で例外を捕捉するため通常は送出されないが、スレッド実行基盤側の例外に備える）を捕捉し、エラーメッセージとして返却。
+* `common.execute_read_query`が内部エラーを`"検索エラー:"`プレフィックス付き文字列として返した場合（Issue #180で追加）、これを検出し警告ログを出力したうえで`"DB検索エラー: ..."`として返却（送出された例外ではないため`try/except`では捕捉できない）。
+* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 198) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 205) / `except Exception as e:` (行番号: 213) / `if result.startswith("検索エラー:"):` (行番号: 222)
 
 
 
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 274 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 299 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
-* 根拠: 関数シグネチャ (行番号: 274 / 抜粋: "retry_state")
+* 根拠: 関数シグネチャ (行番号: 299 / 抜粋: "retry_state")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: return文なし (行番号: 277〜281 / 抜粋: "logger.warning(")
+* 根拠: return文なし (行番号: 302〜306 / 抜粋: "logger.warning(")
 
 
 * **副作用**: `logger.warning` によるログ書き込み
-* 根拠: `logger.warning(...)` (行番号: 277〜281 / 抜粋: "logger.warning(")
+* 根拠: `logger.warning(...)` (行番号: 302〜306 / 抜粋: "logger.warning(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 276 / 抜粋: "exception = retry_state")
+* 根拠: try-except構文なし (行番号: 301 / 抜粋: "exception = retry_state")
 
 
 
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを別スレッドで実行し、`ResourceExhausted` 例外発生時に指数バックオフによるリトライを行う。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 283〜290 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 308〜315 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
-* 根拠: 関数シグネチャ (行番号: 290 / 抜粋: "chat_session, prompt: str")
+* 根拠: 関数シグネチャ (行番号: 315 / 抜粋: "chat_session, prompt: str")
 
 
 * **戻り値/レスポンス**: APIレスポンスオブジェクト
-* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 302 / 抜粋: "return await asyncio.to_thread")
+* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 327 / 抜粋: "return await asyncio.to_thread")
 
 
 * **副作用**: APIへのネットワーク通信
-* 根拠: `chat_session.send_message` (行番号: 302 / 抜粋: "chat_session.send_message")
+* 根拠: `chat_session.send_message` (行番号: 327 / 抜粋: "chat_session.send_message")
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
-* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 284 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
+* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 309 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
 
 
 
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。
-* 根拠: `async def analyze_text_and_execute` (行番号: 309 / 抜粋: "async def analyze_text_and_execute")
+* 根拠: `async def analyze_text_and_execute` (行番号: 334 / 抜粋: "async def analyze_text_and_execute")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 309 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 334 / 抜粋: "user_id: str, user_name: str, text: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 309 / 抜粋: "-> Optional[str]:")
+* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 334 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: API通信、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 326, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 351, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
 
 
 * **エラーハンドリング**:
@@ -279,7 +280,7 @@
 * 空のレスポンス時はエラーメッセージを返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 356, 359, 407 / 抜粋: "except Exception as e:")
+* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 381, 359, 407 / 抜粋: "except Exception as e:")
 
 
 
