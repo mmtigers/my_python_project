@@ -126,3 +126,74 @@ def test_perform_backup_detects_transfer_integrity_mismatch(monkeypatch):
 
     assert success is False
     assert "整合性" in msg
+
+
+class TestPartialNasFileCleanupOnFailure:
+    """Issue #248回帰防止: NAS転送が途中で失敗、または転送後の整合性確認に
+    失敗した場合、以前はローカルの一時ファイル(temp_path)のみ削除しており、
+    NAS側に書きかけ・破損した不完全なファイルがそのまま残置されていた。"""
+
+    def test_partial_nas_file_is_removed_when_copy_raises_midway(self, monkeypatch):
+        """shutil.copy2 自体が例外を送出する前に、NAS側へ部分的に書き込み済みの
+        ファイルが存在しているケース(ディスク逼迫等で書き込み途中に失敗)を再現する。"""
+        real_copy2 = backup_service.shutil.copy2
+
+        def _copy_then_fail(src, dst, *args, **kwargs):
+            # コピー自体は一部完了させてから失敗させる(実運用でのディスク逼迫時、
+            # OS側のバッファがフラッシュされファイルの一部が既に書き込まれている
+            # 状況を模す)
+            real_copy2(src, dst, *args, **kwargs)
+            raise OSError("Simulated NAS disk full mid-copy")
+
+        monkeypatch.setattr(backup_service.shutil, "copy2", _copy_then_fail)
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is False
+        nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        assert os.listdir(nas_backup_dir) == [], (
+            "NAS転送失敗時、NAS側に残置された不完全なファイルが削除されているべき"
+        )
+
+    def test_partial_nas_file_is_removed_on_integrity_mismatch(self, monkeypatch):
+        """転送後の整合性確認(サイズ比較)に失敗した場合も、NAS側に残った
+        破損ファイルが削除されること。"""
+        real_getsize = os.path.getsize
+
+        def _mismatched_getsize(path):
+            size = real_getsize(path)
+            if "db_backups" in str(path):
+                return size + 1
+            return size
+
+        monkeypatch.setattr(backup_service.os.path, "getsize", _mismatched_getsize)
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is False
+        nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
+        assert os.listdir(nas_backup_dir) == [], (
+            "整合性確認失敗時、NAS側に残置された破損ファイルが削除されているべき"
+        )
+
+    def test_cleanup_failure_does_not_mask_original_error(self, monkeypatch):
+        """NAS側ファイルの削除自体が失敗(NAS切断等)しても、例外処理全体が
+        中断せず、元のエラーに基づく戻り値がそのまま返ること。"""
+        def _copy_then_fail(src, dst, *args, **kwargs):
+            raise OSError("Simulated NAS disk full mid-copy")
+
+        monkeypatch.setattr(backup_service.shutil, "copy2", _copy_then_fail)
+
+        original_remove = os.remove
+
+        def _fail_remove_for_nas(path):
+            if "db_backups" in str(path):
+                raise OSError("Simulated NAS disconnected during cleanup")
+            return original_remove(path)
+
+        monkeypatch.setattr(backup_service.os, "remove", _fail_remove_for_nas)
+
+        success, msg, size_mb = backup_service.perform_backup()
+
+        assert success is False
+        assert "Simulated NAS disk full mid-copy" in msg

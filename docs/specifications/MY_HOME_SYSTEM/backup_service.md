@@ -73,14 +73,15 @@
 * 根拠: `return True, "バックアップ完了", local_size_mb` および `return False, str(e), 0.0` (行番号: 67, 76 / 抜粋: "return True, "バックアップ完了",...")
 
 
-* **副作用**: ローカルに一時ディレクトリおよびDBファイルを作成、`sqlite3` によるDBの読み取り・書き込み、NASディレクトリへファイルをコピー出力、一時ファイルの削除、標準出力（ログ出力）、`_backup_config_files` 経由での追加設定ファイルのNASへのコピー、外部API呼び出し（`send_push`）。
+* **副作用**: ローカルに一時ディレクトリおよびDBファイルを作成、`sqlite3` によるDBの読み取り・書き込み、NASディレクトリへファイルをコピー出力、一時ファイル（および失敗時はIssue #247で追加されたNAS側の不完全ファイル）の削除、標準出力（ログ出力）、`_backup_config_files` 経由での追加設定ファイルのNASへのコピー、外部API呼び出し（`send_push`）。
 * 根拠: `src_conn.backup(...)`、`shutil.copy2(...)`、`os.remove(...)`、`_backup_config_files(nas_backup_dir, timestamp, src_db_path)` (行番号: 45, 60, 64, 66 / 抜粋: "_backup_config_files(nas_b...")
 
 
 * **エラーハンドリング**:
 * NASディレクトリ作成時に `PermissionError` または `OSError` が発生した場合、（外側の `except` での二重通知を避けるため）ここでは通知を送らずログにのみ記録し、例外を再送出（`raise`）する。
-* 処理全体を `try...except Exception as e` で囲み、あらゆる例外を捕捉して `_notify_and_log_error` へ渡し（＝通知は最終的にこの1箇所のみで行われる）、一時ファイルが存在する場合は削除して失敗のタプルを返す。
+* 処理全体を `try...except Exception as e` で囲み、あらゆる例外を捕捉して `_notify_and_log_error` へ渡し（＝通知は最終的にこの1箇所のみで行われる）、一時ファイル（`temp_path`）が存在する場合は削除して失敗のタプルを返す。**（Issue #248で修正）** 従来はローカルの一時ファイルのみを削除しており、`shutil.copy2`がNAS側のディスク逼迫・切断等でコピー途中に失敗した場合、または転送後の整合性確認（サイズ比較）に失敗した場合、NAS側に書きかけ・破損した不完全なファイル（`nas_final_path`）がそのまま残置されていた（バックアップの成否には影響しないが、正常なバックアップと誤認されうるゴミファイルがNAS上に残る問題）。現在は`temp_path`の削除に続けて`nas_final_path`が存在する場合はこちらも削除を試みる。この削除自体が失敗した場合（NAS切断等）は`logger.error`でログに残すのみとし、元の例外に基づく戻り値（`False, str(e), 0.0`）はそのまま返す（削除失敗によって元のエラー内容が上書き・隠蔽されないようにするため）。
 * 根拠: `except (PermissionError, OSError) as e:` および `except Exception as e:` (行番号: 54〜58, 71〜76 / 抜粋: "except Exception as e:")
+* 根拠: NAS側不完全ファイルの削除とコメント (行番号: 76〜86 / 抜粋: "# #248: shutil.copy2()がNAS側の容量不足・切断等でコピー途中に失敗した場合、\n        # または転送後の整合性確認(サイズ比較)に失敗した場合、NAS側には書きかけ・\n        # 破損した不完全なファイル(nas_final_path)がそのまま残置されていた。", "if nas_final_path.exists():\n            try:\n                os.remove(nas_final_path)\n            except OSError as cleanup_err:\n                logger.error(f\"❌ NAS側の不完全なバックアップファイルの削除に失敗: {cleanup_err}\")")
 
 
 
@@ -164,8 +165,11 @@ flowchart TD
   GlobalCatch([Exception捕捉]) --> NotifyError[外部: _notify_and_log_error]
   NotifyError --> CheckTemp{一時ファイル\n存在確認}
   CheckTemp -- 存在する --> RemoveTempFail[一時ファイル削除]
-  RemoveTempFail --> ReturnFail([End: 失敗を返す])
-  CheckTemp -- 存在しない --> ReturnFail
+  RemoveTempFail --> CheckNasPartial
+  CheckTemp -- 存在しない --> CheckNasPartial{"NAS側の不完全な\nファイル存在確認\n(Issue #248)"}
+  CheckNasPartial -- 存在する --> RemoveNasPartial["NAS側ファイル削除を試行\n(削除失敗は元のエラーを隠蔽しないようログのみ)"]
+  RemoveNasPartial --> ReturnFail([End: 失敗を返す])
+  CheckNasPartial -- 存在しない --> ReturnFail
 
 ```
 
@@ -219,6 +223,7 @@ graph TD
 * NASディレクトリ作成失敗時のエラーハンドリング（54〜58行目）は、意図的に `_notify_and_log_error`（通知）を呼び出さずログ記録のみを行ってから例外を再送出している。これは、外側の `except Exception as e:`（71行目）でも同一エラーが捕捉されて通知が二重送信されるのを防ぐための設計であり、コード中にもその旨のコメントが付されている（過去に二重通知が発生していたための対策）。この一本化された経路を崩さないよう、将来的にこのブロックへ通知呼び出しを追加する際は二重送信に注意する必要がある。
 * Issue #113で修正: 従来 `config.BACKUP_FILES`（`config.py`/`.env`/`devices.json`を列挙）はどのコードからも参照されず、`perform_backup` はDBファイル単体しかNASへ転送していなかった（CLAUDE.mdの説明と実装が食い違う死に設定になっていた）。`_backup_config_files` を新設し、`perform_backup` の転送成功後にこれを呼び出すことで、`config.BACKUP_FILES` に列挙されたファイルが実際にバックアップされるようにした。相対パスのエントリは `config.BASE_DIR` を基準に解決するため、`config.BACKUP_FILES` に新しいファイルを追加する場合は `config.BASE_DIR`（`MY_HOME_SYSTEM/`）からの相対パス、または絶対パスで指定する必要がある。
 * `_backup_config_files` が書き込む先の `nas_backup_dir`（`NAS_PROJECT_ROOT/db_backups`、すなわち `config.DB_BACKUPS_DIR`）は `monitors/nas_monitor.py` の `run_retention_cleanup` によるリテンション削除の対象でもある。以前はこの削除処理が拡張子 `.db` のみを対象としていたため、`_backup_config_files` が生成する設定ファイルのコピー（`.py`/`.json`拡張子、および`.env`はコピー時に拡張子なしのファイル名になる）は一切削除されず無限に蓄積していた（Issue #191、詳細は `docs/specifications/MY_HOME_SYSTEM/nas_monitor.md` の `run_retention_cleanup` を参照）。`nas_monitor.py` 側で `DB_BACKUPS_DIR` 全体を拡張子を問わず削除対象とするよう修正済みのため、`config.BACKUP_FILES` に新しい拡張子のファイルを追加しても、削除対象からは自動的に漏れない。
+* **(Issue #248バグ修正の背景)** `perform_backup`の外側`except Exception`ブロックは、以前はローカルの一時ファイル(`temp_path`)のみを削除しており、`shutil.copy2`によるNAS転送がディスク逼迫・切断等で途中失敗した場合、または転送後の整合性確認（サイズ比較）に失敗した場合に、NAS側へ書きかけ・破損した状態で残った不完全なファイル(`nas_final_path`)がそのまま放置されていた。データ損失は伴わない（正常なバックアップは別途成功時にのみ作成される）が、破損したゴミファイルがNAS上に無期限に蓄積するリスクがあった。現在は`temp_path`と同様に`nas_final_path`の存在確認・削除も行うが、この削除自体の失敗（NAS切断等）が発生した場合は、ログにのみ記録し元のエラー内容（戻り値の`msg`）を上書きしないようにしている。新たに同様の「ローカル/リモート両方に副産物を残しうる」処理を追加する際は、失敗時のクリーンアップ対象がローカル側だけになっていないか確認すること。
 
 ## 9. 不明事項一覧
 
