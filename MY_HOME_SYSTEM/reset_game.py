@@ -5,8 +5,17 @@ import sqlite3
 import traceback
 from datetime import datetime
 
+import config
+
 # --- 設定 ---
-DB_PATH = "home_system.db"  # DBファイルパス
+# #186: 以前はCWD相対の"home_system.db"に直接sqlite3.connectしており、他のDB
+# アクセス経路(config.SQLITE_DB_PATH = BASE_DIR/home_system.db、環境変数
+# SQLITE_DB_PATHで上書き可)と食い違っていた。MY_HOME_SYSTEM/以外のCWDから実行
+# するとファイル不在で終了する、あるいは同名ファイルが存在すれば別のDBを誤って
+# 操作する、SQLITE_DB_PATH環境変数での差し替え運用時に本番と異なるファイルを
+# リセットする、といったリスクがあったため、他のスクリプトと同じconfig.SQLITE_DB_PATH
+# を参照するよう統一する。
+DB_PATH = config.SQLITE_DB_PATH  # DBファイルパス
 LOG_DIR = "logs"
 
 # 日本語名とDB内のuser_idのマッピング
