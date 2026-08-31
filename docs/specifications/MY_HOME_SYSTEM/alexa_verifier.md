@@ -40,8 +40,8 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `s3.amazonaws.com`上のAmazon証明書チェーン（`SignatureCertChainUrl`） | 実際に取得される証明書の内容・更新頻度・障害時の挙動は、Amazon側のインフラに依存し本ファイルからは分からない。 | 根拠: [_fetch_leaf_certificate] (行番号: 82 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)") |
-| `cryptography`ライブラリの`x509`/署名検証の内部実装 | 証明書パース・SAN抽出・RSA署名検証（`public_key.verify`）の内部アルゴリズム実装の詳細は`cryptography`本体に依存し、本ファイルからは分からない。 | 根拠: [x509.load_pem_x509_certificates呼び出しとpublic_key.verify呼び出し] (行番号: 85, 123 / 抜粋: "certs = x509.load_pem_x509_certificates(resp.content)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303") |
+| `s3.amazonaws.com`上のAmazon証明書チェーン（`SignatureCertChainUrl`） | 実際に取得される証明書の内容・更新頻度・障害時の挙動は、Amazon側のインフラに依存し本ファイルからは分からない。 | 根拠: [_fetch_leaf_certificate] (行番号: 89 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)") |
+| `cryptography`ライブラリの`x509`/署名検証の内部実装 | 証明書パース・SAN抽出・RSA署名検証（`public_key.verify`）の内部アルゴリズム実装の詳細は`cryptography`本体に依存し、本ファイルからは分からない。 | 根拠: [x509.load_pem_x509_certificates呼び出しとpublic_key.verify呼び出し] (行番号: 94, 132 / 抜粋: "certs = x509.load_pem_x509_certificates(resp.content)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303") |
 | 呼び出し元（`MY_HOME_SYSTEM/routers/alexa_router.py`と推測されるが対応する仕様書は`docs/specifications/`配下に見つからなかった） | `verify_signature`/`verify_timestamp`が送出する`AlexaVerificationError`をどのように捕捉しHTTPレスポンスへ変換しているかの実装は本ファイルからは分からない。 | 根拠: [AlexaVerificationErrorクラスDocstring] (行番号: 52〜53 / 抜粋: "class AlexaVerificationError(Exception):\n    \"\"\"署名・証明書・タイムスタンプの検証に失敗した\"\"\"") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -96,8 +96,8 @@
 
 ### `_fetch_leaf_certificate`
 
-* **役割**: `SignatureCertChainUrl`から証明書チェーンをHTTPS経由で取得し、先頭（リーフ）証明書を返す内部ヘルパー関数。`_cert_cache`にキャッシュ済みかつ有効期限内であればHTTP取得を省略してキャッシュを返す。取得成功時は`CERT_CACHE_TTL_SECONDS`（1時間）後を有効期限として`_cert_cache`へ書き込む。
-* 根拠: (行番号: 76〜91 / 抜粋: "def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:\n    now = time.time()\n    cached = _cert_cache.get(cert_chain_url)\n    if cached and cached[1] > now:\n        return cached[0]")
+* **役割**: `SignatureCertChainUrl`から証明書チェーンをHTTPS経由で取得し、先頭（リーフ）証明書を返す内部ヘルパー関数。`_cert_cache`にキャッシュ済みかつ有効期限内であればHTTP取得を省略してキャッシュを返す。取得成功時は`CERT_CACHE_TTL_SECONDS`（1時間）後を有効期限として`_cert_cache`へ書き込む。**（Issue #179で修正）** 以前は`requests.get`/`resp.raise_for_status()`が送出する`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）がそのまま伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしていたが、これを`try/except`で捕捉し`AlexaVerificationError`へ変換するよう修正した。
+* 根拠: (行番号: 76〜100 / 抜粋: "def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:\n    now = time.time()\n    cached = _cert_cache.get(cert_chain_url)\n    if cached and cached[1] > now:\n        return cached[0]")、例外変換の修正 (行番号: 88〜92 / 抜粋: "try:\n        resp = requests.get(cert_chain_url, timeout=5)\n        resp.raise_for_status()\n    except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
 
 
 * **引数/リクエスト**: `cert_chain_url: str`
@@ -105,58 +105,58 @@
 
 
 * **戻り値/レスポンス**: `x509.Certificate`（証明書チェーンの先頭＝リーフ証明書）
-* 根拠: (行番号: 76, 89〜91 / 抜粋: "leaf = certs[0]\n    _cert_cache[cert_chain_url] = (leaf, now + CERT_CACHE_TTL_SECONDS)\n    return leaf")
+* 根拠: (行番号: 76, 98〜100 / 抜粋: "leaf = certs[0]\n    _cert_cache[cert_chain_url] = (leaf, now + CERT_CACHE_TTL_SECONDS)\n    return leaf")
 
 
 * **副作用**: `requests.get`によるHTTPSリクエスト（タイムアウト5秒）、成功時の`_cert_cache`への書き込み。
-* 根拠: (行番号: 82〜83, 90 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)\n    resp.raise_for_status()")
+* 根拠: (行番号: 89〜90, 99 / 抜粋: "resp = requests.get(cert_chain_url, timeout=5)\n        resp.raise_for_status()")
 
 
-* **エラーハンドリング**: `requests.get`が失敗した場合（`resp.raise_for_status()`）、呼び出し元の`requests`例外がそのまま伝播する（`AlexaVerificationError`への変換は行われない）。証明書チェーンのパース結果が空リストの場合は`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 83, 86〜87 / 抜粋: "resp.raise_for_status()", "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
+* **エラーハンドリング**: `requests.get`または`resp.raise_for_status()`が`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）を送出した場合、これを捕捉し`AlexaVerificationError`へ変換して送出する（Issue #179で修正。以前は`requests`例外がそのまま伝播していた）。証明書チェーンのパース結果が空リストの場合も`AlexaVerificationError`を送出する。
+* 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc"), (行番号: 95〜96 / 抜粋: "if not certs:\n        raise AlexaVerificationError(\"Certificate chain response is empty\")")
 
 ### `verify_signature`
 
 * **役割**: `Signature`ヘッダと`SignatureCertChainUrl`ヘッダを使ってリクエストボディの署名を検証する公開関数。(1) 両ヘッダの非空チェック、(2) `_validate_cert_chain_url`によるURL形式検証、(3) `_fetch_leaf_certificate`によるリーフ証明書取得、(4) 証明書の有効期限チェック（`not_valid_before_utc <= now <= not_valid_after_utc`）、(5) SANに`echo-api.amazon.com`が含まれるかのチェック、(6) `Signature`ヘッダのbase64デコード、(7) リーフ証明書の公開鍵によるRSA署名検証（PKCS1v15パディング + SHA1ハッシュ、Amazon Alexaの署名アルゴリズム仕様で固定）、を順に行う。
-* 根拠: [関数定義とDocstring] (行番号: 94〜98 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 103〜107 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
 
 
 * **引数/リクエスト**: `raw_body: bytes`（リクエストの生ボディ）, `signature_b64: str`（`Signature`ヘッダの値）, `cert_chain_url: str`（`SignatureCertChainUrl`ヘッダの値）
-* 根拠: (行番号: 94)
+* 根拠: (行番号: 103)
 
 
 * **戻り値/レスポンス**: `None`（検証成功時は何も返さず正常終了）
-* 根拠: (行番号: 94)
+* 根拠: (行番号: 103)
 
 
 * **副作用**: `_fetch_leaf_certificate`経由のHTTPSリクエスト（キャッシュ済みなら省略）、`public_key.verify`によるCPU負荷のかかる暗号演算。
-* 根拠: (行番号: 103, 123 / 抜粋: "leaf_cert = _fetch_leaf_certificate(cert_chain_url)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303")
+* 根拠: (行番号: 112, 132 / 抜粋: "leaf_cert = _fetch_leaf_certificate(cert_chain_url)", "public_key.verify(signature, raw_body, padding.PKCS1v15(), hashes.SHA1())  # nosec B303")
 
 
 * **エラーハンドリング**: ヘッダ欠落・URL形式不正・証明書期限切れ/未到達・SAN不一致・base64デコード失敗（`ValueError`/`TypeError`）・署名不一致（`InvalidSignature`）のいずれについても、それぞれ`AlexaVerificationError`（該当箇所は`from exc`で元例外を連鎖）を送出する。
-* 根拠: (行番号: 99〜100, 106〜107, 111〜112, 115〜117, 124〜125 / 抜粋: "if not signature_b64 or not cert_chain_url:\n        raise AlexaVerificationError(\"Missing Signature or SignatureCertChainUrl header\")", "except InvalidSignature as exc:\n        raise AlexaVerificationError(\"Request signature does not match body\") from exc")
+* 根拠: (行番号: 108〜109, 115〜116, 120〜121, 124〜126, 133〜134 / 抜粋: "if not signature_b64 or not cert_chain_url:\n        raise AlexaVerificationError(\"Missing Signature or SignatureCertChainUrl header\")", "except InvalidSignature as exc:\n        raise AlexaVerificationError(\"Request signature does not match body\") from exc")
 
 ### `verify_timestamp`
 
 * **役割**: リクエストJSON内の`request.timestamp`が、リプレイ攻撃対策の許容範囲内（既定`TIMESTAMP_TOLERANCE_SECONDS`=150秒）であることを確認する公開関数。`request_timestamp`の末尾`"Z"`を`"+00:00"`に置換したうえで`datetime.fromisoformat`でパースし、現在時刻（UTC）との差の絶対値が許容範囲を超えていれば拒否する。**Issue #110の修正**により、パース成功後にタイムゾーン情報（`tzinfo`）の有無を確認するガードが追加された。`datetime.fromisoformat`はタイムゾーン情報のないISO文字列（例:`"2026-08-30T00:00:00"`）もパース成功として受理してしまう（`ValueError`にならない）が、Alexaの`request.timestamp`は仕様上常にタイムゾーン付きのため、これは仕様外の不正な形式として扱い`AlexaVerificationError`を送出する。このガードが無いと、後続の`now(tz付き) - ts(tz無し)`比較が`TypeError`を送出し、呼び出し元ルーターが`AlexaVerificationError`のみを捕捉する設計のため、本来返すべき400ではなく500が返っていた。
-* 根拠: [関数定義とDocstring] (行番号: 128〜129 / 抜粋: "def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_TOLERANCE_SECONDS) -> None:\n    \"\"\"リクエストJSON内の request.timestamp がリプレイ攻撃対策の許容範囲内であることを確認する。\"\"\"")
-* 根拠: [tzinfoガード(Issue #110)] (行番号: 135〜142 / 抜粋: "if ts.tzinfo is None:\n        # datetime.fromisoformat はタイムゾーン情報のないISO文字列(例: \"2026-08-30T00:00:00\")\n        # もパース成功として受理してしまう(ValueErrorにならない)。", "raise AlexaVerificationError(f\"Request timestamp missing timezone info: {request_timestamp!r}\")")
+* 根拠: [関数定義とDocstring] (行番号: 137〜138 / 抜粋: "def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_TOLERANCE_SECONDS) -> None:\n    \"\"\"リクエストJSON内の request.timestamp がリプレイ攻撃対策の許容範囲内であることを確認する。\"\"\"")
+* 根拠: [tzinfoガード(Issue #110)] (行番号: 144〜151 / 抜粋: "if ts.tzinfo is None:\n        # datetime.fromisoformat はタイムゾーン情報のないISO文字列(例: \"2026-08-30T00:00:00\")\n        # もパース成功として受理してしまう(ValueErrorにならない)。", "raise AlexaVerificationError(f\"Request timestamp missing timezone info: {request_timestamp!r}\")")
 
 
 * **引数/リクエスト**: `request_timestamp: str`（Alexaリクエストの`request.timestamp`フィールド）, `tolerance_seconds: int = TIMESTAMP_TOLERANCE_SECONDS`（許容範囲の秒数、既定150秒）
-* 根拠: (行番号: 128)
+* 根拠: (行番号: 137)
 
 
 * **戻り値/レスポンス**: `None`（検証成功時は何も返さず正常終了）
-* 根拠: (行番号: 128)
+* 根拠: (行番号: 137)
 
 
 * **副作用**: なし（`datetime.now(timezone.utc)`による現在時刻取得のみ、外部I/Oなし）
-* 根拠: (行番号: 144 / 抜粋: "now = datetime.now(timezone.utc)")
+* 根拠: (行番号: 153 / 抜粋: "now = datetime.now(timezone.utc)")
 
 
 * **エラーハンドリング**: `fromisoformat`のパース失敗時（`ValueError`/`AttributeError`）は`AlexaVerificationError`を送出（`from exc`で連鎖）。パース成功してもタイムゾーン情報が無い場合（Issue #110）は`AlexaVerificationError`を送出。許容範囲を超えた場合も`AlexaVerificationError`を送出する。
-* 根拠: (行番号: 130〜133, 135〜142, 145〜147 / 抜粋: "except (ValueError, AttributeError) as exc:\n        raise AlexaVerificationError(f\"Invalid request timestamp: {request_timestamp!r}\") from exc", "delta = abs((now - ts).total_seconds())\n    if delta > tolerance_seconds:\n        raise AlexaVerificationError(f\"Request timestamp outside tolerance window ({delta:.0f}s)\")")
+* 根拠: (行番号: 139〜142, 144〜151, 154〜156 / 抜粋: "except (ValueError, AttributeError) as exc:\n        raise AlexaVerificationError(f\"Invalid request timestamp: {request_timestamp!r}\") from exc", "delta = abs((now - ts).total_seconds())\n    if delta > tolerance_seconds:\n        raise AlexaVerificationError(f\"Request timestamp outside tolerance window ({delta:.0f}s)\")")
 
 ## 5. 処理フロー図
 
@@ -168,6 +168,7 @@ flowchart TD
         VSHeaderCheck -- Yes --> VSUrlValidate["_validate_cert_chain_url(cert_chain_url)"]
         VSUrlValidate -- 不正 --> VSErr2["AlexaVerificationError: URL形式不正"]
         VSUrlValidate -- OK --> VSFetchCert["_fetch_leaf_certificate(cert_chain_url)<br>(キャッシュ有効ならHTTPS省略)"]
+        VSFetchCert -- "RequestException(Issue #179で変換)" --> VSErr7["AlexaVerificationError: 証明書チェーン取得失敗"]
         VSFetchCert --> VSExpiryCheck{"証明書は有効期限内か?"}
         VSExpiryCheck -- No --> VSErr3["AlexaVerificationError: 期限切れ/未到達"]
         VSExpiryCheck -- Yes --> VSSanCheck{"SANにecho-api.amazon.comを含むか?"}
@@ -262,16 +263,16 @@ graph TD
 * 根拠: [モジュールDocstring] (行番号: 6〜10 / 抜粋: "ask-sdk-webservice-support 同梱の検証器は certvalidator -> oscrypto 経由で\nlibcrypto を動的ロードしようとするが")
 * **ルートCAまでの証明書チェーン検証を行っていない**: モジュールDocstringに明記の通り、証明書チェーンの取得自体がHTTPS（通常のCA検証あり）経由かつAmazon管理下のURLパスに固定されるという前提のもとで、ルートCAまでのフルパス検証(full path validation)は意図的に省略されている。この前提（`_validate_cert_chain_url`によるURL形式チェック）が破られた場合の防御は、このURL形式チェック自体に一元的に依存する。**（Issue #173で強化）** 以前はこのURL形式チェック自体に、正規化前の生パスへの`startswith`判定という抜け穴があり（`".."`によるパストラバーサルURLが通過しうる）、「URLがAmazon管理下のパスに固定される」という前提を崩しうる状態だった。`posixpath.normpath`による正規化後判定への変更でこの抜け穴は塞がれたが、この関数（URL形式チェック）に防御が一元的に依存する設計自体は変わっていない。
 * 根拠: [モジュールDocstring] (行番号: 23〜25 / 抜粋: "なお、証明書チェーンの取得自体はHTTPS(s3.amazonaws.com、通常のCA検証あり)経由で\n行われ、かつURLがAmazon管理下のパスに固定されるため")
-* **`_fetch_leaf_certificate`のHTTP取得失敗時は`AlexaVerificationError`に変換されない**: `resp.raise_for_status()`が送出する`requests`例外（`requests.exceptions.HTTPError`等）はそのまま呼び出し元へ伝播し、`AlexaVerificationError`への変換は行われない。呼び出し元ルーターが`AlexaVerificationError`のみを捕捉する設計の場合、Amazon側の証明書チェーンURLが一時的に応答不能になっただけでも、意図しない形（500等）でエラーが伝播しうる（Issue #110で`verify_timestamp`側の同種の問題が修正されたが、`_fetch_leaf_certificate`のHTTP取得失敗経路自体は本Issueのスコープ外で未修正）。
-* 根拠: (行番号: 83 / 抜粋: "resp.raise_for_status()")
+* **`_fetch_leaf_certificate`のHTTP取得失敗を`AlexaVerificationError`へ変換（Issue #179で修正）**: 以前は`resp.raise_for_status()`が送出する`requests`例外（`requests.exceptions.HTTPError`等）がそのまま呼び出し元へ伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしてFastAPIのグローバル例外ハンドラに届き、Amazon側の証明書チェーンURLが一時的に応答不能になっただけで意図しない500が返っていた（Issue #110で`verify_timestamp`側の同種の問題が修正された際、この`_fetch_leaf_certificate`側の経路はスコープ外として未修正のまま残っていた）。`requests.get`/`resp.raise_for_status()`を`try/except requests.exceptions.RequestException`で囲み、捕捉した例外を`AlexaVerificationError`へ変換するよう修正した。
+* 根拠: (行番号: 88〜92 / 抜粋: "except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
 * **タイムスタンプのタイムゾーン欠落ガード（Issue #110で追加）**: `verify_timestamp`は、`datetime.fromisoformat`がタイムゾーン情報のないISO文字列もパース成功として受理してしまう挙動に対し、パース後に`tzinfo is None`を明示的にチェックして`AlexaVerificationError`を送出するガードを持つ。このガードが無かった旧実装では、後続の`now(tz付き) - ts(tz無し)`比較が`TypeError`を送出し、呼び出し元が`AlexaVerificationError`のみを捕捉する設計のため、本来返すべき400ではなく500が返っていた（実害は署名検証を通過した後にしか到達しないため極小）。
-* 根拠: (行番号: 135〜142)
+* 根拠: (行番号: 144〜151)
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| 呼び出し元ルーターが`AlexaVerificationError`以外の例外（`requests`例外等）をどう扱うか | `verify_signature`/`verify_timestamp`の一部エラー経路（`_fetch_leaf_certificate`のHTTP取得失敗等）は`AlexaVerificationError`に変換されずそのまま伝播するが、呼び出し元がこれをHTTPレスポンスへどう変換するかは本ファイルからは不明。 | `MY_HOME_SYSTEM/routers/alexa_router.py` |
+| 呼び出し元ルーターが`AlexaVerificationError`以外の例外をどう扱うか | Issue #179の修正により`_fetch_leaf_certificate`のHTTP取得失敗（`requests.exceptions.RequestException`）は`AlexaVerificationError`へ変換されるようになったが、`x509.load_pem_x509_certificates`が不正なPEMデータに対して送出しうる`ValueError`等、本ファイル内で`AlexaVerificationError`に変換されない例外経路が他にも残っており、呼び出し元がこれらをHTTPレスポンスへどう変換するかは本ファイルからは不明。 | `MY_HOME_SYSTEM/routers/alexa_router.py` |
 | `_cert_cache`のプロセス間共有の有無 | `unified_server.py`が複数プロセス/ワーカー構成で稼働する場合、`_cert_cache`はプロセスごとに独立するかどうかが本ファイルからは不明。 | `MY_HOME_SYSTEM/unified_server.py`、デプロイ構成（起動コマンド等） |
 
 ## 10. 自己検証結果
