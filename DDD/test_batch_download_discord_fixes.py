@@ -164,6 +164,57 @@ class TestCollectTasksNormalizesMissavSearchUrls:
         assert tasks[0].url == "https://missav.live/dm18/ja/dvdms-079"
 
 
+class TestCollectTasksListFileReadFailureIsProtected:
+    """Issue #184の回帰テスト: list/*.txt側の読み込みはtry/exceptで保護され
+    エラーログを出したうえで処理を継続するが、list.txt側にはこの保護が無かった。
+    list.txtの読み込みで例外が発生すると_collect_tasks全体が未処理例外で中断し、
+    後続で処理されるはずのlist/*.txtのタスクまで巻き添えで処理されなくなっていた。"""
+
+    def test_list_txt_read_failure_does_not_abort_list_dir_processing(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        (list_dir / "other_source.txt").write_text(
+            "https://example.com/other-video\n", encoding="utf-8"
+        )
+
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            module,
+            "CONFIG",
+            dataclasses.replace(
+                module.CONFIG,
+                LIST_FILE_PATH=list_file,
+                LIST_DIR_PATH=list_dir,
+                HISTORY_FILE_PATH=tmp_path / "history.txt",
+            ),
+        )
+
+        real_open = open
+
+        def _open_with_simulated_failure(path, *args, **kwargs):
+            if Path(path) == list_file:
+                raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "simulated decode failure")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _open_with_simulated_failure, raising=False)
+
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader.history = set()
+
+        with caplog.at_level(logging.ERROR, logger="Downloader"):
+            # 例外を送出せずに完走すること自体が回帰確認の対象
+            tasks = downloader._collect_tasks()
+
+        # list.txtは読めなかったが、list/*.txt側のタスクは巻き添えにならず処理される
+        assert len(tasks) == 1
+        assert tasks[0].url == "https://example.com/other-video"
+        assert any("リスト読み込みエラー" in r.message for r in caplog.records)
+
+
 class TestScrapingStrategyFragmentStaging:
     """missavのHLSフラグメント(数千個の小ファイル)を、NASの保存先ディレクトリ
     ではなくローカルディスク(CONFIG.LOCAL_TMP_DIR)へ一時保存することを確認する

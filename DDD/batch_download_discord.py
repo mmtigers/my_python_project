@@ -1012,13 +1012,21 @@ class BatchDownloader:
             tasks_by_source.setdefault(source_name, []).append(DownloadTask(url, source_name))
 
         if CONFIG.LIST_FILE_PATH.exists():
-            with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    url = line.strip()
-                    if url and not url.startswith("#"):
-                        url = _normalize_url(url)
-                        if url not in self.history:
-                            _add(url, "list")
+            # #184: list/*.txt側は非UTF-8バイト等の読み込み失敗をtry/exceptで保護し
+            # エラーログを出したうえで処理を継続するが、list.txt側にはこの保護が
+            # 無かった。list.txtの読み込みで例外が発生すると_collect_tasks全体が
+            # 未処理例外で中断し、後続で処理されるはずのlist/*.txtのタスクまで
+            # 巻き添えで処理されなくなっていた。list/*.txt側と同じパターンで保護する。
+            try:
+                with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
+                    for line in f:
+                        url = line.strip()
+                        if url and not url.startswith("#"):
+                            url = _normalize_url(url)
+                            if url not in self.history:
+                                _add(url, "list")
+            except Exception as e:
+                logger.error(f"リスト読み込みエラー ({CONFIG.LIST_FILE_PATH.name}): {e}", exc_info=True)
 
         if CONFIG.LIST_DIR_PATH.exists():
             # glob()の順序はOS/ファイルシステム依存で不定なため、実行毎に順序が
