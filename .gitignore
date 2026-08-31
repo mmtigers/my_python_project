@@ -56,6 +56,13 @@ assets/salary_images/
 *.pdf
 *.mp4
 *.txt
+# Issue #187: 上記の*.pngは個人的なプライベート画像(カメラスナップショット等)を
+# 想定した除外ルールだが、family-quest/public/配下のPWAアイコン・favicon等の
+# フロントエンドソースアセットまで巻き込んで無条件にgit管理外にしてしまい、
+# コード側(vite.config.ts, index.html)が参照する実ファイルが一度もコミットされず
+# 常に404になる不具合の一因になっていた。ビルド成果物ではなくソースとして
+# コミットが必要なこのディレクトリのみ明示的に除外対象から戻す。
+!family-quest/public/*.png
 
 # DDD: personal generated content, not source
 DDD/split_results/
