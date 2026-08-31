@@ -560,10 +560,11 @@
 
 ### `Uploader` クラス
 
-* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。
+* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
 
 
-* 根拠: 分割ロジックと送信ロジック (行番号: 529 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: 分割ロジックと送信ロジック (行番号: 589 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: `split_files: List[Path] = []` および `finally:` ブロック (行番号: 584, 609〜618 / 抜粋: "for s_file in split_files:\n try:\n os.remove(s_file)")
 
 
 
@@ -571,7 +572,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 507 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 566 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -579,23 +580,23 @@
 * **戻り値/レスポンス**: `None`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 507 / 抜粋: "-> None:")
+* 根拠: メソッドシグネチャ (行番号: 566 / 抜粋: "-> None:")
 
 
 
 
-* **副作用**: 動画の分割ファイル生成、外部API（Discord Webhook）へのHTTP POSTリクエスト送信。
+* **副作用**: 動画の分割ファイル生成、外部API（Discord Webhook）へのHTTP POSTリクエスト送信、分割ファイルのローカル削除(`os.remove`、送信後に必ず実行)。
 
 
-* 根拠: `subprocess.run`, `requests.post` (行番号: 526-537, 555-560 / 抜粋: "requests.post(")
+* 根拠: `subprocess.run`, `requests.post` (行番号: 586-597, 604 / 抜粋: "requests.post(")、`os.remove(s_file)` (行番号: 616)
 
 
 
 
-* **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。
+* **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
 
-* 根拠: `except Exception as e:` (行番号: 548, 565-566 / 抜粋: "except Exception as e: logger....")
+* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 608 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
 
 
 

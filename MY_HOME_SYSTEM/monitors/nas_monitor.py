@@ -256,7 +256,13 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
-            ("タイムラプス動画", os.path.join(getattr(config, "ASSETS_DIR", ""), "timelapse"),
+            # タイムラプス動画の生成先(monitors/smart_timelapse_generator.pyの
+            # setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
+            # config.BASE_DIR/assets/timelapse であり、以前はここがNAS側の
+            # パスを指していたため、誰も書かないディレクトリを掃除し、誰も
+            # 掃除しないローカルディレクトリにファイルが無限蓄積していた
+            # (Issue #171)。生成先と同じローカルパスに修正する。
+            ("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4", ".jpg")),
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
              getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
