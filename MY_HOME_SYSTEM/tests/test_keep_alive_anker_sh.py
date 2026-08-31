@@ -44,3 +44,32 @@ def test_connect_script_path_points_under_tools_dir():
 
 def test_connect_speaker_sh_actually_lives_under_tools():
     assert os.path.isfile(REPO_CONNECT_SCRIPT)
+
+
+class TestLogTimestampFreshness:
+    """#249回帰防止: 以前はTIMESTAMPをスクリプト起動時に1回だけ評価しており、
+    再接続処理のsleep等を挟んで複数回log()が呼ばれても、記録される時刻は
+    常に起動時刻のままだった(全ログ行が同一時刻になり、実際の発生時刻が
+    ログから分からなくなっていた)。"""
+
+    def test_no_global_timestamp_computed_once_at_startup(self):
+        src = _read_script()
+        # トップレベル(関数定義の外)でTIMESTAMPを1回だけ評価する代入が
+        # 存在しないこと。
+        assert not re.search(r'^TIMESTAMP=\$\(date', src, re.MULTILINE), (
+            "TIMESTAMPをトップレベルで一度だけ評価してはならない"
+            "(以降のlog()呼び出しが全て同じ古い時刻を記録してしまう)"
+        )
+
+    def test_log_function_calls_date_internally(self):
+        src = _read_script()
+        log_func_match = re.search(r'^log\(\)\s*\{(.*?)^\}', src, re.DOTALL | re.MULTILINE)
+        assert log_func_match, "log()関数の定義が見つからない"
+        log_body = log_func_match.group(1)
+
+        assert "date" in log_body, (
+            "log()関数は呼び出しのたびにdateコマンドで現在時刻を取得するべき"
+        )
+        # log()の出力行がグローバル変数TIMESTAMPを参照していないこと
+        # (関数外で1回だけ評価された古い値を使い回してしまうため)
+        assert "$TIMESTAMP" not in log_body
