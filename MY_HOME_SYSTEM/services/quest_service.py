@@ -768,7 +768,11 @@ class QuestService:
 
         if quest['quest_type'] == 'random':
             seed = f"{now.strftime('%Y-%m-%d')}_{quest['quest_id']}"
-            if random.Random(seed).random() > quest['occurrence_chance']:
+            # #241: occurrence_chanceがNoneの場合、float > Noneの比較でTypeErrorになる。
+            # DBスキーマ(quest_master.occurrence_chance DEFAULT 1.0)とmodels/quest.pyの
+            # 既定値(Optional[float] = 1.0)に合わせ、Noneは「常に出現」扱いにする。
+            occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0
+            if random.Random(seed).random() > occurrence_chance:
                 return False
 
         if quest['start_time'] and quest['end_time']:

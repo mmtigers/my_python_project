@@ -747,6 +747,52 @@ class TestFilterActiveQuestsDateParseErrorLogging:
         assert "None" not in logged_message
 
 
+class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
+    """Issue #241の回帰テスト: quest_type='random'のクエストでoccurrence_chanceが
+    Noneの場合、random.Random(seed).random() > None の比較でTypeErrorになり、
+    filter_active_quests/process_complete_quest側の検証が例外で落ちていた
+    (start_date/end_dateパース失敗のValueErrorのみ捕捉しており、この経路は無防備だった)。
+    occurrence_chanceがNoneの場合はDBスキーマ(DEFAULT 1.0)・models/quest.pyの
+    既定値(Optional[float] = 1.0)と同じ「常に出現」扱いにする。"""
+
+    def _make_random_quest(self, occurrence_chance):
+        return {
+            "quest_id": 9001,
+            "quest_type": "random",
+            "occurrence_chance": occurrence_chance,
+            "start_time": None,
+            "end_time": None,
+            "day_of_week": None,
+            "target_user": "all",
+            "icon_key": "🎲",
+        }
+
+    def test_none_occurrence_chance_does_not_raise_type_error(self):
+        quest_service = QuestService()
+        quest = self._make_random_quest(None)
+
+        # 例外を送出せず完走すること自体が回帰確認の対象
+        result = quest_service._is_quest_currently_active(quest)
+
+        assert result is True, "occurrence_chance=Noneは既定値1.0(常に出現)として扱うべき"
+
+    def test_filter_active_quests_does_not_raise_for_random_quest_with_none_chance(self):
+        quest_service = QuestService()
+        quest = self._make_random_quest(None)
+
+        result = quest_service.filter_active_quests([quest])
+
+        assert len(result) == 1
+
+    def test_explicit_chance_still_behaves_as_before(self):
+        quest_service = QuestService()
+        quest_never = self._make_random_quest(0.0)
+
+        assert quest_service._is_quest_currently_active(quest_never) is False, (
+            "occurrence_chance=0.0(既存の明示的な値)は従来通り出現しないこと"
+        )
+
+
 class TestSyncMasterDataSyncsRewardTarget:
     """
     Issue #95: sync_master_data の reward_master への UPSERT が target 列を

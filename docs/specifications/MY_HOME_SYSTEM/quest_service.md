@@ -276,16 +276,16 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._is_quest_currently_active`
 
-* **役割**: `quest_master`1行(`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応)を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`quest_type == 'limited'`の場合は`start_date`/`end_date`(`YYYY-MM-DD`形式、`split('-')`でパース)による期間チェック(パース失敗時は`ValueError`を捕捉しログ出力のうえ`False`)、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`start_time`と`end_time`が両方設定されていれば現在時刻(JST、`"%H:%M"`形式の文字列比較)がその範囲内か(`start_time > end_time`の場合は日付をまたぐ範囲として扱う)、`day_of_week`(カンマ区切りの整数文字列)が設定されていれば現在の曜日(`date.weekday()`、月曜=0)がその一覧に含まれるかを判定する。いずれか1つでも条件を満たさなければ`False`を返す。Issue #163で`filter_active_quests`から切り出され、`_process_complete_quest_locked`のサーバー側検証と共用されるようになった(表示上出現していないクエストがAPI直叩きで完了できてしまう食い違いを防ぐため、判定基準を完全に一致させる目的)。
-* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 696〜739)
+* **役割**: `quest_master`1行(`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応)を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`quest_type == 'limited'`の場合は`start_date`/`end_date`(`YYYY-MM-DD`形式、`split('-')`でパース)による期間チェック(パース失敗時は`ValueError`を捕捉しログ出力のうえ`False`)、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。**（Issue #241で修正）** `occurrence_chance`が`None`の場合は、`quest_master`のDBスキーマ(`DEFAULT 1.0`)・`models/quest.py`の既定値(`Optional[float] = 1.0`)と同じ「常に出現」扱いとして`1.0`にフォールバックする。`start_time`と`end_time`が両方設定されていれば現在時刻(JST、`"%H:%M"`形式の文字列比較)がその範囲内か(`start_time > end_time`の場合は日付をまたぐ範囲として扱う)、`day_of_week`(カンマ区切りの整数文字列)が設定されていれば現在の曜日(`date.weekday()`、月曜=0)がその一覧に含まれるかを判定する。いずれか1つでも条件を満たさなければ`False`を返す。Issue #163で`filter_active_quests`から切り出され、`_process_complete_quest_locked`のサーバー側検証と共用されるようになった(表示上出現していないクエストがAPI直叩きで完了できてしまう食い違いを防ぐため、判定基準を完全に一致させる目的)。
+* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 744〜791)、`occurrence_chance`のNoneフォールバック (行番号: 769〜776 / 抜粋: "occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0")
 * **引数/リクエスト**: `quest`(`quest_master`1行、`dict`または`sqlite3.Row`), `now: Optional[datetime.datetime]`（省略時は`datetime.datetime.now(pytz.timezone("Asia/Tokyo"))`で現在時刻を取得）
-* 根拠: (行番号: 696, 702)
+* 根拠: (行番号: 744, 750)
 * **戻り値/レスポンス**: `bool`
-* 根拠: `return True` (行番号: 739) / 各分岐の `return False` (行番号: 712, 716, 719, 724, 729, 732, 737)
+* 根拠: `return True` (行番号: 791) / 各分岐の `return False`
 * **副作用**: なし(ログ出力を除く)。`quest_type == 'limited'`の日付パース失敗時のみ`logger.warning`
-* 根拠: (行番号: 718 / 抜粋: "logger.warning(f\"Date parse error for quest {quest['quest_id']}: {e}\")")
-* **エラーハンドリング**: `start_date`/`end_date`のパース失敗(`ValueError`)のみ捕捉し`False`を返す。それ以外(`occurrence_chance`が`None`の場合の比較等)は捕捉されず呼び出し元へ伝播しうる。
-* 根拠: (行番号: 708〜719 / 抜粋: "except ValueError as e:\n                logger.warning(...)\n                return False")
+* 根拠: (行番号: 766 / 抜粋: "logger.warning(f\"Date parse error for quest {quest['quest_id']}: {e}\")")
+* **エラーハンドリング**: `start_date`/`end_date`のパース失敗(`ValueError`)を捕捉し`False`を返す。**（Issue #241で修正）** `occurrence_chance`が`None`の場合も例外を送出せず`1.0`(常に出現)として扱う(以前は`float > None`の比較で未捕捉の`TypeError`となり呼び出し元(`filter_active_quests`/`_process_complete_quest_locked`)へ伝播していた)。
+* 根拠: (行番号: 764〜767 / 抜粋: "except ValueError as e:\n                logger.warning(...)\n                return False")、(行番号: 769〜776)
 
 ### `QuestService._get_sibling_partner_id`
 
@@ -831,8 +831,8 @@ graph TD
 * 根拠: (行番号: 144, 407, 409)
 * **`_is_quest_currently_active`(旧`filter_active_quests`内)の日付フォーマット依存**: 日付文字列を`split('-')`で分割しており、対象フォーマット(`YYYY-MM-DD`)に厳密に依存している。Issue #163でこの判定は`filter_active_quests`から`_is_quest_currently_active`へ切り出され、`_process_complete_quest_locked`のサーバー側検証からも呼ばれるようになったため、この依存は完了APIにも及ぶ。
 * 根拠: `y, m, d = map(int, quest['start_date'].split('-'))` (行番号: 710)
-* **`_is_quest_currently_active`は`occurrence_chance`が`None`の場合に未捕捉の`TypeError`となりうる**: `quest_type == 'random'`の判定で`random.Random(seed).random() > quest['occurrence_chance']`を評価する際、`occurrence_chance`列が`None`だと比較で`TypeError`が送出されるが、この関数は`start_date`/`end_date`パース失敗時の`ValueError`しか捕捉しない。Issue #163以前は`filter_active_quests`(表示専用)からしか呼ばれておらず、この経路が例外を送出すると表示一覧の生成自体が失敗するだけだったが、同関数を流用した`_process_complete_quest_locked`のサーバー側検証でも同じ経路を通るため、`occurrence_chance`が`None`のrandom型クエストは表示・完了の両方で同様に失敗しうる状態のまま変わっていない。
-* 根拠: `if random.Random(seed).random() > quest['occurrence_chance']:` (行番号: 723)
+* **`_is_quest_currently_active`の`occurrence_chance`が`None`の場合の未捕捉`TypeError`（Issue #241で修正）**: `quest_type == 'random'`の判定で`random.Random(seed).random() > quest['occurrence_chance']`を評価する際、`occurrence_chance`列が`None`だと比較で`TypeError`が送出されていた。`filter_active_quests`(表示専用)と`_process_complete_quest_locked`(完了APIのサーバー側検証、Issue #163)の両方がこの関数を共用しているため、`occurrence_chance`が`None`のrandom型クエストが存在すると表示・完了の両方が失敗しうる状態だった。`quest_data.py`には現状`quest_type: 'random'`のクエスト定義が無く、DBスキーマ側も`DEFAULT 1.0`のため通常運用では到達しない潜在バグだったが、`None`の場合は同じ既定値`1.0`(常に出現)にフォールバックすることで解消した。
+* 根拠: `occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0` (行番号: 774)
 * **`_trigger_tv_unlock`のスレッド管理**: `threading.Thread`による非同期実行が行われているが、プロセス終了時のスレッド制御（明示的な待機やキャンセル）は実装されていない（`daemon=True`によりプロセス終了時に強制終了される前提と見られる）。
 * 根拠: `t = threading.Thread(target=unlock_task, daemon=True)` (行番号: 430)
 * **兄妹連携クエストの前提条件**: `_get_sibling_partner_id`は`quest_users.role = ROLE_CHILD`のユーザーが「ちょうど2人」であることを前提としており、子供が1人または3人以上の家族構成では常に`HTTPException(400)`が送出される。
