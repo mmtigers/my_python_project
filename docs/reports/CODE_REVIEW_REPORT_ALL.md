@@ -7,6 +7,37 @@
 
 ---
 
+## 0. 対応状況（最終更新: 2026-08-29）
+
+指摘34件（Critical 9・High 6・Medium 19）のうち24件は対応完了、9件は部分対応（残作業あり）、1件は意思決定により対応対象外。**7. 最終結論**の「🔴 REJECT・49/100」判定はこの2026-08-11時点の状況を反映したものであり、以下の通り2026-08-29時点では大半が解消済みのため、現状の判定としては読み替えが必要。
+
+### 🔲 残件（未対応・部分対応・9件）
+
+| # | 項目 | 状態 | 詳細 |
+|---|---|---|---|
+| Critical#1 | APIの認可欠如（`user_id`/`approver_id`のクライアント信頼） | 未対応（意思決定によりスコープ外） | 棚卸し課題4で対応スコープ外と合意済み。docs改善バックログのB1と同一課題 |
+| Critical#3 | Streamlitダッシュボードの無認証公開 | 部分対応 | `--server.address`を`0.0.0.0`→`127.0.0.1`に変更済みで外部露出は解消。ただし`sudo systemctl restart`ボタン（`views/dashboard/log_tab.py:119`）を含めアプリ内認証は依然なし |
+| Critical#4 | DBバックアップのGit履歴残存 | 部分対応 | `.gitignore`修正・ワーキングツリーからの追跡解除は完了済み。過去コミット履歴からの完全消去（`git filter-repo`等）はリポジトリ所有者の判断待ち。docs改善バックログのD4と同一課題 |
+| Critical#8 | カメラ機能の無認証公開 | 部分対応 | 外部アクセスは`access_control_middleware`でCloudflare Access JWT検証必須化済み（PR #80）。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み |
+| High#1 | `family-quest/`テストコード皆無・ESLintが`.ts`/`.tsx`対象外 | 部分対応 | ESLintの`files`グロブは`.ts`/`.tsx`を含むよう修正済み（Lint対象化は解消）。テストファイルは依然0件（`*.test.*`/`*.spec.*`検索でヒットなし、テスト用依存もpackage.jsonに無し）。docs改善バックログのC2と同一課題 |
+| High#3 | `UserStatusCard`のHP固定表示 | 対応済み・要追加確認 | HP再計算バグ自体は是正済み（バックエンド値をそのまま使う設計に変更）。ただし現在の`UserStatusCard.tsx`にはHP表示UI自体が存在しない。意図した仕様変更か確認が必要 |
+| M2 | `config.py`の子供の氏名・年齢ハードコード | 部分対応 | 年齢は`family_members.local.json`（`.gitignore`で除外・git追跡対象外）に切り出し済み。氏名は`config.py`の`FAMILY_SETTINGS`に引き続き残存 |
+| M4 | SwitchBot Webhook署名検証がトークン未設定時オプトイン | 変化あり（仕様は同じ・警告追加） | 実装（未設定時に検証スキップ）自体は変更なし。ただしアプリ起動時（`unified_server.py`のlifespan）に未設定を警告するログが追加された。docs改善バックログのB5と同一課題 |
+| M12 | `WeeklyTrends.tsx`/`CameraDashboard.tsx`が生`useEffect`+fetchでデータ取得 | 部分対応 | `WeeklyTrends.tsx`は機能ごと削除済み（該当なし）。`CameraDashboard.tsx`は現存し、`useQuery`化はされていない（ただしAPI呼び出し自体は下記M14の通り`apiClient`経由に統一済み） |
+| M15 | `AvatarUploader.tsx`のアップロードファイル検証欠如 | 対応済み・付随課題あり | フロント（5MB・MIME）・バックエンド（10MB・拡張子/マジックバイト検証）とも実装済みだが、サイズ上限値がフロント/バックエンドで不一致。docs改善バックログのB6と同一課題 |
+| M17 | `split_prompts.py`のファイル名衝突時無警告上書き | 部分対応 | 衝突時に警告ログを出すよう改修済み（「無警告」は解消）。上書き自体を防止・退避する仕組みは未実装 |
+| M18 | `extract_youtube_urls.py`の出力上書き | 部分対応 | 同上（警告ログ追加のみ、上書き自体は継続） |
+
+### ✅ 対応完了（22件）
+
+**Critical**: #2 IPアドレス制限ヘッダー詐称（`access_control_middleware`でJWT検証必須化、PR #80）／#5 `package.json`/`tsconfig.json`不在（コミット`74e5f83`で追加）／#6 Admin Dashboard無条件到達性（`features/admin/`ごと機能削除）／#7 アバターアップロード実装不備（`apiClient.postForm()`実装）／#9 DDD機微コンテンツのGit無制限追跡（`.gitignore`に`DDD/split_results/`等追加、追跡0件確認）
+
+**High**: #2 tsconfig不在・`as any`型迂回（`tsconfig.json`で`strict: true`、`as any`は0件）／#4 `batch_download_discord.py`多重起動防止欠如（`fcntl.flock`実装）／#5 `extract_youtube_urls.py`レート制限未考慮（ジッター付きsleep＋連続失敗しきい値実装）／#6 `newface_monitor.py`非アトミック書き込み（tmpファイル＋バックアップ＋`Path.replace()`実装）
+
+**Medium**: M1 `financial_service.py`ハードコード（機能ごと削除）／M3 `ai_logic.py`死んだコードの脆弱性（完全削除＋回帰テストで再発防止）／M5 `nas_monitor.py`のrsync timeout未指定（`timeout=120`追加）／M6 CIにlint/型チェック不在（`ruff`・Bandit・pip-audit・`npm run build`をCIに追加）／M7 `ApprovalList.tsx`の`approver_id`ハードコード（動的解決に変更）／M8 エラーメッセージ握りつぶし（`detail`をUIに表示）／M9 承認/却下失敗時の無通知（`setMessageData`で通知）／M10 `history_id`フォールバック不統一（`??`で統一）／M11 クエストロック判定ロジック重複（`getQuestLockState()`に共通化）／M13 `pendingInventory`クエリ重複登録（1箇所に統一）／M14 `apiClient`迂回の生fetch呼び出し（全箇所`apiClient`経由に統一）／M16 DDD `requirements.txt`の依存不足（`yt-dlp`/`curl_cffi`を明記）／M19 `newface_monitor.py`の`cast_id`にURLクエリ混入（クエリ・フラグメント除去処理を追加）
+
+---
+
 ## 1. 仕様理解
 
 - **システムの目的**: 家庭内自動化基盤。中核は `MY_HOME_SYSTEM/`（FastAPI製バックエンド、SwitchBot/Nature Remo/防犯カメラ監視、家族向けクエスト＝お手伝いゲーミフィケーション、LINEボット、家計/不動産監視を1サーバーに統合）。`family-quest/` はそのクエスト機能のReact SPAフロントエンド。`DDD/` はバックエンドとは独立した、開発者個人用のDiscord動画一括ダウンロード・YouTube URL抽出・Webサイト監視スクリプト群（家庭内自動化とは別の私的自動化ツール）。
