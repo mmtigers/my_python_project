@@ -169,6 +169,18 @@ def _skip_optional_alias(sql: str, pos: int) -> int:
     return pos
 
 
+# B3: `FROM/**/tablename` のようにキーワードと識別子の間にSQLコメントを挟むと、
+# 下の _extract_referenced_tables が要求する「FROM/JOINの直後に空白」という前提が
+# 崩れ、正規表現がテーブル名を検出できず許可テーブル判定をすり抜けてしまう
+# (UNION SELECTと組み合わせた許可外テーブルの読み取りバイパスを実証済み)。
+# ブロックコメント(/* */)・行コメント(--)を実行前に空白へ置換して無害化する。
+_SQL_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)
+
+
+def _strip_sql_comments(sql: str) -> str:
+    return _SQL_COMMENT_RE.sub(" ", sql)
+
+
 def _extract_referenced_tables(sql: str) -> List[str]:
     """
     SQL文中で FROM / JOIN が参照するテーブル名をすべて抽出する（簡易パーサ）。
@@ -221,6 +233,10 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
     sql = args.get("sql_query")
     if not sql:
         return "SQLクエリが指定されていません"
+
+    # B3: コメントによる検出バイパスを防ぐため、以降の判定・実行はすべて
+    # コメント除去後のSQLに対して行う。
+    sql = _strip_sql_comments(sql)
 
     # 安全対策: SELECT以外は禁止
     if not sql.strip().upper().startswith("SELECT"):

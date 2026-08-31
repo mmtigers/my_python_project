@@ -159,6 +159,29 @@ class TestSaveLogGeneric:
         )
         assert result is False
 
+    def test_rejects_sql_injection_in_table_name(self, isolated_db):
+        """B3: table名はSQL文字列へ直接展開されるため、不正な識別子は実行前に拒否する。"""
+        result = db.save_log_generic(
+            f"{config.SQLITE_TABLE_SENSOR}; DROP TABLE {config.SQLITE_TABLE_SENSOR}--",
+            ["timestamp"],
+            ("2026-01-01T00:00:00",),
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            # テーブル自体が破壊されていないこと
+            cur.execute(f"SELECT COUNT(*) as c FROM {config.SQLITE_TABLE_SENSOR}")
+
+    def test_rejects_sql_injection_in_column_name(self, isolated_db):
+        """B3: カラム名も同様にSQL文字列へ直接展開されるため、不正な識別子は実行前に拒否する。"""
+        result = db.save_log_generic(
+            config.SQLITE_TABLE_SENSOR,
+            ["timestamp) VALUES ('x'); DROP TABLE " + config.SQLITE_TABLE_SENSOR + "--"],
+            ("2026-01-01T00:00:00",),
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) as c FROM {config.SQLITE_TABLE_SENSOR}")
+
 
 class TestSaveLogAsync:
     @pytest.mark.asyncio

@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import time
 import json
@@ -8,6 +9,13 @@ from contextlib import contextmanager
 import config
 
 logger = logging.getLogger("core.database")
+
+# save_log_generic の table/カラム名はプレースホルダ化できず、SQL文字列へ直接
+# 展開せざるを得ない。現状の呼び出し元は全てリテラル固定値かconfig定数のみだが、
+# 将来ユーザー入力等の動的な値が渡された場合に備え、SQLite識別子として妥当な
+# 文字種(英数字・アンダースコアのみ、数字始まり不可)のみを許可するホワイトリスト
+# 検証を構造的な防御として設ける(B3)。
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 @contextmanager
 def get_db_cursor(commit: bool = False):
@@ -68,6 +76,9 @@ def execute_read_query(query: str, params: tuple = ()) -> str:
 
 def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """汎用データ保存関数"""
+    if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):
+        logger.error(f"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})")
+        return False
     try:
         with get_db_cursor(commit=True) as cur:
             placeholders = ", ".join(["?"] * len(values_list))
