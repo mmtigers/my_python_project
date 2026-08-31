@@ -261,17 +261,31 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._process_complete_quest_locked`
 
-* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行う。続けて、`quest['quest_type']`が`'infinite'`以外かつ直近の完了履歴がある場合、`is_within_reset_period`でその履歴が現在の`reset_period`（`quest_master.reset_period`が未設定なら`'daily'`）の期間内かどうかを判定し、期間内であれば`400`エラーとするサーバー側の周期リセットガード（M-1-3）を行う。このガードは、`is_within_reset_period`が元々`get_all_view_data`の表示専用（`completedQuests`算出）にしか使われておらず、上記10秒スパムチェックだけではAPI直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていたことへの対策として追加された。`'infinite'`タイプ（「何回でも挑戦しよう」等）は仕様上多重完了が前提のため、このガードの対象外。ガードを通過後、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた（判定内容自体は変更なし）。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 317〜375)
-* 根拠: `# M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。` (行番号: 337), `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = "今週" if reset_period == 'weekly' else "本日"\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 342〜346)
+* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、まず対象者・出現条件のサーバー側検証を行う(Issue #163)。`target_user`が`'all'`・本人の`user_id`・`'siblings'`(かつ`user['role'] == ROLE_CHILD`)のいずれでもなければ`403`。続けて`_is_quest_currently_active(quest)`が`False`(limited型の期間外・random型の未出現抽選・時間帯外・曜日外のいずれか)であれば`403`とする。これらの検証は、以前`filter_active_quests`(GET /dataの表示整形専用)にしか存在せず、API直叩きで他人向けクエスト・時間帯外・曜日外・未出現のrandomクエストを完了できてしまっていた穴を塞ぐために追加された(報酬購入側は`_process_purchase_reward_locked`内のtargetチェックとしてIssue #95で追加済みだったが、完了側には未展開のまま残っていた)。続いて直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行う。さらに、`quest['quest_type']`が`'infinite'`以外かつ直近の完了履歴がある場合、`is_within_reset_period`でその履歴が現在の`reset_period`（`quest_master.reset_period`が未設定なら`'daily'`）の期間内かどうかを判定し、期間内であれば`400`エラーとするサーバー側の周期リセットガード（M-1-3）を行う。このガードは、`is_within_reset_period`が元々`get_all_view_data`の表示専用（`completedQuests`算出）にしか使われておらず、上記10秒スパムチェックだけではAPI直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていたことへの対策として追加された。`'infinite'`タイプ（「何回でも挑戦しよう」等）は仕様上多重完了が前提のため、このガードの対象外。ガードを通過後、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた（判定内容自体は変更なし）。
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 333〜)
+* 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, ...)\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, ...)` (行番号: 351〜357)
+* 根拠: `# M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。` (行番号: 371), `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = "今週" if reset_period == 'weekly' else "本日"\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 376〜380)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 317)
+* 根拠: (行番号: 333)
 * **戻り値/レスポンス**: `Dict[str, Any]`（ステータスや報酬情報）
-* 根拠: (行番号: 317, 365〜370, 375)
+* 根拠: (行番号: 333, 383〜388, 393)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し、ログ出力、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し
-* 根拠: (行番号: 319〜320, 355, 363, 373)
-* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する）。この時間ベースのチェックに加え、`quest_type`が`'infinite'`以外のクエストが現在の`reset_period`内に既に完了済みの場合は`HTTPException(400)`（M-1-3の周期リセットガード）。さらに呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
-* 根拠: (行番号: 332〜335 / 抜粋: "elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)"), (行番号: 342〜346 / 抜粋: "if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):")
+* 根拠: (行番号: 335〜336, 373, 381, 391)
+* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。対象者不一致(`target_user`不整合)または`_is_quest_currently_active`が`False`の場合は`HTTPException(403)`(Issue #163)。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する）。この時間ベースのチェックに加え、`quest_type`が`'infinite'`以外のクエストが現在の`reset_period`内に既に完了済みの場合は`HTTPException(400)`（M-1-3の周期リセットガード）。さらに呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
+* 根拠: (行番号: 351〜357), (行番号: 366〜369 / 抜粋: "elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)"), (行番号: 376〜380 / 抜粋: "if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):")
+
+### `QuestService._is_quest_currently_active`
+
+* **役割**: `quest_master`1行(`dict`または`sqlite3.Row`。いずれも`[]`でのアクセスに対応)を受け取り、「今」出現・実行可能な条件を満たすかを`bool`で返す。`quest_type == 'limited'`の場合は`start_date`/`end_date`(`YYYY-MM-DD`形式、`split('-')`でパース)による期間チェック(パース失敗時は`ValueError`を捕捉しログ出力のうえ`False`)、`quest_type == 'random'`の場合は`f"{今日の日付}_{quest_id}"`をシードとした`random.Random(seed).random()`が`occurrence_chance`を超えていないかの出現抽選チェックを行う。`start_time`と`end_time`が両方設定されていれば現在時刻(JST、`"%H:%M"`形式の文字列比較)がその範囲内か(`start_time > end_time`の場合は日付をまたぐ範囲として扱う)、`day_of_week`(カンマ区切りの整数文字列)が設定されていれば現在の曜日(`date.weekday()`、月曜=0)がその一覧に含まれるかを判定する。いずれか1つでも条件を満たさなければ`False`を返す。Issue #163で`filter_active_quests`から切り出され、`_process_complete_quest_locked`のサーバー側検証と共用されるようになった(表示上出現していないクエストがAPI直叩きで完了できてしまう食い違いを防ぐため、判定基準を完全に一致させる目的)。
+* 根拠: `def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:` (行番号: 696〜739)
+* **引数/リクエスト**: `quest`(`quest_master`1行、`dict`または`sqlite3.Row`), `now: Optional[datetime.datetime]`（省略時は`datetime.datetime.now(pytz.timezone("Asia/Tokyo"))`で現在時刻を取得）
+* 根拠: (行番号: 696, 702)
+* **戻り値/レスポンス**: `bool`
+* 根拠: `return True` (行番号: 739) / 各分岐の `return False` (行番号: 712, 716, 719, 724, 729, 732, 737)
+* **副作用**: なし(ログ出力を除く)。`quest_type == 'limited'`の日付パース失敗時のみ`logger.warning`
+* 根拠: (行番号: 718 / 抜粋: "logger.warning(f\"Date parse error for quest {quest['quest_id']}: {e}\")")
+* **エラーハンドリング**: `start_date`/`end_date`のパース失敗(`ValueError`)のみ捕捉し`False`を返す。それ以外(`occurrence_chance`が`None`の場合の比較等)は捕捉されず呼び出し元へ伝播しうる。
+* 根拠: (行番号: 708〜719 / 抜粋: "except ValueError as e:\n                logger.warning(...)\n                return False")
 
 ### `QuestService._get_sibling_partner_id`
 
@@ -421,16 +435,17 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.filter_active_quests`
 
-* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`icon`/`type`/`target`/`days`のエイリアスフィールドを付与する。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 547〜588)
+* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`icon`/`type`/`target`/`days`のエイリアスフィールドを付与する。Issue #163で、期間・曜日・時間帯・出現確率の判定本体は`_is_quest_currently_active`へ切り出され、本関数はそれを1件ずつ呼び出して`False`ならスキップするだけの薄いループになった（`_process_complete_quest_locked`のサーバー側検証と判定基準を完全に一致させるため）。
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 741〜754)
+* 根拠: `if not self._is_quest_currently_active(q, now):\n                continue` (行番号: 746〜747)
 * **引数/リクエスト**: `quests: List[dict]`
-* 根拠: (行番号: 547)
+* 根拠: (行番号: 741)
 * **戻り値/レスポンス**: `List[dict]`
-* 根拠: (行番号: 547, 588)
+* 根拠: (行番号: 741, 754)
 * **副作用**: リストの書き換え・フィルタリングのみ（DBや外部通信なし）
-* 根拠: (行番号: 587 / 抜粋: "filtered.append(q)")
-* **エラーハンドリング**: `limited`型の日付文字列パースに失敗した場合、ログを出力してそのクエストをスキップ（`continue`）
-* 根拠: (行番号: 565〜567 / 抜粋: "except ValueError as e:\n                    logger.warning(...)\n                    continue")
+* 根拠: (行番号: 753 / 抜粋: "filtered.append(q)")
+* **エラーハンドリング**: `limited`型の日付文字列パースに失敗した場合、`_is_quest_currently_active`内でログを出力し`False`を返す（結果として本関数の絞り込みからは除外される）
+* 根拠: (行番号: 746〜747), `_is_quest_currently_active`側の該当箇所は本節上部の当該関数の項を参照
 
 ### `ShopService.process_purchase_reward`
 
@@ -569,7 +584,11 @@ flowchart TD
     AcquireLock --> CallLocked["_process_complete_quest_locked を呼び出し"]
     CallLocked --> DB_Select{"DBからユーザとクエストを取得できるか"}
     DB_Select -- No --> Err404[HTTPException 404: Not found]
-    DB_Select -- Yes --> SpamCheck{"直近10秒以内に完了履歴があるか<br>(tzinfoを保持したまま比較)"}
+    DB_Select -- Yes --> TargetCheck{"target_userが'all'/本人/<br>'siblings'かつROLE_CHILDのいずれかか<br>(Issue #163)"}
+    TargetCheck -- No --> Err403T[HTTPException 403: このクエストの対象者ではありません]
+    TargetCheck -- Yes --> ActiveCheck{"_is_quest_currently_activeがTrueか<br>(期間/出現抽選/時間帯/曜日、Issue #163)"}
+    ActiveCheck -- No --> Err403A[HTTPException 403: 現在実行できないクエストです]
+    ActiveCheck -- Yes --> SpamCheck{"直近10秒以内に完了履歴があるか<br>(tzinfoを保持したまま比較)"}
     SpamCheck -- Yes --> Err429[HTTPException 429: 少し時間を空けてください]
     SpamCheck -- No --> ResetGuard{"M-1-3: quest_typeが'infinite'以外 かつ<br>直近履歴が現在のreset_period内か<br>(is_within_reset_periodで判定)"}
     ResetGuard -- Yes --> Err400G[HTTPException 400: 本日/今週は完了済みです]
@@ -785,14 +804,18 @@ graph TD
 * 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 781〜786)
 * **冗長なローカルインポート**: `is_within_reset_period`内の`import datetime`（行144）、`_trigger_tv_unlock`内の`import threading`（行407）と`from services import notification_service`（行409）は、いずれもモジュール冒頭で既にインポート済みのモジュールを関数内で再度インポートしており、実害はないが冗長である。
 * 根拠: (行番号: 144, 407, 409)
-* **`filter_active_quests`の日付フォーマット依存**: 日付文字列を`split('-')`で分割しており、対象フォーマット(`YYYY-MM-DD`)に厳密に依存している。
-* 根拠: `y, m, d = map(int, q['start_date'].split('-'))` (行番号: 558)
+* **`_is_quest_currently_active`(旧`filter_active_quests`内)の日付フォーマット依存**: 日付文字列を`split('-')`で分割しており、対象フォーマット(`YYYY-MM-DD`)に厳密に依存している。Issue #163でこの判定は`filter_active_quests`から`_is_quest_currently_active`へ切り出され、`_process_complete_quest_locked`のサーバー側検証からも呼ばれるようになったため、この依存は完了APIにも及ぶ。
+* 根拠: `y, m, d = map(int, quest['start_date'].split('-'))` (行番号: 710)
+* **`_is_quest_currently_active`は`occurrence_chance`が`None`の場合に未捕捉の`TypeError`となりうる**: `quest_type == 'random'`の判定で`random.Random(seed).random() > quest['occurrence_chance']`を評価する際、`occurrence_chance`列が`None`だと比較で`TypeError`が送出されるが、この関数は`start_date`/`end_date`パース失敗時の`ValueError`しか捕捉しない。Issue #163以前は`filter_active_quests`(表示専用)からしか呼ばれておらず、この経路が例外を送出すると表示一覧の生成自体が失敗するだけだったが、同関数を流用した`_process_complete_quest_locked`のサーバー側検証でも同じ経路を通るため、`occurrence_chance`が`None`のrandom型クエストは表示・完了の両方で同様に失敗しうる状態のまま変わっていない。
+* 根拠: `if random.Random(seed).random() > quest['occurrence_chance']:` (行番号: 723)
 * **`_trigger_tv_unlock`のスレッド管理**: `threading.Thread`による非同期実行が行われているが、プロセス終了時のスレッド制御（明示的な待機やキャンセル）は実装されていない（`daemon=True`によりプロセス終了時に強制終了される前提と見られる）。
 * 根拠: `t = threading.Thread(target=unlock_task, daemon=True)` (行番号: 430)
 * **兄妹連携クエストの前提条件**: `_get_sibling_partner_id`は`quest_users.role = ROLE_CHILD`のユーザーが「ちょうど2人」であることを前提としており、子供が1人または3人以上の家族構成では常に`HTTPException(400)`が送出される。
 * 根拠: `if user_id not in child_ids or len(child_ids) != 2: raise HTTPException(status_code=400, ...)` (行番号: 307〜308)
 * **兄妹連携クエストのカスケード処理は3箇所に個別実装**: 承認（`_process_approve_quest_locked`内、`_approve_linked_history`呼び出し）・却下（`process_reject_quest`内）・取消（`_process_cancel_quest_locked`内、`_revert_and_delete_history`経由）のそれぞれで`hist['linked_history_id']`の有無を個別にチェックしており、共通ヘルパーに統合されていない（H-3による`process_approve_quest`/`process_cancel_quest`のロック委譲分割後も、この重複自体は解消されていない）。
 * 根拠: (行番号: 378, 446〜448, 516〜524)
+* **`_process_complete_quest_locked`は以前、対象者・出現条件のサーバー側検証を持たなかった(Issue #163で解消)**: `target_user`による対象者制限や`day_of_week`/`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`による出現条件は、以前`filter_active_quests`(`GET /data`の表示整形専用)にしか判定が無く、API直叩きで他人向けクエスト・時間帯外・曜日外・未出現のrandomクエストを完了・報酬取得できてしまっていた。また`target_user == 'siblings'`をrole_adultが完了すると、`_process_coop_quest_completion`を経由せず単独即時報酬になってしまう(兄妹連携クエストの前提を破る)問題もあった。報酬購入側は`_process_purchase_reward_locked`内のtargetチェックとしてIssue #95で同種の対策が追加済みだったが、完了側には未展開のまま残っていた。修正では、`filter_active_quests`が使っていた出現条件判定を`_is_quest_currently_active`として切り出し、`_process_complete_quest_locked`のtarget_user検証と合わせて、クエスト・ユーザーの存在確認(404)の直後・スパムチェック(429)より前に呼び出すことで、表示と完了可否の判定基準を一致させた。
+* 根拠: (行番号: 341〜357 / 抜粋: "# 対象者・出現条件のサーバー側検証(Issue #163)。")
 * **アイテム使用の通知は`LINE_USER_ID`宛に1回のみ**: `use_item`はアイテム使用を即座に消費として確定し、`config.LINE_USER_ID`宛に「使用しました」という通知を1回送信する。アイテム使用に親の承認は不要なため、承認待ちを知らせる通知や、承認権限を持つユーザー個別への「承認待ちがある」というプッシュ通知は存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
 * 根拠: `notification_service.send_push(user_id=config.LINE_USER_ID, ...)` (行番号: 826〜829、`use_item`内)
 
