@@ -127,6 +127,45 @@ class TestSaveKnownCastsBackup:
         assert not backup_file.exists()
 
 
+class TestLoadDailySummaryCorruption:
+    """Issue #174の回帰テスト: load_daily_summaryはload_known_castsと同じ
+    「非UTF-8破損でUnicodeDecodeError(IOErrorのサブクラスではなくValueErrorの
+    サブクラス)が未捕捉のまま伝播する」バグを持っていた。伝播すると
+    record_daily_new_casts経由でsave_known_castsまで到達できず、
+    毎時同じキャストが「新規」として再通知され続ける無限反復を招く。"""
+
+    def test_non_utf8_bytes_are_treated_as_load_failure_and_return_empty_dict(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+
+        summary_file = tmp_path / "daily_summary.json"
+        # 実際のCRITICALログと同じ症状(0xf9は不正な開始バイト)を再現する
+        summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
+
+        result = DataManager.load_daily_summary()
+
+        assert result == {}
+
+    def test_record_daily_new_casts_completes_despite_corrupted_summary_file(
+        self, tmp_path, monkeypatch
+    ):
+        """load_daily_summaryが例外を送出しないため、record_daily_new_casts
+        (延いてはこれを呼ぶ_check_site)が破損ファイルによって中断せず、
+        後続のsave_known_castsまで到達できることを確認する。"""
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+
+        summary_file = tmp_path / "daily_summary.json"
+        summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
+
+        # 例外を送出せずに完走すること自体が回帰確認の対象
+        DataManager.record_daily_new_casts("restpia_test", 3)
+
+        # 破損ファイルは新しい正常な集計データで上書きされている
+        result = DataManager.load_daily_summary()
+        assert result["counts"]["restpia_test"] == 3
+
+
 if __name__ == "__main__":
     import pytest
 
