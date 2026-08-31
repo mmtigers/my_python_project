@@ -61,17 +61,34 @@ def split_prompts(input_file: Path, output_dir: Path) -> int:
     pad_width = max(2, max(len(num_str) for num_str, _, _ in matches))
 
     written = 0
+    # #244: 同一実行内で複数の項目が同じファイル名(番号+サニタイズ後タイトル)に
+    # 解決すると、以前は無警告で後勝ちの上書きとなり、先に書き出した項目の内容が
+    # 完全に失われていた。同一実行内で既に使用したファイル名はここで追跡し、
+    # 衝突時は連番を付与して両方の項目を保存する。出力先ディレクトリに前回実行分の
+    # 同名ファイルが既に存在するケース(再実行時の意図的な上書き)とは区別する。
+    seen_filenames: set = set()
     for num_str, raw_title, prompt_text in matches:
         num = num_str.zfill(pad_width)
         raw_title = raw_title.strip()
         safe_title = _shared_sanitize_filename(raw_title)
         prompt_text = prompt_text.strip()
 
-        filename = f"{num}_{safe_title}.md"
-        filepath = output_dir / filename
+        base_filename = f"{num}_{safe_title}.md"
+        filename = base_filename
+        if filename in seen_filenames:
+            suffix = 2
+            while f"{num}_{safe_title}_{suffix}.md" in seen_filenames:
+                suffix += 1
+            filename = f"{num}_{safe_title}_{suffix}.md"
+            logger.warning(
+                f"⚠️ 項目内で重複: '{base_filename}' は同一実行内で既に使用されているため "
+                f"'{filename}' として保存します（元データの番号/タイトルが重複している可能性）"
+            )
+        seen_filenames.add(filename)
 
+        filepath = output_dir / filename
         if filepath.exists():
-            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（元データの番号/タイトルが重複している可能性）")
+            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（前回実行分の可能性）")
 
         filepath.write_text(f"# {raw_title}\n\nPrompt: {prompt_text}\n", encoding='utf-8')
         written += 1

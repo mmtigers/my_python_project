@@ -10,6 +10,7 @@
 ## 関連ドキュメント
 
 * [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）の実装元。
+* `test_split_prompts.py`（Issue #244回帰テスト。`test_*.py`のため専用の仕様書は本リポジトリの命名規則上対応なし）— 同一実行内でのファイル名衝突時の連番サフィックス付与、および前回実行分ファイルへの上書き継続を検証する。
 
 ## 2. ファイルの概要
 
@@ -46,7 +47,7 @@
 
 ### `split_prompts`
 
-* **役割**: 入力Markdownファイルの内容から「番号. タイトル」＋「Prompt: 内容」形式の項目を正規表現で全件抽出し、項目ごとに個別のMarkdownファイル（`{ゼロ埋め番号}_{サニタイズ済みタイトル}.md`）として`output_dir`へ書き出す。
+* **役割**: 入力Markdownファイルの内容から「番号. タイトル」＋「Prompt: 内容」形式の項目を正規表現で全件抽出し、項目ごとに個別のMarkdownファイル（`{ゼロ埋め番号}_{サニタイズ済みタイトル}.md`）として`output_dir`へ書き出す。**（Issue #244で修正）** 以前は、同一実行内で複数の項目が同じファイル名（ゼロ埋め番号+サニタイズ後タイトルの組み合わせ）に解決した場合、警告ログを出すのみで無条件に上書きしており、先に書き出した項目のPrompt内容が後続の項目によって完全に失われていた。現在は同一実行内で使用済みのファイル名を`seen_filenames`集合で追跡し、衝突時は`_2`, `_3`...という連番サフィックスを付与して両方の項目を保存する。出力先ディレクトリに前回実行分の同名ファイルが既に存在するケース（意図的な再実行時の上書き）とは区別され、そちらは従来通り上書きされる。
 * 根拠: [関数定義とDocstring] (行番号: 32〜44 / 抜粋: "def split_prompts(input_file: Path, output_dir: Path) -> int:\n    """入力Markdownファイルを項目ごとの個別ファイルへ分割する。")
 
 
@@ -62,8 +63,8 @@
 * 根拠: [ファイルI/O処理] (行番号: 45, 55, 76 / 抜粋: "content = input_file.read_text(encoding='utf-8')", "output_dir.mkdir(parents=True, exist_ok=True)", "filepath.write_text(f"# {raw_title}\\n\\nPrompt: {prompt_text}\\n", encoding='utf-8')")
 
 
-* **エラーハンドリング**: 関数自体には`try-except`がなく、Docstringに`FileNotFoundError`（`input_file`が存在しない場合）を送出しうる旨が明記されているが、実際の送出は`input_file.read_text()`（標準ライブラリ側の挙動）に委ねられている。マッチが0件の場合は例外ではなく警告ログと`0`の返却で処理を打ち切る。出力ファイルが既に存在する場合は上書きするが、警告ログを出力するのみで処理は継続する。
-* 根拠: [Docstringのraises節とガード節] (行番号: 42〜43, 48〜53, 73〜74 / 抜粋: "Raises:\n        FileNotFoundError: input_file が存在しない場合。")
+* **エラーハンドリング**: 関数自体には`try-except`がなく、Docstringに`FileNotFoundError`（`input_file`が存在しない場合）を送出しうる旨が明記されているが、実際の送出は`input_file.read_text()`（標準ライブラリ側の挙動）に委ねられている。マッチが0件の場合は例外ではなく警告ログと`0`の返却で処理を打ち切る。**（Issue #244で修正）** 同一実行内でファイル名が衝突する場合は例外を送出せず、連番サフィックスを付与して警告ログを出力した上で両方の項目を保存する。出力先ディレクトリに前回実行分の同名ファイルが既に存在する場合（同一実行内の衝突とは区別）は、従来通り警告ログを出力するのみで上書きを継続する。
+* 根拠: [Docstringのraises節とガード節] (行番号: 42〜43, 48〜53 / 抜粋: "Raises:\n        FileNotFoundError: input_file が存在しない場合。")、同一実行内衝突時のサフィックス付与 (行番号: 76〜87 / 抜粋: "base_filename = f"{num}_{safe_title}.md"\n        filename = base_filename\n        if filename in seen_filenames:\n            suffix = 2\n            while f"{num}_{safe_title}_{suffix}.md" in seen_filenames:\n                suffix += 1\n            filename = f"{num}_{safe_title}_{suffix}.md"")、前回実行分の上書き (行番号: 90〜91 / 抜粋: "if filepath.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（前回実行分の可能性）")")
 
 
 ### `main`
@@ -107,8 +108,10 @@ flowchart TD
 
     LoopStart --> Zfill["num = num_str.zfill(pad_width)"]
     Zfill --> Sanitize["safe_title = sanitize_filename(title.strip())"]
-    Sanitize --> BuildPath["filepath = output_dir / '{num}_{safe_title}.md'"]
-    BuildPath --> ExistsCheck{"filepathが既に存在するか?"}
+    Sanitize --> DupCheck{"同一実行内でファイル名が<br>既出(seen_filenames)か?"}
+    DupCheck -->|Yes| SuffixLog["連番サフィックスを付与し警告ログ出力"] --> BuildPath
+    DupCheck -->|No| BuildPath["filepath = output_dir / '{num}_{safe_title}[_連番].md'"]
+    BuildPath --> ExistsCheck{"filepathが(前回実行分として)<br>既に存在するか?"}
     ExistsCheck -->|Yes| WarnOverwrite["上書き警告ログ出力"] --> WriteFile
     ExistsCheck -->|No| WriteFile["filepath.write_text(タイトル+プロンプト内容)"]
     WriteFile --> IncWritten["written件数をインクリメント"]
@@ -166,8 +169,8 @@ graph TD
 * 根拠: [PROMPT_PATTERN定義] (行番号: 29 / 抜粋: "PROMPT_PATTERN = re.compile(r'(\\d+)\\.\\s+([^\\n]+)\\n+Prompt:\\s+([^\\n]+)')")
 * **タイトル・プロンプト内容とも単一行想定**: 正規表現のキャプチャグループが`[^\n]+`（改行を含まない）であるため、複数行にまたがるタイトルやプロンプト本文には対応していない。
 * 根拠: [PROMPT_PATTERN定義] (行番号: 29 / 抜粋: "([^\\n]+)\\n+Prompt:\\s+([^\\n]+)")
-* **既存ファイルの無警告上書き**: 出力先に同名ファイルが既に存在する場合、警告ログは出力されるが処理は中断されず上書きされる。番号・タイトルの重複時にデータが意図せず失われるリスクがある。
-* 根拠: [上書きチェック] (行番号: 73〜74 / 抜粋: "if filepath.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（元データの番号/タイトルが重複している可能性）")")
+* **(Issue #244バグ修正の背景)** 以前は出力先に同名ファイルが既に存在する場合、警告ログは出力されるが処理は中断されず無条件に上書きされていた。同一実行内で番号・タイトルの組が重複する入力データの場合、先に書き出した項目のPrompt内容が後続の項目によって完全に失われるデータ損失があった。現在は同一実行内での衝突（`seen_filenames`で追跡）に限り連番サフィックス（`_2`, `_3`...）を付与して両方の項目を保存するよう修正されている。出力先ディレクトリに前回実行分の同名ファイルが既に存在するケース（再実行時の意図的な上書き）は、この修正の対象外として従来通り上書きされる点に注意（`FileManager.save`（`extract_youtube_urls.py`）の無警告上書きと同様の「再実行時は上書き」という設計判断を踏襲）。今後、同様に「1回の実行内で複数件を同一の出力先へ書き出す」処理を追加する際は、実行内衝突と前回実行分の上書きを混同しないよう注意すること。
+* 根拠: [同一実行内衝突時のサフィックス付与とコメント] (行番号: 68〜87 / 抜粋: "# #244: 同一実行内で複数の項目が同じファイル名(番号+サニタイズ後タイトル)に\n    # 解決すると、以前は無警告で後勝ちの上書きとなり、先に書き出した項目の内容が\n    # 完全に失われていた。")、前回実行分の上書き (行番号: 90〜91 / 抜粋: "if filepath.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（前回実行分の可能性）")")
 * **`pad_width`計算の前提**: ゼロ埋め幅は実際に出現する番号「文字列」の最大長（最小2桁）を基準に動的決定される設計だが、`matches`が空の場合はこの計算自体が実行されない（`HasMatches`分岐で早期`return`されるため空リストに対する`max()`のエラーは発生しない）。
 * 根拠: [pad_width計算] (行番号: 61 / 抜粋: "pad_width = max(2, max(len(num_str) for num_str, _, _ in matches))")
 * **CLIデフォルト値の環境依存性**: `input_file`のデフォルト値`"一ノ瀬蓮_プロンプト1000選.md"`は特定の用途・環境を前提とした固定値であり、汎用スクリプトとして流用する際は明示的な引数指定が推奨される。
