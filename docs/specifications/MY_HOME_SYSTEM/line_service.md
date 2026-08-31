@@ -189,7 +189,7 @@
 
 ### `get_active_quests_message`
 
-* **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出して`TextMessage`を返す。対象判定(`quest['target']`)は、`'all'`なら全員、それ以外は`target == user_id`の完全一致が基本だが、`target == 'siblings'`（兄妹連携クエスト）の場合のみ例外的に、呼び出し元`user_id`とは比較せず「`role_child`のユーザー全員が対象」として扱う（Issue #109の修正。以前は`target != 'all' and target != user_id`のみの判定だったため、`'siblings'`がどの`user_id`とも一致せず常にスキップされ、LINE経由では兄妹連携クエストが誰にも表示されなかった）。
+* **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出して`TextMessage`を返す。対象判定(`quest['target_user']`)は、`'all'`なら全員、それ以外は`target == user_id`の完全一致が基本だが、`target == 'siblings'`（兄妹連携クエスト）の場合のみ例外的に、呼び出し元`user_id`とは比較せず「`role_child`のユーザー全員が対象」として扱う（Issue #109の修正。以前は`target != 'all' and target != user_id`のみの判定だったため、`'siblings'`がどの`user_id`とも一致せず常にスキップされ、LINE経由では兄妹連携クエストが誰にも表示されなかった）。**（#291で修正）** 参照フィールドは`q['target']`から、`quest_master`の実カラム名である`q['target_user']`に変更された（quest_serviceが以前このビューへ付与していた`target`という重複フィールド名の廃止に追随したもの）。
 * 根拠: `async def get_active_quests_message(user_id: str)...` (行番号: 132-168 / 抜粋: "async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage]:")
 * 根拠: `siblings`判定分岐 (行番号: 141〜155 / 抜粋: "users = data.get("users", [])\n        user_role = next((u.get('role') for u in users if u.get('user_id') == user_id), None)", "if target == 'siblings':\n                if user_role != ROLE_CHILD:\n                    continue")
 

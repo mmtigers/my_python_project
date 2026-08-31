@@ -836,9 +836,9 @@ class QuestService:
             if not self._is_quest_currently_active(q, now):
                 continue
 
-            q['icon'] = q['icon_key']
-            q['type'] = q['quest_type']
-            q['target'] = q['target_user']
+            # #291: quest_master由来の値そのまま(icon_key/quest_type/target_user)を
+            # 正とし、以前ここで追加していた icon/type/target というフィールド名の
+            # 二重化(useGameData.tsからの起点調査で発覚)は廃止した。
             q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None
             filtered.append(q)
         return filtered
@@ -1163,8 +1163,11 @@ class GameSystem:
 
             rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
             for r in rewards:
-                r['icon'] = r['icon_key']
-                r['cost'] = r['cost_gold']
+                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold
+                # の別名)を廃止し、DBの実カラム名に一本化する。desc は
+                # description の同期用レガシー列(sync_strict.py参照)であり、
+                # このビュー応答では description のみを正としてdesc自体を落とす。
+                r.pop('desc', None)
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
