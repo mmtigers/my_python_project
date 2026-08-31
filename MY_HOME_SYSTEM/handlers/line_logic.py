@@ -29,7 +29,7 @@ from core.logger import setup_logging
 logger = setup_logging("line_logic")
 # ▲▲▲ ▲▲▲
 from core.utils import get_now_iso, get_today_date_str
-from core.database import save_log_async
+from core.database import save_log_async, save_logs_batch_async
 from models.line import LinePostbackData
 
 TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
@@ -224,17 +224,20 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
         if action == "all_genki":
             timestamp = get_now_iso()
 
-            # 全対象メンバーのログを保存
-            save_results = [
-                sync_run(save_log_async(
-                    config.SQLITE_TABLE_CHILD,
-                    ["user_id", "user_name", "child_name", "condition", "timestamp"],
-                    (user_id, user_name, name, "😊 元気いっぱい", timestamp)
-                ))
-                for name in TARGET_MEMBERS
-            ]
+            # #231: 以前はTARGET_MEMBERS分のsave_log_asyncをそれぞれ独立に呼んでおり、
+            # 各呼び出しが個別にcommitされていた。1件でも失敗すると「全体を失敗扱い」
+            # として案内しユーザーに再試行を促す(H-7)一方、既に成功した分はコミット
+            # 済みのまま残り、案内どおり再試行すると成功済み分まで再度INSERTされ
+            # 重複行が生じていた。全メンバー分を単一トランザクションでまとめて保存し、
+            # 1件でも失敗すれば全件ロールバックすることで、案内どおりDB状態も真に
+            # all-or-nothingにし、再試行を安全にする。
+            save_all_ok = sync_run(save_logs_batch_async(
+                config.SQLITE_TABLE_CHILD,
+                ["user_id", "user_name", "child_name", "condition", "timestamp"],
+                [(user_id, user_name, name, "😊 元気いっぱい", timestamp) for name in TARGET_MEMBERS]
+            ))
 
-            if not all(save_results):
+            if not save_all_ok:
                 logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")
                 send_reply_text(line_bot_api, reply_token, "⚠️ 記録に失敗しました。もう一度お試しください。")
             else:

@@ -83,3 +83,32 @@ async def save_log_async(table: str, columns_list: List[str], values_list: tuple
     """save_log_generic の非同期ラッパー"""
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, save_log_generic, table, columns_list, values_list)
+
+def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:
+    """複数行をまとめて単一トランザクションで保存する汎用関数。
+
+    #231: save_log_generic を複数回呼び出す実装(handlers/line_logic.py の
+    all_genki等)では、各呼び出しがそれぞれ独立にcommitされるため、途中の1件が
+    失敗しても、既に成功した分はコミット済みのまま残ってしまう。呼び出し元は
+    「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促すが、
+    再試行すると既に成功していた分まで重複して保存されていた。単一の
+    get_db_cursor(commit=True)ブロック内で全件INSERTすることで、1件でも
+    失敗すれば例外がget_db_cursor側のrollbackへ伝播し、全件ロールバックされる
+    (真のall-or-nothing)。
+    """
+    try:
+        with get_db_cursor(commit=True) as cur:
+            placeholders = ", ".join(["?"] * len(columns_list))
+            columns = ", ".join(columns_list)
+            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+            for values in values_list:
+                cur.execute(sql, values)
+        return True
+    except Exception as e:
+        logger.error(f"バッチデータ保存失敗 ({table}): {e}")
+        return False
+
+async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:
+    """save_logs_batch_generic の非同期ラッパー"""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)
