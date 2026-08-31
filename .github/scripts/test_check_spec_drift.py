@@ -193,3 +193,50 @@ def test_full_audit_no_longer_flags_existing_ddd_test_docs_as_orphaned():
     report = module.cmd_full()
     orphaned_str = "\n".join(report.orphaned)
     assert "DDD/test_" not in orphaned_str
+
+
+# --- Issue #188の回帰テスト ---
+#
+# doc_to_source_candidates は MY_HOME_SYSTEM/DDD 側では rglob で実在する
+# ファイルのみを候補として返すため、ソースが本当に削除された仕様書では
+# 候補が常に空リストになっていた。cmd_full() の孤立判定は
+# `if candidates and not any(exists)` であるため、候補0件の仕様書は
+# 孤立判定自体がスキップされ、どのカテゴリにも一切現れなかった
+# (family-quest側のsource_to_doc_candidatesは実在確認前の「あるべき
+# パス」を候補として構築するため、この非対称は発生しない)。
+#
+# docs/specifications/MY_HOME_SYSTEM/ai_logic.md と bounty_router.md は、
+# 対応するソース(MY_HOME_SYSTEM/ai_logic.py, bounty_router.py)がリポジトリ
+# 上のどこにも存在しない実例であり、本Issueの実測結果でも使われている。
+
+
+def test_doc_to_source_candidates_returns_nonempty_for_source_that_no_longer_exists():
+    """
+    対応ソースが本当に削除されている仕様書(ai_logic.md)でも、
+    doc_to_source_candidates が空リストを返さないこと(=孤立判定の
+    `if candidates and ...` が誤ってスキップされない)ことを確認する。
+    """
+    doc_path = module.SPEC_ROOT / "MY_HOME_SYSTEM" / "ai_logic.md"
+    candidates = module.doc_to_source_candidates(doc_path)
+
+    assert candidates, (
+        "対応ソースが存在しない仕様書でも候補は空であってはならない"
+        "(空だとcmd_full()の孤立判定自体がスキップされてしまう)"
+    )
+    assert not any((module.REPO_ROOT / c).exists() for c in candidates), (
+        "この仕様書に対応する実ソースは存在しないはずなのに、候補のいずれかが"
+        "実在してしまっている(テスト前提が崩れている)"
+    )
+
+
+def test_full_audit_detects_orphaned_py_docs_with_no_matching_source():
+    """
+    cmd_full()の孤立ドキュメント検知が、対応ソースの存在しない
+    ai_logic.md / bounty_router.md を実際に「孤立ドキュメント」として
+    報告すること(修正前はcandidates=[]により検知自体がスキップされ、
+    週次監査のIssueに永久に現れなかった)。
+    """
+    report = module.cmd_full()
+    orphaned_str = "\n".join(report.orphaned)
+    assert "MY_HOME_SYSTEM/ai_logic.md" in orphaned_str
+    assert "MY_HOME_SYSTEM/bounty_router.md" in orphaned_str

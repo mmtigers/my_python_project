@@ -162,7 +162,22 @@ def doc_to_source_candidates(doc_path: Path) -> list[Path]:
             if rel not in seen:
                 seen.add(rel)
                 rels.append(rel)
-        return [rel for rel in rels if not is_excluded(rel)]
+        rels = [rel for rel in rels if not is_excluded(rel)]
+        # #188: rglobは実在するファイルのみを返すため、ソースが既に削除された
+        # 仕様書ではここまでのmatchesが常に空になり、呼び出し元(cmd_full)の
+        # `if candidates and not any(exists)` 判定がcandidates=[]によって
+        # スキップされ、孤立ドキュメントとして永久に検知されなかった
+        # (family-quest側のsource_to_doc_candidatesは実在確認前の「あるべき
+        # パス」を候補として構築するため、この非対称は発生しない)。
+        # rglobで何も見つからない場合でも、フラット命名規約のデフォルトパス
+        # (<base_dir>/<stem>.py, .sh)を実在チェック抜きの候補として必ず1件は
+        # 含めることで、cmd_full側が孤立判定できるようにする。
+        if not rels:
+            rels = [
+                Path(parts[0]) / f"{stem}.py",
+                Path(parts[0]) / f"{stem}.sh",
+            ]
+        return rels
 
     if parts and parts[0] == "family-quest":
         candidates = []
