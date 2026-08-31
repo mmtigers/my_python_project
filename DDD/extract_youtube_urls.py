@@ -319,17 +319,28 @@ class FileManager:
         """
         return _shared_sanitize_filename(filename, max_length=max_length)
 
-    def save(self, result: ExtractionResult) -> bool:
+    def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:
         """抽出結果をテキストファイルに保存する。
 
         Args:
             result (ExtractionResult): 保存対象の抽出データ。
+            base_dir (Optional[Path]): 保存先のベースディレクトリ。省略時は
+                AppConfig.get_output_base_dir()を呼び出して取得する(#243修正前の
+                挙動)。get_output_base_dir()はNASマウント確認・自己修復・障害通知を
+                伴う重い処理のため、複数件のExtractionResultを保存する呼び出し元は
+                同一巡回内で1回だけ取得した値をここへ渡して使い回すこと
+                (process_subscriptions()/UrlExtractorApp.run()参照)。
 
         Returns:
             bool: 保存に成功した場合は True。
         """
-        # 遅延評価でディレクトリを取得
-        target_dir = AppConfig.get_output_base_dir() / AppConfig.SUB_DIR_NAME
+        # #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。
+        # 以前は常にここでget_output_base_dir()を呼んでいたため、process_subscriptions
+        # 自体が1回に抑えていたつもりの重い処理(NASマウント確認・自己修復・障害通知)が、
+        # 保存件数分だけ再評価され、NAS瞬断時に再マウント試行・通知が多重発生していた。
+        if base_dir is None:
+            base_dir = AppConfig.get_output_base_dir()
+        target_dir = base_dir / AppConfig.SUB_DIR_NAME
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -472,7 +483,9 @@ class SubscriptionManager:
             logger.debug(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
             got_result = False
             for result in self.extractor.extract_iter(url):
-                self.file_manager.save(result)
+                # #243: 巡回開始時に1回だけ取得済みのcurrent_baseを使い回し、
+                # save()内での再評価(NASマウント確認・自己修復・障害通知)を防ぐ。
+                self.file_manager.save(result, base_dir=current_base)
                 got_result = True
 
             # #227: 以前はgot_result(1件でも結果を取得できたか)だけを見ていたため、
@@ -533,9 +546,13 @@ class UrlExtractorApp:
 
         if target_url:
             total_files = 0
+            # #243: process_subscriptions()と同様、1本のURLから複数のExtractionResultが
+            # 得られる場合にget_output_base_dir()が結果ごとに再評価されないよう、
+            # 1回だけ取得した値をsave()へ渡して使い回す。
+            base_dir = AppConfig.get_output_base_dir()
             # イテレータを回して処理
             for result in self.extractor.extract_iter(target_url):
-                if self.file_manager.save(result):
+                if self.file_manager.save(result, base_dir=base_dir):
                     total_files += 1
             logger.info(f"🎉 処理完了: 計 {total_files} ファイルを作成しました")
         else:
