@@ -225,7 +225,14 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     # ※もしCloudflare経由であることを厳密に担保したい場合は、将来的に
     # `Cf-Access-Jwt-Assertion` ヘッダーの検証をここに追加する。
     
-    logger.debug(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    # #182: setup_logging()(core/logger.py)はロガーレベルをINFO固定にしており、
+    # DEBUGレベルのオーバーライド手段が存在しないため、logger.debug()での出力は
+    # 常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアの
+    # docstring・CLAUDE.mdはいずれも「非プライベートネットワークからのリクエストを
+    # ログに記録する」ことを意図した挙動として明記しており、ポーリング等の定常ノイズを
+    # 意図的にDEBUGへ降格するSilence Policy(#177のuvicornアクセスログ抑制とは別経路)
+    # とは性質が異なるため、実際に記録されるようINFOレベルに変更する。
+    logger.info(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
     return await call_next(request)
 
 @app.exception_handler(Exception)
