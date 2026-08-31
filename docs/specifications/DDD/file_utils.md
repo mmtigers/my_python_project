@@ -35,24 +35,24 @@
 
 ### `sanitize_filename`
 
-* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定文字数以内に切り詰め、さらに末尾のピリオドと空白を除去した安全なファイル名文字列を生成する。変換結果が空文字列になった場合は`"untitled"`にフォールバックする。
-* 根拠: [関数定義とDocstring] (行番号: 9〜19 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")
+* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定バイト数以内（UTF-8エンコード後）に切り詰め、さらに末尾のピリオドと空白を除去した安全なファイル名文字列を生成する。変換結果が空文字列になった場合は`"untitled"`にフォールバックする。**（Issue #175で修正）** 以前は`safe[:max_length]`という「文字数」ベースの切り詰めだったため、UTF-8で1文字3バイトになる日本語では`max_length`文字が最大その3倍のバイト数になり、ext4等の255バイト制限を容易に超過してENAMETOOLONGを引き起こしていた。現在はUTF-8エンコード後のバイト列を切り詰めており、マルチバイト文字の境界で分断された末尾の不完全なバイト列は`errors='ignore'`で安全に除去する。
+* 根拠: [関数定義とDocstring] (行番号: 9〜20 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")、バイト単位の切り詰め (行番号: 23〜30 / 抜粋: "#175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では\n    # 日本語1文字が3バイトになるため")
 
 
-* **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成するファイル名の最大文字数。拡張子は含まない前提。ext4等の255バイト制限に対する安全マージンとして既定200文字）
-* 根拠: [引数定義とDocstring] (行番号: 9, 12〜15 / 抜粋: "max_length: 生成するファイル名の最大文字数（拡張子は含まない前提）。\n            ext4等の255バイト制限に対する安全マージンとして既定200文字。")
+* **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成するファイル名の最大バイト数。UTF-8エンコード後、拡張子は含まない前提。ext4等の255バイト制限に対する安全マージンとして既定200バイト）
+* 根拠: [引数定義とDocstring] (行番号: 9, 12〜16 / 抜粋: "max_length: 生成するファイル名の最大バイト数（UTF-8エンコード後、拡張子は\n            含まない前提）。ext4等の255バイト制限に対する安全マージンとして\n            既定200バイト。")
 
 
 * **戻り値/レスポンス**: `str`（安全なファイル名文字列。変換結果が空文字列であれば`"untitled"`）
-* 根拠: [戻り値ヒントとDocstringおよびフォールバック] (行番号: 9, 17〜18, 22, 28〜29 / 抜粋: "Returns:\n        安全なファイル名文字列。", "if not safe:", "safe = \"untitled\"\n    return safe")
+* 根拠: [戻り値ヒントとDocstringおよびフォールバック] (行番号: 9, 18〜19, 33, 39〜40 / 抜粋: "Returns:\n        安全なファイル名文字列。", "if not safe:", "safe = \"untitled\"\n    return safe")
 
 
 * **副作用**: なし（純粋な文字列変換処理。ファイルシステムへのアクセスは行わない）
-* 根拠: [関数本体] (行番号: 20〜29 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    safe = safe[:max_length].strip('. ')\n    if not safe:\n        safe = \"untitled\"\n    return safe")
+* 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
 
 
 * **エラーハンドリング**: なし（例外を送出する処理は含まれていない。`filename`が文字列でない場合の型チェックも存在しない）
-* 根拠: [関数本体] (行番号: 20〜29 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n    safe = safe[:max_length].strip('. ')\n    if not safe:\n        safe = \"untitled\"\n    return safe")
+* 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
 
 
 ## 5. 処理フロー図
@@ -63,7 +63,9 @@
 flowchart TD
     Start["Start: sanitize_filename(filename, max_length)"] --> Replace["禁止文字(バックスラッシュ・スラッシュ・記号類)をアンダースコアに置換<br>(re.sub)"]
     Replace --> Strip1["前後の空白を除去 (strip)"]
-    Strip1 --> Truncate["max_length文字数で切り詰め"]
+    Strip1 --> Encode["UTF-8エンコード後のバイト長がmax_lengthを超えるか判定<br>(#175: 文字数ではなくバイト数で判定)"]
+    Encode -- 超える --> Truncate["バイト列をmax_lengthバイトで切り詰め、<br>errors='ignore'で不完全なマルチバイト末尾を除去してデコード"]
+    Encode -- 超えない --> Strip2
     Truncate --> Strip2["末尾のピリオド・空白を除去 (strip('. '))"]
     Strip2 --> EmptyCheck{"空文字列になったか?"}
     EmptyCheck -- Yes --> Untitled["'untitled'にフォールバック"]
@@ -99,6 +101,7 @@ graph TD
 * **入力型の未検証**: `filename`引数が`str`型であることを前提としており、`None`や非文字列が渡された場合の型チェック・エラーハンドリングが存在しない。呼び出し元での事前検証に依存する設計となっている。
 * **禁止文字リストの限定性**: 置換対象は`\/*?:"<>|`の8文字のみであり、制御文字（NULバイト等）やOS/ファイルシステム固有の予約語（Windowsの`CON`, `PRN`等）には対応していない。
 * **`max_length`のデフォルト値の前提**: Docstringに「拡張子は含まない前提」と明記されているが、関数自体は拡張子の有無を判別するロジックを持たず、呼び出し元が拡張子を別途扱う必要がある。
+* **（Issue #175で解消）文字数ベースの切り詰めによるバイト制限超過**: 以前は`safe[:max_length]`という単純な文字列スライスで切り詰めており、`max_length`は実質「文字数」を制限するものだった。UTF-8で1文字3バイトになる日本語等では、既定値200文字が最大600バイトとなりext4等の255バイト制限を容易に超過し、`ENAMETOOLONG`でファイル操作が失敗する不具合があった（`extract_youtube_urls.py`はチャンネル名とタイトルの2つの`sanitize_filename`結果を連結するため、この問題がさらに顕著だった）。現在はUTF-8エンコード後のバイト列を切り詰めるよう修正済み。ただし本関数単体は拡張子分のバイト数を考慮しないため、呼び出し元が拡張子や区切り文字（`extract_youtube_urls.py`の`"_"`等）の分を差し引いた`max_length`を渡す必要がある点は変わらない。
 
 ## 9. 不明事項一覧
 
@@ -110,7 +113,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 実際の呼び出し箇所・呼び出しパターン | `DDD/batch_download_discord.py`と`DDD/extract_youtube_urls.py`を直接確認した。(1) `batch_download_discord.py`では、`FileSystemManager.sanitize_filename`（326〜327行目、本関数への委譲ラッパー）が487行目で`video_id`（`task.url.split('?')[0].rstrip('/').split('/')[-1]`により対象ページのURL末尾セグメントから生成した文字列。取得できない場合は`f"vid_{int(time.time())}"`にフォールバック）を引数に呼び出され、戻り値に`.mp4`を付与してファイル名としている。(2) `extract_youtube_urls.py`では、`FileManager._sanitize_filename`（267〜276行目、同じく本関数への委譲ラッパー）が295〜296行目で`result.channel_name`（チャンネル名）と`result.title`（動画タイトル）の2種類の文字列に対しそれぞれ呼び出され、`{safe_channel}_{safe_title}.txt`（`safe_channel`が`"unknown_channel"`の場合は`{safe_title}.txt`）というファイル名を構成している。いずれの呼び出しもキーワード引数`max_length`を指定しておらず、既定値200文字が使用される。 | 直接ソース確認: `DDD/batch_download_discord.py:326-327, 487`, `DDD/extract_youtube_urls.py:267-276, 295-296` |
+| 実際の呼び出し箇所・呼び出しパターン | `DDD/batch_download_discord.py`と`DDD/extract_youtube_urls.py`を直接確認した。(1) `batch_download_discord.py`では、`FileSystemManager.sanitize_filename`（411, 413行目、本関数への委譲ラッパー）が589行目で`video_id`（対象ページのURL末尾セグメントから生成した文字列。取得できない場合は`f"vid_{int(time.time())}"`にフォールバック）を引数に呼び出され、戻り値に`.mp4`を付与してファイル名としている（`max_length`未指定、既定値200バイト）。(2) `extract_youtube_urls.py`では、`FileManager._sanitize_filename`（279行目、同じく本関数への委譲ラッパー）が313〜314行目で`result.channel_name`（チャンネル名）と`result.title`（動画タイトル）の2種類の文字列に対しそれぞれ呼び出され、`{safe_channel}_{safe_title}.txt`（`safe_channel`が`"unknown_channel"`の場合は`{safe_title}.txt`）というファイル名を構成している。**（Issue #175で修正）** 以前はいずれも`max_length`未指定（既定値200文字＝当時の文字数ベース実装では最大600バイト×2）で、連結後のファイル名が255バイト制限を大幅に超過しうる不具合があったため、現在はチャンネル名・タイトルの双方に明示的に`max_length=100`（バイト）を指定し（313〜314行目）、連結後も255バイトに収まるようにしている。 | 直接ソース確認: `DDD/batch_download_discord.py:411,413,589`, `DDD/extract_youtube_urls.py:279,313-314` |
 
 ## 10. 自己検証結果
 

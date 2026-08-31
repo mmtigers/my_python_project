@@ -219,16 +219,16 @@
 
 ### `FileManager._sanitize_filename`
 
-* **役割**: 外部モジュール`file_utils.sanitize_filename`へファイル名のサニタイズ処理を委譲する静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 278〜288 / 抜粋: "def _sanitize_filename(filename: str) -> str:\n        """ファイル名として使用できない文字を置換する。")
+* **役割**: 外部モジュール`file_utils.sanitize_filename`へファイル名のサニタイズ処理を委譲する静的メソッド。**（Issue #175で修正）** 以前は`filename`のみを受け取り委譲先の`max_length`は常に既定値（当時は200文字＝文字数ベース）のままだったが、呼び出し元がバイト数の上限を明示的に指定できるよう`max_length`引数を追加し、そのまま委譲先へ渡すようになった。
+* 根拠: [メソッド定義とDocstring] (行番号: 279〜289 / 抜粋: "def _sanitize_filename(filename: str, max_length: int = 200) -> str:\n        """ファイル名として使用できない文字を置換する。")
 
 
-* **引数/リクエスト**: `filename: str`（元の文字列）
-* 根拠: [引数定義とDocstring] (行番号: 279, 282〜283 / 抜粋: "filename (str): 元の文字列。")
+* **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成する文字列の最大バイト数。UTF-8エンコード後）
+* 根拠: [引数定義とDocstring] (行番号: 279, 282〜284 / 抜粋: "filename (str): 元の文字列。\n            max_length (int): 生成する文字列の最大バイト数（UTF-8エンコード後）。")
 
 
 * **戻り値/レスポンス**: `str`（安全なファイル名文字列）
-* 根拠: [Docstringと戻り値] (行番号: 285〜286, 288 / 抜粋: "Returns:\n            str: 安全なファイル名文字列。\n        """\n        return _shared_sanitize_filename(filename)")
+* 根拠: [Docstringと戻り値] (行番号: 286〜287, 289 / 抜粋: "Returns:\n            str: 安全なファイル名文字列。\n        """\n        return _shared_sanitize_filename(filename, max_length=max_length)")
 
 
 * **副作用**: なし
@@ -237,24 +237,24 @@
 
 ### `FileManager.save`
 
-* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。保存先ディレクトリは`AppConfig.get_output_base_dir()`を遅延評価で取得する。
-* 根拠: [メソッド定義とDocstring] (行番号: 290〜298 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")
+* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。保存先ディレクトリは`AppConfig.get_output_base_dir()`を遅延評価で取得する。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。
+* 根拠: [メソッド定義とDocstring] (行番号: 291〜299 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (行番号: 308〜314 / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")
 
 
 * **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）
-* 根拠: [引数定義とDocstring] (行番号: 290, 293〜294 / 抜粋: "result (ExtractionResult): 保存対象の抽出データ。")
+* 根拠: [引数定義とDocstring] (行番号: 291, 294〜295 / 抜粋: "result (ExtractionResult): 保存対象の抽出データ。")
 
 
 * **戻り値/レスポンス**: `bool`（保存に成功した場合`True`。ディレクトリ作成失敗時・ファイル書き込み失敗時は`False`）
-* 根拠: [Docstringと各return] (行番号: 296〜297, 305, 321, 324 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
+* 根拠: [Docstringと各return] (行番号: 297〜298, 306, 327, 330 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
 
 
 * **副作用**: 保存先ディレクトリの作成(`mkdir`)、テキストファイルへの書き込み(`open(..., "w")`)、成功/失敗・上書き時のログ出力。
-* 根拠: [ディレクトリ作成とファイル書き込み] (行番号: 301〜302, 316〜319 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "with output_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")")
+* 根拠: [ディレクトリ作成とファイル書き込み] (行番号: 302〜303, 322〜326 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "with output_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")")
 
 
 * **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する。
-* 根拠: [try-exceptブロック] (行番号: 301〜305, 316〜324 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False")
+* 根拠: [try-exceptブロック] (行番号: 302〜306, 322〜330 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False")
 
 
 ### `SubscriptionManager.__init__`
@@ -506,7 +506,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `sanitize_filename`の詳細ルール | 関連ドキュメント（`file_utils.md`）の解析結果によれば、`sanitize_filename(filename, max_length=200)`は禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し、前後の空白を除去したうえで`max_length`（既定200文字）まで切り詰め、さらに末尾のピリオド・空白を除去する実装であることが分かった。これはあくまで別ファイルの解析結果に基づく補足情報である。 | [file_utils.md](./file_utils.md) |
+| `sanitize_filename`の詳細ルール | 関連ドキュメント（`file_utils.md`）の解析結果によれば、`sanitize_filename(filename, max_length=200)`は禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し、前後の空白を除去したうえで`max_length`（既定200バイト。**Issue #175で文字数からバイト数ベースへ修正済み**）まで切り詰め、さらに末尾のピリオド・空白を除去する実装であることが分かった。これはあくまで別ファイルの解析結果に基づく補足情報である。 | [file_utils.md](./file_utils.md) |
 | `core.logger.get_logger`の実際の実装 | `MY_HOME_SYSTEM/core/logger.py`を直接確認した（Issue #126で修正: 過去の解析時点では`get_logger`という名前の関数が未定義だったが、現在は定義済み）。同ファイル103〜105行目に`def get_logger(name: str) -> logging.Logger: return setup_logging(name)`という、`setup_logging(name, webhook_url=None)`関数(61〜100行目)のエイリアスとして`get_logger`が明示的に定義されている。したがって`from core.logger import get_logger`（本ファイル39行目）は`MY_HOME_SYSTEM`が`sys.path`上にありインポート可能な環境（本リポジトリのようなモノレポ構成でのCI・開発環境を含む）では正常に成功し、本ファイルは`setup_logging`が返す本番用ロガー（`propagate=False`、コンソール出力・`WatchedFileHandler`によるファイル出力・条件付きDiscord通知を備える）を使用する。43〜46行目のフォールバック分岐（`logging.getLogger("UrlExtractor")`）が使われるのは、`MY_HOME_SYSTEM`自体が存在しない・`sys.path`に追加できない等、真に`core`パッケージがインポート不可能な環境（DDD単体デプロイ等）に限られる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:103-105`（参考: [../MY_HOME_SYSTEM/logger.md](../MY_HOME_SYSTEM/logger.md)） |
 | `core.nas_utils.get_managed_target_directory`の実際の実装 | `MY_HOME_SYSTEM/core/nas_utils.py:87-126`を直接確認した。シグネチャは`get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_point: str = "/mnt/nas") -> Path`であり、本ファイルの呼び出し箇所（`nas_dir_str`, `fallback_dir_str`, `mount_point`）と引数名が完全に一致することを確認した。実装は、(1) `is_mounted_and_writable`（74〜85行目）でマウント状態と書き込み権限を確認し正常なら`sync_fallback_to_nas`でフォールバックデータをNASへ同期して`nas_dir`を返す、(2) 異常時は`attempt_remount`（19〜45行目、`sudo mount`コマンド呼び出し）で再マウントを試行し成功すれば同様に同期して`nas_dir`を返す、(3) それでも復旧しない場合はエラーログ出力と`config.LINE_USER_ID`宛の`send_push`通知を行った上でローカルの`fallback_dir`を作成して返す、というフェイルソフト設計である。関連ドキュメント`nas_utils.md`が示していた内容と一致することも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/nas_utils.py:87-126`（参考: [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md)） |
 

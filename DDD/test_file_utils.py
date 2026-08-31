@@ -34,6 +34,35 @@ class TestSanitizeFilenameBasicBehavior:
         assert len(result) == 200
 
 
+class TestSanitizeFilenameByteSafeTruncation:
+    """Issue #175の回帰テスト: 以前はsafe[:max_length]で「文字数」を制限しており、
+    UTF-8で1文字3バイトになる日本語では200文字(最大600バイト)がext4等の255バイト
+    上限を容易に超過し、ファイル操作がENAMETOOLONGで失敗しうる不具合があった。"""
+
+    def test_japanese_title_result_stays_within_byte_limit(self):
+        # 「あ」は3バイト。200文字なら文字数ベースの旧実装では600バイトになり
+        # 255バイトを大幅に超過していた。
+        result = sanitize_filename("あ" * 200, max_length=200)
+        assert len(result.encode("utf-8")) <= 200
+
+    def test_japanese_title_is_not_truncated_mid_character(self):
+        """マルチバイト文字の境界で切り詰めても、不完全なバイト列による
+        UnicodeDecodeErrorや文字化けを起こさず正しくデコードできること。"""
+        # 「あ」(3バイト)を101個 = 303バイト。max_length=100バイトで切ると
+        # 単純なバイトスライスでは33文字目の途中(3バイト目)で切断される。
+        result = sanitize_filename("あ" * 101, max_length=100)
+        # 全て正しく再エンコードできる(不完全なバイト列が残っていない)こと
+        assert result.encode("utf-8").decode("utf-8") == result
+        assert len(result.encode("utf-8")) <= 100
+        # 33文字(99バイト)までは安全に残るはず
+        assert result == "あ" * 33
+
+    def test_ascii_only_behavior_is_unchanged(self):
+        """既存のASCII入力に対する挙動(文字数=バイト数)は変わらないこと。"""
+        result = sanitize_filename("a" * 300, max_length=200)
+        assert result == "a" * 200
+
+
 class TestSanitizeFilenameNeverReturnsEmptyString:
     @pytest.mark.parametrize("degenerate_input", ["..", ".", "...", "   ", ". . ."])
     def test_symbol_only_input_does_not_produce_empty_string(self, degenerate_input):
