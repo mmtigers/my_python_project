@@ -383,70 +383,70 @@
 
 ### `PostBootHealthCheck.check_peripherals`
 
-* **役割**: NASのマウント状況と書き込み権限、防犯カメラ群のポート疎通、スピーカー（サウンドカードまたはBluetooth接続）の状態をチェックする。NAS書き込み権限エラー時は即座にDiscord通知を送信する。カメラは `config.CAMERAS` が空（`devices.json` 読み込み失敗等）の場合 `STATUS_WARN "No Config"` とする。スピーカーは `TARGET_BLUETOOTH_MAC`（モジュールレベルで `config.SPEAKER_BLUETOOTH_MAC` から取得）が設定されていれば `bluetoothctl info` による実際のBluetooth接続確認を行う。
-* 根拠: `def check_peripherals(self) -> None:` (行番号: 219〜298 / 抜粋: "def check_peripherals(self) -> None:")
+* **役割**: NASのマウント状況と書き込み権限、防犯カメラ群のポート疎通、スピーカー（サウンドカードまたはBluetooth接続）の状態をチェックする。NAS書き込み権限エラー時は即座にDiscord通知を送信する。カメラは `config.CAMERAS` が空（`devices.json` 読み込み失敗等）の場合 `STATUS_WARN "No Config"` とする。スピーカーは `TARGET_BLUETOOTH_MAC`（モジュールレベルで `resolve_target_bluetooth_mac()` により、`config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` から取得され、それ以外は `None` となりサウンドカード確認にフォールバックする）が設定されていれば、`stdin=subprocess.DEVNULL`・`timeout=15`を指定した `bluetoothctl info` による実際のBluetooth接続確認を行う。
+* 根拠: `def check_peripherals(self) -> None:` (行番号: 229〜313 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 219 / 抜粋: "def check_peripherals(self) -> None:")
+* 根拠: (行番号: 229 / 抜粋: "def check_peripherals(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`（`self.results` へNAS・カメラ・スピーカーの各 `CheckResult` を追加）
-* 根拠: `-> None:` および `self.results.append(CheckResult("Speaker", spk_status, spk_msg))` (行番号: 219, 298 / 抜粋: "-> None:")
+* 根拠: `-> None:` および `self.results.append(CheckResult("Speaker", spk_status, spk_msg))` (行番号: 229, 313 / 抜粋: "-> None:")
 
 
-* **副作用**: `os.path.ismount` によるマウント確認、テストファイルの書き込み・削除（NAS書き込みテスト）、`logger.error` 出力、`common.send_push` によるDiscord即時通知（権限エラー時）、カメラへのポート疎通確認、`aplay -l` / `bluetoothctl info` のサブプロセス実行、`self.results` への3件（NAS, Cameras, Speaker）の追加。
-* 根拠: `common.send_push(\n                    user_id=getattr(config, "LINE_USER_ID", None),` (行番号: 239〜240 / 抜粋: "common.send_push(")
+* **副作用**: `os.path.ismount` によるマウント確認、テストファイルの書き込み・削除（NAS書き込みテスト）、`logger.error` 出力、`common.send_push` によるDiscord即時通知（権限エラー時）、カメラへのポート疎通確認、`aplay -l`（`timeout=10`）/ `bluetoothctl info`（`stdin=subprocess.DEVNULL`, `timeout=15`）のサブプロセス実行、`self.results` への3件（NAS, Cameras, Speaker）の追加。
+* 根拠: `common.send_push(\n                    user_id=getattr(config, "LINE_USER_ID", None),` (行番号: 249〜250 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。サウンドカード検出・Bluetooth接続確認処理は個別に bare `except:` で保護されている。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 234 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 265〜267 / 抜粋: "else:"), `except: pass` (行番号: 279 / 抜粋: "except: pass")
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except: pass` (行番号: 289 / 抜粋: "except: pass")
 
 
 
 ### `PostBootHealthCheck.check_recent_logs`
 
 * **役割**: ログファイルの末尾200行を取得し、直近10分以内に出力された `ERROR` または `CRITICAL` を含む行のみを抽出して結果を判定する。`tail` サブプロセス実行自体が失敗した場合は、ログを読めていない旨を `STATUS_WARN` として明示し、以降の行走査には進まない（旧実装では例外を捕捉してログ出力するのみで `error_lines` が空のまま `STATUS_OK "Clean"` に落ちていたが、修正済み）。
-* 根拠: `def check_recent_logs(self):` (行番号: 301〜343 / 抜粋: "def check_recent_logs(self):")
+* 根拠: `def check_recent_logs(self):` (行番号: 316〜358 / 抜粋: "def check_recent_logs(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 301 / 抜粋: "def check_recent_logs(self):")
+* 根拠: (行番号: 316 / 抜粋: "def check_recent_logs(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加。ログファイル未存在時・`tail` 失敗時はいずれも途中で `return`）
-* 根拠: `self.results.append(CheckResult("Logs", STATUS_WARN, "No log file yet"))\n            return` (行番号: 304〜305 / 抜粋: "return")
+* 根拠: `self.results.append(CheckResult("Logs", STATUS_WARN, "No log file yet"))\n            return` (行番号: 319〜320 / 抜粋: "return")
 
 
-* **副作用**: `tail -n 200` サブプロセス実行によるログファイル読み取り、`logger.error` 出力（`tail` 失敗時）、`self.results` への追加。
-* 根拠: `res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")` (行番号: 312 / 抜粋: "res = subprocess.check_output(["tail", "-n", "200", self.log_file_path]).decode("utf-8", errors="ignore")")
+* **副作用**: `tail -n 200` サブプロセス実行（`timeout=10`付き）によるログファイル読み取り、`logger.error` 出力（`tail` 失敗時）、`self.results` への追加。
+* 根拠: `res = subprocess.check_output(["tail", "-n", "200", self.log_file_path], timeout=10).decode("utf-8", errors="ignore")` (行番号: 327 / 抜粋: "res = subprocess.check_output(["tail", "-n", "200", self.log_file_path], timeout=10).decode("utf-8", errors="ignore")")
 
 
 * **エラーハンドリング**: ログファイル未存在時は `STATUS_WARN` を追加して `return`。`tail` コマンド実行失敗など全体の `Exception` を捕捉した場合は `logger.error` 出力に加え `STATUS_WARN` を結果に追加して `return`（行の走査自体を行わない）。各行の日時パース失敗（`ValueError`）はその行をスキップする。
-* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 313〜316 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 329 / 抜粋: "except ValueError:")
+* 根拠: `except Exception as e:\n            logger.error(f"Log check failed: {e}")\n            self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))\n            return` (行番号: 328〜331 / 抜粋: "self.results.append(CheckResult("Logs", STATUS_WARN, f"Check Failed: {e}"))"), `except ValueError:` (行番号: 344 / 抜粋: "except ValueError:")
 
 
 
 ### `PostBootHealthCheck.run`
 
 * **役割**: 各チェックメソッド（ネットワーク・システムリソース・DB・周辺機器・サービス・ログ）を順に実行し、最後にレポート送信を行う。
-* 根拠: `def run(self):` (行番号: 346〜354 / 抜粋: "def run(self):")
+* 根拠: `def run(self):` (行番号: 361〜369 / 抜粋: "def run(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 346 / 抜粋: "def run(self):")
+* 根拠: (行番号: 361 / 抜粋: "def run(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 346〜354 / 抜粋: "def run(self):")
+* 根拠: (行番号: 361〜369 / 抜粋: "def run(self):")
 
 
 * **副作用**: `logger.info` によるログ出力、各チェックメソッドの実行、`self._send_report()` の呼び出し。
-* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 348〜354 / 抜粋: "self._send_report()")
+* 根拠: `self.check_network_and_apis()` 〜 `self._send_report()` (行番号: 363〜369 / 抜粋: "self._send_report()")
 
 
 * **エラーハンドリング**: なし（各チェックメソッド内部で個別に処理される前提）
-* 根拠: (行番号: 346〜354 / 抜粋: "def run(self):")
+* 根拠: (行番号: 361〜369 / 抜粋: "def run(self):")
 
 
 
