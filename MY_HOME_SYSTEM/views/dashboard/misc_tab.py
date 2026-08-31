@@ -10,7 +10,6 @@ import pytz
 
 import config
 from services import train_service
-from .common import render_status_card_html
 
 def render_traffic():
     st.subheader("🚃 JR宝塚線・神戸線 運行状況")

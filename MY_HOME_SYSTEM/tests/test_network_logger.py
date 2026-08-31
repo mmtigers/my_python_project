@@ -13,7 +13,7 @@ monitors/network_logger.py の回帰テスト(Issue #190)。
 """
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

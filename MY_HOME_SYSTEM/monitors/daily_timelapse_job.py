@@ -8,7 +8,6 @@ import tempfile
 import traceback
 import argparse
 import re
-from pathlib import Path
 from dataclasses import asdict
 
 # プロジェクトルートの解決と追加

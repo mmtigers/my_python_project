@@ -1,7 +1,7 @@
 # MY_HOME_SYSTEM/services/sensor_service.py
 import asyncio
 import time
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, Any
 
 import config
 import common

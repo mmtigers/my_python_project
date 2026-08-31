@@ -2,15 +2,12 @@
 import sqlite3
 import datetime
 import asyncio
-from typing import List, Tuple, Optional, Union, Dict, Any
+from typing import Union
 
 # LINE Messaging API Models
 from linebot.v3.messaging import (
     TextMessage,
-    FlexMessage,
-    QuickReply,
-    QuickReplyItem,
-    MessageAction
+    FlexMessage
 )
 
 import config
@@ -20,7 +17,7 @@ from core.utils import get_now_iso, get_today_date_str
 from core.database import save_log_async
 
 # Quest Service Integration
-from services.quest_service import game_system, quest_service, user_service, ROLE_CHILD
+from services.quest_service import game_system, quest_service, ROLE_CHILD
 
 # ロガー設定
 logger = setup_logging("line_service")
