@@ -1558,7 +1558,13 @@ class DataManager:
         try:
             with open(summary_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except DataManager._LOAD_ERRORS as e:
+            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError
+            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま
+            # 伝播する」バグが本メソッドにも残っていた。伝播すると
+            # record_daily_new_casts経由でsave_known_castsまで到達できず、
+            # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
+            # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
             logger.error(f"Failed to load daily summary from {summary_file}: {e}")
             return {}
 
