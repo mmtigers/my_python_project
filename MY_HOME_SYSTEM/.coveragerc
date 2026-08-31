@@ -8,7 +8,7 @@ omit =
     dashboard.py
     reset_game.py
     sync_strict.py
-    train_service.py
+    services/train_service.py
     switchbot_webhook_fix.py
     post_boot_health_check.py
     */__init__.py
