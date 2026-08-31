@@ -1,0 +1,27 @@
+{
+  "cameras": [
+    {
+      "id": "example-camera-id",
+      "name": "カメラ名",
+      "nas_folder": "example",
+      "location": "拠点名",
+      "ip": "192.168.1.XXX",
+      "port": 80,
+      "user": "admin",
+      "pass": "password",
+      "rtsp_url": "rtsp://user:password@192.168.1.XXX:554/stream"
+    }
+  ],
+  "monitor_devices": [
+    {
+      "id": "SWITCHBOT_DEVICE_ID",
+      "type": "Plug Mini (JP)",
+      "location": "拠点名",
+      "name": "デバイス名",
+      "notify_settings": {
+        "power_threshold_watts": 5.0,
+        "notify_mode": "LOG_ONLY"
+      }
+    }
+  ]
+}
