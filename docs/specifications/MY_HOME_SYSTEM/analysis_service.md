@@ -210,8 +210,8 @@
 
 ### `load_sensor_data`
 
-* **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。
-* 根拠: `load_sensor_data` (行番号: 217 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")
+* **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
+* 根拠: `load_sensor_data` (行番号: 217 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。

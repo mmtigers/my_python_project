@@ -203,7 +203,6 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
         df_power["device_type"] = df_power["device_name"].apply(
             lambda x: "Nature Remo E Lite" if x and "Remo" in str(x) else "Plug"
         )
-        df_power["device_type"] = df_power["device_type"].replace("Plug", "Nature Remo E Lite") 
 
     # --- 統合 ---
     df_list = []
