@@ -21,10 +21,12 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
 
       if (target === 'children') return !isAdult;
       if (target === 'adults') return isAdult;
-      if (target === 'mom') return currentUser.user_id === 'mom';
-      if (target === 'dad') return currentUser.user_id === 'dad';
 
-      return true;
+      // #239: 上記以外(具体的なuser_id宛て、または将来追加されうる未知のtarget値)は
+      // QuestList.tsxのターゲット判定(q.target !== currentUser?.user_id)と同様に
+      // 安全側(deny-by-default)へ倒す。以前は'mom'/'dad'以外のtarget('son'/'daughter'等)
+      // がどの分岐にも一致せず無条件でtrueになり、対象外の家族全員に表示されていた。
+      return target === currentUser.user_id;
     });
 
     // 2. ソート (安い順)
