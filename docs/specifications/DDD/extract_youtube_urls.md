@@ -15,6 +15,7 @@
 * [batch_download_discord.md](./batch_download_discord.md) — 同じDDDサブシステム内で`yt_dlp`と`file_utils.sanitize_filename`を併用する類似スクリプトとの比較参考。
 * [newface_monitor.md](./newface_monitor.md) — 本ファイルの`PROJECT_ROOT`解決方式（`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`）と`get_managed_target_directory`フォールバックの`fallback_dir_str`尊重パターンは、同じDDDサブシステム内で先行して修正済みのnewface_monitor.pyの同一パターンを踏襲したものである（コード内コメントで直接言及されている）。
 * [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) — 本ファイルの`PROJECT_ROOT`解決・`core.*`インポート可否・フォールバックスタブの引数尊重・`_verify_environment`のフォールバック検知・（Issue #123回帰テストとして追加された）`process_subscriptions`のNAS状態再評価タイミングを検証する回帰テストの解析ドキュメント。
+* `test_extract_youtube_urls_save_base_dir.py`（Issue #243回帰テスト。専用の仕様書は本リポジトリの命名規則上作成しない対象＝`test_*.py`のため対応なし）— `FileManager.save`への`base_dir`引数受け渡し、および`process_subscriptions`/`UrlExtractorApp.run`が`get_output_base_dir()`を1回だけ呼ぶことを検証する。
 
 ## 2. ファイルの概要
 
@@ -34,6 +35,8 @@
 * 根拠: [SubscriptionManager.process_subscriptionsとrunメソッド] (行番号: 379〜444, 466〜469 / 抜粋: "if args.cron:\n            self.sub_manager.process_subscriptions()")
 * **(Issue #123バグ修正)** `SubscriptionManager`のサブスクリプション用DBパス(`db_path`)は、以前は`__init__`時点で一度だけ確定していたため、アプリ起動時にNASがフォールバック中で、その後`process_subscriptions()`実行時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、NAS状態の検証自体は最新状態で通過するのに`db_path`だけ古いローカルパスのまま取り残され、ローカルに空DBが新規作成されてサブスクリプションが1件も読み込まれない（無言のno-op）という不具合があった。現在は`process_subscriptions()`実行のたびに`AppConfig.get_output_base_dir()`を1回呼び出し、その同一時点の値から環境検証と`db_path`の導出を両方行うことで、評価タイミングのズレを解消している。
 * 根拠: [process_subscriptions冒頭のコメントとdb_path導出] (行番号: 381〜396 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")
+* **(Issue #243バグ修正)** `FileManager.save`は以前、呼び出しのたびに常に`AppConfig.get_output_base_dir()`を内部で呼び出していた。`process_subscriptions()`自身は巡回開始時に`current_base`として1回だけ取得する配慮をしていたにもかかわらず、1チャンネル/1URLから複数の`ExtractionResult`が得られる場合（`extract_iter`がプレイリストごとに複数回`yield`する等）、`save()`が結果件数分だけ`get_output_base_dir()`を再評価してしまい、NAS瞬断時の再マウント試行・障害通知が保存件数分だけ多重発生しうる不具合があった。現在は`save()`が`base_dir`引数（省略可能、`Optional[Path] = None`）を受け取り、呼び出し元が既に取得済みの値を渡せるようになった。`process_subscriptions()`は`current_base`を、`UrlExtractorApp.run()`の直接URL実行分岐も1回だけ取得した値を、それぞれ`save()`へ渡して使い回す。
+* 根拠: [FileManager.saveのbase_dir引数とコメント] (行番号: 322, 337〜343 / 抜粋: "def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:", "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、process_subscriptions\n        # 自体が1回に抑えていたつもりの重い処理(NASマウント確認・自己修復・障害通知)が、\n        # 保存件数分だけ再評価され、NAS瞬断時に再マウント試行・通知が多重発生していた。\n        if base_dir is None:\n            base_dir = AppConfig.get_output_base_dir()")、process_subscriptions呼び出し箇所 (行番号: 488 / 抜粋: "self.file_manager.save(result, base_dir=current_base)")、UrlExtractorApp.run呼び出し箇所 (行番号: 552〜555 / 抜粋: "base_dir = AppConfig.get_output_base_dir()\n            for result in self.extractor.extract_iter(target_url):\n                if self.file_manager.save(result, base_dir=base_dir):")
 
 ## 3. 外部依存関係
 
@@ -255,12 +258,12 @@
 
 ### `FileManager.save`
 
-* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。保存先ディレクトリは`AppConfig.get_output_base_dir()`を遅延評価で取得する。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。
+* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。**（Issue #243で修正）** 保存先ディレクトリは、引数`base_dir`が渡されればそれをそのまま使い、省略された場合のみ`AppConfig.get_output_base_dir()`を遅延評価で呼び出す。以前は`base_dir`引数が存在せず常に本メソッド内で`get_output_base_dir()`を呼んでいたため、1回の巡回/1URLから複数の`ExtractionResult`が保存される場合に、NASマウント確認・自己修復・障害通知を伴う重い処理が保存件数分だけ再評価されていた不具合の修正である。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。
 * 根拠: [メソッド定義とDocstring] (行番号: 291〜299 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (行番号: 308〜314 / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")
 
 
-* **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）
-* 根拠: [引数定義とDocstring] (行番号: 291, 294〜295 / 抜粋: "result (ExtractionResult): 保存対象の抽出データ。")
+* **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）, `base_dir: Optional[Path] = None`（**Issue #243で追加**。保存先のベースディレクトリ。省略時は`AppConfig.get_output_base_dir()`を内部で呼び出して取得する）
+* 根拠: [引数定義とDocstring] (行番号: 322, 327〜332 / 抜粋: "def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:", "base_dir (Optional[Path]): 保存先のベースディレクトリ。省略時は\n                AppConfig.get_output_base_dir()を呼び出して取得する(#243修正前の\n                挙動)。")
 
 
 * **戻り値/レスポンス**: `bool`（保存に成功した場合`True`。ディレクトリ作成失敗時・ファイル書き込み失敗時は`False`）
@@ -337,7 +340,7 @@
 
 ### `SubscriptionManager.process_subscriptions`
 
-* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**（Issue #227で修正）** 以前はサーキットブレーカーの成否判定を`got_result`（`extract_iter`が1件でも結果をyieldしたか）のみで行っていたため、あるチャンネルの`/videos`等の一部リクエストが成功しさえすれば、内部の大量プレイリストが軒並み失敗しても連続失敗カウントが常に0にリセットされ、サーキットブレーカーが内部の失敗を検知できなかった。現在は`got_result`に加えて`extractor.last_extract_internal_failures`（`extract_iter`内部の失敗件数）も確認し、内部失敗が1件でもあれば連続失敗としてカウントする。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。**(Issue #185バグ修正)** DB初期化ブロック内の`db_path.parent.mkdir(parents=True, exist_ok=True)`が送出しうる`OSError`（権限エラー・読み取り専用マウント等）は`sqlite3.Error`のサブクラスではないため、以前は`except sqlite3.Error`節で捕捉されず、本メソッド内の他の失敗経路（エラーログ出力+安全な`return`）というフェイルソフト方針に反して`--cron`実行全体が未処理例外で異常終了していた。`except`節を`(sqlite3.Error, OSError)`に拡張し、`OSError`も同じフェイルソフト方針で処理するよう修正した。
+* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**（Issue #227で修正）** 以前はサーキットブレーカーの成否判定を`got_result`（`extract_iter`が1件でも結果をyieldしたか）のみで行っていたため、あるチャンネルの`/videos`等の一部リクエストが成功しさえすれば、内部の大量プレイリストが軒並み失敗しても連続失敗カウントが常に0にリセットされ、サーキットブレーカーが内部の失敗を検知できなかった。現在は`got_result`に加えて`extractor.last_extract_internal_failures`（`extract_iter`内部の失敗件数）も確認し、内部失敗が1件でもあれば連続失敗としてカウントする。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。**(Issue #185バグ修正)** DB初期化ブロック内の`db_path.parent.mkdir(parents=True, exist_ok=True)`が送出しうる`OSError`（権限エラー・読み取り専用マウント等）は`sqlite3.Error`のサブクラスではないため、以前は`except sqlite3.Error`節で捕捉されず、本メソッド内の他の失敗経路（エラーログ出力+安全な`return`）というフェイルソフト方針に反して`--cron`実行全体が未処理例外で異常終了していた。`except`節を`(sqlite3.Error, OSError)`に拡張し、`OSError`も同じフェイルソフト方針で処理するよう修正した。**（Issue #243で修正）** ループ内の`self.file_manager.save(result)`呼び出しを`self.file_manager.save(result, base_dir=current_base)`に変更し、巡回開始時に既に取得済みの`current_base`を`save()`へ渡して使い回すようにした。これにより、1URLから複数の`ExtractionResult`が得られる場合でも`save()`内部で`get_output_base_dir()`が再評価されなくなった。
 * 根拠: [メソッド定義とDocstringおよびIssue #123修正コメント] (行番号: 385〜402 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""\n        # 1. 環境検証（データロスト防止の防波堤）\n        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")、Issue #185修正のコメントとexcept節 (行番号: 405〜412 / 抜粋: "# #185: db_path.parent.mkdir()が送出しうるOSError(権限エラー・読み取り専用\n        # マウント等)は sqlite3.Error のサブクラスではないため捕捉されず", "except (sqlite3.Error, OSError) as e:")
 
 
@@ -351,7 +354,7 @@
 
 
 * **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`, `OSError`。Issue #185で`OSError`を追加)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。**（Issue #227で修正）** `got_result`が`True`でも`extractor.last_extract_internal_failures`が1以上であれば連続失敗としてカウントし、連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
-* 根拠: [各種ガード節とbreakおよび内部失敗判定] (行番号: 431〜433, 443〜445, 460〜462, 464〜466, 483〜495 / 抜粋: "internal_failures = getattr(self.extractor, "last_extract_internal_failures", 0)\n            if got_result and not internal_failures:\n                consecutive_failures = 0\n            else:\n                consecutive_failures += 1", "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
+* 根拠: [各種ガード節とbreakおよび内部失敗判定] (行番号: 431〜433, 443〜445, 460〜462, 464〜466, 483〜495 / 抜粋: "internal_failures = getattr(self.extractor, "last_extract_internal_failures", 0)\n            if got_result and not internal_failures:\n                consecutive_failures = 0\n            else:\n                consecutive_failures += 1", "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")、save呼び出し箇所 (行番号: 488 / 抜粋: "self.file_manager.save(result, base_dir=current_base)")
 
 
 ### `UrlExtractorApp.__init__`
@@ -371,7 +374,7 @@
 
 ### `UrlExtractorApp.run`
 
-* **役割**: コマンドライン引数（`url`位置引数、`--cron`フラグ）を解析し、`--cron`指定時はサブスクリプション巡回、それ以外はURL引数（未指定時は対話的に`input()`で取得）を`extract_iter`で処理・保存するエントリーポイントメソッド。
+* **役割**: コマンドライン引数（`url`位置引数、`--cron`フラグ）を解析し、`--cron`指定時はサブスクリプション巡回、それ以外はURL引数（未指定時は対話的に`input()`で取得）を`extract_iter`で処理・保存するエントリーポイントメソッド。**（Issue #243で修正）** 直接URL実行分岐（`--cron`未指定時）でも、`process_subscriptions()`と同様に1本のURLから複数の`ExtractionResult`が得られる場合に`get_output_base_dir()`が結果ごとに再評価されないよう、ループ開始前に`base_dir = AppConfig.get_output_base_dir()`で1回だけ取得した値を、各`self.file_manager.save(result, base_dir=base_dir)`呼び出しへ渡して使い回す。
 * 根拠: [メソッド定義とDocstring] (行番号: 457〜458 / 抜粋: "def run(self) -> None:\n        """コマンドライン引数を解析し、メイン処理を実行する。"""")
 
 
@@ -383,8 +386,8 @@
 * 根拠: [戻り値ヒント] (行番号: 457 / 抜粋: "def run(self) -> None:")
 
 
-* **副作用**: 起動・完了ログ出力、`--cron`時は`sub_manager.process_subscriptions()`呼び出し、URL未指定時の対話的`input()`呼び出し、`extractor.extract_iter`によるネットワークアクセスと`file_manager.save`によるファイル保存。
-* 根拠: [メイン処理フロー] (行番号: 459, 466〜469, 471〜489 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")
+* **副作用**: 起動・完了ログ出力、`--cron`時は`sub_manager.process_subscriptions()`呼び出し、URL未指定時の対話的`input()`呼び出し、`extractor.extract_iter`によるネットワークアクセスと`file_manager.save`によるファイル保存。直接URL実行分岐では、ループ開始前に`AppConfig.get_output_base_dir()`を1回呼び出す（Issue #243）。
+* 根拠: [メイン処理フロー] (行番号: 459, 466〜469, 471〜489 / 抜粋: "logger.info("=== YouTube URL Extractor (v3.1.0) Started ===")")、base_dir事前取得箇所 (行番号: 549〜555 / 抜粋: "# #243: process_subscriptions()と同様、1本のURLから複数のExtractionResultが\n            # 得られる場合にget_output_base_dir()が結果ごとに再評価されないよう、\n            # 1回だけ取得した値をsave()へ渡して使い回す。\n            base_dir = AppConfig.get_output_base_dir()\n            # イテレータを回して処理\n            for result in self.extractor.extract_iter(target_url):\n                if self.file_manager.save(result, base_dir=base_dir):")
 
 
 * **エラーハンドリング**: 対話的URL入力時の`KeyboardInterrupt`を捕捉し、情報ログを出力して`sys.exit(0)`で正常終了する。それ以外の例外処理はこのメソッド自体にはない。
@@ -503,6 +506,8 @@ graph TD
 * 根拠: [process_subscriptions冒頭のコメント] (行番号: 388〜392 / 抜粋: "# ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰\n        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証\n        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り\n        # 残されていた。")
 * **YDL_OPTS共有辞書のコピー渡し**: `yt_dlp.YoutubeDL.__init__`が渡された`params`辞書を直接書き換えるため、`AppConfig.YDL_OPTS`（クラス属性の共有辞書）をそのまま渡すと繰り返し呼び出し時に状態汚染が起きるリスクがあり、コード内コメントで明示的に`dict(AppConfig.YDL_OPTS)`によるコピー渡しが行われている。
 * 根拠: [コメントとコピー渡し] (行番号: 174〜179, 249〜250 / 抜粋: "# yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える\n            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、")
+* **(Issue #243バグ修正の背景)** `FileManager.save`は`base_dir`引数を省略した場合のみ内部で`get_output_base_dir()`を呼び出す設計になった。`get_output_base_dir()`はNASマウント確認・自己修復・障害通知を伴う重い処理であるため、1回の巡回/1URLの処理で複数回`save()`を呼ぶ呼び出し元（`process_subscriptions()`、`UrlExtractorApp.run()`の直接URL実行分岐）は、必ず処理開始時に1回だけ取得した値を`base_dir`として渡して使い回すこと。新たに`save()`を複数回呼ぶ処理を追加する際は、この呼び出し規約（Issue #123の`db_path`と同様、NAS関連の重い処理は評価タイミングを揃えて使い回す）を踏襲すること。
+* 根拠: [save()のbase_dir引数コメント] (行番号: 337〜340 / 抜粋: "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、process_subscriptions\n        # 自体が1回に抑えていたつもりの重い処理(NASマウント確認・自己修復・障害通知)が、\n        # 保存件数分だけ再評価され、NAS瞬断時に再マウント試行・通知が多重発生していた。")
 * **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。
 * 根拠: [上書きチェック] (行番号: 313〜314 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
 * **チャンネルURL探索の暗黙的な仕様依存**: `/videos`・`/playlists`のURLパス付与がYouTube側のURL構造に依存しており、YouTube側の仕様変更で機能しなくなるリスクがある。
