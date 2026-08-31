@@ -23,7 +23,10 @@
 * 根拠: `def confirm_or_abort(...)` docstring (行番号: 185〜192 / 抜粋: "sync_strict.py はマスタに無い行を無確認でDELETEする(マスタが空なら全削除)。")
 
 `quest_master`へのUpsertでは、`reset_period`列を含む全カラムを明示的に指定する(Issue #100)。以前は`reset_period`列がINSERT対象に含まれていなかったため、新規行や既存行の再Upsert時にDB列のデフォルト値(`current_schema.sql`/`migrations/0002`に由来する`'weekly_monday'`。SQLiteの`ALTER TABLE`では変更不能なため列を再作成しない限り残り続ける)がそのまま入ってしまい、`is_within_reset_period()`が扱えない値のため周期内多重完了ガードが機能しない・クリアしても未クリア表示になる不具合(`migrations/0005`で一度データ補正済みのもの)が再発する経路になっていた。
-* 根拠: `reset_period_val = q.get('reset_period', 'daily')` および `INSERT INTO quest_master (...)` (行番号: 57〜94 / 抜粋: "#100: reset_period 列を明示的にINSERTしないと")
+* 根拠: `reset_period_val = q.get('reset_period', 'daily')` および `INSERT INTO quest_master (...)` (行番号: 64〜97 / 抜粋: "#100: reset_period 列を明示的にINSERTしないと")
+
+Issue #164の修正により、`quest_master`へのUpsert対象は`start_time`/`end_time`(時間帯)・`start_date`/`end_date`(期間)・`occurrence_chance`(出現率)・`pre_requisite_quest_id`(前提クエスト)を含む全16列に拡張された。修正前はこれら6列がINSERT/UPDATE列リストから欠落しており、`services/quest_service.py`の`sync_master_data()`(全16列を同期)と非対称な「不完全な同期」になっていた。この結果、`quest_data.py`側で`start_time`/`end_time`を持つ時間帯限定クエスト(朝ミッション等)が、`sync_strict.py`経由の新規登録時はNULL(=`filter_active_quests()`で終日扱い)になり、既存行への時間帯変更も永久に反映されない不具合があった。
+* 根拠: `INSERT INTO quest_master (... start_time, end_time, start_date, end_date, occurrence_chance, pre_requisite_quest_id)` (行番号: 66〜114 / 抜粋: "#164: 時間帯(start_time/end_time)・期間(start_date/end_date)・出現率")
 
 ## 3. 外部依存関係
 
@@ -63,16 +66,16 @@
 
 ### `sync_quests`
 
-* **役割**: `quest_data.QUESTS`を元に`quest_master`テーブルを完全同期する。`dry_run=True`の場合は`_count_rows_to_delete`で削除見込み件数と登録予定件数をログ出力するのみで、DBへは一切書き込まない。通常実行時は、マスタに存在しないIDの行を`DELETE`(`master_ids`が空なら全件`DELETE`)したうえで、`QUESTS`の各要素を`quest_id`をキーに`INSERT ... ON CONFLICT DO UPDATE`でUpsertする。
-* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 22〜95)
+* **役割**: `quest_data.QUESTS`を元に`quest_master`テーブルを完全同期する。`dry_run=True`の場合は`_count_rows_to_delete`で削除見込み件数と登録予定件数をログ出力するのみで、DBへは一切書き込まない。通常実行時は、マスタに存在しないIDの行を`DELETE`(`master_ids`が空なら全件`DELETE`)したうえで、`QUESTS`の各要素を`quest_id`をキーに`INSERT ... ON CONFLICT DO UPDATE`でUpsertする。Issue #164により、Upsert対象列は`quest_id`/`title`/`quest_type`/`target_user`/`exp_gain`/`gold_gain`/`icon_key`/`day_of_week`/`description`/`reset_period`/`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`/`pre_requisite_quest_id`の全16列(`services/quest_service.py`の`sync_master_data()`と同じ列構成)になった。
+* 根拠: `def sync_quests(cur, dry_run: bool = False):` (行番号: 22〜116)
 * **引数/リクエスト**: `cur`(DBカーソル), `dry_run: bool = False`
 * 根拠: (行番号: 22)
 * **戻り値/レスポンス**: なし(`return`文は`dry_run`時の早期`return`のみ)
-* 根拠: (行番号: 22〜95、通常実行パスに明示的な`return`なし)
+* 根拠: (行番号: 22〜116、通常実行パスに明示的な`return`なし)
 * **副作用**: `dry_run=False`時、`quest_master`テーブルへの`DELETE`文および`INSERT ... ON CONFLICT DO UPDATE`文の発行、ログ出力(`logger.info`)
-* 根拠: (行番号: 38〜43 / 抜粋: "sql_delete = f\"DELETE FROM quest_master..."), (行番号: 66〜94 / 抜粋: "INSERT INTO quest_master (")
+* 根拠: (行番号: 38〜43 / 抜粋: "sql_delete = f\"DELETE FROM quest_master..."), (行番号: 73〜114 / 抜粋: "INSERT INTO quest_master (")
 * **エラーハンドリング**: なし(呼び出し元の`run_sync`/`common.get_db_cursor`に依存)
-* 根拠: (行番号: 22〜95、try-exceptなし)
+* 根拠: (行番号: 22〜116、try-exceptなし)
 
 ### `sync_rewards`
 
@@ -173,7 +176,7 @@ flowchart TD
     Q_Check -- No --> Q_DelAll["全クエストデータを削除"]
     Q_DelPartial --> Q_Loop{"QUESTSの全要素をループ"}
     Q_DelAll --> Q_Loop
-    Q_Loop -- 要素あり --> Q_Upsert["quest_masterへUpsert<br/>(reset_periodも含む全カラムを明示指定 #100)"]
+    Q_Loop -- 要素あり --> Q_Upsert["quest_masterへUpsert<br/>(reset_period・時間帯・期間・出現率・前提クエストも含む全16列を明示指定 #100 #164)"]
     Q_Upsert --> Q_Loop
     Q_Loop -- 完了 --> CallRewards["sync_rewards(cur, dry_run)呼び出し"]
 
@@ -255,8 +258,8 @@ graph TD
 
 * **破壊的な削除操作**: 実行時(`dry_run=False`)に`quest_master`および`reward_master`テーブルのデータが物理削除(DELETE)され、その後Upsertされる。マスタデータ(`QUESTS`/`REWARDS`)が空、または想定より少ないと、DBの対応テーブルの内容が意図せず失われる。M-9-6でこのリスクに対する安全ガード(`confirm_or_abort`)が導入されている。
 * 根拠: `DELETE`処理 (行番号: 38〜43, 109〜114 / 抜粋: "DELETE FROM quest_master")
-* **`quest_master`へのUpsertは全カラムを明示指定する必要がある(Issue #100)**: `reset_period`のようにINSERT対象から漏れた列は、SQLiteの列デフォルト値(`current_schema.sql`/`migrations/0002`由来の`'weekly_monday'`)がそのまま入り、`is_within_reset_period()`が扱えない値のため周期内多重完了ガードが機能しなくなる。`ALTER TABLE`では列のデフォルト値自体を変更できない(列を再作成しない限り残り続ける)ため、アプリケーション側で明示的に値を指定する必要がある。今後`quest_master`に新しい列を追加する場合も、`sync_quests`のINSERT/UPDATE列リストへの追加を忘れずに行う必要がある。
-* 根拠: `reset_period_val = q.get('reset_period', 'daily')` (行番号: 57〜64), `INSERT INTO quest_master (... reset_period)` (行番号: 66〜94)
+* **`quest_master`へのUpsertは全カラムを明示指定する必要がある(Issue #100、#164)**: `reset_period`のようにINSERT対象から漏れた列は、SQLiteの列デフォルト値(`current_schema.sql`/`migrations/0002`由来の`'weekly_monday'`)がそのまま入り、`is_within_reset_period()`が扱えない値のため周期内多重完了ガードが機能しなくなる。`ALTER TABLE`では列のデフォルト値自体を変更できない(列を再作成しない限り残り続ける)ため、アプリケーション側で明示的に値を指定する必要がある。実際にIssue #164では、`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`/`pre_requisite_quest_id`の6列が`sync_quests`のUpsert列リストから欠落したまま長期間残っており、`services/quest_service.py`の`sync_master_data()`(全16列)と非対称な不完全同期になっていた(時間帯限定クエストが`sync_strict.py`経由だと終日扱いになる不具合)。今後`quest_master`に新しい列を追加する場合も、`sync_quests`のINSERT/UPDATE列リストへの追加を忘れずに行う必要がある。
+* 根拠: `reset_period_val = q.get('reset_period', 'daily')` (行番号: 57〜64), `INSERT INTO quest_master (... reset_period, start_time, end_time, start_date, end_date, occurrence_chance, pre_requisite_quest_id)` (行番号: 66〜114)
 * **削除処理の非対称性**: `sync_quests`と`sync_rewards`はいずれも`master_ids`が空の場合に全データを削除する`else`分岐を持つ点は共通しているが、`dry_run`時の件数カウント(`_count_rows_to_delete`)は両者で共通ヘルパーに統合されている一方、実削除・Upsertのロジック自体はほぼ重複したコードとして個別に実装されている。
 * 根拠: `sync_quests`の`else`分岐 (行番号: 41〜43), `sync_rewards`の`else`分岐 (行番号: 112〜114)
 * **データ取得におけるフォールバック**: マスターデータの辞書から値を取得する際、`.get('exp_gain', q.get('exp', 0))`のように、キーが存在しない場合に代替キーやデフォルト値を使用している箇所が複数ある。
