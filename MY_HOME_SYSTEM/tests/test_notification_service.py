@@ -132,6 +132,60 @@ class TestSendPushFallbackBehavior:
         fake_api.push_message.assert_not_called()
 
 
+class TestSendPushSignatureRedesign:
+    """Issue #289の回帰テスト: send_pushの宛先解決(LINE user_idの決定)を
+    関数内に一元化した。target="discord"のみの呼び出しではuser_idが完全に
+    不要であること、target に "line"/"both" を含む場合はuser_id省略時に
+    config.LINE_USER_ID へフォールバックすることを確認する。"""
+
+    def test_discord_only_call_does_not_require_user_id(self, monkeypatch):
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
+        monkeypatch.setattr(
+            notification_service.requests, "post", lambda *a, **kw: MagicMock(status_code=204)
+        )
+
+        result = notification_service.send_push(
+            [{"type": "text", "text": "hi"}], target="discord"
+        )
+        assert result is True
+
+    def test_line_target_without_user_id_falls_back_to_config_line_user_id(self, monkeypatch):
+        monkeypatch.setattr(config, "LINE_USER_ID", "configured-user")
+        fake_api = _install_fake_line_sdk(monkeypatch)
+
+        result = notification_service.send_push(
+            [{"type": "text", "text": "hi"}], target="line"
+        )
+
+        assert result is True
+        fake_api.push_message.assert_called_once()
+        push_request = fake_api.push_message.call_args.args[0]
+        assert push_request.to == "configured-user"
+
+    def test_line_target_without_user_id_or_config_fallback_fails_gracefully(self, monkeypatch):
+        monkeypatch.setattr(config, "LINE_USER_ID", None)
+        fake_api = _install_fake_line_sdk(monkeypatch)
+
+        result = notification_service.send_push(
+            [{"type": "text", "text": "hi"}], target="line"
+        )
+
+        assert result is False
+        fake_api.push_message.assert_not_called()
+
+    def test_explicit_user_id_overrides_config_line_user_id(self, monkeypatch):
+        monkeypatch.setattr(config, "LINE_USER_ID", "default-user")
+        fake_api = _install_fake_line_sdk(monkeypatch)
+
+        result = notification_service.send_push(
+            [{"type": "text", "text": "hi"}], target="line", user_id="explicit-user"
+        )
+
+        assert result is True
+        push_request = fake_api.push_message.call_args.args[0]
+        assert push_request.to == "explicit-user"
+
+
 class TestSendReply:
     def test_returns_false_when_line_not_configured(self, monkeypatch):
         monkeypatch.setattr(notification_service, "line_configuration", None)

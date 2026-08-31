@@ -161,7 +161,7 @@ class LogAnalyzer:
                 f"📊 **週間ログ分析レポート ({target_period})**\n\n"
                 f"✅ **異常なし**\nシステムログ・サーバー含め正常です✨"
             )
-            common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")
+            common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")
             return
 
         total_errors = sum(d["errors"] for d in self.report_data.values())
@@ -187,7 +187,7 @@ class LogAnalyzer:
         msg += "━━━━━━━━━━━━━━━━━━━\n"
         msg += "※ `logs/` または `/var/log/` を確認してください。"
 
-        common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")
+        common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")
 
 if __name__ == "__main__":
     analyzer = LogAnalyzer(days_back=7)

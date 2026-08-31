@@ -121,12 +121,16 @@ class TestMotionDetectorStderrDeadlock:
 class TestSendPushUsesKeywordArguments:
     """Issue #167の回帰テスト: _run_smart_timelapse_job_locked内の2箇所の
     send_push呼び出しが send_push(user_id, messages, "discord", "report"/"error")
-    という位置引数になっていた。実シグネチャは
+    という位置引数になっていた。当時の実シグネチャは
     send_push(user_id, messages, image_data=None, target="both", channel="notify", ...)
     のため、"discord" が image_data に、"report"/"error" が target に渡ってしまい、
     target が discord/line/both のいずれにも一致せずどこにも送信されないまま
     True が返っていた(沈黙的な通知喪失)。send_pushをモックし、target/channelが
-    キーワード引数として渡されていることを検証する。"""
+    キーワード引数として渡されていることを検証する。
+
+    Issue #289でsend_pushのシグネチャ自体をmessages以外キーワード専用に
+    再設計した後は、messagesのみが唯一の位置引数となる(target=discordの
+    ためuser_idも不要になった)。"""
 
     def _patch_no_motion_pipeline(self, monkeypatch):
         monkeypatch.setattr(stg, "check_dependencies", lambda: True)
@@ -158,7 +162,7 @@ class TestSendPushUsesKeywordArguments:
         args, kwargs = mock_send_push.call_args
         # 修正前は positional (user_id, messages, "discord", "report") の4引数呼び出しで、
         # kwargsにtarget/channelが含まれていなかった。
-        assert len(args) == 2, "user_id/messages以外は必ずキーワード引数で渡すこと"
+        assert len(args) == 1, "messages以外は必ずキーワード引数で渡すこと"
         assert kwargs.get("target") == "discord"
         assert kwargs.get("channel") == "report"
 
@@ -177,7 +181,7 @@ class TestSendPushUsesKeywordArguments:
 
         mock_send_push.assert_called_once()
         args, kwargs = mock_send_push.call_args
-        assert len(args) == 2, "user_id/messages以外は必ずキーワード引数で渡すこと"
+        assert len(args) == 1, "messages以外は必ずキーワード引数で渡すこと"
         assert kwargs.get("target") == "discord"
         assert kwargs.get("channel") == "error"
 

@@ -12,7 +12,7 @@
 - [common.md](./common.md) — `setup_logging`・`send_push`を再エクスポートするFacadeモジュール
 - [logger.md](./logger.md) — `common.setup_logging`の実体(`core.logger.setup_logging`)
 - [notification_service.md](./notification_service.md) — `common.send_push`の実体(`services.notification_service.send_push`)
-- [config.md](./config.md) — `LINE_CHANNEL_ACCESS_TOKEN`/`LINE_USER_ID`等の設定値を提供
+- [config.md](./config.md) — `LINE_CHANNEL_ACCESS_TOKEN`等の設定値を提供
 - [switchbot_service.md](./switchbot_service.md) — `create_switchbot_auth_headers`(SwitchBot API認証ヘッダー生成)の実装元
 - [webhook_router.md](./webhook_router.md) — 同じSwitchBot/LINE Webhookエコシステムに属する、Webhook受信側のルーター
 
@@ -43,9 +43,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.setup_logging` | ロガーの初期化処理、ログの出力先やフォーマットの実装が不明。 | `logger = common.setup_logging("webhook_fix")` (行番号: 26) |
-| `common.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 117) |
+| `common.send_push` | 引数に渡されるDiscord指定などの処理内容や、実際の通知送信ロジックが不明。 | `common.send_push([...], target="discord", ...)` (行番号: 142, 148) |
 | `config.LINE_CHANNEL_ACCESS_TOKEN` | 環境変数等からの読み込み処理など、具体的な定義内容や値が不明。 | `if not config.LINE_CHANNEL_ACCESS_TOKEN:` (行番号: 73) |
-| `config.LINE_USER_ID` | 通知先となるユーザーIDの定義内容や値が不明。 | `common.send_push(config.LINE_USER_ID, ...)` (行番号: 117) |
 | `sb_tool.create_switchbot_auth_headers` | APIリクエストに必要なトークンや署名生成などの具体的な認証ロジックが不明。 | `headers = sb_tool.create_switchbot_auth_headers()` (行番号: 33) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -189,7 +188,6 @@ graph TD
     COMMON -.-> BlackBox2[ブラックボックス: send_push]
     
     CONFIG -.-> BlackBox3[ブラックボックス: LINE_CHANNEL_ACCESS_TOKEN]
-    CONFIG -.-> BlackBox4[ブラックボックス: LINE_USER_ID]
     
     SBTOOL -.-> BlackBox5[ブラックボックス: create_switchbot_auth_headers]
     

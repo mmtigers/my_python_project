@@ -38,9 +38,8 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config.LOG_DIR` | 外部ファイルで定義されており、具体的なパスや型が提供されていないため。 | `self.log_dir = config.LOG_DIR` (行番号: 41 / 抜粋: "self.log_dir = config.LOG_DIR") |
-| `config.LINE_USER_ID` | 外部ファイルで定義されており、具体的な値や型が提供されていないため。 | `common.send_push(config.LINE...` (行番号: 164, 190 / 抜粋: "common.send_push(config.LINE_USER_ID,") |
 | `common.setup_logging` | 外部ファイルで定義されており、内部処理や戻り値の型仕様が不明なため。 | `logger = common.setup_logging(...` (行番号: 13 / 抜粋: "logger = common.setup_logging("log_analyzer")") |
-| `common.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `common.send_push(config.LINE...` (行番号: 164, 190 / 抜粋: "common.send_push(config.LINE_USER_ID,") |
+| `common.send_push` | 外部ファイルで定義されており、引数の詳細仕様やエラー挙動が不明なため。 | `common.send_push([...` (行番号: 164, 190 / 抜粋: "common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -197,7 +196,7 @@
 
 
 * **副作用**: `common.send_push` による外部システムへの通信。
-* 根拠: 外部モジュール呼び出し (行番号: 164, 190 / 抜粋: "common.send_push(config.LINE_USER_ID,")
+* 根拠: 外部モジュール呼び出し (行番号: 164, 190 / 抜粋: "common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")")
 
 
 * **エラーハンドリング**: なし
@@ -293,8 +292,8 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | ログ設定の実態や、`send_push`のエラー発生時の挙動（リトライの有無、同期・非同期など）を特定するため。 | `common.send_push(config.LINE_USER_ID, [{"type": "text", "text": msg}], target="discord", channel="report")` の呼び出しから |
-| 高 | `config.py` | `LOG_DIR`の具体的なパス構造や、`LINE_USER_ID`に何が格納されているか（複数IDか単一IDか等）を確認するため。 | `self.log_dir = config.LOG_DIR` の参照から |
+| 高 | `common.py` | ログ設定の実態や、`send_push`のエラー発生時の挙動（リトライの有無、同期・非同期など）を特定するため。 | `common.send_push([{"type": "text", "text": msg}], target="discord", channel="report")` の呼び出しから |
+| 高 | `config.py` | `LOG_DIR`の具体的なパス構造を確認するため。 | `self.log_dir = config.LOG_DIR` の参照から |
 
 ## 8. 保守上の注意点
 
@@ -307,7 +306,6 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `LOG_DIR` の具体的なパス | 外部ファイルに定義されているため | `config.py` |
-| `LINE_USER_ID` の値とデータ型 | 外部ファイルに定義されているため | `config.py` |
 | `setup_logging` の詳細仕様 | ログフォーマットや出力先などの設定が不明なため | `common.py` |
 | `send_push` の詳細仕様 | 引数（`target="discord"`, `channel="report"`）の意味や、通信エラー時の挙動が不明なため | `common.py` |
 
@@ -316,9 +314,8 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `LOG_DIR` の具体的なパス | `MY_HOME_SYSTEM/config.py`228〜231行目を直接確認した。`LOG_DIR: str = ensure_safe_path_with_backoff(os.path.join(BASE_DIR, "logs"), "logs")`と定義されており、`BASE_DIR`(212行目で`os.path.dirname(os.path.abspath(__file__))`、実質`MY_HOME_SYSTEM`ディレクトリ)配下の`logs`サブディレクトリを安全性チェック付きで解決するパスであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212,228-231` |
-| `LINE_USER_ID` の値とデータ型 | `MY_HOME_SYSTEM/config.py`185行目を直接確認した。`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`と定義されており、環境変数から取得する`Optional[str]`型であることを確認した。実値そのものは環境変数由来のためリポジトリ内には存在しない。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185` |
 | `setup_logging` の詳細仕様 | `MY_HOME_SYSTEM/common.py`15行目で`from core.logger import setup_logging, DiscordErrorHandler`と再エクスポートしていることを確認した上で、`MY_HOME_SYSTEM/core/logger.py`46〜85行目の実体を直接確認した。54行目で`logger.setLevel(logging.INFO)`、58〜60行目でコンソール出力用の`StreamHandler`、63〜74行目で`config.BASE_DIR/logs/home_system.log`への`TimedRotatingFileHandler(when='midnight', interval=1, backupCount=7)`（日次ローテーション・7世代保持）、76〜84行目で`config.DISCORD_WEBHOOK_ERROR`（または引数指定のURL）が設定されていれば`DiscordErrorHandler`を`logging.ERROR`レベルで追加登録する、という3種のハンドラを登録する関数であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:15`, `MY_HOME_SYSTEM/core/logger.py:46-85` |
-| `send_push` の詳細仕様 | `MY_HOME_SYSTEM/common.py`31〜37行目で`from services.notification_service import send_push, ...`と再エクスポートしていることを確認した上で、`MY_HOME_SYSTEM/services/notification_service.py`116〜140行目の実体を直接確認した。`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`というシグネチャで、121〜124行目は`target`が`"discord"`または`"both"`のとき`_send_discord_webhook(messages, image_data, channel, filename)`を呼び出し(失敗時は`success=False`かつ警告ログのみで例外は送出しない)、127〜138行目は`target`が`"line"`または`"both"`のとき`_send_line_push(user_id, line_msgs)`を呼び出し、LINE送信に失敗した場合は135〜137行目で`_send_discord_webhook(fallback, None, 'error')`によりDiscordのerrorチャンネルへフォールバック通知することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:116-140` |
+| `send_push` の詳細仕様 | `MY_HOME_SYSTEM/common.py`31〜37行目で`from services.notification_service import send_push, ...`と再エクスポートしていることを確認した上で、`MY_HOME_SYSTEM/services/notification_service.py`116〜163行目の実体を直接確認した。Issue #289で`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`に再設計されており、`target`が`"discord"`または`"both"`のとき`_send_discord_webhook(messages, image_data, channel, filename)`を呼び出し(失敗時は`success=False`かつ警告ログのみで例外は送出しない)、`target`が`"line"`または`"both"`のとき`user_id`(省略時は`config.LINE_USER_ID`にフォールバック)が解決できれば`_send_line_push`を呼び出し、LINE送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知することを確認した。本ファイル(`log_analyzer.py`)は`target="discord"`のみで呼び出すため`user_id`は渡していない。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:116-163`, `MY_HOME_SYSTEM/monitors/log_analyzer.py:164,190` |
 
 ## 10. 自己検証結果
 

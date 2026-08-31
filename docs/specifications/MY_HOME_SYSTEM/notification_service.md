@@ -135,24 +135,24 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 ### `send_push`
 
-* **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。
-* 根拠: [関数定義] (行番号: 116〜140 / 抜粋: "def send_push(user_id: str...")
+* **役割**: 指定されたターゲット(discord, line, both)に応じてメッセージを各プラットフォームへ統合送信する。LINEに画像は送信せず注記を付与し、LINEの送信に失敗した場合はDiscordのerrorチャンネルへフォールバック通知を行う。`filename`はDiscord送信時にそのまま`_send_discord_webhook`へ引き継がれる。Issue #289で、LINE宛先(`user_id`)の解決をこの関数に一元化するようシグネチャを再設計した: `messages`のみが位置引数として渡せ、それ以外はすべてキーワード専用(`*`以降)。`user_id`は target に "line"/"both" を含む場合のみ使われ、省略時は`config.LINE_USER_ID`にフォールバックする。`target="discord"`のみの呼び出しでは`user_id`は一切不要になった。
+* 根拠: [関数定義] (行番号: 116〜163 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
-* **引数/リクエスト**: `user_id: str`, `messages: List[Any]`, `image_data: Optional[bytes] = None`, `target: str = "both"`, `channel: str = "notify"`, `filename: str = "snapshot.jpg"`
-* 根拠: [関数定義] (行番号: 116 / 抜粋: "def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify", filename: str = "snapshot.jpg") -> bool:")
+* **引数/リクエスト**: `messages: List[Any]`（唯一の位置引数）、以降キーワード専用で `target: str = "both"`, `channel: str = "notify"`, `user_id: Optional[str] = None`, `image_data: Optional[bytes] = None`, `filename: str = "snapshot.jpg"`
+* 根拠: [関数定義] (行番号: 116〜124 / 抜粋: "def send_push(\n    messages: List[Any],\n    *,\n    target: str = \"both\",\n    channel: str = \"notify\",\n    user_id: Optional[str] = None,\n    image_data: Optional[bytes] = None,\n    filename: str = \"snapshot.jpg\",\n) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 140 / 抜粋: "return success")
+* 根拠: [戻り値] (行番号: 163 / 抜粋: "return success")
 
 
 * **副作用**: `_send_discord_webhook`（通常送信時および失敗時のフォールバック送信の計2箇所）および `_send_line_push` の呼び出し。
-* 根拠: [関数呼び出し] (行番号: 122, 133, 137 / 抜粋: "_send_discord_webhook(...)")
+* 根拠: [関数呼び出し] (行番号: 140, 156, 160 / 抜粋: "_send_discord_webhook(...)")
 
 
-* **エラーハンドリング**: 各送信関数の戻り値を確認し、失敗時はログ出力を行い `success` フラグをFalseにする。LINE失敗時はDiscordへフォールバック送信を実行する。
-* 根拠: [条件分岐] (行番号: 133〜138 / 抜粋: "logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")")
+* **エラーハンドリング**: 各送信関数の戻り値を確認し、失敗時はログ出力を行い `success` フラグをFalseにする。LINE送信が必要な場合に`user_id`も`config.LINE_USER_ID`も解決できなければエラーログを出力して`success`をFalseにする(LINE送信自体は試みない)。LINE失敗時はDiscordへフォールバック送信を実行する。
+* 根拠: [条件分岐] (行番号: 146〜161 / 抜粋: "resolved_user_id = user_id or getattr(config, \"LINE_USER_ID\", None)\n        if not resolved_user_id:\n            logger.error(...)")
 
 
 
@@ -218,7 +218,12 @@ flowchart TD
     
     TargetCheckDiscord -- No --> TargetCheckLine{"target in ['line', 'both']?"}
     
-    TargetCheckLine -- Yes --> ImageDataCheck{"image_data is not None?"}
+    TargetCheckLine -- Yes --> ResolveUserId{"user_id 指定 or<br/>config.LINE_USER_ID あり?"}
+    ResolveUserId -- No --> LogNoUserId["logger.error('LINE送信先user_id未指定')"]
+    LogNoUserId --> SetSuccessFalseNoUserId["success = False"]
+    SetSuccessFalseNoUserId --> End([End])
+
+    ResolveUserId -- Yes --> ImageDataCheck{"image_data is not None?"}
     ImageDataCheck -- Yes --> AddNote["LINEメッセージ末尾に'画像はDiscordを確認'を追加"]
     AddNote --> LineSend["内部：_send_line_push()"]
     ImageDataCheck -- No --> LineSend
@@ -227,7 +232,7 @@ flowchart TD
     LineSuccessCheck -- No --> LineLogError["logger.error('LINE送信失敗')"]
     LineLogError --> FallbackSend["外部：_send_discord_webhook(channel='error')"]
     FallbackSend --> SetSuccessFalse["success = False"]
-    SetSuccessFalse --> End([End])
+    SetSuccessFalse --> End
     LineSuccessCheck -- Yes --> End
     
     TargetCheckLine -- No --> End

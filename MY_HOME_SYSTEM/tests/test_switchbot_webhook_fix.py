@@ -96,7 +96,7 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         mock_send_push.assert_called_once()
         args, kwargs = mock_send_push.call_args
         assert kwargs.get("channel") == "error"
-        assert "登録に失敗" in args[1][0]["text"]
+        assert "登録に失敗" in args[0][0]["text"]
 
     def test_sends_success_notification_when_registration_succeeds(self, monkeypatch):
         monkeypatch.setenv("WEBHOOK_BASE_URL", BASE_URL)
