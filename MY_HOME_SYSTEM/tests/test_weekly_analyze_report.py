@@ -183,3 +183,65 @@ class TestRunReport:
         mock_send.assert_called_once()
         sent_text = mock_send.call_args[0][1][0]["text"]
         assert "今週の我が家レポート" in sent_text
+
+
+class TestRunReportDuplicateSendPrevention:
+    """Issue #234の回帰テスト: 月曜8時台の判定のみで送信済みフラグが無かったため、
+    外部cronが同一時間枠内で本スクリプトを複数回起動すると重複送信されていた不具合。"""
+
+    def test_second_invocation_in_same_monday_morning_is_skipped(self, isolated_db, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):  # JST 2026-08-17 08:00 (月曜)
+            report.run_report()  # 1回目: 外部cronによる正規の起動
+            report.run_report()  # 2回目: 同一時間枠内での多重起動(重複)
+
+        mock_send.assert_called_once(), "同一時間枠内の多重起動で重複送信された(実行済みフラグが機能していない)"
+
+    def test_next_mondays_run_is_not_blocked_by_previous_weeks_flag(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):  # 2026-08-17(月)
+            report.run_report()
+        with freeze_time("2026-08-23 23:00:00"):  # 翌週2026-08-24(月)
+            report.run_report()
+
+        assert mock_send.call_count == 2, "前週の実行済みフラグにより翌週の正規実行までブロックされてはならない"
+
+    def test_send_failure_does_not_write_flag_so_retry_can_still_send(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(side_effect=[False, True])
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):
+            report.run_report()  # 1回目: 送信失敗
+            report.run_report()  # 2回目: 再試行(同一時間枠内でも成功させたい)
+
+        assert mock_send.call_count == 2, "送信失敗時にもフラグを書いてしまうと再試行が永久にブロックされる"
+
+    def test_forced_run_bypasses_flag_and_does_not_write_it(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        flag_file = tmp_path / "last_weekly_report.txt"
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(flag_file))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-19 08:00:00", tz_offset=9):  # 水曜日、--force
+            monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py", "--force"])
+            report.run_report()
+            report.run_report()
+
+        assert mock_send.call_count == 2, "--force は手動テスト用途のためフラグの影響を受けてはならない"
+        assert not flag_file.exists(), "--force 実行時はフラグを記録してはならない(通常実行をブロックしないため)"

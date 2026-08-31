@@ -1,6 +1,7 @@
 import config
 import common
 import datetime
+import os
 import pytz
 import sys
 from typing import Dict, Optional, Any
@@ -11,6 +12,10 @@ logger = common.setup_logging("weekly_report")
 # 定数定義 (本来はconfig.pyまたは.envから読み込むべき値)
 # 設計書 9.2: 機密情報・設定値の分離 
 DEFAULT_ELEC_PRICE_PER_KWH = 31
+
+# #234: 外部cron(リポジトリ管理外)による月曜8時台の多重起動時に重複送信するのを防ぐための
+# 実行済みフラグファイル。monitors/tv_lock_monitor.pyのLAST_RUN_FILEと同じ方式。
+LAST_RUN_FILE = os.path.join(config.FALLBACK_ROOT, "last_weekly_report.txt")
 
 def get_start_date(period_type: str) -> Optional[datetime.datetime]:
     """指定された期間タイプに応じた集計開始日時を取得する。
@@ -200,6 +205,15 @@ def run_report() -> None:
         logger.debug(f"⏭️ 現在はレポート送信タイミングではありません ({now.strftime('%a %H:%M')}) - Skip")
         return
 
+    # #234: 実行済みフラグチェック (外部cronの多重起動による重複送信防止)
+    today_str = now.strftime("%Y-%m-%d")
+    if not is_force and os.path.exists(LAST_RUN_FILE):
+        with open(LAST_RUN_FILE, "r") as f:
+            last_run = f.read().strip()
+        if last_run == today_str:
+            logger.debug(f"⏭️ 本日は既に週間レポートを送信済みのためスキップします ({today_str})")
+            return
+
     logger.info("📊 週間レポート生成プロセスを開始します...")
     
     date_fmt = "%m/%d"
@@ -263,6 +277,12 @@ def run_report() -> None:
     # common.send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
     if common.send_push(config.LINE_USER_ID, [{"type": "text", "text": full_msg}], target="discord"):
         logger.info("✅ レポート送信完了")
+        # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない。
+        # monitors/timelapse_runner.pyの--force時の扱いと同様)
+        if not is_force:
+            os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
+            with open(LAST_RUN_FILE, "w") as f:
+                f.write(today_str)
     else:
         logger.error("❌ レポート送信失敗")
 
