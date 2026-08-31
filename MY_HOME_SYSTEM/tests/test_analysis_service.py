@@ -146,6 +146,36 @@ class TestLoadSensorData:
         assert result.empty
 
 
+class TestLoadSensorDataPowerDeviceTypeClassification:
+    """Issue #169の回帰テスト: device_nameに"Remo"を含むかで"Nature Remo E Lite"/"Plug"に
+    正しく振り分けた直後、`.replace("Plug", "Nature Remo E Lite")`で全行を
+    "Nature Remo E Lite"に一括置換してしまっていた不具合。この結果、個別家電(Plug)の
+    グラフが常に空になり(views/dashboard/sensor_tab.pyのstr.contains("Plug")フィルタが
+    一致しなくなる)、全プラグの消費電力がスマートメーター全体消費のグラフへ混入していた。"""
+
+    def test_plug_device_keeps_plug_device_type(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev1', 'Plug1', 50, '2026-01-01T00:00:00')"
+            )
+        result = analysis_service.load_sensor_data()
+        row = result[result["device_id"] == "dev1"].iloc[0]
+        assert row["device_type"] == "Plug", (
+            f"Plug由来のdevice_typeがNature Remo E Liteへ一括置換されている: {row['device_type']!r}"
+        )
+
+    def test_nature_remo_device_keeps_nature_remo_device_type(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev2', 'Nature Remo E Lite (Living)', 300, '2026-01-01T00:00:00')"
+            )
+        result = analysis_service.load_sensor_data()
+        row = result[result["device_id"] == "dev2"].iloc[0]
+        assert row["device_type"] == "Nature Remo E Lite"
+
+
 class TestCalculateMonthlyCostCumulative:
     def test_returns_zero_when_no_power_data(self, isolated_db):
         assert analysis_service.calculate_monthly_cost_cumulative() == 0
