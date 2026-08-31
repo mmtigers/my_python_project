@@ -114,3 +114,35 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog):
         module.logger.propagate = original_propagate
 
     assert any("Unusually large diff" in record.message for record in caplog.records)
+
+
+class TestNotifyDailySummaryReturnValue:
+    """Issue #226の回帰テスト: notify_daily_summaryは送信結果をbool値として
+    呼び出し元に返す(以前は常にNoneで、呼び出し元が成否を判別できなかった)。"""
+
+    def test_returns_true_on_success(self):
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        notifier.session.post = MagicMock(return_value=response)
+
+        result = notifier.notify_daily_summary({"site_a": 2}, {"site_a": "サイトA"}, "2026-08-30")
+
+        assert result is True
+
+    def test_returns_false_on_request_exception(self):
+        import requests
+
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        notifier.session.post = MagicMock(side_effect=requests.RequestException("boom"))
+
+        result = notifier.notify_daily_summary({"site_a": 2}, {"site_a": "サイトA"}, "2026-08-30")
+
+        assert result is False
+
+    def test_returns_false_when_webhook_not_configured(self):
+        notifier = DiscordNotifier(webhook_url="")
+
+        result = notifier.notify_daily_summary({"site_a": 2}, {"site_a": "サイトA"}, "2026-08-30")
+
+        assert result is False
