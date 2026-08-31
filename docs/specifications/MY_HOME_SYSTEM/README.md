@@ -34,6 +34,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 
 | 仕様書 | 概要 |
 | --- | --- |
+| [alexa_handler.md](./alexa_handler.md) | Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群。LaunchRequestをAPL(画面)または読み上げでファミリークエストの状況表示にディスパッチする。 |
 | [line_logic.md](./line_logic.md) | LINE Messaging APIのWebhook PostbackEvent（ボタン操作）専用の処理ロジック。 |
 | [line_handler.md](./line_handler.md) | LINE Bot APIのWebhookイベント（メッセージ・ポストバック）を解析し、各処理へ振り分けるディスパッチャ。 |
 | [line.md](./line.md) | LINE連携のイベント・Postbackデータ構造を定義するPydanticモデル群。 |
