@@ -69,8 +69,8 @@
 
 ### `get_analysis_data`
 
-* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。
-* 根拠: `get_analysis_data` 定義部 (行番号: 40〜135 / 抜粋: "def get_analysis_data(start_dt")
+* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。
+* 根拠: `get_analysis_data` 定義部 (行番号: 40〜141 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
@@ -86,7 +86,7 @@
 
 
 * **エラーハンドリング**: 例外発生時はキャッチして `logger.error` でログ出力し、`None` を返す。
-* 根拠: `except Exception as e:` ブロック (行番号: 132 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` ブロック (行番号: 138 / 抜粋: "except Exception as e:")
 
 
 
