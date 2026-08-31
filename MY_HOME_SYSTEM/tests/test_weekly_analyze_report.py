@@ -7,7 +7,6 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 import pytz
 from freezegun import freeze_time
 
@@ -62,7 +61,6 @@ class TestIsMonthEndReport:
 class TestGetAnalysisData:
     def test_aggregates_correctly_when_all_tables_present(self, isolated_db):
         start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
-        start_str = start.strftime("%Y-%m-%d %H:%M:%S")
 
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(

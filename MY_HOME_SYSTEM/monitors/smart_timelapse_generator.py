@@ -17,7 +17,7 @@ import re
 import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
 try:

@@ -14,7 +14,6 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import common
-import config
 
 
 def _seed_basic_data():

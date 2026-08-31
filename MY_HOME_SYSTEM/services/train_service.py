@@ -1,11 +1,9 @@
 # MY_HOME_SYSTEM/services/train_service.py
 import requests
 from bs4 import BeautifulSoup
-import traceback
 import re
-import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 # 自作モジュール
 import common

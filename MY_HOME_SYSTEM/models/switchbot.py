@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/models/switchbot.py
-from pydantic import BaseModel, Field
-from typing import Optional, Union, Dict, Any
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
 
 class SwitchBotContext(BaseModel):
     """Webhookで送られてくる詳細コンテキスト"""

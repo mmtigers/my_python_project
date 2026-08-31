@@ -2,10 +2,8 @@ import sqlite3
 import os
 import datetime
 import shutil
-import time
 from pathlib import Path
 from typing import Tuple
-from common import setup_logging
 # 設計書 (Source: 137) に従い core.logger を使用
 from core.logger import setup_logging  # 設計書に従い core.logger を使用 [cite: 137, 354]
 from common import send_push           # 通知用ユーティリティ

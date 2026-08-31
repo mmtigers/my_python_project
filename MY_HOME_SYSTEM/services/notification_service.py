@@ -1,8 +1,6 @@
 # MY_HOME_SYSTEM/services/notification_service.py
-import json
-import logging
 import requests
-from typing import List, Optional, Any, Union
+from typing import List, Optional, Any
 
 # ▼▼▼ v3 Imports ▼▼▼
 from linebot.v3.messaging import (
@@ -12,9 +10,7 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
-    FlexMessage,
-    Message,
-    MessagingApiBlob
+    Message
 )
 # ▲▲▲ ▲▲▲
 import config

@@ -13,7 +13,6 @@ from datetime import datetime
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pytest
 import pytz
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

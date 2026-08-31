@@ -4,16 +4,14 @@ import sys
 import asyncio
 import time
 import socket
-import logging
 import subprocess
 import traceback
 import signal
 import uuid
-import requests
 import datetime
 import platform
 from datetime import datetime as dt_class, timedelta
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 from http.client import RemoteDisconnected
 from urllib3.exceptions import ProtocolError

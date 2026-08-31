@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/monitors/timelapse_runner.py
 import os
 import sys
-import time
 import datetime
 import subprocess
 import argparse

@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/switchbot_webhook_fix.py
 import sys
 import os
-import traceback
 import requests
 import time
 

@@ -3,10 +3,9 @@ import sqlite3
 import shutil
 import subprocess
 import requests
-import os
 from datetime import datetime, timedelta, date
 import pytz
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 
 import pandas as pd
 
