@@ -116,6 +116,79 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog):
     assert any("Unusually large diff" in record.message for record in caplog.records)
 
 
+class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
+    """Issue #237の回帰テスト: 新規検知が1件も無い場合にsave_known_castsが
+    current_castsで全置換していたため、_parse_htmlが単発でパース失敗した
+    既知キャスト(current_castsから漏れているだけで実際には引き続き掲載中)が
+    known_castsから恒久的に消え、次回正常にパースできた際に「新規キャスト」
+    として誤って再通知される不具合。新規検知の有無に関わらず、save_known_casts
+    には常にknown_casts∪current_castsが渡されるべきことを検証する。"""
+
+    def _make_site(self):
+        return module.SiteConfig(
+            site_id="union_test",
+            name="Union Test Site",
+            target_url="https://example.test/",
+            selector_container="div",
+            selector_name="li",
+            selector_link="a",
+            selector_image="img",
+        )
+
+    def test_transient_parse_failure_of_known_cast_does_not_evict_it_when_no_new_casts(
+        self, monkeypatch
+    ):
+        """既知キャストAが単発パース失敗でcurrent_castsに含まれず、かつ
+        真の新規キャストも0件だった場合、Aはknown_castsから消えてはならない。
+        current_castsを完全に空にすると「スクレイピング自体に失敗した」扱いの
+        早期return分岐(if not current_casts: return)に入ってしまうため、
+        既知キャストBは正常にパースできたという設定にして区別する。"""
+        cast_a = CastMember(id="a", name="既存A", detail_url="https://example.test/a", image_url="")
+        cast_b = CastMember(id="b", name="既存B", detail_url="https://example.test/b", image_url="")
+        known_casts = {cast_a, cast_b}
+        current_casts = {cast_b}  # 今回はAのパースに失敗、Bは成功、新規は0件
+
+        site = self._make_site()
+        monitor = MagicMock()
+        monitor.fetch_current_casts.return_value = current_casts
+        notifier = MagicMock()
+
+        monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=known_casts))
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+        monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
+
+        module._check_site(monitor, notifier, site)
+
+        mock_save.assert_called_once()
+        saved_site, saved_casts = mock_save.call_args[0]
+        assert cast_a in saved_casts, "単発パース失敗した既知キャストが全置換でknown_castsから消えている"
+
+    def test_still_unions_when_genuine_new_casts_are_detected(self, monkeypatch):
+        """新規検知がある場合も、既存の挙動通りunionで保存されること(非破壊確認)。"""
+        cast_a = CastMember(id="a", name="既存A", detail_url="https://example.test/a", image_url="")
+        cast_new = CastMember(id="new-1", name="新規1", detail_url="https://example.test/new-1", image_url="")
+        known_casts = {cast_a}
+        current_casts = {cast_new}  # Aは今回パース失敗、newは真の新規
+
+        site = self._make_site()
+        monitor = MagicMock()
+        monitor.fetch_current_casts.return_value = current_casts
+        notifier = MagicMock()
+
+        monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=known_casts))
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+        monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
+
+        module._check_site(monitor, notifier, site)
+
+        notifier.notify.assert_called_once()
+        mock_save.assert_called_once()
+        saved_site, saved_casts = mock_save.call_args[0]
+        assert saved_casts == {cast_a, cast_new}
+
+
 class TestNotifyDailySummaryReturnValue:
     """Issue #226の回帰テスト: notify_daily_summaryは送信結果をbool値として
     呼び出し元に返す(以前は常にNoneで、呼び出し元が成否を判別できなかった)。"""
