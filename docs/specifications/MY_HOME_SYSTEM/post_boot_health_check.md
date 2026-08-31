@@ -269,69 +269,69 @@
 ### `PostBootHealthCheck.check_system_resources`
 
 * **役割**: CPU温度（`vcgencmd measure_temp`）とディスク使用率（`shutil.disk_usage`）を取得し、3段階の閾値（温度: 75°C未満OK/75〜85°C未満WARN/85°C以上ERR、ディスク使用率: 90%以下OK/90〜95%WARN/95%超ERR）に基づきステータスを判定して結果に追加する。いずれかがERRなら全体もERR、いずれかがWARN(かつERRなし)ならWARNとする。
-* 根拠: `def check_system_resources(self):` (行番号: 84〜124 / 抜粋: "def check_system_resources(self):")
+* 根拠: `def check_system_resources(self):` (行番号: 94〜134 / 抜粋: "def check_system_resources(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 84 / 抜粋: "def check_system_resources(self):")
+* 根拠: (行番号: 94 / 抜粋: "def check_system_resources(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ `CheckResult` を追加）
-* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (行番号: 122〜124 / 抜粋: "self.results.append(CheckResult(")
+* 根拠: `self.results.append(CheckResult(\n            "System Resource", final_status, f"CPU: {temp_msg} / Disk: {disk_msg}"\n        ))` (行番号: 132〜134 / 抜粋: "self.results.append(CheckResult(")
 
 
-* **副作用**: `vcgencmd` サブプロセス実行、`shutil.disk_usage` によるディスク情報取得、`self.results` への追加。
-* 根拠: `res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")` (行番号: 87 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"]).decode("utf-8")")
+* **副作用**: `vcgencmd` サブプロセス実行（`timeout=10`付き）、`shutil.disk_usage` によるディスク情報取得、`self.results` への追加。
+* 根拠: `res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")` (行番号: 97 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")")
 
 
 * **エラーハンドリング**: 温度取得・ディスク取得それぞれを個別の `try/except:`（bare except）で保護し、失敗時は `STATUS_WARN` と `"Unknown"` を設定して処理を継続する。
-* 根拠: `except:` (行番号: 96, 111 / 抜粋: "except:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
+* 根拠: `except:` (行番号: 106, 121 / 抜粋: "except:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
 
 
 
 ### `PostBootHealthCheck.check_network_and_apis`
 
 * **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
-* 根拠: `def check_network_and_apis(self):` (行番号: 126〜147 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: `def check_network_and_apis(self):` (行番号: 136〜157 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 126 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: (行番号: 136 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ping失敗時は途中で `return` して以降のAPIチェックを行わない）
-* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 131〜132 / 抜粋: "return ")
+* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 141〜142 / 抜粋: "return ")
 
 
-* **副作用**: `ping` コマンドのサブプロセス実行、`switchbot_service.create_switchbot_auth_headers()`呼び出し、SwitchBot/NatureRemo APIへの認証ヘッダー付きHTTP GETリクエスト（`_check_http`経由）、`self.results` への追加。
-* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)` (行番号: 129 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL)")
+* **副作用**: `ping` コマンドのサブプロセス実行（`timeout=10`付き）、`switchbot_service.create_switchbot_auth_headers()`呼び出し、SwitchBot/NatureRemo APIへの認証ヘッダー付きHTTP GETリクエスト（`_check_http`経由）、`self.results` への追加。
+* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)` (行番号: 139 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)")
 
 
 * **エラーハンドリング**: ping失敗時（bare except）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except:` (行番号: 130 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 141 / 抜粋: "if not self._check_http(url, headers=headers):")
+* 根拠: `except:` (行番号: 140 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 151 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 
 ### `PostBootHealthCheck.check_database`
 
 * **役割**: SQLite DBファイルの存在確認と `PRAGMA quick_check` による整合性チェックを行う。
-* 根拠: `def check_database(self):` (行番号: 150〜171 / 抜粋: "def check_database(self):")
+* 根拠: `def check_database(self):` (行番号: 160〜181 / 抜粋: "def check_database(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 150 / 抜粋: "def check_database(self):")
+* 根拠: (行番号: 160 / 抜粋: "def check_database(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ファイル不在時は途中で `return`）
-* 根拠: `self.results.append(CheckResult("Database", STATUS_ERR, "File Not Found"))\n            return` (行番号: 156〜157 / 抜粋: "return")
+* 根拠: `self.results.append(CheckResult("Database", STATUS_ERR, "File Not Found"))\n            return` (行番号: 166〜167 / 抜粋: "return")
 
 
 * **副作用**: 読み取り専用モード（`mode=ro`）でのSQLite接続・クエリ実行・接続クローズ、`self.results` への追加。
-* 根拠: `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 160 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)")
+* 根拠: `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 170 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)")
 
 
 * **エラーハンドリング**: DBファイル不在時は `STATUS_ERR` を追加して `return`。接続・クエリ実行中の任意の `Exception` を捕捉し `STATUS_ERR` とエラー内容を結果に追加する。
-* 根拠: `except Exception as e:` (行番号: 170 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 180 / 抜粋: "except Exception as e:")
 
 
 
