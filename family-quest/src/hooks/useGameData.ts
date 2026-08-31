@@ -134,7 +134,12 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, quest }: { user: User; quest: Quest }) => {
             return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定
                 user_id: user.user_id,
-                quest_id: quest.id || quest.quest_id,
+                // #246: quest.id || quest.quest_id という逆順は、useQuestStatus.ts
+                // (getQuestLockStateのqId算出、ソースオブトゥルース)が統一した
+                // `quest.quest_id || quest.id` という規約と食い違っていた。バックエンドの
+                // quest_masterはquest_id列のみを持ちidフィールドは存在しないため現状の
+                // 実害は無いが、規約統一のため揃える。
+                quest_id: quest.quest_id || quest.id,
             });
         },
         onSuccess: (res, variables) => {
@@ -248,7 +253,9 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // --- ラッパー関数 (Async/Await対応) ---
 
     const completeQuest = async (user: User, quest: Quest) => {
-        const qId = quest.id || quest.quest_id;
+        // #246: useQuestStatus.tsのgetQuestLockStateと同じ`quest.quest_id || quest.id`
+        // の順序に統一する(以前はquest.id || quest.quest_idという逆順だった)。
+        const qId = quest.quest_id || quest.id;
         const isPending = gameData?.pendingQuests.some(pq => pq.user_id === user.user_id && pq.quest_id === qId);
 
         if (isPending) {

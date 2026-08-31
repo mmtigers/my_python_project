@@ -125,6 +125,8 @@
 
 * **バグ修正の記録**: `chronicle`クエリを無効化していなかったため、クエスト完了が冒険の記録に反映されるまで`staleTime`（5分）が切れるのを待つ必要があったバグを修正し、`gameData`と併せて`chronicle`も無効化するようにした。また以前は`status`/`message`を返り値から落としていたため、子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが呼び出し元で絶対に表示されなかった。
 * 根拠: (行番号: 142〜144, 250〜252行目 / 抜粋: "// ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。", "// ★バグ修正: 以前は status/message を返り値から落としていたため、\n                // 子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが\n                // App.tsx 側で絶対に表示されなかった（res.status が常に undefined）。")
+* **(Issue #246バグ修正)** `completeQuestMutation`のリクエストボディ組み立て（`quest_id: ...`）と`completeQuest`ラッパー内の申請中チェック用`qId`算出の2箇所は、以前`quest.id || quest.quest_id`という順序だった。これは`useQuestStatus.ts`の`getQuestLockState`（ソースオブトゥルースとして統一された`quest.quest_id || quest.id`という順序）と食い違っており、技術的負債として記録されていた。バックエンドの`quest_master`由来のQuestオブジェクトは常に`quest_id`列のみを持ち`id`フィールドは存在しないため、修正前後で現状の実害（`quest.id`は常に`undefined`）はない。将来Questオブジェクトの形状が変わった場合（例: マスタ側に`id`という別名列が追加される等）に2箇所だけ黙って異なる値を参照するようになることを防ぐため、`useQuestStatus.ts`と同じ順序に統一した。
+* 根拠: [quest_id算出のコメントと順序] (行番号: 137〜142, 255〜258 / 抜粋: "// #246: quest.id || quest.quest_id という逆順は、useQuestStatus.ts\n                // (getQuestLockStateのqId算出、ソースオブトゥルース)が統一した\n                // `quest.quest_id || quest.id` という規約と食い違っていた。", "quest_id: quest.quest_id || quest.id,", "const qId = quest.quest_id || quest.id;")
 
 ### `cancelQuest` (ラッパー) & `cancelQuestMutation`
 
