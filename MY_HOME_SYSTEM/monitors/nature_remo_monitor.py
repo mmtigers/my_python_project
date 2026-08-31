@@ -101,8 +101,15 @@ async def process_location(location: str, token: str) -> None:
             for prop in echonet_props:
                 if prop.get("epc") == 231: # 0xE7 = 231
                     val_str = prop.get("val")
-                    if val_str and val_str.isdigit():
+                    # #235: str.isdigit()は符号付き文字列(例: "-120")に対してFalseを返すため、
+                    # 太陽光発電等による逆潮流(売電)時の負の瞬時電力値が無警告で欠損していた。
+                    # float()へのパースを直接試み、失敗時のみ警告ログを出す方式に変更。
+                    try:
                         power_val = float(val_str)
+                    except (TypeError, ValueError):
+                        logger.warning(
+                            "⚠️ 瞬時電力値のパースに失敗しました (location=%s, val=%r)", location, val_str
+                        )
                     break
             
             if power_val is not None:

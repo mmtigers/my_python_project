@@ -95,8 +95,8 @@
 
 ### `process_location`
 
-* **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。
-* 根拠: `[process_location]` (行番号: 78〜139 / 抜粋: "async def process_location(loc")
+* **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。**（Issue #235で修正）** 電力値のパースは以前`val_str.isdigit()`で数字文字列かどうかを判定していたが、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告も無く無条件に破棄されていた。`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ警告ログを出す方式に変更した。
+* 根拠: `[process_location]` (行番号: 78〜145 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
@@ -107,12 +107,12 @@
 * 根拠: `[process_location]` (行番号: 78 / 抜粋: "async def process_location(loc")
 
 
-* **副作用**: 外部サービス (`sensor_service.process_power_data`, `sensor_service.process_meter_data`) の非同期呼び出し、ログへの出力。
-* 根拠: `[process_location]` (行番号: 113, 135 / 抜粋: "await sensor_service.process_p")
+* **副作用**: 外部サービス (`sensor_service.process_power_data`, `sensor_service.process_meter_data`) の非同期呼び出し、ログへの出力。電力値のパースに失敗した場合(`None`や数値に変換できない文字列)は`logger.warning`で警告ログを出力する(Issue #235で追加)。
+* 根拠: `[process_location]` (行番号: 109〜111, 120, 142 / 抜粋: "logger.warning(", "await sensor_service.process_p")
 
 
-* **エラーハンドリング**: なし（例外は上位に伝播するが、通信エラーは `fetch_data_sync` 内部で処理されるため辞書操作時のキーエラー等以外は発生しにくい）。
-* 根拠: `[process_location]` (行番号: 78〜139 / 抜粋: "async def process_location(loc")
+* **エラーハンドリング**: 電力値(`EPC: 231`)のパース失敗(`TypeError`/`ValueError`)はその場で`try/except`により捕捉し警告ログを出力、`power_val`は`None`のまま次の家電へ処理を継続する(Issue #235で追加。修正前はこのケースを`str.isdigit()`で無警告に判定していた)。それ以外の例外は上位に伝播するが、通信エラーは `fetch_data_sync` 内部で処理されるため辞書操作時のキーエラー等以外は発生しにくい。
+* 根拠: `[process_location]` (行番号: 108〜111 / 抜粋: "except (TypeError, ValueError):")
 
 
 
@@ -178,7 +178,9 @@ flowchart TD
     FetchEnd --> ParseApp{appliancesのループ}
     ParseApp -- 要素あり --> CheckMeter{type == EL_SMART_METER?}
     CheckMeter -- Yes --> ParseEpc(EPC: 231 の検索)
-    ParseEpc --> CheckEpc{値が存在するか?}
+    ParseEpc --> TryParse{"float()へのパースに成功?(#235で変更)"}
+    TryParse -- No --> LogParseWarn[警告ログ出力] --> ParseApp
+    TryParse -- Yes --> CheckEpc{値が存在するか?}
     CheckEpc -- Yes --> SendPwr(外部：sensor_service.process_power_data - ブラックボックス)
     CheckEpc -- No --> ParseApp
     SendPwr --> LogPwr[電力ログ出力]
@@ -230,8 +232,7 @@ graph TD
 * 瞬時電力の抽出判定において、EPCの値がマジックナンバーの `231` （16進数 `0xE7` の十進数表現）としてハードコードされている。
 * `requests.get` のタイムアウト時間が `timeout=10`（10秒）でハードコードされている。
 * データのパース時、温度 (`te_val`) が存在する場合のみ湿度の処理（委譲）に進み、温度が存在せず湿度だけが存在するパターンのデータは破棄されるロジックとなっている。
-
-## 9. 不明事項一覧
+* Issue #235修正前は瞬時電力値(EPC: 231)のパースに`val_str.isdigit()`を用いており、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython言語仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告ログも無く無条件に破棄されていた。修正後は`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ`logger.warning`を出す方式にした。数値文字列かどうかを事前チェックする実装(`isdigit`, `isnumeric`等)を新規に書く際は、符号付き数値・小数を正しく扱えるか(=`float()`/`int()`への実パースで検証する方が安全)を確認すること。
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
