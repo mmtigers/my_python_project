@@ -387,20 +387,20 @@
 ### `FileSystemManager.ensure_dir`
 
 * **役割**: 指定パスのディレクトリを（親ディレクトリを含め）作成する静的メソッド。
-* 根拠: [FileSystemManager.ensure_dir] (行番号: 353〜359 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* 根拠: [FileSystemManager.ensure_dir] (行番号: 416〜430 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
 * **引数/リクエスト**: `path: Path`
-* **戻り値/レスポンス**: `bool`（成功時`True`、権限エラー時`False`）
-* 根拠: [戻り値ヒント] (行番号: 353 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* **戻り値/レスポンス**: `bool`（成功時`True`、権限エラーおよびその他の`OSError`時`False`）
+* 根拠: [戻り値ヒント] (行番号: 417 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
-* **副作用**: ディレクトリ作成(`mkdir`)、権限エラー時のDiscord通知。
-* 根拠: [mkdir呼び出し] (行番号: 355 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
+* **副作用**: ディレクトリ作成(`mkdir`)、エラー時のDiscord通知。
+* 根拠: [mkdir呼び出し] (行番号: 419 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
 
 
-* **エラーハンドリング**: `PermissionError` を捕捉し、エラー通知を送信して `False` を返す。
-* 根拠: [try-exceptブロック] (行番号: 357〜359 / 抜粋: "except PermissionError:")
+* **エラーハンドリング**: `PermissionError` を捕捉し「❌ 権限エラー」通知を送信して `False` を返す。**（Issue #236で修正）** 以前は`PermissionError`以外の`OSError`(読み取り専用マウントの`Errno 30`、NAS切断時の`Errno 5`、ディスクフル時の`Errno 28`等)を捕捉しておらず、専用通知を経由しないまま呼び出し元(最終的には`run_locked`の`except Exception`)へ伝播していた。`extract_youtube_urls.py`の`process_subscriptions`(#185)と同様に`except OSError`節を追加し、「❌ ディレクトリ作成エラー」通知を送信して`False`を返すようにした。
+* 根拠: [try-exceptブロック] (行番号: 421〜430 / 抜粋: "except PermissionError:", "except OSError as e:")
 
 
 ### `FileSystemManager.check_disk_space`
@@ -1036,6 +1036,7 @@ flowchart TD
 * **`noplaylist`によるプレイリスト一括ダウンロードの防止**: `UniversalYtDlpStrategy.download`の`ydl_opts`に`noplaylist: True`が追加され、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回される問題が修正されている。
 * 根拠: [ydl_optsのコメント] (行番号: 462〜466 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")
 * **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
+* **ディレクトリ作成失敗時のOSError全般の捕捉（Issue #236で修正）**: `FileSystemManager.ensure_dir`は以前`except PermissionError:`のみを定義しており、読み取り専用マウント（`Errno 30`）・NAS切断中のI/Oエラー（`Errno 5`）・ディスクフル（`Errno 28`）等の他の`OSError`サブクラスは専用のDiscord通知を経由せず呼び出し元（最終的には`run_locked`の`except Exception`）へ伝播していた。同種のmkdir呼び出しを持つ`extract_youtube_urls.py`の`process_subscriptions`（#185）が先に`except (sqlite3.Error, OSError)`でOSError全般を捕捉するよう修正済みだったのに対し、本ファイルはその横展開から取り残されていた。`except OSError as e:`節を追加し、原因（`Errno`）を含めた専用通知を送信するよう修正した。
 
 ## 9. 不明事項一覧
 
