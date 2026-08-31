@@ -44,7 +44,7 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 ### Button
 
 * **役割**: 指定されたバリエーションとサイズに基づくスタイルを適用し、アニメーションと音声再生を伴うボタンを描画する。
-* 根拠: `export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...` (行番号: 17〜71 / 抜粋: "export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(")
+* 根拠: `export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(...` (行番号: 17〜70 / 抜粋: "export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(")
 
 
 * **引数/リクエスト**: `ButtonProps` 型（`HTMLMotionProps<"button">` から `ref` を除外し、`variant`, `size`, `isLoading`, `children` を追加）
@@ -52,7 +52,7 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 
 * **戻り値/レスポンス**: `React.ReactNode`（`motion.button` コンポーネント）
-* 根拠: `return ( <motion.button...` (行番号: 54〜69 / 抜粋: "return ( <motion.button")
+* 根拠: `return ( <motion.button...` (行番号: 53〜68 / 抜粋: "return ( <motion.button")
 
 
 * **副作用**: `useSound` の呼び出しによる初期化。
@@ -60,14 +60,14 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 17〜71 / 抜粋: 判断不可)
+* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 17〜70 / 抜粋: 判断不可)
 
 
 
 ### handleClick (Buttonコンポーネント内部関数)
 
 * **役割**: クリックイベントをフックし、条件を満たす場合は音声再生を実行した上で、プロパティとして渡された `onClick` 関数を実行する。
-* 根拠: `const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {...` (行番号: 44〜52 / 抜粋: "const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {")
+* 根拠: `const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {...` (行番号: 44〜51 / 抜粋: "const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {")
 
 
 * **引数/リクエスト**: `e: React.MouseEvent<HTMLButtonElement>`
@@ -75,15 +75,15 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 
 * **戻り値/レスポンス**: `void`
-* 根拠: 関数内に `return` ステートメントなし (行番号: 44〜52)
+* 根拠: 関数内に `return` ステートメントなし (行番号: 44〜51)
 
 
-* **副作用**: コンソールへのログ出力、および外部関数 `play('tap')` の呼び出し。
-* 根拠: `console.log("Button clicked! Playing tap sound...");` (45行目) および `play('tap');` (47行目)
+* **副作用**: 外部関数 `play('tap')` の呼び出し。
+* 根拠: `play('tap');` (46行目)
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 44〜52 / 抜粋: 判断不可)
+* 根拠: ファイル内にtry-catchやエラー制御の記述なし (行番号: 44〜51 / 抜粋: 判断不可)
 
 
 
@@ -91,8 +91,7 @@ Framer Motionを利用したアニメーション付きのボタンコンポー�
 
 ```mermaid
 flowchart TD
-    Start([クリックイベント発生]) --> Log[コンソール出力: Button clicked!...]
-    Log --> Condition1{disabled が false かつ isLoading が false か？}
+    Start([クリックイベント発生]) --> Condition1{disabled が false かつ isLoading が false か？}
     Condition1 -- はい --> Play[外部: play関数を実行]
     Condition1 -- いいえ --> Condition2
     Play --> Condition2{onClick関数が指定されているか？}
@@ -111,7 +110,6 @@ graph TD
     Button --> useSound["外部: useSound()"]
     Button --> motion["外部: motion.button"]
     Button --> Loader2["外部: Loader2"]
-    handleClick --> console["標準: console.log()"]
     handleClick --> play["外部: play()"]
     handleClick --> propsOnClick["外部: 渡されたonClick()"]
 
@@ -126,7 +124,6 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* コンソールログ (`console.log`) がクリックのたびに出力されるため、本番環境へのデプロイ前に制御または削除が必要になる可能性がある。
 * `disabled` と `isLoading` の両方が `true` の場合、コンポーネントの `disabled` 属性は `true` となる（論理和 `disabled || isLoading` に依存）。
 * `play` 関数の呼び出しに対するエラーハンドリングが存在しないため、ブラウザの音声再生制限（Autoplay Policyなど）に抵触した場合の挙動が制御されていない。
 
