@@ -18,12 +18,15 @@
 
 ## 2. ファイルの概要
 
-* 「Family Quest」システムのマスターデータを定義する、実行ロジックを一切含まない純粋なデータ定義モジュール。
-* 家族4人のユーザー情報（`USERS`）、日課・特別クエストの定義（`QUESTS`）、ゴールドと交換できる報酬（`REWARDS`）の3つのリスト定数のみで構成される。
+* 「Family Quest」システムのマスターデータを定義するモジュール。大部分は実行ロジックを持たない静的なリスト定数だが、モジュールロード時に`quest_users.local.json`（存在すれば）を読み込んで`USERS`の一部フィールドを上書きする条件分岐・例外処理を含む点で、純粋なデータ定義のみのファイルではなくなっている。
+* 根拠: `if os.path.exists(_QUEST_USERS_LOCAL_PATH):` (行番号: 64 / 抜粋: "if os.path.exists(_QUEST_USERS_LOCAL_PATH):")
+* 家族4人のユーザー情報（`USERS`）、日課・特別クエストの定義（`QUESTS`）、ゴールドと交換できる報酬（`REWARDS`）の3つのリスト定数を中心に構成される。
+* `USERS[].info`は、年齢や住宅ローン残高など個人を特定しうる情報を含まないプレースホルダー文字列としてtracked source上に定義されており、Git管理対象外（gitignore対象）の`quest_users.local.json`が存在すればuser_id単位で上書きされる。`config.py`の`FAMILY_SETTINGS`/`family_members.local.json`と同じ設計方針であることがコメントで明記されている。
+* 根拠: `# 注意: info は年齢・具体的な金額など個人を特定しうる情報を含みうるため、` (行番号: 30 / 抜粋: "info は年齢・具体的な金額など個人を特定しうる情報を含みうるため"), `# config.py の FAMILY_SETTINGS / family_members.local.json と同じ方針。` (行番号: 33 / 抜粋: "config.py の FAMILY_SETTINGS / family_members.local.json と同じ方針。")
 * ファイル冒頭に2つの独立したモジュールdocstring（改訂履歴コメント）が存在し、更新履歴（Phase 4.1, Phase 5.1）が記述されている。
 * 一部のクエスト定義行はコメントアウトされており、過去に存在した／将来復活しうるクエストが無効化された状態で残されている。
 * `QUESTS` には、兄妹どちらか一方が完了報告すると2人とも報酬を得る「兄妹連携」クエスト（`target: 'siblings'`、id: 1040, 1041）と、「九九」学習用クエスト（id: 1030, 1031）が定義されている。
-* 根拠: `{'id': 1040, 'title': 'いっしょにおかたづけ', ... 'target': 'siblings', ...}` (行番号: 110 / 抜粋: "'target': 'siblings'"), `{'id': 1030, 'title': '今日の九九タイム', ...}` (行番号: 98 / 抜粋: "今日の九九タイム")
+* 根拠: `{'id': 1040, 'title': 'いっしょにおかたづけ', ... 'target': 'siblings', ...}` (行番号: 138 / 抜粋: "'target': 'siblings'"), `{'id': 1030, 'title': '今日の九九タイム', ...}` (行番号: 126 / 抜粋: "今日の九九タイム")
 
 ## 3. 外部依存関係
 
@@ -31,13 +34,15 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| （なし） | — | 本ファイルには `import` 文が一切存在しない。 | ファイル全体 (行番号: 1〜229 / 抜粋: ファイル中に "import" という文字列を含む行が存在しない) |
+| `json` | 標準 | `quest_users.local.json`のパース(`json.load`) | 根拠: [インポート宣言] (行番号: 1 / 抜粋: "import json") |
+| `logging` | 標準 | `logger`の初期化(`logging.getLogger`)、ローカルオーバーライド読み込み失敗時の警告ログ出力 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "import logging") |
+| `os` | 標準 | `quest_users.local.json`のパス解決(`os.environ.get`, `os.path.join`, `os.path.dirname`, `os.path.abspath`)およびファイル存在確認(`os.path.exists`) | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import os") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| （なし） | 本ファイルは外部モジュール・外部API・DB等への参照を一切持たない、静的なリスト・辞書リテラルのみで構成されるデータファイルであるため、ブラックボックスとなる外部要素は存在しない。 | ファイル全体 (行番号: 1〜229 / 抜粋: "USERS = [" / "QUESTS = [" / "REWARDS = [") |
+| `quest_users.local.json`（既定パス。`QUEST_USERS_LOCAL_PATH`環境変数で差し替え可能） | Git管理対象外（`*.local.json`としてgitignore対象）の外部ファイルであり、`USERS`の各フィールドがどのような値・構造で実際に上書きされるか、本ファイル単体からは不明なため。 | 根拠: [外部ファイル読み込み] (行番号: 60〜67 / 抜粋: "_QUEST_USERS_LOCAL_PATH = os.environ.get(\n    \"QUEST_USERS_LOCAL_PATH\",") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
