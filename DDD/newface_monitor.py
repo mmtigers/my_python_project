@@ -1910,16 +1910,20 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
         )
 
     # 4. Notify & Update
+    # #237: 新規検知が無い場合にcurrent_castsで全置換すると、_parse_htmlが
+    # 単発でパース失敗した既知キャスト(current_castsから漏れているだけで実際には
+    # 引き続き掲載されている)がknown_castsから恒久的に消え、次回正常にパース
+    # できた際に「新規キャスト」として誤って再通知される。新規検知の有無に
+    # 関わらず常にunionで保存することで、既知キャストが消えないようにする。
+    updated_casts = known_casts.union(current_casts)
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
         notifier.notify(new_casts, site_name=site.name)
         DataManager.record_daily_new_casts(site.site_id, len(new_casts))
-
-        updated_casts = known_casts.union(current_casts)
-        DataManager.save_known_casts(site, updated_casts)
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
-        DataManager.save_known_casts(site, current_casts)
+
+    DataManager.save_known_casts(site, updated_casts)
 
 
 def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
