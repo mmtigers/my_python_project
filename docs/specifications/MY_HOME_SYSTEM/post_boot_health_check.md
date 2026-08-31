@@ -154,46 +154,46 @@
 ### `PostBootHealthCheck` (クラス概要)
 
 * **役割**: システム起動直後の健全性チェックをまとめて実行するメインクラス。リソース・ネットワーク・DB・サービス・周辺機器・ログの各チェックメソッドと、結果集約・通知送信メソッドを持つ。
-* 根拠: `class PostBootHealthCheck:` (行番号: 46〜390 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: `class PostBootHealthCheck:` (行番号: 56〜405 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **引数/リクエスト**: なし（コンストラクタは引数なし）
-* 根拠: `def __init__(self):` (行番号: 47 / 抜粋: "def __init__(self):")
+* 根拠: `def __init__(self):` (行番号: 57 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: 該当なし（クラス定義）
-* 根拠: (行番号: 46 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 56 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **副作用**: 該当なし（クラス定義自体には副作用なし。各メソッド参照）
-* 根拠: (行番号: 46 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 56 / 抜粋: "class PostBootHealthCheck:")
 
 
 * **エラーハンドリング**: 該当なし（各メソッド参照）
-* 根拠: (行番号: 46 / 抜粋: "class PostBootHealthCheck:")
+* 根拠: (行番号: 56 / 抜粋: "class PostBootHealthCheck:")
 
 
 
 ### `PostBootHealthCheck.__init__`
 
 * **役割**: リトライ回数・間隔、結果リスト、ログファイルパスを初期化する。
-* 根拠: `def __init__(self):` (行番号: 47〜53 / 抜粋: "def __init__(self):\n        self.max_retries = 12       \n        self.retry_interval = 10    \n        self.results: List[CheckResult] = []")
+* 根拠: `def __init__(self):` (行番号: 57〜63 / 抜粋: "def __init__(self):\n        self.max_retries = 12       \n        self.retry_interval = 10    \n        self.results: List[CheckResult] = []")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 47 / 抜粋: "def __init__(self):")
+* 根拠: (行番号: 57 / 抜粋: "def __init__(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 47 / 抜粋: "def __init__(self):")
+* 根拠: (行番号: 57 / 抜粋: "def __init__(self):")
 
 
 * **副作用**: `self.max_retries=12`, `self.retry_interval=10`, `self.results=[]`, `self.log_file_path` の各インスタンス属性を設定する。
-* 根拠: `self.log_file_path = os.path.join(log_dir, "home_system.log")` (行番号: 53 / 抜粋: "self.log_file_path = os.path.join(log_dir, "home_system.log")")
+* 根拠: `self.log_file_path = os.path.join(log_dir, "home_system.log")` (行番号: 63 / 抜粋: "self.log_file_path = os.path.join(log_dir, "home_system.log")")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 47〜53 / 抜粋: "self.results: List[CheckResult] = []")
+* 根拠: (行番号: 57〜63 / 抜粋: "self.results: List[CheckResult] = []")
 
 
 
