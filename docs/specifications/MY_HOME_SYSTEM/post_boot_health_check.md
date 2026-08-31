@@ -105,26 +105,49 @@
 
 
 
+### `resolve_target_bluetooth_mac`
+
+* **役割**: `config.ENABLE_BLUETOOTH` が真の場合に限り `config.SPEAKER_BLUETOOTH_MAC` を返すモジュールレベル関数。BT運用が無効な環境（`bluetooth.service`停止時など）でSpeakerチェックがBT WARNを出し続けないよう、無効時は `None` を返してサウンドカード確認へのフォールバックを促す。戻り値は直後にモジュールレベル変数 `TARGET_BLUETOOTH_MAC` へ代入される。
+* 根拠: `def resolve_target_bluetooth_mac():` 〜 `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 32〜40 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):\n        return None\n    return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
+
+
+* **引数/リクエスト**: なし
+* 根拠: (行番号: 32 / 抜粋: "def resolve_target_bluetooth_mac():")
+
+
+* **戻り値/レスポンス**: `str | None`（`config.ENABLE_BLUETOOTH`が真なら`config.SPEAKER_BLUETOOTH_MAC`の値、そうでなければ`None`）
+* 根拠: `return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` (行番号: 40 / 抜粋: "return getattr(config, "SPEAKER_BLUETOOTH_MAC", None)")
+
+
+* **副作用**: なし（`config`属性の読み取りのみ）。呼び出し結果はモジュールレベル変数 `TARGET_BLUETOOTH_MAC` に代入される。
+* 根拠: `TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()` (行番号: 42 / 抜粋: "TARGET_BLUETOOTH_MAC = resolve_target_bluetooth_mac()")
+
+
+* **エラーハンドリング**: なし（`getattr`のデフォルト値により、`config`に該当属性が存在しない場合も例外は発生しない）。
+* 根拠: (行番号: 38, 40 / 抜粋: "if not getattr(config, "ENABLE_BLUETOOTH", False):")
+
+
+
 ### `CheckResult`
 
 * **役割**: 1件のヘルスチェック結果（項目名・ステータス・メッセージ）を保持するデータクラス。
-* 根拠: `@dataclass\nclass CheckResult:` (行番号: 40〜44 / 抜粋: "class CheckResult:\n    name: str\n    status: str\n    message: str")
+* 根拠: `@dataclass\nclass CheckResult:` (行番号: 50〜54 / 抜粋: "class CheckResult:\n    name: str\n    status: str\n    message: str")
 
 
 * **引数/リクエスト**: `name: str`, `status: str`, `message: str`
-* 根拠: (行番号: 42〜44 / 抜粋: "name: str\n    status: str\n    message: str")
+* 根拠: (行番号: 52〜54 / 抜粋: "name: str\n    status: str\n    message: str")
 
 
 * **戻り値/レスポンス**: `CheckResult` インスタンス
-* 根拠: `@dataclass` (行番号: 40 / 抜粋: "@dataclass")
+* 根拠: `@dataclass` (行番号: 50 / 抜粋: "@dataclass")
 
 
 * **副作用**: なし
-* 根拠: (行番号: 40〜44 / 抜粋: "class CheckResult:")
+* 根拠: (行番号: 50〜54 / 抜粋: "class CheckResult:")
 
 
 * **エラーハンドリング**: なし（型ヒントのみで実行時バリデーションはなし）
-* 根拠: (行番号: 40〜44 / 抜粋: "class CheckResult:")
+* 根拠: (行番号: 50〜54 / 抜粋: "class CheckResult:")
 
 
 
