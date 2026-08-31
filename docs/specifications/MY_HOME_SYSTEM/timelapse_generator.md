@@ -40,6 +40,7 @@
 | `get_db_cursor` | 外部関数 | データベースへの接続とカーソル取得 | `from core.database import get_db_cursor` (行番号: 13) |
 | `setup_logging` | 外部関数 | ロガーの初期化と取得 | `from core.logger import setup_logging` (行番号: 14) |
 | `send_push` | 外部関数 | （ファイル内に明示的な使用箇所なし） | `from services.notification_service import send_push` (行番号: 15) |
+| `timelapse_job_lock` | 外部関数(コンテキストマネージャ) | 多重起動防止のためのファイルロック取得(Issue #240で追加)。実体は`smart_timelapse_generator.py`で定義されるものを流用 | `from monitors.smart_timelapse_generator import timelapse_job_lock` (行番号: 16) |
 
 ### ブラックボックスとなる外部要素
 
@@ -165,29 +166,51 @@
 
 ### 関数: `main`
 
-* **役割**: スクリプトのエントリポイント。コマンドライン引数（`--date`, `--limit`）の解析、対象日時・期間の決定、一時ディレクトリの作成を行い、ハードコードされたカメラ対応表（`TARGET_CAM_MAP`、3台分）ごとに一連の処理（イベント取得、`--limit`指定時の件数制限、動画生成、アップロード）を順に実行する。最後に一時ファイルを削除する。
-* 根拠: `def main():` (行番号: 271〜328 / 抜粋: "parser.parse_args()")
+* **役割**: スクリプトのエントリポイント。**（Issue #240で修正）** 以前は排他制御を一切行わず、処理本体をそのまま実行していた。姉妹システム(`smart_timelapse_generator.py`/`daily_timelapse_job.py`)からインポートした`timelapse_job_lock()`で多重実行防止ロックを取得し、取得できた場合のみ処理本体`_main_locked()`を呼び出す。ロック取得に失敗した場合（他プロセスが実行中）は警告ログを出力して即座に終了し、`_main_locked()`は呼び出さない。
+* 根拠: `def main():` (行番号: 287〜296 / 抜粋: "with timelapse_job_lock() as acquired:")
+
+
+* **引数/リクエスト**: なし
+* 根拠: `def main():` (行番号: 287)
+
+
+* **戻り値/レスポンス**: なし（`None`）
+* 根拠: `def main():` (行番号: 287〜296)
+
+
+* **副作用**: `timelapse_job_lock()`によるファイルロックの取得・解放、ロック取得成功時の`_main_locked()`呼び出し
+* 根拠: (行番号: 291〜296 / 抜粋: "with timelapse_job_lock() as acquired:\n        if not acquired:\n            logger.warning(...)\n            return\n        _main_locked()")
+
+
+* **エラーハンドリング**: ロック取得に失敗した場合は警告ログを出力して`return`し、処理本体は実行されない（多重起動時の共有一時ディレクトリ全消去を防ぐ）。
+* 根拠: (行番号: 292〜294 / 抜粋: "if not acquired:\n            logger.warning(\"別のタイムラプス処理が実行中のため、今回の処理をスキップします。\")\n            return")
+
+
+### 関数: `_main_locked`
+
+* **役割**: 旧`main()`の処理本体（Issue #240でロック取得部分から分離）。コマンドライン引数（`--date`, `--limit`）の解析、対象日時・期間の決定、一時ディレクトリの作成を行い、ハードコードされたカメラ対応表（`TARGET_CAM_MAP`、3台分）ごとに一連の処理（イベント取得、`--limit`指定時の件数制限、動画生成、アップロード）を順に実行する。最後に一時ファイルを削除する。`main()`が取得した`timelapse_job_lock`の範囲内で実行されることを前提とする。
+* 根拠: `def _main_locked():` (行番号: 299〜356 / 抜粋: "parser.parse_args()")
 
 
 * **引数/リクエスト**: なし（コマンドライン引数 `--date`, `--limit` に依存）
-* 根拠: `parser.add_argument("--date"...` / `parser.add_argument("--limit"...` (行番号: 273〜274 / 抜粋: "parser.add_argument("--limit"")
+* 根拠: `parser.add_argument("--date"...` / `parser.add_argument("--limit"...` (行番号: 301〜302 / 抜粋: "parser.add_argument(\"--limit\"")
 
 
 * **戻り値/レスポンス**: なし（`--date` 不正時は途中で `return` する）
-* 根拠: `def main():` (行番号: 271〜328 / 抜粋: "return文なし（早期returnのみ）")
+* 根拠: `def _main_locked():` (行番号: 299〜356 / 抜粋: "return文なし（早期returnのみ）")
 
 
 * **副作用**:
 * コマンドライン引数の読み取り
 * ディレクトリの作成（`os.makedirs`）
 * コンソールへのログ出力
-* 一時ファイルの削除（`os.remove`）
+* 一時ファイルの削除（`cleanup_tmp_video_dir`経由）
 * 各関数呼び出しによる全体処理の実行
-* 根拠: `os.makedirs(config.TMP_VI...` / `os.remove(f)` (行番号: 290, 328 / 抜粋: "os.remove(f)")
+* 根拠: `os.makedirs(config.TMP_VI...` / `cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)` (行番号: 318, 355 / 抜粋: "cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)")
 
 
 * **エラーハンドリング**: `--date` 引数の形式が不正な場合（`ValueError`）、エラーログを出力して関数を終了（`return`）する。
-* 根拠: `except ValueError:` (行番号: 280〜282 / 抜粋: "except ValueError: logger.er...")
+* 根拠: `except ValueError:` (行番号: 308〜310 / 抜粋: "except ValueError: logger.er...")
 
 
 
@@ -195,7 +218,11 @@
 
 ```mermaid
 flowchart TD
-    Start([Start main]) --> ParseArgs{引数に--dateがあるか}
+    Start([Start main]) --> LockTry["外部: timelapse_job_lock()<br>(#240で追加)"]
+    LockTry --> LockOk{ロック取得成功?}
+    LockOk -- No --> LogSkip[警告ログ出力] --> End([End])
+    LockOk -- Yes --> MainLocked["_main_locked()"]
+    MainLocked --> ParseArgs{引数に--dateがあるか}
     ParseArgs -- Yes --> ParseDate[日付パース]
     ParseDate -- 失敗 --> End([End])
     ParseArgs -- No --> UseToday[今日の日付を使用]
@@ -228,11 +255,12 @@ flowchart TD
 graph TD
     subgraph timelapse_generator.py
         main["main()"]
+        main_locked["_main_locked() (#240で追加)"]
         get_event_times["get_event_times()"]
         process_video_clips["process_video_clips()"]
         extract_video_clip["extract_video_clip()"]
         upload_video_to_discord["upload_video_to_discord()"]
-        TARGET_CAM_MAP["TARGET_CAM_MAP (main内ローカル変数)"]
+        TARGET_CAM_MAP["TARGET_CAM_MAP (_main_locked内ローカル変数)"]
     end
 
     subgraph 外部依存
@@ -242,15 +270,19 @@ graph TD
         DiscordAPI["外部: Discord Webhook"]
         FFmpeg["外部プロセス: FFmpeg"]
         NAS["ファイルシステム: NAS / Tmp"]
+        lock["外部: monitors.smart_timelapse_generator.timelapse_job_lock (#240で追加)"]
     end
 
-    main --> get_event_times
-    main --> process_video_clips
-    main --> upload_video_to_discord
-    main --> config
+    main --> lock
+    main --> main_locked
     main --> logger
-    main --> NAS
-    main --> TARGET_CAM_MAP
+    main_locked --> get_event_times
+    main_locked --> process_video_clips
+    main_locked --> upload_video_to_discord
+    main_locked --> config
+    main_locked --> logger
+    main_locked --> NAS
+    main_locked --> TARGET_CAM_MAP
 
     get_event_times --> db
     get_event_times --> logger
@@ -282,7 +314,8 @@ graph TD
 ## 8. 保守上の注意点
 
 * `math` モジュールおよび `send_push` 関数がインポートされているが、スクリプト内で使用されていない。
-* 対象カメラは `main`内のローカル辞書 `TARGET_CAM_MAP`（行番号: 292〜296）に「防犯カメラ」「駐車場カメラ」「玄関カメラ」の3台がハードコードされており、`config`側の設定には依存していない。カメラを追加・変更する際は本ファイルを直接編集する必要がある。
+* 対象カメラは `_main_locked`内のローカル辞書 `TARGET_CAM_MAP`（行番号: 320〜324）に「防犯カメラ」「駐車場カメラ」「玄関カメラ」の3台がハードコードされており、`config`側の設定には依存していない。カメラを追加・変更する際は本ファイルを直接編集する必要がある。
+* **多重起動防止ロックの追加（Issue #240で修正）**: 姉妹システム(`smart_timelapse_generator.py`/`daily_timelapse_job.py`)は`timelapse_job_lock()`(fcntlベースの排他ロック)で多重実行を防いでいるが、本ファイルは以前この仕組みを一切使用しておらず、`main`末尾の`cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)`が共有一時ディレクトリ(`config.TMP_VIDEO_DIR`)配下を無条件に全消去するため、二重起動（手動実行とcron実行の重複等）時に一方の処理中クリップファイルがもう一方のクリーンアップで削除されうる不具合があった。修正後は`main()`が`smart_timelapse_generator.py`の`timelapse_job_lock()`を取得し、取得できた場合のみ処理本体`_main_locked()`を実行するようになった（取得できなかった場合は警告ログを出力してスキップ）。
 * `process_video_clips` や `upload_video_to_discord` で `subprocess.run` を実行する際、`shell=False`（リスト形式の引数）であるためコマンドインジェクションの脆弱性は低いが、例外処理が設定されていない箇所がある（`stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL` で実行されている箇所の失敗が検知されない）。
 * `upload_video_to_discord` で `getattr(config, 'DISCORD_WEBHOOK_REPORT', getattr(config, 'DISCORD_WEBHOOK_URL', None))` としているため、2つめの `getattr` でも属性が存在しない場合は `None` となる。
 * `main` 内でのクリーンアップ処理（`os.remove(f)`）でエラー（使用中など）が発生した場合に例外がキャッチされずプロセスが終了する。
