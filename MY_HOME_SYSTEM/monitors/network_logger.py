@@ -2,6 +2,7 @@ import asyncio
 import csv
 import datetime
 import os
+import re
 import sys
 import time
 from typing import Dict, Any, List, Optional
@@ -36,6 +37,21 @@ CSV_HEADERS = [
 ]
 
 
+# Issue #190: pingコマンド自体が報告する実測RTT("64 bytes from ...: ... time=0.055 ms")
+# を抽出する。以前はこの値を使わず、サブプロセット起動(fork/exec)〜終了までの
+# 壁時計時間を計測していたため、OS のプロセス生成オーバーヘッドが系統的に
+# 上乗せされ、実RTTより大きい値が記録され続けていた。
+_PING_TIME_RE = re.compile(r"time[=<]([\d.]+)\s*ms")
+
+
+def _parse_ping_latency_ms(ping_stdout: str) -> Optional[float]:
+    """pingコマンドの標準出力から実測RTT(ms)を抽出する。抽出できない場合はNone。"""
+    m = _PING_TIME_RE.search(ping_stdout)
+    if m:
+        return float(m.group(1))
+    return None
+
+
 async def ping_host(ip: str) -> Dict[str, Any]:
     """ICMP Pingを実行し、到達確認とレイテンシ計測を行います。
 
@@ -53,16 +69,23 @@ async def ping_host(ip: str) -> Dict[str, Any]:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        stdout, _stderr = await process.communicate()
         end_time = time.perf_counter()
 
         return_code = process.returncode
-        duration_ms = (end_time - start_time) * 1000
+        wall_duration_ms = (end_time - start_time) * 1000
 
         if return_code == 0:
+            # #190: pingコマンド自身が報告する実測RTTを優先する。パースに失敗した
+            # 場合のみ、従来どおりの壁時計時間(サブプロセス起動オーバーヘッド込み、
+            # 系統的に大きめ)へフォールバックする。
+            parsed_latency = _parse_ping_latency_ms(stdout.decode('utf-8', errors='replace'))
+            if parsed_latency is None:
+                logger.warning(f"Failed to parse ping RTT for {ip}; falling back to wall-clock timing.")
+                parsed_latency = wall_duration_ms
             return {
                 "status": "OK",
-                "latency": round(duration_ms, 2),
+                "latency": round(parsed_latency, 2),
                 "error": ""
             }
         else:
@@ -178,12 +201,20 @@ async def monitor_camera(cam_config: Dict[str, Any]) -> Optional[Dict[str, Any]]
 
 
 def init_csv() -> None:
-    """ログファイルが存在しない場合、ヘッダーを作成して初期化します。"""
+    """ログファイルが存在しない、または空の場合、ヘッダーを作成して初期化します。
+
+    #190: logrotateがcopytruncateでローテーションすると、ファイル自体は
+    削除されず0バイトに切り詰められる(参照: deploy/logrotate/home_system)。
+    以前は「存在しない場合のみ」ヘッダーを書いていたため、ローテーション後は
+    ヘッダー無しのままデータ行だけが追記され続けていた。「存在しない、または
+    存在するが空」の場合にヘッダーを書くよう修正し、毎サイクル呼び出すことで
+    ローテーション直後の次回書き込みで確実にヘッダーが復元されるようにする。
+    """
     try:
         # ディレクトリがない場合は作成（念のため）
         os.makedirs(os.path.dirname(CSV_FILE), exist_ok=True)
 
-        if not os.path.exists(CSV_FILE):
+        if not os.path.exists(CSV_FILE) or os.path.getsize(CSV_FILE) == 0:
             with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 writer.writerow(CSV_HEADERS)
@@ -218,6 +249,10 @@ async def main() -> None:
             valid_results = [res for res in results if res is not None]
 
             if valid_results:
+                # #190: logrotateのcopytruncateによりCSVが0バイトへ切り詰められた
+                # 直後でも、ここで毎サイクル呼び出すことでヘッダー行を確実に復元する。
+                init_csv()
+
                 # CSVへの追記
                 try:
                     with open(CSV_FILE, 'a', newline='', encoding='utf-8') as f:
