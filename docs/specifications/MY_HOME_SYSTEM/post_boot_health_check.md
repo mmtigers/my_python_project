@@ -200,69 +200,69 @@
 ### `PostBootHealthCheck._check_port`
 
 * **役割**: 指定ホスト・ポートへのTCP接続を試み、疎通可否を判定する。
-* 根拠: `def _check_port(self, host: str, port: int, timeout=3) -> bool:` (行番号: 56〜61 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
+* 根拠: `def _check_port(self, host: str, port: int, timeout=3) -> bool:` (行番号: 66〜71 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
 
 
 * **引数/リクエスト**: `host: str`, `port: int`, `timeout=3`
-* 根拠: (行番号: 56 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
+* 根拠: (行番号: 66 / 抜粋: "def _check_port(self, host: str, port: int, timeout=3) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（接続成功時 `True`、失敗時 `False`）
-* 根拠: `return True` / `return False` (行番号: 59, 61 / 抜粋: "return True")
+* 根拠: `return True` / `return False` (行番号: 69, 71 / 抜粋: "return True")
 
 
 * **副作用**: なし（ソケット接続を確立しコンテキスト終了時に自動クローズ）
-* 根拠: `with socket.create_connection((host, port), timeout=timeout):` (行番号: 58 / 抜粋: "with socket.create_connection((host, port), timeout=timeout):")
+* 根拠: `with socket.create_connection((host, port), timeout=timeout):` (行番号: 68 / 抜粋: "with socket.create_connection((host, port), timeout=timeout):")
 
 
 * **エラーハンドリング**: `socket.timeout`, `ConnectionRefusedError`, `OSError` を捕捉し `False` を返す。
-* 根拠: `except (socket.timeout, ConnectionRefusedError, OSError):` (行番号: 60 / 抜粋: "except (socket.timeout, ConnectionRefusedError, OSError):")
+* 根拠: `except (socket.timeout, ConnectionRefusedError, OSError):` (行番号: 70 / 抜粋: "except (socket.timeout, ConnectionRefusedError, OSError):")
 
 
 
 ### `PostBootHealthCheck._check_http`
 
 * **役割**: 指定URLへ`headers`付きでHTTP GETリクエストを送信し、ステータスコードが200〜399の範囲かを判定する。`headers`は省略可能（省略時は`None`のまま`requests.get`に渡される）。
-* 根拠: `def _check_http(self, url: str, timeout=5, headers=None) -> bool:` (行番号: 63〜68 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
+* 根拠: `def _check_http(self, url: str, timeout=5, headers=None) -> bool:` (行番号: 73〜78 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
 
 
 * **引数/リクエスト**: `url: str`, `timeout=5`, `headers=None`
-* 根拠: (行番号: 63 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
+* 根拠: (行番号: 73 / 抜粋: "def _check_http(self, url: str, timeout=5, headers=None) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `return 200 <= res.status_code < 400` (行番号: 66 / 抜粋: "return 200 <= res.status_code < 400")
+* 根拠: `return 200 <= res.status_code < 400` (行番号: 76 / 抜粋: "return 200 <= res.status_code < 400")
 
 
 * **副作用**: 外部へのHTTP GETリクエスト送信。
-* 根拠: `res = requests.get(url, headers=headers, timeout=timeout)` (行番号: 65 / 抜粋: "res = requests.get(url, headers=headers, timeout=timeout)")
+* 根拠: `res = requests.get(url, headers=headers, timeout=timeout)` (行番号: 75 / 抜粋: "res = requests.get(url, headers=headers, timeout=timeout)")
 
 
 * **エラーハンドリング**: 任意の `Exception` を捕捉し `False` を返す。
-* 根拠: `except Exception:` (行番号: 67 / 抜粋: "except Exception:")
+* 根拠: `except Exception:` (行番号: 77 / 抜粋: "except Exception:")
 
 
 
 ### `PostBootHealthCheck._get_uptime`
 
 * **役割**: `/proc/uptime` を読み取り、システム稼働時間を「秒」「分」「時間+分」の形式で文字列化する。
-* 根拠: `def _get_uptime(self) -> str:` (行番号: 70〜81 / 抜粋: "def _get_uptime(self) -> str:")
+* 根拠: `def _get_uptime(self) -> str:` (行番号: 80〜91 / 抜粋: "def _get_uptime(self) -> str:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 70 / 抜粋: "def _get_uptime(self) -> str:")
+* 根拠: (行番号: 80 / 抜粋: "def _get_uptime(self) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（例: `"5秒"`, `"3分"`, `"1時間20分"`。失敗時は `"不明"`）
-* 根拠: `return f"{int(uptime_seconds)}秒"` および `return "不明"` (行番号: 75, 81 / 抜粋: "return "不明"")
+* 根拠: `return f"{int(uptime_seconds)}秒"` および `return "不明"` (行番号: 85, 91 / 抜粋: "return "不明"")
 
 
 * **副作用**: `/proc/uptime` ファイルの読み取り。
-* 根拠: `with open('/proc/uptime', 'r') as f:` (行番号: 72 / 抜粋: "with open('/proc/uptime', 'r') as f:")
+* 根拠: `with open('/proc/uptime', 'r') as f:` (行番号: 82 / 抜粋: "with open('/proc/uptime', 'r') as f:")
 
 
 * **エラーハンドリング**: 無条件の `except:`（bare except）で全例外を捕捉し `"不明"` を返す。
-* 根拠: `except:` (行番号: 80 / 抜粋: "except:")
+* 根拠: `except:` (行番号: 90 / 抜粋: "except:")
 
 
 
