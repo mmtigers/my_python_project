@@ -663,8 +663,8 @@
 * 根拠: [戻り値ヒント] (行番号: 1748 / 抜粋: "def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:")
 
 
-* **副作用**: `DataManager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`DataManager.record_daily_new_casts`による日次集計更新。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。
-* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1842, 1846, 1862〜1870 / 抜粋: "known_casts = DataManager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")
+* **副作用**: `DataManager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`DataManager.record_daily_new_casts`による日次集計更新。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。**（Issue #237で修正）** `save_known_casts`に渡す保存対象は、新規検知の有無に関わらず常に`known_casts.union(current_casts)`（和集合）である。以前は新規検知が1件でもあれば和集合、1件も無ければ`current_casts`による全置換という非対称な実装だったため、`_parse_html`が個別カードのパース失敗を`except Exception`で握りつぶしフェイルソフトに処理を続行する設計（既知キャストのカードが単発でパース失敗し`current_casts`から漏れるケースがある）と組み合わさると、同一実行内に他の真の新規キャストが1件も無い場合に限り、そのカードが`known_casts`から恒久的に消え、次回正常にパースできた際に「新規キャスト」として誤って再通知されていた。
+* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1881, 1905〜1910 / 抜粋: "known_casts = DataManager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時unionでの保存 (行番号: 1918, 1926 / 抜粋: "updated_casts = known_casts.union(current_casts)" / "DataManager.save_known_casts(site, updated_casts)")
 
 
 * **エラーハンドリング**: `monitor.fetch_current_casts`での`requests.RequestException`発生時はエラーログを出力して`return`（当該サイトのみ中断、他サイトへは影響しない）。取得キャストが0件の場合はデバッグログを出力して`return`。
@@ -793,11 +793,11 @@ flowchart TD
 
     HasNew -- Yes --> Notify["外部：notifier.notify(new_casts, site_name)<br>(Discord Webhook送信)"]
     Notify --> RecordDaily["外部：DataManager.record_daily_new_casts"]
-    RecordDaily --> UnionSave["外部：DataManager.save_known_casts(known ∪ current)"]
+    RecordDaily --> UnionSave["外部：DataManager.save_known_casts(known ∪ current)<br>(#237で常時union化)"]
     UnionSave --> NextSite
 
-    HasNew -- No --> SaveCurrent["外部：DataManager.save_known_casts(current_casts)"]
-    SaveCurrent --> NextSite["site単位の例外はcatchして次サイトへ"]
+    HasNew -- No --> UnionSave
+    NextSite["site単位の例外はcatchして次サイトへ"]
 
     NextSite --> SiteLoopEnd{"全サイト処理済み?"}
     SiteLoopEnd -- No --> SiteLoopStart
