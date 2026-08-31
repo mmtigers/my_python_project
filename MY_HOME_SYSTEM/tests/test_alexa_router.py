@@ -5,6 +5,7 @@ routers/alexa_router.py (/webhook/alexa) の結線テスト。
 署名/タイムスタンプ検証そのものは test_alexa_verifier.py でカバー済みのため、
 ここでは「検証結果に応じて正しくディスパッチ/エラー応答するか」を確認する。
 """
+import asyncio
 import json
 import os
 import sys
@@ -114,3 +115,40 @@ def test_rejects_missing_signature_headers(api_client):
     )
 
     assert res.status_code == 400
+
+
+def test_verify_signature_and_skill_invoke_are_offloaded_to_a_thread(api_client, monkeypatch):
+    """Issue #230の回帰テスト: verify_signature(証明書キャッシュミス時に同期
+    requests.get())とskill.invoke(quest_serviceのSQLite同期アクセスを含む)は、
+    unified_serverが単一プロセス・単一イベントループ構成であるにもかかわらず
+    直接awaitされていなかったため、同時間帯のSwitchBot/LINE Webhook・
+    Family Quest APIの処理をブロックしうる不具合があった。LINE経路
+    (webhook_router.py)と同様にasyncio.to_threadでスレッドへ退避されている
+    ことを確認する。"""
+    _seed_one_user()
+
+    real_to_thread = asyncio.to_thread
+    offloaded_funcs = []
+
+    async def _spy_to_thread(func, *args, **kwargs):
+        offloaded_funcs.append(func)
+        return await real_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr("routers.alexa_router.asyncio.to_thread", _spy_to_thread)
+
+    with patch("routers.alexa_router.verify_signature", return_value=None) as mock_verify, \
+         patch("routers.alexa_router.verify_timestamp", return_value=None):
+        res = api_client.post(
+            "/webhook/alexa",
+            content=json.dumps(_launch_request_body()).encode("utf-8"),
+            headers=HEADERS,
+        )
+
+    assert res.status_code == 200
+    assert mock_verify in offloaded_funcs, (
+        "verify_signature がスレッドへ退避(asyncio.to_thread)されていない"
+    )
+    from handlers.alexa_handler import skill
+    assert skill.invoke in offloaded_funcs, (
+        "skill.invoke がスレッドへ退避(asyncio.to_thread)されていない"
+    )
