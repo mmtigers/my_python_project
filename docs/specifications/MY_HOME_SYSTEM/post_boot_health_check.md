@@ -608,19 +608,20 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `common.py` | `setup_logging` と `send_push` の実装が本ファイルの全チェック結果通知・NAS権限エラー即時通知の挙動を左右するため。 | `import common` (行番号: 20 / 抜粋: "import common") |
-| 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 151 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
-| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 160 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)") |
+| 高 | `config.py` | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実値を把握し、どの環境を対象としたヘルスチェックかを確認するため。 | `getattr(config, "SQLITE_DB_PATH", "home_system.db")` (行番号: 161 / 抜粋: "db_path = getattr(config, "SQLITE_DB_PATH", "home_system.db")") |
+| 中 | `home_system.db`（対象DBファイル） | `PRAGMA quick_check` の対象となるDBのスキーマ・データ構造を把握し、健全性チェックの意味を正確に理解するため。 | `conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)` (行番号: 170 / 抜粋: "conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)") |
 
 ## 8. 保守上の注意点
 
-* **多数の bare `except:`**: `_get_uptime`（80行目）、`check_system_resources`（96, 111行目）、`check_network_and_apis`（130行目）、`check_peripherals`（279, 289行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
-* **（修正済み）`check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（313〜316行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
-* **（修正済み）`TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、現在は `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)`（32行目）から取得するよう修正済みで、`config.SPEAKER_BLUETOOTH_MAC` が設定されていれば実際のBluetooth接続状態を確認する経路が有効になる。
-* **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（239〜244行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。
-* **（修正済み）`check_services` のブロッキング待機**: 以前はBackend Server/Family Quest/Dashboardの3対象を直列にリトライしており、各サービスにつき最大12回×10秒（最大2分/サービス）の同期的な `time.sleep` が発生するため、全滅時は最悪ケースで合計6分間スクリプトがブロックされ通知が遅延していたが、現在は`ThreadPoolExecutor`（190〜191行目）で対象ごとに独立したスレッドへ`_wait_for_service`（193〜216行目）を並列実行するよう修正済みで、最悪時間が単一対象のリトライ時間（最大2分）程度まで縮まっている。
-* **SwitchBot/NatureRemo APIの認証はするが応答内容は見ていない**: `check_network_and_apis`（126〜147行目）は認証ヘッダー付与とステータスコード検証（`_check_http`経由）まで行うようになったが、レスポンス本文の内容（デバイス一覧の妥当性等）までは検証していないため、200番台を返すが実質的に空/不正なレスポンスのケースは検知できない。
-* **（修正済み）`check_system_resources` の危険域判定**: 以前はCPU温度・ディスク使用率がどれだけ閾値を超過しても `STATUS_WARN` までしか上がらず、危険域でもタイトルアイコンが🔴（`_send_report` の `has_err` 判定）にならなかったが、現在は温度85°C以上・ディスク使用率95%超で `STATUS_ERR` に昇格するよう修正済み（89〜92, 104〜107行目）。
-* **（修正済み）`check_services` のDashboard扱い**: 以前は `Dashboard` のみ `critical=False` でポート未応答でも `STATUS_WARN` までしか上がらなかったが、現在は3対象すべて `critical=True`（181行目、`_wait_for_service`が参照する対象定義）に統一され、Dashboard未起動時も `STATUS_ERR` として報告される。
+* **多数の bare `except:`**: `_get_uptime`（90行目）、`check_system_resources`（106, 121行目）、`check_network_and_apis`（140行目）、`check_peripherals`（289, 304行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
+* **（修正済み）`check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（328〜331行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
+* **（修正済み）`TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、その後 `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` から取得するよう修正され、さらに現在は `resolve_target_bluetooth_mac()`（32〜40行目、42行目で呼び出し）が `config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` を返すよう修正済みで、`ENABLE_BLUETOOTH` が偽（未設定含む）の環境では常に `None` となりSpeakerチェックがサウンドカード確認にフォールバックする（`bluetooth.service`が停止している環境でBT関連のWARNを出し続けないための対応）。
+* **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（249〜254行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。
+* **（修正済み）`check_services` のブロッキング待機**: 以前はBackend Server/Family Quest/Dashboardの3対象を直列にリトライしており、各サービスにつき最大12回×10秒（最大2分/サービス）の同期的な `time.sleep` が発生するため、全滅時は最悪ケースで合計6分間スクリプトがブロックされ通知が遅延していたが、現在は`ThreadPoolExecutor`（200〜201行目）で対象ごとに独立したスレッドへ`_wait_for_service`（203〜226行目）を並列実行するよう修正済みで、最悪時間が単一対象のリトライ時間（最大2分）程度まで縮まっている。
+* **SwitchBot/NatureRemo APIの認証はするが応答内容は見ていない**: `check_network_and_apis`（136〜157行目）は認証ヘッダー付与とステータスコード検証（`_check_http`経由）まで行うようになったが、レスポンス本文の内容（デバイス一覧の妥当性等）までは検証していないため、200番台を返すが実質的に空/不正なレスポンスのケースは検知できない。
+* **（修正済み）`check_system_resources` の危険域判定**: 以前はCPU温度・ディスク使用率がどれだけ閾値を超過しても `STATUS_WARN` までしか上がらず、危険域でもタイトルアイコンが🔴（`_send_report` の `has_err` 判定）にならなかったが、現在は温度85°C以上・ディスク使用率95%超で `STATUS_ERR` に昇格するよう修正済み（99〜102, 114〜117行目）。
+* **（修正済み）`check_services` のDashboard扱い**: 以前は `Dashboard` のみ `critical=False` でポート未応答でも `STATUS_WARN` までしか上がらなかったが、現在は3対象すべて `critical=True`（191行目、`_wait_for_service`が参照する対象定義）に統一され、Dashboard未起動時も `STATUS_ERR` として報告される。
+* **サブプロセス呼び出しへの`timeout`追加**: `vcgencmd`（97行目）、`ping`（139行目）、`aplay`（287行目）、`bluetoothctl`（295〜298行目、`stdin=subprocess.DEVNULL`も追加）、`tail`（327行目）の各`subprocess.check_output`/`check_call`呼び出しに`timeout`引数が追加されている。特に`bluetoothctl`はBluetoothデーモン不調時に応答を返さず無限に待機することがあるため、というコメント（293〜294行目）がコード内に付与されている。
 
 ## 9. 不明事項一覧
 

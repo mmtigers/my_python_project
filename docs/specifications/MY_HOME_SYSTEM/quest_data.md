@@ -199,7 +199,7 @@ flowchart TD
     CheckLocal -- Yes --> LoadLocal["外部: quest_users.local.json を読み込みJSONパース"]
     LoadLocal --> MergeCheck{"読み込み・パースは成功したか?"}
     MergeCheck -- Yes --> MergeUsers["user_id が一致しdict型のoverrideを USERS に dict.update でマージ"]
-    MergeCheck -- No（例外発生） --> LogWarn["logger.warning() でログ出力（プレースホルダーのまま続行）"]
+    MergeCheck -- No --> LogWarn["例外発生: logger.warning() でログ出力（プレースホルダーのまま続行）"]
     MergeUsers --> BuildQuests
     LogWarn --> BuildQuests
     BuildQuests --> BuildRewards["REWARDS リストを構築 (23件)"]
@@ -231,7 +231,7 @@ graph TD
     LocalLoad --> os
     LocalLoad --> json
     LocalLoad --> LocalJson
-    LocalLoad -. 失敗時 .-> logger
+    LocalLoad -. "失敗時" .-> logger
     LocalLoad -.-> USERS
 
     Consumer["外部: 本データをインポートする未特定のモジュール群<br/>（本ファイルからは特定不可）"]
