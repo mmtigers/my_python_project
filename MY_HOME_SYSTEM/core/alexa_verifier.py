@@ -30,7 +30,7 @@ import logging
 import posixpath
 from datetime import datetime, timezone
 from typing import Dict, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 import requests
 from cryptography import x509
@@ -66,7 +66,13 @@ def _validate_cert_chain_url(url: str) -> None:
     # 要求している(公式SDKの検証器も正規化を実施)。生のparsed.pathへのstartswith判定
     # のみだと、"/echo.api/../<別バケット>/cert.pem" のような".."を含むパスがこの
     # チェックを素通りしてしまう。posixpath.normpathで正規化してから判定する。
-    normalized_path = posixpath.normpath(parsed.path)
+    # #223: urlparseが返すparsed.pathはパーセントデコードされない生文字列のため、
+    # "/echo.api/%2e%2e/evil-bucket/cert.pem" のようなエンコード済みの".."は
+    # normpathでも検知できず素通りしてしまう。一方、後段の_fetch_leaf_certificateが
+    # 同じURL文字列をrequests.get()に渡すと、requestsは送信前に%2e%2eを..へデコード
+    # するため、検証時と実際の取得先が食い違う。requestsの挙動に合わせ、normpathへ
+    # 渡す前にunquoteで一度だけパーセントデコードする。
+    normalized_path = posixpath.normpath(unquote(parsed.path))
     if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl path: {parsed.path!r}")
     if (parsed.port or CERT_CHAIN_URL_PORT) != CERT_CHAIN_URL_PORT:
