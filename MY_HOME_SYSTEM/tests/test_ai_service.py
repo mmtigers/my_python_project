@@ -154,10 +154,16 @@ async def test_tool_search_db_without_from_or_join_returns_error():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_no_matching_rows_returns_not_found_message(monkeypatch):
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): [])
+    """common.execute_read_query は0件時、実際には(空リストではなく)
+    "該当するデータはありませんでした。"という非空文字列を返す(core/database.py参照)。
+    その文字列がそのまま呼び出し元へ返ることを確認する。"""
+    monkeypatch.setattr(
+        ai_service.common, "execute_read_query",
+        lambda sql, params=(): "該当するデータはありませんでした。",
+    )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
-    assert "見つかりませんでした" in result
+    assert "ありませんでした" in result
 
 
 @pytest.mark.asyncio
@@ -169,6 +175,23 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert "DB検索エラー" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_internal_error_string_is_not_passed_through_as_data(monkeypatch):
+    """Issue #180の回帰テスト: common.execute_read_query は不正なSQL等の実行時例外を
+    自身の内部でキャッチし、送出せず"検索エラー: ..."という非空文字列として返す設計
+    (core/database.py参照)。以前はこれが正常な検索結果と区別されずAIへそのまま
+    渡っていた(かつ`if not rows:`は非空文字列に対して常に偽となるデッドコードだった)。
+    このエラー文字列が検出され、DB検索エラーとして扱われることを確認する。"""
+    monkeypatch.setattr(
+        ai_service.common, "execute_read_query",
+        lambda sql, params=(): "検索エラー: no such table: xyz",
+    )
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
+    assert "DB検索エラー" in result
+    assert "no such table: xyz" in result
 
 
 class TestSimpleRateLimiter:
