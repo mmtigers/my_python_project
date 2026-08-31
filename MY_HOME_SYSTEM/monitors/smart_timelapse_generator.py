@@ -581,6 +581,7 @@ class Uploader:
         else:
             logger.warning(f"動画サイズ ({summary.file_size_bytes/(1024*1024):.2f}MB) が制限を超過。分割処理を開始します。")
             log_cpu_usage()
+            split_files: List[Path] = []
             try:
                 res = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', summary.output_path], capture_output=True, text=True, check=True, timeout=60)
                 dur = float(res.stdout.strip())
@@ -589,22 +590,32 @@ class Uploader:
                 base_dir = os.path.dirname(summary.output_path)
                 split_pattern = os.path.join(base_dir, f"{os.path.splitext(os.path.basename(summary.output_path))[0]}_part_%03d.mp4")
                 split_cmd = ['nice', '-n', '15', 'ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', summary.output_path, '-c', 'copy', '-f', 'segment', '-segment_time', str(math.ceil(dur / pc)), '-reset_timestamps', '1', split_pattern]
-                
+
                 if shutil.which('ionice'):
                     split_cmd = ['ionice', '-c', '2', '-n', '7'] + split_cmd
-                    
+
                 subprocess.run(split_cmd, stdout=subprocess.DEVNULL, stderr=get_ffmpeg_stderr(), check=True, timeout=3600)
-                
+
                 split_files = sorted(Path(base_dir).glob(f"{os.path.splitext(os.path.basename(summary.output_path))[0]}_part_*.mp4"))
                 if not split_files: raise RuntimeError("動画分割に失敗しました。出力ファイルが生成されませんでした。")
-                
+
                 for i, s_file in enumerate(split_files):
                     msg = f"🎥 {summary.target_date} ダイジェスト (Part {i+1}/{len(split_files)})"
                     self._send_to_discord(webhook_url, msg, str(s_file))
                     time.sleep(5) # APIレートリミット対策
-                    
+
                 self._send_completion_notice(webhook_url, len(split_files))
             except Exception as e: logger.error(f"分割送信エラー: {e}")
+            finally:
+                # 分割ファイル(*_part_*.mp4)は元動画(summary.output_path)とは別に
+                # ローカルディスクを消費し続ける送信専用の一時生成物のため、
+                # 送信の成否に関わらず削除する(Issue #171)。元動画自体は
+                # 保持期間ベースのリテンションクリーンアップ(nas_monitor)に委ねる。
+                for s_file in split_files:
+                    try:
+                        os.remove(s_file)
+                    except OSError as cleanup_err:
+                        logger.warning(f"分割ファイルの削除に失敗しました: {s_file}: {cleanup_err}")
 
     def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:
         """Discord Webhookにファイルを直接アップロードする"""
