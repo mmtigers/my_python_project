@@ -368,18 +368,32 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.process_reject_quest`
 
-* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を却下する。履歴は`DELETE`せず、`quest_history`該当行の`status`列を`'rejected'`へ`UPDATE`することで却下履歴を残す（ソースコメントには、以前はDELETEしていたため`status='rejected'`という値自体が実際には生成されず、`process_complete_quest`のスパムチェック`status != 'rejected'`が常に成立する死に条件になっていた、という経緯が記されている）。連結された相方の履歴が`pending`であれば、同一トランザクション内で相方側の`status`も同様に`'rejected'`へカスケード更新する。
-* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 521〜542)
-* 根拠: `# 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には\n            # 生成されず、...)` ... `cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))` (行番号: 531〜534)
-* 根拠: `if hist['linked_history_id'] is not None:\n                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))` (行番号: 537〜538)
+* **役割**: 対象ユーザーと、連結された相方（存在する場合）を`history_id`から軽量な参照クエリで特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_reject_quest_locked`に委譲する薄いラッパー。**（Issue #228で追加）** 以前は`process_reject_quest`がこのロックに一切参加していなかったため、同一`history_id`に対する承認(`process_approve_quest`)と却下がほぼ同時に実行されると、承認側が先に`quest_users`へgold/expを加算・コミットした後に却下の`UPDATE`がコミットされ、`quest_history.status`は`'rejected'`になるのに付与済みの報酬は一切ロールバックされないという不整合が実機で確認されていた。`process_approve_quest`/`process_cancel_quest`と同じロックに参加させることでこれら3操作を相互に直列化し、この不整合を防ぐ。連結履歴がある場合に相方のIDも合わせてロックする理由は`process_approve_quest`/`process_cancel_quest`と同じ（Issue #98）。
+* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 555〜577)
+* 根拠: [ロック取得部] (行番号: 564〜577 / 抜粋: "with common.get_db_cursor() as cur:\n            hist_peek = cur.execute(\n                \"SELECT user_id, linked_history_id FROM quest_history WHERE id = ?\", (history_id,)\n            ).fetchone()" / "with _acquire_user_balance_locks(lock_user_ids):\n            return self._process_reject_quest_locked(approver_id, history_id, reason)")
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
-* 根拠: (行番号: 521)
+* 根拠: (行番号: 555)
+* **戻り値/レスポンス**: `Dict[str, str]`（`_process_reject_quest_locked`の戻り値をそのまま返却）
+* 根拠: (行番号: 577 / 抜粋: "return self._process_reject_quest_locked(approver_id, history_id, reason)")
+* **副作用**: 軽量な参照クエリ（`hist_peek`、連結履歴がある場合は相方の`user_id`もSELECT）、複数ユーザー分のロックの取得・解放
+* 根拠: (行番号: 564〜576)
+* **エラーハンドリング**: 参照クエリで該当履歴が見つからない場合 `HTTPException(404)`（内部の`_process_reject_quest_locked`の例外はそのまま伝播）
+* 根拠: (行番号: 566〜567 / 抜粋: "if not hist_peek:\n            raise HTTPException(status_code=404, detail=\"History not found\")")
+
+### `QuestService._process_reject_quest_locked`
+
+* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を却下する実処理（`process_reject_quest`が取得したユーザー単位ロック内で実行されることを前提とする）。履歴は`DELETE`せず、`quest_history`該当行の`status`列を`'rejected'`へ`UPDATE`することで却下履歴を残す（ソースコメントには、以前はDELETEしていたため`status='rejected'`という値自体が実際には生成されず、`process_complete_quest`のスパムチェック`status != 'rejected'`が常に成立する死に条件になっていた、という経緯が記されている）。連結された相方の履歴が`pending`であれば、同一トランザクション内で相方側の`status`も同様に`'rejected'`へカスケード更新する。**（Issue #228で修正）** 主対象のUPDATEにも`AND status = 'pending'`の再チェックを追加した（連結相方向けの更新には元々付いていたが主対象には無い非対称な実装だった）。呼び出し元がユーザー単位ロックを取得済みであるため、この行自体の承認/却下は既にロックにより直列化されており、直前の`if hist['status'] != 'pending']`チェックとUPDATEの間で状態が変化することは実質的に無いが、UPDATE自体を条件付きにすることで一貫性を保っている。
+* 根拠: `def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 583〜609)
+* 根拠: `# 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には\n            # 生成されず、...)` ... `cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (history_id,))` (行番号: 593〜601)
+* 根拠: `if hist['linked_history_id'] is not None:\n                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))` (行番号: 604〜605)
+* **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
+* 根拠: (行番号: 583)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "rejected"}`）
-* 根拠: (行番号: 521, 542)
+* 根拠: (行番号: 583, 609)
 * **副作用**: DB更新（`quest_history`の`status`列を`'rejected'`へ`UPDATE`。連結された相方の`pending`行も含む）、ログ出力
-* 根拠: (行番号: 534, 538〜539, 541)
+* 根拠: (行番号: 601, 604〜606, 608)
 * **エラーハンドリング**: 承認者が`role_adult`でない場合 `HTTPException(403)`、履歴なし `HTTPException(404)`、承認待ちでない場合 `HTTPException(400)`
-* 根拠: (行番号: 524〜525, 528, 529)
+* 根拠: (行番号: 586〜587, 590, 591)
 
 ### `QuestService._apply_quest_rewards`
 
@@ -631,7 +645,7 @@ flowchart TD
 
 ```
 
-以下は、`process_approve_quest`/`process_cancel_quest`におけるユーザー単位ロック取得の流れです（H-3、および連結相方も合わせてロックするIssue #98対応）。
+以下は、`process_approve_quest`/`process_cancel_quest`/`process_reject_quest`におけるユーザー単位ロック取得の流れです（H-3、および連結相方も合わせてロックするIssue #98対応。`process_reject_quest`のロック参加はIssue #228で追加）。
 
 ```mermaid
 flowchart TD
@@ -654,6 +668,17 @@ flowchart TD
     CAcquireLock --> CCallLocked["_process_cancel_quest_locked を呼び出し"]
     CAcquireLock2 --> CCallLocked
     CCallLocked --> CEnd[End]
+
+    RStart["Start: process_reject_quest<br>(Issue #228でロック参加を追加)"] --> RPeek["quest_historyをSELECTし<br>本来の完了者(hist.user_id)とlinked_history_idを特定"]
+    RPeek --> RFound{"履歴が見つかったか"}
+    RFound -- No --> RErr404[HTTPException 404: History not found]
+    RFound -- Yes --> RLinked{"linked_history_idがあるか<br>(兄妹連携クエスト)"}
+    RLinked -- Yes --> RPeekPartner["連結先historyをSELECTし<br>相方のuser_idも特定"]
+    RPeekPartner --> RAcquireLock["_acquire_user_balance_locks([報告者, 相方])で<br>両者分をuser_id昇順でロック取得<br>(process_approve_questと同じロックキーのため相互に直列化される)"]
+    RLinked -- No --> RAcquireLock2["_acquire_user_balance_locks([報告者])で<br>報告者のみロック取得"]
+    RAcquireLock --> RCallLocked["_process_reject_quest_locked を呼び出し"]
+    RAcquireLock2 --> RCallLocked
+    RCallLocked --> REnd[End]
 ```
 
 以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。
@@ -704,7 +729,7 @@ graph TD
     get_completion_lock_key -.->|target_userを参照| quest_master
     QuestService -->|process_complete_quest| get_completion_lock
     get_completion_lock --> completion_locks
-    QuestService -->|"process_approve_quest /<br>process_cancel_quest<br>(報告者+連結相方)"| acquire_user_balance_locks
+    QuestService -->|"process_approve_quest /<br>process_cancel_quest /<br>process_reject_quest(#228)<br>(報告者+連結相方)"| acquire_user_balance_locks
     acquire_user_balance_locks -.->|linked_history_id経由で<br>相方のuser_idを参照| quest_history
     acquire_user_balance_locks --> get_user_balance_lock
     get_user_balance_lock --> user_balance_locks
@@ -812,7 +837,7 @@ graph TD
 * 根拠: `t = threading.Thread(target=unlock_task, daemon=True)` (行番号: 430)
 * **兄妹連携クエストの前提条件**: `_get_sibling_partner_id`は`quest_users.role = ROLE_CHILD`のユーザーが「ちょうど2人」であることを前提としており、子供が1人または3人以上の家族構成では常に`HTTPException(400)`が送出される。
 * 根拠: `if user_id not in child_ids or len(child_ids) != 2: raise HTTPException(status_code=400, ...)` (行番号: 307〜308)
-* **兄妹連携クエストのカスケード処理は3箇所に個別実装**: 承認（`_process_approve_quest_locked`内、`_approve_linked_history`呼び出し）・却下（`process_reject_quest`内）・取消（`_process_cancel_quest_locked`内、`_revert_and_delete_history`経由）のそれぞれで`hist['linked_history_id']`の有無を個別にチェックしており、共通ヘルパーに統合されていない（H-3による`process_approve_quest`/`process_cancel_quest`のロック委譲分割後も、この重複自体は解消されていない）。
+* **兄妹連携クエストのカスケード処理は3箇所に個別実装**: 承認（`_process_approve_quest_locked`内、`_approve_linked_history`呼び出し）・却下（`_process_reject_quest_locked`内）・取消（`_process_cancel_quest_locked`内、`_revert_and_delete_history`経由）のそれぞれで`hist['linked_history_id']`の有無を個別にチェックしており、共通ヘルパーに統合されていない（H-3による`process_approve_quest`/`process_cancel_quest`のロック委譲分割、およびIssue #228による`process_reject_quest`の同様のロック委譲分割後も、この重複自体は解消されていない）。
 * 根拠: (行番号: 378, 446〜448, 516〜524)
 * **`_process_complete_quest_locked`は以前、対象者・出現条件のサーバー側検証を持たなかった(Issue #163で解消)**: `target_user`による対象者制限や`day_of_week`/`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`による出現条件は、以前`filter_active_quests`(`GET /data`の表示整形専用)にしか判定が無く、API直叩きで他人向けクエスト・時間帯外・曜日外・未出現のrandomクエストを完了・報酬取得できてしまっていた。また`target_user == 'siblings'`をrole_adultが完了すると、`_process_coop_quest_completion`を経由せず単独即時報酬になってしまう(兄妹連携クエストの前提を破る)問題もあった。報酬購入側は`_process_purchase_reward_locked`内のtargetチェックとしてIssue #95で同種の対策が追加済みだったが、完了側には未展開のまま残っていた。修正では、`filter_active_quests`が使っていた出現条件判定を`_is_quest_currently_active`として切り出し、`_process_complete_quest_locked`のtarget_user検証と合わせて、クエスト・ユーザーの存在確認(404)の直後・スパムチェック(429)より前に呼び出すことで、表示と完了可否の判定基準を一致させた。
 * 根拠: (行番号: 341〜357 / 抜粋: "# 対象者・出現条件のサーバー側検証(Issue #163)。")
