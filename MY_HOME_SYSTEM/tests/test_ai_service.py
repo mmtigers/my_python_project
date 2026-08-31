@@ -101,6 +101,25 @@ def test_extract_referenced_tables_subquery_is_detected():
     assert "quest_users" in tables
 
 
+def test_extract_referenced_tables_comma_join_with_alias_catches_second_table():
+    """Issue #224: 1つ目のテーブルにエイリアスが付いたカンマ結合(暗黙CROSS JOIN)
+    でも2つ目のテーブルを抽出できること。エイリアスが無い場合(H-6)は直後がカンマ
+    になるため検出できていたが、`FROM a x, b y`のようにエイリアスが挟まると、
+    識別子の直後がカンマではなくエイリアス文字列になり抽出漏れしていた。"""
+    sql = "SELECT s.* FROM power_usage c, quest_users s WHERE c.id = s.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "power_usage" in tables
+    assert "quest_users" in tables
+
+
+def test_extract_referenced_tables_comma_join_with_as_alias_catches_second_table():
+    """Issue #224: `AS`付きエイリアスのカンマ結合でも2つ目のテーブルを抽出できること"""
+    sql = "SELECT s.* FROM power_usage AS c, quest_users AS s WHERE c.id = s.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "power_usage" in tables
+    assert "quest_users" in tables
+
+
 @pytest.mark.asyncio
 async def test_tool_search_db_rejects_non_select():
     result = await ai_service.tool_search_db({"sql_query": "DELETE FROM quest_users"})
@@ -119,6 +138,17 @@ async def test_tool_search_db_blocks_comma_joined_disallowed_table():
     """H-6の回帰防止: 許可テーブルとのカンマ結合で quest_users を素通りさせない"""
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}, quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_comma_joined_disallowed_table_with_alias():
+    """Issue #224の回帰防止: 1つ目のテーブルにエイリアスが付いたカンマ結合で
+    quest_users を素通りさせない(Issueの再現条件そのもの)"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db(
+        {"sql_query": f"SELECT s.* FROM {table} c, quest_users s WHERE c.id = s.id"}
+    )
     assert "許可されていない" in result
 
 
