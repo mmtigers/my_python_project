@@ -338,46 +338,46 @@
 ### `PostBootHealthCheck.check_services`
 
 * **役割**: バックエンドサーバー、Family Quest（フロントエンド）、ダッシュボードの3対象について、`ThreadPoolExecutor`（`max_workers=len(targets)`、対象数と同じ3ワーカー）で対象ごとに独立したスレッドへ`_wait_for_service`を並列実行させ、各サービスの起動待ち・判定を並行して行う。以前は3対象を直列にリトライしており、全滅時は最悪ケースで（対象数）×（1対象あたりの最大待ち時間）＝最大6分間notifyがブロックされていたが、並列化により最悪時間を単一対象のリトライ時間（最大2分）程度まで縮めている。
-* 根拠: `def check_services(self):` (行番号: 174〜191 / 抜粋: "def check_services(self):"), `with ThreadPoolExecutor(max_workers=len(targets)) as executor:\n            self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 190〜191 / 抜粋: "with ThreadPoolExecutor(max_workers=len(targets)) as executor:")
+* 根拠: `def check_services(self):` (行番号: 184〜201 / 抜粋: "def check_services(self):"), `with ThreadPoolExecutor(max_workers=len(targets)) as executor:\n            self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 200〜201 / 抜粋: "with ThreadPoolExecutor(max_workers=len(targets)) as executor:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 174 / 抜粋: "def check_services(self):")
+* 根拠: (行番号: 184 / 抜粋: "def check_services(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ、`executor.map`が返す各サービスの `CheckResult` を対象の元の順序のまま追加）
-* 根拠: `self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 191 / 抜粋: "self.results.extend(executor.map(self._wait_for_service, targets))")
+* 根拠: `self.results.extend(executor.map(self._wait_for_service, targets))` (行番号: 201 / 抜粋: "self.results.extend(executor.map(self._wait_for_service, targets))")
 
 
 * **副作用**: `logger.info` によるログ出力、`ThreadPoolExecutor`の生成・3スレッドでの`_wait_for_service`並列実行（各スレッド内で`_check_port`/`_check_http`呼び出しと`time.sleep`が発生）、`self.results` への追加。
-* 根拠: `logger.info("⏳ Waiting for services to startup...")` (行番号: 184 / 抜粋: "logger.info("⏳ Waiting for services to startup...")")
+* 根拠: `logger.info("⏳ Waiting for services to startup...")` (行番号: 194 / 抜粋: "logger.info("⏳ Waiting for services to startup...")")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし（`_wait_for_service`側にも例外捕捉はなく、`_check_port`/`_check_http`が内部で例外を吸収して`bool`を返す設計に依存している）。
-* 根拠: (行番号: 174〜191 / 抜粋: "def check_services(self):")
+* 根拠: (行番号: 184〜201 / 抜粋: "def check_services(self):")
 
 
 
 ### `PostBootHealthCheck._wait_for_service`
 
 * **役割**: 1つのサービス対象（`target`辞書）について、`type`（`"port"`または`"http"`）に応じて`_check_port`/`_check_http`で疎通確認し、成功するまで最大`max_retries`回・`retry_interval`秒間隔でリトライしたうえで判定結果の`CheckResult`を返す。`check_services`から`ThreadPoolExecutor`経由で対象ごとに並列に呼び出されることを前提とした、旧`check_services`本体のリトライループを1対象分に切り出したメソッド。`critical=True`の対象（Backend Server, Family Quest, Dashboard の3件すべて）が全リトライ失敗した場合は`STATUS_ERR`とする（`critical=False`の対象は現状存在しないため`STATUS_WARN`に倒れる分岐は到達しない）。
-* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 193〜216 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
+* 根拠: `def _wait_for_service(self, target: dict) -> CheckResult:` (行番号: 203〜226 / 抜粋: "def _wait_for_service(self, target: dict) -> CheckResult:")
 
 
 * **引数/リクエスト**: `target: dict`（`"name"`, `"type"`, `"val"`, `"critical"`の各キーを持つ、`check_services`内で定義される対象定義。`Dashboard`は`{"name": "Dashboard", "type": "port", "val": 8501, "critical": True}`）
-* 根拠: `{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},` (行番号: 181 / 抜粋: "{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},")
+* 根拠: `{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},` (行番号: 191 / 抜粋: "{"name": "Dashboard",      "type": "port", "val": 8501, "critical": True},")
 
 
 * **戻り値/レスポンス**: `CheckResult`（対象名・判定ステータス・メッセージ）
-* 根拠: `return CheckResult(target["name"], status, msg)` (行番号: 216 / 抜粋: "return CheckResult(target["name"], status, msg)")
+* 根拠: `return CheckResult(target["name"], status, msg)` (行番号: 226 / 抜粋: "return CheckResult(target["name"], status, msg)")
 
 
 * **副作用**: `_check_port` / `_check_http` 呼び出し、リトライ間の `time.sleep(self.retry_interval)`。
-* 根拠: `time.sleep(self.retry_interval)` (行番号: 203 / 抜粋: "time.sleep(self.retry_interval)")
+* 根拠: `time.sleep(self.retry_interval)` (行番号: 213 / 抜粋: "time.sleep(self.retry_interval)")
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はなし。`if target["critical"]:`の分岐で全リトライ失敗時のステータスを`STATUS_ERR`（`critical=True`）または`STATUS_WARN`（`critical=False`、現状到達しない）に振り分ける。
-* 根拠: `if target["critical"]:\n                status = STATUS_ERR\n                msg = "Failed"\n            else:\n                status = STATUS_WARN` (行番号: 209〜213 / 抜粋: "if target["critical"]:")
+* 根拠: `if target["critical"]:\n                status = STATUS_ERR\n                msg = "Failed"\n            else:\n                status = STATUS_WARN` (行番号: 219〜223 / 抜粋: "if target["critical"]:")
 
 
 
