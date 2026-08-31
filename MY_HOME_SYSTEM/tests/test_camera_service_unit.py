@@ -80,6 +80,103 @@ class TestPruneFinishedVodProcesses:
         assert "cam1_20260102" not in camera_service._active_vod_processes
 
 
+class TestVodGenerationLockPruning:
+    """#247: _vod_generation_locksは以前、cam_id×target_dateのキーを一度登録すると
+    二度と削除されず、_active_vod_processesに対応するような剪定処理も存在しなかった
+    ため無限に蓄積し続けていた。参照カウント方式(_RefCountedLock)により、使用後は
+    自動的にエントリが削除されることを検証する。"""
+
+    def test_entry_is_removed_after_use(self):
+        with camera_service._vod_generation_lock("cam1_20260101"):
+            assert "cam1_20260101" in camera_service._vod_generation_locks
+
+        assert "cam1_20260101" not in camera_service._vod_generation_locks, (
+            "使用後はエントリが辞書から削除され、無限蓄積しないこと"
+        )
+
+    def test_multiple_keys_each_removed_independently(self):
+        with camera_service._vod_generation_lock("cam1_20260101"):
+            pass
+        with camera_service._vod_generation_lock("cam2_20260102"):
+            pass
+
+        assert camera_service._vod_generation_locks == {}
+
+    def test_entry_not_removed_while_another_thread_is_waiting(self):
+        """使用中(参照カウント>0)のエントリは、他スレッドが利用中の間は
+        削除されないこと(削除してしまうと、同一process_keyに対して2つの
+        別々のLockオブジェクトが生成され、排他制御が破られてしまう)。"""
+        key = "cam1_20260103"
+        first_holder_ready = threading.Event()
+        release_first_holder = threading.Event()
+        second_thread_done = threading.Event()
+
+        def hold_first():
+            with camera_service._vod_generation_lock(key):
+                first_holder_ready.set()
+                release_first_holder.wait(timeout=5)
+
+        def wait_second():
+            first_holder_ready.wait(timeout=5)
+            # この時点でfirst_holderがロックを保持中。ここでref_countが2になるはず。
+            with camera_service._vod_generation_lock(key):
+                pass
+            second_thread_done.set()
+
+        t1 = threading.Thread(target=hold_first)
+        t2 = threading.Thread(target=wait_second)
+        t1.start()
+        t1_ready = first_holder_ready.wait(timeout=5)
+        assert t1_ready
+        t2.start()
+
+        # t2はt1がロックを保持している間ブロックされ、まだ完了していないはず。
+        # この間、エントリは(t1のref_countにより)辞書に残り続けているべき。
+        import time as _time
+        _time.sleep(0.2)
+        assert key in camera_service._vod_generation_locks, (
+            "他スレッドが同一キーを取得待ちの間はエントリを削除してはならない"
+        )
+
+        release_first_holder.set()
+        t1.join(timeout=5)
+        assert second_thread_done.wait(timeout=5)
+        t2.join(timeout=5)
+
+        assert key not in camera_service._vod_generation_locks, (
+            "全ての利用者が使い終わったらエントリは削除されるべき"
+        )
+
+    def test_mutual_exclusion_still_enforced_across_concurrent_calls(self):
+        """回帰防止: 参照カウント方式に変更しても、同一process_keyに対する
+        排他制御(同時に2スレッドがクリティカルセクションへ入らないこと)が
+        引き続き機能すること。"""
+        key = "cam1_20260104"
+        concurrent_count = 0
+        max_concurrent = 0
+        lock_for_counter = threading.Lock()
+
+        def critical_section():
+            nonlocal concurrent_count, max_concurrent
+            with camera_service._vod_generation_lock(key):
+                with lock_for_counter:
+                    concurrent_count += 1
+                    max_concurrent = max(max_concurrent, concurrent_count)
+                import time as _time
+                _time.sleep(0.05)
+                with lock_for_counter:
+                    concurrent_count -= 1
+
+        threads = [threading.Thread(target=critical_section) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert max_concurrent == 1, "同一process_keyに対する排他制御が破られている"
+        assert camera_service._vod_generation_locks == {}
+
+
 class TestSetCameraEnabledAtomicWrite:
     def test_writes_atomically_and_no_tmp_file_left_behind(self, tmp_path, monkeypatch):
         devices_path = tmp_path / "devices.json"
