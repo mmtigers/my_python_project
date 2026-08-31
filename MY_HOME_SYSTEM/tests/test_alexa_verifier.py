@@ -14,6 +14,7 @@ import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -149,6 +150,38 @@ class TestVerifySignature:
         with patch("core.alexa_verifier.requests.get", return_value=_mock_get(pem)):
             with pytest.raises(av.AlexaVerificationError):
                 av.verify_signature(body, sig_b64, VALID_CERT_URL)
+
+
+class TestFetchLeafCertificateNetworkErrors:
+    """Issue #179の回帰テスト: requests.get/raise_for_statusが送出する
+    requests.exceptions.RequestException(Timeout/ConnectionError/HTTPError等)は
+    AlexaVerificationErrorではないため、router側のexcept AlexaVerificationErrorを
+    素通りしグローバル例外ハンドラ経由で500になっていた。証明書チェーン取得失敗も
+    AlexaVerificationErrorに変換し、routerが本来意図する400を返せるようにする。"""
+
+    def test_connection_error_is_converted_to_verification_error(self):
+        with patch(
+            "core.alexa_verifier.requests.get",
+            side_effect=requests.exceptions.ConnectionError("connection refused"),
+        ):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
+
+    def test_timeout_is_converted_to_verification_error(self):
+        with patch(
+            "core.alexa_verifier.requests.get",
+            side_effect=requests.exceptions.Timeout("timed out"),
+        ):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
+
+    def test_http_error_status_is_converted_to_verification_error(self):
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404")
+
+        with patch("core.alexa_verifier.requests.get", return_value=resp):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
 
 
 class TestVerifyTimestamp:
