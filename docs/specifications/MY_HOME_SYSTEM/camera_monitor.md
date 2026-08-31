@@ -414,9 +414,9 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 611 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 63 / 抜粋: "getattr(config, 'MOTION_COOLD") |
-| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 356 / 抜粋: "save_log_generic("device_record") |
-| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 553 / 抜粋: "send_push(") |
+| 高 | `config.py` | `CAMERAS`（IP、ポート、認証情報等）、`MOTION_COOLDOWN_SEC`、`NVR_RECORD_DIR`等の重要な環境変数が定義されており、監視対象や動作閾値の全容を把握するため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "config.CAMERAS"), `config.MOTION_COOLDOWN_SEC` (行番号: 63 / 抜粋: "getattr(config, 'MOTION_COOLD") |
+| 中 | `core/database.py` | `save_log_generic` 関数の引数（`columns`, `values`）は判明しているが、実際にどのデータベース（SQLite/MySQL等）にどのようなスキーマで書き込まれるか確認するため。 | 根拠: `save_log_generic("device_records"` (行番号: 365 / 抜粋: "save_log_generic("device_record") |
+| 中 | `services/notification_service.py` | 障害発生時のアラート仕様（送信先プラットフォームが引数の `discord` か `LINE_USER_ID` かなど）の動作を特定するため。 | 根拠: `send_push` (行番号: 564 / 抜粋: "send_push(") |
 
 ## 8. 保守上の注意点
 
@@ -440,7 +440,7 @@ graph TD
 | --- | --- | --- |
 | DBの保存先とスキーマ | `database.md`の解析によれば、`save_log_generic`は`core/database.py`が提供する汎用INSERT関数で、指定されたテーブル・カラム・値からSQLを動的に構築しSQLiteへ書き込むと推測される。ただし`device_records`テーブル自体の正確なカラム定義は`database.md`側でも「呼び出し元依存で不明」とされており、依然として不明。 | database.md |
 | プッシュ通知の仕様 | `notification_service.md`の解析によれば、`send_push`は`target`引数（"discord"/"line"/"both"）に応じて通知先を振り分け、LINE送信失敗時はDiscordのerrorチャンネルへフォールバック通知を行う関数（戻り値`bool`）と推測される。 | notification_service.md |
-| 設定値の構造と中身 | `config.py`および`monitors/camera_monitor.py`を直接確認した。`config.CAMERAS`は`devices.json`（リポジトリ内に実体なし、`.gitignore`の`*.json`規則により追跡対象外）から297〜305行目でPydanticモデル`CameraConfig`（`id, name, nas_folder, location, ip, port(既定2020), user, password(エイリアス"pass"), rtsp_url`、144〜153行目）としてロードされるリストで、`camera_monitor.py`242行目の`next((c for c in config.CAMERAS if c["name"] == cam_name), None)`および610〜611行目の`ThreadPoolExecutor(max_workers=len(config.CAMERAS))`で実際に利用されている。NASのパスは`config.py`216〜217行目の`NAS_MOUNT_POINT = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")` / `NAS_PROJECT_ROOT = os.path.join(NAS_MOUNT_POINT, "home_system")`が起点であり、`camera_monitor.py`47行目の`ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")`はさらにそのサブディレクトリを指す。クールダウン秒数は`camera_monitor.py`63行目の`MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)`により参照され、実体は`config.py`325行目の`MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))`（環境変数未設定時は既定60秒）であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-153, 216-217, 297-305, 325`, `MY_HOME_SYSTEM/monitors/camera_monitor.py:47, 63, 242, 610-611` |
+| 設定値の構造と中身 | `config.py`および`monitors/camera_monitor.py`を直接確認した。`config.CAMERAS`は`devices.json`（リポジトリ内に実体なし、`.gitignore`の`*.json`規則により追跡対象外）から297〜305行目でPydanticモデル`CameraConfig`（`id, name, nas_folder, location, ip, port(既定2020), user, password(エイリアス"pass"), rtsp_url`、144〜153行目）としてロードされるリストで、`camera_monitor.py`251行目の`next((c for c in config.CAMERAS if c["name"] == cam_name), None)`および621〜622行目の`ThreadPoolExecutor(max_workers=len(config.CAMERAS))`で実際に利用されている。NASのパスは`config.py`216〜217行目の`NAS_MOUNT_POINT = os.getenv("NAS_MOUNT_POINT", "/mnt/nas")` / `NAS_PROJECT_ROOT = os.path.join(NAS_MOUNT_POINT, "home_system")`が起点であり、`camera_monitor.py`47行目の`ASSETS_DIR = os.path.join(config.ASSETS_DIR, "snapshots")`はさらにそのサブディレクトリを指す。クールダウン秒数は`camera_monitor.py`63行目の`MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)`により参照され、実体は`config.py`325行目の`MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))`（環境変数未設定時は既定60秒）であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-153, 216-217, 297-305, 325`, `MY_HOME_SYSTEM/monitors/camera_monitor.py:47, 63, 251, 621-622` |
 
 ## 10. 自己検証結果
 
