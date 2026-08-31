@@ -201,8 +201,8 @@
 
 ### `get_live_segment` (`GET /live/{camera_id}/{segment_file}`)
 
-* **役割**: ライブHLSの `.ts` セグメントファイルを、パストラバーサル検証を経て配信する。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 116〜118 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")
+* **役割**: ライブHLSの `.ts` セグメントファイルを、拡張子チェックとパストラバーサル検証を経て配信する。Issue #172の修正（コミット時点）により、`.ts`以外の拡張子は400で拒否するようになった。修正前は拡張子を一切検証していなかったため、`_resolve_segment_path`のパストラバーサル対策のみでは防げない形で、同一ディレクトリ内に配置される`ffmpeg.log`（RTSP認証情報を含みうる。`camera_service.md`参照）等の任意ファイルがそのまま配信され得た。
+* 根拠: [エンドポイント定義とDocstring] (行番号: 116〜118 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 122〜123 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
 
 
 * **引数/リクエスト**: `camera_id: str`, `segment_file: str`（いずれもパスパラメータ）
@@ -210,15 +210,15 @@
 
 
 * **戻り値/レスポンス**: `FileResponse`（media_type="video/MP2T"）
-* 根拠: [レスポンス返却] (行番号: 127 / 抜粋: "return FileResponse(segment_path, media_type="video/MP2T")")
+* 根拠: [レスポンス返却] (行番号: 132 / 抜粋: "return FileResponse(segment_path, media_type="video/MP2T")")
 
 
 * **副作用**: `_resolve_segment_path` によるパス検証、`camera_service.HLS_LIVE_DIR` の参照。
-* 根拠: [パス解決] (行番号: 123 / 抜粋: "segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)")
+* 根拠: [パス解決] (行番号: 129 / 抜粋: "segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)")
 
 
-* **エラーハンドリング**: カメラID未検出時404、セグメントファイル不在時404（`_resolve_segment_path`内で範囲外パスの場合は400が送出されうる）。
-* 根拠: [エラー分岐] (行番号: 120〜121, 124〜125 / 抜粋: "if not os.path.exists(segment_path):\n        raise HTTPException(status_code=404, detail="Segment not found")")
+* **エラーハンドリング**: `segment_file`が`.ts`で終わらない場合400（カメラID検証より前に判定）、カメラID未検出時404、セグメントファイル不在時404（`_resolve_segment_path`内で範囲外パスの場合も400が送出されうる）。
+* 根拠: [エラー分岐] (行番号: 122〜123, 126〜127, 130〜131 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")
 
 
 ## 5. 処理フロー図
@@ -311,6 +311,7 @@ graph TD
 * **（コミット`95d3e55`, E-3で解消）`enabled`フラグの固定値**: 修正前は `get_camera_settings` の `enabled` が常に `True`固定で、`config.CAMERAS` 側で無効化されたカメラの状態を反映する仕組みがなかった。現在は `cam.get("enabled", True)` により実際の値を反映し、`PUT /settings/{camera_id}`（`update_camera_settings`）で `camera_service.set_camera_enabled` 経由の永続化（`devices.json`書き込み）が可能になっている。
 * **例外処理の欠如**: `get_camera_settings` では `config.CAMERAS` の各要素に `id`/`name` キーが存在しない場合の `KeyError` に対する処理がない（`enabled`キーのみ`.get`で防御的にアクセスしている）。`update_camera_settings` も `camera_service.set_camera_enabled` 呼び出し自体に対する `try-except` は持たず、`False`戻り値（対象カメラ不在）のみをHTTP 404として扱う。
 * **パストラバーサル対策の一元化**: `.ts` セグメント配信は `_resolve_segment_path` により防御されているが、`.m3u8` の場合は `camera_service.generate_record_playlist` / `start_hls_stream` の戻り値パスをそのまま `FileResponse` に渡しており、パス検証の責務が `camera_service` 側にあるかは本ファイルからは確認できない。
+* **（Issue #172で解消）拡張子チェックの非対称性**: `get_record_file` は`.m3u8`/`.ts`以外を400で拒否していたが、`get_live_segment` は修正前は拡張子を一切検証しておらず、`_resolve_segment_path`のパストラバーサル対策だけでは防げない形で同一カメラディレクトリ内の`ffmpeg.log`（`camera_service.py`が`chmod 600`で保護しているファイル。RTSP認証情報を含みうる）等が配信され得た。現在は`get_record_file`と同様に`.ts`以外を400で拒否する。
 
 ## 9. 不明事項一覧
 
