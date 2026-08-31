@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-- [config.md](./config.md) — 設定値(`MONITOR_DEVICES`)を提供
+- [config.md](./config.md) — 設定値(`MONITOR_DEVICES`, `BASE_DIR`)を提供
 - [switchbot_service.md](./switchbot_service.md) — `sb_tool.get_device_status`の実体
 - [switchbot.md](./switchbot.md) — `get_device_status`の戻り値のバリデーションに使われる`DeviceStatusResponse`モデルを定義
 - [sensor_service.md](./sensor_service.md) — 呼び出し先。`process_power_data`, `process_meter_data`に処理を委譲
@@ -19,7 +19,7 @@
 
 ## 2. ファイルの概要
 
-本ファイルは、設定された監視対象のSwitchBotデバイスからAPI経由で定期的にステータス（電力、温湿度、電源状態など）を取得し、状態変化の有無に応じて適切なログを出力するとともに、取得したセンサーデータを後続の処理サービス（電力データ処理、温湿度データ処理）へ連携するためのデバイス監視スクリプトである。
+本ファイルは、設定された監視対象のSwitchBotデバイスからAPI経由で定期的にステータス（電力、温湿度、電源状態など）を取得し、状態変化の有無に応じて適切なログを出力するとともに、取得したセンサーデータを後続の処理サービス（電力データ処理、温湿度データ処理）へ連携するためのデバイス監視スクリプトである。本スクリプトは`scheduler_boot.py`によって5分ごとに新規プロセスとして起動される使い捨てプロセスモデルであるため、状態変化検知用のキャッシュ(`_last_device_states`)をプロセス終了前にディスク上のJSONファイルへ永続化し、次回起動時に復元することで、プロセス再起動をまたいでも状態変化を検知できるようにしている（根拠: [ファイル冒頭のM-4-5コメント] 行番号: 25-32）。
 
 ## 3. 外部依存関係
 
@@ -31,7 +31,7 @@
 | `sys` | 標準ライブラリ | モジュール検索パスの操作 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "`import sys`") |
 | `os` | 標準ライブラリ | パスの絶対パス解決・操作 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "`import os`") |
 | `time` | 標準ライブラリ | 未使用（インポートのみ） | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "`import time`") |
-| `json` | 標準ライブラリ | 未使用（インポートのみ） | 根拠: [インポート宣言] (行番号: 6 / 抜粋: "`import json`") |
+| `json` | 標準ライブラリ | 状態キャッシュのJSON永続化（読み込み・書き込み） | 根拠: [`_load_persisted_states`/`_save_persisted_states`内での使用] (行番号: 6, 41, 50 / 抜粋: "`import json`", "`return json.load(f)`", "`json.dump(states, f)`") |
 | `typing` | 標準ライブラリ | 型アノテーションの提供 | 根拠: [インポート宣言] (行番号: 7 / 抜粋: "`from typing import Dict, Any, Optional, List, Set`") |
 | `config` | 外部モジュール | デバイスリスト設定の取得 | 根拠: [インポート宣言] (行番号: 12 / 抜粋: "`import config`") |
 | `sb_tool` | 外部モジュール | SwitchBot APIからの状態取得 | 根拠: [インポート宣言] (行番号: 13 / 抜粋: "`from services import switchbot_service as sb_tool`") |
@@ -42,10 +42,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 128 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
-| `sb_tool.get_device_status` | SwitchBot API通信の内部実装およびAPIからのレスポンスの厳密な仕様が不明。 | 根拠: [`fetch_device_status_sync`内のAPI呼出] (行番号: 31 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`") |
-| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 162-164 / 抜粋: "`await sensor_service.process_power_data(...)`") |
-| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 168-170 / 抜粋: "`await sensor_service.process_meter_data(...)`") |
+| `config.MONITOR_DEVICES` | 設定値の具体的なデータ構造や内容が提供コード外のため不明。 | 根拠: [`main`内の変数代入] (行番号: 158 / 抜粋: "`devices: List[Dict[str, Any]] = getattr(config, "MONITOR_DEVICES", [])`") |
+| `config.BASE_DIR` | 実際のパス値が提供コード外のため不明。永続化先ファイルのディレクトリを決定する。 | 根拠: [`_STATE_FILE`の変数定義] (行番号: 34 / 抜粋: "`_STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")`") |
+| `sb_tool.get_device_status` | SwitchBot API通信の内部実装およびAPIからのレスポンスの厳密な仕様が不明。 | 根拠: [`fetch_device_status_sync`内のAPI呼出] (行番号: 57 / 抜粋: "`status: Optional[Dict[str, Any]] = sb_tool.get_device_status(device_id)`") |
+| `sensor_service.process_power_data` | 電力データ処理（保存や通知など）の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 192-194 / 抜粋: "`await sensor_service.process_power_data(...)`") |
+| `sensor_service.process_meter_data` | 温湿度データ処理の内部実装が不明。 | 根拠: [`main`内の非同期呼出] (行番号: 198-200 / 抜粋: "`await sensor_service.process_meter_data(...)`") |
 | `setup_logging` | ログの出力先、フォーマット設定の内部実装が不明。 | 根拠: [ロガー初期化処理] (行番号: 17 / 抜粋: "`logger = setup_logging("device_monitor")`") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
