@@ -126,13 +126,34 @@ def sync_rewards(cur, dry_run: bool = False):
         logger.info(f"[dry-run] Would upsert {len(REWARDS)} rewards.")
         return
 
-    # 削除
+    # 削除対象の抽出(削除自体は下のFKチェック付きループで行う)
     if master_ids:
         placeholders = ','.join(['?'] * len(master_ids))
-        cur.execute(f"DELETE FROM reward_master WHERE reward_id NOT IN ({placeholders})", master_ids)
+        stale_rewards = cur.execute(
+            f"SELECT reward_id FROM reward_master WHERE reward_id NOT IN ({placeholders})", master_ids
+        ).fetchall()
     else:
-        cur.execute("DELETE FROM reward_master")
-        logger.info("Deleted ALL rewards (Master is empty)")
+        stale_rewards = cur.execute("SELECT reward_id FROM reward_master").fetchall()
+        logger.info("Master is empty: all rewards are candidates for deletion")
+
+    # #165: user_inventory は reward_master(reward_id) へのFK(PRAGMA foreign_keys=ON、
+    # core/database.py:24)を持つため、所持者がいる(所有中/申請中/使用済問わず
+    # user_inventoryに行が残る)報酬を無条件でDELETEするとIntegrityErrorとなり、
+    # run_sync全体がexit 1する。services/quest_service.pyのsync_master_data()側では
+    # M-1-2としてこの対策済み(参照が残っている報酬は削除をスキップし警告ログのみ出す)
+    # だが、sync_strict.py側には未展開だった。同じ対策をここにも適用する。
+    for row in stale_rewards:
+        stale_reward_id = row['reward_id']
+        still_referenced = cur.execute(
+            "SELECT 1 FROM user_inventory WHERE reward_id = ? LIMIT 1", (stale_reward_id,)
+        ).fetchone()
+        if still_referenced:
+            logger.warning(
+                f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
+                "user_inventoryに参照が残っているため削除をスキップします。"
+            )
+            continue
+        cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
 
     # Upsert
     for r in REWARDS:
@@ -143,18 +164,25 @@ def sync_rewards(cur, dry_run: bool = False):
         target_val = r.get('target', 'all')
         desc_val = r.get('desc', '')
 
+        # #165: 従来はレガシー列の desc のみ書き込んでおり、アプリが実際に読む
+        # description 列(InventoryService.get_user_inventoryの`rm.description as desc`。
+        # services/quest_service.py:848)が更新されないままだった。sync_strict経由で
+        # 登録・更新された報酬は所持済みアイテム一覧で説明が空表示になり、
+        # sync_master_data(descriptionへ書く)との実行順で表示が食い違っていた。
+        # 両列を同じ値で同期する。
         cur.execute("""
             INSERT INTO reward_master (
-                reward_id, title, category, cost_gold, icon_key, target, desc
+                reward_id, title, category, cost_gold, icon_key, target, desc, description
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(reward_id) DO UPDATE SET
                 title = excluded.title,
                 category = excluded.category,
                 cost_gold = excluded.cost_gold,
                 icon_key = excluded.icon_key,
                 target = excluded.target,
-                desc = excluded.desc
+                desc = excluded.desc,
+                description = excluded.description
         """, (
             r['id'],
             r['title'],
@@ -162,6 +190,7 @@ def sync_rewards(cur, dry_run: bool = False):
             cost_val,
             icon_val,
             target_val,
+            desc_val,
             desc_val
         ))
     logger.info(f"Upserted {len(REWARDS)} rewards.")

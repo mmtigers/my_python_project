@@ -35,6 +35,14 @@ def _seed_reward_master_row(reward_id: int = 8888, title: str = "Stale Reward"):
         )
 
 
+def _seed_user_inventory_row(reward_id: int, user_id: str = "dad", status: str = "owned"):
+    with common.get_db_cursor(commit=True) as cur:
+        cur.execute(
+            "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) VALUES (?, ?, ?, ?)",
+            (user_id, reward_id, status, common.get_now_iso()),
+        )
+
+
 class TestConfirmOrAbortSafetyGuard:
     """対話的な確認プロンプト・空マスタガードの単体テスト(DBアクセスなし)。"""
 
@@ -299,3 +307,92 @@ class TestSyncQuestsFullColumnSync:
         assert row["end_date"] is None
         assert row["occurrence_chance"] == 1.0
         assert row["pre_requisite_quest_id"] is None
+
+
+class TestSyncRewardsSkipsDeleteWhenReferencedByUserInventory:
+    """Issue #165の回帰テスト: sync_rewards() が無条件で
+    DELETE FROM reward_master WHERE reward_id NOT IN (...) を実行しており、
+    PRAGMA foreign_keys=ON下でuser_inventoryにFK参照が残る報酬(所持実績あり)を
+    quest_data.REWARDSから削除した状態で実行すると、DELETE自体がIntegrityErrorで
+    失敗しrun_sync全体がexit 1していた。services/quest_service.pyのsync_master_data()
+    側ではM-1-2として既に対策済み(参照が残っている報酬は削除をスキップ)だった。"""
+
+    def test_referenced_reward_delete_does_not_raise_and_sync_completes(self, isolated_db, monkeypatch):
+        _seed_reward_master_row(reward_id=8888, title="Stale Reward")
+        _seed_user_inventory_row(reward_id=8888)
+
+        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        # 修正前はここでsqlite3.IntegrityErrorが送出され、run_sync全体が失敗していた。
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+    def test_referenced_reward_row_is_kept_but_unreferenced_stale_reward_is_deleted(
+        self, isolated_db, monkeypatch
+    ):
+        _seed_reward_master_row(reward_id=8888, title="Referenced Stale Reward")
+        _seed_reward_master_row(reward_id=7777, title="Unreferenced Stale Reward")
+        _seed_user_inventory_row(reward_id=8888)
+
+        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
+        monkeypatch.setattr(sync_strict, "REWARDS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            referenced = cur.execute(
+                "SELECT COUNT(*) as c FROM reward_master WHERE reward_id = 8888"
+            ).fetchone()["c"]
+            unreferenced = cur.execute(
+                "SELECT COUNT(*) as c FROM reward_master WHERE reward_id = 7777"
+            ).fetchone()["c"]
+        assert referenced == 1, "user_inventoryに参照が残る報酬はマスタ削除をスキップすべき"
+        assert unreferenced == 0, "参照の無い報酬は通常通り削除されるべき"
+
+
+class TestSyncRewardsWritesDescriptionColumn:
+    """Issue #165の回帰テスト: sync_rewards() がレガシー列 desc のみを書き込み、
+    アプリが実際に読む description 列(InventoryService.get_user_inventoryの
+    `rm.description as desc`。services/quest_service.py:848)を更新していなかった。
+    sync_strict経由で登録・更新された報酬は所持済みアイテム一覧で説明が
+    空表示になってしまう不具合。"""
+
+    def test_new_reward_description_column_is_populated(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(
+            sync_strict, "REWARDS",
+            [{"id": 1, "title": "New Reward", "desc": "とても良い報酬です"}],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT desc, description FROM reward_master WHERE reward_id = 1"
+            ).fetchone()
+        assert row["desc"] == "とても良い報酬です"
+        assert row["description"] == "とても良い報酬です"
+
+    def test_existing_reward_description_column_is_updated_not_left_stale(self, isolated_db, monkeypatch):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold, desc, description) "
+                "VALUES (1, 'Old Reward', 100, '古い説明', '古い説明')"
+            )
+
+        monkeypatch.setattr(
+            sync_strict, "REWARDS",
+            [{"id": 1, "title": "New Reward", "desc": "新しい説明"}],
+            raising=False,
+        )
+        monkeypatch.setattr(sync_strict, "QUESTS", [], raising=False)
+
+        sync_strict.run_sync(dry_run=False, assume_yes=True, allow_empty_master=True)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT desc, description FROM reward_master WHERE reward_id = 1"
+            ).fetchone()
+        assert row["desc"] == "新しい説明"
+        assert row["description"] == "新しい説明"
