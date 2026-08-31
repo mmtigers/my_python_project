@@ -63,13 +63,22 @@ def sync_quests(cur, dry_run: bool = False):
         # models.quest.MasterQuest.reset_period のデフォルトと同じ 'daily' を使う。
         reset_period_val = q.get('reset_period', 'daily')
 
+        # #164: 時間帯(start_time/end_time)・期間(start_date/end_date)・出現率
+        # (occurrence_chance)・前提クエスト(pre_requisite_quest_id)も
+        # sync_master_data()(services/quest_service.py)と同じ完全同期対象とする。
+        # これらを列リストから欠落させると、時間帯限定クエストが再UPSERT時に
+        # NULL(=filter_active_quests()で終日扱い)に上書きされてしまう。
+        # models.quest.MasterQuest のデフォルトと合わせ、occurrence_chanceのみ
+        # 未指定時のデフォルトを1.0とする。
         cur.execute("""
             INSERT INTO quest_master (
                 quest_id, title, quest_type, target_user,
                 exp_gain, gold_gain, icon_key,
-                day_of_week, description, reset_period
+                day_of_week, description, reset_period,
+                start_time, end_time, start_date, end_date,
+                occurrence_chance, pre_requisite_quest_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(quest_id) DO UPDATE SET
                 title = excluded.title,
                 quest_type = excluded.quest_type,
@@ -79,7 +88,13 @@ def sync_quests(cur, dry_run: bool = False):
                 icon_key = excluded.icon_key,
                 day_of_week = excluded.day_of_week,
                 description = excluded.description,
-                reset_period = excluded.reset_period
+                reset_period = excluded.reset_period,
+                start_time = excluded.start_time,
+                end_time = excluded.end_time,
+                start_date = excluded.start_date,
+                end_date = excluded.end_date,
+                occurrence_chance = excluded.occurrence_chance,
+                pre_requisite_quest_id = excluded.pre_requisite_quest_id
         """, (
             q['id'],
             q['title'],
@@ -90,7 +105,13 @@ def sync_quests(cur, dry_run: bool = False):
             icon_val,
             q.get('days'),              # days (0,1,2...)
             q.get('desc'),              # desc -> description
-            reset_period_val
+            reset_period_val,
+            q.get('start_time'),
+            q.get('end_time'),
+            q.get('start_date'),
+            q.get('end_date'),
+            q.get('chance', 1.0),       # chance -> occurrence_chance
+            q.get('pre_requisite_quest_id'),
         ))
     logger.info(f"Upserted {len(QUESTS)} quests.")
 
