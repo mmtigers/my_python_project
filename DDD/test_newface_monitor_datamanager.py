@@ -19,6 +19,7 @@ DDDにはpytest基盤(conftest.py等)が無いため、本ファイルは
 """
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
@@ -28,6 +29,20 @@ import newface_monitor as module  # noqa: E402
 SiteConfig = module.SiteConfig
 CastMember = module.CastMember
 DataManager = module.DataManager
+
+
+def _fixed_datetime(monkeypatch, initial):
+    """module.datetime.now()を任意の時刻に固定するdatetimeサブクラスを注入する。
+    戻り値の`_now`属性を書き換えることでテスト中に時刻を進められる。"""
+    class _FixedDatetime(module.datetime):
+        _now = initial
+
+        @classmethod
+        def now(cls):
+            return cls._now
+
+    monkeypatch.setattr(module, "datetime", _FixedDatetime)
+    return _FixedDatetime
 
 
 def _make_site(data_filename: str) -> "SiteConfig":
@@ -164,6 +179,83 @@ class TestLoadDailySummaryCorruption:
         # 破損ファイルは新しい正常な集計データで上書きされている
         result = DataManager.load_daily_summary()
         assert result["counts"]["restpia_test"] == 3
+
+
+class TestDailySummaryLateCountsNotLost:
+    """Issue #183の回帰テスト: 以前はrecord_daily_new_castsがカレンダー日付変更時に
+    集計を無条件リセットしていたため、(1) 21時台のサマリ送信後(22時〜24時)に
+    検知した件数が送信済み扱いのまま加算され続け、翌日最初の検知時のリセットで
+    どのサマリにも計上されずに消える、(2) 21時台の実行自体が無かった日は
+    追い付き送信もできずその日の集計が丸ごと失われる、という2つの過少報告
+    経路があった。日付によるリセットを廃止し、_maybe_send_daily_summaryが
+    実際に送信した直後にのみ集計をクリアするよう修正した。"""
+
+    def test_record_daily_new_casts_accumulates_across_calendar_date_change(
+        self, tmp_path, monkeypatch
+    ):
+        """カレンダー日付をまたいで呼び出しても、以前存在したような
+        日付ベースのリセットは行われず単純加算され続けること。"""
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 23, 0, 0))
+
+        DataManager.record_daily_new_casts("restpia_test", 2)  # 8/30 23:00
+
+        fixed_dt._now = module.datetime(2026, 8, 31, 0, 30, 0)  # 日付が変わった直後
+        DataManager.record_daily_new_casts("restpia_test", 3)
+        DataManager.record_daily_new_casts("other_site", 1)
+
+        result = DataManager.load_daily_summary()
+        assert result["counts"] == {"restpia_test": 5, "other_site": 1}
+
+    def test_counts_after_send_are_carried_over_to_next_send_not_lost(
+        self, tmp_path, monkeypatch
+    ):
+        """21時台の送信後(22時・23時)に検知した件数、および日付をまたいで
+        蓄積した件数が、次回の送信でまとめて送られること(以前は日付変更時の
+        リセットで消えていた)。"""
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
+
+        notifier = MagicMock()
+        # 1回目の21時台送信(件数0)
+        module._maybe_send_daily_summary(notifier)
+        assert notifier.notify_daily_summary.call_count == 1
+
+        # 送信後(22時・23時)に検知 -> 以前はこの分が翌日のリセットで消えていた
+        DataManager.record_daily_new_casts("restpia_test", 4)
+        DataManager.record_daily_new_casts("restpia_test", 1)
+        # 日付をまたいでさらに検知
+        DataManager.record_daily_new_casts("other_site", 2)
+
+        # 翌日21時台に送信
+        fixed_dt._now = module.datetime(2026, 8, 31, 21, 0, 0)
+        module._maybe_send_daily_summary(notifier)
+
+        assert notifier.notify_daily_summary.call_count == 2
+        sent_counts = notifier.notify_daily_summary.call_args.args[0]
+        assert sent_counts == {"restpia_test": 5, "other_site": 2}
+
+        # 送信後はリセットされていること
+        result = DataManager.load_daily_summary()
+        assert result["counts"] == {}
+
+    def test_missed_21h_run_does_not_lose_accumulated_counts(self, tmp_path, monkeypatch):
+        """21時台の実行自体が無かった日(cron欠落・ロック競合等)でも、
+        次に成功した21時台の実行でまとめて送信され取りこぼされないこと。"""
+        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 15, 0, 0))
+
+        # 21時台の実行が無かった日(8/30)の日中に検知
+        # (以前は翌日の送信処理内で「送信対象の集計データはdate==today_strのものだけ」
+        # という判定によりこの分が空扱いされ、丸ごと失われていた)
+        DataManager.record_daily_new_casts("restpia_test", 3)
+
+        fixed_dt._now = module.datetime(2026, 8, 31, 21, 0, 0)  # 翌日21時台の実行
+        notifier = MagicMock()
+        module._maybe_send_daily_summary(notifier)
+
+        sent_counts = notifier.notify_daily_summary.call_args.args[0]
+        assert sent_counts == {"restpia_test": 3}
 
 
 if __name__ == "__main__":
