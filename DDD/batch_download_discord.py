@@ -421,6 +421,14 @@ class FileSystemManager:
         except PermissionError:
             DiscordNotifier.send(f"❌ 権限エラー: {path}", is_error=True)
             return False
+        except OSError as e:
+            # #236: PermissionError以外のOSError(読み取り専用マウントのErrno 30、
+            # NAS切断時のErrno 5、ディスクフル時のErrno 28等)はここで捕捉されず、
+            # 専用のDiscord通知を経由しないままrun_lockedのexcept Exceptionまで
+            # 伝播し、インフラ障害の原因究明が遅れていた。extract_youtube_urls.pyの
+            # process_subscriptions(#185)と同様にOSError全般を捕捉する。
+            DiscordNotifier.send(f"❌ ディレクトリ作成エラー: {path} ({e})", is_error=True)
+            return False
 
     @staticmethod
     def check_disk_space(path: Path, min_free_gb: Optional[int] = None) -> bool:
