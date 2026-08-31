@@ -73,6 +73,17 @@ def perform_backup() -> Tuple[bool, str, float]:
         _notify_and_log_error(error_msg)
         if temp_path.exists():
             os.remove(temp_path)
+        # #248: shutil.copy2()がNAS側の容量不足・切断等でコピー途中に失敗した場合、
+        # または転送後の整合性確認(サイズ比較)に失敗した場合、NAS側には書きかけ・
+        # 破損した不完全なファイル(nas_final_path)がそのまま残置されていた。
+        # ローカルの一時ファイルと同様に、NAS側の不完全なファイルも削除を試みる。
+        # 削除自体の失敗(NASが切断されている等)でこの例外処理全体が中断しない
+        # よう、個別にtry-exceptで保護する。
+        if nas_final_path.exists():
+            try:
+                os.remove(nas_final_path)
+            except OSError as cleanup_err:
+                logger.error(f"❌ NAS側の不完全なバックアップファイルの削除に失敗: {cleanup_err}")
         return False, str(e), 0.0
 
 def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:
