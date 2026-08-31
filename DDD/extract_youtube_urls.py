@@ -402,10 +402,14 @@ class SubscriptionManager:
         db_path = current_base.parent / "home_system.db"
 
         # 2. DB初期化
+        # #185: db_path.parent.mkdir()が送出しうるOSError(権限エラー・読み取り専用
+        # マウント等)は sqlite3.Error のサブクラスではないため捕捉されず、本メソッド
+        # 内の他の失敗経路(ログ出力+安全なreturn)というフェイルソフト方針に反して
+        # --cron実行全体が未処理例外で異常終了していた。OSErrorも合わせて捕捉する。
         try:
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._init_db(db_path)
-        except sqlite3.Error as e:
+        except (sqlite3.Error, OSError) as e:
             logger.error(f"❌ DB初期化エラー: {e}", exc_info=True)
             return
 
