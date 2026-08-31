@@ -184,9 +184,6 @@ async def process_approval_command(approver_id: str, text: str) -> TextMessage:
             msg = f"✅ 承認しました！\n獲得: {res['earnedExp']}EXP, {res['earnedGold']}G"
             if res.get('leveledUp'):
                 msg += f"\n🎉 レベルアップ！ Lv.{res['newLevel']}"
-            if res.get('bossEffect'):
-                dmg = res['bossEffect']['damage']
-                msg += f"\n⚔️ ボスに {dmg} ダメージ！"
             return TextMessage(text=msg)
             
         elif "却下" in cmd:

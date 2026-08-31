@@ -187,3 +187,13 @@ class TestProcessApprovalCommand:
     async def test_unrecognized_command_returns_unknown_message(self, isolated_db):
         result = await line_service.process_approval_command("dad", "こんにちは 123")
         assert "不明なコマンド" in result.text
+
+    async def test_no_boss_effect_reference_remains(self):
+        """Issue #181の回帰テスト: quest_service.process_approve_questの戻り値dictに
+        bossEffectキーは存在せず(2026年8月のリファクタリングでボス戦機能は削除済み、
+        CLAUDE.md参照)、`res.get('bossEffect')`は常にNoneとなる死に分岐だった。
+        CLAUDE.mdの規約(削除済み機能を復活/参照しないこと)の回帰防止として、
+        ソース上にこの参照が再度混入していないことを直接確認する。"""
+        import inspect
+        source = inspect.getsource(line_service.process_approval_command)
+        assert "bossEffect" not in source
