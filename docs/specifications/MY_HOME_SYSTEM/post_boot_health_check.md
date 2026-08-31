@@ -453,46 +453,46 @@
 ### `PostBootHealthCheck._send_report`
 
 * **役割**: `self.results` の内容からステータスアイコン付きのレポート文字列を組み立て、ログ出力とDiscord通知を行う。
-* 根拠: `def _send_report(self):` (行番号: 356〜390 / 抜粋: "def _send_report(self):")
+* 根拠: `def _send_report(self):` (行番号: 371〜405 / 抜粋: "def _send_report(self):")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 356 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 371 / 抜粋: "def _send_report(self):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 356〜390 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 371〜405 / 抜粋: "def _send_report(self):")
 
 
 * **副作用**: `self._get_uptime()` の呼び出し、`logger.info` によるレポート全文のログ出力、`common.send_push` によるDiscord通知送信。
-* 根拠: `common.send_push(\n            user_id=getattr(config, "LINE_USER_ID", None),\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 385〜390 / 抜粋: "common.send_push(")
+* 根拠: `common.send_push(\n            user_id=getattr(config, "LINE_USER_ID", None),\n            messages=[{"type": "text", "text": f"{title}\n\n{body}"}],\n            target="discord",\n            channel="report"\n        )` (行番号: 400〜405 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 356〜390 / 抜粋: "def _send_report(self):")
+* 根拠: (行番号: 371〜405 / 抜粋: "def _send_report(self):")
 
 
 
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に `PostBootHealthCheck` をインスタンス化し `run()` を呼び出す。
-* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 392〜394 / 抜粋: "if __name__ == "__main__":")
+* 根拠: `if __name__ == "__main__":\n    checker = PostBootHealthCheck()\n    checker.run()` (行番号: 407〜409 / 抜粋: "if __name__ == "__main__":")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 392〜394 / 抜粋: "checker = PostBootHealthCheck()")
+* 根拠: (行番号: 407〜409 / 抜粋: "checker = PostBootHealthCheck()")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 392〜394 / 抜粋: "checker.run()")
+* 根拠: (行番号: 407〜409 / 抜粋: "checker.run()")
 
 
 * **副作用**: `PostBootHealthCheck` インスタンスの生成、`run()` を通じた全チェックの実行とレポート送信。
-* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 393〜394 / 抜粋: "checker.run()")
+* 根拠: `checker = PostBootHealthCheck()\n    checker.run()` (行番号: 408〜409 / 抜粋: "checker.run()")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 392〜394 / 抜粋: "if __name__ == "__main__":")
+* 根拠: (行番号: 407〜409 / 抜粋: "if __name__ == "__main__":")
 
 
 
@@ -526,6 +526,7 @@ flowchart TD
 graph TD
     subgraph "post_boot_health_check.py"
         logger["logger (Global)"]
+        resolve_bt["resolve_target_bluetooth_mac()"]
         CheckResult["CheckResult (dataclass)"]
         PostBootHealthCheck["PostBootHealthCheck"]
         init["__init__()"]
@@ -556,6 +557,7 @@ graph TD
     end
 
     logger --> common
+    resolve_bt --> config
     PostBootHealthCheck --> init
     PostBootHealthCheck --> check_port
     PostBootHealthCheck --> check_http
