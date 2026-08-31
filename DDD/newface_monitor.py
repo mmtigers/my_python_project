@@ -1547,8 +1547,9 @@ class DataManager:
         """日次サマリの集計状態を読み込む。
 
         Returns:
-            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},
-                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。
+            Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}
+                形式の集計状態。'counts'は直近の送信以降に累積した未送信件数
+                (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。
                 ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
         """
         summary_file = DataManager._daily_summary_file()
@@ -1589,12 +1590,20 @@ class DataManager:
 
     @staticmethod
     def record_daily_new_casts(site_id: str, count: int) -> None:
-        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。
+        """サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する。
 
         cron等により1時間毎に別プロセスとして実行される前提のため、
-        実行毎にファイルを読み書きして状態を永続化する。集計中の日付が
-        当日と異なる場合（日付が変わった後の最初の検知）は、集計を
-        リセットしてから加算する。
+        実行毎にファイルを読み書きして状態を永続化する。
+
+        #183: 以前はカレンダー日付が変わった時点で無条件に集計をリセットして
+        いたため、(1) 21時台のサマリ送信後(22時〜24時)に検知した件数が、送信
+        済みにもかかわらず加算され続けた挙げ句、翌日最初の検知時のリセットで
+        どのサマリにも計上されないまま消える、(2) 21時台に実行自体が無かった日
+        (cron欠落・ロック競合)は日付リセットにより追い付き送信もできずその日の
+        集計が丸ごと失われる、という2つの過少報告経路があった。日付によるリセットを
+        廃止し、_maybe_send_daily_summaryが実際に送信した直後にのみ集計を
+        クリアすることで、未送信の件数が(日付をまたいでも)必ず次回送信に
+        引き継がれるようにする。
 
         Args:
             site_id (str): 検知元サイトのID。
@@ -1603,11 +1612,7 @@ class DataManager:
         if count <= 0:
             return
 
-        today_str = datetime.now().strftime('%Y-%m-%d')
         data = DataManager.load_daily_summary()
-        if data.get('date') != today_str:
-            data = {'date': today_str, 'counts': {}, 'last_sent_date': data.get('last_sent_date', '')}
-
         counts = data.setdefault('counts', {})
         counts[site_id] = counts.get(site_id, 0) + count
         DataManager.save_daily_summary(data)
@@ -1910,13 +1915,20 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
 
 
 def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
-    """21時台の実行のときだけ、その日の新規検知サマリをDiscordへテキスト通知する。
+    """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。
 
     このスクリプトはcron等により1時間毎に別プロセスとして起動される前提
     (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは
     実行時刻の時(hour)が21かどうかで判定する。同日中に複数回21時台の実行が
     走った場合の重複送信を避けるため、送信済み日付をdaily_summary.jsonに
     永続化して判定に用いる。
+
+    #183: counts は record_daily_new_casts 側でカレンダー日付によるリセットを
+    行わなくなったため、ここで送信するのは「厳密な当日分」ではなく「前回この
+    関数が実際に送信してから今までに累積した全件数」になる。21時台の実行が
+    まる1日以上飛んだ場合(cron欠落・ロック競合)も、次に成功した21時台の実行で
+    未送信分がまとめて送られる(取りこぼしなし)。送信が成功した場合のみ
+    countsをクリアする。
 
     Args:
         notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
@@ -1930,14 +1942,11 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
     if data.get('last_sent_date') == today_str:
         return
 
-    counts = data.get('counts', {}) if data.get('date') == today_str else {}
+    counts = data.get('counts', {})
     site_names = {site.site_id: site.name for site in MonitorConfig.SITES}
     notifier.notify_daily_summary(counts, site_names, today_str)
 
-    data['date'] = data.get('date', today_str)
-    data.setdefault('counts', {})
-    data['last_sent_date'] = today_str
-    DataManager.save_daily_summary(data)
+    DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
 
 
 # M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや
