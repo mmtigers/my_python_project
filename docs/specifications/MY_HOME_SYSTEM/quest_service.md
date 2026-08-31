@@ -328,30 +328,30 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._process_approve_quest_locked`
 
-* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を承認する実処理（`process_approve_quest`が取得したユーザー単位ロック内で実行されることを前提とする）。`_apply_quest_rewards`で報酬を確定し、連結された相方履歴があれば`_approve_linked_history`でカスケード承認、TVロック解除対象クエストかつ子供のクエストであれば`_trigger_tv_unlock`を呼ぶ。TVロック判定の`quest`は、`sync_master_data`のマスタ削除(`DELETE ... NOT IN`)後も`quest_history`の`pending`行が残るケースで`None`になり得るため、`if quest and ...`で`None`ガードされている（M-1-1: 以前はこのガードが無く、マスタ削除済みクエストのpending履歴を承認しようとすると`quest['quest_id']`が無条件に評価され`TypeError`で500になり承認が恒久的に失敗していた）。
-* 根拠: `def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:` (行番号: 410〜444)
-* 根拠: `if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:` (行番号: 439〜441 / 抜粋: "quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る")
+* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を承認する実処理（`process_approve_quest`が取得したユーザー単位ロック内で実行されることを前提とする）。`_apply_quest_rewards`で報酬を確定し、連結された相方履歴があれば`_approve_linked_history`でカスケード承認、TVロック解除対象クエストかつ子供のクエストであれば`_trigger_tv_unlock`を呼ぶ。TVロック判定の`quest`は、`sync_master_data`のマスタ削除(`DELETE ... NOT IN`)後も`quest_history`の`pending`行が残るケースで`None`になり得るため、`if quest and ...`で`None`ガードされている（M-1-1: 以前はこのガードが無く、マスタ削除済みクエストのpending履歴を承認しようとすると`quest['quest_id']`が無条件に評価され`TypeError`で500になり承認が恒久的に失敗していた）。**（Issue #238で修正）** `_approve_linked_history`が返す相方の報酬情報（`user_id`/`leveledUp`/`newLevel`/`earnedMedals`）を、`result`辞書へ`partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`として格納するようになった。以前は`_approve_linked_history`の戻り値が無く(`-> None`)、相方の報酬情報はDB上には正しく反映されるもののAPIレスポンスには一切含まれず、フロント側が相方（自分でタップしなかった方の子ども）のレベルアップ/メダル獲得演出を出す手段が無かった。
+* 根拠: `def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:` (行番号: 477〜519)
+* 根拠: `if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:` (行番号: 508〜510 / 抜粋: "quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る")、相方報酬情報の格納 (行番号: 500〜506 / 抜粋: "partner_result = self._approve_linked_history(cur, hist['linked_history_id'])")
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`
-* 根拠: (行番号: 410)
-* **戻り値/レスポンス**: `Dict[str, Any]`
-* 根拠: (行番号: 410, 444)
+* 根拠: (行番号: 477)
+* **戻り値/レスポンス**: `Dict[str, Any]`（連結された相方履歴が無い場合は`partnerUserId`等のキー自体が含まれない。ルーター側の`response_model=CompleteResponse`により未設定時は既定値で埋められる）
+* 根拠: (行番号: 477, 519)
 * **副作用**: DB参照/更新、`_approve_linked_history`/`_trigger_tv_unlock`の呼び出し、ログ出力
-* 根拠: (行番号: 433〜434, 439〜441, 443)
+* 根拠: (行番号: 500〜506, 508〜510, 517)
 * **エラーハンドリング**: 承認者が`role_adult`でない場合 `HTTPException(403)`、履歴なし `HTTPException(404)`、承認待ちでない場合 `HTTPException(400)`
-* 根拠: (行番号: 413〜414, 417, 418)
+* 根拠: (行番号: 480〜481, 484, 485)
 
 ### `QuestService._approve_linked_history`
 
-* **役割**: 兄妹連携クエストで連結された相方側の`quest_history`行を承認済みに確定する。対象行が存在しない、または既に`pending`でない場合は何もしない冪等な実装。呼び出し元`process_approve_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない。
-* 根拠: `def _approve_linked_history(self, cur, linked_history_id: int) -> None:` (行番号: 446〜459 / 抜粋: "相方側 quest_history 行を承認済みに確定する(冪等)")
+* **役割**: 兄妹連携クエストで連結された相方側の`quest_history`行を承認済みに確定する。対象行が存在しない、または既に`pending`でない場合は何もしない冪等な実装。呼び出し元`process_approve_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない。**（Issue #238で修正）** 相方の`user_id`と`_apply_quest_rewards`の戻り値（`leveledUp`/`newLevel`/`earnedGold`/`earnedExp`/`earnedMedals`）を1つの辞書にまとめて呼び出し元へ返すようになった（以前は`-> None`で常に何も返していなかった）。
+* 根拠: `def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:` (行番号: 521〜541 / 抜粋: "相方側 quest_history 行を承認済みに確定する(冪等)")
 * **引数/リクエスト**: `cur`, `linked_history_id: int`
-* 根拠: (行番号: 446)
-* **戻り値/レスポンス**: なし（`-> None`）
-* 根拠: (行番号: 446)
+* 根拠: (行番号: 521)
+* **戻り値/レスポンス**: `Optional[Dict[str, Any]]`。対象行が存在しない/`pending`でない/対象ユーザーが存在しない場合は`None`。正常時は`{"user_id": ..., "status": "success", "leveledUp": ..., "newLevel": ..., "earnedGold": ..., "earnedExp": ..., "earnedMedals": ...}`（`_apply_quest_rewards`の戻り値に`user_id`を加えたもの）。
+* 根拠: (行番号: 521, 528, 535, 541)
 * **副作用**: DB参照/更新（`_apply_quest_rewards`経由）、ログ出力
-* 根拠: (行番号: 458〜459)
-* **エラーハンドリング**: 対象履歴が存在しない・`pending`でない、または対象ユーザーが存在しない場合は早期`return`（例外を送出しない）
-* 根拠: (行番号: 449〜450, 454〜455)
+* 根拠: (行番号: 539〜540)
+* **エラーハンドリング**: 対象履歴が存在しない・`pending`でない、または対象ユーザーが存在しない場合は早期`return None`（例外を送出しない）
+* 根拠: (行番号: 528〜529, 534〜535)
 
 ### `QuestService._trigger_tv_unlock`
 
