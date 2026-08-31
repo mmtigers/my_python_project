@@ -45,7 +45,7 @@
 | `common.get_db_cursor` | トランザクション管理やDB接続の詳細な仕組みが不明。 | `with common.get_db_cursor() a...` (行番号: 73 / 抜粋: "with common.get_db_cursor() a...") |
 | `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。 | `await save_log_async(...)` (行番号: 36 / 抜粋: "await save_log_async(") |
 | `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 110 / 抜粋: "data = await asyncio.to_threa...") |
-| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 170 / 抜粋: "res = await asyncio.to_thread...") |
+| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 181 / 抜粋: "res = await asyncio.to_thread...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -213,24 +213,24 @@
 
 ### `process_approval_command`
 
-* **役割**: 入力テキストを解析し、クエストの承認または却下の処理を実行して結果の`TextMessage`を返す。
-* 根拠: `async def process_approval_c...` (行番号: 159-194 / 抜粋: "def process_approval_command(")
+* **役割**: 入力テキストを解析し、クエストの承認または却下の処理を実行して結果の`TextMessage`を返す。**（Issue #181で修正）** 承認時のメッセージ構築において、`quest_service.process_approve_quest`の戻り値dictに存在しない`bossEffect`キーを参照する死に分岐（2026年8月のリファクタリングで削除済みのボス戦機能への残存参照、CLAUDE.md規約違反）が存在したが、これを削除した。
+* 根拠: `async def process_approval_c...` (行番号: 170-200 / 抜粋: "def process_approval_command(")、削除箇所 (行番号: 184-187 / 抜粋: "msg = f\"✅ 承認しました！\\n獲得: {res['earnedExp']}EXP, {res['earnedGold']}G\"\n            if res.get('leveledUp'):\n                msg += f\"\\n🎉 レベルアップ！ Lv.{res['newLevel']}\"\n            return TextMessage(text=msg)")
 
 
 * **引数/リクエスト**: `approver_id` (str), `text` (str)
-* 根拠: 関数の引数定義 (行番号: 159 / 抜粋: "approver_id: str, text: str")
+* 根拠: 関数の引数定義 (行番号: 170 / 抜粋: "approver_id: str, text: str")
 
 
 * **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 159 / 抜粋: "-> TextMessage:")
+* 根拠: 戻り値の型ヒント (行番号: 170 / 抜粋: "-> TextMessage:")
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`quest_service.process_approve_quest` または `process_reject_quest`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 170, 182 / 抜粋: "await asyncio.to_thread(")
+* 根拠: `await asyncio.to_thread...` (行番号: 181, 190 / 抜粋: "await asyncio.to_thread(")
 
 
 * **エラーハンドリング**: ID変換時の `ValueError` をキャッチし専用メッセージを返す。その他の `Exception` をキャッチし、例外に `detail` 属性があればそれを付与したエラーメッセージを返す。
-* 根拠: `except ValueError:` および `except Exception as e:` (行番号: 187, 189 / 抜粋: "except ValueError:")
+* 根拠: `except ValueError:` および `except Exception as e:` (行番号: 195, 197 / 抜粋: "except ValueError:")
 
 
 
