@@ -49,23 +49,46 @@
 ### モジュールdocstring（二重定義）
 
 * **役割**: ファイル冒頭に更新履歴を記したdocstringが2つ連続して記述されている。Pythonの仕様上、モジュールの実際の `__doc__` になるのは最初の文字列リテラルのみであり、2つ目は単なる評価済みの式文（未使用の文字列リテラル）として扱われる。
-* 根拠: 1つ目 (行番号: 1〜7 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 4.1 (Complete Descriptions)\n[2026-01-14 更新]"), 2つ目 (行番号: 8〜14 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)\n[2026-01-24 更新]")
+* 根拠: 1つ目 (行番号: 5〜11 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 4.1 (Complete Descriptions)\n[2026-01-14 更新]"), 2つ目 (行番号: 12〜18 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)\n[2026-01-24 更新]")
 
 
 * **引数/リクエスト**: 該当なし（静的な文字列リテラル）
-* 根拠: (行番号: 1〜14 / 抜粋: "\"\"\"")
+* 根拠: (行番号: 5〜18 / 抜粋: "\"\"\"")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: (行番号: 1〜14 / 抜粋: "\"\"\"")
+* 根拠: (行番号: 5〜18 / 抜粋: "\"\"\"")
 
 
 * **副作用**: 1つ目のdocstringはモジュールの `__doc__` 属性として保持される。2つ目は評価はされるが、いかなる変数にも代入されず破棄される。
-* 根拠: (行番号: 8 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)")
+* 根拠: (行番号: 12 / 抜粋: "\"\"\"\nFamily Quest Master Data - Phase 5.1 (Boss Expansion & Price Adjustment)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 1〜14 / 抜粋: "\"\"\"")
+* 根拠: (行番号: 5〜18 / 抜粋: "\"\"\"")
+
+
+
+### `logger`
+
+* **役割**: `__name__`（`"quest_data"`）を名前としてPython標準の`logging.getLogger`でロガーを初期化する。`notification_service.py`等が使う`core.logger.setup_logging`とは異なり、標準の`logging.getLogger`のみを使用している。
+* 根拠: [変数宣言] (行番号: 20 / 抜粋: "logger = logging.getLogger(__name__)")
+
+
+* **引数/リクエスト**: 該当なし
+* 根拠: (行番号: 20 / 抜粋: "logger = logging.getLogger(__name__)")
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: (行番号: 20 / 抜粋: "logger = logging.getLogger(__name__)")
+
+
+* **副作用**: なし（`quest_users.local.json`読み込み失敗時に`logger.warning`を呼び出す消費元として後続コードから参照される）
+* 根拠: (行番号: 73 / 抜粋: "logger.warning(f\"quest_users.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}\")")
+
+
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 20 / 抜粋: "logger = logging.getLogger(__name__)")
 
 
 
