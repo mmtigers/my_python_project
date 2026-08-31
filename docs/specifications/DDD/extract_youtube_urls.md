@@ -88,8 +88,8 @@
 
 ### `AppConfig`
 
-* **役割**: 出力先ディレクトリ、NASパス、サブディレクトリ名、レート制限対策のスリープ範囲、`yt_dlp`オプションなど、アプリケーション全体の設定値を保持する定数クラス（インスタンス化不要、クラス変数と`classmethod`のみで構成）。
-* 根拠: [クラス定義とDocstring] (行番号: 61〜62 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")
+* **役割**: 出力先ディレクトリ、NASパス、サブディレクトリ名、レート制限対策のスリープ範囲、`yt_dlp`オプションなど、アプリケーション全体の設定値を保持する定数クラス（インスタンス化不要、クラス変数と`classmethod`のみで構成）。`SUBSCRIPTION_SLEEP_RANGE`はチャンネルURL「間」の巡回間隔、`CONSECUTIVE_FAILURE_THRESHOLD`はサーキットブレーカーの連続失敗閾値。**（Issue #227で追加）** `INTRA_CHANNEL_SLEEP_RANGE`は、1チャンネル処理の内部で発行される`/videos`→`/playlists`→各プレイリストという複数リクエスト間に挟むジッター待機の範囲（既定1.0〜3.0秒）。以前は`SUBSCRIPTION_SLEEP_RANGE`によるチャンネル間の間隔のみが存在し、チャンネル内部の連続リクエストは無防備のまま連射されていたため、この内部リクエスト用の間隔を別途追加した。
+* 根拠: [クラス定義とDocstring] (行番号: 61〜62 / 抜粋: "class AppConfig:\n    """アプリケーション設定を保持する定数クラス。"""")、内部リクエスト用スリープ範囲 (行番号: 81 / 抜粋: "INTRA_CHANNEL_SLEEP_RANGE: tuple = (1.0, 3.0)")
 
 
 * **引数/リクエスト**: なし（クラス変数として静的に定義）
@@ -134,6 +134,24 @@
 
 * **戻り値/レスポンス**: 該当なし（データクラスのフィールド定義自体）
 * **副作用**: なし
+* **エラーハンドリング**: なし
+
+
+### `YouTubeExtractor.__init__`（Issue #227で追加）
+
+* **役割**: `last_extract_internal_failures`（1チャンネル処理内部での失敗件数カウンタ、初期値0）を初期化するコンストラクタ。以前は`YouTubeExtractor`に`__init__`が無かったが、`extract_iter`内部の失敗を呼び出し元(`SubscriptionManager.process_subscriptions`)のサーキットブレーカーへ伝えるための状態保持先として追加された。
+* 根拠: [メソッド定義とコメント] (行番号: 131〜138 / 抜粋: "def __init__(self) -> None:\n        # #227: extract_iter内部(1チャンネルにつき/videos・/playlists・各プレイリスト\n        # という複数リクエスト)で発生した失敗件数。")
+
+
+* **引数/リクエスト**: なし
+* 根拠: (行番号: 131)
+
+
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: `self.last_extract_internal_failures`への属性代入のみ
+* 根拠: (行番号: 138 / 抜粋: "self.last_extract_internal_failures: int = 0")
+
+
 * **エラーハンドリング**: なし
 
 
@@ -197,24 +215,24 @@
 
 ### `YouTubeExtractor.extract_iter`
 
-* **役割**: URLの種類に応じて抽出方式を切り替えるイテレータメソッド。チャンネルURLの場合は`/videos`（全動画）と`/playlists`（各プレイリスト）を自動探索して複数の`ExtractionResult`を`yield`し、それ以外（プレイリストURLや単一動画URL）の場合は単発で`_extract_single_list`を呼び出す。
-* 根拠: [メソッド定義とDocstring] (行番号: 219〜229 / 抜粋: "def extract_iter(self, target_url: str) -> Iterator[ExtractionResult]:\n        """URLの種類に応じて再帰的または単発で抽出を行うイテレータ。")
+* **役割**: URLの種類に応じて抽出方式を切り替えるイテレータメソッド。チャンネルURLの場合は`/videos`（全動画）と`/playlists`（各プレイリスト）を自動探索して複数の`ExtractionResult`を`yield`し、それ以外（プレイリストURLや単一動画URL）の場合は単発で`_extract_single_list`を呼び出す。**（Issue #227で修正）** 以前は`/videos`取得→`/playlists`取得→検出した各プレイリストへの逐次リクエストがsleep無しで連続発行されていたため、外側のチャンネルURL間のジッター（`SUBSCRIPTION_SLEEP_RANGE`）とは独立に、1チャンネル内部の複数リクエストがレート制限/Bot検知を誘発しやすい構造だった。現在は`/videos`→`/playlists`間、および各プレイリスト取得の前（最初の1件を除く）に`AppConfig.INTRA_CHANNEL_SLEEP_RANGE`によるジッター待機を挟む。また、呼び出しの先頭で`self.last_extract_internal_failures`を0にリセットし、個々のプレイリスト取得失敗やプレイリスト一覧取得自体の失敗のたびに加算することで、呼び出し元が「1件でも結果をyieldできたか」だけでなく「内部で何件失敗したか」も判定できるようにしている。
+* 根拠: [メソッド定義とDocstring] (行番号: 234〜244 / 抜粋: "def extract_iter(self, target_url: str) -> Iterator[ExtractionResult]:\n        """URLの種類に応じて再帰的または単発で抽出を行うイテレータ。")、内部リクエスト間のスリープ (行番号: 264〜266, 283〜286 / 抜粋: "time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))")、失敗カウント (行番号: 245, 293〜297 / 抜粋: "self.last_extract_internal_failures = 0")
 
 
 * **引数/リクエスト**: `target_url: str`（開始URL）
-* 根拠: [引数定義とDocstring] (行番号: 219, 224〜225 / 抜粋: "target_url (str): 開始URL。")
+* 根拠: [引数定義とDocstring] (行番号: 234, 239〜240 / 抜粋: "target_url (str): 開始URL。")
 
 
 * **戻り値/レスポンス**: `Iterator[ExtractionResult]`（抽出結果を順次`yield`）
-* 根拠: [Docstringと戻り値ヒント] (行番号: 219, 227〜228 / 抜粋: "Yields:\n            Iterator[ExtractionResult]: 抽出結果を順次返す。")
+* 根拠: [Docstringと戻り値ヒント] (行番号: 234, 242〜243 / 抜粋: "Yields:\n            Iterator[ExtractionResult]: 抽出結果を順次返す。")
 
 
-* **副作用**: チャンネルURLの場合、`/videos`・`/playlists`双方への`yt_dlp`アクセス（ネットワーク通信）、進捗ログ出力。
-* 根拠: [チャンネル探索処理] (行番号: 230〜266 / 抜粋: "if self._is_channel_url(target_url):\n            logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")")
+* **副作用**: チャンネルURLの場合、`/videos`・`/playlists`双方への`yt_dlp`アクセス（ネットワーク通信）、内部リクエスト間の`time.sleep`、進捗ログ出力、`self.last_extract_internal_failures`のリセットと加算。
+* 根拠: [チャンネル探索処理] (行番号: 245〜297 / 抜粋: "if self._is_channel_url(target_url):\n            logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")")
 
 
-* **エラーハンドリング**: プレイリスト一覧取得時（`/playlists`）の例外を`except Exception`で捕捉し、スタックトレース付きでエラーログを出力（処理は中断されるがメソッド自体は正常終了）。個々の`_extract_single_list`呼び出しの失敗（`None`が返る場合）は単に`yield`をスキップする。
-* 根拠: [try-exceptブロック] (行番号: 265〜266 / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)")
+* **エラーハンドリング**: プレイリスト一覧取得時（`/playlists`）の例外を`except Exception`で捕捉し、スタックトレース付きでエラーログを出力した上で`last_extract_internal_failures`を1加算する（処理は中断されるがメソッド自体は正常終了）。個々の`_extract_single_list`呼び出しの失敗（`None`が返る場合）は`yield`をスキップし、プレイリスト取得（`pl_url`が存在する場合）に限り`last_extract_internal_failures`を1加算する。
+* 根拠: [try-exceptブロックと失敗カウント] (行番号: 291〜297 / 抜粋: "except Exception:\n                logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)\n                self.last_extract_internal_failures += 1")
 
 
 ### `FileManager._sanitize_filename`
@@ -319,7 +337,7 @@
 
 ### `SubscriptionManager.process_subscriptions`
 
-* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。**(Issue #185バグ修正)** DB初期化ブロック内の`db_path.parent.mkdir(parents=True, exist_ok=True)`が送出しうる`OSError`（権限エラー・読み取り専用マウント等）は`sqlite3.Error`のサブクラスではないため、以前は`except sqlite3.Error`節で捕捉されず、本メソッド内の他の失敗経路（エラーログ出力+安全な`return`）というフェイルソフト方針に反して`--cron`実行全体が未処理例外で異常終了していた。`except`節を`(sqlite3.Error, OSError)`に拡張し、`OSError`も同じフェイルソフト方針で処理するよう修正した。
+* **役割**: DBから読み込んだアクティブなチャンネルURLを順次巡回し、`extractor.extract_iter`で抽出→`file_manager.save`で保存するメイン処理。環境検証（NASフォールバック中でないか）、DB初期化、リクエスト間のジッター付き待機、連続失敗時のサーキットブレーカー（`CONSECUTIVE_FAILURE_THRESHOLD`回で巡回を中断）を含む。**（Issue #227で修正）** 以前はサーキットブレーカーの成否判定を`got_result`（`extract_iter`が1件でも結果をyieldしたか）のみで行っていたため、あるチャンネルの`/videos`等の一部リクエストが成功しさえすれば、内部の大量プレイリストが軒並み失敗しても連続失敗カウントが常に0にリセットされ、サーキットブレーカーが内部の失敗を検知できなかった。現在は`got_result`に加えて`extractor.last_extract_internal_failures`（`extract_iter`内部の失敗件数）も確認し、内部失敗が1件でもあれば連続失敗としてカウントする。**(Issue #123バグ修正)** 以前は`db_path`を`__init__`時点のNAS状態で固定していたため、アプリ起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰していると（autofsの再マウント遅延はこのリポジトリで既知の事象）、ここでの検証自体は最新のNAS状態を見て通過するのに`db_path`だけ古いローカルパスのまま取り残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり「アクティブなサブスクリプションが登録されていません」で無言のno-op終了し、巡回1回分が静かにスキップされてゴミの空`DDD/home_system.db`が残る不具合があった。現在は`AppConfig.get_output_base_dir()`の呼び出し結果を1回だけ取得し（呼び出し回数を1回に抑えるためでもある）、環境検証と`db_path`導出の両方をその同一時点の値から行う。**(Issue #185バグ修正)** DB初期化ブロック内の`db_path.parent.mkdir(parents=True, exist_ok=True)`が送出しうる`OSError`（権限エラー・読み取り専用マウント等）は`sqlite3.Error`のサブクラスではないため、以前は`except sqlite3.Error`節で捕捉されず、本メソッド内の他の失敗経路（エラーログ出力+安全な`return`）というフェイルソフト方針に反して`--cron`実行全体が未処理例外で異常終了していた。`except`節を`(sqlite3.Error, OSError)`に拡張し、`OSError`も同じフェイルソフト方針で処理するよう修正した。
 * 根拠: [メソッド定義とDocstringおよびIssue #123修正コメント] (行番号: 385〜402 / 抜粋: "def process_subscriptions(self) -> None:\n        """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""\n        # 1. 環境検証（データロスト防止の防波堤）\n        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、\n        ...\n        current_base = AppConfig.get_output_base_dir()\n        if not self._verify_environment(current_base):\n            return\n        db_path = current_base.parent / "home_system.db"")、Issue #185修正のコメントとexcept節 (行番号: 405〜412 / 抜粋: "# #185: db_path.parent.mkdir()が送出しうるOSError(権限エラー・読み取り専用\n        # マウント等)は sqlite3.Error のサブクラスではないため捕捉されず", "except (sqlite3.Error, OSError) as e:")
 
 
@@ -332,8 +350,8 @@
 * 根拠: [メイン処理フロー] (行番号: 399, 433 / 抜粋: "current_base = AppConfig.get_output_base_dir()", "logger.info(f"🔄 サブスクリプション巡回開始: {len(urls)} 件 (Source: SQLite DB)")")
 
 
-* **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`, `OSError`。Issue #185で`OSError`を追加)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
-* 根拠: [各種ガード節とbreak] (行番号: 400〜401, 412〜414, 425〜427, 429〜431, 452〜454 / 抜粋: "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
+* **エラーハンドリング**: 環境検証失敗時は即座に`return`。DB初期化(`sqlite3.Error`, `OSError`。Issue #185で`OSError`を追加)・DB読み込み(`sqlite3.Error`)失敗時はエラーログを出力して`return`。アクティブなURLが0件の場合はデバッグログを出力して`return`。**（Issue #227で修正）** `got_result`が`True`でも`extractor.last_extract_internal_failures`が1以上であれば連続失敗としてカウントし、連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`（既定3）に達した場合はエラーログを出力してループを`break`で中断する。
+* 根拠: [各種ガード節とbreakおよび内部失敗判定] (行番号: 431〜433, 443〜445, 460〜462, 464〜466, 483〜495 / 抜粋: "internal_failures = getattr(self.extractor, "last_extract_internal_failures", 0)\n            if got_result and not internal_failures:\n                consecutive_failures = 0\n            else:\n                consecutive_failures += 1", "if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:\n                    logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")\n                    break")
 
 
 ### `UrlExtractorApp.__init__`
