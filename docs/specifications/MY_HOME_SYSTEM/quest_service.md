@@ -22,16 +22,18 @@
 
 ## 2. ファイルの概要
 
-データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。クエスト完了処理（`process_complete_quest`）は`_get_completion_lock_key`が算出するキーへのプロセス内`threading.Lock`による直列化で二重加算を防ぐ。このキーは通常`(user_id, quest_id)`だが、対象クエストの`target_user`が`'siblings'`（兄妹連携クエスト）の場合は報告者(`user_id`)に依存しない共通キー`('__coop__', quest_id)`になる（Issue #96: 以前は兄妹連携クエストでも`(user_id, quest_id)`のままだったため、兄の報告は`(兄, quest_id)`、妹の報告は`(妹, quest_id)`と別ロックとなって直列化されず、ほぼ同時報告で`_process_coop_quest_completion`によるpendingペア生成が二重に走り、承認時に報酬が2倍になる不具合があった）。報酬購入処理（`process_purchase_reward`）は、DBレベルの単一アトミックUPDATE（`WHERE gold >= ?`＋`rowcount`判定）による残高減算の同時多重リクエスト対策に加え、`(user_id, reward_id)`単位のプロセス内ロック（`_get_purchase_lock`）と直近10秒以内の同一報酬購入を拒否するスパムチェックを持つ（Issue #101: アトミックUPDATEは「残高を読む→比較する→書く」の分割による二重減算は防いでいたが、購入確認モーダルの連打で1回目のレスポンス前に届いた2回目のリクエストは、サーバー側では独立した正当な購入として扱われてしまい、残高が足りる限り2回とも成立して二重購入が起こり得た）。
+データベースクエリを用いて、ユーザー情報、クエスト、アイテム（ごほうび）、インベントリの状態管理と操作を行うサービス群を定義したファイル。また、マスターデータファイル（`quest_data`）とデータベースの同期や、画面表示用の集約データ生成を担う。親権限の判定は `quest_users.role` カラム（モジュール定数 `ROLE_ADULT` / `ROLE_CHILD` の2値）を唯一の基準として行われ、`target_user == 'siblings'` のクエストについては兄妹どちらか一方の完了報告で双方の履歴を連結（`linked_history_id`）して同時に承認・却下・取消（カスケード）する「兄妹連携クエスト」機構を持つ。クエスト完了処理（`process_complete_quest`）は`_get_completion_lock_key`が算出するキーへのプロセス内`threading.Lock`による直列化で二重加算を防ぐ。このキーは通常`(user_id, quest_id)`だが、対象クエストの`target_user`が`'siblings'`（兄妹連携クエスト）の場合は報告者(`user_id`)に依存しない共通キー`('__coop__', quest_id)`になる（Issue #96: 以前は兄妹連携クエストでも`(user_id, quest_id)`のままだったため、兄の報告は`(兄, quest_id)`、妹の報告は`(妹, quest_id)`と別ロックとなって直列化されず、ほぼ同時報告で`_process_coop_quest_completion`によるpendingペア生成が二重に走り、承認時に報酬が2倍になる不具合があった）。加えて、大人の即時完了パス(`_apply_quest_rewards`)による`quest_users`更新を対象ユーザー単位で直列化するため、`process_complete_quest`は`_get_user_balance_lock`も取得する(Issue #161、詳細は32行目以降を参照)。報酬購入処理（`process_purchase_reward`）は、DBレベルの単一アトミックUPDATE（`WHERE gold >= ?`＋`rowcount`判定）による残高減算の同時多重リクエスト対策に加え、`(user_id, reward_id)`単位のプロセス内ロック（`_get_purchase_lock`）と直近10秒以内の同一報酬購入を拒否するスパムチェック、さらに`_get_user_balance_lock`を持つ（Issue #101: アトミックUPDATEは「残高を読む→比較する→書く」の分割による二重減算は防いでいたが、購入確認モーダルの連打で1回目のレスポンス前に届いた2回目のリクエストは、サーバー側では独立した正当な購入として扱われてしまい、残高が足りる限り2回とも成立して二重購入が起こり得た）。
 * 根拠: (行番号: 67〜71 / 抜粋: "同一(user_id, quest_id)への同時リクエスト（クライアントのリトライ・二重タップ等）\n# 別スレッドでほぼ同時に到達すると、どちらも「直近の完了履歴なし」を読んでしまい、\n# 経験値・ゴールド・ボスダメージが二重に加算されるレースコンディションが発生しうる。")
-* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 301〜315 / 抜粋: "if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)")
-* 根拠: (行番号: 749〜751 / 抜粋: "# 残高チェックと減算を単一のアトミックなUPDATEにすることで、\n# 同時多重リクエストによる read-then-write のレースコンディション\n# (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。")
-* 根拠: `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)` (行番号: 733〜736)
+* 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 317〜331 / 抜粋: "if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)")
+* 根拠: `with _get_user_balance_lock(user_id):\n            with _get_completion_lock(...)` (行番号: 313〜315)
+* 根拠: (行番号: 764〜766 / 抜粋: "# 残高チェックと減算を単一のアトミックなUPDATEにすることで、\n# 同時多重リクエストによる read-then-write のレースコンディション\n# (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。")
+* 根拠: `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)` (行番号: 748〜751), `with _get_user_balance_lock(user_id):\n            with _get_purchase_lock(...)` (行番号: 739〜741)
 
 
-H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_users`のgold/exp/levelをread-modify-writeで更新する経路）も、対象ユーザー単位のプロセス内ロック（`_get_user_balance_lock`）で直列化され、同一ユーザーへの承認×承認・承認×取消の並行実行によるgold/exp消失レースを防ぐようになった。また`InventoryService.use_item`によるアイテム使用は、`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・状態(`'owned'`)確認後に即座に消費を確定する（親の承認は不要な）単一ステップの処理である（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_users`のgold/exp/levelをread-modify-writeで更新する経路）も、対象ユーザー単位のプロセス内ロック（`_get_user_balance_lock`）で直列化され、同一ユーザーへの承認×承認・承認×取消の並行実行によるgold/exp消失レースを防ぐようになった。ただしIssue #161発覚時点では、`process_complete_quest`(completion lock)と`process_purchase_reward`(purchase lock)はこの`_get_user_balance_lock`を取得しておらず、quest_usersを書き換えうる4経路(完了・承認・取消・購入)が3つの独立したロックレジストリ(`_completion_locks`/`_user_balance_locks`/`_purchase_locks`)に分断されたままだった。具体的には (1) 大人が異なるquest_idのクエストをほぼ同時に完了すると、completion lockのキーが異なるため並行実行され、`_apply_quest_rewards`のread-modify-writeが競合してgold/expのlost updateが起こり得た。(2) 購入(アトミック減算)と承認/取消(絶対値SET)が別ロック系統のため並行実行可能で、承認/取消のSELECT後に購入の減算が確定すると、承認/取消の絶対値UPDATEがその減算を上書きし購入代金が実質返金され得た。この修正で`process_complete_quest`/`process_purchase_reward`も`_get_user_balance_lock`を(既存のcompletion/purchase lockより外側で)取得するようになり、4経路すべてが対象ユーザー単位で直列化される。ロック取得順序を常に balance lock → completion/purchase lock に統一しているのは、経路間のデッドロックを防ぐため。また`InventoryService.use_item`によるアイテム使用は、`'pending'`状態での申請と`ROLE_ADULT`による承認を経る2段階フローではなく、所有者・状態(`'owned'`)確認後に即座に消費を確定する（親の承認は不要な）単一ステップの処理である（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
 * 根拠: (行番号: 88〜91 / 抜粋: "process_approve_quest / process_cancel_quest は「quest_usersをSELECT →")
-* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 793〜796 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
+* 根拠: (行番号: 301〜312, 724〜738 / 抜粋: "quest_users を書き換えうる全経路(承認・取消・完了)が対象ユーザー単位で\n        # 直列化されるよう、completion lock とは独立に user balance lock も取得する。")
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 822〜825 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
 
 ## 3. 外部依存関係
 
@@ -112,7 +114,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `_get_user_balance_lock` (モジュールレベル関数) と `_user_balance_locks` / `_user_balance_locks_guard` (モジュールレベル変数)
 
-* **役割**: `user_id`をキーとして`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`と同様の構造）。`process_approve_quest`/`process_cancel_quest`は「`quest_users`をSELECT→Pythonでgold/exp/levelを計算→UPDATE」というread-modify-write処理のため、同一ユーザーへの承認×承認・承認×取消が並行実行される（例: 親が承認一覧を連続タップする`handleApproveAll`）と一方の更新が消失するレースコンディションが起こりうる（H-3）。`quest_users`(gold/exp/level)を書き換える処理を対象ユーザー単位でプロセス内直列化するために導入された。
+* **役割**: `user_id`をキーとして`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`と同様の構造）。`process_approve_quest`/`process_cancel_quest`は「`quest_users`をSELECT→Pythonでgold/exp/levelを計算→UPDATE」というread-modify-write処理のため、同一ユーザーへの承認×承認・承認×取消が並行実行される（例: 親が承認一覧を連続タップする`handleApproveAll`）と一方の更新が消失するレースコンディションが起こりうる（H-3）。`quest_users`(gold/exp/level)を書き換える処理を対象ユーザー単位でプロセス内直列化するために導入された。導入当初は`process_approve_quest`/`process_cancel_quest`のみが取得しており、`process_complete_quest`(大人の即時完了パス)と`process_purchase_reward`は別系統の`_completion_locks`/`_purchase_locks`しか取得していなかったため、完了×完了(異なるquest_id)や購入×承認/取消といった経路をまたぐ並行実行ではquest_usersのlost updateを防げていなかった。Issue #161でこれら2箇所からも(既存のcompletion/purchase lockより外側で)取得するよう修正され、quest_usersを書き換えうる4経路(完了・承認・取消・購入)すべてが対象ユーザー単位で直列化されるようになった。
 * 根拠: `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `def _get_user_balance_lock(user_id: str) -> threading.Lock:` (行番号: 98〜104)
 * **引数/リクエスト**: `user_id: str`
 * 根拠: (行番号: 98)
@@ -231,16 +233,17 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.process_complete_quest`
 
-* **役割**: `_get_completion_lock_key(user_id, quest_id)`で算出したキーを`_get_completion_lock`に渡してプロセス内ロックを取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。
-* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 295〜299)
+* **役割**: `user_id`単位の`_get_user_balance_lock`と、`_get_completion_lock_key(user_id, quest_id)`で算出したキーの`_get_completion_lock`を、常にこの順(balance lock→completion lock)でネストして取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー(Issue #161)。completion lockは`(user_id, quest_id)`単位のため、同一ユーザーが異なる`quest_id`をほぼ同時に完了すると別々のロックキーとなり並行実行されてしまい、大人の即時完了パス(`_apply_quest_rewards`)が行う`quest_users`(gold/exp/level)へのread-modify-writeがこれだけでは保護されず、対象ユーザーの残高更新でlost updateが起こり得た。`process_approve_quest`/`process_cancel_quest`が既に使っている`_get_user_balance_lock`をここでも取得することで、`quest_users`を書き換えうる全経路(完了・承認・取消)が対象ユーザー単位で直列化される。ロック取得順序を常に balance lock → completion/purchase lock に統一しているのは、経路間のデッドロックを防ぐため。
+* 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 300〜315)
+* 根拠: `with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 313〜315)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 295)
+* 根拠: (行番号: 300)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_process_complete_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 299 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
-* **副作用**: `_get_completion_lock_key`によるDB参照（`quest_master`）、ロックの取得・解放（`with`文）
-* 根拠: (行番号: 298)
+* 根拠: (行番号: 315 / 抜粋: "return self._process_complete_quest_locked(user_id, quest_id)")
+* **副作用**: `_get_completion_lock_key`によるDB参照（`quest_master`）、2種類のロック(user balance lock, completion lock)の取得・解放（`with`文のネスト）
+* 根拠: (行番号: 313〜315)
 * **エラーハンドリング**: なし（内部の例外はそのまま伝播）
-* 根拠: (行番号: 295〜299)
+* 根拠: (行番号: 300〜315)
 
 ### `QuestService._get_completion_lock_key`
 
@@ -431,16 +434,17 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `ShopService.process_purchase_reward`
 
-* **役割**: `_get_purchase_lock((user_id, reward_id))`でプロセス内ロックを取得したうえで、実処理を`_process_purchase_reward_locked`に委譲する薄いラッパー（Issue #101）。以前は本体の処理を直接含んでいたが、購入確認モーダルの「はい」連打による二重購入(後述)を防ぐため、`process_complete_quest`と同様のロック委譲パターンに分割された。
-* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 707〜712)
+* **役割**: `user_id`単位の`_get_user_balance_lock`と`_get_purchase_lock((user_id, reward_id))`を、常にこの順(balance lock→purchase lock)でネストして取得したうえで、実処理を`_process_purchase_reward_locked`に委譲する薄いラッパー（Issue #101, #161）。購入はゴールド残高の減算をアトミックな`UPDATE ... SET gold = gold - ?`で行うためread-modify-writeのレース自体は起きないが、`process_approve_quest`/`process_cancel_quest`は「SELECT→Pythonで計算→絶対値でSET」で`quest_users`を更新するため、purchase lockだけでは経路が独立したままだった。承認/取消のSELECT後に購入の減算UPDATEが確定すると、承認/取消側の絶対値SETがその減算を上書きし、購入代金が実質返金される不整合が起こり得た。`process_approve_quest`/`process_cancel_quest`が既に使っている`_get_user_balance_lock`をここでも取得することで、`quest_users`を書き換えうる全経路(完了・承認・取消・購入)が対象ユーザー単位で直列化される。ロック取得順序を常に balance lock → completion/purchase lock に統一しているのは、経路間のデッドロックを防ぐため。
+* 根拠: `def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 723〜741)
+* 根拠: `with _get_user_balance_lock(user_id):\n            with _get_purchase_lock((user_id, reward_id)):\n                return self._process_purchase_reward_locked(user_id, reward_id)` (行番号: 739〜741)
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
-* 根拠: (行番号: 707)
+* 根拠: (行番号: 723)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_process_purchase_reward_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 712 / 抜粋: "return self._process_purchase_reward_locked(user_id, reward_id)")
-* **副作用**: ロックの取得・解放（`with`文）
-* 根拠: (行番号: 711)
+* 根拠: (行番号: 741 / 抜粋: "return self._process_purchase_reward_locked(user_id, reward_id)")
+* **副作用**: 2種類のロック(user balance lock, purchase lock)の取得・解放（`with`文のネスト）
+* 根拠: (行番号: 739〜741)
 * **エラーハンドリング**: なし（内部の例外はそのまま伝播）
-* 根拠: (行番号: 707〜712)
+* 根拠: (行番号: 723〜741)
 
 ### `ShopService._process_purchase_reward_locked`
 
@@ -448,7 +452,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: `def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:` (行番号: 714〜776)
 * 根拠: `last_purchase = cur.execute("""\n                SELECT redeemed_at FROM reward_history\n                WHERE user_id = ? AND reward_id = ?\n                ORDER BY redeemed_at DESC LIMIT 1\n            """, ...)` および `if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)` (行番号: 727〜736)
 * 根拠: `target = reward['target'] or 'all'` から `raise HTTPException(status_code=403, detail="This reward is not available for you")` まで (行番号: 738〜747)
-* 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 752〜757)
+* 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 781〜786)
 * **引数/リクエスト**: `user_id: str`, `reward_id: int`
 * 根拠: (行番号: 714)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "purchased", "newGold": new_gold}`）
@@ -555,11 +559,12 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ```mermaid
 flowchart TD
-    Start[Start: process_complete_quest] --> ResolveKey["_get_completion_lock_key(user_id, quest_id):<br>quest_masterのtarget_userを参照"]
+    Start[Start: process_complete_quest] --> AcquireBalanceLock["_get_user_balance_lock(user_id)で<br>ユーザー単位ロックを取得(Issue #161、最も外側)"]
+    AcquireBalanceLock --> ResolveKey["_get_completion_lock_key(user_id, quest_id):<br>quest_masterのtarget_userを参照"]
     ResolveKey --> IsCoop{"target_user == 'siblings'か"}
     IsCoop -- Yes --> CoopKey["ロックキー = ('__coop__', quest_id)<br>(報告者に依存しない共通キー)"]
     IsCoop -- No --> NormalKey["ロックキー = (user_id, quest_id)"]
-    CoopKey --> AcquireLock["_get_completion_lock(key)で<br>プロセス内ロックを取得"]
+    CoopKey --> AcquireLock["_get_completion_lock(key)で<br>プロセス内ロックを取得(balance lockの内側)"]
     NormalKey --> AcquireLock
     AcquireLock --> CallLocked["_process_complete_quest_locked を呼び出し"]
     CallLocked --> DB_Select{"DBからユーザとクエストを取得できるか"}
@@ -585,11 +590,12 @@ flowchart TD
 
 ```
 
-以下は、ごほうび購入処理（`process_purchase_reward`）の、ロック取得・スパムチェック・アトミックUPDATEによる二重購入防止に着目したフローです（Issue #101でロック取得とスパムチェックの分岐を追加）。
+以下は、ごほうび購入処理（`process_purchase_reward`）の、ロック取得・スパムチェック・アトミックUPDATEによる二重購入防止に着目したフローです（Issue #101でロック取得とスパムチェックの分岐を追加。Issue #161でuser balance lockの取得を追加し、承認/取消とのquest_users更新の競合を防ぐ）。
 
 ```mermaid
 flowchart TD
-    PStart[Start: process_purchase_reward] --> PAcquireLock["_get_purchase_lock((user_id, reward_id))で<br>プロセス内ロックを取得"]
+    PStart[Start: process_purchase_reward] --> PAcquireBalanceLock["_get_user_balance_lock(user_id)で<br>ユーザー単位ロックを取得(Issue #161、最も外側)"]
+    PAcquireBalanceLock --> PAcquireLock["_get_purchase_lock((user_id, reward_id))で<br>プロセス内ロックを取得(balance lockの内側)"]
     PAcquireLock --> PCallLocked["_process_purchase_reward_locked を呼び出し"]
     PCallLocked --> PSelect{"reward/userが存在するか"}
     PSelect -- No --> PErr404[HTTPException 404]
@@ -771,10 +777,12 @@ graph TD
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 214, 274)
 * **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`辞書もエントリを削除しない同じ設計である。
 * 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `_completion_locks[key] = lock` (行番号: 81), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `_user_balance_locks[user_id] = lock` (行番号: 103), `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `_purchase_locks[key] = lock` (行番号: 141)
+* **quest_usersを書き換える4経路のロック体系は依然3レジストリに分かれたまま(Issue #161で経路間のlost updateのみ解消)**: `_completion_locks`/`_user_balance_locks`/`_purchase_locks`という3つの独立したロックレジストリ自体は統合されておらず、`process_complete_quest`/`process_purchase_reward`が`_get_user_balance_lock`を(それぞれcompletion/purchase lockより外側で)追加取得するようになっただけである。取得順序は常に balance lock → completion/purchase lock に統一されており、いずれの経路も balance lock を取得してから自分専用のロックを取得するだけで、balance lock 取得後に他の経路のロック(completion/purchase)を待つことはない。そのため経路間の循環待ちは生じずデッドロックの心配はないが、レジストリが3つに分かれている構造自体は残っているため、新しく`quest_users`を書き換える経路を追加する際は、この`_get_user_balance_lock`を(自身の専用ロックより外側で)取得することを個別に判断・実装する必要があり、忘れると同種のlost updateが再発し得る。
+* 根拠: (行番号: 300〜315, 723〜741 / 抜粋: "ロック取得順序は常に balance lock → completion/purchase lock に統一し、\n        # 経路間のデッドロックを防ぐ。")
 * **`_get_completion_lock_key`はロック取得前にDBへ1回問い合わせる**: 兄妹連携クエストかどうかを判定するために`quest_master`をSELECTする処理が、ロック取得そのものより前・かつ別の`get_db_cursor`トランザクションとして実行される。この問い合わせと実際のロック取得の間にはわずかな非アトミックな隙間があるが、判定対象は`target_user`という更新されることがほぼ無いマスタ値であり、ここでのTOCTOU（read-then-lock間のズレ）が実害あるレースを生む経路は確認できていない（Issue #96の修正で導入）。
 * 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 251〜265)
 * **`process_purchase_reward`は現在プロセス内ロック(#101)とDBレベルのアトミックUPDATEを併用する**: 残高チェックと減算自体は、`process_complete_quest`/`process_approve_quest`/`process_cancel_quest`のプロセス内ロックとは異なり、`WHERE user_id = ? AND gold >= ?`条件付きの単一`UPDATE`文と`rowcount`判定によって、複数プロセス/複数ワーカー構成でも成立する形でレースコンディションを防いでいる。一方、Issue #101で追加された「直近10秒以内の同一購入を拒否する」スパムチェック自体は他の`_get_completion_lock`等と同じ`threading.Lock`ベース（`_get_purchase_lock`）であり、複数プロセス/複数ワーカー構成では別プロセスからの同時リクエストまでは防げない（このスパムチェックが無かった以前は、購入確認モーダルの連打で2回とも独立した正当な購入として成立し、アトミックUPDATE自体は正しく機能していても二重購入自体は防げていなかった）。
-* 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 752〜757)
+* 根拠: `cur.execute("UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?", ...)` および `if cur.rowcount == 0: raise HTTPException(status_code=400, detail="Not enough gold")` (行番号: 781〜786)
 * **冗長なローカルインポート**: `is_within_reset_period`内の`import datetime`（行144）、`_trigger_tv_unlock`内の`import threading`（行407）と`from services import notification_service`（行409）は、いずれもモジュール冒頭で既にインポート済みのモジュールを関数内で再度インポートしており、実害はないが冗長である。
 * 根拠: (行番号: 144, 407, 409)
 * **`filter_active_quests`の日付フォーマット依存**: 日付文字列を`split('-')`で分割しており、対象フォーマット(`YYYY-MM-DD`)に厳密に依存している。

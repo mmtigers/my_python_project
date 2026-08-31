@@ -300,8 +300,19 @@ class QuestService:
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         # 同一ユーザー・同一クエストへの同時多重リクエストによる二重加算を防ぐため、
         # DBトランザクションの外側でプロセス内ロックを取得して処理全体を直列化する。
-        with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):
-            return self._process_complete_quest_locked(user_id, quest_id)
+        #
+        # completion lock は (user_id, quest_id) 単位のため、同一ユーザーが
+        # 異なる quest_id をほぼ同時に完了すると別々のロックキーとなり並行実行される。
+        # 大人の即時完了パス(_apply_quest_rewards)は quest_users(gold/exp/level)への
+        # read-modify-write を伴うため、これだけでは対象ユーザーの残高更新が
+        # 並行実行から保護されず lost update が起こり得る(Issue #161)。
+        # quest_users を書き換えうる全経路(承認・取消・完了)が対象ユーザー単位で
+        # 直列化されるよう、completion lock とは独立に user balance lock も取得する。
+        # ロック取得順序は常に balance lock → completion/purchase lock に統一し、
+        # 経路間のデッドロックを防ぐ。
+        with _get_user_balance_lock(user_id):
+            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):
+                return self._process_complete_quest_locked(user_id, quest_id)
 
     def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:
         # 兄妹連携クエスト(target_user='siblings')は、兄・妹どちらが完了報告しても
@@ -713,8 +724,21 @@ class ShopService:
         # 同一ユーザー・同一報酬への同時多重リクエスト(購入確認モーダルの連打等)による
         # 二重購入を防ぐため、DBトランザクションの外側でプロセス内ロックを取得して
         # 処理全体を直列化する(#101)。
-        with _get_purchase_lock((user_id, reward_id)):
-            return self._process_purchase_reward_locked(user_id, reward_id)
+        #
+        # purchase lock は (user_id, reward_id) 単位の直列化に過ぎず、
+        # process_approve_quest/process_cancel_quest が保持する user balance lock
+        # とは独立している。購入はゴールドをアトミックな "gold = gold - ?" で減算する
+        # ため read-modify-write レース自体は起きないが、承認/取消は
+        # "SELECT→Pythonで計算→絶対値でSET" のため、購入のUPDATEコミット後に
+        # 承認/取消が古いgoldを基準にした絶対値SETを行うと、購入による減算が
+        # 上書きされて消失する(Issue #161)。quest_users を書き換えうる全経路
+        # (承認・取消・完了・購入)が対象ユーザー単位で直列化されるよう、
+        # purchase lock とは独立に user balance lock も取得する。
+        # ロック取得順序は常に balance lock → completion/purchase lock に統一し、
+        # 経路間のデッドロックを防ぐ。
+        with _get_user_balance_lock(user_id):
+            with _get_purchase_lock((user_id, reward_id)):
+                return self._process_purchase_reward_locked(user_id, reward_id)
 
     def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
