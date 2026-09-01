@@ -2,13 +2,21 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
+import { gameDataResponseSchema } from '../lib/gameDataSchema';
 import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
+// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。
+// ★バグ修正(Issue #120): 以前はmessage/created_atという実際には存在しない
+// フィールド名を宣言しており、_fetch_recent_logsの実際のレスポンス形状
+// {id, text, dateStr, timestamp}と不一致だった。adventureLogsはどの
+// コンポーネントからも消費されていないため現状は実害がなかったが、
+// 将来利用する際に誤った型に気づかず参照してしまう不具合の種だった)
 interface AdventureLog {
-    id: string | number;
-    message: string;
-    created_at: string;
+    id: string;
+    text: string;
+    dateStr: string;
+    timestamp: string;
 }
 
 // 家族全体の統計情報 (UserService.get_family_chronicle の "stats" レスポンスに対応)
@@ -19,28 +27,21 @@ export interface FamilyStats {
     partyRank: string;
 }
 
-// 年代記の1エントリ (UserService._fetch_full_adventure_logs のレスポンスに対応。
-// FamilyLog.tsx 側で複数の代替フィールド名にも防御的にフォールバックしているため、
-// それらも任意プロパティとして許容する)
+// 年代記の1エントリ (GameSystem._fetch_full_adventure_logs のレスポンスに対応。
+// #291: date/id/avatar_url/message/quest_title/reward_gold/reward_exp/created_at は
+// バックエンドから一度も送られてこない幽霊フィールドだったため削除した。
+// FamilyLog.tsx側の「複数の代替フィールド名への防御的フォールバック」もあわせて廃止した。
 export interface ChronicleItem {
     type?: string;
     timestamp?: string;
     dateStr?: string;
-    date?: string;
-    id?: string | number;
     userId?: string;
     userName?: string;
     userAvatar?: string;
-    avatar_url?: string;
     title?: string;
     text?: string;
-    message?: string;
-    quest_title?: string;
     gold?: number;
-    reward_gold?: number;
     exp?: number;
-    reward_exp?: number;
-    created_at?: string;
 }
 
 export interface LevelUpInfo {
@@ -96,12 +97,16 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // 1. メインデータの取得
     const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
-        queryFn: () => {
+        queryFn: async () => {
             const viewerUserId = viewerUserIdRef.current;
             const endpoint = viewerUserId
                 ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`
                 : '/api/quest/data';
-            return apiClient.get(endpoint);
+            const raw = await apiClient.get<unknown>(endpoint);
+            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と
+            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド
+            // バグとしてではなく、ここで即座にエラーとして検知させる。
+            return gameDataResponseSchema.parse(raw) as GameDataResponse;
         },
         staleTime: 1000 * 30,
         refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限
@@ -127,7 +132,9 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, quest }: { user: User; quest: Quest }) => {
             return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定
                 user_id: user.user_id,
-                quest_id: quest.id || quest.quest_id,
+                // #291: quest.id という幽霊フィールド(バックエンドから送られてこない)への
+                // フォールバックを廃止し、実カラムのquest_idのみを参照する。
+                quest_id: quest.quest_id,
             });
         },
         onSuccess: (res, variables) => {
@@ -153,7 +160,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post('/api/quest/quest/cancel', {
                 user_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
             });
         },
         onSuccess: () => {
@@ -170,7 +177,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post<QuestResult>('/api/quest/approve', {
                 approver_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
             });
         },
         onSuccess: (res, variables) => {
@@ -189,6 +196,19 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
                     job: completer?.job_class || '無職',
                 });
             }
+            // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認では、相方
+            // (自分でタップしなかった方の子ども)側もgold/exp/level/medalが同時に
+            // 付与されるが、以前はAPIレスポンスにその情報が一切含まれておらず、
+            // 相方のレベルアップ演出を出す手段が無かった。partnerUserIdで相方を
+            // 特定し、本人と同様にonLevelUpを呼ぶ。
+            if (res.partnerLeveledUp && res.partnerNewLevel != null && onLevelUp) {
+                const partner = gameData?.users.find(u => u.user_id === res.partnerUserId);
+                onLevelUp({
+                    user: partner?.name || res.partnerUserId || '',
+                    level: res.partnerNewLevel,
+                    job: partner?.job_class || '無職',
+                });
+            }
         },
         onError: (err) => handleError('承認', err),
     });
@@ -198,7 +218,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history, reason }: { user: User; history: QuestHistory; reason?: string }) => {
             return apiClient.post('/api/quest/reject', {
                 approver_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
                 reason,
             });
         },
@@ -213,7 +233,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, reward }: { user: User; reward: Reward }) => {
             return apiClient.post('/api/quest/reward/purchase', {
                 user_id: user.user_id,
-                reward_id: reward.id || reward.reward_id,
+                reward_id: reward.reward_id,
             });
         },
         onSuccess: (_data, variables) => { // data -> _data
@@ -228,7 +248,9 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // --- ラッパー関数 (Async/Await対応) ---
 
     const completeQuest = async (user: User, quest: Quest) => {
-        const qId = quest.id || quest.quest_id;
+        // #291: quest.id という幽霊フィールドへのフォールバックを廃止し、
+        // useQuestStatus.tsのgetQuestLockStateと同じく実カラムのquest_idのみ参照する。
+        const qId = quest.quest_id;
         const isPending = gameData?.pendingQuests.some(pq => pq.user_id === user.user_id && pq.quest_id === qId);
 
         if (isPending) {
@@ -268,8 +290,16 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
             // ★バグ修正(M-6-1): 以前はレスポンスを破棄しており、承認画面側で
             // メダル獲得演出(earnedMedals)を出す手段が無かった。leveledUp通知は
             // approveQuestMutationのonSuccess側で行うため、ここではearnedMedalsのみ返す。
+            // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認時は相方の
+            // earnedMedalsもpartnerEarnedMedalsとして返し、呼び出し元でトースト表示の
+            // 合算に使えるようにする。
             const res = await approveQuestMutation.mutateAsync({ user, history: historyItem });
-            return { success: true, earnedMedals: res.earnedMedals, leveledUp: res.leveledUp };
+            return {
+                success: true,
+                earnedMedals: res.earnedMedals,
+                leveledUp: res.leveledUp,
+                partnerEarnedMedals: res.partnerEarnedMedals ?? 0,
+            };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
         }
@@ -287,7 +317,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     // buyReward ラッパー
     const buyReward = async (user: User, reward: Reward) => {
-        const cost = reward.cost_gold || reward.cost;
+        const cost = reward.cost_gold;
         if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };
 
         try {

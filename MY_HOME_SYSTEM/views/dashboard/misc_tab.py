@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/views/dashboard/misc_tab.py
+import html
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -9,7 +10,6 @@ import pytz
 
 import config
 from services import train_service
-from .common import render_status_card_html
 
 def render_traffic():
     st.subheader("🚃 JR宝塚線・神戸線 運行状況")
@@ -30,8 +30,8 @@ def render_traffic():
             st.markdown(f"""
             <div style="background-color:{bg_color}; padding:15px; border-radius:10px; border:1px solid #ccc;">
                 <h3 style="margin:0; color:#333;">{name}</h3>
-                <h2 style="margin:5px 0; color:{status_color};">{line['status']}</h2>
-                <p style="margin:0;">{line['detail']}</p>
+                <h2 style="margin:5px 0; color:{status_color};">{html.escape(line['status'])}</h2>
+                <p style="margin:0;">{html.escape(line['detail'])}</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -59,24 +59,25 @@ def _render_route_search(col, from_st: str, to_st: str, label_icon: str):
             if data.get("details"):
                 steps = []
                 for d in data["details"]:
-                    if "⬇️" in d: steps.append(f"<div class='line-node'>{d}</div>")
-                    elif "🔄" in d: steps.append(f"<div class='transfer-mark'>{d}</div>")
-                    else: steps.append(f"<div class='station-node'>{d}</div>")
+                    d_esc = html.escape(d)
+                    if "⬇️" in d: steps.append(f"<div class='line-node'>{d_esc}</div>")
+                    elif "🔄" in d: steps.append(f"<div class='transfer-mark'>{d_esc}</div>")
+                    else: steps.append(f"<div class='station-node'>{d_esc}</div>")
                 details_html = f"<div class='route-path'>{''.join(steps)}</div>"
 
             st.markdown(f"""
             <div class="route-card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{data['departure']}</span>
+                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{html.escape(data['departure'])}</span>
                     <span style="color:#777;">➡</span>
-                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{data['arrival']}</span>
+                    <span style="font-size:1.3rem; font-weight:bold; color:#0d47a1;">{html.escape(data['arrival'])}</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; color:#555; margin-bottom:5px;">
-                    <span>⏱️ <b>{data['duration']}</b></span>
-                    <span>💰 {data['cost']}</span>
+                    <span>⏱️ <b>{html.escape(data['duration'])}</b></span>
+                    <span>💰 {html.escape(data['cost'])}</span>
                 </div>
                 <div style="font-size:0.9rem; color:#666;">
-                    <span>🔄 乗換: {data['transfer']}</span>
+                    <span>🔄 乗換: {html.escape(data['transfer'])}</span>
                 </div>
                 {details_html}
             </div>

@@ -12,7 +12,13 @@ Markdown仕様書が1つ対応する規約がある（例外: 全体設計書.md
   full  - リポジトリ全体を対象に、コミット日時ベースでドリフト・孤立ドキュメント・
           未文書化ファイルを洗い出す（週次の定期監査用）
 
-いずれも exit code は常に 0 固定（非ブロッキング運用のため）。
+いずれも、正常に完走した場合(検知結果の有無を問わず)は exit code が常に
+0 固定（非ブロッキング運用のため）。ただし git コマンド自体が失敗した場合
+（shallow cloneでの参照エラー等）は例外を送出し非0で終了する — 「差分取得
+失敗=ドリフトなし」と黙って誤解しないよう意図的な設計であり(run()参照)、
+呼び出し側のCIワークフロー（`.github/workflows/spec-drift-pr-check.yml`・
+`spec-drift-weekly-audit.yml`）側で `continue-on-error: true` 等により
+ジョブ全体は非ブロッキングに保つ前提になっている。
 検知結果はMarkdownレポートとして標準出力、または --out 指定先に書き出す。
 """
 from __future__ import annotations
@@ -33,8 +39,13 @@ PY_EXTENSIONS = {".py", ".sh"}
 FQ_SOURCE_ROOT = "family-quest/src"
 FQ_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 
-EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup"}
-EXCLUDE_SUFFIXES = {".d.ts"}
+# Issue #283: PR #278で導入されたfamily-questのVitestテスト(*.test.ts/tsx、
+# src/test/配下のセットアップファイル)は、"tests"(複数形)ディレクトリ名にも
+# test_*.pyという命名にも一致しないため、上記の除外経路のどちらにも
+# 引っかからず「仕様書が見つからないファイル」として誤検知されていた。
+# "test"(単数形)ディレクトリと *.test.ts(x) サフィックスを明示的に除外する。
+EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup", "test"}
+EXCLUDE_SUFFIXES = {".d.ts", ".test.ts", ".test.tsx"}
 
 
 def run(cmd: list[str]) -> str:
@@ -54,9 +65,25 @@ def is_excluded(rel_path: Path) -> bool:
     return any(rel_path.name.endswith(suf) for suf in EXCLUDE_SUFFIXES)
 
 
+def is_test_file(rel_path: Path) -> bool:
+    """pytestの標準的な命名規則(test_*.py)に一致するテストファイルかどうか。
+
+    MY_HOME_SYSTEMのテストは`tests/`ディレクトリ配下に置かれるため
+    EXCLUDE_PARTSのディレクトリ名ベースの除外で捕捉できるが、DDDには
+    pytest基盤となる`tests/`ディレクトリが無く、DDD直下に`test_*.py`を
+    フラット配置する規約になっている(Issue #124)。ディレクトリ名だけでは
+    検知できないため、ファイル名の命名規則でも判定する。
+    is_excluded とは別関数にしているのは、doc_to_source_candidates の
+    逆引き(仕様書→ソース)ではこの判定を適用したくないため
+    (適用すると、既存のtest_*.md仕様書が対応ソースを見失い、孤立ドキュメント
+    判定の候補から外れてしまう副作用がある)。
+    """
+    return rel_path.suffix == ".py" and rel_path.stem.startswith("test_")
+
+
 def is_tracked_source(rel_path: Path) -> bool:
     """このスクリプトが「仕様書があるべき」と見なす対象かどうか。"""
-    if is_excluded(rel_path):
+    if is_excluded(rel_path) or is_test_file(rel_path):
         return False
     if rel_path.name == "__init__.py":
         # パッケージマーカーで実体を持たないことが大半のため対象外。
@@ -83,7 +110,21 @@ def source_to_doc_candidates(rel_path: Path) -> list[Path]:
     if parts[0] in PY_SOURCE_DIRS:
         # MY_HOME_SYSTEM/**/name.py 、DDD/name.py はいずれもフラットに
         # docs/specifications/<dir>/name.md へ対応する規約。
-        return [SPEC_ROOT / parts[0] / f"{stem}.md"]
+        candidates = []
+        # Issue #105: フラット規約はサブディレクトリ構造を畳むため、同名stem
+        # (例: MY_HOME_SYSTEM/common.py と MY_HOME_SYSTEM/views/dashboard/common.py)
+        # が衝突しうる。ソースディレクトリ直下より2階層以上深いファイルについては、
+        # 直近の親ディレクトリ名を接頭辞にしたdisambiguation名(例: dashboard_common.md。
+        # 既存の docs/specifications/MY_HOME_SYSTEM/dashboard_common.md が実際に
+        # この命名規則を採用している)を優先候補として先に返す。該当する
+        # disambiguation済み仕様書が存在しない大多数のケースでは、呼び出し側が
+        # existing(実在するファイルのみ)でフィルタするため、通常のフラット規約
+        # (<stem>.md)へ自然にフォールバックする。
+        if len(parts) > 2:
+            parent_dir = parts[-2]
+            candidates.append(SPEC_ROOT / parts[0] / f"{parent_dir}_{stem}.md")
+        candidates.append(SPEC_ROOT / parts[0] / f"{stem}.md")
+        return candidates
 
     if str(rel_path).startswith(FQ_SOURCE_ROOT + "/"):
         sub = rel_path.relative_to(FQ_SOURCE_ROOT)  # 例: App.tsx / hooks/useGameData.ts
@@ -110,8 +151,38 @@ def doc_to_source_candidates(doc_path: Path) -> list[Path]:
         # rglobが誤って拾ってしまわないようここでも明示的に除外する。
         matches = list((REPO_ROOT / parts[0]).rglob(f"{stem}.py"))
         matches += list((REPO_ROOT / parts[0]).rglob(f"{stem}.sh"))
-        rels = [m.relative_to(REPO_ROOT) for m in matches]
-        return [rel for rel in rels if not is_excluded(rel)]
+        # Issue #105: source_to_doc_candidates の disambiguation規則(直近の親
+        # ディレクトリ名を接頭辞にした <parent>_<stem>.md)の逆写像。stemの先頭の
+        # アンダースコアで(親ディレクトリ名, 残りのstem)に分割し、
+        # "**/<親ディレクトリ名>/<残りのstem>.py(.sh)" というパターンで探索する
+        # (例: dashboard_common.md → **/dashboard/common.py)。
+        if "_" in stem:
+            parent_dir, _, remainder = stem.partition("_")
+            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.py"))
+            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.sh"))
+        rels = []
+        seen = set()
+        for m in matches:
+            rel = m.relative_to(REPO_ROOT)
+            if rel not in seen:
+                seen.add(rel)
+                rels.append(rel)
+        rels = [rel for rel in rels if not is_excluded(rel)]
+        # #188: rglobは実在するファイルのみを返すため、ソースが既に削除された
+        # 仕様書ではここまでのmatchesが常に空になり、呼び出し元(cmd_full)の
+        # `if candidates and not any(exists)` 判定がcandidates=[]によって
+        # スキップされ、孤立ドキュメントとして永久に検知されなかった
+        # (family-quest側のsource_to_doc_candidatesは実在確認前の「あるべき
+        # パス」を候補として構築するため、この非対称は発生しない)。
+        # rglobで何も見つからない場合でも、フラット命名規約のデフォルトパス
+        # (<base_dir>/<stem>.py, .sh)を実在チェック抜きの候補として必ず1件は
+        # 含めることで、cmd_full側が孤立判定できるようにする。
+        if not rels:
+            rels = [
+                Path(parts[0]) / f"{stem}.py",
+                Path(parts[0]) / f"{stem}.sh",
+            ]
+        return rels
 
     if parts and parts[0] == "family-quest":
         candidates = []

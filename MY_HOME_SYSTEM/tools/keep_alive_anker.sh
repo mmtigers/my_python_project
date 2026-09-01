@@ -6,7 +6,6 @@
 
 # --- Configuration ---
 LOGFILE="/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log"
-TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 SPEAKER_MAC="F4:4E:FC:B6:65:D4" # Anker SoundCore 2 MAC Address
 CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"
 
@@ -16,8 +15,14 @@ export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 
 # ログ関数
+# #249: 以前はTIMESTAMPをスクリプト起動時に1回だけ評価していたため、
+# 再接続(sleep 5等)を挟んで複数回log()が呼ばれても、記録される時刻は
+# 常に起動時刻のまま(全ログ行が同一時刻)になっていた。呼び出しのたびに
+# dateコマンドで現在時刻を取得するよう修正する。
 log() {
-    echo "$TIMESTAMP - $1" >> "$LOGFILE"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$timestamp - $1" >> "$LOGFILE"
 }
 
 # --- 1. Check Connection ---

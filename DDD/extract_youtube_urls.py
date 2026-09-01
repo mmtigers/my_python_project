@@ -14,7 +14,7 @@ import re
 import time
 import random
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Set, Iterator, Dict, Any
 import sqlite3
 from contextlib import closing
@@ -73,6 +73,12 @@ class AppConfig:
     # レート制限対策: チャンネル/URLごとの巡回間隔とサーキットブレーカー閾値
     SUBSCRIPTION_SLEEP_RANGE: tuple = (2.0, 5.0)
     CONSECUTIVE_FAILURE_THRESHOLD: int = 3
+
+    # #227: レート制限対策はチャンネルURL間の間隔(SUBSCRIPTION_SLEEP_RANGE)にしか
+    # 及んでおらず、1チャンネル内部で発行される /videos -> /playlists -> 各プレイリスト
+    # という複数リクエストは間隔なしで連射されていた。これらの内部リクエスト間にも
+    # 同種のジッター待機を挟む。
+    INTRA_CHANNEL_SLEEP_RANGE: tuple = (1.0, 3.0)
     
     # yt-dlp オプション: 高速化のため extract_flat を使用
     YDL_OPTS: Dict[str, Any] = {
@@ -121,6 +127,15 @@ class ExtractionResult:
 # ==========================================
 class YouTubeExtractor:
     """YouTubeからURL情報を抽出するクラス。"""
+
+    def __init__(self) -> None:
+        # #227: extract_iter内部(1チャンネルにつき/videos・/playlists・各プレイリスト
+        # という複数リクエスト)で発生した失敗件数。extract_iterが1件でも結果をyield
+        # すれば呼び出し元(process_subscriptions)は「成功」扱いにしていたため、大量の
+        # プレイリストが失敗してもサーキットブレーカーの連続失敗カウントが常に0に
+        # リセットされていた。extract_iterの呼び出しごとにリセットし、呼び出し元が
+        # 参照できるようにする。
+        self.last_extract_internal_failures: int = 0
 
     @staticmethod
     def _normalize_url(entry: Dict[str, Any]) -> Optional[str]:
@@ -227,6 +242,8 @@ class YouTubeExtractor:
         Yields:
             Iterator[ExtractionResult]: 抽出結果を順次返す。
         """
+        self.last_extract_internal_failures = 0
+
         if self._is_channel_url(target_url):
             logger.info("ℹ️ チャンネルURLを検出。詳細スキャンを開始します。")
             base_url = target_url.split('?')[0].rstrip('/')
@@ -244,6 +261,10 @@ class YouTubeExtractor:
                     is_playlist=False
                 )
 
+            # #227: /videos と /playlists は同一チャンネルに対する連続リクエストで
+            # あり、間隔を空けずに連射するとレート制限/Bot検知を誘発しうる。
+            time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))
+
             # Phase 2: Playlists
             try:
                 # 呼び出し間の状態汚染を避けるためコピーを渡す（理由は上のコメント参照）
@@ -252,18 +273,28 @@ class YouTubeExtractor:
                     if pl_tab and 'entries' in pl_tab:
                         playlists = list(pl_tab['entries'])
                         logger.info(f"📂 {len(playlists)} 個のプレイリストが見つかりました。")
-                        for pl in playlists:
+                        for i, pl in enumerate(playlists):
                             if not pl:
                                 continue
                             pl_url = pl.get('url')
                             pl_title = pl.get('title', 'Unknown Playlist')
                             if pl_url:
+                                if i > 0:
+                                    # #227: 検出した各プレイリストへの逐次リクエストが
+                                    # sleep無しで連続発行されていたため、ここにも
+                                    # ジッター待機を挟む。
+                                    time.sleep(random.uniform(*AppConfig.INTRA_CHANNEL_SLEEP_RANGE))
                                 res = self._extract_single_list(pl_url, force_title=pl_title)
                                 if res:
                                     res.is_playlist = True
                                     yield res
+                                else:
+                                    # #227: 個々のプレイリスト取得失敗を呼び出し元の
+                                    # サーキットブレーカーが検知できるよう記録する。
+                                    self.last_extract_internal_failures += 1
             except Exception:
                 logger.error("❌ プレイリスト一覧の取得に失敗しました", exc_info=True)
+                self.last_extract_internal_failures += 1
         else:
             res = self._extract_single_list(target_url)
             if res:
@@ -276,37 +307,54 @@ class FileManager:
     """ファイル保存に関する責務を持つクラス。"""
     
     @staticmethod
-    def _sanitize_filename(filename: str) -> str:
+    def _sanitize_filename(filename: str, max_length: int = 200) -> str:
         """ファイル名として使用できない文字を置換する。
 
         Args:
             filename (str): 元の文字列。
+            max_length (int): 生成する文字列の最大バイト数（UTF-8エンコード後）。
 
         Returns:
             str: 安全なファイル名文字列。
         """
-        return _shared_sanitize_filename(filename)
+        return _shared_sanitize_filename(filename, max_length=max_length)
 
-    def save(self, result: ExtractionResult) -> bool:
+    def save(self, result: ExtractionResult, base_dir: Optional[Path] = None) -> bool:
         """抽出結果をテキストファイルに保存する。
 
         Args:
             result (ExtractionResult): 保存対象の抽出データ。
+            base_dir (Optional[Path]): 保存先のベースディレクトリ。省略時は
+                AppConfig.get_output_base_dir()を呼び出して取得する(#243修正前の
+                挙動)。get_output_base_dir()はNASマウント確認・自己修復・障害通知を
+                伴う重い処理のため、複数件のExtractionResultを保存する呼び出し元は
+                同一巡回内で1回だけ取得した値をここへ渡して使い回すこと
+                (process_subscriptions()/UrlExtractorApp.run()参照)。
 
         Returns:
             bool: 保存に成功した場合は True。
         """
-        # 遅延評価でディレクトリを取得
-        target_dir = AppConfig.get_output_base_dir() / AppConfig.SUB_DIR_NAME
+        # #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。
+        # 以前は常にここでget_output_base_dir()を呼んでいたため、process_subscriptions
+        # 自体が1回に抑えていたつもりの重い処理(NASマウント確認・自己修復・障害通知)が、
+        # 保存件数分だけ再評価され、NAS瞬断時に再マウント試行・通知が多重発生していた。
+        if base_dir is None:
+            base_dir = AppConfig.get_output_base_dir()
+        target_dir = base_dir / AppConfig.SUB_DIR_NAME
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
+        except OSError:
             logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)
             return False
 
-        safe_channel = self._sanitize_filename(result.channel_name)
-        safe_title = self._sanitize_filename(result.title)
-        
+        # #175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると、
+        # "{safe_channel}_{safe_title}.txt" は最大 200+1+200+4=405 バイトとなり
+        # ext4等の255バイト上限を確実に超過する。チャンネル名と動画タイトルの
+        # 両方を含めても合計が255バイトに収まるよう、それぞれの上限を100バイトに
+        # 抑える(100+1(区切り)+100+4(".txt")=205バイト、安全マージンあり)。
+        safe_channel = self._sanitize_filename(result.channel_name, max_length=100)
+        safe_title = self._sanitize_filename(result.title, max_length=100)
+
         filename = f"{safe_title}.txt" if safe_channel == "unknown_channel" else f"{safe_channel}_{safe_title}.txt"
         output_path = target_dir / filename
 
@@ -332,18 +380,26 @@ class SubscriptionManager:
     def __init__(self, extractor: YouTubeExtractor, file_manager: FileManager):
         self.extractor = extractor
         self.file_manager = file_manager
-        
-        # DBはNASのベースディレクトリの1つ上の階層（home_system直下）に配置
-        self.db_path = AppConfig.get_output_base_dir().parent / "home_system.db"
+        # ★バグ修正(Issue #123): db_pathは以前ここ(__init__時点)で一度だけ確定していたが、
+        # process_subscriptions()実行のたびに評価し直す方式に変更したため、インスタンス
+        # 属性としては持たない(詳細はprocess_subscriptions()のコメント参照)。
 
-    def _verify_environment(self) -> bool:
+    def _verify_environment(self, current_base: Optional[Path] = None) -> bool:
         """
         NASのマウント状態（フォールバック中ではないか）を検証する。
-        
+
+        Args:
+            current_base (Optional[Path]): 検証対象のベースディレクトリ。省略時は
+                AppConfig.get_output_base_dir()を呼び出して取得する。
+                get_output_base_dir()はマウント確認・自己修復・障害通知を伴う重い
+                処理のため、呼び出し元が既に同一時点の値を取得済みの場合はそれを
+                渡して使い回すこと(process_subscriptions()参照)。
+
         Returns:
             bool: 正常なNAS環境であれば True、ローカルフォールバック中であれば False
         """
-        current_base = AppConfig.get_output_base_dir()
+        if current_base is None:
+            current_base = AppConfig.get_output_base_dir()
         # 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して
         # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが
         # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。
@@ -354,9 +410,9 @@ class SubscriptionManager:
             return False
         return True
 
-    def _init_db(self) -> None:
+    def _init_db(self, db_path: Path) -> None:
         """サブスクリプション管理用のテーブルが存在しない場合は作成する。"""
-        with closing(sqlite3.connect(self.db_path)) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             with closing(conn.cursor()) as cur:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS youtube_subscriptions (
@@ -371,22 +427,39 @@ class SubscriptionManager:
     def process_subscriptions(self) -> None:
         """登録されたチャンネルリストをDBから読み込み、順次抽出を実行する。"""
         # 1. 環境検証（データロスト防止の防波堤）
-        if not self._verify_environment():
+        # ★バグ修正(Issue #123): 以前はdb_pathを__init__時点のNAS状態で固定していたため、
+        # プロセス起動時にNASがフォールバック中で、その後この巡回開始時までにNASが復帰
+        # していると(autofsの再マウント遅延はこのリポジトリで既知の事象)、ここでの検証
+        # 自体は最新のNAS状態を見て通過するのにdb_pathだけ古いローカルパスのまま取り
+        # 残されていた。結果、ローカルに空DBが新規作成されてSELECTが0件になり、「アク
+        # ティブなサブスクリプションが登録されていません」で無言のno-op終了していた
+        # (巡回1回分が静かにスキップされ、ゴミの空DDD/home_system.dbが残る)。
+        # get_output_base_dir()の呼び出し結果を1回だけ取得し、検証とdb_path導出の
+        # 両方をその同一時点の値から行うことで、評価タイミングのズレを無くす
+        # (get_output_base_dir()はNASの自己修復・障害通知を伴う重い処理のため、
+        # 呼び出し回数も1回に抑える)。
+        current_base = AppConfig.get_output_base_dir()
+        if not self._verify_environment(current_base):
             return
+        db_path = current_base.parent / "home_system.db"
 
         # 2. DB初期化
+        # #185: db_path.parent.mkdir()が送出しうるOSError(権限エラー・読み取り専用
+        # マウント等)は sqlite3.Error のサブクラスではないため捕捉されず、本メソッド
+        # 内の他の失敗経路(ログ出力+安全なreturn)というフェイルソフト方針に反して
+        # --cron実行全体が未処理例外で異常終了していた。OSErrorも合わせて捕捉する。
         try:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._init_db()
-        except sqlite3.Error as e:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._init_db(db_path)
+        except (sqlite3.Error, OSError) as e:
             logger.error(f"❌ DB初期化エラー: {e}", exc_info=True)
             return
 
         urls: List[str] = []
-        
+
         # 3. DBからアクティブなサブスクリプションを取得
         try:
-            with closing(sqlite3.connect(self.db_path)) as conn:
+            with closing(sqlite3.connect(db_path)) as conn:
                 with closing(conn.cursor()) as cur:
                     cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")
                     rows = cur.fetchall()
@@ -410,14 +483,28 @@ class SubscriptionManager:
             logger.debug(f"[{i+1}/{len(urls)}] 巡回処理中: {url}")
             got_result = False
             for result in self.extractor.extract_iter(url):
-                self.file_manager.save(result)
+                # #243: 巡回開始時に1回だけ取得済みのcurrent_baseを使い回し、
+                # save()内での再評価(NASマウント確認・自己修復・障害通知)を防ぐ。
+                self.file_manager.save(result, base_dir=current_base)
                 got_result = True
 
-            if got_result:
+            # #227: 以前はgot_result(1件でも結果を取得できたか)だけを見ていたため、
+            # あるチャンネルの大量プレイリストが軒並み失敗しても、/videos等の一部が
+            # 成功しさえすればconsecutive_failuresが0にリセットされ、サーキット
+            # ブレーカーが内部の失敗を検知できなかった。extract_iter内部の失敗件数
+            # (last_extract_internal_failures)も合わせて確認する。
+            internal_failures = getattr(self.extractor, "last_extract_internal_failures", 0)
+            if got_result and not internal_failures:
                 consecutive_failures = 0
             else:
                 consecutive_failures += 1
-                logger.warning(f"⚠️ 抽出結果を取得できませんでした ({url}) — 連続失敗数: {consecutive_failures}")
+                if not got_result:
+                    logger.warning(f"⚠️ 抽出結果を取得できませんでした ({url}) — 連続失敗数: {consecutive_failures}")
+                else:
+                    logger.warning(
+                        f"⚠️ チャンネル内で{internal_failures}件のリクエストが失敗しました "
+                        f"({url}) — 連続失敗数: {consecutive_failures}"
+                    )
                 if consecutive_failures >= AppConfig.CONSECUTIVE_FAILURE_THRESHOLD:
                     logger.error("複数回連続で抽出に失敗したため巡回を中断します — レート制限の可能性があります")
                     break
@@ -459,9 +546,13 @@ class UrlExtractorApp:
 
         if target_url:
             total_files = 0
+            # #243: process_subscriptions()と同様、1本のURLから複数のExtractionResultが
+            # 得られる場合にget_output_base_dir()が結果ごとに再評価されないよう、
+            # 1回だけ取得した値をsave()へ渡して使い回す。
+            base_dir = AppConfig.get_output_base_dir()
             # イテレータを回して処理
             for result in self.extractor.extract_iter(target_url):
-                if self.file_manager.save(result):
+                if self.file_manager.save(result, base_dir=base_dir):
                     total_files += 1
             logger.info(f"🎉 処理完了: 計 {total_files} ファイルを作成しました")
         else:

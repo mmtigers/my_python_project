@@ -6,10 +6,11 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `b24086f` |
 
 ## 関連ドキュメント
 
-* [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）の実装元。
+* [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）と、Discord Webhookサーキットブレーカー（`DiscordCircuitBreaker`）の実装元。後者は`newface_monitor.py`の`DiscordNotifier`とも共通利用される。
 * [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) — 本ファイルがフォールバック的にインポートするDiscord Webhook通知処理（`_send_discord_webhook`）の実装元。
 * [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS容量監視との関連（全体設計書によれば、DDDのダウンロード活動によるNAS容量逼迫を`nas_monitor.py`側が監視する運用連携があるとされる。ただし本ファイルは`nas_monitor.py`を直接importしておらず、独自の簡易的な容量チェック（`FileSystemManager.check_disk_space`）を実装している点に注意）。
 * [../全体設計書.md](../全体設計書.md) — DDDサブシステム全体の位置付けおよびMY_HOME_SYSTEMとのNASリソース協調に関する記述。
@@ -52,26 +53,49 @@
 | `typing.List`, `Optional`, `Tuple`, `Any`, `Set`, `NamedTuple`, `Dict`, `Iterable` | 標準ライブラリ | 型ヒント全般 | 根拠: [import文] (行番号: 39 / 抜粋: "from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable") |
 | `dataclasses.dataclass`, `field` | 標準ライブラリ | `AppConfig` の定義（frozenデータクラス）とデフォルトファクトリ | 根拠: [import文] (行番号: 40 / 抜粋: "from dataclasses import dataclass, field") |
 | `file_utils.sanitize_filename` (as `_shared_sanitize_filename`) | ローカルモジュール | ファイル名のサニタイズ処理を共通モジュールへ委譲 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
+| `file_utils.DiscordCircuitBreaker` | ローカルモジュール | `DiscordNotifier.send`が参照するモジュールレベル変数`_discord_circuit_breaker`の型。Discord Webhookへの連続送信失敗検知用 | 根拠: [import文] (行番号: 43 / 抜粋: "from file_utils import DiscordCircuitBreaker") |
 | `pathlib.Path` | 標準ライブラリ | パスオブジェクトの操作全般 | 根拠: [import文] (行番号: 43 / 抜粋: "from pathlib import Path") |
 | `urllib.parse.urljoin` | 標準ライブラリ | m3u8マニフェスト内の相対URIを絶対URLへ書き換える処理で使用 | 根拠: [import文] (行番号: 44 / 抜粋: "from urllib.parse import urljoin") |
 | `concurrent.futures.ThreadPoolExecutor`, `as_completed` | 標準ライブラリ | m3u8セグメントの並行ダウンロード（最大5ワーカー） | 根拠: [import文] (行番号: 45 / 抜粋: "from concurrent.futures import ThreadPoolExecutor, as_completed") |
 | `requests.adapters.HTTPAdapter` | サードパーティ | セッションへのリトライ用アダプタのマウント | 根拠: [import文] (行番号: 48 / 抜粋: "from requests.adapters import HTTPAdapter") |
 | `urllib3.util.retry.Retry` | サードパーティ | HTTPリクエストのリトライポリシー定義 | 根拠: [import文] (行番号: 49 / 抜粋: "from urllib3.util.retry import Retry") |
 | `yt_dlp` | サードパーティ | 動画のメタデータ抽出およびダウンロード（Universal）、`playlist.m3u8`の結合（ScrapingStrategy）、バージョン鮮度チェック | 根拠: [import文] (行番号: 50 / 抜粋: "import yt_dlp") |
-| `services.notification_service._send_discord_webhook` | ローカルモジュール（動的解決） | Discord Webhook通知の送信。`try-except ImportError` で見つからない場合は無効化されたダミー関数にフォールバック | 根拠: [import文] (行番号: 84〜89 / 抜粋: "from services.notification_service import _send_discord_webhook") |
-| `curl_cffi.requests` (as `curl_requests`) | サードパーティ（遅延インポート） | m3u8マニフェスト・HLSセグメントの取得をブラウザ偽装(`impersonate="chrome"`)付きで行う。`_fetch_m3u8_manifest`内では`try-except ImportError`でガードされるが、`_download_segment`内では無条件でインポートされる | 根拠: [遅延import] (行番号: 592, 644 / 抜粋: "import curl_cffi.requests as curl_requests") |
+| `services.notification_service._send_discord_webhook` | ローカルモジュール（動的解決） | Discord Webhook通知の送信。`try-except ImportError` で見つからない場合は、`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`（いずれも未設定時は`DISCORD_WEBHOOK_URL`）を`os.getenv`で直接参照し`requests.post`で実際に送信する、本ファイル内実装済みの単独フォールバック関数`_standalone_send_discord_webhook`に置き換えられる（無効化されるダミーではない） | 根拠: [importとフォールバック代入] (行番号: 108〜115 / 抜粋: "from services.notification_service import _send_discord_webhook\nexcept ImportError:", "_send_discord_webhook = _standalone_send_discord_webhook") |
+| `curl_cffi.requests` (as `curl_requests`) | サードパーティ（遅延インポート） | m3u8マニフェスト・HLSセグメントの取得をブラウザ偽装(`impersonate="chrome"`)付きで行う。`_fetch_m3u8_manifest`内では`try-except ImportError`でガードされるが、`_download_segment`内では無条件でインポートされる | 根拠: [遅延import] (行番号: 692, 744 / 抜粋: "import curl_cffi.requests as curl_requests") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `services.notification_service._send_discord_webhook` | 実装が別ファイルに存在し、Webhook URLや認証方式、`image_data`引数の扱いなど詳細が不明。見つからない場合はダミー関数(`pass`)にフォールバックする実装のみがこのファイルからは確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 85, 88〜89 / 抜粋: "from services.notification_service import _send_discord_webhook") |
+| `services.notification_service._send_discord_webhook` | 実装が別ファイルに存在し、Webhook URLや認証方式、`image_data`引数の扱いなど詳細は本ファイルからは不明。ただし見つからない場合のフォールバック(`_standalone_send_discord_webhook`)自体は本ファイル内に実装があり、無効化されたダミー(`pass`)ではなく`os.getenv`で`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`(または`DISCORD_WEBHOOK_URL`)を参照し`requests.post`で実際に送信する簡易実装であることは本ファイルから確認できる。 | 根拠: [フォールバック関数定義とimport/except] (行番号: 84〜115 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "_send_discord_webhook = _standalone_send_discord_webhook") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）が本ファイルからは不明。 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
 | `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 65〜79 / 抜粋: "_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")") |
-| `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 405, 480〜481, 752〜753 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")") |
-| `curl_cffi`のブラウザ偽装(`impersonate`)実装 | `impersonate="chrome"`が実際にどのChrome版相当のTLS/HTTP指紋を再現するか、対応バージョンの下限など`curl_cffi`本体の実装詳細は本ファイルからは分からない。 | 根拠: [curl_cffi呼び出し箇所] (行番号: 601〜606, 646〜651 / 抜粋: "impersonate="chrome",") |
+| `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 472, 547, 915 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")", "with yt_dlp.YoutubeDL(ydl_opts) as ydl:") |
+| `curl_cffi`のブラウザ偽装(`impersonate`)実装 | `impersonate="chrome"`が実際にどのChrome版相当のTLS/HTTP指紋を再現するか、対応バージョンの下限など`curl_cffi`本体の実装詳細は本ファイルからは分からない。 | 根拠: [curl_cffi呼び出し箇所] (行番号: 701〜706, 746〜751 / 抜粋: "impersonate="chrome",") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### `_standalone_send_discord_webhook`
+
+* **役割**: `MY_HOME_SYSTEM`（LINE Bot SDKや`config.py`、DBを要する）を持たない単独環境向けの、追加の依存関係なしでテキスト通知のみを送る簡易Discord Webhook送信関数。`services.notification_service._send_discord_webhook`のインポートに失敗した場合にのみ、`_send_discord_webhook`名へこの関数が代入される（無効化されたダミー(`pass`)ではなく実際にPOST送信を行う）。
+* 根拠: [関数定義とDocstring] (行番号: 84〜88 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:\n    """MY_HOME_SYSTEM(LINE Bot SDKやconfig.py、DBを要する)を持たない単独環境向けの\n    簡易Discord Webhook送信フォールバック。DISCORD_WEBHOOK_ERROR/DISCORD_WEBHOOK_NOTIFY\n    (未設定時はDISCORD_WEBHOOK_URL)を直接参照し、追加の依存関係なしでテキスト通知のみ送る。")
+
+
+* **引数/リクエスト**: `messages`（辞書のリスト。各要素は`{"text": ...}`形式を想定し`.get("text", "")`で本文を取り出す。辞書でない要素は`str()`変換される）、`image_data=None`（引数として受け取るが本関数の実装内では未使用）、`channel="notify"`（`"error"`なら`DISCORD_WEBHOOK_ERROR`系、それ以外は`DISCORD_WEBHOOK_NOTIFY`系のURLを選択するチャンネル指定）
+* 根拠: [引数定義とチャンネル分岐] (行番号: 84, 90〜93 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "if channel == "error":\n        url = os.getenv("DISCORD_WEBHOOK_ERROR") or os.getenv("DISCORD_WEBHOOK_URL")\n    else:\n        url = os.getenv("DISCORD_WEBHOOK_NOTIFY") or os.getenv("DISCORD_WEBHOOK_URL")")
+
+
+* **戻り値/レスポンス**: `bool`（送信成功時`True`、Webhook URL未設定時または送信失敗時`False`）
+* 根拠: [戻り値ヒントと各return] (行番号: 84, 95, 102, 105 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "if not url:\n        return False")
+
+
+* **副作用**: `os.getenv`による環境変数(`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`/`DISCORD_WEBHOOK_URL`)の読み込み、`requests.post`によるDiscord Webhookへの実送信（本文は`text[:2000]`に切り詰め、タイムアウトは`CONFIG.REQUEST_TIMEOUT`）、送信失敗時の警告ログ出力。
+* 根拠: [requests.post呼び出し] (行番号: 100 / 抜粋: "resp = requests.post(url, json={"content": text[:2000]}, timeout=CONFIG.REQUEST_TIMEOUT)")
+
+
+* **エラーハンドリング**: `channel`に応じたいずれの環境変数も未設定（URLが`None`）の場合は`requests.post`自体を呼ばずに`False`を返す。送信時の例外は`Exception`で捕捉して`logger.warning`で警告ログを出力したうえで`False`を返す（例外の再送出はしない）。
+* 根拠: [try-exceptブロック] (行番号: 99〜105 / 抜粋: "try:\n        resp = requests.post(url, json={"content": text[:2000]}, timeout=CONFIG.REQUEST_TIMEOUT)\n        resp.raise_for_status()\n        return True\n    except Exception as e:\n        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {e}")\n        return False")
+
 
 ### `_resolve_cookies_file`
 
@@ -97,20 +121,20 @@
 
 ### `AppConfig`
 
-* **役割**: アプリケーション全体の設定値（時間制限、パス、リトライ回数、機能フラグ、ボット検知対策のスリープ範囲・閾値・マーカー文字列等）を保持するイミュータブル(`frozen=True`)なデータクラス。
-* 根拠: [AppConfigクラス] (行番号: 109〜110 / 抜粋: "@dataclass(frozen=True)\nclass AppConfig:")
+* **役割**: アプリケーション全体の設定値（時間制限、パス、リトライ回数、機能フラグ、ボット検知対策のスリープ範囲・閾値・マーカー文字列等）を保持するイミュータブル(`frozen=True`)なデータクラス。NAS関連では、`REQUIRE_NAS_MOUNT`（`false`でNAS未マウントでも起動を許可し`verify_nas_mount`自体をスキップする単独環境向けフラグ）、`LOCAL_TMP_DIR`（`ScrapingStrategy`がHLSフラグメント・結合を行うローカル一時ディレクトリ。既定は`tempfile.gettempdir()`ではなく`CURRENT_DIR/tmp_fragments`＝本スクリプトと同じ実ディスク上。理由はソースコメントによれば、`/tmp`がtmpfs運用の環境（一部Raspberry Pi OS構成含む）だと動画1本分(数GB)の書き込みでOOM・SSH切断を招きうるため）、`LOCAL_TMP_MIN_FREE_SPACE_GB`（`LOCAL_TMP_DIR`の空き容量下限）の3フィールドが、PR #72で追加されたローカル→NAS二段階転送パイプライン（`ScrapingStrategy._download_with_ytdlp`参照）向けに存在する。**（本PRで追加）** `DISCORD_CIRCUIT_BREAKER_THRESHOLD`（既定3）は、`_discord_circuit_breaker`（`DiscordNotifier.send`が参照するモジュールレベルの`file_utils.DiscordCircuitBreaker`）が連続何回の送信失敗でブレーカーを開くかの閾値。
+* 根拠: [AppConfigクラスとNAS関連フィールドのコメント] (行番号: 135〜136, 151〜153, 154〜166, 167〜169 / 抜粋: "@dataclass(frozen=True)\nclass AppConfig:", "REQUIRE_NAS_MOUNT: bool = os.getenv("DDD_REQUIRE_NAS_MOUNT", "true").lower() == "true"", "LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))", "LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))")
 
 
 * **引数/リクエスト**: なし（フィールドはデフォルト値、環境変数、または`_resolve_cookies_file`の呼び出し結果から初期化される）
-* 根拠: [各フィールド定義] (行番号: 111〜188 / 抜粋: "RESTRICT_TIME: bool = not FORCE_MODE")
+* 根拠: [各フィールド定義] (行番号: 137〜237 / 抜粋: "RESTRICT_TIME: bool = not FORCE_MODE")
 
 
 * **戻り値/レスポンス**: 該当なし（インスタンスは `CONFIG = AppConfig()` としてモジュールレベルで単一生成）
-* 根拠: [インスタンス生成] (行番号: 194 / 抜粋: "CONFIG = AppConfig()")
+* 根拠: [インスタンス生成] (行番号: 243 / 抜粋: "CONFIG = AppConfig()")
 
 
-* **副作用**: `os.getenv` による環境変数(`ENABLE_YOUTUBE_DL`, `VIDEO_SAVE_DIR`)の読み込み、`field(default_factory=_resolve_cookies_file)`によるCookieファイル解決処理の実行。
-* 根拠: [環境変数読み込みとdefault_factory] (行番号: 116〜117, 143 / 抜粋: "ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"", "YOUTUBE_COOKIES_FILE: Optional[Path] = field(default_factory=_resolve_cookies_file)")
+* **副作用**: `os.getenv` による環境変数(`ENABLE_YOUTUBE_DL`, `VIDEO_SAVE_DIR`, `DDD_REQUIRE_NAS_MOUNT`, `DDD_LOCAL_TMP_DIR`, `DDD_LOCAL_TMP_MIN_FREE_SPACE_GB`, `DDD_REQUEST_TIMEOUT`等)の読み込み、`field(default_factory=_resolve_cookies_file)`によるCookieファイル解決処理の実行。
+* 根拠: [環境変数読み込みとdefault_factory] (行番号: 143, 153, 166, 169, 192 / 抜粋: "ENABLE_YOUTUBE_DL: bool = os.getenv("ENABLE_YOUTUBE_DL", "false").lower() == "true"", "YOUTUBE_COOKIES_FILE: Optional[Path] = field(default_factory=_resolve_cookies_file)")
 
 
 * **エラーハンドリング**: なし
@@ -119,12 +143,12 @@
 ### `AppConfig.nas_marker_path`
 
 * **役割**: NASマウント確認用のマーカーファイル（`NAS_MOUNT_POINT / NAS_MARKER_FILE`）の完全パスを返すプロパティ。
-* 根拠: [プロパティ定義] (行番号: 190〜192 / 抜粋: "@property\n    def nas_marker_path(self) -> Path:\n        return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
+* 根拠: [プロパティ定義] (行番号: 239〜241 / 抜粋: "@property\n    def nas_marker_path(self) -> Path:\n        return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
 * **戻り値/レスポンス**: `Path`
-* 根拠: [戻り値] (行番号: 192 / 抜粋: "return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
+* 根拠: [戻り値] (行番号: 241 / 抜粋: "return self.NAS_MOUNT_POINT / self.NAS_MARKER_FILE")
 
 
 * **副作用**: なし
@@ -215,26 +239,39 @@
 * **エラーハンドリング**: なし
 
 
+### `_discord_circuit_breaker` (モジュールレベル変数)
+
+* **役割**: `DiscordNotifier.send`が全呼び出しで共有する、モジュールレベル単一インスタンスの`file_utils.DiscordCircuitBreaker`。**（本PRで追加）** 以前は`DiscordNotifier.send`にWebhookへの連続送信失敗を検知する仕組みが一切無く、Webhookが機能していない間の1回の実行で無駄なリクエストを送り続けていた。閾値は`CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD`(既定3)。
+* 根拠: [モジュールレベル変数定義] (行番号: 326 / 抜粋: "_discord_circuit_breaker = DiscordCircuitBreaker(failure_threshold=CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD)")
+
+
+* **引数/リクエスト**: 該当なし（モジュールロード時に1度だけ生成される）
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし（インスタンス生成のみ）
+* **エラーハンドリング**: なし
+* 根拠: [モジュールレベル変数定義] (行番号: 326 / 抜粋: 前掲)
+
+
 ### `DiscordNotifier.send`
 
-* **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。エラー通知フラグに応じて送信先チャンネル(`error`/`notify`)を切り替える。
-* 根拠: [DiscordNotifier.send] (行番号: 259〜266 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。エラー通知フラグに応じて送信先チャンネル(`error`/`notify`)を切り替える。**（本PRで追加）** 送信前に`_discord_circuit_breaker`が開いていないか確認し、開いていれば送信自体を試みずスキップする。
+* 根拠: [DiscordNotifier.send] (行番号: 328〜346 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **引数/リクエスト**: `text: str` (通知内容), `is_error: bool = False` (エラー通知フラグ)
-* 根拠: [引数定義] (行番号: 260 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [引数定義] (行番号: 330 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 260 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (行番号: 330 / 抜粋: "-> None:")
 
 
-* **副作用**: `_send_discord_webhook` の呼び出しによる外部APIへの通知送信。
-* 根拠: [API呼び出し] (行番号: 264 / 抜粋: "_send_discord_webhook([message], channel=channel)")
+* **副作用**: サーキットブレーカーの開放チェック（開いていれば警告ログを出力し早期return）、`_send_discord_webhook` の呼び出しによる外部APIへの通知送信、送信結果に応じた`_discord_circuit_breaker`の状態更新(`record_success`/`record_failure`)。
+* 根拠: [ブレーカーチェックとAPI呼び出し] (行番号: 331〜335, 339, 343〜346 / 抜粋: "if _discord_circuit_breaker.is_open:\n            # Webhookへの連続送信失敗を検知しているため、無駄なリクエストを\n            # 重ねないよう以降の送信をスキップする。" / "sent = _send_discord_webhook([message], channel=channel)")
 
 
-* **エラーハンドリング**: 送信時の例外を捕捉し、`exc_info=True` 付きでエラーログを出力（例外は再送出しない）。
-* 根拠: [try-exceptブロック] (行番号: 263〜266 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `_discord_circuit_breaker.is_open`が`True`の場合は警告ログを出力し送信自体を行わずreturnする。送信時の例外を捕捉した場合は`exc_info=True` 付きでエラーログを出力し（例外は再送出しない）`sent = False`とする。`_send_discord_webhook`の戻り値（例外を送出せず`bool`を返す実装のため）が`False`の場合も同様に失敗として扱う。成否いずれの場合も`_discord_circuit_breaker`の`record_success()`/`record_failure()`を呼び状態を更新する。
+* 根拠: [try-exceptブロックと成否分岐] (行番号: 336〜346 / 抜粋: "try:\n            sent = _send_discord_webhook([message], channel=channel)\n        except Exception as e:\n            logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)\n            sent = False\n        if sent:\n            _discord_circuit_breaker.record_success()\n        else:\n            _discord_circuit_breaker.record_failure()")
 
 
 ### `HistoryManager.load_history`
@@ -365,20 +402,20 @@
 ### `FileSystemManager.ensure_dir`
 
 * **役割**: 指定パスのディレクトリを（親ディレクトリを含め）作成する静的メソッド。
-* 根拠: [FileSystemManager.ensure_dir] (行番号: 353〜359 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* 根拠: [FileSystemManager.ensure_dir] (行番号: 416〜430 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
 * **引数/リクエスト**: `path: Path`
-* **戻り値/レスポンス**: `bool`（成功時`True`、権限エラー時`False`）
-* 根拠: [戻り値ヒント] (行番号: 353 / 抜粋: "def ensure_dir(path: Path) -> bool:")
+* **戻り値/レスポンス**: `bool`（成功時`True`、権限エラーおよびその他の`OSError`時`False`）
+* 根拠: [戻り値ヒント] (行番号: 417 / 抜粋: "def ensure_dir(path: Path) -> bool:")
 
 
-* **副作用**: ディレクトリ作成(`mkdir`)、権限エラー時のDiscord通知。
-* 根拠: [mkdir呼び出し] (行番号: 355 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
+* **副作用**: ディレクトリ作成(`mkdir`)、エラー時のDiscord通知。
+* 根拠: [mkdir呼び出し] (行番号: 419 / 抜粋: "path.mkdir(parents=True, exist_ok=True)")
 
 
-* **エラーハンドリング**: `PermissionError` を捕捉し、エラー通知を送信して `False` を返す。
-* 根拠: [try-exceptブロック] (行番号: 357〜359 / 抜粋: "except PermissionError:")
+* **エラーハンドリング**: `PermissionError` を捕捉し「❌ 権限エラー」通知を送信して `False` を返す。**（Issue #236で修正）** 以前は`PermissionError`以外の`OSError`(読み取り専用マウントの`Errno 30`、NAS切断時の`Errno 5`、ディスクフル時の`Errno 28`等)を捕捉しておらず、専用通知を経由しないまま呼び出し元(最終的には`run_locked`の`except Exception`)へ伝播していた。`extract_youtube_urls.py`の`process_subscriptions`(#185)と同様に`except OSError`節を追加し、「❌ ディレクトリ作成エラー」通知を送信して`False`を返すようにした。
+* 根拠: [try-exceptブロック] (行番号: 421〜430 / 抜粋: "except PermissionError:", "except OSError as e:")
 
 
 ### `FileSystemManager.check_disk_space`
@@ -417,17 +454,17 @@
 
 ### `SystemHealthChecker.verify_nas_mount`
 
-* **役割**: NASのマウントポイントおよびマーカーファイル(`nas_marker_path`)の存在を確認し、未マウントであればCRITICAL通知を送信する静的メソッド。
-* 根拠: [SystemHealthChecker.verify_nas_mount] (行番号: 384〜388 / 抜粋: "def verify_nas_mount() -> bool:")
+* **役割**: `CONFIG.REQUIRE_NAS_MOUNT`が`False`（環境変数`DDD_REQUIRE_NAS_MOUNT`を`"false"`に設定）の場合は、NASを経由せずローカルディスクへ直接保存する単独環境向けに、以降のマウント確認自体を行わず無条件で`True`を返す。`True`（既定）の場合のみ、NASのマウントポイントおよびマーカーファイル(`nas_marker_path`)の存在を確認し、未マウントであればCRITICAL通知を送信する静的メソッド。
+* 根拠: [SystemHealthChecker.verify_nas_mountとREQUIRE_NAS_MOUNT分岐] (行番号: 448〜455 / 抜粋: "def verify_nas_mount() -> bool:\n        if not CONFIG.REQUIRE_NAS_MOUNT:\n            return True")
 
 
 * **引数/リクエスト**: なし
-* **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒント] (行番号: 384 / 抜粋: "def verify_nas_mount() -> bool:")
+* **戻り値/レスポンス**: `bool`（`REQUIRE_NAS_MOUNT`無効時、またはマウント確認成功時は`True`。マウント確認失敗時は`False`）
+* 根拠: [戻り値ヒント] (行番号: 448 / 抜粋: "def verify_nas_mount() -> bool:")
 
 
-* **副作用**: 未マウント時のDiscord通知(`is_error=True`)。
-* 根拠: [通知送信] (行番号: 386 / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)")
+* **副作用**: `REQUIRE_NAS_MOUNT`有効時、未マウント検知時のDiscord通知(`is_error=True`)。
+* 根拠: [通知送信] (行番号: 453 / 抜粋: "DiscordNotifier.send("⛔ CRITICAL: NASマウントエラー", is_error=True)")
 
 
 * **エラーハンドリング**: なし（例外は捕捉されず呼び出し元に伝播しうる）
@@ -494,46 +531,68 @@
 
 ### `UniversalYtDlpStrategy.download`
 
-* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。
-* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 448〜466 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")
+* **役割**: `yt_dlp`を用いて汎用サイト（YouTube含む全対応サイト）から動画をダウンロードする。YouTubeドメインかどうかで保存カテゴリ（`youtube`/`others`）を振り分け、既存ファイルがあればスキップする。Cookieファイル設定時は`cookiefile`オプションを付与し、`yt-dlp`自身のリクエスト間隔にもスリープを設定する。`ydl_opts`には`noplaylist: True`が設定されており、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回されることを防いでいる。また`trim_file_name`（yt-dlp自身が持つ、拡張子を除いたファイル名を指定文字数に切り詰めるオプション）でファイル名長を制限しているが、これは`no_ext[:trim_file_name]`という単純な文字数ベースのスライスであり、UTF-8で1文字複数バイトになる文字（日本語等）に対してバイト数を保証しない。**（Issue #175で修正）** 以前の`150`文字は、日本語（UTF-8で3バイト/文字）のタイトルでは約85文字を超えるとext4等の255バイト制限を超過しうる不十分な値だったため、拡張子分の余白を見込んで日本語でも255バイトに収まる`80`文字に変更された。
+* 根拠: [UniversalYtDlpStrategy.downloadとnoplaylistのコメント] (行番号: 515〜533 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード\n            # してしまい、MAX_TASKS_PER_RUNによる1回あたりの上限governanceが\n            # まるごと迂回されてしまう。単一動画のみを対象にする。\n            'noplaylist': True,")、trim_file_nameの修正 (行番号: 534〜543 / 抜粋: "#175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の\n            # 単純なスライス)であり、バイト数を保証しない。")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
-* 根拠: [引数定義] (行番号: 448 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [引数定義] (行番号: 515 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功・スキップ時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 484, 489, 494 / 抜粋: "if self._should_skip(filename): return True")
+* 根拠: [return文] (行番号: 522, 558, 563, 570 / 抜粋: "if self._should_skip(filename): return True")
 
 
 * **副作用**: 保存先ディレクトリの決定・作成、`yt_dlp`によるメタデータ取得とダウンロード、成功時のDiscord通知。
-* 根拠: [ダウンロード実行と通知] (行番号: 487〜488 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
+* 根拠: [ダウンロード実行と通知] (行番号: 561〜562 / 抜粋: "ydl.download([task.url])\n                DiscordNotifier.send(f"✅ 動画保存完了\\nファイル: `{filename.name}`")")
 
 
 * **エラーハンドリング**: `yt_dlp`実行時の例外を捕捉してエラーログを出力し、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。
-* 根拠: [try-exceptブロック] (行番号: 490〜494 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
+* 根拠: [try-exceptブロック] (行番号: 564〜570 / 抜粋: "except Exception as e:\n            logger.error(f"⚠️ Universal DL エラー: {e}", exc_info=True)\n            if _is_bot_detection_error(e):")
 
 
 ### `ScrapingStrategy.download`
 
-* **役割**: `missav`サイト専用のダウンロード処理。対象ページのHTMLを取得し、JS難読化されたm3u8 URLを抽出したうえで`yt_dlp`経由でダウンロードする。ファイル名はURLパス末尾（取得できなければタイムスタンプ由来のフォールバックID）をサニタイズして生成する。
-* 根拠: [ScrapingStrategy.download] (行番号: 500〜520 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* **役割**: `missav`サイト専用のダウンロード処理。対象ページのHTMLを取得し、JS難読化されたm3u8 URLを抽出したうえで`yt_dlp`経由でダウンロードする。ファイル名はURLパス末尾（取得できなければタイムスタンプ由来のフォールバックID）をサニタイズして生成する。`_should_skip`による重複スキップ判定の前に、必ず`_cleanup_stale_ytdlp_artifacts`を呼び出し、過去の中断で`final_path`と同名で残った中間生成物（`.part`/`.part-FragN.part`/`.ytdl`/旧版の`.fragments.tmp`ディレクトリ等）を一掃する。
+* 根拠: [ScrapingStrategy.downloadとクリーンアップ呼び出し] (行番号: 567〜593 / 抜粋: "def download(self, task: DownloadTask) -> bool:", "self._cleanup_stale_ytdlp_artifacts(final_path)\n\n        if self._should_skip(final_path): return True")
 
 
 * **引数/リクエスト**: `task: DownloadTask`
-* 根拠: [引数定義] (行番号: 500 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
+* 根拠: [引数定義] (行番号: 567 / 抜粋: "def download(self, task: DownloadTask) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功・スキップ時`True`、失敗時`False`）
-* 根拠: [return文] (行番号: 503, 506, 511, 518, 520 / 抜粋: "if not target_dir: return False")
+* 根拠: [return文] (行番号: 570, 573, 578, 591, 593 / 抜粋: "if not target_dir: return False")
 
 
-* **副作用**: HTML取得のHTTPリクエスト、URLから生成したファイル名でのファイル保存、`_download_with_ytdlp`経由のyt-dlp実行。
-* 根拠: [ダウンロード委譲] (行番号: 520 / 抜粋: "return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)")
+* **副作用**: HTML取得のHTTPリクエスト、`_cleanup_stale_ytdlp_artifacts`による残留中間ファイルの削除、URLから生成したファイル名でのファイル保存、`_download_with_ytdlp`経由のyt-dlp実行。
+* 根拠: [ダウンロード委譲] (行番号: 593 / 抜粋: "return self._download_with_ytdlp(m3u8_url, final_path, task.url, target_dir)")
 
 
 * **エラーハンドリング**: HTML取得失敗時や m3u8 URL抽出失敗時は警告ログを出力して`False`を返す（例外送出なし）。`_fetch_html`が`BotDetectionError`を送出した場合はそのまま呼び出し元に伝播する。
-* 根拠: [ガード節] (行番号: 506, 509〜511 / 抜粋: "if not m3u8_url:")
+* 根拠: [ガード節] (行番号: 576〜578 / 抜粋: "if not m3u8_url:")
+
+
+### `ScrapingStrategy._cleanup_stale_ytdlp_artifacts`
+
+* **役割**: `final_path`と同じディレクトリ内で、`final_path.name`から始まる中間生成物（NAS上に残った古い`.part`/`.part-FragN.part`/`.ytdl`ファイルや、旧版実装が使っていた`.fragments.tmp`ディレクトリ等）を削除する静的メソッド。Docstringによれば、以前の実装は結合(merge)処理をNAS上の`final_path`へ直接`outtmpl`させていたため、処理が中断すると数百〜数千個のフラグメント断片がNAS上に残留し続けていた（実機で確認）。`_download_with_ytdlp`の修正（後述）により今後この種の残骸は発生しなくなるが、修正前に残った既存の残骸や、本メソッド自身が発見できなかった残骸を安全側で一掃する目的で、`ScrapingStrategy.download`から`_should_skip`判定より前に必ず呼び出される。
+* 根拠: [_cleanup_stale_ytdlp_artifactsとDocstring] (行番号: 595〜605 / 抜粋: "def _cleanup_stale_ytdlp_artifacts(final_path: Path) -> None:\n        """final_pathと同名で始まる中間生成物（NAS上に残った古い`.part`/\n        `.part-FragN.part`/`.ytdl`/旧版の`.fragments.tmp`ディレクトリ等）を削除する。", "以前の実装は結合(merge)処理をNAS上のfinal_pathへ直接outtmplさせていたため、\n        処理が中断すると数百〜数千個のフラグメント断片がNAS上に残留し続けていた\n        （実機で確認）。")
+
+
+* **引数/リクエスト**: `final_path: Path`
+* 根拠: [引数定義] (行番号: 595〜596 / 抜粋: "def _cleanup_stale_ytdlp_artifacts(final_path: Path) -> None:")
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [戻り値ヒント] (行番号: 596 / 抜粋: "def _cleanup_stale_ytdlp_artifacts(final_path: Path) -> None:")
+
+
+* **副作用**: `final_path.parent`内の走査(`iterdir`)、`final_path.name`で始まり`final_path`自身とは異なる各エントリの削除（ディレクトリは`shutil.rmtree(ignore_errors=True)`、ファイルは`unlink`）。
+* 根拠: [走査と削除処理] (行番号: 609〜616 / 抜粋: "for stale in final_path.parent.iterdir():\n                if stale == final_path or not stale.name.startswith(final_path.name):\n                    continue\n                try:\n                    if stale.is_dir():\n                        shutil.rmtree(stale, ignore_errors=True)\n                    else:\n                        stale.unlink()")
+
+
+* **エラーハンドリング**: `final_path.parent`が存在しない場合は何もせず`return`する。個別エントリの削除失敗(`OSError`)、および走査自体の失敗(`OSError`)はいずれも警告ログを出力するのみで、例外は再送出されず処理は継続する。
+* 根拠: [ガード節とtry-exceptブロック] (行番号: 607〜608, 617〜620 / 抜粋: "if not final_path.parent.exists():\n                return", "except OSError as e:\n            logger.warning(f"⚠️ 残留中間ファイルのスキャンに失敗しました ({final_path.parent}): {e}")")
 
 
 ### `ScrapingStrategy._fetch_html`
@@ -641,46 +700,52 @@
 
 ### `ScrapingStrategy._download_segments_and_localize_manifest`
 
-* **役割**: 絶対URL化済みのm3u8マニフェスト内の各セグメント（および`#EXT-X-KEY`等の`URI`属性）を、`ThreadPoolExecutor`（`_FRAGMENT_DOWNLOAD_WORKERS`=5並列）で`_download_segment`により並行ダウンロードし、ローカルファイルの絶対`file://` URIに差し替えたマニフェストを返すインスタンスメソッド。`yt-dlp`自身にセグメント取得をさせるとTLS指紋の違いによりWAFに403でブロックされ続けることを実機の生トラフィック検証(`debug_printtraffic`)で確認したため、セグメント取得自体も`curl_cffi`経由で行い、`yt-dlp`/`ffmpeg`には取得済みのローカルファイルのみを渡す。
-* 根拠: [_download_segments_and_localize_manifestとDocstring] (行番号: 657〜672 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
+* **役割**: 絶対URL化済みのm3u8マニフェスト内の各セグメント（および`#EXT-X-KEY`等の`URI`属性）を、`ThreadPoolExecutor`（`_FRAGMENT_DOWNLOAD_WORKERS`=5並列）で`_download_segment`により並行ダウンロードし、ローカルファイルの絶対`file://` URIに差し替えたマニフェストを返すインスタンスメソッド。`yt-dlp`自身にセグメント取得をさせるとTLS指紋の違いによりWAFに403でブロックされ続けることを実機の生トラフィック検証(`debug_printtraffic`)で確認したため、セグメント取得自体も`curl_cffi`経由で行い、`yt-dlp`/`ffmpeg`には取得済みのローカルファイルのみを渡す。**Issue #104の修正**により、いずれかのセグメントで例外（`BotDetectionError`含む）が発生した場合は、まだ実行が始まっていない残りのキュー済みセグメント取得を明示的にキャンセルしてから例外を再送出するようになった。
+* 根拠: [_download_segments_and_localize_manifestとDocstring] (行番号: 757〜772 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
 
 
 * **引数/リクエスト**: `localized_manifest: str`（絶対URL化済みマニフェスト）, `page_url: str`（Refererヘッダー設定用）, `tmp_dir: Path`（セグメント保存先の一時ディレクトリ）
-* 根拠: [引数定義] (行番号: 657〜659 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
+* 根拠: [引数定義] (行番号: 757〜759 / 抜粋: "def _download_segments_and_localize_manifest(\n        self, localized_manifest: str, page_url: str, tmp_dir: Path\n    ) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（セグメントURIをローカル`file://`パスへ差し替え済みのマニフェスト本文）
-* 根拠: [戻り値ヒントと末尾return] (行番号: 659, 712 / 抜粋: "return "\\n".join(new_lines)")
+* 根拠: [戻り値ヒントと末尾return] (行番号: 759, 822 / 抜粋: "return "\\n".join(new_lines)")
 
 
-* **副作用**: マニフェスト内の各セグメントURLを`_download_segment`で並行ダウンロードし`tmp_dir`配下へファイル書き込み（`ThreadPoolExecutor`, 最大5ワーカー）。
-* 根拠: [並行ダウンロードとファイル書き込み] (行番号: 686〜703 / 抜粋: "def _fetch_one(idx: int, url: str) -> Tuple[int, str]:\n            suffix = Path(url.split('?')[0]).suffix or '.bin'\n            local_name = f"seg_{idx:06d}{suffix}"\n            local_path = tmp_dir / local_name\n            content = self._download_segment(url, page_url)\n            local_path.write_bytes(content)")
+* **副作用**: マニフェスト内の各セグメントURLを`_download_segment`で並行ダウンロードし`tmp_dir`配下へファイル書き込み（`ThreadPoolExecutor`, 最大5ワーカー）。いずれかのセグメントで例外が発生した場合は、`executor.shutdown(wait=True, cancel_futures=True)`により、まだ実行が始まっていないキュー済みのセグメント取得（＝HTTP GETリクエスト自体）をキャンセルする（Issue #104の修正、後述のエラーハンドリング参照）。
+* 根拠: [並行ダウンロードとファイル書き込み] (行番号: 786〜796 / 抜粋: "def _fetch_one(idx: int, url: str) -> Tuple[int, str]:\n            suffix = Path(url.split('?')[0]).suffix or '.bin'\n            local_name = f"seg_{idx:06d}{suffix}"\n            local_path = tmp_dir / local_name\n            content = self._download_segment(url, page_url)\n            local_path.write_bytes(content)")
 
 
-* **エラーハンドリング**: 個別セグメントのダウンロード失敗（`_download_segment`が送出する例外、`BotDetectionError`含む）は`future.result()`の呼び出し元でそのまま伝播し、本メソッド内で個別に捕捉されることはない（コメントで明記）。
-* 根拠: [コメント] (行番号: 702 / 抜粋: "idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる")
+* **エラーハンドリング**: 個別セグメントのダウンロード失敗（`_download_segment`が送出する例外、`BotDetectionError`含む）は`future.result()`の呼び出し元でそのまま伝播する。**Issue #104の修正（`with ThreadPoolExecutor(...) as executor:`ブロック終了時の暗黙のshutdownがキュー済み残り全件の完走を待ってしまい、モジュールDocstring/仕様書が謳う「即時セッション中断」が事実上機能していなかった不具合の修正）**により、`as_completed`ループを`try`/`except Exception:`で囲み、例外捕捉時に`executor.shutdown(wait=True, cancel_futures=True)`を明示的に呼んで未着手のキュー済みセグメントをキャンセルしたうえで、同じ例外を`raise`により再送出する（実行中だった最大`_FRAGMENT_DOWNLOAD_WORKERS`件分の完了は待つ）。
+* 根拠: [コメント] (行番号: 803 / 抜粋: "idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる")
+* 根拠: [Issue #104修正のtry/except] (行番号: 801〜815 / 抜粋: "try:\n                for future in as_completed(futures):\n                    idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる\n                    resolved[idx] = local_uri\n            except Exception:", "executor.shutdown(wait=True, cancel_futures=True)\n                raise")
 
 
 ### `ScrapingStrategy._download_with_ytdlp`
 
-* **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化→`_download_segments_and_localize_manifest`で全セグメントを`curl_cffi`経由で並行ダウンロードしローカル`file://` URIへ差し替える、というパイプラインを実行したうえで、差し替え済みマニフェストを一時ディレクトリへ`playlist.m3u8`として書き出し、最後に`yt_dlp`（`enable_file_urls: True`）へそのローカルファイルの`file://` URIのみを渡してセグメントの結合（ネットワークアクセスなし）を行う。成功時はDiscord通知を送信する。
-* 根拠: [_download_with_ytdlpとコメント] (行番号: 714〜719 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:\n        # HLS(m3u8)は「マニフェスト・全セグメントをcurl_cffi(ブラウザ偽装)で\n        # 自前取得してローカルに保存 → yt-dlpにはローカルファイルのみを渡して\n        # 結合させる」方式で処理する(理由は_download_segments_and_localize_manifest\n        # のdocstring参照)。")
+* **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化→`_download_segments_and_localize_manifest`で全セグメントを`curl_cffi`経由で並行ダウンロードしローカル`file://` URIへ差し替える、というパイプラインを実行したうえで、以下の**ローカルディスク完結の結合＋NASへの2段階転送**方式でファイルを完成させる（PR #72でNAS上に直接結合する旧実装から変更）。
+  1. セグメント本体・差し替え済みマニフェスト(`playlist.m3u8`)は`CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")`という**ローカルディスク**上の一時ディレクトリ(`tmp_dir`)へ書き込む（NAS上の`save_dir`ではない）。開始前に同名`tmp_dir`が残っていれば削除してから作り直し、書き込み前に`FileSystemManager.check_disk_space`で`CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB`以上の空きを確認する。
+  2. セグメント取得完了後、結合(`yt-dlp`)＋その後の`FixupM3u8`（ffmpeg再多重化）でさらに同程度のディスクを消費する見込みから、取得済みバイト数の約2.2倍の空き容量があるかを結合開始前に**再度**確認し、不足していれば具体的なバイト数を含むエラーログを出力して`False`を返す（ここで中断せず結合まで進めてディスクフルで失敗すると、それまでの帯域・時間が丸ごと無駄になるため）。
+  3. `yt_dlp`の`outtmpl`は`final_path`（NAS上）ではなく`local_merged_path`（`tmp_dir`内、ローカルディスク上）を指す。ソースコメントによれば、HLSの`hlsnative`ダウンローダーはローカル`file://`入力であっても出力先(`outtmpl`)に対し「フラグメント毎に`<name>.part-FragN.part`を書き込んでから結合」という動作をするため、これをNAS上で行うと結局NAS上に数百〜数千個の小ファイルが書き込まれ、セグメント取得側で対処したのと同じNASマウント遅延由来の問題（書き込み直後の読み込みでの"fragment not found"、長時間のハング）が結合段階で再発していた（実機のNAS上に大量の`*.part-FragN.part`/`*.ytdl`が残留する形で確認済み）。
+  4. 結合完了後、完成した1ファイルのみをNASへ転送する。ローカルディスク→NAS(CIFS)という異種ファイルシステム間のコピーは原子的にできないため、まず`shutil.copy2`で`nas_tmp_path`（`final_path.with_name(final_path.name + ".nastmp")`、NAS上の一時名）へコピーし、`local_merged_path.stat().st_size`と`nas_tmp_path.stat().st_size`を比較する**ファイルサイズ検証**を行う。ソースコメントによれば、NAS(CIFS)は接続が不安定な場合があり、実機のdmesgで`"sends on sock ... stuck for 15 seconds"`や`"No writable handle in writepages"`が確認されており、この場合`shutil.copy2`自体は例外を送出せず「見かけ上成功」してしまい、末尾のmoov atomが丸ごと欠落した再生不能なmp4が生成される実害が確認されている。サイズが一致しない場合は不完全な`nas_tmp_path`を削除して`OSError`を送出する。
+  5. サイズ検証に成功した場合のみ、同一ファイルシステム内(NAS上)でのアトミックな`nas_tmp_path.replace(final_path)`を行い、その後Discord成功通知を送信する。
+* 根拠: [_download_with_ytdlp全体とローカル/NAS 2段階転送のコメント] (行番号: 826〜830, 837〜869, 880〜902, 904〜916, 918〜945 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:", "tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")", "'outtmpl': str(local_merged_path),", "local_size = local_merged_path.stat().st_size\n            nas_size = nas_tmp_path.stat().st_size\n            if nas_size != local_size:", "nas_tmp_path.replace(final_path)")
 
 
-* **引数/リクエスト**: `m3u8_url: str`, `final_path: Path`, `page_url: str`, `save_dir: Path`
-* 根拠: [引数定義] (行番号: 714 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
+* **引数/リクエスト**: `m3u8_url: str`, `final_path: Path`（NAS上の最終保存先）, `page_url: str`, `save_dir: Path`
+* 根拠: [引数定義] (行番号: 826 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
 
 
-* **戻り値/レスポンス**: `bool`（成功時`True`、マニフェスト取得失敗・一時ディレクトリ作成失敗・ダウンロード失敗時`False`）
-* 根拠: [return文] (行番号: 721, 730, 755, 764 / 抜粋: "return False")
+* **戻り値/レスポンス**: `bool`（NAS転送・サイズ検証まで成功時`True`。マニフェスト取得失敗・一時ディレクトリ作成失敗・ローカルディスク空き容量不足（初回/結合前の再チェックいずれか）・ダウンロード失敗時は`False`）
+* 根拠: [return文] (行番号: 833, 849, 856, 902, 948, 959 / 抜粋: "if not FileSystemManager.check_disk_space(tmp_dir, min_free_gb=CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB):\n            shutil.rmtree(tmp_dir, ignore_errors=True)\n            return False")
 
 
-* **副作用**: `_fetch_m3u8_manifest`/`_download_segments_and_localize_manifest`によるネットワークアクセス（`curl_cffi`）とローカルファイル書き込み（セグメント本体・`playlist.m3u8`）、一時ディレクトリ(`{final_path名}.fragments.tmp`)の作成、`yt_dlp`によるローカルファイルの結合実行、成功時のDiscord通知、失敗時の一時ディレクトリの削除(`shutil.rmtree`、`finally`節）。
-* 根拠: [一時ディレクトリ作成とyt-dlp実行] (行番号: 725, 738〜753, 765〜766 / 抜粋: "tmp_dir = final_path.with_name(final_path.name + ".fragments.tmp")", "ydl_opts = {\n                'format': 'best',\n                'outtmpl': str(final_path),\n                'quiet': not CONFIG.SHOW_PROGRESS_BAR,\n                'no_warnings': True,")
+* **副作用**: `_fetch_m3u8_manifest`/`_download_segments_and_localize_manifest`によるネットワークアクセス（`curl_cffi`）と**ローカルディスク**上の`tmp_dir`へのファイル書き込み（セグメント本体・`playlist.m3u8`）、ローカルディスクの空き容量チェック（開始前・結合前の2回）、`yt_dlp`によるローカルディスク上での結合実行（`outtmpl`は`local_merged_path`）、`shutil.copy2`によるNAS上の一時ファイル(`nas_tmp_path`)へのコピー、ファイルサイズ比較検証、検証成功時の`nas_tmp_path.replace(final_path)`によるアトミックなNAS上での確定、成功時のDiscord通知、`finally`節での`tmp_dir`削除(`shutil.rmtree`、成功・失敗いずれの場合も実行)。
+* 根拠: [ローカル結合とNAS転送処理] (行番号: 840, 854, 904〜913, 925, 935〜943, 945, 960〜961 / 抜粋: "tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")", "shutil.copy2(str(local_merged_path), str(nas_tmp_path))", "nas_tmp_path.replace(final_path)", "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
 
 
-* **エラーハンドリング**: マニフェスト取得失敗時（`None`）や一時ディレクトリ作成失敗時（`OSError`）はエラーログを出力して`False`を返す。`BotDetectionError`発生時は生成済みの`final_path`を削除したうえで再送出する。それ以外の例外はエラーログを出力し、`final_path`が存在すれば削除したうえで、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。いずれの場合も`finally`節で一時ディレクトリを削除する。
-* 根拠: [try-exceptとfinally] (行番号: 756〜766 / 抜粋: "except BotDetectionError:\n            if final_path.exists(): final_path.unlink()\n            raise")
+* **エラーハンドリング**: マニフェスト取得失敗時（`None`）、一時ディレクトリ作成失敗時（`OSError`）、初回または結合前のディスク空き容量不足時はエラーログを出力して`False`を返す（後者2つは`tmp_dir`を削除してから返す）。`BotDetectionError`発生時は生成済みの`final_path`と`nas_tmp_path`（存在すれば）を削除したうえで再送出する。それ以外の例外（NASサイズ不一致による`OSError`含む）はエラーログを出力し、`final_path`が存在すれば削除、`nas_tmp_path`も削除したうえで、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。いずれの経路でも`finally`節で`tmp_dir`（ローカル一時ディレクトリ）を削除する。
+* 根拠: [try-except-finally] (行番号: 949〜961 / 抜粋: "except BotDetectionError:\n            if final_path.exists(): final_path.unlink()\n            nas_tmp_path.unlink(missing_ok=True)\n            raise\n        except Exception as e:", "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
 
 
 ### `BatchDownloader.__init__`
@@ -736,21 +801,21 @@
 
 ### `BatchDownloader._collect_tasks`
 
-* **役割**: `list.txt`と`list/*.txt`の全ファイルからURLを読み込み、コメント行(`#`始まり)・空行・履歴済みURL・重複URLを除外したうえでソース名ごとにグループ化し、`_round_robin_flatten`でラウンドロビン順に平坦化した`DownloadTask`一覧を生成する。
-* 根拠: [_collect_tasks] (行番号: 798〜834 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* **役割**: `list.txt`と`list/*.txt`の全ファイルからURLを読み込み、コメント行(`#`始まり)・空行・履歴済みURL・重複URLを除外したうえでソース名ごとにグループ化し、`_round_robin_flatten`でラウンドロビン順に平坦化した`DownloadTask`一覧を生成する。**（Issue #184で修正）** 以前は`list/*.txt`側の読み込みのみ`try/except`で保護されており、`list.txt`側にはこの保護が無かった。`list.txt`が非UTF-8バイト等で読み込み失敗すると未処理例外が`_collect_tasks`全体を中断させ、本来は独立して処理されるはずの`list/*.txt`側のタスクまで巻き添えで処理されなくなっていた。`list.txt`の読み込みも`list/*.txt`側と同じ`try/except`パターンで保護し、失敗時はエラーログを出力したうえで`list/*.txt`側の処理を継続するよう修正した。
+* 根拠: [_collect_tasks] (行番号: 1000〜1046 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `List[DownloadTask]`
-* 根拠: [戻り値ヒント] (行番号: 798 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
+* 根拠: [戻り値ヒント] (行番号: 1000 / 抜粋: "def _collect_tasks(self) -> List[DownloadTask]:")
 
 
 * **副作用**: `list.txt`および`list/`配下の`*.txt`ファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 812〜813, 823, 826 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
+* 根拠: [ファイル読み込み] (行番号: 1021, 1038 / 抜粋: "with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:")
 
 
-* **エラーハンドリング**: 個別リストファイルの読み込み失敗時は例外を捕捉してエラーログを出力し、他ファイルの処理を継続する。
-* 根拠: [try-exceptブロック] (行番号: 831〜832 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `list.txt`・`list/*.txt`のいずれについても、個別リストファイルの読み込み失敗時は例外を捕捉してエラーログを出力し、他ファイルの処理を継続する（Issue #184修正後は両者とも同一パターンで保護される）。
+* 根拠: [try-exceptブロック(list.txt側)] (行番号: 1020, 1028〜1029 / 抜粋: "try:\n                with open(CONFIG.LIST_FILE_PATH"), [try-exceptブロック(list/*.txt側)] (行番号: 1037, 1045〜1046 / 抜粋: "except Exception as e:\n                    logger.error(f\"リスト読み込みエラー ({list_file.name}): {e}\", exc_info=True)")
 
 
 ### `BatchDownloader._purge_skipped_tasks`
@@ -830,8 +895,8 @@
 * 根拠: [メインループ] (行番号: 1000〜1046 / 抜粋: "for i, task in enumerate(tasks):")
 
 
-* **エラーハンドリング**: `BotDetectionError`を捕捉した場合はクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。
-* 根拠: [try-exceptとbreak] (行番号: 1020〜1042 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")\n                CooldownManager.trigger_cooldown()")
+* **エラーハンドリング**: `BotDetectionError`を捕捉した場合は`exc_info=True`付きで`logger.critical`によりログ出力したうえでクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。**（本PRで修正）** `logger.critical`呼び出しに以前`exc_info`が付いておらず、同じ`_run_locked`内の他の例外ログ（`except Exception as e:`側、行番号1256）が`exc_info=True`付きであることとの一貫性が無かった。
+* 根拠: [try-exceptとbreak] (行番号: 1243〜1265 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
 
 
 ## 5. 処理フロー図
@@ -867,7 +932,7 @@ flowchart TD
     TimeCheck2 -->|"Yes"| GetStrategy{"URLの判定<br>(_get_strategy)"}
 
     GetStrategy -->|"無効なYouTube URL<br>(フラグ無効時)"| Continue["処理スキップ(continue)"]
-    GetStrategy -->|"missavを含む"| Scrape["ScrapingStrategyを実行<br>(HTML取得→m3u8抽出→yt-dlp)"]
+    GetStrategy -->|"missavを含む"| Scrape["ScrapingStrategyを実行<br>(HTML取得→m3u8抽出→<br>セグメント取得→ローカル結合→<br>NAS2段階転送+サイズ検証)"]
     GetStrategy -->|"その他・有効なYouTube"| YTDlp["UniversalYtDlpStrategyを実行"]
 
     Scrape --> BotCheck{"BotDetectionError発生?"}
@@ -933,6 +998,7 @@ flowchart TD
     subgraph SubBlackBox["ブラックボックス・外部システム"]
         NotificationService["services.notification_service<br>(_send_discord_webhook)"]
         FileUtils["file_utils<br>(sanitize_filename)"]
+        DiscordCircuitBreaker["file_utils.DiscordCircuitBreaker"]
         YTDLP["yt_dlp"]
         Requests["requests"]
         CurlCffi["curl_cffi"]
@@ -943,6 +1009,7 @@ flowchart TD
 
     DiscordNotifier -.-> NotificationService
     NotificationService -.-> DiscordAPI
+    DiscordNotifier --> DiscordCircuitBreaker
     FileSystemManager -.-> FileUtils
     UniversalYtDlpStrategy --> YTDLP
     ScrapingStrategy --> YTDLP
@@ -950,6 +1017,7 @@ flowchart TD
     NetworkManager --> Requests
     ScrapingStrategy --> Requests
     ScrapingStrategy --> CurlCffi
+    ScrapingStrategy -.->|"copy2+サイズ検証+replace"| NAS
     FileSystemManager --> NAS
     HistoryManager --> NAS
     CooldownManager --> NAS
@@ -969,7 +1037,10 @@ flowchart TD
 * **副作用**: `_purge_skipped_tasks` 内で `list.txt` や `list/*.txt` を物理的に上書き・削除する処理が含まれており、バグが混入した場合、読み込み元のタスク一覧データを消失するリスクがある。ただし一時ファイル(`.tmp`)経由の`replace`によりアトミック性は確保されている。
 * **多重起動防止**: `fcntl.flock` によるロックファイル制御が導入されており、cron等での実行が重複した場合に `list.txt` / `list/*.txt` への同時読み書き競合を防いでいる（`run`メソッド）。
 * **外部入力の実行制限**: `sys.argv` に `--force` が指定されている場合、`SystemHealthChecker.is_within_time_window` による時間制限の判定が無視される。
-* **通知モジュールの依存**: `services.notification_service` が見つからない場合はエラーとせず、何もしないダミー関数(`pass`)で上書きされるフォールバックが実装されている。
+* **通知モジュールの依存**: `services.notification_service` が見つからない場合はエラーとせず、`_standalone_send_discord_webhook`という本ファイル内実装済みの単独フォールバック関数で`_send_discord_webhook`が上書きされる。これは何もしないダミー(`pass`)ではなく、`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`(いずれも未設定時は`DISCORD_WEBHOOK_URL`)を`os.getenv`で直接参照し`requests.post`で実際にDiscordへ送信する、`MY_HOME_SYSTEM`側の依存(LINE Bot SDK・`config.py`・DB等)を必要としない単独環境向けの簡易実装である。ただしいずれの環境変数も未設定の場合は`_standalone_send_discord_webhook`自身が`False`を返し、通知は送信されない。
+* 根拠: [_standalone_send_discord_webhookとimport/except] (行番号: 84〜115 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "except ImportError:", "_send_discord_webhook = _standalone_send_discord_webhook")
+* **NAS転送のCIFS破損対策（PR #72）**: `ScrapingStrategy._download_with_ytdlp`は、HLSセグメント取得と結合をNAS上ではなく`CONFIG.LOCAL_TMP_DIR`配下のローカルディスク上で完結させ、完成した1ファイルのみを`shutil.copy2`→ファイルサイズ検証→`Path.replace`によるアトミックなリネームという2段階でNASへ転送する（旧実装はyt-dlpの結合先(`outtmpl`)を直接NAS上の`final_path`にしていた）。ソースコメントによれば、これはNAS(CIFS)接続不安定時に`shutil.copy2`が例外を送出せず「見かけ上成功」し、末尾のmoov atomが欠落した再生不能なmp4を生成する実害（実機のdmesgで`"stuck for 15 seconds"`/`"No writable handle in writepages"`を確認済み）への対策であり、サイズ不一致時は不完全な`.nastmp`ファイルを削除して`OSError`を送出することで、破損ファイルが`final_path`として確定してしまう（＝`_should_skip`が完了済みと誤認する）ことを防いでいる。`CONFIG.REQUIRE_NAS_MOUNT`（環境変数`DDD_REQUIRE_NAS_MOUNT`、既定`true`）を`false`にすると`SystemHealthChecker.verify_nas_mount`自体がスキップされ、NAS未マウントの単独環境でも起動できる。
+* 根拠: [_download_with_ytdlpとverify_nas_mountのコメント] (行番号: 858〜867, 926〜934, 151〜153 / 抜粋: "yt-dlpによる結合(merge)先もローカルディスクにする。以前はここに\n        # final_path(NAS上)を直接指定していたが", "NAS(CIFS)は接続が不安定な場合があり、実機のdmesgでも\n        # "sends on sock ... stuck for 15 seconds"や"No writable handle\n        # in writepages"", "REQUIRE_NAS_MOUNT: bool = os.getenv("DDD_REQUIRE_NAS_MOUNT", "true").lower() == "true"")
 * **missav専用ロジックの脆弱性**: `_extract_m3u8_url` はmissavサイト側のJS難読化パターン（`eval(function(p,a,c,k,e,d)...`）や変数名（`source1280`等）にハードコードで依存しており、サイト構造の変更時に抽出が失敗する可能性がある（フォールバック抽出パターンは用意されている）。
 * **`curl_cffi`によるTLS指紋(WAF)回避の脆弱性**: `_fetch_m3u8_manifest`のDocstringによれば、missavのm3u8はCloudflareのボットチャレンジがかかったCDNで配信されており、`yt-dlp`の`impersonate`指定は最初のリクエストにしか効かない（内部の再取得リクエストには引き継がれない）ことが実機検証で確認されている。また`_download_segments_and_localize_manifest`のDocstringによれば、`yt-dlp`自身の"requests"ネットワークハンドラは独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequestsと異なり、WAFに403でブロックされ続けることを実機の生トラフィック検証(`debug_printtraffic`)で確認したとされている。そのためマニフェスト取得・セグメント取得の両方を`curl_cffi`の`impersonate="chrome"`偽装に置き換えているが、これは裏を返せば`curl_cffi`のChrome偽装プロファイルが実際のChromeのTLS/HTTP指紋と一致しなくなった場合や、CDN側が`curl_cffi`のChrome偽装自体を検知してブロックするようになった場合には、同じ問題が再発するリスクを内包している。
 * 根拠: [_fetch_m3u8_manifest / _download_segments_and_localize_manifestのDocstring] (行番号: 583〜589, 664〜671 / 抜粋: "impersonate設定が引き継がれない(yt-dlp側の制限。実機検証で403の再現を確認済み)。", "ハンドラが独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequests\n        とは異なり、User-Agent等のヘッダーを完全に一致させてもWAFに403で\n        ブロックされ続けることを実機の生トラフィック検証(debug_printtraffic)で\n        確認した。")
@@ -979,9 +1050,11 @@ flowchart TD
 * 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 206〜220 / 抜粋: "# 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
 * **履歴ファイルI/O失敗の可視化**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録するよう修正済みである。読み込み失敗時は安全側（空の履歴として続行）に倒すため、失敗が続くと既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある点自体は変わらない。
 * 根拠: [HistoryManager.load_history/add_historyのコメント] (行番号: 277〜280, 290〜292 / 抜粋: "# M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
+* **（本PRで追加）`_discord_circuit_breaker`はモジュールレベルの単一インスタンス・プロセス内限定**: `DiscordNotifier.send`が呼ばれるたびにこの単一インスタンスの状態を更新するため、`BotDetectionError`検知時の通知（`logger.critical`直後）やタスク失敗通知等、送信元に関わらず全ての`DiscordNotifier.send`呼び出しが同じ連続失敗カウントを共有する。1回のプロセス実行内で連続3回(既定)失敗すると、以降そのプロセスが終了するまで（`BotDetectionError`によるクールダウン通知等も含め）全てのDiscord通知がスキップされる。状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まる。
 * **`noplaylist`によるプレイリスト一括ダウンロードの防止**: `UniversalYtDlpStrategy.download`の`ydl_opts`に`noplaylist: True`が追加され、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回される問題が修正されている。
 * 根拠: [ydl_optsのコメント] (行番号: 462〜466 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")
 * **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
+* **ディレクトリ作成失敗時のOSError全般の捕捉（Issue #236で修正）**: `FileSystemManager.ensure_dir`は以前`except PermissionError:`のみを定義しており、読み取り専用マウント（`Errno 30`）・NAS切断中のI/Oエラー（`Errno 5`）・ディスクフル（`Errno 28`）等の他の`OSError`サブクラスは専用のDiscord通知を経由せず呼び出し元（最終的には`run_locked`の`except Exception`）へ伝播していた。同種のmkdir呼び出しを持つ`extract_youtube_urls.py`の`process_subscriptions`（#185）が先に`except (sqlite3.Error, OSError)`でOSError全般を捕捉するよう修正済みだったのに対し、本ファイルはその横展開から取り残されていた。`except OSError as e:`節を追加し、原因（`Errno`）を含めた専用通知を送信するよう修正した。
 
 ## 9. 不明事項一覧
 

@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
+from file_utils import DiscordCircuitBreaker
+
 # プロジェクトルート（DDDの親ディレクトリ）をパスに追加
 CURRENT_DIR = Path(__file__).resolve().parent # ~/develop/DDD
 PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM" # ~/develop/MY_HOME_SYSTEM
@@ -1286,6 +1288,9 @@ class DiscordNotifier:
         """
         self.webhook_url = webhook_url
         self.session = self._create_rate_limited_session()
+        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー
+        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)
+        self._circuit_breaker = DiscordCircuitBreaker()
 
     def _create_rate_limited_session(self) -> requests.Session:
         """Discordのレート制限(429)に自動追従するHTTPセッションを作成する。
@@ -1331,6 +1336,15 @@ class DiscordNotifier:
         site_prefix = f"【{site_name}】" if site_name else ""
 
         for cast in new_casts:
+            if self._circuit_breaker.is_open:
+                # 連続送信失敗によりサーキットブレーカーが開いている間は、
+                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。
+                logger.warning(
+                    "Discord Webhookへの連続送信失敗を検知しているため、"
+                    "残りの通知をスキップします。"
+                )
+                break
+
             fields = [{"name": "Name", "value": cast.name, "inline": True}]
             if cast.age:
                 # 一覧ページ上に年齢表記が見つかったキャストのみ追加
@@ -1363,6 +1377,7 @@ class DiscordNotifier:
                 response = self.session.post(self.webhook_url, json=payload, timeout=10)
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
+                self._circuit_breaker.record_success()
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
@@ -1371,20 +1386,24 @@ class DiscordNotifier:
                 body = e.response.text[:300] if e.response is not None else ""
                 logger.error(
                     f"Failed to send notification for {cast.name}: {e} | body: {body} | "
-                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}"
+                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}",
+                    exc_info=True,
                 )
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
-                    # 無駄なだけなので打ち切る（サーキットブレーカー）。
+                    # 無駄なだけなので即座にブレーカーを開いて打ち切る。
                     logger.error(
                         f"Discord Webhook returned {status} — URL is likely invalid or revoked. "
                         "Aborting remaining notifications for this run."
                     )
+                    self._circuit_breaker.trip()
                     break
+                self._circuit_breaker.record_failure()
             except requests.RequestException as e:
-                logger.error(f"Failed to send notification for {cast.name}: {e}")
+                logger.error(f"Failed to send notification for {cast.name}: {e}", exc_info=True)
+                self._circuit_breaker.record_failure()
 
-    def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> None:
+    def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
 
         個別キャスト通知(embed形式)とは異なり、1日分の件数をまとめた
@@ -1394,10 +1413,22 @@ class DiscordNotifier:
             counts (Dict[str, int]): site_id -> 新規検知件数 の集計。
             site_names (Dict[str, str]): site_id -> 表示名 の対応表。
             date_str (str): サマリ対象日（'YYYY-MM-DD'）。
+
+        Returns:
+            bool: 送信に成功した場合True。Webhook未設定または送信失敗の場合False。
+                (#226) 呼び出し元の_maybe_send_daily_summaryはこの戻り値を見て、
+                成功時のみ集計をクリアする(失敗時に無条件でクリアすると、その日の
+                集計がサイレントに失われ再送もできなくなるため)。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")
-            return
+            return False
+
+        if self._circuit_breaker.is_open:
+            logger.warning(
+                "Discord Webhookへの連続送信失敗を検知しているため、日次サマリ通知をスキップします。"
+            )
+            return False
 
         if counts:
             total = sum(counts.values())
@@ -1421,8 +1452,12 @@ class DiscordNotifier:
             response = self.session.post(self.webhook_url, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Daily summary notification sent successfully for {date_str}.")
+            self._circuit_breaker.record_success()
+            return True
         except requests.RequestException as e:
-            logger.error(f"Failed to send daily summary notification: {e}")
+            logger.error(f"Failed to send daily summary notification: {e}", exc_info=True)
+            self._circuit_breaker.record_failure()
+            return False
 
 
 class DataManager:
@@ -1462,7 +1497,7 @@ class DataManager:
         try:
             return DataManager._read_casts_file(data_file)
         except DataManager._LOAD_ERRORS as e:
-            logger.error(f"Failed to load data from {data_file}: {e}")
+            logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)
 
         # 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける
         # ため、退避してから復旧を試みる。
@@ -1473,7 +1508,7 @@ class DataManager:
             data_file.rename(quarantine_path)
             logger.error(f"Quarantined corrupted cache file: {data_file} -> {quarantine_path}")
         except OSError as e:
-            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}")
+            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}", exc_info=True)
 
         # 直近の正常データがバックアップとして残っていれば、そこから復旧する
         # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。
@@ -1486,7 +1521,7 @@ class DataManager:
                 )
                 return casts
             except DataManager._LOAD_ERRORS as e:
-                logger.error(f"Backup file {backup_file} is also unusable: {e}")
+                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
         return set()
@@ -1547,8 +1582,9 @@ class DataManager:
         """日次サマリの集計状態を読み込む。
 
         Returns:
-            Dict: {'date': 'YYYY-MM-DD', 'counts': {site_id: count},
-                'last_sent_date': 'YYYY-MM-DD'} 形式の集計状態。
+            Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}
+                形式の集計状態。'counts'は直近の送信以降に累積した未送信件数
+                (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。
                 ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
         """
         summary_file = DataManager._daily_summary_file()
@@ -1558,8 +1594,14 @@ class DataManager:
         try:
             with open(summary_file, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
-            logger.error(f"Failed to load daily summary from {summary_file}: {e}")
+        except DataManager._LOAD_ERRORS as e:
+            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError
+            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま
+            # 伝播する」バグが本メソッドにも残っていた。伝播すると
+            # record_daily_new_casts経由でsave_known_castsまで到達できず、
+            # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
+            # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
+            logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
             return {}
 
     @staticmethod
@@ -1583,12 +1625,20 @@ class DataManager:
 
     @staticmethod
     def record_daily_new_casts(site_id: str, count: int) -> None:
-        """サイト単位で検知した新規キャスト件数を、当日分の集計に加算する。
+        """サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する。
 
         cron等により1時間毎に別プロセスとして実行される前提のため、
-        実行毎にファイルを読み書きして状態を永続化する。集計中の日付が
-        当日と異なる場合（日付が変わった後の最初の検知）は、集計を
-        リセットしてから加算する。
+        実行毎にファイルを読み書きして状態を永続化する。
+
+        #183: 以前はカレンダー日付が変わった時点で無条件に集計をリセットして
+        いたため、(1) 21時台のサマリ送信後(22時〜24時)に検知した件数が、送信
+        済みにもかかわらず加算され続けた挙げ句、翌日最初の検知時のリセットで
+        どのサマリにも計上されないまま消える、(2) 21時台に実行自体が無かった日
+        (cron欠落・ロック競合)は日付リセットにより追い付き送信もできずその日の
+        集計が丸ごと失われる、という2つの過少報告経路があった。日付によるリセットを
+        廃止し、_maybe_send_daily_summaryが実際に送信した直後にのみ集計を
+        クリアすることで、未送信の件数が(日付をまたいでも)必ず次回送信に
+        引き継がれるようにする。
 
         Args:
             site_id (str): 検知元サイトのID。
@@ -1597,11 +1647,7 @@ class DataManager:
         if count <= 0:
             return
 
-        today_str = datetime.now().strftime('%Y-%m-%d')
         data = DataManager.load_daily_summary()
-        if data.get('date') != today_str:
-            data = {'date': today_str, 'counts': {}, 'last_sent_date': data.get('last_sent_date', '')}
-
         counts = data.setdefault('counts', {})
         counts[site_id] = counts.get(site_id, 0) + count
         DataManager.save_daily_summary(data)
@@ -1658,7 +1704,7 @@ class WebMonitor:
 
         except requests.RequestException as e:
             # 呼び出し元でハンドリングするために再送出、ただしログは記録する
-            logger.error(f"Network error during scraping of site '{site.site_id}': {e}")
+            logger.error(f"Network error during scraping of site '{site.site_id}': {e}", exc_info=True)
             raise
 
     def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:
@@ -1891,26 +1937,37 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
         )
 
     # 4. Notify & Update
+    # #237: 新規検知が無い場合にcurrent_castsで全置換すると、_parse_htmlが
+    # 単発でパース失敗した既知キャスト(current_castsから漏れているだけで実際には
+    # 引き続き掲載されている)がknown_castsから恒久的に消え、次回正常にパース
+    # できた際に「新規キャスト」として誤って再通知される。新規検知の有無に
+    # 関わらず常にunionで保存することで、既知キャストが消えないようにする。
+    updated_casts = known_casts.union(current_casts)
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
         notifier.notify(new_casts, site_name=site.name)
         DataManager.record_daily_new_casts(site.site_id, len(new_casts))
-
-        updated_casts = known_casts.union(current_casts)
-        DataManager.save_known_casts(site, updated_casts)
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
-        DataManager.save_known_casts(site, current_casts)
+
+    DataManager.save_known_casts(site, updated_casts)
 
 
 def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
-    """21時台の実行のときだけ、その日の新規検知サマリをDiscordへテキスト通知する。
+    """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。
 
     このスクリプトはcron等により1時間毎に別プロセスとして起動される前提
     (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは
     実行時刻の時(hour)が21かどうかで判定する。同日中に複数回21時台の実行が
     走った場合の重複送信を避けるため、送信済み日付をdaily_summary.jsonに
     永続化して判定に用いる。
+
+    #183: counts は record_daily_new_casts 側でカレンダー日付によるリセットを
+    行わなくなったため、ここで送信するのは「厳密な当日分」ではなく「前回この
+    関数が実際に送信してから今までに累積した全件数」になる。21時台の実行が
+    まる1日以上飛んだ場合(cron欠落・ロック競合)も、次に成功した21時台の実行で
+    未送信分がまとめて送られる(取りこぼしなし)。送信が成功した場合のみ
+    countsをクリアする。
 
     Args:
         notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
@@ -1924,14 +1981,22 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
     if data.get('last_sent_date') == today_str:
         return
 
-    counts = data.get('counts', {}) if data.get('date') == today_str else {}
+    counts = data.get('counts', {})
     site_names = {site.site_id: site.name for site in MonitorConfig.SITES}
-    notifier.notify_daily_summary(counts, site_names, today_str)
+    sent = notifier.notify_daily_summary(counts, site_names, today_str)
 
-    data['date'] = data.get('date', today_str)
-    data.setdefault('counts', {})
-    data['last_sent_date'] = today_str
-    DataManager.save_daily_summary(data)
+    # #226: 送信が失敗した(Webhook未設定/ネットワーク障害等)場合にここへ進むと、
+    # 集計がクリアされ last_sent_date も当日にセットされてしまい、その日の集計が
+    # 失われた上に本関数冒頭のガードで同日中の再送機会も失われる。送信成功時のみ
+    # クリア・last_sent_date更新を行い、失敗時は次回実行時に再送を試みられるよう
+    # 何も保存しない。
+    if sent:
+        DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
+    else:
+        logger.error(
+            "Daily summary notification failed; keeping accumulated counts for retry "
+            "on the next run instead of clearing them."
+        )
 
 
 # M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや

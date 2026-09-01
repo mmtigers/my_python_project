@@ -164,6 +164,57 @@ class TestCollectTasksNormalizesMissavSearchUrls:
         assert tasks[0].url == "https://missav.live/dm18/ja/dvdms-079"
 
 
+class TestCollectTasksListFileReadFailureIsProtected:
+    """Issue #184の回帰テスト: list/*.txt側の読み込みはtry/exceptで保護され
+    エラーログを出したうえで処理を継続するが、list.txt側にはこの保護が無かった。
+    list.txtの読み込みで例外が発生すると_collect_tasks全体が未処理例外で中断し、
+    後続で処理されるはずのlist/*.txtのタスクまで巻き添えで処理されなくなっていた。"""
+
+    def test_list_txt_read_failure_does_not_abort_list_dir_processing(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        (list_dir / "other_source.txt").write_text(
+            "https://example.com/other-video\n", encoding="utf-8"
+        )
+
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("dummy", encoding="utf-8")
+
+        monkeypatch.setattr(
+            module,
+            "CONFIG",
+            dataclasses.replace(
+                module.CONFIG,
+                LIST_FILE_PATH=list_file,
+                LIST_DIR_PATH=list_dir,
+                HISTORY_FILE_PATH=tmp_path / "history.txt",
+            ),
+        )
+
+        real_open = open
+
+        def _open_with_simulated_failure(path, *args, **kwargs):
+            if Path(path) == list_file:
+                raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "simulated decode failure")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _open_with_simulated_failure, raising=False)
+
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader.history = set()
+
+        with caplog.at_level(logging.ERROR, logger="Downloader"):
+            # 例外を送出せずに完走すること自体が回帰確認の対象
+            tasks = downloader._collect_tasks()
+
+        # list.txtは読めなかったが、list/*.txt側のタスクは巻き添えにならず処理される
+        assert len(tasks) == 1
+        assert tasks[0].url == "https://example.com/other-video"
+        assert any("リスト読み込みエラー" in r.message for r in caplog.records)
+
+
 class TestScrapingStrategyFragmentStaging:
     """missavのHLSフラグメント(数千個の小ファイル)を、NASの保存先ディレクトリ
     ではなくローカルディスク(CONFIG.LOCAL_TMP_DIR)へ一時保存することを確認する
@@ -576,6 +627,123 @@ class TestConfigurableRequestTimeout:
 
     def test_uses_env_override_when_set(self, monkeypatch):
         assert self._request_timeout_with_env(monkeypatch, "90") == 90
+
+
+class TestFileSystemManagerEnsureDirCatchesGenericOSError:
+    """Issue #236の回帰テスト: ensure_dirがPermissionError以外のOSError
+    (読み取り専用マウントのErrno 30、NAS切断時のErrno 5、ディスクフル時の
+    Errno 28等)を捕捉せず、専用のDiscord通知を経由しないまま呼び出し元へ
+    伝播していた不具合。extract_youtube_urls.pyのprocess_subscriptions(#185)と
+    同様にOSError全般を捕捉するよう修正した。"""
+
+    def test_permission_error_still_sends_dedicated_notification_and_returns_false(
+        self, monkeypatch, tmp_path
+    ):
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_permission_error(*args, **kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_permission_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False
+        assert len(calls) == 1
+        assert "権限エラー" in calls[0][0]
+        assert calls[0][1] is True
+
+    def test_read_only_filesystem_oserror_sends_notification_and_returns_false(
+        self, monkeypatch, tmp_path
+    ):
+        """読み取り専用マウント(Errno 30)のような、PermissionError以外のOSErrorの回帰テスト。"""
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_read_only_error(*args, **kwargs):
+            raise OSError(30, "Read-only file system")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_read_only_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False, "PermissionError以外のOSErrorも呼び出し元へ伝播させず捕捉すべき"
+        assert len(calls) == 1, "OSError発生時も専用のDiscord通知を送るべき"
+        assert calls[0][1] is True
+
+    def test_disk_full_oserror_sends_notification_and_returns_false(self, monkeypatch, tmp_path):
+        """ディスクフル(Errno 28)のような、PermissionError以外のOSErrorの回帰テスト。"""
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        def _raise_disk_full_error(*args, **kwargs):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(module.Path, "mkdir", _raise_disk_full_error)
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "sub")
+
+        assert result is False
+        assert len(calls) == 1
+        assert calls[0][1] is True
+
+    def test_success_returns_true_and_sends_no_notification(self, monkeypatch, tmp_path):
+        calls = []
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda text, is_error=False: calls.append((text, is_error))))
+
+        result = module.FileSystemManager.ensure_dir(tmp_path / "new_sub_dir")
+
+        assert result is True
+        assert calls == []
+        assert (tmp_path / "new_sub_dir").is_dir()
+
+
+class TestDiscordNotifierCircuitBreaker:
+    """DiscordNotifier.send() がWebhookへの連続送信失敗時にサーキットブレーカーとして
+    機能することの回帰テスト。以前はこの経路に一切ブレーカーが無く、Webhookが機能して
+    いない間の1回の実行で無駄なリクエストを送り続けていた。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_circuit_breaker(self):
+        # モジュールレベルのシングルトンのため、他テストへ状態が漏れないようにする
+        module._discord_circuit_breaker.record_success()
+        yield
+        module._discord_circuit_breaker.record_success()
+
+    def test_send_skips_after_consecutive_failures(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(module, "_send_discord_webhook", lambda *a, **k: calls.append(1) or False)
+
+        threshold = module.CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD
+        for _ in range(threshold):
+            module.DiscordNotifier.send("test message")
+        assert len(calls) == threshold
+        assert module._discord_circuit_breaker.is_open is True
+
+        module.DiscordNotifier.send("this should be skipped")
+        assert len(calls) == threshold, "ブレーカーが開いた後は送信自体が行われないべき"
+
+    def test_send_records_failure_on_exception(self, monkeypatch):
+        def _raise(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(module, "_send_discord_webhook", _raise)
+
+        threshold = module.CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD
+        for _ in range(threshold):
+            module.DiscordNotifier.send("test message")
+
+        assert module._discord_circuit_breaker.is_open is True
+
+    def test_send_success_resets_breaker(self, monkeypatch):
+        module._discord_circuit_breaker.record_failure()
+        module._discord_circuit_breaker.record_failure()
+
+        monkeypatch.setattr(module, "_send_discord_webhook", lambda *a, **k: True)
+        module.DiscordNotifier.send("ok message")
+
+        assert module._discord_circuit_breaker.is_open is False
 
 
 if __name__ == "__main__":

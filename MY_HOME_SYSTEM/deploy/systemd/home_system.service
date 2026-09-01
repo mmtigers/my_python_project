@@ -1,6 +1,6 @@
 [Unit]
 Description=My Home System Server
-After=network.target ngrok.service
+After=network.target
 RequiresMountsFor=/mnt/nas
 
 [Service]

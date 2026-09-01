@@ -2,11 +2,9 @@
 import sqlite3
 import shutil
 import subprocess
-import requests
-import os
 from datetime import datetime, timedelta, date
 import pytz
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -203,7 +201,6 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
         df_power["device_type"] = df_power["device_name"].apply(
             lambda x: "Nature Remo E Lite" if x and "Remo" in str(x) else "Plug"
         )
-        df_power["device_type"] = df_power["device_type"].replace("Plug", "Nature Remo E Lite") 
 
     # --- 統合 ---
     df_list = []
@@ -229,10 +226,15 @@ def calculate_monthly_cost_cumulative() -> int:
         start_of_month = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
 
         # 1. 新テーブル (power_usage) から取得
+        # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
+        # 同居しており、プラグの消費電力はスマートメーターの計測値に既に
+        # 含まれる部分集合である。デバイスを絞らず全行を合算するとプラグ分が
+        # 二重計上されるため、load_sensor_data()と同じ分類基準
+        # (device_nameに"Remo"を含む)でスマートメーターの行のみに絞る。
         query = f"""
-            SELECT timestamp, wattage as power_watts 
-            FROM {config.SQLITE_TABLE_POWER_USAGE} 
-            WHERE timestamp >= '{start_of_month}'
+            SELECT device_id, timestamp, wattage as power_watts
+            FROM {config.SQLITE_TABLE_POWER_USAGE}
+            WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'
             ORDER BY timestamp ASC
         """
         df = load_data_from_db(query)
@@ -240,7 +242,7 @@ def calculate_monthly_cost_cumulative() -> int:
         # 2. 新テーブルが空なら旧テーブル (device_records) へフォールバック
         if df.empty:
             query_old = f"""
-                SELECT timestamp, power_watts FROM device_records
+                SELECT device_id, timestamp, power_watts FROM device_records
                 WHERE device_type = 'Nature Remo E Lite' AND timestamp >= '{start_of_month}'
                 ORDER BY timestamp ASC
             """
@@ -249,7 +251,14 @@ def calculate_monthly_cost_cumulative() -> int:
         if df.empty:
             return 0
 
-        df["time_diff"] = df["timestamp"].diff().dt.total_seconds() / 3600
+        # #170: 複数拠点のスマートメーター等、複数device_idの行が時系列で混在した
+        # ままdiff()を取ると、直前行が別デバイスの場合に誤った時間幅(2台のメーターの
+        # 記録間隔)が計算に使われる(device_idでのグループ化がない)。device_idごとに
+        # グループ化してdiff()を取ってから合算する。
+        if "device_id" in df.columns:
+            df["time_diff"] = df.groupby("device_id", dropna=False)["timestamp"].diff().dt.total_seconds() / 3600
+        else:
+            df["time_diff"] = df["timestamp"].diff().dt.total_seconds() / 3600
         df = df.dropna(subset=["time_diff"])
         df = df[df["time_diff"] <= 1.0]
 
@@ -391,24 +400,6 @@ def load_ranking_data(date_str: str, ranking_type: str) -> pd.DataFrame:
 # ==========================================
 # System Stats & Utils
 # ==========================================
-
-def get_ngrok_url() -> Dict[str, str]:
-    """ngrokの現在の公開URLを取得する"""
-    try:
-        res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=2)
-        if res.status_code == 200:
-            data = res.json()
-            urls = {}
-            for t in data.get("tunnels", []):
-                addr = t.get("config", {}).get("addr", "")
-                if "8000" in addr:
-                    urls["server"] = t.get("public_url")
-                elif "8501" in addr:
-                    urls["dashboard"] = t.get("public_url")
-            return urls
-    except Exception:
-        pass
-    return {}
 
 def get_disk_usage() -> Optional[Dict[str, float]]:
     """ディスク使用量を取得"""

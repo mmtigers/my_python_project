@@ -98,6 +98,17 @@ jobs:
             --cov-report=html \
             --cov-fail-under=45
 
+      - name: Install DDD dependencies
+        # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
+        # DDD/conftest.py(#103/#137)がDiscord/LINE Webhook系の環境変数をマスクする
+        # ため、logger.error/critical経由で本番Webhookへ誤通知する心配はない。
+        working-directory: ./DDD
+        run: pip install -r requirements.txt
+
+      - name: Run DDD tests
+        working-directory: ./DDD
+        run: python -m pytest -v
+
       - name: Upload coverage report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -189,3 +200,9 @@ jobs:
         # フィルタ不具合やTSの型エラーがマージまで検出できなかった。
         # 最小限としてまずビルド検証(tsc型チェック含む)をブロッキング条件にする。
         run: npm run build
+
+      - name: Test (vitest)
+        # family-questにはテストが1件も無かった。まずgetQuestLockState
+        # (ロック/完了/申請中判定の共通ロジック)・isSameOriginAvatarPath
+        # (M-9-5のアバターURL検証)・useOnlineStatusの回帰テストで土台を作る。
+        run: npm test

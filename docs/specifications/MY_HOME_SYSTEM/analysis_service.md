@@ -6,17 +6,18 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a4fb40f` |
 
 ## 関連ドキュメント
 
 - [config.md](./config.md) — `SQLITE_DB_PATH`、`MONITOR_DEVICES`、各種`SQLITE_TABLE_*`などの設定値を提供する。
 - [logger.md](./logger.md) — `setup_logging`の実装元。
-- [dashboard.md](./dashboard.md) — 本ファイルの`load_*`関数群・`get_ngrok_url`/`get_disk_usage`/`get_memory_usage`/`get_system_logs`等を呼び出す主要な呼び出し元（Streamlitダッシュボード）。
+- [dashboard.md](./dashboard.md) — 本ファイルの`load_*`関数群・`get_disk_usage`/`get_memory_usage`/`get_system_logs`等を呼び出す主要な呼び出し元（Streamlitダッシュボード）。
 - [database.md](./database.md) — 同じくSQLiteへの読み取りアクセスを提供するが、本ファイルは`get_ro_db_connection`による直接の`sqlite3.connect`を用いており、`database.md`が扱う`core/database.py`の`get_db_cursor`等とは別経路であることに留意。
 
 ## 2. ファイルの概要
 
-* このファイルは、データベース（SQLite）やOSシステム情報（ディスク、メモリ、システムログ）、外部API（ngrok）からデータを取得し、Pandas DataFrame等を用いて加工・集計（タイムゾーン変換、デバイス名のマッピング、月額コスト計算など）を行うデータ分析・取得用のサービス層（Service層）を担っている。
+* このファイルは、データベース（SQLite）やOSシステム情報（ディスク、メモリ、システムログ）からデータを取得し、Pandas DataFrame等を用いて加工・集計（タイムゾーン変換、デバイス名のマッピング、月額コスト計算など）を行うデータ分析・取得用のサービス層（Service層）を担っている。以前は外部API（ngrok）からダッシュボード公開URLを取得する`get_ngrok_url`も提供していたが、無認証のダッシュボードがngrok経由で外部公開されうるセキュリティ上の懸念から削除された（Issue #225）。
 
 ## 3. 外部依存関係
 
@@ -27,14 +28,13 @@
 | `sqlite3` | 標準ライブラリ | SQLiteデータベースへの接続およびクエリ実行 | `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
 | `shutil` | 標準ライブラリ | ディスク使用量の取得 | `import shutil` (行番号: 3 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | OSコマンド（free, journalctl）の実行 | `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
-| `requests` | サードパーティ | ngrokのローカルAPIへのHTTPリクエスト | `import requests` (行番号: 5 / 抜粋: "import requests") |
-| `os` | 標準ライブラリ | 未使用（インポートのみ） | `import os` (行番号: 6 / 抜粋: "import os") |
-| `datetime`, `timedelta`, `date` | 標準ライブラリ | 日付や時間の取得・計算 | `from datetime import ...` (行番号: 7 / 抜粋: "from datetime import datetime") |
-| `pytz` | サードパーティ | タイムゾーンの指定 | `import pytz` (行番号: 8 / 抜粋: "import pytz") |
-| `typing` | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 9 / 抜粋: "from typing import Dict, List") |
-| `pandas` as `pd` | サードパーティ | データの保持、加工、結合、集計 | `import pandas as pd` (行番号: 11 / 抜粋: "import pandas as pd") |
-| `config` | 内部ファイル | 各種定数、テーブル名、デバイス定義の取得 | `import config` (行番号: 13 / 抜粋: "import config") |
-| `core.logger` | 内部ファイル | ロガーのセットアップ | `from core.logger import setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
+| `os` | 標準ライブラリ | 未使用（インポートのみ） | `import os` (行番号: 5 / 抜粋: "import os") |
+| `datetime`, `timedelta`, `date` | 標準ライブラリ | 日付や時間の取得・計算 | `from datetime import ...` (行番号: 6 / 抜粋: "from datetime import datetime") |
+| `pytz` | サードパーティ | タイムゾーンの指定 | `import pytz` (行番号: 7 / 抜粋: "import pytz") |
+| `typing` | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 8 / 抜粋: "from typing import Dict, List") |
+| `pandas` as `pd` | サードパーティ | データの保持、加工、結合、集計 | `import pandas as pd` (行番号: 10 / 抜粋: "import pandas as pd") |
+| `config` | 内部ファイル | 各種定数、テーブル名、デバイス定義の取得 | `import config` (行番号: 12 / 抜粋: "import config") |
+| `core.logger` | 内部ファイル | ロガーのセットアップ | `from core.logger import setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
 
 ### ブラックボックスとなる外部要素
 
@@ -210,8 +210,8 @@
 
 ### `load_sensor_data`
 
-* **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。
-* 根拠: `load_sensor_data` (行番号: 217 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")
+* **役割**: `device_records`、SwitchBotのログ、電力使用量の3つのテーブルからデータを取得・統合・ソートし、表示名を適用する。電力使用量(`config.SQLITE_TABLE_POWER_USAGE`)由来の行は、`device_name`に`"Remo"`を含めば`device_type="Nature Remo E Lite"`(スマートメーター全体消費)、含まなければ`device_type="Plug"`(個別家電)として分類される。**（Issue #169で解消）** 以前はこの分類直後に`.replace("Plug", "Nature Remo E Lite")`が実行されており、"Plug"に分類された全行が無条件で"Nature Remo E Lite"へ上書きされていた(`str.contains("Plug")`で個別家電を絞り込む`views/dashboard/sensor_tab.py`側のフィルタが構造的に一致しなくなり、個別家電グラフが常に空になる・全プラグの消費電力がスマートメーター全体消費のグラフへ混入する不具合)。この一括置換は削除され、"Remo"を含むかどうかの判定結果がそのまま最終的な`device_type`になる。
+* 根拠: `load_sensor_data` (行番号: 217 / 抜粋: "df_merged = pd.concat(df_list, ignore_index=True)")、`device_type`分類 (行番号: 202〜205 / 抜粋: "df_power[\"device_type\"] = df_power[\"device_name\"].apply(\n            lambda x: \"Nature Remo E Lite\" if x and \"Remo\" in str(x) else \"Plug\"\n        )")
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
@@ -233,24 +233,24 @@
 
 ### `calculate_monthly_cost_cumulative`
 
-* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。
-* 根拠: `calculate_monthly_cost_cumulative` (行番号: 257 / 抜粋: "return int(df["kwh"].sum() * 31)")
+* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。
+* 根拠: `calculate_monthly_cost_cumulative` (行番号: 224〜271 / 抜粋: "return int(df["kwh"].sum() * 31)")、デバイス絞り込み (行番号: 230〜236 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 260〜264 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 225 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 224 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
-* 根拠: `-> int:` (行番号: 225 / 抜粋: "-> int:")
+* 根拠: `-> int:` (行番号: 224 / 抜粋: "-> int:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 238 / 抜粋: "df = load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 242 / 抜粋: "df = load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 260 / 抜粋: "return 0")
+* 根拠: `except Exception as e:` (行番号: 269〜271 / 抜粋: "return 0")
 
 
 
@@ -392,95 +392,72 @@
 
 
 
-### `get_ngrok_url`
-
-* **役割**: ngrokのローカルAPI（ポート4040）を叩き、公開されているURL（8000ポート/8501ポート対応）を取得する。
-* 根拠: `get_ngrok_url` (行番号: 398 / 抜粋: "res = requests.get("[http://127.0.0.1:4040/api/tunnels](http://127.0.0.1:4040/api/tunnels)"")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `def get_ngrok_url() -> Dict[str, str]:` (行番号: 395 / 抜粋: "def get_ngrok_url()")
-
-
-* **戻り値/レスポンス**: `Dict[str, str]` (`server` や `dashboard` をキーとしたURLの辞書)
-* 根拠: `-> Dict[str, str]:` (行番号: 395 / 抜粋: "-> Dict[str, str]:")
-
-
-* **副作用**: 外部API（`http://127.0.0.1:4040/api/tunnels`）へのHTTP GETリクエストの実行。
-* 根拠: `requests.get` (行番号: 398 / 抜粋: "requests.get(")
-
-
-* **エラーハンドリング**: 例外発生時（接続エラー等）はエラーを握り潰して空の辞書を返す。
-* 根拠: `except Exception: pass` (行番号: 409 / 抜粋: "except Exception:")
-
-
-
 ### `get_disk_usage`
 
 * **役割**: ルートディレクトリ（`/`）のディスク使用量（全体、使用済、空き、使用率）を取得する。
-* 根拠: `get_disk_usage` (行番号: 416 / 抜粋: "total, used, free = shutil.disk_usage("/")")
+* 根拠: `get_disk_usage` (行番号: 407 / 抜粋: "total, used, free = shutil.disk_usage("/")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 413 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 405 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
-* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 413 / 抜粋: "-> Optional[Dict[str, float]]:")
+* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 405 / 抜粋: "-> Optional[Dict[str, float]]:")
 
 
 * **副作用**: OSファイルシステムのディスク容量読み取り。
-* 根拠: `shutil.disk_usage("/")` (行番号: 416 / 抜粋: "shutil.disk_usage("/")")
+* 根拠: `shutil.disk_usage("/")` (行番号: 408 / 抜粋: "shutil.disk_usage("/")")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
-* 根拠: `except Exception as e:` (行番号: 425 / 抜粋: "return None")
+* 根拠: `except Exception as e:` (行番号: 415 / 抜粋: "return None")
 
 
 
 ### `get_memory_usage`
 
 * **役割**: OSの `free -m` コマンドを実行し、結果をパースしてメモリの使用状況を取得する。
-* 根拠: `get_memory_usage` (行番号: 430 / 抜粋: "subprocess.run(["free", "-m"], capture_output=True")
+* 根拠: `get_memory_usage` (行番号: 422 / 抜粋: "subprocess.run(["free", "-m"], capture_output=True")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 427 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 419 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
-* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 427 / 抜粋: "-> Optional[Dict[str, float]]:")
+* 根拠: `-> Optional[Dict[str, float]]:` (行番号: 419 / 抜粋: "-> Optional[Dict[str, float]]:")
 
 
 * **副作用**: OSコマンド（`free`）の実行。
-* 根拠: `subprocess.run` (行番号: 430 / 抜粋: "subprocess.run(["free", "-m"]")
+* 根拠: `subprocess.run` (行番号: 422 / 抜粋: "subprocess.run(["free", "-m"]")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `None` を返す。
-* 根拠: `except Exception as e:` (行番号: 446 / 抜粋: "return None")
+* 根拠: `except Exception as e:` (行番号: 436 / 抜粋: "return None")
 
 
 
 ### `get_system_logs`
 
 * **役割**: OSの `journalctl` コマンドを実行し、`home_system.service` のシステムログを取得する。
-* 根拠: `get_system_logs` (行番号: 451 / 抜粋: "cmd = ["journalctl", "-u", "home_system.service"")
+* 根拠: `get_system_logs` (行番号: 443 / 抜粋: "cmd = ["journalctl", "-u", "home_system.service"")
 
 
 * **引数/リクエスト**: `lines` (`int`, デフォルト `50`): 行数。`priority` (`Optional[str]`): ログの優先度。`target_date` (`Optional[date]`): 対象日付。
-* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 448 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
+* 根拠: `lines: int = 50, priority: Optional[str] = None, target_date: Optional[date] = None` (行番号: 440 / 抜粋: "lines: int = 50, priority: Optional[str] = None")
 
 
 * **戻り値/レスポンス**: `str` (取得したログの文字列。失敗時はエラーメッセージの文字列)
-* 根拠: `-> str:` (行番号: 448 / 抜粋: "-> str:")
+* 根拠: `-> str:` (行番号: 440 / 抜粋: "-> str:")
 
 
 * **副作用**: OSコマンド（`journalctl`）の実行。
-* 根拠: `subprocess.run` (行番号: 461 / 抜粋: "subprocess.run(cmd")
+* 根拠: `subprocess.run` (行番号: 453 / 抜粋: "subprocess.run(cmd")
 
 
 * **エラーハンドリング**: 例外発生時はエラーメッセージを文字列として返す。
-* 根拠: `except Exception as e:` (行番号: 464 / 抜粋: "return f"ログ取得エラー: {e}"")
+* 根拠: `except Exception as e:` (行番号: 455 / 抜粋: "return f"ログ取得エラー: {e}"")
 
 
 
@@ -518,7 +495,6 @@ graph TD
     subgraph External
         SQLite[(SQLite Database)]
         OS[OS System / Commands]
-        Ngrok[ngrok API]
         Config[config module]
         Pandas[pandas]
     end
@@ -544,7 +520,6 @@ graph TD
     end
 
     subgraph System Stats & Utils
-        GetNgrok["get_ngrok_url()"]
         GetDisk["get_disk_usage()"]
         GetMem["get_memory_usage()"]
         GetLogs["get_system_logs()"]
@@ -576,7 +551,6 @@ graph TD
     LoadRankD --> GetConn
     LoadRankData --> GetConn
 
-    GetNgrok --> Ngrok
     GetDisk --> OS
     GetMem --> OS
     GetLogs --> OS
@@ -587,14 +561,15 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | データベースのパス(`SQLITE_DB_PATH`)や、テーブル名、デバイスのマッピング情報(`MONITOR_DEVICES`)が定義されており、これがないと正確なデータ構造や参照先が判明しないため。 | `config.SQLITE_DB_PATH`, `config.MONITOR_DEVICES` など多数の参照 (行番号: 13 / 抜粋: "import config") |
+| 高 | `config.py` | データベースのパス(`SQLITE_DB_PATH`)や、テーブル名、デバイスのマッピング情報(`MONITOR_DEVICES`)が定義されており、これがないと正確なデータ構造や参照先が判明しないため。 | `config.SQLITE_DB_PATH`, `config.MONITOR_DEVICES` など多数の参照 (行番号: 12 / 抜粋: "import config") |
 | 中 | データベースのスキーマ定義ファイル（または実際のSQLiteファイル） | `device_records`, `weather_history`, `app_rankings` など、複数のテーブルのカラム構造を把握しなければ、他サービスとの連携仕様が掴めないため。 | 各SQLクエリ内の `SELECT` 対象 (行番号: 266, 288 / 抜粋: "FROM weather_history") |
-| 低 | `core/logger.py` | ログの出力先、レベル（INFO, ERRORなど）、ローテーションルールを確認し、運用時の障害調査手法を確立するため。 | `setup_logging("analysis_service")` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
+| 低 | `core/logger.py` | ログの出力先、レベル（INFO, ERRORなど）、ローテーションルールを確認し、運用時の障害調査手法を確立するため。 | `setup_logging("analysis_service")` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
 
 ## 8. 保守上の注意点
 
 * `process_dataframe` は `timestamp` カラムの各値へ `_parse_timestamp_to_jst` を `.apply()` で1件ずつ適用する実装であり、ベクトル化された `pd.to_datetime` に比べて大量データでは処理速度が低下する可能性がある。また `_parse_timestamp_to_jst` はtzinfoの無い(naive)値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`するため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う新たな前提）。
 * `calculate_monthly_cost_cumulative` では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `31` を掛けて月額概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。
+* **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側で`device_name LIKE '%Remo%'`によりスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ`device_name LIKE '%Remo%'`条件で修正済み。
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。
 * `get_system_logs` で `subprocess.run` に引数を渡す際、`target_date` などが外部から未検証のまま渡されると意図しないコマンド引数として解釈される可能性がある。
 * SQLiteの接続時に `?mode=ro` (Read Only) と URI オプションを使用しているため、SQLiteのバージョンやコンパイルオプションによっては URI がサポートされず接続エラーになる可能性がある。

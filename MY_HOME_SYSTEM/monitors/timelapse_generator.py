@@ -7,13 +7,12 @@ import datetime
 import subprocess
 import requests
 import argparse
-import math
 from typing import List
 
 import config
 from core.database import get_db_cursor
 from core.logger import setup_logging
-from services.notification_service import send_push
+from monitors.smart_timelapse_generator import timelapse_job_lock
 
 logger = setup_logging("timelapse_generator")
 
@@ -284,6 +283,18 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
             time.sleep(2)
 
 def main():
+    # #240: 姉妹システム(smart_timelapse_generator.py/daily_timelapse_job.py)は
+    # timelapse_job_lockで多重実行を排他制御しているが、本ファイルはこれを
+    # 使用しておらず、二重起動時にcleanup_tmp_video_dir()が一方の処理中クリップを
+    # 巻き込んで全消去しうる不具合があった。同じロックを共有し多重実行を防ぐ。
+    with timelapse_job_lock() as acquired:
+        if not acquired:
+            logger.warning("別のタイムラプス処理が実行中のため、今回の処理をスキップします。")
+            return
+        _main_locked()
+
+
+def _main_locked():
     parser = argparse.ArgumentParser(description="タイムラプス生成スクリプト")
     parser.add_argument("--date", type=str, help="対象日付を YYYY-MM-DD 形式で指定。指定なしで本日。")
     parser.add_argument("--limit", type=int, default=0, help="【検証用】処理するイベント数の上限を指定（例: --limit 5）") # ★追加

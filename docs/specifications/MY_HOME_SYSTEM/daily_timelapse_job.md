@@ -8,6 +8,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `d4a858f` |
 
 ## 関連ドキュメント
 
@@ -51,9 +52,9 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, "LINE_USER_ID", "")` (行番号: 55 / 抜粋: "getattr(config, "LINE_USER_ID", "")") |
+| `config` | モジュール内部で定義されている変数や初期化処理の内容が提供されていないため | `getattr(config, 'NVR_RECORD_DIR', ...)` (行番号: 81 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | `setup_logging` | ログ出力のフォーマット、出力先（ファイル/標準出力など）の仕様が提供されていないため | `logger = setup_logging(__name__)` (行番号: 37 / 抜粋: "logger = setup_logging(**name**)") |
-| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 58〜63, 206〜211, 244〜249 / 抜粋: "send_push(user_id=user_id, messages=...)") |
+| `send_push` | 関数内部の処理、引数（`target`, `channel`など）に対する正確な挙動、エラーハンドリングの有無が提供されていないため | `send_push(...)` (行番号: 58〜63, 218〜222, 226〜230, 263〜267 / 抜粋: "send_push(messages=..., target="discord", ...)") |
 | `smart_timelapse_generator` の全インポート要素 | 各クラス(`MotionDetector`, `VideoBuilder`等)のメソッド、プロパティの仕様、各関数の詳細な処理内容、厳密な戻り値・引数の型定義が提供されていないため | `from monitors.smart_timelapse_generator import ...` (行番号: 24〜35 / 抜粋: "from monitors.smart_timelapse_generator import") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -138,7 +139,7 @@
 
 
 * **副作用**:
-* DiscordへのPush通知（依存ファイル経由）
+* DiscordへのPush通知（依存ファイル経由）。全チャンク処理後、有効クリップが1件も無い場合は`global_event_idx`(検知イベント総数)の値で通知内容を分岐する: `0`件なら「動きなし」の`report`通知、1件以上(=イベント検知はあったがクリップ抽出が全滅)なら`error`通知(Issue #233修正、修正前は後者の場合も「動きなし」という事実と異なる通知を送っていた)。
 
 
 * ディレクトリの作成・一時ディレクトリの作成と破棄
@@ -153,7 +154,7 @@
 * サマリー情報のJSONファイル (`.done`) のディスクへの保存
 
 
-* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 188 / 抜粋: "os.rename(src_csv, dst_csv)")
+* 根拠: [ファイルI/OおよびAPI呼び出し処理] (行番号: 188 / 抜粋: "os.rename(src_csv, dst_csv)")、[クリップ抽出全滅時の分岐] (行番号: 210〜232 / 抜粋: "if global_event_idx > 0:")
 
 
 
@@ -211,7 +212,9 @@ flowchart TD
     LoopEvents -- No --> LoopChunks
     
     LoopChunks -- No --> CheckClips{"有効クリップが1件以上あるか?"}
-    CheckClips -- No --> SendInfo["外部: send_push(動きなし通知)"] --> End
+    CheckClips -- No --> CheckEventsFound{"検知イベント数(global_event_idx) > 0 か?(#233で追加)"}
+    CheckEventsFound -- No --> SendInfo["外部: send_push(動きなし通知, report)"] --> End
+    CheckEventsFound -- "Yes(クリップ抽出全滅)" --> SendClipFailErr["ログ出力 + 外部: send_push(クリップ抽出失敗エラー通知, error, #233で追加)"] --> End
     CheckClips -- Yes --> BuildConcat["外部: VideoBuilder._build_concat"]
     
     BuildConcat -- 成功 --> GenThumb["外部: VideoBuilder._generate_thumbnail"]
@@ -306,10 +309,18 @@ graph TD
 
 
 
-* `LINE_USER_ID` という変数名で `config` から値を取得しているが、`send_push` の引数には `target="discord"` を指定しており、変数名と通知先が一致していない。
+* Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)が不要になった。これに伴い、以前存在していた`user_id = getattr(config, "LINE_USER_ID", "")`という、通知先(Discord)と変数名(LINE_USER_ID)が一致しない代入は削除され、4箇所とも`messages`のみを渡す形に更新された。
 
 
-* 根拠: [通知送信処理] (行番号: 58〜63, 206〜211, 244〜249 / 抜粋: "user_id=user_id, ..., target="discord"")
+* 根拠: [通知送信処理] (行番号: 59〜63, 219〜223, 226〜230, 264〜268 / 抜粋: "send_push(\n            messages=[...], target="discord"")
+
+
+
+
+* `all_clip_files` は各イベントの `_build_clip()` 成功時のみ追加される実装のため、「イベント検知はあったがクリップ抽出が全滅した」場合と「そもそもイベントが無かった」場合の両方で空になる。Issue #233修正前はこの2つを区別せず一律「動きなし」通知を送っていたため、クリップ抽出全滅というエラー状態が利用者から見えなくなっていた。修正後は`global_event_idx`(全チャンクを通した検知イベント総数)の値で両者を区別し、前者は`error`チャンネルへ通知する。
+
+
+* 根拠: [クリップ抽出結果の分岐] (行番号: 210〜232 / 抜粋: "if not all_clip_files: if global_event_idx > 0:")
 
 
 

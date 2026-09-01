@@ -1,7 +1,7 @@
 # MY_HOME_SYSTEM/services/sensor_service.py
 import asyncio
 import time
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, Any
 
 import config
 import common
@@ -69,9 +69,9 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
     try:
         await asyncio.to_thread(
             send_push,
-            config.LINE_USER_ID,
-            [{"type": "text", "text": msg}],
-            None, "discord", "notify"
+            messages=[{"type": "text", "text": msg}],
+            target="discord",
+            channel="notify",
         )
         # 状態の大きな変化（タイムアウト）なので INFO を維持
         logger.info(f"通知送信 [Digital Event]: {msg}")
@@ -94,7 +94,11 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
     now: float = time.time()
     
     # Motion Sensor Logic
-    if dev_type and "Motion" in dev_type:
+    # "Motion" 部分一致はデバイス一覧API語彙("Motion Sensor")向け。
+    # SwitchBot公式Webhookの語彙("WoPresence")はこの部分一致に合致しないため、
+    # 完全一致で追加している(#94: 以前はWoPresence形式のイベントがこの分岐に
+    # 到達せず、見守り通知・無反応タイマーが発火しなかった)。
+    if dev_type and ("Motion" in dev_type or dev_type == "WoPresence"):
         if state == "detected":
             if mac in MOTION_TASKS: 
                 MOTION_TASKS[mac].cancel()
@@ -123,10 +127,10 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
             
     if msg:
         await asyncio.to_thread(
-            send_push, 
-            config.LINE_USER_ID, 
-            [{"type": "text", "text": msg}], 
-            None, "discord", "notify"
+            send_push,
+            messages=[{"type": "text", "text": msg}],
+            target="discord",
+            channel="notify",
         )
 
 def cancel_all_tasks() -> None:
@@ -212,7 +216,7 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
         logger.info(f"🔔 [Digital Event] Power state threshold crossed: {msg}")
         await asyncio.to_thread(
             send_push,
-            config.LINE_USER_ID,
-            [{"type": "text", "text": msg}],
-            None, target_platform, "notify"
+            messages=[{"type": "text", "text": msg}],
+            target=target_platform,
+            channel="notify",
         )

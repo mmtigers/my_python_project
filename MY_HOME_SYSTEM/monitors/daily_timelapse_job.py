@@ -8,7 +8,6 @@ import tempfile
 import traceback
 import argparse
 import re
-from pathlib import Path
 from dataclasses import asdict
 
 # プロジェクトルートの解決と追加
@@ -53,13 +52,11 @@ def parse_time(time_str: str) -> datetime.time:
 
 def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_time_str: str = None, end_time_str: str = None) -> None:
     t_start = time.perf_counter()
-    user_id = getattr(config, "LINE_USER_ID", "")
-    
+
     if not check_dependencies():
         send_push(
-            user_id=user_id, 
-            messages=[{"type": "text", "text": "⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。"}], 
-            target="discord", 
+            messages=[{"type": "text", "text": "⚠️ 日次タイムラプス生成エラー\nFFmpeg等がインストールされていません。"}],
+            target="discord",
             channel="error"
         )
         return
@@ -208,13 +205,26 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
 
                 # 全ファイルの解析ループ終了
                 if not all_clip_files:
-                    logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
-                    send_push(
-                        user_id=user_id,
-                        messages=[{"type": "text", "text": f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。"}],
-                        target="discord",
-                        channel="report"
-                    )
+                    if global_event_idx > 0:
+                        # #233: all_clip_filesは_build_clip()成功時のみ追加されるため、
+                        # 「イベントは検知されたがクリップ抽出が全滅した」場合も空になり、
+                        # 以前は下のelse節と同じ「動きなし」という事実と異なる通知を送っていた。
+                        logger.error(
+                            f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) で "
+                            f"{global_event_idx} 件のイベントを検知しましたが、クリップ抽出が全て失敗しました。"
+                        )
+                        send_push(
+                            messages=[{"type": "text", "text": f"⚠️ {camera_name} ({target_date_str}{time_range_log}) 動き検知イベントはありましたが、クリップ生成に全て失敗しました。"}],
+                            target="discord",
+                            channel="error"
+                        )
+                    else:
+                        logger.info(f"{camera_name} の対象期間内 ({target_date_str}{time_range_log}) に動き検知イベントはありませんでした。")
+                        send_push(
+                            messages=[{"type": "text", "text": f"ℹ️ {camera_name} ({target_date_str}{time_range_log}) の動きはありませんでした。"}],
+                            target="discord",
+                            channel="report"
+                        )
                     return
 
                 logger.info(f"全 {len(target_files)} ファイルの解析完了。有効クリップ総数: {len(all_clip_files)} 件")
@@ -248,7 +258,6 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
             err_msg = traceback.format_exc()
             logger.error(f"日次バッチ処理中に予期せぬエラーが発生しました: {err_msg}")
             send_push(
-                user_id=user_id,
                 messages=[{"type": "text", "text": f"⚠️ 日次タイムラプス生成エラー ({camera_name})\n{str(e)}"}],
                 target="discord",
                 channel="error"

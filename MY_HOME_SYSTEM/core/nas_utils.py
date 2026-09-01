@@ -4,13 +4,22 @@ import subprocess
 from pathlib import Path
 
 try:
-    import config
+    import config  # noqa: F401 — Issue #111回帰テスト用の"カナリア"importで、
+    # このimport自体の成否(nas_utils.configがNoneになるかどうか)を
+    # tests/test_nas_utils.pyが検証している。Issue #289でconfig.LINE_USER_ID
+    # の参照を撤去した後もこの意図で残しているため、未使用に見えても削除しない。
     from core.logger import get_logger
     from services.notification_service import send_push
 except ImportError:
     # 単体テスト用フォールバック
     import logging
     logging.basicConfig(level=logging.INFO)
+    # get_managed_target_directory は getattr(config, "LINE_USER_ID", None) で
+    # config の存在を安全に確認しているつもりだったが、これは属性欠如は防げても
+    # 名前 config 自体の未束縛(NameError)は防げない。config が未定義のままだと
+    # NAS復旧失敗時にNameErrorで例外が送出され、本来フェイルソフトであるべき
+    # この関数がフォールバックディレクトリ作成(Fail-Softロジック)に到達しない。
+    config = None
     def get_logger(name): return logging.getLogger(name)
     def send_push(*args, **kwargs): pass
 
@@ -117,14 +126,12 @@ def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_
     error_msg = f"🚨 【NAS障害・介入要求】\nNASへのアクセス及び自動修復に失敗しました。\nPath: {nas_dir_str}\nローカルへフォールバックします。"
     logger.error(error_msg)
     
-    # getattrを利用してconfigの存在確認を安全に行う
-    user_id = getattr(config, "LINE_USER_ID", None)
-    if user_id:
-        send_push(
-            user_id, 
-            [{"type": "text", "text": error_msg}],
-            target="discord", channel="error"
-        )
+    # target="discord"のみのためLINE宛先(user_id)は不要(Issue #289)。
+    # 以前はconfig.LINE_USER_ID未設定時にこの通知自体がスキップされてしまっていた。
+    send_push(
+        [{"type": "text", "text": error_msg}],
+        target="discord", channel="error"
+    )
 
     # Fail-Softロジック
     fallback_dir.mkdir(parents=True, exist_ok=True)

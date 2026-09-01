@@ -1,9 +1,9 @@
 import datetime
 import importlib
+import os
 import random
-import math
 import threading
-import pytz
+from contextlib import ExitStack
 from typing import List, Dict, Any, Optional, Tuple
 
 from fastapi import HTTPException
@@ -11,7 +11,7 @@ import common
 import config
 import game_logic
 from core import sound_manager
-from services import notification_service
+from services import notification_service, switchbot_service
 from core.logger import setup_logging
 
 # モデル定義のインポート (型ヒント用)
@@ -19,6 +19,17 @@ from models.quest import MasterUser, MasterQuest, MasterReward
 
 # ロガー設定
 logger = setup_logging("quest_service")
+
+# JST(日本標準時、UTC+9固定・DSTなし)。is_within_reset_period/calculate_quest_boost/
+# _is_quest_currently_active/filter_active_quests/get_all_view_data がそれぞれ
+# 独立に「datetime.timezone(timedelta(hours=9))」または「pytz.timezone("Asia/Tokyo")」
+# という2通りの異なる方法でJSTを組み立てていたため、この定数へ一本化する(Issue #293)。
+# 標準ライブラリの固定オフセットtzinfoを採用する: pytzのtimezoneオブジェクトは
+# datetime.replace(tzinfo=...)に直接使うと不正なオフセット(この地域ではLMT起源の
+# +09:19)を返す既知の落とし穴があり、is_within_reset_period内でまさにreplace()に
+# 渡している箇所があるため、datetime()/replace()/astimezone()/now()のいずれに
+# 使っても常に正しい+09:00になる固定オフセット版のほうが安全。
+JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 # quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)
 ROLE_ADULT = 'role_adult'
@@ -33,6 +44,38 @@ except ImportError:
     except ImportError:
         logger.warning("quest_data module not found via relative import.")
         quest_data = None
+
+
+# _process_complete_quest_locked のスパムチェック間隔(秒)。infiniteクエストのみ
+# フロントエンド(family-quest QuestList.tsx)のクールダウン表示(60秒)と揃える(B2)。
+SPAM_CHECK_INTERVAL_SECONDS = 10
+INFINITE_QUEST_COOLDOWN_SECONDS = 60
+
+
+def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
+    """
+    common.get_now_iso() で保存されたISOタイムスタンプ文字列から、現在までの
+    経過秒数(実時間)を返す。パース失敗時・空文字/Noneの場合は None を返す。
+
+    completed_at/redeemed_at 等は common.get_now_iso() によりJST付きで保存される。
+    tzinfoを切り捨てて datetime.datetime.now()(サーバーのOSローカル時刻)と比較すると、
+    サーバーのOSタイムゾーンがJST以外(例: GitHub ActionsのUTC)の場合に実時間で
+    数秒しか経っていなくても差分が約9時間分ズレて算出されてしまう。tzinfoを
+    保持したまま比較することで、サーバーのOSタイムゾーンに依存せず常に
+    「実時間で何秒経過したか」を正しく判定する。
+    """
+    if not timestamp_str:
+        return None
+    try:
+        last_time = datetime.datetime.fromisoformat(timestamp_str)
+        if last_time.tzinfo is None:
+            # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
+            last_time = last_time.replace(tzinfo=JST)
+        now_check = datetime.datetime.now(last_time.tzinfo)
+        return (now_check - last_time).total_seconds()
+    except Exception:
+        return None
+
 
 # ==========================================
 # Completion Lock (Race Condition Guard)
@@ -74,6 +117,44 @@ def _get_user_balance_lock(user_id: str) -> threading.Lock:
         if lock is None:
             lock = threading.Lock()
             _user_balance_locks[user_id] = lock
+        return lock
+
+
+def _acquire_user_balance_locks(user_ids) -> ExitStack:
+    # 兄妹連携クエストの承認/取消は、報告者だけでなく相方の quest_users
+    # (gold/exp/level)も同一トランザクションで書き換える(Issue #98)。報告者の
+    # ロックしか取得しないと、相方を対象とする別の承認/取消と並行実行された
+    # 場合に相方側でlost updateが起こりうるため、関係する全ユーザーのロックを
+    # まとめて取得する。複数ユーザーを同時にロックする際は、常に同じ順序
+    # (user_idの昇順)で取得することで、対向のカスケード処理同士が互いの
+    # ロックを取り合うデッドロックを防ぐ。
+    stack = ExitStack()
+    for uid in sorted(set(user_ids)):
+        stack.enter_context(_get_user_balance_lock(uid))
+    return stack
+
+
+# ==========================================
+# Purchase Lock (Race Condition Guard)
+# ==========================================
+# process_purchase_reward は残高チェックと減算を単一のアトミックなUPDATEで行うため
+# read-then-writeのレースコンディション自体は起きないが、「直近の購入履歴を読む→
+# 履歴を書く」というスパムチェック(#101)は他のスパムチェックと同様のTOCTOUを持つ。
+# 購入確認モーダルの「はい」連打で、1回目のレスポンス前に2回目のリクエストが
+# ほぼ同時に到達すると、どちらも「直近の購入履歴なし」を読んでしまいスパムチェックを
+# すり抜け、残高が足りる限り2回とも独立した正当な購入として成立してしまう
+# (ゴールド二重消費+アイテム二重取得)。process_complete_quest の完了ロックと
+# 同様に、同一(user_id, reward_id)への処理をプロセス内で直列化する。
+_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}
+_purchase_locks_guard = threading.Lock()
+
+
+def _get_purchase_lock(key: Tuple[str, int]) -> threading.Lock:
+    with _purchase_locks_guard:
+        lock = _purchase_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _purchase_locks[key] = lock
         return lock
 
 
@@ -131,21 +212,44 @@ class UserService:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
             if not user:
                 raise HTTPException(status_code=404, detail="User not found")
-            
-            cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?", 
+
+            old_avatar = user['avatar']
+
+            cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?",
                        (avatar_url, common.get_now_iso(), user_id))
-            
+
             logger.info(f"Avatar Updated: User={user_id}, URL={avatar_url}")
-            return {"status": "updated", "avatar": avatar_url}
+
+        self._delete_orphaned_avatar(old_avatar, avatar_url)
+        return {"status": "updated", "avatar": avatar_url}
+
+    def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:
+        """アップロード済みの旧アバターファイルが差し替え後にディスクへ残り続けるのを防ぐ。
+        絵文字などアップロードファイル以外の値や、他ユーザーと共有され得ない
+        /uploads/ 配下のファイルのみを対象とし、パストラバーサルを避けるため
+        ファイル名部分のみをUPLOAD_DIR基準で解決する。"""
+        if not old_avatar or old_avatar == new_avatar:
+            return
+        if not old_avatar.startswith("/uploads/"):
+            return
+
+        filename = os.path.basename(old_avatar)
+        file_path = os.path.join(config.UPLOAD_DIR, filename)
+        if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):
+            return
+
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                logger.info(f"Orphaned avatar removed: {file_path}")
+        except OSError as e:
+            logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")
 
 
 class QuestService:
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
-        
-        import datetime
-        # 外部ライブラリを使わず、標準機能でJST（+9時間）を定義
-        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+
         now_jst = datetime.datetime.now(JST)
         today_jst = now_jst.date()
         
@@ -201,7 +305,11 @@ class QuestService:
             ORDER BY completed_at DESC LIMIT 1
         """, (user_id, quest['quest_id'])).fetchone()
 
-        now = datetime.datetime.now()
+        # M-1-3系: is_within_reset_periodと同様、経過日数の判定はJST基準で
+        # 行う必要がある。以前はdatetime.datetime.now()(OSローカル時刻)を
+        # 使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の
+        # 判定でdays_diffが1小さくなる不具合があった。
+        now_jst = datetime.datetime.now(JST)
         last_date = None
 
         if last_hist:
@@ -210,11 +318,11 @@ class QuestService:
                 last_date = dt.date()
             except Exception:
                 pass
-        
+
         if not last_date:
             return {"gold": 0, "exp": 0}
 
-        today_date = now.date()
+        today_date = now_jst.date()
         days_diff = (today_date - last_date).days
 
         if days_diff <= 1:
@@ -230,8 +338,35 @@ class QuestService:
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         # 同一ユーザー・同一クエストへの同時多重リクエストによる二重加算を防ぐため、
         # DBトランザクションの外側でプロセス内ロックを取得して処理全体を直列化する。
-        with _get_completion_lock((user_id, quest_id)):
-            return self._process_complete_quest_locked(user_id, quest_id)
+        #
+        # completion lock は (user_id, quest_id) 単位のため、同一ユーザーが
+        # 異なる quest_id をほぼ同時に完了すると別々のロックキーとなり並行実行される。
+        # 大人の即時完了パス(_apply_quest_rewards)は quest_users(gold/exp/level)への
+        # read-modify-write を伴うため、これだけでは対象ユーザーの残高更新が
+        # 並行実行から保護されず lost update が起こり得る(Issue #161)。
+        # quest_users を書き換えうる全経路(承認・取消・完了)が対象ユーザー単位で
+        # 直列化されるよう、completion lock とは独立に user balance lock も取得する。
+        # ロック取得順序は常に balance lock → completion/purchase lock に統一し、
+        # 経路間のデッドロックを防ぐ。
+        with _get_user_balance_lock(user_id):
+            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):
+                return self._process_complete_quest_locked(user_id, quest_id)
+
+    def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:
+        # 兄妹連携クエスト(target_user='siblings')は、兄・妹どちらが完了報告しても
+        # 同じロックキーで直列化する必要がある。ここを (user_id, quest_id) のままにすると
+        # 報告者ごとにロックキーが分かれてしまい、兄妹がほぼ同時に報告した場合、双方の
+        # 処理が互いのロック取得を待たずに _process_coop_quest_completion まで進んでしまい、
+        # pendingペア(quest_history 2行×2組)が二重生成されて承認時に報酬が2倍になる。
+        # そのため、対象クエストが兄妹連携クエストの場合はユーザーIDに依存しない
+        # 共通キーを使って直列化する。
+        with common.get_db_cursor() as cur:
+            quest = cur.execute(
+                "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)
+            ).fetchone()
+        if quest and quest['target_user'] == 'siblings':
+            return ('__coop__', quest_id)
+        return (user_id, quest_id)
 
     def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
@@ -241,6 +376,24 @@ class QuestService:
             if not quest or not user:
                 raise HTTPException(status_code=404, detail="Not found")
 
+            # 対象者・出現条件のサーバー側検証(Issue #163)。
+            # filter_active_quests(GET /dataの表示整形専用)にしか無かった判定を、
+            # API直叩きでバイパスして他人向けクエスト・時間帯外・曜日外・
+            # 未出現のrandomクエストを完了できてしまう穴を塞ぐ。報酬購入側は
+            # Issue #95で同種のサーバー側targetチェックを追加済みだったが、
+            # 完了側には未展開のまま残っていた。
+            # target_user は 'all'/本人のuser_id/'siblings'(role_childのみ)の
+            # いずれかのみ許可する。'siblings'をrole_adultが完了すると、
+            # _process_coop_quest_completionを経由せず単独即時報酬になってしまう
+            # (兄妹連携クエストの前提を破る)ため、これも合わせて拒否する。
+            is_sibling_target = quest['target_user'] == 'siblings'
+            if quest['target_user'] not in ('all', user_id) and not (
+                is_sibling_target and user['role'] == ROLE_CHILD
+            ):
+                raise HTTPException(status_code=403, detail="This quest is not available for you")
+            if not self._is_quest_currently_active(quest):
+                raise HTTPException(status_code=403, detail="This quest is not currently available")
+
             # スパムチェック
             last_hist = cur.execute("""
                 SELECT completed_at FROM quest_history 
@@ -249,26 +402,14 @@ class QuestService:
             """, (user_id, quest['quest_id'])).fetchone()
 
             if last_hist and last_hist['completed_at']:
-                try:
-                    last_time = datetime.datetime.fromisoformat(last_hist['completed_at'])
-                    # completed_at は common.get_now_iso() によりJST付きで保存される。
-                    # 以前はここで tzinfo を切り捨てた上で datetime.datetime.now()(サーバーのOSローカル時刻)
-                    # と比較していたため、サーバーのOSタイムゾーンがJST以外(例: GitHub ActionsのUTC)だと
-                    # 実時間で10秒経過しても差分が約9時間分ズレたままになり、同じクエストが
-                    # 約9時間もの間 429 (「少し時間を空けてから」)で完了できなくなる不具合があった。
-                    # tzinfoを保持したまま比較することで、サーバーのOSタイムゾーンに依存せず
-                    # 常に「実時間で10秒経過したか」を正しく判定する。
-                    if last_time.tzinfo is None:
-                        # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
-                        last_time = last_time.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
-                    now_check = datetime.datetime.now(last_time.tzinfo)
-
-                    if (now_check - last_time).total_seconds() < 10:
-                        raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass
+                elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])
+                # B2: infiniteクエストはフロントエンド(QuestList.tsx)が60秒のクールダウンを
+                # UIとして提示しているが、サーバー側は全クエスト共通の10秒間隔しか強制していなかった
+                # ため、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていた。
+                # infiniteのみフロントの意図(60秒)に合わせてサーバー側の下限も引き上げる。
+                min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS
+                if elapsed is not None and elapsed < min_interval_seconds:
+                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
 
             # M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。
             # is_within_reset_period は元々 get_all_view_data の表示専用
@@ -352,17 +493,51 @@ class QuestService:
             "message": "親の承認待ちです（兄妹クエスト）"
         }
 
-    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
-        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
-        # 先に特定してから、そのユーザー単位でロックを取得する。
+    def _get_lock_user_ids_for_history(
+        self, history_id: int, primary_user_id: Optional[str] = None
+    ) -> List[str]:
+        """history_idに対応するquest_history行から、ロック対象ユーザーID一覧を求める。
+        兄妹連携クエスト(linked_history_id あり)の場合は相方のuser_idも含める(#98)。
+
+        process_approve_quest/process_reject_quest/process_cancel_questがそれぞれ
+        個別に実装していた「対象履歴をpeekして相方を辿り、ロック対象ユーザーを
+        まとめる」ロジックを一元化したもの(Issue #293)。
+
+        primary_user_idを指定しない場合はquest_history.user_idから取得し、履歴が
+        見つからなければ404を送出する(process_approve_quest/process_reject_quest
+        の従来の挙動)。指定した場合はそれを主対象としてそのまま使い、履歴が
+        見つからなくても404は送出しない(process_cancel_questの従来の挙動:
+        存在確認自体は_process_cancel_quest_locked側に委ねる)。
+        """
         with common.get_db_cursor() as cur:
             hist_peek = cur.execute(
-                "SELECT user_id FROM quest_history WHERE id = ?", (history_id,)
+                "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()
-        if not hist_peek:
-            raise HTTPException(status_code=404, detail="History not found")
 
-        with _get_user_balance_lock(hist_peek['user_id']):
+        if primary_user_id is not None:
+            lock_user_ids = [primary_user_id]
+        else:
+            if not hist_peek:
+                raise HTTPException(status_code=404, detail="History not found")
+            lock_user_ids = [hist_peek['user_id']]
+
+        if hist_peek and hist_peek['linked_history_id'] is not None:
+            with common.get_db_cursor() as cur:
+                linked_peek = cur.execute(
+                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
+                ).fetchone()
+            if linked_peek:
+                lock_user_ids.append(linked_peek['user_id'])
+
+        return lock_user_ids
+
+    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
+        # 先に特定してから、そのユーザー単位でロックを取得する。兄妹連携クエスト
+        # (linked_history_id あり)の場合は、承認時に相方の quest_users も
+        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id)
+        with _acquire_user_balance_locks(lock_user_ids):
             return self._process_approve_quest_locked(approver_id, history_id)
 
     def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:
@@ -388,8 +563,16 @@ class QuestService:
             attacker_id = hist['user_id']
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード承認 ---
+            # #238: _approve_linked_historyは相方のgold/exp/level/medalを正しく
+            # 付与していたが戻り値が無く(-> None)、レスポンスに一切含まれないため
+            # フロント側は相方のレベルアップ/メダル獲得演出を出しようがなかった。
             if hist['linked_history_id'] is not None:
-                self._approve_linked_history(cur, hist['linked_history_id'])
+                partner_result = self._approve_linked_history(cur, hist['linked_history_id'])
+                if partner_result:
+                    result['partnerUserId'] = partner_result['user_id']
+                    result['partnerLeveledUp'] = partner_result['leveledUp']
+                    result['partnerNewLevel'] = partner_result['newLevel']
+                    result['partnerEarnedMedals'] = partner_result['earnedMedals']
 
             # --- TV Lock Feature ---
             # quest はマスタから削除された quest_id の pending 履歴を承認する場合 None になり得る
@@ -401,26 +584,29 @@ class QuestService:
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
             return result
 
-    def _approve_linked_history(self, cur, linked_history_id: int) -> None:
-        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。"""
+    def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:
+        """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。
+
+        #238: 戻り値で相方のuser_idと_apply_quest_rewardsの結果(leveledUp/newLevel/
+        earnedMedals等)を返す。呼び出し元(_process_approve_quest_locked)がこれを
+        レスポンスへ含めることで、フロント側が相方のレベルアップ/メダル獲得演出を
+        出せるようにするため。
+        """
         linked_hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (linked_history_id,)).fetchone()
         if not linked_hist or linked_hist['status'] != 'pending':
-            return
+            return None
 
         linked_user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (linked_hist['user_id'],)).fetchone()
         linked_quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (linked_hist['quest_id'],)).fetchone()
         if not linked_user:
-            return
+            return None
 
         override_rewards = {"gold": linked_hist['gold_earned'], "exp": linked_hist['exp_earned']}
-        self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
+        reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
         logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
+        return {"user_id": linked_hist['user_id'], **reward_result}
 
     def _trigger_tv_unlock(self, quest_id: int):
-        import threading
-        from services import switchbot_service
-        from services import notification_service
-        
         def unlock_task():
             logger.info(f"📺 Initiating TV Unlock (Turn ON) for quest_id: {quest_id}")
             try:
@@ -444,6 +630,19 @@ class QuestService:
         t.start()
     
     def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
+        # #228: process_approve_quest と同じユーザー単位ロックに参加させる。
+        # 以前はここでロックを一切取得していなかったため、同一history_idに対する
+        # 承認と却下がほぼ同時に実行されると、承認側が先にquest_usersへgold/expを
+        # 加算・コミットした後に却下のUPDATEがコミットされ、quest_history.statusは
+        # 'rejected'になるのに付与済みの報酬は一切ロールバックされない不整合が
+        # 生じていた。兄妹連携クエスト(linked_history_id あり)の場合は、相方の
+        # quest_users もカスケードして書き換えるため相方のユーザーIDも合わせて
+        # ロックする(process_approve_quest/process_cancel_questと同じ理由、#98)。
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id)
+        with _acquire_user_balance_locks(lock_user_ids):
+            return self._process_reject_quest_locked(approver_id, history_id, reason)
+
+    def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -456,7 +655,12 @@ class QuestService:
             # 却下履歴を残す(以前はDELETEしていたため status='rejected' が実際には
             # 生成されず、process_complete_quest のスパムチェック `status != 'rejected'`
             # が常に成立する死に条件になっていた)。
-            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ?", (history_id,))
+            # #228: 主対象のUPDATEにも AND status = 'pending' を付ける(連結相方向けの
+            # 更新には元々付いていたが主対象には無い非対称な実装だった)。ロック取得に
+            # よりこの行の承認/却下は既に直列化されているため二重の安全策ではあるが、
+            # UPDATE自体を「pendingのままなら却下」という条件付きにすることで、
+            # 万一チェックとUPDATEの間に状態が変化しても却下確定を防ぐ。
+            cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (history_id,))
 
             # --- 兄妹連携クエスト: 連結された相方の履歴も同一トランザクションでカスケード却下 ---
             if hist['linked_history_id'] is not None:
@@ -493,8 +697,12 @@ class QuestService:
         """, (new_level, new_exp_val, final_gold, earned_medals, now_iso, user['user_id']))
         
         if history_id:
-            cur.execute("UPDATE quest_history SET status='approved', completed_at=?, gold_earned=?, exp_earned=? WHERE id=?", 
-                       (now_iso, earned_gold, earned_exp, history_id))
+            # completed_at は子供が完了報告した時刻のまま維持する(承認時刻で上書きしない)。
+            # 上書きしていた旧実装では、承認が翌日(weeklyなら翌週)にずれた場合に
+            # process_complete_quest のスパムチェック/周期リセット判定が「本日(今週)完了済み」
+            # と誤判定し、翌日分の完了報告ができなくなる不具合があった(#93)。
+            cur.execute("UPDATE quest_history SET status='approved', gold_earned=?, exp_earned=? WHERE id=?",
+                       (earned_gold, earned_exp, history_id))
         else:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -515,7 +723,12 @@ class QuestService:
         }
 
     def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:
-        with _get_user_balance_lock(user_id):
+        # 兄妹連携クエスト(linked_history_id あり)の場合は、取消時に相方の
+        # quest_users もカスケードしてロールバックするため、相方のユーザーIDも
+        # 合わせてロックする(#98)。history_id が不正/他人の履歴の場合の404/403は
+        # 従来どおり _process_cancel_quest_locked 側で検出される。
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id, primary_user_id=user_id)
+        with _acquire_user_balance_locks(lock_user_ids):
             return self._process_cancel_quest_locked(user_id, history_id)
 
     def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:
@@ -544,10 +757,13 @@ class QuestService:
 
     def _revert_and_delete_history(self, cur, hist, user) -> None:
         """
-        quest_history 1行を取り消す。pending であれば単純に削除、approved であれば
-        付与済みの経験値・ゴールドをロールバックしてから削除する。
+        quest_history 1行を取り消す。approved であれば付与済みの経験値・ゴールドを
+        ロールバックしてから削除する。pending / rejected は報酬がまだ付与されて
+        いないため、残高には触れず単純に削除する(#97: 以前は status == 'pending'
+        以外を一律「付与済み」とみなしてロールバックしていたため、rejected 履歴を
+        cancel すると、もらっていない経験値・ゴールドが残高から減算されていた)。
         """
-        if hist['status'] == 'pending':
+        if hist['status'] != 'approved':
             cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
             return
 
@@ -560,58 +776,126 @@ class QuestService:
                     (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))
         cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
-    def filter_active_quests(self, quests: List[dict]) -> List[dict]:
-        filtered = []
-        now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+    def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:
+        """quest_master 1行(dict/sqlite3.Row。どちらも `[]` でのアクセスに対応)が
+        「今」出現・実行可能な条件(limited型の期間・random型の出現抽選・時間帯・曜日)を
+        満たすかを判定する。filter_active_quests(GET /dataの表示フィルタ)と
+        _process_complete_quest_locked(完了APIのサーバー側検証、Issue #163)の
+        両方から呼ばれる共通ロジック。表示上出現していないクエストがAPI直叩きで
+        完了できてしまう食い違いを防ぐため、判定基準を完全に一致させている。"""
+        now = now or datetime.datetime.now(JST)
         today_date = now.date()
         current_time_str = now.strftime("%H:%M")
-        current_weekday = today_date.weekday()
+
+        if quest['quest_type'] == 'limited':
+            try:
+                if quest['start_date']:
+                    y, m, d = map(int, quest['start_date'].split('-'))
+                    if today_date < datetime.date(y, m, d):
+                        return False
+                if quest['end_date']:
+                    y, m, d = map(int, quest['end_date'].split('-'))
+                    if today_date > datetime.date(y, m, d):
+                        return False
+            except ValueError as e:
+                logger.warning(f"Date parse error for quest {quest['quest_id']}: {e}")
+                return False
+
+        if quest['quest_type'] == 'random':
+            seed = f"{now.strftime('%Y-%m-%d')}_{quest['quest_id']}"
+            # #241: occurrence_chanceがNoneの場合、float > Noneの比較でTypeErrorになる。
+            # DBスキーマ(quest_master.occurrence_chance DEFAULT 1.0)とmodels/quest.pyの
+            # 既定値(Optional[float] = 1.0)に合わせ、Noneは「常に出現」扱いにする。
+            occurrence_chance = quest['occurrence_chance'] if quest['occurrence_chance'] is not None else 1.0
+            if random.Random(seed).random() > occurrence_chance:
+                return False
+
+        if quest['start_time'] and quest['end_time']:
+            if quest['start_time'] <= quest['end_time']:
+                if not (quest['start_time'] <= current_time_str <= quest['end_time']):
+                    return False
+            else:
+                if not (current_time_str >= quest['start_time'] or current_time_str <= quest['end_time']):
+                    return False
+
+        if quest['day_of_week']:
+            days_list = [int(d) for d in quest['day_of_week'].split(',')]
+            if today_date.weekday() not in days_list:
+                return False
+
+        return True
+
+    def filter_active_quests(self, quests: List[dict]) -> List[dict]:
+        filtered = []
+        now = datetime.datetime.now(JST)
 
         for q in quests:
-            if q['quest_type'] == 'limited':
-                try:
-                    if q.get('start_date'):
-                        y, m, d = map(int, q['start_date'].split('-'))
-                        start_dt = datetime.date(y, m, d)
-                        if today_date < start_dt: continue
-                    if q.get('end_date'):
-                        y, m, d = map(int, q['end_date'].split('-'))
-                        end_dt = datetime.date(y, m, d)
-                        if today_date > end_dt: continue
-                except ValueError as e:
-                    logger.warning(f"Date parse error for quest {q.get('quest_id')}: {e}")
-                    continue
-            if q['quest_type'] == 'random':
-                seed = f"{now.strftime('%Y-%m-%d')}_{q['quest_id']}"
-                if random.Random(seed).random() > q['occurrence_chance']: continue
-            if q.get('start_time') and q.get('end_time'):
-                if q['start_time'] <= q['end_time']:
-                    if not (q['start_time'] <= current_time_str <= q['end_time']): continue
-                else:
-                    if not (current_time_str >= q['start_time'] or current_time_str <= q['end_time']): continue
+            if not self._is_quest_currently_active(q, now):
+                continue
 
-            q['icon'] = q['icon_key']
-            q['type'] = q['quest_type']
-            q['target'] = q['target_user']
-            if q['day_of_week']:
-                days_list = [int(d) for d in q['day_of_week'].split(',')]
-                q['days'] = days_list
-                if current_weekday not in days_list:
-                    continue
-            else:
-                q['days'] = None
+            # #291: quest_master由来の値そのまま(icon_key/quest_type/target_user)を
+            # 正とし、以前ここで追加していた icon/type/target というフィールド名の
+            # 二重化(useGameData.tsからの起点調査で発覚)は廃止した。
+            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None
             filtered.append(q)
         return filtered
     
 
 class ShopService:
     def process_purchase_reward(self, user_id: str, reward_id: int) -> Dict[str, Any]:
+        # 同一ユーザー・同一報酬への同時多重リクエスト(購入確認モーダルの連打等)による
+        # 二重購入を防ぐため、DBトランザクションの外側でプロセス内ロックを取得して
+        # 処理全体を直列化する(#101)。
+        #
+        # purchase lock は (user_id, reward_id) 単位の直列化に過ぎず、
+        # process_approve_quest/process_cancel_quest が保持する user balance lock
+        # とは独立している。購入はゴールドをアトミックな "gold = gold - ?" で減算する
+        # ため read-modify-write レース自体は起きないが、承認/取消は
+        # "SELECT→Pythonで計算→絶対値でSET" のため、購入のUPDATEコミット後に
+        # 承認/取消が古いgoldを基準にした絶対値SETを行うと、購入による減算が
+        # 上書きされて消失する(Issue #161)。quest_users を書き換えうる全経路
+        # (承認・取消・完了・購入)が対象ユーザー単位で直列化されるよう、
+        # purchase lock とは独立に user balance lock も取得する。
+        # ロック取得順序は常に balance lock → completion/purchase lock に統一し、
+        # 経路間のデッドロックを防ぐ。
+        with _get_user_balance_lock(user_id):
+            with _get_purchase_lock((user_id, reward_id)):
+                return self._process_purchase_reward_locked(user_id, reward_id)
+
+    def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
             reward = cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (reward_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
 
             if not reward: raise HTTPException(status_code=404, detail="Reward not found")
             if not user: raise HTTPException(status_code=404, detail="User not found")
+
+            # スパムチェック(#101): 購入確認モーダルの「はい」連打で、1回目のレスポンス前に
+            # 2回目のリクエストが送られると、ロックが無ければサーバー側は各リクエストを
+            # 独立した正当な購入として処理してしまい、残高が足りれば2回とも成功して
+            # 二重購入(ゴールド二重消費+アイテム二重取得)が成立する。process_complete_quest
+            # と同じ「直近10秒以内の同一操作は拒否」というスパムチェックを行う。
+            last_purchase = cur.execute("""
+                SELECT redeemed_at FROM reward_history
+                WHERE user_id = ? AND reward_id = ?
+                ORDER BY redeemed_at DESC LIMIT 1
+            """, (user_id, reward_id)).fetchone()
+
+            if last_purchase and last_purchase['redeemed_at']:
+                elapsed = _seconds_since_iso_timestamp(last_purchase['redeemed_at'])
+                if elapsed is not None and elapsed < 10:
+                    raise HTTPException(status_code=429, detail="少し時間を空けてから実行してください")
+
+            target = reward['target'] or 'all'
+            if target != 'all':
+                is_adult = user['role'] == ROLE_ADULT
+                allowed = (
+                    (target == 'children' and not is_adult) or
+                    (target == 'adults' and is_adult) or
+                    (target == user_id)
+                )
+                if not allowed:
+                    raise HTTPException(status_code=403, detail="This reward is not available for you")
 
             # 残高チェックと減算を単一のアトミックなUPDATEにすることで、
             # 同時多重リクエストによる read-then-write のレースコンディション
@@ -648,10 +932,10 @@ class InventoryService:
         with common.get_db_cursor() as cur:
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
-                       rm.title, rm.icon_key as icon, rm.category
+                       rm.title, rm.description as desc, rm.icon_key as icon, rm.category
                 FROM user_inventory ui
                 JOIN reward_master rm ON ui.reward_id = rm.reward_id
-                WHERE ui.user_id = ? AND ui.status IN ('owned', 'pending')
+                WHERE ui.user_id = ? AND ui.status = 'owned'
                 ORDER BY ui.purchased_at DESC
             """
             rows = cur.execute(sql, (user_id,)).fetchall()
@@ -759,7 +1043,14 @@ class GameSystem:
                 ph = ','.join(['?'] * len(active_q_ids))
                 cur.execute(f"DELETE FROM quest_master WHERE quest_id NOT IN ({ph})", active_q_ids)
             else:
-                cur.execute("DELETE FROM quest_master")
+                # #242: quest_data.QUESTSが空(コーディングミス等)になった瞬間、
+                # 以前は無条件でDELETE FROM quest_masterを実行し全クエストマスタが
+                # 消えていた。reward_master側の「参照が残っている行は削除をスキップする」
+                # 安全弁と同様、意図しない全消去を防ぐため削除自体をスキップする。
+                logger.warning(
+                    "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
+                    "スキップしました(意図しない全消去を防ぐための安全弁)。"
+                )
 
             for q in valid_quests:
                 cur.execute("""
@@ -820,15 +1111,16 @@ class GameSystem:
             
             for r in valid_rewards:
                 cur.execute("""
-                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(reward_id) DO UPDATE SET
-                        title = excluded.title, 
+                        title = excluded.title,
                         category = excluded.category,
-                        cost_gold = excluded.cost_gold, 
+                        cost_gold = excluded.cost_gold,
                         icon_key = excluded.icon_key,
-                        description = excluded.description
-                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc))
+                        description = excluded.description,
+                        target = excluded.target
+                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc, r.target))
 
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
@@ -868,13 +1160,16 @@ class GameSystem:
 
             rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
             for r in rewards:
-                r['icon'] = r['icon_key']
-                r['cost'] = r['cost_gold']
+                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold
+                # の別名)を廃止し、DBの実カラム名に一本化する。desc は
+                # description の同期用レガシー列(sync_strict.py参照)であり、
+                # このビュー応答では description のみを正としてdesc自体を落とす。
+                r.pop('desc', None)
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
             try:
-                now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+                now_jst = datetime.datetime.now(JST)
                 one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
             except Exception as jst_err:
                 # 万が一のタイムゾーンエラーに対する防御型フォールバック（Safety Guard）

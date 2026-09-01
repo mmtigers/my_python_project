@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core.logger import setup_logging
 from core.database import save_log_generic
-from core.utils import get_now_iso
+from core.utils import get_now_iso, retry_with_backoff
 from services.notification_service import send_push
 
 # ロガー設定
@@ -25,6 +25,12 @@ class NasMonitor:
     def __init__(self) -> None:
         self.ip: str = getattr(config, "NAS_IP", "192.168.1.20")
         self.mount_point: str = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
+        # NAS_PROJECT_ROOT は mount_point 配下のアプリ専用ディレクトリ(home_system)。
+        # ASSETS_DIR 等はNAS未マウント時にフォールバックパスへ動的に切り替わるため、
+        # 同期先には(現在値に依存しない)固定のNAS_PROJECT_ROOTを使う。
+        self.nas_project_root: str = getattr(
+            config, "NAS_PROJECT_ROOT", os.path.join(self.mount_point, "home_system")
+        )
         self.fallback_dir: str = getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")
         self.timeout: int = getattr(config, "NAS_CHECK_TIMEOUT", 5)
         self.write_check_retries: int = getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)
@@ -111,58 +117,76 @@ class NasMonitor:
             "    f.write('health_check')\n"
             "os.remove(path)\n"
         )
-        for attempt in range(self.write_check_retries):
+
+        def _attempt() -> None:
             test_file = os.path.join(self.mount_point, self._write_test_filename())
-            try:
-                subprocess.run(
-                    [sys.executable, "-c", script, test_file],
-                    timeout=self.timeout,
-                    check=True,
-                    capture_output=True,
-                )
-                return True
-            except subprocess.TimeoutExpired:
-                if attempt < self.write_check_retries - 1:
-                    wait_time = 2 ** attempt
-                    logger.warning(
-                        f"⚠️ [Attempt {attempt + 1}/{self.write_check_retries}] "
-                        f"Write permission check timed out after {self.timeout}s "
-                        f"(NAS mount possibly still waking up). Retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
-                # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
-                # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
-                # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
-                diag_ping_ok = self.check_ping()
-                diag_mount_ok = self.check_mount() if diag_ping_ok else False
-                logger.error(
-                    f"Write permission check timed out after {self.timeout}s "
-                    f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
-                    f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
-                )
-                return False
-            except (subprocess.CalledProcessError, OSError) as e:
-                logger.error(f"Write permission check error: {e}")
-                return False
-        return False
+            subprocess.run(
+                [sys.executable, "-c", script, test_file],
+                timeout=self.timeout,
+                check=True,
+                capture_output=True,
+            )
+
+        def _on_retry(attempt: int, delay: float, e: BaseException) -> None:
+            logger.warning(
+                f"⚠️ [Attempt {attempt + 1}/{self.write_check_retries}] "
+                f"Write permission check timed out after {self.timeout}s "
+                f"(NAS mount possibly still waking up). Retrying in {delay:.0f}s..."
+            )
+
+        try:
+            # write_check_retries は「総試行回数」を表す既存の意味を維持するため、
+            # retry_with_backoffの max_retries(初回を含まない追加リトライ回数)には
+            # -1 したものを渡す。Exponential Backoff (1s, 2s, 4s, ...) は上限なし
+            # (config.py側と異なり、CIFSストール解消までどれだけでも待たせたいため)。
+            retry_with_backoff(
+                _attempt,
+                max_retries=self.write_check_retries - 1,
+                retryable_exceptions=(subprocess.TimeoutExpired,),
+                base_delay=1.0,
+                on_retry=_on_retry,
+            )
+            return True
+        except subprocess.TimeoutExpired:
+            # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
+            # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
+            # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
+            # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
+            diag_ping_ok = self.check_ping()
+            diag_mount_ok = self.check_mount() if diag_ping_ok else False
+            logger.error(
+                f"Write permission check timed out after {self.timeout}s "
+                f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
+                f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
+            )
+            return False
+        except (subprocess.CalledProcessError, OSError) as e:
+            logger.error(f"Write permission check error: {e}")
+            return False
 
     def sync_fallback_data(self) -> None:
-        """フォールバックディレクトリのデータをNASへ安全に同期・移動する"""
-        if not os.path.exists(self.fallback_dir) or not os.listdir(self.fallback_dir):
+        """フォールバックディレクトリの assets データをNASへ安全に同期・移動する。
+
+        FALLBACK_ROOT直下には last_memory_alert.txt / last_tv_lock.txt など、
+        他モニターがローカル専用の状態管理に使うファイルも同居している。
+        同期対象は本来NAS(ASSETS_DIR)に属するデータである assets サブディレクトリに限定し、
+        それら無関係な状態ファイルを巻き込んで移動・削除しないようにする。
+        """
+        fallback_assets_dir = os.path.join(self.fallback_dir, "assets")
+        if not os.path.exists(fallback_assets_dir) or not os.listdir(fallback_assets_dir):
             logger.debug("フォールバックディレクトリに同期対象のデータはありません。")
             return
 
-        logger.info(f"Starting fallback data sync from {self.fallback_dir} to {self.mount_point}")
-        
+        nas_assets_dir = os.path.join(self.nas_project_root, "assets")
+        logger.info(f"Starting fallback data sync from {fallback_assets_dir} to {nas_assets_dir}")
+
         # rsyncを使用して安全に転送。--remove-source-filesで転送完了したファイルのみ元から削除
         cmd = [
-            "rsync", "-av", "--remove-source-files", 
-            f"{self.fallback_dir}/", 
-            f"{self.mount_point}/"
+            "rsync", "-av", "--remove-source-files",
+            f"{fallback_assets_dir}/",
+            f"{nas_assets_dir}/"
         ]
-        
+
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0:
@@ -170,13 +194,12 @@ class NasMonitor:
 
                 # 通知（復旧および同期完了）
                 send_push(
-                    config.LINE_USER_ID,
-                    [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {self.mount_point}"}],
+                    [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {nas_assets_dir}"}],
                     target="discord", channel="report"
                 )
 
                 # rsync --remove-source-files は空ディレクトリを残すため、クリーンアップ
-                self._cleanup_empty_dirs(self.fallback_dir)
+                self._cleanup_empty_dirs(fallback_assets_dir)
             else:
                 logger.error(f"Sync failed with rsync error: {res.stderr}")
         except subprocess.TimeoutExpired:
@@ -208,8 +231,15 @@ class NasMonitor:
             logger.error(f"Disk usage check error: {e}")
             return None
 
-    def cleanup_old_files(self, directory: str, retention_days: int, extensions: Tuple[str, ...]) -> Dict[str, Any]:
-        """指定ディレクトリ配下を再帰的に走査し、保持日数を超えた対象拡張子のファイルを削除する。"""
+    def cleanup_old_files(
+        self, directory: str, retention_days: int, extensions: Optional[Tuple[str, ...]]
+    ) -> Dict[str, Any]:
+        """指定ディレクトリ配下を再帰的に走査し、保持日数を超えたファイルを削除する。
+
+        extensions が None の場合は拡張子で絞り込まず、ディレクトリ内の全ファイルを対象とする
+        (ディレクトリ自体がバックアップ専用など、単一種類の成果物しか置かれないことが
+        保証されている場合に使う。Issue #191)。
+        """
         result: Dict[str, Any] = {"deleted_count": 0, "freed_gb": 0.0}
 
         if not directory or not os.path.isdir(directory):
@@ -220,7 +250,7 @@ class NasMonitor:
 
         for root, _dirs, files in os.walk(directory):
             for name in files:
-                if not name.lower().endswith(extensions):
+                if extensions is not None and not name.lower().endswith(extensions):
                     continue
                 path = os.path.join(root, name)
                 try:
@@ -242,10 +272,24 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
-            ("タイムラプス動画", os.path.join(getattr(config, "ASSETS_DIR", ""), "timelapse"),
+            # タイムラプス動画の生成先(monitors/smart_timelapse_generator.pyの
+            # setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
+            # config.BASE_DIR/assets/timelapse であり、以前はここがNAS側の
+            # パスを指していたため、誰も書かないディレクトリを掃除し、誰も
+            # 掃除しないローカルディレクトリにファイルが無限蓄積していた
+            # (Issue #171)。生成先と同じローカルパスに修正する。
+            ("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4", ".jpg")),
+            # DB_BACKUPS_DIR は services/backup_service.py の Phase 2 (DBダンプ)と
+            # _backup_config_files (config.BACKUP_FILES 中のDB以外のファイル、例:
+            # config.py/.env/devices.json) の両方の出力専用ディレクトリであり、
+            # 拡張子は .db に限らない (.env はコピー時に拡張子なしのファイル名になる)。
+            # 以前は .db のみを削除対象としていたため、設定ファイルのバックアップ
+            # コピーは一切削除されず無限に蓄積していた(Issue #191)。このディレクトリは
+            # バックアップ専用でバックアップ以外のファイルが置かれることはないため、
+            # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
-             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), (".db",)),
+             getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None),
         ]
 
         summary_lines = []
@@ -262,7 +306,6 @@ class NasMonitor:
 
         if summary_lines:
             send_push(
-                config.LINE_USER_ID,
                 [{"type": "text", "text": "🗑️ **古いファイルの自動削除**\n" + "\n".join(summary_lines)}],
                 target="discord", channel="report"
             )
@@ -283,6 +326,29 @@ class NasMonitor:
             )
         )
 
+        # ダッシュボードのNASステータスカード(views/dashboard/summary.py)・
+        # NAS状態パネル(views/dashboard/log_tab.py)は device_records ではなく
+        # config.SQLITE_TABLE_NAS(=nas_records)を読むが、以前はこのテーブルへ
+        # INSERTする本番コードが存在せず、常に「データなし」表示のままだった
+        # (Issue #168)。nas_records のスキーマ(status_ping/status_mount は
+        # 'OK'/'NG' の文字列)に合わせて書き込む。
+        save_log_generic(
+            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),
+            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",
+             "total_gb", "used_gb", "free_gb", "percent"],
+            (
+                get_now_iso(),
+                self.device_name,
+                self.ip,
+                "OK" if ping_ok else "NG",
+                "OK" if mount_ok else "NG",
+                usage['total_gb'] if usage else None,
+                usage['used_gb'] if usage else None,
+                usage['free_gb'] if usage else None,
+                percent
+            )
+        )
+
     def run(self) -> None:
         """NASの状態監視、復旧検知、およびディスク使用量の確認を実行する。"""
         
@@ -298,7 +364,6 @@ class NasMonitor:
         if not is_currently_healthy and was_healthy:
             logger.error(f"❌ NAS connection lost or write failed. Falling back to local storage. (Ping: {ping_ok}, Mount: {mount_ok}, Write: {write_ok})")
             send_push(
-                config.LINE_USER_ID, 
                 [{"type": "text", "text": f"🚨 【NAS障害】\nNASへのアクセスが失われました。\nローカルフォールバックへ移行します。\nIP: {self.ip}"}],
                 target="discord", channel="error"
             )
@@ -350,7 +415,6 @@ class NasMonitor:
         
         channel = "error" if is_full else "report"
         send_push(
-            config.LINE_USER_ID, 
             [{"type": "text", "text": msg}],
             target="discord", channel=channel
         )

@@ -12,6 +12,7 @@ from unittest.mock import patch
 # プロジェクトルートにパスを通す
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import common
 import config
 from monitors.nas_monitor import NasMonitor
 
@@ -104,7 +105,11 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         return path
 
     def test_old_timelapse_outputs_are_cleaned_up(self):
-        timelapse_dir = os.path.join(self.tmp_dir, "timelapse")
+        """タイムラプス動画の実際の生成先(monitors/smart_timelapse_generator.pyの
+        setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
+        config.BASE_DIR/assets/timelapse であるため、リテンション対象も
+        同じローカルパスを見る必要がある(Issue #171)。"""
+        timelapse_dir = os.path.join(self.tmp_dir, "assets", "timelapse")
         os.makedirs(timelapse_dir, exist_ok=True)
         old_summary = self._make_file(
             os.path.join(timelapse_dir, "20250101_summary.mp4"), age_days=40
@@ -116,7 +121,7 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
             os.path.join(timelapse_dir, "20260101_summary.mp4"), age_days=5
         )
 
-        with patch.object(config, "ASSETS_DIR", self.tmp_dir), \
+        with patch.object(config, "BASE_DIR", self.tmp_dir), \
              patch.object(self.monitor, "cleanup_old_files", wraps=self.monitor.cleanup_old_files) as spy, \
              patch("monitors.nas_monitor.send_push"):
             self.monitor.run_retention_cleanup()
@@ -128,6 +133,107 @@ class TestNasMonitorRetentionTargets(unittest.TestCase):
         self.assertFalse(os.path.exists(old_summary))
         self.assertFalse(os.path.exists(old_part))
         self.assertTrue(os.path.exists(new_summary))
+
+    def test_old_config_file_backups_are_cleaned_up(self):
+        """Issue #191の回帰テスト: services/backup_service.py の _backup_config_files が
+        config.BACKUP_FILES 中のDB以外のファイル(config.py, .env, devices.json)を
+        DB_BACKUPS_DIR へ拡張子付き/なしでコピーするが、以前のリテンションは
+        DBバックアップ対象の拡張子を ".db" のみに限定していたため、設定ファイルの
+        バックアップコピーは一切削除されず無限蓄積していた。"""
+        db_backups_dir = os.path.join(self.tmp_dir, "db_backups")
+        os.makedirs(db_backups_dir, exist_ok=True)
+        old_db = self._make_file(os.path.join(db_backups_dir, "home_system_20250101_000000.db"), age_days=40)
+        old_config = self._make_file(os.path.join(db_backups_dir, "config_20250101_000000.py"), age_days=40)
+        old_devices = self._make_file(os.path.join(db_backups_dir, "devices_20250101_000000.json"), age_days=40)
+        # Path(".env").stem == ".env", Path(".env").suffix == "" のため
+        # 実際のコピー結果は拡張子なしのファイル名になる
+        old_env = self._make_file(os.path.join(db_backups_dir, ".env_20250101_000000"), age_days=40)
+        new_db = self._make_file(os.path.join(db_backups_dir, "home_system_20260101_000000.db"), age_days=5)
+
+        with patch.object(config, "DB_BACKUPS_DIR", db_backups_dir), \
+             patch("monitors.nas_monitor.send_push"):
+            self.monitor.run_retention_cleanup()
+
+        self.assertFalse(os.path.exists(old_db))
+        self.assertFalse(os.path.exists(old_config))
+        self.assertFalse(os.path.exists(old_devices))
+        self.assertFalse(os.path.exists(old_env))
+        self.assertTrue(os.path.exists(new_db))
+
+
+class TestNasMonitorFallbackSync(unittest.TestCase):
+    """Issue #162 の回帰テスト: sync_fallback_dataの同期先がmount_point直下になっており、
+    本来の NAS_PROJECT_ROOT/assets ではなく誤った場所へ移動されていた不具合。
+    また、同期対象を assets サブディレクトリに限定せず fallback_dir 全体を対象と
+    していたため、last_memory_alert.txt 等の無関係なローカル状態ファイルまで
+    巻き込んで移動・削除されていた不具合。"""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.mount_point = os.path.join(self.tmp_dir, "mnt_nas")
+        self.fallback_dir = os.path.join(self.tmp_dir, "temp_fallback")
+        self.nas_project_root = os.path.join(self.mount_point, "home_system")
+        os.makedirs(self.mount_point, exist_ok=True)
+        os.makedirs(self.fallback_dir, exist_ok=True)
+
+        with patch.object(config, "NAS_MOUNT_POINT", self.mount_point), \
+             patch.object(config, "FALLBACK_ROOT", self.fallback_dir), \
+             patch.object(config, "NAS_PROJECT_ROOT", self.nas_project_root):
+            self.monitor = NasMonitor()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def test_sync_targets_nas_project_root_assets_not_mount_root(self):
+        assets_dir = os.path.join(self.fallback_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        with open(os.path.join(assets_dir, "snapshot.jpg"), "w") as f:
+            f.write("dummy")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            self.monitor.sync_fallback_data()
+
+        cmd = mock_run.call_args.args[0]
+        src, dst = cmd[-2], cmd[-1]
+        expected_dst = os.path.join(self.nas_project_root, "assets") + "/"
+        self.assertEqual(src, assets_dir + "/")
+        self.assertEqual(dst, expected_dst)
+
+    def test_sync_does_not_touch_unrelated_fallback_state_files(self):
+        assets_dir = os.path.join(self.fallback_dir, "assets")
+        os.makedirs(assets_dir, exist_ok=True)
+        with open(os.path.join(assets_dir, "snapshot.jpg"), "w") as f:
+            f.write("dummy")
+
+        unrelated_state_file = os.path.join(self.fallback_dir, "last_memory_alert.txt")
+        with open(unrelated_state_file, "w") as f:
+            f.write("2026-08-30T00:00:00")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            self.monitor.sync_fallback_data()
+
+        # rsyncの対象パスが assets サブディレクトリに限定され、
+        # fallback_dir直下の無関係な状態ファイルを含んでいないこと
+        cmd = mock_run.call_args.args[0]
+        src = cmd[-2]
+        self.assertEqual(src, assets_dir + "/")
+        self.assertTrue(os.path.exists(unrelated_state_file), "無関係な状態ファイルは移動・削除されないこと")
+
+    def test_sync_skipped_when_only_unrelated_state_files_exist(self):
+        """assetsサブディレクトリが存在しない(=同期すべきNASデータがない)場合は、
+        fallback_dir直下の状態ファイルの有無に関わらず同期処理自体を行わないこと。"""
+        with open(os.path.join(self.fallback_dir, "last_tv_lock.txt"), "w") as f:
+            f.write("2026-08-30")
+
+        with patch("monitors.nas_monitor.subprocess.run") as mock_run, \
+             patch("monitors.nas_monitor.send_push"):
+            self.monitor.sync_fallback_data()
+
+        mock_run.assert_not_called()
 
 
 class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
@@ -283,6 +389,65 @@ class TestNasMonitorWriteTestFilenameUniqueness(unittest.TestCase):
             self.assertEqual(len(set(used_paths)), len(used_paths))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+class TestNasMonitorSaveToDbWritesNasRecords:
+    """Issue #168の回帰テスト: save_to_dbは以前device_recordsにしか書き込んで
+    おらず、ダッシュボードのNASステータスカード(views/dashboard/summary.py)・
+    NAS状態パネル(views/dashboard/log_tab.py)が読むconfig.SQLITE_TABLE_NAS
+    (=nas_records)には何も書き込まれず、常に「データなし」表示のままだった。"""
+
+    def test_healthy_state_is_recorded_in_nas_records(self, isolated_db):
+        monitor = NasMonitor()
+        usage = {"total_gb": 100.0, "used_gb": 40.0, "free_gb": 60.0, "percent": 40.0}
+
+        monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None, "nas_recordsに何も書き込まれていない"
+        # views/dashboard/summary.py・log_tab.pyはstatus_ping/status_mountを
+        # 文字列 'OK' と直接比較するため、真偽値ではなくこの文字列である必要がある。
+        assert row["status_ping"] == "OK"
+        assert row["status_mount"] == "OK"
+        assert row["total_gb"] == 100.0
+        assert row["used_gb"] == 40.0
+        assert row["free_gb"] == 60.0
+        assert row["percent"] == 40.0
+
+    def test_unhealthy_state_is_recorded_as_ng(self, isolated_db):
+        monitor = NasMonitor()
+
+        monitor.save_to_db(ping_ok=False, mount_ok=False, usage=None)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None
+        assert row["status_ping"] == "NG"
+        assert row["status_mount"] == "NG"
+
+    def test_device_records_write_is_unaffected(self, isolated_db):
+        """既存のdevice_records書き込み(他のNAS使用率グラフ等が依存する可能性が
+        あるため)は、nas_records書き込みの追加によって壊れていないこと。"""
+        monitor = NasMonitor()
+        usage = {"total_gb": 100.0, "used_gb": 40.0, "free_gb": 60.0, "percent": 40.0}
+
+        monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT * FROM device_records WHERE device_name='NAS_Monitor' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+
+        assert row is not None
+        assert row["contact_state"] == "mounted"
+        assert row["nas_usage_percent"] == 40.0
 
 
 if __name__ == "__main__":

@@ -64,10 +64,10 @@ class TestAllGenki:
     ):
         """H-7: 保存が失敗した場合、成功の「✅ 記録しました」ではなく
         失敗を知らせる返信をすること。"""
-        async def _failing_save_log_async(*args, **kwargs):
+        async def _failing_save_logs_batch_async(*args, **kwargs):
             return False
 
-        monkeypatch.setattr(line_logic, "save_log_async", _failing_save_log_async)
+        monkeypatch.setattr(line_logic, "save_logs_batch_async", _failing_save_logs_batch_async)
         event = fake_postback_event("action=all_genki")
 
         line_logic.handle_postback(event, mock_line_api)
@@ -75,6 +75,53 @@ class TestAllGenki:
         texts = _texts_from_reply(mock_line_api)
         assert any("失敗" in t for t in texts)
         assert not any("記録しました" in t for t in texts)
+
+    def test_partial_failure_rolls_back_so_retry_does_not_duplicate(
+        self, isolated_db, mock_line_api, monkeypatch
+    ):
+        """Issue #231の回帰テスト: TARGET_MEMBERSのうち一部だけ保存に失敗する
+        場合でも、save_logs_batch_asyncが単一トランザクションで実行するため
+        既に成功していたメンバー分も含めて全件ロールバックされる
+        (all-or-nothing)。以前はsave_log_asyncをメンバーごとに独立に呼んで
+        いたため、この状況で成功済み分だけがコミット済みのまま残り、失敗
+        通知を受けて再試行すると重複して保存されていた。"""
+        from core import database as db_module
+
+        real_batch_generic = db_module.save_logs_batch_generic
+
+        def _batch_generic_with_broken_second_row(table, columns_list, values_list):
+            # 1件目は正常なまま、2件目だけ列数を不正にしてINSERTを失敗させる
+            # (実際のDBロック競合等で一部だけ失敗する状況を模す)。
+            broken_values = list(values_list)
+            broken_values[1] = broken_values[1][:2]
+            return real_batch_generic(table, columns_list, broken_values)
+
+        monkeypatch.setattr(db_module, "save_logs_batch_generic", _batch_generic_with_broken_second_row)
+
+        line_logic.handle_postback(fake_postback_event("action=all_genki"), mock_line_api)
+
+        texts = _texts_from_reply(mock_line_api)
+        assert any("失敗" in t for t in texts)
+
+        with common.get_db_cursor() as cur:
+            count = cur.execute(
+                f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
+            ).fetchone()["c"]
+        assert count == 0, "一部失敗時に成功済み分がコミットされたまま残っている(重複の温床)"
+
+        # 案内どおりユーザーが再試行すると、今度は(修正が入り)正常に全員分が保存され、
+        # 失敗時に残った分との重複も一切発生しないこと。
+        monkeypatch.setattr(db_module, "save_logs_batch_generic", real_batch_generic)
+        line_logic.handle_postback(fake_postback_event("action=all_genki"), mock_line_api)
+
+        with common.get_db_cursor() as cur:
+            rows = cur.execute(
+                f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD} WHERE user_id='U1'"
+            ).fetchall()
+        saved_names = [row["child_name"] for row in rows]
+        assert sorted(saved_names) == sorted(config.FAMILY_SETTINGS["members"]), (
+            "再試行後の保存件数がメンバー数と一致しない(重複または欠落)"
+        )
 
 
 class TestShowHealthInput:

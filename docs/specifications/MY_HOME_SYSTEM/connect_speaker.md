@@ -6,6 +6,7 @@
 | 言語 | Bash (Shell Script) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a4fb40f` |
 
 ## 関連ドキュメント
 
@@ -199,7 +200,7 @@ graph TD
 * 通知メッセージのエスケープ処理に `python3` のワンライナーを使用しているため、実行環境に Python3 がインストールされていない場合、構文エラーが発生し通知内容が破損・未送信になる可能性がある。
 * `send_discord` 関数内の `curl` コマンドで標準出力・標準エラー出力を `/dev/null` にリダイレクトしているため、ネットワークエラーやDiscord側のAPI仕様変更（400番台エラー等）による送信失敗時にエラーログが一切残らない。
 * リトライ時の接続待機時間が `sleep 5` と固定されているため、ハードウェアやBluetoothスタックの応答遅延によっては、接続が完了しているにもかかわらずタイムアウト判定を受けるリスクがある。
-* **修正済み: JSONエスケープの死にコード化**: 以前は`send_discord`関数内で`escaped_message`を`python3`経由で正しく生成していたにもかかわらず、`curl`に渡すJSONペイロード側では未エスケープの`$message`をそのまま埋め込んでいたため、エスケープ処理自体が死にコードになっており、メッセージに二重引用符や改行・バックスラッシュが含まれるとJSONペイロードが壊れ通知が失敗し得た。現在はペイロード生成が`$escaped_message`参照に修正されている(46行目)。
+* **[修正済み] JSONエスケープの死にコード化**: 以前は`send_discord`関数内で`escaped_message`を`python3`経由で正しく生成していたにもかかわらず、`curl`に渡すJSONペイロード側では未エスケープの`$message`をそのまま埋め込んでいたため、エスケープ処理自体が死にコードになっており、メッセージに二重引用符や改行・バックスラッシュが含まれるとJSONペイロードが壊れ通知が失敗し得た。現在はペイロード生成が`$escaped_message`参照に修正されている(46行目)。
 
 ## 9. 不明事項一覧
 
@@ -213,7 +214,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| スクリプトの実行契機（トリガー） | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認したところ、同スクリプトは11行目で`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/connect_speaker.sh"`を定義し、35〜42行目でスピーカー切断検知時（`pactl list sinks short`にMACアドレスが含まれない場合）に`"$CONNECT_SCRIPT" >> "$LOGFILE" 2>&1`として`connect_speaker.sh`を呼び出していることを確認した。すなわち`keep_alive_anker.sh`が`connect_speaker.sh`の実行元（呼び出し元）の一つであることが直接ソースから判明した。ただし`keep_alive_anker.sh`自体も14行目のコメント「# cron実行時でもPipeWireソケットを見つけられるようにする」からcron等の定期実行を前提とした設計であることは読み取れるが、その`crontab`設定自体・実行間隔はリポジトリ内に見つからず（`keep_alive_anker.md`の不明事項一覧でも同様に未解決とされている）、最終的な実行契機（定期実行のスケジュール）自体は依然として不明である。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11, 14, 35〜42`（参考: [keep_alive_anker.md](./keep_alive_anker.md)の不明事項一覧） |
+| スクリプトの実行契機（トリガー） | `MY_HOME_SYSTEM/tools/keep_alive_anker.sh`を直接確認したところ、同スクリプトは11行目で`CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"`を定義し、35〜42行目でスピーカー切断検知時（`pactl list sinks short`にMACアドレスが含まれない場合）に`"$CONNECT_SCRIPT" >> "$LOGFILE" 2>&1`として`connect_speaker.sh`を呼び出していることを確認した。すなわち`keep_alive_anker.sh`が`connect_speaker.sh`の実行元（呼び出し元）の一つであることが直接ソースから判明した。ただし`keep_alive_anker.sh`自体も14行目のコメント「# cron実行時でもPipeWireソケットを見つけられるようにする」からcron等の定期実行を前提とした設計であることは読み取れるが、その`crontab`設定自体・実行間隔はリポジトリ内に見つからず（`keep_alive_anker.md`の不明事項一覧でも同様に未解決とされている）、最終的な実行契機（定期実行のスケジュール）自体は依然として不明である。 | 直接ソース確認: `MY_HOME_SYSTEM/tools/keep_alive_anker.sh:11, 14, 35〜42`（参考: [keep_alive_anker.md](./keep_alive_anker.md)の不明事項一覧） |
 | Webhook URLの実際の設定内容と使い分け | 実際のURL値は`.env`が存在しないため依然不明だが、「使い分けの意図」についてはリポジトリ内の直接ソースから判明した。`MY_HOME_SYSTEM/config.py:193〜198`は`DISCORD_WEBHOOK_ERROR`（194行目）、`DISCORD_WEBHOOK_REPORT`（196行目）、`DISCORD_WEBHOOK_NOTIFY`（197行目）、`DISCORD_WEBHOOK_URL`（198行目、`DISCORD_WEBHOOK_NOTIFY`が未設定なら`DISCORD_WEBHOOK_URL`環境変数にフォールバック）という4種類のDiscord Webhook用環境変数を個別に定義しており、これらはシステム全体で「エラー通知チャンネル」「定期レポートチャンネル」「通常通知チャンネル」を使い分けるためのものであることが`MY_HOME_SYSTEM/services/notification_service.py:32〜37`の`_send_discord_webhook`関数（`channel`引数が`"error"`なら`DISCORD_WEBHOOK_ERROR`、`"report"`なら`DISCORD_WEBHOOK_REPORT`、それ以外は`DISCORD_WEBHOOK_NOTIFY`または`DISCORD_WEBHOOK_URL`を選択）から確認できる。`connect_speaker.sh`自身も22行目で`WEBHOOK_URL="${DISCORD_WEBHOOK_ERROR:-$DISCORD_WEBHOOK_NOTIFY}"`としており、まず`DISCORD_WEBHOOK_ERROR`（エラー通知チャンネル）を優先し、未設定であれば`DISCORD_WEBHOOK_NOTIFY`（通常通知チャンネル）にフォールバックするという使い分けであることが直接確認できた。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:193〜198`, `MY_HOME_SYSTEM/services/notification_service.py:32〜37`, `MY_HOME_SYSTEM/tools/connect_speaker.sh:22` |
 
 ## 10. 自己検証結果

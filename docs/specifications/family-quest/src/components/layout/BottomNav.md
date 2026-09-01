@@ -13,9 +13,10 @@
 
 ## 2. ファイルの概要
 
-画面下部に固定表示されるフッターナビゲーションを提供するコンポーネントである。「クエスト」「ごほうび」「もちもの」「記録」の4タブで構成され、そのうち先頭3タブ（クエスト/ごほうび/もちもの）はラベルを非表示にしてアイコンのみで表示し、「記録」タブのみラベルも表示する。ファイル内のコメントによれば、これは以前存在した「上部stickyタブ＋ヘッダーの記録ボタン」という二重のナビゲーション構造を廃止し、フッター1本の4タブ構成に統一した実装であるとされている。
+画面下部に固定表示されるフッターナビゲーションを提供するコンポーネントである。「クエスト」「ごほうび」「もちもの」「記録」の4タブで構成され、全4タブに`iconOnly: true`が指定されているため、いずれのタブもラベルを非表示にしてアイコンのみで表示する。ファイル内のコメントによれば、これは以前存在した「上部stickyタブ＋ヘッダーの記録ボタン」という二重のナビゲーション構造を廃止し、フッター1本の4タブ構成に統一した実装であるとされている。なお、11〜12行目の別コメントは「クエスト/ごほうび/もちものはアイコンのみ表示(iconOnly)にする」と述べ「記録」タブを対象から除外しているが、実際の`TABS`定数（17行目）では「記録」タブにも`iconOnly: true`が指定されており、コメントと実装が一致していない。
 
-* 根拠: `const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeColor: string; iconOnly?: boolean }[] = [\n    { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400', iconOnly: true },\n    { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400', iconOnly: true },\n    { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400', iconOnly: true },\n    { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400' },\n];` (行番号: 13〜18)
+* 根拠: `const TABS: { key: BottomNavTab; label: string; icon: React.ElementType; activeColor: string; iconOnly?: boolean }[] = [\n    { key: 'quest', label: 'クエスト', icon: Sword, activeColor: 'text-blue-400', iconOnly: true },\n    { key: 'shop', label: 'ごほうび', icon: ShoppingBag, activeColor: 'text-orange-400', iconOnly: true },\n    { key: 'inventory', label: 'もちもの', icon: Package, activeColor: 'text-green-400', iconOnly: true },\n    { key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400', iconOnly: true },\n];` (行番号: 13〜18)
+* 根拠: `// ★バグ修正: ごほうび画面へのもちもの統合をやめ、「クエスト/ごほうび/もちもの/記録」の\n// 4タブ構成に戻す。クエスト/ごほうび/もちものはアイコンのみ表示(iconOnly)にする。` (行番号: 11〜12)
 * 根拠: `// 角度⑦: 縦画面での「上部stickyタブ(クエスト/ごほうび)」+「ヘッダーの記録ボタン」という\n// 二重のナビゲーション構造を廃止し、フッター1本の4タブに統一する。` (行番号: 20〜21)
 * 根拠: `{!tab.iconOnly && <span className="text-[10px] font-bold">{tab.label}</span>}` (行番号: 39)
 
@@ -147,8 +148,10 @@ graph TD
 
 * タブの並び順・表示内容（ラベルの有無を含む）は`TABS`定数の配列順にそのまま依存しており、タブを追加・削除・並び替える場合はこの配列を編集するだけでよい設計になっている。
 * 根拠: `const TABS: { ... }[] = [` (行番号: 13〜18)
-* 「クエスト」「ごほうび」「もちもの」の3タブは`iconOnly: true`によりラベルが非表示だが、「記録」タブのみ`iconOnly`が指定されておらず（`undefined`）ラベルが表示される。タブ間で表示仕様が統一されていない点に注意が必要。
-* 根拠: `{ key: 'quest', ... iconOnly: true },` (行番号: 14), `{ key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400' },` (行番号: 17)
+* 「クエスト」「ごほうび」「もちもの」「記録」の4タブすべてに`iconOnly: true`が指定されており、いずれのタブもラベル`<span>`が描画されない（`aria-label`属性にはラベル文字列が設定されるため、視覚的なラベル表示は無くともアクセシビリティ上の名称は維持される）。
+* 根拠: `{ key: 'quest', ... iconOnly: true },`〜`{ key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400', iconOnly: true },` (行番号: 14〜17), `aria-label={tab.label}` (行番号: 35)
+* 11〜12行目のコメント「クエスト/ごほうび/もちものはアイコンのみ表示(iconOnly)にする」は「記録」タブを対象外として述べているが、実際の`TABS`定数（17行目）では「記録」タブにも`iconOnly: true`が指定されており、コメントの記述と実装が一致していない点に注意が必要。
+* 根拠: `// 4タブ構成に戻す。クエスト/ごほうび/もちものはアイコンのみ表示(iconOnly)にする。` (行番号: 12), `{ key: 'familyLog', label: '記録', icon: Scroll, activeColor: 'text-purple-400', iconOnly: true },` (行番号: 17)
 * `nav`要素には`env(safe-area-inset-bottom)`によるセーフエリア対応のpaddingが指定されており、ノッチ・ホームインジケーター付きデバイスを想定した実装になっている。
 * 根拠: `style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}` (行番号: 26)
 * コメントによれば、以前は「上部stickyタブ」と「ヘッダーの記録ボタン」という別のナビゲーション構造が存在していたとされており、本コンポーネントへの統一に伴い、それらの旧実装が別ファイル（ヘッダー等）に残存していないか確認が必要。

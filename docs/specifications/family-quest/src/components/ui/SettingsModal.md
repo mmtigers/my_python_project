@@ -15,15 +15,16 @@
 * [../../context/settingsShared.md](../../context/settingsShared.md) - `THEME_COLORS`定数の実装元
 * [../../context/SettingsContext.md](../../context/SettingsContext.md) - `useSettings`が参照するContextのProvider本体
 * [../../types/index.md](../../types/index.md) - `User`型定義の提供元
+* [../../lib/utils.md](../../lib/utils.md) - `isSameOriginAvatarPath`の実装元
 * [../../../App.md](../../../App.md) - 本コンポーネントを`lazy`で読み込み呼び出している側
 
 ## 2. ファイルの概要
 
 表示密度（ゆったり/コンパクト）、非識字モード（アイコン主体表示）の対象ユーザー、ユーザーごとのパネルアクセントカラーをまとめて設定するモーダル画面である。`useSettings`フックから取得した設定値と更新関数を用い、ローカルなReact状態は持たずにContext経由の状態のみを操作する。ファイル冒頭のコメントによれば、以前は「アイコン主体表示」がコード上に固定されており画面から変更できなかった機能を、本コンポーネントの追加によって設定可能にしたという経緯がある。
 
-* 根拠: `// 表示密度・非識字モード対象ユーザー・ユーザーごとのテーマカラーをまとめて設定する画面。\n// 以前は「アイコン主体表示」がコード上に固定されているだけで、誰も画面から変更できなかった。` (行番号: 15〜16)
-* 根拠: `const { density, setDensity, iconFirstUserIds, toggleIconFirstUser, userThemeColors, setUserThemeColor } = useSettings();` (行番号: 18)
-* 根拠: ローカルの`useState`宣言が本ファイル中に存在しない (行番号: 1〜101)
+* 根拠: `// 表示密度・非識字モード対象ユーザー・ユーザーごとのテーマカラーをまとめて設定する画面。\n// 以前は「アイコン主体表示」がコード上に固定されているだけで、誰も画面から変更できなかった。` (行番号: 16〜17)
+* 根拠: `const { density, setDensity, iconFirstUserIds, toggleIconFirstUser, userThemeColors, setUserThemeColor } = useSettings();` (行番号: 19)
+* 根拠: ローカルの`useState`宣言が本ファイル中に存在しない (行番号: 1〜111)
 
 ## 3. 外部依存関係
 
@@ -38,16 +39,17 @@
 | THEME_COLORS | 定数 | 選択可能なテーマカラー一覧（キー・ラベル・クラス名）の取得元、色スウォッチの描画に使用 | 根拠: `import { THEME_COLORS } from '@/context/settingsShared';` (行番号: 5) |
 | User | 型 | `Props`の`users`配列の要素型 | 根拠: `import { User } from '@/types';` (行番号: 6) |
 | LayoutGrid, Rows3 | アイコンコンポーネント | 表示密度ボタン（コンパクト/ゆったり）のアイコン表示 | 根拠: `import { LayoutGrid, Rows3 } from 'lucide-react';` (行番号: 7) |
+| isSameOriginAvatarPath | 外部モジュール | `user.avatar`が自サーバーの画像パスか(絵文字等の非パス値ではないか)を判定するための型ガード関数 | 根拠: `import { isSameOriginAvatarPath } from '@/lib/utils';` (行番号: 8) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| Modal | `./Modal`の内部実装が本ファイルには存在せず、`isOpen`/`onClose`/`title`/`maxWidth`以外のprops仕様やESCキー・背景クリック時の挙動が不明 | 根拠: `<Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 21) |
-| Button | `./Button`の内部実装が本ファイルには存在せず、`variant`/`size`propsによる具体的なスタイル変化や音声再生等の副作用が不明 | 根拠: `<Button variant={density === 'comfortable' ? 'primary' : 'outline'} size="sm"` (行番号: 27〜28) |
+| Modal | `./Modal`の内部実装が本ファイルには存在せず、`isOpen`/`onClose`/`title`/`maxWidth`以外のprops仕様やESCキー・背景クリック時の挙動が不明 | 根拠: `<Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 22) |
+| Button | `./Button`の内部実装が本ファイルには存在せず、`variant`/`size`propsによる具体的なスタイル変化や音声再生等の副作用が不明 | 根拠: `<Button variant={density === 'comfortable' ? 'primary' : 'outline'} size="sm"` (行番号: 28〜29) |
 | useSettings | `setDensity`/`toggleIconFirstUser`/`setUserThemeColor`の内部実装（永続化タイミング・副作用）が本ファイルからは不明 | 根拠: `import { useSettings } from '@/context/useSettings';` (行番号: 4) |
-| THEME_COLORS | 定数の完全な内容（何色分あるか、`key`/`label`/`className`の全パターン）が本ファイルからは不明。`.map`で反復利用しているのみ | 根拠: `{THEME_COLORS.map(color => (` (行番号: 80) |
-| User | `@/types`で定義された`User`型の全プロパティが本ファイルからは不明。`user_id`, `name`, `icon`のみが実際に参照されている | 根拠: `import { User } from '@/types';` (行番号: 6), `user.user_id`, `user.name`, `user.icon` (行番号: 52, 55, 60〜65, 77〜78, 83〜85) |
+| THEME_COLORS | 定数の完全な内容（何色分あるか、`key`/`label`/`className`の全パターン）が本ファイルからは不明。`.map`で反復利用しているのみ | 根拠: `{THEME_COLORS.map(color => (` (行番号: 90) |
+| User | `@/types`で定義された`User`型の全プロパティが本ファイルからは不明。`user_id`, `name`, `avatar`のみが実際に参照されている | 根拠: `import { User } from '@/types';` (行番号: 6), `user.user_id`, `user.name`, `user.avatar` (行番号: 53, 56, 62〜71, 86〜87, 94〜95) |
 | lucide-react | `LayoutGrid`/`Rows3`アイコンの具体的な描画仕様は外部ライブラリの実装に依存し不明 | 根拠: `import { LayoutGrid, Rows3 } from 'lucide-react';` (行番号: 7) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -55,55 +57,56 @@
 ### `Props`
 
 * **役割**: `SettingsModal`が受け取るプロパティの型定義。モーダルの開閉状態(`isOpen`)、閉じる際のコールバック(`onClose`)、設定対象となるユーザー一覧(`users`)を受け取る。
-* 根拠: `interface Props {\n    isOpen: boolean;\n    onClose: () => void;\n    users: User[];\n}` (行番号: 9〜13)
+* 根拠: `interface Props {\n    isOpen: boolean;\n    onClose: () => void;\n    users: User[];\n}` (行番号: 10〜14)
 
 
 * **引数/リクエスト**: 該当なし（型定義のため）
-* 根拠: `interface Props {` (行番号: 9)
+* 根拠: `interface Props {` (行番号: 10)
 
 
 * **戻り値/レスポンス**: 該当なし（型定義のため）
-* 根拠: `interface Props {` (行番号: 9)
+* 根拠: `interface Props {` (行番号: 10)
 
 
 * **副作用**: なし
-* 根拠: `interface Props {` (行番号: 9〜13)
+* 根拠: `interface Props {` (行番号: 10〜14)
 
 
 * **エラーハンドリング**: なし
-* 根拠: `interface Props {` (行番号: 9〜13)
+* 根拠: `interface Props {` (行番号: 10〜14)
 
 
 
 ### `SettingsModal`
 
-* **役割**: `useSettings`から取得した設定値をもとに、`Modal`内に「表示密度」「非識字モード対象ユーザー」「ユーザーごとのテーマカラー」の3セクションを描画し、各UI操作（ボタン/チェックボックス/カラースウォッチのクリック）を対応する`useSettings`の更新関数に橋渡しする。
-* 根拠: `const SettingsModal: React.FC<Props> = ({ isOpen, onClose, users }) => {` (行番号: 17〜99)
+* **役割**: `useSettings`から取得した設定値をもとに、`Modal`内に「表示密度」「非識字モード対象ユーザー」「ユーザーごとのテーマカラー」の3セクションを描画し、各UI操作（ボタン/チェックボックス/カラースウォッチのクリック）を対応する`useSettings`の更新関数に橋渡しする。「非識字モード対象ユーザー」セクションの各行アイコンは、`isSameOriginAvatarPath(user.avatar)`が`true`（自サーバーの画像パス）なら`<img>`を、そうでなければ`user.avatar || '🙂'`をテキストとして描画する（Issue #118: 以前は存在しない`user.icon`を参照しており、`User`型に`icon`フィールド自体は存在するもののバックエンド(`quest_users`テーブル)には対応する列が無く常に`undefined`のため、全ユーザーが一律`'🙂'`固定表示になっていた）。
+* 根拠: `const SettingsModal: React.FC<Props> = ({ isOpen, onClose, users }) => {` (行番号: 18〜109)
+* 根拠: `{isSameOriginAvatarPath(user.avatar) ? ( <img ... /> ) : ( <span className="text-xl">{user.avatar || '🙂'}</span> )}` (行番号: 70〜74)
 
 
 * **引数/リクエスト**: `Props`型（`{ isOpen: boolean; onClose: () => void; users: User[] }`）
-* 根拠: `({ isOpen, onClose, users })` (行番号: 17)
+* 根拠: `({ isOpen, onClose, users })` (行番号: 18)
 
 
 * **戻り値/レスポンス**: `JSX.Element`（`<Modal>`でラップされた3セクションのUI）
-* 根拠: `return (\n        <Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 20〜21)
+* 根拠: `return (\n        <Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 21〜22)
 
 
 * **副作用**:
   - 「ゆったり」/「コンパクト」ボタンのクリック時に`setDensity('comfortable')`/`setDensity('compact')`を呼び出す
-  - 根拠: `onClick={() => setDensity('comfortable')}` (行番号: 31), `onClick={() => setDensity('compact')}` (行番号: 39)
+  - 根拠: `onClick={() => setDensity('comfortable')}` (行番号: 32), `onClick={() => setDensity('compact')}` (行番号: 40)
 
 
   - 各ユーザーのチェックボックス変更時に`toggleIconFirstUser(user.user_id)`を呼び出す
-  - 根拠: `onChange={() => toggleIconFirstUser(user.user_id)}` (行番号: 61)
+  - 根拠: `onChange={() => toggleIconFirstUser(user.user_id)}` (行番号: 62)
 
 
   - 各ユーザー・各色のスウォッチクリック時に`setUserThemeColor(user.user_id, color.key)`を呼び出す
-  - 根拠: `onClick={() => setUserThemeColor(user.user_id, color.key)}` (行番号: 84)
+  - 根拠: `onClick={() => setUserThemeColor(user.user_id, color.key)}` (行番号: 94)
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内に`try-catch`やエラー制御の記述なし (行番号: 17〜99)
+* 根拠: ファイル内に`try-catch`やエラー制御の記述なし (行番号: 18〜109)
 
 
 
@@ -152,18 +155,18 @@ graph TD
 | 高 | `@/context/useSettings.ts` および `@/context/SettingsContext.tsx` | `setDensity`/`toggleIconFirstUser`/`setUserThemeColor`の実装（永続化の有無・タイミング）を確認するため。 | 根拠: `import { useSettings } from '@/context/useSettings';` (行番号: 4) |
 | 中 | `@/context/settingsShared.ts` | `THEME_COLORS`の全内容（選択可能な色の総数・キー一覧）を確認するため。 | 根拠: `import { THEME_COLORS } from '@/context/settingsShared';` (行番号: 5) |
 | 中 | `../../../App.tsx` | 本コンポーネントを`isOpen`/`onClose`/`users`にどのような実データを渡して呼び出しているか（呼び出し実態）を確認するため。 | 根拠: 本ファイル単体では呼び出し元は不明 |
-| 低 | `./Modal.tsx`, `./Button.tsx` | `title`/`maxWidth`/`variant`/`size`等のpropsが実際にどう描画・スタイリングされるかを確認するため。 | 根拠: `<Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 21) |
+| 低 | `./Modal.tsx`, `./Button.tsx` | `title`/`maxWidth`/`variant`/`size`等のpropsが実際にどう描画・スタイリングされるかを確認するため。 | 根拠: `<Modal isOpen={isOpen} onClose={onClose} title="表示せってい" maxWidth="md">` (行番号: 22) |
 
 ## 8. 保守上の注意点
 
 * ユーザーの表示順は呼び出し元から渡される`users`配列の順序にそのまま依存しており、本ファイル内でのソート処理は行っていない。
-* 根拠: `{users.map(user => {` (行番号: 51), `{users.map(user => (` (行番号: 76)
+* 根拠: `{users.map(user => {` (行番号: 52), `{users.map(user => (` (行番号: 86)
 * 「非識字モード対象ユーザー」の選択状態は`iconFirstUserIds.includes(user.user_id)`という配列総当たり判定であり、`users`の数が多い場合は毎レンダリングでO(n)の走査がユーザーごとに繰り返される。
-* 根拠: `const checked = iconFirstUserIds.includes(user.user_id);` (行番号: 52)
+* 根拠: `const checked = iconFirstUserIds.includes(user.user_id);` (行番号: 53)
 * テーマカラーの選択状態は`userThemeColors[user.user_id] === color.key`という厳密等価比較のみで判定しており、`userThemeColors`に該当ユーザーのキーが存在しない場合は常に「未選択」（`border-transparent opacity-70`）として扱われる。
-* 根拠: `userThemeColors[user.user_id] === color.key\n                                                ? 'border-white scale-110'\n                                                : 'border-transparent opacity-70 hover:opacity-100'` (行番号: 85〜88)
-* `user.icon`が未設定の場合は絵文字`🙂`をフォールバック表示する。
-* 根拠: `<span className="text-xl">{user.icon || '🙂'}</span>` (行番号: 64)
+* 根拠: `userThemeColors[user.user_id] === color.key\n                                                ? 'border-white scale-110'\n                                                : 'border-transparent opacity-70 hover:opacity-100'` (行番号: 95〜98)
+* Issue #118で修正: `user.avatar`が未設定、または絵文字デフォルト値の場合は`'🙂'`をフォールバックとしつつテキスト表示し、自サーバーの画像パス(`isSameOriginAvatarPath`が`true`)の場合は`<img>`で描画する。以前は本ファイルに存在しない`user.icon`を参照しており（`User`型定義上は`icon?: string`が存在するが、バックエンドの`quest_users`テーブルには対応する列が無く実データとして送られてくることがない）、常に`undefined`となって全ユーザーが一律`'🙂'`表示になっていた。
+* 根拠: `{isSameOriginAvatarPath(user.avatar) ? ( <img src={user.avatar} ... /> ) : ( <span className="text-xl">{user.avatar || '🙂'}</span> )}` (行番号: 70〜74)
 
 ## 9. 不明事項一覧
 

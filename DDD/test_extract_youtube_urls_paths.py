@@ -15,10 +15,12 @@ get_managed_target_directory が使われるが、これが引数を無視して
 同一バグ)。
 """
 import importlib
+import logging
+import sqlite3
 import sys
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -40,6 +42,35 @@ def test_core_module_is_importable_with_fixed_project_root():
     ローカルフォールバックスタブに落ちないこと。"""
     assert str(module.PROJECT_ROOT) in sys.path
     import core.logger  # noqa: F401  (ImportErrorにならないこと自体が検証)
+
+
+class TestFileManagerSaveFilenameByteLength:
+    """Issue #175の回帰テスト: FileManager.saveは
+    "{safe_channel}_{safe_title}.txt" という形式でファイル名を組み立てるが、
+    以前は各コンポーネントがそれぞれ既定のmax_length(200文字)で切り詰められる
+    だけだったため、日本語のチャンネル名・タイトルでは(3バイト/文字として)
+    最大200*3*2+5=1205バイトとなり、ext4等の255バイト上限を大幅に超過して
+    ENAMETOOLONGでファイル保存が失敗しうる不具合があった。"""
+
+    def test_long_japanese_channel_and_title_still_saves_successfully(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module.AppConfig, "get_output_base_dir", staticmethod(lambda: tmp_path))
+
+        result = module.ExtractionResult(
+            title="あ" * 200,
+            urls=["https://example.test/1"],
+            source_url="https://example.test/list",
+            channel_name="い" * 200,
+            is_playlist=True,
+        )
+
+        manager = module.FileManager()
+        assert manager.save(result) is True
+
+        saved_files = list((tmp_path / module.AppConfig.SUB_DIR_NAME).glob("*.txt"))
+        assert len(saved_files) == 1
+        # ファイル名(拡張子込み)自体がファイルシステムのNAME_MAX(255バイト)に
+        # 収まっていること。
+        assert len(saved_files[0].name.encode("utf-8")) <= 255
 
 
 class TestFallbackStubRespectsExplicitPath:
@@ -114,6 +145,116 @@ class TestVerifyEnvironmentDetectsFallback:
         with patch.object(module.AppConfig, "get_output_base_dir", return_value=messy_path):
             manager = module.SubscriptionManager.__new__(module.SubscriptionManager)
             assert manager._verify_environment() is False
+
+
+class TestProcessSubscriptionsUsesFreshDbPath:
+    """
+    Issue #123回帰テスト: アプリ起動(SubscriptionManager構築)時点ではNASが
+    フォールバック中でも、process_subscriptions()の実行時までにNASが復帰して
+    いれば(autofsの再マウント遅延はこのリポジトリで既知の事象)、NAS側の
+    home_system.dbを正しく参照してサブスクリプションを処理できること。
+
+    修正前は db_path が __init__ 時点のNAS状態(フォールバック中)で固定され、
+    process_subscriptions() 側の環境検証だけが最新状態(復帰済み)を見るため、
+    検証は通過するのにDBはローカルの空DBを新規作成してしまい、NAS側に登録
+    済みのサブスクリプションが1件も読み込まれず「無言のno-op」になっていた。
+    """
+
+    def test_recovers_and_reads_nas_db_when_nas_comes_back_before_processing(self, tmp_path):
+        nas_base = tmp_path / "nas" / "youtube_extractor" / "data"
+        local_base = tmp_path / "local" / "data"
+        nas_base.mkdir(parents=True)
+        local_base.mkdir(parents=True)
+
+        nas_db_path = nas_base.parent / "home_system.db"
+        # NAS側DBに事前にアクティブなサブスクリプションを1件登録しておく
+        # (プロセス起動より前の巡回で既に登録済み、という状況を再現)
+        with closing(sqlite3.connect(nas_db_path)) as conn:
+            conn.execute(
+                """
+                CREATE TABLE youtube_subscriptions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    channel_url TEXT UNIQUE NOT NULL,
+                    is_active INTEGER DEFAULT 1,
+                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO youtube_subscriptions (channel_url, is_active) VALUES (?, 1)",
+                ("https://example.test/channel/known",),
+            )
+            conn.commit()
+
+        class _RecoverableBaseDir:
+            """NASフォールバック→復帰、という時間経過をシミュレートするコールバック。"""
+
+            def __init__(self, local_dir, nas_dir):
+                self.local_dir = local_dir
+                self.nas_dir = nas_dir
+                self.recovered = False
+
+            def __call__(self):
+                return self.nas_dir if self.recovered else self.local_dir
+
+        base_dir_resolver = _RecoverableBaseDir(local_base, nas_base)
+
+        extractor = MagicMock()
+        extractor.extract_iter.return_value = iter([])
+        file_manager = MagicMock()
+
+        with patch.object(module.AppConfig, "get_output_base_dir", side_effect=base_dir_resolver), \
+                patch.object(module.AppConfig, "LOCAL_DIR_STR", str(local_base)):
+            # UrlExtractorApp.__init__と同じタイミングでSubscriptionManagerを構築する
+            # (この時点ではまだNASはフォールバック中)
+            manager = module.SubscriptionManager(extractor, file_manager)
+
+            # その後、巡回開始までにNASが復帰する
+            base_dir_resolver.recovered = True
+
+            manager.process_subscriptions()
+
+        # NAS側に事前登録されていたサブスクリプションが実際に処理されたこと
+        # (ローカルの空DBが使われていれば、ここは一度も呼ばれない)
+        extractor.extract_iter.assert_called_once_with("https://example.test/channel/known")
+
+        # ローカル側にはゴミの空DBが作られていないこと
+        assert not (local_base.parent / "home_system.db").exists()
+
+
+class TestProcessSubscriptionsHandlesMkdirOSError:
+    """Issue #185の回帰テスト: db_path.parent.mkdir()が送出しうるOSError
+    (権限エラー・読み取り専用マウント等)はsqlite3.Errorのサブクラスでは
+    ないため、以前は`except sqlite3.Error`節で捕捉されず--cron実行全体が
+    未処理例外で異常終了していた。process_subscriptions内の他の失敗経路
+    (エラーログ出力+安全なreturn)と同じフェイルソフト方針に統一されている
+    ことを確認する。"""
+
+    def test_mkdir_permission_error_is_caught_and_logged_not_raised(self, tmp_path, caplog):
+        base = tmp_path / "data"
+        base.mkdir(parents=True)
+
+        extractor = MagicMock()
+        file_manager = MagicMock()
+        manager = module.SubscriptionManager(extractor, file_manager)
+
+        # core.logger.setup_logging() は propagate=False で設定するため、
+        # rootロガーに依拠するcaplogがそのままでは記録できない
+        # (test_newface_monitor_notifier.pyの同種コメント参照)。
+        # テスト実行中だけ強制的にTrueへ切り替え、終了後に元の値へ戻す。
+        original_propagate = module.logger.propagate
+        module.logger.propagate = True
+        try:
+            with patch.object(module.AppConfig, "get_output_base_dir", return_value=base), \
+                    patch("pathlib.Path.mkdir", side_effect=PermissionError("Permission denied")), \
+                    caplog.at_level(logging.ERROR, logger=module.logger.name):
+                # 例外を送出せずに完走すること自体が回帰確認の対象
+                manager.process_subscriptions()
+        finally:
+            module.logger.propagate = original_propagate
+
+        extractor.extract_iter.assert_not_called()
+        assert any("DB初期化エラー" in r.message for r in caplog.records)
 
 
 if __name__ == "__main__":

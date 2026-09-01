@@ -80,14 +80,15 @@ const resolveErrorText = (res: ActionResult, fallback: string): string =>
   res.detail || (res.reason && ERROR_REASON_MESSAGES[res.reason]) || fallback;
 
 const ConfirmModal = ({
-  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel
+  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel, isConfirming
 }: {
   mode: 'complete' | 'purchase' | 'reject' | null,
   target: ConfirmTarget | null,
   rejectReason: string | null,
   onSelectRejectReason: (reason: string) => void,
   onConfirm: () => void,
-  onCancel: () => void
+  onCancel: () => void,
+  isConfirming: boolean
 }) => {
   if (!mode || !target) return null;
 
@@ -99,9 +100,9 @@ const ConfirmModal = ({
       }
       case 'purchase': {
         const t = target as Reward;
-        // Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず
-        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };
+        // #291: masterData.js のフォールバック報酬も含め cost_gold に一本化したため、
+        // cost へのフォールバックは不要になった。
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -133,8 +134,8 @@ const ConfirmModal = ({
         )}
 
         <div className="flex gap-4 justify-center">
-          <Button variant="secondary" onClick={onCancel}>キャンセル</Button>
-          <Button variant="primary" onClick={onConfirm}>はい</Button>
+          <Button variant="secondary" onClick={onCancel} disabled={isConfirming}>キャンセル</Button>
+          <Button variant="primary" onClick={onConfirm} isLoading={isConfirming}>はい</Button>
         </div>
       </div>
     </Modal>
@@ -159,6 +160,29 @@ function App() {
   // 存在しないため、どのパネルの操作かをここで明示的に持つ(承認/却下は別途「親」固定で扱う)。
   const [confirmUser, setConfirmUser] = useState<User | null>(null);
   const [rejectReason, setRejectReason] = useState<string | null>(null);
+  // #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。
+  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、
+  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には
+  // 対になるstateを使う。
+  const [isConfirming, setIsConfirming] = useState(false);
+  const isConfirmingRef = useRef(false);
+
+  // #119: 承認待ちカードは「スワイプ承認」と「承認ボタン」が併存し、確認モーダルを
+  // 挟まず即座にAPIを叩くため、#101のisConfirmingRefと同じ連打対策が無かった。
+  // 連打・スワイプ+ボタンのほぼ同時操作で同一履歴に2回目の承認POSTが飛ぶと、
+  // サーバー側は1回目で既に承認済みのため400(「承認待ちではありません」)を返し、
+  // 実際は成功しているのに「承認に失敗しました」というエラーモーダルが出てしまっていた。
+  // 承認は複数のクエストを並行して処理できる必要があるため、単一のbooleanではなく
+  // 処理中の履歴idの集合で個別に多重送信を防ぐ。
+  const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
+  const isApprovingAllRef = useRef(false);
+
+  // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
+  // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
+  // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。
+  // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに
+  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。
+  const [completedSignal, setCompletedSignal] = useState<{ id: ID; nonce: number } | null>(null);
 
   // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
   const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
@@ -209,6 +233,20 @@ function App() {
 
     if (res.success) {
       if (mode === 'complete') {
+        const completedQuest = target as Quest;
+        // #102: 完了音・無限クエストのクールダウンは、確認モーダルでの「はい」タップ
+        // 時点ではなく、実際に完了APIが成功したこの時点で発火させる(以前はQuestList側で
+        // タップ即時に鳴らしていたため、モーダルを「キャンセル」しても完了音が鳴り、
+        // 無限クエストはクールダウンに入ってしまっていた)。
+        // 子ども(role_child)の完了報告は親の承認待ち(status: 'pending')になるのが常だが、
+        // それでも「提出」自体は完了しているため、鳴らす対象・クールダウン対象から
+        // pending を除外しない(除外すると子どもに対しては常に無音・無クールダウンになり、
+        // 無限クエストを連打で何度も申請できてしまう)。
+        play(completedQuest.quest_type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
+        const idForSignal = completedQuest.quest_id;
+        if (idForSignal !== undefined) {
+          setCompletedSignal({ id: idForSignal, nonce: Date.now() });
+        }
         if (res.status === 'pending') {
           showToast({ title: "申請完了", text: res.message || "親の承認待ちになりました", icon: '📨' });
         } else if ((res.earnedMedals ?? 0) > 0) {
@@ -280,114 +318,158 @@ function App() {
   // --- Confirm Execution (完了・購入・却下。子どもの誤操作対策として確認を挟む) ---
   const executeConfirm = async () => {
     if (!confirmMode || !confirmTarget) return;
-    const actingUser = confirmUser || currentUser;
+    // #101: 「はい」の連打で、1回目のレスポンス前に2回目の実行が発火するのを防ぐ。
+    // (サーバー側にもスパムチェック/ロックを追加済みだが、フロント側でも連打そのものを
+    // 抑止し、連打の2回目がエラートーストになるのを防ぐ)
+    if (isConfirmingRef.current) return;
+    isConfirmingRef.current = true;
+    setIsConfirming(true);
 
-    if (confirmMode === 'complete') {
-      // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
-      // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
-      const target = confirmTarget as Quest;
+    try {
+      const actingUser = confirmUser || currentUser;
+
+      if (confirmMode === 'complete') {
+        // 完了処理そのもの(メダル演出・エラー表示含む)はrunQuestActionに委ねる。
+        // モーダルは先に閉じ、成功/失敗の通知はトースト/エラーモーダル側で行う。
+        const target = confirmTarget as Quest;
+        setConfirmMode(null);
+        setConfirmTarget(null);
+        setConfirmUser(null);
+        await runQuestAction(actingUser, 'complete', target);
+        return;
+      }
+
+      let res: ActionResult = { success: false };
+
+      if (confirmMode === 'purchase') {
+        // #245: actingUser(confirmUser)はモーダルを開いた時点のスナップショットであり、
+        // 背景ポーリング(useGameDataの10秒間隔)によるゴールド残高の更新に追従しない。
+        // buyReward内のローカル事前チェック((user.gold || 0) < cost)がこの古い残高で
+        // 判定してしまうと、実際には購入可能な状況でも誤って「お金が足りません」と
+        // なりAPIコール自体がブロックされる。実行直前にusersから同一user_idの最新
+        // オブジェクトを引き直し、鮮度の高い残高でチェック・購入を行う。
+        const freshActingUser = users.find(u => u.user_id === actingUser.user_id) || actingUser;
+        res = await buyReward(freshActingUser, confirmTarget as Reward);
+        if (res.success) {
+          showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
+          // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
+          play('clear');
+        }
+      } else if (confirmMode === 'reject') {
+        // 却下の記録名義は「親」で固定する(要件5)
+        res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);
+        if (res.success) {
+          play('cancel');
+        }
+      }
+
+      if (!res.success) {
+        const fallback = confirmMode === 'reject' ? "却下に失敗しました" : "失敗しました";
+        setMessageData({ title: "エラー", text: resolveErrorText(res, fallback) });
+        play('cancel');
+        // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で
+        // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)
+        return;
+      }
+
       setConfirmMode(null);
       setConfirmTarget(null);
       setConfirmUser(null);
-      await runQuestAction(actingUser, 'complete', target);
-      return;
+      setRejectReason(null);
+    } finally {
+      isConfirmingRef.current = false;
+      setIsConfirming(false);
     }
-
-    let res: ActionResult = { success: false };
-
-    if (confirmMode === 'purchase') {
-      res = await buyReward(actingUser, confirmTarget as Reward);
-      if (res.success) {
-        showToast({ title: "購入完了", text: "アイテムを「もちもの」に入れました！", icon: '🛍️' });
-        // ★要件8: medalサウンドは「メダル獲得時」専用に戻す(以前は購入時にも誤って鳴っていた)
-        play('clear');
-      }
-    } else if (confirmMode === 'reject') {
-      // 却下の記録名義は「親」で固定する(要件5)
-      res = await rejectQuest(getRepresentativeParent(users), confirmTarget as QuestHistory, rejectReason || undefined);
-      if (res.success) {
-        play('cancel');
-      }
-    }
-
-    if (!res.success) {
-      const fallback = confirmMode === 'reject' ? "却下に失敗しました" : "失敗しました";
-      setMessageData({ title: "エラー", text: resolveErrorText(res, fallback) });
-      play('cancel');
-      // ★角度⑨: 確認モーダルは閉じずに残し、エラーを閉じたあとにもう一度「はい」で
-      // 再試行できるようにする(状態[購入対象/却下理由]を失わないため)
-      return;
-    }
-
-    setConfirmMode(null);
-    setConfirmTarget(null);
-    setConfirmUser(null);
-    setRejectReason(null);
   };
 
   // 承認ハンドラ: 記録名義は「親」で固定する(要件5)
   const handleApprove = async (history: QuestHistory) => {
-    const res = await approveQuest(getRepresentativeParent(users), history);
-    if (res.success) {
-      play('approve');
-      // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
-      // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
-      if ((res.earnedMedals ?? 0) > 0) {
-        play('medal');
-        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${res.earnedMedals} 枚手に入れた！`, icon: "🏅" });
+    // #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは
+    // 1回分として扱い、エラー表示を出さない)。
+    if (history.id != null) {
+      if (approvingHistoryIdsRef.current.has(history.id)) return;
+      approvingHistoryIdsRef.current.add(history.id);
+    }
+    try {
+      const res = await approveQuest(getRepresentativeParent(users), history);
+      if (res.success) {
+        play('approve');
+        // ★バグ修正(M-6-1): 承認APIのearnedMedalsを見て、完了フロー(runQuestAction)と
+        // 同様にメダル獲得演出を出す(以前は承認経由だと一切反映されなかった)。
+        // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認では相方
+        // (自分でタップしなかった方の子ども)側もメダルを獲得しうるため、
+        // partnerEarnedMedalsも合算して演出に反映する。
+        const totalEarnedMedals = (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);
+        if (totalEarnedMedals > 0) {
+          play('medal');
+          showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
+        }
+      } else {
+        setMessageData({
+          title: "エラー",
+          text: resolveErrorText(res, "承認に失敗しました"),
+          onRetry: () => handleApprove(history),
+        });
+        play('cancel');
       }
-    } else {
-      setMessageData({
-        title: "エラー",
-        text: resolveErrorText(res, "承認に失敗しました"),
-        onRetry: () => handleApprove(history),
-      });
-      play('cancel');
+    } finally {
+      if (history.id != null) {
+        approvingHistoryIdsRef.current.delete(history.id);
+      }
     }
   };
 
   // 角度⑩: 承認待ちが複数あるとき、1件ずつ承認する手間を減らす一括承認
   const handleApproveAll = async () => {
-    // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
-    // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
-    const targets = [...pendingQuestsRef.current];
-    if (targets.length === 0) return;
+    // #119: 一括承認ボタンの連打で、1回目のループが終わる前に2回目が
+    // 同じ履歴を並行して承認しようとし400になるのを防ぐ。
+    if (isApprovingAllRef.current) return;
+    isApprovingAllRef.current = true;
+    try {
+      // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
+      // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
+      const targets = [...pendingQuestsRef.current];
+      if (targets.length === 0) return;
 
-    let successCount = 0;
-    let totalEarnedMedals = 0;
-    // 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。
-    // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。
-    const cascadedIds = new Set<ID>();
-    for (const history of targets) {
-      if (history.id != null && cascadedIds.has(history.id)) {
-        successCount++;
-        continue;
-      }
-      const res = await approveQuest(getRepresentativeParent(users), history);
-      if (res.success) {
-        successCount++;
-        totalEarnedMedals += res.earnedMedals ?? 0;
-        if (history.linked_history_id != null) {
-          cascadedIds.add(history.linked_history_id);
+      let successCount = 0;
+      let totalEarnedMedals = 0;
+      // 兄妹連携クエストは片方を承認するとサーバー側で相方の行も自動承認される。
+      // 相方のidをここに記録し、後続ループで個別に承認APIを叩いて400にならないようにする。
+      const cascadedIds = new Set<ID>();
+      for (const history of targets) {
+        if (history.id != null && cascadedIds.has(history.id)) {
+          successCount++;
+          continue;
+        }
+        const res = await approveQuest(getRepresentativeParent(users), history);
+        if (res.success) {
+          successCount++;
+          // #238: 兄妹連携クエストのカスケード承認では相方側もメダルを獲得しうる
+          totalEarnedMedals += (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);
+          if (history.linked_history_id != null) {
+            cascadedIds.add(history.linked_history_id);
+          }
         }
       }
-    }
 
-    if (successCount > 0) play('approve');
-    if (totalEarnedMedals > 0) {
-      play('medal');
-      showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
-    }
+      if (successCount > 0) play('approve');
+      if (totalEarnedMedals > 0) {
+        play('medal');
+        showToast({ title: "ちいさなメダル獲得！", text: `ちいさなメダルを ${totalEarnedMedals} 枚手に入れた！`, icon: "🏅" });
+      }
 
-    if (successCount === targets.length) {
-      showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
-    } else {
-      setMessageData({
-        title: "エラー",
-        text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
-        onRetry: () => handleApproveAll(),
-      });
-      play('cancel');
+      if (successCount === targets.length) {
+        showToast({ title: "一括承認", text: `${successCount}件のクエストを承認しました`, icon: '✅' });
+      } else {
+        setMessageData({
+          title: "エラー",
+          text: `一部の承認に失敗しました (${successCount}/${targets.length}件成功)`,
+          onRetry: () => handleApproveAll(),
+        });
+        play('cancel');
+      }
+    } finally {
+      isApprovingAllRef.current = false;
     }
   };
 
@@ -466,6 +548,7 @@ function App() {
             onApprove={handleApprove}
             onReject={handleReject}
             onApproveAll={handleApproveAll}
+            completedSignal={completedSignal}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
@@ -514,6 +597,7 @@ function App() {
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
+                  completedSignal={completedSignal}
                   iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
                 />
               )}
@@ -557,6 +641,7 @@ function App() {
         onSelectRejectReason={setRejectReason}
         onConfirm={executeConfirm}
         onCancel={() => { setConfirmMode(null); setRejectReason(null); play('cancel'); }}
+        isConfirming={isConfirming}
       />
 
       {messageData && (

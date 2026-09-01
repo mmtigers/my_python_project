@@ -7,11 +7,12 @@ DB操作そのもの。テーブルが存在しない・カラムが一致しな
 空データを返すFail-Soft設計になっているため、その両方を検証する。
 """
 import os
+import sqlite3
 import sys
-from unittest.mock import MagicMock
+from datetime import datetime
 
 import pandas as pd
-import pytest
+import pytz
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -144,9 +145,112 @@ class TestLoadSensorData:
         assert result.empty
 
 
+class TestLoadSensorDataPowerDeviceTypeClassification:
+    """Issue #169の回帰テスト: device_nameに"Remo"を含むかで"Nature Remo E Lite"/"Plug"に
+    正しく振り分けた直後、`.replace("Plug", "Nature Remo E Lite")`で全行を
+    "Nature Remo E Lite"に一括置換してしまっていた不具合。この結果、個別家電(Plug)の
+    グラフが常に空になり(views/dashboard/sensor_tab.pyのstr.contains("Plug")フィルタが
+    一致しなくなる)、全プラグの消費電力がスマートメーター全体消費のグラフへ混入していた。"""
+
+    def test_plug_device_keeps_plug_device_type(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev1', 'Plug1', 50, '2026-01-01T00:00:00')"
+            )
+        result = analysis_service.load_sensor_data()
+        row = result[result["device_id"] == "dev1"].iloc[0]
+        assert row["device_type"] == "Plug", (
+            f"Plug由来のdevice_typeがNature Remo E Liteへ一括置換されている: {row['device_type']!r}"
+        )
+
+    def test_nature_remo_device_keeps_nature_remo_device_type(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
+                "VALUES ('dev2', 'Nature Remo E Lite (Living)', 300, '2026-01-01T00:00:00')"
+            )
+        result = analysis_service.load_sensor_data()
+        row = result[result["device_id"] == "dev2"].iloc[0]
+        assert row["device_type"] == "Nature Remo E Lite"
+
+
 class TestCalculateMonthlyCostCumulative:
     def test_returns_zero_when_no_power_data(self, isolated_db):
         assert analysis_service.calculate_monthly_cost_cumulative() == 0
+
+    def test_plug_readings_are_excluded_from_smart_meter_cost(self, isolated_db):
+        """Issue #170の回帰テスト: power_usageにはスマートメーター(全体消費)と
+        各プラグ(個別家電)が同居しているが、以前はデバイスを絞らず全行を
+        diff()ベースで合算していたため、プラグの消費電力がスマートメーターの
+        計測値(既にプラグ分を含む)へ二重計上されていた。プラグの読み取り値が
+        時系列上にどれだけ混在していても、計算結果はスマートメーター単独の
+        場合と一致するべき。"""
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        # start_of_monthはマイクロ秒+タイムゾーンオフセット付きのisoformat()文字列
+        # ("...T00:00:00.xxxxxx+09:00")で、SQL側は単純な文字列比較(>=)を行うため、
+        # ちょうど月初(second=0)ちょうどのタイムスタンプは境界で除外されうる。
+        # 1秒後を基準にして安全にstart_of_month以降になるようにする。
+        base = now.replace(day=1, hour=0, minute=0, second=1)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # スマートメーター: 1時間おきに1000Wで2点(1.0kWh分)
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{base.strftime('%Y-%m-%dT%H:%M:%S')}')"
+            )
+            ts2 = base.replace(hour=1).strftime("%Y-%m-%dT%H:%M:%S")
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{ts2}')"
+            )
+            # プラグ: スマートメーターの間に挟まる形で大電力(5000W)を1点記録
+            ts_plug = base.replace(minute=30).strftime("%Y-%m-%dT%H:%M:%S")
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('plug1', 'Plug_TV', 5000, '{ts_plug}')"
+            )
+
+        with_plug_result = analysis_service.calculate_monthly_cost_cumulative()
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DELETE FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = 'plug1'")
+        meter_only_result = analysis_service.calculate_monthly_cost_cumulative()
+
+        assert with_plug_result == meter_only_result, (
+            "プラグの読み取り値がスマートメーターの電気代計算に混入している: "
+            f"with_plug={with_plug_result}, meter_only={meter_only_result}"
+        )
+
+    def test_diff_is_computed_per_device_not_across_interleaved_devices(self, isolated_db):
+        """Issue #170の回帰テスト: 複数device_id(例: 複数拠点のスマートメーター)の行が
+        時系列で混在したままdiff()を取ると、直前行が別デバイスの場合に誤った時間幅が
+        計算に使われる。device_idごとにグループ化してdiff()を取ることで、各デバイスの
+        経過時間はそのデバイス自身の直前レコードとの差分になるべき。"""
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        # (前テストと同じ理由で)月初ちょうどの境界を避けて1秒後を基準にする
+        base = now.replace(day=1, hour=0, minute=0, second=1)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # デバイスA(伊丹)とデバイスB(高砂)が10分ずれで交互に記録される
+            rows = [
+                ("remo_itami", "伊丹_Nature Remo E Lite", 1000, base),
+                ("remo_takasago", "高砂_Nature Remo E Lite", 2000, base.replace(minute=10)),
+                ("remo_itami", "伊丹_Nature Remo E Lite", 1000, base.replace(hour=1)),
+                ("remo_takasago", "高砂_Nature Remo E Lite", 2000, base.replace(hour=1, minute=10)),
+            ]
+            for device_id, device_name, watts, ts in rows:
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                    f"('{device_id}', '{device_name}', {watts}, '{ts.strftime('%Y-%m-%dT%H:%M:%S')}')"
+                )
+
+        result = analysis_service.calculate_monthly_cost_cumulative()
+
+        # 正しい計算: 伊丹=1000W×1h=1.0kWh, 高砂=2000W×1h=2.0kWh, 合計3.0kWh -> 31倍で93
+        # (device_idでグループ化せず時系列のまま混在diff()を取ると、10分/50分単位の
+        # 誤った時間幅が使われ、異なる(98)結果になっていた)
+        assert result == int(3.0 * 31)
 
 
 class TestLoadBicycleData:
@@ -188,18 +292,56 @@ class TestLoadRankingData:
 
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:
     """
-    weather_history テーブルの実カラムと load_weather_history/load_yearly_temperature_stats が
-    要求するカラム(location, umbrella_level等)が一致していない既知の問題があるが、
-    いずれも例外を外に投げず空のDataFrameを返すFail-Soft設計になっていることを確認する。
+    Issue #114で修正済み: 以前はweather_historyテーブルの実カラムと
+    load_weather_history/load_yearly_temperature_stats が要求するカラム
+    (location, umbrella_level等)が一致しておらず、新規DB(init_db)では
+    "no such column: location" のOperationalErrorがexceptで握りつぶされ、
+    常に空のDataFrameが返っていた(天気関連の表示・年間気温統計が無言で空になるバグ)。
+    例外を投げないこと自体は引き続き保証しつつ、修正後は実際に投入したデータが
+    正しく返ってくることも検証する。
     """
+
+    @staticmethod
+    def _insert_weather_row(db_path, date, location, min_temp=1.0, max_temp=10.0,
+                             weather_desc="晴れ", max_pop=10, umbrella_level="不要"):
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute(
+                "INSERT INTO weather_history "
+                "(date, location, min_temp, max_temp, weather_desc, max_pop, umbrella_level, recorded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (date, location, min_temp, max_temp, weather_desc, max_pop, umbrella_level, date),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_load_weather_history_does_not_raise_and_returns_dataframe(self, isolated_db):
         result = analysis_service.load_weather_history()
         assert isinstance(result, pd.DataFrame)
 
+    def test_load_weather_history_returns_rows_matching_location(self, isolated_db):
+        today = datetime.now().strftime("%Y-%m-%d")
+        self._insert_weather_row(isolated_db, today, location="伊丹")
+        self._insert_weather_row(isolated_db, today, location="東京")
+
+        result = analysis_service.load_weather_history(location="伊丹")
+
+        assert len(result) == 1
+        assert result.iloc[0]["date"] == today
+
     def test_load_yearly_temperature_stats_does_not_raise(self, isolated_db):
         result = analysis_service.load_yearly_temperature_stats(2026)
         assert isinstance(result, pd.DataFrame)
+
+    def test_load_yearly_temperature_stats_returns_weather_data_for_matching_location(self, isolated_db):
+        self._insert_weather_row(isolated_db, "2026-03-15", location="伊丹", max_temp=15.0, min_temp=5.0)
+
+        result = analysis_service.load_yearly_temperature_stats(2026, location="伊丹")
+
+        assert len(result) == 1
+        assert result.iloc[0]["out_max"] == 15.0
+        assert result.iloc[0]["out_min"] == 5.0
 
 
 class TestSystemStats:
@@ -216,23 +358,3 @@ class TestSystemStats:
     def test_get_system_logs_does_not_raise(self):
         result = analysis_service.get_system_logs(lines=10)
         assert isinstance(result, str)
-
-    def test_get_ngrok_url_returns_empty_dict_when_ngrok_not_running(self, monkeypatch):
-        def _raise(*a, **kw):
-            raise ConnectionError("no ngrok running")
-        monkeypatch.setattr(analysis_service.requests, "get", _raise)
-        assert analysis_service.get_ngrok_url() == {}
-
-    def test_get_ngrok_url_parses_tunnels_response(self, monkeypatch):
-        fake_response = MagicMock()
-        fake_response.status_code = 200
-        fake_response.json.return_value = {
-            "tunnels": [
-                {"config": {"addr": "http://localhost:8000"}, "public_url": "https://server.ngrok.io"},
-                {"config": {"addr": "http://localhost:8501"}, "public_url": "https://dashboard.ngrok.io"},
-            ]
-        }
-        monkeypatch.setattr(analysis_service.requests, "get", lambda *a, **kw: fake_response)
-        urls = analysis_service.get_ngrok_url()
-        assert urls["server"] == "https://server.ngrok.io"
-        assert urls["dashboard"] == "https://dashboard.ngrok.io"

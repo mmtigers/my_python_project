@@ -35,8 +35,8 @@
 * 根拠: [ログファイルクローズ] (行番号: 171〜175 / 抜粋: "log_file.close()")
 
 
-* 録画プレイリスト生成(`generate_record_playlist`)は、`process_key`（`カメラID_日付`）単位の`threading.Lock`（`_get_vod_generation_lock`）で排他制御された内部関数`_generate_record_playlist_locked`へ処理を委譲し、同一キーへの同時リクエストによるffmpegの二重起動と同一ファイルへの競合書き込みを防止する。
-* 根拠: [ロック委譲] (行番号: 212〜213 / 抜粋: "with _get_vod_generation_lock(process_key):")
+* 録画プレイリスト生成(`generate_record_playlist`)は、`process_key`（`カメラID_日付`）単位のロック（コンテキストマネージャ`_vod_generation_lock`）で排他制御された内部関数`_generate_record_playlist_locked`へ処理を委譲し、同一キーへの同時リクエストによるffmpegの二重起動と同一ファイルへの競合書き込みを防止する。**（Issue #247で修正）** 以前は`_get_vod_generation_lock`関数が`カメラID_日付`単位の`threading.Lock`を`_vod_generation_locks`辞書へ登録するのみで、`_active_vod_processes`に対応する`_prune_finished_vod_processes`のような削除・剪定手段が無く、日々無限に蓄積し続けていた。現在は参照カウント方式(`_RefCountedLock`)を導入した`_vod_generation_lock`コンテキストマネージャに置き換え、使用が終わった(参照カウントが0に戻った)エントリのみを安全に削除する。単純に「ロックが未取得状態なら削除」する方式だと、ロック取得元が辞書からロックオブジェクトを取り出した直後・実際に獲得する直前の隙間で別スレッドが剪定してしまい、同一`process_key`に対して2つの別々のロックオブジェクトが生成されて同時に「取得成功」する（このロック機構が本来防ぐべき二重起動と同じ問題を再発させる）ため、参照カウントで安全性を担保している。
+* 根拠: [ロック委譲] (行番号: 244 / 抜粋: "with _vod_generation_lock(process_key):")、`_RefCountedLock`と参照カウントによる安全な削除のコメント (行番号: 34〜51 / 抜粋: "# #247: _active_vod_processesには対応する_prune_finished_vod_processes()が\n# あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが\n# 増えるたびに(long-running環境で日々)無限に蓄積していた。")
 
 
 * `_active_vod_processes`に登録されたプロセスのうち完了済み（`poll()`が`None`でない）ものは、`_generate_record_playlist_locked`の呼び出しの都度`_prune_finished_vod_processes`により除去され、`カメラID_日付`キーが無限に蓄積することを防ぐ。
@@ -78,25 +78,36 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `_get_vod_generation_lock`
+### `_RefCountedLock` (クラス、Issue #247で追加)
 
-* **役割**: 指定された`process_key`に対応する`threading.Lock`を`_vod_generation_locks`辞書から取得し、存在しなければ新規作成して返す。ロックオブジェクトの生成自体は`_vod_generation_locks_guard`で保護される。
-* 根拠: [関数定義] (行番号: 36〜42 / 抜粋: "def _get_vod_generation_lock(process_key: str) -> threading.Lock:")
+* **役割**: `_vod_generation_locks`辞書の1エントリが表す状態（実際の`threading.Lock`と、現在何人の利用者が参照中かを示す`ref_count`）を保持するだけの単純なコンテナクラス。`_vod_generation_lock`コンテキストマネージャが、使用が終わった(ref_countが0に戻った)エントリのみを安全に辞書から削除できるようにするための土台。
+* 根拠: [クラス定義] (行番号: 44〜49 / 抜粋: "class _RefCountedLock:\n    __slots__ = (\"lock\", \"ref_count\")\n\n    def __init__(self) -> None:\n        self.lock = threading.Lock()\n        self.ref_count = 0")
 
+* **引数/リクエスト**: なし（`__init__`は引数を取らない）
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: `self.lock`（新規`threading.Lock`）・`self.ref_count`（0）の初期化のみ
+* **エラーハンドリング**: なし
+
+### `_vod_generation_lock` (コンテキストマネージャ、Issue #247で`_get_vod_generation_lock`を置き換え)
+
+* **役割**: 指定された`process_key`単位で排他制御を行うコンテキストマネージャ。`_vod_generation_locks_guard`で保護しつつ、`_vod_generation_locks`辞書から対応する`_RefCountedLock`を取得（無ければ新規作成）し`ref_count`を1増やしたうえで、実際のロック（`entry.lock`）を獲得して処理ブロックを実行する。処理完了後は`ref_count`を1減らし、0になった（＝他に利用者がいない）場合にのみそのエントリを辞書から削除する。**Issue #247で修正**: 以前の`_get_vod_generation_lock`は`threading.Lock`を返すだけの単純な取得専用関数で、一度登録されたエントリを削除する手段が無く、`カメラID_日付`の組み合わせが増えるたびに無限に蓄積していた。「ロックが未取得状態(`lock.locked() is False`)なら削除する」という単純な方式は、ロック取得元が辞書からロックオブジェクトの参照を取り出した直後・実際に`with`文で獲得する直前の隙間で、別スレッドがその一瞬の未取得状態を見て剪定してしまい、同一`process_key`に対して2つの別々のロックオブジェクトが生成され両方が同時に「取得成功」してしまう（本来このロック機構が防ぐべき、ffmpegの二重起動と全く同じ問題を再発させる）ため採用しなかった。代わりに参照カウントを導入し、そのエントリを実際に使用中の呼び出し（辞書からの取得からブロック完了まで）が1件でも存在する間は、他のスレッドが決して削除できないようにしている。
+* 根拠: [関数定義とDocstring] (行番号: 56〜60 / 抜粋: "def _vod_generation_lock(process_key: str):\n    \"\"\"process_key単位で排他制御を行うコンテキストマネージャ。\n    使用中(参照カウント>0)のエントリは剪定されず、使用を終えた\n    (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。\"\"\"")
+* 根拠: [取得・ref_count加算] (行番号: 61〜66 / 抜粋: "with _vod_generation_locks_guard:\n        entry = _vod_generation_locks.get(process_key)\n        if entry is None:\n            entry = _RefCountedLock()\n            _vod_generation_locks[process_key] = entry\n        entry.ref_count += 1")
+* 根拠: [解放・ref_count減算と条件付き削除] (行番号: 67〜74 / 抜粋: "try:\n        with entry.lock:\n            yield\n    finally:\n        with _vod_generation_locks_guard:\n            entry.ref_count -= 1\n            if entry.ref_count == 0 and _vod_generation_locks.get(process_key) is entry:\n                del _vod_generation_locks[process_key]")
 
 * **引数/リクエスト**: `process_key: str`
-* 根拠: [引数定義] (行番号: 36 / 抜粋: "def _get_vod_generation_lock(process_key: str) -> threading.Lock:")
+* 根拠: [引数定義] (行番号: 57 / 抜粋: "def _vod_generation_lock(process_key: str):")
 
 
-* **戻り値/レスポンス**: `threading.Lock`（該当`process_key`用のロックオブジェクト）
-* 根拠: [戻り値] (行番号: 42 / 抜粋: "return lock")
+* **戻り値/レスポンス**: なし（`@contextlib.contextmanager`によるジェネレータベースのコンテキストマネージャ。`with`文のブロック内で保護対象の処理を実行する）
+* 根拠: [デコレータ] (行番号: 56 / 抜粋: "@contextlib.contextmanager")
 
 
-* **副作用**: `_vod_generation_locks`辞書への新規ロック登録（未登録時のみ）。
-* 根拠: [ロック登録] (行番号: 41 / 抜粋: "_vod_generation_locks[process_key] = lock")
+* **副作用**: `_vod_generation_locks`辞書への新規`_RefCountedLock`登録（未登録時のみ）、`ref_count`の増減、`ref_count`が0に戻った場合の辞書からの削除、`entry.lock`の獲得・解放。
+* 根拠: (行番号: 61〜74)
 
 
-* **エラーハンドリング**: なし
+* **エラーハンドリング**: なし（`try`/`finally`により、ブロック内で例外が送出された場合でも`ref_count`の減算と条件付き削除は必ず実行される）
 
 
 ### `_prune_finished_vod_processes`
@@ -249,19 +260,19 @@
 ### `generate_record_playlist`
 
 * **役割**: 指定日の録画プレイリスト生成を、`process_key`（`カメラID_日付`）単位の`threading.Lock`で排他制御しながら内部実装`_generate_record_playlist_locked`へ委譲するラッパー関数。実際の生成ロジックは`_generate_record_playlist_locked`が担う。
-* 根拠: [関数定義] (行番号: 201〜213 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 233〜244 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
-* 根拠: [引数定義] (行番号: 201 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
+* 根拠: [引数定義] (行番号: 233 / 抜粋: "def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`（`_generate_record_playlist_locked`の戻り値をそのまま返す）
-* 根拠: [戻り値] (行番号: 213 / 抜粋: "return _generate_record_playlist_locked(cam_conf, target_date, process_key)")
+* 根拠: [戻り値] (行番号: 245 / 抜粋: "return _generate_record_playlist_locked(cam_conf, target_date, process_key)")
 
 
-* **副作用**: `process_key`（`f"{cam_id}_{target_date}"`）の算出、`_get_vod_generation_lock`によるロックの取得・解放（`with`文）。
-* 根拠: [ロック取得] (行番号: 207, 212 / 抜粋: "with _get_vod_generation_lock(process_key):")
+* **副作用**: `process_key`（`f"{cam_id}_{target_date}"`）の算出、`_vod_generation_lock`によるロックの取得・解放（`with`文。Issue #247で`_get_vod_generation_lock`から置き換え）。
+* 根拠: [ロック取得] (行番号: 239, 244 / 抜粋: "with _vod_generation_lock(process_key):")
 
 
 * **エラーハンドリング**: なし（内部実装`_generate_record_playlist_locked`に委譲）
@@ -317,7 +328,7 @@
 
 ```mermaid
 flowchart TD
-    Start["Start: generate_record_playlist"] --> AcquireLock["process_key単位のロックを取得<br>(_get_vod_generation_lock)"]
+    Start["Start: generate_record_playlist"] --> AcquireLock["process_key単位のロックを取得<br>(_vod_generation_lock, Issue #247で参照カウント方式に変更)"]
     AcquireLock --> Locked["_generate_record_playlist_locked を実行"]
     Locked --> FindDir["NVR保存先ディレクトリの解決"]
     FindDir --> DirExists{"保存先ディレクトリが存在するか?"}
@@ -370,7 +381,7 @@ graph TD
         active_vod_processes["_active_vod_processes (Global)"]
         rtsp_cache["_rtsp_cache (Global)"]
         vod_locks["_vod_generation_locks (Global)"]
-        get_vod_lock["_get_vod_generation_lock()"]
+        get_vod_lock["_vod_generation_lock()"]
         prune_vod["_prune_finished_vod_processes()"]
         mask_rtsp["_mask_rtsp_url_for_log()"]
         init_output_dir["init_output_dir()"]
@@ -441,7 +452,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **プロセス管理辞書のスレッドセーフティ**: `_active_processes`, `_rtsp_cache` はモジュールレベルのグローバル辞書であり、ロック等の排他制御なしに読み書きされている。`_active_vod_processes`への登録・判定は同一`process_key`について`_get_vod_generation_lock`によるロックで直列化されるようになったが、`_vod_generation_locks`自体には使用済みエントリを削除する仕組みがなく、`カメラID_日付`の組み合わせごとにロックオブジェクトが増え続ける。
+* **プロセス管理辞書のスレッドセーフティ**: `_active_processes`, `_rtsp_cache` はモジュールレベルのグローバル辞書であり、ロック等の排他制御なしに読み書きされている。`_active_vod_processes`への登録・判定は同一`process_key`について`_vod_generation_lock`によるロックで直列化される。
+* **(Issue #247バグ修正の背景)** `_vod_generation_locks`は以前、`_get_vod_generation_lock`関数が`カメラID_日付`単位の`threading.Lock`を登録するだけで、`_active_vod_processes`に対応する`_prune_finished_vod_processes`のような削除・剪定手段が無く、長期稼働環境で日々無限に蓄積し続けていた（`threading.Lock`自体は軽量なため実運用上のメモリ影響は小さいという判断で、優先度は低として記録されていた）。現在は`_RefCountedLock`による参照カウント方式へ置き換え、そのエントリを実際に使用中の呼び出しが1件も無くなった時点で自動的に辞書から削除するようにした。「未取得状態なら削除する」という単純な方式は、取得元がロックオブジェクトの参照を辞書から取り出した直後・実際に獲得する直前の隙間で別スレッドに剪定されてしまい、同一`process_key`に対して2つの別々のロックオブジェクトが生成され両方が同時に「取得成功」してしまう（このロック機構が本来防ぐべきffmpegの二重起動と同じ問題を再発させる）ため採用しなかった。今後同様に「使用頻度に応じてキー空間が際限なく増えるモジュールレベルの辞書」を追加する際は、この参照カウントパターン、または`_active_vod_processes`のような「完了済み/未使用の状態を外部から判定できる」剪定パターンのいずれかを検討すること。
 * **`start_hls_stream`の広範な例外抑制**: `get_rtsp_url`呼び出しを`except Exception:`で包括的に捕捉し、詳細を握りつぶして空文字列を返している（呼び出し元では失敗理由が判別できない）。
 * **ffmpeg起動失敗の未捕捉**: `start_hls_stream`および`_generate_record_playlist_locked`内の`subprocess.Popen`呼び出し自体（例: ffmpeg実行ファイルが存在しない場合の`FileNotFoundError`）に対するtry-exceptが存在せず、例外は呼び出し元に伝播する。
 * **RTSP URLのargv経由の残存露出**: ログファイルへの平文露出は`-hide_banner`/`-loglevel error`と`_mask_rtsp_url_for_log`により対策されたが、`subprocess.Popen`に渡す`cmd`のargv自体には認証情報込みのRTSP URLがそのまま含まれており、`ps`コマンド等によるプロセス一覧の閲覧では引き続き見える。ffmpeg CLIの仕様上URLを間接参照する手段がなく、完全な対策は本ファイルの変更のみでは行えない既知の残存リスクである。

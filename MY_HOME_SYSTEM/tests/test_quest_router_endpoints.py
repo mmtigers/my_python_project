@@ -14,7 +14,6 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import common
-import config
 
 
 def _seed_basic_data():
@@ -128,6 +127,39 @@ class TestInventoryEndpoints:
         items = res.json()
         assert len(items) == 1
         assert items[0]["status"] == "owned"
+
+    def test_get_inventory_returns_reward_description_as_desc(self, seeded_client):
+        """Issue #116回帰防止: 以前はSELECT対象にreward_master.descriptionが含まれておらず、
+        レスポンスにdescキー自体が存在しなかったため、フロントで常に「説明はありません」に
+        フォールバックしていた。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "UPDATE reward_master SET description = ? WHERE reward_id = 201", ("テスト用の説明文",)
+            )
+        self._purchase_reward(seeded_client)
+
+        res = seeded_client.get("/api/quest/inventory/dad")
+        assert res.status_code == 200
+        assert res.json()[0]["desc"] == "テスト用の説明文"
+
+    def test_get_inventory_excludes_legacy_pending_status_rows(self, seeded_client):
+        """Issue #116回帰防止: 旧承認フローの遺物としてstatus='pending'の行がuser_inventoryに
+        残っていても、もちもの一覧には含めないこと。表示してしまうと、フロントの型が
+        'owned'|'consumed'しか知らないため、タップするとuse_itemが400
+        'Cannot use this item'を返す押せないアイテムになってしまう。"""
+        self._purchase_reward(seeded_client)
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('dad', 201, 'pending', ?)",
+                (common.get_now_iso(),),
+            )
+
+        res = seeded_client.get("/api/quest/inventory/dad")
+        assert res.status_code == 200
+        items = res.json()
+        assert len(items) == 1
+        assert all(item["status"] != "pending" for item in items)
 
     def test_use_item_by_owner_succeeds(self, seeded_client, monkeypatch):
         """アイテム使用は親の承認を待たず即座に消費が確定する"""

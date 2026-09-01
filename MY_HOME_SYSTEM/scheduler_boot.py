@@ -4,14 +4,12 @@ import subprocess
 import sys
 import os
 from concurrent.futures import ThreadPoolExecutor, Future
-from datetime import datetime
-from typing import List, Dict, Any, TypedDict
+from typing import List, Dict, TypedDict
 
 # プロジェクトルートへのパス解決
 PROJECT_ROOT: str = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(PROJECT_ROOT)
 
-import config
 from core.logger import setup_logging
 
 # ロガー設定

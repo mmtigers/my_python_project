@@ -27,9 +27,10 @@ https://developer.amazon.com/en-US/docs/alexa/custom-skills/host-a-custom-skill-
 import time
 import base64
 import logging
+import posixpath
 from datetime import datetime, timezone
 from typing import Dict, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, unquote
 
 import requests
 from cryptography import x509
@@ -61,7 +62,18 @@ def _validate_cert_chain_url(url: str) -> None:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}")
     if (parsed.hostname or "").lower() != CERT_CHAIN_URL_HOSTNAME:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl host: {parsed.hostname!r}")
-    if not parsed.path.startswith(CERT_CHAIN_URL_PATH_PREFIX):
+    # #173: Amazon公式の検証手順は「URLパスを正規化した後に/echo.api/で始まること」を
+    # 要求している(公式SDKの検証器も正規化を実施)。生のparsed.pathへのstartswith判定
+    # のみだと、"/echo.api/../<別バケット>/cert.pem" のような".."を含むパスがこの
+    # チェックを素通りしてしまう。posixpath.normpathで正規化してから判定する。
+    # #223: urlparseが返すparsed.pathはパーセントデコードされない生文字列のため、
+    # "/echo.api/%2e%2e/evil-bucket/cert.pem" のようなエンコード済みの".."は
+    # normpathでも検知できず素通りしてしまう。一方、後段の_fetch_leaf_certificateが
+    # 同じURL文字列をrequests.get()に渡すと、requestsは送信前に%2e%2eを..へデコード
+    # するため、検証時と実際の取得先が食い違う。requestsの挙動に合わせ、normpathへ
+    # 渡す前にunquoteで一度だけパーセントデコードする。
+    normalized_path = posixpath.normpath(unquote(parsed.path))
+    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl path: {parsed.path!r}")
     if (parsed.port or CERT_CHAIN_URL_PORT) != CERT_CHAIN_URL_PORT:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl port: {parsed.port!r}")
@@ -73,8 +85,17 @@ def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     if cached and cached[1] > now:
         return cached[0]
 
-    resp = requests.get(cert_chain_url, timeout=5)
-    resp.raise_for_status()
+    # #179: requests.get/raise_for_status が送出する例外(Timeout/ConnectionError/
+    # HTTPError等の requests.exceptions.RequestException)はAlexaVerificationErrorでは
+    # ないため、router側の`except AlexaVerificationError`を素通りしFastAPIのグローバル
+    # 例外ハンドラに届いて500になっていた(証明書キャッシュミス時にAmazon S3側が一時的に
+    # 遅延・障害の場合に発生しうる)。ここで捕捉しAlexaVerificationErrorに変換することで
+    # routerが本来意図している400を返せるようにする。
+    try:
+        resp = requests.get(cert_chain_url, timeout=5)
+        resp.raise_for_status()
+    except requests.exceptions.RequestException as exc:
+        raise AlexaVerificationError(f"Failed to fetch certificate chain: {exc}") from exc
 
     certs = x509.load_pem_x509_certificates(resp.content)
     if not certs:
@@ -125,6 +146,15 @@ def verify_timestamp(request_timestamp: str, tolerance_seconds: int = TIMESTAMP_
         ts = datetime.fromisoformat(request_timestamp.replace("Z", "+00:00"))
     except (ValueError, AttributeError) as exc:
         raise AlexaVerificationError(f"Invalid request timestamp: {request_timestamp!r}") from exc
+
+    if ts.tzinfo is None:
+        # datetime.fromisoformat はタイムゾーン情報のないISO文字列(例: "2026-08-30T00:00:00")
+        # もパース成功として受理してしまう(ValueErrorにならない)。Alexaのrequest.timestampは
+        # 常にタイムゾーン付き(Z or +00:00)のISO 8601形式のため、これは仕様外の不正な形式として
+        # AlexaVerificationErrorを送出する。ここでガードしないと、後続の
+        # `now(aware) - ts(naive)` がTypeErrorを送出し、ルーターがAlexaVerificationErrorのみを
+        # 捕捉するため500(本来返すべきは400)になっていた。
+        raise AlexaVerificationError(f"Request timestamp missing timezone info: {request_timestamp!r}")
 
     now = datetime.now(timezone.utc)
     delta = abs((now - ts).total_seconds())

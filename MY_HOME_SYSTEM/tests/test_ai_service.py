@@ -101,6 +101,66 @@ def test_extract_referenced_tables_subquery_is_detected():
     assert "quest_users" in tables
 
 
+def test_strip_sql_comments_removes_block_and_line_comments():
+    sql = "SELECT * FROM/**/quest_users--trailing comment\nWHERE 1=1"
+    stripped = ai_service._strip_sql_comments(sql)
+    assert "/*" not in stripped
+    assert "--" not in stripped
+    assert "quest_users" in stripped
+
+
+def test_extract_referenced_tables_bypass_via_block_comment_is_closed():
+    """
+    B3: `FROM/**/tablename` のようにFROM直後を空白なしのブロックコメントで埋めると、
+    旧実装は `FROM\\s+テーブル名` を要求する正規表現がマッチせずテーブル名を検出
+    できなかった(=許可テーブル判定を素通りするバイパス)。tool_search_dbは実行前に
+    _strip_sql_comments でコメントを除去するため、そちらを通した文字列であれば
+    検出できることを確認する。
+    """
+    sql = "SELECT secret FROM child_health_records WHERE 1=0 UNION SELECT pwd FROM/**/secret_admin_table--"
+    stripped = ai_service._strip_sql_comments(sql)
+    tables = ai_service._extract_referenced_tables(stripped)
+    assert "child_health_records" in tables
+    assert "secret_admin_table" in tables
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_disallowed_table_hidden_behind_block_comment():
+    """B3の回帰防止: FROM直後のブロックコメントで隠された許可外テーブルを素通りさせない"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    sql = f"SELECT * FROM {table} WHERE 1=0 UNION SELECT * FROM/**/quest_users--"
+    result = await ai_service.tool_search_db({"sql_query": sql})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_allows_documented_table_with_harmless_comment(monkeypatch):
+    """コメント除去は誤検知(許可テーブルのみの正常クエリの拒否)を起こさないこと"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table} /* comment */ WHERE 1=1"})
+    assert result == "OK"
+
+
+def test_extract_referenced_tables_comma_join_with_alias_catches_second_table():
+    """Issue #224: 1つ目のテーブルにエイリアスが付いたカンマ結合(暗黙CROSS JOIN)
+    でも2つ目のテーブルを抽出できること。エイリアスが無い場合(H-6)は直後がカンマ
+    になるため検出できていたが、`FROM a x, b y`のようにエイリアスが挟まると、
+    識別子の直後がカンマではなくエイリアス文字列になり抽出漏れしていた。"""
+    sql = "SELECT s.* FROM power_usage c, quest_users s WHERE c.id = s.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "power_usage" in tables
+    assert "quest_users" in tables
+
+
+def test_extract_referenced_tables_comma_join_with_as_alias_catches_second_table():
+    """Issue #224: `AS`付きエイリアスのカンマ結合でも2つ目のテーブルを抽出できること"""
+    sql = "SELECT s.* FROM power_usage AS c, quest_users AS s WHERE c.id = s.id"
+    tables = ai_service._extract_referenced_tables(sql)
+    assert "power_usage" in tables
+    assert "quest_users" in tables
+
+
 @pytest.mark.asyncio
 async def test_tool_search_db_rejects_non_select():
     result = await ai_service.tool_search_db({"sql_query": "DELETE FROM quest_users"})
@@ -119,6 +179,17 @@ async def test_tool_search_db_blocks_comma_joined_disallowed_table():
     """H-6の回帰防止: 許可テーブルとのカンマ結合で quest_users を素通りさせない"""
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}, quest_users"})
+    assert "許可されていない" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_blocks_comma_joined_disallowed_table_with_alias():
+    """Issue #224の回帰防止: 1つ目のテーブルにエイリアスが付いたカンマ結合で
+    quest_users を素通りさせない(Issueの再現条件そのもの)"""
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db(
+        {"sql_query": f"SELECT s.* FROM {table} c, quest_users s WHERE c.id = s.id"}
+    )
     assert "許可されていない" in result
 
 
@@ -154,10 +225,16 @@ async def test_tool_search_db_without_from_or_join_returns_error():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_no_matching_rows_returns_not_found_message(monkeypatch):
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): [])
+    """common.execute_read_query は0件時、実際には(空リストではなく)
+    "該当するデータはありませんでした。"という非空文字列を返す(core/database.py参照)。
+    その文字列がそのまま呼び出し元へ返ることを確認する。"""
+    monkeypatch.setattr(
+        ai_service.common, "execute_read_query",
+        lambda sql, params=(): "該当するデータはありませんでした。",
+    )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
-    assert "見つかりませんでした" in result
+    assert "ありませんでした" in result
 
 
 @pytest.mark.asyncio
@@ -169,6 +246,23 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert "DB検索エラー" in result
+
+
+@pytest.mark.asyncio
+async def test_tool_search_db_internal_error_string_is_not_passed_through_as_data(monkeypatch):
+    """Issue #180の回帰テスト: common.execute_read_query は不正なSQL等の実行時例外を
+    自身の内部でキャッチし、送出せず"検索エラー: ..."という非空文字列として返す設計
+    (core/database.py参照)。以前はこれが正常な検索結果と区別されずAIへそのまま
+    渡っていた(かつ`if not rows:`は非空文字列に対して常に偽となるデッドコードだった)。
+    このエラー文字列が検出され、DB検索エラーとして扱われることを確認する。"""
+    monkeypatch.setattr(
+        ai_service.common, "execute_read_query",
+        lambda sql, params=(): "検索エラー: no such table: xyz",
+    )
+    table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
+    result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
+    assert "DB検索エラー" in result
+    assert "no such table: xyz" in result
 
 
 class TestSimpleRateLimiter:
@@ -422,6 +516,32 @@ class TestAnalyzeTextAndExecute:
 
         assert "記録完了: カレー" in result
         assert "制限を超過" in result
+
+    @pytest.mark.asyncio
+    async def test_generic_google_api_error_during_final_response_returns_tool_result_with_note(
+        self, ai_configured, monkeypatch
+    ):
+        """Issue #232の回帰テスト: 1回目呼び出しにはGoogleAPIError専用メッセージが
+        あるが、ツール実行後の2回目呼び出しは以前ResourceExhausted用フォールバック
+        しか持たず、それ以外のGoogleAPIErrorは関数末尾の汎用except Exception
+        (「処理中にエラーが発生しました」)まで伝播していた。この時点でツール(DB書き込み)は
+        既に成功しているため、ユーザーには保存が失敗したかのように見え、再送信による
+        重複記録を誘発しうる不具合があった。ResourceExhaustedと同様にtool_resultを
+        返し、実行結果を正しく伝えることを確認する。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        mock_retry = AsyncMock(
+            side_effect=[make_response(function_call=fc), GoogleAPIError("fatal, non-retryable")]
+        )
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(
+            ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー")
+        )
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+        assert "処理中にエラーが発生しました" not in result
 
 
 class TestCallGeminiApiWithRetry:

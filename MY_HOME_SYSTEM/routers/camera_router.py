@@ -3,7 +3,6 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
 import config
 from services import camera_service
 
@@ -116,6 +115,12 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 @router.get("/live/{camera_id}/{segment_file}")
 def get_live_segment(camera_id: str, segment_file: str):
     """ライブのHLSセグメント（.tsファイル）を配信"""
+    # _resolve_segment_pathはパストラバーサルのみを検査し拡張子は見ないため、
+    # ここで明示的に許可拡張子を絞らないと、同ディレクトリ内のffmpeg.log
+    # （RTSP認証情報を含みうる）等がそのまま配信されてしまう。
+    if not segment_file.endswith(".ts"):
+        raise HTTPException(status_code=400, detail="Unsupported file extension")
+
     cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
     if not cam_conf:
         raise HTTPException(status_code=404, detail="Camera not found")

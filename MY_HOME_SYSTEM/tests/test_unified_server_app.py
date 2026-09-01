@@ -12,9 +12,11 @@ unified_server.py のアプリレベルのテスト。
 - lifespan (起動/終了) が監視プロセスの起動・終了を正しく行うこと
   (実サブプロセスは起動せず subprocess.Popen をモックする)
 """
+import logging
 import os
 import subprocess
 import sys
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
@@ -22,6 +24,87 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
 import unified_server
+
+
+def _make_uvicorn_access_record(method: str, path: str, status_code: int) -> logging.LogRecord:
+    """uvicorn(h11_impl.py/httptools_impl.py)の実際のアクセスログフォーマット
+    ('%s - "%s %s HTTP/%s" %d')を再現したLogRecordを生成する。
+    ステータスコードは%位置引数の最後にあり、前方スペースのみで末尾に
+    スペースは付かない点が本テストの要。"""
+    return logging.LogRecord(
+        name="uvicorn.access", level=logging.INFO, pathname=__file__, lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:12345", method, path, "1.1", status_code),
+        exc_info=None,
+    )
+
+
+class TestSilencePolicyFilterMatchesRealUvicornLogFormat:
+    """Issue #177の回帰テスト: SilencePolicyFilterは" 200 "/" 304 "という
+    前後スペース付きの部分文字列でステータスコードを判定していたが、実際の
+    uvicornアクセスログはステータスコードがメッセージ末尾にあり後方スペースが
+    付かない('... HTTP/1.1" 200'のように末尾が"200"で終わる)ため、この判定は
+    常にFalseとなり抑制対象キーワード判定に到達しなかった(死にコード)。"""
+
+    def test_polling_endpoint_200_is_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/data", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is False, (
+            "ポーリングエンドポイントへの200応答が抑制されていない: "
+            f"{record.getMessage()!r}"
+        )
+
+    def test_static_asset_304_is_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/assets/app.js", 304)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is False
+
+    def test_non_silenced_path_with_200_still_passes_through(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/complete", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
+
+    def test_error_status_is_never_suppressed(self):
+        record = _make_uvicorn_access_record("GET", "/api/quest/data", 500)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
+
+    def test_post_request_is_never_suppressed_even_with_200(self):
+        record = _make_uvicorn_access_record("POST", "/api/quest/data", 200)
+        filt = unified_server.SilencePolicyFilter()
+        assert filt.filter(record) is True
+
+
+class TestRunUvicornServerDoesNotSilenceAccessLoggerLevel:
+    """Issue #229の回帰テスト。
+
+    以前は本番起動経路(__main__)が uvicorn.config.LOGGING_CONFIG を書き換え、
+    "uvicorn.access" ロガー自体のレベルを WARNING に固定していた。uvicornの
+    アクセスログは常に logger.info()(レベル20)で出力されるため、ロガーの
+    レベルチェックの時点でログレコードが作られず、lifespan()内で登録される
+    SilencePolicyFilter(GETの200/304ポーリングのみを選別して抑制し、POST・
+    エラーは残す設計)が一度も呼び出されなかった。上記のfilter()単体テスト
+    (TestSilencePolicyFilterMatchesRealUvicornLogFormat)はfilter()を直接呼び出す
+    だけなので、この「ロガーのレベルチェックでレコード自体が作られない」という
+    不具合を検知できない。本テストは、実際の起動エントリポイントが
+    uvicorn.run()へどのようなlog_configを渡すかを検証することで、この経路を
+    直接カバーする。
+    """
+
+    def test_uvicorn_run_is_not_given_a_log_config_that_silences_access_logger(self):
+        with patch("uvicorn.run") as mock_run:
+            unified_server._run_uvicorn_server()
+
+        assert mock_run.call_count == 1
+        _, kwargs = mock_run.call_args
+        log_config = kwargs.get("log_config")
+        if log_config is not None:
+            access_level = log_config.get("loggers", {}).get("uvicorn.access", {}).get("level")
+            assert access_level != "WARNING", (
+                "uvicorn.run()に渡されたlog_configがuvicorn.accessロガーの"
+                "レベルをWARNINGへ固定しており、SilencePolicyFilterに"
+                "アクセスログが一切到達しなくなる"
+            )
 
 
 def test_cors_middleware_uses_config_cors_origins():
@@ -114,6 +197,29 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
         """
         res = api_client.get("/health", headers={"X-Forwarded-For": "203.0.113.5"})
         assert res.status_code == 200
+
+    def test_external_access_is_actually_logged(self, api_client, monkeypatch):
+        """Issue #182の回帰テスト: core/logger.pyのsetup_logging()はロガーレベルを
+        INFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、
+        以前はlogger.debug()での「外部アクセスの記録」が常に抑制され、CLAUDE.mdが
+        明記する「非プライベートネットワークからのリクエストをログに記録する」という
+        意図した挙動が事実上機能していなかった。実際にロガーへ記録されることを確認する
+        (INFOレベルで確実に出力されるINFOメソッド経由での呼び出しを検証)。"""
+        info_calls = []
+        monkeypatch.setattr(unified_server.logger, "info", lambda msg: info_calls.append(msg))
+        debug_calls = []
+        monkeypatch.setattr(unified_server.logger, "debug", lambda msg: debug_calls.append(msg))
+
+        # 203.0.113.0/24(TEST-NET-3)はPythonのipaddressモジュール上ではis_private=True
+        # 判定される(ドキュメント用として非公開ネットワーク扱い)ため、8.8.8.8のような
+        # 確実に非プライベートと判定されるIPを使う。
+        res = api_client.get("/health", headers={"X-Forwarded-For": "8.8.8.8"})
+
+        assert res.status_code == 200
+        assert any("Allowed external access via Cloudflare" in m for m in info_calls), (
+            "外部アクセスがlogger.info経由で記録されていない"
+        )
+        assert debug_calls == [], "外部アクセスの記録がlogger.debugのまま(常に抑制される)になっている"
 
 
 class _FakeProcess:

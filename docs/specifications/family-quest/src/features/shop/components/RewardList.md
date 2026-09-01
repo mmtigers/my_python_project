@@ -50,8 +50,8 @@
   * `onBuy`: `(reward: Reward) => void` (商品購入時のコールバック関数)
   * `currentUser`: `User` (現在のユーザー情報)
 * 根拠: `RewardListProps`インターフェース (行番号: 5〜10 / 抜粋: `interface RewardListProps {\n  rewards: Reward[];\n  userGold: number;\n  onBuy: (reward: Reward) => void;\n  currentUser: User;\n}`)
-* フィルタリングにおける`target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`（`isAdult`、20行目）で行われ、`target === 'mom'`/`'dad'`の判定は引き続き`currentUser.user_id`の直接比較（24〜25行目）で行われる。
-* 根拠: (行番号: 20, 22〜25 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`)
+* フィルタリングにおける`target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`（`isAdult`、20行目）で行われる。**（Issue #239で修正）** それ以外の`target`値（具体的なuser_id宛て、または将来追加されうる未知の値）は、以前は`'mom'`/`'dad'`のみを個別に`if`分岐でハードコード比較し、それ以外は無条件で`true`（全員へ表示）を返す安全でないフォールバックになっていた。修正後は`QuestList.tsx`のターゲット判定（`q.target !== currentUser?.user_id`）と同様の安全側（deny-by-default）に統一し、`target === currentUser.user_id`の完全一致でのみ表示する。これにより`'mom'`/`'dad'`以外の任意のuser_id宛てtarget（例: `'son'`/`'daughter'`）も正しく本人以外には表示されなくなった。
+* 根拠: (行番号: 20, 22〜23, 29 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'children') return !isAdult;`, `return target === currentUser.user_id;`)
 
 
 * **戻り値/レスポンス**: `JSX.Element`
@@ -62,8 +62,8 @@
 * 根拠: イベントハンドラ (行番号: 59 / 抜粋: `onClick={() => canAfford && onBuy(reward)}`)
 
 
-* **エラーハンドリング**: オブジェクトのプロパティ欠損に対して論理和(`||`)演算子を用いてデフォルト値へフォールバックしている。
-* 根拠: 変数代入 (行番号: 16, 32〜33, 51, 54, 70, 76 / 抜粋: `const target = r.target || 'all';` など)
+* **エラーハンドリング**: オブジェクトのプロパティ欠損に対して論理和(`||`)演算子を用いてデフォルト値へフォールバックしている。**（#291で修正）** `cost_gold || cost`、`reward_id || id`、`description || desc`、`icon || icon_key`という複数フィールド名間のフォールバックは、`id`/`cost`/`desc`/`icon`が`Reward`型定義から削除された（バックエンドAPIから一度も送られてこない幽霊フィールドだったため）ことに伴い廃止され、`cost_gold`/`reward_id`/`description`/`icon_key`という実カラム名のみを参照する。`reward_id`が無い場合の`index`へのフォールバックのみ引き続き残っている。
+* 根拠: 変数代入 (行番号: 16, 34〜35, 47, 53, 56, 72 / 抜粋: `const target = r.target || 'all';`, `const costA = a.cost_gold || 0;`, `const rId = reward.reward_id || index;` など)
 
 
 
@@ -79,23 +79,19 @@ flowchart TD
     TargetCheck -- "all"または未指定 --> TargetAll[対象: 全員]
     TargetCheck -- "children" --> TargetChildren[対象: 子供]
     TargetCheck -- "adults" --> TargetAdults[対象: 大人]
-    TargetCheck -- "mom" --> TargetMom[対象: 母親]
-    TargetCheck -- "dad" --> TargetDad[対象: 父親]
+    TargetCheck -- "上記以外(具体的なuser_id宛て等)" --> TargetSpecific["対象: target値と一致するuser_id<br>(#239で安全側フォールバックに変更)"]
 
     TargetAll --> FilterKeep[リストに残す]
     TargetChildren --> IsAdultCheck1{currentUser.role が role_adult 以外か?}
     TargetAdults --> IsAdultCheck2{currentUser.role が role_adult か?}
-    TargetMom --> IsMomCheck{user_idがmomか?}
-    TargetDad --> IsDadCheck{user_idがdadか?}
+    TargetSpecific --> IsSpecificCheck{"target === currentUser.user_id か?"}
 
     IsAdultCheck1 -- Yes --> FilterKeep
     IsAdultCheck1 -- No --> FilterDrop[除外]
     IsAdultCheck2 -- Yes --> FilterKeep
     IsAdultCheck2 -- No --> FilterDrop
-    IsMomCheck -- Yes --> FilterKeep
-    IsMomCheck -- No --> FilterDrop
-    IsDadCheck -- Yes --> FilterKeep
-    IsDadCheck -- No --> FilterDrop
+    IsSpecificCheck -- Yes --> FilterKeep
+    IsSpecificCheck -- "No(#239修正前は無条件でYes扱いだった)" --> FilterDrop
 
     FilterKeep --> SortProcess[フィルタリング済リストのソート]
     FilterDrop --> SortProcess
@@ -156,20 +152,20 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **判定基準の混在**: `target === 'children'`/`'adults'`の判定は`currentUser.role === 'role_adult'`という役割ベースの判定（`isAdult`）を用いる一方、`target === 'mom'`/`'dad'`の判定は依然として`currentUser.user_id`のハードコードされた文字列比較（`'mom'`/`'dad'`）を用いている。同じフィルタリング処理内で判定基準（role vs user_id）が統一されていない点に留意が必要。
-* 根拠: 条件式 (行番号: 20, 24, 25 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'mom') return currentUser.user_id === 'mom';`, `if (target === 'dad') return currentUser.user_id === 'dad';`)
+* **安全側フォールバックへの統一（Issue #239で修正）**: 以前は`target === 'mom'`/`'dad'`のみを個別にハードコード比較し、それ以外の`target`値（`'son'`/`'daughter'`等の具体的なuser_id宛て、または将来追加されうる未知の値）はどの`if`分岐にも一致せず`return true`（無条件で全員へ表示）に落ちる安全でない実装だった。`quest_data.py`のREWARDSに該当targetが存在しなかったため実データでは未発火だったが、個人宛て報酬が追加された時点で顕在化する潜在バグだった。修正後は`QuestList.tsx`のターゲット判定（`q.target !== currentUser?.user_id`なら除外）と同様の安全側（deny-by-default）に統一し、`'children'`/`'adults'`以外は`target === currentUser.user_id`の完全一致でのみ表示する。
+* 根拠: 条件式 (行番号: 20, 22〜23, 29 / 抜粋: `const isAdult = currentUser.role === 'role_adult';`, `if (target === 'children') return !isAdult;`, `return target === currentUser.user_id;`)
 
 
-* **プロパティの非正規化（フォールバック）**: 一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`、`icon`と`icon_key`）が混在しており、データ構造が統一されていないことが窺える。
-* 根拠: 変数代入 (行番号: 32〜33, 51, 54, 70, 76 / 抜粋: `const displayText = reward.description || reward.desc || reward.category || 'General';` など)
+* **プロパティの非正規化（フォールバック）は解消済み（Issue #291）**: かつては一つのデータに対して複数のプロパティ名（例: `cost_gold`と`cost`、`reward_id`と`id`、`description`と`desc`と`category`、`icon`と`icon_key`）が混在していたが、`id`/`cost`/`desc`/`icon`はバックエンドAPIから一度も送られてこない幽霊フィールドだったと判明したため`Reward`型定義から削除された。現在は`cost_gold`/`reward_id`/`description`（無ければ`category`）/`icon_key`という実カラム名のみを参照する（`category`へのフォールバックは引き続き残る）。
+* 根拠: 変数代入 (行番号: 34〜35, 47, 53, 56, 72 / 抜粋: `const displayText = reward.description || reward.category || 'General';` など)
 
 
-* **リストのKey属性におけるインデックス使用**: 一意のID（`reward_id`や`id`）が存在しない場合、配列の`index`をフォールバックとしてReactの`key`に指定している。コード上のコメントでは「バックエンドのデータ不備がある場合のみ発生するベストエフォートの保険」として意図的に残されているとされているが、リストが動的に増減または並び替わる場合はレンダリングバグやパフォーマンス低下を引き起こす可能性がある点は変わらない。
-* 根拠: 変数代入およびJSX (行番号: 48〜51, 58 / 抜粋: `const rId = reward.reward_id || reward.id || index;`, `key={rId}`)
+* **リストのKey属性におけるインデックス使用**: 一意のID（`reward_id`）が存在しない場合、配列の`index`をフォールバックとしてReactの`key`に指定している。コード上のコメントでは「バックエンドのデータ不備がある場合のみ発生するベストエフォートの保険」として意図的に残されているとされているが、リストが動的に増減または並び替わる場合はレンダリングバグやパフォーマンス低下を引き起こす可能性がある点は変わらない。**（#291で修正）** `id`フィールドが`Reward`型定義から削除されたため、`reward.reward_id || reward.id || index`から`reward.reward_id || index`という`reward_id`のみを起点にしたフォールバックに簡略化された。
+* 根拠: 変数代入およびJSX (行番号: 50, 53, 82 / 抜粋: `const rId = reward.reward_id || index;`, `key={rId}`)
 
 
-* **未使用アイコンインポートの不在**: 以前は見出し用に`lucide-react`の`ShoppingBag`アイコンがインポートされていたが、現在の実装では`lucide-react`自体がインポートされておらず、アイコン表示は各商品カード内の`reward.icon || reward.icon_key || '🎁'`のみとなっている（見出しアイコンは廃止されている）。
-* 根拠: ファイル先頭のインポート文一覧に`lucide-react`が存在しない (行番号: 1〜3 / 抜粋: `import React, { useMemo } from 'react';\nimport { Reward, User } from '@/types';\nimport { Card } from '@/components/ui/Card';`)
+* **未使用アイコンインポートの不在**: 以前は見出し用に`lucide-react`の`ShoppingBag`アイコンがインポートされていたが、現在の実装では`lucide-react`自体がインポートされておらず、アイコン表示は各商品カード内の`reward.icon_key || '🎁'`のみとなっている（見出しアイコンは廃止されている。**（#291で修正）** 以前あった`reward.icon`への参照は、`icon`が幽霊フィールドと判明し型定義から削除されたため廃止された）。
+* 根拠: ファイル先頭のインポート文一覧に`lucide-react`が存在しない (行番号: 1〜3 / 抜粋: `import React, { useMemo } from 'react';\nimport { Reward, User } from '@/types';\nimport { Card } from '@/components/ui/Card';`)、アイコン参照 (行番号: 72 / 抜粋: `{reward.icon_key || '🎁'}`)
 
 
 
@@ -185,7 +181,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `Reward` / `User`の詳細なデータ構造 | `family-quest/src/types/index.ts`を直接確認した。`Reward`インターフェース(76〜88行目)は`id?`/`reward_id?`、`desc?`/`description?`、`cost: number`(必須)/`cost_gold?`(任意)、`icon?`/`icon_key?`という類似プロパティの併存が確認でき、本ファイルの`reward.cost_gold || reward.cost`(32〜33行目)や`reward.description || reward.desc || reward.category`(54行目)というフォールバックの実態と一致する。`User`インターフェース(9〜26行目)は`role?: string`(19行目)と`gold: number`(必須、18行目)を持ち、本ファイルが参照する`currentUser.role`/`userGold`と対応することを確認した。 | 直接ソース確認: `family-quest/src/types/index.ts:9-26,76-88` |
+| `Reward` / `User`の詳細なデータ構造 | `family-quest/src/types/index.ts`を直接確認した。**（#291で修正）** `Reward`インターフェースはかつて`id?`/`reward_id?`、`desc?`/`description?`、`cost: number`(必須)/`cost_gold?`(任意)、`icon?`/`icon_key?`という類似プロパティを併存させていたが、`id`/`cost`/`desc`/`icon`はバックエンドAPIから一度も送られてこない幽霊フィールドだったと判明したため型定義から削除され、現在は`reward_id?`/`description?`/`cost_gold: number`(必須)/`icon_key?`のみが定義されている。本ファイルの`reward.cost_gold || 0`や`reward.description || reward.category`というシンプルな参照は、この型定義の一本化と一致する。`User`インターフェースは`role?: string`と`gold: number`(必須)を持ち、本ファイルが参照する`currentUser.role`/`userGold`と対応することを確認した。 | 直接ソース確認: `family-quest/src/types/index.ts` |
 | `onBuy` 実行時の具体的なシステム挙動 | `family-quest/src/features/shop/components/RewardShop.tsx`と`family-quest/src/App.tsx`を直接確認した。`RewardShop`(14〜25行目)は`onBuy`propをそのまま`RewardList`へ素通しするのみで独自処理は持たない。縦画面側は`App.tsx`の`handleBuyReward`(254〜259行目)が呼ばれ、`confirmUser`/`confirmTarget`/`confirmMode('purchase')`をセットして`'select'`音を再生するのみで、実際の購入は`ConfirmModal`で「はい」が押された際の`executeConfirm`(262〜296行目)内で`buyReward(actingUser, confirmTarget as Reward)`(269行目、`useGameData`が返す関数)が呼ばれ、成功時にトースト表示と`'clear'`音再生(271〜274行目)、失敗時は`resolveErrorText`によるエラーメッセージ表示と`'cancel'`音再生(283〜286行目)を行う。横画面側は`FamilyDashboard.tsx`の`FamilyPanel`が`onBuyReward={(r) => onBuyReward(user, r)}`(107行目)として同じ`App.tsx`の`handleBuyReward`に委譲しており、最終的な購入処理の実体は縦横どちらの経路でも共通の`executeConfirm`である。 | 直接ソース確認: `family-quest/src/features/shop/components/RewardShop.tsx:14-25`, `family-quest/src/App.tsx:254-296`, `family-quest/src/features/family/components/FamilyDashboard.tsx:107` |
 | `Card` コンポーネントの内部実装 | `family-quest/src/components/ui/Card.tsx`を直接確認した。`Card`(11〜49行目)は`variant`prop(既定`'default'`)に応じて`switch`文(17〜40行目)で`variantStyle`(border色・背景色等)を切り替えるが、本ファイル(`RewardList.tsx`)は`variant`を一切指定せず`className`のみを直接渡している(57〜65行目)ため、実際には常に既定の`'default'`スタイル(15行目)に本ファイル独自の`className`（購入可否に応じた色分け）が上書き合成される形で描画される。`Card`はクリックイベントをそのまま`{...props}`経由でルート`div`に伝播させ、`onClick`が渡されていれば`cursor-pointer`等の`interactiveStyle`を追加する(43行目)。 | 直接ソース確認: `family-quest/src/components/ui/Card.tsx:11-49`（呼び出し側: `family-quest/src/features/shop/components/RewardList.tsx:57-65`） |
 

@@ -2,15 +2,12 @@
 import sqlite3
 import datetime
 import asyncio
-from typing import List, Tuple, Optional, Union, Dict, Any
+from typing import Union
 
 # LINE Messaging API Models
 from linebot.v3.messaging import (
     TextMessage,
-    FlexMessage,
-    QuickReply,
-    QuickReplyItem,
-    MessageAction
+    FlexMessage
 )
 
 import config
@@ -20,7 +17,7 @@ from core.utils import get_now_iso, get_today_date_str
 from core.database import save_log_async
 
 # Quest Service Integration
-from services.quest_service import game_system, quest_service, user_service
+from services.quest_service import game_system, quest_service, ROLE_CHILD
 
 # ロガー設定
 logger = setup_logging("line_service")
@@ -138,9 +135,20 @@ async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMess
         if not quests:
             return TextMessage(text="現在受注できるクエストはありません🛌")
 
+        # 兄妹連携クエスト(target='siblings')は特定のuser_idとは一致しないため、
+        # 単純な != user_id 比較では常にスキップされ誰にも表示されなかった。
+        # 対象は子供(role_child)全員であり、家族画面(FamilyDashboard.tsx等)の
+        # 対象判定と同じ意味付けにする。
+        users = data.get("users", [])
+        user_role = next((u.get('role') for u in users if u.get('user_id') == user_id), None)
+
         lines = ["⚔️ 本日のクエスト"]
         for q in quests:
-            if q['target'] != 'all' and q['target'] != user_id:
+            target = q['target_user']
+            if target == 'siblings':
+                if user_role != ROLE_CHILD:
+                    continue
+            elif target != 'all' and target != user_id:
                 continue
                 
             bonus = ""
@@ -173,9 +181,6 @@ async def process_approval_command(approver_id: str, text: str) -> TextMessage:
             msg = f"✅ 承認しました！\n獲得: {res['earnedExp']}EXP, {res['earnedGold']}G"
             if res.get('leveledUp'):
                 msg += f"\n🎉 レベルアップ！ Lv.{res['newLevel']}"
-            if res.get('bossEffect'):
-                dmg = res['bossEffect']['damage']
-                msg += f"\n⚔️ ボスに {dmg} ダメージ！"
             return TextMessage(text=msg)
             
         elif "却下" in cmd:

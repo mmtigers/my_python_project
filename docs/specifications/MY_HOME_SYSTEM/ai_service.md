@@ -28,7 +28,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理制御およびスレッド委譲（`Lock`, `to_thread`） | `import asyncio` (抜粋: "import asyncio") |
-| `re` | 標準ライブラリ | `tool_search_db`が生成SQLから参照テーブル名を抽出するための正規表現マッチング | `import re` (行番号: 3 / 抜粋: "import re") |
+| `re` | 標準ライブラリ | `tool_search_db`が生成SQLから参照テーブル名を抽出するための正規表現マッチング、および**（B3で追加）** SQLコメント(`_SQL_COMMENT_RE`)を除去するための正規表現マッチング | `import re` (行番号: 3 / 抜粋: "import re") |
 | `time` | 標準ライブラリ | レート制限における経過時間計測 | `import time` (抜粋: "import time") |
 | `json` | 標準ライブラリ | インポートされているが未使用 | `import json` (抜粋: "import json") |
 | `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得 | `import traceback` (抜粋: "import traceback") |
@@ -49,7 +49,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` の各種プロパティ | APIキーや各種定数の具体的な値や構造が不明なため | `config.GEMINI_API_KEY` 等 (抜粋: "if config.GEMINI_API_KEY:") |
-| `common.execute_read_query` | 内部のDB接続仕様、戻り値の正確なデータ構造、発生しうる例外が不明なため | `common.execute_read_query` (抜粋: "common.execute_read_query, sql") |
+| `common.execute_read_query` | 内部のDB接続仕様は不明なため。戻り値については、Issue #180の修正で`tool_search_db`側が`"検索エラー:"`プレフィックス付き文字列（エラー時）という部分的な構造を前提とするようになったが、それ以外（正常時のJSON形式データ・該当なしメッセージの厳密な形式）の詳細は本ファイルからは分からない（[database.md](./database.md)参照） | `common.execute_read_query` (抜粋: "common.execute_read_query, sql") |
 | `line_service.log_child_health` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_child_health` (抜粋: "await line_service.log_child_health") |
 | `line_service.log_food_record` | 関数内部の挙動、戻り値（`msg_obj.text`を持つオブジェクト）の詳細な型が不明なため | `line_service.log_food_record` (抜粋: "await line_service.log_food_record") |
 | `setup_logging` | ロガーの具体的な出力先やフォーマット仕様が不明なため | `setup_logging("ai_service")` (抜粋: "setup_logging("ai_service")") |
@@ -152,134 +152,175 @@
 ### `ALLOWED_SEARCH_TABLES` (変数)
 
 * **役割**: `tool_search_db`がSELECTで参照することを許可するテーブル名の集合(set)。`config.SQLITE_TABLE_CHILD`, `_FOOD`, `_SHOPPING`, `_POWER_USAGE`の4テーブルのみを許可する。
-* 根拠: `ALLOWED_SEARCH_TABLES = {...}` (行番号: 132-138 / 抜粋: "ALLOWED_SEARCH_TABLES = {")
+* 根拠: `ALLOWED_SEARCH_TABLES = {...}` (行番号: 141-146 / 抜粋: "ALLOWED_SEARCH_TABLES = {")
+
+
+
+### `_skip_optional_alias` (関数、Issue #224で追加)
+
+* **役割**: `_extract_referenced_tables`が使う内部ヘルパー。指定位置に続くテーブルエイリアス（`AS name`または`name`）があれば読み飛ばした位置を返す。次の識別子が`_SQL_KEYWORDS_NOT_ALIAS`に含まれるSQLキーワード（`WHERE`/`JOIN`等、テーブル参照の終端を示すもの）の場合はエイリアスとみなさず元の位置をそのまま返す。**導入経緯**: `_extract_referenced_tables`はカンマ結合(暗黙CROSS JOIN)の2つ目以降のテーブルを、直前のテーブル名の直後にカンマが続くかで判定していたが、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと識別子の直後がカンマではなくエイリアス文字列になり、カンマ判定が即座に失敗して2つ目のテーブルが検出漏れしていた。
+* 根拠: 関数定義 (行番号: 162〜169 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
+
+
+
+### `_SQL_COMMENT_RE` (変数、B3で追加)
+
+* **役割**: SQLのブロックコメント(`/* ... */`)および行コメント(`-- ...`)にマッチする正規表現。`_extract_referenced_tables`は`FROM`/`JOIN`キーワードの直後に空白が続くことを前提としているが、`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むとこの前提が崩れ、テーブル名を検出できず`ALLOWED_SEARCH_TABLES`による許可テーブル判定をすり抜けられる（UNION SELECTと組み合わせた許可外テーブルの読み取りバイパスを実証済み）。`tool_search_db`が実行前に`_strip_sql_comments`経由でこの正規表現を使い、コメント部分を空白へ置換して無害化する。
+* 根拠: `_SQL_COMMENT_RE = re.compile(r"/\*.*?\*/|--[^\n]*", re.DOTALL)` (行番号: 172〜177 / 抜粋: "# B3: `FROM/**/tablename` のようにキーワードと識別子の間にSQLコメントを挟むと、\n...\n_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
+* **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルのコンパイル済み正規表現）
+* 根拠: (行番号: 177 / 抜粋: "_SQL_COMMENT_RE = re.compile(r\"/\\*.*?\\*/|--[^\\n]*\", re.DOTALL)")
+
+
+
+### `_strip_sql_comments` (関数、B3で追加)
+
+* **役割**: `_SQL_COMMENT_RE`を使い、渡されたSQL文字列中のブロックコメント・行コメントをすべて半角スペース1文字に置換して返す。`tool_search_db`がSELECT判定・`_extract_referenced_tables`によるテーブル抽出の前段でこれを呼び出し、以降の判定・実行はすべてコメント除去後のSQLに対して行う。
+* 根拠: `def _strip_sql_comments(sql: str) -> str:\n    return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 180〜181)
+
+
+* **引数/リクエスト**: `sql: str`
+* 根拠: (行番号: 180 / 抜粋: "def _strip_sql_comments(sql: str) -> str:")
+
+
+* **戻り値/レスポンス**: `str`（コメント部分を空白に置換したSQL文字列）
+* 根拠: `return _SQL_COMMENT_RE.sub(" ", sql)` (行番号: 181)
+
+
+* **副作用**: なし
+* 根拠: (行番号: 180〜181)
+
+
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 180〜181)
 
 
 
 ### `_extract_referenced_tables` (関数)
 
-* **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。
-* 根拠: 関数Docstring (行番号: 143〜150 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")
+* **役割**: SQL文字列中で `FROM` / `JOIN` が参照するテーブル名をすべて抽出する簡易パーサ。単純な「FROM/JOIN直後の1識別子」だけでなく、`FROM a, b` のような暗黙CROSS JOIN（カンマ結合）の2つ目以降のテーブルや、`FROM (SELECT ... FROM x) AS y` のようなサブクエリ内の`FROM`/`JOIN`（`re.finditer`がSQL全文を走査するため自然に検出される）も対象にする（H-6での修正）。**（Issue #224で修正）** カンマ結合の各テーブル名の直後で`_skip_optional_alias`によりエイリアスを読み飛ばしてからカンマ判定を行うようになり、`FROM power_usage c, quest_users s`のようにエイリアス付きの1つ目のテーブルに続く2つ目のテーブルも検出できるようになった。**（B3で強化）** 呼び出し元`tool_search_db`が`_strip_sql_comments`でコメントを除去した後のSQLを渡すようになったため、本関数自体は変更されていないが、`FROM/**/tablename`のようなコメント難読化によるテーブル名検出漏れ（許可テーブル判定のバイパス）は呼び出し側の前処理で塞がれるようになった。
+* 根拠: 関数Docstring (行番号: 186〜196 / 抜粋: "`FROM a, b` のような暗黙CROSS JOIN(カンマ結合)の2つ目以降のテーブル")、エイリアス読み飛ばし (行番号: 213, 219 / 抜粋: "pos = _skip_optional_alias(sql, m.end())")
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: 関数シグネチャ (行番号: 141 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
+* 根拠: 関数シグネチャ (行番号: 184 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
 
 
 * **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト。同一テーブルが複数回参照されれば重複を含みうる)
-* 根拠: `return tables` (行番号: 172 / 抜粋: "return tables")
+* 根拠: `return tables` (行番号: 220 / 抜粋: "return tables")
 
 
 * **副作用**: なし
-* 根拠: `tables: List[str] = []` へのローカル追加のみ (行番号: 152 / 抜粋: "tables: List[str] = []")
+* 根拠: `tables: List[str] = []` へのローカル追加のみ (行番号: 198 / 抜粋: "tables: List[str] = []")
 
 
 * **エラーハンドリング**: なし（正規表現マッチングのみ。マッチしない場合は空リストを返す）。`(` トークンにマッチした場合（サブクエリの開始）は `continue` でスキップし、テーブル名として追加しない。
-* 根拠: `if token == "(":` (行番号: 159〜161 / 抜粋: "サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。")
+* 根拠: `if token == "(":` (行番号: 205〜207 / 抜粋: "サブクエリの開始。中身のFROM/JOINはこのループが引き続き検出する。")
 
 
 
 ### `tool_search_db` (関数)
 
-* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。
-* 根拠: `async def tool_search_db` (行番号: 175 / 抜粋: "async def tool_search_db")
+* **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `common.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
+* 根拠: `async def tool_search_db` (行番号: 223 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 237〜239 / 抜粋: "# B3: コメントによる検出バイパスを防ぐため、以降の判定・実行はすべて\n    # コメント除去後のSQLに対して行う。\n    sql = _strip_sql_comments(sql)")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 175 / 抜粋: "args: Dict[str, Any]")
+* 根拠: 関数シグネチャ (行番号: 223 / 抜粋: "args: Dict[str, Any]")
 
 
-* **戻り値/レスポンス**: `str`
-* 根拠: `return str(rows)[:2000]` またはエラー文字列 (行番号: 208 / 抜粋: "return str(rows)[:2000]")
+* **戻り値/レスポンス**: `str`。正常時は`common.execute_read_query`の戻り値文字列（該当データなしメッセージまたはJSON形式の検索結果文字列、2000文字でカット）をそのまま返す。`execute_read_query`内部でエラーが発生した場合（`"検索エラー:"`プレフィックスで検出）は`"DB検索エラー: ..."`という別形式のエラー文字列に変換して返す。
+* 根拠: `return result[:2000]` (行番号: 271 / 抜粋: "return result[:2000]")、エラー変換 (行番号: 266〜268 / 抜粋: "if result.startswith(\"検索エラー:\"):\n        logger.warning(f\"⚠️ search_db query failed: {result} (sql={sql!r})\")\n        return f\"DB検索エラー: {result[len('検索エラー:'):].strip()}\"")
 
 
-* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行を`logger.warning`で記録。
-* 根拠: `await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 204 / 抜粋: "common.execute_read_query, sql")
+* **副作用**: `common.execute_read_query` の呼び出し（DB読み取り）。許可外テーブルへのアクセス試行、および`execute_read_query`が内部エラー文字列を返した場合を`logger.warning`で記録。
+* 根拠: `result = await asyncio.to_thread(common.execute_read_query, sql)` (行番号: 256 / 抜粋: "common.execute_read_query, sql")、エラー時の警告ログ (行番号: 267 / 抜粋: "logger.warning(f\"⚠️ search_db query failed: {result} (sql={sql!r})\")")
 
 
 * **エラーハンドリング**:
 * 引数 `sql_query` の存在確認。
+* **（B3で追加）** `_strip_sql_comments`によるSQLコメントの除去（判定より前段、コメント経由の許可テーブル判定バイパスを防止）。
 * クエリが "SELECT" で始まらない場合は実行をブロックしエラーメッセージを返却。
 * `_extract_referenced_tables` で参照テーブルを特定できない場合はエラーメッセージを返却。
 * 参照テーブルのいずれかが `ALLOWED_SEARCH_TABLES` に含まれない場合は、警告ログを出力しエラーメッセージを返却（実行しない）。
-* DB検索時のあらゆる例外を捕捉し、エラーメッセージとして返却。
-* 根拠: `if not sql.strip().upper().startswith("SELECT"):` (行番号: 190) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 197) / `except Exception as e:` (行番号: 209)
+* `asyncio.to_thread`自体が送出しうる例外（`common.execute_read_query`自体は内部で例外を捕捉するため通常は送出されないが、スレッド実行基盤側の例外に備える）を捕捉し、エラーメッセージとして返却。
+* `common.execute_read_query`が内部エラーを`"検索エラー:"`プレフィックス付き文字列として返した場合（Issue #180で追加）、これを検出し警告ログを出力したうえで`"DB検索エラー: ..."`として返却（送出された例外ではないため`try/except`では捕捉できない）。
+* 根拠: `sql = _strip_sql_comments(sql)` (行番号: 239) / `if not sql.strip().upper().startswith("SELECT"):` (行番号: 242) / `disallowed = [t for t in referenced_tables if t not in ALLOWED_SEARCH_TABLES]` (行番号: 249) / `except Exception as e:` (行番号: 257) / `if result.startswith("検索エラー:"):` (行番号: 266)
 
 
 
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 274 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 299 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
-* 根拠: 関数シグネチャ (行番号: 274 / 抜粋: "retry_state")
+* 根拠: 関数シグネチャ (行番号: 299 / 抜粋: "retry_state")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: return文なし (行番号: 277〜281 / 抜粋: "logger.warning(")
+* 根拠: return文なし (行番号: 302〜306 / 抜粋: "logger.warning(")
 
 
 * **副作用**: `logger.warning` によるログ書き込み
-* 根拠: `logger.warning(...)` (行番号: 277〜281 / 抜粋: "logger.warning(")
+* 根拠: `logger.warning(...)` (行番号: 302〜306 / 抜粋: "logger.warning(")
 
 
 * **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 276 / 抜粋: "exception = retry_state")
+* 根拠: try-except構文なし (行番号: 301 / 抜粋: "exception = retry_state")
 
 
 
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを別スレッドで実行し、`ResourceExhausted` 例外発生時に指数バックオフによるリトライを行う。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 283〜290 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 308〜315 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
-* 根拠: 関数シグネチャ (行番号: 290 / 抜粋: "chat_session, prompt: str")
+* 根拠: 関数シグネチャ (行番号: 315 / 抜粋: "chat_session, prompt: str")
 
 
 * **戻り値/レスポンス**: APIレスポンスオブジェクト
-* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 302 / 抜粋: "return await asyncio.to_thread")
+* 根拠: `return await asyncio.to_thread(chat_session.send_message, prompt)` (行番号: 327 / 抜粋: "return await asyncio.to_thread")
 
 
 * **副作用**: APIへのネットワーク通信
-* 根拠: `chat_session.send_message` (行番号: 302 / 抜粋: "chat_session.send_message")
+* 根拠: `chat_session.send_message` (行番号: 327 / 抜粋: "chat_session.send_message")
 
 
 * **エラーハンドリング**: `tenacity` ライブラリによる自動リトライ（最大3回）。最終的に失敗した場合は例外を再スロー（`reraise=True`）。
-* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 284 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
+* 根拠: `@retry(retry=retry_if_exception_type(ResourceExhausted), ...)` (行番号: 309 / 抜粋: "retry_if_exception_type(ResourceExhausted)")
 
 
 
 ### `analyze_text_and_execute` (関数)
 
-* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。
-* 根拠: `async def analyze_text_and_execute` (行番号: 309 / 抜粋: "async def analyze_text_and_execute")
+* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #232で修正）** 1回目のGemini呼び出しは`ResourceExhausted`/`GoogleAPIError`をそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前`ResourceExhausted`用のフォールバックしか持たず、それ以外の`GoogleAPIError`は関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも`except GoogleAPIError`を追加し、`ResourceExhausted`と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。
+* 根拠: `async def analyze_text_and_execute` (行番号: 334 / 抜粋: "async def analyze_text_and_execute")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 309 / 抜粋: "user_id: str, user_name: str, text: str")
+* 根拠: 関数シグネチャ (行番号: 334 / 抜粋: "user_id: str, user_name: str, text: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 309 / 抜粋: "-> Optional[str]:")
+* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 334 / 抜粋: "-> Optional[str]:")
 
 
 * **副作用**: API通信、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 326, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 351, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
 
 
 * **エラーハンドリング**:
 * `MODEL_NAME` や APIキーが不在の場合は早期リターン (`None`)。
 * レート制限超過時はフォールバックメッセージを返却。
-* `ResourceExhausted` 時はフォールバックメッセージ（ツール実行後の場合はツール結果と警告文）を返却。
-* `GoogleAPIError` 時は特定のエラーメッセージを返却。
+* 1回目のGemini呼び出しで`ResourceExhausted`発生時はフォールバックメッセージ(`FALLBACK_MESSAGE`)を、`GoogleAPIError`発生時は「AIサービスで予期せぬエラーが発生しました」を返却。
+* **（Issue #232で修正）** ツール実行後の2回目のGemini呼び出し（最終応答生成）で`ResourceExhausted`発生時はツール結果(`tool_result`)に「制限を超過したため、実行結果のみ表示します」という注記を添えて返却する。同様に`GoogleAPIError`（`ResourceExhausted`以外）発生時も、以前は捕捉されず末尾の汎用`except Exception`まで伝播していたが、現在は`tool_result`に「エラーが発生したため、実行結果のみ表示します」という注記を添えて返却する（ツール実行=DB書き込みは既に成功しているため、その結果を正しくユーザーへ伝える）。
 * 空のレスポンス時はエラーメッセージを返却。
 * 未知のツール名指定時はエラーメッセージを結果として扱う。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: `except ResourceExhausted:` / `except GoogleAPIError as e:` / `except Exception as e:` (行番号: 356, 359, 407 / 抜粋: "except Exception as e:")
+* 根拠: 1回目呼び出しの分岐 (行番号: 409, 412 / 抜粋: "except ResourceExhausted:", "except GoogleAPIError as e:")、2回目呼び出しの分岐 (行番号: 452, 456 / 抜粋: "except ResourceExhausted:\n                # ツール実行は成功しているが、最終回答生成でコケた場合", "except GoogleAPIError as e:\n                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は")、末尾の汎用ハンドラ (行番号: 470 / 抜粋: "except Exception as e:")
 
 
 
@@ -309,7 +350,8 @@ flowchart TD
     CheckTool -- Yes --> IdentifyTool{ツール特定}
     IdentifyTool -- "record_child_health" --> RunHealth[ツール実行: tool_record_child_health]
     IdentifyTool -- "record_food" --> RunFood[ツール実行: tool_record_food]
-    IdentifyTool -- "search_db" --> CheckSelect{"SELECT文か?"}
+    IdentifyTool -- "search_db" --> StripComments["B3: _strip_sql_comments で<br>SQLコメントを空白に置換"]
+    StripComments --> CheckSelect{"SELECT文か?"}
     CheckSelect -- No --> RunSearch[ツール実行: tool_search_db<br>エラーメッセージ返却]
     CheckSelect -- Yes --> CheckTableAllowed{"参照テーブルは<br>ALLOWED_SEARCH_TABLESに<br>含まれるか?"}
     CheckTableAllowed -- No --> RunSearch
@@ -326,6 +368,7 @@ flowchart TD
     CallAPI2 --> CheckException2{例外発生?}
     
     CheckException2 -- "ResourceExhausted" --> EndToolOnly([End: Return Tool Result + Warning Msg])
+    CheckException2 -- "GoogleAPIError(#232で追加)" --> EndToolOnlyApiErr([End: Return Tool Result + Error Msg])
     CheckException2 -- "Other Exception" --> EndGeneralError
     CheckException2 -- "No Error" --> ReturnFinalText([End: Return final_res.text])
 
@@ -344,7 +387,9 @@ graph TD
         tool_record_food
         tool_search_db
         _extract_referenced_tables
+        _strip_sql_comments["_strip_sql_comments(B3で追加)"]
         ALLOWED_SEARCH_TABLES[変数: ALLOWED_SEARCH_TABLES]
+        SQL_COMMENT_RE["_SQL_COMMENT_RE(B3で追加)"]
         rate_limiter[Instance: rate_limiter]
         tools_schema[変数: tools_schema]
     end
@@ -385,8 +430,10 @@ graph TD
     
     tool_search_db --> common
     tool_search_db --> _extract_referenced_tables
+    tool_search_db -->|B3: 判定前にコメント除去| _strip_sql_comments
     tool_search_db --> ALLOWED_SEARCH_TABLES
     tool_search_db --> logger
+    _strip_sql_comments --> SQL_COMMENT_RE
 
 ```
 
@@ -400,12 +447,12 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。またSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になる。
-* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES` (行番号: 132-138, 141-172)
+* `tool_search_db` は `SELECT` 開始チェックに加え、`_extract_referenced_tables` によるテーブル名抽出と `ALLOWED_SEARCH_TABLES` との突合による許可テーブルチェックを行う。`_extract_referenced_tables` はH-6の修正により `FROM a, b` のようなカンマ結合（暗黙CROSS JOIN）の2つ目以降のテーブルと、サブクエリ内の`FROM`/`JOIN`も抽出対象になったが、依然として正規表現による簡易パーサであり、完全なSQL構文解析ではない点に留意。例えば `main.table_name` のようなスキーマ修飾名は識別子の`.`部分が正規表現にマッチしないため`main`のみが抽出され、意図せず許可テーブル判定に影響する可能性がある。**（Issue #224で強化）** H-6のカンマ結合対応後も、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと、識別子の直後がカンマではなくエイリアス文字列になるため、2つ目以降のテーブルが検出漏れし許可テーブルチェックを回避しうる状態だった(読み取り専用接続のため直接的なデータ改ざんはないが、非公開テーブルの内容がAI応答経由で漏洩しうる)。`_skip_optional_alias`でエイリアス(`AS name`または`name`。ただし`WHERE`/`JOIN`等のSQLキーワードはエイリアスとみなさない)を読み飛ばしてからカンマ判定するよう修正した。**（B3で解消）** 以前はSQLコメント(`--`や`/* */`)の内容も区別なく走査対象になっており、`FROM/**/tablename`のようにキーワードと識別子の間にコメントを挟むことで`_extract_referenced_tables`の正規表現がテーブル名を検出できなくなり、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。`tool_search_db`が`_extract_referenced_tables`を呼ぶ前に`_strip_sql_comments`でコメントを空白へ置換するようになり、この経路は塞がれた。ただしコメント除去も正規表現ベースであり、文字列リテラル内に`--`や`/* */`と類似する内容が含まれる場合の扱いなど、完全なSQL字句解析ではない点は変わらない。
+* 根拠: `_extract_referenced_tables`, `ALLOWED_SEARCH_TABLES`, `_skip_optional_alias` (行番号: 141-146, 162-169, 184-220)、`_strip_sql_comments`/`_SQL_COMMENT_RE` (行番号: 172-181)、呼び出し順序 (行番号: 237-239 / 抜粋: "sql = _strip_sql_comments(sql)")
 
 
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。
-* `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。
+* `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。**（Issue #232で対応範囲を縮小）** 以前はツール実行後の2回目Gemini呼び出しで`ResourceExhausted`以外の`GoogleAPIError`が発生した場合もこの汎用ハンドラまで伝播し、ツール(DB書き込み)は既に成功しているにもかかわらず「処理中にエラーが発生しました」という一般エラーになっていた。ユーザーが保存失敗と誤解して再送信すると、冪等性チェックの無い記録処理(`tool_record_child_health`/`tool_record_food`)が重複登録を起こしうる状態だった。2回目呼び出し専用の`except GoogleAPIError`を追加し、この経路がこの汎用ハンドラに到達しないようにした。
 * `json` と `datetime` モジュールがインポートされているが、ファイル内で一度も使用されていない。
 
 ## 9. 不明事項一覧

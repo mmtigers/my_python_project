@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `d4a858f` |
 
 ## 関連ドキュメント
 
@@ -50,7 +51,7 @@
 | --- | --- | --- |
 | `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 41 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
 | `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 36 / 抜粋: "logger = setup_logging(**name**)") |
-| `services.notification_service.send_push` | 引数の詳細仕様および実際の送信先プラットフォームの実装内容が不明なため。 | `send_push(user_id, [...], "discord", "report")` (行番号: 595, 617 / 抜粋: "send_push(user_id, [{"type":") |
+| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`または`"error"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。Issue #289でsend_pushのシグネチャが再設計され、`target="discord"`のみの呼び出しに不要だった`user_id`(元は`getattr(config, "LINE_USER_ID", "")`)引数は撤去された。 | `send_push([...], target="discord", channel="report")` (行番号: 671〜676, 700〜705, 709〜714 / 抜粋: "send_push(\n                [{"type": "text"...") |
 | `ffmpeg`, `ffprobe` (外部コマンド) | システム上にインストールされた実行バイナリに依存しており、バージョンごとの挙動差異が保証されないため。 | `subprocess.run(["ffmpeg"...])` (行番号: 125 / 抜粋: "subprocess.run(["ffmpeg", "-ve...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -560,10 +561,11 @@
 
 ### `Uploader` クラス
 
-* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。
+* **役割**: 生成された動画ファイルのサイズを判定し、制限（`MAX_FILE_SIZE_BYTES`）を超える場合はFFmpegを用いて動画を分割した後、Discord Webhookに対して動画ファイルと完了通知を送信する。分割ファイル(`*_part_*.mp4`)は送信専用の一時生成物であり、送信の成否に関わらず`finally`節で削除する(Issue #171: 以前はこの削除が無く、元動画とは別にローカルディスクへ重複して残り続けていた)。元動画(`summary.output_path`)自体はここでは削除せず、`nas_monitor`の保持期間ベースのリテンションクリーンアップに委ねる。
 
 
-* 根拠: 分割ロジックと送信ロジック (行番号: 529 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: 分割ロジックと送信ロジック (行番号: 589 / 抜粋: "pc = math.ceil(summary.file_si...")
+* 根拠: `split_files: List[Path] = []` および `finally:` ブロック (行番号: 584, 609〜618 / 抜粋: "for s_file in split_files:\n try:\n os.remove(s_file)")
 
 
 
@@ -571,7 +573,7 @@
 * **引数/リクエスト**: `split_and_send`メソッド: `summary` (SummaryInfo), `base_filename` (str)。
 
 
-* 根拠: メソッドシグネチャ (行番号: 507 / 抜粋: "def split_and_send(self, summa...")
+* 根拠: メソッドシグネチャ (行番号: 566 / 抜粋: "def split_and_send(self, summa...")
 
 
 
@@ -579,23 +581,23 @@
 * **戻り値/レスポンス**: `None`。
 
 
-* 根拠: メソッドシグネチャ (行番号: 507 / 抜粋: "-> None:")
+* 根拠: メソッドシグネチャ (行番号: 566 / 抜粋: "-> None:")
 
 
 
 
-* **副作用**: 動画の分割ファイル生成、外部API（Discord Webhook）へのHTTP POSTリクエスト送信。
+* **副作用**: 動画の分割ファイル生成、外部API（Discord Webhook）へのHTTP POSTリクエスト送信、分割ファイルのローカル削除(`os.remove`、送信後に必ず実行)。
 
 
-* 根拠: `subprocess.run`, `requests.post` (行番号: 526-537, 555-560 / 抜粋: "requests.post(")
+* 根拠: `subprocess.run`, `requests.post` (行番号: 586-597, 604 / 抜粋: "requests.post(")、`os.remove(s_file)` (行番号: 616)
 
 
 
 
-* **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。
+* **エラーハンドリング**: 動画分割プロセスの失敗やWebhook送信時の例外をキャッチし、ログにエラーを出力する。分割ファイルの削除自体が失敗した場合(`OSError`)も個別に捕捉してログ出力するのみで処理を継続する。
 
 
-* 根拠: `except Exception as e:` (行番号: 548, 565-566 / 抜粋: "except Exception as e: logger....")
+* 根拠: `except Exception as e: logger.error(f"分割送信エラー: {e}")` (行番号: 608 / 抜粋: "except Exception as e: logger....")、`except OSError as cleanup_err:` (行番号: 617〜618)
 
 
 
@@ -627,18 +629,18 @@
 
 
 
-* **副作用**: 他クラスの呼び出しによるすべての副作用、完了記録ファイル（`.done`）の生成、プッシュ通知送信。
+* **副作用**: 他クラスの呼び出しによるすべての副作用、完了記録ファイル（`.done`）の生成、プッシュ通知送信。`VideoBuilder().build()`が例外を送出せず`False`を返した場合(動画生成失敗)も、Issue #233修正によりエラーログ出力とエラー通知送信を行う(修正前はこのケースで通知が一切送られなかった)。
 
 
-* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 612, 613, 595, 617 / 抜粋: "mark_as_done(rec, os.path.base...")
+* 根拠: `mark_as_done(...)`, `send_push(...)` (行番号: 694, 672〜677, 700〜706 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
 
 
 
 
-* **エラーハンドリング**: 全体処理を`try-except`で囲み、例外発生時にはスタックトレースをログに出力し、外部API経由でエラー通知を送信する。
+* **エラーハンドリング**: 全体処理を`try-except`で囲み、例外発生時にはスタックトレースをログに出力し、外部API経由でエラー通知を送信する。加えて、`VideoBuilder().build()`が`False`を返す(例外を伴わない失敗)場合を専用の`else`節で捕捉し、同様にエラーログ・エラー通知を行う(Issue #233修正)。
 
 
-* 根拠: `except Exception as e:` (行番号: 615-617 / 抜粋: "send_push(user_id, [{"type": "...")
+* 根拠: `except Exception as e:`, `else:` (行番号: 696〜706, 708〜715 / 抜粋: "logger.error(f\"動画生成に失敗しま...")
 
 
 
@@ -661,8 +663,8 @@ flowchart TD
     
     HasEvents -- Yes --> BuildVideo[VideoBuilder: クリップ生成と結合]
     BuildVideo --> VideoSuccess{動画生成成功?}
-    VideoSuccess -- No --> EndError[ログ出力]
-    EndError --> End
+    VideoSuccess -- "No(#233で修正)" --> SendPushBuildFail[ログ出力 + 外部：send_push エラー通知]
+    SendPushBuildFail --> End
     
     VideoSuccess -- Yes --> MarkDone[完了ファイルの生成]
     MarkDone --> Upload[Uploader: Discordへ送信]
@@ -773,6 +775,9 @@ graph TD
 
 
 * OpenCVの背景差分学習（`createBackgroundSubtractorMOG2`）を使用しているため、動画の初期フレーム周辺の精度はパラメータ（`history`や`varThreshold`）のチューニングに依存する。
+
+
+* `_run_smart_timelapse_job_locked`内の`VideoBuilder().build()`呼び出しは、例外を送出せず`False`を返すことで失敗を通知する設計になっている。Issue #233修正前はこの`False`ケースに対応する`else`節が存在せず、動き検知イベントはあったのに関数がそのまま正常終了し通知が一切送られなかった。同様のパターン(ブール戻り値で失敗を表す下位関数)を扱う際は、`if`分岐だけでなく`False`側の処理も必ず用意すること。
 
 
 

@@ -16,13 +16,17 @@
 * [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
-* [google_photos_service.md](./google_photos_service.md) - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
-* [financial_service.md](./financial_service.md) - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
+* `google_photos_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
+* `financial_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
 
 ## 2. ファイルの概要
 
 * システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。
 * 根拠: [環境変数読み込み処理] (行番号: 171 / 抜粋: `ENV: str = os.getenv("ENV"`)
+
+
+* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（既定値は環境変数未設定時`"F4:4E:FC:B6:65:D4"`）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。
+* 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 170〜180 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\nENV: str = os.getenv(\"ENV\", \"development\")\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"F4:4E:FC:B6:65:D4\")")
 
 
 * SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照。未設定時は検証をスキップする後方互換設計)。
@@ -34,7 +38,7 @@
 
 
 * NASなどの外部ストレージのマウント遅延を考慮したディレクトリの検証、作成、書き込みテストを行う関数を提供する。
-* 根拠: [ストレージ検証関数] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
+* 根拠: [ストレージ検証関数] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`)
 
 
 * NAS死活監視(`monitors/nas_monitor.py`)の書き込みテストがタイムアウトした際の再試行回数(`NAS_WRITE_CHECK_RETRIES`、既定3)を定義する。`verify_and_initialize_storage`と同様、autofsのアイドルアンマウント後の再トリガーやNAS本体のディスクスピンアップによる一過性の遅延を、単発のタイムアウトで即座に障害と判定せずExponential Backoffで吸収する目的で追加された。
@@ -61,8 +65,9 @@
 * 根拠: [Retention / TV Lock / Clinic Monitor 各セクションの定数群] (行番号: 493 / 抜粋: `RECORDING_RETENTION_DAYS: int = int(os.getenv`)
 
 
-* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、Streamlitダッシュボード・LAN内開発サーバー・Cloudflare Tunnel公開ドメインを含む形でこちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。
-* 根拠: [CORS許可オリジン定義] (行番号: 421 / 抜粋: `CORS_ORIGINS: List[str] = [`)
+* CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、Streamlitダッシュボード・LAN内開発サーバー・Cloudflare Tunnel公開ドメインを含む形でこちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。`FRONTEND_URL`（既定値はパス付きの`"http://192.168.1.200:8000/quest"`）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
+* 根拠: [CORS許可オリジン定義] (行番号: 438 / 抜粋: `CORS_ORIGINS: List[str] = [`)
+* 根拠: [_frontend_originの算出(Issue #112)] (行番号: 427, 433 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
 
 
 * クエスト機能のファイルアップロード(`/api/quest/upload`)におけるアップロード可能な最大ファイルサイズ(MB単位、環境変数で上書き可、既定10MB)を定義する。
@@ -71,6 +76,10 @@
 
 * タイムラプス動画生成(`monitors/smart_timelapse_generator.py`, `monitors/scheduled_timelapse.py`)が`getattr(config, "TIMELAPSE_...", デフォルト値)`の形で参照する解像度・背景差分検出パラメータ・監視対象カメラフォルダ(`TIMELAPSE_CAMERAS`)・実行スケジュール(`TIMELAPSE_SCHEDULES`)・エンコード設定等の定数群を定義する。以前は対応する定数が本ファイルに存在せず、常にハードコードされたデフォルト値へフォールバックしていた。
 * 根拠: [タイムラプス生成設定] (行番号: 450 / 抜粋: `# タイムラプス生成設定`)
+
+
+* 「18. Alexaスキル設定」セクションで、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
+* 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 614〜621 / 抜粋: "# ==========================================\n# 18. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 
 
 
@@ -83,18 +92,19 @@
 | `os` | 標準ライブラリ | 環境変数取得、パス結合、ディレクトリ作成等のOS操作 | 根拠: `import os` (行番号: 24 / 抜粋: `import os`) |
 | `sys` | 標準ライブラリ | ロガーの標準出力ハンドラの設定 | 根拠: `import sys` (行番号: 25 / 抜粋: `import sys`) |
 | `json` | 標準ライブラリ | 外部JSONファイルの読み込み・パース | 根拠: `import json` (行番号: 26 / 抜粋: `import json`) |
-| `time` | 標準ライブラリ | リトライ時の待機（Exponential Backoff） | 根拠: `import time` (行番号: 27 / 抜粋: `import time`) |
 | `logging` | 標準ライブラリ | ロガーの取得・設定およびログ出力 | 根拠: `import logging` (行番号: 28 / 抜粋: `import logging`) |
 | `Optional`, `List`, `Dict`, `Any` | 標準ライブラリ(`typing`) | 型ヒントの定義 | 根拠: `from typing import Optional, L` (行番号: 29 / 抜粋: `from typing import Optional, L`) |
-| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み処理 | 根拠: `from dotenv import load_dotenv` (行番号: 31 / 抜粋: `from dotenv import load_dotenv`) |
-| `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 32 / 抜粋: `from pydantic import BaseModel`) |
-| `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 454 / 抜粋: `from datetime import time as _`) |
+| `urlparse` | 標準ライブラリ(`urllib.parse`) | `FRONTEND_URL`から`CORS_ORIGINS`用のscheme+netloc(パスを含まないOrigin相当の値)を取り出すために使用（Issue #112の修正で追加） | 根拠: `from urllib.parse import urlparse` (行番号: 30 / 抜粋: `from urllib.parse import urlparse`) |
+| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み処理 | 根拠: `from dotenv import load_dotenv` (行番号: 32 / 抜粋: `from dotenv import load_dotenv`) |
+| `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 33 / 抜粋: `from pydantic import BaseModel`) |
+| `retry_with_backoff` | 内部モジュール(`core.utils`) | `verify_and_initialize_storage`のExponential Backoffリトライ機構(Issue #292で共通ユーティリティへ切り出し)。以前はここで`import time`し自前で`time.sleep`していたが、リトライループごと`core.utils`へ委譲したため`config.py`自身は`time`モジュールに直接依存しなくなった。 | 根拠: `from core.utils import retry_with_backoff` (行番号: 35 / 抜粋: `from core.utils import retry_with_backoff`) |
+| `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 473 / 抜粋: `from datetime import time as _`) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号: 139 / 抜粋: `load_dotenv()`) |
+| `.env`ファイル | 外部ファイルであり、実行時の環境変数の実際の内容がコードから読み取れないため。 | 根拠: `load_dotenv()` (行番号: 141 / 抜粋: `load_dotenv()`) |
 | `devices.json` | システムに接続されるカメラやモニター等のデバイス設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(DEVICES_JSON_PATH, ` (行番号: 304 / 抜粋: `with open(DEVICES_JSON_PATH, `) |
 | `family_events.json` | 家族の記念日・イベント設定情報を持つ外部ファイルであり、具体的な内容が不明なため。 | 根拠: `with open(_events_path, "r", ` (行番号: 285 / 抜粋: `with open(_events_path, "r", `) |
 | `family_members.local.json` | Git管理対象外(gitignore)の外部ファイルであり、`FAMILY_SETTINGS["styles"]` の年齢等の実データがどのような値・構造で上書きされるか不明なため。 | 根拠: `# family_members.local.json (gitignore対象) から読み込み、` (行番号: 518 / 抜粋: `family_members.local.json`) |
@@ -104,24 +114,24 @@
 
 ### `verify_and_initialize_storage`
 
-* **役割**: 指定されたパスのディレクトリ作成と書き込みテストを、指定回数リトライ（Exponential Backoff）しながら実行する。
-* 根拠: [関数定義] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
+* **役割**: 指定されたパスのディレクトリ作成と書き込みテストを、指定回数リトライ（Exponential Backoff）しながら実行する。Issue #292で、Exponential Backoffのループ機構自体を`core.utils.retry_with_backoff`(共通ユーティリティ)へ委譲するようリファクタリングされた。`monitors/nas_monitor.py`の`check_write_permission`も同じ共通ユーティリティを使うようになったが、リトライ対象の例外集合・リトライ回数・待機時間という「ポリシー」自体は呼び出し元ごとに従来のまま維持されている(挙動を変えない純粋なリファクタリング)。
+* 根拠: [関数定義] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`), [retry_with_backoffへの委譲] (行番号: 78〜85 / 抜粋: `retry_with_backoff(\n            _attempt,\n            max_retries=max_retries,\n            retryable_exceptions=(OSError, PermissionError, IOError),`)
 
 
 * **引数/リクエスト**: `base_path` (str: 確認対象ディレクトリ), `max_retries` (int: 最大リトライ回数。デフォルトは5)
-* 根拠: [引数定義] (行番号: 40 / 抜粋: `base_path: str, max_retries: i`)
+* 根拠: [引数定義] (行番号: 43 / 抜粋: `base_path: str, max_retries: i`)
 
 
 * **戻り値/レスポンス**: `bool` (初期化・テスト成功でTrue、最終的に失敗でFalse)
-* 根拠: [戻り値型ヒント] (行番号: 40 / 抜粋: `-> bool:`)
+* 根拠: [戻り値型ヒント] (行番号: 43 / 抜粋: `-> bool:`)
 
 
-* **副作用**: ディレクトリの作成(`os.makedirs`)、一時ファイル(`.write_test`)の作成・削除。
-* 根拠: [ディレクトリ・ファイル操作] (行番号: 58 / 抜粋: `os.makedirs(base_path, exist_o`)
+* **副作用**: ディレクトリの作成(`os.makedirs`)、一時ファイル(`.write_test`)の作成・削除、失敗時は`time.sleep`によるExponential Backoff待機(`core.utils.retry_with_backoff`内で発生)。
+* 根拠: [ディレクトリ・ファイル操作] (行番号: 47〜54 / 抜粋: `os.makedirs(base_path, exist_o`)
 
 
-* **エラーハンドリング**: `OSError`, `PermissionError`, `IOError`をキャッチし、リトライ上限未満なら待機、上限到達時はエラーログを出力しFalseを返す。
-* 根拠: [例外捕捉] (行番号: 73 / 抜粋: `except (OSError, PermissionErr`)
+* **エラーハンドリング**: `retry_with_backoff`に`(OSError, PermissionError, IOError)`をリトライ対象として渡し、リトライ上限未満なら`core.utils`側でExponential Backoff待機、上限到達時は`retry_with_backoff`が最後の例外を再送出するため、これを`except`で捕捉してエラーログを出力しFalseを返す。
+* 根拠: [例外捕捉] (行番号: 86〜90 / 抜粋: `except (OSError, PermissionError, IOError) as e:`)
 
 
 

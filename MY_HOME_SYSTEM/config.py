@@ -25,12 +25,14 @@
 import os
 import sys
 import json
-import time
 import logging
 from typing import Optional, List, Dict, Any
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
+
+from core.utils import retry_with_backoff
 
 # ==========================================
 # Bootstrap Helpers (Logger / Storage)
@@ -52,42 +54,43 @@ def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
     """
     test_file: str = os.path.join(base_path, ".write_test")
 
-    for attempt in range(max_retries + 1):
-        try:
-            # 1. ディレクトリの存在確認と作成
-            # マウント前の一時的なローカル作成を防ぐため、リトライごとに毎回実行する
-            os.makedirs(base_path, exist_ok=True)
+    def _attempt() -> None:
+        # 1. ディレクトリの存在確認と作成
+        # マウント前の一時的なローカル作成を防ぐため、リトライごとに毎回実行する
+        os.makedirs(base_path, exist_ok=True)
 
-            # 2. 書き込み・権限テスト
-            # ディレクトリが存在しても、マウント直後の不安定な状態や権限不足をここで検知
-            with open(test_file, 'w') as f:
-                f.write("test")
+        # 2. 書き込み・権限テスト
+        # ディレクトリが存在しても、マウント直後の不安定な状態や権限不足をここで検知
+        with open(test_file, 'w') as f:
+            f.write("test")
 
-            # テストファイルのクリーンアップ
-            os.remove(test_file)
+        # テストファイルのクリーンアップ
+        os.remove(test_file)
 
-            if attempt > 0:
-                logger.info(f"✅ Retry {attempt}: Successfully accessed '{base_path}'.")
+    def _on_retry(attempt: int, delay: float, e: BaseException) -> None:
+        logger.warning(
+            f"⚠️ [Attempt {attempt + 1}/{max_retries}] Failed to access '{base_path}'. "
+            f"Retrying in {delay:.0f}s... Reason: {e}"
+        )
 
-            return True
+    try:
+        # Exponential Backoff (1s, 2s, 4s, 8s, 16s)
+        retry_with_backoff(
+            _attempt,
+            max_retries=max_retries,
+            retryable_exceptions=(OSError, PermissionError, IOError),
+            base_delay=1.0,
+            max_delay=16.0,
+            on_retry=_on_retry,
+        )
+    except (OSError, PermissionError, IOError) as e:
+        logger.error(
+            f"🚨 [Critical] Max retries ({max_retries}) reached. "
+            f"Failed to access or initialize storage at '{base_path}'. Reason: {e}"
+        )
+        return False
 
-        except (OSError, PermissionError, IOError) as e:
-            if attempt < max_retries:
-                # Exponential Backoff (1s, 2s, 4s, 8s, 16s)
-                wait_time: int = 2 ** attempt
-                logger.warning(
-                    f"⚠️ [Attempt {attempt + 1}/{max_retries}] Failed to access '{base_path}'. "
-                    f"Retrying in {wait_time}s... Reason: {e}"
-                )
-                time.sleep(wait_time)
-            else:
-                logger.error(
-                    f"🚨 [Critical] Max retries ({max_retries}) reached. "
-                    f"Failed to access or initialize storage at '{base_path}'. Reason: {e}"
-                )
-                return False
-
-    return False
+    return True
 
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
@@ -424,6 +427,12 @@ _default_quest_dir = os.path.join(os.path.dirname(BASE_DIR), "family-quest", "di
 QUEST_DIST_DIR: str = os.getenv("QUEST_DIST_DIR", _default_quest_dir)
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")
+# ブラウザが送信する Origin ヘッダーは scheme://host[:port] のみでパスを含まない
+# (Starlette の CORSMiddleware は allow_origins との完全一致で比較する)。
+# FRONTEND_URL は post_boot_health_check.py 等で実際にHTTPリクエストを送る
+# 完全なURL(パス込み)として使われているためパスを保持したままにし、
+# CORS_ORIGINSに追加する際だけ scheme+netloc のみを取り出す。
+_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # M-8-2: 以前はここ(config.py)と unified_server.py の両方に別々のCORS許可
 # オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
 # だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
@@ -434,7 +443,7 @@ CORS_ORIGINS: List[str] = [
     "http://localhost:8501",   # Streamlitダッシュボード
     "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
     "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
-    FRONTEND_URL,
+    _frontend_origin,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:

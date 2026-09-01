@@ -85,15 +85,37 @@ class TestSpamGuardIsTimezoneSafe:
             quest_service.process_complete_quest("dad", 9001)
         assert exc_info.value.status_code == 429
 
-    def test_retry_just_over_10_seconds_succeeds_regardless_of_server_timezone(self, isolated_db):
+    def test_infinite_retry_just_over_cooldown_succeeds_regardless_of_server_timezone(self, isolated_db):
         """
         回帰対象のバグそのもの: 修正前は、この呼び出しがサーバーのOSタイムゾーンが
         JST以外(UTC等)の場合に約9時間ぶんズレて誤って429を返し続けていた。
 
         'infinite' タイプ(M-1-3のサーバー側周期リセット強制の対象外)を使い、
-        このテストが検証したい「10秒スパムガードの境界判定」を、M-1-3で新設した
+        このテストが検証したい「スパムガードの境界判定」を、M-1-3で新設した
         「周期内の再完了禁止」チェックと分離する。
+
+        B2: infiniteタイプのみ、フロントエンド(QuestList.tsx)のクールダウン表示に
+        合わせてスパムガードの間隔を10秒→60秒(INFINITE_QUEST_COOLDOWN_SECONDS)へ
+        引き上げたため、境界値も60秒基準に更新。
         """
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0),
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
+                (9001, "TestQuest", "infinite", 10, 5),
+            )
+        quest_service = QuestService()
+        quest_service.process_complete_quest("dad", 9001)
+        _set_last_completed_at("dad", 9001, seconds_ago=60.5)
+
+        result = quest_service.process_complete_quest("dad", 9001)
+        assert result["status"] == "success"
+
+    def test_infinite_retry_just_under_cooldown_is_rejected(self, isolated_db):
+        """B2: infiniteクエストは60秒未満の再送信を429で拒否すること(10秒では通らない)。"""
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
@@ -107,8 +129,9 @@ class TestSpamGuardIsTimezoneSafe:
         quest_service.process_complete_quest("dad", 9001)
         _set_last_completed_at("dad", 9001, seconds_ago=10.5)
 
-        result = quest_service.process_complete_quest("dad", 9001)
-        assert result["status"] == "success"
+        with pytest.raises(HTTPException) as exc_info:
+            quest_service.process_complete_quest("dad", 9001)
+        assert exc_info.value.status_code == 429
 
 
 class TestRepeatedCompletionAfterGuardWindow:
@@ -179,6 +202,11 @@ class TestResetPeriodEnforcement:
         assert exc_info.value.status_code == 400
 
     def test_infinite_quest_type_is_exempt_from_reset_period(self, isolated_db):
+        """
+        B2: infiniteはM-1-3の周期リセット強制の対象外だが、B2でinfinite専用の
+        スパムガード間隔を60秒に引き上げたため、境界値も60秒超(65秒)にして
+        「周期リセット免除」と「スパムガード間隔」の2つの独立した挙動を混同しないようにする。
+        """
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
@@ -190,7 +218,67 @@ class TestResetPeriodEnforcement:
             )
         quest_service = QuestService()
         quest_service.process_complete_quest("dad", 9003)
-        _set_last_completed_at("dad", 9003, seconds_ago=11)
+        _set_last_completed_at("dad", 9003, seconds_ago=65)
 
         result = quest_service.process_complete_quest("dad", 9003)
         assert result["status"] == "success"
+
+
+class TestApprovalDoesNotOverwriteCompletedAt:
+    """
+    #93: 子供の完了報告(pending)を親が翌日(weeklyなら翌週)に承認した場合の回帰テスト。
+
+    修正前は _apply_quest_rewards が承認時に completed_at を承認時刻で上書きしていたため、
+    「前日の夜に子供が報告 → 翌朝に親が承認」という自然な運用で、承認直後から丸1日、
+    process_complete_quest のスパムチェック/周期リセット判定が「本日(今週)完了済み」と
+    誤判定し、翌日分の完了報告ができなくなっていた。
+    """
+
+    def _seed_child_and_adult(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
+        )
+
+    def test_daily_quest_completable_next_day_even_if_approved_late(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_child_and_adult(cur)
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period, target_user) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (9004, "DailyQuest", "daily", 10, 5, "daily", "son"),
+            )
+
+        quest_service = QuestService()
+
+        # 前日の夜、子供が完了報告(pending)する
+        report_result = quest_service.process_complete_quest("son", 9004)
+        assert report_result["status"] == "pending"
+
+        with common.get_db_cursor() as cur:
+            history_id = cur.execute(
+                "SELECT id FROM quest_history WHERE user_id = 'son' AND quest_id = 9004"
+            ).fetchone()["id"]
+
+        # 報告時刻を「前日」にずらしておく
+        _set_last_completed_at("son", 9004, seconds_ago=25 * 3600)
+        with common.get_db_cursor() as cur:
+            reported_at = cur.execute(
+                "SELECT completed_at FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()["completed_at"]
+
+        # 親が翌朝に承認する
+        approve_result = quest_service.process_approve_quest("dad", history_id)
+        assert approve_result["status"] == "success"
+
+        with common.get_db_cursor() as cur:
+            hist_after = cur.execute(
+                "SELECT completed_at FROM quest_history WHERE id = ?", (history_id,)
+            ).fetchone()
+        # completed_at は承認時刻で上書きされず、子供が報告した(前日の)時刻のまま
+        assert hist_after["completed_at"] == reported_at
+
+        # 承認直後でも、翌日分として新たに完了報告できる(429/400にならない)
+        next_report = quest_service.process_complete_quest("son", 9004)
+        assert next_report["status"] == "pending"

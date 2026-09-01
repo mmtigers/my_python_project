@@ -11,7 +11,7 @@
 
 * [nas_monitor.md](./nas_monitor.md) - 類似目的の別モジュール(`nas_monitor.py`はNASの死活監視・リテンション削除を担当するのに対し、本ファイルは他モジュール向けの汎用フォールバック管理ユーティリティを提供)
 * [config.md](./config.md) - `LINE_USER_ID`等の設定値を提供
-* [logger.md](./logger.md) - ロガー機能の提供元候補(ただし関数名`get_logger`との対応関係は不明瞭)
+* [logger.md](./logger.md) - `core.logger.get_logger`(`setup_logging`のエイリアス)の実装元。本ファイル8行目の`from core.logger import get_logger`はこのエイリアスにより正常にインポートできる（詳細は本ファイル「相互参照による補足情報」参照）
 * [notification_service.md](./notification_service.md) - `send_push`の実体
 
 ## 2. ファイルの概要
@@ -28,7 +28,7 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 | `shutil` | 標準ライブラリ | ファイルやディレクトリのコピー・削除 | `import shutil` (行番号: 2 / 抜粋: "import shutil") |
 | `subprocess` | 標準ライブラリ | OSコマンド(`mount`)の実行 | `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
 | `pathlib.Path` | 標準ライブラリ | パス操作 | `from pathlib import Path` (行番号: 4 / 抜粋: "from pathlib import Path") |
-| `config` | 外部モジュール | `LINE_USER_ID` の取得など | `import config` (行番号: 7 / 抜粋: "import config") |
+| `config` | 外部モジュール | `LINE_USER_ID` の取得など。**Issue #111の修正**により、`import config`自体が失敗した場合のフォールバックとして`config = None`が明示的に定義されるようになった（以前はこのフォールバック節が`get_logger`/`send_push`のみを定義し`config`を定義していなかったため、`import config`が失敗すると`config`という名前自体が未束縛のままモジュールロードが完了し、`get_managed_target_directory`のNAS復旧失敗経路で`NameError`が送出されていた）。 | `import config` (行番号: 7 / 抜粋: "import config"), `config = None` (行番号: 19 / 抜粋: "config = None") |
 | `core.logger.get_logger` | 外部関数 | ロガーの取得 | `from core.logger import get_logger` (行番号: 8 / 抜粋: "from core.logger import get_logger") |
 | `services.notification_service.send_push` | 外部関数 | エラー時のプッシュ通知送信 | `from services.notification_service import send_push` (行番号: 9 / 抜粋: "from services.notification_service import...") |
 
@@ -129,8 +129,10 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 * 根拠: `get_managed_target_directory`内処理 (行番号: 103, 108, 118, 125 / 抜粋: "sync_fallback_to_nas(...)", "fallback_dir.mkdir(...)")
 
 
-* **エラーハンドリング**: 外部通知前に`getattr`を用いて`config.LINE_USER_ID`の存在を安全に確認し、存在する場合のみ通知処理を行う。
-* 根拠: `get_managed_target_directory`例外回避 (行番号: 116〜117 / 抜粋: "user_id = getattr(config, "LINE_USER_ID", None)")
+* **エラーハンドリング**: `send_push`は`target="discord"`のみで呼び出すため`user_id`引数は不要(Issue #289でsend_pushのシグネチャからLINE宛先解決を分離し、Discord専用呼び出しではuser_id自体が不要になった)。以前は`config.LINE_USER_ID`が未設定だとこの通知自体がスキップされてしまっていたが、現在は`config.LINE_USER_ID`の値に関わらず必ず通知が送信される。
+  なお`import config`自体は依然として維持されている。これは**Issue #111の修正**で追加された、`import config`が失敗した場合に`config`という名前そのものが未束縛のままモジュールロードが完了してしまう問題（未束縛だと後続コードで`NameError`が送出され、`get_managed_target_directory`のFail-Softロジックに到達できない）を防ぐための「カナリア」importであり、`tests/test_nas_utils.py`がこの契約(`nas_utils.config is None`)を回帰テストしているため、本文中で`config`を直接参照しなくなった後も削除していない（`core/nas_utils.py`の`# noqa: F401`コメント参照）。
+* 根拠: `send_push`呼び出し (行番号: 128〜131 / 抜粋: "send_push(\n        [{\"type\": \"text\", \"text\": error_msg}],\n        target=\"discord\", channel=\"error\"\n    )")
+* 根拠: `config = None`フォールバック(Issue #111) / カナリアimport(Issue #289) (行番号: 6〜21 / 抜粋: "try:\n    import config  # noqa: F401 — Issue #111回帰テスト用の\"カナリア\"import")
 
 
 
@@ -150,11 +152,8 @@ flowchart TD
     ReturnNAS2 --> End
 
     C2 -- False --> LogErr[エラーログ出力]
-    LogErr --> GetConf[config.LINE_USER_ID 取得]
-    GetConf --> C3{LINE_USER_ID が存在?}
-    C3 -- True --> Notify[外部：send_push実行]
+    LogErr --> Notify[外部：send_push実行(target=discord, user_id不要)]
     Notify --> MkdirFall[fallback_dir 作成]
-    C3 -- False --> MkdirFall
     MkdirFall --> ReturnFall[fallback_dirパスを返す]
     ReturnFall --> End
 
@@ -181,7 +180,6 @@ graph TD
     end
 
     subgraph 外部モジュール / OS
-        get_managed_target_directory -.-> config.LINE_USER_ID
         get_managed_target_directory -.-> 外部:send_push
         attempt_remount -.-> OSコマンド:sudo_mount
         nas_utils.py -.-> 外部:get_logger
@@ -216,9 +214,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `get_logger`の仕様 | `MY_HOME_SYSTEM/core/logger.py`全85行を直接確認したところ、同ファイルには`get_logger`という名前の関数は一切定義されていない（定義されているのは`setup_logging(name, webhook_url=None)`関数(46〜86行目)と`DiscordErrorHandler`クラス(9〜44行目)のみ）ことを確認した。したがって本ファイル(`core/nas_utils.py`)8行目の`from core.logger import get_logger`は実行環境によらず常に`ImportError`となり、6〜15行目の`try...except ImportError`により、常に14行目のフォールバック定義`def get_logger(name): return logging.getLogger(name)`（標準`logging`モジュールへの単純な委譲）が使用される設計であることが確定した。（`docs/specifications/DDD/newface_monitor.md`での同一調査結果と一致することも確認した。） | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py`（全85行、`get_logger`定義なし）, `MY_HOME_SYSTEM/core/nas_utils.py:6-17` |
-| `send_push`の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(user_id, messages, image_data=None, target="both", channel="notify", filename="snapshot.jpg")`(116〜140行目)を直接確認した。`success = True`で始まり、`target`が`"discord"`/`"both"`のとき`_send_discord_webhook`(30〜71行目、HTTPステータスが`[200, 204]`以外または`requests`例外発生時に`False`)が失敗すれば`success = False`、`target`が`"line"`/`"both"`のとき`_send_line_push`(73〜114行目、`line_configuration`未設定・送信メッセージ0件・LINE API例外のいずれかで`False`)が失敗すれば`success = False`にした上でDiscordのerrorチャンネルへフォールバック通知(133〜138行目)する。戻り値は`bool`(140行目)であり、本ファイル(`core/nas_utils.py`)116行目で`config.LINE_USER_ID`宛にこの関数を呼び出していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:30-140`（参考: `MY_HOME_SYSTEM/core/nas_utils.py:116`） |
-| `config`モジュールの全容 | `MY_HOME_SYSTEM/core/nas_utils.py`を直接確認したところ、本ファイルが実際に参照する`config`属性は`getattr(config, "LINE_USER_ID", None)`(116行目)の1箇所のみであることを確認した。対応する`MY_HOME_SYSTEM/config.py`185行目を直接確認したところ`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`と定義されており、環境変数`LINE_USER_ID`が未設定であれば`None`になるオプショナル文字列であることを確認した。`config.py`全体（全500行超）には他に多数の設定値（NAS関連、各種閾値、Webhook URL等）が定義されているが、本ファイルが実際に依存しているのは`LINE_USER_ID`のみであることが確定した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185`, `MY_HOME_SYSTEM/core/nas_utils.py:116` |
+| `get_logger`の仕様 | `MY_HOME_SYSTEM/core/logger.py`を直接確認した。同ファイル103〜105行目に`def get_logger(name: str) -> logging.Logger: return setup_logging(name)`という、`setup_logging`のエイリアスとして`get_logger`が明示的に定義されている（Issue #126で修正: 過去の解析時点では未定義だったが、現在は定義済み）。したがって本ファイル(`core/nas_utils.py`)8行目の`from core.logger import get_logger`は正常にインポートに成功し、6〜9行目の`try`節がそのまま実行される。10〜21行目の`except ImportError`フォールバック（`def get_logger(name): return logging.getLogger(name)`という標準`logging`モジュールへの単純な委譲）は、`core`/`services`パッケージ自体がインポート不可能な環境（DDD単体デプロイ等）でのみ使用される設計であることを確認した。実際に使われる`core.logger.get_logger`は`setup_logging(name)`をそのまま呼び出すため、`propagate=False`・コンソール出力・`WatchedFileHandler`によるファイル出力・条件付きDiscord通知という`setup_logging`の全機能を伴う（詳細は[logger.md](./logger.md)参照）。 | 直接ソース確認: `MY_HOME_SYSTEM/core/logger.py:103-105`, `MY_HOME_SYSTEM/core/nas_utils.py:6-23`（参考: [logger.md](./logger.md)） |
+| `send_push`の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`(116〜163行目、Issue #289でシグネチャ再設計)を直接確認した。`success = True`で始まり、`target`が`"discord"`/`"both"`のとき`_send_discord_webhook`が失敗すれば`success = False`、`target`が`"line"`/`"both"`のとき`user_id`(省略時は`config.LINE_USER_ID`にフォールバック)が解決できなければエラーログを出して`success = False`、解決できれば`_send_line_push`を呼び出し失敗時はDiscordのerrorチャンネルへフォールバック通知する。戻り値は`bool`(163行目)であり、本ファイル(`core/nas_utils.py`)は`target="discord"`のみで呼び出すため`user_id`引数を渡していない(128〜131行目)ことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:116-163`（参考: `MY_HOME_SYSTEM/core/nas_utils.py:128-131`） |
+| `config`モジュールの全容 | `MY_HOME_SYSTEM/core/nas_utils.py`を直接確認したところ、Issue #289で`send_push`呼び出しから`config.LINE_USER_ID`の参照を撤去した結果、本ファイルの実行時ロジックはもはや`config`のいかなる属性も参照しない(唯一の名残は7行目の`import config`で、これはIssue #111回帰テスト用のカナリアimportとして`# noqa: F401`付きで意図的に残されている)ことを確認した。対応する`MY_HOME_SYSTEM/config.py`193行目には`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`が定義されている。 | 直接ソース確認: `MY_HOME_SYSTEM/core/nas_utils.py:7,19,128-131`, `MY_HOME_SYSTEM/config.py:193` |
 
 ## 10. 自己検証結果
 

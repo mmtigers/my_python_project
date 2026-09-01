@@ -10,11 +10,13 @@ import datetime
 import os
 import sys
 import threading
+import time
 import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -132,6 +134,176 @@ class TestProcessRejectQuest:
         assert chronicle["stats"]["totalQuests"] == 1
 
 
+class TestGetLockUserIdsForHistory:
+    """QuestService._get_lock_user_ids_for_history() のテスト(Issue #293)。
+
+    process_approve_quest/process_reject_quest/process_cancel_questが個別に
+    実装していた「対象履歴をpeekして兄妹連携クエストの相方を辿り、ロック対象
+    ユーザーをまとめる」ロジックをこのヘルパーへ一元化した。挙動そのものは
+    変更していないため、3つの呼び出し元それぞれの従来の契約(404を送出する/
+    しない)を個別に確認する。
+    """
+
+    def _seed_users(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child'), "
+            "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+        )
+        cur.execute(
+            "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+            "(101, 'Test', 'daily', 10, 5)"
+        )
+
+    def test_no_linked_history_returns_only_the_owner(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('son', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+
+        assert lock_user_ids == ['son']
+
+    def test_linked_history_includes_the_partner(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending')
+            """)
+            partner_history_id = cur.lastrowid
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status, linked_history_id)
+                VALUES ('son', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending', ?)
+            """, (partner_history_id,))
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+
+        assert lock_user_ids == ['son', 'daughter']
+
+    def test_missing_history_without_primary_user_id_raises_404(self, isolated_db):
+        """process_approve_quest/process_reject_quest の従来の挙動: primary_user_idを
+        指定しない呼び出しでは、存在しないhistory_idに対して404を送出する。"""
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+
+        quest_service = QuestService()
+        with pytest.raises(HTTPException) as exc_info:
+            quest_service._get_lock_user_ids_for_history(999999)
+        assert exc_info.value.status_code == 404
+
+    def test_missing_history_with_primary_user_id_does_not_raise(self, isolated_db):
+        """process_cancel_questの従来の挙動: primary_user_idを指定した場合、
+        history_idの存在確認自体は_process_cancel_quest_locked側に委ねるため、
+        ここでは404を送出せずprimary_user_idのみを返す。"""
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
+
+        assert lock_user_ids == ['son']
+
+
+class TestProcessRejectQuestConcurrentWithApprove:
+    """Issue #228の回帰テスト。
+
+    process_reject_quest は以前ロックを一切取得していなかったため、同一
+    history_idに対する承認と却下がほぼ同時に実行されると、承認側が先に
+    quest_usersへgold/expを加算・コミットした後に却下のUPDATEがコミットされ、
+    quest_history.statusは'rejected'になるのに付与済みの報酬は一切ロール
+    バックされないという不整合が実機で確認されていた。process_reject_quest を
+    process_approve_quest と同じユーザー単位ロックに参加させることで、
+    この2つの操作を直列化し、上記の不整合を防ぐ。
+    """
+
+    def test_reject_loses_race_cleanly_when_approve_completes_first(self, isolated_db, monkeypatch):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+                "('daughter', 'Daughter', 'Novice', 1, 0, 100, 'role_child')"
+            )
+            cur.execute(
+                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+                "(101, 'Test', 'daily', 50, 50)"
+            )
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 50, 50, '2026-01-01T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+
+        # 承認処理がquest_usersへの報酬加算(_apply_quest_rewards)後、コミット前に
+        # 少し待機するようにする。承認はロック取得後この時間だけロックを保持し
+        # 続けるため、その間に却下側がロック取得を試みてブロックされることを
+        # 利用し、確実に「承認が先にロックを取得して完走し終えてから却下が
+        # 動き出す」という、Issueが報告した不整合が起きうる順序を再現する。
+        original_apply_rewards = quest_service._apply_quest_rewards
+
+        def _slow_apply_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None):
+            result = original_apply_rewards(
+                cur, user, quest, now_iso, history_id=history_id, override_rewards=override_rewards
+            )
+            time.sleep(0.2)
+            return result
+
+        monkeypatch.setattr(quest_service, "_apply_quest_rewards", _slow_apply_rewards)
+
+        results = {}
+        errors = {}
+
+        def _approve():
+            try:
+                results["approve"] = quest_service.process_approve_quest("dad", history_id)
+            except Exception as e:  # noqa: BLE001 - スレッド内例外を主スレッドへ伝える
+                errors["approve"] = e
+
+        def _reject():
+            try:
+                results["reject"] = quest_service.process_reject_quest("dad", history_id)
+            except Exception as e:  # noqa: BLE001
+                errors["reject"] = e
+
+        t_approve = threading.Thread(target=_approve)
+        t_reject = threading.Thread(target=_reject)
+        t_approve.start()
+        time.sleep(0.05)  # 承認が先にロックを取得できるよう、わずかに先行させる
+        t_reject.start()
+        t_approve.join(timeout=5)
+        t_reject.join(timeout=5)
+
+        assert not t_approve.is_alive() and not t_reject.is_alive()
+
+        with common.get_db_cursor() as cur:
+            hist = cur.execute("SELECT * FROM quest_history WHERE id=?", (history_id,)).fetchone()
+            user = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
+
+        # 承認が確定した場合、却下はロック取得後の再チェックで「承認待ちでは
+        # ありません」(400)として弾かれ、statusは'approved'のまま
+        # (以前のバグのように'rejected'へ上書きされない)こと。
+        assert "approve" not in errors
+        assert "reject" in errors
+        assert isinstance(errors["reject"], HTTPException)
+        assert errors["reject"].status_code == 400
+
+        assert hist["status"] == "approved"
+        # 報酬が実際に加算されており、かつ却下によってロールバックされていないこと
+        # (statusが'rejected'なのに報酬が残る、という以前のバグの逆に、
+        # statusが'approved'であることと報酬が加算済みであることが一致している)
+        assert user["gold"] == 150
+
+
 class TestIsWithinResetPeriod:
     def setup_method(self):
         self.quest_service = QuestService()
@@ -207,8 +379,16 @@ class TestCalculateQuestBoost:
         assert boost == {"gold": 0, "exp": 0}
 
     def test_missed_days_grants_proportional_bonus(self, isolated_db):
+        """Issue #176回帰防止: このテストは以前 datetime.datetime.now()(naive、
+        OSローカル時刻)で3日前を計算してseedしていたが、calculate_quest_boostは
+        JST基準(datetime.datetime.now(JST))で「今日」を判定するため、CI実行環境
+        (UTC)かつ実行時刻がJST 0時〜9時に相当する時間帯(UTC 15時〜24時)だと、
+        OSローカルの日付とJSTの日付がずれてdays_diffが期待値と食い違い、決定的に
+        失敗していた。calculate_quest_boostと同じJST基準のtimezone-awareな
+        「今」を使ってseedすることで、実行環境・実行時刻に依存しないようにする。"""
         _seed_user_and_quest(gold_gain=100, exp_gain=100)
-        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        three_days_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=3)).isoformat()
         with common.get_db_cursor(commit=True) as cur:
             cur.execute("""
                 INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
@@ -232,6 +412,31 @@ class TestCalculateQuestBoost:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
             boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
         assert boost == {"gold": 100, "exp": 100}
+
+    def test_missed_days_is_computed_in_jst_not_os_local_timezone(self, isolated_db):
+        """Issue #108回帰防止: is_within_reset_periodと異なり、以前は
+        datetime.datetime.now()(OSローカル時刻、tzinfoなし)を「今日」の
+        基準にしていたため、サーバーOSのタイムゾーンがJST以外だと
+        JST 0時〜9時の間の判定でdays_diffが1小さくなっていた。
+
+        サーバーOSがUTC(tz_offset=0)の状態で、JST基準では
+        2026-08-20 03:00(=UTC 2026-08-19 18:00)を「現在時刻」として固定する。
+        completed_atはJST 2026-08-17 12:00(3日前)。
+        JST基準で正しく判定されれば days_diff=3 -> missed_days=2 -> ratio=0.2。
+        OSローカル(UTC)の日付(08-19)を誤って使うと days_diff=2 ->
+        missed_days=1 -> ratio=0.1 になってしまう(修正前の不具合)。
+        """
+        _seed_user_and_quest(gold_gain=100, exp_gain=100)
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('dad', 101, 'DailyQuest', 100, 100, '2026-08-17T12:00:00', 'approved')
+            """)
+        with freeze_time("2026-08-19 18:00:00", tz_offset=0):
+            with common.get_db_cursor() as cur:
+                quest = cur.execute("SELECT * FROM quest_master WHERE quest_id=101").fetchone()
+                boost = self.quest_service.calculate_quest_boost(cur, "dad", quest)
+        assert boost == {"gold": 20, "exp": 20}
 
 
 class TestGetAllViewDataTargetedQuestBoost:
@@ -274,7 +479,11 @@ class TestGetAllViewDataSharedQuestBoostViewer:
             "INSERT INTO quest_master (quest_id, title, quest_type, target_user, exp_gain, gold_gain) "
             "VALUES (101, 'Shared Quest', 'daily', 'siblings', 100, 100)"
         )
-        three_days_ago = (datetime.datetime.now() - datetime.timedelta(days=3)).isoformat()
+        # calculate_quest_boostはJST基準(datetime.datetime.now(JST))で「今日」を
+        # 判定するため、seed側もnaiveなOSローカル時刻ではなく同じJST基準の
+        # timezone-awareな「今」を使う(Issue #176回帰防止)。
+        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+        three_days_ago = (datetime.datetime.now(JST) - datetime.timedelta(days=3)).isoformat()
         cur.execute("""
             INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
             VALUES ('son', 101, 'Shared Quest', 100, 100, ?, 'approved')
@@ -292,6 +501,11 @@ class TestGetAllViewDataSharedQuestBoostViewer:
         assert quest["bonus_exp"] == 0
 
     def test_boost_uses_viewers_own_history_when_target_user_is_not_a_real_user(self, isolated_db):
+        """Issue #176回帰防止: _seed_shared_quest_with_historyは以前naiveなOS
+        ローカル時刻で3日前をseedしており、calculate_quest_boostのJST基準の
+        「今日」判定とずれてCI実行環境(UTC)かつ実行時刻がJST 0時〜9時に相当する
+        時間帯だとdays_diffが決定的にずれていた。_seed_shared_quest_with_history
+        自体をJST基準のtimezone-awareな「今」でseedするよう修正済み。"""
         with common.get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
 
@@ -310,7 +524,8 @@ class TestSyncMasterData:
     - quest_data モジュール不在時に HTTPException(500) を送出すること
     - 新規DBに欠けている旧カラム(role/reset_period/description)を
       ALTER TABLEで自動追加するレガシーマイグレーション分岐
-    - マスタ側の対象idリストが空の場合に全件DELETEする分岐
+    - reward_master側の対象idリストが空の場合に全件DELETEする分岐
+    - quest_master側は対象idリストが空でも全件DELETEしない安全弁(Issue #242)
     実際の外部サービス呼び出しは無く、quest_data はリポジトリ同梱の静的データなので
     実データを使っても決定的(deterministic)である。
     """
@@ -377,9 +592,40 @@ class TestSyncMasterData:
 
         assert result["status"] == "synced"
 
-    def test_empty_master_lists_delete_all_existing_rows(self, isolated_db, monkeypatch):
-        """quest_data側の各マスタが空の場合、対象idによる絞り込みDELETEではなく
-        テーブル全件を削除する分岐(quest_master/reward_masterそれぞれ)を通ること。"""
+    def test_empty_reward_master_list_deletes_all_existing_rows(self, isolated_db, monkeypatch):
+        """quest_data.REWARDSが空の場合、reward_masterはuser_inventoryの参照が
+        残っていない限りテーブル全件を削除する既存の分岐を通ること(この安全弁は
+        Issue #242以前から存在しており、quest_master側とは異なり据え置き)。"""
+        fake_quest_data = types.SimpleNamespace(
+            USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
+            QUESTS=[],
+            REWARDS=[],
+        )
+        monkeypatch.setattr(quest_service_module, "quest_data", fake_quest_data)
+        monkeypatch.setattr(quest_service_module.importlib, "reload", lambda module: None)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
+            )
+
+        game_system = GameSystem()
+        result = game_system.sync_master_data()
+
+        assert result["status"] == "synced"
+        with common.get_db_cursor() as cur:
+            reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
+        assert reward_count == 0
+
+    def test_empty_quest_master_list_skips_deletion_and_preserves_existing_rows(
+        self, isolated_db, monkeypatch
+    ):
+        """Issue #242の回帰テスト: 以前はquest_data.QUESTSが空の場合、
+        quest_masterに対しても対象idによる絞り込みDELETEではなくテーブル全件を
+        削除する分岐を通っていた。reward_master側にはuser_inventory参照チェック
+        という安全弁があるのに対し、quest_master側には同種の安全弁が一切なく、
+        QUESTSが空になった瞬間(コーディングミス等)に無条件で全クエストマスタが
+        消えていた。修正後は削除自体をスキップし、既存行を保持する。"""
         fake_quest_data = types.SimpleNamespace(
             USERS=[{"user_id": "dad", "name": "Dad", "job_class": "Warrior"}],
             QUESTS=[],
@@ -393,19 +639,19 @@ class TestSyncMasterData:
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) "
                 "VALUES (999, 'Stale Quest', 'daily', 1, 1)"
             )
-            cur.execute(
-                "INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (999, 'Stale Reward', 100)"
-            )
 
         game_system = GameSystem()
-        result = game_system.sync_master_data()
+        with patch.object(quest_service_module, "logger") as mock_logger:
+            result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
         with common.get_db_cursor() as cur:
             quest_count = cur.execute("SELECT COUNT(*) c FROM quest_master").fetchone()["c"]
-            reward_count = cur.execute("SELECT COUNT(*) c FROM reward_master").fetchone()["c"]
-        assert quest_count == 0
-        assert reward_count == 0
+        assert quest_count == 1, "quest_data.QUESTSが空でもquest_masterの既存行を無条件削除してはならない"
+        mock_logger.warning.assert_any_call(
+            "⚠️ quest_data.QUESTSが空のため、quest_masterへの全削除操作を"
+            "スキップしました(意図しない全消去を防ぐための安全弁)。"
+        )
 
     def test_reward_still_owned_by_user_inventory_is_not_deleted(self, isolated_db, monkeypatch):
         """M-1-2: user_inventory(reward_master(reward_id)へのFK)が参照している報酬を
@@ -610,3 +856,155 @@ class TestFilterActiveQuestsDateParseErrorLogging:
             f"log message should reference the quest_id (4242), got: {logged_message!r}"
         )
         assert "None" not in logged_message
+
+
+class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
+    """Issue #241の回帰テスト: quest_type='random'のクエストでoccurrence_chanceが
+    Noneの場合、random.Random(seed).random() > None の比較でTypeErrorになり、
+    filter_active_quests/process_complete_quest側の検証が例外で落ちていた
+    (start_date/end_dateパース失敗のValueErrorのみ捕捉しており、この経路は無防備だった)。
+    occurrence_chanceがNoneの場合はDBスキーマ(DEFAULT 1.0)・models/quest.pyの
+    既定値(Optional[float] = 1.0)と同じ「常に出現」扱いにする。"""
+
+    def _make_random_quest(self, occurrence_chance):
+        return {
+            "quest_id": 9001,
+            "quest_type": "random",
+            "occurrence_chance": occurrence_chance,
+            "start_time": None,
+            "end_time": None,
+            "day_of_week": None,
+            "target_user": "all",
+            "icon_key": "🎲",
+        }
+
+    def test_none_occurrence_chance_does_not_raise_type_error(self):
+        quest_service = QuestService()
+        quest = self._make_random_quest(None)
+
+        # 例外を送出せず完走すること自体が回帰確認の対象
+        result = quest_service._is_quest_currently_active(quest)
+
+        assert result is True, "occurrence_chance=Noneは既定値1.0(常に出現)として扱うべき"
+
+    def test_filter_active_quests_does_not_raise_for_random_quest_with_none_chance(self):
+        quest_service = QuestService()
+        quest = self._make_random_quest(None)
+
+        result = quest_service.filter_active_quests([quest])
+
+        assert len(result) == 1
+
+    def test_explicit_chance_still_behaves_as_before(self):
+        quest_service = QuestService()
+        quest_never = self._make_random_quest(0.0)
+
+        assert quest_service._is_quest_currently_active(quest_never) is False, (
+            "occurrence_chance=0.0(既存の明示的な値)は従来通り出現しないこと"
+        )
+
+
+class TestSyncMasterDataSyncsRewardTarget:
+    """
+    Issue #95: sync_master_data の reward_master への UPSERT が target 列を
+    含んでいなかったため、対象者制限(target='children'/'adults' 等)がDBへ
+    一切反映されず、全報酬が全ユーザーに表示・購入可能になっていた。
+    """
+
+    def test_reward_target_is_synced_to_db(self, isolated_db):
+        game_system = GameSystem()
+        game_system.sync_master_data()
+
+        with common.get_db_cursor() as cur:
+            children_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 10"
+            ).fetchone()
+            adults_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 120"
+            ).fetchone()
+
+        assert children_reward["target"] == "children"
+        assert adults_reward["target"] == "adults"
+
+    def test_reward_target_is_updated_on_resync(self, isolated_db):
+        game_system = GameSystem()
+        game_system.sync_master_data()
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("UPDATE reward_master SET target = 'all' WHERE reward_id = 120")
+
+        game_system.sync_master_data()
+
+        with common.get_db_cursor() as cur:
+            adults_reward = cur.execute(
+                "SELECT target FROM reward_master WHERE reward_id = 120"
+            ).fetchone()
+
+        assert adults_reward["target"] == "adults"
+
+
+class TestProcessPurchaseRewardTargetRestriction:
+    """
+    Issue #95: 対象者制限のある報酬(target != 'all')は、フロントの表示フィルタだけ
+    でなくサーバー側の購入処理でも制限されるべき。API直叩きによるバイパスを防ぐ。
+    """
+
+    def _seed_users(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 10000, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 10000, 'role_child')"
+        )
+
+    def _seed_reward(self, cur, target):
+        cur.execute(
+            "INSERT INTO reward_master (reward_id, title, cost_gold, target) VALUES "
+            "(500, 'Restricted Reward', 100, ?)",
+            (target,),
+        )
+
+    def test_child_cannot_purchase_adults_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "adults")
+
+        with pytest.raises(HTTPException) as exc_info:
+            ShopService().process_purchase_reward("son", 500)
+
+        assert exc_info.value.status_code == 403
+
+    def test_adult_can_purchase_adults_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "adults")
+
+        result = ShopService().process_purchase_reward("dad", 500)
+
+        assert result["status"] == "purchased"
+
+    def test_adult_cannot_purchase_children_only_reward(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "children")
+
+        with pytest.raises(HTTPException) as exc_info:
+            ShopService().process_purchase_reward("dad", 500)
+
+        assert exc_info.value.status_code == 403
+
+    def test_all_target_reward_is_purchasable_by_anyone(self, isolated_db):
+        from services.quest_service import ShopService
+
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            self._seed_reward(cur, "all")
+
+        result = ShopService().process_purchase_reward("son", 500)
+
+        assert result["status"] == "purchased"

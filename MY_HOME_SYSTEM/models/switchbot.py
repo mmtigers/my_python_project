@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM/models/switchbot.py
-from pydantic import BaseModel, Field
-from typing import Optional, Union, Dict, Any
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
 
 class SwitchBotContext(BaseModel):
     """Webhookで送られてくる詳細コンテキスト"""
@@ -11,6 +11,12 @@ class SwitchBotContext(BaseModel):
     # ctx.deviceType が常にフォールバック(トップレベルのNone)になっていた。
     deviceType: Optional[str] = None
     detectionState: Optional[str] = None
+    # WoContact(開閉センサー)の実際の開閉状態を表すフィールド("open"/"close"/
+    # "timeOutNotClose")。SwitchBot公式Webhookドキュメント(OpenWonderLabs/SwitchBotAPI
+    # README-v1.0.md)によると、同デバイスの detectionState は内蔵PIRのモーション検知
+    # 結果("DETECTED"/"NOT_DETECTED")であり、開閉状態そのものではないため別フィールドと
+    # して定義する(Issue #251)。
+    openState: Optional[str] = None
     brightness: Optional[str] = None
     timeOfSample: Optional[int] = None
     # 電力計などのフィールド

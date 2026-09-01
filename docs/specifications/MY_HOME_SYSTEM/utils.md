@@ -11,7 +11,7 @@
 
 - [common.md](./common.md) — `get_now_iso`, `get_today_date_str`, `get_display_date`を`core.utils`から再エクスポートするFacadeモジュール
 - [sensor_service.md](./sensor_service.md) — `core.utils.get_now_iso`の直接の利用元
-- [weather_service.md](./weather_service.md) — `common.get_now_iso`経由での利用元
+- `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `common.get_now_iso`経由での利用元
 - [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
 
 ## 2. ファイルの概要
@@ -138,6 +138,35 @@
 
 
 
+### `retry_with_backoff`
+
+* **役割**: 引数なしのcallable(`fn`)を実行し、指定した例外クラス群(`retryable_exceptions`)に該当する例外が発生した場合のみExponential Backoffで再試行する共通ユーティリティ。Issue #292で、`config.py`の`verify_and_initialize_storage`と`monitors/nas_monitor.py`の`check_write_permission`がそれぞれ個別に実装していたNAS I/O向けのExponential Backoffループを1箇所に集約するために追加された。リトライ対象の例外集合・リトライ回数・待機秒数という「ポリシー」自体は呼び出し元ごとに異なるため引数として渡せるようにしており、集約後も各呼び出し元の挙動(リトライ回数・待機秒数・リトライ対象例外)自体は変更していない。
+* 根拠: [retry_with_backoff] (行番号: 56〜64 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
+
+
+* **引数/リクエスト**:
+* `fn` (`Callable[[], Any]`): 実行する引数なしのcallable。リトライごとに再度呼び出される(試行ごとに異なる状態が必要な場合はfn内で都度生成する設計を前提とする)。
+* `max_retries` (`int`, キーワード専用): 初回実行を含まない追加リトライの最大回数。
+* `retryable_exceptions` (`Tuple[Type[BaseException], ...]`, キーワード専用): リトライ対象とする例外クラスのタプル。これ以外の例外は即座に呼び出し元へ伝播する。
+* `base_delay` (`float`, キーワード専用): 初回リトライの待機秒数。デフォルトは1.0。
+* `max_delay` (`float`, キーワード専用): 待機秒数の上限。デフォルトは`float("inf")`(上限なし)。
+* `on_retry` (`Optional[Callable[[int, float, BaseException], None]]`, キーワード専用): 各リトライ前に呼ばれるコールバック(attempt, delay, exception)。呼び出し元固有のログ出力に使う。デフォルトは`None`。
+* 根拠: [引数定義] (行番号: 56〜63 / 抜粋: "fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],")
+
+
+* **戻り値/レスポンス**: `Any`。`fn()`の戻り値をそのまま返す。
+* 根拠: [戻り値] (行番号: 102 / 抜粋: "return fn()")
+
+
+* **副作用**: リトライ時に`on_retry`コールバックを呼び出し、`time.sleep`でスレッドを一時停止する。ログ出力自体は行わず(呼び出し元が`on_retry`内で行う設計)、この関数自身はロガーを持たない。
+* 根拠: [リトライループ] (行番号: 100〜105 / 抜粋: "for attempt in range(max_retries + 1):\n        try:\n            return fn()\n        except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+
+
+* **エラーハンドリング**: `retryable_exceptions`に該当する例外のみを捕捉し、`max_retries`回のリトライを使い切った場合は最後に発生した例外をそのまま再送出する(`raise`で元の例外を維持)。`retryable_exceptions`に含まれない例外は即座に(リトライせず)呼び出し元へ伝播する。
+* 根拠: [例外捕捉と再送出] (行番号: 103〜105 / 抜粋: "except retryable_exceptions as e:\n            if attempt >= max_retries:\n                raise")
+
+
+
 ### `wait_for_storage_warmup`
 
 * **役割**: 対象のファイルまたはディレクトリが存在し、読み書きアクセスが可能になるまで指数関数的バックオフを用いて待機する。
@@ -261,8 +290,9 @@ graph TD
 ## 8. 保守上の注意点
 
 * `with_exponential_backoff` は `while True:` を用いており、関数が成功するまで無限にリトライを繰り返す仕様である。恒久的な障害が発生した場合、処理が永遠にブロックされる。
-* `with_exponential_backoff` および `wait_for_storage_warmup` は `time.sleep()` を使用した同期的処理である。非同期フレームワーク（`asyncio`, `FastAPI`の非同期エンドポイントなど）で実行した場合、イベントループ全体をブロックする可能性がある。
+* `with_exponential_backoff`、`wait_for_storage_warmup`、`retry_with_backoff` はいずれも `time.sleep()` を使用した同期的処理である。非同期フレームワーク（`asyncio`, `FastAPI`の非同期エンドポイントなど）で実行した場合、イベントループ全体をブロックする可能性がある。
 * `wait_for_storage_warmup` では、`os.access` や `Path(target_path)` 自体が例外（権限エラー以外のOSレベルのエラーなど）を発生させた場合のハンドリングが実装されていない。
+* **（Issue #292で新規追加）`retry_with_backoff`**: `with_exponential_backoff`(無限リトライの`while True`デコレータ)や`wait_for_storage_warmup`(パス存在確認限定・呼び出し元なし)とは異なり、任意のcallableを有限回数リトライしつつ最後の例外を再送出する汎用ヘルパーとして追加された。既に`config.py::verify_and_initialize_storage`と`monitors/nas_monitor.py::check_write_permission`から実際に呼び出されている(下記相互参照参照)。
 
 ## 9. 不明事項一覧
 

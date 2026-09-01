@@ -21,11 +21,13 @@
 
 * 監視カメラ機能全体のエントリーポイントとなる、独立した全画面レイアウトのダッシュボードコンポーネント。
 * マウント時にカメラ設定一覧をAPIから取得し、`order`昇順でソートして`allCameras`として保持する。表示に使う`cameras`は`allCameras`から`enabled`が`true`のものだけを`useMemo`で抽出した派生値である。
-* 根拠: `fetchSettings`と`cameras`の定義 (行番号: 15〜23, 31 / 抜粋: "const fetchSettings = useCallback(() => {\n        return apiClient.get<CameraConfig[]>('/api/cameras/settings')", "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: `fetchSettings`と`cameras`の定義 (行番号: 28〜38, 46 / 抜粋: "const fetchSettings = useCallback(() => {\n        return apiClient.get<CameraConfig[]>('/api/cameras/settings')", "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 * 「ライブ映像」タブと「録画再生」タブを切り替え、それぞれ`LiveView`・`RecordView`コンポーネントへ描画を委譲する。
 * マウント中はページタイトル（`document.title`）を「ホーム監視カメラ」に変更し、アンマウント時に「Family Quest」へ戻す。
 * ヘッダーの歯車アイコンボタンから`CameraSettingsModal`を開き、`allCameras`（無効化されたカメラも含む全件）と、カメラの有効/無効切り替え成功時に呼ばれる`onToggled`コールバックとして`fetchSettings`自身を渡すことで、モーダル側の操作後に一覧を再取得する。
-* 根拠: `CameraSettingsModal`の呼び出し (行番号: 76〜81 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={fetchSettings}\n            />")
+* 根拠: `CameraSettingsModal`の呼び出し (行番号: 103〜108 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={fetchSettings}\n            />")
+* **Issue #121で修正**: 設定取得（`fetchSettings`）が失敗した場合、以前は`console.error`のみでユーザーへの通知が一切なく、ライブタブが「無言で」空のグリッドを表示していた。`CameraDashboard`は`main.tsx`で`ToastProvider`配下ではなく独立してマウントされる（`/camera`はFamily Quest本体と同時に使われない専用ビューア）ため、他画面のような`useToast()`は使えない。代わりにローカルな`fetchError`ステートを追加し、取得失敗時は画面上部に再試行ボタン付きのエラーバナーを表示するようにした。
+* 根拠: `fetchError`ステートと表示バナー (行番号: 26, 34〜37, 69〜79 / 抜粋: "const [fetchError, setFetchError] = useState<string | null>(null);", "{fetchError && (\n                    <div className=\"mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300\">")
 
 ## 3. 外部依存関係
 
@@ -45,61 +47,72 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient`の内部実装 | ベースURL、認証、共通エラー処理などの詳細仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 16 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
-| `/api/cameras/settings` エンドポイント | カメラ設定一覧を返すバックエンドの実装・レスポンス仕様の詳細が本ファイルには含まれないため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 16 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
-| `Camera`・`Settings`アイコン（`lucide-react`）の内部実装 | アイコンのSVG実体やライブラリのバージョンが本ファイルからは確認できないため。 | 根拠: [`<Camera size={28} className="text-blue-500" />`, `<Settings size={22} />`] (行番号: 42, 50 / 抜粋: "<Camera size={28} className=\"text-blue-500\" />") |
-| `LiveView`・`RecordView`・`CameraSettingsModal`の内部実装 | 本ファイルからは`cameras`（または`allCameras`）とコールバックのプロパティを渡して呼び出している箇所のみが確認でき、それぞれの内部ロジックは別ファイルにあるため。 | 根拠: [`<LiveView cameras={cameras} />`, `<RecordView cameras={cameras} />`, `<CameraSettingsModal .../>`] (行番号: 70, 72, 76〜81 / 抜粋: "<LiveView cameras={cameras} />") |
+| `apiClient`の内部実装 | ベースURL、認証、共通エラー処理などの詳細仕様が本ファイルからは読み取れないため。 | 根拠: [`apiClient.get`] (行番号: 29 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
+| `/api/cameras/settings` エンドポイント | カメラ設定一覧を返すバックエンドの実装・レスポンス仕様の詳細が本ファイルには含まれないため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 29 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
+| `Camera`・`Settings`アイコン（`lucide-react`）の内部実装 | アイコンのSVG実体やライブラリのバージョンが本ファイルからは確認できないため。 | 根拠: [`<Camera size={28} className="text-blue-500" />`, `<Settings size={22} />`] (行番号: 57, 65 / 抜粋: "<Camera size={28} className=\"text-blue-500\" />") |
+| `LiveView`・`RecordView`・`CameraSettingsModal`の内部実装 | 本ファイルからは`cameras`（または`allCameras`）とコールバックのプロパティを渡して呼び出している箇所のみが確認でき、それぞれの内部ロジックは別ファイルにあるため。 | 根拠: [`<LiveView cameras={cameras} />`, `<RecordView cameras={cameras} />`, `<CameraSettingsModal .../>`] (行番号: 97, 99, 103〜108 / 抜粋: "<LiveView cameras={cameras} />") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `CameraDashboard`
 
-* **役割**: カメラ監視機能の全体レイアウト（ヘッダー、設定ボタン、タブ切り替え、コンテンツ表示、設定モーダル）を構築し、マウント時にカメラ設定を取得するメインコンポーネント。
-* 根拠: [`CameraDashboard`] (行番号: 9〜84 / 抜粋: "const CameraDashboard: React.FC = () => {")
+* **役割**: カメラ監視機能の全体レイアウト（ヘッダー、設定ボタン、エラーバナー、タブ切り替え、コンテンツ表示、設定モーダル）を構築し、マウント時にカメラ設定を取得するメインコンポーネント。
+* 根拠: [`CameraDashboard`] (行番号: 18〜111 / 抜粋: "const CameraDashboard: React.FC = () => {")
 
 
 * **引数/リクエスト（Props）**: なし
-* 根拠: [コンポーネント定義] (行番号: 9 / 抜粋: "const CameraDashboard: React.FC = () => {")
+* 根拠: [コンポーネント定義] (行番号: 18 / 抜粋: "const CameraDashboard: React.FC = () => {")
 
 
-* **戻り値/レスポンス**: JSX要素。`loading`が`true`の間は「読み込み中...」のみを表示する`<div>`を返し、それ以外はヘッダー（見出しと設定ボタン）・タブ切り替えボタン・（`activeTab`に応じた）`LiveView`または`RecordView`・`CameraSettingsModal`を含む全画面レイアウトの`<div>`を返す。
-* 根拠: [早期return] (行番号: 33 / 抜粋: "if (loading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (行番号: 35〜83 / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
+* **戻り値/レスポンス**: JSX要素。`loading`が`true`の間は「読み込み中...」のみを表示する`<div>`を返し、それ以外はヘッダー（見出しと設定ボタン）・（`fetchError`が真の場合のみ）エラーバナー・タブ切り替えボタン・（`activeTab`に応じた）`LiveView`または`RecordView`・`CameraSettingsModal`を含む全画面レイアウトの`<div>`を返す。
+* 根拠: [早期return] (行番号: 48 / 抜粋: "if (loading) return <div className=\"min-h-screen bg-gray-900 text-white flex items-center justify-center p-8\">読み込み中...</div>;")、[通常return] (行番号: 50〜110 / 抜粋: "return (\n        // 独立した全画面レイアウト\n        <div className=\"min-h-screen bg-gray-900 text-gray-100 p-4 md:p-8 font-sans\">")
 
 
-* **副作用**: マウント時（`useEffect`の依存配列が`[fetchSettings]`）に、`document.title`を「ホーム監視カメラ」へ変更し、`fetchSettings()`を呼び出してカメラ設定一覧を取得したのち、`.finally`で`loading`を`false`にする。クリーンアップ関数として、アンマウント時に`document.title`を「Family Quest」へ戻す。設定ボタン（`aria-label="カメラ設定"`）のクリックで`setSettingsOpen(true)`し、`CameraSettingsModal`をマウント（`isOpen`で表示制御）する。
-* 根拠: [`useEffect`] (行番号: 25〜29 / 抜粋: "useEffect(() => {\n        document.title = \"ホーム監視カメラ\";\n        fetchSettings().finally(() => setLoading(false));")、[cleanup] (行番号: 28 / 抜粋: "return () => { document.title = \"Family Quest\"; };")、[設定ボタン] (行番号: 45〜51 / 抜粋: "<button\n                        aria-label=\"カメラ設定\"\n                        className=\"p-2 rounded-full text-gray-300 hover:bg-gray-800 hover:text-white transition-colors\"\n                        onClick={() => setSettingsOpen(true)}\n                    >")
+* **副作用**: マウント時（`useEffect`の依存配列が`[fetchSettings]`）に、`document.title`を「ホーム監視カメラ」へ変更し、`fetchSettings()`を呼び出してカメラ設定一覧を取得したのち、`.finally`で`loading`を`false`にする。クリーンアップ関数として、アンマウント時に`document.title`を「Family Quest」へ戻す。設定ボタン（`aria-label="カメラ設定"`）のクリックで`setSettingsOpen(true)`し、`CameraSettingsModal`をマウント（`isOpen`で表示制御）する。エラーバナー内の「再試行」ボタンのクリックで`setLoading(true)`のうえ`fetchSettings()`を再実行する（**Issue #121で追加**）。
+* 根拠: [`useEffect`] (行番号: 40〜44 / 抜粋: "useEffect(() => {\n        document.title = \"ホーム監視カメラ\";\n        fetchSettings().finally(() => setLoading(false));")、[cleanup] (行番号: 43 / 抜粋: "return () => { document.title = \"Family Quest\"; };")、[設定ボタン] (行番号: 60〜66 / 抜粋: "<button\n                        aria-label=\"カメラ設定\"\n                        className=\"p-2 rounded-full text-gray-300 hover:bg-gray-800 hover:text-white transition-colors\"\n                        onClick={() => setSettingsOpen(true)}\n                    >")、[再試行ボタン] (行番号: 72〜77 / 抜粋: "<button\n                            onClick={() => { setLoading(true); fetchSettings().finally(() => setLoading(false)); }}")
 
 
-* **エラーハンドリング**: `fetchSettings`内部の`apiClient.get`が失敗した場合の処理は`fetchSettings`自体に委譲されており（後述）、本コンポーネントの`useEffect`側では`.finally(() => setLoading(false))`により失敗時も含め必ず`loading`が`false`になるのみで、追加のエラーハンドリングは行っていない。
-* 根拠: [`.finally`] (行番号: 27 / 抜粋: "fetchSettings().finally(() => setLoading(false));")
+* **エラーハンドリング**: `fetchSettings`内部の`apiClient.get`が失敗した場合の処理は`fetchSettings`自体に委譲されており（後述）、本コンポーネントの`useEffect`側では`.finally(() => setLoading(false))`により失敗時も含め必ず`loading`が`false`になる。**Issue #121で修正**: 以前はこれ以上のエラーハンドリングを行っていなかったが、現在は`fetchSettings`が更新する`fetchError`ステートが真の場合、`{fetchError && (...)}`の条件付きレンダリングでヘッダー直下にエラーバナー（メッセージ＋再試行ボタン）を表示する。
+* 根拠: [`.finally`] (行番号: 42 / 抜粋: "fetchSettings().finally(() => setLoading(false));")、[エラーバナー] (行番号: 69〜79 / 抜粋: "{fetchError && (")
 
 ### `fetchSettings` (`useCallback`)
 
-* **役割**: `/api/cameras/settings`からカメラ設定一覧を取得し、`order`昇順でソートして`allCameras`にセットする。マウント時の初回取得と、`CameraSettingsModal`での有効/無効切り替え成功後の再取得（`onToggled`経由）の両方から呼ばれる、`useCallback`でメモ化された関数。
-* 根拠: (行番号: 15〜23 / 抜粋: "const fetchSettings = useCallback(() => {\n        return apiClient.get<CameraConfig[]>('/api/cameras/settings')\n            .then(data => {\n                setAllCameras([...data].sort((a, b) => a.order - b.order));\n            })")
+* **役割**: `/api/cameras/settings`からカメラ設定一覧を取得し、`order`昇順でソートして`allCameras`にセットする。マウント時の初回取得と、`CameraSettingsModal`での有効/無効切り替え成功後の再取得（`onToggled`経由）、およびエラーバナーの「再試行」ボタンの3箇所から呼ばれる、`useCallback`でメモ化された関数。
+* 根拠: (行番号: 28〜38 / 抜粋: "const fetchSettings = useCallback(() => {\n        return apiClient.get<CameraConfig[]>('/api/cameras/settings')\n            .then(data => {\n                setAllCameras([...data].sort((a, b) => a.order - b.order));\n                setFetchError(null);\n            })")
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 15 / 抜粋: "const fetchSettings = useCallback(() => {")
+* 根拠: (行番号: 28 / 抜粋: "const fetchSettings = useCallback(() => {")
 
 * **戻り値/レスポンス**: `Promise<void>`（`apiClient.get`が返す`Promise`をそのまま`return`しており、呼び出し元（`useEffect`や`onToggled`）は`.finally`等でチェーン可能）
-* 根拠: (行番号: 16 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')")
+* 根拠: (行番号: 29 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')")
 
-* **副作用**: `apiClient.get<CameraConfig[]>('/api/cameras/settings')`によるHTTP GETリクエスト。成功時は取得データを`[...data]`でコピーしたうえで`(a, b) => a.order - b.order`によりソートし、`setAllCameras`で状態を更新する。
-* 根拠: (行番号: 16〜19 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')\n            .then(data => {\n                setAllCameras([...data].sort((a, b) => a.order - b.order));\n            })")
+* **副作用**: `apiClient.get<CameraConfig[]>('/api/cameras/settings')`によるHTTP GETリクエスト。成功時は取得データを`[...data]`でコピーしたうえで`(a, b) => a.order - b.order`によりソートし、`setAllCameras`で状態を更新したうえで`setFetchError(null)`により（再試行等で）以前のエラー表示があればクリアする（**Issue #121で追加**）。
+* 根拠: (行番号: 29〜33 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')\n            .then(data => {\n                setAllCameras([...data].sort((a, b) => a.order - b.order));\n                setFetchError(null);\n            })")
 
-* **エラーハンドリング**: `.catch`ブロックで`console.error("Failed to fetch camera settings:", err)`を出力するのみで、`setAllCameras`は呼ばれない（失敗時は直前の`allCameras`の状態が維持される）。ユーザー向けのエラーメッセージ表示は実装されていない。
-* 根拠: (行番号: 20〜22 / 抜粋: "})\n            .catch(err => {\n                console.error(\"Failed to fetch camera settings:\", err);\n            });")
+* **エラーハンドリング**: `.catch`ブロックで`console.error("Failed to fetch camera settings:", err)`を出力したうえで、`setFetchError(extractErrorDetail(err))`により取得したエラーメッセージをステートにセットする（`setAllCameras`は呼ばれないため、失敗時は直前の`allCameras`の状態が維持される）。**Issue #121で修正**: 以前は`console.error`のみでユーザー向けのエラーメッセージ表示が一切実装されておらず、バックエンド停止・ネットワーク断時にライブタブが無言で空のグリッドを表示していた。現在は`fetchError`ステートを介して`CameraDashboard`側にエラーバナー（メッセージ＋再試行ボタン）が表示される。
+* 根拠: (行番号: 34〜37 / 抜粋: "})\n            .catch(err => {\n                console.error(\"Failed to fetch camera settings:\", err);\n                setFetchError(extractErrorDetail(err));\n            });")
+
+### `extractErrorDetail` (モジュールレベル関数、**Issue #121で追加**)
+
+* **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。`error`が`Error`インスタンスかつ`message`が真値の場合のみそれを使い、それ以外は固定文言`'カメラ設定の取得に失敗しました'`にフォールバックする。`fetchSettings`の`catch`から呼ばれ、`fetchError`ステート（エラーバナーの表示文言）にセットされる。`InventoryList.tsx`等の同名ヘルパーと同じパターン。
+* 根拠: (行番号: 9〜16 / 抜粋: "// ★バグ修正(Issue #121): apiClient側でスローされるErrorのmessageには、バックエンドが\n// 返す{\"detail\": \"...\"}の内容が入っている(apiClient.ts参照)。", "const extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';\n};")
+
+* **引数/リクエスト**: `error: unknown`
+* **戻り値/レスポンス**: `string`
+* **副作用**: なし
+* **エラーハンドリング**: なし（自身がエラー内容を安全な文字列に変換するためのヘルパー）
+* 根拠: (行番号: 14〜16 / 抜粋: "const extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';\n};")
 
 ### `cameras` (`useMemo`)
 
 * **役割**: `allCameras`のうち`enabled`が`true`のものだけを抽出した、`LiveView`/`RecordView`へ渡す表示用カメラ一覧。`allCameras`が変化したときのみ再計算される。
-* 根拠: (行番号: 31 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: (行番号: 46 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 
 * **引数/リクエスト**: `allCameras`（クロージャ経由、`useMemo`の依存配列）
 * **戻り値/レスポンス**: `CameraConfig[]`（`enabled === true`の要素のみ、順序は`allCameras`のソート順を維持）
 * **副作用**: なし
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 31 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: (行番号: 46 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 
 ## 5. 処理フロー図
 
@@ -111,30 +124,38 @@ flowchart TD
     CallFetchSettings --> FetchSettings["apiClient.get('/api/cameras/settings')"]
     FetchSettings -- 成功 --> SortByOrder["[...data].sort((a,b) => a.order - b.order)"]
     SortByOrder --> SetAllCameras["setAllCameras(sorted)"]
+    SetAllCameras --> ClearFetchError["setFetchError(null)"]
     FetchSettings -- 失敗(catch) --> LogError["console.error('Failed to fetch camera settings:', err)"]
+    LogError --> SetFetchError["外部: extractErrorDetail(err)<br>setFetchError(...)<br>(Issue #121)"]
 
-    SetAllCameras --> FinallySetLoadingFalse["finally: setLoading(false)"]
-    LogError --> FinallySetLoadingFalse
+    ClearFetchError --> FinallySetLoadingFalse["finally: setLoading(false)"]
+    SetFetchError --> FinallySetLoadingFalse
 
     FinallySetLoadingFalse --> ComputeCameras["useMemo: cameras = allCameras.filter(c => c.enabled)"]
     ComputeCameras --> CheckLoading{"loading === true?"}
 
     CheckLoading -- Yes --> ShowLoading["「読み込み中...」を表示"] --> End(["Render終了"])
-    CheckLoading -- No --> RenderLayout["ヘッダー(見出し+設定ボタン)・タブボタンを描画"]
+    CheckLoading -- No --> RenderLayout["ヘッダー(見出し+設定ボタン)を描画"]
+    RenderLayout --> CheckFetchError{"fetchError !== null ?<br>(Issue #121)"}
+    CheckFetchError -- Yes --> RenderErrorBanner["エラーバナー(メッセージ+再試行ボタン)を描画"]
+    CheckFetchError -- No --> RenderTabs["タブボタンを描画"]
+    RenderErrorBanner --> RenderTabs
 
-    RenderLayout --> CheckTab{"activeTab === 'live' ?"}
+    RenderTabs --> CheckTab{"activeTab === 'live' ?"}
     CheckTab -- Yes --> RenderLive["<LiveView cameras={cameras} /> を描画"]
     CheckTab -- No --> RenderRecord["<RecordView cameras={cameras} /> を描画"]
-    RenderLayout --> RenderModal["<CameraSettingsModal isOpen={settingsOpen} cameras={allCameras} onToggled={fetchSettings} /> を描画"]
+    RenderTabs --> RenderModal["<CameraSettingsModal isOpen={settingsOpen} cameras={allCameras} onToggled={fetchSettings} /> を描画"]
 
     RenderLive --> WaitAction{"ユーザー操作"}
     RenderRecord --> WaitAction
     RenderModal --> WaitAction
+    RenderErrorBanner --> WaitAction
 
     WaitAction -- タブボタンクリック --> SetActiveTab["setActiveTab('live' | 'record')"]
     WaitAction -- 設定ボタンクリック --> SetSettingsOpenTrue["setSettingsOpen(true)"]
     WaitAction -- モーダルonClose --> SetSettingsOpenFalse["setSettingsOpen(false)"]
     WaitAction -- モーダルonToggled --> CallFetchSettings
+    WaitAction -- 再試行ボタンクリック(Issue #121) --> RetrySetLoading["setLoading(true)"] --> CallFetchSettings
 
     SetActiveTab --> RenderLayout
     SetSettingsOpenTrue --> RenderLayout
@@ -152,9 +173,10 @@ flowchart TD
 graph TD
     subgraph "CameraDashboard.tsx"
         Component_CameraDashboard["CameraDashboard (Component)"]
-        States["allCameras / activeTab / loading / settingsOpen (useState)"]
+        States["allCameras / activeTab / loading / settingsOpen / fetchError (useState)"]
         FetchSettingsFn["fetchSettings (useCallback)"]
         CamerasMemo["cameras (useMemo)"]
+        ExtractErrorFn["extractErrorDetail (Issue #121)"]
     end
 
     subgraph "外部ライブラリ"
@@ -180,6 +202,7 @@ graph TD
     Component_CameraDashboard --> CameraSettingsModal
     FetchSettingsFn --> ApiClient
     FetchSettingsFn --> States
+    FetchSettingsFn --> ExtractErrorFn
     CamerasMemo --> States
     States --> CameraConfig
     LiveView --> CameraConfig
@@ -195,25 +218,25 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `family-quest/src/features/camera/components/CameraSettingsModal.tsx` | 新規追加された設定モーダルが`allCameras`をどう表示し、有効/無効切り替えをどのAPIで永続化しているかを確認するため。 | 根拠: [`<CameraSettingsModal .../>`] (行番号: 76〜81 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}") |
-| 高 | `family-quest/src/features/camera/components/LiveView.tsx` | 「ライブ映像」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<LiveView cameras={cameras} />`] (行番号: 70 / 抜粋: "<LiveView cameras={cameras} />") |
-| 高 | `family-quest/src/features/camera/components/RecordView.tsx` | 「録画再生」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<RecordView cameras={cameras} />`] (行番号: 72 / 抜粋: "<RecordView cameras={cameras} />") |
-| 中 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/settings`呼び出しの認証・共通エラー処理仕様を確認するため。 | 根拠: [`apiClient.get`] (行番号: 16 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
-| 中 | バックエンドの`/api/cameras/settings`エンドポイント実装 | カメラ設定（`enabled`, `order`等）がどのように永続化・管理されているかを確認するため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 16) |
-| 低 | 本コンポーネントのルーティング／マウント元ファイル | `CameraDashboard`が「独立した全画面レイアウト」とコメントされており、アプリ全体のどのルートからマウントされるかを確認するため。 | 根拠: [コメント] (行番号: 36 / 抜粋: "// 独立した全画面レイアウト") |
+| 高 | `family-quest/src/features/camera/components/CameraSettingsModal.tsx` | 新規追加された設定モーダルが`allCameras`をどう表示し、有効/無効切り替えをどのAPIで永続化しているかを確認するため。 | 根拠: [`<CameraSettingsModal .../>`] (行番号: 103〜108 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}") |
+| 高 | `family-quest/src/features/camera/components/LiveView.tsx` | 「ライブ映像」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<LiveView cameras={cameras} />`] (行番号: 97 / 抜粋: "<LiveView cameras={cameras} />") |
+| 高 | `family-quest/src/features/camera/components/RecordView.tsx` | 「録画再生」タブ選択時に描画される内容の詳細仕様を確認するため。 | 根拠: [`<RecordView cameras={cameras} />`] (行番号: 99 / 抜粋: "<RecordView cameras={cameras} />") |
+| 中 | `family-quest/src/lib/apiClient.ts` | `/api/cameras/settings`呼び出しの認証・共通エラー処理仕様を確認するため。 | 根拠: [`apiClient.get`] (行番号: 29 / 抜粋: "return apiClient.get<CameraConfig[]>('/api/cameras/settings')") |
+| 中 | バックエンドの`/api/cameras/settings`エンドポイント実装 | カメラ設定（`enabled`, `order`等）がどのように永続化・管理されているかを確認するため。 | 根拠: [`apiClient.get<CameraConfig[]>('/api/cameras/settings')`] (行番号: 29) |
+| 低 | 本コンポーネントのルーティング／マウント元ファイル | `CameraDashboard`が「独立した全画面レイアウト」とコメントされており、アプリ全体のどのルートからマウントされるかを確認するため。 | 根拠: [コメント] (行番号: 51 / 抜粋: "// 独立した全画面レイアウト") |
 
 ## 8. 保守上の注意点
 
-* `apiClient.get`失敗時、`console.error`でログ出力されるのみで、ユーザーへのエラー表示（例:「カメラ設定の取得に失敗しました」等のメッセージ）は実装されていない。初回マウント時に失敗した場合は`allCameras`が初期値の空配列`[]`のままとなり、`cameras`も空配列となるため`LiveView`/`RecordView`にはカメラが1台も表示されない状態になるが、その理由（通信失敗か、単に有効なカメラが0台か）をユーザーは区別できない。
-* 根拠: [`.catch`] (行番号: 20〜22 / 抜粋: "console.error(\"Failed to fetch camera settings:\", err);")
-* `fetchSettings`は`useCallback(..., [])`で依存配列が空のためマウント時に一度だけ生成され、それを依存配列に持つ`useEffect(() => {...}, [fetchSettings])`も実質マウント時の1回のみ実行される。ただし本バージョンでは`CameraSettingsModal`の`onToggled`にも同じ`fetchSettings`が渡されており、モーダルでの有効/無効切り替え成功時には`allCameras`が再取得される（以前バージョンには存在しなかった再取得経路）。
-* 根拠: [`useEffect`] (行番号: 25〜29 / 抜粋: "useEffect(() => {\n        document.title = \"ホーム監視カメラ\";\n        fetchSettings().finally(() => setLoading(false));\n    }, [fetchSettings]);")、[`onToggled`] (行番号: 80 / 抜粋: "onToggled={fetchSettings}")
+* **Issue #121で修正**: 以前は`apiClient.get`失敗時、`console.error`でログ出力されるのみで、ユーザーへのエラー表示は実装されていなかった。初回マウント時に失敗した場合は`allCameras`が初期値の空配列`[]`のままとなり、`cameras`も空配列となるため`LiveView`/`RecordView`にはカメラが1台も表示されない状態になるが、その理由（通信失敗か、単に有効なカメラが0台か）をユーザーは区別できなかった。現在は`fetchSettings`の`catch`で`fetchError`ステートに`extractErrorDetail(err)`をセットし、ヘッダー直下に再試行ボタン付きのエラーバナーを表示する。`CameraDashboard`は`main.tsx`で`ToastProvider`配下ではなく独立してマウントされるため、`useToast()`によるトースト表示は使えず、ローカルステートによる画面内表示を選んでいる。
+* 根拠: [`.catch`] (行番号: 34〜37 / 抜粋: "console.error(\"Failed to fetch camera settings:\", err);\n                setFetchError(extractErrorDetail(err));")、[エラーバナー] (行番号: 69〜79)
+* `fetchSettings`は`useCallback(..., [])`で依存配列が空のためマウント時に一度だけ生成され、それを依存配列に持つ`useEffect(() => {...}, [fetchSettings])`も実質マウント時の1回のみ実行される。ただし本バージョンでは`CameraSettingsModal`の`onToggled`とエラーバナーの「再試行」ボタンにも同じ`fetchSettings`が渡されており、モーダルでの有効/無効切り替え成功時、および取得失敗後の再試行時にも`allCameras`が再取得される。
+* 根拠: [`useEffect`] (行番号: 40〜44 / 抜粋: "useEffect(() => {\n        document.title = \"ホーム監視カメラ\";\n        fetchSettings().finally(() => setLoading(false));\n    }, [fetchSettings]);")、[`onToggled`] (行番号: 107 / 抜粋: "onToggled={fetchSettings}")、[再試行ボタン] (行番号: 72〜73 / 抜粋: "onClick={() => { setLoading(true); fetchSettings().finally(() => setLoading(false)); }}")
 * `document.title`をマウント時に変更し、アンマウント時に固定文字列`"Family Quest"`へ戻す実装になっているが、この値がアプリ全体のデフォルトタイトルと一致しているかどうかは本ファイルのみからは検証できない（他画面がマウントされた際に独自のタイトルへ再度変更する場合は問題ないが、想定外の順序でアンマウントされると不整合が生じる可能性がある）。
-* 根拠: [`return () => { document.title = "Family Quest"; };`] (行番号: 28)
+* 根拠: [`return () => { document.title = "Family Quest"; };`] (行番号: 43)
 * カメラ一覧のソートは`fetchSettings`内で`allCameras`に対して行われ（`[...data].sort((a, b) => a.order - b.order)`）、表示用の`cameras`は`useMemo`で`allCameras.filter(c => c.enabled)`するのみでソートし直さない。`CameraConfig`の`order`が同値の場合の挙動（ソート安定性）は`Array.prototype.sort`のJavaScriptエンジンの実装依存となる。
-* 根拠: [`.sort`] (行番号: 18 / 抜粋: "setAllCameras([...data].sort((a, b) => a.order - b.order));")、[`.filter`] (行番号: 31 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
+* 根拠: [`.sort`] (行番号: 31 / 抜粋: "setAllCameras([...data].sort((a, b) => a.order - b.order));")、[`.filter`] (行番号: 46 / 抜粋: "const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);")
 * 有効/無効の切り替えUI自体は本ファイルには存在せず、`CameraSettingsModal`に`allCameras`（無効化されたカメラも含む全件）と`onToggled`（切り替え成功時に呼ばれ`fetchSettings`を再実行する）を渡すのみである。切り替えが実際にどのAPIを叩いて永続化されるかは`CameraSettingsModal`側の実装に依存し、本ファイルからは確認できない。
-* 根拠: [`CameraSettingsModal`への props 渡し] (行番号: 76〜81 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={fetchSettings}\n            />")
+* 根拠: [`CameraSettingsModal`への props 渡し] (行番号: 103〜108 / 抜粋: "<CameraSettingsModal\n                isOpen={settingsOpen}\n                onClose={() => setSettingsOpen(false)}\n                cameras={allCameras}\n                onToggled={fetchSettings}\n            />")
 
 ## 9. 不明事項一覧
 

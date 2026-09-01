@@ -40,6 +40,7 @@ from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable
 from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
+from file_utils import DiscordCircuitBreaker
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -183,6 +184,9 @@ class AppConfig:
     MISSAV_SLEEP_RANGE: Tuple[float, float] = (8.0, 20.0)
     # 連続失敗数がこの値に達したら、レート制限/ブロックの可能性を疑って処理全体を中断する
     CONSECUTIVE_FAILURE_THRESHOLD: int = 3
+    # Discord Webhookへの通知が連続でこの回数失敗したら、Webhookが機能していないと
+    # 判断してそれ以降の送信をスキップする(サーキットブレーカー)
+    DISCORD_CIRCUIT_BREAKER_THRESHOLD: int = 3
     # yt-dlp自体のリクエスト間スリープ（メタデータ取得等、内部リクエストの間隔を空ける）
     YTDLP_SLEEP_INTERVAL: float = 3.0
     YTDLP_MAX_SLEEP_INTERVAL: float = 8.0
@@ -319,15 +323,27 @@ class DownloadTask(NamedTuple):
 # ==========================================
 # 2. マネージャー & ユーティリティ
 # ==========================================
+_discord_circuit_breaker = DiscordCircuitBreaker(failure_threshold=CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD)
+
 class DiscordNotifier:
     @staticmethod
     def send(text: str, is_error: bool = False) -> None:
+        if _discord_circuit_breaker.is_open:
+            # Webhookへの連続送信失敗を検知しているため、無駄なリクエストを
+            # 重ねないよう以降の送信をスキップする。
+            logger.warning(f"⚠️ Discord Webhookへの連続送信失敗を検知しているため、通知をスキップします: {text[:50]}")
+            return
         channel = 'error' if is_error else 'notify'
         message = {"type": "text", "text": text}
         try:
-            _send_discord_webhook([message], channel=channel)
+            sent = _send_discord_webhook([message], channel=channel)
         except Exception as e:
             logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)
+            sent = False
+        if sent:
+            _discord_circuit_breaker.record_success()
+        else:
+            _discord_circuit_breaker.record_failure()
 
 class HistoryManager:
     @staticmethod
@@ -420,6 +436,14 @@ class FileSystemManager:
             return True
         except PermissionError:
             DiscordNotifier.send(f"❌ 権限エラー: {path}", is_error=True)
+            return False
+        except OSError as e:
+            # #236: PermissionError以外のOSError(読み取り専用マウントのErrno 30、
+            # NAS切断時のErrno 5、ディスクフル時のErrno 28等)はここで捕捉されず、
+            # 専用のDiscord通知を経由しないままrun_lockedのexcept Exceptionまで
+            # 伝播し、インフラ障害の原因究明が遅れていた。extract_youtube_urls.pyの
+            # process_subscriptions(#185)と同様にOSError全般を捕捉する。
+            DiscordNotifier.send(f"❌ ディレクトリ作成エラー: {path} ({e})", is_error=True)
             return False
 
     @staticmethod
@@ -533,7 +557,14 @@ class UniversalYtDlpStrategy(DownloadStrategy):
             'noplaylist': True,
             # 動画タイトルがそのままファイル名になるため、極端に長いタイトルで
             # ext4等のファイル名長制限（255バイト）に抵触して失敗するのを防ぐ。
-            'trim_file_name': 150,
+            # #175: yt-dlpのtrim_file_nameは文字数ベース(no_ext[:trim_file_name]の
+            # 単純なスライス)であり、バイト数を保証しない。UTF-8で1文字3バイトの
+            # 日本語では、以前の150文字は最大450バイトとなり255バイト上限を
+            # 容易に超過しうる不十分な値だった(約85文字超で失敗)。拡張子
+            # (merge_output_formatで固定される".mp4"等、最大5バイト程度)分の
+            # 余白を見込み、日本語(3バイト/文字)でも255バイトに収まる80文字に
+            # 変更する(80*3+5=245バイト、安全マージンあり)。
+            'trim_file_name': 80,
             # ボット検知対策: yt-dlp自身が発行する内部リクエスト（メタデータ取得等）の
             # 間にもランダムなスリープを挟み、機械的なアクセスパターンを避ける。
             'sleep_interval_requests': CONFIG.YTDLP_SLEEP_INTERVAL,
@@ -798,9 +829,21 @@ class ScrapingStrategy(DownloadStrategy):
         resolved: Dict[int, str] = {}
         with ThreadPoolExecutor(max_workers=self._FRAGMENT_DOWNLOAD_WORKERS) as executor:
             futures = {executor.submit(_fetch_one, idx, url): idx for idx, url in targets.items()}
-            for future in as_completed(futures):
-                idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
-                resolved[idx] = local_uri
+            try:
+                for future in as_completed(futures):
+                    idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
+                    resolved[idx] = local_uri
+            except Exception:
+                # ボット検知(403/429/503)等で一部セグメントが例外を出した場合、
+                # 「即時セッション中断」を実際に機能させるため、まだ実行が
+                # 始まっていない残りのセグメント取得をキャンセルする。
+                # `with`ブロックの終了時に暗黙で呼ばれる shutdown(wait=True) には
+                # cancel_futuresを指定できず、数百〜数千件のキュー済みセグメントが
+                # ブロック中のCDNへのHTTP GETを完走し終えるまで例外の伝播が
+                # 遅延してしまっていた(実行中の最大_FRAGMENT_DOWNLOAD_WORKERS件は
+                # 完了を待つが、キュー済みの残りはリクエスト自体を送らずに済む)。
+                executor.shutdown(wait=True, cancel_futures=True)
+                raise
 
         new_lines = list(lines)
         for idx, _url in targets.items():
@@ -993,13 +1036,21 @@ class BatchDownloader:
             tasks_by_source.setdefault(source_name, []).append(DownloadTask(url, source_name))
 
         if CONFIG.LIST_FILE_PATH.exists():
-            with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
-                for line in f:
-                    url = line.strip()
-                    if url and not url.startswith("#"):
-                        url = _normalize_url(url)
-                        if url not in self.history:
-                            _add(url, "list")
+            # #184: list/*.txt側は非UTF-8バイト等の読み込み失敗をtry/exceptで保護し
+            # エラーログを出したうえで処理を継続するが、list.txt側にはこの保護が
+            # 無かった。list.txtの読み込みで例外が発生すると_collect_tasks全体が
+            # 未処理例外で中断し、後続で処理されるはずのlist/*.txtのタスクまで
+            # 巻き添えで処理されなくなっていた。list/*.txt側と同じパターンで保護する。
+            try:
+                with open(CONFIG.LIST_FILE_PATH, "r", encoding="utf-8") as f:
+                    for line in f:
+                        url = line.strip()
+                        if url and not url.startswith("#"):
+                            url = _normalize_url(url)
+                            if url not in self.history:
+                                _add(url, "list")
+            except Exception as e:
+                logger.error(f"リスト読み込みエラー ({CONFIG.LIST_FILE_PATH.name}): {e}", exc_info=True)
 
         if CONFIG.LIST_DIR_PATH.exists():
             # glob()の順序はOS/ファイルシステム依存で不定なため、実行毎に順序が
@@ -1208,7 +1259,7 @@ class BatchDownloader:
             except BotDetectionError as e:
                 # 429やSign-in要求はIP/アカウント単位の制限である可能性が高く、
                 # 残りのタスクを続けても状況を悪化させるだけなので即座に中断する。
-                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")
+                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)
                 CooldownManager.trigger_cooldown()
                 DiscordNotifier.send(
                     f"🚨 CRITICAL: ボット検知/レート制限の兆候（429・Sign-in要求等）を検知したため、"

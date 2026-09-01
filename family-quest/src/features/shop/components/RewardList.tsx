@@ -21,16 +21,18 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
 
       if (target === 'children') return !isAdult;
       if (target === 'adults') return isAdult;
-      if (target === 'mom') return currentUser.user_id === 'mom';
-      if (target === 'dad') return currentUser.user_id === 'dad';
 
-      return true;
+      // #239: 上記以外(具体的なuser_id宛て、または将来追加されうる未知のtarget値)は
+      // QuestList.tsxのターゲット判定(q.target !== currentUser?.user_id)と同様に
+      // 安全側(deny-by-default)へ倒す。以前は'mom'/'dad'以外のtarget('son'/'daughter'等)
+      // がどの分岐にも一致せず無条件でtrueになり、対象外の家族全員に表示されていた。
+      return target === currentUser.user_id;
     });
 
     // 2. ソート (安い順)
     return filtered.sort((a, b) => {
-      const costA = a.cost_gold || a.cost || 0;
-      const costB = b.cost_gold || b.cost || 0;
+      const costA = a.cost_gold || 0;
+      const costB = b.cost_gold || 0;
       return costA - costB;
     });
   }, [rewards, currentUser]);
@@ -42,16 +44,16 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
       )}
 
       {sortedRewards.map((reward, index) => {
-        const cost = reward.cost_gold || reward.cost || 0;
+        const cost = reward.cost_gold || 0;
         const canAfford = userGold >= cost;
 
-        // ★low-priority: reward_id/id は型上どちらも省略可能なため、両方欠けている
+        // ★low-priority: reward_id は型上省略可能なため、欠けている
         // (バックエンドのデータ不備) 場合のみ index にフォールバックする。通常データでは
         // 発生しないベストエフォートの保険であり、意図的にそのまま残している。
-        const rId = reward.reward_id || reward.id || index;
+        const rId = reward.reward_id || index;
 
         // ★追加: 説明文の優先順位ロジック
-        const displayText = reward.description || reward.desc || reward.category || 'General';
+        const displayText = reward.description || reward.category || 'General';
 
         return (
           <Card
@@ -67,7 +69,7 @@ const RewardList: React.FC<RewardListProps> = ({ rewards, userGold, onBuy, curre
             {/* ★変更: 左側のアイコンとテキストエリア (overflow-hiddenではみ出し防止) */}
             <div className="flex items-center gap-3 overflow-hidden">
               <span className="text-2xl filter drop-shadow-lg flex-shrink-0">
-                {reward.icon || reward.icon_key || '🎁'}
+                {reward.icon_key || '🎁'}
               </span>
 
               {/* ★変更: テキストエリア (min-w-0で縮小を許可) */}

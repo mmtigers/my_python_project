@@ -22,7 +22,7 @@ import pytest
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
 
-from file_utils import sanitize_filename  # noqa: E402
+from file_utils import sanitize_filename, DiscordCircuitBreaker  # noqa: E402
 
 
 class TestSanitizeFilenameBasicBehavior:
@@ -32,6 +32,35 @@ class TestSanitizeFilenameBasicBehavior:
     def test_truncates_to_max_length(self):
         result = sanitize_filename("a" * 300, max_length=200)
         assert len(result) == 200
+
+
+class TestSanitizeFilenameByteSafeTruncation:
+    """Issue #175の回帰テスト: 以前はsafe[:max_length]で「文字数」を制限しており、
+    UTF-8で1文字3バイトになる日本語では200文字(最大600バイト)がext4等の255バイト
+    上限を容易に超過し、ファイル操作がENAMETOOLONGで失敗しうる不具合があった。"""
+
+    def test_japanese_title_result_stays_within_byte_limit(self):
+        # 「あ」は3バイト。200文字なら文字数ベースの旧実装では600バイトになり
+        # 255バイトを大幅に超過していた。
+        result = sanitize_filename("あ" * 200, max_length=200)
+        assert len(result.encode("utf-8")) <= 200
+
+    def test_japanese_title_is_not_truncated_mid_character(self):
+        """マルチバイト文字の境界で切り詰めても、不完全なバイト列による
+        UnicodeDecodeErrorや文字化けを起こさず正しくデコードできること。"""
+        # 「あ」(3バイト)を101個 = 303バイト。max_length=100バイトで切ると
+        # 単純なバイトスライスでは33文字目の途中(3バイト目)で切断される。
+        result = sanitize_filename("あ" * 101, max_length=100)
+        # 全て正しく再エンコードできる(不完全なバイト列が残っていない)こと
+        assert result.encode("utf-8").decode("utf-8") == result
+        assert len(result.encode("utf-8")) <= 100
+        # 33文字(99バイト)までは安全に残るはず
+        assert result == "あ" * 33
+
+    def test_ascii_only_behavior_is_unchanged(self):
+        """既存のASCII入力に対する挙動(文字数=バイト数)は変わらないこと。"""
+        result = sanitize_filename("a" * 300, max_length=200)
+        assert result == "a" * 200
 
 
 class TestSanitizeFilenameNeverReturnsEmptyString:
@@ -51,3 +80,45 @@ class TestSanitizeFilenameNeverReturnsEmptyString:
         assert not filename.startswith("."), (
             f"generated filename {filename!r} is a hidden dotfile with an empty stem"
         )
+
+
+class TestDiscordCircuitBreaker:
+    """DiscordCircuitBreaker のサーキットブレーカー挙動の回帰テスト。
+
+    Discord Webhookが機能していない間、newface_monitor.py/
+    batch_download_discord.py の両DiscordNotifierが無駄なリクエストを
+    送り続けないことを保証する共通ロジックを検証する。
+    """
+
+    def test_starts_closed(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        assert breaker.is_open is False
+
+    def test_opens_after_reaching_failure_threshold(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is False, "閾値に達するまでは閉じたままであるべき"
+        breaker.record_failure()
+        assert breaker.is_open is True, "連続失敗が閾値に達したら開くべき"
+
+    def test_success_resets_failure_count_and_closes_breaker(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_success()
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is False, "成功後は連続失敗カウントがリセットされているべき"
+
+    def test_trip_opens_immediately_regardless_of_threshold(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=100)
+        breaker.trip()
+        assert breaker.is_open is True
+
+    def test_success_closes_breaker_after_trip(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.trip()
+        assert breaker.is_open is True
+        breaker.record_success()
+        assert breaker.is_open is False

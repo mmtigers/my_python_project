@@ -24,6 +24,8 @@
 * 根拠: ルーター定義と2つのエンドポイントの存在 (行番号: 17 / 抜粋: `router = APIRouter()`)、(行番号: 19 / 抜粋: `@router.post("/callback/line")`)、(行番号: 45 / 抜粋: `@router.post("/webhook/switchbot")`)
 * コミット`94c2198`（H-4修正）により、SwitchBot公式Webhookペイロード形式（`context.deviceType`に`"WoContact"`/`"WoPresence"`等が入る形式）に対応した。`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙（`"Contact Sensor"`, `"Motion Sensor"`）と公式Webhookの語彙（`"WoContact"`, `"WoPresence"`）を併存させたsetに変更され、`device_type`の解決ロジックも`ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更された（修正前の`getattr(ctx, "deviceType", ...)`はモデル上`deviceType`が常に定義済みの`Optional`フィールドだったため、デフォルト値が効かず常に`None`になるバグがあった）。
 * 根拠: `TARGET_DEVICE_TYPES = {` (行番号: 40-43 / 抜粋: "TARGET_DEVICE_TYPES = {"), `device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"` (行番号: 61 / 抜粋: "device_type = ctx.deviceType or getattr")
+* Issue #251の修正により、`state`（開閉/検知ステータス）の解決ロジックが変更された。WoContact(開閉センサー)/`"Contact Sensor"`では、`ctx.openState`（`"open"`/`"close"`/`"timeOutNotClose"`、実際の開閉状態）が設定されていればそちらを優先し、未設定時のみ`ctx.detectionState`（内蔵PIRのモーション検知結果。`"DETECTED"`/`"NOT_DETECTED"`）へフォールバックする。それ以外のデバイスタイプ（WoPresence等）は従来通り`ctx.detectionState`を用いる。修正前は開閉センサーでも常に`ctx.detectionState`を開閉状態として扱っていたため、実機からのWebhookでは値が`"open"`/`"timeoutnotclose"`のいずれとも一致せず、ドア開放時の防犯通知が発火しないバグがあった。
+* 根拠: `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
 
 
 
@@ -100,8 +102,8 @@
 
 ### エンドポイント `switchbot_webhook`
 
-* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。
-* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜104 / 抜粋: `@router.post("/webhook/switchbot")`)
+* **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。この解決済みの`device_type`変数は、`sensor_service.process_sensor_data`の第4引数にもそのまま渡される（#94修正: 以前はここで未解決の`body.deviceType`（公式Webhook形式では`context`側にのみ値が入るため常に`None`）を渡していたため、公式形式のモーションイベントが`process_sensor_data`側のMotion判定に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。開閉/検知ステータスを表す`state`変数は、`device_type`が`"WoContact"`/`"Contact Sensor"`かつ`ctx.openState`が設定されている場合はそちらを優先し、それ以外は`ctx.detectionState`を用いる（Issue #251修正: WoContactの`detectionState`は内蔵PIRのモーション検知結果であり開閉状態ではないため、開閉判定を誤らせないよう区別した）。
+* 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜119 / 抜粋: `@router.post("/webhook/switchbot")`), `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:"), `await sensor_service.process_sensor_data(mac, name, location, device_type, state)` (行番号: 117)
 
 
 * **引数/リクエスト**: `body`: `SwitchBotWebhookBody` (Pydanticモデルなどの型)、`token`: `str`（省略可、デフォルト`None`。クエリパラメータ `?token=...`）
@@ -109,21 +111,21 @@
 
 
 * **戻り値/レスポンス**: JSON形式の辞書 (ステータスと理由を含む)。
-* 根拠: 各return文 (行番号: 66, 76, 104 / 抜粋: `return {"status": "success"}`)
+* 根拠: 各return文 (行番号: 66, 88, 119 / 抜粋: `return {"status": "success"}`)
 
 
 * **副作用**:
 * `device_records` へのログ保存 (`save_log_async`)。
 * 特定のステータスの場合、`config.SQLITE_TABLE_DAILY_LOGS` へのログ保存 (`save_log_async`)。
-* `sensor_service.process_sensor_data` の実行による副作用。
-* 根拠: 関数内の処理呼び出し (行番号: 88, 96, 102 / 抜粋: `await save_log_async(...)`)
+* `sensor_service.process_sensor_data` の実行による副作用（第4引数には61行目で解決済みの`device_type`を渡す。#94修正）。
+* 根拠: 関数内の処理呼び出し (行番号: 100, 108, 117 / 抜粋: `await save_log_async(...)`)
 
 
 * **エラーハンドリング**:
 * `config.SWITCHBOT_WEBHOOK_TOKEN` が設定されている場合、クエリパラメータ `token` が一致しなければ HTTP 401 を送出する(`hmac.compare_digest`によるタイミング攻撃耐性のある比較)。未設定時は従来通り検証をスキップする(後方互換)。
 * 対象外デバイスや重複イベントの場合は早期リターン。
 * 明示的な `try-except` ブロックはそれ以外にはなし。
-* 根拠: トークン検証 (行番号: 51〜53 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 64, 73 / 抜粋: `if device_type not in...`)
+* 根拠: トークン検証 (行番号: 51〜53 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 64, 85 / 抜粋: `if device_type not in...`)
 
 
 
@@ -220,7 +222,7 @@ graph TD
 | 高 | `services/sensor_service.py` | SwitchBotからのイベントの重複判定と、センサーデータのメインロジックの副作用を把握するため。 | 行番号: 73, 102 / 抜粋: `sensor_service.is_duplicate...`、`await sensor_service.process...` |
 | 高 | `core/database.py` | ログデータの保存先スキーマ、実際に保存されるテーブル構造を確認し、永続化層の仕様を明確化するため。 | 行番号: 88 / 抜粋: `await save_log_async(...)` |
 | 中 | `handlers/line_handler.py` | LINEのメッセージ処理の全体像を把握するため。 | 行番号: 28 / 抜粋: `line_handler.line_handler.handle` |
-| 中 | `config.py` | 登録されているデバイス情報（`MONITOR_DEVICES`）の構造やデータベーステーブル名、`SWITCHBOT_WEBHOOK_TOKEN`などの定数を確認するため。 | 行番号: 51, 82, 96 / 抜粋: `config.SWITCHBOT_WEBHOOK_TOKEN`、`config.MONITOR_DEVICES`、`config.SQLITE_TABLE_DAILY_LOGS` |
+| 中 | `config.py` | 登録されているデバイス情報（`MONITOR_DEVICES`）の構造やデータベーステーブル名、`SWITCHBOT_WEBHOOK_TOKEN`などの定数を確認するため。 | 行番号: 51, 94, 108 / 抜粋: `config.SWITCHBOT_WEBHOOK_TOKEN`、`config.MONITOR_DEVICES`、`config.SQLITE_TABLE_DAILY_LOGS` |
 
 ## 8. 保守上の注意点
 
@@ -240,20 +242,24 @@ graph TD
 * 根拠: ガード節1の処理 (行番号: 58〜66)
 
 
+* **(Issue #251修正)** 修正前は開閉/検知ステータスを表す`state`変数が常に`str(ctx.detectionState).lower()`で解決されていた。しかしSwitchBot公式Webhookドキュメントによれば、WoContact(開閉センサー)の`detectionState`は内蔵PIRのモーション検知結果(`"DETECTED"`/`"NOT_DETECTED"`)であり、実際の開閉状態は別フィールドの`ctx.openState`(`"open"`/`"close"`/`"timeOutNotClose"`)が表す。そのため修正前は実機からのWebhookで`state`が`"open"`/`"timeoutnotclose"`のいずれとも一致せず、ドア開放時の防犯通知(`sensor_service.process_sensor_data`のContact Sensor Logic分岐)が発火しないバグがあった。現在は`device_type`が`"WoContact"`/`"Contact Sensor"`かつ`ctx.openState`が設定されている場合はそちらを優先し、未設定時(過去互換ペイロード)のみ`ctx.detectionState`へフォールバックする。WoPresence(人感センサー)は元々`detectionState`がモーション検知状態を正しく表すため、この分岐の対象外(従来通り`detectionState`を使用)。
+* 根拠: `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:")
+
+
 * イベント重複排除ロジックはインメモリで処理されているかなど詳細不明だが、この関数の処理に依存している。
-* 根拠: ガード節2の処理 (行番号: 73〜76)
+* 根拠: ガード節2の処理 (行番号: 85〜88)
 
 
 * `switchbot_webhook` において、`sb_tool` と `config` 両方からの名前取得を試み、失敗した場合のフォールバック (`Unknown_{mac}`) が設定されている。
-* 根拠: `name` 変数の解決 (行番号: 81〜85)
+* 根拠: `name` 変数の解決 (行番号: 93〜97)
 
 
 * `switchbot_webhook` において、`ctx.brightness` が存在しない場合は空文字列として保存される。
-* 根拠: `save_log_async` の引数 (行番号: 90)
+* 根拠: `save_log_async` の引数 (行番号: 102)
 
 
 * `switchbot_webhook` 内での明示的な例外処理（`try-except`）が存在しないため、`save_log_async` 等で例外が発生した場合、デフォルトのエラーレスポンスとなる。
-* 根拠: 関数全体の構造 (行番号: 45〜104)
+* 根拠: 関数全体の構造 (行番号: 45〜116)
 
 
 
@@ -273,9 +279,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `SwitchBotWebhookBody` の構造 | `MY_HOME_SYSTEM/models/switchbot.py`(全33行)を直接確認した。`SwitchBotWebhookBody`(22〜27行目)は`eventType: str`, `eventVersion: str`, `context: SwitchBotContext`, `deviceType: Optional[str] = None`を持つPydanticモデル。ネストする`SwitchBotContext`(5〜20行目)は`deviceMac: str`(必須)に加え、コミット`94c2198`(H-4修正)で追加された`deviceType: Optional[str] = None`(12行目。公式Webhookでは`context`内に`"WoContact"`/`"WoPresence"`等が入る)、`detectionState`/`brightness: Optional[str] = None`、`timeOfSample: Optional[int] = None`、電力計向けの`power`/`voltage`/`weight`/`watt`フィールドを持つ。本ファイルがアクセスしている`context.deviceMac`, `context.deviceType`, `context.detectionState`, `context.brightness`は全て`SwitchBotContext`側のフィールドと一致することを確認した(`SwitchBotWebhookBody`直下にも同名の`deviceType`フィールドが独立して存在し、本ファイルはコンテキスト側を優先しつつこちらへフォールバックする)。 | 直接ソース確認: `MY_HOME_SYSTEM/models/switchbot.py:1-33` |
-| `MONITOR_DEVICES` の構造 | `MY_HOME_SYSTEM/config.py`を直接確認した。298行目で`MONITOR_DEVICES: List[Dict[str, Any]] = []`として初期化され、307行目で`[DeviceConfig(**d).model_dump() for d in _devices_data["monitor_devices"]]`により`devices.json`の`monitor_devices`配列を`DeviceConfig`モデルでバリデーションした上でdictのリストとして格納される。`DeviceConfig`(159〜165行目)は`id: str, type: str, location: str, name: str, notify_settings: NotifySettings`(`default_factory`)を持つ。本ファイル82行目の`next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)`によるid検索は、この`DeviceConfig.id`フィールドと一致することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:159-165,296-307`（本ファイル内利用: `MY_HOME_SYSTEM/routers/webhook_router.py:82`） |
-| `SQLITE_TABLE_DAILY_LOGS` の値 | `MY_HOME_SYSTEM/config.py:238`に`SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"`とハードコードされていることを直接確認した。本ファイル96行目の`save_log_async(config.SQLITE_TABLE_DAILY_LOGS, ...)`はこの文字列`"daily_logs"`をテーブル名として使用している。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:238`（本ファイル内利用: `MY_HOME_SYSTEM/routers/webhook_router.py:96`） |
+| `SwitchBotWebhookBody` の構造 | `MY_HOME_SYSTEM/models/switchbot.py`(全39行)を直接確認した。`SwitchBotWebhookBody`(28〜33行目)は`eventType: str`, `eventVersion: str`, `context: SwitchBotContext`, `deviceType: Optional[str] = None`を持つPydanticモデル。ネストする`SwitchBotContext`(5〜26行目)は`deviceMac: str`(必須)に加え、コミット`94c2198`(H-4修正)で追加された`deviceType: Optional[str] = None`(12行目。公式Webhookでは`context`内に`"WoContact"`/`"WoPresence"`等が入る)、`detectionState`、Issue #251修正で追加された`openState: Optional[str] = None`(19行目。WoContactの実際の開閉状態。`detectionState`は同デバイス内蔵PIRのモーション検知結果であり別物)、`brightness: Optional[str] = None`、`timeOfSample: Optional[int] = None`、電力計向けの`power`/`voltage`/`weight`/`watt`フィールドを持つ。本ファイルがアクセスしている`context.deviceMac`, `context.deviceType`, `context.detectionState`, `context.openState`, `context.brightness`は全て`SwitchBotContext`側のフィールドと一致することを確認した(`SwitchBotWebhookBody`直下にも同名の`deviceType`フィールドが独立して存在し、本ファイルはコンテキスト側を優先しつつこちらへフォールバックする)。 | 直接ソース確認: `MY_HOME_SYSTEM/models/switchbot.py:1-39` |
+| `MONITOR_DEVICES` の構造 | `MY_HOME_SYSTEM/config.py`を直接確認した。298行目で`MONITOR_DEVICES: List[Dict[str, Any]] = []`として初期化され、307行目で`[DeviceConfig(**d).model_dump() for d in _devices_data["monitor_devices"]]`により`devices.json`の`monitor_devices`配列を`DeviceConfig`モデルでバリデーションした上でdictのリストとして格納される。`DeviceConfig`(159〜165行目)は`id: str, type: str, location: str, name: str, notify_settings: NotifySettings`(`default_factory`)を持つ。本ファイル94行目の`next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)`によるid検索は、この`DeviceConfig.id`フィールドと一致することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:159-165,296-307`（本ファイル内利用: `MY_HOME_SYSTEM/routers/webhook_router.py:94`） |
+| `SQLITE_TABLE_DAILY_LOGS` の値 | `MY_HOME_SYSTEM/config.py:238`に`SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"`とハードコードされていることを直接確認した。本ファイル108行目の`save_log_async(config.SQLITE_TABLE_DAILY_LOGS, ...)`はこの文字列`"daily_logs"`をテーブル名として使用している。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:238`（本ファイル内利用: `MY_HOME_SYSTEM/routers/webhook_router.py:108`） |
 | `SWITCHBOT_WEBHOOK_TOKEN` の値・設定有無 | `MY_HOME_SYSTEM/config.py:191`に`SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")`と定義されていることを直接確認した。値は環境変数由来で未設定時は`None`となる。本ファイル自身の49〜52行目の`if config.SWITCHBOT_WEBHOOK_TOKEN: ... hmac.compare_digest(token, config.SWITCHBOT_WEBHOOK_TOKEN)`というロジックにより「設定されていれば検証、未設定ならスキップ」という後方互換設計であることは本ファイル単体からも確認できる。ただし実際の値自体は`.env`(gitignore対象)にのみ存在しうるものであり、`MY_HOME_SYSTEM/.env.example`を確認したが`SWITCHBOT_WEBHOOK_TOKEN`というキー自体が記載されておらず、具体的な値はリポジトリ内からは確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:191`（`MY_HOME_SYSTEM/.env.example`にキー記載なし、値自体は解消不可） |
 | `line_handler` の処理内容 | `MY_HOME_SYSTEM/handlers/line_handler.py`(全177行)を直接確認した。`line_handler`(35, 42行目)は`config.LINE_CHANNEL_ACCESS_TOKEN`と`LINE_CHANNEL_SECRET`の両方が設定されている場合のみ`WebhookHandler(config.LINE_CHANNEL_SECRET)`として初期化される`Optional[WebhookHandler]`。175〜177行目で`line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`と`line_handler.add(PostbackEvent)(handle_postback)`によりイベントディスパッチが登録される。`handle_message`(92〜104行目)はテキストメッセージ受信時に`asyncio.run(_process_message_async(...))`で非同期処理を同期的に実行し、内部でファミリークエストコマンド(「ステータス」「クエスト」「承認」「却下」)、健康記録コマンド、AI応答フォールバック(`services.ai_service.analyze_text_and_execute`)の順に分岐する。`handle_postback`(145〜173行目)は`"approve:"`/`"reject:"`プレフィックスの場合は`_process_message_async`へ委譲し、それ以外は`handlers.line_logic.handle_postback`へ処理を委譲する。副作用として、いずれの経路でも最終的にLINE Messaging APIへの`reply_message`呼び出し(71〜85行目)が発生しうる。 | 直接ソース確認: `MY_HOME_SYSTEM/handlers/line_handler.py:35-177` |
 | 重複排除の仕組み | `MY_HOME_SYSTEM/services/sensor_service.py:19-51`を直接確認した。モジュールレベルの辞書`EVENT_CACHE: Dict[str, Dict[str, Any]] = {}`(22行目)と定数`DEDUPE_TTL_SECONDS: float = 3.0`(23行目)を用いる。`is_duplicate_webhook(mac, state, event_timestamp)`(29〜51行目)は、同一macの直近イベント(`EVENT_CACHE.get(mac)`)が存在し、かつその`state`が今回と完全一致し、かつ経過時間(`event_timestamp - last_event["timestamp"]`)が3.0秒以内であれば`True`(重複)を返す。それ以外の場合は`EVENT_CACHE`を最新の`state`/`timestamp`で更新して`False`(新規イベント)を返す設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/sensor_service.py:19-51` |

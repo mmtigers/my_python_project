@@ -17,7 +17,7 @@ import re
 import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
 try:
@@ -581,6 +581,7 @@ class Uploader:
         else:
             logger.warning(f"動画サイズ ({summary.file_size_bytes/(1024*1024):.2f}MB) が制限を超過。分割処理を開始します。")
             log_cpu_usage()
+            split_files: List[Path] = []
             try:
                 res = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', summary.output_path], capture_output=True, text=True, check=True, timeout=60)
                 dur = float(res.stdout.strip())
@@ -589,22 +590,32 @@ class Uploader:
                 base_dir = os.path.dirname(summary.output_path)
                 split_pattern = os.path.join(base_dir, f"{os.path.splitext(os.path.basename(summary.output_path))[0]}_part_%03d.mp4")
                 split_cmd = ['nice', '-n', '15', 'ffmpeg', '-v', 'error', '-nostdin', '-y', '-i', summary.output_path, '-c', 'copy', '-f', 'segment', '-segment_time', str(math.ceil(dur / pc)), '-reset_timestamps', '1', split_pattern]
-                
+
                 if shutil.which('ionice'):
                     split_cmd = ['ionice', '-c', '2', '-n', '7'] + split_cmd
-                    
+
                 subprocess.run(split_cmd, stdout=subprocess.DEVNULL, stderr=get_ffmpeg_stderr(), check=True, timeout=3600)
-                
+
                 split_files = sorted(Path(base_dir).glob(f"{os.path.splitext(os.path.basename(summary.output_path))[0]}_part_*.mp4"))
                 if not split_files: raise RuntimeError("動画分割に失敗しました。出力ファイルが生成されませんでした。")
-                
+
                 for i, s_file in enumerate(split_files):
                     msg = f"🎥 {summary.target_date} ダイジェスト (Part {i+1}/{len(split_files)})"
                     self._send_to_discord(webhook_url, msg, str(s_file))
                     time.sleep(5) # APIレートリミット対策
-                    
+
                 self._send_completion_notice(webhook_url, len(split_files))
             except Exception as e: logger.error(f"分割送信エラー: {e}")
+            finally:
+                # 分割ファイル(*_part_*.mp4)は元動画(summary.output_path)とは別に
+                # ローカルディスクを消費し続ける送信専用の一時生成物のため、
+                # 送信の成否に関わらず削除する(Issue #171)。元動画自体は
+                # 保持期間ベースのリテンションクリーンアップ(nas_monitor)に委ねる。
+                for s_file in split_files:
+                    try:
+                        os.remove(s_file)
+                    except OSError as cleanup_err:
+                        logger.warning(f"分割ファイルの削除に失敗しました: {s_file}: {cleanup_err}")
 
     def _send_to_discord(self, webhook_url: str, message: str, file_path: str) -> None:
         """Discord Webhookにファイルを直接アップロードする"""
@@ -642,7 +653,6 @@ def run_smart_timelapse_job(input_video: str) -> None:
 
 def _run_smart_timelapse_job_locked(input_video: str) -> None:
     t_start = time.perf_counter()
-    user_id = getattr(config, "LINE_USER_ID", "")
     if not check_dependencies(): return
 
     work, out, rec = setup_directories()
@@ -658,7 +668,11 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
         events = EventBuilder().build(records, work)
         
         if not events:
-            send_push(user_id, [{"type": "text", "text": f"ℹ️ {sum_info.target_date} の動きなし"}], "discord", "report")
+            send_push(
+                [{"type": "text", "text": f"ℹ️ {sum_info.target_date} の動きなし"}],
+                target="discord",
+                channel="report"
+            )
             return
 
         sum_info.output_path = os.path.join(out, os.path.basename(input_video).replace(".mp4", "_summary.mp4"))
@@ -674,13 +688,27 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
                 sum_info.events = len(events)
                 sum_info.summary_duration = sum([e.duration for e in events])
                 sum_info.file_size_bytes = os.path.getsize(sum_info.output_path)
-                
+
                 mark_as_done(rec, os.path.basename(input_video), sum_info)
                 Uploader().split_and_send(sum_info, os.path.basename(input_video))
-            
+            else:
+                # #233: build()がFalseを返す場合(例外は発生しない)、以前はここで
+                # 何も通知せず関数が正常終了していた。動き検知イベントはあったのに
+                # 通知が一切来ず、利用者は処理自体に気づけなかった。
+                logger.error(f"動画生成に失敗しました: {input_video}")
+                send_push(
+                    [{"type": "text", "text": f"⚠️ {sum_info.target_date} のタイムラプス動画生成に失敗しました"}],
+                    target="discord",
+                    channel="error"
+                )
+
     except Exception as e:
         logger.error(f"エラー: {traceback.format_exc()}")
-        send_push(user_id, [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}], "discord", "error")
+        send_push(
+            [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}],
+            target="discord",
+            channel="error"
+        )
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or not os.path.exists(sys.argv[1]): sys.exit(1)

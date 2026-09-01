@@ -13,7 +13,7 @@ CREATE TABLE device_records (
             hub_onoff TEXT,
             cam_onoff TEXT,
             threshold_watts REAL
-        , battery_level INTEGER);
+        , battery_level INTEGER, nas_usage_percent REAL);
 CREATE TABLE sqlite_sequence(name,seq);
 CREATE TABLE ohayo_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,3 +344,4 @@ CREATE TABLE family_mileage_history (
                 target_exp INTEGER NOT NULL,
                 completed_at DATETIME NOT NULL
             );
+CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP);

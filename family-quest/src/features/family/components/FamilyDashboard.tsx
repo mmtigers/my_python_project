@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { User, Quest, QuestHistory, Reward } from '@/types';
+import { ID, User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -37,6 +37,9 @@ interface FamilyDashboardProps {
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
+    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
+    // クールダウンを発火させるための通知(App側で管理)。
+    completedSignal: { id: ID; nonce: number } | null;
     onAvatarClick: (user: User) => void;
 }
 
@@ -46,7 +49,7 @@ interface FamilyDashboardProps {
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     users, quests, completedQuests, pendingQuests, rewards,
-    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, onAvatarClick,
+    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
     const orderedUsers = sortByFamilyOrder(users);
@@ -62,13 +65,13 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     // (角度⑥と隣接する着想: 空パネルに余計な視線誘導をしない)
     const hasNothingToDo = (user: User) => {
         return !quests.some(q => {
-            if (q.target && q.target !== 'all') {
-                if (q.target === 'siblings') {
+            if (q.target_user && q.target_user !== 'all') {
+                if (q.target_user === 'siblings') {
                     // 兄妹連携クエスト: 対象は子ども(role_child)全員
                     if (user.role !== 'role_child') return false;
-                } else if (q.target.startsWith('role_')) {
-                    if (user.role !== q.target) return false;
-                } else if (q.target !== user.user_id) {
+                } else if (q.target_user.startsWith('role_')) {
+                    if (user.role !== q.target_user) return false;
+                } else if (q.target_user !== user.user_id) {
                     return false;
                 }
             }
@@ -105,6 +108,7 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                         onInteract={() => setActiveUserId(user.user_id)}
                         onQuestClick={(q) => onQuestClick(user, q)}
                         onBuyReward={(r) => onBuyReward(user, r)}
+                        completedSignal={completedSignal}
                         onAvatarClick={() => onAvatarClick(user)}
                     />
                 ))}
@@ -126,12 +130,13 @@ interface FamilyPanelProps {
     onInteract: () => void;
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
+    completedSignal: { id: ID; nonce: number } | null;
     onAvatarClick: () => void;
 }
 
 const FamilyPanel: React.FC<FamilyPanelProps> = ({
     user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
-    onInteract, onQuestClick, onBuyReward, onAvatarClick,
+    onInteract, onQuestClick, onBuyReward, completedSignal, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
 
@@ -194,6 +199,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                         pendingQuests={pendingQuests}
                         currentUser={user}
                         onQuestClick={onQuestClick}
+                        completedSignal={completedSignal}
                         panelMode
                         iconFirst={iconFirst}
                     />

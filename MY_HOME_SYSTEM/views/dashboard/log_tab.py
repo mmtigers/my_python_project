@@ -2,9 +2,7 @@
 import streamlit as st
 import pandas as pd
 import subprocess
-import os
-import glob
-from datetime import datetime, date
+from datetime import date
 from services import analysis_service
 
 def render_logs(df_sensor: pd.DataFrame):
@@ -50,19 +48,6 @@ def render_system():
     """システム管理タブ"""
     st.title("🔧 システム管理コックピット")
 
-    st.subheader("🌐 外部接続 (ngrok)")
-    urls = analysis_service.get_ngrok_url()
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**📱 LINE Bot / Server (Port 8000)**")
-        if urls.get("server"): st.success(f"接続OK: {urls['server']}")
-        else: st.error("取得失敗")
-    with c2:
-        st.markdown("**📊 Dashboard (Port 8501)**")
-        if urls.get("dashboard"): st.success(f"接続OK: {urls['dashboard']}")
-        else: st.warning("取得失敗")
-
-    st.markdown("---")
     st.subheader("💻 リソース状況")
     disk = analysis_service.get_disk_usage()
     if disk:
@@ -122,7 +107,6 @@ def render_system():
                     st.error(f"エラー: {e}")
     
     # バックアップ機能 (簡易実装)
-    import config
     from services import backup_service
     st.subheader("📦 バックアップ")
     if st.button("今すぐバックアップを実行"):

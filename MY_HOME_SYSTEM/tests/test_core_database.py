@@ -159,6 +159,29 @@ class TestSaveLogGeneric:
         )
         assert result is False
 
+    def test_rejects_sql_injection_in_table_name(self, isolated_db):
+        """B3: table名はSQL文字列へ直接展開されるため、不正な識別子は実行前に拒否する。"""
+        result = db.save_log_generic(
+            f"{config.SQLITE_TABLE_SENSOR}; DROP TABLE {config.SQLITE_TABLE_SENSOR}--",
+            ["timestamp"],
+            ("2026-01-01T00:00:00",),
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            # テーブル自体が破壊されていないこと
+            cur.execute(f"SELECT COUNT(*) as c FROM {config.SQLITE_TABLE_SENSOR}")
+
+    def test_rejects_sql_injection_in_column_name(self, isolated_db):
+        """B3: カラム名も同様にSQL文字列へ直接展開されるため、不正な識別子は実行前に拒否する。"""
+        result = db.save_log_generic(
+            config.SQLITE_TABLE_SENSOR,
+            ["timestamp) VALUES ('x'); DROP TABLE " + config.SQLITE_TABLE_SENSOR + "--"],
+            ("2026-01-01T00:00:00",),
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            cur.execute(f"SELECT COUNT(*) as c FROM {config.SQLITE_TABLE_SENSOR}")
+
 
 class TestSaveLogAsync:
     @pytest.mark.asyncio
@@ -172,6 +195,71 @@ class TestSaveLogAsync:
         with db.get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_SENSOR} WHERE device_id='mac2'"
+            ).fetchone()
+        assert row is not None
+
+
+class TestSaveLogsBatchGeneric:
+    """Issue #231の回帰テスト。
+
+    save_log_generic を複数回呼ぶ実装(handlers/line_logic.py の all_genki等)
+    では、各呼び出しがそれぞれ独立にcommitされるため、途中の1件が失敗しても
+    既に成功した分はコミット済みのまま残ってしまう。呼び出し元は「1件でも
+    失敗すれば全体を失敗扱いとする」と案内し再試行を促す(H-7)が、実際には
+    成功済み分が残ったままのため、再試行すると重複して保存されていた。
+    save_logs_batch_generic は複数行を単一トランザクションでまとめて保存し、
+    1件でも失敗すれば全件をロールバックすることでこれを防ぐ。
+    """
+
+    def test_saves_all_rows_successfully(self, isolated_db):
+        result = db.save_logs_batch_generic(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [
+                ("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+                ("U1", "テスト太郎", "次男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+            ],
+        )
+        assert result is True
+        with db.get_db_cursor() as cur:
+            rows = cur.execute(f"SELECT child_name FROM {config.SQLITE_TABLE_CHILD}").fetchall()
+        assert {r["child_name"] for r in rows} == {"長男", "次男"}
+
+    def test_partial_failure_rolls_back_entire_batch(self, isolated_db):
+        """1件目は正常な行、2件目は列数不一致でINSERTが失敗する行を与えた場合、
+        1件目分も含めて全件がロールバックされテーブルに一切残らないこと
+        (真のall-or-nothing)。以前の実装(save_log_genericの複数回呼び出し)
+        であれば1件目だけがコミット済みのまま残っていたはずのケース。"""
+        result = db.save_logs_batch_generic(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [
+                ("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00"),
+                ("U1", "テスト太郎", "次男"),  # 列数不一致で2件目のINSERTが失敗する
+            ],
+        )
+        assert result is False
+        with db.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) c FROM {config.SQLITE_TABLE_CHILD}").fetchone()["c"]
+        assert count == 0
+
+    def test_returns_false_on_invalid_table(self, isolated_db):
+        result = db.save_logs_batch_generic("table_that_does_not_exist", ["col"], [("value",)])
+        assert result is False
+
+
+class TestSaveLogsBatchAsync:
+    @pytest.mark.asyncio
+    async def test_delegates_to_save_logs_batch_generic(self, isolated_db):
+        result = await db.save_logs_batch_async(
+            config.SQLITE_TABLE_CHILD,
+            ["user_id", "user_name", "child_name", "condition", "timestamp"],
+            [("U1", "テスト太郎", "長男", "😊 元気いっぱい", "2026-01-01T00:00:00")],
+        )
+        assert result is True
+        with db.get_db_cursor() as cur:
+            row = cur.execute(
+                f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='長男'"
             ).fetchone()
         assert row is not None
 
@@ -191,3 +279,45 @@ class TestExecuteReadQuery:
     def test_returns_error_message_on_malformed_sql(self, isolated_db):
         result = db.execute_read_query("SELECT * FROM nonexistent_table_xyz")
         assert result.startswith("検索エラー:")
+
+
+class TestExecuteReadQueryConnectionCleanup:
+    """Issue #178の回帰テスト: execute_read_queryはconn.close()が正常経路にしか
+    無くtry/finallyが無かったため、cursor.execute()が例外を送出する
+    (不正なSQL等)たびに接続がGC任せで残りリークしていた。"""
+
+    def _spy_on_close(self, monkeypatch):
+        # sqlite3.Connectionはインスタンス単位の属性代入(conn.close = ...)や
+        # クラスメソッドの直接上書き(sqlite3.Connection.close = ...)を許可
+        # しない('immutable type')C拡張型のため、sqlite3.connect()の
+        # factory引数でサブクラスを注入しclose()呼び出しを記録する。
+        close_calls = []
+
+        class SpyConnection(sqlite3.Connection):
+            def close(self):
+                close_calls.append(True)
+                super().close()
+
+        real_connect = sqlite3.connect
+
+        def spy_connect(*args, **kwargs):
+            kwargs["factory"] = SpyConnection
+            return real_connect(*args, **kwargs)
+
+        monkeypatch.setattr(db.sqlite3, "connect", spy_connect)
+        return close_calls
+
+    def test_connection_is_closed_when_query_raises(self, isolated_db, monkeypatch):
+        close_calls = self._spy_on_close(monkeypatch)
+
+        result = db.execute_read_query("SELECT * FROM nonexistent_table_xyz")
+
+        assert result.startswith("検索エラー:")
+        assert close_calls == [True], "cursor.execute()が例外を送出した場合も接続はcloseされるべき"
+
+    def test_connection_is_closed_on_success(self, isolated_db, monkeypatch):
+        close_calls = self._spy_on_close(monkeypatch)
+
+        db.execute_read_query("SELECT * FROM quest_users WHERE user_id = ?", ("nobody",))
+
+        assert close_calls == [True]

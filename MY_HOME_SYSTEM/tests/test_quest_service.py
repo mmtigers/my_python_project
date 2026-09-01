@@ -2,8 +2,6 @@
 import unittest
 import sys
 import os
-import sqlite3
-import shutil
 
 # プロジェクトルートにパスを通す
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -13,7 +11,7 @@ import common
 import init_unified_db
 # 修正: 分割されたサービスをインポート
 import game_logic  # ★追加: GameLogicをインポート
-from services.quest_service import QuestService, UserService, ShopService
+from services.quest_service import QuestService, UserService, ShopService, ROLE_ADULT, ROLE_CHILD
 
 class TestQuestService(unittest.TestCase):
     
@@ -161,6 +159,41 @@ class TestQuestService(unittest.TestCase):
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
             self.assertEqual(user["exp"], 0)
             self.assertEqual(user["gold"], 100)
+            hist_check = cur.execute("SELECT * FROM quest_history WHERE id=?", (hist_id,)).fetchone()
+            self.assertIsNone(hist_check)
+
+    def test_cancel_rejected_history_does_not_deduct_balance(self):
+        """#97: 却下済み(rejected)履歴をcancelしても、報酬は付与されていないため残高が変化しないこと"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('kid', 'Kid', 'Novice', 1, 0, 100, ?), "
+                "('parent', 'Parent', 'Warrior', 1, 0, 0, ?)",
+                (ROLE_CHILD, ROLE_ADULT),
+            )
+
+        result = self.quest_service.process_complete_quest("kid", 101)
+        self.assertEqual(result["status"], "pending")
+
+        with common.get_db_cursor() as cur:
+            hist = cur.execute(
+                "SELECT * FROM quest_history WHERE user_id='kid' ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            hist_id = hist["id"]
+
+        self.quest_service.process_reject_quest("parent", hist_id)
+
+        with common.get_db_cursor() as cur:
+            hist_check = cur.execute("SELECT status FROM quest_history WHERE id=?", (hist_id,)).fetchone()
+            self.assertEqual(hist_check["status"], "rejected")
+
+        self.quest_service.process_cancel_quest("kid", hist_id)
+
+        with common.get_db_cursor() as cur:
+            kid = cur.execute("SELECT * FROM quest_users WHERE user_id='kid'").fetchone()
+            # 却下済みなので報酬は元々付与されておらず、cancelしても残高は不変
+            self.assertEqual(kid["exp"], 0)
+            self.assertEqual(kid["gold"], 100)
             hist_check = cur.execute("SELECT * FROM quest_history WHERE id=?", (hist_id,)).fetchone()
             self.assertIsNone(hist_check)
 

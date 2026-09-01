@@ -1,21 +1,17 @@
 # MY_HOME_SYSTEM/unified_server.py
 import os
 import sys
-import asyncio
 import datetime
 import subprocess
-import signal
 import logging
-from contextlib import asynccontextmanager
 import ipaddress
 
 from typing import AsyncGenerator, Optional, Callable, Awaitable
 
-from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
 
 # プロジェクトルートの解決
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +29,6 @@ from services import sensor_service
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router
 
 # Handlers
-from handlers import line_handler
 
 # Logger
 logger = setup_logging("unified_server")
@@ -48,13 +43,20 @@ class SilencePolicyFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             msg = record.getMessage()
-            
+
             # GETリクエスト以外(POST, PUT, DELETE等)はフィルタリングせず出力
             if "GET " not in msg:
                 return True
-                
+
             # 正常系 (200 OK) または キャッシュ (304 Not Modified) 以外はエラー/警告として出力
-            if " 200 " not in msg and " 304 " not in msg:
+            # #177: uvicornのアクセスログフォーマット('%s - "%s %s HTTP/%s" %d'、
+            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に
+            # 前方スペースのみで出力され、後方にはスペースが付かない
+            # (例: '127.0.0.1 - "GET /path HTTP/1.1" 200')。" 200 "/" 304 " という
+            # 前後スペース付きの部分文字列判定では決して一致せず、抑制が常に無効化
+            # されていた。末尾の空白を除去したうえで、末尾一致(endswith)で判定する。
+            stripped_msg = msg.rstrip()
+            if not stripped_msg.endswith(" 200") and not stripped_msg.endswith(" 304"):
                 return True
 
             # ログ出力を抑制するパスやキーワードのリスト
@@ -218,7 +220,14 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     # ※もしCloudflare経由であることを厳密に担保したい場合は、将来的に
     # `Cf-Access-Jwt-Assertion` ヘッダーの検証をここに追加する。
     
-    logger.debug(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
+    # #182: setup_logging()(core/logger.py)はロガーレベルをINFO固定にしており、
+    # DEBUGレベルのオーバーライド手段が存在しないため、logger.debug()での出力は
+    # 常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアの
+    # docstring・CLAUDE.mdはいずれも「非プライベートネットワークからのリクエストを
+    # ログに記録する」ことを意図した挙動として明記しており、ポーリング等の定常ノイズを
+    # 意図的にDEBUGへ降格するSilence Policy(#177のuvicornアクセスログ抑制とは別経路)
+    # とは性質が異なるため、実際に記録されるようINFOレベルに変更する。
+    logger.info(f"Allowed external access via Cloudflare - IP: {client_ip}, Path: {request.url.path}")
     return await call_next(request)
 
 @app.exception_handler(Exception)
@@ -312,14 +321,23 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-if __name__ == "__main__":
+def _run_uvicorn_server() -> None:
+    """本番起動経路のエントリポイント(`python unified_server.py`)。
+
+    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。
+    uvicornのアクセスログは常にlogger.info()(レベル20)で出力されるため、
+    ロガーのレベルチェックの時点でログレコードが作られず、lifespan()内で
+    登録しているSilencePolicyFilter(GETの200/304ポーリングのみを選別して抑制し、
+    POST・エラーは残す設計)が一度も呼び出されなかった。結果、POST等の状態変更
+    リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない
+    状態になっていた。デフォルトのlog_config(uvicorn.access=INFO)をそのまま使い、
+    レコード生成自体は妨げず、SilencePolicyFilterに選別を委ねる。
+    """
     import uvicorn
-    import logging
-    
-    # 【改修】Uvicornのデフォルトログ設定を取得し、アクセスログのレベルを WARNING に変更
-    # これにより、正常なAPIポーリングやWebhook受信時の INFO ログスパムを抑止する
-    log_config = uvicorn.config.LOGGING_CONFIG
-    log_config["loggers"]["uvicorn.access"]["level"] = "WARNING"
 
     # 0.0.0.0 で起動することで外部（192.168.1.xxx等）からのアクセスを許可します
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_config=log_config)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+if __name__ == "__main__":
+    _run_uvicorn_server()

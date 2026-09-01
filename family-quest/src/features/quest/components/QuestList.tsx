@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { User, Quest, QuestHistory } from '@/types';
+import { ID, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
 import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
@@ -14,6 +14,9 @@ interface QuestListProps {
     pendingQuests: QuestHistory[];
     currentUser: User;
     onQuestClick: (quest: Quest) => void;
+    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
+    // クールダウンを発火させるための通知(App側で管理)。
+    completedSignal: { id: ID; nonce: number } | null;
     // 横画面4人表示のパネル内で使うためのモード。
     // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
     // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
@@ -40,18 +43,31 @@ const QuestItem: React.FC<{
     pendingQuests: QuestHistory[];
     currentUser: User;
     onClick: (q: Quest) => void;
+    completedSignal: { id: ID; nonce: number } | null;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {
 
-    const { play } = useSound();
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
+    const { play } = useSound();
 
     const {
         isDone, isPending, isInfinite, isRandom, isTimeLimited, isLimited, isLocked,
         displayTitle, variant
     } = useQuestStatus({ quest, currentUser, completedQuests, pendingQuests });
+
+    // #102: 完了音・クールダウンは、タップ時点(確認モーダルが開く前)ではなく、
+    // 完了APIが実際に成功した時点(App側からのcompletedSignal)でのみ発火させる。
+    // 以前はタップ即時に鳴らしていたため、確認モーダルで「キャンセル」しても完了音が鳴り、
+    // 無限クエストは60秒間タップ不能になっていた。
+    const questId = quest.quest_id;
+    useEffect(() => {
+        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;
+        setIsCooldown(true);
+        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
+        return () => clearTimeout(timer);
+    }, [completedSignal, isInfinite, questId]);
 
     // ボーナス計算
     const bonusGold = quest.bonus_gold || 0;
@@ -59,7 +75,7 @@ const QuestItem: React.FC<{
     const hasBonus = bonusGold > 0 || bonusExp > 0;
 
     // 合計報酬(ゴールドのみ画面表示する。EXPは表示不要のため計算しない)
-    const baseGold = quest.gold_gain || quest.gold || 0;
+    const baseGold = quest.gold_gain || 0;
     const totalGold = baseGold + bonusGold;
 
     const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
@@ -73,16 +89,9 @@ const QuestItem: React.FC<{
     const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;
 
     const runComplete = () => {
+        // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。
+        // ここではあくまで確認モーダルを開く(onClick)のみを行う。
         if (isCooldown || isEffectivelyLocked) return;
-        if (quest.type === 'daily' || isInfinite) {
-            play('clear');
-        } else {
-            play('submit');
-        }
-        if (isInfinite) {
-            setIsCooldown(true);
-            setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
-        }
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
@@ -215,7 +224,7 @@ const QuestItem: React.FC<{
                             </span>
                         ) : (
                             <span className={`${iconSizeClasses} ${isInfinite ? 'text-cyan-200' : ''} ${isRandom && !isDone && !isPending ? 'animate-bounce' : ''} ${isDone ? 'opacity-30' : ''}`}>
-                                {quest.icon || quest.icon_key}
+                                {quest.icon_key}
                             </span>
                         )}
                     </div>
@@ -235,9 +244,9 @@ const QuestItem: React.FC<{
                         </div>
 
                         {/* 説明文: iconFirst(非識字年齢向け)では非表示にし、アイコンでの識別を優先する */}
-                        {!iconFirst && (quest.desc || quest.description) && (
+                        {!iconFirst && quest.description && (
                             <div className={descSizeClasses}>
-                                {quest.desc || quest.description}
+                                {quest.description}
                             </div>
                         )}
                     </div>
@@ -284,7 +293,7 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
     const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
@@ -292,18 +301,18 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
-            if (q.target && q.target !== 'all') {
-                if (q.target === 'siblings') {
+            if (q.target_user && q.target_user !== 'all') {
+                if (q.target_user === 'siblings') {
                     // 兄妹連携クエスト: 対象は子ども(role_child)全員
                     if (currentUser.role !== 'role_child') return false;
-                } else if (q.target.startsWith('role_')) {
-                    if (currentUser.role !== q.target) return false;
-                } else if (q.target !== currentUser?.user_id) {
+                } else if (q.target_user.startsWith('role_')) {
+                    if (currentUser.role !== q.target_user) return false;
+                } else if (q.target_user !== currentUser?.user_id) {
                     return false;
                 }
             }
 
-            if (q.type === 'daily' && q.days) {
+            if (q.quest_type === 'daily' && q.days) {
                 if (Array.isArray(q.days) && q.days.length === 0) return true;
                 const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
                 if (!dayList.includes(currentDay)) return false;
@@ -320,7 +329,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                 if (isDone) return 4;
                 if (isPending) return 3;
                 if (isLocked) return 2;
-                if (quest.type === 'limited') return 0; // 進行中の期間限定を最優先
+                if (quest.quest_type === 'limited') return 0; // 進行中の期間限定を最優先
                 return 1; // 通常(無限・ランダム・特別バッジ付き含む)
             };
 
@@ -337,8 +346,10 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             if (bonusA !== bonusB) return bonusB - bonusA;
             // M-6-5バグ修正: 実カラムはquest_idであり、idは常にundefinedのため
             // (b.id as number) - (a.id as number) は常にNaNになり並び順が不定だった。
-            const idA = Number(a.quest_id ?? a.id ?? 0);
-            const idB = Number(b.quest_id ?? b.id ?? 0);
+            // #291: idフィールド自体が幽霊フィールドとして型定義から削除されたため、
+            // quest_idのみを参照する。
+            const idA = Number(a.quest_id ?? 0);
+            const idB = Number(b.quest_id ?? 0);
             return idB - idA;
         });
     }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
@@ -370,7 +381,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
         <AnimatePresence mode="popLayout">
             {list.map(q => (
                 <motion.div
-                    key={q.id || q.quest_id}
+                    key={q.quest_id}
                     layout
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -384,6 +395,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         pendingQuests={pendingQuests}
                         currentUser={currentUser}
                         onClick={onQuestClick}
+                        completedSignal={completedSignal}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />

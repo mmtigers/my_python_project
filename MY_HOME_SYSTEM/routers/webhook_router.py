@@ -65,7 +65,19 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
         logger.debug(f"Ignored webhook from unsupported device type: {device_type} (MAC: {mac})")
         return {"status": "ignored", "reason": "unsupported_device"}
 
-    state = str(ctx.detectionState).lower()
+    # WoContact(開閉センサー)は ctx.openState ("open"/"close"/"timeOutNotClose") が
+    # 実際の開閉状態を表す。ctx.detectionState は同デバイス内蔵PIRのモーション検知結果
+    # ("DETECTED"/"NOT_DETECTED")であり開閉状態ではないため、開閉判定には使わない
+    # (SwitchBot公式Webhookドキュメント参照。Issue #251: 修正前はdetectionStateを
+    # 開閉状態として扱っていたため、実機からのWebhookでは"open"/"timeoutnotclose"に
+    # 一致せず、ドア開放時の防犯通知が発火しなかった)。openStateが未設定のペイロード
+    # (過去互換)ではdetectionStateへフォールバックする。
+    # WoPresence(人感センサー)はdetectionStateがそのままモーション検知状態を表すため、
+    # 従来通りdetectionStateを用いる。
+    if device_type in ("WoContact", "Contact Sensor") and ctx.openState is not None:
+        state = str(ctx.openState).lower()
+    else:
+        state = str(ctx.detectionState).lower()
     current_time = time.time()
 
     # 🌟 追加: ガード節 2 - イベントの重複排除 (Fail-Fast)
@@ -99,6 +111,9 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
         )
 
     # 3. センサーロジック (Service呼び出し)
-    await sensor_service.process_sensor_data(mac, name, location, body.deviceType, state)
+    # device_type(61行目で context.deviceType/トップレベルから解決済み)を渡す。
+    # 以前はここで未解決の body.deviceType(公式Webhook形式では常にNone)を渡していたため、
+    # process_sensor_data のMotion判定に到達せず通知・無反応タイマーが発火しなかった(#94)。
+    await sensor_service.process_sensor_data(mac, name, location, device_type, state)
     
     return {"status": "success"}

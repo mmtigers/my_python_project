@@ -14,6 +14,7 @@ import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -105,6 +106,30 @@ class TestVerifySignature:
         with pytest.raises(av.AlexaVerificationError):
             av.verify_signature(b"body", "sig", bad_url)
 
+    @pytest.mark.parametrize("traversal_url", [
+        # Issue #173: 正規化前は "/echo.api/" で始まるためstartswithを素通りしてしまうが、
+        # ".." を解決すると /echo.api/ の外側を指す
+        "https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/../../etc/passwd",
+        "https://s3.amazonaws.com/echo.api/a/../../evil-bucket/cert.pem",
+        # Issue #223: パーセントエンコードされた".."はurlparse().pathの時点では
+        # デコードされないため、normpathへ渡す前にデコードしないと素通りしてしまう。
+        # requestsは送信前にこれらを実際に".."へデコードするため、検証と取得先が
+        # 食い違ってしまう。
+        "https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/%2E%2E/evil-bucket/cert.pem",
+        "https://s3.amazonaws.com/echo.api/%2e%2e/%2e%2e/etc/passwd",
+        "https://s3.amazonaws.com/echo.api/a/%2e%2e/%2e%2e/evil-bucket/cert.pem",
+    ])
+    def test_rejects_cert_chain_url_with_path_traversal(self, traversal_url):
+        """Issue #173/#223の回帰テスト: Amazon公式の検証手順はURLパスを正規化した後に
+        /echo.api/で始まることを要求するが、以前は生のparsed.pathへのstartswith判定
+        のみだったため、".."を含むURLがチェックを素通りしていた(#173)。その後の修正でも
+        parsed.pathはパーセントデコードされないままnormpathへ渡していたため、
+        "%2e%2e"のようなエンコード済みの".."がチェックを素通りしていた(#223)。"""
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_signature(b"body", "sig", traversal_url)
+
     def test_rejects_expired_certificate(self, rsa_key):
         cert = _make_cert(rsa_key, not_before_delta=-10, not_after_delta=-1)
         pem = cert.public_bytes(serialization.Encoding.PEM)
@@ -137,6 +162,38 @@ class TestVerifySignature:
                 av.verify_signature(body, sig_b64, VALID_CERT_URL)
 
 
+class TestFetchLeafCertificateNetworkErrors:
+    """Issue #179の回帰テスト: requests.get/raise_for_statusが送出する
+    requests.exceptions.RequestException(Timeout/ConnectionError/HTTPError等)は
+    AlexaVerificationErrorではないため、router側のexcept AlexaVerificationErrorを
+    素通りしグローバル例外ハンドラ経由で500になっていた。証明書チェーン取得失敗も
+    AlexaVerificationErrorに変換し、routerが本来意図する400を返せるようにする。"""
+
+    def test_connection_error_is_converted_to_verification_error(self):
+        with patch(
+            "core.alexa_verifier.requests.get",
+            side_effect=requests.exceptions.ConnectionError("connection refused"),
+        ):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
+
+    def test_timeout_is_converted_to_verification_error(self):
+        with patch(
+            "core.alexa_verifier.requests.get",
+            side_effect=requests.exceptions.Timeout("timed out"),
+        ):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
+
+    def test_http_error_status_is_converted_to_verification_error(self):
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = requests.exceptions.HTTPError("404")
+
+        with patch("core.alexa_verifier.requests.get", return_value=resp):
+            with pytest.raises(av.AlexaVerificationError):
+                av.verify_signature(b"body", "sig", VALID_CERT_URL)
+
+
 class TestVerifyTimestamp:
     def test_accepts_current_timestamp(self):
         now = datetime.datetime.now(datetime.timezone.utc)
@@ -155,3 +212,14 @@ class TestVerifyTimestamp:
     def test_rejects_malformed_timestamp(self):
         with pytest.raises(av.AlexaVerificationError):
             av.verify_timestamp("not-a-timestamp")
+
+    def test_rejects_timestamp_without_timezone_as_verification_error_not_typeerror(self):
+        """Issue #110回帰防止: datetime.fromisoformat はタイムゾーン情報のない
+        ISO文字列(例: "2026-08-30T00:00:00")もパース成功として受理してしまう
+        (ValueError/AttributeErrorにならない)ため、以前はその後の
+        `now(aware) - ts(naive)` がTypeErrorを送出していた。ルーターは
+        AlexaVerificationErrorのみを捕捉するため、この経路だけ400ではなく
+        500になっていた(グローバル例外ハンドラ経由)。"""
+        naive_timestamp = datetime.datetime.now().isoformat()
+        with pytest.raises(av.AlexaVerificationError):
+            av.verify_timestamp(naive_timestamp)

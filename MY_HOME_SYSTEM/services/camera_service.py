@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sys
@@ -7,7 +8,7 @@ import time
 import urllib.parse
 import glob
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from core.logger import setup_logging
 import config
 
@@ -29,17 +30,48 @@ _rtsp_cache: Dict[str, str] = {}
 
 # VOD生成のcheck-then-act競合(同一cam_id・日付への同時リクエストで
 # ffmpegが二重起動し同一ファイルへ書き込む)を防ぐための、process_key単位ロック。
-_vod_generation_locks: Dict[str, threading.Lock] = {}
+#
+# #247: _active_vod_processesには対応する_prune_finished_vod_processes()が
+# あるが、以前はこの辞書には剪定処理が存在せず、cam_id×target_dateの組み合わせが
+# 増えるたびに(long-running環境で日々)無限に蓄積していた。threading.Lockオブジェクト
+# 自体は軽量なため実運用上のメモリ影響は小さいが、参照カウント(_RefCountedLock)を
+# 導入し、そのエントリを誰も使用していない(参照カウント0)場合にのみ辞書から削除する。
+# 単純に「lock.locked()がFalseなら削除」する方式だと、取得元(_vod_generation_lock)が
+# 辞書からロックオブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
+# 別スレッドが剪定してしまい、同一process_keyに対して2つの別々のLockオブジェクトが
+# 生成されて同時に「取得成功」してしまう(このロック機構が本来防ぐべき二重起動と
+# 全く同じ問題を再発させる)ため、参照カウントで安全性を担保している。
+class _RefCountedLock:
+    __slots__ = ("lock", "ref_count")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.ref_count = 0
+
+
+_vod_generation_locks: Dict[str, _RefCountedLock] = {}
 _vod_generation_locks_guard = threading.Lock()
 
 
-def _get_vod_generation_lock(process_key: str) -> threading.Lock:
+@contextlib.contextmanager
+def _vod_generation_lock(process_key: str):
+    """process_key単位で排他制御を行うコンテキストマネージャ。
+    使用中(参照カウント>0)のエントリは剪定されず、使用を終えた
+    (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。"""
     with _vod_generation_locks_guard:
-        lock = _vod_generation_locks.get(process_key)
-        if lock is None:
-            lock = threading.Lock()
-            _vod_generation_locks[process_key] = lock
-        return lock
+        entry = _vod_generation_locks.get(process_key)
+        if entry is None:
+            entry = _RefCountedLock()
+            _vod_generation_locks[process_key] = entry
+        entry.ref_count += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _vod_generation_locks_guard:
+            entry.ref_count -= 1
+            if entry.ref_count == 0 and _vod_generation_locks.get(process_key) is entry:
+                del _vod_generation_locks[process_key]
 
 
 def _prune_finished_vod_processes() -> None:
@@ -209,7 +241,7 @@ def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Opti
     # process_key単位でロックし、以降の「実行中チェック→未実行ならPopen起動・登録」を
     # 単一の原子的な区間にする。ロック無しだと、同一カメラ・日付への同時リクエストが
     # どちらも「実行中でない」と判定してffmpegを二重起動し、同一ファイルへ競合書き込みし得た。
-    with _get_vod_generation_lock(process_key):
+    with _vod_generation_lock(process_key):
         return _generate_record_playlist_locked(cam_conf, target_date, process_key)
 
 

@@ -7,7 +7,6 @@ import os
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 import pytz
 from freezegun import freeze_time
 
@@ -62,7 +61,6 @@ class TestIsMonthEndReport:
 class TestGetAnalysisData:
     def test_aggregates_correctly_when_all_tables_present(self, isolated_db):
         start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
-        start_str = start.strftime("%Y-%m-%d %H:%M:%S")
 
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
@@ -89,6 +87,41 @@ class TestGetAnalysisData:
         assert result["car_count"] == 1
         assert result["sick_count"] == 1
         assert result["elec_bill"] >= 0
+
+
+class TestGetAnalysisDataElectricityCostExcludesPlugs:
+    """Issue #170の回帰テスト: get_analysis_dataの電気代計算(sql_power)が
+    デバイス無差別にSELECT AVG(wattage)しており、プラグ(個別家電。既に
+    スマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの
+    平均値を希釈していた不具合。"""
+
+    def test_plug_readings_do_not_affect_elec_bill(self, isolated_db):
+        start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                "('remo1', '伊丹_Nature Remo E Lite', 1000, datetime('now'))"
+            )
+
+        meter_only = report.get_analysis_data(start)
+
+        with common.get_db_cursor(commit=True) as cur:
+            # アイドル時の小さいwattage(1W)を持つプラグを大量に追加しても、
+            # スマートメーター単独の場合と結果が変わらないべき
+            for _ in range(5):
+                cur.execute(
+                    f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                    "('plug1', 'Plug_TV', 1, datetime('now'))"
+                )
+
+        with_plugs = report.get_analysis_data(start)
+
+        assert meter_only is not None and with_plugs is not None
+        assert with_plugs["elec_bill"] == meter_only["elec_bill"], (
+            "プラグのアイドル値が電気代計算(AVG(wattage))を希釈している: "
+            f"meter_only={meter_only['elec_bill']}, with_plugs={with_plugs['elec_bill']}"
+        )
 
 
 class TestGenerateTextSection:
@@ -146,5 +179,67 @@ class TestRunReport:
             report.run_report()
 
         mock_send.assert_called_once()
-        sent_text = mock_send.call_args[0][1][0]["text"]
+        sent_text = mock_send.call_args[0][0][0]["text"]
         assert "今週の我が家レポート" in sent_text
+
+
+class TestRunReportDuplicateSendPrevention:
+    """Issue #234の回帰テスト: 月曜8時台の判定のみで送信済みフラグが無かったため、
+    外部cronが同一時間枠内で本スクリプトを複数回起動すると重複送信されていた不具合。"""
+
+    def test_second_invocation_in_same_monday_morning_is_skipped(self, isolated_db, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):  # JST 2026-08-17 08:00 (月曜)
+            report.run_report()  # 1回目: 外部cronによる正規の起動
+            report.run_report()  # 2回目: 同一時間枠内での多重起動(重複)
+
+        mock_send.assert_called_once(), "同一時間枠内の多重起動で重複送信された(実行済みフラグが機能していない)"
+
+    def test_next_mondays_run_is_not_blocked_by_previous_weeks_flag(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):  # 2026-08-17(月)
+            report.run_report()
+        with freeze_time("2026-08-23 23:00:00"):  # 翌週2026-08-24(月)
+            report.run_report()
+
+        assert mock_send.call_count == 2, "前週の実行済みフラグにより翌週の正規実行までブロックされてはならない"
+
+    def test_send_failure_does_not_write_flag_so_retry_can_still_send(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py"])
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(tmp_path / "last_weekly_report.txt"))
+        mock_send = MagicMock(side_effect=[False, True])
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-16 23:00:00"):
+            report.run_report()  # 1回目: 送信失敗
+            report.run_report()  # 2回目: 再試行(同一時間枠内でも成功させたい)
+
+        assert mock_send.call_count == 2, "送信失敗時にもフラグを書いてしまうと再試行が永久にブロックされる"
+
+    def test_forced_run_bypasses_flag_and_does_not_write_it(
+        self, isolated_db, monkeypatch, tmp_path
+    ):
+        flag_file = tmp_path / "last_weekly_report.txt"
+        monkeypatch.setattr(report, "LAST_RUN_FILE", str(flag_file))
+        mock_send = MagicMock(return_value=True)
+        monkeypatch.setattr(report.common, "send_push", mock_send)
+
+        with freeze_time("2026-08-19 08:00:00", tz_offset=9):  # 水曜日、--force
+            monkeypatch.setattr(sys, "argv", ["weekly_analyze_report.py", "--force"])
+            report.run_report()
+            report.run_report()
+
+        assert mock_send.call_count == 2, "--force は手動テスト用途のためフラグの影響を受けてはならない"
+        assert not flag_file.exists(), "--force 実行時はフラグを記録してはならない(通常実行をブロックしないため)"
