@@ -2,7 +2,6 @@
 import sqlite3
 import shutil
 import subprocess
-import requests
 import os
 from datetime import datetime, timedelta, date
 import pytz
@@ -402,24 +401,6 @@ def load_ranking_data(date_str: str, ranking_type: str) -> pd.DataFrame:
 # ==========================================
 # System Stats & Utils
 # ==========================================
-
-def get_ngrok_url() -> Dict[str, str]:
-    """ngrokの現在の公開URLを取得する"""
-    try:
-        res = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=2)
-        if res.status_code == 200:
-            data = res.json()
-            urls = {}
-            for t in data.get("tunnels", []):
-                addr = t.get("config", {}).get("addr", "")
-                if "8000" in addr:
-                    urls["server"] = t.get("public_url")
-                elif "8501" in addr:
-                    urls["dashboard"] = t.get("public_url")
-            return urls
-    except Exception:
-        pass
-    return {}
 
 def get_disk_usage() -> Optional[Dict[str, float]]:
     """ディスク使用量を取得"""

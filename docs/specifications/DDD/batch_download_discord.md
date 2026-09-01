@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-* [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）の実装元。
+* [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）と、Discord Webhookサーキットブレーカー（`DiscordCircuitBreaker`）の実装元。後者は`newface_monitor.py`の`DiscordNotifier`とも共通利用される。
 * [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) — 本ファイルがフォールバック的にインポートするDiscord Webhook通知処理（`_send_discord_webhook`）の実装元。
 * [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS容量監視との関連（全体設計書によれば、DDDのダウンロード活動によるNAS容量逼迫を`nas_monitor.py`側が監視する運用連携があるとされる。ただし本ファイルは`nas_monitor.py`を直接importしておらず、独自の簡易的な容量チェック（`FileSystemManager.check_disk_space`）を実装している点に注意）。
 * [../全体設計書.md](../全体設計書.md) — DDDサブシステム全体の位置付けおよびMY_HOME_SYSTEMとのNASリソース協調に関する記述。
@@ -52,6 +52,7 @@
 | `typing.List`, `Optional`, `Tuple`, `Any`, `Set`, `NamedTuple`, `Dict`, `Iterable` | 標準ライブラリ | 型ヒント全般 | 根拠: [import文] (行番号: 39 / 抜粋: "from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable") |
 | `dataclasses.dataclass`, `field` | 標準ライブラリ | `AppConfig` の定義（frozenデータクラス）とデフォルトファクトリ | 根拠: [import文] (行番号: 40 / 抜粋: "from dataclasses import dataclass, field") |
 | `file_utils.sanitize_filename` (as `_shared_sanitize_filename`) | ローカルモジュール | ファイル名のサニタイズ処理を共通モジュールへ委譲 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
+| `file_utils.DiscordCircuitBreaker` | ローカルモジュール | `DiscordNotifier.send`が参照するモジュールレベル変数`_discord_circuit_breaker`の型。Discord Webhookへの連続送信失敗検知用 | 根拠: [import文] (行番号: 43 / 抜粋: "from file_utils import DiscordCircuitBreaker") |
 | `pathlib.Path` | 標準ライブラリ | パスオブジェクトの操作全般 | 根拠: [import文] (行番号: 43 / 抜粋: "from pathlib import Path") |
 | `urllib.parse.urljoin` | 標準ライブラリ | m3u8マニフェスト内の相対URIを絶対URLへ書き換える処理で使用 | 根拠: [import文] (行番号: 44 / 抜粋: "from urllib.parse import urljoin") |
 | `concurrent.futures.ThreadPoolExecutor`, `as_completed` | 標準ライブラリ | m3u8セグメントの並行ダウンロード（最大5ワーカー） | 根拠: [import文] (行番号: 45 / 抜粋: "from concurrent.futures import ThreadPoolExecutor, as_completed") |
@@ -119,7 +120,7 @@
 
 ### `AppConfig`
 
-* **役割**: アプリケーション全体の設定値（時間制限、パス、リトライ回数、機能フラグ、ボット検知対策のスリープ範囲・閾値・マーカー文字列等）を保持するイミュータブル(`frozen=True`)なデータクラス。NAS関連では、`REQUIRE_NAS_MOUNT`（`false`でNAS未マウントでも起動を許可し`verify_nas_mount`自体をスキップする単独環境向けフラグ）、`LOCAL_TMP_DIR`（`ScrapingStrategy`がHLSフラグメント・結合を行うローカル一時ディレクトリ。既定は`tempfile.gettempdir()`ではなく`CURRENT_DIR/tmp_fragments`＝本スクリプトと同じ実ディスク上。理由はソースコメントによれば、`/tmp`がtmpfs運用の環境（一部Raspberry Pi OS構成含む）だと動画1本分(数GB)の書き込みでOOM・SSH切断を招きうるため）、`LOCAL_TMP_MIN_FREE_SPACE_GB`（`LOCAL_TMP_DIR`の空き容量下限）の3フィールドが、PR #72で追加されたローカル→NAS二段階転送パイプライン（`ScrapingStrategy._download_with_ytdlp`参照）向けに存在する。
+* **役割**: アプリケーション全体の設定値（時間制限、パス、リトライ回数、機能フラグ、ボット検知対策のスリープ範囲・閾値・マーカー文字列等）を保持するイミュータブル(`frozen=True`)なデータクラス。NAS関連では、`REQUIRE_NAS_MOUNT`（`false`でNAS未マウントでも起動を許可し`verify_nas_mount`自体をスキップする単独環境向けフラグ）、`LOCAL_TMP_DIR`（`ScrapingStrategy`がHLSフラグメント・結合を行うローカル一時ディレクトリ。既定は`tempfile.gettempdir()`ではなく`CURRENT_DIR/tmp_fragments`＝本スクリプトと同じ実ディスク上。理由はソースコメントによれば、`/tmp`がtmpfs運用の環境（一部Raspberry Pi OS構成含む）だと動画1本分(数GB)の書き込みでOOM・SSH切断を招きうるため）、`LOCAL_TMP_MIN_FREE_SPACE_GB`（`LOCAL_TMP_DIR`の空き容量下限）の3フィールドが、PR #72で追加されたローカル→NAS二段階転送パイプライン（`ScrapingStrategy._download_with_ytdlp`参照）向けに存在する。**（本PRで追加）** `DISCORD_CIRCUIT_BREAKER_THRESHOLD`（既定3）は、`_discord_circuit_breaker`（`DiscordNotifier.send`が参照するモジュールレベルの`file_utils.DiscordCircuitBreaker`）が連続何回の送信失敗でブレーカーを開くかの閾値。
 * 根拠: [AppConfigクラスとNAS関連フィールドのコメント] (行番号: 135〜136, 151〜153, 154〜166, 167〜169 / 抜粋: "@dataclass(frozen=True)\nclass AppConfig:", "REQUIRE_NAS_MOUNT: bool = os.getenv("DDD_REQUIRE_NAS_MOUNT", "true").lower() == "true"", "LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))", "LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))")
 
 
@@ -237,26 +238,39 @@
 * **エラーハンドリング**: なし
 
 
+### `_discord_circuit_breaker` (モジュールレベル変数)
+
+* **役割**: `DiscordNotifier.send`が全呼び出しで共有する、モジュールレベル単一インスタンスの`file_utils.DiscordCircuitBreaker`。**（本PRで追加）** 以前は`DiscordNotifier.send`にWebhookへの連続送信失敗を検知する仕組みが一切無く、Webhookが機能していない間の1回の実行で無駄なリクエストを送り続けていた。閾値は`CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD`(既定3)。
+* 根拠: [モジュールレベル変数定義] (行番号: 326 / 抜粋: "_discord_circuit_breaker = DiscordCircuitBreaker(failure_threshold=CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD)")
+
+
+* **引数/リクエスト**: 該当なし（モジュールロード時に1度だけ生成される）
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし（インスタンス生成のみ）
+* **エラーハンドリング**: なし
+* 根拠: [モジュールレベル変数定義] (行番号: 326 / 抜粋: 前掲)
+
+
 ### `DiscordNotifier.send`
 
-* **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。エラー通知フラグに応じて送信先チャンネル(`error`/`notify`)を切り替える。
-* 根拠: [DiscordNotifier.send] (行番号: 259〜266 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* **役割**: Discord Webhook経由で通知メッセージを送信する静的メソッド。エラー通知フラグに応じて送信先チャンネル(`error`/`notify`)を切り替える。**（本PRで追加）** 送信前に`_discord_circuit_breaker`が開いていないか確認し、開いていれば送信自体を試みずスキップする。
+* 根拠: [DiscordNotifier.send] (行番号: 328〜346 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **引数/リクエスト**: `text: str` (通知内容), `is_error: bool = False` (エラー通知フラグ)
-* 根拠: [引数定義] (行番号: 260 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
+* 根拠: [引数定義] (行番号: 330 / 抜粋: "def send(text: str, is_error: bool = False) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 260 / 抜粋: "-> None:")
+* 根拠: [戻り値ヒント] (行番号: 330 / 抜粋: "-> None:")
 
 
-* **副作用**: `_send_discord_webhook` の呼び出しによる外部APIへの通知送信。
-* 根拠: [API呼び出し] (行番号: 264 / 抜粋: "_send_discord_webhook([message], channel=channel)")
+* **副作用**: サーキットブレーカーの開放チェック（開いていれば警告ログを出力し早期return）、`_send_discord_webhook` の呼び出しによる外部APIへの通知送信、送信結果に応じた`_discord_circuit_breaker`の状態更新(`record_success`/`record_failure`)。
+* 根拠: [ブレーカーチェックとAPI呼び出し] (行番号: 331〜335, 339, 343〜346 / 抜粋: "if _discord_circuit_breaker.is_open:\n            # Webhookへの連続送信失敗を検知しているため、無駄なリクエストを\n            # 重ねないよう以降の送信をスキップする。" / "sent = _send_discord_webhook([message], channel=channel)")
 
 
-* **エラーハンドリング**: 送信時の例外を捕捉し、`exc_info=True` 付きでエラーログを出力（例外は再送出しない）。
-* 根拠: [try-exceptブロック] (行番号: 263〜266 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `_discord_circuit_breaker.is_open`が`True`の場合は警告ログを出力し送信自体を行わずreturnする。送信時の例外を捕捉した場合は`exc_info=True` 付きでエラーログを出力し（例外は再送出しない）`sent = False`とする。`_send_discord_webhook`の戻り値（例外を送出せず`bool`を返す実装のため）が`False`の場合も同様に失敗として扱う。成否いずれの場合も`_discord_circuit_breaker`の`record_success()`/`record_failure()`を呼び状態を更新する。
+* 根拠: [try-exceptブロックと成否分岐] (行番号: 336〜346 / 抜粋: "try:\n            sent = _send_discord_webhook([message], channel=channel)\n        except Exception as e:\n            logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)\n            sent = False\n        if sent:\n            _discord_circuit_breaker.record_success()\n        else:\n            _discord_circuit_breaker.record_failure()")
 
 
 ### `HistoryManager.load_history`
@@ -880,8 +894,8 @@
 * 根拠: [メインループ] (行番号: 1000〜1046 / 抜粋: "for i, task in enumerate(tasks):")
 
 
-* **エラーハンドリング**: `BotDetectionError`を捕捉した場合はクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。
-* 根拠: [try-exceptとbreak] (行番号: 1020〜1042 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")\n                CooldownManager.trigger_cooldown()")
+* **エラーハンドリング**: `BotDetectionError`を捕捉した場合は`exc_info=True`付きで`logger.critical`によりログ出力したうえでクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。**（本PRで修正）** `logger.critical`呼び出しに以前`exc_info`が付いておらず、同じ`_run_locked`内の他の例外ログ（`except Exception as e:`側、行番号1256）が`exc_info=True`付きであることとの一貫性が無かった。
+* 根拠: [try-exceptとbreak] (行番号: 1243〜1265 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
 
 
 ## 5. 処理フロー図
@@ -983,6 +997,7 @@ flowchart TD
     subgraph SubBlackBox["ブラックボックス・外部システム"]
         NotificationService["services.notification_service<br>(_send_discord_webhook)"]
         FileUtils["file_utils<br>(sanitize_filename)"]
+        DiscordCircuitBreaker["file_utils.DiscordCircuitBreaker"]
         YTDLP["yt_dlp"]
         Requests["requests"]
         CurlCffi["curl_cffi"]
@@ -993,6 +1008,7 @@ flowchart TD
 
     DiscordNotifier -.-> NotificationService
     NotificationService -.-> DiscordAPI
+    DiscordNotifier --> DiscordCircuitBreaker
     FileSystemManager -.-> FileUtils
     UniversalYtDlpStrategy --> YTDLP
     ScrapingStrategy --> YTDLP
@@ -1033,6 +1049,7 @@ flowchart TD
 * 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 206〜220 / 抜粋: "# 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
 * **履歴ファイルI/O失敗の可視化**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録するよう修正済みである。読み込み失敗時は安全側（空の履歴として続行）に倒すため、失敗が続くと既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある点自体は変わらない。
 * 根拠: [HistoryManager.load_history/add_historyのコメント] (行番号: 277〜280, 290〜292 / 抜粋: "# M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
+* **（本PRで追加）`_discord_circuit_breaker`はモジュールレベルの単一インスタンス・プロセス内限定**: `DiscordNotifier.send`が呼ばれるたびにこの単一インスタンスの状態を更新するため、`BotDetectionError`検知時の通知（`logger.critical`直後）やタスク失敗通知等、送信元に関わらず全ての`DiscordNotifier.send`呼び出しが同じ連続失敗カウントを共有する。1回のプロセス実行内で連続3回(既定)失敗すると、以降そのプロセスが終了するまで（`BotDetectionError`によるクールダウン通知等も含め）全てのDiscord通知がスキップされる。状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まる。
 * **`noplaylist`によるプレイリスト一括ダウンロードの防止**: `UniversalYtDlpStrategy.download`の`ydl_opts`に`noplaylist: True`が追加され、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回される問題が修正されている。
 * 根拠: [ydl_optsのコメント] (行番号: 462〜466 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")
 * **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
