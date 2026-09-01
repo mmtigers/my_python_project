@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `eee72ac` |
 
 ## 関連ドキュメント
 
@@ -614,13 +615,13 @@ graph TD
 ## 8. 保守上の注意点
 
 * **多数の bare `except:`**: `_get_uptime`（90行目）、`check_system_resources`（106, 121行目）、`check_network_and_apis`（140行目）、`check_peripherals`（289, 304行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
-* **（修正済み）`check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（328〜331行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
-* **（修正済み）`TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、その後 `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` から取得するよう修正され、さらに現在は `resolve_target_bluetooth_mac()`（32〜40行目、42行目で呼び出し）が `config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` を返すよう修正済みで、`ENABLE_BLUETOOTH` が偽（未設定含む）の環境では常に `None` となりSpeakerチェックがサウンドカード確認にフォールバックする（`bluetooth.service`が停止している環境でBT関連のWARNを出し続けないための対応）。
+* **[修正済み] `check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（328〜331行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
+* **[修正済み] `TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、その後 `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` から取得するよう修正され、さらに現在は `resolve_target_bluetooth_mac()`（32〜40行目、42行目で呼び出し）が `config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` を返すよう修正済みで、`ENABLE_BLUETOOTH` が偽（未設定含む）の環境では常に `None` となりSpeakerチェックがサウンドカード確認にフォールバックする（`bluetooth.service`が停止している環境でBT関連のWARNを出し続けないための対応）。
 * **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（249〜254行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。
-* **（修正済み）`check_services` のブロッキング待機**: 以前はBackend Server/Family Quest/Dashboardの3対象を直列にリトライしており、各サービスにつき最大12回×10秒（最大2分/サービス）の同期的な `time.sleep` が発生するため、全滅時は最悪ケースで合計6分間スクリプトがブロックされ通知が遅延していたが、現在は`ThreadPoolExecutor`（200〜201行目）で対象ごとに独立したスレッドへ`_wait_for_service`（203〜226行目）を並列実行するよう修正済みで、最悪時間が単一対象のリトライ時間（最大2分）程度まで縮まっている。
+* **[修正済み] `check_services` のブロッキング待機**: 以前はBackend Server/Family Quest/Dashboardの3対象を直列にリトライしており、各サービスにつき最大12回×10秒（最大2分/サービス）の同期的な `time.sleep` が発生するため、全滅時は最悪ケースで合計6分間スクリプトがブロックされ通知が遅延していたが、現在は`ThreadPoolExecutor`（200〜201行目）で対象ごとに独立したスレッドへ`_wait_for_service`（203〜226行目）を並列実行するよう修正済みで、最悪時間が単一対象のリトライ時間（最大2分）程度まで縮まっている。
 * **SwitchBot/NatureRemo APIの認証はするが応答内容は見ていない**: `check_network_and_apis`（136〜157行目）は認証ヘッダー付与とステータスコード検証（`_check_http`経由）まで行うようになったが、レスポンス本文の内容（デバイス一覧の妥当性等）までは検証していないため、200番台を返すが実質的に空/不正なレスポンスのケースは検知できない。
-* **（修正済み）`check_system_resources` の危険域判定**: 以前はCPU温度・ディスク使用率がどれだけ閾値を超過しても `STATUS_WARN` までしか上がらず、危険域でもタイトルアイコンが🔴（`_send_report` の `has_err` 判定）にならなかったが、現在は温度85°C以上・ディスク使用率95%超で `STATUS_ERR` に昇格するよう修正済み（99〜102, 114〜117行目）。
-* **（修正済み）`check_services` のDashboard扱い**: 以前は `Dashboard` のみ `critical=False` でポート未応答でも `STATUS_WARN` までしか上がらなかったが、現在は3対象すべて `critical=True`（191行目、`_wait_for_service`が参照する対象定義）に統一され、Dashboard未起動時も `STATUS_ERR` として報告される。
+* **[修正済み] `check_system_resources` の危険域判定**: 以前はCPU温度・ディスク使用率がどれだけ閾値を超過しても `STATUS_WARN` までしか上がらず、危険域でもタイトルアイコンが🔴（`_send_report` の `has_err` 判定）にならなかったが、現在は温度85°C以上・ディスク使用率95%超で `STATUS_ERR` に昇格するよう修正済み（99〜102, 114〜117行目）。
+* **[修正済み] `check_services` のDashboard扱い**: 以前は `Dashboard` のみ `critical=False` でポート未応答でも `STATUS_WARN` までしか上がらなかったが、現在は3対象すべて `critical=True`（191行目、`_wait_for_service`が参照する対象定義）に統一され、Dashboard未起動時も `STATUS_ERR` として報告される。
 * **サブプロセス呼び出しへの`timeout`追加**: `vcgencmd`（97行目）、`ping`（139行目）、`aplay`（287行目）、`bluetoothctl`（295〜298行目、`stdin=subprocess.DEVNULL`も追加）、`tail`（327行目）の各`subprocess.check_output`/`check_call`呼び出しに`timeout`引数が追加されている。特に`bluetoothctl`はBluetoothデーモン不調時に応答を返さず無限に待機することがあるため、というコメント（293〜294行目）がコード内に付与されている。
 
 ## 9. 不明事項一覧
