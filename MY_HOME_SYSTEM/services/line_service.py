@@ -147,7 +147,7 @@ async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMess
 
         lines = ["⚔️ 本日のクエスト"]
         for q in quests:
-            target = q['target']
+            target = q['target_user']
             if target == 'siblings':
                 if user_role != ROLE_CHILD:
                     continue

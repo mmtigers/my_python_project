@@ -452,9 +452,10 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.filter_active_quests`
 
-* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`icon`/`type`/`target`/`days`のエイリアスフィールドを付与する。Issue #163で、期間・曜日・時間帯・出現確率の判定本体は`_is_quest_currently_active`へ切り出され、本関数はそれを1件ずつ呼び出して`False`ならスキップするだけの薄いループになった（`_process_complete_quest_locked`のサーバー側検証と判定基準を完全に一致させるため）。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 741〜754)
-* 根拠: `if not self._is_quest_currently_active(q, now):\n                continue` (行番号: 746〜747)
+* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`days`（`day_of_week`をカンマ区切りの整数リストへ変換した派生フィールド）を付与する。Issue #163で、期間・曜日・時間帯・出現確率の判定本体は`_is_quest_currently_active`へ切り出され、本関数はそれを1件ずつ呼び出して`False`ならスキップするだけの薄いループになった（`_process_complete_quest_locked`のサーバー側検証と判定基準を完全に一致させるため）。**（#291で修正）** 以前ここで付与していた`icon`/`type`/`target`という`icon_key`/`quest_type`/`target_user`の別名（重複フィールド名。フロントエンドの`useGameData.ts`起点の調査で発覚）は廃止され、`quest_master`由来のフィールド名（`icon_key`/`quest_type`/`target_user`）がそのままレスポンスの正となる。
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 831〜843)
+* 根拠: `if not self._is_quest_currently_active(q, now):\n                continue` (行番号: 836〜837)
+* 根拠: エイリアス廃止のコメントと`days`付与 (行番号: 839〜842 / 抜粋: "# #291: quest_master由来の値そのまま(icon_key/quest_type/target_user)を\n            # 正とし、以前ここで追加していた icon/type/target というフィールド名の\n            # 二重化(useGameData.tsからの起点調査で発覚)は廃止した。\n            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None")
 * **引数/リクエスト**: `quests: List[dict]`
 * 根拠: (行番号: 741)
 * **戻り値/レスポンス**: `List[dict]`
@@ -550,10 +551,11 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `GameSystem.get_all_view_data`
 
-* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 970)
-* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 987), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 991)
-* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1010〜1017)
+* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。`reward_master`から取得した各報酬については、**（#291で修正）** 以前ここで付与していた`icon`/`cost`という`icon_key`/`cost_gold`の別名（重複フィールド名）は廃止され、DBの実カラム名（`icon_key`/`cost_gold`）がそのまま正となる。あわせて、`description`の同期用レガシー列である`reward_master.desc`（`sync_strict.py`が書き込む）はこのビュー応答からは`dict.pop`で除去され、`description`のみが公開される。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 1131)
+* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 1147), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 1151)
+* 根拠: 報酬フィールドの一本化 (行番号: 1164〜1170 / 抜粋: "rewards = [dict(row) for row in cur.execute(\"SELECT * FROM reward_master\")]\n            for r in rewards:\n                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold\n                # の別名)を廃止し、DBの実カラム名に一本化する。desc は\n                # description の同期用レガシー列(sync_strict.py参照)であり、\n                # このビュー応答では description のみを正としてdesc自体を落とす。\n                r.pop('desc', None)")
+* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1173〜1177)
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（省略時は`None`。`target_user`が実在ユーザーでない共有クエストのボーナス計算で、閲覧中ユーザーの代表IDとして使われる）
 * 根拠: (行番号: 970)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）

@@ -5,7 +5,7 @@ import { Quest, QuestHistory, User } from '@/types';
 const user: User = { user_id: 'alice', name: 'Alice', level: 1, exp: 0, gold: 0 };
 
 function makeQuest(overrides: Partial<Quest> = {}): Quest {
-    return { id: 1, title: 'テストクエスト', ...overrides };
+    return { quest_id: 1, title: 'テストクエスト', ...overrides };
 }
 
 function makeHistory(overrides: Partial<QuestHistory> = {}): QuestHistory {
@@ -46,22 +46,15 @@ describe('getQuestLockState', () => {
     });
 
     it('marks a quest done when this user has an approved completion', () => {
-        const quest = makeQuest({ id: 1 });
+        const quest = makeQuest({ quest_id: 1 });
         const completed = [makeHistory({ quest_id: 1 })];
         const state = getQuestLockState(quest, user, completed, []);
         expect(state.isDone).toBe(true);
         expect(state.completedEntry).toEqual(completed[0]);
     });
 
-    it('prefers quest_id over id when matching history entries', () => {
-        const quest = makeQuest({ id: 1, quest_id: 42 });
-        const completed = [makeHistory({ quest_id: 42 })];
-        const state = getQuestLockState(quest, user, completed, []);
-        expect(state.isDone).toBe(true);
-    });
-
     it('treats an infinite quest as never "done", even with completions', () => {
-        const quest = makeQuest({ type: 'infinite' });
+        const quest = makeQuest({ quest_type: 'infinite' });
         const completed = [makeHistory(), makeHistory()];
         const state = getQuestLockState(quest, user, completed, []);
         expect(state.isInfinite).toBe(true);
@@ -75,7 +68,7 @@ describe('getQuestLockState', () => {
     });
 
     it('marks a quest pending when this user has a pending entry', () => {
-        const quest = makeQuest({ id: 1 });
+        const quest = makeQuest({ quest_id: 1 });
         const pending = [makeHistory({ quest_id: 1, status: 'pending' })];
         const state = getQuestLockState(quest, user, [], pending);
         expect(state.isPending).toBe(true);
@@ -83,7 +76,7 @@ describe('getQuestLockState', () => {
     });
 
     it('ignores another user\'s pending entry for the same quest', () => {
-        const quest = makeQuest({ id: 1 });
+        const quest = makeQuest({ quest_id: 1 });
         const pending = [makeHistory({ user_id: 'bob', quest_id: 1, status: 'pending' })];
         const state = getQuestLockState(quest, user, [], pending);
         expect(state.isPending).toBe(false);

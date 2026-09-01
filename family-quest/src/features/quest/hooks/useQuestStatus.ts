@@ -13,9 +13,10 @@ interface UseQuestStatusProps {
 // クリックハンドラの3箇所にほぼ同じロジックが重複して実装されていた。
 // フックの外（QuestList のソート処理など）からも使えるよう、プレーン関数として切り出す。
 //
-// 注意: 元の3実装には qId の算出順序に食い違いがあった
+// #291: 元の3実装には qId の算出順序に食い違いがあった
 // （useQuestStatus は `quest.quest_id || quest.id`、QuestList/App.tsx は `quest.id || quest.quest_id`）。
-// ここでは useQuestStatus（本来のソースオブトゥルース）側の順序に統一している。
+// quest.id はAPIから一度も送られてこない幽霊フィールドだったため型定義から削除し、
+// ここではquest_idのみを参照する。
 export interface QuestLockState {
     isLocked: boolean;
     isDone: boolean;
@@ -33,10 +34,10 @@ export function getQuestLockState(
     completedQuests: QuestHistory[],
     pendingQuests: QuestHistory[]
 ): QuestLockState {
-    const qId = quest.quest_id || quest.id;
+    const qId = quest.quest_id;
 
     // 無限クエスト判定（APIの型またはフロントエンド拡張フラグ）
-    const isInfinite = quest.type === 'infinite' || quest.quest_type === 'infinite' || !!quest._isInfinite;
+    const isInfinite = quest.quest_type === 'infinite' || !!quest._isInfinite;
 
     // ▼ ロック判定ロジック (Smart Client方式)
     // 1. 前提クエストIDがあるか確認
@@ -85,8 +86,8 @@ export const useQuestStatus = ({ quest, currentUser, completedQuests, pendingQue
         const { isLocked, isDone, isPending, isInfinite, myCompletions } =
             getQuestLockState(quest, currentUser, completedQuests, pendingQuests);
 
-        const isRandom = quest.type === 'random';
-        const isLimited = quest.type === 'limited';
+        const isRandom = quest.quest_type === 'random';
+        const isLimited = quest.quest_type === 'limited';
         const isTimeLimited = !!quest.start_time;
 
         // 表示タイトルの生成
