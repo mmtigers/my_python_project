@@ -9,7 +9,7 @@
 
 ## 関連ドキュメント
 
-* [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。ただし関連ドキュメント側にも、実際にどのような文字列（動画タイトル等）に対して呼び出しているかの具体的な呼び出し箇所は明記されていない。
+* [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。具体的な呼び出し箇所（`video_id`に対する呼び出し）は本ファイル末尾の「相互参照による補足情報」を参照。
 * [../DDD/extract_youtube_urls.md](./extract_youtube_urls.md) — 本モジュールDocstring上のもう一方の呼び出し元候補。`FileManager._sanitize_filename`が本関数への委譲ラッパーとして存在する（Issue #126で修正: 過去の解析時点では対応する仕様書が`docs/specifications/`配下に見つからなかったが、現在は`extract_youtube_urls.md`として存在する）。
 
 ## 2. ファイルの概要

@@ -11,7 +11,7 @@
 
 - [common.md](./common.md) — `get_now_iso`, `get_today_date_str`, `get_display_date`を`core.utils`から再エクスポートするFacadeモジュール
 - [sensor_service.md](./sensor_service.md) — `core.utils.get_now_iso`の直接の利用元
-- [weather_service.md](./weather_service.md) — `common.get_now_iso`経由での利用元
+- `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `common.get_now_iso`経由での利用元
 - [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
 
 ## 2. ファイルの概要
