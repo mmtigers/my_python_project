@@ -11,6 +11,7 @@
 
 - [../lib/apiClient.md](../lib/apiClient.md) — 全APIリクエストの実行元。エンドポイントの共通処理・エラーハンドリングの実装元。
 - [../lib/masterData.md](../lib/masterData.md) — `INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`フォールバックデータの実装元。
+- [../lib/gameDataSchema.md](../lib/gameDataSchema.md) — `gameData`クエリのレスポンスをランタイム検証するZodスキーマ(`gameDataResponseSchema`)の実装元（Issue #291で追加）。
 - [../types/index.md](../types/index.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`型定義の提供元。
 - [../../../MY_HOME_SYSTEM/quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/data`/`/family/chronicle`/`/complete`/`/quest/cancel`/`/approve`/`/reject`/`/reward/purchase`等、本フックが呼び出すバックエンドAPIエンドポイントの実装元。
 - [../../../MY_HOME_SYSTEM/quest_service.md](../../../MY_HOME_SYSTEM/quest_service.md) — クエスト完了・購入等のビジネスロジック（`process_complete_quest`等）の実装元。
@@ -33,22 +34,24 @@
 | `useQuery`, `useMutation`, `useQueryClient` | ライブラリ | データのフェッチ、キャッシュ管理、ミューテーション用 | 根拠: (行番号: 2 / 抜粋: "import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';") |
 | `apiClient` | 外部モジュール | APIエンドポイントへの通信処理用クライアント | 根拠: (行番号: 3 / 抜粋: "import { apiClient } from '../lib/apiClient';") |
 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` | 外部モジュール | APIレスポンスがない場合の初期値・フォールバック用定数 | 根拠: (行番号: 4 / 抜粋: "import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';") |
-| `User`, `Quest`, `QuestHistory`, `Reward`, `QuestResult` | 型定義 | ユーザー、クエスト、報酬などの型アノテーション | 根拠: (行番号: 5 / 抜粋: "import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';") |
+| `gameDataResponseSchema` | 外部モジュール(Zodスキーマ) | `gameData`クエリのレスポンスをランタイムで検証するために使用（Issue #291で追加）。バックエンドのレスポンス形状が期待するフィールド名と食い違っている場合、コンポーネント側で無言でundefinedを参照する「幽霊フィールド」バグとしてではなく、取得境界で即座にエラーとして検知させる目的。 | 根拠: (行番号: 5 / 抜粋: "import { gameDataResponseSchema } from '../lib/gameDataSchema';") |
+| `User`, `Quest`, `QuestHistory`, `Reward`, `QuestResult` | 型定義 | ユーザー、クエスト、報酬などの型アノテーション | 根拠: (行番号: 6 / 抜粋: "import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: (行番号: 106〜112 / 抜粋: "queryFn: () => {\n            const viewerUserId = viewerUserIdRef.current;") |
+| `apiClient` の内部実装 | ベースURL、ヘッダ付与、認証トークン処理、エラー詳細などの具体的な通信仕様が本ファイルからは読み取れないため。 | 根拠: (行番号: 100〜110 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;") |
 | 各APIエンドポイントの仕様 | リクエスト後のDBの挙動、トランザクション、外部影響が不明であるため。 | 根拠: (行番号: 135 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete', {") |
 | マスターデータの実体 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` 等の具体的なオブジェクト構造・値が不明であるため。 | 根拠: (行番号: 314〜316 / 抜粋: "users: gameData?.users || INITIAL_USERS,") |
+| `gameDataResponseSchema` の詳細なフィールド定義 | `../lib/gameDataSchema.ts`に実装があり、各フィールドの厳密なZod型（`optional`/`nullable`の組み合わせ等）は本ファイルからは呼び出し結果（`.parse()`の成否）のみで、定義の全容は不明。 | 根拠: (行番号: 5, 109 / 抜粋: "import { gameDataResponseSchema } from '../lib/gameDataSchema';", "return gameDataResponseSchema.parse(raw) as GameDataResponse;") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `AdventureLog` / `FamilyStats` / `ChronicleItem` / `LevelUpInfo` (型定義)
 
-* **役割**: `any`型を排除するために新規追加された厳密な型定義群。`AdventureLog`は`gameData.logs`の1件（`QuestService._fetch_recent_logs`のレスポンス、`{id, text, dateStr, timestamp}`）、`FamilyStats`は`UserService.get_family_chronicle`の`"stats"`レスポンスに対応する家族全体の統計情報、`ChronicleItem`は年代記（`_fetch_full_adventure_logs`のレスポンス）の1エントリで、`FamilyLog.tsx`側が複数の代替フィールド名にフォールバックしていることを踏まえ、それらも任意プロパティとして許容している。`LevelUpInfo`はレベルアップ通知用の型で、`App.tsx`の`handleLevelUp`に渡される。**Issue #120で修正**: `AdventureLog`は以前`{id, message, created_at}`という、バックエンドの実際のレスポンス（`{id, text, dateStr, timestamp}`）には存在しないフィールド名を宣言していた（型と実データが不一致）。`gameData.logs`（`adventureLogs`として公開）はどのコンポーネントからも消費されていなかったため実害はなかったが、将来利用する際に誤った型に気づかず参照してしまう不具合の種だったため、実際のレスポンス形状に合わせて修正した。
-* 根拠: (行番号: 7〜57 / 抜粋: "// 新規追加: any型を排除するための厳密なインターフェース定義\n// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。\n// ★バグ修正(Issue #120): ...)\ninterface AdventureLog {\n    id: string;\n    text: string;\n    dateStr: string;\n    timestamp: string;\n}", "// 家族全体の統計情報 (UserService.get_family_chronicle の \"stats\" レスポンスに対応)\nexport interface FamilyStats {", "// 年代記の1エントリ (UserService._fetch_full_adventure_logs のレスポンスに対応。", "export interface LevelUpInfo {")
+* **役割**: `any`型を排除するために新規追加された厳密な型定義群。`AdventureLog`は`gameData.logs`の1件（`QuestService._fetch_recent_logs`のレスポンス、`{id, text, dateStr, timestamp}`）、`FamilyStats`は`UserService.get_family_chronicle`の`"stats"`レスポンスに対応する家族全体の統計情報、`ChronicleItem`は年代記（`GameSystem._fetch_full_adventure_logs`のレスポンス）の1エントリ、`LevelUpInfo`はレベルアップ通知用の型で、`App.tsx`の`handleLevelUp`に渡される。**Issue #120で修正**: `AdventureLog`は以前`{id, message, created_at}`という、バックエンドの実際のレスポンス（`{id, text, dateStr, timestamp}`）には存在しないフィールド名を宣言していた（型と実データが不一致）。`gameData.logs`（`adventureLogs`として公開）はどのコンポーネントからも消費されていなかったため実害はなかったが、将来利用する際に誤った型に気づかず参照してしまう不具合の種だったため、実際のレスポンス形状に合わせて修正した。**（#291で修正）** `ChronicleItem`は以前、`FamilyLog.tsx`側が複数の代替フィールド名（`date`/`id`/`avatar_url`/`message`/`quest_title`/`reward_gold`/`reward_exp`/`created_at`）に防御的にフォールバックしていることを踏まえ、それらも任意プロパティとして許容していたが、これらがバックエンドから一度も送られてこない「幽霊フィールド」だったと判明したため型定義から削除され、`FamilyLog.tsx`側の対応するフォールバックも合わせて廃止された。現在の`ChronicleItem`は`type`/`timestamp`/`dateStr`/`userId`/`userName`/`userAvatar`/`title`/`text`/`gold`/`exp`のみを持つ。
+* 根拠: (行番号: 10〜52 / 抜粋: "// 新規追加: any型を排除するための厳密なインターフェース定義\n// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。\n// ★バグ修正(Issue #120): ...)\ninterface AdventureLog {\n    id: string;\n    text: string;\n    dateStr: string;\n    timestamp: string;\n}", "// 家族全体の統計情報 (UserService.get_family_chronicle の \"stats\" レスポンスに対応)\nexport interface FamilyStats {", "// 年代記の1エントリ (GameSystem._fetch_full_adventure_logs のレスポンスに対応。\n// #291: date/id/avatar_url/message/quest_title/reward_gold/reward_exp/created_at は\n// バックエンドから一度も送られてこない幽霊フィールドだったため削除した。\n// FamilyLog.tsx側の「複数の代替フィールド名への防御的フォールバック」もあわせて廃止した。", "export interface LevelUpInfo {")
 
 ### `GameDataResponse` / `ChronicleResponse` / `PurchaseResponse` (型定義)
 
@@ -98,13 +101,14 @@
 
 ### `gameData` / `chronicleData` クエリ (`useQuery`)
 
-* **役割**: `useQuery`によるメインデータ取得（`queryKey: ['gameData']`, `GET /api/quest/data`。`viewerUserIdRef.current`が設定されていれば`?viewer_user_id={encodeURIComponent(...)}`をURLに付与する。`staleTime` 30秒, `refetchInterval` 10秒）と、年代記データ取得（`queryKey: ['chronicle']`, `GET /api/quest/family/chronicle`, `staleTime` 5分, ポーリングなし）の2系統のクエリを定義する。
-* 根拠: (行番号: 104〜115, 123〜127 / 抜粋: "const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({\n        queryKey: ['gameData'],\n        queryFn: () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            return apiClient.get(endpoint);\n        },", "const { data: chronicleData } = useQuery<ChronicleResponse>({\n        queryKey: ['chronicle'],\n        queryFn: () => apiClient.get('/api/quest/family/chronicle'),")
+* **役割**: `useQuery`によるメインデータ取得（`queryKey: ['gameData']`, `GET /api/quest/data`。`viewerUserIdRef.current`が設定されていれば`?viewer_user_id={encodeURIComponent(...)}`をURLに付与する。`staleTime` 30秒, `refetchInterval` 10秒）と、年代記データ取得（`queryKey: ['chronicle']`, `GET /api/quest/family/chronicle`, `staleTime` 5分, ポーリングなし）の2系統のクエリを定義する。**（#291で修正）** `gameData`クエリの`queryFn`は非同期関数に変更され、`apiClient.get<unknown>(endpoint)`で取得した生レスポンスを`gameDataResponseSchema.parse(raw)`（`../lib/gameDataSchema.ts`のZodスキーマ）でランタイム検証したうえで`GameDataResponse`にキャストして返すようになった。バックエンドのレスポンス形状がフロントの期待するフィールド名と食い違っている場合、以前はコンポーネント側が無言で`undefined`を参照する「幽霊フィールド」バグとして表面化しないまま残っていたが、この変更により取得境界で即座に例外（`zod`の`ZodError`）として検知されるようになった。`chronicleData`クエリはこの検証を経由せず、以前と同じく`apiClient.get`の戻り値をそのまま返す。
+* 根拠: (行番号: 98〜113, 122〜125 / 抜粋: "const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({\n        queryKey: ['gameData'],\n        queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },", "const { data: chronicleData } = useQuery<ChronicleResponse>({\n        queryKey: ['chronicle'],\n        queryFn: () => apiClient.get('/api/quest/family/chronicle'),")
+* 根拠: Zod検証のコメント (行番号: 106〜108 / 抜粋: "// #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。")
 
 * **引数/リクエスト**: なし（`useGameData`呼び出し時に自動実行。ただし`gameData`クエリの実際のリクエストURLは`viewerUserIdRef`の値に応じて変化する）
 * **戻り値/レスポンス**: `gameData: GameDataResponse | undefined`, `chronicleData: ChronicleResponse | undefined`、および`isGameDataLoading: boolean`
 * **副作用**: HTTP GETリクエストのポーリング実行
-* **エラーハンドリング**: React Query側のデフォルト挙動に依存（本ファイル内で明示的な`onError`は定義されていない）
+* **エラーハンドリング**: React Query側のデフォルト挙動に依存（本ファイル内で明示的な`onError`は定義されていない）。**（#291で追加）** `gameData`クエリの`queryFn`は`gameDataResponseSchema.parse(raw)`が失敗した場合に`ZodError`を送出し、これは`useQuery`のエラー状態（本フックの戻り値には`error`として公開されていない）として扱われる。
 
 ### `completeQuest` (ラッパー) & `completeQuestMutation`
 
@@ -125,8 +129,8 @@
 
 * **バグ修正の記録**: `chronicle`クエリを無効化していなかったため、クエスト完了が冒険の記録に反映されるまで`staleTime`（5分）が切れるのを待つ必要があったバグを修正し、`gameData`と併せて`chronicle`も無効化するようにした。また以前は`status`/`message`を返り値から落としていたため、子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが呼び出し元で絶対に表示されなかった。
 * 根拠: (行番号: 142〜144, 250〜252行目 / 抜粋: "// ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。", "// ★バグ修正: 以前は status/message を返り値から落としていたため、\n                // 子供が申請したクエスト（承認待ち）でも「申請完了」メッセージが\n                // App.tsx 側で絶対に表示されなかった（res.status が常に undefined）。")
-* **(Issue #246バグ修正)** `completeQuestMutation`のリクエストボディ組み立て（`quest_id: ...`）と`completeQuest`ラッパー内の申請中チェック用`qId`算出の2箇所は、以前`quest.id || quest.quest_id`という順序だった。これは`useQuestStatus.ts`の`getQuestLockState`（ソースオブトゥルースとして統一された`quest.quest_id || quest.id`という順序）と食い違っており、技術的負債として記録されていた。バックエンドの`quest_master`由来のQuestオブジェクトは常に`quest_id`列のみを持ち`id`フィールドは存在しないため、修正前後で現状の実害（`quest.id`は常に`undefined`）はない。将来Questオブジェクトの形状が変わった場合（例: マスタ側に`id`という別名列が追加される等）に2箇所だけ黙って異なる値を参照するようになることを防ぐため、`useQuestStatus.ts`と同じ順序に統一した。
-* 根拠: [quest_id算出のコメントと順序] (行番号: 137〜142, 255〜258 / 抜粋: "// #246: quest.id || quest.quest_id という逆順は、useQuestStatus.ts\n                // (getQuestLockStateのqId算出、ソースオブトゥルース)が統一した\n                // `quest.quest_id || quest.id` という規約と食い違っていた。", "quest_id: quest.quest_id || quest.id,", "const qId = quest.quest_id || quest.id;")
+* **(Issue #246バグ修正、Issue #291でさらに簡略化)** `completeQuestMutation`のリクエストボディ組み立て（`quest_id: ...`）と`completeQuest`ラッパー内の申請中チェック用`qId`算出の2箇所は、Issue #246の時点では`quest.quest_id || quest.id`という`useQuestStatus.ts`の`getQuestLockState`と揃えたフォールバック順序になっていた（バックエンドの`quest_master`由来のQuestオブジェクトは常に`quest_id`列のみを持ち`id`フィールドは存在しないため、当時から実害はなかった）。**（#291で修正）** その後`quest.id`自体がバックエンドAPIから一度も送られてこない幽霊フィールドと判明し`Quest`型定義から削除されたため、`quest.id`へのフォールバックそのものが不要になり、両箇所とも`quest.quest_id`のみを参照する単純な形に簡略化された。
+* 根拠: [quest_id算出のコメントと簡略化] (行番号: 133〜137, 252〜254 / 抜粋: "// #291: quest.id という幽霊フィールド(バックエンドから送られてこない)への\n                // フォールバックを廃止し、実カラムのquest_idのみを参照する。\n                quest_id: quest.quest_id,", "// #291: quest.id という幽霊フィールドへのフォールバックを廃止し、\n        // useQuestStatus.tsのgetQuestLockStateと同じく実カラムのquest_idのみ参照する。\n        const qId = quest.quest_id;")
 
 ### `cancelQuest` (ラッパー) & `cancelQuestMutation`
 
@@ -258,6 +262,7 @@ graph TD
     subgraph "内部モジュール"
         APIClient["../lib/apiClient"]
         MasterData["../lib/masterData"]
+        GameDataSchema["../lib/gameDataSchema (Zod, #291で追加)"]
         AppTypes["@/types"]
     end
 
@@ -266,6 +271,7 @@ graph TD
     Hook_useGameData --> MasterData
     Hook_useGameData --> AppTypes
     Queries --> APIClient
+    Queries -->|gameDataクエリのみ: .parse()でランタイム検証| GameDataSchema
     Mutations --> APIClient
     Wrappers --> Mutations
     Wrappers --> Queries
@@ -282,11 +288,14 @@ graph TD
 | 高 | `../lib/apiClient.ts` | `apiClient.get`/`post`の内部実装や、`Error.message`に`detail`を詰める仕組みを確認する必要がある。 | 根拠: (行番号: 3 / 抜粋: "import { apiClient } from '../lib/apiClient';") |
 | 中 | バックエンドのエンドポイント (例: `/api/quest/complete` のハンドラ等) | トランザクションや、クエスト完了時のレベルアップ計算処理（`leveledUp`の判定ロジック）、メダル付与ロジック（`earnedMedals`）などの仕様、および`viewer_user_id`パラメータの解釈方法を確認するため。 | 根拠: (行番号: 135 / 抜粋: "return apiClient.post<QuestResult>('/api/quest/complete', {") |
 | 低 | `../lib/masterData.ts` | 初期データの構成を確認し、API通信失敗時や初期表示時の画面挙動を特定するため。 | 根拠: (行番号: 4 / 抜粋: "import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';") |
+| 中 | `../lib/gameDataSchema.ts` | `gameData`クエリのランタイム検証に使う`gameDataResponseSchema`の詳細なフィールド定義（各サブスキーマの`optional`/`nullable`の組み合わせ）を確認し、`GameDataResponse`型との整合性を把握するため（Issue #291で追加）。 | 根拠: (行番号: 5, 109 / 抜粋: "import { gameDataResponseSchema } from '../lib/gameDataSchema';") |
 
 ## 8. 保守上の注意点
 
 * **ポーリング対象の縮小**: `useQuery` で `refetchInterval` が設定されているのは `gameData`（10秒間隔）のみである。`chronicle`は`staleTime`（5分）のみでポーリングされない。以前存在した`familyMileage`・`bounties`のポーリングは廃止されている。加えて、アイテム使用承認フローの廃止（2026-08-29 コミット`9d5edec`）に伴い、以前存在した`pendingInventory`クエリ（および対応する10秒間隔のポーリング）自体が削除された。
-* 根拠: (行番号: 113〜114, 126 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "staleTime: 1000 * 60 * 5,")
+* 根拠: (行番号: 111〜112, 124 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "staleTime: 1000 * 60 * 5,")
+* **（#291で追加）ランタイム型検証層の導入**: `gameData`クエリはOpenAPI→TS生成パイプラインが存在しないバックエンドとの型契約のズレを検知する目的で、Zodスキーマ`gameDataResponseSchema`（`../lib/gameDataSchema.ts`）によるランタイム検証を経由するようになった。`.strict()`は意図的に使われておらず、未知のフィールドは無視される（将来バックエンドが新フィールドを追加してもparseは失敗しない）。一方、スキーマに定義された必須フィールドが欠けている、または型が一致しない場合は`.parse()`が例外を送出し、`useQuery`はエラー状態になる。`chronicleData`クエリ（`/api/quest/family/chronicle`）は対象外であり、この検証を経由しない。新しいフィールドを`GameDataResponse`関連の型に追加する際は、`gameDataSchema.ts`側のスキーマも合わせて更新しないと、実際にはバックエンドから返っているフィールドがランタイム検証をすり抜けず`.parse()`失敗の原因になる可能性がある（逆に、スキーマ側にだけフィールドを追加し忘れても、`.strict()`でない以上parse自体は失敗せず、単に検証対象から漏れるだけである点に注意）。
+* 根拠: (行番号: 100〜109 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },")
 * **`chronicle`キャッシュの無効化漏れ修正**: `completeQuest`/`cancelQuest`/`approveQuest`/`buyReward`の成功時には`gameData`に加えて`chronicle`クエリも無効化されるようになった（以前は`completeQuest`成功時に`chronicle`を無効化しておらず、`staleTime`（5分）が切れるまで冒険の記録に反映されなかったバグの修正）。ただし`rejectQuest`は`gameData`のみを無効化し、`chronicle`は無効化されない（却下は記録に載らないため）。新しい状態変更アクションを追加する際は、そのアクションが年代記に影響するかどうかを踏まえて`chronicle`の無効化要否を判断する必要がある。
 * 根拠: (行番号: 142〜145, 167〜170, 184〜186, 227〜230行目 / 抜粋: "// ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。")
 * **`buyRewardMutation` の戻り値キャスト**: `buyReward` 内で `mutateAsync` の戻り値を `as unknown as PurchaseResponse` として型キャストしている。`apiClient.post` 自体の戻り値の型（ジェネリック`<T>`）と実際のレスポンス形状との整合はランタイムでは検証されない。
@@ -314,7 +323,7 @@ graph TD
 | --- | --- | --- |
 | `apiClient`の具体的な通信設定 | `family-quest/src/lib/apiClient.ts`を直接確認した。`getBaseUrl`(6〜13行目)は`import.meta.env.VITE_API_URL`が定義されていればそれを、未定義なら`window.location.origin`をベースURLとして使う。`_request`(77〜95行目)を含むファイル全体を確認したが、`Authorization`ヘッダーの付与や認証トークンを扱う処理は一切存在せず、`post`(43〜51行目)が`Content-Type: application/json`ヘッダーのみを付与していることを確認した。 | 直接ソース確認: `family-quest/src/lib/apiClient.ts:6-13,43-51,77-95` |
 | `INITIAL_USERS` や `MASTER_QUESTS` の中身 | `family-quest/src/lib/masterData.js`を直接確認した。`INITIAL_USERS`(4〜18行目)は`user_id: 'guest'`, `name: '接続エラー'`等の1件のみ、`MASTER_QUESTS`(20〜23行目)は「⚠️ サーバーに繋がりません」「パパに知らせてください」という2件のダミークエスト、`MASTER_REWARDS`(25〜27行目)は「データ取得失敗」という1件のダミー報酬で構成されており、いずれもコメント(2行目)の通り「サーバー接続エラー時のみ使用されるフォールバックデータ」であることを確認した。 | 直接ソース確認: `family-quest/src/lib/masterData.js:1-27` |
-| 各種Typeの完全なプロパティ | `family-quest/src/types/index.ts`を直接確認した。`User`(9〜26行目)、`Quest`(29〜59行目)、`QuestHistory`(62〜76行目)、`Reward`(79〜91行目)、`InventoryItem`(94〜103行目)、`QuestResult`(106〜113行目)の全6インターフェースが定義されている（`PendingInventory`型は存在しない）。`description`/`desc`(`Quest`33〜34行目、`Reward`83〜84行目)、`id`/`quest_id`または`id`/`reward_id`のような類似プロパティの併存が複数箇所にみられるが、なぜ2系統存在するのかを説明するコメントは`types/index.ts`自体には存在せず、この点は本ファイルからは特定できなかった。 | 直接ソース確認: `family-quest/src/types/index.ts:1-114` |
+| 各種Typeの完全なプロパティ | `family-quest/src/types/index.ts`を直接確認した。`User`(9〜33行目)、`Quest`(35〜60行目)、`QuestHistory`(62〜79行目)、`Reward`(81〜90行目)、`InventoryItem`、`QuestResult`の全6インターフェースが定義されている（`PendingInventory`型は存在しない）。**（#291で修正）** `Quest`の`description`/`desc`、`id`/`quest_id`、`Reward`の`id`/`reward_id`、`cost`/`cost_gold`、`icon`/`icon_key`のような類似プロパティの併存はすべて解消済みであることを確認した。これらの重複は「バックエンドAPIから一度も送られてこない幽霊フィールド」（`id`/`desc`/`exp`/`gold`/`type`/`icon`/`target`(`Quest`)、`history_id`(`QuestHistory`)、`id`/`cost`/`desc`/`icon`(`Reward`)）が誤って型定義に残っていたことが原因と判明し、実カラム名（`quest_id`/`description`/`exp_gain`/`gold_gain`/`quest_type`/`icon_key`/`target_user`等）のみに一本化された。本ファイル(`useGameData.ts`)側の`history.id ?? history.history_id`、`reward.id || reward.reward_id`、`reward.cost_gold || reward.cost`、`quest.id ?? quest.quest_id`といったフォールバックも、対応する型定義の一本化に合わせてすべて単一フィールド参照に簡略化されている。 | 直接ソース確認: `family-quest/src/types/index.ts` |
 | `earnedMedals`の付与条件 | `MY_HOME_SYSTEM/game_logic.py`と`MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`GameLogic.calculate_drop_rewards`(64〜79行目)は`medal_chance = 0.05`（5%固定、71行目）とし、`earned_medals = 1 if random.random() < medal_chance else 0`(72行目)で0か1を決定する。この結果は`quest_service.py`の`_apply_quest_rewards`(412〜458行目)内で`rewards['medals']`(423行目)として取り出され、`quest_users`テーブルの`medal_count`列を`medal_count + ?`で加算するUPDATE文(432〜436行目)に使われたうえで、戻り値の`"earnedMedals": earned_medals`(457行目)としてAPIレスポンス(`CompleteResponse.earnedMedals`)に含まれることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/game_logic.py:64-79`, `MY_HOME_SYSTEM/services/quest_service.py:412-458` |
 
 ## 10. 自己検証結果
