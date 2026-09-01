@@ -141,20 +141,20 @@
 
 ### `QUESTS`
 
-* **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。
-* 根拠: `QUESTS = [` (行番号: 81〜207 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 138, 206 / 抜粋: "'target': 'siblings'")
+* **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。B-5（特別：涼花）セクションには、id: 305（お手伝い）、id: 306（自分のおもちゃの片付け）、id: 307（なぞり書きプリント）の3件が追加され、いずれも`type: 'infinite'`（何度でも挑戦できる）で定義されている。
+* 根拠: `QUESTS = [` (行番号: 81〜210 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 138, 209 / 抜粋: "'target': 'siblings'"), 追加された3件 (行番号: 202〜204 / 抜粋: "{'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', ...}")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
 * 根拠: (行番号: 81 / 抜粋: "QUESTS = [")
 
 
-* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が53件、コメントアウトされ無効化された定義が9件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
-* 根拠: 最初の要素 (行番号: 89 / 抜粋: "{'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},"), コメントアウトされた要素の例 (行番号: 116 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 138 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 126 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}")
+* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が56件、コメントアウトされ無効化された定義が9件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
+* 根拠: 最初の要素 (行番号: 89 / 抜粋: "{'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},"), コメントアウトされた要素の例 (行番号: 116 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 138 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 126 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}"), 涼花向けに追加された3件 (行番号: 202〜204)
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 81〜207 / 抜粋: "QUESTS = [")
+* 根拠: (行番号: 81〜210 / 抜粋: "QUESTS = [")
 
 
 * **エラーハンドリング**: なし（バリデーションロジックを含まない。またコメント行78〜79に `category` と `difficulty` の凡例が記されているのみで、実行時の値チェックは行われていない）
