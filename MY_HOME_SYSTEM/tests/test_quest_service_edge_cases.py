@@ -459,6 +459,38 @@ class TestGetAllViewDataTargetedQuestBoost:
         assert "bonus_exp" in targeted
 
 
+class TestGetAllViewDataUsersOrder:
+    """
+    回帰防止: "SELECT * FROM quest_users" にORDER BY句が無いと、user_idが
+    TEXT PRIMARY KEYであるためSQLiteが主キーのアルファベット順
+    (dad, daughter, mom, son)で行を返すことがある。family-quest側の App.tsx は
+    users[currentUserIdx] という配列インデックスでタブと現在のユーザーを
+    対応づけており、quest_data.USERSの宣言順(dad, mom, son, daughter)と一致しない
+    順序で返ると、タブの位置と実際に表示される家族が入れ替わってしまう
+    (例: 「ともや」のタブに寝かしつけ(mom/dad向け)クエストが表示される)。
+    get_all_view_data は quest_data.USERS の宣言順に並べ替えて返すべき。
+    """
+
+    def test_users_are_ordered_by_quest_data_users_declaration_order(self, isolated_db):
+        # あえて quest_data.USERS の宣言順(dad, mom, son, daughter)とは異なる
+        # 順序でINSERTし、かつ user_id のアルファベット順(dad, daughter, mom, son)
+        # とも異なる順序にすることで、DBの内部的な返却順に依存していないことを確認する。
+        with common.get_db_cursor(commit=True) as cur:
+            for user_id, name in [
+                ("son", "Son"), ("daughter", "Daughter"), ("dad", "Dad"), ("mom", "Mom"),
+            ]:
+                cur.execute(
+                    "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES "
+                    "(?, ?, 'Job', 1, 0, 0)",
+                    (user_id, name),
+                )
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data()
+
+        assert [u["user_id"] for u in data["users"]] == ["dad", "mom", "son", "daughter"]
+
+
 class TestGetAllViewDataSharedQuestBoostViewer:
     """
     quest_master.target_user は実在の quest_users.user_id (例:'dad')の他に
