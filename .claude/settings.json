@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/spec_drift_reminder.py record 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "仕様書ドリフト追跡を更新中..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/spec_drift_reminder.py report 2>/dev/null || true",
+            "timeout": 15,
+            "statusMessage": "仕様書ドリフトを確認中..."
+          }
+        ]
+      }
+    ]
+  }
+}

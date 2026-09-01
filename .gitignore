@@ -96,6 +96,10 @@ family_events.json
 !alexa-skill/**/*.json
 !MY_HOME_SYSTEM/alexa/**/*.json
 !family-quest/tsconfig*.json
+
+# Claude Code project config (team-wide hooks/permissions), not personal data —
+# same reasoning as the family-quest exception above.
+!.claude/settings.json
 # family-quest: the blanket *.mp3 rule above targets personal media, not this
 # app's own sound-effect assets referenced by useSound.ts.
 !family-quest/public/*.mp3
