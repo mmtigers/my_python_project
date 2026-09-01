@@ -183,3 +183,62 @@ class TestDevicesJsonValidation:
         with self._with_devices_json("{not valid json!!!") as cfg:
             assert cfg.CAMERAS == []
             assert cfg.MONITOR_DEVICES == []
+
+
+class TestVerifyAndInitializeStorage:
+    """verify_and_initialize_storage() のテスト(Issue #292)。
+
+    Issue #292でExponential Backoffのループ自体をcore.utils.retry_with_backoffへ
+    委譲するリファクタリングを行ったため、外部から見た挙動(戻り値・リトライ回数・
+    最終的にキャッチする例外の種類)が変わっていないことを回帰確認する。
+    実際のsleepはcore.utils側で発生するため、core.utils.time.sleepをmonkeypatchで
+    無効化する。
+    """
+
+    def test_returns_true_when_path_is_writable_on_first_attempt(self, tmp_path, monkeypatch):
+        import core.utils as core_utils
+        monkeypatch.setattr(core_utils.time, "sleep", lambda s: None)
+        target = tmp_path / "nas_dir"
+
+        result = config.verify_and_initialize_storage(str(target))
+
+        assert result is True
+        assert target.is_dir()
+        # テストファイルはクリーンアップされていること
+        assert not (target / ".write_test").exists()
+
+    def test_recovers_after_transient_oserror_then_succeeds(self, tmp_path, monkeypatch):
+        import core.utils as core_utils
+        sleeps = []
+        monkeypatch.setattr(core_utils.time, "sleep", lambda s: sleeps.append(s))
+        target = tmp_path / "nas_dir"
+        call_count = {"n": 0}
+        real_makedirs = os.makedirs
+
+        def flaky_makedirs(path, exist_ok=False):
+            call_count["n"] += 1
+            if call_count["n"] < 3:
+                raise OSError("simulated transient mount delay")
+            return real_makedirs(path, exist_ok=exist_ok)
+
+        monkeypatch.setattr(config.os, "makedirs", flaky_makedirs)
+
+        result = config.verify_and_initialize_storage(str(target), max_retries=5)
+
+        assert result is True
+        assert call_count["n"] == 3
+        assert sleeps == [1, 2]
+
+    def test_returns_false_after_exhausting_retries(self, tmp_path, monkeypatch):
+        import core.utils as core_utils
+        monkeypatch.setattr(core_utils.time, "sleep", lambda s: None)
+        target = tmp_path / "nas_dir"
+
+        def always_fails(path, exist_ok=False):
+            raise PermissionError("simulated permanent permission error")
+
+        monkeypatch.setattr(config.os, "makedirs", always_fails)
+
+        result = config.verify_and_initialize_storage(str(target), max_retries=2)
+
+        assert result is False
