@@ -240,3 +240,59 @@ def test_full_audit_detects_orphaned_py_docs_with_no_matching_source():
     orphaned_str = "\n".join(report.orphaned)
     assert "MY_HOME_SYSTEM/ai_logic.md" in orphaned_str
     assert "MY_HOME_SYSTEM/bounty_router.md" in orphaned_str
+
+
+# --- Issue #283の回帰テスト ---
+#
+# PR #278で導入されたfamily-questのVitestテスト(*.test.ts、src/test/配下の
+# セットアップファイル)は、"tests"(複数形)ディレクトリ名にもtest_*.pyという
+# 命名にも一致しないため、既存の除外経路(EXCLUDE_PARTSのディレクトリ名判定・
+# is_test_file)のどちらにも引っかからず、is_tracked_sourceがTrueを返して
+# 「仕様書が見つからないファイル」として誤検知されていた。
+
+
+def test_test_ts_suffix_file_is_not_a_tracked_source():
+    """
+    *.test.ts は仕様書不要(is_tracked_source=False)であること。
+    修正前はFQ_EXTENSIONSの.tsに一致し、Trueを返していた。
+    """
+    rel_path = Path("family-quest/src/hooks/useOnlineStatus.test.ts")
+    assert module.is_tracked_source(rel_path) is False
+
+
+def test_nested_test_ts_suffix_file_is_not_a_tracked_source():
+    """回帰防止: ネストした*.test.tsも同様に対象外であること。"""
+    rel_path = Path("family-quest/src/features/quest/hooks/useQuestStatus.test.ts")
+    assert module.is_tracked_source(rel_path) is False
+
+
+def test_src_test_dir_file_is_not_a_tracked_source():
+    """
+    src/test/配下のファイル(例: setup.ts)は、ファイル名自体は*.test.tsに
+    一致しなくても、"test"ディレクトリ配下にあることをもって対象外になること。
+    """
+    rel_path = Path("family-quest/src/test/setup.ts")
+    assert module.is_tracked_source(rel_path) is False
+
+
+def test_non_test_fq_source_file_is_still_tracked():
+    """
+    回帰防止: *.test.ts(x)でもsrc/test/配下でもない通常のfamily-quest
+    ソースファイルは、引き続きis_tracked_sourceの対象(=仕様書が必要)のままであること。
+    """
+    rel_path = Path("family-quest/src/lib/utils.ts")
+    assert module.is_tracked_source(rel_path) is True
+
+
+def test_full_audit_no_longer_flags_family_quest_test_files_as_undocumented():
+    """
+    cmd_full()を実行しても、family-questのVitestテストファイルが
+    「仕様書が見つからないファイル」として報告されないこと
+    (Issue #283で報告された実際の症状の回帰確認)。
+    """
+    report = module.cmd_full()
+    undocumented_str = "\n".join(report.undocumented)
+    assert "useOnlineStatus.test.ts" not in undocumented_str
+    assert "useQuestStatus.test.ts" not in undocumented_str
+    assert "src/test/setup.ts" not in undocumented_str
+    assert "utils.test.ts" not in undocumented_str
