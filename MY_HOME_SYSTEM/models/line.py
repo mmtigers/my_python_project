@@ -1,5 +1,5 @@
 # MY_HOME_SYSTEM/models/line.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import List, Optional, Any
 
 # --- Webhookのエントリポイント用モデル (unified_server.py用) ---

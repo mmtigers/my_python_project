@@ -14,7 +14,7 @@ import re
 import time
 import random
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional, Set, Iterator, Dict, Any
 import sqlite3
 from contextlib import closing
@@ -343,7 +343,7 @@ class FileManager:
         target_dir = base_dir / AppConfig.SUB_DIR_NAME
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
+        except OSError:
             logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)
             return False
 

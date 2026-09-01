@@ -1,6 +1,6 @@
 import math
 import random
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any
 
 # レベルアップ計算などのコアロジック
 class GameLogic:

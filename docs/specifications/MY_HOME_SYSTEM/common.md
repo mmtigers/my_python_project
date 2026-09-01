@@ -14,7 +14,7 @@
 * [database.md](./database.md) - `core.database`の実体。`get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async`を提供
 * [utils.md](./utils.md) - `core.utils`の実体。`get_now_iso`, `get_today_date_str`, `get_display_date`を提供
 * [notification_service.md](./notification_service.md) - `services.notification_service`の実体。`send_push`, `send_reply`, `get_line_message_quota`, `_send_discord_webhook`, `_send_line_push`を提供
-* 呼び出し元(`import common`で本Facadeを利用): [dashboard.md](./dashboard.md), [financial_service.md](./financial_service.md), [google_photos_service.md](./google_photos_service.md), [init_unified_db.md](./init_unified_db.md), [quest_service.md](./quest_service.md)
+* 呼び出し元(`import common`で本Facadeを利用): [dashboard.md](./dashboard.md), `financial_service.py`・`google_photos_service.py`（いずれも本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる）, [init_unified_db.md](./init_unified_db.md), [quest_service.md](./quest_service.md)
 
 ## 2. ファイルの概要
 

@@ -2,7 +2,6 @@ import os
 import glob
 import re
 import datetime
-import logging
 from typing import List, Dict, Any, Optional
 
 # 自作モジュール
