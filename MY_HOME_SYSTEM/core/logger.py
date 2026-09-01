@@ -49,7 +49,9 @@ class DiscordErrorHandler(logging.Handler):
                     target=self._send_webhook, args=(url, payload), daemon=True
                 ).start()
             except Exception:
-                pass
+                # logging.Handler標準のhandleError()を使う。sys.stderrへ直接書き出すのみで
+                # 再度loggingを経由しないため、ここで失敗を握りつぶしても無限ループにはならない。
+                self.handleError(record)
 
     @staticmethod
     def _send_webhook(url, payload):
