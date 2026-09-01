@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/handlers/line_logic.py
 import config
 import asyncio
-import json
 import sqlite3
 import datetime
 from urllib.parse import parse_qsl
@@ -10,14 +9,12 @@ from urllib.parse import parse_qsl
 from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
-    PushMessageRequest,
     TextMessage,
     FlexMessage,
     FlexContainer,
     QuickReply,
     QuickReplyItem,
-    MessageAction,
-    PostbackAction
+    MessageAction
 )
 from linebot.v3.webhooks import PostbackEvent
 # ▲▲▲ ▲▲▲

@@ -1,7 +1,7 @@
 import os
 import sys
 import time
-from typing import List, Dict, Any, Tuple
+from typing import List, Tuple
 
 import psutil
 
@@ -126,7 +126,7 @@ def main() -> None:
                         msg = f"⚠️ [プロセス肥大化警告] PID: {p.info['pid']} ({cmd_short}) が {rss_mb:.1f} MB のメモリを消費しています。(閾値: {proc_limit_mb} MB)"
                         logger.warning(msg)
                         alert_messages.append(msg)
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 # Fail-Soft: プロセスが既に存在しない・アクセス権がない場合はスキップ
                 continue
     except Exception as e:
