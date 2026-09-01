@@ -134,6 +134,85 @@ class TestProcessRejectQuest:
         assert chronicle["stats"]["totalQuests"] == 1
 
 
+class TestGetLockUserIdsForHistory:
+    """QuestService._get_lock_user_ids_for_history() のテスト(Issue #293)。
+
+    process_approve_quest/process_reject_quest/process_cancel_questが個別に
+    実装していた「対象履歴をpeekして兄妹連携クエストの相方を辿り、ロック対象
+    ユーザーをまとめる」ロジックをこのヘルパーへ一元化した。挙動そのものは
+    変更していないため、3つの呼び出し元それぞれの従来の契約(404を送出する/
+    しない)を個別に確認する。
+    """
+
+    def _seed_users(self, cur):
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+            "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
+            "('son', 'Son', 'Novice', 1, 0, 0, 'role_child'), "
+            "('daughter', 'Daughter', 'Novice', 1, 0, 0, 'role_child')"
+        )
+        cur.execute(
+            "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES "
+            "(101, 'Test', 'daily', 10, 5)"
+        )
+
+    def test_no_linked_history_returns_only_the_owner(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('son', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending')
+            """)
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+
+        assert lock_user_ids == ['son']
+
+    def test_linked_history_includes_the_partner(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
+                VALUES ('daughter', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending')
+            """)
+            partner_history_id = cur.lastrowid
+            cur.execute("""
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status, linked_history_id)
+                VALUES ('son', 101, 'Test', 10, 5, '2026-01-01T00:00:00', 'pending', ?)
+            """, (partner_history_id,))
+            history_id = cur.lastrowid
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+
+        assert lock_user_ids == ['son', 'daughter']
+
+    def test_missing_history_without_primary_user_id_raises_404(self, isolated_db):
+        """process_approve_quest/process_reject_quest の従来の挙動: primary_user_idを
+        指定しない呼び出しでは、存在しないhistory_idに対して404を送出する。"""
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+
+        quest_service = QuestService()
+        with pytest.raises(HTTPException) as exc_info:
+            quest_service._get_lock_user_ids_for_history(999999)
+        assert exc_info.value.status_code == 404
+
+    def test_missing_history_with_primary_user_id_does_not_raise(self, isolated_db):
+        """process_cancel_questの従来の挙動: primary_user_idを指定した場合、
+        history_idの存在確認自体は_process_cancel_quest_locked側に委ねるため、
+        ここでは404を送出せずprimary_user_idのみを返す。"""
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_users(cur)
+
+        quest_service = QuestService()
+        lock_user_ids = quest_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
+
+        assert lock_user_ids == ['son']
+
+
 class TestProcessRejectQuestConcurrentWithApprove:
     """Issue #228の回帰テスト。
 

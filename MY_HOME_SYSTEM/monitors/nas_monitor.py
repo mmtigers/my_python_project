@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core.logger import setup_logging
 from core.database import save_log_generic
-from core.utils import get_now_iso
+from core.utils import get_now_iso, retry_with_backoff
 from services.notification_service import send_push
 
 # ロガー設定
@@ -117,42 +117,52 @@ class NasMonitor:
             "    f.write('health_check')\n"
             "os.remove(path)\n"
         )
-        for attempt in range(self.write_check_retries):
+
+        def _attempt() -> None:
             test_file = os.path.join(self.mount_point, self._write_test_filename())
-            try:
-                subprocess.run(
-                    [sys.executable, "-c", script, test_file],
-                    timeout=self.timeout,
-                    check=True,
-                    capture_output=True,
-                )
-                return True
-            except subprocess.TimeoutExpired:
-                if attempt < self.write_check_retries - 1:
-                    wait_time = 2 ** attempt
-                    logger.warning(
-                        f"⚠️ [Attempt {attempt + 1}/{self.write_check_retries}] "
-                        f"Write permission check timed out after {self.timeout}s "
-                        f"(NAS mount possibly still waking up). Retrying in {wait_time}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
-                # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
-                # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
-                # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
-                diag_ping_ok = self.check_ping()
-                diag_mount_ok = self.check_mount() if diag_ping_ok else False
-                logger.error(
-                    f"Write permission check timed out after {self.timeout}s "
-                    f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
-                    f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
-                )
-                return False
-            except (subprocess.CalledProcessError, OSError) as e:
-                logger.error(f"Write permission check error: {e}")
-                return False
-        return False
+            subprocess.run(
+                [sys.executable, "-c", script, test_file],
+                timeout=self.timeout,
+                check=True,
+                capture_output=True,
+            )
+
+        def _on_retry(attempt: int, delay: float, e: BaseException) -> None:
+            logger.warning(
+                f"⚠️ [Attempt {attempt + 1}/{self.write_check_retries}] "
+                f"Write permission check timed out after {self.timeout}s "
+                f"(NAS mount possibly still waking up). Retrying in {delay:.0f}s..."
+            )
+
+        try:
+            # write_check_retries は「総試行回数」を表す既存の意味を維持するため、
+            # retry_with_backoffの max_retries(初回を含まない追加リトライ回数)には
+            # -1 したものを渡す。Exponential Backoff (1s, 2s, 4s, ...) は上限なし
+            # (config.py側と異なり、CIFSストール解消までどれだけでも待たせたいため)。
+            retry_with_backoff(
+                _attempt,
+                max_retries=self.write_check_retries - 1,
+                retryable_exceptions=(subprocess.TimeoutExpired,),
+                base_delay=1.0,
+                on_retry=_on_retry,
+            )
+            return True
+        except subprocess.TimeoutExpired:
+            # 「起床待ちで失敗したのか」「本当に無応答なのか」を切り分けられるよう、
+            # 最終失敗時のみ軽量なping/mount確認を添えてログに残す
+            # (ping/mountが両方OKなら書き込みI/Oだけが遅い=ディスク起床待ちの可能性が高く、
+            # pingすら通らなければネットワーク/NAS本体側の障害を疑う材料になる)。
+            diag_ping_ok = self.check_ping()
+            diag_mount_ok = self.check_mount() if diag_ping_ok else False
+            logger.error(
+                f"Write permission check timed out after {self.timeout}s "
+                f"x {self.write_check_retries} attempts (NAS mount possibly stalled) "
+                f"[diagnostic: ping={diag_ping_ok}, mount={diag_mount_ok}]"
+            )
+            return False
+        except (subprocess.CalledProcessError, OSError) as e:
+            logger.error(f"Write permission check error: {e}")
+            return False
 
     def sync_fallback_data(self) -> None:
         """フォールバックディレクトリの assets データをNASへ安全に同期・移動する。

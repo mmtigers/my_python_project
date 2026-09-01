@@ -40,6 +40,7 @@ from typing import List, Optional, Tuple, Any, Set, NamedTuple, Dict, Iterable
 from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
+from file_utils import DiscordCircuitBreaker
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -183,6 +184,9 @@ class AppConfig:
     MISSAV_SLEEP_RANGE: Tuple[float, float] = (8.0, 20.0)
     # 連続失敗数がこの値に達したら、レート制限/ブロックの可能性を疑って処理全体を中断する
     CONSECUTIVE_FAILURE_THRESHOLD: int = 3
+    # Discord Webhookへの通知が連続でこの回数失敗したら、Webhookが機能していないと
+    # 判断してそれ以降の送信をスキップする(サーキットブレーカー)
+    DISCORD_CIRCUIT_BREAKER_THRESHOLD: int = 3
     # yt-dlp自体のリクエスト間スリープ（メタデータ取得等、内部リクエストの間隔を空ける）
     YTDLP_SLEEP_INTERVAL: float = 3.0
     YTDLP_MAX_SLEEP_INTERVAL: float = 8.0
@@ -319,15 +323,27 @@ class DownloadTask(NamedTuple):
 # ==========================================
 # 2. マネージャー & ユーティリティ
 # ==========================================
+_discord_circuit_breaker = DiscordCircuitBreaker(failure_threshold=CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD)
+
 class DiscordNotifier:
     @staticmethod
     def send(text: str, is_error: bool = False) -> None:
+        if _discord_circuit_breaker.is_open:
+            # Webhookへの連続送信失敗を検知しているため、無駄なリクエストを
+            # 重ねないよう以降の送信をスキップする。
+            logger.warning(f"⚠️ Discord Webhookへの連続送信失敗を検知しているため、通知をスキップします: {text[:50]}")
+            return
         channel = 'error' if is_error else 'notify'
         message = {"type": "text", "text": text}
         try:
-            _send_discord_webhook([message], channel=channel)
+            sent = _send_discord_webhook([message], channel=channel)
         except Exception as e:
             logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)
+            sent = False
+        if sent:
+            _discord_circuit_breaker.record_success()
+        else:
+            _discord_circuit_breaker.record_failure()
 
 class HistoryManager:
     @staticmethod
@@ -1243,7 +1259,7 @@ class BatchDownloader:
             except BotDetectionError as e:
                 # 429やSign-in要求はIP/アカウント単位の制限である可能性が高く、
                 # 残りのタスクを続けても状況を悪化させるだけなので即座に中断する。
-                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}")
+                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)
                 CooldownManager.trigger_cooldown()
                 DiscordNotifier.send(
                     f"🚨 CRITICAL: ボット検知/レート制限の兆候（429・Sign-in要求等）を検知したため、"
