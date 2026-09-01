@@ -1,5 +1,4 @@
 # MY_HOME_SYSTEM/views/dashboard/common.py
-import streamlit as st
 
 CUSTOM_CSS = """
 <style>

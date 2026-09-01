@@ -3,7 +3,6 @@ import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from typing import List, Dict, Any
 import config
 from services import camera_service
 

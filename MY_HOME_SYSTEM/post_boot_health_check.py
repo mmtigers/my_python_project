@@ -182,7 +182,6 @@ class PostBootHealthCheck:
 
     # --- 3. Services (Wait & Retry) ---
     def check_services(self):
-        backend_url = getattr(config, "BACKEND_URL", "http://localhost:8000")
         frontend_url = getattr(config, "FRONTEND_URL", "http://localhost:8000/quest/")
         
         targets = [
@@ -247,7 +246,6 @@ class PostBootHealthCheck:
                 error_detail = f"NAS書き込み権限エラー: {e}"
                 logger.error(error_detail)
                 common.send_push(
-                    user_id=getattr(config, "LINE_USER_ID", None),
                     messages=[{"type": "text", "text": f"🚨 [System Alert] NAS権限エラー\n内容: {error_detail}"}],
                     target="discord",
                     channel="report"
@@ -398,7 +396,6 @@ class PostBootHealthCheck:
         logger.info(f"Report:\n{title}\n{body}")
         
         common.send_push(
-            user_id=getattr(config, "LINE_USER_ID", None),
             messages=[{"type": "text", "text": f"{title}\n\n{body}"}],
             target="discord",
             channel="report"

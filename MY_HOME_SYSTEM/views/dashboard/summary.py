@@ -2,7 +2,7 @@
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional
 
 from services import train_service
 from services import analysis_service

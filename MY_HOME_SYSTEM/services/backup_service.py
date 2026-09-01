@@ -2,10 +2,8 @@ import sqlite3
 import os
 import datetime
 import shutil
-import time
 from pathlib import Path
 from typing import Tuple
-from common import setup_logging
 # 設計書 (Source: 137) に従い core.logger を使用
 from core.logger import setup_logging  # 設計書に従い core.logger を使用 [cite: 137, 354]
 from common import send_push           # 通知用ユーティリティ
@@ -111,7 +109,6 @@ def _notify_and_log_error(message: str) -> None:
     """ERRORレベルの記録と管理者への即時通知を行う [cite: 361, 387]"""
     logger.error(f"❌ {message}")
     send_push(
-        user_id=getattr(config, "LINE_USER_ID", None),
         messages=[{"type": "text", "text": f"🚨 【重要】バックアップ失敗報\n{message}"}],
         target="discord",
         channel="report"

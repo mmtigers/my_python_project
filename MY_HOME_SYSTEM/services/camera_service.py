@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import glob
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from core.logger import setup_logging
 import config
 

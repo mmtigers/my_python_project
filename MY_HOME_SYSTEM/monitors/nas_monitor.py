@@ -194,7 +194,6 @@ class NasMonitor:
 
                 # 通知（復旧および同期完了）
                 send_push(
-                    config.LINE_USER_ID,
                     [{"type": "text", "text": f"🟢 【NAS復旧】\nNASの復旧と、ローカルからのデータ同期が完了しました。\nPath: {nas_assets_dir}"}],
                     target="discord", channel="report"
                 )
@@ -307,7 +306,6 @@ class NasMonitor:
 
         if summary_lines:
             send_push(
-                config.LINE_USER_ID,
                 [{"type": "text", "text": "🗑️ **古いファイルの自動削除**\n" + "\n".join(summary_lines)}],
                 target="discord", channel="report"
             )
@@ -366,7 +364,6 @@ class NasMonitor:
         if not is_currently_healthy and was_healthy:
             logger.error(f"❌ NAS connection lost or write failed. Falling back to local storage. (Ping: {ping_ok}, Mount: {mount_ok}, Write: {write_ok})")
             send_push(
-                config.LINE_USER_ID, 
                 [{"type": "text", "text": f"🚨 【NAS障害】\nNASへのアクセスが失われました。\nローカルフォールバックへ移行します。\nIP: {self.ip}"}],
                 target="discord", channel="error"
             )
@@ -418,7 +415,6 @@ class NasMonitor:
         
         channel = "error" if is_full else "report"
         send_push(
-            config.LINE_USER_ID, 
             [{"type": "text", "text": msg}],
             target="discord", channel=channel
         )

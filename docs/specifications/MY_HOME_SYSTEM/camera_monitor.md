@@ -53,7 +53,7 @@
 | --- | --- | --- |
 | `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "for cam in config.CAMERAS") |
 | `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 365 / 抜粋: "save_log_generic("device_records") |
-| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push(config.LINE_USER_ID...` (行番号: 564 / 抜粋: "send_push(") |
+| `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (行番号: 564 / 抜粋: "send_push(") |
 | NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 186 / 抜粋: "nas_folder_name = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
