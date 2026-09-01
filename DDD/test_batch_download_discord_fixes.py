@@ -699,5 +699,52 @@ class TestFileSystemManagerEnsureDirCatchesGenericOSError:
         assert (tmp_path / "new_sub_dir").is_dir()
 
 
+class TestDiscordNotifierCircuitBreaker:
+    """DiscordNotifier.send() がWebhookへの連続送信失敗時にサーキットブレーカーとして
+    機能することの回帰テスト。以前はこの経路に一切ブレーカーが無く、Webhookが機能して
+    いない間の1回の実行で無駄なリクエストを送り続けていた。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_circuit_breaker(self):
+        # モジュールレベルのシングルトンのため、他テストへ状態が漏れないようにする
+        module._discord_circuit_breaker.record_success()
+        yield
+        module._discord_circuit_breaker.record_success()
+
+    def test_send_skips_after_consecutive_failures(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(module, "_send_discord_webhook", lambda *a, **k: calls.append(1) or False)
+
+        threshold = module.CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD
+        for _ in range(threshold):
+            module.DiscordNotifier.send("test message")
+        assert len(calls) == threshold
+        assert module._discord_circuit_breaker.is_open is True
+
+        module.DiscordNotifier.send("this should be skipped")
+        assert len(calls) == threshold, "ブレーカーが開いた後は送信自体が行われないべき"
+
+    def test_send_records_failure_on_exception(self, monkeypatch):
+        def _raise(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(module, "_send_discord_webhook", _raise)
+
+        threshold = module.CONFIG.DISCORD_CIRCUIT_BREAKER_THRESHOLD
+        for _ in range(threshold):
+            module.DiscordNotifier.send("test message")
+
+        assert module._discord_circuit_breaker.is_open is True
+
+    def test_send_success_resets_breaker(self, monkeypatch):
+        module._discord_circuit_breaker.record_failure()
+        module._discord_circuit_breaker.record_failure()
+
+        monkeypatch.setattr(module, "_send_discord_webhook", lambda *a, **k: True)
+        module.DiscordNotifier.send("ok message")
+
+        assert module._discord_circuit_breaker.is_open is False
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

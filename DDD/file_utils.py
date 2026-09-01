@@ -38,3 +38,47 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
         # フォールバック名を補う。
         safe = "untitled"
     return safe
+
+
+class DiscordCircuitBreaker:
+    """Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする
+    プロセス内サーキットブレーカー。
+
+    newface_monitor.py の DiscordNotifier.notify() には元々、Webhookが
+    401/404を返した場合にその実行内の残り通知を打ち切る簡易的な仕組みが
+    あったが、対象がHTTPステータスの一部(401/404)に限られており、
+    タイムアウトや接続エラーなど他の失敗モードでは何度でも送信を再試行し
+    続けていた。また batch_download_discord.py 側の DiscordNotifier.send()
+    には同種の仕組みが一切無く、Webhookが機能していない間の1回の実行で
+    無駄なリクエストを送り続けていた。本クラスは両スクリプトで共通利用
+    できる「連続N回失敗したら以降はスキップする」ロジックを提供する。
+
+    cron等で毎回新規プロセスとして起動される運用のため、プロセスをまたいだ
+    状態は永続化しない(次回実行は必ず閉じた状態から始まる)。
+    """
+
+    def __init__(self, failure_threshold: int = 3):
+        self._failure_threshold = failure_threshold
+        self._consecutive_failures = 0
+        self._open = False
+
+    @property
+    def is_open(self) -> bool:
+        """送信をスキップすべき(連続失敗数が閾値に達した)場合True。"""
+        return self._open
+
+    def record_success(self) -> None:
+        """送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。"""
+        self._consecutive_failures = 0
+        self._open = False
+
+    def record_failure(self) -> None:
+        """送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。"""
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self._failure_threshold:
+            self._open = True
+
+    def trip(self) -> None:
+        """Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した
+        場合に、閾値を待たず即座にブレーカーを開く。"""
+        self._open = True
