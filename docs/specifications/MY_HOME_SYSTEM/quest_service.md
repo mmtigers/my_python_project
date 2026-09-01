@@ -17,7 +17,7 @@
 * [sound_manager.md](./sound_manager.md) - `sound_manager.play`の実体(`core.sound_manager`)
 * [notification_service.md](./notification_service.md) - `notification_service.send_push`の実体(`services.notification_service`)
 * [switchbot_service.md](./switchbot_service.md) - `switchbot_service.send_device_command`の実体(TVロック解除、`_trigger_tv_unlock`内でローカルインポート)
-* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`等の設定値の提供元
+* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`/`UPLOAD_DIR`（B6で追加、`_delete_orphaned_avatar`が参照）等の設定値の提供元
 * `fix_quest_reset_period.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `quest_master.reset_period`列の値(`'weekly_monday'`→`'daily'`)を一括修正するワンショットスクリプト。本ファイルの`is_within_reset_period`が`'daily'`/`'weekly'`の2値しか扱わないことと関連が疑われる
 
 ## 2. ファイルの概要
@@ -43,20 +43,21 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 | --- | --- | --- | --- |
 | `datetime` | 標準ライブラリ | 日付や時刻の操作・比較 | `import datetime` (行番号: 1) |
 | `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 2) |
-| `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 3) |
-| `math` | 標準ライブラリ | インポートされているが、本ファイル内では`math.`の呼び出しは一切確認できない(未使用) | `import math` (行番号: 4) |
-| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行 | `import threading` (行番号: 5) |
-| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 6) |
-| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 7) |
-| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 9) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 10) |
-| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 11) |
-| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 12) |
-| `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 13) |
-| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notification_service, switchbot_service` (行番号: 14) |
-| `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`_trigger_tv_unlock`)。**（Issue #293で修正）** 以前は`_trigger_tv_unlock`内のローカルimportのみでモジュールレベルには無かったが、`notification_service`と同じ行でモジュールレベルへ統合した。 | `from services import notification_service, switchbot_service` (行番号: 14) |
-| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 15) |
-| `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 18) |
+| `os` | 標準ライブラリ | **（B6で追加）** `UserService._delete_orphaned_avatar`が旧アバターファイルのファイル名抽出(`os.path.basename`)・パス結合(`os.path.join`)・パストラバーサル対策(`os.path.dirname`/`os.path.normpath`)・存在確認と削除(`os.path.exists`/`os.remove`)に使用 | `import os` (行番号: 3) |
+| `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 4) |
+| `math` | 標準ライブラリ | インポートされているが、本ファイル内では`math.`の呼び出しは一切確認できない(未使用) | `import math` (行番号: 5) |
+| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行 | `import threading` (行番号: 6) |
+| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 7) |
+| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 8) |
+| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 10) |
+| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 11) |
+| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 12) |
+| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 13) |
+| `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 14) |
+| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notification_service, switchbot_service` (行番号: 15) |
+| `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`_trigger_tv_unlock`)。**（Issue #293で修正）** 以前は`_trigger_tv_unlock`内のローカルimportのみでモジュールレベルには無かったが、`notification_service`と同じ行でモジュールレベルへ統合した。 | `from services import notification_service, switchbot_service` (行番号: 15) |
+| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 16) |
+| `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 19) |
 | `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`) | `import quest_data` / `from .. import quest_data` |
 
 **（Issue #293で削除）** `pytz`(外部ライブラリ、`Asia/Tokyo`タイムゾーン用)は、モジュールレベル定数`JST`(標準ライブラリの固定オフセット版、後述)への一本化に伴い本ファイルから完全に不要になったため削除した。同様に、`is_within_reset_period`内のローカル`import datetime`(冗長)、`_trigger_tv_unlock`内のローカル`import threading`・`from services import notification_service`(いずれも冗長、モジュールレベルで既にインポート済み)も削除した。
@@ -87,21 +88,28 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 ### `JST` (モジュールレベル定数)
 
 * **役割**: **（Issue #293で新規追加）** JST(日本標準時、UTC+9固定・DSTなし)を表す`datetime.timezone`インスタンス。以前は`_seconds_since_iso_timestamp`/`is_within_reset_period`/`calculate_quest_boost`/`_is_quest_currently_active`/`filter_active_quests`/`get_all_view_data`がそれぞれ独立に、`datetime.timezone(datetime.timedelta(hours=9))`(標準ライブラリ)または`pytz.timezone("Asia/Tokyo")`(pytz)という2通りの異なる方法でJSTを組み立てていたため、この定数へ一本化した。標準ライブラリの固定オフセット版を採用したのは、`is_within_reset_period`内に`dt.replace(tzinfo=JST)`という`.replace()`呼び出しがあり、pytzのtimezoneオブジェクトを`.replace(tzinfo=...)`に直接使うと不正なオフセット(この地域ではLMT起源の+09:19)を返す既知の落とし穴があるため。一本化に伴い、本ファイルは`pytz`への依存自体が不要になり`import pytz`を削除した。
-* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')`
+* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')` (行番号: 33)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの定数）
+
+### `SPAM_CHECK_INTERVAL_SECONDS` / `INFINITE_QUEST_COOLDOWN_SECONDS` (モジュールレベル定数、B2で追加)
+
+* **役割**: `_process_complete_quest_locked`のスパムチェックが用いる完了間隔の下限(秒)。`SPAM_CHECK_INTERVAL_SECONDS`(10)はdaily/weekly等の通常クエスト向け、`INFINITE_QUEST_COOLDOWN_SECONDS`(60)は`quest_type == 'infinite'`のクエスト専用の下限値。フロントエンド(`family-quest`の`QuestList.tsx`)がinfiniteクエストに60秒のクールダウン表示を出す一方、以前のサーバー側は全クエスト共通の10秒間隔しか強制しておらず、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていたため、infiniteクエストのみサーバー側の下限もフロントの意図(60秒)に合わせて引き上げる目的で追加された。daily/weeklyクエストの10秒間隔自体は変更されていない。
+* 根拠: `SPAM_CHECK_INTERVAL_SECONDS = 10` / `INFINITE_QUEST_COOLDOWN_SECONDS = 60` (行番号: 52-53 / 抜粋: "# _process_complete_quest_locked のスパムチェック間隔(秒)。infiniteクエストのみ\n# フロントエンド(family-quest QuestList.tsx)のクールダウン表示(60秒)と揃える(B2)。\nSPAM_CHECK_INTERVAL_SECONDS = 10\nINFINITE_QUEST_COOLDOWN_SECONDS = 60")
+* **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの整数定数）
+* 根拠: (行番号: 52-53)
 
 ### `_seconds_since_iso_timestamp` (モジュールレベル関数)
 
 * **役割**: `common.get_now_iso()`で保存されたISOタイムスタンプ文字列(JST付き)から、現在までの経過秒数(実時間)を返す。パース失敗時・空文字/Noneの場合は`None`を返す。`tzinfo`が無い古いデータは保存規約に合わせてJSTとみなす。サーバーのOSタイムゾーンに依存せず常に「実時間で何秒経過したか」を正しく判定できるよう`tzinfo`を保持したまま比較するのは、`_process_complete_quest_locked`のスパムチェックで修正済みだったロジック(タイムゾーン起因の誤判定バグの修正)を、`_process_purchase_reward_locked`のスパムチェック(Issue #101)でも再利用するために、共通ヘルパーとして抽出したもの。
-* 根拠: `def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:` (行番号: 39〜61)
+* 根拠: `def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:` (行番号: 46〜68)
 * **引数/リクエスト**: `timestamp_str: Optional[str]`
-* 根拠: (行番号: 39)
+* 根拠: (行番号: 46)
 * **戻り値/レスポンス**: `Optional[float]`（経過秒数。パース失敗/空文字/None時は`None`）
-* 根拠: (行番号: 51〜52, 59, 60〜61)
+* 根拠: (行番号: 58〜59, 67〜68)
 * **副作用**: なし（純粋な日時計算）
-* 根拠: (行番号: 39〜61)
+* 根拠: (行番号: 46〜68)
 * **エラーハンドリング**: `datetime.datetime.fromisoformat`等での例外は`except Exception:`で捕捉し`None`を返す（呼び出し元には送出しない）
-* 根拠: (行番号: 60〜61 / 抜粋: "except Exception:\n        return None")
+* 根拠: (行番号: 67〜68 / 抜粋: "except Exception:\n        return None")
 
 ### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` / `_completion_locks_guard` (モジュールレベル変数)
 
@@ -183,16 +191,29 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `UserService.update_avatar`
 
-* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 127〜137)
+* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。**（B6で修正）** 更新前の`avatar`列の値を`old_avatar`として保持しておき、DB更新のトランザクション(`get_db_cursor(commit=True)`)を抜けた後に`_delete_orphaned_avatar`を呼び出して、差し替えにより不要になった旧アバターファイルの削除を試みる。以前はDBの`avatar`列を更新するのみで、`UPLOAD_DIR`配下の旧アバターファイル自体は削除されず、再アップロードのたびにディスクへ蓄積し続けていた。
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 201〜215 / 抜粋: "old_avatar = user['avatar']")、`self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 214)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
-* 根拠: (行番号: 127)
+* 根拠: (行番号: 201)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "updated", "avatar": avatar_url}`）
-* 根拠: (行番号: 127, 137)
-* **副作用**: DB更新（`quest_users`）、ログ出力
-* 根拠: (行番号: 133〜136)
+* 根拠: (行番号: 201, 215)
+* **副作用**: DB更新（`quest_users`）、ログ出力、（B6で追加）`_delete_orphaned_avatar`の呼び出しによるローカルファイルシステムからの旧アバターファイル削除の試行（DBコミット後、`get_db_cursor`のトランザクション外で実行される）
+* 根拠: (行番号: 209〜212, 214)
 * **エラーハンドリング**: ユーザー不在時に `HTTPException(status_code=404)`
-* 根拠: (行番号: 130〜131 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
+* 根拠: (行番号: 204〜205 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
+
+### `UserService._delete_orphaned_avatar` (メソッド、B6で追加)
+
+* **役割**: アップロード済みの旧アバターファイルが、アバター差し替え後にディスクへ残り続けるのを防ぐため、条件を満たす場合のみ`config.UPLOAD_DIR`配下の旧ファイルを削除する。対象は`/uploads/`配下のパス（絵文字などアップロードファイル以外のavatar値や、他ユーザーと共有され得ないファイル）に限定し、`old_avatar`が空文字/`None`の場合、または新旧のURLが同一の場合は何もしない。パストラバーサル対策として、`old_avatar`から`os.path.basename`でファイル名部分のみを取り出し、`config.UPLOAD_DIR`と結合したうえで、結合結果の親ディレクトリが正規化済み`UPLOAD_DIR`と一致することを確認してから削除する。
+* 根拠: `def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:` (行番号: 217〜237 / 抜粋: "アップロード済みの旧アバターファイルが差し替え後にディスクへ残り続けるのを防ぐ。")
+* **引数/リクエスト**: `old_avatar: Optional[str]`（更新前のavatar列の値）, `new_avatar: str`（更新後のavatar URL）
+* 根拠: (行番号: 217)
+* **戻り値/レスポンス**: なし（`-> None`）
+* 根拠: (行番号: 217)
+* **副作用**: 条件を満たす場合、ローカルファイルシステムから旧アバターファイルを削除（`os.remove`）。削除成功時はログ出力。
+* 根拠: `os.remove(file_path)` (行番号: 234 / 抜粋: "os.remove(file_path)")、ログ出力 (行番号: 235 / 抜粋: "logger.info(f\"Orphaned avatar removed: {file_path}\")")
+* **エラーハンドリング**: `old_avatar`が空/`None`、新旧URLが同一、`/uploads/`配下でない、またはパストラバーサル対策の一致チェックに失敗した場合はいずれも早期`return`（何もしない）。`os.remove`が`OSError`を送出した場合は`except OSError`で捕捉し、警告ログを出力するのみで例外を再送出しない（アバター更新自体は既に成功しているため、削除失敗はユーザーへのレスポンスに影響しない）。
+* 根拠: 早期return群 (行番号: 222〜225 / 抜粋: "if not old_avatar or old_avatar == new_avatar:\n            return\n        if not old_avatar.startswith(\"/uploads/\"):\n            return")、パストラバーサル対策 (行番号: 229〜230 / 抜粋: "if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return")、例外処理 (行番号: 236〜237 / 抜粋: "except OSError as e:\n            logger.warning(f\"Failed to remove orphaned avatar {file_path}: {e}\")")
 
 ### `QuestService.is_within_reset_period`
 
@@ -251,7 +272,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._get_completion_lock_key`
 
-* **役割**: `process_complete_quest`が使用する完了ロックのキーを算出する。対象クエストの`target_user`をDBから参照し、`'siblings'`（兄妹連携クエスト）であれば`user_id`に依存しない共通キー`('__coop__', quest_id)`を返し、それ以外は従来どおり`(user_id, quest_id)`を返す。兄妹連携クエストは「どちらが報告しても2人分のpending行を作成する」ため、報告者ごとに異なるキーで直列化すると兄・妹の同時報告がどちらもロック未取得のまま`_process_coop_quest_completion`まで進み、pendingペアが二重生成されてしまう（Issue #96）。共通キーにすることで、兄妹どちらの報告であっても同一ロックで直列化され、先に処理された側が作成した相方分のpending行を、後から来た側が`_process_complete_quest_locked`内のスパムチェック（直近10秒以内の完了履歴）または周期リセット判定で検出してブロックする。
+* **役割**: `process_complete_quest`が使用する完了ロックのキーを算出する。対象クエストの`target_user`をDBから参照し、`'siblings'`（兄妹連携クエスト）であれば`user_id`に依存しない共通キー`('__coop__', quest_id)`を返し、それ以外は従来どおり`(user_id, quest_id)`を返す。兄妹連携クエストは「どちらが報告しても2人分のpending行を作成する」ため、報告者ごとに異なるキーで直列化すると兄・妹の同時報告がどちらもロック未取得のまま`_process_coop_quest_completion`まで進み、pendingペアが二重生成されてしまう（Issue #96）。共通キーにすることで、兄妹どちらの報告であっても同一ロックで直列化され、先に処理された側が作成した相方分のpending行を、後から来た側が`_process_complete_quest_locked`内のスパムチェック（直近の完了履歴からの経過秒数が下限未満か。B2以降、下限はinfiniteクエストのみ60秒・それ以外は10秒）または周期リセット判定で検出してブロックする。
 * 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 301〜315)
 * 根拠: (行番号: 313〜315 / 抜粋: "if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)")
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
@@ -265,18 +286,18 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._process_complete_quest_locked`
 
-* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、まず対象者・出現条件のサーバー側検証を行う(Issue #163)。`target_user`が`'all'`・本人の`user_id`・`'siblings'`(かつ`user['role'] == ROLE_CHILD`)のいずれでもなければ`403`。続けて`_is_quest_currently_active(quest)`が`False`(limited型の期間外・random型の未出現抽選・時間帯外・曜日外のいずれか)であれば`403`とする。これらの検証は、以前`filter_active_quests`(GET /dataの表示整形専用)にしか存在せず、API直叩きで他人向けクエスト・時間帯外・曜日外・未出現のrandomクエストを完了できてしまっていた穴を塞ぐために追加された(報酬購入側は`_process_purchase_reward_locked`内のtargetチェックとしてIssue #95で追加済みだったが、完了側には未展開のまま残っていた)。続いて直近10秒以内の完了履歴があれば`429`エラーとするスパムチェックを行う。さらに、`quest['quest_type']`が`'infinite'`以外かつ直近の完了履歴がある場合、`is_within_reset_period`でその履歴が現在の`reset_period`（`quest_master.reset_period`が未設定なら`'daily'`）の期間内かどうかを判定し、期間内であれば`400`エラーとするサーバー側の周期リセットガード（M-1-3）を行う。このガードは、`is_within_reset_period`が元々`get_all_view_data`の表示専用（`completedQuests`算出）にしか使われておらず、上記10秒スパムチェックだけではAPI直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていたことへの対策として追加された。`'infinite'`タイプ（「何回でも挑戦しよう」等）は仕様上多重完了が前提のため、このガードの対象外。ガードを通過後、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた（判定内容自体は変更なし）。
-* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 333〜)
-* 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, ...)\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, ...)` (行番号: 351〜357)
-* 根拠: `# M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。` (行番号: 371), `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = "今週" if reset_period == 'weekly' else "本日"\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 376〜380)
+* **役割**: クエスト完了の実処理。クエスト・ユーザーの存在確認後、まず対象者・出現条件のサーバー側検証を行う(Issue #163)。`target_user`が`'all'`・本人の`user_id`・`'siblings'`(かつ`user['role'] == ROLE_CHILD`)のいずれでもなければ`403`。続けて`_is_quest_currently_active(quest)`が`False`(limited型の期間外・random型の未出現抽選・時間帯外・曜日外のいずれか)であれば`403`とする。これらの検証は、以前`filter_active_quests`(GET /dataの表示整形専用)にしか存在せず、API直叩きで他人向けクエスト・時間帯外・曜日外・未出現のrandomクエストを完了できてしまっていた穴を塞ぐために追加された(報酬購入側は`_process_purchase_reward_locked`内のtargetチェックとしてIssue #95で追加済みだったが、完了側には未展開のまま残っていた)。続いて直近の完了履歴があれば経過秒数を`_seconds_since_iso_timestamp`で算出し、その間隔が下限未満であれば`429`エラーとするスパムチェックを行う。**（B2で修正）** この下限は`quest['quest_type'] == 'infinite'`かどうかで`min_interval_seconds`として動的に決まり、infiniteクエストは`INFINITE_QUEST_COOLDOWN_SECONDS`(60秒)、それ以外は従来どおり`SPAM_CHECK_INTERVAL_SECONDS`(10秒)を用いる。以前は全クエスト共通で10秒間隔しか強制しておらず、フロントエンド(`QuestList.tsx`)がinfiniteクエストに提示する60秒のクールダウン表示と食い違い、リロードやAPI直叩きで実質10秒間隔まで周回できてしまっていた。さらに、`quest['quest_type']`が`'infinite'`以外かつ直近の完了履歴がある場合、`is_within_reset_period`でその履歴が現在の`reset_period`（`quest_master.reset_period`が未設定なら`'daily'`）の期間内かどうかを判定し、期間内であれば`400`エラーとするサーバー側の周期リセットガード（M-1-3）を行う。このガードは、`is_within_reset_period`が元々`get_all_view_data`の表示専用（`completedQuests`算出）にしか使われておらず、上記スパムチェックだけではAPI直叩き等で同一クエストを周期内に何度でも完了・多重報酬できてしまっていたことへの対策として追加された。`'infinite'`タイプ（「何回でも挑戦しよう」等）は仕様上多重完了が前提のため、このガードの対象外。ガードを通過後、`calculate_quest_boost`でボーナスを計算する。対象ユーザーが`ROLE_CHILD`の場合、対象クエストの`target_user`が`'siblings'`なら`_process_coop_quest_completion`に委譲、それ以外は`quest_history`に`'pending'`ステータスで挿入し承認待ちレスポンスを返す。`ROLE_ADULT`の場合は`_apply_quest_rewards`で即時に報酬を適用する。スパムチェックの経過秒数判定は、`_process_purchase_reward_locked`と共通の`_seconds_since_iso_timestamp`ヘルパーを使う形にIssue #101でリファクタリングされた。
+* 根拠: `def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 366〜)
+* 根拠: `is_sibling_target = quest['target_user'] == 'siblings'\n            if quest['target_user'] not in ('all', user_id) and not (\n                is_sibling_target and user['role'] == ROLE_CHILD\n            ):\n                raise HTTPException(status_code=403, ...)\n            if not self._is_quest_currently_active(quest):\n                raise HTTPException(status_code=403, ...)` (行番号: 384〜390)
+* 根拠: `# M-1-3: daily/weekly の周期リセットをサーバー側でも強制する。` (行番号: 409), `if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):\n                    period_label = "今週" if reset_period == 'weekly' else "本日"\n                    raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")` (行番号: 414〜418)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
-* 根拠: (行番号: 333)
+* 根拠: (行番号: 366)
 * **戻り値/レスポンス**: `Dict[str, Any]`（ステータスや報酬情報）
-* 根拠: (行番号: 333, 383〜388, 393)
+* 根拠: (行番号: 366, 427, 437〜442, 447)
 * **副作用**: DB参照/更新（`quest_master`, `quest_users`, `quest_history`）、`sound_manager.play("submit")`呼び出し、ログ出力、`_apply_quest_rewards`/`_process_coop_quest_completion`の呼び出し
-* 根拠: (行番号: 335〜336, 373, 381, 391)
-* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。対象者不一致(`target_user`不整合)または`_is_quest_currently_active`が`False`の場合は`HTTPException(403)`(Issue #163)。直近10秒以内の完了履歴がある場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間10秒経過を判定する）。この時間ベースのチェックに加え、`quest_type`が`'infinite'`以外のクエストが現在の`reset_period`内に既に完了済みの場合は`HTTPException(400)`（M-1-3の周期リセットガード）。さらに呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
-* 根拠: (行番号: 351〜357), (行番号: 366〜369 / 抜粋: "elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                if elapsed is not None and elapsed < 10:\n                    raise HTTPException(status_code=429, ...)"), (行番号: 376〜380 / 抜粋: "if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):")
+* 根拠: (行番号: 368〜369, 427, 429〜432, 435, 445)
+* **エラーハンドリング**: クエスト・ユーザー不在時 `HTTPException(404)`。対象者不一致(`target_user`不整合)または`_is_quest_currently_active`が`False`の場合は`HTTPException(403)`(Issue #163)。**（B2で修正）** 直近の完了履歴からの経過秒数が、infiniteクエストは60秒(`INFINITE_QUEST_COOLDOWN_SECONDS`)・それ以外は10秒(`SPAM_CHECK_INTERVAL_SECONDS`)未満の場合 `HTTPException(429)`（`_seconds_since_iso_timestamp`で`tzinfo`を保持したまま経過秒数を算出することで、サーバーのOSタイムゾーンに依存せず実時間での経過を判定する）。この時間ベースのチェックに加え、`quest_type`が`'infinite'`以外のクエストが現在の`reset_period`内に既に完了済みの場合は`HTTPException(400)`（M-1-3の周期リセットガード）。さらに呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出したキー（兄妹連携クエストなら報告者に依存しない共通キー）に基づくプロセス内ロックにより、ほぼ同時到達した複数リクエストが直列化される。
+* 根拠: (行番号: 384〜390), `elapsed = _seconds_since_iso_timestamp(last_hist['completed_at'])\n                min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS\n                if elapsed is not None and elapsed < min_interval_seconds:\n                    raise HTTPException(status_code=429, ...)` (行番号: 399〜407), (行番号: 414〜418 / 抜粋: "if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:\n                reset_period = quest['reset_period'] or 'daily'\n                if self.is_within_reset_period(last_hist['completed_at'], reset_period):")
 
 ### `QuestService._is_quest_currently_active`
 
@@ -608,7 +629,7 @@ flowchart TD
     TargetCheck -- No --> Err403T[HTTPException 403: このクエストの対象者ではありません]
     TargetCheck -- Yes --> ActiveCheck{"_is_quest_currently_activeがTrueか<br>(期間/出現抽選/時間帯/曜日、Issue #163)"}
     ActiveCheck -- No --> Err403A[HTTPException 403: 現在実行できないクエストです]
-    ActiveCheck -- Yes --> SpamCheck{"直近10秒以内に完了履歴があるか<br>(tzinfoを保持したまま比較)"}
+    ActiveCheck -- Yes --> SpamCheck{"直近の完了履歴からの経過秒数が<br>下限未満か(B2: infiniteは60秒、<br>それ以外は10秒。tzinfoを保持したまま比較)"}
     SpamCheck -- Yes --> Err429[HTTPException 429: 少し時間を空けてください]
     SpamCheck -- No --> ResetGuard{"M-1-3: quest_typeが'infinite'以外 かつ<br>直近履歴が現在のreset_period内か<br>(is_within_reset_periodで判定)"}
     ResetGuard -- Yes --> Err400G[HTTPException 400: 本日/今週は完了済みです]
@@ -723,6 +744,8 @@ graph TD
         purchase_locks["_purchase_locks (dict)"]
         seconds_since_iso_timestamp["_seconds_since_iso_timestamp()"]
         role_consts["ROLE_ADULT / ROLE_CHILD"]
+        spam_check_consts["SPAM_CHECK_INTERVAL_SECONDS /<br>INFINITE_QUEST_COOLDOWN_SECONDS(B2で追加)"]
+        delete_orphaned_avatar["_delete_orphaned_avatar()(B6で追加)"]
     end
 
     game_system_inst --> GameSystem
@@ -744,6 +767,9 @@ graph TD
     QuestService -.->|スパムチェックの経過秒数判定| seconds_since_iso_timestamp
     ShopService -.->|スパムチェックの経過秒数判定| seconds_since_iso_timestamp
     QuestService -.-> role_consts
+    QuestService -->|"_process_complete_quest_locked<br>のスパムチェック下限(B2)"| spam_check_consts
+    UserService -->|"update_avatar(B6)"| delete_orphaned_avatar
+    delete_orphaned_avatar -.-> os_lib
 
     subgraph External Modules
         common
@@ -755,6 +781,7 @@ graph TD
         models_quest["models.quest"]
         quest_data
         threading_lib["threading (Lock)"]
+        os_lib["os(B6で追加)"]
     end
 
     get_completion_lock --> threading_lib
@@ -787,6 +814,7 @@ graph TD
     InventoryService -.-> quest_users
 
     UserService -.-> common
+    delete_orphaned_avatar -.->|"UPLOAD_DIR(B6)"| config
     QuestService -.-> common
     ShopService -.-> common
     InventoryService -.-> common
@@ -849,6 +877,10 @@ graph TD
 * 根拠: (行番号: 341〜357 / 抜粋: "# 対象者・出現条件のサーバー側検証(Issue #163)。")
 * **アイテム使用の通知は`LINE_USER_ID`宛に1回のみ**: `use_item`はアイテム使用を即座に消費として確定し、`config.LINE_USER_ID`宛に「使用しました」という通知を1回送信する。アイテム使用に親の承認は不要なため、承認待ちを知らせる通知や、承認権限を持つユーザー個別への「承認待ちがある」というプッシュ通知は存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
 * 根拠: `notification_service.send_push(user_id=config.LINE_USER_ID, ...)` (行番号: 826〜829、`use_item`内)
+* **`_process_complete_quest_locked`のスパムチェック下限は`quest_type`によって非対称（B2）**: `SPAM_CHECK_INTERVAL_SECONDS`(10秒)/`INFINITE_QUEST_COOLDOWN_SECONDS`(60秒)という2つのモジュールレベル定数は、いずれも`_process_complete_quest_locked`内の1箇所でしか参照されない。新しい`quest_type`を追加する場合や、フロントエンド(`family-quest`の`QuestList.tsx`)側のクールダウン表示秒数を変更する場合は、この関数内の三項演算子(`INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS`)を個別に見直す必要があり、`quest_type`ごとの下限値を宣言的に管理する仕組みは無い。
+* 根拠: `min_interval_seconds = INFINITE_QUEST_COOLDOWN_SECONDS if quest['quest_type'] == 'infinite' else SPAM_CHECK_INTERVAL_SECONDS` (行番号: 405)
+* **`_delete_orphaned_avatar`の削除はベストエフォート、かつ更新のトランザクション外（B6）**: `update_avatar`は`quest_users.avatar`のUPDATEを`get_db_cursor(commit=True)`のトランザクション内でコミットした後、そのトランザクションの外側で`_delete_orphaned_avatar`を呼び出す。ファイル削除がDBコミットとは別ステップのため、両者はアトミックではない（DBのUPDATEは成功したがファイル削除は`OSError`で失敗する、またはその逆に相当する状況は原理上起こり得るが、`_delete_orphaned_avatar`は`OSError`を`except`で握りつぶし警告ログのみ出力するため、アバター更新自体のレスポンスには一切影響しない）。またAPIとしての冪等性は保証されず、同一`old_avatar`に対して`update_avatar`が複数回・並行に呼ばれた場合、2回目以降の`os.remove`は対象ファイルが既に無い状態で`os.path.exists`チェックにより素通りする（例外にはならない）。
+* 根拠: `self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 214、`with common.get_db_cursor(commit=True) as cur:`ブロックの外)、`if os.path.exists(file_path): os.remove(file_path)` (行番号: 233〜234)
 
 ## 9. 不明事項一覧
 
