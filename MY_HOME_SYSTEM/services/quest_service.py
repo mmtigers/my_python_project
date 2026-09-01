@@ -4,7 +4,6 @@ import os
 import random
 import math
 import threading
-import pytz
 from contextlib import ExitStack
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -13,7 +12,7 @@ import common
 import config
 import game_logic
 from core import sound_manager
-from services import notification_service
+from services import notification_service, switchbot_service
 from core.logger import setup_logging
 
 # モデル定義のインポート (型ヒント用)
@@ -21,6 +20,17 @@ from models.quest import MasterUser, MasterQuest, MasterReward
 
 # ロガー設定
 logger = setup_logging("quest_service")
+
+# JST(日本標準時、UTC+9固定・DSTなし)。is_within_reset_period/calculate_quest_boost/
+# _is_quest_currently_active/filter_active_quests/get_all_view_data がそれぞれ
+# 独立に「datetime.timezone(timedelta(hours=9))」または「pytz.timezone("Asia/Tokyo")」
+# という2通りの異なる方法でJSTを組み立てていたため、この定数へ一本化する(Issue #293)。
+# 標準ライブラリの固定オフセットtzinfoを採用する: pytzのtimezoneオブジェクトは
+# datetime.replace(tzinfo=...)に直接使うと不正なオフセット(この地域ではLMT起源の
+# +09:19)を返す既知の落とし穴があり、is_within_reset_period内でまさにreplace()に
+# 渡している箇所があるため、datetime()/replace()/astimezone()/now()のいずれに
+# 使っても常に正しい+09:00になる固定オフセット版のほうが安全。
+JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 # quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)
 ROLE_ADULT = 'role_adult'
@@ -61,7 +71,7 @@ def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float
         last_time = datetime.datetime.fromisoformat(timestamp_str)
         if last_time.tzinfo is None:
             # tzinfoがない古いデータは、保存規約(common.get_now_iso)に合わせてJSTとみなす
-            last_time = last_time.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=9)))
+            last_time = last_time.replace(tzinfo=JST)
         now_check = datetime.datetime.now(last_time.tzinfo)
         return (now_check - last_time).total_seconds()
     except Exception:
@@ -240,10 +250,7 @@ class UserService:
 class QuestService:
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:
         if not completed_at_str: return False
-        
-        import datetime
-        # 外部ライブラリを使わず、標準機能でJST（+9時間）を定義
-        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+
         now_jst = datetime.datetime.now(JST)
         today_jst = now_jst.date()
         
@@ -303,7 +310,6 @@ class QuestService:
         # 行う必要がある。以前はdatetime.datetime.now()(OSローカル時刻)を
         # 使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の
         # 判定でdays_diffが1小さくなる不具合があった。
-        JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
         now_jst = datetime.datetime.now(JST)
         last_date = None
 
@@ -488,20 +494,35 @@ class QuestService:
             "message": "親の承認待ちです（兄妹クエスト）"
         }
 
-    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
-        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
-        # 先に特定してから、そのユーザー単位でロックを取得する。兄妹連携クエスト
-        # (linked_history_id あり)の場合は、承認時に相方の quest_users も
-        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。
+    def _get_lock_user_ids_for_history(
+        self, history_id: int, primary_user_id: Optional[str] = None
+    ) -> List[str]:
+        """history_idに対応するquest_history行から、ロック対象ユーザーID一覧を求める。
+        兄妹連携クエスト(linked_history_id あり)の場合は相方のuser_idも含める(#98)。
+
+        process_approve_quest/process_reject_quest/process_cancel_questがそれぞれ
+        個別に実装していた「対象履歴をpeekして相方を辿り、ロック対象ユーザーを
+        まとめる」ロジックを一元化したもの(Issue #293)。
+
+        primary_user_idを指定しない場合はquest_history.user_idから取得し、履歴が
+        見つからなければ404を送出する(process_approve_quest/process_reject_quest
+        の従来の挙動)。指定した場合はそれを主対象としてそのまま使い、履歴が
+        見つからなくても404は送出しない(process_cancel_questの従来の挙動:
+        存在確認自体は_process_cancel_quest_locked側に委ねる)。
+        """
         with common.get_db_cursor() as cur:
             hist_peek = cur.execute(
                 "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()
-        if not hist_peek:
-            raise HTTPException(status_code=404, detail="History not found")
 
-        lock_user_ids = [hist_peek['user_id']]
-        if hist_peek['linked_history_id'] is not None:
+        if primary_user_id is not None:
+            lock_user_ids = [primary_user_id]
+        else:
+            if not hist_peek:
+                raise HTTPException(status_code=404, detail="History not found")
+            lock_user_ids = [hist_peek['user_id']]
+
+        if hist_peek and hist_peek['linked_history_id'] is not None:
             with common.get_db_cursor() as cur:
                 linked_peek = cur.execute(
                     "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
@@ -509,6 +530,14 @@ class QuestService:
             if linked_peek:
                 lock_user_ids.append(linked_peek['user_id'])
 
+        return lock_user_ids
+
+    def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        # ロック対象ユーザー(quest_historyの本来の完了者。gold/exp更新の対象)を
+        # 先に特定してから、そのユーザー単位でロックを取得する。兄妹連携クエスト
+        # (linked_history_id あり)の場合は、承認時に相方の quest_users も
+        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id)
         with _acquire_user_balance_locks(lock_user_ids):
             return self._process_approve_quest_locked(approver_id, history_id)
 
@@ -579,10 +608,6 @@ class QuestService:
         return {"user_id": linked_hist['user_id'], **reward_result}
 
     def _trigger_tv_unlock(self, quest_id: int):
-        import threading
-        from services import switchbot_service
-        from services import notification_service
-        
         def unlock_task():
             logger.info(f"📺 Initiating TV Unlock (Turn ON) for quest_id: {quest_id}")
             try:
@@ -614,22 +639,7 @@ class QuestService:
         # 生じていた。兄妹連携クエスト(linked_history_id あり)の場合は、相方の
         # quest_users もカスケードして書き換えるため相方のユーザーIDも合わせて
         # ロックする(process_approve_quest/process_cancel_questと同じ理由、#98)。
-        with common.get_db_cursor() as cur:
-            hist_peek = cur.execute(
-                "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
-            ).fetchone()
-        if not hist_peek:
-            raise HTTPException(status_code=404, detail="History not found")
-
-        lock_user_ids = [hist_peek['user_id']]
-        if hist_peek['linked_history_id'] is not None:
-            with common.get_db_cursor() as cur:
-                linked_peek = cur.execute(
-                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
-                ).fetchone()
-            if linked_peek:
-                lock_user_ids.append(linked_peek['user_id'])
-
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id)
         with _acquire_user_balance_locks(lock_user_ids):
             return self._process_reject_quest_locked(approver_id, history_id, reason)
 
@@ -718,19 +728,7 @@ class QuestService:
         # quest_users もカスケードしてロールバックするため、相方のユーザーIDも
         # 合わせてロックする(#98)。history_id が不正/他人の履歴の場合の404/403は
         # 従来どおり _process_cancel_quest_locked 側で検出される。
-        lock_user_ids = [user_id]
-        with common.get_db_cursor() as cur:
-            hist_peek = cur.execute(
-                "SELECT linked_history_id FROM quest_history WHERE id = ?", (history_id,)
-            ).fetchone()
-        if hist_peek and hist_peek['linked_history_id'] is not None:
-            with common.get_db_cursor() as cur:
-                linked_peek = cur.execute(
-                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
-                ).fetchone()
-            if linked_peek:
-                lock_user_ids.append(linked_peek['user_id'])
-
+        lock_user_ids = self._get_lock_user_ids_for_history(history_id, primary_user_id=user_id)
         with _acquire_user_balance_locks(lock_user_ids):
             return self._process_cancel_quest_locked(user_id, history_id)
 
@@ -786,7 +784,7 @@ class QuestService:
         _process_complete_quest_locked(完了APIのサーバー側検証、Issue #163)の
         両方から呼ばれる共通ロジック。表示上出現していないクエストがAPI直叩きで
         完了できてしまう食い違いを防ぐため、判定基準を完全に一致させている。"""
-        now = now or datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        now = now or datetime.datetime.now(JST)
         today_date = now.date()
         current_time_str = now.strftime("%H:%M")
 
@@ -830,15 +828,15 @@ class QuestService:
 
     def filter_active_quests(self, quests: List[dict]) -> List[dict]:
         filtered = []
-        now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+        now = datetime.datetime.now(JST)
 
         for q in quests:
             if not self._is_quest_currently_active(q, now):
                 continue
 
-            q['icon'] = q['icon_key']
-            q['type'] = q['quest_type']
-            q['target'] = q['target_user']
+            # #291: quest_master由来の値そのまま(icon_key/quest_type/target_user)を
+            # 正とし、以前ここで追加していた icon/type/target というフィールド名の
+            # 二重化(useGameData.tsからの起点調査で発覚)は廃止した。
             q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None
             filtered.append(q)
         return filtered
@@ -1163,13 +1161,16 @@ class GameSystem:
 
             rewards = [dict(row) for row in cur.execute("SELECT * FROM reward_master")]
             for r in rewards:
-                r['icon'] = r['icon_key']
-                r['cost'] = r['cost_gold']
+                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold
+                # の別名)を廃止し、DBの実カラム名に一本化する。desc は
+                # description の同期用レガシー列(sync_strict.py参照)であり、
+                # このビュー応答では description のみを正としてdesc自体を落とす。
+                r.pop('desc', None)
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
             try:
-                now_jst = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+                now_jst = datetime.datetime.now(JST)
                 one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
             except Exception as jst_err:
                 # 万が一のタイムゾーンエラーに対する防御型フォールバック（Safety Guard）

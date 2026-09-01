@@ -58,7 +58,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | --- | --- |
 | [quest_router.md](./quest_router.md) | フロントエンド(Family Quest)からのリクエストを処理するクエストAPIルーティング。 |
 | [quest_service.md](./quest_service.md) | ユーザーのレベル計算、経験値(コイン)の付与・消費、報酬インベントリの管理を計算し、DBへ永続化する。 |
-| [game_logic.md](./game_logic.md) | ボス討伐状況の更新など、レベルアップ必要経験値・最大HP・ドロップ報酬計算といったゲームルールロジック。 |
+| [game_logic.md](./game_logic.md) | レベルアップ必要経験値・最大HP・ドロップ報酬計算といったゲームルールロジック。旧版に記載のあった「ボス討伐状況の更新」はボス機能の廃止（`d1599d6`）に伴い該当ロジックが削除されている。 |
 | [quest.md](./quest.md) | クエストシステムのドメイン/リクエスト/レスポンス/インベントリモデルを定義するPydanticモデル群。 |
 | [quest_data.md](./quest_data.md) | Family Questのマスターデータ（ユーザー情報、クエスト定義、報酬定義）を定義する純粋なデータ定義モジュール。 |
 | [reset_game.md](./reset_game.md) | Family QuestのDB上のユーザーゲームデータ（レベル・経験値・ゴールド・メダル数）をリセットするCLIスクリプト。 |

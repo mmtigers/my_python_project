@@ -19,7 +19,7 @@
 * [notification_service.md](./notification_service.md) - `notification_service.send_push`の実体(`services.notification_service`)
 * [switchbot_service.md](./switchbot_service.md) - `switchbot_service.send_device_command`の実体(TVロック解除、`_trigger_tv_unlock`内でローカルインポート)
 * [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`等の設定値の提供元
-* [fix_quest_reset_period.md](./fix_quest_reset_period.md) - `quest_master.reset_period`列の値(`'weekly_monday'`→`'daily'`)を一括修正するワンショットスクリプト。本ファイルの`is_within_reset_period`が`'daily'`/`'weekly'`の2値しか扱わないことと関連が疑われる
+* `fix_quest_reset_period.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `quest_master.reset_period`列の値(`'weekly_monday'`→`'daily'`)を一括修正するワンショットスクリプト。本ファイルの`is_within_reset_period`が`'daily'`/`'weekly'`の2値しか扱わないことと関連が疑われる
 
 ## 2. ファイルの概要
 
@@ -46,23 +46,21 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 | `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 2) |
 | `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 3) |
 | `math` | 標準ライブラリ | インポートされているが、本ファイル内では`math.`の呼び出しは一切確認できない(未使用) | `import math` (行番号: 4) |
-| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行(ローカル再インポートあり) | `import threading` (行番号: 5) |
-| `pytz` | 外部ライブラリ | タイムゾーン(`Asia/Tokyo`)の設定 | `import pytz` (行番号: 6) |
-| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 7) |
-| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 8) |
-| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 10) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 11) |
-| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 12) |
-| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 13) |
-| `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 14) |
-| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notification_service` (行番号: 15) |
-| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 16) |
-| `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 19) |
-| `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`) | `import quest_data` / `from .. import quest_data` (行番号: 30, 33) |
-| `datetime` (ローカル再インポート) | 標準ライブラリ | `is_within_reset_period`内でトップレベルの`datetime`を再度インポート(冗長) | `import datetime` (行番号: 161) |
-| `threading` (ローカル再インポート) | 標準ライブラリ | `_trigger_tv_unlock`内でトップレベルの`threading`を再度インポート(冗長) | `import threading` (行番号: 462) |
-| `services.switchbot_service` | 内部モジュール(関数内ローカルインポート) | TVプラグのON操作コマンド送信 | `from services import switchbot_service` (行番号: 463) |
-| `services.notification_service` (ローカル再インポート) | 内部モジュール | `_trigger_tv_unlock`内でモジュールレベルと同じものを再度インポート(冗長) | `from services import notification_service` (行番号: 464) |
+| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行 | `import threading` (行番号: 5) |
+| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 6) |
+| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 7) |
+| `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 9) |
+| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 10) |
+| `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 11) |
+| `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 12) |
+| `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 13) |
+| `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notification_service, switchbot_service` (行番号: 14) |
+| `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`_trigger_tv_unlock`)。**（Issue #293で修正）** 以前は`_trigger_tv_unlock`内のローカルimportのみでモジュールレベルには無かったが、`notification_service`と同じ行でモジュールレベルへ統合した。 | `from services import notification_service, switchbot_service` (行番号: 14) |
+| `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 15) |
+| `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 18) |
+| `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`) | `import quest_data` / `from .. import quest_data` |
+
+**（Issue #293で削除）** `pytz`(外部ライブラリ、`Asia/Tokyo`タイムゾーン用)は、モジュールレベル定数`JST`(標準ライブラリの固定オフセット版、後述)への一本化に伴い本ファイルから完全に不要になったため削除した。同様に、`is_within_reset_period`内のローカル`import datetime`(冗長)、`_trigger_tv_unlock`内のローカル`import threading`・`from services import notification_service`(いずれも冗長、モジュールレベルで既にインポート済み)も削除した。
 
 ### ブラックボックスとなる外部要素
 
@@ -86,6 +84,12 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: `ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'` (行番号: 24〜25)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの文字列定数）
 * 根拠: (行番号: 23〜25 / 抜粋: "# quest_users.role の値 (親権限判定はこの2値のみを唯一の判定基準とする)")
+
+### `JST` (モジュールレベル定数)
+
+* **役割**: **（Issue #293で新規追加）** JST(日本標準時、UTC+9固定・DSTなし)を表す`datetime.timezone`インスタンス。以前は`_seconds_since_iso_timestamp`/`is_within_reset_period`/`calculate_quest_boost`/`_is_quest_currently_active`/`filter_active_quests`/`get_all_view_data`がそれぞれ独立に、`datetime.timezone(datetime.timedelta(hours=9))`(標準ライブラリ)または`pytz.timezone("Asia/Tokyo")`(pytz)という2通りの異なる方法でJSTを組み立てていたため、この定数へ一本化した。標準ライブラリの固定オフセット版を採用したのは、`is_within_reset_period`内に`dt.replace(tzinfo=JST)`という`.replace()`呼び出しがあり、pytzのtimezoneオブジェクトを`.replace(tzinfo=...)`に直接使うと不正なオフセット(この地域ではLMT起源の+09:19)を返す既知の落とし穴があるため。一本化に伴い、本ファイルは`pytz`への依存自体が不要になり`import pytz`を削除した。
+* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')`
+* **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの定数）
 
 ### `_seconds_since_iso_timestamp` (モジュールレベル関数)
 
@@ -193,7 +197,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.is_within_reset_period`
 
-* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する（`'weekly_monday'`はこれに該当する値の一例で、`quest_master`のテーブル定義(`current_schema.sql`)側の`reset_period`列DEFAULTとして残存するが、`sync_master_data`が列追加マイグレーション時に設定するデフォルト値は現在`'daily'`であり`sync_master_data`自身が`'weekly_monday'`を設定することはない。詳細は8節を参照）。
+* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する（`'weekly_monday'`はこれに該当する値の一例で、`quest_master`のテーブル定義(`current_schema.sql`)側の`reset_period`列DEFAULTとして残存するが、`sync_master_data`が列追加マイグレーション時に設定するデフォルト値は現在`'daily'`であり`sync_master_data`自身が`'weekly_monday'`を設定することはない。詳細は8節を参照）。**（Issue #293で修正）** 以前はこの関数内でローカルに`import datetime`し(ファイル冒頭で既にモジュールレベルimport済みで完全に無駄な再インポートだった)、`JST`変数もこの関数内で毎回組み立てていたが、`calculate_quest_boost`/`_is_quest_currently_active`/`filter_active_quests`/`get_all_view_data`がそれぞれ独立に(一部はpytzベースで)同じJSTを組み立てていた重複を解消するため、ファイル冒頭のモジュールレベル定数`JST`(`datetime.timezone(datetime.timedelta(hours=9), 'JST')`)へ一本化した。`dt.replace(tzinfo=JST)`という`.replace()`呼び出しがこの関数内にあるため、`pytz.timezone("Asia/Tokyo")`ではなく標準ライブラリの固定オフセット版を統一先として採用している(pytzのtimezoneオブジェクトを`.replace(tzinfo=...)`に直接使うと、この地域ではLMT起源の不正なオフセット+09:19になる既知の落とし穴があるため)。
 * 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 208〜242)
 * 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 225〜226 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
 * 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242)
@@ -314,18 +318,24 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * **エラーハンドリング**: なし（`_get_sibling_partner_id`から送出される`HTTPException`はそのまま伝播）
 * 根拠: (行番号: 388〜417)
 
+### `QuestService._get_lock_user_ids_for_history`
+
+* **役割**: **（Issue #293で新規追加）** `history_id`に対応する`quest_history`行から、ユーザー単位ロックの対象とすべきuser_id一覧を求める共通ヘルパー。連結履歴(`linked_history_id`)がある場合は相方のuser_idも含める(#98)。`process_approve_quest`/`process_reject_quest`/`process_cancel_quest`がそれぞれ個別に実装していた「対象履歴をpeekして相方を辿り、ロック対象ユーザーをまとめる」ほぼ同一のロジック(前2者はコード上完全に同一)を一元化したもので、挙動そのものは変更していない純粋なリファクタリング。
+* 根拠: `def _get_lock_user_ids_for_history(self, history_id: int, primary_user_id: Optional[str] = None) -> List[str]:`
+* **引数/リクエスト**: `history_id: int`, `primary_user_id: Optional[str] = None`
+* **戻り値/レスポンス**: `List[str]`。`primary_user_id`を渡さない場合は`quest_history.user_id`を主対象として使い、対象履歴が存在しなければ`HTTPException(404)`を送出する(`process_approve_quest`/`process_reject_quest`の従来の挙動)。`primary_user_id`を渡した場合はそれを主対象としてそのまま使い、対象履歴が存在しなくても404は送出しない(`process_cancel_quest`の従来の挙動。存在確認自体は`_process_cancel_quest_locked`側に委ねる)。いずれの場合も連結履歴があれば相方のuser_idをリストへ追加する。
+* **副作用**: 軽量な参照クエリ（`quest_history`から`user_id`・`linked_history_id`をSELECT。連結履歴がある場合は相方の`user_id`もSELECT）
+* **エラーハンドリング**: `primary_user_id`未指定かつ対象履歴が見つからない場合のみ`HTTPException(404, "History not found")`を送出する。
+
 ### `QuestService.process_approve_quest`
 
-* **役割**: ロック対象ユーザー（`quest_history`の本来の完了者。gold/exp更新の対象であり、承認者`approver_id`とは別人）と、連結された相方（存在する場合）を`history_id`から軽量な参照クエリで先に特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_approve_quest_locked`に委譲する薄いラッパー（H-3）。連結履歴がある場合に相方のIDも合わせてロックするのは、`_process_approve_quest_locked`が`_approve_linked_history`経由で相方の`quest_users`もカスケード更新するためで、報告者のロックのみでは相方を対象とする別の並行承認/取消とのlost updateを防げなかった（Issue #98）。
-* 根拠: 関数冒頭のコメント (行番号: 387〜390 / 抜粋: "兄妹連携クエスト\n        # (linked_history_id あり)の場合は、承認時に相方の quest_users も\n        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。")
+* **役割**: `_get_lock_user_ids_for_history`(Issue #293で追加された共通ヘルパー)でロック対象ユーザー（`quest_history`の本来の完了者。gold/exp更新の対象であり、承認者`approver_id`とは別人）と連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_approve_quest_locked`に委譲する薄いラッパー（H-3）。連結履歴がある場合に相方のIDも合わせてロックするのは、`_process_approve_quest_locked`が`_approve_linked_history`経由で相方の`quest_users`もカスケード更新するためで、報告者のロックのみでは相方を対象とする別の並行承認/取消とのlost updateを防げなかった（Issue #98）。
+* 根拠: 関数冒頭のコメント (抜粋: "兄妹連携クエスト\n        # (linked_history_id あり)の場合は、承認時に相方の quest_users も\n        # カスケードして書き換えるため、相方のユーザーIDも合わせてロックする(#98)。")
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`
-* 根拠: (行番号: 386)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`_process_approve_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 408 / 抜粋: "return self._process_approve_quest_locked(approver_id, history_id)")
-* **副作用**: 軽量な参照クエリ（`quest_history`から`user_id`・`linked_history_id`をSELECT。連結履歴がある場合は相方の`user_id`もSELECT）、複数ユーザー分のロックの取得・解放
-* 根拠: (行番号: 391〜405, 407)
-* **エラーハンドリング**: 参照クエリで該当履歴が見つからない場合 `HTTPException(404)`（内部の`_process_approve_quest_locked`の例外はそのまま伝播）
-* 根拠: (行番号: 395〜396 / 抜粋: "if not hist_peek:\n            raise HTTPException(status_code=404, detail=\"History not found\")")
+* 根拠: (抜粋: "return self._process_approve_quest_locked(approver_id, history_id)")
+* **副作用**: `_get_lock_user_ids_for_history`経由の軽量な参照クエリ、複数ユーザー分のロックの取得・解放
+* **エラーハンドリング**: 参照クエリで該当履歴が見つからない場合 `HTTPException(404)`(`_get_lock_user_ids_for_history`が送出。内部の`_process_approve_quest_locked`の例外はそのまま伝播)
 
 ### `QuestService._process_approve_quest_locked`
 
@@ -362,24 +372,20 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: (行番号: 406)
 * **戻り値/レスポンス**: なし（`return`文なし）
 * 根拠: (行番号: 406〜431)
-* **副作用**: `threading`・`switchbot_service`・`notification_service`のローカル再インポート、別スレッド生成（`daemon=True`）、外部API呼び出し、失敗時はLINE通知
-* 根拠: (行番号: 407〜409, 429〜431, 414, 424〜427)
+* **副作用**: 別スレッド生成（`daemon=True`）、外部API呼び出し、失敗時はLINE通知。**（Issue #293で修正）** 以前は`threading`・`switchbot_service`・`notification_service`をこの関数内でローカル再インポートしていたが、`threading`と`notification_service`はファイル冒頭で既にモジュールレベルimport済みであり完全に無駄な再インポートだった。`switchbot_service`はモジュールレベルに無かったため、一貫性のため`from services import notification_service, switchbot_service`としてモジュールレベルへ統合し、この関数内のローカルimport 3行は削除した。
+* 根拠: (抜粋: "外部API呼び出し、失敗時はLINE通知")
 * **エラーハンドリング**: API呼び出しの例外・非成功レスポンス(`statusCode != 100`)を`Exception`としてまとめて捕捉し、ログ出力のうえ`config.LINE_PARENTS_GROUP_ID`が設定されていれば親グループへ失敗通知を送る（Fail-Soft）
 * 根拠: (行番号: 419〜427 / 抜粋: "except Exception as e:\n                logger.error(f\"❌ TV Unlock failed: {e}\")")
 
 ### `QuestService.process_reject_quest`
 
-* **役割**: 対象ユーザーと、連結された相方（存在する場合）を`history_id`から軽量な参照クエリで特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_reject_quest_locked`に委譲する薄いラッパー。**（Issue #228で追加）** 以前は`process_reject_quest`がこのロックに一切参加していなかったため、同一`history_id`に対する承認(`process_approve_quest`)と却下がほぼ同時に実行されると、承認側が先に`quest_users`へgold/expを加算・コミットした後に却下の`UPDATE`がコミットされ、`quest_history.status`は`'rejected'`になるのに付与済みの報酬は一切ロールバックされないという不整合が実機で確認されていた。`process_approve_quest`/`process_cancel_quest`と同じロックに参加させることでこれら3操作を相互に直列化し、この不整合を防ぐ。連結履歴がある場合に相方のIDも合わせてロックする理由は`process_approve_quest`/`process_cancel_quest`と同じ（Issue #98）。
-* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 555〜577)
-* 根拠: [ロック取得部] (行番号: 564〜577 / 抜粋: "with common.get_db_cursor() as cur:\n            hist_peek = cur.execute(\n                \"SELECT user_id, linked_history_id FROM quest_history WHERE id = ?\", (history_id,)\n            ).fetchone()" / "with _acquire_user_balance_locks(lock_user_ids):\n            return self._process_reject_quest_locked(approver_id, history_id, reason)")
+* **役割**: `_get_lock_user_ids_for_history`(Issue #293で追加された共通ヘルパー)で対象ユーザーと連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_reject_quest_locked`に委譲する薄いラッパー。**（Issue #228で追加）** 以前は`process_reject_quest`がこのロックに一切参加していなかったため、同一`history_id`に対する承認(`process_approve_quest`)と却下がほぼ同時に実行されると、承認側が先に`quest_users`へgold/expを加算・コミットした後に却下の`UPDATE`がコミットされ、`quest_history.status`は`'rejected'`になるのに付与済みの報酬は一切ロールバックされないという不整合が実機で確認されていた。`process_approve_quest`/`process_cancel_quest`と同じロックに参加させることでこれら3操作を相互に直列化し、この不整合を防ぐ。連結履歴がある場合に相方のIDも合わせてロックする理由は`process_approve_quest`/`process_cancel_quest`と同じ（Issue #98）。
+* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:`
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
-* 根拠: (行番号: 555)
 * **戻り値/レスポンス**: `Dict[str, str]`（`_process_reject_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 577 / 抜粋: "return self._process_reject_quest_locked(approver_id, history_id, reason)")
-* **副作用**: 軽量な参照クエリ（`hist_peek`、連結履歴がある場合は相方の`user_id`もSELECT）、複数ユーザー分のロックの取得・解放
-* 根拠: (行番号: 564〜576)
-* **エラーハンドリング**: 参照クエリで該当履歴が見つからない場合 `HTTPException(404)`（内部の`_process_reject_quest_locked`の例外はそのまま伝播）
-* 根拠: (行番号: 566〜567 / 抜粋: "if not hist_peek:\n            raise HTTPException(status_code=404, detail=\"History not found\")")
+* 根拠: (抜粋: "return self._process_reject_quest_locked(approver_id, history_id, reason)")
+* **副作用**: `_get_lock_user_ids_for_history`経由の軽量な参照クエリ、複数ユーザー分のロックの取得・解放
+* **エラーハンドリング**: 参照クエリで該当履歴が見つからない場合 `HTTPException(404)`(`_get_lock_user_ids_for_history`が送出。内部の`_process_reject_quest_locked`の例外はそのまま伝播)
 
 ### `QuestService._process_reject_quest_locked`
 
@@ -411,16 +417,13 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.process_cancel_quest`
 
-* **役割**: 対象ユーザーと、連結された相方（存在する場合）を`history_id`から軽量な参照クエリで特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_cancel_quest_locked`に委譲する薄いラッパー（H-3）。`process_approve_quest`とは異なり、報告者側のロック対象は引数の`user_id`そのものであるため事前の参照クエリは不要だが、連結履歴がある場合は相方のIDを特定するための参照クエリが必要になる。連結履歴がある場合に相方のIDも合わせてロックするのは、`_process_cancel_quest_locked`が`_revert_and_delete_history`経由で相方の`quest_users`もカスケード更新するためで、報告者のロックのみでは相方を対象とする別の並行承認/取消とのlost updateを防げなかった（Issue #98）。
-* 根拠: `def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:` (行番号: 563〜582)
+* **役割**: `_get_lock_user_ids_for_history`(Issue #293で追加された共通ヘルパー。`primary_user_id=user_id`を渡す)で対象ユーザーと連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_cancel_quest_locked`に委譲する薄いラッパー（H-3）。`process_approve_quest`/`process_reject_quest`とは異なり報告者側のロック対象は引数の`user_id`そのものであるため、`_get_lock_user_ids_for_history`には`primary_user_id`を明示的に渡し、対象履歴が存在しなくても404を送出させない(`history_id`が不正な場合や`user_id`不一致の検出は従来どおり`_process_cancel_quest_locked`側に委ねる)。連結履歴がある場合に相方のIDも合わせてロックするのは、`_process_cancel_quest_locked`が`_revert_and_delete_history`経由で相方の`quest_users`もカスケード更新するためで、報告者のロックのみでは相方を対象とする別の並行承認/取消とのlost updateを防げなかった（Issue #98）。
+* 根拠: `def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:`
 * **引数/リクエスト**: `user_id: str`, `history_id: int`
-* 根拠: (行番号: 563)
 * **戻り値/レスポンス**: `Dict[str, str]`（`_process_cancel_quest_locked`の戻り値をそのまま返却）
-* 根拠: (行番号: 582 / 抜粋: "return self._process_cancel_quest_locked(user_id, history_id)")
-* **副作用**: 軽量な参照クエリ（連結履歴がある場合、相方の`user_id`をSELECT）、複数ユーザー分のロックの取得・解放
-* 根拠: (行番号: 569〜579, 581)
+* 根拠: (抜粋: "return self._process_cancel_quest_locked(user_id, history_id)")
+* **副作用**: `_get_lock_user_ids_for_history`経由の軽量な参照クエリ（連結履歴がある場合、相方の`user_id`をSELECT）、複数ユーザー分のロックの取得・解放
 * **エラーハンドリング**: なし（内部の例外はそのまま伝播。`history_id`が不正な場合や`user_id`不一致は`_process_cancel_quest_locked`側で検出される）
-* 根拠: (行番号: 563〜582)
 
 ### `QuestService._process_cancel_quest_locked`
 
@@ -450,9 +453,10 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService.filter_active_quests`
 
-* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`icon`/`type`/`target`/`days`のエイリアスフィールドを付与する。Issue #163で、期間・曜日・時間帯・出現確率の判定本体は`_is_quest_currently_active`へ切り出され、本関数はそれを1件ずつ呼び出して`False`ならスキップするだけの薄いループになった（`_process_complete_quest_locked`のサーバー側検証と判定基準を完全に一致させるため）。
-* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 741〜754)
-* 根拠: `if not self._is_quest_currently_active(q, now):\n                continue` (行番号: 746〜747)
+* **役割**: クエストの期間（`limited`型の`start_date`/`end_date`）、曜日（`day_of_week`）、時間帯（`start_time`/`end_time`）、出現確率（`random`型、日付とクエストIDから決定的シードで判定）をもとに、現在有効なクエスト一覧に絞り込み、各クエストへ`days`（`day_of_week`をカンマ区切りの整数リストへ変換した派生フィールド）を付与する。Issue #163で、期間・曜日・時間帯・出現確率の判定本体は`_is_quest_currently_active`へ切り出され、本関数はそれを1件ずつ呼び出して`False`ならスキップするだけの薄いループになった（`_process_complete_quest_locked`のサーバー側検証と判定基準を完全に一致させるため）。**（#291で修正）** 以前ここで付与していた`icon`/`type`/`target`という`icon_key`/`quest_type`/`target_user`の別名（重複フィールド名。フロントエンドの`useGameData.ts`起点の調査で発覚）は廃止され、`quest_master`由来のフィールド名（`icon_key`/`quest_type`/`target_user`）がそのままレスポンスの正となる。
+* 根拠: `def filter_active_quests(self, quests: List[dict]) -> List[dict]:` (行番号: 831〜843)
+* 根拠: `if not self._is_quest_currently_active(q, now):\n                continue` (行番号: 836〜837)
+* 根拠: エイリアス廃止のコメントと`days`付与 (行番号: 839〜842 / 抜粋: "# #291: quest_master由来の値そのまま(icon_key/quest_type/target_user)を\n            # 正とし、以前ここで追加していた icon/type/target というフィールド名の\n            # 二重化(useGameData.tsからの起点調査で発覚)は廃止した。\n            q['days'] = [int(d) for d in q['day_of_week'].split(',')] if q['day_of_week'] else None")
 * **引数/リクエスト**: `quests: List[dict]`
 * 根拠: (行番号: 741)
 * **戻り値/レスポンス**: `List[dict]`
@@ -548,10 +552,11 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `GameSystem.get_all_view_data`
 
-* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
-* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 970)
-* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 987), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 991)
-* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1010〜1017)
+* **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。`reward_master`から取得した各報酬については、**（#291で修正）** 以前ここで付与していた`icon`/`cost`という`icon_key`/`cost_gold`の別名（重複フィールド名）は廃止され、DBの実カラム名（`icon_key`/`cost_gold`）がそのまま正となる。あわせて、`description`の同期用レガシー列である`reward_master.desc`（`sync_strict.py`が書き込む）はこのビュー応答からは`dict.pop`で除去され、`description`のみが公開される。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
+* 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 1131)
+* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 1147), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 1151)
+* 根拠: 報酬フィールドの一本化 (行番号: 1164〜1170 / 抜粋: "rewards = [dict(row) for row in cur.execute(\"SELECT * FROM reward_master\")]\n            for r in rewards:\n                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold\n                # の別名)を廃止し、DBの実カラム名に一本化する。desc は\n                # description の同期用レガシー列(sync_strict.py参照)であり、\n                # このビュー応答では description のみを正としてdesc自体を落とす。\n                r.pop('desc', None)")
+* 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1173〜1177)
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（省略時は`None`。`target_user`が実在ユーザーでない共有クエストのボーナス計算で、閲覧中ユーザーの代表IDとして使われる）
 * 根拠: (行番号: 970)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`users`, `quests`, `rewards`, `completedQuests`, `logs`, `pendingQuests`）
