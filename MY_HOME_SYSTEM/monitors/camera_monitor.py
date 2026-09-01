@@ -560,7 +560,6 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                     try:
                         alert_msg: str = f"🚨 **カメラ監視アラート**\n[{cam_name}] の接続障害が継続しています（連続{consecutive_errors}回失敗）。\n詳細: {err_msg}"
                         send_push(
-                            config.LINE_USER_ID or "",
                             [{"type": "text", "text": alert_msg}],
                             target="discord",
                             channel="error"

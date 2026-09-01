@@ -178,7 +178,8 @@
 
 
 * **副作用**: `get_service_status`と`is_process_alive`の呼び出し、ロックファイルの作成/更新/削除（`touch`, `unlink`）、`send_push`による通知送信（復旧・停止・リマインダーの3パターン）、ログ出力。
-* 根拠: `send_push(...MSG_RECOVERED...)` (行番号: 168 / 抜粋: "send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")"), `LOCK_FILE.unlink()` (行番号: 169), `send_push(...MSG_STOPPED...)` (行番号: 179 / 抜粋: "send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")"), `send_push(...MSG_REMINDER...)` (行番号: 184 / 抜粋: "send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")"), `LOCK_FILE.touch()` (行番号: 188)
+* 根拠: `send_push(...MSG_RECOVERED...)` (行番号: 168 / 抜粋: "send_push([{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")"), `LOCK_FILE.unlink()` (行番号: 169), `send_push(...MSG_STOPPED...)` (行番号: 179 / 抜粋: "send_push([{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")"), `send_push(...MSG_REMINDER...)` (行番号: 184 / 抜粋: "send_push([{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")"), `LOCK_FILE.touch()` (行番号: 188)
+* Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しでは`user_id`(旧: 第1引数の`config.LINE_USER_ID`)が不要になったため、3箇所とも`messages`のみを渡す形に更新された。
 
 
 * **エラーハンドリング**: 全体で `Exception` をキャッチし、例外発生時はエラートレースをログに出力する。
