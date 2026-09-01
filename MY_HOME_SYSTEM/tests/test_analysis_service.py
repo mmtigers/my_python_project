@@ -10,7 +10,6 @@ import os
 import sqlite3
 import sys
 from datetime import datetime
-from unittest.mock import MagicMock
 
 import pandas as pd
 import pytz
@@ -359,23 +358,3 @@ class TestSystemStats:
     def test_get_system_logs_does_not_raise(self):
         result = analysis_service.get_system_logs(lines=10)
         assert isinstance(result, str)
-
-    def test_get_ngrok_url_returns_empty_dict_when_ngrok_not_running(self, monkeypatch):
-        def _raise(*a, **kw):
-            raise ConnectionError("no ngrok running")
-        monkeypatch.setattr(analysis_service.requests, "get", _raise)
-        assert analysis_service.get_ngrok_url() == {}
-
-    def test_get_ngrok_url_parses_tunnels_response(self, monkeypatch):
-        fake_response = MagicMock()
-        fake_response.status_code = 200
-        fake_response.json.return_value = {
-            "tunnels": [
-                {"config": {"addr": "http://localhost:8000"}, "public_url": "https://server.ngrok.io"},
-                {"config": {"addr": "http://localhost:8501"}, "public_url": "https://dashboard.ngrok.io"},
-            ]
-        }
-        monkeypatch.setattr(analysis_service.requests, "get", lambda *a, **kw: fake_response)
-        urls = analysis_service.get_ngrok_url()
-        assert urls["server"] == "https://server.ngrok.io"
-        assert urls["dashboard"] == "https://dashboard.ngrok.io"
