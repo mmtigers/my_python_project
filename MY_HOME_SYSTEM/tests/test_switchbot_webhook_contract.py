@@ -243,5 +243,5 @@ class TestContactSensorEndToEndNotification:
 
         assert result["status"] == "success"
         mock_send_push.assert_called_once()
-        sent_msg = mock_send_push.call_args.args[1][0]["text"]
+        sent_msg = mock_send_push.call_args.kwargs["messages"][0]["text"]
         assert "開きました" in sent_msg
