@@ -109,7 +109,6 @@ def _notify_and_log_error(message: str) -> None:
     """ERRORレベルの記録と管理者への即時通知を行う [cite: 361, 387]"""
     logger.error(f"❌ {message}")
     send_push(
-        user_id=getattr(config, "LINE_USER_ID", None),
         messages=[{"type": "text", "text": f"🚨 【重要】バックアップ失敗報\n{message}"}],
         target="discord",
         channel="report"

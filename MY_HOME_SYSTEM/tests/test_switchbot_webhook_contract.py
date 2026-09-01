@@ -168,7 +168,7 @@ class TestOfficialMotionPayloadTriggersNotification:
             assert svc.IS_ACTIVE.get("AA:BB:CC:DD:EE:02") is True
             assert "AA:BB:CC:DD:EE:02" in svc.MOTION_TASKS
             mock_send_push.assert_called_once()
-            sent_msg = mock_send_push.call_args.args[1][0]["text"]
+            sent_msg = mock_send_push.call_args.kwargs["messages"][0]["text"]
             assert "動きがありました" in sent_msg
         finally:
             if "AA:BB:CC:DD:EE:02" in svc.MOTION_TASKS:
@@ -243,5 +243,5 @@ class TestContactSensorEndToEndNotification:
 
         assert result["status"] == "success"
         mock_send_push.assert_called_once()
-        sent_msg = mock_send_push.call_args.args[1][0]["text"]
+        sent_msg = mock_send_push.call_args.kwargs["messages"][0]["text"]
         assert "開きました" in sent_msg

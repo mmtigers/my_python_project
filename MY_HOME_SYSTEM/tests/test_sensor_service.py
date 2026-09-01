@@ -75,8 +75,8 @@ class TestProcessSensorDataMotion:
         assert sensor_service.IS_ACTIVE["mac_motion"] is True
         assert "mac_motion" in sensor_service.MOTION_TASKS
         mock_send.assert_called_once()
-        args = mock_send.call_args[0]
-        assert "動きがありました" in args[1][0]["text"]
+        kwargs = mock_send.call_args.kwargs
+        assert "動きがありました" in kwargs["messages"][0]["text"]
 
     async def test_motion_detected_while_already_active_does_not_resend_notification(self):
         sensor_service.IS_ACTIVE["mac_motion"] = True
@@ -101,8 +101,8 @@ class TestProcessSensorDataMotion:
         assert sensor_service.IS_ACTIVE["mac_motion"] is True
         assert "mac_motion" in sensor_service.MOTION_TASKS
         mock_send.assert_called_once()
-        args = mock_send.call_args[0]
-        assert "動きがありました" in args[1][0]["text"]
+        kwargs = mock_send.call_args.kwargs
+        assert "動きがありました" in kwargs["messages"][0]["text"]
 
 
 @pytest.mark.asyncio
@@ -209,7 +209,7 @@ class TestProcessPowerData:
             await sensor_service.process_power_data("dev1", "エアコン", 500, {"power_threshold_watts": 100})
 
         mock_send.assert_called_once()
-        msg = mock_send.call_args[0][1][0]["text"]
+        msg = mock_send.call_args.kwargs["messages"][0]["text"]
         assert "使用開始" in msg
 
     async def test_crossing_threshold_downward_sends_off_notification(self, isolated_db):
@@ -222,7 +222,7 @@ class TestProcessPowerData:
             await sensor_service.process_power_data("dev1", "エアコン", 5, {"power_threshold_watts": 100})
 
         mock_send.assert_called_once()
-        msg = mock_send.call_args[0][1][0]["text"]
+        msg = mock_send.call_args.kwargs["messages"][0]["text"]
         assert "使用終了" in msg
 
     async def test_staying_below_threshold_does_not_notify(self, isolated_db):
