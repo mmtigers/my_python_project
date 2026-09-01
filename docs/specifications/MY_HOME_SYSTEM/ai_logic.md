@@ -6,7 +6,7 @@
 
 - [ai_service.md](./ai_service.md) — 後継実装。現在のAI解析（Gemini Function Calling）はこちらに一本化されている。
 - [line_handler.md](./line_handler.md) — 実際にLINE Webhookのテキストメッセージ処理を担っている呼び出し元（`_process_message_async()`）。
-- [line_logic.md](./line_logic.md) — 本ファイルを呼び出していたが、同時に到達不能なデッドコードとして削除された `handlers/line_logic.py` の仕様書。
+- [line_logic.md](./line_logic.md) — 本ファイルを呼び出していた `handlers/line_logic.py` の仕様書。`handlers/line_logic.py` 自体は削除されておらず現存する（PostbackEvent処理は引き続き提供）。同ファイル内の到達不能だった `handle_message()` 等一部関数のみが、本ファイルと同時にデッドコードとして削除された。
 
 ## 廃止理由
 

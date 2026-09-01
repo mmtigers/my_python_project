@@ -12,9 +12,9 @@
 - [config.md](./config.md) — `CAMERAS`、`ASSETS_DIR`、`MOTION_COOLDOWN_SEC`、`LINE_USER_ID`、`NVR_RECORD_DIR`等の設定を提供する。
 - [database.md](./database.md) — `save_log_generic`の実装元（`core/database.py`）。
 - [notification_service.md](./notification_service.md) — `send_push`の実装元。
-- [camera_digest_service.md](./camera_digest_service.md) — 本ファイルが生成するスナップショット画像の消費先。
+- `camera_digest_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — 本ファイルが生成するスナップショット画像の消費先。
 - [camera_service.md](./camera_service.md) — 同様のONVIF/WSDL動的探索ロジック（`find_wsdl_path`）を持つ姉妹モジュール（ライブ配信・録画用）。
-- [collect_onvif_logs.md](./collect_onvif_logs.md) — 同様にONVIFイベント（PullPointSubscription）を収集する別スクリプト。
+- `collect_onvif_logs.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — 同様にONVIFイベント（PullPointSubscription）を収集する別スクリプト。
 
 ## 2. ファイルの概要
 
