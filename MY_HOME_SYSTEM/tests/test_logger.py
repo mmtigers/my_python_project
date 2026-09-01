@@ -73,6 +73,36 @@ class TestEmitHandlesNonStringMsg:
             assert mock_post.call_count == 1
 
 
+class TestEmitReportsFailuresInsteadOfSwallowingThem:
+    """Issue #288の回帰テスト: emit()内で例外が起きた場合、以前は
+    `except Exception: pass` で完全に握りつぶされ、ハンドラの不調を検知する
+    手段がなかった。標準のhandleError()経由でsys.stderrに可視化されるようにする。
+    handleError()はlogging機構を再度通らないため、無限ループの心配はない。
+    """
+
+    def test_emit_calls_handle_error_when_formatting_fails(self, monkeypatch):
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
+        handler = DiscordErrorHandler()
+
+        with patch.object(handler, "format", side_effect=RuntimeError("boom")), \
+             patch.object(handler, "handleError") as mock_handle_error:
+            # 例外はemit()の外へ伝播しないこと。
+            handler.emit(_make_error_record())
+
+        mock_handle_error.assert_called_once()
+
+    def test_emit_calls_handle_error_when_thread_start_fails(self, monkeypatch):
+        monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
+        handler = DiscordErrorHandler()
+
+        with patch("core.logger.threading.Thread") as mock_thread_cls, \
+             patch.object(handler, "handleError") as mock_handle_error:
+            mock_thread_cls.return_value.start.side_effect = RuntimeError("can't start new thread")
+            handler.emit(_make_error_record())
+
+        mock_handle_error.assert_called_once()
+
+
 class TestEmitSkipsDiscordOriginatedMessages:
     def test_emit_skips_when_msg_already_mentions_discord(self, monkeypatch):
         """Discord通知自体の失敗ログを再度Discordへ送って無限ループ/スパムするのを防ぐ既存挙動。"""

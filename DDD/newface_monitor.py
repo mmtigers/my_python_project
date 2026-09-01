@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional
 from urllib.parse import urljoin, urlparse, parse_qs
 
+from file_utils import DiscordCircuitBreaker
+
 # プロジェクトルート（DDDの親ディレクトリ）をパスに追加
 CURRENT_DIR = Path(__file__).resolve().parent # ~/develop/DDD
 PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM" # ~/develop/MY_HOME_SYSTEM
@@ -1286,6 +1288,9 @@ class DiscordNotifier:
         """
         self.webhook_url = webhook_url
         self.session = self._create_rate_limited_session()
+        # 連続送信失敗時に以降の送信をスキップするサーキットブレーカー
+        # (このインスタンスの生存期間=1回のプロセス実行の間だけ有効)
+        self._circuit_breaker = DiscordCircuitBreaker()
 
     def _create_rate_limited_session(self) -> requests.Session:
         """Discordのレート制限(429)に自動追従するHTTPセッションを作成する。
@@ -1331,6 +1336,15 @@ class DiscordNotifier:
         site_prefix = f"【{site_name}】" if site_name else ""
 
         for cast in new_casts:
+            if self._circuit_breaker.is_open:
+                # 連続送信失敗によりサーキットブレーカーが開いている間は、
+                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。
+                logger.warning(
+                    "Discord Webhookへの連続送信失敗を検知しているため、"
+                    "残りの通知をスキップします。"
+                )
+                break
+
             fields = [{"name": "Name", "value": cast.name, "inline": True}]
             if cast.age:
                 # 一覧ページ上に年齢表記が見つかったキャストのみ追加
@@ -1363,6 +1377,7 @@ class DiscordNotifier:
                 response = self.session.post(self.webhook_url, json=payload, timeout=10)
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
+                self._circuit_breaker.record_success()
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
@@ -1371,18 +1386,22 @@ class DiscordNotifier:
                 body = e.response.text[:300] if e.response is not None else ""
                 logger.error(
                     f"Failed to send notification for {cast.name}: {e} | body: {body} | "
-                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}"
+                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}",
+                    exc_info=True,
                 )
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
-                    # 無駄なだけなので打ち切る（サーキットブレーカー）。
+                    # 無駄なだけなので即座にブレーカーを開いて打ち切る。
                     logger.error(
                         f"Discord Webhook returned {status} — URL is likely invalid or revoked. "
                         "Aborting remaining notifications for this run."
                     )
+                    self._circuit_breaker.trip()
                     break
+                self._circuit_breaker.record_failure()
             except requests.RequestException as e:
-                logger.error(f"Failed to send notification for {cast.name}: {e}")
+                logger.error(f"Failed to send notification for {cast.name}: {e}", exc_info=True)
+                self._circuit_breaker.record_failure()
 
     def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
@@ -1403,6 +1422,12 @@ class DiscordNotifier:
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")
+            return False
+
+        if self._circuit_breaker.is_open:
+            logger.warning(
+                "Discord Webhookへの連続送信失敗を検知しているため、日次サマリ通知をスキップします。"
+            )
             return False
 
         if counts:
@@ -1427,9 +1452,11 @@ class DiscordNotifier:
             response = self.session.post(self.webhook_url, json=payload, timeout=10)
             response.raise_for_status()
             logger.info(f"Daily summary notification sent successfully for {date_str}.")
+            self._circuit_breaker.record_success()
             return True
         except requests.RequestException as e:
-            logger.error(f"Failed to send daily summary notification: {e}")
+            logger.error(f"Failed to send daily summary notification: {e}", exc_info=True)
+            self._circuit_breaker.record_failure()
             return False
 
 
@@ -1470,7 +1497,7 @@ class DataManager:
         try:
             return DataManager._read_casts_file(data_file)
         except DataManager._LOAD_ERRORS as e:
-            logger.error(f"Failed to load data from {data_file}: {e}")
+            logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)
 
         # 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける
         # ため、退避してから復旧を試みる。
@@ -1481,7 +1508,7 @@ class DataManager:
             data_file.rename(quarantine_path)
             logger.error(f"Quarantined corrupted cache file: {data_file} -> {quarantine_path}")
         except OSError as e:
-            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}")
+            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}", exc_info=True)
 
         # 直近の正常データがバックアップとして残っていれば、そこから復旧する
         # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。
@@ -1494,7 +1521,7 @@ class DataManager:
                 )
                 return casts
             except DataManager._LOAD_ERRORS as e:
-                logger.error(f"Backup file {backup_file} is also unusable: {e}")
+                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
         return set()
@@ -1574,7 +1601,7 @@ class DataManager:
             # record_daily_new_casts経由でsave_known_castsまで到達できず、
             # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
             # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
-            logger.error(f"Failed to load daily summary from {summary_file}: {e}")
+            logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
             return {}
 
     @staticmethod
@@ -1677,7 +1704,7 @@ class WebMonitor:
 
         except requests.RequestException as e:
             # 呼び出し元でハンドリングするために再送出、ただしログは記録する
-            logger.error(f"Network error during scraping of site '{site.site_id}': {e}")
+            logger.error(f"Network error during scraping of site '{site.site_id}': {e}", exc_info=True)
             raise
 
     def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:

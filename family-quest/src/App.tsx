@@ -100,9 +100,9 @@ const ConfirmModal = ({
       }
       case 'purchase': {
         const t = target as Reward;
-        // Lowバグ修正: masterData.jsのフォールバック報酬はcost_goldを持たず
-        // costのみのため、cost_gold単独参照だと「undefinedG」表示になっていた。
-        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold ?? t.cost}G で買いますか？` };
+        // #291: masterData.js のフォールバック報酬も含め cost_gold に一本化したため、
+        // cost へのフォールバックは不要になった。
+        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };
       }
       case 'reject':
         return { title: '却下確認', text: '本当に却下しますか？' };
@@ -242,8 +242,8 @@ function App() {
         // それでも「提出」自体は完了しているため、鳴らす対象・クールダウン対象から
         // pending を除外しない(除外すると子どもに対しては常に無音・無クールダウンになり、
         // 無限クエストを連打で何度も申請できてしまう)。
-        play(completedQuest.type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
-        const idForSignal = completedQuest.id ?? completedQuest.quest_id;
+        play(completedQuest.quest_type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
+        const idForSignal = completedQuest.quest_id;
         if (idForSignal !== undefined) {
           setCompletedSignal({ id: idForSignal, nonce: Date.now() });
         }
