@@ -2,9 +2,7 @@
 import streamlit as st
 import pandas as pd
 import subprocess
-import os
-import glob
-from datetime import datetime, date
+from datetime import date
 from services import analysis_service
 
 def render_logs(df_sensor: pd.DataFrame):
@@ -109,7 +107,6 @@ def render_system():
                     st.error(f"エラー: {e}")
     
     # バックアップ機能 (簡易実装)
-    import config
     from services import backup_service
     st.subheader("📦 バックアップ")
     if st.button("今すぐバックアップを実行"):

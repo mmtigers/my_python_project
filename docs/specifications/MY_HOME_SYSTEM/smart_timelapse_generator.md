@@ -51,7 +51,7 @@
 | --- | --- | --- |
 | `config`モジュール | 設定値の実体や環境変数とのマッピング仕様がファイル内に記述されていないため。 | `getattr(config, 'TIMELAPSE_FPS_ANALYZE', 1)` などの呼び出し (行番号: 41 / 抜粋: "getattr(config, 'TIMELAPSE_...") |
 | `core.logger.setup_logging` | 出力先、ログローテーション、フォーマットなどのロギング仕様が不明なため。 | `logger = setup_logging(__name__)` (行番号: 36 / 抜粋: "logger = setup_logging(**name**)") |
-| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`または`"error"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。 | `send_push(user_id, [...], target="discord", channel="report")` (行番号: 672〜677, 701〜706, 710〜715 / 抜粋: "send_push(\n                user_id,") |
+| `services.notification_service.send_push` | 実際の送信先プラットフォームの実装内容が不明なため。引数のマッピング(`target`/`channel`)自体は`notification_service.md`から判明しており、本ファイル側は`target="discord"`/`channel="report"`または`"error"`をキーワード引数で渡すよう修正済み(Issue #167)。動画生成が`False`を返した場合(例外なし)のエラー通知も追加済み(Issue #233)。Issue #289でsend_pushのシグネチャが再設計され、`target="discord"`のみの呼び出しに不要だった`user_id`(元は`getattr(config, "LINE_USER_ID", "")`)引数は撤去された。 | `send_push([...], target="discord", channel="report")` (行番号: 671〜676, 700〜705, 709〜714 / 抜粋: "send_push(\n                [{"type": "text"...") |
 | `ffmpeg`, `ffprobe` (外部コマンド) | システム上にインストールされた実行バイナリに依存しており、バージョンごとの挙動差異が保証されないため。 | `subprocess.run(["ffmpeg"...])` (行番号: 125 / 抜粋: "subprocess.run(["ffmpeg", "-ve...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）

@@ -1,21 +1,17 @@
 # MY_HOME_SYSTEM/unified_server.py
 import os
 import sys
-import asyncio
 import datetime
 import subprocess
-import signal
 import logging
-from contextlib import asynccontextmanager
 import ipaddress
 
 from typing import AsyncGenerator, Optional, Callable, Awaitable
 
-from fastapi import FastAPI, Request, HTTPException, Response
+from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
 
 # プロジェクトルートの解決
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -33,7 +29,6 @@ from services import sensor_service
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router
 
 # Handlers
-from handlers import line_handler
 
 # Logger
 logger = setup_logging("unified_server")

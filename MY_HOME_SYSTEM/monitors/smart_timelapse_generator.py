@@ -17,7 +17,7 @@ import re
 import requests
 from pathlib import Path
 from typing import List, Tuple, Dict, Any, Optional
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
 try:
@@ -653,7 +653,6 @@ def run_smart_timelapse_job(input_video: str) -> None:
 
 def _run_smart_timelapse_job_locked(input_video: str) -> None:
     t_start = time.perf_counter()
-    user_id = getattr(config, "LINE_USER_ID", "")
     if not check_dependencies(): return
 
     work, out, rec = setup_directories()
@@ -670,7 +669,6 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
         
         if not events:
             send_push(
-                user_id,
                 [{"type": "text", "text": f"ℹ️ {sum_info.target_date} の動きなし"}],
                 target="discord",
                 channel="report"
@@ -699,7 +697,6 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
                 # 通知が一切来ず、利用者は処理自体に気づけなかった。
                 logger.error(f"動画生成に失敗しました: {input_video}")
                 send_push(
-                    user_id,
                     [{"type": "text", "text": f"⚠️ {sum_info.target_date} のタイムラプス動画生成に失敗しました"}],
                     target="discord",
                     channel="error"
@@ -708,7 +705,6 @@ def _run_smart_timelapse_job_locked(input_video: str) -> None:
     except Exception as e:
         logger.error(f"エラー: {traceback.format_exc()}")
         send_push(
-            user_id,
             [{"type": "text", "text": f"⚠️ エラー: {str(e)}"}],
             target="discord",
             channel="error"

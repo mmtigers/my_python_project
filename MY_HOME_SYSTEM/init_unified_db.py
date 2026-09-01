@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/init_unified_db.py
 import sqlite3
-import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 import config
 import common
 from core.migrations import apply_pending_migrations

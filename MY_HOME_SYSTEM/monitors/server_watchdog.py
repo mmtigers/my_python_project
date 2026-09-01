@@ -5,7 +5,6 @@ import traceback
 from pathlib import Path
 import sys
 import os
-from typing import Optional
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -165,7 +164,7 @@ def check_health() -> None:
             logger.debug("Health Check: Service=%s, Process=%s", status, process_status_str)
             
             if LOCK_FILE.exists():
-                send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
+                send_push([{"type": "text", "text": MSG_RECOVERED}], target="discord", channel="notify")
                 LOCK_FILE.unlink()
                 logger.info("Recovery notification sent.")
         else:
@@ -176,12 +175,12 @@ def check_health() -> None:
             
             if not LOCK_FILE.exists():
                 should_notify = True
-                send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")
+                send_push([{"type": "text", "text": MSG_STOPPED}], target="discord", channel="error")
                 logger.info("Stop alert sent.")
             else:
                 if current_time - LOCK_FILE.stat().st_mtime > REMINDER_INTERVAL_SEC:
                     should_notify = True
-                    send_push(config.LINE_USER_ID, [{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")
+                    send_push([{"type": "text", "text": MSG_REMINDER}], target="discord", channel="error")
                     logger.info("Reminder alert sent.")
 
             if should_notify:

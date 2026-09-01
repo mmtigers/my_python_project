@@ -136,7 +136,6 @@ def main():
         try:
             # Discordへエラー通知
             common.send_push(
-                config.LINE_USER_ID,
                 [{"type": "text", "text": err_msg}],
                 target="discord",
                 channel="error",

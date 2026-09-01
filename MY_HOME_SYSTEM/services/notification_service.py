@@ -1,8 +1,6 @@
 # MY_HOME_SYSTEM/services/notification_service.py
-import json
-import logging
 import requests
-from typing import List, Optional, Any, Union
+from typing import List, Optional, Any
 
 # ▼▼▼ v3 Imports ▼▼▼
 from linebot.v3.messaging import (
@@ -12,9 +10,7 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
-    FlexMessage,
-    Message,
-    MessagingApiBlob
+    Message
 )
 # ▲▲▲ ▲▲▲
 import config
@@ -113,10 +109,28 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
         logger.error(f"LINE Push Error: {e}")
         return False
 
-def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = None, target: str = "both", channel: str = "notify", filename: str = "snapshot.jpg") -> bool:
-    """統合プッシュ通知関数"""
+def send_push(
+    messages: List[Any],
+    *,
+    target: str = "both",
+    channel: str = "notify",
+    user_id: Optional[str] = None,
+    image_data: Optional[bytes] = None,
+    filename: str = "snapshot.jpg",
+) -> bool:
+    """統合プッシュ通知関数。
+
+    宛先の組み合わせ解決をこの関数に一元化する。`user_id` は LINE 送信が
+    必要な場合(targetが"line"または"both")のみ使われ、省略時は
+    `config.LINE_USER_ID` にフォールバックする。target="discord" のみの
+    呼び出しでは user_id は一切不要(呼び出し元が意味のないLINE宛先を
+    渡す必要がなくなる。Issue #289)。
+    messages以外の引数はキーワード専用とし、位置引数の取り違え
+    (Issue #167のようにtarget/channelが誤ってimage_data等に渡ってしまう事故)
+    を型レベルで防ぐ。
+    """
     success = True
-    
+
     # 1. Discord送信
     if target in ["discord", "both"]:
         if not _send_discord_webhook(messages, image_data, channel, filename):
@@ -125,17 +139,22 @@ def send_push(user_id: str, messages: List[Any], image_data: Optional[bytes] = N
 
     # 2. LINE送信 (image_dataはLINEには送らない簡易実装)
     if target in ["line", "both"]:
-        # 画像がある場合はテキストで注記を追加
-        line_msgs = list(messages)
-        if image_data:
-            line_msgs.append(TextMessage(text="※画像はDiscordを確認してください"))
-
-        if not _send_line_push(user_id, line_msgs):
-            # LINE失敗時はDiscordのエラーチャンネルに通知
-            logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")
-            fallback = [{"type": "text", "text": "⚠️ LINE送信失敗: (詳細ログ確認)"}]
-            _send_discord_webhook(fallback, None, 'error')
+        resolved_user_id = user_id or getattr(config, "LINE_USER_ID", None)
+        if not resolved_user_id:
+            logger.error(f"LINE通知の送信先user_idが指定されていません(target={target})")
             success = False
+        else:
+            # 画像がある場合はテキストで注記を追加
+            line_msgs = list(messages)
+            if image_data:
+                line_msgs.append(TextMessage(text="※画像はDiscordを確認してください"))
+
+            if not _send_line_push(resolved_user_id, line_msgs):
+                # LINE失敗時はDiscordのエラーチャンネルに通知
+                logger.error("LINE送信失敗。Discordへフォールバック通知を行います。")
+                fallback = [{"type": "text", "text": "⚠️ LINE送信失敗: (詳細ログ確認)"}]
+                _send_discord_webhook(fallback, None, 'error')
+                success = False
 
     return success
 

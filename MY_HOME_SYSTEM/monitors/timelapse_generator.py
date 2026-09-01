@@ -7,13 +7,11 @@ import datetime
 import subprocess
 import requests
 import argparse
-import math
 from typing import List
 
 import config
 from core.database import get_db_cursor
 from core.logger import setup_logging
-from services.notification_service import send_push
 from monitors.smart_timelapse_generator import timelapse_job_lock
 
 logger = setup_logging("timelapse_generator")

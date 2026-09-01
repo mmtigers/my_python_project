@@ -4,7 +4,10 @@ import subprocess
 from pathlib import Path
 
 try:
-    import config
+    import config  # noqa: F401 — Issue #111回帰テスト用の"カナリア"importで、
+    # このimport自体の成否(nas_utils.configがNoneになるかどうか)を
+    # tests/test_nas_utils.pyが検証している。Issue #289でconfig.LINE_USER_ID
+    # の参照を撤去した後もこの意図で残しているため、未使用に見えても削除しない。
     from core.logger import get_logger
     from services.notification_service import send_push
 except ImportError:
@@ -123,14 +126,12 @@ def get_managed_target_directory(nas_dir_str: str, fallback_dir_str: str, mount_
     error_msg = f"🚨 【NAS障害・介入要求】\nNASへのアクセス及び自動修復に失敗しました。\nPath: {nas_dir_str}\nローカルへフォールバックします。"
     logger.error(error_msg)
     
-    # getattrを利用してconfigの存在確認を安全に行う
-    user_id = getattr(config, "LINE_USER_ID", None)
-    if user_id:
-        send_push(
-            user_id, 
-            [{"type": "text", "text": error_msg}],
-            target="discord", channel="error"
-        )
+    # target="discord"のみのためLINE宛先(user_id)は不要(Issue #289)。
+    # 以前はconfig.LINE_USER_ID未設定時にこの通知自体がスキップされてしまっていた。
+    send_push(
+        [{"type": "text", "text": error_msg}],
+        target="discord", channel="error"
+    )
 
     # Fail-Softロジック
     fallback_dir.mkdir(parents=True, exist_ok=True)
