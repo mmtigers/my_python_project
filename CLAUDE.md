@@ -65,7 +65,7 @@ npm run build    # tsc -b && vite build -> dist/
 npm run lint     # ESLint
 ```
 
-ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行する。ローカルの `.git/hooks/post-merge` フック（gitでは管理されておらず、リポジトリをclone後に再設置が必要）が、`git pull` で `family-quest/` に変更があった場合に自動でこれを呼び出す。
+ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行し、成功時にビルド元のgitツリーハッシュを `dist/.built-tree` に記録する。`./deploy.sh --if-stale` はそのハッシュがHEADの `family-quest` ツリーと一致すればビルドをスキップする冪等モードで、ローカルの `.git/hooks/post-merge` フック（gitでは管理されておらず、リポジトリをclone後に再設置が必要）が `git pull` のたびに、また `MY_HOME_SYSTEM/start_all.sh` がサーバー起動前に、これを呼び出す（`git reset --hard` 等のpull以外の経路で更新された場合でも、次のサーバー起動時にビルド漏れが回収される。2026-09-01のAPIスキーマ不整合障害の再発防止）。
 
 ### DDD (バッチ処理)
 
