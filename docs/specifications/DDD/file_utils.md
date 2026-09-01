@@ -10,15 +10,17 @@
 
 ## 関連ドキュメント
 
-* [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。ただし関連ドキュメント側にも、実際にどのような文字列（動画タイトル等）に対して呼び出しているかの具体的な呼び出し箇所は明記されていない。
+* [batch_download_discord.md](./batch_download_discord.md) — 本モジュールの`sanitize_filename`の主要な呼び出し元（`FileSystemManager.sanitize_filename`という委譲ラッパー経由で利用）。具体的な呼び出し箇所（`video_id`に対する呼び出し）は本ファイル末尾の「相互参照による補足情報」を参照。加えて`DiscordNotifier.send`が本モジュールの`DiscordCircuitBreaker`をモジュールレベルの単一インスタンス(`_discord_circuit_breaker`)として利用する。
 * [../DDD/extract_youtube_urls.md](./extract_youtube_urls.md) — 本モジュールDocstring上のもう一方の呼び出し元候補。`FileManager._sanitize_filename`が本関数への委譲ラッパーとして存在する（Issue #126で修正: 過去の解析時点では対応する仕様書が`docs/specifications/`配下に見つからなかったが、現在は`extract_youtube_urls.md`として存在する）。
+* [../DDD/newface_monitor.md](./newface_monitor.md) — `DiscordNotifier`クラスがインスタンス単位で`DiscordCircuitBreaker`を保持し、`notify`/`notify_daily_summary`の両送信経路で利用する。
 
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`のみである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`と、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`の2つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
+* 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 ## 3. 外部依存関係
 
@@ -56,6 +58,28 @@
 * 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
 
 
+### `DiscordCircuitBreaker`
+
+* **役割**: Discord Webhookへの送信が連続して失敗した回数を数え、指定した閾値(`failure_threshold`)に達すると「開いた(is_open=True)」状態になり、それ以降の送信呼び出し元に送信をスキップさせるためのプロセス内サーキットブレーカー。クラスDocstringによれば、`newface_monitor.py`の`DiscordNotifier.notify()`には元々401/404限定の簡易的な打ち切りロジックしかなく、タイムアウトや接続エラーには対応していなかった問題と、`batch_download_discord.py`側の`DiscordNotifier.send()`には同種の仕組みが一切無かった問題を、両スクリプトで共通利用できる形で解消するために追加された。cron等で毎回新規プロセスとして起動される運用を前提に、プロセスをまたいだ状態の永続化は行わない(インスタンス変数のみで状態を保持する)。
+* 根拠: [クラス定義とDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
+
+
+* **引数/リクエスト**: `__init__(self, failure_threshold: int = 3)` — 連続失敗が何回に達したら開くかの閾値。`is_open`(プロパティ、引数なし)、`record_success()`(引数なし)、`record_failure()`(引数なし)、`trip()`(引数なし)。
+* 根拠: [各メソッド定義] (行番号: 60, 65〜66, 70, 75, 81 / 抜粋: "def __init__(self, failure_threshold: int = 3):", "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+
+
+* **戻り値/レスポンス**: `is_open`(プロパティ)は`bool`(送信をスキップすべきならTrue)。`__init__`/`record_success`/`record_failure`/`trip`はいずれも`None`。
+* 根拠: [型ヒント] (行番号: 60, 66, 70, 75, 81 / 抜粋: "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+
+
+* **副作用**: いずれもインスタンス変数(`self._consecutive_failures`, `self._open`)の書き換えのみで、外部I/Oは行わない。`record_success()`は連続失敗カウントを0にリセットしブレーカーを閉じる。`record_failure()`は連続失敗カウントを1増やし、`failure_threshold`に達した場合のみブレーカーを開く。`trip()`は閾値を無視して即座にブレーカーを開く(Docstringによれば、Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した場合向け)。
+* 根拠: [record_success本体] (行番号: 70〜73 / 抜粋: "def record_success(self) -> None:\n        \"\"\"送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。\"\"\"\n        self._consecutive_failures = 0\n        self._open = False")、[record_failure本体] (行番号: 75〜79 / 抜粋: "def record_failure(self) -> None:\n        \"\"\"送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。\"\"\"\n        self._consecutive_failures += 1\n        if self._consecutive_failures >= self._failure_threshold:\n            self._open = True")、[trip本体] (行番号: 81〜84 / 抜粋: "def trip(self) -> None:\n        \"\"\"Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した\n        場合に、閾値を待たず即座にブレーカーを開く。\"\"\"\n        self._open = True")
+
+
+* **エラーハンドリング**: なし(例外を送出する処理は含まれていない。呼び出し順序の妥当性チェックも存在せず、`record_success`/`record_failure`/`trip`はいつ何度呼び出されても単に内部カウンタと`_open`フラグを更新するだけである)
+* 根拠: [クラス本体全体] (行番号: 43〜84 / 抜粋: 前掲の各メソッド定義)
+
+
 ## 5. 処理フロー図
 
 `sanitize_filename` の変換ロジックのフローを示します。
@@ -75,19 +99,42 @@ flowchart TD
     Return --> End["End"]
 ```
 
+`DiscordCircuitBreaker`の状態遷移(各メソッド呼び出しによる`_open`フラグの変化)を示します。
+
+```mermaid
+flowchart TD
+    Init(["__init__(failure_threshold)"]) --> Closed["閉: _consecutive_failures=0, _open=False"]
+    Closed -- "record_failure()" --> CheckThreshold{"_consecutive_failures >= failure_threshold?"}
+    CheckThreshold -- No --> Closed
+    CheckThreshold -- Yes --> Open["開: _open=True"]
+    Closed -- "trip()" --> Open
+    Open -- "trip()" --> Open
+    Open -- "record_failure()" --> Open
+    Closed -- "record_success()" --> Closed
+    Open -- "record_success()" --> Closed
+```
+
 ## 6. 依存関係図
 
 ```mermaid
 graph TD
     subgraph "file_utils.py"
         sanitize_filename["sanitize_filename()"]
+        DiscordCircuitBreaker["DiscordCircuitBreaker"]
     end
 
     subgraph "外部依存"
         re_mod["re (標準ライブラリ)"]
     end
 
+    subgraph "呼び出し元 (別ファイル)"
+        batch_dl["batch_download_discord.py: DiscordNotifier.send()"]
+        newface["newface_monitor.py: DiscordNotifier"]
+    end
+
     sanitize_filename --> re_mod
+    batch_dl --> DiscordCircuitBreaker
+    newface --> DiscordCircuitBreaker
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -103,6 +150,8 @@ graph TD
 * **禁止文字リストの限定性**: 置換対象は`\/*?:"<>|`の8文字のみであり、制御文字（NULバイト等）やOS/ファイルシステム固有の予約語（Windowsの`CON`, `PRN`等）には対応していない。
 * **`max_length`のデフォルト値の前提**: Docstringに「拡張子は含まない前提」と明記されているが、関数自体は拡張子の有無を判別するロジックを持たず、呼び出し元が拡張子を別途扱う必要がある。
 * **（Issue #175で解消）文字数ベースの切り詰めによるバイト制限超過**: 以前は`safe[:max_length]`という単純な文字列スライスで切り詰めており、`max_length`は実質「文字数」を制限するものだった。UTF-8で1文字3バイトになる日本語等では、既定値200文字が最大600バイトとなりext4等の255バイト制限を容易に超過し、`ENAMETOOLONG`でファイル操作が失敗する不具合があった（`extract_youtube_urls.py`はチャンネル名とタイトルの2つの`sanitize_filename`結果を連結するため、この問題がさらに顕著だった）。現在はUTF-8エンコード後のバイト列を切り詰めるよう修正済み。ただし本関数単体は拡張子分のバイト数を考慮しないため、呼び出し元が拡張子や区切り文字（`extract_youtube_urls.py`の`"_"`等）の分を差し引いた`max_length`を渡す必要がある点は変わらない。
+* **`DiscordCircuitBreaker`はプロセス内・非スレッドセーフ**: 状態(`_consecutive_failures`, `_open`)はインスタンス変数のみで保持され、ファイル等への永続化やロックは一切行わない。呼び出し元(`batch_download_discord.py`はモジュールレベルの単一インスタンス`_discord_circuit_breaker`、`newface_monitor.py`は`DiscordNotifier`インスタンスごとの`self._circuit_breaker`)がプロセス終了時に状態を失うことを前提とした設計であり、次回のcron実行では必ず閉じた状態(`is_open=False`)から始まる。
+* **`record_failure()`と`trip()`の使い分けは呼び出し元の判断に委ねられている**: 本クラス自体はHTTPステータスコード等の失敗理由を一切解釈しない。閾値到達を待たず即座に開くべきか(`trip()`)、連続回数をカウントしてから開くべきか(`record_failure()`)の判断は、呼び出し元(例: `newface_monitor.py`のDiscordNotifier.notify()は401/404で`trip()`、それ以外の`requests.RequestException`で`record_failure()`)が行う。
 
 ## 9. 不明事項一覧
 

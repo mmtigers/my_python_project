@@ -26,30 +26,28 @@ export interface User {
 }
 
 // クエスト情報
+// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/
+// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ
+// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、
+// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には
+// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に
+// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。
 export interface Quest {
-    id?: ID;
     quest_id?: ID;
     title: string;
     description?: string;
-    desc?: string;
     difficulty?: number;
-    reward_exp?: number;
-    reward_gold?: number;
     exp_gain?: number;
-    exp?: number;
-    gold?: number;
     gold_gain?: number;
     bonus_gold?: number;
     bonus_exp?: number;
     quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
-    type?: string;
     _isInfinite?: boolean;
-    icon?: string;
     icon_key?: string;
     start_time?: string;
     end_time?: string;
     days?: number[] | string | null;
-    target?: string;
+    target_user?: string;
     pre_requisite_quest_id?: number | null;
     // ★共有クエスト判定用 (バックエンドの get_available_quests が付与するフィールド)
     is_shared_completed_by?: string;
@@ -59,8 +57,9 @@ export interface Quest {
 }
 
 // クエスト履歴
+// ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、
+// history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。
 export interface QuestHistory {
-    history_id?: ID;
     id?: ID;
     user_id: string;
     quest_id: ID;
@@ -76,16 +75,15 @@ export interface QuestHistory {
 }
 
 // 報酬アイテム
+// ★フィールド名の統一(Issue #291): id/cost/icon/desc は reward_id/cost_gold/
+// icon_key/description の別名としてバックエンドが付与していたものだが、
+// 二重化を廃止しDBの実カラム名に一本化した。
 export interface Reward {
-    id?: ID;
     reward_id?: ID;
     title: string;
-    desc?: string;
     description?: string;
     category?: string;
-    cost: number;
-    cost_gold?: number;
-    icon?: string;
+    cost_gold: number;
     icon_key?: string;
     target?: string;
 }

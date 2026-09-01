@@ -16,8 +16,8 @@
 * [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
-* [google_photos_service.md](./google_photos_service.md) - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
-* [financial_service.md](./financial_service.md) - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
+* `google_photos_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
+* `financial_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
 
 ## 2. ファイルの概要
 
@@ -38,7 +38,7 @@
 
 
 * NASなどの外部ストレージのマウント遅延を考慮したディレクトリの検証、作成、書き込みテストを行う関数を提供する。
-* 根拠: [ストレージ検証関数] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
+* 根拠: [ストレージ検証関数] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`)
 
 
 * NAS死活監視(`monitors/nas_monitor.py`)の書き込みテストがタイムアウトした際の再試行回数(`NAS_WRITE_CHECK_RETRIES`、既定3)を定義する。`verify_and_initialize_storage`と同様、autofsのアイドルアンマウント後の再トリガーやNAS本体のディスクスピンアップによる一過性の遅延を、単発のタイムアウトで即座に障害と判定せずExponential Backoffで吸収する目的で追加された。
@@ -92,13 +92,13 @@
 | `os` | 標準ライブラリ | 環境変数取得、パス結合、ディレクトリ作成等のOS操作 | 根拠: `import os` (行番号: 24 / 抜粋: `import os`) |
 | `sys` | 標準ライブラリ | ロガーの標準出力ハンドラの設定 | 根拠: `import sys` (行番号: 25 / 抜粋: `import sys`) |
 | `json` | 標準ライブラリ | 外部JSONファイルの読み込み・パース | 根拠: `import json` (行番号: 26 / 抜粋: `import json`) |
-| `time` | 標準ライブラリ | リトライ時の待機（Exponential Backoff） | 根拠: `import time` (行番号: 27 / 抜粋: `import time`) |
 | `logging` | 標準ライブラリ | ロガーの取得・設定およびログ出力 | 根拠: `import logging` (行番号: 28 / 抜粋: `import logging`) |
-| `Optional`, `List`, `Dict`, `Any` | 標準ライブラリ(`typing`) | 型ヒントの定義 | 根拠: `from typing import Optional, L` (行番号: 30 / 抜粋: `from typing import Optional, L`) |
-| `urlparse` | 標準ライブラリ(`urllib.parse`) | `FRONTEND_URL`から`CORS_ORIGINS`用のscheme+netloc(パスを含まないOrigin相当の値)を取り出すために使用（Issue #112の修正で追加） | 根拠: `from urllib.parse import urlparse` (行番号: 31 / 抜粋: `from urllib.parse import urlparse`) |
-| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み処理 | 根拠: `from dotenv import load_dotenv` (行番号: 33 / 抜粋: `from dotenv import load_dotenv`) |
-| `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 34 / 抜粋: `from pydantic import BaseModel`) |
-| `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 454 / 抜粋: `from datetime import time as _`) |
+| `Optional`, `List`, `Dict`, `Any` | 標準ライブラリ(`typing`) | 型ヒントの定義 | 根拠: `from typing import Optional, L` (行番号: 29 / 抜粋: `from typing import Optional, L`) |
+| `urlparse` | 標準ライブラリ(`urllib.parse`) | `FRONTEND_URL`から`CORS_ORIGINS`用のscheme+netloc(パスを含まないOrigin相当の値)を取り出すために使用（Issue #112の修正で追加） | 根拠: `from urllib.parse import urlparse` (行番号: 30 / 抜粋: `from urllib.parse import urlparse`) |
+| `load_dotenv` | 外部ライブラリ(`dotenv`) | `.env`ファイルからの環境変数読み込み処理 | 根拠: `from dotenv import load_dotenv` (行番号: 32 / 抜粋: `from dotenv import load_dotenv`) |
+| `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 33 / 抜粋: `from pydantic import BaseModel`) |
+| `retry_with_backoff` | 内部モジュール(`core.utils`) | `verify_and_initialize_storage`のExponential Backoffリトライ機構(Issue #292で共通ユーティリティへ切り出し)。以前はここで`import time`し自前で`time.sleep`していたが、リトライループごと`core.utils`へ委譲したため`config.py`自身は`time`モジュールに直接依存しなくなった。 | 根拠: `from core.utils import retry_with_backoff` (行番号: 35 / 抜粋: `from core.utils import retry_with_backoff`) |
+| `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 473 / 抜粋: `from datetime import time as _`) |
 
 ### ブラックボックスとなる外部要素
 
@@ -114,24 +114,24 @@
 
 ### `verify_and_initialize_storage`
 
-* **役割**: 指定されたパスのディレクトリ作成と書き込みテストを、指定回数リトライ（Exponential Backoff）しながら実行する。
-* 根拠: [関数定義] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
+* **役割**: 指定されたパスのディレクトリ作成と書き込みテストを、指定回数リトライ（Exponential Backoff）しながら実行する。Issue #292で、Exponential Backoffのループ機構自体を`core.utils.retry_with_backoff`(共通ユーティリティ)へ委譲するようリファクタリングされた。`monitors/nas_monitor.py`の`check_write_permission`も同じ共通ユーティリティを使うようになったが、リトライ対象の例外集合・リトライ回数・待機時間という「ポリシー」自体は呼び出し元ごとに従来のまま維持されている(挙動を変えない純粋なリファクタリング)。
+* 根拠: [関数定義] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`), [retry_with_backoffへの委譲] (行番号: 78〜85 / 抜粋: `retry_with_backoff(\n            _attempt,\n            max_retries=max_retries,\n            retryable_exceptions=(OSError, PermissionError, IOError),`)
 
 
 * **引数/リクエスト**: `base_path` (str: 確認対象ディレクトリ), `max_retries` (int: 最大リトライ回数。デフォルトは5)
-* 根拠: [引数定義] (行番号: 40 / 抜粋: `base_path: str, max_retries: i`)
+* 根拠: [引数定義] (行番号: 43 / 抜粋: `base_path: str, max_retries: i`)
 
 
 * **戻り値/レスポンス**: `bool` (初期化・テスト成功でTrue、最終的に失敗でFalse)
-* 根拠: [戻り値型ヒント] (行番号: 40 / 抜粋: `-> bool:`)
+* 根拠: [戻り値型ヒント] (行番号: 43 / 抜粋: `-> bool:`)
 
 
-* **副作用**: ディレクトリの作成(`os.makedirs`)、一時ファイル(`.write_test`)の作成・削除。
-* 根拠: [ディレクトリ・ファイル操作] (行番号: 58 / 抜粋: `os.makedirs(base_path, exist_o`)
+* **副作用**: ディレクトリの作成(`os.makedirs`)、一時ファイル(`.write_test`)の作成・削除、失敗時は`time.sleep`によるExponential Backoff待機(`core.utils.retry_with_backoff`内で発生)。
+* 根拠: [ディレクトリ・ファイル操作] (行番号: 47〜54 / 抜粋: `os.makedirs(base_path, exist_o`)
 
 
-* **エラーハンドリング**: `OSError`, `PermissionError`, `IOError`をキャッチし、リトライ上限未満なら待機、上限到達時はエラーログを出力しFalseを返す。
-* 根拠: [例外捕捉] (行番号: 73 / 抜粋: `except (OSError, PermissionErr`)
+* **エラーハンドリング**: `retry_with_backoff`に`(OSError, PermissionError, IOError)`をリトライ対象として渡し、リトライ上限未満なら`core.utils`側でExponential Backoff待機、上限到達時は`retry_with_backoff`が最後の例外を再送出するため、これを`except`で捕捉してエラーログを出力しFalseを返す。
+* 根拠: [例外捕捉] (行番号: 86〜90 / 抜粋: `except (OSError, PermissionError, IOError) as e:`)
 
 
 

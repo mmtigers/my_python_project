@@ -17,11 +17,14 @@ export const INITIAL_USERS = [
     }
 ];
 
+// #291: バックエンドのAPIレスポンスと同じフィールド名(quest_id/exp_gain/gold_gain/
+// quest_type/icon_key、reward_id/cost_gold/icon_key/description)に統一し、
+// フロント側で二重のフィールド名フォールバックを持たずに済むようにする。
 export const MASTER_QUESTS = [
-    { id: 999, title: '⚠️ サーバーに繋がりません', exp: 0, gold: 0, type: 'daily', days: null, icon: '🔌' },
-    { id: 998, title: 'パパに知らせてください', exp: 0, gold: 0, type: 'daily', days: null, icon: '👨‍🔧' },
+    { quest_id: 999, title: '⚠️ サーバーに繋がりません', exp_gain: 0, gold_gain: 0, quest_type: 'daily', days: null, icon_key: '🔌' },
+    { quest_id: 998, title: 'パパに知らせてください', exp_gain: 0, gold_gain: 0, quest_type: 'daily', days: null, icon_key: '👨‍🔧' },
 ];
 
 export const MASTER_REWARDS = [
-    { id: 999, title: 'データ取得失敗', cost: 99999, category: 'special', icon: '❌', desc: 'サーバーを確認してください' },
+    { reward_id: 999, title: 'データ取得失敗', cost_gold: 99999, category: 'special', icon_key: '❌', description: 'サーバーを確認してください' },
 ];
