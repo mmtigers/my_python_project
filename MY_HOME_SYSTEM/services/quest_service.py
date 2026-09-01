@@ -1128,6 +1128,20 @@ class GameSystem:
     def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
+
+            # SQLiteは "SELECT * FROM quest_users" にORDER BYが無いと、user_idが
+            # TEXT PRIMARY KEYであるため主キーのアルファベット順(dad, daughter, mom, son)
+            # で返すことがあり、quest_data.USERSの宣言順(dad, mom, son, daughter)と
+            # 一致しない。family-quest側の App.tsx は users[currentUserIdx] という
+            # 配列インデックスでタブと現在のユーザーを対応づけているため、この順序の
+            # 食い違いがあるとタブの位置と実際に表示される家族が入れ替わってしまう
+            # (例: 「ともや」のタブに寝かしつけ(mom/dad向け)クエストが出る)。
+            # quest_data.USERS の宣言順を唯一の正としてソートし直すことで、
+            # DBの内部的な返却順に依存しないようにする。
+            if quest_data:
+                canonical_order = {u['user_id']: i for i, u in enumerate(quest_data.USERS)}
+                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))
+
             for u in users:
                 u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])
                 u['maxHp'] = game_logic.GameLogic.calculate_max_hp(u['level'])
