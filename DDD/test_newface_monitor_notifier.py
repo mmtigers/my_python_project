@@ -219,3 +219,70 @@ class TestNotifyDailySummaryReturnValue:
         result = notifier.notify_daily_summary({"site_a": 2}, {"site_a": "サイトA"}, "2026-08-30")
 
         assert result is False
+
+
+def _make_casts(n: int):
+    return [
+        _make_cast("") for _ in range(n)
+    ]
+
+
+class TestDiscordNotifierCircuitBreaker:
+    """DiscordNotifierがWebhookへの連続送信失敗時にサーキットブレーカーとして
+    機能することの回帰テスト。以前は401/404の一部ケースを除き、タイムアウトや
+    接続エラーが続いてもnotify()は無制限にリトライし続けていた。"""
+
+    def test_notify_skips_remaining_casts_after_consecutive_request_exceptions(self, monkeypatch):
+        import requests
+
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        notifier.session.post = MagicMock(side_effect=requests.exceptions.ConnectionError("boom"))
+
+        # 既定の閾値(3)を超える件数を渡し、閾値到達後は送信自体が行われないことを確認する
+        casts = _make_casts(6)
+        notifier.notify(casts, site_name="テストサイト")
+
+        # デフォルトの閾値(3)に達した時点でブレーカーが開き、以降の送信はスキップされる
+        assert notifier.session.post.call_count == 3
+        assert notifier._circuit_breaker.is_open is True
+
+    def test_notify_trips_breaker_immediately_on_401(self, monkeypatch):
+        import requests
+
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        response = MagicMock()
+        response.status_code = 401
+        response.text = "invalid webhook"
+        http_error = requests.exceptions.HTTPError(response=response)
+        notifier.session.post = MagicMock(side_effect=http_error)
+
+        notifier.notify(_make_casts(3), site_name="テストサイト")
+
+        # 401は再試行が無意味なため、1回目の失敗で即座にブレーカーが開き打ち切られる
+        assert notifier.session.post.call_count == 1
+        assert notifier._circuit_breaker.is_open is True
+
+    def test_notify_daily_summary_is_skipped_when_breaker_is_open(self):
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        notifier.session.post = MagicMock()
+        notifier._circuit_breaker.trip()
+
+        result = notifier.notify_daily_summary({"site_a": 1}, {"site_a": "サイトA"}, "2026-08-30")
+
+        assert result is False
+        notifier.session.post.assert_not_called()
+
+    def test_notify_daily_summary_success_resets_breaker(self):
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        notifier.session.post = MagicMock(return_value=response)
+        notifier._circuit_breaker.record_failure()
+        notifier._circuit_breaker.record_failure()
+
+        result = notifier.notify_daily_summary({"site_a": 1}, {"site_a": "サイトA"}, "2026-08-30")
+
+        assert result is True
+        assert notifier._circuit_breaker.is_open is False

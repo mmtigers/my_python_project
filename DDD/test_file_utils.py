@@ -22,7 +22,7 @@ import pytest
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
 
-from file_utils import sanitize_filename  # noqa: E402
+from file_utils import sanitize_filename, DiscordCircuitBreaker  # noqa: E402
 
 
 class TestSanitizeFilenameBasicBehavior:
@@ -80,3 +80,45 @@ class TestSanitizeFilenameNeverReturnsEmptyString:
         assert not filename.startswith("."), (
             f"generated filename {filename!r} is a hidden dotfile with an empty stem"
         )
+
+
+class TestDiscordCircuitBreaker:
+    """DiscordCircuitBreaker のサーキットブレーカー挙動の回帰テスト。
+
+    Discord Webhookが機能していない間、newface_monitor.py/
+    batch_download_discord.py の両DiscordNotifierが無駄なリクエストを
+    送り続けないことを保証する共通ロジックを検証する。
+    """
+
+    def test_starts_closed(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        assert breaker.is_open is False
+
+    def test_opens_after_reaching_failure_threshold(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is False, "閾値に達するまでは閉じたままであるべき"
+        breaker.record_failure()
+        assert breaker.is_open is True, "連続失敗が閾値に達したら開くべき"
+
+    def test_success_resets_failure_count_and_closes_breaker(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_success()
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is False, "成功後は連続失敗カウントがリセットされているべき"
+
+    def test_trip_opens_immediately_regardless_of_threshold(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=100)
+        breaker.trip()
+        assert breaker.is_open is True
+
+    def test_success_closes_breaker_after_trip(self):
+        breaker = DiscordCircuitBreaker(failure_threshold=3)
+        breaker.trip()
+        assert breaker.is_open is True
+        breaker.record_success()
+        assert breaker.is_open is False
