@@ -93,6 +93,17 @@ if command -v mountpoint >/dev/null 2>&1; then
   fi
 fi
 
+# --- Phase 2: family-quest フロントエンドの鮮度チェック ---
+# git pull 以外の経路(git reset --hard 等)でチェックアウトが更新されると
+# post-merge フックが発火せず、dist/ が旧世代のままサーバーだけ新コードで
+# 起動してAPIスキーマ不整合を起こすことがある(2026-09-01の障害)。
+# サーバー起動前に必ず冪等チェックを通し、ビルド漏れをここで回収する。
+# ビルド失敗でもサーバー起動は続行する(旧distを配信し続ける方がマシなため)。
+echo "--- Ensure family-quest dist is fresh ---"
+if ! bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1; then
+    echo "⚠️ family-quest build failed. Serving existing dist/. See logs/quest_deploy.log"
+fi
+
 # --- Phase 3: 初期化 & Webhook修正 ---
 echo "--- Check & Fix Webhooks (Cloudflare Tunnel) ---"
 $PYTHON_EXEC switchbot_webhook_fix.py > logs/webhook_fix.log 2>&1
