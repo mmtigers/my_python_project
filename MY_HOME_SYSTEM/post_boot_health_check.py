@@ -182,7 +182,6 @@ class PostBootHealthCheck:
 
     # --- 3. Services (Wait & Retry) ---
     def check_services(self):
-        backend_url = getattr(config, "BACKEND_URL", "http://localhost:8000")
         frontend_url = getattr(config, "FRONTEND_URL", "http://localhost:8000/quest/")
         
         targets = [

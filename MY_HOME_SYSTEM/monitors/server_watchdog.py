@@ -5,7 +5,6 @@ import traceback
 from pathlib import Path
 import sys
 import os
-from typing import Optional
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

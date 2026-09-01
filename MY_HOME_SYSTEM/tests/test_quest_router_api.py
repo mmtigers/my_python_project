@@ -8,7 +8,6 @@ routers/quest_router.py をTestClient経由でエンドツーエンドにテス�
 """
 import io
 import os
-import shutil
 import sys
 
 import pytest
