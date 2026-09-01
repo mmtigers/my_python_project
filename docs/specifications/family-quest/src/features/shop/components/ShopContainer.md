@@ -1,4 +1,12 @@
-# ShopContainer.tsx（廃止）
+# ShopContainer.tsx (廃止)
+
+## 廃止notice
+
+このファイルが対応していたソース `family-quest/src/features/shop/components/ShopContainer.tsx` は削除されました(コミット `74e5f83`「fix(family-quest): add build config, fix critical/high findings」)。
+
+- 廃止日: 2026-08
+- 廃止理由: デッドコードだった `ShopContainer.tsx` が削除された(コミットメッセージ内 "Remove dead ShopContainer.tsx and a stray .lnk file leaking an internal IP" を参照)。この時点では2026-08のボス/装備/ギルド/マイレージ/週間ランキング機能削除リファクタ(`d1599d6`/`ffdc8c2`/`1818d5a`)より前で、無関係な削除である。
+- 本仕様書は削除されたソースの記録として残置する。新規の実装・参照の対象にはしないこと。
 
 ## 関連ドキュメント
 
@@ -7,14 +15,6 @@
 - [InventoryList.md](./InventoryList.md) — 本ファイルが「現在の実装」として言及している、所持品一覧コンポーネント。
 - [RewardShop.md](./RewardShop.md) — `RewardList`と所持ゴールド表示を1画面にまとめる現行の「ごほうび」画面コンテナ。以前独立していた「もちもの」タブ（本ファイルが担っていたタブ切替の一部）は廃止され、購入UIが`RewardShop`に統合されている。
 - [../../../../App.md](../../../../App.md) — 「お店」画面を実際に描画している現在の呼び出し元。
-
-`family-quest/src/features/shop/components/ShopContainer.tsx` は削除された。
-
-## 廃止理由
-
-コミット `74e5f83`「fix(family-quest): add build config, fix critical/high findings」にて、
-デッドコードだった `ShopContainer.tsx` が削除された（コミットメッセージ内 "Remove dead
-ShopContainer.tsx and a stray .lnk file leaking an internal IP" を参照）。
 
 ## 現在の実装
 
