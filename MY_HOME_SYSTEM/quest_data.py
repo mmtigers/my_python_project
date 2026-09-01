@@ -199,6 +199,9 @@ QUESTS = [
     # B-5. 特別：涼花 (Daughter)
     # ------------------------------------------
     {'id': 302, 'title': 'トイレでおしっこ成功', 'type': 'infinite', 'target': 'daughter', 'category': 'life', 'difficulty': 'B', 'exp': 50, 'gold': 30, 'icon': '🚽', 'desc': 'トイトレ頑張ろう！'},
+    {'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 20, 'icon': '🌸', 'desc': 'ママやパパに頼まれたことをおてつだいしよう'},
+    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', 'difficulty': 'D', 'exp': 20, 'gold': 15, 'icon': '🧸', 'desc': '遊んだあとはおもちゃをもとの場所にもどそう'},
+    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', 'difficulty': 'D', 'exp': 30, 'gold': 30, 'icon': '✏️', 'desc': '線や数字をなぞって鉛筆のれんしゅうをしよう'},
 
     # ------------------------------------------
     # B-6. 特別：兄妹連携 (Siblings) — どちらか一方が完了報告すると2人とも報酬を得る
