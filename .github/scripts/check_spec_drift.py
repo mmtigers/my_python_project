@@ -39,8 +39,13 @@ PY_EXTENSIONS = {".py", ".sh"}
 FQ_SOURCE_ROOT = "family-quest/src"
 FQ_EXTENSIONS = {".ts", ".tsx", ".js", ".jsx"}
 
-EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup"}
-EXCLUDE_SUFFIXES = {".d.ts"}
+# Issue #283: PR #278で導入されたfamily-questのVitestテスト(*.test.ts/tsx、
+# src/test/配下のセットアップファイル)は、"tests"(複数形)ディレクトリ名にも
+# test_*.pyという命名にも一致しないため、上記の除外経路のどちらにも
+# 引っかからず「仕様書が見つからないファイル」として誤検知されていた。
+# "test"(単数形)ディレクトリと *.test.ts(x) サフィックスを明示的に除外する。
+EXCLUDE_PARTS = {"tests", "__pycache__", "node_modules", "migrations", ".venv", "db_backup", "test"}
+EXCLUDE_SUFFIXES = {".d.ts", ".test.ts", ".test.tsx"}
 
 
 def run(cmd: list[str]) -> str:
