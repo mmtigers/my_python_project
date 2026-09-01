@@ -179,24 +179,24 @@
 
 ### 関数 `check_write_permission`
 
-* **役割**: NASのマウント先(`self.mount_point`直下の`.write_test`)に対し、別プロセス(`sys.executable -c`)でopen/write/close/removeを実行して書き込み権限を確認する。CIFSマウントのストールで本体プロセスが巻き込まれてハングしないよう、サブプロセスをタイムアウト付きで待ち受ける。タイムアウト発生時は最大`self.write_check_retries`回までExponential Backoff（`2 ** attempt`秒、0-indexed）で再試行する。
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 80〜132 / 抜粋: "def check_write_permission(self) -> bool:")
+* **役割**: NASのマウント先(`self.mount_point`直下の`.write_test.<pid>.<ns>`、試行ごとに一意なファイル名)に対し、別プロセス(`sys.executable -c`)でopen/write/close/removeを実行して書き込み権限を確認する。CIFSマウントのストールで本体プロセスが巻き込まれてハングしないよう、サブプロセスをタイムアウト付きで待ち受ける。タイムアウト発生時は最大`self.write_check_retries`回(総試行回数)までExponential Backoff（`2 ** attempt`秒、0-indexed、上限なし）で再試行する。**Issue #292**で、リトライループの機構自体を共通ユーティリティ`core.utils.retry_with_backoff`(`config.py`の`verify_and_initialize_storage`と共用)に委譲するようリファクタリングされたが、`write_check_retries`が「総試行回数」を意味する既存の属性名との整合を保つため、`retry_with_backoff`へは`max_retries=self.write_check_retries - 1`(初回を含まない追加リトライ回数)を渡している。リトライ対象は`subprocess.TimeoutExpired`のみで、`CalledProcessError`/`OSError`は従来どおりリトライしない(挙動そのものは変更していない純粋なリファクタリング)。
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 95〜165 / 抜粋: "def check_write_permission(self) -> bool:")、`retry_with_backoff(...)`呼び出し (行番号: 142〜148 / 抜粋: "retry_with_backoff(\n                _attempt,\n                max_retries=self.write_check_retries - 1,\n                retryable_exceptions=(subprocess.TimeoutExpired,),")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_write_permission(self) -> bool:` (行番号: 80 / 抜粋: "def check_write_permission(self) -> bool:")
+* 根拠: `def check_write_permission(self) -> bool:` (行番号: 95 / 抜粋: "def check_write_permission(self) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（書き込み・削除成功時True。全リトライを使い切ってタイムアウトした場合、または`CalledProcessError`/`OSError`発生時はFalse）
-* 根拠: `return True` (行番号: 107)、`return False` (行番号: 129, 132) / 抜粋: "return True"
+* 根拠: `return True` (行番号: 149)、`return False` (行番号: 162, 165) / 抜粋: "return True"
 
 
-* **副作用**: サブプロセス(`sys.executable -c <script>`)の起動によるテストファイルの作成・削除。タイムアウト時は`time.sleep(wait_time)`によるリトライ待機。最終リトライでもタイムアウトした場合は診断のため`self.check_ping()`・`self.check_mount()`を追加で実行する。
-* 根拠: `subprocess.run([sys.executable, "-c", script, test_file], timeout=self.timeout, check=True, capture_output=True)` (行番号: 101〜106)、`time.sleep(wait_time)` (行番号: 116)、`diag_ping_ok = self.check_ping()` / `diag_mount_ok = self.check_mount() if diag_ping_ok else False` (行番号: 122〜123)
+* **副作用**: サブプロセス(`sys.executable -c <script>`)の起動によるテストファイルの作成・削除。タイムアウト時は`retry_with_backoff`内の`time.sleep`によるリトライ待機(`_on_retry`コールバック経由で警告ログも出力)。最終リトライでもタイムアウトした場合は診断のため`self.check_ping()`・`self.check_mount()`を追加で実行する。
+* 根拠: `subprocess.run([sys.executable, "-c", script, test_file], timeout=self.timeout, check=True, capture_output=True)` (`_attempt`内、行番号: 121〜128)、`_on_retry`コールバック定義 (行番号: 130〜135)、`diag_ping_ok = self.check_ping()` / `diag_mount_ok = self.check_mount() if diag_ping_ok else False` (行番号: 155〜156)
 
 
-* **エラーハンドリング**: `subprocess.TimeoutExpired`発生時は、最終試行でなければ`2 ** attempt`秒待機して再試行（警告ログ出力）。最終試行でタイムアウトした場合は`self.check_ping()`/`self.check_mount()`の結果を添えてエラーログを出力し`False`を返す。`subprocess.CalledProcessError`または`OSError`はリトライせずエラーログ出力後`False`を返す（この経路ではping/mount診断ログは出力されない）。
-* 根拠: `except subprocess.TimeoutExpired:` (行番号: 108〜129)、`except (subprocess.CalledProcessError, OSError) as e:` (行番号: 130〜132)
+* **エラーハンドリング**: `retry_with_backoff`が`subprocess.TimeoutExpired`のみをリトライ対象として実行し、全リトライ失敗時は最後の`TimeoutExpired`を再送出する。呼び出し元の`except subprocess.TimeoutExpired:`でこれを捕捉し、`self.check_ping()`/`self.check_mount()`の結果を添えてエラーログを出力し`False`を返す。`subprocess.CalledProcessError`または`OSError`は`retry_with_backoff`の`retryable_exceptions`に含まれないため即座に伝播し、呼び出し元の`except (subprocess.CalledProcessError, OSError) as e:`でリトライせずエラーログ出力後`False`を返す（この経路ではping/mount診断ログは出力されない）。
+* 根拠: `except subprocess.TimeoutExpired:` (行番号: 150〜162)、`except (subprocess.CalledProcessError, OSError) as e:` (行番号: 163〜165)
 
 
 
@@ -476,7 +476,7 @@ flowchart TD
 * `__init__`の`self.fallback_dir`は以前存在しない属性名`FALLBACK_DIR`を参照しており常に`getattr`のデフォルト値へフォールバックしていたが、`config.FALLBACK_ROOT`(実属性名)を参照するよう修正された(28行目)。ただし`config.FALLBACK_ROOT`の実際の値(`BASE_DIR/temp_fallback`)と`getattr`のフォールバック文字列(`"/tmp/temp_fallback"`)は異なるパスである点に注意。
 * `save_to_db`が`device_records`テーブルへ書き込むNAS使用率は、以前は電池残量用に後付けされた`battery_level`列へ誤って流用されていたが、マイグレーション`migrations/0006_add_device_records_nas_usage_percent.sql`で新設された専用列`nas_usage_percent`へ書き込み先が切り替えられた(205行目)。過去に`battery_level`へ書き込まれた行はマイグレーション対象外でそのまま残る。
 * `save_to_db`は以前`device_records`テーブルにしか書き込んでおらず、`nas_records`テーブル(`config.SQLITE_TABLE_NAS`)を読むダッシュボードのNASステータスカード・NAS状態パネルは常に「データなし」だった(Issue #168、`analysis_service.load_nas_status`参照)。修正後は`nas_records`へも独立した`save_log_generic`呼び出しで書き込む。`device_records`側の書き込みは、この修正時点で他にこの行を読む本番コードが見当たらなかったため、削除はせずそのまま残してある(両テーブルへ同じ監視結果を重複して記録する構成になった)。
-* `check_write_permission`のリトライは`subprocess.TimeoutExpired`（108〜129行目）でのみ発動し、`subprocess.CalledProcessError`や`OSError`（130〜132行目、例: マウント未確立直後のENOENTでサブプロセス側の`open()`が失敗し非ゼロ終了コードになるケース）はリトライされず即座に`False`を返す。`config.py`の`verify_and_initialize_storage`が`(OSError, PermissionError, IOError)`を包括的にリトライ対象としているのとは非対称であり、両者のNAS I/Oリトライポリシーは別々に実装されたまま一元化されていない（`docs/reports/MY_HOME_SYSTEM/NAS_TIMEOUT_INVESTIGATION_2026-08-24.md`参照）。
+* **（Issue #292でリトライループ機構を一元化・ポリシー自体は非対称のまま維持）** `check_write_permission`と`config.py`の`verify_and_initialize_storage`は、Exponential Backoffの「ループ機構」自体を共通ユーティリティ`core.utils.retry_with_backoff`に集約した(`docs/reports/MY_HOME_SYSTEM/NAS_TIMEOUT_INVESTIGATION_2026-08-24.md` §4.3/§7.2で提案されていた対応)。ただし、リトライ対象の例外集合という「ポリシー」自体はあえて変更していない: `check_write_permission`は依然として`subprocess.TimeoutExpired`のみをリトライ対象(`retryable_exceptions=(subprocess.TimeoutExpired,)`)とし、`subprocess.CalledProcessError`や`OSError`(例: マウント未確立直後のENOENTでサブプロセス側の`open()`が失敗し非ゼロ終了コードになるケース)は引き続きリトライされず即座に`False`を返す。一方`verify_and_initialize_storage`は`(OSError, PermissionError, IOError)`を包括的にリトライ対象としており、この非対称性自体は解消していない。これはリトライ対象例外を広げる変更が実際のNASマウント無しでは安全性を検証できないため(このクラウド実行環境ではNASマウント自体を検証できない)、デッドコード/重複コードの除去にとどめ、ポリシー自体の変更は意図的に見送った判断である。ポリシーを揃えるかどうかは実機での挙動確認後にユーザーと相談の上判断すべき別課題として残す。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)引数が不要になった。これに伴い本ファイルの4箇所の`send_push`呼び出しからは、以前存在した第1引数`config.LINE_USER_ID`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。
 
 ## 9. 不明事項一覧

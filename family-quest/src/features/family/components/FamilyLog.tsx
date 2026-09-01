@@ -23,7 +23,7 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
 
     // 日付ごとにログをグループ化
     const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
-        const date = item.dateStr || item.date || '----/--/--';
+        const date = item.dateStr || '----/--/--';
         if (!groups[date]) groups[date] = [];
         groups[date].push(item);
         return groups;
@@ -53,17 +53,17 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
 
                     <div className="space-y-1.5">
                         {logs.map((log: ChronicleItem) => (
-                            <div key={log.timestamp || log.id} className="bg-blue-950/30 p-1.5 rounded border border-blue-900/50">
+                            <div key={log.timestamp} className="bg-blue-950/30 p-1.5 rounded border border-blue-900/50">
                                 <div className="flex items-center gap-1 text-[9px] text-gray-400 mb-0.5">
                                     <Clock size={9} />
-                                    {formatTime(log.timestamp || log.created_at)}
+                                    {formatTime(log.timestamp)}
                                 </div>
 
                                 <div className="text-[11px] text-white leading-snug">
-                                    {log.text || log.message || `${log.quest_title} を達成！`}
+                                    {log.text}
                                 </div>
                                 <div className="flex gap-1.5 mt-0.5">
-                                    {((log.gold || 0) > 0 || (log.reward_gold || 0) > 0) && (
+                                    {(log.gold || 0) > 0 && (
                                         // M-6-4バグ修正: 報酬購入(type='reward')はゴールドを消費した記録のため
                                         // "-N G"、クエスト達成(type='quest')は獲得のため"+N G"と表示する。
                                         // 以前は購入も一律"+N G"(獲得)表示になっていた。
@@ -73,7 +73,7 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
                                                 : 'text-yellow-400 bg-yellow-900/30'
                                                 }`}
                                         >
-                                            {log.type === 'reward' ? '-' : '+'}{log.gold || log.reward_gold} G
+                                            {log.type === 'reward' ? '-' : '+'}{log.gold} G
                                         </span>
                                     )}
                                 </div>
