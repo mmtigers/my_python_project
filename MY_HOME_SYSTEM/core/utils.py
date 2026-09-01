@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from pathlib import Path
-from typing import Callable, Any, Union
+from typing import Callable, Any, Optional, Tuple, Type, Union
 
 logger = logging.getLogger("core")
 
@@ -51,6 +51,62 @@ def with_exponential_backoff(
                     time.sleep(delay)
         return wrapper
     return decorator
+
+
+def retry_with_backoff(
+    fn: Callable[[], Any],
+    *,
+    max_retries: int,
+    retryable_exceptions: Tuple[Type[BaseException], ...],
+    base_delay: float = 1.0,
+    max_delay: float = float("inf"),
+    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,
+) -> Any:
+    """
+    NAS等マウント遅延の影響を受けるI/O処理向けの、Exponential Backoffによる
+    リトライの共通ユーティリティ(Issue #292)。
+
+    config.py の verify_and_initialize_storage と monitors/nas_monitor.py の
+    check_write_permission が、リトライ回数・待機時間・対象例外の異なる
+    Exponential Backoffループをそれぞれ個別に実装していたため、ループの
+    メカニズム自体をここに集約する。リトライ対象の例外集合・回数・待機秒数
+    という「ポリシー」自体は呼び出し元ごとに異なりうるため引数として残し、
+    挙動そのものは変更しない(純粋なリファクタリング)。
+
+    fn() を実行し、retryable_exceptions に該当する例外が発生した場合のみ、
+    base_delay * 2^attempt 秒(max_delayで頭打ち)待機して最大 max_retries 回
+    まで再試行する。全リトライを使い切った場合は最後に発生した例外を
+    そのまま再送出する(呼び出し元でキャッチして最終的なフォールバック処理を
+    行うこと)。
+
+    Args:
+        fn: 実行する引数なしのcallable。リトライごとに再度呼び出されるため、
+            試行ごとに異なる状態(一意なファイル名等)が必要な場合はfn内で
+            都度生成すること。
+        max_retries: 初回実行を含まない追加リトライの最大回数。
+        retryable_exceptions: リトライ対象とする例外クラスのタプル。
+            これ以外の例外は即座に呼び出し元へ伝播する。
+        base_delay: 初回リトライの待機秒数。
+        max_delay: 待機秒数の上限(未指定の場合は上限なし)。
+        on_retry: 各リトライ前に呼ばれるコールバック(attempt, delay, exception)。
+            呼び出し元固有のログ出力に使う。
+
+    Returns:
+        fn() の戻り値。
+
+    Raises:
+        retryable_exceptions に該当する例外を、全リトライ失敗後に再送出する。
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except retryable_exceptions as e:
+            if attempt >= max_retries:
+                raise
+            delay = min(max_delay, base_delay * (2 ** attempt))
+            if on_retry:
+                on_retry(attempt, delay, e)
+            time.sleep(delay)
 
 
 def wait_for_storage_warmup(

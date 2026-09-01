@@ -13,7 +13,7 @@
 - [apiClient.md](../lib/apiClient.md) — `InventoryItem`型の利用元。
 - [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
 - [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
-- [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。`description`/`desc`混在プロパティの実際の参照パターンを確認できる。
+- [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。
 - [game_logic.md](../../../MY_HOME_SYSTEM/game_logic.md) — `User.maxHp`の計算式（`calculate_max_hp(level) = level * 20 + 5`）を実装するバックエンド側のロジック実装元。
 - [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与するバックエンドAPIの実装元。
 
@@ -66,8 +66,9 @@
 
 ### `Quest`
 
-* **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。
-* 根拠: [該当要素] (行番号: 29〜59 / 抜粋: "export interface Quest {")
+* **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
+* 根拠: [該当要素] (行番号: 29〜57 / 抜粋: "export interface Quest {")
+* 根拠: [フィールド名統一のコメント] (行番号: 29〜34 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -77,8 +78,9 @@
 
 ### `QuestHistory`
 
-* **役割**: クエスト履歴のデータ構造の定義。
-* 根拠: [該当要素] (行番号: 62〜73 / 抜粋: "export interface QuestHistory {")
+* **役割**: クエスト履歴のデータ構造の定義。**（Issue #291で修正）** `quest_history.id`が実カラムであり、以前併存していた`history_id`はAPIから一度も送られてこない幽霊フィールドだったと判明したため削除された。
+* 根拠: [該当要素] (行番号: 59〜75 / 抜粋: "export interface QuestHistory {")
+* 根拠: [フィールド名統一のコメント] (行番号: 59〜61 / 抜粋: "// ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、\n// history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -88,8 +90,9 @@
 
 ### `Reward`
 
-* **役割**: 報酬アイテムのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 76〜88 / 抜粋: "export interface Reward {")
+* **役割**: 報酬アイテムのデータ構造の定義。**（Issue #291で修正）** 以前は`id`/`cost`/`icon`/`desc`が`reward_id`/`cost_gold`/`icon_key`/`description`の別名としてバックエンドが付与していたものとして型に含まれていたが、これらが幽霊フィールドだったと判明し、二重化を廃止してDBの実カラム名のみに一本化された（`cost_gold`は`cost`が任意だったのに対し必須プロパティになっている）。
+* 根拠: [該当要素] (行番号: 77〜89 / 抜粋: "export interface Reward {")
+* 根拠: [フィールド名統一のコメント] (行番号: 77〜80 / 抜粋: "// ★フィールド名の統一(Issue #291): id/cost/icon/desc は reward_id/cost_gold/\n// icon_key/description の別名としてバックエンドが付与していたものだが、\n// 二重化を廃止しDBの実カラム名に一本化した。")
 
 
 * **引数/リクエスト**: 該当なし
@@ -154,7 +157,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* 多くのインターフェース（`Quest`, `Reward` など）において、`description` と `desc` のように類似した意味を持つプロパティが混在しており、オプショナル（`?`）指定されています。
+* **（Issue #291で解消済み）** かつては多くのインターフェース（`Quest`, `Reward` など）において、`description` と `desc` のように類似した意味を持つ複数のプロパティ（`id`/`quest_id`、`exp`/`exp_gain`、`gold`/`gold_gain`、`icon`/`icon_key`、`type`/`quest_type`、`target`/`target_user`、`history_id`/`id`、`cost`/`cost_gold`など）が併存していたが、これらのうち`id`/`exp`/`gold`/`desc`(`Quest`)、`history_id`(`QuestHistory`)、`id`/`cost`/`desc`/`icon`(`Reward`)はバックエンドAPIから一度も送られてこない「幽霊フィールド」だったと判明し、型定義から削除された。現在はDBの実カラム名（`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`/`description`/`reward_id`/`cost_gold`等）のみに一本化されている。
 * `ID` 型が `number | string` のユニオン型となっているため、これらを参照する各インターフェース側のプロパティ（`id`, `quest_id` 等）を利用する際、厳密な型判定が必要になる場面が発生します。
 * `Quest` インターフェースの `days` プロパティの型が `number[] | string | null` と多岐にわたり、使用箇所で複雑な型チェックやパース処理が要求される構造になっています。
 * `User.maxHp` はバックエンドの `calculate_max_hp(level) = level * 20 + 5` で計算される値であり、フロントエンド側で独自に再計算してはならない旨がコメントで明記されています（過去に誤った式で再計算していた実装があったとの記述あり）。この制約はコメント上の申し合わせに過ぎず、型システムによる強制はありません。
@@ -165,14 +168,12 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| プロパティの使い分け | `Quest`の`description`と`desc`、`exp`と`exp_gain`など、類似プロパティの具体的な使われ方が不明 | 本ファイルをインポートしているコンポーネントやロジックの実装ファイル |
 | DB上のデータ構造との差異 | オプショナル(`?`)が多用されているが、これがDBのNULL許容を反映しているか、フロントエンド特有の処理上の都合か不明 | バックエンドのDBスキーマ定義ファイルやAPIの実装ファイル |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| プロパティの使い分け | `RewardList.md`の解析によれば、`RewardList`側では`reward.description || reward.desc || reward.category || 'General'`のようなフォールバック順で参照しており、`Reward`型の複数の類似プロパティがいずれも実データ上使われうる前提でハンドリングされているとされている。また`RewardShop.md`の解析によれば、`RewardShop`は`currentUser.gold`（`User.gold`）を直接参照しているとされている。 | `../features/shop/components/RewardList.md`, `../features/shop/components/RewardShop.md` |
 | DB上のデータ構造との差異 | `quest_service.md`の解析によれば、バックエンドはユーザー情報取得時に`SELECT level, gold ...`のようなSQLクエリを実行しているとされ、DBカラム名（`level`, `gold`等）は`User`型のプロパティ名とおおむね対応しているように見える。ただしDBスキーマの型・NULL許容等の制約自体は`quest_service.md`側でも不明と記載されており、この不明事項を完全に解消するものではない。 | `../../../MY_HOME_SYSTEM/quest_service.md` |
 
 ## 10. 自己検証結果
