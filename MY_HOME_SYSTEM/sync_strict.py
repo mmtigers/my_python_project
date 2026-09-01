@@ -1,7 +1,7 @@
 import argparse
 import sys
 import common  # プロジェクト共通モジュール
-from quest_data import QUESTS, REWARDS, USERS  # マスターデータ
+from quest_data import QUESTS, REWARDS  # マスターデータ
 
 # ロガー設定
 logger = common.setup_logging("strict_sync")

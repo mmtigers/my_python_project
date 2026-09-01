@@ -1,8 +1,5 @@
 # MY_HOME_SYSTEM/handlers/line_handler.py
 import asyncio
-import os
-import sys
-import json
 import time
 from typing import Optional, List, Any, Dict
 
@@ -15,17 +12,12 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     ReplyMessageRequest,
-    TextMessage,
-    FlexMessage,
-    QuickReply,
-    QuickReplyItem,
-    MessageAction
+    TextMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent
 
 import config
 from core.logger import setup_logging
-from models.line import LinePostbackData
 from services import line_service, ai_service
 
 # ロガー設定
