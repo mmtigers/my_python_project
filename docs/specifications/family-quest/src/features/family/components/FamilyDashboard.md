@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a4fb40f` |
 
 ## 関連ドキュメント
 
@@ -245,9 +246,9 @@ graph TD
 * 根拠: (行番号: 13〜16 / 抜粋: "// 表示順(パパ・ママ・兄・妹)を固定するための並び替えキー(要件5)。")
 * **アイコン優先表示の外部化**: 以前はモジュール定数`ICON_FIRST_USER_IDS`でハードコードされていたが、現在は`useSettings()`から取得する`iconFirstUserIds`に置き換えられ、設定画面側で管理される構成になっている。
 * 根拠: (行番号: 52, 101 / 抜粋: "const { iconFirstUserIds, userThemeColors } = useSettings();", "iconFirst={iconFirstUserIds.includes(user.user_id)}")
-* **テーマカラーとハイライトリングの分離（バグ修正済み）**: パネルのボーダー色は常にそのユーザーのテーマカラー（`themeColorKey`）を反映し、リング（強調枠）だけを「直前に操作した」ことの一時的なハイライトとして使う設計に変更された。以前はテーマカラーが`isActive`時のみ適用されていたため、設定画面で色を選んでも操作するまで反映されないという不具合があった。
+* **[修正済み] テーマカラーとハイライトリングの分離**: パネルのボーダー色は常にそのユーザーのテーマカラー（`themeColorKey`）を反映し、リング（強調枠）だけを「直前に操作した」ことの一時的なハイライトとして使う設計に変更された。以前はテーマカラーが`isActive`時のみ適用されていたため、設定画面で色を選んでも操作するまで反映されないという不具合があった。
 * 根拠: (行番号: 141〜150)
-* **タブ構成の再変更（バグ修正済み）**: 一時的にごほうび画面へ「もちもの」を統合していたが、クエスト/ごほうび/もちものの3タブ構成に戻された。
+* **[修正済み] タブ構成の再変更**: 一時的にごほうび画面へ「もちもの」を統合していたが、クエスト/ごほうび/もちものの3タブ構成に戻された。
 * 根拠: (行番号: 162 / 抜粋: "★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。")
 * **パネルごとに独立したタブ状態**: 各`FamilyPanel`は`tab`ステートを個別に持つため、あるユーザーのパネルで「ごほうび」タブを開いていても他ユーザーのパネルには影響しない。
 * 根拠: (行番号: 139 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
@@ -255,7 +256,7 @@ graph TD
 * 根拠: (行番号: 54〜56)
 * **アイドル表示の視覚的優先度低下**: `hasNothingToDo`が`true`のユーザーのパネルには`opacity-70`が適用され、パネル自体は表示され続けるが視線誘導の優先度が下がる。
 * 根拠: (行番号: 62〜63, 155 / 抜粋: "// 今日やることが1件もない人は、パネル自体は残しつつ視覚的な優先度を下げる", "${isIdle ? 'opacity-70' : ''}")
-* **兄妹連携クエスト(`target === 'siblings'`)対応（バグ修正済み）**: `hasNothingToDo`内の対象判定は以前`all`/`role_`プレフィックス一致/`user_id`完全一致のみに対応しており、`target === 'siblings'`のクエストはどの分岐にも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）。`target === 'siblings'`の場合は`user.role === 'role_child'`であれば対象とする分岐を追加した。同種の対象判定ロジックは`QuestList.tsx`側にも存在する（本ファイルの管轄外）。
+* **[修正済み] 兄妹連携クエスト(`target === 'siblings'`)対応**: `hasNothingToDo`内の対象判定は以前`all`/`role_`プレフィックス一致/`user_id`完全一致のみに対応しており、`target === 'siblings'`のクエストはどの分岐にも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）。`target === 'siblings'`の場合は`user.role === 'role_child'`であれば対象とする分岐を追加した。同種の対象判定ロジックは`QuestList.tsx`側にも存在する（本ファイルの管轄外）。
 * 根拠: (行番号: 67〜69 / 抜粋: "if (q.target === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (user.role !== 'role_child') return false;\n                } else if (q.target.startsWith('role_')) {")
 * **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
 * 根拠: (行番号: 111, 202 / 抜粋: "completedSignal={completedSignal}")

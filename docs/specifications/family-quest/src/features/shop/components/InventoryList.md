@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a4fb40f` |
 
 ## 関連ドキュメント
 
@@ -210,7 +211,7 @@ graph TD
 
 * **一覧取得(`useQuery`)のエラーハンドリング欠如**: `fetchInventory`の`useQuery`自体には`onError`が無く、一覧取得に失敗した場合にエラーを画面上に表示・通知する処理は記述されていません（**バグ修正(M-6-3)で追加されたのは`useMutationAction`の`onError`のみで、`useQuery`側は対象外**）。
 * 根拠: (行番号: 44〜48 / 抜粋: "const { data: items, isLoading } = useQuery({\n        queryKey: queryKey,\n        queryFn: () => apiClient.fetchInventory(userId),\n        refetchInterval: 5000\n    });")
-* **エラートースト追加によるサイレント失敗の解消（バグ修正済み、M-6-3）**: 以前は使用ミューテーション（`useMutationAction`）に`onError`が定義されておらず、通信エラー等が発生してもコンソールログのみでユーザーには一切通知されないサイレント失敗になっていた。現在は`onError`を追加し、`extractErrorDetail(error)`で取り出したメッセージを`showToast`でトースト表示する（追加で`play('cancel')`も再生）。ただしキャッシュの`setQueryData`は`onSuccess`内でのみ行われる設計のため、`onError`時に巻き戻す対象のキャッシュ変更自体が存在せず、いわゆる「楽観的更新のロールバック」は不要（`invalidateQueries`による次回フェッチが実質的な同期手段）。
+* **[修正済み] エラートースト追加によるサイレント失敗の解消（M-6-3）**: 以前は使用ミューテーション（`useMutationAction`）に`onError`が定義されておらず、通信エラー等が発生してもコンソールログのみでユーザーには一切通知されないサイレント失敗になっていた。現在は`onError`を追加し、`extractErrorDetail(error)`で取り出したメッセージを`showToast`でトースト表示する（追加で`play('cancel')`も再生）。ただしキャッシュの`setQueryData`は`onSuccess`内でのみ行われる設計のため、`onError`時に巻き戻す対象のキャッシュ変更自体が存在せず、いわゆる「楽観的更新のロールバック」は不要（`invalidateQueries`による次回フェッチが実質的な同期手段）。
 * 根拠: (行番号: 67〜72 / 抜粋: "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {\n            showToast({ title: \"エラー\", text: extractErrorDetail(error), icon: \"⚠️\" });\n            play('cancel');\n        }")
 * **ポーリング負荷**: `refetchInterval: 5000` が設定されており、5秒ごとに自動フェッチが走るため、ユーザー数が多い場合はサーバー負荷への影響を考慮する必要があります。
 * **確認ダイアログの状態管理**: アイテム使用時の確認はブラウザネイティブの`confirm()`ではなく、`itemToUse`ステートとアプリ標準の`Modal`コンポーネントで実装されている。`useMutationAction.mutate`呼び出しと`setItemToUse(null)`が同一の`onClick`内で連続実行されるため、ミューテーションの成否に関わらずモーダルは即座に閉じる（成否のフィードバックは、成功時は`onSuccess`側のキャッシュ更新、失敗時は`onError`側のトーストにのみ依存する）。
@@ -221,7 +222,7 @@ graph TD
 * 根拠: (行番号: 101〜102 / 抜粋: "const gridClass = panelMode ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2';\n    const iconBoxClass = panelMode ? 'text-xl w-9 h-9' : 'text-2xl w-11 h-11';")
 * **アイテム使用は即時確定（親承認フローの廃止、2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）**: 使用（`useItem`）は成功と同時にサーバー側で消費が確定する設計であり、本コンポーネントもこれに合わせて成功時に対象アイテムをキャッシュから`filter`で完全に除去する。ステータスを中間状態（例: 承認待ち）に更新して一覧に残す処理や、それを取り消す「やめる」操作、専用の承認待ちキャッシュキーの無効化は存在しない。`chronicle`クエリの無効化もこの`onSuccess`内で直接行われ、他コンポーネント（`ApprovalList`等）が使用確定やそれに伴う`chronicle`反映を代行する設計にはなっていない。
 * 根拠: (行番号: 52〜63 / 抜粋: "// アイテム使用は即座に消費が確定する(親の承認は不要)ため、\n            // リストからも即座に取り除く。\n            const usedInventoryId = variables;\n            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {\n                if (!oldItems) return [];\n                return oldItems.filter(item => item.id !== usedInventoryId);\n            });\n\n            // 念のためサーバーとも同期\n            queryClient.invalidateQueries({ queryKey: queryKey });\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
-* **「はい」連打による多重使用リクエストの防止（バグ修正済み、Issue #119）**: 以前は「はい」ボタンの`onClick`が`itemToUse`の真偽値のみを条件に無条件で`useMutationAction.mutate`を呼んでいたため、連打（ダブルタップ）で`setItemToUse(null)`によるモーダル閉じ（再レンダー）が反映される前に2回目のクリックイベントが発火すると、同一アイテムに対して`mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（1回目で既に`'consumed'`済み）により`400`「Cannot use this item」を返し、実際は1回目が成功しているのにエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的な多重送信ガードを追加し、`useMutationAction`の`onSettled`で必ず解除するようにした。`useMutationAction.isPending`（React Queryのreactiveな状態）ではなく`useRef`を使っているのは、`#101`の`isConfirmingRef`（`App.tsx`）と同じ理由で、連打による同期的な2回目の呼び出しが1回目の状態更新の反映（再レンダー）を待たずに発生しうるため。
+* **[修正済み] 「はい」連打による多重使用リクエストの防止（Issue #119）**: 以前は「はい」ボタンの`onClick`が`itemToUse`の真偽値のみを条件に無条件で`useMutationAction.mutate`を呼んでいたため、連打（ダブルタップ）で`setItemToUse(null)`によるモーダル閉じ（再レンダー）が反映される前に2回目のクリックイベントが発火すると、同一アイテムに対して`mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（1回目で既に`'consumed'`済み）により`400`「Cannot use this item」を返し、実際は1回目が成功しているのにエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的な多重送信ガードを追加し、`useMutationAction`の`onSettled`で必ず解除するようにした。`useMutationAction.isPending`（React Queryのreactiveな状態）ではなく`useRef`を使っているのは、`#101`の`isConfirmingRef`（`App.tsx`）と同じ理由で、連打による同期的な2回目の呼び出しが1回目の状態更新の反映（再レンダー）を待たずに発生しうるため。
 * 根拠: (行番号: 41, 73〜75, 140〜147 / 抜粋: "const isUsingItemRef = useRef(false);", "onSettled: () => {\n            isUsingItemRef.current = false;\n        }", "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
 
 ## 9. 不明事項一覧
