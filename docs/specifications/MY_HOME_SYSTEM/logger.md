@@ -83,8 +83,8 @@
 * 根拠: `[threading.Thread起動とコメント]` (行番号: 44〜50 / 抜粋: "# M-5-5: emit()はログ出力のたびにリクエスト処理スレッド上で呼ばれるため、\n                # ここで同期的にrequests.postすると、Discord側が遅い/落ちている場合に\n                # そのスレッドをtimeout秒(最大5秒)ブロックしてしまう。バックグラウンド\n                # スレッドで送信し、emit()自体は即座に返すようにする。\n                threading.Thread(\n                    target=self._send_webhook, args=(url, payload), daemon=True\n                ).start()")
 
 
-* **エラーハンドリング**: `try`ブロック全体（ペイロード組み立て・スレッド起動）で発生した全ての例外(`Exception`)をキャッチし、`pass`で握りつぶす。
-* 根拠: `[except Exception]` (行番号: 51〜52 / 抜粋: "except Exception:\n                pass")
+* **エラーハンドリング**: `try`ブロック全体（ペイロード組み立て・スレッド起動）で発生した全ての例外(`Exception`)をキャッチし、`logging.Handler`標準の`self.handleError(record)`に委譲する（`sys.stderr`へ直接書き出すのみでlogging機構を再度通らないため、無限ループにはならない）。
+* 根拠: `[except Exception]` (行番号: 51〜54 / 抜粋: "except Exception:\n                # logging.Handler標準のhandleError()を使う。sys.stderrへ直接書き出すのみで\n                # 再度loggingを経由しないため、ここで失敗を握りつぶしても無限ループにはならない。\n                self.handleError(record)")
 
 
 
@@ -260,7 +260,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **例外の握りつぶし**: `DiscordErrorHandler.emit` および `_send_webhook` はいずれも `except Exception: pass` で囲まれており、Webhookの送信失敗（ネットワークエラー、レート制限、無効なURL等）やペイロード組み立て時の例外が発生しても一切のログ・警告が出力されずに無視される。
+* **例外の握りつぶし**: `_send_webhook` は `except Exception: pass` で囲まれており、Webhookの送信失敗（ネットワークエラー、レート制限、無効なURL等）が発生しても一切のログ・警告が出力されずに無視される。一方 `DiscordErrorHandler.emit` はペイロード組み立て・スレッド起動時の例外を `self.handleError(record)`（`logging.Handler`標準機構）に委譲するよう変更されており、`sys.stderr`へ出力されるため、ハンドラの不調自体は検知可能になっている（Issue #288）。
 * **バックグラウンドスレッドでの送信**: `emit`は`_send_webhook`を`daemon=True`のバックグラウンドスレッドで起動して即座に返る設計のため、`emit()`が例外なく完了しても、実際のWebhook送信自体が成功したかどうかは呼び出し元からは分からない（`_send_webhook`内の例外も同様に握りつぶされる）。
 * **無限ループ防止のハードコード**: メッセージ（`str()`化後）に `"Discord"` という文字列が含まれるとDiscord通知から除外される仕様となっている (`"Discord" not in str(record.msg)`)。他の無関係なログ（例: "Discordアカウントの連携が完了しました"）であってもERRORレベルの場合は通知されない可能性がある。
 * **固定された設定値**: ログファイル名が `"home_system.log"`、タイムアウト値が `timeout=5` とコード内にハードコードされており、呼び出し元から変更できない。

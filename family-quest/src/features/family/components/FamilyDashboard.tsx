@@ -65,13 +65,13 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     // (角度⑥と隣接する着想: 空パネルに余計な視線誘導をしない)
     const hasNothingToDo = (user: User) => {
         return !quests.some(q => {
-            if (q.target && q.target !== 'all') {
-                if (q.target === 'siblings') {
+            if (q.target_user && q.target_user !== 'all') {
+                if (q.target_user === 'siblings') {
                     // 兄妹連携クエスト: 対象は子ども(role_child)全員
                     if (user.role !== 'role_child') return false;
-                } else if (q.target.startsWith('role_')) {
-                    if (user.role !== q.target) return false;
-                } else if (q.target !== user.user_id) {
+                } else if (q.target_user.startsWith('role_')) {
+                    if (user.role !== q.target_user) return false;
+                } else if (q.target_user !== user.user_id) {
                     return false;
                 }
             }

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
+import { gameDataResponseSchema } from '../lib/gameDataSchema';
 import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
@@ -26,28 +27,21 @@ export interface FamilyStats {
     partyRank: string;
 }
 
-// 年代記の1エントリ (UserService._fetch_full_adventure_logs のレスポンスに対応。
-// FamilyLog.tsx 側で複数の代替フィールド名にも防御的にフォールバックしているため、
-// それらも任意プロパティとして許容する)
+// 年代記の1エントリ (GameSystem._fetch_full_adventure_logs のレスポンスに対応。
+// #291: date/id/avatar_url/message/quest_title/reward_gold/reward_exp/created_at は
+// バックエンドから一度も送られてこない幽霊フィールドだったため削除した。
+// FamilyLog.tsx側の「複数の代替フィールド名への防御的フォールバック」もあわせて廃止した。
 export interface ChronicleItem {
     type?: string;
     timestamp?: string;
     dateStr?: string;
-    date?: string;
-    id?: string | number;
     userId?: string;
     userName?: string;
     userAvatar?: string;
-    avatar_url?: string;
     title?: string;
     text?: string;
-    message?: string;
-    quest_title?: string;
     gold?: number;
-    reward_gold?: number;
     exp?: number;
-    reward_exp?: number;
-    created_at?: string;
 }
 
 export interface LevelUpInfo {
@@ -103,12 +97,16 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // 1. メインデータの取得
     const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
-        queryFn: () => {
+        queryFn: async () => {
             const viewerUserId = viewerUserIdRef.current;
             const endpoint = viewerUserId
                 ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`
                 : '/api/quest/data';
-            return apiClient.get(endpoint);
+            const raw = await apiClient.get<unknown>(endpoint);
+            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と
+            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド
+            // バグとしてではなく、ここで即座にエラーとして検知させる。
+            return gameDataResponseSchema.parse(raw) as GameDataResponse;
         },
         staleTime: 1000 * 30,
         refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限
@@ -134,12 +132,9 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, quest }: { user: User; quest: Quest }) => {
             return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定
                 user_id: user.user_id,
-                // #246: quest.id || quest.quest_id という逆順は、useQuestStatus.ts
-                // (getQuestLockStateのqId算出、ソースオブトゥルース)が統一した
-                // `quest.quest_id || quest.id` という規約と食い違っていた。バックエンドの
-                // quest_masterはquest_id列のみを持ちidフィールドは存在しないため現状の
-                // 実害は無いが、規約統一のため揃える。
-                quest_id: quest.quest_id || quest.id,
+                // #291: quest.id という幽霊フィールド(バックエンドから送られてこない)への
+                // フォールバックを廃止し、実カラムのquest_idのみを参照する。
+                quest_id: quest.quest_id,
             });
         },
         onSuccess: (res, variables) => {
@@ -165,7 +160,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post('/api/quest/quest/cancel', {
                 user_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
             });
         },
         onSuccess: () => {
@@ -182,7 +177,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
             return apiClient.post<QuestResult>('/api/quest/approve', {
                 approver_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
             });
         },
         onSuccess: (res, variables) => {
@@ -223,7 +218,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, history, reason }: { user: User; history: QuestHistory; reason?: string }) => {
             return apiClient.post('/api/quest/reject', {
                 approver_id: user.user_id,
-                history_id: history.id ?? history.history_id,
+                history_id: history.id,
                 reason,
             });
         },
@@ -238,7 +233,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         mutationFn: async ({ user, reward }: { user: User; reward: Reward }) => {
             return apiClient.post('/api/quest/reward/purchase', {
                 user_id: user.user_id,
-                reward_id: reward.id || reward.reward_id,
+                reward_id: reward.reward_id,
             });
         },
         onSuccess: (_data, variables) => { // data -> _data
@@ -253,9 +248,9 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // --- ラッパー関数 (Async/Await対応) ---
 
     const completeQuest = async (user: User, quest: Quest) => {
-        // #246: useQuestStatus.tsのgetQuestLockStateと同じ`quest.quest_id || quest.id`
-        // の順序に統一する(以前はquest.id || quest.quest_idという逆順だった)。
-        const qId = quest.quest_id || quest.id;
+        // #291: quest.id という幽霊フィールドへのフォールバックを廃止し、
+        // useQuestStatus.tsのgetQuestLockStateと同じく実カラムのquest_idのみ参照する。
+        const qId = quest.quest_id;
         const isPending = gameData?.pendingQuests.some(pq => pq.user_id === user.user_id && pq.quest_id === qId);
 
         if (isPending) {
@@ -322,7 +317,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     // buyReward ラッパー
     const buyReward = async (user: User, reward: Reward) => {
-        const cost = reward.cost_gold || reward.cost;
+        const cost = reward.cost_gold;
         if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };
 
         try {

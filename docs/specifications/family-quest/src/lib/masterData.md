@@ -62,47 +62,47 @@
 
 ### 定数：`MASTER_QUESTS`
 
-* **役割**: 接続エラー時に使用される、エラー状態を伝えるダミークエストのフォールバックデータを定義する。
-* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
+* **役割**: 接続エラー時に使用される、エラー状態を伝えるダミークエストのフォールバックデータを定義する。**（#291で修正）** プロパティ名がバックエンドAPIのレスポンスと同じフィールド名（`quest_id`/`exp_gain`/`gold_gain`/`quest_type`/`icon_key`）に統一され、フロント側（`QuestList.tsx`等）が二重のフィールド名フォールバック（`quest.gold_gain || quest.gold`等）を持たずに済むようになった。以前は`id`/`exp`/`gold`/`type`/`icon`という別名を使用していた。
+* 根拠: [定数定義] (行番号: 20〜26 / 抜粋: "// #291: バックエンドのAPIレスポンスと同じフィールド名(quest_id/exp_gain/gold_gain/\n// quest_type/icon_key、reward_id/cost_gold/icon_key/description)に統一し、\n// フロント側で二重のフィールド名フォールバックを持たずに済むようにする。\nexport const MASTER_QUESTS = [")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [定数定義] (行番号: 20 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 23 / 抜粋: "export const MASTER_QUESTS = [")
 
 
-* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `id`, `title`, `exp`, `gold`, `type`, `days`, `icon`）
-* 根拠: [定数の中身] (行番号: 21〜22 / 抜粋: "{ id: 999, title: '⚠️ サーバ...")
+* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `quest_id`, `title`, `exp_gain`, `gold_gain`, `quest_type`, `days`, `icon_key`）
+* 根拠: [定数の中身] (行番号: 24〜25 / 抜粋: "{ quest_id: 999, title: '⚠️ サーバーに繋がりません', exp_gain: 0, gold_gain: 0, quest_type: 'daily', days: null, icon_key: '🔌' },")
 
 
 * **副作用**: なし
-* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 23〜26 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数定義] (行番号: 20〜23 / 抜粋: "export const MASTER_QUESTS = [")
+* 根拠: [定数定義] (行番号: 23〜26 / 抜粋: "export const MASTER_QUESTS = [")
 
 
 
 ### 定数：`MASTER_REWARDS`
 
-* **役割**: 接続エラー時に使用される、データ取得失敗を伝えるダミー報酬のフォールバックデータを定義する。
-* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
+* **役割**: 接続エラー時に使用される、データ取得失敗を伝えるダミー報酬のフォールバックデータを定義する。**（#291で修正）** プロパティ名がバックエンドAPIのレスポンスと同じフィールド名（`reward_id`/`cost_gold`/`icon_key`/`description`）に統一された。以前は`id`/`cost`/`icon`/`desc`という別名を使用しており、`RewardList.tsx`側で`cost_gold || cost`のような二重参照が必要だったが、これが不要になった。
+* 根拠: [定数定義] (行番号: 20〜22, 28〜30 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [定数定義] (行番号: 25 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 28 / 抜粋: "export const MASTER_REWARDS = [")
 
 
-* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `id`, `title`, `cost`, `category`, `icon`, `desc`）
-* 根拠: [定数の中身] (行番号: 26 / 抜粋: "{ id: 999, title: 'データ取得失敗...")
+* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `reward_id`, `title`, `cost_gold`, `category`, `icon_key`, `description`）
+* 根拠: [定数の中身] (行番号: 29 / 抜粋: "{ reward_id: 999, title: 'データ取得失敗', cost_gold: 99999, category: 'special', icon_key: '❌', description: 'サーバーを確認してください' },")
 
 
 * **副作用**: なし
-* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 28〜30 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数定義] (行番号: 25〜27 / 抜粋: "export const MASTER_REWARDS = [")
+* 根拠: [定数定義] (行番号: 28〜30 / 抜粋: "export const MASTER_REWARDS = [")
 
 
 
@@ -140,7 +140,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* 定数としてエクスポートされる各オブジェクトのスキーマ（プロパティ構成）はハードコードされている。アプリ全体でユーザー、クエスト、報酬のデータ構造に変更があった場合、このファイルのオブジェクト構造も手動で合わせる必要がある。
+* 定数としてエクスポートされる各オブジェクトのスキーマ（プロパティ構成）はハードコードされている。アプリ全体でユーザー、クエスト、報酬のデータ構造に変更があった場合、このファイルのオブジェクト構造も手動で合わせる必要がある。**（#291で対応）** `MASTER_QUESTS`/`MASTER_REWARDS`のプロパティ名は、`Quest`/`Reward`型定義がバックエンドの実カラム名に一本化されたことに合わせて更新済みであり、現時点ではフィールド名の乖離はない。
 * ファイル冒頭コメントの記載パスは実際の配置場所 (`family-quest/src/lib/masterData.js`) と一致している。
 * 根拠: [ファイル冒頭コメント] (行番号: 1 / 抜粋: "// family-quest/src/lib/masterData.js")
 
