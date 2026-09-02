@@ -7,18 +7,21 @@
 
 ---
 
-## 0. 対応状況（最終更新: 2026-08-29）
+## 0. 対応状況（最終更新: 2026-09-02）
 
-指摘34件（Critical 9・High 6・Medium 19）のうち24件は対応完了、9件は部分対応（残作業あり）、1件は意思決定により対応対象外。**7. 最終結論**の「🔴 REJECT・49/100」判定はこの2026-08-11時点の状況を反映したものであり、以下の通り2026-08-29時点では大半が解消済みのため、現状の判定としては読み替えが必要。
+指摘34件（Critical 9・High 6・Medium 19）のうち21件は対応完了、12件は未対応・部分対応（残作業あり）、1件は意思決定により対応対象外。**7. 最終結論**の「🔴 REJECT・49/100」判定はこの2026-08-11時点の状況を反映したものであり、以下の通り大半が解消済みのため、現状の判定としては読み替えが必要。
 
-### 🔲 残件（未対応・部分対応・9件）
+> **2026-09-02訂正（Issue #321）**: Critical#2は一度「対応完了」（`access_control_middleware`によるCloudflare Access JWT検証必須化、PR #80）と記録されたが、PR #80は2026-08-28のfamily-quest障害でrevert済みであり、**未対応に戻っている**。Critical#8の外部アクセス防御についても同様にアプリ層のJWT検証は消滅しており、エッジのCloudflare Access（インフラ側・コード外）のみが防御となっている。本表はこの回帰を反映済み。詳細は`CODE_REVIEW_REPORT_2026-08-22.md`のH-10、`MY_HOME_SYSTEM/CODE_REVIEW_REPORT.md`の2.2を参照。
+
+### 🔲 残件（未対応・部分対応・13件、うち1件はスコープ外）
 
 | # | 項目 | 状態 | 詳細 |
 |---|---|---|---|
 | Critical#1 | APIの認可欠如（`user_id`/`approver_id`のクライアント信頼） | 未対応（意思決定によりスコープ外） | 棚卸し課題4で対応スコープ外と合意済み。docs改善バックログのB1と同一課題 |
+| Critical#2 | IPアドレス制限ヘッダー詐称 | **未対応に戻った（PR #80 revert）** | 一度`access_control_middleware`によるCloudflare Access JWT検証必須化（PR #80）で対応完了と記録されたが、2026-08-28のfamily-quest障害でPR #80はrevert済み。現在の`unified_server.py`に存在するのは`ip_restriction_middleware`のみで、非プライベートIPからのリクエストをログに記録するだけで全て通過させる。`Cf-Access-Jwt-Assertion`を参照するコードはコメント1箇所のみ。JWT検証を再実装するか、エッジのCloudflare Access委譲を正式設計として確定させるかはIssue #321で判断待ち。`CODE_REVIEW_REPORT_2026-08-22.md`のH-10と同一課題 |
 | Critical#3 | Streamlitダッシュボードの無認証公開 | 部分対応 | `--server.address`を`0.0.0.0`→`127.0.0.1`に変更済みで外部露出は解消。ただし`sudo systemctl restart`ボタン（`views/dashboard/log_tab.py:119`）を含めアプリ内認証は依然なし |
 | Critical#4 | DBバックアップのGit履歴残存 | 部分対応 | `.gitignore`修正・ワーキングツリーからの追跡解除は完了済み。過去コミット履歴からの完全消去（`git filter-repo`等）はリポジトリ所有者の判断待ち。docs改善バックログのD4と同一課題 |
-| Critical#8 | カメラ機能の無認証公開 | 部分対応 | 外部アクセスは`access_control_middleware`でCloudflare Access JWT検証必須化済み（PR #80）。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み |
+| Critical#8 | カメラ機能の無認証公開 | 部分対応（**PR #80 revertによりアプリ層防御は消滅**） | 外部アクセスは一度`access_control_middleware`でCloudflare Access JWT検証必須化（PR #80）されたが、2026-08-28のrevertで消滅し、現在の外部アクセス防御はエッジのCloudflare Access（インフラ側・コード外）のみ。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み。アプリ層防御の再実装要否はCritical#2と同じくIssue #321で判断待ち |
 | High#1 | `family-quest/`テストコード皆無・ESLintが`.ts`/`.tsx`対象外 | 部分対応 | ESLintの`files`グロブは`.ts`/`.tsx`を含むよう修正済み（Lint対象化は解消）。テストファイルは依然0件（`*.test.*`/`*.spec.*`検索でヒットなし、テスト用依存もpackage.jsonに無し）。docs改善バックログのC2と同一課題 |
 | High#3 | `UserStatusCard`のHP固定表示 | 対応済み・要追加確認 | HP再計算バグ自体は是正済み（バックエンド値をそのまま使う設計に変更）。ただし現在の`UserStatusCard.tsx`にはHP表示UI自体が存在しない。意図した仕様変更か確認が必要 |
 | M2 | `config.py`の子供の氏名・年齢ハードコード | 部分対応 | 年齢は`family_members.local.json`（`.gitignore`で除外・git追跡対象外）に切り出し済み。氏名は`config.py`の`FAMILY_SETTINGS`に引き続き残存 |
@@ -28,9 +31,9 @@
 | M17 | `split_prompts.py`のファイル名衝突時無警告上書き | 部分対応 | 衝突時に警告ログを出すよう改修済み（「無警告」は解消）。上書き自体を防止・退避する仕組みは未実装 |
 | M18 | `extract_youtube_urls.py`の出力上書き | 部分対応 | 同上（警告ログ追加のみ、上書き自体は継続） |
 
-### ✅ 対応完了（22件）
+### ✅ 対応完了（21件）
 
-**Critical**: #2 IPアドレス制限ヘッダー詐称（`access_control_middleware`でJWT検証必須化、PR #80）／#5 `package.json`/`tsconfig.json`不在（コミット`74e5f83`で追加）／#6 Admin Dashboard無条件到達性（`features/admin/`ごと機能削除）／#7 アバターアップロード実装不備（`apiClient.postForm()`実装）／#9 DDD機微コンテンツのGit無制限追跡（`.gitignore`に`DDD/split_results/`等追加、追跡0件確認）
+**Critical**: #5 `package.json`/`tsconfig.json`不在（コミット`74e5f83`で追加）／#6 Admin Dashboard無条件到達性（`features/admin/`ごと機能削除）／#7 アバターアップロード実装不備（`apiClient.postForm()`実装）／#9 DDD機微コンテンツのGit無制限追跡（`.gitignore`に`DDD/split_results/`等追加、追跡0件確認）
 
 **High**: #2 tsconfig不在・`as any`型迂回（`tsconfig.json`で`strict: true`、`as any`は0件）／#4 `batch_download_discord.py`多重起動防止欠如（`fcntl.flock`実装）／#5 `extract_youtube_urls.py`レート制限未考慮（ジッター付きsleep＋連続失敗しきい値実装）／#6 `newface_monitor.py`非アトミック書き込み（tmpファイル＋バックアップ＋`Path.replace()`実装）
 
