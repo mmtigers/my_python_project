@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import LiveView from './LiveView';
 import RecordView from './RecordView';
 import CameraSettingsModal from './CameraSettingsModal';
@@ -10,42 +11,44 @@ import { apiClient } from '@/lib/apiClient';
 // 返す{"detail": "..."}の内容が入っている(apiClient.ts参照)。CameraDashboardは
 // main.tsxでToastProvider配下ではなく独立してマウントされるため(/cameraは
 // Family Quest本体と同時に使われない専用ビューア)、他画面のようにuseToast()の
-// showToastは使えない。代わりにローカルなfetchErrorステートで画面内にエラー表示する。
+// showToastは使えない。代わりにクエリのerrorから画面内にエラー表示する。
 const extractErrorDetail = (error: unknown): string => {
     return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';
 };
 
 const CameraDashboard: React.FC = () => {
-    const [allCameras, setAllCameras] = useState<CameraConfig[]>([]);
     const [activeTab, setActiveTab] = useState<'live' | 'record'>('live');
-    const [loading, setLoading] = useState(true);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    // ★バグ修正(Issue #121): 以前はcatchがconsole.errorのみで、バックエンド停止・
-    // ネットワーク断時にライブタブが「無言で」空のグリッドを表示していた
-    // (障害の原因がユーザーに一切伝わらない)。取得失敗を画面上のバナーで通知する。
-    const [fetchError, setFetchError] = useState<string | null>(null);
 
-    const fetchSettings = useCallback(() => {
-        return apiClient.get<CameraConfig[]>('/api/cameras/settings')
-            .then(data => {
-                setAllCameras([...data].sort((a, b) => a.order - b.order));
-                setFetchError(null);
-            })
-            .catch(err => {
-                console.error("Failed to fetch camera settings:", err);
-                setFetchError(extractErrorDetail(err));
-            });
-    }, []);
+    // ★リファクタ(Issue #326/M12): 以前は生のuseEffect+ローカルステート
+    // (allCameras/loading/fetchError)でデータ取得しており、他画面が従っている
+    // React Query規約(useGameData.ts方式)から外れた最後の1箇所だった。
+    // カメラ設定は設定モーダル経由でしか変わらないためポーリングは不要で、
+    // キャッシュ方針はqueryClient.tsのデフォルト(staleTime 60秒・retry 1)に従う。
+    // 取得失敗時もキャッシュ済みデータは保持されるため、Issue #121のエラーバナー
+    // (再試行つき)と既存表示の共存という従来挙動は変わらない。
+    const {
+        data: allCameras = [],
+        isLoading,
+        error,
+        refetch,
+    } = useQuery<CameraConfig[]>({
+        queryKey: ['cameraSettings'],
+        queryFn: async () => {
+            const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');
+            return [...data].sort((a, b) => a.order - b.order);
+        },
+    });
 
     useEffect(() => {
         document.title = "ホーム監視カメラ";
-        fetchSettings().finally(() => setLoading(false));
         return () => { document.title = "Family Quest"; };
-    }, [fetchSettings]);
+    }, []);
 
     const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);
+    const fetchError = error ? extractErrorDetail(error) : null;
 
-    if (loading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-8">読み込み中...</div>;
+    if (isLoading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-8">読み込み中...</div>;
 
     return (
         // 独立した全画面レイアウト
@@ -70,7 +73,7 @@ const CameraDashboard: React.FC = () => {
                     <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-red-700 bg-red-950/40 px-4 py-3 text-sm text-red-300">
                         <span>⚠️ カメラ設定の取得に失敗しました: {fetchError}</span>
                         <button
-                            onClick={() => { setLoading(true); fetchSettings().finally(() => setLoading(false)); }}
+                            onClick={() => refetch()}
                             className="shrink-0 rounded bg-red-800 px-3 py-1 font-bold text-white hover:bg-red-700 transition-colors"
                         >
                             再試行
@@ -104,7 +107,7 @@ const CameraDashboard: React.FC = () => {
                 isOpen={settingsOpen}
                 onClose={() => setSettingsOpen(false)}
                 cameras={allCameras}
-                onToggled={fetchSettings}
+                onToggled={async () => { await refetch(); }}
             />
         </div>
     );
