@@ -66,6 +66,44 @@ def test_apply_pending_migrations_adds_expected_columns():
         conn.close()
 
 
+def test_migration_0008_fixes_quest_master_reset_period_column_default():
+    """
+    Issue #329: 0002 で焼き付いたカラムDEFAULT 'weekly_monday' は ALTER TABLE では
+    変更できないため、0008 がテーブル再作成方式で 'daily' に修正すること。
+    既存行のデータが失われず、DEFAULT未指定のINSERTにも 'daily' が入ること。
+    """
+    conn = sqlite3.connect(":memory:")
+    try:
+        _make_minimal_schema(conn)
+        conn.execute("INSERT INTO quest_master (quest_id, title) VALUES (1, 'そうじ')")
+        conn.commit()
+
+        apply_pending_migrations(conn)
+
+        # カラムDEFAULTが 'daily' に修正されていること
+        defaults = {row[1]: row[4] for row in conn.execute("PRAGMA table_info(quest_master)").fetchall()}
+        assert defaults["reset_period"] == "'daily'"
+
+        # 既存行が保持され、0002由来のDEFAULT('weekly_monday')は0005/0008で補正済みであること
+        row = conn.execute("SELECT title, reset_period FROM quest_master WHERE quest_id = 1").fetchone()
+        assert row == ("そうじ", "daily")
+
+        # reset_period 未指定でINSERTした新規行にDEFAULTの 'daily' が入ること
+        conn.execute("INSERT INTO quest_master (title) VALUES ('あたらしいクエスト')")
+        val = conn.execute(
+            "SELECT reset_period FROM quest_master WHERE title = 'あたらしいクエスト'"
+        ).fetchone()[0]
+        assert val == "daily"
+
+        # 作業用テーブルが残っていないこと
+        leftover = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='quest_master_rebuild_0008'"
+        ).fetchone()
+        assert leftover is None
+    finally:
+        conn.close()
+
+
 def test_apply_pending_migrations_is_idempotent():
     conn = sqlite3.connect(":memory:")
     try:

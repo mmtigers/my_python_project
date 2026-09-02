@@ -171,6 +171,8 @@ CREATE TABLE quest_users (
         updated_at DATETIME
     , avatar TEXT DEFAULT '🙂', medal_count INTEGER DEFAULT 0, role TEXT);
 CREATE TABLE quest_master (
+        -- migrations/0008 でテーブル再作成し、reset_period のDEFAULTを
+        -- 'weekly_monday'(処理側が扱えない値)から 'daily' に修正済み (Issue #329)
         quest_id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
@@ -182,8 +184,12 @@ CREATE TABLE quest_master (
         target_user TEXT DEFAULT 'all',      -- 'all', 'dad', 'mom', 'sun'
         start_date TEXT,                    -- 'YYYY-MM-DD'
         end_date TEXT,                      -- 'YYYY-MM-DD'
-        occurrence_chance REAL DEFAULT 1.0   -- 0.0〜1.0
-    , start_time TEXT, end_time TEXT, days TEXT, pre_requisite_quest_id INTEGER DEFAULT NULL, reset_period TEXT DEFAULT 'weekly_monday');
+        occurrence_chance REAL DEFAULT 1.0,  -- 0.0〜1.0
+        start_time TEXT,
+        end_time TEXT,
+        days TEXT,
+        pre_requisite_quest_id INTEGER DEFAULT NULL,
+        reset_period TEXT DEFAULT 'daily');
 CREATE TABLE quest_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT,
