@@ -80,6 +80,71 @@ class TestSendDiscordWebhook:
         assert result is False
 
 
+class TestSendLinePushFlexDictConversion:
+    """Issue #322の回帰テスト: 辞書形式のflexメッセージが黙って破棄されないこと。
+
+    以前は _send_line_push 内の flex 分岐が pass で、辞書形式のflexメッセージは
+    無言で破棄されていた(テキスト混在時は送信自体が成功するため気づけない)。
+    現在は FlexContainer.from_dict でv3オブジェクトへ変換して送信し、変換不能な
+    場合・未対応型の場合は内容つきのログを残す。
+    """
+
+    _VALID_FLEX_DICT = {
+        "type": "flex",
+        "altText": "テスト通知",
+        "contents": {
+            "type": "bubble",
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [{"type": "text", "text": "hello"}],
+            },
+        },
+    }
+
+    def test_flex_dict_is_converted_to_flex_message_and_sent(self, monkeypatch):
+        fake_api = _install_fake_line_sdk(monkeypatch)
+
+        result = notification_service._send_line_push("dad", [self._VALID_FLEX_DICT])
+
+        assert result is True
+        push_request = fake_api.push_message.call_args.args[0]
+        assert len(push_request.messages) == 1
+        sent = push_request.messages[0]
+        assert isinstance(sent, notification_service.FlexMessage)
+        assert sent.alt_text == "テスト通知"
+
+    def test_invalid_flex_dict_is_dropped_with_error_log_but_text_still_sent(self, monkeypatch):
+        fake_api = _install_fake_line_sdk(monkeypatch)
+        fake_logger = MagicMock()
+        monkeypatch.setattr(notification_service, "logger", fake_logger)
+
+        broken_flex = {"type": "flex", "altText": "壊れたflex", "contents": {"type": "unknown_container"}}
+        result = notification_service._send_line_push(
+            "dad", [broken_flex, {"type": "text", "text": "hi"}]
+        )
+
+        # テキストメッセージは送信され、壊れたflexは内容つきエラーログとともに破棄される
+        assert result is True
+        push_request = fake_api.push_message.call_args.args[0]
+        assert len(push_request.messages) == 1
+        assert isinstance(push_request.messages[0], notification_service.TextMessage)
+        assert fake_logger.error.called
+        assert "壊れたflex" in fake_logger.error.call_args.args[0]
+
+    def test_unsupported_dict_type_is_dropped_with_warning_log(self, monkeypatch):
+        fake_api = _install_fake_line_sdk(monkeypatch)
+        fake_logger = MagicMock()
+        monkeypatch.setattr(notification_service, "logger", fake_logger)
+
+        result = notification_service._send_line_push("dad", [{"type": "sticker", "packageId": "1"}])
+
+        assert result is False
+        fake_api.push_message.assert_not_called()
+        warning_messages = [c.args[0] for c in fake_logger.warning.call_args_list]
+        assert any("未対応のメッセージ型" in m for m in warning_messages)
+
+
 class TestSendPushFallbackBehavior:
     def test_both_succeed(self, monkeypatch):
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
