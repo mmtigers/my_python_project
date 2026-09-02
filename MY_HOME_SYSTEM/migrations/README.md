@@ -5,9 +5,20 @@
 `*.sql` をファイル名の昇順で読み込み、`schema_migrations` テーブルに記録された
 適用済みバージョンと突き合わせて未適用分のみを実行します。
 
+**このディレクトリがスキーマの唯一の定義元です (Issue #330)。**
+`0000_baseline_schema.sql` が全テーブル・インデックスのベースライン
+(全文 `CREATE TABLE IF NOT EXISTS` のため既存DBではno-op)、0001以降が
+カラム追加・データ移行の積み上げです。以前 `init_unified_db.py` が持っていた
+CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリを適用するだけの
+薄いラッパーになっています。空DBに `apply_pending_migrations()` だけを適用しても
+フルスキーマが構築できることは `tests/test_empty_db_e2e.py` が
+(旧init_dbスキーマのスナップショット `tests/fixtures/legacy_init_db_schema.json`
+との突き合わせ込みで)検証しています。
+
 ## 新しいマイグレーションの追加方法
 
-1. `NNNN_short_description.sql` の形式でファイルを追加する（`NNNN` は既存の最大値+1のゼロ埋め4桁連番）。
+1. `NNNN_short_description.sql` の形式でファイルを追加する（`NNNN` は既存の最大値+1のゼロ埋め4桁連番。`0000` はベースライン専用の予約番号で、以後使わない）。
+   - 新しいテーブルの追加も、既存の `0000_baseline_schema.sql` を書き換えるのではなく、新しい `NNNN_*.sql` の `CREATE TABLE IF NOT EXISTS` として追加する。
 2. 可能な限り `ALTER TABLE ... ADD COLUMN` を先頭に書き、後続のデータ移行(UPDATE等)はその後に続ける。
    - 既に列が存在する環境（過去の実行時チェックで先に適用済み等）に対して再実行された場合、
      `ALTER TABLE` の失敗（duplicate column）はランナー側で警告ログとして扱われ、

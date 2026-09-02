@@ -554,12 +554,16 @@ class TestSyncMasterData:
     """
     GameSystem.sync_master_data() の未テストだった分岐:
     - quest_data モジュール不在時に HTTPException(500) を送出すること
-    - 新規DBに欠けている旧カラム(role/reset_period/description)を
-      ALTER TABLEで自動追加するレガシーマイグレーション分岐
     - reward_master側の対象idリストが空の場合に全件DELETEする分岐
     - quest_master側は対象idリストが空でも全件DELETEしない安全弁(Issue #242)
     実際の外部サービス呼び出しは無く、quest_data はリポジトリ同梱の静的データなので
     実データを使っても決定的(deterministic)である。
+
+    Issue #330: 以前ここでテストしていた「SELECTを試して失敗したらALTER TABLE」式の
+    レガシー実行時マイグレーション分岐(role/reset_period/description)は完全退役した。
+    これらのカラムは migrations/ 配下(0000ベースライン+0001〜0003等)が供給し、
+    sync_master_data はカラムの存在を前提とする(存在保証はマイグレーション経路の
+    テスト test_migrations.py / test_empty_db_e2e.py 側で検証する)。
     """
 
     def _column_names(self, cur, table):
@@ -574,49 +578,27 @@ class TestSyncMasterData:
 
         assert exc_info.value.status_code == 500
 
-    def test_adds_missing_legacy_columns_on_fresh_db(self, isolated_db):
-        """role/reset_period/description は現在 core/migrations.py 側のマイグレーションで
-        新規DB作成時に追加されるため、通常のisolated_dbには既に存在する。
-        sync_master_data内の同名ALTER TABLE分岐は、それより前に作られた旧スキーマDBのための
-        後方互換コードであり、その状態を意図的に再現(DROP COLUMN)してテストする。"""
-        with common.get_db_cursor(commit=True) as cur:
-            # role の一括UPDATEはUPDATE文なので、既存ユーザー行が無いと対象0件になってしまう。
-            # 旧スキーマ時代からの既存ユーザーが居る状態を再現するため事前に行を用意する。
-            cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class) VALUES "
-                "('dad', 'Dad', 'Warrior'), ('son', 'Son', 'Novice')"
-            )
-            cur.execute("ALTER TABLE quest_users DROP COLUMN role")
-            cur.execute("ALTER TABLE quest_master DROP COLUMN reset_period")
-            cur.execute("ALTER TABLE reward_master DROP COLUMN description")
-
+    def test_migration_provided_columns_exist_and_sync_populates_roles(self, isolated_db):
+        """Issue #330の回帰テスト: レガシー実行時ALTERを退役させた後も、
+        migrations経由で構築されたDB(isolated_db)には role/reset_period/description が
+        最初から存在し、sync_master_data がrole値を正しく投入できること。"""
         with common.get_db_cursor() as cur:
-            assert "role" not in self._column_names(cur, "quest_users")
-            assert "reset_period" not in self._column_names(cur, "quest_master")
-            assert "description" not in self._column_names(cur, "reward_master")
+            assert "role" in self._column_names(cur, "quest_users")
+            assert "reset_period" in self._column_names(cur, "quest_master")
+            assert "description" in self._column_names(cur, "reward_master")
 
         game_system = GameSystem()
         result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
         with common.get_db_cursor() as cur:
-            assert "role" in self._column_names(cur, "quest_users")
-            assert "reset_period" in self._column_names(cur, "quest_master")
-            assert "description" in self._column_names(cur, "reward_master")
-
             dad_role = cur.execute(
                 "SELECT role FROM quest_users WHERE user_id='dad'"
             ).fetchone()["role"]
-            son_role = cur.execute(
-                "SELECT role FROM quest_users WHERE user_id='son'"
-            ).fetchone()["role"]
         assert dad_role == "role_adult"
-        assert son_role == "role_child"
 
-    def test_second_sync_call_skips_migration_without_error(self, isolated_db):
-        """カラムが既に存在する2回目以降の呼び出しでは、
-        マイグレーションtry節が例外なく成功し(ALTER TABLEは実行されない)、
-        通常通り同期が完了すること。"""
+    def test_second_sync_call_succeeds_without_error(self, isolated_db):
+        """2回目以降の呼び出しでも(UPSERTのみで)通常通り同期が完了すること。"""
         game_system = GameSystem()
         game_system.sync_master_data()
 

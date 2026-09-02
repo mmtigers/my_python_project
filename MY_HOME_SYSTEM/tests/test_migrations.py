@@ -15,13 +15,20 @@ from core.migrations import apply_pending_migrations
 
 
 def _make_minimal_schema(conn: sqlite3.Connection) -> None:
-    """migrations/ 配下のSQLが対象とする最低限のテーブルだけを用意する"""
+    """0001以降のマイグレーションSQLが対象とする最低限のテーブルだけを、
+    旧スキーマ(マイグレーション未適用)状態で用意する。
+
+    Issue #330で追加された 0000_baseline_schema.sql は全文 CREATE TABLE IF NOT EXISTS の
+    ため、ここで作った既存テーブルはそのまま維持され(=旧スキーマDBの再現が保たれ)、
+    ここに無いテーブルはベースラインが補完する。device_records の timestamp は
+    ベースラインのインデックス(idx_device_records_device_ts)が参照するため、
+    実際の旧DBと同様に最初から持たせておく。"""
     conn.executescript("""
         CREATE TABLE quest_users (user_id TEXT PRIMARY KEY, name TEXT);
         CREATE TABLE quest_master (quest_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE reward_master (reward_id INTEGER PRIMARY KEY, title TEXT);
         CREATE TABLE quest_history (id INTEGER PRIMARY KEY, user_id TEXT, quest_id INTEGER);
-        CREATE TABLE device_records (id INTEGER PRIMARY KEY, device_id TEXT);
+        CREATE TABLE device_records (id INTEGER PRIMARY KEY, device_id TEXT, timestamp DATETIME);
         CREATE TABLE weather_history (id INTEGER PRIMARY KEY, date TEXT UNIQUE, min_temp REAL, max_temp REAL, weather_desc TEXT, recorded_at TEXT);
     """)
     conn.commit()

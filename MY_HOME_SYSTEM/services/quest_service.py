@@ -1011,22 +1011,12 @@ class GameSystem:
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
         
         with common.get_db_cursor(commit=True) as cur:
-            # ★追加: マイグレーション処理 (role カラムの追加と初期化)
-            try:
-                cur.execute("SELECT role FROM quest_users LIMIT 1")
-            except Exception:
-                logger.info("⚠️ 'role' column missing in quest_users. Adding it now...")
-                cur.execute("ALTER TABLE quest_users ADD COLUMN role TEXT")
-                cur.execute("UPDATE quest_users SET role = 'role_adult' WHERE user_id IN ('dad', 'mom')")
-                cur.execute("UPDATE quest_users SET role = 'role_child' WHERE user_id IN ('daughter', 'son', 'child')")
-
-            # ★追加: マイグレーション処理 (reset_period カラムの追加)
-            try:
-                cur.execute("SELECT reset_period FROM quest_master LIMIT 1")
-            except Exception:
-                logger.info("⚠️ 'reset_period' column missing in quest_master. Adding it now...")
-                cur.execute("ALTER TABLE quest_master ADD COLUMN reset_period TEXT DEFAULT 'daily'")
-
+            # Issue #330: 以前ここにあった「SELECTを試して失敗したらALTER TABLE」式の
+            # レガシー実行時マイグレーション(role/reset_period/descriptionカラムの追加)は
+            # 完全退役した。スキーマは migrations/ 配下(0000ベースライン+0001以降)が
+            # 唯一の定義元であり、unified_serverのlifespanとinit_db()の双方が起動時に
+            # apply_pending_migrations() を適用するため、本メソッド到達時点で
+            # これらのカラムは必ず存在する。
             for u in valid_users:
                 role_val = getattr(u, 'role', None)
                 cur.execute("""
@@ -1077,12 +1067,6 @@ class GameSystem:
                     q.pre_requisite_quest_id, q.reset_period
                 ))
             
-            try:
-                cur.execute("SELECT description FROM reward_master LIMIT 1")
-            except Exception:
-                logger.info("⚠️ 'description' column missing in reward_master. Adding it now...")
-                cur.execute("ALTER TABLE reward_master ADD COLUMN description TEXT")
-
             active_r_ids = [r.id for r in valid_rewards]
             if active_r_ids:
                 ph = ','.join(['?'] * len(active_r_ids))
