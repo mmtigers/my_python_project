@@ -45,15 +45,72 @@ SSH到達性は、`start_all.sh` の `switchbot_webhook_fix.py`（Cloudflare Tun
 
 ## 必要な準備（ユーザー側の作業）
 
-実装再開時にこの3点が完了している必要がある。
+実装再開時にこの3点が完了している必要がある。UIはCloudflare側の更新で変わる可能性があるため、実際の画面に合わせて読み替えること。
 
-1. **Cloudflare Zero Trust**: SSH用のSelf-hosted Access Applicationを作成し、Service Token（Client ID / Secret）を発行。既存のTunnel設定に、ラズパイの22番ポート向けのルートを追加。
-2. **ラズパイ側**: `cloudflared`（webhook修正で既に導入済み）に対し、`cloudflared access ssh` 用の設定を追加。またはSSH configに以下を追加。
+### 1. Cloudflare Zero Trust側
+
+**前提確認**: `start_all.sh` の `switchbot_webhook_fix.py` が使っている既存の `cloudflared` トンネルが、**名前付きトンネル（named tunnel）** であること。もし `cloudflared tunnel --url ...` のような使い捨てURL方式（quick tunnel）であれば、先に名前付きトンネルへ移行する必要がある（`cloudflared tunnel create <name>` でトンネルを作成し、DNSレコードを紐付け直す）。
+
+1. https://one.dash.cloudflare.com/ にログインし、対象アカウントのZero Trustダッシュボードを開く。
+2. 左メニュー **Networks → Tunnels** を開き、既存トンネル（webhook用に使っているもの）を選択し、トンネルIDを控える。
+3. トンネルの **Public Hostname** タブで「Add a public hostname」を押し、以下を設定して保存する。
+   - Subdomain: 例 `ssh-raspi`
+   - Domain: 既存で使っているドメイン
+   - Type: `SSH`
+   - URL: `localhost:22`
+4. 左メニュー **Access → Applications → Add an application → Self-hosted** を選び、以下を設定する。
+   - Application name: 例 `Raspi SSH (Claude monitoring)`
+   - Application domain: 手順3で作った `ssh-raspi.<domain>`
+   - Session Duration: 用途に合わせて設定（自動化専用なので長め、例24時間でも可）
+5. Policyを1つ追加する。
+   - Policy name: 例 `Claude Automation`
+   - Action: `Service Auth`
+   - Rule: `Include` → `Service Token` を選択（手順6で発行するトークンをここで指定するため、一旦保存だけしておき後で紐付けてもよい）
+6. 左メニュー **Access → Service Tokens → Create Service Token** を開き、以下を設定する。
+   - Service Token Name: 例 `claude-pi-monitor`
+   - Duration: 有効期限（無期限にしない場合は、後述の運用注意点を参照）
+   - 発行後に表示される **Client ID** と **Client Secret** を控える（**Client Secretはこの画面でしか表示されない**ので、必ずこのタイミングでメモする）。
+7. 手順5のPolicyに戻り、Includeルールとして手順6のService Tokenを紐付ける。
+
+### 2. ラズパイ側
+
+1. `cloudflared --version` で既にインストール済みであることを確認する（webhook修正で使用中のはず）。
+2. `sudo systemctl status ssh` でSSHデーモンが起動していることを確認する。
+3. トンネルの設定ファイル（`/etc/cloudflared/config.yml` が一般的。環境によっては `~/.cloudflared/config.yml`）に、SSH用のingressルールを追加する。**既存のWebhook/API用ルールより前に**書くこと（cloudflaredのingressは上から順にマッチする）。
+   ```yaml
+   tunnel: <既存のトンネルID>
+   credentials-file: /etc/cloudflared/<既存のトンネルID>.json
+   ingress:
+     - hostname: ssh-raspi.example.com     # 追加: SSH用
+       service: ssh://localhost:22
+     - hostname: home-system.example.com   # 既存: Webhook/API用
+       service: http://localhost:8000
+     - service: http_status:404
+   ```
+4. `sudo systemctl restart cloudflared` を実行し、設定を反映する。
+5. `sudo systemctl status cloudflared` でエラーが出ていないことを確認する。
+
+### 3. Claude Code Remote環境側
+
+1. 環境変数/シークレットとして以下を登録する（Claude Code Remoteの環境設定画面）。**リポジトリには絶対にコミットしない。**
+   - `CF_ACCESS_CLIENT_ID` — 手順1-6のClient ID
+   - `CF_ACCESS_CLIENT_SECRET` — 手順1-6のClient Secret
+   - `RASPI_SSH_HOSTNAME` — 例 `ssh-raspi.example.com`
+   - `RASPI_SSH_USER` — ラズパイ側のSSHログインユーザー名
+   - `RASPI_SSH_PRIVATE_KEY` — ラズパイの `~/.ssh/authorized_keys` に対応する秘密鍵（既存の鍵を流用せず、この自動化専用の鍵ペアを新規発行し、ラズパイ側に公開鍵を追加登録することを推奨）
+2. SSH接続時、`cloudflared access ssh` はService TokenをCloudflare公式仕様の環境変数 `TUNNEL_SERVICE_TOKEN_ID` / `TUNNEL_SERVICE_TOKEN_SECRET` から読む（`CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET` をこの名前にマッピングして渡す）。SSH configの例:
    ```
    Host raspi-home
-       ProxyCommand cloudflared access ssh --hostname <access-hostname>
+       HostName ssh-raspi.example.com
+       User <RASPI_SSH_USERの値>
+       IdentityFile ~/.ssh/claude_raspi_monitor
+       ProxyCommand sh -c 'TUNNEL_SERVICE_TOKEN_ID=$CF_ACCESS_CLIENT_ID TUNNEL_SERVICE_TOKEN_SECRET=$CF_ACCESS_CLIENT_SECRET cloudflared access ssh --hostname %h'
    ```
-3. **Claude Code Remote環境側**: Service Token（Client ID/Secret）とSSH秘密鍵を環境変数/シークレットとして登録する。**リポジトリには絶対にコミットしない。**
+3. 動作確認: `ssh raspi-home 'echo ok'` が認証エラーなく `ok` を返すことを確認してから、Routine作成に進む。
+
+### Service Tokenの有効期限に関する注意
+
+Cloudflare Service Tokenに有効期限を設定した場合、期限切れでRoutineのSSH接続が失敗するようになる。無期限にするか、期限を設定する場合はカレンダーリマインダー等で更新時期を管理すること。更新時は「Client ID」は変わらず「Client Secret」のみ再発行されるため、CCR環境側の `CF_ACCESS_CLIENT_SECRET` のみ更新すればよい。
 
 ## マーカーファイル規約（実装時）
 
