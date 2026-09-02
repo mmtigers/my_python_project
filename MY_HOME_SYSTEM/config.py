@@ -21,6 +21,7 @@
     16. メモリ監視設定
     17. TVロック機能設定
     18. Alexaスキル設定
+    19. ラズパイ監視(health_watch)設定
 """
 import os
 import sys
@@ -623,3 +624,15 @@ TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 # がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。
 # 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。
 ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
+
+# ==========================================
+# 19. ラズパイ監視(health_watch)設定
+# ==========================================
+# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。
+# 設定すると monitors/health_watch.py が異常検知時(通知抑制の内側)に
+# このスクリプトを異常サマリつきで fire-and-forget 起動する。
+# 未設定(既定)なら層1の検知・通知のみで、従来と完全に同じ挙動。
+# 想定値: <リポジトリ>/MY_HOME_SYSTEM/scripts/claude_investigate.sh
+# (Claude Code CLI・ghの実機セットアップが済むまでは未設定のままにすること。
+#  docs/runbooks/raspi_claude_log_monitoring.md の層2セクション参照)
+HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv("HEALTH_WATCH_INVESTIGATE_HOOK")
