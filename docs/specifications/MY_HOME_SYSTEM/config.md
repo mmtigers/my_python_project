@@ -82,6 +82,10 @@
 * 根拠: [HEALTH_WATCH_INVESTIGATE_HOOK定義とコメント] (行番号: 627〜638 / 抜粋: "# ==========================================\n# 19. ラズパイ監視(health_watch)設定\n# ==========================================\n# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。", "HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv(\"HEALTH_WATCH_INVESTIGATE_HOOK\")")
 
 
+* 「20. NASパスの遅延解決 (Issue #330 PR-B)」セクションで、NAS上のパス定数(`ASSETS_DIR`/`TMP_VIDEO_DIR`とその派生`SALARY_IMAGE_DIR`/`SOUND_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。旧import時ディレクトリ自動作成ループのNAS配下分(`salary_images`/`clinic_html`)は`_resolve_assets_dir()`内へ移動し、import時ループはローカルの`LOG_DIR`/`SALARY_DATA_DIR`のみを扱う。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。
+* 根拠: [遅延解決セクション] (抜粋: "# 20. NASパスの遅延解決 (Issue #330 PR-B)", "def __getattr__(name: str) -> str:", "def prewarm_nas_paths() -> None:")
+
+
 * 「18. Alexaスキル設定」セクションで、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
 * 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 614〜621 / 抜粋: "# ==========================================\n# 18. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 

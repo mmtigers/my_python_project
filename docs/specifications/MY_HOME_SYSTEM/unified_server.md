@@ -100,7 +100,7 @@
 
 ### `lifespan`
 
-* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
+* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
 * 根拠: `async def lifespan(app: FastA` (行番号: 97-157 / 抜粋: "async def lifespan(app: FastA")
 * 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 105-106 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
 
@@ -117,7 +117,7 @@
 * 根拠: 該当関数内処理 (行番号: 105-106, 110-117, 119-121, 124-133, 139-146, 148-155 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "apply_pending_migrations(migration_conn)", "scheduler_process.terminate()")
 
 
-* **エラーハンドリング**: マイグレーション適用失敗時の例外(`Exception`)を捕捉しエラーログ出力のうえ起動は継続する。スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を捕捉し、フォールバック（エラーログ出力や強制kill）を実行する。カメラ監視サブプロセス(`camera_process`)の起動自体には例外処理がなく、失敗時はそのまま例外が送出される。
+* **エラーハンドリング**: NASパスプリウォーム失敗時・マイグレーション適用失敗時の例外(`Exception`)をそれぞれ捕捉しエラーログ出力のうえ起動は継続する。スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を捕捉し、フォールバック（エラーログ出力や強制kill）を実行する。カメラ監視サブプロセス(`camera_process`)の起動自体には例外処理がなく、失敗時はそのまま例外が送出される。
 * 根拠: `except Exception as e: logger.error(f"⚠️ Migration check failed...")` (行番号: 116-117 / 抜粋: "Migration check failed"), `except Exception as e:` (行番号: 132-133 / 抜粋: "Failed to start scheduler"), `except subprocess.TimeoutExpired` (行番号: 143-144, 152-153 / 抜粋: "except subprocess.TimeoutExpired")
 
 
