@@ -1,3 +1,10 @@
+> **⚠️ 廃止 (2026-09-02)**: このファイルは、ソース (`MY_HOME_SYSTEM/scripts/claude_log_watchdog.sh`) が
+> Issue #339 対応で削除されたため廃止されました。一次チェック部分は層1として
+> `monitors/health_watch.py`([health_watch.md](./health_watch.md))に置き換え済みで、
+> `claude -p` ヘッドレス起動部分は調査専用の `scripts/claude_investigate.sh`
+> ([scripts_claude_investigate.md](./scripts_claude_investigate.md))へ移設されました。
+> 以下の内容は削除時点の履歴として残しています。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |

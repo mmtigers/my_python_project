@@ -18,7 +18,8 @@
 
 ## 2. ファイルの概要
 
-ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウントの6項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧・自動調査は行わない。
+ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウントの6項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。
+* 根拠: モジュールdocstring (行番号: 17-25 / 抜粋: "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
 
 ## 3. 外部依存関係
 
@@ -284,49 +285,72 @@
 
 
 
+### `_fire_investigate_hook` (**Issue #339で追加**)
+
+* **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
+* 根拠: [関数定義] (行番号: 190〜230 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+
+
+* **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
+* 根拠: [関数定義] (行番号: 190)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [関数定義] (行番号: 190)
+
+
+* **副作用**: `subprocess.Popen`によるフックスクリプトの起動（`start_new_session=True`でdetachし、層1プロセス終了後も生存させる）、フックの標準出力/標準エラーの`logs/claude_investigate.log`への追記リダイレクト（`check_app_logs`はhealth_watch関連行を除外するため自己発火しない）、標準入力への異常サマリ書き込みとclose、ロガーへの記録。
+* 根拠: [Popen呼び出し] (行番号: 214〜227 / 抜粋: "proc = subprocess.Popen(\n                [hook],\n                stdin=subprocess.PIPE,", "start_new_session=True")
+
+
+* **エラーハンドリング**: フックパスが存在しない/実行権限がない場合はエラーログのみで起動しない。起動時の例外（`Popen`失敗等）も捕捉してエラーログのみとし、層1本体（検知・通知・マーカー更新）を巻き込まない。
+* 根拠: [ガード/例外処理] (行番号: 204〜206, 228〜230 / 抜粋: "if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):", "except Exception as e:\n        logger.error(f\"調査フックの起動に失敗しました: {e}\")")
+
+
+
 ### `run_checks`
 
-* **役割**: 6つのチェック関数を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 185〜238 / 抜粋: "def run_checks() -> int:")
+* **役割**: 6つのチェック関数を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
+* 根拠: [関数定義] (行番号: 232〜285 / 抜粋: "def run_checks() -> int:")、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 185)
+* 根拠: [関数定義] (行番号: 232)
 
 
 * **戻り値/レスポンス**: `int`（終了コード）。正常時および異常検知して通知に成功/抑制した場合は0。通知送信に失敗した場合、またはチェック自体が例外を出した場合は1。
-* 根拠: [戻り値] (行番号: 216, 227, 233〜234, 238 / 抜粋: "exit_code = 0", "exit_code = 1", "return exit_code")
+* 根拠: [戻り値] (行番号: 263, 274, 281〜282, 286 / 抜粋: "exit_code = 0", "exit_code = 1", "return exit_code")
 
 
-* **副作用**: (1)各チェック関数の実行、(2)異常時の`send_push`呼び出し(`target="discord"`, `channel="error"`)、(3)マーカーファイルの更新（通知の成否に関わらず実行し、同じログ行の重複検知を防ぐ）、(4)ロガーへの記録。
-* 根拠: [関数呼び出し] (行番号: 205, 225, 237 / 抜粋: 'send_push([{"type": "text", "text": msg}], target="discord", channel="error")', "_write_marker(now)")
+* **副作用**: (1)各チェック関数の実行、(2)異常時の`send_push`呼び出し(`target="discord"`, `channel="error"`)、(3)通知抑制を通過した場合の層2フック発火(`_fire_investigate_hook`。通知の**成否に関わらず**呼ばれる — 通知障害時こそ調査が必要なため)、(4)マーカーファイルの更新（通知の成否に関わらず実行し、同じログ行の重複検知を防ぐ）、(5)ロガーへの記録。
+* 根拠: [関数呼び出し] (行番号: 252, 272, 276, 285 / 抜粋: 'send_push([{"type": "text", "text": msg}], target="discord", channel="error")', "_fire_investigate_hook(anomalies, now)", "_write_marker(now)")
 
 
 * **エラーハンドリング**: 各チェックの例外は個別に捕捉してエラーログに記録し、`internal_errors`へ追加して残りのチェックを続行する（異常通知自体には含めない。run_task.shがERROR行を記録し週次のlog_analyzerが拾う想定がコメントに記載）。通知送信失敗時はエラーログを出力し終了コード1にする。
-* 根拠: [例外処理] (行番号: 204〜211 / 抜粋: "except Exception as e:")、[送信失敗処理] (行番号: 225〜227 / 抜粋: 'logger.error("異常通知の送信に失敗しました")')
+* 根拠: [例外処理] (行番号: 251〜258 / 抜粋: "except Exception as e:")、[送信失敗処理] (行番号: 272〜274 / 抜粋: 'logger.error("異常通知の送信に失敗しました")')
 
 
 
 ### `__main__` ブロック
 
 * **役割**: スクリプト直接実行時に`run_checks`を呼び、その戻り値を終了コードとしてプロセスを終了する。
-* 根拠: [エントリーポイント] (行番号: 241〜242 / 抜粋: "sys.exit(run_checks())")
+* 根拠: [エントリーポイント] (行番号: 289〜290 / 抜粋: "sys.exit(run_checks())")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [エントリーポイント] (行番号: 241〜242)
+* 根拠: [エントリーポイント] (行番号: 289〜290)
 
 
 * **戻り値/レスポンス**: プロセス終了コード
-* 根拠: [エントリーポイント] (行番号: 242)
+* 根拠: [エントリーポイント] (行番号: 290)
 
 
 * **副作用**: `run_checks`の実行
-* 根拠: [エントリーポイント] (行番号: 242)
+* 根拠: [エントリーポイント] (行番号: 290)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [エントリーポイント] (行番号: 241〜242)
+* 根拠: [エントリーポイント] (行番号: 289〜290)
 
 
 
@@ -425,6 +449,7 @@ graph TD
 * マーカーは通知の成否に関わらず更新されるため、通知に失敗したログエラーは次回以降再検知されない。通知失敗自体は終了コード1として`run_task.sh`のログに残り、週次の`log_analyzer.py`レポートで回収される設計（根拠: 行番号: 207〜208, 236〜237のコメント）。
 * ディスク/メモリ閾値・再通知間隔はモジュール定数としてハードコードされている（環境変数化されていない）（根拠: 行番号: 41〜53）。
 * cron登録・死活監視（Cloudflare Tunnelアラート）との組み合わせは `docs/runbooks/raspi_claude_log_monitoring.md` に運用手順として記載されている。
+* **層2フック（Issue #339）は`.env`の`HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら完全no-op**であり、実機のClaude Code CLI・ghセットアップとフラグ確認（runbookの有効化手順）が済むまで設定しないこと。フックの実体は`scripts/claude_investigate.sh`（[scripts_claude_investigate.md](./scripts_claude_investigate.md)）で、多重起動防止（flock）・タイムアウト・許可ツール制限はスクリプト側が持つ（根拠: 行番号: 190〜230）。
 
 ## 9. 不明事項一覧
 

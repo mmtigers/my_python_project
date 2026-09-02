@@ -15,7 +15,12 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   6. NASがマウントされているか
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
-自動復旧(systemctl restart等)・自動調査は行わない(ランブックのガードレール参照)。
+自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
+
+層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが
+設定されている場合のみ、通知と同じ抑制の内側で自動調査フック
+(scripts/claude_investigate.sh)を fire-and-forget 起動する。未設定なら
+従来どおり検知・通知のみ。
 """
 
 import datetime
@@ -182,6 +187,48 @@ def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     return True
 
 
+def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:
+    """層2(自動調査)フックを発火する(Issue #339)。
+
+    config.HEALTH_WATCH_INVESTIGATE_HOOK が未設定なら何もしない(既定)。
+    設定されている場合、異常サマリを標準入力で渡してスクリプトを
+    fire-and-forget のサブプロセスとして起動する(完了は待たない。
+    調査は数分かかりうるが、毎時cronの層1を長時間ブロックしないため)。
+    多重起動防止(flock)・タイムアウト・--max-turns 等のガードレールは
+    フックスクリプト側が持つ。本関数は _should_notify と同じ抑制の内側で
+    呼ばれるため、同一異常セット継続中の再発火も通知と同じ6時間間隔に収まる。
+    フックの起動失敗は層1の検知・通知を巻き込まない(ログのみ)。
+    """
+    hook = getattr(config, "HEALTH_WATCH_INVESTIGATE_HOOK", None)
+    if not hook:
+        return
+    if not (os.path.isfile(hook) and os.access(hook, os.X_OK)):
+        logger.error(f"調査フックが存在しないか実行権限がありません: {hook}")
+        return
+
+    summary = (
+        f"検知時刻: {now.isoformat()}\n"
+        + "\n".join(f"・{a}" for a in anomalies)
+    )
+    try:
+        # フックの出力はrun_task.sh経由の自ログではなく専用ファイルへ残す
+        # (check_app_logsはhealth_watch関連行を除外するため自己発火もしない)
+        out_path = os.path.join(config.LOG_DIR, "claude_investigate.log")
+        with open(out_path, "a", encoding="utf-8") as out:
+            proc = subprocess.Popen(
+                [hook],
+                stdin=subprocess.PIPE,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,  # 層1(本プロセス)終了後もフックを生かす
+            )
+        proc.stdin.write(summary.encode("utf-8"))
+        proc.stdin.close()
+        logger.info(f"調査フックを起動しました (pid={proc.pid}): {hook}")
+    except Exception as e:
+        logger.error(f"調査フックの起動に失敗しました: {e}")
+
+
 def run_checks() -> int:
     """全チェックを実行し、異常があれば通知する。戻り値はプロセスの終了コード。"""
     now = datetime.datetime.now()
@@ -225,6 +272,8 @@ def run_checks() -> int:
             if not send_push([{"type": "text", "text": msg}], target="discord", channel="error"):
                 logger.error("異常通知の送信に失敗しました")
                 exit_code = 1
+            # 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)
+            _fire_investigate_hook(anomalies, now)
         else:
             logger.info("同一の異常が継続中のため再通知を抑制しました")
     else:

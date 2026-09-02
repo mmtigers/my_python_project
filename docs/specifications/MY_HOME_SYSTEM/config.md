@@ -78,6 +78,10 @@
 * 根拠: [タイムラプス生成設定] (行番号: 450 / 抜粋: `# タイムラプス生成設定`)
 
 
+* 「19. ラズパイ監視(health_watch)設定」セクション(Issue #339)で、層2(異常検知時のClaude自動調査)のフックスクリプト絶対パス`HEALTH_WATCH_INVESTIGATE_HOOK`（環境変数、既定は未設定=`None`）を定義する。設定すると`monitors/health_watch.py`が異常検知時(通知抑制の内側)にこのスクリプトを異常サマリつきでfire-and-forget起動し、未設定なら層1の検知・通知のみで従来と同一挙動になる、というコメントが付されている。想定値は`MY_HOME_SYSTEM/scripts/claude_investigate.sh`で、実機セットアップ完了までは未設定のままにする旨も明記されている。
+* 根拠: [HEALTH_WATCH_INVESTIGATE_HOOK定義とコメント] (行番号: 627〜638 / 抜粋: "# ==========================================\n# 19. ラズパイ監視(health_watch)設定\n# ==========================================\n# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。", "HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv(\"HEALTH_WATCH_INVESTIGATE_HOOK\")")
+
+
 * 「18. Alexaスキル設定」セクションで、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
 * 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 614〜621 / 抜粋: "# ==========================================\n# 18. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 
