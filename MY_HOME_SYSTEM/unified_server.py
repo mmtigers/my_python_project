@@ -100,6 +100,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not config.SWITCHBOT_WEBHOOK_TOKEN:
         logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.")
 
+    # NAS依存パス(ASSETS_DIR等)のプリウォーム。Issue #330 PR-Bでconfigのimport時
+    # NAS検証は遅延化されたため、サーバー起動時はここで明示的に解決しておく
+    # (遅延化前と同じく、起動時点でNAS障害のフォールバック判定が済む)。
+    try:
+        config.prewarm_nas_paths()
+    except Exception as e:
+        logger.error(f"⚠️ NAS path prewarm failed (continuing startup): {e}")
+
     # スキーママイグレーションの適用 (migrations/ 配下、詳細は core/migrations.py 参照)
     try:
         migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)

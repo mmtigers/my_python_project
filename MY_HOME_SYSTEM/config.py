@@ -22,6 +22,7 @@
     17. TVロック機能設定
     18. Alexaスキル設定
     19. ラズパイ監視(health_watch)設定
+    20. NASパスの遅延解決 (Issue #330 PR-B)
 """
 import os
 import sys
@@ -232,10 +233,10 @@ NAS_PROJECT_ROOT: str = os.path.join(NAS_MOUNT_POINT, "home_system")
 # (未設定時は従来通りのデフォルトパスを使用)
 SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")
 
-ASSETS_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(NAS_PROJECT_ROOT, "assets"),
-    "assets"
-)
+# ASSETS_DIR はNAS上のパスであり、import時に検証するとNAS障害・マウント遅延時に
+# Exponential Backoff(最悪 約31秒)で全importerをブロックしていたため、
+# Issue #330 PR-Bで遅延解決(ファイル末尾のモジュール__getattr__)へ移行した。
+# 利用側は従来どおり config.ASSETS_DIR で参照できる(初回アクセス時に検証・キャッシュ)。
 LOG_DIR: str = ensure_safe_path_with_backoff(
     os.path.join(BASE_DIR, "logs"),
     "logs"
@@ -341,7 +342,7 @@ MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))
 _passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
 SALARY_PDF_PASSWORDS: List[str] = [p.strip() for p in _passwords_str.split(",") if p.strip()]
 
-SALARY_IMAGE_DIR: str = os.path.join(ASSETS_DIR, "salary_images")
+# SALARY_IMAGE_DIR はASSETS_DIR(遅延解決)配下のため、同じくモジュール__getattr__で遅延解決する
 SALARY_DATA_DIR: str = os.path.join(BASE_DIR, "data")
 SALARY_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
 BONUS_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
@@ -460,11 +461,8 @@ UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "5"))
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定
 # ==========================================
-# テンポラリ動画保存先ディレクトリ (バックオフ付きの安全なパス取得を適用)
-TMP_VIDEO_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(NAS_PROJECT_ROOT, "tmp_video"),
-    "tmp_video"
-)
+# テンポラリ動画保存先ディレクトリ (NAS上のパス。Issue #330 PR-Bで遅延解決へ移行。
+# 初回の config.TMP_VIDEO_DIR アクセス時にバックオフ付き検証が走りキャッシュされる)
 
 # NVR録画ファイルのベースディレクトリ
 NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
@@ -520,7 +518,7 @@ DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 # ==========================================
 # 13. Sound & Family設定
 # ==========================================
-SOUND_DIR: str = os.path.join(ASSETS_DIR, "sounds")
+# SOUND_DIR はASSETS_DIR(遅延解決)配下のため、モジュール__getattr__で遅延解決する
 
 SOUND_PLAYER_CMD: str = "mpg123"
 SOUND_PLAYER_ARGS: List[str] = ["-o", "pulse"]
@@ -573,9 +571,8 @@ SUUMO_MONITOR_INTERVAL: int = 3600
 # 15. 小児科予約監視設定 (Clinic Monitor)
 # ==========================================
 CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
-CLINIC_HTML_DIR: str = os.path.join(ASSETS_DIR, "clinic_html")
-CLINIC_STATS_CSV: str = os.path.join(ASSETS_DIR, "clinic_stats.csv")
-CLINIC_GRAPH_PATH: str = os.path.join(ASSETS_DIR, "clinic_trend.png")
+# CLINIC_HTML_DIR / CLINIC_STATS_CSV / CLINIC_GRAPH_PATH はASSETS_DIR(遅延解決)配下の
+# ため、モジュール__getattr__で遅延解決する
 
 CLINIC_MONITOR_START_HOUR: int = int(os.getenv("CLINIC_MONITOR_START_HOUR", "8"))
 CLINIC_MONITOR_END_HOUR: int = int(os.getenv("CLINIC_MONITOR_END_HOUR", "19"))
@@ -583,7 +580,9 @@ CLINIC_REQUEST_TIMEOUT: int = int(os.getenv("CLINIC_REQUEST_TIMEOUT", "10"))
 CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
 
 # 自動作成ディレクトリへの追加 (printをloggerに置き換え)
-for d in [ASSETS_DIR, LOG_DIR, SALARY_IMAGE_DIR, SALARY_DATA_DIR, CLINIC_HTML_DIR]:
+# NAS配下(ASSETS_DIR/SALARY_IMAGE_DIR/CLINIC_HTML_DIR)の作成はIssue #330 PR-Bで
+# 遅延解決側(_resolve_assets_dir)へ移動し、import時はローカルディレクトリのみ扱う。
+for d in [LOG_DIR, SALARY_DATA_DIR]:
     try:
         if not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
@@ -636,3 +635,79 @@ ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
 # (Claude Code CLI・ghの実機セットアップが済むまでは未設定のままにすること。
 #  docs/runbooks/raspi_claude_log_monitoring.md の層2セクション参照)
 HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv("HEALTH_WATCH_INVESTIGATE_HOOK")
+
+# ==========================================
+# 20. NASパスの遅延解決 (Issue #330 PR-B)
+# ==========================================
+# ASSETS_DIR / TMP_VIDEO_DIR はNAS上のパスであり、以前はモジュールimport時に
+# ensure_safe_path_with_backoff(書き込みテスト + Exponential Backoff、最悪 約31秒)を
+# 実行していたため、NAS障害・マウント遅延時にconfigをimportするだけの
+# テスト・CLIツール・cronスクリプトまで長時間ブロックしていた。
+# PEP 562のモジュール__getattr__により「初回アクセス時に検証・作成し、
+# 結果をモジュール属性としてキャッシュする」方式へ変更した。
+# 利用側の書き方(config.ASSETS_DIR 等)は従来と変わらない。
+# サーバー起動時はunified_server.pyのlifespanが prewarm_nas_paths() を呼び、
+# 従来どおり起動時点で検証が走る。
+
+# ASSETS_DIR 配下で自動作成するサブディレクトリ
+# (旧: import時のディレクトリ自動作成ループにあったNAS配下分)
+_ASSETS_SUBDIRS_TO_CREATE: List[str] = ["salary_images", "clinic_html"]
+
+# ASSETS_DIR から派生する遅延解決パス (属性名 -> ASSETS_DIRからの相対パス)
+_ASSETS_DERIVED_PATHS: Dict[str, str] = {
+    "SALARY_IMAGE_DIR": "salary_images",
+    "SOUND_DIR": "sounds",
+    "CLINIC_HTML_DIR": "clinic_html",
+    "CLINIC_STATS_CSV": "clinic_stats.csv",
+    "CLINIC_GRAPH_PATH": "clinic_trend.png",
+}
+
+
+def _resolve_assets_dir() -> str:
+    """ASSETS_DIRを検証・解決し、配下の自動作成サブディレクトリも整える。"""
+    path = ensure_safe_path_with_backoff(
+        os.path.join(NAS_PROJECT_ROOT, "assets"), "assets"
+    )
+    for sub in _ASSETS_SUBDIRS_TO_CREATE:
+        subdir = os.path.join(path, sub)
+        try:
+            os.makedirs(subdir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"⚠️ Warning: Failed to ensure directory existence '{subdir}': {e}")
+    return path
+
+
+def __getattr__(name: str) -> str:
+    """NAS依存パス定数の遅延解決 (PEP 562)。
+
+    通常の属性解決(モジュールglobals)に失敗した場合のみ呼ばれるため、
+    一度解決して globals() に書き込んだ後は本関数を経由しない(=キャッシュ)。
+    テストが monkeypatch.setattr/delattr で上書き・再解決させることも可能。
+    """
+    if name == "ASSETS_DIR":
+        value = _resolve_assets_dir()
+    elif name == "TMP_VIDEO_DIR":
+        value = ensure_safe_path_with_backoff(
+            os.path.join(NAS_PROJECT_ROOT, "tmp_video"), "tmp_video"
+        )
+    elif name in _ASSETS_DERIVED_PATHS:
+        # ASSETS_DIR の解決(必要なら)を経由して派生パスを組み立てる
+        assets_dir = globals().get("ASSETS_DIR") or __getattr__("ASSETS_DIR")
+        value = os.path.join(assets_dir, _ASSETS_DERIVED_PATHS[name])
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+    globals()[name] = value
+    return value
+
+
+def prewarm_nas_paths() -> None:
+    """NAS依存の遅延パスをまとめて解決する(サーバー起動時のプリウォーム用)。
+
+    unified_server.pyのlifespanから呼ばれ、遅延化前と同じく起動時点で
+    NASの検証・フォールバック判定を済ませる。失敗してもensure_safe_path_with_backoff
+    自体がローカルへフォールバックするため例外は送出しない。
+    """
+    for name in ("ASSETS_DIR", "TMP_VIDEO_DIR", *_ASSETS_DERIVED_PATHS):
+        getattr(sys.modules[__name__], name)
+    logger.info("✅ NAS依存パスのプリウォーム完了")
