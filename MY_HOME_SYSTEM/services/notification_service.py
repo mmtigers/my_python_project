@@ -10,6 +10,8 @@ from linebot.v3.messaging import (
     PushMessageRequest,
     ReplyMessageRequest,
     TextMessage,
+    FlexMessage,
+    FlexContainer,
     Message
 )
 # ▲▲▲ ▲▲▲
@@ -85,11 +87,26 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
                 if msg_type == "text":
                     sdk_messages.append(TextMessage(text=msg.get("text", "")))
                 elif msg_type == "flex":
-                    # FlexMessageオブジェクトへの変換は複雑なため、
-                    # 可能な限り呼び出し元でオブジェクト化することを推奨
-                    pass 
-                # 必要に応じて ImageMessage 等も追加
-            
+                    # Issue #322: 以前はここが pass で、辞書形式のflexメッセージが
+                    # 無言で破棄されていた(テキスト混在時は送信自体は成功するため
+                    # 気づけないサイレント障害の芽)。handlers/line_logic.py と同じ
+                    # FlexContainer.from_dict でv3オブジェクトへ変換し、変換に
+                    # 失敗した場合も黙殺せず内容つきのエラーログを残す。
+                    try:
+                        sdk_messages.append(
+                            FlexMessage(
+                                altText=msg.get("altText") or msg.get("alt_text") or "通知",
+                                contents=FlexContainer.from_dict(msg.get("contents") or {}),
+                            )
+                        )
+                    except Exception as conv_err:
+                        logger.error(
+                            f"flex辞書メッセージのFlexMessage変換に失敗したため破棄します: {conv_err} / msg={msg}"
+                        )
+                else:
+                    # ImageMessage 等の未対応型もサイレントに落とさずログに残す
+                    logger.warning(f"未対応のメッセージ型のため破棄します: type={msg_type} / msg={msg}")
+
         if not sdk_messages:
             logger.warning("LINE送信対象のメッセージがありません")
             return False

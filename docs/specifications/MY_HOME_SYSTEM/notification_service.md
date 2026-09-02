@@ -296,7 +296,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `json` および `logging` がインポートされているが使用されていない。
-* `_send_line_push` 内で、`type` が `"flex"` の辞書型メッセージの変換処理が `pass` となっており未実装である（呼び出し元でのオブジェクト化を前提としている）。
+* `_send_line_push` 内の `type` が `"flex"` の辞書型メッセージは、以前は変換処理が `pass` で未実装（無言で破棄）だったが、Issue #322対応で `FlexContainer.from_dict` によるv3 `FlexMessage` オブジェクトへの変換が実装された（`altText`/`alt_text` キーを代替テキストとして使用、無い場合は`"通知"`）。変換に失敗した場合はメッセージ内容つきのエラーログを出して当該メッセージのみ破棄し、`text`/`flex` 以外の未対応型の辞書も警告ログを出して破棄する（サイレントに落とさない）。なお `send_reply` 側は従来どおり `text` 型辞書のみ変換対象である。
 * `_send_discord_webhook` のタイムアウトは送信内容によって異なる（画像添付時: `timeout=60`、テキストのみ: `timeout=10`）。いずれもハードコードされている。
 * `_send_discord_webhook` はHTTPステータスコードが200/204以外の場合、`res.text`を含めたエラー内容をログに出力してからFalseを返す（Discord API側のエラー原因特定を目的とした挙動）。
 * `send_push`および`_send_discord_webhook`には`filename`引数（デフォルト`"snapshot.jpg"`）があり、画像添付時のアップロードファイル名を呼び出し元から指定できる。MIMEタイプは明示せず、Discord側の拡張子判定に委ねている。
