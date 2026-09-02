@@ -24,12 +24,14 @@
 * 根拠: [モジュールDocstring] (行番号: 4〜12 / 抜粋: "NewFace Monitor System (Refactored for MY_HOME_SYSTEM)\nTargets: MonitorConfig.SITES に登録された複数サイト")
 * `MY_HOME_SYSTEM`の共通コア機能（`core.logger`, `core.nas_utils`, `core.utils`）のインポートを試み、失敗時（単体テスト用・モジュール欠損時）はファイル内にフォールバック実装（ロガー、NASディレクトリ解決の簡易版、ストレージウォームアップ処理）を用意している。
 * 根拠: [try-exceptブロック] (行番号: 41〜46 / 抜粋: "try:\n    # システム統合環境下でのインポート\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    from core.utils import wait_for_storage_warmup\nexcept ImportError:")
-* `SiteConfig`データクラスは監視対象1サイト分の設定（対象URL、CSSセレクタ、画像取得方法、名前抽出時の特殊処理フラグ等）を保持し、`MonitorConfig.SITES`にはこの`SiteConfig`インスタンスが80件登録されている。各サイトのHTML構造の違い（lazyload画像、インラインCSS背景画像、年齢バッジの位置、クエリパラメータ形式のID等）を、コード変更ではなく`SiteConfig`のフラグ・パラメータ調整のみで吸収する設計である。
-* 根拠: [SiteConfigクラスとSITES定義] (行番号: 124〜129, 197〜200 / 抜粋: "新しいサイトを監視対象に加える場合は、このデータクラスのインスタンスを\n    MonitorConfig.SITES に追加するだけでよい（コード本体の変更は不要）。")
+* `SiteConfig`データクラスは監視対象1サイト分の設定（対象URL、CSSセレクタ、画像取得方法、名前抽出時の特殊処理フラグ等）を保持し、`MonitorConfig.SITES`にはこの`SiteConfig`インスタンスが79件登録されている（2026-09-02にサイト閉鎖が確認された`bellica`が削除され80件から79件になった。削除理由はリスト内コメントとして残されている）。各サイトのHTML構造の違い（lazyload画像、インラインCSS背景画像、年齢バッジの位置、クエリパラメータ形式のID等）を、コード変更ではなく`SiteConfig`のフラグ・パラメータ調整のみで吸収する設計である。
+* 根拠: [SiteConfigクラスとSITES定義] (行番号: 129〜130, 205〜206 / 抜粋: "新しいサイトを監視対象に加える場合は、このデータクラスのインスタンスを\n    MonitorConfig.SITES に追加するだけでよい（コード本体の変更は不要）。")、[bellica削除コメント] (行番号: 339〜341 / 抜粋: "# bellica は2026-09-02にサイト閉鎖を確認したため監視対象から削除")
 * `requests`と`BeautifulSoup`を用いて各サイトをスクレイピングし、キャスト情報（ID・名前・詳細URL・画像URL・年齢）を抽出、サイトごとに保存された既知キャスト一覧（JSON永続化、`known_casts_{site_id}.json`）との差分検知により新規キャストのみをDiscordへ通知する。
 * 根拠: [WebMonitor._parse_htmlとCastMember] (行番号: 1585〜1736, 1227〜1243 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:")
 * 1サイトの通信障害・レイアウト変更・パースエラーが他サイトの監視処理に波及しないよう、サイト単位の処理は`_check_site`関数として分離され、例外は`run_monitor`内でサイトごとに個別捕捉される。
-* 根拠: [_check_site Docstring] (行番号: 1748〜1757 / 抜粋: "サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が\n    他サイトの監視処理に波及しないようにする。")
+* 根拠: [_check_site Docstring] (行番号: 2070〜2079 / 抜粋: "サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が\n    他サイトの監視処理に波及しないようにする。")
+* **（2026-09-02のbellica閉鎖対応で追加）** サイト別の連続ネットワーク失敗回数を`site_failures.json`に永続化し、`CONSECUTIVE_FAILURE_ALERT_THRESHOLD`（24回=1時間毎実行前提で約1日）に達したサイトは「閉鎖・移転の疑い」としてDiscordへ1回だけテキストアラートを送信した上で、以降の失敗ログをERRORからWARNINGへ降格する（一次ヘルスチェックのERROR監視が恒久的に消失したサイトで発報し続けないようにするため）。疎通成功時に連続失敗状態はリセットされ、通常のERROR運用に自動的に戻る。
+* 根拠: [_handle_site_network_failure Docstring] (行番号: 2034〜2052 / 抜粋: "単発・短期のネットワーク障害は従来\n    どおりERRORで記録しつつ、CONSECUTIVE_FAILURE_ALERT_THRESHOLD回連続で失敗した\n    サイトは「閉鎖・移転の疑い」としてDiscordへ1回だけテキスト通知し")
 * 各サイトの新規検知件数はサイト単位のJSONに加え、`daily_summary.json`にも累積され、21時台の実行時にこれまでの累積分をテキスト形式でDiscordへ別途通知する（重複送信は送信済み日付の永続化で防止）。**（Issue #183で修正）** 以前はカレンダー日付が変わると集計が無条件にリセットされていたため、21時台送信後(22時〜24時)の検知や21時台の実行自体が無かった日の検知がどのサマリにも計上されないまま失われていたが、現在は実際に送信された時にのみ累積がクリアされ、日付をまたいでも未送信分は必ず次回送信に引き継がれる。
 * 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1917〜1935 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
 * 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。
@@ -55,7 +57,7 @@
 | `dataclasses.dataclass`, `asdict` | 標準ライブラリ | `SiteConfig`/`CastMember`データクラスの定義、辞書変換 | 根拠: [import文] (行番号: 24 / 抜粋: "from dataclasses import dataclass, asdict") |
 | `datetime.datetime` | 標準ライブラリ | 現在時刻の取得（日次サマリの日付判定、21時台判定） | 根拠: [import文] (行番号: 25 / 抜粋: "from datetime import datetime") |
 | `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作全般 | 根拠: [import文] (行番号: 26 / 抜粋: "from pathlib import Path") |
-| `typing.List`, `Set`, `Dict`, `Optional` | 標準ライブラリ | 型ヒント全般 | 根拠: [import文] (行番号: 27 / 抜粋: "from typing import List, Set, Dict, Optional") |
+| `typing.List`, `Set`, `Dict`, `Optional`, `Tuple` | 標準ライブラリ | 型ヒント全般（`Tuple`は`record_site_failure`の戻り値型） | 根拠: [import文] (行番号: 26 / 抜粋: "from typing import List, Set, Dict, Optional, Tuple") |
 | `urllib.parse.urljoin`, `urlparse`, `parse_qs` | 標準ライブラリ | 相対URL（キャスト詳細ページ・画像）の絶対URL化、クエリパラメータからのID抽出 | 根拠: [import文] (行番号: 28 / 抜粋: "from urllib.parse import urljoin, urlparse, parse_qs") |
 | `file_utils.DiscordCircuitBreaker` | 内部モジュール(DDD配下) | `DiscordNotifier`が保持するDiscord Webhook連続送信失敗検知用サーキットブレーカー | 根拠: [import文] (行番号: 29 / 抜粋: "from file_utils import DiscordCircuitBreaker") |
 | `requests` | サードパーティ | HTTPセッションの生成・GETリクエスト送信、Discord Webhookへの POST送信 | 根拠: [import文] (行番号: 36 / 抜粋: "import requests") |
@@ -73,7 +75,7 @@
 | `core.logger.get_logger` | インポート成功時に実際に使用される実装（フォーマット、出力先、ログレベル等）の詳細が本ファイルからは不明。フォールバック実装（`logging.getLogger`ベース）のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 43, 53〜54 / 抜粋: "from core.logger import get_logger") |
 | `core.nas_utils.get_managed_target_directory` | インポート成功時の実際の実装（NASマウント確認・自動修復ロジックの詳細）が不明。フォールバック実装は`fallback_dir_str`引数をそのまま返すのみ。 | 根拠: [import文とフォールバック定義] (行番号: 44, 56〜64 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | `core.utils.wait_for_storage_warmup` | インポート成功時の実際の実装が不明。フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）のみがこのファイルから確認できる。 | 根拠: [import文とフォールバック定義] (行番号: 45, 66〜103 / 抜粋: "from core.utils import wait_for_storage_warmup") |
-| `MonitorConfig.SITES`に登録された80件の対象Webサイト | 各サイトのHTML構造（CSSセレクタが依拠する実際のマークアップ）は本ファイルのコードからは分からず、外部Webサイトの実物に依存する。 | 根拠: [SiteConfig各エントリ] (行番号: 200〜1173 / 抜粋: "SITES: List[SiteConfig] = [") |
+| `MonitorConfig.SITES`に登録された79件の対象Webサイト | 各サイトのHTML構造（CSSセレクタが依拠する実際のマークアップ）は本ファイルのコードからは分からず、外部Webサイトの実物に依存する。 | 根拠: [SiteConfig各エントリ] (行番号: 206〜1174 / 抜粋: "SITES: List[SiteConfig] = [") |
 | Discord Webhook API | Webhookエンドポイントの認証・レート制限・レスポンス仕様の詳細は本ファイルのコードからは分からず、Discord側の実装に依存する。 | 根拠: [Webhook POST送信] (行番号: 1343, 1398 / 抜粋: "response = self.session.post(self.webhook_url, json=payload, timeout=10)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -188,7 +190,11 @@
 
 
 * **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
-* 根拠: [定数定義とコメント] (行番号: 1193〜1196 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
+* 根拠: [定数定義とコメント] (行番号: 1194〜1196 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
+
+
+* **`CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24`について（2026-09-02のbellica閉鎖対応で追加）**: ネットワーク起因の巡回失敗がこの回数連続したサイトを「閉鎖・移転の疑い」としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格するための閾値。1時間毎のcron実行前提で約1日分に相当する。2026-09-02のbellica閉鎖時に、消失したサイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の再発防止として導入された。
+* 根拠: [定数定義とコメント] (行番号: 1198〜1206 / 抜粋: "# ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」\n    # としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格する\n    CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24")
 
 
 * **エラーハンドリング**: なし
@@ -196,7 +202,7 @@
 
 #### `MonitorConfig.SITES` について（データ内容の補足）
 
-`SITES`は`SiteConfig`インスタンスを80件含むリストであり、各エントリはコメント付きで対象サイトのHTML構造上の特殊事情（例: lazyload画像は`image_attr='data-original'`、インラインCSS背景画像は`image_from_style=True`、名前要素に年齢が兄弟要素またはタブ区切りで同居する場合は`name_first_text_only=True`/`name_strip_after_tab=True`、クエリパラメータ形式のID体系は`id_query_param`）を個別に記載している。これらは設定データであり、個別のロジック（関数・メソッド）ではないため本セクションでは項目単位の列挙は行わず、全体としての設計方針のみを記載する。
+`SITES`は`SiteConfig`インスタンスを79件含むリストであり（2026-09-02にサイト閉鎖が確認された`bellica`は削除済み。削除理由はリスト内コメントに記載）、各エントリはコメント付きで対象サイトのHTML構造上の特殊事情（例: lazyload画像は`image_attr='data-original'`、インラインCSS背景画像は`image_from_style=True`、名前要素に年齢が兄弟要素またはタブ区切りで同居する場合は`name_first_text_only=True`/`name_strip_after_tab=True`、クエリパラメータ形式のID体系は`id_query_param`）を個別に記載している。これらは設定データであり、個別のロジック（関数・メソッド）ではないため本セクションでは項目単位の列挙は行わず、全体としての設計方針のみを記載する。
 * 根拠: [SITES定義の冒頭と代表的なエントリ] (行番号: 197〜200, 207〜209, 242〜243, 254〜255 / 抜粋: "# 新規サイトを監視対象に加える場合は、このリストに SiteConfig を追記する。\n    SITES: List[SiteConfig] = [")
 
 
@@ -401,6 +407,28 @@
 * 根拠: [送信成否分岐] (行番号: 1423〜1425, 1427〜1431, 1454〜1459 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping daily summary notification.")\n            return False" / "except requests.RequestException as e:\n            logger.error(f"Failed to send daily summary notification: {e}", exc_info=True)\n            self._circuit_breaker.record_failure()\n            return False")
 
 
+### `DiscordNotifier.notify_site_failure_alert`（2026-09-02のbellica閉鎖対応で追加）
+
+* **役割**: 連続巡回失敗中のサイトについて「閉鎖・移転の疑い」をDiscordへテキスト形式(content)で通知するメソッド。サイト名・site_id・対象URL・連続失敗回数と、復旧見込みが無い場合の対処（`MonitorConfig.SITES`からのエントリ削除）を案内する文面を送信する。
+* 根拠: [メソッド定義とDocstring] (行番号: 1461〜1471 / 抜粋: "def notify_site_failure_alert(self, site: SiteConfig, failure_count: int) -> bool:\n        """連続巡回失敗中のサイトについて「閉鎖・移転の疑い」をDiscordへテキスト通知する。")
+
+
+* **引数/リクエスト**: `site: SiteConfig`（連続失敗中のサイトの設定）, `failure_count: int`（現在の連続失敗回数）
+* 根拠: [引数定義とDocstring] (行番号: 1461, 1464〜1466 / 抜粋: "site (SiteConfig): 連続失敗中のサイトの設定。\n            failure_count (int): 現在の連続失敗回数。")
+
+
+* **戻り値/レスポンス**: `bool`。送信に成功した場合`True`、Webhook未設定・サーキットブレーカーが開いている・送信失敗のいずれかの場合`False`。呼び出し元（`_handle_site_network_failure`）は`True`の場合のみアラート送信済みとして記録し、失敗時は次回実行時に再試行される。
+* 根拠: [Docstring] (行番号: 1468〜1470 / 抜粋: "Returns:\n            bool: 送信に成功した場合True。呼び出し元はTrueの場合のみアラート\n                送信済みとして記録する(失敗時は次回実行時に再試行される)。")
+
+
+* **副作用**: Webhookへの`session.post`呼び出し、成功/失敗ログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`)。
+* 根拠: [送信処理] (行番号: 1490〜1499 / 抜粋: "response = self.session.post(self.webhook_url, json=payload, timeout=10)\n            response.raise_for_status()\n            logger.info(f\"Site failure alert sent successfully for site '{site.site_id}'.\")\n            self._circuit_breaker.record_success()")
+
+
+* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合、およびサーキットブレーカーが開いている場合は警告ログを出力し`False`を返す（送信自体は試みない）。`requests.RequestException`発生時は`exc_info=True`付きでエラーログを出力し`record_failure()`を呼んで`False`を返す。
+* 根拠: [ガード節とexcept節] (行番号: 1472〜1480, 1496〜1499 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning(\"Discord Webhook URL is not configured. Skipping site failure alert.\")\n            return False" / "except requests.RequestException as e:\n            logger.error(f\"Failed to send site failure alert for site '{site.site_id}': {e}\", exc_info=True)")
+
+
 ### `DataManager._LOAD_ERRORS` (クラス定数)
 
 * **役割**: JSONファイルの読み込み失敗とみなす例外群をまとめたクラス定数。`UnicodeDecodeError`は`IOError`/`OSError`のサブクラスではなく`ValueError`のサブクラスであるため、`IOError`のみを捕捉する実装では非UTF-8データによる破損（例:「'utf-8' codec can't decode byte ... : invalid start byte」）を検知できず、同一の破損ファイルへの読み込み失敗が繰り返され続けてしまう問題を踏まえ、`OSError`, `ValueError`, `TypeError`, `KeyError`をまとめて捕捉対象としている。`load_known_casts`（`_read_casts_file`経由）に加え、**Issue #174の修正**により`load_daily_summary`もこの定数で例外を捕捉するようになった（以前は`load_daily_summary`のみ`(json.JSONDecodeError, IOError)`という狭いパターンのままで同種のバグが残っていた）。
@@ -554,6 +582,24 @@
 * **エラーハンドリング**: なし（内部で呼び出す`load_daily_summary`/`save_daily_summary`側のエラーハンドリングに依存）
 
 
+### サイト別連続巡回失敗状態の永続化メソッド群（2026-09-02のbellica閉鎖対応で追加）
+
+`DataManager`には、サイト別の連続ネットワーク失敗回数とアラート送信済みフラグを`site_failures.json`（`daily_summary.json`と同様に全サイト共通の1ファイル）へ永続化する5つの静的メソッドが追加されている。状態のフォーマットは`{site_id: {'count': int, 'alerted': bool}}`。
+
+* **`_site_failures_file() -> Path`**: 保存先ファイル（`get_data_dir() / 'site_failures.json'`）のパスを返す。
+* 根拠: [メソッド定義] (行番号: 1696〜1702 / 抜粋: "def _site_failures_file() -> Path:\n        \"\"\"サイト別の連続巡回失敗状態を保存するファイルのパスを返す。")
+* **`load_site_failures() -> Dict`**: 状態を読み込む。ファイルが存在しない・`_LOAD_ERRORS`での読み込み失敗・辞書以外のデータが保存されていた場合は空辞書を返し、監視処理本体を止めない。
+* 根拠: [メソッド定義とexcept節] (行番号: 1704〜1728 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで\n            # 含めて読み込み失敗として扱い、監視処理本体を止めない")
+* **`save_site_failures(data: Dict) -> None`**: `save_known_casts`と同じ一時ファイル経由のアトミック書き込みパターンで状態を保存する。`IOError`発生時はエラーログのみ。
+* 根拠: [メソッド定義] (行番号: 1729〜1747 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = failures_file.with_suffix(failures_file.suffix + '.tmp')")
+* **`record_site_failure(site_id: str) -> Tuple[int, bool]`**: 失敗を1回分加算して保存し、`(更新後の連続失敗回数, アラート送信済みかどうか)`を返す。
+* 根拠: [メソッド定義] (行番号: 1748〜1763 / 抜粋: "def record_site_failure(site_id: str) -> Tuple[int, bool]:\n        \"\"\"サイトの巡回失敗を1回分記録し、更新後の連続失敗状態を返す。")
+* **`mark_site_failure_alerted(site_id: str) -> None`**: 閉鎖疑いアラートを送信済み(`alerted: True`)として記録する。
+* 根拠: [メソッド定義] (行番号: 1764〜1775 / 抜粋: "def mark_site_failure_alerted(site_id: str) -> None:")
+* **`clear_site_failure(site_id: str) -> None`**: 疎通成功時に当該サイトのエントリを削除する。記録が無いサイトについては何もしない（毎時の正常巡回のたびに全サイト分のNAS書き込みが発生しないようにするため）。
+* 根拠: [メソッド定義とガード節] (行番号: 1776〜1789 / 抜粋: "data = DataManager.load_site_failures()\n        if site_id not in data:\n            return")
+
+
 ### `WebMonitor.__init__`
 
 * **役割**: Webサイトの監視・スクレイピングを統括するクラスのコンストラクタ。リトライ機能付きHTTPセッションを初期化する。
@@ -608,8 +654,8 @@
 * 根拠: [処理内容] (行番号: 1571, 1573〜1574 / 抜粋: "time.sleep(random.uniform(1.0, 3.0))\n\n            logger.debug(f"Fetching URL: {site.target_url}")\n            response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)")
 
 
-* **エラーハンドリング**: `requests.RequestException`発生時は`exc_info=True`付きでエラーログを出力したうえで例外を再送出(`raise`)し、呼び出し元でのハンドリングを要求する（Docstringにも「通信エラー時」に本例外を送出する旨明記）。**（本PRで修正）** 以前は`exc_info`が付いておらず、再送出される例外自体はトレースバックを保持するものの、このログ出力時点ではスタック情報が記録されていなかった。
-* 根拠: [try-exceptブロックとDocstring] (行番号: 1705〜1708 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出、ただしログは記録する\n            logger.error(f"Network error during scraping of site '{site.site_id}': {e}", exc_info=True)\n            raise")
+* **エラーハンドリング**: `requests.RequestException`発生時はデバッグログを出力したうえで例外を再送出(`raise`)し、呼び出し元でのハンドリングを要求する（Docstringにも「通信エラー時」に本例外を送出する旨明記）。**（2026-09-02のbellica閉鎖対応で変更）** 以前はここで無条件に`exc_info=True`付きのERRORログを出力していたが、ログの重大度は連続失敗状態に応じて呼び出し元の`_handle_site_network_failure`が決定するよう変更された（恒久的に消失したサイトが毎時ERRORを出し続けてヘルスチェックを発報させないようにするため）。
+* 根拠: [try-exceptブロックとコメント] (行番号: 1842〜1848 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
 
 
 ### `WebMonitor._parse_html`
@@ -647,10 +693,32 @@
 * 根拠: [ガード節] (行番号: 1740 / 抜粋: "if self.session:")
 
 
+### `_handle_site_network_failure`（2026-09-02のbellica閉鎖対応で追加）
+
+* **役割**: サイト巡回のネットワーク失敗を`DataManager.record_site_failure`で記録し、連続失敗が`MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD`に達した未アラートのサイトについて`notifier.notify_site_failure_alert`で「閉鎖・移転の疑い」をDiscordへ1回だけ通知する関数。失敗ログの重大度も決定し、アラート送信済みサイトはWARNING、それ以外は従来どおりERRORで記録する。2026-09-02のbellica閉鎖（ドメインがホスティング業者のデフォルト自己署名証明書+ポータルサイトへの302リダイレクトに変化）で、恒久的に消失したサイトが毎時ERRORを出し続けて一次ヘルスチェック(health_watch)が発報し続けた事象の再発防止。
+* 根拠: [関数定義とDocstring] (行番号: 2034〜2052 / 抜粋: "def _handle_site_network_failure(notifier: DiscordNotifier, site: SiteConfig, exc: Exception) -> None:\n    \"\"\"サイト巡回のネットワーク失敗を記録し、連続失敗が閾値に達したサイトを1回だけアラートする。")
+
+
+* **引数/リクエスト**: `notifier: DiscordNotifier`（アラート送信に使うインスタンス）, `site: SiteConfig`（巡回に失敗したサイトの設定）, `exc: Exception`（発生したネットワーク例外。ログ出力用）
+* 根拠: [引数定義とDocstring] (行番号: 2034, 2048〜2051 / 抜粋: "notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。\n        site (SiteConfig): 巡回に失敗したサイトの設定。\n        exc (Exception): 発生したネットワーク例外(ログ出力用)。")
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [戻り値ヒント] (行番号: 2034 / 抜粋: "-> None:")
+
+
+* **副作用**: `DataManager.record_site_failure`による失敗回数の加算・保存。閾値到達かつ未アラート時の`notifier.notify_site_failure_alert`呼び出しと、送信成功時の`DataManager.mark_site_failure_alerted`による送信済みフラグの永続化。WARNINGまたはERRORでのログ出力（連続失敗回数と例外内容を含む）。
+* 根拠: [処理本体] (行番号: 2053〜2068 / 抜粋: "count, alerted = DataManager.record_site_failure(site.site_id)\n\n    if not alerted and count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD:\n        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する\n        if notifier.notify_site_failure_alert(site, count):\n            DataManager.mark_site_failure_alerted(site.site_id)")
+
+
+* **エラーハンドリング**: アラート送信が失敗（`notify_site_failure_alert`が`False`）した場合は`alerted`フラグを立てず、次回の失敗時に再試行される。その場合のログはERRORのまま維持される。
+* 根拠: [送信成否分岐とログレベル分岐] (行番号: 2055〜2059, 2064〜2068 / 抜粋: "if alerted:\n        logger.warning(f\"{message} (closure alert already sent)\")\n    else:\n        logger.error(message)")
+
+
 ### `_check_site`
 
 * **役割**: 1サイト分の巡回（既知キャスト読み込み→現在キャスト取得→差分検知→通知→保存）を行う関数。サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が他サイトの監視処理に波及しないようにする。
-* 根拠: [関数定義とDocstring] (行番号: 1748〜1757 / 抜粋: "def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:\n        """1サイト分の巡回・差分検知・通知・保存を行う。")
+* 根拠: [関数定義とDocstring] (行番号: 2070〜2079 / 抜粋: "def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:\n        """1サイト分の巡回・差分検知・通知・保存を行う。")
 
 
 * **引数/リクエスト**: `monitor: WebMonitor`（使い回すインスタンス）, `notifier: DiscordNotifier`（使い回すインスタンス）, `site: SiteConfig`（処理対象のサイト設定）
@@ -665,8 +733,8 @@
 * 根拠: [メイン処理フローと大量検知時の警告] (行番号: 1881, 1905〜1910 / 抜粋: "known_casts = DataManager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時unionでの保存 (行番号: 1918, 1926 / 抜粋: "updated_casts = known_casts.union(current_casts)" / "DataManager.save_known_casts(site, updated_casts)")
 
 
-* **エラーハンドリング**: `monitor.fetch_current_casts`での`requests.RequestException`発生時はエラーログを出力して`return`（当該サイトのみ中断、他サイトへは影響しない）。取得キャストが0件の場合はデバッグログを出力して`return`。
-* 根拠: [try-exceptとガード節] (行番号: 1765〜1769, 1771〜1776 / 抜粋: "except requests.RequestException:\n        logger.error(f"Aborting monitor run for site '{site.site_id}' due to network failure.")\n        return")
+* **エラーハンドリング**: `monitor.fetch_current_casts`での`requests.RequestException`発生時は`_handle_site_network_failure`に処理を委譲して`return`（当該サイトのみ中断、他サイトへは影響しない。失敗回数の記録・閾値到達時のDiscordアラート・ログレベルの決定は委譲先が行う）。**（2026-09-02のbellica閉鎖対応で変更）** 取得成功時（`fetch_current_casts`が例外を送出しなかった時点）には`DataManager.clear_site_failure`で連続失敗状態を解消する。この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因であり、閉鎖疑いを判定する疎通不能とは区別される（従来どおりデバッグログを出力して`return`）。
+* 根拠: [try-exceptと疎通成功時のクリア] (行番号: 2087〜2096 / 抜粋: "except requests.RequestException as e:\n        _handle_site_network_failure(notifier, site, e)\n        return\n\n    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する\n    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で\n    # あり、閉鎖疑いを判定する疎通不能とは区別する)\n    DataManager.clear_site_failure(site.site_id)")
 
 
 ### `_maybe_send_daily_summary`
@@ -782,8 +850,12 @@ flowchart TD
     CheckSite --> LoadKnown["外部：DataManager.load_known_casts(site)"]
     LoadKnown --> Fetch["外部：monitor.fetch_current_casts(site)"]
 
-    Fetch -- "requests.RequestException" --> LogNetErr["エラーログ出力(当該サイトのみ中断)"] --> NextSite
-    Fetch -- 成功 --> HasCasts{"current_castsが空でないか?"}
+    Fetch -- "requests.RequestException" --> HandleFail["外部：_handle_site_network_failure<br>(失敗回数を記録)"]
+    HandleFail --> ThresholdCheck{"連続失敗が閾値(24回)以上<br>かつ未アラート?"}
+    ThresholdCheck -- Yes --> SendAlert["外部：notifier.notify_site_failure_alert<br>(閉鎖疑いをDiscordへ1回だけ通知)"] --> FailLog
+    ThresholdCheck -- No --> FailLog["ログ出力<br>(アラート送信済みならWARNING、<br>それ以外はERROR。当該サイトのみ中断)"] --> NextSite
+    Fetch -- 成功 --> ClearFail["外部：DataManager.clear_site_failure<br>(連続失敗状態を解消)"]
+    ClearFail --> HasCasts{"current_castsが空でないか?"}
     HasCasts -- No --> DebugLog["デバッグログ出力"] --> NextSite
 
     HasCasts -- Yes --> Diff["差分検知: current_casts - known_casts"]
@@ -881,7 +953,7 @@ graph TD
     end
 
     subgraph "外部依存（外部システム）"
-        TargetSites["80件の対象Webサイト<br>(MonitorConfig.SITES)"]
+        TargetSites["79件の対象Webサイト<br>(MonitorConfig.SITES)"]
         DiscordAPI["Discord Webhook API"]
         Storage["NAS/ローカルストレージ"]
         LockFile["ロックファイル<br>(.newface_monitor.lock)"]
@@ -937,7 +1009,7 @@ graph TD
 | 高 | `core/nas_utils.py` | `get_managed_target_directory`の実際の実装（NASマウント確認・自動修復ロジック）が、フォールバック実装（`fallback_dir_str`をそのまま返すのみ）とどう異なるかを確認する必要があるため。 | 根拠: [import文] (行番号: 44 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 | 中 | `core/utils.py` | `wait_for_storage_warmup`の実際の実装が、フォールバック実装（Exponential Backoffでのテストファイル書き込み確認）と同等かどうかを確認するため。 | 根拠: [import文] (行番号: 45 / 抜粋: "from core.utils import wait_for_storage_warmup") |
 | 中 | `core/logger.py` | `get_logger`の実際の実装（出力フォーマット、ログレベル、出力先）を確認するため。 | 根拠: [import文] (行番号: 43 / 抜粋: "from core.logger import get_logger") |
-| 低 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のCSSセレクタが正しく機能する前提となる実際のマークアップ構造を確認するため（コード外の外部サイト、80件）。 | 根拠: [SiteConfig各エントリのセレクタ定義] (行番号: 204〜207等 / 抜粋: "selector_container='ul.gallist li',") |
+| 低 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のCSSセレクタが正しく機能する前提となる実際のマークアップ構造を確認するため（コード外の外部サイト、79件）。 | 根拠: [SiteConfig各エントリのセレクタ定義] (行番号: 211〜214等 / 抜粋: "selector_container='ul.gallist li',") |
 
 ## 8. 保守上の注意点
 
@@ -946,14 +1018,17 @@ graph TD
 * **HTML構造への強い依存**: `_parse_html`は各`SiteConfig`にハードコードされたCSSセレクタに依存しており、対象サイトのレイアウト変更で抽出が機能しなくなるリスクがある（該当箇所には警告ログでの検知は用意されている）。
 * **`CastMember`の`__eq__`/`__hash__`が`id`のみに依拠**: `name`, `detail_url`, `image_url`, `age`が変化しても`id`が同一であれば同一キャストとみなされ、差分検知(`current_casts - known_casts`)では検知されない（名前変更等は新規追加として通知されない）。
 * **Discord通知のレート制限考慮**: `notify`メソッドは各キャスト送信前に`time.sleep(1)`の固定待機に加え、セッション側の`Retry`（`respect_retry_after_header=True`）による429時の自動バックオフも備える。
-* **（本PRで追加）`DiscordNotifier._circuit_breaker`はプロセス内・インスタンス単位でのみ有効**: `run_monitor`は1回の実行で`DiscordNotifier`を1つだけ生成し(`_run_monitor_locked`)、全80サイトの`notify`呼び出しと`notify_daily_summary`呼び出しで同じインスタンス(および同じ`_circuit_breaker`)を使い回す。そのため、あるサイトの通知で連続失敗しブレーカーが開くと、同一プロセス実行内の以降の全サイトの通知・日次サマリ通知もスキップされる（Webhook自体が機能していないと判断しているため意図的な挙動）。ただしこの状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まり、Webhookが復旧していなくても最初の数回は無駄なリクエストが再び発生する。
-* **80サイトを1プロセスで逐次処理する構成**: `run_monitor`は`MonitorConfig.SITES`の全80件を単一プロセス内で順次処理するため、1回の実行時間はサイト数に比例して増大する。各サイト間の待機は`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`のみであり、サイト単位の並列化やレート制限の個別調整は行われていない。
+* **（本PRで追加）`DiscordNotifier._circuit_breaker`はプロセス内・インスタンス単位でのみ有効**: `run_monitor`は1回の実行で`DiscordNotifier`を1つだけ生成し(`_run_monitor_locked`)、全79サイトの`notify`呼び出しと`notify_daily_summary`・`notify_site_failure_alert`呼び出しで同じインスタンス(および同じ`_circuit_breaker`)を使い回す。そのため、あるサイトの通知で連続失敗しブレーカーが開くと、同一プロセス実行内の以降の全サイトの通知・日次サマリ通知もスキップされる（Webhook自体が機能していないと判断しているため意図的な挙動）。ただしこの状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まり、Webhookが復旧していなくても最初の数回は無駄なリクエストが再び発生する。
+* **79サイトを1プロセスで逐次処理する構成**: `run_monitor`は`MonitorConfig.SITES`の全79件を単一プロセス内で順次処理するため、1回の実行時間はサイト数に比例して増大する。各サイト間の待機は`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`のみであり、サイト単位の並列化やレート制限の個別調整は行われていない。
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
 * **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
 * 根拠: [load_known_castsの隔離処理] (行番号: 1469〜1471 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")
 * **（Issue #174で一部解消・一部残存）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消された。ただし`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みは`load_daily_summary`/`save_daily_summary`には無いままであり、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされる（読み込み失敗時に`load_daily_summary`が返す空辞書に対し`record_daily_new_casts`が新規`counts`辞書を作成するため）。これは「無限反復の停止」を優先した最小修正であり、日次サマリの集計データ自体の耐障害性向上は本Issueのスコープ外。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。ファイル破損時のみ、上記の理由でカウントが失われうる。
 * 根拠: [load_daily_summaryの#174修正] (行番号: 1562〜1570), [record_daily_new_castsの累積] (行番号: 1615〜1616 / 抜粋: "data = DataManager.load_daily_summary()\n        counts = data.setdefault('counts', {})")
+
+* **（2026-09-02のbellica閉鎖対応で追加）閉鎖疑いサイトの失敗ログはWARNINGに降格される**: 連続失敗が閾値（`CONSECUTIVE_FAILURE_ALERT_THRESHOLD`=24回）に達しDiscordアラートが送信されたサイトは、以降の失敗ログがERRORではなくWARNINGで記録されるため、ログのERROR監視（`health_watch`等）には現れなくなる。閉鎖疑いの検知・対処はDiscordアラート側で担保される設計であり、アラート送信自体が失敗し続ける場合（Webhook未設定・Discord障害等）はERRORのまま維持され再試行される。また、閉鎖と判断してサイトを`MonitorConfig.SITES`から削除しても、`site_failures.json`内の当該サイトのエントリと`known_casts_{site_id}.json`は自動では削除されず残置される（実害はないが、`.corrupted-*`・`.bak`と同様にクリーンアップ機構はない）。
+* 根拠: [ログレベル分岐] (行番号: 2060〜2068 / 抜粋: "if alerted:\n        logger.warning(f\"{message} (closure alert already sent)\")\n    else:\n        logger.error(message)")
 
 ## 9. 不明事項一覧
 
