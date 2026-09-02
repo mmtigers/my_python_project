@@ -2,7 +2,7 @@
 
 ラズパイ（`home_system.service` 稼働機）のログを定期監視し、異常検知時に通知（将来的には調査・改修案提示まで）を行うための構成メモ。
 
-**現状**: 層1（検知・通知）は実装済み（`MY_HOME_SYSTEM/monitors/health_watch.py`）。層2（Claudeによる自動調査）は意図的に後付けとし未実装。
+**現状**: 層1（検知・通知）は実装済み（`MY_HOME_SYSTEM/monitors/health_watch.py`）。層2（Claudeによる自動調査）は意図的に後付けとし未実装（雛形 `MY_HOME_SYSTEM/scripts/claude_log_watchdog.sh` あり。後述）。
 
 ## 目的
 
@@ -12,7 +12,7 @@
 ## 全体構成（採用: 3層）
 
 ```
-層1: 検知（ラズパイ上、毎時cron、トークン消費ゼロ）
+層1: 検知（ラズパイ上、毎時cron、トークン消費ゼロ） … 実装済み
   monitors/health_watch.py （run_task.sh経由、home_system.serviceから独立）
     - service active / journalctl err..emerg / logs/*.log のERROR
     - ディスク・メモリ閾値 / NASマウント
@@ -23,6 +23,8 @@
   通知を受けて人間がClaude Codeセッションを開き調査する（現運用）。
   将来: 層1の異常検知をトリガーに `claude -p` をヘッドレス起動し、
   原因調査 → GitHub Issue/Draft PR起票まで自動化（ガードレール後述）。
+  雛形: scripts/claude_log_watchdog.sh（未検証。一次チェック部分は
+  health_watch.py で置き換え済みのため、claude -p 起動部分のみ流用する）
 
 層3: 死活監視（ラズパイの外）
   Cloudflare Zero Trust の Tunnel Health アラート。
@@ -86,13 +88,26 @@
 
 誤検知（flakyな一時的エラー等）が続く場合は、`LogAnalyzer.IGNORE_PATTERNS` や閾値側を見直す。
 
-## 層2（自動調査）を実装するときのガードレール
+## 層2（自動調査）を実装するときのガードレール・準備
 
-- コード修正の自動適用・自動デプロイは行わない（GitHub IssueまたはDraft PRとして提案するのみ）。`claude -p` の `--allowedTools` を読み取り系 + `gh issue` 系に機械的に制限する。
-- `systemctl restart` 等の破壊的操作は自動実行しない（`log_tab.py` の再起動ボタンが確認チェックボックス必須になっているのと同じ思想）。
+雛形として `MY_HOME_SYSTEM/scripts/claude_log_watchdog.sh` がある（**未検証**。一次チェック部分は `health_watch.py` に置き換え済みなので、`claude -p` ヘッドレス起動部分のみを流用し、`PROJECT_DIR` 等のパスは実環境 `/home/masahiro/develop` に合わせて修正すること）。
+
+ガードレール:
+
+- コード修正の自動適用・自動デプロイは行わない（GitHub IssueまたはDraft PRとして提案するのみ）。`claude -p` の `--allowedTools` を読み取り系 + `gh issue create`/`gh pr create --draft` のみに機械的に制限する。
+- `systemctl restart` 等の破壊的操作は自動実行しない（`log_tab.py` の再起動ボタンが確認チェックボックス必須になっているのと同じ思想）。許可リストにこれらを含めないことで担保する。
+- `--dangerously-skip-permissions`（全許可モード）は絶対に使わない。
+- `--permission-mode` / `--allowedTools` 等のフラグ名・値はCLIのバージョンによって変わりうるため、実装前に必ず実機で `claude --help` / `claude -p --help` を確認してから設定する（ここを飛ばすと「ガードレールが効いていない」状態になりうる）。
 - 多重起動防止は `fcntl.flock`（DDDのバッチと同じ方式）、暴走対策はタイムアウトと `--max-turns`。
 - 通知は `notification_service.py` の既存Webhook設定を再利用し、新たな認証情報経路を増やさない。
 - 詳細調査を毎回発火させる方向でのチューニングは行わない（コスト増につながるため）。層1の検知精度側を直す。
+
+準備（ラズパイ側、未実施）:
+
+1. Claude Code CLIのインストール（`claude --version` で確認）。
+2. ヘッドレス実行用の認証: ブラウザのある別マシンで `claude setup-token` を実行して長期トークンを発行し、ラズパイ側の環境変数 `CLAUDE_CODE_OAUTH_TOKEN` に設定（`.env` 等gitignore対象の場所。**リポジトリには絶対にコミットしない**）。
+3. `gh` CLIをIssue/PR作成の最小権限トークンで認証。
+4. コスト面: `claude -p` はステートレスで異常検知時のみ呼ばれるため平常時コストはゼロ。呼び出しコストは `--output-format json` のレスポンスから取得してログに記録することを検討する。
 
 ## 将来拡張（不採用だが記録として残す）
 
