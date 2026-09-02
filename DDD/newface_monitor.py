@@ -23,7 +23,7 @@ import fcntl
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set, Dict, Optional
+from typing import List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
 from file_utils import DiscordCircuitBreaker
@@ -336,18 +336,9 @@ class MonitorConfig:
             # 詳細URLが 'profile?lid=23' 形式のため 'lid'パラメータをIDとして使う
             id_query_param='lid',
         ),
-        SiteConfig(
-            site_id='bellica',
-            name='Bellica',
-            target_url='https://bellica-osaka.com/news.php',
-            selector_container='ul.newsList li',
-            selector_name='h2.title',
-            # このサイトの新人情報一覧は個別プロフィールページへのリンクを
-            # 持たないブログ形式のため、リンクは常に見つからない
-            # （detail_urlは一覧ページURLへ、cast_idは名前ベースへフォールバックする）
-            selector_link='a',
-            selector_image='span.thumb img',
-        ),
+        # bellica は2026-09-02にサイト閉鎖を確認したため監視対象から削除
+        # (ドメインがホスティング業者のデフォルト自己署名証明書+ポータルサイト
+        # www.undernavi.com への302リダイレクトに変化し、コンテンツが消失)
         SiteConfig(
             site_id='osaka_mkd',
             name='もくきん堂',
@@ -1206,6 +1197,14 @@ class MonitorConfig:
     # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値
     MASS_DETECTION_WARNING_THRESHOLD: int = 20
 
+    # Site Failure Alert Settings
+    # ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」
+    # としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格する
+    # (1時間毎のcron実行前提で約1日分。2026-09-02のbellica閉鎖時に、消失した
+    # サイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の
+    # 再発防止。詳細は _handle_site_network_failure を参照)。
+    CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24
+
     @classmethod
     def get_data_dir(cls) -> Path:
         """NASアクセスを検証・修復し、動的にデータディレクトリを解決する。
@@ -1459,6 +1458,48 @@ class DiscordNotifier:
             self._circuit_breaker.record_failure()
             return False
 
+    def notify_site_failure_alert(self, site: SiteConfig, failure_count: int) -> bool:
+        """連続巡回失敗中のサイトについて「閉鎖・移転の疑い」をDiscordへテキスト通知する。
+
+        Args:
+            site (SiteConfig): 連続失敗中のサイトの設定。
+            failure_count (int): 現在の連続失敗回数。
+
+        Returns:
+            bool: 送信に成功した場合True。呼び出し元はTrueの場合のみアラート
+                送信済みとして記録する(失敗時は次回実行時に再試行される)。
+        """
+        if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
+            logger.warning("Discord Webhook URL is not configured. Skipping site failure alert.")
+            return False
+
+        if self._circuit_breaker.is_open:
+            logger.warning(
+                "Discord Webhookへの連続送信失敗を検知しているため、サイト疎通不能アラートをスキップします。"
+            )
+            return False
+
+        content = (
+            f"⚠️ **監視サイト疎通不能アラート**\n"
+            f"「{site.name}」({site.site_id}) の巡回が{failure_count}回連続で失敗しています。\n"
+            f"URL: {site.target_url}\n"
+            f"サイト閉鎖・ドメイン移転の可能性があります。復旧見込みが無ければ "
+            f"newface_monitor.py の MonitorConfig.SITES から当該エントリを削除してください。\n"
+            f"(本アラートは疎通が回復するまで1回だけ送信され、以降の失敗ログはWARNINGに降格されます)"
+        )
+
+        payload = {"username": "New Face Monitor", "content": content}
+        try:
+            response = self.session.post(self.webhook_url, json=payload, timeout=10)
+            response.raise_for_status()
+            logger.info(f"Site failure alert sent successfully for site '{site.site_id}'.")
+            self._circuit_breaker.record_success()
+            return True
+        except requests.RequestException as e:
+            logger.error(f"Failed to send site failure alert for site '{site.site_id}': {e}", exc_info=True)
+            self._circuit_breaker.record_failure()
+            return False
+
 
 class DataManager:
     """データの永続化と読み込みを担当するクラス。"""
@@ -1652,6 +1693,102 @@ class DataManager:
         counts[site_id] = counts.get(site_id, 0) + count
         DataManager.save_daily_summary(data)
 
+    @staticmethod
+    def _site_failures_file() -> Path:
+        """サイト別の連続巡回失敗状態を保存するファイルのパスを返す。
+
+        daily_summary.jsonと同様、全サイト共通で1ファイルに集約して管理する。
+        """
+        return MonitorConfig.get_data_dir() / 'site_failures.json'
+
+    @staticmethod
+    def load_site_failures() -> Dict:
+        """サイト別の連続巡回失敗状態を読み込む。
+
+        Returns:
+            Dict: {site_id: {'count': int, 'alerted': bool}} 形式の状態。
+                'count'は現在継続中の連続失敗回数、'alerted'は閉鎖疑いアラートを
+                Discordへ送信済みかどうか。ファイルが存在しない・読み込みに
+                失敗した場合は空辞書を返す。
+        """
+        failures_file = DataManager._site_failures_file()
+        if not failures_file.exists():
+            return {}
+
+        try:
+            with open(failures_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # 破損等で辞書以外が保存されていた場合も安全に初期状態へ戻す
+                return data if isinstance(data, dict) else {}
+        except DataManager._LOAD_ERRORS as e:
+            # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
+            # 含めて読み込み失敗として扱い、監視処理本体を止めない
+            logger.error(f"Failed to load site failures from {failures_file}: {e}", exc_info=True)
+            return {}
+
+    @staticmethod
+    def save_site_failures(data: Dict) -> None:
+        """サイト別の連続巡回失敗状態をJSONファイルに保存する。
+
+        Args:
+            data (Dict): 保存対象の状態。
+        """
+        failures_file = DataManager._site_failures_file()
+        try:
+            failures_file.parent.mkdir(parents=True, exist_ok=True)
+
+            # アトミック書き込み: save_known_castsと同じパターン
+            tmp_path = failures_file.with_suffix(failures_file.suffix + '.tmp')
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            tmp_path.replace(failures_file)
+        except IOError as e:
+            logger.error(f"Failed to save site failures: {e}", exc_info=True)
+
+    @staticmethod
+    def record_site_failure(site_id: str) -> Tuple[int, bool]:
+        """サイトの巡回失敗を1回分記録し、更新後の連続失敗状態を返す。
+
+        Args:
+            site_id (str): 失敗したサイトのID。
+
+        Returns:
+            Tuple[int, bool]: (更新後の連続失敗回数, アラート送信済みかどうか)。
+        """
+        data = DataManager.load_site_failures()
+        entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
+        entry['count'] = int(entry.get('count', 0)) + 1
+        DataManager.save_site_failures(data)
+        return entry['count'], bool(entry.get('alerted', False))
+
+    @staticmethod
+    def mark_site_failure_alerted(site_id: str) -> None:
+        """サイトの閉鎖疑いアラートを送信済みとして記録する。
+
+        Args:
+            site_id (str): アラートを送信したサイトのID。
+        """
+        data = DataManager.load_site_failures()
+        entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
+        entry['alerted'] = True
+        DataManager.save_site_failures(data)
+
+    @staticmethod
+    def clear_site_failure(site_id: str) -> None:
+        """サイトへの疎通成功時に連続失敗状態を解消する。
+
+        記録が無いサイトについては何もしない(毎時の正常巡回のたびに
+        全サイト分のNAS書き込みが発生しないようにするため)。
+
+        Args:
+            site_id (str): 疎通に成功したサイトのID。
+        """
+        data = DataManager.load_site_failures()
+        if site_id not in data:
+            return
+        del data[site_id]
+        DataManager.save_site_failures(data)
+
 
 class WebMonitor:
     """Webサイトの監視とスクレイピングを統括するクラス。"""
@@ -1703,8 +1840,11 @@ class WebMonitor:
             return self._parse_html(soup, site)
 
         except requests.RequestException as e:
-            # 呼び出し元でハンドリングするために再送出、ただしログは記録する
-            logger.error(f"Network error during scraping of site '{site.site_id}': {e}", exc_info=True)
+            # 呼び出し元でハンドリングするために再送出する。ログの重大度は
+            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、
+            # ここでは無条件にERRORを記録しない(恒久的に消失したサイトが
+            # 毎時ERRORを出し続けてヘルスチェックを発報させないようにするため)
+            logger.debug(f"Network error during scraping of site '{site.site_id}': {e}")
             raise
 
     def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:
@@ -1891,6 +2031,42 @@ class WebMonitor:
 # Main Execution Flow
 # ==========================================
 
+def _handle_site_network_failure(notifier: DiscordNotifier, site: SiteConfig, exc: Exception) -> None:
+    """サイト巡回のネットワーク失敗を記録し、連続失敗が閾値に達したサイトを1回だけアラートする。
+
+    2026-09-02にbellicaが閉鎖され(ドメインがホスティング業者のデフォルト自己署名
+    証明書+ポータルサイトへの302リダイレクトに変化)、恒久的に消失したサイトが
+    毎時ERRORログを出し続けて一次ヘルスチェック(health_watch)が発報し続けた。
+    単発・短期のネットワーク障害は従来どおりERRORで記録しつつ、
+    CONSECUTIVE_FAILURE_ALERT_THRESHOLD回連続で失敗したサイトは「閉鎖・移転の
+    疑い」としてDiscordへ1回だけテキスト通知し、以降の失敗ログをWARNINGへ降格
+    することで、対処済み・把握済みの消失サイトによる発報が続かないようにする。
+    連続失敗の状態は疎通成功時にリセットされる(_check_site参照)ため、一時的な
+    長期障害から復旧した場合は通常のERROR運用に自動的に戻る。
+
+    Args:
+        notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。
+        site (SiteConfig): 巡回に失敗したサイトの設定。
+        exc (Exception): 発生したネットワーク例外(ログ出力用)。
+    """
+    count, alerted = DataManager.record_site_failure(site.site_id)
+
+    if not alerted and count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD:
+        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する
+        if notifier.notify_site_failure_alert(site, count):
+            DataManager.mark_site_failure_alerted(site.site_id)
+            alerted = True
+
+    message = (
+        f"Aborting monitor run for site '{site.site_id}' due to network failure "
+        f"({count} consecutive failures): {exc}"
+    )
+    if alerted:
+        logger.warning(f"{message} (closure alert already sent)")
+    else:
+        logger.error(message)
+
+
 def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:
     """1サイト分の巡回・差分検知・通知・保存を行う。
 
@@ -1910,9 +2086,14 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
     # 2. Fetch Data
     try:
         current_casts = monitor.fetch_current_casts(site)
-    except requests.RequestException:
-        logger.error(f"Aborting monitor run for site '{site.site_id}' due to network failure.")
+    except requests.RequestException as e:
+        _handle_site_network_failure(notifier, site, e)
         return
+
+    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する
+    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で
+    # あり、閉鎖疑いを判定する疎通不能とは区別する)
+    DataManager.clear_site_failure(site.site_id)
 
     if not current_casts:
         logger.debug(

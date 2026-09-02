@@ -66,7 +66,7 @@ def test_valid_http_image_url_is_kept_in_thumbnail():
     assert payload["embeds"][0]["thumbnail"] == {"url": image_url}
 
 
-def test_mass_detection_warning_logged_when_known_casts_exist(caplog):
+def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatch):
     known_casts = {
         CastMember(id=f"known-{i}", name=f"既存{i}", detail_url="https://example.test/", image_url="")
         for i in range(5)
@@ -109,6 +109,8 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog):
             module.DataManager.load_known_casts = MagicMock(return_value=known_casts)
             module.DataManager.save_known_casts = MagicMock()
             module.DataManager.record_daily_new_casts = MagicMock()
+            # 素の代入だと他テストファイルへモックがリークするためmonkeypatchを使う
+            monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
             module._check_site(monitor, notifier, site)
     finally:
         module.logger.propagate = original_propagate
@@ -157,6 +159,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         mock_save = MagicMock()
         monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
         monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
+        monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
 
         module._check_site(monitor, notifier, site)
 
@@ -180,6 +183,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         mock_save = MagicMock()
         monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
         monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
+        monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
 
         module._check_site(monitor, notifier, site)
 
