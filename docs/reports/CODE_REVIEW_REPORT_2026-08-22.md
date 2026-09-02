@@ -6,6 +6,33 @@
 
 ---
 
+## 0. 対応状況（2026-09-02追記・Issue #323）
+
+> **状態管理の方針**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポート（および他のレビューレポート）は「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323時点のスナップショット。以後の最新状態は各Issueを参照すること。
+
+High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に基づく）:
+
+| # | 項目 | 状態 | 備考 |
+|---|---|---|---|
+| H-1 | `get_db_cursor`のリトライ機構破綻 | ✅ 対応済み | `core/database.py`にロック時リトライ実装済み |
+| H-2 | 新規/再構築DBの承認フロー無効化・新規構築パス崩壊 | ✅ 対応済み | `migrations/0001`(roleカラム+`role_adult`補正)等で解消 |
+| H-3 | 承認・取消・アイテム経路のread-modify-writeレース | ✅ 対応済み | `services/quest_service.py`に`_completion_locks`/`_user_balance_locks`によるキー別排他を実装済み |
+| H-4 | SwitchBot Webhookの実ペイロード形式不一致の疑い | 🔲 **未解決** | 実機ログでの確認が必要 → **Issue #328**（`blocked:実機作業`） |
+| H-5 | アイテム「承認待ち」フローの断絶 | ✅ 対応済み | — |
+| H-6 | AIツールのSQL許可テーブル検査のカンマ結合回避 | ✅ 対応済み | — |
+| H-7 | DB保存失敗の握りつぶし・虚偽の成功応答 | ✅ 対応済み | — |
+| H-8 | 兄妹連携クエストのフロント未表示 | ✅ 対応済み | 兄妹連携(coop)クエストとして実装済み |
+| H-9 | `start_all.sh`のpkill対象名不一致によるscheduler二重起動 | ✅ 対応済み | — |
+| H-10 | 認証境界が事実上存在しない | 🔲 **未解決** | JWT検証再実装 or エッジ委譲の正式設計化を判断中 → **Issue #321**（`decision-needed`） |
+| H-11 | CIがMY_HOME_SYSTEMのみ対象・フロントはテスト0件 | ✅ 対応済み | `test.yml`にfrontendジョブ(`npm ci`+`build`+`npm test`)・DDD lint/pytest追加済み。vitestテストも存在 |
+| H-12 | DDD `extract_youtube_urls.py`のCWD依存フォールバック | ✅ 対応済み | — |
+| M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
+
+- **「5. 品質向上ロードマップ」のPhase 3（スキーマ管理一本化・設定一本化・NASブロッキング分離等）は未着手** → **Issue #330**（`priority:medium`）で追跡。
+- Medium各グループ（M-1〜M-10）の個別項目は多くが個別修正済みだが、本表では網羅照合していない。未解決と判明したものは都度Issue化する方針（上記のとおりIssueが正）。
+
+---
+
 ## 1. エグゼクティブサマリー
 
 **総合評価: C(要改善)**
