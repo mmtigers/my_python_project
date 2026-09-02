@@ -190,9 +190,10 @@ jobs:
         continue-on-error: true
 
       - name: pip-audit (known CVEs - non-blocking)
-        # requirements.txt に多数の既知CVEを持つバージョンが固定されている(2026年時点)。
-        # 依存関係の一括更新は影響範囲が大きく本タスクの範囲外のため、
-        # ここではPRごとに可視化することを優先し、ブロッキングにはしない。
+        # Issue #324 (2026-09-02) で既知CVE付きの固定バージョンは一括更新済みで、
+        # この時点の検知は0件。ただし新規CVEの公開はPRの差分と無関係にCIを
+        # 赤くし得るため、引き続き可視化のみとしブロッキングにはしない
+        # (ブロッキング化 or 定期監査Issue化の判断はIssue #324を参照)。
         run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
         continue-on-error: true
 
