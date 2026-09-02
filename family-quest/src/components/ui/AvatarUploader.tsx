@@ -12,6 +12,8 @@ interface AvatarUploaderProps {
     onUploadComplete: () => void;
 }
 
+// M15/Issue #325: バックエンド(MY_HOME_SYSTEM/config.py の UPLOAD_MAX_FILE_SIZE_MB)と
+// 同じ5MBに揃えている。変更時は両方(とエラー文言)を更新すること。
 const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB
 
 const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {
