@@ -19,7 +19,7 @@
 
 * FastAPIを使用したクエスト管理システム（MY_HOME_SYSTEM）のルーティング定義（コントローラー）ファイル。
 * ゲームデータ同期、クエストの完了・承認・却下・キャンセル、報酬の購入、画像アップロード、音声テスト、インベントリ管理などの各エンドポイントを提供する。
-* ビジネスロジックの大部分を外部サービス（`services.quest_service` など）に委譲しているが、画像アップロードのファイル検証・保存などは本ファイル内に実装されている。画像アップロード(`upload_image`)は拡張子・マジックバイト検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB）を上限としたファイルサイズチェックを行い、上限超過時は書きかけのファイルを削除してHTTP 413を返す（コミット`4f3a8a1`, M-9-3修正）。
+* ビジネスロジックの大部分を外部サービス（`services.quest_service` など）に委譲しているが、画像アップロードのファイル検証・保存などは本ファイル内に実装されている。画像アップロード(`upload_image`)は拡張子・マジックバイト検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定5MB、Issue #325でフロントの5MB上限と統一）を上限としたファイルサイズチェックを行い、上限超過時は書きかけのファイルを削除してHTTP 413を返す（コミット`4f3a8a1`, M-9-3修正）。
 * 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB"), `raise HTTPException(\n                status_code=413,` (行番号: 123-124 / 抜粋: "status_code=413,")
 * `get_all_data`はクエリパラメータ`viewer_user_id`（任意、`Optional[str]`）を受け取り、`game_system.get_all_view_data()`へそのまま透過して渡す。
 * 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 40 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
@@ -340,7 +340,7 @@
 
 ### `upload_image`
 
-* **役割**: 画像ファイルをサーバーにアップロードし、保存するエンドポイント。拡張子チェック、マジックナンバー検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB）を上限としたファイルサイズ検証を行う（コミット`4f3a8a1`, M-9-3修正で追加）。
+* **役割**: 画像ファイルをサーバーにアップロードし、保存するエンドポイント。拡張子チェック、マジックナンバー検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定5MB、Issue #325でフロントの5MB上限と統一）を上限としたファイルサイズ検証を行う（コミット`4f3a8a1`, M-9-3修正で追加）。
 * 根拠: ルーティング定義 (行番号: 89-135 / 抜粋: "@router.post("/upload")")
 
 
@@ -527,7 +527,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `get_all_data` において広範な `Exception` でエラーをキャッチしており、捕捉した例外をそのままHTTP 500エラーとして送出している。
-* `upload_image` において、`File(...)` を使用してメモリと一時ファイル間でストリーミング書き込み（`1024 * 1024` バイトのチャンクサイズ）を行っている。コミット`4f3a8a1`（M-9-3修正）以降は書き込みながら累計サイズ`total_bytes`を追跡し、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定10MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可）を超えた時点で書き込みを打ち切り、書きかけのファイルを削除してHTTP 413を返す。判定はチャンク単位の累計値のみで行われ、`Content-Length`ヘッダ等によるアップロード開始前の事前拒否は行っていない。
+* `upload_image` において、`File(...)` を使用してメモリと一時ファイル間でストリーミング書き込み（`1024 * 1024` バイトのチャンクサイズ）を行っている。コミット`4f3a8a1`（M-9-3修正）以降は書き込みながら累計サイズ`total_bytes`を追跡し、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定5MB、環境変数`UPLOAD_MAX_FILE_SIZE_MB`で上書き可。Issue #325でフロントの5MB上限と統一）を超えた時点で書き込みを打ち切り、書きかけのファイルを削除してHTTP 413を返す。判定はチャンク単位の累計値のみで行われ、`Content-Length`ヘッダ等によるアップロード開始前の事前拒否は行っていない。
 * 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 109 / 抜粋: "max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `common.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
 * かつて存在した `consume_item` (`POST /inventory/consume`), `cancel_item_usage` (`POST /inventory/cancel`), `get_admin_pending_inventory` (`GET /inventory/admin/pending`) の各エンドポイントは、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い削除されている。これに伴い、インポートしていた `ConsumeItemAction` モデルも削除されている。`use_item` (`POST /inventory/use`) 自体のルーティング・実装コードは変更されていない。

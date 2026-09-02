@@ -61,8 +61,8 @@
 
 ### `MAX_AVATAR_SIZE_BYTES` (モジュールレベル定数)
 
-* **役割**: アップロード可能な画像ファイルサイズの上限（5MB）を定義する。`handleFileChange`のバリデーションで参照される。
-* 根拠: (行番号: 15 / 抜粋: "const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB")
+* **役割**: アップロード可能な画像ファイルサイズの上限（5MB）を定義する。`handleFileChange`のバリデーションで参照される。M15/Issue #325対応で、バックエンド(`MY_HOME_SYSTEM/config.py`の`UPLOAD_MAX_FILE_SIZE_MB`、既定5MB)と同一値に揃えられており、変更時は両方(とエラー文言)を更新する旨の相互参照コメントが付いている。
+* 根拠: (行番号: 17 / 抜粋: "const MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024; // 5MB")
 
 ### `AvatarUploader`
 

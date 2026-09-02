@@ -451,8 +451,10 @@ if ALLOW_ALL_ORIGINS:
 
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
-# ディスクを圧迫し得た。アバター画像用途を想定し余裕を持って10MBとする。
-UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "10"))
+# ディスクを圧迫し得た。アバター画像用途を想定した上限とする。
+# M15/Issue #325: フロントエンド(family-quest/src/components/ui/AvatarUploader.tsx の
+# MAX_AVATAR_SIZE_BYTES)と同じ5MBに揃えている。変更時は両方を更新すること。
+UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "5"))
 
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定
