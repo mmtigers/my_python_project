@@ -1,0 +1,341 @@
+{
+ "indexes": [
+  "idx_device_records_device_ts",
+  "idx_power_usage_device_ts",
+  "idx_switchbot_logs_device_ts"
+ ],
+ "tables": {
+  "ai_report_records": [
+   "id",
+   "message",
+   "timestamp"
+  ],
+  "bicycle_parking_records": [
+   "area_name",
+   "id",
+   "status_text",
+   "timestamp",
+   "waiting_count"
+  ],
+  "bounties": [
+   "assignee_id",
+   "completed_at",
+   "created_at",
+   "created_by",
+   "description",
+   "id",
+   "reward_exp",
+   "reward_gold",
+   "status",
+   "target_type",
+   "target_user_id",
+   "title",
+   "updated_at"
+  ],
+  "car_records": [
+   "action",
+   "id",
+   "rule_name",
+   "score",
+   "timestamp"
+  ],
+  "child_health_records": [
+   "child_name",
+   "condition",
+   "id",
+   "timestamp",
+   "user_id",
+   "user_name"
+  ],
+  "daily_logs": [
+   "category",
+   "detail",
+   "id",
+   "timestamp",
+   "user_id"
+  ],
+  "daily_records": [
+   "category",
+   "date",
+   "id",
+   "timestamp",
+   "user_id",
+   "user_name",
+   "value"
+  ],
+  "defecation_records": [
+   "condition",
+   "id",
+   "note",
+   "record_type",
+   "timestamp",
+   "user_id",
+   "user_name"
+  ],
+  "device_records": [
+   "brightness_state",
+   "cam_onoff",
+   "contact_state",
+   "device_id",
+   "device_name",
+   "device_type",
+   "hub_onoff",
+   "humidity_percent",
+   "id",
+   "movement_state",
+   "nas_usage_percent",
+   "power_watts",
+   "temperature_celsius",
+   "threshold_watts",
+   "timestamp"
+  ],
+  "equipment_master": [
+   "cost_gold",
+   "equipment_id",
+   "icon_key",
+   "name",
+   "power",
+   "type"
+  ],
+  "family_mileage": [
+   "current_exp",
+   "id",
+   "target_exp",
+   "target_name",
+   "updated_at"
+  ],
+  "family_mileage_history": [
+   "achieved_exp",
+   "completed_at",
+   "id",
+   "target_exp",
+   "target_name"
+  ],
+  "food_records": [
+   "id",
+   "meal_date",
+   "meal_time_category",
+   "menu_category",
+   "timestamp",
+   "user_id",
+   "user_name"
+  ],
+  "haircut_records": [
+   "email_id",
+   "id",
+   "menu",
+   "platform",
+   "price",
+   "shop_name",
+   "timestamp",
+   "visit_date"
+  ],
+  "health_records": [
+   "id",
+   "note",
+   "status",
+   "timestamp",
+   "user_name"
+  ],
+  "land_price_records": [
+   "area_m2",
+   "city",
+   "district",
+   "id",
+   "prefecture",
+   "price",
+   "price_per_m2",
+   "recorded_at",
+   "trade_id",
+   "transaction_period",
+   "type"
+  ],
+  "nas_records": [
+   "device_name",
+   "free_gb",
+   "id",
+   "ip_address",
+   "percent",
+   "status_mount",
+   "status_ping",
+   "timestamp",
+   "total_gb",
+   "used_gb"
+  ],
+  "ohayo_records": [
+   "id",
+   "message",
+   "recognized_keyword",
+   "timestamp",
+   "user_id",
+   "user_name"
+  ],
+  "party_state": [
+   "charge_gauge",
+   "current_boss_id",
+   "current_hp",
+   "id",
+   "is_defeated",
+   "max_hp",
+   "total_damage",
+   "updated_at",
+   "week_start_date"
+  ],
+  "power_usage": [
+   "device_id",
+   "device_name",
+   "id",
+   "timestamp",
+   "wattage"
+  ],
+  "quest_history": [
+   "completed_at",
+   "exp_earned",
+   "gold_earned",
+   "id",
+   "linked_history_id",
+   "quest_id",
+   "quest_title",
+   "status",
+   "user_id"
+  ],
+  "quest_master": [
+   "day_of_week",
+   "days",
+   "description",
+   "end_date",
+   "end_time",
+   "exp_gain",
+   "gold_gain",
+   "icon_key",
+   "occurrence_chance",
+   "pre_requisite_quest_id",
+   "quest_id",
+   "quest_type",
+   "reset_period",
+   "start_date",
+   "start_time",
+   "target_user",
+   "title"
+  ],
+  "quest_users": [
+   "avatar",
+   "exp",
+   "gold",
+   "job_class",
+   "level",
+   "medal_count",
+   "name",
+   "role",
+   "updated_at",
+   "user_id"
+  ],
+  "quests": [
+   "description",
+   "difficulty",
+   "end_date",
+   "gold_reward",
+   "icon_key",
+   "quest_id",
+   "quest_type",
+   "start_date",
+   "title",
+   "xp_reward"
+  ],
+  "reward_history": [
+   "cost_gold",
+   "id",
+   "redeemed_at",
+   "reward_id",
+   "reward_title",
+   "user_id"
+  ],
+  "reward_master": [
+   "category",
+   "cost_gold",
+   "desc",
+   "description",
+   "icon_key",
+   "reward_id",
+   "target",
+   "title"
+  ],
+  "schema_migrations": [
+   "applied_at",
+   "version"
+  ],
+  "security_logs": [
+   "classification",
+   "device_name",
+   "id",
+   "image_path",
+   "recorded_at",
+   "timestamp"
+  ],
+  "shopping_records": [
+   "email_id",
+   "id",
+   "item_name",
+   "order_date",
+   "platform",
+   "price",
+   "timestamp"
+  ],
+  "suumo_records": [
+   "address",
+   "id",
+   "property_id",
+   "rent_price",
+   "timestamp",
+   "title",
+   "url"
+  ],
+  "switchbot_meter_logs": [
+   "device_id",
+   "device_name",
+   "humidity",
+   "id",
+   "temperature",
+   "timestamp"
+  ],
+  "user_equipments": [
+   "acquired_at",
+   "equipment_id",
+   "id",
+   "is_equipped",
+   "user_id"
+  ],
+  "user_inventory": [
+   "id",
+   "purchased_at",
+   "reward_id",
+   "status",
+   "used_at",
+   "user_id"
+  ],
+  "users": [
+   "avatar",
+   "gold",
+   "id",
+   "job_class",
+   "level",
+   "medal_count",
+   "name",
+   "status",
+   "updated_at",
+   "user_id",
+   "xp"
+  ],
+  "weather_history": [
+   "date",
+   "id",
+   "location",
+   "max_pop",
+   "max_temp",
+   "min_temp",
+   "recorded_at",
+   "umbrella_level",
+   "weather_desc"
+  ]
+ }
+}

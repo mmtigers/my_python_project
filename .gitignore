@@ -90,6 +90,11 @@ family_events.json
 !family-quest/package.json
 !family-quest/package-lock.json
 
+# MY_HOME_SYSTEM/tests/fixtures: テストが参照するコミット必須のフィクスチャ
+# (個人データではない)。広域の *.json ルールの対象外にする (Issue #330 PR-A:
+# legacy_init_db_schema.json がgitignoreで黙ってコミット漏れしCIだけ落ちた再発防止)。
+!MY_HOME_SYSTEM/tests/fixtures/*.json
+
 # alexa-skill / MY_HOME_SYSTEM/alexa: this project's own committed Alexa skill
 # config (interaction model, skill manifest, APL document), not personal data —
 # same reasoning as the family-quest exception above.
