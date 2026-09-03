@@ -23,7 +23,7 @@ High 12件+M-10-1のコード照合結果（2026-09-02、Issue #323の調査に�
 | H-7 | DB保存失敗の握りつぶし・虚偽の成功応答 | ✅ 対応済み | — |
 | H-8 | 兄妹連携クエストのフロント未表示 | ✅ 対応済み | 兄妹連携(coop)クエストとして実装済み |
 | H-9 | `start_all.sh`のpkill対象名不一致によるscheduler二重起動 | ✅ 対応済み | — |
-| H-10 | 認証境界が事実上存在しない | 🔲 **未解決** | JWT検証再実装 or エッジ委譲の正式設計化を判断中 → **Issue #321**（`decision-needed`） |
+| H-10 | 認証境界が事実上存在しない | ✅ **対応方針確定** | エッジのCloudflare Access委譲を正式設計として確定（案B、2026-09-03）。JWT検証は再実装しない → **Issue #321** |
 | H-11 | CIがMY_HOME_SYSTEMのみ対象・フロントはテスト0件 | ✅ 対応済み | `test.yml`にfrontendジョブ(`npm ci`+`build`+`npm test`)・DDD lint/pytest追加済み。vitestテストも存在 |
 | H-12 | DDD `extract_youtube_urls.py`のCWD依存フォールバック | ✅ 対応済み | — |
 | M-10-1 | `test.yml`に`permissions:`ブロックが無い | ✅ 対応済み | `permissions: contents: read`を明示済み（`test.yml`冒頭） |
