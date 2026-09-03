@@ -191,9 +191,10 @@ jobs:
 
       - name: pip-audit (known CVEs - non-blocking)
         # Issue #324 (2026-09-02) で既知CVE付きの固定バージョンは一括更新済みで、
-        # この時点の検知は0件。ただし新規CVEの公開はPRの差分と無関係にCIを
-        # 赤くし得るため、引き続き可視化のみとしブロッキングにはしない
-        # (ブロッキング化 or 定期監査Issue化の判断はIssue #324を参照)。
+        # この時点の検知は0件。新規CVEの公開はPRの差分と無関係にCIを赤くし得る
+        # ため、引き続きPR単位ではブロッキングにしない。代わりに
+        # pip-audit-weekly-audit.yml が同じ対象を週次監査し、検知が出れば
+        # Issueで可視化・追跡する(仕様書ドリフトのIssue #20と同型の運用)。
         run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
         continue-on-error: true
 
