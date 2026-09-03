@@ -191,6 +191,13 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     許可ネットワーク:
     - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
     - ローカルホスト (127.0.0.1, ::1)
+
+    非プライベートIPからのアクセスはブロックせずログ記録のみ行い通過させる（Issue #321・
+    2026-09-03決定）。アプリ層では`Cf-Access-Jwt-Assertion`の署名/aud検証を意図的に
+    実装せず、外部アクセス制御はインフラ側のCloudflare Access（Zero Trust）に委譲する設計を
+    正式なものとしている。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に
+    限定されていること（ルーター/FW側の設定）を前提とする。詳細は
+    `docs/reports/CODE_REVIEW_REPORT_ALL.md`のCritical#2/#8を参照。
     """
     allowed_webhook_paths = {
         "/webhook/switchbot",
@@ -223,10 +230,13 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     except ValueError:
         pass
 
-    # 🌟 変更: Cloudflare Access (Zero Trust) を導入したため、IPベースの遮断を無効化し、
+    # Cloudflare Access (Zero Trust) を導入しているため、IPベースの遮断は行わず、
     # 認証はCloudflareのエッジネットワークに委譲する。
-    # ※もしCloudflare経由であることを厳密に担保したい場合は、将来的に
-    # `Cf-Access-Jwt-Assertion` ヘッダーの検証をここに追加する。
+    # Issue #321(2026-09-03決定・案B): `Cf-Access-Jwt-Assertion`ヘッダーの検証は
+    # PR #80で一度実装されたが2026-08-28の障害でrevertされ、その後の判断として
+    # 「再実装しない」ことを正式設計として確定した(defense in depthより、過去の
+    # 障害実績の再導入を避けることを優先)。オリジンへの直接到達をCloudflareの
+    # IPレンジ経由に限定するインフラ側設定が、この設計の前提条件となる。
     
     # #182: setup_logging()(core/logger.py)はロガーレベルをINFO固定にしており、
     # DEBUGレベルのオーバーライド手段が存在しないため、logger.debug()での出力は

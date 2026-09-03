@@ -82,7 +82,7 @@ npm run lint     # ESLint
 `unified_server.py` が唯一のFastAPIエントリーポイント。起動時 (`lifespan`) に未適用のSQLマイグレーションを適用し、その後 `monitors/camera_monitor.py` と `scheduler_boot.py` を（asyncioタスクではなく）**別プロセス**として起動する — これが `tests/conftest.py` の `api_client` フィクスチャが `lifespan` の実行を一切避けている理由である。ルーターは薄く作られており、`routers/*.py` はリクエストのパース・検証のみを行い、ロジックは `services/*.py` に委譲し、そこから永続化のために `core/database.py` を呼ぶ。新規エンドポイントを追加する際は、ロジックをルーターに直接書かずこのレイヤリングに従うこと。
 
 新規エンドポイントに関わる独自ミドルウェアが2つある:
-- `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（現状ブロックはしない）、`/webhook/switchbot` と `/callback/line` は外部からのトラフィックを受け付ける必要があるため無条件に許可している。実際のアクセス制御はエッジのCloudflare Accessに委譲されている。
+- `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（ブロックはしない）、`/webhook/switchbot` と `/callback/line` は外部からのトラフィックを受け付ける必要があるため無条件に許可している。**これは意図的な設計として正式に確定している**（Issue #321・2026-09-03決定）: アプリ層では`Cf-Access-Jwt-Assertion`のJWT検証を行わず（一度PR #80で実装したが2026-08-28の障害でrevert済みで、再実装しない方針を採用）、外部アクセス制御はエッジのCloudflare Accessに委譲する。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
 - CORSの許可オリジンは `config.CORS_ORIGINS` の1箇所だけに存在する（環境変数 `ALLOW_ALL_ORIGINS=true` で `["*"]` に上書き可能）。`unified_server.py` 側に別のハードコードされたオリジンリストを追加しないこと — 過去に2つの別々のリストが存在し、片方しか実際には反映されていないというバグがあった。
 
 `/quest/{full_path}` と `/camera/{full_path}` のルートは、`family-quest` のSPAビルドを静的ファイルとして配信する。パストラバーサル対策（realpath化したdistディレクトリに対する `os.path.commonpath` チェック）を行い、クライアント側ルーティングのために `index.html` へフォールバックする。

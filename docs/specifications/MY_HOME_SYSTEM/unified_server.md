@@ -124,7 +124,7 @@
 
 ### `ip_restriction_middleware`
 
-* **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス以外では、`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。
+* **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス以外では、`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。**（Issue #321・2026-09-03決定）** 非プライベートIPからのアクセスをブロックしない現在の挙動は、意図的な設計として正式に確定している。`Cf-Access-Jwt-Assertion`の署名/aud検証は一度PR #80で実装されたが2026-08-28の障害でrevertされ、再実装せずエッジのCloudflare Access（インフラ側）への委譲を正式設計とする案（案B）が採用された。この設計はオリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
 * 根拠: `async def ip_restriction_middle` (行番号: 178-236 / 抜粋: "async def ip_restriction_middle")
 
 
@@ -368,7 +368,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `ip_restriction_middleware` 内でIP制限のロジックが実装されているが、現状は `return await call_next(request)` が分岐の最終地点で必ず呼ばれるため、事実上すべてのIPからのアクセスが遮断されずに後続処理へ流れる状態となっている。
+* `ip_restriction_middleware` 内でIP制限のロジックが実装されているが、現状は `return await call_next(request)` が分岐の最終地点で必ず呼ばれるため、事実上すべてのIPからのアクセスが遮断されずに後続処理へ流れる状態となっている。この挙動はIssue #321（2026-09-03決定・案B）によりバグではなく正式な設計として確定済み（アプリ層でのJWT検証は行わず、外部アクセス制御はエッジのCloudflare Accessに委譲する）。
 * モジュール `handlers.line_handler` はインポートされているが、ファイル内で一度も使用されていない（未使用インポート）。
 * `contextlib.asynccontextmanager` もインポートされているが、`lifespan`関数には`@asynccontextmanager`デコレータが付与されておらず（`FastAPI(lifespan=lifespan)`に直接渡されている）、ファイル内で一度も使用されていない（未使用インポート）。
 * サブプロセス（`camera_process`, `scheduler_process`）はグローバル変数として定義および管理されており、プロセス停止処理（`terminate()`や`kill()`）で状態変異（副作用）を伴う。

@@ -9,21 +9,23 @@
 
 ## 0. 対応状況（最終更新: 2026-09-02）
 
-指摘34件（Critical 9・High 6・Medium 19）のうち25件は対応完了、8件は未対応・部分対応（残作業あり）、1件は意思決定により対応対象外。
+指摘34件（Critical 9・High 6・Medium 19）のうち25件は対応完了、6件は未対応・部分対応（残作業あり）、3件は意思決定により対応方針確定/対象外。
 
 > **状態管理の方針（2026-09-02・Issue #323）**: 残件の状態管理の正は**GitHub Issue**に一本化する。本レポートは「レビュー時点の歴史的記録+未解決項目のIssueへのポインタ」であり、以下の表はIssue #323対応時点のスナップショット。以後の最新状態は各Issueを参照すること。
 > また、本レポート中の「docs改善バックログ」（B1/B5/B6/C2/D4等の項番）の参照先は**リポジトリ内のファイルではなく、Claude Artifact「RPi改善バックログ」**である（リポジトリ内を検索してもヒットしない）。今後の残件参照はバックログ項番ではなくGitHub Issue番号を正とする。**7. 最終結論**の「🔴 REJECT・49/100」判定はこの2026-08-11時点の状況を反映したものであり、以下の通り大半が解消済みのため、現状の判定としては読み替えが必要。
 
 > **2026-09-02訂正（Issue #321）**: Critical#2は一度「対応完了」（`access_control_middleware`によるCloudflare Access JWT検証必須化、PR #80）と記録されたが、PR #80は2026-08-28のfamily-quest障害でrevert済みであり、**未対応に戻っている**。Critical#8の外部アクセス防御についても同様にアプリ層のJWT検証は消滅しており、エッジのCloudflare Access（インフラ側・コード外）のみが防御となっている。本表はこの回帰を反映済み。詳細は`CODE_REVIEW_REPORT_2026-08-22.md`のH-10、`MY_HOME_SYSTEM/CODE_REVIEW_REPORT.md`の2.2を参照。
 
-### 🔲 残件（未対応・部分対応・9件、うち1件はスコープ外）
+> **2026-09-03決定（Issue #321）**: 上記の判断待ち事項について、オーナーが**案B（エッジのCloudflare Access委譲を正式設計として確定）**を選択した。JWT検証（`Cf-Access-Jwt-Assertion`の署名/aud検証）は再実装せず、アプリ層は引き続きIPベースの簡易チェックのみとし、外部アクセス制御はインフラ側のCloudflare Accessに委譲する設計を正式なものとする。前提条件（オリジンへの直接到達をCloudflareのIPレンジ経由に限定するルーター/FW設定）はオーナー側の運用事項として別途確認する。`unified_server.py`のミドルウェアdocstring/コメントもこの決定を反映済み。
+
+### 🔲 残件（未対応・部分対応・9件、うち3件は意思決定により方針確定/対象外）
 
 | # | 項目 | 状態 | 詳細 |
 |---|---|---|---|
 | Critical#1 | APIの認可欠如（`user_id`/`approver_id`のクライアント信頼） | 未対応（意思決定によりスコープ外） | 棚卸し課題4で対応スコープ外と合意済み。docs改善バックログのB1と同一課題 |
-| Critical#2 | IPアドレス制限ヘッダー詐称 | **未対応に戻った（PR #80 revert）** | 一度`access_control_middleware`によるCloudflare Access JWT検証必須化（PR #80）で対応完了と記録されたが、2026-08-28のfamily-quest障害でPR #80はrevert済み。現在の`unified_server.py`に存在するのは`ip_restriction_middleware`のみで、非プライベートIPからのリクエストをログに記録するだけで全て通過させる。`Cf-Access-Jwt-Assertion`を参照するコードはコメント1箇所のみ。JWT検証を再実装するか、エッジのCloudflare Access委譲を正式設計として確定させるかはIssue #321で判断待ち。`CODE_REVIEW_REPORT_2026-08-22.md`のH-10と同一課題 |
+| Critical#2 | IPアドレス制限ヘッダー詐称 | **対応方針確定（エッジ委譲、Issue #321・案B）** | 一度`access_control_middleware`によるCloudflare Access JWT検証必須化（PR #80）で対応完了と記録されたが、2026-08-28のfamily-quest障害でPR #80はrevert済み。オーナーはJWT検証を再実装せず、エッジのCloudflare Access委譲を正式設計として確定する案Bを選択（2026-09-03）。アプリ層は`ip_restriction_middleware`によるIPベースの簡易チェックのみで、`Cf-Access-Jwt-Assertion`の検証は意図的に行わない。`CODE_REVIEW_REPORT_2026-08-22.md`のH-10と同一課題 |
 | Critical#3 | Streamlitダッシュボードの無認証公開 | 部分対応 | `--server.address`を`0.0.0.0`→`127.0.0.1`に変更済みで外部露出は解消。ただし`sudo systemctl restart`ボタン（`views/dashboard/log_tab.py:119`）を含めアプリ内認証は依然なし |
-| Critical#8 | カメラ機能の無認証公開 | 部分対応（**PR #80 revertによりアプリ層防御は消滅**） | 外部アクセスは一度`access_control_middleware`でCloudflare Access JWT検証必須化（PR #80）されたが、2026-08-28のrevertで消滅し、現在の外部アクセス防御はエッジのCloudflare Access（インフラ側・コード外）のみ。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み。アプリ層防御の再実装要否はCritical#2と同じくIssue #321で判断待ち |
+| Critical#8 | カメラ機能の無認証公開 | **対応方針確定（エッジ委譲、Issue #321・案B）** | 外部アクセスは一度`access_control_middleware`でCloudflare Access JWT検証必須化（PR #80）されたが、2026-08-28のrevertで消滅。Critical#2と同じくオーナーが案B（エッジ委譲の正式化）を選択（2026-09-03）したため、現在の外部アクセス防御（エッジのCloudflare Access、インフラ側・コード外）が正式設計となった。LAN内アクセスは引き続き無認証だが、棚卸し課題4でLAN内を信頼境界とする方針が合意済み |
 | High#3 | `UserStatusCard`のHP固定表示 | 対応済み・要追加確認 | HP再計算バグ自体は是正済み（バックエンド値をそのまま使う設計に変更）。ただし現在の`UserStatusCard.tsx`にはHP表示UI自体が存在しない。意図した仕様変更か確認が必要 → Issue #327（`decision-needed`）で追跡 |
 | M2 | `config.py`の子供の氏名・年齢ハードコード | 部分対応 | 年齢は`family_members.local.json`（`.gitignore`で除外・git追跡対象外）に切り出し済み。氏名は`config.py`の`FAMILY_SETTINGS`に引き続き残存 |
 | M4 | SwitchBot Webhook署名検証がトークン未設定時オプトイン | 変化あり（仕様は同じ・警告追加） | 実装（未設定時に検証スキップ）自体は変更なし。ただしアプリ起動時（`unified_server.py`のlifespan）に未設定を警告するログが追加された。実機でのトークン設定はIssue #318（`blocked:実機作業`）で追跡。docs改善バックログのB5と同一課題 |
