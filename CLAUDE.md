@@ -73,7 +73,7 @@ npm run lint     # ESLint
 
 ### CI (`.github/workflows/test.yml`)
 
-4つの独立したジョブがある: `lint`（`MY_HOME_SYSTEM`・`DDD`両方にruffを実行、PRをブロックするのは `F821,F822,F823,E9` のみ）、`test`（`MY_HOME_SYSTEM` のpytest + カバレッジ、`--cov-fail-under=45`。続けて `DDD` のpytestも実行するが、こちらはPRの差分に `DDD/**` が含まれる場合のみ。DDDテストは重い回帰テスト2件で約3分半かかるため、push時・差分判定不能時を除きスキップされる）、`security`（bandit + pip-audit、ブロックするのはbanditのHigh severityのみ）、`frontend`（`family-quest` で `npm ci && npm run build && npm test`、つまり `tsc -b` によるTSの型チェックとVitestがゲートになっている）。もう2つのワークフロー（`spec-drift-pr-check.yml`、`spec-drift-weekly-audit.yml`）は `.github/scripts/check_spec_drift.py` を実行するが、検知結果に関わらず**常に非ブロッキング**（exit 0）である。
+4つの独立したジョブがある: `lint`（`MY_HOME_SYSTEM`・`DDD`両方にruffを実行、PRをブロックするのは `F821,F822,F823,E9` のみ）、`test`（`MY_HOME_SYSTEM` のpytest + カバレッジ、`--cov-fail-under=45`。続けて `DDD` のpytestも実行するが、こちらはPRの差分に `DDD/**` が含まれる場合のみ。DDDテストは重い回帰テスト2件で約3分半かかるため、push時・差分判定不能時を除きスキップされる）、`security`（bandit + pip-audit、ブロックするのはbanditのHigh severityのみ）、`frontend`（`family-quest` で `npm ci && npm run build && npm test`、つまり `tsc -b` によるTSの型チェックとVitestがゲートになっている）。もう2つのワークフロー（`spec-drift-pr-check.yml`、`spec-drift-weekly-audit.yml`）は `.github/scripts/check_spec_drift.py` を実行するが、検知結果に関わらず**常に非ブロッキング**（exit 0）である。`pip-audit-weekly-audit.yml` は `security` ジョブの pip-audit と同じ対象（`MY_HOME_SYSTEM/requirements.txt`）を週次で監査し、検知が1件以上あれば `pip-audit-audit` ラベルのIssueを自動起票/更新する（Issue #324: PRのCIを常時安定させるため、pip-audit自体はブロッキング化せず定期監査Issue方式を採用）。
 
 ## アーキテクチャ
 
