@@ -25,6 +25,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): 既定の360分ではハング時にActionsを浪費するため上限を設ける
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -74,6 +76,8 @@ jobs:
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): pytest約1分 + DDDテスト約3分半 + インストール時間に対して十分な余裕
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -181,6 +185,7 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # C-L1 (Issue #414)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -244,6 +249,7 @@ jobs:
   frontend:
     name: Frontend Build (family-quest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # C-L1 (Issue #414)
     defaults:
       run:
         working-directory: ./family-quest

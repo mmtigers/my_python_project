@@ -26,6 +26,8 @@ jobs:
   review:
     name: Claude PR review
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): LLMレビューが応答待ちで固まった場合の上限
+    timeout-minutes: 30
     if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
