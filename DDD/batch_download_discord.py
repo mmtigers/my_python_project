@@ -175,6 +175,12 @@ class AppConfig:
     # (未設定時は従来通り20秒=自宅ラズパイ側の挙動は変わらない)。
     REQUEST_TIMEOUT: int = int(os.getenv("DDD_REQUEST_TIMEOUT", "20"))
     MAX_RETRIES: int = 3
+    # #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒
+    # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで
+    # 数GBのダウンロードが丸ごと破棄されるのを防ぐ。BotDetectionError は
+    # リトライ対象外(即座にセッション中断)。
+    SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3
+    SEGMENT_RETRY_BASE_DELAY: float = 1.0
 
     # 【追加】ボット検知/レート制限対策
     # タスク間隔: 固定秒数だと機械的なアクセスパターンとして検知されやすいため、
@@ -787,7 +793,11 @@ class ScrapingStrategy(DownloadStrategy):
 
     _FRAGMENT_DOWNLOAD_WORKERS = 5
 
-    def _download_segment(self, url: str, page_url: str) -> bytes:
+    def _fetch_segment_once(self, url: str, page_url: str) -> bytes:
+        """1個のHLSセグメントをcurl_cffi(ブラウザ偽装)で1回だけ取得する。
+
+        リトライは行わない(_download_segment側で行う)。
+        """
         import curl_cffi.requests as curl_requests
 
         res = curl_requests.get(
@@ -800,6 +810,36 @@ class ScrapingStrategy(DownloadStrategy):
             raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")
         res.raise_for_status()
         return res.content
+
+    def _download_segment(self, url: str, page_url: str) -> bytes:
+        """1個のHLSセグメントを、指数バックオフ付きリトライで取得する。
+
+        #397: 以前はcurl_cffiを1回呼ぶだけで、数千セグメント中1つの一時的な
+        タイムアウト(低速回線ではREQUEST_TIMEOUTのコメントどおり起こりうる)で
+        例外→finallyのrmtreeで全フラグメント削除→連続失敗カウント加算、
+        3回で実行中断、という形で数GBのダウンロードが丸ごと破棄されていた。
+        SEGMENT_DOWNLOAD_MAX_ATTEMPTS 回まで、SEGMENT_RETRY_BASE_DELAY * 2^n 秒
+        待って再試行する。BotDetectionError(403/429/503)はIP単位のブロックで
+        あり再試行しても悪化させるだけなのでリトライせず即座に伝播させる。
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS + 1):
+            try:
+                return self._fetch_segment_once(url, page_url)
+            except BotDetectionError:
+                raise
+            except Exception as e:
+                last_exc = e
+                if attempt >= CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS:
+                    break
+                delay = CONFIG.SEGMENT_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    f"⚠️ セグメント取得に失敗しました ({attempt}/{CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS}): "
+                    f"{e}。{delay:.1f}秒後に再試行します: {url}"
+                )
+                time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def _download_segments_and_localize_manifest(
         self, localized_manifest: str, page_url: str, tmp_dir: Path

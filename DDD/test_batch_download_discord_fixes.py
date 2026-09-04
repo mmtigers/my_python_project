@@ -233,6 +233,64 @@ class TestCollectTasksListFileReadFailureIsProtected:
         assert any("リスト読み込みエラー" in r.message for r in caplog.records)
 
 
+class TestScrapingStrategySegmentRetry:
+    """#397: セグメント取得に指数バックオフ付きリトライがあり、1セグメントの
+    一時失敗で数GBのダウンロードが丸ごと破棄されないこと。BotDetectionError は
+    リトライせず即座に伝播すること。"""
+
+    def _strategy(self, monkeypatch, side_effects):
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        calls = []
+
+        def _fake_fetch_once(url, page_url):
+            calls.append(url)
+            effect = side_effects[len(calls) - 1]
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+
+        monkeypatch.setattr(strategy, "_fetch_segment_once", _fake_fetch_once)
+        sleeps = []
+        monkeypatch.setattr(module.time, "sleep", lambda s: sleeps.append(s))
+        return strategy, calls, sleeps
+
+    def test_transient_failure_is_retried_with_exponential_backoff(self, monkeypatch):
+        strategy, calls, sleeps = self._strategy(
+            monkeypatch, [TimeoutError("timed out"), ConnectionError("reset"), b"segment"]
+        )
+
+        result = strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert result == b"segment"
+        assert len(calls) == 3
+        assert sleeps == [
+            module.CONFIG.SEGMENT_RETRY_BASE_DELAY,
+            module.CONFIG.SEGMENT_RETRY_BASE_DELAY * 2,
+        ]
+
+    def test_gives_up_after_max_attempts_and_raises_last_error(self, monkeypatch):
+        attempts = module.CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS
+        strategy, calls, _ = self._strategy(
+            monkeypatch, [TimeoutError(f"timeout {i}") for i in range(attempts)]
+        )
+
+        with pytest.raises(TimeoutError, match=f"timeout {attempts - 1}"):
+            strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert len(calls) == attempts
+
+    def test_bot_detection_is_not_retried(self, monkeypatch):
+        strategy, calls, sleeps = self._strategy(
+            monkeypatch, [module.BotDetectionError("HTTP 403"), b"never"]
+        )
+
+        with pytest.raises(module.BotDetectionError):
+            strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert len(calls) == 1
+        assert sleeps == []
+
+
 class TestScrapingStrategyFragmentStaging:
     """missavのHLSフラグメント(数千個の小ファイル)を、NASの保存先ディレクトリ
     ではなくローカルディスク(CONFIG.LOCAL_TMP_DIR)へ一時保存することを確認する

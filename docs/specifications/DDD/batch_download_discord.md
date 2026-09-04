@@ -125,6 +125,10 @@
 * 根拠: [AppConfigクラスとNAS関連フィールドのコメント] (行番号: 135〜136, 151〜153, 154〜166, 167〜169 / 抜粋: "@dataclass(frozen=True)\nclass AppConfig:", "REQUIRE_NAS_MOUNT: bool = os.getenv("DDD_REQUIRE_NAS_MOUNT", "true").lower() == "true"", "LOCAL_TMP_DIR: Path = Path(os.getenv("DDD_LOCAL_TMP_DIR", str(CURRENT_DIR / "tmp_fragments")))", "LOCAL_TMP_MIN_FREE_SPACE_GB: int = int(os.getenv("DDD_LOCAL_TMP_MIN_FREE_SPACE_GB", "10"))")
 
 
+* **（Issue #397で追加）`SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3` / `SEGMENT_RETRY_BASE_DELAY: float = 1.0`について**: `ScrapingStrategy._download_segment`がHLSセグメント1個あたりに行う取得試行回数と、リトライ前の初回待機秒（指数バックオフで1秒→2秒）。数千セグメント中1つの一時的なタイムアウトで数GBのダウンロードが丸ごと破棄されるのを防ぐ。`BotDetectionError`はリトライ対象外。
+* 根拠: [定数定義とコメント] (行番号: 178〜183 / 抜粋: "# #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒\n    # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで\n    # 数GBのダウンロードが丸ごと破棄されるのを防ぐ。BotDetectionError は\n    # リトライ対象外(即座にセッション中断)。\n    SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3\n    SEGMENT_RETRY_BASE_DELAY: float = 1.0")
+
+
 * **引数/リクエスト**: なし（フィールドはデフォルト値、環境変数、または`_resolve_cookies_file`の呼び出し結果から初期化される）
 * 根拠: [各フィールド定義] (行番号: 137〜237 / 抜粋: "RESTRICT_TIME: bool = not FORCE_MODE")
 
@@ -676,26 +680,48 @@
 * **エラーハンドリング**: なし
 
 
-### `ScrapingStrategy._download_segment`
+### `ScrapingStrategy._fetch_segment_once`（Issue #397で追加）
 
-* **役割**: 1個のHLSセグメントを`curl_cffi`によるブラウザ偽装(`impersonate="chrome"`)付きで自前ダウンロードするインスタンスメソッド。`yt-dlp`自身の"requests"ネットワークハンドラは独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequestsとは異なり、WAFに403でブロックされ続けることを実機検証で確認したため、セグメント取得も本メソッド経由で行う（詳細な検証根拠は`_download_segments_and_localize_manifest`のDocstring参照）。
-* 根拠: [_download_segment] (行番号: 643〜655 / 抜粋: "def _download_segment(self, url: str, page_url: str) -> bytes:")
+* **役割**: 1個のHLSセグメントを`curl_cffi`によるブラウザ偽装(`impersonate="chrome"`)付きで**1回だけ**取得するインスタンスメソッド（旧`_download_segment`の本体をそのまま切り出したもの。リトライは行わず`_download_segment`側で行う）。`yt-dlp`自身の"requests"ネットワークハンドラは独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequestsとは異なり、WAFに403でブロックされ続けることを実機検証で確認したため、セグメント取得も本メソッド経由で行う（詳細な検証根拠は`_download_segments_and_localize_manifest`のDocstring参照）。
+* 根拠: [_fetch_segment_once] (行番号: 796〜812 / 抜粋: "def _fetch_segment_once(self, url: str, page_url: str) -> bytes:\n        \"\"\"1個のHLSセグメントをcurl_cffi(ブラウザ偽装)で1回だけ取得する。\n\n        リトライは行わない(_download_segment側で行う)。")
 
 
 * **引数/リクエスト**: `url: str`（セグメントの絶対URL）, `page_url: str`（Refererヘッダー設定用）
-* 根拠: [引数定義] (行番号: 643 / 抜粋: "def _download_segment(self, url: str, page_url: str) -> bytes:")
+* 根拠: [引数定義] (行番号: 796 / 抜粋: "def _fetch_segment_once(self, url: str, page_url: str) -> bytes:")
 
 
 * **戻り値/レスポンス**: `bytes`（セグメントのバイナリ本体）
-* 根拠: [戻り値ヒントとreturn文] (行番号: 643, 655 / 抜粋: "def _download_segment(self, url: str, page_url: str) -> bytes:", "return res.content")
+* 根拠: [戻り値ヒントとreturn文] (行番号: 796, 812 / 抜粋: "return res.content")
 
 
 * **副作用**: `curl_cffi.requests`の遅延インポート（`try-except`によるガードなし）、対象セグメントURLへのHTTP GETリクエスト。
-* 根拠: [遅延importとHTTPリクエスト] (行番号: 644, 646〜651 / 抜粋: "import curl_cffi.requests as curl_requests")
+* 根拠: [遅延importとHTTPリクエスト] (行番号: 801, 803〜808 / 抜粋: "import curl_cffi.requests as curl_requests")
 
 
-* **エラーハンドリング**: ステータスコードがボット検知/レート制限系（403/429/503）の場合は`BotDetectionError`を送出する。`raise_for_status`によるその他のHTTPエラーはそのまま呼び出し元（`_download_segments_and_localize_manifest`の`ThreadPoolExecutor`ワーカー）へ伝播する（本メソッド内での例外の捕捉はない）。
-* 根拠: [ボット検知チェック] (行番号: 652〜654 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n            raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")\n        res.raise_for_status()")
+* **エラーハンドリング**: ステータスコードがボット検知/レート制限系（403/429/503）の場合は`BotDetectionError`を送出する。`raise_for_status`によるその他のHTTPエラーはそのまま呼び出し元（`_download_segment`）へ伝播する（本メソッド内での例外の捕捉はない）。
+* 根拠: [ボット検知チェック] (行番号: 809〜811 / 抜粋: "if res.status_code in CONFIG.SCRAPING_BLOCK_STATUS_CODES:\n            raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")\n        res.raise_for_status()")
+
+
+### `ScrapingStrategy._download_segment`（Issue #397で変更）
+
+* **役割**: 1個のHLSセグメントを、`_fetch_segment_once`を指数バックオフ付きで最大`CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS`（3）回試行して取得するインスタンスメソッド。**（Issue #397で修正）** 以前は`curl_cffi`を1回呼ぶだけで、数千セグメント中1つの一時的なタイムアウト（低速回線では`REQUEST_TIMEOUT`のコメントどおり起こりうる）で例外→`_download_with_ytdlp`の`finally`による`tmp_dir`全削除→連続失敗カウント加算、3回で実行中断、という形で数GBのダウンロードが丸ごと破棄されていた。再開機構も無いため、リトライを本メソッドに追加した。
+* 根拠: [_download_segmentとDocstring] (行番号: 814〜842 / 抜粋: "def _download_segment(self, url: str, page_url: str) -> bytes:\n        \"\"\"1個のHLSセグメントを、指数バックオフ付きリトライで取得する。\n\n        #397: 以前はcurl_cffiを1回呼ぶだけで、数千セグメント中1つの一時的な\n        タイムアウト(低速回線ではREQUEST_TIMEOUTのコメントどおり起こりうる)で\n        例外→finallyのrmtreeで全フラグメント削除→連続失敗カウント加算、\n        3回で実行中断、という形で数GBのダウンロードが丸ごと破棄されていた。")
+
+
+* **引数/リクエスト**: `url: str`（セグメントの絶対URL）, `page_url: str`（Refererヘッダー設定用）
+* 根拠: [引数定義] (行番号: 814 / 抜粋: "def _download_segment(self, url: str, page_url: str) -> bytes:")
+
+
+* **戻り値/レスポンス**: `bytes`（セグメントのバイナリ本体。いずれかの試行で`_fetch_segment_once`が成功した時点の内容）
+* 根拠: [戻り値ヒントとreturn文] (行番号: 814, 828 / 抜粋: "return self._fetch_segment_once(url, page_url)")
+
+
+* **副作用**: `_fetch_segment_once`の呼び出し（HTTP GET）。失敗時は警告ログ（試行回数・待機秒・URLを含む）を出力し、`CONFIG.SEGMENT_RETRY_BASE_DELAY * 2^(attempt-1)`秒（1秒→2秒）の`time.sleep`を挟んで再試行する。
+* 根拠: [リトライループ] (行番号: 826〜840 / 抜粋: "for attempt in range(1, CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS + 1):" / "delay = CONFIG.SEGMENT_RETRY_BASE_DELAY * (2 ** (attempt - 1))" / "time.sleep(delay)")
+
+
+* **エラーハンドリング**: `BotDetectionError`（403/429/503）はIP単位のブロックであり再試行しても悪化させるだけなので、リトライせず即座に再送出する（`_download_segments_and_localize_manifest`経由でセッション中断へつながる）。それ以外の`Exception`（タイムアウト・接続断・`raise_for_status`のHTTPエラー等）は最大試行回数まで再試行し、尽きた場合は最後に発生した例外をそのまま送出する。
+* 根拠: [except節と最終raise] (行番号: 829〜833, 841〜842 / 抜粋: "except BotDetectionError:\n                raise\n            except Exception as e:\n                last_exc = e\n                if attempt >= CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS:\n                    break" / "assert last_exc is not None\n        raise last_exc")
 
 
 ### `ScrapingStrategy._download_segments_and_localize_manifest`
