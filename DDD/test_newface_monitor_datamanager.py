@@ -21,6 +21,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
 
@@ -111,6 +113,85 @@ class TestLoadKnownCastsCorruption:
         result = dm.load_known_casts(site)
 
         assert result == {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
+
+
+class TestLoadKnownCastsContentErrorsAreQuarantined:
+    """Issue #365: 隔離(.corrupted-*)は内容起因の失敗(JSONDecodeError/
+    UnicodeDecodeError/TypeError/KeyError)に限られること。"""
+
+    def test_json_syntax_error_is_quarantined_and_returns_empty_set(self, tmp_path):
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        data_file.write_text('[{"id": "1", "name": "truncated', encoding="utf-8")
+
+        assert dm.load_known_casts(site) == set()
+        assert not data_file.exists()
+        assert len(list(tmp_path.glob(f"{data_file.name}.corrupted-*"))) == 1
+
+    def test_schema_mismatch_type_error_is_quarantined(self, tmp_path):
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        # CastMember(**item) が受け付けないキー → TypeError
+        data_file.write_text('[{"unexpected_field": 1}]', encoding="utf-8")
+
+        assert dm.load_known_casts(site) == set()
+        assert not data_file.exists()
+        assert len(list(tmp_path.glob(f"{data_file.name}.corrupted-*"))) == 1
+
+
+class TestLoadKnownCastsTransientIOErrorIsNotQuarantined:
+    """Issue #365 (D-H2) の回帰テスト。
+
+    以前は _LOAD_ERRORS(OSError含む)を捕捉した後、種別を問わず
+    data_file.rename(quarantine_path) していたため、CIFS/autofs の瞬断
+    (EIO/ENOENT/ETIMEDOUT)で open() が失敗しただけで中身が正しいファイルが
+    .corrupted-* に退避され、.bak が無ければ空集合→全キャスト再通知、
+    以降は union 保存されるため隔離前のデータ(退店済み含む)が永久に
+    戻らなかった。OSError はログのみ出して当該サイトをスキップすること。
+    """
+
+    @staticmethod
+    def _raise_eio(_path):
+        raise OSError(5, "Input/output error")
+
+    def test_os_error_raises_known_casts_unavailable_and_keeps_file(self, tmp_path, monkeypatch):
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        original = '[{"id": "1", "name": "Alice", "detail_url": "u", "image_url": "i", "age": "20"}]'
+        data_file.write_text(original, encoding="utf-8")
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(self._raise_eio))
+
+        with pytest.raises(module.KnownCastsUnavailableError):
+            dm.load_known_casts(site)
+
+        # 正常なファイルが隔離されず、そのまま残っていること
+        assert data_file.exists()
+        assert data_file.read_text(encoding="utf-8") == original
+        assert list(tmp_path.glob(f"{data_file.name}.corrupted-*")) == []
+
+    def test_check_site_skips_fetch_notify_and_save_on_io_error(self, tmp_path, monkeypatch):
+        """_check_site は I/O エラー時に空集合で続行せず、巡回・通知・保存の
+        いずれも行わずに当該サイトをスキップすること。"""
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        data_file.write_text('[{"id": "1", "name": "Alice", "detail_url": "u", "image_url": "i"}]', encoding="utf-8")
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(self._raise_eio))
+
+        monitor = MagicMock()
+        notifier = MagicMock()
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+
+        module._check_site(monitor, notifier, site, dm)
+
+        monitor.fetch_current_casts.assert_not_called()
+        notifier.notify.assert_not_called()
+        mock_save.assert_not_called()
+        assert data_file.exists()
 
 
 class TestSaveKnownCastsBackup:

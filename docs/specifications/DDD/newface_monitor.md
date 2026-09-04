@@ -450,11 +450,21 @@
 ### `DataManager._LOAD_ERRORS` (クラス定数)
 
 * **役割**: JSONファイルの読み込み失敗とみなす例外群をまとめたクラス定数。`UnicodeDecodeError`は`IOError`/`OSError`のサブクラスではなく`ValueError`のサブクラスであるため、`IOError`のみを捕捉する実装では非UTF-8データによる破損（例:「'utf-8' codec can't decode byte ... : invalid start byte」）を検知できず、同一の破損ファイルへの読み込み失敗が繰り返され続けてしまう問題を踏まえ、`OSError`, `ValueError`, `TypeError`, `KeyError`をまとめて捕捉対象としている。`load_known_casts`（`_read_casts_file`経由）に加え、**Issue #174の修正**により`load_daily_summary`もこの定数で例外を捕捉するようになった（以前は`load_daily_summary`のみ`(json.JSONDecodeError, IOError)`という狭いパターンのままで同種のバグが残っていた）。
-* 根拠: [定義とコメント] (行番号: 1431〜1435 / 抜粋: "# 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく\n    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる\n    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を\n    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。\n    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)")
+* 根拠: [定義とコメント] (行番号: 1536〜1540 / 抜粋: "# 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく\n    # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる\n    # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を\n    # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。\n    _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)")
 
 
 * **副作用**: なし（タプルの定義のみ）
 * **エラーハンドリング**: 該当なし（例外を捕捉する側で使われる定数そのもの）
+
+
+### `DataManager._CONTENT_ERRORS` (クラス定数) / `KnownCastsUnavailableError`（Issue #365で追加）
+
+* **役割**: `_CONTENT_ERRORS = (ValueError, TypeError, KeyError)`は、`_LOAD_ERRORS`のうち「ファイルの内容そのものが壊れている」ことを示す例外群（`json.JSONDecodeError`/`UnicodeDecodeError`は`ValueError`のサブクラス、`CastMember(**item)`の引数不一致は`TypeError`/`KeyError`）。`load_known_casts`が破損ファイルとして`.corrupted-*`へ隔離してよいのはこれらに限られ、`OSError`（CIFS/autofsの瞬断によるEIO/ENOENT/ETIMEDOUT等）は「内容が正しいファイルを開けなかっただけ」なので隔離しない。`KnownCastsUnavailableError`（`Exception`のサブクラス）は、その`OSError`ケースを呼び出し元（`_check_site`）へ伝えて当該サイトの巡回を今回の実行ではスキップさせるためのモジュールレベル例外。以前は種別を問わず隔離していたため、一時的なI/Oエラーで正常なファイルが退避され、`.bak`が無ければ空集合→全キャスト再通知、以降はunion保存されるため隔離前のデータ（退店済み含む）が永久に戻らなかった。
+* 根拠: [KnownCastsUnavailableError定義と_CONTENT_ERRORSのコメント] (行番号: 1515〜1521, 1542〜1548 / 抜粋: "class KnownCastsUnavailableError(Exception):\n    \"\"\"既知キャストファイルが存在するのにI/Oエラーで読めなかったことを示す例外(#365)。" / "# #365: このうち「ファイルの内容そのものが壊れている」ことを示す例外群。" / "_CONTENT_ERRORS = (ValueError, TypeError, KeyError)")
+
+
+* **副作用**: なし（定義のみ）
+* **エラーハンドリング**: 該当なし
 
 
 ### `DataManager._read_casts_file`
@@ -481,24 +491,24 @@
 
 ### `DataManager.load_known_casts`
 
-* **役割**: 指定サイトの保存済みキャストデータ(`self._data_file(site)`。**Issue #364**以前は呼び出しのたびにNAS状態を再評価する`MonitorConfig.get_data_file(site)`だった)を`_read_casts_file`経由でJSONファイルから読み込み、`CastMember`の集合として返すインスタンスメソッド。読み込みに失敗した場合、単純に空集合を返すのではなく、(1)破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離することで同じ破損ファイルへの読み込み失敗が繰り返され続けるのを防ぎ、(2)`.bak`バックアップファイルが存在すればそこからの復旧を試み、(3)復旧にも失敗した場合にのみ空集合へフォールバックする、という多段の復旧ロジックを持つ。
-* 根拠: [メソッド定義とDocstring] (行番号: 1556〜1564 / 抜粋: "def load_known_casts(self, site: SiteConfig) -> Set[CastMember]:\n        """指定サイトの保存済みキャストデータを読み込む。")
+* **役割**: 指定サイトの保存済みキャストデータ(`self._data_file(site)`。**Issue #364**以前は呼び出しのたびにNAS状態を再評価する`MonitorConfig.get_data_file(site)`だった)を`_read_casts_file`経由でJSONファイルから読み込み、`CastMember`の集合として返すインスタンスメソッド。**（Issue #365で変更）** 内容起因の読み込み失敗（`_CONTENT_ERRORS`）の場合のみ、単純に空集合を返すのではなく、(1)破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離することで同じ破損ファイルへの読み込み失敗が繰り返され続けるのを防ぎ、(2)`.bak`バックアップファイルが存在すればそこからの復旧を試み、(3)復旧にも失敗した場合にのみ空集合へフォールバックする、という多段の復旧ロジックを持つ。一方、ファイルは存在するが`OSError`（NAS/CIFSの瞬断等）で読めなかった場合は隔離もフォールバックもせず、`KnownCastsUnavailableError`を送出して呼び出し元に当該サイトのスキップを求める。
+* 根拠: [メソッド定義とDocstring] (行番号: 1574〜1590 / 抜粋: "def load_known_casts(self, site: SiteConfig) -> Set[CastMember]:\n        """指定サイトの保存済みキャストデータを読み込む。" / "Raises:\n            KnownCastsUnavailableError: ファイルは存在するがI/Oエラー(OSError)で\n                読めなかった場合。呼び出し元は当該サイトの処理をスキップすること")
 
 
 * **引数/リクエスト**: `site: SiteConfig`
-* 根拠: [引数定義とDocstring] (行番号: 1448, 1452 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
+* 根拠: [引数定義とDocstring] (行番号: 1574, 1577〜1578 / 抜粋: "site (SiteConfig): 対象サイトの設定。")
 
 
-* **戻り値/レスポンス**: `Set[CastMember]`（ファイル不在時、または破損＋`.bak`バックアップからの復旧も失敗した場合は空集合）
-* 根拠: [Docstringと各return] (行番号: 1454〜1456, 1460, 1463, 1487, 1492 / 抜粋: "Returns:\n            Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。")
+* **戻り値/レスポンス**: `Set[CastMember]`（ファイル不在時、または内容破損＋`.bak`バックアップからの復旧も失敗した場合は空集合）。`OSError`時は戻り値を返さず`KnownCastsUnavailableError`を送出する。
+* 根拠: [Docstringと各return/raise] (行番号: 1580〜1588, 1594, 1608〜1610, 1632, 1637 / 抜粋: "Returns:\n            Set[CastMember]: 既知のキャストの集合。内容起因の読み込み失敗時は\n                隔離・バックアップ復旧を試み、それも不可なら空集合を返す。" / "raise KnownCastsUnavailableError(")
 
 
 * **副作用**: `DataManager._read_casts_file`経由でのJSONファイル読み込み、デバッグ/エラー/警告ログ出力。読み込み失敗時は破損ファイルのリネーム(`data_file.rename(quarantine_path)`)、`.bak`バックアップファイルが存在する場合はその読み込み。
 * 根拠: [処理内容] (行番号: 1565, 1577〜1579, 1581, 1588, 1591 / 抜粋: "data_file = self._data_file(site)" / "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )" / "data_file.rename(quarantine_path)" / "backup_file = data_file.with_suffix(data_file.suffix + '.bak')" / "casts = DataManager._read_casts_file(backup_file)")
 
 
-* **エラーハンドリング**: データファイルが存在しない場合はデバッグログを出力し空集合を返す。`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）発生時は`exc_info=True`付きでエラーログを出力したうえで、破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離する（リネーム自体が`OSError`で失敗した場合も`exc_info=True`付きでエラーログを出力するのみで処理は継続）。続けて`.bak`バックアップファイルが存在すれば`_read_casts_file`で読み込みを試み、成功すれば復旧件数を警告ログに出力してそれを返す（バックアップも`DataManager._LOAD_ERRORS`で失敗した場合は`exc_info=True`付きでエラーログを出力）。バックアップが存在しない、またはバックアップも読み込めない場合は、コメントに明記の通り「データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）」として空集合を返す。**（本PRで修正）** これら3箇所のエラーログはいずれも例外オブジェクト`e`をメッセージに含めていたが以前は`exc_info=True`が付いておらず、ファイル内の他の同種例外ログ（`save_known_casts`等）との一貫性が無かった。
-* 根拠: [try-exceptブロックと隔離・復旧処理] (行番号: 1499〜1500, 1502〜1503, 1510〜1511, 1513〜1514, 1523〜1524, 1526〜1527 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)" / "# 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける\n        # ため、退避してから復旧を試みる。" / "except OSError as e:\n            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}", exc_info=True)" / "# 直近の正常データがバックアップとして残っていれば、そこから復旧する\n        # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。" / "except DataManager._LOAD_ERRORS as e:\n                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)" / "# データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）\n        return set()")
+* **エラーハンドリング**: データファイルが存在しない場合はデバッグログを出力し空集合を返す。**（Issue #365で変更）** `_read_casts_file`が`OSError`を送出した場合（CIFS/autofsの瞬断によるEIO/ENOENT/ETIMEDOUT等。`wait_for_storage_warmup`のDocstring自体が想定している事象）は、`exc_info=True`付きでエラーログを出力したうえで**ファイルを隔離せず**`KnownCastsUnavailableError`を送出する（以前は`_LOAD_ERRORS`として`OSError`も一括で捕捉し、種別を問わず隔離していた）。`DataManager._CONTENT_ERRORS`（`ValueError`, `TypeError`, `KeyError`）発生時は`exc_info=True`付きでエラーログを出力したうえで、破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離する（リネーム自体が`OSError`で失敗した場合も`exc_info=True`付きでエラーログを出力するのみで処理は継続）。続けて`.bak`バックアップファイルが存在すれば`_read_casts_file`で読み込みを試み、成功すれば復旧件数を警告ログに出力してそれを返す（バックアップも`DataManager._LOAD_ERRORS`で失敗した場合は`exc_info=True`付きでエラーログを出力）。バックアップが存在しない、またはバックアップも読み込めない場合は、コメントに明記の通り「データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）」として空集合を返す。**（本PRで修正）** これら3箇所のエラーログはいずれも例外オブジェクト`e`をメッセージに含めていたが以前は`exc_info=True`が付いておらず、ファイル内の他の同種例外ログ（`save_known_casts`等）との一貫性が無かった。
+* 根拠: [try-exceptブロックと隔離・復旧処理] (行番号: 1596〜1614, 1616〜1617, 1622〜1623, 1625〜1626, 1633〜1634, 1636〜1637 / 抜粋: "except OSError as e:\n            # #365: CIFS/autofsの瞬断(EIO/ENOENT/ETIMEDOUT等。wait_for_storage_warmupの\n            # docstring自体が想定している事象)でopen()が失敗しただけのケース。\n            # 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる" / "raise KnownCastsUnavailableError(" / "except DataManager._CONTENT_ERRORS as e:\n            logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)" / "# 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける\n        # ため、退避してから復旧を試みる(内容起因の破損に限る。#365)。" / "except OSError as e:\n            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}", exc_info=True)" / "# 直近の正常データがバックアップとして残っていれば、そこから復旧する\n        # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。" / "except DataManager._LOAD_ERRORS as e:\n                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)" / "# データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）\n        return set()")
 
 
 ### `DataManager.save_known_casts`
@@ -751,8 +761,8 @@
 * 根拠: [メイン処理フローと大量検知時の警告] (行番号: 2113, 2142〜2147 / 抜粋: "known_casts = data_manager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時unionでの保存 (行番号: 2155, 2163 / 抜粋: "updated_casts = known_casts.union(current_casts)" / "data_manager.save_known_casts(site, updated_casts)")
 
 
-* **エラーハンドリング**: `monitor.fetch_current_casts`での`requests.RequestException`発生時は`_handle_site_network_failure`に処理を委譲して`return`（当該サイトのみ中断、他サイトへは影響しない。失敗回数の記録・閾値到達時のDiscordアラート・ログレベルの決定は委譲先が行う）。**（2026-09-02のbellica閉鎖対応で変更）** 取得成功時（`fetch_current_casts`が例外を送出しなかった時点）には`data_manager.clear_site_failure`で連続失敗状態を解消する。この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因であり、閉鎖疑いを判定する疎通不能とは区別される（従来どおりデバッグログを出力して`return`）。
-* 根拠: [try-exceptと疎通成功時のクリア] (行番号: 2116〜2125 / 抜粋: "except requests.RequestException as e:\n        _handle_site_network_failure(notifier, site, e, data_manager)\n        return\n\n    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する\n    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で\n    # あり、閉鎖疑いを判定する疎通不能とは区別する)\n    data_manager.clear_site_failure(site.site_id)")
+* **エラーハンドリング**: **（Issue #365で追加）** `data_manager.load_known_casts`が`KnownCastsUnavailableError`（既知キャストファイルは存在するがI/Oエラーで読めない）を送出した場合はWARNINGログ（「Skipping site ... because known casts are unavailable」）を出力し、巡回（`fetch_current_casts`）・通知・保存のいずれも行わず`return`する（空集合で続行すると全キャストの再通知と、union保存による退店済みキャストの復活を招くため）。`monitor.fetch_current_casts`での`requests.RequestException`発生時は`_handle_site_network_failure`に処理を委譲して`return`（当該サイトのみ中断、他サイトへは影響しない。失敗回数の記録・閾値到達時のDiscordアラート・ログレベルの決定は委譲先が行う）。**（2026-09-02のbellica閉鎖対応で変更）** 取得成功時（`fetch_current_casts`が例外を送出しなかった時点）には`data_manager.clear_site_failure`で連続失敗状態を解消する。この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因であり、閉鎖疑いを判定する疎通不能とは区別される（従来どおりデバッグログを出力して`return`）。
+* 根拠: [KnownCastsUnavailableErrorによるスキップ] (行番号: 2152〜2160 / 抜粋: "except KnownCastsUnavailableError as e:\n        # #365: I/Oエラーで既知キャストが読めない場合、空集合で続行すると\n        # 全キャストの再通知と退店済みキャストの復活(union保存)を招くため、\n        # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする" / "logger.warning(f\"Skipping site '{site.site_id}' because known casts are unavailable: {e}\")\n        return")、[try-exceptと疎通成功時のクリア] (行番号: 2163〜2172 / 抜粋: "except requests.RequestException as e:\n        _handle_site_network_failure(notifier, site, e, data_manager)\n        return\n\n    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する\n    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で\n    # あり、閉鎖疑いを判定する疎通不能とは区別する)\n    data_manager.clear_site_failure(site.site_id)")
 
 
 ### `_maybe_send_daily_summary`
@@ -869,6 +879,7 @@ flowchart TD
 
     SiteLoopStart --> CheckSite["外部：_check_site(monitor, notifier, site, data_manager)"]
     CheckSite --> LoadKnown["外部：data_manager.load_known_casts(site)"]
+    LoadKnown -- "KnownCastsUnavailableError<br>(#365: I/Oエラー)" --> SkipSite["WARNINGログ出力<br>巡回・通知・保存を行わず当該サイトをスキップ"] --> NextSite
     LoadKnown --> Fetch["外部：monitor.fetch_current_casts(site)"]
 
     Fetch -- "requests.RequestException" --> HandleFail["外部：_handle_site_network_failure<br>(失敗回数を記録)"]
@@ -908,7 +919,8 @@ flowchart TD
         LExists -- No --> LEmpty1["デバッグログ出力<br>空集合を返す"]
         LExists -- Yes --> LRead["_read_casts_file(data_file)"]
         LRead -- 成功 --> LReturn["読み込んだSet[CastMember]を返す"]
-        LRead -- "_LOAD_ERRORS<br>(OSError/ValueError/TypeError/KeyError)" --> LErrLog["エラーログ出力"]
+        LRead -- "OSError<br>(NAS/CIFS瞬断等のI/Oエラー)" --> LIoErr["エラーログ出力<br>隔離せず KnownCastsUnavailableError を送出<br>(#365: _check_siteが当該サイトをスキップ)"]
+        LRead -- "_CONTENT_ERRORS<br>(ValueError/TypeError/KeyError)" --> LErrLog["エラーログ出力"]
         LErrLog --> LQuarantine["破損ファイルを<br>name.corrupted-timestamp へrename<br>(隔離。失敗してもログのみで継続)"]
         LQuarantine --> LBakExists{".bakファイルが存在?"}
         LBakExists -- No --> LEmpty2["空集合を返す<br>(安全側フォールバック)"]
@@ -1045,7 +1057,9 @@ graph TD
 * **79サイトを1プロセスで逐次処理する構成**: `run_monitor`は`MonitorConfig.SITES`の全79件を単一プロセス内で順次処理するため、1回の実行時間はサイト数に比例して増大する。各サイト間の待機は`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`のみであり、サイト単位の並列化やレート制限の個別調整は行われていない。
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
-* **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
+* **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
+* 根拠: [OSError分岐のコメント] (行番号: 1596〜1603 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")
+* **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は内容起因の読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
 * 根拠: [load_known_castsの隔離処理] (行番号: 1469〜1471 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")
 * **（Issue #174で一部解消・一部残存）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消された。ただし`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みは`load_daily_summary`/`save_daily_summary`には無いままであり、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされる（読み込み失敗時に`load_daily_summary`が返す空辞書に対し`record_daily_new_casts`が新規`counts`辞書を作成するため）。これは「無限反復の停止」を優先した最小修正であり、日次サマリの集計データ自体の耐障害性向上は本Issueのスコープ外。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。ファイル破損時のみ、上記の理由でカウントが失われうる。
 * 根拠: [load_daily_summaryの#174修正] (行番号: 1562〜1570), [record_daily_new_castsの累積] (行番号: 1615〜1616 / 抜粋: "data = DataManager.load_daily_summary()\n        counts = data.setdefault('counts', {})")

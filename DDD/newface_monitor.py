@@ -1512,6 +1512,15 @@ class DiscordNotifier:
             return False
 
 
+class KnownCastsUnavailableError(Exception):
+    """既知キャストファイルが存在するのにI/Oエラーで読めなかったことを示す例外(#365)。
+
+    内容起因の破損(JSON構文エラー・非UTF-8・フィールド不一致)とは区別し、
+    NAS/CIFSの瞬断等による一時的な読み込み失敗として、当該サイトの巡回を
+    今回の実行ではスキップさせるために用いる。
+    """
+
+
 class DataManager:
     """データの永続化と読み込みを担当するクラス。
 
@@ -1529,6 +1538,14 @@ class DataManager:
     # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を
     # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。
     _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)
+
+    # #365: このうち「ファイルの内容そのものが壊れている」ことを示す例外群。
+    # json.JSONDecodeError / UnicodeDecodeError は ValueError のサブクラス、
+    # CastMember(**item) の引数不一致は TypeError/KeyError として現れる。
+    # load_known_casts が破損ファイルとして隔離(.corrupted-*)してよいのはこれらに
+    # 限られ、OSError(CIFS/autofsの瞬断によるEIO/ENOENT/ETIMEDOUT等)は内容が
+    # 正しいファイルを開けなかっただけなので隔離してはならない。
+    _CONTENT_ERRORS = (ValueError, TypeError, KeyError)
 
     def __init__(self, data_dir: Path):
         """
@@ -1560,7 +1577,14 @@ class DataManager:
             site (SiteConfig): 対象サイトの設定。
 
         Returns:
-            Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。
+            Set[CastMember]: 既知のキャストの集合。内容起因の読み込み失敗時は
+                隔離・バックアップ復旧を試み、それも不可なら空集合を返す。
+
+        Raises:
+            KnownCastsUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合。呼び出し元は当該サイトの処理をスキップすること
+                (空集合で続行すると全キャストの再通知と、union保存による退店済み
+                キャストの復活を招く。#365)。
         """
         data_file = self._data_file(site)
         if not data_file.exists():
@@ -1569,11 +1593,26 @@ class DataManager:
 
         try:
             return DataManager._read_casts_file(data_file)
-        except DataManager._LOAD_ERRORS as e:
+        except OSError as e:
+            # #365: CIFS/autofsの瞬断(EIO/ENOENT/ETIMEDOUT等。wait_for_storage_warmupの
+            # docstring自体が想定している事象)でopen()が失敗しただけのケース。
+            # 中身は正しい可能性が高いため隔離せず、当該サイトの処理を
+            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、
+            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、
+            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。
+            logger.error(
+                f"I/O error while loading data from {data_file}; "
+                f"skipping site '{site.site_id}' for this run: {e}",
+                exc_info=True,
+            )
+            raise KnownCastsUnavailableError(
+                f"{site.site_id}: known casts file is unreadable ({e})"
+            ) from e
+        except DataManager._CONTENT_ERRORS as e:
             logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)
 
         # 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける
-        # ため、退避してから復旧を試みる。
+        # ため、退避してから復旧を試みる(内容起因の破損に限る。#365)。
         quarantine_path = data_file.with_name(
             f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
         )
@@ -2110,7 +2149,15 @@ def _check_site(
     logger.debug(f"--- Checking site '{site.site_id}' ({site.name}) ---")
 
     # 1. Load Data
-    known_casts = data_manager.load_known_casts(site)
+    try:
+        known_casts = data_manager.load_known_casts(site)
+    except KnownCastsUnavailableError as e:
+        # #365: I/Oエラーで既知キャストが読めない場合、空集合で続行すると
+        # 全キャストの再通知と退店済みキャストの復活(union保存)を招くため、
+        # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする
+        # (詳細なERRORログはload_known_casts側で出力済み)。
+        logger.warning(f"Skipping site '{site.site_id}' because known casts are unavailable: {e}")
+        return
 
     # 2. Fetch Data
     try:
