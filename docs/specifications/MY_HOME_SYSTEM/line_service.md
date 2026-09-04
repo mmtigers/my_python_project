@@ -25,27 +25,25 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sqlite3` | 標準ライブラリ | データベース操作 | `import sqlite3` (行番号: 2 / 抜粋: "import sqlite3") |
-| `datetime` | 標準ライブラリ | 日付時刻処理 | `import datetime` (行番号: 3 / 抜粋: "import datetime") |
-| `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
-| `typing` | 標準ライブラリ | 型ヒントの提供。実際に使用されているのは`Union`のみで、`List`, `Tuple`, `Optional`, `Dict`, `Any`はファイル内で使用されていない（未使用インポート） | `from typing import List...` (行番号: 5 / 抜粋: "from typing import List, Tupl...") |
-| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。実際に使用されているのは`TextMessage`と`FlexMessage`のみで、`QuickReply`, `QuickReplyItem`, `MessageAction`はファイル内で使用されていない（未使用インポート） | `from linebot.v3.messaging...` (行番号: 8-14 / 抜粋: "from linebot.v3.messaging imp...") |
-| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 16 / 抜粋: "import config") |
-| `common` | 外部モジュール | DBカーソルの取得等 | `import common` (行番号: 17 / 抜粋: "import common") |
-| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 18 / 抜粋: "from core.logger import setup...") |
-| `core.utils` | 外部モジュール | 時刻や日付文字列の取得 | `from core.utils import...` (行番号: 19 / 抜粋: "from core.utils import get_no...") |
-| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 20 / 抜粋: "from core.database import sav...") |
-| `services.quest_service` | 外部モジュール | ゲームやクエスト情報の処理 | `from services.quest_service...` (行番号: 23 / 抜粋: "from services.quest_service i...") |
+| `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 2 / 抜粋: "import asyncio") |
+| `typing` | 標準ライブラリ | 型ヒントの提供。`Union`（元々使用）に加え`List`もIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた | `from typing import List, Union` (行番号: 3 / 抜粋: "from typing import List, Union") |
+| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`と`FlexMessage`のみ | `from linebot.v3.messaging...` (行番号: 6-9 / 抜粋: "from linebot.v3.messaging imp...") |
+| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 11 / 抜粋: "import config") |
+| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 12 / 抜粋: "from core.logger import setup...") |
+| `core.utils` | 外部モジュール | 時刻や日付文字列の取得 | `from core.utils import...` (行番号: 13 / 抜粋: "from core.utils import get_no...") |
+| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 14 / 抜粋: "from core.database import sav...") |
+| `services.quest_service` | 外部モジュール | ゲームやクエスト情報の処理 | `from services.quest_service...` (行番号: 17 / 抜粋: "from services.quest_service i...") |
+
+**（Issue #410で削除）** 以前このテーブルにあった`sqlite3`（標準ライブラリ）・`datetime`（標準ライブラリ）・`common`（外部モジュール）・`linebot.v3.messaging`の`QuickReply`/`QuickReplyItem`/`MessageAction`（未使用インポートとして記載）・`typing`の`Tuple`/`Optional`/`Dict`/`Any`（未使用インポートとして記載、ただし実際には元々インポートされていなかった旧版の誤記）は、`log_daily_action`/`log_ohayo`/`get_daily_health_summary_text`の削除に伴い（`sqlite3`/`datetime`/`common`は）実際に未使用となったため削除、または（`QuickReply`系・`typing`系は）元々インポートされていなかった旧版の記載誤りだった。
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 28 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
-| `common.get_db_cursor` | トランザクション管理やDB接続の詳細な仕組みが不明。 | `with common.get_db_cursor() a...` (行番号: 73 / 抜粋: "with common.get_db_cursor() a...") |
+| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 22 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
 | `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 41 / 抜粋: "save_ok = await save_log_async(") |
-| `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 110 / 抜粋: "data = await asyncio.to_threa...") |
-| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 181 / 抜粋: "res = await asyncio.to_thread...") |
+| `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 109 / 抜粋: "data = await asyncio.to_threa...") |
+| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 183 / 抜粋: "res = await asyncio.to_thread...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -100,72 +98,10 @@
 
 
 
-### `log_daily_action`
+### [削除済み] `log_daily_action` / `log_ohayo` / `get_daily_health_summary_text`（Issue #410で削除）
 
-* **役割**: ユーザーの日常動作（外出・面会など）をログ出力する（返信は行わない）。
-* 根拠: `async def log_daily_action...` (行番号: 53-56 / 抜粋: "def log_daily_action(user_id:")
-
-
-* **引数/リクエスト**: `user_id` (str), `user_name` (str), `action_type` (str), `value` (str)
-* 根拠: 関数の引数定義 (行番号: 53 / 抜粋: "action_type: str, value: str)")
-
-
-* **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 53 / 抜粋: "-> None:")
-
-
-* **副作用**: ロガーによる情報出力。
-* 根拠: `logger.info...` (行番号: 55 / 抜粋: "logger.info(f"Daily Action: ")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 53-56 / 抜粋: "該当ブロック内に例外処理なし")
-
-
-
-### `log_ohayo`
-
-* **役割**: おはようメッセージと認識されたキーワードをDBに記録する。
-* 根拠: `async def log_ohayo...` (行番号: 58-64 / 抜粋: "def log_ohayo(user_id: str, u")
-
-
-* **引数/リクエスト**: `user_id` (str), `user_name` (str), `message` (str), `keyword` (str)
-* 根拠: 関数の引数定義 (行番号: 58 / 抜粋: "message: str, keyword: str)")
-
-
-* **戻り値/レスポンス**: `None`
-* 根拠: 戻り値の型ヒント (行番号: 58 / 抜粋: "-> None:")
-
-
-* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。
-* 根拠: `await save_log_async...` (行番号: 60 / 抜粋: "await save_log_async(")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 58-64 / 抜粋: "該当ブロック内に例外処理なし")
-
-
-
-### `get_daily_health_summary_text`
-
-* **役割**: 設定された全メンバーの今日の体調記録の最新をDBから取得し、サマリの文字列として結合して返す。
-* 根拠: `def get_daily_health_summary...` (行番号: 66-101 / 抜粋: "def get_daily_health_summary_")
-
-
-* **引数/リクエスト**: なし
-* 根拠: 関数の引数定義 (行番号: 66 / 抜粋: "def get_daily_health_summary_")
-
-
-* **戻り値/レスポンス**: `str`
-* 根拠: 戻り値の型ヒント (行番号: 66 / 抜粋: "-> str:")
-
-
-* **副作用**: DBからの読み取り処理、およびDBコネクションの `row_factory` プロパティの変更。
-* 根拠: `cur.connection.row_factory = sqlite3.Row` (行番号: 75 / 抜粋: "cur.connection.row_factory = ")
-
-
-* **エラーハンドリング**: タイムスタンプのパース失敗時に時間を `??:??` とし、DB読み取り時の汎用エラー(`Exception`)をキャッチしてエラーメッセージ文字列を返す。
-* 根拠: `except:` および `except Exception as e:` (行番号: 90, 97 / 抜粋: "except Exception as e:")
+* 保守性(#410): 3関数とも本番コード（`handlers/line_handler.py`・`services/ai_service.py`等）のいずれからも呼び出し箇所が無い未使用関数だった（grep incl. tests で確認。`log_ohayo`と`get_daily_health_summary_text`はテストのみから参照されていたため、該当テスト（`TestLogOhayo`/`TestGetDailyHealthSummaryText`）も合わせて削除した。`log_daily_action`はテストからも未参照だった）。`get_daily_health_summary_text`削除に伴い、同関数内にあった「カーソル生成後で無効な`cur.connection.row_factory = sqlite3.Row`のno-op設定」「タイムスタンプパース失敗時のbareな`except:`」も解消された。体調サマリの取得・表示は`handlers/line_logic.py`の`get_daily_health_summary`（LINEの`check_status` postbackアクションから実際に呼ばれている実装、生の`sqlite3.connect`を使う点は別の既知事項として残る）が担う。関数削除に伴い、本ファイルで未使用となった`import sqlite3`・`import datetime`・`import common`も削除した。
+* 根拠: 削除前のコミット履歴(本仕様書の旧版)、および現行`services/line_service.py`に3関数が存在しないこと
 
 
 
@@ -184,7 +120,7 @@
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 110 / 抜粋: "await asyncio.to_thread(game_")
+* 根拠: `await asyncio.to_thread...` (行番号: 109 / 抜粋: "await asyncio.to_thread(game_")
 
 
 * **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
@@ -258,7 +194,7 @@
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`quest_service.process_approve_quest` または `process_reject_quest`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 181, 190 / 抜粋: "await asyncio.to_thread(")
+* 根拠: `await asyncio.to_thread...` (行番号: 183, 192 / 抜粋: "await asyncio.to_thread(")
 
 
 * **エラーハンドリング**: ID変換時の `ValueError` をキャッチし専用メッセージを返す。その他の `Exception` をキャッチし、例外に `detail` 属性があればそれを付与したエラーメッセージを返す。
@@ -312,9 +248,6 @@ graph TD
     subgraph "line_service.py"
         log_child_health
         log_food_record
-        log_daily_action
-        log_ohayo
-        get_daily_health_summary_text
         get_user_status_message
         get_active_quests_message
         process_approval_command
@@ -335,7 +268,6 @@ graph TD
 
     subgraph "外部: その他"
         config
-        common
         linebot_v3_messaging[linebot.v3.messaging]
     end
 
@@ -348,14 +280,8 @@ graph TD
     log_food_record --> get_now_iso
     log_food_record --> linebot_v3_messaging
 
-    log_daily_action --> setup_logging
-
-    log_ohayo --> save_log_async
-    log_ohayo --> get_now_iso
-
-    get_daily_health_summary_text --> get_today_date_str
-    get_daily_health_summary_text --> common
-    get_daily_health_summary_text --> config
+    %% Issue #410: log_daily_action / log_ohayo / get_daily_health_summary_text は
+    %% 未使用関数として削除済み(それに伴い common への依存も解消)
 
     get_user_status_message --> game_system
     get_user_status_message --> linebot_v3_messaging
@@ -381,11 +307,11 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `get_daily_health_summary_text` 内で `cur.connection.row_factory = sqlite3.Row` の設定を行っているが、`common.get_db_cursor` がコネクションプールを用いている場合、同じ接続を使い回す他の処理に副作用が波及する可能性がある。
+* **[修正済み] Issue #410 保守性**: `get_daily_health_summary_text`（`cur.connection.row_factory = sqlite3.Row`のno-op設定を含んでいた）は、`log_daily_action`・`log_ohayo`とともに本番未参照の未使用関数だったため削除した（詳細は「削除済み」セクション参照）。
 * `process_approval_command` において、`hasattr(e, 'detail')` を用いて例外の詳細を取得しようとしているが、外部システム (`quest_service`) が投げる特定の例外構造に暗黙的に依存している。
 * `game_system.get_all_view_data` や `quest_service.process_approve_quest` が同期関数である前提で `asyncio.to_thread` を用いて非同期実行しているが、これらの関数内部でのDB書き込みや排他制御がスレッドセーフに行われているかの確認が必要。
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
-* **未使用インポート**: `linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`（行番号: 11-13）がインポートされているが、いずれもファイル内で使用されていない（旧版の記述を訂正: `typing`からのインポートは実際には`Union`のみで、`List`はIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた）。
+* 旧版の本セクションは「`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`が未使用インポートされている」と記載していたが、確認したところ本ファイルはそもそも`TextMessage`/`FlexMessage`以外を`linebot.v3.messaging`からインポートしておらず誤りだった（訂正のみ。Issue #410とは無関係）。
 * **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: `get_active_quests_message`が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加し、`get_active_quests_message`の戻り値をこれに通すようにした。同関数は`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）にも使われている。
 * 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 34, 36)、`split_text_into_line_messages` (行番号: 39-61)、`get_active_quests_message`での使用 (行番号: 211)
 

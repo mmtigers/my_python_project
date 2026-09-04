@@ -41,41 +41,9 @@ class TestLogFoodRecord:
         assert "(手入力)" in row["menu_category"]
 
 
-@pytest.mark.asyncio
-class TestLogOhayo:
-    async def test_does_not_raise_even_if_target_table_is_absent(self, isolated_db):
-        """communication_logsテーブルが無くてもsave_log_asyncがFail-Softなので例外にならないこと"""
-        await line_service.log_ohayo("U1", "太郎", "おはよう！", "おはよ")
-
-
-class TestGetDailyHealthSummaryText:
-    def test_reports_unrecorded_for_all_members_when_no_data(self, isolated_db):
-        text = line_service.get_daily_health_summary_text()
-        for member in config.FAMILY_SETTINGS["members"]:
-            assert f"{member}: (未記録)" in text
-
-    def test_shows_recorded_condition_with_healthy_icon(self, isolated_db):
-        member = config.FAMILY_SETTINGS["members"][0]
-        today = line_service.get_today_date_str()
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
-                (member, "元気いっぱい", f"{today}T09:00:00"),
-            )
-        text = line_service.get_daily_health_summary_text()
-        assert "✅" in text
-        assert "元気いっぱい" in text
-
-    def test_shows_warning_icon_for_unwell_condition(self, isolated_db):
-        member = config.FAMILY_SETTINGS["members"][0]
-        today = line_service.get_today_date_str()
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                f"INSERT INTO {config.SQLITE_TABLE_CHILD} (child_name, condition, timestamp) VALUES (?, ?, ?)",
-                (member, "熱がある", f"{today}T09:00:00"),
-            )
-        text = line_service.get_daily_health_summary_text()
-        assert "⚠️" in text
+# 保守性(#410): log_ohayo / get_daily_health_summary_text は本番から未参照の
+# 未使用関数だったため services/line_service.py から削除した(それに伴い、
+# ここにあった TestLogOhayo / TestGetDailyHealthSummaryText も削除)。
 
 
 @pytest.mark.asyncio

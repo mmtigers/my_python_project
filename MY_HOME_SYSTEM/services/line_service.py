@@ -1,6 +1,4 @@
 # MY_HOME_SYSTEM/services/line_service.py
-import sqlite3
-import datetime
 import asyncio
 from typing import List, Union
 
@@ -11,7 +9,6 @@ from linebot.v3.messaging import (
 )
 
 import config
-import common
 from core.logger import setup_logging
 from core.utils import get_now_iso, get_today_date_str
 from core.database import save_log_async
@@ -94,55 +91,13 @@ async def log_food_record(user_id: str, user_name: str, category: str, item: str
         return TextMessage(text=f"{SAVE_FAILED_PREFIX}。{category}「{item}」は保存されていません。もう一度お試しください。")
     return TextMessage(text=f"🍽️ {category}「{item}」を記録しました！")
 
-async def log_daily_action(user_id: str, user_name: str, action_type: str, value: str) -> None:
-    """日常動作（外出・面会など）を記録 (返信なし)"""
-    logger.info(f"Daily Action: {user_name} -> {action_type}: {value}")
-    # 必要に応じてDB保存処理を追加
-
-async def log_ohayo(user_id: str, user_name: str, message: str, keyword: str) -> None:
-    """おはようメッセージの記録"""
-    await save_log_async(
-        "communication_logs",
-        ["user_id", "user_name", "message", "timestamp", "recognized_keyword"], 
-        (user_id, user_name, message, get_now_iso(), keyword)
-    )
-
-def get_daily_health_summary_text() -> str:
-    """今日の体調記録サマリを取得してテキストで返す"""
-    today_str = get_today_date_str()
-    summary_lines = []
-    
-    try:
-        # 読み取り専用で接続
-        with common.get_db_cursor() as cur:
-            # RowFactoryはcommon側で設定されていない場合があるため、dict化は手動で行うかcommonに依存
-            cur.connection.row_factory = sqlite3.Row
-            
-            for name in TARGET_MEMBERS:
-                row = cur.execute(f"""
-                    SELECT condition, timestamp FROM {config.SQLITE_TABLE_CHILD}
-                    WHERE child_name = ? AND timestamp LIKE ?
-                    ORDER BY id DESC LIMIT 1
-                """, (name, f"{today_str}%")).fetchone()
-                
-                if row:
-                    try:
-                        ts = row["timestamp"]
-                        if "T" in ts: dt = datetime.datetime.fromisoformat(ts)
-                        else: dt = datetime.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
-                        time_str = dt.strftime("%H:%M")
-                    except:
-                        time_str = "??:??"
-                    status = row["condition"]
-                    icon = "✅" if "元気" in status else "⚠️"
-                    summary_lines.append(f"{icon} {name}: {status} ({time_str})")
-                else:
-                    summary_lines.append(f"❓ {name}: (未記録)")
-    except Exception as e:
-        logger.error(f"DB Read Error: {e}")
-        return "⚠️ データ取得エラー"
-
-    return "\n".join(summary_lines)
+# 保守性(#410): log_daily_action / log_ohayo / get_daily_health_summary_text は
+# 本番・テストのいずれからも呼び出し箇所が無い未使用関数だったため削除した
+# (grep incl. tests で確認)。get_daily_health_summary_text内にあった
+# cur.connection.row_factory = sqlite3.Row（カーソル生成後の設定で無効な
+# no-op行だった点も含む）・bareのexcept:は、関数ごと削除により解消した。
+# 体調サマリの取得は handlers/line_logic.py の get_daily_health_summary
+# (LINEのcheck_status postbackアクションから実際に呼ばれている実装)を使うこと。
 
 # ==========================================
 # 2. Family Quest Integration (New)
