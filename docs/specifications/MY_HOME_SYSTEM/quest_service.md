@@ -192,14 +192,14 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `UserService.update_avatar`
 
-* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。**（B6で修正）** 更新前の`avatar`列の値を`old_avatar`として保持しておき、DB更新のトランザクション(`get_db_cursor(commit=True)`)を抜けた後に`_delete_orphaned_avatar`を呼び出して、差し替えにより不要になった旧アバターファイルの削除を試みる。以前はDBの`avatar`列を更新するのみで、`UPLOAD_DIR`配下の旧アバターファイル自体は削除されず、再アップロードのたびにディスクへ蓄積し続けていた。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 201〜215 / 抜粋: "old_avatar = user['avatar']")、`self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 214)
+* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。**（B6で修正）** 更新前の`avatar`列の値を`old_avatar`として保持しておき、DB更新のトランザクション(`get_db_cursor(commit=True)`)を抜けた後に`_delete_orphaned_avatar`を呼び出して、差し替えにより不要になった旧アバターファイルの削除を試みる。以前はDBの`avatar`列を更新するのみで、`UPLOAD_DIR`配下の旧アバターファイル自体は削除されず、再アップロードのたびにディスクへ蓄積し続けていた。**（Issue #372で修正）** 同一トランザクション内で`SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ?`により旧アバターを他ユーザーが参照しているかを確認し（`still_referenced`）、参照が残っている場合は`_delete_orphaned_avatar`を呼び出さない。以前は他ユーザーのアップロード画像パスを自分の`avatar_url`に指定してから絵文字に戻す操作で、そのユーザーの画像ファイルが物理削除されていた。
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 210〜233 / 抜粋: "old_avatar = user['avatar']")、`still_referenced = cur.execute(` (行番号: 224〜227)、`if not still_referenced:\n            self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 231〜232)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
 * 根拠: (行番号: 201)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "updated", "avatar": avatar_url}`）
 * 根拠: (行番号: 201, 215)
-* **副作用**: DB更新（`quest_users`）、ログ出力、（B6で追加）`_delete_orphaned_avatar`の呼び出しによるローカルファイルシステムからの旧アバターファイル削除の試行（DBコミット後、`get_db_cursor`のトランザクション外で実行される）
-* 根拠: (行番号: 209〜212, 214)
+* **副作用**: DB更新（`quest_users`）、DB参照（他ユーザーの`avatar`参照確認）、ログ出力、（B6で追加）`_delete_orphaned_avatar`の呼び出しによるローカルファイルシステムからの旧アバターファイル削除の試行（DBコミット後、`get_db_cursor`のトランザクション外で実行される。Issue #372以降は他ユーザーからの参照が無い場合のみ）
+* 根拠: (行番号: 218〜219, 224〜227, 231〜232)
 * **エラーハンドリング**: ユーザー不在時に `HTTPException(status_code=404)`
 * 根拠: (行番号: 204〜205 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
 

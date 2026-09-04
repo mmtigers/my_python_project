@@ -224,24 +224,24 @@
 
 ### `UpdateUserAction`
 
-* **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 66 / 抜粋: "class UpdateUserAction(BaseModel):")
+* **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。**（Issue #372で追加）** `avatar_url`に`field_validator`を持ち、`routers/quest_router.py`の`upload_image`が生成する`/uploads/<uuid4>.<jpg|jpeg|png|gif|webp>`形式（`_UPLOADED_AVATAR_RE`）か、パス区切り(`/`, `\\`)・HTML特殊文字(`<`, `>`, `"`, `'`)を含まず先頭が`.`でない16文字以下の短い文字列（絵文字アバター、`_EMOJI_AVATAR_MAX_LEN`）のみを受け付ける。それ以外は`ValueError`を送出し、FastAPIにより422となる。任意の`/uploads/`パスを許すと、他ユーザーのアップロード画像を自分のアバターに指定してから絵文字に戻す操作で、そのファイルが孤立扱いになり削除される経路が残るため。
+* 根拠: クラス名と継承元 (行番号: 82 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 86〜98)
 
 
-* **引数/リクエスト (フィールド)**: `user_id` (str), `avatar_url` (str)
-* 根拠: フィールド定義 (行番号: 67〜68 / 抜粋: "avatar_url: str" など)
+* **引数/リクエスト (フィールド)**: `user_id` (str), `avatar_url` (str、上記バリデータ付き)
+* 根拠: フィールド定義 (行番号: 83〜84 / 抜粋: "avatar_url: str" など)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 66 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 82 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 66〜68 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 82〜98 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 66〜68 / 抜粋: "class UpdateUserAction(BaseModel):")
+* **エラーハンドリング**: `avatar_url`が許容形式でない場合、バリデータが`ValueError`を送出する（FastAPIでは422 Unprocessable Entity）
+* 根拠: (行番号: 98 / 抜粋: "raise ValueError(\"avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます\")")
 
 
 

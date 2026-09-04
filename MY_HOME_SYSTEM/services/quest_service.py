@@ -218,9 +218,18 @@ class UserService:
             cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?",
                        (avatar_url, common.get_now_iso(), user_id))
 
+            # #372: 旧アバターのファイルを他のユーザーも参照している場合(同じ /uploads/ パスを
+            # 指定された場合)、物理削除するとそのユーザーのアバターが404になる。
+            # 他ユーザーからの参照が残っている限りファイルは削除しない。
+            still_referenced = cur.execute(
+                "SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ? LIMIT 1",
+                (old_avatar, user_id),
+            ).fetchone() is not None
+
             logger.info(f"Avatar Updated: User={user_id}, URL={avatar_url}")
 
-        self._delete_orphaned_avatar(old_avatar, avatar_url)
+        if not still_referenced:
+            self._delete_orphaned_avatar(old_avatar, avatar_url)
         return {"status": "updated", "avatar": avatar_url}
 
     def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:

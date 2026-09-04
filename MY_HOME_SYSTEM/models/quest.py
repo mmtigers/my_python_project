@@ -1,5 +1,7 @@
 # MY_HOME_SYSTEM/models/quest.py
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, field_validator
 from typing import Optional
 
 # ==========================================
@@ -66,9 +68,34 @@ class ApproveAction(BaseModel):
     # 任意項目なので既存クライアント(未送信)との後方互換は崩さない。
     reason: Optional[str] = None
 
+# #372: アップロード経由のアバターURLは routers/quest_router.py の upload_image が生成する
+# 「/uploads/<uuid4>.<拡張子>」の形のみを受け付ける。任意の /uploads/ パスを許すと、
+# 他ユーザーのアップロード画像を自分のアバターに指定 → 絵文字に戻す、という操作で
+# そのファイルが孤立扱いになり削除されてしまう経路が残る。
+_UPLOADED_AVATAR_RE = re.compile(
+    r"^/uploads/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|gif|webp)$"
+)
+# 絵文字アバター(結合絵文字・肌色修飾子を含めても十数コードポイント)の上限。
+_EMOJI_AVATAR_MAX_LEN = 16
+
+
 class UpdateUserAction(BaseModel):
     user_id: str
     avatar_url: str
+
+    @field_validator("avatar_url")
+    @classmethod
+    def _validate_avatar_url(cls, value: str) -> str:
+        if _UPLOADED_AVATAR_RE.match(value):
+            return value
+        # 絵文字などの短い表示用文字列。パス区切り・HTML特殊文字を含むものは拒否する。
+        if (
+            0 < len(value) <= _EMOJI_AVATAR_MAX_LEN
+            and not any(ch in value for ch in "/\\<>\"'")
+            and not value.startswith(".")
+        ):
+            return value
+        raise ValueError("avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます")
 
 class SoundTestRequest(BaseModel):
     sound_key: str
