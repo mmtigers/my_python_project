@@ -1,0 +1,58 @@
+# Issue #400: 依存更新の自動化。SHAピン留めしたGitHub Actionsは手動更新しないと
+# 陳腐化するため、Dependabot で週次のPRを自動起票する。pip/npm も同じ週次で
+# 起票し、更新の取りこぼしを防ぐ(PRのCIゲートは test.yml が担う)。
+# 週次実行は月曜 09:00 JST に揃え、定期監査ワークフロー(spec-drift/pip-audit)と
+# 同じタイミングで棚卸しできるようにしている。
+version: 2
+updates:
+  # GitHub Actions (SHAピン留めの更新。コメントのバージョン表記も自動更新される)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # MY_HOME_SYSTEM (FastAPIバックエンド): requirements.txt / requirements-dev.txt
+  - package-ecosystem: "pip"
+    directory: "/MY_HOME_SYSTEM"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    labels:
+      - "dependencies"
+      - "python"
+    # 依存が多くPRが大量に立つのを避けるため、同時オープン数を抑える
+    open-pull-requests-limit: 5
+
+  # DDD (バッチ処理): requirements.txt
+  - package-ecosystem: "pip"
+    directory: "/DDD"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    labels:
+      - "dependencies"
+      - "python"
+    open-pull-requests-limit: 3
+
+  # family-quest (React/TypeScriptフロントエンド): package.json / package-lock.json
+  - package-ecosystem: "npm"
+    directory: "/family-quest"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    labels:
+      - "dependencies"
+      - "javascript"
+    open-pull-requests-limit: 5

@@ -43,7 +43,12 @@ async def _run_main_with_status(monkeypatch, device, status):
     monkeypatch.setattr(spm.sensor_service, "process_power_data", _noop)
     monkeypatch.setattr(spm.sensor_service, "process_meter_data", _noop)
 
-    with patch.object(spm, "fetch_device_status_sync", return_value=status):
+    # C-L2 (Issue #414): main() 末尾の asyncio.sleep(2) を実時間で待たない
+    async def _no_sleep(*args, **kwargs):
+        return None
+
+    with patch.object(spm, "fetch_device_status_sync", return_value=status), \
+         patch.object(spm.asyncio, "sleep", _no_sleep):
         await spm.main()
 
 

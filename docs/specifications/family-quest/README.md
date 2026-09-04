@@ -1,8 +1,8 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された54件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された46件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
-「(廃止)」の付いた仕様書は、2026-08のFamily Quest大改修等で対応するソースファイル自体が削除済みのものです。削除された記録として残置されているのみで、新規の実装・参照の対象ではありません。
+対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
 ## ルート
 
@@ -23,13 +23,11 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [AvatarUploader.md](./src/components/ui/AvatarUploader.md) | アバター画像の選択・プレビュー・サーバーへのアップロードを行うモーダルUIコンポーネント。エラー・成功メッセージはモーダル内のインラインUIで表示する。 |
-| [BattleEffect.md](./src/components/ui/BattleEffect.md) | (廃止) ボス機能の廃止に伴い削除。クエスト完了（ボス攻撃時）の視覚演出を担っていたコンポーネント。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
 | [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
 | [CountUp.md](./src/components/ui/CountUp.md) | `framer-motion`のバネ物理モデルを用いて数値をカウントアップ表示するコンポーネント。プレフィックス・サフィックス・カンマ区切りに対応。 |
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
-| [LevelUpModal.md](./src/components/ui/LevelUpModal.md) | ユーザーのレベルアップ情報を表示し、同時に効果音を再生するモーダルコンポーネント。 |
 | [MessageModal.md](./src/components/ui/MessageModal.md) | タイトル・メッセージ・任意アイコンと「OK」ボタンのみを持つ、状態を持たないシンプルなモーダルダイアログ。 |
 | [Modal.md](./src/components/ui/Modal.md) | ESCキー・背景クリック・閉じるボタンに応じて非表示処理を呼び出す汎用モーダルウィンドウ。 |
 | [SettingsModal.md](./src/components/ui/SettingsModal.md) | 表示密度・非識字モード対象ユーザー・ユーザー別パネルアクセントカラーをまとめて設定するモーダル画面。`useSettings`フック経由でContext状態を操作する。 |
@@ -44,12 +42,6 @@
 | [toastShared.md](./src/context/toastShared.md) | `ToastContext.tsx`/`useToast.ts`から参照される型定義とReact Contextオブジェクトを集約するモジュール。 |
 | [useSettings.md](./src/context/useSettings.md) | `SettingsContext`から値を取得するカスタムフック。Provider外で呼ばれた場合は例外を投げる。 |
 | [useToast.md](./src/context/useToast.md) | `ToastContext`から値を取得するカスタムフック。Provider外で呼ばれた場合は例外を投げる。 |
-
-## src/features/admin/components
-
-| 仕様書 | 概要 |
-| --- | --- |
-| [AdminDashboard.md](./src/features/admin/components/AdminDashboard.md) | (廃止) ボスHP調整機能およびファミリーマイレージ設定機能の廃止に伴い削除。 |
 
 ## src/features/camera/components
 
@@ -70,19 +62,9 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
-| [BossCard.md](./src/features/family/components/BossCard.md) | (廃止) ボス機能の廃止に伴い削除。出現中ボスの情報と攻撃ボタンを表示していたコンポーネント。 |
 | [FamilyDashboard.md](./src/features/family/components/FamilyDashboard.md) | 横画面（常設デバイス）用のメインレイアウト。パパ・ママ・兄・妹を1行4列のグリッドで常時表示し、各パネル内でステータスとその日のクエスト一覧／ごほうび画面が完結する。 |
 | [FamilyLog.md](./src/features/family/components/FamilyLog.md) | 家族のステータス情報（ランク・レベル・クエスト数・所持金）と、日付ごとにグループ化したタイムライン形式の冒険記録を表示する。 |
-| [FamilyMileageCard.md](./src/features/family/components/FamilyMileageCard.md) | (廃止) ファミリーマイレージ機能の廃止に伴い削除。 |
-| [FamilyParty.md](./src/features/family/components/FamilyParty.md) | (廃止) パーティ機能の廃止に伴い削除。 |
 | [UserStatusCard.md](./src/features/family/components/UserStatusCard.md) | 選択中ユーザーのレベル・HP・EXP・所持ゴールド・獲得メダル等をRPGのステータスカード風に可視化するコンポーネント。 |
-| [WeeklyTrends.md](./src/features/family/components/WeeklyTrends.md) | (廃止) 週間ランキング機能の廃止に伴い削除。 |
-
-## src/features/guild/components
-
-| 仕様書 | 概要 |
-| --- | --- |
-| [GuildBoard.md](./src/features/guild/components/GuildBoard.md) | (廃止) ギルド機能（ギルド討伐依頼板UI）の廃止に伴い削除。 |
 
 ## src/features/quest/components
 
@@ -101,11 +83,9 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
-| [EquipmentShop.md](./src/features/shop/components/EquipmentShop.md) | (廃止) 装備機能（装備購入・装着UI）の廃止に伴い削除。 |
 | [InventoryList.md](./src/features/shop/components/InventoryList.md) | ユーザーの所持アイテム（インベントリ）一覧を取得・表示し、アイテムの「使用」「キャンセル」を行うUIコンポーネント。React Queryでのポーリングと楽観的UI更新を行う。 |
 | [RewardList.md](./src/features/shop/components/RewardList.md) | ユーザー情報と保有ゴールドに基づき、購入可能な商品を価格順にソートして表示するUIコンポーネント。購入可否に応じて見た目を切り替える。 |
 | [RewardShop.md](./src/features/shop/components/RewardShop.md) | 「ごほうび」画面のコンポーネント。所持ゴールド表示 → 購入可能な報酬一覧（`RewardList`） → 所持品（`InventoryList`）の順に構成し、旧「もちもの」独立タブは廃止された。 |
-| [ShopContainer.md](./src/features/shop/components/ShopContainer.md) | (廃止) デッドコードとして削除済み。「お店」「もちもの」タブ切り替えUIは本コンポーネントに集約されておらず、現在は`App.tsx`が`RewardShop`／`InventoryList`を直接マウントする。 |
 
 ## src/hooks
 
@@ -132,8 +112,20 @@
 | --- | --- |
 | [index.md](./src/types/index.md) | アプリケーション全体で使用される共通の型定義（ユーザー・クエスト・クエスト履歴・報酬・インベントリ等）を提供する。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型は機能廃止に伴い削除済み。 |
 
-## src/utils
+## 廃止済み仕様書一覧
 
-| 仕様書 | 概要 |
+以下は対応するソースファイルが削除済みのため、仕様書ファイル自体も削除したもの(Issue #402)。`.github/scripts/check_spec_drift.py` の週次監査で「孤立ドキュメント」として報告され続けるのを避けるため、記録はこの一覧のみに残す。内容が必要な場合は git 履歴(削除コミット以前)を参照すること。機能廃止の経緯は[全体設計書.md](../全体設計書.md)の改訂メモを参照。
+
+| 旧仕様書(旧ソース) | 廃止理由 |
 | --- | --- |
-| [gameHelpers.md](./src/utils/gameHelpers.md) | 曜日配列の提供、現在時刻（曜日インデックス・HHMM形式）の取得、指定レベルに応じた次レベル必要経験値の計算などを行う純粋なユーティリティ・定数群。 |
+| `src/components/ui/BattleEffect.md` (`BattleEffect.tsx`) | ボス機能の廃止に伴い削除(`ffdc8c2`)。クエスト完了（ボス攻撃時）の視覚演出コンポーネント。 |
+| `src/components/ui/LevelUpModal.md` (`LevelUpModal.tsx`) | レベルアップ等の通知をトースト通知に統一した改修で削除(`1818d5a`)。 |
+| `src/features/admin/components/AdminDashboard.md` (`AdminDashboard.tsx`) | ボスHP調整機能およびファミリーマイレージ設定機能の廃止に伴い削除。 |
+| `src/features/family/components/BossCard.md` (`BossCard.tsx`) | ボス機能の廃止に伴い削除。出現中ボスの情報と攻撃ボタンを表示していたコンポーネント。 |
+| `src/features/family/components/FamilyMileageCard.md` (`FamilyMileageCard.tsx`) | ファミリーマイレージ機能の廃止に伴い削除。 |
+| `src/features/family/components/FamilyParty.md` (`FamilyParty.tsx`) | パーティ機能の廃止に伴い削除。 |
+| `src/features/family/components/WeeklyTrends.md` (`WeeklyTrends.tsx`) | 週間ランキング機能の廃止に伴い削除。 |
+| `src/features/guild/components/GuildBoard.md` (`GuildBoard.tsx`) | ギルド機能（ギルド討伐依頼板UI）の廃止に伴い削除。 |
+| `src/features/shop/components/EquipmentShop.md` (`EquipmentShop.tsx`) | 装備機能（装備購入・装着UI）の廃止に伴い削除。 |
+| `src/features/shop/components/ShopContainer.md` (`ShopContainer.tsx`) | デッドコードとして削除済み。「お店」「もちもの」タブ切り替えUIは本コンポーネントに集約されておらず、現在は`App.tsx`が`RewardShop`／`InventoryList`を直接マウントする。 |
+| `src/utils/gameHelpers.md` (`gameHelpers.js`) | どこからも参照されない死にコードとして削除(`690c941`)。`getNextLevelExp`はバックエンド`game_logic.py`の`calculate_next_level_exp`と同一式の重複実装だった。 |

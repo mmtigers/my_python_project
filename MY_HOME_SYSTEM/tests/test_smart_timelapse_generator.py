@@ -283,6 +283,9 @@ class TestSplitAndSendCleansUpPartFiles:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
         monkeypatch.setattr(stg.subprocess, "run", fake_run)
+        # C-L2 (Issue #414): split_and_send の time.sleep(5)(APIレートリミット対策)を
+        # 分割パートごとに実時間で待たない
+        monkeypatch.setattr(stg.time, "sleep", lambda seconds: None)
 
         return summary, part_files
 

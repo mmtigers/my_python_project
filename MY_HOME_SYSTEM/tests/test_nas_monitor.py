@@ -252,7 +252,9 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
     def test_check_write_permission_times_out_instead_of_hanging(self):
         monitor = NasMonitor()
         monitor.mount_point = self.tmp_dir
-        monitor.timeout = 1
+        # C-L2 (Issue #414): タイムアウト自体の動作(FIFOでブロックしたサブプロセスが
+        # killされて戻る)を検証したいだけなので、待ち時間は最小にする
+        monitor.timeout = 0.2
         monitor.write_check_retries = 2  # リトライ待機を短縮してテストを高速化
         # 各試行は本来ファイル名を毎回変えるが(自己永続的な失敗ループ回避のため)、
         # このテストは「同じ箇所が全リトライを通じて塞がり続けるケース」を
@@ -265,7 +267,9 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         result = {}
 
         def run():
-            result["value"] = monitor.check_write_permission()
+            # retry_with_backoff の Exponential Backoff 待機(1s, 2s, ...)はスキップする
+            with patch("core.utils.time.sleep"):
+                result["value"] = monitor.check_write_permission()
 
         t = threading.Thread(target=run, daemon=True)
         start = time.monotonic()
@@ -285,21 +289,26 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         単発のタイムアウトで即座に異常とせず、リトライで復旧を検知できること。"""
         monitor = NasMonitor()
         monitor.mount_point = self.tmp_dir
-        monitor.timeout = 1
+        monitor.timeout = 0.2  # C-L2 (Issue #414): 待ち時間は最小にする
         monitor.write_check_retries = 3
         fixed_name = ".write_test_fixed_for_test"
         monitor._write_test_filename = lambda: fixed_name
         fifo_path = os.path.join(self.tmp_dir, fixed_name)
         os.mkfifo(fifo_path)
 
+        # 1回目の試行(timeout=0.2s)が確実にタイムアウトした後にストールを解消する。
+        # Backoff待機は下で patch するので time.sleep ではなく Event.wait で待つ。
+        stall_cleared = threading.Event()
+
         def clear_stall_after_delay():
-            time.sleep(1.5)
+            stall_cleared.wait(0.4)
             os.remove(fifo_path)
 
         threading.Thread(target=clear_stall_after_delay, daemon=True).start()
 
         start = time.monotonic()
-        result = monitor.check_write_permission()
+        with patch("core.utils.time.sleep"):
+            result = monitor.check_write_permission()
         elapsed = time.monotonic() - start
 
         self.assertTrue(
@@ -313,7 +322,7 @@ class TestNasMonitorWritePermissionTimeout(unittest.TestCase):
         切り分けられるよう、ping/mountの結果がログに残ること。"""
         monitor = NasMonitor()
         monitor.mount_point = self.tmp_dir
-        monitor.timeout = 1
+        monitor.timeout = 0.2  # C-L2 (Issue #414): 待ち時間は最小にする
         monitor.write_check_retries = 1
         fixed_name = ".write_test_fixed_for_test"
         monitor._write_test_filename = lambda: fixed_name
@@ -382,7 +391,9 @@ class TestNasMonitorWriteTestFilenameUniqueness(unittest.TestCase):
                     used_paths.append(cmd[-1])
                 raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
 
-            with patch("monitors.nas_monitor.subprocess.run", side_effect=spy_run):
+            # C-L2 (Issue #414): Backoff 待機(1s, 2s)はスキップする
+            with patch("monitors.nas_monitor.subprocess.run", side_effect=spy_run), \
+                 patch("core.utils.time.sleep"):
                 monitor.check_write_permission()
 
             self.assertEqual(len(used_paths), monitor.write_check_retries)

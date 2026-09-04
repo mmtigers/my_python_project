@@ -25,13 +25,16 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): 既定の360分ではハング時にActionsを浪費するため上限を設ける
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          # Issue #403: 実機 .venv とCIで同じ版を使うよう MY_HOME_SYSTEM/.python-version を参照する
+          python-version-file: MY_HOME_SYSTEM/.python-version
           cache: pip
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
@@ -63,9 +66,18 @@ jobs:
         run: ruff check . --output-format=github
         continue-on-error: true
 
+      - name: Spec drift script tests (pytest .github/scripts/)
+        # Issue #402: check_spec_drift.py の回帰テストは従来「手動実行前提」でCI未実行
+        # だった。tmp_path 上の疑似リポジトリで完結するようになったため、
+        # lint ジョブ(依存が requirements-dev.txt だけで軽い)でブロッキング実行する。
+        working-directory: .
+        run: python -m pytest .github/scripts/ -q
+
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): pytest約1分 + DDDテスト約3分半 + インストール時間に対して十分な余裕
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -75,12 +87,19 @@ jobs:
 
       - name: Check for DDD changes
         # DDDテストは全体の約3分半(重い回帰テスト2件+yt_dlp等のimport)を占めるが、
-        # DDDは他サブシステムから独立しているため、PRの差分に DDD/** が含まれない
-        # 場合はスキップして良い。push/workflow_dispatch時、および差分を判定できない
-        # 異常時は、安全側に倒して常に実行する。
+        # DDDは他サブシステムからほぼ独立しているため、PRの差分に関連ファイルが
+        # 含まれない場合はスキップして良い。push/workflow_dispatch時、および差分を
+        # 判定できない異常時は、安全側に倒して常に実行する。
+        #
+        # Issue #368: DDD/newface_monitor.py・extract_youtube_urls.py は sys.path に
+        # MY_HOME_SYSTEM を足して core.logger / core.nas_utils / core.utils / config を
+        # 直接importするため、DDD/ だけでなくそれらのimport先も pathspec に含める
+        # (以前は core/ や config.py の変更PRでDDDテストが黙ってスキップされていた)。
+        # また git diff 自体の失敗が "changed=false" に倒れないよう pipefail を付ける。
         id: ddd_changes
         working-directory: .
         run: |
+          set -o pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -90,18 +109,27 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only HEAD^1 HEAD -- DDD/ | grep -q .; then
+          ddd_pathspec="DDD/ MY_HOME_SYSTEM/core/ MY_HOME_SYSTEM/config.py MY_HOME_SYSTEM/common.py"
+          # shellcheck disable=SC2086  # pathspecは意図的に単語分割する
+          if ! changed_files=$(git diff --name-only HEAD^1 HEAD -- $ddd_pathspec); then
+            echo "::warning::git diff に失敗したため、安全側に倒してDDDテストを実行します"
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "DDD/** に変更あり: DDDテストを実行します"
+            exit 0
+          fi
+          if [ -n "$changed_files" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "DDD/** またはDDDのimport先(${ddd_pathspec}) に変更あり: DDDテストを実行します"
+            echo "$changed_files"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "DDD/** に変更なし: DDDテストをスキップします"
+            echo "DDD/** およびDDDのimport先に変更なし: DDDテストをスキップします"
           fi
 
       - name: Set up Python 3.11
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          # Issue #403: 実機 .venv とCIで同じ版を使うよう MY_HOME_SYSTEM/.python-version を参照する
+          python-version-file: MY_HOME_SYSTEM/.python-version
           cache: pip
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
@@ -114,6 +142,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
+        # Issue #367: .coveragerc の omit を「本当に実行不能なもの」だけに絞った
+        # 真のビュー(2026-09-04時点の実測 67%: 6,575 stmts / miss 2,151)を基準に、
+        # 約3pt下の 64 を閾値とする(旧 45 は omit で水増しされた公式ビュー 87% に
+        # 対する値で、退行検知として機能していなかった)。段階的に引き上げること。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -125,7 +157,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=45
+            --cov-fail-under=64
 
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
@@ -153,13 +185,15 @@ jobs:
   security:
     name: Security Scan
     runs-on: ubuntu-latest
+    timeout-minutes: 20  # C-L1 (Issue #414)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          # Issue #403: 実機 .venv とCIで同じ版を使うよう MY_HOME_SYSTEM/.python-version を参照する
+          python-version-file: MY_HOME_SYSTEM/.python-version
           cache: pip
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
@@ -195,6 +229,9 @@ jobs:
         # ため、引き続きPR単位ではブロッキングにしない。代わりに
         # pip-audit-weekly-audit.yml が同じ対象を週次監査し、検知が出れば
         # Issueで可視化・追跡する(仕様書ドリフトのIssue #20と同型の運用)。
+        # 注意(Issue #366): pip-audit は検知0件のとき -o の出力ファイルを生成しない
+        # (stdoutに "No known vulnerabilities found" を出すのみ)。後続のアーティファクト
+        # アップロードで pip-audit-report.md が見つからなくても正常(=検知なし)である。
         run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
         continue-on-error: true
 
@@ -212,6 +249,7 @@ jobs:
   frontend:
     name: Frontend Build (family-quest)
     runs-on: ubuntu-latest
+    timeout-minutes: 15  # C-L1 (Issue #414)
     defaults:
       run:
         working-directory: ./family-quest
@@ -227,6 +265,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Lint (eslint)
+        # Issue #401: `npm run lint` はCLAUDE.mdに開発コマンドとして載っているのに
+        # CIでは未実行だった。現状0エラーのため追加コストなしでゲート化する。
+        run: npm run lint
 
       - name: Build (tsc -b && vite build)
         # H-11: 以前はfamily-quest側にCIが一切無く、H-8のようなフロントエンドの

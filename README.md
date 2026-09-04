@@ -23,5 +23,14 @@
 
 ## CI
 
-`.github/workflows/`で、テスト(`test.yml`)と仕様書ドリフト監査(`spec-drift-*.yml`、
-ソースと`docs/specifications/`の対応関係チェック)を実行している。
+`.github/workflows/`配下のワークフロー(詳細は[CLAUDE.md](./CLAUDE.md)の「CI」節を参照):
+
+| ワークフロー | 契機 | 内容 |
+| --- | --- | --- |
+| `test.yml` | push / PR | lint(ruff、`.github/scripts/`のpytest)・テスト+カバレッジ(`MY_HOME_SYSTEM`、差分に応じて`DDD`)・セキュリティスキャン(bandit、pip-audit)・フロントエンドビルド(`family-quest`のlint/build/vitest)。 |
+| `claude-review.yml` | PR | Claude Code Actionによる自動コードレビュー(`CLAUDE.md`の規約を踏まえた指摘をPRコメントとして投稿)。 |
+| `spec-drift-pr-check.yml` | PR | ソースと`docs/specifications/`の対応関係チェック(PR差分)。非ブロッキングでPRコメントに結果を投稿。 |
+| `spec-drift-weekly-audit.yml` | 週次 | 同チェックのリポジトリ全体監査。検知があればIssue(`spec-drift-audit`ラベル)を自動起票/更新。 |
+| `pip-audit-weekly-audit.yml` | 週次 | `requirements*.txt`(MY_HOME_SYSTEM・DDD)の既知CVE監査。検知があればIssue(`pip-audit-audit`ラベル)を自動起票/更新。 |
+
+依存関係の更新は`.github/dependabot.yml`(GitHub Actions・pip・npm、週次)で自動起票される。

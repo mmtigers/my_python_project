@@ -12,7 +12,7 @@
 * [../../lib/utils.md](../../lib/utils.md) - `cn`関数の実装元
 * [./Button.md](./Button.md) - ヘッダー部の閉じるボタンとして利用するコンポーネント
 * [./MessageModal.md](./MessageModal.md) - 本コンポーネントの利用例（結果/エラーメッセージモーダル）
-* [./LevelUpModal.md](./LevelUpModal.md) - 本コンポーネントの利用例（レベルアップ演出モーダル）
+* `LevelUpModal.tsx`(廃止済み。`1818d5a`で削除、仕様書も Issue #402 で削除) - かつての利用例（レベルアップ演出モーダル）
 * [../../../App.md](../../../App.md) - 呼び出し元の一例（`ConfirmModal`が内部で汎用モーダルとして利用）
 
 ## 2. ファイルの概要

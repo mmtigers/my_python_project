@@ -10,24 +10,27 @@ venv/
 .venv/
 
 # Environment Variables
+# Issue #406: .env.local / .env.production 等の派生ファイルも除外する。
+# .env.example はプレースホルダーのみのテンプレートなのでコミット対象(打ち消し)。
 .env
+.env.*
+!.env.example
 
-# Editor
+# Editor / OS
 .vscode/
 *.code-workspace
+.DS_Store
 
 # Claude Code local state
 .claude/worktrees/
 
 # Logs
 *.log
-*.csv
 logs/
 
 # Temporary
 tmp/
 *.done
-*.ts
 *.m3u8
 
 # Database
@@ -48,21 +51,36 @@ MY_HOME_SYSTEM/watchdog_throttle_history.state
 # MY_HOME_SYSTEM: timelapse runtime working dir (frames/lock, not source)
 MY_HOME_SYSTEM/work/
 
-# Private Assets (Images, PDFs)
-assets/snapshots/
-assets/salary_images/
-*.jpg
-*.png
-*.pdf
-*.mp4
-*.txt
-# Issue #187: 上記の*.pngは個人的なプライベート画像(カメラスナップショット等)を
-# 想定した除外ルールだが、family-quest/public/配下のPWAアイコン・favicon等の
-# フロントエンドソースアセットまで巻き込んで無条件にgit管理外にしてしまい、
-# コード側(vite.config.ts, index.html)が参照する実ファイルが一度もコミットされず
-# 常に404になる不具合の一因になっていた。ビルド成果物ではなくソースとして
-# コミットが必要なこのディレクトリのみ明示的に除外対象から戻す。
-!family-quest/public/*.png
+# Issue #406: 個人データ(画像・CSV・JSON・HLSセグメント等)の除外は、以前は
+# *.csv / *.ts / *.png / *.txt / *.json をリポジトリ全域に掛け、family-quest の
+# ソース(*.ts)・PWAアイコン(public/*.png)・テストフィクスチャ(tests/fixtures/*.json)
+# 等を !打ち消しで個別に戻していた。打ち消し漏れによるコミット漏れ事故
+# (Issue #187: PWAアイコン、Issue #330: フィクスチャJSON)が構造的に再発するため、
+# 実際に個人データが生成されるディレクトリ/ファイルに限定する(config.py 参照)。
+# 新しい実行時データの保存先を増やした場合は、ここにその場所を追加すること。
+
+# MY_HOME_SYSTEM: ローカル専用の設定・認証情報(いずれも *.example がテンプレート)
+MY_HOME_SYSTEM/devices.json
+MY_HOME_SYSTEM/family_events.json
+MY_HOME_SYSTEM/google_photos_credentials.json
+MY_HOME_SYSTEM/google_photos_token.json
+MY_HOME_SYSTEM/switchbot_device_states.json
+*.local.json
+# MY_HOME_SYSTEM: 実行時に生成される個人データの保存先
+# uploads/ = アバター画像(.jpg/.png に加え .webp/.gif も受理するためディレクトリごと除外)
+MY_HOME_SYSTEM/uploads/
+# assets/ = NAS未接続時のローカルフォールバック先(カメラスナップショット・給与明細画像・CSV等)
+MY_HOME_SYSTEM/assets/
+# data/ = HLS配信のセグメント(.ts)・プレイリスト(.m3u8)
+MY_HOME_SYSTEM/data/
+# 上記以外の場所に出力されうる個人メディア/CSV(MY_HOME_SYSTEM 配下にコミット対象の
+# 画像・音声・CSVは存在しない)
+MY_HOME_SYSTEM/**/*.jpg
+MY_HOME_SYSTEM/**/*.png
+MY_HOME_SYSTEM/**/*.pdf
+MY_HOME_SYSTEM/**/*.mp4
+MY_HOME_SYSTEM/**/*.mp3
+MY_HOME_SYSTEM/**/*.csv
 
 # DDD: personal generated content, not source
 DDD/split_results/
@@ -70,44 +88,21 @@ DDD/*プロンプト*.md
 DDD/.batch_download_discord.lock
 DDD/.newface_monitor.lock
 DDD/.bot_detection_cooldown
-
-# ただし requirements.txt / requirements-dev.txt は含める
-!requirements.txt
-!requirements-dev.txt
+# DDD: ダウンロード対象リスト・履歴・監視データ(known_casts_*.json 等)
+DDD/list/
+DDD/list.txt
+DDD/history.txt
+DDD/data/
+DDD/*.json
+# DDD 配下にコミット対象の画像・動画・音声は存在しない
+DDD/**/*.jpg
+DDD/**/*.png
+DDD/**/*.pdf
+DDD/**/*.mp4
+DDD/**/*.mp3
+DDD/**/*.csv
 
 *.zip
-*.mp3
-*.json
-family_events.json
-# Explicit (defense-in-depth) in case the broad *.json rule above is ever narrowed:
-*.local.json
-
-# family-quest: the blanket *.ts rule above targets HLS transport-stream
-# segments (video, generated at runtime), and the blanket *.json rule targets
-# personal data files — neither is meant to exclude this app's own committed
-# source/config. Explicitly un-ignore them so the project stays buildable.
-!family-quest/**/*.ts
-!family-quest/package.json
-!family-quest/package-lock.json
-
-# MY_HOME_SYSTEM/tests/fixtures: テストが参照するコミット必須のフィクスチャ
-# (個人データではない)。広域の *.json ルールの対象外にする (Issue #330 PR-A:
-# legacy_init_db_schema.json がgitignoreで黙ってコミット漏れしCIだけ落ちた再発防止)。
-!MY_HOME_SYSTEM/tests/fixtures/*.json
-
-# alexa-skill / MY_HOME_SYSTEM/alexa: this project's own committed Alexa skill
-# config (interaction model, skill manifest, APL document), not personal data —
-# same reasoning as the family-quest exception above.
-!alexa-skill/**/*.json
-!MY_HOME_SYSTEM/alexa/**/*.json
-!family-quest/tsconfig*.json
-
-# Claude Code project config (team-wide hooks/permissions), not personal data —
-# same reasoning as the family-quest exception above.
-!.claude/settings.json
-# family-quest: the blanket *.mp3 rule above targets personal media, not this
-# app's own sound-effect assets referenced by useSound.ts.
-!family-quest/public/*.mp3
 
 # Test / Coverage artifacts
 .coverage
@@ -116,6 +111,7 @@ htmlcov/
 coverage.xml
 .hypothesis/
 .pytest_cache/
+.ruff_cache/
 tmp_nas/
 temp_fallback/
 temp_backups/

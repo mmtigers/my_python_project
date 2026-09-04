@@ -59,6 +59,25 @@ def run(cmd: list[str]) -> str:
     return result.stdout
 
 
+# Issue #407: ソース/仕様書の走査は、ワーキングツリーの rglob ではなく git 管理下の
+# ファイル一覧(git ls-files)を使う。rglob だと gitignore 済み/未追跡の .py/.sh/.ts
+# (ローカルの作業ファイル、.venv 等)まで「仕様書が見つからない」として報告していた。
+# cmd_full() 1回の実行中は同じ一覧を使い回す(doc_to_source_candidates が仕様書ごとに
+# 呼ばれるため)。REPO_ROOT の差し替え(テスト)や cmd_full() の開始時に必ずクリアする。
+_TRACKED_FILES_CACHE: dict[Path, list[Path]] = {}
+
+
+def tracked_files() -> list[Path]:
+    """git 管理下の全ファイルを REPO_ROOT 基準の相対パスで返す(1実行内でキャッシュ)。"""
+    root = REPO_ROOT
+    cached = _TRACKED_FILES_CACHE.get(root)
+    if cached is None:
+        out = run(["git", "ls-files", "-z"])
+        cached = [Path(p) for p in out.split("\0") if p]
+        _TRACKED_FILES_CACHE[root] = cached
+    return cached
+
+
 def is_excluded(rel_path: Path) -> bool:
     if any(part in EXCLUDE_PARTS for part in rel_path.parts):
         return True
@@ -147,28 +166,32 @@ def doc_to_source_candidates(doc_path: Path) -> list[Path]:
 
     if parts and parts[0] in PY_SOURCE_DIRS:
         # フラット命名なので、ディレクトリ内のどこにあるか探索が必要。
-        # .venv/db_backup 等はgitignore対象でも実ファイルシステム上は存在するため、
-        # rglobが誤って拾ってしまわないようここでも明示的に除外する。
-        matches = list((REPO_ROOT / parts[0]).rglob(f"{stem}.py"))
-        matches += list((REPO_ROOT / parts[0]).rglob(f"{stem}.sh"))
+        # Issue #407: 走査対象は git 管理下のファイルに限定する(以前の rglob は
+        # .venv/db_backup 等の gitignore 済みファイルまで拾い得た)。
+        in_base = [
+            p for p in tracked_files()
+            if p.parts and p.parts[0] == parts[0] and p.suffix in PY_EXTENSIONS
+        ]
+        matches = [p for p in in_base if p.stem == stem]
         # Issue #105: source_to_doc_candidates の disambiguation規則(直近の親
         # ディレクトリ名を接頭辞にした <parent>_<stem>.md)の逆写像。stemの先頭の
         # アンダースコアで(親ディレクトリ名, 残りのstem)に分割し、
-        # "**/<親ディレクトリ名>/<残りのstem>.py(.sh)" というパターンで探索する
+        # "**/<親ディレクトリ名>/<残りのstem>.py(.sh)" に一致するものを探す
         # (例: dashboard_common.md → **/dashboard/common.py)。
         if "_" in stem:
             parent_dir, _, remainder = stem.partition("_")
-            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.py"))
-            matches += list((REPO_ROOT / parts[0]).rglob(f"{parent_dir}/{remainder}.sh"))
+            matches += [
+                p for p in in_base
+                if p.stem == remainder and len(p.parts) >= 2 and p.parts[-2] == parent_dir
+            ]
         rels = []
         seen = set()
-        for m in matches:
-            rel = m.relative_to(REPO_ROOT)
+        for rel in matches:
             if rel not in seen:
                 seen.add(rel)
                 rels.append(rel)
         rels = [rel for rel in rels if not is_excluded(rel)]
-        # #188: rglobは実在するファイルのみを返すため、ソースが既に削除された
+        # #188: git ls-files は実在(追跡中)のファイルしか返さないため、ソースが既に削除された
         # 仕様書ではここまでのmatchesが常に空になり、呼び出し元(cmd_full)の
         # `if candidates and not any(exists)` 判定がcandidates=[]によって
         # スキップされ、孤立ドキュメントとして永久に検知されなかった
@@ -212,13 +235,24 @@ class Report:
 
 
 def cmd_pr(base: str, head: str) -> Report:
-    diff_output = run(["git", "diff", "--name-status", base, head])
+    # --find-renames を明示し、rename 検知が git 設定(diff.renames)に依存しないようにする。
+    diff_output = run(["git", "diff", "--name-status", "--find-renames", base, head])
     changed: dict[str, str] = {}
     for line in diff_output.splitlines():
         if not line.strip():
             continue
         status, *paths = line.split("\t")
-        changed[paths[-1]] = status[0]  # rename時は新パスを使う
+        code = status[0]
+        if code == "R":
+            # Issue #407: rename(R) は「旧パスの削除 + 新パスの追加」として扱う。
+            # 以前は新パスしか見ておらず、旧ソースの仕様書が孤立したことを検知できなかった。
+            changed[paths[0]] = "D"
+            changed[paths[-1]] = "A"
+        elif code == "C":
+            # copy(C) は旧パスがそのまま残るので、新パスの追加としてのみ扱う。
+            changed[paths[-1]] = "A"
+        else:
+            changed[paths[-1]] = code
 
     changed_paths = set(changed.keys())
     report = Report()
@@ -263,61 +297,47 @@ def cmd_pr(base: str, head: str) -> Report:
 
 
 def git_last_commit_epoch(rel_path: Path) -> int | None:
-    out = run(["git", "log", "-1", "--format=%ct", "--", str(rel_path)]).strip()
+    # Issue #407: rename を跨いで履歴を追う(--follow)。
+    out = run(["git", "log", "-1", "--follow", "--format=%ct", "--", str(rel_path)]).strip()
     return int(out) if out else None
 
 
 def cmd_full() -> Report:
     report = Report()
+    # Issue #407: 走査は git 管理下のファイル(git ls-files)に限定する。
+    _TRACKED_FILES_CACHE.clear()
+    spec_rel_root = SPEC_ROOT.relative_to(REPO_ROOT)
 
     # 1. ソース起点: 未文書化 + ドリフト(ソースの方が新しい)
-    for base_dir in PY_SOURCE_DIRS:
-        for ext in PY_EXTENSIONS:
-            for src in (REPO_ROOT / base_dir).rglob(f"*{ext}"):
-                rel = src.relative_to(REPO_ROOT)
-                if not is_tracked_source(rel):
-                    continue
-                candidates = source_to_doc_candidates(rel)
-                existing = [c for c in candidates if c.exists()]
-                if not existing:
-                    report.undocumented.append(str(rel))
-                    continue
-                doc = existing[0]
-                src_t = git_last_commit_epoch(rel)
-                doc_t = git_last_commit_epoch(doc.relative_to(REPO_ROOT))
-                if src_t and doc_t and src_t > doc_t:
-                    days = (src_t - doc_t) / 86400
-                    report.stale.append(
-                        f"{rel} (ソースが{days:.1f}日新しい) → {doc.relative_to(REPO_ROOT)}"
-                    )
+    for rel in tracked_files():
+        if not is_tracked_source(rel):
+            continue
+        candidates = source_to_doc_candidates(rel)
+        existing = [c for c in candidates if c.exists()]
+        if not existing:
+            report.undocumented.append(str(rel))
+            continue
+        doc = existing[0]
+        src_t = git_last_commit_epoch(rel)
+        doc_t = git_last_commit_epoch(doc.relative_to(REPO_ROOT))
+        if src_t and doc_t and src_t > doc_t:
+            days = (src_t - doc_t) / 86400
+            report.stale.append(
+                f"{rel} (ソースが{days:.1f}日新しい) → {doc.relative_to(REPO_ROOT)}"
+            )
 
-    fq_src_dir = REPO_ROOT / FQ_SOURCE_ROOT
-    for ext in FQ_EXTENSIONS:
-        for src in fq_src_dir.rglob(f"*{ext}"):
-            rel = src.relative_to(REPO_ROOT)
-            if not is_tracked_source(rel):
-                continue
-            candidates = source_to_doc_candidates(rel)
-            existing = [c for c in candidates if c.exists()]
-            if not existing:
-                report.undocumented.append(str(rel))
-                continue
-            doc = existing[0]
-            src_t = git_last_commit_epoch(rel)
-            doc_t = git_last_commit_epoch(doc.relative_to(REPO_ROOT))
-            if src_t and doc_t and src_t > doc_t:
-                days = (src_t - doc_t) / 86400
-                report.stale.append(
-                    f"{rel} (ソースが{days:.1f}日新しい) → {doc.relative_to(REPO_ROOT)}"
-                )
-
-    # 2. 仕様書起点: 孤立ドキュメント(対応ソースが存在しない)
-    for doc in SPEC_ROOT.rglob("*.md"):
-        rel = doc.relative_to(REPO_ROOT)
+    # 2. 仕様書起点: 孤立ドキュメント(対応ソースが git 管理下に存在しない)
+    tracked_set = set(tracked_files())
+    for rel in tracked_files():
+        if rel.suffix != ".md" or not rel.is_relative_to(spec_rel_root):
+            continue
+        doc = REPO_ROOT / rel
         if rel.name in {"全体設計書.md", "README.md"}:
             continue
         candidates = doc_to_source_candidates(doc)
-        if candidates and not any((REPO_ROOT / c).exists() for c in candidates):
+        # 実在確認もワーキングツリーではなく git 管理下かどうかで行う
+        # (未追跡の同名ファイルがあっても孤立判定を覆さない)。
+        if candidates and not any(c in tracked_set for c in candidates):
             report.orphaned.append(str(rel))
 
     return report

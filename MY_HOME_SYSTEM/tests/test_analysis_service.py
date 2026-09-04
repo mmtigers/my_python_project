@@ -13,6 +13,7 @@ from datetime import datetime
 
 import pandas as pd
 import pytz
+from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -175,6 +176,9 @@ class TestLoadSensorDataPowerDeviceTypeClassification:
         assert row["device_type"] == "Nature Remo E Lite"
 
 
+# C-L3 (Issue #414): 月初 00:00:00〜00:00:01 JST の1秒窓で境界判定が揺れるため、
+# 現在時刻を月の半ば(2026-09-15 12:00 JST = 03:00 UTC)に固定する。
+@freeze_time("2026-09-15 03:00:00")
 class TestCalculateMonthlyCostCumulative:
     def test_returns_zero_when_no_power_data(self, isolated_db):
         assert analysis_service.calculate_monthly_cost_cumulative() == 0
@@ -320,6 +324,7 @@ class TestWeatherFunctionsFailSoftOnSchemaMismatch:
         result = analysis_service.load_weather_history()
         assert isinstance(result, pd.DataFrame)
 
+    @freeze_time("2026-09-15 03:00:00")  # C-L3 (Issue #414): naive な datetime.now() の日付を固定
     def test_load_weather_history_returns_rows_matching_location(self, isolated_db):
         today = datetime.now().strftime("%Y-%m-%d")
         self._insert_weather_row(isolated_db, today, location="伊丹")
