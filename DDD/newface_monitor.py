@@ -1204,6 +1204,10 @@ class MonitorConfig:
     # サイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の
     # 再発防止。詳細は _handle_site_network_failure を参照)。
     CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24
+    # #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、
+    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、
+    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。
+    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5
 
     @classmethod
     def get_data_dir(cls) -> Path:
@@ -1492,7 +1496,8 @@ class DiscordNotifier:
 
         content = (
             f"⚠️ **監視サイト疎通不能アラート**\n"
-            f"「{site.name}」({site.site_id}) の巡回が{failure_count}回連続で失敗しています。\n"
+            f"「{site.name}」({site.site_id}) の巡回が{failure_count}回連続で失敗しています"
+            f"(疎通不能・別ドメインへのリダイレクト・キャスト0件のいずれか)。\n"
             f"URL: {site.target_url}\n"
             f"サイト閉鎖・ドメイン移転の可能性があります。復旧見込みが無ければ "
             f"newface_monitor.py の MonitorConfig.SITES から当該エントリを削除してください。\n"
@@ -1510,6 +1515,18 @@ class DiscordNotifier:
             logger.error(f"Failed to send site failure alert for site '{site.site_id}': {e}", exc_info=True)
             self._circuit_breaker.record_failure()
             return False
+
+
+class SiteUnavailableError(Exception):
+    """HTTP的には成功したが、巡回結果として「サイトが消失した疑い」を示す例外(#395)。
+
+    2026-09-02のbellica閉鎖では、ドメインがホスティング業者のポータルへ302で
+    リダイレクトされる形になった。証明書が正常ならrequestsはリダイレクトを追従して
+    200を返すため、requests.RequestExceptionだけを失敗扱いにしていると永久に
+    検知されず、毎時WARNING「No elements found」を出し続けるだけになる。
+    別ドメインへのリダイレクト、およびキャスト0件の巡回結果を、ネットワーク失敗と
+    同じく連続失敗として計上するために用いる。
+    """
 
 
 class KnownCastsUnavailableError(Exception):
@@ -1783,7 +1800,19 @@ class DataManager:
             with open(failures_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 # 破損等で辞書以外が保存されていた場合も安全に初期状態へ戻す
-                return data if isinstance(data, dict) else {}
+                if not isinstance(data, dict):
+                    return {}
+                # #395: トップレベルだけでなく各エントリも辞書であることを検証する。
+                # {"site": 5} のような値が混入すると record_site_failure の
+                # entry.get で AttributeError となり、_run_monitor_locked の
+                # CRITICAL(Discord発報)が毎時繰り返されていた。不正なエントリは
+                # 初期状態(記録なし)として読み飛ばす。
+                invalid = [k for k, v in data.items() if not isinstance(v, dict)]
+                if invalid:
+                    logger.warning(
+                        f"Ignoring malformed site failure entries in {failures_file}: {invalid}"
+                    )
+                return {k: v for k, v in data.items() if isinstance(v, dict)}
         except DataManager._LOAD_ERRORS as e:
             # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
             # 含めて読み込み失敗として扱い、監視処理本体を止めない
@@ -1850,6 +1879,16 @@ class DataManager:
         self.save_site_failures(data)
 
 
+def _normalized_netloc(url: str) -> str:
+    """URLのドメイン部分を比較用に正規化する(小文字化し先頭の 'www.' を除去)。
+
+    #395: リダイレクト先が別ドメインかどうかの判定に用いる。'example.com' と
+    'www.example.com' の間の正規化リダイレクトを閉鎖疑いと誤判定しないための処理。
+    """
+    netloc = urlparse(url).netloc.lower()
+    return netloc[4:] if netloc.startswith('www.') else netloc
+
+
 class WebMonitor:
     """Webサイトの監視とスクレイピングを統括するクラス。"""
 
@@ -1887,6 +1926,9 @@ class WebMonitor:
 
         Raises:
             requests.RequestException: 通信エラー時。
+            SiteUnavailableError: 最終応答のドメインが target_url と異なる場合
+                (閉鎖・移転したサイトが別ドメインのポータルへリダイレクトされる
+                ケース。#395)。
         """
         try:
             # Bot検知回避のためのランダム待機
@@ -1895,6 +1937,15 @@ class WebMonitor:
             logger.debug(f"Fetching URL: {site.target_url}")
             response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)
             response.raise_for_status()
+
+            # #395: bellica閉鎖時の実際の症状は「302で別ドメインのポータルへ
+            # リダイレクト」であり、証明書が正常ならrequestsが追従して200を返す。
+            # HTTP的に成功していても最終URLのドメインが監視対象と異なる場合は、
+            # サイト消失の疑いとして連続失敗に計上する(www.の有無は同一ドメイン扱い)。
+            if response.url and _normalized_netloc(response.url) != _normalized_netloc(site.target_url):
+                raise SiteUnavailableError(
+                    f"redirected to a different domain: {site.target_url} -> {response.url}"
+                )
 
             soup = BeautifulSoup(response.content, 'html.parser')
             return self._parse_html(soup, site)
@@ -2091,10 +2142,29 @@ class WebMonitor:
 # Main Execution Flow
 # ==========================================
 
+@dataclass
+class SiteCheckResult:
+    """_check_site の1サイト分の結果(#395)。
+
+    Attributes:
+        failed (bool): 疎通不能・別ドメインへのリダイレクト・キャスト0件のいずれかで
+            連続失敗として計上したか。自局側障害の判定(失敗サイト数の割合)に使う。
+        pending_alert_count (Optional[int]): 連続失敗が閾値に達し、かつ閉鎖疑い
+            アラートが未送信の場合の連続失敗回数。実行終了時に
+            _send_pending_site_failure_alerts がまとめて送信判断を行う。
+    """
+    failed: bool = False
+    pending_alert_count: Optional[int] = None
+
+
 def _handle_site_network_failure(
-    notifier: DiscordNotifier, site: SiteConfig, exc: Exception, data_manager: DataManager
-) -> None:
-    """サイト巡回のネットワーク失敗を記録し、連続失敗が閾値に達したサイトを1回だけアラートする。
+    notifier: DiscordNotifier,
+    site: SiteConfig,
+    exc: Exception,
+    data_manager: DataManager,
+    log_level: int = logging.ERROR,
+) -> Optional[int]:
+    """サイト巡回の失敗を記録し、閉鎖疑いアラートが必要なら連続失敗回数を返す。
 
     2026-09-02にbellicaが閉鎖され(ドメインがホスティング業者のデフォルト自己署名
     証明書+ポータルサイトへの302リダイレクトに変化)、恒久的に消失したサイトが
@@ -2106,34 +2176,86 @@ def _handle_site_network_failure(
     連続失敗の状態は疎通成功時にリセットされる(_check_site参照)ため、一時的な
     長期障害から復旧した場合は通常のERROR運用に自動的に戻る。
 
+    #395での変更点:
+    - ログの降格は「アラート送信済み」ではなく「連続失敗回数が閾値以上」で判定する。
+      Webhook未設定/失効でアラート送信が失敗し続けると alerted が永久に立たず、
+      毎時ERROR→Discord発報が続いていたため、送信の成否とは切り離して降格する
+      (送信自体は alerted が立つまで毎回再試行される)。
+    - アラートの送信はここでは行わず、戻り値で「送信が必要」を伝える。同一実行内で
+      失敗サイト数が総数の大半を占める場合(Pi側の回線断等の自局側障害)に79件の
+      アラートが一斉送信されるのを防ぐため、_run_monitor_locked が全サイト処理後に
+      _send_pending_site_failure_alerts でまとめて送信可否を判断する。
+
     Args:
-        notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。
+        notifier (DiscordNotifier): (後方互換のため残している。送信は行わない)
         site (SiteConfig): 巡回に失敗したサイトの設定。
-        exc (Exception): 発生したネットワーク例外(ログ出力用)。
+        exc (Exception): 発生した例外(ログ出力用)。
         data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに
             束縛されたDataManager(#364)。
+        log_level (int): 閾値未満のときに使うログレベル。ネットワーク失敗は
+            ERROR、キャスト0件(レイアウト変更の可能性もある)はWARNINGを渡す。
+
+    Returns:
+        Optional[int]: 連続失敗回数が閾値以上かつアラート未送信なら現在の連続
+            失敗回数(=アラート送信が必要)。それ以外は None。
     """
     count, alerted = data_manager.record_site_failure(site.site_id)
-
-    if not alerted and count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD:
-        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する
-        if notifier.notify_site_failure_alert(site, count):
-            data_manager.mark_site_failure_alerted(site.site_id)
-            alerted = True
+    threshold_reached = count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD
 
     message = (
-        f"Aborting monitor run for site '{site.site_id}' due to network failure "
+        f"Aborting monitor run for site '{site.site_id}' due to site failure "
         f"({count} consecutive failures): {exc}"
     )
     if alerted:
         logger.warning(f"{message} (closure alert already sent)")
+    elif threshold_reached:
+        logger.warning(f"{message} (closure alert threshold reached; alert pending)")
     else:
-        logger.error(message)
+        logger.log(log_level, message)
+
+    return count if (threshold_reached and not alerted) else None
+
+
+def _send_pending_site_failure_alerts(
+    notifier: DiscordNotifier,
+    data_manager: DataManager,
+    pending: List[Tuple[SiteConfig, int]],
+    failed_count: int,
+    total_count: int,
+) -> None:
+    """全サイト処理後に、閾値到達サイトの閉鎖疑いアラートをまとめて送信する(#395)。
+
+    同一実行内で失敗したサイトの割合が MonitorConfig.SELF_OUTAGE_SUPPRESS_RATIO を
+    超える場合は、個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の
+    障害とみなして送信を抑止する。この場合 alerted は立てないため、回線復旧後の
+    次回実行で(まだ閾値以上なら)改めて送信判断が行われる。
+
+    Args:
+        notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。
+        data_manager (DataManager): 送信成功時に alerted を永続化するDataManager。
+        pending (List[Tuple[SiteConfig, int]]): (サイト設定, 連続失敗回数) のリスト。
+        failed_count (int): 今回の実行で失敗として計上したサイト数。
+        total_count (int): 今回の実行で処理対象としたサイト数。
+    """
+    if not pending:
+        return
+
+    if total_count > 0 and failed_count / total_count > MonitorConfig.SELF_OUTAGE_SUPPRESS_RATIO:
+        logger.warning(
+            f"Suppressing {len(pending)} site closure alert(s): {failed_count}/{total_count} sites "
+            "failed in this run, which looks like a local network outage rather than site closures."
+        )
+        return
+
+    for site, count in pending:
+        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する
+        if notifier.notify_site_failure_alert(site, count):
+            data_manager.mark_site_failure_alerted(site.site_id)
 
 
 def _check_site(
     monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig, data_manager: DataManager
-) -> None:
+) -> SiteCheckResult:
     """1サイト分の巡回・差分検知・通知・保存を行う。
 
     サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が
@@ -2145,6 +2267,9 @@ def _check_site(
         site (SiteConfig): 処理対象のサイト設定。
         data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに
             束縛されたDataManager(#364)。
+
+    Returns:
+        SiteCheckResult: 失敗計上の有無と、閉鎖疑いアラートの要否(#395)。
     """
     logger.debug(f"--- Checking site '{site.site_id}' ({site.name}) ---")
 
@@ -2157,26 +2282,28 @@ def _check_site(
         # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする
         # (詳細なERRORログはload_known_casts側で出力済み)。
         logger.warning(f"Skipping site '{site.site_id}' because known casts are unavailable: {e}")
-        return
+        return SiteCheckResult()
 
     # 2. Fetch Data
     try:
         current_casts = monitor.fetch_current_casts(site)
-    except requests.RequestException as e:
-        _handle_site_network_failure(notifier, site, e, data_manager)
-        return
-
-    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する
-    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で
-    # あり、閉鎖疑いを判定する疎通不能とは区別する)
-    data_manager.clear_site_failure(site.site_id)
+    except (requests.RequestException, SiteUnavailableError) as e:
+        pending = _handle_site_network_failure(notifier, site, e, data_manager)
+        return SiteCheckResult(failed=True, pending_alert_count=pending)
 
     if not current_casts:
-        logger.debug(
-            f"No casts found via scraping for site '{site.site_id}'. "
-            "Verify selectors or site availability."
+        # #395: 200を返すが1件も抽出できない状態が続くのも消失サイトの症状
+        # (bellicaはポータルへのリダイレクト後、要素が見つからないだけだった)。
+        # セレクタ不一致等のレイアウト変更の可能性もあるため単発ではERRORにせず、
+        # 連続失敗として計上し閾値到達で閉鎖疑いアラートの対象にする。
+        pending = _handle_site_network_failure(
+            notifier, site, SiteUnavailableError("no casts parsed"), data_manager,
+            log_level=logging.WARNING,
         )
-        return
+        return SiteCheckResult(failed=True, pending_alert_count=pending)
+
+    # 到達できてキャストを取得できた時点で連続失敗の記録があれば解消する
+    data_manager.clear_site_failure(site.site_id)
 
     # 3. Detect Diff
     new_casts_set = current_casts - known_casts
@@ -2208,6 +2335,7 @@ def _check_site(
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
 
     data_manager.save_known_casts(site, updated_casts)
+    return SiteCheckResult()
 
 
 def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManager) -> None:
@@ -2319,12 +2447,25 @@ def _run_monitor_locked() -> None:
         monitor = WebMonitor()
         notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
 
+        # #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に
+        # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。
+        failed_count = 0
+        pending_alerts: List[Tuple[SiteConfig, int]] = []
         for site in MonitorConfig.SITES:
             try:
-                _check_site(monitor, notifier, site, data_manager)
+                result = _check_site(monitor, notifier, site, data_manager)
             except Exception as e:
                 # 1サイトの予期しない例外で他サイトの処理を止めない
                 logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
+                continue
+            if result.failed:
+                failed_count += 1
+            if result.pending_alert_count is not None:
+                pending_alerts.append((site, result.pending_alert_count))
+
+        _send_pending_site_failure_alerts(
+            notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)
+        )
 
         _maybe_send_daily_summary(notifier, data_manager)
 
