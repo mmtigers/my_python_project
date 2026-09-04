@@ -190,10 +190,13 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
         logger.error(f"❌ [{cam_conf['name']}] NAS folder not found or unmounted: {nas_folder}")
         return None
 
-    # 最新のmp4ファイルを取得 (NVRの仕様に依存しますが、直近に更新されたファイルを取得)
-    # 検索範囲を絞るため、本日分の日付ディレクトリなどを指定するとより高速です
-    search_pattern = os.path.join(nas_folder, "**", "*.mp4")
-    mp4_files = sorted(glob.glob(search_pattern, recursive=True), key=os.path.getmtime, reverse=True)
+    # 最新のmp4ファイルを取得
+    # #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
+    # 再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
+    # camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
+    today_str = dt_class.now().strftime("%Y%m%d")
+    search_pattern = os.path.join(nas_folder, f"{today_str}_*.mp4")
+    mp4_files = sorted(glob.glob(search_pattern), key=os.path.getmtime, reverse=True)
     
     if not mp4_files:
         logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")
@@ -233,7 +236,11 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
                 logger.error(f"❌ [{cam_conf['name']}] Unexpected error in NVR extraction: {e}")
                 break
 
-            time.sleep(2 ** attempt)  # Exponential Backoff
+            # #411 S-L10: 最終試行後もsleepしていたため、失敗確定後に無駄な最大8秒待ちが
+            # 発生していた(呼出元は動体検知の同期パスで待たされる)。次のリトライがある
+            # ときだけ待つ。
+            if attempt < max_retries:
+                time.sleep(2 ** attempt)  # Exponential Backoff
 
         return None
     finally:
@@ -616,8 +623,14 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
 async def main() -> None:
     if not WSDL_DIR: return logger.error("WSDL not found")
+    # #411 S-L3: devices.json未配置等でconfig.CAMERASが空だと
+    # ThreadPoolExecutor(max_workers=0)がValueErrorを送出しプロセスが即死する。
+    # カメラが1台も無ければ何もせず正常終了する。
+    if not config.CAMERAS:
+        logger.warning("⚠️ config.CAMERAS が空のため camera_monitor は何も監視せず終了します。")
+        return
     loop = asyncio.get_running_loop()
-    with ThreadPoolExecutor(max_workers=len(config.CAMERAS)) as executor:
+    with ThreadPoolExecutor(max_workers=max(1, len(config.CAMERAS))) as executor:
         await asyncio.gather(*[loop.run_in_executor(executor, monitor_single_camera, cam) for cam in config.CAMERAS])
 
 if __name__ == "__main__":

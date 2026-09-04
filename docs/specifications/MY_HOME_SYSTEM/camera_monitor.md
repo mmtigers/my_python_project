@@ -192,8 +192,16 @@
 * 根拠: `subprocess.run(cmd` (行番号: 221 / 抜粋: "subprocess.run(cmd,")
 
 
+* **（#411 S-L10で修正）** 最新mp4ファイルの検索は以前 `os.path.join(nas_folder, "**", "*.mp4")` を `recursive=True` で走査しており、動体検知のたびにNVRの保存期間全体（数十日分）をCIFS越しにglobしていた。`camera_service.py` の録画ファイル命名規則（`{YYYYMMDD}_*.mp4`）に合わせ、当日分の日付プレフィックスに絞った非再帰globに変更した。
+* 根拠: `today_str = dt_class.now().strftime("%Y%m%d")` (行番号: 197)、`search_pattern = os.path.join(nas_folder, f"{today_str}_*.mp4")` (行番号: 198)
+
+
 * **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は`/tmp`に`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
 * 根拠: `except subprocess.TimeoutExpired` (行番号: 228 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 239 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 245 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 246 / 抜粋: "except OSError:")
+
+
+* **（#411 S-L10で修正）** リトライ間のExponential Backoff (`time.sleep(2 ** attempt)`) は以前、最終試行(3回目)の失敗後にも実行されており、結果が確定した(呼出元を待たせるだけの)状態のまま最大8秒の無駄な待機が発生していた。次のリトライが残っている場合のみsleepするよう変更した。
+* 根拠: `if attempt < max_retries:` (行番号: 242)
 
 
 
@@ -292,23 +300,27 @@
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 618〜622 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 624〜634 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 618 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 624 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `main` (行番号: 618 / 抜粋: "-> None:")
+* 根拠: `main` (行番号: 624 / 抜粋: "-> None:")
 
 
 * **副作用**: 複数スレッドの起動。
-* 根拠: `ThreadPoolExecutor` (行番号: 621 / 抜粋: "with ThreadPoolExecutor")
+* 根拠: `ThreadPoolExecutor` (行番号: 633 / 抜粋: "with ThreadPoolExecutor")
 
 
 * **エラーハンドリング**: WSDLが見つからない場合はエラーログを出力して終了。
-* 根拠: `if not WSDL_DIR:` (行番号: 619 / 抜粋: "if not WSDL_DIR: return logger")
+* 根拠: `if not WSDL_DIR:` (行番号: 625 / 抜粋: "if not WSDL_DIR: return logger")
+
+
+* **（#411 S-L3で修正）** `config.CAMERAS` が空（`devices.json` 未配置等）の場合、以前は `ThreadPoolExecutor(max_workers=len(config.CAMERAS))` が `max_workers=0` となり `ValueError` を送出してプロセスが即座に落ちていた。カメラが1台も無い場合は警告ログを出して何もせず正常終了し、カメラが存在する場合も `max_workers` を `max(1, ...)` で下限保護する。
+* 根拠: `if not config.CAMERAS:` (行番号: 629)、`ThreadPoolExecutor(max_workers=max(1, len(config.CAMERAS)))` (行番号: 633)
 
 
 

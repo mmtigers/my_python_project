@@ -7,6 +7,7 @@ monitors/camera_monitor.py のLow優先度指摘のテスト。
 - monitor_single_camera: 玄関カメラの全イベントペイロード(dir(events)含む)が
   デバッグ目的のまま INFO レベルで本番ログに出力され続けていた問題。
 """
+import datetime
 import glob
 import inspect
 import os
@@ -32,7 +33,10 @@ class TestCaptureSnapshotCleansUpOnFailure:
         cam_name = f"TestCam_{uuid.uuid4().hex[:8]}"
         nas_folder = tmp_path / cam_name
         nas_folder.mkdir()
-        (nas_folder / "recording.mp4").write_bytes(b"fake video")
+        # #411 S-L10 で当日分("{YYYYMMDD}_*.mp4")に検索を絞ったため、録画ファイル名も
+        # 実際のNVR命名規則に合わせる。
+        today_str = datetime.datetime.now().strftime("%Y%m%d")
+        (nas_folder / f"{today_str}_000000.mp4").write_bytes(b"fake video")
 
         cam_conf = {"name": cam_name, "nas_folder": cam_name}
         monkeypatch.setattr(camera_monitor.config, "NVR_RECORD_DIR", str(tmp_path), raising=False)
