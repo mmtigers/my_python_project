@@ -67,29 +67,31 @@
 
 ### エンドポイント `callback_line`
 
-* **役割**: LINE BotからのWebhookを受け取り、署名を検証した上で `line_handler` に処理を委譲する。
-* 根拠: `callback_line`関数定義と内部の`handle`呼び出し (行番号: 19〜33 / 抜粋: `@router.post("/callback/line")`)
+* **役割**: LINE BotからのWebhookを受け取り、署名を検証した上で `line_handler` に処理を委譲する。**（L-L1 / Issue #410, #376で修正）** `X-Line-Signature`ヘッダが無い/空の場合はSDKへ渡す前にHTTP 400で拒否する（以前はSDK内部の`AttributeError`が汎用`except`に落ち、署名検証していないのに`"OK"`(200)を返していた）。ボディのUTF-8デコード失敗もHTTP 400にする（以前は`try`の外で`UnicodeDecodeError`→500）。複数イベント一括配信時のイベント単位の例外隔離は本エンドポイントではなく`handlers/line_handler.py`の各ハンドラ側で行う。
+* 根拠: `callback_line`関数定義と内部の`handle`呼び出し (行番号: 20〜47 / 抜粋: `@router.post("/callback/line")`)、署名欠落チェック (行番号: 29〜30 / 抜粋: `if not x_line_signature:`)、デコード (行番号: 33〜36 / 抜粋: `except UnicodeDecodeError:`)
 
 
 * **引数/リクエスト**:
 * `request`: FastAPI `Request` オブジェクト (生のボディ取得用)
-* `x_line_signature`: 文字列 (HTTPヘッダーからの署名文字列)
-* 根拠: 関数の引数定義 (行番号: 20 / 抜粋: `async def callback_line(request...`)
+* `x_line_signature`: `Optional[str]` (HTTPヘッダーからの署名文字列。欠落時は`None`)
+* 根拠: 関数の引数定義 (行番号: 21 / 抜粋: `async def callback_line(request: Request, x_line_signature: Optional[str] = Header(None))`)
 
 
 * **戻り値/レスポンス**: 正常時は `"OK"` (文字列)。
-* 根拠: return文とアノテーション (行番号: 20, 33 / 抜粋: `-> str:`、`return "OK"`)
+* 根拠: return文とアノテーション (行番号: 21, 47 / 抜粋: `-> str:`、`return "OK"`)
 
 
 * **副作用**: `line_handler.line_handler.handle` の実行による副作用（詳細不明）。エラー時にロガー経由での出力。
-* 根拠: 関数内の処理 (行番号: 28, 32 / 抜粋: `await asyncio.to_thread(...)`、`logger.error(...)`)
+* 根拠: 関数内の処理 (行番号: 42, 46 / 抜粋: `await asyncio.to_thread(...)`、`logger.error(...)`)
 
 
 * **エラーハンドリング**:
 * `line_handler.line_handler` が存在しない場合は HTTP 501 を返す。
+* **（L-L1で追加）** `x_line_signature` が `None`/空文字の場合は HTTP 400 (`"Missing X-Line-Signature"`) を返す（SDKは呼ばない）。
+* **（L-L1で追加）** ボディが UTF-8 としてデコードできない場合は HTTP 400 (`"Body is not valid UTF-8"`) を返す。
 * `InvalidSignatureError` 発生時は HTTP 400 を返す。
 * その他例外時はロガーでエラー出力し、そのまま `"OK"` を返す（例外の再スローなし）。
-* 根拠: try-exceptブロックとif文 (行番号: 22, 29〜32 / 抜粋: `except InvalidSignatureError:`)
+* 根拠: try-exceptブロックとif文 (行番号: 23, 29〜30, 35〜36, 43〜46 / 抜粋: `except InvalidSignatureError:`)
 
 
 
@@ -136,8 +138,11 @@ flowchart TD
     %% callback_lineのフロー
     StartLine["Start: callback_line"] --> CheckConfig{"line_handlerが存在するか?"}
     CheckConfig -->|"No"| Raise501["HTTP 501エラー送出"]
-    CheckConfig -->|"Yes"| GetBody["リクエストボディ取得"]
-    GetBody --> CallHandle["外部: line_handler.handle()"]
+    CheckConfig -->|"Yes"| CheckSig{"L-L1: X-Line-Signature<br>ヘッダあり?"}
+    CheckSig -->|"No"| Raise400Sig["HTTP 400エラー送出"]
+    CheckSig -->|"Yes"| GetBody["リクエストボディ取得<br>(UTF-8デコード)"]
+    GetBody -->|"UnicodeDecodeError"| Raise400Body["HTTP 400エラー送出"]
+    GetBody -->|"OK"| CallHandle["外部: line_handler.handle()"]
     CallHandle --> CheckError{"例外発生か?"}
     CheckError -->|"InvalidSignatureError"| Raise400["HTTP 400エラー送出"]
     CheckError -->|"Other Exception"| LogError["エラーログ出力"]
@@ -230,8 +235,8 @@ graph TD
 * 根拠: トークン検証ブロック (行番号: 51〜53)
 
 
-* `callback_line` において、`InvalidSignatureError` 以外の例外が発生した場合、ロガーには出力されるが例外は再スローされず `"OK"` が返却される。
-* 根拠: `except Exception as e:` 内の処理 (行番号: 31〜32)
+* `callback_line` において、`InvalidSignatureError` 以外の例外が発生した場合、ロガーには出力されるが例外は再スローされず `"OK"` が返却される。**（L-L1で範囲を縮小）** 以前は署名ヘッダ欠落時のSDK内部`AttributeError`もこの経路で200になっていたが、現在は署名欠落・UTF-8デコード失敗を事前に400で弾くため、この汎用ハンドラに到達するのはSDK/ハンドラ実行中の想定外例外のみ。複数イベント一括配信時に1件目の例外で以降のイベントが処理されない問題は、`handlers/line_handler.py`側の`handle_message`/`handle_postback`がイベント単位で例外を握る（`exc_info=True`でログ）ことで解消している（#376）。
+* 根拠: `except Exception as e:` 内の処理 (行番号: 45〜46)、事前チェック (行番号: 29〜36)
 
 
 * **(コミット`94c2198`, H-4修正で解消)** 修正前は `device_type = getattr(ctx, "deviceType", getattr(body, "deviceType", "Unknown"))` という実装だったが、`SwitchBotContext.deviceType` がPydanticの`Optional`フィールドとして常に定義済みだったため`getattr`のデフォルト値が効かず、`ctx.deviceType`が未設定(`None`)の場合でも`getattr`は`None`をそのまま返し、`body.deviceType`側へのフォールバックが機能しなかった。加えて`TARGET_DEVICE_TYPES`はデバイス一覧APIの語彙のみだったため、SwitchBot公式Webhookのペイロード（`context.deviceType`に`"WoContact"`等が入る形式）は常に「対象外デバイス」として黙って捨てられていた。現在は`device_type = ctx.deviceType or getattr(body, "deviceType", None) or "Unknown"`という`or`連鎖に変更され、`TARGET_DEVICE_TYPES`も公式Webhook語彙を含むsetに拡張されている。

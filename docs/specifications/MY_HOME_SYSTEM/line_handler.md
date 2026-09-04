@@ -78,89 +78,116 @@
 
 
 
+### `AI_REPLY_TIMEOUT_SEC` (変数、Issue #376で追加)
+
+* **役割**: `_process_message_async`のAI経路（`ai_service.analyze_text_and_execute`）に課す総時間上限（秒、`20`）。Gemini呼び出しはtenacityリトライ（最大3試行）×最大`MAX_TOOL_ROUNDS`回の連鎖になりうる一方、LINEのreply tokenは短命（約1分）で超過すると`reply_message`が400になり無応答になるため、上限内に終わらなければ打ち切る。
+* 根拠: `AI_REPLY_TIMEOUT_SEC = 20` (行番号: 47)
+
+### `_is_redelivery` (関数、Issue #376で追加)
+
+* **役割**: LINE Webhookの再配信（`event.delivery_context.is_redelivery`）かどうかを返す。再配信を有効化していると応答が遅れた同一イベントが再送され、冪等性チェックの無い記録処理（体調・食事）が二重登録されるため、`handle_message`/`handle_postback`はこれが真のイベントをスキップする。SDKの値が厳密に`True`の場合のみ真とし（`is True`）、属性欠落や真偽値以外（テストの`MagicMock`等）は再配信扱いしない。
+* 根拠: `def _is_redelivery(event) -> bool:` (行番号: 50-59 / 抜粋: "return getattr(ctx, \"is_redelivery\", False) is True")
+
+
+* **引数/リクエスト**: `event`（SDKのイベントオブジェクト）
+* 根拠: 関数シグネチャ (行番号: 50)
+
+
+* **戻り値/レスポンス**: `bool`
+* 根拠: (行番号: 59)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 50-59)
+
+
+* **エラーハンドリング**: `getattr`のデフォルトで属性欠落を吸収
+* 根拠: (行番号: 58-59)
+
 ### `reply_message`
 
-* **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。
-* 根拠: `def reply_message(reply_token: str, messages: List[Any]):` (行番号: 71-85 / 抜粋: "def reply_message(reply_token: str, messages: List[Any]):")
+* **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。**（Issue #376で修正）** 返信が失敗（reply tokenの期限切れ等）し、かつ`user_id`が渡されている場合は`line_bot_api.push_message`（`PushMessageRequest`）へフォールバックして同じメッセージを届ける（以前はログのみで無応答だった）。
+* 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 81-114 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (行番号: 103-114 / 抜粋: "line_bot_api.push_message(")
 
 
 * **引数/リクエスト**:
 * `reply_token`: `str`型 (LINE APIの返信用トークン)
 * `messages`: `List[Any]`型または単一のオブジェクト (送信するメッセージオブジェクト)
-* 根拠: 引数定義 (行番号: 71 / 抜粋: "def reply_message(reply_token: str, messages: List[Any]):")
+* `user_id`: `Optional[str]` (Issue #376で追加。返信失敗時のpush先。`None`ならフォールバックしない)
+* 根拠: 引数定義 (行番号: 81)
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: return文の記述がない (行番号: 71-85 / 抜粋: "line_bot_api.reply_message(")
+* 根拠: return文はいずれも値なし (行番号: 89, 97, 104)
 
 
-* **副作用**: LINE Platform経由でのユーザーへのメッセージ送信。
-* 根拠: 外部API呼び出し (行番号: 78-83 / 抜粋: "line_bot_api.reply_message(")
+* **副作用**: LINE Platform経由でのユーザーへのメッセージ送信（reply、失敗時はpush。pushは月間送信数の枠を消費する）。
+* 根拠: 外部API呼び出し (行番号: 92-97, 107-111 / 抜粋: "line_bot_api.reply_message(" / "line_bot_api.push_message(")
 
 
-* **エラーハンドリング**: `line_bot_api` 未初期化時は早期return。それ以外の例外発生時は `logger.error` でログ出力を行い、処理を継続する。
-* 根拠: `if not line_bot_api: return` / `except Exception as e: logger.error(...)` (行番号: 73, 84-85 / 抜粋: "if not line_bot_api: return")
+* **エラーハンドリング**: `line_bot_api` 未初期化時は早期return。reply失敗時は `logger.error` の後、`user_id`があれば`logger.warning`を出しpushへフォールバック。push失敗も`logger.error`で握り、例外は外へ伝播しない。
+* 根拠: `if not line_bot_api: return` / `except Exception as e:` ×2 (行番号: 89, 98-99, 103-104, 113-114)
 
 
 
 ### `handle_message`
 
-* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。
-* 根拠: `def handle_message(event: MessageEvent):` (行番号: 92-104 / 抜粋: "def handle_message(event: MessageEvent):")
+* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真なら警告ログを出してスキップする。また関数全体を`try/except Exception`で包み、SDKの`WebhookHandler.handle`ループが1件目の例外で中断して同一Webhook内の後続イベントが処理されない（のに200が返る）問題をイベント単位で隔離する。
+* 根拠: `def handle_message(event: MessageEvent):` (行番号: 168-189 / 抜粋: "def handle_message(event: MessageEvent):")、再配信スキップ (行番号: 173-175)、例外隔離 (行番号: 188-189 / 抜粋: "logger.error(f\"handle_message Error: {e}\", exc_info=True)")
 
 
 * **引数/リクエスト**:
 * `event`: `MessageEvent`型 (LINEのWebhookイベントオブジェクト)
-* 根拠: 引数定義 (行番号: 92 / 抜粋: "def handle_message(event: MessageEvent):")
+* 根拠: 引数定義 (行番号: 168 / 抜粋: "def handle_message(event: MessageEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: return文が存在しない (行番号: 92-104 / 抜粋: "asyncio.run(")
+* 根拠: 再配信スキップ時の空`return`のみ (行番号: 175)
 
 
-* **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、`logger.info`によるログ出力、および `_process_message_async` の実行に伴う副作用。
-* 根拠: 関数呼び出し (行番号: 98, 100, 102-104 / 抜粋: "user_name = _get_display_name(user_id)")
+* **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、`logger.info`/`logger.warning`によるログ出力、および `_process_message_async` の実行に伴う副作用。
+* 根拠: 関数呼び出し (行番号: 174, 181, 183, 185-187 / 抜粋: "user_name = _get_display_name(user_id)")
 
 
-* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。本関数自体にtry-exceptは存在しない。
-* 根拠: `_get_display_name`の呼び出し (行番号: 98 / 抜粋: "user_name = _get_display_name(user_id)")
+* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。**（L-L1で追加）** 本関数自体も全例外を捕捉し`logger.error(..., exc_info=True)`で記録して握る（後続イベントの処理を止めない）。
+* 根拠: `except Exception as e:` (行番号: 188-189)
 
 
 
 ### `_NEGATIVE_GENKI_PATTERNS` / `CONDITION_NOT_GENKI` (変数、Issue #375で追加)
 
 * **役割**: `_NEGATIVE_GENKI_PATTERNS`は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」の否定表現タプル。`CONDITION_NOT_GENKI`（`"元気なし"`）は否定表現を検出したときに記録する体調文字列。以前は`"元気" if "元気" in msg_text`の部分一致のため「元気ない」が肯定の「元気」として記録され意味が反転していた。
-* 根拠: (行番号: 82-83 / 抜粋: "_NEGATIVE_GENKI_PATTERNS = (\"元気ない\", \"元気がない\", \"元気なし\", ...)")
+* 根拠: (行番号: 119-120 / 抜粋: "_NEGATIVE_GENKI_PATTERNS = (\"元気ない\", \"元気がない\", \"元気なし\", ...)")
 
 ### `_detect_condition_keyword` (関数、Issue #375で追加)
 
 * **役割**: 与えられたテキストから定型キーワードで体調を判定する。否定表現（`_NEGATIVE_GENKI_PATTERNS`）を最初に評価して`CONDITION_NOT_GENKI`を返し、次に「元気」→「元気」、「風邪」→「風邪」、いずれも無ければ「不明」を返す。
-* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 86-94)
+* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 123-131)
 
 
 * **引数/リクエスト**: `text: str`
-* 根拠: 関数シグネチャ (行番号: 86)
+* 根拠: 関数シグネチャ (行番号: 123)
 
 
 * **戻り値/レスポンス**: `str`（`"元気なし"` / `"元気"` / `"風邪"` / `"不明"`）
-* 根拠: 各`return` (行番号: 88-94)
+* 根拠: 各`return` (行番号: 125-131)
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 86-94)
+* 根拠: 関数本体 (行番号: 123-131)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数本体 (行番号: 86-94)
+* 根拠: 関数本体 (行番号: 123-131)
 
 ### `_extract_health_targets` (関数、Issue #375で追加)
 
 * **役割**: メッセージ中に登場する`config.FAMILY_SETTINGS["members"]`の全メンバーを出現位置順に列挙し、各メンバーについて「その名前の直後〜次の名前まで」の区間を`_detect_condition_keyword`で判定する。区間内にキーワードが無い（「不明」）場合はメッセージ全体の判定結果へフォールバックする（「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方に対応）。以前は最初に一致した1名だけを処理し、2名併記時は残りを無言で捨てていた。
-* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 97-123)
+* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 134-160)
 
 
 * **引数/リクエスト**: `msg_text: str`
-* 根拠: 関数シグネチャ (行番号: 97)
+* 根拠: 関数シグネチャ (行番号: 134)
 
 
 * **戻り値/レスポンス**: `List[tuple]`（出現順の`(メンバー名, 体調)`。該当メンバーが無ければ空リスト）
@@ -168,16 +195,16 @@
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 97-123)
+* 根拠: 関数本体 (行番号: 134-160)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数本体 (行番号: 97-123)
+* 根拠: 関数本体 (行番号: 134-160)
 
 ### `_process_message_async`
 
 * **役割**: 受信したテキストメッセージの内容に応じた分岐（ステータス、クエスト、承認/却下、子供の体調記録）を行い、該当しない場合はAI解析に回す非同期処理ロジック。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合は従来どおりAI解析へフォールバックする。
-* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 145 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、体調分岐 (行番号: 165-174 / 抜粋: "targets = _extract_health_targets(msg_text)")
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 191 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、体調分岐 (行番号: 211-220 / 抜粋: "targets = _extract_health_targets(msg_text)")
 
 
 * **引数/リクエスト**:
@@ -185,45 +212,46 @@
 * `user_name`: `str`型 (ユーザーの表示名)
 * `msg_text`: `str`型 (受信したテキストメッセージ)
 * `reply_token`: `str`型 (返信用トークン)
-* 根拠: 引数定義 (行番号: 106 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
+* 根拠: 引数定義 (行番号: 191 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 113, 118, 123, 132 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 199, 204, 209, 220 / 抜粋: "return")
 
 
-* **副作用**: `line_service`、`ai_service` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。
-* 根拠: サービス呼び出し (行番号: 111, 116, 121, 130, 136-138 / 抜粋: "resp = await line_service.get_user_status_message(user_id)")
+* **副作用**: `line_service`、`ai_service` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。
+* 根拠: サービス呼び出し (行番号: 197, 202, 207, 215, 225-228 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
 
 
-* **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) で例外が発生した場合、エラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。それ以外の分岐（ステータス/クエスト/承認却下/体調記録）にはtry-exceptがない。
-* 根拠: `except Exception as e: logger.error(...)` (行番号: 141-143 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。それ以外の分岐（ステータス/クエスト/承認却下/体調記録）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
+* 根拠: `except asyncio.TimeoutError:` (行番号: 231-237)、`except Exception as e: logger.error(...)` (行番号: 238-240 / 抜粋: "except Exception as e:")
 
 
 
 ### `handle_postback`
 
-* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`data` 文字列が "approve:" または "reject:" で始まる場合は「承認/却下」コマンドに変換して `_process_message_async` を呼び出す。それ以外は `line_logic.handle_postback` へ処理を丸投げする。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 145-173 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`data` 文字列が "approve:" または "reject:" で始まる場合は「承認/却下」コマンドに変換して `_process_message_async` を呼び出す。それ以外は `line_logic.handle_postback` へ処理を丸投げする。**（Issue #376 / L-L1で修正）** `handle_message`と同様に、先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 242-278 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 246-248)、例外隔離 (行番号: 277-278)
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 145 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* 根拠: 引数定義 (行番号: 242 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 163 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 248, 266 / 抜粋: "return")
 
 
-* **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`によるログ出力。
-* 根拠: 関数呼び出し (行番号: 151, 160, 169 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
+* **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`によるログ出力。
+* 根拠: 関数呼び出し (行番号: 254, 263, 272 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
 
 
 * **エラーハンドリング**:
 * "approve:/reject:" のパース失敗時 (`ValueError`) にはエラーログを出力し処理終了。
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
-* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` (行番号: 161-162, 170-173 / 抜粋: "except ValueError:")
+* **（L-L1で追加）** 上記以外（`event`属性アクセスや承認コマンド処理中の例外等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
+* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` ×2 (行番号: 264-265, 273-276, 277-278 / 抜粋: "except ValueError:")
 
 
 
@@ -327,7 +355,11 @@ graph TD
 
 
 * **[修正済み] Issue #375 「元気ない」の反転記録・2名併記時の取りこぼし**: 体調キーワード分岐は`"元気" in msg_text`の部分一致で「元気ない/元気がない/元気なし」も「元気」として記録し、また最初に一致した1名のみ処理して2名目以降を無言で捨てていた。`_detect_condition_keyword`（否定表現を先に判定し`CONDITION_NOT_GENKI`＝「元気なし」を返す）と`_extract_health_targets`（全メンバーを出現順に列挙し名前ごとの区間で判定、区間にキーワードが無ければ全体判定へフォールバック）に置き換えた。判定は依然として定型キーワードの部分一致であり、「熱がある」等キーワード外の表現は「不明」として記録される（AIフォールバックには回らない）点は従来どおり。
-* 根拠: `_NEGATIVE_GENKI_PATTERNS`/`CONDITION_NOT_GENKI` (行番号: 82-83)、`_detect_condition_keyword` (行番号: 86-94)、`_extract_health_targets` (行番号: 97-123)、分岐 (行番号: 165-174)
+* 根拠: `_NEGATIVE_GENKI_PATTERNS`/`CONDITION_NOT_GENKI` (行番号: 119-120)、`_detect_condition_keyword` (行番号: 123-131)、`_extract_health_targets` (行番号: 134-160)、分岐 (行番号: 211-220)
+
+
+* **[修正済み] Issue #376 / L-L1 reply token期限切れ・再配信による重複記録・イベント単位の例外隔離**: Webhook応答前に同期的にAI処理（tenacityリトライ×連鎖ツール呼び出し）を完走する構造のため、LINEのreply token（約1分）を超過すると`reply_message`が400になり無応答、さらに再配信を有効化していると同一イベントが再送されて記録が二重化していた。対応: (1) `AI_REPLY_TIMEOUT_SEC`(20秒)で`asyncio.wait_for`によりAI経路を打ち切り、超過時は確認を促す文言を返信、(2) `reply_message`は失敗時に`user_id`宛て`push_message`へフォールバック、(3) `deliveryContext.isRedelivery=true`のイベントは`handle_message`/`handle_postback`でスキップ、(4) 両ハンドラを`try/except`で包み、複数イベント一括配信時に1件目の例外で後続が処理されない問題を隔離。**署名検証後に即200を返してバックグラウンドで処理する構造への変更は行っていない**（同期処理のまま。`webhookEventId`による冪等化も未実装で、再配信は一律スキップ）。`asyncio.wait_for`の打ち切りはコルーチンをキャンセルするが、`run_in_executor`/`to_thread`上で進行中のDB書き込み・Gemini呼び出しのスレッドは止まらないため、タイムアウト応答後に記録が完了している可能性がある。
+* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 47)、`_is_redelivery` (行番号: 50-59)、`reply_message`のpushフォールバック (行番号: 98-114)、`handle_message` (行番号: 168-189)、AI経路の`wait_for` (行番号: 225-237)、`handle_postback` (行番号: 242-278)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。
