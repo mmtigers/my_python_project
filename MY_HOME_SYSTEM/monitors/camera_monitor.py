@@ -10,7 +10,7 @@ import signal
 import uuid
 import datetime
 import platform
-from datetime import datetime as dt_class, timedelta
+from datetime import datetime as dt_class, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 from http.client import RemoteDisconnected
@@ -142,17 +142,18 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
             return True
 
         utc = sys_dt.UTCDateTime
-        cam_time = dt_class(utc.Date.Year, utc.Date.Month, utc.Date.Day,
-                           utc.Time.Hour, utc.Time.Minute, utc.Time.Second)
-        
-        # 簡易的なUTC->Local変換 (JST前提)
-        cam_time_jst = cam_time + timedelta(hours=9)
-        now_jst = dt_class.now()
-        
-        diff = abs((now_jst - cam_time_jst).total_seconds())
-        
+        # #382: 以前はカメラのUTC時刻に+9hした naive 値をホストローカルの dt_class.now() と
+        # 比較していた(JST前提)。ホストのTZがUTC等の環境では差が常に9hになり、全カメラが
+        # 「時刻ズレ」で永久に接続不能になっていた。両者を aware な UTC で比較する。
+        cam_time_utc = dt_class(utc.Date.Year, utc.Date.Month, utc.Date.Day,
+                               utc.Time.Hour, utc.Time.Minute, utc.Time.Second,
+                               tzinfo=timezone.utc)
+        now_utc = dt_class.now(timezone.utc)
+
+        diff = abs((now_utc - cam_time_utc).total_seconds())
+
         if diff > 300: # 5分以上のズレ
-            logger.warning(f"⏰ [{cam_name}] Time Drift Detected! Camera: {cam_time_jst}, Server: {now_jst}, Diff: {diff:.0f}s")
+            logger.warning(f"⏰ [{cam_name}] Time Drift Detected! Camera(UTC): {cam_time_utc}, Server(UTC): {now_utc}, Diff: {diff:.0f}s")
             logger.warning(f"   -> ONVIF authentication requires synchronized clocks. Please check camera settings.")
             return False
         return True
@@ -180,7 +181,8 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
 
     # nas_folder は NVR録画ベースディレクトリ配下の「フォルダ名」であり、絶対パスではない
     # (camera_service.py の get_rtsp_url等と同じ解決ロジックに合わせる)
-    nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
+    # #405: config.NVR_RECORD_DIR は常に定義されるため、環境変数への直接フォールバックは持たない
+    nvr_base_dir = config.NVR_RECORD_DIR
     nas_folder_name = cam_conf.get("nas_folder") or cam_conf["name"]
     nas_folder = os.path.join(nvr_base_dir, nas_folder_name)
     if not os.path.exists(nas_folder):

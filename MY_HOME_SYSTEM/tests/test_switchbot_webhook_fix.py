@@ -85,7 +85,8 @@ class TestUpdateSwitchbotWebhook:
 
 class TestFixAllWebhooksNotifiesOnDangerousState:
     def test_sends_error_alert_when_switchbot_registration_fails_after_delete(self, monkeypatch):
-        monkeypatch.setenv("WEBHOOK_BASE_URL", BASE_URL)
+        # #405: WEBHOOK_BASE_URL は config 経由で読むようになったため config 属性を差し替える
+        monkeypatch.setattr(wf.config, "WEBHOOK_BASE_URL", BASE_URL)
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: None)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
@@ -99,7 +100,8 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         assert "登録に失敗" in args[0][0]["text"]
 
     def test_sends_success_notification_when_registration_succeeds(self, monkeypatch):
-        monkeypatch.setenv("WEBHOOK_BASE_URL", BASE_URL)
+        # #405: WEBHOOK_BASE_URL は config 経由で読むようになったため config 属性を差し替える
+        monkeypatch.setattr(wf.config, "WEBHOOK_BASE_URL", BASE_URL)
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: True)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()
@@ -112,7 +114,8 @@ class TestFixAllWebhooksNotifiesOnDangerousState:
         assert kwargs.get("channel") == "report"
 
     def test_sends_nothing_when_nothing_changed(self, monkeypatch):
-        monkeypatch.setenv("WEBHOOK_BASE_URL", BASE_URL)
+        # #405: WEBHOOK_BASE_URL は config 経由で読むようになったため config 属性を差し替える
+        monkeypatch.setattr(wf.config, "WEBHOOK_BASE_URL", BASE_URL)
         monkeypatch.setattr(wf, "update_switchbot_webhook", lambda base_url: False)
         monkeypatch.setattr(wf, "update_line_webhook", lambda base_url: False)
         mock_send_push = MagicMock()

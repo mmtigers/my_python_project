@@ -105,6 +105,8 @@
 
 * **役割**: 実行環境の環境変数からベースURLを取得し、SwitchBotとLINEのWebhook更新処理を実行する。`update_switchbot_webhook`が`None`(旧設定削除後に新規登録が失敗した危険な状態、Issue #166)を返した場合は、更新の成否に関わらず必ずエラー通知(`channel="error"`)を送信する。そのうえで、SwitchBot側の更新有無(`bool(sb_result)`)またはLINE側の更新有無のいずれかが真の場合のみ、従来通り成功通知(`channel="report"`)を送信する。
 * 根拠: [関数定義およびコメント] (行番号: 120〜148 / 抜粋: "実際に更新が走った時のみ通知を送信")
+* **（Issue #405 で修正）** ベースURLは `config.WEBHOOK_BASE_URL`（環境変数 `WEBHOOK_BASE_URL`）から取得する。以前は `os.environ.get()` で直接読んでおり `.env.example` 整合テストの死角だった。
+* 根拠: `base_url = config.WEBHOOK_BASE_URL` (行番号: 124)
 * 根拠: `if sb_result is None:` (行番号: 136〜142 / 抜粋: "update_switchbot_webhook が None(=旧設定を削除した後に新規登録が失敗し、")
 
 
