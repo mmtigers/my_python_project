@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `07bb74e` |
+| 解析基準コミット | `53f4ba8` |
 
 ## 関連ドキュメント
 
@@ -25,6 +25,9 @@
 * 根拠: `hideUserSwitcher`/`hideLogSwitcher`/`showBackToMain`の説明コメントと使用箇所 (13〜24, 70, 95, 143行目 / 抜粋: "// 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の\n    // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。", "{showBackToMain && (", "{!hideUserSwitcher && users.map((user, idx) => {", "{!hideLogSwitcher && (")
 * ユーザーアバターの表示可否判定には`isSameOriginAvatarPath(user.avatar)`（`lib/utils.ts`からインポート）を用いる。以前の`user.avatar && user.avatar.startsWith('/')`という判定は、プロトコル相対URL（`"//evil.example/x"`）もマッチしてしまい、外部ホストの画像に差し替えられる可能性があるバグ（M-9-5）だったため、`"//"`で始まるものを明示的に除外する共通ヘルパーに置き換えられた。
 * 根拠: `isSameOriginAvatarPath`のインポートと使用 (4, 111行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
+* **[修正済み] トグル系ボタンへの`aria-pressed`付与（Issue #412 F-L5）**: ホームボタン（`showBackToMain`）・ユーザー切替ボタン・記録ボタンはいずれも「選択中/非選択」という状態を持つトグルだが、以前は視覚的なスタイル（`scale`/枠線色等）でしか状態を表現しておらず、スクリーンリーダー利用者には選択状態が伝わらなかった。各ボタンに`aria-pressed`（それぞれ`viewMode === 'user'`/`isActive`/`viewMode === 'familyLog'`）と`aria-label`（見た目のテキストと同じ内容だが、アイコン+バッジのレイアウトのため明示）を追加した。
+* 根拠: (行番号: 78〜79, 108〜109, 155〜156 / 抜粋: "aria-pressed={viewMode === 'user'}", "aria-pressed={isActive}", "aria-pressed={viewMode === 'familyLog'}")
+
 
 ## 3. 外部依存関係
 

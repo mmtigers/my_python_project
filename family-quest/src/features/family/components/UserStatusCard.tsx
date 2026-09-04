@@ -15,8 +15,12 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
         <div className="border-4 border-double border-white bg-blue-800 rounded-lg p-2 shadow-xl relative animate-in fade-in duration-300">
             <div className="flex items-center gap-3 relative z-10">
                 {/* アバター */}
-                <div
+                {/* #412(F-L5): 以前はonClick付きのdivで、キーボード操作(Tab移動・Enter/Space)
+                    では開けなかった。<button>にすることで標準のキーボード操作対応を得る */}
+                <button
+                    type="button"
                     onClick={() => onAvatarClick(user)}
+                    aria-label={`${user.name}のアバターを変更`}
                     className="text-4xl bg-blue-900 p-1 rounded border-2 border-white shadow-inner cursor-pointer hover:brightness-110 active:scale-95 transition-all w-[52px] h-[52px] flex items-center justify-center overflow-hidden flex-shrink-0"
                 >
                     {/* ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、
@@ -27,7 +31,7 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                     ) : (
                         user.avatar || '🙂'
                     )}
-                </div>
+                </button>
 
                 {/* ステータス詳細 */}
                 <div className="flex-1 min-w-0 space-y-1">

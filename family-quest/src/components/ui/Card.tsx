@@ -8,7 +8,7 @@ interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
     children: React.ReactNode;
 }
 
-export const Card: React.FC<CardProps> = ({ variant = 'default', className = '', children, ...props }) => {
+export const Card: React.FC<CardProps> = ({ variant = 'default', className = '', children, onClick, onKeyDown, ...props }) => {
     // バリエーションごとのスタイル定義
     const baseStyle = "border p-2 rounded flex justify-between items-center transition-all relative overflow-hidden";
 
@@ -40,10 +40,31 @@ export const Card: React.FC<CardProps> = ({ variant = 'default', className = '',
     }
 
     // 押せる感じ（カーソルポインター）にするかどうか
-    const interactiveStyle = props.onClick ? "cursor-pointer active:scale-[0.98] select-none" : "";
+    const interactiveStyle = onClick ? "cursor-pointer active:scale-[0.98] select-none" : "";
+
+    // #412(F-L5): onClickを持つCardはRewardList/InventoryList/QuestList等で
+    // 広く使われているが、以前はただのdivだったためキーボード操作(Tab移動・
+    // Enter/Space押下)で選択・操作できなかった。onClickがある場合のみ
+    // role="button"・tabIndex・Enter/Space→onClickのキーボードハンドラを付与する。
+    const handleKeyDown = onClick
+        ? (e: React.KeyboardEvent<HTMLDivElement>) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick(e as unknown as React.MouseEvent<HTMLDivElement>);
+            }
+            onKeyDown?.(e);
+        }
+        : onKeyDown;
 
     return (
-        <div className={`${baseStyle} ${variantStyle} ${interactiveStyle} ${className}`} {...props}>
+        <div
+            {...props}
+            onClick={onClick}
+            onKeyDown={handleKeyDown}
+            role={onClick ? (props.role ?? 'button') : props.role}
+            tabIndex={onClick ? (props.tabIndex ?? 0) : props.tabIndex}
+            className={`${baseStyle} ${variantStyle} ${interactiveStyle} ${className}`}
+        >
             {children}
         </div>
     );

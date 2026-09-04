@@ -63,6 +63,8 @@ const Header: React.FC<HeaderProps> = ({
             </div>
 
             {/* Unified Navigation Area (Users + Log) */}
+            {/* #412(F-L5): ホーム/ユーザー切替/記録の各ボタンは選択状態を持つ
+                トグルであるため aria-pressed で状態をスクリーンリーダーに伝える */}
             <div className="flex flex-wrap justify-center items-end gap-2 sm:gap-4 px-2 mt-2">
 
                 {/* 1. ホームボタン(横画面のみ)。トップ画面でも表示して統一感を持たせる
@@ -73,6 +75,8 @@ const Header: React.FC<HeaderProps> = ({
                 {showBackToMain && (
                     <button
                         onClick={onBackToMain}
+                        aria-pressed={viewMode === 'user'}
+                        aria-label="ホーム"
                         className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'user' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
                             }`}
                     >
@@ -101,6 +105,8 @@ const Header: React.FC<HeaderProps> = ({
                         <button
                             key={user.user_id}
                             onClick={() => onUserSwitch(idx)}
+                            aria-pressed={isActive}
+                            aria-label={user.name}
                             className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${isActive ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
                                 }`}
                         >
@@ -146,6 +152,8 @@ const Header: React.FC<HeaderProps> = ({
                 {!hideLogSwitcher && (
                     <button
                         onClick={onLogSwitch}
+                        aria-pressed={viewMode === 'familyLog'}
+                        aria-label="記録"
                         className={`relative transition-all duration-300 flex flex-col items-center group p-1 ${viewMode === 'familyLog' ? 'scale-110 -translate-y-1 z-10' : 'scale-95 opacity-60 hover:opacity-100 hover:scale-100'
                             }`}
                     >

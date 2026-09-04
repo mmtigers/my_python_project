@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `65fce15` |
+| 解析基準コミット | `53f4ba8` |
 
 ## 関連ドキュメント
 
@@ -58,7 +58,7 @@
 
 ### `UserStatusCard`
 
-* **役割**: 渡された`user`情報（アバター、名前、職業クラス、レベル、ゴールド、メダル数）をもとにステータスカードUIをレンダリングする。アバター画像は`isSameOriginAvatarPath(user.avatar)`が真（自サーバーの相対パス）の場合に`<img>`で表示し、そうでない場合は`user.avatar`（絵文字等）、デフォルト`'🙂'`の順にフォールバックする（**Issue #390**: 以前その間にあった`user.icon`はバックエンドが送出しない幽霊フィールドで常に`undefined`だったため参照を削除）。**バグ修正**: 以前は`user.avatar && user.avatar.startsWith('/')`で自ドメイン判定していたが、プロトコル相対URL（`"//evil.example/x"`）も`startsWith('/')`がtrueになり素通りしてしまう問題があったため、`"//"`始まりを明示的に除外する共通ヘルパー`isSameOriginAvatarPath`（`../../../lib/utils`）に置き換えられた。
+* **役割**: 渡された`user`情報（アバター、名前、職業クラス、レベル、ゴールド、メダル数）をもとにステータスカードUIをレンダリングする。**（Issue #412 F-L5で修正）** アバター部分は以前`onClick`付きの`div`で、キーボード操作（Tab移動・Enter/Space押下）ではアバター変更モーダルを開けなかった。`<button type="button">`（`aria-label={`${user.name}のアバターを変更`}`）に変更し、標準のキーボード操作対応を得た。アバター画像は`isSameOriginAvatarPath(user.avatar)`が真（自サーバーの相対パス）の場合に`<img>`で表示し、そうでない場合は`user.avatar`（絵文字等）、デフォルト`'🙂'`の順にフォールバックする（**Issue #390**: 以前その間にあった`user.icon`はバックエンドが送出しない幽霊フィールドで常に`undefined`だったため参照を削除）。**バグ修正**: 以前は`user.avatar && user.avatar.startsWith('/')`で自ドメイン判定していたが、プロトコル相対URL（`"//evil.example/x"`）も`startsWith('/')`がtrueになり素通りしてしまう問題があったため、`"//"`始まりを明示的に除外する共通ヘルパー`isSameOriginAvatarPath`（`../../../lib/utils`）に置き換えられた。
 * 根拠: (行番号: 11〜55 / 抜粋: "const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {")
 * 根拠: アバター判定のバグ修正コメント (行番号: 22〜24 / 抜粋: "{/* ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、\n                        未設定時の絵文字デフォルト値の場合がある。パス以外を<img src>に渡すと\n                        壊れた画像アイコンになるため、Header.tsxと同様にパス形式かどうかを判定する */}")
 * 根拠: フォールバック表示 (行番号: 25〜29 / 抜粋: "{isSameOriginAvatarPath(user.avatar) ? (\n                        <img src={user.avatar} alt=\"avatar\" className=\"w-full h-full object-cover\" />\n                    ) : (\n                        user.avatar || '🙂'\n                    )}")
