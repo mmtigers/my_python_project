@@ -57,7 +57,7 @@ numpy==2.2.6
 numpy-financial==1.0.0
 oauthlib==3.3.1
 onvif_zeep==0.2.12
-opencv-python-headless==4.12.0.88
+opencv-python-headless==5.0.0.93
 packaging==25.0
 pandas==2.3.3
 pdf2image==1.17.0
