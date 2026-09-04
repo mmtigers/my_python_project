@@ -10,8 +10,7 @@
 ## 関連ドキュメント
 
 * [webhook_router.md](./webhook_router.md) - 呼び出し元(`callback_line()`が本ファイルの`line_handler.handle`を`asyncio.to_thread`経由で実行)
-* [line.md](./line.md) - 型定義を提供(`LinePostbackData`は本ファイルでは未使用インポート)
-* [line_logic.md](./line_logic.md) - Postbackイベントの委譲先
+* [line_logic.md](./line_logic.md) - Postbackイベントの委譲先(`LinePostbackData`は本ファイルではなく`line_logic.py`が使用する)
 * [line_service.md](./line_service.md) - コマンド処理(ステータス確認・クエスト・承認却下・体調記録)の委譲先
 * [ai_service.md](./ai_service.md) - フォールバック時(未定義コマンド)のAI解析委譲先
 * [config.md](./config.md) - 認証情報・`FAMILY_SETTINGS`等の設定値を提供
@@ -19,7 +18,7 @@
 ## 2. ファイルの概要
 
 * LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を、SDKのイベントハンドラーとして解析し、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が署名検証込みで `line_handler.handle(body, signature)`（SDKの`WebhookHandler.handle`）を呼び出し、登録済みのイベントハンドラー（本ファイルの`handle_message`/`handle_postback`）をディスパッチする構成になっている。
-* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 176-177 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")
+* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 310-311 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")
 
 
 
@@ -29,182 +28,208 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準ライブラリ | 非同期関数の同期的な実行(`asyncio.run`) | インポート宣言 (行番号: 2 / 抜粋: "import asyncio") |
-| `os`, `sys`, `json` | 標準ライブラリ | ファイル内での明示的な使用箇所なし（未使用インポート） | インポート宣言 (行番号: 3-5 / 抜粋: "import os") |
-| `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定用タイムスタンプ取得 | インポート宣言 (行番号: 6 / 抜粋: "import time") |
-| `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 7 / 抜粋: "from typing import Optional, List, Any, Dict") |
-| `handlers.line_logic` | 内部モジュール | ポストバックイベントの一部処理委譲 | インポート宣言 (行番号: 9 / 抜粋: "import handlers.line_logic as line_logic") |
-| `WebhookHandler` (linebot.v3) | 外部ライブラリ | LINE Webhookイベントの検証・ディスパッチ | インポート宣言 (行番号: 12 / 抜粋: "from linebot.v3 import WebhookHandler") |
-| `Configuration`等 (linebot.v3.messaging) | 外部ライブラリ | LINE APIクライアントの初期化、メッセージ送信オブジェクトの構築 | インポート宣言 (行番号: 13-23 / 抜粋: "from linebot.v3.messaging import (") |
-| `MessageEvent`等 (linebot.v3.webhooks) | 外部ライブラリ | Webhookイベントの型定義およびルーティング | インポート宣言 (行番号: 24 / 抜粋: "from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent") |
-| `config` | 内部モジュール | APIトークンや設定値（家族のメンバー等）の取得 | インポート宣言 (行番号: 26 / 抜粋: "import config") |
-| `setup_logging` (core.logger) | 内部モジュール | ロガーの初期化 | インポート宣言 (行番号: 27 / 抜粋: "from core.logger import setup_logging") |
-| `LinePostbackData` (models.line) | 内部モジュール | ファイル内での明示的な使用箇所なし（未使用インポート） | インポート宣言 (行番号: 28 / 抜粋: "from models.line import LinePostbackData") |
-| `line_service`, `ai_service` | 内部モジュール | ビジネスロジック、外部API、AI解析処理への委譲 | インポート宣言 (行番号: 29 / 抜粋: "from services import line_service, ai_service") |
+| `asyncio` | 標準ライブラリ | 非同期関数の同期的な実行(`asyncio.run`)、AI経路の時間上限(`asyncio.wait_for`/`asyncio.TimeoutError`。Issue #376で追加) | インポート宣言 (行番号: 2 / 抜粋: "import asyncio") |
+| `time` | 標準ライブラリ | LINEプロフィール表示名キャッシュ(`_profile_cache`)のTTL判定・エビクション用タイムスタンプ取得 | インポート宣言 (行番号: 3 / 抜粋: "import time") |
+| `Optional`, `List`, `Any`, `Dict` | 標準ライブラリ (typing) | 型ヒント | インポート宣言 (行番号: 4 / 抜粋: "from typing import Optional, List, Any, Dict") |
+| `handlers.line_logic` | 内部モジュール | ポストバックイベントの一部処理委譲 | インポート宣言 (行番号: 6 / 抜粋: "import handlers.line_logic as line_logic") |
+| `WebhookHandler` (linebot.v3) | 外部ライブラリ | LINE Webhookイベントの検証・ディスパッチ | インポート宣言 (行番号: 9 / 抜粋: "from linebot.v3 import WebhookHandler") |
+| `Configuration`, `ApiClient`, `MessagingApi`, `ReplyMessageRequest`, `PushMessageRequest`（Issue #376で追加）, `TextMessage` (linebot.v3.messaging) | 外部ライブラリ | LINE APIクライアントの初期化、メッセージ送信オブジェクトの構築。`PushMessageRequest`は`reply_message`のreply失敗時pushフォールバックに使用 | インポート宣言 (行番号: 10-17 / 抜粋: "from linebot.v3.messaging import (") |
+| `MessageEvent`等 (linebot.v3.webhooks) | 外部ライブラリ | Webhookイベントの型定義およびルーティング | インポート宣言 (行番号: 18 / 抜粋: "from linebot.v3.webhooks import MessageEvent, TextMessageContent, PostbackEvent") |
+| `config` | 内部モジュール | APIトークンや設定値（家族のメンバー等）の取得 | インポート宣言 (行番号: 20 / 抜粋: "import config") |
+| `setup_logging` (core.logger) | 内部モジュール | ロガーの初期化 | インポート宣言 (行番号: 21 / 抜粋: "from core.logger import setup_logging") |
+| `line_service`, `ai_service` | 内部モジュール | ビジネスロジック、外部API、AI解析処理への委譲 | インポート宣言 (行番号: 22 / 抜粋: "from services import line_service, ai_service") |
+
+旧版の本テーブルは`os`/`sys`/`json`（標準ライブラリ）・`models.line.LinePostbackData`を未使用インポートとして記載していたが、確認したところ現行ファイルはこれらを一切インポートしておらず誤りだった（訂正のみ。特定のIssueとは無関係）。
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.LINE_CHANNEL_ACCESS_TOKEN` / `config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 38, 40, 42 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:") |
-| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 127 / 抜粋: "for child in config.FAMILY_SETTINGS["members"]:") |
-| `line_service` 各種メソッド | 引数に対する具体的な処理内容および戻り値の型・形式が不明 | 該当要素の呼び出し (行番号: 111 / 抜粋: "resp = await line_service.get_user_status_message(user_id)") |
-| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 136-138 / 抜粋: "ai_resp_text = await ai_service.analyze_text_and_execute(") |
-| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明 | 該当要素の呼び出し (行番号: 169 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
+| `config.LINE_CHANNEL_ACCESS_TOKEN` / `config.LINE_CHANNEL_SECRET` | 値の取得元や環境変数の仕様が不明 | 該当要素の使用 (行番号: 31, 33, 35 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:") |
+| `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 166 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
+| `line_service` 各種メソッド | 引数に対する具体的な処理内容および戻り値の型・形式が不明 | 該当要素の呼び出し (行番号: 224 / 抜粋: "resp = await line_service.get_user_status_message(user_id)") |
+| `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 252 / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
+| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明 | 該当要素の呼び出し (行番号: 301 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
 | `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `_PROFILE_CACHE_MAX_SIZE` (変数、Issue #410で追加)
+
+* **役割**: `_profile_cache`が保持できるエントリ数の上限（`500`）。以前はTTL（`_PROFILE_CACHE_TTL_SEC`）がエントリの「古さ」判定にのみ使われ、キャッシュから自動でエントリを削除する仕組みが無かったため、ユニークな話者が増えるほど`_profile_cache`が無制限に成長し続けていた（プロセスは長時間稼働するため実質的なメモリリーク）。
+* 根拠: `_PROFILE_CACHE_MAX_SIZE = 500` (行番号: 47)
+
+### `_evict_oldest_profile_cache_entries` (関数、Issue #410で追加)
+
+* **役割**: `_profile_cache`が`_PROFILE_CACHE_MAX_SIZE`件を超えている場合、キャッシュ時刻（各エントリのタプルの2番目の要素、`cached_at`）が古い順にエントリを削除して上限内に収める。`_get_display_name`が新規エントリを書き込むたびに呼ばれる。
+* 根拠: `def _evict_oldest_profile_cache_entries() -> None:` (行番号: 67-76)
+
+
+* **引数/リクエスト**: なし
+* 根拠: 関数シグネチャ (行番号: 67)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: 型ヒント (行番号: 67)
+
+
+* **副作用**: `_profile_cache`からの削除（`del`）
+* 根拠: `del _profile_cache[uid]` (行番号: 76)
+
+
+* **エラーハンドリング**: なし（超過が無ければ早期return）
+* 根拠: `if overflow <= 0: return` (行番号: 72-73)
+
 ### `_get_display_name`
 
-* **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。
-* 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 52-67 / 抜粋: "def _get_display_name(user_id: str) -> str:")
+* **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。**（Issue #410で修正）** キャッシュ書き込み後に`_evict_oldest_profile_cache_entries`を呼び、`_profile_cache`が上限を超えないようにする。
+* 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 80-96 / 抜粋: "def _get_display_name(user_id: str) -> str:")、エビクション呼び出し (行番号: 95 / 抜粋: "_evict_oldest_profile_cache_entries()")
 
 
 * **引数/リクエスト**: `user_id`: `str`型
-* 根拠: 引数定義 (行番号: 52 / 抜粋: "def _get_display_name(user_id: str) -> str:")
+* 根拠: 引数定義 (行番号: 80 / 抜粋: "def _get_display_name(user_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (表示名。取得失敗時は`"Unknown"`)
-* 根拠: `return user_name` (行番号: 67 / 抜粋: "return user_name")
+* 根拠: `return user_name` (行番号: 96 / 抜粋: "return user_name")
 
 
-* **副作用**: キャッシュヒット時はなし。キャッシュミス時は`line_bot_api.get_profile`呼び出しと`_profile_cache`への書き込み。
-* 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (行番号: 60-61 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
+* **副作用**: キャッシュヒット時はなし。キャッシュミス時は`line_bot_api.get_profile`呼び出し、`_profile_cache`への書き込み、および上限超過時のエビクション。
+* 根拠: `if line_bot_api: profile = line_bot_api.get_profile(user_id)` (行番号: 90-91 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
 
 
 * **エラーハンドリング**: `get_profile`失敗時は例外を無視し`"Unknown"`のまま続行（キャッシュにも`"Unknown"`が書き込まれ、TTL間は再試行されない）。
-* 根拠: `except Exception: pass` (行番号: 63-64 / 抜粋: "except Exception:")
+* 根拠: `except Exception: pass` (行番号: 93-94 / 抜粋: "except Exception:")
 
 
 
 ### `AI_REPLY_TIMEOUT_SEC` (変数、Issue #376で追加)
 
 * **役割**: `_process_message_async`のAI経路（`ai_service.analyze_text_and_execute`）に課す総時間上限（秒、`20`）。Gemini呼び出しはtenacityリトライ（最大3試行）×最大`MAX_TOOL_ROUNDS`回の連鎖になりうる一方、LINEのreply tokenは短命（約1分）で超過すると`reply_message`が400になり無応答になるため、上限内に終わらなければ打ち切る。
-* 根拠: `AI_REPLY_TIMEOUT_SEC = 20` (行番号: 47)
+* 根拠: `AI_REPLY_TIMEOUT_SEC = 20` (行番号: 52)
 
 ### `_is_redelivery` (関数、Issue #376で追加)
 
 * **役割**: LINE Webhookの再配信（`event.delivery_context.is_redelivery`）かどうかを返す。再配信を有効化していると応答が遅れた同一イベントが再送され、冪等性チェックの無い記録処理（体調・食事）が二重登録されるため、`handle_message`/`handle_postback`はこれが真のイベントをスキップする。SDKの値が厳密に`True`の場合のみ真とし（`is True`）、属性欠落や真偽値以外（テストの`MagicMock`等）は再配信扱いしない。
-* 根拠: `def _is_redelivery(event) -> bool:` (行番号: 50-59 / 抜粋: "return getattr(ctx, \"is_redelivery\", False) is True")
+* 根拠: `def _is_redelivery(event) -> bool:` (行番号: 55-64 / 抜粋: "return getattr(ctx, \"is_redelivery\", False) is True")
 
 
 * **引数/リクエスト**: `event`（SDKのイベントオブジェクト）
-* 根拠: 関数シグネチャ (行番号: 50)
+* 根拠: 関数シグネチャ (行番号: 55)
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 59)
+* 根拠: (行番号: 64)
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 50-59)
+* 根拠: 関数本体 (行番号: 55-64)
 
 
 * **エラーハンドリング**: `getattr`のデフォルトで属性欠落を吸収
-* 根拠: (行番号: 58-59)
+* 根拠: (行番号: 63-64)
 
 ### `reply_message`
 
 * **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。**（Issue #376で修正）** 返信が失敗（reply tokenの期限切れ等）し、かつ`user_id`が渡されている場合は`line_bot_api.push_message`（`PushMessageRequest`）へフォールバックして同じメッセージを届ける（以前はログのみで無応答だった）。
-* 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 81-114 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (行番号: 103-114 / 抜粋: "line_bot_api.push_message(")
+* 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 100-131 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (行番号: 121-131 / 抜粋: "line_bot_api.push_message(")
 
 
 * **引数/リクエスト**:
 * `reply_token`: `str`型 (LINE APIの返信用トークン)
 * `messages`: `List[Any]`型または単一のオブジェクト (送信するメッセージオブジェクト)
 * `user_id`: `Optional[str]` (Issue #376で追加。返信失敗時のpush先。`None`ならフォールバックしない)
-* 根拠: 引数定義 (行番号: 81)
+* 根拠: 引数定義 (行番号: 100)
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: return文はいずれも値なし (行番号: 89, 97, 104)
+* 根拠: return文はいずれも値なし (行番号: 108, 117, 122)
 
 
 * **副作用**: LINE Platform経由でのユーザーへのメッセージ送信（reply、失敗時はpush。pushは月間送信数の枠を消費する）。
-* 根拠: 外部API呼び出し (行番号: 92-97, 107-111 / 抜粋: "line_bot_api.reply_message(" / "line_bot_api.push_message(")
+* 根拠: 外部API呼び出し (行番号: 111-116, 125-129 / 抜粋: "line_bot_api.reply_message(" / "line_bot_api.push_message(")
 
 
 * **エラーハンドリング**: `line_bot_api` 未初期化時は早期return。reply失敗時は `logger.error` の後、`user_id`があれば`logger.warning`を出しpushへフォールバック。push失敗も`logger.error`で握り、例外は外へ伝播しない。
-* 根拠: `if not line_bot_api: return` / `except Exception as e:` ×2 (行番号: 89, 98-99, 103-104, 113-114)
+* 根拠: `if not line_bot_api: return` / `except Exception as e:` ×2 (行番号: 108, 118-119, 121-122, 130-131)
 
 
 
 ### `handle_message`
 
-* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真なら警告ログを出してスキップする。また関数全体を`try/except Exception`で包み、SDKの`WebhookHandler.handle`ループが1件目の例外で中断して同一Webhook内の後続イベントが処理されない（のに200が返る）問題をイベント単位で隔離する。
-* 根拠: `def handle_message(event: MessageEvent):` (行番号: 168-189 / 抜粋: "def handle_message(event: MessageEvent):")、再配信スキップ (行番号: 173-175)、例外隔離 (行番号: 188-189 / 抜粋: "logger.error(f\"handle_message Error: {e}\", exc_info=True)")
+* **役割**: `TextMessageContent` の `MessageEvent` を受け取り、`_get_display_name`（TTLキャッシュ付き）で送信者の表示名を取得した上で、非同期処理 `_process_message_async` を同期的に実行 (`asyncio.run`) する。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真なら警告ログを出してスキップする。また関数全体を`try/except Exception`で包み、SDKの`WebhookHandler.handle`ループが1件目の例外で中断して同一Webhook内の後続イベントが処理されない（のに200が返る）問題をイベント単位で隔離する。**（L-L6 #410で修正）** `event.source.user_id`がグループでの発言時にLINEの仕様上`None`になりうるケースを考慮していなかった（`_get_display_name(None)`は`get_profile(None)`の例外を握り潰し`"Unknown"`を返すだけなので、以前はこの状態に気づかないまま処理が続行し、`user_id=NULL`のまま体調・食事等の記録がDB保存されていた）。`user_id`が`None`の場合は警告ログを出して処理をスキップするようにした。
+* 根拠: `def handle_message(event: MessageEvent):` (行番号: 187-216 / 抜粋: "def handle_message(event: MessageEvent):")、再配信スキップ (行番号: 192-194)、`user_id`のNoneガード (行番号: 196-203 / 抜粋: "if user_id is None:")、例外隔離 (行番号: 215-216 / 抜粋: "logger.error(f\"handle_message Error: {e}\", exc_info=True)")
 
 
 * **引数/リクエスト**:
 * `event`: `MessageEvent`型 (LINEのWebhookイベントオブジェクト)
-* 根拠: 引数定義 (行番号: 168 / 抜粋: "def handle_message(event: MessageEvent):")
+* 根拠: 引数定義 (行番号: 187 / 抜粋: "def handle_message(event: MessageEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 再配信スキップ時の空`return`のみ (行番号: 175)
+* 根拠: 再配信スキップ時・`user_id`Noneガード時の空`return`のみ (行番号: 194, 203)
 
 
 * **副作用**: `_get_display_name`経由での外部API呼び出し（キャッシュミス時のみ）、`logger.info`/`logger.warning`によるログ出力、および `_process_message_async` の実行に伴う副作用。
-* 根拠: 関数呼び出し (行番号: 174, 181, 183, 185-187 / 抜粋: "user_name = _get_display_name(user_id)")
+* 根拠: 関数呼び出し (行番号: 202, 208, 210, 212-214 / 抜粋: "user_name = _get_display_name(user_id)")
 
 
-* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。**（L-L1で追加）** 本関数自体も全例外を捕捉し`logger.error(..., exc_info=True)`で記録して握る（後続イベントの処理を止めない）。
-* 根拠: `except Exception as e:` (行番号: 188-189)
+* **エラーハンドリング**: `_get_display_name`内部で`get_profile`失敗時の例外を無視する設計に委譲。**（L-L1で追加）** 本関数自体も全例外を捕捉し`logger.error(..., exc_info=True)`で記録して握る（後続イベントの処理を止めない）。**（L-L6で追加）** `user_id`が`None`の場合は`_get_display_name`/`_process_message_async`を呼ばず早期returnする。
+* 根拠: `except Exception as e:` (行番号: 215-216)
 
 
 
 ### `_NEGATIVE_GENKI_PATTERNS` / `CONDITION_NOT_GENKI` (変数、Issue #375で追加)
 
 * **役割**: `_NEGATIVE_GENKI_PATTERNS`は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」の否定表現タプル。`CONDITION_NOT_GENKI`（`"元気なし"`）は否定表現を検出したときに記録する体調文字列。以前は`"元気" if "元気" in msg_text`の部分一致のため「元気ない」が肯定の「元気」として記録され意味が反転していた。
-* 根拠: (行番号: 119-120 / 抜粋: "_NEGATIVE_GENKI_PATTERNS = (\"元気ない\", \"元気がない\", \"元気なし\", ...)")
+* 根拠: (行番号: 138-139 / 抜粋: "_NEGATIVE_GENKI_PATTERNS = (\"元気ない\", \"元気がない\", \"元気なし\", ...)")
 
 ### `_detect_condition_keyword` (関数、Issue #375で追加)
 
 * **役割**: 与えられたテキストから定型キーワードで体調を判定する。否定表現（`_NEGATIVE_GENKI_PATTERNS`）を最初に評価して`CONDITION_NOT_GENKI`を返し、次に「元気」→「元気」、「風邪」→「風邪」、いずれも無ければ「不明」を返す。
-* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 123-131)
+* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 142-150)
 
 
 * **引数/リクエスト**: `text: str`
-* 根拠: 関数シグネチャ (行番号: 123)
+* 根拠: 関数シグネチャ (行番号: 142)
 
 
 * **戻り値/レスポンス**: `str`（`"元気なし"` / `"元気"` / `"風邪"` / `"不明"`）
-* 根拠: 各`return` (行番号: 125-131)
+* 根拠: 各`return` (行番号: 144-150)
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 123-131)
+* 根拠: 関数本体 (行番号: 142-150)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数本体 (行番号: 123-131)
+* 根拠: 関数本体 (行番号: 142-150)
 
 ### `_extract_health_targets` (関数、Issue #375で追加)
 
 * **役割**: メッセージ中に登場する`config.FAMILY_SETTINGS["members"]`の全メンバーを出現位置順に列挙し、各メンバーについて「その名前の直後〜次の名前まで」の区間を`_detect_condition_keyword`で判定する。区間内にキーワードが無い（「不明」）場合はメッセージ全体の判定結果へフォールバックする（「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方に対応）。以前は最初に一致した1名だけを処理し、2名併記時は残りを無言で捨てていた。
-* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 134-160)
+* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 153-179)
 
 
 * **引数/リクエスト**: `msg_text: str`
-* 根拠: 関数シグネチャ (行番号: 134)
+* 根拠: 関数シグネチャ (行番号: 153)
 
 
 * **戻り値/レスポンス**: `List[tuple]`（出現順の`(メンバー名, 体調)`。該当メンバーが無ければ空リスト）
-* 根拠: `return targets` (行番号: 123)
+* 根拠: `return targets` (行番号: 179)
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 134-160)
+* 根拠: 関数本体 (行番号: 153-179)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数本体 (行番号: 134-160)
+* 根拠: 関数本体 (行番号: 153-179)
 
 ### `_process_message_async`
 
 * **役割**: 受信したテキストメッセージの内容に応じた分岐（ステータス、クエスト、承認/却下、子供の体調記録）を行い、該当しない場合はAI解析に回す非同期処理ロジック。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合は従来どおりAI解析へフォールバックする。
-* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 191 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、体調分岐 (行番号: 211-220 / 抜粋: "targets = _extract_health_targets(msg_text)")
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 219 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、体調分岐 (行番号: 239-247 / 抜粋: "targets = _extract_health_targets(msg_text)")
 
 
 * **引数/リクエスト**:
@@ -212,46 +237,46 @@
 * `user_name`: `str`型 (ユーザーの表示名)
 * `msg_text`: `str`型 (受信したテキストメッセージ)
 * `reply_token`: `str`型 (返信用トークン)
-* 根拠: 引数定義 (行番号: 191 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
+* 根拠: 引数定義 (行番号: 219 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 199, 204, 209, 220 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 226, 231, 236, 247 / 抜粋: "return")
 
 
 * **副作用**: `line_service`、`ai_service` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。
-* 根拠: サービス呼び出し (行番号: 197, 202, 207, 215, 225-231 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
+* 根拠: サービス呼び出し (行番号: 224, 229, 234, 245, 251-254 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
 
 
 * **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。それ以外の分岐（ステータス/クエスト/承認却下/体調記録）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
-* 根拠: `except asyncio.TimeoutError:` (行番号: 231-237)、`except Exception as e: logger.error(...)` (行番号: 238-240 / 抜粋: "except Exception as e:")
+* 根拠: `except asyncio.TimeoutError:` (行番号: 260-265)、`except Exception as e: logger.error(...)` (行番号: 266-267 / 抜粋: "except Exception as e:")
 
 
 
 ### `handle_postback`
 
 * **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`data` 文字列が "approve:" または "reject:" で始まる場合は「承認/却下」コマンドに変換して `_process_message_async` を呼び出す。それ以外は `line_logic.handle_postback` へ処理を丸投げする。**（Issue #376 / L-L1で修正）** `handle_message`と同様に、先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 243-279 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 247-249)、例外隔離 (行番号: 278-279)
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 271-307 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 275-277)、例外隔離 (行番号: 306-307)
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 243 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* 根拠: 引数定義 (行番号: 271 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 249, 267 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 277, 295 / 抜粋: "return")
 
 
 * **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`によるログ出力。
-* 根拠: 関数呼び出し (行番号: 255, 264, 273 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
+* 根拠: 関数呼び出し (行番号: 283, 292, 301 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
 
 
 * **エラーハンドリング**:
 * "approve:/reject:" のパース失敗時 (`ValueError`) にはエラーログを出力し処理終了。
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
 * **（L-L1で追加）** 上記以外（`event`属性アクセスや承認コマンド処理中の例外等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
-* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` ×2 (行番号: 265-266, 274-277, 278-279 / 抜粋: "except ValueError:")
+* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` ×2 (行番号: 293-294, 302-305, 306-307 / 抜粋: "except ValueError:")
 
 
 
@@ -338,32 +363,32 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **プロフィール表示名のキャッシュ**: 従来は`handle_message`が受信メッセージ毎に`line_bot_api.get_profile`を直接呼び出しており、ログ表示用の名前取得だけのために毎回外部API通信が発生していた。現在は`_get_display_name`がTTL付き（3600秒）のインメモリキャッシュ(`_profile_cache`)を挟むため、キャッシュヒット時は外部API呼び出しが発生しない。プロセス再起動でキャッシュはクリアされる。
-* 根拠: `_profile_cache`, `_PROFILE_CACHE_TTL_SEC` (行番号: 48-49 / 抜粋: "_profile_cache: Dict[str, tuple] = {}")
+* **プロフィール表示名のキャッシュ**: 従来は`handle_message`が受信メッセージ毎に`line_bot_api.get_profile`を直接呼び出しており、ログ表示用の名前取得だけのために毎回外部API通信が発生していた。現在は`_get_display_name`がTTL付き（3600秒）のインメモリキャッシュ(`_profile_cache`)を挟むため、キャッシュヒット時は外部API呼び出しが発生しない。プロセス再起動でキャッシュはクリアされる。**（Issue #410で修正）** TTLはエントリの「古さ」判定にのみ使われエントリを自動削除する仕組みが無かったため無制限に成長し続けていたが、`_PROFILE_CACHE_MAX_SIZE`（500）を超えたら`_evict_oldest_profile_cache_entries`が最終アクセス時刻の古いエントリから削除するようになった。
+* 根拠: `_profile_cache`, `_PROFILE_CACHE_TTL_SEC` (行番号: 41-42 / 抜粋: "_profile_cache: Dict[str, tuple] = {}")、`_PROFILE_CACHE_MAX_SIZE`/エビクション (行番号: 47, 62-76)
 
 
 * **非同期処理の実行**: `handle_message` および `handle_postback` は同期関数として定義されており、内部で `asyncio.run()` を使用して非同期関数を呼び出している。呼び出し元の`routers/webhook_router.py`の`callback_line()`は`asyncio.to_thread`経由で`line_handler.handle`（同期API）を別スレッドで実行しているため、ASGIのメインイベントループ内で`asyncio.run()`が呼ばれるわけではないが、この二重構造は把握しておく必要がある。
-* 根拠: `asyncio.run` の使用 (行番号: 102-104, 160 / 抜粋: "asyncio.run(")
+* 根拠: `asyncio.run` の使用 (行番号: 213-215, 292 / 抜粋: "asyncio.run(")
 
 
 * **変数初期化の順序と依存**: `line_handler` と `line_bot_api` がグローバルスコープで定義され、`config.LINE_CHANNEL_ACCESS_TOKEN`/`config.LINE_CHANNEL_SECRET`が揃っている場合のみ条件付きで初期化される。`reply_message`は`if not line_bot_api: return`で早期returnするが、`handle_message`/`_get_display_name`は`line_bot_api`が`None`のままでも例外を出さずに動作継続する（`_get_display_name`は`try/except Exception: pass`で吸収）。
-* 根拠: モジュールレベルの条件分岐 (行番号: 38-45 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:")
-
-
-* **未使用のインポート**: `os`, `sys`, `json`, `models.line.LinePostbackData` がインポートされているが、ファイル内で明示的に使用されていない。
-* 根拠: インポート宣言と使用箇所の不在 (行番号: 3-5, 28 / 抜粋: "import os")
+* 根拠: モジュールレベルの条件分岐 (行番号: 31-38 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:")
 
 
 * **[修正済み] Issue #375 「元気ない」の反転記録・2名併記時の取りこぼし**: 体調キーワード分岐は`"元気" in msg_text`の部分一致で「元気ない/元気がない/元気なし」も「元気」として記録し、また最初に一致した1名のみ処理して2名目以降を無言で捨てていた。`_detect_condition_keyword`（否定表現を先に判定し`CONDITION_NOT_GENKI`＝「元気なし」を返す）と`_extract_health_targets`（全メンバーを出現順に列挙し名前ごとの区間で判定、区間にキーワードが無ければ全体判定へフォールバック）に置き換えた。判定は依然として定型キーワードの部分一致であり、「熱がある」等キーワード外の表現は「不明」として記録される（AIフォールバックには回らない）点は従来どおり。
-* 根拠: `_NEGATIVE_GENKI_PATTERNS`/`CONDITION_NOT_GENKI` (行番号: 119-120)、`_detect_condition_keyword` (行番号: 123-131)、`_extract_health_targets` (行番号: 134-160)、分岐 (行番号: 211-220)
+* 根拠: `_NEGATIVE_GENKI_PATTERNS`/`CONDITION_NOT_GENKI` (行番号: 138-139)、`_detect_condition_keyword` (行番号: 142-150)、`_extract_health_targets` (行番号: 153-179)、分岐 (行番号: 239-247)
 
 
 * **[修正済み] Issue #376 / L-L1 reply token期限切れ・再配信による重複記録・イベント単位の例外隔離**: Webhook応答前に同期的にAI処理（tenacityリトライ×連鎖ツール呼び出し）を完走する構造のため、LINEのreply token（約1分）を超過すると`reply_message`が400になり無応答、さらに再配信を有効化していると同一イベントが再送されて記録が二重化していた。対応: (1) `AI_REPLY_TIMEOUT_SEC`(20秒)で`asyncio.wait_for`によりAI経路を打ち切り、超過時は確認を促す文言を返信、(2) `reply_message`は失敗時に`user_id`宛て`push_message`へフォールバック、(3) `deliveryContext.isRedelivery=true`のイベントは`handle_message`/`handle_postback`でスキップ、(4) 両ハンドラを`try/except`で包み、複数イベント一括配信時に1件目の例外で後続が処理されない問題を隔離。**署名検証後に即200を返してバックグラウンドで処理する構造への変更は行っていない**（同期処理のまま。`webhookEventId`による冪等化も未実装で、再配信は一律スキップ）。`asyncio.wait_for`の打ち切りはコルーチンをキャンセルするが、`run_in_executor`/`to_thread`上で進行中のDB書き込み・Gemini呼び出しのスレッドは止まらないため、タイムアウト応答後に記録が完了している可能性がある。
-* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 47)、`_is_redelivery` (行番号: 50-59)、`reply_message`のpushフォールバック (行番号: 98-114)、`handle_message` (行番号: 168-189)、AI経路の`wait_for` (行番号: 225-238)、`handle_postback` (行番号: 243-279)
+* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 52)、`_is_redelivery` (行番号: 55-64)、`reply_message`のpushフォールバック (行番号: 121-131)、`handle_message` (行番号: 187-216)、AI経路の`wait_for` (行番号: 251-267)、`handle_postback` (行番号: 271-307)
+
+
+* **[修正済み] Issue #410 L-L6 グループ発言でuser_idがNoneのケース未考慮**: `event.source.user_id`はグループでの発言時、プロフィール未共有等の理由でLINEの仕様上`None`になりうる。`_get_display_name(None)`は`get_profile(None)`の例外を握り潰し`"Unknown"`を返すだけなので、以前はこの状態に気づかないまま処理が続行し、`user_id=NULL`のまま体調・食事等の記録がDB保存されていた。`handle_message`は`user_id`が`None`の場合、警告ログを出して`_get_display_name`/`_process_message_async`を呼ばず早期returnする（`handle_postback`側は本Issueの対象外として未対応のまま）。
+* 根拠: `handle_message`の`if user_id is None:` (行番号: 196-203)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。
-* 根拠: `if line_handler: line_handler.add(...)` (行番号: 175-177 / 抜粋: "if line_handler:")
+* 根拠: `if line_handler: line_handler.add(...)` (行番号: 309-311 / 抜粋: "if line_handler:")
 
 
 

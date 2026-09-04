@@ -40,6 +40,11 @@ if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
 # プロフィール表示名のキャッシュ (ログ用のためだけに毎回 LINE API を叩かないようにする)
 _PROFILE_CACHE_TTL_SEC = 3600
 _profile_cache: Dict[str, tuple] = {}  # user_id -> (display_name, cached_at)
+# 保守性(#410): TTLは「エントリが古いか」の判定にのみ使われ、キャッシュから自動で
+# エントリを削除する仕組みが無かったため、ユニークな話者が増えるほど_profile_cacheが
+# 無制限に成長し続けていた(プロセスは長時間稼働するため実質的なメモリリーク)。
+# 上限を設け、超過時は最終アクセス時刻が古いエントリから削除する。
+_PROFILE_CACHE_MAX_SIZE = 500
 
 # Issue #376: AI経路(Gemini呼び出し + tenacityリトライ × 最大 MAX_TOOL_ROUNDS 回)の総時間上限。
 # LINE の reply token は短命(約1分)で、超過すると reply_message が 400 になり無応答になる。
@@ -59,6 +64,19 @@ def _is_redelivery(event) -> bool:
     return getattr(ctx, "is_redelivery", False) is True
 
 
+def _evict_oldest_profile_cache_entries() -> None:
+    """
+    保守性(#410): `_profile_cache`が`_PROFILE_CACHE_MAX_SIZE`件を超えている場合、
+    キャッシュ時刻(`cached_at`)が古いエントリから順に削除して上限内に収める。
+    """
+    overflow = len(_profile_cache) - _PROFILE_CACHE_MAX_SIZE
+    if overflow <= 0:
+        return
+    oldest_user_ids = sorted(_profile_cache, key=lambda uid: _profile_cache[uid][1])[:overflow]
+    for uid in oldest_user_ids:
+        del _profile_cache[uid]
+
+
 def _get_display_name(user_id: str) -> str:
     """LINEのユーザー表示名を取得する。TTL付きでキャッシュし、API呼び出し頻度を抑える。"""
     cached = _profile_cache.get(user_id)
@@ -74,6 +92,7 @@ def _get_display_name(user_id: str) -> str:
         pass
 
     _profile_cache[user_id] = (user_name, time.time())
+    _evict_oldest_profile_cache_entries()
     return user_name
 
 
@@ -175,6 +194,15 @@ def handle_message(event: MessageEvent):
             return
 
         user_id = event.source.user_id
+        # L-L6 (#410): グループでの発言時、プロフィール未共有等の理由でLINEの仕様上
+        # user_idがNoneになりうる。_get_display_name(None)はget_profile(None)の例外を
+        # 握り潰し"Unknown"を返すだけなので、以前はこの状態に気づかないまま処理が続行し、
+        # user_id=NULLのまま体調・食事等の記録がDB保存されていた。記録の紐付け先が
+        # 無いため、user_id不明のイベントはここで処理をスキップする。
+        if user_id is None:
+            logger.warning("⚠️ event.source.user_id が取得できないため処理をスキップします(グループでのプロフィール未共有等の可能性)")
+            return
+
         msg_text = event.message.text.strip()
         reply_token = event.reply_token
 

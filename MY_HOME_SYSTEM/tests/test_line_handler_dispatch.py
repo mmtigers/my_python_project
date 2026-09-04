@@ -541,3 +541,91 @@ class TestAiReplyTextLengthLimit:
 
         sent = mock_reply.call_args.args[1]
         assert sent.text == "短い返事"
+
+
+class TestHandleMessageUserIdNoneGuard:
+    """L-L6 (#410) の回帰テスト: グループ発言でuser_idが取得できない(None)場合、
+    get_profile(None)の例外を握り潰したまま処理を続行しuser_id=NULLでDB保存
+    してしまわないよう、早期にスキップすること。"""
+
+    def _group_event_without_user_id(self, text="ステータス"):
+        event = MagicMock()
+        event.source.user_id = None
+        event.message.text = text
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+        return event
+
+    def test_message_without_user_id_is_skipped_before_processing(self, monkeypatch):
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+        mock_display_name = MagicMock()
+        monkeypatch.setattr(line_handler, "_get_display_name", mock_display_name)
+
+        line_handler.handle_message(self._group_event_without_user_id())
+
+        mock_process.assert_not_called()
+        mock_display_name.assert_not_called()
+
+    def test_message_with_user_id_present_is_processed_normally(self, monkeypatch):
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+        event = MagicMock()
+        event.source.user_id = "U1"
+        event.message.text = "ステータス"
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+
+        line_handler.handle_message(event)
+
+        mock_process.assert_called_once()
+
+
+class TestProfileCacheBounding:
+    """保守性(#410) の回帰テスト: _profile_cacheが上限を超えて無制限に成長しないこと。"""
+
+    def setup_method(self):
+        line_handler._profile_cache.clear()
+
+    def teardown_method(self):
+        line_handler._profile_cache.clear()
+
+    def test_cache_does_not_exceed_max_size(self, monkeypatch):
+        fake_api = MagicMock()
+        fake_api.get_profile.side_effect = lambda uid: MagicMock(display_name=f"User_{uid}")
+        monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+        monkeypatch.setattr(line_handler, "_PROFILE_CACHE_MAX_SIZE", 5)
+
+        for i in range(10):
+            line_handler._get_display_name(f"U{i}")
+
+        assert len(line_handler._profile_cache) == 5
+
+    def test_oldest_entries_are_evicted_first(self, monkeypatch):
+        fake_api = MagicMock()
+        fake_api.get_profile.side_effect = lambda uid: MagicMock(display_name=f"User_{uid}")
+        monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+        monkeypatch.setattr(line_handler, "_PROFILE_CACHE_MAX_SIZE", 3)
+
+        base_time = 1_700_000_000.0
+        for i in range(5):
+            monkeypatch.setattr(line_handler.time, "time", lambda t=base_time, i=i: t + i)
+            line_handler._get_display_name(f"U{i}")
+
+        # 最初の2件(U0, U1)は最も古いため削除され、直近3件(U2,U3,U4)が残る
+        assert set(line_handler._profile_cache.keys()) == {"U2", "U3", "U4"}
+
+    def test_cache_hit_does_not_trigger_unnecessary_eviction_churn(self, monkeypatch):
+        """キャッシュヒット時はAPIを叩かず_profile_cacheへの書き込みも発生しないため、
+        エントリ数が増えないこと(既存の動作の確認)。"""
+        fake_api = MagicMock()
+        fake_api.get_profile.return_value = MagicMock(display_name="太郎")
+        monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+        monkeypatch.setattr(line_handler, "_PROFILE_CACHE_MAX_SIZE", 500)
+
+        line_handler._get_display_name("U1")
+        line_handler._get_display_name("U1")
+        line_handler._get_display_name("U1")
+
+        assert len(line_handler._profile_cache) == 1
+        assert fake_api.get_profile.call_count == 1
