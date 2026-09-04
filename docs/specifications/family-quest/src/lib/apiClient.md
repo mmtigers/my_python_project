@@ -6,6 +6,7 @@
 | 言語 | TypeScript (React/Vite想定環境) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `c7ef30a` |
 
 ## 関連ドキュメント
 
@@ -132,16 +133,24 @@
 
 ### `ApiClient._request` (プライベートメソッド)
 
-* **役割**: 実際に `fetch` を使用してHTTPリクエストを行う共通処理。エンドポイントの先頭スラッシュを正規化してURLを構築し、通信成功時はJSONをパースして返す。失敗時はエラーレスポンスを解析し例外をスローする。
-* 根拠: [_requestメソッド定義] (行番号: 77〜95 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
+* **役割**: 実際に `fetch` を使用してHTTPリクエストを行う共通処理。エンドポイントの先頭スラッシュを正規化してURLを構築し、通信成功時はJSONをパースして返す。失敗時はエラーレスポンスを解析し例外をスローする。**（Issue #412 F-L3で修正）** 3点を改善した。(1) HTTPエラー応答の `detail` が配列（FastAPIの422バリデーションエラー形式 `[{loc, msg, type}, ...]`）の場合、新設の `extractDetailMessage` が各要素の `msg` を抽出して結合するようになった（以前は文字列以外なら一律 `API Error: 422` になっていた）。(2) `response.status === 204`、または本文が空文字列の成功応答では `JSON.parse` を呼ばずに `undefined` を返すようになった（以前は `response.json()` が `"Unexpected end of JSON input"` を送出していた）。(3) `catch` 節で、`fetch` 自体の失敗（オフライン・DNS失敗・CORS等による `TypeError`）または不正なJSON応答（`SyntaxError`）は、生のブラウザ文言（`"Failed to fetch"` 等）ではなく「通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。」に変換して再スローする（自前で `throw new Error(errorMessage)` したHTTPエラーはこの変換の対象外で、そのまま透過する）。
+* 根拠: [_requestメソッド定義] (行番号: 96〜122 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
+* 根拠: `extractDetailMessage`(422配列detailの結合) (行番号: 32〜46 / 抜粋: "function extractDetailMessage(detail: unknown): string | undefined {")
+* 根拠: 204/空ボディの回避 (行番号: 105〜111 / 抜粋: "if (response.status === 204) return undefined as T;
+            const text = await response.text();
+            return (text ? JSON.parse(text) : undefined) as T;")
+* 根拠: TypeError/SyntaxErrorの文言変換 (行番号: 118〜120 / 抜粋: "if (error instanceof TypeError || error instanceof SyntaxError) {
+                throw new Error('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');")
 
 
 * **引数/リクエスト**: `endpoint: string`, `options: RequestOptions`
 * 根拠: [_requestメソッド定義] (行番号: 77 / 抜粋: "private async _request<T>(endpoint: string, options: RequestOptions): Promise<T> {")
 
 
-* **戻り値/レスポンス**: `Promise<T>` (パースされたJSONレスポンス)
-* 根拠: [_requestメソッド定義] (行番号: 90 / 抜粋: "return await response.json() as T;")
+* **戻り値/レスポンス**: `Promise<T>` （204/空ボディの場合は `undefined`、それ以外はパースされたJSONレスポンス）
+* 根拠: [_requestメソッド定義] (行番号: 108〜111 / 抜粋: "if (response.status === 204) return undefined as T;
+            const text = await response.text();
+            return (text ? JSON.parse(text) : undefined) as T;")
 
 
 * **副作用**: `fetch` APIによる外部ネットワーク通信。エラー時の `console.error` 出力。
@@ -150,9 +159,9 @@
 
 * **エラーハンドリング**:
 * HTTPステータスが `!ok` の場合、レスポンスのJSONパースを試みる（パース失敗時は空オブジェクト `{}` にフォールバック）。
-* `errorData.detail` が文字列ならそれを、そうでなければステータスコードを用いた汎用メッセージを使用して `Error` をスロー。
-* 通信例外やスローされた例外を `catch` で捕捉し、コンソールにエラーログを出力した上で再スローする。
-* 根拠: [try-catchおよびif (!response.ok)ブロック] (行番号: 81〜94 / 抜粋: "if (!response.ok) {")
+* `errorData.detail` を `extractDetailMessage` に通し、文字列ならそのまま、422形式の配列なら各 `msg` を `' / '` 結合、いずれでもなければステータスコードを用いた汎用メッセージ（`API Error: <status>`）を使用して `Error` をスロー。
+* 通信例外やスローされた例外を `catch` で捕捉し、コンソールにエラーログを出力する。上記の自前 `Error`（HTTPエラー）はそのまま再スローするが、`fetch` 自体の失敗（`TypeError`）や不正なJSON（`SyntaxError`）は「通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。」という日本語文言に変換して再スローする。
+* 根拠: [try-catchおよびif (!response.ok)ブロック] (行番号: 100〜122 / 抜粋: "if (!response.ok) {")
 
 
 
@@ -281,6 +290,10 @@ graph TD
 * **ベースURLとエンドポイントの結合**: `_request` 内で `cleanEndpoint` として先頭のスラッシュを付与・補完しているが、`this.baseUrl` の末尾のスラッシュの有無については検査・トリム処理がない。環境変数やオリジンの末尾にスラッシュが含まれていた場合、URLが `//` となる可能性がある。
 * **SSR環境の考慮**: `typeof window !== 'undefined'` の判定を行っているが、`undefined` (例: SSR/Node環境) かつ `.env` が未定義の場合、ベースURLが空文字 `''` となる。これによりリクエストが相対パスとして処理されるか、エラーになる。
 * **エラー時のJSONパース**: `response.json().catch(() => ({}))` と記載されており、APIが `text/html` 等の非JSONエラーレスポンスを返した場合、パースエラーは握りつぶされて常に空オブジェクトとして扱われる。
+* **[修正済み] 204/空ボディ応答でのJSONパース失敗（Issue #412 F-L3）**: 以前は成功応答を一律 `response.json()` していたため、`cancel`/`reject`系などボディを返さないエンドポイントで `"Unexpected end of JSON input"` が発生していた。`response.status === 204` および空文字列本文の場合は `undefined` を返すようにした。
+* **[修正済み] 422バリデーションエラーが `API Error: 422` としてしか表示されない（Issue #412 F-L3）**: FastAPIの422応答は `detail` が配列（各要素に `msg`）で返るが、以前は文字列判定のみだったため常に汎用メッセージにフォールバックしていた。`extractDetailMessage` で配列内の `msg` を結合するようにした。
+* **[修正済み] `fetch` 失敗時の生のブラウザ文言（Issue #412 F-L3）**: オフライン・DNS失敗・CORS等で `fetch` 自体が `TypeError`（例: `"Failed to fetch"`）を投げた場合、以前はその文言がそのままエラーモーダルに表示されていた。`catch` 節で `TypeError`/`SyntaxError` のみを日本語の通信エラー文言に変換するようにした（自前でスローしたHTTPエラーの `Error` はそのまま透過する）。
+
 
 ## 9. 不明事項一覧
 
