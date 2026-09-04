@@ -77,6 +77,8 @@
 
 * **役割**: `SignatureCertChainUrl`ヘッダの値がAmazon純正のURL形式（`https://s3.amazonaws.com/echo.api/...`、ポート443）であることを検証する内部ヘルパー関数。scheme・hostname（大文字小文字を無視）・pathプレフィックス・portの4項目をそれぞれ`CERT_CHAIN_URL_*`定数と比較する。**（Issue #173で修正）** pathプレフィックスの判定は、以前は生の`parsed.path`に対する`startswith`のみだったため、`https://s3.amazonaws.com/echo.api/../evil-bucket/cert.pem`のような`".."`を含むパスがこのチェックを素通りしていた(Amazon公式の検証手順は「URLパスを正規化した後に`/echo.api/`で始まること」を要求しており、この点で公式手順から乖離していた)。現在は`posixpath.normpath`で`parsed.path`を正規化してから`startswith`判定を行う。**（Issue #223で修正）** `urlparse`が返す`parsed.path`はパーセントデコードされない生文字列のため、`https://s3.amazonaws.com/echo.api/%2e%2e/evil-bucket/cert.pem`のようなパーセントエンコード済みの`".."`は`normpath`でも検知できず素通りしていた。一方、後段の`_fetch_leaf_certificate`が同じURL文字列を`requests.get()`に渡すと`requests`が送信前に`%2e%2e`を`".."`へデコードするため、検証結果と実際の取得先が食い違っていた。現在は`normpath`へ渡す前に`unquote`で一度パーセントデコードしてから判定する。
 * 根拠: (行番号: 59〜73 / 抜粋: "def _validate_cert_chain_url(url: str) -> None:\n    parsed = urlparse(url)")、正規化 (行番号: 69〜70 / 抜粋: "normalized_path = posixpath.normpath(unquote(parsed.path))\n    if not normalized_path.startswith(CERT_CHAIN_URL_PATH_PREFIX):")
+* **（Issue #385 で追加）** クエリ文字列またはフラグメントを含むURLは `AlexaVerificationError` で拒否する。Amazonの証明書URLにクエリが付くことはなく、許すとキャッシュキーの無限増殖(`?x=1`, `?x=2`, …)と取得先の揺れの原因になるため。
+* 根拠: `if parsed.query or parsed.fragment:` (行番号: 93〜94)
 
 
 * **引数/リクエスト**: `url: str`（`SignatureCertChainUrl`ヘッダの値）
@@ -94,10 +96,26 @@
 * **エラーハンドリング**: scheme/hostname/pathプレフィックス（正規化後）/portのいずれかが期待値と異なる場合、それぞれ`AlexaVerificationError`を送出する。
 * 根拠: (行番号: 61〜71 / 抜粋: "if parsed.scheme != CERT_CHAIN_URL_SCHEME:\n        raise AlexaVerificationError(f\"Invalid SignatureCertChainUrl scheme: {parsed.scheme!r}\")")
 
+
+### `_cert_cache_key`（Issue #385 で追加）
+
+* **役割**: 証明書URLから `scheme://host(小文字)/正規化パス` 形式のキャッシュキーを生成する。クエリ・フラグメントは含めない。
+* 根拠: `def _cert_cache_key(url: str) -> str:` (行番号: 63〜67)
+* **引数/リクエスト**: `url: str`
+* 根拠: (行番号: 63)
+* **戻り値/レスポンス**: `str`
+* 根拠: (行番号: 67)
+* **副作用**: なし
+* 根拠: (行番号: 63〜67)
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 63〜67)
+
 ### `_fetch_leaf_certificate`
 
 * **役割**: `SignatureCertChainUrl`から証明書チェーンをHTTPS経由で取得し、先頭（リーフ）証明書を返す内部ヘルパー関数。`_cert_cache`にキャッシュ済みかつ有効期限内であればHTTP取得を省略してキャッシュを返す。取得成功時は`CERT_CACHE_TTL_SECONDS`（1時間）後を有効期限として`_cert_cache`へ書き込む。**（Issue #179で修正）** 以前は`requests.get`/`resp.raise_for_status()`が送出する`requests.exceptions.RequestException`（`Timeout`/`ConnectionError`/`HTTPError`等）がそのまま伝播し、呼び出し元ルーターの`except AlexaVerificationError`を素通りしていたが、これを`try/except`で捕捉し`AlexaVerificationError`へ変換するよう修正した。
 * 根拠: (行番号: 76〜100 / 抜粋: "def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:\n    now = time.time()\n    cached = _cert_cache.get(cert_chain_url)\n    if cached and cached[1] > now:\n        return cached[0]")、例外変換の修正 (行番号: 88〜92 / 抜粋: "try:\n        resp = requests.get(cert_chain_url, timeout=5)\n        resp.raise_for_status()\n    except requests.exceptions.RequestException as exc:\n        raise AlexaVerificationError(f\"Failed to fetch certificate chain: {exc}\") from exc")
+* **（Issue #385 で修正）** キャッシュキーはURL文字列そのものではなく `_cert_cache_key`（`scheme://host/正規化パス`、クエリ・フラグメントを含まない）を使う。エントリ数は `CERT_CACHE_MAX_ENTRIES`（8）で上限を設け、超過時は期限切れを捨てたうえで最も期限の近いものから破棄する。`x509.load_pem_x509_certificates` の `ValueError`（PEMとして解釈できない応答）は `AlexaVerificationError` に変換する（以前は router の except を素通りして500になっていた）。
+* 根拠: `cache_key = _cert_cache_key(cert_chain_url)` (行番号: 99)、`except ValueError as exc:` (行番号: 120〜121)、`while len(_cert_cache) >= CERT_CACHE_MAX_ENTRIES:` (行番号: 129〜131)
 
 
 * **引数/リクエスト**: `cert_chain_url: str`
@@ -119,6 +137,8 @@
 
 * **役割**: `Signature`ヘッダと`SignatureCertChainUrl`ヘッダを使ってリクエストボディの署名を検証する公開関数。(1) 両ヘッダの非空チェック、(2) `_validate_cert_chain_url`によるURL形式検証、(3) `_fetch_leaf_certificate`によるリーフ証明書取得、(4) 証明書の有効期限チェック（`not_valid_before_utc <= now <= not_valid_after_utc`）、(5) SANに`echo-api.amazon.com`が含まれるかのチェック、(6) `Signature`ヘッダのbase64デコード、(7) リーフ証明書の公開鍵によるRSA署名検証（PKCS1v15パディング + SHA1ハッシュ、Amazon Alexaの署名アルゴリズム仕様で固定）、を順に行う。
 * 根拠: [関数定義とDocstring] (行番号: 103〜107 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
+* **（Issue #385 で修正）** SAN拡張が無い証明書で送出される `x509.ExtensionNotFound` を `AlexaVerificationError` に変換する（以前は router で500になっていた）。
+* 根拠: `except x509.ExtensionNotFound as exc:` (行番号: 155〜156)
 
 
 * **引数/リクエスト**: `raw_body: bytes`（リクエストの生ボディ）, `signature_b64: str`（`Signature`ヘッダの値）, `cert_chain_url: str`（`SignatureCertChainUrl`ヘッダの値）

@@ -54,6 +54,17 @@ class AlexaVerificationError(Exception):
 
 
 _cert_cache: Dict[str, Tuple[x509.Certificate, float]] = {}
+# #385: キャッシュはURL文字列キーのため、クエリ文字列を変えるだけで別エントリとして
+# 無制限に増え(かつ都度 requests.get でスレッドプールを占有し)ていた。正規化キーを使い、
+# 上限を超えたら最も古いエントリから捨てる。
+CERT_CACHE_MAX_ENTRIES = 8
+
+
+def _cert_cache_key(url: str) -> str:
+    """scheme://host/正規化パス をキャッシュキーとする(クエリ・フラグメントは含めない)。"""
+    parsed = urlparse(url)
+    normalized_path = posixpath.normpath(unquote(parsed.path))
+    return f"{parsed.scheme}://{(parsed.hostname or '').lower()}{normalized_path}"
 
 
 def _validate_cert_chain_url(url: str) -> None:
@@ -77,11 +88,16 @@ def _validate_cert_chain_url(url: str) -> None:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl path: {parsed.path!r}")
     if (parsed.port or CERT_CHAIN_URL_PORT) != CERT_CHAIN_URL_PORT:
         raise AlexaVerificationError(f"Invalid SignatureCertChainUrl port: {parsed.port!r}")
+    # #385: Amazonの証明書URLにクエリ/フラグメントが付くことはない。許すとキャッシュキーの
+    # 無限増殖(?x=1, ?x=2, ...)と取得先の揺れの原因になるため拒否する。
+    if parsed.query or parsed.fragment:
+        raise AlexaVerificationError("SignatureCertChainUrl must not contain query or fragment")
 
 
 def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     now = time.time()
-    cached = _cert_cache.get(cert_chain_url)
+    cache_key = _cert_cache_key(cert_chain_url)
+    cached = _cert_cache.get(cache_key)
     if cached and cached[1] > now:
         return cached[0]
 
@@ -97,12 +113,23 @@ def _fetch_leaf_certificate(cert_chain_url: str) -> x509.Certificate:
     except requests.exceptions.RequestException as exc:
         raise AlexaVerificationError(f"Failed to fetch certificate chain: {exc}") from exc
 
-    certs = x509.load_pem_x509_certificates(resp.content)
+    # #385: PEMとして解釈できない応答は ValueError であり AlexaVerificationError ではないため、
+    # router の except を素通りして500になっていた。検証エラーに変換する。
+    try:
+        certs = x509.load_pem_x509_certificates(resp.content)
+    except ValueError as exc:
+        raise AlexaVerificationError(f"Certificate chain is not valid PEM: {exc}") from exc
     if not certs:
         raise AlexaVerificationError("Certificate chain response is empty")
 
     leaf = certs[0]
-    _cert_cache[cert_chain_url] = (leaf, now + CERT_CACHE_TTL_SECONDS)
+    # 期限切れエントリを捨てたうえで、それでも上限を超えるなら最も期限の近いものから捨てる
+    for key in [k for k, (_c, exp) in _cert_cache.items() if exp <= now]:
+        _cert_cache.pop(key, None)
+    while len(_cert_cache) >= CERT_CACHE_MAX_ENTRIES:
+        oldest_key = min(_cert_cache, key=lambda k: _cert_cache[k][1])
+        _cert_cache.pop(oldest_key, None)
+    _cert_cache[cache_key] = (leaf, now + CERT_CACHE_TTL_SECONDS)
     return leaf
 
 
@@ -121,7 +148,12 @@ def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -
     if not (leaf_cert.not_valid_before_utc <= now <= leaf_cert.not_valid_after_utc):
         raise AlexaVerificationError("Signing certificate is expired or not yet valid")
 
-    san_ext = leaf_cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+    # #385: SAN拡張が無い証明書では ExtensionNotFound(AlexaVerificationErrorではない)が
+    # 送出され router で500になっていたため、検証エラーに変換する。
+    try:
+        san_ext = leaf_cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+    except x509.ExtensionNotFound as exc:
+        raise AlexaVerificationError("Signing certificate has no SubjectAlternativeName") from exc
     dns_names = san_ext.value.get_values_for_type(x509.DNSName)
     if REQUIRED_SAN not in dns_names:
         raise AlexaVerificationError(f"Signing certificate SAN does not include {REQUIRED_SAN}")
