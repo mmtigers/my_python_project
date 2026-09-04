@@ -103,13 +103,22 @@ class LogAnalyzer:
                 logger.warning(f"⚠️ 読み取り権限がありません: {filepath}")
                 return
 
+            # #381: トレースバック継続行("Traceback (most recent call last):" や
+            # "    File ..." / "XxxError: ...")にはタイムスタンプが無いため、以前は
+            # start_date のフィルタを素通りして必ずカウントされ、1回トレースバックが出ると
+            # その日 logrotate されるまで毎時「異常」が立ち続けていた。直前にパースできた
+            # タイムスタンプを継続行のタイムスタンプとして引き継いで判定する。
+            last_dt = None
             with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
                     if any(ignore in line for ignore in self.IGNORE_PATTERNS):
                         continue
 
                     dt = self._parse_timestamp(line)
-                    if dt and dt < self.start_date:
+                    if dt is not None:
+                        last_dt = dt
+                    effective_dt = dt if dt is not None else last_dt
+                    if effective_dt and effective_dt < self.start_date:
                         continue
                     
                     line_upper = line.upper()
