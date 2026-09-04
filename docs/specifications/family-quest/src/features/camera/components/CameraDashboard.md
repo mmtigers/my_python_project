@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -96,7 +97,7 @@
 * **エラーハンドリング**: `queryFn`自身はtry/catchを持たず、例外はそのまま`useQuery`の`error`に格納される。エラー表示への変換は`CameraDashboard`本体の`fetchError`派生値（`extractErrorDetail`）が担う。
 * 根拠: (行番号: 37〜40, 49 / 抜粋: "queryFn: async () => {\n            const data = await apiClient.get<CameraConfig[]>('/api/cameras/settings');", "const fetchError = error ? extractErrorDetail(error) : null;")
 
-### `extractErrorDetail` (モジュールレベル関数、**Issue #121で追加**)
+### `extractErrorDetail` (`@/lib/errorDetail`からのインポート、Issue #121で追加、Issue #412 品質で`InventoryList.tsx`と重複していたため`lib/errorDetail.ts`へ移動)
 
 * **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。`error`が`Error`インスタンスかつ`message`が真値の場合のみそれを使い、それ以外は固定文言`'カメラ設定の取得に失敗しました'`にフォールバックする。React Query化後は`useQuery`の`error`戻り値から`fetchError`派生値を作る際に呼ばれる。`InventoryList.tsx`等の同名ヘルパーと同じパターン。
 * 根拠: (行番号: 10〜17, 49 / 抜粋: "// ★バグ修正(Issue #121): apiClient側でスローされるErrorのmessageには、バックエンドが\n// 返す{\"detail\": \"...\"}の内容が入っている(apiClient.ts参照)。", "const extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';\n};")

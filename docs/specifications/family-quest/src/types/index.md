@@ -6,7 +6,7 @@
 | 言語 | TypeScript |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `07bb74e` |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -45,8 +45,8 @@
 
 ### `ID`
 
-* **役割**: IDを表す汎用的な型の定義。
-* 根拠: [該当要素] (行番号: 6 / 抜粋: "export type ID = number | string;")
+* **役割**: IDを表す汎用的な型の定義。**（Issue #412 品質で修正）** 以前は`number | string`だったが、`quest_id`/`reward_id`/`history_id`等の実カラムはすべてSQLiteの`INTEGER PRIMARY KEY`でありサーバーは常に`number`を返すため、`number`のみに絞った（`tsc -b`が通ることを確認済み）。`gameDataSchema.ts`のZod検証層（実際のワイヤーデータに対する独立した防御）は`z.union([z.number(), z.string()])`のまま変更していない。
+* 根拠: [該当要素] (行番号: 5〜9 / 抜粋: "export type ID = number;")
 
 
 * **引数/リクエスト**: 該当なし

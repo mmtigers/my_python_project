@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `46c9bc4` |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -153,7 +153,7 @@ graph TD
 | `App` コンポーネントの詳細な機能 | `family-quest/src/App.tsx`(全526行)を直接確認した。ユーザー切替(`currentUserIdx`)、購入・却下確認モーダル(`ConfirmModal`)、エラー表示モーダル(`MessageModal`)、クエスト完了/取消のワンタップ実行(`runQuestAction`/`handleQuestClick`)、報酬購入(`handleBuyReward`/`executeConfirm`)、承認・一括承認(`handleApprove`/`handleApproveAll`)、`useLayoutMode`による横画面(`FamilyDashboard`)/縦画面(`UserStatusCard`+`QuestList`等+`BottomNav`)のレイアウト切替、アバターアップロード(`AvatarUploader`、`lazy`import)、設定モーダル(`SettingsModal`、`lazy`import)を統括するFamily Questのメイン画面コンポーネントであることを確認した(138〜523行目)。 | 直接ソース確認: `family-quest/src/App.tsx:138-523` |
 | `CameraDashboard` コンポーネントの詳細な機能 | `family-quest/src/features/camera/components/CameraDashboard.tsx`(全67行)を直接確認した。マウント時の`useEffect`(13〜27行目)で`document.title`を「ホーム監視カメラ」に変更しつつ`apiClient.get<CameraConfig[]>('/api/cameras/settings')`を呼び出し、`enabled`なカメラのみ`filter`し`order`昇順に`sort`して`cameras`状態にセットする(16〜19行目)。「🟢 ライブ映像」/「📼 録画再生」の2タブ(`activeTab`, 43〜56行目)を持ち、`live`時は`LiveView`、`record`時は`RecordView`にカメラ一覧を渡して描画する(58〜62行目)独立した全画面レイアウト(`min-h-screen`、31〜65行目)のコンポーネントである。 | 直接ソース確認: `family-quest/src/features/camera/components/CameraDashboard.tsx:1-67` |
 | データフェッチ機構のグローバル設定 | `family-quest/src/lib/queryClient.ts`(全10行)を直接確認した。`queryClient`は`retry: 1`（失敗時1回再試行）、`staleTime: 1000 * 60`（60秒）、`refetchOnWindowFocus: false`という`defaultOptions.queries`(4〜9行目)を持つ`QueryClient`インスタンスであり、記載内容以外の追加設定（`mutations`のデフォルト等）はファイル内に存在しない。 | 直接ソース確認: `family-quest/src/lib/queryClient.ts:1-10` |
-| グローバルスタイルの定義内容 | `family-quest/src/index.css`を直接確認した。全2行で`@tailwind base; @tailwind components; @tailwind utilities;`のみが記述されており、Tailwind CSSの3レイヤーを読み込むだけのファイルで、カスタムのCSS変数やベーススタイルの追加定義は本ファイルには存在しない（`App.css`という別ファイルは存在するが、`main.tsx`からインポートされているのは`index.css`のみである）。 | 直接ソース確認: `family-quest/src/index.css:1-2` |
+| グローバルスタイルの定義内容 | `family-quest/src/index.css`を直接確認した。全2行で`@tailwind base; @tailwind components; @tailwind utilities;`のみが記述されており、Tailwind CSSの3レイヤーを読み込むだけのファイルで、カスタムのCSS変数やベーススタイルの追加定義は本ファイルには存在しない（**Issue #412 品質で修正**: `main.tsx`からインポートされていない、どこからも参照されていなかった`App.css`は死蔵ファイルと判断し削除された。同様に未参照だった`src/assets/react.svg`・`public/silent.mp3`も削除された）。 | 直接ソース確認: `family-quest/src/index.css:1-2` |
 | HTML側のDOM構造 | `family-quest/index.html`(全20行)を直接確認した。`<body>`内に`<div id="root"></div>`(16行目)と`<script type="module" src="/src/main.tsx"></script>`(17行目)のみが存在し、`main.tsx`がマウント対象とする`id="root"`の要素が確実に存在することを確認した。`<head>`には`<title>Family Quest</title>`(12行目)、`theme-color`(9行目)、`description`(10行目)、`apple-touch-icon`(11行目)等のメタデータが定義されている。 | 直接ソース確認: `family-quest/index.html:1-20` |
 | `/camera` 以外のルーティング設計の有無 | `family-quest/package.json`および`family-quest`ディレクトリ全体を確認したが、`react-router`等のルーティングライブラリの依存は存在せず(`package.json`に`router`を含む依存は0件)、`*route*`/`*router*`という名前の設定ファイルもリポジトリ内に見つからなかった。`family-quest/src/main.tsx`(全41行)を確認したところ、ルーティングは本ファイル17行目で確認した`window.location.pathname.includes('/camera')`による単純な文字列一致のみで、`isCameraView`の真偽で`CameraDashboard`か`App`(+`SettingsProvider`+`ToastProvider`)かをルート直下で丸ごと切り替えている(24〜39行目)。専用のルーティングライブラリや追加のルート定義は存在しないことを確認した。 | 直接ソース確認: `family-quest/src/main.tsx:1-41`, `family-quest/package.json`（`router`依存なし） |
 

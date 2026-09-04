@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `c29d467` |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -21,7 +21,7 @@
 
 ## 2. ファイルの概要
 
-横画面（Echo Show 15等の常設デバイス）用のメインレイアウトコンポーネント`FamilyDashboard`と、その内部で使われるユーザー単位のパネルコンポーネント`FamilyPanel`を定義する。パパ・ママ・兄・妹（`FAMILY_ORDER`で固定された順序）を1行4列のグリッドで常時表示し、各パネル内でそのユーザーのステータスと、クエスト/ごほうび/もちものの3タブの内容が完結する（別画面への誘導をしない）。親向けの承認機能は独立画面を持たず、メイン画面上部に常時統合表示される。テーマカラーは`useSettings`から取得し、直前に操作したパネルのみリング（強調枠）でハイライトする。
+横画面（Echo Show 15等の常設デバイス）用のメインレイアウトコンポーネント`FamilyDashboard`と、その内部で使われるユーザー単位のパネルコンポーネント`FamilyPanel`を定義する。パパ・ママ・兄・妹（**Issue #412 品質で修正**: 以前は`FAMILY_ORDER`というハードコードされた配列で固定していたが、サーバー側(`quest_service.py`の`GameSystem.get_all_view_data`)が既に`quest_data.USERS`の宣言順(同じdad→mom→son→daughter)でソート済みの`users`を返すため、クライアント側の再ソートは重複と判断し削除した。現在は受け取った`users`の順序をそのまま使う）を1行4列のグリッドで常時表示し、各パネル内でそのユーザーのステータスと、クエスト/ごほうび/もちものの3タブの内容が完結する（別画面への誘導をしない）。親向けの承認機能は独立画面を持たず、メイン画面上部に常時統合表示される。テーマカラーは`useSettings`から取得し、直前に操作したパネルのみリング（強調枠）でハイライトする。
 
 * 根拠: コンポーネント直前のコメント (行番号: 44〜47 / 抜粋: "// 横画面(Echo Show 15等の常設デバイス)用メインレイアウト。\n// パパ・ママ・兄・妹を1行4列で常時表示し、各パネル内でその人のステータスと\n// その日のクエスト一覧が完結する(別画面への誘導をしない)。親向けの承認機能は\n// 独立画面を持たず、このメイン画面上部に常時統合表示する。")
 * 根拠: `FamilyDashboard`関数定義 (行番号: 48 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
@@ -58,20 +58,10 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `FAMILY_ORDER` (モジュールレベル定数)
+### `FAMILY_ORDER` / `sortByFamilyOrder` — 削除済み（Issue #412 品質）
 
-* **役割**: パパ・ママ・兄・妹の表示順を固定するための`user_id`配列。権限判定(`quest_users.role`)とは別の「画面上の並び順」の関心事のため、ここでのみ`user_id`を直接使う旨がコメントで明記されている。
-* 根拠: (行番号: 13〜16 / 抜粋: "// 表示順(パパ・ママ・兄・妹)を固定するための並び替えキー(要件5)。\n// 権限判定(quest_users.role)とは別の「画面上の並び順」の関心事のため、ここでのみ\n// user_id を直接使う(Family Questの家族構成は固定のため妥当と判断)。\nconst FAMILY_ORDER = ['dad', 'mom', 'son', 'daughter'];")
-
-
-### `sortByFamilyOrder` (モジュールレベル関数)
-
-* **役割**: `users`配列を`FAMILY_ORDER`のインデックス順に並び替える。`FAMILY_ORDER`に含まれないユーザーは末尾（インデックス-1同士は順序維持、片方のみ-1なら-1側が後ろ）に配置される。
-* 根拠: (行番号: 18〜27 / 抜粋: "function sortByFamilyOrder(users: User[]): User[] {\n    return [...users].sort((a, b) => {\n        const ia = FAMILY_ORDER.indexOf(a.user_id);\n        const ib = FAMILY_ORDER.indexOf(b.user_id);\n        if (ia === -1 && ib === -1) return 0;\n        if (ia === -1) return 1;\n        if (ib === -1) return -1;\n        return ia - ib;\n    });\n}")
-* **引数/リクエスト**: `users: User[]`
-* **戻り値/レスポンス**: `User[]`（元配列を破壊せず`[...users]`のコピーをソート）
-* **副作用**: なし
-* **エラーハンドリング**: なし
+以前はパパ・ママ・兄・妹の表示順を固定するためのハードコードされた`user_id`配列`FAMILY_ORDER = ['dad', 'mom', 'son', 'daughter']`と、それに基づいて`users`配列を並び替える`sortByFamilyOrder`関数が存在した。サーバー側(`MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`)が、SQLiteが`user_id`のアルファベット順で返しうる`users`を`quest_data.USERS`の宣言順（`dad`→`mom`→`son`→`daughter`、`FAMILY_ORDER`と同一）に必ずソートし直してから返すため、クライアント側での再ソートは常に無意味な重複処理だった。判定ロジックの集約（`lib/questTargeting.ts`の追加）に合わせて削除し、`orderedUsers`は`users`をそのまま参照するようになった（変数名は互換のため残している）。
+* 根拠: `orderedUsers = users` (行番号: 47 付近) と `MY_HOME_SYSTEM/services/quest_service.py` の `GameSystem.get_all_view_data` 内のソート処理（直接ソース確認）。
 
 
 ### `FamilyDashboardProps` (型定義)
@@ -83,7 +73,7 @@
 
 ### `FamilyDashboard`
 
-* **役割**: `users`を`sortByFamilyOrder`で並び替え、代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、並び替え済みユーザーごとに`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。Issue #102で追加された`completedSignal`（Propsで受け取る）はここでは判定に一切関与せず、そのまま各`FamilyPanel`へ転送するだけである。
+* **役割**: 代表の親（`role === 'role_adult'`、無ければ先頭）を`ApprovalList`の`currentUser`として渡して承認バーを表示したのち、`users`（**Issue #412 品質で修正**: サーバーが返す順のまま。以前の`sortByFamilyOrder`呼び出しは削除）の各ユーザーについて`FamilyPanel`をグリッド表示する。承認バーの記録名義は「親」で固定し、実際にどちらの親が画面をタップしたかは区別しない（要件5）。直前に操作したパネルのIDを`activeUserId`として保持し、各`FamilyPanel`へ渡す。各ユーザーについて`hasNothingToDo`で「今日やることが1件もないか」を判定し`isIdle`として渡す。Issue #102で追加された`completedSignal`（Propsで受け取る）はここでは判定に一切関与せず、そのまま各`FamilyPanel`へ転送するだけである。
 * 根拠: (行番号: 50〜118 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
 * 根拠: 代表の親のコメント (行番号: 56〜58 / 抜粋: "// 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは\n    // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。\n    const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];")
 * 根拠: `activeUserId`のコメント (行番号: 60〜62 / 抜粋: "// 角度⑥: 直前に操作したパネルを枠でハイライトし、常時4人表示でも\n    // 「今どこを触っているか」が一目でわかるようにする。\n    const [activeUserId, setActiveUserId] = useState<string | null>(null);")
@@ -109,8 +99,8 @@
 
 ### `hasNothingToDo` (FamilyDashboardコンポーネント内部関数)
 
-* **役割**: 指定した`user`について、対象（`target_user`が`all`/未指定、`siblings`（子ども全員）、`role_`プレフィックス一致、または`user_id`一致）となる`quests`のうち、`getQuestLockState`で`isLocked`かつ`isDone`のいずれでもない（＝「今やれる状態のクエスト」が）1件でも存在するかを判定し、存在しない場合に`true`（今日やることがない）を返す。**バグ修正**: 以前は`target === 'siblings'`（兄妹連携クエスト）が`all`/`role_*`/`user_id`完全一致のいずれにも一致せず全ユーザーから除外されていたため、`target`が`'siblings'`の場合は`user.role === 'role_child'`であれば対象とする分岐を追加した。**（#291で修正）** 参照フィールドは`q.target`から、`quest_master`の実カラム名である`q.target_user`に変更された（バックエンドが以前このビューへ付与していた`target`という重複フィールド名の廃止に追随したもの）。
-* 根拠: (行番号: 64〜79 / 抜粋: "const hasNothingToDo = (user: User) => {\n        return !quests.some(q => {\n            if (q.target_user && q.target_user !== 'all') {\n                if (q.target_user === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (user.role !== 'role_child') return false;\n                } else if (q.target_user.startsWith('role_')) {\n                    if (user.role !== q.target_user) return false;\n                } else if (q.target_user !== user.user_id) {\n                    return false;\n                }\n            }\n            const { isLocked, isDone } = getQuestLockState(q, user, completedQuests, pendingQuests);\n            return !isLocked && !isDone;\n        });\n    };")
+* **役割**: 指定した`user`について、対象となる`quests`のうち、`getQuestLockState`で`isLocked`かつ`isDone`のいずれでもない（＝「今やれる状態のクエスト」が）1件でも存在するかを判定し、存在しない場合に`true`（今日やることがない）を返す。対象判定（`target_user`が`all`/未指定、`siblings`（子ども全員）、`role_`プレフィックス一致、または`user_id`一致）は**Issue #412 品質で修正**: 以前は`QuestList.tsx`とほぼ同一のロジックが本ファイルにも重複していたが、`lib/questTargeting.ts`の`isQuestVisibleToUser`に集約し、ここから呼び出す形に変更した。判定内容自体（`siblings`対応等）は変わらない。
+* 根拠: `hasNothingToDo`と`isQuestVisibleToUser`呼び出し（行番号 58〜63付近、`if (!isQuestVisibleToUser(q, user)) return false;`）。判定本体は`../../../lib/questTargeting.md`を参照。
 
 
 * **引数/リクエスト**: `user: User`
@@ -244,7 +234,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **`FAMILY_ORDER`のハードコード**: 表示順序を固定するために`user_id`（`'dad'`, `'mom'`, `'son'`, `'daughter'`）を直接使用している。コメントにより「Family Questの家族構成は固定のため妥当」と明記されているが、家族構成が変わった場合はこの配列を変更する必要がある。
+* **[修正済み] `FAMILY_ORDER`のハードコードを削除（Issue #412 品質）**: 以前は表示順序を固定するために`user_id`（`'dad'`, `'mom'`, `'son'`, `'daughter'`）の配列を直接使用していたが、サーバー側が常に同じ順序でソート済みの`users`を返すことを確認し、この重複したクライアント側ロジックを削除した。
 * 根拠: (行番号: 13〜16 / 抜粋: "// 表示順(パパ・ママ・兄・妹)を固定するための並び替えキー(要件5)。")
 * **アイコン優先表示の外部化**: 以前はモジュール定数`ICON_FIRST_USER_IDS`でハードコードされていたが、現在は`useSettings()`から取得する`iconFirstUserIds`に置き換えられ、設定画面側で管理される構成になっている。
 * 根拠: (行番号: 52, 101 / 抜粋: "const { iconFirstUserIds, userThemeColors } = useSettings();", "iconFirst={iconFirstUserIds.includes(user.user_id)}")
@@ -258,8 +248,8 @@ graph TD
 * 根拠: (行番号: 54〜56)
 * **アイドル表示の視覚的優先度低下**: `hasNothingToDo`が`true`のユーザーのパネルには`opacity-70`が適用され、パネル自体は表示され続けるが視線誘導の優先度が下がる。
 * 根拠: (行番号: 62〜63, 155 / 抜粋: "// 今日やることが1件もない人は、パネル自体は残しつつ視覚的な優先度を下げる", "${isIdle ? 'opacity-70' : ''}")
-* **[修正済み] 兄妹連携クエスト(`target_user === 'siblings'`)対応**: `hasNothingToDo`内の対象判定は以前`all`/`role_`プレフィックス一致/`user_id`完全一致のみに対応しており、`target_user === 'siblings'`のクエストはどの分岐にも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）。`target_user === 'siblings'`の場合は`user.role === 'role_child'`であれば対象とする分岐を追加した。同種の対象判定ロジックは`QuestList.tsx`側にも存在する（本ファイルの管轄外）。**（#291で修正）** 参照フィールド名は`q.target`から`q.target_user`（`quest_master`の実カラム名）に変更された。
-* 根拠: (行番号: 67〜69 / 抜粋: "if (q.target_user === 'siblings') {\n                    // 兄妹連携クエスト: 対象は子ども(role_child)全員\n                    if (user.role !== 'role_child') return false;\n                } else if (q.target_user.startsWith('role_')) {")
+* **[修正済み] 兄妹連携クエスト(`target_user === 'siblings'`)対応**: 以前は`target === 'siblings'`（兄妹連携クエスト）が`all`/`role_*`/`user_id`完全一致のいずれにも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）バグを修正済み。**（Issue #412 品質で修正）** この判定ロジック自体は`QuestList.tsx`にも重複していたため`lib/questTargeting.ts`の`isQuestVisibleToUser`に集約された（本ファイルは同関数を呼び出すのみ）。**（#291で修正）** 参照フィールド名は`q.target`から`q.target_user`（`quest_master`の実カラム名）に変更された。
+* 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）
 * **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
 * 根拠: (行番号: 111, 202 / 抜粋: "completedSignal={completedSignal}")
 

@@ -9,22 +9,7 @@ import { InventoryList } from '../../shop/components/InventoryList';
 import { useSettings } from '@/context/useSettings';
 import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
 import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
-
-// 表示順(パパ・ママ・兄・妹)を固定するための並び替えキー(要件5)。
-// 権限判定(quest_users.role)とは別の「画面上の並び順」の関心事のため、ここでのみ
-// user_id を直接使う(Family Questの家族構成は固定のため妥当と判断)。
-const FAMILY_ORDER = ['dad', 'mom', 'son', 'daughter'];
-
-function sortByFamilyOrder(users: User[]): User[] {
-    return [...users].sort((a, b) => {
-        const ia = FAMILY_ORDER.indexOf(a.user_id);
-        const ib = FAMILY_ORDER.indexOf(b.user_id);
-        if (ia === -1 && ib === -1) return 0;
-        if (ia === -1) return 1;
-        if (ib === -1) return -1;
-        return ia - ib;
-    });
-}
+import { isQuestVisibleToUser } from '@/lib/questTargeting';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -59,7 +44,12 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     processingQuestKeys, busyHistoryIds, isApprovingAll, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
-    const orderedUsers = sortByFamilyOrder(users);
+    // #412(品質): 以前はここで FAMILY_ORDER=['dad','mom','son','daughter'] という
+    // ハードコードされた並び順に再ソートしていたが、サーバー側(quest_service.pyの
+    // GameSystem.get_all_view_data)が既に quest_data.USERS の宣言順(同じ dad→mom→
+    // son→daughter)を正としてソート済みの users を返すため、クライアント側での
+    // 再ソートは不要かつ重複していた。users をそのまま表示順として使う。
+    const orderedUsers = users;
     // 承認バーの記録名義は「親」で固定し、実際に画面をタップしたのがどちらの親かは
     // 区別しない(要件5: 現状も厳密なセキュリティ境界ではないための最もシンプルな方式)。
     const representativeParent = orderedUsers.find(u => u.role === 'role_adult') || orderedUsers[0];
@@ -72,16 +62,8 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     // (角度⑥と隣接する着想: 空パネルに余計な視線誘導をしない)
     const hasNothingToDo = (user: User) => {
         return !quests.some(q => {
-            if (q.target_user && q.target_user !== 'all') {
-                if (q.target_user === 'siblings') {
-                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
-                    if (user.role !== 'role_child') return false;
-                } else if (q.target_user.startsWith('role_')) {
-                    if (user.role !== q.target_user) return false;
-                } else if (q.target_user !== user.user_id) {
-                    return false;
-                }
-            }
+            // #412(品質): 判定ロジックは lib/questTargeting.ts に集約(QuestList.tsx と共通)。
+            if (!isQuestVisibleToUser(q, user)) return false;
             const { isLocked, isDone } = getQuestLockState(q, user, completedQuests, pendingQuests);
             return !isLocked && !isDone;
         });

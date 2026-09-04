@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `07bb74e` |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -266,6 +266,8 @@ graph TD
 * 根拠: (行番号: 216〜225 / 抜粋: "{isRandom && !isDone && !isPending && (\n                    <div\n                        className=\"absolute inset-0 opacity-20 pointer-events-none\"\n                        style={{\n                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',")
 * **[修正済み] フォールバック(案内専用)クエストのタップを無効化（Issue #412 F-L10）**: `masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時のみ表示されるquest_id 999/998）はAPI経由で完了できない案内表示に過ぎないが、以前はタップ可能で、タップすると存在しないクエストへの完了APIが404等のエラーになっていた。`Quest`型に新設した`_isFallback?: boolean`（`_isInfinite`と同様のフロントエンド拡張フラグ）を`isEffectivelyLocked`の算出に含め、ロック中と同じ扱い（タップ・長押しとも無効）にした。
 * 根拠: (行番号: 95〜98 / 抜粋: "// #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、\n    // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを\n    // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。\n    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;")
+* **[修正済み] `target_user`判定を`lib/questTargeting.ts`へ集約（Issue #412 品質）**: `sortedQuests`のフィルタ内でターゲット（`all`/`siblings`/`role_`プレフィックス/`user_id`一致）を判定していたロジックは、`FamilyDashboard.tsx`の`hasNothingToDo`とほぼ同一のコードが重複していたため、`isQuestVisibleToUser`（`lib/questTargeting.ts`）に集約し、両ファイルから呼び出す形に変更した。判定内容自体に変更はない。
+* 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）、本ファイル内の呼び出し（`if (!isQuestVisibleToUser(q, currentUser)) return false;`）
 * バッジ表示は`badgeCandidates`に優先度（`priority`が小さいほど優先: 未開放0 < 対応済み1 < 申請中2 < 期間限定3 < 時間限定4）を付けてソートし、上位`MAX_VISIBLE_BADGES`（2件）のみ表示、残りは「+N」でまとめられる。バッジ種別を追加する際はこの優先度体系に組み込む必要がある。
 * 根拠: (行番号: 121〜168 / 抜粋: "// ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)\n    const badgeCandidates: BadgeCandidate[] = [];")
 

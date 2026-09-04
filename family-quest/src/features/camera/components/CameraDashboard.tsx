@@ -6,15 +6,14 @@ import CameraSettingsModal from './CameraSettingsModal';
 import { CameraConfig } from '../types';
 import { Camera, Settings } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
-
 // ★バグ修正(Issue #121): apiClient側でスローされるErrorのmessageには、バックエンドが
 // 返す{"detail": "..."}の内容が入っている(apiClient.ts参照)。CameraDashboardは
 // main.tsxでToastProvider配下ではなく独立してマウントされるため(/cameraは
 // Family Quest本体と同時に使われない専用ビューア)、他画面のようにuseToast()の
 // showToastは使えない。代わりにクエリのerrorから画面内にエラー表示する。
-const extractErrorDetail = (error: unknown): string => {
-    return error instanceof Error && error.message ? error.message : 'カメラ設定の取得に失敗しました';
-};
+// #412(品質): 以前はこのファイルとInventoryList.tsxにほぼ同じ関数が重複していたため
+// lib/errorDetail.ts に集約した。
+import { extractErrorDetail } from '@/lib/errorDetail';
 
 const CameraDashboard: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'live' | 'record'>('live');
@@ -46,7 +45,7 @@ const CameraDashboard: React.FC = () => {
     }, []);
 
     const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras]);
-    const fetchError = error ? extractErrorDetail(error) : null;
+    const fetchError = error ? extractErrorDetail(error, 'カメラ設定の取得に失敗しました') : null;
 
     if (isLoading) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center p-8">読み込み中...</div>;
 

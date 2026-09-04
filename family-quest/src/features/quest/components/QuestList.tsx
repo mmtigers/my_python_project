@@ -5,6 +5,7 @@ import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
 import { useQuestStatus, getQuestLockState, getQuestProcessingKey } from '../hooks/useQuestStatus';
+import { isQuestVisibleToUser } from '@/lib/questTargeting';
 import { useSound } from '@/hooks/useSound';
 import { useLongPress } from '@/hooks/useLongPress';
 
@@ -339,16 +340,8 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
-            if (q.target_user && q.target_user !== 'all') {
-                if (q.target_user === 'siblings') {
-                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
-                    if (currentUser.role !== 'role_child') return false;
-                } else if (q.target_user.startsWith('role_')) {
-                    if (currentUser.role !== q.target_user) return false;
-                } else if (q.target_user !== currentUser?.user_id) {
-                    return false;
-                }
-            }
+            // #412(品質): 判定ロジックは lib/questTargeting.ts に集約(FamilyDashboard.tsx と共通)。
+            if (!isQuestVisibleToUser(q, currentUser)) return false;
 
             // #412(F-L1): quest.days による曜日フィルタは削除した。サーバー側
             // (quest_service.py の filter_active_quests → _is_quest_currently_active)

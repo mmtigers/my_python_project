@@ -3,7 +3,11 @@
 // 共通の型定義
 
 // ID型
-export type ID = number | string;
+// #412(品質): 以前は number | string だったが、quest_id/reward_id/history_id等の
+// 実カラムはすべてSQLiteのINTEGER PRIMARY KEYであり、サーバーは常にintを返すため
+// number のみに絞った(tsc -bが通ることを確認済み)。gameDataSchema.tsのZod検証層は
+// 実際のワイヤーデータに対する独立した防御であるため、そちらの union はそのまま残す。
+export type ID = number;
 
 // ユーザー情報
 // #390: avatar / job_class / role は quest_users の NULL 可カラムのため null を許容する
