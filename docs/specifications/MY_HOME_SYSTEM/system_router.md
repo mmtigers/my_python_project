@@ -52,20 +52,20 @@
 
 ### `manual_backup`
 
-* **役割**: `/backup` パスに対するPOSTリクエストを受け取り、手動バックアップ処理をトリガーする。
-* 根拠: [manual_backup] (行番号: 9-11 / 抜粋: "@router.post("/backup")")
+* **役割**: `/backup` パスに対するPOSTリクエストを受け取り、手動バックアップ処理をトリガーする。**（Issue #408で修正）** 以前は`async def`の中で同期的な`perform_backup()`（sqlite backup + NASへの`shutil.copy2`）を直接呼んでいたためイベントループ全体が止まり、`/webhook/switchbot`や`/callback/line`を含む全リクエストが数秒〜数十秒停止していた。現在は通常の`def`として定義し、FastAPIがスレッドプール上で実行する。
+* 根拠: [manual_backup] (行番号: 12-27 / 抜粋: "def manual_backup() -> Dict[str, Any]:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [manual_backup] (行番号: 10 / 抜粋: "async def manual_backup() -> ")
+* 根拠: [manual_backup] (行番号: 13 / 抜粋: "def manual_backup() -> ")
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message`, `size_mb` を含む辞書を返す。
-* 根拠: [戻り値の型ヒントとreturn文] (行番号: 10, 15 / 抜粋: "return {"status": "success", ")
+* **戻り値/レスポンス**: `Dict[str, Any]` 型。成功時は `status`, `message`, `size_mb` を含む辞書を返す。失敗時は`HTTPException(500)`で、`detail`は固定文言「バックアップに失敗しました。サーバーログを確認してください。」（Issue #408: 以前は`perform_backup`の生の失敗メッセージ＝NASパス等の内部情報を含みうる例外文字列をそのまま返していた。生メッセージは`logger.error`でログにのみ残す）。
+* 根拠: [戻り値の型ヒントとreturn文] (行番号: 13, 22-27 / 抜粋: "return {"status": "success", ")
 
 
-* **副作用**: 外部関数 `backup_service.perform_backup()` を呼び出す（具体的な副作用は不明（`services.backup_service`ファイルに依存のため要確認））。
-* 根拠: [関数呼び出し] (行番号: 12 / 抜粋: "success, msg, size = backup_s")
+* **副作用**: 外部関数 `backup_service.perform_backup()` を呼び出す（具体的な副作用は不明（`services.backup_service`ファイルに依存のため要確認））。失敗時は`logger.error`でログ出力。
+* 根拠: [関数呼び出し] (行番号: 22, 25 / 抜粋: "success, msg, size = backup_s")
 
 
 * **エラーハンドリング**: `backup_service.perform_backup()` の戻り値 `success` が真でない場合、ステータスコード500の `HTTPException` を送出する。
@@ -118,7 +118,7 @@ graph TD
 
 
 * `backup_service.perform_backup()` 内で例外（Exception）が発生した場合、このエンドポイント内ではキャッチ処理（try-except）が行われていない。
-* 根拠: [manual_backup関数全体] (行番号: 10-15 / 抜粋: "async def manual_backup() -> ")
+* 根拠: [manual_backup関数全体] (行番号: 13-27 / 抜粋: "def manual_backup() -> ")
 
 
 
