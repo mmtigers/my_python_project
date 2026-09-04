@@ -119,7 +119,14 @@ logger = get_logger("newface_monitor")
 # いずれかを年齢表記とみなす。実在の年齢は2桁のため誤検知を避けるため
 # 桁数を2桁に限定する(例: ランキングバッジ等の"(1)"のような1桁の
 # 括弧数字を誤って年齢と判定しないようにする)。
-AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(?:歳|才)?\s*[）)]|(\d{2})\s*(?:歳|才)')
+#
+# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも
+# 無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の
+# 括弧付き2桁数字を誤って年齢と判定しうる懸念があった。「歳」「才」で
+# 明示された数字は引き続き無条件に信頼するが、それが無い場合のみ
+# MonitorConfig.AGE_PLAUSIBLE_MIN/MAX の範囲かどうかで足切りする
+# (呼び出し側で判定。第2groupで「歳」「才」の有無を判別する)。
+AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(歳|才)?\s*[）)]|(\d{2})\s*(?:歳|才)')
 
 
 @dataclass(frozen=True)
@@ -1196,6 +1203,12 @@ class MonitorConfig:
     # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
     # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値
     MASS_DETECTION_WARNING_THRESHOLD: int = 20
+    # D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と
+    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない
+    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で
+    # 明示された数字は範囲に関わらず信頼する)。
+    AGE_PLAUSIBLE_MIN: int = 18
+    AGE_PLAUSIBLE_MAX: int = 79
 
     # Site Failure Alert Settings
     # ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」
@@ -1204,34 +1217,49 @@ class MonitorConfig:
     # サイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の
     # 再発防止。詳細は _handle_site_network_failure を参照)。
     CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24
+    # #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、
+    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、
+    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。
+    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5
 
     @classmethod
     def get_data_dir(cls) -> Path:
         """NASアクセスを検証・修復し、動的にデータディレクトリを解決する。
-        
+
         クラスロード時ではなく、実際の処理が必要になったタイミング（遅延評価）で
         マウント確認や自動修復ロジックを実行する。
-        
+
+        #364: 委譲先の get_managed_target_directory はNAS未マウント時に
+        sudo mountによる自己修復とDiscord/LINEへの障害通知を伴う重い処理のため、
+        1回の実行(_run_monitor_locked)で1回だけ呼び出し、結果をDataManagerへ
+        渡して使い回すこと(サイト処理のたびに再評価しない)。
+
         Returns:
             Path: 利用可能なディレクトリパス
         """
         return get_managed_target_directory(
-            nas_dir_str=cls.NAS_DIR_STR, 
+            nas_dir_str=cls.NAS_DIR_STR,
             fallback_dir_str=cls.LOCAL_DIR_STR,
             mount_point=cls.MOUNT_POINT
         )
 
     @classmethod
-    def get_data_file(cls, site: SiteConfig) -> Path:
-        """指定サイトの既知キャスト保存先JSONファイルのパスを取得する。
+    def is_local_fallback_dir(cls, data_dir: Path) -> bool:
+        """解決済みのデータディレクトリがNAS障害時のローカルフォールバック先かを判定する。
+
+        #364: NAS未マウント時、get_data_dir()はローカルの LOCAL_DIR_STR を返す。
+        ローカル側には known_casts_*.json が存在しないため、そのまま巡回を続けると
+        全サイトの全在籍キャストが「新規」として再通知される(2026-09-04の
+        コードレビューで指摘)。extract_youtube_urls.py の _verify_environment と
+        同じく、パス正規化した上での比較で確実にフォールバック状態を検知する。
 
         Args:
-            site (SiteConfig): 対象サイトの設定。
+            data_dir (Path): get_data_dir() が返したディレクトリ。
 
         Returns:
-            Path: サイトごとの既知キャストデータファイルの完全なパス。
+            bool: ローカルフォールバック先であれば True。
         """
-        return cls.get_data_dir() / site.get_data_filename()
+        return Path(data_dir).resolve() == Path(cls.LOCAL_DIR_STR).resolve()
 
 
 # ==========================================
@@ -1280,6 +1308,22 @@ class CastMember:
 class DiscordNotifier:
     """Discordへの通知を担当するサービスクラス。"""
 
+    # D-L6: Discord embedのtitle(256文字)/field.value(1024文字)には上限があり、
+    # 超過するとembed全体が400 Bad Requestで拒否される。cast.name等は外部サイトの
+    # スクレイピング結果でありサイト側の表示崩れ・異常データで想定外に長くなり
+    # うるため、送信前に安全側で切り詰める（サイト側コード(site.name等)由来の
+    # 文字列は開発者が管理するため対象外）。
+    _EMBED_TITLE_MAX_LEN = 250
+    _EMBED_FIELD_VALUE_MAX_LEN = 250
+
+    @staticmethod
+    def _truncate_for_embed(text: str, max_len: int) -> str:
+        """Discord embedの文字数上限に収まるよう、超過分を省略記号付きで切り詰める。"""
+        if len(text) <= max_len:
+            return text
+        suffix = "…(省略)"
+        return text[: max(max_len - len(suffix), 0)] + suffix
+
     def __init__(self, webhook_url: Optional[str]):
         """
         Args:
@@ -1320,19 +1364,26 @@ class DiscordNotifier:
         if self.session:
             self.session.close()
 
-    def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:
+    def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:
         """新規キャスト情報をDiscordに通知する。
 
         Args:
             new_casts (List[CastMember]): 通知対象の新規キャストリスト。
             site_name (str): 通知元サイトの表示名。複数サイト運用時に
                 どのサイトの新着かを区別できるよう埋め込みタイトルに付与する。
+
+        Returns:
+            int: 実際にDiscordへの送信に成功した件数（D-L9）。サーキット
+                ブレーカーが開いて送信をスキップしたキャストは含まない。
+                呼び出し元(_check_site)はこの値を日次サマリの集計に用いる
+                ことで、送信できなかった分まで過大計上しないようにする。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping notification.")
-            return
+            return 0
 
         site_prefix = f"【{site_name}】" if site_name else ""
+        sent_count = 0
 
         for cast in new_casts:
             if self._circuit_breaker.is_open:
@@ -1344,12 +1395,19 @@ class DiscordNotifier:
                 )
                 break
 
-            fields = [{"name": "Name", "value": cast.name, "inline": True}]
+            safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)
+            fields = [{"name": "Name", "value": safe_name, "inline": True}]
             if cast.age:
                 # 一覧ページ上に年齢表記が見つかったキャストのみ追加
                 # (見つからない場合はフィールド自体を省略する)
                 fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})
-            fields.append({"name": "Link", "value": f"[詳細ページへ]({cast.detail_url})", "inline": True})
+            fields.append({
+                "name": "Link",
+                "value": self._truncate_for_embed(
+                    f"[詳細ページへ]({cast.detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
+                ),
+                "inline": True,
+            })
 
             # DiscordのembedはURL系フィールドにhttp(s)の絶対URLを要求しており、
             # data:URIや相対パス等が渡ると400 Bad Requestで通知全体が拒否される。
@@ -1361,7 +1419,9 @@ class DiscordNotifier:
                 "username": "New Face Monitor",
                 "embeds": [
                     {
-                        "title": f"✨ 新人キャスト情報{site_prefix}: {cast.name}",
+                        "title": self._truncate_for_embed(
+                            f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
+                        ),
                         "description": "新しいキャストが追加されました！",
                         "url": cast.detail_url,
                         "color": 16738740,  # Pinkish
@@ -1377,6 +1437,7 @@ class DiscordNotifier:
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
                 self._circuit_breaker.record_success()
+                sent_count += 1
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
@@ -1401,6 +1462,8 @@ class DiscordNotifier:
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {e}", exc_info=True)
                 self._circuit_breaker.record_failure()
+
+        return sent_count
 
     def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
@@ -1481,7 +1544,8 @@ class DiscordNotifier:
 
         content = (
             f"⚠️ **監視サイト疎通不能アラート**\n"
-            f"「{site.name}」({site.site_id}) の巡回が{failure_count}回連続で失敗しています。\n"
+            f"「{site.name}」({site.site_id}) の巡回が{failure_count}回連続で失敗しています"
+            f"(疎通不能・別ドメインへのリダイレクト・キャスト0件のいずれか)。\n"
             f"URL: {site.target_url}\n"
             f"サイト閉鎖・ドメイン移転の可能性があります。復旧見込みが無ければ "
             f"newface_monitor.py の MonitorConfig.SITES から当該エントリを削除してください。\n"
@@ -1501,14 +1565,65 @@ class DiscordNotifier:
             return False
 
 
+class SiteUnavailableError(Exception):
+    """HTTP的には成功したが、巡回結果として「サイトが消失した疑い」を示す例外(#395)。
+
+    2026-09-02のbellica閉鎖では、ドメインがホスティング業者のポータルへ302で
+    リダイレクトされる形になった。証明書が正常ならrequestsはリダイレクトを追従して
+    200を返すため、requests.RequestExceptionだけを失敗扱いにしていると永久に
+    検知されず、毎時WARNING「No elements found」を出し続けるだけになる。
+    別ドメインへのリダイレクト、およびキャスト0件の巡回結果を、ネットワーク失敗と
+    同じく連続失敗として計上するために用いる。
+    """
+
+
+class KnownCastsUnavailableError(Exception):
+    """既知キャストファイルが存在するのにI/Oエラーで読めなかったことを示す例外(#365)。
+
+    内容起因の破損(JSON構文エラー・非UTF-8・フィールド不一致)とは区別し、
+    NAS/CIFSの瞬断等による一時的な読み込み失敗として、当該サイトの巡回を
+    今回の実行ではスキップさせるために用いる。
+    """
+
+
 class DataManager:
-    """データの永続化と読み込みを担当するクラス。"""
+    """データの永続化と読み込みを担当するクラス。
+
+    #364: 以前は全メソッドが静的メソッドで、呼び出しのたびに
+    MonitorConfig.get_data_dir()(= core.nas_utils.get_managed_target_directory。
+    NASマウント確認・sudo mountによる自己修復・Discord/LINE障害通知を伴う重い処理)
+    を再評価していた。1サイトあたり最低3回、79サイトで1実行あたり240回以上に達し、
+    NAS未マウント時には毎時数百回のsudo mountとDiscord投稿が発生していた。
+    _run_monitor_locked が1回だけ解決した data_dir をコンストラクタで受け取り、
+    以降のファイルパス導出ではNAS状態を一切再評価しない。
+    """
 
     # 読み込み失敗とみなす例外群。UnicodeDecodeErrorはIOErrorのサブクラスではなく
     # ValueErrorのサブクラスのため、IOErrorだけを捕捉すると非UTF-8データによる
     # 破損（例: 'utf-8' codec can't decode byte ... : invalid start byte）を
     # 検知できず、同じ破損ファイルへの読み込み失敗が繰り返され続けてしまう。
     _LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError)
+
+    # #365: このうち「ファイルの内容そのものが壊れている」ことを示す例外群。
+    # json.JSONDecodeError / UnicodeDecodeError は ValueError のサブクラス、
+    # CastMember(**item) の引数不一致は TypeError/KeyError として現れる。
+    # load_known_casts が破損ファイルとして隔離(.corrupted-*)してよいのはこれらに
+    # 限られ、OSError(CIFS/autofsの瞬断によるEIO/ENOENT/ETIMEDOUT等)は内容が
+    # 正しいファイルを開けなかっただけなので隔離してはならない。
+    _CONTENT_ERRORS = (ValueError, TypeError, KeyError)
+
+    def __init__(self, data_dir: Path):
+        """
+        Args:
+            data_dir (Path): 解決済みのデータディレクトリ(NAS上、または検証済みの
+                ローカルパス)。呼び出し元(_run_monitor_locked)がフォールバック中で
+                ないことを確認した上で渡す前提。
+        """
+        self.data_dir = Path(data_dir)
+
+    def _data_file(self, site: SiteConfig) -> Path:
+        """指定サイトの既知キャスト保存先JSONファイルのパスを返す。"""
+        return self.data_dir / site.get_data_filename()
 
     @staticmethod
     def _read_casts_file(data_file: Path) -> Set[CastMember]:
@@ -1520,28 +1635,49 @@ class DataManager:
             data = json.load(f)
             return {CastMember(**item) for item in data}
 
-    @staticmethod
-    def load_known_casts(site: SiteConfig) -> Set[CastMember]:
+    def load_known_casts(self, site: SiteConfig) -> Set[CastMember]:
         """指定サイトの保存済みキャストデータを読み込む。
 
         Args:
             site (SiteConfig): 対象サイトの設定。
 
         Returns:
-            Set[CastMember]: 既知のキャストの集合。読み込み失敗時は空集合を返す。
+            Set[CastMember]: 既知のキャストの集合。内容起因の読み込み失敗時は
+                隔離・バックアップ復旧を試み、それも不可なら空集合を返す。
+
+        Raises:
+            KnownCastsUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合。呼び出し元は当該サイトの処理をスキップすること
+                (空集合で続行すると全キャストの再通知と、union保存による退店済み
+                キャストの復活を招く。#365)。
         """
-        data_file = MonitorConfig.get_data_file(site)
+        data_file = self._data_file(site)
         if not data_file.exists():
             logger.debug(f"No existing data found for site '{site.site_id}'. Starting with empty state.")
             return set()
 
         try:
             return DataManager._read_casts_file(data_file)
-        except DataManager._LOAD_ERRORS as e:
+        except OSError as e:
+            # #365: CIFS/autofsの瞬断(EIO/ENOENT/ETIMEDOUT等。wait_for_storage_warmupの
+            # docstring自体が想定している事象)でopen()が失敗しただけのケース。
+            # 中身は正しい可能性が高いため隔離せず、当該サイトの処理を
+            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、
+            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、
+            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。
+            logger.error(
+                f"I/O error while loading data from {data_file}; "
+                f"skipping site '{site.site_id}' for this run: {e}",
+                exc_info=True,
+            )
+            raise KnownCastsUnavailableError(
+                f"{site.site_id}: known casts file is unreadable ({e})"
+            ) from e
+        except DataManager._CONTENT_ERRORS as e:
             logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)
 
         # 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける
-        # ため、退避してから復旧を試みる。
+        # ため、退避してから復旧を試みる(内容起因の破損に限る。#365)。
         quarantine_path = data_file.with_name(
             f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
         )
@@ -1567,15 +1703,15 @@ class DataManager:
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
         return set()
 
-    @staticmethod
-    def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:
+    def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:
         """指定サイトのキャストデータをJSONファイルに保存する。
 
         Args:
             site (SiteConfig): 対象サイトの設定。
             casts (Set[CastMember]): 保存対象のキャスト集合。
         """
-        data_file = MonitorConfig.get_data_file(site)
+        data_file = self._data_file(site)
+        tmp_path: Optional[Path] = None
         try:
             data_file.parent.mkdir(parents=True, exist_ok=True)
             data = [c.to_dict() for c in casts]
@@ -1598,28 +1734,44 @@ class DataManager:
             # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。
             if data_file.exists():
                 backup_path = data_file.with_suffix(data_file.suffix + '.bak')
+                # D-L7: 以前はbackup_path.write_bytes(...)で直接上書きしていたため、
+                # 書き込み中にプロセスが中断すると.bak自体が破損・欠損した状態で
+                # 残ってしまいうった(load_known_castsが復旧に使う最後の砦であるにも
+                # 関わらず非アトミックだった)。他の永続化と同じtmp書き込み+replaceの
+                # アトミックパターンに揃える。
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
                 try:
-                    backup_path.write_bytes(data_file.read_bytes())
+                    bak_tmp_path.write_bytes(data_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
                 except OSError as e:
                     logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    # 中断された.bak用一時ファイルを残さない(best-effort)。
+                    bak_tmp_path.unlink(missing_ok=True)
 
             tmp_path.replace(data_file)
 
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
+            # D-L8: tmp_path.replace(data_file)に到達する前に例外（読み戻し検証失敗
+            # 等）が起きると、以前は書き込み済みの.tmpファイルがそのまま残り続けて
+            # いた。data_file.parent.mkdir失敗等でtmp_path自体が未定義の場合もある
+            # ため、生成済みであれば削除する(best-effort。削除自体の失敗は無視する)。
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
-    @staticmethod
-    def _daily_summary_file() -> Path:
+    def _daily_summary_file(self) -> Path:
         """日次サマリの集計状態を保存するファイルのパスを返す。
 
         全サイト共通で1ファイルに集計するため、サイト単位のknown_casts_*.json
         とは別にトップレベルのファイルとして管理する。
         """
-        return MonitorConfig.get_data_dir() / 'daily_summary.json'
+        return self.data_dir / 'daily_summary.json'
 
-    @staticmethod
-    def load_daily_summary() -> Dict:
+    def load_daily_summary(self) -> Dict:
         """日次サマリの集計状態を読み込む。
 
         Returns:
@@ -1628,7 +1780,7 @@ class DataManager:
                 (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。
                 ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
         """
-        summary_file = DataManager._daily_summary_file()
+        summary_file = self._daily_summary_file()
         if not summary_file.exists():
             return {}
 
@@ -1645,14 +1797,13 @@ class DataManager:
             logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
             return {}
 
-    @staticmethod
-    def save_daily_summary(data: Dict) -> None:
+    def save_daily_summary(self, data: Dict) -> None:
         """日次サマリの集計状態をJSONファイルに保存する。
 
         Args:
             data (Dict): 保存対象の集計状態。
         """
-        summary_file = DataManager._daily_summary_file()
+        summary_file = self._daily_summary_file()
         try:
             summary_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1664,8 +1815,7 @@ class DataManager:
         except IOError as e:
             logger.error(f"Failed to save daily summary: {e}", exc_info=True)
 
-    @staticmethod
-    def record_daily_new_casts(site_id: str, count: int) -> None:
+    def record_daily_new_casts(self, site_id: str, count: int) -> None:
         """サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する。
 
         cron等により1時間毎に別プロセスとして実行される前提のため、
@@ -1688,21 +1838,19 @@ class DataManager:
         if count <= 0:
             return
 
-        data = DataManager.load_daily_summary()
+        data = self.load_daily_summary()
         counts = data.setdefault('counts', {})
         counts[site_id] = counts.get(site_id, 0) + count
-        DataManager.save_daily_summary(data)
+        self.save_daily_summary(data)
 
-    @staticmethod
-    def _site_failures_file() -> Path:
+    def _site_failures_file(self) -> Path:
         """サイト別の連続巡回失敗状態を保存するファイルのパスを返す。
 
         daily_summary.jsonと同様、全サイト共通で1ファイルに集約して管理する。
         """
-        return MonitorConfig.get_data_dir() / 'site_failures.json'
+        return self.data_dir / 'site_failures.json'
 
-    @staticmethod
-    def load_site_failures() -> Dict:
+    def load_site_failures(self) -> Dict:
         """サイト別の連続巡回失敗状態を読み込む。
 
         Returns:
@@ -1711,7 +1859,7 @@ class DataManager:
                 Discordへ送信済みかどうか。ファイルが存在しない・読み込みに
                 失敗した場合は空辞書を返す。
         """
-        failures_file = DataManager._site_failures_file()
+        failures_file = self._site_failures_file()
         if not failures_file.exists():
             return {}
 
@@ -1719,21 +1867,32 @@ class DataManager:
             with open(failures_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
                 # 破損等で辞書以外が保存されていた場合も安全に初期状態へ戻す
-                return data if isinstance(data, dict) else {}
+                if not isinstance(data, dict):
+                    return {}
+                # #395: トップレベルだけでなく各エントリも辞書であることを検証する。
+                # {"site": 5} のような値が混入すると record_site_failure の
+                # entry.get で AttributeError となり、_run_monitor_locked の
+                # CRITICAL(Discord発報)が毎時繰り返されていた。不正なエントリは
+                # 初期状態(記録なし)として読み飛ばす。
+                invalid = [k for k, v in data.items() if not isinstance(v, dict)]
+                if invalid:
+                    logger.warning(
+                        f"Ignoring malformed site failure entries in {failures_file}: {invalid}"
+                    )
+                return {k: v for k, v in data.items() if isinstance(v, dict)}
         except DataManager._LOAD_ERRORS as e:
             # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
             # 含めて読み込み失敗として扱い、監視処理本体を止めない
             logger.error(f"Failed to load site failures from {failures_file}: {e}", exc_info=True)
             return {}
 
-    @staticmethod
-    def save_site_failures(data: Dict) -> None:
+    def save_site_failures(self, data: Dict) -> None:
         """サイト別の連続巡回失敗状態をJSONファイルに保存する。
 
         Args:
             data (Dict): 保存対象の状態。
         """
-        failures_file = DataManager._site_failures_file()
+        failures_file = self._site_failures_file()
         try:
             failures_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1745,8 +1904,7 @@ class DataManager:
         except IOError as e:
             logger.error(f"Failed to save site failures: {e}", exc_info=True)
 
-    @staticmethod
-    def record_site_failure(site_id: str) -> Tuple[int, bool]:
+    def record_site_failure(self, site_id: str) -> Tuple[int, bool]:
         """サイトの巡回失敗を1回分記録し、更新後の連続失敗状態を返す。
 
         Args:
@@ -1755,26 +1913,24 @@ class DataManager:
         Returns:
             Tuple[int, bool]: (更新後の連続失敗回数, アラート送信済みかどうか)。
         """
-        data = DataManager.load_site_failures()
+        data = self.load_site_failures()
         entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
         entry['count'] = int(entry.get('count', 0)) + 1
-        DataManager.save_site_failures(data)
+        self.save_site_failures(data)
         return entry['count'], bool(entry.get('alerted', False))
 
-    @staticmethod
-    def mark_site_failure_alerted(site_id: str) -> None:
+    def mark_site_failure_alerted(self, site_id: str) -> None:
         """サイトの閉鎖疑いアラートを送信済みとして記録する。
 
         Args:
             site_id (str): アラートを送信したサイトのID。
         """
-        data = DataManager.load_site_failures()
+        data = self.load_site_failures()
         entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
         entry['alerted'] = True
-        DataManager.save_site_failures(data)
+        self.save_site_failures(data)
 
-    @staticmethod
-    def clear_site_failure(site_id: str) -> None:
+    def clear_site_failure(self, site_id: str) -> None:
         """サイトへの疎通成功時に連続失敗状態を解消する。
 
         記録が無いサイトについては何もしない(毎時の正常巡回のたびに
@@ -1783,11 +1939,21 @@ class DataManager:
         Args:
             site_id (str): 疎通に成功したサイトのID。
         """
-        data = DataManager.load_site_failures()
+        data = self.load_site_failures()
         if site_id not in data:
             return
         del data[site_id]
-        DataManager.save_site_failures(data)
+        self.save_site_failures(data)
+
+
+def _normalized_netloc(url: str) -> str:
+    """URLのドメイン部分を比較用に正規化する(小文字化し先頭の 'www.' を除去)。
+
+    #395: リダイレクト先が別ドメインかどうかの判定に用いる。'example.com' と
+    'www.example.com' の間の正規化リダイレクトを閉鎖疑いと誤判定しないための処理。
+    """
+    netloc = urlparse(url).netloc.lower()
+    return netloc[4:] if netloc.startswith('www.') else netloc
 
 
 class WebMonitor:
@@ -1827,6 +1993,9 @@ class WebMonitor:
 
         Raises:
             requests.RequestException: 通信エラー時。
+            SiteUnavailableError: 最終応答のドメインが target_url と異なる場合
+                (閉鎖・移転したサイトが別ドメインのポータルへリダイレクトされる
+                ケース。#395)。
         """
         try:
             # Bot検知回避のためのランダム待機
@@ -1835,6 +2004,15 @@ class WebMonitor:
             logger.debug(f"Fetching URL: {site.target_url}")
             response = self.session.get(site.target_url, timeout=MonitorConfig.TIMEOUT)
             response.raise_for_status()
+
+            # #395: bellica閉鎖時の実際の症状は「302で別ドメインのポータルへ
+            # リダイレクト」であり、証明書が正常ならrequestsが追従して200を返す。
+            # HTTP的に成功していても最終URLのドメインが監視対象と異なる場合は、
+            # サイト消失の疑いとして連続失敗に計上する(www.の有無は同一ドメイン扱い)。
+            if response.url and _normalized_netloc(response.url) != _normalized_netloc(site.target_url):
+                raise SiteUnavailableError(
+                    f"redirected to a different domain: {site.target_url} -> {response.url}"
+                )
 
             soup = BeautifulSoup(response.content, 'html.parser')
             return self._parse_html(soup, site)
@@ -1920,7 +2098,19 @@ class WebMonitor:
                 if name_elem:
                     age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
                     if age_match:
-                        age = age_match.group(1) or age_match.group(2)
+                        bracket_num, bracket_suffix, plain_num = age_match.groups()
+                        if bracket_num is not None:
+                            # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
+                            # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを
+                            # 確認し、部屋番号・順位バッジ等の誤検知を減らす。
+                            if bracket_suffix or (
+                                MonitorConfig.AGE_PLAUSIBLE_MIN
+                                <= int(bracket_num)
+                                <= MonitorConfig.AGE_PLAUSIBLE_MAX
+                            ):
+                                age = bracket_num
+                        else:
+                            age = plain_num
 
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
@@ -2031,8 +2221,29 @@ class WebMonitor:
 # Main Execution Flow
 # ==========================================
 
-def _handle_site_network_failure(notifier: DiscordNotifier, site: SiteConfig, exc: Exception) -> None:
-    """サイト巡回のネットワーク失敗を記録し、連続失敗が閾値に達したサイトを1回だけアラートする。
+@dataclass
+class SiteCheckResult:
+    """_check_site の1サイト分の結果(#395)。
+
+    Attributes:
+        failed (bool): 疎通不能・別ドメインへのリダイレクト・キャスト0件のいずれかで
+            連続失敗として計上したか。自局側障害の判定(失敗サイト数の割合)に使う。
+        pending_alert_count (Optional[int]): 連続失敗が閾値に達し、かつ閉鎖疑い
+            アラートが未送信の場合の連続失敗回数。実行終了時に
+            _send_pending_site_failure_alerts がまとめて送信判断を行う。
+    """
+    failed: bool = False
+    pending_alert_count: Optional[int] = None
+
+
+def _handle_site_network_failure(
+    notifier: DiscordNotifier,
+    site: SiteConfig,
+    exc: Exception,
+    data_manager: DataManager,
+    log_level: int = logging.ERROR,
+) -> Optional[int]:
+    """サイト巡回の失敗を記録し、閉鎖疑いアラートが必要なら連続失敗回数を返す。
 
     2026-09-02にbellicaが閉鎖され(ドメインがホスティング業者のデフォルト自己署名
     証明書+ポータルサイトへの302リダイレクトに変化)、恒久的に消失したサイトが
@@ -2044,30 +2255,86 @@ def _handle_site_network_failure(notifier: DiscordNotifier, site: SiteConfig, ex
     連続失敗の状態は疎通成功時にリセットされる(_check_site参照)ため、一時的な
     長期障害から復旧した場合は通常のERROR運用に自動的に戻る。
 
-    Args:
-        notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。
-        site (SiteConfig): 巡回に失敗したサイトの設定。
-        exc (Exception): 発生したネットワーク例外(ログ出力用)。
-    """
-    count, alerted = DataManager.record_site_failure(site.site_id)
+    #395での変更点:
+    - ログの降格は「アラート送信済み」ではなく「連続失敗回数が閾値以上」で判定する。
+      Webhook未設定/失効でアラート送信が失敗し続けると alerted が永久に立たず、
+      毎時ERROR→Discord発報が続いていたため、送信の成否とは切り離して降格する
+      (送信自体は alerted が立つまで毎回再試行される)。
+    - アラートの送信はここでは行わず、戻り値で「送信が必要」を伝える。同一実行内で
+      失敗サイト数が総数の大半を占める場合(Pi側の回線断等の自局側障害)に79件の
+      アラートが一斉送信されるのを防ぐため、_run_monitor_locked が全サイト処理後に
+      _send_pending_site_failure_alerts でまとめて送信可否を判断する。
 
-    if not alerted and count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD:
-        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する
-        if notifier.notify_site_failure_alert(site, count):
-            DataManager.mark_site_failure_alerted(site.site_id)
-            alerted = True
+    Args:
+        notifier (DiscordNotifier): (後方互換のため残している。送信は行わない)
+        site (SiteConfig): 巡回に失敗したサイトの設定。
+        exc (Exception): 発生した例外(ログ出力用)。
+        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに
+            束縛されたDataManager(#364)。
+        log_level (int): 閾値未満のときに使うログレベル。ネットワーク失敗は
+            ERROR、キャスト0件(レイアウト変更の可能性もある)はWARNINGを渡す。
+
+    Returns:
+        Optional[int]: 連続失敗回数が閾値以上かつアラート未送信なら現在の連続
+            失敗回数(=アラート送信が必要)。それ以外は None。
+    """
+    count, alerted = data_manager.record_site_failure(site.site_id)
+    threshold_reached = count >= MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD
 
     message = (
-        f"Aborting monitor run for site '{site.site_id}' due to network failure "
+        f"Aborting monitor run for site '{site.site_id}' due to site failure "
         f"({count} consecutive failures): {exc}"
     )
     if alerted:
         logger.warning(f"{message} (closure alert already sent)")
+    elif threshold_reached:
+        logger.warning(f"{message} (closure alert threshold reached; alert pending)")
     else:
-        logger.error(message)
+        logger.log(log_level, message)
+
+    return count if (threshold_reached and not alerted) else None
 
 
-def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig) -> None:
+def _send_pending_site_failure_alerts(
+    notifier: DiscordNotifier,
+    data_manager: DataManager,
+    pending: List[Tuple[SiteConfig, int]],
+    failed_count: int,
+    total_count: int,
+) -> None:
+    """全サイト処理後に、閾値到達サイトの閉鎖疑いアラートをまとめて送信する(#395)。
+
+    同一実行内で失敗したサイトの割合が MonitorConfig.SELF_OUTAGE_SUPPRESS_RATIO を
+    超える場合は、個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の
+    障害とみなして送信を抑止する。この場合 alerted は立てないため、回線復旧後の
+    次回実行で(まだ閾値以上なら)改めて送信判断が行われる。
+
+    Args:
+        notifier (DiscordNotifier): アラート送信に使うDiscordNotifierインスタンス。
+        data_manager (DataManager): 送信成功時に alerted を永続化するDataManager。
+        pending (List[Tuple[SiteConfig, int]]): (サイト設定, 連続失敗回数) のリスト。
+        failed_count (int): 今回の実行で失敗として計上したサイト数。
+        total_count (int): 今回の実行で処理対象としたサイト数。
+    """
+    if not pending:
+        return
+
+    if total_count > 0 and failed_count / total_count > MonitorConfig.SELF_OUTAGE_SUPPRESS_RATIO:
+        logger.warning(
+            f"Suppressing {len(pending)} site closure alert(s): {failed_count}/{total_count} sites "
+            "failed in this run, which looks like a local network outage rather than site closures."
+        )
+        return
+
+    for site, count in pending:
+        # 送信に失敗した場合はalertedを立てず、次回実行時に再試行する
+        if notifier.notify_site_failure_alert(site, count):
+            data_manager.mark_site_failure_alerted(site.site_id)
+
+
+def _check_site(
+    monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig, data_manager: DataManager
+) -> SiteCheckResult:
     """1サイト分の巡回・差分検知・通知・保存を行う。
 
     サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が
@@ -2077,30 +2344,45 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
         monitor (WebMonitor): 使い回すWebMonitorインスタンス。
         notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
         site (SiteConfig): 処理対象のサイト設定。
+        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに
+            束縛されたDataManager(#364)。
+
+    Returns:
+        SiteCheckResult: 失敗計上の有無と、閉鎖疑いアラートの要否(#395)。
     """
     logger.debug(f"--- Checking site '{site.site_id}' ({site.name}) ---")
 
     # 1. Load Data
-    known_casts = DataManager.load_known_casts(site)
+    try:
+        known_casts = data_manager.load_known_casts(site)
+    except KnownCastsUnavailableError as e:
+        # #365: I/Oエラーで既知キャストが読めない場合、空集合で続行すると
+        # 全キャストの再通知と退店済みキャストの復活(union保存)を招くため、
+        # 巡回・通知・保存のいずれも行わず当該サイトを今回はスキップする
+        # (詳細なERRORログはload_known_casts側で出力済み)。
+        logger.warning(f"Skipping site '{site.site_id}' because known casts are unavailable: {e}")
+        return SiteCheckResult()
 
     # 2. Fetch Data
     try:
         current_casts = monitor.fetch_current_casts(site)
-    except requests.RequestException as e:
-        _handle_site_network_failure(notifier, site, e)
-        return
-
-    # ネットワーク的に到達できた時点で連続失敗の記録があれば解消する
-    # (この後のパース結果が空になるケースはセレクタ不一致等のレイアウト起因で
-    # あり、閉鎖疑いを判定する疎通不能とは区別する)
-    DataManager.clear_site_failure(site.site_id)
+    except (requests.RequestException, SiteUnavailableError) as e:
+        pending = _handle_site_network_failure(notifier, site, e, data_manager)
+        return SiteCheckResult(failed=True, pending_alert_count=pending)
 
     if not current_casts:
-        logger.debug(
-            f"No casts found via scraping for site '{site.site_id}'. "
-            "Verify selectors or site availability."
+        # #395: 200を返すが1件も抽出できない状態が続くのも消失サイトの症状
+        # (bellicaはポータルへのリダイレクト後、要素が見つからないだけだった)。
+        # セレクタ不一致等のレイアウト変更の可能性もあるため単発ではERRORにせず、
+        # 連続失敗として計上し閾値到達で閉鎖疑いアラートの対象にする。
+        pending = _handle_site_network_failure(
+            notifier, site, SiteUnavailableError("no casts parsed"), data_manager,
+            log_level=logging.WARNING,
         )
-        return
+        return SiteCheckResult(failed=True, pending_alert_count=pending)
+
+    # 到達できてキャストを取得できた時点で連続失敗の記録があれば解消する
+    data_manager.clear_site_failure(site.site_id)
 
     # 3. Detect Diff
     new_casts_set = current_casts - known_casts
@@ -2126,15 +2408,19 @@ def _check_site(monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig
     updated_casts = known_casts.union(current_casts)
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
-        notifier.notify(new_casts, site_name=site.name)
-        DataManager.record_daily_new_casts(site.site_id, len(new_casts))
+        # D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで
+        # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ
+        # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。
+        sent_count = notifier.notify(new_casts, site_name=site.name)
+        data_manager.record_daily_new_casts(site.site_id, sent_count)
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
 
-    DataManager.save_known_casts(site, updated_casts)
+    data_manager.save_known_casts(site, updated_casts)
+    return SiteCheckResult()
 
 
-def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
+def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManager) -> None:
     """21時台の実行のときだけ、前回送信以降に累積した新規検知サマリをDiscordへテキスト通知する。
 
     このスクリプトはcron等により1時間毎に別プロセスとして起動される前提
@@ -2152,13 +2438,15 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
 
     Args:
         notifier (DiscordNotifier): 使い回すDiscordNotifierインスタンス。
+        data_manager (DataManager): 今回の実行で解決済みのデータディレクトリに
+            束縛されたDataManager(#364)。
     """
     now = datetime.now()
     if now.hour != 21:
         return
 
     today_str = now.strftime('%Y-%m-%d')
-    data = DataManager.load_daily_summary()
+    data = data_manager.load_daily_summary()
     if data.get('last_sent_date') == today_str:
         return
 
@@ -2172,7 +2460,7 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier) -> None:
     # クリア・last_sent_date更新を行い、失敗時は次回実行時に再送を試みられるよう
     # 何も保存しない。
     if sent:
-        DataManager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
+        data_manager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})
     else:
         logger.error(
             "Daily summary notification failed; keeping accumulated counts for retry "
@@ -2210,12 +2498,29 @@ def _run_monitor_locked() -> None:
     """モニタープロセスのメインロジック。MonitorConfig.SITESに登録された全サイトを順に処理する。"""
     logger.debug("=== NewFace Monitor Started ===")
 
+    # #364: データディレクトリはここで1回だけ解決し、DataManagerに束縛して全サイトで
+    # 使い回す。get_data_dir()はNAS未マウント時にsudo mount・Discord/LINE通知を伴う
+    # 重い処理のため、サイト処理のたびに再評価してはならない
+    # (extract_youtube_urls.py の process_subscriptions と同じ方針)。
     data_dir = MonitorConfig.get_data_dir()
+
+    # フェイルソフト: NASがアンマウント状態でローカルフォールバック先が返された場合、
+    # ローカル側には known_casts_*.json が無く全サイトの全在籍キャストを「新規」として
+    # 再通知してしまう(ストレージのウォームアップ確認はローカルディレクトリに対して
+    # 必ず通過するため、ここで検知しないと防げない)。実行全体を中断する。
+    if MonitorConfig.is_local_fallback_dir(data_dir):
+        logger.error(
+            "🚨 NASがアンマウント状態(ローカルフォールバック中)を検知しました。"
+            "既知キャストデータの喪失による全キャスト再通知を防ぐため、当該バッチ処理を中断します。"
+        )
+        return
 
     # フェイルソフト: ストレージが利用できない場合は安全にタスクを終了（Exit）
     if not wait_for_storage_warmup(data_dir):
         logger.error("NASストレージへのアクセスが確立できないため、当該バッチ処理を安全に中断します。")
         return
+
+    data_manager = DataManager(data_dir)
 
     monitor = None
     notifier = None
@@ -2224,14 +2529,27 @@ def _run_monitor_locked() -> None:
         monitor = WebMonitor()
         notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)
 
+        # #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に
+        # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。
+        failed_count = 0
+        pending_alerts: List[Tuple[SiteConfig, int]] = []
         for site in MonitorConfig.SITES:
             try:
-                _check_site(monitor, notifier, site)
+                result = _check_site(monitor, notifier, site, data_manager)
             except Exception as e:
                 # 1サイトの予期しない例外で他サイトの処理を止めない
                 logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
+                continue
+            if result.failed:
+                failed_count += 1
+            if result.pending_alert_count is not None:
+                pending_alerts.append((site, result.pending_alert_count))
 
-        _maybe_send_daily_summary(notifier)
+        _send_pending_site_failure_alerts(
+            notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)
+        )
+
+        _maybe_send_daily_summary(notifier, data_manager)
 
     except Exception as e:
         logger.critical(f"Critical error in NewFace Monitor: {e}", exc_info=True)

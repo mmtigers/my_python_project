@@ -257,10 +257,10 @@
 * **エラーハンドリング**: なし（委譲先の例外処理には依存）
 
 
-### `FileManager.save`
+### `FileManager.save`（D-L10で変更）
 
-* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。**（Issue #243で修正）** 保存先ディレクトリは、引数`base_dir`が渡されればそれをそのまま使い、省略された場合のみ`AppConfig.get_output_base_dir()`を遅延評価で呼び出す。以前は`base_dir`引数が存在せず常に本メソッド内で`get_output_base_dir()`を呼んでいたため、1回の巡回/1URLから複数の`ExtractionResult`が保存される場合に、NASマウント確認・自己修復・障害通知を伴う重い処理が保存件数分だけ再評価されていた不具合の修正である。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。
-* 根拠: [メソッド定義とDocstring] (行番号: 291〜299 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (行番号: 308〜314 / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")
+* **役割**: `ExtractionResult`の抽出結果（チャンネル名・タイトルをサニタイズしたファイル名）をテキストファイルへ1行1URL形式で保存するインスタンスメソッド。**（Issue #243で修正）** 保存先ディレクトリは、引数`base_dir`が渡されればそれをそのまま使い、省略された場合のみ`AppConfig.get_output_base_dir()`を遅延評価で呼び出す。以前は`base_dir`引数が存在せず常に本メソッド内で`get_output_base_dir()`を呼んでいたため、1回の巡回/1URLから複数の`ExtractionResult`が保存される場合に、NASマウント確認・自己修復・障害通知を伴う重い処理が保存件数分だけ再評価されていた不具合の修正である。**（Issue #175で修正）** ファイル名は`{safe_channel}_{safe_title}.txt`という形式で2つのサニタイズ済み文字列を連結するため、以前のように各コンポーネントを`_sanitize_filename`の既定値（200バイト）のまま切り詰めると、連結後のファイル名が最大`200+1+200+4=405`バイトとなりext4等の255バイト制限を確実に超過し`ENAMETOOLONG`で保存が失敗しうる不具合があった。現在はチャンネル名・タイトルの双方に`max_length=100`（バイト）を明示的に指定し、連結後も255バイト以内（`100+1+100+4=205`バイト、安全マージンあり）に収まるようにしている。**（D-L10で修正）** ファイル書き込みは以前`output_path.open("w", ...)`による直接上書きだったため、NAS瞬断等で書き込み中にプロセスが中断すると、同名ファイルが既に存在するケース（チャンネル名/タイトルの重複）で中身が空/一部だけの壊れたファイルが残ってしまいうった。`newface_monitor.py`/`batch_download_discord.py`の他の永続化と同じ「`.tmp`へ書き込み→`replace`」のアトミックパターンに揃えた。
+* 根拠: [メソッド定義とDocstring] (行番号: 291〜299 / 抜粋: "def save(self, result: ExtractionResult) -> bool:\n        """抽出結果をテキストファイルに保存する。")、バイト数配分 (行番号: 308〜314 / 抜粋: "#175: 各コンポーネントを既定のmax_length(200バイト)のまま連結すると")、[D-L10: tmp+replaceのコメント] (行番号: 364〜370 / 抜粋: "# D-L10: 以前はoutput_path.open("w", ...)で直接上書きしていたため、\n        # 書き込み中(NAS瞬断等)にプロセスが中断すると" / "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')")
 
 
 * **引数/リクエスト**: `result: ExtractionResult`（保存対象の抽出データ）, `base_dir: Optional[Path] = None`（**Issue #243で追加**。保存先のベースディレクトリ。省略時は`AppConfig.get_output_base_dir()`を内部で呼び出して取得する）
@@ -268,15 +268,15 @@
 
 
 * **戻り値/レスポンス**: `bool`（保存に成功した場合`True`。ディレクトリ作成失敗時・ファイル書き込み失敗時は`False`）
-* 根拠: [Docstringと各return] (行番号: 297〜298, 306, 327, 330 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
+* 根拠: [Docstringと各return] (行番号: 297〜298, 306, 375〜376, 383 / 抜粋: "Returns:\n            bool: 保存に成功した場合は True。")
 
 
-* **副作用**: 保存先ディレクトリの作成(`mkdir`)、テキストファイルへの書き込み(`open(..., "w")`)、成功/失敗・上書き時のログ出力。
-* 根拠: [ディレクトリ作成とファイル書き込み] (行番号: 302〜303, 322〜326 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "with output_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")")
+* **副作用**: 保存先ディレクトリの作成(`mkdir`)、**（D-L10で変更）** 一時ファイル(`.tmp`)への書き込みと`tmp_path.replace(output_path)`によるアトミックな置換（以前は`output_path`への直接書き込み）、成功/失敗・上書き時のログ出力。
+* 根拠: [ディレクトリ作成とアトミック書き込み] (行番号: 302〜303, 370〜376 / 抜粋: "target_dir.mkdir(parents=True, exist_ok=True)", "tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')\n        try:\n            with tmp_path.open("w", encoding="utf-8") as f:\n                for url in result.urls:\n                    f.write(url + "\\n")\n            tmp_path.replace(output_path)")
 
 
-* **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する。
-* 根拠: [try-exceptブロック] (行番号: 302〜306, 322〜330 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False")
+* **エラーハンドリング**: ディレクトリ作成時の`OSError`を捕捉してエラーログを出力し`False`を返す。ファイル書き込み時の`IOError`を捕捉してエラーログを出力し`False`を返す。**（D-L10で追加）** 書き込み失敗時は、残置された`.tmp`ファイルをbest-effortで削除する（削除自体の失敗は無視する）。出力先ファイルが既に存在する場合は警告ログを出力するのみで上書きを継続する（`replace`によりアトミックに置き換わるため、書き込み成功時に既存ファイルが中途半端な状態になることはない）。
+* 根拠: [try-exceptブロックとtmp削除] (行番号: 302〜306, 377〜383 / 抜粋: "except OSError as e:\n            logger.error(f"❌ ディレクトリ作成失敗: {target_dir}", exc_info=True)\n            return False" / "except IOError:\n            logger.error(f"❌ ファイル書き込みエラー: {output_path}", exc_info=True)\n            # 書き込み失敗時の.tmpファイル残置を防ぐ(best-effort)。\n            try:\n                tmp_path.unlink(missing_ok=True)")
 
 
 ### `SubscriptionManager.__init__`
@@ -509,8 +509,8 @@ graph TD
 * 根拠: [コメントとコピー渡し] (行番号: 174〜179, 249〜250 / 抜粋: "# yt_dlp.YoutubeDL.__init__は渡されたparams辞書を直接書き換える\n            # （実測でjs_runtimes/http_headers/outtmpl等のキーが追加される）ため、")
 * **(Issue #243バグ修正の背景)** `FileManager.save`は`base_dir`引数を省略した場合のみ内部で`get_output_base_dir()`を呼び出す設計になった。`get_output_base_dir()`はNASマウント確認・自己修復・障害通知を伴う重い処理であるため、1回の巡回/1URLの処理で複数回`save()`を呼ぶ呼び出し元（`process_subscriptions()`、`UrlExtractorApp.run()`の直接URL実行分岐）は、必ず処理開始時に1回だけ取得した値を`base_dir`として渡して使い回すこと。新たに`save()`を複数回呼ぶ処理を追加する際は、この呼び出し規約（Issue #123の`db_path`と同様、NAS関連の重い処理は評価タイミングを揃えて使い回す）を踏襲すること。
 * 根拠: [save()のbase_dir引数コメント] (行番号: 337〜340 / 抜粋: "# #243: 呼び出し元から渡されなかった場合のみ遅延評価でディレクトリを取得する。\n        # 以前は常にここでget_output_base_dir()を呼んでいたため、process_subscriptions\n        # 自体が1回に抑えていたつもりの重い処理(NASマウント確認・自己修復・障害通知)が、\n        # 保存件数分だけ再評価され、NAS瞬断時に再マウント試行・通知が多重発生していた。")
-* **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。
-* 根拠: [上書きチェック] (行番号: 313〜314 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
+* **既存ファイルの無警告上書き**: `FileManager.save`は出力先に同名ファイルが既存の場合、警告ログを出力するのみで上書きを継続する。**（D-L10で追加）** ただし上書き自体は`.tmp`経由のアトミックな`replace`で行われるため、書き込み中に中断しても既存ファイルが破損した状態で残ることはない（以前は`output_path`への直接書き込みだったため、NAS瞬断等での中断時に破損ファイルが残りうった）。
+* 根拠: [上書きチェック] (行番号: 361〜362 / 抜粋: "if output_path.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")")
 * **チャンネルURL探索の暗黙的な仕様依存**: `/videos`・`/playlists`のURLパス付与がYouTube側のURL構造に依存しており、YouTube側の仕様変更で機能しなくなるリスクがある。
 * 根拠: [extract_iter内のURL構築] (行番号: 232, 235, 251 / 抜粋: "base_url = target_url.split('?')[0].rstrip('/')")
 * **`_is_channel_url`の判定パターンの限定性**: 正規表現は`@handle`, `channel/`, `c/`, `user/`の4形式のみに対応しており、これら以外のURL形式（例: カスタムショートURL等）は判定対象外となる可能性がある。
