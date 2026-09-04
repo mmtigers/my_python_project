@@ -31,6 +31,31 @@ const getRepresentativeParent = (allUsers: User[]): User => {
 // 却下理由のプリセット。自由入力の手間を省き、あとで見返した時にも理由がわかるようにする。
 const REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '重複している', 'その他'];
 
+// #393: 選択中ユーザーをlocalStorageに永続化する。インデックスではなくuser_idを保存する
+// ことで、メンバーの並び順が変わったりメンバーが減っても、対応する人を正しく再選択でき
+// (見つからなければ0番目にフォールバックする)、以前のように保存していたindexが範囲外に
+// なって「接続エラー(guest)」カードが出る事故が起きない。
+const CURRENT_USER_STORAGE_KEY = 'familyQuest.currentUserId.v1';
+
+function loadSavedUserId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    // 形状検証: 空文字列や(将来の形式変更等による)非文字列相当の値は無視する
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCurrentUserId(userId: string): void {
+  try {
+    window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, userId);
+  } catch {
+    // localStorageが使えない環境(プライベートモード等)では永続化を諦める
+  }
+}
+
 // UI Components
 import Header from './components/layout/Header';
 import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
@@ -153,6 +178,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
+  // #393: 起動時にlocalStorageへ保存されたuser_idを一度だけ解決するための保持先。
+  // 実データ(users)が届くまではINITIAL_USERSの1人(guest)しか無く解決しようがないため、
+  // 下のuseEffectで実データが揃うまで待つ。
+  const pendingSavedUserIdRef = useRef<string | null>(loadSavedUserId());
 
   // モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)
   const [confirmMode, setConfirmMode] = useState<'complete' | 'purchase' | 'reject' | null>(null);
@@ -225,6 +254,35 @@ function App() {
   } = useGameData(currentUserIdx, handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
+
+  // #393: usersが実データに揃ったら、保存済みuser_idをfindIndexで一度だけ解決する。
+  // 見つからなければ(メンバー削除・初回起動等)0番目にフォールバックする。
+  // また、以後のcurrentUserIdxの変化(ユーザー切替)を都度localStorageへ保存する。
+  // users.length <= 1 の間はまだ INITIAL_USERS のフォールバック(guest 1人)の可能性があり、
+  // それを保存してしまうと起動のたびに実データ到着前の一瞬で正しい保存値を消してしまうため、
+  // 解決・保存のどちらもスキップする。
+  useEffect(() => {
+    if (users.length <= 1) return;
+
+    const savedUserId = pendingSavedUserIdRef.current;
+    if (savedUserId !== null) {
+      pendingSavedUserIdRef.current = null;
+      const idx = users.findIndex(u => u.user_id === savedUserId);
+      if (idx !== -1) {
+        setCurrentUserIdx(idx);
+        return; // 次のレンダーで本effectが再実行され、保存処理まで進む
+      }
+    }
+
+    // メンバーが減った等でindexが範囲外になった場合は0番目にクランプする
+    if (currentUserIdx >= users.length) {
+      setCurrentUserIdx(0);
+      return;
+    }
+
+    const user = users[currentUserIdx];
+    if (user) saveCurrentUserId(user.user_id);
+  }, [users, currentUserIdx]);
 
   // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
   // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして

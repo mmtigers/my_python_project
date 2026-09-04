@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `c29d467` |
+| 解析基準コミット | `a1bbf12` |
 
 ## 関連ドキュメント
 
@@ -118,6 +118,11 @@
 * **役割**: 却下理由のプリセット文字列配列。`ConfirmModal`の却下モードで一覧表示され、自由入力の手間を省くために使われる。
 * 根拠: (31〜32行目 / 抜粋: "// 却下理由のプリセット。自由入力の手間を省き、あとで見返した時にも理由がわかるようにする。\nconst REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '重複している', 'その他'];")
 
+### `CURRENT_USER_STORAGE_KEY` / `loadSavedUserId` / `saveCurrentUserId` (モジュールレベル定数・関数、Issue #393で追加)
+
+* **役割**: 選択中ユーザーを`localStorage`（キー`familyQuest.currentUserId.v1`）に永続化するための読み書きヘルパー。以前は`currentUserIdx`がメモリのみで保持されており、PWA起動のたびに`0`（パパ）にリセットされ、子どものスマホでは毎回切替が必要だった。**インデックスではなく`user_id`を保存する**ことで、`quest_data.USERS`の宣言順が変わったりメンバーが減った場合でも`users.findIndex`で正しい人を再選択でき、見つからなければ自然に`0`番目へフォールバックする（以前の「保存したindexが範囲外になり`INITIAL_USERS`の`guest`カードが出て誰も選択状態にならない」不具合の根治にもなる）。`loadSavedUserId`は`window.localStorage.getItem`を`try/catch`で保護し、戻り値が非空の`string`であることを検証してから返す（形状検証）。`saveCurrentUserId`も`localStorage.setItem`を`try/catch`で保護し、プライベートモード等で書き込みに失敗しても永続化を諦めるだけで処理は継続する。
+* 根拠: (37〜54行目 / 抜粋: "// #393: 選択中ユーザーをlocalStorageに永続化する。インデックスではなくuser_idを保存する\n// ことで、メンバーの並び順が変わったりメンバーが減っても、対応する人を正しく再選択でき\n// (見つからなければ0番目にフォールバックする)、以前のように保存していたindexが範囲外に\n// なって「接続エラー(guest)」カードが出る事故が起きない。\nconst CURRENT_USER_STORAGE_KEY = 'familyQuest.currentUserId.v1';", "function loadSavedUserId(): string | null {", "function saveCurrentUserId(userId: string): void {")
+
 ### `ConfirmTarget` (型定義)
 
 * **役割**: `ConfirmModal`の`target`に渡りうる型。モード（完了/購入/却下）ごとに実際に持っているプロパティが異なるため、メッセージ生成はモードごとに個別にキャストして組み立てる。クエスト完了の確認ダイアログが復活したことに伴い`Quest`が追加された。
@@ -169,8 +174,9 @@
 * **戻り値/レスポンス**: JSX要素。`isLoading`が真の間はローディング表示のみを返す。
 * 根拠: (491, 493行目 / 抜粋: "if (isLoading) return <div className=\"p-10 text-center\">Loading Family Quest...</div>;", "return (\n    <div className=\"min-h-screen bg-gray-900 pb-20 font-sans text-gray-100\">")
 
-* **副作用**: `App`は`useEffect`を1つ定義している（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。確認モーダルの連打防止用に`isConfirming`(state)/`isConfirmingRef`(ref)も保持する（Issue #101、`executeConfirm`の項を参照）。Issue #102で追加された`completedSignal`(state)は、クエスト完了APIが実際に成功した時点でのみ完了音・無限クエストのクールダウンを発火させるため、対象クエストのid・**完了した本人のuserId（Issue #363で追加）**・発火のたびに変わるnonceを`CompletedSignal`型（`@/types`）で`QuestList`/`QuestItem`側へ通知する用途で保持する（`runQuestAction`の項を参照）。
+* **副作用**: `App`は`pendingQuestsRef`同期用に加え、**（Issue #393）** 選択中ユーザーの永続化解決・保存用の`useEffect`を定義している。`useState(0)`初期値の`currentUserIdx`とは別に、マウント時に一度だけ`loadSavedUserId()`の結果を`pendingSavedUserIdRef`（ref）へ保持し、`users`が実データ（`users.length > 1`。`INITIAL_USERS`は1件のみのため、これでフォールバックデータとの区別に使う）に揃った時点のeffectで`users.findIndex(u => u.user_id === savedUserId)`により対応する`currentUserIdx`を一度だけ解決する（見つからなければ何もせず次の分岐へ進む）。続けて`currentUserIdx`が`users.length`以上（メンバー減少等で範囲外）なら`0`へクランプし、それ以外は現在の`currentUser.user_id`を`saveCurrentUserId`で保存する。この一連の処理は`users.length <= 1`（＝まだ`INITIAL_USERS`のフォールバックの可能性がある）間はスキップされ、実データ到着前に`guest`を保存して既存の保存値を消してしまうのを防ぐ。それ以外に（`pendingQuestsRef.current`を最新の`pendingQuests`に同期させるためのもので、`handleApproveAll`の`onRetry`が古い`pendingQuests`クロージャを掴んだままになるバグの修正として追加された）。これに加え、内部で呼び出す各種ハンドラーを通じて、状態更新・音声再生・トースト表示・`useGameData`のミューテーション呼び出しを行う。確認モーダルの連打防止用に`isConfirming`(state)/`isConfirmingRef`(ref)も保持する（Issue #101、`executeConfirm`の項を参照）。Issue #102で追加された`completedSignal`(state)は、クエスト完了APIが実際に成功した時点でのみ完了音・無限クエストのクールダウンを発火させるため、対象クエストのid・**完了した本人のuserId（Issue #363で追加）**・発火のたびに変わるnonceを`CompletedSignal`型（`@/types`）で`QuestList`/`QuestItem`側へ通知する用途で保持する（`runQuestAction`の項を参照）。
 * 根拠: (211〜217行目 / 抜粋: "// ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests\n  // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして\n  // 400エラーになり続けていた。refで常に最新のpendingQuestsを参照できるようにする。\n  const pendingQuestsRef = useRef(pendingQuests);\n  useEffect(() => {\n    pendingQuestsRef.current = pendingQuests;\n  }, [pendingQuests]);")
+* 根拠: 選択中ユーザーの永続化 (180, 184, 256〜285行目 / 抜粋: "const pendingSavedUserIdRef = useRef<string | null>(loadSavedUserId());", "useEffect(() => {\n    if (users.length <= 1) return;\n\n    const savedUserId = pendingSavedUserIdRef.current;\n    if (savedUserId !== null) {\n      pendingSavedUserIdRef.current = null;\n      const idx = users.findIndex(u => u.user_id === savedUserId);\n      if (idx !== -1) {\n        setCurrentUserIdx(idx);\n        return;\n      }\n    }", "if (currentUserIdx >= users.length) {\n      setCurrentUserIdx(0);\n      return;\n    }", "if (user) saveCurrentUserId(user.user_id);")
 * 根拠: `isConfirming`/`isConfirmingRef`の宣言 (163〜168行目 / 抜粋: "// #101: 確認モーダルの「はい」連打による二重実行(例: 購入の二重成立)を防ぐガード。\n  // レスポンス前の同期的な連打はstate更新の反映(再レンダー)を待たずに発生しうるため、\n  // 判定にはuseState単独ではなくrefを使い、ボタンの見た目のdisabled/ローディング表示には\n  // 対になるstateを使う。\n  const [isConfirming, setIsConfirming] = useState(false);\n  const isConfirmingRef = useRef(false);")
 * 根拠: `completedSignal`の宣言 (181〜188行目 / 抜粋: "// 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに\n  // 変わるnonceをApp側からQuestList/QuestItemへ通知する。\n  // #363: 横画面の4人パネルでは同じsignalが全員のQuestItemに届くため、「誰の完了か」\n  // (userId)も載せ、QuestItem側で自分のパネルの完了だけに反応させる。\n  const [completedSignal, setCompletedSignal] = useState<CompletedSignal | null>(null);")
 
@@ -512,6 +518,8 @@ graph TD
 * 根拠: (428〜441行目 / 抜粋: "for (const history of targets) {\n      const res = await approveQuest(getRepresentativeParent(users), history);\n      if (res.success) {\n        successCount++;\n        // #238: 兄妹連携クエストのカスケード承認では相方側もメダルを獲得しうる\n        totalEarnedMedals += (res.earnedMedals ?? 0) + (res.partnerEarnedMedals ?? 0);\n      }\n    }")
 * **`cost_gold`欠落時のフォールバックは廃止済み（#291）**: 購入確認モーダルの金額表示はかつて`Reward.cost_gold`のみを参照しており、`masterData.js`のフォールバック報酬（`cost_gold`を持たず`cost`のみ）が選択されると「undefinedG」と表示されるLowバグがあったため、一時的に`cost_gold ?? cost`のフォールバックで修正されていた。**（#291で再修正）** その後`masterData.js`のフォールバック報酬自体が`cost_gold`フィールドを持つよう統一され、`Reward`型からも`cost`（重複フィールド名）が削除されたため、このフォールバックは不要になり`t.cost_gold`のみを参照する形に戻った。同様のフォールバックは`RewardList.tsx`（本ファイルの管轄外）でも同時に削除されている。
 * 根拠: (101〜105行目 / 抜粋: "// #291: masterData.js のフォールバック報酬も含め cost_gold に一本化したため、\n        // cost へのフォールバックは不要になった。\n        return { title: 'アイテム購入', text: `「${t.title}」を ${t.cost_gold}G で買いますか？` };")
+* **[修正済み] 選択中ユーザーの永続化とindex範囲外の自動補正（Issue #393 / F-M6）**: 以前は`users[currentUserIdx] || INITIAL_USERS[0]`のみで、メンバーが減った場合や不整合な`currentUserIdx`のままだと`INITIAL_USERS`（「接続エラー(guest)」）にフォールバックし`Header`側では誰も選択状態にならなかった。また`currentUserIdx`はメモリのみで保持されておりPWA起動のたびに`0`（パパ）に戻っていた。修正後は`localStorage`（`familyQuest.currentUserId.v1`）に選択中ユーザーの`user_id`を保存し、次回起動時は`users.findIndex`で対応する`currentUserIdx`を解決する（見つからなければ`0`）。`currentUserIdx`が`users.length`以上になった場合も同じeffectで`0`へクランプする。`localStorage`の読み書きはいずれも`try/catch`で保護し、`loadSavedUserId`は戻り値が非空の`string`であることを検証する。
+* 根拠: (37〜54, 180, 184, 256〜285行目)
 * **PARENT判定はUI上の配慮に過ぎない**: `isParentUser`（`quest_users.role`基準）はクライアント側の表示制御のみに使われ、セキュリティ境界ではない。実際のアクセス制御はバックエンド側で別途行う必要がある。
 * 根拠: (18〜21行目 / 抜粋: "// ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、\n// セキュリティ境界ではない。バックエンドは現状どのuser_idでも自称できてしまうため、")
 * **承認・却下の記録名義固定**: `getRepresentativeParent`により、承認・却下の記録名義は常に代表の親1名に固定される（要件5）。横画面の4人表示では「今アクティブなユーザー」概念が存在しないための設計である。
