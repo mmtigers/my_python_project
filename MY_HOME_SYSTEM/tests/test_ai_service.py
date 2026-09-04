@@ -948,3 +948,195 @@ class TestToolRecordFunctionsReportSaveFailure:
 
         # 2回目呼び出しが失敗した場合は tool_result がそのままユーザーへ返るため、失敗文言が見える
         assert "記録失敗:" in result
+
+
+# ==========================================
+# Issue #374 / L-L4: 連鎖 function_call・複数パート応答・response.text の ValueError
+# ==========================================
+
+class _FunctionCallOnlyResponse:
+    """google-generativeai の GenerateContentResponse を模す。function_call パートしか
+    無い(またはテキストが無い)応答では `.text` が ValueError を送出する実挙動を再現する。"""
+
+    def __init__(self, parts):
+        self.parts = parts
+
+    @property
+    def text(self):
+        raise ValueError("Invalid operation: The `response.text` quick accessor requires the response to contain a valid `Part`")
+
+
+def make_text_part(text):
+    part = MagicMock()
+    part.function_call = None
+    part.text = text
+    return part
+
+
+def make_fc_part(fc):
+    part = MagicMock()
+    part.function_call = fc
+    return part
+
+
+class TestChainedFunctionCalls:
+    @pytest.mark.asyncio
+    async def test_second_function_call_after_tool_result_is_executed_not_error(self, ai_configured, monkeypatch):
+        """Issue #374 の再現条件: 1件目のツール実行後、2件目の function_call が返る。
+        以前は final_res.text が ValueError → 汎用 except → 「処理中にエラー」だった。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_child_health", {"child_name": "涼花", "condition": "熱"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1)]),
+            _FunctionCallOnlyResponse([make_fc_part(fc2)]),
+            make_response(function_call=None, text="2人とも記録しました"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_tool = AsyncMock(side_effect=["記録完了: 智矢", "記録完了: 涼花"])
+        monkeypatch.setattr(ai_service, "tool_record_child_health", mock_tool)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱、涼花も熱")
+
+        assert result == "2人とも記録しました"
+        assert mock_tool.call_count == 2
+        assert mock_tool.call_args_list[1].args[2] == {"child_name": "涼花", "condition": "熱"}
+        assert mock_retry.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_multiple_function_calls_in_one_response_are_all_executed_and_returned_together(
+        self, ai_configured, monkeypatch
+    ):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_food", {"item": "おかゆ"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1), make_fc_part(fc2)]),
+            make_response(function_call=None, text="両方記録しました"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_health = AsyncMock(return_value="記録完了: 智矢")
+        mock_food = AsyncMock(return_value="記録完了: おかゆ")
+        monkeypatch.setattr(ai_service, "tool_record_child_health", mock_health)
+        monkeypatch.setattr(ai_service, "tool_record_food", mock_food)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱でおかゆ食べた")
+
+        assert result == "両方記録しました"
+        mock_health.assert_called_once()
+        mock_food.assert_called_once()
+        # 2回目の呼び出しには2件分の function_response がまとめて渡る
+        sent_parts = mock_retry.call_args_list[1].args[1]
+        assert len(sent_parts) == 2
+
+    @pytest.mark.asyncio
+    async def test_text_plus_function_call_multipart_response_triggers_tool(self, ai_configured, monkeypatch):
+        """L-L4: parts[0] がテキストで parts[1] が function_call の応答でもツールが実行されること
+        (以前は parts[0] のみ検査し雑談扱いになっていた)。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        first = MagicMock()
+        first.parts = [make_text_part("記録しますね"), make_fc_part(fc)]
+        first.text = "記録しますね"
+        mock_retry = AsyncMock(side_effect=[first, make_response(function_call=None, text="記録しました")])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_food = AsyncMock(return_value="記録完了: カレー")
+        monkeypatch.setattr(ai_service, "tool_record_food", mock_food)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        mock_food.assert_called_once_with("U1", "太郎", {"item": "カレー"})
+        assert result == "記録しました"
+
+    @pytest.mark.asyncio
+    async def test_final_response_without_text_falls_back_to_tool_results(self, ai_configured, monkeypatch):
+        """ツール実行後の応答に function_call もテキストも無く `.text` が ValueError を
+        送出する場合、汎用エラーではなく tool_result をユーザーへ返すこと。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        no_text_part = MagicMock()
+        no_text_part.function_call = None
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc)]),
+            _FunctionCallOnlyResponse([no_text_part]),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー"))
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+        assert "処理中にエラーが発生しました" not in result
+
+    @pytest.mark.asyncio
+    async def test_empty_parts_after_tool_execution_falls_back_to_tool_results(self, ai_configured, monkeypatch):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc)]),
+            make_response(parts_present=False),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー"))
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+
+    @pytest.mark.asyncio
+    async def test_endless_function_calls_stop_at_max_rounds_and_return_tool_results(
+        self, ai_configured, monkeypatch
+    ):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("search_db", {"sql_query": "SELECT 1 FROM food_records"})
+        mock_retry = AsyncMock(return_value=_FunctionCallOnlyResponse([make_fc_part(fc)]))
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_search = AsyncMock(return_value="検索結果")
+        monkeypatch.setattr(ai_service, "tool_search_db", mock_search)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "検索して")
+
+        assert mock_search.call_count == ai_service.MAX_TOOL_ROUNDS
+        # 初回 + 各ラウンドの結果送信 = MAX_TOOL_ROUNDS + 1 回の API 呼び出し
+        assert mock_retry.call_count == ai_service.MAX_TOOL_ROUNDS + 1
+        assert "検索結果" in result
+        assert "上限" in result
+        assert "処理中にエラーが発生しました" not in result
+
+    @pytest.mark.asyncio
+    async def test_resource_exhausted_mid_chain_returns_all_tool_results_so_far(self, ai_configured, monkeypatch):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_child_health", {"child_name": "涼花", "condition": "熱"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1)]),
+            _FunctionCallOnlyResponse([make_fc_part(fc2)]),
+            ResourceExhausted("quota"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(
+            ai_service, "tool_record_child_health", AsyncMock(side_effect=["記録完了: 智矢", "記録完了: 涼花"])
+        )
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱、涼花も熱")
+
+        assert "記録完了: 智矢" in result
+        assert "記録完了: 涼花" in result
+        assert "制限を超過" in result
+
+
+class TestResponseHelpers:
+    def test_extract_function_calls_scans_all_parts(self):
+        fc = make_function_call("record_food", {"item": "x"})
+        resp = MagicMock()
+        resp.parts = [make_text_part("hi"), make_fc_part(fc), make_text_part("bye")]
+        assert ai_service._extract_function_calls(resp) == [fc]
+
+    def test_extract_function_calls_returns_empty_for_text_only(self):
+        assert ai_service._extract_function_calls(make_response(function_call=None)) == []
+
+    def test_response_text_or_none_swallows_value_error(self):
+        assert ai_service._response_text_or_none(_FunctionCallOnlyResponse([])) is None
+
+    def test_response_text_or_none_returns_text(self):
+        assert ai_service._response_text_or_none(make_response(text="ok")) == "ok"

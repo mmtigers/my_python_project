@@ -348,22 +348,111 @@
 
 
 
-### `analyze_text_and_execute` (関数)
+### `MAX_TOOL_ROUNDS` (変数、Issue #374で追加)
 
-* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #232で修正）** 1回目のGemini呼び出しは`ResourceExhausted`/`GoogleAPIError`をそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前`ResourceExhausted`用のフォールバックしか持たず、それ以外の`GoogleAPIError`は関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも`except GoogleAPIError`を追加し、`ResourceExhausted`と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。
-* 根拠: `async def analyze_text_and_execute` (行番号: 334 / 抜粋: "async def analyze_text_and_execute")
+* **役割**: `analyze_text_and_execute`が「ツール実行→結果送信→次の応答」を繰り返す上限回数（`5`）。AIが`function_call`を返し続けた場合の無限ループ防止の安全弁。
+* 根拠: `MAX_TOOL_ROUNDS = 5` (行番号: 49)
+
+### `_extract_function_calls` (関数、Issue #374で追加)
+
+* **役割**: 応答の`parts`をすべて走査し、`function_call`を持つパートの`function_call`をリストで返す（L-L4対応。以前は`response.parts[0]`のみを検査していたため、テキスト+`function_call`の複数パート応答でツール呼び出しが無視され雑談扱いになっていた）。
+* 根拠: `def _extract_function_calls(response) -> List[Any]:` (行番号: 474〜486)
 
 
-* **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
-* 根拠: 関数シグネチャ (行番号: 334 / 抜粋: "user_id: str, user_name: str, text: str")
+* **引数/リクエスト**: `response`（Gemini応答オブジェクト。`parts`属性を持つ）
+* 根拠: 関数シグネチャ (行番号: 474)
+
+
+* **戻り値/レスポンス**: `List[Any]`（`function_call`オブジェクトのリスト。無ければ空リスト）
+* 根拠: `return calls` (行番号: 486)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 474〜486)
+
+
+* **エラーハンドリング**: `parts`が`None`の場合は空として扱う（`response.parts or []`）
+* 根拠: (行番号: 482)
+
+### `_response_text_or_none` (関数、Issue #374で追加)
+
+* **役割**: `response.text`を安全に取り出す。google-generativeaiの`response.text`は`function_call`パートしか無い応答や空応答で`ValueError`を送出するため、例外を送出せず`None`を返す（空文字も`None`）。
+* 根拠: `def _response_text_or_none(response) -> Optional[str]:` (行番号: 489〜498)
+
+
+* **引数/リクエスト**: `response`
+* 根拠: 関数シグネチャ (行番号: 489)
 
 
 * **戻り値/レスポンス**: `Optional[str]`
-* 根拠: 関数シグネチャおよび `return response.text` / `return None` (行番号: 334 / 抜粋: "-> Optional[str]:")
+* 根拠: `return text or None` (行番号: 498)
 
 
-* **副作用**: API通信、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
-* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / ツール関数の呼び出し (行番号: 351, 355, 397 / 抜粋: "await _call_gemini_api_with_retry")
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 489〜498)
+
+
+* **エラーハンドリング**: `ValueError`/`AttributeError`/`IndexError`を捕捉し`None`を返す
+* 根拠: `except (ValueError, AttributeError, IndexError):` (行番号: 495〜496)
+
+### `_dispatch_tool` (関数、Issue #374で追加)
+
+* **役割**: `function_call`の名前に応じて`tool_record_child_health`/`tool_record_food`/`tool_search_db`を実行し結果文字列を返す。未知の名前は`"エラー: 未知のツールが呼び出されました。"`を返す（以前`analyze_text_and_execute`内にインラインで書かれていた分岐を切り出したもの）。
+* 根拠: `async def _dispatch_tool(...)` (行番号: 501〜509)
+
+
+* **引数/リクエスト**: `user_id: str`, `user_name: str`, `fname: str`, `fargs: Dict[str, Any]`
+* 根拠: 関数シグネチャ (行番号: 501)
+
+
+* **戻り値/レスポンス**: `str`
+* 根拠: 各`return` (行番号: 503〜509)
+
+
+* **副作用**: 呼び出したツール関数の副作用（DB書き込み・読み取り）
+* 根拠: (行番号: 503〜508)
+
+
+* **エラーハンドリング**: なし（ツール関数側に委ねる）
+* 根拠: 関数本体 (行番号: 501〜509)
+
+### `_tool_results_fallback` (関数、Issue #374で追加)
+
+* **役割**: ツールは実行済みだが最終応答を生成できなかった場合に、蓄積した`tool_results`を改行連結し末尾に`(注記)`を添えた文字列を返す。
+* 根拠: `def _tool_results_fallback(tool_results: List[str], note: str) -> str:` (行番号: 512〜514)
+
+
+* **引数/リクエスト**: `tool_results: List[str]`, `note: str`
+* 根拠: 関数シグネチャ (行番号: 512)
+
+
+* **戻り値/レスポンス**: `str`
+* 根拠: `return "\n".join(tool_results) + f"\n({note})"` (行番号: 514)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 512〜514)
+
+
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 512〜514)
+
+### `analyze_text_and_execute` (関数)
+
+* **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しは`ResourceExhausted`/`GoogleAPIError`をそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前`ResourceExhausted`用のフォールバックしか持たず、それ以外の`GoogleAPIError`は関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも`except GoogleAPIError`を追加し、`ResourceExhausted`と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。
+* 根拠: `async def analyze_text_and_execute` (行番号: 517 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+
+
+* **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
+* 根拠: 関数シグネチャ (行番号: 517 / 抜粋: "user_id: str, user_name: str, text: str")
+
+
+* **戻り値/レスポンス**: `Optional[str]`
+* 根拠: 関数シグネチャおよび `return final_text` / `return None` / `return _tool_results_fallback(...)` (行番号: 517, 589, 593, 621, 631, 635, 639 / 抜粋: "-> Optional[str]:")
+
+
+* **副作用**: API通信（初回1回 + ツール実行ラウンドごとに1回、最大`MAX_TOOL_ROUNDS`回）、RateLimiterのカウント更新、および選択されたツールによる副作用（DB/外部サービス操作）
+* 根拠: `await rate_limiter.allow_request()` / `await _call_gemini_api_with_retry` / `_dispatch_tool` (行番号: 534, 563, 606, 617 / 抜粋: "response = await _call_gemini_api_with_retry(chat_manual, function_responses)")
 
 
 * **エラーハンドリング**:
@@ -371,10 +460,12 @@
 * レート制限超過時はフォールバックメッセージを返却。
 * 1回目のGemini呼び出しで`ResourceExhausted`発生時はフォールバックメッセージ(`FALLBACK_MESSAGE`)を、`GoogleAPIError`発生時は「AIサービスで予期せぬエラーが発生しました」を返却。
 * **（Issue #232で修正）** ツール実行後の2回目のGemini呼び出し（最終応答生成）で`ResourceExhausted`発生時はツール結果(`tool_result`)に「制限を超過したため、実行結果のみ表示します」という注記を添えて返却する。同様に`GoogleAPIError`（`ResourceExhausted`以外）発生時も、以前は捕捉されず末尾の汎用`except Exception`まで伝播していたが、現在は`tool_result`に「エラーが発生したため、実行結果のみ表示します」という注記を添えて返却する（ツール実行=DB書き込みは既に成功しているため、その結果を正しくユーザーへ伝える）。
-* 空のレスポンス時はエラーメッセージを返却。
-* 未知のツール名指定時はエラーメッセージを結果として扱う。
+* 初回の空のレスポンス時はエラーメッセージを返却。
+* **（Issue #374で追加）** ツール実行後の応答が空（`parts`無し）、または`function_call`もテキストも無く`response.text`が`ValueError`を送出する場合は、汎用エラーではなく`_tool_results_fallback`で実行結果を返却。
+* **（Issue #374で追加）** `MAX_TOOL_ROUNDS`回ループしてもテキスト応答に至らない場合は「ツール呼び出し回数が上限に達した」注記付きで実行結果を返却。
+* 未知のツール名指定時はエラーメッセージを結果として扱う（`_dispatch_tool`）。
 * その他予期せぬ例外発生時はエラーログ出力と汎用エラーメッセージを返却。
-* 根拠: 1回目呼び出しの分岐 (行番号: 409, 412 / 抜粋: "except ResourceExhausted:", "except GoogleAPIError as e:")、2回目呼び出しの分岐 (行番号: 452, 456 / 抜粋: "except ResourceExhausted:\n                # ツール実行は成功しているが、最終回答生成でコケた場合", "except GoogleAPIError as e:\n                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は")、末尾の汎用ハンドラ (行番号: 470 / 抜粋: "except Exception as e:")
+* 根拠: 1回目呼び出しの分岐 (行番号: 564, 567 / 抜粋: "except ResourceExhausted:", "except GoogleAPIError as e:")、ループ内の結果送信の分岐 (行番号: 618, 622 / 抜粋: "except ResourceExhausted:\n                # ツール実行は成功しているが、最終回答生成でコケた場合", "except GoogleAPIError as e:\n                # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は")、空応答・テキスト無しのフォールバック (行番号: 586〜596, 633〜635)、上限到達 (行番号: 637〜639)、末尾の汎用ハンドラ (行番号: 641 / 抜粋: "except Exception as e:")
 
 
 
@@ -397,11 +488,15 @@ flowchart TD
     
     CheckException1 -- "No Error" --> CheckEmpty{応答が空?}
     CheckEmpty -- Yes --> EndEmptyError([End: Return Empty Error Msg])
-    CheckEmpty -- No --> CheckTool{Function Call あり?}
+    CheckEmpty -- No --> LoopStart["Issue #374: ループ開始<br>(最大 MAX_TOOL_ROUNDS 回)"]
+    LoopStart --> CheckTool{"全パートに<br>Function Call あり?<br>(_extract_function_calls)"}
     
-    CheckTool -- No --> ReturnText([End: Return response.text])
+    CheckTool -- No --> CheckText{"テキスト取得可?<br>(_response_text_or_none)"}
+    CheckText -- Yes --> ReturnText([End: Return text])
+    CheckText -- "No / ツール実行済み" --> EndToolOnlyEmpty([End: Return Tool Results + 空応答注記])
+    CheckText -- "No / ツール未実行" --> EndEmptyError
     
-    CheckTool -- Yes --> IdentifyTool{ツール特定}
+    CheckTool -- "Yes (全件を順に実行)" --> IdentifyTool{"ツール特定<br>(_dispatch_tool)"}
     IdentifyTool -- "record_child_health" --> RunHealth[ツール実行: tool_record_child_health]
     IdentifyTool -- "record_food" --> RunFood[ツール実行: tool_record_food]
     IdentifyTool -- "search_db" --> StripComments["B3: _strip_sql_comments で<br>SQLコメントを空白に置換"]
@@ -409,11 +504,11 @@ flowchart TD
     CheckSelect -- No --> RunSearch[ツール実行: tool_search_db<br>エラーメッセージ返却]
     CheckSelect -- Yes --> CheckTableAllowed{"参照テーブルは<br>ALLOWED_SEARCH_TABLESに<br>含まれるか?"}
     CheckTableAllowed -- No --> RunSearch
-    CheckTableAllowed -- Yes --> RunSearchOk[外部：common.execute_read_query 実行]
+    CheckTableAllowed -- Yes --> RunSearchOk["Issue #357: _execute_restricted_read_query 実行<br>(set_authorizer で許可外テーブルを拒否)"]
     RunSearchOk --> RunSearch
     IdentifyTool -- "その他" --> SetUnknownError[結果にエラー文字セット]
     
-    RunHealth --> BuildFuncRes[FunctionResponse 生成]
+    RunHealth --> BuildFuncRes["FunctionResponse 生成<br>(複数 call 分をまとめる)"]
     RunFood --> BuildFuncRes
     RunSearch --> BuildFuncRes
     SetUnknownError --> BuildFuncRes
@@ -421,10 +516,14 @@ flowchart TD
     BuildFuncRes --> CallAPI2[外部：_call_gemini_api_with_retry 再呼び出し]
     CallAPI2 --> CheckException2{例外発生?}
     
-    CheckException2 -- "ResourceExhausted" --> EndToolOnly([End: Return Tool Result + Warning Msg])
-    CheckException2 -- "GoogleAPIError(#232で追加)" --> EndToolOnlyApiErr([End: Return Tool Result + Error Msg])
+    CheckException2 -- "ResourceExhausted" --> EndToolOnly([End: Return Tool Results + Warning Msg])
+    CheckException2 -- "GoogleAPIError(#232で追加)" --> EndToolOnlyApiErr([End: Return Tool Results + Error Msg])
     CheckException2 -- "Other Exception" --> EndGeneralError
-    CheckException2 -- "No Error" --> ReturnFinalText([End: Return final_res.text])
+    CheckException2 -- "No Error" --> CheckEmpty2{応答が空?}
+    CheckEmpty2 -- Yes --> EndToolOnlyEmpty
+    CheckEmpty2 -- No --> CheckRounds{"ラウンド数 <<br>MAX_TOOL_ROUNDS?"}
+    CheckRounds -- Yes --> CheckTool
+    CheckRounds -- No --> EndToolOnlyLimit([End: Return Tool Results + 上限到達注記])
 
 ```
 
@@ -448,6 +547,11 @@ graph TD
         DENIED_SQL_FUNCTIONS["_DENIED_SQL_FUNCTIONS(Issue #357で追加)"]
         _search_db_authorizer["_search_db_authorizer(Issue #357で追加)"]
         _execute_restricted_read_query["_execute_restricted_read_query(Issue #357で追加)"]
+        MAX_TOOL_ROUNDS["変数: MAX_TOOL_ROUNDS(Issue #374で追加)"]
+        _extract_function_calls["_extract_function_calls(Issue #374で追加)"]
+        _response_text_or_none["_response_text_or_none(Issue #374で追加)"]
+        _dispatch_tool["_dispatch_tool(Issue #374で追加)"]
+        _tool_results_fallback["_tool_results_fallback(Issue #374で追加)"]
         rate_limiter[Instance: rate_limiter]
         tools_schema[変数: tools_schema]
     end
@@ -467,9 +571,14 @@ graph TD
 
     analyze_text_and_execute --> rate_limiter
     analyze_text_and_execute --> _call_gemini_api_with_retry
-    analyze_text_and_execute --> tool_record_child_health
-    analyze_text_and_execute --> tool_record_food
-    analyze_text_and_execute --> tool_search_db
+    analyze_text_and_execute -->|Issue #374: ループ上限| MAX_TOOL_ROUNDS
+    analyze_text_and_execute -->|Issue #374: 全パート走査| _extract_function_calls
+    analyze_text_and_execute -->|Issue #374: text安全取得| _response_text_or_none
+    analyze_text_and_execute -->|Issue #374| _dispatch_tool
+    analyze_text_and_execute -->|Issue #374| _tool_results_fallback
+    _dispatch_tool --> tool_record_child_health
+    _dispatch_tool --> tool_record_food
+    _dispatch_tool --> tool_search_db
     analyze_text_and_execute --> genai
     analyze_text_and_execute --> get_now_iso
     analyze_text_and_execute --> config
@@ -518,7 +627,9 @@ graph TD
 
 * レートリミットクラス (`SimpleRateLimiter`) はオンメモリで状態を保持するため、複数プロセス（ワーカー）でアプリケーションを稼働させる場合、プロセス間で制限が共有されない。
 * `analyze_text_and_execute` の終盤での例外キャッチ (`except Exception as e:`) は広範であり、意図しないエラーも一律のメッセージで握りつぶす仕様となっている。**（Issue #232で対応範囲を縮小）** 以前はツール実行後の2回目Gemini呼び出しで`ResourceExhausted`以外の`GoogleAPIError`が発生した場合もこの汎用ハンドラまで伝播し、ツール(DB書き込み)は既に成功しているにもかかわらず「処理中にエラーが発生しました」という一般エラーになっていた。ユーザーが保存失敗と誤解して再送信すると、冪等性チェックの無い記録処理(`tool_record_child_health`/`tool_record_food`)が重複登録を起こしうる状態だった。2回目呼び出し専用の`except GoogleAPIError`を追加し、この経路がこの汎用ハンドラに到達しないようにした。
-* `json` と `datetime` モジュールがインポートされているが、ファイル内で一度も使用されていない。
+* **[修正済み] Issue #374 / L-L4 連鎖 function_call と複数パート応答**: 以前は`response.parts[0]`のみを検査し（テキスト+`function_call`の複数パート応答ではツール呼び出しを無視して雑談扱い）、ツール実行後は`final_res.text`を無条件に読んでいた（google-generativeaiの`response.text`は`function_call`パートしか無い応答で`ValueError`を送出するため、2件目の`function_call`が返ると汎用`except`に落ち「処理中にエラー」→ユーザーが再送→1件目の重複登録）。現在は`_extract_function_calls`で全パートを走査し、`MAX_TOOL_ROUNDS`回を上限に「全`function_call`を実行→`function_response`をまとめて送信→次の応答」をループし、テキスト応答は`_response_text_or_none`で安全に取り出す。最終応答が得られない場合（空応答・テキスト無し・上限到達・API例外）はいずれも`_tool_results_fallback`で実行結果をユーザーへ返し、汎用エラーには落とさない。上限に達した場合は蓄積した実行結果に注記を添えて返すが、AIが本当に必要としていた後続のツール呼び出しは打ち切られる点に留意（上限値は`MAX_TOOL_ROUNDS`で調整）。
+* 根拠: `MAX_TOOL_ROUNDS` (行番号: 49)、`_extract_function_calls`/`_response_text_or_none`/`_dispatch_tool`/`_tool_results_fallback` (行番号: 474-514)、ループ本体 (行番号: 582-639)
+* `datetime` モジュールがインポートされていない（旧版の記述を訂正。`json`はIssue #357で使用されるようになった）。
 
 ## 9. 不明事項一覧
 

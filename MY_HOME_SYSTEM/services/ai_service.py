@@ -44,6 +44,9 @@ else:
 MAX_RETRIES = 3
 REQUESTS_PER_MINUTE_LIMIT = 10  # 必要に応じて調整
 FALLBACK_MESSAGE = "申し訳ございません。現在AIサービスが混雑しており応答できません。少し時間を置いて再度お試しください。"
+# Issue #374: 1メッセージで連鎖的にツール呼び出しが返る場合(「智矢が熱、涼花も熱」等)に
+# ツール実行→結果送信を繰り返す上限回数。無限ループ防止のための安全弁。
+MAX_TOOL_ROUNDS = 5
 
 
 # ==========================================
@@ -468,6 +471,49 @@ async def _call_gemini_api_with_retry(chat_session, prompt: str):
 # 4. Main Logic
 # ==========================================
 
+def _extract_function_calls(response) -> List[Any]:
+    """
+    Issue #374 (L-L4): 応答の全パートを走査し、function_call を持つものをすべて返す。
+
+    以前は `response.parts[0]` だけを検査していたため、テキスト+function_call の
+    複数パート応答ではツール呼び出しが無視され雑談扱いになっていた。
+    """
+    calls: List[Any] = []
+    for part in (response.parts or []):
+        fc = getattr(part, "function_call", None)
+        if fc:
+            calls.append(fc)
+    return calls
+
+
+def _response_text_or_none(response) -> Optional[str]:
+    """
+    Issue #374: `response.text` は function_call パートしか無い応答や空応答で
+    ValueError を送出する(google-generativeai の仕様)。例外を送出せず None を返す。
+    """
+    try:
+        text = response.text
+    except (ValueError, AttributeError, IndexError):
+        return None
+    return text or None
+
+
+async def _dispatch_tool(user_id: str, user_name: str, fname: str, fargs: Dict[str, Any]) -> str:
+    """function_call の名前に応じてツール関数を実行し、結果文字列を返す"""
+    if fname == "record_child_health":
+        return await tool_record_child_health(user_id, user_name, fargs)
+    if fname == "record_food":
+        return await tool_record_food(user_id, user_name, fargs)
+    if fname == "search_db":
+        return await tool_search_db(fargs)
+    return "エラー: 未知のツールが呼び出されました。"
+
+
+def _tool_results_fallback(tool_results: List[str], note: str) -> str:
+    """ツールは実行済みだが最終応答を生成できなかった場合に、実行結果のみをユーザーへ返す"""
+    return "\n".join(tool_results) + f"\n({note})"
+
+
 async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> Optional[str]:
     """
     ユーザーの入力を解析し、適切なツールを実行するか、会話応答を返す。
@@ -526,42 +572,53 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
             logger.error("❌ Empty response from Gemini")
             return "エラー: AIからの応答が空でした。"
 
-        part = response.parts[0]
-        
-        # --- Handle Function Call ---
-        if part.function_call:
-            fc = part.function_call
-            fname = fc.name
-            fargs = dict(fc.args)
-            
-            logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
-            
-            tool_result = ""
-            if fname == "record_child_health":
-                tool_result = await tool_record_child_health(user_id, user_name, fargs)
-            elif fname == "record_food":
-                tool_result = await tool_record_food(user_id, user_name, fargs)
-            elif fname == "search_db":
-                tool_result = await tool_search_db(fargs)
-            else:
-                tool_result = "エラー: 未知のツールが呼び出されました。"
+        # Issue #374: ツール実行→結果送信→次の応答、を上限回数までループする。
+        # 以前は1回のツール実行後に `final_res.text` を無条件に読んでおり、
+        # 「智矢が熱、涼花も熱」のように2件目の function_call が返ると
+        # response.text が ValueError を送出→汎用 except→「処理中にエラー」となり、
+        # 1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録(#232と同種)
+        # という経路が残っていた。
+        tool_results: List[str] = []
+        for _round in range(MAX_TOOL_ROUNDS):
+            calls = _extract_function_calls(response)
 
-            # 結果をAIに返して最終回答を生成
-            function_response = content.Part(
-                function_response=content.FunctionResponse(
-                    name=fname,
-                    response={"result": tool_result}
-                )
-            )
-            
+            # --- Normal Chat / 最終応答 ---
+            if not calls:
+                final_text = _response_text_or_none(response)
+                if final_text:
+                    return final_text
+                if tool_results:
+                    # ツールは実行済みだが最終応答テキストが取り出せない(空応答等)
+                    logger.warning("⚠️ Gemini returned no text after tool execution; falling back to tool results.")
+                    return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+                logger.error("❌ Empty response from Gemini")
+                return "エラー: AIからの応答が空でした。"
+
+            # --- Handle Function Call(s) ---
+            # 1つの応答に複数の function_call が含まれる場合はすべて実行し、
+            # function_response もまとめて1回で返す。
+            function_responses = []
+            for fc in calls:
+                fname = fc.name
+                fargs = dict(fc.args)
+                logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
+
+                tool_result = await _dispatch_tool(user_id, user_name, fname, fargs)
+                tool_results.append(tool_result)
+                function_responses.append(content.Part(
+                    function_response=content.FunctionResponse(
+                        name=fname,
+                        response={"result": tool_result}
+                    )
+                ))
+
             # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
             try:
-                final_res = await _call_gemini_api_with_retry(chat_manual, [function_response])
-                return final_res.text
+                response = await _call_gemini_api_with_retry(chat_manual, function_responses)
             except ResourceExhausted:
                 # ツール実行は成功しているが、最終回答生成でコケた場合
                 logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
-                return f"{tool_result}\n(AIの応答生成が制限を超過したため、実行結果のみ表示します)"
+                return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
             except GoogleAPIError as e:
                 # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
                 # 既に成功しているにもかかわらず、最終応答生成でResourceExhausted以外の
@@ -571,10 +628,15 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
                 # ResourceExhaustedと同様にtool_resultを返し、実行結果を正しく伝える。
                 logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
-                return f"{tool_result}\n(AIの応答生成でエラーが発生したため、実行結果のみ表示します)"
+                return _tool_results_fallback(tool_results, "AIの応答生成でエラーが発生したため、実行結果のみ表示します")
 
-        # --- Normal Chat ---
-        return response.text
+            if not response or not response.parts:
+                logger.warning("⚠️ Empty response from Gemini after tool execution; falling back to tool results.")
+                return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+
+        # ループ上限到達: AIが function_call を返し続けた場合の安全弁
+        logger.warning(f"⚠️ Tool call rounds exceeded MAX_TOOL_ROUNDS={MAX_TOOL_ROUNDS}; falling back to tool results.")
+        return _tool_results_fallback(tool_results, "ツール呼び出し回数が上限に達したため、実行結果のみ表示します")
 
     except Exception as e:
         logger.error(f"AI Analysis Unexpected Error: {e}")
