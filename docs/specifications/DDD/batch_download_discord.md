@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `e6ed731` |
+| 解析基準コミット | `dd8233d` |
 
 ## 関連ドキュメント
 
@@ -420,6 +420,34 @@
 
 * **エラーハンドリング**: `PermissionError` を捕捉し「❌ 権限エラー」通知を送信して `False` を返す。**（Issue #236で修正）** 以前は`PermissionError`以外の`OSError`(読み取り専用マウントの`Errno 30`、NAS切断時の`Errno 5`、ディスクフル時の`Errno 28`等)を捕捉しておらず、専用通知を経由しないまま呼び出し元(最終的には`run_locked`の`except Exception`)へ伝播していた。`extract_youtube_urls.py`の`process_subscriptions`(#185)と同様に`except OSError`節を追加し、「❌ ディレクトリ作成エラー」通知を送信して`False`を返すようにした。
 * 根拠: [try-exceptブロック] (行番号: 421〜430 / 抜粋: "except PermissionError:", "except OSError as e:")
+
+
+### `FileSystemManager.sweep_stale_fragment_dirs`（Issue #398で追加）
+
+* **役割**: `CONFIG.LOCAL_TMP_DIR`配下に残留した`*.fragments.tmp`ディレクトリ（`ScrapingStrategy._download_with_ytdlp`がHLSセグメント取得・結合に使う一時ディレクトリ）を一掃する静的メソッド。通常は`_download_with_ytdlp`の`finally`節でリクエストごとに削除されるが、プロセスがクラッシュ・SIGKILL等で`finally`すら実行できずに終了した場合、数GB規模のフラグメント断片（SDカード等、Piのローカルディスク上）が残り続け、`LOCAL_TMP_MIN_FREE_SPACE_GB`チェックにより後続の全ダウンロードが失敗する形で顕在化していた（同一動画の再試行時のみ削除される`_cleanup_stale_ytdlp_artifacts`とは異なり、URLがパージ/リストから削除されると永久に残置される）。`BatchDownloader._run_locked`の冒頭（ロック取得後、他プロセスとの競合が無いことが保証された状態）から呼び出される。
+* 根拠: [メソッド定義とDocstring] (行番号: 471〜489 / 抜粋: "def sweep_stale_fragment_dirs() -> None:
+        """#398: クラッシュ・強制終了等で未クリーンアップのまま残った
+        CONFIG.LOCAL_TMP_DIR配下の "*.fragments.tmp" ディレクトリを一掃する。")
+
+
+* **引数/リクエスト**: なし
+* 根拠: [引数定義] (行番号: 472 / 抜粋: "def sweep_stale_fragment_dirs() -> None:")
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [戻り値ヒント] (行番号: 472 / 抜粋: "def sweep_stale_fragment_dirs() -> None:")
+
+
+* **副作用**: `CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp")`で列挙した各ディレクトリの`shutil.rmtree`による削除、削除成功時の情報ログ出力。
+* 根拠: [glob と rmtree] (行番号: 483〜488 / 抜粋: "for stale_dir in CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp"):
+            try:
+                shutil.rmtree(stale_dir)")
+
+
+* **エラーハンドリング**: `CONFIG.LOCAL_TMP_DIR`自体が存在しない場合は何もせず`return`する。個別ディレクトリの削除失敗(`OSError`)は警告ログを出力するのみで処理を継続する（例外は再送出しない）。
+* 根拠: [ガード節とexcept節] (行番号: 481〜482, 487〜488 / 抜粋: "if not CONFIG.LOCAL_TMP_DIR.exists():
+            return", "except OSError as e:
+                logger.warning(f"⚠️ 残留フラグメントディレクトリの削除に失敗しました ({stale_dir}): {e}")")
 
 
 ### `FileSystemManager.check_disk_space`
@@ -908,8 +936,8 @@
 
 ### `BatchDownloader._run_locked`
 
-* **役割**: ロック取得後のメイン処理本体。依存関係チェック、クールダウン確認、時間帯・NASマウント確認、タスク収集、YouTube機能無効時のフィルタリング＆パージ、1回あたりのタスク数上限適用、各タスクの逐次ダウンロード実行（ボット検知時は即座にクールダウンをトリガーして中断）を行う。
-* 根拠: [_run_locked] (行番号: 935〜1047 / 抜粋: "def _run_locked(self) -> None:")
+* **役割**: ロック取得後のメイン処理本体。**（Issue #398で変更）** 冒頭で`FileSystemManager.sweep_stale_fragment_dirs()`を呼び出し、前回実行のクラッシュ等でローカルディスク上に残留した`*.fragments.tmp`を一掃したうえで、依存関係チェック、クールダウン確認、時間帯・NASマウント確認、タスク収集、YouTube機能無効時のフィルタリング＆パージ、1回あたりのタスク数上限適用、各タスクの逐次ダウンロード実行（ボット検知時は即座にクールダウンをトリガーして中断）を行う。
+* 根拠: [_run_lockedと冒頭のsweep呼び出し] (行番号: 1251〜1276 / 抜粋: "def _run_locked(self) -> None:\n        # #398: 前回実行のクラッシュ等で残留した*.fragments.tmpを、他プロセスとの\n        # 競合が無いことが保証されたロック取得後の最初に一掃する" / "FileSystemManager.sweep_stale_fragment_dirs()")
 
 
 * **引数/リクエスト**: なし
@@ -917,7 +945,7 @@
 * 根拠: [戻り値ヒント] (行番号: 935 / 抜粋: "def _run_locked(self) -> None:")
 
 
-* **副作用**: 依存関係・クールダウン・時間帯・NASマウントの各チェック、`_collect_tasks`/`_purge_skipped_tasks`の呼び出し、`MAX_TASKS_PER_RUN`によるタスク数制限、各`DownloadStrategy.download`の実行によるファイル保存とDiscord通知、`HistoryManager.add_history`への追記、`CooldownManager.trigger_cooldown`の呼び出し、タスク間の`_sleep_between_tasks`。
+* **副作用**: **（Issue #398で追加）** `FileSystemManager.sweep_stale_fragment_dirs()`によるローカル一時ディレクトリの掃除。依存関係・クールダウン・時間帯・NASマウントの各チェック、`_collect_tasks`/`_purge_skipped_tasks`の呼び出し、`MAX_TASKS_PER_RUN`によるタスク数制限、各`DownloadStrategy.download`の実行によるファイル保存とDiscord通知、`HistoryManager.add_history`への追記、`CooldownManager.trigger_cooldown`の呼び出し、タスク間の`_sleep_between_tasks`。
 * 根拠: [メインループ] (行番号: 1000〜1046 / 抜粋: "for i, task in enumerate(tasks):")
 
 
@@ -931,7 +959,8 @@
 flowchart TD
     Start["開始: BatchDownloader.run"] --> Lock{"ロック取得成功?"}
     Lock -->|"No(他プロセス実行中)"| End["終了(exit 1)"]
-    Lock -->|"Yes"| DepCheck["依存関係チェック(ffmpeg + yt-dlp鮮度)"]
+    Lock -->|"Yes"| Sweep["外部：FileSystemManager.sweep_stale_fragment_dirs()<br>(#398: 前回クラッシュ等の残留*.fragments.tmpを一掃)"]
+    Sweep --> DepCheck["依存関係チェック(ffmpeg + yt-dlp鮮度)"]
     DepCheck --> CooldownCheck{"ボット検知クールダウン中か?"}
     CooldownCheck -->|"Yes"| Unlock0["ロック解放"] --> End0["終了(今回スキップ)"]
     CooldownCheck -->|"No"| TimeCheck{"時間帯制限内か?"}
@@ -1062,6 +1091,7 @@ flowchart TD
 
 * **副作用**: `_purge_skipped_tasks` 内で `list.txt` や `list/*.txt` を物理的に上書き・削除する処理が含まれており、バグが混入した場合、読み込み元のタスク一覧データを消失するリスクがある。ただし一時ファイル(`.tmp`)経由の`replace`によりアトミック性は確保されている。
 * **多重起動防止**: `fcntl.flock` によるロックファイル制御が導入されており、cron等での実行が重複した場合に `list.txt` / `list/*.txt` への同時読み書き競合を防いでいる（`run`メソッド）。
+* **（Issue #398で追加）残留フラグメントの掃除はロック取得後の`_run_locked`冒頭で行う**: `sweep_stale_fragment_dirs`は他プロセスとの競合が無いことが保証された状態でのみ安全にディレクトリ削除を行えるため、ロック取得前の`run`メソッドではなく`_run_locked`の最初に呼び出す設計になっている。以前は同一動画の再試行時のみ削除される`_cleanup_stale_ytdlp_artifacts`しか無かったため、URLがパージ/リストから削除されると数GB規模の残骸が`CONFIG.LOCAL_TMP_DIR`（Piのローカルディスク、多くはSDカード）に永久に残置され、`LOCAL_TMP_MIN_FREE_SPACE_GB`チェックで後続の全ダウンロードが失敗する形で顕在化していた。
 * **外部入力の実行制限**: `sys.argv` に `--force` が指定されている場合、`SystemHealthChecker.is_within_time_window` による時間制限の判定が無視される。
 * **通知モジュールの依存**: `services.notification_service` が見つからない場合はエラーとせず、`_standalone_send_discord_webhook`という本ファイル内実装済みの単独フォールバック関数で`_send_discord_webhook`が上書きされる。これは何もしないダミー(`pass`)ではなく、`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`(いずれも未設定時は`DISCORD_WEBHOOK_URL`)を`os.getenv`で直接参照し`requests.post`で実際にDiscordへ送信する、`MY_HOME_SYSTEM`側の依存(LINE Bot SDK・`config.py`・DB等)を必要としない単独環境向けの簡易実装である。ただしいずれの環境変数も未設定の場合は`_standalone_send_discord_webhook`自身が`False`を返し、通知は送信されない。
 * 根拠: [_standalone_send_discord_webhookとimport/except] (行番号: 84〜115 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "except ImportError:", "_send_discord_webhook = _standalone_send_discord_webhook")

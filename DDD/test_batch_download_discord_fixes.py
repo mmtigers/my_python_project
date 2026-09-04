@@ -530,6 +530,55 @@ class TestScrapingStrategyPreMergeDiskSpaceGuard:
         assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
 
 
+class TestSweepStaleFragmentDirs:
+    """#398: クラッシュ等でLOCAL_TMP_DIR配下に残留した*.fragments.tmpを
+    _run_locked冒頭で一掃すること。"""
+
+    def test_sweeps_stale_fragment_dirs_but_keeps_unrelated_files(self, tmp_path, monkeypatch):
+        local_tmp_dir = tmp_path / "tmp_fragments"
+        local_tmp_dir.mkdir()
+        stale_a = local_tmp_dir / "video1.mp4.fragments.tmp"
+        stale_a.mkdir()
+        (stale_a / "seg_000000.ts").write_bytes(b"stale")
+        stale_b = local_tmp_dir / "video2.mp4.fragments.tmp"
+        stale_b.mkdir()
+        unrelated_file = local_tmp_dir / "not_a_fragments_dir.txt"
+        unrelated_file.write_text("keep-me")
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        module.FileSystemManager.sweep_stale_fragment_dirs()
+
+        assert not stale_a.exists()
+        assert not stale_b.exists()
+        assert unrelated_file.exists()
+
+    def test_missing_local_tmp_dir_is_a_no_op(self, tmp_path, monkeypatch):
+        local_tmp_dir = tmp_path / "does_not_exist"
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        module.FileSystemManager.sweep_stale_fragment_dirs()  # 例外を送出しないこと
+
+    def test_run_locked_sweeps_before_other_checks(self, tmp_path, monkeypatch):
+        """_run_locked冒頭(依存関係チェックより前)で一掃されること。"""
+        local_tmp_dir = tmp_path / "tmp_fragments"
+        local_tmp_dir.mkdir()
+        stale = local_tmp_dir / "video1.mp4.fragments.tmp"
+        stale.mkdir()
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        def _stop_here():
+            raise RuntimeError("stop after dependency check")
+
+        monkeypatch.setattr(module.SystemHealthChecker, "check_dependencies", staticmethod(_stop_here))
+
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        with pytest.raises(RuntimeError, match="stop after dependency check"):
+            downloader._run_locked()
+
+        assert not stale.exists()
+
+
 class TestScrapingStrategyStaleArtifactCleanup:
     """以前の実装がNAS上に残した`.part`/`.part-FragN.part`/`.ytdl`/旧版の
     `.fragments.tmp`ディレクトリ等の残骸を、次回試行前に一掃することを

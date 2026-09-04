@@ -469,6 +469,27 @@ class FileSystemManager:
             return False
 
     @staticmethod
+    def sweep_stale_fragment_dirs() -> None:
+        """#398: クラッシュ・強制終了等で未クリーンアップのまま残った
+        CONFIG.LOCAL_TMP_DIR配下の "*.fragments.tmp" ディレクトリを一掃する。
+
+        通常は_download_with_ytdlpのfinally節でtmp_dirごとに削除されるが、
+        プロセスがSIGKILL等でfinallyすら実行できずに終了した場合、数GB規模の
+        フラグメント断片(SDカード等、Piのローカルディスク上)が残り続け、
+        LOCAL_TMP_MIN_FREE_SPACE_GBチェックにより後続の全ダウンロードが
+        失敗する形で顕在化する。ロック取得後(_run_locked冒頭)に呼び出す前提
+        (他プロセスとの競合が無いことが保証された状態でのみ安全に一掃できる)。
+        """
+        if not CONFIG.LOCAL_TMP_DIR.exists():
+            return
+        for stale_dir in CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp"):
+            try:
+                shutil.rmtree(stale_dir)
+                logger.info(f"🧹 残留フラグメントディレクトリを削除しました: {stale_dir}")
+            except OSError as e:
+                logger.warning(f"⚠️ 残留フラグメントディレクトリの削除に失敗しました ({stale_dir}): {e}")
+
+    @staticmethod
     def check_disk_space(path: Path, min_free_gb: Optional[int] = None) -> bool:
         threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb
         try:
@@ -1228,6 +1249,12 @@ class BatchDownloader:
                 os.close(lock_fd)
 
     def _run_locked(self) -> None:
+        # #398: 前回実行のクラッシュ等で残留した*.fragments.tmpを、他プロセスとの
+        # 競合が無いことが保証されたロック取得後の最初に一掃する(SDカード上の
+        # ローカルディスクを圧迫し続け、LOCAL_TMP_MIN_FREE_SPACE_GBチェックで
+        # 後続の全ダウンロードが失敗する事象への対策)。
+        FileSystemManager.sweep_stale_fragment_dirs()
+
         SystemHealthChecker.check_dependencies()
 
         cooldown_until = CooldownManager.is_in_cooldown()
