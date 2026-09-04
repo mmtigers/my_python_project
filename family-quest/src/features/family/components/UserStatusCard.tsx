@@ -25,7 +25,7 @@ const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) 
                     {isSameOriginAvatarPath(user.avatar) ? (
                         <img src={user.avatar} alt="avatar" className="w-full h-full object-cover" />
                     ) : (
-                        user.avatar || user.icon || '🙂'
+                        user.avatar || '🙂'
                     )}
                 </div>
 

@@ -19,7 +19,6 @@ const formatTime = (ts: string | number | undefined) => {
 // 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、
 // タブで選ばせるのではなく最初から全員分を並べて表示する。
 const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {
-    const hasAvatarImage = isSameOriginAvatarPath(user.avatar);
 
     // 日付ごとにログをグループ化
     const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {
@@ -33,10 +32,10 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
         <div className="bg-black/20 border border-gray-700 rounded-xl p-3 space-y-3 min-w-0">
             <div className="flex items-center gap-2 border-b border-gray-700 pb-2">
                 <span className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center bg-gray-800 text-sm flex-shrink-0">
-                    {hasAvatarImage ? (
+                    {isSameOriginAvatarPath(user.avatar) ? (
                         <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                     ) : (
-                        user.avatar || user.icon || '🙂'
+                        user.avatar || '🙂'
                     )}
                 </span>
                 <h3 className="font-bold text-white text-sm truncate">{user.name}</h3>

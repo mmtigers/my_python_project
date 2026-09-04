@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `c7af5f6` |
+| 解析基準コミット | `65fce15` |
 
 ## 関連ドキュメント
 
@@ -51,7 +51,7 @@
 | --- | --- | --- | --- |
 | `useState`, `useRef`, `useEffect`, `lazy`, `Suspense` | 関数/コンポーネント | ローカル状態管理、`pendingQuestsRef`（常に最新の`pendingQuests`を参照するためのref）の保持と`useEffect`によるその同期、コンポーネントの動的import、非同期読み込み中のフォールバック制御 | 1行目: `import { useState, useRef, useEffect, lazy, Suspense } from 'react';` |
 | `motion` | オブジェクト | ジェスチャー(`onPanEnd`)付きアニメーションdivの描画 | 2行目: `import { motion } from 'framer-motion';` |
-| `WifiOff` | コンポーネント | オフライン時のバナーアイコン表示 | 3行目: `import { WifiOff } from 'lucide-react';` |
+| `WifiOff`, `AlertTriangle` | コンポーネント | オフライン時のバナーアイコン表示、およびデータ取得失敗バナーのアイコン（Issue #390） | 3行目: `import { WifiOff, AlertTriangle } from 'lucide-react';` |
 | `INITIAL_USERS` | 定数 | ユーザーデータが未取得または存在しない場合のフォールバック | 4行目: `import { INITIAL_USERS } from './lib/masterData';` |
 | `useGameData`, `LevelUpInfo` | カスタムフック / 型定義 | ゲーム全体のデータ・状態更新関数の取得、レベルアップ情報の型 | 5行目: `import { useGameData, LevelUpInfo } from './hooks/useGameData';` |
 | `useSound` | カスタムフック | 効果音再生関数の取得 | 6行目: `import { useSound } from './hooks/useSound';` |
@@ -313,8 +313,9 @@
 
 ### `App` のレンダリング分岐（JSX本体）
 
-* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、`Header`（`hideUserSwitcher={layoutMode === 'landscape'}`, `hideLogSwitcher={layoutMode === 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた`QuestList`/`RewardShop`/`InventoryList`、`viewMode === 'familyLog'`なら`FamilyLog`を描画する。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`（画面幅の92%、上限1800px。横画面での左右余白を画面幅に対する一定割合に抑えプレイヤーパネルの表示幅を広げるための修正）、それ以外は`max-w-md md:max-w-5xl`に切り替わる。Issue #102で追加された`completedSignal`（state）は、`FamilyDashboard`（横画面）と`QuestList`（縦画面）の両方のJSX使用箇所に共通のpropとしてそのまま渡される。
+* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、**（Issue #390）** `/api/quest/data`の取得失敗バナー（`useGameData`が返す`gameDataError`が非`null`のとき、`role="alert"`の琥珀色バーに「データの取得に失敗しました: {gameDataError}」と`refetchGameData`を呼ぶ「再試行」ボタンを表示。オフラインバナーと同時表示の場合はその下に積む）、`Header`（`hideUserSwitcher={layoutMode === 'landscape'}`, `hideLogSwitcher={layoutMode === 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた`QuestList`/`RewardShop`/`InventoryList`、`viewMode === 'familyLog'`なら`FamilyLog`を描画する。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`（画面幅の92%、上限1800px。横画面での左右余白を画面幅に対する一定割合に抑えプレイヤーパネルの表示幅を広げるための修正）、それ以外は`max-w-md md:max-w-5xl`に切り替わる。Issue #102で追加された`completedSignal`（state）は、`FamilyDashboard`（横画面）と`QuestList`（縦画面）の両方のJSX使用箇所に共通のpropとしてそのまま渡される。
 * 根拠: (525, 527〜528, 588行目 / 抜粋: "${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}", "{viewMode === 'main' && layoutMode === 'landscape' && (\n          <FamilyDashboard", "completedSignal={completedSignal}")
+* 根拠: データ取得失敗バナー (208, 517〜535行目 / 抜粋: "gameDataError, refetchGameData,", "{/* #390: /api/quest/data の取得失敗(ネットワーク・Zod検証失敗)を画面に出す。", "{gameDataError && (\n        <div\n          role=\"alert\"", "<span className=\"truncate\">データの取得に失敗しました: {gameDataError}</span>", "onClick={() => { refetchGameData(); play('tap'); }}")
 * 根拠: スワイプ操作 (571〜575行目 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
 
 * **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。**（Issue #362）** この`Suspense`は`ChunkErrorBoundary`で包まれており、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。

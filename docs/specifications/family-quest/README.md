@@ -123,6 +123,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [apiClient.md](./src/lib/apiClient.md) | バックエンドAPIへ通信するHTTPクライアント（`ApiClient`クラス）を提供。ベースURL解決・共通ヘッダ設定・JSON送受信・エラーハンドリングをカプセル化する。 |
+| [errorDetail.md](./src/lib/errorDetail.md) | `apiClient`がスローした例外から表示用文字列を取り出す`extractErrorDetail`と、`/api/quest/data`取得失敗（Zod検証失敗を含む）をバナー向けに要約する`describeGameDataError`を提供する。 |
 | [masterData.md](./src/lib/masterData.md) | サーバー接続エラー発生時のみ使用されるフォールバック用のダミーデータを定義・エクスポートする。 |
 | [queryClient.md](./src/lib/queryClient.md) | `@tanstack/react-query`の`QueryClient`を初期化し、システム全体のデータフェッチングのデフォルト動作（再試行回数・キャッシュ期限等）を定義したインスタンスをエクスポートする。 |
 | [utils.md](./src/lib/utils.md) | Tailwind CSSのクラス名をマージ（結合・競合解決）するユーティリティ関数`cn`を提供する。 |

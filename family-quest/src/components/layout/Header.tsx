@@ -112,7 +112,7 @@ const Header: React.FC<HeaderProps> = ({
                                     <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="w-full h-full flex items-center justify-center text-3xl">
-                                        {user.avatar || user.icon || '🙂'}
+                                        {user.avatar || '🙂'}
                                     </div>
                                 )}
                             </div>

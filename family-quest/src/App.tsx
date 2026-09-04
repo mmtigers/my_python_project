@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, AlertTriangle } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
@@ -205,6 +205,7 @@ function App() {
     users, quests, rewards, completedQuests, pendingQuests,
     chronicle,
     isLoading,
+    gameDataError, refetchGameData,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
     refreshData,
   } = useGameData(currentUserIdx, handleLevelUp);
@@ -510,6 +511,27 @@ function App() {
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
           <WifiOff size={14} /> オフラインです。最新の情報ではない可能性があります
+        </div>
+      )}
+
+      {/* #390: /api/quest/data の取得失敗(ネットワーク・Zod検証失敗)を画面に出す。
+          以前はブラウザの console でしか分からず、全端末が「サーバーに繋がりません」の
+          フォールバック表示または最後に成功した古いデータのまま無言になっていた。
+          オフラインバナーとは別物(オンラインでもサーバー側の応答不整合で起きる)。 */}
+      {gameDataError && (
+        <div
+          role="alert"
+          className={`fixed inset-x-0 z-40 bg-amber-700 text-white text-xs font-bold px-3 py-1.5 flex items-center justify-center gap-2 ${isOnline ? 'top-0' : 'top-7'}`}
+        >
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="truncate">データの取得に失敗しました: {gameDataError}</span>
+          <button
+            type="button"
+            onClick={() => { refetchGameData(); play('tap'); }}
+            className="shrink-0 rounded bg-amber-900 px-2 py-0.5 border border-amber-400 hover:bg-amber-800 transition-colors"
+          >
+            再試行
+          </button>
         </div>
       )}
 

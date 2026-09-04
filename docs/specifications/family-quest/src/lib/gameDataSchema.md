@@ -6,6 +6,7 @@
 | 言語 | TypeScript |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `65fce15` |
 
 ## 関連ドキュメント
 
@@ -38,8 +39,8 @@
 
 ### `userSchema` (モジュールレベル定数、非export)
 
-* **役割**: `gameData.users`配列の1要素（`quest_users`テーブルの行 + `get_all_view_data`が付与する`nextLevelExp`/`maxHp`/`hp`）を検証するZodスキーマ。`user_id`/`name`/`level`/`exp`/`gold`は必須、`avatar`/`medal_count`/`job_class`/`role`/`hp`/`maxHp`は任意。
-* 根拠: [定数定義] (行番号: 17〜29 / 抜粋: "const userSchema = z.object({\n    user_id: z.string(),\n    name: z.string(),\n    level: z.number(),\n    exp: z.number(),\n    avatar: z.string().optional(),\n    medal_count: z.number().optional(),\n    job_class: z.string().optional(),\n    gold: z.number(),\n    role: z.string().optional(),\n    hp: z.number().optional(),\n    maxHp: z.number().optional(),\n});")
+* **役割**: `gameData.users`配列の1要素（`quest_users`テーブルの行 + `get_all_view_data`が付与する`nextLevelExp`/`maxHp`/`hp`）を検証するZodスキーマ。`user_id`/`name`/`level`/`exp`/`gold`は必須、`hp`/`maxHp`は任意。**（Issue #390で修正）** `avatar`/`medal_count`/`job_class`/`role`は`quest_users`のNULL可カラム（`migrations/0000_baseline_schema.sql`、`0001_add_quest_users_role.sql`）であるため`.nullable().optional()`とし、`null`を受理する。以前は`.optional()`のみで`null`を拒否していたため、`quest_data.py`に`role`無しでメンバーを追加すると`"role": null`で届いてZod検証が失敗し、全端末が「サーバーに繋がりません」のフォールバック表示になっていた。
+* 根拠: [定数定義] (行番号: 17〜33 / 抜粋: "// #390: quest_users の avatar / job_class / role は NULL 可のカラム\n// (migrations/0000_baseline_schema.sql, 0001_add_quest_users_role.sql)。", "const userSchema = z.object({\n    user_id: z.string(),\n    name: z.string(),\n    level: z.number(),\n    exp: z.number(),\n    avatar: z.string().nullable().optional(),\n    medal_count: z.number().nullable().optional(),\n    job_class: z.string().nullable().optional(),\n    gold: z.number(),\n    role: z.string().nullable().optional(),\n    hp: z.number().optional(),\n    maxHp: z.number().optional(),\n});")
 
 * **引数/リクエスト**: 該当なし（スキーマ定義であり関数ではない）
 * **戻り値/レスポンス**: 該当なし
@@ -69,8 +70,8 @@
 
 ### `questHistorySchema` (モジュールレベル定数、非export)
 
-* **役割**: `gameData.completedQuests`/`gameData.pendingQuests`配列の1要素（`quest_history`テーブルの行）を検証するZodスキーマ。`user_id`/`quest_id`/`status`は必須（`quest_id`は`number | string`の`union`）。`status`は`'pending' | 'approved' | 'rejected' | 'completed'`の4値に限定した`z.enum`。`id`/`quest_title`/`gold_earned`/`exp_earned`/`linked_history_id`は任意。
-* 根拠: [定数定義] (行番号: 62〜71 / 抜粋: "const questHistorySchema = z.object({\n    id: z.number().optional(),\n    user_id: z.string(),\n    quest_id: z.union([z.number(), z.string()]),\n    quest_title: z.string().nullable().optional(),\n    status: z.enum(['pending', 'approved', 'rejected', 'completed']),\n    gold_earned: z.number().optional(),\n    exp_earned: z.number().optional(),\n    linked_history_id: z.union([z.number(), z.string()]).nullable().optional(),\n});")
+* **役割**: `gameData.completedQuests`/`gameData.pendingQuests`配列の1要素（`quest_history`テーブルの行）を検証するZodスキーマ。`user_id`/`quest_id`/`status`は必須（`quest_id`は`number | string`の`union`）。**（Issue #390で修正）** `status`はサーバーが実際に生成する`'pending' | 'approved' | 'rejected'`の3値に限定した`z.enum`（以前含まれていた`'completed'`はどこにも生成されない値だったため削除）。`id`/`quest_title`/`linked_history_id`は任意、`gold_earned`/`exp_earned`はNULL可カラムのため`.nullable().optional()`。
+* 根拠: [定数定義] (行番号: 66〜78 / 抜粋: "// #390: quest_history.gold_earned / exp_earned は NULL 可のカラム。\n// status はサーバーが生成する 'pending' | 'approved' | 'rejected' のみ", "const questHistorySchema = z.object({\n    id: z.number().optional(),\n    user_id: z.string(),\n    quest_id: z.union([z.number(), z.string()]),\n    quest_title: z.string().nullable().optional(),\n    status: z.enum(['pending', 'approved', 'rejected']),\n    gold_earned: z.number().nullable().optional(),\n    exp_earned: z.number().nullable().optional(),\n    linked_history_id: z.union([z.number(), z.string()]).nullable().optional(),\n});")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -172,6 +173,11 @@ graph TD
 | 低 | `zod`パッケージのドキュメント | `.optional()`/`.nullable()`/`.union()`/`.enum()`等の挙動、および`.parse()`失敗時の`ZodError`の構造を確認するため。 | `import { z } from 'zod';` |
 
 ## 8. 保守上の注意点
+
+* **バックエンド実レスポンスとの契約テスト（Issue #390）**: `gameDataSchema.test.ts`に、`GameSystem.get_all_view_data`の実レスポンス形状（`SELECT *`による全カラム、`null`の`role`/`avatar`/`job_class`、`use_item`が記録する`quest_id=0`の履歴行、兄妹連携の`linked_history_id`、`_fetch_recent_logs`の`logs`）を模したfixtureを`gameDataResponseSchema.safeParse`に通す契約テストがある。バックエンドのレスポンス形状（`quest_service.py`の`get_all_view_data`/`filter_active_quests`/`_fetch_recent_logs`、`migrations/`のカラム定義）を変更した際は、このfixtureと本スキーマの両方を更新すること。
+* 根拠: `family-quest/src/lib/gameDataSchema.test.ts`（テストファイルのため仕様書は持たない）
+* **NULL可カラムは`.nullable().optional()`にする**: SQLiteの`quest_users`/`quest_history`はほとんどのカラムがNULL可であり、`SELECT *`の結果がそのまま届く。`.optional()`だけでは「キーが無い」ことしか許容せず`null`は拒否されるため、新しいカラムをスキーマに追加する際はDBのNULL制約を`migrations/`で確認し、NULL可なら`.nullable().optional()`にすること。
+* 根拠: (行番号: 17〜20, 66〜68)
 
 * **`.strict()`を意図的に使わない設計**: `gameDataResponseSchema`および各サブスキーマは`.strict()`を付与しておらず、バックエンドがスキーマに定義されていない新しいフィールドを追加しても`.parse()`は失敗しない（未知フィールドは黙って無視される）。これは将来のバックエンド変更でこのフロントエンドのビルドが壊れないようにするための意図的なトレードオフだが、裏を返すと「バックエンドが新フィールドを追加したのにこのスキーマ側の更新を忘れた」場合も検知されない（＝この検証層はバックエンドの追加変更を検知する目的では機能しない）。
 * 根拠: (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
