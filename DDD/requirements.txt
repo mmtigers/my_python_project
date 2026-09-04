@@ -4,4 +4,4 @@ yt-dlp>=2024.1.0
 # missav等、CloudflareのボットチャレンジがかかったCDN(surrit.com等)からm3u8を
 # 取得する際、yt-dlpのgenericエクストラクタでブラウザ偽装(impersonate)を行うために
 # 必要(未インストールだと"Impersonate target ... is not available"で明示的に失敗する)
-curl_cffi>=0.13.0
+curl_cffi>=0.16.2
