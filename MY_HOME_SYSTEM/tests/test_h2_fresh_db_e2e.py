@@ -46,7 +46,16 @@ class TestFreshDbApprovalFlowE2E:
 
     def test_child_complete_then_adult_approve_succeeds_on_fresh_db(self, isolated_db):
         """空DB→migrations→sync_master→子供complete→親approveが
-        承認スキップにも403にもならず、正しく完結すること。"""
+        承認スキップにも403にもならず、正しく完結すること。
+
+        #414 C-L5: 以前は tests/test_empty_db_e2e.py::TestEmptyDbEndToEnd に
+        ほぼ同一のフロー(空DB→sync_master→子の完了→親の承認)をHTTP層
+        (TestClient経由)で検証する重複テストが存在したが、HTTP層の
+        complete/approve自体は test_quest_router_api.py 側で(役割は事前投入の
+        seeded_clientを使って)別途カバーされており、ルーターはロジックを
+        持たない薄い委譲層(CLAUDE.md参照)のため「空DB+HTTP経由」の組み合わせは
+        新たな分岐を検証していなかった。実quest_data(SON_QUEST_ID)を使う本テスト
+        に一本化した。"""
         game_system = GameSystem()
         game_system.sync_master_data()
 
