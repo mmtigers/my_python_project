@@ -114,6 +114,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
+        # Issue #367: .coveragerc の omit を「本当に実行不能なもの」だけに絞った
+        # 真のビュー(2026-09-04時点の実測 67%: 6,575 stmts / miss 2,151)を基準に、
+        # 約3pt下の 64 を閾値とする(旧 45 は omit で水増しされた公式ビュー 87% に
+        # 対する値で、退行検知として機能していなかった)。段階的に引き上げること。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -125,7 +129,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=45
+            --cov-fail-under=64
 
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
