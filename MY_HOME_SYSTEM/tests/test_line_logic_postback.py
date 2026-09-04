@@ -292,3 +292,43 @@ class TestHandlePostbackCrashIsolation:
         event = fake_postback_event("action=all_genki")
 
         line_logic.handle_postback(event, mock_line_api)  # 例外が外に漏れないこと
+
+
+class TestCheckStatusUsesJstDisplayDate:
+    def test_uses_get_display_date_not_naive_now(self, isolated_db, mock_line_api, monkeypatch):
+        """L-L2 (#410) の回帰テスト: 記録確認画面の日付表示にnaive
+        datetime.datetime.now()(サーバーのローカルタイムゾーン依存)ではなく、
+        JST基準のcore.utils.get_display_date()を使うこと。"""
+        spy = MagicMock(return_value="09/04")
+        monkeypatch.setattr(line_logic, "get_display_date", spy)
+        event = fake_postback_event("action=check_status")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        spy.assert_called_once()
+        mock_line_api.reply_message.assert_called_once()
+
+
+class TestPydanticFallbackRemovalDoesNotCrash:
+    """保守性(#410)の回帰テスト: LinePostbackData構築の到達不能フォールバックを
+    削除した後も、actionキーを欠いた不正な postback.data で例外が外へ漏れず、
+    handle_postback全体のtry/exceptで安全に握り潰されること
+    (LinePostbackDataはaction必須なのでValidationErrorになる想定)。"""
+
+    def test_postback_data_without_action_key_does_not_raise(self, isolated_db, mock_line_api):
+        event = fake_postback_event("child=智矢&status=genki")  # actionキーが無い
+
+        line_logic.handle_postback(event, mock_line_api)  # 例外が外に漏れないこと
+
+        mock_line_api.reply_message.assert_not_called()
+
+    def test_postback_data_with_action_and_extra_unknown_fields_is_accepted(
+        self, isolated_db, mock_line_api
+    ):
+        """モデルに定義の無い余分なフィールドがあっても(pydanticの既定挙動で無視され)
+        正常に処理されること。"""
+        event = fake_postback_event("action=all_genki&unexpected_field=xyz")
+
+        line_logic.handle_postback(event, mock_line_api)
+
+        mock_line_api.reply_message.assert_called_once()

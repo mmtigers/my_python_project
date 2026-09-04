@@ -137,7 +137,7 @@ async def test_tool_search_db_blocks_disallowed_table_hidden_behind_block_commen
 async def test_tool_search_db_allows_documented_table_with_harmless_comment(monkeypatch):
     """コメント除去は誤検知(許可テーブルのみの正常クエリの拒否)を起こさないこと"""
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table} /* comment */ WHERE 1=1"})
     assert result == "OK"
 
@@ -205,7 +205,7 @@ async def test_tool_search_db_blocks_subquery_disallowed_table():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_allows_documented_table(monkeypatch):
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert result == "OK"
@@ -225,11 +225,11 @@ async def test_tool_search_db_without_from_or_join_returns_error():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_no_matching_rows_returns_not_found_message(monkeypatch):
-    """common.execute_read_query は0件時、実際には(空リストではなく)
+    """_execute_restricted_read_query(旧common.execute_read_query)は0件時、実際には(空リストではなく)
     "該当するデータはありませんでした。"という非空文字列を返す(core/database.py参照)。
     その文字列がそのまま呼び出し元へ返ることを確認する。"""
     monkeypatch.setattr(
-        ai_service.common, "execute_read_query",
+        ai_service, "_execute_restricted_read_query",
         lambda sql, params=(): "該当するデータはありませんでした。",
     )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
@@ -242,7 +242,7 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
     def _raise(sql, params=()):
         raise Exception("malformed SQL")
 
-    monkeypatch.setattr(ai_service.common, "execute_read_query", _raise)
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", _raise)
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert "DB検索エラー" in result
@@ -250,13 +250,13 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
 
 @pytest.mark.asyncio
 async def test_tool_search_db_internal_error_string_is_not_passed_through_as_data(monkeypatch):
-    """Issue #180の回帰テスト: common.execute_read_query は不正なSQL等の実行時例外を
+    """Issue #180の回帰テスト: _execute_restricted_read_query(旧common.execute_read_query)は不正なSQL等の実行時例外を
     自身の内部でキャッチし、送出せず"検索エラー: ..."という非空文字列として返す設計
     (core/database.py参照)。以前はこれが正常な検索結果と区別されずAIへそのまま
     渡っていた(かつ`if not rows:`は非空文字列に対して常に偽となるデッドコードだった)。
     このエラー文字列が検出され、DB検索エラーとして扱われることを確認する。"""
     monkeypatch.setattr(
-        ai_service.common, "execute_read_query",
+        ai_service, "_execute_restricted_read_query",
         lambda sql, params=(): "検索エラー: no such table: xyz",
     )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
@@ -722,3 +722,421 @@ class TestRateLimiterLockIsThreadSafeAcrossEventLoops:
         kind, value = outcome
         assert kind == "ok", f"allow_request() raised: {value!r}"
         assert value is True
+
+
+# ==========================================
+# Issue #357: 引用符付き識別子による許可テーブル判定バイパスの回帰テスト
+# ==========================================
+
+def _seed_search_db_tables():
+    """許可テーブル(food_records)と許可外テーブル(quest_users)に1行ずつ投入する"""
+    import common
+
+    with common.get_db_cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO {config.SQLITE_TABLE_FOOD} (user_id, user_name, meal_date, meal_time_category, menu_category, timestamp) "
+            "VALUES ('U1', '太郎', '2026-09-04', 'Dinner', '夕食: カレー', '2026-09-04T19:00:00+09:00')"
+        )
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) "
+            "VALUES ('secret-line-id', 'SECRET_NAME', 'Warrior', 1, 0, 0)"
+        )
+
+
+# Issue #357 で実証された5つのバイパス形式 + スカラーサブクエリ形式。
+# いずれも許可テーブル(food_records)を1つ含めることで旧実装の正規表現判定を素通りしていた。
+_BYPASS_SQLS = {
+    "double_quote": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM "quest_users"',
+    "brackets": "SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM [quest_users]",
+    "backticks": "SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM `quest_users`",
+    "schema_qualified": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM "main".quest_users',
+    "no_space_after_from": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM"quest_users"',
+    "scalar_subquery": 'SELECT (SELECT name FROM "quest_users" LIMIT 1) AS leaked FROM food_records',
+}
+
+
+class TestSearchDbQuotedIdentifierBypass:
+    """Issue #357: 正規表現層(tool_search_db)の暫定対策。引用符・角括弧・バッククォートを
+    含むSQLは、DBへ到達する前に拒否されること。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    async def test_tool_search_db_rejects_each_bypass_form_before_db_access(self, form, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            ai_service, "_execute_restricted_read_query", lambda sql, params=(): called.append(sql) or "OK"
+        )
+
+        result = await ai_service.tool_search_db({"sql_query": _BYPASS_SQLS[form]})
+
+        assert result.startswith("エラー:")
+        assert "引用符" in result
+        assert called == [], "引用符付き識別子を含むSQLはDBへ到達してはならない"
+
+    @pytest.mark.asyncio
+    async def test_tool_search_db_rejects_unquoted_scalar_subquery_on_disallowed_table(self, monkeypatch):
+        """引用符無しのスカラーサブクエリは従来通り正規表現層で許可外テーブルとして拒否されること"""
+        monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
+        sql = "SELECT (SELECT name FROM quest_users LIMIT 1) AS leaked FROM food_records"
+        result = await ai_service.tool_search_db({"sql_query": sql})
+        assert "許可されていない" in result
+
+
+class TestSearchDbAuthorizer:
+    """Issue #357: 構造的対策。`_execute_restricted_read_query` は SQLite の
+    set_authorizer により、正規表現層を経由せず直接呼んでも許可外テーブルを読めないこと。"""
+
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    def test_authorizer_denies_each_bypass_form_even_without_regex_layer(self, isolated_db, form):
+        _seed_search_db_tables()
+
+        result = ai_service._execute_restricted_read_query(_BYPASS_SQLS[form])
+
+        assert result.startswith("検索エラー:"), result
+        assert "SECRET_NAME" not in result
+        assert "secret-line-id" not in result
+
+    def test_authorizer_denies_plain_disallowed_table(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query("SELECT * FROM quest_users")
+        assert result.startswith("検索エラー:")
+        assert "SECRET_NAME" not in result
+
+    def test_authorizer_denies_sqlite_master(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT name FROM sqlite_master")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_pragma_table_valued_function(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT * FROM pragma_table_info('quest_users')")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_load_extension_function(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT load_extension('evil')")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_attach(self, isolated_db, tmp_path):
+        result = ai_service._execute_restricted_read_query(f"ATTACH '{tmp_path / 'x.db'}' AS x")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_write_and_leaves_table_untouched(self, isolated_db):
+        import common
+
+        result = ai_service._execute_restricted_read_query(
+            f"INSERT INTO {config.SQLITE_TABLE_FOOD} (menu_category, timestamp) VALUES ('x', 'y')"
+        )
+        assert result.startswith("検索エラー:")
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) FROM {config.SQLITE_TABLE_FOOD}").fetchone()[0]
+        assert count == 0
+
+    def test_allowed_table_query_returns_json_rows(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT menu_category FROM {config.SQLITE_TABLE_FOOD} ORDER BY id DESC LIMIT 5"
+        )
+        assert result.startswith("[")
+        assert "カレー" in result
+
+    def test_allowed_table_query_with_functions_and_alias_still_works(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT COUNT(*) AS n, upper(f.menu_category) AS m, date('now') AS d FROM {config.SQLITE_TABLE_FOOD} f"
+        )
+        assert '"n": 1' in result
+
+    def test_allowed_table_with_no_rows_returns_not_found_message(self, isolated_db):
+        result = ai_service._execute_restricted_read_query(f"SELECT * FROM {config.SQLITE_TABLE_CHILD}")
+        assert result == "該当するデータはありませんでした。"
+
+
+class TestSearchDbEndToEndWithRealDb:
+    """tool_search_db を実DB(isolated_db)に対して通し、許可クエリが依然として機能し、
+    バイパス形式が正規表現層・認可層のどちらでも漏洩しないことを確認する。"""
+
+    @pytest.mark.asyncio
+    async def test_allowed_query_end_to_end_returns_data(self, isolated_db):
+        _seed_search_db_tables()
+        result = await ai_service.tool_search_db(
+            {"sql_query": f"SELECT menu_category, timestamp FROM {config.SQLITE_TABLE_FOOD} WHERE user_name = '太郎'"}
+        )
+        assert "カレー" in result
+        assert not result.startswith("DB検索エラー")
+
+    @pytest.mark.asyncio
+    async def test_allowed_join_of_two_allowed_tables_end_to_end(self, isolated_db):
+        _seed_search_db_tables()
+        sql = (
+            f"SELECT f.menu_category FROM {config.SQLITE_TABLE_FOOD} f "
+            f"JOIN {config.SQLITE_TABLE_CHILD} c ON c.user_id = f.user_id"
+        )
+        result = await ai_service.tool_search_db({"sql_query": sql})
+        assert result == "該当するデータはありませんでした。"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    async def test_bypass_forms_never_leak_end_to_end(self, isolated_db, form):
+        _seed_search_db_tables()
+        result = await ai_service.tool_search_db({"sql_query": _BYPASS_SQLS[form]})
+        assert result.startswith("エラー:")
+        assert "SECRET_NAME" not in result
+
+
+class TestToolRecordFunctionsReportSaveFailure:
+    """Issue #373: line_service 側が保存失敗メッセージ(SAVE_FAILED_PREFIX)を返した場合、
+    ツール結果は「記録完了:」ではなく「記録失敗:」で始まり、AIが成功と誤認しないこと。
+    また必須引数の欠落はDBへ渡さずツール結果で返すこと。"""
+
+    @pytest.mark.asyncio
+    async def test_tool_record_child_health_reports_failure_prefix(self, monkeypatch):
+        failed_text = f"{ai_service.line_service.SAVE_FAILED_PREFIX}。【智矢】元気 は保存されていません。"
+        monkeypatch.setattr(
+            ai_service.line_service, "log_child_health", AsyncMock(return_value=MagicMock(text=failed_text))
+        )
+
+        result = await ai_service.tool_record_child_health(
+            "U1", "太郎", {"child_name": "智矢", "condition": "元気"}
+        )
+
+        assert result.startswith("記録失敗:")
+        assert "記録完了" not in result
+
+    @pytest.mark.asyncio
+    async def test_tool_record_food_reports_failure_prefix(self, monkeypatch):
+        failed_text = f"{ai_service.line_service.SAVE_FAILED_PREFIX}。夕食「カレー」は保存されていません。"
+        monkeypatch.setattr(
+            ai_service.line_service, "log_food_record", AsyncMock(return_value=MagicMock(text=failed_text))
+        )
+
+        result = await ai_service.tool_record_food("U1", "太郎", {"item": "カレー", "category": "夕食"})
+
+        assert result.startswith("記録失敗:")
+        assert "記録完了" not in result
+
+    @pytest.mark.asyncio
+    async def test_tool_record_child_health_missing_condition_is_not_saved(self, monkeypatch):
+        mock_log = AsyncMock()
+        monkeypatch.setattr(ai_service.line_service, "log_child_health", mock_log)
+
+        result = await ai_service.tool_record_child_health("U1", "太郎", {"child_name": "智矢"})
+
+        assert result.startswith("記録失敗:")
+        mock_log.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_record_food_missing_item_is_not_saved(self, monkeypatch):
+        mock_log = AsyncMock()
+        monkeypatch.setattr(ai_service.line_service, "log_food_record", mock_log)
+
+        result = await ai_service.tool_record_food("U1", "太郎", {"category": "夕食"})
+
+        assert result.startswith("記録失敗:")
+        mock_log.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_save_failure_reaches_ai_as_tool_result(self, isolated_db, ai_configured, monkeypatch):
+        """analyze_text_and_execute 経由でも失敗が tool_result(function_response)に反映されること"""
+        import common
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_child_health", {"child_name": "智矢", "condition": "元気"})
+        mock_retry = AsyncMock(side_effect=[make_response(function_call=fc), ResourceExhausted("quota")])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢は元気")
+
+        # 2回目呼び出しが失敗した場合は tool_result がそのままユーザーへ返るため、失敗文言が見える
+        assert "記録失敗:" in result
+
+
+# ==========================================
+# Issue #374 / L-L4: 連鎖 function_call・複数パート応答・response.text の ValueError
+# ==========================================
+
+class _FunctionCallOnlyResponse:
+    """google-generativeai の GenerateContentResponse を模す。function_call パートしか
+    無い(またはテキストが無い)応答では `.text` が ValueError を送出する実挙動を再現する。"""
+
+    def __init__(self, parts):
+        self.parts = parts
+
+    @property
+    def text(self):
+        raise ValueError("Invalid operation: The `response.text` quick accessor requires the response to contain a valid `Part`")
+
+
+def make_text_part(text):
+    part = MagicMock()
+    part.function_call = None
+    part.text = text
+    return part
+
+
+def make_fc_part(fc):
+    part = MagicMock()
+    part.function_call = fc
+    return part
+
+
+class TestChainedFunctionCalls:
+    @pytest.mark.asyncio
+    async def test_second_function_call_after_tool_result_is_executed_not_error(self, ai_configured, monkeypatch):
+        """Issue #374 の再現条件: 1件目のツール実行後、2件目の function_call が返る。
+        以前は final_res.text が ValueError → 汎用 except → 「処理中にエラー」だった。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_child_health", {"child_name": "涼花", "condition": "熱"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1)]),
+            _FunctionCallOnlyResponse([make_fc_part(fc2)]),
+            make_response(function_call=None, text="2人とも記録しました"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_tool = AsyncMock(side_effect=["記録完了: 智矢", "記録完了: 涼花"])
+        monkeypatch.setattr(ai_service, "tool_record_child_health", mock_tool)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱、涼花も熱")
+
+        assert result == "2人とも記録しました"
+        assert mock_tool.call_count == 2
+        assert mock_tool.call_args_list[1].args[2] == {"child_name": "涼花", "condition": "熱"}
+        assert mock_retry.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_multiple_function_calls_in_one_response_are_all_executed_and_returned_together(
+        self, ai_configured, monkeypatch
+    ):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_food", {"item": "おかゆ"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1), make_fc_part(fc2)]),
+            make_response(function_call=None, text="両方記録しました"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_health = AsyncMock(return_value="記録完了: 智矢")
+        mock_food = AsyncMock(return_value="記録完了: おかゆ")
+        monkeypatch.setattr(ai_service, "tool_record_child_health", mock_health)
+        monkeypatch.setattr(ai_service, "tool_record_food", mock_food)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱でおかゆ食べた")
+
+        assert result == "両方記録しました"
+        mock_health.assert_called_once()
+        mock_food.assert_called_once()
+        # 2回目の呼び出しには2件分の function_response がまとめて渡る
+        sent_parts = mock_retry.call_args_list[1].args[1]
+        assert len(sent_parts) == 2
+
+    @pytest.mark.asyncio
+    async def test_text_plus_function_call_multipart_response_triggers_tool(self, ai_configured, monkeypatch):
+        """L-L4: parts[0] がテキストで parts[1] が function_call の応答でもツールが実行されること
+        (以前は parts[0] のみ検査し雑談扱いになっていた)。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        first = MagicMock()
+        first.parts = [make_text_part("記録しますね"), make_fc_part(fc)]
+        first.text = "記録しますね"
+        mock_retry = AsyncMock(side_effect=[first, make_response(function_call=None, text="記録しました")])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_food = AsyncMock(return_value="記録完了: カレー")
+        monkeypatch.setattr(ai_service, "tool_record_food", mock_food)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        mock_food.assert_called_once_with("U1", "太郎", {"item": "カレー"})
+        assert result == "記録しました"
+
+    @pytest.mark.asyncio
+    async def test_final_response_without_text_falls_back_to_tool_results(self, ai_configured, monkeypatch):
+        """ツール実行後の応答に function_call もテキストも無く `.text` が ValueError を
+        送出する場合、汎用エラーではなく tool_result をユーザーへ返すこと。"""
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        no_text_part = MagicMock()
+        no_text_part.function_call = None
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc)]),
+            _FunctionCallOnlyResponse([no_text_part]),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー"))
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+        assert "処理中にエラーが発生しました" not in result
+
+    @pytest.mark.asyncio
+    async def test_empty_parts_after_tool_execution_falls_back_to_tool_results(self, ai_configured, monkeypatch):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_food", {"item": "カレー"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc)]),
+            make_response(parts_present=False),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(ai_service, "tool_record_food", AsyncMock(return_value="記録完了: カレー"))
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "カレー食べた")
+
+        assert "記録完了: カレー" in result
+
+    @pytest.mark.asyncio
+    async def test_endless_function_calls_stop_at_max_rounds_and_return_tool_results(
+        self, ai_configured, monkeypatch
+    ):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("search_db", {"sql_query": "SELECT 1 FROM food_records"})
+        mock_retry = AsyncMock(return_value=_FunctionCallOnlyResponse([make_fc_part(fc)]))
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        mock_search = AsyncMock(return_value="検索結果")
+        monkeypatch.setattr(ai_service, "tool_search_db", mock_search)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "検索して")
+
+        assert mock_search.call_count == ai_service.MAX_TOOL_ROUNDS
+        # 初回 + 各ラウンドの結果送信 = MAX_TOOL_ROUNDS + 1 回の API 呼び出し
+        assert mock_retry.call_count == ai_service.MAX_TOOL_ROUNDS + 1
+        assert "検索結果" in result
+        assert "上限" in result
+        assert "処理中にエラーが発生しました" not in result
+
+    @pytest.mark.asyncio
+    async def test_resource_exhausted_mid_chain_returns_all_tool_results_so_far(self, ai_configured, monkeypatch):
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc1 = make_function_call("record_child_health", {"child_name": "智矢", "condition": "熱"})
+        fc2 = make_function_call("record_child_health", {"child_name": "涼花", "condition": "熱"})
+        mock_retry = AsyncMock(side_effect=[
+            _FunctionCallOnlyResponse([make_fc_part(fc1)]),
+            _FunctionCallOnlyResponse([make_fc_part(fc2)]),
+            ResourceExhausted("quota"),
+        ])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+        monkeypatch.setattr(
+            ai_service, "tool_record_child_health", AsyncMock(side_effect=["記録完了: 智矢", "記録完了: 涼花"])
+        )
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢が熱、涼花も熱")
+
+        assert "記録完了: 智矢" in result
+        assert "記録完了: 涼花" in result
+        assert "制限を超過" in result
+
+
+class TestResponseHelpers:
+    def test_extract_function_calls_scans_all_parts(self):
+        fc = make_function_call("record_food", {"item": "x"})
+        resp = MagicMock()
+        resp.parts = [make_text_part("hi"), make_fc_part(fc), make_text_part("bye")]
+        assert ai_service._extract_function_calls(resp) == [fc]
+
+    def test_extract_function_calls_returns_empty_for_text_only(self):
+        assert ai_service._extract_function_calls(make_response(function_call=None)) == []
+
+    def test_response_text_or_none_swallows_value_error(self):
+        assert ai_service._response_text_or_none(_FunctionCallOnlyResponse([])) is None
+
+    def test_response_text_or_none_returns_text(self):
+        assert ai_service._response_text_or_none(make_response(text="ok")) == "ok"

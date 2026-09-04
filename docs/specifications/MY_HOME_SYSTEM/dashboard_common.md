@@ -32,11 +32,11 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `streamlit` | 外部ライブラリ | インポートされているが、本ファイル内では使用されていない（`CUSTOM_CSS`の適用や`render_status_card_html`の呼び出しは、いずれも本ファイルの外側で行われる） | `import streamlit as st` (行番号: 2 / 抜粋: "import streamlit as st") |
+| `html` | 標準ライブラリ | **（Issue #378で追加。旧版の記述を訂正）** `render_status_card_html`が`title`/`value`をHTMLエスケープするために使用（`html.escape`）。以前このテーブルは本ファイルが`streamlit`をインポートしていると記載していたが、実際には（Issue #378時点・それ以前も含め）本ファイルは`streamlit`を一切インポートしておらず誤りだった（`CUSTOM_CSS`の適用や`render_status_card_html`の呼び出しは呼び出し元で行われる） | `import html` (行番号: 2 / 抜粋: "import html") |
 
 ### ブラックボックスとなる外部要素
 
-該当なし（本ファイルは`streamlit`のインポート以外に外部モジュール・外部関数への依存を持たず、文字列定数の定義と純粋なHTML文字列生成関数のみで構成される）。
+該当なし（本ファイルは標準ライブラリ`html`（Issue #378で追加）以外に外部モジュール・外部関数への依存を持たず、文字列定数の定義と純粋なHTML生成関数のみで構成される）。
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -65,24 +65,24 @@
 
 ### `render_status_card_html`
 
-* **役割**: タイトル・値・テーマ名を受け取り、`CUSTOM_CSS`で定義された`.status-card`クラスおよびテーマクラス（`{theme}`）を適用したステータスカードのHTML文字列を生成して返す。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str) -> str:\n    """ステータスカードのHTMLを生成"""` (行番号: 50〜51 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* **役割**: タイトル・値・テーマ名を受け取り、`CUSTOM_CSS`で定義された`.status-card`クラスおよびテーマクラス（`{theme}`）を適用したステータスカードのHTML文字列を生成して返す。**（Issue #378で修正）** `title`・`value`は`unsafe_allow_html=True`経由でそのまま描画される呼び出し元(`views/dashboard/summary.py`)が多く、以前はスクレイピング/DB由来の文字列（クエストタイトル等）をそのまま埋め込むと格納型XSSになり得た。`title`は常に`html.escape`する。`value`も既定でエスケープするが、`views/dashboard/summary.py`の`get_bicycle_status`のように前日比の色付け（`<span>`等）を意図的に組み立てて渡す呼び出し元向けに、キーワード専用引数`value_is_html`（既定`False`）で`value`のエスケープをスキップできる（`title`は`value_is_html`の影響を受けず常にエスケープされる）。
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 50 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")、エスケープ処理 (行番号: 63〜64 / 抜粋: "safe_title = html.escape(title)")
 
 
-* **引数/リクエスト**: `title` (型: `str`。カードの見出し文字列)、`value` (型: `str`。カードに表示する値。HTMLタグを含む文字列も許容する設計)、`theme` (型: `str`。`CUSTOM_CSS`で定義されたテーマクラス名。例: `"theme-green"`)
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str) -> str:` (行番号: 50 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* **引数/リクエスト**: `title` (型: `str`。カードの見出し文字列。常にエスケープされる)、`value` (型: `str`。カードに表示する値。`value_is_html=True`時のみHTMLタグを含む文字列を許容)、`theme` (型: `str`。`CUSTOM_CSS`で定義されたテーマクラス名。例: `"theme-green"`)、`value_is_html` (型: `bool`。キーワード専用、既定`False`。Issue #378で追加)
+* 根拠: 関数シグネチャ (行番号: 50)
 
 
-* **戻り値/レスポンス**: `str` (`<div class="status-card {theme}">`内に`title`, `value`を埋め込んだHTML文字列)
-* 根拠: `return f"""\n    <div class="status-card {theme}">\n        <div class="status-title">{title}</div>\n        <div class="status-value">{value}</div>\n    </div>\n    """` (行番号: 52〜56 / 抜粋: "return f\"\"\"")
+* **戻り値/レスポンス**: `str` (`<div class="status-card {theme}">`内に、エスケープ後の`title`/`value`を埋め込んだHTML文字列)
+* 根拠: `return f"""\n    <div class="status-card {theme}">\n        <div class="status-title">{safe_title}</div>\n        <div class="status-value">{safe_value}</div>\n    </div>\n    """` (行番号: 65〜69 / 抜粋: "return f\"\"\"")
 
 
 * **副作用**: なし（文字列を生成して返すのみの純粋関数。画面描画・外部I/Oは行わない）
-* 根拠: 関数本体全体 (行番号: 50〜57 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* 根拠: 関数本体全体 (行番号: 50〜70)
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。渡された引数の型・内容に関するバリデーションも存在しない）
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str) -> str:` 全体 (行番号: 50〜57 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* 根拠: 関数本体全体 (行番号: 50〜70)
 
 
 
@@ -91,16 +91,21 @@
 ```mermaid
 flowchart TD
     subgraph Module_Load["モジュールロード時"]
-        M1["開始"] --> M2["streamlitをインポート(未使用)"]
+        M1["開始"] --> M2["htmlをインポート(Issue #378で追加)"]
         M2 --> M3["CUSTOM_CSS文字列定数を定義"]
         M3 --> M4["render_status_card_html関数を定義"]
         M4 --> M5["終了"]
     end
 
     subgraph render_status_card_html_Flow["render_status_card_html() 処理フロー"]
-        R1["開始: title, value, theme受け取り"] --> R2["f-stringでdiv要素のHTMLを組み立て"]
-        R2 --> R3["組み立てたHTML文字列を返却"]
-        R3 --> R4["終了"]
+        R1["開始: title, value, theme, value_is_html受け取り"] --> R2["Issue #378: html.escape(title)"]
+        R2 --> R3{"value_is_html?"}
+        R3 -- "False(既定)" --> R4["html.escape(value)"]
+        R3 -- "True" --> R5["valueをそのまま使用"]
+        R4 --> R6["f-stringでdiv要素のHTMLを組み立て"]
+        R5 --> R6
+        R6 --> R7["組み立てたHTML文字列を返却"]
+        R7 --> R8["終了"]
     end
 ```
 
@@ -110,11 +115,11 @@ flowchart TD
 graph TD
     DashboardCommonPy["views/dashboard/common.py"]
 
-    subgraph External_Libraries
-        Streamlit["streamlit (未使用インポート)"]
+    subgraph Standard_Library
+        HtmlModule["html(Issue #378で追加)"]
     end
 
-    DashboardCommonPy -.->|未使用インポート| Streamlit
+    DashboardCommonPy -->|"html.escape(title/value)"| HtmlModule
 
     Dashboard["dashboard.py"] -->|view_commonとしてimport, CUSTOM_CSSを参照| DashboardCommonPy
     Summary["summary.py"] -->|.commonとしてimport, render_status_card_htmlを呼び出し| DashboardCommonPy
@@ -130,8 +135,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **未使用インポート**: `streamlit`がインポートされているが、本ファイル内のいずれの箇所でも使用されていない（`CUSTOM_CSS`は単なる文字列定数、`render_status_card_html`はf-stringを組み立てるのみで`st.*`のAPIを呼び出していない）。
-* 根拠: `import streamlit as st` (行番号: 2 / 抜粋: "import streamlit as st")
+* **[修正済み] Issue #378 render_status_card_htmlの格納型XSS**: `title`/`value`は呼び出し元（`views/dashboard/summary.py`）が`unsafe_allow_html=True`でそのままStreamlitに渡すため、以前はエスケープ無しでf-stringに埋め込んでいた。`title`にDB/スクレイピング由来の文字列が渡ると格納型XSSになり得る構造だった（値そのものは本ファイル外から渡されるため、本ファイル単体では実際に危険な値が渡っているかは判断できない）。`html.escape`で`title`を常に、`value`も既定でエスケープするよう修正し、`get_bicycle_status`のように意図的にHTML断片を組み立てる呼び出し元向けにキーワード専用引数`value_is_html`（既定`False`）でエスケープをスキップできるようにした。
+* 根拠: `import html` (行番号: 2)、`html.escape` の呼び出し (行番号: 63〜64)、`value_is_html`引数 (行番号: 50)
 
 
 * **HTMLエスケープなしの文字列組み立て**: `render_status_card_html`は`title`, `value`の内容をエスケープなしでそのままHTMLに埋め込む。呼び出し元（`summary.py`の`get_bicycle_status`等）は`value`に意図的にHTMLタグ（`<span>`等）を含めて渡す設計になっており、任意のHTML文字列がそのまま出力される。呼び出し元が外部データ由来の文字列を`value`に含めた場合、想定外のHTML混入リスクがある。

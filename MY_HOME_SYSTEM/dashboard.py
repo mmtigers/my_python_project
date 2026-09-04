@@ -72,7 +72,17 @@ def main():
             # タイムゾーン処理は Service/Pandas で行われている前提だが念のため変換
             ts = report["timestamp"]
             if isinstance(ts, str):
-                report_time = datetime.fromisoformat(ts).astimezone(pytz.timezone("Asia/Tokyo")) if "T" in ts else datetime.now()
+                tz_jst = pytz.timezone("Asia/Tokyo")
+                if "T" in ts:
+                    report_time = datetime.fromisoformat(ts).astimezone(tz_jst)
+                else:
+                    # L-L2 (#410): 以前はこの分岐で常にdatetime.now()(現在時刻)に
+                    # フォールバックしており、レポートの実際の生成時刻に関わらず
+                    # 「たった今」の報告であるかのように表示されていた。
+                    # 保存規約(core.utils.get_now_iso)導入前の旧フォーマット
+                    # ("YYYY-MM-DD HH:MM:SS")として明示的にパースし、JSTとして
+                    # localizeする。
+                    report_time = tz_jst.localize(datetime.strptime(ts, "%Y-%m-%d %H:%M:%S"))
             else:
                 report_time = ts
             
@@ -143,7 +153,10 @@ def main():
         except Exception:
             pass
         st.error("システムエラーが発生しました。ログを確認してください。")
-        st.code(traceback.format_exc())
+        # L-L5 (#410): traceback.format_exc()を画面表示していると、内部の
+        # ファイルパスや設定値がLAN内の閲覧者に露出する。画面には汎用メッセージ
+        # のみを表示し、詳細はログにのみ残す。
+        logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
     main()

@@ -12,9 +12,7 @@ from linebot.v3.messaging import (
     TextMessage,
     FlexMessage,
     FlexContainer,
-    QuickReply,
-    QuickReplyItem,
-    MessageAction
+    QuickReply
 )
 from linebot.v3.webhooks import PostbackEvent
 # ▲▲▲ ▲▲▲
@@ -25,7 +23,7 @@ from linebot.v3.webhooks import PostbackEvent
 from core.logger import setup_logging
 logger = setup_logging("line_logic")
 # ▲▲▲ ▲▲▲
-from core.utils import get_now_iso, get_today_date_str
+from core.utils import get_now_iso, get_today_date_str, get_display_date
 from core.database import save_log_async, save_logs_batch_async
 from models.line import LinePostbackData
 
@@ -75,28 +73,6 @@ def get_user_name(event, line_bot_api: MessagingApi) -> str:
         pass
     return "家族のみんな"
 
-def create_quick_reply(items_data: list) -> QuickReply:
-    """QuickReply生成 (v3モデル使用)"""
-    items = []
-    for label, text in items_data:
-        # ラベルは最大20文字制限
-        safe_label = str(label)[:20]
-        items.append(QuickReplyItem(
-            action=MessageAction(label=safe_label, text=text)
-        ))
-    return QuickReply(items=items)
-
-def get_quota_text(api: MessagingApi):
-    """今月のメッセージ残数を取得 (v3対応)"""
-    try:
-        quota = api.get_message_quota()
-        if quota and quota.value is not None:
-             # total_usage などのプロパティ名はSDKのバージョンによるが、
-             # 一般的に value (残り) や totalUsage (使用量) が返る
-             return f"\n(当月送信数: {quota.total_usage}通)" 
-    except:
-        pass
-    return ""
 
 # --- Logic & UI Generators ---
 
@@ -172,7 +148,7 @@ def get_daily_health_summary():
                     try:
                         dt = datetime.datetime.fromisoformat(row["timestamp"])
                         time_str = dt.strftime("%H:%M")
-                    except:
+                    except Exception:
                         time_str = "??:??"
                     status = row["condition"]
                     icon = "✅" if "元気" in status else "⚠️"
@@ -205,13 +181,16 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
         # Postbackデータのパース
         # data形式例: "action=child_check&child=Taro&status=genki"
         raw_dict = dict(parse_qsl(event.postback.data))
-        
-        # モデルへのマッピング（バリデーション用だが、未知のフィールド許容のためtry-except）
-        try:
-            pb = LinePostbackData(**raw_dict)
-        except Exception:
-            # Pydanticモデルに定義されていないフィールドがある場合のフォールバック
-            pb = LinePostbackData(action=raw_dict.get("action", "unknown"))
+
+        # 保守性(#410): 以前はここに「LinePostbackData(**raw_dict)がバリデーション
+        # エラーを送出した場合、actionのみでモデルを再構築するフォールバック」の
+        # try/exceptがあったが、pydanticのBaseModelは既定でモデルに定義の無い
+        # フィールドを無視する(extra="forbid"等は設定していない)ため、
+        # raw_dictにactionキーさえ含まれていれば例外は送出されず、このフォールバックは
+        # 到達不能だった。本ボットが生成するpostback.dataは常に"action=..."を含むため
+        # 実質発火しない分岐だった。想定外の入力(action無し等)で万一送出された場合は
+        # 呼び出し元 handle_postback の末尾except Exceptionでログ・握り潰しされる。
+        pb = LinePostbackData(**raw_dict)
 
         # アクションの取得（空白除去で堅牢化）
         action = raw_dict.get("action", "").strip()
@@ -326,7 +305,10 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
         # === 4. 記録確認 & 修正 ===
         elif action == "check_status":
             summary = get_daily_health_summary()
-            today_disp = datetime.datetime.now().strftime("%m/%d")
+            # L-L2 (#410): naive datetime.datetime.now()(サーバーのローカルタイムゾーン
+            # 依存)は get_today_date_str() 等が前提とするJSTとズレうる。既存の
+            # core.utils.get_display_date()(JST基準・同じ"%m/%d"形式)を使う。
+            today_disp = get_display_date()
             
             flex_content = {
                 "type": "bubble",

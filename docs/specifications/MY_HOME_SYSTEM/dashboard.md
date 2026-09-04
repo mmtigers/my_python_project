@@ -19,7 +19,7 @@
 * Streamlit製ダッシュボードアプリケーションのエントリーポイント。ページ設定・ロガー設定などアプリ全体の初期化を行う。
 * `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・駐輪場・NASステータス等のデータを読み込み、AIレポート（`load_ai_report`）を取得して展開表示する。
 * サマリー表示（`views.dashboard.summary`）と11個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、トレンド、システム管理、駐輪場）のレンダリングを、それぞれ対応する `views.dashboard` 配下のビューモジュールに委譲する。
-* アプリ実行中に例外が発生した場合、エラーログを出力しDiscordへ通知を試み、画面上にエラーメッセージとトレースバックを表示するフェイルセーフ処理を持つ。
+* アプリ実行中に例外が発生した場合、エラーログを出力しDiscordへ通知を試み、画面上に汎用エラーメッセージを表示するフェイルセーフ処理を持つ（**Issue #410 L-L5で修正**: トレースバックは以前画面にも表示していたが、内部情報の露出防止のためログのみに変更した）。
 
 ## 3. 外部依存関係
 
@@ -49,14 +49,14 @@
 | --- | --- | --- |
 | `services.analysis_service` の各関数 | `load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `load_ai_report`, `apply_friendly_names` の実装（DBアクセス方法やデータ整形ロジック）が本ファイルからは不明。 | `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)") |
 | `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `LINE_USER_ID` の実際の値がどこでどう定義されているか不明。 | `config.SQLITE_TABLE_CHILD` (行番号: 60 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
-| `common.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `common.send_push(` (行番号: 138 / 抜粋: "common.send_push(") |
+| `common.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `common.send_push(` (行番号: 148 / 抜粋: "common.send_push(") |
 | `view_common.CUSTOM_CSS` | CSSの具体的な内容・スタイル定義が不明。 | `view_common.CUSTOM_CSS` (行番号: 48 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
-| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` (行番号: 87 / 抜粋: "summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)") |
-| `quest_tab.render` | クエストタブの内部実装が不明。 | `quest_tab.render()` (行番号: 111 / 抜粋: "quest_tab.render()") |
-| `misc_tab` の各関数 | `render_traffic`, `render_photos`, `render_bicycle` の内部実装が不明。 | `misc_tab.render_traffic()` (行番号: 113 / 抜粋: "misc_tab.render_traffic()") |
-| `sensor_tab` の各関数 | `render_electricity`, `render_temperature`, `render_takasago` の内部実装が不明。 | `sensor_tab.render_electricity(df_sensor, now)` (行番号: 117 / 抜粋: "sensor_tab.render_electricity(df_sensor, now)") |
-| `health_tab.render` | 健康管理タブの内部実装が不明。 | `health_tab.render(df_child, df_poop, df_food)` (行番号: 121 / 抜粋: "health_tab.render(df_child, df_poop, df_food)") |
-| `log_tab` の各関数 | `render_logs`, `render_trends`, `render_system` の内部実装が不明。 | `log_tab.render_logs(df_sensor)` (行番号: 125 / 抜粋: "log_tab.render_logs(df_sensor)") |
+| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` (行番号: 97 / 抜粋: "summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)") |
+| `quest_tab.render` | クエストタブの内部実装が不明。 | `quest_tab.render()` (行番号: 121 / 抜粋: "quest_tab.render()") |
+| `misc_tab` の各関数 | `render_traffic`, `render_photos`, `render_bicycle` の内部実装が不明。 | `misc_tab.render_traffic()` (行番号: 123 / 抜粋: "misc_tab.render_traffic()") |
+| `sensor_tab` の各関数 | `render_electricity`, `render_temperature`, `render_takasago` の内部実装が不明。 | `sensor_tab.render_electricity(df_sensor, now)` (行番号: 127 / 抜粋: "sensor_tab.render_electricity(df_sensor, now)") |
+| `health_tab.render` | 健康管理タブの内部実装が不明。 | `health_tab.render(df_child, df_poop, df_food)` (行番号: 131 / 抜粋: "health_tab.render(df_child, df_poop, df_food)") |
+| `log_tab` の各関数 | `render_logs`, `render_trends`, `render_system` の内部実装が不明。 | `log_tab.render_logs(df_sensor)` (行番号: 135 / 抜粋: "log_tab.render_logs(df_sensor)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -108,8 +108,8 @@
 
 ### `main`
 
-* **役割**: サイドバー設定、各種データの読み込み、AIレポート表示、サマリー表示、11個のタブの切り替え・レンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。
-* 根拠: `def main():` (行番号: 39〜147 / 抜粋: "def main():")
+* **役割**: サイドバー設定、各種データの読み込み、AIレポート表示、サマリー表示、11個のタブの切り替え・レンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（Issue #410 L-L2で修正）** AIレポートの`timestamp`が`"T"`を含まない旧フォーマット（`"YYYY-MM-DD HH:MM:SS"`、保存規約`core.utils.get_now_iso`導入前のレガシーデータ）の場合、以前は`datetime.now()`（現在時刻）にフォールバックしており、レポートの実際の生成時刻に関わらず「たった今」の報告であるかのように表示されていた。旧フォーマットとして明示的に`strptime`でパースし、JSTとして`localize`するよう修正した。**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
+* 根拠: `def main():` (行番号: 39〜159 / 抜粋: "def main():")、タイムスタンプの旧フォーマット対応 (行番号: 74-85 / 抜粋: "report_time = tz_jst.localize(datetime.strptime(ts, \"%Y-%m-%d %H:%M:%S\"))")、トレースバックのログのみ化 (行番号: 155-159 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
@@ -126,15 +126,15 @@
     * `analysis_service` 経由での複数のデータ読み込み（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス、AIレポート）。
     * AIレポートがある場合、時間帯に応じたアイコン付きの展開エリアにメッセージを表示する。
     * サマリーおよび11タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
-    * 例外発生時、エラーログ出力・Discordへのエラー通知（`common.send_push`）・画面へのエラーメッセージ表示・トレースバック表示。
-* 根拠: `st.cache_data.clear()` (行番号: 44 / 抜粋: "st.cache_data.clear()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `common.send_push(` (行番号: 138 / 抜粋: "common.send_push(")
+    * 例外発生時、エラーログ出力・Discordへのエラー通知（`common.send_push`）・画面への汎用エラーメッセージ表示。**（Issue #410 L-L5で修正）** トレースバックは画面表示せず、ログ（`logger.error`）にのみ出力する。
+* 根拠: `st.cache_data.clear()` (行番号: 44 / 抜粋: "st.cache_data.clear()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `common.send_push(` (行番号: 148 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**:
     * データ読み込みからタブレンダリングまでの全体を `try...except Exception as e:` で捕捉する。
     * 例外捕捉時、エラーメッセージをログ出力（`logger.error`）した上で、`common.send_push` によるDiscord通知を試みる。この通知処理自体は入れ子の `try...except Exception: pass` で保護されており、通知失敗時も処理は継続する（例外を握りつぶす）。
-    * 最後に `st.error(...)` でユーザー向けエラーメッセージを表示し、`st.code(traceback.format_exc())` でトレースバックを画面に出力する。
-* 根拠: `except Exception as e:` (行番号: 133〜147 / 抜粋: "except Exception as e:"), `except Exception:\n            pass` (行番号: 144〜145 / 抜粋: "except Exception:\n            pass")
+    * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
+* 根拠: `except Exception as e:` (行番号: 143〜159 / 抜粋: "except Exception as e:"), `except Exception:\n            pass` (行番号: 153〜154 / 抜粋: "except Exception:\n            pass")、トレースバックのログのみ化 (行番号: 155〜159 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 
@@ -220,7 +220,7 @@ graph TD
 | 高 | `services/analysis_service.py` | ダッシュボードが表示する全データ（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス、AIレポート）の取得ロジックが集約されており、UIの正確な挙動を把握するために必須。 | `from services import analysis_service` (行番号: 11 / 抜粋: "from services import analysis_service") |
 | 高 | `views/dashboard/summary.py`, `quest_tab.py`, `sensor_tab.py`, `health_tab.py`, `misc_tab.py`, `log_tab.py` | 実際の画面描画ロジックが全てこれらのモジュールに委譲されており、UIの詳細仕様（表示項目・グラフ・操作性）を理解するために必要。 | `from views.dashboard import (...)` (行番号: 14〜22 / 抜粋: "from views.dashboard import (") |
 | 中 | `config.py` | `SQLITE_TABLE_CHILD` 等のテーブル名定数や `LINE_USER_ID` の実値を把握し、DB構造や通知先を確認するため。 | `config.SQLITE_TABLE_CHILD` (行番号: 60 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
-| 中 | `common.py` | `send_push` の実装（Discord通知の具体的な送信方式・エラー処理）を確認するため。 | `common.send_push(` (行番号: 138 / 抜粋: "common.send_push(") |
+| 中 | `common.py` | `send_push` の実装（Discord通知の具体的な送信方式・エラー処理）を確認するため。 | `common.send_push(` (行番号: 148 / 抜粋: "common.send_push(") |
 
 ## 8. 保守上の注意点
 

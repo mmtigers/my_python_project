@@ -234,8 +234,8 @@
 
 ### `render_summary`
 
-* **役割**: 上記8個の`get_*_status`関数（およびグローバル関数`analysis_service.calculate_monthly_cost_cumulative`）を呼び出してステータス値・テーマを収集し、`render_status_card_html`でHTML化した9枚のカードを3列×3行のレイアウトで描画する。
-* 根拠: `def render_summary(...):` および `"""トップ画面サマリー描画"""` (行番号: 203〜210 / 抜粋: "\"\"\"トップ画面サマリー描画\"\"\"")
+* **役割**: 上記8個の`get_*_status`関数（およびグローバル関数`analysis_service.calculate_monthly_cost_cumulative`）を呼び出してステータス値・テーマを収集し、`render_status_card_html`でHTML化した9枚のカードを3列×3行のレイアウトで描画する。**（Issue #378で修正）** `render_status_card_html`は`title`/`value`を既定でHTMLエスケープするようになったため、`get_bicycle_status`が意図的に組み立てる`<span>`断片（前日比の色付け）を含む`bicycle_val`のみ`value_is_html=True`を指定してエスケープをスキップしている。他8件のカードは変更なし（値そのものがハードコード文字列/数値のみで構成されており、通常時と結果は変わらない）。
+* 根拠: `def render_summary(...):` および `"""トップ画面サマリー描画"""` (行番号: 203〜210 / 抜粋: "\"\"\"トップ画面サマリー描画\"\"\"")、`value_is_html=True`の使用箇所 (行番号: 234 / 抜粋: "c6.markdown(render_status_card_html(\"🚲 駐輪場待機\", bicycle_val, bicycle_theme, value_is_html=True), unsafe_allow_html=True)")
 
 
 * **引数/リクエスト**: `now` (型: `datetime`。基準時刻)、`df_sensor` (型: `pd.DataFrame`。センサーデータ)、`df_car` (型: `pd.DataFrame`。車データ)、`df_bicycle` (型: `pd.DataFrame`。駐輪場データ)、`nas_data` (型: `Optional[pd.Series]`。NASステータス)
@@ -345,8 +345,8 @@ graph TD
 * 根拠: `if line_g.get("is_suspended") or line_a.get("is_suspended"):` (行番号: 90 / 抜粋: "if line_g.get(\"is_suspended\") or line_a.get(\"is_suspended\"):"), `elif line_g["is_delay"] or line_a["is_delay"]:` (行番号: 92 / 抜粋: "elif line_g[\"is_delay\"] or line_a[\"is_delay\"]:")
 
 
-* **HTMLインジェクションの潜在リスク**: `get_bicycle_status`が生成する`details`のHTML文字列（`<span style=...>`）はエスケープなしで構築され、最終的に`unsafe_allow_html=True`で描画される。データが外部サービス由来の場合、想定外の文字列混入リスクがある。
-* 根拠: `diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"` (行番号: 183 / 抜粋: "diff_str = f\" <span style='color:#d32f2f;'>(🔺{diff})</span>\"")
+* **HTMLインジェクションの潜在リスク（Issue #378で部分対応）**: `get_bicycle_status`が生成する`details`のHTML文字列（`<span style=...>`）は依然としてエスケープなしで組み立てられている（`short_name`は関数内のハードコード辞書、`current_val`/`diff`は`int()`変換済みの数値のみが埋め込まれるため、現状のデータフローでは`area_name`等の外部文字列が直接混入する経路は無い）。Issue #378では`views/dashboard/common.py`の`render_status_card_html`側に`title`/`value`の既定エスケープを追加したが、`render_summary`は`bicycle_val`を`value_is_html=True`で渡しており、この経路自体は引き続きエスケープをスキップする。将来`get_bicycle_status`の`details`構築に外部/DB由来の生文字列を追加する場合は、`render_status_card_html`側の保護に頼らず呼び出し側で個別にエスケープする必要がある。
+* 根拠: `diff_str = f" <span style='color:#d32f2f;'>(🔺{diff})</span>"` (行番号: 183 / 抜粋: "diff_str = f\" <span style='color:#d32f2f;'>(🔺{diff})</span>\"")、`value_is_html=True` (行番号: 234)
 
 
 * **マジックナンバーのハードコード**: 活動判定の閾値（10分、60分、180分）、炊飯器の稼働判定電力（500W）、駐輪場待機数のテーマ切り替え閾値（0, 10）が各関数内に直接埋め込まれている。
