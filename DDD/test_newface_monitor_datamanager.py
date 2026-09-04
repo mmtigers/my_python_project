@@ -3,7 +3,7 @@
 restpiaサイトのknown_casts_*.jsonキャッシュが 'utf-8' codec can't decode byte
 ... : invalid start byte で毎時CRITICALを出し続けた不具合の回帰テスト。
 
-DataManager.load_known_casts()は元々 (json.JSONDecodeError, IOError) しか
+dm.load_known_casts()は元々 (json.JSONDecodeError, IOError) しか
 捕捉しておらず、UnicodeDecodeError(ValueErrorのサブクラスでIOErrorではない)を
 捕捉できなかったため、同じ破損ファイルへの読み込み失敗が毎回未処理の例外として
 伝播し、自動復旧が一切行われなかった。本テストは、
@@ -28,6 +28,9 @@ import newface_monitor as module  # noqa: E402
 
 SiteConfig = module.SiteConfig
 CastMember = module.CastMember
+# #364: DataManagerは静的メソッド群から、解決済みdata_dirを束縛するインスタンスへ
+# 変更された。各テストは MonitorConfig.get_data_dir のmonkeypatchではなく
+# DataManager(tmp_path) を直接生成して使う。
 DataManager = module.DataManager
 
 
@@ -63,13 +66,13 @@ class TestLoadKnownCastsCorruption:
         self, tmp_path, monkeypatch
     ):
         site = _make_site("known_casts_restpia_test.json")
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         data_file = tmp_path / site.get_data_filename()
         # 実際のCRITICALログと同じ症状(0xf9は不正な開始バイト)を再現する
         data_file.write_bytes(b'[{"id": "1", "name": "\xf9broken"}]')
 
-        result = DataManager.load_known_casts(site)
+        result = dm.load_known_casts(site)
 
         assert result == set()
 
@@ -77,12 +80,12 @@ class TestLoadKnownCastsCorruption:
         self, tmp_path, monkeypatch
     ):
         site = _make_site("known_casts_restpia_test.json")
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         data_file = tmp_path / site.get_data_filename()
         data_file.write_bytes(b'[{"id": "1", "name": "\xf9broken"}]')
 
-        DataManager.load_known_casts(site)
+        dm.load_known_casts(site)
 
         assert not data_file.exists()
         quarantined = list(tmp_path.glob(f"{data_file.name}.corrupted-*"))
@@ -90,12 +93,12 @@ class TestLoadKnownCastsCorruption:
         assert quarantined[0].read_bytes() == b'[{"id": "1", "name": "\xf9broken"}]'
 
         # 退避済みなので、次回の読み込みは「ファイルなし」として扱われる
-        second_result = DataManager.load_known_casts(site)
+        second_result = dm.load_known_casts(site)
         assert second_result == set()
 
     def test_recovers_from_backup_when_primary_file_is_corrupted(self, tmp_path, monkeypatch):
         site = _make_site("known_casts_restpia_test.json")
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         data_file = tmp_path / site.get_data_filename()
         backup_file = data_file.with_suffix(data_file.suffix + ".bak")
@@ -105,7 +108,7 @@ class TestLoadKnownCastsCorruption:
         )
         data_file.write_bytes(b'[{"id": "1", "name": "\xf9broken"}]')
 
-        result = DataManager.load_known_casts(site)
+        result = dm.load_known_casts(site)
 
         assert result == {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
 
@@ -113,26 +116,26 @@ class TestLoadKnownCastsCorruption:
 class TestSaveKnownCastsBackup:
     def test_save_keeps_previous_version_as_backup(self, tmp_path, monkeypatch):
         site = _make_site("known_casts_restpia_test.json")
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         first = {CastMember(id="1", name="Alice", detail_url="u1", image_url="i1", age="20")}
-        DataManager.save_known_casts(site, first)
+        dm.save_known_casts(site, first)
 
         second = {CastMember(id="2", name="Bob", detail_url="u2", image_url="i2", age="25")}
-        DataManager.save_known_casts(site, second)
+        dm.save_known_casts(site, second)
 
         data_file = tmp_path / site.get_data_filename()
         backup_file = data_file.with_suffix(data_file.suffix + ".bak")
 
-        assert DataManager.load_known_casts(site) == second
+        assert dm.load_known_casts(site) == second
         assert backup_file.exists()
         assert DataManager._read_casts_file(backup_file) == first
 
     def test_save_does_not_create_backup_on_first_write(self, tmp_path, monkeypatch):
         site = _make_site("known_casts_restpia_test.json")
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
-        DataManager.save_known_casts(
+        dm.save_known_casts(
             site, {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
         )
 
@@ -152,13 +155,13 @@ class TestLoadDailySummaryCorruption:
     def test_non_utf8_bytes_are_treated_as_load_failure_and_return_empty_dict(
         self, tmp_path, monkeypatch
     ):
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         summary_file = tmp_path / "daily_summary.json"
         # 実際のCRITICALログと同じ症状(0xf9は不正な開始バイト)を再現する
         summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
 
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
 
         assert result == {}
 
@@ -168,16 +171,16 @@ class TestLoadDailySummaryCorruption:
         """load_daily_summaryが例外を送出しないため、record_daily_new_casts
         (延いてはこれを呼ぶ_check_site)が破損ファイルによって中断せず、
         後続のsave_known_castsまで到達できることを確認する。"""
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
 
         summary_file = tmp_path / "daily_summary.json"
         summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
 
         # 例外を送出せずに完走すること自体が回帰確認の対象
-        DataManager.record_daily_new_casts("restpia_test", 3)
+        dm.record_daily_new_casts("restpia_test", 3)
 
         # 破損ファイルは新しい正常な集計データで上書きされている
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"]["restpia_test"] == 3
 
 
@@ -195,16 +198,16 @@ class TestDailySummaryLateCountsNotLost:
     ):
         """カレンダー日付をまたいで呼び出しても、以前存在したような
         日付ベースのリセットは行われず単純加算され続けること。"""
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
         fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 23, 0, 0))
 
-        DataManager.record_daily_new_casts("restpia_test", 2)  # 8/30 23:00
+        dm.record_daily_new_casts("restpia_test", 2)  # 8/30 23:00
 
         fixed_dt._now = module.datetime(2026, 8, 31, 0, 30, 0)  # 日付が変わった直後
-        DataManager.record_daily_new_casts("restpia_test", 3)
-        DataManager.record_daily_new_casts("other_site", 1)
+        dm.record_daily_new_casts("restpia_test", 3)
+        dm.record_daily_new_casts("other_site", 1)
 
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"] == {"restpia_test": 5, "other_site": 1}
 
     def test_counts_after_send_are_carried_over_to_next_send_not_lost(
@@ -213,46 +216,46 @@ class TestDailySummaryLateCountsNotLost:
         """21時台の送信後(22時・23時)に検知した件数、および日付をまたいで
         蓄積した件数が、次回の送信でまとめて送られること(以前は日付変更時の
         リセットで消えていた)。"""
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
         fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
 
         notifier = MagicMock()
         # 1回目の21時台送信(件数0)
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
         assert notifier.notify_daily_summary.call_count == 1
 
         # 送信後(22時・23時)に検知 -> 以前はこの分が翌日のリセットで消えていた
-        DataManager.record_daily_new_casts("restpia_test", 4)
-        DataManager.record_daily_new_casts("restpia_test", 1)
+        dm.record_daily_new_casts("restpia_test", 4)
+        dm.record_daily_new_casts("restpia_test", 1)
         # 日付をまたいでさらに検知
-        DataManager.record_daily_new_casts("other_site", 2)
+        dm.record_daily_new_casts("other_site", 2)
 
         # 翌日21時台に送信
         fixed_dt._now = module.datetime(2026, 8, 31, 21, 0, 0)
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
 
         assert notifier.notify_daily_summary.call_count == 2
         sent_counts = notifier.notify_daily_summary.call_args.args[0]
         assert sent_counts == {"restpia_test": 5, "other_site": 2}
 
         # 送信後はリセットされていること
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"] == {}
 
     def test_missed_21h_run_does_not_lose_accumulated_counts(self, tmp_path, monkeypatch):
         """21時台の実行自体が無かった日(cron欠落・ロック競合等)でも、
         次に成功した21時台の実行でまとめて送信され取りこぼされないこと。"""
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
         fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 15, 0, 0))
 
         # 21時台の実行が無かった日(8/30)の日中に検知
         # (以前は翌日の送信処理内で「送信対象の集計データはdate==today_strのものだけ」
         # という判定によりこの分が空扱いされ、丸ごと失われていた)
-        DataManager.record_daily_new_casts("restpia_test", 3)
+        dm.record_daily_new_casts("restpia_test", 3)
 
         fixed_dt._now = module.datetime(2026, 8, 31, 21, 0, 0)  # 翌日21時台の実行
         notifier = MagicMock()
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
 
         sent_counts = notifier.notify_daily_summary.call_args.args[0]
         assert sent_counts == {"restpia_test": 3}
@@ -264,47 +267,47 @@ class TestDailySummarySendFailureDoesNotLoseCounts:
     last_sent_dateも更新しないこと(同日中の再送機会を残すため)。"""
 
     def test_send_failure_keeps_counts_and_allows_retry_same_day(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
         _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
 
-        DataManager.record_daily_new_casts("restpia_test", 3)
+        dm.record_daily_new_casts("restpia_test", 3)
 
         notifier = MagicMock()
         notifier.notify_daily_summary.return_value = False  # Webhook失敗を模す
 
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
 
         # 送信失敗時は集計がクリアされず、last_sent_dateも更新されないこと
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"] == {"restpia_test": 3}
         assert result.get("last_sent_date") != "2026-08-30"
 
         # 送信失敗時はガード節(last_sent_date==today_str)に引っかからず、
         # 同日中の再実行で再送を試みられること
         notifier.notify_daily_summary.return_value = True
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
 
         assert notifier.notify_daily_summary.call_count == 2
         sent_counts = notifier.notify_daily_summary.call_args.args[0]
         assert sent_counts == {"restpia_test": 3}
 
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"] == {}
         assert result["last_sent_date"] == "2026-08-30"
 
     def test_send_success_still_clears_counts(self, tmp_path, monkeypatch):
         """回帰防止: Falseケースの追加が成功時の既存挙動(#183)を壊していないこと。"""
-        monkeypatch.setattr(module.MonitorConfig, "get_data_dir", staticmethod(lambda: tmp_path))
+        dm = DataManager(tmp_path)
         _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
 
-        DataManager.record_daily_new_casts("restpia_test", 3)
+        dm.record_daily_new_casts("restpia_test", 3)
 
         notifier = MagicMock()
         notifier.notify_daily_summary.return_value = True
 
-        module._maybe_send_daily_summary(notifier)
+        module._maybe_send_daily_summary(notifier, dm)
 
-        result = DataManager.load_daily_summary()
+        result = dm.load_daily_summary()
         assert result["counts"] == {}
         assert result["last_sent_date"] == "2026-08-30"
 

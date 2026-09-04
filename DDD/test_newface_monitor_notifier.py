@@ -66,7 +66,7 @@ def test_valid_http_image_url_is_kept_in_thumbnail():
     assert payload["embeds"][0]["thumbnail"] == {"url": image_url}
 
 
-def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatch):
+def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatch, tmp_path):
     known_casts = {
         CastMember(id=f"known-{i}", name=f"既存{i}", detail_url="https://example.test/", image_url="")
         for i in range(5)
@@ -111,7 +111,9 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatc
             module.DataManager.record_daily_new_casts = MagicMock()
             # 素の代入だと他テストファイルへモックがリークするためmonkeypatchを使う
             monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
-            module._check_site(monitor, notifier, site)
+            # #364: DataManagerはインスタンス化方式になった(メソッドは上で
+            # クラス属性ごとモック済みのため、data_dirの値自体は使われない)
+            module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
     finally:
         module.logger.propagate = original_propagate
 
@@ -138,7 +140,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         )
 
     def test_transient_parse_failure_of_known_cast_does_not_evict_it_when_no_new_casts(
-        self, monkeypatch
+        self, monkeypatch, tmp_path
     ):
         """既知キャストAが単発パース失敗でcurrent_castsに含まれず、かつ
         真の新規キャストも0件だった場合、Aはknown_castsから消えてはならない。
@@ -161,13 +163,13 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
         monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
 
-        module._check_site(monitor, notifier, site)
+        module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
 
         mock_save.assert_called_once()
         saved_site, saved_casts = mock_save.call_args[0]
         assert cast_a in saved_casts, "単発パース失敗した既知キャストが全置換でknown_castsから消えている"
 
-    def test_still_unions_when_genuine_new_casts_are_detected(self, monkeypatch):
+    def test_still_unions_when_genuine_new_casts_are_detected(self, monkeypatch, tmp_path):
         """新規検知がある場合も、既存の挙動通りunionで保存されること(非破壊確認)。"""
         cast_a = CastMember(id="a", name="既存A", detail_url="https://example.test/a", image_url="")
         cast_new = CastMember(id="new-1", name="新規1", detail_url="https://example.test/new-1", image_url="")
@@ -185,7 +187,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
         monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
 
-        module._check_site(monitor, notifier, site)
+        module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
 
         notifier.notify.assert_called_once()
         mock_save.assert_called_once()
