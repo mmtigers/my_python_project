@@ -253,3 +253,96 @@ class TestHandlePostbackWrapper:
         event.reply_token = "tok"
 
         line_handler.handle_postback(event)  # 例外が外に漏れないこと
+
+
+# ==========================================
+# Issue #375: 「元気ない」の否定判定と2名併記時の全員記録
+# ==========================================
+
+@pytest.mark.asyncio
+class TestHealthKeywordNegationAndMultipleNames:
+    @pytest.mark.parametrize("phrase", ["元気ない", "元気がない", "元気なし", "元気じゃない"])
+    async def test_negated_genki_is_not_recorded_as_genki(self, phrase, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", f"体調 智矢 {phrase}", "tok")
+
+        mock_fn.assert_called_once_with("U1", "パパ", "智矢", line_handler.CONDITION_NOT_GENKI)
+        assert mock_fn.call_args.args[3] != "元気"
+
+    async def test_plain_genki_still_recorded_as_genki(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気いっぱい", "tok")
+
+        mock_fn.assert_called_once_with("U1", "パパ", "智矢", "元気")
+
+    async def test_two_names_with_different_conditions_are_both_recorded(self, monkeypatch):
+        mock_fn = AsyncMock(side_effect=[MagicMock(text="r1"), MagicMock(text="r2")])
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気 涼花 風邪", "tok")
+
+        assert mock_fn.call_count == 2
+        assert mock_fn.call_args_list[0].args[2:] == ("智矢", "元気")
+        assert mock_fn.call_args_list[1].args[2:] == ("涼花", "風邪")
+        # 返信は1回にまとめ、2件分のメッセージを含む
+        mock_reply.assert_called_once()
+        assert len(mock_reply.call_args.args[1]) == 2
+
+    async def test_two_names_share_condition_written_before_the_names(self, monkeypatch):
+        """「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方は全員に適用"""
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 元気 智矢 涼花", "tok")
+
+        assert mock_fn.call_count == 2
+        assert {c.args[2] for c in mock_fn.call_args_list} == {"智矢", "涼花"}
+        assert all(c.args[3] == "元気" for c in mock_fn.call_args_list)
+
+    async def test_two_names_one_negated_one_positive(self, monkeypatch):
+        mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気ない 涼花 元気", "tok")
+
+        conds = {c.args[2]: c.args[3] for c in mock_fn.call_args_list}
+        assert conds == {"智矢": line_handler.CONDITION_NOT_GENKI, "涼花": "元気"}
+
+    async def test_save_failure_message_for_one_child_is_included_in_reply(self, monkeypatch):
+        """#373 の失敗メッセージがそのまま返信に含まれ、成功分と一緒に送られること"""
+        mock_fn = AsyncMock(side_effect=[MagicMock(text="ok"), MagicMock(text="⚠️ 記録に失敗しました")])
+        monkeypatch.setattr(line_handler.line_service, "log_child_health", mock_fn)
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "パパ", "体調 智矢 元気 涼花 元気", "tok")
+
+        texts = [m.text for m in mock_reply.call_args.args[1]]
+        assert texts == ["ok", "⚠️ 記録に失敗しました"]
+
+
+class TestDetectConditionKeyword:
+    def test_negation_takes_priority_over_positive(self):
+        assert line_handler._detect_condition_keyword("元気がない") == line_handler.CONDITION_NOT_GENKI
+
+    def test_positive(self):
+        assert line_handler._detect_condition_keyword("今日は元気") == "元気"
+
+    def test_cold(self):
+        assert line_handler._detect_condition_keyword("風邪気味") == "風邪"
+
+    def test_unknown(self):
+        assert line_handler._detect_condition_keyword("特になし") == "不明"
+
+    def test_extract_targets_returns_empty_when_no_member(self):
+        assert line_handler._extract_health_targets("体調どう？") == []

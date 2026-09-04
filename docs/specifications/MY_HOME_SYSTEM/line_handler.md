@@ -127,10 +127,57 @@
 
 
 
+### `_NEGATIVE_GENKI_PATTERNS` / `CONDITION_NOT_GENKI` (変数、Issue #375で追加)
+
+* **役割**: `_NEGATIVE_GENKI_PATTERNS`は「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」の否定表現タプル。`CONDITION_NOT_GENKI`（`"元気なし"`）は否定表現を検出したときに記録する体調文字列。以前は`"元気" if "元気" in msg_text`の部分一致のため「元気ない」が肯定の「元気」として記録され意味が反転していた。
+* 根拠: (行番号: 82-83 / 抜粋: "_NEGATIVE_GENKI_PATTERNS = (\"元気ない\", \"元気がない\", \"元気なし\", ...)")
+
+### `_detect_condition_keyword` (関数、Issue #375で追加)
+
+* **役割**: 与えられたテキストから定型キーワードで体調を判定する。否定表現（`_NEGATIVE_GENKI_PATTERNS`）を最初に評価して`CONDITION_NOT_GENKI`を返し、次に「元気」→「元気」、「風邪」→「風邪」、いずれも無ければ「不明」を返す。
+* 根拠: `def _detect_condition_keyword(text: str) -> str:` (行番号: 86-94)
+
+
+* **引数/リクエスト**: `text: str`
+* 根拠: 関数シグネチャ (行番号: 86)
+
+
+* **戻り値/レスポンス**: `str`（`"元気なし"` / `"元気"` / `"風邪"` / `"不明"`）
+* 根拠: 各`return` (行番号: 88-94)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 86-94)
+
+
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 86-94)
+
+### `_extract_health_targets` (関数、Issue #375で追加)
+
+* **役割**: メッセージ中に登場する`config.FAMILY_SETTINGS["members"]`の全メンバーを出現位置順に列挙し、各メンバーについて「その名前の直後〜次の名前まで」の区間を`_detect_condition_keyword`で判定する。区間内にキーワードが無い（「不明」）場合はメッセージ全体の判定結果へフォールバックする（「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方に対応）。以前は最初に一致した1名だけを処理し、2名併記時は残りを無言で捨てていた。
+* 根拠: `def _extract_health_targets(msg_text: str) -> List[tuple]:` (行番号: 97-123)
+
+
+* **引数/リクエスト**: `msg_text: str`
+* 根拠: 関数シグネチャ (行番号: 97)
+
+
+* **戻り値/レスポンス**: `List[tuple]`（出現順の`(メンバー名, 体調)`。該当メンバーが無ければ空リスト）
+* 根拠: `return targets` (行番号: 123)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 97-123)
+
+
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 97-123)
+
 ### `_process_message_async`
 
-* **役割**: 受信したテキストメッセージの内容に応じた分岐（ステータス、クエスト、承認/却下、子供の体調記録）を行い、該当しない場合はAI解析に回す非同期処理ロジック。
-* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 106-143 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
+* **役割**: 受信したテキストメッセージの内容に応じた分岐（ステータス、クエスト、承認/却下、子供の体調記録）を行い、該当しない場合はAI解析に回す非同期処理ロジック。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合は従来どおりAI解析へフォールバックする。
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 145 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、体調分岐 (行番号: 165-174 / 抜粋: "targets = _extract_health_targets(msg_text)")
 
 
 * **引数/リクエスト**:
@@ -208,7 +255,9 @@ flowchart TD
     MsgText -- "ステータス" --> CallStatus["外部：line_service.get_user_status_message()"]
     MsgText -- "クエスト" --> CallQuest["外部：line_service.get_active_quests_message()"]
     MsgText -- "承認 / 却下..." --> CallApprove["外部：line_service.process_approval_command()"]
-    MsgText -- "子供記録 / 体調..." --> CallHealth["外部：line_service.log_child_health()"]
+    MsgText -- "子供記録 / 体調..." --> ExtractTargets["Issue #375: _extract_health_targets<br>(全メンバー・否定表現優先)"]
+    ExtractTargets -- "メンバー無し" --> CallAI
+    ExtractTargets -- "メンバーあり(全員分)" --> CallHealth["外部：line_service.log_child_health()"]
     MsgText -- その他 --> CallAI["外部：ai_service.analyze_text_and_execute()"]
     
     CallStatus --> Reply["reply_message()"]
@@ -275,6 +324,10 @@ graph TD
 
 * **未使用のインポート**: `os`, `sys`, `json`, `models.line.LinePostbackData` がインポートされているが、ファイル内で明示的に使用されていない。
 * 根拠: インポート宣言と使用箇所の不在 (行番号: 3-5, 28 / 抜粋: "import os")
+
+
+* **[修正済み] Issue #375 「元気ない」の反転記録・2名併記時の取りこぼし**: 体調キーワード分岐は`"元気" in msg_text`の部分一致で「元気ない/元気がない/元気なし」も「元気」として記録し、また最初に一致した1名のみ処理して2名目以降を無言で捨てていた。`_detect_condition_keyword`（否定表現を先に判定し`CONDITION_NOT_GENKI`＝「元気なし」を返す）と`_extract_health_targets`（全メンバーを出現順に列挙し名前ごとの区間で判定、区間にキーワードが無ければ全体判定へフォールバック）に置き換えた。判定は依然として定型キーワードの部分一致であり、「熱がある」等キーワード外の表現は「不明」として記録される（AIフォールバックには回らない）点は従来どおり。
+* 根拠: `_NEGATIVE_GENKI_PATTERNS`/`CONDITION_NOT_GENKI` (行番号: 82-83)、`_detect_condition_keyword` (行番号: 86-94)、`_extract_health_targets` (行番号: 97-123)、分岐 (行番号: 165-174)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。

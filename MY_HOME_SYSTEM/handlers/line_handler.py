@@ -76,6 +76,53 @@ def reply_message(reply_token: str, messages: List[Any]):
     except Exception as e:
         logger.error(f"LINE Reply Failed: {e}")
 
+# Issue #375: 「元気ない」「元気がない」「元気なし」は "元気" を部分文字列として含むため、
+# 以前は `"元気" if "元気" in msg_text` で肯定の「元気」として記録され意味が反転していた。
+# 否定表現を肯定判定より先に評価する。
+_NEGATIVE_GENKI_PATTERNS = ("元気ない", "元気がない", "元気なし", "元気じゃない", "元気ではない")
+CONDITION_NOT_GENKI = "元気なし"
+
+
+def _detect_condition_keyword(text: str) -> str:
+    """定型キーワードから体調の状態を判定する(否定表現を先に判定)。該当なしは「不明」。"""
+    if any(p in text for p in _NEGATIVE_GENKI_PATTERNS):
+        return CONDITION_NOT_GENKI
+    if "元気" in text:
+        return "元気"
+    if "風邪" in text:
+        return "風邪"
+    return "不明"
+
+
+def _extract_health_targets(msg_text: str) -> List[tuple]:
+    """
+    Issue #375: メッセージ中に登場する家族メンバー全員と、それぞれの体調キーワードを返す。
+
+    以前は最初に一致した1名だけを処理し、「体調 智矢 元気 涼花 風邪」のような
+    2名併記時は2人目以降を無言で捨てていた。各名前の直後〜次の名前までの区間から
+    体調を判定し、区間内にキーワードが無ければメッセージ全体から判定した値
+    (「体調 元気 智矢 涼花」のように名前より前にキーワードがある書き方)へフォールバックする。
+
+    Returns:
+        List[tuple]: 出現順の (メンバー名, 体調) のリスト。該当メンバーが無ければ空。
+    """
+    positions = []
+    for member in config.FAMILY_SETTINGS["members"]:
+        idx = msg_text.find(member)
+        if idx >= 0:
+            positions.append((idx, member))
+    positions.sort()
+
+    whole_cond = _detect_condition_keyword(msg_text)
+    targets = []
+    for i, (idx, member) in enumerate(positions):
+        seg_start = idx + len(member)
+        seg_end = positions[i + 1][0] if i + 1 < len(positions) else len(msg_text)
+        seg_cond = _detect_condition_keyword(msg_text[seg_start:seg_end])
+        targets.append((member, seg_cond if seg_cond != "不明" else whole_cond))
+    return targets
+
+
 # === Event Handlers ===
 # 注: ディスパッチロジック自体はLINE SDKの初期化有無に関わらず常に定義する。
 # SDKへの登録(line_handler.add)のみを `if line_handler:` 配下で行うことで、
@@ -116,12 +163,15 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
 
     # 2. Health & Life Log Commands
     if "子供記録" in msg_text or "体調" in msg_text:
-        for child in config.FAMILY_SETTINGS["members"]:
-            if child in msg_text:
-                cond = "元気" if "元気" in msg_text else ("風邪" if "風邪" in msg_text else "不明")
-                resp = await line_service.log_child_health(user_id, user_name, child, cond)
-                reply_message(reply_token, resp)
-                return
+        # Issue #375: 否定表現(元気ない等)を先に判定し、2名以上の併記は全員分を記録する。
+        targets = _extract_health_targets(msg_text)
+        if targets:
+            responses = []
+            for child, cond in targets:
+                responses.append(await line_service.log_child_health(user_id, user_name, child, cond))
+            # LINEのreplyは1回につき最大5メッセージ。メンバー数(4名)はこれに収まる。
+            reply_message(reply_token, responses[:5])
+            return
 
     # 3. AI Analysis (Fallback)
     try:
