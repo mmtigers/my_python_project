@@ -42,6 +42,24 @@ class TestIsBotDetectionError:
         誤ってボット検知と判定しないこと。"""
         assert module._is_bot_detection_error(Exception(message)) is False
 
+    @pytest.mark.parametrize("message", [
+        "ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users.",
+        "ERROR: Sign in to confirm your age",
+    ])
+    def test_age_restriction_message_is_not_bot_detection(self, message):
+        """#396: 年齢制限動画のメッセージ("Sign in to confirm your age")を
+        ボット検知と誤判定し、12時間の全停止に入らないこと。"""
+        assert module._is_bot_detection_error(Exception(message)) is False
+
+    @pytest.mark.parametrize("message", [
+        "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser ...",
+        "ERROR: [youtube] abc123: Sign in to confirm you’re not a bot.",
+    ])
+    def test_genuine_bot_message_still_detected_with_either_apostrophe(self, message):
+        """#396: 本物のボット検知メッセージは、ASCII/Unicodeどちらの
+        アポストロフィでも引き続き検知されること。"""
+        assert module._is_bot_detection_error(Exception(message)) is True
+
 
 class TestHistoryManagerLogsFailures:
     """M-7-1: 履歴ファイルI/O失敗が except: pass で握りつぶされ、

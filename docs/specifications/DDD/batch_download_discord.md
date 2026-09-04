@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `b24086f` |
+| 解析基準コミット | `e6ed731` |
 
 ## 関連ドキュメント
 
@@ -169,20 +169,20 @@
 
 ### `_is_bot_detection_error`
 
-* **役割**: 例外オブジェクトの文字列表現（小文字化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが含まれるかを判定する関数。マーカーが数字のみ（"403"/"429"/"503"）の場合は正規表現の単語境界(`\b`)で厳密に一致するかを判定し、フレーズマーカー（"sign in to confirm"等）は従来通り部分文字列一致(`in`)で判定する。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正である。
-* 根拠: [関数定義とコメント] (行番号: 206〜212 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し、\n    # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って\n    # 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
+* **役割**: 例外オブジェクトの文字列表現（小文字化し、Unicodeのアポストロフィ`’`をASCIIの`'`に正規化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが含まれるかを判定する関数。マーカーが数字のみ（"403"/"429"/"503"）の場合は正規表現の単語境界(`\b`)で厳密に一致するかを判定し、フレーズマーカー（"sign in to confirm you're not a bot"等）は部分文字列一致(`in`)で判定する。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正である。**（Issue #396で修正）** 以前のフレーズマーカー`"sign in to confirm"`は、yt-dlpの年齢制限メッセージ「Sign in to confirm your age. This video may be inappropriate for some users.」にも部分一致し、年齢制限動画1本で`BotDetectionError`→セッション中断＋12時間クールダウンに入っていた。マーカーをボット検知に固有の`"sign in to confirm you're not a bot"`/`"confirm you're not a bot"`に絞るとともに、`CONFIG.BOT_DETECTION_EXCLUDED_MARKERS`（`"confirm your age"`）を含むメッセージはマーカー判定より優先して`False`を返す。
+* 根拠: [関数定義とコメント] (行番号: 269〜289 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し" / "# #396: yt-dlpのメッセージは "you’re"(U+2019) のような引用符を使うことがある\n    # ため、ASCIIのアポストロフィに正規化してからマーカーと比較する。\n    message = str(exc).lower().replace("’", "'")\n    # #396: 年齢制限("Sign in to confirm your age")等、ボット検知ではないことが\n    # 明確な文言を含む場合は、マーカーに一致しても誤検知として扱わない。\n    if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):\n        return False")、[マーカー定義] (行番号: 205〜222 / 抜粋: "BOT_DETECTION_MARKERS: Tuple[str, ...] = (\n        \"sign in to confirm you're not a bot\",\n        \"confirm you're not a bot\"," / "BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (\n        \"confirm your age\",\n    )")
 
 
 * **引数/リクエスト**: `exc: Exception`
-* 根拠: [引数定義] (行番号: 206 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
+* 根拠: [引数定義] (行番号: 269 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒントと各return] (行番号: 206, 217, 219, 220 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
+* 根拠: [戻り値ヒントと各return] (行番号: 269, 282, 286, 288, 289 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
 
 
 * **副作用**: なし
-* 根拠: [処理内容] (行番号: 213〜216 / 抜粋: "message = str(exc).lower()\n    for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            if re.search(rf"\\b{re.escape(marker)}\\b", message):")
+* 根拠: [処理内容] (行番号: 278〜289 / 抜粋: "message = str(exc).lower().replace("’", "'")" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            if re.search(rf"\\b{re.escape(marker)}\\b", message):")
 
 
 * **エラーハンドリング**: なし（判定ロジックのみで例外は送出しない）
@@ -1046,7 +1046,8 @@ flowchart TD
 * 根拠: [_fetch_m3u8_manifest / _download_segments_and_localize_manifestのDocstring] (行番号: 583〜589, 664〜671 / 抜粋: "impersonate設定が引き継がれない(yt-dlp側の制限。実機検証で403の再現を確認済み)。", "ハンドラが独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequests\n        とは異なり、User-Agent等のヘッダーを完全に一致させてもWAFに403で\n        ブロックされ続けることを実機の生トラフィック検証(debug_printtraffic)で\n        確認した。")
 * **状態のミスマッチ**: プログラム実行中に手動で `history.txt` やリストファイルが編集された場合、インメモリのタスク一覧とディスク上の状態に乖離が生じる可能性がある。
 * **クールダウンファイルの信頼性**: `CooldownManager.is_in_cooldown`はクールダウンファイルの内容が壊れている場合、安全側（＝クールダウンしない）に倒す設計であり、意図せずクールダウンが無効化されるリスクがある一方、システム停止よりは優先される設計判断となっている。
-* **`BOT_DETECTION_MARKERS`の数字マーカーは単語境界一致、フレーズマーカーは部分一致**: `_is_bot_detection_error`は"429"/"403"/"503"のような数字のみのマーカーを正規表現の単語境界(`\b`)で厳密に判定するよう修正済みであり、動画IDなどに埋め込まれた偶然の数字列（例:「AbC403XyZ」）への誤検知は解消されている。一方で"sign in to confirm"等のフレーズマーカーは引き続き部分文字列一致(`in`)で判定されるため、無関係なログメッセージにたまたま同じフレーズが含まれる場合の誤検知リスクは残る。
+* **`BOT_DETECTION_MARKERS`の数字マーカーは単語境界一致、フレーズマーカーは部分一致**: `_is_bot_detection_error`は"429"/"403"/"503"のような数字のみのマーカーを正規表現の単語境界(`\b`)で厳密に判定するよう修正済みであり、動画IDなどに埋め込まれた偶然の数字列（例:「AbC403XyZ」）への誤検知は解消されている。一方で"sign in to confirm you're not a bot"等のフレーズマーカーは引き続き部分文字列一致(`in`)で判定されるため、無関係なログメッセージにたまたま同じフレーズが含まれる場合の誤検知リスクは残る。**（Issue #396で修正）** 以前の`"sign in to confirm"`はyt-dlpの年齢制限メッセージ（"Sign in to confirm your age..."）にも一致し、年齢制限動画1本で12時間の全停止に入っていた（`ENABLE_YOUTUBE_DL=true`環境で顕在化）。マーカーを"not a bot"まで含む文言へ絞り、`BOT_DETECTION_EXCLUDED_MARKERS`（"confirm your age"）を含むメッセージは判定より優先して除外する。新たなフレーズマーカーを追加する際は、yt-dlpの他のサインイン系メッセージ（年齢制限・会員限定等）に部分一致しないか確認すること。回帰テストは`test_batch_download_discord_fixes.py`の`TestIsBotDetectionError`。
+* 根拠: [マーカー定義のコメント] (行番号: 205〜209 / 抜粋: "# #396: 以前の "sign in to confirm" は、yt-dlpの年齢制限メッセージ\n    # "Sign in to confirm your age. This video may be inappropriate for some users."\n    # にも部分一致し、年齢制限動画1本でセッション中断+12時間クールダウンに\n    # 入っていた。")
 * 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 206〜220 / 抜粋: "# 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
 * **履歴ファイルI/O失敗の可視化**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録するよう修正済みである。読み込み失敗時は安全側（空の履歴として続行）に倒すため、失敗が続くと既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある点自体は変わらない。
 * 根拠: [HistoryManager.load_history/add_historyのコメント] (行番号: 277〜280, 290〜292 / 抜粋: "# M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")

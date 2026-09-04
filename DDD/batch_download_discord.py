@@ -202,13 +202,23 @@ class AppConfig:
     # 実際には requests.exceptions.RetryError の
     # "too many 503 error responses" のような文言になる。"503"を含めておくことで
     # このリトライ尽き後のメッセージもボット検知として拾えるようにしている。
+    # #396: 以前の "sign in to confirm" は、yt-dlpの年齢制限メッセージ
+    # "Sign in to confirm your age. This video may be inappropriate for some users."
+    # にも部分一致し、年齢制限動画1本でセッション中断+12時間クールダウンに
+    # 入っていた。ボット検知に固有の "not a bot" まで含む文言に絞る
+    # (アポストロフィは _is_bot_detection_error 側で ' に正規化して比較する)。
     BOT_DETECTION_MARKERS: Tuple[str, ...] = (
-        "sign in to confirm",
+        "sign in to confirm you're not a bot",
         "confirm you're not a bot",
         "429",
         "403",
         "503",
         "too many requests",
+    )
+    # #396: これらの文言を含むメッセージはボット検知ではなく動画個別の事情
+    # (年齢制限等)であり、当該タスクのスキップに留める。マーカー判定より優先する。
+    BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (
+        "confirm your age",
     )
     # missav等、requestsで直接HTMLを取得するスクレイピング先向け。
     # これらのステータスコードやページ内マーカーはCloudflare等のボット対策サービスが
@@ -263,7 +273,13 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って
     # 引き起こし得た。数字のみのマーカーは単語境界(\b)で厳密に判定し、
     # フレーズマーカーは従来通り部分文字列一致とする。
-    message = str(exc).lower()
+    # #396: yt-dlpのメッセージは "you’re"(U+2019) のような引用符を使うことがある
+    # ため、ASCIIのアポストロフィに正規化してからマーカーと比較する。
+    message = str(exc).lower().replace("’", "'")
+    # #396: 年齢制限("Sign in to confirm your age")等、ボット検知ではないことが
+    # 明確な文言を含む場合は、マーカーに一致しても誤検知として扱わない。
+    if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):
+        return False
     for marker in CONFIG.BOT_DETECTION_MARKERS:
         if marker.isdigit():
             if re.search(rf"\b{re.escape(marker)}\b", message):
