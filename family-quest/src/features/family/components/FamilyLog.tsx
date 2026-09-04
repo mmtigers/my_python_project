@@ -51,8 +51,10 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
                     <div className="text-[10px] text-gray-400 mb-1.5 font-bold">{date}</div>
 
                     <div className="space-y-1.5">
-                        {logs.map((log: ChronicleItem) => (
-                            <div key={log.timestamp} className="bg-blue-950/30 p-1.5 rounded border border-blue-900/50">
+                        {/* #412(F-L2): timestampが同秒のイベントが複数あるとkeyが衝突するため、
+                            リスト内の位置も組み合わせて一意にする。 */}
+                        {logs.map((log: ChronicleItem, i: number) => (
+                            <div key={`${log.timestamp}-${i}`} className="bg-blue-950/30 p-1.5 rounded border border-blue-900/50">
                                 <div className="flex items-center gap-1 text-[9px] text-gray-400 mb-0.5">
                                     <Clock size={9} />
                                     {formatTime(log.timestamp)}

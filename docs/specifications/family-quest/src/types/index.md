@@ -6,7 +6,7 @@
 | 言語 | TypeScript |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `65fce15` |
+| 解析基準コミット | `07bb74e` |
 
 ## 関連ドキュメント
 
@@ -68,7 +68,7 @@
 ### `Quest`
 
 * **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
-* **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。
+* **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`
 * 根拠: [該当要素] (行番号: 36〜59 / 抜粋: "// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface Quest {")
 * 根拠: [フィールド名統一のコメント] (行番号: 29〜34 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
 

@@ -92,7 +92,10 @@ const QuestItem: React.FC<{
     const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
     const isSharedDoneByOther = isSharedCompleted || isSharedPending;
     const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
-    const isEffectivelyLocked = isLocked || isSharedDoneByOther;
+    // #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、
+    // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを
+    // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。
+    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;
 
     // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの
     // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。
@@ -206,8 +209,18 @@ const QuestItem: React.FC<{
                 {...(canCancel ? longPressHandlers : {})}
             >
                 {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
+                {/* #412(F-L9): 外部URL(transparenttextures.com)への依存を廃止し、
+                    ネットワーク不要なCSSのみのドット柄(stardust風)に置き換える。
+                    以前はオフライン時に画像が欠落するだけでなく、常時起動キオスク端末で
+                    描画のたびに不要な外部通信が発生し続けていた。 */}
                 {isRandom && !isDone && !isPending && (
-                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+                    <div
+                        className="absolute inset-0 opacity-20 pointer-events-none"
+                        style={{
+                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',
+                            backgroundSize: '14px 14px',
+                        }}
+                    ></div>
                 )}
 
                 {/* #391: 完了/取消APIの送信中オーバーレイ。応答が返るまでカードを操作不能にし、
@@ -321,8 +334,6 @@ const QuestItem: React.FC<{
 };
 
 export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, processingQuestKeys, panelMode, iconFirst }: QuestListProps) {
-    const jsDay = new Date().getDay();
-    const currentDay = (jsDay + 6) % 7;
     const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
 
     const sortedQuests = useMemo(() => {
@@ -339,11 +350,12 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                 }
             }
 
-            if (q.quest_type === 'daily' && q.days) {
-                if (Array.isArray(q.days) && q.days.length === 0) return true;
-                const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
-                if (!dayList.includes(currentDay)) return false;
-            }
+            // #412(F-L1): quest.days による曜日フィルタは削除した。サーバー側
+            // (quest_service.py の filter_active_quests → _is_quest_currently_active)
+            // が既にJST基準で day_of_week フィルタ済みの quests のみを返しているため、
+            // ここで端末のローカルタイムゾーンを使って再フィルタすると、端末TZ≠JSTの
+            // 時間帯(JSTの0〜9時に相当するUTC以西のTZ等)で当日のクエストが消えてしまう
+            // (曜日境界の食い違い)。
             return true;
         }).sort((a, b) => {
             // ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み
@@ -379,7 +391,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             const idB = Number(b.quest_id ?? 0);
             return idB - idA;
         });
-    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
+    }, [quests, currentUser, completedQuests, pendingQuests]);
 
     // ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。
     // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。

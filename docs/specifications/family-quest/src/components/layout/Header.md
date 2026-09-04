@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `65fce15` |
+| 解析基準コミット | `07bb74e` |
 
 ## 関連ドキュメント
 
@@ -66,7 +66,7 @@
 
 ### `Header`
 
-* **役割**: ナビゲーション（ホームボタン＋ユーザー切替＋記録ボタン）、表示設定ボタン、タイトルを含むヘッダーUIのレンダリング。`hideUserSwitcher`が真の場合はユーザー切替のボタン群を、`hideLogSwitcher`が真の場合は記録ボタンを、`showBackToMain`が偽の場合はホームボタンを、それぞれ描画しない。
+* **役割**: ナビゲーション（ホームボタン＋ユーザー切替＋記録ボタン）、表示設定ボタン、タイトルを含むヘッダーUIのレンダリング。**（Issue #412 F-L9で修正）** タイトル「FAMILY QUEST」の`fontFamily`から`"Press Start 2P"`を削除した。このフォントはGoogle Fonts等の読込設定がどこにも存在せず一度も読み込まれておらず、実際には常に次点の`cursive`フォールバックで描画され続けていた「死んだ指定」だったため、実際に使われているフォールバックのみを書くようにした（見た目に変化はない）。`hideUserSwitcher`が真の場合はユーザー切替のボタン群を、`hideLogSwitcher`が真の場合は記録ボタンを、`showBackToMain`が偽の場合はホームボタンを、それぞれ描画しない。
 * 根拠: `const Header: React.FC<HeaderProps> = ({...}) => { return (<header...` (行番号: 28〜174 / 抜粋: "const Header: React.FC<HeaderProps> = ({")
 
 * **引数/リクエスト**: `HeaderProps` で定義されたプロパティのオブジェクト（`users`, `currentUserIdx`, `viewMode`, `onUserSwitch`, `onLogSwitch`, `onSettingsClick`, `hideUserSwitcher`, `hideLogSwitcher`, `showBackToMain`, `onBackToMain`）

@@ -53,7 +53,10 @@ const Header: React.FC<HeaderProps> = ({
 
             {/* Title Area */}
             <div className="pt-4 pb-2 text-center relative">
-                <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: '"Press Start 2P", cursive, sans-serif' }}>
+                {/* #412(F-L9): 'Press Start 2P' はどこにも読込設定が無く一度も読み込まれない
+                    ままだった(常にcursiveフォールバックで描画されている死んだ指定)。
+                    実際に使われているフォールバックのみを指定する。 */}
+                <h1 className="text-2xl font-black text-yellow-500 tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]" style={{ fontFamily: 'cursive, sans-serif' }}>
                     FAMILY QUEST
                 </h1>
                 <p className="text-[10px] text-gray-400 font-mono">我が家の冒険譚</p>

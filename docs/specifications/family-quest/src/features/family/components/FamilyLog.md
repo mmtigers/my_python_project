@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `65fce15` |
+| 解析基準コミット | `07bb74e` |
 
 ## 関連ドキュメント
 
@@ -64,6 +64,8 @@
 * **役割**: 1ユーザー分のタイムラインカラムを描画する。アバター画像（`isSameOriginAvatarPath(user.avatar)`が真の場合は`<img>`、それ以外はアバター文字列/アイコン/デフォルト絵文字`🙂`）とユーザー名を上部に表示し、`entries`を日付（`dateStr`、無ければ`'----/--/--'`）でグループ化して、日付ごとにタイムライン風のリストとして表示する。`entries`が空の場合は「まだ記録がありません」を表示する。各ログ項目では時刻（`timestamp`）、本文（`text`）、獲得/消費ゴールド（`gold`が正の場合のみバッジ表示）を描画する。**（#291で修正）** `ChronicleItem`から`date`/`id`/`message`/`quest_title`/`reward_gold`/`created_at`という、バックエンドから一度も送られてこない幽霊フィールドが削除されたことに伴い、これらへの防御的フォールバック（`item.date`、`log.id`、`log.message`、`` `${log.quest_title} を達成！` ``、`log.created_at`、`log.reward_gold`）はすべて廃止され、`dateStr`/`timestamp`/`text`/`gold`のみを参照する。各ログ項目の`key`も`log.timestamp || log.id`から`log.timestamp`のみに変更された。**バグ修正(M-6-4)**: `log.type === 'reward'`（報酬購入）の場合は消費として赤色で`-N G`、それ以外（クエスト達成等）は獲得として黄色で`+N G`と表示するようになった。以前は購入によるゴールド消費も一律`+N G`（獲得）として表示されていた。
 * 根拠: (行番号: 19〜87 / 抜粋: "// 冒険の記録(タイムライン)1人分のカラム。ホーム画面(横画面の4人並びパネル)と同様に、\n// タブで選ばせるのではなく最初から全員分を並べて表示する。\nconst UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ user, entries }) => {")
 * 根拠: アバター判定 (行番号: 35〜39 / 抜粋: "{isSameOriginAvatarPath(user.avatar) ? (\n                        <img src={user.avatar} alt={user.name} className=\"w-full h-full object-cover\" />\n                    ) : (\n                        user.avatar || '🙂'\n                    )}")。**（Issue #390）** `user.avatar`が`string | null`になったことに伴い、型ガード`isSameOriginAvatarPath`をJSX内で直接呼んで`<img src>`に渡す型を`string`に絞る形に変更し、幽霊フィールド`user.icon`（常に`undefined`）へのフォールバックを削除した。
+* **[修正済み] `key`の衝突を解消（Issue #412 F-L2）**: 以前は`key={log.timestamp}`のみだったため、同秒に複数のイベント（クエスト達成連打・アイテム使用等）が記録されると`key`が衝突しうる。表示専用の読み取りリストで並び順はサーバー側（`ts`降順）で確定済みのため、リスト内のインデックス`i`も組み合わせて一意にした（`key={`${log.timestamp}-${i}`}`、57行目）。
+* **未対応（バックエンド変更が必要）: `use_item`の記録行が「クエスト達成」として混入する**: `chronicle`（本コンポーネントが描画するデータ）は`GameSystem._fetch_full_adventure_logs`（`quest_service.py`）が`quest_history WHERE status='approved'`から`'quest' as type`で一律に生成しており、`use_item()`が記録する行（`quest_id=0`、`quest_title = "アイテム使用: {商品名}"`）もこのSQLの対象から除外されず`type: 'quest'`として届く。`_fetch_full_adventure_logs`は`quest_id`自体をSELECTしていないため、フロントエンド側には`quest_id=0`かどうかを判定する手段がなく、`text`は「{name}は {quest_title} を達成した！」に組み立てられ、実際には「アイテム使用: アイス を達成した！」のような不自然な表示になる。是正するにはバックエンド側で`_fetch_full_adventure_logs`のクエリから`quest_id=0`の行を除外する、または`type`をSELECTに含めて`'item_use'`等で区別できるようにする変更が必要。
 * 根拠: グループ化 (行番号: 25〜30 / 抜粋: "const groupedChronicle = entries.reduce((groups: Record<string, ChronicleItem[]>, item: ChronicleItem) => {\n        const date = item.dateStr || '----/--/--';\n        if (!groups[date]) groups[date] = [];\n        groups[date].push(item);\n        return groups;\n    }, {});")
 * 根拠: 空表示 (行番号: 45〜47 / 抜粋: "{entries.length === 0 && (\n                <div className=\"text-center text-gray-500 text-xs py-4\">まだ記録がありません</div>\n            )}")
 * 根拠: `key`・ログ本文と獲得/消費ゴールド (行番号: 56, 59, 63, 66, 76 / 抜粋: "<div key={log.timestamp} className=\"bg-blue-950/30 p-1.5 rounded border border-blue-900/50\">", "{formatTime(log.timestamp)}", "{log.text}", "{(log.gold || 0) > 0 && (", "{log.type === 'reward' ? '-' : '+'}{log.gold} G")

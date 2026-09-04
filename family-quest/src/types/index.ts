@@ -44,6 +44,9 @@ export interface Quest {
     bonus_exp?: number;
     quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
     _isInfinite?: boolean;
+    // #412(F-L10): masterData.js のフォールバック(サーバー接続エラー時の案内)専用の
+    // 疑似クエストであることを示すフロントエンド拡張フラグ。バックエンドは送出しない。
+    _isFallback?: boolean;
     icon_key?: string;
     start_time?: string;
     end_time?: string;

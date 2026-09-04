@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `c29d467` |
+| 解析基準コミット | `07bb74e` |
 
 ## 関連ドキュメント
 
@@ -20,7 +20,7 @@
 
 ## 2. ファイルの概要
 
-このファイルは、クエストのリスト（`QuestList`）および個別のクエスト（`QuestItem`）を画面に描画するUIコンポーネントを提供する。`QuestList`は`quests`をターゲット（役割/ユーザー個別/`siblings`＝子ども全員）・曜日で絞り込み、共通関数`getQuestLockState`によるステータススコアとボーナス量・`quest_id`でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に振り分け、`framer-motion`によるアニメーション付きで`QuestItem`のリストとして描画する。完了済み・未開放クエストは既定で折りたたまれ、`showDoneAndLocked`ステートのトグルボタンで開閉できる。`panelMode`propが真の場合、横画面4人表示（`FamilyDashboard`）のパネル内で使うことを想定し、ビューポート幅基準の`md:`ブレークポイントに依存しない、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示に切り替える。`iconFirst`propが真の場合、非識字年齢の子ども向けにアイコンを大きく・説明文を非表示にした表示にする。`QuestItem`側では、完了済み・申請中クエストの取消は誤操作防止のため「長押し」（`useLongPress`）でのみ発火し、通常タップは新規の完了操作にのみ作用する。**（#291で修正）** 参照フィールド名がバックエンドの実カラム名に一本化され、`quest.target`→`quest.target_user`、`quest.type`→`quest.quest_type`、`quest.icon`/`quest.icon_key`→`quest.icon_key`のみ、`quest.desc`/`quest.description`→`quest.description`のみ、`quest.gold`/`quest.gold_gain`→`quest.gold_gain`のみに変更され、ソートの`quest_id ?? id`フォールバックおよび`key`の`q.id || q.quest_id`フォールバックも、`id`が幽霊フィールドと判明したため`quest_id`のみの参照に簡略化された。
+このファイルは、クエストのリスト（`QuestList`）および個別のクエスト（`QuestItem`）を画面に描画するUIコンポーネントを提供する。`QuestList`は`quests`をターゲット（役割/ユーザー個別/`siblings`＝子ども全員）で絞り込み（**Issue #412 F-L1で修正**: 曜日での再フィルタは削除、後述）、共通関数`getQuestLockState`によるステータススコアとボーナス量・`quest_id`でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に振り分け、`framer-motion`によるアニメーション付きで`QuestItem`のリストとして描画する。完了済み・未開放クエストは既定で折りたたまれ、`showDoneAndLocked`ステートのトグルボタンで開閉できる。`panelMode`propが真の場合、横画面4人表示（`FamilyDashboard`）のパネル内で使うことを想定し、ビューポート幅基準の`md:`ブレークポイントに依存しない、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示に切り替える。`iconFirst`propが真の場合、非識字年齢の子ども向けにアイコンを大きく・説明文を非表示にした表示にする。`QuestItem`側では、完了済み・申請中クエストの取消は誤操作防止のため「長押し」（`useLongPress`）でのみ発火し、通常タップは新規の完了操作にのみ作用する。**（#291で修正）** 参照フィールド名がバックエンドの実カラム名に一本化され、`quest.target`→`quest.target_user`、`quest.type`→`quest.quest_type`、`quest.icon`/`quest.icon_key`→`quest.icon_key`のみ、`quest.desc`/`quest.description`→`quest.description`のみ、`quest.gold`/`quest.gold_gain`→`quest.gold_gain`のみに変更され、ソートの`quest_id ?? id`フォールバックおよび`key`の`q.id || q.quest_id`フォールバックも、`id`が幽霊フィールドと判明したため`quest_id`のみの参照に簡略化された。
 * 根拠: `export default function QuestList` (行番号: 285 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, panelMode, iconFirst }: QuestListProps) {")
 * 根拠: `const QuestItem: React.FC` (行番号: 37 / 抜粋: "const QuestItem: React.FC<{")
 * 根拠: `panelMode`/`iconFirst`のコメント (行番号: 17〜23 / 抜粋: "// 横画面4人表示のパネル内で使うためのモード。\n    // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には\n    // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。\n    panelMode?: boolean;\n    // アイコン主体・文字量を絞った表示にするか(非識字年齢の子ども向け)。\n    // 説明文を非表示にし、アイコンをより大きく見せる。\n    iconFirst?: boolean;")
@@ -100,7 +100,7 @@
 
 ### `QuestList`
 
-* **役割**: 受け取ったクエスト一覧を（ターゲット、曜日で）フィルタリングし、`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。Issue #102で追加された`completedSignal`はここでは判定に一切関与せず、各`QuestItem`へそのまま素通しするのみである。
+* **役割**: 受け取ったクエスト一覧を（ターゲットで）フィルタリングし（**Issue #412 F-L1で修正**: 以前あった端末ローカル時刻基準の曜日フィルタは削除、後述）、`getQuestLockState`によるステータススコアとボーナス量・`quest_id`（無ければ`id`にフォールバック）でソートしたうえで、`activeQuests`（今できること）と`doneOrLockedQuests`（完了済み・未開放）に分割する。前者は常に、後者は`showDoneAndLocked`が真のときのみ`QuestItem`のリストとして`AnimatePresence`付きで描画する。`panelMode`が真の場合、リストコンテナのクラス（`listContainerClass`）を2カラムグリッドではなく単一カラム縦積みにし、見出し（`-- クエスト一覧 --`）も非表示にする。Issue #102で追加された`completedSignal`はここでは判定に一切関与せず、各`QuestItem`へそのまま素通しするのみである。
 * 根拠: `export default function QuestList` (行番号: 296〜446 / 抜粋: "export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {")
 * 根拠: `activeQuests`/`doneOrLockedQuests`への振り分け (行番号: 355〜369 / 抜粋: "// ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。\n    // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。\n    const { activeQuests, doneOrLockedQuests } = useMemo(() => {")
 * 根拠: `listContainerClass`/`headerClass`の分岐 (行番号: 371〜376 / 抜粋: "const listContainerClass = panelMode\n        ? 'space-y-2 animate-in fade-in duration-300'\n        : 'space-y-2 md:space-y-0 md:grid md:grid-cols-2 md:gap-6 ...';")
@@ -123,15 +123,12 @@
 
 ```mermaid
 flowchart TD
-    Start["Start: QuestList Render"] --> CalcDay["現在の曜日を算出 (jsDay, currentDay)"]
-    CalcDay --> FilterSort["useMemo: クエストのフィルタ＆ソート (sortedQuests)"]
+    Start["Start: QuestList Render"] --> FilterSort["useMemo: クエストのフィルタ＆ソート (sortedQuests)"]
 
     subgraph "フィルタリング (sortedQuests)"
         F2{"ターゲット(target)判定に合致?"}
         F2 -- No --> Drop["除外"]
-        F2 -- Yes --> F3{"曜日(days)指定に合致?"}
-        F3 -- No --> Drop
-        F3 -- Yes --> Keep["保持"]
+        F2 -- Yes --> Keep["保持 (曜日フィルタはIssue #412 F-L1で削除。サーバーが既にJST基準でフィルタ済み)"]
     end
 
     Keep --> Sort["getQuestLockState()でスコア算出 → スコア・ボーナス合計・IDでソート"]
@@ -263,6 +260,12 @@ graph TD
 * 根拠: (行番号: 108〜115 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
 * アイコンエリア（`min-w-[1.5rem]`で幅を確保する`<div>`）とカード全体のpadding（`cardSizeClasses`）・列間のgap（`layoutClasses`）は、クエスト名・ゴールド表示エリアをより広く取るため、アイコン周りの余白を半分程度に縮小する形で調整されている（`p-2`→`p-1`、`md:p-6`→`md:p-3`、`gap-2`→`gap-1`、`gap-3 md:gap-6`→`gap-1.5 md:gap-3`、`min-w-[3rem]`→`min-w-[1.5rem]`）。
 * 根拠: (行番号: 114〜115, 210 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';\n    const layoutClasses = panelMode ? 'flex items-center gap-1' : 'flex md:grid md:grid-cols-[auto_1fr_auto] items-center gap-1.5 md:gap-3';", "<div className=\"flex items-center justify-center min-w-[1.5rem]\">")
+* **[修正済み] 曜日フィルタの二重判定を削除（Issue #412 F-L1）**: `QuestList`（本ファイル、`sortedQuests`の`useMemo`）は以前`new Date().getDay()`で端末ローカル時刻の曜日を求め、`q.days`を使って再度曜日フィルタしていた。しかしサーバー側（`quest_service.py`の`filter_active_quests` → `_is_quest_currently_active`）が既にJST基準で`day_of_week`フィルタ済みの`quests`のみを返しているため、端末のタイムゾーンがJSTと異なる場合（特にJSTの0〜9時に相当する時間帯）に、サーバー側では「今日」扱いのクエストが端末側の判定では「昨日/明日」となり消えてしまっていた。修正後はこのクライアント側フィルタを削除し、`quest.days`フィールド自体もどこからも参照されなくなった（型定義からは削除していない）。
+* 根拠: `sortedQuests`内のコメント (抜粋: "// #412(F-L1): quest.days による曜日フィルタは削除した。サーバー側\n            // (quest_service.py の filter_active_quests → _is_quest_currently_active)\n            // が既にJST基準で day_of_week フィルタ済みの quests のみを返しているため、")
+* **[修正済み] 外部URL依存の背景パターンをCSSのみの表現へ置換（Issue #412 F-L9）**: `isRandom`（ランダムクエスト）のカード装飾は以前`bg-[url('https://www.transparenttextures.com/patterns/stardust.png')]`という外部ホストの画像を毎回読み込んでいた。オフライン時に画像が欠落するだけでなく、常時表示している端末では描画のたびに不要な外部通信が発生し続けていた。修正後は`radial-gradient`によるドット柄（ネットワーク不要）に置き換えた。
+* 根拠: (行番号: 216〜225 / 抜粋: "{isRandom && !isDone && !isPending && (\n                    <div\n                        className=\"absolute inset-0 opacity-20 pointer-events-none\"\n                        style={{\n                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',")
+* **[修正済み] フォールバック(案内専用)クエストのタップを無効化（Issue #412 F-L10）**: `masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時のみ表示されるquest_id 999/998）はAPI経由で完了できない案内表示に過ぎないが、以前はタップ可能で、タップすると存在しないクエストへの完了APIが404等のエラーになっていた。`Quest`型に新設した`_isFallback?: boolean`（`_isInfinite`と同様のフロントエンド拡張フラグ）を`isEffectivelyLocked`の算出に含め、ロック中と同じ扱い（タップ・長押しとも無効）にした。
+* 根拠: (行番号: 95〜98 / 抜粋: "// #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、\n    // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを\n    // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。\n    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;")
 * バッジ表示は`badgeCandidates`に優先度（`priority`が小さいほど優先: 未開放0 < 対応済み1 < 申請中2 < 期間限定3 < 時間限定4）を付けてソートし、上位`MAX_VISIBLE_BADGES`（2件）のみ表示、残りは「+N」でまとめられる。バッジ種別を追加する際はこの優先度体系に組み込む必要がある。
 * 根拠: (行番号: 121〜168 / 抜粋: "// ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)\n    const badgeCandidates: BadgeCandidate[] = [];")
 

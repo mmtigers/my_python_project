@@ -6,6 +6,7 @@
 | 言語 | JavaScript / React |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `07bb74e` |
 
 ## 関連ドキュメント
 
@@ -62,7 +63,7 @@
 
 ### 定数：`MASTER_QUESTS`
 
-* **役割**: 接続エラー時に使用される、エラー状態を伝えるダミークエストのフォールバックデータを定義する。**（#291で修正）** プロパティ名がバックエンドAPIのレスポンスと同じフィールド名（`quest_id`/`exp_gain`/`gold_gain`/`quest_type`/`icon_key`）に統一され、フロント側（`QuestList.tsx`等）が二重のフィールド名フォールバック（`quest.gold_gain || quest.gold`等）を持たずに済むようになった。以前は`id`/`exp`/`gold`/`type`/`icon`という別名を使用していた。
+* **役割**: 接続エラー時に使用される、エラー状態を伝えるダミークエストのフォールバックデータを定義する。**（Issue #412 F-L10で修正）** 各要素に`_isFallback: true`（`Quest`型の新設フィールド、`QuestList.tsx`の`isEffectivelyLocked`算出に使われるフロントエンド拡張フラグ）を追加し、これらの案内専用クエストがタップ可能で完了API呼び出し（404エラー）に繋がってしまう不具合を防いだ。根拠: 26〜27行目 `_isFallback: true` の付与。**（#291で修正）** プロパティ名がバックエンドAPIのレスポンスと同じフィールド名（`quest_id`/`exp_gain`/`gold_gain`/`quest_type`/`icon_key`）に統一され、フロント側（`QuestList.tsx`等）が二重のフィールド名フォールバック（`quest.gold_gain || quest.gold`等）を持たずに済むようになった。以前は`id`/`exp`/`gold`/`type`/`icon`という別名を使用していた。
 * 根拠: [定数定義] (行番号: 20〜26 / 抜粋: "// #291: バックエンドのAPIレスポンスと同じフィールド名(quest_id/exp_gain/gold_gain/\n// quest_type/icon_key、reward_id/cost_gold/icon_key/description)に統一し、\n// フロント側で二重のフィールド名フォールバックを持たずに済むようにする。\nexport const MASTER_QUESTS = [")
 
 
@@ -70,7 +71,7 @@
 * 根拠: [定数定義] (行番号: 23 / 抜粋: "export const MASTER_QUESTS = [")
 
 
-* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `quest_id`, `title`, `exp_gain`, `gold_gain`, `quest_type`, `days`, `icon_key`）
+* **戻り値/レスポンス**: オブジェクトの配列（プロパティ: `quest_id`, `title`, `exp_gain`, `gold_gain`, `quest_type`, `days`, `icon_key`, `_isFallback`）
 * 根拠: [定数の中身] (行番号: 24〜25 / 抜粋: "{ quest_id: 999, title: '⚠️ サーバーに繋がりません', exp_gain: 0, gold_gain: 0, quest_type: 'daily', days: null, icon_key: '🔌' },")
 
 
