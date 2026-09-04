@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1f5428` |
 
 ## 関連ドキュメント
 
@@ -46,18 +47,35 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `isValidDensity` / `sanitizeIconFirstUserIds` / `sanitizeUserThemeColors` (モジュールレベル関数、Issue #412 F-L7で追加)
+
+* **役割**: `loadSettings`が`localStorage`から読み込んだ値をフィールドごとに検証・無害化するヘルパー群。**（Issue #412 F-L7）** 以前は`{ ...DEFAULT_SETTINGS, ...parsed }`という単純なスプレッドマージだったため、`parsed.iconFirstUserIds`が配列以外（他タブでの旧バージョンの書き込み・手動編集等で壊れた形状）だった場合、そのまま`state`に乗ってしまい、`App.tsx`側の`iconFirstUserIds.includes(currentUser.user_id)`で例外が発生しアプリ全体がクラッシュしていた。`isValidDensity`は`'comfortable'`/`'compact'`のいずれかの文字列かを判定する型ガード、`sanitizeIconFirstUserIds`は配列でなければ`DEFAULT_SETTINGS.iconFirstUserIds`（空配列）にフォールバックし、配列であっても文字列以外の要素を`filter`で除去する、`sanitizeUserThemeColors`はオブジェクト（配列でない）でなければ空オブジェクトにフォールバックし、各エントリの値が`THEME_COLORS`に定義された6色のいずれかでなければそのエントリを除外する。
+* 根拠: (行番号: 12〜44 / 抜粋: "// #412(F-L7): localStorage の値は他タブでの旧バージョン書き込み・手動編集・
+// ブラウザ拡張機能等により、型定義と食い違う形状になりうる。", "function isValidDensity(value: unknown): value is Density {", "function sanitizeIconFirstUserIds(value: unknown): string[] {", "function sanitizeUserThemeColors(value: unknown): Record<string, ThemeColorKey> {")
+
 ### `loadSettings` (モジュールレベル関数)
 
-* **役割**: `localStorage`から保存済みの設定を読み込み、`DEFAULT_SETTINGS`とマージして返す。`window`が存在しない（SSR等）場合、保存データがない場合、JSONパースに失敗した場合は`DEFAULT_SETTINGS`にフォールバックする。`userThemeColors`のみ、保存値と`DEFAULT_SETTINGS`のプロパティをさらにネストしてマージする。
-* 根拠: `function loadSettings(): SettingsState {` (行番号: 12〜26)
+* **役割**: `localStorage`から保存済みの設定を読み込み、フィールドごとに`isValidDensity`/`sanitizeIconFirstUserIds`/`sanitizeUserThemeColors`（Issue #412 F-L7）で検証したうえで`SettingsState`を組み立てて返す。`window`が存在しない（SSR等）場合、保存データがない場合、JSONパースに失敗した場合、パース結果が`null`または非オブジェクトの場合は`DEFAULT_SETTINGS`にフォールバックする。**（Issue #412 F-L7で修正）** 以前は`{ ...DEFAULT_SETTINGS, ...parsed }`という単純なスプレッドマージ（`userThemeColors`のみ例外的にネストマージ）だったため、`parsed`の各フィールドの型を検証しないまま`state`へ反映しており、不正な形状のデータでアプリがクラッシュする不具合があった。修正後はフィールドを個別に組み立てるため、ネストマージの特別扱いも不要になった。
+* 根拠: `function loadSettings(): SettingsState {` (行番号: 46〜59 / 抜粋: "function loadSettings(): SettingsState {
+    if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+    try {
+        const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+        if (!raw) return DEFAULT_SETTINGS;
+        const parsed = JSON.parse(raw) as Partial<SettingsState> | null;
+        if (!parsed || typeof parsed !== 'object') return DEFAULT_SETTINGS;
+        return {
+            density: isValidDensity(parsed.density) ? parsed.density : DEFAULT_SETTINGS.density,
+            iconFirstUserIds: sanitizeIconFirstUserIds(parsed.iconFirstUserIds),
+            userThemeColors: sanitizeUserThemeColors(parsed.userThemeColors),
+        };")
 
 
 * **引数/リクエスト**: なし
 * 根拠: `function loadSettings(): SettingsState {` (行番号: 12)
 
 
-* **戻り値/レスポンス**: `SettingsState`
-* 根拠: `function loadSettings(): SettingsState {` (行番号: 12), `return {\n            ...DEFAULT_SETTINGS,\n            ...parsed,\n            userThemeColors: { ...DEFAULT_SETTINGS.userThemeColors, ...(parsed.userThemeColors || {}) },\n        };` (行番号: 18〜22)
+* **戻り値/レスポンス**: `SettingsState`（各フィールドとも検証済みの安全な値）
+* 根拠: `function loadSettings(): SettingsState {` (行番号: 46), フィールドごとの組み立て (行番号: 53〜57)
 
 
 * **副作用**: `window.localStorage.getItem`の呼び出し（読み取りのみ、書き込みなし）
@@ -159,7 +177,8 @@ graph TD
 * 根拠: `const [settings, setSettings] = useState<SettingsState>(loadSettings);` (行番号: 29)
 * `localStorage`への読み込み・書き込みの両方が`try-catch`で保護されており、失敗時は例外を投げずに黙って`DEFAULT_SETTINGS`へフォールバック（読み込み時）または永続化をスキップ（書き込み時）する。呼び出し元からはこれらの失敗を検知する手段がない。
 * 根拠: `} catch {\n        return DEFAULT_SETTINGS;\n    }` (行番号: 23〜25), `} catch {\n            // localStorageが使えない環境(プライベートモード等)では単に永続化を諦める\n        }` (行番号: 34〜36)
-* `userThemeColors`のみ、`loadSettings`内で`DEFAULT_SETTINGS.userThemeColors`と`parsed.userThemeColors`をネストしてマージしている。`density`や`iconFirstUserIds`等の他のフィールドは`parsed`側の値でそのまま上書きされるため、保存データの形式が古い場合にフィールドごとに異なるマージ挙動になる点に注意が必要。
+* **[修正済み] localStorageの形状未検証によるクラッシュ（Issue #412 F-L7）**: 以前は`loadSettings`が`{ ...DEFAULT_SETTINGS, ...parsed }`で単純にマージしていたため、`parsed.iconFirstUserIds`が配列以外（文字列・オブジェクト・数値等）だとそのまま`state`に乗り、`App.tsx:601`付近の`iconFirstUserIds.includes(currentUser.user_id)`が`TypeError`を送出してアプリ全体がクラッシュしていた。修正後は`isValidDensity`/`sanitizeIconFirstUserIds`/`sanitizeUserThemeColors`でフィールドごとに形状検証し、不正な値は`DEFAULT_SETTINGS`の対応する値（または要素単位のフィルタ）にフォールバックする。`userThemeColors`のネストマージという特別扱いも、フィールドごとの組み立てに統一されたことで不要になった。
+* 根拠: (行番号: 12〜59)
 * 根拠: `return {\n            ...DEFAULT_SETTINGS,\n            ...parsed,\n            userThemeColors: { ...DEFAULT_SETTINGS.userThemeColors, ...(parsed.userThemeColors || {}) },\n        };` (行番号: 18〜22)
 * `value`は`useMemo`により`settings`が変わるたびにのみ再生成されるため、`setDensity`等の関数自体は`settings`変更のたびに新しい参照になる（`useCallback`ではなく`useMemo`内のインライン関数定義のため）。これに依存するメモ化されたコンポーネント（`React.memo`等）がある場合、意図しない再レンダリングが発生する可能性がある。
 * 根拠: `const value = useMemo<SettingsContextValue>(() => ({\n        ...settings,\n        setDensity: (density) => setSettings(s => ({ ...s, density })),` (行番号: 39〜41)

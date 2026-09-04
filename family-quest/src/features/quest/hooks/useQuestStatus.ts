@@ -1,5 +1,12 @@
 import { useMemo } from 'react';
-import { User, Quest, QuestHistory } from '@/types';
+import { ID, User, Quest, QuestHistory } from '@/types';
+
+// #391: 「このユーザーのこのクエストに対する完了/取消APIが送信中か」を表す集合のキー。
+// 横画面の4人パネルでは同じクエスト(target all)を別々のユーザーが同時に完了しうるため、
+// quest_id 単体ではなく (user_id, quest_id) の組で識別する。
+// App.tsx(集合の管理)と QuestList.tsx(カードのローディング表示)の両方から使う。
+export const getQuestProcessingKey = (userId: string, questId: ID | undefined): string =>
+    `${userId}:${questId ?? ''}`;
 
 interface UseQuestStatusProps {
     quest: Quest;

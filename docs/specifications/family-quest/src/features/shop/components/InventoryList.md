@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a4fb40f` |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -62,7 +62,7 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `extractErrorDetail` (モジュールレベル関数)
+### `extractErrorDetail` (`../../../lib/errorDetail`からのインポート、Issue #412 品質で移動)
 
 * **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。`error`が`Error`インスタンスかつ`message`が真値の場合のみそれを使い、それ以外は固定文言`'操作に失敗しました'`にフォールバックする。使用ミューテーションの`onError`から呼ばれ、トースト表示用のテキストとして使われる。
 * 根拠: (行番号: 12〜16 / 抜粋: "// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す\n// {\"detail\": \"...\"} の内容が入っている(apiClient.ts参照)。\nconst extractErrorDetail = (error: unknown): string => {\n    return error instanceof Error && error.message ? error.message : '操作に失敗しました';\n};")

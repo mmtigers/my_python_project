@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `65fce15` |
 
 ## 関連ドキュメント
 
@@ -50,12 +51,13 @@
 
 ### `AdventureLog` / `FamilyStats` / `ChronicleItem` / `LevelUpInfo` (型定義)
 
-* **役割**: `any`型を排除するために新規追加された厳密な型定義群。`AdventureLog`は`gameData.logs`の1件（`QuestService._fetch_recent_logs`のレスポンス、`{id, text, dateStr, timestamp}`）、`FamilyStats`は`UserService.get_family_chronicle`の`"stats"`レスポンスに対応する家族全体の統計情報、`ChronicleItem`は年代記（`GameSystem._fetch_full_adventure_logs`のレスポンス）の1エントリ、`LevelUpInfo`はレベルアップ通知用の型で、`App.tsx`の`handleLevelUp`に渡される。**Issue #120で修正**: `AdventureLog`は以前`{id, message, created_at}`という、バックエンドの実際のレスポンス（`{id, text, dateStr, timestamp}`）には存在しないフィールド名を宣言していた（型と実データが不一致）。`gameData.logs`（`adventureLogs`として公開）はどのコンポーネントからも消費されていなかったため実害はなかったが、将来利用する際に誤った型に気づかず参照してしまう不具合の種だったため、実際のレスポンス形状に合わせて修正した。**（#291で修正）** `ChronicleItem`は以前、`FamilyLog.tsx`側が複数の代替フィールド名（`date`/`id`/`avatar_url`/`message`/`quest_title`/`reward_gold`/`reward_exp`/`created_at`）に防御的にフォールバックしていることを踏まえ、それらも任意プロパティとして許容していたが、これらがバックエンドから一度も送られてこない「幽霊フィールド」だったと判明したため型定義から削除され、`FamilyLog.tsx`側の対応するフォールバックも合わせて廃止された。現在の`ChronicleItem`は`type`/`timestamp`/`dateStr`/`userId`/`userName`/`userAvatar`/`title`/`text`/`gold`/`exp`のみを持つ。
+* **役割**: `any`型を排除するために新規追加された厳密な型定義群。`AdventureLog`は`gameData.logs`の1件（`QuestService._fetch_recent_logs`のレスポンス、`{id, text, dateStr, timestamp}`）、`FamilyStats`は`UserService.get_family_chronicle`の`"stats"`レスポンスに対応する家族全体の統計情報（**Issue #390**: どのコンポーネントからも消費されていないため`export`を外し、戻り値の`familyStats`も削除した。`ChronicleResponse`の型の一部としてのみ残る）、`ChronicleItem`は年代記（`GameSystem._fetch_full_adventure_logs`のレスポンス）の1エントリ、`LevelUpInfo`はレベルアップ通知用の型で、`App.tsx`の`handleLevelUp`に渡される。**Issue #120で修正**: `AdventureLog`は以前`{id, message, created_at}`という、バックエンドの実際のレスポンス（`{id, text, dateStr, timestamp}`）には存在しないフィールド名を宣言していた（型と実データが不一致）。`gameData.logs`（`adventureLogs`として公開）はどのコンポーネントからも消費されていなかったため実害はなかったが、将来利用する際に誤った型に気づかず参照してしまう不具合の種だったため、実際のレスポンス形状に合わせて修正した。**（#291で修正）** `ChronicleItem`は以前、`FamilyLog.tsx`側が複数の代替フィールド名（`date`/`id`/`avatar_url`/`message`/`quest_title`/`reward_gold`/`reward_exp`/`created_at`）に防御的にフォールバックしていることを踏まえ、それらも任意プロパティとして許容していたが、これらがバックエンドから一度も送られてこない「幽霊フィールド」だったと判明したため型定義から削除され、`FamilyLog.tsx`側の対応するフォールバックも合わせて廃止された。現在の`ChronicleItem`は`type`/`timestamp`/`dateStr`/`userId`/`userName`/`userAvatar`/`title`/`text`/`gold`/`exp`のみを持つ。
 * 根拠: (行番号: 10〜52 / 抜粋: "// 新規追加: any型を排除するための厳密なインターフェース定義\n// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。\n// ★バグ修正(Issue #120): ...)\ninterface AdventureLog {\n    id: string;\n    text: string;\n    dateStr: string;\n    timestamp: string;\n}", "// 家族全体の統計情報 (UserService.get_family_chronicle の \"stats\" レスポンスに対応)\nexport interface FamilyStats {", "// 年代記の1エントリ (GameSystem._fetch_full_adventure_logs のレスポンスに対応。\n// #291: date/id/avatar_url/message/quest_title/reward_gold/reward_exp/created_at は\n// バックエンドから一度も送られてこない幽霊フィールドだったため削除した。\n// FamilyLog.tsx側の「複数の代替フィールド名への防御的フォールバック」もあわせて廃止した。", "export interface LevelUpInfo {")
 
 ### `GameDataResponse` / `ChronicleResponse` / `PurchaseResponse` (型定義)
 
-* **役割**: 各`useQuery`/`useMutation`のレスポンス型。`GameDataResponse`は`/api/quest/data`のレスポンス（`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`/`logs`）、`ChronicleResponse`は`/api/quest/family/chronicle`のレスポンス（`stats`/`chronicle`）、`PurchaseResponse`は購入ミューテーションのレスポンス（`newGold`/`success`）を表す。
+* **役割**: 各`useQuery`/`useMutation`のレスポンス型。`GameDataResponse`は`/api/quest/data`のレスポンス（`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`/`logs`）、`ChronicleResponse`は`/api/quest/family/chronicle`のレスポンス（`stats`/`chronicle`）、`PurchaseResponse`は購入ミューテーションのレスポンス（`status`/`newGold`。**Issue #390**: 以前宣言していた`success: boolean`はサーバー（`models/quest.py`の`PurchaseResponse`）が返さない幽霊フィールドだったため、実際の形状に合わせた）を表す。
+* 根拠: (行番号: 71〜77 / 抜粋: "// models/quest.py の PurchaseResponse に対応。\n// #390: 以前は success: boolean と宣言していたがサーバーは status しか返さない\n// 幽霊フィールドだったため、実際の形状に合わせる。\ninterface PurchaseResponse {\n    status: string;\n    newGold: number;\n}")
 * 根拠: (行番号: 59〜77 / 抜粋: "interface GameDataResponse {\n    users: User[];\n    quests: Quest[];\n    rewards: Reward[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    logs: AdventureLog[];\n}", "interface ChronicleResponse {", "interface PurchaseResponse {")
 
 ### `useGameData` (カスタムフック本体)
@@ -87,28 +89,22 @@
 
 * **エラーハンドリング**: なし
 
-### `extractErrorDetail` (内部関数)
+### `extractErrorDetail` / `describeGameDataError` (`../lib/errorDetail`からのインポート)
 
-* **役割**: `apiClient`側でスローされた`Error`から、バックエンドが返す`{"detail": "..."}`のメッセージ内容（`Error.message`）を取り出す。各ラッパー関数の`catch`節から呼ばれ、返り値の`detail`フィールドとしてApp.tsx側に渡ることで、汎用エラーメッセージではなくバックエンドの実際のエラー内容を表示できるようにする。
-* 根拠: (行番号: 86〜92 / 抜粋: "// apiClient側でスローされるErrorのmessageには、バックエンドが返す\n    // {\"detail\": \"...\"} の内容が入っている（apiClient.ts参照）。\n    // ここでそれを取り出し、呼び出し元(App.tsx)がユーザーに実際のエラー内容を\n    // 表示できるようにする。\n    const extractErrorDetail = (error: unknown): string | undefined => {")
-
-* **引数/リクエスト**: `error: unknown`
-* **戻り値/レスポンス**: `string | undefined`（`error`が`Error`インスタンスの場合は`error.message`、それ以外は`undefined`）
-* 根拠: (行番号: 91 / 抜粋: "return error instanceof Error ? error.message : undefined;")
-
-* **副作用**: なし
-* **エラーハンドリング**: なし
+* **役割**: **（Issue #390で移動）** 以前は本フック内部に`extractErrorDetail`（`apiClient`がスローした`Error`の`message`、すなわちバックエンドの`{"detail": "..."}`を取り出す関数）がローカル定義されていたが、`InventoryList.tsx`/`CameraDashboard.tsx`にも同じ関数が重複していたため`src/lib/errorDetail.ts`へ集約した。各ラッパー関数の`catch`節から`extractErrorDetail(e)`（`fallback`無しの呼び出しで`string | undefined`を返す）として呼ばれ、返り値の`detail`フィールドとして`App.tsx`側に渡る。`describeGameDataError`は`gameData`クエリの`error`を戻り値`gameDataError`の表示用文字列へ変換する（`ZodError`は最初の不一致箇所を要約する）。
+* 根拠: (行番号: 6, 280, 289, 310, 320, 333, 353 / 抜粋: "import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';", "return { success: false, reason: 'error', detail: extractErrorDetail(e) };", "gameDataError: gameDataError ? describeGameDataError(gameDataError, 'データの取得に失敗しました') : null,")
 
 ### `gameData` / `chronicleData` クエリ (`useQuery`)
 
 * **役割**: `useQuery`によるメインデータ取得（`queryKey: ['gameData']`, `GET /api/quest/data`。`viewerUserIdRef.current`が設定されていれば`?viewer_user_id={encodeURIComponent(...)}`をURLに付与する。`staleTime` 30秒, `refetchInterval` 10秒）と、年代記データ取得（`queryKey: ['chronicle']`, `GET /api/quest/family/chronicle`, `staleTime` 5分, ポーリングなし）の2系統のクエリを定義する。**（#291で修正）** `gameData`クエリの`queryFn`は非同期関数に変更され、`apiClient.get<unknown>(endpoint)`で取得した生レスポンスを`gameDataResponseSchema.parse(raw)`（`../lib/gameDataSchema.ts`のZodスキーマ）でランタイム検証したうえで`GameDataResponse`にキャストして返すようになった。バックエンドのレスポンス形状がフロントの期待するフィールド名と食い違っている場合、以前はコンポーネント側が無言で`undefined`を参照する「幽霊フィールド」バグとして表面化しないまま残っていたが、この変更により取得境界で即座に例外（`zod`の`ZodError`）として検知されるようになった。`chronicleData`クエリはこの検証を経由せず、以前と同じく`apiClient.get`の戻り値をそのまま返す。
-* 根拠: (行番号: 98〜113, 122〜125 / 抜粋: "const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({\n        queryKey: ['gameData'],\n        queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },", "const { data: chronicleData } = useQuery<ChronicleResponse>({\n        queryKey: ['chronicle'],\n        queryFn: () => apiClient.get('/api/quest/family/chronicle'),")
+* 根拠: (行番号: 95〜120, 129〜132 / 抜粋: "const {\n        data: gameData,\n        isLoading: isGameDataLoading,\n        error: gameDataError,\n        refetch: refetchGameData,\n    } = useQuery<GameDataResponse>({\n        queryKey: ['gameData'],\n        queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },", "const { data: chronicleData } = useQuery<ChronicleResponse>({\n        queryKey: ['chronicle'],\n        queryFn: () => apiClient.get('/api/quest/family/chronicle'),")
 * 根拠: Zod検証のコメント (行番号: 106〜108 / 抜粋: "// #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。")
 
 * **引数/リクエスト**: なし（`useGameData`呼び出し時に自動実行。ただし`gameData`クエリの実際のリクエストURLは`viewerUserIdRef`の値に応じて変化する）
-* **戻り値/レスポンス**: `gameData: GameDataResponse | undefined`, `chronicleData: ChronicleResponse | undefined`、および`isGameDataLoading: boolean`
+* **戻り値/レスポンス**: `gameData: GameDataResponse | undefined`, `chronicleData: ChronicleResponse | undefined`、`isGameDataLoading: boolean`、および**（Issue #390で追加）** `gameDataError`（`useQuery`の`error`）と`refetchGameData`（`useQuery`の`refetch`）
 * **副作用**: HTTP GETリクエストのポーリング実行
-* **エラーハンドリング**: React Query側のデフォルト挙動に依存（本ファイル内で明示的な`onError`は定義されていない）。**（#291で追加）** `gameData`クエリの`queryFn`は`gameDataResponseSchema.parse(raw)`が失敗した場合に`ZodError`を送出し、これは`useQuery`のエラー状態（本フックの戻り値には`error`として公開されていない）として扱われる。
+* **エラーハンドリング**: React Query側のデフォルト挙動に依存（本ファイル内で明示的な`onError`は定義されていない）。**（#291で追加）** `gameData`クエリの`queryFn`は`gameDataResponseSchema.parse(raw)`が失敗した場合に`ZodError`を送出し、これは`useQuery`のエラー状態として扱われる。**（Issue #390で修正）** 以前はこの`error`を捨てており、取得失敗（ネットワーク・Zod検証失敗）はブラウザの`console`でしか分からず、画面は`INITIAL_USERS`（「接続エラー」）のフォールバックか最後に成功した古いデータのまま無言だった。現在は`describeGameDataError`で表示用文字列に変換した`gameDataError`（正常時`null`）と`refetchGameData`を戻り値として公開し、`App.tsx`がバナー（再試行ボタン付き）を表示する。
+* 根拠: (行番号: 95〜98, 350〜354 / 抜粋: "// #390: 以前は isError / error を捨てており、取得失敗(ネットワーク・Zod検証失敗)は\n    // ブラウザの console でしか分からず、画面は INITIAL_USERS(「接続エラー」)か\n    // 最後に成功したデータのまま無言だった。error を呼び出し元(App)へ返してバナー表示する。", "gameDataError: gameDataError ? describeGameDataError(gameDataError, 'データの取得に失敗しました') : null,\n        refetchGameData: () => { void refetchGameData(); },")
 
 ### `completeQuest` (ラッパー) & `completeQuestMutation`
 
@@ -208,6 +204,11 @@
 
 * **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。`mutateAsync`の戻り値は`as unknown as PurchaseResponse`でキャストされる。
 * 根拠: (行番号: 298, 301, 303〜305 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };", "const res = await buyRewardMutation.mutateAsync({ user, reward }) as unknown as PurchaseResponse;")
+
+### 戻り値オブジェクト
+
+* **役割**: `users`/`quests`/`rewards`（未取得時は`masterData.js`のフォールバック）、`completedQuests`/`pendingQuests`/`chronicle`（未取得時は空配列）、`isLoading`、`gameDataError`/`refetchGameData`（Issue #390）、各ラッパー関数、`refreshData`を返す。**（Issue #390で削除）** `adventureLogs`（`gameData.logs`）と`familyStats`（`chronicleData.stats`）はどのコンポーネントからも消費されていなかったため戻り値から削除した（レスポンス型`GameDataResponse.logs`/`ChronicleResponse.stats`自体は残る）。
+* 根拠: (行番号: 342〜362 / 抜粋: "return {\n        users: gameData?.users || INITIAL_USERS,\n        quests: gameData?.quests || MASTER_QUESTS,\n        rewards: gameData?.rewards || MASTER_REWARDS,\n        completedQuests: gameData?.completedQuests || [],\n        pendingQuests: gameData?.pendingQuests || [],\n        chronicle: chronicleData?.chronicle || [],\n        isLoading: isGameDataLoading,")
 
 ### `refreshData`
 

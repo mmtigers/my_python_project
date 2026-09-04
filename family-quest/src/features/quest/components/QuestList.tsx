@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
+import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ID, User, Quest, QuestHistory } from '@/types';
+import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
-import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
+import { useQuestStatus, getQuestLockState, getQuestProcessingKey } from '../hooks/useQuestStatus';
+import { isQuestVisibleToUser } from '@/lib/questTargeting';
 import { useSound } from '@/hooks/useSound';
 import { useLongPress } from '@/hooks/useLongPress';
 
@@ -16,7 +17,10 @@ interface QuestListProps {
     onQuestClick: (quest: Quest) => void;
     // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
     // クールダウンを発火させるための通知(App側で管理)。
-    completedSignal: { id: ID; nonce: number } | null;
+    completedSignal: CompletedSignal | null;
+    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合(App側で管理)。
+    // 該当カードはローディング表示になりタップ・長押しを受け付けない。
+    processingQuestKeys?: string[];
     // 横画面4人表示のパネル内で使うためのモード。
     // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
     // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
@@ -43,10 +47,11 @@ const QuestItem: React.FC<{
     pendingQuests: QuestHistory[];
     currentUser: User;
     onClick: (q: Quest) => void;
-    completedSignal: { id: ID; nonce: number } | null;
+    completedSignal: CompletedSignal | null;
+    isProcessing?: boolean;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, panelMode, iconFirst }) => {
 
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
@@ -61,13 +66,19 @@ const QuestItem: React.FC<{
     // 完了APIが実際に成功した時点(App側からのcompletedSignal)でのみ発火させる。
     // 以前はタップ即時に鳴らしていたため、確認モーダルで「キャンセル」しても完了音が鳴り、
     // 無限クエストは60秒間タップ不能になっていた。
+    // #363: 横画面の4人パネルでは同じ completedSignal が全パネルの同一クエストに届くため、
+    // クエストidだけでなく「誰の完了か」(userId)も一致する場合のみクールダウンに入れる。
+    // 以前は id しか見ておらず、兄が完了した無限クエストが妹・パパ・ママのパネルでも
+    // 60秒 "Wait..." になっていた(サーバー側のクールダウンは (user, quest) 単位)。
     const questId = quest.quest_id;
+    const currentUserId = currentUser.user_id;
     useEffect(() => {
-        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;
+        if (!isInfinite || !completedSignal) return;
+        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) return;
         setIsCooldown(true);
         const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
         return () => clearTimeout(timer);
-    }, [completedSignal, isInfinite, questId]);
+    }, [completedSignal, isInfinite, questId, currentUserId]);
 
     // ボーナス計算
     const bonusGold = quest.bonus_gold || 0;
@@ -82,7 +93,10 @@ const QuestItem: React.FC<{
     const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
     const isSharedDoneByOther = isSharedCompleted || isSharedPending;
     const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
-    const isEffectivelyLocked = isLocked || isSharedDoneByOther;
+    // #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、
+    // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを
+    // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。
+    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;
 
     // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの
     // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。
@@ -91,19 +105,20 @@ const QuestItem: React.FC<{
     const runComplete = () => {
         // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。
         // ここではあくまで確認モーダルを開く(onClick)のみを行う。
-        if (isCooldown || isEffectivelyLocked) return;
+        // #391: 完了/取消APIの送信中(isProcessing)は再タップを受け付けない。
+        if (isCooldown || isEffectivelyLocked || isProcessing) return;
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
     const runCancel = () => {
-        if (isEffectivelyLocked) return;
+        if (isEffectivelyLocked || isProcessing) return;
         play('cancel');
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
-    const { isPressing, pressProgress, handlers: longPressHandlers } = useLongPress({
+    const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({
         onLongPress: runCancel,
-        disabled: !canCancel,
+        disabled: !canCancel || isProcessing,
         thresholdMs: 550,
     });
 
@@ -111,6 +126,11 @@ const QuestItem: React.FC<{
     // 完了済み・申請中は canCancel 側(長押し)に処理を委ねる。
     const handleTapComplete = () => {
         if (canCancel || isCooldown) return; // 長押し対象/クールダウン中はタップでは何もしない
+        // #389: 長押し(取消)が550msで発火 → 取消API → invalidateQueries → 再取得(LAN内で
+        // 100〜300ms)が指を離すより先に終わると、同じDOMノードに本ハンドラが付いた状態で
+        // pointerup 由来の click が届き、直前に取り消したクエストの完了確認モーダルが
+        // 開いてしまう(子どもが「はい」を押せば即再申請)。長押し発火直後の click は無視する。
+        if (wasFiredRecently()) return;
         runComplete();
     };
 
@@ -190,8 +210,29 @@ const QuestItem: React.FC<{
                 {...(canCancel ? longPressHandlers : {})}
             >
                 {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
+                {/* #412(F-L9): 外部URL(transparenttextures.com)への依存を廃止し、
+                    ネットワーク不要なCSSのみのドット柄(stardust風)に置き換える。
+                    以前はオフライン時に画像が欠落するだけでなく、常時起動キオスク端末で
+                    描画のたびに不要な外部通信が発生し続けていた。 */}
                 {isRandom && !isDone && !isPending && (
-                    <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+                    <div
+                        className="absolute inset-0 opacity-20 pointer-events-none"
+                        style={{
+                            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.9) 1px, transparent 1.5px)',
+                            backgroundSize: '14px 14px',
+                        }}
+                    ></div>
+                )}
+
+                {/* #391: 完了/取消APIの送信中オーバーレイ。応答が返るまでカードを操作不能にし、
+                    「送信中」であることを見せる(再タップで確認モーダルが二重に開くのを防ぐ) */}
+                {isProcessing && (
+                    <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg cursor-wait" aria-busy="true">
+                        <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                            <Loader2 size={16} className="animate-spin" />
+                            送信中...
+                        </div>
+                    </div>
                 )}
 
                 {/* クールダウン時のオーバーレイ: 残り時間を円形プログレスで可視化 */}
@@ -293,30 +334,21 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {
-    const jsDay = new Date().getDay();
-    const currentDay = (jsDay + 6) % 7;
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, processingQuestKeys, panelMode, iconFirst }: QuestListProps) {
     const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
 
     const sortedQuests = useMemo(() => {
         return quests.filter(q => {
             // ★変更: ターゲット判定 (role プレフィックスの対応)
-            if (q.target_user && q.target_user !== 'all') {
-                if (q.target_user === 'siblings') {
-                    // 兄妹連携クエスト: 対象は子ども(role_child)全員
-                    if (currentUser.role !== 'role_child') return false;
-                } else if (q.target_user.startsWith('role_')) {
-                    if (currentUser.role !== q.target_user) return false;
-                } else if (q.target_user !== currentUser?.user_id) {
-                    return false;
-                }
-            }
+            // #412(品質): 判定ロジックは lib/questTargeting.ts に集約(FamilyDashboard.tsx と共通)。
+            if (!isQuestVisibleToUser(q, currentUser)) return false;
 
-            if (q.quest_type === 'daily' && q.days) {
-                if (Array.isArray(q.days) && q.days.length === 0) return true;
-                const dayList = Array.isArray(q.days) ? q.days : String(q.days).split(',').map(Number);
-                if (!dayList.includes(currentDay)) return false;
-            }
+            // #412(F-L1): quest.days による曜日フィルタは削除した。サーバー側
+            // (quest_service.py の filter_active_quests → _is_quest_currently_active)
+            // が既にJST基準で day_of_week フィルタ済みの quests のみを返しているため、
+            // ここで端末のローカルタイムゾーンを使って再フィルタすると、端末TZ≠JSTの
+            // 時間帯(JSTの0〜9時に相当するUTC以西のTZ等)で当日のクエストが消えてしまう
+            // (曜日境界の食い違い)。
             return true;
         }).sort((a, b) => {
             // ▼ ソート順: 進行中の期間限定 → 通常 → ロック中 → 承認待ち → 完了済み
@@ -352,7 +384,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
             const idB = Number(b.quest_id ?? 0);
             return idB - idA;
         });
-    }, [quests, currentUser, currentDay, completedQuests, pendingQuests]);
+    }, [quests, currentUser, completedQuests, pendingQuests]);
 
     // ▼ 角度①: 「今できること」だけを最初に見せるため、完了済み/ロック中は折りたたむ。
     // 申請中(承認待ち)は本人がまだ気にする状態なので折りたたまず常時表示する。
@@ -396,6 +428,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         currentUser={currentUser}
                         onClick={onQuestClick}
                         completedSignal={completedSignal}
+                        isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />

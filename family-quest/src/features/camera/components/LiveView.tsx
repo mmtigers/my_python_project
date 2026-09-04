@@ -28,11 +28,24 @@ const LiveView: React.FC<LiveViewProps> = ({ cameras }) => {
 
             {!isSingleView && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* #412(F-L5): 以前はonClick付きのdivで、キーボード操作では1台拡大表示に
+                        切り替えられなかった。HlsPlayerが内部でエラー時に再試行<button>を
+                        描画しうるため(#392)、<button>の入れ子(不正なHTML)を避けてdivのまま
+                        role="button"・tabIndex・Enter/Space対応のキーボードハンドラを付与する */}
                     {cameras.map(camera => (
                         <div
                             key={camera.id}
+                            role="button"
+                            tabIndex={0}
                             className="cursor-pointer border border-gray-700 rounded overflow-hidden shadow-md"
                             onClick={() => setSelectedCamera(camera.id)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    setSelectedCamera(camera.id);
+                                }
+                            }}
+                            aria-label={`${camera.name}を拡大表示`}
                         >
                             <div className="bg-gray-800 text-white p-2 text-center text-sm font-bold tracking-wider">
                                 {camera.name}

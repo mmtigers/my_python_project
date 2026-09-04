@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `53f4ba8` |
 
 ## 関連ドキュメント
 
@@ -42,7 +43,7 @@
 
 ### `LiveView`
 
-* **役割**: 監視カメラのライブ映像を一覧グリッド表示、またはクリックされたカメラのみを単独で大きく表示するコンポーネント。
+* **役割**: 監視カメラのライブ映像を一覧グリッド表示、またはクリックされたカメラのみを単独で大きく表示するコンポーネント。**（Issue #412 F-L5で修正）** グリッド表示時の各カメラタイルは以前`onClick`付きの`div`で、キーボード操作では1台拡大表示に切り替えられなかった。`role="button"`・`tabIndex={0}`・`aria-label`（`{camera.name}を拡大表示`）と、`Enter`/`Space`で`setSelectedCamera`を呼ぶ`onKeyDown`を付与した。`HlsPlayer`がエラー時に内部で「再試行」`<button>`（Issue #392）を描画しうるため、タイル自体を`<button>`にすると`<button>`の入れ子という不正なHTMLになる。そのためタイルは`div`のまま`role="button"`パターン（`Card.tsx`と同様）で対応している。
 * 根拠: [`LiveView`] (行番号: 9〜49 / 抜粋: "const LiveView: React.FC<LiveViewProps> = ({ cameras }) => {")
 
 

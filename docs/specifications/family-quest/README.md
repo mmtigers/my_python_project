@@ -9,7 +9,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [App.md](./App.md) | ルートコンポーネント。アクティブなタブ・表示モード・選択中ユーザーなどのUI状態を一元管理し、`useLayoutMode`が返すレイアウトモードに応じて横画面用`FamilyDashboard`（4人常時表示）または縦画面用のタブ切替UIを描画する。 |
-| [main.md](./main.md) | Reactツリーのレンダリングとプロバイダ（React Query等）設定を行うエントリーポイント。URLパスに`/camera`を含むかで`CameraDashboard`または`App`をルートにマウントする。 |
+| [main.md](./main.md) | Reactツリーのレンダリングとプロバイダ（React Query等）設定を行うエントリーポイント。URLパスに`/camera`を含むかで`CameraDashboard`または`App`をルートにマウントする。PWAのService Workerを`registerSW`で明示登録し、1時間ごとの更新チェックと新SW有効化時の自動再読み込みを行う。 |
 
 ## src/components/layout
 
@@ -25,6 +25,7 @@
 | [AvatarUploader.md](./src/components/ui/AvatarUploader.md) | アバター画像の選択・プレビュー・サーバーへのアップロードを行うモーダルUIコンポーネント。エラー・成功メッセージはモーダル内のインラインUIで表示する。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
+| [ChunkErrorBoundary.md](./src/components/ui/ChunkErrorBoundary.md) | `lazy()`チャンクの読み込み失敗(SW更新後の旧チャンク404)を捕捉し自動再読み込みするエラーバウンダリ。それ以外の描画エラーには「再読み込み」ボタン付きフォールバックを表示する。 |
 | [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
 | [CountUp.md](./src/components/ui/CountUp.md) | `framer-motion`のバネ物理モデルを用いて数値をカウントアップ表示するコンポーネント。プレフィックス・サフィックス・カンマ区切りに対応。 |
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
@@ -102,8 +103,10 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [apiClient.md](./src/lib/apiClient.md) | バックエンドAPIへ通信するHTTPクライアント（`ApiClient`クラス）を提供。ベースURL解決・共通ヘッダ設定・JSON送受信・エラーハンドリングをカプセル化する。 |
+| [errorDetail.md](./src/lib/errorDetail.md) | `apiClient`がスローした例外から表示用文字列を取り出す`extractErrorDetail`と、`/api/quest/data`取得失敗（Zod検証失敗を含む）をバナー向けに要約する`describeGameDataError`を提供する。 |
 | [masterData.md](./src/lib/masterData.md) | サーバー接続エラー発生時のみ使用されるフォールバック用のダミーデータを定義・エクスポートする。 |
 | [queryClient.md](./src/lib/queryClient.md) | `@tanstack/react-query`の`QueryClient`を初期化し、システム全体のデータフェッチングのデフォルト動作（再試行回数・キャッシュ期限等）を定義したインスタンスをエクスポートする。 |
+| [questTargeting.md](./src/lib/questTargeting.md) | クエストの`target_user`判定（`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致）を行う`isQuestVisibleToUser`を提供する。`QuestList.tsx`と`FamilyDashboard.tsx`で重複していたロジックを集約したもの。 |
 | [utils.md](./src/lib/utils.md) | Tailwind CSSのクラス名をマージ（結合・競合解決）するユーティリティ関数`cn`を提供する。 |
 
 ## src/types

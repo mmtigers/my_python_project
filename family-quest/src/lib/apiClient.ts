@@ -29,6 +29,23 @@ interface ErrorResponse {
     detail?: string | unknown;
 }
 
+// #412(F-L3): FastAPIのバリデーションエラー(422)は detail が
+// [{loc, msg, type}, ...] という配列で返る。以前は文字列以外の detail を
+// 一律 `API Error: ${status}` にフォールバックしていたため、422の具体的な
+// エラー内容(どのフィールドが不正か等)がユーザーにもconsoleにも伝わらなかった。
+function extractDetailMessage(detail: unknown): string | undefined {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+        const messages = detail
+            .map(item => (item && typeof item === 'object' && 'msg' in item)
+                ? String((item as { msg: unknown }).msg)
+                : null)
+            .filter((m): m is string => !!m);
+        if (messages.length > 0) return messages.join(' / ');
+    }
+    return undefined;
+}
+
 class ApiClient {
     private baseUrl: string;
 
@@ -82,14 +99,25 @@ class ApiClient {
             const response = await fetch(url, options);
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({})) as ErrorResponse;
-                const errorMessage = typeof errorData.detail === 'string'
-                    ? errorData.detail
-                    : `API Error: ${response.status}`;
+                const errorMessage = extractDetailMessage(errorData.detail) ?? `API Error: ${response.status}`;
                 throw new Error(errorMessage);
             }
-            return await response.json() as T;
+            // #412(F-L3): 204 No Content や空ボディの成功レスポンス(cancel/reject等の
+            // 一部エンドポイント)に対して response.json() を呼ぶと
+            // "Unexpected end of JSON input" で失敗していた。ボディを一度テキストとして
+            // 読み、空ならパースせずに undefined を返す。
+            if (response.status === 204) return undefined as T;
+            const text = await response.text();
+            return (text ? JSON.parse(text) : undefined) as T;
         } catch (error) {
             console.error(`API Request Failed [${endpoint}]:`, error);
+            // #412(F-L3): 上のthrow new Error(errorMessage)(HTTPエラー応答)はそのまま
+            // 透過させる。それ以外(fetch自体の失敗によるTypeError、あるいは不正な
+            // JSONによるSyntaxError)は、"Failed to fetch"のような生のブラウザ文言が
+            // そのままモーダルに表示されてしまうのを避け、意味の伝わる文言に変換する。
+            if (error instanceof TypeError || error instanceof SyntaxError) {
+                throw new Error('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');
+            }
             throw error;
         }
     }

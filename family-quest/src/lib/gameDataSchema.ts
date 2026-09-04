@@ -14,16 +14,20 @@
 // 意図的に .strict() は使わない。
 import { z } from 'zod';
 
+// #390: quest_users の avatar / job_class / role は NULL 可のカラム
+// (migrations/0000_baseline_schema.sql, 0001_add_quest_users_role.sql)。
+// quest_data.py に role 無しでメンバーを追加すると "role": null で届くため、
+// .optional() だけでは Zod が拒否して全端末が「サーバーに繋がりません」になる。
 const userSchema = z.object({
     user_id: z.string(),
     name: z.string(),
     level: z.number(),
     exp: z.number(),
-    avatar: z.string().optional(),
-    medal_count: z.number().optional(),
-    job_class: z.string().optional(),
+    avatar: z.string().nullable().optional(),
+    medal_count: z.number().nullable().optional(),
+    job_class: z.string().nullable().optional(),
     gold: z.number(),
-    role: z.string().optional(),
+    role: z.string().nullable().optional(),
     hp: z.number().optional(),
     maxHp: z.number().optional(),
 });
@@ -59,14 +63,17 @@ const rewardSchema = z.object({
     target: z.string().nullable().optional(),
 });
 
+// #390: quest_history.gold_earned / exp_earned は NULL 可のカラム。
+// status はサーバーが生成する 'pending' | 'approved' | 'rejected' のみ
+// ('completed' はどこにも生成されない値だったため削除)。
 const questHistorySchema = z.object({
     id: z.number().optional(),
     user_id: z.string(),
     quest_id: z.union([z.number(), z.string()]),
     quest_title: z.string().nullable().optional(),
-    status: z.enum(['pending', 'approved', 'rejected', 'completed']),
-    gold_earned: z.number().optional(),
-    exp_earned: z.number().optional(),
+    status: z.enum(['pending', 'approved', 'rejected']),
+    gold_earned: z.number().nullable().optional(),
+    exp_earned: z.number().nullable().optional(),
     linked_history_id: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
