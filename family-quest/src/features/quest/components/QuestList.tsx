@@ -107,7 +107,7 @@ const QuestItem: React.FC<{
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
-    const { isPressing, pressProgress, handlers: longPressHandlers } = useLongPress({
+    const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({
         onLongPress: runCancel,
         disabled: !canCancel,
         thresholdMs: 550,
@@ -117,6 +117,11 @@ const QuestItem: React.FC<{
     // 完了済み・申請中は canCancel 側(長押し)に処理を委ねる。
     const handleTapComplete = () => {
         if (canCancel || isCooldown) return; // 長押し対象/クールダウン中はタップでは何もしない
+        // #389: 長押し(取消)が550msで発火 → 取消API → invalidateQueries → 再取得(LAN内で
+        // 100〜300ms)が指を離すより先に終わると、同じDOMノードに本ハンドラが付いた状態で
+        // pointerup 由来の click が届き、直前に取り消したクエストの完了確認モーダルが
+        // 開いてしまう(子どもが「はい」を押せば即再申請)。長押し発火直後の click は無視する。
+        if (wasFiredRecently()) return;
         runComplete();
     };
 

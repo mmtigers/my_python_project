@@ -1,7 +1,7 @@
-import { render, screen, cleanup } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QuestList from './QuestList';
-import { CompletedSignal, Quest, User } from '@/types';
+import { CompletedSignal, Quest, QuestHistory, User } from '@/types';
 
 // #363: 横画面4人パネルでは App が管理する同じ completedSignal が全パネルの
 // QuestList に渡される。無限クエスト(target all)を兄が完了したとき、兄のパネル
@@ -59,5 +59,64 @@ describe('QuestList completedSignal cooldown (#363)', () => {
     it('does nothing without a signal', () => {
         renderPanel(son, null);
         expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
+    });
+});
+
+// #389: 長押し(取消)が閾値に達して取消APIが走り、その再取得で「完了済み」→「未完了」に
+// 切り替わった直後、指を離した瞬間の click が同じカードの handleTapComplete に届いて
+// 「完了確認モーダル」(onQuestClick)が開いてしまう競合の再現テスト。
+describe('QuestList long-press cancel -> click race (#389)', () => {
+    const dailyQuest: Quest = { quest_id: 20, title: '歯みがき', quest_type: 'daily', target_user: 'all', gold_gain: 3 };
+    // 申請中(pending)のカードは折りたたまれず常時表示され、かつ長押し取消の対象になる
+    const pending: QuestHistory = { id: 1, user_id: 'son', quest_id: 20, status: 'pending' };
+
+    const renderList = (pendingRows: QuestHistory[], onQuestClick: (q: Quest) => void) => (
+        <QuestList
+            quests={[dailyQuest]}
+            completedQuests={[]}
+            pendingQuests={pendingRows}
+            currentUser={son}
+            onQuestClick={onQuestClick}
+            completedSignal={null}
+            panelMode
+        />
+    );
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    it('ignores the click that lands right after a long-press cancel, but accepts a later tap', () => {
+        const onQuestClick = vi.fn();
+        const { rerender } = render(renderList([pending], onQuestClick));
+        const title = screen.getByText('歯みがき');
+
+        // 1. 申請中カードを長押し → 550ms で取消(onQuestClick 1回目)が発火
+        fireEvent.pointerDown(title);
+        act(() => {
+            vi.advanceTimersByTime(550);
+        });
+        expect(onQuestClick).toHaveBeenCalledTimes(1);
+
+        // 2. 取消APIの応答と再取得が指を離すより先に終わり、カードが「未申請」に切り替わる
+        rerender(renderList([], onQuestClick));
+
+        // 3. 指を離した瞬間の pointerup → click が同じカードに届く
+        fireEvent.pointerUp(title);
+        fireEvent.click(title);
+        // 修正前はここで完了確認(onQuestClick 2回目)が開いていた
+        expect(onQuestClick).toHaveBeenCalledTimes(1);
+
+        // 4. 猶予時間を過ぎてからの通常タップは完了確認として受け付ける
+        act(() => {
+            vi.advanceTimersByTime(400);
+        });
+        fireEvent.click(title);
+        expect(onQuestClick).toHaveBeenCalledTimes(2);
     });
 });
