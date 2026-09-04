@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { CompletedSignal, User, Quest, QuestHistory, Reward } from '@/types';
+import { CompletedSignal, ID, User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -41,6 +41,11 @@ interface FamilyDashboardProps {
     // クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、
     // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。
     completedSignal: CompletedSignal | null;
+    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合。各パネルの QuestList へ透過的に渡す。
+    processingQuestKeys?: string[];
+    // #391(F-L8): 承認APIが送信中の履歴id集合と一括承認中フラグ。ApprovalList のボタン表示に使う。
+    busyHistoryIds?: ID[];
+    isApprovingAll?: boolean;
     onAvatarClick: (user: User) => void;
 }
 
@@ -50,7 +55,8 @@ interface FamilyDashboardProps {
 // 独立画面を持たず、このメイン画面上部に常時統合表示する。
 const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
     users, quests, completedQuests, pendingQuests, rewards,
-    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal, onAvatarClick,
+    onQuestClick, onBuyReward, onApprove, onReject, onApproveAll, completedSignal,
+    processingQuestKeys, busyHistoryIds, isApprovingAll, onAvatarClick,
 }) => {
     const { iconFirstUserIds, userThemeColors } = useSettings();
     const orderedUsers = sortByFamilyOrder(users);
@@ -90,6 +96,8 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                     onApprove={onApprove}
                     onReject={onReject}
                     onApproveAll={onApproveAll}
+                    busyHistoryIds={busyHistoryIds}
+                    isApprovingAll={isApprovingAll}
                 />
             )}
 
@@ -110,6 +118,7 @@ const FamilyDashboard: React.FC<FamilyDashboardProps> = ({
                         onQuestClick={(q) => onQuestClick(user, q)}
                         onBuyReward={(r) => onBuyReward(user, r)}
                         completedSignal={completedSignal}
+                        processingQuestKeys={processingQuestKeys}
                         onAvatarClick={() => onAvatarClick(user)}
                     />
                 ))}
@@ -132,12 +141,13 @@ interface FamilyPanelProps {
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
     completedSignal: CompletedSignal | null;
+    processingQuestKeys?: string[];
     onAvatarClick: () => void;
 }
 
 const FamilyPanel: React.FC<FamilyPanelProps> = ({
     user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,
-    onInteract, onQuestClick, onBuyReward, completedSignal, onAvatarClick,
+    onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
 
@@ -201,6 +211,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                         currentUser={user}
                         onQuestClick={onQuestClick}
                         completedSignal={completedSignal}
+                        processingQuestKeys={processingQuestKeys}
                         panelMode
                         iconFirst={iconFirst}
                     />

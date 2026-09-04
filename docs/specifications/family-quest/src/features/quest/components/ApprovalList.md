@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `c29d467` |
 
 ## 関連ドキュメント
 
@@ -48,8 +49,8 @@
 
 ### `Props` (型定義)
 
-* **役割**: `ApprovalList`が受け取るプロパティの型定義。承認待ちクエスト一覧・ユーザー一覧に加え、承認・却下・一括承認をそれぞれ親に委譲するコールバック（`onApprove`/`onReject`/`onApproveAll`）を持つ。
-* 根拠: (行番号: 7〜13 / 抜粋: "type Props = {\n    pendingQuests: QuestHistory[];\n    users: User[];\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n};")
+* **役割**: `ApprovalList`が受け取るプロパティの型定義。承認待ちクエスト一覧・ユーザー一覧に加え、承認・却下・一括承認をそれぞれ親に委譲するコールバック（`onApprove`/`onReject`/`onApproveAll`）を持つ。**（Issue #391 / F-L8で追加）** 任意の`busyHistoryIds?: ID[]`（承認APIが送信中の履歴id。`App.tsx`の`approvingHistoryIdsRef`の写し）と`isApprovingAll?: boolean`（一括承認の実行中）を受け取り、該当行のボタン・スワイプと「すべて承認」ボタンの表示制御に使う。
+* 根拠: (行番号: 7〜18 / 抜粋: "type Props = {\n    pendingQuests: QuestHistory[];\n    users: User[];\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n    // #391(F-L8): 承認APIが送信中の履歴id(App側の approvingHistoryIdsRef の写し)。\n    // 該当行の承認/却下ボタンをローディング表示にし、スワイプも無効化する。\n    busyHistoryIds?: ID[];\n    // 一括承認の実行中。「すべて承認」ボタンをローディング表示にする。\n    isApprovingAll?: boolean;\n};")
 
 ### `SWIPE_THRESHOLD` (モジュールレベル定数)
 
@@ -85,10 +86,12 @@
 ### `ApprovalList`
 
 * **役割**: 承認待ちクエストの一覧を表示し、各クエストについて親から渡されたハンドラ（`onApprove`/`onReject`）を、複数件あれば一括承認ハンドラ（`onApproveAll`）を、ボタン押下またはスワイプ操作から呼び出すReactコンポーネント。`pendingQuests`が空の場合は何も描画しない。`collapsed`が真の間は見出し行のみを表示し、詳細リストを畳む。
-* 根拠: (行番号: 52〜125 / 抜粋: "const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll }) => {")
+* 根拠: (行番号: 57〜133 / 抜粋: "const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll, busyHistoryIds = [], isApprovingAll = false }) => {")
+* **（Issue #391 / F-L8）** 各行は`busy = quest.id != null && busyHistoryIds.includes(quest.id)`を判定し、`busy`なら`SwipeableRow`にスワイプハンドラを渡さず（ドラッグ無効）、却下ボタンは`disabled`、承認ボタンは`isLoading`（`Button`のスピナー表示＋disabled）にする。「クエストをすべて承認」ボタンは`isApprovingAll`の間`isLoading`になる。以前は一括承認中に個別の「承認」をタップすると、サーバー側で既に承認済みのため400「承認待ちではありません」のエラーモーダルが出ていた。
+* 根拠: (行番号: 86, 96〜104, 118〜123 / 抜粋: "<Button variant=\"success\" size=\"sm\" onClick={onApproveAll} isLoading={isApprovingAll}>", "const busy = quest.id != null && busyHistoryIds.includes(quest.id);", "onSwipeApprove={busy ? undefined : () => onApprove(quest)}\n                                onSwipeReject={busy ? undefined : () => onReject(quest)}", "onClick={() => onReject(quest)} disabled={busy}", "onClick={() => onApprove(quest)} isLoading={busy}")
 
-* **引数/リクエスト**: `Props` (`pendingQuests: QuestHistory[]`, `users: User[]`, `onApprove: (history: QuestHistory) => void`, `onReject: (history: QuestHistory) => void`, `onApproveAll: () => void`)
-* 根拠: (行番号: 7〜13, 52)
+* **引数/リクエスト**: `Props` (`pendingQuests: QuestHistory[]`, `users: User[]`, `onApprove: (history: QuestHistory) => void`, `onReject: (history: QuestHistory) => void`, `onApproveAll: () => void`, `busyHistoryIds?: ID[]`, `isApprovingAll?: boolean`)
+* 根拠: (行番号: 7〜18, 57)
 
 * **戻り値/レスポンス**: JSX.Element（`pendingQuests`が1件以上ある場合）または `null`（0件の場合）
 * 根拠: (行番号: 60 / 抜粋: "if (pendingQuests.length === 0) return null;")

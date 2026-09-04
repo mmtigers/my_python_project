@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `4062600` |
+| 解析基準コミット | `c29d467` |
 
 ## 関連ドキュメント
 
@@ -59,7 +59,8 @@
 
 ### `QuestListProps` / `BadgeCandidate` / `QuestItem`のprops型
 
-* **役割**: `QuestList`が受け取るProps型定義(`QuestListProps`)。`panelMode`（パネル内固定レイアウト用）と`iconFirst`（アイコン主体・非識字年齢向け表示用）に加え、Issue #102で`completedSignal: { id: ID; nonce: number } | null`が追加された（完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるため、`App`側から通知される）。`BadgeCandidate`はバッジ表示の優先度付け（`key`, `priority`, `node`）に使う内部型。`QuestItem`側にも同じ`completedSignal`を含む、`panelMode?: boolean`, `iconFirst?: boolean`を含むprops型が個別に定義され、`QuestList`から素通しで渡される。
+* **役割**: `QuestList`が受け取るProps型定義(`QuestListProps`)。`panelMode`（パネル内固定レイアウト用）と`iconFirst`（アイコン主体・非識字年齢向け表示用）に加え、Issue #102で`completedSignal: { id: ID; nonce: number } | null`が追加された（完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるため、`App`側から通知される）。`BadgeCandidate`はバッジ表示の優先度付け（`key`, `priority`, `node`）に使う内部型。`QuestItem`側にも同じ`completedSignal`を含む、`panelMode?: boolean`, `iconFirst?: boolean`を含むprops型が個別に定義され、`QuestList`から素通しで渡される。**（Issue #391で追加）** `QuestListProps`に任意の`processingQuestKeys?: string[]`（完了/取消APIが送信中の`(user_id, quest_id)`キー集合、`App`側で管理）が追加され、`QuestList`は各カードについて`getQuestProcessingKey(currentUser.user_id, q.quest_id)`が含まれるかを`QuestItem`の`isProcessing?: boolean`として渡す。
+* 根拠: `processingQuestKeys` / `isProcessing` (行番号: 20〜22, 50, 426 / 抜粋: "// #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合(App側で管理)。\n    // 該当カードはローディング表示になりタップ・長押しを受け付けない。\n    processingQuestKeys?: string[];", "isProcessing?: boolean;", "isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}")
 * 根拠: `interface QuestListProps {` (行番号: 11〜27 / 抜粋: "onQuestClick: (quest: Quest) => void;\n    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの\n    // クールダウンを発火させるための通知(App側で管理)。\n    completedSignal: { id: ID; nonce: number } | null;")
 * 根拠: `BadgeCandidate` (行番号: 31〜35 / 抜粋: "interface BadgeCandidate {\n    key: string;\n    priority: number;\n    node: React.ReactNode;\n}")
 * 根拠: `QuestItem`のprops型 (行番号: 40〜49 / 抜粋: "completedSignal: { id: ID; nonce: number } | null;\n    panelMode?: boolean;\n    iconFirst?: boolean;\n}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {")
@@ -94,7 +95,7 @@
   * `onClick`コールバックを、対象クエストに`_isInfinite`プロパティを動的付与したオブジェクトとともに呼び出す（`runComplete`は確認モーダルを開くため、`runCancel`は取消実行のため）
   * 根拠: (行番号: 95, 101 / 抜粋: "onClick({ ...quest, _isInfinite: !!isInfinite });")
 
-* **エラーハンドリング**: なし。`runComplete`は`isCooldown`または`isEffectivelyLocked`の場合、`runCancel`は`isEffectivelyLocked`の場合にそれぞれ冒頭で処理を中断する。`handleTapComplete`は`canCancel`（長押し対象）または`isCooldown`の場合、および**直前の長押し（取消）発火から猶予時間（`useLongPress`の`clickSuppressMs`、既定400ms）以内の場合（Issue #389）**はタップでは何もしない。
+* **エラーハンドリング**: なし。`runComplete`は`isCooldown`または`isEffectivelyLocked`または`isProcessing`（Issue #391: 完了/取消APIの送信中）の場合、`runCancel`は`isEffectivelyLocked`または`isProcessing`の場合にそれぞれ冒頭で処理を中断する。`useLongPress`も`isProcessing`の間は`disabled`になる。`handleTapComplete`は`canCancel`（長押し対象）または`isCooldown`の場合、および**直前の長押し（取消）発火から猶予時間（`useLongPress`の`clickSuppressMs`、既定400ms）以内の場合（Issue #389）**はタップでは何もしない。
 * 根拠: (行番号: 100, 105, 119〜126行目 / 抜粋: "if (isCooldown || isEffectivelyLocked) return;", "if (isEffectivelyLocked) return;", "if (canCancel || isCooldown) return; // 長押し対象/クールダウン中はタップでは何もしない", "if (wasFiredRecently()) return;")
 
 ### `QuestList`
@@ -253,6 +254,8 @@ graph TD
 * 共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`）が自分以外の値を持つ場合、`isEffectivelyLocked`が真となりクリック不可・長押し無効になる。この判定は`useQuestStatus`が返す`isLocked`とは別に本ファイル内で独自に算出されている。
 * 根拠: (行番号: 65〜69 / 抜粋: "const isEffectivelyLocked = isLocked || isSharedDoneByOther;")
 * 完了済み・申請中クエストの取消操作は、以前存在した確認クリックではなく`useLongPress`による550msの長押し（`canCancel`が真のときのみ有効）に統一されている。通常タップは`canCancel`または`isCooldown`のときには何も起きない（`handleTapComplete`が早期リターン）。
+* **[修正済み] 送信中のカードが再タップできて確認モーダルが二重に開く（Issue #391）**: `App.tsx`の`executeConfirm`は確認モーダルを閉じてから`await runQuestAction`するため、応答が返るまでカードは未完了のまま再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残っていた。修正後は`App`が管理する送信中キー集合（`processingQuestKeys`）に`getQuestProcessingKey(currentUser.user_id, quest.quest_id)`が含まれるカードを`isProcessing`とし、「送信中...」オーバーレイ（`Loader2`スピナー、`aria-busy`）を表示してタップ（`runComplete`/`handleTapComplete`）・長押し（`useLongPress`の`disabled`）を無効化する。`App.handleQuestClick`側でも同じ集合で再タップを静かに無視する。
+* 根拠: (行番号: 104〜105, 110, 117, 213〜222 / 抜粋: "if (isCooldown || isEffectivelyLocked || isProcessing) return;", "disabled: !canCancel || isProcessing,", "{isProcessing && (\n                    <div className=\"absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg cursor-wait\" aria-busy=\"true\">", "送信中...")
 * **[修正済み] 長押し取消→指を離した瞬間のclickで完了確認が開く競合（Issue #389）**: `canCancel`の真偽で`onClick={handleTapComplete}`と長押しハンドラを同じ`Card`に差し替えているため、長押しが550msで発火→取消API→`invalidateQueries`→再取得（LAN内で100〜300ms）が指を離すより先に終わると、`canCancel`が偽になった同じDOMノードに`handleTapComplete`が付いた状態で`pointerup`由来の`click`が届き、直前に取り消したクエストの完了確認モーダルが開いていた（子どもが「はい」を押せば即再申請）。修正後は`useLongPress`が返す`wasFiredRecently()`（直近の長押し発火から400ms以内なら真）を`handleTapComplete`の冒頭で確認し、該当する`click`を無視する。再現テストは`QuestList.test.tsx`。
 * 根拠: (行番号: 110〜126 / 抜粋: "const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({", "// #389: 長押し(取消)が550msで発火 → 取消API → invalidateQueries → 再取得(LAN内で\n        // 100〜300ms)が指を離すより先に終わると、同じDOMノードに本ハンドラが付いた状態で\n        // pointerup 由来の click が届き、直前に取り消したクエストの完了確認モーダルが\n        // 開いてしまう(子どもが「はい」を押せば即再申請)。長押し発火直後の click は無視する。\n        if (wasFiredRecently()) return;")
 * 根拠: (行番号: 71〜73, 95〜106 / 抜粋: "// 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの\n    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。\n    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;", "const handleTapComplete = () => {\n        if (canCancel || isCooldown) return;")

@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
+import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
-import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
+import { useQuestStatus, getQuestLockState, getQuestProcessingKey } from '../hooks/useQuestStatus';
 import { useSound } from '@/hooks/useSound';
 import { useLongPress } from '@/hooks/useLongPress';
 
@@ -17,6 +17,9 @@ interface QuestListProps {
     // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
     // クールダウンを発火させるための通知(App側で管理)。
     completedSignal: CompletedSignal | null;
+    // #391: 完了/取消APIが送信中の (user_id, quest_id) キー集合(App側で管理)。
+    // 該当カードはローディング表示になりタップ・長押しを受け付けない。
+    processingQuestKeys?: string[];
     // 横画面4人表示のパネル内で使うためのモード。
     // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
     // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
@@ -44,9 +47,10 @@ const QuestItem: React.FC<{
     currentUser: User;
     onClick: (q: Quest) => void;
     completedSignal: CompletedSignal | null;
+    isProcessing?: boolean;
     panelMode?: boolean;
     iconFirst?: boolean;
-}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {
+}> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, isProcessing = false, panelMode, iconFirst }) => {
 
     const [isCooldown, setIsCooldown] = useState(false);
     const COOLDOWN_MS = 60000;
@@ -97,19 +101,20 @@ const QuestItem: React.FC<{
     const runComplete = () => {
         // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。
         // ここではあくまで確認モーダルを開く(onClick)のみを行う。
-        if (isCooldown || isEffectivelyLocked) return;
+        // #391: 完了/取消APIの送信中(isProcessing)は再タップを受け付けない。
+        if (isCooldown || isEffectivelyLocked || isProcessing) return;
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
     const runCancel = () => {
-        if (isEffectivelyLocked) return;
+        if (isEffectivelyLocked || isProcessing) return;
         play('cancel');
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
     const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({
         onLongPress: runCancel,
-        disabled: !canCancel,
+        disabled: !canCancel || isProcessing,
         thresholdMs: 550,
     });
 
@@ -203,6 +208,17 @@ const QuestItem: React.FC<{
                 {/* ランダムクエストのキラキラ演出 (Card内部でoverflow-hiddenされる) */}
                 {isRandom && !isDone && !isPending && (
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-20 pointer-events-none"></div>
+                )}
+
+                {/* #391: 完了/取消APIの送信中オーバーレイ。応答が返るまでカードを操作不能にし、
+                    「送信中」であることを見せる(再タップで確認モーダルが二重に開くのを防ぐ) */}
+                {isProcessing && (
+                    <div className="absolute inset-0 bg-black/40 z-20 flex items-center justify-center rounded-lg cursor-wait" aria-busy="true">
+                        <div className="bg-white/90 text-black px-3 py-1 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                            <Loader2 size={16} className="animate-spin" />
+                            送信中...
+                        </div>
+                    </div>
                 )}
 
                 {/* クールダウン時のオーバーレイ: 残り時間を円形プログレスで可視化 */}
@@ -304,7 +320,7 @@ const QuestItem: React.FC<{
     );
 };
 
-export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, panelMode, iconFirst }: QuestListProps) {
+export default function QuestList({ quests, completedQuests, pendingQuests, currentUser, onQuestClick, completedSignal, processingQuestKeys, panelMode, iconFirst }: QuestListProps) {
     const jsDay = new Date().getDay();
     const currentDay = (jsDay + 6) % 7;
     const [showDoneAndLocked, setShowDoneAndLocked] = useState(false);
@@ -407,6 +423,7 @@ export default function QuestList({ quests, completedQuests, pendingQuests, curr
                         currentUser={currentUser}
                         onClick={onQuestClick}
                         completedSignal={completedSignal}
+                        isProcessing={!!processingQuestKeys?.includes(getQuestProcessingKey(currentUser.user_id, q.quest_id))}
                         panelMode={panelMode}
                         iconFirst={iconFirst}
                     />

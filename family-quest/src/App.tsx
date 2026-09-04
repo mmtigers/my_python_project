@@ -13,7 +13,7 @@ import { InventoryList } from './features/shop/components/InventoryList';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
 import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
-import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
+import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';
 
 // 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
 // ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
@@ -177,6 +177,20 @@ function App() {
   // 処理中の履歴idの集合で個別に多重送信を防ぐ。
   const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
   const isApprovingAllRef = useRef(false);
+  // #391(F-L8): 承認ボタンの isLoading 表示用に approvingHistoryIdsRef を state にも写す。
+  // 判定は同期的なrefで行い、見た目だけ state に追従させる(#101 と同じ二重化パターン)。
+  const [approvingHistoryIds, setApprovingHistoryIds] = useState<ID[]>([]);
+  const [isApprovingAll, setIsApprovingAll] = useState(false);
+  const syncApprovingHistoryIds = () => setApprovingHistoryIds([...approvingHistoryIdsRef.current]);
+
+  // #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを
+  // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま
+  // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと
+  // 400「本日は完了済み」/429 のエラーモーダルになっていた。
+  // handleQuestClick で無視し、QuestItem にローディング表示を出すために state にも写す。
+  const processingQuestKeysRef = useRef<Set<string>>(new Set());
+  const [processingQuestKeys, setProcessingQuestKeys] = useState<string[]>([]);
+  const syncProcessingQuestKeys = () => setProcessingQuestKeys([...processingQuestKeysRef.current]);
 
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
@@ -231,6 +245,21 @@ function App() {
   // 完了(confirmMode='complete'の確認後)・取り消し(長押しでワンタップ)の実行本体。
   // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。
   const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
+    // #391: 同一ユーザー・同一クエストの完了/取消が送信中なら二重送信しない
+    // (再試行(onRetry)から再入する場合は finally で解除済みなので通る)。
+    const processingKey = getQuestProcessingKey(user.user_id, target.quest_id);
+    if (processingQuestKeysRef.current.has(processingKey)) return;
+    processingQuestKeysRef.current.add(processingKey);
+    syncProcessingQuestKeys();
+    try {
+      await runQuestActionInner(user, mode, target);
+    } finally {
+      processingQuestKeysRef.current.delete(processingKey);
+      syncProcessingQuestKeys();
+    }
+  };
+
+  const runQuestActionInner = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
     const res: ActionResult = mode === 'complete'
       ? await completeQuest(user, target as Quest)
       : await cancelQuest(user, target as QuestHistory);
@@ -272,6 +301,8 @@ function App() {
   };
 
   const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
+    // #391: 送信中のクエストの再タップは静かに無視する(確認モーダルも開かない)。
+    if (processingQuestKeysRef.current.has(getQuestProcessingKey(user.user_id, q.quest_id))) return;
     play('select');
 
     // 1. 履歴タブなど、明示的に履歴として渡された場合 → ワンタップで取り消し
@@ -390,9 +421,12 @@ function App() {
   const handleApprove = async (history: QuestHistory) => {
     // #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは
     // 1回分として扱い、エラー表示を出さない)。
+    // #391(F-L8): 一括承認中は対象の全idが先に集合へ入るため、一括承認中の個別タップも
+    // ここで同様に無視される(以前は一括承認と競合して400のエラーモーダルになっていた)。
     if (history.id != null) {
       if (approvingHistoryIdsRef.current.has(history.id)) return;
       approvingHistoryIdsRef.current.add(history.id);
+      syncApprovingHistoryIds();
     }
     try {
       const res = await approveQuest(getRepresentativeParent(users), history);
@@ -419,6 +453,7 @@ function App() {
     } finally {
       if (history.id != null) {
         approvingHistoryIdsRef.current.delete(history.id);
+        syncApprovingHistoryIds();
       }
     }
   };
@@ -429,11 +464,25 @@ function App() {
     // 同じ履歴を並行して承認しようとし400になるのを防ぐ。
     if (isApprovingAllRef.current) return;
     isApprovingAllRef.current = true;
+    setIsApprovingAll(true);
+    // #391(F-L8): 個別承認が送信中の履歴は一括の対象から外し(応答待ちの行を二重に
+    // 承認して400にしない)、残りの全idを先に approvingHistoryIdsRef へ入れて、
+    // 一括処理中の個別タップを handleApprove 側で無視させる。
+    const claimedIds: ID[] = [];
     try {
       // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
       // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
-      const targets = [...pendingQuestsRef.current];
+      const targets = [...pendingQuestsRef.current].filter(h =>
+        h.id == null || !approvingHistoryIdsRef.current.has(h.id)
+      );
       if (targets.length === 0) return;
+      for (const h of targets) {
+        if (h.id != null) {
+          approvingHistoryIdsRef.current.add(h.id);
+          claimedIds.push(h.id);
+        }
+      }
+      syncApprovingHistoryIds();
 
       let successCount = 0;
       let totalEarnedMedals = 0;
@@ -473,7 +522,10 @@ function App() {
         play('cancel');
       }
     } finally {
+      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);
+      syncApprovingHistoryIds();
       isApprovingAllRef.current = false;
+      setIsApprovingAll(false);
     }
   };
 
@@ -574,6 +626,9 @@ function App() {
             onReject={handleReject}
             onApproveAll={handleApproveAll}
             completedSignal={completedSignal}
+            processingQuestKeys={processingQuestKeys}
+            busyHistoryIds={approvingHistoryIds}
+            isApprovingAll={isApprovingAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
@@ -602,6 +657,8 @@ function App() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onApproveAll={handleApproveAll}
+                busyHistoryIds={approvingHistoryIds}
+                isApprovingAll={isApprovingAll}
               />
             )}
 
@@ -623,6 +680,7 @@ function App() {
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
                   completedSignal={completedSignal}
+                  processingQuestKeys={processingQuestKeys}
                   iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
                 />
               )}

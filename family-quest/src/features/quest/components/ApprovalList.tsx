@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle, XCircle, ChevronDown, ChevronUp, CheckCheck } from 'lucide-react';
 import { motion, useMotionValue, useTransform, PanInfo } from 'framer-motion';
-import { QuestHistory, User } from '@/types';
+import { ID, QuestHistory, User } from '@/types';
 import { Button } from '../../../components/ui/Button';
 
 type Props = {
@@ -10,6 +10,11 @@ type Props = {
     onApprove: (history: QuestHistory) => void;
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
+    // #391(F-L8): 承認APIが送信中の履歴id(App側の approvingHistoryIdsRef の写し)。
+    // 該当行の承認/却下ボタンをローディング表示にし、スワイプも無効化する。
+    busyHistoryIds?: ID[];
+    // 一括承認の実行中。「すべて承認」ボタンをローディング表示にする。
+    isApprovingAll?: boolean;
 };
 
 const SWIPE_THRESHOLD = 90;
@@ -49,7 +54,7 @@ const SwipeableRow: React.FC<{
     );
 };
 
-const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll }) => {
+const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll, busyHistoryIds = [], isApprovingAll = false }) => {
     // 承認待ちが多いときに折りたためるように(デフォルトは開いた状態)
     const [collapsed, setCollapsed] = useState(false);
 
@@ -78,7 +83,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                 <div className="px-4 pb-4">
                     {pendingQuests.length > 1 && (
                         <div className="flex justify-end mb-2">
-                            <Button variant="success" size="sm" onClick={onApproveAll}>
+                            <Button variant="success" size="sm" onClick={onApproveAll} isLoading={isApprovingAll}>
                                 <CheckCheck size={16} /> クエストをすべて承認 ({pendingQuests.length})
                             </Button>
                         </div>
@@ -88,11 +93,15 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
 
                     <div className="space-y-3">
                         {/* --- クエスト承認リスト (既存) --- */}
-                        {pendingQuests.map((quest) => (
+                        {pendingQuests.map((quest) => {
+                            // #391(F-L8): 送信中(個別承認の応答待ち、または一括承認の対象)の行は
+                            // ボタンをローディング表示にし、スワイプも受け付けない。
+                            const busy = quest.id != null && busyHistoryIds.includes(quest.id);
+                            return (
                             <SwipeableRow
                                 key={quest.id}
-                                onSwipeApprove={() => onApprove(quest)}
-                                onSwipeReject={() => onReject(quest)}
+                                onSwipeApprove={busy ? undefined : () => onApprove(quest)}
+                                onSwipeReject={busy ? undefined : () => onReject(quest)}
                             >
                                 <div className="bg-white p-3 rounded shadow-sm flex justify-between items-center gap-2">
                                     <div className="min-w-0">
@@ -107,16 +116,17 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                                         </p>
                                     </div>
                                     <div className="flex gap-2 flex-shrink-0">
-                                        <Button variant="danger" size="sm" className="min-h-[44px] min-w-[44px]" onClick={() => onReject(quest)}>
+                                        <Button variant="danger" size="sm" className="min-h-[44px] min-w-[44px]" onClick={() => onReject(quest)} disabled={busy}>
                                             <XCircle size={18} />
                                         </Button>
-                                        <Button variant="primary" size="sm" className="min-h-[44px]" onClick={() => onApprove(quest)}>
+                                        <Button variant="primary" size="sm" className="min-h-[44px]" onClick={() => onApprove(quest)} isLoading={busy}>
                                             <CheckCircle size={18} /> 承認
                                         </Button>
                                     </div>
                                 </div>
                             </SwipeableRow>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             )}

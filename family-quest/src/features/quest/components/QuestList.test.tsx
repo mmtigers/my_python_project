@@ -1,6 +1,7 @@
 import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QuestList from './QuestList';
+import { getQuestProcessingKey } from '../hooks/useQuestStatus';
 import { CompletedSignal, Quest, QuestHistory, User } from '@/types';
 
 // #363: 横画面4人パネルでは App が管理する同じ completedSignal が全パネルの
@@ -118,5 +119,53 @@ describe('QuestList long-press cancel -> click race (#389)', () => {
         });
         fireEvent.click(title);
         expect(onQuestClick).toHaveBeenCalledTimes(2);
+    });
+});
+
+// #391: 完了APIの送信中(processingQuestKeys に含まれる)カードは「送信中...」の
+// オーバーレイを出し、再タップしても onQuestClick(確認モーダル)を呼ばない。
+describe('QuestList in-flight processing overlay (#391)', () => {
+    const dailyQuest: Quest = { quest_id: 30, title: 'おふろ', quest_type: 'daily', target_user: 'all', gold_gain: 3 };
+
+    afterEach(() => {
+        cleanup();
+    });
+
+    it('shows the busy overlay and ignores taps for the processing (user, quest) key only', () => {
+        const onQuestClick = vi.fn();
+        render(
+            <QuestList
+                quests={[dailyQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={onQuestClick}
+                completedSignal={null}
+                processingQuestKeys={[getQuestProcessingKey('son', 30)]}
+                panelMode
+            />
+        );
+        expect(screen.getByText('送信中...')).toBeInTheDocument();
+        fireEvent.click(screen.getByText('おふろ'));
+        expect(onQuestClick).not.toHaveBeenCalled();
+    });
+
+    it('does not mark another user\'s panel as busy for the same quest', () => {
+        const onQuestClick = vi.fn();
+        render(
+            <QuestList
+                quests={[dailyQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={daughter}
+                onQuestClick={onQuestClick}
+                completedSignal={null}
+                processingQuestKeys={[getQuestProcessingKey('son', 30)]}
+                panelMode
+            />
+        );
+        expect(screen.queryByText('送信中...')).not.toBeInTheDocument();
+        fireEvent.click(screen.getByText('おふろ'));
+        expect(onQuestClick).toHaveBeenCalledTimes(1);
     });
 });

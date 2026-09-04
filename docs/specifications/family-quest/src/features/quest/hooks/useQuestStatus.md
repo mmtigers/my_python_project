@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `c29d467` |
 
 ## 関連ドキュメント
 
@@ -36,6 +37,15 @@
 | `@/types` (外部モジュール) | `User`、`Quest`、`QuestHistory` の完全なスキーマ定義が本ファイル内に存在しないため、コード内でアクセスされているプロパティ（`quest_id`, `id`, `type`, `quest_type`, `status`, `pre_requisite_quest_id`, `_isInfinite` など）以外の全体像は判断不可。 | 根拠: [import文] (行番号: 2 / 抜粋: "import { User, Quest, QuestHistory } from '@/types';") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### `getQuestProcessingKey` (export関数、Issue #391で追加)
+
+* **役割**: 「このユーザーのこのクエストに対する完了/取消APIが送信中か」を表す集合（`App.tsx`の`processingQuestKeysRef`）のキー文字列`"<user_id>:<quest_id>"`を生成する。横画面の4人パネルでは同じクエスト（`target_user: 'all'`）を別々のユーザーが同時に完了しうるため、`quest_id`単体ではなく`(user_id, quest_id)`の組で識別する。`App.tsx`（集合の管理）と`QuestList.tsx`（カードのローディング表示判定）の両方から使う。
+* 根拠: (行番号: 4〜9 / 抜粋: "// #391: 「このユーザーのこのクエストに対する完了/取消APIが送信中か」を表す集合のキー。", "export const getQuestProcessingKey = (userId: string, questId: ID | undefined): string =>\n    `${userId}:${questId ?? ''}`;")
+* **引数/リクエスト**: `userId: string`, `questId: ID | undefined`
+* **戻り値/レスポンス**: `string`
+* **副作用**: なし
+* **エラーハンドリング**: なし（`questId`未定義時は空文字を連結する）
 
 ### `UseQuestStatusProps`
 
