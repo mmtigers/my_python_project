@@ -75,12 +75,19 @@ jobs:
 
       - name: Check for DDD changes
         # DDDテストは全体の約3分半(重い回帰テスト2件+yt_dlp等のimport)を占めるが、
-        # DDDは他サブシステムから独立しているため、PRの差分に DDD/** が含まれない
-        # 場合はスキップして良い。push/workflow_dispatch時、および差分を判定できない
-        # 異常時は、安全側に倒して常に実行する。
+        # DDDは他サブシステムからほぼ独立しているため、PRの差分に関連ファイルが
+        # 含まれない場合はスキップして良い。push/workflow_dispatch時、および差分を
+        # 判定できない異常時は、安全側に倒して常に実行する。
+        #
+        # Issue #368: DDD/newface_monitor.py・extract_youtube_urls.py は sys.path に
+        # MY_HOME_SYSTEM を足して core.logger / core.nas_utils / core.utils / config を
+        # 直接importするため、DDD/ だけでなくそれらのimport先も pathspec に含める
+        # (以前は core/ や config.py の変更PRでDDDテストが黙ってスキップされていた)。
+        # また git diff 自体の失敗が "changed=false" に倒れないよう pipefail を付ける。
         id: ddd_changes
         working-directory: .
         run: |
+          set -o pipefail
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -90,12 +97,20 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if git diff --name-only HEAD^1 HEAD -- DDD/ | grep -q .; then
+          ddd_pathspec="DDD/ MY_HOME_SYSTEM/core/ MY_HOME_SYSTEM/config.py MY_HOME_SYSTEM/common.py"
+          # shellcheck disable=SC2086  # pathspecは意図的に単語分割する
+          if ! changed_files=$(git diff --name-only HEAD^1 HEAD -- $ddd_pathspec); then
+            echo "::warning::git diff に失敗したため、安全側に倒してDDDテストを実行します"
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "DDD/** に変更あり: DDDテストを実行します"
+            exit 0
+          fi
+          if [ -n "$changed_files" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "DDD/** またはDDDのimport先(${ddd_pathspec}) に変更あり: DDDテストを実行します"
+            echo "$changed_files"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "DDD/** に変更なし: DDDテストをスキップします"
+            echo "DDD/** およびDDDのimport先に変更なし: DDDテストをスキップします"
           fi
 
       - name: Set up Python 3.11
