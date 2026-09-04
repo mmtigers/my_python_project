@@ -14,17 +14,30 @@ import game_logic  # ★追加: GameLogicをインポート
 from services.quest_service import QuestService, UserService, ShopService, ROLE_ADULT, ROLE_CHILD
 
 class TestQuestService(unittest.TestCase):
-    
+
+    @classmethod
+    def setUpClass(cls):
+        """ロガーのセットアップ(Issue #404: 毎テストの setUp で呼ぶと setup_logging が
+        古いハンドラを close() せずに捨てるためファイルハンドルが累積していた。
+        クラスで1回だけ行い、終了時に閉じる)"""
+        cls._test_logger = common.setup_logging("test_quest")
+
+    @classmethod
+    def tearDownClass(cls):
+        for handler in list(cls._test_logger.handlers):
+            cls._test_logger.removeHandler(handler)
+            handler.close()
+
     def setUp(self):
         """各テストケースの実行前に呼ばれる"""
         # テスト中はDiscord通知を無効化
         self.original_webhook = config.DISCORD_WEBHOOK_ERROR
         config.DISCORD_WEBHOOK_ERROR = None
         
-        # ロガーのセットアップ
-        common.setup_logging("test_quest")
-        
         # テスト用DBのセットアップ
+        # Issue #404: グローバル設定を書き換えるため tearDown で必ず元に戻す
+        # (戻さないと同一プロセスの後続テストが削除済みのDBパスを掴む)
+        self.original_db_path = config.SQLITE_DB_PATH
         self.test_db_file = "test_home_system.db"
         config.SQLITE_DB_PATH = self.test_db_file
         
@@ -45,7 +58,10 @@ class TestQuestService(unittest.TestCase):
         """各テストケースの終了後に呼ばれる"""
         # Discord通知設定を復元
         config.DISCORD_WEBHOOK_ERROR = self.original_webhook
-        
+
+        # DBパスを復元(Issue #404)
+        config.SQLITE_DB_PATH = self.original_db_path
+
         # DBファイルの削除
         if os.path.exists(self.test_db_file):
             try:
