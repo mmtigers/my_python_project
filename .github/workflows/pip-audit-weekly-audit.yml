@@ -1,7 +1,7 @@
 name: pip-audit Weekly Audit
 
-# MY_HOME_SYSTEM/requirements.txt を対象に、既知CVEの検知結果を週次でIssueとして
-# 報告する。test.yml の Security Scan ジョブの pip-audit ステップはPRの差分と
+# MY_HOME_SYSTEM/requirements.txt・requirements-dev.txt・DDD/requirements.txt を
+# 対象に、既知CVEの検知結果を週次でIssueとして報告する(Issue #400 で dev/DDD を追加)。test.yml の Security Scan ジョブの pip-audit ステップはPRの差分と
 # 無関係な新規CVE公開でも赤くなり得るため非ブロッキングにしている(Issue #324)。
 # その代わりに、仕様書ドリフト(spec-drift-weekly-audit.yml)と同じ型の定期監査
 # Issueで放置を防ぐ。
@@ -31,13 +31,18 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: MY_HOME_SYSTEM/requirements.txt
+          cache-dependency-path: |
+            MY_HOME_SYSTEM/requirements.txt
+            MY_HOME_SYSTEM/requirements-dev.txt
+            DDD/requirements.txt
 
       - name: Install dependencies
+        # Issue #400: pip-audit 自体も requirements-dev.txt と同じバージョンに固定する
+        # (未固定だと監査ツール側の挙動変化で週次結果が揺れる)。
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pip-audit
+          pip install pip-audit==2.9.0
 
       - name: Run pip-audit (non-blocking)
         id: audit
@@ -50,7 +55,8 @@ jobs:
         # ファイルが無い場合はアーティファクト用に固定文言のファイルを作っておく。
         run: |
           set +e
-          pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md
+          pip-audit -r requirements.txt -r requirements-dev.txt -r ../DDD/requirements.txt \
+            --desc -f markdown -o pip-audit-report.md
           code=$?
           set -e
           echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
@@ -68,7 +74,7 @@ jobs:
           script: |
             const fs = require("fs");
             const title = "📋 pip-audit 定期監査";
-            const header = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt）\n\n";
+            const header = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt, requirements-dev.txt, DDD/requirements.txt）\n\n";
             // Issue #366: 判定はレポートファイルの有無/中身ではなく、前ステップが記録した
             // exit code と「pip-auditがレポートを書いたか」で行う(0件時はファイルが生成されないため)。
             const exitCode = "${{ steps.audit.outputs.exit_code }}";
