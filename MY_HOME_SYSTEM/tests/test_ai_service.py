@@ -137,7 +137,7 @@ async def test_tool_search_db_blocks_disallowed_table_hidden_behind_block_commen
 async def test_tool_search_db_allows_documented_table_with_harmless_comment(monkeypatch):
     """コメント除去は誤検知(許可テーブルのみの正常クエリの拒否)を起こさないこと"""
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table} /* comment */ WHERE 1=1"})
     assert result == "OK"
 
@@ -205,7 +205,7 @@ async def test_tool_search_db_blocks_subquery_disallowed_table():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_allows_documented_table(monkeypatch):
-    monkeypatch.setattr(ai_service.common, "execute_read_query", lambda sql, params=(): "OK")
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert result == "OK"
@@ -225,11 +225,11 @@ async def test_tool_search_db_without_from_or_join_returns_error():
 
 @pytest.mark.asyncio
 async def test_tool_search_db_no_matching_rows_returns_not_found_message(monkeypatch):
-    """common.execute_read_query は0件時、実際には(空リストではなく)
+    """_execute_restricted_read_query(旧common.execute_read_query)は0件時、実際には(空リストではなく)
     "該当するデータはありませんでした。"という非空文字列を返す(core/database.py参照)。
     その文字列がそのまま呼び出し元へ返ることを確認する。"""
     monkeypatch.setattr(
-        ai_service.common, "execute_read_query",
+        ai_service, "_execute_restricted_read_query",
         lambda sql, params=(): "該当するデータはありませんでした。",
     )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
@@ -242,7 +242,7 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
     def _raise(sql, params=()):
         raise Exception("malformed SQL")
 
-    monkeypatch.setattr(ai_service.common, "execute_read_query", _raise)
+    monkeypatch.setattr(ai_service, "_execute_restricted_read_query", _raise)
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
     result = await ai_service.tool_search_db({"sql_query": f"SELECT * FROM {table}"})
     assert "DB検索エラー" in result
@@ -250,13 +250,13 @@ async def test_tool_search_db_query_exception_is_caught_and_returns_error_string
 
 @pytest.mark.asyncio
 async def test_tool_search_db_internal_error_string_is_not_passed_through_as_data(monkeypatch):
-    """Issue #180の回帰テスト: common.execute_read_query は不正なSQL等の実行時例外を
+    """Issue #180の回帰テスト: _execute_restricted_read_query(旧common.execute_read_query)は不正なSQL等の実行時例外を
     自身の内部でキャッチし、送出せず"検索エラー: ..."という非空文字列として返す設計
     (core/database.py参照)。以前はこれが正常な検索結果と区別されずAIへそのまま
     渡っていた(かつ`if not rows:`は非空文字列に対して常に偽となるデッドコードだった)。
     このエラー文字列が検出され、DB検索エラーとして扱われることを確認する。"""
     monkeypatch.setattr(
-        ai_service.common, "execute_read_query",
+        ai_service, "_execute_restricted_read_query",
         lambda sql, params=(): "検索エラー: no such table: xyz",
     )
     table = next(iter(ai_service.ALLOWED_SEARCH_TABLES))
@@ -722,3 +722,160 @@ class TestRateLimiterLockIsThreadSafeAcrossEventLoops:
         kind, value = outcome
         assert kind == "ok", f"allow_request() raised: {value!r}"
         assert value is True
+
+
+# ==========================================
+# Issue #357: 引用符付き識別子による許可テーブル判定バイパスの回帰テスト
+# ==========================================
+
+def _seed_search_db_tables():
+    """許可テーブル(food_records)と許可外テーブル(quest_users)に1行ずつ投入する"""
+    import common
+
+    with common.get_db_cursor(commit=True) as cur:
+        cur.execute(
+            f"INSERT INTO {config.SQLITE_TABLE_FOOD} (user_id, user_name, meal_date, meal_time_category, menu_category, timestamp) "
+            "VALUES ('U1', '太郎', '2026-09-04', 'Dinner', '夕食: カレー', '2026-09-04T19:00:00+09:00')"
+        )
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) "
+            "VALUES ('secret-line-id', 'SECRET_NAME', 'Warrior', 1, 0, 0)"
+        )
+
+
+# Issue #357 で実証された5つのバイパス形式 + スカラーサブクエリ形式。
+# いずれも許可テーブル(food_records)を1つ含めることで旧実装の正規表現判定を素通りしていた。
+_BYPASS_SQLS = {
+    "double_quote": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM "quest_users"',
+    "brackets": "SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM [quest_users]",
+    "backticks": "SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM `quest_users`",
+    "schema_qualified": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM "main".quest_users',
+    "no_space_after_from": 'SELECT * FROM food_records WHERE 0 UNION ALL SELECT user_id, name FROM"quest_users"',
+    "scalar_subquery": 'SELECT (SELECT name FROM "quest_users" LIMIT 1) AS leaked FROM food_records',
+}
+
+
+class TestSearchDbQuotedIdentifierBypass:
+    """Issue #357: 正規表現層(tool_search_db)の暫定対策。引用符・角括弧・バッククォートを
+    含むSQLは、DBへ到達する前に拒否されること。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    async def test_tool_search_db_rejects_each_bypass_form_before_db_access(self, form, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            ai_service, "_execute_restricted_read_query", lambda sql, params=(): called.append(sql) or "OK"
+        )
+
+        result = await ai_service.tool_search_db({"sql_query": _BYPASS_SQLS[form]})
+
+        assert result.startswith("エラー:")
+        assert "引用符" in result
+        assert called == [], "引用符付き識別子を含むSQLはDBへ到達してはならない"
+
+    @pytest.mark.asyncio
+    async def test_tool_search_db_rejects_unquoted_scalar_subquery_on_disallowed_table(self, monkeypatch):
+        """引用符無しのスカラーサブクエリは従来通り正規表現層で許可外テーブルとして拒否されること"""
+        monkeypatch.setattr(ai_service, "_execute_restricted_read_query", lambda sql, params=(): "OK")
+        sql = "SELECT (SELECT name FROM quest_users LIMIT 1) AS leaked FROM food_records"
+        result = await ai_service.tool_search_db({"sql_query": sql})
+        assert "許可されていない" in result
+
+
+class TestSearchDbAuthorizer:
+    """Issue #357: 構造的対策。`_execute_restricted_read_query` は SQLite の
+    set_authorizer により、正規表現層を経由せず直接呼んでも許可外テーブルを読めないこと。"""
+
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    def test_authorizer_denies_each_bypass_form_even_without_regex_layer(self, isolated_db, form):
+        _seed_search_db_tables()
+
+        result = ai_service._execute_restricted_read_query(_BYPASS_SQLS[form])
+
+        assert result.startswith("検索エラー:"), result
+        assert "SECRET_NAME" not in result
+        assert "secret-line-id" not in result
+
+    def test_authorizer_denies_plain_disallowed_table(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query("SELECT * FROM quest_users")
+        assert result.startswith("検索エラー:")
+        assert "SECRET_NAME" not in result
+
+    def test_authorizer_denies_sqlite_master(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT name FROM sqlite_master")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_pragma_table_valued_function(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT * FROM pragma_table_info('quest_users')")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_load_extension_function(self, isolated_db):
+        result = ai_service._execute_restricted_read_query("SELECT load_extension('evil')")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_attach(self, isolated_db, tmp_path):
+        result = ai_service._execute_restricted_read_query(f"ATTACH '{tmp_path / 'x.db'}' AS x")
+        assert result.startswith("検索エラー:")
+
+    def test_authorizer_denies_write_and_leaves_table_untouched(self, isolated_db):
+        import common
+
+        result = ai_service._execute_restricted_read_query(
+            f"INSERT INTO {config.SQLITE_TABLE_FOOD} (menu_category, timestamp) VALUES ('x', 'y')"
+        )
+        assert result.startswith("検索エラー:")
+        with common.get_db_cursor() as cur:
+            count = cur.execute(f"SELECT COUNT(*) FROM {config.SQLITE_TABLE_FOOD}").fetchone()[0]
+        assert count == 0
+
+    def test_allowed_table_query_returns_json_rows(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT menu_category FROM {config.SQLITE_TABLE_FOOD} ORDER BY id DESC LIMIT 5"
+        )
+        assert result.startswith("[")
+        assert "カレー" in result
+
+    def test_allowed_table_query_with_functions_and_alias_still_works(self, isolated_db):
+        _seed_search_db_tables()
+        result = ai_service._execute_restricted_read_query(
+            f"SELECT COUNT(*) AS n, upper(f.menu_category) AS m, date('now') AS d FROM {config.SQLITE_TABLE_FOOD} f"
+        )
+        assert '"n": 1' in result
+
+    def test_allowed_table_with_no_rows_returns_not_found_message(self, isolated_db):
+        result = ai_service._execute_restricted_read_query(f"SELECT * FROM {config.SQLITE_TABLE_CHILD}")
+        assert result == "該当するデータはありませんでした。"
+
+
+class TestSearchDbEndToEndWithRealDb:
+    """tool_search_db を実DB(isolated_db)に対して通し、許可クエリが依然として機能し、
+    バイパス形式が正規表現層・認可層のどちらでも漏洩しないことを確認する。"""
+
+    @pytest.mark.asyncio
+    async def test_allowed_query_end_to_end_returns_data(self, isolated_db):
+        _seed_search_db_tables()
+        result = await ai_service.tool_search_db(
+            {"sql_query": f"SELECT menu_category, timestamp FROM {config.SQLITE_TABLE_FOOD} WHERE user_name = '太郎'"}
+        )
+        assert "カレー" in result
+        assert not result.startswith("DB検索エラー")
+
+    @pytest.mark.asyncio
+    async def test_allowed_join_of_two_allowed_tables_end_to_end(self, isolated_db):
+        _seed_search_db_tables()
+        sql = (
+            f"SELECT f.menu_category FROM {config.SQLITE_TABLE_FOOD} f "
+            f"JOIN {config.SQLITE_TABLE_CHILD} c ON c.user_id = f.user_id"
+        )
+        result = await ai_service.tool_search_db({"sql_query": sql})
+        assert result == "該当するデータはありませんでした。"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("form", sorted(_BYPASS_SQLS))
+    async def test_bypass_forms_never_leak_end_to_end(self, isolated_db, form):
+        _seed_search_db_tables()
+        result = await ai_service.tool_search_db({"sql_query": _BYPASS_SQLS[form]})
+        assert result.startswith("エラー:")
+        assert "SECRET_NAME" not in result

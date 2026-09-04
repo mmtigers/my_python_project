@@ -1,6 +1,8 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
+import json
 import re
+import sqlite3
 import threading
 import time
 import traceback
@@ -218,6 +220,76 @@ def _extract_referenced_tables(sql: str) -> List[str]:
     return tables
 
 
+# Issue #357: `"quest_users"` / `[quest_users]` / `` `quest_users` `` / `"main".quest_users`
+# / `FROM"quest_users"` のような引用符・角括弧付き識別子は、上の正規表現
+# (`FROM\s+[A-Za-z_]...`)にマッチせず参照テーブルとして検出されない。
+# 許可テーブルを1つ含めれば referenced_tables が非空かつ disallowed が空になり、
+# UNION SELECT やスカラーサブクエリで許可外テーブルを読めていた。
+# 正規表現パーサでこれらを網羅するのは困難なため、暫定対策としてこれらの文字を
+# 含むSQLは実行前に即拒否する(構造的な対策は下の set_authorizer 側)。
+_QUOTED_IDENTIFIER_CHARS = ('"', '`', '[')
+
+# Issue #357: SQLite組み込み関数のうち、SELECT文からでもファイル読み書き・
+# 拡張ロードといった副作用を起こしうるもの。set_authorizer で拒否する。
+_DENIED_SQL_FUNCTIONS = frozenset({
+    "load_extension", "readfile", "writefile", "edit", "fsdir", "zipfile",
+})
+
+
+def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:
+    """
+    Issue #357: AIツール(search_db)専用の SQLite 認可コールバック。
+
+    正規表現によるテーブル名抽出(`_extract_referenced_tables`)は引用符付き識別子等で
+    すり抜けられるため、SQLiteエンジン自身に「許可テーブル以外は読めない」ことを
+    強制させる構造的な防御。SQLiteは文の準備時に、読み取るテーブル/列ごとに
+    SQLITE_READ、関数ごとに SQLITE_FUNCTION 等をこのコールバックへ問い合わせ、
+    SQLITE_DENY が返るとその文全体をエラーにする(引用符の有無・スキーマ修飾・
+    サブクエリ・UNION・テーブル値関数(json_each/pragma_table_info等)を問わず適用される)。
+
+    許可するのは SELECT / WITH RECURSIVE / 許可テーブルの READ / 危険でない関数のみ。
+    ATTACH・PRAGMA・INSERT/UPDATE/DELETE・DDL 等それ以外の操作はすべて拒否する。
+    """
+    if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_READ:
+        # arg1=テーブル名(テーブル値関数の場合は関数名), arg2=列名。
+        # sqlite_master 等のシステムテーブルも許可リスト外なのでここで拒否される。
+        return sqlite3.SQLITE_OK if arg1 in ALLOWED_SEARCH_TABLES else sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_FUNCTION:
+        # arg2=関数名
+        if (arg2 or "").lower() in _DENIED_SQL_FUNCTIONS:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    # SQLITE_ATTACH / SQLITE_PRAGMA / SQLITE_INSERT / SQLITE_UPDATE / SQLITE_DELETE / DDL 等
+    return sqlite3.SQLITE_DENY
+
+
+def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:
+    """
+    Issue #357: `_search_db_authorizer` を設定した接続でSELECTを実行する、
+    AIツール(search_db)専用の読み取り関数。
+
+    `core.database.execute_read_query` と同じ戻り値の契約
+    (0件: "該当するデータはありませんでした。" / 正常: JSON文字列 /
+    失敗: "検索エラー: ..." で例外は送出しない)を維持し、tool_search_db 側の
+    既存のエラー判定(#180)をそのまま使えるようにしている。
+    `execute_read_query` 自体は他の呼び出し元と共有されるため変更せず、
+    認可コールバックはこのAI経路にのみ適用する。
+    """
+    try:
+        with common.get_db_cursor() as cursor:
+            cursor.connection.set_authorizer(_search_db_authorizer)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return "該当するデータはありませんでした。"
+        return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
+    except Exception as e:
+        return f"検索エラー: {str(e)}"
+
+
 async def tool_search_db(args: Dict[str, Any]) -> str:
     """
     [Tool] データベースから情報を検索する (読み取り専用)。
@@ -240,6 +312,13 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
     if not sql.strip().upper().startswith("SELECT"):
         return "エラー: データ変更操作は許可されていません。"
 
+    # Issue #357: 引用符・角括弧付き識別子は _extract_referenced_tables で検出できず
+    # 許可テーブル判定をすり抜けるため、含まれていれば即拒否する(多層防御。
+    # 実行時は _search_db_authorizer が構造的に許可外テーブルの読み取りを拒否する)。
+    if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):
+        logger.warning(f"⚠️ search_db blocked quoted identifier (sql={sql!r})")
+        return "エラー: 引用符付きの識別子（\" ` [）は使用できません。"
+
     # 安全対策: ドキュメントに明記した許可テーブル以外への参照を禁止
     referenced_tables = _extract_referenced_tables(sql)
     if not referenced_tables:
@@ -250,17 +329,18 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
         return "エラー: 許可されていないテーブルへのアクセスです。"
 
     try:
-        # 読み取り専用で実行
-        result = await asyncio.to_thread(common.execute_read_query, sql)
+        # Issue #357: 許可テーブル以外の読み取りをSQLiteの認可コールバックで
+        # 構造的に拒否する専用関数で実行する(以前は common.execute_read_query)。
+        result = await asyncio.to_thread(_execute_restricted_read_query, sql)
     except Exception as e:
         return f"DB検索エラー: {e}"
 
-    # #180: common.execute_read_query は例外発生時も"検索エラー: ..."という非空文字列を
-    # 返す設計(core/database.py参照)のため、以前の`if not rows:`は常に偽となり
-    # 到達しないデッドコードだった。加えて、SQL実行時エラーの文字列がそのまま
-    # 正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。
-    # execute_read_queryの内部エラープレフィックスで判定し、警告ログを残した上で
-    # エラーであることが分かる形でAIへ返す。
+    # #180: _execute_restricted_read_query(旧 common.execute_read_query)は例外発生時も
+    # "検索エラー: ..."という非空文字列を返す設計のため、以前の`if not rows:`は
+    # 常に偽となり到達しないデッドコードだった。加えて、SQL実行時エラーの文字列が
+    # そのまま正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。
+    # 内部エラープレフィックスで判定し、警告ログを残した上でエラーであることが
+    # 分かる形でAIへ返す。
     if result.startswith("検索エラー:"):
         logger.warning(f"⚠️ search_db query failed: {result} (sql={sql!r})")
         return f"DB検索エラー: {result[len('検索エラー:'):].strip()}"
