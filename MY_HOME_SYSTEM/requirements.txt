@@ -53,7 +53,7 @@ MarkupSafe==3.0.3
 matplotlib==3.10.7
 multidict==6.7.0
 narwhals==2.13.0
-numpy==2.2.6
+numpy==2.4.6
 numpy-financial==1.0.0
 oauthlib==3.3.1
 onvif_zeep==0.2.12
