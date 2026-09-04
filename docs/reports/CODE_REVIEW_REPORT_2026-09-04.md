@@ -6,7 +6,7 @@
 - 既存レポート(`CODE_REVIEW_REPORT_ALL.md`、`CODE_REVIEW_REPORT_2026-08-22.md`)と open Issue(#318/#319/#321/#327/#328/#338/#339/#340)で既に追跡中の項目は**再掲しない**。以下はすべて今回新たに見つかった指摘。
 - 意思決定済みの設計(クライアント申告 `user_id`、Cloudflare Access エッジ委譲、IP 制限ミドルウェアがログのみ、家族名の `config.py` ハードコード、Streamlit ダッシュボードのアプリ内認証なし)は対象外。
 - 全ソースを通読したうえで、High 以上の指摘は該当コードパスを個別に再確認済み。動的検証: `MY_HOME_SYSTEM` pytest 732件 pass(カバレッジ 87%、omit 除外前は 63%)、`DDD` pytest 128件 pass、`family-quest` `tsc -b`/ESLint/vitest 22件 pass、ruff ゲート(F821/F822/F823/E9)両ディレクトリ pass、bandit High 0件(DDD の SHA1 1件は非ブロッキング設定通り)、`pip-audit` の「検知0件時にファイル未生成」挙動を実機再現。
-- 本レポートは「レビュー時点の記録」であり、残件の状態管理は従来どおり GitHub Issue を正とする(Issue #323 方針)。
+- 本レポートは「レビュー時点の記録」であり、残件の状態管理は従来どおり GitHub Issue を正とする(Issue #323 方針)。全指摘は **Issue #355(トラッキング親Issue)** 配下のサブIssue #356〜#414 に展開済み(High/Medium は1指摘=1 Issue、Low と保守性項目はサブシステムごとに1 Issue、Discord送信系4件と `role_*` 不整合2件は統合)。
 
 ---
 
