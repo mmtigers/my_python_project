@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a1bbf12` |
+| 解析基準コミット | `896ef83` |
 
 ## 関連ドキュメント
 
@@ -145,7 +145,9 @@
 
 ### `ConfirmModal`
 
-* **役割**: 完了確認・購入確認・却下確認用のモーダルを表示する。渡された`mode`（`'complete' | 'purchase' | 'reject' | null`）に応じて`getMessage`内の`switch`文でタイトルとメッセージテキストを切り替える。`mode === 'complete'`のときは「クエスト完了」というタイトルで「「タイトル」を完了にしますか？」を表示し（実機検証で子どもの誤操作が多かったため復活）、`mode === 'purchase'`では報酬の`cost_gold`を使って金額を表示する。**（#291で修正）** 以前は`masterData.js`のフォールバック報酬が`cost_gold`を持たず`cost`のみだったため`t.cost_gold ?? t.cost`という二重参照を行っていたが、`masterData.js`のフォールバック報酬も含め`cost_gold`に一本化されたため、このフォールバックは不要になり`t.cost_gold`のみを参照する。`mode === 'reject'`のときのみ、`REJECT_REASONS`をワンタップで選べるボタン群を表示する。呼び出し元（`App`）から渡される`isConfirming`が`true`の間、「キャンセル」ボタンは`disabled`、「はい」ボタンは`isLoading`（`Button`コンポーネントのローディング表示＋disabled）になる（Issue #101: 確認ボタンの連打による二重実行防止のため追加）。
+* **役割**: 完了確認・購入確認・却下確認用のモーダルを表示する。**（Issue #394で修正）** 内部の`Modal`に`preventClose={isConfirming}`を渡し、購入/却下の応答待ち中は背景タップ・ESC・×ボタンのいずれでも閉じられないようにする（以前はキャンセルボタンのみ`disabled`で、他の手段では閉じられてしまい、閉じてもリクエスト自体は継続するため角度⑨の「モーダルを残して再試行」という設計意図が崩れていた）。
+* 根拠: `preventClose`の付与 (143行目 / 抜粋: "<Modal isOpen={true} onClose={onCancel} title={msg.title} preventClose={isConfirming}>")
+渡された`mode`（`'complete' | 'purchase' | 'reject' | null`）に応じて`getMessage`内の`switch`文でタイトルとメッセージテキストを切り替える。`mode === 'complete'`のときは「クエスト完了」というタイトルで「「タイトル」を完了にしますか？」を表示し（実機検証で子どもの誤操作が多かったため復活）、`mode === 'purchase'`では報酬の`cost_gold`を使って金額を表示する。**（#291で修正）** 以前は`masterData.js`のフォールバック報酬が`cost_gold`を持たず`cost`のみだったため`t.cost_gold ?? t.cost`という二重参照を行っていたが、`masterData.js`のフォールバック報酬も含め`cost_gold`に一本化されたため、このフォールバックは不要になり`t.cost_gold`のみを参照する。`mode === 'reject'`のときのみ、`REJECT_REASONS`をワンタップで選べるボタン群を表示する。呼び出し元（`App`）から渡される`isConfirming`が`true`の間、「キャンセル」ボタンは`disabled`、「はい」ボタンは`isLoading`（`Button`コンポーネントのローディング表示＋disabled）になる（Issue #101: 確認ボタンの連打による二重実行防止のため追加）。
 * 根拠: (82〜143行目 / 抜粋: "const ConfirmModal = ({\n  mode, target, rejectReason, onSelectRejectReason, onConfirm, onCancel, isConfirming\n}: {")
 * 根拠: `getMessage`の`switch`文 (95〜110行目 / 抜粋: "const getMessage = (): { title: string; text: string } => {\n    switch (mode) {")
 * 根拠: `complete`ケース (97〜100行目 / 抜粋: "case 'complete': {\n        const t = target as Quest;\n        return { title: 'クエスト完了', text: `「${t.title}」を完了にしますか？` };\n      }")

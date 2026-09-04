@@ -10,6 +10,11 @@ interface ModalProps {
     children: React.ReactNode;
     footer?: React.ReactNode;
     maxWidth?: "sm" | "md" | "lg" | "xl";
+    // #394: 応答待ち中(購入/却下の確認APIを実行中等)は、背景タップ・ESC・×ボタンの
+    // いずれでも閉じられないようにするためのフラグ。true の間、リクエストは継続したまま
+    // モーダルだけが消えて「モーダルを残して再試行できるようにする」という設計意図が
+    // 崩れるのを防ぐ。
+    preventClose?: boolean;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -18,16 +23,17 @@ export const Modal: React.FC<ModalProps> = ({
     title,
     children,
     footer,
-    maxWidth = "sm"
+    maxWidth = "sm",
+    preventClose = false,
 }) => {
-    // ESCキーで閉じる
+    // ESCキーで閉じる(#394: preventClose中は無効化する)
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
         };
-        if (isOpen) window.addEventListener("keydown", handleEsc);
+        if (isOpen && !preventClose) window.addEventListener("keydown", handleEsc);
         return () => window.removeEventListener("keydown", handleEsc);
-    }, [isOpen, onClose]);
+    }, [isOpen, preventClose, onClose]);
 
     if (!isOpen) return null;
 
@@ -38,24 +44,32 @@ export const Modal: React.FC<ModalProps> = ({
         xl: "max-w-xl",
     };
 
+    // #394: preventClose中は onClose 自体を渡さない(呼び出し元のクリックハンドラを
+    // undefined にすることで、背景タップ/×ボタンのどちらからも閉じられなくする)。
+    const handleClose = preventClose ? undefined : onClose;
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
             {/* 背景 (Backdrop) */}
             <div
                 className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                onClick={onClose}
+                onClick={handleClose}
             />
 
             {/* コンテンツ本体 */}
-            <div className={cn(
-                "relative bg-slate-800 border-2 border-slate-600 rounded-lg shadow-2xl w-full overflow-hidden animate-in zoom-in-95 duration-200",
-                maxWidthClasses[maxWidth]
-            )}>
+            <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={typeof title === 'string' ? title : undefined}
+                className={cn(
+                    "relative bg-slate-800 border-2 border-slate-600 rounded-lg shadow-2xl w-full overflow-hidden animate-in zoom-in-95 duration-200",
+                    maxWidthClasses[maxWidth]
+                )}>
                 {/* ヘッダー */}
                 {/* onCloseは必須propsなので常にヘッダーを表示、またはtitleがある時のみ表示など調整 */}
                 <div className="flex items-center justify-between p-4 border-b border-slate-700 bg-slate-900/50">
                     <h3 className="text-lg font-bold text-white flex-1">{title}</h3>
-                    <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 -mr-2">
+                    <Button variant="ghost" size="icon" onClick={handleClose} disabled={preventClose} className="h-8 w-8 -mr-2">
                         <X size={18} />
                     </Button>
                 </div>

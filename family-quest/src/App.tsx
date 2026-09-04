@@ -137,7 +137,10 @@ const ConfirmModal = ({
   const msg = getMessage();
 
   return (
-    <Modal isOpen={true} onClose={onCancel} title={msg.title}>
+    // #394: 応答待ち中(isConfirming)は背景タップ/ESC/×ボタンのいずれでも閉じられない
+    // ようにする(閉じてもリクエストは継続するため、「モーダルを残して再試行できる
+    // ようにする」という設計意図が崩れてしまう)。
+    <Modal isOpen={true} onClose={onCancel} title={msg.title} preventClose={isConfirming}>
       <div className="p-4">
         <p className="whitespace-pre-wrap text-center mb-4">{msg.text}</p>
 
