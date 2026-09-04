@@ -9,7 +9,7 @@
 | 仕様書 | 概要 |
 | --- | --- |
 | [App.md](./App.md) | ルートコンポーネント。アクティブなタブ・表示モード・選択中ユーザーなどのUI状態を一元管理し、`useLayoutMode`が返すレイアウトモードに応じて横画面用`FamilyDashboard`（4人常時表示）または縦画面用のタブ切替UIを描画する。 |
-| [main.md](./main.md) | Reactツリーのレンダリングとプロバイダ（React Query等）設定を行うエントリーポイント。URLパスに`/camera`を含むかで`CameraDashboard`または`App`をルートにマウントする。 |
+| [main.md](./main.md) | Reactツリーのレンダリングとプロバイダ（React Query等）設定を行うエントリーポイント。URLパスに`/camera`を含むかで`CameraDashboard`または`App`をルートにマウントする。PWAのService Workerを`registerSW`で明示登録し、1時間ごとの更新チェックと新SW有効化時の自動再読み込みを行う。 |
 
 ## src/components/layout
 
@@ -26,6 +26,7 @@
 | [BattleEffect.md](./src/components/ui/BattleEffect.md) | (廃止) ボス機能の廃止に伴い削除。クエスト完了（ボス攻撃時）の視覚演出を担っていたコンポーネント。 |
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
+| [ChunkErrorBoundary.md](./src/components/ui/ChunkErrorBoundary.md) | `lazy()`チャンクの読み込み失敗(SW更新後の旧チャンク404)を捕捉し自動再読み込みするエラーバウンダリ。それ以外の描画エラーには「再読み込み」ボタン付きフォールバックを表示する。 |
 | [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
 | [CountUp.md](./src/components/ui/CountUp.md) | `framer-motion`のバネ物理モデルを用いて数値をカウントアップ表示するコンポーネント。プレフィックス・サフィックス・カンマ区切りに対応。 |
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |

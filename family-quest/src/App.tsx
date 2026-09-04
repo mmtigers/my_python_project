@@ -37,6 +37,7 @@ import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
 import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
+import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';
 
 // 初期表示には不要なモーダル類は動的importで分離し、初回バンドルを軽くする
 // (実際に開かれるまでチャンクを読み込まない)
@@ -653,6 +654,10 @@ function App() {
         />
       )}
 
+      {/* #362: SW更新で旧チャンクがprecacheから消えた後に lazy() の import() が404すると、
+          ErrorBoundaryが無い場合はルートごとアンマウントされ白画面になる。
+          ChunkErrorBoundaryがチャンク読込失敗を検知して自動で再読み込みする。 */}
+      <ChunkErrorBoundary>
       <Suspense fallback={null}>
         {avatarUser && (
           <AvatarUploader
@@ -669,6 +674,7 @@ function App() {
           <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
         )}
       </Suspense>
+      </ChunkErrorBoundary>
 
     </div>
   );
