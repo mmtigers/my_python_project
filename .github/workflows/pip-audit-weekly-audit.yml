@@ -40,8 +40,27 @@ jobs:
           pip install pip-audit
 
       - name: Run pip-audit (non-blocking)
-        continue-on-error: true
-        run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
+        id: audit
+        # Issue #366: pip-audit は検知0件のとき `-o` の出力ファイルを一切生成しない
+        # (stdoutに "No known vulnerabilities found" を出して exit 0 するだけ)。
+        # 「ファイル無し=チェック失敗」と誤判定して毎週誤Issueを起票しないよう、
+        # exit code(0=検知なし / 1=検知あり or pip-audit自体のエラー)と
+        # 「pip-auditがレポートファイルを書いたか」を $GITHUB_OUTPUT に記録し、
+        # 次のステップはファイルの中身ではなくこの2値で clean/vuln/failure を判定する。
+        # ファイルが無い場合はアーティファクト用に固定文言のファイルを作っておく。
+        run: |
+          set +e
+          pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          if [ -f pip-audit-report.md ]; then
+            echo "report_written=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_written=false" >> "$GITHUB_OUTPUT"
+            echo "No known vulnerabilities found" > pip-audit-report.md
+          fi
+          echo "pip-audit exit code: ${code}"
 
       - name: Create or update tracking issue
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
@@ -49,19 +68,31 @@ jobs:
           script: |
             const fs = require("fs");
             const title = "📋 pip-audit 定期監査";
+            const header = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt）\n\n";
+            // Issue #366: 判定はレポートファイルの有無/中身ではなく、前ステップが記録した
+            // exit code と「pip-auditがレポートを書いたか」で行う(0件時はファイルが生成されないため)。
+            const exitCode = "${{ steps.audit.outputs.exit_code }}";
+            const reportWritten = "${{ steps.audit.outputs.report_written }}" === "true";
             let report;
-            try {
-              report = fs.readFileSync("MY_HOME_SYSTEM/pip-audit-report.md", "utf8").trim();
-              if (!report) {
-                report = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt）\n\n検知事項なし。";
-              } else {
-                report = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt）\n\n" + report;
+            let isClean = false;
+            if (exitCode === "0") {
+              isClean = true;
+              report = header + "検知事項なし。";
+            } else if (exitCode === "1" && reportWritten) {
+              // 脆弱性検知あり: pip-audit が書いた Markdown レポートをそのまま載せる
+              let body = "";
+              try {
+                body = fs.readFileSync("MY_HOME_SYSTEM/pip-audit-report.md", "utf8").trim();
+              } catch (e) {
+                body = "";
               }
-            } catch (e) {
-              report = "## pip-audit 定期監査（MY_HOME_SYSTEM/requirements.txt）\n\n" +
-                "チェック自体が失敗しました。Actionsのログを確認してください（このチェックはブロッキングではありません）。";
+              report = header + (body || "脆弱性が検知されましたが、レポート本文を読み取れませんでした。Actionsのログを確認してください。");
+            } else {
+              // exit 1 でレポート未生成(=pip-audit自体のエラー)、またはその他の異常終了
+              report = header +
+                `チェック自体が失敗しました(pip-audit exit code: ${exitCode || "不明"})。` +
+                "Actionsのログを確認してください（このチェックはブロッキングではありません）。";
             }
-            const isClean = report.includes("検知事項なし") || report.includes("No known vulnerabilities found");
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const date = new Date().toISOString().slice(0, 10);
             const body = report + `\n\n---\n最終実行: ${date} ([ワークフロー実行結果](${runUrl}))`;

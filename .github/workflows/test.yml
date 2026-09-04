@@ -195,6 +195,9 @@ jobs:
         # ため、引き続きPR単位ではブロッキングにしない。代わりに
         # pip-audit-weekly-audit.yml が同じ対象を週次監査し、検知が出れば
         # Issueで可視化・追跡する(仕様書ドリフトのIssue #20と同型の運用)。
+        # 注意(Issue #366): pip-audit は検知0件のとき -o の出力ファイルを生成しない
+        # (stdoutに "No known vulnerabilities found" を出すのみ)。後続のアーティファクト
+        # アップロードで pip-audit-report.md が見つからなくても正常(=検知なし)である。
         run: pip-audit -r requirements.txt --desc -f markdown -o pip-audit-report.md || true
         continue-on-error: true
 
