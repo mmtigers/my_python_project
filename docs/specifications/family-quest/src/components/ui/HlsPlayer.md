@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `288f639` |
 
 ## 関連ドキュメント
 
@@ -59,14 +60,14 @@
 
 * **副作用**:
   * `useEffect`内で`videoRef.current`（`<video>`要素）を取得し、`onVideoRef`が渡されていれば呼び出す。
-  * `Hls.isSupported()`が`true`の場合、`new Hls({ startPosition: ... })`でインスタンスを生成し、`hls.loadSource(streamUrl)`・`hls.attachMedia(video)`でストリームをアタッチし、`Hls.Events.ERROR`と`Hls.Events.MANIFEST_PARSED`イベントを購読する。
+  * `Hls.isSupported()`が`true`の場合、`new Hls({ startPosition: ... })`でインスタンスを生成し、`hls.loadSource(streamUrl)`・`hls.attachMedia(video)`でストリームをアタッチし、`Hls.Events.ERROR`・`Hls.Events.MANIFEST_PARSED`・**（Issue #392で追加）** `Hls.Events.FRAG_LOADED`イベントを購読する。`FRAG_LOADED`はセグメント取得成功＝ネットワーク回復の合図として、後述のバックオフ再試行カウンタ`networkRetryCount`を`0`にリセットする。
   * `Hls.isSupported()`が`false`かつ`video.canPlayType('application/vnd.apple.mpegurl')`が真の場合、`video.src = streamUrl`を直接設定し、`loadedmetadata`・`error`のネイティブDOMイベントを購読する。
-  * クリーンアップ関数（`useEffect`の戻り値）で、`hls`変数が存在すれば`hls.destroy()`を呼び、存在しなければ（ネイティブ再生時のみ）`loadedmetadata`/`error`のリスナーを`removeEventListener`する。
-* 根拠: [`useEffect`] (行番号: 25〜99 / 抜粋: "useEffect(() => {\n        const video = videoRef.current;")、[cleanup] (行番号: 89〜98 / 抜粋: "return () => {\n            if (hls) {\n                hls.destroy();")
+  * クリーンアップ関数（`useEffect`の戻り値）で、`disposed`フラグを立てて保留中のバックオフ再試行タイマーを`clearTimeout`し、`Hls.isSupported()`であれば`hls?.destroy()`、そうでなければ（ネイティブ再生時のみ）`loadedmetadata`/`error`のリスナーを`removeEventListener`する。**（Issue #392 / F-L4で追加）** 最後に`onVideoRef`が渡されていれば`onVideoRef(null)`を呼び、アンマウント・`streamUrl`差し替え時に呼び出し元（`RecordView.tsx`の`videoRefs`等）へ切り離しを通知する（以前は呼ばれておらず、切離済み要素への参照が残っていた）。
+* 根拠: [`useEffect`] (行番号: 27〜101 / 抜粋: "useEffect(() => {\n        const video = videoRef.current;")、[cleanup] (行番号: 133〜150 / 抜粋: "return () => {\n            disposed = true;\n            if (retryTimer !== null) {\n                window.clearTimeout(retryTimer);\n                retryTimer = null;\n            }\n            if (Hls.isSupported()) {\n                hls?.destroy();\n            } else {", "if (onVideoRef) onVideoRef(null);")
 
 
-* **エラーハンドリング**: `Hls.Events.ERROR`イベントで`data.fatal`が`true`の場合、`console.error`でログ出力した上で、`data.type === Hls.ErrorTypes.MEDIA_ERROR`であれば直近3秒以内に回復を試みていない場合のみ`hls.recoverMediaError()`で回復を試行し（3秒以内の連続エラーは`hls.destroy()`＋`setStreamError(true)`で中断）、それ以外の致命的エラー種別では即座に`hls.destroy()`＋`setStreamError(true)`とする。Safariのネイティブ再生時は`error`イベントで`handleNativeError`が呼ばれ`console.error`＋`setStreamError(true)`する。また`video.play()`失敗時（Promiseのreject）は`.catch(e => console.error("Play failed:", e))`でログ出力するのみで`streamError`状態は更新しない。`streamError`が`true`の間は「映像を取得できませんでした」というオーバーレイを表示する。
-* 根拠: [`Hls.Events.ERROR`] (行番号: 57〜77 / 抜粋: "hls.on(Hls.Events.ERROR, (_event, data) => {")、[`handleNativeError`] (行番号: 40〜43 / 抜粋: "const handleNativeError = () => {\n            console.error(\"Native video playback error (Safari HLS)\");\n            setStreamError(true);\n        };")、[`play().catch`] (行番号: 48 / 抜粋: "if (autoPlay) video.play().catch(e => console.error(\"Play failed:\", e));")、[エラーオーバーレイ] (行番号: 109〜113 / 抜粋: "{streamError && (\n                <div className=\"absolute inset-0 flex items-center justify-center bg-black/80 text-white text-sm text-center p-4 pointer-events-none\">")
+* **エラーハンドリング**: `Hls.Events.ERROR`イベントで`data.fatal`が`true`の場合、`console.error`でログ出力した上で種別ごとに分岐する。**（Issue #392で修正）** `data.type === Hls.ErrorTypes.NETWORK_ERROR`（`camera_router.py`がffmpeg起動待ちで返す503応答やサーバー再起動中の接続失敗などで発生しうる）は`scheduleNetworkRetry`により`1000 * 2^n`ms（`n`は再試行回数、`NETWORK_RETRY_MAX_MS`＝30秒で頭打ち）のバックオフで`hls.startLoad()`を再試行し、`NETWORK_RETRY_MAX_ATTEMPTS`（6回）を超えたら`giveUp`（`hls.destroy()`＋`setStreamError(true)`）する。`data.type === Hls.ErrorTypes.MEDIA_ERROR`であれば直近3秒以内に回復を試みていない場合のみ`hls.recoverMediaError()`で回復を試行し（3秒以内の連続エラーは`giveUp`）、それ以外の致命的エラー種別では即座に`giveUp`する。以前はNETWORK_ERRORも即`hls.destroy()`していたため、ライブ4分割を常時表示している端末では一時的な503やサーバー再起動でタイルが再マウントまで永久に死んでいた。Safariのネイティブ再生時は`error`イベントで`handleNativeError`が呼ばれ`console.error`＋`setStreamError(true)`する。また`video.play()`失敗時（Promiseのreject）は`.catch(e => console.error("Play failed:", e))`でログ出力するのみで`streamError`状態は更新しない。`streamError`が`true`の間は「映像を取得できませんでした」というオーバーレイに加え、**（Issue #392で追加）** 押下で`retryNonce`をインクリメントして`useEffect`を再実行させ（＝HLSインスタンスを再生成する）「再試行」ボタンを表示する。ボタンの`onClick`は`e.stopPropagation()`で、`LiveView.tsx`のタイル全体に付いた「1台拡大表示」の`onClick`への伝播を止める。
+* 根拠: [`Hls.Events.ERROR`とNETWORK_ERROR分岐] (行番号: 97〜117 / 抜粋: "instance.on(Hls.Events.ERROR, (_event, data) => {\n                if (!data.fatal) return;\n                console.error(\"HLS Fatal Error:\", data);\n                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {\n                    scheduleNetworkRetry();")、[`scheduleNetworkRetry`/`giveUp`] (行番号: 19〜21, 67〜91 / 抜粋: "const NETWORK_RETRY_BASE_MS = 1000;\nconst NETWORK_RETRY_MAX_MS = 30 * 1000;\nconst NETWORK_RETRY_MAX_ATTEMPTS = 6;", "const giveUp = () => {\n            hls?.destroy();\n            hls = undefined;\n            setStreamError(true);\n        };", "const scheduleNetworkRetry = () => {\n            if (networkRetryCount >= NETWORK_RETRY_MAX_ATTEMPTS) {")、[再試行ボタン] (行番号: 161〜172 / 抜粋: "{streamError && (\n                <div className=\"absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/80 text-white text-sm text-center p-4\">", "onClick={(e) => { e.stopPropagation(); setRetryNonce(n => n + 1); }}")
 
 ## 5. 処理フロー図
 
@@ -159,6 +160,12 @@ graph TD
 | 低 | バックエンドの`/api/cameras/live/{id}/stream.m3u8`・`/api/cameras/record/...`エンドポイント実装 | `streamUrl`として渡されるHLSマニフェストの生成方式（セグメント長、有効期限等）を確認するため。 | 根拠: [呼び出し元での`streamUrl`組み立て] 本ファイル単体では確認できない |
 
 ## 8. 保守上の注意点
+
+* **[修正済み] NETWORK_ERRORのバックオフ再試行と再試行ボタン（Issue #392）**: 以前は`MEDIA_ERROR`以外の`fatal`エラーを即`hls.destroy()`しており、`camera_router.py`がffmpeg起動待ちで返しうる503応答やサーバー再起動中の一時的な接続断でも、ライブ4分割を常時表示している端末ではタイルが再マウントまで永久に死んでいた。修正後は`NETWORK_ERROR`のみ指数バックオフ（1s→2s→4s→8s→16s→30s、最大6回）で`hls.startLoad()`を再試行し、`Hls.Events.FRAG_LOADED`（セグメント取得成功）で再試行回数をリセットする。再試行上限を超えた場合とその他の致命的エラーは従来通り`hls.destroy()`＋エラー表示だが、オーバーレイに「再試行」ボタンを追加し、押下で`retryNonce`ステートをインクリメントして`useEffect`を再実行させる（＝HLSインスタンスを一から作り直す）ことでユーザー操作による復帰手段を用意した。
+* 根拠: (行番号: 15〜21, 67〜122, 161〜172)
+* **[修正済み] アンマウント時に`onVideoRef(null)`を呼ぶ（Issue #392 / F-L4）**: 以前はクリーンアップ関数が`onVideoRef`を一切呼んでおらず、`RecordView.tsx`の`videoRefs`（カメラIDごとの`<video>`参照マップ）に、アンマウント済み・差し替え済みの要素への参照が残り続けていた。修正後はクリーンアップの最後で`onVideoRef?.(null)`を呼ぶ。
+* 根拠: (行番号: 149 / 抜粋: "if (onVideoRef) onVideoRef(null);")
+* **契約テスト**: `HlsPlayer.retry.test.tsx`が`hls.js`を`vi.mock`でモックし、NETWORK_ERRORのバックオフ・`FRAG_LOADED`によるリセット・再試行上限超過後のボタン表示とクリック時のインスタンス再生成・非NETWORK/MEDIA致命的エラーの即時失敗・`onVideoRef`のマウント/アンマウント呼び出し・アンマウント後に保留中の再試行タイマーが発火しないことを検証する（既存の`HlsPlayer.test.tsx`はSafariネイティブ再生パスのリスナー着脱を実`hls.js`で検証しており対象が異なる）。
 
 * `hls.js`非対応かつネイティブHLS非対応（`video.canPlayType`が偽を返す）ブラウザの場合、`if (Hls.isSupported())`と`else if (video.canPlayType(...))`のいずれの分岐にも入らず、`hls`変数は未初期化（`let hls: Hls;`のまま代入されない）となる。この状態でクリーンアップ関数が呼ばれると`if (hls)`が`false`になり、リスナーの`removeEventListener`も呼ばれない（元々登録されていないため実害はないが、ユーザーには何の映像もエラー表示も出ない「サイレント失敗」状態になる）。
 * 根拠: [`let hls: Hls;`] (行番号: 34 / 抜粋: "let hls: Hls;")、[分岐] (行番号: 51, 83 / 抜粋: "if (Hls.isSupported()) {" / "} else if (video.canPlayType('application/vnd.apple.mpegurl')) {")

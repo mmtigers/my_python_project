@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `288f639` |
 
 ## 関連ドキュメント
 
@@ -69,8 +70,8 @@
 
 ### `handlePlay` (RecordView内ローカル関数)
 
-* **役割**: 入力された日付・時刻をもとに、各カメラの録画オフセットをAPIから取得してシーク秒数を算出し、再生用のURLサフィックスとオフセット一覧をstateにセットする。
-* 根拠: [`handlePlay`] (行番号: 32〜60 / 抜粋: "const handlePlay = async () => {")
+* **役割**: 入力された日付・時刻をもとに、各カメラの録画オフセットをAPIから取得してシーク秒数を算出し、再生用のURLサフィックスとオフセット一覧をstateにセットする。**（Issue #392 / F-L4で修正）** 冒頭で`isPreparing`（準備中フラグ）による多重実行ガードを追加し、取得中は「再生開始」ボタンを「準備中...」表示＋`disabled`にする。カメラごとのオフセット取得は`for...of`内の逐次`await`から`Promise.all(cameras.map(...))`による並列取得に変更し、待機時間がカメラ台数に比例しないようにした（個々の失敗時に`totalSeconds`へフォールバックする挙動は維持）。
+* 根拠: [`handlePlay`] (行番号: 32〜67 / 抜粋: "const handlePlay = async () => {\n        if (isPreparing) return;")、[並列化] (行番号: 44〜58 / 抜粋: "const entries = await Promise.all(cameras.map(async (camera) => {")
 
 
 * **引数/リクエスト**: なし（クロージャ経由で`targetDate`, `targetTime`, `cameras`を参照）
@@ -81,8 +82,8 @@
 * 根拠: [state更新] (行番号: 57〜59 / 抜粋: "setStartOffsets(offsets);\n        // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる\n        setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);")
 
 
-* **副作用**: カメラ台数分の`apiClient.get<{ offset_seconds: number }>('/api/cameras/record/{id}/{dateStr}/info')`呼び出し（逐次実行）。
-* 根拠: [`apiClient.get`] (行番号: 48 / 抜粋: "const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);")
+* **副作用**: カメラ台数分の`apiClient.get<{ offset_seconds: number }>('/api/cameras/record/{id}/{dateStr}/info')`呼び出し（**Issue #392で修正**: 並列実行）、`isPreparing`ステートの更新（`try`/`finally`で必ず`false`に戻す）。
+* 根拠: [`apiClient.get`] (行番号: 47 / 抜粋: "const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);")
 
 
 * **エラーハンドリング**: 未入力時は`setValidationError`でエラー表示し中断。個々のAPI呼び出し失敗時は`console.error`でログ出力し、当該カメラのオフセットを`totalSeconds`にフォールバックして処理を継続する（全体は中断しない）。
@@ -245,8 +246,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `handlePlay`内のカメラごとのオフセット取得は`for...of`ループ内で`await`しており、カメラ台数分のAPIリクエストが並列ではなく逐次（直列）実行される。カメラ台数が多い場合、再生開始までの待機時間がカメラ数に比例して増大する可能性がある。
-* 根拠: [`for (const camera of cameras) { ... await apiClient.get ... }`] (行番号: 46〜55)
+* **[修正済み] オフセット取得の並列化と多重実行ガード（Issue #392 / F-L4）**: 以前は`handlePlay`内のカメラごとのオフセット取得が`for...of`ループ内で`await`されており、カメラ台数分のAPIリクエストが逐次実行されるため、再生開始までの待機時間がカメラ数に比例して増大していた。また処理中の再クリックで同じ取得が並行して走りうる状態だった。修正後は`Promise.all`による並列取得に変更し、`isPreparing`フラグで多重実行を防いだうえ、ボタンを「準備中...」表示にして進行中であることを見せる。
+* 根拠: (行番号: 22〜24, 32〜67, 96〜103)
 * 個別カメラのオフセット取得に失敗した場合、そのカメラのみ`totalSeconds`（オフセット未考慮の総秒数）にフォールバックされるが、ユーザーへ「一部のカメラでオフセット取得に失敗した」旨の通知は行われない（`console.error`のみ）。
 * 根拠: [`catch (err)`] (行番号: 51〜54 / 抜粋: "} catch (err) {\n                console.error(\"Failed to fetch offset\", err);")
 * `handleGlobalPlay`は各`<video>`要素の`play()`のPromise reject（自動再生ポリシー等によるエラー）を捕捉していない。ブラウザ環境によっては未処理のPromise rejectionが発生し得る。
