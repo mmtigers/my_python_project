@@ -47,6 +47,8 @@
 
 * **役割**: DBファイルパス（`DB_PATH`）、ログディレクトリ（`LOG_DIR`）、日本語名とDB内`user_id`のマッピング（`NAME_MAP`）を定義し、日付別のログファイルを作成、`logging.basicConfig` によりファイル出力とコンソール出力の両方を行うよう設定する。**（Issue #186で修正）** 以前は`DB_PATH`がCWD相対のハードコード文字列`"home_system.db"`であり、他のDBアクセス経路（`config.SQLITE_DB_PATH` = `BASE_DIR/home_system.db`、環境変数`SQLITE_DB_PATH`で上書き可）と食い違っていた。`MY_HOME_SYSTEM/`以外のCWDから実行するとファイル不在で終了する、あるいは同名ファイルが存在すれば別のDBを誤って操作する、`SQLITE_DB_PATH`環境変数での差し替え運用時に本番と異なるファイルをリセットする、といったリスクがあったため、`config`モジュールをインポートし`DB_PATH = config.SQLITE_DB_PATH`から導出するよう統一した。
 * 根拠: `DB_PATH = config.SQLITE_DB_PATH` 〜 `logging.basicConfig(...)` (行番号: 18〜40 / 抜粋: "DB_PATH = config.SQLITE_DB_PATH  # DBファイルパス")、Issue #186修正のimportとコメント (行番号: 8〜17 / 抜粋: "import config", "# #186: 以前はCWD相対の"home_system.db"に直接sqlite3.connectしており、他のDB")
+* **（Issue #409 Q-L8 で修正）** `LOG_DIR` は CWD 相対の `"logs"` ではなく `config.LOG_DIR` を使い、`logging.basicConfig` は import 時ではなく `main()` から呼ぶ `_setup_logging()` に移動した。
+* 根拠: `LOG_DIR = config.LOG_DIR`、`def _setup_logging() -> None:`
 
 
 * **引数/リクエスト**: なし

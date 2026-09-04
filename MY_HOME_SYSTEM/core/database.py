@@ -107,6 +107,10 @@ def save_logs_batch_generic(table: str, columns_list: List[str], values_list: Li
     失敗すれば例外がget_db_cursor側のrollbackへ伝播し、全件ロールバックされる
     (真のall-or-nothing)。
     """
+    # Q-L9(#409): save_log_generic と同じ識別子ホワイトリストを適用する(以前は片方だけだった)
+    if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):
+        logger.error(f"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})")
+        return False
     try:
         with get_db_cursor(commit=True) as cur:
             placeholders = ", ".join(["?"] * len(columns_list))
