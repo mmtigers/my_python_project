@@ -361,14 +361,27 @@ class FileManager:
         if output_path.exists():
             logger.warning(f"⚠️ 上書き: {filename} は既に存在します（チャンネル名/タイトルが重複している可能性）")
 
+        # D-L10: 以前はoutput_path.open("w", ...)で直接上書きしていたため、
+        # 書き込み中(NAS瞬断等)にプロセスが中断すると、同名ファイルが既に
+        # 存在するケース(上記の重複)では中身が空/一部だけのファイルで
+        # 上書きされたまま残ってしまいうった。newface_monitor.py/
+        # batch_download_discord.pyの他の永続化と同じ「.tmpへ書き込み→
+        # replace」のアトミックパターンに揃える。
+        tmp_path = output_path.with_suffix(output_path.suffix + '.tmp')
         try:
-            with output_path.open("w", encoding="utf-8") as f:
+            with tmp_path.open("w", encoding="utf-8") as f:
                 for url in result.urls:
                     f.write(url + "\n")
+            tmp_path.replace(output_path)
             logger.info(f"✅ 保存完了: {filename} ({len(result.urls)} 件)")
             return True
         except IOError:
             logger.error(f"❌ ファイル書き込みエラー: {output_path}", exc_info=True)
+            # 書き込み失敗時の.tmpファイル残置を防ぐ(best-effort)。
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return False
 
 class SubscriptionManager:
