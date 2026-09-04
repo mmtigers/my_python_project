@@ -1,5 +1,5 @@
 requests>=2.28.0
-beautifulsoup4>=4.11.0
+beautifulsoup4>=4.15.0
 yt-dlp>=2024.1.0
 # missav等、CloudflareのボットチャレンジがかかったCDN(surrit.com等)からm3u8を
 # 取得する際、yt-dlpのgenericエクストラクタでブラウザ偽装(impersonate)を行うために
