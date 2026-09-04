@@ -12,6 +12,7 @@ import sys
 from datetime import datetime
 
 import pandas as pd
+import pytest
 import pytz
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -358,3 +359,158 @@ class TestSystemStats:
     def test_get_system_logs_does_not_raise(self):
         result = analysis_service.get_system_logs(lines=10)
         assert isinstance(result, str)
+
+
+class TestProcessDataframeCoercesInvalidTimestamps:
+    """L-L3 (#410) の回帰テスト: 1行でも不正なタイムスタンプがあると
+    process_dataframe(ひいてはload_data_from_db)が例外で全行を失っていた。
+    不正な行のみpd.NaTへ変換し、他の正常な行は失われないこと。"""
+
+    def test_invalid_row_is_coerced_to_nat_and_other_rows_survive(self):
+        df = pd.DataFrame({
+            "timestamp": ["2026-01-01T09:00:00+09:00", "not-a-timestamp", "2026-01-02T09:00:00+09:00"],
+            "value": [1, 2, 3],
+        })
+        result = analysis_service.process_dataframe(df)
+
+        assert len(result) == 3, "不正な行があっても他の行が失われてはならない"
+        assert pd.isna(result["timestamp"].iloc[1])
+        assert not pd.isna(result["timestamp"].iloc[0])
+        assert not pd.isna(result["timestamp"].iloc[2])
+
+    def test_all_valid_rows_unaffected_by_coerce_wrapper(self):
+        """既存のTestProcessDataframe系テストと同じ結果になること(ラッパー化による
+        回帰が無いこと)"""
+        df = pd.DataFrame({"timestamp": ["2026-01-01T00:00:00Z"], "value": [1]})
+        result = analysis_service.process_dataframe(df)
+        assert str(result["timestamp"].dt.tz) == "Asia/Tokyo"
+
+
+class TestLoadDataFromDbSurvivesOneBadTimestampRow:
+    def test_one_malformed_timestamp_row_does_not_empty_out_whole_result(self, isolated_db):
+        """L-L3 (#410) の回帰テスト: load_data_from_db経由でも、1行の不正な
+        タイムスタンプでパネル全体が「データなし」にならないこと。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_NAS} "
+                "(timestamp, device_name, ip_address, status_ping, status_mount, total_gb, used_gb, free_gb, percent) "
+                "VALUES ('2026-01-01T00:00:00', 'NAS1', '192.168.1.1', 'ok', 'ok', 100, 50, 50, 50.0)"
+            )
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_NAS} "
+                "(timestamp, device_name, ip_address, status_ping, status_mount, total_gb, used_gb, free_gb, percent) "
+                "VALUES ('invalid-timestamp-value', 'NAS2', '192.168.1.2', 'ok', 'ok', 100, 50, 50, 50.0)"
+            )
+
+        result = analysis_service.load_data_from_db(f"SELECT * FROM {config.SQLITE_TABLE_NAS}")
+
+        assert len(result) == 2, "不正なタイムスタンプの1行のせいで全行が失われてはならない"
+        assert set(result["device_name"]) == {"NAS1", "NAS2"}
+
+
+class TestCalculateMonthlyCostCumulativeMicrosecondBoundary:
+    def test_record_at_exact_month_start_midnight_is_included(self, isolated_db):
+        """L-L2 (#410) の回帰テスト: start_of_month.isoformat()にnowの微秒が残ると、
+        月初ちょうど0時(微秒無し)のレコードが文字列比較の境界で除外されていた。
+        microsecond=0を指定することで、ちょうど月初0時のレコードも集計に含まれる。
+        DB側のタイムスタンプは本番の保存規約(core.utils.get_now_iso、JSTオフセット付き
+        isoformat())に合わせ、こちらも.isoformat()で挿入する(オフセット有無が
+        不揃いだと、この境界問題とは別に文字列比較そのものがズレるため)。"""
+        now = datetime.now(pytz.timezone("Asia/Tokyo"))
+        exact_midnight = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{exact_midnight.isoformat()}')"
+            )
+            ts2 = exact_midnight.replace(hour=1).isoformat()
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{ts2}')"
+            )
+
+        result = analysis_service.calculate_monthly_cost_cumulative()
+
+        assert result == int(1.0 * 31)
+
+
+class TestLoadWeatherHistoryUsesJst:
+    def test_start_date_is_computed_with_jst_aware_now(self, monkeypatch):
+        """L-L2 (#410) の回帰テスト: 以前はdatetime.now()(naive、サーバーのローカル
+        タイムゾーン依存)を使っていた。JSTを明示的に指定するようになったこと。"""
+        captured = {}
+        real_datetime = analysis_service.datetime
+
+        class _SpyDatetime(real_datetime):
+            @classmethod
+            def now(cls, tz=None):
+                captured["tz"] = tz
+                return real_datetime.now(tz)
+
+        monkeypatch.setattr(analysis_service, "datetime", _SpyDatetime)
+
+        analysis_service.load_weather_history(days=1)
+
+        assert captured.get("tz") is not None
+        assert str(captured["tz"]) == "Asia/Tokyo"
+
+
+class TestLoadRankingDataParametrized:
+    """
+    app_rankings はマイグレーション(migrations/*.sql)には存在しない旧テーブルで、
+    isolated_db フィクスチャでは初期化されない(TestLoadRankingData の
+    「テーブル無し」テスト参照)。これらのテストはテーブル自体をローカルに
+    作成してからデータを投入する。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _create_app_rankings_table(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS app_rankings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    ranking_type TEXT,
+                    rank INTEGER,
+                    app_id TEXT,
+                    title TEXT,
+                    developer TEXT,
+                    icon_url TEXT,
+                    score REAL,
+                    recorded_at TEXT
+                )
+            """)
+
+    def test_returns_rows_matching_date_and_type(self, isolated_db):
+        """保守性(#410, bandit B608)の回帰テスト: f-string埋め込みからプレースホルダ化
+        した後も、通常のクエリ結果は変わらないこと。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
+                "('2026-09-01', 'free', 1, 'アプリA', 'com.example.a')"
+            )
+            cur.execute(
+                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
+                "('2026-09-01', 'grossing', 1, 'アプリB', 'com.example.b')"
+            )
+
+        result = analysis_service.load_ranking_data("2026-09-01", "free")
+
+        assert len(result) == 1
+        assert result.iloc[0]["title"] == "アプリA"
+
+    def test_value_containing_single_quote_does_not_break_query(self, isolated_db):
+        """プレースホルダ化により、値にシングルクォートが含まれても
+        (f-string埋め込みなら構文エラーやインジェクションになりうる形でも)
+        安全に扱えること。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
+                "('2026-09-01', \"weird' type\", 1, 'アプリC', 'com.example.c')"
+            )
+
+        result = analysis_service.load_ranking_data("2026-09-01", "weird' type")
+
+        assert len(result) == 1
+        assert result.iloc[0]["title"] == "アプリC"

@@ -53,6 +53,22 @@ def _parse_timestamp_to_jst(value) -> pd.Timestamp:
     return ts.tz_convert("Asia/Tokyo")
 
 
+def _parse_timestamp_to_jst_coerce(value) -> pd.Timestamp:
+    """
+    L-L3 (#410): `_parse_timestamp_to_jst`は不正なタイムスタンプ文字列に対して例外を
+    送出する。以前は`process_dataframe`がこれを`.apply()`でそのまま呼んでいたため、
+    1行でも不正なタイムスタンプがあると例外が`load_data_from_db`の`except Exception`
+    まで伝播し、パネル全体のデータが空扱いになっていた(該当行だけでなく全行が
+    失われる)。`pandas`の`errors='coerce'`相当に、パース失敗時は当該行のみ`pd.NaT`
+    にして処理を継続する。
+    """
+    try:
+        return _parse_timestamp_to_jst(value)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Timestamp parse failed, coercing to NaT: {value!r} ({e})")
+        return pd.NaT
+
+
 def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """DataFrameのタイムスタンプを日本時間に変換し、表示名を適用する共通処理"""
     if df.empty or "timestamp" not in df.columns:
@@ -60,7 +76,7 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    df["timestamp"] = df["timestamp"].apply(_parse_timestamp_to_jst)
+    df["timestamp"] = df["timestamp"].apply(_parse_timestamp_to_jst_coerce)
 
     return df
 
@@ -223,7 +239,11 @@ def calculate_monthly_cost_cumulative() -> int:
     """今月の電気代概算"""
     try:
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
-        start_of_month = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+        # L-L2 (#410): microsecond=0 を指定しないと start_of_month の isoformat() に
+        # nowの微秒がそのまま残り(例 "...T00:00:00.123456+09:00")、月初ちょうど0時
+        # (微秒無し)のDBレコードが文字列比較で「start_of_month未満」と判定され
+        # 集計から漏れる(SQLiteの文字列比較では"+09:00"より"."の方が大きい)。
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
 
         # 1. 新テーブル (power_usage) から取得
         # #170: power_usageにはスマートメーター(全体消費)と各プラグ(個別家電)が
@@ -269,7 +289,10 @@ def calculate_monthly_cost_cumulative() -> int:
         return 0
 
 def load_weather_history(days: int = 40, location: str = "伊丹") -> pd.DataFrame:
-    start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    # L-L2 (#410): naive datetime.now()はサーバーのローカルタイムゾーン(環境依存)を
+    # 使うため、他関数(get_today_date_str等)が前提とするJSTと日付境界がズレうる。
+    # JSTで明示的に現在時刻を取得する。
+    start_date = (datetime.now(pytz.timezone("Asia/Tokyo")) - timedelta(days=days)).strftime("%Y-%m-%d")
     query = f"""
         SELECT date, min_temp, max_temp, weather_desc, umbrella_level 
         FROM weather_history 
@@ -320,11 +343,11 @@ def load_yearly_temperature_stats(year: int, location: str = "伊丹") -> pd.Dat
         
         df_new = pd.DataFrame()
         try: df_new = pd.read_sql_query(q_new, conn)
-        except: pass
+        except Exception: pass
             
         df_old = pd.DataFrame()
         try: df_old = pd.read_sql_query(q_old, conn)
-        except: pass
+        except Exception: pass
 
         if not df_new.empty and not df_old.empty:
             df_sensor = pd.concat([df_new, df_old]).groupby("date").agg({"in_max": "max", "in_min": "min"}).reset_index()
@@ -383,14 +406,17 @@ def load_ranking_dates(limit: int = 3) -> List[str]:
 
 def load_ranking_data(date_str: str, ranking_type: str) -> pd.DataFrame:
     """特定日付・タイプのランキングを取得"""
-    query = f"""
-        SELECT rank, title, app_id FROM app_rankings 
-        WHERE date = '{date_str}' AND ranking_type = '{ranking_type}'
+    # 保守性(#410, bandit B608): date_str は load_ranking_dates() が返すDB由来の値
+    # (app_rankings.dateの実データ)であり、テーブル名等の識別子ではなく値そのもの
+    # なので、f-string埋め込みではなくプレースホルダで渡せる。
+    query = """
+        SELECT rank, title, app_id FROM app_rankings
+        WHERE date = ? AND ranking_type = ?
         ORDER BY rank ASC
     """
     conn = get_ro_db_connection()
     try:
-        return pd.read_sql_query(query, conn)
+        return pd.read_sql_query(query, conn, params=(date_str, ranking_type))
     except Exception as e:
         logger.error(f"Ranking Data Load Error: {e}")
         return pd.DataFrame()
