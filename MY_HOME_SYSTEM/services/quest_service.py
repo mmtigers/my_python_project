@@ -767,10 +767,23 @@ class QuestService:
             cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
             return
 
+        # #356: 以前は max(0, gold - gold_earned) で 0 に飽和させていたため、付与された
+        # ゴールドを報酬購入で使い切った後に履歴をキャンセルすると残高が減らず、
+        # 再完了で再び付与される「無限ゴールド」が成立していた。付与済みゴールドを
+        # 既に消費している(残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが
+        # 常に「付与の完全な巻き戻し」になることを保証する。
+        gold_earned = hist['gold_earned'] or 0
+        current_gold = user['gold'] or 0
+        if current_gold < gold_earned:
+            raise HTTPException(
+                status_code=400,
+                detail="獲得したゴールドを既に使用しているため、このクエストは取り消せません",
+            )
+
         new_level, new_exp = game_logic.GameLogic.calc_level_down(
             user['level'], user['exp'], hist['exp_earned']
         )
-        new_gold = max(0, user['gold'] - hist['gold_earned'])
+        new_gold = current_gold - gold_earned
 
         cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?",
                     (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))

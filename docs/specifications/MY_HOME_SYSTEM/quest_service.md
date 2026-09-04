@@ -461,8 +461,9 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._revert_and_delete_history`
 
-* **役割**: `quest_history`1行を取り消すヘルパー。`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除し（ゴールドは`max(0, ...)`で負値化を防止）、`approved`以外（`pending`・`rejected`）は報酬が付与されていないため残高には触れず単純に削除する（Issue #97: 以前は`status == 'pending'`以外を一律「付与済み」とみなしてロールバックしていたため、`rejected`履歴を`cancel`すると、もらっていない経験値・ゴールドが残高から減算される不具合があった）。呼び出し元`process_cancel_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない（Issue #98）。
-* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 608〜627 / 抜粋: "if hist['status'] != 'approved':\n            cur.execute(\"DELETE FROM quest_history WHERE id = ?\", (hist['id'],))\n            return")
+* **役割**: `quest_history`1行を取り消すヘルパー。`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除し、`approved`以外（`pending`・`rejected`）は報酬が付与されていないため残高には触れず単純に削除する（Issue #97: 以前は`status == 'pending'`以外を一律「付与済み」とみなしてロールバックしていたため、`rejected`履歴を`cancel`すると、もらっていない経験値・ゴールドが残高から減算される不具合があった）。呼び出し元`process_cancel_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない（Issue #98）。
+**（Issue #356で修正）** ゴールドの巻き戻しは以前`max(0, gold - gold_earned)`で0に飽和させていたため、付与されたゴールドを報酬購入で使い切った後に履歴をキャンセルすると残高が減らず、再完了で再び付与される「無限ゴールド」が成立していた。現在は残高(`quest_users.gold`)が付与額(`quest_history.gold_earned`)未満の場合は`HTTPException(400)`を送出して取り消し自体を拒否し（`get_db_cursor`の例外時ロールバックにより履歴・残高とも変化しない）、残高が十分な場合のみ`gold - gold_earned`をそのまま書き戻す。
+* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 767〜796 / 抜粋: "if hist['status'] != 'approved':\n            cur.execute(\"DELETE FROM quest_history WHERE id = ?\", (hist['id'],))\n            return")、`if current_gold < gold_earned:\n            raise HTTPException(` (行番号: 786〜790)、`new_gold = current_gold - gold_earned` (行番号: 795)
 * **引数/リクエスト**: `cur`, `hist`, `user`
 * 根拠: (行番号: 608)
 * **戻り値/レスポンス**: なし（`-> None`）
