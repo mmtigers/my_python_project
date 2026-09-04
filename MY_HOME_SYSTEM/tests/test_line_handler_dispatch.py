@@ -169,8 +169,15 @@ class TestReplyMessage:
         fake_api = MagicMock()
         fake_api.reply_message.side_effect = Exception("LINE API down")
         monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(line_handler, "logger", mock_logger)
 
         line_handler.reply_message("tok", TextMessage(text="hi"))  # 例外が外に漏れないこと
+
+        # C-L4 (Issue #414): 例外経路に実際に到達し、握りつぶさずログに残していること
+        fake_api.reply_message.assert_called_once()
+        mock_logger.error.assert_called_once()
+        assert "LINE Reply Failed" in mock_logger.error.call_args[0][0]
 
 
 class TestHandleMessageWrapper:
@@ -243,9 +250,10 @@ class TestHandlePostbackWrapper:
         mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
 
     def test_line_logic_delegation_exception_is_caught_silently(self, monkeypatch):
-        monkeypatch.setattr(
-            line_handler.line_logic, "handle_postback", MagicMock(side_effect=Exception("boom"))
-        )
+        mock_delegate = MagicMock(side_effect=Exception("boom"))
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+        mock_logger = MagicMock()
+        monkeypatch.setattr(line_handler, "logger", mock_logger)
 
         event = MagicMock()
         event.source.user_id = "U1"
@@ -253,3 +261,8 @@ class TestHandlePostbackWrapper:
         event.reply_token = "tok"
 
         line_handler.handle_postback(event)  # 例外が外に漏れないこと
+
+        # C-L4 (Issue #414): 委譲先に到達したうえで例外を捕捉し、ログに残していること
+        mock_delegate.assert_called_once()
+        mock_logger.error.assert_called_once()
+        assert "Logic Delegation Error" in mock_logger.error.call_args[0][0]
