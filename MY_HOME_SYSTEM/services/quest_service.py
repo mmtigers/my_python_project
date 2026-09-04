@@ -974,11 +974,17 @@ class InventoryService:
 
             now_iso = common.get_now_iso()
 
+            # #369: SELECT→Python判定→無条件UPDATE では、WALで読み取りがブロックされない
+            # ため連打された2リクエストが両方 'owned' を読み、両方が消費処理・履歴INSERT・
+            # 通知を実行していた(二重使用)。status='owned' を条件に含めた条件付きUPDATEに
+            # し、rowcount==0(先行リクエストが既に消費済み)なら400で拒否する。
             cur.execute("""
                 UPDATE user_inventory
                 SET status = 'consumed', used_at = ?
-                WHERE id = ?
+                WHERE id = ? AND status = 'owned'
             """, (now_iso, inventory_id))
+            if cur.rowcount == 0:
+                raise HTTPException(400, "Cannot use this item")
 
             log_title = f"アイテム使用: {item['title']}"
             cur.execute("""
@@ -987,13 +993,17 @@ class InventoryService:
             """, (item['user_id'], log_title, now_iso))
 
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
-            notification_service.send_push(
-                user_id=config.LINE_USER_ID,
-                messages=[{"type": "text", "text": msg}]
-            )
-            sound_manager.play("quest_clear")
 
-            return {"status": "consumed", "message": "つかいました！"}
+        # 外部副作用(LINE送信・効果音)はコミット後に実行する。以前はトランザクション内で
+        # LINE APIの往復を待っていたため、その間SQLiteの書き込みロックを保持し続け、
+        # 他のwriterが "database is locked" 待ちになっていた(Q-L7)。
+        notification_service.send_push(
+            user_id=config.LINE_USER_ID,
+            messages=[{"type": "text", "text": msg}]
+        )
+        sound_manager.play("quest_clear")
+
+        return {"status": "consumed", "message": "つかいました！"}
 
 
 class GameSystem:
