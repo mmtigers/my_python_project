@@ -119,8 +119,9 @@ def update_line_webhook(base_url):
 def fix_all_webhooks():
     logger.info("🚀 Webhook自動修復ツール起動 (Fixed Architecture)")
     
-    # 環境変数からベースURLを取得 (ngrok探索を廃止)
-    base_url = os.environ.get("WEBHOOK_BASE_URL")
+    # ベースURLは config.WEBHOOK_BASE_URL (環境変数 WEBHOOK_BASE_URL) から取得 (ngrok探索を廃止)。
+    # #405: 以前は os.environ.get() で直接読んでいたため .env.example 整合テストの死角だった。
+    base_url = config.WEBHOOK_BASE_URL
     if not base_url:
         logger.error("❌ WEBHOOK_BASE_URL が .env に設定されていません。処理を終了します。")
         sys.exit(1)

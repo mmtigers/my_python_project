@@ -23,6 +23,7 @@ jobs:
   check:
     name: Check spec/source drift
     runs-on: ubuntu-latest
+    timeout-minutes: 10  # C-L1 (Issue #414)
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -31,15 +32,24 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: "3.11"
+          # Issue #403: 実機 .venv とCIで同じ版を使うよう MY_HOME_SYSTEM/.python-version を参照する
+          python-version-file: MY_HOME_SYSTEM/.python-version
 
       - name: Run drift check (non-blocking)
         id: drift
         continue-on-error: true
+        # Issue #407: 以前は base.sha と github.sha(マージ参照)を比較していたが、
+        # マージ参照は checkout 時点の base で作られるため、イベント発行〜checkout の
+        # 間に base が進むと base 側の変更が差分に混入して誤検知していた。
+        # PR head と、head/base の merge-base(三点比較)で PR 自身の変更だけを見る。
         run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          merge_base="$(git merge-base "$base_sha" "$head_sha")"
+          echo "base=${base_sha} head=${head_sha} merge-base=${merge_base}"
           python3 .github/scripts/check_spec_drift.py pr \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.sha }}" \
+            --base "$merge_base" \
+            --head "$head_sha" \
             --out drift-report.md
 
       - name: Read report

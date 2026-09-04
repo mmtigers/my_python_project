@@ -79,20 +79,38 @@ class TestFamilyChronicle:
 
 
 class TestUpdateUserAvatar:
+    # #372: アップロード経由のアバターは upload_image が生成する /uploads/<uuid4>.<ext> 形式のみ
+    # 受け付けるようになったため、テストデータもその形式に合わせる。
+    UPLOADED = "/uploads/123e4567-e89b-12d3-a456-426614174000.jpg"
+
     def test_updates_avatar_for_existing_user(self, seeded_client):
         res = seeded_client.post(
-            "/api/quest/user/update", json={"user_id": "dad", "avatar_url": "/uploads/new.jpg"}
+            "/api/quest/user/update", json={"user_id": "dad", "avatar_url": self.UPLOADED}
         )
         assert res.status_code == 200
-        assert res.json()["avatar"] == "/uploads/new.jpg"
+        assert res.json()["avatar"] == self.UPLOADED
 
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT avatar FROM quest_users WHERE user_id='dad'").fetchone()
-        assert row["avatar"] == "/uploads/new.jpg"
+        assert row["avatar"] == self.UPLOADED
+
+    def test_accepts_emoji_avatar(self, seeded_client):
+        res = seeded_client.post(
+            "/api/quest/user/update", json={"user_id": "dad", "avatar_url": "🧑‍🚀"}
+        )
+        assert res.status_code == 200
+
+    def test_rejects_arbitrary_upload_path(self, seeded_client):
+        """#372: uuid形式でない /uploads/ パス(他ユーザーのファイル名の指定等)は422で拒否。"""
+        for bad in ("/uploads/new.jpg", "/uploads/../secret.txt", "/x.jpg", "<img src=x>", ""):
+            res = seeded_client.post(
+                "/api/quest/user/update", json={"user_id": "dad", "avatar_url": bad}
+            )
+            assert res.status_code == 422, bad
 
     def test_returns_404_for_unknown_user(self, seeded_client):
         res = seeded_client.post(
-            "/api/quest/user/update", json={"user_id": "nobody", "avatar_url": "/x.jpg"}
+            "/api/quest/user/update", json={"user_id": "nobody", "avatar_url": self.UPLOADED}
         )
         assert res.status_code == 404
 

@@ -159,6 +159,8 @@
 
 * **役割**: 指定カメラ・指定日の録画ファイルのメタデータとして、開始オフセット秒数を `camera_service.get_record_start_offset` から取得し返す。
 * 根拠: [エンドポイント定義とDocstring] (行番号: 75〜77 / 抜粋: "def get_record_info(camera_id: str, target_date: str):\n    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""")
+* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
+* 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 78)、`def _validate_target_date(target_date: str) -> None:` (行番号: 81〜83)、呼び出し (行番号: 89, 100)
 
 
 * **引数/リクエスト**: `camera_id: str`, `target_date: str`（いずれもパスパラメータ）
@@ -181,6 +183,8 @@
 
 * **役割**: リクエストされたファイル名の拡張子により処理を分岐する。`.m3u8`の場合は録画プレイリストを生成・返却し、`.ts`の場合は録画セグメントファイルを配信、それ以外の拡張子は400エラーとする。
 * 根拠: [エンドポイント定義とDocstring] (行番号: 85〜87 / 抜粋: "def get_record_file(camera_id: str, target_date: str, filename: str):\n    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""")
+* **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
+* 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 78)、`def _validate_target_date(target_date: str) -> None:` (行番号: 81〜83)、呼び出し (行番号: 89, 100)
 
 
 * **引数/リクエスト**: `camera_id: str`, `target_date: str`, `filename: str`（いずれもパスパラメータ）

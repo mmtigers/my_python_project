@@ -173,6 +173,8 @@
 
 * **役割**: 複数行をまとめて単一トランザクションで保存する汎用関数。**（Issue #231で追加）** `save_log_generic`を複数回呼び出す実装(`handlers/line_logic.py`の`all_genki`等)では、各呼び出しがそれぞれ独立に`commit`されるため、複数行のうち途中の1件が失敗しても、既に成功した分はコミット済みのまま残ってしまう不具合があった。呼び出し元は「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促す設計だったが、実際には成功済み分が残ったままのため、再試行すると重複して保存されていた。本関数は単一の`get_db_cursor(commit=True)`ブロック内で全件INSERTすることで、1件でも失敗すれば例外が`get_db_cursor`側の`rollback`へ伝播し全件ロールバックされる、真のall-or-nothingを実現する。**`save_log_generic`とは異なり、B3で追加された`_SQL_IDENTIFIER_RE`による`table`/`columns_list`の識別子検証は行わない**（詳細は8節を参照）。
 * 根拠: [関数定義とDocstring] (行番号: 98-109 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
+* **（Issue #409 Q-L9 で修正）** `save_log_generic` と同じ `_SQL_IDENTIFIER_RE` によるテーブル名・カラム名の検証を追加。
+* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(...)` (save_logs_batch_generic 冒頭)
 
 
 * **引数/リクエスト**:

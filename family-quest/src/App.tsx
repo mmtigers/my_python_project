@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
 import { motion } from 'framer-motion';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, AlertTriangle } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
 import { useSound } from './hooks/useSound';
@@ -12,8 +12,8 @@ import RewardShop from './features/shop/components/RewardShop';
 import { InventoryList } from './features/shop/components/InventoryList';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
-import { ID, Quest, QuestHistory, Reward, User } from '@/types';
-import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
+import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
+import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';
 
 // 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
 // ★注意: これはクライアント側のUI上の配慮（隠しボタンを子どもに見せないため）にすぎず、
@@ -31,12 +31,38 @@ const getRepresentativeParent = (allUsers: User[]): User => {
 // 却下理由のプリセット。自由入力の手間を省き、あとで見返した時にも理由がわかるようにする。
 const REJECT_REASONS = ['写真が不明瞭', 'まだ終わっていない', '重複している', 'その他'];
 
+// #393: 選択中ユーザーをlocalStorageに永続化する。インデックスではなくuser_idを保存する
+// ことで、メンバーの並び順が変わったりメンバーが減っても、対応する人を正しく再選択でき
+// (見つからなければ0番目にフォールバックする)、以前のように保存していたindexが範囲外に
+// なって「接続エラー(guest)」カードが出る事故が起きない。
+const CURRENT_USER_STORAGE_KEY = 'familyQuest.currentUserId.v1';
+
+function loadSavedUserId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    // 形状検証: 空文字列や(将来の形式変更等による)非文字列相当の値は無視する
+    return typeof raw === 'string' && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCurrentUserId(userId: string): void {
+  try {
+    window.localStorage.setItem(CURRENT_USER_STORAGE_KEY, userId);
+  } catch {
+    // localStorageが使えない環境(プライベートモード等)では永続化を諦める
+  }
+}
+
 // UI Components
 import Header from './components/layout/Header';
 import BottomNav, { BottomNavTab } from './components/layout/BottomNav';
 import MessageModal from './components/ui/MessageModal';
 import { Button } from './components/ui/Button';
 import { Modal } from './components/ui/Modal';
+import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';
 
 // 初期表示には不要なモーダル類は動的importで分離し、初回バンドルを軽くする
 // (実際に開かれるまでチャンクを読み込まない)
@@ -111,7 +137,10 @@ const ConfirmModal = ({
   const msg = getMessage();
 
   return (
-    <Modal isOpen={true} onClose={onCancel} title={msg.title}>
+    // #394: 応答待ち中(isConfirming)は背景タップ/ESC/×ボタンのいずれでも閉じられない
+    // ようにする(閉じてもリクエストは継続するため、「モーダルを残して再試行できる
+    // ようにする」という設計意図が崩れてしまう)。
+    <Modal isOpen={true} onClose={onCancel} title={msg.title} preventClose={isConfirming}>
       <div className="p-4">
         <p className="whitespace-pre-wrap text-center mb-4">{msg.text}</p>
 
@@ -152,6 +181,10 @@ function App() {
   const [activeTab, setActiveTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
   const [viewMode, setViewMode] = useState<'main' | 'familyLog'>('main');
   const [currentUserIdx, setCurrentUserIdx] = useState(0);
+  // #393: 起動時にlocalStorageへ保存されたuser_idを一度だけ解決するための保持先。
+  // 実データ(users)が届くまではINITIAL_USERSの1人(guest)しか無く解決しようがないため、
+  // 下のuseEffectで実データが揃うまで待つ。
+  const pendingSavedUserIdRef = useRef<string | null>(loadSavedUserId());
 
   // モーダル状態 (完了・購入・却下。取消は長押しでのみ発火するため確認を挟まない)
   const [confirmMode, setConfirmMode] = useState<'complete' | 'purchase' | 'reject' | null>(null);
@@ -176,13 +209,29 @@ function App() {
   // 処理中の履歴idの集合で個別に多重送信を防ぐ。
   const approvingHistoryIdsRef = useRef<Set<ID>>(new Set());
   const isApprovingAllRef = useRef(false);
+  // #391(F-L8): 承認ボタンの isLoading 表示用に approvingHistoryIdsRef を state にも写す。
+  // 判定は同期的なrefで行い、見た目だけ state に追従させる(#101 と同じ二重化パターン)。
+  const [approvingHistoryIds, setApprovingHistoryIds] = useState<ID[]>([]);
+  const [isApprovingAll, setIsApprovingAll] = useState(false);
+  const syncApprovingHistoryIds = () => setApprovingHistoryIds([...approvingHistoryIdsRef.current]);
+
+  // #391: クエスト完了/取消APIが送信中の (user_id, quest_id) の集合。以前は確認モーダルを
+  // 閉じてから await runQuestAction していたため、応答が返るまでカードは未完了のまま
+  // 再タップでき、2回目の確認モーダルが1回目の完了後も開いたまま残って「はい」を押すと
+  // 400「本日は完了済み」/429 のエラーモーダルになっていた。
+  // handleQuestClick で無視し、QuestItem にローディング表示を出すために state にも写す。
+  const processingQuestKeysRef = useRef<Set<string>>(new Set());
+  const [processingQuestKeys, setProcessingQuestKeys] = useState<string[]>([]);
+  const syncProcessingQuestKeys = () => setProcessingQuestKeys([...processingQuestKeysRef.current]);
 
   // #102: クエスト完了の効果音・無限クエストの連打防止クールダウンは、以前は
   // QuestList側でタップ即時(=確認モーダルを開く前)に発火していたため、確認モーダルで
   // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。
   // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに
   // 変わるnonceをApp側からQuestList/QuestItemへ通知する。
-  const [completedSignal, setCompletedSignal] = useState<{ id: ID; nonce: number } | null>(null);
+  // #363: 横画面の4人パネルでは同じsignalが全員のQuestItemに届くため、「誰の完了か」
+  // (userId)も載せ、QuestItem側で自分のパネルの完了だけに反応させる。
+  const [completedSignal, setCompletedSignal] = useState<CompletedSignal | null>(null);
 
   // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
   const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
@@ -202,11 +251,41 @@ function App() {
     users, quests, rewards, completedQuests, pendingQuests,
     chronicle,
     isLoading,
+    gameDataError, refetchGameData,
     completeQuest, approveQuest, rejectQuest, cancelQuest, buyReward,
     refreshData,
   } = useGameData(currentUserIdx, handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
+
+  // #393: usersが実データに揃ったら、保存済みuser_idをfindIndexで一度だけ解決する。
+  // 見つからなければ(メンバー削除・初回起動等)0番目にフォールバックする。
+  // また、以後のcurrentUserIdxの変化(ユーザー切替)を都度localStorageへ保存する。
+  // users.length <= 1 の間はまだ INITIAL_USERS のフォールバック(guest 1人)の可能性があり、
+  // それを保存してしまうと起動のたびに実データ到着前の一瞬で正しい保存値を消してしまうため、
+  // 解決・保存のどちらもスキップする。
+  useEffect(() => {
+    if (users.length <= 1) return;
+
+    const savedUserId = pendingSavedUserIdRef.current;
+    if (savedUserId !== null) {
+      pendingSavedUserIdRef.current = null;
+      const idx = users.findIndex(u => u.user_id === savedUserId);
+      if (idx !== -1) {
+        setCurrentUserIdx(idx);
+        return; // 次のレンダーで本effectが再実行され、保存処理まで進む
+      }
+    }
+
+    // メンバーが減った等でindexが範囲外になった場合は0番目にクランプする
+    if (currentUserIdx >= users.length) {
+      setCurrentUserIdx(0);
+      return;
+    }
+
+    const user = users[currentUserIdx];
+    if (user) saveCurrentUserId(user.user_id);
+  }, [users, currentUserIdx]);
 
   // ★バグ修正(M-6-2): handleApproveAllのonRetryが承認失敗時点の古いpendingQuests
   // クロージャを掴んだままになり、再試行すると既に承認済みの項目まで再承認しようとして
@@ -227,6 +306,21 @@ function App() {
   // 完了(confirmMode='complete'の確認後)・取り消し(長押しでワンタップ)の実行本体。
   // 完了時、要件8のメダル演出(res.earnedMedalsを見て効果音・お祝い表示を出す)もここで行う。
   const runQuestAction = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
+    // #391: 同一ユーザー・同一クエストの完了/取消が送信中なら二重送信しない
+    // (再試行(onRetry)から再入する場合は finally で解除済みなので通る)。
+    const processingKey = getQuestProcessingKey(user.user_id, target.quest_id);
+    if (processingQuestKeysRef.current.has(processingKey)) return;
+    processingQuestKeysRef.current.add(processingKey);
+    syncProcessingQuestKeys();
+    try {
+      await runQuestActionInner(user, mode, target);
+    } finally {
+      processingQuestKeysRef.current.delete(processingKey);
+      syncProcessingQuestKeys();
+    }
+  };
+
+  const runQuestActionInner = async (user: User, mode: 'complete' | 'cancel', target: Quest | QuestHistory) => {
     const res: ActionResult = mode === 'complete'
       ? await completeQuest(user, target as Quest)
       : await cancelQuest(user, target as QuestHistory);
@@ -245,7 +339,7 @@ function App() {
         play(completedQuest.quest_type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
         const idForSignal = completedQuest.quest_id;
         if (idForSignal !== undefined) {
-          setCompletedSignal({ id: idForSignal, nonce: Date.now() });
+          setCompletedSignal({ id: idForSignal, userId: user.user_id, nonce: Date.now() });
         }
         if (res.status === 'pending') {
           showToast({ title: "申請完了", text: res.message || "親の承認待ちになりました", icon: '📨' });
@@ -268,6 +362,8 @@ function App() {
   };
 
   const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
+    // #391: 送信中のクエストの再タップは静かに無視する(確認モーダルも開かない)。
+    if (processingQuestKeysRef.current.has(getQuestProcessingKey(user.user_id, q.quest_id))) return;
     play('select');
 
     // 1. 履歴タブなど、明示的に履歴として渡された場合 → ワンタップで取り消し
@@ -386,9 +482,12 @@ function App() {
   const handleApprove = async (history: QuestHistory) => {
     // #119: 同一履歴への多重送信は静かに無視する(2回目のタップ・スワイプは
     // 1回分として扱い、エラー表示を出さない)。
+    // #391(F-L8): 一括承認中は対象の全idが先に集合へ入るため、一括承認中の個別タップも
+    // ここで同様に無視される(以前は一括承認と競合して400のエラーモーダルになっていた)。
     if (history.id != null) {
       if (approvingHistoryIdsRef.current.has(history.id)) return;
       approvingHistoryIdsRef.current.add(history.id);
+      syncApprovingHistoryIds();
     }
     try {
       const res = await approveQuest(getRepresentativeParent(users), history);
@@ -415,6 +514,7 @@ function App() {
     } finally {
       if (history.id != null) {
         approvingHistoryIdsRef.current.delete(history.id);
+        syncApprovingHistoryIds();
       }
     }
   };
@@ -425,11 +525,25 @@ function App() {
     // 同じ履歴を並行して承認しようとし400になるのを防ぐ。
     if (isApprovingAllRef.current) return;
     isApprovingAllRef.current = true;
+    setIsApprovingAll(true);
+    // #391(F-L8): 個別承認が送信中の履歴は一括の対象から外し(応答待ちの行を二重に
+    // 承認して400にしない)、残りの全idを先に approvingHistoryIdsRef へ入れて、
+    // 一括処理中の個別タップを handleApprove 側で無視させる。
+    const claimedIds: ID[] = [];
     try {
       // ★バグ修正(M-6-2): 古いpendingQuestsクロージャではなく、refで常に最新の
       // 一覧を参照する(このハンドラ自体が古いonRetryとして再試行されても正しく動く)。
-      const targets = [...pendingQuestsRef.current];
+      const targets = [...pendingQuestsRef.current].filter(h =>
+        h.id == null || !approvingHistoryIdsRef.current.has(h.id)
+      );
       if (targets.length === 0) return;
+      for (const h of targets) {
+        if (h.id != null) {
+          approvingHistoryIdsRef.current.add(h.id);
+          claimedIds.push(h.id);
+        }
+      }
+      syncApprovingHistoryIds();
 
       let successCount = 0;
       let totalEarnedMedals = 0;
@@ -469,7 +583,10 @@ function App() {
         play('cancel');
       }
     } finally {
+      for (const id of claimedIds) approvingHistoryIdsRef.current.delete(id);
+      syncApprovingHistoryIds();
       isApprovingAllRef.current = false;
+      setIsApprovingAll(false);
     }
   };
 
@@ -507,6 +624,27 @@ function App() {
       {!isOnline && (
         <div className="fixed top-0 inset-x-0 z-40 bg-red-800 text-white text-xs font-bold text-center py-1.5 flex items-center justify-center gap-2">
           <WifiOff size={14} /> オフラインです。最新の情報ではない可能性があります
+        </div>
+      )}
+
+      {/* #390: /api/quest/data の取得失敗(ネットワーク・Zod検証失敗)を画面に出す。
+          以前はブラウザの console でしか分からず、全端末が「サーバーに繋がりません」の
+          フォールバック表示または最後に成功した古いデータのまま無言になっていた。
+          オフラインバナーとは別物(オンラインでもサーバー側の応答不整合で起きる)。 */}
+      {gameDataError && (
+        <div
+          role="alert"
+          className={`fixed inset-x-0 z-40 bg-amber-700 text-white text-xs font-bold px-3 py-1.5 flex items-center justify-center gap-2 ${isOnline ? 'top-0' : 'top-7'}`}
+        >
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="truncate">データの取得に失敗しました: {gameDataError}</span>
+          <button
+            type="button"
+            onClick={() => { refetchGameData(); play('tap'); }}
+            className="shrink-0 rounded bg-amber-900 px-2 py-0.5 border border-amber-400 hover:bg-amber-800 transition-colors"
+          >
+            再試行
+          </button>
         </div>
       )}
 
@@ -549,6 +687,9 @@ function App() {
             onReject={handleReject}
             onApproveAll={handleApproveAll}
             completedSignal={completedSignal}
+            processingQuestKeys={processingQuestKeys}
+            busyHistoryIds={approvingHistoryIds}
+            isApprovingAll={isApprovingAll}
             onAvatarClick={(user) => setAvatarUser(user)}
           />
         )}
@@ -577,6 +718,8 @@ function App() {
                 onApprove={handleApprove}
                 onReject={handleReject}
                 onApproveAll={handleApproveAll}
+                busyHistoryIds={approvingHistoryIds}
+                isApprovingAll={isApprovingAll}
               />
             )}
 
@@ -598,6 +741,7 @@ function App() {
                   currentUser={currentUser}
                   onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
                   completedSignal={completedSignal}
+                  processingQuestKeys={processingQuestKeys}
                   iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
                 />
               )}
@@ -653,6 +797,10 @@ function App() {
         />
       )}
 
+      {/* #362: SW更新で旧チャンクがprecacheから消えた後に lazy() の import() が404すると、
+          ErrorBoundaryが無い場合はルートごとアンマウントされ白画面になる。
+          ChunkErrorBoundaryがチャンク読込失敗を検知して自動で再読み込みする。 */}
+      <ChunkErrorBoundary>
       <Suspense fallback={null}>
         {avatarUser && (
           <AvatarUploader
@@ -669,6 +817,7 @@ function App() {
           <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />
         )}
       </Suspense>
+      </ChunkErrorBoundary>
 
     </div>
   );

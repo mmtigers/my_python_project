@@ -8,8 +8,8 @@
 | --- | --- |
 | [全体設計書.md](./全体設計書.md) | 3サブシステムの役割・データフロー・システム間連携をまとめた全体アーキテクチャ概要。個別ソースファイルには対応しない例外ドキュメント。 |
 | [ラズパイデプロイ前動作検証手順.md](./ラズパイデプロイ前動作検証手順.md) | Raspberry Piへのデプロイ前に行う動作検証の運用手順書。 |
-| [MY_HOME_SYSTEM/](./MY_HOME_SYSTEM/README.md) | IoT制御・環境監視・API統合ルーティングを担うFastAPIバックエンド(69件)。 |
-| [family-quest/](./family-quest/README.md) | クエスト管理をRPG風UIで提供するReact/TypeScriptフロントエンド(42件、`src/`構造をミラー)。 |
+| [MY_HOME_SYSTEM/](./MY_HOME_SYSTEM/README.md) | IoT制御・環境監視・API統合ルーティングを担うFastAPIバックエンド(69件、廃止済み3件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
+| [family-quest/](./family-quest/README.md) | クエスト管理をRPG風UIで提供するReact/TypeScriptフロントエンド(46件、`src/`構造をミラー。廃止済み11件は同ディレクトリのREADME末尾に一覧のみ記録)。 |
 | [DDD/](./DDD/README.md) | 動画・画像等のデータ自動収集バッチ処理群(3件)。 |
 
 ## 仕様書の規約

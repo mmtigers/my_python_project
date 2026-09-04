@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/services/notification_service.py
+import time
 import requests
 from typing import List, Optional, Any
 
@@ -50,23 +51,75 @@ def _send_discord_webhook(messages: List[Any], image_data: Optional[bytes] = Non
             text = "（メッセージ）"
         text_content += f"{text}\n\n"
     
+    # #361: Discord の content は 2000 文字上限。以前は切り詰めも分割もせず送っていたため、
+    # 週間ログ分析レポート等の長文は 400 で丸ごと届かず、DDD 側ではブレーカーの誤作動も
+    # 招いていた。上限内のチャンクに分割し、先頭チャンクにのみ画像を添付する。
+    chunks = _split_discord_content(text_content)
     try:
-        if image_data:
-            # MIMEタイプの指定を外し、Discord側にファイル拡張子で自動判定させる
-            files = {'file': (filename, image_data)}
-            res = requests.post(url, files=files, data={'content': text_content}, timeout=60) # タイムアウトを60秒に延長
-        else:
-            res = requests.post(url, json={"content": text_content}, timeout=10)
-        
-        # ステータスコードが成功(200, 204)以外の場合、エラー内容をログに出力して原因を特定する
-        if res.status_code not in [200, 204]:
-            logger.error(f"Discord API エラー: {res.status_code} - {res.text}")
-            return False
-            
+        for idx, chunk in enumerate(chunks):
+            if image_data and idx == 0:
+                # MIMEタイプの指定を外し、Discord側にファイル拡張子で自動判定させる
+                files = {'file': (filename, image_data)}
+                res = _post_discord_with_retry(url, files=files, data={'content': chunk}, timeout=60)
+            else:
+                res = _post_discord_with_retry(url, json={"content": chunk}, timeout=10)
+
+            # ステータスコードが成功(200, 204)以外の場合、エラー内容をログに出力して原因を特定する
+            if res.status_code not in [200, 204]:
+                logger.error(f"Discord API エラー: {res.status_code} - {res.text}")
+                return False
+
         return True
     except Exception as e:
         logger.error(f"Discord送信失敗: {e}")
         return False
+
+
+# Discord の content 上限(2000)に対する安全側のチャンクサイズ
+DISCORD_CONTENT_CHUNK_SIZE = 1900
+# 429/5xx 時のリトライ回数(初回を除く)と、Retry-After が無い/異常な場合の待機秒数
+DISCORD_RETRY_ATTEMPTS = 1
+DISCORD_RETRY_MAX_WAIT_SECONDS = 5.0
+_retry_sleep = time.sleep
+
+
+def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:
+    """text を limit 文字以下のチャンクに分割する(できるだけ改行位置で切る)。空文字は1チャンク。"""
+    if len(text) <= limit:
+        return [text]
+    chunks: List[str] = []
+    rest = text
+    while len(rest) > limit:
+        cut = rest.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(rest[:cut])
+        rest = rest[cut:].lstrip("\n")
+    if rest:
+        chunks.append(rest)
+    return chunks
+
+
+def _post_discord_with_retry(url: str, **kwargs):
+    """requests.post を呼び、429/5xx なら Retry-After(または短い固定待機)の後に限定回数リトライする。"""
+    res = requests.post(url, **kwargs)
+    for _ in range(DISCORD_RETRY_ATTEMPTS):
+        status = getattr(res, "status_code", None)
+        if status != 429 and not (isinstance(status, int) and status >= 500):
+            break
+        wait = 1.0
+        headers = getattr(res, "headers", None) or {}
+        retry_after = headers.get("Retry-After") or headers.get("X-RateLimit-Reset-After")
+        try:
+            if retry_after is not None:
+                wait = float(retry_after)
+        except (TypeError, ValueError):
+            wait = 1.0
+        wait = max(0.0, min(wait, DISCORD_RETRY_MAX_WAIT_SECONDS))
+        logger.warning(f"Discord API {status} — {wait:.1f}s 後にリトライします")
+        _retry_sleep(wait)
+        res = requests.post(url, **kwargs)
+    return res
 
 def _send_line_push(user_id: str, messages: List[Any]) -> bool:
     """LINE Push API送信 (v3対応版)"""

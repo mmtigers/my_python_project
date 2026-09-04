@@ -78,9 +78,21 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
     except Exception as e:
         logger.error(f"無反応通知の送信に失敗しました: {name} ({e})")
     finally:
-        IS_ACTIVE[mac] = False
-        if mac in MOTION_TASKS:
-            del MOTION_TASKS[mac]
+        # #387: 通知送信(to_thread)中に次の検知が来ると、process_sensor_data が本タスクを
+        # cancel して新しいタイマータスクを MOTION_TASKS[mac] に登録する。その後この finally が
+        # 走ると、以前は無条件に IS_ACTIVE=False・del MOTION_TASKS[mac] していたため、
+        # 「新タスクの参照」を消してしまい、直後の検知で二重通知、さらに参照を失った新タスクが
+        # cancel 不能のまま満了して誤った「止まりました」通知を出していた。
+        # 自分がまだ登録中のタスクである場合にのみ後片付けを行う。
+        registered = MOTION_TASKS.get(mac)
+        superseded = (
+            isinstance(registered, asyncio.Task)
+            and registered is not asyncio.current_task()
+            and not registered.done()
+        )
+        if not superseded:
+            IS_ACTIVE[mac] = False
+            MOTION_TASKS.pop(mac, None)
 
 async def process_sensor_data(mac: str, name: str, location: str, dev_type: str, state: str) -> None:
     """

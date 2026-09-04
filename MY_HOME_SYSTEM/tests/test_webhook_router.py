@@ -126,3 +126,131 @@ class TestLineCallback:
 
         assert res.status_code == 200
         assert res.text == '"OK"'
+
+
+# ==========================================
+# Issue #376 / L-L1 (#410): 署名ヘッダ欠落・不正バイト列・イベント単位の例外隔離・再配信スキップ
+# ==========================================
+import base64
+import hashlib
+import hmac as _hmac
+import json
+
+from linebot.v3 import WebhookHandler
+from linebot.v3.webhooks import MessageEvent, PostbackEvent, TextMessageContent
+
+from handlers import line_handler as _line_handler_module
+
+_TEST_CHANNEL_SECRET = "test-channel-secret"
+
+
+def _sign(body: str) -> str:
+    digest = _hmac.new(_TEST_CHANNEL_SECRET.encode("utf-8"), body.encode("utf-8"), hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def _text_event(user_id: str, text: str, reply_token: str, is_redelivery: bool = False, event_id: str = "evt"):
+    return {
+        "type": "message",
+        "mode": "active",
+        "timestamp": 1700000000000,
+        "source": {"type": "user", "userId": user_id},
+        "webhookEventId": event_id,
+        "deliveryContext": {"isRedelivery": is_redelivery},
+        "replyToken": reply_token,
+        "message": {"id": "m1", "type": "text", "text": text, "quoteToken": "q"},
+    }
+
+
+@pytest.fixture
+def real_webhook_handler(monkeypatch):
+    """実際のSDK WebhookHandler(署名検証・イベントループ込み)に本番のハンドラを登録する"""
+    wh = WebhookHandler(_TEST_CHANNEL_SECRET)
+    wh.add(MessageEvent, message=TextMessageContent)(_line_handler_module.handle_message)
+    wh.add(PostbackEvent)(_line_handler_module.handle_postback)
+    monkeypatch.setattr(webhook_router.line_handler, "line_handler", wh)
+    monkeypatch.setattr(_line_handler_module, "line_bot_api", None)
+    _line_handler_module._profile_cache.clear()
+    return wh
+
+
+class TestLineCallbackInputValidation:
+    def test_missing_signature_header_returns_400_not_200(self, api_client, monkeypatch):
+        """L-L1: 署名ヘッダ欠落時、SDK内部のAttributeErrorが汎用exceptに落ちて 200 になっていた"""
+        fake_handler = MagicMock()
+        fake_handler.handle.side_effect = AttributeError("'NoneType' object has no attribute 'encode'")
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b'{"events": []}')
+
+        assert res.status_code == 400
+        fake_handler.handle.assert_not_called()
+
+    def test_empty_signature_header_returns_400(self, api_client, monkeypatch):
+        fake_handler = MagicMock()
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b'{"events": []}', headers={"X-Line-Signature": ""})
+
+        assert res.status_code == 400
+        fake_handler.handle.assert_not_called()
+
+    def test_invalid_utf8_body_returns_400_not_500(self, api_client, monkeypatch):
+        """L-L1: .decode('utf-8') が try の外にあり不正バイト列で 500 になっていた"""
+        fake_handler = MagicMock()
+        monkeypatch.setattr(webhook_router.line_handler, "line_handler", fake_handler)
+
+        res = api_client.post("/callback/line", content=b"\xff\xfe\xfd", headers={"X-Line-Signature": "sig"})
+
+        assert res.status_code == 400
+        fake_handler.handle.assert_not_called()
+
+
+class TestLineCallbackWithRealSdkHandler:
+    """SDKの署名検証とイベントループを実物で通し、ハンドラ側のイベント単位隔離・再配信スキップを検証する"""
+
+    def test_exception_in_first_event_does_not_block_second_event(self, api_client, real_webhook_handler, monkeypatch):
+        processed = []
+
+        async def fake_process(user_id, user_name, msg_text, reply_token):
+            if user_id == "U_BAD":
+                raise RuntimeError("boom in first event")
+            processed.append((user_id, msg_text))
+
+        monkeypatch.setattr(_line_handler_module, "_process_message_async", fake_process)
+        body = json.dumps({"destination": "Ubot", "events": [
+            _text_event("U_BAD", "hello", "tok1", event_id="e1"),
+            _text_event("U_GOOD", "ステータス", "tok2", event_id="e2"),
+        ]})
+
+        res = api_client.post("/callback/line", content=body.encode("utf-8"), headers={"X-Line-Signature": _sign(body)})
+
+        assert res.status_code == 200
+        assert processed == [("U_GOOD", "ステータス")]
+
+    def test_redelivered_event_is_skipped(self, api_client, real_webhook_handler, monkeypatch):
+        processed = []
+
+        async def fake_process(user_id, user_name, msg_text, reply_token):
+            processed.append((user_id, msg_text))
+
+        monkeypatch.setattr(_line_handler_module, "_process_message_async", fake_process)
+        body = json.dumps({"destination": "Ubot", "events": [
+            _text_event("U1", "智矢は元気", "tok1", is_redelivery=True, event_id="e1"),
+            _text_event("U2", "ステータス", "tok2", is_redelivery=False, event_id="e2"),
+        ]})
+
+        res = api_client.post("/callback/line", content=body.encode("utf-8"), headers={"X-Line-Signature": _sign(body)})
+
+        assert res.status_code == 200
+        assert processed == [("U2", "ステータス")]
+
+    def test_wrong_signature_with_real_handler_returns_400(self, api_client, real_webhook_handler, monkeypatch):
+        called = MagicMock()
+        monkeypatch.setattr(_line_handler_module, "_process_message_async", called)
+        body = json.dumps({"destination": "Ubot", "events": [_text_event("U1", "hi", "tok1")]})
+
+        res = api_client.post("/callback/line", content=body.encode("utf-8"), headers={"X-Line-Signature": _sign(body + " ")})
+
+        assert res.status_code == 400
+        called.assert_not_called()

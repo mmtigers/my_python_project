@@ -89,6 +89,8 @@
 
 * **役割**: ビュー描画に必要な全データを取得するエンドポイント。クエリパラメータ`viewer_user_id`（任意）を受け取り、そのまま`game_system.get_all_view_data()`に渡す。
 * 根拠: ルーティング定義 (行番号: 37-43 / 抜粋: "@router.get("/data")")
+* **（Issue #409 で修正）** `HTTPException` は再送出し、それ以外は `logger.exception` でスタックトレース付きで記録してから 500 を返す。未使用の `seed_data()` 関数は削除。
+* 根拠: `except HTTPException: raise` / `logger.exception("Data Fetch Error")`
 
 
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（クエリパラメータ、省略可能）
@@ -342,6 +344,8 @@
 
 * **役割**: 画像ファイルをサーバーにアップロードし、保存するエンドポイント。拡張子チェック、マジックナンバー検証に加え、`config.UPLOAD_MAX_FILE_SIZE_MB`（既定5MB、Issue #325でフロントの5MB上限と統一）を上限としたファイルサイズ検証を行う（コミット`4f3a8a1`, M-9-3修正で追加）。
 * 根拠: ルーティング定義 (行番号: 89-135 / 抜粋: "@router.post("/upload")")
+* **（Issue #409 Q-L6 で修正）** `file.filename` が空なら 400。書き込み途中の例外時は書きかけファイルを削除する。
+* 根拠: `if not file.filename: raise HTTPException(status_code=400, ...)`、`except Exception` 節の `os.remove(file_path)`
 
 
 * **引数/リクエスト**: `file` (`UploadFile` 型、FastAPIの `File(...)` によりフォームデータとして受信)

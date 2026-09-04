@@ -38,7 +38,10 @@ def test_backup_failure_returns_500_with_message(api_client, monkeypatch):
     )
     res = api_client.post("/api/system/backup")
     assert res.status_code == 500
-    assert "整合性確認に失敗" in res.json()["detail"]
+    # #408: 生の失敗メッセージ(NASパス等の内部情報を含みうる)はログにのみ残し、
+    # クライアントには固定の要約のみを返す。
+    assert res.json()["detail"] == "バックアップに失敗しました。サーバーログを確認してください。"
+    assert "整合性確認に失敗" not in res.json()["detail"]
 
 
 def test_backup_endpoint_currently_requires_no_authentication(api_client, monkeypatch):

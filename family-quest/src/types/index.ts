@@ -3,20 +3,25 @@
 // 共通の型定義
 
 // ID型
-export type ID = number | string;
+// #412(品質): 以前は number | string だったが、quest_id/reward_id/history_id等の
+// 実カラムはすべてSQLiteのINTEGER PRIMARY KEYであり、サーバーは常にintを返すため
+// number のみに絞った(tsc -bが通ることを確認済み)。gameDataSchema.tsのZod検証層は
+// 実際のワイヤーデータに対する独立した防御であるため、そちらの union はそのまま残す。
+export type ID = number;
 
 // ユーザー情報
+// #390: avatar / job_class / role は quest_users の NULL 可カラムのため null を許容する
+// (gameDataSchema.ts と対応)。icon はバックエンドが送出しない幽霊フィールドだったため削除。
 export interface User {
     user_id: string;
     name: string;
     level: number;
     exp: number;
-    avatar?: string;
-    icon?: string;
-    medal_count?: number;
-    job_class?: string;
+    avatar?: string | null;
+    medal_count?: number | null;
+    job_class?: string | null;
     gold: number;
-    role?: string;
+    role?: string | null;
     // バックエンド(MY_HOME_SYSTEM)から送られてくるHP。個々のプレイヤーはダメージを
     // 受けない仕様のため hp は常に maxHp と等しいが、maxHp 自体は
     // calculate_max_hp(level) = level * 20 + 5 で計算される値なのでフロント側で
@@ -32,17 +37,20 @@ export interface User {
 // どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には
 // 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に
 // 一本化し、フロントの参照側もフォールバック連鎖を廃止した。
+// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。
 export interface Quest {
     quest_id?: ID;
     title: string;
-    description?: string;
-    difficulty?: number;
+    description?: string | null;
     exp_gain?: number;
     gold_gain?: number;
     bonus_gold?: number;
     bonus_exp?: number;
     quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
     _isInfinite?: boolean;
+    // #412(F-L10): masterData.js のフォールバック(サーバー接続エラー時の案内)専用の
+    // 疑似クエストであることを示すフロントエンド拡張フラグ。バックエンドは送出しない。
+    _isFallback?: boolean;
     icon_key?: string;
     start_time?: string;
     end_time?: string;
@@ -59,16 +67,16 @@ export interface Quest {
 // クエスト履歴
 // ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、
 // history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。
+// #390: status の 'completed' はサーバーが生成しない値、date は送出されない
+// 幽霊フィールドだったため削除。gold_earned / exp_earned は NULL 可カラム。
 export interface QuestHistory {
     id?: ID;
     user_id: string;
     quest_id: ID;
-    quest_title?: string;
-    status: 'pending' | 'approved' | 'rejected' | 'completed';
-    date?: string;
-    // ★追加: 型エラー修正
-    gold_earned?: number;
-    exp_earned?: number;
+    quest_title?: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+    gold_earned?: number | null;
+    exp_earned?: number | null;
     // 兄妹連携クエストの相方側 quest_history.id。承認/却下がサーバー側で
     // この行にもカスケードされる(services/quest_service.py参照)。
     linked_history_id?: ID | null;
@@ -88,16 +96,30 @@ export interface Reward {
     target?: string;
 }
 
-// インベントリアイテム
+// インベントリアイテム (models/quest.py の InventoryItem に対応)
+// #390: desc はサーバー側 Optional[str] のため null を許容する。
 export interface InventoryItem {
     id: number;
     reward_id: number;
     title: string;
     icon: string;
-    desc: string;
+    desc?: string | null;
     status: 'owned' | 'consumed';
     purchased_at: string;
+    used_at?: string | null;
     category?: string;
+}
+
+// #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ
+// 「完了音・無限クエストのクールダウンを発火せよ」と通知するためのシグナル。
+// nonce は同一クエストの連続完了でも useEffect が再発火するよう毎回変える。
+// userId は横画面の4人パネル表示で「誰の完了か」を区別するために必須 (#363):
+// これが無いと兄が完了した無限クエストのクールダウンが妹・パパ・ママのパネルにも
+// 掛かってしまう(サーバー側のクールダウンは (user, quest) 単位)。
+export interface CompletedSignal {
+    id: ID;
+    userId: string;
+    nonce: number;
 }
 
 // ★追加: クエスト完了結果 (APIレスポンス用)

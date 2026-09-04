@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `53f4ba8` |
 
 ## 関連ドキュメント
 
@@ -24,6 +25,9 @@
 * 根拠: `hideUserSwitcher`/`hideLogSwitcher`/`showBackToMain`の説明コメントと使用箇所 (13〜24, 70, 95, 143行目 / 抜粋: "// 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の\n    // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。", "{showBackToMain && (", "{!hideUserSwitcher && users.map((user, idx) => {", "{!hideLogSwitcher && (")
 * ユーザーアバターの表示可否判定には`isSameOriginAvatarPath(user.avatar)`（`lib/utils.ts`からインポート）を用いる。以前の`user.avatar && user.avatar.startsWith('/')`という判定は、プロトコル相対URL（`"//evil.example/x"`）もマッチしてしまい、外部ホストの画像に差し替えられる可能性があるバグ（M-9-5）だったため、`"//"`で始まるものを明示的に除外する共通ヘルパーに置き換えられた。
 * 根拠: `isSameOriginAvatarPath`のインポートと使用 (4, 111行目 / 抜粋: "import { isSameOriginAvatarPath } from '../../lib/utils';", "{isSameOriginAvatarPath(user.avatar) ? (")
+* **[修正済み] トグル系ボタンへの`aria-pressed`付与（Issue #412 F-L5）**: ホームボタン（`showBackToMain`）・ユーザー切替ボタン・記録ボタンはいずれも「選択中/非選択」という状態を持つトグルだが、以前は視覚的なスタイル（`scale`/枠線色等）でしか状態を表現しておらず、スクリーンリーダー利用者には選択状態が伝わらなかった。各ボタンに`aria-pressed`（それぞれ`viewMode === 'user'`/`isActive`/`viewMode === 'familyLog'`）と`aria-label`（見た目のテキストと同じ内容だが、アイコン+バッジのレイアウトのため明示）を追加した。
+* 根拠: (行番号: 78〜79, 108〜109, 155〜156 / 抜粋: "aria-pressed={viewMode === 'user'}", "aria-pressed={isActive}", "aria-pressed={viewMode === 'familyLog'}")
+
 
 ## 3. 外部依存関係
 
@@ -40,7 +44,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `User` (from `@/types`) | 外部ファイルで定義されており、プロパティの全容（`user_id`, `name`, `avatar`, `icon`以外に何を持つか）が本ファイルからは判断不可。 | `import { User } from '@/types';` (行番号: 2) |
+| `User` (from `@/types`) | 外部ファイルで定義されており、プロパティの全容（`user_id`, `name`, `avatar`以外に何を持つか）が本ファイルからは判断不可。**（Issue #390）** 以前参照していた`user.icon`はバックエンドが送出しない幽霊フィールド（常に`undefined`）だったため参照を削除し、アバターの絵文字フォールバックは`user.avatar \|\| '🙂'`のみになった。 | `import { User } from '@/types';` (行番号: 2), `{user.avatar \|\| '🙂'}` (行番号: 115) |
 | 各種コールバック関数の処理内容 | 親コンポーネントから渡される関数であり、実行時に具体的にどのような処理（API呼び出しやルーティングなど）が行われるか判断不可。 | `onClick={() => onUserSwitch(idx)}` (行番号: 100), `onClick={onLogSwitch}` (行番号: 145), `onClick={onSettingsClick}` (行番号: 46), `onClick={onBackToMain}` (行番号: 72) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -65,7 +69,7 @@
 
 ### `Header`
 
-* **役割**: ナビゲーション（ホームボタン＋ユーザー切替＋記録ボタン）、表示設定ボタン、タイトルを含むヘッダーUIのレンダリング。`hideUserSwitcher`が真の場合はユーザー切替のボタン群を、`hideLogSwitcher`が真の場合は記録ボタンを、`showBackToMain`が偽の場合はホームボタンを、それぞれ描画しない。
+* **役割**: ナビゲーション（ホームボタン＋ユーザー切替＋記録ボタン）、表示設定ボタン、タイトルを含むヘッダーUIのレンダリング。**（Issue #412 F-L9で修正）** タイトル「FAMILY QUEST」の`fontFamily`から`"Press Start 2P"`を削除した。このフォントはGoogle Fonts等の読込設定がどこにも存在せず一度も読み込まれておらず、実際には常に次点の`cursive`フォールバックで描画され続けていた「死んだ指定」だったため、実際に使われているフォールバックのみを書くようにした（見た目に変化はない）。`hideUserSwitcher`が真の場合はユーザー切替のボタン群を、`hideLogSwitcher`が真の場合は記録ボタンを、`showBackToMain`が偽の場合はホームボタンを、それぞれ描画しない。
 * 根拠: `const Header: React.FC<HeaderProps> = ({...}) => { return (<header...` (行番号: 28〜174 / 抜粋: "const Header: React.FC<HeaderProps> = ({")
 
 * **引数/リクエスト**: `HeaderProps` で定義されたプロパティのオブジェクト（`users`, `currentUserIdx`, `viewMode`, `onUserSwitch`, `onLogSwitch`, `onSettingsClick`, `hideUserSwitcher`, `hideLogSwitcher`, `showBackToMain`, `onBackToMain`）

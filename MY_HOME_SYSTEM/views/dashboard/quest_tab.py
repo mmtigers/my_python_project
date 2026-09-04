@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/views/dashboard/quest_tab.py
+import html
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -56,7 +57,11 @@ def render():
                 # logsは {'text':..., 'dateStr':...} のリスト
                 # 直近5件を表示
                 for log in logs[:5]:
-                    st.markdown(f"**{log['text']}** \n<span style='color:grey; font-size:0.8em'>({log['timestamp']})</span>", unsafe_allow_html=True)
+                    # Issue #378: log['text']はユーザー名+quest_title/reward_titleで、
+                    # 認証なしの/api/questから自由に書き込める(routers/quest_router.py)ため、
+                    # unsafe_allow_html=True と組み合わせると格納型XSSになる。エスケープする。
+                    safe_text = html.escape(log['text'])
+                    st.markdown(f"**{safe_text}** \n<span style='color:grey; font-size:0.8em'>({log['timestamp']})</span>", unsafe_allow_html=True)
                     st.write("---")
             else:
                 st.write("まだ冒険の記録がありません")

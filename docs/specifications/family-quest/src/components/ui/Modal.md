@@ -6,19 +6,21 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `896ef83` |
 
 ## 関連ドキュメント
 
 * [../../lib/utils.md](../../lib/utils.md) - `cn`関数の実装元
 * [./Button.md](./Button.md) - ヘッダー部の閉じるボタンとして利用するコンポーネント
 * [./MessageModal.md](./MessageModal.md) - 本コンポーネントの利用例（結果/エラーメッセージモーダル）
-* [./LevelUpModal.md](./LevelUpModal.md) - 本コンポーネントの利用例（レベルアップ演出モーダル）
+* `LevelUpModal.tsx`(廃止済み。`1818d5a`で削除、仕様書も Issue #402 で削除) - かつての利用例（レベルアップ演出モーダル）
 * [../../../App.md](../../../App.md) - 呼び出し元の一例（`ConfirmModal`が内部で汎用モーダルとして利用）
 
 ## 2. ファイルの概要
 
 * 画面上にモーダルウィンドウ（ダイアログ）を表示し、ユーザーのアクション（ESCキー押下、背景クリック、閉じるボタンクリック）に応じて非表示（閉じる）処理を呼び出す責務を持つ。
 * 根拠: [Modalコンポーネント] (行番号: 15〜77 / 抜粋: "export const Modal: React.FC<M")
+* **（Issue #394で追加）** 応答待ち中（購入/却下等の確認APIを実行中）に背景タップ・ESC・×ボタンのいずれでも閉じられてしまうと、リクエストは継続したままモーダルだけが消え、「モーダルを残して再試行できるようにする」という`App.tsx`側の設計意図が崩れる。任意の`preventClose?: boolean`（既定`false`）propが追加され、`true`の間はこれらすべての手段を無効化する。あわせて`role="dialog"`・`aria-modal="true"`（`title`が文字列の場合は`aria-label`にも設定）を常時付与する。
 
 
 
@@ -29,6 +31,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `React`, `useEffect` | ライブラリ | コンポーネント定義と副作用フックとしての利用 | 根拠: [import文] (行番号: 1〜1 / 抜粋: "import React, { useEffect } fr") |
+（インポート自体に変更なし。Issue #394はProps・内部ロジックのみの変更）
 | `X` | アイコンコンポーネント | 閉じるボタンのアイコンとして表示 | 根拠: [import文] (行番号: 2〜2 / 抜粋: "import { X } from "lucide-reac") |
 | `cn` | ユーティリティ関数 | 動的なクラス名の結合処理として利用 | 根拠: [import文] (行番号: 3〜3 / 抜粋: "import { cn } from "@/lib/util") |
 | `Button` | UIコンポーネント | ヘッダー部の閉じるボタンとして利用 | 根拠: [import文] (行番号: 4〜4 / 抜粋: "import { Button } from "./Butt") |
@@ -44,20 +47,21 @@
 
 ### `Modal`
 
-* **役割**: プロパティに基づきモーダルのUI（背景、ヘッダー、ボディ、フッター）を描画し、状態に応じた表示制御とイベントハンドリングを行う。
-* 根拠: [Modalコンポーネント] (行番号: 15〜77 / 抜粋: "export const Modal: React.FC<M")
+* **役割**: プロパティに基づきモーダルのUI（背景、ヘッダー、ボディ、フッター）を描画し、状態に応じた表示制御とイベントハンドリングを行う。**（Issue #394で修正）** `preventClose`が`true`の間は`handleClose`（`preventClose ? undefined : onClose`）を背景`div`の`onClick`・×ボタンの`onClick`双方に渡すことで両者を無効化し、×ボタン自体も`disabled`にする。ESCキーの`keydown`リスナーも`isOpen && !preventClose`のときのみ登録する。
+* 根拠: [Modalコンポーネント] (行番号: 15〜88 / 抜粋: "export const Modal: React.FC<M")
+* 根拠: `preventClose`による無効化 (行番号: 29〜36, 47〜49, 56, 72 / 抜粋: "if (isOpen && !preventClose) window.addEventListener(\"keydown\", handleEsc);", "const handleClose = preventClose ? undefined : onClose;", "onClick={handleClose}", "onClick={handleClose} disabled={preventClose}")
 
 
-* **引数/リクエスト**: `ModalProps`型 (`isOpen`: boolean, `onClose`: () => void, `title`?: ReactNode, `children`: ReactNode, `footer`?: ReactNode, `maxWidth`?: "sm" | "md" | "lg" | "xl")
-* 根拠: [ModalPropsインターフェース] (行番号: 6〜13 / 抜粋: "interface ModalProps {")
+* **引数/リクエスト**: `ModalProps`型 (`isOpen`: boolean, `onClose`: () => void, `title`?: ReactNode, `children`: ReactNode, `footer`?: ReactNode, `maxWidth`?: "sm" | "md" | "lg" | "xl", **`preventClose`?: boolean（Issue #394で追加、既定`false`）**)
+* 根拠: [ModalPropsインターフェース] (行番号: 6〜18 / 抜粋: "interface ModalProps {", "preventClose?: boolean;")
 
 
 * **戻り値/レスポンス**: `React.FC<ModalProps>` (`isOpen`がfalseの場合は`null`、trueの場合はJSX要素を返却)
 * 根拠: [戻り値] (行番号: 32〜76 / 抜粋: "if (!isOpen) return null;")
 
 
-* **副作用**: `isOpen`がtrueの際、グローバルな`window`オブジェクトに対して`keydown`イベントリスナー（ESCキー検知時の`onClose`呼び出し）を登録し、クリーンアップ時に解除する。
-* 根拠: [useEffectフック内のロジック] (行番号: 24〜30 / 抜粋: "window.addEventListener("keydo")
+* **副作用**: `isOpen`が`true`かつ`preventClose`が`false`の際、グローバルな`window`オブジェクトに対して`keydown`イベントリスナー（ESCキー検知時の`onClose`呼び出し）を登録し、クリーンアップ時に解除する。
+* 根拠: [useEffectフック内のロジック] (行番号: 29〜36 / 抜粋: "if (isOpen && !preventClose) window.addEventListener(\"keydown\", handleEsc);")
 
 
 * **エラーハンドリング**: なし
@@ -73,9 +77,13 @@ flowchart TD
     CheckOpen -- No --> ReturnNull["return null"] --> End([End])
     CheckOpen -- Yes --> RenderUI["UIの描画開始"]
 
-    RenderUI --> RenderBackdrop["背景を描画し onClick に 外部: onClose() を設定"]
+    RenderUI --> CalcHandleClose{"preventClose が true か"}
+    CalcHandleClose -- はい --> HandleCloseUndef["handleClose = undefined"]
+    CalcHandleClose -- いいえ --> HandleCloseOnClose["handleClose = onClose"]
+    HandleCloseUndef --> RenderBackdrop
+    HandleCloseOnClose --> RenderBackdrop["背景を描画し onClick に handleClose を設定 (role=dialog aria-modal=true)"]
     RenderBackdrop --> CalcClass["外部: cn() で maxWidth のクラス名を結合"]
-    CalcClass --> RenderHeader["ヘッダー部描画: title および 外部: Button, X を配置"]
+    CalcClass --> RenderHeader["ヘッダー部描画: title および 外部: Button(disabled={preventClose}), X を配置"]
     RenderHeader --> RenderBody["ボディ部描画: children を配置"]
     RenderBody --> CheckFooter{"footer が指定されているか?"}
 
@@ -83,8 +91,10 @@ flowchart TD
     CheckFooter -- No --> EndRender
 
     subgraph Event [副作用: キーボードイベント]
-        KeyStart([keydownイベント発生]) --> CheckEsc{"e.key === 'Escape' ?"}
-        CheckEsc -- Yes --> FireClose["外部: onClose() 呼び出し"] --> KeyEnd([完了])
+        KeyStart([keydownイベント発生]) --> CheckRegistered{"isOpen かつ preventClose が false のときのみリスナー登録済み"}
+        CheckRegistered -- はい --> CheckEsc{"e.key === 'Escape' ?"}
+        CheckRegistered -- いいえ --> KeyEnd([リスナー未登録のため何も起きない])
+        CheckEsc -- Yes --> FireClose["外部: onClose() 呼び出し"] --> KeyEnd
         CheckEsc -- No --> KeyEnd
     end
 
@@ -124,7 +134,10 @@ graph TD
 
 
 * `isOpen`が`false`の際は早期リターンされ、DOMツリーから完全に削除される。フェードアウトなどのアニメーションを持たせたい場合は別のアプローチが必要な実装となっている。
-* 根拠: [早期リターン] (行番号: 32〜32 / 抜粋: "if (!isOpen) return null;")
+* 根拠: [早期リターン] (行番号: 38〜38 / 抜粋: "if (!isOpen) return null;")
+* **[修正済み] 応答待ち中に閉じられてしまう不具合（Issue #394 / F-M7）**: 以前は`onClose`を無条件に背景`div`・×ボタン双方の`onClick`とESCの`keydown`リスナーへ渡していたため、`App.tsx`の`ConfirmModal`で購入/却下の応答待ち中（`isConfirming`）でも背景タップやESCで閉じることができ、リクエストは継続したままモーダルが消えて「失敗時にモーダルを残して再試行できるようにする」（角度⑨、`App.tsx`の`executeConfirm`コメント）という設計意図が崩れていた（キャンセルボタンのみ`disabled`にしていた）。修正後は`preventClose`propが`true`の間、背景・×ボタン・ESCのいずれも無効化される。あわせてアクセシビリティのため`role="dialog"`・`aria-modal="true"`を常時付与した（フォーカストラップは未対応、F-L5参照）。
+* 根拠: (行番号: 14〜18, 27, 47〜49, 56, 63, 72)
+
 
 
 

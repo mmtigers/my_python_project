@@ -75,6 +75,8 @@
 
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
 * 根拠: `[send_inactive_notification]` (行番号: 61 / 抜粋: "msg: str = f"💤【{location}・見守")
+* **（Issue #387 で修正）** `finally` の後片付け（`IS_ACTIVE[mac]=False`・`MOTION_TASKS` からの削除）は、`MOTION_TASKS[mac]` に「自分とは別の、まだ完了していない `asyncio.Task`」が登録されている（＝通知送信中に次の検知が来て新しいタイマータスクに置き換えられた）場合はスキップする。以前は無条件に実行していたため新タスクの参照を消してしまい、直後の検知で二重通知、さらに参照を失った新タスクが cancel 不能のまま満了して誤った「止まりました」通知を出していた。
+* 根拠: `registered = MOTION_TASKS.get(mac)` (行番号: 87〜95)
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `timeout: int`

@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `65fce15` |
 
 ## 関連ドキュメント
 
@@ -41,7 +42,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `apiClient` | APIリクエストの実装詳細（`postForm`/`post`メソッドの内部実装、認証ヘッダーの自動付与、ベースURL、共通エラー処理など）が不明。 | `await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);` (行番号: 65)、`await apiClient.post('/api/quest/user/update', { ... });` (行番号: 66) |
-| `User` | `user_id`, `avatar`, `icon` 以外のプロパティ構成が不明。 | `user: User;` (行番号: 10) |
+| `User` | `user_id`, `avatar` 以外のプロパティ構成が不明。 | `user: User;` (行番号: 10) |
 | `Modal` | モーダルの正確な動作仕様（内部イベント、アクセシビリティ対応など）が不明。 | `<Modal isOpen={true} onClose={onClose} title="アバター変更">` (行番号: 85) |
 | `Button` | ボタンの正確な動作仕様（`variant`, `isLoading`, `disabled` 指定時の内部的な挙動変化など）が不明。 | `<Button variant="secondary" ...>` (行番号: 141, 146, 149) |
 | エンドポイント `/api/quest/upload` | サーバー側のバリデーション、レスポンス形式（`{ url }`）の詳細が不明。 | `'/api/quest/upload'` (行番号: 65) |
@@ -66,9 +67,9 @@
 
 ### `AvatarUploader`
 
-* **役割**: アバターの選択、クライアント側バリデーション、プレビュー、アップロードを実行するReact関数コンポーネント。内部状態として `uploading`（送信中）, `preview`（プレビュー画像のData URL）, `errorMessage`（バリデーション/通信エラー文言）, `uploadDone`（アップロード完了フラグ）を持つ。プレビューエリアの表示は、`preview`（選択直後のdata:URL）が存在するか、または`isSameOriginAvatarPath(user.avatar)`が`true`（自サーバーのアップロード画像パス）の場合のみ`<img>`を描画し、それ以外（未アップロード時の絵文字デフォルト値等）は`user.avatar || user.icon || '👤'`をテキストとして描画する（Issue #117: 以前は`preview || user.avatar`が真であれば無条件に`<img src={user.avatar}>`をレンダリングしており、`user.avatar`が絵文字の場合に壊れた画像アイコンになっていた）。
+* **役割**: アバターの選択、クライアント側バリデーション、プレビュー、アップロードを実行するReact関数コンポーネント。内部状態として `uploading`（送信中）, `preview`（プレビュー画像のData URL）, `errorMessage`（バリデーション/通信エラー文言）, `uploadDone`（アップロード完了フラグ）を持つ。プレビューエリアの表示は、`avatarImageSrc`（`preview`＝選択直後のdata:URLを最優先し、無ければ`isSameOriginAvatarPath(user.avatar)`が`true`＝自サーバーのアップロード画像パスの場合に`user.avatar`、それ以外は`null`）が存在する場合のみ`<img src={avatarImageSrc}>`を描画し、それ以外（未アップロード時の絵文字デフォルト値等）は`user.avatar || '👤'`をテキストとして描画する（**Issue #390**: `user.avatar`が`string | null`になったため`<img src>`へ渡す値を事前に`string | null`へ絞る`avatarImageSrc`を導入し、幽霊フィールド`user.icon`へのフォールバックを削除）（Issue #117: 以前は`preview || user.avatar`が真であれば無条件に`<img src={user.avatar}>`をレンダリングしており、`user.avatar`が絵文字の場合に壊れた画像アイコンになっていた）。
 * 根拠: `const AvatarUploader: React.FC<AvatarUploaderProps>` (行番号: 17〜164 / 抜粋: "const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUploadComplete }) => {")
-* 根拠: `{preview || isSameOriginAvatarPath(user.avatar) ? ( <img ... /> ) : ( <div>{user.avatar || user.icon || '👤'}</div> )}` (行番号: 92〜107 / 抜粋: "{preview || isSameOriginAvatarPath(user.avatar) ? (")
+* 根拠: `avatarImageSrc`の算出とプレビュー分岐 (行番号: 86〜112 / 抜粋: "const avatarImageSrc = preview || (isSameOriginAvatarPath(user.avatar) ? user.avatar : null);", "{avatarImageSrc ? (", "src={avatarImageSrc}", "{user.avatar || '👤'}")
 
 * **引数/リクエスト**: `AvatarUploaderProps` オブジェクト（`user`, `onClose`, `onUploadComplete` を分割代入で取得）
 * 根拠: `({ user, onClose, onUploadComplete })` (行番号: 17 / 抜粋: "= ({ user, onClose, onUploadComplete }) => {")
@@ -235,7 +236,7 @@ graph TD
 | --- | --- | --- |
 | `apiClient.postForm`/`apiClient.post` の詳細仕様 | インターセプターの有無や共通のエラーハンドリング、ヘッダー付与などの仕様が読み取れないため。 | `@/lib/apiClient.ts` |
 | 画像のトリミング責務 | フロントエンドに処理がないため、サーバー側で期待通りにトリミングされているか不明なため。 | バックエンドのエンドポイント処理ファイル |
-| `User` 型の全体像 | `user_id`, `avatar`, `icon` 以外のプロパティが本コンポーネント以外でどのように影響するか不明なため。 | `@/types/index.ts`（または該当の型定義ファイル） |
+| `User` 型の全体像 | `user_id`, `avatar` 以外のプロパティが本コンポーネント以外でどのように影響するか不明なため。 | `@/types/index.ts`（または該当の型定義ファイル） |
 | サーバー側のファイルサイズ・形式検証の有無 | クライアント側の5MB/画像形式チェックがサーバー側でも二重に検証されているか不明なため。 | バックエンドのエンドポイント処理ファイル |
 | アップロード成功・紐付け失敗時の整合性 | `/api/quest/upload`成功後に`/api/quest/user/update`が失敗した場合、アップロード済み画像がどう扱われるか（孤立ファイルとして残るか等）不明なため。 | バックエンドのエンドポイント処理ファイル |
 

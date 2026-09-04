@@ -83,6 +83,10 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
         fileInputRef.current?.click();
     };
 
+    // 選択直後の data:URL プレビューを最優先し、無ければ既存のアップロード済み画像パス
+    // (絵文字等のパス以外は <img src> に渡さない)。#390: user.avatar は null もとりうる。
+    const avatarImageSrc = preview || (isSameOriginAvatarPath(user.avatar) ? user.avatar : null);
+
     return (
         <Modal isOpen={true} onClose={onClose} title="アバター変更">
             <div className="flex flex-col items-center gap-6">
@@ -91,20 +95,20 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
                     className="w-32 h-32 rounded-full border-4 border-slate-600 bg-slate-800 overflow-hidden relative cursor-pointer group shadow-xl"
                     onClick={triggerSelect}
                 >
-                    {preview || isSameOriginAvatarPath(user.avatar) ? (
+                    {avatarImageSrc ? (
                         <img
                             // ★バグ修正: user.avatar はアップロード画像のパス('/uploads/...')の場合と、
                             // 未設定時の絵文字デフォルト値('⚔️'等)の場合がある。preview(選択直後の
                             // data:URLプレビュー)以外は、isSameOriginAvatarPathでパス形式かどうかを
                             // 判定してから<img src>に渡さないと、絵文字を渡した際に壊れた画像アイコンに
                             // なってしまう(UserStatusCard.tsx/Header.tsxと同じ判定に合わせる)。
-                            src={preview || user.avatar}
+                            src={avatarImageSrc}
                             alt="Avatar"
                             className="w-full h-full object-cover transition-opacity group-hover:opacity-50"
                         />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-4xl group-hover:opacity-50">
-                            {user.avatar || user.icon || '👤'}
+                            {user.avatar || '👤'}
                         </div>
                     )}
 

@@ -170,7 +170,9 @@ class UserService:
             total_gold = sum(u['gold'] for u in users) if users else 0
             # process_reject_quest が却下履歴を残す(status='rejected')ようになったため、
             # 却下された申請を「達成したクエスト数」に含めないよう明示的に除外する。
-            res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status != 'rejected'").fetchone()
+            # Q-L5(#409): 承認待ち(pending)行と、use_item が quest_id=0 で挿入する
+            # 「アイテム使用」行は達成クエスト数に含めない。
+            res = cur.execute("SELECT COUNT(*) as count FROM quest_history WHERE status = 'approved' AND quest_id != 0").fetchone()
             total_quests = res['count'] if res else 0
             
             if total_level < 10: rank = "駆け出しの家族"
@@ -218,9 +220,18 @@ class UserService:
             cur.execute("UPDATE quest_users SET avatar = ?, updated_at = ? WHERE user_id = ?",
                        (avatar_url, common.get_now_iso(), user_id))
 
+            # #372: 旧アバターのファイルを他のユーザーも参照している場合(同じ /uploads/ パスを
+            # 指定された場合)、物理削除するとそのユーザーのアバターが404になる。
+            # 他ユーザーからの参照が残っている限りファイルは削除しない。
+            still_referenced = cur.execute(
+                "SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ? LIMIT 1",
+                (old_avatar, user_id),
+            ).fetchone() is not None
+
             logger.info(f"Avatar Updated: User={user_id}, URL={avatar_url}")
 
-        self._delete_orphaned_avatar(old_avatar, avatar_url)
+        if not still_referenced:
+            self._delete_orphaned_avatar(old_avatar, avatar_url)
         return {"status": "updated", "avatar": avatar_url}
 
     def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:
@@ -299,9 +310,12 @@ class QuestService:
             return {"gold": 0, "exp": 0}
 
         # --- 以下、既存ロジック ---
+        # Q-L1(#409): 以前は status='approved' のみを見ていたため、承認待ち(pending)の日を
+        # 「サボった日」と誤判定して連続達成ボーナスが付いていた。process_complete_quest の
+        # スパム/周期チェックと同じく rejected 以外を「実施済み」として扱う。
         last_hist = cur.execute("""
             SELECT completed_at FROM quest_history 
-            WHERE user_id = ? AND quest_id = ? AND status = 'approved'
+            WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
             ORDER BY completed_at DESC LIMIT 1
         """, (user_id, quest['quest_id'])).fetchone()
 
@@ -348,6 +362,14 @@ class QuestService:
         # 直列化されるよう、completion lock とは独立に user balance lock も取得する。
         # ロック取得順序は常に balance lock → completion/purchase lock に統一し、
         # 経路間のデッドロックを防ぐ。
+        # Q-L10(#409): ロック辞書は user_id ごとにエントリが増え、プロセス再起動まで解放されない。
+        # 存在しない user_id でロックを作らないよう、ロック取得前に存在確認する
+        # (存在チェック後に取得するロック内で改めて検証されるため二重チェックは無害)。
+        with common.get_db_cursor() as cur:
+            exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
+        if not exists:
+            raise HTTPException(status_code=404, detail="User not found")
+
         with _get_user_balance_lock(user_id):
             with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):
                 return self._process_complete_quest_locked(user_id, quest_id)
@@ -551,6 +573,10 @@ class QuestService:
             if hist['status'] != 'pending': raise HTTPException(status_code=400, detail="承認待ちではありません")
 
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (hist['user_id'],)).fetchone()
+            if not user:
+                # #409: 履歴のユーザーがマスタから消えている場合、以前は _apply_quest_rewards 内で
+                # TypeError → 500 になっていた(_approve_linked_history 側は None 返却で防御済み)。
+                raise HTTPException(status_code=404, detail="User of this history not found")
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
 
             override_rewards = {
@@ -696,18 +722,20 @@ class QuestService:
             WHERE user_id = ?
         """, (new_level, new_exp_val, final_gold, earned_medals, now_iso, user['user_id']))
         
+        # Q-L3(#409): メダルドロップ数も履歴(medals_earned、migration 0009)に記録し、
+        # キャンセル時に _revert_and_delete_history が戻せるようにする。
         if history_id:
             # completed_at は子供が完了報告した時刻のまま維持する(承認時刻で上書きしない)。
             # 上書きしていた旧実装では、承認が翌日(weeklyなら翌週)にずれた場合に
             # process_complete_quest のスパムチェック/周期リセット判定が「本日(今週)完了済み」
             # と誤判定し、翌日分の完了報告ができなくなる不具合があった(#93)。
-            cur.execute("UPDATE quest_history SET status='approved', gold_earned=?, exp_earned=? WHERE id=?",
-                       (earned_gold, earned_exp, history_id))
+            cur.execute("UPDATE quest_history SET status='approved', gold_earned=?, exp_earned=?, medals_earned=? WHERE id=?",
+                       (earned_gold, earned_exp, earned_medals, history_id))
         else:
             cur.execute("""
-                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status)
-                VALUES (?, ?, ?, ?, ?, ?, 'approved')
-            """, (user['user_id'], quest['quest_id'], quest['title'], earned_exp, earned_gold, now_iso))
+                INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, medals_earned, completed_at, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'approved')
+            """, (user['user_id'], quest['quest_id'], quest['title'], earned_exp, earned_gold, earned_medals, now_iso))
 
         if leveled_up:
             sound_manager.play("level_up")
@@ -767,13 +795,28 @@ class QuestService:
             cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
             return
 
+        # #356: 以前は max(0, gold - gold_earned) で 0 に飽和させていたため、付与された
+        # ゴールドを報酬購入で使い切った後に履歴をキャンセルすると残高が減らず、
+        # 再完了で再び付与される「無限ゴールド」が成立していた。付与済みゴールドを
+        # 既に消費している(残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが
+        # 常に「付与の完全な巻き戻し」になることを保証する。
+        gold_earned = hist['gold_earned'] or 0
+        current_gold = user['gold'] or 0
+        if current_gold < gold_earned:
+            raise HTTPException(
+                status_code=400,
+                detail="獲得したゴールドを既に使用しているため、このクエストは取り消せません",
+            )
+
         new_level, new_exp = game_logic.GameLogic.calc_level_down(
             user['level'], user['exp'], hist['exp_earned']
         )
-        new_gold = max(0, user['gold'] - hist['gold_earned'])
+        new_gold = current_gold - gold_earned
+        # Q-L3(#409): メダルも戻す(履歴に記録が無い古い行は 0 扱い)
+        medals_earned = (hist['medals_earned'] if 'medals_earned' in hist.keys() else 0) or 0
 
-        cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?",
-                    (new_level, new_exp, new_gold, common.get_now_iso(), user['user_id']))
+        cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, medal_count = MAX(0, medal_count - ?), updated_at=? WHERE user_id=?",
+                    (new_level, new_exp, new_gold, medals_earned, common.get_now_iso(), user['user_id']))
         cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
     def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:
@@ -961,11 +1004,17 @@ class InventoryService:
 
             now_iso = common.get_now_iso()
 
+            # #369: SELECT→Python判定→無条件UPDATE では、WALで読み取りがブロックされない
+            # ため連打された2リクエストが両方 'owned' を読み、両方が消費処理・履歴INSERT・
+            # 通知を実行していた(二重使用)。status='owned' を条件に含めた条件付きUPDATEに
+            # し、rowcount==0(先行リクエストが既に消費済み)なら400で拒否する。
             cur.execute("""
                 UPDATE user_inventory
                 SET status = 'consumed', used_at = ?
-                WHERE id = ?
+                WHERE id = ? AND status = 'owned'
             """, (now_iso, inventory_id))
+            if cur.rowcount == 0:
+                raise HTTPException(400, "Cannot use this item")
 
             log_title = f"アイテム使用: {item['title']}"
             cur.execute("""
@@ -974,13 +1023,17 @@ class InventoryService:
             """, (item['user_id'], log_title, now_iso))
 
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
-            notification_service.send_push(
-                user_id=config.LINE_USER_ID,
-                messages=[{"type": "text", "text": msg}]
-            )
-            sound_manager.play("quest_clear")
 
-            return {"status": "consumed", "message": "つかいました！"}
+        # 外部副作用(LINE送信・効果音)はコミット後に実行する。以前はトランザクション内で
+        # LINE APIの往復を待っていたため、その間SQLiteの書き込みロックを保持し続け、
+        # 他のwriterが "database is locked" 待ちになっていた(Q-L7)。
+        notification_service.send_push(
+            user_id=config.LINE_USER_ID,
+            messages=[{"type": "text", "text": msg}]
+        )
+        sound_manager.play("quest_clear")
+
+        return {"status": "consumed", "message": "つかいました！"}
 
 
 class GameSystem:
@@ -1143,15 +1196,17 @@ class GameSystem:
             known_user_ids = {u['user_id'] for u in users}
 
             for q in filtered_quests:
-                if q['target_user'] and q['target_user'] != 'all':
+                # Q-L2(#409): target_user='all' の daily クエストも、完了時には閲覧ユーザーの
+                # 履歴に基づくボーナスが付くのに、表示側は常に 0 固定だった。'all' の場合は
+                # 閲覧中のユーザー(viewer_user_id)の履歴で算出する。
+                if q['target_user'] == 'all' or not q['target_user']:
+                    boost_user_id = viewer_user_id
+                else:
                     boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
-                    if boost_user_id:
-                        boost = self.quest_service.calculate_quest_boost(cur, boost_user_id, q)
-                        q['bonus_gold'] = boost['gold']
-                        q['bonus_exp'] = boost['exp']
-                    else:
-                        q['bonus_gold'] = 0
-                        q['bonus_exp'] = 0
+                if boost_user_id:
+                    boost = self.quest_service.calculate_quest_boost(cur, boost_user_id, q)
+                    q['bonus_gold'] = boost['gold']
+                    q['bonus_exp'] = boost['exp']
                 else:
                     q['bonus_gold'] = 0
                     q['bonus_exp'] = 0
@@ -1166,14 +1221,10 @@ class GameSystem:
 
             # 過去1ヶ月の完了履歴を取得して周期を判定する
             # ※SQLiteの date('now') はUTC基準のため、Python側でJSTの閾値文字列を生成する
-            try:
-                now_jst = datetime.datetime.now(JST)
-                one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
-            except Exception as jst_err:
-                # 万が一のタイムゾーンエラーに対する防御型フォールバック（Safety Guard）
-                logger.error(f"❌ Failed to calculate JST time for analytics: {jst_err}")
-                now_native = datetime.datetime.now()
-                one_month_ago = (now_native - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+            # JST は固定オフセットの timezone なので now()/strftime が失敗することはない
+            # (#409: 到達不能な try/except フォールバックを削除)
+            now_jst = datetime.datetime.now(JST)
+            one_month_ago = (now_jst - datetime.timedelta(days=30)).strftime("%Y-%m-%d")
 
             recent_completed = [dict(row) for row in cur.execute(
                 "SELECT * FROM quest_history WHERE status='approved' AND completed_at >= ? ORDER BY completed_at DESC",

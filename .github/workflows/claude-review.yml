@@ -26,6 +26,8 @@ jobs:
   review:
     name: Claude PR review
     runs-on: ubuntu-latest
+    # C-L1 (Issue #414): LLMレビューが応答待ちで固まった場合の上限
+    timeout-minutes: 30
     if: github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -33,7 +35,14 @@ jobs:
           fetch-depth: 1
 
       - name: Claude Code Review
-        uses: anthropics/claude-code-action@v1
+        # Issue #399: 他のアクションと同様にコミットSHAへピン留めする(可変な major
+        # タグ参照は、OAuthトークンと id-token: write を持つ本ジョブにとって
+        # サプライチェーン攻撃の単一障害点になる)。更新時は refs/tags/v1 が指す
+        # コミット(`git ls-remote --tags https://github.com/anthropics/claude-code-action`
+        # の `v1^{}` 行)を確認し、併記のバージョンコメントも合わせて更新すること。
+        # なお pull-requests: write はレビューコメント投稿、id-token: write は
+        # OAuthトークン利用時のGitHub Appトークン交換(OIDC)にそれぞれ必要なため維持する。
+        uses: anthropics/claude-code-action@ef8bb1e43bf303cff727a1dd0b8837029fe982a2 # v1.0.215 (= v1 が指すコミット, 2026-09-04時点)
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 

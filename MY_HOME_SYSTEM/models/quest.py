@@ -1,6 +1,13 @@
 # MY_HOME_SYSTEM/models/quest.py
-from pydantic import BaseModel
-from typing import Optional
+import re
+
+from pydantic import BaseModel, Field, field_validator
+from typing import Literal, Optional
+
+# Q-L4(#409): SQLite の INTEGER は 64bit 符号付き。上限の無い int フィールドに 2**63 以上を渡すと
+# sqlite3 が OverflowError を送出して 500 になっていたため、ID 系は 1〜2**63-1 に制限する。
+_SQLITE_INT_MAX = 2**63 - 1
+_DAY_OF_WEEK_RE = re.compile(r"^[0-6](,[0-6])*$")
 
 # ==========================================
 # Domain Models (Pydantic)
@@ -17,13 +24,16 @@ class MasterUser(BaseModel):
     role: Optional[str] = None
 
 class MasterQuest(BaseModel):
-    id: int
-    title: str
+    # #409: 以前は type/reset_period が自由文字列、exp/gold が負値可、days が未検証で、
+    # タイポ('dayly' 等)は「ボーナス無し・周期チェック有り」の中途半端な挙動に、
+    # 不正な days('0,,1')は int() の ValueError で GET /data 全体が 500 になっていた。
+    id: int = Field(ge=1, le=_SQLITE_INT_MAX)
+    title: str = Field(min_length=1, max_length=200)
     desc: Optional[str] = None
-    type: str
+    type: Literal['daily', 'special', 'infinite']
     target: str = 'all'
-    exp: int
-    gold: int
+    exp: int = Field(ge=0)
+    gold: int = Field(ge=0)
     icon: str
     days: Optional[str] = None
     start_date: Optional[str] = None
@@ -32,43 +42,75 @@ class MasterQuest(BaseModel):
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None
-    reset_period: Optional[str] = 'daily'
+    reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'
+
+    @field_validator("days")
+    @classmethod
+    def _validate_days(cls, value: Optional[str]) -> Optional[str]:
+        if value is None or value == "":
+            return None
+        if not _DAY_OF_WEEK_RE.match(value):
+            raise ValueError("days は '0,3' のようなカンマ区切りの曜日番号(0〜6)で指定してください")
+        return value
 
 class MasterReward(BaseModel):
-    id: int
-    title: str
+    id: int = Field(ge=1, le=_SQLITE_INT_MAX)
+    title: str = Field(min_length=1, max_length=200)
     category: str
-    cost_gold: int
+    cost_gold: int = Field(ge=0)
     icon_key: str
     desc: Optional[str] = None
-    target: str = "all"
+    target: Optional[str] = "all"
 
 # Request Models
-class UserAction(BaseModel):
-    user_id: str
-
+# (#409: 未使用だった UserAction / InventoryItem は削除)
 class QuestAction(BaseModel):
-    user_id: str
-    quest_id: int
+    user_id: str = Field(min_length=1, max_length=64)
+    quest_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class RewardAction(BaseModel):
-    user_id: str
-    reward_id: int
+    user_id: str = Field(min_length=1, max_length=64)
+    reward_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class HistoryAction(BaseModel):
     user_id: str
-    history_id: int
+    history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class ApproveAction(BaseModel):
-    approver_id: str
-    history_id: int
+    approver_id: str = Field(min_length=1, max_length=64)
+    history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
     # 却下理由(プリセット選択、フロントエンドのみで完結していたUXにログ用の裏付けを追加)。
     # 任意項目なので既存クライアント(未送信)との後方互換は崩さない。
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+# #372: アップロード経由のアバターURLは routers/quest_router.py の upload_image が生成する
+# 「/uploads/<uuid4>.<拡張子>」の形のみを受け付ける。任意の /uploads/ パスを許すと、
+# 他ユーザーのアップロード画像を自分のアバターに指定 → 絵文字に戻す、という操作で
+# そのファイルが孤立扱いになり削除されてしまう経路が残る。
+_UPLOADED_AVATAR_RE = re.compile(
+    r"^/uploads/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(jpg|jpeg|png|gif|webp)$"
+)
+# 絵文字アバター(結合絵文字・肌色修飾子を含めても十数コードポイント)の上限。
+_EMOJI_AVATAR_MAX_LEN = 16
+
 
 class UpdateUserAction(BaseModel):
     user_id: str
     avatar_url: str
+
+    @field_validator("avatar_url")
+    @classmethod
+    def _validate_avatar_url(cls, value: str) -> str:
+        if _UPLOADED_AVATAR_RE.match(value):
+            return value
+        # 絵文字などの短い表示用文字列。パス区切り・HTML特殊文字を含むものは拒否する。
+        if (
+            0 < len(value) <= _EMOJI_AVATAR_MAX_LEN
+            and not any(ch in value for ch in "/\\<>\"'")
+            and not value.startswith(".")
+        ):
+            return value
+        raise ValueError("avatar_url は /uploads/<uuid>.<ext> 形式か短い絵文字文字列のみ指定できます")
 
 class SoundTestRequest(BaseModel):
     sound_key: str
@@ -101,16 +143,6 @@ class PurchaseResponse(BaseModel):
     status: str
     newGold: int
 
-# Inventory Models
-class InventoryItem(BaseModel):
-    id: int             # inventory ID
-    reward_id: int      # master ID
-    title: str
-    desc: Optional[str] = None
-    icon: str
-    status: str         # owned, consumed
-    purchased_at: str
-    used_at: Optional[str] = None
 
 class UseItemResponse(BaseModel):
     status: str

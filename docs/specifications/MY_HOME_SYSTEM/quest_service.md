@@ -168,6 +168,8 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 * **役割**: `quest_users`の合計レベル・合計ゴールド、`quest_history`の総件数から家族のランク（4段階のしきい値）を判定し、`_fetch_full_adventure_logs`で取得した冒険ログとともに返す。
 * 根拠: `def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 85〜103)
+* **（Issue #409 Q-L5 で修正）** `totalQuests` は `status = 'approved' AND quest_id != 0`（承認待ち行と `use_item` のアイテム使用行を除外）で数える。
+* 根拠: `SELECT COUNT(*) as count FROM quest_history WHERE status = 'approved' AND quest_id != 0`
 * **引数/リクエスト**: なし（`self`のみ）
 * 根拠: (行番号: 85)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`stats: {totalLevel, totalGold, totalQuests, partyRank}` と `chronicle`）
@@ -192,14 +194,14 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `UserService.update_avatar`
 
-* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。**（B6で修正）** 更新前の`avatar`列の値を`old_avatar`として保持しておき、DB更新のトランザクション(`get_db_cursor(commit=True)`)を抜けた後に`_delete_orphaned_avatar`を呼び出して、差し替えにより不要になった旧アバターファイルの削除を試みる。以前はDBの`avatar`列を更新するのみで、`UPLOAD_DIR`配下の旧アバターファイル自体は削除されず、再アップロードのたびにディスクへ蓄積し続けていた。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 201〜215 / 抜粋: "old_avatar = user['avatar']")、`self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 214)
+* **役割**: ユーザーが存在することを確認したうえで、アバターURLを更新する。**（B6で修正）** 更新前の`avatar`列の値を`old_avatar`として保持しておき、DB更新のトランザクション(`get_db_cursor(commit=True)`)を抜けた後に`_delete_orphaned_avatar`を呼び出して、差し替えにより不要になった旧アバターファイルの削除を試みる。以前はDBの`avatar`列を更新するのみで、`UPLOAD_DIR`配下の旧アバターファイル自体は削除されず、再アップロードのたびにディスクへ蓄積し続けていた。**（Issue #372で修正）** 同一トランザクション内で`SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ?`により旧アバターを他ユーザーが参照しているかを確認し（`still_referenced`）、参照が残っている場合は`_delete_orphaned_avatar`を呼び出さない。以前は他ユーザーのアップロード画像パスを自分の`avatar_url`に指定してから絵文字に戻す操作で、そのユーザーの画像ファイルが物理削除されていた。
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 210〜233 / 抜粋: "old_avatar = user['avatar']")、`still_referenced = cur.execute(` (行番号: 224〜227)、`if not still_referenced:\n            self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 231〜232)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
 * 根拠: (行番号: 201)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "updated", "avatar": avatar_url}`）
 * 根拠: (行番号: 201, 215)
-* **副作用**: DB更新（`quest_users`）、ログ出力、（B6で追加）`_delete_orphaned_avatar`の呼び出しによるローカルファイルシステムからの旧アバターファイル削除の試行（DBコミット後、`get_db_cursor`のトランザクション外で実行される）
-* 根拠: (行番号: 209〜212, 214)
+* **副作用**: DB更新（`quest_users`）、DB参照（他ユーザーの`avatar`参照確認）、ログ出力、（B6で追加）`_delete_orphaned_avatar`の呼び出しによるローカルファイルシステムからの旧アバターファイル削除の試行（DBコミット後、`get_db_cursor`のトランザクション外で実行される。Issue #372以降は他ユーザーからの参照が無い場合のみ）
+* 根拠: (行番号: 218〜219, 224〜227, 231〜232)
 * **エラーハンドリング**: ユーザー不在時に `HTTPException(status_code=404)`
 * 根拠: (行番号: 204〜205 / 抜粋: "raise HTTPException(status_code=404, detail=\"User not found\")")
 
@@ -246,6 +248,8 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 * **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」は、Issue #108の修正により`is_within_reset_period`と同じJST基準（`datetime.timezone(+9時間)`）に統一された（以前はサーバーのローカル時刻`datetime.datetime.now()`を使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の判定で`days_diff`が1小さくなる不具合があった）。
 * 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 247〜298)
+* **（Issue #409 Q-L1 で修正）** 最終実施日の取得条件を `status = 'approved'` から `status != 'rejected'` に変更し、承認待ちの日を「サボり」と誤判定しないようにした。
+* 根拠: `WHERE user_id = ? AND quest_id = ? AND status != 'rejected'` (calculate_quest_boost 内の SELECT)
 * 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 252〜253), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 259〜260)
 * 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')\n        now_jst = datetime.datetime.now(JST)` (行番号: 273〜274)
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
@@ -261,6 +265,8 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 * **役割**: `user_id`単位の`_get_user_balance_lock`と、`_get_completion_lock_key(user_id, quest_id)`で算出したキーの`_get_completion_lock`を、常にこの順(balance lock→completion lock)でネストして取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー(Issue #161)。completion lockは`(user_id, quest_id)`単位のため、同一ユーザーが異なる`quest_id`をほぼ同時に完了すると別々のロックキーとなり並行実行されてしまい、大人の即時完了パス(`_apply_quest_rewards`)が行う`quest_users`(gold/exp/level)へのread-modify-writeがこれだけでは保護されず、対象ユーザーの残高更新でlost updateが起こり得た。`process_approve_quest`/`process_cancel_quest`が既に使っている`_get_user_balance_lock`をここでも取得することで、`quest_users`を書き換えうる全経路(完了・承認・取消)が対象ユーザー単位で直列化される。ロック取得順序を常に balance lock → completion/purchase lock に統一しているのは、経路間のデッドロックを防ぐため。
 * 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 300〜315)
+* **（Issue #409 Q-L10 で修正）** ロック取得前に `quest_users` の存在を確認し、存在しない `user_id` では 404 を返してロック辞書にエントリを作らない。
+* 根拠: `exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", ...)` (process_complete_quest 冒頭)
 * 根拠: `with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 313〜315)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
 * 根拠: (行番号: 300)
@@ -461,8 +467,11 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `QuestService._revert_and_delete_history`
 
-* **役割**: `quest_history`1行を取り消すヘルパー。`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除し（ゴールドは`max(0, ...)`で負値化を防止）、`approved`以外（`pending`・`rejected`）は報酬が付与されていないため残高には触れず単純に削除する（Issue #97: 以前は`status == 'pending'`以外を一律「付与済み」とみなしてロールバックしていたため、`rejected`履歴を`cancel`すると、もらっていない経験値・ゴールドが残高から減算される不具合があった）。呼び出し元`process_cancel_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない（Issue #98）。
-* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 608〜627 / 抜粋: "if hist['status'] != 'approved':\n            cur.execute(\"DELETE FROM quest_history WHERE id = ?\", (hist['id'],))\n            return")
+* **役割**: `quest_history`1行を取り消すヘルパー。`approved`であれば`game_logic.GameLogic.calc_level_down`で経験値・ゴールドをロールバックしたうえで削除し、`approved`以外（`pending`・`rejected`）は報酬が付与されていないため残高には触れず単純に削除する（Issue #97: 以前は`status == 'pending'`以外を一律「付与済み」とみなしてロールバックしていたため、`rejected`履歴を`cancel`すると、もらっていない経験値・ゴールドが残高から減算される不具合があった）。呼び出し元`process_cancel_quest`が`_acquire_user_balance_locks`で相方のロックも取得済みであることを前提としており、本関数自身はロックを取得しない（Issue #98）。
+**（Issue #356で修正）** ゴールドの巻き戻しは以前`max(0, gold - gold_earned)`で0に飽和させていたため、付与されたゴールドを報酬購入で使い切った後に履歴をキャンセルすると残高が減らず、再完了で再び付与される「無限ゴールド」が成立していた。現在は残高(`quest_users.gold`)が付与額(`quest_history.gold_earned`)未満の場合は`HTTPException(400)`を送出して取り消し自体を拒否し（`get_db_cursor`の例外時ロールバックにより履歴・残高とも変化しない）、残高が十分な場合のみ`gold - gold_earned`をそのまま書き戻す。
+* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 767〜796 / 抜粋: "if hist['status'] != 'approved':\n            cur.execute(\"DELETE FROM quest_history WHERE id = ?\", (hist['id'],))\n            return")、`if current_gold < gold_earned:\n            raise HTTPException(` (行番号: 786〜790)、`new_gold = current_gold - gold_earned` (行番号: 795)
+* **（Issue #409 Q-L3 で修正）** `quest_history.medals_earned`（migration 0009）を用い、`medal_count = MAX(0, medal_count - medals_earned)` でメダルも戻す。`_apply_quest_rewards` は付与時に `medals_earned` を記録する。
+* 根拠: `medals_earned = (hist['medals_earned'] if 'medals_earned' in hist.keys() else 0) or 0` と直後の UPDATE 文
 * **引数/リクエスト**: `cur`, `hist`, `user`
 * 根拠: (行番号: 608)
 * **戻り値/レスポンス**: なし（`-> None`）
@@ -532,16 +541,16 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `InventoryService.use_item`
 
-* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。続けて`config.LINE_USER_ID`宛に使用を知らせるLINE通知を送り、`"quest_clear"`サウンドを再生する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
-* 根拠: 関数Docstring `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 793〜796 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
+* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。**（Issue #369で修正）** UPDATEは`WHERE id = ? AND status = 'owned'`の条件付きで行い、`cur.rowcount == 0`（SELECT後に別リクエストが先に消費していた）なら`HTTPException(400)`を送出する。以前はSELECT→Python判定→無条件UPDATEだったため、連打された2リクエストがWALで両方`'owned'`を読み、両方が消費・履歴INSERT・通知を実行する二重使用が起きていた。LINE通知（`config.LINE_USER_ID`宛）と`"quest_clear"`サウンド再生は、以前はトランザクション内で実行されLINE API往復中もSQLiteの書き込みロックを保持していたが、現在は`get_db_cursor`ブロックを抜けたコミット後に実行する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: 関数Docstring `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 966〜969 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")、`WHERE id = ? AND status = 'owned'` (行番号: 993)、`if cur.rowcount == 0:` (行番号: 995〜996)、コミット後の`notification_service.send_push`/`sound_manager.play` (行番号: 1009〜1013)
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
 * 根拠: (行番号: 793)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "consumed", "message": "つかいました！"}`）
 * 根拠: (行番号: 793, 832)
 * **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
 * 根拠: (行番号: 813〜817, 819〜823, 826〜829, 830)
-* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`
-* 根拠: (行番号: 807〜809 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")
+* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`、条件付きUPDATEの`rowcount == 0`（並行リクエストが先に消費済み）の場合も `HTTPException(400)`
+* 根拠: (行番号: 980〜982 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")、(行番号: 995〜996 / 抜粋: "if cur.rowcount == 0:\n                raise HTTPException(400, \"Cannot use this item\")")
 
 ### `GameSystem.__init__`
 
@@ -575,6 +584,8 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 * **役割**: フロントエンド描画に必要な状態（ユーザー、フィルタ済みクエスト、報酬、直近1ヶ月の完了履歴、承認待ち履歴、直近ログ）を一括で取得・整形する。**（回帰修正）** `users`は`"SELECT * FROM quest_users"`（`ORDER BY`句なし）で取得した直後、`quest_data.USERS`の宣言順（`dad, mom, son, daughter`）に`list.sort`で並べ替える。これは、`user_id`がTEXT PRIMARY KEYであるため`ORDER BY`無しのSQLiteがしばしば主キーのアルファベット順（`dad, daughter, mom, son`）で行を返すことがあり、family-quest側の`App.tsx`が`users[currentUserIdx]`という配列インデックスでタブと現在のユーザーを対応づけているため、この順序の食い違いがあるとタブの位置と実際に表示される家族が入れ替わってしまう不具合（例: 「son」のタブに`target_user='mom'`/`'dad'`向けクエストが表示される）への対策。`quest_data`が読み込めていない場合（インポート失敗時）は並べ替えをスキップし、DBが返した順のまま返す。ユーザーには`nextLevelExp`/`maxHp`/`hp`を付与し、各クエストには`bonus_gold`/`bonus_exp`（`target_user`が`'all'`以外の場合のみ`calculate_quest_boost`で算出）を付与する。`quest_master.target_user`は実際の`quest_users.user_id`（例: `'dad'`）の他に`'siblings'`のようなグループ指定も取りうるため、`target_user`が実在の`user_id`（`known_user_ids`に含まれる）でない場合は、引数`viewer_user_id`（閲覧中のユーザーのID。省略可能で既定は`None`）を代表ユーザーとして`calculate_quest_boost`に渡す。`viewer_user_id`も指定されなければボーナスは`0`固定になる。`reward_master`から取得した各報酬については、**（#291で修正）** 以前ここで付与していた`icon`/`cost`という`icon_key`/`cost_gold`の別名（重複フィールド名）は廃止され、DBの実カラム名（`icon_key`/`cost_gold`）がそのまま正となる。あわせて、`description`の同期用レガシー列である`reward_master.desc`（`sync_strict.py`が書き込む）はこのビュー応答からは`dict.pop`で除去され、`description`のみが公開される。直近1ヶ月の閾値算出はJST（`pytz`）で行い、失敗時はサーバーのローカル時刻にフォールバックする。`quest_type == 'infinite'`のクエストは条件を満たす全履歴を、それ以外はユーザーごとに最新1件のみを評価して`is_within_reset_period`で有効性判定する。`target_user`が`'role_'`で始まる共有クエストについては、誰かが完了済み/承認待ちであればそのユーザー情報を`is_shared_completed_by`等のフィールドに付与する。
 * 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 1128), `users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]` (行番号: 1130), 並べ替え処理 (行番号: 1141〜1143 / 抜粋: "if quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))")
+* **（Issue #409 Q-L2 で修正）** `target_user='all'` のクエストも `viewer_user_id` の履歴で `calculate_quest_boost` を算出する（以前は常に 0）。JST 計算を囲んでいた到達不能な try/except を削除。あわせて `_process_approve_quest_locked` は履歴のユーザーが存在しない場合 404 を返す。
+* 根拠: `if q['target_user'] == 'all' or not q['target_user']: boost_user_id = viewer_user_id`
 * 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 1147), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 1151)
 * 根拠: 報酬フィールドの一本化 (行番号: 1164〜1170 / 抜粋: "rewards = [dict(row) for row in cur.execute(\"SELECT * FROM reward_master\")]\n            for r in rewards:\n                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold\n                # の別名)を廃止し、DBの実カラム名に一本化する。desc は\n                # description の同期用レガシー列(sync_strict.py参照)であり、\n                # このビュー応答では description のみを正としてdesc自体を落とす。\n                r.pop('desc', None)")
 * 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1173〜1177)

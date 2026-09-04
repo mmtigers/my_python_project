@@ -1,6 +1,8 @@
 # MY_HOME_SYSTEM/services/ai_service.py
 import asyncio
+import json
 import re
+import sqlite3
 import threading
 import time
 import traceback
@@ -42,6 +44,9 @@ else:
 MAX_RETRIES = 3
 REQUESTS_PER_MINUTE_LIMIT = 10  # 必要に応じて調整
 FALLBACK_MESSAGE = "申し訳ございません。現在AIサービスが混雑しており応答できません。少し時間を置いて再度お試しください。"
+# Issue #374: 1メッセージで連鎖的にツール呼び出しが返る場合(「智矢が熱、涼花も熱」等)に
+# ツール実行→結果送信を繰り返す上限回数。無限ループ防止のための安全弁。
+MAX_TOOL_ROUNDS = 5
 
 
 # ==========================================
@@ -108,11 +113,19 @@ async def tool_record_child_health(user_id: str, user_name: str, args: Dict[str,
     """
     child_name = args.get("child_name")
     condition = args.get("condition")
-    
+
+    # Issue #373: AIが必須引数を欠落させた場合(condition=None 等)、そのままDBへ渡すと
+    # NULL の記録が保存されうる。ツール結果として不足を返し、AIに再確認させる。
+    if not child_name or not condition:
+        return "記録失敗: child_name と condition の両方が必要です。"
+
     # 名前の正規化 (config.FAMILY_SETTINGS["members"] とのマッチング)
     # ここではAIが正しい名前(configにある名前)を抽出してくると期待する
-    
+
     msg_obj = await line_service.log_child_health(user_id, user_name, child_name, condition)
+    # Issue #373: 保存失敗時は「記録完了」ではなく失敗であることをAIへ明示する。
+    if msg_obj.text.startswith(line_service.SAVE_FAILED_PREFIX):
+        return f"記録失敗: {msg_obj.text}"
     return f"記録完了: {msg_obj.text}"
 
 
@@ -130,8 +143,15 @@ async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -
     """
     item = args.get("item")
     category = args.get("category", "その他")
-    
+
+    # Issue #373: 必須引数(item)の欠落はDBへ渡さずツール結果で返す。
+    if not item:
+        return "記録失敗: item(食べたメニュー名) が必要です。"
+
     msg_obj = await line_service.log_food_record(user_id, user_name, category, item, is_manual=True)
+    # Issue #373: 保存失敗時は「記録完了」ではなく失敗であることをAIへ明示する。
+    if msg_obj.text.startswith(line_service.SAVE_FAILED_PREFIX):
+        return f"記録失敗: {msg_obj.text}"
     return f"記録完了: {msg_obj.text}"
 
 
@@ -218,6 +238,76 @@ def _extract_referenced_tables(sql: str) -> List[str]:
     return tables
 
 
+# Issue #357: `"quest_users"` / `[quest_users]` / `` `quest_users` `` / `"main".quest_users`
+# / `FROM"quest_users"` のような引用符・角括弧付き識別子は、上の正規表現
+# (`FROM\s+[A-Za-z_]...`)にマッチせず参照テーブルとして検出されない。
+# 許可テーブルを1つ含めれば referenced_tables が非空かつ disallowed が空になり、
+# UNION SELECT やスカラーサブクエリで許可外テーブルを読めていた。
+# 正規表現パーサでこれらを網羅するのは困難なため、暫定対策としてこれらの文字を
+# 含むSQLは実行前に即拒否する(構造的な対策は下の set_authorizer 側)。
+_QUOTED_IDENTIFIER_CHARS = ('"', '`', '[')
+
+# Issue #357: SQLite組み込み関数のうち、SELECT文からでもファイル読み書き・
+# 拡張ロードといった副作用を起こしうるもの。set_authorizer で拒否する。
+_DENIED_SQL_FUNCTIONS = frozenset({
+    "load_extension", "readfile", "writefile", "edit", "fsdir", "zipfile",
+})
+
+
+def _search_db_authorizer(action: int, arg1, arg2, db_name, trigger_or_view) -> int:
+    """
+    Issue #357: AIツール(search_db)専用の SQLite 認可コールバック。
+
+    正規表現によるテーブル名抽出(`_extract_referenced_tables`)は引用符付き識別子等で
+    すり抜けられるため、SQLiteエンジン自身に「許可テーブル以外は読めない」ことを
+    強制させる構造的な防御。SQLiteは文の準備時に、読み取るテーブル/列ごとに
+    SQLITE_READ、関数ごとに SQLITE_FUNCTION 等をこのコールバックへ問い合わせ、
+    SQLITE_DENY が返るとその文全体をエラーにする(引用符の有無・スキーマ修飾・
+    サブクエリ・UNION・テーブル値関数(json_each/pragma_table_info等)を問わず適用される)。
+
+    許可するのは SELECT / WITH RECURSIVE / 許可テーブルの READ / 危険でない関数のみ。
+    ATTACH・PRAGMA・INSERT/UPDATE/DELETE・DDL 等それ以外の操作はすべて拒否する。
+    """
+    if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_RECURSIVE):
+        return sqlite3.SQLITE_OK
+    if action == sqlite3.SQLITE_READ:
+        # arg1=テーブル名(テーブル値関数の場合は関数名), arg2=列名。
+        # sqlite_master 等のシステムテーブルも許可リスト外なのでここで拒否される。
+        return sqlite3.SQLITE_OK if arg1 in ALLOWED_SEARCH_TABLES else sqlite3.SQLITE_DENY
+    if action == sqlite3.SQLITE_FUNCTION:
+        # arg2=関数名
+        if (arg2 or "").lower() in _DENIED_SQL_FUNCTIONS:
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+    # SQLITE_ATTACH / SQLITE_PRAGMA / SQLITE_INSERT / SQLITE_UPDATE / SQLITE_DELETE / DDL 等
+    return sqlite3.SQLITE_DENY
+
+
+def _execute_restricted_read_query(query: str, params: tuple = ()) -> str:
+    """
+    Issue #357: `_search_db_authorizer` を設定した接続でSELECTを実行する、
+    AIツール(search_db)専用の読み取り関数。
+
+    `core.database.execute_read_query` と同じ戻り値の契約
+    (0件: "該当するデータはありませんでした。" / 正常: JSON文字列 /
+    失敗: "検索エラー: ..." で例外は送出しない)を維持し、tool_search_db 側の
+    既存のエラー判定(#180)をそのまま使えるようにしている。
+    `execute_read_query` 自体は他の呼び出し元と共有されるため変更せず、
+    認可コールバックはこのAI経路にのみ適用する。
+    """
+    try:
+        with common.get_db_cursor() as cursor:
+            cursor.connection.set_authorizer(_search_db_authorizer)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return "該当するデータはありませんでした。"
+        return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
+    except Exception as e:
+        return f"検索エラー: {str(e)}"
+
+
 async def tool_search_db(args: Dict[str, Any]) -> str:
     """
     [Tool] データベースから情報を検索する (読み取り専用)。
@@ -240,6 +330,13 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
     if not sql.strip().upper().startswith("SELECT"):
         return "エラー: データ変更操作は許可されていません。"
 
+    # Issue #357: 引用符・角括弧付き識別子は _extract_referenced_tables で検出できず
+    # 許可テーブル判定をすり抜けるため、含まれていれば即拒否する(多層防御。
+    # 実行時は _search_db_authorizer が構造的に許可外テーブルの読み取りを拒否する)。
+    if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):
+        logger.warning(f"⚠️ search_db blocked quoted identifier (sql={sql!r})")
+        return "エラー: 引用符付きの識別子（\" ` [）は使用できません。"
+
     # 安全対策: ドキュメントに明記した許可テーブル以外への参照を禁止
     referenced_tables = _extract_referenced_tables(sql)
     if not referenced_tables:
@@ -250,17 +347,18 @@ async def tool_search_db(args: Dict[str, Any]) -> str:
         return "エラー: 許可されていないテーブルへのアクセスです。"
 
     try:
-        # 読み取り専用で実行
-        result = await asyncio.to_thread(common.execute_read_query, sql)
+        # Issue #357: 許可テーブル以外の読み取りをSQLiteの認可コールバックで
+        # 構造的に拒否する専用関数で実行する(以前は common.execute_read_query)。
+        result = await asyncio.to_thread(_execute_restricted_read_query, sql)
     except Exception as e:
         return f"DB検索エラー: {e}"
 
-    # #180: common.execute_read_query は例外発生時も"検索エラー: ..."という非空文字列を
-    # 返す設計(core/database.py参照)のため、以前の`if not rows:`は常に偽となり
-    # 到達しないデッドコードだった。加えて、SQL実行時エラーの文字列がそのまま
-    # 正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。
-    # execute_read_queryの内部エラープレフィックスで判定し、警告ログを残した上で
-    # エラーであることが分かる形でAIへ返す。
+    # #180: _execute_restricted_read_query(旧 common.execute_read_query)は例外発生時も
+    # "検索エラー: ..."という非空文字列を返す設計のため、以前の`if not rows:`は
+    # 常に偽となり到達しないデッドコードだった。加えて、SQL実行時エラーの文字列が
+    # そのまま正常な検索結果としてAIへ渡っていた(呼び出し元はログにも残らず気づけない)。
+    # 内部エラープレフィックスで判定し、警告ログを残した上でエラーであることが
+    # 分かる形でAIへ返す。
     if result.startswith("検索エラー:"):
         logger.warning(f"⚠️ search_db query failed: {result} (sql={sql!r})")
         return f"DB検索エラー: {result[len('検索エラー:'):].strip()}"
@@ -373,6 +471,49 @@ async def _call_gemini_api_with_retry(chat_session, prompt: str):
 # 4. Main Logic
 # ==========================================
 
+def _extract_function_calls(response) -> List[Any]:
+    """
+    Issue #374 (L-L4): 応答の全パートを走査し、function_call を持つものをすべて返す。
+
+    以前は `response.parts[0]` だけを検査していたため、テキスト+function_call の
+    複数パート応答ではツール呼び出しが無視され雑談扱いになっていた。
+    """
+    calls: List[Any] = []
+    for part in (response.parts or []):
+        fc = getattr(part, "function_call", None)
+        if fc:
+            calls.append(fc)
+    return calls
+
+
+def _response_text_or_none(response) -> Optional[str]:
+    """
+    Issue #374: `response.text` は function_call パートしか無い応答や空応答で
+    ValueError を送出する(google-generativeai の仕様)。例外を送出せず None を返す。
+    """
+    try:
+        text = response.text
+    except (ValueError, AttributeError, IndexError):
+        return None
+    return text or None
+
+
+async def _dispatch_tool(user_id: str, user_name: str, fname: str, fargs: Dict[str, Any]) -> str:
+    """function_call の名前に応じてツール関数を実行し、結果文字列を返す"""
+    if fname == "record_child_health":
+        return await tool_record_child_health(user_id, user_name, fargs)
+    if fname == "record_food":
+        return await tool_record_food(user_id, user_name, fargs)
+    if fname == "search_db":
+        return await tool_search_db(fargs)
+    return "エラー: 未知のツールが呼び出されました。"
+
+
+def _tool_results_fallback(tool_results: List[str], note: str) -> str:
+    """ツールは実行済みだが最終応答を生成できなかった場合に、実行結果のみをユーザーへ返す"""
+    return "\n".join(tool_results) + f"\n({note})"
+
+
 async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> Optional[str]:
     """
     ユーザーの入力を解析し、適切なツールを実行するか、会話応答を返す。
@@ -431,42 +572,53 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
             logger.error("❌ Empty response from Gemini")
             return "エラー: AIからの応答が空でした。"
 
-        part = response.parts[0]
-        
-        # --- Handle Function Call ---
-        if part.function_call:
-            fc = part.function_call
-            fname = fc.name
-            fargs = dict(fc.args)
-            
-            logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
-            
-            tool_result = ""
-            if fname == "record_child_health":
-                tool_result = await tool_record_child_health(user_id, user_name, fargs)
-            elif fname == "record_food":
-                tool_result = await tool_record_food(user_id, user_name, fargs)
-            elif fname == "search_db":
-                tool_result = await tool_search_db(fargs)
-            else:
-                tool_result = "エラー: 未知のツールが呼び出されました。"
+        # Issue #374: ツール実行→結果送信→次の応答、を上限回数までループする。
+        # 以前は1回のツール実行後に `final_res.text` を無条件に読んでおり、
+        # 「智矢が熱、涼花も熱」のように2件目の function_call が返ると
+        # response.text が ValueError を送出→汎用 except→「処理中にエラー」となり、
+        # 1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録(#232と同種)
+        # という経路が残っていた。
+        tool_results: List[str] = []
+        for _round in range(MAX_TOOL_ROUNDS):
+            calls = _extract_function_calls(response)
 
-            # 結果をAIに返して最終回答を生成
-            function_response = content.Part(
-                function_response=content.FunctionResponse(
-                    name=fname,
-                    response={"result": tool_result}
-                )
-            )
-            
+            # --- Normal Chat / 最終応答 ---
+            if not calls:
+                final_text = _response_text_or_none(response)
+                if final_text:
+                    return final_text
+                if tool_results:
+                    # ツールは実行済みだが最終応答テキストが取り出せない(空応答等)
+                    logger.warning("⚠️ Gemini returned no text after tool execution; falling back to tool results.")
+                    return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+                logger.error("❌ Empty response from Gemini")
+                return "エラー: AIからの応答が空でした。"
+
+            # --- Handle Function Call(s) ---
+            # 1つの応答に複数の function_call が含まれる場合はすべて実行し、
+            # function_response もまとめて1回で返す。
+            function_responses = []
+            for fc in calls:
+                fname = fc.name
+                fargs = dict(fc.args)
+                logger.info(f"🤖 AI Triggered Tool: {fname} args={fargs}")
+
+                tool_result = await _dispatch_tool(user_id, user_name, fname, fargs)
+                tool_results.append(tool_result)
+                function_responses.append(content.Part(
+                    function_response=content.FunctionResponse(
+                        name=fname,
+                        response={"result": tool_result}
+                    )
+                ))
+
             # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
             try:
-                final_res = await _call_gemini_api_with_retry(chat_manual, [function_response])
-                return final_res.text
+                response = await _call_gemini_api_with_retry(chat_manual, function_responses)
             except ResourceExhausted:
                 # ツール実行は成功しているが、最終回答生成でコケた場合
                 logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
-                return f"{tool_result}\n(AIの応答生成が制限を超過したため、実行結果のみ表示します)"
+                return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
             except GoogleAPIError as e:
                 # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
                 # 既に成功しているにもかかわらず、最終応答生成でResourceExhausted以外の
@@ -476,10 +628,15 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
                 # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
                 # ResourceExhaustedと同様にtool_resultを返し、実行結果を正しく伝える。
                 logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
-                return f"{tool_result}\n(AIの応答生成でエラーが発生したため、実行結果のみ表示します)"
+                return _tool_results_fallback(tool_results, "AIの応答生成でエラーが発生したため、実行結果のみ表示します")
 
-        # --- Normal Chat ---
-        return response.text
+            if not response or not response.parts:
+                logger.warning("⚠️ Empty response from Gemini after tool execution; falling back to tool results.")
+                return _tool_results_fallback(tool_results, "AIの応答が空だったため、実行結果のみ表示します")
+
+        # ループ上限到達: AIが function_call を返し続けた場合の安全弁
+        logger.warning(f"⚠️ Tool call rounds exceeded MAX_TOOL_ROUNDS={MAX_TOOL_ROUNDS}; falling back to tool results.")
+        return _tool_results_fallback(tool_results, "ツール呼び出し回数が上限に達したため、実行結果のみ表示します")
 
     except Exception as e:
         logger.error(f"AI Analysis Unexpected Error: {e}")

@@ -239,6 +239,8 @@
 
 * **役割**: 指定日付の最初の録画mp4ファイル名から時刻部分を抽出し、0時0分0秒からの経過秒数を算出して返す。
 * 根拠: [関数定義とDocstring] (行番号: 179〜180 / 抜粋: "\"\"\"指定日の最初の録画ファイルの開始時刻を0時からの秒数で返す\"\"\"")
+* **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（環境変数への到達不能なフォールバックを削除）。
+* 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 243)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
@@ -256,6 +258,20 @@
 * **エラーハンドリング**: 対象ファイルが存在しない場合は即座に`0`を返す。ファイル名の時刻文字列パース(`datetime.strptime`)で例外が発生した場合は警告ログを出力し`0`を返す。
 * 根拠: [try-exceptブロック] (行番号: 196〜198 / 抜粋: "except Exception as e:\n            logger.warning(f\"Failed to parse start offset for {cam_conf['name']}: {e}\")\n            return 0")
 
+
+
+### `stop_all_processes`（Issue #360 で追加）
+
+* **役割**: `_active_processes`（ライブ配信）と `_active_vod_processes`（VOD生成）に登録された ffmpeg 子プロセスをすべて `terminate()` → timeout 後 `kill()` し、両レジストリを空にして停止数を返す。`unified_server.py` の lifespan 終了処理から呼ばれる。以前は終了処理が scheduler/camera_monitor しか止めておらず、ffmpeg が孤児化して再起動後の新 ffmpeg と同じ HLS パスへ二重書き込みし再生が破損していた。
+* 根拠: `def stop_all_processes(timeout: float = 5.0) -> int:` (行番号: 80〜102)
+* **引数/リクエスト**: `timeout: float`（既定 5.0）
+* 根拠: (行番号: 80)
+* **戻り値/レスポンス**: `int`（停止したプロセス数）
+* 根拠: (行番号: 102)
+* **副作用**: 子プロセスの terminate/kill、レジストリのクリア、ログ出力
+* 根拠: (行番号: 88〜101)
+* **エラーハンドリング**: 個々の停止失敗は WARNING ログのみで続行
+* 根拠: (行番号: 96〜97)
 
 ### `generate_record_playlist`
 
@@ -282,6 +298,8 @@
 
 * **役割**: 指定日の10分単位分割mp4ファイル群を`ffconcat`形式のリストファイルにまとめ、ffmpegでVOD用HLSプレイリストへ変換する。呼び出し前に完了済みVODプロセスを`_prune_finished_vod_processes`で剪定したうえで同一カメラ・日付の変換プロセスの多重実行を防止し、過去日付かつ生成済みの場合はキャッシュされたプレイリストを返す。呼び出し元`generate_record_playlist`が取得した`process_key`単位のロック内で実行されることを前提とする。
 * 根拠: [関数定義] (行番号: 216〜319 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")
+* **（Issue #359 / #405 で修正）** 当日分（`target_date == today_str`）のプレイリストが存在し、その更新時刻から `VOD_TODAY_REUSE_SECONDS`（300 秒）以内なら再生成せずに返す。以前は当日分をキャッシュ対象外としていたため、プレイリスト要求のたびに当日の全録画を再多重化していた。NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する。
+* 根拠: `VOD_TODAY_REUSE_SECONDS = 300` (行番号: 28)、`nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 284)、`if target_date == today_str and os.path.exists(playlist_path):` (行番号: 326〜333)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`, `process_key: str`

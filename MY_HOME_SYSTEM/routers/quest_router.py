@@ -38,8 +38,12 @@ def sync_master_data():
 def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:
     try:
         return game_system.get_all_view_data(viewer_user_id)
-    except Exception as e:
-        logger.error(f"Data Fetch Error: {e}")
+    except HTTPException:
+        # #409: 以前は HTTPException まで 500 に潰していた
+        raise
+    except Exception:
+        # #409: logger.error(f"{e}") ではスタックトレースが失われ原因調査ができなかった
+        logger.exception("Data Fetch Error")
         raise HTTPException(status_code=500, detail="Failed to fetch data")
 
 @router.post("/complete", response_model=CompleteResponse)
@@ -66,10 +70,6 @@ def purchase_reward(action: RewardAction):
 def get_family_chronicle():
     return user_service.get_family_chronicle()
 
-# Initialization alias
-def seed_data():
-    return game_system.sync_master_data()
-
 @router.post("/seed", response_model=SyncResponse)
 def seed_data_endpoint():
     return game_system.sync_master_data()
@@ -88,8 +88,12 @@ def validate_image_header(header: bytes) -> bool:
 
 @router.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
+    file_path = None
     try:
         allowed_extensions = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        # Q-L6(#409): filename が無い multipart は以前 os.path.splitext(None) の TypeError → 500 だった
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="ファイル名がありません")
         file_ext = os.path.splitext(file.filename)[1].lower()
         if file_ext not in allowed_extensions:
             raise HTTPException(status_code=400, detail="許可されていないファイル形式です(拡張子)")
@@ -132,6 +136,12 @@ async def upload_image(file: UploadFile = File(...)):
         raise he
     except Exception as e:
         logger.error(f"Upload failed: {e}")
+        # Q-L6(#409): 書き込み途中(ディスクフル等)の例外では書きかけファイルが残っていた
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
         raise HTTPException(status_code=500, detail="画像の保存に失敗しました")
     
 @router.post("/test_sound")

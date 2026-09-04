@@ -2,6 +2,7 @@
 import asyncio
 import hmac
 import time
+from typing import Optional
 from fastapi import APIRouter, Request, Header, HTTPException
 from linebot.v3.exceptions import InvalidSignatureError
 
@@ -17,14 +18,27 @@ logger = setup_logging("webhook_router")
 router = APIRouter()
 
 @router.post("/callback/line")
-async def callback_line(request: Request, x_line_signature: str = Header(None)) -> str:
+async def callback_line(request: Request, x_line_signature: Optional[str] = Header(None)) -> str:
     """LINE Bot Webhook"""
     if not line_handler.line_handler:
         raise HTTPException(status_code=501, detail="LINE Bot not configured")
-    
-    body = (await request.body()).decode('utf-8')
+
+    # L-L1 (#410): 署名ヘッダが無いと SDK 内部で AttributeError となり、以前は下の汎用
+    # except に落ちて 200 "OK" を返していた(署名検証していないのに成功応答)。
+    # 署名なしは不正リクエストとして 400 で即拒否する。
+    if not x_line_signature:
+        raise HTTPException(status_code=400, detail="Missing X-Line-Signature")
+
+    # L-L1: 不正なバイト列は以前 try の外で UnicodeDecodeError → 500 になっていた。
     try:
-        # 同期ハンドラをスレッドで実行
+        body = (await request.body()).decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Body is not valid UTF-8")
+
+    try:
+        # 同期ハンドラをスレッドで実行。
+        # 複数イベント一括配信時のイベント単位の例外隔離は handlers/line_handler.py の
+        # 各ハンドラ(handle_message / handle_postback)側で行う(#376)。
         await asyncio.to_thread(line_handler.line_handler.handle, body, x_line_signature)
     except InvalidSignatureError:
         raise HTTPException(status_code=400)

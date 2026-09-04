@@ -73,46 +73,65 @@
 ### `_parse_timestamp_to_jst`
 
 * **役割**: タイムスタンプ値をJSTの`pd.Timestamp`へ変換する。オフセット付き(aware)の値はそのオフセットを尊重してJSTへ変換し、tzinfoが無い(naive)値は保存規約(`core.utils.get_now_iso`)に合わせて「元からJSTで記録されている」とみなして`tz_localize`する（M-1-4: 以前は`process_dataframe`が`pd.to_datetime(..., utc=True)`で一律UTCとみなしていたため、tzinfoの無いレガシーレコードがグラフ・電気代集計で9時間ズレる原因になっていた）。
-* 根拠: `_parse_timestamp_to_jst` のDocstring (行番号: 45〜50 / 抜粋: "pd.to_datetime(..., utc=True) で一律UTCとみなしていたため、tzinfoの無い")
+* 根拠: `_parse_timestamp_to_jst` のDocstring (行番号: 43〜48 / 抜粋: "pd.to_datetime(..., utc=True) で一律UTCとみなしていたため、tzinfoの無い")
 
 
 * **引数/リクエスト**: `value`（型ヒントなし。タイムスタンプ文字列またはタイムスタンプ相当の値を想定）
-* 根拠: `def _parse_timestamp_to_jst(value) -> pd.Timestamp:` (行番号: 41 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
+* 根拠: `def _parse_timestamp_to_jst(value) -> pd.Timestamp:` (行番号: 39 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
 
 
 * **戻り値/レスポンス**: `pd.Timestamp`（Asia/Tokyoにローカライズ/変換済み）
-* 根拠: `-> pd.Timestamp:` (行番号: 41 / 抜粋: "-> pd.Timestamp:")
+* 根拠: `-> pd.Timestamp:` (行番号: 39 / 抜粋: "-> pd.Timestamp:")
 
 
 * **副作用**: なし
-* 根拠: `ts = pd.Timestamp(value)` で新規オブジェクトを生成するのみ (行番号: 52 / 抜粋: "ts = pd.Timestamp(value)")
+* 根拠: `ts = pd.Timestamp(value)` で新規オブジェクトを生成するのみ (行番号: 50 / 抜粋: "ts = pd.Timestamp(value)")
 
 
-* **エラーハンドリング**: なし（`pd.Timestamp(value)`が不正な値でパースに失敗した場合の例外は本関数内で捕捉されず、呼び出し元に伝播する）
-* 根拠: 該当関数内に `try-except` なし (行番号: 41〜55 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
+* **エラーハンドリング**: なし（`pd.Timestamp(value)`が不正な値でパースに失敗した場合の例外は本関数内で捕捉されず、呼び出し元に伝播する。**（Issue #410 L-L3で対応）** `process_dataframe`は本関数を直接ではなく、例外を`pd.NaT`へ丸める`_parse_timestamp_to_jst_coerce`経由で呼ぶようになった）
+* 根拠: 該当関数内に `try-except` なし (行番号: 39〜53 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
+
+### `_parse_timestamp_to_jst_coerce` (関数、Issue #410 L-L3で追加)
+
+* **役割**: `_parse_timestamp_to_jst`を`try/except`で包み、`ValueError`/`TypeError`（不正なタイムスタンプ文字列のパース失敗）を`pd.NaT`に丸めて返す。以前は`process_dataframe`が`_parse_timestamp_to_jst`を`.apply()`で直接呼んでいたため、1行でも不正なタイムスタンプがあると例外が`load_data_from_db`の`except Exception`まで伝播し、他の正常な行も含めてパネル全体が「データなし」（空DataFrame）扱いになっていた。`pandas`の`pd.to_datetime(..., errors='coerce')`相当の挙動を、独自の`_parse_timestamp_to_jst`ロジックに対して実現するためのラッパー。
+* 根拠: `def _parse_timestamp_to_jst_coerce(value) -> pd.Timestamp:` (行番号: 56〜69)
 
 
+* **引数/リクエスト**: `value`（`_parse_timestamp_to_jst`と同じ）
+* 根拠: 関数シグネチャ (行番号: 56)
+
+
+* **戻り値/レスポンス**: `pd.Timestamp`（成功時）または`pd.NaT`（`ValueError`/`TypeError`発生時）
+* 根拠: `return _parse_timestamp_to_jst(value)` / `return pd.NaT` (行番号: 66, 69)
+
+
+* **副作用**: パース失敗時に`logger.warning`でログ出力
+* 根拠: `logger.warning(f"Timestamp parse failed, coercing to NaT: {value!r} ({e})")` (行番号: 68)
+
+
+* **エラーハンドリング**: `ValueError`/`TypeError`のみを捕捉して`pd.NaT`を返す。それ以外の例外は呼び出し元へ伝播する。
+* 根拠: `except (ValueError, TypeError) as e:` (行番号: 67〜69)
 
 ### `process_dataframe`
 
-* **役割**: DataFrameの `timestamp` カラムの各値を `_parse_timestamp_to_jst` に通し、日本時間（Asia/Tokyo）に変換する。
-* 根拠: `process_dataframe` (行番号: 65 / 抜粋: "df["timestamp"] = df["timestamp"].apply(_parse_timestamp_to_jst)")
+* **役割**: DataFrameの `timestamp` カラムの各値を`_parse_timestamp_to_jst_coerce`（Issue #410 L-L3で`_parse_timestamp_to_jst`から変更）に通し、日本時間（Asia/Tokyo）に変換する。不正な値を含む行はエラーではなく`pd.NaT`になる。
+* 根拠: `process_dataframe` (行番号: 79 / 抜粋: "df[\"timestamp\"] = df[\"timestamp\"].apply(_parse_timestamp_to_jst_coerce)")
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
-* 根拠: `df: pd.DataFrame` (行番号: 58 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
+* 根拠: `df: pd.DataFrame` (行番号: 72 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (変換後のデータフレーム)
-* 根拠: `-> pd.DataFrame` (行番号: 58 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame` (行番号: 72 / 抜粋: "-> pd.DataFrame:")
 
 
-* **副作用**: なし
-* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (行番号: 63 / 抜粋: "df = df.copy()")
+* **副作用**: なし（`_parse_timestamp_to_jst_coerce`経由でのログ出力を除く）
+* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (行番号: 77 / 抜粋: "df = df.copy()")
 
 
-* **エラーハンドリング**: なし（内部で呼び出す`_parse_timestamp_to_jst`が例外を送出した場合、`.apply()`経由で呼び出し元に伝播する）
-* 根拠: 該当関数内に `try-except` なし (行番号: 58〜67 / 抜粋: "def process_dataframe(")
+* **エラーハンドリング**: **（Issue #410 L-L3で修正）** 内部で呼び出す`_parse_timestamp_to_jst_coerce`が`ValueError`/`TypeError`を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。それ以外の予期しない例外（`_parse_timestamp_to_jst_coerce`が再送出するもの）は依然として呼び出し元へ伝播する。
+* 根拠: 該当関数内に `try-except` なし、`_parse_timestamp_to_jst_coerce`への委譲 (行番号: 72〜81 / 抜粋: "def process_dataframe(")
 
 
 
@@ -233,47 +252,47 @@
 
 ### `calculate_monthly_cost_cumulative`
 
-* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。
-* 根拠: `calculate_monthly_cost_cumulative` (行番号: 224〜271 / 抜粋: "return int(df["kwh"].sum() * 31)")、デバイス絞り込み (行番号: 230〜236 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 260〜264 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
+* **役割**: 当月の電力使用量データから、今月の電気代概算（kwh * 31）を算出する。新テーブルが空なら旧テーブルへフォールバックする。**（Issue #170で修正）** `power_usage`テーブルにはスマートメーター(全体消費)と各プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)が同居しているため、新テーブル側のSELECTに`device_name LIKE '%Remo%'`条件を追加し(`load_sensor_data`の`"Remo"`部分一致による分類基準と同一)、スマートメーターの行のみを対象にするよう修正した(以前は全デバイスを無差別に合算しておりプラグ分が二重計上されていた)。また、`time_diff`(経過時間)の算出を`device_id`ごとにグループ化してから`diff()`を取るよう変更した(以前は時系列でソートしただけの全行に対しdiff()を取っており、複数拠点のスマートメーター等、直前行が別デバイスの場合に誤った時間幅が使われていた)。**（Issue #410 L-L2で修正）** `start_of_month`を組み立てる`.replace(...)`に`microsecond=0`を追加した。以前は`now`の微秒がそのまま`start_of_month.isoformat()`（例: `"...T00:00:00.123456+09:00"`）に残っており、DB側が本番の保存規約(`core.utils.get_now_iso`)通り微秒無しでちょうど月初0時に記録されている場合、SQLiteの文字列比較(`timestamp >= '{start_of_month}'`)では`"+09:00"`より`"."`の方が文字コード上大きいため、その行が範囲外と判定され集計から漏れていた。
+* 根拠: `calculate_monthly_cost_cumulative` (行番号: 238〜285 / 抜粋: "return int(df[\"kwh\"].sum() * 31)")、`microsecond=0` (行番号: 246 / 抜粋: "start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()")、デバイス絞り込み (行番号: 248〜257 / 抜粋: "WHERE timestamp >= '{start_of_month}' AND device_name LIKE '%Remo%'")、device_idごとのグループ化 (行番号: 274〜278 / 抜粋: "df.groupby(\"device_id\", dropna=False)[\"timestamp\"].diff()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 224 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 238 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
-* 根拠: `-> int:` (行番号: 224 / 抜粋: "-> int:")
+* 根拠: `-> int:` (行番号: 238 / 抜粋: "-> int:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 242 / 抜粋: "df = load_data_from_db(query)")
+* 根拠: `load_data_from_db(query)` を呼び出し。 (行番号: 260 / 抜粋: "df = load_data_from_db(query)")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し `0` を返す。
-* 根拠: `except Exception as e:` (行番号: 269〜271 / 抜粋: "return 0")
+* 根拠: `except Exception as e:` (行番号: 287〜289 / 抜粋: "return 0")
 
 
 
 ### `load_weather_history`
 
-* **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。
-* 根拠: `load_weather_history` (行番号: 266 / 抜粋: "FROM weather_history")
+* **役割**: 指定された日数分、指定された場所（デフォルトは伊丹）の天気履歴を取得する。**（Issue #410 L-L2で修正）** 遡り開始日(`start_date`)の算出に使う「現在時刻」を、以前のnaive`datetime.now()`（サーバーのローカルタイムゾーンに依存し、`get_today_date_str()`等が前提とするJSTと日付境界がズレうる）から、JST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更した。
+* 根拠: `load_weather_history` (行番号: 291〜308 / 抜粋: "FROM weather_history")、JST明示化 (行番号: 295 / 抜粋: "start_date = (datetime.now(pytz.timezone(\"Asia/Tokyo\")) - timedelta(days=days)).strftime(\"%Y-%m-%d\")")
 
 
 * **引数/リクエスト**: `days` (`int`, デフォルト `40`): 遡る日数。`location` (`str`, デフォルト `"伊丹"`): 取得対象の場所。
-* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 262 / 抜粋: "days: int = 40, location: str = "伊丹"")
+* 根拠: `days: int = 40, location: str = "伊丹"` (行番号: 291 / 抜粋: "days: int = 40, location: str = "伊丹"")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (天気履歴のデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 262 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (行番号: 291 / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query(query, conn)` (行番号: 271 / 抜粋: "df = pd.read_sql_query(query, conn)")
+* 根拠: `pd.read_sql_query(query, conn)` (行番号: 303 / 抜粋: "df = pd.read_sql_query(query, conn)")
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。
-* 根拠: `except Exception as e:` (行番号: 275 / 抜粋: "return pd.DataFrame()")
+* 根拠: `except Exception as e:` (行番号: 306〜308 / 抜粋: "return pd.DataFrame()")
 
 
 
@@ -295,8 +314,8 @@
 * 根拠: `pd.read_sql_query` (行番号: 291 / 抜粋: "df_weather = pd.read_sql_query(q_weather, conn)")
 
 
-* **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。
-* 根拠: `try: df_new = pd.read_sql_query(q_new, conn) except: pass` 等 (行番号: 314, 318 / 抜粋: "except: pass")
+* **エラーハンドリング**: 各クエリ実行ごとに `try-except` で回避処理。全体の例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。**（保守性 #410で修正）** 個別クエリの回避処理は以前bareの`except:`だったが、`except Exception:`へ変更した（`KeyboardInterrupt`/`SystemExit`等の`BaseException`まで握り潰さないようにする一般的なプラクティスに合わせた。挙動そのものは変わらない）。
+* 根拠: `try: df_new = pd.read_sql_query(q_new, conn) except Exception: pass` 等 (行番号: 344〜350 / 抜粋: "except Exception: pass")
 
 
 
@@ -371,24 +390,24 @@
 
 ### `load_ranking_data`
 
-* **役割**: 特定日付とランキングタイプに応じたランキングデータを取得する。
-* 根拠: `load_ranking_data` (行番号: 378 / 抜粋: "SELECT rank, title, app_id FROM app_rankings")
+* **役割**: 特定日付とランキングタイプに応じたランキングデータを取得する。**（保守性 #410, bandit B608で修正）** `date_str`/`ranking_type`をf-stringでSQL文字列へ直接埋め込んでいたのを、`?`プレースホルダ+`pd.read_sql_query(..., params=(date_str, ranking_type))`へ変更した。`date_str`は`load_ranking_dates()`が返すDB由来の値（`app_rankings.date`の実データ）であり、テーブル名等の識別子ではなく値そのものなのでプレースホルダ化できる。
+* 根拠: `load_ranking_data` (行番号: 407〜423 / 抜粋: "SELECT rank, title, app_id FROM app_rankings")、プレースホルダ化 (行番号: 412〜419 / 抜粋: "return pd.read_sql_query(query, conn, params=(date_str, ranking_type))")
 
 
 * **引数/リクエスト**: `date_str` (`str`): 対象日付。`ranking_type` (`str`): ランキングの種別。
-* 根拠: `date_str: str, ranking_type: str` (行番号: 375 / 抜粋: "date_str: str, ranking_type: str")
+* 根拠: `date_str: str, ranking_type: str` (行番号: 407 / 抜粋: "date_str: str, ranking_type: str")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (ランキングデータのデータフレーム)
-* 根拠: `-> pd.DataFrame:` (行番号: 375 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame:` (行番号: 407 / 抜粋: "-> pd.DataFrame:")
 
 
 * **副作用**: データベースの読み取り操作。
-* 根拠: `pd.read_sql_query(query, conn)` (行番号: 384 / 抜粋: "return pd.read_sql_query(query, conn)")
+* 根拠: `pd.read_sql_query(query, conn, params=(date_str, ranking_type))` (行番号: 419)
 
 
 * **エラーハンドリング**: 例外発生時はエラーログを出力し空のデータフレームを返す。`finally`で接続を閉じる。
-* 根拠: `except Exception as e:` (行番号: 387 / 抜粋: "return pd.DataFrame()")
+* 根拠: `except Exception as e:` (行番号: 420〜423 / 抜粋: "return pd.DataFrame()")
 
 
 
@@ -573,6 +592,8 @@ graph TD
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。
 * `get_system_logs` で `subprocess.run` に引数を渡す際、`target_date` などが外部から未検証のまま渡されると意図しないコマンド引数として解釈される可能性がある。
 * SQLiteの接続時に `?mode=ro` (Read Only) と URI オプションを使用しているため、SQLiteのバージョンやコンパイルオプションによっては URI がサポートされず接続エラーになる可能性がある。
+* **[修正済み] Issue #410 L-L2/L-L3/保守性 まとめ**: (1) `calculate_monthly_cost_cumulative`の`start_of_month`に`microsecond=0`を追加し、月初ちょうど0時のレコードが文字列比較の境界で漏れる問題を解消（本番の保存規約通り、DB側・`start_of_month`側の双方が`.isoformat()`（JSTオフセット付き）である前提のもとで成立する修正）。(2) `load_weather_history`の`start_date`算出をnaive`datetime.now()`からJST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更。(3) `process_dataframe`が1行の不正なタイムスタンプで全行を失っていた問題を、パース失敗時に`pd.NaT`へ丸める`_parse_timestamp_to_jst_coerce`の導入で解消。(4) `load_ranking_data`のf-string SQL埋め込み（bandit B608）をプレースホルダ化。(5) `load_yearly_temperature_stats`内の2箇所のbare `except:`を`except Exception:`へ変更。
+* 根拠: `calculate_monthly_cost_cumulative` (行番号: 246)、`load_weather_history` (行番号: 295)、`_parse_timestamp_to_jst_coerce`/`process_dataframe` (行番号: 56-69, 79)、`load_ranking_data` (行番号: 412-419)、`load_yearly_temperature_stats`のexcept (行番号: 346, 350)
 
 ## 9. 不明事項一覧
 

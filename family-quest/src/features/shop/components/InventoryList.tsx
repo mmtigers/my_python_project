@@ -8,14 +8,10 @@ import { useSound } from '../../../hooks/useSound';
 import { useToast } from '../../../context/useToast';
 import { Loader2, PackageOpen } from 'lucide-react';
 import { InventoryItem } from '../../../types';
-
-// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す
-// {"detail": "..."} の内容が入っている(apiClient.ts参照)。
-const extractErrorDetail = (error: unknown): string => {
-    return error instanceof Error && error.message ? error.message : '操作に失敗しました';
-};
-
-
+// M-6-3/#412(品質): apiClient側でスローされるErrorのmessageには、バックエンドが返す
+// {"detail": "..."} の内容が入っている(apiClient.ts参照)。以前はこのファイルと
+// CameraDashboard.tsxにほぼ同じ関数が重複していたため lib/errorDetail.ts に集約した。
+import { extractErrorDetail } from '../../../lib/errorDetail';
 
 type Props = {
     userId: string;
@@ -67,7 +63,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         // M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が
         // ユーザーに一切通知されないサイレント失敗になっていた。
         onError: (error) => {
-            showToast({ title: "エラー", text: extractErrorDetail(error), icon: "⚠️" });
+            showToast({ title: "エラー", text: extractErrorDetail(error, '操作に失敗しました'), icon: "⚠️" });
             play('cancel');
         },
         onSettled: () => {

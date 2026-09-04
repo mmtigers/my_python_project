@@ -69,6 +69,8 @@
 
 * **役割**: ロガーから渡されたレコードがERRORレベル以上かつメッセージに"Discord"が含まれない場合、スタックトレース（最大1000文字）を付与したペイロードを組み立て、`_send_webhook`をバックグラウンドスレッドで起動してDiscordへ非同期に送信する。`record.msg`は例外オブジェクト等の非文字列が渡される場合もあるため、`str()`化してから`"Discord"`の包含チェックを行う（コード内コメント「record.msg は例外オブジェクト等の非文字列が渡される場合もあるため...」参照）。
 * 根拠: `[emit]` (行番号: 18〜52 / 抜粋: "def emit(self, record):\n        # M-5-5(Low): record.msg は例外オブジェクト等の非文字列が渡される場合もあるため、\n        # str化してから比較する(\"Discord\" not in record.msg は非文字列だとTypeErrorになりうる)。\n        if record.levelno >= logging.ERROR and \"Discord\" not in str(record.msg):")
+* **（Issue #361 で修正）** (1) スタックトレースは `record.exc_info` がある場合のみ付ける（以前は exc_info の無い ERROR でも `format_stack()` を常に付け、本文が約900字を超えると Discord の2000字制限で 400 になり通知が無言で消えていた）。(2) 本文は `DISCORD_CONTENT_LIMIT`（1900）−200 字で切り詰め、トレースは残り容量の範囲で末尾を付け、最終的な content は `_truncate_discord_content` で 1900 字以内に収める。(3) 送信スレッドは `_register_sender` で追跡し、生存数が `DISCORD_MAX_INFLIGHT_SENDERS`（16）以上なら送信をスキップする。
+* 根拠: `if record.exc_info:` (行番号: 87〜88)、`body_limit = DISCORD_CONTENT_LIMIT - 200` (行番号: 92〜94)、`if _inflight_count() >= DISCORD_MAX_INFLIGHT_SENDERS:` (行番号: 110〜111)、`_register_sender(sender)` (行番号: 115)
 
 
 * **引数/リクエスト**: `record` (型: 明示なし、暗黙的に`logging.LogRecord`。判定およびフォーマット対象のログレコード)
@@ -111,10 +113,26 @@
 
 
 
+
+### `flush_pending_discord_notifications` / `_truncate_discord_content`（Issue #361 で追加）
+
+* **役割**: `flush_pending_discord_notifications(timeout=5.0)` は送信中の Discord 通知スレッドを最大 timeout 秒まで `join` する。モジュール読み込み時に `atexit.register` されており、cron 起動の短命プロセス（DDD の `newface_monitor.py` 等）で終了間際の ERROR 通知がデーモンスレッドごと殺されて届かなかった問題（D-M2）を防ぐ。`_truncate_discord_content(content, limit=1900)` は上限超過時に「…(切り詰め)」マーカー付きで切り詰める。
+* 根拠: `def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SECONDS) -> None:` (行番号: 39〜48)、`atexit.register(flush_pending_discord_notifications)` (行番号: 51)、`def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:` (行番号: 54〜58)
+* **引数/リクエスト**: `timeout: float` / `content: str, limit: int`
+* 根拠: (行番号: 39, 54)
+* **戻り値/レスポンス**: なし / `str`
+* 根拠: (行番号: 39, 58)
+* **副作用**: スレッドの join（プロセス終了を最大 timeout 秒遅らせる）
+* 根拠: (行番号: 44〜48)
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 39〜58)
+
 ### `setup_logging`
 
 * **役割**: 指定された名前でロガーを初期化し、既存のハンドラをクリアした後、コンソール出力、ファイル出力、Discord通知の3種のハンドラを登録して返す。ロガーの`propagate`を`False`に設定し、rootロガーへの伝播を行わない。
 * 根拠: `[setup_logging]` (行番号: 61〜64 / 抜粋: "def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:\n    \"\"\"ロガーのセットアップ\"\"\"\n    logger = logging.getLogger(name)\n    logger.propagate = False")
+* **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
+* 根拠: `log_dir = getattr(config, "LOG_DIR", None) or os.path.join(config.BASE_DIR, "logs")` (行番号: 149)
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)

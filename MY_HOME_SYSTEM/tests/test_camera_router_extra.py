@@ -24,7 +24,7 @@ class TestUnknownCameraIsRejectedBeforePathResolution:
     def test_get_record_file_unknown_camera_returns_404(self, monkeypatch):
         monkeypatch.setattr(config, "CAMERAS", [{"id": "cam1", "name": "Cam1"}])
         with pytest.raises(HTTPException) as exc_info:
-            get_record_file("nonexistent_camera", "2026-01-01", "seg1.ts")
+            get_record_file("nonexistent_camera", "20260101", "seg1.ts")
         assert exc_info.value.status_code == 404
 
     def test_get_live_segment_unknown_camera_returns_404(self, monkeypatch):

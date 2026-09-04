@@ -101,13 +101,13 @@ def test_get_live_stream_times_out_if_playlist_never_appears(api_client, one_cam
 
 def test_get_record_info_returns_offset(api_client, one_camera, monkeypatch):
     monkeypatch.setattr(camera_router.camera_service, "get_record_start_offset", lambda cam_conf, date: 42)
-    res = api_client.get("/api/cameras/record/cam1/2026-01-01/info")
+    res = api_client.get("/api/cameras/record/cam1/20260101/info")
     assert res.status_code == 200
     assert res.json()["offset_seconds"] == 42
 
 
 def test_get_record_info_unknown_camera_returns_404(api_client, one_camera):
-    res = api_client.get("/api/cameras/record/unknown_cam/2026-01-01/info")
+    res = api_client.get("/api/cameras/record/unknown_cam/20260101/info")
     assert res.status_code == 404
 
 
@@ -117,11 +117,26 @@ def test_get_record_file_playlist_success(api_client, one_camera, tmp_path, monk
     monkeypatch.setattr(
         camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: str(playlist)
     )
-    res = api_client.get("/api/cameras/record/cam1/2026-01-01/record.m3u8")
+    res = api_client.get("/api/cameras/record/cam1/20260101/record.m3u8")
     assert res.status_code == 200
 
 
 def test_get_record_file_playlist_not_found_returns_404(api_client, one_camera, monkeypatch):
     monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: None)
-    res = api_client.get("/api/cameras/record/cam1/2026-01-01/record.m3u8")
+    res = api_client.get("/api/cameras/record/cam1/20260101/record.m3u8")
     assert res.status_code == 404
+
+
+# #386: target_date は glob パターン/ファイル名に埋め込まれるため YYYYMMDD 以外は 400 で拒否する
+@pytest.mark.parametrize("bad_date", ["*", "2026-01-01", "2026010", "20260101x", "[0-9]*"])
+def test_record_endpoints_reject_non_yyyymmdd_target_date(api_client, one_camera, monkeypatch, bad_date):
+    called = []
+    monkeypatch.setattr(camera_router.camera_service, "get_record_start_offset", lambda cam_conf, date: called.append(date) or 0)
+    monkeypatch.setattr(camera_router.camera_service, "generate_record_playlist", lambda cam_conf, date: called.append(date) or None)
+
+    res_info = api_client.get(f"/api/cameras/record/cam1/{bad_date}/info")
+    res_pl = api_client.get(f"/api/cameras/record/cam1/{bad_date}/record.m3u8")
+
+    assert res_info.status_code == 400
+    assert res_pl.status_code == 400
+    assert called == [], "不正な target_date が camera_service まで到達している"

@@ -102,6 +102,8 @@
 
 * **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
 * 根拠: `async def lifespan(app: FastA` (行番号: 97-157 / 抜粋: "async def lifespan(app: FastA")
+* **（Issue #383 / #360 で修正）** 起動時マイグレーションは `sqlite3.connect(..., timeout=30.0)` で接続し、失敗時は `logger.critical`（Discord 通知）を出して `app.state.migration_ok = False` とし、camera_monitor / scheduler の子プロセスを起動しない（以前は既定 5 秒の timeout で失敗しやすく、失敗を握りつぶしてサービスを継続していた）。camera_monitor の `Popen` も scheduler と同様に try/except で保護する。終了処理では scheduler / camera_monitor に加えて `camera_service.stop_all_processes()` でライブ配信・VOD 生成の ffmpeg も停止する（孤児化による HLS 二重書き込みの防止）。
+* 根拠: `migration_ok = True` (行番号: 116)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 118)、`logger.critical(` (行番号: 125)、`app.state.migration_ok = migration_ok` (行番号: 129)、`if migration_ok:` (行番号: 133)、`camera_service.stop_all_processes()` (行番号: 178)
 * 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 105-106 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
 
 

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
 import { gameDataResponseSchema } from '../lib/gameDataSchema';
+import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';
 import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
 // 新規追加: any型を排除するための厳密なインターフェース定義
@@ -20,7 +21,9 @@ interface AdventureLog {
 }
 
 // 家族全体の統計情報 (UserService.get_family_chronicle の "stats" レスポンスに対応)
-export interface FamilyStats {
+// #390: どのコンポーネントからも消費されていないため戻り値(familyStats)からは外した。
+// レスポンス型の一部として残す。
+interface FamilyStats {
     totalLevel: number;
     totalGold: number;
     totalQuests: number;
@@ -65,9 +68,12 @@ interface ChronicleResponse {
     chronicle: ChronicleItem[];
 }
 
+// models/quest.py の PurchaseResponse に対応。
+// #390: 以前は success: boolean と宣言していたがサーバーは status しか返さない
+// 幽霊フィールドだったため、実際の形状に合わせる。
 interface PurchaseResponse {
+    status: string;
     newGold: number;
-    success: boolean;
 }
 
 export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpInfo) => void) => {
@@ -75,14 +81,6 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     const handleError = (actionName: string, error: unknown) => {
         console.error(`${actionName} failed:`, error);
-    };
-
-    // apiClient側でスローされるErrorのmessageには、バックエンドが返す
-    // {"detail": "..."} の内容が入っている（apiClient.ts参照）。
-    // ここでそれを取り出し、呼び出し元(App.tsx)がユーザーに実際のエラー内容を
-    // 表示できるようにする。
-    const extractErrorDetail = (error: unknown): string | undefined => {
-        return error instanceof Error ? error.message : undefined;
     };
 
     // 共有クエスト(target_user='siblings'等)のボーナス計算はサーバー側で
@@ -95,7 +93,15 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     const viewerUserIdRef = useRef<string | undefined>(undefined);
 
     // 1. メインデータの取得
-    const { data: gameData, isLoading: isGameDataLoading } = useQuery<GameDataResponse>({
+    // #390: 以前は isError / error を捨てており、取得失敗(ネットワーク・Zod検証失敗)は
+    // ブラウザの console でしか分からず、画面は INITIAL_USERS(「接続エラー」)か
+    // 最後に成功したデータのまま無言だった。error を呼び出し元(App)へ返してバナー表示する。
+    const {
+        data: gameData,
+        isLoading: isGameDataLoading,
+        error: gameDataError,
+        refetch: refetchGameData,
+    } = useQuery<GameDataResponse>({
         queryKey: ['gameData'],
         queryFn: async () => {
             const viewerUserId = viewerUserIdRef.current;
@@ -339,10 +345,13 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         rewards: gameData?.rewards || MASTER_REWARDS,
         completedQuests: gameData?.completedQuests || [],
         pendingQuests: gameData?.pendingQuests || [],
-        adventureLogs: gameData?.logs || [],
-        familyStats: chronicleData?.stats || null,
         chronicle: chronicleData?.chronicle || [],
         isLoading: isGameDataLoading,
+        // #390: 直近の /api/quest/data 取得失敗。null なら正常。初回成功後の失敗でも
+        // data(最後の成功値)は保持されるため、呼び出し元は「古いデータを表示中」の
+        // バナーとして使う。
+        gameDataError: gameDataError ? describeGameDataError(gameDataError, 'データの取得に失敗しました') : null,
+        refetchGameData: () => { void refetchGameData(); },
 
         completeQuest,
         approveQuest,

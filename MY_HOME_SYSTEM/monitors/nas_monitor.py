@@ -44,7 +44,7 @@ class NasMonitor:
             "data", "nas_monitor_state.json"
         )
 
-    def _load_state(self) -> Dict[str, bool]:
+    def _load_state(self) -> Dict[str, Any]:
         """前回の監視状態をファイルから読み込む"""
         if os.path.exists(self.state_file):
             try:
@@ -54,7 +54,7 @@ class NasMonitor:
                 logger.error(f"State load error: {e}")
         return {"is_healthy": True}  # デフォルトは正常とみなす
 
-    def _save_state(self, state: Dict[str, bool]) -> None:
+    def _save_state(self, state: Dict[str, Any]) -> None:
         """現在の監視状態をファイルへ保存する"""
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
@@ -290,6 +290,14 @@ class NasMonitor:
             # 拡張子で絞り込まず全ファイルを対象にする。
             ("DBバックアップ", getattr(config, "DB_BACKUPS_DIR", None),
              getattr(config, "DB_BACKUP_RETENTION_DAYS", 30), None),
+            # #359: 録画VOD用のHLSセグメント(services/camera_service.py の
+            # generate_record_playlist が BASE_DIR/data/hls_streams/vod/<cam>/ に生成する
+            # .ts/.m3u8/concat_*.txt)は1日分で数GB規模だが、どこにも削除経路が無く
+            # ローカル(SDカード)に無制限に蓄積していた。過去日の閲覧結果はキャッシュとして
+            # 数日残せば十分なので短い保持期間で削除する。
+            ("録画VODキャッシュ",
+             os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"),
+             getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt")),
         ]
 
         summary_lines = []
@@ -367,13 +375,15 @@ class NasMonitor:
                 [{"type": "text", "text": f"🚨 【NAS障害】\nNASへのアクセスが失われました。\nローカルフォールバックへ移行します。\nIP: {self.ip}"}],
                 target="discord", channel="error"
             )
-            self._save_state({"is_healthy": False})
+            previous_state["is_healthy"] = False
+            self._save_state(previous_state)
 
         # 2. 状態遷移の検知（異常 -> 正常：NAS復旧時）
         elif is_currently_healthy and not was_healthy:
             logger.debug("NAS recovery detected. Initiating fallback data sync...")
             self.sync_fallback_data()
-            self._save_state({"is_healthy": True})
+            previous_state["is_healthy"] = True
+            self._save_state(previous_state)
 
         # DB記録
         usage = self.get_disk_usage() if is_currently_healthy else None
@@ -394,9 +404,16 @@ class NasMonitor:
         now = datetime.now()
         is_report_time = (now.hour == 8)
 
-        # 保持期間を超えた録画・バックアップの自動削除（1日1回、レポート時刻に合わせて実行）
-        if is_report_time:
+        # 保持期間を超えた録画・バックアップの自動削除(1日1回)。
+        # #388: 以前は「実行時刻の hour == 8」だけで判定していたが、scheduler の実行間隔は
+        # 毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は
+        # 8時台の実行が無く、その日の削除がまるごとスキップされていた。状態ファイルに
+        # 最終実行日を持ち、「今日まだ実行していない かつ 8時以降」で判定する。
+        today_str = now.strftime("%Y-%m-%d")
+        if now.hour >= 8 and previous_state.get("last_cleanup_date") != today_str:
             self.run_retention_cleanup()
+            previous_state["last_cleanup_date"] = today_str
+            self._save_state(previous_state)
 
         if not is_full and not is_report_time:
             return

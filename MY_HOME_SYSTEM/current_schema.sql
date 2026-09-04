@@ -198,7 +198,7 @@ CREATE TABLE quest_history (
         exp_earned INTEGER,
         gold_earned INTEGER,
         completed_at DATETIME NOT NULL
-    , status TEXT DEFAULT 'approved', linked_history_id INTEGER DEFAULT NULL);
+    , status TEXT DEFAULT 'approved', linked_history_id INTEGER DEFAULT NULL, medals_earned INTEGER DEFAULT 0);
 CREATE TABLE reward_master (
         reward_id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,

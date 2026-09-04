@@ -175,6 +175,12 @@ class AppConfig:
     # (未設定時は従来通り20秒=自宅ラズパイ側の挙動は変わらない)。
     REQUEST_TIMEOUT: int = int(os.getenv("DDD_REQUEST_TIMEOUT", "20"))
     MAX_RETRIES: int = 3
+    # #397: HLSセグメント1個あたりの取得試行回数と、リトライ前の初回待機秒
+    # (指数バックオフ: 1秒→2秒)。数千セグメント中1つの一時的なタイムアウトで
+    # 数GBのダウンロードが丸ごと破棄されるのを防ぐ。BotDetectionError は
+    # リトライ対象外(即座にセッション中断)。
+    SEGMENT_DOWNLOAD_MAX_ATTEMPTS: int = 3
+    SEGMENT_RETRY_BASE_DELAY: float = 1.0
 
     # 【追加】ボット検知/レート制限対策
     # タスク間隔: 固定秒数だと機械的なアクセスパターンとして検知されやすいため、
@@ -202,13 +208,23 @@ class AppConfig:
     # 実際には requests.exceptions.RetryError の
     # "too many 503 error responses" のような文言になる。"503"を含めておくことで
     # このリトライ尽き後のメッセージもボット検知として拾えるようにしている。
+    # #396: 以前の "sign in to confirm" は、yt-dlpの年齢制限メッセージ
+    # "Sign in to confirm your age. This video may be inappropriate for some users."
+    # にも部分一致し、年齢制限動画1本でセッション中断+12時間クールダウンに
+    # 入っていた。ボット検知に固有の "not a bot" まで含む文言に絞る
+    # (アポストロフィは _is_bot_detection_error 側で ' に正規化して比較する)。
     BOT_DETECTION_MARKERS: Tuple[str, ...] = (
-        "sign in to confirm",
+        "sign in to confirm you're not a bot",
         "confirm you're not a bot",
         "429",
         "403",
         "503",
         "too many requests",
+    )
+    # #396: これらの文言を含むメッセージはボット検知ではなく動画個別の事情
+    # (年齢制限等)であり、当該タスクのスキップに留める。マーカー判定より優先する。
+    BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (
+        "confirm your age",
     )
     # missav等、requestsで直接HTMLを取得するスクレイピング先向け。
     # これらのステータスコードやページ内マーカーはCloudflare等のボット対策サービスが
@@ -263,7 +279,13 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って
     # 引き起こし得た。数字のみのマーカーは単語境界(\b)で厳密に判定し、
     # フレーズマーカーは従来通り部分文字列一致とする。
-    message = str(exc).lower()
+    # #396: yt-dlpのメッセージは "you’re"(U+2019) のような引用符を使うことがある
+    # ため、ASCIIのアポストロフィに正規化してからマーカーと比較する。
+    message = str(exc).lower().replace("’", "'")
+    # #396: 年齢制限("Sign in to confirm your age")等、ボット検知ではないことが
+    # 明確な文言を含む場合は、マーカーに一致しても誤検知として扱わない。
+    if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):
+        return False
     for marker in CONFIG.BOT_DETECTION_MARKERS:
         if marker.isdigit():
             if re.search(rf"\b{re.escape(marker)}\b", message):
@@ -304,6 +326,35 @@ def _normalize_url(url: str) -> str:
     """
     scheme, netloc, path, query, _fragment = urlsplit(url)
     return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def _packer_base_n_digits(num: int, radix: int) -> str:
+    """p,a,c,k,e,d形式のJSパッカーが使う復元関数(JS側の"e")と同じ規則で、
+    数値numをradix進数の文字列表現に変換する(D-L5)。
+
+    JS側の実装:
+        e = function(c) {
+            return (c < a ? '' : e(parseInt(c / a)))
+                + ((c = c % a) > 35 ? String.fromCharCode(c + 29) : c.toString(36))
+        }
+    各桁(0〜radix-1)は、35以下ならbase36の数字/小文字(0-9a-z)、36以上なら
+    大文字(A-Z、String.fromCharCode(c+29)で得られる)で表現される。radixの
+    大きさに関わらず桁の文字集合は最大62種(0-9a-zA-Z)に固定される点がポイントで、
+    radix自体をbase36の桁数(36種)と取り違えると、radixが36以外(典型的には62)の
+    ページで誤った単語に置換されてしまう。
+    """
+    def digit_char(d: int) -> str:
+        if d > 35:
+            return chr(d + 29)
+        return "0123456789abcdefghijklmnopqrstuvwxyz"[d]
+
+    if num == 0:
+        return "0"
+    digits = []
+    while num > 0:
+        digits.append(digit_char(num % radix))
+        num //= radix
+    return "".join(reversed(digits))
 
 
 def _looks_like_block_page(html: str) -> bool:
@@ -447,6 +498,27 @@ class FileSystemManager:
             return False
 
     @staticmethod
+    def sweep_stale_fragment_dirs() -> None:
+        """#398: クラッシュ・強制終了等で未クリーンアップのまま残った
+        CONFIG.LOCAL_TMP_DIR配下の "*.fragments.tmp" ディレクトリを一掃する。
+
+        通常は_download_with_ytdlpのfinally節でtmp_dirごとに削除されるが、
+        プロセスがSIGKILL等でfinallyすら実行できずに終了した場合、数GB規模の
+        フラグメント断片(SDカード等、Piのローカルディスク上)が残り続け、
+        LOCAL_TMP_MIN_FREE_SPACE_GBチェックにより後続の全ダウンロードが
+        失敗する形で顕在化する。ロック取得後(_run_locked冒頭)に呼び出す前提
+        (他プロセスとの競合が無いことが保証された状態でのみ安全に一掃できる)。
+        """
+        if not CONFIG.LOCAL_TMP_DIR.exists():
+            return
+        for stale_dir in CONFIG.LOCAL_TMP_DIR.glob("*.fragments.tmp"):
+            try:
+                shutil.rmtree(stale_dir)
+                logger.info(f"🧹 残留フラグメントディレクトリを削除しました: {stale_dir}")
+            except OSError as e:
+                logger.warning(f"⚠️ 残留フラグメントディレクトリの削除に失敗しました ({stale_dir}): {e}")
+
+    @staticmethod
     def check_disk_space(path: Path, min_free_gb: Optional[int] = None) -> bool:
         threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb
         try:
@@ -547,7 +619,14 @@ class UniversalYtDlpStrategy(DownloadStrategy):
 
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': f'{str(target_dir)}/%(title)s.%(ext)s',
+            # D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name
+            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと、source_nameに
+            # '%'が含まれる場合にyt-dlpのテンプレート展開(%(...)s)と衝突し、
+            # "the following fields are missing"等のテンプレートエラーで
+            # ダウンロードが失敗しうる。'paths'オプションでディレクトリを分離し、
+            # outtmplはファイル名部分のみのテンプレートにする。
+            'paths': {'home': str(target_dir)},
+            'outtmpl': '%(title)s.%(ext)s',
             'merge_output_format': 'mp4',
             'quiet': True, 'no_warnings': True, 'nopart': False,
             # M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、
@@ -582,7 +661,13 @@ class UniversalYtDlpStrategy(DownloadStrategy):
                 if self._should_skip(filename): return True
 
                 logger.info(f"📥 DL開始: {info.get('title')}")
-                ydl.download([task.url])
+                # D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、
+                # 直前のextract_info(download=False)と合わせてメタデータ取得の
+                # ネットワークリクエストが2回発生していた（ボット検知対策として
+                # 抑えているはずのアクセス回数を自ら増やしてしまっていた）。
+                # 既に取得済みのinfoをprocess_ie_resultへ渡し、再抽出せずに
+                # ダウンロードを実行する。
+                ydl.process_ie_result(info, download=True)
                 DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{filename.name}`")
                 return True
         except Exception as e:
@@ -677,17 +762,15 @@ class ScrapingStrategy(DownloadStrategy):
         if not match: return None
         
         p = match.group(1).replace("\\'", "'")
+        # D-L5: group(2)がpacker本来のradix('a')。以前はこれを無視してbase36固定
+        # (chars 36種のmod 36)で単語を復元していたため、radixが36以外(典型的には
+        # 62)のページでは誤った単語に置換され、m3u8抽出そのものに失敗しうった。
+        radix = int(match.group(2))
         c = int(match.group(3))
         k = match.group(4).split('|')
-        
+
         def e_func(num: int) -> str:
-            if num == 0: return "0"
-            chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-            res = ""
-            while num > 0:
-                res = chars[num % 36] + res
-                num //= 36
-            return res
+            return _packer_base_n_digits(num, radix)
 
         unpacked = p
         for i in range(c - 1, -1, -1):
@@ -771,7 +854,11 @@ class ScrapingStrategy(DownloadStrategy):
 
     _FRAGMENT_DOWNLOAD_WORKERS = 5
 
-    def _download_segment(self, url: str, page_url: str) -> bytes:
+    def _fetch_segment_once(self, url: str, page_url: str) -> bytes:
+        """1個のHLSセグメントをcurl_cffi(ブラウザ偽装)で1回だけ取得する。
+
+        リトライは行わない(_download_segment側で行う)。
+        """
         import curl_cffi.requests as curl_requests
 
         res = curl_requests.get(
@@ -784,6 +871,36 @@ class ScrapingStrategy(DownloadStrategy):
             raise BotDetectionError(f"{url}: HTTP {res.status_code}（ボット検知/レート制限の可能性）")
         res.raise_for_status()
         return res.content
+
+    def _download_segment(self, url: str, page_url: str) -> bytes:
+        """1個のHLSセグメントを、指数バックオフ付きリトライで取得する。
+
+        #397: 以前はcurl_cffiを1回呼ぶだけで、数千セグメント中1つの一時的な
+        タイムアウト(低速回線ではREQUEST_TIMEOUTのコメントどおり起こりうる)で
+        例外→finallyのrmtreeで全フラグメント削除→連続失敗カウント加算、
+        3回で実行中断、という形で数GBのダウンロードが丸ごと破棄されていた。
+        SEGMENT_DOWNLOAD_MAX_ATTEMPTS 回まで、SEGMENT_RETRY_BASE_DELAY * 2^n 秒
+        待って再試行する。BotDetectionError(403/429/503)はIP単位のブロックで
+        あり再試行しても悪化させるだけなのでリトライせず即座に伝播させる。
+        """
+        last_exc: Optional[Exception] = None
+        for attempt in range(1, CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS + 1):
+            try:
+                return self._fetch_segment_once(url, page_url)
+            except BotDetectionError:
+                raise
+            except Exception as e:
+                last_exc = e
+                if attempt >= CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS:
+                    break
+                delay = CONFIG.SEGMENT_RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                logger.warning(
+                    f"⚠️ セグメント取得に失敗しました ({attempt}/{CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS}): "
+                    f"{e}。{delay:.1f}秒後に再試行します: {url}"
+                )
+                time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def _download_segments_and_localize_manifest(
         self, localized_manifest: str, page_url: str, tmp_dir: Path
@@ -998,13 +1115,26 @@ class BatchDownloader:
     def __init__(self):
         self.session = NetworkManager.create_session()
         self._shutdown_requested = False
+        # D-L3: シグナルを_shutdown_requestedへフラグ化するだけでは、進行中の
+        # タスク(yt-dlpによる数GB規模のダウンロード等)はメインループの次回
+        # チェック(タスク境界)まで止まらない。2回目以降のシグナルでは即座に
+        # KeyboardInterruptを送出し、実行中の処理を強制的に中断できるようにする。
+        self._interrupt_count = 0
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         self.history = HistoryManager.load_history()
 
     def _signal_handler(self, signum: int, frame: Any) -> None:
-        logger.info("🛑 停止シグナル検知")
-        self._shutdown_requested = True
+        self._interrupt_count += 1
+        if self._interrupt_count == 1:
+            logger.info("🛑 停止シグナル検知（現在のタスク完了後に終了します。強制終了するには再度シグナルを送ってください）")
+            self._shutdown_requested = True
+            return
+        # D-L3: 1回目のシグナル後もタスクが終わらない(数GB規模のダウンロード中
+        # 等)場合、2回目のシグナルで即座に強制中断する。ロック解放は
+        # run()のtry/finallyが担保する。
+        logger.critical("🛑🛑 2回目の停止シグナルを検知したため、実行中の処理を強制中断します")
+        raise KeyboardInterrupt("second interrupt signal received; forcing immediate shutdown")
 
     def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
         # 【修正】ハードコードではなく、設定フラグで制御するように変更
@@ -1159,9 +1289,13 @@ class BatchDownloader:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (BlockingIOError, OSError):
+            # D-L4: 他インスタンス実行中によるスキップは異常系ではなく想定内の
+            # 正常系(newface_monitor.run_monitorと同じ扱い)であり、sys.exit(1)
+            # で終了するとrun_task.sh側がERRORとして記録してしまっていた。
+            # 正常終了(終了コード0)として扱うようreturnに変更する。
             logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")
             os.close(lock_fd)
-            sys.exit(1)
+            return
 
         try:
             self._run_locked()
@@ -1172,6 +1306,12 @@ class BatchDownloader:
                 os.close(lock_fd)
 
     def _run_locked(self) -> None:
+        # #398: 前回実行のクラッシュ等で残留した*.fragments.tmpを、他プロセスとの
+        # 競合が無いことが保証されたロック取得後の最初に一掃する(SDカード上の
+        # ローカルディスクを圧迫し続け、LOCAL_TMP_MIN_FREE_SPACE_GBチェックで
+        # 後続の全ダウンロードが失敗する事象への対策)。
+        FileSystemManager.sweep_stale_fragment_dirs()
+
         SystemHealthChecker.check_dependencies()
 
         cooldown_until = CooldownManager.is_in_cooldown()

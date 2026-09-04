@@ -74,3 +74,22 @@ def test_update_avatar_ignores_path_traversal_in_old_value(isolated_db, tmp_path
     user_service.update_avatar("test_user", "/uploads/new-avatar.png")
 
     assert outside_file.exists()
+
+
+def test_update_avatar_keeps_file_still_referenced_by_another_user(isolated_db, tmp_path, monkeypatch):
+    """#372: 他ユーザーが同じアップロード画像を参照している間は物理削除しない。"""
+    upload_dir = tmp_path / "uploads"
+    upload_dir.mkdir()
+    monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+    shared = upload_dir / "shared-avatar.png"
+    shared.write_bytes(b"png")
+    _insert_user(user_id="dad", avatar="/uploads/shared-avatar.png")
+    _insert_user(user_id="mom", avatar="/uploads/shared-avatar.png")
+
+    user_service.update_avatar("mom", "🙂")
+
+    assert shared.exists(), "dad が参照中のファイルが削除された"
+
+    # dad も別の画像に切り替えれば、参照が無くなるので削除される
+    user_service.update_avatar("dad", "🙂")
+    assert not shared.exists()

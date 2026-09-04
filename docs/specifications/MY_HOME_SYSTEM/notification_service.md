@@ -91,6 +91,8 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 * **役割**: Discordの指定チャンネル(error, report, notify)に対応するWebhook URLへテキストおよび画像データを含めたメッセージを送信する。画像添付時はファイル名を指定してアップロードする。
 * 根拠: [関数定義] (行番号: 30〜71 / 抜粋: "def _send_discord_webhook(...)")
+* **（Issue #361 で修正）** 本文を `_split_discord_content` で `DISCORD_CONTENT_CHUNK_SIZE`（1900）字以下のチャンクに分割して順に送信し、画像は先頭チャンクにのみ添付する。各 POST は `_post_discord_with_retry` 経由で、429 または 5xx のときは `Retry-After`（または `X-RateLimit-Reset-After`、無ければ 1 秒、上限 `DISCORD_RETRY_MAX_WAIT_SECONDS`＝5 秒）待ってから `DISCORD_RETRY_ATTEMPTS`（1）回リトライする。以前は切り詰めも分割もせず送っていたため、週間ログ分析レポート等の長文は 400 で丸ごと届かず、DDD 側ではサーキットブレーカーの誤作動も招いていた。
+* 根拠: `chunks = _split_discord_content(text_content)` (行番号: 57)、`_post_discord_with_retry(url, ...)` (行番号: 63, 65)、`DISCORD_CONTENT_CHUNK_SIZE = 1900` (行番号: 79)、`DISCORD_RETRY_ATTEMPTS = 1` (行番号: 81)
 
 
 * **引数/リクエスト**: `messages: List[Any]`, `image_data: Optional[bytes] = None`, `channel: str = "notify"`, `filename: str = "snapshot.jpg"`
@@ -109,6 +111,20 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 * 根拠: [ステータスコード判定] (行番号: 64〜66 / 抜粋: "logger.error(f"Discord API エラー: {res.status_code} - {res.text}")")、[例外処理] (行番号: 69〜71 / 抜粋: "except Exception as e: ... return False")
 
 
+
+
+### `_split_discord_content` / `_post_discord_with_retry`（Issue #361 で追加）
+
+* **役割**: `_split_discord_content(text, limit=1900)` は text を limit 字以下のチャンクに分割する（できるだけ改行位置で切る。空文字は1チャンク）。`_post_discord_with_retry(url, **kwargs)` は `requests.post` を呼び、429/5xx なら `Retry-After` 等に従って `_retry_sleep`（既定 `time.sleep`、テストで差し替え可能）で待機したうえで限定回数リトライし、最後のレスポンスを返す。
+* 根拠: `def _split_discord_content(text: str, limit: int = DISCORD_CONTENT_CHUNK_SIZE) -> List[str]:` (行番号: 86〜100)、`def _post_discord_with_retry(url: str, **kwargs):` (行番号: 103〜121)
+* **引数/リクエスト**: `text: str, limit: int` / `url: str, **kwargs`（`requests.post` に渡す）
+* 根拠: (行番号: 86, 103)
+* **戻り値/レスポンス**: `List[str]` / `requests.Response`
+* 根拠: (行番号: 100, 121)
+* **副作用**: HTTP POST、待機（sleep）、WARNING ログ
+* 根拠: (行番号: 105〜120)
+* **エラーハンドリング**: `Retry-After` が数値でない場合は 1 秒扱い。例外は呼び出し元（`_send_discord_webhook`）の `except Exception` で捕捉される
+* 根拠: (行番号: 112〜116)
 
 ### `_send_line_push`
 

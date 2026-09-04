@@ -79,6 +79,8 @@
 
 * **役割**: 指定されたスクリプトをサブプロセスとして実行し、実行結果をログに出力する。
 * 根拠: `def run_script` (行番号: 45, 47 / 抜粋: "指定されたスクリプトをサブプロセスとして実行")
+* **（Issue #360 / #361 で修正）** `subprocess.run` ではなく `subprocess.Popen` で起動して `_running_children[script_path]` に登録し、`proc.communicate(timeout=3600)` で完了を待つ。これにより SIGTERM 受信時に `terminate_running_children()` から実行中の子プロセスを止められる。失敗時にログへ流す stderr は末尾 20 行に絞る（Discord 通知の 2000 字制限対策）。タイムアウト時は `proc.kill()` を試みる。`finally` で `_running_children` から自分のエントリを外す。
+* 根拠: `proc = subprocess.Popen(` (行番号: 115〜123)、`_stdout, stderr = proc.communicate(timeout=3600)` (行番号: 126)、`tail = "\n".join(stderr.strip().splitlines()[-20:])` (行番号: 135)
 
 
 * **引数/リクエスト**: `script_path` (`str`): 実行するスクリプトの相対パス, `args` (`List[str]`): スクリプトに渡す引数
@@ -98,10 +100,26 @@
 
 
 
+
+### `terminate_running_children` / `_handle_shutdown_signal` / `install_signal_handlers`（Issue #360 で追加）
+
+* **役割**: `_running_children`（実行中の子プロセスの `script_path → Popen`、`_children_lock` で保護）を走査し、生存中のものを `terminate()` → timeout 後 `kill()` して停止数を返す。`_handle_shutdown_signal` は SIGTERM/SIGINT で `_shutdown_event` を立てて `terminate_running_children()` を呼ぶ。`install_signal_handlers` は両シグナルにこのハンドラを登録する（メインスレッド以外からの呼び出し等で `ValueError`/`OSError` になる場合は無視）。以前は scheduler が SIGTERM で即死し、実行中の `nas_monitor.py` 等（最大3600s）が孤児として走り続けて再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
+* 根拠: `_running_children: Dict[str, subprocess.Popen] = {}` (行番号: 48〜50)、`def terminate_running_children(timeout: float = 5.0) -> int:` (行番号: 53〜70)、`def _handle_shutdown_signal(signum, _frame) -> None:` (行番号: 73〜76)、`def install_signal_handlers() -> None:` (行番号: 79〜85)
+* **引数/リクエスト**: `timeout: float` / `(signum, _frame)` / なし
+* 根拠: (行番号: 53, 73, 79)
+* **戻り値/レスポンス**: `int`（停止数）/ なし / なし
+* 根拠: (行番号: 70)
+* **副作用**: 子プロセスの terminate/kill、`_shutdown_event` の set、シグナルハンドラ登録、ログ出力
+* 根拠: (行番号: 59〜69, 74〜76, 80〜85)
+* **エラーハンドリング**: 子プロセス停止失敗は WARNING ログのみ、`signal.signal` の失敗は無視
+* 根拠: (行番号: 67〜68, 83〜85)
+
 ### `main`
 
 * **役割**: `ThreadPoolExecutor`（ワーカー数 = `TASKS`件数、最低1）を使って `TASKS` リストを巡回し、現在時刻と最終実行時刻の差が指定間隔（`interval`）以上、かつ当該スクリプトが実行中でないタスクに対して `run_script` を非同期（別スレッド）で投入する無限ループを実行する。実行中のタスクは `in_flight` 辞書（スクリプトパス→`Future`）で管理し、完了していないタスクは同一周期内で再投入しない（多重起動防止）。
 * 根拠: `def main() -> None:` (行番号: 94 / 抜粋: "メインループ。")
+* **（Issue #360 で修正）** 冒頭で `install_signal_handlers()` を呼び、メインループは `while True` ではなく `while not _shutdown_event.is_set()`、スリープは `_shutdown_event.wait(10)`（シャットダウン要求で即抜ける）。ループを抜けた後に `terminate_running_children()` を呼ぶ。
+* 根拠: `install_signal_handlers()` (行番号: 167)、`while not _shutdown_event.is_set():` (行番号: 172)、`_shutdown_event.wait(10)` (行番号: 189)、`terminate_running_children()` (行番号: 191)
 
 
 * **引数/リクエスト**: なし

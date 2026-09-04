@@ -42,6 +42,24 @@ class TestIsBotDetectionError:
         誤ってボット検知と判定しないこと。"""
         assert module._is_bot_detection_error(Exception(message)) is False
 
+    @pytest.mark.parametrize("message", [
+        "ERROR: [youtube] abc123: Sign in to confirm your age. This video may be inappropriate for some users.",
+        "ERROR: Sign in to confirm your age",
+    ])
+    def test_age_restriction_message_is_not_bot_detection(self, message):
+        """#396: 年齢制限動画のメッセージ("Sign in to confirm your age")を
+        ボット検知と誤判定し、12時間の全停止に入らないこと。"""
+        assert module._is_bot_detection_error(Exception(message)) is False
+
+    @pytest.mark.parametrize("message", [
+        "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser ...",
+        "ERROR: [youtube] abc123: Sign in to confirm you’re not a bot.",
+    ])
+    def test_genuine_bot_message_still_detected_with_either_apostrophe(self, message):
+        """#396: 本物のボット検知メッセージは、ASCII/Unicodeどちらの
+        アポストロフィでも引き続き検知されること。"""
+        assert module._is_bot_detection_error(Exception(message)) is True
+
 
 class TestHistoryManagerLogsFailures:
     """M-7-1: 履歴ファイルI/O失敗が except: pass で握りつぶされ、
@@ -83,6 +101,89 @@ class TestHistoryManagerLogsFailures:
         assert "https://example.com/video1" in module.HistoryManager.load_history()
 
 
+class TestUniversalYtDlpStrategyOuttmplUsesPathsHome:
+    """D-L1: source_nameに'%'が含まれる場合、outtmpl文字列への直接埋め込みが
+    yt-dlpのテンプレート展開と衝突しないよう、'paths'オプションで保存先を分離
+    していること。"""
+
+    def test_outtmpl_is_filename_only_and_paths_home_is_target_dir(self, tmp_path, monkeypatch):
+        strategy = module.UniversalYtDlpStrategy.__new__(module.UniversalYtDlpStrategy)
+        target_dir = tmp_path / "100% Fan Club"
+        monkeypatch.setattr(strategy, "_determine_save_dir", lambda *a, **k: target_dir)
+
+        captured_opts = {}
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                captured_opts.update(opts)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                raise RuntimeError("stop before actual network access")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+
+        task = module.DownloadTask(url="https://example.test/video", source_name="test_list")
+        strategy.download(task)
+
+        assert captured_opts["outtmpl"] == "%(title)s.%(ext)s"
+        assert captured_opts["paths"] == {"home": str(target_dir)}
+        assert "%" not in captured_opts["outtmpl"].replace("%(title)s", "").replace("%(ext)s", "")
+
+
+class TestUniversalYtDlpStrategySingleMetadataFetch:
+    """D-L2: extract_info(download=False)の後にydl.download()で再度メタデータを
+    取得せず、process_ie_resultで取得済みのinfoを使って1回のフェッチで完結する
+    こと(ボット検知対策として抑えているアクセス回数を自ら増やさないため)。"""
+
+    def test_process_ie_result_is_used_instead_of_second_download_call(self, tmp_path, monkeypatch):
+        strategy = module.UniversalYtDlpStrategy.__new__(module.UniversalYtDlpStrategy)
+        monkeypatch.setattr(strategy, "_determine_save_dir", lambda *a, **k: tmp_path)
+        monkeypatch.setattr(module.DiscordNotifier, "send", staticmethod(lambda *a, **k: None))
+
+        info = {"title": "sample", "id": "abc123"}
+        calls = []
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                calls.append(("extract_info", url, download))
+                return info
+
+            def prepare_filename(self, passed_info):
+                return str(tmp_path / "sample.mp4")
+
+            def process_ie_result(self, ie_result, download=True):
+                calls.append(("process_ie_result", ie_result, download))
+
+            def download(self, urls):
+                calls.append(("download", urls))
+                raise AssertionError("download()による二重メタデータ取得が発生している")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+
+        task = module.DownloadTask(url="https://example.test/video", source_name="test_list")
+        result = strategy.download(task)
+
+        assert result is True
+        assert ("extract_info", task.url, False) in calls
+        assert ("process_ie_result", info, True) in calls
+        assert not any(call[0] == "download" for call in calls)
+
+
 class TestUniversalYtDlpStrategyNoPlaylist:
     """M-7-3: リストの1行がプレイリスト/チャンネルURLだった場合に無制限DLされる
     問題の回帰テスト。noplaylistオプションが設定されていることを確認する。"""
@@ -115,6 +216,56 @@ class TestUniversalYtDlpStrategyNoPlaylist:
         strategy.download(task)
 
         assert captured_opts.get("noplaylist") is True
+
+
+class TestPackerBaseNDigits:
+    """D-L5: p,a,c,k,e,dパッカーの復元関数(JS側の"e")と同じ規則で、radix(a)に
+    応じた桁の文字列表現を返すこと。以前はradixを無視してbase36固定(mod 36)
+    だったため、radixが36以外(典型的には62)のページで誤った単語に置換され、
+    m3u8抽出が失敗しうった。"""
+
+    def test_radix_36_matches_legacy_base36_digits(self):
+        # 旧実装(chars="0..9a..z", mod 36)と同じ結果になること(回帰確認)。
+        assert module._packer_base_n_digits(0, 36) == "0"
+        assert module._packer_base_n_digits(35, 36) == "z"
+        assert module._packer_base_n_digits(36, 36) == "10"
+        assert module._packer_base_n_digits(40, 36) == "14"
+
+    def test_radix_62_uses_uppercase_for_values_above_35(self):
+        assert module._packer_base_n_digits(35, 62) == "z"
+        assert module._packer_base_n_digits(36, 62) == "A"
+        assert module._packer_base_n_digits(40, 62) == "E"
+        assert module._packer_base_n_digits(61, 62) == "Z"
+        # 62進数なので、61を超えると2桁になること
+        assert module._packer_base_n_digits(62, 62) == "10"
+
+    def test_radix_10_is_plain_decimal(self):
+        assert module._packer_base_n_digits(0, 10) == "0"
+        assert module._packer_base_n_digits(9, 10) == "9"
+        assert module._packer_base_n_digits(123, 10) == "123"
+
+
+class TestExtractM3u8UrlRespectsPackerRadix:
+    """D-L5: _extract_m3u8_url が正規表現で捕捉したradix(a)を実際に使って
+    単語置換を行うこと。radix=62のページで、旧実装(base36固定)なら復元
+    できなかった単語(索引40の'E'->'vid1')が正しく復元されることを確認する。"""
+
+    def test_radix_62_word_is_correctly_restored(self):
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+
+        # 索引40は radix=62 では _packer_base_n_digits(40, 62) == "E" と
+        # エンコードされる(旧実装のbase36固定では"14"になり一致しなかった)。
+        p_raw = r"source=\'https://cdn.example.com/hls/E.m3u8\'"
+        k_entries = [""] * 40 + ["vid1"]
+        k_str = "|".join(k_entries)
+        html = (
+            "eval(function(p,a,c,k,e,d){return p}('"
+            + p_raw + "',62,41,'" + k_str + "'.split('|')))"
+        )
+
+        result = strategy._extract_m3u8_url(html)
+
+        assert result == "https://cdn.example.com/hls/vid1.m3u8"
 
 
 class TestNormalizeUrl:
@@ -213,6 +364,64 @@ class TestCollectTasksListFileReadFailureIsProtected:
         assert len(tasks) == 1
         assert tasks[0].url == "https://example.com/other-video"
         assert any("リスト読み込みエラー" in r.message for r in caplog.records)
+
+
+class TestScrapingStrategySegmentRetry:
+    """#397: セグメント取得に指数バックオフ付きリトライがあり、1セグメントの
+    一時失敗で数GBのダウンロードが丸ごと破棄されないこと。BotDetectionError は
+    リトライせず即座に伝播すること。"""
+
+    def _strategy(self, monkeypatch, side_effects):
+        strategy = module.ScrapingStrategy.__new__(module.ScrapingStrategy)
+        calls = []
+
+        def _fake_fetch_once(url, page_url):
+            calls.append(url)
+            effect = side_effects[len(calls) - 1]
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+
+        monkeypatch.setattr(strategy, "_fetch_segment_once", _fake_fetch_once)
+        sleeps = []
+        monkeypatch.setattr(module.time, "sleep", lambda s: sleeps.append(s))
+        return strategy, calls, sleeps
+
+    def test_transient_failure_is_retried_with_exponential_backoff(self, monkeypatch):
+        strategy, calls, sleeps = self._strategy(
+            monkeypatch, [TimeoutError("timed out"), ConnectionError("reset"), b"segment"]
+        )
+
+        result = strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert result == b"segment"
+        assert len(calls) == 3
+        assert sleeps == [
+            module.CONFIG.SEGMENT_RETRY_BASE_DELAY,
+            module.CONFIG.SEGMENT_RETRY_BASE_DELAY * 2,
+        ]
+
+    def test_gives_up_after_max_attempts_and_raises_last_error(self, monkeypatch):
+        attempts = module.CONFIG.SEGMENT_DOWNLOAD_MAX_ATTEMPTS
+        strategy, calls, _ = self._strategy(
+            monkeypatch, [TimeoutError(f"timeout {i}") for i in range(attempts)]
+        )
+
+        with pytest.raises(TimeoutError, match=f"timeout {attempts - 1}"):
+            strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert len(calls) == attempts
+
+    def test_bot_detection_is_not_retried(self, monkeypatch):
+        strategy, calls, sleeps = self._strategy(
+            monkeypatch, [module.BotDetectionError("HTTP 403"), b"never"]
+        )
+
+        with pytest.raises(module.BotDetectionError):
+            strategy._download_segment("https://cdn.example.com/seg0.ts", "https://missav.live/x")
+
+        assert len(calls) == 1
+        assert sleeps == []
 
 
 class TestScrapingStrategyFragmentStaging:
@@ -452,6 +661,105 @@ class TestScrapingStrategyPreMergeDiskSpaceGuard:
         assert not final_path.exists()
         assert list(nas_save_dir.iterdir()) == []
         assert not local_tmp_dir.exists() or list(local_tmp_dir.iterdir()) == []
+
+
+class TestRunLockBusyIsNormalExit:
+    """D-L4: ロック競合(多重起動)時はsys.exit(1)ではなく正常終了(return)する
+    こと。newface_monitor.run_monitorと同じ扱いに揃え、run_task.sh側が
+    ERRORとして記録しないようにする。"""
+
+    def test_lock_busy_returns_without_raising_system_exit(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCK_FILE_PATH=tmp_path / ".lock"))
+        monkeypatch.setattr(
+            module.fcntl, "flock",
+            lambda *a, **k: (_ for _ in ()).throw(BlockingIOError("locked")),
+        )
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        run_locked_called = []
+        downloader._run_locked = lambda: run_locked_called.append(True)
+
+        result = downloader.run()  # 例外(SystemExit含む)を送出しないこと
+
+        assert result is None
+        assert run_locked_called == []
+
+
+class TestSignalHandlerForcesShutdownOnSecondSignal:
+    """D-L3: シグナルを_shutdown_requestedへフラグ化するだけでは進行中の
+    数GB規模のダウンロードは止まらないため、2回目のシグナルで即座に
+    KeyboardInterruptを送出し強制中断できること。"""
+
+    def _make_downloader(self):
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader._interrupt_count = 0
+        downloader._shutdown_requested = False
+        return downloader
+
+    def test_first_signal_only_sets_flag(self):
+        downloader = self._make_downloader()
+
+        downloader._signal_handler(module.signal.SIGINT, None)  # 例外を送出しないこと
+
+        assert downloader._shutdown_requested is True
+        assert downloader._interrupt_count == 1
+
+    def test_second_signal_raises_keyboard_interrupt(self):
+        downloader = self._make_downloader()
+        downloader._signal_handler(module.signal.SIGINT, None)
+
+        with pytest.raises(KeyboardInterrupt):
+            downloader._signal_handler(module.signal.SIGINT, None)
+
+        assert downloader._interrupt_count == 2
+
+
+class TestSweepStaleFragmentDirs:
+    """#398: クラッシュ等でLOCAL_TMP_DIR配下に残留した*.fragments.tmpを
+    _run_locked冒頭で一掃すること。"""
+
+    def test_sweeps_stale_fragment_dirs_but_keeps_unrelated_files(self, tmp_path, monkeypatch):
+        local_tmp_dir = tmp_path / "tmp_fragments"
+        local_tmp_dir.mkdir()
+        stale_a = local_tmp_dir / "video1.mp4.fragments.tmp"
+        stale_a.mkdir()
+        (stale_a / "seg_000000.ts").write_bytes(b"stale")
+        stale_b = local_tmp_dir / "video2.mp4.fragments.tmp"
+        stale_b.mkdir()
+        unrelated_file = local_tmp_dir / "not_a_fragments_dir.txt"
+        unrelated_file.write_text("keep-me")
+
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        module.FileSystemManager.sweep_stale_fragment_dirs()
+
+        assert not stale_a.exists()
+        assert not stale_b.exists()
+        assert unrelated_file.exists()
+
+    def test_missing_local_tmp_dir_is_a_no_op(self, tmp_path, monkeypatch):
+        local_tmp_dir = tmp_path / "does_not_exist"
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        module.FileSystemManager.sweep_stale_fragment_dirs()  # 例外を送出しないこと
+
+    def test_run_locked_sweeps_before_other_checks(self, tmp_path, monkeypatch):
+        """_run_locked冒頭(依存関係チェックより前)で一掃されること。"""
+        local_tmp_dir = tmp_path / "tmp_fragments"
+        local_tmp_dir.mkdir()
+        stale = local_tmp_dir / "video1.mp4.fragments.tmp"
+        stale.mkdir()
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, LOCAL_TMP_DIR=local_tmp_dir))
+
+        def _stop_here():
+            raise RuntimeError("stop after dependency check")
+
+        monkeypatch.setattr(module.SystemHealthChecker, "check_dependencies", staticmethod(_stop_here))
+
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        with pytest.raises(RuntimeError, match="stop after dependency check"):
+            downloader._run_locked()
+
+        assert not stale.exists()
 
 
 class TestScrapingStrategyStaleArtifactCleanup:

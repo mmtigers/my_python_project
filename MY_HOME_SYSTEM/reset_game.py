@@ -16,7 +16,9 @@ import config
 # リセットする、といったリスクがあったため、他のスクリプトと同じconfig.SQLITE_DB_PATH
 # を参照するよう統一する。
 DB_PATH = config.SQLITE_DB_PATH  # DBファイルパス
-LOG_DIR = "logs"
+# Q-L8(#409): 以前は CWD 相対の "logs" だったため、実行場所によって別のディレクトリに
+# ログが作られていた。他スクリプトと同じく config.LOG_DIR を使う。
+LOG_DIR = config.LOG_DIR
 
 # 日本語名とDB内のuser_idのマッピング
 NAME_MAP = {
@@ -27,17 +29,21 @@ NAME_MAP = {
 }
 
 # --- ログ設定 ---
-os.makedirs(LOG_DIR, exist_ok=True)
 log_file = os.path.join(LOG_DIR, f"reset_game_{datetime.now().strftime('%Y%m%d')}.log")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+
+def _setup_logging() -> None:
+    """Q-L8(#409): 以前は import 時に basicConfig を実行していたため、テスト等で本モジュールを
+    import しただけで logs/ が作られ root logger が乗っ取られていた。main() から呼ぶ。"""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
 
 def get_db_connection():
     """データベース接続を取得する"""
@@ -168,6 +174,7 @@ def reset_user_data(target_user):
             conn.close()
 
 def main():
+    _setup_logging()
     logging.info("スクリプト起動: ユーザー選択モード")
     
     users_info = fetch_users()

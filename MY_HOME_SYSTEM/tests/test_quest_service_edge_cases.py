@@ -305,6 +305,15 @@ class TestProcessRejectQuestConcurrentWithApprove:
 
 
 class TestIsWithinResetPeriod:
+    @pytest.fixture(autouse=True)
+    def _frozen_now(self):
+        # C-L3 (Issue #414): JST の日付/週境界をまたぐ数ミリ秒の窓で不安定になるため、
+        # 現在時刻を固定する(2026-09-02(水) 10:00 JST = 01:00 UTC)。
+        # freezegun のクラスデコレータは pytest 形式の setup_method(self) と
+        # 相性が悪い(余分な引数を渡す)ため、autouse フィクスチャで包む。
+        with freeze_time("2026-09-02 01:00:00"):
+            yield
+
     def setup_method(self):
         self.quest_service = QuestService()
 

@@ -6,6 +6,7 @@
 | 言語 | TypeScript |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `6007292` |
 
 ## 関連ドキュメント
 
@@ -44,8 +45,8 @@
 
 ### `ID`
 
-* **役割**: IDを表す汎用的な型の定義。
-* 根拠: [該当要素] (行番号: 6 / 抜粋: "export type ID = number | string;")
+* **役割**: IDを表す汎用的な型の定義。**（Issue #412 品質で修正）** 以前は`number | string`だったが、`quest_id`/`reward_id`/`history_id`等の実カラムはすべてSQLiteの`INTEGER PRIMARY KEY`でありサーバーは常に`number`を返すため、`number`のみに絞った（`tsc -b`が通ることを確認済み）。`gameDataSchema.ts`のZod検証層（実際のワイヤーデータに対する独立した防御）は`z.union([z.number(), z.string()])`のまま変更していない。
+* 根拠: [該当要素] (行番号: 5〜9 / 抜粋: "export type ID = number;")
 
 
 * **引数/リクエスト**: 該当なし
@@ -55,8 +56,8 @@
 
 ### `User`
 
-* **役割**: ユーザー情報のデータ構造の定義。`hp`/`maxHp`はバックエンド(MY_HOME_SYSTEM)から送られてくる値であり、`maxHp`は`calculate_max_hp(level) = level * 20 + 5`で計算されるため、フロント側で独自に再計算してはならない旨がコメントで明記されている。
-* 根拠: [該当要素] (行番号: 9〜26 / 抜粋: "export interface User {")
+* **役割**: ユーザー情報のデータ構造の定義。`hp`/`maxHp`はバックエンド(MY_HOME_SYSTEM)から送られてくる値であり、`maxHp`は`calculate_max_hp(level) = level * 20 + 5`で計算されるため、フロント側で独自に再計算してはならない旨がコメントで明記されている。**（Issue #390で修正）** `avatar`/`medal_count`/`job_class`/`role`は`quest_users`のNULL可カラムのため`string | null`/`number | null`を許容する（`gameDataSchema.ts`の`.nullable().optional()`と対応）。以前存在した`icon?: string`はバックエンドが一度も送出しない幽霊フィールドだったため削除し、`Header.tsx`/`FamilyLog.tsx`/`UserStatusCard.tsx`/`AvatarUploader.tsx`の`user.icon`参照（常に`undefined`で`'🙂'`等のフォールバックに落ちていた）も合わせて削除した。
+* 根拠: [該当要素] (行番号: 8〜28 / 抜粋: "// #390: avatar / job_class / role は quest_users の NULL 可カラムのため null を許容する\n// (gameDataSchema.ts と対応)。icon はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface User {", "avatar?: string | null;")
 
 
 * **引数/リクエスト**: 該当なし
@@ -67,7 +68,8 @@
 ### `Quest`
 
 * **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
-* 根拠: [該当要素] (行番号: 29〜57 / 抜粋: "export interface Quest {")
+* **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`
+* 根拠: [該当要素] (行番号: 36〜59 / 抜粋: "// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface Quest {")
 * 根拠: [フィールド名統一のコメント] (行番号: 29〜34 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
 
 
@@ -78,8 +80,8 @@
 
 ### `QuestHistory`
 
-* **役割**: クエスト履歴のデータ構造の定義。**（Issue #291で修正）** `quest_history.id`が実カラムであり、以前併存していた`history_id`はAPIから一度も送られてこない幽霊フィールドだったと判明したため削除された。
-* 根拠: [該当要素] (行番号: 59〜75 / 抜粋: "export interface QuestHistory {")
+* **役割**: クエスト履歴のデータ構造の定義。**（Issue #291で修正）** `quest_history.id`が実カラムであり、以前併存していた`history_id`はAPIから一度も送られてこない幽霊フィールドだったと判明したため削除された。**（Issue #390で修正）** `status`はサーバーが生成する`'pending' | 'approved' | 'rejected'`の3値のみ（`'completed'`は生成されない値だったため削除）、`date?: string`は送出されない幽霊フィールドのため削除、`quest_title`/`gold_earned`/`exp_earned`はNULL可カラムのため`null`を許容する。
+* 根拠: [該当要素] (行番号: 63〜77 / 抜粋: "// #390: status の 'completed' はサーバーが生成しない値、date は送出されない\n// 幽霊フィールドだったため削除。gold_earned / exp_earned は NULL 可カラム。\nexport interface QuestHistory {", "status: 'pending' | 'approved' | 'rejected';")
 * 根拠: [フィールド名統一のコメント] (行番号: 59〜61 / 抜粋: "// ★フィールド名の統一(Issue #291): quest_history.id が実カラムであり、\n// history_id はAPIから一度も送られてこない幽霊フィールドだったため削除した。")
 
 
@@ -102,8 +104,19 @@
 
 ### `InventoryItem`
 
-* **役割**: インベントリアイテムのデータ構造の定義。
-* 根拠: [該当要素] (行番号: 91〜100 / 抜粋: "export interface InventoryItem {")
+* **役割**: インベントリアイテムのデータ構造の定義（`MY_HOME_SYSTEM/models/quest.py`の`InventoryItem`に対応）。**（Issue #390で修正）** `desc`はサーバー側が`Optional[str] = None`のため`string | null`を許容する任意フィールドに、また`used_at?: string | null`を追加した。
+* 根拠: [該当要素] (行番号: 92〜104 / 抜粋: "// インベントリアイテム (models/quest.py の InventoryItem に対応)\n// #390: desc はサーバー側 Optional[str] のため null を許容する。\nexport interface InventoryItem {", "desc?: string | null;", "used_at?: string | null;")
+
+
+* **引数/リクエスト**: 該当なし
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+### `CompletedSignal`
+
+* **役割**: クエスト完了APIが実際に成功した時点で`App.tsx`が`QuestList`/`QuestItem`へ「完了音・無限クエストのクールダウンを発火せよ」と通知するためのシグナルの型。`id`（対象クエストの`quest_id`）、`userId`（完了した本人の`user_id`）、`nonce`（同一クエストの連続完了でも`useEffect`が再発火するよう毎回変わる値）を持つ。**（Issue #363で追加）** 以前は`App.tsx`/`QuestList.tsx`/`FamilyDashboard.tsx`の3箇所に`{ id: ID; nonce: number }`というインライン型が重複しており`userId`を持たなかったため、横画面4人パネルで兄が完了した無限クエストのクールダウンが妹・パパ・ママのパネルにも掛かっていた（サーバー側のクールダウンは(user, quest)単位）。
+* 根拠: [該当要素] (行番号: 103〜113 / 抜粋: "export interface CompletedSignal {\n    id: ID;\n    userId: string;\n    nonce: number;\n}")
 
 
 * **引数/リクエスト**: 該当なし

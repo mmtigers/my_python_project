@@ -1,17 +1,16 @@
 [run]
 source = .
+# Issue #367: omit は「本当に実行不能なもの」だけに絞る。かつては専用テストが
+# 存在するモジュール(monitors/*, sync_strict.py 等)まで除外しており、CIの
+# カバレッジ値が実態より大きく水増しされ閾値が退行検知として機能していなかった。
+# 除外対象は tests/ 自身、パッケージマーカー、および Streamlit UI(単体テスト
+# では実行不能な dashboard.py と views/dashboard/*)のみ。ここへ追加する場合は
+# tests/test_coveragerc.py(各エントリが実在するパスに一致するかの回帰テスト)も参照。
 omit =
     tests/*
-    old/*
-    monitors/*
-    views/dashboard/*
-    dashboard.py
-    reset_game.py
-    sync_strict.py
-    services/train_service.py
-    switchbot_webhook_fix.py
-    post_boot_health_check.py
     */__init__.py
+    dashboard.py
+    views/dashboard/*
 
 [report]
 exclude_lines =

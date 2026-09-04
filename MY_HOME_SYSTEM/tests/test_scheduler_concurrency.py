@@ -26,11 +26,25 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import scheduler_boot
 
 
-class _FakeCompletedProcess:
-    def __init__(self, returncode=0):
+class _FakePopen:
+    """#360: run_script は subprocess.run ではなく Popen(+communicate)で子プロセスを
+    起動し PID を保持するようになったため、テストのフェイクも Popen 互換にする。"""
+
+    def __init__(self, returncode=0, on_communicate=None):
         self.returncode = returncode
-        self.stdout = ""
-        self.stderr = ""
+        self._on_communicate = on_communicate
+        self.killed = False
+
+    def communicate(self, timeout=None):
+        if self._on_communicate:
+            self._on_communicate()
+        return "", ""
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
 
 
 def test_two_tasks_execute_concurrently_not_serially(monkeypatch):
@@ -42,14 +56,13 @@ def test_two_tasks_execute_concurrently_not_serially(monkeypatch):
             return True
         return real_exists(path)
 
-    def _fake_subprocess_run(cmd, **kwargs):
-        # 両方のタスクがここに同時に到達しない限りタイムアウトで例外になる。
+    def _fake_popen(cmd, **kwargs):
+        # 両方のタスクが communicate() に同時に到達しない限りタイムアウトで例外になる。
         # = 直列実行に戻ってしまった場合はこのテストがタイムアウトで失敗する。
-        barrier.wait()
-        return _FakeCompletedProcess(returncode=0)
+        return _FakePopen(returncode=0, on_communicate=barrier.wait)
 
     monkeypatch.setattr(scheduler_boot.os.path, "exists", _fake_exists)
-    monkeypatch.setattr(scheduler_boot.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(scheduler_boot.subprocess, "Popen", _fake_popen)
 
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-scheduler") as executor:
         future_a = executor.submit(scheduler_boot.run_script, "monitors/fake_task_a.py", [])
@@ -67,7 +80,7 @@ def test_two_tasks_execute_concurrently_not_serially(monkeypatch):
 
 def test_missing_script_returns_false_without_calling_subprocess(monkeypatch):
     calls = []
-    monkeypatch.setattr(scheduler_boot.subprocess, "run", lambda *a, **kw: calls.append(1))
+    monkeypatch.setattr(scheduler_boot.subprocess, "Popen", lambda *a, **kw: calls.append(1))
 
     result = scheduler_boot.run_script("monitors/definitely_does_not_exist_12345.py", [])
 
@@ -84,10 +97,62 @@ def test_subprocess_timeout_is_treated_as_failure_not_crash(monkeypatch):
         lambda path: True if "fake_timeout_task.py" in str(path) else real_exists(path),
     )
 
-    def _raise_timeout(cmd, **kwargs):
-        raise subprocess_module.TimeoutExpired(cmd="fake", timeout=kwargs.get("timeout"))
+    class _TimeoutPopen(_FakePopen):
+        def communicate(self, timeout=None):
+            if not self.killed:
+                raise subprocess_module.TimeoutExpired(cmd="fake", timeout=timeout)
+            return "", ""
 
-    monkeypatch.setattr(scheduler_boot.subprocess, "run", _raise_timeout)
+    monkeypatch.setattr(scheduler_boot.subprocess, "Popen", lambda *a, **kw: _TimeoutPopen())
 
     result = scheduler_boot.run_script("monitors/fake_timeout_task.py", [])
     assert result is False
+
+
+
+def test_sigterm_terminates_running_children(monkeypatch):
+    """#360: SIGTERM 受信時に実行中の子プロセスが terminate されること。"""
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class _BlockingPopen(_FakePopen):
+        def __init__(self):
+            super().__init__(returncode=None)
+            self.terminated = False
+
+        def communicate(self, timeout=None):
+            started.set()
+            release.wait(timeout=5)
+            self.returncode = 0
+            return "", ""
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+            release.set()
+
+        def wait(self, timeout=None):
+            return 0
+
+    proc = _BlockingPopen()
+    real_exists = os.path.exists
+    monkeypatch.setattr(
+        scheduler_boot.os.path, "exists",
+        lambda path: True if "fake_long_task.py" in str(path) else real_exists(path),
+    )
+    monkeypatch.setattr(scheduler_boot.subprocess, "Popen", lambda *a, **kw: proc)
+
+    t = threading.Thread(target=scheduler_boot.run_script, args=("monitors/fake_long_task.py", []))
+    t.start()
+    assert started.wait(timeout=5)
+
+    stopped = scheduler_boot.terminate_running_children()
+    t.join(timeout=5)
+
+    assert stopped == 1
+    assert proc.terminated is True
+    assert "monitors/fake_long_task.py" not in scheduler_boot._running_children

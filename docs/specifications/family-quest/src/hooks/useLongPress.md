@@ -6,6 +6,7 @@
 | 言語 | TypeScript (React Hooks) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `4062600` |
 
 ## 関連ドキュメント
 
@@ -13,7 +14,8 @@
 
 ## 2. ファイルの概要
 
-完了済み/申請中クエストの「取り消し」操作を、うっかりタップで誤発火させないための長押しジェスチャーを提供するカスタムフックである。ポインターダウンから`thresholdMs`（デフォルト600ms）経過するまで押され続けた場合は`onLongPress`を、それより前に指が離された場合は`onShortTap`（渡されていれば）を呼び出す。押している間の経過割合(`pressProgress`、0〜1)も返却し、長押し中のプログレス表示に利用できる。
+完了済み/申請中クエストの「取り消し」操作を、うっかりタップで誤発火させないための長押しジェスチャーを提供するカスタムフックである。ポインターダウンから`thresholdMs`（デフォルト600ms）経過するまで押され続けた場合は`onLongPress`を、それより前に指が離された場合は`onShortTap`（渡されていれば）を呼び出す。押している間の経過割合(`pressProgress`、0〜1)も返却し、長押し中のプログレス表示に利用できる。**（Issue #389）** さらに、直近の長押し発火から`clickSuppressMs`（既定400ms）以内かどうかを返す`wasFiredRecently()`を返却する。長押し（取消）が発火→取消API→再取得で同じDOMノードに`onClick`（完了確認）が付け替わった直後に、指を離した瞬間の`click`が完了確認モーダルを開いてしまう競合を、呼び出し側の`onClick`ハンドラでガードするためのものである。
+* 根拠: `wasFiredRecently` (行番号: 18〜22, 96〜99 / 抜粋: "// #389: 直近 clickSuppressMs 以内に onLongPress が発火したかどうか。", "const wasFiredRecently = useCallback((): boolean => {\n        const firedAt = lastFiredAtRef.current;\n        return firedAt !== null && Date.now() - firedAt < clickSuppressMs;\n    }, [clickSuppressMs]);")
 
 * 根拠: `// 完了済み/申請中クエストの「取り消し」を、うっかりタップで発火させないための\n// 長押しジェスチャー用フック。閾値に達したら onLongPress、\n// 達する前に指を離したら onShortTap を呼ぶ。` (行番号: 25〜27)
 * 根拠: `thresholdMs?: number;` (行番号: 7), `thresholdMs = 600,` (行番号: 31)
@@ -41,20 +43,20 @@
 
 ### `UseLongPressOptions` (型定義)
 
-* **役割**: `useLongPress`が受け取る引数の型定義。長押し時のコールバック(`onLongPress`、必須)、短タップ時のコールバック(`onShortTap`、任意)、長押し判定の閾値ミリ秒(`thresholdMs`、任意)、フック自体の無効化フラグ(`disabled`、任意)を持つ。
-* 根拠: `interface UseLongPressOptions {\n    onLongPress: () => void;\n    // 長押しに達しなかった場合の通常タップ。渡さなければ短タップは何もしない。\n    onShortTap?: () => void;\n    thresholdMs?: number;\n    disabled?: boolean;\n}` (行番号: 3〜9)
+* **役割**: `useLongPress`が受け取る引数の型定義。長押し時のコールバック(`onLongPress`、必須)、短タップ時のコールバック(`onShortTap`、任意)、長押し判定の閾値ミリ秒(`thresholdMs`、任意)、フック自体の無効化フラグ(`disabled`、任意)、長押し発火後にclickを無視する猶予ミリ秒(`clickSuppressMs`、任意、Issue #389で追加)を持つ。
+* 根拠: `interface UseLongPressOptions {\n    onLongPress: () => void;\n    // 長押しに達しなかった場合の通常タップ。渡さなければ短タップは何もしない。\n    onShortTap?: () => void;\n    thresholdMs?: number;\n    disabled?: boolean;\n    // #389: 長押し発火後、この時間内に届いた click を「直前の長押しの余韻」とみなして\n    // 呼び出し側が無視できるようにするための猶予時間。\n    clickSuppressMs?: number;\n}` (行番号: 3〜12)
 
 
 ### `UseLongPressResult` (型定義)
 
-* **役割**: `useLongPress`の戻り値の型定義。押下経過割合(`pressProgress`)、押下中フラグ(`isPressing`)、DOM要素に紐付ける4種のポインターイベントハンドラ(`handlers`)を持つ。
-* 根拠: `interface UseLongPressResult {\n    // 押し始めてからの経過割合(0〜1)。長押し中のプログレス表示に使う\n    pressProgress: number;\n    isPressing: boolean;\n    handlers: {\n        onPointerDown: (e: React.PointerEvent) => void;\n        onPointerUp: (e: React.PointerEvent) => void;\n        onPointerLeave: (e: React.PointerEvent) => void;\n        onPointerCancel: (e: React.PointerEvent) => void;\n    };\n}` (行番号: 11〜21)
+* **役割**: `useLongPress`の戻り値の型定義。押下経過割合(`pressProgress`)、押下中フラグ(`isPressing`)、直近の長押し発火が猶予時間内かを返す`wasFiredRecently`(Issue #389で追加)、DOM要素に紐付ける4種のポインターイベントハンドラ(`handlers`)を持つ。
+* 根拠: `interface UseLongPressResult {\n    // 押し始めてからの経過割合(0〜1)。長押し中のプログレス表示に使う\n    pressProgress: number;\n    isPressing: boolean;\n    // #389: 直近 clickSuppressMs 以内に onLongPress が発火したかどうか。\n    ...\n    wasFiredRecently: () => boolean;\n    handlers: {\n        onPointerDown: (e: React.PointerEvent) => void;\n        onPointerUp: (e: React.PointerEvent) => void;\n        onPointerLeave: (e: React.PointerEvent) => void;\n        onPointerCancel: (e: React.PointerEvent) => void;\n    };\n}` (行番号: 14〜30)
 
 
-### `PROGRESS_TICK_MS` (モジュールレベル定数)
+### `PROGRESS_TICK_MS` / `DEFAULT_CLICK_SUPPRESS_MS` (モジュールレベル定数)
 
-* **役割**: `pressProgress`を更新する間隔（ミリ秒）。値は`30`。
-* 根拠: `const PROGRESS_TICK_MS = 30;` (行番号: 23)
+* **役割**: `PROGRESS_TICK_MS`は`pressProgress`を更新する間隔（ミリ秒）で値は`30`。`DEFAULT_CLICK_SUPPRESS_MS`は`clickSuppressMs`未指定時の既定値で`400`（Issue #389で追加）。
+* 根拠: `const PROGRESS_TICK_MS = 30;\nconst DEFAULT_CLICK_SUPPRESS_MS = 400;` (行番号: 31〜32)
 
 
 ### `useLongPress`
@@ -80,7 +82,8 @@
   - 根拠: `const endPress = useCallback((triggerShortTap: boolean) => {\n        clearTimers();\n        setIsPressing(false);\n        setPressProgress(0);\n        if (triggerShortTap && !firedRef.current && onShortTap) {\n            onShortTap();\n        }\n    }, [clearTimers, onShortTap]);` (行番号: 72〜79)
 
 
-  - `thresholdMs`到達時（`setTimeout`コールバック内）、`firedRef.current`を`true`にし、タイマーを停止、状態をリセットしたうえで`onLongPress`を呼び出す
+  - `thresholdMs`到達時（`setTimeout`コールバック内）、`firedRef.current`を`true`にし、`lastFiredAtRef.current`に発火時刻(`Date.now()`)を記録し（Issue #389）、タイマーを停止、状態をリセットしたうえで`onLongPress`を呼び出す
+  - 根拠: `lastFiredAtRef.current = Date.now();` (行番号: 77)
   - 根拠: `timeoutRef.current = window.setTimeout(() => {\n            firedRef.current = true;\n            clearTimers();\n            setIsPressing(false);\n            setPressProgress(0);\n            onLongPress();\n        }, thresholdMs);` (行番号: 63〜69)
 
 
@@ -98,6 +101,15 @@
 * 根拠: (行番号: 1, 81 / 抜粋: "import { useCallback, useEffect, useRef, useState } from 'react';", "useEffect(() => clearTimers, [clearTimers]);")
 
 
+
+### `wasFiredRecently` (内部関数、戻り値として公開。Issue #389で追加)
+
+* **役割**: `lastFiredAtRef.current`が`null`でなく、かつ現在時刻との差が`clickSuppressMs`未満なら`true`を返す。長押し発火直後の`click`を呼び出し側が無視するための判定関数。`useCallback`で`clickSuppressMs`にのみ依存する。
+* 根拠: `const wasFiredRecently = useCallback((): boolean => {\n        const firedAt = lastFiredAtRef.current;\n        return firedAt !== null && Date.now() - firedAt < clickSuppressMs;\n    }, [clickSuppressMs]);` (行番号: 96〜99)
+* **引数/リクエスト**: なし
+* **戻り値/レスポンス**: `boolean`
+* **副作用**: なし
+* **エラーハンドリング**: なし
 
 ### `clearTimers` (内部関数)
 
@@ -220,6 +232,8 @@ graph TD
 * 根拠: `intervalRef.current = window.setInterval(() => {\n            setPressProgress(Math.min(1, (Date.now() - startedAt) / thresholdMs));\n        }, PROGRESS_TICK_MS);` (行番号: 59〜61), `timeoutRef.current = window.setTimeout(() => {` (行番号: 63)
 * `firedRef`は`useRef`によるミュータブルな値であり、再レンダリングをトリガーしない。`onPointerDown`のたびに`false`へリセットされ、`onLongPress`発火時のみ`true`になる。この値により、長押し発火後に指を離した際の`endPress(true)`が誤って`onShortTap`を呼ばないよう防いでいる。
 * 根拠: `firedRef.current = false;` (行番号: 54), `firedRef.current = true;` (行番号: 64), `if (triggerShortTap && !firedRef.current && onShortTap) {` (行番号: 76)
+* **長押し発火後のclick競合ガード（Issue #389）**: 本フックは長押し発火後の`click`イベント自体を抑止しない（`handlers`に`onClick`は含まれない）。`QuestList.tsx`は`canCancel`の真偽で`onClick`と本フックの`handlers`を差し替えるため、長押し（取消）の直後に再取得で`canCancel`が偽になると、本フックの`handlers`が外れた同じDOMノードに`onClick`が付き、指を離した瞬間の`click`が届く。そのため抑止は呼び出し側の`onClick`ハンドラが`wasFiredRecently()`を見て行う設計にしている（`lastFiredAtRef`はフックインスタンスに紐づくため、`handlers`が外れても値は保持される）。`clickSuppressMs`は既定400msで、これより遅い通常タップは受け付ける。
+* 根拠: (行番号: 8〜11, 18〜22, 48, 77, 96〜99)
 * `onPointerLeave`/`onPointerCancel`にはハンドラの引数として渡される`PointerEvent`に対して`stopPropagation()`が呼ばれていない（`onPointerDown`/`onPointerUp`のみ呼ばれている）。要素外へポインターが離脱した際にイベントが親要素へ伝播する可能性がある。
 * 根拠: `const onPointerLeave = useCallback(() => {\n        endPress(false);\n    }, [endPress]);` (行番号: 88〜90)
 * **バグ修正: アンマウント時のタイマークリーンアップ漏れ**: 以前は`clearTimers`の呼び出しが`onPointerUp`/`onPointerLeave`/`onPointerCancel`または`thresholdMs`到達時にのみ発生し、フック自体のアンマウント時に呼び出す`useEffect`のクリーンアップ関数が定義されていなかった。押下状態のままコンポーネント（クエストカード等）がアンマウントされた場合、`setTimeout`/`setInterval`が残存し、アンマウント後に`onLongPress`が発火したり破棄済みコンポーネントに対する`setState`が呼ばれたりする可能性があった。`useEffect(() => clearTimers, [clearTimers])`を追加し、アンマウント時に`clearTimers`を確実に呼び出すよう修正した。
@@ -235,7 +249,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(95〜99行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel, thresholdMs: 550 })`として呼び出されており、`onShortTap`は渡されていない（＝短タップでは何も起きない）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(179行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`div`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:95-99,179` |
+| `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`に実際渡される値、および`handlers`が紐付けられるDOM要素 | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(110〜114行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel, thresholdMs: 550 })`として呼び出されており、`onShortTap`・`clickSuppressMs`は渡されていない（＝短タップでは何も起きず、猶予は既定の400ms）。戻り値の`wasFiredRecently`は`handleTapComplete`(119〜126行目)で`if (wasFiredRecently()) return;`として使われている（Issue #389）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(179行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`div`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:95-99,179` |
 
 ## 10. 自己検証結果
 

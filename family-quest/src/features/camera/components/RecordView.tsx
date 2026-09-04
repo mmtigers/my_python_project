@@ -13,6 +13,9 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
     const [playUrlSuffix, setPlayUrlSuffix] = useState<string | null>(null);
     const [startOffsets, setStartOffsets] = useState<{ [key: string]: number }>({});
     const [validationError, setValidationError] = useState<string | null>(null);
+    // #392(F-L4): 「再生開始」押下後、各カメラのオフセット取得(API)が終わるまでの busy 状態。
+    // 以前は表示が変わらず、連打すると同じ取得が並行して走っていた。
+    const [isPreparing, setIsPreparing] = useState(false);
     const timeInputRef = useRef<HTMLInputElement>(null); // ★追加: input要素への参照用
 
     const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
@@ -30,33 +33,41 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
     }, []);
 
     const handlePlay = async () => {
+        if (isPreparing) return;
         if (!targetDate || !targetTime) {
             // ★変更: 素の alert() を廃止し、入力欄付近にインラインでエラーを表示する
             setValidationError("日付と時刻を指定してください");
             return;
         }
         setValidationError(null);
+        setIsPreparing(true);
 
         const dateStr = targetDate.replace(/-/g, '');
         const [hours, minutes] = targetTime.split(':').map(Number);
         const totalSeconds = hours * 3600 + minutes * 60;
 
-        // 各カメラごとにAPIからオフセットを取得し、正確なシーク位置を計算する
-        const offsets: { [key: string]: number } = {};
-        for (const camera of cameras) {
-            try {
-                const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);
-                // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
-                offsets[camera.id] = Math.max(0, totalSeconds - data.offset_seconds);
-            } catch (err) {
-                console.error("Failed to fetch offset", err);
-                offsets[camera.id] = totalSeconds;
-            }
-        }
+        try {
+            // 各カメラごとにAPIからオフセットを取得し、正確なシーク位置を計算する。
+            // #392(F-L4): 以前はカメラ数分を直列に await していたため待ち時間がカメラ数に
+            // 比例していた。互いに独立した取得なので並列に投げる。
+            const entries = await Promise.all(cameras.map(async (camera) => {
+                try {
+                    const data = await apiClient.get<{ offset_seconds: number }>(`/api/cameras/record/${camera.id}/${dateStr}/info`);
+                    // (指定時刻の総秒数) - (その日の最初のファイルの開始秒数)
+                    return [camera.id, Math.max(0, totalSeconds - data.offset_seconds)] as const;
+                } catch (err) {
+                    console.error("Failed to fetch offset", err);
+                    return [camera.id, totalSeconds] as const;
+                }
+            }));
+            const offsets: { [key: string]: number } = Object.fromEntries(entries);
 
-        setStartOffsets(offsets);
-        // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる
-        setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);
+            setStartOffsets(offsets);
+            // バックエンドが生成するファイル名 (record_YYYYMMDD.m3u8) と一致させる
+            setPlayUrlSuffix(`${dateStr}/record_${dateStr}.m3u8`);
+        } finally {
+            setIsPreparing(false);
+        }
     };
 
     const handleGlobalPlay = () => Object.values(videoRefs.current).forEach(v => v?.play());
@@ -92,8 +103,13 @@ const RecordView: React.FC<RecordViewProps> = ({ cameras }) => {
                         }}
                     />
                 </div>
-                <button className="px-8 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold transition-colors" onClick={handlePlay}>
-                    再生開始
+                <button
+                    className="px-8 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-60 disabled:cursor-wait text-white rounded font-bold transition-colors"
+                    onClick={handlePlay}
+                    disabled={isPreparing}
+                    aria-busy={isPreparing}
+                >
+                    {isPreparing ? '準備中...' : '再生開始'}
                 </button>
             </div>
 

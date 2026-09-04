@@ -28,11 +28,16 @@ echo "--- Cleanup Old Processes ---"
 # (旧 'scheduler.py' は実体 'scheduler_boot.py' と一致せず、再起動のたびに
 #  古いschedulerが生き残って二重起動する原因になっていた。
 #  存在しない 'bluetooth_monitor.py' の行は削除。)
+# (#360: scheduler が起動した監視スクリプト(monitors/*.py)と、ライブ配信/VOD生成の
+#  ffmpeg は旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり
+#  古い設定で DB 書き込み・保持期間削除を続けたりするため、停止対象に含める。)
 CLEANUP_TARGETS=(
   "unified_server.py"
   "camera_monitor.py"
   "scheduler_boot.py"
   "streamlit run"
+  "python.*monitors/[a-z_]*\.py"
+  "ffmpeg.*hls_streams"
 )
 
 # まずは優しく停止 (SIGTERM)

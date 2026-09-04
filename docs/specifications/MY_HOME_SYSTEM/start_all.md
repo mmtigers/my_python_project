@@ -72,6 +72,8 @@
 
 * **役割**: 停止対象プロセス名の配列`CLEANUP_TARGETS`(`unified_server.py`, `camera_monitor.py`, `scheduler_boot.py`, `streamlit run`)を定義し、各対象へ`pkill`でSIGTERMを送って優しく停止させる。以前は`scheduler.py`という実在しないプロセス名を対象にしており実体の`scheduler_boot.py`にマッチしないため旧schedulerプロセスが再起動のたびに生き残っていた点と、存在しない`bluetooth_monitor.py`を対象にしていた点を修正し、実ファイル名の配列に置き換えている。
 * 根拠: クリーンアップ処理ブロックおよび修正コメント (行番号: 24〜36 / 抜粋: "CLEANUP_TARGETS=(")
+* **（Issue #360 で修正）** `CLEANUP_TARGETS` に `python.*monitors/[a-z_]*\.py`（scheduler が起動した監視スクリプト）と `ffmpeg.*hls_streams`（ライブ配信/VOD 生成の ffmpeg）を追加。旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり古い設定で DB 書き込み・保持期間削除を続けたりするため。
+* 根拠: `CLEANUP_TARGETS=(` (行番号: 34〜41)
 
 
 * **引数/リクエスト**: なし
