@@ -28,6 +28,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os`, `sys`, `time`, `socket`, `subprocess`, `uuid`, `platform` | 標準ライブラリ | システム操作、プロセス実行、パス解決、通信等 | 根拠: `import os` など (行番号: 2〜14 / 抜粋: "import os") |
+| `tempfile` | 標準ライブラリ | `capture_snapshot_from_nvr`のスナップショット一時ファイルパスをOS標準の一時ディレクトリ配下に解決するために使用（#414 C-L7で追加。以前は`/tmp/`を直書きしていた） | 根拠: `import tempfile` (行番号: 8 / 抜粋: "import tempfile") |
 | `asyncio` | 標準ライブラリ | 非同期イベントループの実行 | 根拠: `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
 | `logging` | 標準ライブラリ | ログ出力（直接使用せず外部モジュール経由用） | 根拠: `import logging` (行番号: 7 / 抜粋: "import logging") |
 | `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得（`process_camera_event`のエラーログに使用） | 根拠: `import traceback` (行番号: 9 / 抜粋: "import traceback") |
@@ -54,7 +55,7 @@
 | `config` モジュールの詳細 | `CAMERAS`, `ASSETS_DIR`, `MOTION_COOLDOWN_SEC`, `LINE_USER_ID`, `NVR_RECORD_DIR` 等の構造や定義値が本ファイルに存在しないため。 | 根拠: `config.CAMERAS` (行番号: 622 / 抜粋: "for cam in config.CAMERAS") |
 | `save_log_generic` の実装・スキーマ | 関数の内部ロジック、および保存先DBの種類・テーブルスキーマが不明なため。 | 根拠: `save_log_generic("device_records"...` (行番号: 365 / 抜粋: "save_log_generic("device_records") |
 | `send_push` の実装 | プッシュ通知の送信手段（LINE等）や実際の処理内容が不明なため。 | 根拠: `send_push([{"type": "text"...` (行番号: 564 / 抜粋: "send_push(") |
-| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 186 / 抜粋: "nas_folder_name = cam_conf.get(") |
+| NVR（NAS）のディレクトリ構造 | 外部ストレージ上の動画ファイルの配置ルールが環境依存であるため。 | 根拠: `cam_conf.get("nas_folder")` (行番号: 187 / 抜粋: "nas_folder_name = cam_conf.get(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -175,9 +176,11 @@
 ### `capture_snapshot_from_nvr`
 
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
-* 根拠: `capture_snapshot_from_nvr` (行番号: 171〜247 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 171〜249 / 抜粋: "def capture_snapshot_from_nvr(")
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。
-* 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 185)
+* 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 186)
+* **[修正済み] #414 C-L7: スナップショット一時ファイルパスを`tempfile.gettempdir()`経由で解決**: `output_tmp`は以前`f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"`と`/tmp`を直書きしていたが、`os.path.join(tempfile.gettempdir(), f"snapshot_{...}.jpg")`に変更した。実行環境のOS標準一時ディレクトリ（Linuxでは通常`/tmp`のまま、`TMPDIR`環境変数があればそちらに追従）に解決される。テスト側(`tests/test_camera_monitor_low_priority.py`)が並列実行時に実`/tmp`をglobして他プロセスの残骸と衝突する偽陽性を避けられるよう、`tempfile.gettempdir`をmonkeypatchして隔離できるようにするための変更。
+* 根拠: `output_tmp = os.path.join(tempfile.gettempdir(), ...)` (行番号: 205 / 抜粋: "output_tmp = os.path.join(tempfile.gettempdir()")
 
 
 * **引数/リクエスト**: `cam_conf: dict` (カメラ設定), `target_time: dt_class = None` (対象時刻・現在未使用)
@@ -188,12 +191,12 @@
 * 根拠: `capture_snapshot_from_nvr` (行番号: 171 / 抜粋: "-> Optional[bytes]:")
 
 
-* **副作用**: NASフォルダの走査(`glob.glob`)、一時ファイルの作成(`uuid`使用)と削除、外部コマンド(`ffmpeg`)の実行。
-* 根拠: `subprocess.run(cmd` (行番号: 221 / 抜粋: "subprocess.run(cmd,")
+* **副作用**: NASフォルダの走査(`glob.glob`)、一時ファイルの作成(`uuid`使用、`tempfile.gettempdir()`配下)と削除、外部コマンド(`ffmpeg`)の実行。
+* 根拠: `subprocess.run(cmd` (行番号: 223 / 抜粋: "subprocess.run(cmd,")
 
 
-* **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は`/tmp`に`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
-* 根拠: `except subprocess.TimeoutExpired` (行番号: 228 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 239 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 245 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 246 / 抜粋: "except OSError:")
+* **エラーハンドリング**: FFmpegのタイムアウトや実行エラー(`CalledProcessError`, `Exception`)をキャッチし、最大3回のExponential Backoffによるリトライを行う。加えて、リトライループ全体を外側の`try`/`finally`で包み、成功・タイムアウト・リトライ失敗・予期しない例外のいずれの終了経路でも`output_tmp`に残った一時ファイルを`os.remove`で確実に削除する（削除自体が失敗した場合の`OSError`は無視する）。以前は成功時のみ`os.remove`が呼ばれておりタイムアウト等の異常終了時は一時ディレクトリに`snapshot_*.jpg`の残骸が蓄積し続けていたが、この`finally`ブロックにより解消されている。
+* 根拠: `except subprocess.TimeoutExpired` (行番号: 230 / 抜粋: "except subprocess.TimeoutExpired:")、`finally` (行番号: 241 / 抜粋: "finally:")、`os.remove(output_tmp)` (行番号: 247 / 抜粋: "os.remove(output_tmp)")、`except OSError` (行番号: 248 / 抜粋: "except OSError:")
 
 
 
@@ -436,7 +439,7 @@ graph TD
 | 設定値の構造と中身 | 監視対象のカメラ設定リストやNASのパス、クールダウンの秒数などの実際の設定値が不明。 | `config.py` |
 | DBの保存先とスキーマ | 動体検知ログ（`device_records` テーブル）の物理構造およびDBエンジンが不明。 | `core/database.py` |
 | プッシュ通知の仕様 | アラート通知のルーティングロジック、フォーマット変換の仕組みが不明。 | `services/notification_service.py` |
-| NVR上の動画ファイル保存規則 | NAS上に保存される `*.mp4` ファイルの命名規則やディレクトリ階層が不明であり、`glob` 検索時のパフォーマンスに影響する可能性がある。（リポジトリ内を検索したが、NAS/NVR機器側のファイル命名規則を記載した仕様書は存在せず、解消不可。外部NVR機器が管理するストレージ仕様のため。なお`camera_monitor.py`自体は195〜196行目で`os.path.join(nas_folder, "**", "*.mp4")`という再帰globパターンをファイル更新時刻`os.path.getmtime`でソートして使用しており、特定の命名規則には依存しない実装であることは直接確認できた） | 環境または外部仕様書 |
+| NVR上の動画ファイル保存規則 | NAS上に保存される `*.mp4` ファイルの命名規則やディレクトリ階層が不明であり、`glob` 検索時のパフォーマンスに影響する可能性がある。（リポジトリ内を検索したが、NAS/NVR機器側のファイル命名規則を記載した仕様書は存在せず、解消不可。外部NVR機器が管理するストレージ仕様のため。なお`camera_monitor.py`自体は196〜197行目で`os.path.join(nas_folder, "**", "*.mp4")`という再帰globパターンをファイル更新時刻`os.path.getmtime`でソートして使用しており、特定の命名規則には依存しない実装であることは直接確認できた） | 環境または外部仕様書 |
 
 ## 相互参照による補足情報
 
