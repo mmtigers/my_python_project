@@ -110,11 +110,19 @@ async def tool_record_child_health(user_id: str, user_name: str, args: Dict[str,
     """
     child_name = args.get("child_name")
     condition = args.get("condition")
-    
+
+    # Issue #373: AIが必須引数を欠落させた場合(condition=None 等)、そのままDBへ渡すと
+    # NULL の記録が保存されうる。ツール結果として不足を返し、AIに再確認させる。
+    if not child_name or not condition:
+        return "記録失敗: child_name と condition の両方が必要です。"
+
     # 名前の正規化 (config.FAMILY_SETTINGS["members"] とのマッチング)
     # ここではAIが正しい名前(configにある名前)を抽出してくると期待する
-    
+
     msg_obj = await line_service.log_child_health(user_id, user_name, child_name, condition)
+    # Issue #373: 保存失敗時は「記録完了」ではなく失敗であることをAIへ明示する。
+    if msg_obj.text.startswith(line_service.SAVE_FAILED_PREFIX):
+        return f"記録失敗: {msg_obj.text}"
     return f"記録完了: {msg_obj.text}"
 
 
@@ -132,8 +140,15 @@ async def tool_record_food(user_id: str, user_name: str, args: Dict[str, Any]) -
     """
     item = args.get("item")
     category = args.get("category", "その他")
-    
+
+    # Issue #373: 必須引数(item)の欠落はDBへ渡さずツール結果で返す。
+    if not item:
+        return "記録失敗: item(食べたメニュー名) が必要です。"
+
     msg_obj = await line_service.log_food_record(user_id, user_name, category, item, is_manual=True)
+    # Issue #373: 保存失敗時は「記録完了」ではなく失敗であることをAIへ明示する。
+    if msg_obj.text.startswith(line_service.SAVE_FAILED_PREFIX):
+        return f"記録失敗: {msg_obj.text}"
     return f"記録完了: {msg_obj.text}"
 
 

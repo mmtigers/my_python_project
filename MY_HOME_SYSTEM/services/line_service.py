@@ -24,27 +24,42 @@ logger = setup_logging("line_service")
 
 TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
 
+# Issue #373: DB保存失敗時の返信メッセージの共通プレフィックス。
+# 呼び出し元(ai_service のツール関数等)はこのプレフィックスで成否を判別する。
+SAVE_FAILED_PREFIX = "⚠️ 記録に失敗しました"
+
 # ==========================================
 # 1. Logging & Health (Existing)
 # ==========================================
 
 async def log_child_health(user_id: str, user_name: str, child_name: str, condition: str) -> TextMessage:
     """子供の体調を記録し、返信メッセージを返す"""
-    await save_log_async(
+    # Issue #373: save_log_async は Fail-Soft で False を返す(DBロック超過・ディスクフル・
+    # NOT NULL違反等)。以前は戻り値を無視して成功メッセージを組み立てていたため、
+    # 保存されていないのに「記録しました」と返す無言のデータ欠損が起きていた
+    # (line_logic.py 側は H-7 で修正済み。こちらは未修正だった)。
+    save_ok = await save_log_async(
         config.SQLITE_TABLE_CHILD,
         ["user_id", "user_name", "child_name", "condition", "timestamp"],
         (user_id, user_name, child_name, condition, get_now_iso())
     )
+    if not save_ok:
+        logger.error(f"log_child_health の記録保存に失敗しました (user_id={user_id}, child={child_name})")
+        return TextMessage(text=f"{SAVE_FAILED_PREFIX}。【{child_name}】{condition} は保存されていません。もう一度お試しください。")
     return TextMessage(text=f"【{child_name}】{condition} を記録しました！🏥")
 
 async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:
     """食事を記録し、返信メッセージを返す"""
     final_rec = f"{category}: {item}" + (" (手入力)" if is_manual else "")
-    await save_log_async(
+    # Issue #373: log_child_health と同様に save_log_async の戻り値を確認する。
+    save_ok = await save_log_async(
         config.SQLITE_TABLE_FOOD,
         ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
         (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())
     )
+    if not save_ok:
+        logger.error(f"log_food_record の記録保存に失敗しました (user_id={user_id}, item={item})")
+        return TextMessage(text=f"{SAVE_FAILED_PREFIX}。{category}「{item}」は保存されていません。もう一度お試しください。")
     return TextMessage(text=f"🍽️ {category}「{item}」を記録しました！")
 
 async def log_daily_action(user_id: str, user_name: str, action_type: str, value: str) -> None:

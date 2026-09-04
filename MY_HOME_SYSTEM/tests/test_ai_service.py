@@ -879,3 +879,72 @@ class TestSearchDbEndToEndWithRealDb:
         result = await ai_service.tool_search_db({"sql_query": _BYPASS_SQLS[form]})
         assert result.startswith("エラー:")
         assert "SECRET_NAME" not in result
+
+
+class TestToolRecordFunctionsReportSaveFailure:
+    """Issue #373: line_service 側が保存失敗メッセージ(SAVE_FAILED_PREFIX)を返した場合、
+    ツール結果は「記録完了:」ではなく「記録失敗:」で始まり、AIが成功と誤認しないこと。
+    また必須引数の欠落はDBへ渡さずツール結果で返すこと。"""
+
+    @pytest.mark.asyncio
+    async def test_tool_record_child_health_reports_failure_prefix(self, monkeypatch):
+        failed_text = f"{ai_service.line_service.SAVE_FAILED_PREFIX}。【智矢】元気 は保存されていません。"
+        monkeypatch.setattr(
+            ai_service.line_service, "log_child_health", AsyncMock(return_value=MagicMock(text=failed_text))
+        )
+
+        result = await ai_service.tool_record_child_health(
+            "U1", "太郎", {"child_name": "智矢", "condition": "元気"}
+        )
+
+        assert result.startswith("記録失敗:")
+        assert "記録完了" not in result
+
+    @pytest.mark.asyncio
+    async def test_tool_record_food_reports_failure_prefix(self, monkeypatch):
+        failed_text = f"{ai_service.line_service.SAVE_FAILED_PREFIX}。夕食「カレー」は保存されていません。"
+        monkeypatch.setattr(
+            ai_service.line_service, "log_food_record", AsyncMock(return_value=MagicMock(text=failed_text))
+        )
+
+        result = await ai_service.tool_record_food("U1", "太郎", {"item": "カレー", "category": "夕食"})
+
+        assert result.startswith("記録失敗:")
+        assert "記録完了" not in result
+
+    @pytest.mark.asyncio
+    async def test_tool_record_child_health_missing_condition_is_not_saved(self, monkeypatch):
+        mock_log = AsyncMock()
+        monkeypatch.setattr(ai_service.line_service, "log_child_health", mock_log)
+
+        result = await ai_service.tool_record_child_health("U1", "太郎", {"child_name": "智矢"})
+
+        assert result.startswith("記録失敗:")
+        mock_log.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_record_food_missing_item_is_not_saved(self, monkeypatch):
+        mock_log = AsyncMock()
+        monkeypatch.setattr(ai_service.line_service, "log_food_record", mock_log)
+
+        result = await ai_service.tool_record_food("U1", "太郎", {"category": "夕食"})
+
+        assert result.startswith("記録失敗:")
+        mock_log.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_save_failure_reaches_ai_as_tool_result(self, isolated_db, ai_configured, monkeypatch):
+        """analyze_text_and_execute 経由でも失敗が tool_result(function_response)に反映されること"""
+        import common
+
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
+        monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
+        fc = make_function_call("record_child_health", {"child_name": "智矢", "condition": "元気"})
+        mock_retry = AsyncMock(side_effect=[make_response(function_call=fc), ResourceExhausted("quota")])
+        monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
+
+        result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢は元気")
+
+        # 2回目呼び出しが失敗した場合は tool_result がそのままユーザーへ返るため、失敗文言が見える
+        assert "記録失敗:" in result

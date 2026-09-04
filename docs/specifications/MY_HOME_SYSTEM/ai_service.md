@@ -106,47 +106,47 @@
 
 ### `tool_record_child_health` (関数)
 
-* **役割**: 子供の体調を記録するため `line_service.log_child_health` を呼び出し、結果メッセージを返す。
-* 根拠: `async def tool_record_child_health` (行番号: 91 / 抜粋: "async def tool_record_child_health")
+* **役割**: 子供の体調を記録するため `line_service.log_child_health` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `child_name`/`condition`のいずれかが欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また`log_child_health`の返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録完了:"`ではなく`"記録失敗: ..."`を返し、AIが保存成功と誤認して完了報告しないようにする。
+* 根拠: `async def tool_record_child_health` (行番号: 99 / 抜粋: "async def tool_record_child_health")、引数欠落チェック (行番号: 116-117)、失敗プレフィックス判定 (行番号: 124-125)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 91 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (行番号: 99 / 抜粋: "user_id: str, user_name: str")
 
 
-* **戻り値/レスポンス**: `str`
-* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号: 110 / 抜粋: "return f"記録完了: {msg_obj.text}"")
+* **戻り値/レスポンス**: `str`。成功時`f"記録完了: {msg_obj.text}"`、保存失敗時`f"記録失敗: {msg_obj.text}"`、引数欠落時`"記録失敗: child_name と condition の両方が必要です。"`。
+* 根拠: (行番号: 117, 125, 126 / 抜粋: "return f\"記録完了: {msg_obj.text}\"")
 
 
-* **副作用**: `line_service.log_child_health` の呼び出し（外部サービス・DB操作の可能性）
-* 根拠: `await line_service.log_child_health` (行番号: 109 / 抜粋: "await line_service.log_child_health")
+* **副作用**: `line_service.log_child_health` の呼び出し（外部サービス・DB操作の可能性）。引数欠落時は呼び出さない。
+* 根拠: `await line_service.log_child_health` (行番号: 122 / 抜粋: "await line_service.log_child_health")
 
 
-* **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 109 / 抜粋: "msg_obj = await line_service")
+* **エラーハンドリング**: try-except構文なし。引数欠落および保存失敗（返信本文のプレフィックス判定）を戻り値で表現する（Issue #373）。
+* 根拠: (行番号: 116-117, 124-125)
 
 
 
 ### `tool_record_food` (関数)
 
-* **役割**: 食事の内容を記録するため `line_service.log_food_record` を呼び出し、結果メッセージを返す。
-* 根拠: `async def tool_record_food` (行番号: 113 / 抜粋: "async def tool_record_food")
+* **役割**: 食事の内容を記録するため `line_service.log_food_record` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `item`が欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録失敗: ..."`を返す（`tool_record_child_health`と同様）。
+* 根拠: `async def tool_record_food` (行番号: 129 / 抜粋: "async def tool_record_food")、引数欠落チェック (行番号: 145-146)、失敗プレフィックス判定 (行番号: 150-151)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
-* 根拠: 関数シグネチャ (行番号: 113 / 抜粋: "user_id: str, user_name: str")
+* 根拠: 関数シグネチャ (行番号: 129 / 抜粋: "user_id: str, user_name: str")
 
 
-* **戻り値/レスポンス**: `str`
-* 根拠: `return f"記録完了: {msg_obj.text}"` (行番号: 129 / 抜粋: "return f"記録完了: {msg_obj.text}"")
+* **戻り値/レスポンス**: `str`。成功時`f"記録完了: {msg_obj.text}"`、保存失敗時`f"記録失敗: {msg_obj.text}"`、引数欠落時`"記録失敗: item(食べたメニュー名) が必要です。"`。
+* 根拠: (行番号: 146, 151, 152 / 抜粋: "return f\"記録完了: {msg_obj.text}\"")
 
 
-* **副作用**: `line_service.log_food_record` の呼び出し（外部サービス・DB操作の可能性）
-* 根拠: `await line_service.log_food_record` (行番号: 128 / 抜粋: "await line_service.log_food_record")
+* **副作用**: `line_service.log_food_record` の呼び出し（外部サービス・DB操作の可能性）。引数欠落時は呼び出さない。
+* 根拠: `await line_service.log_food_record` (行番号: 148 / 抜粋: "await line_service.log_food_record")
 
 
-* **エラーハンドリング**: なし
-* 根拠: try-except構文なし (行番号: 128 / 抜粋: "msg_obj = await line_service")
+* **エラーハンドリング**: try-except構文なし。引数欠落および保存失敗（返信本文のプレフィックス判定）を戻り値で表現する（Issue #373）。
+* 根拠: (行番号: 145-146, 150-151)
 
 
 

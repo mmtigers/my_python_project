@@ -43,55 +43,60 @@
 | --- | --- | --- |
 | `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 28 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
 | `common.get_db_cursor` | トランザクション管理やDB接続の詳細な仕組みが不明。 | `with common.get_db_cursor() a...` (行番号: 73 / 抜粋: "with common.get_db_cursor() a...") |
-| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。 | `await save_log_async(...)` (行番号: 36 / 抜粋: "await save_log_async(") |
+| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 41 / 抜粋: "save_ok = await save_log_async(") |
 | `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 110 / 抜粋: "data = await asyncio.to_threa...") |
 | `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 181 / 抜粋: "res = await asyncio.to_thread...") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `SAVE_FAILED_PREFIX` (変数、Issue #373で追加)
+
+* **役割**: `log_child_health` / `log_food_record` がDB保存に失敗したときに返す`TextMessage`本文の共通プレフィックス `"⚠️ 記録に失敗しました"`。呼び出し元（`ai_service.tool_record_child_health` / `tool_record_food`）はこのプレフィックスで返信の成否を判別する。
+* 根拠: `SAVE_FAILED_PREFIX = "⚠️ 記録に失敗しました"` (行番号: 29)
+
 ### `log_child_health`
 
-* **役割**: 子供の体調をDBに記録し、記録完了の`TextMessage`を返す。
-* 根拠: `async def log_child_health...` (行番号: 34-41 / 抜粋: "def log_child_health(user_id:")
+* **役割**: 子供の体調をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `save_log_async`の戻り値（Fail-Softで`False`）を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージ（保存されていない旨と再試行の案内）を返す。以前は戻り値を無視して常に成功メッセージを組み立てていたため、DBロック超過・ディスクフル等で保存されていないのに「記録しました」と返す無言のデータ欠損が起きていた（`line_logic.py`側はH-7で修正済みだったが本関数は未修正だった）。
+* 根拠: `async def log_child_health...` (行番号: 35-49 / 抜粋: "def log_child_health(user_id:")、`save_ok = await save_log_async(` (行番号: 41)、`if not save_ok:` (行番号: 46-48)
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `child_name` (str), `condition` (str)
-* 根拠: 関数の引数定義 (行番号: 34 / 抜粋: "user_id: str, user_name: str,")
+* 根拠: 関数の引数定義 (行番号: 35 / 抜粋: "user_id: str, user_name: str,")
 
 
-* **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 34 / 抜粋: "-> TextMessage:")
+* **戻り値/レスポンス**: `TextMessage`。成功時は`"【{child_name}】{condition} を記録しました！🏥"`、保存失敗時は`f"{SAVE_FAILED_PREFIX}。【{child_name}】{condition} は保存されていません。もう一度お試しください。"`。
+* 根拠: 戻り値の型ヒント (行番号: 35 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 48)、成功時 (行番号: 49)
 
 
-* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。
-* 根拠: `await save_log_async...` (行番号: 36 / 抜粋: "await save_log_async(")
+* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。
+* 根拠: `save_ok = await save_log_async(` (行番号: 41)、`logger.error(f"log_child_health の記録保存に失敗しました ...")` (行番号: 47)
 
 
-* **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理(`try-except`)なし (行番号: 34-41 / 抜粋: "該当ブロック内に例外処理なし")
+* **エラーハンドリング**: `try-except`は無いが、`save_log_async`の戻り値`False`を失敗として扱い失敗メッセージを返す（Issue #373）。
+* 根拠: `if not save_ok:` (行番号: 46-48)
 
 
 
 ### `log_food_record`
 
-* **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。
-* 根拠: `async def log_food_record...` (行番号: 43-51 / 抜粋: "def log_food_record(user_id:")
+* **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `log_child_health`と同様に`save_log_async`の戻り値を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージを返す。
+* 根拠: `async def log_food_record...` (行番号: 51-63 / 抜粋: "def log_food_record(user_id:")、`save_ok = await save_log_async(` (行番号: 55)、`if not save_ok:` (行番号: 60-62)
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `category` (str), `item` (str), `is_manual` (bool, デフォルト `False`)
-* 根拠: 関数の引数定義 (行番号: 43 / 抜粋: "category: str, item: str, is_")
+* 根拠: 関数の引数定義 (行番号: 51 / 抜粋: "category: str, item: str, is_")
 
 
-* **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 43 / 抜粋: "-> TextMessage:")
+* **戻り値/レスポンス**: `TextMessage`。成功時は`"🍽️ {category}「{item}」を記録しました！"`、保存失敗時は`f"{SAVE_FAILED_PREFIX}。{category}「{item}」は保存されていません。もう一度お試しください。"`。
+* 根拠: 戻り値の型ヒント (行番号: 51 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 62)、成功時 (行番号: 63)
 
 
-* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。
-* 根拠: `await save_log_async...` (行番号: 46 / 抜粋: "await save_log_async(")
+* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。
+* 根拠: `save_ok = await save_log_async(` (行番号: 55)、`logger.error(f"log_food_record の記録保存に失敗しました ...")` (行番号: 61)
 
 
-* **エラーハンドリング**: なし
-* 根拠: 該当ブロック内に例外処理なし (行番号: 43-51 / 抜粋: "該当ブロック内に例外処理なし")
+* **エラーハンドリング**: `try-except`は無いが、`save_log_async`の戻り値`False`を失敗として扱い失敗メッセージを返す（Issue #373）。
+* 根拠: `if not save_ok:` (行番号: 60-62)
 
 
 

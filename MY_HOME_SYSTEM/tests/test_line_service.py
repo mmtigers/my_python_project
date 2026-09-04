@@ -6,6 +6,7 @@ import os
 import sys
 
 import pytest
+from unittest.mock import AsyncMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -197,3 +198,53 @@ class TestProcessApprovalCommand:
         import inspect
         source = inspect.getsource(line_service.process_approval_command)
         assert "bossEffect" not in source
+
+
+@pytest.mark.asyncio
+class TestSaveFailureIsReportedToUser:
+    """Issue #373: save_log_async は Fail-Soft で False を返すが、log_child_health /
+    log_food_record は戻り値を無視して成功メッセージを返していた(無言のデータ欠損)。
+    失敗時は SAVE_FAILED_PREFIX で始まる失敗メッセージを返し、「記録しました」と
+    言わないこと。"""
+
+    async def test_log_child_health_reports_failure_when_save_returns_false(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(line_service, "save_log_async", AsyncMock(return_value=False))
+
+        result = await line_service.log_child_health("U1", "太郎", "智矢", "元気")
+
+        assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
+        assert "智矢" in result.text
+        assert "記録しました" not in result.text
+
+    async def test_log_food_record_reports_failure_when_save_returns_false(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(line_service, "save_log_async", AsyncMock(return_value=False))
+
+        result = await line_service.log_food_record("U1", "太郎", "夕食", "カレー", is_manual=True)
+
+        assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
+        assert "カレー" in result.text
+        assert "記録しました" not in result.text
+
+    async def test_log_child_health_reports_failure_on_real_db_error(self, isolated_db):
+        """モックではなく実際のDBエラー(テーブル欠落)経由でも失敗メッセージになること"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
+
+        result = await line_service.log_child_health("U1", "太郎", "智矢", "元気")
+
+        assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
+
+    async def test_log_food_record_reports_failure_on_real_db_error(self, isolated_db):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(f"DROP TABLE {config.SQLITE_TABLE_FOOD}")
+
+        result = await line_service.log_food_record("U1", "太郎", "夕食", "カレー")
+
+        assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
+
+    async def test_success_message_does_not_start_with_failure_prefix(self, isolated_db):
+        """成功時のメッセージが失敗プレフィックスと誤判定されないこと(ai_service側の判定の前提)"""
+        health = await line_service.log_child_health("U1", "太郎", "智矢", "元気")
+        food = await line_service.log_food_record("U1", "太郎", "夕食", "カレー")
+        assert not health.text.startswith(line_service.SAVE_FAILED_PREFIX)
+        assert not food.text.startswith(line_service.SAVE_FAILED_PREFIX)
