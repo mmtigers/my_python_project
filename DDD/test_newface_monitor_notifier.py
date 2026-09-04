@@ -66,6 +66,74 @@ def test_valid_http_image_url_is_kept_in_thumbnail():
     assert payload["embeds"][0]["thumbnail"] == {"url": image_url}
 
 
+class TestEmbedFieldTruncation:
+    """D-L6: Discord embedのtitle(256文字)/field.value(1024文字)上限を超える
+    キャスト名等を送信すると、embed全体が400 Bad Requestで拒否されうる。
+    送信前に安全側で切り詰めることを確認する。"""
+
+    def test_long_cast_name_is_truncated_in_title_and_name_field(self):
+        long_name = "あ" * 400  # embedのtitle/field.value上限を大きく超える長さ
+        payload = _notify_and_capture_payload(
+            CastMember(
+                id="cast-1", name=long_name,
+                detail_url="https://example.test/profile/1", image_url="", age="",
+            )
+        )
+        embed = payload["embeds"][0]
+        assert len(embed["title"]) <= DiscordNotifier._EMBED_TITLE_MAX_LEN
+        name_field = next(f for f in embed["fields"] if f["name"] == "Name")
+        assert len(name_field["value"]) <= DiscordNotifier._EMBED_FIELD_VALUE_MAX_LEN
+        # 元の名前が丸ごと欠落せず、先頭部分は保持されていること
+        assert embed["title"].startswith("✨ 新人キャスト情報【テストサイト】: " + "あ" * 10)
+
+    def test_short_cast_name_is_not_modified(self):
+        payload = _notify_and_capture_payload(_make_cast(""))
+        embed = payload["embeds"][0]
+        assert embed["title"] == "✨ 新人キャスト情報【テストサイト】: テストキャスト"
+        name_field = next(f for f in embed["fields"] if f["name"] == "Name")
+        assert name_field["value"] == "テストキャスト"
+
+
+class TestNotifyReturnsSentCount:
+    """D-L9: notify()は実際にDiscordへ送信できた件数を返し、サーキット
+    ブレーカーで送信をスキップしたキャストは計上しないこと。"""
+
+    def test_returns_zero_when_webhook_not_configured(self):
+        notifier = DiscordNotifier(webhook_url="")
+        result = notifier.notify([_make_cast("")], site_name="テストサイト")
+        assert result == 0
+
+    def test_returns_count_of_successful_sends(self, monkeypatch):
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        response = MagicMock()
+        response.raise_for_status.return_value = None
+        notifier.session.post = MagicMock(return_value=response)
+
+        casts = [_make_cast("") for _ in range(3)]
+        result = notifier.notify(casts, site_name="テストサイト")
+
+        assert result == 3
+
+    def test_casts_skipped_by_open_circuit_breaker_are_not_counted(self, monkeypatch):
+        """連続失敗でブレーカーが開いた後にスキップされたキャストは、
+        戻り値の送信済み件数に含まれないこと(#395より前は呼び出し元が
+        len(new_casts)を無条件に使っており、日次サマリが過大報告していた)。"""
+        import requests
+
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        notifier.session.post = MagicMock(side_effect=requests.exceptions.ConnectionError("boom"))
+
+        # 既定の閾値(3)を超える件数を渡す。3回失敗した時点でブレーカーが開き、
+        # 残りは送信自体が試みられない。
+        casts = [_make_cast("") for _ in range(6)]
+        result = notifier.notify(casts, site_name="テストサイト")
+
+        assert result == 0  # 1件も成功していない
+        assert notifier._circuit_breaker.is_open is True
+
+
 def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatch, tmp_path):
     known_casts = {
         CastMember(id=f"known-{i}", name=f"既存{i}", detail_url="https://example.test/", image_url="")

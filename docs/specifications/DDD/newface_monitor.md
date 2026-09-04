@@ -141,10 +141,10 @@
 * 根拠: [try-exceptブロックとコメント] (行番号: 83〜85, 96〜99, 101〜103 / 抜粋: "# 最終的にアクセスできない場合はパニックを起こさずFalseを返す\n        logger.error(f"Storage warmup failed after {max_retries} attempts.")\n        return False")
 
 
-### `AGE_PATTERN` (モジュール定数)
+### `AGE_PATTERN` (モジュール定数)（D-L12で変更）
 
-* **役割**: 名前要素のテキストから年齢を抽出するための正規表現。"うるは(23歳)"のような全角/半角括弧付き数字、または「歳」「才」が続く数字表記のいずれかにマッチする。ランキングバッジ等の1桁の括弧数字（例: "(1)"）を誤って年齢と判定しないよう、桁数を2桁に限定している。
-* 根拠: [定義とコメント] (行番号: 115〜121 / 抜粋: "# 名前要素のテキストから年齢を抽出するための正規表現。\n# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、\n...\nAGE_PATTERN = re.compile(r'[（(]\\s*(\\d{2})\\s*(?:歳|才)?\\s*[）)]|(\\d{2})\\s*(?:歳|才)')")
+* **役割**: 名前要素のテキストから年齢を抽出するための正規表現。"うるは(23歳)"のような全角/半角括弧付き数字、または「歳」「才」が続く数字表記のいずれかにマッチする。ランキングバッジ等の1桁の括弧数字（例: "(1)"）を誤って年齢と判定しないよう、桁数を2桁に限定している。**（D-L12で変更）** 括弧内の「歳」「才」の有無を判別できるよう、以前は非捕捉グループだった`(?:歳|才)?`を捕捉グループ`(歳|才)?`に変更した。マッチ結果は3グループ: `group(1)`＝括弧内の数字、`group(2)`＝括弧内の「歳」「才」（無ければ`None`）、`group(3)`＝括弧無しで「歳」「才」が続く数字。呼び出し側（`_parse_html`）は、`group(2)`が`None`（＝括弧内に「歳」「才」の明示が無い）の場合のみ、`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲かどうかで年齢として採用するか判定する（詳細は`WebMonitor._parse_html`参照）。以前は括弧内の数字を「歳」「才」の有無に関わらず無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。
+* 根拠: [定義とコメント] (行番号: 116〜129 / 抜粋: "# 名前要素のテキストから年齢を抽出するための正規表現。\n# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、\n...\n# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも\n# 無条件に年齢とみなしていたため" / "AGE_PATTERN = re.compile(r'[（(]\\s*(\\d{2})\\s*(歳|才)?\\s*[）)]|(\\d{2})\\s*(?:歳|才)')")
 
 
 ### `SiteConfig`
@@ -194,6 +194,10 @@
 
 * **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
 * 根拠: [定数定義とコメント] (行番号: 1194〜1196 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
+
+
+* **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._parse_html`のAge Extraction部分で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
+* 根拠: [定数定義とコメント] (行番号: 1207〜1211 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
 
 
 * **`CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24`について（2026-09-02のbellica閉鎖対応で追加）**: ネットワーク起因の巡回失敗がこの回数連続したサイトを「閉鎖・移転の疑い」としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格するための閾値。1時間毎のcron実行前提で約1日分に相当する。2026-09-02のbellica閉鎖時に、消失したサイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の再発防止として導入された。
@@ -312,6 +316,21 @@
 * **エラーハンドリング**: なし
 
 
+### `DiscordNotifier._EMBED_TITLE_MAX_LEN` / `_EMBED_FIELD_VALUE_MAX_LEN` / `_truncate_for_embed`（D-L6で追加）
+
+* **役割**: Discord embedの`title`（実際の上限256文字）・`fields[].value`（実際の上限1024文字）を超えるとembed全体が400 Bad Requestで拒否されるため、安全側の切り詰め上限（クラス定数、いずれも250文字）と、その上限に収まるよう省略記号付きで切り詰める静的メソッド`_truncate_for_embed`を追加した。`cast.name`等は外部サイトのスクレイピング結果であり、サイト側の表示崩れ・異常データで想定外に長くなりうるため送信前に切り詰める対象とする（`site.name`等の開発者管理の文字列は対象外）。
+* 根拠: [クラス定数と静的メソッドの定義] (行番号: 1311〜1326 / 抜粋: "# D-L6: Discord embedのtitle(256文字)/field.value(1024文字)には上限があり、\n    # 超過するとembed全体が400 Bad Requestで拒否される。" / "_EMBED_TITLE_MAX_LEN = 250\n    _EMBED_FIELD_VALUE_MAX_LEN = 250" / "def _truncate_for_embed(text: str, max_len: int) -> str:")
+
+
+* **引数/リクエスト**: `_truncate_for_embed(text: str, max_len: int)`
+* **戻り値/レスポンス**: `str`（`max_len`以下に切り詰められた文字列。切り詰め時は末尾に`"…(省略)"`を付与）
+* 根拠: [戻り値ヒントと処理] (行番号: 1320〜1326 / 抜粋: "def _truncate_for_embed(text: str, max_len: int) -> str:\n        \"\"\"Discord embedの文字数上限に収まるよう、超過分を省略記号付きで切り詰める。\"\"\"\n        if len(text) <= max_len:\n            return text\n        suffix = "…(省略)"\n        return text[: max(max_len - len(suffix), 0)] + suffix")
+
+
+* **副作用**: なし（純粋な文字列処理）
+* **エラーハンドリング**: なし
+
+
 ### `DiscordNotifier.__init__`
 
 * **役割**: Discordへの通知送信を担当するサービスクラスのコンストラクタ。Webhook URLを保持し、レート制限に自動追従するHTTPセッションを生成する。あわせて、このインスタンスの生存期間(=1回のプロセス実行の間)だけ有効な`DiscordCircuitBreaker`インスタンスを生成し保持する。
@@ -367,26 +386,26 @@
 * 根拠: [ガード節] (行番号: 1303 / 抜粋: "if self.session:")
 
 
-### `DiscordNotifier.notify`
+### `DiscordNotifier.notify`（D-L6・D-L9で変更）
 
-* **役割**: 新規キャストのリストを受け取り、各キャストごとにDiscord埋め込みメッセージ(embed)を構築してWebhook経由で送信する。`site_name`が指定されている場合はどのサイトの新着かを区別できるよう埋め込みタイトルに`【サイト名】`のプレフィックスを付与する。Webhook URL未設定時は送信をスキップする。**（本PRで一般化）** 以前は認証エラー(401/404)発生時のみ残りの通知処理を打ち切る簡易的な打ち切りロジックだったが、タイムアウトや接続エラー等の他の失敗モードには対応していなかった。現在は`self._circuit_breaker`（`DiscordCircuitBreaker`）を用い、ループ先頭でブレーカーが開いていれば残りのキャストの送信自体をスキップする。401/404発生時は即座に`trip()`でブレーカーを開き、それ以外の`requests.RequestException`発生時は`record_failure()`で連続失敗を積算し既定3回で開く。
-* 根拠: [メソッド定義とDocstring] (行番号: 1324〜1331 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:\n        """新規キャスト情報をDiscordに通知する。")
+* **役割**: 新規キャストのリストを受け取り、各キャストごとにDiscord埋め込みメッセージ(embed)を構築してWebhook経由で送信する。`site_name`が指定されている場合はどのサイトの新着かを区別できるよう埋め込みタイトルに`【サイト名】`のプレフィックスを付与する。Webhook URL未設定時は送信をスキップする。**（本PRで一般化）** 以前は認証エラー(401/404)発生時のみ残りの通知処理を打ち切る簡易的な打ち切りロジックだったが、タイムアウトや接続エラー等の他の失敗モードには対応していなかった。現在は`self._circuit_breaker`（`DiscordCircuitBreaker`）を用い、ループ先頭でブレーカーが開いていれば残りのキャストの送信自体をスキップする。401/404発生時は即座に`trip()`でブレーカーを開き、それ以外の`requests.RequestException`発生時は`record_failure()`で連続失敗を積算し既定3回で開く。**（D-L6で追加）** embedの`title`（`✨ 新人キャスト情報{site_prefix}: {cast.name}`）と`fields`の`Name`/`Link`の`value`は、いずれも`self._truncate_for_embed`で`_EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`（250文字）に切り詰めてから送信する。`cast.name`はスクレイピング結果でありサイト側の表示崩れ等で想定外に長くなりうるため、Discordの実際の上限（title 256文字、field.value 1024文字）を超えてembed全体が拒否される事態を防ぐ。
+* 根拠: [メソッド定義とDocstring] (行番号: 1367〜1381 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:\n        """新規キャスト情報をDiscordに通知する。")、[D-L6: title/field.valueの切り詰め] (行番号: 1398〜1409, 1422〜1424 / 抜粋: "safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)" / "\"title\": self._truncate_for_embed(\n                            f\"✨ 新人キャスト情報{site_prefix}: {cast.name}\", self._EMBED_TITLE_MAX_LEN\n                        ),")
 
 
 * **引数/リクエスト**: `new_casts: List[CastMember]`（通知対象の新規キャストリスト）, `site_name: str = ""`（通知元サイトの表示名）
-* 根拠: [引数定義とDocstring] (行番号: 1324, 1328〜1330 / 抜粋: "new_casts (List[CastMember]): 通知対象の新規キャストリスト。\n            site_name (str): 通知元サイトの表示名。")
+* 根拠: [引数定義とDocstring] (行番号: 1367, 1370〜1372 / 抜粋: "new_casts (List[CastMember]): 通知対象の新規キャストリスト。\n            site_name (str): 通知元サイトの表示名。")
 
 
-* **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1324 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:")
+* **戻り値/レスポンス**: `int`（**D-L9で変更**。以前は`None`。実際にDiscordへの送信に成功した件数。サーキットブレーカーが開いて送信をスキップしたキャストや、送信失敗したキャストは含まない）
+* 根拠: [戻り値ヒントとDocstring・return] (行番号: 1367, 1373〜1378, 1451 / 抜粋: "Returns:\n            int: 実際にDiscordへの送信に成功した件数（D-L9）。サーキット\n                ブレーカーが開いて送信をスキップしたキャストは含まない。" / "return sent_count")
 
 
-* **副作用**: Webhook URL未設定時の警告ログ出力、ループ先頭でのサーキットブレーカー開放チェック（開いていれば警告ログを出力し`break`）、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`/`trip`)。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。`cast.image_url`が`http://`/`https://`で始まらない場合（lazyload画像のプレースホルダーとして`data:`URIや相対パスが混入したケース等）は、embedの`thumbnail`を送信せず空オブジェクトにする（Discord側のURL形式バリデーション失敗による`400 Bad Request`を避けるため）。
-* 根拠: [ブレーカーチェックと送信処理・thumbnail URL検証] (行番号: 1339〜1346, 1354〜1358, 1365 / 抜粋: "if self._circuit_breaker.is_open:\n                # 連続送信失敗によりサーキットブレーカーが開いている間は、\n                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。" / "thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else \"\"")
+* **副作用**: Webhook URL未設定時の警告ログ出力、ループ先頭でのサーキットブレーカー開放チェック（開いていれば警告ログを出力し`break`）、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`/`trip`)、**（D-L9で追加）** 送信成功のたびの`sent_count`インクリメント。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。`cast.image_url`が`http://`/`https://`で始まらない場合（lazyload画像のプレースホルダーとして`data:`URIや相対パスが混入したケース等）は、embedの`thumbnail`を送信せず空オブジェクトにする（Discord側のURL形式バリデーション失敗による`400 Bad Request`を避けるため）。
+* 根拠: [ブレーカーチェックと送信処理・thumbnail URL検証・sent_count加算] (行番号: 1382〜1389, 1397〜1409, 1426, 1441〜1443 / 抜粋: "if self._circuit_breaker.is_open:\n                # 連続送信失敗によりサーキットブレーカーが開いている間は、\n                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。" / "thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else \"\"" / "self._circuit_breaker.record_success()\n                sent_count += 1")
 
 
-* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し即座に処理を中断(`return`)。`requests.HTTPError`発生時はレスポンス本文の先頭300文字に加え、原因切り分け用として`detail_url`/`image_url`を含めて`exc_info=True`付きでエラーログを出力し、ステータスコードが401または404であればさらにエラーログを出力したうえで`self._circuit_breaker.trip()`を呼び即座にブレーカーを開いて通知ループを`break`で打ち切る（401/404以外は`record_failure()`のみ呼び、次のキャストの処理を継続する）。それ以外の`requests.RequestException`発生時は`exc_info=True`付きでエラーログを出力し`record_failure()`を呼んで次のキャストの処理を継続する。
-* 根拠: [各エラー分岐] (行番号: 1332〜1334, 1373〜1404 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping notification.")\n            return" / "logger.error(\n                    f\"Failed to send notification for {cast.name}: {e} | body: {body} | \"\n                    f\"detail_url: {cast.detail_url} | image_url: {cast.image_url}\",\n                    exc_info=True,\n                )" / "self._circuit_breaker.trip()\n                    break" / "self._circuit_breaker.record_failure()")
+* **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し即座に`0`を返す（**D-L9で変更**。以前は`return`のみで戻り値は常に`None`だった）。`requests.HTTPError`発生時はレスポンス本文の先頭300文字に加え、原因切り分け用として`detail_url`/`image_url`を含めて`exc_info=True`付きでエラーログを出力し、ステータスコードが401または404であればさらにエラーログを出力したうえで`self._circuit_breaker.trip()`を呼び即座にブレーカーを開いて通知ループを`break`で打ち切る（401/404以外は`record_failure()`のみ呼び、次のキャストの処理を継続する）。それ以外の`requests.RequestException`発生時は`exc_info=True`付きでエラーログを出力し`record_failure()`を呼んで次のキャストの処理を継続する。
+* 根拠: [各エラー分岐] (行番号: 1379〜1381, 1428〜1451 / 抜粋: "if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:\n            logger.warning("Discord Webhook URL is not configured. Skipping notification.")\n            return 0" / "logger.error(\n                    f\"Failed to send notification for {cast.name}: {e} | body: {body} | \"\n                    f\"detail_url: {cast.detail_url} | image_url: {cast.image_url}\",\n                    exc_info=True,\n                )" / "self._circuit_breaker.trip()\n                    break" / "self._circuit_breaker.record_failure()")
 
 
 ### `DiscordNotifier.notify_daily_summary`
@@ -515,26 +534,26 @@
 * 根拠: [try-exceptブロックと隔離・復旧処理] (行番号: 1596〜1614, 1616〜1617, 1622〜1623, 1625〜1626, 1633〜1634, 1636〜1637 / 抜粋: "except OSError as e:\n            # #365: CIFS/autofsの瞬断(EIO/ENOENT/ETIMEDOUT等。wait_for_storage_warmupの\n            # docstring自体が想定している事象)でopen()が失敗しただけのケース。\n            # 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる" / "raise KnownCastsUnavailableError(" / "except DataManager._CONTENT_ERRORS as e:\n            logger.error(f"Failed to load data from {data_file}: {e}", exc_info=True)" / "# 破損ファイルをそのままにすると次回以降も同じ位置で読み込みに失敗し続ける\n        # ため、退避してから復旧を試みる(内容起因の破損に限る。#365)。" / "except OSError as e:\n            logger.error(f"Failed to quarantine corrupted cache file {data_file}: {e}", exc_info=True)" / "# 直近の正常データがバックアップとして残っていれば、そこから復旧する\n        # （空集合へのフォールバックは全キャストの再通知を招くため、可能な限り回避する）。" / "except DataManager._LOAD_ERRORS as e:\n                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)" / "# データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）\n        return set()")
 
 
-### `DataManager.save_known_casts`
+### `DataManager.save_known_casts`（D-L7・D-L8で変更）
 
-* **役割**: 指定サイトのキャスト集合をJSONファイルへアトミックに保存する静的メソッド。一時ファイルへ書き出したのち`replace`で置き換えることで書き込み中断時の既存データ破損/消失を防ぐ従来のアトミック書き込みパターンに加え、(1)一時ファイルを本番ファイルへ置き換える前に`_read_casts_file`で一時ファイルを読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に現在の本番ファイルの内容を`.bak`としてバックアップする、という2つの安全策を追加している。
-* 根拠: [メソッド定義とDocstring] (行番号: 1495〜1501 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")
+* **役割**: 指定サイトのキャスト集合をJSONファイルへアトミックに保存するインスタンスメソッド。一時ファイルへ書き出したのち`replace`で置き換えることで書き込み中断時の既存データ破損/消失を防ぐ従来のアトミック書き込みパターンに加え、(1)一時ファイルを本番ファイルへ置き換える前に`_read_casts_file`で一時ファイルを読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に現在の本番ファイルの内容を`.bak`としてバックアップする、という2つの安全策を追加している。**（D-L7で変更）** `.bak`の更新自体も、以前は`backup_path.write_bytes(data_file.read_bytes())`という非アトミックな直接上書きだったが、他の永続化と同じ「`.bak.tmp`へ書き込み→`replace`」パターンに揃えた。書き込み中に中断しても`.bak`本体は直前の内容のまま無傷で残る。**（D-L8で変更）** `tmp_path.replace(data_file)`に到達する前に例外（読み戻し検証失敗等）が発生すると、以前は書き込み済みの`.tmp`ファイルが削除されずディレクトリに残り続けていた。`tmp_path`が生成済みであれば、外側の`except`節でbest-effortに削除する。
+* 根拠: [メソッド定義とDocstring] (行番号: 1706〜1712 / 抜粋: "def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:\n        """指定サイトのキャストデータをJSONファイルに保存する。")
 
 
 * **引数/リクエスト**: `site: SiteConfig`, `casts: Set[CastMember]`（保存対象のキャスト集合）
-* 根拠: [引数定義とDocstring] (行番号: 1495, 1498〜1500 / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
+* 根拠: [引数定義とDocstring] (行番号: 1706, 1709〜1711 / 抜粋: "site (SiteConfig): 対象サイトの設定。\n            casts (Set[CastMember]): 保存対象のキャスト集合。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 1495 / 抜粋: "def save_known_casts(site: SiteConfig, casts: Set[CastMember]) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1706 / 抜粋: "def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:")
 
 
-* **副作用**: 保存先ディレクトリの作成(`mkdir`)、一時ファイル(`.tmp`)への書き込み、`DataManager._read_casts_file`による一時ファイルの読み戻し検証、本番ファイルが存在する場合はその内容を`.bak`ファイルへコピー(`backup_path.write_bytes(data_file.read_bytes())`)、`tmp_path.replace(data_file)`によるアトミックな置換、デバッグログ出力。バックアップの更新は最後の`replace`より前に行われるが、これはコメントに明記の通り「万一この途中でプロセスが中断しても本番ファイル(`data_file`)は無傷のまま残る」ようにするための意図的な順序である。
-* 根拠: [処理順序とコメント] (行番号: 1504, 1507〜1509, 1514〜1516, 1521〜1522, 1524, 1530 / 抜粋: "data_file.parent.mkdir(parents=True, exist_ok=True)" / "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)" / "# 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。\n            # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を\n            # ここで検知できれば、破損データへの置き換え自体を未然に防げる。" / "# コピー元(data_file)は最後のreplaceまで保持したままにすることで、\n            # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。" / "backup_path = data_file.with_suffix(data_file.suffix + '.bak')" / "tmp_path.replace(data_file)")
+* **副作用**: 保存先ディレクトリの作成(`mkdir`)、一時ファイル(`.tmp`)への書き込み、`DataManager._read_casts_file`による一時ファイルの読み戻し検証、本番ファイルが存在する場合はその内容を`.bak`ファイルへ**（D-L7で変更）** `.bak.tmp`経由のアトミックな`replace`でコピー、`tmp_path.replace(data_file)`によるアトミックな置換、デバッグログ出力。バックアップの更新は最後の`replace`より前に行われるが、これはコメントに明記の通り「万一この途中でプロセスが中断しても本番ファイル(`data_file`)は無傷のまま残る」ようにするための意図的な順序である。
+* 根拠: [処理順序とコメント] (行番号: 1715, 1718〜1720, 1725〜1727, 1732〜1734, 1737〜1745 / 抜粋: "data_file.parent.mkdir(parents=True, exist_ok=True)" / "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ" / "# 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。" / "# コピー元(data_file)は最後のreplaceまで保持したままにすることで、\n            # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。" / "bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')\n                try:\n                    bak_tmp_path.write_bytes(data_file.read_bytes())\n                    bak_tmp_path.replace(backup_path)")
 
 
-* **エラーハンドリング**: `(OSError, ValueError, TypeError)`発生時は`exc_info=True`付きでエラーログを出力する（例外の再送出はしない）。この例外タプルには一時ファイルの読み戻し検証(`_read_casts_file`)が送出しうる`ValueError`/`TypeError`（JSON破損・想定外の型）も含まれ、検証失敗時も同じ`except`節で捕捉されて処理が打ち切られる（`tmp_path.replace(data_file)`より前に検証しているため、検証失敗時に本番ファイルが破損データで上書きされることはない）。`.bak`バックアップファイルへの書き込み(`backup_path.write_bytes`)のみが失敗した場合は、内側の`try`/`except OSError`で警告ログを出力するに留め、後続のアトミック置換自体は中断せず継続する。
-* 根拠: [外側try-exceptと内側try-except] (行番号: 1533〜1534, 1525〜1528 / 抜粋: "except (OSError, ValueError, TypeError) as e:\n            logger.error(f"Failed to save data: {e}", exc_info=True)" / "try:\n                    backup_path.write_bytes(data_file.read_bytes())\n                except OSError as e:\n                    logger.warning(f"Failed to update backup file {backup_path}: {e}")")
+* **エラーハンドリング**: `(OSError, ValueError, TypeError)`発生時は`exc_info=True`付きでエラーログを出力する（例外の再送出はしない）。この例外タプルには一時ファイルの読み戻し検証(`_read_casts_file`)が送出しうる`ValueError`/`TypeError`（JSON破損・想定外の型）も含まれ、検証失敗時も同じ`except`節で捕捉されて処理が打ち切られる（`tmp_path.replace(data_file)`より前に検証しているため、検証失敗時に本番ファイルが破損データで上書きされることはない）。**（D-L8で追加）** この外側`except`節では、`tmp_path`が生成済み（`None`でない）であれば`tmp_path.unlink(missing_ok=True)`をbest-effortで実行し、検証失敗等で残った`.tmp`ファイルの残置を防ぐ（削除自体の失敗も無視する）。`.bak`バックアップファイルへの書き込み（**D-L7で変更**。`bak_tmp_path.write_bytes`＋`replace`）のみが失敗した場合は、内側の`try`/`except OSError`で警告ログを出力し、失敗した`bak_tmp_path`をbest-effortで削除したうえで、後続のアトミック置換自体は中断せず継続する。
+* 根拠: [外側try-exceptとtmp_path削除・内側try-except] (行番号: 1753〜1763, 1743〜1749 / 抜粋: "except (OSError, ValueError, TypeError) as e:\n            logger.error(f"Failed to save data: {e}", exc_info=True)" / "# D-L8: tmp_path.replace(data_file)に到達する前に例外（読み戻し検証失敗\n            # 等）が起きると、以前は書き込み済みの.tmpファイルがそのまま残り続けて\n            # いた。" / "if tmp_path is not None:\n                try:\n                    tmp_path.unlink(missing_ok=True)" / "except OSError as e:\n                    logger.warning(f"Failed to update backup file {backup_path}: {e}")\n                    # 中断された.bak用一時ファイルを残さない(best-effort)。\n                    bak_tmp_path.unlink(missing_ok=True)")
 
 
 ### `DataManager._daily_summary_file`
@@ -690,10 +709,10 @@
 * 根拠: [try-exceptブロックとコメント] (行番号: 1842〜1848 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
 
 
-### `WebMonitor._parse_html`
+### `WebMonitor._parse_html`（D-L12で変更）
 
-* **役割**: `BeautifulSoup`オブジェクトから、サイト設定済みCSSセレクタ（`selector_container`, `selector_name`, `selector_link`, `selector_image`）を用いて各キャストのコンテナ要素を抽出し、名前・年齢・詳細URL・ID・画像URLを取り出して`CastMember`集合を構築する。名前抽出は`name_first_text_only`/`name_strip_after_tab`フラグに応じて分岐し、リンク抽出はコンテナ自体が`<a>`要素であるフォールバックにも対応する。ID抽出は`id_query_param`指定時のクエリパラメータ優先、次にキー=値形式でないクエリ文字列全体、最後にパス末尾セグメントの順でフォールバックし、それでも取得できない場合はコンテナHTMLのSHA1フィンガープリントを付与した`name_{name}_{fingerprint}`形式のIDを生成する。画像抽出は`image_from_style`指定時のインラインCSS背景画像抽出、通常時は`image_attr`（未取得なら`src`へのフォールバック）を用いる。
-* 根拠: [メソッド定義とDocstring] (行番号: 1585〜1594 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")
+* **役割**: `BeautifulSoup`オブジェクトから、サイト設定済みCSSセレクタ（`selector_container`, `selector_name`, `selector_link`, `selector_image`）を用いて各キャストのコンテナ要素を抽出し、名前・年齢・詳細URL・ID・画像URLを取り出して`CastMember`集合を構築する。名前抽出は`name_first_text_only`/`name_strip_after_tab`フラグに応じて分岐し、リンク抽出はコンテナ自体が`<a>`要素であるフォールバックにも対応する。**（D-L12で変更）** 年齢抽出は`AGE_PATTERN`の3グループ（括弧内数字/括弧内「歳」「才」/括弧無し数字）を分解し、`(1)`括弧無しで「歳」「才」が続く場合、`(2)`括弧内数字に「歳」「才」が明示されている場合は無条件に年齢として採用し、`(3)`括弧内数字のみ（「歳」「才」の明示無し）の場合は`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲内でのみ採用する（範囲外なら`age`は空文字のまま）。以前は`(3)`のケースも無条件に年齢として採用しており、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。ID抽出は`id_query_param`指定時のクエリパラメータ優先、次にキー=値形式でないクエリ文字列全体、最後にパス末尾セグメントの順でフォールバックし、それでも取得できない場合はコンテナHTMLのSHA1フィンガープリントを付与した`name_{name}_{fingerprint}`形式のIDを生成する。画像抽出は`image_from_style`指定時のインラインCSS背景画像抽出、通常時は`image_attr`（未取得なら`src`へのフォールバック）を用いる。
+* 根拠: [メソッド定義とDocstring] (行番号: 1585〜1594 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[D-L12: 年齢抽出の分岐] (行番号: 2094〜2113 / 抜粋: "bracket_num, bracket_suffix, plain_num = age_match.groups()\n                        if bracket_num is not None:\n                            # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、\n                            # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを\n                            # 確認し、部屋番号・順位バッジ等の誤検知を減らす。\n                            if bracket_suffix or (\n                                MonitorConfig.AGE_PLAUSIBLE_MIN\n                                <= int(bracket_num)\n                                <= MonitorConfig.AGE_PLAUSIBLE_MAX\n                            ):\n                                age = bracket_num\n                        else:\n                            age = plain_num")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`（解析対象のHTML）, `site: SiteConfig`（対象サイトの設定。セレクタ・ベースURLに使用）
@@ -795,8 +814,8 @@
 * 根拠: [戻り値ヒントと各return] (行番号: 2258, 2285, 2290〜2292, 2294〜2303, 2338 / 抜粋: ") -> SiteCheckResult:" / "return SiteCheckResult()" / "return SiteCheckResult(failed=True, pending_alert_count=pending)")
 
 
-* **副作用**: `data_manager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`data_manager.record_daily_new_casts`による日次集計更新。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。**（Issue #237で修正）** `save_known_casts`に渡す保存対象は、新規検知の有無に関わらず常に`known_casts.union(current_casts)`（和集合）である。以前は新規検知が1件でもあれば和集合、1件も無ければ`current_casts`による全置換という非対称な実装だったため、`_parse_html`が個別カードのパース失敗を`except Exception`で握りつぶしフェイルソフトに処理を続行する設計（既知キャストのカードが単発でパース失敗し`current_casts`から漏れるケースがある）と組み合わさると、同一実行内に他の真の新規キャストが1件も無い場合に限り、そのカードが`known_casts`から恒久的に消え、次回正常にパースできた際に「新規キャスト」として誤って再通知されていた。
-* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 2113, 2142〜2147 / 抜粋: "known_casts = data_manager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時unionでの保存 (行番号: 2155, 2163 / 抜粋: "updated_casts = known_casts.union(current_casts)" / "data_manager.save_known_casts(site, updated_casts)")
+* **副作用**: `data_manager.load_known_casts`/`save_known_casts`の呼び出し、`monitor.fetch_current_casts`によるHTTP通信、新規検知時の`notifier.notify`によるDiscord通知と`data_manager.record_daily_new_casts`による日次集計更新。**（D-L9で変更）** `record_daily_new_casts`に渡す件数は、以前は`len(new_casts)`（検知した新規件数そのもの）だったが、`notifier.notify`の戻り値（実際にDiscordへ送信できた件数）を使うよう変更した。サーキットブレーカーが開いて送信をスキップしたキャストまで日次サマリに計上すると、実際には送られていない件数分だけ過大報告になっていたため。既知キャスト(`known_casts`)が1件以上存在するにもかかわらず、新規検知件数が`MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD`（既定値20）以上となった場合は、`known_casts`データの喪失・巻き戻り（NAS同期不整合やキャッシュ破損からの復旧漏れ等）による大量誤検知・再通知の疑いとして警告ログを出力する（通知自体は継続され、あくまで調査の手がかりを残す目的）。**（Issue #237で修正）** `save_known_casts`に渡す保存対象は、新規検知の有無に関わらず常に`known_casts.union(current_casts)`（和集合）である。以前は新規検知が1件でもあれば和集合、1件も無ければ`current_casts`による全置換という非対称な実装だったため、`_parse_html`が個別カードのパース失敗を`except Exception`で握りつぶしフェイルソフトに処理を続行する設計（既知キャストのカードが単発でパース失敗し`current_casts`から漏れるケースがある）と組み合わさると、同一実行内に他の真の新規キャストが1件も無い場合に限り、そのカードが`known_casts`から恒久的に消え、次回正常にパースできた際に「新規キャスト」として誤って再通知されていた。
+* 根拠: [メイン処理フローと大量検知時の警告] (行番号: 2113, 2142〜2147 / 抜粋: "known_casts = data_manager.load_known_casts(site)" / "if known_casts and len(new_casts) >= MonitorConfig.MASS_DETECTION_WARNING_THRESHOLD:\n        logger.warning(\n            f\"Unusually large diff for site '{site.site_id}': \"")、常時unionでの保存 (行番号: 2155, 2163 / 抜粋: "updated_casts = known_casts.union(current_casts)" / "data_manager.save_known_casts(site, updated_casts)")、[D-L9: sent_countの利用] (行番号: 2390〜2396 / 抜粋: "# D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで\n        # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ\n        # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。\n        sent_count = notifier.notify(new_casts, site_name=site.name)\n        data_manager.record_daily_new_casts(site.site_id, sent_count)")
 
 
 * **エラーハンドリング**: **（Issue #365で追加）** `data_manager.load_known_casts`が`KnownCastsUnavailableError`（既知キャストファイルは存在するがI/Oエラーで読めない）を送出した場合はWARNINGログ（「Skipping site ... because known casts are unavailable」）を出力し、巡回（`fetch_current_casts`）・通知・保存のいずれも行わず`return`する（空集合で続行すると全キャストの再通知と、union保存による退店済みキャストの復活を招くため）。`monitor.fetch_current_casts`での`requests.RequestException`または`SiteUnavailableError`（**Issue #395で追加**。別ドメインへのリダイレクト）発生時は`_handle_site_network_failure`に処理を委譲し、`SiteCheckResult(failed=True, pending_alert_count=...)`を返す（当該サイトのみ中断、他サイトへは影響しない。失敗回数の記録・ログレベルの決定は委譲先が行い、Discordアラートの送信可否は`_run_monitor_locked`が全サイト処理後に判断する）。**（Issue #395で変更）** 取得できたキャストが0件の場合も、以前のように`clear_site_failure`してデバッグログで`return`するのではなく、`SiteUnavailableError("no casts parsed")`を理由として`_handle_site_network_failure`に`log_level=logging.WARNING`で委譲し、連続失敗として計上する（200を返すがポータルへリダイレクト後に要素が見つからないだけ、というbellicaの症状を検知するため。レイアウト変更の可能性もあるため閾値未満ではERRORにしない）。連続失敗状態の解消（`data_manager.clear_site_failure`）は、到達できて1件以上のキャストを取得できた時点で行う。
@@ -1097,6 +1116,9 @@ graph TD
 * **（本PRで追加）`DiscordNotifier._circuit_breaker`はプロセス内・インスタンス単位でのみ有効**: `run_monitor`は1回の実行で`DiscordNotifier`を1つだけ生成し(`_run_monitor_locked`)、全79サイトの`notify`呼び出しと`notify_daily_summary`・`notify_site_failure_alert`呼び出しで同じインスタンス(および同じ`_circuit_breaker`)を使い回す。そのため、あるサイトの通知で連続失敗しブレーカーが開くと、同一プロセス実行内の以降の全サイトの通知・日次サマリ通知もスキップされる（Webhook自体が機能していないと判断しているため意図的な挙動）。ただしこの状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まり、Webhookが復旧していなくても最初の数回は無駄なリクエストが再び発生する。
 * **79サイトを1プロセスで逐次処理する構成**: `run_monitor`は`MonitorConfig.SITES`の全79件を単一プロセス内で順次処理するため、1回の実行時間はサイト数に比例して増大する。各サイト間の待機は`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`のみであり、サイト単位の並列化やレート制限の個別調整は行われていない。
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
+* **（D-L6で追加）Discord embedの文字数上限は250文字に安全側で切り詰める**: `DiscordNotifier._EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`はいずれもDiscordの実際の上限（title 256文字、field.value 1024文字）より小さい250文字に設定している。今後embedへ新しいフィールドを追加する際、そのフィールド値がスクレイピング結果（外部サイト由来で長さが保証されない文字列）である場合は、`_truncate_for_embed`で同様に切り詰めること。
+* **（D-L9で追加）日次サマリの計上件数はnotify()の戻り値に依存する**: `_check_site`は`data_manager.record_daily_new_casts`に渡す件数として`notifier.notify(...)`の戻り値（実送信件数）を使う。`notify`のシグネチャを変更する場合（戻り値の意味を変える等）は、この呼び出し元の前提が崩れないか確認すること。
+* **（D-L12で追加）`AGE_PLAUSIBLE_MIN`/`AGE_PLAUSIBLE_MAX`は経験的な範囲であり万能ではない**: 括弧内の数字に「歳」「才」の明示が無い場合のみこの範囲（18〜79）でフィルタするが、この範囲内に収まる非年齢の2桁数字（部屋番号・順位バッジ等）は依然として誤って年齢と判定されうる。あくまで明らかに範囲外の値（例: レビューで指摘された"(85)"）を除外するための最小限の足切りであり、完全な誤検知防止ではない。
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
 * **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
 * 根拠: [OSError分岐のコメント] (行番号: 1596〜1603 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")

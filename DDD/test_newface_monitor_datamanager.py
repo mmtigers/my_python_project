@@ -225,6 +225,67 @@ class TestSaveKnownCastsBackup:
         assert data_file.exists()
         assert not backup_file.exists()
 
+    def test_backup_write_is_atomic_via_tmp_and_replace(self, tmp_path, monkeypatch):
+        """D-L7: .bakの更新はwrite_bytesによる直接上書きではなく、
+        他の永続化と同じtmp書き込み+replaceのアトミックパターンで行うこと。
+        書き込み中に中断しても既存の.bakが破損しないことを保証する。"""
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+
+        first = {CastMember(id="1", name="Alice", detail_url="u1", image_url="i1", age="20")}
+        dm.save_known_casts(site, first)  # 初回はdata_file未存在のため.bakは作られない
+
+        second = {CastMember(id="2", name="Bob", detail_url="u2", image_url="i2", age="25")}
+        dm.save_known_casts(site, second)  # .bak = first の内容になる
+
+        data_file = tmp_path / site.get_data_filename()
+        backup_file = data_file.with_suffix(data_file.suffix + ".bak")
+        bak_tmp_file = backup_file.with_suffix(backup_file.suffix + ".tmp")
+
+        original_write_bytes = Path.write_bytes
+
+        def _raise_after_partial_write(self, data):
+            # 実際のディスク書き込み中断を模して、bak_tmp_fileへの書き込み自体は
+            # 発生させつつ例外を送出する(.bakの直接write_bytesだった場合と違い、
+            # 中断してもbak_tmp_fileという別名のファイルにしか影響しないことを
+            # 確認するのが本テストの主眼)。
+            original_write_bytes(self, data)
+            raise OSError("simulated write failure while updating .bak")
+
+        monkeypatch.setattr(Path, "write_bytes", _raise_after_partial_write)
+
+        third = {CastMember(id="3", name="Carol", detail_url="u3", image_url="i3", age="30")}
+        dm.save_known_casts(site, third)  # .bak更新(second相当への更新)は失敗するはず
+
+        # .bak本体は(書き込み失敗のため)更新されず、直前の状態(firstのバックアップ)
+        # のまま残る(直接write_bytesだった場合は破損した内容で上書きされうった)。
+        assert DataManager._read_casts_file(backup_file) == first
+        # 失敗した一時ファイルが残置されないこと
+        assert not bak_tmp_file.exists()
+        # 本体データ(data_file)自体は正常にthirdへ更新されていること
+        # (.bak更新の失敗は警告ログに留め、保存処理全体を失敗させない)
+        assert dm.load_known_casts(site) == third
+
+    def test_verification_failure_does_not_leave_tmp_file_behind(self, tmp_path, monkeypatch):
+        """D-L8: tmpファイルの読戻し検証に失敗した場合、以前は.json.tmpが
+        削除されずディレクトリに残り続けていた。best-effortで削除すること。"""
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+
+        def _raise_on_verify(_path):
+            raise ValueError("simulated verification failure")
+
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(_raise_on_verify))
+
+        dm.save_known_casts(
+            site, {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
+        )
+
+        data_file = tmp_path / site.get_data_filename()
+        tmp_path_file = data_file.with_suffix(data_file.suffix + ".tmp")
+        assert not tmp_path_file.exists()
+        assert not data_file.exists()  # 検証失敗のためreplaceまで到達していない
+
 
 class TestLoadDailySummaryCorruption:
     """Issue #174の回帰テスト: load_daily_summaryはload_known_castsと同じ

@@ -77,6 +77,10 @@ def stub_run_dependencies(monkeypatch):
     monkeypatch.setattr(module, "WebMonitor", MagicMock(return_value=monitor))
 
     notifier = MagicMock()
+    # D-L9: notify()はint(実際に送信できた件数)を返す契約になったため、
+    # 呼び出し元(record_daily_new_casts)が比較演算できるようMagicMockの
+    # 戻り値を明示的にintへ固定する。
+    notifier.notify.return_value = 1
     monkeypatch.setattr(module, "DiscordNotifier", MagicMock(return_value=notifier))
 
     warmup = MagicMock(return_value=True)

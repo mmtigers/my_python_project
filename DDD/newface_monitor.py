@@ -119,7 +119,14 @@ logger = get_logger("newface_monitor")
 # いずれかを年齢表記とみなす。実在の年齢は2桁のため誤検知を避けるため
 # 桁数を2桁に限定する(例: ランキングバッジ等の"(1)"のような1桁の
 # 括弧数字を誤って年齢と判定しないようにする)。
-AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(?:歳|才)?\s*[）)]|(\d{2})\s*(?:歳|才)')
+#
+# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも
+# 無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の
+# 括弧付き2桁数字を誤って年齢と判定しうる懸念があった。「歳」「才」で
+# 明示された数字は引き続き無条件に信頼するが、それが無い場合のみ
+# MonitorConfig.AGE_PLAUSIBLE_MIN/MAX の範囲かどうかで足切りする
+# (呼び出し側で判定。第2groupで「歳」「才」の有無を判別する)。
+AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(歳|才)?\s*[）)]|(\d{2})\s*(?:歳|才)')
 
 
 @dataclass(frozen=True)
@@ -1196,6 +1203,12 @@ class MonitorConfig:
     # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
     # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値
     MASS_DETECTION_WARNING_THRESHOLD: int = 20
+    # D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と
+    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない
+    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で
+    # 明示された数字は範囲に関わらず信頼する)。
+    AGE_PLAUSIBLE_MIN: int = 18
+    AGE_PLAUSIBLE_MAX: int = 79
 
     # Site Failure Alert Settings
     # ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」
@@ -1295,6 +1308,22 @@ class CastMember:
 class DiscordNotifier:
     """Discordへの通知を担当するサービスクラス。"""
 
+    # D-L6: Discord embedのtitle(256文字)/field.value(1024文字)には上限があり、
+    # 超過するとembed全体が400 Bad Requestで拒否される。cast.name等は外部サイトの
+    # スクレイピング結果でありサイト側の表示崩れ・異常データで想定外に長くなり
+    # うるため、送信前に安全側で切り詰める（サイト側コード(site.name等)由来の
+    # 文字列は開発者が管理するため対象外）。
+    _EMBED_TITLE_MAX_LEN = 250
+    _EMBED_FIELD_VALUE_MAX_LEN = 250
+
+    @staticmethod
+    def _truncate_for_embed(text: str, max_len: int) -> str:
+        """Discord embedの文字数上限に収まるよう、超過分を省略記号付きで切り詰める。"""
+        if len(text) <= max_len:
+            return text
+        suffix = "…(省略)"
+        return text[: max(max_len - len(suffix), 0)] + suffix
+
     def __init__(self, webhook_url: Optional[str]):
         """
         Args:
@@ -1335,19 +1364,26 @@ class DiscordNotifier:
         if self.session:
             self.session.close()
 
-    def notify(self, new_casts: List[CastMember], site_name: str = "") -> None:
+    def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:
         """新規キャスト情報をDiscordに通知する。
 
         Args:
             new_casts (List[CastMember]): 通知対象の新規キャストリスト。
             site_name (str): 通知元サイトの表示名。複数サイト運用時に
                 どのサイトの新着かを区別できるよう埋め込みタイトルに付与する。
+
+        Returns:
+            int: 実際にDiscordへの送信に成功した件数（D-L9）。サーキット
+                ブレーカーが開いて送信をスキップしたキャストは含まない。
+                呼び出し元(_check_site)はこの値を日次サマリの集計に用いる
+                ことで、送信できなかった分まで過大計上しないようにする。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping notification.")
-            return
+            return 0
 
         site_prefix = f"【{site_name}】" if site_name else ""
+        sent_count = 0
 
         for cast in new_casts:
             if self._circuit_breaker.is_open:
@@ -1359,12 +1395,19 @@ class DiscordNotifier:
                 )
                 break
 
-            fields = [{"name": "Name", "value": cast.name, "inline": True}]
+            safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)
+            fields = [{"name": "Name", "value": safe_name, "inline": True}]
             if cast.age:
                 # 一覧ページ上に年齢表記が見つかったキャストのみ追加
                 # (見つからない場合はフィールド自体を省略する)
                 fields.append({"name": "Age", "value": f"{cast.age}歳", "inline": True})
-            fields.append({"name": "Link", "value": f"[詳細ページへ]({cast.detail_url})", "inline": True})
+            fields.append({
+                "name": "Link",
+                "value": self._truncate_for_embed(
+                    f"[詳細ページへ]({cast.detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
+                ),
+                "inline": True,
+            })
 
             # DiscordのembedはURL系フィールドにhttp(s)の絶対URLを要求しており、
             # data:URIや相対パス等が渡ると400 Bad Requestで通知全体が拒否される。
@@ -1376,7 +1419,9 @@ class DiscordNotifier:
                 "username": "New Face Monitor",
                 "embeds": [
                     {
-                        "title": f"✨ 新人キャスト情報{site_prefix}: {cast.name}",
+                        "title": self._truncate_for_embed(
+                            f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
+                        ),
                         "description": "新しいキャストが追加されました！",
                         "url": cast.detail_url,
                         "color": 16738740,  # Pinkish
@@ -1392,6 +1437,7 @@ class DiscordNotifier:
                 response.raise_for_status()
                 logger.info(f"Notification sent successfully for: {cast.name}")
                 self._circuit_breaker.record_success()
+                sent_count += 1
             except requests.HTTPError as e:
                 status = e.response.status_code if e.response is not None else None
                 # レスポンス本文にDiscord側の検証エラー詳細（フィールド長超過等）が
@@ -1416,6 +1462,8 @@ class DiscordNotifier:
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {e}", exc_info=True)
                 self._circuit_breaker.record_failure()
+
+        return sent_count
 
     def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
@@ -1663,6 +1711,7 @@ class DataManager:
             casts (Set[CastMember]): 保存対象のキャスト集合。
         """
         data_file = self._data_file(site)
+        tmp_path: Optional[Path] = None
         try:
             data_file.parent.mkdir(parents=True, exist_ok=True)
             data = [c.to_dict() for c in casts]
@@ -1685,16 +1734,34 @@ class DataManager:
             # 万一この途中でプロセスが中断しても本番ファイルは無傷のまま残る。
             if data_file.exists():
                 backup_path = data_file.with_suffix(data_file.suffix + '.bak')
+                # D-L7: 以前はbackup_path.write_bytes(...)で直接上書きしていたため、
+                # 書き込み中にプロセスが中断すると.bak自体が破損・欠損した状態で
+                # 残ってしまいうった(load_known_castsが復旧に使う最後の砦であるにも
+                # 関わらず非アトミックだった)。他の永続化と同じtmp書き込み+replaceの
+                # アトミックパターンに揃える。
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
                 try:
-                    backup_path.write_bytes(data_file.read_bytes())
+                    bak_tmp_path.write_bytes(data_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
                 except OSError as e:
                     logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    # 中断された.bak用一時ファイルを残さない(best-effort)。
+                    bak_tmp_path.unlink(missing_ok=True)
 
             tmp_path.replace(data_file)
 
             logger.debug(f"Saved {len(casts)} casts to {data_file}")
         except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save data: {e}", exc_info=True)
+            # D-L8: tmp_path.replace(data_file)に到達する前に例外（読み戻し検証失敗
+            # 等）が起きると、以前は書き込み済みの.tmpファイルがそのまま残り続けて
+            # いた。data_file.parent.mkdir失敗等でtmp_path自体が未定義の場合もある
+            # ため、生成済みであれば削除する(best-effort。削除自体の失敗は無視する)。
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def _daily_summary_file(self) -> Path:
         """日次サマリの集計状態を保存するファイルのパスを返す。
@@ -2031,7 +2098,19 @@ class WebMonitor:
                 if name_elem:
                     age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
                     if age_match:
-                        age = age_match.group(1) or age_match.group(2)
+                        bracket_num, bracket_suffix, plain_num = age_match.groups()
+                        if bracket_num is not None:
+                            # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
+                            # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを
+                            # 確認し、部屋番号・順位バッジ等の誤検知を減らす。
+                            if bracket_suffix or (
+                                MonitorConfig.AGE_PLAUSIBLE_MIN
+                                <= int(bracket_num)
+                                <= MonitorConfig.AGE_PLAUSIBLE_MAX
+                            ):
+                                age = bracket_num
+                        else:
+                            age = plain_num
 
                 # Link & ID Extraction
                 link_elem = div.select_one(site.selector_link)
@@ -2329,8 +2408,11 @@ def _check_site(
     updated_casts = known_casts.union(current_casts)
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
-        notifier.notify(new_casts, site_name=site.name)
-        data_manager.record_daily_new_casts(site.site_id, len(new_casts))
+        # D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで
+        # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ
+        # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。
+        sent_count = notifier.notify(new_casts, site_name=site.name)
+        data_manager.record_daily_new_casts(site.site_id, sent_count)
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
 
