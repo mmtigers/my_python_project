@@ -229,7 +229,9 @@ def render_summary(
     c4, c5, c6 = st.columns(3)
     c4.markdown(render_status_card_html("🍚 炊飯器", rice_val, rice_theme), unsafe_allow_html=True)
     c5.markdown(render_status_card_html("💰 今月の電気代", elec_val, "theme-blue"), unsafe_allow_html=True)
-    c6.markdown(render_status_card_html("🚲 駐輪場待機", bicycle_val, bicycle_theme), unsafe_allow_html=True)
+    # Issue #378: get_bicycle_status は前日比の色付け(<span>)等を意図的に組み立てて
+    # 返すため、render_status_card_html のエスケープをスキップする(value_is_html=True)。
+    c6.markdown(render_status_card_html("🚲 駐輪場待機", bicycle_val, bicycle_theme, value_is_html=True), unsafe_allow_html=True)
 
     c7, c8, c9 = st.columns(3)
     c7.markdown(render_status_card_html("🚃 JR運行情報", traffic_val, traffic_theme), unsafe_allow_html=True)

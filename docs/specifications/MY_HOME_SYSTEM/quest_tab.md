@@ -30,10 +30,10 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `streamlit` | 外部ライブラリ | UI描画全般（タイトル、カラム、メトリクス、Markdown表示等） | `import streamlit as st` (行番号: 2 / 抜粋: "import streamlit as st") |
-| `pandas` | 外部ライブラリ | ユーザーリストを`DataFrame`化しグラフ描画用に整形 | `import pandas as pd` (行番号: 3 / 抜粋: "import pandas as pd") |
-| `plotly.express` | 外部ライブラリ | 経験値ランキングの棒グラフ生成 | `import plotly.express as px` (行番号: 4 / 抜粋: "import plotly.express as px") |
-| `datetime` | 標準ライブラリ | インポートされているが、本ファイル内では使用されていない | `from datetime import datetime` (行番号: 5 / 抜粋: "from datetime import datetime") |
+| `html` | 標準ライブラリ | **（Issue #378で追加。旧版の記述を訂正）** `render`が達成履歴の`log['text']`をHTMLエスケープするために使用（`html.escape`）。以前このテーブルは`from datetime import datetime`が未使用インポートとして存在すると記載していたが、実際には（それ以前も含め）本ファイルは`datetime`を一切インポートしておらず誤りだった | `import html` (行番号: 2 / 抜粋: "import html") |
+| `streamlit` | 外部ライブラリ | UI描画全般（タイトル、カラム、メトリクス、Markdown表示等） | `import streamlit as st` (行番号: 3 / 抜粋: "import streamlit as st") |
+| `pandas` | 外部ライブラリ | ユーザーリストを`DataFrame`化しグラフ描画用に整形 | `import pandas as pd` (行番号: 4 / 抜粋: "import pandas as pd") |
+| `plotly.express` | 外部ライブラリ | 経験値ランキングの棒グラフ生成 | `import plotly.express as px` (行番号: 5 / 抜粋: "import plotly.express as px") |
 | `game_system` | 内部モジュール | クエスト・ユーザー・ログデータの取得 (`get_all_view_data`) | `from services.quest_service import game_system` (行番号: 6 / 抜粋: "from services.quest_service import game_system") |
 
 ### ブラックボックスとなる外部要素
@@ -46,8 +46,8 @@
 
 ### `render`
 
-* **役割**: Family Questタブ全体（メンバーごとの経験値メトリクス、経験値ランキングの棒グラフ、直近の達成履歴）を描画する。
-* 根拠: `def render():` (行番号: 8〜66 / 抜粋: "def render():")
+* **役割**: Family Questタブ全体（メンバーごとの経験値メトリクス、経験値ランキングの棒グラフ、直近の達成履歴）を描画する。**（Issue #378で修正）** 達成履歴（`log['text']`。`quest_service._fetch_recent_logs`が組み立てる「ユーザー名 + quest_title/reward_title」）は`unsafe_allow_html=True`でそのまま`st.markdown`へ渡している。`quest_title`/`reward_title`は認証なしの`/api/quest`から自由に書き込める（`routers/quest_router.py`）ため、以前はエスケープ無しで格納型XSSになり得た。`html.escape(log['text'])`でエスケープしてから埋め込むよう修正した（`log['timestamp']`はDB由来のタイムスタンプでありエスケープ対象に含めていない）。
+* 根拠: `def render():` (行番号: 8〜69 / 抜粋: "def render():")、エスケープ処理 (行番号: 63〜64 / 抜粋: "safe_text = html.escape(log['text'])")
 
 
 * **引数/リクエスト**: なし
@@ -66,7 +66,7 @@
 
 
 * **エラーハンドリング**: 関数本体全体（データ取得からUI描画まで）を`try...except Exception as e:`で捕捉し、例外発生時は`st.error`でエラーメッセージ（例外内容込み）を画面表示する。処理は再送出されない。
-* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 65〜66 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 69 / 抜粋: "except Exception as e:")
 
 
 
@@ -116,7 +116,7 @@ graph TD
     end
 
     subgraph Python_Standard_Libraries
-        Datetime["datetime"]
+        Html["html(Issue #378で追加)"]
     end
 
     subgraph Project_Internal
@@ -126,7 +126,7 @@ graph TD
     QuestTabPy --> Streamlit
     QuestTabPy --> Pandas
     QuestTabPy --> PlotlyExpress
-    QuestTabPy --> Datetime
+    QuestTabPy -->|"html.escape(log['text'])"| Html
     QuestTabPy --> QuestService
 
     Dashboard["dashboard.py"] -->|render呼び出し| QuestTabPy
@@ -140,8 +140,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **未使用インポート**: `datetime`がインポートされているが、本ファイル内のいかなる箇所でも使用されていない。Lintツールで未使用インポート警告が発生しうる。
-* 根拠: `from datetime import datetime` (行番号: 5 / 抜粋: "from datetime import datetime")
+* **[修正済み] Issue #378 達成履歴の格納型XSS**: `log['text']`（`quest_service._fetch_recent_logs`が組み立てる「ユーザー名 + quest_title/reward_title」）を`unsafe_allow_html=True`で描画していた。`quest_title`/`reward_title`は認証なしの`/api/quest`から自由に書き込める（`routers/quest_router.py`）ため、LAN内の誰かがクエスト名に`<img onerror=...>`等を入れれば管理ダッシュボードで実行される格納型XSSだった。`html.escape(log['text'])`でエスケープしてから埋め込むよう修正した（`log['timestamp']`はDB由来のタイムスタンプでエスケープ対象に含めていない）。`misc_tab.py`は既にこの対策済みだったため、非対称な状態が解消された。
+* 根拠: `import html` (行番号: 2)、`safe_text = html.escape(log['text'])` (行番号: 63)
 
 
 * **リストの破壊的ソート**: `users.sort(...)`は`game_system.get_all_view_data()`が返した`data["users"]`リストをin-placeでソートする。呼び出し元が同一オブジェクトを他所でも参照・再利用している場合、意図せず順序が変更される可能性がある。
@@ -149,11 +149,11 @@ graph TD
 
 
 * **広範な例外キャッチ**: `except Exception as e:`でデータ取得からUI描画までの全処理を一括して捕捉しており、`KeyError`（`u['exp']`等のキー欠損）とネットワーク/DBエラーが区別されずに同一のエラーメッセージとして表示される。ログ出力（`logging`）は行われていない。
-* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 65〜66 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 69 / 抜粋: "except Exception as e:")
 
 
-* **コメントと実装の不一致**: 59行目直前のコメントは `logs`の要素を`{'text':..., 'dateStr':...}`のリストと説明しているが、実際のコード（60行目）では`log['timestamp']`が参照されており、キー名の不一致がある。
-* 根拠: `# logsは {'text':..., 'dateStr':...} のリスト` と `{log['timestamp']}` (行番号: 57, 60 / 抜粋: "# logsは {'text':..., 'dateStr':...} のリスト")
+* **コメントと実装の不一致**: 57行目のコメントは `logs`の要素を`{'text':..., 'dateStr':...}`のリストと説明しているが、実際のコード（64行目）では`log['timestamp']`が参照されており、キー名の不一致がある。
+* 根拠: `# logsは {'text':..., 'dateStr':...} のリスト` と `{log['timestamp']}` (行番号: 57, 64 / 抜粋: "# logsは {'text':..., 'dateStr':...} のリスト")
 
 
 ## 9. 不明事項一覧

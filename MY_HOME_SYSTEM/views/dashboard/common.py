@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/views/dashboard/common.py
+import html
 
 CUSTOM_CSS = """
 <style>
@@ -46,11 +47,24 @@ CUSTOM_CSS = """
 </style>
 """
 
-def render_status_card_html(title: str, value: str, theme: str) -> str:
-    """ステータスカードのHTMLを生成"""
+def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:
+    """
+    ステータスカードのHTMLを生成。
+
+    Issue #378: `title`/`value`はunsafe_allow_html=True経由でそのまま描画されるため、
+    以前はスクレイピング由来・DB由来の文字列(quest_title/reward_title等)を
+    そのまま埋め込むと格納型XSSになりえた。`title`は常にHTMLエスケープする。
+    `value`も既定でエスケープするが、`views/dashboard/summary.py`の
+    `get_bicycle_status`のように前日比の色付け等で意図的にHTML断片
+    (`<span>`/`<br>`等)を組み立てて渡す呼び出し元は、`value_is_html=True`を
+    指定してエスケープをスキップできる(その場合、`value`の構築元に外部/DB由来の
+    生文字列を含めないこと)。
+    """
+    safe_title = html.escape(title)
+    safe_value = value if value_is_html else html.escape(value)
     return f"""
     <div class="status-card {theme}">
-        <div class="status-title">{title}</div>
-        <div class="status-value">{value}</div>
+        <div class="status-title">{safe_title}</div>
+        <div class="status-value">{safe_value}</div>
     </div>
     """
