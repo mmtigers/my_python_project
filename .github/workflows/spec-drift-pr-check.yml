@@ -36,10 +36,18 @@ jobs:
       - name: Run drift check (non-blocking)
         id: drift
         continue-on-error: true
+        # Issue #407: 以前は base.sha と github.sha(マージ参照)を比較していたが、
+        # マージ参照は checkout 時点の base で作られるため、イベント発行〜checkout の
+        # 間に base が進むと base 側の変更が差分に混入して誤検知していた。
+        # PR head と、head/base の merge-base(三点比較)で PR 自身の変更だけを見る。
         run: |
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          merge_base="$(git merge-base "$base_sha" "$head_sha")"
+          echo "base=${base_sha} head=${head_sha} merge-base=${merge_base}"
           python3 .github/scripts/check_spec_drift.py pr \
-            --base "${{ github.event.pull_request.base.sha }}" \
-            --head "${{ github.sha }}" \
+            --base "$merge_base" \
+            --head "$head_sha" \
             --out drift-report.md
 
       - name: Read report

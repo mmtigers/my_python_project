@@ -17,6 +17,7 @@ CI では test.yml の lint ジョブから `pytest .github/scripts/` で実行�
   - #124: DDD直下にフラット配置された test_*.py の除外
   - #188: ソース削除済み仕様書の孤立ドキュメント検知
   - #283: family-quest の Vitest テスト(*.test.ts / src/test/)の除外
+  - #407: rename/copy の扱い、--follow 付きの更新日時判定、git ls-files ベースの走査
 """
 import importlib.util
 import os
@@ -346,3 +347,105 @@ def test_full_audit_reports_stale_when_source_committed_after_doc(pseudo_repo):
         s.startswith("MY_HOME_SYSTEM/services/foo_service.py") and "foo_service.md" in s
         for s in report.stale
     )
+
+
+# --- Issue #407の回帰テスト ---
+#
+# - pr モードは rename(R)/copy(C) で旧パスを捨てていたため、「旧ソースの仕様書が
+#   孤立化した」ことを検知できなかった(ソース削除は D で扱うが rename は D にならない)。
+# - full モードは rglob でワーキングツリーを走査していたため、gitignore 済み/未追跡の
+#   .py/.sh/.ts も「仕様書が見つからないファイル」として報告していた。
+
+
+def test_pr_mode_treats_rename_as_delete_of_old_path_and_add_of_new_path(pseudo_repo):
+    """git mv でソースを rename しただけのPRでは、旧仕様書(foo_service.md)が孤立した
+    ことと、新パス(bar_service.py)に仕様書が無いことの両方を報告すること。"""
+    base = _git(pseudo_repo, "rev-parse", "HEAD").strip()
+    _git(pseudo_repo, "mv", "MY_HOME_SYSTEM/services/foo_service.py", "MY_HOME_SYSTEM/services/bar_service.py")
+    head = _commit_all(pseudo_repo, "rename source only", date="1700000200 +0000")
+
+    report = module.cmd_pr(base, head)
+    assert any(
+        "MY_HOME_SYSTEM/services/foo_service.py が削除されました" in s and "foo_service.md" in s
+        for s in report.orphaned
+    ), report.orphaned
+    assert report.undocumented == ["MY_HOME_SYSTEM/services/bar_service.py"]
+
+
+def test_pr_mode_is_clean_when_rename_updates_both_source_and_doc(pseudo_repo):
+    """ソースの rename と同時に仕様書も rename(更新)していれば検知事項なしであること。"""
+    base = _git(pseudo_repo, "rev-parse", "HEAD").strip()
+    _git(pseudo_repo, "mv", "MY_HOME_SYSTEM/services/foo_service.py", "MY_HOME_SYSTEM/services/bar_service.py")
+    _git(
+        pseudo_repo, "mv",
+        "docs/specifications/MY_HOME_SYSTEM/foo_service.md",
+        "docs/specifications/MY_HOME_SYSTEM/bar_service.md",
+    )
+    head = _commit_all(pseudo_repo, "rename source and doc", date="1700000200 +0000")
+
+    report = module.cmd_pr(base, head)
+    assert report.is_empty(), (report.stale, report.undocumented, report.orphaned)
+
+
+def test_pr_mode_treats_copy_as_add_of_new_path_only(pseudo_repo):
+    """copy(C) は旧パスがそのまま残るため、新パスの未文書化だけを報告し、
+    旧仕様書を孤立扱いしないこと。"""
+    base = _git(pseudo_repo, "rev-parse", "HEAD").strip()
+    src = pseudo_repo / "MY_HOME_SYSTEM/services/foo_service.py"
+    src.write_text("# original\n" * 50, encoding="utf-8")
+    _commit_all(pseudo_repo, "make source large enough for copy detection", date="1700000150 +0000")
+    base = _git(pseudo_repo, "rev-parse", "HEAD").strip()
+    (pseudo_repo / "MY_HOME_SYSTEM/services/copied_service.py").write_text(
+        src.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    head = _commit_all(pseudo_repo, "copy source", date="1700000200 +0000")
+
+    report = module.cmd_pr(base, head)
+    assert report.undocumented == ["MY_HOME_SYSTEM/services/copied_service.py"]
+    assert report.orphaned == []
+
+
+def test_full_audit_does_not_flag_renamed_source_with_renamed_doc_as_stale(pseudo_repo):
+    """ソースと仕様書を同じコミットで rename した場合、full モードで
+    ドリフト(ソースの方が新しい)として誤検知しないこと(--follow 付きの日時比較)。"""
+    _git(pseudo_repo, "mv", "MY_HOME_SYSTEM/services/foo_service.py", "MY_HOME_SYSTEM/services/bar_service.py")
+    _git(
+        pseudo_repo, "mv",
+        "docs/specifications/MY_HOME_SYSTEM/foo_service.md",
+        "docs/specifications/MY_HOME_SYSTEM/bar_service.md",
+    )
+    _commit_all(pseudo_repo, "rename source and doc", date="1700086400 +0000")
+
+    report = module.cmd_full()
+    assert not any("bar_service" in s for s in report.stale), report.stale
+    assert not any("bar_service" in s for s in report.undocumented), report.undocumented
+    assert not any("foo_service" in s for s in report.orphaned), report.orphaned
+
+
+def test_full_audit_ignores_untracked_files(pseudo_repo):
+    """未追跡(gitignore 済み等)のソース/仕様書は走査対象外であること。以前は rglob で
+    ワーキングツリーを走査していたため、ローカルにだけ存在する .py/.ts が
+    「仕様書が見つからないファイル」として、未追跡の .md が孤立ドキュメントとして
+    報告されていた。"""
+    _write(pseudo_repo, "MY_HOME_SYSTEM/scratch_untracked.py")
+    _write(pseudo_repo, "family-quest/src/Untracked.tsx")
+    _write(pseudo_repo, "docs/specifications/MY_HOME_SYSTEM/untracked_doc.md")
+
+    report = module.cmd_full()
+    joined = "\n".join(report.undocumented + report.orphaned + report.stale)
+    assert "scratch_untracked.py" not in joined
+    assert "Untracked.tsx" not in joined
+    assert "untracked_doc.md" not in joined
+
+
+def test_doc_to_source_candidates_ignores_untracked_source_for_orphan_check(pseudo_repo):
+    """仕様書→ソースの逆引きも git 管理下のファイルだけを見ること(未追跡の
+    同名 .py があっても孤立ドキュメントの判定を覆さない)。"""
+    _write(pseudo_repo, "MY_HOME_SYSTEM/ai_logic.py")  # 未追跡のまま
+
+    module._TRACKED_FILES_CACHE.clear()
+    candidates = module.doc_to_source_candidates(module.SPEC_ROOT / "MY_HOME_SYSTEM" / "ai_logic.md")
+    # 未追跡ファイルは候補に入らず、フラット規約のデフォルト候補(#188)にフォールバックする
+    assert Path("MY_HOME_SYSTEM/ai_logic.py") in candidates
+    report = module.cmd_full()
+    assert "MY_HOME_SYSTEM/ai_logic.md" in "\n".join(report.orphaned)
