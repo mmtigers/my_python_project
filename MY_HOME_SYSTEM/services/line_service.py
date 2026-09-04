@@ -2,7 +2,7 @@
 import sqlite3
 import datetime
 import asyncio
-from typing import Union
+from typing import List, Union
 
 # LINE Messaging API Models
 from linebot.v3.messaging import (
@@ -27,6 +27,38 @@ TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
 # Issue #373: DB保存失敗時の返信メッセージの共通プレフィックス。
 # 呼び出し元(ai_service のツール関数等)はこのプレフィックスで成否を判別する。
 SAVE_FAILED_PREFIX = "⚠️ 記録に失敗しました"
+
+# Issue #377: LINEのTextMessageは1件あたり5000字が上限で、超過するとMessaging APIが
+# 400を返す(呼び出し元の`reply_message`はexceptで握るだけなのでユーザーには何も届かない)。
+# 4900字を安全マージンとして1メッセージあたりの上限にする。
+LINE_TEXT_MAX_CHARS = 4900
+# reply/push 1回で送れるメッセージ数の上限(LINE Messaging APIの仕様)。
+LINE_MAX_MESSAGES_PER_REPLY = 5
+
+
+def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:
+    """
+    Issue #377: 長文を LINE の5000字制限に収まる `TextMessage` へ変換する。
+
+    テキストが `LINE_TEXT_MAX_CHARS` 字以下ならそのまま単一の `TextMessage` を返す
+    （`handlers.line_handler.reply_message` は単一オブジェクト・リストのどちらも
+    受け付けるため、既存呼び出し元の挙動は変わらない）。超過する場合のみ
+    `LINE_TEXT_MAX_CHARS` 字ごとに分割した `TextMessage` のリストを返し、1回の
+    reply/pushで送れる上限(`LINE_MAX_MESSAGES_PER_REPLY`件)を超えるときは末尾を
+    切り詰めて注記を付ける（全文を無制限に送り続けることはしない）。
+    """
+    if len(text) <= LINE_TEXT_MAX_CHARS:
+        return TextMessage(text=text)
+
+    chunks = [text[i:i + LINE_TEXT_MAX_CHARS] for i in range(0, len(text), LINE_TEXT_MAX_CHARS)]
+    if len(chunks) > LINE_MAX_MESSAGES_PER_REPLY:
+        chunks = chunks[:LINE_MAX_MESSAGES_PER_REPLY]
+        notice = "\n…(文字数上限のため以下省略)"
+        last = chunks[-1]
+        if len(last) + len(notice) > LINE_TEXT_MAX_CHARS:
+            last = last[:LINE_TEXT_MAX_CHARS - len(notice)]
+        chunks[-1] = last + notice
+    return [TextMessage(text=c) for c in chunks]
 
 # ==========================================
 # 1. Logging & Health (Existing)
@@ -141,7 +173,7 @@ async def get_user_status_message(user_id: str) -> Union[TextMessage, FlexMessag
         logger.error(f"Status fetch error: {e}")
         return TextMessage(text="⚠️ ステータスの取得に失敗しました。")
 
-async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage]:
+async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage, List[TextMessage]]:
     """受注可能なクエスト一覧を返す"""
     try:
         data = await asyncio.to_thread(game_system.get_all_view_data)
@@ -173,7 +205,10 @@ async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMess
             lines.append(f"・{q['title']} (💰{q['gold_gain']}{bonus})")
         
         lines.append("\n終わったら「○○完了」と報告してね！")
-        return TextMessage(text="\n".join(lines))
+        # Issue #377: クエスト件数が多いと5000字を超えうるため分割する。
+        # `line_handler.reply_message`は非list渡しをlist化するのと同様、list渡しもそのまま
+        # 使えるため、呼び出し元(line_handler.py)の変更は不要。
+        return split_text_into_line_messages("\n".join(lines))
 
     except Exception as e:
         logger.error(f"Quest fetch error: {e}")

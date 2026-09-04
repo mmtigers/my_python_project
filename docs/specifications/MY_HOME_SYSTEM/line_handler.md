@@ -220,7 +220,7 @@
 
 
 * **副作用**: `line_service`、`ai_service` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。
-* 根拠: サービス呼び出し (行番号: 197, 202, 207, 215, 225-228 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
+* 根拠: サービス呼び出し (行番号: 197, 202, 207, 215, 225-231 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
 
 
 * **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。それ以外の分岐（ステータス/クエスト/承認却下/体調記録）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
@@ -231,27 +231,27 @@
 ### `handle_postback`
 
 * **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`data` 文字列が "approve:" または "reject:" で始まる場合は「承認/却下」コマンドに変換して `_process_message_async` を呼び出す。それ以外は `line_logic.handle_postback` へ処理を丸投げする。**（Issue #376 / L-L1で修正）** `handle_message`と同様に、先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 242-278 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 246-248)、例外隔離 (行番号: 277-278)
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 243-279 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 247-249)、例外隔離 (行番号: 278-279)
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 242 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* 根拠: 引数定義 (行番号: 243 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 各分岐でのreturnは空 (行番号: 248, 266 / 抜粋: "return")
+* 根拠: 各分岐でのreturnは空 (行番号: 249, 267 / 抜粋: "return")
 
 
 * **副作用**: `_process_message_async` または `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`によるログ出力。
-* 根拠: 関数呼び出し (行番号: 254, 263, 272 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
+* 根拠: 関数呼び出し (行番号: 255, 264, 273 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
 
 
 * **エラーハンドリング**:
 * "approve:/reject:" のパース失敗時 (`ValueError`) にはエラーログを出力し処理終了。
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
 * **（L-L1で追加）** 上記以外（`event`属性アクセスや承認コマンド処理中の例外等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
-* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` ×2 (行番号: 264-265, 273-276, 277-278 / 抜粋: "except ValueError:")
+* 根拠: `except ValueError: logger.error(...)` / `except Exception as e: logger.error(...)` ×2 (行番号: 265-266, 274-277, 278-279 / 抜粋: "except ValueError:")
 
 
 
@@ -359,7 +359,7 @@ graph TD
 
 
 * **[修正済み] Issue #376 / L-L1 reply token期限切れ・再配信による重複記録・イベント単位の例外隔離**: Webhook応答前に同期的にAI処理（tenacityリトライ×連鎖ツール呼び出し）を完走する構造のため、LINEのreply token（約1分）を超過すると`reply_message`が400になり無応答、さらに再配信を有効化していると同一イベントが再送されて記録が二重化していた。対応: (1) `AI_REPLY_TIMEOUT_SEC`(20秒)で`asyncio.wait_for`によりAI経路を打ち切り、超過時は確認を促す文言を返信、(2) `reply_message`は失敗時に`user_id`宛て`push_message`へフォールバック、(3) `deliveryContext.isRedelivery=true`のイベントは`handle_message`/`handle_postback`でスキップ、(4) 両ハンドラを`try/except`で包み、複数イベント一括配信時に1件目の例外で後続が処理されない問題を隔離。**署名検証後に即200を返してバックグラウンドで処理する構造への変更は行っていない**（同期処理のまま。`webhookEventId`による冪等化も未実装で、再配信は一律スキップ）。`asyncio.wait_for`の打ち切りはコルーチンをキャンセルするが、`run_in_executor`/`to_thread`上で進行中のDB書き込み・Gemini呼び出しのスレッドは止まらないため、タイムアウト応答後に記録が完了している可能性がある。
-* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 47)、`_is_redelivery` (行番号: 50-59)、`reply_message`のpushフォールバック (行番号: 98-114)、`handle_message` (行番号: 168-189)、AI経路の`wait_for` (行番号: 225-237)、`handle_postback` (行番号: 242-278)
+* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 47)、`_is_redelivery` (行番号: 50-59)、`reply_message`のpushフォールバック (行番号: 98-114)、`handle_message` (行番号: 168-189)、AI経路の`wait_for` (行番号: 225-238)、`handle_postback` (行番号: 243-279)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。

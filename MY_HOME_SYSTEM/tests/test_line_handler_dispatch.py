@@ -512,3 +512,32 @@ class TestReplyMessagePushFallback:
         monkeypatch.setattr(line_handler, "line_bot_api", fake_api)
 
         line_handler.reply_message("tok", TextMessage(text="hi"), user_id="U1")  # 例外が外に漏れないこと
+
+
+@pytest.mark.asyncio
+class TestAiReplyTextLengthLimit:
+    """Issue #377: Gemini応答がLINEの5000字制限を超える場合の分割/切り詰め"""
+
+    async def test_long_ai_response_is_split_before_reply(self, monkeypatch):
+        long_text = "x" * 12000
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", AsyncMock(return_value=long_text))
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "教えて", "tok")
+
+        sent = mock_reply.call_args.args[1]
+        assert isinstance(sent, list)
+        assert len(sent) <= line_handler.line_service.LINE_MAX_MESSAGES_PER_REPLY
+        for m in sent:
+            assert len(m.text) <= line_handler.line_service.LINE_TEXT_MAX_CHARS
+
+    async def test_short_ai_response_is_still_a_single_text_message(self, monkeypatch):
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", AsyncMock(return_value="短い返事"))
+        mock_reply = MagicMock()
+        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+
+        await line_handler._process_message_async("U1", "太郎", "こんにちは", "tok")
+
+        sent = mock_reply.call_args.args[1]
+        assert sent.text == "短い返事"

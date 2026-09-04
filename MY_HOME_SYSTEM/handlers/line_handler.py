@@ -227,7 +227,8 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
             timeout=AI_REPLY_TIMEOUT_SEC,
         )
         if ai_resp_text:
-            reply_message(reply_token, TextMessage(text=ai_resp_text), user_id=user_id)
+            # Issue #377: Gemini応答は長さ無制限のため、LINEの5000字制限を超えうる。
+            reply_message(reply_token, line_service.split_text_into_line_messages(ai_resp_text), user_id=user_id)
     except asyncio.TimeoutError:
         logger.error(f"AI Processing Timeout (> {AI_REPLY_TIMEOUT_SEC}s) for user {user_id}")
         reply_message(

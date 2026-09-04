@@ -13,6 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import common
 import config
 from services import line_service
+from linebot.v3.messaging import TextMessage
 
 
 @pytest.mark.asyncio
@@ -248,3 +249,47 @@ class TestSaveFailureIsReportedToUser:
         food = await line_service.log_food_record("U1", "太郎", "夕食", "カレー")
         assert not health.text.startswith(line_service.SAVE_FAILED_PREFIX)
         assert not food.text.startswith(line_service.SAVE_FAILED_PREFIX)
+
+
+class TestSplitTextIntoLineMessages:
+    """Issue #377: LINEの5000字制限対策のテキスト分割ヘルパー"""
+
+    def test_short_text_returns_single_text_message_unwrapped(self):
+        result = line_service.split_text_into_line_messages("短いテキスト")
+        assert isinstance(result, TextMessage)
+        assert result.text == "短いテキスト"
+
+    def test_text_at_exact_limit_is_not_split(self):
+        text = "a" * line_service.LINE_TEXT_MAX_CHARS
+        result = line_service.split_text_into_line_messages(text)
+        assert isinstance(result, TextMessage)
+        assert result.text == text
+
+    def test_text_over_limit_is_split_into_multiple_messages(self):
+        text = "a" * (line_service.LINE_TEXT_MAX_CHARS + 10)
+        result = line_service.split_text_into_line_messages(text)
+        assert isinstance(result, list)
+        assert len(result) == 2
+        assert all(len(m.text) <= line_service.LINE_TEXT_MAX_CHARS for m in result)
+        assert "".join(m.text for m in result) == text
+
+    def test_no_message_exceeds_5000_chars(self):
+        text = "b" * (line_service.LINE_TEXT_MAX_CHARS * 3 + 500)
+        result = line_service.split_text_into_line_messages(text)
+        for m in result:
+            assert len(m.text) < 5000
+
+    def test_never_exceeds_max_messages_per_reply(self):
+        """極端に長い応答でも5件を超えて送ろうとしないこと(末尾は切り詰め注記付き)"""
+        text = "c" * (line_service.LINE_TEXT_MAX_CHARS * 20)
+        result = line_service.split_text_into_line_messages(text)
+        assert isinstance(result, list)
+        assert len(result) == line_service.LINE_MAX_MESSAGES_PER_REPLY
+        assert "省略" in result[-1].text
+        assert len(result[-1].text) <= line_service.LINE_TEXT_MAX_CHARS
+
+    def test_all_but_last_chunk_are_full_when_truncated(self):
+        text = "d" * (line_service.LINE_TEXT_MAX_CHARS * 20)
+        result = line_service.split_text_into_line_messages(text)
+        for m in result[:-1]:
+            assert len(m.text) == line_service.LINE_TEXT_MAX_CHARS

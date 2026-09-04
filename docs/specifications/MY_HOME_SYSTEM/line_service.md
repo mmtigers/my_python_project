@@ -192,27 +192,54 @@
 
 
 
+### `LINE_TEXT_MAX_CHARS` / `LINE_MAX_MESSAGES_PER_REPLY` (変数、Issue #377で追加)
+
+* **役割**: `LINE_TEXT_MAX_CHARS`（`4900`）はLINEの`TextMessage`1件あたりの文字数上限（実際の上限は5000字で、超過するとMessaging APIが400を返す）に安全マージンを取った、本ファイルが扱う1メッセージあたりの上限。`LINE_MAX_MESSAGES_PER_REPLY`（`5`）は1回のreply/pushで送信できるメッセージ数の上限。
+* 根拠: `LINE_TEXT_MAX_CHARS = 4900` (行番号: 34)、`LINE_MAX_MESSAGES_PER_REPLY = 5` (行番号: 36)
+
+### `split_text_into_line_messages` (関数、Issue #377で追加)
+
+* **役割**: 長文を LINE の5000字制限に収まる`TextMessage`へ変換する。テキストが`LINE_TEXT_MAX_CHARS`字以下ならそのまま単一の`TextMessage`を返す（`handlers.line_handler.reply_message`は単一オブジェクト・リストのどちらも受け付けるため、短文の場合の呼び出し元の挙動は変わらない）。超過する場合のみ`LINE_TEXT_MAX_CHARS`字ごとに分割した`TextMessage`のリストを返し、`LINE_MAX_MESSAGES_PER_REPLY`件を超えるときは末尾を切り詰めて「(文字数上限のため以下省略)」の注記を付ける（全文を無制限に送り続けることはしない）。`handlers/line_handler.py`のAI応答返信でも使われる。
+* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 39-61)
+
+
+* **引数/リクエスト**: `text: str`
+* 根拠: 関数シグネチャ (行番号: 39)
+
+
+* **戻り値/レスポンス**: `Union[TextMessage, List[TextMessage]]`
+* 根拠: `return TextMessage(text=text)` (行番号: 51) / `return [TextMessage(text=c) for c in chunks]` (行番号: 61)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 39-61)
+
+
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 39-61)
+
 ### `get_active_quests_message`
 
-* **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出して`TextMessage`を返す。対象判定(`quest['target_user']`)は、`'all'`なら全員、それ以外は`target == user_id`の完全一致が基本だが、`target == 'siblings'`（兄妹連携クエスト）の場合のみ例外的に、呼び出し元`user_id`とは比較せず「`role_child`のユーザー全員が対象」として扱う（Issue #109の修正。以前は`target != 'all' and target != user_id`のみの判定だったため、`'siblings'`がどの`user_id`とも一致せず常にスキップされ、LINE経由では兄妹連携クエストが誰にも表示されなかった）。**（#291で修正）** 参照フィールドは`q['target']`から、`quest_master`の実カラム名である`q['target_user']`に変更された（quest_serviceが以前このビューへ付与していた`target`という重複フィールド名の廃止に追随したもの）。
-* 根拠: `async def get_active_quests_message(user_id: str)...` (行番号: 132-168 / 抜粋: "async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage]:")
-* 根拠: `siblings`判定分岐 (行番号: 141〜155 / 抜粋: "users = data.get("users", [])\n        user_role = next((u.get('role') for u in users if u.get('user_id') == user_id), None)", "if target == 'siblings':\n                if user_role != ROLE_CHILD:\n                    continue")
+* **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出してメッセージを返す。対象判定(`quest['target_user']`)は、`'all'`なら全員、それ以外は`target == user_id`の完全一致が基本だが、`target == 'siblings'`（兄妹連携クエスト）の場合のみ例外的に、呼び出し元`user_id`とは比較せず「`role_child`のユーザー全員が対象」として扱う（Issue #109の修正。以前は`target != 'all' and target != user_id`のみの判定だったため、`'siblings'`がどの`user_id`とも一致せず常にスキップされ、LINE経由では兄妹連携クエストが誰にも表示されなかった）。**（#291で修正）** 参照フィールドは`q['target']`から、`quest_master`の実カラム名である`q['target_user']`に変更された（quest_serviceが以前このビューへ付与していた`target`という重複フィールド名の廃止に追随したもの）。**（Issue #377で修正）** クエスト件数が多いと5000字を超えうるため、最終的な文字列連結結果を`split_text_into_line_messages`に通してから返す（通常件数では従来どおり単一`TextMessage`）。
+* 根拠: `async def get_active_quests_message(user_id: str)...` (行番号: 176-215 / 抜粋: "async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage, List[TextMessage]]:")
+* 根拠: `siblings`判定分岐 (行番号: 189-195 / 抜粋: "users = data.get("users", [])", "if target == 'siblings':\n                if user_role != ROLE_CHILD:\n                    continue")
+* 根拠: 文字数分割 (行番号: 211 / 抜粋: "return split_text_into_line_messages(\"\\n\".join(lines))")
 
 
 * **引数/リクエスト**: `user_id` (str)
-* 根拠: 関数の引数定義 (行番号: 132 / 抜粋: "user_id: str")
+* 根拠: 関数の引数定義 (行番号: 176 / 抜粋: "user_id: str")
 
 
-* **戻り値/レスポンス**: `Union[TextMessage, FlexMessage]`
-* 根拠: 戻り値の型ヒント (行番号: 132 / 抜粋: "-> Union[TextMessage, FlexMes")
+* **戻り値/レスポンス**: `Union[TextMessage, FlexMessage, List[TextMessage]]`（Issue #377でクエスト一覧が長文化した場合の分割に対応するため`List[TextMessage]`が追加された）
+* 根拠: 戻り値の型ヒント (行番号: 176 / 抜粋: "-> Union[TextMessage, FlexMessage, List[TextMessage]]")
 
 
 * **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 135 / 抜粋: "await asyncio.to_thread(game_")
+* 根拠: `await asyncio.to_thread...` (行番号: 179 / 抜粋: "await asyncio.to_thread(game_")
 
 
 * **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
-* 根拠: `except Exception as e:` (行番号: 155 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e:` (行番号: 213 / 抜粋: "except Exception as e:")
 
 
 
@@ -291,6 +318,7 @@ graph TD
         get_user_status_message
         get_active_quests_message
         process_approval_command
+        split_text_into_line_messages["split_text_into_line_messages(Issue #377で追加)"]
     end
 
     subgraph "外部: coreモジュール"
@@ -334,6 +362,8 @@ graph TD
 
     get_active_quests_message --> game_system
     get_active_quests_message --> linebot_v3_messaging
+    get_active_quests_message -->|Issue #377| split_text_into_line_messages
+    split_text_into_line_messages --> linebot_v3_messaging
 
     process_approval_command --> quest_service
     process_approval_command --> linebot_v3_messaging
@@ -355,7 +385,9 @@ graph TD
 * `process_approval_command` において、`hasattr(e, 'detail')` を用いて例外の詳細を取得しようとしているが、外部システム (`quest_service`) が投げる特定の例外構造に暗黙的に依存している。
 * `game_system.get_all_view_data` や `quest_service.process_approve_quest` が同期関数である前提で `asyncio.to_thread` を用いて非同期実行しているが、これらの関数内部でのDB書き込みや排他制御がスレッドセーフに行われているかの確認が必要。
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
-* **未使用インポート**: `typing`から`List`, `Tuple`, `Optional`, `Dict`, `Any`（行番号: 5）、`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`（行番号: 11-13）がインポートされているが、いずれもファイル内で使用されていない。
+* **未使用インポート**: `linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`（行番号: 11-13）がインポートされているが、いずれもファイル内で使用されていない（旧版の記述を訂正: `typing`からのインポートは実際には`Union`のみで、`List`はIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた）。
+* **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: `get_active_quests_message`が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加し、`get_active_quests_message`の戻り値をこれに通すようにした。同関数は`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）にも使われている。
+* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 34, 36)、`split_text_into_line_messages` (行番号: 39-61)、`get_active_quests_message`での使用 (行番号: 211)
 
 ## 9. 不明事項一覧
 
