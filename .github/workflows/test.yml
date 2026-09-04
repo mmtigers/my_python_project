@@ -63,6 +63,13 @@ jobs:
         run: ruff check . --output-format=github
         continue-on-error: true
 
+      - name: Spec drift script tests (pytest .github/scripts/)
+        # Issue #402: check_spec_drift.py の回帰テストは従来「手動実行前提」でCI未実行
+        # だった。tmp_path 上の疑似リポジトリで完結するようになったため、
+        # lint ジョブ(依存が requirements-dev.txt だけで軽い)でブロッキング実行する。
+        working-directory: .
+        run: python -m pytest .github/scripts/ -q
+
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全66件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全69件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -9,7 +9,6 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [unified_server.md](./unified_server.md) | FastAPIサーバーの起動・設定を行う統合エントリーポイント。ルートディレクトリ解決、CORS設定、IP検証、各種ルーターの統合を行う。 |
 | [system_router.md](./system_router.md) | 手動バックアップをトリガーするPOSTエンドポイントを提供するFastAPIルーター。 |
 | [webhook_router.md](./webhook_router.md) | 外部システム（LINE Bot・SwitchBot等）からのWebhookリクエストを受け取り、適切なハンドラ・サービスへルーティングする。 |
-| [bounty_router.md](./bounty_router.md) | （廃止）報酬（ギルド討伐依頼）システムに関するAPIルーティング。2026-08のFamily Quest大改修に伴い削除済み。 |
 | [camera_router.md](./camera_router.md) | カメラのライブ配信（HLS）・録画セグメントの一覧取得や配信APIを提供する（`camera_service.py`に処理を委譲）。 |
 
 ## B. ハードウェア・IoT制御モジュール
@@ -49,7 +48,6 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [ai_service.md](./ai_service.md) | LLMを活用した推論・テキスト生成の共通インターフェース。 |
 | [log_analyzer.md](./log_analyzer.md) | 蓄積された各種ログ（センサー、タスク消化、システムログ）のパターンを分析する。 |
 | [weekly_analyze_report.md](./weekly_analyze_report.md) | 週次で家庭内の状況（健全性、タスク消化率など）をAIで要約し、レポートとして出力（LINE等へ送信）する。 |
-| [ai_logic.md](./ai_logic.md) | （廃止）AI解析用の宣言スタブファイル。未接続の到達不能コードとして削除済み、後継はai_service.py。 |
 | [analysis_service.md](./analysis_service.md) | DB・OS情報・外部APIからデータを取得し、Pandas等で加工・集計するデータ分析用サービス層。 |
 
 ## E. クエストバックエンド (Family Quest用API)
@@ -105,3 +103,13 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [health_tab.md](./health_tab.md) | Streamlitダッシュボードの「健康管理」タブ。子供の体調・排便・食事のデータフレームを表形式で表示する。 |
 | [sensor_tab.md](./sensor_tab.md) | Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。 |
 | [summary.md](./summary.md) | Streamlitダッシュボードのトップ画面の9個のステータスカード（在宅状況・電気代・NAS死活等）を判定・描画するモジュール。 |
+
+## 廃止済み仕様書一覧
+
+以下は対応するソースファイルが削除済みのため、仕様書ファイル自体も削除したもの(Issue #402)。`.github/scripts/check_spec_drift.py` の週次監査で「孤立ドキュメント」として報告され続けるのを避けるため、記録はこの一覧のみに残す。内容が必要な場合は git 履歴(削除コミット以前)を参照すること。
+
+| 旧仕様書(旧ソース) | 廃止理由 |
+| --- | --- |
+| `bounty_router.md` (`routers/bounty_router.py`) | 報酬（ギルド討伐依頼）システムのAPIルーティング。2026-08のFamily Quest大改修(ギルド機能廃止、`d1599d6`/`ffdc8c2`/`1818d5a`)に伴い削除。 |
+| `ai_logic.md` (`handlers/ai_logic.py`) | Gemini Function Calling用の宣言スタブ。呼び出し経路(`line_logic.handle_message()`)ごと到達不能なデッドコードだったため削除。後継は[ai_service.md](./ai_service.md)。 |
+| `scripts_claude_log_watchdog.md` (`scripts/claude_log_watchdog.sh`) | Issue #339 対応(`e7b4175`)で削除。一次チェック部分は[health_watch.md](./health_watch.md)へ、`claude -p`起動部分は[scripts_claude_investigate.md](./scripts_claude_investigate.md)へ分割移設。 |

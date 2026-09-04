@@ -11,7 +11,7 @@
 
 - [App.md](../../App.md) — `play('tap')`/`play('medal')`/`play('select')`/`play('clear')`/`play('cancel')`等を呼び出す利用元。
 - [Button.md](../components/ui/Button.md) — クリック時に`play('tap')`を呼び出す利用元。
-- [LevelUpModal.md](../components/ui/LevelUpModal.md) — 表示時に`play('levelUp')`を呼び出す利用元。
+- `LevelUpModal.tsx`(廃止済み。`1818d5a`で削除、仕様書も Issue #402 で削除) — かつて表示時に`play('levelUp')`を呼び出していた利用元。
 - [QuestList.md](../features/quest/components/QuestList.md) — クエスト完了操作時に`play('clear')`/`play('submit')`を呼び出す利用元。
 - [InventoryList.md](../features/shop/components/InventoryList.md) — アイテム使用・キャンセル時に`play('clear')`/`play('cancel')`を呼び出す利用元。
 

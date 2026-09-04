@@ -10,7 +10,7 @@
 ## 関連ドキュメント
 
 * [health_watch.md](./health_watch.md) - 本スクリプトを起動する層1(一次ヘルスチェック)。`_fire_investigate_hook()`が異常サマリを標準入力で渡して本スクリプトをfire-and-forget起動する
-* [scripts_claude_log_watchdog.md](./scripts_claude_log_watchdog.md) - 廃止された前身の雛形。一次チェック部分はhealth_watch.pyへ、`claude -p`起動部分は本スクリプトへ分割移設された
+* `scripts/claude_log_watchdog.sh`(廃止。仕様書は Issue #402 で削除済み、[README.md](./README.md)の廃止済み仕様書一覧を参照) - 廃止された前身の雛形。一次チェック部分はhealth_watch.pyへ、`claude -p`起動部分は本スクリプトへ分割移設された
 * [config.md](./config.md) - 起動経路となる`config.HEALTH_WATCH_INVESTIGATE_HOOK`の定義元
 * [notification_service.md](./notification_service.md) - `WATCHDOG_NOTIFY_WEBHOOK_URL`が「再利用する想定」としているDiscord Webhook通知の実体(本スクリプト自身は`curl`でPOSTする)
 * `docs/runbooks/raspi_claude_log_monitoring.md` - 設計背景・ガードレールの意図・有効化手順を記載したランブック
