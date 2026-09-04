@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -71,9 +72,21 @@ def get_live_stream(camera_id: str):
 
     raise HTTPException(status_code=503, detail="Stream generation timeout")
 
+# #386: target_date は camera_service 側で glob パターン(f"{target_date}_*.mp4")と
+# concat ファイル名にそのまま埋め込まれる。未検証だと "*" で全期間(30日×144本)を
+# 1本に結合する数時間の ffmpeg ジョブを外部から起動できたため、YYYYMMDD の8桁のみ許可する。
+_TARGET_DATE_RE = re.compile(r"^\d{8}$")
+
+
+def _validate_target_date(target_date: str) -> None:
+    if not _TARGET_DATE_RE.match(target_date):
+        raise HTTPException(status_code=400, detail="target_date must be YYYYMMDD")
+
+
 @router.get("/record/{camera_id}/{target_date}/info")
 def get_record_info(camera_id: str, target_date: str):
     """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""
+    _validate_target_date(target_date)
     cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
     if not cam_conf:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -84,6 +97,7 @@ def get_record_info(camera_id: str, target_date: str):
 @router.get("/record/{camera_id}/{target_date}/{filename}")
 def get_record_file(camera_id: str, target_date: str, filename: str):
     """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""
+    _validate_target_date(target_date)
     # .m3u8 プレイリストの要求の場合
     if filename.endswith(".m3u8"):
         cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
