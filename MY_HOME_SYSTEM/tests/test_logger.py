@@ -14,6 +14,7 @@ record.msg が非文字列(例外オブジェクト等)の場合にTypeErrorに�
 import logging
 import os
 import sys
+import threading
 import time
 from unittest.mock import patch
 
@@ -35,8 +36,12 @@ class TestEmitDoesNotBlockOnSlowDiscord:
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = DiscordErrorHandler()
 
+        # C-L2 (Issue #414): 「遅いDiscord」は固定の time.sleep(2) ではなく、テスト終了時に
+        # 解放する Event で再現する(バックグラウンドスレッドを2秒間残さない)
+        release_post = threading.Event()
+
         def slow_post(*args, **kwargs):
-            time.sleep(2)
+            release_post.wait(2)
             return None
 
         with patch("core.logger.requests.post", side_effect=slow_post) as mock_post:
@@ -54,6 +59,7 @@ class TestEmitDoesNotBlockOnSlowDiscord:
             deadline = time.monotonic() + 3
             while mock_post.call_count == 0 and time.monotonic() < deadline:
                 time.sleep(0.05)
+            release_post.set()
             assert mock_post.call_count == 1
 
 
