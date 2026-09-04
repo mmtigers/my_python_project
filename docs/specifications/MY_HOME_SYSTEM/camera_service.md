@@ -239,6 +239,8 @@
 
 * **役割**: 指定日付の最初の録画mp4ファイル名から時刻部分を抽出し、0時0分0秒からの経過秒数を算出して返す。
 * 根拠: [関数定義とDocstring] (行番号: 179〜180 / 抜粋: "\"\"\"指定日の最初の録画ファイルの開始時刻を0時からの秒数で返す\"\"\"")
+* **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（環境変数への到達不能なフォールバックを削除）。
+* 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 243)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`
@@ -282,6 +284,8 @@
 
 * **役割**: 指定日の10分単位分割mp4ファイル群を`ffconcat`形式のリストファイルにまとめ、ffmpegでVOD用HLSプレイリストへ変換する。呼び出し前に完了済みVODプロセスを`_prune_finished_vod_processes`で剪定したうえで同一カメラ・日付の変換プロセスの多重実行を防止し、過去日付かつ生成済みの場合はキャッシュされたプレイリストを返す。呼び出し元`generate_record_playlist`が取得した`process_key`単位のロック内で実行されることを前提とする。
 * 根拠: [関数定義] (行番号: 216〜319 / 抜粋: "def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str, process_key: str) -> Optional[str]:")
+* **（Issue #359 / #405 で修正）** 当日分（`target_date == today_str`）のプレイリストが存在し、その更新時刻から `VOD_TODAY_REUSE_SECONDS`（300 秒）以内なら再生成せずに返す。以前は当日分をキャッシュ対象外としていたため、プレイリスト要求のたびに当日の全録画を再多重化していた。NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する。
+* 根拠: `VOD_TODAY_REUSE_SECONDS = 300` (行番号: 28)、`nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 284)、`if target_date == today_str and os.path.exists(playlist_path):` (行番号: 326〜333)
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `target_date: str`, `process_key: str`

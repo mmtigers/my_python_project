@@ -25,6 +25,7 @@
     20. NASパスの遅延解決 (Issue #330 PR-B)
 """
 import os
+import time
 import sys
 import json
 import logging
@@ -54,7 +55,10 @@ def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
     Returns:
         bool: ストレージの初期化と書き込みテストが成功した場合はTrue、最終的に失敗した場合はFalse。
     """
-    test_file: str = os.path.join(base_path, ".write_test")
+    # #384: 固定名 ".write_test" だと、scheduler 起動直後に同時に走る複数プロセスが同じ
+    # ファイルを open→write→remove して衝突し(片方の os.remove が FileNotFoundError)、
+    # 起動のたびにリトライ警告が出る/最悪フォールバックに落ちていた。プロセス固有の名前にする。
+    test_file: str = os.path.join(base_path, f".write_test.{os.getpid()}.{time.time_ns()}")
 
     def _attempt() -> None:
         # 1. ディレクトリの存在確認と作成
@@ -201,6 +205,9 @@ LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
 # 未設定の場合は従来通り検証なし（後方互換）。
 SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+# switchbot_webhook_fix.py が SwitchBot/LINE の Webhook URL を再登録する際の公開ベースURL
+# (例: https://home.example.com)。#405: 以前はスクリプト側で os.environ.get() を直接読んでいた。
+WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")
 
 # Discord Webhooks
 DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")
@@ -511,6 +518,8 @@ TIMELAPSE_SEGMENT_TIME: str = "40"
 # ==========================================
 # NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
 RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
+# #359: 録画VODのHLSセグメントキャッシュ(BASE_DIR/data/hls_streams/vod)の保持日数
+HLS_VOD_RETENTION_DAYS: int = int(os.getenv("HLS_VOD_RETENTION_DAYS", "3"))
 # DBバックアップの保持日数
 DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")

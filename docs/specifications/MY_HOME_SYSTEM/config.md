@@ -124,6 +124,8 @@
 
 * **役割**: 指定されたパスのディレクトリ作成と書き込みテストを、指定回数リトライ（Exponential Backoff）しながら実行する。Issue #292で、Exponential Backoffのループ機構自体を`core.utils.retry_with_backoff`(共通ユーティリティ)へ委譲するようリファクタリングされた。`monitors/nas_monitor.py`の`check_write_permission`も同じ共通ユーティリティを使うようになったが、リトライ対象の例外集合・リトライ回数・待機時間という「ポリシー」自体は呼び出し元ごとに従来のまま維持されている(挙動を変えない純粋なリファクタリング)。
 * 根拠: [関数定義] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`), [retry_with_backoffへの委譲] (行番号: 78〜85 / 抜粋: `retry_with_backoff(\n            _attempt,\n            max_retries=max_retries,\n            retryable_exceptions=(OSError, PermissionError, IOError),`)
+* **（Issue #384 で修正）** 書き込みテスト用ファイル名は固定の `.write_test` ではなく `.write_test.<pid>.<time_ns>` とプロセス固有にする。以前は scheduler 起動直後に同時実行される複数の監視プロセスが同じファイルを open→write→remove して衝突し(片方の `os.remove` が `FileNotFoundError`)、起動のたびにリトライ警告が出る/最悪 `temp_fallback` へ落ちていた。
+* 根拠: `test_file: str = os.path.join(base_path, f".write_test.{os.getpid()}.{time.time_ns()}")` (行番号: 61)
 
 
 * **引数/リクエスト**: `base_path` (str: 確認対象ディレクトリ), `max_retries` (int: 最大リトライ回数。デフォルトは5)
@@ -142,6 +144,12 @@
 * 根拠: [例外捕捉] (行番号: 86〜90 / 抜粋: `except (OSError, PermissionError, IOError) as e:`)
 
 
+
+
+#### 追加された設定値（Issue #359 / #405）
+
+* `WEBHOOK_BASE_URL: Optional[str]`（行番号: 210）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
+* `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 522）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
 
 ### `ensure_safe_path_with_backoff`
 

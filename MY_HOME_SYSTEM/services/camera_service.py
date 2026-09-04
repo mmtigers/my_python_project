@@ -24,6 +24,9 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")
 HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")
 
+# #359: 当日分の録画VODプレイリストを再生成せずに再利用する猶予秒数
+VOD_TODAY_REUSE_SECONDS = 300
+
 _active_processes: Dict[str, subprocess.Popen] = {}
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
@@ -211,7 +214,7 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
 def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
         """指定日の最初の録画ファイルの開始時刻を0時からの秒数で返す"""
         nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
-        nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
+        nvr_base_dir = config.NVR_RECORD_DIR
         search_dir = os.path.join(nvr_base_dir, nas_folder_name)
         
         search_pattern = os.path.join(search_dir, f"{target_date}_*.mp4")
@@ -249,8 +252,10 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     cam_id = cam_conf['id']
     nas_folder_name = cam_conf.get("nas_folder", cam_conf["name"])
 
-    # NVRの保存ディレクトリ (config.NVR_RECORD_DIR が未定義の場合は環境変数やフォールバックを使用)
-    nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', os.getenv("NVR_RECORD_DIR", "/mnt/nas/home_system/nvr_recordings"))
+    # NVRの保存ディレクトリ。#405: 以前は getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...)) で
+    # config を経由しない環境変数読み取りのフォールバックを持っていたが、config.NVR_RECORD_DIR は
+    # 常に定義されるためフォールバックは到達不能で、.env.example 整合テストの死角になっていた。
+    nvr_base_dir = config.NVR_RECORD_DIR
     search_dir = os.path.join(nvr_base_dir, nas_folder_name)
 
     if not os.path.exists(search_dir):
@@ -288,6 +293,18 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     if target_date < today_str and os.path.exists(playlist_path):
         logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
         return playlist_path
+
+    # #359: 当日分は録画が増え続けるためキャッシュ対象外だが、以前はプレイリスト要求の
+    # たびに当日の全録画を再多重化していた(連続再生・再読込のたびに数GBを再生成)。
+    # 生成完了から VOD_TODAY_REUSE_SECONDS 以内なら再利用し、それを過ぎたら再生成する。
+    if target_date == today_str and os.path.exists(playlist_path):
+        try:
+            age = time.time() - os.path.getmtime(playlist_path)
+        except OSError:
+            age = None
+        if age is not None and age < VOD_TODAY_REUSE_SECONDS:
+            logger.debug(f"✅ [{cam_conf['name']}] 当日プレイリストは {age:.0f}s 前に生成済みのため再利用します。")
+            return playlist_path
 
     # ffmpegのconcatファイルリスト作成 (ffconcat version 1.0 を使用しタイムラインを補正)
     with open(concat_file_path, "w", encoding="utf-8") as f:
