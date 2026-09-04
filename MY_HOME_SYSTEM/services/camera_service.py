@@ -77,6 +77,32 @@ def _vod_generation_lock(process_key: str):
                 del _vod_generation_locks[process_key]
 
 
+def stop_all_processes(timeout: float = 5.0) -> int:
+    """ライブ配信・VOD生成の全 ffmpeg 子プロセスを停止する(サーバー終了時に呼ぶ)。
+
+    #360: 以前は lifespan の終了処理が scheduler/camera_monitor しか止めておらず、
+    ffmpeg が孤児化して再起動後の新 ffmpeg と同じ HLS パスへ二重書き込みし、
+    再生が破損していた。停止できたプロセス数を返す。
+    """
+    stopped = 0
+    for registry in (_active_processes, _active_vod_processes):
+        for key, proc in list(registry.items()):
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    stopped += 1
+            except Exception as e:
+                logger.warning(f"ffmpeg プロセス停止に失敗 ({key}): {e}")
+            registry.pop(key, None)
+    if stopped:
+        logger.info(f"🛑 ffmpeg プロセスを {stopped} 件停止しました")
+    return stopped
+
+
 def _prune_finished_vod_processes() -> None:
     """完了済み(poll()がNoneでない)プロセスを_active_vod_processesから除去する。
     キーがcam_id×target_dateの組み合わせのため、剪定しないと日々増え続けて

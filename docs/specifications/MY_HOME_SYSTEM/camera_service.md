@@ -259,6 +259,20 @@
 * 根拠: [try-exceptブロック] (行番号: 196〜198 / 抜粋: "except Exception as e:\n            logger.warning(f\"Failed to parse start offset for {cam_conf['name']}: {e}\")\n            return 0")
 
 
+
+### `stop_all_processes`（Issue #360 で追加）
+
+* **役割**: `_active_processes`（ライブ配信）と `_active_vod_processes`（VOD生成）に登録された ffmpeg 子プロセスをすべて `terminate()` → timeout 後 `kill()` し、両レジストリを空にして停止数を返す。`unified_server.py` の lifespan 終了処理から呼ばれる。以前は終了処理が scheduler/camera_monitor しか止めておらず、ffmpeg が孤児化して再起動後の新 ffmpeg と同じ HLS パスへ二重書き込みし再生が破損していた。
+* 根拠: `def stop_all_processes(timeout: float = 5.0) -> int:` (行番号: 80〜102)
+* **引数/リクエスト**: `timeout: float`（既定 5.0）
+* 根拠: (行番号: 80)
+* **戻り値/レスポンス**: `int`（停止したプロセス数）
+* 根拠: (行番号: 102)
+* **副作用**: 子プロセスの terminate/kill、レジストリのクリア、ログ出力
+* 根拠: (行番号: 88〜101)
+* **エラーハンドリング**: 個々の停止失敗は WARNING ログのみで続行
+* 根拠: (行番号: 96〜97)
+
 ### `generate_record_playlist`
 
 * **役割**: 指定日の録画プレイリスト生成を、`process_key`（`カメラID_日付`）単位の`threading.Lock`で排他制御しながら内部実装`_generate_record_playlist_locked`へ委譲するラッパー関数。実際の生成ロジックは`_generate_record_playlist_locked`が担う。

@@ -23,7 +23,7 @@ import sqlite3
 import config
 from core.logger import setup_logging
 from core.migrations import apply_pending_migrations
-from services import sensor_service
+from services import sensor_service, camera_service
 
 # Routers
 from routers import quest_router, webhook_router, system_router, camera_router, alexa_router
@@ -109,30 +109,47 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error(f"⚠️ NAS path prewarm failed (continuing startup): {e}")
 
     # スキーママイグレーションの適用 (migrations/ 配下、詳細は core/migrations.py 参照)
+    # #383: 以前は接続に timeout 未指定(既定5秒)で、前世代の監視プロセスが書き込み中だと
+    # "database is locked" で失敗しやすく、しかも失敗を logger.error で握りつぶして
+    # 子プロセスを起動しサービスを継続していた(スキーマ未適用のまま全APIが500)。
+    # timeout を延ばし、失敗時は CRITICAL(Discord通知)を出して監視子プロセスを起動しない。
+    migration_ok = True
     try:
-        migration_conn = sqlite3.connect(config.SQLITE_DB_PATH)
+        migration_conn = sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)
         try:
             apply_pending_migrations(migration_conn)
         finally:
             migration_conn.close()
     except Exception as e:
-        logger.error(f"⚠️ Migration check failed (continuing startup): {e}")
+        migration_ok = False
+        logger.critical(
+            f"🚨 Migration failed at startup: {e}. "
+            "Monitor subprocesses will NOT be started; fix the DB/schema and restart."
+        )
+    app.state.migration_ok = migration_ok
 
     global camera_process
-    camera_script = os.path.join(PROJECT_ROOT, "monitors/camera_monitor.py")
-    camera_process = subprocess.Popen([sys.executable, camera_script])
-    
-    # Schedulerの起動管理
     global scheduler_process
-    try:
-        scheduler_script = os.path.join(PROJECT_ROOT, "scheduler_boot.py")
-        if os.path.exists(scheduler_script):
-            scheduler_process = subprocess.Popen([sys.executable, scheduler_script])
-            logger.info(f"✅ Scheduler started (PID: {scheduler_process.pid})")
-        else:
-            logger.warning("⚠️ scheduler_boot.py not found. Skipping scheduler start.")
-    except Exception as e:
-        logger.error(f"Failed to start scheduler: {e}")
+    if migration_ok:
+        # #360: camera_monitor の起動も scheduler と同様に保護する(以前は失敗すると
+        # lifespan の例外でサーバー全体が起動しなかった)。
+        try:
+            camera_script = os.path.join(PROJECT_ROOT, "monitors/camera_monitor.py")
+            camera_process = subprocess.Popen([sys.executable, camera_script])
+            logger.info(f"✅ Camera monitor started (PID: {camera_process.pid})")
+        except Exception as e:
+            logger.error(f"Failed to start camera monitor: {e}")
+
+        # Schedulerの起動管理
+        try:
+            scheduler_script = os.path.join(PROJECT_ROOT, "scheduler_boot.py")
+            if os.path.exists(scheduler_script):
+                scheduler_process = subprocess.Popen([sys.executable, scheduler_script])
+                logger.info(f"✅ Scheduler started (PID: {scheduler_process.pid})")
+            else:
+                logger.warning("⚠️ scheduler_boot.py not found. Skipping scheduler start.")
+        except Exception as e:
+            logger.error(f"Failed to start scheduler: {e}")
 
     yield
 
@@ -155,6 +172,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except subprocess.TimeoutExpired:
             camera_process.kill()
         logger.info("Camera monitor stopped.")
+
+    # #360: ライブ配信/VOD生成の ffmpeg も止める(孤児化による HLS 二重書き込み防止)
+    try:
+        camera_service.stop_all_processes()
+    except Exception as e:
+        logger.error(f"Failed to stop ffmpeg processes: {e}")
 
     sensor_service.cancel_all_tasks()
     logger.info("Bye!")

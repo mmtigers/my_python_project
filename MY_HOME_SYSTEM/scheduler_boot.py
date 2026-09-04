@@ -1,8 +1,10 @@
 # MY_HOME_SYSTEM/scheduler.py
 import time
+import signal
 import subprocess
 import sys
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import List, Dict, TypedDict
 
@@ -40,6 +42,49 @@ TASKS: List[Task] = [
     {"script": "monitors/nas_monitor.py",             "interval": 3600, "last_run": 0, "args": []},
 ]
 
+# #360: 実行中の子プロセス(監視スクリプト)を追跡する。以前は SIGTERM を受けると
+# scheduler 本体だけが即死し、実行中の nas_monitor.py 等(最大3600s)が孤児として
+# 走り続け、再起動後の新世代と DB 書き込み・保持期間削除が競合していた。
+_running_children: Dict[str, subprocess.Popen] = {}
+_children_lock = threading.Lock()
+_shutdown_event = threading.Event()
+
+
+def terminate_running_children(timeout: float = 5.0) -> int:
+    """実行中の子プロセスを terminate(→timeout後 kill)し、停止した数を返す。"""
+    with _children_lock:
+        children = list(_running_children.items())
+    stopped = 0
+    for script, proc in children:
+        try:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                stopped += 1
+                logger.info(f"🛑 Stopped child task: {script}")
+        except Exception as e:
+            logger.warning(f"Failed to stop child task {script}: {e}")
+    return stopped
+
+
+def _handle_shutdown_signal(signum, _frame) -> None:
+    logger.info(f"Received signal {signum}; shutting down scheduler and child tasks...")
+    _shutdown_event.set()
+    terminate_running_children()
+
+
+def install_signal_handlers() -> None:
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handle_shutdown_signal)
+        except (ValueError, OSError):
+            # メインスレッド以外から呼ばれた場合等は無視(テスト環境など)
+            pass
+
+
 def run_script(script_path: str, args: List[str]) -> bool:
     """
     指定されたスクリプトをサブプロセスとして実行する。
@@ -63,31 +108,50 @@ def run_script(script_path: str, args: List[str]) -> bool:
     env: Dict[str, str] = os.environ.copy()
     env["PYTHONPATH"] = PROJECT_ROOT
 
+    proc = None
     try:
-        # 実行完了を待機
-        result = subprocess.run(
+        # #360: subprocess.run ではなく Popen で起動して PID を保持し、SIGTERM 受信時に
+        # terminate_running_children() から止められるようにする。
+        proc = subprocess.Popen(
             [sys.executable, full_path] + args,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=3600  # タイムラプスなど長時間タスクを許容するため60分に延長
         )
+        with _children_lock:
+            _running_children[script_path] = proc
 
-        if result.returncode == 0:
+        # 実行完了を待機
+        _stdout, stderr = proc.communicate(timeout=3600)  # タイムラプスなど長時間タスクを許容するため60分
+
+        if proc.returncode == 0:
             logger.debug(f"✅ Finished: {script_path}")
             return True
         else:
-            logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {result.returncode})")
-            if result.stderr:
-                logger.error(f"Stderr: {result.stderr.strip()}")
+            logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {proc.returncode})")
+            if stderr:
+                # #361: Discord 通知は 2000 字上限のため、stderr は末尾 20 行程度に絞る
+                tail = "\n".join(stderr.strip().splitlines()[-20:])
+                logger.error(f"Stderr (tail): {tail}")
             return False
 
     except subprocess.TimeoutExpired:
         logger.error(f"⏰ Timeout: {script_path} exceeded 3600 seconds.")
+        if proc is not None:
+            try:
+                proc.kill()
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
         return False
     except Exception as e:
         logger.exception(f"🔥 Unexpected error running {script_path}: {e}")
         return False
+    finally:
+        with _children_lock:
+            if _running_children.get(script_path) is proc:
+                _running_children.pop(script_path, None)
 
 def main() -> None:
     """
@@ -100,11 +164,12 @@ def main() -> None:
     多重起動（前回実行が長引いた際の連続再実行）を防ぐ。
     """
     logger.info("⏰ --- MY_HOME_SYSTEM Scheduler Started (Parallel Mode) ---")
+    install_signal_handlers()
 
     in_flight: Dict[str, Future] = {}
 
     with ThreadPoolExecutor(max_workers=max(len(TASKS), 1), thread_name_prefix="scheduler") as executor:
-        while True:
+        while not _shutdown_event.is_set():
             now: float = time.time()
 
             for task in TASKS:
@@ -120,8 +185,11 @@ def main() -> None:
                     task["last_run"] = now
                     in_flight[script] = executor.submit(run_script, script, task["args"])
 
-            # CPU負荷軽減のための短いスリープ
-            time.sleep(10)
+            # CPU負荷軽減のための短いスリープ(シャットダウン要求があれば即抜ける)
+            _shutdown_event.wait(10)
+
+    terminate_running_children()
+    logger.info("⏰ --- Scheduler stopped ---")
 
 if __name__ == "__main__":
     try:

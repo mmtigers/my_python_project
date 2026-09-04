@@ -61,11 +61,14 @@ class TestStartAllShCleanupTargets:
 
     def test_cleanup_targets_cover_all_four_known_processes(self):
         targets = _cleanup_targets()
+        # #360: scheduler 配下の監視スクリプトと HLS 用 ffmpeg も停止対象に含める
         assert set(targets) == {
             "unified_server.py",
             "camera_monitor.py",
             "scheduler_boot.py",
             "streamlit run",
+            "python.*monitors/[a-z_]*\\.py",
+            "ffmpeg.*hls_streams",
         }
 
 
