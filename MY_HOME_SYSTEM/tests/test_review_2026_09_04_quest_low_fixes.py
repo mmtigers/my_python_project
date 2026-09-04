@@ -11,6 +11,7 @@ Issue #409(Family Quest の Low・保守性指摘)の回帰テスト。
 - Q-L10 存在しない user_id ではロック辞書にエントリを作らない
 - 品質: MasterQuest/MasterReward の値域検証
 """
+import datetime
 import os
 import sys
 from unittest.mock import patch
@@ -47,12 +48,17 @@ def _quiet(monkeypatch):
 
 def test_bonus_treats_pending_day_as_done(isolated_db):
     _seed()
+    # ボーナス判定は JST 日付基準なので、SQLite の datetime('now')(UTC)ではなく
+    # JST で日付を作る(UTC 15時以降は UTC 日付と JST 日付がずれて壁時計依存になる)
+    now_jst = datetime.datetime.now(qs_module.JST)
+    three_days_ago = (now_jst - datetime.timedelta(days=3)).isoformat()
+    two_days_ago = (now_jst - datetime.timedelta(days=2)).isoformat()
     with common.get_db_cursor(commit=True) as cur:
         # 3日前: approved、2日前: pending(承認待ち)。昨日は無し → 欠席は1日だけ
         cur.execute("INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                    "VALUES ('dad', 901, 'テスト', 10, 100, datetime('now', '-3 days'), 'approved')")
+                    "VALUES ('dad', 901, 'テスト', 10, 100, ?, 'approved')", (three_days_ago,))
         cur.execute("INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
-                    "VALUES ('dad', 901, 'テスト', 0, 0, datetime('now', '-2 days'), 'pending')")
+                    "VALUES ('dad', 901, 'テスト', 0, 0, ?, 'pending')", (two_days_ago,))
         quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = 901").fetchone()
         boost = qs_module.QuestService().calculate_quest_boost(cur, "dad", quest)
     # 最終実施(pending)は2日前 → days_diff=2 → missed=1 → 10%
