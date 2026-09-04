@@ -328,6 +328,35 @@ def _normalize_url(url: str) -> str:
     return urlunsplit((scheme, netloc, path, query, ""))
 
 
+def _packer_base_n_digits(num: int, radix: int) -> str:
+    """p,a,c,k,e,d形式のJSパッカーが使う復元関数(JS側の"e")と同じ規則で、
+    数値numをradix進数の文字列表現に変換する(D-L5)。
+
+    JS側の実装:
+        e = function(c) {
+            return (c < a ? '' : e(parseInt(c / a)))
+                + ((c = c % a) > 35 ? String.fromCharCode(c + 29) : c.toString(36))
+        }
+    各桁(0〜radix-1)は、35以下ならbase36の数字/小文字(0-9a-z)、36以上なら
+    大文字(A-Z、String.fromCharCode(c+29)で得られる)で表現される。radixの
+    大きさに関わらず桁の文字集合は最大62種(0-9a-zA-Z)に固定される点がポイントで、
+    radix自体をbase36の桁数(36種)と取り違えると、radixが36以外(典型的には62)の
+    ページで誤った単語に置換されてしまう。
+    """
+    def digit_char(d: int) -> str:
+        if d > 35:
+            return chr(d + 29)
+        return "0123456789abcdefghijklmnopqrstuvwxyz"[d]
+
+    if num == 0:
+        return "0"
+    digits = []
+    while num > 0:
+        digits.append(digit_char(num % radix))
+        num //= radix
+    return "".join(reversed(digits))
+
+
 def _looks_like_block_page(html: str) -> bool:
     """取得したHTMLがCloudflare等のボット検知チャレンジページかを判定する。
 
@@ -590,7 +619,14 @@ class UniversalYtDlpStrategy(DownloadStrategy):
 
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': f'{str(target_dir)}/%(title)s.%(ext)s',
+            # D-L1: 保存先ディレクトリ(target_dir、リストファイル名由来のsource_name
+            # を含みうる)をouttmpl文字列へf-stringで直接埋め込むと、source_nameに
+            # '%'が含まれる場合にyt-dlpのテンプレート展開(%(...)s)と衝突し、
+            # "the following fields are missing"等のテンプレートエラーで
+            # ダウンロードが失敗しうる。'paths'オプションでディレクトリを分離し、
+            # outtmplはファイル名部分のみのテンプレートにする。
+            'paths': {'home': str(target_dir)},
+            'outtmpl': '%(title)s.%(ext)s',
             'merge_output_format': 'mp4',
             'quiet': True, 'no_warnings': True, 'nopart': False,
             # M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、
@@ -625,7 +661,13 @@ class UniversalYtDlpStrategy(DownloadStrategy):
                 if self._should_skip(filename): return True
 
                 logger.info(f"📥 DL開始: {info.get('title')}")
-                ydl.download([task.url])
+                # D-L2: 以前はここで改めてydl.download([task.url])を呼んでおり、
+                # 直前のextract_info(download=False)と合わせてメタデータ取得の
+                # ネットワークリクエストが2回発生していた（ボット検知対策として
+                # 抑えているはずのアクセス回数を自ら増やしてしまっていた）。
+                # 既に取得済みのinfoをprocess_ie_resultへ渡し、再抽出せずに
+                # ダウンロードを実行する。
+                ydl.process_ie_result(info, download=True)
                 DiscordNotifier.send(f"✅ 動画保存完了\nファイル: `{filename.name}`")
                 return True
         except Exception as e:
@@ -720,17 +762,15 @@ class ScrapingStrategy(DownloadStrategy):
         if not match: return None
         
         p = match.group(1).replace("\\'", "'")
+        # D-L5: group(2)がpacker本来のradix('a')。以前はこれを無視してbase36固定
+        # (chars 36種のmod 36)で単語を復元していたため、radixが36以外(典型的には
+        # 62)のページでは誤った単語に置換され、m3u8抽出そのものに失敗しうった。
+        radix = int(match.group(2))
         c = int(match.group(3))
         k = match.group(4).split('|')
-        
+
         def e_func(num: int) -> str:
-            if num == 0: return "0"
-            chars = "0123456789abcdefghijklmnopqrstuvwxyz"
-            res = ""
-            while num > 0:
-                res = chars[num % 36] + res
-                num //= 36
-            return res
+            return _packer_base_n_digits(num, radix)
 
         unpacked = p
         for i in range(c - 1, -1, -1):
@@ -1075,13 +1115,26 @@ class BatchDownloader:
     def __init__(self):
         self.session = NetworkManager.create_session()
         self._shutdown_requested = False
+        # D-L3: シグナルを_shutdown_requestedへフラグ化するだけでは、進行中の
+        # タスク(yt-dlpによる数GB規模のダウンロード等)はメインループの次回
+        # チェック(タスク境界)まで止まらない。2回目以降のシグナルでは即座に
+        # KeyboardInterruptを送出し、実行中の処理を強制的に中断できるようにする。
+        self._interrupt_count = 0
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
         self.history = HistoryManager.load_history()
 
     def _signal_handler(self, signum: int, frame: Any) -> None:
-        logger.info("🛑 停止シグナル検知")
-        self._shutdown_requested = True
+        self._interrupt_count += 1
+        if self._interrupt_count == 1:
+            logger.info("🛑 停止シグナル検知（現在のタスク完了後に終了します。強制終了するには再度シグナルを送ってください）")
+            self._shutdown_requested = True
+            return
+        # D-L3: 1回目のシグナル後もタスクが終わらない(数GB規模のダウンロード中
+        # 等)場合、2回目のシグナルで即座に強制中断する。ロック解放は
+        # run()のtry/finallyが担保する。
+        logger.critical("🛑🛑 2回目の停止シグナルを検知したため、実行中の処理を強制中断します")
+        raise KeyboardInterrupt("second interrupt signal received; forcing immediate shutdown")
 
     def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
         # 【修正】ハードコードではなく、設定フラグで制御するように変更
@@ -1236,9 +1289,13 @@ class BatchDownloader:
         try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (BlockingIOError, OSError):
+            # D-L4: 他インスタンス実行中によるスキップは異常系ではなく想定内の
+            # 正常系(newface_monitor.run_monitorと同じ扱い)であり、sys.exit(1)
+            # で終了するとrun_task.sh側がERRORとして記録してしまっていた。
+            # 正常終了(終了コード0)として扱うようreturnに変更する。
             logger.info("⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)")
             os.close(lock_fd)
-            sys.exit(1)
+            return
 
         try:
             self._run_locked()
