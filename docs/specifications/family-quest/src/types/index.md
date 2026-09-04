@@ -6,6 +6,7 @@
 | 言語 | TypeScript |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `c7af5f6` |
 
 ## 関連ドキュメント
 
@@ -104,6 +105,17 @@
 
 * **役割**: インベントリアイテムのデータ構造の定義。
 * 根拠: [該当要素] (行番号: 91〜100 / 抜粋: "export interface InventoryItem {")
+
+
+* **引数/リクエスト**: 該当なし
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+### `CompletedSignal`
+
+* **役割**: クエスト完了APIが実際に成功した時点で`App.tsx`が`QuestList`/`QuestItem`へ「完了音・無限クエストのクールダウンを発火せよ」と通知するためのシグナルの型。`id`（対象クエストの`quest_id`）、`userId`（完了した本人の`user_id`）、`nonce`（同一クエストの連続完了でも`useEffect`が再発火するよう毎回変わる値）を持つ。**（Issue #363で追加）** 以前は`App.tsx`/`QuestList.tsx`/`FamilyDashboard.tsx`の3箇所に`{ id: ID; nonce: number }`というインライン型が重複しており`userId`を持たなかったため、横画面4人パネルで兄が完了した無限クエストのクールダウンが妹・パパ・ママのパネルにも掛かっていた（サーバー側のクールダウンは(user, quest)単位）。
+* 根拠: [該当要素] (行番号: 103〜113 / 抜粋: "export interface CompletedSignal {\n    id: ID;\n    userId: string;\n    nonce: number;\n}")
 
 
 * **引数/リクエスト**: 該当なし

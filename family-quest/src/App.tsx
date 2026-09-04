@@ -12,7 +12,7 @@ import RewardShop from './features/shop/components/RewardShop';
 import { InventoryList } from './features/shop/components/InventoryList';
 import FamilyDashboard from './features/family/components/FamilyDashboard';
 
-import { ID, Quest, QuestHistory, Reward, User } from '@/types';
+import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';
 import { getQuestLockState } from './features/quest/hooks/useQuestStatus';
 
 // 保護者判定は quest_users.role ('role_adult'/'role_child') を唯一の判定基準とする。
@@ -183,7 +183,9 @@ function App() {
   // 「キャンセル」しても完了音が鳴り、無限クエストは60秒間タップ不能になっていた。
   // 実際に完了APIが成功した時点でのみ発火させるため、対象クエストのidと発火のたびに
   // 変わるnonceをApp側からQuestList/QuestItemへ通知する。
-  const [completedSignal, setCompletedSignal] = useState<{ id: ID; nonce: number } | null>(null);
+  // #363: 横画面の4人パネルでは同じsignalが全員のQuestItemに届くため、「誰の完了か」
+  // (userId)も載せ、QuestItem側で自分のパネルの完了だけに反応させる。
+  const [completedSignal, setCompletedSignal] = useState<CompletedSignal | null>(null);
 
   // エラー表示用(成功系の通知はすべてトースト化したため、ここはエラー専用)
   const [messageData, setMessageData] = useState<{ title: string, text: string, onRetry?: () => void } | null>(null);
@@ -246,7 +248,7 @@ function App() {
         play(completedQuest.quest_type === 'daily' || completedQuest._isInfinite ? 'clear' : 'submit');
         const idForSignal = completedQuest.quest_id;
         if (idForSignal !== undefined) {
-          setCompletedSignal({ id: idForSignal, nonce: Date.now() });
+          setCompletedSignal({ id: idForSignal, userId: user.user_id, nonce: Date.now() });
         }
         if (res.status === 'pending') {
           showToast({ title: "申請完了", text: res.message || "親の承認待ちになりました", icon: '📨' });

@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a4fb40f` |
+| 解析基準コミット | `c7af5f6` |
 
 ## 関連ドキュメント
 
@@ -76,7 +76,8 @@
 
 ### `FamilyDashboardProps` (型定義)
 
-* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。Issue #102で、完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるための通知`completedSignal: { id: ID; nonce: number } | null`が追加された（呼び出し元の`App.tsx`から渡され、各`FamilyPanel`へそのまま転送される）。
+* **役割**: `FamilyDashboard`コンポーネントが受け取るPropsの型定義。Issue #102で、完了APIが実際に成功した時点でのみ対象クエストの完了音・無限クエストのクールダウンを発火させるための通知`completedSignal: CompletedSignal | null`が追加された（呼び出し元の`App.tsx`から渡され、各`FamilyPanel`へそのまま転送される）。**（Issue #363）** `CompletedSignal`（`@/types`）は`{ id, userId, nonce }`を持ち、同じシグナルが4パネル全員へ渡されても、各パネルの`QuestItem`が`userId`と自パネルのユーザーを照合して自分の完了にだけ反応する（以前は`{ id, nonce }`のみで、兄の無限クエスト完了が他3人のパネルにもクールダウンを掛けていた）。
+* 根拠: (行番号: 3, 40〜43 / 抜粋: "import { CompletedSignal, User, Quest, QuestHistory, Reward } from '@/types';", "// クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、\n    // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。\n    completedSignal: CompletedSignal | null;")
 * 根拠: (行番号: 29〜44 / 抜粋: "interface FamilyDashboardProps {\n    users: User[];\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    onQuestClick: (user: User, quest: Quest) => void;\n    onBuyReward: (user: User, reward: Reward) => void;\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n    // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの\n    // クールダウンを発火させるための通知(App側で管理)。\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: (user: User) => void;\n}")
 
 
@@ -120,7 +121,8 @@
 
 ### `FamilyPanelProps` (型定義)
 
-* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。Issue #102で、`FamilyDashboard`から転送される`completedSignal: { id: ID; nonce: number } | null`が追加された。
+* **役割**: `FamilyPanel`コンポーネントが受け取るPropsの型定義。Issue #102で、`FamilyDashboard`から転送される`completedSignal: CompletedSignal | null`が追加された（Issue #363で`userId`を含む`CompletedSignal`型に変更）。
+* 根拠: (行番号: 134 / 抜粋: "completedSignal: CompletedSignal | null;")
 * 根拠: (行番号: 120〜135 / 抜粋: "interface FamilyPanelProps {\n    user: User;\n    quests: Quest[];\n    completedQuests: QuestHistory[];\n    pendingQuests: QuestHistory[];\n    rewards: Reward[];\n    iconFirst: boolean;\n    isActive: boolean;\n    themeColorKey?: keyof typeof THEME_BORDER_CLASSES;\n    isIdle: boolean;\n    onInteract: () => void;\n    onQuestClick: (quest: Quest) => void;\n    onBuyReward: (reward: Reward) => void;\n    completedSignal: { id: ID; nonce: number } | null;\n    onAvatarClick: () => void;\n}")
 
 

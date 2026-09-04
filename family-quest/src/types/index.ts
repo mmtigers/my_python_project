@@ -100,6 +100,18 @@ export interface InventoryItem {
     category?: string;
 }
 
+// #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ
+// 「完了音・無限クエストのクールダウンを発火せよ」と通知するためのシグナル。
+// nonce は同一クエストの連続完了でも useEffect が再発火するよう毎回変える。
+// userId は横画面の4人パネル表示で「誰の完了か」を区別するために必須 (#363):
+// これが無いと兄が完了した無限クエストのクールダウンが妹・パパ・ママのパネルにも
+// 掛かってしまう(サーバー側のクールダウンは (user, quest) 単位)。
+export interface CompletedSignal {
+    id: ID;
+    userId: string;
+    nonce: number;
+}
+
 // ★追加: クエスト完了結果 (APIレスポンス用)
 export interface QuestResult {
     status: string;

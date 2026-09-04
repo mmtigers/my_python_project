@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Undo2, Clock, TrendingUp, Lock, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ID, User, Quest, QuestHistory } from '@/types';
+import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
 import { useQuestStatus, getQuestLockState } from '../hooks/useQuestStatus';
@@ -16,7 +16,7 @@ interface QuestListProps {
     onQuestClick: (quest: Quest) => void;
     // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
     // クールダウンを発火させるための通知(App側で管理)。
-    completedSignal: { id: ID; nonce: number } | null;
+    completedSignal: CompletedSignal | null;
     // 横画面4人表示のパネル内で使うためのモード。
     // true の場合、ビューポート幅基準の md: ブレークポイント(2カラム化・拡大表示)には
     // 依存せず、狭いパネル幅でも崩れないタップ領域確保済みの単一カラム表示にする。
@@ -43,7 +43,7 @@ const QuestItem: React.FC<{
     pendingQuests: QuestHistory[];
     currentUser: User;
     onClick: (q: Quest) => void;
-    completedSignal: { id: ID; nonce: number } | null;
+    completedSignal: CompletedSignal | null;
     panelMode?: boolean;
     iconFirst?: boolean;
 }> = ({ quest, completedQuests, pendingQuests, currentUser, onClick, completedSignal, panelMode, iconFirst }) => {
@@ -61,13 +61,19 @@ const QuestItem: React.FC<{
     // 完了APIが実際に成功した時点(App側からのcompletedSignal)でのみ発火させる。
     // 以前はタップ即時に鳴らしていたため、確認モーダルで「キャンセル」しても完了音が鳴り、
     // 無限クエストは60秒間タップ不能になっていた。
+    // #363: 横画面の4人パネルでは同じ completedSignal が全パネルの同一クエストに届くため、
+    // クエストidだけでなく「誰の完了か」(userId)も一致する場合のみクールダウンに入れる。
+    // 以前は id しか見ておらず、兄が完了した無限クエストが妹・パパ・ママのパネルでも
+    // 60秒 "Wait..." になっていた(サーバー側のクールダウンは (user, quest) 単位)。
     const questId = quest.quest_id;
+    const currentUserId = currentUser.user_id;
     useEffect(() => {
-        if (!isInfinite || !completedSignal || completedSignal.id !== questId) return;
+        if (!isInfinite || !completedSignal) return;
+        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) return;
         setIsCooldown(true);
         const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
         return () => clearTimeout(timer);
-    }, [completedSignal, isInfinite, questId]);
+    }, [completedSignal, isInfinite, questId, currentUserId]);
 
     // ボーナス計算
     const bonusGold = quest.bonus_gold || 0;

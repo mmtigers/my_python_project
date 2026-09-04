@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Sword, ShoppingBag, Package } from 'lucide-react';
-import { ID, User, Quest, QuestHistory, Reward } from '@/types';
+import { CompletedSignal, User, Quest, QuestHistory, Reward } from '@/types';
 import UserStatusCard from './UserStatusCard';
 import QuestList from '../../quest/components/QuestList';
 import ApprovalList from '../../quest/components/ApprovalList';
@@ -38,8 +38,9 @@ interface FamilyDashboardProps {
     onReject: (history: QuestHistory) => void;
     onApproveAll: () => void;
     // #102: 完了APIが実際に成功した時点でのみ、対象クエストの完了音・無限クエストの
-    // クールダウンを発火させるための通知(App側で管理)。
-    completedSignal: { id: ID; nonce: number } | null;
+    // クールダウンを発火させるための通知(App側で管理)。#363: userId を含み、
+    // 各パネルの QuestItem は自分のユーザーの完了にのみ反応する。
+    completedSignal: CompletedSignal | null;
     onAvatarClick: (user: User) => void;
 }
 
@@ -130,7 +131,7 @@ interface FamilyPanelProps {
     onInteract: () => void;
     onQuestClick: (quest: Quest) => void;
     onBuyReward: (reward: Reward) => void;
-    completedSignal: { id: ID; nonce: number } | null;
+    completedSignal: CompletedSignal | null;
     onAvatarClick: () => void;
 }
 
