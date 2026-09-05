@@ -4,31 +4,13 @@ import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
 import { gameDataResponseSchema } from '../lib/gameDataSchema';
 import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';
-import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
+import { ID, User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
-// 新規追加: any型を排除するための厳密なインターフェース定義
-// (gameData.logsの1件。バックエンドのQuestService._fetch_recent_logsに対応。
-// ★バグ修正(Issue #120): 以前はmessage/created_atという実際には存在しない
-// フィールド名を宣言しており、_fetch_recent_logsの実際のレスポンス形状
-// {id, text, dateStr, timestamp}と不一致だった。adventureLogsはどの
-// コンポーネントからも消費されていないため現状は実害がなかったが、
-// 将来利用する際に誤った型に気づかず参照してしまう不具合の種だった)
-interface AdventureLog {
-    id: string;
-    text: string;
-    dateStr: string;
-    timestamp: string;
-}
-
-// 家族全体の統計情報 (UserService.get_family_chronicle の "stats" レスポンスに対応)
-// #390: どのコンポーネントからも消費されていないため戻り値(familyStats)からは外した。
-// レスポンス型の一部として残す。
-interface FamilyStats {
-    totalLevel: number;
-    totalGold: number;
-    totalQuests: number;
-    partyRank: string;
-}
+// #412(API契約): gameData.logs(AdventureLog)・chronicle.stats(FamilyStats)は
+// どちらもどのコンポーネントからも参照されていない(grep済み)ため型ごと削除した。
+// gameDataResponseSchema.ts側のlogsフィールドも合わせて削除済み。将来これらを
+// 使う際は、バックエンドの実レスポンス形状(QuestService._fetch_recent_logs /
+// UserService.get_family_chronicleのstats)を確認のうえ型を再定義すること。
 
 // 年代記の1エントリ (GameSystem._fetch_full_adventure_logs のレスポンスに対応。
 // #291: date/id/avatar_url/message/quest_title/reward_gold/reward_exp/created_at は
@@ -60,11 +42,9 @@ interface GameDataResponse {
     rewards: Reward[];
     completedQuests: QuestHistory[];
     pendingQuests: QuestHistory[];
-    logs: AdventureLog[];
 }
 
 interface ChronicleResponse {
-    stats: FamilyStats;
     chronicle: ChronicleItem[];
 }
 
@@ -134,13 +114,17 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
 
     // クエスト完了
+    // #412(API契約): Quest.quest_id は表示用途(マスタ読み込み前のプレースホルダー等)
+    // 向けに型としてはoptionalだが、リクエストボディの quest_id は
+    // バックエンドの QuestAction(quest_id: int, ge=1)が必須で、undefinedを渡すと
+    // JSON.stringifyでキーごと落ちて422になる。ここではmutationFn自体の引数を
+    // questId: ID(必須)として分離し、undefinedがそのまま送信経路に乗らないように
+    // コンパイル時に強制する(呼び出し元のcompleteQuestでnullチェック済み)。
     const completeQuestMutation = useMutation({
-        mutationFn: async ({ user, quest }: { user: User; quest: Quest }) => {
+        mutationFn: async ({ user, questId }: { user: User; questId: ID }) => {
             return apiClient.post<QuestResult>('/api/quest/complete', { // 型指定
                 user_id: user.user_id,
-                // #291: quest.id という幽霊フィールド(バックエンドから送られてこない)への
-                // フォールバックを廃止し、実カラムのquest_idのみを参照する。
-                quest_id: quest.quest_id,
+                quest_id: questId,
             });
         },
         onSuccess: (res, variables) => {
@@ -162,11 +146,12 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     });
 
     // クエストキャンセル
+    // #412(API契約): QuestHistory.id も同様の理由でリクエスト側はhistoryId: ID(必須)に分離する。
     const cancelQuestMutation = useMutation({
-        mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
+        mutationFn: async ({ user, historyId }: { user: User; historyId: ID }) => {
             return apiClient.post('/api/quest/quest/cancel', {
                 user_id: user.user_id,
-                history_id: history.id,
+                history_id: historyId,
             });
         },
         onSuccess: () => {
@@ -179,11 +164,13 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     });
 
     // 承認
+    // #412(API契約): history はonSuccess側でcompleter(申請者)の表示情報を引くために
+    // そのまま保持しつつ、リクエストに使うhistoryIdのみID(必須)として分離する。
     const approveQuestMutation = useMutation({
-        mutationFn: async ({ user, history }: { user: User; history: QuestHistory }) => {
+        mutationFn: async ({ user, historyId }: { user: User; history: QuestHistory; historyId: ID }) => {
             return apiClient.post<QuestResult>('/api/quest/approve', {
                 approver_id: user.user_id,
-                history_id: history.id,
+                history_id: historyId,
             });
         },
         onSuccess: (res, variables) => {
@@ -220,11 +207,12 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     });
 
     // 却下
+    // #412(API契約): historyIdをID(必須)として分離(cancel/approveと同様)。
     const rejectQuestMutation = useMutation({
-        mutationFn: async ({ user, history, reason }: { user: User; history: QuestHistory; reason?: string }) => {
+        mutationFn: async ({ user, historyId, reason }: { user: User; historyId: ID; reason?: string }) => {
             return apiClient.post('/api/quest/reject', {
                 approver_id: user.user_id,
-                history_id: history.id,
+                history_id: historyId,
                 reason,
             });
         },
@@ -235,11 +223,13 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     });
 
     // 報酬購入
+    // #412(API契約): rewardId をID(必須)として分離(reward はonSuccess等での
+    // 表示用に引き続き保持)。
     const buyRewardMutation = useMutation({
-        mutationFn: async ({ user, reward }: { user: User; reward: Reward }) => {
+        mutationFn: async ({ user, rewardId }: { user: User; reward: Reward; rewardId: ID }) => {
             return apiClient.post('/api/quest/reward/purchase', {
                 user_id: user.user_id,
-                reward_id: reward.reward_id,
+                reward_id: rewardId,
             });
         },
         onSuccess: (_data, variables) => { // data -> _data
@@ -257,6 +247,12 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         // #291: quest.id という幽霊フィールドへのフォールバックを廃止し、
         // useQuestStatus.tsのgetQuestLockStateと同じく実カラムのquest_idのみ参照する。
         const qId = quest.quest_id;
+        // #412(API契約): quest_id は本来常に存在するはず(サーバー応答はgameDataSchema.ts側で
+        // 必須、masterData.jsのフォールバックも必ず付与)だが、Quest型自体は表示専用途向けに
+        // optionalなため、undefinedのままリクエストへ渡してしまう(→422)経路を確実に断つ。
+        if (qId == null) {
+            return { success: false, reason: 'error', detail: 'クエスト情報が正しく取得できていません(再読み込みしてください)' };
+        }
         const isPending = gameData?.pendingQuests.some(pq => pq.user_id === user.user_id && pq.quest_id === qId);
 
         if (isPending) {
@@ -265,7 +261,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
         try {
             // QuestResult型として受け取る
-            const res = await completeQuestMutation.mutateAsync({ user, quest });
+            const res = await completeQuestMutation.mutateAsync({ user, questId: qId });
             return {
                 success: true,
                 // ★バグ修正: 以前は status/message を返り値から落としていたため、
@@ -282,8 +278,13 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     };
 
     const cancelQuest = async (user: User, historyItem: QuestHistory) => {
+        // #412(API契約): history_id も同様に未確定のまま送らせない。
+        const hId = historyItem.id;
+        if (hId == null) {
+            return { success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' };
+        }
         try {
-            await cancelQuestMutation.mutateAsync({ user, history: historyItem });
+            await cancelQuestMutation.mutateAsync({ user, historyId: hId });
             return { success: true };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
@@ -292,6 +293,11 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     const approveQuest = async (user: User, historyItem: QuestHistory) => {
         if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
+        // #412(API契約): history_id も同様に未確定のまま送らせない。
+        const hId = historyItem.id;
+        if (hId == null) {
+            return { success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' };
+        }
         try {
             // ★バグ修正(M-6-1): 以前はレスポンスを破棄しており、承認画面側で
             // メダル獲得演出(earnedMedals)を出す手段が無かった。leveledUp通知は
@@ -299,7 +305,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
             // ★バグ修正(Issue #238): 兄妹連携クエストのカスケード承認時は相方の
             // earnedMedalsもpartnerEarnedMedalsとして返し、呼び出し元でトースト表示の
             // 合算に使えるようにする。
-            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem });
+            const res = await approveQuestMutation.mutateAsync({ user, history: historyItem, historyId: hId });
             return {
                 success: true,
                 earnedMedals: res.earnedMedals,
@@ -313,8 +319,13 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     const rejectQuest = async (user: User, historyItem: QuestHistory, rejectReason?: string) => {
         if (user.role !== 'role_adult') return { success: false, reason: 'permission' };
+        // #412(API契約): history_id も同様に未確定のまま送らせない。
+        const hId = historyItem.id;
+        if (hId == null) {
+            return { success: false, reason: 'error', detail: '履歴情報が正しく取得できていません(再読み込みしてください)' };
+        }
         try {
-            await rejectQuestMutation.mutateAsync({ user, history: historyItem, reason: rejectReason });
+            await rejectQuestMutation.mutateAsync({ user, historyId: hId, reason: rejectReason });
             return { success: true };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
@@ -326,8 +337,14 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         const cost = reward.cost_gold;
         if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };
 
+        // #412(API契約): reward_id も同様に未確定のまま送らせない。
+        const rId = reward.reward_id;
+        if (rId == null) {
+            return { success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' };
+        }
+
         try {
-            const res = await buyRewardMutation.mutateAsync({ user, reward }) as unknown as PurchaseResponse;
+            const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId }) as unknown as PurchaseResponse;
             return { success: true, newGold: res.newGold, reward };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };
