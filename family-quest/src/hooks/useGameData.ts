@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { gameDataResponseSchema } from '../lib/gameDataSchema';
+import { gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';
 import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';
 import { ID, User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
@@ -100,8 +100,21 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
 
     useEffect(() => {
         const viewer = gameData?.users?.[currentUserIdx];
-        if (viewer) viewerUserIdRef.current = viewer.user_id;
-    }, [gameData, currentUserIdx]);
+        if (!viewer || viewer.user_id === viewerUserIdRef.current) return;
+
+        const isInitialAssignment = viewerUserIdRef.current === undefined;
+        viewerUserIdRef.current = viewer.user_id;
+
+        // #473: 以前はここでrefを更新するのみで、次回フェッチへの反映を
+        // ポーリング(最大10秒後)や他の操作によるinvalidateQueriesに任せていたため、
+        // ユーザー切替直後の共有クエストのボーナス計算(閲覧中ユーザー基準)が
+        // 数秒間古いviewerのまま表示され続けていた。切替を検知した時点で
+        // 即座に新しいviewer_user_idで再フェッチする(初回代入時は不要な
+        // 二重フェッチを避けるため除外する)。
+        if (!isInitialAssignment) {
+            refetchGameData();
+        }
+    }, [gameData, currentUserIdx, refetchGameData]);
 
     // 2. 年代記データの取得
     const { data: chronicleData } = useQuery<ChronicleResponse>({
@@ -226,11 +239,14 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // #412(API契約): rewardId をID(必須)として分離(reward はonSuccess等での
     // 表示用に引き続き保持)。
     const buyRewardMutation = useMutation({
-        mutationFn: async ({ user, rewardId }: { user: User; reward: Reward; rewardId: ID }) => {
-            return apiClient.post('/api/quest/reward/purchase', {
+        mutationFn: async ({ user, rewardId }: { user: User; reward: Reward; rewardId: ID }): Promise<PurchaseResponse> => {
+            const raw = await apiClient.post('/api/quest/reward/purchase', {
                 user_id: user.user_id,
                 reward_id: rewardId,
             });
+            // #444: gameDataと同様、購入APIのレスポンスもここでランタイム検証する。
+            // 以前はこの検証層を経由せず、呼び出し側で無検証キャストしていた。
+            return purchaseResponseSchema.parse(raw);
         },
         onSuccess: (_data, variables) => { // data -> _data
             queryClient.invalidateQueries({ queryKey: ['gameData'] });
@@ -344,7 +360,7 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         }
 
         try {
-            const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId }) as unknown as PurchaseResponse;
+            const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId });
             return { success: true, newGold: res.newGold, reward };
         } catch (e) {
             return { success: false, reason: 'error', detail: extractErrorDetail(e) };

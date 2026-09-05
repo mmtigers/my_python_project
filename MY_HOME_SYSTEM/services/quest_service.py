@@ -246,6 +246,44 @@ class UserService:
         except OSError as e:
             logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")
 
+    def delete_unlinked_avatar(self, filename: str) -> bool:
+        """#442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの
+        紐付け)のうち2段階目(/user/update)が失敗した際のロールバック用。まだどの
+        ユーザーにも紐付けられていない画像を削除し、孤立ファイルとしてディスクに
+        残り続けるのを防ぐ。
+
+        _delete_orphaned_avatarと同様、ファイル名部分のみをUPLOAD_DIR基準で解決し
+        パストラバーサルを防ぐ。加えて、削除しようとしているファイルを既に
+        どこかのユーザーが参照している場合は削除しない(競合するアップロード等で
+        誤って現役のアバターを消さないための安全策)。
+
+        Returns:
+            bool: 実際に削除した場合True。参照中・パス不正・ファイル未存在等で
+                削除しなかった場合False。
+        """
+        filename = os.path.basename(filename)
+        file_path = os.path.join(config.UPLOAD_DIR, filename)
+        if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):
+            return False
+
+        avatar_value = f"/uploads/{filename}"
+        with common.get_db_cursor() as cur:
+            still_referenced = cur.execute(
+                "SELECT 1 FROM quest_users WHERE avatar = ? LIMIT 1", (avatar_value,)
+            ).fetchone() is not None
+        if still_referenced:
+            return False
+
+        try:
+            if not os.path.exists(file_path):
+                return False
+            os.remove(file_path)
+            logger.info(f"Unlinked avatar removed (rollback): {file_path}")
+            return True
+        except OSError as e:
+            logger.warning(f"Failed to remove unlinked avatar {file_path}: {e}")
+            return False
+
 
 class QuestService:
     def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:

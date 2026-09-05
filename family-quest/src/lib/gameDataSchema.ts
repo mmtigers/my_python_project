@@ -30,6 +30,10 @@ const userSchema = z.object({
     role: z.string().nullable().optional(),
     hp: z.number().optional(),
     maxHp: z.number().optional(),
+    // #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を
+    // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた
+    // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。
+    nextLevelExp: z.number().optional(),
 });
 
 const questSchema = z.object({
@@ -87,4 +91,13 @@ export const gameDataResponseSchema = z.object({
     rewards: z.array(rewardSchema),
     completedQuests: z.array(questHistorySchema),
     pendingQuests: z.array(questHistorySchema),
+});
+
+// #444: models/quest.py の PurchaseResponse に対応。以前はbuyRewardMutationの
+// 戻り値を `as unknown as PurchaseResponse` で無検証キャストしており、gameDataと
+// 異なりこの検証層を経由していなかった(バックエンドのレスポンス形状が変わっても
+// 実行時まで気づけない盲点)。
+export const purchaseResponseSchema = z.object({
+    status: z.string(),
+    newGold: z.number(),
 });

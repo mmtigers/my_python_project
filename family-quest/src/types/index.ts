@@ -28,6 +28,9 @@ export interface User {
     // 独自に再計算してはいけない（旧実装は誤った式で再計算していた）。
     hp?: number;
     maxHp?: number;
+    // #470: get_all_view_dataが付与する次レベルまでの必要経験値。
+    // gameDataSchema.ts の userSchema にも対応するフィールドを追加済み。
+    nextLevelExp?: number;
 }
 
 // クエスト情報

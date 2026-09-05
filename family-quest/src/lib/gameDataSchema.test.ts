@@ -111,6 +111,12 @@ describe('gameDataResponseSchema contract with /api/quest/data (#390)', () => {
         expect(parsed.users).toHaveLength(3);
     });
 
+    it('keeps nextLevelExp after parsing instead of silently dropping it (#470)', () => {
+        const parsed = gameDataResponseSchema.parse(realisticResponse);
+        const dad = parsed.users.find(u => u.user_id === 'dad');
+        expect(dad?.nextLevelExp).toBe(300);
+    });
+
     it('rejects a status value the server never produces', () => {
         const broken = {
             ...realisticResponse,

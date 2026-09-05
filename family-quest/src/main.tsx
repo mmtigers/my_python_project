@@ -8,6 +8,7 @@ import { queryClient } from './lib/queryClient'
 import { SettingsProvider } from './context/SettingsContext'
 import { ToastProvider } from './context/ToastContext'
 import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary'
+import { isCameraRoute } from './lib/routing'
 
 // CameraDashboard(hls.js含む)は /camera 専用でFamily Quest本体とは同時に使われないため、
 // 動的importで別チャンクに分離し、通常のクエスト画面の初回読み込みバンドルから除外する。
@@ -59,7 +60,7 @@ if (!rootElement) {
 }
 
 // ★追加: URLのパスが '/camera' または '/quest/camera' 等で始まる場合はカメラビューワをレンダリングする
-const isCameraView = window.location.pathname.includes('/camera');
+const isCameraView = isCameraRoute(window.location.pathname);
 
 // #362: lazy() チャンクの読み込み失敗(SW更新後の旧チャンク404)で白画面にならないよう、
 // ルート直下を ChunkErrorBoundary で包む(チャンク失敗時は自動再読み込み)。
