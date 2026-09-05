@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py
 import asyncio
+import fcntl
 import sys
 import os
 import json
@@ -34,19 +35,32 @@ _STATE_FILE: str = os.path.join(config.BASE_DIR, "switchbot_device_states.json")
 
 
 def _load_persisted_states() -> Dict[str, Dict[str, Any]]:
+    # #449: 状態ファイルは通常scheduler_boot.pyにより逐次実行される前提だが、
+    # 手動実行等でこの前提が崩れた場合に備え、読み取り中に他プロセスの書き込みと
+    # 競合しないようflock(共有ロック)で保護する。
     try:
         if os.path.exists(_STATE_FILE):
             with open(_STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                try:
+                    return json.load(f)
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except Exception as e:
         logger.warning(f"⚠️ Failed to load persisted device states: {e}")
     return {}
 
 
 def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:
+    # #449: 書き込み中に他プロセスの読み取り/書き込みと競合しないよう
+    # flock(排他ロック)で保護する。
     try:
         with open(_STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(states, f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(states, f)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     except Exception as e:
         logger.warning(f"⚠️ Failed to persist device states: {e}")
 
