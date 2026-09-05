@@ -12,6 +12,7 @@ unified_server.py のアプリレベルのテスト。
 - lifespan (起動/終了) が監視プロセスの起動・終了を正しく行うこと
   (実サブプロセスは起動せず subprocess.Popen をモックする)
 """
+import importlib
 import logging
 import os
 import subprocess
@@ -119,6 +120,44 @@ def test_cors_middleware_uses_config_cors_origins():
     ]
     assert len(cors_middlewares) == 1
     assert cors_middlewares[0].kwargs.get("allow_origins") == config.CORS_ORIGINS
+
+
+def test_cors_allow_credentials_is_false_when_all_origins_allowed():
+    """
+    #411 S-L7: allow_origins=["*"](ALLOW_ALL_ORIGINS=true)とallow_credentials=True
+    の組合せは、StarletteのCORSMiddlewareが認証情報付きリクエストに対して
+    ワイルドカードの代わりにリクエスト元Originをそのままエコーバックしてしまい、
+    実質的に任意オリジンへ資格情報付きアクセスを許可してしまう。
+    ワイルドカード指定時はallow_credentialsがFalseになることを確認する。
+    通常時(config.CORS_ORIGINSが具体的なオリジンリスト)はallow_credentials=Trueの
+    ままであることも合わせて確認する。
+    """
+    original_env = os.environ.get("ALLOW_ALL_ORIGINS")
+    try:
+        os.environ["ALLOW_ALL_ORIGINS"] = "true"
+        importlib.reload(config)
+        importlib.reload(unified_server)
+        cors_middlewares = [
+            m for m in unified_server.app.user_middleware if m.cls.__name__ == "CORSMiddleware"
+        ]
+        assert cors_middlewares[0].kwargs.get("allow_origins") == ["*"]
+        assert cors_middlewares[0].kwargs.get("allow_credentials") is False
+
+        os.environ.pop("ALLOW_ALL_ORIGINS", None)
+        importlib.reload(config)
+        importlib.reload(unified_server)
+        cors_middlewares = [
+            m for m in unified_server.app.user_middleware if m.cls.__name__ == "CORSMiddleware"
+        ]
+        assert cors_middlewares[0].kwargs.get("allow_origins") != ["*"]
+        assert cors_middlewares[0].kwargs.get("allow_credentials") is True
+    finally:
+        if original_env is None:
+            os.environ.pop("ALLOW_ALL_ORIGINS", None)
+        else:
+            os.environ["ALLOW_ALL_ORIGINS"] = original_env
+        importlib.reload(config)
+        importlib.reload(unified_server)
 
 
 def test_root_health_check(api_client):

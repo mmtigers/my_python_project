@@ -192,10 +192,15 @@ app = FastAPI(
 # M-8-2: 許可オリジンのリストは config.CORS_ORIGINS に一本化した
 # (以前はここに別のハードコードされたリストがあり、config.py側の設定や
 # ALLOW_ALL_ORIGINS環境変数を変更してもCORS設定に反映されなかった)。
+# #411 S-L7: allow_origins=["*"](ALLOW_ALL_ORIGINS=true時)と allow_credentials=True の
+# 組合せは、Starletteの CORSMiddleware がワイルドカード指定でも認証情報(Cookie等)を
+# 伴うリクエストに対してリクエスト元Originをそのままエコーバックしてしまい、実質的に
+# 任意オリジンへ資格情報付きアクセスを許可する状態になる。ワイルカード指定時は
+# allow_credentials を False にする。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=config.CORS_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
