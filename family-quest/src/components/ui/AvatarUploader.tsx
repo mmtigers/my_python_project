@@ -59,12 +59,14 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
         const formData = new FormData();
         formData.append('file', fileInputRef.current.files[0]);
 
+        // ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており
+        // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。
+        // さらにアップロードするだけではユーザーのアバターには反映されないため、
+        // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。
+        let uploadedUrl: string | null = null;
         try {
-            // ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており
-            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。
-            // さらにアップロードするだけではユーザーのアバターには反映されないため、
-            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。
             const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);
+            uploadedUrl = url;
             await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });
 
             // ★変更: 素の alert() を廃止し、アプリ標準のモーダル内メッセージで完了を伝える。
@@ -74,6 +76,19 @@ const AvatarUploader: React.FC<AvatarUploaderProps> = ({ user, onClose, onUpload
         } catch (error) {
             console.error('Upload failed:', error);
             setErrorMessage(error instanceof Error ? error.message : "アップロードに失敗しました");
+
+            // #442: 1段階目(画像アップロード)は成功したが2段階目(ユーザーへの紐付け)が
+            // 失敗した場合、アップロード済みの画像がどのユーザーにも紐付かないまま
+            // サーバー上に孤立して残ってしまう。ベストエフォートでロールバック削除を
+            // 試みる(失敗してもユーザーへは元のエラーのみを表示する)。
+            if (uploadedUrl) {
+                const filename = uploadedUrl.split('/').pop();
+                if (filename) {
+                    apiClient.delete(`/api/quest/upload/${encodeURIComponent(filename)}`).catch(rollbackError => {
+                        console.error('Failed to roll back orphaned avatar upload:', rollbackError);
+                    });
+                }
+            }
         } finally {
             setUploading(false);
         }

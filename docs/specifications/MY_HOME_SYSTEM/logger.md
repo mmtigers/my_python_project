@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -90,26 +91,51 @@
 
 
 
+### `_webhook_failure_logger`（Issue #436 で追加）
+
+* **役割**: `DiscordErrorHandler._send_webhook`のWebhook送信失敗を最低限どこかに残すための、`setup_logging`とは独立したモジュールレベルのロガー。アプリの名前付きロガー（`setup_logging()`は呼び出し時に既存ハンドラを`clear()`しうる）とは別名の`"core.logger.discord_webhook_failure"`で取得し、`_webhook_failure_logger.handlers`が空の場合のみモジュール読み込み時に一度だけ独自の`StreamHandler`を追加する。
+* 根拠: `[モジュールレベル変数宣言]` (行番号: 25〜35 / 抜粋: "_webhook_failure_logger = logging.getLogger(\"core.logger.discord_webhook_failure\")\nif not _webhook_failure_logger.handlers:\n    _webhook_failure_handler = logging.StreamHandler()\n    _webhook_failure_handler.setFormatter(...)\n    _webhook_failure_logger.addHandler(_webhook_failure_handler)\n    _webhook_failure_logger.propagate = False")
+
+
+* **引数/リクエスト**: 該当なし
+* 根拠: 同上
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: 同上
+
+
+* **副作用**: `if not _webhook_failure_logger.handlers:`のガードで多重登録を防ぎつつ、フォーマット済み(`'%(asctime)s [%(levelname)s] %(name)s: %(message)s'`)`StreamHandler`を追加し、`propagate`を`False`に設定する（アプリの名前付きロガーへは伝播させない）。
+* 根拠: `[条件分岐とハンドラ追加]` (行番号: 29〜35 / 抜粋: "if not _webhook_failure_logger.handlers:\n    _webhook_failure_handler = logging.StreamHandler()\n    _webhook_failure_handler.setFormatter(\n        logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')\n    )\n    _webhook_failure_logger.addHandler(_webhook_failure_handler)\n    _webhook_failure_logger.propagate = False")
+
+
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
+
+
 ### `DiscordErrorHandler._send_webhook`（静的メソッド）
 
 * **役割**: `emit`がバックグラウンドスレッドの実行対象として渡す静的メソッド。実際に`requests.post`でDiscord Webhookへペイロードを送信する処理を担う。
-* 根拠: `[_send_webhook]` (行番号: 54〜59 / 抜粋: "@staticmethod\n    def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)\n        except Exception:\n            pass")
+* 根拠: `[_send_webhook]` (行番号: 134〜142 / 抜粋: "@staticmethod\n    def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)\n        except Exception:\n            _webhook_failure_logger.warning(\"Discord webhook送信に失敗しました: %s\", url, exc_info=True)")
+* **（Issue #436 で修正）** 以前は送信失敗時に`except Exception: pass`で完全に握りつぶしており、Webhook URL失効やネットワーク障害でDiscord通知システム自体が壊れていても一切気づけなかった。専用の`_webhook_failure_logger`へ`logger.warning("Discord webhook送信に失敗しました: %s", url, exc_info=True)`として、スタックトレース付きの警告ログを出力するよう変更された。
+* 根拠: `[except節]` (行番号: 138〜142 / 抜粋: "except Exception:\n            # #436: 以前はここで完全に握りつぶしており...\n            _webhook_failure_logger.warning(\"Discord webhook送信に失敗しました: %s\", url, exc_info=True)")
 
 
 * **引数/リクエスト**: `url` (型: 明示なし。送信先のDiscord Webhook URL)、`payload` (型: 明示なし、`emit`が組み立てた`dict`。送信するJSONペイロード)
-* 根拠: `[引数定義]` (行番号: 55 / 抜粋: "def _send_webhook(url, payload):")
+* 根拠: `[引数定義]` (行番号: 135 / 抜粋: "def _send_webhook(url, payload):")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `[メソッド本体]` (行番号: 55〜59 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
+* 根拠: `[メソッド本体]` (行番号: 135〜142 / 抜粋: "def _send_webhook(url, payload):\n        try:\n            requests.post(url, json=payload, timeout=5)")
 
 
-* **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。
-* 根拠: `[requests.post]` (行番号: 57 / 抜粋: "requests.post(url, json=payload, timeout=5)")
+* **副作用**: `requests.post`によるDiscord Webhookへの外部API通信（タイムアウト5秒）。失敗時は`_webhook_failure_logger`への警告ログ出力（`exc_info=True`によりスタックトレースを含む）。
+* 根拠: `[requests.post]` (行番号: 137 / 抜粋: "requests.post(url, json=payload, timeout=5)")、`[warning呼び出し]` (行番号: 142 / 抜粋: "_webhook_failure_logger.warning(\"Discord webhook送信に失敗しました: %s\", url, exc_info=True)")
 
 
-* **エラーハンドリング**: `requests.post`実行中に発生した全ての例外(`Exception`)をキャッチし、`pass`で握りつぶす（バックグラウンドスレッド内の例外を静かに無視する設計）。
-* 根拠: `[except Exception]` (行番号: 58〜59 / 抜粋: "except Exception:\n            pass")
+* **エラーハンドリング**: `requests.post`実行中に発生した全ての例外(`Exception`)をキャッチし、`_webhook_failure_logger.warning(...)`で警告ログ（`exc_info=True`で例外トレース付き）を出力する。以前は`pass`で完全に握りつぶし一切のログを残さなかったが、Issue #436でこの可視化が追加された（ただし呼び出し元である`emit`側にこの失敗は伝播しない点は変わらない）。
+* 根拠: `[except Exception]` (行番号: 138〜142 / 抜粋: "except Exception:\n            _webhook_failure_logger.warning(\"Discord webhook送信に失敗しました: %s\", url, exc_info=True)")
 
 
 
@@ -215,7 +241,10 @@ flowchart TD
 
         subgraph send_webhook_Flow["_send_webhook() (バックグラウンドスレッド)"]
             E15["開始"] --> E16["外部：requests.post() で送信 (timeout=5)"]
-            E16 --> E17["終了 (例外はpassで握りつぶす)"]
+            E16 --> E17["終了 (成功時は何もしない)"]
+            E16 --> E18{"例外発生?"}
+            E18 -- Yes --> E19["_webhook_failure_logger.warning()で警告ログ出力<br/>(exc_info=Trueでスタックトレース付き、Issue #436)"]
+            E19 --> E17
         end
         E14 -.->|別スレッドで実行| E15
     end
@@ -278,8 +307,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **例外の握りつぶし**: `_send_webhook` は `except Exception: pass` で囲まれており、Webhookの送信失敗（ネットワークエラー、レート制限、無効なURL等）が発生しても一切のログ・警告が出力されずに無視される。一方 `DiscordErrorHandler.emit` はペイロード組み立て・スレッド起動時の例外を `self.handleError(record)`（`logging.Handler`標準機構）に委譲するよう変更されており、`sys.stderr`へ出力されるため、ハンドラの不調自体は検知可能になっている（Issue #288）。
-* **バックグラウンドスレッドでの送信**: `emit`は`_send_webhook`を`daemon=True`のバックグラウンドスレッドで起動して即座に返る設計のため、`emit()`が例外なく完了しても、実際のWebhook送信自体が成功したかどうかは呼び出し元からは分からない（`_send_webhook`内の例外も同様に握りつぶされる）。
+* **[修正済み] 例外の握りつぶし（Issue #436）**: `_send_webhook` は以前 `except Exception: pass` で囲まれており、Webhookの送信失敗（ネットワークエラー、レート制限、無効なURL等）が発生しても一切のログ・警告が出力されずに無視されていた。専用の`_webhook_failure_logger`（`"core.logger.discord_webhook_failure"`という別名で`propagate=False`・独自の`StreamHandler`を持つ）へ`warning(..., exc_info=True)`を出力するよう修正され、通知システム自体の障害を標準エラー出力から検知できるようになった。一方 `DiscordErrorHandler.emit` はペイロード組み立て・スレッド起動時の例外を `self.handleError(record)`（`logging.Handler`標準機構）に委譲するよう変更されており、`sys.stderr`へ出力されるため、ハンドラの不調自体も検知可能になっている（Issue #288）。
+* **バックグラウンドスレッドでの送信**: `emit`は`_send_webhook`を`daemon=True`のバックグラウンドスレッドで起動して即座に返る設計のため、`emit()`が例外なく完了しても、実際のWebhook送信自体が成功したかどうかは呼び出し元からは分からない（`_send_webhook`内の例外は`_webhook_failure_logger`への警告ログ出力に置き換わった(Issue #436)が、`emit`呼び出し元への伝播はしない点は変わらない）。
 * **無限ループ防止のハードコード**: メッセージ（`str()`化後）に `"Discord"` という文字列が含まれるとDiscord通知から除外される仕様となっている (`"Discord" not in str(record.msg)`)。他の無関係なログ（例: "Discordアカウントの連携が完了しました"）であってもERRORレベルの場合は通知されない可能性がある。
 * **固定された設定値**: ログファイル名が `"home_system.log"`、タイムアウト値が `timeout=5` とコード内にハードコードされており、呼び出し元から変更できない。
 * **後方互換性(getattr)**: `target_url`の取得時、`config`から`DISCORD_WEBHOOK_ERROR`を取得する際に `getattr(config, "DISCORD_WEBHOOK_ERROR", None)` を使用している箇所(92行目)と、`config.DISCORD_WEBHOOK_ERROR` と直接参照している箇所(24行目)が混在している。前者は属性がない場合に`None`となるが、後者は`AttributeError`でクラッシュする可能性がある（ただし後者は`DiscordErrorHandler`内で後から実行されるため、URLがない場合は設定されない前提かもしれないが、ロジック上の不整合がある）。

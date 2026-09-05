@@ -88,6 +88,37 @@ def test_preexisting_file_from_previous_run_is_still_overwritten(tmp_path):
     assert "新しい内容" in md_files[0].read_text(encoding="utf-8")
 
 
+def test_item_without_prompt_line_is_warned_and_skipped(tmp_path, caplog):
+    """#468: 「番号. タイトル」に続くPrompt行が無い等でフォーマットに一致しない
+    項目は、無警告でスキップされず警告ログに記録されること。"""
+    input_file = tmp_path / "input.md"
+    input_file.write_text(
+        "1. 正常な項目\n\nPrompt: これは保存される\n\n"
+        "2. Prompt行が無い項目\n\n"
+        "3. また別の正常な項目\n\nPrompt: これも保存される\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "out"
+
+    with caplog.at_level("WARNING"):
+        written = split_prompts(input_file, output_dir)
+
+    assert written == 2
+    assert any("2" in record.message and "フォーマット" in record.message for record in caplog.records)
+
+
+def test_fully_matching_input_does_not_warn_about_format(tmp_path, caplog):
+    """全項目がフォーマットに一致する場合、フォーマット不一致の警告は出ないこと。"""
+    input_file = tmp_path / "input.md"
+    input_file.write_text("1. タイトルA\n\nPrompt: 内容A\n", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    with caplog.at_level("WARNING"):
+        split_prompts(input_file, output_dir)
+
+    assert not any("フォーマット" in record.message for record in caplog.records)
+
+
 if __name__ == "__main__":
     import pytest
 

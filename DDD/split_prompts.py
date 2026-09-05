@@ -28,6 +28,13 @@ logger = logging.getLogger("SplitPrompts")
 # カテゴリのヘッダーなどは無視し、要件の箇所のみを的確にキャッチする。
 PROMPT_PATTERN = re.compile(r'(\d+)\.\s+([^\n]+)\n+Prompt:\s+([^\n]+)')
 
+# #468: PROMPT_PATTERNは「番号. タイトル」の直後に単一行の「Prompt: 内容」が
+# 続く形式にのみ一致する。直後にPromptが続かない・複数行にまたがる等の理由で
+# フォーマット外になった項目を検知するため、「番号. 」で始まる行だけを緩く
+# 検出する。PROMPT_PATTERNより広く一致するため、これに含まれるが
+# PROMPT_PATTERNではヒットしなかった番号を「フォーマット外」として警告する。
+_ITEM_START_PATTERN = re.compile(r'^(\d+)\.\s+\S', re.MULTILINE)
+
 
 def split_prompts(input_file: Path, output_dir: Path) -> int:
     """入力Markdownファイルを項目ごとの個別ファイルへ分割する。
@@ -51,6 +58,20 @@ def split_prompts(input_file: Path, output_dir: Path) -> int:
             "フォーマットを確認してください。"
         )
         return 0
+
+    # #468: 「番号. 」で始まるが完全な形式(直後に単一行のPrompt:)に一致しなかった
+    # 項目を検知し、無警告でスキップされないようにする。
+    matched_numbers = {num_str for num_str, _, _ in matches}
+    unmatched_numbers = [
+        n for n in _ITEM_START_PATTERN.findall(content) if n not in matched_numbers
+    ]
+    if unmatched_numbers:
+        logger.warning(
+            f"⚠️ '{input_file}' 内に「番号. タイトル」形式に見える行が"
+            f"{len(unmatched_numbers)}件ありましたが、フォーマット(単一行のタイトル+"
+            f"単一行の「Prompt: 内容」)に一致せずスキップされました: "
+            f"{', '.join(unmatched_numbers)}"
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
 

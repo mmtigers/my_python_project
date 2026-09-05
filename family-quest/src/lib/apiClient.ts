@@ -46,11 +46,14 @@ function extractDetailMessage(detail: unknown): string | undefined {
     return undefined;
 }
 
-class ApiClient {
+export class ApiClient {
     private baseUrl: string;
 
     constructor(baseUrl: string) {
-        this.baseUrl = baseUrl;
+        // #476: VITE_API_URL等に末尾スラッシュ付きの値が設定されていても、
+        // cleanEndpoint(先頭に'/'を付与)と結合した際に「//」が生じないよう、
+        // 末尾のスラッシュをここで正規化しておく。
+        this.baseUrl = baseUrl.replace(/\/+$/, '');
     }
 
     async get<T>(endpoint: string): Promise<T> {

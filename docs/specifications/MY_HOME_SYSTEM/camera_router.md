@@ -31,12 +31,12 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | パス結合(`os.path.join`)、実パス解決(`os.path.realpath`)、共通パス判定(`os.path.commonpath`)、ファイル存在確認(`os.path.exists`) | 根拠: [import文] (行番号: 1 / 抜粋: "import os") |
-| `time` | 標準ライブラリ | ストリーム生成待機のためのスリープ(`time.sleep`) | 根拠: [import文] (行番号: 2 / 抜粋: "import time") |
-| `fastapi.APIRouter`, `HTTPException` | 外部ライブラリ | ルーターの生成、HTTPエラーレスポンスの送出 | 根拠: [import文] (行番号: 3 / 抜粋: "from fastapi import APIRouter, HTTPException") |
-| `fastapi.responses.FileResponse` | 外部ライブラリ | 動画/プレイリストファイルをHTTPレスポンスとして返却 | 根拠: [import文] (行番号: 4 / 抜粋: "from fastapi.responses import FileResponse") |
-| `pydantic.BaseModel` | 外部ライブラリ | `PUT /settings/{camera_id}`のリクエストボディ用モデル`CameraSettingsUpdate`の基底クラス | 根拠: [import文] (行番号: 5 / 抜粋: "from pydantic import BaseModel") |
-| `typing.List`, `Dict`, `Any` | 標準ライブラリ | 型ヒント（本ファイル内での明示的な使用箇所はimport文のみ） | 根拠: [import文] (行番号: 6 / 抜粋: "from typing import List, Dict, Any") |
+| `asyncio` | 標準ライブラリ | **（Issue #457で追加）** `get_live_stream`内で`camera_service.start_hls_stream`をスレッドプールへオフロードする(`asyncio.to_thread`)ため、および初期セグメント生成待ちループ中にイベントループを他リクエストへ譲る非同期スリープ(`asyncio.sleep`)のため | 根拠: [import文] (行番号: 1 / 抜粋: "import asyncio")、[使用箇所] (行番号: 64, 76 / 抜粋: "await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)", "await asyncio.sleep(0.5)") |
+| `os` | 標準ライブラリ | パス結合(`os.path.join`)、実パス解決(`os.path.realpath`)、共通パス判定(`os.path.commonpath`)、ファイル存在確認(`os.path.exists`) | 根拠: [import文] (行番号: 2 / 抜粋: "import os") |
+| `re` | 標準ライブラリ | `target_date`のYYYYMMDD形式検証用正規表現(`_TARGET_DATE_RE`)のコンパイル | 根拠: [import文] (行番号: 3 / 抜粋: "import re") |
+| `fastapi.APIRouter`, `HTTPException` | 外部ライブラリ | ルーターの生成、HTTPエラーレスポンスの送出 | 根拠: [import文] (行番号: 4 / 抜粋: "from fastapi import APIRouter, HTTPException") |
+| `fastapi.responses.FileResponse` | 外部ライブラリ | 動画/プレイリストファイルをHTTPレスポンスとして返却 | 根拠: [import文] (行番号: 5 / 抜粋: "from fastapi.responses import FileResponse") |
+| `pydantic.BaseModel` | 外部ライブラリ | `PUT /settings/{camera_id}`のリクエストボディ用モデル`CameraSettingsUpdate`の基底クラス | 根拠: [import文] (行番号: 6 / 抜粋: "from pydantic import BaseModel") |
 | `config` | 内部モジュール | カメラ設定一覧(`config.CAMERAS`)の取得 | 根拠: [config.CAMERASの参照] (行番号: 38 / 抜粋: "for idx, cam in enumerate(config.CAMERAS):") |
 | `services.camera_service` | 内部モジュール | ライブ配信開始、録画情報取得、録画プレイリスト生成、カメラ有効/無効の永続化、HLSディレクトリパスの取得 | 根拠: [import文] (行番号: 8 / 抜粋: "from services import camera_service") |
 
@@ -44,7 +44,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `camera_service` | 本タスクの指示により、本ファイル執筆時点では `camera_service.py` を読み込まずブラックボックスとして扱う。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `HLS_VOD_DIR`, `HLS_LIVE_DIR` の内部実装・戻り値の詳細仕様は不明。 | 根拠: [import文と呼び出し箇所] (行番号: 8, 50, 62, 82, 94, 107, 123 / 抜粋: "from services import camera_service") |
+| `camera_service` | 本タスクの指示により、本ファイル執筆時点では `camera_service.py` を読み込まずブラックボックスとして扱う。`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `HLS_VOD_DIR`, `HLS_LIVE_DIR` の内部実装・戻り値の詳細仕様は不明。**（Issue #457対応）** `start_hls_stream`の呼び出しは`get_live_stream`が`async def`化されたことに伴い`await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)`という形に変わった（呼び出し先の関数自体のシグネチャ・戻り値は変わらない）。 | 根拠: [import文と呼び出し箇所] (行番号: 8, 50, 64, 82, 94, 107, 123 / 抜粋: "from services import camera_service", "await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)") |
 | `config` | `config.CAMERAS` の構造（各カメラ辞書のキー、読み込み元ファイル等）が本ファイルからは不明。 | 根拠: [config.CAMERASの参照] (行番号: 38, 58, 78, 90, 102, 119 / 抜粋: "config.CAMERAS") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -135,24 +135,24 @@
 
 ### `get_live_stream` (`GET /live/{camera_id}/stream.m3u8`)
 
-* **役割**: 指定カメラIDのライブHLSストリーム生成を `camera_service.start_hls_stream` に依頼し、プレイリストファイル(.m3u8)が生成されるまで最大5秒待機したうえでファイルレスポンスを返す。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 55〜57 / 抜粋: "def get_live_stream(camera_id: str):\n    """ライブHLSプレイリスト（.m3u8）の取得"""")
+* **役割**: 指定カメラIDのライブHLSストリーム生成を `camera_service.start_hls_stream` に依頼し、プレイリストファイル(.m3u8)が生成されるまで最大5秒待機したうえでファイルレスポンスを返す。**（Issue #457で修正）** 以前は同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動等のブロッキング処理を含む）を直接呼び出し、待機ループも`time.sleep(0.5)`（同期）で実装されていたため、その間サーバーの共有スレッドプールのワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`エンドポイントに変更され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエストへ譲るようになった。
+* 根拠: [エンドポイント定義とDocstring] (行番号: 55〜57 / 抜粋: "async def get_live_stream(camera_id: str):\n    """ライブHLSプレイリスト（.m3u8）の取得"""")、[オフロード呼び出し] (行番号: 62〜64 / 抜粋: "# #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、\n    # イベントループを止めないようスレッドプールへオフロードする。\n    playlist_path = await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)")
 
 
 * **引数/リクエスト**: `camera_id: str`（パスパラメータ）
-* 根拠: [引数定義] (行番号: 55〜56 / 抜粋: "@router.get("/live/{camera_id}/stream.m3u8")\ndef get_live_stream(camera_id: str):")
+* 根拠: [引数定義] (行番号: 55〜56 / 抜粋: "@router.get("/live/{camera_id}/stream.m3u8")\nasync def get_live_stream(camera_id: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse`（media_type="application/vnd.apple.mpegurl"）。カメラ未検出時は404、ストリーム初期化失敗時は500、生成タイムアウト時は503を送出。
-* 根拠: [FileResponse返却] (行番号: 70 / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
+* 根拠: [FileResponse返却] (行番号: 75 / 抜粋: "return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")")
 
 
-* **副作用**: `camera_service.start_hls_stream` の呼び出し（ストリーム開始プロセスの起動を誘発しうる）、最大10回×0.5秒の待機ループによるブロッキング。
-* 根拠: [待機ループ] (行番号: 68〜71 / 抜粋: "for _ in range(10):\n        if os.path.exists(playlist_path):\n            return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")\n        time.sleep(0.5)")
+* **副作用**: `camera_service.start_hls_stream` を`asyncio.to_thread`経由でスレッドプール実行（ストリーム開始プロセスの起動を誘発しうる）、最大10回×0.5秒の`await asyncio.sleep(0.5)`による非同期待機ループ（イベントループはブロックしない）。
+* 根拠: [待機ループ] (行番号: 73〜76 / 抜粋: "for _ in range(10):\n        if os.path.exists(playlist_path):\n            return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")\n        await asyncio.sleep(0.5)")
 
 
 * **エラーハンドリング**: カメラID未検出時に404、`start_hls_stream`が空文字列相当（falsy）を返した場合に500、待機ループ内でファイルが生成されなかった場合に503の `HTTPException` を送出。
-* 根拠: [各種例外送出] (行番号: 59〜60, 64〜65, 73 / 抜粋: "if not cam_conf:\n        raise HTTPException(status_code=404, detail="Camera not found")")
+* 根拠: [各種例外送出] (行番号: 59〜60, 66〜67, 78 / 抜粋: "if not cam_conf:\n        raise HTTPException(status_code=404, detail="Camera not found")")
 
 
 ### `get_record_info` (`GET /record/{camera_id}/{target_date}/info`)
@@ -275,7 +275,7 @@ graph TD
         fastapi_responses["fastapi.responses.FileResponse"]
         pydantic_mod["pydantic.BaseModel"]
         os_mod["os"]
-        time_mod["time"]
+        asyncio_mod["asyncio"]
         config["config (CAMERAS)"]
         camera_service["services.camera_service (ブラックボックス)"]
     end
@@ -287,7 +287,7 @@ graph TD
     get_camera_settings --> config
     get_live_stream --> config
     get_live_stream --> camera_service
-    get_live_stream --> time_mod
+    get_live_stream --> asyncio_mod
     get_live_stream --> fastapi_responses
     get_record_info --> config
     get_record_info --> camera_service
@@ -311,7 +311,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **同期的な待機処理によるブロッキング**: `get_live_stream` は最大5秒間 `time.sleep(0.5)` によるポーリングでブロックする。FastAPIの同期関数（`def`、`async def`ではない）内であるため、デフォルトのスレッドプール実行であればリクエストごとにワーカースレッドを占有する点に留意が必要。
+* **[修正済み・Issue #457] 同期的な待機処理によるブロッキングを解消**: 以前は `get_live_stream` が同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動を含むブロッキング処理）を直接呼び出したうえで最大5秒間 `time.sleep(0.5)` によるポーリングでブロックしており、デフォルトのスレッドプール実行下ではリクエストごとにワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`化され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエスト処理に譲るようになった。
 * **（コミット`95d3e55`, E-3で解消）`enabled`フラグの固定値**: 修正前は `get_camera_settings` の `enabled` が常に `True`固定で、`config.CAMERAS` 側で無効化されたカメラの状態を反映する仕組みがなかった。現在は `cam.get("enabled", True)` により実際の値を反映し、`PUT /settings/{camera_id}`（`update_camera_settings`）で `camera_service.set_camera_enabled` 経由の永続化（`devices.json`書き込み）が可能になっている。
 * **例外処理の欠如**: `get_camera_settings` では `config.CAMERAS` の各要素に `id`/`name` キーが存在しない場合の `KeyError` に対する処理がない（`enabled`キーのみ`.get`で防御的にアクセスしている）。`update_camera_settings` も `camera_service.set_camera_enabled` 呼び出し自体に対する `try-except` は持たず、`False`戻り値（対象カメラ不在）のみをHTTP 404として扱う。
 * **パストラバーサル対策の一元化**: `.ts` セグメント配信は `_resolve_segment_path` により防御されているが、`.m3u8` の場合は `camera_service.generate_record_playlist` / `start_hls_stream` の戻り値パスをそのまま `FileResponse` に渡しており、パス検証の責務が `camera_service` 側にあるかは本ファイルからは確認できない。
@@ -329,7 +329,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `camera_service` の各関数の内部実装 | `camera_service.md`の解析によれば、`start_hls_stream`はffmpegプロセスをカメラID単位で起動しHLSライブ配信用プレイリストパス（`str`、RTSP URL取得失敗時は空文字列）を返し、`get_record_start_offset`は指定日最初の録画ファイル名から算出した0時からの経過秒数（`int`、失敗時は`0`）を返し、`generate_record_playlist`は10分単位に分割されたmp4群を`ffconcat`で結合したVOD用HLSプレイリストパス（`Optional[str]`、保存先ディレクトリ不在時や対象ファイルなし時は`None`）を返すと推測される。ただし`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実際のパス値自体は`camera_service.md`側でも本文中に明記が確認できず、依然として不明。 | camera_service.md |
-| `camera_service` の各関数の内部実装（`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実値） | `services/camera_service.py`を直接確認した。20行目で`BASE_DIR = os.path.dirname(os.path.dirname(__file__))`（`services/`の親、すなわち`MY_HOME_SYSTEM/`）と定義され、21〜22行目で`HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")`、`HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")`という固定のローカルディレクトリパス（`MY_HOME_SYSTEM/data/hls_streams/live`および`MY_HOME_SYSTEM/data/hls_streams/vod`）であることを確認した。`start_hls_stream`は86行目で`init_output_dir(HLS_LIVE_DIR, cam_id)`、`generate_record_playlist`は167行目で`init_output_dir(HLS_VOD_DIR, cam_id)`をそれぞれ呼び出しており、camera_service.md側の推測が実際のパス値でも裏付けられることを確認した。`set_camera_enabled(camera_id, enabled) -> bool`(322〜347行目)は、`config.DEVICES_JSON_PATH`が存在しなければ`False`を返し(325〜326行目)、存在すれば`devices.json`を読み込んで対象カメラを`id`で検索、見つからなければ`False`を返す(331〜334行目)。見つかった場合は`target["enabled"] = enabled`で更新した上で、一時ファイル(`{DEVICES_JSON_PATH}.tmp`)へ書き込んでから`os.replace`でアトミックに本ファイルへ反映し(337〜342行目。書き込み途中のクラッシュでdevices.json自体が壊れることを防ぐ設計)、さらに`config.CAMERAS`（インメモリ）内の対応する辞書の`enabled`も直接更新する(344〜347行目)ことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/camera_service.py:20-22, 86, 167, 322-347` |
+| `camera_service` の各関数の内部実装（`HLS_LIVE_DIR`/`HLS_VOD_DIR`の実値） | `services/camera_service.py`を直接確認した。23行目で`BASE_DIR = os.path.dirname(os.path.dirname(__file__))`（`services/`の親、すなわち`MY_HOME_SYSTEM/`）と定義され、24〜25行目で`HLS_LIVE_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "live")`、`HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")`という固定のローカルディレクトリパス（`MY_HOME_SYSTEM/data/hls_streams/live`および`MY_HOME_SYSTEM/data/hls_streams/vod`）であることを確認した。ライブHLS配信の実処理は238行目で`init_output_dir(HLS_LIVE_DIR, cam_id)`、`generate_record_playlist`は350行目で`init_output_dir(HLS_VOD_DIR, cam_id)`をそれぞれ呼び出しており、camera_service.md側の推測が実際のパス値でも裏付けられることを確認した。**（Issue #439で`start_hls_stream`は`_live_stream_lock`を取得する薄いラッパーに変更され、上記の実処理自体は新設の`_start_hls_stream_locked`関数（237〜289行目）に分離されている。）** `set_camera_enabled(camera_id, enabled) -> bool`(451〜478行目)は、`config.DEVICES_JSON_PATH`が存在しなければ`False`を返し(454〜455行目)、存在すれば`devices.json`を読み込んで対象カメラを`id`で検索、見つからなければ`False`を返す(460〜463行目)。見つかった場合は`target["enabled"] = enabled`で更新した上で、一時ファイル(`{DEVICES_JSON_PATH}.tmp`)へ書き込んでから`os.replace`でアトミックに本ファイルへ反映し(466〜471行目。書き込み途中のクラッシュでdevices.json自体が壊れることを防ぐ設計)、さらに`config.CAMERAS`（インメモリ）内の対応する辞書の`enabled`も直接更新する(473〜476行目)ことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/camera_service.py:23-25, 237-289, 350, 451-478` |
 | `config.CAMERAS` のデータ構造 | `config.py`を直接確認した。`CAMERAS: List[Dict[str, Any]] = []`(297行目)は、`devices.json`（リポジトリ内に実体なし、`.gitignore`の`*.json`規則により追跡対象外）が存在すれば300〜305行目で`CAMERAS = [CameraConfig(**c).model_dump(by_alias=True) for c in _devices_data["cameras"]]`として読み込まれる。`CameraConfig`(Pydanticモデル、144〜154行目)のキー一覧は`id: str, name: str, nas_folder: Optional[str], location: str, ip: str, port: int(既定2020), user: Optional[str], password: Optional[str](エイリアス"pass"), rtsp_url: Optional[str], enabled: bool(既定True。コミット`95d3e55`で追加)`である。本ファイル(`camera_router.py`)自身も38〜44行目で`for idx, cam in enumerate(config.CAMERAS): {"id": cam["id"], "name": cam["name"], "enabled": cam.get("enabled", True)}`のように`id`/`name`キーへ実際にアクセスし`enabled`は`.get`で防御的に取得しており、58行目以降でも`next((c for c in config.CAMERAS if c["id"] == camera_id), None)`という形で`cam_conf`辞書を取得し`camera_service`の各関数へそのまま渡していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:144-154, 297, 300-305`, `MY_HOME_SYSTEM/routers/camera_router.py:38-44, 58-59, 78-79, 90-91, 102-103, 119-120` |
 
 ## 10. 自己検証結果

@@ -93,3 +93,52 @@ def test_update_avatar_keeps_file_still_referenced_by_another_user(isolated_db, 
     # dad も別の画像に切り替えれば、参照が無くなるので削除される
     user_service.update_avatar("dad", "🙂")
     assert not shared.exists()
+
+
+class TestDeleteUnlinkedAvatar:
+    """#442: AvatarUploader.tsxの2段階アップロードのうち2段階目(ユーザーへの紐付け)が
+    失敗した際、1段階目でアップロード済みの画像をロールバック削除するための
+    UserService.delete_unlinked_avatarの回帰テスト。"""
+
+    def test_deletes_a_file_not_referenced_by_any_user(self, isolated_db, tmp_path, monkeypatch):
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+
+        orphan = upload_dir / "orphan.png"
+        orphan.write_bytes(b"orphan")
+
+        assert user_service.delete_unlinked_avatar("orphan.png") is True
+        assert not orphan.exists()
+
+    def test_does_not_delete_a_file_still_referenced_by_a_user(self, isolated_db, tmp_path, monkeypatch):
+        """他のリクエストが先に紐付けに成功していた場合、誤って現役のアバターを
+        消してしまわないこと。"""
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+
+        in_use = upload_dir / "in-use.png"
+        in_use.write_bytes(b"in-use")
+        _insert_user(avatar="/uploads/in-use.png")
+
+        assert user_service.delete_unlinked_avatar("in-use.png") is False
+        assert in_use.exists()
+
+    def test_returns_false_for_a_nonexistent_file(self, isolated_db, tmp_path, monkeypatch):
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+
+        assert user_service.delete_unlinked_avatar("does-not-exist.png") is False
+
+    def test_ignores_path_traversal_attempts(self, isolated_db, tmp_path, monkeypatch):
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_bytes(b"do-not-delete")
+
+        assert user_service.delete_unlinked_avatar("../secret.txt") is False
+        assert outside_file.exists()

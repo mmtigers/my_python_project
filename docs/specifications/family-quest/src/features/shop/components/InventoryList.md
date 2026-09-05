@@ -34,9 +34,11 @@
 * **バグ修正(Issue #119)**: 使用確認`Modal`の「はい」ボタンは、押下と同時に`setItemToUse(null)`でモーダルを閉じる実装のため、連打（ダブルタップ）で1回目のクリックが画面に反映される前に2回目のクリックイベントが発火し、同一アイテムに対し`useMutationAction.mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（既に1回目で`'consumed'`に更新済み）により`400`（`"Cannot use this item"`）となり、実際は1回目が成功しているにもかかわらずエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的なガードを追加し、2回目以降のクリックは`useMutationAction.mutate`を呼ばずに無視するようにした（`onSettled`でリクエスト完了時に解除）。
 * 根拠: (行番号: 41, 73〜75, 140〜147 / 抜粋: "const isUsingItemRef = useRef(false);", "onSettled: () => {\n            isUsingItemRef.current = false;\n        }", "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
 * **新機能(YouTubeごほうび券クールダウン)**: `apiClient.fetchInventory`の戻り値が配列から`InventoryResponse`（`{items, youtube_cooldown_remaining_seconds}`）に変更されたのに合わせ、`data?.items`を一覧として使う。バックエンドが返す`youtube_cooldown_remaining_seconds`(サーバー側の残り秒数、5秒間隔のポーリングで再同期)を起点に、1秒間隔の`setInterval`でローカルに`youtubeCooldownSeconds`をカウントダウンする`useEffect`を追加した。`item.is_youtube_reward`が真かつ`youtubeCooldownSeconds > 0`のアイテムは`isCoolingDown`となり、カードのクリック(使用確認モーダルを開く操作)を無効化したうえで、説明文の代わりに`formatCooldown`(mm:ss形式)を使った「目を休めよう。あと{mm:ss}で使えます」という文言と`Lock`アイコンを表示する。使用成功時のキャッシュ更新（`onSuccess`内の`setQueryData`）も、配列を直接フィルタする形から`InventoryResponse`の`items`フィールドのみを`filter`する形に変更した。
-* 根拠: `const items = data?.items;` (行番号: 52)、`useEffect(() => {\n        const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;` (行番号: 58〜67)、`const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;` (行番号: 127)、`onClick={() => { if (!isCoolingDown) setItemToUse(item); }}` (行番号: 134)、`queryClient.setQueryData<InventoryResponse>(queryKey, (old) => {\n                if (!old) return old;\n                return { ...old, items: old.items.filter(item => item.id !== usedInventoryId) };\n            });` (行番号: 75〜78)
+* 根拠: `const items = data?.items;` (行番号: 59)、`useEffect(() => {\n        const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;` (行番号: 66〜75)、`const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;` (行番号: 170)、`onClick={() => { if (!isCoolingDown) setItemToUse(item); }}` (行番号: 177)、`queryClient.setQueryData<InventoryResponse>(queryKey, (old) => {\n                if (!old) return old;\n                return { ...old, items: old.items.filter(item => item.id !== usedInventoryId) };\n            });` (行番号: 100〜103)
 * **新機能(YouTubeごほうび券クールダウンの予告バナー)**: バックエンドがクールダウンの猶予期間中(実際の制限開始前)に返す`data?.youtube_cooldown_announcement`を`cooldownAnnouncement`として取り出し、真であれば`formatAnnouncementDate`(ISO日付を「9/12(土)」のような表示用文字列に変換)を使った「{開始日}から、YouTubeのごほうび券は使うと15分間、次の1枚が使えなくなります(目を休めるため)。」という予告バナー(`announcementBanner`)を表示する。いきなり制限がかかると子どもが困惑するため、施行日を迎えるまでの猶予期間中に事前告知する目的。このバナーは、もちものが空の状態(`items.length === 0`)でも、通常のアイテム一覧表示時でも(グリッドの`col-span-full`要素として)表示され、個別のアイテムの`is_youtube_reward`/所持状況とは無関係に、`cooldownAnnouncement`の有無だけで出し分けられる。
-* 根拠: `const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;` (行番号: 60)、`function formatAnnouncementDate(isoDate: string): string {` (行番号: 34〜37)、`const announcementBanner = cooldownAnnouncement && (` (行番号: 113〜121)、空状態での表示 (行番号: 124〜135)、一覧表示時の`col-span-full`表示 (行番号: 148〜150)
+* 根拠: `const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;` (行番号: 60)、`function formatAnnouncementDate(isoDate: string): string {` (行番号: 34〜37)、`const announcementBanner = cooldownAnnouncement && (` (行番号: 130〜138)、空状態での表示 (行番号: 141〜143)、一覧表示時の`col-span-full`表示 (行番号: 165〜167)
+* **バグ修正(Issue #441)**: 使用ミューテーション（`useMutationAction`）には既にエラー通知（M-6-3）が実装済みだったが、一覧取得自体の`useQuery`にはエラーハンドリングが一切無く、取得失敗時は画面上に何も表示されないサイレント失敗のままだった（「アイテムが無い」のか「読み込みに失敗した」のか区別できない）。`useQuery`から`isError`/`error`も分割代入で取得し、`isError`が`true`になった時点を検知する`useEffect`を追加、`hasShownFetchErrorRef`（`useRef`）でエラー状態に入った最初の1回だけ`showToast`を呼ぶようにした（5秒間隔のポーリングでバックエンドが落ちたままの間、失敗のたびにトーストが連投されるのを防ぐ。`isError`が`false`に戻ればrefをリセットし、次にエラーになった際は再度1回だけ表示する）。
+* 根拠: (行番号: 54, 82〜92 / 抜粋: "const { data, isLoading, isError, error } = useQuery({", "const hasShownFetchErrorRef = useRef(false);\n    useEffect(() => {\n        if (isError) {\n            if (!hasShownFetchErrorRef.current) {\n                hasShownFetchErrorRef.current = true;\n                showToast({ title: \"エラー\", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: \"⚠️\" });\n            }\n        } else {\n            hasShownFetchErrorRef.current = false;\n        }\n    }, [isError, error, showToast]);")
 
 ## 3. 外部依存関係
 
@@ -44,7 +46,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `React`, `useState`, `useRef`, `useEffect` | モジュール | Reactコンポーネントとしての定義と利用、確認モーダルの表示対象アイテム保持用の状態管理、多重使用リクエスト防止ガード（`isUsingItemRef`）用の参照保持、YouTubeごほうび券クールダウンの1秒間隔カウントダウン用の副作用(`useEffect`) | 根拠: [`React`, `useState`, `useRef`, `useEffect`] (行番号: 1 / 抜粋: "import React, { useState, useRef, useEffect } from 'react';") |
+| `React`, `useEffect`, `useRef`, `useState` | モジュール | Reactコンポーネントとしての定義と利用、確認モーダルの表示対象アイテム保持用の状態管理、多重使用リクエスト防止ガード（`isUsingItemRef`）用の参照保持、YouTubeごほうび券クールダウンの1秒間隔カウントダウン用の副作用(`useEffect`)。**（#441で`useEffect`の用途が追加）** 一覧取得(`useQuery`)がエラー状態になったことを検知して初回の1回だけトーストを表示する副作用処理、および「エラー状態が続いている間」を判定する`hasShownFetchErrorRef`用の参照保持 | 根拠: [`React`, `useEffect`, `useRef`, `useState`] (行番号: 1 / 抜粋: "import React, { useEffect, useRef, useState } from 'react';") |
 | `useQuery`, `useMutation`, `useQueryClient` | フック | データ取得、データ更新、キャッシュ操作 | 根拠: [`@tanstack/react-query`] (行番号: 2 / 抜粋: "import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';") |
 | `apiClient` | オブジェクト | サーバーサイドとのAPI通信 | 根拠: [`apiClient`] (行番号: 3 / 抜粋: "import { apiClient } from '../../../lib/apiClient';") |
 | `Card` | コンポーネント | アイテムごとのUIカードレイアウト表示 | 根拠: [`Card`] (行番号: 4 / 抜粋: "import { Card } from '../../../components/ui/Card';") |
@@ -95,27 +97,30 @@
 
 * **副作用**:
   * `apiClient`を利用した外部API呼び出し（一覧取得・使用）。
+  * **（Issue #441で追加）** 一覧取得の`useQuery`が返す`isError`を監視する`useEffect`。`isError`が`true`になった最初の1回だけ`hasShownFetchErrorRef.current`を`true`にセットして`showToast`を呼び、`isError`が`false`に戻れば`hasShownFetchErrorRef.current`を`false`にリセットする（5秒間隔のポーリングで失敗が継続する間、トーストが連投されるのを防ぐ）。
   * `queryClient.setQueryData`によるローカルキャッシュの直接更新（使用成功時、対象アイテムを`filter`でキャッシュから完全に除去する。承認待ち等の中間状態への更新は行わない）。
   * `queryClient.invalidateQueries`による`['inventory', userId]`と`['chronicle']`キャッシュの無効化（使用成功時のみ）。
   * `play`関数による音声再生。使用成功時は`'clear'`、使用失敗時は`'cancel'`。
-  * `showToast`によるエラートースト表示（使用失敗時、`title: "エラー"`, `text: extractErrorDetail(error)`, `icon: "⚠️"`）。**バグ修正(M-6-3)**: 以前は`onError`が無く、失敗がユーザーに一切通知されないサイレント失敗になっていた。
+  * `showToast`によるエラートースト表示（使用失敗時、`title: "エラー"`, `text: extractErrorDetail(error, '操作に失敗しました')`, `icon: "⚠️"`）。**バグ修正(M-6-3)**: 以前は`onError`が無く、失敗がユーザーに一切通知されないサイレント失敗になっていた。
   * `setItemToUse`によるローカルstate更新（使用確認モーダルの開閉制御）。
   * `isUsingItemRef.current`の設定・解除（`onSettled`で必ず解除。**バグ修正(Issue #119)**、連打による多重使用リクエストを防ぐ）。
-* 根拠: [`useMutationAction`, `itemToUse`] (行番号: 50〜76 / 抜粋: "const useMutationAction = useMutation({\n        mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),")
-* 根拠: 使用成功時のキャッシュ更新・無効化・再生音 (行番号: 52〜65 / 抜粋: "// アイテム使用は即座に消費が確定する(親の承認は不要)ため、\n            // リストからも即座に取り除く。\n            const usedInventoryId = variables;\n            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {\n                if (!oldItems) return [];\n                return oldItems.filter(item => item.id !== usedInventoryId);\n            });\n\n            // 念のためサーバーとも同期\n            queryClient.invalidateQueries({ queryKey: queryKey });\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });\n\n            play('clear');")
-* 根拠: 使用失敗時のonError (行番号: 67〜72 / 抜粋: "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {\n            showToast({ title: \"エラー\", text: extractErrorDetail(error), icon: \"⚠️\" });\n            play('cancel');\n        }")
-* 根拠: `isUsingItemRef`の解除(`onSettled`) (行番号: 73〜75 / 抜粋: "onSettled: () => {\n            isUsingItemRef.current = false;\n        }")
+* 根拠: [`useMutationAction`, `itemToUse`] (行番号: 63〜89 / 抜粋: "const useMutationAction = useMutation({\n        mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),")
+* 根拠: **（Issue #441）** 一覧取得エラーの初回トースト (行番号: 51〜61 / 抜粋: "const hasShownFetchErrorRef = useRef(false);\n    useEffect(() => {\n        if (isError) {\n            if (!hasShownFetchErrorRef.current) {\n                hasShownFetchErrorRef.current = true;\n                showToast({ title: \"エラー\", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: \"⚠️\" });\n            }\n        } else {\n            hasShownFetchErrorRef.current = false;\n        }\n    }, [isError, error, showToast]);")
+* 根拠: 使用成功時のキャッシュ更新・無効化・再生音 (行番号: 65〜78 / 抜粋: "// アイテム使用は即座に消費が確定する(親の承認は不要)ため、\n            // リストからも即座に取り除く。\n            const usedInventoryId = variables;\n            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {\n                if (!oldItems) return [];\n                return oldItems.filter(item => item.id !== usedInventoryId);\n            });\n\n            // 念のためサーバーとも同期\n            queryClient.invalidateQueries({ queryKey: queryKey });\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });\n\n            play('clear');")
+* 根拠: 使用失敗時のonError (行番号: 80〜85 / 抜粋: "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {\n            showToast({ title: \"エラー\", text: extractErrorDetail(error, '操作に失敗しました'), icon: \"⚠️\" });\n            play('cancel');\n        }")
+* 根拠: `isUsingItemRef`の解除(`onSettled`) (行番号: 86〜88 / 抜粋: "onSettled: () => {\n            isUsingItemRef.current = false;\n        }")
 
 
 * **エラーハンドリング**:
   * APIデータ取得中（`isLoading`）はローディングアイコンを表示。
   * データが空（`!items || items.length === 0`）の場合は専用のメッセージUIを表示。
+  * **（Issue #441で追加）** 一覧取得の`useQuery`（`fetchInventory`）が`isError`になった場合、専用の画面UI（ローディング/空状態のような分岐レンダリング）は無いままだが、`useEffect`が検知して`showToast`でエラー通知トーストを1回だけ表示する（それ以前は取得失敗時のUI・通知処理が一切無かった）。
   * 使用（`useMutationAction`）の通信エラーは`onError`で`extractErrorDetail`によりメッセージを取り出し`showToast`でユーザーに通知する（**バグ修正(M-6-3)**、以前はこのハンドラ自体が存在せずサイレント失敗だった）。
-  * ただし、一覧取得の`useQuery`（`fetchInventory`）自体には`onError`等の明示的なエラーハンドリングは無く、取得失敗時のUI・キャッチ処理はファイル内に記述されていない。
   * 「はい」ボタンのクリックハンドラは、`itemToUse && !isUsingItemRef.current`のときのみ`useMutationAction.mutate`を呼ぶ。既に使用リクエストが進行中（`isUsingItemRef.current === true`）の場合は何もせず`setItemToUse(null)`でモーダルを閉じるのみとし、多重送信によるサーバー側400エラーの発生自体を未然に防ぐ（**バグ修正(Issue #119)**）。
-* 根拠: [条件付きレンダリング部分] (行番号: 78〜95 / 抜粋: "if (isLoading) return (")
-* 根拠: `useMutationAction`の`onError` (行番号: 67〜72)
-* 根拠: 「はい」ボタンのガード (行番号: 144〜147 / 抜粋: "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
+* 根拠: [条件付きレンダリング部分] (行番号: 91〜108 / 抜粋: "if (isLoading) return (")
+* 根拠: **（Issue #441）** 一覧取得エラーの通知 (行番号: 51〜61)
+* 根拠: `useMutationAction`の`onError` (行番号: 80〜85)
+* 根拠: 「はい」ボタンのガード (行番号: 157〜160 / 抜粋: "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
 
 
 ## 5. 処理フロー図
@@ -123,8 +128,15 @@
 ```mermaid
 flowchart TD
     Start([描画開始]) --> Init["外部：useQueryClient, useSound, useToastの初期化"]
-    Init --> Query["外部：useQuery(fetchInventory) \n5秒間隔のポーリング"]
-    Query --> CheckLoading{"isLoading === true?"}
+    Init --> Query["外部：useQuery(fetchInventory) \n5秒間隔のポーリング\n(isError/errorも取得)"]
+    Query --> FetchErrEffect{"#441: useEffect - isError === true?"}
+    FetchErrEffect -- はい --> CheckShown{"hasShownFetchErrorRef.current?"}
+    CheckShown -- いいえ(初回) --> ShowFetchErrToast["hasShownFetchErrorRef.current=true\nshowToast(取得失敗)"]
+    CheckShown -- はい(表示済み) --> CheckLoading
+    ShowFetchErrToast --> CheckLoading
+    FetchErrEffect -- いいえ --> ResetShown["hasShownFetchErrorRef.current=false"] --> CheckLoading
+
+    CheckLoading{"isLoading === true?"}
 
     CheckLoading -- Yes --> RenderLoading["ローディングUI表示"] --> End([描画終了])
     CheckLoading -- No --> CheckEmpty{"itemsが未定義 or 空?"}
@@ -161,9 +173,13 @@ graph TD
     end
 
     subgraph ReactQuery ["@tanstack/react-query"]
-        useQueryHook["useQuery"]
+        useQueryHook["useQuery (isError/errorも取得, #441)"]
         useMutationHook["useMutation"]
         useQueryClientHook["useQueryClient"]
+    end
+
+    subgraph ReactCore ["react"]
+        useEffectHook["useEffect (#441: 一覧取得エラーの初回トースト)"]
     end
 
     subgraph CustomHooks
@@ -189,6 +205,7 @@ graph TD
     InventoryList --> useQueryHook
     InventoryList --> useMutationHook
     InventoryList --> useQueryClientHook
+    InventoryList --> useEffectHook
     InventoryList --> useSoundHook
     InventoryList --> useToastHook
     InventoryList --> Card
@@ -214,8 +231,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **一覧取得(`useQuery`)のエラーハンドリング欠如**: `fetchInventory`の`useQuery`自体には`onError`が無く、一覧取得に失敗した場合にエラーを画面上に表示・通知する処理は記述されていません（**バグ修正(M-6-3)で追加されたのは`useMutationAction`の`onError`のみで、`useQuery`側は対象外**）。
-* 根拠: (行番号: 44〜48 / 抜粋: "const { data: items, isLoading } = useQuery({\n        queryKey: queryKey,\n        queryFn: () => apiClient.fetchInventory(userId),\n        refetchInterval: 5000\n    });")
+* **[修正済み] 一覧取得(`useQuery`)のエラーハンドリング欠如（Issue #441）**: 以前は`fetchInventory`の`useQuery`自体に`onError`相当のハンドリングが無く（`useMutationAction`の`onError`はM-6-3で追加済みだったが、`useQuery`側は対象外のままだった）、一覧取得に失敗した場合にエラーを画面上に表示・通知する処理が存在しなかった（「アイテムが無い」のか「読み込みに失敗した」のか区別できないサイレント失敗）。現在は`useQuery`から`isError`/`error`も取得し、専用の`useEffect`＋`hasShownFetchErrorRef`により、エラー状態に入った最初の1回だけ`showToast`でトースト通知する（5秒間隔のポーリングが失敗し続けても連投はしない）。ただし、`isLoading`/空状態のような専用の画面分岐（例えば「再試行」ボタン付きのエラー専用UI）はまだ無く、トースト表示後は通常時と同じ表示（`items`が`undefined`のままなら空状態UIが出る）に留まる。
+* 根拠: (行番号: 40, 46〜61 / 抜粋: "const { data: items, isLoading, isError, error } = useQuery({\n        queryKey: queryKey,\n        queryFn: () => apiClient.fetchInventory(userId),\n        refetchInterval: 5000\n    });", "const hasShownFetchErrorRef = useRef(false);\n    useEffect(() => {\n        if (isError) {\n            if (!hasShownFetchErrorRef.current) {\n                hasShownFetchErrorRef.current = true;\n                showToast({ title: \"エラー\", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: \"⚠️\" });\n            }\n        } else {\n            hasShownFetchErrorRef.current = false;\n        }\n    }, [isError, error, showToast]);")
 * **[修正済み] エラートースト追加によるサイレント失敗の解消（M-6-3）**: 以前は使用ミューテーション（`useMutationAction`）に`onError`が定義されておらず、通信エラー等が発生してもコンソールログのみでユーザーには一切通知されないサイレント失敗になっていた。現在は`onError`を追加し、`extractErrorDetail(error)`で取り出したメッセージを`showToast`でトースト表示する（追加で`play('cancel')`も再生）。ただしキャッシュの`setQueryData`は`onSuccess`内でのみ行われる設計のため、`onError`時に巻き戻す対象のキャッシュ変更自体が存在せず、いわゆる「楽観的更新のロールバック」は不要（`invalidateQueries`による次回フェッチが実質的な同期手段）。
 * 根拠: (行番号: 67〜72 / 抜粋: "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {\n            showToast({ title: \"エラー\", text: extractErrorDetail(error), icon: \"⚠️\" });\n            play('cancel');\n        }")
 * **ポーリング負荷**: `refetchInterval: 5000` が設定されており、5秒ごとに自動フェッチが走るため、ユーザー数が多い場合はサーバー負荷への影響を考慮する必要があります。
@@ -238,7 +255,6 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `item.status`の取りうる全値とその意味 | 本ファイルは`item.status`を一切参照しておらず、`InventoryItem.status`のどの値のアイテムが一覧（`GET /inventory/{user_id}`のレスポンス）に含まれるかは本ファイルからは断定できないため。 | `../../../types`, バックエンドの`GET /inventory/{user_id}`実装 |
-| 一覧取得(`useQuery`)失敗時のデフォルトの挙動 | `fetchInventory`自体には`onError`が無く、グローバルなエラーハンドラーの有無がこのファイル単独では不明なため。 | `../../../lib/apiClient` または親コンポーネント群 |
 | `play('clear')`/`play('cancel')`等の音声の有無 | 指定されたキーに対応する音声が確実に存在するかが不明なため。 | `../../../hooks/useSound` |
 | `Modal`コンポーネントの内部実装 | `isOpen`/`onClose`/`title`/`footer`のprops以外にどのような機能（フォーカストラップ、アニメーション等）を持つか不明なため。 | `../../../components/ui/Modal` |
 | `useToast`/`showToast`の内部実装 | トーストの表示時間・同時表示数の上限など、`../../../context/useToast`に依存する具体的な挙動が不明なため。 | `../../../context/useToast.ts`, `ToastContext.tsx` |
@@ -249,7 +265,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `item.status`の取りうる全値とその意味 | `family-quest/src/types/index.ts`を直接確認した。`InventoryItem.status`(100行目)は`'owned' \| 'consumed'`の2値で定義されている（`'pending'`のような承認待ちを示す値は存在しない）。本ファイルが`status`を全く参照しないのは、これと整合する（一覧には基本的に`'owned'`のアイテムのみが表示対象として想定され、使用即座に一覧から除去されるため`'consumed'`状態のアイテムを画面上で区別して扱う必要が無い設計と考えられる）。 | 直接ソース確認: `family-quest/src/types/index.ts:100` |
-| 一覧取得(`useQuery`)失敗時のデフォルトの挙動 | `family-quest/src/lib/apiClient.ts`を直接確認した。`_request`メソッド(77〜95行目)は`!response.ok`の場合、レスポンスのJSONの`detail`フィールド（文字列型の場合のみ）またはフォールバックの`API Error: {status}`から`Error`を生成してスローし(83〜88行目)、`catch`節(91〜94行目)で`console.error`によるログ出力の後に例外を再スローするのみで、`apiClient.ts`内にグローバルなエラー通知・トースト表示の仕組みは実装されていないことを確認した。呼び出し元の`InventoryList.tsx`自体は、使用ミューテーション（`useMutationAction`）には`onError`ハンドラを定義し`showToast`で通知するようになった（M-6-3）が、一覧取得の`useQuery`（`fetchInventory`）には引き続き`onError`が無く、取得失敗時はコンソールログのみで画面上には何も表示されない。 | 直接ソース確認: `family-quest/src/lib/apiClient.ts:77-95` |
+| 一覧取得(`useQuery`)失敗時のデフォルトの挙動（#441で解消済み） | `family-quest/src/lib/apiClient.ts`を直接確認した。`_request`メソッド(77〜95行目)は`!response.ok`の場合、レスポンスのJSONの`detail`フィールド（文字列型の場合のみ）またはフォールバックの`API Error: {status}`から`Error`を生成してスローし(83〜88行目)、`catch`節(91〜94行目)で`console.error`によるログ出力の後に例外を再スローするのみで、`apiClient.ts`内にグローバルなエラー通知・トースト表示の仕組みは実装されていないことを確認した。以前の`InventoryList.tsx`は、使用ミューテーション（`useMutationAction`）には`onError`ハンドラを定義し`showToast`で通知するようになっていた（M-6-3）が、一覧取得の`useQuery`（`fetchInventory`）には`onError`が無く、取得失敗時はコンソールログのみで画面上には何も表示されなかった。**Issue #441でこの空白が埋められ**、`useQuery`から`isError`/`error`を取得する`useEffect`＋`hasShownFetchErrorRef`により、エラー状態に入った最初の1回だけ`showToast`が呼ばれるようになった（`family-quest/src/features/shop/components/InventoryList.tsx:46-61`で直接確認）。 | 直接ソース確認: `family-quest/src/lib/apiClient.ts:77-95`, `family-quest/src/features/shop/components/InventoryList.tsx:46-61` |
 | `play('clear')`/`play('cancel')`等の音声の有無 | `family-quest/src/hooks/useSound.ts`を直接確認した。`SOUNDS`定義(4〜13行目)には本ファイルが使用する`'clear'`(6行目、`/quest/quest_clear.mp3`、「クエスト完了」用と兼用の音源)と`'cancel'`(12行目、`/quest/tap.mp3`と同一音源、「cancel は tap(タップ音) を使用」)がいずれも実在することを確認した。 | 直接ソース確認: `family-quest/src/hooks/useSound.ts:4-13` |
 | `Modal`コンポーネントの内部実装 | `family-quest/src/components/ui/Modal.tsx`(全76行)を直接確認した。`Modal`(15〜76行目)は`isOpen`/`onClose`/`title`/`children`/`footer`/`maxWidth`(既定`"sm"`)をpropsとして受け取り、`useEffect`(24〜30行目)で`isOpen`が真の間だけ`keydown`リスナーを登録してESCキー押下時に`onClose`を呼ぶ。フォーカストラップは実装されておらず、背景（バックドロップ）のクリックでも`onClose`が呼ばれる(44〜47行目)。本ファイルは`title`/`footer`/`children`のみを渡しており(122〜141行目)、`maxWidth`は既定値`"sm"`のまま使用していることを確認した。 | 直接ソース確認: `family-quest/src/components/ui/Modal.tsx:15-76` |
 | `useToast`/`showToast`の内部実装 | `family-quest/src/context/useToast.ts`と`toastShared.ts`を直接確認した。`useToast()`(`useToast.ts`4〜8行目)は`useContext(ToastContext)`を呼び出し、値が`null`なら`Error('useToast は ToastProvider の内側で使ってください')`を`throw`する。`ToastContextValue.showToast`(`toastShared.ts`15〜17行目)は`(toast: Omit<ToastItem, 'id' \| 'createdAt'>) => void`型で、`ToastItem`(7〜13行目)は`id`/`title`/`text?`/`icon?`/`createdAt`を持つ。実際の描画・表示時間・スタック方法は`ToastContext.tsx`(Provider本体)側の実装に依存し、本調査の範囲では未確認。 | 直接ソース確認: `family-quest/src/context/useToast.ts:1-8`, `family-quest/src/context/toastShared.ts:1-19` |

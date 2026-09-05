@@ -16,11 +16,13 @@
 * [src/context/SettingsContext.md](src/context/SettingsContext.md) - `App`分岐のみをラップする`SettingsProvider`の実装元
 * [src/context/ToastContext.md](src/context/ToastContext.md) - `App`分岐のみをラップする`ToastProvider`の実装元
 * [src/components/ui/ChunkErrorBoundary.md](src/components/ui/ChunkErrorBoundary.md) - ルート直下でツリー全体を包む、`lazy()`チャンク読込失敗時の自動再読み込み用エラーバウンダリ(Issue #362)
+* [src/lib/routing.md](src/lib/routing.md) - **（Issue #472で追加）** `isCameraView`の判定に使う`isCameraRoute`関数の実装元。以前の`window.location.pathname.includes('/camera')`という単純部分一致を、単体テスト可能なセグメント単位の判定関数に置き換えた。
 
 ## 2. ファイルの概要
 
-* DOMから特定のルート要素（`id="root"`）を取得し、`React.StrictMode`と`QueryClientProvider`（React Query）でラップした上で、URLのパス（`window.location.pathname`）に`/camera`が含まれるかどうか（`isCameraView`）に応じて、マウントするツリーをルート直下で丸ごと切り替えるエントリーポイントファイルである。`isCameraView`が`true`の場合は`CameraDashboard`（カメラビューワ、`lazy()`による動的importで別チャンクに分離され`Suspense`でラップされる）を、`false`の場合は`App`（通常のFamily Questアプリ）を`SettingsProvider`・`ToastProvider`でラップしてレンダリングする。`CameraDashboard`は`SettingsProvider`/`ToastProvider`の**外側**でマウントされるため、`App`側のみが使えるこれら2つのコンテキスト（`useSettings`/`useToast`）を利用できない設計になっている。
-* 根拠: `ReactDOM.createRoot(rootElement).render(...)` と `isCameraView` による分岐 (行番号: 22, 24-41 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera'); ... {isCameraView ? (\n        <Suspense fallback={null}>\n          <CameraDashboard />\n        </Suspense>\n      ) : (\n        <SettingsProvider>\n          <ToastProvider>\n            <App />\n          </ToastProvider>\n        </SettingsProvider>\n      )}")
+* DOMから特定のルート要素（`id="root"`）を取得し、`React.StrictMode`と`QueryClientProvider`（React Query）でラップした上で、URLのパス（`window.location.pathname`）が「カメラルート」かどうか（`isCameraView`）に応じて、マウントするツリーをルート直下で丸ごと切り替えるエントリーポイントファイルである。`isCameraView`が`true`の場合は`CameraDashboard`（カメラビューワ、`lazy()`による動的importで別チャンクに分離され`Suspense`でラップされる）を、`false`の場合は`App`（通常のFamily Questアプリ）を`SettingsProvider`・`ToastProvider`でラップしてレンダリングする。`CameraDashboard`は`SettingsProvider`/`ToastProvider`の**外側**でマウントされるため、`App`側のみが使えるこれら2つのコンテキスト（`useSettings`/`useToast`）を利用できない設計になっている。**（Issue #472で変更）** `isCameraView`の判定は、以前はこのファイル内で`window.location.pathname.includes('/camera')`という単純な部分一致で行っていたが、`./lib/routing`から新たにインポートした`isCameraRoute(window.location.pathname)`関数呼び出しに置き換えられた。判定の意図（`/camera`または`/quest/camera`で始まるパスをカメラビューとして扱う）自体は変わっていないが、実装がセグメント単位の厳密な判定になり、かつ単体テスト可能な別モジュールに切り出された。
+* 根拠: `ReactDOM.createRoot(rootElement).render(...)` と `isCameraView` による分岐 (行番号: 63, 67-86 / 抜粋: "const isCameraView = isCameraRoute(window.location.pathname); ... {isCameraView ? (\n        <Suspense fallback={null}>\n          <CameraDashboard />\n        </Suspense>\n      ) : (\n        <SettingsProvider>\n          <ToastProvider>\n            <App />\n          </ToastProvider>\n        </SettingsProvider>\n      )}")
+* 根拠: `isCameraRoute`のインポートへの置き換え (行番号: 11, 62〜63 / 抜粋: "import { isCameraRoute } from './lib/routing'", "// ★追加: URLのパスが '/camera' または '/quest/camera' 等で始まる場合はカメラビューワをレンダリングする\nconst isCameraView = isCameraRoute(window.location.pathname);")
 * 根拠: [CameraDashboardのlazy import化とコメント] (行番号: 12〜14 / 抜粋: "// CameraDashboard(hls.js含む)は /camera 専用でFamily Quest本体とは同時に使われないため、\n// 動的importで別チャンクに分離し、通常のクエスト画面の初回読み込みバンドルから除外する。\nconst CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))")
 * **Issue #362(PWA Service Workerの更新戦略)**: `virtual:pwa-register`の`registerSW`を明示的に呼び出し、1時間ごとに`registration.update()`で新しいSWの有無を確認する。新しいSWが有効化(`skipWaiting`+`clientsClaim`)されて`controllerchange`が発火した時点で`window.location.reload()`によりページを自動再読み込みし、常時表示中のキオスク端末(Echo Show)でも旧バンドルが残留しないようにする。初回インストール時(controllerが無い状態からの初回claim)の`controllerchange`は「更新」ではないため再読み込みしない。さらにレンダーツリー全体を`ChunkErrorBoundary`で包み、SW更新後に旧チャンクが404になって`lazy()`がthrowしても白画面にせず自動再読み込みする。
 * 根拠: SW更新戦略のコメントと実装 (行番号: 16〜51 / 抜粋: "const SW_UPDATE_INTERVAL_MS = 60 * 60 * 1000;", "navigator.serviceWorker.addEventListener('controllerchange', () => {\n    if (!hadController) {\n      hadController = true;\n      return;\n    }\n    window.location.reload();\n  });", "registerSW({\n  immediate: true,\n  onRegisteredSW(_swUrl, registration) {")
@@ -42,7 +44,8 @@
 | `queryClient` | 内部モジュール | React Queryのクライアントインスタンス | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
 | `SettingsProvider` | 内部モジュール | `App`分岐のみをラップする設定コンテキストのプロバイダ（`CameraDashboard`側では利用不可） | 根拠: `SettingsProvider` (行番号: 7 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'") |
 | `ToastProvider` | 内部モジュール | `App`分岐のみをラップするトースト通知コンテキストのプロバイダ（`CameraDashboard`側では利用不可） | 根拠: `ToastProvider` (行番号: 8 / 抜粋: "import { ToastProvider } from './context/ToastContext'") |
-| `CameraDashboard` | 内部モジュール（`lazy`による動的import） | カメラビューワのルートコンポーネント（`/camera`パス時。静的importではなく`lazy()`で別チャンクに分離される） | 根拠: `CameraDashboard` (行番号: 12 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
+| `CameraDashboard` | 内部モジュール（`lazy`による動的import） | カメラビューワのルートコンポーネント（`/camera`パス時。静的importではなく`lazy()`で別チャンクに分離される） | 根拠: `CameraDashboard` (行番号: 15 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
+| `isCameraRoute` | 内部モジュール（純粋関数） | **（Issue #472で追加）** URLのパスが「カメラルート」（`/camera`または`/quest/camera`で始まる）かどうかを判定する。以前ここに直接書かれていた`pathname.includes('/camera')`という部分一致判定を置き換えた | 根拠: (行番号: 11 / 抜粋: "import { isCameraRoute } from './lib/routing'") |
 
 ### ブラックボックスとなる外部要素
 
@@ -55,7 +58,7 @@
 | `SettingsProvider` | 内部実装が提供されていないため、どのような設定コンテキストを提供するか不明（`./context/SettingsContext`ファイルに依存のため要確認）。 | 根拠: `SettingsProvider` (行番号: 7 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'") |
 | `ToastProvider` | 内部実装が提供されていないため、どのようなトースト通知機構を提供するか不明（`./context/ToastContext`ファイルに依存のため要確認）。 | 根拠: `ToastProvider` (行番号: 8 / 抜粋: "import { ToastProvider } from './context/ToastContext'") |
 | `document` API | `root`というIDを持つ要素がDOM上に存在するかどうかはHTML側の実装に依存するため不明。 | 根拠: `document.getElementById` (行番号: 15 / 抜粋: "const rootElement = document.getElementById('root');") |
-| `window.location` API | 実行時のURLパスに依存するため、どのタイミングで`/camera`パスになるか（ルーティング全体の設計）は本ファイルからは不明。 | 根拠: `window.location.pathname` (行番号: 61 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');") |
+| `window.location` API | 実行時のURLパスに依存するため、どのタイミングで`/camera`パスになるか（ルーティング全体の設計）は本ファイルからは不明。 | 根拠: `window.location.pathname` (行番号: 63 / 抜粋: "const isCameraView = isCameraRoute(window.location.pathname);") |
 | `navigator.serviceWorker` / `virtual:pwa-register` | ブラウザのService Worker APIおよび`vite-plugin-pwa`がビルド時に生成する仮想モジュール。生成されるSWの中身(`skipWaiting`/`clientsClaim`/`cleanupOutdatedCaches`)は`vite.config.ts`の`VitePWA`設定に依存し本ファイルからは不明。 | 根拠: (行番号: 3, 27〜51 / 抜粋: "if ('serviceWorker' in navigator) {", "registerSW({\n  immediate: true,") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -110,6 +113,7 @@ graph TD
     Main --> ChunkErrorBoundary["内部ファイル：./components/ui/ChunkErrorBoundary<br>ルート直下で全体をラップ"]
     Main --> RegisterSW["外部モジュール：virtual:pwa-register (registerSW)"]
     Main --> ServiceWorker["外部：navigator.serviceWorker (controllerchange)"]
+    Main -->|isCameraRoute(pathname), #472| Routing["内部ファイル：./lib/routing (isCameraRoute)"]
 
 ```
 
@@ -123,6 +127,7 @@ graph TD
 | 中 | `./lib/queryClient.ts` または `.js` | React Queryによるデータフェッチのグローバルなキャッシュ戦略やエラーハンドリングの設定内容を確認するため。 | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
 | 中 | `index.html` | マウント対象となる `<div id="root"></div>` 要素が確実に定義されているか、およびメタデータ等を確認するため。 | 根拠: `document.getElementById` (行番号: 15 / 抜粋: "document.getElementById('root'); ") |
 | 低 | `./index.css` | アプリケーション全体に適用されているベーススタイルやCSS変数の定義状況を把握するため。 | 根拠: `index.css` (行番号: 4 / 抜粋: "import './index.css'") |
+| 中 | `./lib/routing.ts` | **（Issue #472で追加）** `isCameraRoute`の正確な判定ロジック（どのパスがカメラルートとみなされるか）を確認するため。本ファイル単体では呼び出しているのみで判定条件の詳細は不明。 | 根拠: (行番号: 11 / 抜粋: "import { isCameraRoute } from './lib/routing'") |
 
 ## 8. 保守上の注意点
 
@@ -132,8 +137,8 @@ graph TD
 * 根拠: [レンダーツリー構造] (行番号: 28-38 / 抜粋: "{isCameraView ? (\n        <Suspense fallback={null}>\n          <CameraDashboard />\n        </Suspense>\n      ) : (\n        <SettingsProvider>\n          <ToastProvider>\n            <App />\n          </ToastProvider>\n        </SettingsProvider>\n      )}")
 * **SW更新時の自動再読み込みはユーザー操作を待たない(Issue #362)**: `controllerchange`を受けた時点で入力中の状態やモーダルの有無に関わらず`window.location.reload()`する。Family Questはサーバー側にしか永続状態を持たないため実害は小さいが、長い入力フォームを持つ画面を追加する場合はこの挙動を考慮する必要がある。また`registerSW`を`src/`から明示的にimportしているため、`vite-plugin-pwa`(`injectRegister: 'auto'`既定)は`registerSW.js`の自動注入を行わず、登録は本ファイルの呼び出しに一本化される。
 * 根拠: (行番号: 16〜24, 32〜38, 41〜51)
-* **ルーティングがURLパスの文字列一致のみで判定されている**: `isCameraView` は `window.location.pathname.includes('/camera')` という単純な部分一致で決定されており、専用のルーティングライブラリを使っていない。将来的に`/camera`を含む別の意図しないパス（例: `/settings/camera-help`）が追加された場合、意図せず`CameraDashboard`がマウントされる可能性がある。
-* 根拠: (61行目 / 抜粋: "const isCameraView = window.location.pathname.includes('/camera');")
+* **[修正済み] ルーティング判定の部分一致による誤マッチのリスク（Issue #472）**: 以前は`isCameraView`を`window.location.pathname.includes('/camera')`という単純な部分一致で本ファイル内で直接決定しており、専用のルーティングライブラリも使っていなかった。将来的に`/camera`を含む別の意図しないパス（例: `/settings/camera-help`）が追加された場合、意図せず`CameraDashboard`がマウントされてしまう懸念があった。現在は`./lib/routing`に切り出した`isCameraRoute`関数（セグメント単位で先頭が`camera`、または先頭が`quest`かつ2番目が`camera`の場合のみ真）を呼び出す形に置き換えられ、単体テスト（`routing.test.ts`）も追加された。依然として専用のルーティングライブラリは使っておらず、ルート判定はこの1関数に閉じている。
+* 根拠: (11, 63行目 / 抜粋: "import { isCameraRoute } from './lib/routing'", "const isCameraView = isCameraRoute(window.location.pathname);")
 
 ## 9. 不明事項一覧
 
@@ -144,7 +149,8 @@ graph TD
 | データフェッチ機構のグローバル設定 | `queryClient` が外部ファイルからインポートされており、本ファイル内では設定パラメータが判断不可であるため。 | `./lib/queryClient` (拡張子は同上) |
 | グローバルスタイルの定義内容 | CSSファイルがインポートされているのみであり、スタイルの衝突や適用範囲が不明であるため。 | `./index.css` |
 | HTML側のDOM構造 | `document.getElementById('root')` の対象となる要素が定義されているHTMLファイルが提供されていないため。 | `index.html` (エントリーポイントに対応するHTMLファイル) |
-| `/camera` 以外のルーティング設計の有無 | `window.location.pathname`の単純な文字列一致でしか分岐していないため、他にルーティングライブラリや設定が存在するか不明。 | ルーティング関連の設定ファイル（存在する場合） |
+| `/camera` 以外のルーティング設計の有無 | `isCameraRoute`（`./lib/routing`）による判定でしか分岐していないため、他にルーティングライブラリや設定が存在するか不明。 | ルーティング関連の設定ファイル（存在する場合） |
+| `isCameraRoute`の正確な判定条件 | 本ファイルは`isCameraRoute(window.location.pathname)`を呼び出しているのみで、関数自体の実装（どのパスパターンを真と判定するか）は`./lib/routing`側にあるため本ファイルからは不明。 | `./lib/routing.ts` |
 
 ## 相互参照による補足情報
 
@@ -155,7 +161,8 @@ graph TD
 | データフェッチ機構のグローバル設定 | `family-quest/src/lib/queryClient.ts`(全10行)を直接確認した。`queryClient`は`retry: 1`（失敗時1回再試行）、`staleTime: 1000 * 60`（60秒）、`refetchOnWindowFocus: false`という`defaultOptions.queries`(4〜9行目)を持つ`QueryClient`インスタンスであり、記載内容以外の追加設定（`mutations`のデフォルト等）はファイル内に存在しない。 | 直接ソース確認: `family-quest/src/lib/queryClient.ts:1-10` |
 | グローバルスタイルの定義内容 | `family-quest/src/index.css`を直接確認した。全2行で`@tailwind base; @tailwind components; @tailwind utilities;`のみが記述されており、Tailwind CSSの3レイヤーを読み込むだけのファイルで、カスタムのCSS変数やベーススタイルの追加定義は本ファイルには存在しない（**Issue #412 品質で修正**: `main.tsx`からインポートされていない、どこからも参照されていなかった`App.css`は死蔵ファイルと判断し削除された。同様に未参照だった`src/assets/react.svg`・`public/silent.mp3`も削除された）。 | 直接ソース確認: `family-quest/src/index.css:1-2` |
 | HTML側のDOM構造 | `family-quest/index.html`(全20行)を直接確認した。`<body>`内に`<div id="root"></div>`(16行目)と`<script type="module" src="/src/main.tsx"></script>`(17行目)のみが存在し、`main.tsx`がマウント対象とする`id="root"`の要素が確実に存在することを確認した。`<head>`には`<title>Family Quest</title>`(12行目)、`theme-color`(9行目)、`description`(10行目)、`apple-touch-icon`(11行目)等のメタデータが定義されている。 | 直接ソース確認: `family-quest/index.html:1-20` |
-| `/camera` 以外のルーティング設計の有無 | `family-quest/package.json`および`family-quest`ディレクトリ全体を確認したが、`react-router`等のルーティングライブラリの依存は存在せず(`package.json`に`router`を含む依存は0件)、`*route*`/`*router*`という名前の設定ファイルもリポジトリ内に見つからなかった。`family-quest/src/main.tsx`(全41行)を確認したところ、ルーティングは本ファイル17行目で確認した`window.location.pathname.includes('/camera')`による単純な文字列一致のみで、`isCameraView`の真偽で`CameraDashboard`か`App`(+`SettingsProvider`+`ToastProvider`)かをルート直下で丸ごと切り替えている(24〜39行目)。専用のルーティングライブラリや追加のルート定義は存在しないことを確認した。 | 直接ソース確認: `family-quest/src/main.tsx:1-41`, `family-quest/package.json`（`router`依存なし） |
+| `/camera` 以外のルーティング設計の有無 | `family-quest/package.json`および`family-quest`ディレクトリ全体を確認したが、`react-router`等のルーティングライブラリの依存は存在せず(`package.json`に`router`を含む依存は0件)、`*route*`/`*router*`という名前の設定ファイルは`src/lib/routing.ts`（Issue #472で新規追加、ルーティングライブラリではなく単一の判定関数`isCameraRoute`のみを提供するモジュール）のみであることを確認した。`family-quest/src/main.tsx`を確認したところ、ルーティングは`isCameraRoute(window.location.pathname)`の真偽のみで、`isCameraView`の真偽で`CameraDashboard`か`App`(+`SettingsProvider`+`ToastProvider`)かをルート直下で丸ごと切り替えている。専用のルーティングライブラリや、`isCameraRoute`以外の追加のルート判定は存在しないことを確認した。 | 直接ソース確認: `family-quest/src/main.tsx`, `family-quest/src/lib/routing.ts`, `family-quest/package.json`（`router`依存なし） |
+| `isCameraRoute`の正確な判定条件 | `family-quest/src/lib/routing.ts`を直接確認した。`isCameraRoute(pathname)`は`pathname.split('/').filter(Boolean)`でパスを非空セグメントに分割し、先頭セグメントが`'camera'`と一致するか、または先頭が`'quest'`かつ2番目のセグメントが`'camera'`と一致する場合にのみ`true`を返す純粋関数である。詳細は[routing.md](src/lib/routing.md)を参照。 | 直接ソース確認: `family-quest/src/lib/routing.ts:1-19` |
 
 ## 10. 自己検証結果
 

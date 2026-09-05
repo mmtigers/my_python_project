@@ -32,6 +32,11 @@ logger = setup_logging("alexa_handler")
 _APL_DOCUMENT_PATH = os.path.join(os.path.dirname(__file__), "..", "alexa", "apl", "main_screen.json")
 _apl_document_cache: Optional[Dict[str, Any]] = None
 
+# #452: Alexaの読み上げ(outputSpeech)は8000文字が上限。家族人数が増えて
+# 全員分の詳細を連結すると将来的にこれへ抵触しうるため、安全マージンを見て
+# この文字数を超える場合は詳細列挙をやめ要約に切り替える。
+_ALEXA_SPEECH_SAFE_LIMIT = 7500
+
 
 def _load_apl_document() -> Dict[str, Any]:
     global _apl_document_cache
@@ -115,8 +120,15 @@ class LaunchRequestHandler(AbstractRequestHandler):
             )
         else:
             # 画面がないデバイス向けのフォールバック: 家族ごとの状況を読み上げる
-            for u in family_data["users"]:
-                speech += f"{u['name']}さんはレベル{u['level']}、{u['gold']}ゴールドです。"
+            details = "".join(
+                f"{u['name']}さんはレベル{u['level']}、{u['gold']}ゴールドです。"
+                for u in family_data["users"]
+            )
+            if len(speech) + len(details) > _ALEXA_SPEECH_SAFE_LIMIT:
+                # #452: 上限に近づく場合は個別詳細を諦め、件数のみの要約に切り替える
+                speech += f"{len(family_data['users'])}人分のデータがあります。詳細は画面でご確認ください。"
+            else:
+                speech += details
 
         response_builder.speak(speech).set_should_end_session(False)
         return response_builder.response

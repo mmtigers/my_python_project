@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/services/switchbot_service.py
+import threading
 import time
 import hashlib
 import hmac
@@ -7,7 +8,7 @@ import uuid
 from typing import Dict, Any, Optional
 
 import requests
-import config 
+import config
 # from common import retry_api_call # 削除
 
 from core.logger import setup_logging   # 修正: core.loggerを使用
@@ -20,6 +21,11 @@ DEVICE_NAME_CACHE: Dict[str, str] = {}
 # 問題(#411 S-L2)への対応。lifespan からの明示的な事前ロードは行わず、
 # get_device_name_by_id() の初回呼出し(＝最初のWebhook受信)時に一度だけ遅延ロードする。
 _fetch_attempted = False
+# #439: DEVICE_NAME_CACHE/_fetch_attempted は複数のWebhookリクエストスレッドから
+# 並行してアクセスされうる。「キャッシュが空か確認してから_fetch_attemptedを立てる」
+# チェックのタイミングが重なると、初回リクエストが集中した際にAPI呼び出しが
+# 複数回走ってしまうため、このLockで保護する(APIコール自体はLock外で行う)。
+_device_cache_lock = threading.Lock()
 
 def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:
     """SwitchBot APIへのリクエスト（Exponential Backoff リトライ付き）"""
@@ -128,14 +134,18 @@ def fetch_device_name_cache() -> bool:
         # statusCodeのチェックは request_switchbot_api 内のPydanticモデルでも行われるが念のため
         if res.get('statusCode') == 100:
             body = res.get('body', {})
+            new_names: Dict[str, str] = {}
             # 通常デバイス
-            for d in body.get('deviceList', []): 
-                DEVICE_NAME_CACHE[d['deviceId']] = d['deviceName']
+            for d in body.get('deviceList', []):
+                new_names[d['deviceId']] = d['deviceName']
             # 赤外線デバイス
-            for d in body.get('infraredRemoteList', []): 
-                DEVICE_NAME_CACHE[d['deviceId']] = d['deviceName']
-            
-            logger.info(f"✅ {len(DEVICE_NAME_CACHE)} 個のデバイス名をキャッシュしました。") # 修正: print -> logger
+            for d in body.get('infraredRemoteList', []):
+                new_names[d['deviceId']] = d['deviceName']
+
+            with _device_cache_lock:
+                DEVICE_NAME_CACHE.update(new_names)
+                cache_size = len(DEVICE_NAME_CACHE)
+            logger.info(f"✅ {cache_size} 個のデバイス名をキャッシュしました。") # 修正: print -> logger
             return True
         else:
             logger.error(f"SwitchBot API Error: {res}")
@@ -148,10 +158,15 @@ def fetch_device_name_cache() -> bool:
 def get_device_name_by_id(device_id: str) -> Optional[str]:
     """IDから名前を検索する関数。キャッシュが空ならここで一度だけ遅延ロードを試みる。"""
     global _fetch_attempted
-    if not DEVICE_NAME_CACHE and not _fetch_attempted:
-        _fetch_attempted = True
+    with _device_cache_lock:
+        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted
+        if should_fetch:
+            _fetch_attempted = True
+    if should_fetch:
+        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない
         fetch_device_name_cache()
-    return DEVICE_NAME_CACHE.get(device_id, None)
+    with _device_cache_lock:
+        return DEVICE_NAME_CACHE.get(device_id, None)
 
 def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:
     """

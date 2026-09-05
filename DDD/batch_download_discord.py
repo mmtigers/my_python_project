@@ -268,8 +268,11 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の
     # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し、
     # BOT_DETECTION_COOLDOWN_HOURS(12時間)ものセッション全停止を誤って
-    # 引き起こし得た。数字のみのマーカーは単語境界(\b)で厳密に判定し、
-    # フレーズマーカーは従来通り部分文字列一致とする。
+    # 引き起こし得た。
+    # #467: フレーズマーカーも従来は部分文字列一致(in)のままだったため、
+    # 無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる
+    # (可能性は低いが数字マーカーと同種の問題)。フレーズ・数字を問わず
+    # 単語境界(\b)で厳密に判定する方式に統一する。
     # #396: yt-dlpのメッセージは "you’re"(U+2019) のような引用符を使うことがある
     # ため、ASCIIのアポストロフィに正規化してからマーカーと比較する。
     message = str(exc).lower().replace("’", "'")
@@ -278,10 +281,7 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):
         return False
     for marker in CONFIG.BOT_DETECTION_MARKERS:
-        if marker.isdigit():
-            if re.search(rf"\b{re.escape(marker)}\b", message):
-                return True
-        elif marker in message:
+        if re.search(rf"\b{re.escape(marker)}\b", message):
             return True
     return False
 
@@ -389,19 +389,35 @@ class DiscordNotifier:
 
 class HistoryManager:
     @staticmethod
+    def _read_history_file(path: Path) -> Set[str]:
+        with open(path, "r", encoding="utf-8") as f:
+            return {line.strip() for line in f if line.strip()}
+
+    @staticmethod
     def load_history() -> Set[str]:
-        history = set()
         if CONFIG.HISTORY_FILE_PATH.exists():
             try:
-                with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:
-                    history = {line.strip() for line in f if line.strip()}
+                return HistoryManager._read_history_file(CONFIG.HISTORY_FILE_PATH)
             except Exception as e:
                 # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが
                 # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の
                 # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、
                 # 原因調査ができるよう必ずログには残す。
                 logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)
-        return history
+
+            # #464: 主ファイルの読み込みに失敗した場合、直近の正常な状態を保持する
+            # バックアップからの復旧を試みる(newface_monitor.pyのload_known_casts
+            # と同じ考え方)。これが無ければ空履歴にフォールバックし、既に
+            # ダウンロード済みのURLが再ダウンロード・再通知され続けてしまう。
+            backup_path = CONFIG.HISTORY_FILE_PATH.with_suffix(CONFIG.HISTORY_FILE_PATH.suffix + ".bak")
+            if backup_path.exists():
+                try:
+                    history = HistoryManager._read_history_file(backup_path)
+                    logger.warning(f"⚠️ バックアップ({backup_path})から履歴を復旧しました。")
+                    return history
+                except Exception as e:
+                    logger.error(f"⚠️ バックアップ履歴ファイルの読み込みにも失敗しました: {e}", exc_info=True)
+        return set()
 
     @staticmethod
     def add_history(url: str) -> None:
@@ -413,6 +429,20 @@ class HistoryManager:
             # 「未ダウンロード」のままになり再ダウンロード・再通知が続く。
             # ここで処理自体を止めるほどではないため続行するが、ログには残す。
             logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)
+            return
+
+        # #464: 追記直後の状態をバックアップへ複製しておく。主ファイルが将来
+        # 破損した場合でも、load_history()がこのバックアップから直近の履歴を
+        # 復旧できるようにする(newface_monitor.pyのsave_known_castsと同じ
+        # tmp書き込み+replaceのアトミックパターンで、バックアップ自体の
+        # 書き込み中断による破損も避ける)。
+        try:
+            backup_path = CONFIG.HISTORY_FILE_PATH.with_suffix(CONFIG.HISTORY_FILE_PATH.suffix + ".bak")
+            bak_tmp_path = backup_path.with_suffix(backup_path.suffix + ".tmp")
+            bak_tmp_path.write_bytes(CONFIG.HISTORY_FILE_PATH.read_bytes())
+            bak_tmp_path.replace(backup_path)
+        except OSError as e:
+            logger.warning(f"⚠️ 履歴ファイルのバックアップ作成に失敗しました: {e}")
 
 class CooldownManager:
     """ボット検知発生後の実行間クールダウンを管理するクラス。

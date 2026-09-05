@@ -22,6 +22,18 @@ DISCORD_ATEXIT_FLUSH_SECONDS = 5.0
 _inflight_senders: "set[threading.Thread]" = set()
 _inflight_lock = threading.Lock()
 
+# #436: _send_webhook の失敗を最低限どこかに残すための独立ロガー。
+# アプリの名前付きロガー(setup_logging()でハンドラをclearされうる)とは
+# 別名にして、通知システム自体の障害を検知できるようにする。
+_webhook_failure_logger = logging.getLogger("core.logger.discord_webhook_failure")
+if not _webhook_failure_logger.handlers:
+    _webhook_failure_handler = logging.StreamHandler()
+    _webhook_failure_handler.setFormatter(
+        logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    )
+    _webhook_failure_logger.addHandler(_webhook_failure_handler)
+    _webhook_failure_logger.propagate = False
+
 
 def _register_sender(thread: threading.Thread) -> None:
     with _inflight_lock:
@@ -124,7 +136,10 @@ class DiscordErrorHandler(logging.Handler):
         try:
             requests.post(url, json=payload, timeout=5)
         except Exception:
-            pass
+            # #436: 以前はここで完全に握りつぶしており、Webhook URL失効やネットワーク障害で
+            # 通知システム自体が壊れていても誰も気づけなかった。最低限の可視化として
+            # 標準エラー出力に警告ログを残す。
+            _webhook_failure_logger.warning("Discord webhook送信に失敗しました: %s", url, exc_info=True)
 
 def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
     """ロガーのセットアップ"""

@@ -18,8 +18,9 @@
 * [sound_manager.md](./sound_manager.md) - `sound_manager.play`の実体(`core.sound_manager`)
 * [notification_service.md](./notification_service.md) - `notification_service.send_push`の実体(`services.notification_service`)
 * [switchbot_service.md](./switchbot_service.md) - `switchbot_service.send_device_command`の実体(TVロック解除、`_trigger_tv_unlock`内でローカルインポート)
-* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`/`UPLOAD_DIR`（B6で追加、`_delete_orphaned_avatar`が参照）/`YOUTUBE_REWARD_IDS`（YouTube系ごほうび券クールダウンの対象reward_id）等の設定値の提供元
+* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`/`UPLOAD_DIR`（B6で追加、`_delete_orphaned_avatar`/`delete_unlinked_avatar`が参照）/`YOUTUBE_REWARD_IDS`（YouTube系ごほうび券クールダウンの対象reward_id）等の設定値の提供元
 * [InventoryList.md](../family-quest/src/features/shop/components/InventoryList.md) - `GET /api/quest/inventory/{user_id}`のレスポンス形状(`items`/`youtube_cooldown_remaining_seconds`/`is_youtube_reward`)を消費するフロントエンドコンポーネント
+* [utils.md](./utils.md) - `RefCountedLockRegistry`（Issue #435で本ファイルの3ロックレジストリ、および`_item_use_locks`の実装として採用）の実体である`core/utils.py`の仕様書
 * `fix_quest_reset_period.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `quest_master.reset_period`列の値(`'weekly_monday'`→`'daily'`)を一括修正するワンショットスクリプト。本ファイルの`is_within_reset_period`が`'daily'`/`'weekly'`の2値しか扱わないことと関連が疑われる
 
 ## 2. ファイルの概要
@@ -49,16 +50,17 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 | `datetime` | 標準ライブラリ | 日付や時刻の操作・比較 | `import datetime` (行番号: 1) |
 | `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 2) |
 | `math` | 標準ライブラリ | **（YouTubeごほうび券クールダウン機能で追加）** クールダウン残り秒数を分単位に切り上げる(`math.ceil`)ために`_get_youtube_cooldown_remaining_seconds`と`InventoryService._use_item_locked`が使用 | `import math` (行番号: 3) |
-| `os` | 標準ライブラリ | **（B6で追加）** `UserService._delete_orphaned_avatar`が旧アバターファイルのファイル名抽出(`os.path.basename`)・パス結合(`os.path.join`)・パストラバーサル対策(`os.path.dirname`/`os.path.normpath`)・存在確認と削除(`os.path.exists`/`os.remove`)に使用 | `import os` (行番号: 4) |
+| `os` | 標準ライブラリ | **（B6で追加、Issue #442で使用箇所追加）** `UserService._delete_orphaned_avatar`および`UserService.delete_unlinked_avatar`（Issue #442で追加）が、いずれも対象ファイルのファイル名抽出(`os.path.basename`)・パス結合(`os.path.join`)・パストラバーサル対策(`os.path.dirname`/`os.path.normpath`)・存在確認と削除(`os.path.exists`/`os.remove`)に使用 | `import os` (行番号: 4) |
 | `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 5) |
-| `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行 | `import threading` (行番号: 6) |
-| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 7) |
-| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 8) |
+| `threading` | 標準ライブラリ | **（Issue #435で用途縮小）** 以前は`_completion_locks`/`_user_balance_locks`/`_purchase_locks`の各エントリ生成(`threading.Lock`)に直接使用していたが、現在はこの3レジストリおよび**YouTubeごほうび券クールダウン機能で追加された`_item_use_locks`**の実装が`core.utils.RefCountedLockRegistry`（内部で`threading.Lock`を使用）に置き換えられたため、本ファイル内で`threading`を直接使う箇所は`_trigger_tv_unlock`内での非同期スレッド実行のみになった | `import threading` (行番号: 6) |
+| `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分のロック（`RefCountedLockRegistry.acquire`が返すコンテキストマネージャ）をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 7) |
+| `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_get_completion_lock`/`_get_purchase_lock`が受け取るキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 8) |
 | `fastapi` (`HTTPException`) | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 10) |
 | `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 11) |
 | `config` | 内部モジュール | 環境変数・定数の参照 | `import config` (行番号: 12) |
 | `game_logic` | 内部モジュール | ゲームレベルや報酬の計算ロジック呼び出し | `import game_logic` (行番号: 13) |
 | `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 14) |
+| `core.utils.RefCountedLockRegistry`（Issue #435で追加） | 内部モジュール | `_completion_locks`/`_user_balance_locks`/`_purchase_locks`、および**YouTubeごほうび券クールダウン機能で追加された`_item_use_locks`**が使うキー単位・参照カウント付きロッククラスの実体。使用が終わった(参照カウントが0に戻った)キーを自動的に内部辞書から削除する（`services/camera_service.py`の`_RefCountedLock`/`_vod_generation_lock`と同じ設計）。以前はこれらのレジストリがそれぞれ`Dict[key, threading.Lock]`＋専用の`threading.Lock`ガード＋`_get_xxx_lock()`アクセサ関数という同じパターンをファイル内に個別実装しており、エントリを削除する手段が無く無制限に肥大化していた。 | `from core.utils import RefCountedLockRegistry` (行番号: 15) |
 | `services.notification_service` | 内部モジュール | LINEなどへのプッシュ通知 | `from services import notification_service, switchbot_service` (行番号: 15) |
 | `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`_trigger_tv_unlock`)。**（Issue #293で修正）** 以前は`_trigger_tv_unlock`内のローカルimportのみでモジュールレベルには無かったが、`notification_service`と同じ行でモジュールレベルへ統合した。 | `from services import notification_service, switchbot_service` (行番号: 15) |
 | `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 16) |
@@ -142,57 +144,57 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * **エラーハンドリング**: なし(`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`のパース失敗時のフォールバックはconfig.py側の責務。詳細はconfig.mdを参照)
 * 根拠: (行番号: 112〜117)
 
-### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` / `_completion_locks_guard` (モジュールレベル変数)
+### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` (モジュールレベル変数、Issue #435で`RefCountedLockRegistry`化)
 
-* **役割**: `Tuple[str, int]` のキーを受け取り `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一キーへの同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。渡されるキー自体は本関数の関知するところではなく、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出する（通常クエストは`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）。
-* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:` (行番号: 76〜82)
+* **役割**: `Tuple[str, int]` のキーを受け取り、`_completion_locks`（`core.utils.RefCountedLockRegistry`のインスタンス）の`acquire(key)`が返すコンテキストマネージャをそのまま返す。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一キーへの同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。渡されるキー自体は本関数の関知するところではなく、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出する（通常クエストは`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）。**（Issue #435で修正）** 以前は`Dict[Tuple[str, int], threading.Lock]`の`_completion_locks`辞書と専用の`_completion_locks_guard`ロックを本ファイル内に直接実装しており、エントリを削除する手段が無く使用したキーの組み合わせが増え続ける限り無制限に肥大化していた。現在は参照カウント方式の`RefCountedLockRegistry`に置き換わり、使用が終わった(参照カウントが0に戻った)キーは自動的に内部辞書から削除される。呼び出し側の`with _get_completion_lock(key):`という使い方・ロック取得順序は変わっていない。
+* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 133), `def _get_completion_lock(key: Tuple[str, int]):\n    return _completion_locks.acquire(key)` (行番号: 136〜137)
 * **引数/リクエスト**: `key: Tuple[str, int]` (`user_id`と`quest_id`の組)
-* 根拠: (行番号: 76)
-* **戻り値/レスポンス**: `threading.Lock`
-* 根拠: (行番号: 76, 82 / 抜粋: "return lock")
-* **副作用**: `_completion_locks`辞書への書き込み（キー未登録時のみ）。エントリを削除する処理は存在せず、辞書は増え続ける。
-* 根拠: (行番号: 79〜81 / 抜粋: "_completion_locks[key] = lock")
+* 根拠: (行番号: 136)
+* **戻り値/レスポンス**: コンテキストマネージャ（`RefCountedLockRegistry.acquire`が返す`@contextlib.contextmanager`ベースのもの。`with`文のブロック内で保護対象の処理を実行する）
+* 根拠: (行番号: 136〜137 / 抜粋: "return _completion_locks.acquire(key)")
+* **副作用**: `_completion_locks`（レジストリ）内部辞書への新規エントリ登録（未登録時のみ）、参照カウントの増減、参照カウントが0に戻った場合の内部辞書からの削除。
+* 根拠: (行番号: 137。実体は`core/utils.py`の`RefCountedLockRegistry.acquire`)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 76〜82)
+* 根拠: (行番号: 136〜137)
 
-### `_get_user_balance_lock` (モジュールレベル関数) と `_user_balance_locks` / `_user_balance_locks_guard` (モジュールレベル変数)
+### `_get_user_balance_lock` (モジュールレベル関数) と `_user_balance_locks` (モジュールレベル変数、Issue #435で`RefCountedLockRegistry`化)
 
-* **役割**: `user_id`をキーとして`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`と同様の構造）。`process_approve_quest`/`process_cancel_quest`は「`quest_users`をSELECT→Pythonでgold/exp/levelを計算→UPDATE」というread-modify-write処理のため、同一ユーザーへの承認×承認・承認×取消が並行実行される（例: 親が承認一覧を連続タップする`handleApproveAll`）と一方の更新が消失するレースコンディションが起こりうる（H-3）。`quest_users`(gold/exp/level)を書き換える処理を対象ユーザー単位でプロセス内直列化するために導入された。導入当初は`process_approve_quest`/`process_cancel_quest`のみが取得しており、`process_complete_quest`(大人の即時完了パス)と`process_purchase_reward`は別系統の`_completion_locks`/`_purchase_locks`しか取得していなかったため、完了×完了(異なるquest_id)や購入×承認/取消といった経路をまたぐ並行実行ではquest_usersのlost updateを防げていなかった。Issue #161でこれら2箇所からも(既存のcompletion/purchase lockより外側で)取得するよう修正され、quest_usersを書き換えうる4経路(完了・承認・取消・購入)すべてが対象ユーザー単位で直列化されるようになった。
-* 根拠: `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `def _get_user_balance_lock(user_id: str) -> threading.Lock:` (行番号: 98〜104)
+* **役割**: `user_id`をキーとして`_user_balance_locks`（`RefCountedLockRegistry`のインスタンス）の`acquire(user_id)`が返すコンテキストマネージャをそのまま返す（`_get_completion_lock`と同様の構造）。`process_approve_quest`/`process_cancel_quest`は「`quest_users`をSELECT→Pythonでgold/exp/levelを計算→UPDATE」というread-modify-write処理のため、同一ユーザーへの承認×承認・承認×取消が並行実行される（例: 親が承認一覧を連続タップする`handleApproveAll`）と一方の更新が消失するレースコンディションが起こりうる（H-3）。`quest_users`(gold/exp/level)を書き換える処理を対象ユーザー単位でプロセス内直列化するために導入された。導入当初は`process_approve_quest`/`process_cancel_quest`のみが取得しており、`process_complete_quest`(大人の即時完了パス)と`process_purchase_reward`は別系統の`_completion_locks`/`_purchase_locks`しか取得していなかったため、完了×完了(異なるquest_id)や購入×承認/取消といった経路をまたぐ並行実行ではquest_usersのlost updateを防げていなかった。Issue #161でこれら2箇所からも(既存のcompletion/purchase lockより外側で)取得するよう修正され、quest_usersを書き換えうる4経路(完了・承認・取消・購入)すべてが対象ユーザー単位で直列化されるようになった。**（Issue #435で修正）** 以前は`Dict[str, threading.Lock]`の`_user_balance_locks`辞書と専用ガードロックを直接実装していたが、現在は他の2つのレジストリと同様`RefCountedLockRegistry`に置き換わり、未使用になったユーザーIDのエントリは自動的に削除される。
+* 根拠: `_user_balance_locks = RefCountedLockRegistry()` (行番号: 110), `def _get_user_balance_lock(user_id: str):\n    return _user_balance_locks.acquire(user_id)` (行番号: 113〜114)
 * **引数/リクエスト**: `user_id: str`
-* 根拠: (行番号: 98)
-* **戻り値/レスポンス**: `threading.Lock`
-* 根拠: (行番号: 98, 104 / 抜粋: "return lock")
-* **副作用**: `_user_balance_locks`辞書への書き込み（キー未登録時のみ）。`_completion_locks`と同様、エントリを削除する処理は存在せず辞書は増え続ける。
-* 根拠: (行番号: 101〜103 / 抜粋: "_user_balance_locks[user_id] = lock")
+* 根拠: (行番号: 113)
+* **戻り値/レスポンス**: コンテキストマネージャ（`RefCountedLockRegistry.acquire`が返すもの）
+* 根拠: (行番号: 113〜114 / 抜粋: "return _user_balance_locks.acquire(user_id)")
+* **副作用**: `_user_balance_locks`（レジストリ）内部辞書への新規エントリ登録（未登録時のみ）、参照カウントの増減、参照カウントが0に戻った場合の内部辞書からの削除。
+* 根拠: (行番号: 114。実体は`core/utils.py`の`RefCountedLockRegistry.acquire`)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 98〜104)
+* 根拠: (行番号: 113〜114)
 
 ### `_acquire_user_balance_locks` (モジュールレベル関数)
 
 * **役割**: 複数の`user_id`に対する`_get_user_balance_lock`のロックをまとめて取得し、`ExitStack`として返す。兄妹連携クエストの承認（`_approve_linked_history`）・取消（カスケード経由の`_revert_and_delete_history`）は、呼び出し元(報告者)だけでなく連結された相方の`quest_users`も同一トランザクション内で書き換えるため、報告者のロックのみでは相方を対象とする別の承認/取消操作と並行実行された場合にlost updateが起こりうる（Issue #98）。複数ユーザーを同時にロックする際は常に`user_id`の昇順で取得することで、双方向のカスケード処理同士（例: 兄の承認が妹をロック待ちし、同時に妹の承認が兄をロック待ちする）が互いのロックを取り合うデッドロックを防いでいる。
-* 根拠: `def _acquire_user_balance_locks(user_ids) -> ExitStack:` (行番号: 107〜118 / 抜粋: "for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))")
+* 根拠: `def _acquire_user_balance_locks(user_ids) -> ExitStack:` (行番号: 117〜128 / 抜粋: "for uid in sorted(set(user_ids)):\n        stack.enter_context(_get_user_balance_lock(uid))")
 * **引数/リクエスト**: `user_ids`（`str`のイテラブル。`process_approve_quest`/`process_cancel_quest`からは報告者と、連結履歴があればその相方のリストとして渡される）
-* 根拠: (行番号: 107)
+* 根拠: (行番号: 117)
 * **戻り値/レスポンス**: `ExitStack`（`with`文で使うコンテキストマネージャ。ブロック終了時に取得した全ロックを解放する）
-* 根拠: (行番号: 115〜118)
-* **副作用**: `_get_user_balance_lock`経由での`_user_balance_locks`辞書への書き込み（キー未登録時のみ）
-* 根拠: (行番号: 116〜117)
+* 根拠: (行番号: 125〜128)
+* **副作用**: `_get_user_balance_lock`経由での`_user_balance_locks`（レジストリ）内部辞書への書き込み（キー未登録時のみ）
+* 根拠: (行番号: 126〜127)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 107〜118)
+* 根拠: (行番号: 117〜128)
 
-### `_get_purchase_lock` (モジュールレベル関数) と `_purchase_locks` / `_purchase_locks_guard` (モジュールレベル変数)
+### `_get_purchase_lock` (モジュールレベル関数) と `_purchase_locks` (モジュールレベル変数、Issue #435で`RefCountedLockRegistry`化)
 
-* **役割**: `Tuple[str, int]`(`user_id`と`reward_id`の組)のキーを受け取り`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`と同一の構造）。`process_purchase_reward`は残高チェックと減算を単一のアトミックな`UPDATE`で行うためread-then-writeのレースコンディション自体は起きないが、`_process_purchase_reward_locked`が行う「直近の購入履歴を読む→履歴を書く」というスパムチェックは他のスパムチェックと同様のTOCTOU(check-then-act間のズレ)を持つ。購入確認モーダルの「はい」連打で、1回目のレスポンス前に2回目のリクエストがほぼ同時に到達すると、ロックが無ければどちらも「直近の購入履歴なし」を読んでしまいスパムチェックをすり抜け、残高が足りる限り2回とも独立した正当な購入として成立してしまう（ゴールド二重消費+アイテム二重取得。Issue #101）。同一(`user_id`, `reward_id`)への処理をプロセス内で直列化することでこれを防ぐ。
-* 根拠: `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `def _get_purchase_lock(key: Tuple[str, int]) -> threading.Lock:` (行番号: 136〜142)
+* **役割**: `Tuple[str, int]`(`user_id`と`reward_id`の組)のキーを受け取り、`_purchase_locks`（`RefCountedLockRegistry`のインスタンス）の`acquire(key)`が返すコンテキストマネージャをそのまま返す（`_get_completion_lock`と同一の構造）。`process_purchase_reward`は残高チェックと減算を単一のアトミックな`UPDATE`で行うためread-then-writeのレースコンディション自体は起きないが、`_process_purchase_reward_locked`が行う「直近の購入履歴を読む→履歴を書く」というスパムチェックは他のスパムチェックと同様のTOCTOU(check-then-act間のズレ)を持つ。購入確認モーダルの「はい」連打で、1回目のレスポンス前に2回目のリクエストがほぼ同時に到達すると、ロックが無ければどちらも「直近の購入履歴なし」を読んでしまいスパムチェックをすり抜け、残高が足りる限り2回とも独立した正当な購入として成立してしまう（ゴールド二重消費+アイテム二重取得。Issue #101）。同一(`user_id`, `reward_id`)への処理をプロセス内で直列化することでこれを防ぐ。**（Issue #435で修正）** 他の2レジストリと同様、`Dict[Tuple[str, int], threading.Lock]`の直接実装から`RefCountedLockRegistry`へ置き換わっている。
+* 根拠: `_purchase_locks = RefCountedLockRegistry()` (行番号: 144), `def _get_purchase_lock(key: Tuple[str, int]):\n    return _purchase_locks.acquire(key)` (行番号: 147〜148)
 * **引数/リクエスト**: `key: Tuple[str, int]` (`user_id`と`reward_id`の組)
-* 根拠: (行番号: 136)
-* **戻り値/レスポンス**: `threading.Lock`
-* 根拠: (行番号: 136, 142 / 抜粋: "return lock")
-* **副作用**: `_purchase_locks`辞書への書き込み（キー未登録時のみ）。他の2つのロックレジストリと同様、エントリを削除する処理は存在せず辞書は増え続ける。
-* 根拠: (行番号: 139〜141 / 抜粋: "_purchase_locks[key] = lock")
+* 根拠: (行番号: 147)
+* **戻り値/レスポンス**: コンテキストマネージャ（`RefCountedLockRegistry.acquire`が返すもの）
+* 根拠: (行番号: 147〜148 / 抜粋: "return _purchase_locks.acquire(key)")
+* **副作用**: `_purchase_locks`（レジストリ）内部辞書への新規エントリ登録（未登録時のみ）、参照カウントの増減、参照カウントが0に戻った場合の内部辞書からの削除。
+* 根拠: (行番号: 148。実体は`core/utils.py`の`RefCountedLockRegistry.acquire`)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 136〜142)
+* 根拠: (行番号: 147〜148)
 
 ### `_get_item_use_lock` (モジュールレベル関数) と `_item_use_locks` / `_item_use_locks_guard` (モジュールレベル変数)
 
@@ -261,20 +263,34 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * **エラーハンドリング**: `old_avatar`が空/`None`、新旧URLが同一、`/uploads/`配下でない、またはパストラバーサル対策の一致チェックに失敗した場合はいずれも早期`return`（何もしない）。`os.remove`が`OSError`を送出した場合は`except OSError`で捕捉し、警告ログを出力するのみで例外を再送出しない（アバター更新自体は既に成功しているため、削除失敗はユーザーへのレスポンスに影響しない）。
 * 根拠: 早期return群 (行番号: 222〜225 / 抜粋: "if not old_avatar or old_avatar == new_avatar:\n            return\n        if not old_avatar.startswith(\"/uploads/\"):\n            return")、パストラバーサル対策 (行番号: 229〜230 / 抜粋: "if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return")、例外処理 (行番号: 236〜237 / 抜粋: "except OSError as e:\n            logger.warning(f\"Failed to remove orphaned avatar {file_path}: {e}\")")
 
+### `UserService.delete_unlinked_avatar` (メソッド、Issue #442で追加)
+
+* **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `/user/update`でのユーザーへの紐付け）のうち2段階目が失敗した際のロールバック用。`quest_router.py`の`DELETE /upload/{filename}`（`delete_uploaded_image`）から呼び出され、まだどのユーザーにも紐付けられていない、アップロード直後の孤立画像ファイルを削除する。`_delete_orphaned_avatar`と同様、`filename`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合したうえで、結合結果の親ディレクトリが正規化済み`UPLOAD_DIR`と一致することを確認してパストラバーサルを防ぐ。加えて、`quest_users`テーブルに当該ファイルを`avatar`として参照する行が1件でも存在すれば削除しない（競合するアップロードや、既に紐付け済みの現役アバターを誤って削除しないための安全策）。
+* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 249〜285 / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの")
+* **引数/リクエスト**: `filename: str`（削除対象のアップロード済みファイル名。ディレクトリ部分は`os.path.basename`で無視される）
+* 根拠: (行番号: 249, 264 / 抜粋: "def delete_unlinked_avatar(self, filename: str) -> bool:", "filename = os.path.basename(filename)")
+* **戻り値/レスポンス**: `bool`（実際にファイルを削除できた場合のみ`True`。参照中・パス不正・ファイル未存在・削除失敗時は`False`）
+* 根拠: 各return文 (行番号: 267, 275, 279, 282, 285 / 抜粋: "return True", "return False")
+* **副作用**: `config.UPLOAD_DIR`配下のパス解決、DB参照（`common.get_db_cursor()`で`quest_users`の`avatar`列を参照する参照確認クエリ）、条件を満たす場合のローカルファイルシステムからのファイル削除（`os.remove`）、削除成功時のログ出力(`logger.info`)。
+* 根拠: `with common.get_db_cursor() as cur:\n            still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? LIMIT 1", (avatar_value,)\n            ).fetchone() is not None` (行番号: 270〜273)、`os.remove(file_path)` (行番号: 280)、`logger.info(f"Unlinked avatar removed (rollback): {file_path}")` (行番号: 281)
+* **エラーハンドリング**: パストラバーサル対策の一致チェックに失敗した場合、他ユーザー（＝いずれかのユーザー）から参照中の場合、対象ファイルが存在しない場合はいずれも`False`を返す（例外は送出しない）。`os.remove`が`OSError`を送出した場合は`except OSError`で捕捉し、警告ログを出力したうえで`False`を返す（呼び出し元の`delete_uploaded_image`エンドポイントはベストエフォートの後始末として扱い、いずれの`False`もHTTPエラーにはしない設計。詳細は`quest_router.md`参照）。
+* 根拠: `if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return False` (行番号: 266〜267)、`if still_referenced:\n            return False` (行番号: 274〜275)、`if not os.path.exists(file_path):\n            return False` (行番号: 278〜279)、`except OSError as e:\n            logger.warning(f"Failed to remove unlinked avatar {file_path}: {e}")\n            return False` (行番号: 283〜285)
+
 ### `QuestService.is_within_reset_period`
 
-* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。`'daily'`/`'weekly'`以外の文字列が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する（`'weekly_monday'`はこれに該当する値の一例。かつて`quest_master`のテーブル定義側`reset_period`列DEFAULTとして残存していたが、Issue #330以降、列の供給はmigrations側に一本化され（DEFAULTはIssue #329対応の`migrations/0008`で`'daily'`へ修正済み）、`sync_master_data`自身が`'weekly_monday'`を設定することはない。詳細は8節を参照）。**（Issue #293で修正）** 以前はこの関数内でローカルに`import datetime`し(ファイル冒頭で既にモジュールレベルimport済みで完全に無駄な再インポートだった)、`JST`変数もこの関数内で毎回組み立てていたが、`calculate_quest_boost`/`_is_quest_currently_active`/`filter_active_quests`/`get_all_view_data`がそれぞれ独立に(一部はpytzベースで)同じJSTを組み立てていた重複を解消するため、ファイル冒頭のモジュールレベル定数`JST`(`datetime.timezone(datetime.timedelta(hours=9), 'JST')`)へ一本化した。`dt.replace(tzinfo=JST)`という`.replace()`呼び出しがこの関数内にあるため、`pytz.timezone("Asia/Tokyo")`ではなく標準ライブラリの固定オフセット版を統一先として採用している(pytzのtimezoneオブジェクトを`.replace(tzinfo=...)`に直接使うと、この地域ではLMT起源の不正なオフセット+09:19になる既知の落とし穴があるため)。
-* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 208〜242)
-* 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 225〜226 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
-* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242)
+* **役割**: 完了日時文字列とリセット周期文字列から、現在の期間内に完了しているかを判定する。JST（UTC+9）を標準ライブラリのみで定義して基準にし、`completed_at_str`をISOパースして`tzinfo`が無ければ**JSTとみなして**変換する（M-1-4: 以前はtzinfo無しの値をUTCとみなしていたが、保存規約(`common.get_now_iso`)は常にJSTで記録するためこの解釈は誤りであり、同ファイル内のスパムチェック(`_process_complete_quest_locked`)がtzinfo無しの値をJSTとみなす実装と矛盾していた。誤ったUTC解釈により、日付境界付近（夜遅く）のレガシー完了時刻で日付跨ぎの誤判定が起きていた。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す）。`reset_period`が`'daily'`の場合は当日一致、`'weekly'`の場合は当該週の月曜日以降かを判定する。**（Issue #446で修正）** `'daily'`/`'weekly'`以外の文字列（空文字・`NULL`・`'weekly_monday'`等の想定外の値）が渡された場合は、いずれの分岐にも一致せず末尾の`return False`に到達する点は変わらないが、以前はここで無言のまま`False`を返しており原因調査が難航しがちだったため、`return False`の直前に`logger.warning`で実際に渡された`reset_period`の値を含む警告ログを出力するよう修正された（`'weekly_monday'`はこの分岐に該当する値の一例。かつて`quest_master`のテーブル定義側`reset_period`列DEFAULTとして残存していたが、Issue #330以降、列の供給はmigrations側に一本化され（DEFAULTはIssue #329対応の`migrations/0008`で`'daily'`へ修正済み）、`sync_master_data`自身が`'weekly_monday'`を設定することはない。詳細は8節を参照）。**（Issue #293で修正）** 以前はこの関数内でローカルに`import datetime`し(ファイル冒頭で既にモジュールレベルimport済みで完全に無駄な再インポートだった)、`JST`変数もこの関数内で毎回組み立てていたが、`calculate_quest_boost`/`_is_quest_currently_active`/`filter_active_quests`/`get_all_view_data`がそれぞれ独立に(一部はpytzベースで)同じJSTを組み立てていた重複を解消するため、ファイル冒頭のモジュールレベル定数`JST`(`datetime.timezone(datetime.timedelta(hours=9), 'JST')`)へ一本化した。`dt.replace(tzinfo=JST)`という`.replace()`呼び出しがこの関数内にあるため、`pytz.timezone("Asia/Tokyo")`ではなく標準ライブラリの固定オフセット版を統一先として採用している(pytzのtimezoneオブジェクトを`.replace(tzinfo=...)`に直接使うと、この地域ではLMT起源の不正なオフセット+09:19になる既知の落とし穴があるため)。
+* 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 289〜324)
+* 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 303〜304 / 抜粋: "M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている")
+* 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... logger.warning(...) ... return False` (行番号: 313〜324)
+* 根拠: [新規追加の警告ログ] (行番号: 320〜323 / 抜粋: "# #446: 'daily'/'weekly' 以外の値(空文字・NULL・想定外の文字列等)は\n        # 常に無効(未完了)扱いとなる。原因調査が難航しないよう、想定外の値を\n        # 検知したことをログに残す。\n        logger.warning(f\"⚠️ is_within_reset_period: 未知のreset_period値 ({reset_period!r}) のため常にFalseを返します。\")")
 * **引数/リクエスト**: `completed_at_str: str`, `reset_period: str`
-* 根拠: (行番号: 208)
+* 根拠: (行番号: 289)
 * **戻り値/レスポンス**: `bool`
-* 根拠: (行番号: 208)
-* **副作用**: なし
-* 根拠: (行番号: 208〜242、DBアクセスや外部呼び出しなし)
+* 根拠: (行番号: 289)
+* **副作用**: 想定外の`reset_period`値を受け取った場合の警告ログ出力（Issue #446で追加。それ以外はDBアクセスや外部呼び出しなし）。
+* 根拠: (行番号: 323 / 抜粋: "logger.warning(f\"⚠️ is_within_reset_period: 未知のreset_period値 ({reset_period!r}) のため常にFalseを返します。\")")
 * **エラーハンドリング**: `completed_at_str`が空なら早期`False`。ISOパース失敗時は`"%Y-%m-%d"`形式でリトライし、それも失敗すれば`False`を返す（例外は送出しない）。
-* 根拠: (行番号: 209, 229〜233 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
+* 根拠: (行番号: 290, 307〜311 / 抜粋: "except Exception:\n            try:\n                completed_date = datetime.datetime.strptime(...)\n            except:\n                return False")
 
 ### `QuestService.__init__`
 
@@ -804,16 +820,17 @@ graph TD
         game_system_inst["game_system / quest_service / shop_service /<br>user_service / inventory_service (モジュール変数)"]
         get_completion_lock["_get_completion_lock()"]
         get_completion_lock_key["_get_completion_lock_key()"]
-        completion_locks["_completion_locks (dict)"]
+        completion_locks["_completion_locks<br>(RefCountedLockRegistry, Issue #435)"]
         get_user_balance_lock["_get_user_balance_lock()"]
         acquire_user_balance_locks["_acquire_user_balance_locks()"]
-        user_balance_locks["_user_balance_locks (dict)"]
+        user_balance_locks["_user_balance_locks<br>(RefCountedLockRegistry, Issue #435)"]
         get_purchase_lock["_get_purchase_lock()"]
-        purchase_locks["_purchase_locks (dict)"]
+        purchase_locks["_purchase_locks<br>(RefCountedLockRegistry, Issue #435)"]
         seconds_since_iso_timestamp["_seconds_since_iso_timestamp()"]
         role_consts["ROLE_ADULT / ROLE_CHILD"]
         spam_check_consts["SPAM_CHECK_INTERVAL_SECONDS /<br>INFINITE_QUEST_COOLDOWN_SECONDS(B2で追加)"]
         delete_orphaned_avatar["_delete_orphaned_avatar()(B6で追加)"]
+        delete_unlinked_avatar["delete_unlinked_avatar()(Issue #442で追加)"]
     end
 
     game_system_inst --> GameSystem
@@ -838,6 +855,9 @@ graph TD
     QuestService -->|"_process_complete_quest_locked<br>のスパムチェック下限(B2)"| spam_check_consts
     UserService -->|"update_avatar(B6)"| delete_orphaned_avatar
     delete_orphaned_avatar -.-> os_lib
+    UserService -->|"delete_unlinked_avatar(Issue #442)"| delete_unlinked_avatar
+    delete_unlinked_avatar -.-> os_lib
+    delete_unlinked_avatar -.-> quest_users
 
     subgraph External Modules
         common
@@ -849,11 +869,14 @@ graph TD
         models_quest["models.quest"]
         quest_data
         threading_lib["threading (Lock)"]
+        ref_counted_lock_registry["core.utils.RefCountedLockRegistry<br>(Issue #435で追加)"]
         os_lib["os(B6で追加)"]
     end
 
-    get_completion_lock --> threading_lib
-    get_user_balance_lock --> threading_lib
+    completion_locks --> ref_counted_lock_registry
+    user_balance_locks --> ref_counted_lock_registry
+    purchase_locks --> ref_counted_lock_registry
+    ref_counted_lock_registry --> threading_lib
     QuestService -->|"_trigger_tv_unlock内でローカルインポート"| services_switchbot
 
     subgraph Database/Tables
@@ -922,8 +945,8 @@ graph TD
 * 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242)
 * **`calculate_quest_boost`と`is_within_reset_period`の「現在時刻」基準不一致（Issue #108で解消済み）**: 以前は`is_within_reset_period`がJST（+9時間、標準ライブラリのみで定義）に厳密に変換して比較する一方、`calculate_quest_boost`は`datetime.datetime.now()`（サーバーのOSローカル時刻）をそのまま使用しており、サーバーのOSタイムゾーンがJST以外（例: UTC環境）の場合、JST 0時〜9時の間の判定で連続日ボーナスの`days_diff`が1小さくなる不具合があった（M-1-4は`is_within_reset_period`のtzinfo無し値の解釈をUTCからJSTへ修正したのみで、この2関数間の基準不一致自体は未解消のまま残っていた）。Issue #108で`calculate_quest_boost`も同じJST基準（`datetime.timezone(+9時間)`）に統一され解消済み。
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 214, 274)
-* **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）、**YouTubeごほうび券クールダウン機能で追加された`_get_item_use_lock`（`InventoryService.use_item`用）**も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`/`_item_use_locks`辞書もエントリを削除しない同じ設計である。
-* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `_completion_locks[key] = lock` (行番号: 81), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `_user_balance_locks[user_id] = lock` (行番号: 103), `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `_purchase_locks[key] = lock` (行番号: 141), `_item_use_locks: Dict[str, threading.Lock] = {}` (行番号: 201), `_item_use_locks[user_id] = lock` (行番号: 210)
+* **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`ベース（実体は`core.utils.RefCountedLockRegistry`）のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。**（Issue #435で修正）** 以前は`_completion_locks`/`_user_balance_locks`/`_purchase_locks`の3辞書がそれぞれ`Dict[key, threading.Lock]`＋専用ガードロックとして本ファイル内に直接実装されており、エントリを削除する処理を持たずキーの組み合わせが増え続ける設計だった。現在はいずれも`RefCountedLockRegistry`（`core/utils.py`、参照カウント方式）のインスタンスに置き換わり、使用が終わった(参照カウントが0に戻った)キーは自動的に内部辞書から削除されるようになった。ロックの取得順序・呼び出し側の`with`文の使い方（`_get_completion_lock`/`_get_user_balance_lock`/`_get_purchase_lock`という関数シグネチャ）自体は変わっていない。YouTubeごほうび券クールダウン機能で追加された`_get_item_use_lock`（`InventoryService.use_item`用）の`_item_use_locks`も、当初からこの3レジストリと同じ`RefCountedLockRegistry`方式で実装されており、同様に複数プロセス/複数ワーカー構成では別プロセスからの同時リクエストまでは防げない点は変わらない。
+* 根拠: `_completion_locks = RefCountedLockRegistry()` (行番号: 133), `_user_balance_locks = RefCountedLockRegistry()` (行番号: 151), `_purchase_locks = RefCountedLockRegistry()` (行番号: 185), `_item_use_locks = RefCountedLockRegistry()` (行番号: 202), `from core.utils import RefCountedLockRegistry` (行番号: 15)
 * **quest_usersを書き換える4経路のロック体系は依然3レジストリに分かれたまま(Issue #161で経路間のlost updateのみ解消)**: `_completion_locks`/`_user_balance_locks`/`_purchase_locks`という3つの独立したロックレジストリ自体は統合されておらず、`process_complete_quest`/`process_purchase_reward`が`_get_user_balance_lock`を(それぞれcompletion/purchase lockより外側で)追加取得するようになっただけである。取得順序は常に balance lock → completion/purchase lock に統一されており、いずれの経路も balance lock を取得してから自分専用のロックを取得するだけで、balance lock 取得後に他の経路のロック(completion/purchase)を待つことはない。そのため経路間の循環待ちは生じずデッドロックの心配はないが、レジストリが3つに分かれている構造自体は残っているため、新しく`quest_users`を書き換える経路を追加する際は、この`_get_user_balance_lock`を(自身の専用ロックより外側で)取得することを個別に判断・実装する必要があり、忘れると同種のlost updateが再発し得る。
 * 根拠: (行番号: 300〜315, 723〜741 / 抜粋: "ロック取得順序は常に balance lock → completion/purchase lock に統一し、\n        # 経路間のデッドロックを防ぐ。")
 * **`_get_completion_lock_key`はロック取得前にDBへ1回問い合わせる**: 兄妹連携クエストかどうかを判定するために`quest_master`をSELECTする処理が、ロック取得そのものより前・かつ別の`get_db_cursor`トランザクションとして実行される。この問い合わせと実際のロック取得の間にはわずかな非アトミックな隙間があるが、判定対象は`target_user`という更新されることがほぼ無いマスタ値であり、ここでのTOCTOU（read-then-lock間のズレ）が実害あるレースを生む経路は確認できていない（Issue #96の修正で導入）。

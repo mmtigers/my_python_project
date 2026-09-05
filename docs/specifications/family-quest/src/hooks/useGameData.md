@@ -12,7 +12,7 @@
 
 - [../lib/apiClient.md](../lib/apiClient.md) — 全APIリクエストの実行元。エンドポイントの共通処理・エラーハンドリングの実装元。
 - [../lib/masterData.md](../lib/masterData.md) — `INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`フォールバックデータの実装元。
-- [../lib/gameDataSchema.md](../lib/gameDataSchema.md) — `gameData`クエリのレスポンスをランタイム検証するZodスキーマ(`gameDataResponseSchema`)の実装元（Issue #291で追加。#412で`logs`フィールドを削除）。
+- [../lib/gameDataSchema.md](../lib/gameDataSchema.md) — `gameData`クエリのレスポンスをランタイム検証するZodスキーマ(`gameDataResponseSchema`)の実装元（Issue #291で追加。#412で`logs`フィールドを削除）。**（Issue #444で追加）** `buyRewardMutation`のレスポンス検証に使う`purchaseResponseSchema`の実装元でもある。
 - [../types/index.md](../types/index.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`/`ID`型定義の提供元。
 - [../../../MY_HOME_SYSTEM/quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/data`/`/family/chronicle`/`/complete`/`/quest/cancel`/`/approve`/`/reject`/`/reward/purchase`等、本フックが呼び出すバックエンドAPIエンドポイントの実装元。
 - [../../../MY_HOME_SYSTEM/quest_service.md](../../../MY_HOME_SYSTEM/quest_service.md) — クエスト完了・購入等のビジネスロジック（`process_complete_quest`等）の実装元。
@@ -37,7 +37,7 @@
 | `useQuery`, `useMutation`, `useQueryClient` | ライブラリ | データのフェッチ、キャッシュ管理、ミューテーション用 | 根拠: (行番号: 2 / 抜粋: "import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';") |
 | `apiClient` | 外部モジュール | APIエンドポイントへの通信処理用クライアント | 根拠: (行番号: 3 / 抜粋: "import { apiClient } from '../lib/apiClient';") |
 | `INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS` | 外部モジュール | APIレスポンスがない場合の初期値・フォールバック用定数 | 根拠: (行番号: 4 / 抜粋: "import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';") |
-| `gameDataResponseSchema` | 外部モジュール(Zodスキーマ) | `gameData`クエリのレスポンスをランタイムで検証するために使用（Issue #291で追加）。バックエンドのレスポンス形状が期待するフィールド名と食い違っている場合、コンポーネント側で無言でundefinedを参照する「幽霊フィールド」バグとしてではなく、取得境界で即座にエラーとして検知させる目的。 | 根拠: (行番号: 5 / 抜粋: "import { gameDataResponseSchema } from '../lib/gameDataSchema';") |
+| `gameDataResponseSchema`, `purchaseResponseSchema` | 外部モジュール(Zodスキーマ) | `gameDataResponseSchema`は`gameData`クエリのレスポンスをランタイムで検証するために使用（Issue #291で追加）。バックエンドのレスポンス形状が期待するフィールド名と食い違っている場合、コンポーネント側で無言でundefinedを参照する「幽霊フィールド」バグとしてではなく、取得境界で即座にエラーとして検知させる目的。**（Issue #444で追加）** `purchaseResponseSchema`は`buyRewardMutation`の`mutationFn`が`/api/quest/reward/purchase`の生レスポンスを検証するために使用する（以前は無検証のまま`as unknown as PurchaseResponse`でキャストしていた）。 | 根拠: (行番号: 5 / 抜粋: "import { gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';") |
 | `ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `QuestResult` | 型定義 | ユーザー、クエスト、報酬などの型アノテーション。**（#412で追加）** `ID`は各ミューテーションの`mutationFn`引数（`questId`/`historyId`/`rewardId`）を必須型で分離するために追加でインポートされた。 | 根拠: (行番号: 7 / 抜粋: "import { ID, User, Quest, QuestHistory, Reward, QuestResult } from '@/types';") |
 
 ### ブラックボックスとなる外部要素
@@ -73,8 +73,9 @@
 * **戻り値/レスポンス**: オブジェクト（`users`, `quests`, `rewards`, `completedQuests`, `pendingQuests`, `chronicle`, `isLoading`, `gameDataError`, `refetchGameData` 等のデータ群と、`completeQuest`, `approveQuest`, `rejectQuest`, `cancelQuest`, `buyReward`, `refreshData` の各実行関数）
 * 根拠: (行番号: 359〜380 / 抜粋: "return {\n        users: gameData?.users || INITIAL_USERS,")
 
-* **副作用**: コンポーネントマウント中、`gameData`に対してAPIエンドポイントへポーリング通信（`refetchInterval` 10秒）を実行する。`chronicleData`はポーリングせず`staleTime`（5分）による再取得のみ。また`gameData`の応答を受けるたびに`useEffect`が発火し、`currentUserIdx`に対応するユーザーの`user_id`を`viewerUserIdRef`へ保存する（次回以降の`gameData`取得リクエストの`viewer_user_id`パラメータに使われる）。
-* 根拠: (行番号: 97〜98, 101〜104, 110 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "useEffect(() => {\n        const viewer = gameData?.users?.[currentUserIdx];\n        if (viewer) viewerUserIdRef.current = viewer.user_id;\n    }, [gameData, currentUserIdx]);", "staleTime: 1000 * 60 * 5,")
+* **副作用**: コンポーネントマウント中、`gameData`に対してAPIエンドポイントへポーリング通信（`refetchInterval` 10秒）を実行する。`chronicleData`はポーリングせず`staleTime`（5分）による再取得のみ。また`gameData`の応答を受けるたびに`useEffect`が発火し、`currentUserIdx`に対応するユーザーの`user_id`を`viewerUserIdRef`へ保存する（次回以降の`gameData`取得リクエストの`viewer_user_id`パラメータに使われる）。**（Issue #473で追加）** この`useEffect`は、解決した`viewer`の`user_id`が直前の`viewerUserIdRef.current`と実際に異なる場合のみ処理を進め（同一なら早期`return`）、かつそれが初回の代入（`viewerUserIdRef.current`がそれまで`undefined`だった場合）でなければ、`refetchGameData()`を即座に呼んで`gameData`を再フェッチする。以前はrefを更新するのみで、反映は次のポーリング（最大10秒後）や他操作による`invalidateQueries`任せだったため、ユーザー切替直後の数秒間、共有クエストのボーナス計算が古いviewer基準のまま表示され続けていた。
+* 根拠: (行番号: 97〜98, 123 / 抜粋: "staleTime: 1000 * 30,\n        refetchInterval: 1000 * 10, // 10秒に1回のポーリングに制限", "staleTime: 1000 * 60 * 5,")
+* 根拠: 即時再フェッチのuseEffect (行番号: 101〜117 / 抜粋: "useEffect(() => {\n        const viewer = gameData?.users?.[currentUserIdx];\n        if (!viewer || viewer.user_id === viewerUserIdRef.current) return;\n\n        const isInitialAssignment = viewerUserIdRef.current === undefined;\n        viewerUserIdRef.current = viewer.user_id;\n\n        // #473: 以前はここでrefを更新するのみで、次回フェッチへの反映を\n        // ポーリング(最大10秒後)や他の操作によるinvalidateQueriesに任せていたため、\n        // ユーザー切替直後の共有クエストのボーナス計算(閲覧中ユーザー基準)が\n        // 数秒間古いviewerのまま表示され続けていた。切替を検知した時点で\n        // 即座に新しいviewer_user_idで再フェッチする(初回代入時は不要な\n        // 二重フェッチを避けるため除外する)。\n        if (!isInitialAssignment) {\n            refetchGameData();\n        }\n    }, [gameData, currentUserIdx, refetchGameData]);")
 
 * **エラーハンドリング**: 内部で `handleError` 関数を呼び出しコンソールへエラーログを出力するほか、`extractErrorDetail`（`../lib/errorDetail`）でバックエンドが返す具体的なエラーメッセージ（`{"detail": "..."}`）を取り出し、各ラッパー関数の返り値の`detail`として呼び出し元に渡す。**（#412で追加）** `completeQuest`/`cancelQuest`/`approveQuest`/`rejectQuest`/`buyReward`はいずれも、対象の`quest_id`/`history_id`/`reward_id`が`null`/`undefined`の場合、通信を一切行わずに`{ success: false, reason: 'error', detail: '(日本語の再読み込み案内)' }`を即座に返す事前ガードを持つ。
 * 根拠: (行番号: 6 / 抜粋: "import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';")
@@ -195,8 +196,9 @@
 
 ### `buyReward` (ラッパー) & `buyRewardMutation`
 
-* **役割**: 所持ゴールドが足りているか検証し、続けて`reward.reward_id`が`null`/`undefined`でないか検証した上で、報酬の購入処理を行う。成功時は`gameData`と、購入したユーザー個別の`inventory`クエリキャッシュ、および`chronicle`（購入は`reward_history`に記録され冒険の記録に載るため）の3つを破棄する。**（#412で変更）** `buyRewardMutation`の`mutationFn`引数は以前`{ user, reward }`（`reward: Reward`全体）だったが、`{ user, reward, rewardId }`（`onSuccess`側での表示用に`reward`も引き続き保持しつつ、リクエストに使う`reward_id`は`rewardId: ID`必須として分離）に変更した。
+* **役割**: 所持ゴールドが足りているか検証し、続けて`reward.reward_id`が`null`/`undefined`でないか検証した上で、報酬の購入処理を行う。成功時は`gameData`と、購入したユーザー個別の`inventory`クエリキャッシュ、および`chronicle`（購入は`reward_history`に記録され冒険の記録に載るため）の3つを破棄する。**（#412で変更）** `buyRewardMutation`の`mutationFn`引数は以前`{ user, reward }`（`reward: Reward`全体）だったが、`{ user, reward, rewardId }`（`onSuccess`側での表示用に`reward`も引き続き保持しつつ、リクエストに使う`reward_id`は`rewardId: ID`必須として分離）に変更した。**（Issue #444で変更）** `mutationFn`の戻り値型は`Promise<PurchaseResponse>`に明示され、`apiClient.post`が返す生レスポンス(`raw`)を`purchaseResponseSchema.parse(raw)`（`gameDataSchema.ts`、Zod）でランタイム検証してから返すようになった。以前はこの検証層を経由せず、`buyReward`ラッパー側の呼び出し箇所で`mutateAsync`の戻り値を`as unknown as PurchaseResponse`と無検証キャストしていたが、`mutationFn`の返り値の型がそのまま`mutateAsync`の戻り値型として伝播するようになったため、このキャストは不要になり削除された。
 * 根拠: (行番号: 225〜242, 336〜352 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };")
+* 根拠: **（Issue #444）** ランタイム検証の追加 (行番号: 241〜250 / 抜粋: "const buyRewardMutation = useMutation({\n        mutationFn: async ({ user, rewardId }: { user: User; reward: Reward; rewardId: ID }): Promise<PurchaseResponse> => {\n            const raw = await apiClient.post('/api/quest/reward/purchase', {\n                user_id: user.user_id,\n                reward_id: rewardId,\n            });\n            // #444: gameDataと同様、購入APIのレスポンスもここでランタイム検証する。\n            // 以前はこの検証層を経由せず、呼び出し側で無検証キャストしていた。\n            return purchaseResponseSchema.parse(raw);\n        },")、キャスト削除後の呼び出し (行番号: 363 / 抜粋: "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId });")
 
 * **引数/リクエスト**: `user: User`, `reward: Reward`
 * 根拠: (行番号: 336 / 抜粋: "const buyReward = async (user: User, reward: Reward) => {")
@@ -207,8 +209,8 @@
 * **副作用**: `/api/quest/reward/purchase` へのPOST。キャッシュ破棄（`['gameData']`, `['inventory', variables.user.user_id]`, `['chronicle']`）。
 * 根拠: (行番号: 236〜239 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n            queryClient.invalidateQueries({ queryKey: ['inventory', variables.user.user_id] });\n            // 購入は reward_history に記録され冒険の記録に載る\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
 
-* **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。**（#412で追加）** `reward.reward_id`が`null`/`undefined`の場合は通信せず`{ success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' }`を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。`mutateAsync`の戻り値は`as unknown as PurchaseResponse`でキャストされる。
-* 根拠: (行番号: 338, 341〜344, 347 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };", "if (rId == null) {\n            return { success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' };\n        }", "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId }) as unknown as PurchaseResponse;")
+* **エラーハンドリング**: ゴールド不足時は `{ success: false, reason: 'gold' }`。**（#412で追加）** `reward.reward_id`が`null`/`undefined`の場合は通信せず`{ success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' }`を返す。通信エラー時は `{ success: false, reason: 'error', detail: extractErrorDetail(e) }`。**（Issue #444で変更）** `mutationFn`が`purchaseResponseSchema.parse(raw)`を返すようになったことで`mutateAsync`の戻り値の型が`PurchaseResponse`として正しく推論されるため、以前ここにあった`as unknown as PurchaseResponse`という無検証キャストは不要になり削除された。`purchaseResponseSchema.parse`自体が失敗した場合（Zodの`ZodError`）は、この`try`ブロック内の例外として`catch`節に落ち、他の通信エラーと同様に`extractErrorDetail(e)`で処理される。
+* 根拠: (行番号: 353〜354, 357〜360, 363 / 抜粋: "if ((user.gold || 0) < cost) return { success: false, reason: 'gold' };", "if (rId == null) {\n            return { success: false, reason: 'error', detail: '報酬情報が正しく取得できていません(再読み込みしてください)' };\n        }", "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId });")
 
 ### 戻り値オブジェクト
 
@@ -271,7 +273,7 @@ graph TD
     subgraph "内部モジュール"
         APIClient["../lib/apiClient"]
         MasterData["../lib/masterData"]
-        GameDataSchema["../lib/gameDataSchema (Zod, #291で追加, #412でlogsを削除)"]
+        GameDataSchema["../lib/gameDataSchema (Zod, #291で追加, #412でlogsを削除, #444でpurchaseResponseSchema追加)"]
         AppTypes["@/types (ID/User/Quest/QuestHistory/Reward/QuestResult)"]
     end
 
@@ -281,6 +283,7 @@ graph TD
     Hook_useGameData --> AppTypes
     Queries --> APIClient
     Queries -->|gameDataクエリのみ: .parse()でランタイム検証| GameDataSchema
+    Mutations -->|buyRewardMutationのみ: purchaseResponseSchema.parse()でランタイム検証, #444| GameDataSchema
     Mutations --> APIClient
     Wrappers --> Mutations
     Wrappers --> Queries
@@ -307,14 +310,14 @@ graph TD
 * 根拠: (行番号: 86〜95 / 抜粋: "queryFn: async () => {\n            const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';\n            const raw = await apiClient.get<unknown>(endpoint);\n            // #291: バックエンドのレスポンス形状がここで定義したスキーマ(gameDataSchema.ts)と\n            // 食い違っている場合、コンポーネント側で無言でundefinedを参照する幽霊フィールド\n            // バグとしてではなく、ここで即座にエラーとして検知させる。\n            return gameDataResponseSchema.parse(raw) as GameDataResponse;\n        },")
 * **`chronicle`キャッシュの無効化漏れ修正**: `completeQuest`/`cancelQuest`/`approveQuest`/`buyReward`の成功時には`gameData`に加えて`chronicle`クエリも無効化されるようになった（以前は`completeQuest`成功時に`chronicle`を無効化しておらず、`staleTime`（5分）が切れるまで冒険の記録に反映されなかったバグの修正）。ただし`rejectQuest`は`gameData`のみを無効化し、`chronicle`は無効化されない（却下は記録に載らないため）。新しい状態変更アクションを追加する際は、そのアクションが年代記に影響するかどうかを踏まえて`chronicle`の無効化要否を判断する必要がある。
 * 根拠: (行番号: 132〜135, 159〜161, 176〜179, 236〜239行目 / 抜粋: "// ★バグ修正: クエスト完了(承認不要な大人の即時完了、または子どもの承認後)は\n            // 冒険の記録(年代記)に載るはずだが、chronicleクエリを無効化していなかったため\n            // staleTime(5分)が切れるまで反映されなかった。")
-* **`buyRewardMutation` の戻り値キャスト**: `buyReward` 内で `mutateAsync` の戻り値を `as unknown as PurchaseResponse` として型キャストしている。`apiClient.post` 自体の戻り値の型（ジェネリック`<T>`）と実際のレスポンス形状との整合はランタイムでは検証されない。
-* 根拠: (行番号: 347 / 抜粋: "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId }) as unknown as PurchaseResponse;")
+* **[修正済み] `buyRewardMutation` の戻り値キャスト・無検証問題（Issue #444）**: 以前は`buyReward`内で`mutateAsync`の戻り値を`as unknown as PurchaseResponse`として無検証に型キャストしており、`apiClient.post`自体の戻り値の型（ジェネリック`<T>`）と実際のレスポンス形状との整合はランタイムでは検証されていなかった。現在は`buyRewardMutation`の`mutationFn`内で`purchaseResponseSchema.parse(raw)`（Zod、`gameDataSchema.ts`）によるランタイム検証を経由してから返すため、`mutateAsync`の戻り値の型が正しく`PurchaseResponse`として推論され、呼び出し側の無検証キャストは不要になり削除された。これにより`gameData`クエリ（#291）に続き、購入APIのレスポンスもフロント・バックエンド間の型契約のズレを取得境界で検知できるようになった。
+* 根拠: (行番号: 247〜249, 363 / 抜粋: "// #444: gameDataと同様、購入APIのレスポンスもここでランタイム検証する。\n            // 以前はこの検証層を経由せず、呼び出し側で無検証キャストしていた。\n            return purchaseResponseSchema.parse(raw);", "const res = await buyRewardMutation.mutateAsync({ user, reward, rewardId: rId });")
 * **役割ベースの権限チェックへの統一**: `approveQuest` と `rejectQuest` 内の権限チェックは `user.role !== 'role_adult'` という役割ベースの判定に統一されている。あくまでクライアント側の事前チェックであり、バックエンド側の認可を代替するものではない。
 * 根拠: (行番号: 295, 321 / 抜粋: "if (user.role !== 'role_adult') return { success: false, reason: 'permission' };")
 * **`refreshData` のキャッシュ無効化範囲**: `queryClient.invalidateQueries({ queryKey: ['inventory'] })` はキー全体（`['inventory', userId]`形式のクエリすべて）を前方一致で無効化する設計であり、コメントで「全インベントリも強制再取得」と明示されている。
 * 根拠: (行番号: 355〜356 / 抜粋: "queryClient.invalidateQueries({ queryKey: ['gameData'] });\n        queryClient.invalidateQueries({ queryKey: ['inventory'] }); // 全インベントリも強制再取得")
-* **`viewerUserIdRef`によるviewer_user_id送信**: `gameData`クエリの`queryFn`は`viewerUserIdRef.current`が設定されている場合のみ`gameData`取得URLに`viewer_user_id`クエリパラメータを付与する。この値は`useEffect`が`gameData`受信後に`currentUserIdx`に対応するユーザーの`user_id`で更新するため、`queryKey`が`['gameData']`のみ（`currentUserIdx`を含まない）であることと相まって、ユーザー切替直後の1回のフェッチには反映されず、次のポーリング（最大10秒後）または他操作によるinvalidateQueriesまで反映が遅れる。
-* 根拠: (行番号: 66〜73, 79〜90, 101〜104 / 抜粋: "const viewerUserIdRef = useRef<string | undefined>(undefined);", "const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';", "useEffect(() => {\n        const viewer = gameData?.users?.[currentUserIdx];\n        if (viewer) viewerUserIdRef.current = viewer.user_id;\n    }, [gameData, currentUserIdx]);")
+* **[修正済み] `viewerUserIdRef`によるviewer_user_id送信の反映遅延（Issue #473）**: `gameData`クエリの`queryFn`は`viewerUserIdRef.current`が設定されている場合のみ`gameData`取得URLに`viewer_user_id`クエリパラメータを付与する。この値は`useEffect`が`gameData`受信後に`currentUserIdx`に対応するユーザーの`user_id`で更新する。`queryKey`は依然として`['gameData']`のみ（`currentUserIdx`を含まない）であり、`viewer_user_id`が変わっても自動的に別クエリとして再フェッチされるわけではない点は変わっていないが、以前は反映がユーザー切替直後の1回のフェッチには間に合わず、次のポーリング（最大10秒後）または他操作による`invalidateQueries`まで遅延していた。現在は`useEffect`内で`viewer.user_id`が実際に変化した（かつ初回代入ではない）ことを検知した時点で`refetchGameData()`を明示的に呼ぶため、ユーザー切替は次の1回のフェッチに即座に反映されるようになった。
+* 根拠: (行番号: 66〜73, 79〜99, 101〜117 / 抜粋: "const viewerUserIdRef = useRef<string | undefined>(undefined);", "const viewerUserId = viewerUserIdRef.current;\n            const endpoint = viewerUserId\n                ? `/api/quest/data?viewer_user_id=${encodeURIComponent(viewerUserId)}`\n                : '/api/quest/data';", "useEffect(() => {\n        const viewer = gameData?.users?.[currentUserIdx];\n        if (!viewer || viewer.user_id === viewerUserIdRef.current) return;\n\n        const isInitialAssignment = viewerUserIdRef.current === undefined;\n        viewerUserIdRef.current = viewer.user_id;\n\n        if (!isInitialAssignment) {\n            refetchGameData();\n        }\n    }, [gameData, currentUserIdx, refetchGameData]);")
 * **（#412で追加）IDの必須化はミューテーション境界のみに限定**: `Quest.quest_id`/`QuestHistory.id`/`Reward.reward_id`自体は`@/types`側では引き続きoptionalなままである（表示専用の文脈やテストフィクスチャでは値が無くても構わないため）。本ファイルでは「実際にAPIリクエストを送る直前」の境界（各ラッパー関数の先頭のnullチェック、および各`mutationFn`の引数型`questId`/`historyId`/`rewardId: ID`）でのみ必須性を強制しており、ドメイン型自体を必須化していない。新しい状態変更アクションを追加する際も、同様に「読み取り用の型は緩いまま、リクエスト直前でのみ確定させる」パターンに従うこと。
 * 根拠: (行番号: 246〜264, 280〜291, 294〜318, 320〜333, 336〜352 / 抜粋: "const qId = quest.quest_id;\n        // #412(API契約): quest_id は本来常に存在するはず(...)\n        if (qId == null) {")
 

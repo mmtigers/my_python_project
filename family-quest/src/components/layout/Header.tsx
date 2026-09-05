@@ -10,13 +10,19 @@ interface HeaderProps {
     onUserSwitch: (idx: number) => void;
     onLogSwitch: () => void;
     onSettingsClick: () => void;
+    // #479: hideUserSwitcher/hideLogSwitcher(省略時=表示)とshowBackToMain
+    // (省略時=非表示)とで既定値の方向が非対称だったため、全てshow*系・
+    // 「省略時の意味」をprop名から読み取れる向きに統一する。
+    //
     // 横画面(4人常時表示レイアウト)では、各ユーザーのアバターは既にメイン画面の
     // パネルに常時表示されているため、ヘッダー側のユーザー切替行は冗長になる。
-    // true の場合はユーザー切替行を省略し、タイトルと記録ボタンのみを表示する。
-    hideUserSwitcher?: boolean;
+    // false の場合はユーザー切替行を省略し、タイトルと記録ボタンのみを表示する。
+    // 省略時はtrue(表示)扱い。
+    showUserSwitcher?: boolean;
     // 縦画面ではフッターナビ(BottomNav)に「記録」タブが統合されたため、
-    // ヘッダー側の記録ボタンは二重導線になる。true の場合は非表示にする。
-    hideLogSwitcher?: boolean;
+    // ヘッダー側の記録ボタンは二重導線になる。false の場合は非表示にする。
+    // 省略時はtrue(表示)扱い。
+    showLogSwitcher?: boolean;
     // ★バグ修正: 横画面(4人並び)で記録画面を表示中は、ユーザー切替行の代わりに
     // 単一の「ホームに戻る」ボタンを表示する。以前はユーザー切替行をそのまま
     // 出していたため、4人分のボタンが並んでしまい「ホームに戻る」という意図が
@@ -32,8 +38,8 @@ const Header: React.FC<HeaderProps> = ({
     onUserSwitch,
     onLogSwitch,
     onSettingsClick,
-    hideUserSwitcher,
-    hideLogSwitcher,
+    showUserSwitcher = true,
+    showLogSwitcher = true,
     showBackToMain,
     onBackToMain,
 }) => {
@@ -99,7 +105,7 @@ const Header: React.FC<HeaderProps> = ({
                 )}
 
                 {/* 2. Users */}
-                {!hideUserSwitcher && users.map((user, idx) => {
+                {showUserSwitcher && users.map((user, idx) => {
                     const isActive = viewMode === 'user' && currentUserIdx === idx;
                     return (
                         <button
@@ -144,12 +150,12 @@ const Header: React.FC<HeaderProps> = ({
                 })}
 
                 {/* Divider (PCのみ表示) */}
-                {(!hideUserSwitcher || showBackToMain) && !hideLogSwitcher && (
+                {(showUserSwitcher || showBackToMain) && showLogSwitcher && (
                     <div className="w-px h-12 bg-gray-700 mx-1 self-center hidden sm:block"></div>
                 )}
 
                 {/* 3. Log Button (縦画面ではフッターナビに統合済みのため非表示) */}
-                {!hideLogSwitcher && (
+                {showLogSwitcher && (
                     <button
                         onClick={onLogSwitch}
                         aria-pressed={viewMode === 'familyLog'}

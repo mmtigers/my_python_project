@@ -29,16 +29,17 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `time` | 標準ライブラリ | 現在時刻の取得、リトライ時の待機（sleep） | 根拠: `import time` (行番号: 2 / 抜粋: "import time") |
-| `hashlib` | 標準ライブラリ | HMAC署名生成時のハッシュアルゴリズム（SHA256）指定 | 根拠: `import hashlib` (行番号: 3 / 抜粋: "import hashlib") |
-| `hmac` | 標準ライブラリ | 認証ヘッダー用のHMAC署名生成 | 根拠: `import hmac` (行番号: 4 / 抜粋: "import hmac") |
-| `base64` | 標準ライブラリ | 生成したHMAC署名のBase64エンコード | 根拠: `import base64` (行番号: 5 / 抜粋: "import base64") |
-| `uuid` | 標準ライブラリ | 認証ヘッダー用のnonce（一意な値）生成 | 根拠: `import uuid` (行番号: 6 / 抜粋: "import uuid") |
-| `typing` | 標準ライブラリ | 静的型チェックのための型ヒントの提供 | 根拠: `from typing import...` (行番号: 7 / 抜粋: "from typing import Dict, Any, Optional") |
-| `requests` | 外部ライブラリ | 外部API（SwitchBot API）へのHTTPリクエスト送信 | 根拠: `import requests` (行番号: 9 / 抜粋: "import requests") |
-| `config` | 内部モジュール | APIホストURL、トークン、シークレット等の設定値取得 | 根拠: `import config` (行番号: 10 / 抜粋: "import config") |
-| `core.logger` | 内部モジュール | ロガー（`setup_logging`）の取得 | 根拠: `from core.logger import...` (行番号: 13 / 抜粋: "from core.logger import setup_logging") |
-| `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 14 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
+| `threading`（Issue #439で追加） | 標準ライブラリ | `DEVICE_NAME_CACHE`/`_fetch_attempted`を複数のWebhookリクエストスレッドから保護する`_device_cache_lock`(`threading.Lock`)の生成 | 根拠: `import threading` (行番号: 2 / 抜粋: "import threading")、[`_device_cache_lock`定義] (行番号: 28 / 抜粋: "_device_cache_lock = threading.Lock()") |
+| `time` | 標準ライブラリ | 現在時刻の取得、リトライ時の待機（sleep） | 根拠: `import time` (行番号: 3 / 抜粋: "import time") |
+| `hashlib` | 標準ライブラリ | HMAC署名生成時のハッシュアルゴリズム（SHA256）指定 | 根拠: `import hashlib` (行番号: 4 / 抜粋: "import hashlib") |
+| `hmac` | 標準ライブラリ | 認証ヘッダー用のHMAC署名生成 | 根拠: `import hmac` (行番号: 5 / 抜粋: "import hmac") |
+| `base64` | 標準ライブラリ | 生成したHMAC署名のBase64エンコード | 根拠: `import base64` (行番号: 6 / 抜粋: "import base64") |
+| `uuid` | 標準ライブラリ | 認証ヘッダー用のnonce（一意な値）生成 | 根拠: `import uuid` (行番号: 7 / 抜粋: "import uuid") |
+| `typing` | 標準ライブラリ | 静的型チェックのための型ヒントの提供 | 根拠: `from typing import...` (行番号: 8 / 抜粋: "from typing import Dict, Any, Optional") |
+| `requests` | 外部ライブラリ | 外部API（SwitchBot API）へのHTTPリクエスト送信 | 根拠: `import requests` (行番号: 10 / 抜粋: "import requests") |
+| `config` | 内部モジュール | APIホストURL、トークン、シークレット等の設定値取得 | 根拠: `import config` (行番号: 11 / 抜粋: "import config") |
+| `core.logger` | 内部モジュール | ロガー（`setup_logging`）の取得 | 根拠: `from core.logger import...` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
+| `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 15 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
 
 ### ブラックボックスとなる外部要素
 
@@ -157,20 +158,20 @@
 
 ### `fetch_device_name_cache`
 
-* **役割**: SwitchBot APIのデバイス一覧エンドポイントからデバイス情報を取得し、グローバル変数 `DEVICE_NAME_CACHE` にデバイスIDと名前のペアを格納する。
-* 根拠: `fetch_device_name_cache` (行番号: 107〜142 / 抜粋: "def fetch_device_name_cache() -> bool:")
+* **役割**: SwitchBot APIのデバイス一覧エンドポイントからデバイス情報を取得し、グローバル変数 `DEVICE_NAME_CACHE` にデバイスIDと名前のペアを格納する。**（Issue #439で修正）** 以前はAPIから取得したデバイス名を`DEVICE_NAME_CACHE`へループの都度ロック無しで直接書き込んでいたが、現在はまずローカル辞書`new_names`（ネットワークI/O中はロックを取得しない）へ全件を集め、最後に`_device_cache_lock`保持下で`DEVICE_NAME_CACHE.update(new_names)`によりまとめてマージする。
+* 根拠: `fetch_device_name_cache` (行番号: 117〜156 / 抜粋: "def fetch_device_name_cache() -> bool:")、[ローカル辞書への集約とロック下でのマージ] (行番号: 137〜148 / 抜粋: "new_names: Dict[str, str] = {}\n            # 通常デバイス\n            for d in body.get('deviceList', []):\n                new_names[d['deviceId']] = d['deviceName']", "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)\n                cache_size = len(DEVICE_NAME_CACHE)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `fetch_device_name_cache` (行番号: 107 / 抜粋: "def fetch_device_name_cache()")
+* 根拠: `fetch_device_name_cache` (行番号: 117 / 抜粋: "def fetch_device_name_cache()")
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
-* 根拠: `fetch_device_name_cache` (行番号: 107 / 抜粋: "-> bool:")
+* 根拠: `fetch_device_name_cache` (行番号: 117 / 抜粋: "-> bool:")
 
 
-* **副作用**: グローバル変数 `DEVICE_NAME_CACHE` の上書き・追加更新。インフォメーションおよびエラーログ出力。APIへのGETリクエスト。
-* 根拠: `global DEVICE_NAME_CACHE` (行番号: 109 / 抜粋: "global DEVICE_NAME_CACHE")
+* **副作用**: `_device_cache_lock`保持下でのグローバル変数 `DEVICE_NAME_CACHE` の追加更新（マージ）。インフォメーションおよびエラーログ出力。APIへのGETリクエスト（ロック外）。
+* 根拠: `global DEVICE_NAME_CACHE` (行番号: 119 / 抜粋: "global DEVICE_NAME_CACHE")、[ロック保持下でのマージ] (行番号: 145〜147 / 抜粋: "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)")
 
 
 * **エラーハンドリング**:
@@ -178,53 +179,53 @@
 * APIレスポンスが `None` の場合（Fail-Soft時）は `False` を返す。
 * `statusCode` が100以外の場合はエラーログを出力し `False` を返す。
 * 任意の例外発生時はエラーログを出力し `False` を返す。
-* 根拠: `except Exception as e` (行番号: 140 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 154 / 抜粋: "except Exception as e:")
 
 
 
 ### `get_device_name_by_id`
 
-* **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。
-* 根拠: `get_device_name_by_id` (行番号: 148〜153 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")
+* **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。**（Issue #439で修正）** 「キャッシュが空かつ未試行かをチェックしてから`_fetch_attempted`を立てる」処理と、最終的なキャッシュ読み取りは、いずれも`_device_cache_lock`保持下で行うよう修正された。以前はロード無しでこのチェックを行っており、Webhookリクエストが集中する起動直後に複数スレッドが同時に「キャッシュ空・未試行」と判定してしまい、`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が並行して複数回走りうる状態だった。ネットワークI/Oを伴う`fetch_device_name_cache()`自体の呼び出しは、`_device_cache_lock`を一度解放してから（ロックの外側で）行う。
+* 根拠: `get_device_name_by_id` (行番号: 158〜169 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
-* 根拠: `get_device_name_by_id` (行番号: 148 / 抜粋: "device_id: str")
+* 根拠: `get_device_name_by_id` (行番号: 158 / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかった場合はデバイス名、存在しない場合はNone)
-* 根拠: `get_device_name_by_id` (行番号: 148 / 抜粋: "-> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 158 / 抜粋: "-> Optional[str]:")
 
 
-* **副作用**: `DEVICE_NAME_CACHE` が空かつ未試行(`_fetch_attempted`が`False`)の場合、`fetch_device_name_cache()` を1回だけ呼び出して遅延ロードを試みる（**#411 S-L2で追加**: 以前は `fetch_device_name_cache` の呼出元がどこにも無く、`DEVICE_NAME_CACHE` は常に空のままだったため、`devices.json` に登録の無いセンサーからのWebhookは常に `Unknown_<mac>` 表示になっていた）。プロセス起動後の初回呼出し(＝最初のWebhook受信)時にのみ発火し、成否に関わらず以後は再試行しない。
-* 根拠: `get_device_name_by_id` (行番号: 148〜153 / 抜粋: "if not DEVICE_NAME_CACHE and not _fetch_attempted:")
+* **副作用**: `_device_cache_lock`保持下での`DEVICE_NAME_CACHE`/`_fetch_attempted`の読み取り・書き込み、`DEVICE_NAME_CACHE` が空かつ未試行(`_fetch_attempted`が`False`)の場合、`fetch_device_name_cache()` を1回だけ呼び出して遅延ロードを試みる（**#411 S-L2で追加**: 以前は `fetch_device_name_cache` の呼出元がどこにも無く、`DEVICE_NAME_CACHE` は常に空のままだったため、`devices.json` に登録の無いセンサーからのWebhookは常に `Unknown_<mac>` 表示になっていた）。プロセス起動後の初回呼出し(＝最初のWebhook受信)時にのみ発火し、成否に関わらず以後は再試行しない。
+* 根拠: `get_device_name_by_id` (行番号: 161〜167 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted")
 
 
 * **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）。遅延ロード自体が失敗しても`fetch_device_name_cache`内で例外は握り潰され`False`が返るのみで、本関数は`None`を返す。
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 153 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 169 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 
 ### `get_device_status`
 
 * **役割**: 指定されたデバイスのステータス取得用URLを構築し、APIリクエストを送信して結果を取得する。
-* 根拠: `get_device_status` (行番号: 148〜161 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 171〜184 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (対象デバイスのID)
-* 根拠: `get_device_status` (行番号: 148 / 抜粋: "device_id: str")
+* 根拠: `get_device_status` (行番号: 171 / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, Any]]` (取得したステータス辞書、失敗時はNone)
-* 根拠: `get_device_status` (行番号: 148 / 抜粋: "-> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 171 / 抜粋: "-> Optional[Dict[str, Any]]:")
 
 
 * **副作用**: APIへのGETリクエスト呼び出し、失敗時のエラーログ出力
-* 根拠: `request_switchbot_api` (行番号: 157 / 抜粋: "response_data = request_switchbot_api(url, headers)")
+* 根拠: `request_switchbot_api` (行番号: 180 / 抜粋: "response_data = request_switchbot_api(url, headers)")
 
 
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
-* 根拠: `except Exception as e` (行番号: 159〜161 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e` (行番号: 182〜184 / 抜粋: "except Exception as e:")
 
 
 
@@ -255,6 +256,7 @@ graph TD
     subgraph "switchbot_service.py"
         logger["logger (Global)"]
         DEVICE_NAME_CACHE["DEVICE_NAME_CACHE (Global)"]
+        device_cache_lock["_device_cache_lock (Global, Issue #439)"]
         request_switchbot_api["request_switchbot_api()"]
         post_switchbot_api["post_switchbot_api()"]
         send_device_command["send_device_command()"]
@@ -269,6 +271,7 @@ graph TD
         core_logger["core.logger"]
         models_switchbot["models.switchbot"]
         requests["requests"]
+        threading_mod["threading"]
     end
 
     logger --> core_logger
@@ -284,8 +287,11 @@ graph TD
     fetch_device_name_cache --> create_switchbot_auth_headers
     fetch_device_name_cache --> request_switchbot_api
     fetch_device_name_cache --> DEVICE_NAME_CACHE
+    fetch_device_name_cache --> device_cache_lock
 
     get_device_name_by_id --> DEVICE_NAME_CACHE
+    get_device_name_by_id --> device_cache_lock
+    device_cache_lock --> threading_mod
 
     get_device_status --> create_switchbot_auth_headers
     get_device_status --> config
@@ -302,7 +308,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **副作用とスレッドセーフティ**: `fetch_device_name_cache` はグローバル変数 `DEVICE_NAME_CACHE` を直接更新する副作用を持つ。マルチスレッド環境下で同時にこの関数が呼び出された場合や、更新中に `get_device_name_by_id` が呼ばれた場合、競合状態が発生する可能性がある。
+* **[修正済み・Issue #439] `DEVICE_NAME_CACHE`/`_fetch_attempted`のスレッドセーフティ**: 以前は`fetch_device_name_cache`がグローバル変数 `DEVICE_NAME_CACHE` をロック無しで直接更新しており、`get_device_name_by_id`の「キャッシュが空か確認してから`_fetch_attempted`を立てる」チェックもロック無しで行っていたため、複数のWebhookリクエストスレッドが起動直後に集中すると、check-then-actの隙間を突いて`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が複数回同時に走りうる競合状態があった。現在は`_device_cache_lock`（グローバル`threading.Lock`）を導入し、(1) `get_device_name_by_id`の「空かつ未試行か」の判定と`_fetch_attempted`のセット、(2) `fetch_device_name_cache`が新規取得したデバイス名を`DEVICE_NAME_CACHE`へマージする処理、(3) `get_device_name_by_id`の最終的なキャッシュ読み取り、の3箇所をこのロックで保護している。ただしSwitchBot APIへのネットワークリクエスト自体（`fetch_device_name_cache`の`request_switchbot_api`呼び出し）は`_device_cache_lock`を保持したままでは行わない設計になっている。
 * **バリデーションモデルの汎用性適用**: `request_switchbot_api` 内で常に `DeviceStatusResponse` モデルによるバリデーションを行っている。しかし、`fetch_device_name_cache` では、同関数を利用して `/v1.1/devices` エンドポイント（ステータスではなくリスト）を要求している。もし `DeviceStatusResponse` がデバイスリスト特有のキー（`deviceList`, `infraredRemoteList`）を許容しない厳密なスキーマだった場合、バリデーションエラーが発生する恐れがある。
 * **広範な例外キャッチ**: `send_device_command`, `fetch_device_name_cache`, `get_device_status` において `except Exception as e:` が使われている。これにより予期しないシンタックスエラーや型エラー（TypeError）なども捕捉してしまい、バグが握りつぶされて `None` または `False` として処理される可能性がある。
 

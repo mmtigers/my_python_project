@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -27,17 +28,18 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `re` | 標準ライブラリ | `is_process_alive`のpgrep用パターン組み立て(`re.escape`)（#411 S-L11で追加） | 根拠: `import re` (行番号: 2 / 抜粋: "import re") |
-| `subprocess` | 標準ライブラリ | OSコマンド（systemctl, pgrep, vcgencmd）の実行 | 根拠: `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
-| `time` | 標準ライブラリ | 現在時刻の取得（リマインダー間隔の判定用） | 根拠: `import time` (行番号: 3 / 抜粋: "import time") |
-| `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得 | 根拠: `import traceback` (行番号: 4 / 抜粋: "import traceback") |
-| `Path` | 標準ライブラリ | ロックファイルのパス生成とファイル操作 | 根拠: `from pathlib import Path` (行番号: 5 / 抜粋: "from pathlib import Path") |
-| `sys` | 標準ライブラリ | モジュールインポートパスの追加 | 根拠: `import sys` (行番号: 6 / 抜粋: "import sys") |
-| `os` | 標準ライブラリ | パスの絶対パス変換およびディレクトリ名取得 | 根拠: `import os` (行番号: 7 / 抜粋: "import os") |
+| `fcntl`（Issue #449で追加） | 標準ライブラリ | `_is_new_history`が状態ファイル(`THROTTLE_STATE_FILE`)への読み取り→書き込みを1つの不可分な区間にするための排他ロック(`flock`)取得 | 根拠: `import fcntl` (行番号: 2 / 抜粋: "import fcntl") |
+| `re` | 標準ライブラリ | `is_process_alive`のpgrep用パターン組み立て(`re.escape`)（#411 S-L11で追加） | 根拠: `import re` (行番号: 3 / 抜粋: "import re") |
+| `subprocess` | 標準ライブラリ | OSコマンド（systemctl, pgrep, vcgencmd）の実行 | 根拠: `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
+| `time` | 標準ライブラリ | 現在時刻の取得（リマインダー間隔の判定用） | 根拠: `import time` (行番号: 5 / 抜粋: "import time") |
+| `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得 | 根拠: `import traceback` (行番号: 6 / 抜粋: "import traceback") |
+| `Path` | 標準ライブラリ | ロックファイルのパス生成とファイル操作 | 根拠: `from pathlib import Path` (行番号: 7 / 抜粋: "from pathlib import Path") |
+| `sys` | 標準ライブラリ | モジュールインポートパスの追加 | 根拠: `import sys` (行番号: 8 / 抜粋: "import sys") |
+| `os` | 標準ライブラリ | パスの絶対パス変換およびディレクトリ名取得 | 根拠: `import os` (行番号: 9 / 抜粋: "import os") |
 | `Optional` | 標準ライブラリ | 型ヒント（コード内での明示的な使用箇所はなし） | 根拠: `from typing import Optional` (行番号: 8 / 抜粋: "from typing import Optional") |
-| `config` | 外部ファイル | 設定値（`BASE_DIR`, `LINE_USER_ID`）の読み込み | 根拠: `import config` (行番号: 12 / 抜粋: "import config") |
-| `setup_logging` | 外部ファイル | ロガーの初期化 | 根拠: `from core.logger import setup_logging` (行番号: 13 / 抜粋: "from core.logger import setup...") |
-| `send_push` | 外部ファイル | 外部への通知送信 | 根拠: `from services.notification_service import send_push` (行番号: 14 / 抜粋: "from services.notification_...") |
+| `config` | 外部ファイル | 設定値（`BASE_DIR`, `LINE_USER_ID`）の読み込み | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
+| `setup_logging` | 外部ファイル | ロガーの初期化 | 根拠: `from core.logger import setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
+| `send_push` | 外部ファイル | 外部への通知送信 | 根拠: `from services.notification_service import send_push` (行番号: 15 / 抜粋: "from services.notification_...") |
 
 ### ブラックボックスとなる外部要素
 
@@ -100,46 +102,47 @@
 ### `_get_boot_id`
 
 * **役割**: `/proc/sys/kernel/random/boot_id`を読み取り、現在のブートを一意に識別する文字列を返す。`_is_new_history`がスロットリング履歴の通知済み状態をブート単位で判定するために使用する。
-* 根拠: `_get_boot_id` (行番号: 71〜75 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `_get_boot_id` (行番号: 80〜84 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _get_boot_id() -> str:` (行番号: 71 / 抜粋: "def _get_boot_id() -> str:")
+* 根拠: `def _get_boot_id() -> str:` (行番号: 80 / 抜粋: "def _get_boot_id() -> str:")
 
 
 * **戻り値/レスポンス**: `str`
-* 根拠: `-> str:` (行番号: 71 / 抜粋: "-> str:")
+* 根拠: `-> str:` (行番号: 80 / 抜粋: "-> str:")
 
 
 * **副作用**: `/proc/sys/kernel/random/boot_id`の読み取り（ファイルI/O）。
-* 根拠: `Path("/proc/sys/kernel/random/boot_id").read_text().strip()` (行番号: 73 / 抜粋: "return Path("/proc/sys/kernel/random/boot_id").read_text().strip()")
+* 根拠: `Path("/proc/sys/kernel/random/boot_id").read_text().strip()` (行番号: 82 / 抜粋: "return Path("/proc/sys/kernel/random/boot_id").read_text().strip()")
 
 
 * **エラーハンドリング**: 読み取りに失敗した場合は例外を握りつぶし、固定文字列`"unknown"`を返す。
-* 根拠: `except Exception:` (行番号: 74〜75 / 抜粋: "except Exception:\n        return "unknown"")
+* 根拠: `except Exception:` (行番号: 83〜84 / 抜粋: "except Exception:\n        return "unknown"")
 
 
 
 ### `_is_new_history`
 
 * **役割**: `check_throttling_status`が検出したスロットリング履歴ビット（`history_issues`）のうち、現在のブートでまだ通知していない未通知ビットが含まれるかを判定する。`THROTTLE_STATE_FILE`に保存された「前回のブートID + 通知済みビット（16進数）」を読み込み、ブートIDが一致すれば通知済みビットとの差分を取る。未通知ビットが1つでもあれば状態ファイルを更新して`True`を返し、既に全ビット通知済みであれば`False`を返す。ブートIDが変わっていた場合や状態ファイルが存在しない・壊れている場合は`notified_bits`を`0`として扱う（＝全ビット未通知扱い）。
-* 根拠: `_is_new_history` (行番号: 77〜101 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
+* **（Issue #449 で修正）** 以前は`THROTTLE_STATE_FILE.read_text()`と`.write_text()`をそれぞれ独立した`try/except`で個別に呼び出しており、このスクリプトが（通常は逐次実行される前提だが）複数プロセスで同時実行された場合、読み取りから書き込みまでの間に他プロセスが割り込むと状態が上書き競合（lost update）する可能性があった。現在は状態ファイルを`r+`モードで一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`による排他ロック（`fcntl.LOCK_EX`）で1つの不可分な区間にし、`finally`節で確実にロックを解放する。戻り値・挙動自体（判定ロジック）は変更されておらず、プロセス境界をまたいだアトミック性のみが追加された。
+* 根拠: `_is_new_history` (行番号: 86〜128 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")、[flockによる排他区間] (行番号: 103〜125 / 抜粋: "THROTTLE_STATE_FILE.touch(exist_ok=True)\n        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:\n            fcntl.flock(f.fileno(), fcntl.LOCK_EX)\n            try:\n                ...\n            finally:\n                fcntl.flock(f.fileno(), fcntl.LOCK_UN)")
 
 
 * **引数/リクエスト**: `history_issues: int`
-* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 77 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
+* 根拠: `def _is_new_history(history_issues: int) -> bool:` (行番号: 86 / 抜粋: "def _is_new_history(history_issues: int) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `-> bool:` (行番号: 77 / 抜粋: "-> bool:")
+* 根拠: `-> bool:` (行番号: 86 / 抜粋: "-> bool:")
 
 
-* **副作用**: `THROTTLE_STATE_FILE`の読み取り、および未通知ビット検出時の書き込み。内部で`_get_boot_id()`を呼び出す。
-* 根拠: `boot_id = _get_boot_id()` (行番号: 85 / 抜粋: "boot_id = _get_boot_id()")、`THROTTLE_STATE_FILE.read_text().split()` (行番号: 88 / 抜粋: "saved_boot_id, saved_hex = THROTTLE_STATE_FILE.read_text().split()")、`THROTTLE_STATE_FILE.write_text(...)` (行番号: 98 / 抜粋: "THROTTLE_STATE_FILE.write_text(f"{boot_id} {hex(history_issues | notified_bits)}")")
+* **副作用**: `THROTTLE_STATE_FILE.touch(exist_ok=True)`によるファイル作成（未存在時）、`r+`モードでのオープンと`fcntl.flock`による排他ロック取得・解放、ファイル内容の読み取りおよび（未通知ビット検出時の）`seek(0)`+`write`+`truncate`による書き換え。内部で`_get_boot_id()`を呼び出す。
+* 根拠: `boot_id = _get_boot_id()` (行番号: 99 / 抜粋: "boot_id = _get_boot_id()")、`THROTTLE_STATE_FILE.touch(exist_ok=True)` (行番号: 103)、`fcntl.flock(f.fileno(), fcntl.LOCK_EX)` (行番号: 105)、`f.read().split()` (行番号: 108)、`f.seek(0); f.write(...); f.truncate()` (行番号: 118〜120)
 
 
-* **エラーハンドリング**: 状態ファイルの読み取りに失敗した場合（未存在・壊れたフォーマット等）は例外を握りつぶし`notified_bits = 0`のまま処理を続行する。状態ファイルへの書き込みに失敗した場合も例外を握りつぶし、`logger.debug`でログのみ出力する（戻り値は`True`のまま維持され、判定結果自体には影響しない）。
-* 根拠: `except Exception:\n        pass  # 状態ファイルなし・壊れている場合は未通知扱い` (行番号: 91〜92 / 抜粋: "except Exception:\n        pass  # 状態ファイルなし・壊れている場合は未通知扱い")、`except Exception as e:\n        logger.debug(f"Failed to save throttle state: {e}")` (行番号: 99〜100 / 抜粋: "except Exception as e:\n        logger.debug(f"Failed to save throttle state: {e}")")
+* **エラーハンドリング**: 状態ファイルの内容パースに失敗した場合（未存在・壊れたフォーマット等）は内側の`try/except Exception`で例外を握りつぶし`notified_bits = 0`のまま処理を続行する。書き込み時の`OSError`も内側で捕捉し`logger.debug`でログのみ出力する（戻り値は`True`のまま維持され、判定結果自体には影響しない）。`THROTTLE_STATE_FILE.touch`や`open`自体が失敗した場合（ディレクトリ権限エラー等）は外側の`except OSError as e:`が捕捉し、`logger.debug`でログ出力した上で`history_issues != 0`をフォールバック値として返す（**Issue #449で新設**: 以前はファイルアクセス自体の失敗に対する専用のフォールバック処理がなく、`read_text`/`write_text`それぞれの`try/except Exception`が個別に失敗を吸収していた）。
+* 根拠: `except Exception:\n                    pass  # 状態ファイルなし・壊れている場合は未通知扱い` (行番号: 111〜112)、`except OSError as e:\n                    logger.debug(f"Failed to save throttle state: {e}")` (行番号: 121〜122)、`except OSError as e:\n        logger.debug(f"Failed to access throttle state file: {e}")\n        return history_issues != 0` (行番号: 126〜128)
 
 
 
@@ -204,16 +207,18 @@ flowchart TD
     
     C -- "完全に正常 (val == 0)" --> F["処理完了"]
     C -- "現在発生中 (active_issues != 0)" --> G["エラーログ記録のみ<br>(send_pushは削除済み。logger.error経由でDiscordへ自動転送)"]
-    C -- "過去の履歴 (history_issues != 0)" --> H1{"_is_new_history()判定<br>(THROTTLE_STATE_FILE読込 + _get_boot_id())"}
+    C -- "過去の履歴 (history_issues != 0)" --> H0["外部: THROTTLE_STATE_FILEをr+で開きfcntl.flock(LOCK_EX)取得(#449)"]
+    H0 --> H1{"_is_new_history()判定<br>(THROTTLE_STATE_FILE読込 + _get_boot_id())"}
     H1 -- "未通知ビットあり" --> H2["THROTTLE_STATE_FILE更新 + 警告ログ記録"]
     H1 -- "既に通知済み" --> H3["デバッグログ記録のみ"]
+    H2 --> H4["flock解放(finally)"]
+    H3 --> H4
+    H4 -.-> I
     
     D --> I["check_health()呼び出し"]
     E --> I
     F --> I
     G --> I
-    H2 --> I
-    H3 --> I
     
     %% check_healthのフロー
     I --> J{"外部：systemctlステータス取得"}
@@ -273,6 +278,7 @@ flowchart TD
         Vcgencmd["コマンド: vcgencmd"]
         ProcBootId["/proc/sys/kernel/random/boot_id"]
         FileSystem["ファイルシステム (Lock File / Throttle State File)"]
+        Fcntl["fcntl.flock (Issue #449)"]
     end
 
     %% 依存関係の定義
@@ -287,6 +293,7 @@ flowchart TD
 
     is_new_history --> get_boot_id
     is_new_history --> FileSystem
+    is_new_history --> Fcntl
     is_new_history --> Config
     get_boot_id --> ProcBootId
 
@@ -323,7 +330,7 @@ flowchart TD
 * `check_throttling_status`は、現在発生中のスロットリング異常を検知しても`send_push`を直接呼び出さない設計になっている（コード中コメント「修正点2」）。これは`core/logger.py`側で`logger.error`呼び出しがDiscordへ自動転送される仕組みがあるため、二重通知を避ける意図的な設計判断であり、バグではない。
 * `check_throttling_status`の汎用例外ハンドラは、`traceback.format_exc()`によるスタックトレース出力ではなく、例外メッセージのみを`logger.warning`で記録する（コメント「無限ループを防ぐためにWARNINGに落とす」）。一方`check_health`の汎用例外ハンドラは`traceback.format_exc()`で完全なスタックトレースを`logger.error`に出力しており、2つの関数でエラーハンドリングの粒度・ログレベルが異なる。
 * 過去のスロットリング履歴（`history_issues`）は、Raspberry Piの仕様上ブート（再起動）まで自動的にクリアされないビットマスクである。そのため`check_throttling_status`が10分間隔などで繰り返し呼び出されると、対策前は毎回`logger.warning`が発生してDiscord通知がノイズになっていた。この対策として`_is_new_history`が`THROTTLE_STATE_FILE`（`watchdog_throttle_history.state`、`config.BASE_DIR`直下）に「ブートID + これまでに通知済みのビット（16進数）」を保存し、同一ブート内で既に通知済みのビットのみであれば`logger.debug`に留めて再通知しない仕組みになっている。
-* `THROTTLE_STATE_FILE`への読み書きにはファイルロックが掛かっておらず、複数プロセスからの同時実行に対する排他制御は行われていない。通常はcron等から`server_watchdog.py`が逐次起動される想定のため実害は小さいと考えられるが、並行実行環境では通知済みビットの読み書きが競合する可能性がある点に注意。
+* **[修正済み] `THROTTLE_STATE_FILE`への同時アクセス（Issue #449）**: 以前は読み書きにファイルロックが掛かっておらず、複数プロセスからの同時実行に対する排他制御が行われていなかった（通常はcron等から`server_watchdog.py`が逐次起動される想定のため実害は小さいと考えられるが、並行実行環境では通知済みビットの読み書きが競合(lost update)する可能性があった）。現在は`_is_new_history`が状態ファイルを`r+`で一度だけ開き、読み取りから書き込みまでの区間全体を`fcntl.flock`(`fcntl.LOCK_EX`)で保護し、`finally`節で確実に解放するため、プロセス境界をまたいだ排他制御が行われる。
 * `_get_boot_id`が`/proc/sys/kernel/random/boot_id`の読み取りに失敗した場合は固定文字列`"unknown"`を返す。この場合、実際のブートが変わっても`THROTTLE_STATE_FILE`側の`boot_id`が常に`"unknown"`で一致し続ける可能性があり、本来ブート跨ぎで再通知されるべき履歴ビットが再通知されないまま扱われるケースが理論上ありうる（Raspberry Pi環境では通常`/proc/sys/kernel/random/boot_id`は利用可能なため、実運用上の発生可能性は不明）。
 
 ## 9. 不明事項一覧

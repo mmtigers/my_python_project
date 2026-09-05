@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `95a2095` |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -24,8 +24,8 @@
 * 根拠: [モジュールDocstring] (行番号: 4〜9 / 抜粋: "YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)\n------------------------------------------------------\n指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプト。\nMY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に準拠。")
 * `PROJECT_ROOT`は`file_utils.resolve_my_home_system_root(CURRENT_DIR)`（**品質で変更**。以前は本ファイル・`newface_monitor.py`がそれぞれ個別に`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみで実装しており、両ファイルで重複していた）として解決される。`core/`の実体は`MY_HOME_SYSTEM/core`配下にあり、DDDの単なる親ディレクトリ（リポジトリルート）を指す実装では`core.*`のインポートが常に失敗し、常にファイル内フォールバックスタブへ落ちてしまう不具合があったための修正である。共通化後も、環境変数`MY_HOME_SYSTEM_ROOT`による明示指定 → `CURRENT_DIR.parent / "MY_HOME_SYSTEM"`（`services`ディレクトリの存在確認付き） → 上位ディレクトリの`services`探索 → 解決不能時は`CURRENT_DIR`自身、という解決順序（`batch_download_discord.py`で先行実装済みだったロバストな方式）は変わらない。
 * 根拠: [PROJECT_ROOT定義とコメント] (行番号: 30〜37 / 抜粋: "# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)。\n# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約\n# (以前はnewface_monitor.pyと同じ、固定の兄弟ディレクトリ前提のみの単純な方式を\n# 個別に実装していた)。core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)ため、DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまう点に変わりはない。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)  # ~/develop/MY_HOME_SYSTEM")、共通化先の実装 (参考: [file_utils.md](./file_utils.md) の `resolve_my_home_system_root` 節)
-* `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。
-* 根拠: [try-exceptブロック] (行番号: 38〜42 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError:")
+* `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。**（Issue #463で追加）** 以前はこの切り替わりを無言で行っていたが、`core.*`のインポート失敗はNASではなくローカルディスクへの書き込みに切り替わることを意味するため、本番環境で`MY_HOME_SYSTEM`へのパス解決が崩れる等の異常があった場合に気づけるよう、フォールバック用ロガー(`logging.getLogger("UrlExtractor")`)自身で`logger.warning(...)`（捕捉した例外`e`の内容を含む）を出力するようになった。
+* 根拠: [try-exceptブロックとコメント] (行番号: 41〜56 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError as e:\n    # 開発環境や単体実行時のフォールバック\n    import logging\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger("UrlExtractor")\n    # #463: core.*のインポート失敗はNASではなくローカルディスクへの書き込みに\n    # 切り替わることを意味する。本番環境でMY_HOME_SYSTEMへのパス解決が崩れる等の\n    # 変更があった場合に気づけるよう、無警告で切り替わらないようにする。\n    logger.warning(\n        f"⚠️ core.*のインポートに失敗したため開発用フォールバックへ切り替わりました "\n        f"(NASではなくローカルディスクへ書き込みます): {e}"\n    )")
 * `SubscriptionManager._verify_environment`によるNASフォールバック検知は、出力先ベースディレクトリと`AppConfig.LOCAL_DIR_STR`（絶対パス）を`Path.resolve()`で正規化した上で完全一致比較する。フォールバック関数が想定外の相対パスを返す場合でも検知漏れが起きないようにするための修正であることがコメントで明記されている。
 * 根拠: [_verify_environmentの比較処理とコメント] (行番号: 355〜359 / 抜粋: "# 絶対パスの包含チェック(旧実装)は、フォールバック関数がkwargsを無視して\n        # CWD相対の"./data"を返すバグと組み合わさると、絶対パスのLOCAL_DIR_STRが\n        # 短い相対パス文字列に決して含まれず、フォールバック状態を検知できなかった。\n        # パス正規化した上での比較にすることで、表記揺れに関わらず確実に検知する。\n        if current_base.resolve() == Path(AppConfig.LOCAL_DIR_STR).resolve():")
 * `yt_dlp`を用いて対象URL（チャンネル・プレイリスト・単一動画）から動画URLを抽出する`YouTubeExtractor`、抽出結果をテキストファイルへ保存する`FileManager`、SQLite DBに登録されたチャンネルを定期巡回する`SubscriptionManager`、およびコマンドライン引数を解析してこれらを統括する`UrlExtractorApp`の4クラスで構成される。
@@ -503,8 +503,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **フォールバック実装と本番実装の差異リスク**: `core.logger`, `core.nas_utils`のインポートに失敗した場合、ファイル内の簡易フォールバック実装に切り替わる。`get_managed_target_directory`のフォールバック実装は`fallback_dir_str`（`AppConfig.LOCAL_DIR_STR`、`BASE_DIR/'data'`の絶対パス）を尊重するよう修正済みだが、本番環境で意図せずインポートが失敗した場合、依然としてNASではなくローカルディスクにデータが保存される点は変わらない。
-* 根拠: [フォールバック定義] (行番号: 42〜56 / 抜粋: "except ImportError:\n    # 開発環境や単体実行時のフォールバック")
+* **フォールバック実装と本番実装の差異リスク（Issue #463でログ可視化）**: `core.logger`, `core.nas_utils`のインポートに失敗した場合、ファイル内の簡易フォールバック実装に切り替わる。`get_managed_target_directory`のフォールバック実装は`fallback_dir_str`（`AppConfig.LOCAL_DIR_STR`、`BASE_DIR/'data'`の絶対パス）を尊重するよう修正済みだが、本番環境で意図せずインポートが失敗した場合、依然としてNASではなくローカルディスクにデータが保存される点は変わらない。以前はこの切り替わり自体が無言で発生していたが、Issue #463でフォールバック用ロガーから`logger.warning`（捕捉した`ImportError`の内容付き）が必ず出力されるようになり、本番環境での意図しない切り替わりにログから気づけるようになった。
+* 根拠: [フォールバック定義とコメント] (行番号: 45〜56 / 抜粋: "except ImportError as e:\n    # 開発環境や単体実行時のフォールバック\n    import logging\n    logging.basicConfig(level=logging.INFO)\n    logger = logging.getLogger("UrlExtractor")\n    # #463: core.*のインポート失敗はNASではなくローカルディスクへの書き込みに\n    # 切り替わることを意味する。本番環境でMY_HOME_SYSTEMへのパス解決が崩れる等の\n    # 変更があった場合に気づけるよう、無警告で切り替わらないようにする。\n    logger.warning(")
 * **`youtube_subscriptions`テーブルへの書き込み手段が本ファイルに存在しない**: `_init_db`はテーブル作成のみを行い、`process_subscriptions`はSELECTのみを実行する。チャンネルURLの登録・有効化（INSERT/UPDATE）を行う手段が本ファイル内に見当たらず、外部プロセスまたは手動でのDB操作が前提と見られる。
 * 根拠: [process_subscriptions] (行番号: 422 / 抜粋: "cur.execute("SELECT channel_url FROM youtube_subscriptions WHERE is_active = 1")")
 * **(Issue #123バグ修正の背景)** `SubscriptionManager`は`db_path`をインスタンス属性として保持せず、`process_subscriptions()`実行のたびに`AppConfig.get_output_base_dir()`から再導出する設計に変更された。これは、NASのマウント状態がプロセスの生存期間中に変化しうる（autofsの再マウント遅延等）ことを前提とした設計であり、今後同様に「起動時に一度だけ解決した値」をNAS関連の状態判定と組み合わせて使う実装を追加する際は、両者の評価タイミングを揃える（同一の`get_output_base_dir()`呼び出し結果を使い回す）よう注意すること。

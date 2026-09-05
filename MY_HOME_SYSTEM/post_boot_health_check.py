@@ -88,7 +88,7 @@ class PostBootHealthCheck:
                     return f"{int(uptime_seconds // 60)}分"
                 else:
                     return f"{int(uptime_seconds // 3600)}時間{int((uptime_seconds % 3600) // 60)}分"
-        except:
+        except Exception:
             return "不明"
 
     # --- 1. System & Network ---
@@ -104,7 +104,7 @@ class PostBootHealthCheck:
             else:
                 temp_status = STATUS_OK
             temp_msg = f"{temp:.1f}°C"
-        except:
+        except Exception:
             temp_status = STATUS_WARN
             temp_msg = "Unknown"
 
@@ -119,7 +119,7 @@ class PostBootHealthCheck:
             else:
                 disk_status = STATUS_OK
             disk_msg = f"{disk_percent:.1f}%"
-        except:
+        except Exception:
             disk_status = STATUS_WARN
             disk_msg = "Unknown"
 
@@ -138,7 +138,7 @@ class PostBootHealthCheck:
         # Ping
         try:
             subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)
-        except:
+        except Exception:
             self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))
             return 
 
@@ -297,7 +297,7 @@ class PostBootHealthCheck:
         try:
             if "card" in subprocess.check_output(["aplay", "-l"], stderr=subprocess.DEVNULL, timeout=10).decode():
                 has_card = True
-        except: pass
+        except Exception: pass
 
         if TARGET_BLUETOOTH_MAC:
             try:
@@ -312,7 +312,7 @@ class PostBootHealthCheck:
                 else:
                     spk_status = STATUS_WARN
                     spk_msg = "Disconnected (BT)"
-            except:
+            except Exception:
                 spk_status = STATUS_WARN
                 spk_msg = "BT Error"
         elif not has_card:

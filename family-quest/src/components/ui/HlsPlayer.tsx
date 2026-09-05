@@ -61,7 +61,14 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
         // Safari用: メタデータ読み込み完了時のハンドラ（cleanup で removeEventListener するため名前付き関数にする）
         const handleLoadedMetadata = () => {
             if (startPosition) video.currentTime = startPosition;
-            if (autoPlay) video.play().catch(e => console.error("Play failed:", e));
+            if (autoPlay) {
+                // #443: 以前はvideo.play()の失敗(自動再生ポリシー等)がconsole.errorのみで
+                // UI状態に反映されず、ユーザーには無音の一時停止画面が残っていた。
+                video.play().catch(e => {
+                    console.error("Play failed:", e);
+                    setStreamError(true);
+                });
+            }
         };
 
         const giveUp = () => {
@@ -122,12 +129,24 @@ const HlsPlayer: React.FC<HlsPlayerProps> = ({
             });
 
             instance.on(Hls.Events.MANIFEST_PARSED, () => {
-                if (autoPlay) video.play().catch(e => console.error("Play failed:", e));
+                if (autoPlay) {
+                    // #443: video.play()の失敗をUI状態に反映する(上のhandleLoadedMetadataと同じ理由)。
+                    video.play().catch(e => {
+                        console.error("Play failed:", e);
+                        setStreamError(true);
+                    });
+                }
             });
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
             video.src = streamUrl;
             video.addEventListener('loadedmetadata', handleLoadedMetadata);
             video.addEventListener('error', handleNativeError);
+        } else {
+            // #443: hls.js非対応かつブラウザのネイティブHLS再生にも非対応の場合、
+            // 以前はどちらの分岐にも入らず、hls変数が未初期化のまま何も起きない
+            // (映像もエラー表示も出ない)画面になっていた。明示的にエラー表示を出す。
+            console.error("HLS is not supported by hls.js and native HLS playback is unavailable in this browser.");
+            setStreamError(true);
         }
 
         return () => {

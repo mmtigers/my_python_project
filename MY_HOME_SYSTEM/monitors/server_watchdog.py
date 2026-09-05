@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/monitors/server_watchdog.py
+import fcntl
 import re
 import subprocess
 import time
@@ -89,24 +90,42 @@ def _is_new_history(history_issues: int) -> bool:
     get_throttled の履歴ビット(Bit 16-19)は再起動までクリアされないため、
     毎回 WARNING を出すと10分毎のノイズになる。ブートIDと通知済みビットを
     状態ファイルに記録し、新しいビットが立った時だけ True を返す。
+
+    #449: このスクリプトはcronから定期実行される前提で、通常は逐次実行されるが、
+    実行が重なった場合に読み取り→書き込みの間で他プロセスが割り込むと状態が
+    上書き競合(lost update)しうる。状態ファイルへのflock(排他ロック)で
+    読み取りから書き込みまでを1つの不可分な区間にする。
     """
     boot_id = _get_boot_id()
     notified_bits = 0
-    try:
-        saved_boot_id, saved_hex = THROTTLE_STATE_FILE.read_text().split()
-        if saved_boot_id == boot_id:
-            notified_bits = int(saved_hex, 16)
-    except Exception:
-        pass  # 状態ファイルなし・壊れている場合は未通知扱い
-
-    if history_issues & ~notified_bits == 0:
-        return False
 
     try:
-        THROTTLE_STATE_FILE.write_text(f"{boot_id} {hex(history_issues | notified_bits)}")
-    except Exception as e:
-        logger.debug(f"Failed to save throttle state: {e}")
-    return True
+        THROTTLE_STATE_FILE.touch(exist_ok=True)
+        with open(THROTTLE_STATE_FILE, "r+", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                try:
+                    saved_boot_id, saved_hex = f.read().split()
+                    if saved_boot_id == boot_id:
+                        notified_bits = int(saved_hex, 16)
+                except Exception:
+                    pass  # 状態ファイルなし・壊れている場合は未通知扱い
+
+                if history_issues & ~notified_bits == 0:
+                    return False
+
+                try:
+                    f.seek(0)
+                    f.write(f"{boot_id} {hex(history_issues | notified_bits)}")
+                    f.truncate()
+                except OSError as e:
+                    logger.debug(f"Failed to save throttle state: {e}")
+                return True
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    except OSError as e:
+        logger.debug(f"Failed to access throttle state file: {e}")
+        return history_issues != 0
 
 def check_throttling_status():
     """
