@@ -129,6 +129,19 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * **エラーハンドリング**: `config.YOUTUBE_REWARD_IDS`が空リストの場合、該当行が無い場合、`_seconds_since_iso_timestamp`が`None`を返す場合はいずれも例外を送出せず`0`を返す
 * 根拠: (行番号: 86〜87, 98〜99, 102〜103)
 
+### `_is_youtube_cooldown_enforced` (モジュールレベル関数、猶予期間機能で追加)
+
+* **役割**: YouTube系ごほうび券のクールダウンを実際に強制する日(`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、JST基準の`datetime.date`)を、現在のJST日付が迎えているかどうかを返す。いきなり制限がかかると子どもが困惑するため、この関数が`False`を返す間(施行日より前)は`InventoryService._use_item_locked`が使用を拒否せず、`InventoryService.get_user_inventory`はクールダウン残り秒数の代わりに予告用の`youtube_cooldown_announcement`を返す。
+* 根拠: `def _is_youtube_cooldown_enforced() -> bool:\n    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` (行番号: 112〜117)
+* **引数/リクエスト**: なし
+* 根拠: (行番号: 112)
+* **戻り値/レスポンス**: `bool`(現在のJST日付が`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`以上なら`True`)
+* 根拠: (行番号: 117)
+* **副作用**: なし（純粋な日付比較）
+* 根拠: (行番号: 112〜117)
+* **エラーハンドリング**: なし(`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`のパース失敗時のフォールバックはconfig.py側の責務。詳細はconfig.mdを参照)
+* 根拠: (行番号: 112〜117)
+
 ### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` / `_completion_locks_guard` (モジュールレベル変数)
 
 * **役割**: `Tuple[str, int]` のキーを受け取り `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一キーへの同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。渡されるキー自体は本関数の関知するところではなく、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出する（通常クエストは`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）。
@@ -560,29 +573,29 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `InventoryService.get_user_inventory`
 
-* **役割**: 指定ユーザーの`'owned'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する（`reward_master.description`を`desc`として、`reward_master.icon_key`を`icon`として別名取得する）。Issue #116で修正: 以前はSQLのフィルタ条件に`'pending'`も含まれていたが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い`ShopService.process_purchase_reward`は`'owned'`でのみ挿入し`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新するため、`'pending'`は新規購入では到達しない値になっていた。しかし廃止前の旧承認フロー由来で`'pending'`のまま残っている既存データが存在する環境では、この行が一覧に含まれてしまい、タップすると`use_item`が`status != 'owned'`により`HTTPException(400)`を返す「押せないアイテム」としてUIに表示されてしまう不具合があったため、`'pending'`をフィルタから除外し`'owned'`のみを返すよう修正した。あわせて、以前はSELECT対象に`reward_master.description`が含まれておらず、レスポンスに`desc`キー自体が存在しなかった（フロントエンドが常に「説明はありません」というフォールバック文言を表示していた）ため、`rm.description as desc`を追加した。**（YouTubeごほうび券クールダウン機能で変更）** 取得した各アイテムには、`config.YOUTUBE_REWARD_IDS`に含まれるかどうかを表す`is_youtube_reward`フラグ(bool)を付与する。戻り値もフラットな配列から`{"items": [...], "youtube_cooldown_remaining_seconds": int}`という辞書に変更され、`_get_youtube_cooldown_remaining_seconds`が算出したクールダウン残り秒数を併せて返す。フロントエンド(`family-quest`の`InventoryList.tsx`)はこのフラグと残り秒数を使って、クールダウン中のYouTube系アイテムの「つかう」操作を無効化し残り時間を表示する。
-* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 1054〜1078)、`item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 1070)、`return {"items": items, "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds}` (行番号: 1075〜1078)
+* **役割**: 指定ユーザーの`'owned'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する（`reward_master.description`を`desc`として、`reward_master.icon_key`を`icon`として別名取得する）。Issue #116で修正: 以前はSQLのフィルタ条件に`'pending'`も含まれていたが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い`ShopService.process_purchase_reward`は`'owned'`でのみ挿入し`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新するため、`'pending'`は新規購入では到達しない値になっていた。しかし廃止前の旧承認フロー由来で`'pending'`のまま残っている既存データが存在する環境では、この行が一覧に含まれてしまい、タップすると`use_item`が`status != 'owned'`により`HTTPException(400)`を返す「押せないアイテム」としてUIに表示されてしまう不具合があったため、`'pending'`をフィルタから除外し`'owned'`のみを返すよう修正した。あわせて、以前はSELECT対象に`reward_master.description`が含まれておらず、レスポンスに`desc`キー自体が存在しなかった（フロントエンドが常に「説明はありません」というフォールバック文言を表示していた）ため、`rm.description as desc`を追加した。**（YouTubeごほうび券クールダウン機能で変更）** 取得した各アイテムには、`config.YOUTUBE_REWARD_IDS`に含まれるかどうかを表す`is_youtube_reward`フラグ(bool)を付与する。戻り値もフラットな配列から`{"items": [...], "youtube_cooldown_remaining_seconds": int, "youtube_cooldown_announcement": dict | None}`という辞書に変更された。**（猶予期間機能で追加）** `_is_youtube_cooldown_enforced()`が`True`(施行済み)の場合のみ`_get_youtube_cooldown_remaining_seconds`で実際の残り秒数を算出し、`False`(施行前の猶予期間中)の場合は`youtube_cooldown_remaining_seconds`を常に`0`にする代わりに、`config.YOUTUBE_REWARD_IDS`が空でなければ`youtube_cooldown_announcement`に`{"starts_on": <ISO日付>, "days_remaining": <残り日数>}`を設定する(施行済み、またはクールダウン対象IDが無い場合は`None`)。フロントエンド(`family-quest`の`InventoryList.tsx`)は`is_youtube_reward`/`youtube_cooldown_remaining_seconds`でクールダウン中のYouTube系アイテムの「つかう」操作を無効化・残り時間表示し、`youtube_cooldown_announcement`があれば「この日から変わるよ」という予告バナーを表示する。
+* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 1063〜1103)、`item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 1079)、`cooldown_enforced = _is_youtube_cooldown_enforced()` (行番号: 1082)、`youtube_cooldown_announcement = None\n            if not cooldown_enforced and config.YOUTUBE_REWARD_IDS:\n                days_remaining = (\n                    config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM - datetime.datetime.now(JST).date()\n                ).days\n                youtube_cooldown_announcement = {\n                    "starts_on": config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM.isoformat(),\n                    "days_remaining": max(0, days_remaining),\n                }` (行番号: 1090〜1098)、`return {\n            "items": items,\n            "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds,\n            "youtube_cooldown_announcement": youtube_cooldown_announcement,\n        }` (行番号: 1100〜1103)
 * **引数/リクエスト**: `user_id: str`
-* 根拠: (行番号: 1054)
-* **戻り値/レスポンス**: `Dict[str, Any]`（`{"items": List[dict], "youtube_cooldown_remaining_seconds": int}`。各`items`要素に`is_youtube_reward: bool`を含む）
-* 根拠: (行番号: 1075〜1078)
-* **副作用**: DB参照（`user_inventory`, `reward_master`。クールダウン算出のため`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ発行）
-* 根拠: (行番号: 1056〜1064, 1073)
+* 根拠: (行番号: 1063)
+* **戻り値/レスポンス**: `Dict[str, Any]`（`{"items": List[dict], "youtube_cooldown_remaining_seconds": int, "youtube_cooldown_announcement": {"starts_on": str, "days_remaining": int} | None}`。各`items`要素に`is_youtube_reward: bool`を含む）
+* 根拠: (行番号: 1100〜1103)
+* **副作用**: DB参照（`user_inventory`, `reward_master`。施行済みの場合のみ`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ発行）
+* 根拠: (行番号: 1065〜1073, 1082〜1085)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 1054〜1078)
+* 根拠: (行番号: 1063〜1103)
 
 ### `InventoryService.use_item` / `InventoryService._use_item_locked`
 
-* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。`use_item`は`_get_item_use_lock(user_id)`でユーザー単位のプロセス内ロックを取得したうえで、実処理を`_use_item_locked`に委譲する薄いラッパー（**YouTubeごほうび券クールダウン機能で追加**。詳細は`_get_item_use_lock`を参照）。`_use_item_locked`は所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象アイテムの`reward_id`が`config.YOUTUBE_REWARD_IDS`に含まれる場合のみ`_get_youtube_cooldown_remaining_seconds`でクールダウン残り秒数を判定し、`0`より大きければ`HTTPException(429)`（分単位に切り上げたメッセージ付き）を送出して消費を拒否する。クールダウン判定を通過（またはYouTube系対象外）した場合、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。**（Issue #369で修正）** UPDATEは`WHERE id = ? AND status = 'owned'`の条件付きで行い、`cur.rowcount == 0`（SELECT後に別リクエストが先に消費していた）なら`HTTPException(400)`を送出する。以前はSELECT→Python判定→無条件UPDATEだったため、連打された2リクエストがWALで両方`'owned'`を読み、両方が消費・履歴INSERT・通知を実行する二重使用が起きていた。LINE通知（`config.LINE_USER_ID`宛）と`"quest_clear"`サウンド再生は、以前はトランザクション内で実行されLINE API往復中もSQLiteの書き込みロックを保持していたが、現在は`get_db_cursor`ブロックを抜けたコミット後に実行する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
-* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:\n        with _get_item_use_lock(user_id):\n            return self._use_item_locked(user_id, inventory_id)` (行番号: 1080〜1082)、関数Docstring `def _use_item_locked(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 1084〜1086 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")、`if item['reward_id'] in config.YOUTUBE_REWARD_IDS:\n                cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)\n                if cooldown_remaining > 0:` (行番号: 1104〜1106)、`raise HTTPException(\n                        429,\n                        f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",\n                    )` (行番号: 1108〜1111)、`WHERE id = ? AND status = 'owned'` (行番号: 1122)、`if cur.rowcount == 0:` (行番号: 1124〜1125)
+* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。`use_item`は`_get_item_use_lock(user_id)`でユーザー単位のプロセス内ロックを取得したうえで、実処理を`_use_item_locked`に委譲する薄いラッパー（**YouTubeごほうび券クールダウン機能で追加**。詳細は`_get_item_use_lock`を参照）。`_use_item_locked`は所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象アイテムの`reward_id`が`config.YOUTUBE_REWARD_IDS`に含まれ、**かつ**`_is_youtube_cooldown_enforced()`が`True`(猶予期間機能で追加。施行日を迎えている)の場合のみ`_get_youtube_cooldown_remaining_seconds`でクールダウン残り秒数を判定し、`0`より大きければ`HTTPException(429)`（分単位に切り上げたメッセージ付き）を送出して消費を拒否する。施行日より前(猶予期間中)は、対象アイテムがYouTube系であっても拒否せず素通しする(いきなり制限がかかると子どもが困惑するため)。クールダウン判定を通過（またはYouTube系対象外・猶予期間中）した場合、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。**（Issue #369で修正）** UPDATEは`WHERE id = ? AND status = 'owned'`の条件付きで行い、`cur.rowcount == 0`（SELECT後に別リクエストが先に消費していた）なら`HTTPException(400)`を送出する。以前はSELECT→Python判定→無条件UPDATEだったため、連打された2リクエストがWALで両方`'owned'`を読み、両方が消費・履歴INSERT・通知を実行する二重使用が起きていた。LINE通知（`config.LINE_USER_ID`宛）と`"quest_clear"`サウンド再生は、以前はトランザクション内で実行されLINE API往復中もSQLiteの書き込みロックを保持していたが、現在は`get_db_cursor`ブロックを抜けたコミット後に実行する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:\n        with _get_item_use_lock(user_id):\n            return self._use_item_locked(user_id, inventory_id)` (行番号: 1106〜1108)、関数Docstring `def _use_item_locked(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 1110〜1112 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")、`if item['reward_id'] in config.YOUTUBE_REWARD_IDS and _is_youtube_cooldown_enforced():\n                cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)\n                if cooldown_remaining > 0:` (行番号: 1132〜1134)、`raise HTTPException(\n                        429,\n                        f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",\n                    )` (行番号: 1136〜1139)、`WHERE id = ? AND status = 'owned'` (行番号: 1150)、`if cur.rowcount == 0:` (行番号: 1152〜1153)
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: (行番号: 1080, 1084)
+* 根拠: (行番号: 1106, 1110)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "consumed", "message": "つかいました！"}`）
-* 根拠: (行番号: 1084, 行末の`return`)
-* **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得。YouTube系の場合`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
-* 根拠: (行番号: 1089〜1096, 1105, 1119〜1123, 1128〜1131)
-* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`、YouTube系ごほうび券がクールダウン中の場合 `HTTPException(429)`、条件付きUPDATEの`rowcount == 0`（並行リクエストが先に消費済み）の場合は `HTTPException(400)`
-* 根拠: (行番号: 1098〜1100 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")、(行番号: 1104〜1111 / YouTubeクールダウン判定)、(行番号: 1124〜1125 / 抜粋: "if cur.rowcount == 0:\n                raise HTTPException(400, \"Cannot use this item\")")
+* 根拠: (行番号: 1110, 行末の`return`)
+* **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得。YouTube系かつ施行済みの場合`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
+* 根拠: (行番号: 1115〜1122, 1133, 1147〜1151, 1156〜1159)
+* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`、YouTube系ごほうび券が(施行済みで)クールダウン中の場合 `HTTPException(429)`、条件付きUPDATEの`rowcount == 0`（並行リクエストが先に消費済み）の場合は `HTTPException(400)`
+* 根拠: (行番号: 1124〜1126 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")、(行番号: 1132〜1139 / YouTubeクールダウン判定)、(行番号: 1152〜1153 / 抜粋: "if cur.rowcount == 0:\n                raise HTTPException(400, \"Cannot use this item\")")
 
 ### `GameSystem.__init__`
 
@@ -756,7 +769,7 @@ flowchart TD
     RCallLocked --> REnd[End]
 ```
 
-以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。`use_item`は`_get_item_use_lock(user_id)`取得後に`_use_item_locked`へ委譲し（YouTubeごほうび券クールダウン機能で追加）、所有者・状態チェックの後にYouTube系ごほうび券のみクールダウン判定を行います。
+以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。`use_item`は`_get_item_use_lock(user_id)`取得後に`_use_item_locked`へ委譲し（YouTubeごほうび券クールダウン機能で追加）、所有者・状態チェックの後にYouTube系ごほうび券かつ施行済み(`_is_youtube_cooldown_enforced()`、猶予期間機能で追加)の場合のみクールダウン判定を行います。
 
 ```mermaid
 flowchart TD
@@ -765,7 +778,9 @@ flowchart TD
     UCheck -- No --> UErr[HTTPException 400/403/404]
     UCheck -- Yes --> UYoutubeCheck{"reward_id が<br>config.YOUTUBE_REWARD_IDS に<br>含まれるか"}
     UYoutubeCheck -- No --> USetConsumed
-    UYoutubeCheck -- Yes --> UCooldownCheck{"_get_youtube_cooldown_remaining_seconds<br>> 0 か"}
+    UYoutubeCheck -- Yes --> UEnforcedCheck{"_is_youtube_cooldown_enforced()<br>(施行日を迎えているか)"}
+    UEnforcedCheck -- No(猶予期間中) --> USetConsumed
+    UEnforcedCheck -- Yes --> UCooldownCheck{"_get_youtube_cooldown_remaining_seconds<br>> 0 か"}
     UCooldownCheck -- Yes --> UCooldownErr["HTTPException 429<br>(残り分数を含むメッセージ)"]
     UCooldownCheck -- No --> USetConsumed["user_inventory.status = 'consumed'<br>(used_atに現在時刻)"]
     USetConsumed --> UInsertHistory["quest_historyへ quest_id=0・<br>status='approved'のログ行を挿入"]

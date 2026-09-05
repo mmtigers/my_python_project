@@ -35,6 +35,8 @@
 * 根拠: (行番号: 41, 73〜75, 140〜147 / 抜粋: "const isUsingItemRef = useRef(false);", "onSettled: () => {\n            isUsingItemRef.current = false;\n        }", "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
 * **新機能(YouTubeごほうび券クールダウン)**: `apiClient.fetchInventory`の戻り値が配列から`InventoryResponse`（`{items, youtube_cooldown_remaining_seconds}`）に変更されたのに合わせ、`data?.items`を一覧として使う。バックエンドが返す`youtube_cooldown_remaining_seconds`(サーバー側の残り秒数、5秒間隔のポーリングで再同期)を起点に、1秒間隔の`setInterval`でローカルに`youtubeCooldownSeconds`をカウントダウンする`useEffect`を追加した。`item.is_youtube_reward`が真かつ`youtubeCooldownSeconds > 0`のアイテムは`isCoolingDown`となり、カードのクリック(使用確認モーダルを開く操作)を無効化したうえで、説明文の代わりに`formatCooldown`(mm:ss形式)を使った「目を休めよう。あと{mm:ss}で使えます」という文言と`Lock`アイコンを表示する。使用成功時のキャッシュ更新（`onSuccess`内の`setQueryData`）も、配列を直接フィルタする形から`InventoryResponse`の`items`フィールドのみを`filter`する形に変更した。
 * 根拠: `const items = data?.items;` (行番号: 52)、`useEffect(() => {\n        const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;` (行番号: 58〜67)、`const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;` (行番号: 127)、`onClick={() => { if (!isCoolingDown) setItemToUse(item); }}` (行番号: 134)、`queryClient.setQueryData<InventoryResponse>(queryKey, (old) => {\n                if (!old) return old;\n                return { ...old, items: old.items.filter(item => item.id !== usedInventoryId) };\n            });` (行番号: 75〜78)
+* **新機能(YouTubeごほうび券クールダウンの予告バナー)**: バックエンドがクールダウンの猶予期間中(実際の制限開始前)に返す`data?.youtube_cooldown_announcement`を`cooldownAnnouncement`として取り出し、真であれば`formatAnnouncementDate`(ISO日付を「9/12(土)」のような表示用文字列に変換)を使った「{開始日}から、YouTubeのごほうび券は使うと15分間、次の1枚が使えなくなります(目を休めるため)。」という予告バナー(`announcementBanner`)を表示する。いきなり制限がかかると子どもが困惑するため、施行日を迎えるまでの猶予期間中に事前告知する目的。このバナーは、もちものが空の状態(`items.length === 0`)でも、通常のアイテム一覧表示時でも(グリッドの`col-span-full`要素として)表示され、個別のアイテムの`is_youtube_reward`/所持状況とは無関係に、`cooldownAnnouncement`の有無だけで出し分けられる。
+* 根拠: `const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;` (行番号: 60)、`function formatAnnouncementDate(isoDate: string): string {` (行番号: 34〜37)、`const announcementBanner = cooldownAnnouncement && (` (行番号: 113〜121)、空状態での表示 (行番号: 124〜135)、一覧表示時の`col-span-full`表示 (行番号: 148〜150)
 
 ## 3. 外部依存関係
 
@@ -51,7 +53,7 @@
 | `useSound` | フック | アクション時の効果音再生 | 根拠: [`useSound`] (行番号: 7 / 抜粋: "import { useSound } from '../../../hooks/useSound';") |
 | `useToast` | フック | 使用失敗時のエラートースト表示 | 根拠: [`useToast`] (行番号: 8 / 抜粋: "import { useToast } from '../../../context/useToast';") |
 | `Loader2`, `PackageOpen`, `Lock` | コンポーネント(アイコン) | UI上の状態表示アイコン（ローディング中/所持アイテム/YouTubeごほうび券クールダウン中） | 根拠: [`lucide-react`] (行番号: 9 / 抜粋: "import { Loader2, PackageOpen, Lock } from 'lucide-react';") |
-| `InventoryItem`, `InventoryResponse` | 型定義 | アイテムデータおよびインベントリ取得APIレスポンス全体（`items`+`youtube_cooldown_remaining_seconds`）の型チェックと補完 | 根拠: [`InventoryItem`, `InventoryResponse`] (行番号: 10 / 抜粋: "import { InventoryItem, InventoryResponse } from '../../../types';") |
+| `InventoryItem`, `InventoryResponse` | 型定義 | アイテムデータおよびインベントリ取得APIレスポンス全体（`items`+`youtube_cooldown_remaining_seconds`+`youtube_cooldown_announcement`）の型チェックと補完 | 根拠: [`InventoryItem`, `InventoryResponse`] (行番号: 10 / 抜粋: "import { InventoryItem, InventoryResponse } from '../../../types';") |
 
 ### ブラックボックスとなる外部要素
 

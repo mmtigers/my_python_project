@@ -22,8 +22,8 @@
 ## 2. ファイルの概要
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
-* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加され、`interface`/`type`の宣言は8件になった。
-* 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜122 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `InventoryResponse`, `QuestResult`の8件のみで`PendingInventory`は存在しないことを確認)
+* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加された。**（猶予期間機能で追加）** クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報を表す`YoutubeCooldownAnnouncement`型も追加され、`interface`/`type`の宣言は9件になった。
+* 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜130 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `YoutubeCooldownAnnouncement`, `InventoryResponse`, `QuestResult`の9件のみで`PendingInventory`は存在しないことを確認)
 * 根拠: [全体] (行番号: 3 / 抜粋: "// 共通の型定義")
 
 ## 3. 外部依存関係
@@ -114,10 +114,21 @@
 * **副作用**: なし
 * **エラーハンドリング**: なし
 
+### `YoutubeCooldownAnnouncement` (猶予期間機能で追加)
+
+* **役割**: YouTube系ごほうび券クールダウンの猶予期間中(バックエンドが実際の使用制限をまだ強制していない期間)に、`InventoryList.tsx`が「この日から変わるよ」という予告バナーを表示するための情報のデータ構造の定義。施行済み、またはクールダウン対象のごほうび券(`config.YOUTUBE_REWARD_IDS`)が設定されていない場合は`InventoryResponse.youtube_cooldown_announcement`が`null`になるため、この型が実際に使われるのは猶予期間中のみ。
+* 根拠: [該当要素] (行番号: 116〜121 / 抜粋: "// YouTubeごほうび券クールダウンの猶予期間中(実際の制限開始前)に表示する予告情報。\n// 施行済み、またはクールダウン対象のごほうび券が無い場合はnull。\nexport interface YoutubeCooldownAnnouncement {\n    starts_on: string; // ISO日付(YYYY-MM-DD)\n    days_remaining: number;\n}")
+
+
+* **引数/リクエスト**: 該当なし
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
 ### `InventoryResponse` (YouTubeごほうび券クールダウン機能で追加)
 
-* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。
-* 根拠: [該当要素] (行番号: 116〜122 / 抜粋: "// GET /api/quest/inventory/{user_id} のレスポンス。\n// #(YouTubeクールダウン): 単純な配列から、YouTube系ごほうび券の残りクールダウン\n// 秒数を併せて返すオブジェクトに変更した。\nexport interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n}")
+* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。**（猶予期間機能で追加）** クールダウンの猶予期間中に表示する予告情報`youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null`も追加された。
+* 根拠: [該当要素] (行番号: 123〜130 / 抜粋: "// GET /api/quest/inventory/{user_id} のレスポンス。\n// #(YouTubeクールダウン): 単純な配列から、YouTube系ごほうび券の残りクールダウン\n// 秒数を併せて返すオブジェクトに変更した。\nexport interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n    youtube_cooldown_announcement: YoutubeCooldownAnnouncement | null;\n}")
 
 
 * **引数/リクエスト**: 該当なし
