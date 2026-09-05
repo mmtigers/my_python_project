@@ -35,10 +35,10 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `asyncio` | 標準ライブラリ | 同期ハンドラをスレッドで実行 | 行番号: 2, 28 / 抜粋: `import asyncio` |
-| `hmac` | 標準ライブラリ | SwitchBot Webhookの共有シークレット比較(タイミング攻撃耐性のある比較) | 行番号: 3, 52 / 抜粋: `import hmac` |
-| `time` | 標準ライブラリ | 現在時刻（Unixタイムスタンプ）の取得 | 行番号: 4, 69 / 抜粋: `import time` |
-| `APIRouter` | 外部ライブラリ | ルーターのインスタンス化 | 行番号: 5, 17 / 抜粋: `from fastapi import APIRouter...` |
+| `hmac` | 標準ライブラリ | SwitchBot Webhookの共有シークレット比較(タイミング攻撃耐性のある比較) | 行番号: 2, 52 / 抜粋: `import hmac` |
+| `time` | 標準ライブラリ | 現在時刻（Unixタイムスタンプ）の取得 | 行番号: 3, 69 / 抜粋: `import time` |
+| `APIRouter` | 外部ライブラリ | ルーターのインスタンス化 | 行番号: 5, 18 / 抜粋: `from fastapi import APIRouter...` |
+| `BackgroundTasks` | 外部ライブラリ | **（Issue #376で追加）** `dispatch_events`の実行をレスポンス送信後へ遅延させるためのスケジューラ | 行番号: 5, 20 / 抜粋: `from fastapi import APIRouter, BackgroundTasks, Request, Header, HTTPException` |
 | `Request` | 外部ライブラリ | リクエストオブジェクトの受け取り | 行番号: 5, 20 / 抜粋: `from fastapi import APIRouter...` |
 | `Header` | 外部ライブラリ | ヘッダー値の取得 | 行番号: 5, 20 / 抜粋: `from fastapi import APIRouter...` |
 | `HTTPException` | 外部ライブラリ | HTTPエラー例外の送出 | 行番号: 5, 23 / 抜粋: `from fastapi import APIRouter...` |
@@ -56,7 +56,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `line_handler.line_handler.handle` | 具体的な処理内容、副作用が提供ファイル内に記述されていないため。 | 行番号: 28 / 抜粋: `await asyncio.to_thread(...)` |
+| `line_handler.line_handler.parser.parse` / `line_handler.dispatch_events` | 具体的な処理内容、副作用が提供ファイル内に記述されていないため（実体は`handlers/line_handler.py`参照）。 | 行番号: 50, 59 / 抜粋: `events = line_handler.line_handler.parser.parse(...)`、`background_tasks.add_task(line_handler.dispatch_events, events)` |
 | `config.SWITCHBOT_WEBHOOK_TOKEN` | 実際のトークン値が`config.py`側の環境変数読み込みに依存し、本ファイルからは不明なため。 | 行番号: 51 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:` |
 | `sensor_service.is_duplicate_webhook` | 重複判定の具体的なキャッシュやDBアクセス機構が不明なため。 | 行番号: 73 / 抜粋: `if sensor_service.is_duplicate...` |
 | `sb_tool.get_device_name_by_id` | デバイス名取得の実装詳細（外部API通信かローカルDBか）が不明なため。 | 行番号: 81 / 抜粋: `api_name = sb_tool.get_device...` |
@@ -67,22 +67,23 @@
 
 ### エンドポイント `callback_line`
 
-* **役割**: LINE BotからのWebhookを受け取り、署名を検証した上で `line_handler` に処理を委譲する。**（L-L1 / Issue #410, #376で修正）** `X-Line-Signature`ヘッダが無い/空の場合はSDKへ渡す前にHTTP 400で拒否する（以前はSDK内部の`AttributeError`が汎用`except`に落ち、署名検証していないのに`"OK"`(200)を返していた）。ボディのUTF-8デコード失敗もHTTP 400にする（以前は`try`の外で`UnicodeDecodeError`→500）。複数イベント一括配信時のイベント単位の例外隔離は本エンドポイントではなく`handlers/line_handler.py`の各ハンドラ側で行う。
-* 根拠: `callback_line`関数定義と内部の`handle`呼び出し (行番号: 20〜47 / 抜粋: `@router.post("/callback/line")`)、署名欠落チェック (行番号: 29〜30 / 抜粋: `if not x_line_signature:`)、デコード (行番号: 33〜36 / 抜粋: `except UnicodeDecodeError:`)
+* **役割**: LINE BotからのWebhookを受け取り、署名を検証した上で `line_handler` に処理を委譲する。**（L-L1 / Issue #410, #376で修正）** `X-Line-Signature`ヘッダが無い/空の場合はSDKへ渡す前にHTTP 400で拒否する（以前はSDK内部の`AttributeError`が汎用`except`に落ち、署名検証していないのに`"OK"`(200)を返していた）。ボディのUTF-8デコード失敗もHTTP 400にする（以前は`try`の外で`UnicodeDecodeError`→500）。**（Issue #376で全面改修）** 以前は`WebhookHandler.handle(body, signature)`が署名検証・パース・ディスパッチ(AI呼び出し・DB書き込み・LINE返信を含む)をHTTPレスポンス送信前に一括で完走させており、AI経路の遅延がそのままreply token(約1分で失効)の失効リスクに直結していた。現在は`line_handler.parser.parse()`で署名検証とパースのみを同期的に行い(ネットワークI/Oを伴わず軽量)即座に`"OK"`を返し、実処理(`handlers.line_handler.dispatch_events`。イベント単位の例外隔離・再配信スキップ・webhookEventIdベースの冪等化・AI呼び出し等)は`BackgroundTasks`でレスポンス送信後に実行する。
+* 根拠: `callback_line`関数定義 (行番号: 19〜60 / 抜粋: `@router.post("/callback/line")`)、署名欠落チェック (行番号: 29〜30 / 抜粋: `if not x_line_signature:`)、デコード (行番号: 33〜36 / 抜粋: `except UnicodeDecodeError:`)、パースとバックグラウンド委譲 (行番号: 50, 59 / 抜粋: `events = line_handler.line_handler.parser.parse(body, x_line_signature)`、`background_tasks.add_task(line_handler.dispatch_events, events)`)
 
 
 * **引数/リクエスト**:
 * `request`: FastAPI `Request` オブジェクト (生のボディ取得用)
+* `background_tasks`: FastAPI `BackgroundTasks`（**Issue #376で追加**。実処理をレスポンス送信後に実行するためのスケジューラ）
 * `x_line_signature`: `Optional[str]` (HTTPヘッダーからの署名文字列。欠落時は`None`)
-* 根拠: 関数の引数定義 (行番号: 21 / 抜粋: `async def callback_line(request: Request, x_line_signature: Optional[str] = Header(None))`)
+* 根拠: 関数の引数定義 (行番号: 20〜24 / 抜粋: `async def callback_line(\n    request: Request,\n    background_tasks: BackgroundTasks,\n    x_line_signature: Optional[str] = Header(None),\n) -> str:`)
 
 
-* **戻り値/レスポンス**: 正常時は `"OK"` (文字列)。
-* 根拠: return文とアノテーション (行番号: 21, 47 / 抜粋: `-> str:`、`return "OK"`)
+* **戻り値/レスポンス**: 正常時は `"OK"` (文字列)。実処理の完了を待たずに返す。
+* 根拠: return文とアノテーション (行番号: 24, 57, 60 / 抜粋: `-> str:`、`return "OK"`)
 
 
-* **副作用**: `line_handler.line_handler.handle` の実行による副作用（詳細不明）。エラー時にロガー経由での出力。
-* 根拠: 関数内の処理 (行番号: 42, 46 / 抜粋: `await asyncio.to_thread(...)`、`logger.error(...)`)
+* **副作用**: `line_handler.line_handler.parser.parse` によるイベントのパース（署名検証含む）。`background_tasks.add_task`による`dispatch_events`のスケジューリング（実際の実行はレスポンス送信後）。エラー時にロガー経由での出力。
+* 根拠: 関数内の処理 (行番号: 50, 59 / 抜粋: `events = line_handler.line_handler.parser.parse(...)`、`background_tasks.add_task(line_handler.dispatch_events, events)`)
 
 
 * **エラーハンドリング**:
@@ -90,8 +91,8 @@
 * **（L-L1で追加）** `x_line_signature` が `None`/空文字の場合は HTTP 400 (`"Missing X-Line-Signature"`) を返す（SDKは呼ばない）。
 * **（L-L1で追加）** ボディが UTF-8 としてデコードできない場合は HTTP 400 (`"Body is not valid UTF-8"`) を返す。
 * `InvalidSignatureError` 発生時は HTTP 400 を返す。
-* その他例外時はロガーでエラー出力し、そのまま `"OK"` を返す（例外の再スローなし）。
-* 根拠: try-exceptブロックとif文 (行番号: 23, 29〜30, 35〜36, 43〜46 / 抜粋: `except InvalidSignatureError:`)
+* **（Issue #376で変更）** 署名は正しいが本文が不正(JSON decode失敗等)の場合、LINE側のリトライ挙動に巻き込まれないようログのみで`"OK"`を返す(以前からの挙動を踏襲。以前はこの経路も含めた全処理が同期`handle()`呼び出し1箇所の`except`だったが、現在はパース専用の`except`に切り出されている)。
+* 根拠: try-exceptブロックとif文 (行番号: 29〜30, 35〜36, 49〜57 / 抜粋: `except InvalidSignatureError:`)
 
 
 

@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/handlers/line_handler.py
 import asyncio
+import threading
 import time
 from typing import Optional, List, Any, Dict
 
@@ -62,6 +63,51 @@ def _is_redelivery(event) -> bool:
     """
     ctx = getattr(event, "delivery_context", None)
     return getattr(ctx, "is_redelivery", False) is True
+
+
+# Issue #376: webhookEventId ベースの冪等化キャッシュ。
+# LINE の Webhook 配信は「少なくとも1回」の到達を保証する仕様であり、isRedelivery で
+# 明示される再配信以外にも、ネットワーク遅延等により同一イベントが複数回届く可能性がある。
+# webhookEventId(ULID形式。line-bot-sdk 3.21.0 では Event 基底クラスの必須フィールド)を
+# 直近処理済みイベントとして記録し、二重処理(体調・食事等の記録の二重登録、AI呼び出しの
+# 二重実行)を防ぐ。単一プロセス・LAN限定の個人用サービスであるため新規DBテーブルは設けず、
+# `_profile_cache` と同様にプロセス内メモリ・サイズ上限つきの辞書で管理する
+# (プロセス再起動で消える点は許容: 再起動を跨いだ再配信は実運用上ほぼ発生しない)。
+_SEEN_EVENT_IDS: Dict[str, float] = {}  # webhook_event_id -> 検知時刻
+_SEEN_EVENT_IDS_MAX_SIZE = 500
+_seen_event_ids_lock = threading.Lock()
+# BackgroundTasks はスレッドプール(run_in_threadpool)で実行されるため、複数の
+# Webhookリクエストがほぼ同時に届いた場合に備え、確認と記録をロックで保護する。
+
+
+def _evict_oldest_seen_event_ids() -> None:
+    """`_SEEN_EVENT_IDS`が上限を超えている場合、検知時刻が古いものから削除する(呼び出し元でロック取得済みが前提)。"""
+    overflow = len(_SEEN_EVENT_IDS) - _SEEN_EVENT_IDS_MAX_SIZE
+    if overflow <= 0:
+        return
+    oldest_ids = sorted(_SEEN_EVENT_IDS, key=lambda eid: _SEEN_EVENT_IDS[eid])[:overflow]
+    for eid in oldest_ids:
+        del _SEEN_EVENT_IDS[eid]
+
+
+def _is_duplicate_event(event) -> bool:
+    """
+    Issue #376: webhookEventId 単位の冪等化チェック。
+
+    未処理のIDなら記録した上で False を返し、直近処理済みのIDなら True を返す
+    (呼び出し側は処理をスキップする)。webhook_event_id が取得できないイベント
+    (テスト用のモック等、想定外の形式)は冪等化できないため、誤って処理を止めない
+    よう False(重複ではない)を返す。
+    """
+    event_id = getattr(event, "webhook_event_id", None)
+    if not event_id:
+        return False
+    with _seen_event_ids_lock:
+        if event_id in _SEEN_EVENT_IDS:
+            return True
+        _SEEN_EVENT_IDS[event_id] = time.time()
+        _evict_oldest_seen_event_ids()
+    return False
 
 
 def _evict_oldest_profile_cache_entries() -> None:
@@ -309,3 +355,40 @@ def handle_postback(event: PostbackEvent):
 if line_handler:
     line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)
     line_handler.add(PostbackEvent)(handle_postback)
+
+
+def dispatch_events(events: List[Any]) -> None:
+    """
+    Issue #376: routers/webhook_router.py が署名検証・パース済みのイベント一覧を
+    BackgroundTasks 経由で渡してくる、実処理のエントリポイント。
+
+    以前は `WebhookHandler.handle(body, signature)` が署名検証・パース・ディスパッチを
+    HTTPレスポンス送信前に一括で行っていたため、AI呼び出し・DB書き込み・LINE返信の
+    レイテンシがそのまま reply token(約1分で失効)の失効リスクに直結していた。
+    ルーター側は `line_handler.parser.parse()` で署名検証とパースのみ済ませて即 200 を
+    返し、実処理(このディスパッチ以降)はレスポンス送信後にバックグラウンドで行う。
+
+    イベント種別ごとの振り分けは `line_handler.add(...)` で登録している内容
+    (MessageEvent+TextMessageContent は handle_message、PostbackEvent は handle_postback)
+    と同じにしてあり、それ以外のイベント種別は元の WebhookHandler と同様に無視する。
+
+    webhookEventId ベースの冪等化チェックをここで一括して行う(handle_message/
+    handle_postback 個別ではなく1箇所に集約することで、対象イベント種別が増えても
+    冪等化漏れが起きないようにする)。1件のイベント処理で例外が起きても後続イベントの
+    処理を止めない(handle_message/handle_postback 自体も内部で例外を握り潰すが、
+    このループでも二重に防御する)。
+    """
+    for event in events:
+        try:
+            if _is_duplicate_event(event):
+                logger.info(
+                    f"⚠️ Skipping duplicate LINE event (webhook_event_id={getattr(event, 'webhook_event_id', None)})"
+                )
+                continue
+
+            if isinstance(event, MessageEvent) and isinstance(event.message, TextMessageContent):
+                handle_message(event)
+            elif isinstance(event, PostbackEvent):
+                handle_postback(event)
+        except Exception as e:
+            logger.error(f"dispatch_events Error: {e}", exc_info=True)
