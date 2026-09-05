@@ -14,6 +14,7 @@ threading.Barrier で「両方が同時に実行中の状態に到達できる�
 もし将来 run_script が何らかのグローバルロックで直列化されてしまった場合、
 2つ目のタスクが Barrier に到達できずタイムアウトし、このテストが失敗する。
 """
+import io
 import os
 import sys
 import threading
@@ -27,18 +28,22 @@ import scheduler_boot
 
 
 class _FakePopen:
-    """#360: run_script は subprocess.run ではなく Popen(+communicate)で子プロセスを
-    起動し PID を保持するようになったため、テストのフェイクも Popen 互換にする。"""
+    """#360: run_script は subprocess.run ではなく Popen(+wait)で子プロセスを
+    起動し PID を保持するようになったため、テストのフェイクも Popen 互換にする。
+    #411 S-L5: communicate()による一括読み取りから、proc.wait()+stderrの
+    別スレッド逐次読み取りに変更されたため、stderrはイテレート可能な
+    ファイルオブジェクト(io.StringIO)として持たせる。"""
 
-    def __init__(self, returncode=0, on_communicate=None):
+    def __init__(self, returncode=0, on_wait=None, stderr_text=""):
         self.returncode = returncode
-        self._on_communicate = on_communicate
+        self._on_wait = on_wait
         self.killed = False
+        self.stderr = io.StringIO(stderr_text)
 
-    def communicate(self, timeout=None):
-        if self._on_communicate:
-            self._on_communicate()
-        return "", ""
+    def wait(self, timeout=None):
+        if self._on_wait:
+            self._on_wait()
+        return self.returncode
 
     def poll(self):
         return self.returncode
@@ -57,9 +62,9 @@ def test_two_tasks_execute_concurrently_not_serially(monkeypatch):
         return real_exists(path)
 
     def _fake_popen(cmd, **kwargs):
-        # 両方のタスクが communicate() に同時に到達しない限りタイムアウトで例外になる。
+        # 両方のタスクが wait() に同時に到達しない限りタイムアウトで例外になる。
         # = 直列実行に戻ってしまった場合はこのテストがタイムアウトで失敗する。
-        return _FakePopen(returncode=0, on_communicate=barrier.wait)
+        return _FakePopen(returncode=0, on_wait=barrier.wait)
 
     monkeypatch.setattr(scheduler_boot.os.path, "exists", _fake_exists)
     monkeypatch.setattr(scheduler_boot.subprocess, "Popen", _fake_popen)
@@ -98,10 +103,10 @@ def test_subprocess_timeout_is_treated_as_failure_not_crash(monkeypatch):
     )
 
     class _TimeoutPopen(_FakePopen):
-        def communicate(self, timeout=None):
+        def wait(self, timeout=None):
             if not self.killed:
                 raise subprocess_module.TimeoutExpired(cmd="fake", timeout=timeout)
-            return "", ""
+            return self.returncode
 
     monkeypatch.setattr(scheduler_boot.subprocess, "Popen", lambda *a, **kw: _TimeoutPopen())
 
@@ -122,11 +127,11 @@ def test_sigterm_terminates_running_children(monkeypatch):
             super().__init__(returncode=None)
             self.terminated = False
 
-        def communicate(self, timeout=None):
+        def wait(self, timeout=None):
             started.set()
             release.wait(timeout=5)
             self.returncode = 0
-            return "", ""
+            return self.returncode
 
         def poll(self):
             return self.returncode
@@ -134,9 +139,6 @@ def test_sigterm_terminates_running_children(monkeypatch):
         def terminate(self):
             self.terminated = True
             release.set()
-
-        def wait(self, timeout=None):
-            return 0
 
     proc = _BlockingPopen()
     real_exists = os.path.exists

@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/scheduler.py
+import collections
 import time
 import signal
 import subprocess
@@ -6,7 +7,7 @@ import sys
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
-from typing import List, Dict, TypedDict
+from typing import List, Dict, Optional, TypedDict
 
 # プロジェクトルートへのパス解決
 PROJECT_ROOT: str = os.path.dirname(os.path.abspath(__file__))
@@ -32,7 +33,7 @@ TASKS: List[Task] = [
     {"script": "monitors/nature_remo_monitor.py",     "interval": 300,  "last_run": 0, "args": []},
     {"script": "monitors/server_watchdog.py",         "interval": 600,  "last_run": 0, "args": []},
 
-    # 頻度: 中 (30分)
+    # 頻度: 中 (5分) — #411 品質: 実値(interval=300秒=5分)と乖離していた「30分」表記を訂正
     {"script": "monitors/tv_lock_monitor.py",         "interval": 300,  "last_run": 0, "args": []},
     # {"script": "monitors/timelapse_runner.py", "interval": 300, "last_run": 0, "args": []},
     # 頻度: 中 (10分 = 600秒)
@@ -103,36 +104,60 @@ def run_script(script_path: str, args: List[str]) -> bool:
         return False
 
     logger.debug(f"▶️ Executing: {script_path} {' '.join(args)}")
-    
-    # 子プロセスがプロジェクトのモジュールを読めるよう PYTHONPATH を設定
+
+    # 子プロセスがプロジェクトのモジュールを読めるよう PYTHONPATH を設定。
+    # #411 S-L5: 以前は既存のPYTHONPATH(start_all.sh等が設定した値)を無条件に
+    # 上書きしていた。呼出元の設定を残しつつPROJECT_ROOTを優先させるため先頭に追記する。
     env: Dict[str, str] = os.environ.copy()
-    env["PYTHONPATH"] = PROJECT_ROOT
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{PROJECT_ROOT}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else PROJECT_ROOT
+    )
 
     proc = None
+    stderr_tail: "collections.deque[str]" = collections.deque(maxlen=20)
+    drain_thread: Optional[threading.Thread] = None
+
+    def _drain_stderr(pipe) -> None:
+        # #411 S-L5: 以前は proc.communicate() でstdout/stderrをタスク完了まで
+        # 全量メモリに保持していた(最大1時間分の出力を保持しうる)。ログ用途は
+        # 末尾20行のみで十分なため、別スレッドで1行ずつ読みながら固定長dequeにのみ
+        # 保持し、メモリ使用量を出力量に依存させないようにする。
+        try:
+            for line in pipe:
+                stderr_tail.append(line.rstrip("\n"))
+        finally:
+            pipe.close()
+
     try:
         # #360: subprocess.run ではなく Popen で起動して PID を保持し、SIGTERM 受信時に
         # terminate_running_children() から止められるようにする。
+        # stdoutは元々破棄するだけなのでDEVNULLに出し、パイプバッファ詰まりを避ける。
         proc = subprocess.Popen(
             [sys.executable, full_path] + args,
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             text=True,
         )
         with _children_lock:
             _running_children[script_path] = proc
 
+        drain_thread = threading.Thread(target=_drain_stderr, args=(proc.stderr,), daemon=True)
+        drain_thread.start()
+
         # 実行完了を待機
-        _stdout, stderr = proc.communicate(timeout=3600)  # タイムラプスなど長時間タスクを許容するため60分
+        proc.wait(timeout=3600)  # タイムラプスなど長時間タスクを許容するため60分
+        drain_thread.join(timeout=5)
 
         if proc.returncode == 0:
             logger.debug(f"✅ Finished: {script_path}")
             return True
         else:
             logger.error(f"⚠️ Task failed [{script_path}] (Exit code: {proc.returncode})")
-            if stderr:
+            if stderr_tail:
                 # #361: Discord 通知は 2000 字上限のため、stderr は末尾 20 行程度に絞る
-                tail = "\n".join(stderr.strip().splitlines()[-20:])
+                tail = "\n".join(stderr_tail)
                 logger.error(f"Stderr (tail): {tail}")
             return False
 
@@ -141,7 +166,7 @@ def run_script(script_path: str, args: List[str]) -> bool:
         if proc is not None:
             try:
                 proc.kill()
-                proc.communicate(timeout=5)
+                proc.wait(timeout=5)
             except Exception:
                 pass
         return False
