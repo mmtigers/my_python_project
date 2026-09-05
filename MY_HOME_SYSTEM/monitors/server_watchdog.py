@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/monitors/server_watchdog.py
+import re
 import subprocess
 import time
 import traceback
@@ -57,10 +58,18 @@ def get_service_status(service_name: str) -> str:
 def is_process_alive(process_keyword: str) -> bool:
     """
     pgrepを使ってプロセスが起動しているか確認する。
+
+    #411 S-L11: 以前は `pgrep -f process_keyword` の単純な部分文字列マッチだったため、
+    `cat unified_server.py` や `vim unified_server.py`、`cp unified_server.py .bak` の
+    ような無関係なコマンドの引数にキーワードが含まれるだけでヒットしてしまい、本来の
+    サーバープロセスが落ちていても誤って「生きている」と判定しうる誤検知の余地があった。
+    pythonインタプリタが当該スクリプトを引数として実行しているパターンにのみマッチする
+    よう正規表現を絞り込む。
     """
+    pattern = rf"python[0-9.]*\s+\S*{re.escape(process_keyword)}(\s|$)"
     try:
         res = subprocess.run(
-            ["pgrep", "-f", process_keyword], 
+            ["pgrep", "-f", pattern],
             capture_output=True, text=True, check=False
         )
         return res.returncode == 0
