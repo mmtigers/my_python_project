@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `46c9bc4` |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -37,7 +37,7 @@
 * 根拠: [_maybe_send_daily_summary Docstring] (行番号: 1017〜1035 / 抜粋: "このスクリプトはcron等により1時間毎に別プロセスとして起動される前提\n    (デーモン常駐ではない)のため、「21時になったら送る」という時刻トリガーは\n    実行時刻の時(hour)が21かどうかで判定する。")
 * **（Issue #364で修正）** データディレクトリ（NAS上の`known_casts_*.json`等の保存先）は`_run_monitor_locked`の冒頭で`MonitorConfig.get_data_dir()`により**1回だけ**解決され、その値を束縛した`DataManager`インスタンスが全サイトの処理で使い回される。以前は`DataManager`の全メソッドが静的メソッドで、呼び出しのたびに`get_data_dir()`（= `core.nas_utils.get_managed_target_directory`。NAS未マウント時は`sudo mount`による自己修復とDiscord/LINE障害通知を伴う）を再評価していたため、79サイト×最低3回で1実行あたり240回以上呼ばれ、NAS障害時には毎時数百回の`sudo mount`と数百件のDiscord投稿が発生していた。あわせて、解決結果がローカルフォールバック先（`MonitorConfig.LOCAL_DIR_STR`）だった場合は、ローカル側に`known_casts_*.json`が無く全サイトの全在籍キャストが「新規」として再通知されてしまうため、`MonitorConfig.is_local_fallback_dir`で検知して実行全体を中断する（`extract_youtube_urls.py`の`_verify_environment`と同じ方針）。
 * 根拠: [_run_monitor_lockedの解決・フォールバック判定とDataManager生成] (行番号: 1344〜1366 / 抜粋: "# #364: データディレクトリはここで1回だけ解決し、DataManagerに束縛して全サイトで\n    # 使い回す。" / "if MonitorConfig.is_local_fallback_dir(data_dir):" / "data_manager = DataManager(data_dir)")、[DataManagerクラスDocstring] (行番号: 616〜625 / 抜粋: "#364: 以前は全メソッドが静的メソッドで、呼び出しのたびに\n    MonitorConfig.get_data_dir()(= core.nas_utils.get_managed_target_directory。")
-* 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。
+* 保存データはNAS等のストレージ上に一時ファイル経由のアトミック書き込みで永続化される。書き込み後は一時ファイルを読み戻して検証し、既存データを`.bak`としてバックアップしてから本番ファイルへ置き換える多段の安全策を持つ（詳細は4章`DataManager.save_known_casts`を参照）。**（Issue #462で追加）** 日次サマリ(`daily_summary.json`)の読み書き(`load_daily_summary`/`save_daily_summary`)にも同じ隔離＋バックアップ復旧・読み戻し検証の仕組みが拡張適用され、既知キャストデータと同水準の耐障害性を持つようになった。**（Issue #461で追加）** 破損検知のたびに`.corrupted-*`として蓄積する隔離ファイルは、`DataManager.cleanup_old_quarantine_files`により`_run_monitor_locked`の巡回ごとに`_QUARANTINE_RETENTION_DAYS`（既定30日）より古いものが削除される。
 * 根拠: [DataManager.save_known_castsのコメント] (行番号: 607〜609 / 抜粋: "# アトミック書き込み: 一時ファイルに書き出してから置き換えることで、\n            # 書き込み中断時に既存データが破損/空になるのを防ぐ\n            # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)")
 * `run_monitor`はモニタープロセスのエントリポイントとして、`fcntl.flock`による多重起動防止ロック（`_MONITOR_LOCK_FILE_PATH`）を非ブロッキングで取得してから処理本体`_run_monitor_locked`を呼び出す。cronの1回の実行が想定より長引く（1時間超）と新旧プロセスが並行実行され、既知キャストリスト・サマリファイルの読み書きが競合しうる問題への対策であり、`batch_download_discord.py`が既に採用している同種のロックパターンを踏襲している。
 * 根拠: [_MONITOR_LOCK_FILE_PATHのコメントとrun_monitor] (行番号: 1052〜1059 / 抜粋: "# M-7-4: 多重起動防止ロック。cron等での実行が重複すると、既知キャストリストや\n# サマリファイルへの読み書きが競合し、一時消失→再通知等のデータ不整合が起きうる\n# (batch_download_discord.pyでは既にflockによる同種のロックが導入済み)。")
@@ -510,6 +510,28 @@
 * **エラーハンドリング**: 該当なし
 
 
+### `DataManager._QUARANTINE_RETENTION_DAYS` (クラス定数) / `DataManager.cleanup_old_quarantine_files`（Issue #461で追加）
+
+* **役割**: `_QUARANTINE_RETENTION_DAYS = 30`は、`load_known_casts`/`load_daily_summary`が破損検知のたびに作成する`.corrupted-*`隔離ファイルの保持日数を定義するクラス定数。`cleanup_old_quarantine_files(retention_days=_QUARANTINE_RETENTION_DAYS)`は、`self.data_dir`直下の`*.corrupted-*`パターンに一致するファイルのうち、最終更新時刻(`mtime`)が`retention_days`日より古いものを削除するインスタンスメソッド。`.bak`バックアップ（常に最新の1世代のみが上書き保持される）と異なり`.corrupted-*`には削除処理が存在せず、破損が繰り返されるたびに際限なく蓄積しディスクを圧迫し得た問題への対処。
+* 根拠: [クラス定数定義とコメント] (行番号: 718〜722 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。\n    _QUARANTINE_RETENTION_DAYS = 30")、[メソッド定義とDocstring] (行番号: 737〜746 / 抜粋: "def cleanup_old_quarantine_files(self, retention_days: int = _QUARANTINE_RETENTION_DAYS) -> int:\n        """`_QUARANTINE_RETENTION_DAYS`日より古い`.corrupted-*`隔離ファイルを削除する。")
+
+
+* **引数/リクエスト**: `retention_days: int = _QUARANTINE_RETENTION_DAYS`（省略時30日）
+* 根拠: [引数定義] (行番号: 737 / 抜粋: "def cleanup_old_quarantine_files(self, retention_days: int = _QUARANTINE_RETENTION_DAYS) -> int:")
+
+
+* **戻り値/レスポンス**: `int`（削除できたファイル数。`self.data_dir`のファイル一覧取得自体に失敗した場合は`0`）
+* 根拠: [戻り値ヒントとDocstring・各return] (行番号: 737, 744〜745, 753, 765 / 抜粋: "Returns:\n            int: 削除できたファイル数。", "return 0", "return deleted")
+
+
+* **副作用**: `self.data_dir.glob("*.corrupted-*")`によるディレクトリ走査、条件（`is_file()`かつ`mtime`が閾値より古い）に合致する各ファイルの削除(`path.unlink()`)、1件以上削除した場合は削除件数を含む情報ログ出力。
+* 根拠: [走査と削除処理] (行番号: 747〜765 / 抜粋: "cutoff = time.time() - retention_days * 86400" / "candidates = list(self.data_dir.glob(\"*.corrupted-*\"))" / "if path.is_file() and path.stat().st_mtime < cutoff:\n                    path.unlink()\n                    deleted += 1")
+
+
+* **エラーハンドリング**: Docstringに明記の通り「削除自体の失敗は致命的ではないためログに残すのみで続行する」設計。ディレクトリ一覧取得(`glob`)が`OSError`を送出した場合は警告ログを出力して即座に`0`を返す（個別ファイルの削除は試みない）。個別ファイルの`stat()`/`unlink()`が`OSError`を送出した場合は当該ファイルについてのみ警告ログを出力し、他の候補ファイルの削除処理を継続する（例外を再送出しない）。
+* 根拠: [try-exceptブロック] (行番号: 749〜753, 756〜761 / 抜粋: "try:\n            candidates = list(self.data_dir.glob(\"*.corrupted-*\"))\n        except OSError as e:\n            logger.warning(f\"Failed to list quarantine files in {self.data_dir}: {e}\")\n            return 0" / "except OSError as e:\n                logger.warning(f\"Failed to delete old quarantine file {path}: {e}\")")
+
+
 ### `DataManager._read_casts_file`
 
 * **役割**: 指定されたJSONファイルを読み込み、`CastMember`の集合に変換する内部ヘルパーの静的メソッド。`load_known_casts`（通常読み込みおよび`.bak`バックアップからの復旧読み込み）と`save_known_casts`（書き込み直後の読み戻し検証）の両方から共通で呼び出される。
@@ -591,45 +613,45 @@
 * **エラーハンドリング**: なし
 
 
-### `DataManager.load_daily_summary`
+### `DataManager.load_daily_summary`（Issue #462で変更）
 
-* **役割**: 日次サマリの集計状態（`{'counts': {...}, 'last_sent_date': ...}`形式）をJSONファイルから読み込む静的メソッド。**（Issue #174で修正）** 以前は`load_known_casts`と同じ「非UTF-8破損によるファイル読み込み失敗」に対する例外捕捉が`(json.JSONDecodeError, IOError)`という狭いパターンのままで、`UnicodeDecodeError`(`IOError`のサブクラスではなく`ValueError`のサブクラス)を捕捉できなかった。この結果、破損した`daily_summary.json`を読もうとすると例外が未捕捉のまま`record_daily_new_casts`経由で`_check_site`を脱出し、`save_known_casts`が実行されないまま処理が中断していた。次回(毎時)実行でも同じ既知キャストが「新規」として再検知されDiscordへ再通知され続ける、という無限反復を招いていた。現在は`load_known_casts`と同じ`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）で捕捉する。**（Issue #183で修正）** 集計状態のスキーマから`'date'`キーを廃止した（後述の`record_daily_new_casts`参照）。
-* 根拠: [メソッド定義とDocstring] (行番号: 646〜654 / 抜粋: "def load_daily_summary() -> Dict:\n        """日次サマリの集計状態を読み込む。")
-
-
-* **引数/リクエスト**: なし
-* **戻り値/レスポンス**: `Dict`（ファイル不在・読み込み失敗時は空辞書）。`'counts'`は直近の送信以降に累積した未送信件数であり、カレンダー日付ではなく「前回送信からの累積」で管理される（Issue #183）。
-* 根拠: [Docstring] (行番号: 649〜654 / 抜粋: "Returns:\n            Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}\n                形式の集計状態。'counts'は直近の送信以降に累積した未送信件数\n                (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
+* **役割**: 日次サマリの集計状態（`{'counts': {...}, 'last_sent_date': ...}`形式）を`self._daily_summary_file()`からJSONとして読み込むインスタンスメソッド。**（Issue #174で修正）** 以前は`load_known_casts`と同じ「非UTF-8破損によるファイル読み込み失敗」に対する例外捕捉が`(json.JSONDecodeError, IOError)`という狭いパターンのままで、`UnicodeDecodeError`(`IOError`のサブクラスではなく`ValueError`のサブクラス)を捕捉できなかった。この結果、破損した`daily_summary.json`を読もうとすると例外が未捕捉のまま`record_daily_new_casts`経由で`_check_site`を脱出し、`save_known_casts`が実行されないまま処理が中断していた。次回(毎時)実行でも同じ既知キャストが「新規」として再検知されDiscordへ再通知され続ける、という無限反復を招いていた。現在は`load_known_casts`と同じ`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）で捕捉する。**（Issue #462で追加）** さらに、`load_known_casts`と同じ隔離＋バックアップ復旧の仕組みを適用するよう拡張された。以前は読み込み失敗時に即座に空辞書を返しており、破損のたびに累積中の未送信カウントが0にリセットされていたが（無限再通知自体は#183/#174で解消済みだったものの、集計の耐障害性は`load_known_casts`より弱いままだった）、現在は(1)破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離し、(2)`.bak`バックアップファイルが存在すればそこからの復旧を試み、(3)復旧にも失敗した場合にのみ空辞書へフォールバックする。**（Issue #183で修正）** 集計状態のスキーマから`'date'`キーを廃止した（後述の`record_daily_new_casts`参照）。
+* 根拠: [メソッド定義とDocstring] (行番号: 913〜921 / 抜粋: "def load_daily_summary(self) -> Dict:\n        """日次サマリの集計状態を読み込む。")、隔離・復旧処理とコメント (行番号: 938〜961 / 抜粋: "# #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。\n        # 以前はここで即座に空辞書を返しており、破損時に累積中の未送信カウントが\n        # 0にリセットされていた" / "quarantine_path = summary_file.with_name(\n            f\"{summary_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}\"\n        )" / "backup_file = summary_file.with_suffix(summary_file.suffix + '.bak')\n        if backup_file.exists():")
 
 
-* **副作用**: JSONファイルの読み込み。
-* 根拠: [ファイル読み込み] (行番号: 660〜661 / 抜粋: "with open(summary_file, 'r', encoding='utf-8') as f:\n                return json.load(f)")
+* **引数/リクエスト**: なし（`self`のみ）
+* **戻り値/レスポンス**: `Dict`（ファイル不在時、または読み込み失敗＋隔離＋`.bak`バックアップからの復旧も全て失敗した場合は空辞書。バックアップからの復旧に成功した場合はその内容）。`'counts'`は直近の送信以降に累積した未送信件数であり、カレンダー日付ではなく「前回送信からの累積」で管理される（Issue #183）。
+* 根拠: [Docstringと各return] (行番号: 916〜921, 924, 928, 957, 961 / 抜粋: "Returns:\n            Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}\n                形式の集計状態。'counts'は直近の送信以降に累積した未送信件数\n                (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。\n                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。")
 
 
-* **エラーハンドリング**: `DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`。`UnicodeDecodeError`は`ValueError`のサブクラスとして捕捉される）発生時は`exc_info=True`付きでエラーログを出力し空辞書を返す。**（本PRで修正）** 以前は同じ`_LOAD_ERRORS`を捕捉する`load_known_casts`側の例外ログには`exc_info`が無く（本PRで併せて追加）、本メソッドのみ`exc_info=True`が無いという不統一があった。
-* 根拠: [try-exceptブロック(#174修正後)] (行番号: 697〜704 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError\n            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま\n            # 伝播する」バグが本メソッドにも残っていた。" / "logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)")
+* **副作用**: JSONファイルの読み込み。読み込み失敗時は、破損ファイルのリネーム(`summary_file.rename(quarantine_path)`)によるエラーログ、`.bak`バックアップファイルが存在する場合はその読み込みとログ出力（復旧成功時は警告ログ、復旧も失敗時はエラーログ）。
+* 根拠: [ファイル読み込みと隔離・復旧処理] (行番号: 926〜928, 942〜959 / 抜粋: "with open(summary_file, 'r', encoding='utf-8') as f:\n                return json.load(f)" / "summary_file.rename(quarantine_path)\n            logger.error(f\"Quarantined corrupted daily summary file: {summary_file} -> {quarantine_path}\")" / "logger.warning(f\"Recovered daily summary from backup {backup_file} after cache corruption.\")")
 
 
-### `DataManager.save_daily_summary`
+* **エラーハンドリング**: `DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`。`UnicodeDecodeError`は`ValueError`のサブクラスとして捕捉される）発生時は`exc_info=True`付きでエラーログを出力する。**（本PRで修正）** 以前は同じ`_LOAD_ERRORS`を捕捉する`load_known_casts`側の例外ログには`exc_info`が無く（本PRで併せて追加）、本メソッドのみ`exc_info=True`が無いという不統一があった。**（Issue #462で追加）** 続けて、破損ファイルを`.corrupted-{タイムスタンプ}`へリネームして隔離する（リネーム自体が`OSError`で失敗した場合も`exc_info=True`付きでエラーログを出力するのみで処理は継続）。`.bak`バックアップファイルが存在すれば読み込みを試み、成功すれば警告ログを出力してその内容を返す（バックアップも`DataManager._LOAD_ERRORS`で失敗した場合は`exc_info=True`付きでエラーログを出力）。バックアップが存在しない、またはバックアップも読み込めない場合は空辞書を返す。ファイルが存在しない場合（`summary_file.exists()`が`False`）はこれらの処理を経ずそのまま空辞書を返す。
+* 根拠: [try-exceptブロックと隔離・復旧処理] (行番号: 923〜924, 929〜936, 942〜949, 951〜961 / 抜粋: "except DataManager._LOAD_ERRORS as e:\n            # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError\n            # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま\n            # 伝播する」バグが本メソッドにも残っていた。" / "logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)" / "except OSError as e:\n            logger.error(f\"Failed to quarantine corrupted daily summary file {summary_file}: {e}\", exc_info=True)" / "except DataManager._LOAD_ERRORS as e:\n                logger.error(f\"Backup file {backup_file} is also unusable: {e}\", exc_info=True)")
 
-* **役割**: 日次サマリの集計状態を、`save_known_casts`と同じ一時ファイル経由のアトミックパターンでJSONファイルに保存する静的メソッド。
-* 根拠: [メソッド定義とDocstring] (行番号: 673〜678 / 抜粋: "def save_daily_summary(data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")
+
+### `DataManager.save_daily_summary`（Issue #462で変更）
+
+* **役割**: 日次サマリの集計状態を、`save_known_casts`と同じ一時ファイル経由のアトミックパターンでJSONファイルに保存するインスタンスメソッド。**（Issue #462で追加）** `save_known_casts`と同様、(1)一時ファイル(`.tmp`)へ書き出した内容を`json.load`で読み戻して正しくパースできることを検証し、(2)本番ファイルへの置換前に、既存の本番ファイルが存在すればその内容を`.bak.tmp`経由のアトミックな`replace`で`.bak`バックアップへ複製・更新する（`load_daily_summary`が破損時の復旧に使う）、という2つの安全策が追加された。読み戻し検証・`replace`到達前に例外が発生した場合、生成済みの`tmp_path`は外側の`except`節でbest-effortに削除される（`save_known_casts`のD-L8修正と同じパターン）。
+* 根拠: [メソッド定義とDocstring] (行番号: 963〜968 / 抜粋: "def save_daily_summary(self, data: Dict) -> None:\n        """日次サマリの集計状態をJSONファイルに保存する。")、検証・バックアップ処理とコメント (行番号: 979〜995 / 抜粋: "# #462: 書き込んだ内容が正しく読み戻せることを検証する(save_known_castsと同じ)。\n            with open(tmp_path, 'r', encoding='utf-8') as f:\n                json.load(f)" / "# 直前の正常データをバックアップとして残す。load_daily_summaryが破損時の\n            # 復旧に使う(save_known_castsと同じtmp書き込み+replaceのアトミックパターン)。")
 
 
 * **引数/リクエスト**: `data: Dict`（保存対象の集計状態）
-* 根拠: [引数定義とDocstring] (行番号: 673, 676〜677 / 抜粋: "data (Dict): 保存対象の集計状態。")
+* 根拠: [引数定義とDocstring] (行番号: 963, 966〜967 / 抜粋: "data (Dict): 保存対象の集計状態。")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 673 / 抜粋: "def save_daily_summary(data: Dict) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 963 / 抜粋: "def save_daily_summary(self, data: Dict) -> None:")
 
 
-* **副作用**: 保存先ディレクトリの作成、一時ファイルへの書き込みとアトミックな`replace`。
-* 根拠: [アトミック書き込みとコメント] (行番号: 683〜687 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')")
+* **副作用**: 保存先ディレクトリの作成(`mkdir`)、一時ファイル(`.tmp`)への書き込み、書き込んだ一時ファイルの読み戻し検証(`json.load`)、本番ファイルが存在する場合はその内容を`.bak.tmp`経由のアトミックな`replace`で`.bak`ファイルへコピー、`tmp_path.replace(summary_file)`によるアトミックな置換。
+* 根拠: [処理内容] (行番号: 972〜995 / 抜粋: "# アトミック書き込み: save_known_castsと同じパターン\n            tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')" / "bak_tmp_path.write_bytes(summary_file.read_bytes())\n                    bak_tmp_path.replace(backup_path)")
 
 
-* **エラーハンドリング**: `IOError`発生時は`exc_info=True`付きでエラーログを出力する。
-* 根拠: [try-exceptブロック] (行番号: 688〜689 / 抜粋: "except IOError as e:\n            logger.error(f"Failed to save daily summary: {e}", exc_info=True)")
+* **エラーハンドリング**: **（Issue #462で変更）** 例外捕捉が`IOError`単独から`(OSError, ValueError, TypeError)`へ拡張された（一時ファイルの読み戻し検証(`json.load`)が送出しうる`ValueError`/`TypeError`を含めて捕捉するため。`save_known_casts`と同じタプル）。捕捉時は`exc_info=True`付きでエラーログを出力し（例外の再送出はしない）、`tmp_path`が生成済み（`None`でない）であれば`tmp_path.unlink(missing_ok=True)`をbest-effortで実行して残置を防ぐ（削除自体の失敗も無視する）。`.bak`バックアップファイルへの書き込みのみが失敗した場合は、内側の`try`/`except OSError`で警告ログを出力し、失敗した`bak_tmp_path`をbest-effortで削除したうえで、後続のアトミック置換自体は中断せず継続する。
+* 根拠: [外側try-exceptとtmp_path削除・内側try-except] (行番号: 990〜1002 / 抜粋: "except OSError as e:\n                    logger.warning(f\"Failed to update backup file {backup_path}: {e}\")\n                    bak_tmp_path.unlink(missing_ok=True)" / "except (OSError, ValueError, TypeError) as e:\n            logger.error(f\"Failed to save daily summary: {e}\", exc_info=True)\n            if tmp_path is not None:\n                try:\n                    tmp_path.unlink(missing_ok=True)\n                except OSError:\n                    pass")
 
 
 ### `DataManager.record_daily_new_casts`
@@ -916,7 +938,7 @@
 
 ### `_run_monitor_locked`
 
-* **役割**: モニタープロセス全体のメインロジック（多重起動防止ロック取得後に`run_monitor`から呼び出される処理本体）。**（Issue #364で変更）** 冒頭で`MonitorConfig.get_data_dir()`を**1回だけ**呼び出してデータディレクトリを解決し、(1)それがローカルフォールバック先であれば`MonitorConfig.is_local_fallback_dir`で検知してERRORログを出し実行全体を中断、(2)そうでなければストレージのウォームアップ確認後に`DataManager(data_dir)`を生成し、`MonitorConfig.SITES`に登録された全サイトを順に`_check_site(monitor, notifier, site, data_manager)`で処理し、最後に`_maybe_send_daily_summary(notifier, data_manager)`を呼び出すオーケストレーション関数。フォールバック検知が`wait_for_storage_warmup`より前にある理由は、`get_data_dir()`がローカルフォールバック先を`mkdir`済みで返すためウォームアップ確認が必ず通過し、そこでは検知できないためである。
+* **役割**: モニタープロセス全体のメインロジック（多重起動防止ロック取得後に`run_monitor`から呼び出される処理本体）。**（Issue #364で変更）** 冒頭で`MonitorConfig.get_data_dir()`を**1回だけ**呼び出してデータディレクトリを解決し、(1)それがローカルフォールバック先であれば`MonitorConfig.is_local_fallback_dir`で検知してERRORログを出し実行全体を中断、(2)そうでなければストレージのウォームアップ確認後に`DataManager(data_dir)`を生成し、`MonitorConfig.SITES`に登録された全サイトを順に`_check_site(monitor, notifier, site, data_manager)`で処理し、最後に`_maybe_send_daily_summary(notifier, data_manager)`を呼び出すオーケストレーション関数。フォールバック検知が`wait_for_storage_warmup`より前にある理由は、`get_data_dir()`がローカルフォールバック先を`mkdir`済みで返すためウォームアップ確認が必ず通過し、そこでは検知できないためである。**（Issue #461で追加）** `DataManager(data_dir)`生成直後に`data_manager.cleanup_old_quarantine_files()`を呼び出し、`_QUARANTINE_RETENTION_DAYS`（既定30日）より古い`.corrupted-*`隔離ファイルを1実行につき1回だけ削除する（サイトループの前に行うため、当該実行中に新たに作られる隔離ファイルは対象外）。
 * 根拠: [関数定義とDocstring・解決・フォールバック判定・DataManager生成] (行番号: 1340〜1366 / 抜粋: "def _run_monitor_locked() -> None:\n    """モニタープロセスのメインロジック。MonitorConfig.SITESに登録された全サイトを順に処理する。"""" / "# #364: データディレクトリはここで1回だけ解決し、DataManagerに束縛して全サイトで\n    # 使い回す。get_data_dir()はNAS未マウント時にsudo mount・Discord/LINE通知を伴う\n    # 重い処理のため、サイト処理のたびに再評価してはならない" / "data_dir = MonitorConfig.get_data_dir()" / "if MonitorConfig.is_local_fallback_dir(data_dir):" / "data_manager = DataManager(data_dir)")
 
 
@@ -928,7 +950,7 @@
 * 根拠: [戻り値ヒント] (行番号: 1340 / 抜粋: "def _run_monitor_locked() -> None:")
 
 
-* **副作用**: デバッグログ出力（開始・終了）、`MonitorConfig.get_data_dir()`の1回の呼び出し（NAS状態の検証・自己修復・障害通知を伴いうる）、`wait_for_storage_warmup`の呼び出し、`DataManager`・`WebMonitor`・`DiscordNotifier`のインスタンス化、全`SITES`エントリに対する`_check_site`の逐次呼び出し、**（Issue #395で追加）** 各`SiteCheckResult`から失敗サイト数と保留アラート（`pending_alert_count`）を集計し、ループ後に`_send_pending_site_failure_alerts(notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES))`を呼び出して閉鎖疑いアラートをまとめて送信判断すること、`_maybe_send_daily_summary`の呼び出し、`finally`ブロックでの`monitor.close()`/`notifier.close()`呼び出し。
+* **副作用**: デバッグログ出力（開始・終了）、`MonitorConfig.get_data_dir()`の1回の呼び出し（NAS状態の検証・自己修復・障害通知を伴いうる）、`wait_for_storage_warmup`の呼び出し、`DataManager`・`WebMonitor`・`DiscordNotifier`のインスタンス化、**（Issue #461で追加）** `data_manager.cleanup_old_quarantine_files()`の呼び出し（`.corrupted-*`隔離ファイルのディレクトリ走査・削除）、全`SITES`エントリに対する`_check_site`の逐次呼び出し、**（Issue #395で追加）** 各`SiteCheckResult`から失敗サイト数と保留アラート（`pending_alert_count`）を集計し、ループ後に`_send_pending_site_failure_alerts(notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES))`を呼び出して閉鎖疑いアラートをまとめて送信判断すること、`_maybe_send_daily_summary`の呼び出し、`finally`ブロックでの`monitor.close()`/`notifier.close()`呼び出し。
 * 根拠: [失敗集計と保留アラート送信] (行番号: 1550〜1568 / 抜粋: "# #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に\n        # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。\n        failed_count = 0\n        pending_alerts: List[Tuple[SiteConfig, int]] = []" / "_send_pending_site_failure_alerts(\n            notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)\n        )")
 * 根拠: [メイン処理フロー] (行番号: 1348, 1366, 1371〜1377, 1382 / 抜粋: "data_dir = MonitorConfig.get_data_dir()" / "data_manager = DataManager(data_dir)" / "monitor = WebMonitor()\n        notifier = DiscordNotifier(MonitorConfig.DISCORD_WEBHOOK_URL)\n\n        for site in MonitorConfig.SITES:\n            try:\n                _check_site(monitor, notifier, site, data_manager)" / "_maybe_send_daily_summary(notifier, data_manager)")
 
@@ -971,7 +993,8 @@ flowchart TD
     WarmupOk -- No --> ErrLog1["エラーログ出力"] --> End1["End (処理中断)"]
 
     WarmupOk -- Yes --> InitInstances["DataManager(data_dir) / WebMonitor /<br>DiscordNotifier をインスタンス化"]
-    InitInstances --> SiteLoopStart["SITES内の各サイトをループ"]
+    InitInstances --> CleanupQuarantine["外部：data_manager.cleanup_old_quarantine_files()<br>(#461: 古い.corrupted-*隔離ファイルを削除)"]
+    CleanupQuarantine --> SiteLoopStart["SITES内の各サイトをループ"]
 
     SiteLoopStart --> CheckSite["外部：_check_site(monitor, notifier, site, data_manager)"]
     CheckSite --> LoadKnown["外部：data_manager.load_known_casts(site)"]
@@ -1038,6 +1061,38 @@ flowchart TD
         SBakWrite -- "OSError" --> SBakWarn["警告ログ出力<br>(バックアップ失敗しても継続)"] --> SReplace
         SBakWrite -- 成功 --> SReplace
         SReplace --> SDebugLog["デバッグログ出力 End"]
+    end
+```
+
+`DataManager.load_daily_summary`/`DataManager.save_daily_summary`は、Issue #462で`load_known_casts`/`save_known_casts`と同じ隔離・復旧および検証・バックアップのロジックが拡張適用された。以下にその内部フローを示す。
+
+```mermaid
+flowchart TD
+    subgraph LDS["DataManager.load_daily_summary (#462)"]
+        DStart["Start"] --> DExists{"summary_file.exists()?"}
+        DExists -- No --> DEmpty1["空辞書を返す"]
+        DExists -- Yes --> DRead["open+json.load(summary_file)"]
+        DRead -- 成功 --> DReturn["読み込んだDictを返す"]
+        DRead -- "_LOAD_ERRORS<br>(OSError/ValueError/TypeError/KeyError)" --> DErrLog["エラーログ出力(exc_info=True)"]
+        DErrLog --> DQuarantine["破損ファイルを<br>name.corrupted-timestamp へrename<br>(隔離。失敗してもログのみで継続)"]
+        DQuarantine --> DBakExists{".bakファイルが存在?"}
+        DBakExists -- No --> DEmpty2["空辞書を返す<br>(安全側フォールバック)"]
+        DBakExists -- Yes --> DReadBak["open+json.load(backup_file)"]
+        DReadBak -- 成功 --> DRecovered["警告ログ出力<br>復旧したDictを返す"]
+        DReadBak -- "_LOAD_ERRORS" --> DBakErrLog["エラーログ出力"] --> DEmpty2
+    end
+
+    subgraph SDS["DataManager.save_daily_summary (#462)"]
+        DSStart["Start"] --> DSMkdir["保存先ディレクトリmkdir"]
+        DSMkdir --> DSTmpWrite["一時ファイル(.tmp)へJSON書き込み"]
+        DSTmpWrite --> DSVerify["open+json.load(tmp_path)で読み戻し検証"]
+        DSVerify -- "検証失敗<br>(OSError/ValueError/TypeError)" --> DSErrLog["エラーログ出力(exc_info=True)<br>tmp_pathをbest-effortで削除<br>replaceせず終了"]
+        DSVerify -- 成功 --> DSBakCheck{"summary_file.exists()?"}
+        DSBakCheck -- No --> DSReplace["tmp_path.replace(summary_file)"]
+        DSBakCheck -- Yes --> DSBakWrite["現summary_fileの内容を<br>.bak.tmp経由でアトミックに.bakへ複製"]
+        DSBakWrite -- "OSError" --> DSBakWarn["警告ログ出力<br>bak_tmp_pathを削除(バックアップ失敗しても継続)"] --> DSReplace
+        DSBakWrite -- 成功 --> DSReplace
+        DSReplace --> DSEnd["End"]
     end
 ```
 
@@ -1160,10 +1215,10 @@ graph TD
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
 * **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
 * 根拠: [OSError分岐のコメント] (行番号: 696〜703 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")
-* **`.corrupted-*`隔離ファイル・`.bak`バックアップファイルの自動クリーンアップなし**: `DataManager.load_known_casts`は内容起因の読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するが、これらの隔離ファイルや`.bak`バックアップファイル自体を削除・世代整理する処理は本ファイル内のどこにも存在しない。破損が繰り返し発生する運用環境では`.corrupted-*`ファイルがデータディレクトリに際限なく蓄積し続ける可能性がある。
-* 根拠: [load_known_castsの隔離処理] (行番号: 569〜571 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")
-* **（Issue #174で一部解消・一部残存）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消された。ただし`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みは`load_daily_summary`/`save_daily_summary`には無いままであり、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされる（読み込み失敗時に`load_daily_summary`が返す空辞書に対し`record_daily_new_casts`が新規`counts`辞書を作成するため）。これは「無限反復の停止」を優先した最小修正であり、日次サマリの集計データ自体の耐障害性向上は本Issueのスコープ外。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。ファイル破損時のみ、上記の理由でカウントが失われうる。
-* 根拠: [load_daily_summaryの#174修正] (行番号: 1562〜1570), [record_daily_new_castsの累積] (行番号: 715〜716 / 抜粋: "data = DataManager.load_daily_summary()\n        counts = data.setdefault('counts', {})")
+* **（Issue #461で解消）`.corrupted-*`隔離ファイルの自動クリーンアップを追加**: 以前は`DataManager.load_known_casts`/`load_daily_summary`が内容起因の読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するのみで、これらの隔離ファイルを削除・世代整理する処理が本ファイル内のどこにも存在せず、破損が繰り返し発生する運用環境では際限なく蓄積し続ける可能性があった。現在は`DataManager.cleanup_old_quarantine_files`（`_run_monitor_locked`が`DataManager`生成直後に1回だけ呼び出す）が、`_QUARANTINE_RETENTION_DAYS`（既定30日）より`mtime`が古い`.corrupted-*`ファイルを削除する。ただし`.bak`バックアップファイル自体は元々1世代のみが上書き保持される設計であり、こちらのクリーンアップは元から不要（新設のクリーンアップ対象にも含まれない）。
+* 根拠: [load_known_castsの隔離処理] (行番号: 820〜822 / 抜粋: "quarantine_path = data_file.with_name(\n            f"{data_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"\n        )")、[cleanup_old_quarantine_filesとコメント] (行番号: 718〜722, 737〜765 / 抜粋: "# #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する\n    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)\n    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを\n    # 圧迫し得た。")、[_run_monitor_lockedからの呼び出し] (行番号: 1764〜1767 / 抜粋: "data_manager = DataManager(data_dir)\n    # #461: 破損検知のたびに増え続ける.corrupted-*隔離ファイルを、巡回のたびに\n    # 一定期間より古いものだけ削除する(失敗しても本処理は継続する)。\n    data_manager.cleanup_old_quarantine_files()")
+* **（Issue #462で解消）`load_daily_summary`は`load_known_casts`ほど手厚い復旧をしない、という制約を解消**: Issue #174の修正により、`daily_summary.json`が非UTF-8データで破損しても`load_daily_summary`が例外を送出せず空辞書を返すようになり、`record_daily_new_casts`経由の無限再通知（`save_known_casts`未実行による既知キャストの巻き戻り）は解消されていた。ただし当時は`load_known_casts`が持つ隔離（`.corrupted-*`へのリネーム）・`.bak`バックアップからの自動復旧の仕組みが`load_daily_summary`/`save_daily_summary`には無く、破損時は単に累積中の未送信カウントが失われ`0`から再カウントされていた。Issue #462でこの非対称性が解消され、`load_daily_summary`/`save_daily_summary`にも`load_known_casts`/`save_known_casts`と同じ隔離・バックアップ復旧・読み戻し検証の仕組みが拡張適用された。破損ファイルは隔離のうえ`.bak`から復旧を試み、それも不可能な場合にのみ従来通り空辞書へフォールバックし累積カウントが失われる（完全に無くなったわけではなく発生条件が狭まった）。**（Issue #183で修正）** かつては加えてカレンダー日付が変わるだけでも累積が無条件にリセットされていたが、この日付ベースのリセット自体は廃止された。
+* 根拠: [load_daily_summaryの#462修正] (行番号: 938〜961 / 抜粋: "# #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。"), [save_daily_summaryの#462修正] (行番号: 979〜993), [record_daily_new_castsの累積] (行番号: 1027〜1028 / 抜粋: "data = self.load_daily_summary()\n        counts = data.setdefault('counts', {})")
 
 * **（2026-09-02のbellica閉鎖対応で追加、Issue #395で変更）閉鎖疑いサイトの失敗ログはWARNINGに降格される**: 連続失敗が閾値（`CONSECUTIVE_FAILURE_ALERT_THRESHOLD`=24回）に達したサイトは、以降の失敗ログがERRORではなくWARNINGで記録されるため、ログのERROR監視（`health_watch`等）には現れなくなる。**（Issue #395）** 降格の条件は「アラート送信済み」ではなく「連続失敗回数が閾値以上」であり、Webhook未設定・失効でアラート送信が失敗し続けてもERRORが毎時発報され続けることはない（送信の再試行は`alerted`が立つまで別途続く）。また、失敗として計上する対象は`requests.RequestException`に加え、別ドメインへのリダイレクト（200を返す消失サイト）とキャスト0件の巡回結果にも拡張された。閉鎖疑いアラートは全サイト処理後にまとめて送信され、同一実行内の失敗サイト割合が`SELF_OUTAGE_SUPPRESS_RATIO`（0.5）を超える場合は自局側障害とみなして抑止される。閉鎖と判断してサイトを`MonitorConfig.SITES`から削除しても、`site_failures.json`内の当該サイトのエントリと`known_casts_{site_id}.json`は自動では削除されず残置される（実害はないが、`.corrupted-*`・`.bak`と同様にクリーンアップ機構はない）。回帰テストは`test_newface_monitor_site_failures.py`。
 * 根拠: [ログレベル分岐] (行番号: 1308〜1314 / 抜粋: "if alerted:\n        logger.warning(f\"{message} (closure alert already sent)\")\n    elif threshold_reached:\n        logger.warning(f\"{message} (closure alert threshold reached; alert pending)\")\n    else:\n        logger.log(log_level, message)")、[自局側障害の抑止] (行番号: 1343〜1348 / 抜粋: "if total_count > 0 and failed_count / total_count > MonitorConfig.SELF_OUTAGE_SUPPRESS_RATIO:")
@@ -1178,7 +1233,6 @@ graph TD
 | `MonitorConfig.SITES`に登録された各対象Webサイトの実際のHTML構造 | `selector_container`等のセレクタが対応する正確なマークアップ構造は本ファイルのコードからは分からない。 | 各対象サイトの実際のHTMLソース（コード外） |
 | Discord Webhook APIの詳細仕様 | ペイロード形式以外の認証方式、レート制限、エラーレスポンスの詳細仕様が本ファイルからは不明。 | Discord公式APIドキュメント（コード外） |
 | 本ファイルの実行方法（cron設定等） | `if __name__ == "__main__":`で直接実行される想定だが、定期実行のスケジューリング方法（cron、systemdタイマー等、および1時間毎という前提の根拠）は本ファイルからは不明。リポジトリ全体を`newface_monitor`および`cron`/`systemd`/`docker-compose`関連のファイル名・記述で検索したが、本ファイルの実行スケジュールを定義する設定ファイルはリポジトリ内に見つからなかった（デプロイ環境側の設定である可能性が高い）。 | デプロイ設定・cron定義ファイル等（リポジトリ内には存在せず） |
-| `.corrupted-*`隔離ファイルの外部クリーンアップ機構の有無 | `DataManager.load_known_casts`は破損ファイルを`.corrupted-{タイムスタンプ}`として退避するのみで、本ファイル内にはこれを削除・アーカイブする処理が存在しない。デプロイ環境側で別途cron等による定期削除が行われているかは本ファイルのコードからは不明。 | デプロイ設定・cron定義ファイル等（リポジトリ内には存在せず） |
 
 ## 相互参照による補足情報
 

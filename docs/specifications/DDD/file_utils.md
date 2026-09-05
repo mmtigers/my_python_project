@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a4fb40f` |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -17,9 +17,10 @@
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。**（品質で追加）** 加えて、DDD配下の各スクリプトから姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する`resolve_my_home_system_root`も提供する。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。**（Issue #469で追加）** 禁止記号8種に加えてASCII制御文字(`0x00`〜`0x1F`、`0x7F`)もアンダースコアへ置換対象とし、さらに置換・切り詰め後の名前がWindows予約デバイス名（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与する（モジュールレベル定数`_WINDOWS_RESERVED_NAMES`で定義）。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
+* 根拠: [_WINDOWS_RESERVED_NAMES定義とコメント] (行番号: 10〜17 / 抜粋: "# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。\n# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、\n# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。\n_WINDOWS_RESERVED_NAMES = frozenset(\n    {\"CON\", \"PRN\", \"AUX\", \"NUL\"}\n    | {f\"COM{i}\" for i in range(1, 10)}\n    | {f\"LPT{i}\" for i in range(1, 10)}\n)")、制御文字置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\\\/*?:\"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
 * 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 ## 3. 外部依存関係
@@ -38,26 +39,41 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
-### `sanitize_filename`
+### `_WINDOWS_RESERVED_NAMES`（モジュールレベル変数、Issue #469で追加）
 
-* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定バイト数以内（UTF-8エンコード後）に切り詰め、さらに末尾のピリオドと空白を除去した安全なファイル名文字列を生成する。変換結果が空文字列になった場合は`"untitled"`にフォールバックする。**（Issue #175で修正）** 以前は`safe[:max_length]`という「文字数」ベースの切り詰めだったため、UTF-8で1文字3バイトになる日本語では`max_length`文字が最大その3倍のバイト数になり、ext4等の255バイト制限を容易に超過してENAMETOOLONGを引き起こしていた。現在はUTF-8エンコード後のバイト列を切り詰めており、マルチバイト文字の境界で分断された末尾の不完全なバイト列は`errors='ignore'`で安全に除去する。
-* 根拠: [関数定義とDocstring] (行番号: 9〜20 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")、バイト単位の切り詰め (行番号: 23〜30 / 抜粋: "#175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では\n    # 日本語1文字が3バイトになるため")
+* **役割**: `sanitize_filename`がサニタイズ後の名前と比較する、Windowsの予約デバイス名（拡張子の有無に関わらずファイル作成が失敗しうる名前）の集合。NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のために用意されている。
+* 根拠: [定義とコメント] (行番号: 10〜17 / 抜粋: "# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。\n# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、\n# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。\n_WINDOWS_RESERVED_NAMES = frozenset(\n    {\"CON\", \"PRN\", \"AUX\", \"NUL\"}\n    | {f\"COM{i}\" for i in range(1, 10)}\n    | {f\"LPT{i}\" for i in range(1, 10)}\n)")
+
+
+* **引数/リクエスト**: 該当なし（モジュールロード時に1度だけ構築される定数）
+* **戻り値/レスポンス**: `frozenset[str]`。内容は`{"CON", "PRN", "AUX", "NUL", "COM1"〜"COM9", "LPT1"〜"LPT9"}`（22要素）。
+* 根拠: [frozenset構築] (行番号: 13〜17 / 抜粋: 前掲)
+
+
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+
+### `sanitize_filename`（Issue #469で変更）
+
+* **役割**: ファイル名として使用できない記号（`\`, `/`, `*`, `?`, `:`, `"`, `<`, `>`, `|`）およびASCII制御文字(`0x00`〜`0x1F`、`0x7F`)をアンダースコア(`_`)に置換し、前後の空白を除去したうえで、指定バイト数以内（UTF-8エンコード後）に切り詰め、さらに末尾のピリオドと空白を除去する。この時点で結果が空文字列になった場合は`"untitled"`にフォールバックする。**（Issue #469で追加）** 最後に、得られた名前を大文字化したものが`_WINDOWS_RESERVED_NAMES`（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`）に完全一致する場合、末尾に`_`を1つ付与して衝突を回避する（例: `"con"` → `"con_"`）。**（Issue #175で修正）** 以前は`safe[:max_length]`という「文字数」ベースの切り詰めだったため、UTF-8で1文字3バイトになる日本語では`max_length`文字が最大その3倍のバイト数になり、ext4等の255バイト制限を容易に超過してENAMETOOLONGを引き起こしていた。現在はUTF-8エンコード後のバイト列を切り詰めており、マルチバイト文字の境界で分断された末尾の不完全なバイト列は`errors='ignore'`で安全に除去する。
+* 根拠: [関数定義とDocstring] (行番号: 20〜31 / 抜粋: "def sanitize_filename(filename: str, max_length: int = 200) -> str:\n    """ファイル名として使用できない文字を置換し、長さを制限する。")、制御文字を含む置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\/*?:"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、バイト単位の切り詰め (行番号: 36〜39 / 抜粋: "#175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では\n    # 日本語1文字が3バイトになるため")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
 
 
 * **引数/リクエスト**: `filename: str`（元の文字列）, `max_length: int = 200`（生成するファイル名の最大バイト数。UTF-8エンコード後、拡張子は含まない前提。ext4等の255バイト制限に対する安全マージンとして既定200バイト）
-* 根拠: [引数定義とDocstring] (行番号: 9, 12〜16 / 抜粋: "max_length: 生成するファイル名の最大バイト数（UTF-8エンコード後、拡張子は\n            含まない前提）。ext4等の255バイト制限に対する安全マージンとして\n            既定200バイト。")
+* 根拠: [引数定義とDocstring] (行番号: 20, 23〜27 / 抜粋: "max_length: 生成するファイル名の最大バイト数（UTF-8エンコード後、拡張子は\n            含まない前提）。ext4等の255バイト制限に対する安全マージンとして\n            既定200バイト。")
 
 
-* **戻り値/レスポンス**: `str`（安全なファイル名文字列。変換結果が空文字列であれば`"untitled"`）
-* 根拠: [戻り値ヒントとDocstringおよびフォールバック] (行番号: 9, 18〜19, 33, 39〜40 / 抜粋: "Returns:\n        安全なファイル名文字列。", "if not safe:", "safe = \"untitled\"\n    return safe")
+* **戻り値/レスポンス**: `str`（安全なファイル名文字列。変換結果が空文字列であれば`"untitled"`。さらにWindows予約名と一致する場合は末尾に`_`が付与された文字列）
+* 根拠: [戻り値ヒントとDocstringおよび各フォールバック] (行番号: 20, 29〜30, 46, 52, 56〜57, 59 / 抜粋: "Returns:\n        安全なファイル名文字列。", "if not safe:", "safe = \"untitled\"", "if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"\n\n    return safe")
 
 
 * **副作用**: なし（純粋な文字列変換処理。ファイルシステムへのアクセスは行わない）
-* 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
+* 根拠: [関数本体] (行番号: 34〜59 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
 
 
 * **エラーハンドリング**: なし（例外を送出する処理は含まれていない。`filename`が文字列でない場合の型チェックも存在しない）
-* 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
+* 根拠: [関数本体] (行番号: 34〜59 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
 
 
 ### `resolve_my_home_system_root` (品質で追加)
@@ -110,7 +126,7 @@
 
 ```mermaid
 flowchart TD
-    Start["Start: sanitize_filename(filename, max_length)"] --> Replace["禁止文字(バックスラッシュ・スラッシュ・記号類)をアンダースコアに置換<br>(re.sub)"]
+    Start["Start: sanitize_filename(filename, max_length)"] --> Replace["禁止文字(バックスラッシュ・スラッシュ・記号類)<br>および制御文字(0x00-0x1F, 0x7F)をアンダースコアに置換<br>(re.sub, #469で制御文字を追加)"]
     Replace --> Strip1["前後の空白を除去 (strip)"]
     Strip1 --> Encode["UTF-8エンコード後のバイト長がmax_lengthを超えるか判定<br>(#175: 文字数ではなくバイト数で判定)"]
     Encode -- 超える --> Truncate["バイト列をmax_lengthバイトで切り詰め、<br>errors='ignore'で不完全なマルチバイト末尾を除去してデコード"]
@@ -118,8 +134,11 @@ flowchart TD
     Truncate --> Strip2["末尾のピリオド・空白を除去 (strip('. '))"]
     Strip2 --> EmptyCheck{"空文字列になったか?"}
     EmptyCheck -- Yes --> Untitled["'untitled'にフォールバック"]
-    EmptyCheck -- No --> Return["戻り値: 安全なファイル名文字列"]
-    Untitled --> Return
+    EmptyCheck -- No --> ReservedCheck
+    Untitled --> ReservedCheck{"大文字化した名前が<br>_WINDOWS_RESERVED_NAMESに一致するか?<br>(#469で追加)"}
+    ReservedCheck -- Yes --> AppendSuffix["末尾に'_'を付与"]
+    ReservedCheck -- No --> Return["戻り値: 安全なファイル名文字列"]
+    AppendSuffix --> Return
     Return --> End["End"]
 ```
 
@@ -158,6 +177,7 @@ flowchart TD
 graph TD
     subgraph "file_utils.py"
         sanitize_filename["sanitize_filename()"]
+        WindowsReserved["_WINDOWS_RESERVED_NAMES<br>(#469で追加)"]
         DiscordCircuitBreaker["DiscordCircuitBreaker"]
         resolve_my_home_system_root["resolve_my_home_system_root()"]
     end
@@ -175,6 +195,7 @@ graph TD
     end
 
     sanitize_filename --> re_mod
+    sanitize_filename --> WindowsReserved
     resolve_my_home_system_root --> os_mod
     resolve_my_home_system_root --> pathlib_mod
     batch_dl --> DiscordCircuitBreaker
@@ -195,7 +216,7 @@ graph TD
 
 * **`resolve_my_home_system_root`の`services`ディレクトリ判定は簡易的**: MY_HOME_SYSTEMのルートかどうかを`services`という名前のサブディレクトリの存在だけで判定しており、たまたま`services`という名前のディレクトリを持つ無関係なディレクトリを誤ってルートと判定する可能性はゼロではない。ただし`MY_HOME_SYSTEM_ROOT`環境変数による明示的な上書きが常に可能であるため、誤判定時の回避手段は用意されている。
 * **入力型の未検証**: `filename`引数が`str`型であることを前提としており、`None`や非文字列が渡された場合の型チェック・エラーハンドリングが存在しない。呼び出し元での事前検証に依存する設計となっている。
-* **禁止文字リストの限定性**: 置換対象は`\/*?:"<>|`の8文字のみであり、制御文字（NULバイト等）やOS/ファイルシステム固有の予約語（Windowsの`CON`, `PRN`等）には対応していない。
+* **（Issue #469で解消）禁止文字リストの限定性・Windows予約名未対応**: 以前は置換対象が`\/*?:"<>|`の8文字のみであり、制御文字（NULバイト等）やOS/ファイルシステム固有の予約語（Windowsの`CON`, `PRN`等）には対応していなかった。現在は正規表現にASCII制御文字(`0x00`〜`0x1F`、`0x7F`)を追加して同様にアンダースコアへ置換し、さらにサニタイズ後の名前が`_WINDOWS_RESERVED_NAMES`（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与するよう修正済み。ただし判定は拡張子を含まない`safe`文字列全体との完全一致のみであり、Windowsの実際の予約名判定（拡張子付き`"CON.txt"`等も同様に予約扱いされる）を完全に再現しているわけではない点は残る。
 * **`max_length`のデフォルト値の前提**: Docstringに「拡張子は含まない前提」と明記されているが、関数自体は拡張子の有無を判別するロジックを持たず、呼び出し元が拡張子を別途扱う必要がある。
 * **（Issue #175で解消）文字数ベースの切り詰めによるバイト制限超過**: 以前は`safe[:max_length]`という単純な文字列スライスで切り詰めており、`max_length`は実質「文字数」を制限するものだった。UTF-8で1文字3バイトになる日本語等では、既定値200文字が最大600バイトとなりext4等の255バイト制限を容易に超過し、`ENAMETOOLONG`でファイル操作が失敗する不具合があった（`extract_youtube_urls.py`はチャンネル名とタイトルの2つの`sanitize_filename`結果を連結するため、この問題がさらに顕著だった）。現在はUTF-8エンコード後のバイト列を切り詰めるよう修正済み。ただし本関数単体は拡張子分のバイト数を考慮しないため、呼び出し元が拡張子や区切り文字（`extract_youtube_urls.py`の`"_"`等）の分を差し引いた`max_length`を渡す必要がある点は変わらない。
 * **`DiscordCircuitBreaker`はプロセス内・非スレッドセーフ**: 状態(`_consecutive_failures`, `_open`)はインスタンス変数のみで保持され、ファイル等への永続化やロックは一切行わない。呼び出し元(`batch_download_discord.py`はモジュールレベルの単一インスタンス`_discord_circuit_breaker`、`newface_monitor.py`は`DiscordNotifier`インスタンスごとの`self._circuit_breaker`)がプロセス終了時に状態を失うことを前提とした設計であり、次回のcron実行では必ず閉じた状態(`is_open=False`)から始まる。
