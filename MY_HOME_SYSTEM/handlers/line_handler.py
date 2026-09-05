@@ -265,23 +265,12 @@ def handle_message(event: MessageEvent):
 async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):
     """非同期メッセージ処理ロジック"""
 
-    # 1. Family Quest Commands (優先度高)
-    if msg_text == "ステータス":
-        resp = await line_service.get_user_status_message(user_id)
-        reply_message(reply_token, resp, user_id=user_id)
-        return
+    # #358: 以前ここにあった LINE 経由の Family Quest コマンド(ステータス/クエスト/
+    # 承認N/却下N)は、LINE ID と quest_users.user_id のマッピングが存在せず本番では
+    # 機能しないデッドコードだったため撤去した(オーナー判断: LINE経由のクエスト機能は廃止)。
+    # クエストの確認・完了報告・承認は family-quest フロントエンドを使うこと。
 
-    if msg_text == "クエスト":
-        resp = await line_service.get_active_quests_message(user_id)
-        reply_message(reply_token, resp, user_id=user_id)
-        return
-
-    if msg_text.startswith("承認") or msg_text.startswith("却下"):
-        resp = await line_service.process_approval_command(user_id, msg_text)
-        reply_message(reply_token, resp, user_id=user_id)
-        return
-
-    # 2. Health & Life Log Commands
+    # 1. Health & Life Log Commands
     if "子供記録" in msg_text or "体調" in msg_text:
         # Issue #375: 否定表現(元気ない等)を先に判定し、2名以上の併記は全員分を記録する。
         targets = _extract_health_targets(msg_text)
@@ -293,7 +282,7 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
             reply_message(reply_token, responses[:5], user_id=user_id)
             return
 
-    # 3. AI Analysis (Fallback)
+    # 2. AI Analysis (Fallback)
     try:
         # Issue #376: AI経路の総時間に上限を設ける(reply token 期限切れ対策)。
         ai_resp_text = await asyncio.wait_for(
@@ -328,19 +317,11 @@ def handle_postback(event: PostbackEvent):
 
         logger.info(f"📩 Postback [{user_id}]: {data_str}")
 
-        # 1. Family Quest (承認/却下) の処理
-        if data_str.startswith("approve:") or data_str.startswith("reject:"):
-            cmd_map = {"approve": "承認", "reject": "却下"}
-            try:
-                action, hist_id = data_str.split(":")
-                cmd_text = f"{cmd_map[action]} {hist_id}"
-                # 非同期で処理を実行（承認処理は時間がかかる場合があるため）
-                asyncio.run(_process_message_async(user_id, "Postback", cmd_text, reply_token))
-            except ValueError:
-                logger.error(f"Invalid Postback format: {data_str}")
-            return
+        # #358: 以前ここにあった approve:/reject: postback の処理(LINE経由のクエスト
+        # 承認/却下)は、それを生成する送信元がリポジトリ内に一切存在しないデッドコード
+        # だったため撤去した(オーナー判断: LINE経由のクエスト機能は廃止)。
 
-        # 2. 既存ロジック (line_logic.py) への委譲
+        # 既存ロジック (line_logic.py) への委譲
         # show_health_input, child_check, その他のボタン操作はここで処理
         try:
             # line_logic側に処理を丸投げする

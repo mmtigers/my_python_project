@@ -566,7 +566,13 @@ class QuestService:
             total_exp = quest['exp_gain'] + boost['exp']
             total_gold = quest['gold_gain'] + boost['gold']
             
-            if user['role'] == ROLE_CHILD:
+            # Q-M2 (#370): 承認(role == ROLE_ADULT必須)・購入(is_adult = role == ROLE_ADULT)は
+            # 元々「ROLE_ADULTのみ大人扱い」だったが、完了処理だけが逆に「ROLE_CHILDのみ子ども扱い、
+            # それ以外は大人扱い」だったため、role が NULL/未知のユーザー(migration 0001対象外の
+            # user_idや、MasterUser.role=Noneで同期された行)は承認ゲート無しで即時報酬を得られていた。
+            # オーナー判断により「不明 = 子ども」(安全側)に統一し、3経路とも
+            # 「ROLE_ADULTのときだけ即時、それ以外はpending」の判定に揃える。
+            if user['role'] != ROLE_ADULT:
                 if quest['target_user'] == 'siblings':
                     return self._process_coop_quest_completion(cur, user, quest, now_iso, total_exp, total_gold)
 
@@ -1440,9 +1446,6 @@ class GameSystem:
                 "SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC"
             )]
 
-            # ユーザーマップ作成
-            user_map = {u['user_id']: u['name'] for u in users}
-
             valid_completed = []
 
             for q in filtered_quests:
@@ -1468,18 +1471,15 @@ class GameSystem:
                                 # 期間外であっても最新履歴を処理済みにし、同ユーザーの過去履歴検索を終了する
                                 users_processed.add(uid)
 
-                # 共有クエスト(複数人ターゲット)の他者対応状況を判定
-                target = q.get('target_user')
-                if target and target.startswith('role_'):
-                    completed_by_someone = next((c for c in valid_completed if c['quest_id'] == q_id), None)
-                    if completed_by_someone:
-                        q['is_shared_completed_by'] = completed_by_someone['user_id']
-                        q['shared_completed_by_name'] = user_map.get(completed_by_someone['user_id'], '誰か')
-                    else:
-                        pending_by_someone = next((p for p in pending if p['quest_id'] == q_id), None)
-                        if pending_by_someone:
-                            q['is_shared_pending_by'] = pending_by_someone['user_id']
-                            q['shared_pending_by_name'] = user_map.get(pending_by_someone['user_id'], '誰か')
+            # Q-M3/F-M5 (#371): 以前ここにあった target_user が 'role_' プレフィックスの
+            # クエストの共有表示判定(is_shared_completed_by/is_shared_pending_by)は、
+            # completion API側(_process_complete_quest_locked)が 'all'/本人/'siblings'
+            # 以外を無条件403で拒否するため、'role_*' ターゲットは一覧には出ても
+            # 誰も完了できないという不整合な潜在バグだった(quest_data.pyに実際の
+            # 'role_*' ターゲットが存在しないため顕在化していなかった)。オーナー判断
+            # (role_* ターゲットは今後も使わない)により、この表示側の分岐を削除した。
+            # 複数人ターゲットの共有表示が必要な唯一のケースである兄妹連携クエスト
+            # (target_user='siblings')は、linked_history_idによる連結で別途処理される。
 
             completed = valid_completed
 
