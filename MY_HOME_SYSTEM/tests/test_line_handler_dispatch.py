@@ -642,3 +642,158 @@ class TestProfileCacheBounding:
 
         assert len(line_handler._profile_cache) == 1
         assert fake_api.get_profile.call_count == 1
+
+
+# ==========================================
+# Issue #376: webhookEventIdベースの冪等化 (_is_duplicate_event) と
+# dispatch_events (BackgroundTasksから呼ばれる実処理エントリポイント)
+# ==========================================
+
+from linebot.v3.webhooks import MessageEvent, PostbackEvent
+
+
+class TestIsDuplicateEvent:
+    def setup_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def teardown_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def test_first_occurrence_is_not_duplicate(self):
+        event = MagicMock()
+        event.webhook_event_id = "evt-1"
+
+        assert line_handler._is_duplicate_event(event) is False
+        assert "evt-1" in line_handler._SEEN_EVENT_IDS
+
+    def test_second_occurrence_of_same_id_is_duplicate(self):
+        event = MagicMock()
+        event.webhook_event_id = "evt-1"
+
+        assert line_handler._is_duplicate_event(event) is False
+        assert line_handler._is_duplicate_event(event) is True
+
+    def test_missing_webhook_event_id_is_never_treated_as_duplicate(self):
+        """冪等化キーが取得できないイベント(想定外の形式)は誤って処理を止めない"""
+        event = MagicMock(spec=[])  # webhook_event_id属性を持たない
+
+        assert line_handler._is_duplicate_event(event) is False
+        assert line_handler._is_duplicate_event(event) is False
+
+    def test_cache_does_not_exceed_max_size(self, monkeypatch):
+        monkeypatch.setattr(line_handler, "_SEEN_EVENT_IDS_MAX_SIZE", 5)
+
+        for i in range(10):
+            event = MagicMock()
+            event.webhook_event_id = f"evt-{i}"
+            line_handler._is_duplicate_event(event)
+
+        assert len(line_handler._SEEN_EVENT_IDS) == 5
+
+    def test_oldest_entries_are_evicted_first(self, monkeypatch):
+        monkeypatch.setattr(line_handler, "_SEEN_EVENT_IDS_MAX_SIZE", 3)
+
+        base_time = 1_700_000_000.0
+        for i in range(5):
+            monkeypatch.setattr(line_handler.time, "time", lambda t=base_time, i=i: t + i)
+            event = MagicMock()
+            event.webhook_event_id = f"evt-{i}"
+            line_handler._is_duplicate_event(event)
+
+        assert set(line_handler._SEEN_EVENT_IDS.keys()) == {"evt-2", "evt-3", "evt-4"}
+
+
+class TestDispatchEvents:
+    """
+    Issue #376: /callback/line がHTTP応答を返した後、BackgroundTasksから呼ばれる
+    dispatch_events の振り分け・冪等化・イベント単位の例外隔離。
+    """
+
+    def setup_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def teardown_method(self):
+        line_handler._SEEN_EVENT_IDS.clear()
+
+    def _message_event(self, event_id="evt-msg", text="ステータス", user_id="U1"):
+        # spec付きMagicMockはクラス自体(dir(MessageEvent))に無い属性の代入・参照が
+        # できない(pydanticフィールドはインスタンス生成時にしか現れないため)ため、
+        # SDKのfrom_dict()で本物のインスタンスを組み立てる
+        # (isinstance()判定・webhook_event_id参照を正しく満たすため)。
+        return MessageEvent.from_dict({
+            "type": "message",
+            "mode": "active",
+            "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": user_id},
+            "webhookEventId": event_id,
+            "deliveryContext": {"isRedelivery": False},
+            "replyToken": "tok",
+            "message": {"id": "m1", "type": "text", "text": text, "quoteToken": "q"},
+        })
+
+    def _postback_event(self, event_id="evt-pb", data="show_health_input", user_id="U1"):
+        return PostbackEvent.from_dict({
+            "type": "postback",
+            "mode": "active",
+            "timestamp": 1700000000000,
+            "source": {"type": "user", "userId": user_id},
+            "webhookEventId": event_id,
+            "deliveryContext": {"isRedelivery": False},
+            "replyToken": "tok",
+            "postback": {"data": data},
+        })
+
+    def test_message_event_is_routed_to_handle_message(self, monkeypatch):
+        mock_handle_message = MagicMock()
+        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        event = self._message_event()
+
+        line_handler.dispatch_events([event])
+
+        mock_handle_message.assert_called_once_with(event)
+
+    def test_postback_event_is_routed_to_handle_postback(self, monkeypatch):
+        mock_handle_postback = MagicMock()
+        monkeypatch.setattr(line_handler, "handle_postback", mock_handle_postback)
+        event = self._postback_event()
+
+        line_handler.dispatch_events([event])
+
+        mock_handle_postback.assert_called_once_with(event)
+
+    def test_unknown_event_type_is_ignored(self, monkeypatch):
+        """MessageEvent/PostbackEvent以外(follow等)は元のWebhookHandlerと同様に無視される"""
+        mock_handle_message = MagicMock()
+        mock_handle_postback = MagicMock()
+        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        monkeypatch.setattr(line_handler, "handle_postback", mock_handle_postback)
+        other_event = MagicMock()  # MessageEvent/PostbackEventいずれのspecでもない
+
+        line_handler.dispatch_events([other_event])
+
+        mock_handle_message.assert_not_called()
+        mock_handle_postback.assert_not_called()
+
+    def test_duplicate_webhook_event_id_is_skipped(self, monkeypatch):
+        mock_handle_message = MagicMock()
+        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        event1 = self._message_event(event_id="dup", text="ステータス")
+        event2 = self._message_event(event_id="dup", text="ステータス")
+
+        line_handler.dispatch_events([event1, event2])
+
+        mock_handle_message.assert_called_once_with(event1)
+
+    def test_exception_in_one_event_does_not_block_the_rest(self, monkeypatch):
+        """dispatch_events自身のループレベルでもイベント単位の例外隔離を二重に保証する"""
+        mock_handle_message = MagicMock(side_effect=[RuntimeError("boom"), None])
+        monkeypatch.setattr(line_handler, "handle_message", mock_handle_message)
+        event1 = self._message_event(event_id="e1")
+        event2 = self._message_event(event_id="e2")
+
+        line_handler.dispatch_events([event1, event2])  # 例外が外に漏れないこと
+
+        assert mock_handle_message.call_count == 2
+
+    def test_empty_events_list_is_a_noop(self):
+        line_handler.dispatch_events([])  # 例外が出ないこと
