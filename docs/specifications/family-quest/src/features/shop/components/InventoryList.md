@@ -11,7 +11,8 @@
 ## 関連ドキュメント
 
 - [apiClient.md](../../../lib/apiClient.md) — `fetchInventory`/`useItem`等、本ファイルが呼び出すAPIクライアントメソッドの実装元。
-- [types/index.md](../../../types/index.md) — `InventoryItem`型定義の提供元。
+- [types/index.md](../../../types/index.md) — `InventoryItem`/`InventoryResponse`型定義の提供元。
+- [quest_service.md](../../../../../MY_HOME_SYSTEM/quest_service.md) — `GET /api/quest/inventory/{user_id}`のレスポンス形状(`items`/`youtube_cooldown_remaining_seconds`/`is_youtube_reward`)を決定するバックエンド実装。
 - [Card.md](../../../components/ui/Card.md) — アイテムカードのUIコンポーネント。
 - [Button.md](../../../components/ui/Button.md) — 確認モーダル内「キャンセル」「はい」ボタンのUIコンポーネント。
 - [Modal.md](../../../components/ui/Modal.md) — 使用確認ダイアログのUIコンポーネント。
@@ -32,8 +33,12 @@
 * 根拠: (行番号: 12〜16, 67〜72 / 抜粋: "// M-6-3: apiClient側でスローされるErrorのmessageには、バックエンドが返す\n// {\"detail\": \"...\"} の内容が入っている(apiClient.ts参照)。\nconst extractErrorDetail = (error: unknown): string => {", "// M-6-3: 以前はonErrorが無く、使用申請の失敗(通信エラー等)が\n        // ユーザーに一切通知されないサイレント失敗になっていた。\n        onError: (error) => {")
 * **バグ修正(Issue #119)**: 使用確認`Modal`の「はい」ボタンは、押下と同時に`setItemToUse(null)`でモーダルを閉じる実装のため、連打（ダブルタップ）で1回目のクリックが画面に反映される前に2回目のクリックイベントが発火し、同一アイテムに対し`useMutationAction.mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（既に1回目で`'consumed'`に更新済み）により`400`（`"Cannot use this item"`）となり、実際は1回目が成功しているにもかかわらずエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的なガードを追加し、2回目以降のクリックは`useMutationAction.mutate`を呼ばずに無視するようにした（`onSettled`でリクエスト完了時に解除）。
 * 根拠: (行番号: 41, 73〜75, 140〜147 / 抜粋: "const isUsingItemRef = useRef(false);", "onSettled: () => {\n            isUsingItemRef.current = false;\n        }", "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
+* **新機能(YouTubeごほうび券クールダウン)**: `apiClient.fetchInventory`の戻り値が配列から`InventoryResponse`（`{items, youtube_cooldown_remaining_seconds}`）に変更されたのに合わせ、`data?.items`を一覧として使う。バックエンドが返す`youtube_cooldown_remaining_seconds`(サーバー側の残り秒数、5秒間隔のポーリングで再同期)を起点に、1秒間隔の`setInterval`でローカルに`youtubeCooldownSeconds`をカウントダウンする`useEffect`を追加した。`item.is_youtube_reward`が真かつ`youtubeCooldownSeconds > 0`のアイテムは`isCoolingDown`となり、カードのクリック(使用確認モーダルを開く操作)を無効化したうえで、説明文の代わりに`formatCooldown`(mm:ss形式)を使った「目を休めよう。あと{mm:ss}で使えます」という文言と`Lock`アイコンを表示する。使用成功時のキャッシュ更新（`onSuccess`内の`setQueryData`）も、配列を直接フィルタする形から`InventoryResponse`の`items`フィールドのみを`filter`する形に変更した。
+* 根拠: `const items = data?.items;` (行番号: 59)、`useEffect(() => {\n        const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;` (行番号: 66〜75)、`const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;` (行番号: 170)、`onClick={() => { if (!isCoolingDown) setItemToUse(item); }}` (行番号: 177)、`queryClient.setQueryData<InventoryResponse>(queryKey, (old) => {\n                if (!old) return old;\n                return { ...old, items: old.items.filter(item => item.id !== usedInventoryId) };\n            });` (行番号: 100〜103)
+* **新機能(YouTubeごほうび券クールダウンの予告バナー)**: バックエンドがクールダウンの猶予期間中(実際の制限開始前)に返す`data?.youtube_cooldown_announcement`を`cooldownAnnouncement`として取り出し、真であれば`formatAnnouncementDate`(ISO日付を「9/12(土)」のような表示用文字列に変換)を使った「{開始日}から、YouTubeのごほうび券は使うと15分間、次の1枚が使えなくなります(目を休めるため)。」という予告バナー(`announcementBanner`)を表示する。いきなり制限がかかると子どもが困惑するため、施行日を迎えるまでの猶予期間中に事前告知する目的。このバナーは、もちものが空の状態(`items.length === 0`)でも、通常のアイテム一覧表示時でも(グリッドの`col-span-full`要素として)表示され、個別のアイテムの`is_youtube_reward`/所持状況とは無関係に、`cooldownAnnouncement`の有無だけで出し分けられる。
+* 根拠: `const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;` (行番号: 60)、`function formatAnnouncementDate(isoDate: string): string {` (行番号: 34〜37)、`const announcementBanner = cooldownAnnouncement && (` (行番号: 130〜138)、空状態での表示 (行番号: 141〜143)、一覧表示時の`col-span-full`表示 (行番号: 165〜167)
 * **バグ修正(Issue #441)**: 使用ミューテーション（`useMutationAction`）には既にエラー通知（M-6-3）が実装済みだったが、一覧取得自体の`useQuery`にはエラーハンドリングが一切無く、取得失敗時は画面上に何も表示されないサイレント失敗のままだった（「アイテムが無い」のか「読み込みに失敗した」のか区別できない）。`useQuery`から`isError`/`error`も分割代入で取得し、`isError`が`true`になった時点を検知する`useEffect`を追加、`hasShownFetchErrorRef`（`useRef`）でエラー状態に入った最初の1回だけ`showToast`を呼ぶようにした（5秒間隔のポーリングでバックエンドが落ちたままの間、失敗のたびにトーストが連投されるのを防ぐ。`isError`が`false`に戻ればrefをリセットし、次にエラーになった際は再度1回だけ表示する）。
-* 根拠: (行番号: 40, 46〜61 / 抜粋: "const { data: items, isLoading, isError, error } = useQuery({", "const hasShownFetchErrorRef = useRef(false);\n    useEffect(() => {\n        if (isError) {\n            if (!hasShownFetchErrorRef.current) {\n                hasShownFetchErrorRef.current = true;\n                showToast({ title: \"エラー\", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: \"⚠️\" });\n            }\n        } else {\n            hasShownFetchErrorRef.current = false;\n        }\n    }, [isError, error, showToast]);")
+* 根拠: (行番号: 54, 82〜92 / 抜粋: "const { data, isLoading, isError, error } = useQuery({", "const hasShownFetchErrorRef = useRef(false);\n    useEffect(() => {\n        if (isError) {\n            if (!hasShownFetchErrorRef.current) {\n                hasShownFetchErrorRef.current = true;\n                showToast({ title: \"エラー\", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: \"⚠️\" });\n            }\n        } else {\n            hasShownFetchErrorRef.current = false;\n        }\n    }, [isError, error, showToast]);")
 
 ## 3. 外部依存関係
 
@@ -41,7 +46,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `React`, `useEffect`, `useRef`, `useState` | モジュール | Reactコンポーネントとしての定義と利用、確認モーダルの表示対象アイテム保持用の状態管理、多重使用リクエスト防止ガード（`isUsingItemRef`）用の参照保持。**（#441で`useEffect`が追加）** 一覧取得(`useQuery`)がエラー状態になったことを検知して初回の1回だけトーストを表示する副作用処理、および「エラー状態が続いている間」を判定する`hasShownFetchErrorRef`用の参照保持 | 根拠: [`React`, `useEffect`, `useRef`, `useState`] (行番号: 1 / 抜粋: "import React, { useEffect, useRef, useState } from 'react';") |
+| `React`, `useEffect`, `useRef`, `useState` | モジュール | Reactコンポーネントとしての定義と利用、確認モーダルの表示対象アイテム保持用の状態管理、多重使用リクエスト防止ガード（`isUsingItemRef`）用の参照保持、YouTubeごほうび券クールダウンの1秒間隔カウントダウン用の副作用(`useEffect`)。**（#441で`useEffect`の用途が追加）** 一覧取得(`useQuery`)がエラー状態になったことを検知して初回の1回だけトーストを表示する副作用処理、および「エラー状態が続いている間」を判定する`hasShownFetchErrorRef`用の参照保持 | 根拠: [`React`, `useEffect`, `useRef`, `useState`] (行番号: 1 / 抜粋: "import React, { useEffect, useRef, useState } from 'react';") |
 | `useQuery`, `useMutation`, `useQueryClient` | フック | データ取得、データ更新、キャッシュ操作 | 根拠: [`@tanstack/react-query`] (行番号: 2 / 抜粋: "import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';") |
 | `apiClient` | オブジェクト | サーバーサイドとのAPI通信 | 根拠: [`apiClient`] (行番号: 3 / 抜粋: "import { apiClient } from '../../../lib/apiClient';") |
 | `Card` | コンポーネント | アイテムごとのUIカードレイアウト表示 | 根拠: [`Card`] (行番号: 4 / 抜粋: "import { Card } from '../../../components/ui/Card';") |
@@ -49,8 +54,8 @@
 | `Modal` | コンポーネント | 「つかう」実行前の確認ダイアログ表示 | 根拠: [`Modal`] (行番号: 6 / 抜粋: "import { Modal } from '../../../components/ui/Modal';") |
 | `useSound` | フック | アクション時の効果音再生 | 根拠: [`useSound`] (行番号: 7 / 抜粋: "import { useSound } from '../../../hooks/useSound';") |
 | `useToast` | フック | 使用失敗時のエラートースト表示 | 根拠: [`useToast`] (行番号: 8 / 抜粋: "import { useToast } from '../../../context/useToast';") |
-| `Loader2`, `PackageOpen` | コンポーネント(アイコン) | UI上の状態表示アイコン（ローディング中/所持アイテム） | 根拠: [`lucide-react`] (行番号: 9 / 抜粋: "import { Loader2, PackageOpen } from 'lucide-react';") |
-| `InventoryItem` | 型定義 | アイテムデータの型チェックと補完 | 根拠: [`InventoryItem`] (行番号: 10 / 抜粋: "import { InventoryItem } from '../../../types';") |
+| `Loader2`, `PackageOpen`, `Lock` | コンポーネント(アイコン) | UI上の状態表示アイコン（ローディング中/所持アイテム/YouTubeごほうび券クールダウン中） | 根拠: [`lucide-react`] (行番号: 9 / 抜粋: "import { Loader2, PackageOpen, Lock } from 'lucide-react';") |
+| `InventoryItem`, `InventoryResponse` | 型定義 | アイテムデータおよびインベントリ取得APIレスポンス全体（`items`+`youtube_cooldown_remaining_seconds`+`youtube_cooldown_announcement`）の型チェックと補完 | 根拠: [`InventoryItem`, `InventoryResponse`] (行番号: 10 / 抜粋: "import { InventoryItem, InventoryResponse } from '../../../types';") |
 
 ### ブラックボックスとなる外部要素
 
@@ -241,6 +246,9 @@ graph TD
 * 根拠: (行番号: 52〜63 / 抜粋: "// アイテム使用は即座に消費が確定する(親の承認は不要)ため、\n            // リストからも即座に取り除く。\n            const usedInventoryId = variables;\n            queryClient.setQueryData<InventoryItem[]>(queryKey, (oldItems) => {\n                if (!oldItems) return [];\n                return oldItems.filter(item => item.id !== usedInventoryId);\n            });\n\n            // 念のためサーバーとも同期\n            queryClient.invalidateQueries({ queryKey: queryKey });\n            queryClient.invalidateQueries({ queryKey: ['chronicle'] });")
 * **[修正済み] 「はい」連打による多重使用リクエストの防止（Issue #119）**: 以前は「はい」ボタンの`onClick`が`itemToUse`の真偽値のみを条件に無条件で`useMutationAction.mutate`を呼んでいたため、連打（ダブルタップ）で`setItemToUse(null)`によるモーダル閉じ（再レンダー）が反映される前に2回目のクリックイベントが発火すると、同一アイテムに対して`mutate`が二重に呼ばれることがあった。2回目のリクエストはサーバー側で`status != 'owned'`（1回目で既に`'consumed'`済み）により`400`「Cannot use this item」を返し、実際は1回目が成功しているのにエラートーストが表示されてしまっていた。`isUsingItemRef`（`useRef`）による同期的な多重送信ガードを追加し、`useMutationAction`の`onSettled`で必ず解除するようにした。`useMutationAction.isPending`（React Queryのreactiveな状態）ではなく`useRef`を使っているのは、`#101`の`isConfirmingRef`（`App.tsx`）と同じ理由で、連打による同期的な2回目の呼び出しが1回目の状態更新の反映（再レンダー）を待たずに発生しうるため。
 * 根拠: (行番号: 41, 73〜75, 140〜147 / 抜粋: "const isUsingItemRef = useRef(false);", "onSettled: () => {\n            isUsingItemRef.current = false;\n        }", "if (itemToUse && !isUsingItemRef.current) {\n                                    isUsingItemRef.current = true;\n                                    useMutationAction.mutate(itemToUse.id);\n                                }")
+
+* **YouTubeごほうび券クールダウンの表示は「サーバー値5秒同期＋ローカル1秒カウントダウン」のハイブリッド**: `youtubeCooldownSeconds`は`data?.youtube_cooldown_remaining_seconds`が変化する(=5秒間隔のポーリングでサーバー値が更新される)たびに`useEffect`内で丸ごと上書きされ、そこから`setInterval`(1000ms)でローカルに1ずつ減算していく。そのため、次のポーリング(最大5秒後)までの間はローカルカウントダウンが唯一の情報源であり、ページ内の別タブ操作等でサーバー側の状態が変わっても最大5秒のズレが生じ得る。クールダウン判定自体（使用可否）はサーバー側(`InventoryService._use_item_locked`)が最終的に強制するため、表示のズレが実際の誤使用を許すことはない。
+* 根拠: `useEffect(() => {\n        const serverValue = data?.youtube_cooldown_remaining_seconds ?? 0;\n        setYoutubeCooldownSeconds(serverValue);\n        if (serverValue <= 0) return;\n\n        const id = window.setInterval(() => {\n            setYoutubeCooldownSeconds((s) => Math.max(0, s - 1));\n        }, 1000);\n        return () => window.clearInterval(id);\n    }, [data?.youtube_cooldown_remaining_seconds]);` (行番号: 58〜67)
 
 ## 9. 不明事項一覧
 

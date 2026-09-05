@@ -738,3 +738,33 @@ def prewarm_nas_paths() -> None:
     for name in ("ASSETS_DIR", "TMP_VIDEO_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
+
+# ==========================================
+# 21. Family Quest: YouTubeごほうび券クールダウン設定
+# ==========================================
+# 連続視聴による目の負担を防ぐため、YouTube系のごほうび券(user_inventory経由で
+# 使用するreward_master.reward_id)を1枚使用してから次の1枚を使用できるまでの
+# クールダウン対象IDを指定する(services/quest_service.py InventoryService.use_item)。
+# 17.のTV_UNLOCK_QUEST_IDSと同じ「カンマ区切りの整数」形式。
+# 既定値はquest_data.pyのYouTube報酬(10:00/30:00/60:00)の現在のreward_id(10,11,12)。
+_youtube_reward_ids_str: str = os.getenv("YOUTUBE_REWARD_IDS", "10,11,12")
+YOUTUBE_REWARD_IDS: List[int] = []
+if _youtube_reward_ids_str:
+    try:
+        YOUTUBE_REWARD_IDS = [int(r.strip()) for r in _youtube_reward_ids_str.split(",") if r.strip().isdigit()]
+    except Exception as e:
+        logger.warning(f"⚠️ YOUTUBE_REWARD_IDS parse error: {e}")
+
+# クールダウンの実際の適用開始日(YYYY-MM-DD、JST基準)。いきなり制限がかかると
+# 子どもが困惑するため、この日を迎えるまではクールダウンを実際には強制せず、
+# family-quest側で「この日から変わるよ」という予告バナーのみを表示する
+# (services/quest_service.py の _is_youtube_cooldown_enforced が判定)。
+# 既定値はこの機能を追加した日(2026-09-05)の1週間後。実際にリリースする日程に
+# 合わせて調整すること。パース失敗時は安全側(=即時強制)にフォールバックする。
+from datetime import date as _date
+_youtube_cooldown_enforce_from_str: str = os.getenv("YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM", "2026-09-12")
+try:
+    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)
+except Exception as e:
+    logger.warning(f"⚠️ YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
+    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)

@@ -41,7 +41,11 @@ describe('InventoryList fetch error handling (#441)', () => {
     });
 
     it('does not show an error toast when the fetch succeeds', async () => {
-        vi.mocked(apiClient.fetchInventory).mockResolvedValue([]);
+        vi.mocked(apiClient.fetchInventory).mockResolvedValue({
+            items: [],
+            youtube_cooldown_remaining_seconds: 0,
+            youtube_cooldown_announcement: null,
+        });
 
         renderWithClient(<InventoryList userId="dad" />);
 

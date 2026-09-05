@@ -80,6 +80,28 @@ class TestTvUnlockQuestIdsParsing:
             assert cfg.TV_UNLOCK_QUEST_IDS == []
 
 
+class TestYoutubeRewardIdsParsing:
+    def test_valid_comma_separated_ids(self):
+        with _with_env(YOUTUBE_REWARD_IDS="1,2,3") as cfg:
+            assert cfg.YOUTUBE_REWARD_IDS == [1, 2, 3]
+
+    def test_malformed_entries_are_silently_skipped(self):
+        """数字以外・空要素が混じっていても例外にならず、有効な数字だけが残ること"""
+        with _with_env(YOUTUBE_REWARD_IDS="1, abc, , 3,, -5") as cfg:
+            # "-5" は str.isdigit() が False (先頭の'-'を含むため) なので除外される
+            assert cfg.YOUTUBE_REWARD_IDS == [1, 3]
+
+    def test_unset_env_var_falls_back_to_youtube_reward_default(self):
+        """未設定時はquest_data.pyのYouTube報酬の既定reward_id(10,11,12)にフォールバックする"""
+        with _with_env(YOUTUBE_REWARD_IDS=None) as cfg:
+            assert cfg.YOUTUBE_REWARD_IDS == [10, 11, 12]
+
+    def test_empty_string_disables_the_cooldown(self):
+        """空文字を明示的に指定した場合はデフォルトへフォールバックせず機能を無効化する"""
+        with _with_env(YOUTUBE_REWARD_IDS="") as cfg:
+            assert cfg.YOUTUBE_REWARD_IDS == []
+
+
 class TestAllowAllOrigins:
     def test_true_switches_cors_origins_to_wildcard(self):
         with _with_env(ALLOW_ALL_ORIGINS="true") as cfg:

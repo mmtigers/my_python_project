@@ -13,7 +13,7 @@
 * [database.md](./database.md) / [init_unified_db.md](./init_unified_db.md) - `config.SQLITE_DB_PATH`, `SQLITE_TABLE_*`定数群を参照する呼び出し元
 * [notification_service.md](./notification_service.md) - `config.LINE_CHANNEL_ACCESS_TOKEN`, `config.DISCORD_WEBHOOK_*`を参照する呼び出し元
 * [webhook_router.md](./webhook_router.md) - `config.SWITCHBOT_WEBHOOK_TOKEN`(SwitchBot Webhook共有シークレット検証)を参照する呼び出し元
-* [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)を参照する呼び出し元
+* [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)、`config.YOUTUBE_REWARD_IDS`(YouTube系ごほうび券クールダウン対象reward_id)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
 * `google_photos_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
@@ -86,6 +86,12 @@
 * 根拠: [遅延解決セクション] (抜粋: "# 20. NASパスの遅延解決 (Issue #330 PR-B)", "def __getattr__(name: str) -> str:", "def prewarm_nas_paths() -> None:")
 
 
+* 「21. Family Quest: YouTubeごほうび券クールダウン設定」セクションで、Family Questの子ども向けYouTube系ごほうび券について、連続視聴による目の負担を防ぐためのクールダウン対象reward_idを`YOUTUBE_REWARD_IDS`(環境変数`YOUTUBE_REWARD_IDS`、カンマ区切りの整数、未設定時は既定値`"10,11,12"`)として定義する。パース方式は「17. TVロック機能設定」の`TV_UNLOCK_QUEST_IDS`と同じ(`isdigit()`を満たす要素のみ`int`化してリスト化、パース例外は`logger.warning`のみで握りつぶす)。`services/quest_service.py`の`InventoryService.use_item`/`get_user_inventory`が参照する。
+* 根拠: [Family Quest: YouTubeごほうび券クールダウン設定セクション] (行番号: 742〜756 / 抜粋: "# 21. Family Quest: YouTubeごほうび券クールダウン設定", "_youtube_reward_ids_str: str = os.getenv(\"YOUTUBE_REWARD_IDS\", \"10,11,12\")", "YOUTUBE_REWARD_IDS: List[int] = []")
+* 同セクションに、クールダウンを実際に強制し始める日を表す`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`(環境変数`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、`YYYY-MM-DD`形式、既定値`"2026-09-12"`、`datetime.date`型)を追加した。いきなり制限がかかると子どもが困惑するため、この日を迎えるまでは`InventoryService.use_item`が実際には使用を拒否せず、family-quest側に予告バナーのみを表示する猶予期間を設ける目的。パース失敗時は`logger.warning`を出したうえで`date(2000, 1, 1)`(=常に施行済み扱い、安全側の即時強制)にフォールバックする。
+* 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 760〜770 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
+
+
 * 「18. Alexaスキル設定」セクションで、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
 * 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 614〜621 / 抜粋: "# ==========================================\n# 18. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 
@@ -107,6 +113,7 @@
 | `BaseModel`, `Field`, `ValidationError` | 外部ライブラリ(`pydantic`) | データバリデーション付きのモデルクラス定義とエラー捕捉 | 根拠: `from pydantic import BaseModel` (行番号: 33 / 抜粋: `from pydantic import BaseModel`) |
 | `retry_with_backoff` | 内部モジュール(`core.utils`) | `verify_and_initialize_storage`のExponential Backoffリトライ機構(Issue #292で共通ユーティリティへ切り出し)。以前はここで`import time`し自前で`time.sleep`していたが、リトライループごと`core.utils`へ委譲したため`config.py`自身は`time`モジュールに直接依存しなくなった。 | 根拠: `from core.utils import retry_with_backoff` (行番号: 35 / 抜粋: `from core.utils import retry_with_backoff`) |
 | `time`(`_dt_time`という別名) | 標準ライブラリ(`datetime`) | タイムラプススケジュール(`TIMELAPSE_SCHEDULES`)の開始・終了時刻定義 | 根拠: `from datetime import time as _dt_time` (行番号: 473 / 抜粋: `from datetime import time as _`) |
+| `date`(`_date`という別名) | 標準ライブラリ(`datetime`) | `YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`(YouTube系ごほうび券クールダウンの施行開始日)のパース・型注釈・フォールバック値の生成 | 根拠: `from datetime import date as _date` (行番号: 764 / 抜粋: `from datetime import date as _date`) |
 
 ### ブラックボックスとなる外部要素
 
@@ -366,6 +373,7 @@ flowchart TD
 * モジュールロード時に外部の`devices.json`や`family_events.json`を読み込む仕様であり、JSONの構文エラーが発生した場合は例外をキャッチして警告を出すが、設定は空のまま処理が続行される。
 * メモリ使用率やストレージ等の警告通知に関連する定数（例：`MEMORY_ALERT_PERCENT`）が存在するが、このファイル単体では監視機構そのものは実装されていない。
 * `TV_UNLOCK_QUEST_IDS` は環境変数のカンマ区切り文字列から数字のみを抽出して`int`変換しており、`isdigit()`を満たさない値（不正なID等）は例外を送出せず黙って除外される仕様のため、設定ミスに気づきにくい。
+* `YOUTUBE_REWARD_IDS`も同じパース方式(`isdigit()`を満たす要素のみ`int`化)のため同じ落とし穴を持つ。加えて`TV_UNLOCK_QUEST_IDS`(未設定時は空リスト=機能無効)と異なり、環境変数が未設定の場合は既定値`"10,11,12"`にフォールバックしてクールダウン機能が有効な状態になる点に注意(明示的に`YOUTUBE_REWARD_IDS=`(空文字)を設定した場合のみ空リストとなり無効化される)。
 * `FAMILY_SETTINGS["members"]` の実名文字列自体は他モジュール（`handlers/line_handler.py`等）のメッセージマッチングロジックと結合しているため、この値を変更すると気づきにくい形で機能が壊れるリスクがある。年齢等の付随情報のみ`family_members.local.json`（gitignore対象）に切り出す設計になっている。
 * `NAS_WRITE_CHECK_RETRIES`(416行目)は本ファイル内では未使用で、`monitors/nas_monitor.py`の`NasMonitor.__init__`が`getattr(config, "NAS_WRITE_CHECK_RETRIES", 3)`で参照する消費専用の設定値である。本ファイル単体を見ても実際の再試行ロジック(Exponential Backoff)は確認できない点に注意。
 

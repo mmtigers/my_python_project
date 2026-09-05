@@ -1,6 +1,6 @@
 // family-quest/src/lib/apiClient.ts
 
-import { InventoryItem } from "../types";
+import { InventoryResponse } from "../types";
 
 // 現在の環境に最も適したBASE_URLを動的に判定する
 const getBaseUrl = (): string => {
@@ -126,9 +126,8 @@ export class ApiClient {
     }
 
     // --- Inventory Methods ---
-    // 配列を直接返すように型指定 (APIがリストを返す前提)
-    async fetchInventory(userId: string): Promise<InventoryItem[]> {
-        return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);
+    async fetchInventory(userId: string): Promise<InventoryResponse> {
+        return this.get<InventoryResponse>(`/api/quest/inventory/${userId}`);
     }
 
     async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {

@@ -1,5 +1,6 @@
 import datetime
 import importlib
+import math
 import os
 import random
 import threading
@@ -52,6 +53,10 @@ except ImportError:
 SPAM_CHECK_INTERVAL_SECONDS = 10
 INFINITE_QUEST_COOLDOWN_SECONDS = 60
 
+# YouTube系ごほうび券(config.YOUTUBE_REWARD_IDS)を使用してから、次のYouTube系
+# ごほうび券を使用できるまでのクールダウン(秒)。連続視聴による目の負担を防ぐ。
+YOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60
+
 
 def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float]:
     """
@@ -76,6 +81,42 @@ def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float
         return (now_check - last_time).total_seconds()
     except Exception:
         return None
+
+
+def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:
+    """
+    直近でYouTube系ごほうび券(config.YOUTUBE_REWARD_IDS)を使用してから、
+    次の1枚を使用できるようになるまでの残り秒数を返す。クールダウン対象IDが
+    未設定、または対象IDを一度も使用していない場合は0を返す。
+    """
+    if not config.YOUTUBE_REWARD_IDS:
+        return 0
+
+    placeholders = ",".join("?" for _ in config.YOUTUBE_REWARD_IDS)
+    row = cur.execute(f"""
+        SELECT used_at FROM user_inventory
+        WHERE user_id = ? AND status = 'consumed' AND reward_id IN ({placeholders})
+        ORDER BY used_at DESC LIMIT 1
+    """, (user_id, *config.YOUTUBE_REWARD_IDS)).fetchone()
+
+    if not row or not row['used_at']:
+        return 0
+
+    elapsed = _seconds_since_iso_timestamp(row['used_at'])
+    if elapsed is None:
+        return 0
+
+    remaining = YOUTUBE_REWARD_COOLDOWN_SECONDS - elapsed
+    return max(0, math.ceil(remaining))
+
+
+def _is_youtube_cooldown_enforced() -> bool:
+    """
+    YouTube系ごほうび券のクールダウンを実際に強制する日(config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM、
+    JST基準)を迎えているかどうかを返す。いきなり制限がかかると子どもが困惑するため、
+    この日より前は使用を拒否せず、family-quest側に予告バナーを表示するだけに留める。
+    """
+    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM
 
 
 # ==========================================
@@ -146,6 +187,23 @@ _purchase_locks = RefCountedLockRegistry()
 
 def _get_purchase_lock(key: Tuple[str, int]):
     return _purchase_locks.acquire(key)
+
+
+# ==========================================
+# Item Use Lock (Race Condition Guard for YouTube Cooldown)
+# ==========================================
+# use_item は「YouTube系ごほうび券の直近used_atを読む→クールダウン判定→consumedへ
+# 更新」というTOCTOUを持つ。同一ユーザーが異なるYouTube系ごほうび券(reward_id違い、
+# 例: 10:00券と30:00券)をほぼ同時に使用しようとすると、両リクエストがクールダウン
+# なし(0秒)を読んでしまい、15分ロックをすり抜けて連続使用が成立し得る。
+# ユーザー単位でuse_item全体をプロセス内で直列化し、このレースを防ぐ。
+# #435: 他の3レジストリと同様、参照カウント付きレジストリを使い、使用を終えた
+# キーは自動的に辞書から削除する。
+_item_use_locks = RefCountedLockRegistry()
+
+
+def _get_item_use_lock(user_id: str):
+    return _item_use_locks.acquire(user_id)
 
 
 # ==========================================
@@ -1030,7 +1088,7 @@ class ShopService:
 
 
 class InventoryService:
-    def get_user_inventory(self, user_id: str) -> List[dict]:
+    def get_user_inventory(self, user_id: str) -> Dict[str, Any]:
         with common.get_db_cursor() as cur:
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
@@ -1041,9 +1099,43 @@ class InventoryService:
                 ORDER BY ui.purchased_at DESC
             """
             rows = cur.execute(sql, (user_id,)).fetchall()
-            return [dict(row) for row in rows]
+            items = []
+            for row in rows:
+                item = dict(row)
+                # フロントエンド(InventoryList.tsx)がYouTube系ごほうび券のクールダウン
+                # UIを出し分けられるよう、判定ロジックはconfig側に集約したままフラグだけ渡す。
+                item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS
+                items.append(item)
+
+            cooldown_enforced = _is_youtube_cooldown_enforced()
+            youtube_cooldown_remaining_seconds = (
+                _get_youtube_cooldown_remaining_seconds(cur, user_id) if cooldown_enforced else 0
+            )
+
+            # 猶予期間中(cooldown_enforced=False)は、実際に制限が始まる日を予告する情報を
+            # 返す。フロントエンド(InventoryList.tsx)はこれを見て告知バナーを表示する。
+            # 施行開始後・クールダウン対象IDが未設定の場合はNone。
+            youtube_cooldown_announcement = None
+            if not cooldown_enforced and config.YOUTUBE_REWARD_IDS:
+                days_remaining = (
+                    config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM - datetime.datetime.now(JST).date()
+                ).days
+                youtube_cooldown_announcement = {
+                    "starts_on": config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM.isoformat(),
+                    "days_remaining": max(0, days_remaining),
+                }
+
+        return {
+            "items": items,
+            "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds,
+            "youtube_cooldown_announcement": youtube_cooldown_announcement,
+        }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        with _get_item_use_lock(user_id):
+            return self._use_item_locked(user_id, inventory_id)
+
+    def _use_item_locked(self, user_id: str, inventory_id: int) -> Dict[str, str]:
         """
         アイテムを使用し、即座に消費を確定する(親の承認は不要)。
         """
@@ -1060,6 +1152,19 @@ class InventoryService:
             if not item: raise HTTPException(404, "Item not found")
             if item['user_id'] != user_id: raise HTTPException(403, "Not your item")
             if item['status'] != 'owned': raise HTTPException(400, "Cannot use this item")
+
+            # 連続視聴による目の負担を防ぐため、YouTube系ごほうび券は前回使用から
+            # YOUTUBE_REWARD_COOLDOWN_SECONDS(15分)経過するまで再使用できないようにする。
+            # ただしYOUTUBE_REWARD_COOLDOWN_ENFORCE_FROMを迎えるまでは実際には拒否しない
+            # (いきなり制限がかかると子どもが困惑するため、事前に予告バナーのみ表示する)。
+            if item['reward_id'] in config.YOUTUBE_REWARD_IDS and _is_youtube_cooldown_enforced():
+                cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)
+                if cooldown_remaining > 0:
+                    remaining_minutes = math.ceil(cooldown_remaining / 60)
+                    raise HTTPException(
+                        429,
+                        f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",
+                    )
 
             now_iso = common.get_now_iso()
 
