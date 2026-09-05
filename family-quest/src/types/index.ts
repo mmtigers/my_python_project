@@ -23,10 +23,16 @@ export interface User {
     gold: number;
     role?: string | null;
     // バックエンド(MY_HOME_SYSTEM)から送られてくるHP。個々のプレイヤーはダメージを
-    // 受けない仕様のため hp は常に maxHp と等しいが、maxHp 自体は
-    // calculate_max_hp(level) = level * 20 + 5 で計算される値なのでフロント側で
-    // 独自に再計算してはいけない（旧実装は誤った式で再計算していた）。
+    // 受けない仕様のため hp は常に maxHp と等しい。
     hp?: number;
+    /**
+     * #471: ⚠️ 常にバックエンドの計算結果をそのまま表示すること。
+     *
+     * `calculate_max_hp(level) = level * 20 + 5` (MY_HOME_SYSTEM側)で計算される値。
+     * フロント側で独自に再計算してはいけない — 過去に誤った式で再計算し、
+     * バックエンドの値とズレて表示されるリグレッションが実際に発生している。
+     * レベルからHPを表示する場合は、必ずこの `maxHp` フィールドを参照すること。
+     */
     maxHp?: number;
     // #470: get_all_view_dataが付与する次レベルまでの必要経験値。
     // gameDataSchema.ts の userSchema にも対応するフィールドを追加済み。
