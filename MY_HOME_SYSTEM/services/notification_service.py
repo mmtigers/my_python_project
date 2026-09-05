@@ -9,7 +9,6 @@ from linebot.v3.messaging import (
     ApiClient,
     MessagingApi,
     PushMessageRequest,
-    ReplyMessageRequest,
     TextMessage,
     FlexMessage,
     FlexContainer,
@@ -228,38 +227,3 @@ def send_push(
 
     return success
 
-def send_reply(reply_token: str, messages: List[Any]) -> bool:
-    """LINE Reply API送信 (v3対応版)"""
-    if not line_configuration: return False
-    
-    sdk_messages: List[Message] = []
-    for msg in messages:
-        if isinstance(msg, Message):
-            sdk_messages.append(msg)
-        elif isinstance(msg, dict) and msg.get('type') == 'text':
-            sdk_messages.append(TextMessage(text=msg.get('text', "")))
-            
-    try:
-        with ApiClient(line_configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            line_bot_api.reply_message(
-                ReplyMessageRequest(
-                    replyToken=reply_token,
-                    messages=sdk_messages
-                )
-            )
-        return True
-    except Exception as e:
-        logger.error(f"LINE Reply Error: {e}")
-        return False
-
-def get_line_message_quota() -> Optional[Any]: # 修正: 戻り値の型ヒントを追加
-    """LINE送信数確認 (v3対応版)"""
-    if not line_configuration: return None
-    try:
-        with ApiClient(line_configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            return line_bot_api.get_message_quota()
-    except Exception as e:
-        logger.error(f"Quota Check Error: {e}")
-        return None

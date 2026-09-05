@@ -78,6 +78,17 @@ def seed_data_endpoint():
 def update_user_avatar(action: UpdateUserAction):
     return user_service.update_avatar(action.user_id, action.avatar_url)
 
+# #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の
+# うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための
+# エンドポイント。まだ紐付いていない自分自身のアップロード直後の画像のみが対象になる
+# よう、削除前にどのユーザーにも参照されていないことをサービス層で確認する。
+# ベストエフォートの後始末のため、削除できなくても(既に無い/他ユーザーが参照中等)
+# エラーにはせず状態を返すのみとする。
+@router.delete("/upload/{filename}")
+def delete_uploaded_image(filename: str):
+    deleted = user_service.delete_unlinked_avatar(filename)
+    return {"status": "deleted" if deleted else "skipped"}
+
 # Image Upload Helper
 def validate_image_header(header: bytes) -> bool:
     if header.startswith(b'\xff\xd8\xff'): return True

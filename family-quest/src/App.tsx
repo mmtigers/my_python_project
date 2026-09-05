@@ -659,8 +659,8 @@ function App() {
         onUserSwitch={handleUserChange}
         onLogSwitch={() => { setViewMode('familyLog'); play('select'); }}
         onSettingsClick={() => { setSettingsOpen(true); play('tap'); }}
-        hideUserSwitcher={layoutMode === 'landscape'}
-        hideLogSwitcher={layoutMode === 'portrait'}
+        showUserSwitcher={layoutMode !== 'landscape'}
+        showLogSwitcher={layoutMode !== 'portrait'}
         showBackToMain={layoutMode === 'landscape'}
         onBackToMain={() => { setViewMode('main'); play('tap'); }}
       />

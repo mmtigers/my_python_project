@@ -42,11 +42,18 @@ try:
     from core.logger import get_logger
     from core.nas_utils import get_managed_target_directory
     logger = get_logger(__name__)
-except ImportError:
+except ImportError as e:
     # 開発環境や単体実行時のフォールバック
     import logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("UrlExtractor")
+    # #463: core.*のインポート失敗はNASではなくローカルディスクへの書き込みに
+    # 切り替わることを意味する。本番環境でMY_HOME_SYSTEMへのパス解決が崩れる等の
+    # 変更があった場合に気づけるよう、無警告で切り替わらないようにする。
+    logger.warning(
+        f"⚠️ core.*のインポートに失敗したため開発用フォールバックへ切り替わりました "
+        f"(NASではなくローカルディスクへ書き込みます): {e}"
+    )
 
     def get_managed_target_directory(*args, **kwargs) -> Path:
         # 呼び出し元(get_output_base_dir)はfallback_dir_str(BASE_DIR/'data'の絶対パス)を

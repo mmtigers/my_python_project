@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `7789bf6` |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -28,19 +28,20 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `os` | 標準ライブラリ | ファイルパス操作、存在確認、削除など | 根拠: `import os` (行番号: 1 / 抜粋: "import os") |
-| `json` | 標準ライブラリ | 状態を記録したJSONファイルの読み書き | 根拠: `import json` (行番号: 2 / 抜粋: "import json") |
-| `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 3 / 抜粋: "import shutil") |
-| `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 4 / 抜粋: "import subprocess") |
-| `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 5 / 抜粋: "import sys") |
-| `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 6 / 抜粋: "import time") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得（レポート時間の判定） | 根拠: `from datetime import datetime` (行番号: 7 / 抜粋: "from datetime import datetime") |
-| `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 8 / 抜粋: "from typing import Dict...") |
-| `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
-| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
-| `get_now_iso` | 自作モジュール | 現在時刻のISOフォーマット取得 | 根拠: `get_now_iso` (行番号: 16 / 抜粋: "from core.utils import get_no...") |
-| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
+| `errno`（Issue #450で追加） | 標準ライブラリ | `_cleanup_empty_dirs`で`os.rmdir`失敗時の`OSError.errno`が`errno.ENOTEMPTY`(ディレクトリが空でない、想定内)かどうかを判定するため | 根拠: `import errno` (行番号: 1 / 抜粋: "import errno") |
+| `os` | 標準ライブラリ | ファイルパス操作、存在確認、削除など | 根拠: `import os` (行番号: 2 / 抜粋: "import os") |
+| `json` | 標準ライブラリ | 状態を記録したJSONファイルの読み書き | 根拠: `import json` (行番号: 3 / 抜粋: "import json") |
+| `shutil` | 標準ライブラリ | ディスク使用量の取得 | 根拠: `import shutil` (行番号: 4 / 抜粋: "import shutil") |
+| `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
+| `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 6 / 抜粋: "import sys") |
+| `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 7 / 抜粋: "import time") |
+| `datetime` | 標準ライブラリ | 現在時刻の取得（レポート時間の判定） | 根拠: `from datetime import datetime` (行番号: 8 / 抜粋: "from datetime import datetime") |
+| `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 9 / 抜粋: "from typing import Dict...") |
+| `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 14 / 抜粋: "import config") |
+| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 16 / 抜粋: "from core.database import sav...") |
+| `get_now_iso` | 自作モジュール | 現在時刻のISOフォーマット取得 | 根拠: `get_now_iso` (行番号: 17 / 抜粋: "from core.utils import get_no...") |
+| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 18 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
 
@@ -227,23 +228,23 @@
 ### 関数 `_cleanup_empty_dirs`
 
 * **役割**: 指定されたディレクトリ配下の空ディレクトリを再帰的に削除する。
-* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 119〜127 / 抜粋: "def _cleanup_empty_dirs(sel...")
+* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 211〜223 / 抜粋: "def _cleanup_empty_dirs(sel...")
 
 
 * **引数/リクエスト**: `path`: `str`
-* 根拠: `path: str` (行番号: 119 / 抜粋: "path: str")
+* 根拠: `path: str` (行番号: 211 / 抜粋: "path: str")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 119 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 211 / 抜粋: "-> None:")
 
 
-* **副作用**: ディレクトリの削除（ファイルシステム操作）。
-* 根拠: `os.rmdir(dir_path)` (行番号: 125 / 抜粋: "os.rmdir(dir_path)")
+* **副作用**: ディレクトリの削除（ファイルシステム操作）。失敗時（`ENOTEMPTY`以外）は`logger.warning`によるログ出力。
+* 根拠: `os.rmdir(dir_path)` (行番号: 217 / 抜粋: "os.rmdir(dir_path)")
 
 
-* **エラーハンドリング**: `OSError`を捕捉し`pass`することで、空でないディレクトリの削除失敗を無視する。
-* 根拠: `except OSError:` と `pass` (行番号: 126〜127 / 抜粋: "except OSError:\n pass")
+* **エラーハンドリング**: **（Issue #450 で修正）** 以前は`OSError`を捕捉し`pass`することで、空でないディレクトリの削除失敗（想定内のENOTEMPTY）だけでなく、権限エラー等それ以外のOSErrorも種別を問わず一律で握りつぶしていた。現在は捕捉した`OSError`の`e.errno`を調べ、`errno.ENOTEMPTY`(ディレクトリが空でない、想定内のケース)のみ無視し、それ以外は`logger.warning(f"空ディレクトリの削除に失敗しました: {dir_path}: {e}")`でログに残す。
+* 根拠: `except OSError as e:` (行番号: 218 / 抜粋: "except OSError as e:\n                    # #450: 「ディレクトリが空でない」は無視してよい想定内のケースだが、\n                    # 権限エラー等それ以外のOSErrorは種別を問わず握りつぶしていたため\n                    # 気づけなかった。ENOTEMPTY以外はログに残す。\n                    if e.errno != errno.ENOTEMPTY:\n                        logger.warning(f\"空ディレクトリの削除に失敗しました: {dir_path}: {e}\")")
 
 
 
@@ -472,7 +473,7 @@ flowchart TD
 
 * `sync_fallback_data`関数内における`rsync --remove-source-files`の実行は、転送完了後に転送元のファイル群を削除する副作用を持つ。加えて`timeout=120`が設定されており、NASマウントが応答不能になった場合は`subprocess.TimeoutExpired`として専用のエラーログが出力される。
 * `sync_fallback_data`の同期先は以前`self.mount_point`(=`config.NAS_MOUNT_POINT`直下、例`/mnt/nas/`)を直接指定しており、アプリが実際に読み書きする`NAS_PROJECT_ROOT`(=`NAS_MOUNT_POINT/home_system`)の1階層下に配置されないため退避データが参照されない場所へ移動されてしまい、さらに同期元も`self.fallback_dir`全体だったため`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)などローカル専用の状態ファイルまで巻き込んで移動・削除していた(Issue #162)。修正により、`__init__`で新設された`self.nas_project_root`(=`getattr(config, "NAS_PROJECT_ROOT", ...)`、31〜33行目)配下の`assets`を同期先に、`self.fallback_dir`配下の`assets`サブディレクトリのみを同期元に限定している(165, 170行目)。
-* `_cleanup_empty_dirs`関数内の`os.rmdir`実行時、`OSError`が全て`pass`されており、ディレクトリが空でない以外の予期せぬ権限エラー等も握りつぶされる。
+* **[修正済み] `_cleanup_empty_dirs`のOSError握りつぶし（Issue #450）**: 以前は`os.rmdir`実行時の`OSError`が全て`pass`されており、ディレクトリが空でない（`ENOTEMPTY`、想定内）以外の予期せぬ権限エラー等も種別を問わず握りつぶされていた。現在は`e.errno`が`errno.ENOTEMPTY`の場合のみ無視し、それ以外は`logger.warning`でログに残すよう修正された。
 * `cleanup_old_files`はファイルの`mtime`（更新日時）のみで削除対象を判定するため、意図的にタイムスタンプが古いまま保持したいファイルも保持日数を超えていれば削除対象となる点に注意が必要。
 * `run_retention_cleanup`は`is_report_time`（毎日8時台）にのみ実行されるため、1日1回しか実行機会がない。8時台にスクリプトが実行されなかった場合、その日はクリーンアップがスキップされる。
 * `run_retention_cleanup`の「DBバックアップ」対象は以前拡張子`.db`のみに限定していたが、同じ`DB_BACKUPS_DIR`には`services/backup_service.py`の`_backup_config_files`がコピーする設定ファイルのバックアップ(`config.py`/`.env`/`devices.json`。`.env`はコピー時に拡張子なしのファイル名になる)も置かれるため、`.db`限定では設定ファイルのバックアップコピーが一切削除対象にならず無限蓄積していた(Issue #191)。`DB_BACKUPS_DIR`がバックアップ専用ディレクトリであることを踏まえ、`extensions=None`(拡張子で絞り込まず全ファイル対象)に修正した。`cleanup_old_files`の`extensions`引数はこれに合わせて`Optional[Tuple[str, ...]]`となり、`None`の場合は拡張子チェックをスキップする。

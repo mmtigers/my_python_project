@@ -157,8 +157,11 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
         if os.path.exists(sum_info.output_path):
             try:
                 os.remove(sum_info.output_path)
-            except OSError:
-                pass
+            except OSError as e:
+                # #450: 権限エラー等で削除に失敗した場合、無音のまま後続の生成処理に
+                # 進んでいた(既存ファイルが残った状態での再生成失敗として遅れて表面化する)。
+                # 想定外のOSErrorとしてログに残す。
+                logger.warning(f"既存の出力ファイル削除に失敗しました: {sum_info.output_path}: {e}")
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:

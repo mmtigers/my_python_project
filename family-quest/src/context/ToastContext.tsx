@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ToastContext, ToastItem } from './toastShared';
 
@@ -10,17 +10,36 @@ const AUTO_DISMISS_MS = 4000;
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [toasts, setToasts] = useState<ToastItem[]>([]);
+    // #478: 手動dismiss後も自動非表示用のタイマーが生き続け、既に無いtoastに対する
+    // setToasts呼び出し(実害はないが無駄なコールバック)が発生していた。
+    // toast.idごとにタイマーIDを保持し、手動dismiss時にclearTimeoutできるようにする。
+    const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+    useEffect(() => {
+        const timers = timersRef.current;
+        return () => {
+            timers.forEach(timerId => clearTimeout(timerId));
+            timers.clear();
+        };
+    }, []);
 
     const showToast = useCallback((toast: Omit<ToastItem, 'id' | 'createdAt'>) => {
         const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };
         setToasts(prev => [...prev, item]);
 
-        setTimeout(() => {
+        const timerId = setTimeout(() => {
+            timersRef.current.delete(item.id);
             setToasts(prev => prev.filter(t => t.id !== item.id));
         }, AUTO_DISMISS_MS);
+        timersRef.current.set(item.id, timerId);
     }, []);
 
     const dismiss = useCallback((id: number) => {
+        const timerId = timersRef.current.get(id);
+        if (timerId !== undefined) {
+            clearTimeout(timerId);
+            timersRef.current.delete(id);
+        }
         setToasts(prev => prev.filter(t => t.id !== id));
     }, []);
 

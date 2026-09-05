@@ -75,16 +75,20 @@
 
 
 * **副作用**:
-  - マウント時（および`durationMs`変更時）に`window.setInterval`で100ms間隔のタイマーを開始し、経過割合`remainingFraction`を`setRemainingFraction`で更新し続ける
-  - 根拠: `const id = window.setInterval(() => {\n            const elapsed = Date.now() - startedAt;\n            const frac = Math.max(0, 1 - elapsed / durationMs);\n            setRemainingFraction(frac);` (行番号: 15〜18)
+  - **（#477で追加）** `useEffect`の先頭で`durationMs <= 0`を判定し、真であれば即座に`setRemainingFraction(0)`（完了状態）をセットして`return`し、以降のタイマー処理には一切入らない。
+  - 根拠: `if (durationMs <= 0) {\n            setRemainingFraction(0);\n            return;\n        }` (行番号: 17〜20)
+
+
+  - `durationMs > 0`の場合のみ、マウント時（および`durationMs`変更時）に`window.setInterval`で100ms間隔のタイマーを開始し、経過割合`remainingFraction`を`setRemainingFraction`で更新し続ける
+  - 根拠: `const id = window.setInterval(() => {\n            const elapsed = Date.now() - startedAt;\n            const frac = Math.max(0, 1 - elapsed / durationMs);\n            setRemainingFraction(frac);` (行番号: 22〜25)
 
 
   - 経過割合が0以下になった時点でタイマー自身を`window.clearInterval`で停止する
-  - 根拠: `if (frac <= 0) window.clearInterval(id);` (行番号: 19)
+  - 根拠: `if (frac <= 0) window.clearInterval(id);` (行番号: 26)
 
 
-  - `useEffect`のクリーンアップ関数として、アンマウント時（および`durationMs`変更による再実行時）に`window.clearInterval`を呼び出す
-  - 根拠: `return () => window.clearInterval(id);` (行番号: 21)
+  - `useEffect`のクリーンアップ関数として、アンマウント時（および`durationMs`変更による再実行時）に`window.clearInterval`を呼び出す。ただし`durationMs <= 0`の早期`return`パスではタイマー自体を作成していないため、このクリーンアップ関数は登録されない（クリーンアップなしの空の`useEffect`終了になる）。
+  - 根拠: `return () => window.clearInterval(id);` (行番号: 28)
 
 
 * **エラーハンドリング**: なし
@@ -98,7 +102,9 @@
 flowchart TD
     Start(["CooldownRing マウント"]) --> InitState["useState: remainingFraction を 1 で初期化"]
     InitState --> EffectRun["useEffect 実行 マウント時および durationMs 変更時"]
-    EffectRun --> RecordStart["startedAt に現在時刻を記録"]
+    EffectRun --> CheckDuration{"durationMs <= 0 ?"}
+    CheckDuration -- はい --> SetZero["setRemainingFraction 0 を実行 (完了状態) → 即return\n(タイマー未作成・クリーンアップなし)"]
+    CheckDuration -- いいえ --> RecordStart["startedAt に現在時刻を記録"]
     RecordStart --> SetInterval["window.setInterval を100ms間隔で開始"]
     SetInterval --> Tick["Tick: elapsed を現在時刻とstartedAtの差から算出"]
     Tick --> CalcFrac["frac を max 0, 1 minus elapsed/durationMs で算出"]
@@ -110,6 +116,7 @@ flowchart TD
 
     InitState --> CalcRender["strokeWidth radius circumference dashoffset を算出"]
     SetState --> CalcRender
+    SetZero --> CalcRender
     CalcRender --> RenderSvg["svg 描画: 背景用circleと進捗用circleの2本"]
 ```
 
@@ -132,8 +139,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `durationMs`に`0`が渡された場合、初回タイマー発火時点で`elapsed / durationMs`がゼロ除算となり計算結果が`Infinity`となるため、`frac`は`Math.max(0, -Infinity)`＝`0`に丸められ、リングは即座に「経過完了」の表示になる。この挙動が意図的なものかは本ファイルからは不明。
-* 根拠: `const frac = Math.max(0, 1 - elapsed / durationMs);` (行番号: 17)
+* **[修正済み] `durationMs`が0以下の場合のゼロ除算・NaN経路（Issue #477）**: 以前は`durationMs`に`0`（または負の値）が渡されると、タイマー発火時点で`elapsed / durationMs`がゼロ除算となり（`durationMs`が負なら`NaN`）、見た目上は`Math.max(0, ...)`によって最終的に`frac = 0`（経過完了扱い）に落ち着いてはいたが、演算経路自体にゼロ除算・NaNが含まれていた。現在は`useEffect`の先頭で`durationMs <= 0`を明示的にガードし、`setRemainingFraction(0)`を直接呼んで即`return`する（`setInterval`自体を作成しない）ため、この経路には入らなくなった。見た目上の最終結果（frac=0）は変わっていない。
+* 根拠: `if (durationMs <= 0) {\n            setRemainingFraction(0);\n            return;\n        }` (行番号: 17〜20)、`const frac = Math.max(0, 1 - elapsed / durationMs);` (行番号: 24、`durationMs > 0`が保証された経路でのみ実行される)
 * 更新間隔は100ms固定であり、CSS側にも`transition: 'stroke-dashoffset 100ms linear'`が設定されているため、両者の間隔が一致していることが視覚的な滑らかさの前提になっている。片方のみ変更すると、カクつきや不整合が生じる可能性がある。
 * 根拠: `}, 100);` (行番号: 20), `style={{ transition: 'stroke-dashoffset 100ms linear' }}` (行番号: 49)
 * `strokeWidth`は`3`固定値であり、`radius = size / 2 - strokeWidth`で算出されるため、`size`に`6`未満の極端に小さい値を渡すと`radius`が0または負になり、描画が破綻する可能性がある。
@@ -145,7 +152,6 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 実際に`durationMs`へ渡される値（呼び出し元での具体的なミリ秒数・定数名） | 本ファイルはpropsとして受け取るのみで、コメント上の「60秒」という記載以外に具体的な数値の裏付けがないため | 呼び出し元ファイル（`../../features/quest/components/QuestList.tsx`） |
-| `durationMs`に0または負の値が渡された場合の想定挙動が仕様として許容されるか | 型定義上は`number`としか制約されておらず、バリデーションのコードが存在しないため。リポジトリ内を検索したが、唯一の呼び出し元(`QuestList.tsx`)は固定定数`60000`しか渡しておらず、値のバリデーションを行う専用ロジックや仕様書に相当するファイルはリポジトリ内には存在せず、解消不可。 | 呼び出し元のバリデーションロジック、または仕様書 |
 
 ## 相互参照による補足情報
 

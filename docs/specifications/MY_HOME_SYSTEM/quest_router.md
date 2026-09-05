@@ -25,6 +25,7 @@
 * 根拠: 関数定義 (行番号: 38 / 抜粋: "def get_all_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]:"), 引数の透過 (行番号: 40 / 抜粋: "return game_system.get_all_view_data(viewer_user_id)")
 * 装備品の購入・変更、ボスのステータス直接更新（DBへのSQL実行）、ファミリーマイレージの取得・更新、週間分析データ取得の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。これに伴い、本ファイルが直接DBアクセスを行う`common`モジュールへの依存も無くなっている。
 * アイテム使用の承認待ちフローに関連していた`consume_item`(旧`POST /inventory/consume`)、`cancel_item_usage`(旧`POST /inventory/cancel`)、`get_admin_pending_inventory`(旧`GET /inventory/admin/pending`)の各エンドポイントは削除されている（コミット`9d5edec`、アイテム使用時の親承認フロー廃止）。これに伴い、インポートしていた`ConsumeItemAction`モデルも削除されている。現在の`use_item`(`POST /inventory/use`)エンドポイント自体のコードは変更されていない。
+* **（Issue #442で追加）** `delete_uploaded_image`(`DELETE /upload/{filename}`)は、フロントエンドのアバターアップロード2段階フロー（1. 画像アップロード→2. ユーザーへの紐付け）の2段階目失敗時に、1段階目でアップロード済みの孤立画像をロールバック削除するためのエンドポイント。`services.quest_service.UserService.delete_unlinked_avatar`に委譲する。
 
 ## 3. 外部依存関係
 
@@ -317,26 +318,49 @@
 
 
 
+### `delete_uploaded_image` (`DELETE /upload/{filename}`)（Issue #442で追加）
+
+* **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `POST /user/update`でユーザーへ紐付け）のうち2段階目が失敗した際のロールバック用エンドポイント。まだどのユーザーにも紐付けられていない、アップロード直後の孤立画像を削除する。ベストエフォートの後始末であるため、削除できなかった場合（既に存在しない、他ユーザーが参照中等）もエラーにはせず状態を返すのみとする。
+* 根拠: [ルーティング定義とコメント] (行番号: 81-88 / 抜粋: "# #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の\n# うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための\n# エンドポイント。...\n@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
+
+
+* **引数/リクエスト**: `filename: str`（パスパラメータ、削除対象のアップロード済みファイル名）
+* 根拠: [引数定義] (行番号: 87-88 / 抜粋: "@router.delete("/upload/{filename}")\ndef delete_uploaded_image(filename: str):")
+
+
+* **戻り値/レスポンス**: `{"status": "deleted"}`（実際に削除できた場合）または `{"status": "skipped"}`（削除しなかった/できなかった場合）。いずれもHTTPステータスは200固定で、失敗を示すエラーレスポンスにはしない。
+* 根拠: [戻り値] (行番号: 90 / 抜粋: "return {"status": "deleted" if deleted else "skipped"}")
+
+
+* **副作用**: `user_service.delete_unlinked_avatar(filename)` の呼び出し（対象ファイルがどのユーザーからも参照されていなければ`config.UPLOAD_DIR`配下から実ファイルを削除する。内部実装は`quest_service.md`参照）。
+* 根拠: [メソッド呼び出し] (行番号: 89 / 抜粋: "deleted = user_service.delete_unlinked_avatar(filename)")
+
+
+* **エラーハンドリング**: なし（`user_service.delete_unlinked_avatar`が`bool`を返す設計のため、本エンドポイント自体は例外を送出しない。存在しないファイル・パス不正・他ユーザー参照中等はいずれも`False`＝`"skipped"`として扱われる）
+* 根拠: [該当関数] (行番号: 87-90 / 抜粋: "def delete_uploaded_image(filename: str):\n    deleted = user_service.delete_unlinked_avatar(filename)\n    return {"status": "deleted" if deleted else "skipped"}")
+
+
+
 ### `validate_image_header`
 
 * **役割**: ファイルのヘッダー情報（マジックナンバー）から画像ファイルかどうかを判定するヘルパー関数。JPEG、PNG、GIF、WEBPを許可する。
-* 根拠: 関数定義と条件分岐 (行番号: 82-87 / 抜粋: "if header.startswith(b'\xff...")
+* 根拠: 関数定義と条件分岐 (行番号: 93-98 / 抜粋: "if header.startswith(b'\xff...")
 
 
 * **引数/リクエスト**: `header` (`bytes` 型)
-* 根拠: 引数定義 (行番号: 82 / 抜粋: "def validate_image_header(header: bytes)")
+* 根拠: 引数定義 (行番号: 93 / 抜粋: "def validate_image_header(header: bytes)")
 
 
 * **戻り値/レスポンス**: `bool` (画像フォーマットに一致すれば `True`、それ以外は `False`)
-* 根拠: 型アノテーション (行番号: 82 / 抜粋: "-> bool:")
+* 根拠: 型アノテーション (行番号: 93 / 抜粋: "-> bool:")
 
 
 * **副作用**: なし
-* 根拠: 関数定義 (行番号: 82-87 / 抜粋: "def validate_image_header")
+* 根拠: 関数定義 (行番号: 93-98 / 抜粋: "def validate_image_header")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 82-87 / 抜粋: "def validate_image_header")
+* 根拠: 該当関数 (行番号: 93-98 / 抜粋: "def validate_image_header")
 
 
 
@@ -495,6 +519,9 @@ graph TD
         S4("user_service")
         S5("inventory_service")
     end
+
+    DelUpload("delete_uploaded_image()")
+    DelUpload -->|"user_service.delete_unlinked_avatar()"| S4
 
     subgraph Config ["config"]
         CF1("UPLOAD_DIR")

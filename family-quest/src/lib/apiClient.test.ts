@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiClient } from './apiClient';
+import { apiClient, ApiClient } from './apiClient';
 
 // #412(F-L3): apiClient._request のエラー・空ボディ処理を検証する。
 // - 204/空ボディの成功応答で JSON.parse に失敗しない
@@ -55,5 +55,42 @@ describe('apiClient error handling (#412 F-L3)', () => {
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
         await expect(apiClient.get('/api/quest/data'))
             .rejects.toThrow('通信エラーが発生しました。ネットワーク接続をご確認のうえ、再度お試しください。');
+    });
+});
+
+describe('ApiClient baseUrl trailing slash normalization (#476)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.unstubAllGlobals();
+    });
+
+    it('does not produce a double slash when baseUrl has a trailing slash', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const client = new ApiClient('https://example.com/');
+        await client.get('/api/quest/data');
+
+        expect(fetchMock).toHaveBeenCalledWith('https://example.com/api/quest/data', expect.anything());
+    });
+
+    it('collapses multiple trailing slashes as well', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const client = new ApiClient('https://example.com///');
+        await client.get('/api/quest/data');
+
+        expect(fetchMock).toHaveBeenCalledWith('https://example.com/api/quest/data', expect.anything());
+    });
+
+    it('still works normally when baseUrl has no trailing slash', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const client = new ApiClient('https://example.com');
+        await client.get('/api/quest/data');
+
+        expect(fetchMock).toHaveBeenCalledWith('https://example.com/api/quest/data', expect.anything());
     });
 });

@@ -15,6 +15,7 @@ quest_service.py 側にあった上記の実行時チェックは Issue #330 で
 本モジュール経由（migrations/ 配下への追加）で行うこと。
 """
 import os
+import re
 import sqlite3
 from typing import List, Set
 
@@ -26,7 +27,16 @@ MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__
 
 # 「既に別経路(旧来の実行時ALTER等)で適用済み」と断定できる、既知のSQLiteエラー文言のみ。
 # それ以外のOperationalError(DBロック・ディスクフル・SQL誤り等)は失敗として扱う。
-_ALREADY_APPLIED_ERROR_PATTERNS = ("duplicate column", "already exists")
+# #440: 以前は単純な部分文字列一致("in"演算子)だったため、無関係なエラーメッセージが
+# たまたまこれらの語を含む場合に誤って「適用済み」と握りつぶす恐れがあった。
+# SQLiteが実際に返す既知のエラー文言の形("duplicate column name: <col>"、
+# "table <name> already exists"、"index <name> already exists")に厳密に
+# アンカーした正規表現に置き換える。
+_ALREADY_APPLIED_ERROR_PATTERNS = (
+    re.compile(r"^duplicate column name: \S"),
+    re.compile(r"^table \S+ already exists$"),
+    re.compile(r"^index \S+ already exists$"),
+)
 
 
 def _ensure_tracking_table(conn: sqlite3.Connection) -> None:
@@ -120,7 +130,7 @@ def apply_pending_migrations(conn: sqlite3.Connection) -> None:
                     conn.execute(statement)
                 except sqlite3.OperationalError as e:
                     message = str(e).lower()
-                    if not any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):
+                    if not any(pattern.search(message) for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):
                         raise
                     logger.warning(
                         f"⚠️ Migration '{filename}': statement skipped "

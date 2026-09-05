@@ -262,8 +262,8 @@
 * 根拠: `with open('/proc/uptime', 'r') as f:` (行番号: 82 / 抜粋: "with open('/proc/uptime', 'r') as f:")
 
 
-* **エラーハンドリング**: 無条件の `except:`（bare except）で全例外を捕捉し `"不明"` を返す。
-* 根拠: `except:` (行番号: 90 / 抜粋: "except:")
+* **エラーハンドリング**: **（修正済み）** 以前は無条件の `except:`（bare except）だったが、`except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`/`GeneratorExit`（いずれも`BaseException`直下でPython3のbare exceptでも捕捉されてしまう）を誤って握りつぶさなくなった。通常の例外はすべて捕捉して `"不明"` を返す点は変わらない。
+* 根拠: `except Exception:` (行番号: 91 / 抜粋: "except Exception:")
 
 
 
@@ -285,8 +285,8 @@
 * 根拠: `res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")` (行番号: 97 / 抜粋: "res = subprocess.check_output(["vcgencmd", "measure_temp"], timeout=10).decode("utf-8")")
 
 
-* **エラーハンドリング**: 温度取得・ディスク取得それぞれを個別の `try/except:`（bare except）で保護し、失敗時は `STATUS_WARN` と `"Unknown"` を設定して処理を継続する。
-* 根拠: `except:` (行番号: 106, 121 / 抜粋: "except:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
+* **エラーハンドリング**: **（修正済み）** 温度取得・ディスク取得それぞれを個別の `try/except Exception:` で保護し、失敗時は `STATUS_WARN` と `"Unknown"` を設定して処理を継続する（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
+* 根拠: `except Exception:` (行番号: 107, 122 / 抜粋: "except Exception:\n            temp_status = STATUS_WARN\n            temp_msg = "Unknown"")
 
 
 
@@ -308,8 +308,8 @@
 * 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)` (行番号: 140 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)")
 
 
-* **エラーハンドリング**: ping失敗時（bare except）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except:` (行番号: 141 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 160 / 抜粋: "if not self._check_http(url, headers=headers):")
+* **エラーハンドリング**: **（修正済み）** ping失敗時（`except Exception:`。以前は無条件の bare `except:` だった）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
+* 根拠: `except Exception:` (行番号: 141 / 抜粋: "except Exception:"), `if not self._check_http(url, headers=headers):` (行番号: 160 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 
@@ -403,8 +403,8 @@
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になったため、以前渡していた`user_id=getattr(config, "LINE_USER_ID", None)`は撤去された。
 
 
-* **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。サウンドカード検出・Bluetooth接続確認処理は個別に bare `except:` で保護されている。
-* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except: pass` (行番号: 289 / 抜粋: "except: pass")
+* **エラーハンドリング**: NAS書き込みテストで `IOError`, `PermissionError` を捕捉し `STATUS_ERR` を設定・エラーログ出力・即時Discord通知を行う。カメラ設定が空の場合は `STATUS_WARN` とする。**（修正済み）** サウンドカード検出・Bluetooth接続確認処理は個別に `except Exception:` で保護されている（以前はいずれも無条件の bare `except:` だったが `except Exception:` に修正され、`SystemExit`/`KeyboardInterrupt`等を誤って捕捉しなくなった）。
+* 根拠: `except (IOError, PermissionError) as e:` (行番号: 244 / 抜粋: "except (IOError, PermissionError) as e:"), `else:\n            cam_status = STATUS_WARN\n            cam_msg = "No Config"` (行番号: 275〜277 / 抜粋: "else:"), `except Exception: pass` (行番号: 300 / 抜粋: "except Exception: pass"), `except Exception:` (行番号: 315 / 抜粋: "except Exception:")
 
 
 
@@ -617,7 +617,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **多数の bare `except:`**: `_get_uptime`（90行目）、`check_system_resources`（106, 121行目）、`check_network_and_apis`（140行目）、`check_peripherals`（289, 304行目）で無条件の `except:` が使われており、`KeyboardInterrupt` や `SystemExit` を含むあらゆる例外を捕捉してしまう可能性がある（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。
+* **[修正済み] bare `except:` を `except Exception:` に統一**: 以前は `_get_uptime`（91行目）、`check_system_resources`（107, 122行目）、`check_network_and_apis`（141行目）、`check_peripherals`（300, 315行目）の計6箇所で無条件の bare `except:` が使われており、`KeyboardInterrupt` や `SystemExit`、`GeneratorExit` を含むあらゆる例外を誤って捕捉してしまう可能性があった（Python 3ではこれらは `BaseException` 派生であり、bare exceptで捕捉されうる）。全て `except Exception:` に修正済みで、通常の例外（`Exception` 派生）を捕捉する挙動自体は変わらない。
 * **[修正済み] `check_recent_logs` のログ判定タイミング**: 以前は `tail` サブプロセスの `Exception` を捕捉した場合でも `error_lines` が空のまま後続の判定に進み `STATUS_OK` として「Clean」と誤報告される問題があったが、現在は `except Exception as e:`（328〜331行目）で即座に `STATUS_WARN` を結果に追加して `return` するよう修正済みで、ログ取得自体の失敗と「エラーなし」が区別されるようになっている。
 * **[修正済み] `TARGET_BLUETOOTH_MAC`**: 以前はモジュールレベルで `None` にハードコードされており、Bluetoothスピーカーの接続確認ロジック（`bluetoothctl info` 呼び出し）が常にデッドコード化していたが、その後 `getattr(config, "SPEAKER_BLUETOOTH_MAC", None)` から取得するよう修正され、さらに現在は `resolve_target_bluetooth_mac()`（32〜40行目、42行目で呼び出し）が `config.ENABLE_BLUETOOTH` が真の場合のみ `config.SPEAKER_BLUETOOTH_MAC` を返すよう修正済みで、`ENABLE_BLUETOOTH` が偽（未設定含む）の環境では常に `None` となりSpeakerチェックがサウンドカード確認にフォールバックする（`bluetooth.service`が停止している環境でBT関連のWARNを出し続けないための対応）。
 * **NAS権限エラー時の二重通知の可能性**: `check_peripherals` 内で権限エラー検知時に即時 `send_push` を行うが（249〜254行目）、この結果もその後 `self.results` に追加され `_send_report` で改めてレポートに含まれ通知される。同一の障害について2回Discord通知が飛ぶ可能性がある。

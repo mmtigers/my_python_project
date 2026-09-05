@@ -1,4 +1,4 @@
-import { render, cleanup } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Hls from 'hls.js';
 import HlsPlayer from './HlsPlayer';
@@ -54,5 +54,38 @@ describe('HlsPlayer (Safari native HLS path)', () => {
         const addedTypes = addSpy.mock.calls.map(([t]) => t).filter(t => t === 'loadedmetadata' || t === 'error');
         expect(removedTypes.sort()).toEqual(['error', 'loadedmetadata']);
         expect(addedTypes.sort()).toEqual(['error', 'loadedmetadata']);
+    });
+});
+
+// #443: HlsPlayerがHLS非対応環境でサイレント失敗する(映像もエラー表示も出ない)問題の回帰テスト。
+describe('HlsPlayer error visibility (#443)', () => {
+    afterEach(() => {
+        cleanup();
+        vi.restoreAllMocks();
+    });
+
+    it('shows an error overlay when neither hls.js nor native HLS playback is available', () => {
+        vi.spyOn(Hls, 'isSupported').mockReturnValue(false);
+        vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue('');
+
+        render(<HlsPlayer streamUrl="/api/cameras/live/cam1/stream.m3u8" />);
+
+        expect(screen.getByText('映像を取得できませんでした')).toBeInTheDocument();
+    });
+
+    it('shows an error overlay when video.play() fails on the Safari native path', async () => {
+        vi.spyOn(Hls, 'isSupported').mockReturnValue(false);
+        vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockImplementation((type: string) =>
+            type === 'application/vnd.apple.mpegurl' ? 'probably' : ''
+        );
+        vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new Error('NotAllowedError'));
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+
+        const { container } = render(<HlsPlayer streamUrl="/api/cameras/live/cam1/stream.m3u8" />);
+        const video = container.querySelector('video');
+        expect(video).not.toBeNull();
+        fireEvent(video as HTMLVideoElement, new Event('loadedmetadata'));
+
+        await waitFor(() => expect(screen.getByText('映像を取得できませんでした')).toBeInTheDocument());
     });
 });

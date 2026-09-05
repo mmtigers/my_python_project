@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../../../lib/apiClient';
 import { Card } from '../../../components/ui/Card';
@@ -37,11 +37,28 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const isUsingItemRef = useRef(false);
 
     // データ取得
-    const { data: items, isLoading } = useQuery({
+    const { data: items, isLoading, isError, error } = useQuery({
         queryKey: queryKey,
         queryFn: () => apiClient.fetchInventory(userId),
         refetchInterval: 5000
     });
+
+    // #441: 他のクエリ/ミューテーションは軒並みエラー通知(トースト)が実装済みだが、
+    // 一覧取得自体にはエラーハンドリングが無く、取得失敗時に画面上は何も表示されない
+    // サイレント失敗のままだった(「アイテムが無い」のか「読み込みに失敗した」のか
+    // 区別できない)。失敗が続くポーリングのたびに連投しないよう、エラー状態に
+    // 入った最初の1回だけトーストを出す。
+    const hasShownFetchErrorRef = useRef(false);
+    useEffect(() => {
+        if (isError) {
+            if (!hasShownFetchErrorRef.current) {
+                hasShownFetchErrorRef.current = true;
+                showToast({ title: "エラー", text: extractErrorDetail(error, 'アイテム一覧の取得に失敗しました'), icon: "⚠️" });
+            }
+        } else {
+            hasShownFetchErrorRef.current = false;
+        }
+    }, [isError, error, showToast]);
 
     const useMutationAction = useMutation({
         mutationFn: (inventoryId: number) => apiClient.useItem(userId, inventoryId),

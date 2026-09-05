@@ -27,10 +27,12 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| React | モジュール | Reactコンポーネント定義 | 根拠: `import React, { useCallback, useMemo, useState } from 'react';` (行番号: 1) |
-| useCallback | フック | `showToast`/`dismiss`関数の参照を安定化するために使用 | 根拠: `import React, { useCallback, useMemo, useState } from 'react';` (行番号: 1) |
-| useMemo | フック | Context経由で提供する`value`オブジェクト（`{ showToast }`）のメモ化 | 根拠: `import React, { useCallback, useMemo, useState } from 'react';` (行番号: 1) |
-| useState | フック | 表示中のトースト一覧(`toasts`)のローカル状態管理 | 根拠: `import React, { useCallback, useMemo, useState } from 'react';` (行番号: 1) |
+| React | モジュール | Reactコンポーネント定義 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
+| useCallback | フック | `showToast`/`dismiss`関数の参照を安定化するために使用 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
+| useEffect | フック | **（#478で追加）** `ToastProvider`アンマウント時に、`timersRef`に残っている全ての未発火タイマーを`clearTimeout`でクリアするクリーンアップの登録 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
+| useMemo | フック | Context経由で提供する`value`オブジェクト（`{ showToast }`）のメモ化 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
+| useRef | フック | **（#478で追加）** トーストidごとの自動非表示用`setTimeout`タイマーIDを保持する`Map<number, ReturnType<typeof setTimeout>>`（`timersRef`）の保持 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
+| useState | フック | 表示中のトースト一覧(`toasts`)のローカル状態管理 | 根拠: `import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';` (行番号: 1) |
 | AnimatePresence | コンポーネント | トーストの追加・削除時のマウント/アンマウントアニメーション制御 | 根拠: `import { AnimatePresence, motion } from 'framer-motion';` (行番号: 2) |
 | motion | オブジェクト | アニメーション付きのトースト要素（`motion.div`）の描画 | 根拠: `import { AnimatePresence, motion } from 'framer-motion';` (行番号: 2) |
 | ToastContext | Context object | `ToastProvider`がラップする対象のContext | 根拠: `import { ToastContext, ToastItem } from './toastShared';` (行番号: 3) |
@@ -53,8 +55,9 @@
 
 ### `ToastProvider`
 
-* **役割**: 表示中トースト一覧(`toasts`)をステートとして保持し、`showToast`（トースト追加）と`dismiss`（トースト削除）の2つの操作関数を`useMemo`で`{ showToast }`としてまとめ、`ToastContext.Provider`として子要素に提供する。加えて、`children`の後段に固定配置(`fixed top-4`)のトーストスタックを`AnimatePresence`と`motion.div`で描画する。
-* 根拠: `export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {` (行番号: 11〜58)
+* **役割**: 表示中トースト一覧(`toasts`)をステートとして保持し、`showToast`（トースト追加）と`dismiss`（トースト削除）の2つの操作関数を`useMemo`で`{ showToast }`としてまとめ、`ToastContext.Provider`として子要素に提供する。加えて、`children`の後段に固定配置(`fixed top-4`)のトーストスタックを`AnimatePresence`と`motion.div`で描画する。**（Issue #478で追加）** トーストidごとの自動非表示用タイマーIDを`timersRef`（`Map<number, ReturnType<typeof setTimeout>>`）で保持し、手動`dismiss`時に該当タイマーを`clearTimeout`できるようにする。以前は手動`dismiss`後も自動非表示用の`setTimeout`が生き続け、既に無いトーストに対する無駄な`setToasts`呼び出し（実害はないが無駄なコールバック）が発生していた。
+* 根拠: `export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {` (行番号: 11〜77)
+* 根拠: `timersRef`の宣言とコメント (行番号: 13〜16 / 抜粋: "// #478: 手動dismiss後も自動非表示用のタイマーが生き続け、既に無いtoastに対する\n    // setToasts呼び出し(実害はないが無駄なコールバック)が発生していた。\n    // toast.idごとにタイマーIDを保持し、手動dismiss時にclearTimeoutできるようにする。\n    const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());")
 
 
 * **引数/リクエスト**: `{ children: React.ReactNode }`
@@ -62,20 +65,24 @@
 
 
 * **戻り値/レスポンス**: `JSX.Element`（`<ToastContext.Provider value={value}>`内に`children`とトーストスタック`<div>`を含む）
-* 根拠: `return (\n        <ToastContext.Provider value={value}>\n            {children}` (行番号: 29〜31)
+* 根拠: `return (\n        <ToastContext.Provider value={value}>\n            {children}` (行番号: 48〜50)
 
 
 * **副作用**:
-  - `showToast`呼び出し時、`Date.now() + Math.random()`をidとする新規`ToastItem`を`toasts`配列に追加し、さらに`AUTO_DISMISS_MS`（4000ms）後に同idのトーストを`toasts`配列から除去する`setTimeout`をスケジュールする
-  - 根拠: `const showToast = useCallback((toast: Omit<ToastItem, 'id' | 'createdAt'>) => {\n        const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };\n        setToasts(prev => [...prev, item]);\n\n        setTimeout(() => {\n            setToasts(prev => prev.filter(t => t.id !== item.id));\n        }, AUTO_DISMISS_MS);` (行番号: 14〜20)
+  - **（Issue #478で追加）** マウント時に登録される`useEffect`（依存配列`[]`、マウント時1回のみ）のクリーンアップ関数として、アンマウント時に`timersRef.current`に残っている全ての未発火タイマーを`forEach`で`clearTimeout`し、`Map`自体も`clear()`する。
+  - 根拠: `useEffect(() => {\n        const timers = timersRef.current;\n        return () => {\n            timers.forEach(timerId => clearTimeout(timerId));\n            timers.clear();\n        };\n    }, []);` (行番号: 18〜24)
 
 
-  - トースト要素のクリック時、`dismiss(t.id)`により該当トーストを`toasts`配列から即座に除去する
-  - 根拠: `onClick={() => dismiss(t.id)}` (行番号: 44), `const dismiss = useCallback((id: number) => {\n        setToasts(prev => prev.filter(t => t.id !== id));\n    }, []);` (行番号: 23〜25)
+  - `showToast`呼び出し時、`Date.now() + Math.random()`をidとする新規`ToastItem`を`toasts`配列に追加し、さらに`AUTO_DISMISS_MS`（4000ms）後に同idのトーストを`toasts`配列から除去する`setTimeout`をスケジュールする。**（Issue #478で追加）** このタイマーのIDを`timersRef.current`に`item.id`をキーとして保存し、タイマーが自然発火した時点で対応するエントリを`timersRef.current`から`delete`する。
+  - 根拠: `const showToast = useCallback((toast: Omit<ToastItem, 'id' | 'createdAt'>) => {\n        const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };\n        setToasts(prev => [...prev, item]);\n\n        const timerId = setTimeout(() => {\n            timersRef.current.delete(item.id);\n            setToasts(prev => prev.filter(t => t.id !== item.id));\n        }, AUTO_DISMISS_MS);\n        timersRef.current.set(item.id, timerId);` (行番号: 26〜35)
+
+
+  - トースト要素のクリック時、`dismiss(t.id)`により該当トーストを`toasts`配列から即座に除去する。**（Issue #478で追加）** その前に、`timersRef.current`に該当idの保留中タイマーがあれば`clearTimeout`で解除し、`timersRef.current`からも削除する（既にトーストが消えた後にタイマーが無駄に発火するのを防ぐ）。
+  - 根拠: `onClick={() => dismiss(t.id)}` (行番号: 63), `const dismiss = useCallback((id: number) => {\n        const timerId = timersRef.current.get(id);\n        if (timerId !== undefined) {\n            clearTimeout(timerId);\n            timersRef.current.delete(id);\n        }\n        setToasts(prev => prev.filter(t => t.id !== id));\n    }, []);` (行番号: 37〜44)
 
 
 * **エラーハンドリング**: なし
-* 根拠: ファイル内に`try-catch`やエラー制御の記述なし (行番号: 11〜58)
+* 根拠: ファイル内に`try-catch`やエラー制御の記述なし (行番号: 11〜77)
 
 
 
@@ -83,19 +90,24 @@
 
 ```mermaid
 flowchart TD
-    Start(["ToastProvider マウント"]) --> InitState["useState で toasts を空配列で初期化"]
-    InitState --> BuildValue["useMemo で value を showToast から合成"]
+    Start(["ToastProvider マウント"]) --> InitState["useState で toasts を空配列で初期化\ntimersRef を空の Map で初期化 (#478)"]
+    InitState --> RegisterCleanup["useEffect(依存配列[])登録:\nアンマウント時にtimersRef内の全タイマーをclearTimeout (#478)"]
+    RegisterCleanup --> BuildValue["useMemo で value を showToast から合成"]
     BuildValue --> ProvideContext["ToastContext.Provider に value を渡して children とトーストスタックを描画"]
 
     ProvideContext --> WaitShow{"子コンポーネントが showToast を呼び出したか"}
     WaitShow -- はい --> CreateItem["Date.now と Math.random から id を生成し ToastItem を作成"]
     CreateItem --> AddToast["toasts 配列に追加 setToasts"]
     AddToast --> ScheduleTimeout["setTimeout を AUTO_DISMISS_MS 4000ms でスケジュール"]
-    ScheduleTimeout --> RenderStack["AnimatePresence 配下で toasts を map し motion.div として描画"]
+    ScheduleTimeout --> StoreTimer["#478: timerIdをtimersRef.currentにitem.idキーで保存"]
+    StoreTimer --> RenderStack["AnimatePresence 配下で toasts を map し motion.div として描画"]
 
     RenderStack --> WaitInteraction{"タイムアウト到達 または トーストがクリックされたか"}
-    WaitInteraction -- タイムアウト到達 --> AutoRemove["該当 id のトーストを toasts から除去"]
-    WaitInteraction -- クリック --> ManualDismiss["dismiss id を実行し toasts から除去"]
+    WaitInteraction -- タイムアウト到達 --> AutoRemove["#478: timersRef.currentから該当idを削除 → 該当idのトーストをtoastsから除去"]
+    WaitInteraction -- クリック --> CheckTimer{"#478: timersRef.currentに該当idの\n保留中タイマーがあるか"}
+    CheckTimer -- はい --> ClearPendingTimer["clearTimeout実行、timersRef.currentから削除"]
+    CheckTimer -- いいえ --> ManualDismiss
+    ClearPendingTimer --> ManualDismiss["dismiss id 実行: toasts から除去"]
     AutoRemove --> RenderStack
     ManualDismiss --> RenderStack
 
@@ -109,6 +121,8 @@ graph TD
     ToastProvider["ToastProvider Component"] --> ReactUseState["外部: react useState"]
     ToastProvider --> ReactUseCallback["外部: react useCallback"]
     ToastProvider --> ReactUseMemo["外部: react useMemo"]
+    ToastProvider --> ReactUseRef["外部: react useRef (#478: timersRef)"]
+    ToastProvider --> ReactUseEffect["外部: react useEffect (#478: アンマウント時のタイマー一括clear)"]
     ToastProvider --> ToastContext["外部: toastShared ToastContext"]
     ToastProvider --> ToastItem["外部: toastShared ToastItem 型"]
     ToastProvider --> AnimatePresence["外部: framer-motion AnimatePresence"]
@@ -127,14 +141,14 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* トーストの`id`は`Date.now() + Math.random()`で生成されており、数値の衝突可能性は理論上ゼロではないが極めて低い。`id`が重複した場合、`dismiss`や自動削除の`filter`処理が意図せず複数件を同時に除去する可能性がある。
-* 根拠: `const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };` (行番号: 15)
-* `showToast`で追加した各トースト用の`setTimeout`は、`AUTO_DISMISS_MS`（4000ms）経過後に発火するタイマーIDを保持・クリアする仕組みがない。トーストが手動で`dismiss`された後もタイマー自体は生き続け、`AUTO_DISMISS_MS`経過時に同idを対象とした`filter`処理が実行される（既に存在しないため実質的な影響はないが、不要なタイマーコールバックは実行される）。
-* 根拠: `setTimeout(() => {\n            setToasts(prev => prev.filter(t => t.id !== item.id));\n        }, AUTO_DISMISS_MS);` (行番号: 18〜20)
+* トーストの`id`は`Date.now() + Math.random()`で生成されており、数値の衝突可能性は理論上ゼロではないが極めて低い。`id`が重複した場合、`dismiss`や自動削除の`filter`処理が意図せず複数件を同時に除去する可能性がある。**（#478で追加された`timersRef`は`Map<number, ...>`のキーとしてこの`id`をそのまま使うため、`id`が衝突した場合は片方のタイマーがもう片方のタイマーIDで上書きされうる点も併せて留意。）**
+* 根拠: `const item: ToastItem = { ...toast, id: Date.now() + Math.random(), createdAt: Date.now() };` (行番号: 27)
+* **[修正済み] `setTimeout`のタイマーID未保持問題（Issue #478）**: 以前は`showToast`で追加した各トースト用の`setTimeout`について、`AUTO_DISMISS_MS`（4000ms）経過後に発火するタイマーIDを保持・クリアする仕組みがなく、トーストが手動で`dismiss`された後もタイマー自体は生き続け、`AUTO_DISMISS_MS`経過時に同idを対象とした無駄な`filter`処理が実行されていた（既に存在しないトーストが対象のため実害はないが、不要なタイマーコールバックは実行され続けていた）。現在は`timersRef`（`Map<number, ReturnType<typeof setTimeout>>`）にidごとのタイマーIDを保持し、`dismiss`時に対応するタイマーがあれば`clearTimeout`する。加えて、`ToastProvider`自体がアンマウントされる場合に備え、`useEffect`のクリーンアップで残存する全タイマーを一括`clearTimeout`する。
+* 根拠: `const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());` (行番号: 16), `useEffect(() => {\n        const timers = timersRef.current;\n        return () => {\n            timers.forEach(timerId => clearTimeout(timerId));\n            timers.clear();\n        };\n    }, []);` (行番号: 18〜24), `dismiss`内の`clearTimeout` (行番号: 38〜42)
 * トーストスタックは`div`要素に`onClick`が設定されているため、トースト全体のどこをクリックしても`dismiss`される。誤タップで意図せず消えてしまう可能性がある。
-* 根拠: `onClick={() => dismiss(t.id)}` (行番号: 44)
+* 根拠: `onClick={() => dismiss(t.id)}` (行番号: 63)
 * トーストスタックの外枠`div`には`pointer-events-none`、各トースト要素には`pointer-events-auto`が指定されており、トーストが存在しない領域ではクリックイベントが背面の要素に透過する設計になっている。
-* 根拠: `className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none w-full max-w-sm px-4"` (行番号: 34), `className="pointer-events-auto w-full bg-slate-800` (行番号: 45)
+* 根拠: `className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none w-full max-w-sm px-4"` (行番号: 53), `className="pointer-events-auto w-full bg-slate-800` (行番号: 64)
 
 ## 9. 不明事項一覧
 

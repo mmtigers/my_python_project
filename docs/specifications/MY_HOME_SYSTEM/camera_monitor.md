@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -29,6 +30,7 @@
 | --- | --- | --- | --- |
 | `os`, `sys`, `time`, `socket`, `subprocess`, `uuid`, `platform` | 標準ライブラリ | システム操作、プロセス実行、パス解決、通信等 | 根拠: `import os` など (行番号: 2〜14 / 抜粋: "import os") |
 | `tempfile` | 標準ライブラリ | `capture_snapshot_from_nvr`のスナップショット一時ファイルパスをOS標準の一時ディレクトリ配下に解決するために使用（#414 C-L7で追加。以前は`/tmp/`を直書きしていた） | 根拠: `import tempfile` (行番号: 8 / 抜粋: "import tempfile") |
+| `threading`（Issue #439で追加） | 標準ライブラリ | `last_motion_detected`辞書の読んでから書くまでを保護する`_motion_lock`、`active_pullpoints`リストへのappend/removeを保護する`_pullpoints_lock`という2つの`threading.Lock`の生成 | 根拠: `import threading` (行番号: 9 / 抜粋: "import threading") |
 | `asyncio` | 標準ライブラリ | 非同期イベントループの実行 | 根拠: `import asyncio` (行番号: 4 / 抜粋: "import asyncio") |
 | `logging` | 標準ライブラリ | ログ出力（直接使用せず外部モジュール経由用） | 根拠: `import logging` (行番号: 7 / 抜粋: "import logging") |
 | `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得（`process_camera_event`のエラーログに使用） | 根拠: `import traceback` (行番号: 9 / 抜粋: "import traceback") |
@@ -59,26 +61,73 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `_motion_lock` / `_pullpoints_lock`（Issue #439 で追加）
+
+* **役割**: グローバル変数`last_motion_detected`（クールダウン判定の「読んでから書く」区間）と`active_pullpoints`（PullPointの追加・削除・走査）を、カメラごとの監視スレッド間で排他制御するための2つの`threading.Lock`。個々のdict/list操作自体はGILにより原子的だが、複数操作にまたがる区間はそれだけでは保護されないため、明示的なロックで囲む設計になっている。
+* 根拠: `_motion_lock = threading.Lock()` (行番号: 70 / 抜粋: "# #439: last_motion_detected はカメラごとの監視スレッドから並行して読み書きされる。\n# 個々のdict操作自体はGILにより原子的だが、クールダウン判定の「読んでから書く」までを\n# 不可分にするためにこのLockで保護する。\n_motion_lock = threading.Lock()")、`_pullpoints_lock = threading.Lock()` (行番号: 77 / 抜粋: "# #439: active_pullpoints はカメラごとの監視スレッドから並行してappend/removeされる。\n...\n_pullpoints_lock = threading.Lock()")
+
+
+* **引数/リクエスト**: 該当なし
+* 根拠: 同上
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: 同上
+
+
+* **副作用**: なし（`threading.Lock`インスタンスの生成のみ）
+* 根拠: 同上
+
+
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
+
+
+### `_add_pullpoint` / `_discard_pullpoint`（Issue #439 で追加）
+
+* **役割**: `active_pullpoints`リストへの安全な追加・削除を担うヘルパー関数。`_add_pullpoint`は`_pullpoints_lock`保護下で`append`する。`_discard_pullpoint`は同様の保護下で`remove`を試み、既に別スレッドにより削除済みで`ValueError`が送出された場合はそれを無視する。以前の呼び出し元は`if x in active_pullpoints: active_pullpoints.remove(x)`という「存在確認してから削除」パターンを各所に直接書いていたが、この2ステップの間に別スレッドが同じ要素を削除すると`list.remove()`が`ValueError`を送出しうり(`finally`節内で発生すると後始末処理が中断する)、この2関数への集約でその競合を解消した。
+* 根拠: `def _add_pullpoint(pullpoint: Any) -> None:` (行番号: 80〜82 / 抜粋: "with _pullpoints_lock:\n        active_pullpoints.append(pullpoint)")、`def _discard_pullpoint(pullpoint: Any) -> None:` (行番号: 85〜91 / 抜粋: "\"\"\"active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。\"\"\"\n    with _pullpoints_lock:\n        try:\n            active_pullpoints.remove(pullpoint)\n        except ValueError:\n            pass")
+
+
+* **引数/リクエスト**: `pullpoint: Any`（いずれも共通）
+* 根拠: 同上
+
+
+* **戻り値/レスポンス**: `None`（いずれも共通）
+* 根拠: 同上
+
+
+* **副作用**: `active_pullpoints`リストの変更（`_pullpoints_lock`保護下）。
+* 根拠: 同上
+
+
+* **エラーハンドリング**: `_discard_pullpoint`は`list.remove()`が送出する`ValueError`(既に削除済みの場合)のみを捕捉して無視する。それ以外の例外は捕捉しない。`_add_pullpoint`は例外を捕捉しない。
+* 根拠: `except ValueError:\n            pass` (行番号: 90〜91)
+
+
+
 ### `cleanup_handler`
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
-* 根拠: `cleanup_handler` (行番号: 70〜84 / 抜粋: "def cleanup_handler(signum:")
+* **（Issue #439 で修正）** `active_pullpoints`の走査は以前`for svc in list(active_pullpoints):`と直接コピーしていたが、`monitor_single_camera`（他スレッド）が同時にリストを変更しうるため、`_pullpoints_lock`保護下でスナップショット(`pullpoints_snapshot`)を取得してからロックを解放し、そのスナップショットを走査するよう変更された。
+* 根拠: `cleanup_handler` (行番号: 94〜110 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
-* 根拠: `cleanup_handler` (行番号: 70 / 抜粋: "def cleanup_handler(signum: int,")
+* 根拠: `cleanup_handler` (行番号: 94 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `cleanup_handler` (行番号: 70 / 抜粋: "-> None:")
+* 根拠: `cleanup_handler` (行番号: 94 / 抜粋: "-> None:")
 
 
-* **副作用**: ONVIFのUnsubscribeリクエスト送信、プロセス終了(`os._exit(0)`)。
-* 根拠: `os._exit` (行番号: 84 / 抜粋: "os._exit(0)")
+* **副作用**: `_pullpoints_lock`保護下での`active_pullpoints`のスナップショット取得、ONVIFのUnsubscribeリクエスト送信、プロセス終了(`os._exit(0)`)。
+* 根拠: `os._exit` (行番号: 110 / 抜粋: "os._exit(0)")、[スナップショット取得] (行番号: 99〜100)
 
 
 * **エラーハンドリング**: Unsubscribe時の例外(`Exception`)は無視(`pass`)される。
-* 根拠: `except Exception` (行番号: 81 / 抜粋: "except Exception:")
+* 根拠: `except Exception` (行番号: 107〜108 / 抜粋: "except Exception:\n            pass")
 
 
 
@@ -269,7 +318,8 @@
 
 
 * **副作用**: DB保存(`save_log_generic`)、画像取得・保存(`save_image_from_stream`)、グローバル変数 `last_motion_detected` の更新。
-* 根拠: `save_log_generic` (行番号: 365 / 抜粋: "save_log_generic("device_record")
+* **（Issue #439 で修正）** クールダウン判定(`last_motion_detected.get(cam_id, 0.0)`の読み取りと、クールダウン未経過でない場合の`last_motion_detected[cam_id] = current_time`への書き込み)は、以前はロックなしで行われていた（カメラごとの監視スレッドが並行して同じ辞書にアクセスしうる）。この「読んでから書く」区間全体を`_motion_lock`で囲むよう修正された。
+* 根拠: `save_log_generic` (行番号: 365 / 抜粋: "save_log_generic("device_record")、[クールダウン判定のロック保護] (行番号: 383〜390 / 抜粋: "current_time: float = time.time()\n        with _motion_lock:\n            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)\n            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:\n                logger.debug(...)\n                return\n            last_motion_detected[cam_id] = current_time")
 
 
 * **エラーハンドリング**: パースエラー等の例外をキャッチして警告ログを出力し、`finally` ブロックで `del msg` を実行しリソースを解放する。
@@ -292,7 +342,8 @@
 
 
 * **副作用**: ONVIF APIコール、例外発生時のプッシュ通知送信(`send_push`)、グローバル変数 `active_pullpoints` への参照追加/削除。
-* 根拠: `send_push` (行番号: 564 / 抜粋: "send_push(")
+* **（Issue #439 で修正）** `active_pullpoints`への追加は`_add_pullpoint(pullpoint)`、削除は`_discard_pullpoint(current_pullpoint)`という排他制御されたヘルパー関数経由に統一された。以前は接続成功時に`active_pullpoints.append(pullpoint)`を直接呼び、例外処理時とリソース解放時にはそれぞれ`if current_pullpoint in active_pullpoints: active_pullpoints.remove(current_pullpoint)`という「存在確認してから削除」パターンを直接書いていた。
+* 根拠: `send_push` (行番号: 599〜603 / 抜粋: "send_push(")、[接続成功時の追加] (行番号: 498 / 抜粋: "_add_pullpoint(pullpoint)")、[例外処理時の削除] (行番号: 611〜612 / 抜粋: "if current_pullpoint:\n                _discard_pullpoint(current_pullpoint)")、[finally節での削除] (行番号: 629〜630 / 抜粋: "if current_pullpoint:\n                _discard_pullpoint(current_pullpoint)")
 
 
 * **エラーハンドリング**: 一時的障害（`RemoteDisconnected`等）と、致命的障害（その他例外）を分けて処理。連続エラー回数に基づくExponential Backoff（最大3600秒）、特定条件（5回・12の倍数回失敗時）での管理者への通知を行う。
@@ -359,9 +410,12 @@ flowchart TD
     IsMotion -- No --> CleanupMsg["メッセージ破棄 (del msg)"]
     CleanupMsg --> Sleep05
     
-    IsMotion -- Yes --> CooldownCheck{"クールダウン経過?"}
-    CooldownCheck -- No --> CleanupMsg
-    CooldownCheck -- Yes --> SaveDB["外部: save_log_generic()"]
+    IsMotion -- Yes --> AcquireMotionLock["_motion_lock取得(Issue #439)"]
+    AcquireMotionLock --> CooldownCheck{"クールダウン経過?"}
+    CooldownCheck -- No --> ReleaseLockSkip["_motion_lock解放"]
+    ReleaseLockSkip --> CleanupMsg
+    CooldownCheck -- Yes --> UpdateTimestamp["last_motion_detected更新 → _motion_lock解放"]
+    UpdateTimestamp --> SaveDB["外部: save_log_generic()"]
     SaveDB --> TriggerSnap["save_image_from_stream()"]
     TriggerSnap --> FFmpeg["外部: ffmpeg (NASから画像抽出)"]
     FFmpeg --> SaveFile["画像ファイル保存"]
@@ -388,6 +442,8 @@ graph TD
         Snapshot["capture_snapshot_from_nvr()"]
         SaveImg["save_image_from_stream()"]
         GlobalVars["last_motion_detected<br/>active_pullpoints"]
+        Locks["_motion_lock / _pullpoints_lock<br/>(Issue #439)"]
+        PullpointHelpers["_add_pullpoint() / _discard_pullpoint()"]
         
         Main --> Monitor
         Monitor --> Process
@@ -395,6 +451,10 @@ graph TD
         SaveImg --> Snapshot
         Monitor --> GlobalVars
         Process --> GlobalVars
+        Process --> Locks
+        Monitor --> PullpointHelpers
+        PullpointHelpers --> Locks
+        PullpointHelpers --> GlobalVars
     end
 
     subgraph "外部ローカルモジュール"
@@ -439,7 +499,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **スレッド間の状態共有リスク**: 複数スレッド（`ThreadPoolExecutor`）からグローバル変数 `last_motion_detected` や `active_pullpoints` への参照・更新が行われている。スレッドセーフなロック機構（`Lock`）が存在しないため、タイミングにより競合状態（Race Condition）が発生する可能性がある。
+* **[修正済み] スレッド間の状態共有リスク（Issue #439）**: 複数スレッド（`ThreadPoolExecutor`）からグローバル変数 `last_motion_detected` や `active_pullpoints` への参照・更新が行われている。以前はスレッドセーフなロック機構が存在せず、タイミングにより競合状態（Race Condition。特に`active_pullpoints`の「存在確認してから削除」パターンでは`list.remove()`が`ValueError`を送出しうり、`finally`節内で発生すると後始末処理自体が中断しうる不具合の恐れがあった）が発生する可能性があった。`_motion_lock`（クールダウン判定の読んでから書くまでを保護）と`_pullpoints_lock`（`active_pullpoints`への追加・削除・走査を保護する`_add_pullpoint`/`_discard_pullpoint`/`cleanup_handler`のスナップショット取得を通じて保護）という2つの`threading.Lock`が導入され、この競合状態は解消された。
 * **ハードコードされた識別子**: `"玄関カメラ"` という特定の名前を用いた条件分岐が記述されており、設定ファイル(`config.py`)上の名前変更に弱く、カメラ増設・名称変更時にこのロジックが意図せず無効化される。
 * **強制終了の影響**: シグナルハンドラ `cleanup_handler` にて `os._exit(0)` を呼び出している。これにより実行中の他のスレッドやリソースのクリーンアップ処理が即座に強制中断される。
 * **外部コマンド依存**: `ping` や `ffmpeg` といったOS環境に依存するコマンドを `subprocess.run` で実行している。対象環境へのコマンドインストールパスが通っていない場合は実行時エラーとなる。

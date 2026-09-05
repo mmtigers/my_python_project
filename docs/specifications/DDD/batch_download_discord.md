@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `40c569a` |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -173,20 +173,20 @@
 
 ### `_is_bot_detection_error`
 
-* **役割**: 例外オブジェクトの文字列表現（小文字化し、Unicodeのアポストロフィ`’`をASCIIの`'`に正規化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが含まれるかを判定する関数。マーカーが数字のみ（"403"/"429"/"503"）の場合は正規表現の単語境界(`\b`)で厳密に一致するかを判定し、フレーズマーカー（"sign in to confirm you're not a bot"等）は部分文字列一致(`in`)で判定する。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正である。**（Issue #396で修正）** 以前のフレーズマーカー`"sign in to confirm"`は、yt-dlpの年齢制限メッセージ「Sign in to confirm your age. This video may be inappropriate for some users.」にも部分一致し、年齢制限動画1本で`BotDetectionError`→セッション中断＋12時間クールダウンに入っていた。マーカーをボット検知に固有の`"sign in to confirm you're not a bot"`/`"confirm you're not a bot"`に絞るとともに、`CONFIG.BOT_DETECTION_EXCLUDED_MARKERS`（`"confirm your age"`）を含むメッセージはマーカー判定より優先して`False`を返す。
-* 根拠: [関数定義とコメント] (行番号: 269〜289 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し" / "# #396: yt-dlpのメッセージは "you’re"(U+2019) のような引用符を使うことがある\n    # ため、ASCIIのアポストロフィに正規化してからマーカーと比較する。\n    message = str(exc).lower().replace("’", "'")\n    # #396: 年齢制限("Sign in to confirm your age")等、ボット検知ではないことが\n    # 明確な文言を含む場合は、マーカーに一致しても誤検知として扱わない。\n    if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):\n        return False")、[マーカー定義] (行番号: 205〜222 / 抜粋: "BOT_DETECTION_MARKERS: Tuple[str, ...] = (\n        \"sign in to confirm you're not a bot\",\n        \"confirm you're not a bot\"," / "BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (\n        \"confirm your age\",\n    )")
+* **役割**: 例外オブジェクトの文字列表現（小文字化し、Unicodeのアポストロフィ`’`をASCIIの`'`に正規化）に`CONFIG.BOT_DETECTION_MARKERS`のいずれかが正規表現の単語境界(`\b`)で厳密に一致するかを判定する関数。**（Issue #467で修正）** 以前は数字のみのマーカー（"403"/"429"/"503"）だけを`\b`による厳密一致で判定し、フレーズマーカー（"sign in to confirm you're not a bot"等）は部分文字列一致(`in`)のままだった。数字マーカーを単純な部分文字列一致で判定すると、エラーメッセージに埋め込まれた動画ID等の英数字列（例: "AbC403XyZ"）に偶然含まれる数字列にまで誤爆し、`BOT_DETECTION_COOLDOWN_HOURS`（12時間）のセッション全停止を誤って引き起こし得たための修正だったが、フレーズマーカー側も無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる同種の問題を抱えていたため、マーカー種別を問わず`\b`による単語境界一致に統一した。**（Issue #396で修正）** 以前のフレーズマーカー`"sign in to confirm"`は、yt-dlpの年齢制限メッセージ「Sign in to confirm your age. This video may be inappropriate for some users.」にも部分一致し、年齢制限動画1本で`BotDetectionError`→セッション中断＋12時間クールダウンに入っていた。マーカーをボット検知に固有の`"sign in to confirm you're not a bot"`/`"confirm you're not a bot"`に絞るとともに、`CONFIG.BOT_DETECTION_EXCLUDED_MARKERS`（`"confirm your age"`）を含むメッセージはマーカー判定より優先して`False`を返す。
+* 根拠: [関数定義とコメント] (行番号: 266〜286 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:\n    # M-7-2: "403"/"429"/"503" のような数字だけのマーカーを単純な部分文字列\n    # マッチ(in)で判定すると、エラーメッセージに埋め込まれた動画ID等の\n    # 英数字列(例: "...AbC403XyZ...")に偶然含まれる数字列にまで誤爆し" / "# #467: フレーズマーカーも従来は部分文字列一致(in)のままだったため、\n    # 無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる\n    # (可能性は低いが数字マーカーと同種の問題)。フレーズ・数字を問わず\n    # 単語境界(\\b)で厳密に判定する方式に統一する。" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if re.search(rf"\\b{re.escape(marker)}\\b", message):\n            return True")、[マーカー定義] (行番号: 207〜222 / 抜粋: "BOT_DETECTION_MARKERS: Tuple[str, ...] = (\n        \"sign in to confirm you're not a bot\",\n        \"confirm you're not a bot\"," / "BOT_DETECTION_EXCLUDED_MARKERS: Tuple[str, ...] = (\n        \"confirm your age\",\n    )")
 
 
 * **引数/リクエスト**: `exc: Exception`
-* 根拠: [引数定義] (行番号: 269 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
+* 根拠: [引数定義] (行番号: 266 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値ヒントと各return] (行番号: 269, 282, 286, 288, 289 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
+* 根拠: [戻り値ヒントと各return] (行番号: 266, 282, 285, 286 / 抜粋: "def _is_bot_detection_error(exc: Exception) -> bool:")
 
 
 * **副作用**: なし
-* 根拠: [処理内容] (行番号: 278〜289 / 抜粋: "message = str(exc).lower().replace("’", "'")" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if marker.isdigit():\n            if re.search(rf"\\b{re.escape(marker)}\\b", message):")
+* 根拠: [処理内容] (行番号: 278〜286 / 抜粋: "message = str(exc).lower().replace("’", "'")" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if re.search(rf"\\b{re.escape(marker)}\\b", message):\n            return True")
 
 
 * **エラーハンドリング**: なし（判定ロジックのみで例外は送出しない）
@@ -278,42 +278,63 @@
 * 根拠: [try-exceptブロックと成否分岐] (行番号: 336〜346 / 抜粋: "try:\n            sent = _send_discord_webhook([message], channel=channel)\n        except Exception as e:\n            logger.error(f"⚠️ Discord通知エラー: {e}", exc_info=True)\n            sent = False\n        if sent:\n            _discord_circuit_breaker.record_success()\n        else:\n            _discord_circuit_breaker.record_failure()")
 
 
-### `HistoryManager.load_history`
+### `HistoryManager._read_history_file`（Issue #464で追加）
 
-* **役割**: 履歴ファイル(`history.txt`)からダウンロード済みURLの集合を読み込む静的メソッド。読み込み失敗時は安全側（空の履歴として続行）に倒しつつ、`logger.error`で必ずログに残す。以前は`except Exception: pass`で読み込み失敗をログにすら残さず握りつぶしており、既にダウンロード済みのURLが全て「未ダウンロード」扱いになる再ダウンロード・再通知の嵐を引き起こしても原因調査ができない問題があったための修正である。
-* 根拠: [HistoryManager.load_historyとコメント] (行番号: 270〜277 / 抜粋: "def load_history() -> Set[str]:\n        history = set()\n        if CONFIG.HISTORY_FILE_PATH.exists():\n            try:\n                with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:\n                    history = {line.strip() for line in f if line.strip()}\n            except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
+* **役割**: 指定パスのファイルをUTF-8テキストとして読み込み、空行を除いた各行を`strip`した文字列集合として返す静的ヘルパー。`load_history`が主ファイル・`.bak`バックアップの双方を同じロジックで読み込めるよう共通化されたもの。
+* 根拠: [関数定義] (行番号: 391〜394 / 抜粋: "def _read_history_file(path: Path) -> Set[str]:\n        with open(path, "r", encoding="utf-8") as f:\n            return {line.strip() for line in f if line.strip()}")
+
+
+* **引数/リクエスト**: `path: Path`
+* 根拠: [引数定義] (行番号: 392 / 抜粋: "def _read_history_file(path: Path) -> Set[str]:")
+
+
+* **戻り値/レスポンス**: `Set[str]`
+* 根拠: [戻り値ヒント] (行番号: 392 / 抜粋: "def _read_history_file(path: Path) -> Set[str]:")
+
+
+* **副作用**: 指定パスのファイル読み込み（クローズは`with`文で保証）。
+* 根拠: [ファイル読み込み] (行番号: 393〜394 / 抜粋: "with open(path, "r", encoding="utf-8") as f:\n            return {line.strip() for line in f if line.strip()}")
+
+
+* **エラーハンドリング**: なし（`open`/読み込みで発生した例外はそのまま呼び出し元(`load_history`)へ伝播する）
+
+
+### `HistoryManager.load_history`（Issue #464で変更）
+
+* **役割**: 履歴ファイル(`history.txt`)からダウンロード済みURLの集合を`_read_history_file`経由で読み込む静的メソッド。**（Issue #464で追加）** 主ファイルの読み込みに失敗した場合、`newface_monitor.py`の`load_known_casts`と同じ考え方で、同名に`.bak`拡張子を付与したバックアップファイルからの復旧を試みる。バックアップの読み込みにも失敗した場合、またはバックアップ自体が存在しない場合は、最終的に空集合を安全側の結果として返す。読み込み・復旧いずれの失敗も`logger.error`/`logger.warning`で必ずログに残す。
+* 根拠: [HistoryManager.load_historyとコメント] (行番号: 396〜420 / 抜粋: "def load_history() -> Set[str]:\n        if CONFIG.HISTORY_FILE_PATH.exists():\n            try:\n                return HistoryManager._read_history_file(CONFIG.HISTORY_FILE_PATH)\n            except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが" / "# #464: 主ファイルの読み込みに失敗した場合、直近の正常な状態を保持する\n            # バックアップからの復旧を試みる(newface_monitor.pyのload_known_casts\n            # と同じ考え方)。" / "backup_path = CONFIG.HISTORY_FILE_PATH.with_suffix(CONFIG.HISTORY_FILE_PATH.suffix + ".bak")\n            if backup_path.exists():\n                try:\n                    history = HistoryManager._read_history_file(backup_path)\n                    logger.warning(f"⚠️ バックアップ({backup_path})から履歴を復旧しました。")\n                    return history\n                except Exception as e:\n                    logger.error(f"⚠️ バックアップ履歴ファイルの読み込みにも失敗しました: {e}", exc_info=True)\n        return set()")
 
 
 * **引数/リクエスト**: なし
-* **戻り値/レスポンス**: `Set[str]`（ファイルが存在しない場合や例外時は空集合）
-* 根拠: [戻り値ヒント] (行番号: 270 / 抜粋: "def load_history() -> Set[str]:")
+* **戻り値/レスポンス**: `Set[str]`（主ファイルが存在しない場合、主ファイル・バックアップとも読み込み失敗の場合、またはバックアップが存在しない場合は空集合）
+* 根拠: [戻り値ヒントと各return] (行番号: 397, 400, 417, 420 / 抜粋: "def load_history() -> Set[str]:")
 
 
-* **副作用**: 履歴ファイルの読み込み、読み込み失敗時のエラーログ出力(`exc_info=True`)。
-* 根拠: [ファイル読み込みとエラーログ] (行番号: 274, 281 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "r", encoding="utf-8") as f:", "logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)")
+* **副作用**: 主ファイルおよび（主ファイル読み込み失敗時のみ）`.bak`バックアップファイルの読み込み、読み込み失敗時のエラーログ出力(`exc_info=True`)、バックアップからの復旧成功時の警告ログ出力。
+* 根拠: [ファイル読み込みとログ出力] (行番号: 400, 406, 415〜419 / 抜粋: "return HistoryManager._read_history_file(CONFIG.HISTORY_FILE_PATH)", "logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)", "logger.warning(f"⚠️ バックアップ({backup_path})から履歴を復旧しました。")")
 
 
-* **エラーハンドリング**: 例外発生時は`exc_info=True`付きでエラーログを出力し、その時点までに読めた履歴（空集合）を安全側の結果として返す（例外は再送出しない）。
-* 根拠: [try-exceptブロックとコメント] (行番号: 276〜281 / 抜粋: "except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが\n                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の\n                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、\n                # 原因調査ができるよう必ずログには残す。\n                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)")
+* **エラーハンドリング**: 主ファイル読み込みで例外発生時は`exc_info=True`付きでエラーログを出力したうえで、`.bak`バックアップが存在すればその読み込みを試みる（例外は再送出しない）。バックアップの読み込みにも失敗した場合はそちらも`exc_info=True`付きでエラーログを出力し、最終的に空集合を返す。主ファイルが存在しない場合もそのまま空集合を返す（この経路ではログを出力しない）。
+* 根拠: [try-exceptブロックとコメント] (行番号: 399〜419 / 抜粋: "except Exception as e:\n                # M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが\n                # 全て「未ダウンロード」扱いになり、全件の再ダウンロード・再通知の\n                # 嵐を引き起こす。方針として安全側(空の履歴として続行)には倒すが、\n                # 原因調査ができるよう必ずログには残す。\n                logger.error(f"⚠️ 履歴ファイルの読み込みに失敗しました: {e}", exc_info=True)" / "except Exception as e:\n                    logger.error(f"⚠️ バックアップ履歴ファイルの読み込みにも失敗しました: {e}", exc_info=True)")
 
 
-### `HistoryManager.add_history`
+### `HistoryManager.add_history`（Issue #464で変更）
 
-* **役割**: ダウンロード完了URLを履歴ファイルへ追記する静的メソッド。書き込み失敗時は処理自体は継続しつつ、`logger.error`で必ずログに残す。以前は`except Exception: pass`で書き込み失敗を握りつぶしており、当該URLが次回実行時も「未ダウンロード」のままになり再ダウンロード・再通知が続いても原因調査ができない問題があったための修正である。
-* 根拠: [HistoryManager.add_historyとコメント] (行番号: 285〜290 / 抜粋: "def add_history(url: str) -> None:\n        try:\n            with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")\n        except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も")
+* **役割**: ダウンロード完了URLを履歴ファイル(`history.txt`)へ追記する静的メソッド。書き込み失敗時は処理自体は継続しつつ、`logger.error`で必ずログに残す。以前は`except Exception: pass`で書き込み失敗を握りつぶしており、当該URLが次回実行時も「未ダウンロード」のままになり再ダウンロード・再通知が続いても原因調査ができない問題があったための修正である。**（Issue #464で追加）** 主ファイルへの追記に成功した場合に限り、`newface_monitor.py`の`save_known_casts`と同じtmp書き込み＋`Path.replace`によるアトミックパターンで、主ファイルの内容全体を`.bak`拡張子のバックアップファイルへ複製・更新する（`load_history`が将来この`.bak`から復旧できるようにするため）。バックアップ作成自体の失敗は`OSError`として捕捉し、警告ログのみ出力してメソッド全体は正常終了する（本処理の目的である履歴への追記自体は既に完了しているため）。
+* 根拠: [HistoryManager.add_historyとコメント] (行番号: 422〜445 / 抜粋: "def add_history(url: str) -> None:\n        try:\n            with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")\n        except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も" / "# #464: 追記直後の状態をバックアップへ複製しておく。主ファイルが将来\n        # 破損した場合でも、load_history()がこのバックアップから直近の履歴を\n        # 復旧できるようにする" / "try:\n            backup_path = CONFIG.HISTORY_FILE_PATH.with_suffix(CONFIG.HISTORY_FILE_PATH.suffix + ".bak")\n            bak_tmp_path = backup_path.with_suffix(backup_path.suffix + ".tmp")\n            bak_tmp_path.write_bytes(CONFIG.HISTORY_FILE_PATH.read_bytes())\n            bak_tmp_path.replace(backup_path)\n        except OSError as e:\n            logger.warning(f"⚠️ 履歴ファイルのバックアップ作成に失敗しました: {e}")")
 
 
 * **引数/リクエスト**: `url: str`
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数定義] (行番号: 285 / 抜粋: "def add_history(url: str) -> None:")
+* 根拠: [関数定義] (行番号: 423 / 抜粋: "def add_history(url: str) -> None:")
 
 
-* **副作用**: 履歴ファイルへの追記書き込み、書き込み失敗時のエラーログ出力(`exc_info=True`)。
-* 根拠: [ファイル書き込みとエラーログ] (行番号: 287, 293 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:", "logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)")
+* **副作用**: 履歴ファイルへの追記書き込み、書き込み失敗時のエラーログ出力(`exc_info=True`)。追記成功時はさらに、履歴ファイル全体を一時ファイル(`.bak.tmp`)へコピーしたうえで`.bak`へアトミックに置き換える（バックアップ更新）。バックアップ作成失敗時は警告ログを出力。
+* 根拠: [ファイル書き込みとバックアップ処理] (行番号: 425〜426, 431, 439〜445 / 抜粋: "with open(CONFIG.HISTORY_FILE_PATH, "a", encoding="utf-8") as f:\n                f.write(f"{url}\\n")", "logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)", "bak_tmp_path.write_bytes(CONFIG.HISTORY_FILE_PATH.read_bytes())\n            bak_tmp_path.replace(backup_path)")
 
 
-* **エラーハンドリング**: 例外発生時は`exc_info=True`付きでエラーログを出力する（処理は継続し、例外は再送出しない）。
-* 根拠: [try-exceptブロックとコメント] (行番号: 289〜293 / 抜粋: "except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も\n            # 「未ダウンロード」のままになり再ダウンロード・再通知が続く。\n            # ここで処理自体を止めるほどではないため続行するが、ログには残す。\n            logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)")
+* **エラーハンドリング**: 主ファイルへの追記で例外発生時は`exc_info=True`付きでエラーログを出力し、`return`でバックアップ処理に進まず終了する（処理は継続し、例外は再送出しない）。バックアップ作成中の`OSError`は捕捉して警告ログを出力するのみで、メソッドは正常終了する（追記自体は既に成功しているため致命的扱いにしない）。
+* 根拠: [try-exceptブロックとコメント] (行番号: 427〜432, 439〜445 / 抜粋: "except Exception as e:\n            # M-7-1: 書き込み失敗を握りつぶすと、このURLは次回実行時も\n            # 「未ダウンロード」のままになり再ダウンロード・再通知が続く。\n            # ここで処理自体を止めるほどではないため続行するが、ログには残す。\n            logger.error(f"⚠️ 履歴ファイルへの書き込みに失敗しました (url={url}): {e}", exc_info=True)\n            return" / "except OSError as e:\n            logger.warning(f"⚠️ 履歴ファイルのバックアップ作成に失敗しました: {e}")")
 
 
 ### `CooldownManager.is_in_cooldown`
@@ -1169,11 +1190,11 @@ flowchart TD
 * 根拠: [_fetch_m3u8_manifest / _download_segments_and_localize_manifestのDocstring] (行番号: 583〜589, 664〜671 / 抜粋: "impersonate設定が引き継がれない(yt-dlp側の制限。実機検証で403の再現を確認済み)。", "ハンドラが独自のSSLContextを使うためTLS指紋(JA3)がブラウザ/素のrequests\n        とは異なり、User-Agent等のヘッダーを完全に一致させてもWAFに403で\n        ブロックされ続けることを実機の生トラフィック検証(debug_printtraffic)で\n        確認した。")
 * **状態のミスマッチ**: プログラム実行中に手動で `history.txt` やリストファイルが編集された場合、インメモリのタスク一覧とディスク上の状態に乖離が生じる可能性がある。
 * **クールダウンファイルの信頼性**: `CooldownManager.is_in_cooldown`はクールダウンファイルの内容が壊れている場合、安全側（＝クールダウンしない）に倒す設計であり、意図せずクールダウンが無効化されるリスクがある一方、システム停止よりは優先される設計判断となっている。
-* **`BOT_DETECTION_MARKERS`の数字マーカーは単語境界一致、フレーズマーカーは部分一致**: `_is_bot_detection_error`は"429"/"403"/"503"のような数字のみのマーカーを正規表現の単語境界(`\b`)で厳密に判定するよう修正済みであり、動画IDなどに埋め込まれた偶然の数字列（例:「AbC403XyZ」）への誤検知は解消されている。一方で"sign in to confirm you're not a bot"等のフレーズマーカーは引き続き部分文字列一致(`in`)で判定されるため、無関係なログメッセージにたまたま同じフレーズが含まれる場合の誤検知リスクは残る。**（Issue #396で修正）** 以前の`"sign in to confirm"`はyt-dlpの年齢制限メッセージ（"Sign in to confirm your age..."）にも一致し、年齢制限動画1本で12時間の全停止に入っていた（`ENABLE_YOUTUBE_DL=true`環境で顕在化）。マーカーを"not a bot"まで含む文言へ絞り、`BOT_DETECTION_EXCLUDED_MARKERS`（"confirm your age"）を含むメッセージは判定より優先して除外する。新たなフレーズマーカーを追加する際は、yt-dlpの他のサインイン系メッセージ（年齢制限・会員限定等）に部分一致しないか確認すること。回帰テストは`test_batch_download_discord_fixes.py`の`TestIsBotDetectionError`。
-* 根拠: [マーカー定義のコメント] (行番号: 205〜209 / 抜粋: "# #396: 以前の "sign in to confirm" は、yt-dlpの年齢制限メッセージ\n    # "Sign in to confirm your age. This video may be inappropriate for some users."\n    # にも部分一致し、年齢制限動画1本でセッション中断+12時間クールダウンに\n    # 入っていた。")
-* 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 206〜220 / 抜粋: "# 引き起こし得た。数字のみのマーカーは単語境界(\\b)で厳密に判定し、\n    # フレーズマーカーは従来通り部分文字列一致とする。")
-* **履歴ファイルI/O失敗の可視化**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録するよう修正済みである。読み込み失敗時は安全側（空の履歴として続行）に倒すため、失敗が続くと既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある点自体は変わらない。
-* 根拠: [HistoryManager.load_history/add_historyのコメント] (行番号: 277〜280, 290〜292 / 抜粋: "# M-7-1: 読み込み失敗を握りつぶすと、既にダウンロード済みのURLが")
+* **`BOT_DETECTION_MARKERS`は数字・フレーズを問わず単語境界一致に統一済み（Issue #467）**: `_is_bot_detection_error`は当初、"429"/"403"/"503"のような数字のみのマーカーだけを正規表現の単語境界(`\b`)で厳密に判定し、"sign in to confirm you're not a bot"等のフレーズマーカーは部分文字列一致(`in`)のままだった。動画IDなどに埋め込まれた偶然の数字列（例:「AbC403XyZ」）への誤検知は数字マーカー側の`\b`化で解消済みだったが、フレーズマーカー側にも「無関係なログにたまたま同一フレーズが含まれる場合の誤検知」という同種のリスクが残っていたため、Issue #467でマーカー種別を問わず`\b`による単語境界一致へ統一した。**（Issue #396で修正）** 以前の`"sign in to confirm"`はyt-dlpの年齢制限メッセージ（"Sign in to confirm your age..."）にも一致し、年齢制限動画1本で12時間の全停止に入っていた（`ENABLE_YOUTUBE_DL=true`環境で顕在化）。マーカーを"not a bot"まで含む文言へ絞り、`BOT_DETECTION_EXCLUDED_MARKERS`（"confirm your age"）を含むメッセージは判定より優先して除外する。新たなマーカーを追加する際は、`\b`（正規表現の単語境界）による一致になる点を踏まえ、yt-dlpの他のサインイン系メッセージ（年齢制限・会員限定等）に意図せず一致しないか確認すること。回帰テストは`test_batch_download_discord_fixes.py`の`TestIsBotDetectionError`。
+* 根拠: [マーカー定義のコメント] (行番号: 207〜211 / 抜粋: "# #396: 以前の "sign in to confirm" は、yt-dlpの年齢制限メッセージ\n    # "Sign in to confirm your age. This video may be inappropriate for some users."\n    # にも部分一致し、年齢制限動画1本でセッション中断+12時間クールダウンに\n    # 入っていた。")
+* 根拠: [_is_bot_detection_errorのコメントと判定処理] (行番号: 267〜286 / 抜粋: "# #467: フレーズマーカーも従来は部分文字列一致(in)のままだったため、\n    # 無関係なログにたまたま同一フレーズが含まれる場合に誤検知しうる\n    # (可能性は低いが数字マーカーと同種の問題)。フレーズ・数字を問わず\n    # 単語境界(\\b)で厳密に判定する方式に統一する。" / "for marker in CONFIG.BOT_DETECTION_MARKERS:\n        if re.search(rf"\\b{re.escape(marker)}\\b", message):\n            return True")
+* **履歴ファイルI/O失敗の可視化とバックアップ復旧（Issue #464）**: `HistoryManager.load_history`/`add_history`は、以前は`except Exception: pass`で読み書き失敗をログにも残さず握りつぶしていたが、現在は`logger.error`（`exc_info=True`付き）で必ず記録する。さらにIssue #464で`newface_monitor.py`の`load_known_casts`/`save_known_casts`と同じ考え方を導入し、`add_history`は追記成功のたびに主ファイル全体をtmp書き込み＋`Path.replace`のアトミックパターンで`.bak`へ複製・更新し、`load_history`は主ファイルの読み込みに失敗した場合にこの`.bak`からの復旧を試みるようになった（共通の読み込みロジックは`_read_history_file`ヘルパーに切り出されている）。主ファイル・バックアップの双方が読み込み失敗、またはバックアップが存在しない場合は最終的に空の履歴として続行するため、その場合は依然として既存のダウンロード済みURLが繰り返し再ダウンロード・再通知される可能性がある。バックアップ作成自体の失敗（`OSError`）は警告ログのみで、履歴への追記自体（本処理の主目的）は成功済みとして扱われる。
+* 根拠: [HistoryManager.load_history/_read_history_file/add_historyのコメント] (行番号: 402〜419, 434〜445 / 抜粋: "# #464: 主ファイルの読み込みに失敗した場合、直近の正常な状態を保持する\n            # バックアップからの復旧を試みる(newface_monitor.pyのload_known_casts\n            # と同じ考え方)。" / "# #464: 追記直後の状態をバックアップへ複製しておく。主ファイルが将来\n        # 破損した場合でも、load_history()がこのバックアップから直近の履歴を\n        # 復旧できるようにする(newface_monitor.pyのsave_known_castsと同じ\n        # tmp書き込み+replaceのアトミックパターンで、バックアップ自体の\n        # 書き込み中断による破損も避ける)。")
 * **（本PRで追加）`_discord_circuit_breaker`はモジュールレベルの単一インスタンス・プロセス内限定**: `DiscordNotifier.send`が呼ばれるたびにこの単一インスタンスの状態を更新するため、`BotDetectionError`検知時の通知（`logger.critical`直後）やタスク失敗通知等、送信元に関わらず全ての`DiscordNotifier.send`呼び出しが同じ連続失敗カウントを共有する。1回のプロセス実行内で連続3回(既定)失敗すると、以降そのプロセスが終了するまで（`BotDetectionError`によるクールダウン通知等も含め）全てのDiscord通知がスキップされる。状態はプロセスをまたいで永続化されないため、次回のcron実行では必ず閉じた状態から始まる。
 * **`noplaylist`によるプレイリスト一括ダウンロードの防止**: `UniversalYtDlpStrategy.download`の`ydl_opts`に`noplaylist: True`が追加され、リストの1行がプレイリスト/チャンネルURLだった場合に1タスクの中で無制限にダウンロードして`MAX_TASKS_PER_RUN`による1回あたりの上限が迂回される問題が修正されている。
 * 根拠: [ydl_optsのコメント] (行番号: 462〜466 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")

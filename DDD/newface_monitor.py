@@ -715,6 +715,12 @@ class DataManager:
     # 正しいファイルを開けなかっただけなので隔離してはならない。
     _CONTENT_ERRORS = (ValueError, TypeError, KeyError)
 
+    # #461: load_known_casts/load_daily_summaryが破損検知のたびに作成する
+    # .corrupted-*隔離ファイルは、.bak(常に最新の1世代のみ保持され上書きされる)
+    # と異なり削除処理を持たず、破損が繰り返されるたびに増え続けディスクを
+    # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。
+    _QUARANTINE_RETENTION_DAYS = 30
+
     def __init__(self, data_dir: Path):
         """
         Args:
@@ -727,6 +733,36 @@ class DataManager:
     def _data_file(self, site: SiteConfig) -> Path:
         """指定サイトの既知キャスト保存先JSONファイルのパスを返す。"""
         return self.data_dir / site.get_data_filename()
+
+    def cleanup_old_quarantine_files(self, retention_days: int = _QUARANTINE_RETENTION_DAYS) -> int:
+        """`_QUARANTINE_RETENTION_DAYS`日より古い`.corrupted-*`隔離ファイルを削除する。
+
+        破損検知のたびに新しいファイル名(タイムスタンプ付き)で作成され、
+        削除処理が無いと際限なく蓄積するため、巡回のたびに呼び出す想定。
+        削除自体の失敗は致命的ではないためログに残すのみで続行する。
+
+        Returns:
+            int: 削除できたファイル数。
+        """
+        cutoff = time.time() - retention_days * 86400
+        deleted = 0
+        try:
+            candidates = list(self.data_dir.glob("*.corrupted-*"))
+        except OSError as e:
+            logger.warning(f"Failed to list quarantine files in {self.data_dir}: {e}")
+            return 0
+
+        for path in candidates:
+            try:
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    deleted += 1
+            except OSError as e:
+                logger.warning(f"Failed to delete old quarantine file {path}: {e}")
+
+        if deleted:
+            logger.info(f"🧹 {deleted}件の古い隔離ファイル(.corrupted-*)を削除しました。")
+        return deleted
 
     @staticmethod
     def _read_casts_file(data_file: Path) -> Set[CastMember]:
@@ -898,7 +934,31 @@ class DataManager:
             # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
             # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
             logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
-            return {}
+
+        # #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。
+        # 以前はここで即座に空辞書を返しており、破損時に累積中の未送信カウントが
+        # 0にリセットされていた(無限再通知自体は#183/#174で解消済みだが、
+        # 集計の耐障害性はload_known_castsより弱いままだった)。
+        quarantine_path = summary_file.with_name(
+            f"{summary_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
+        )
+        try:
+            summary_file.rename(quarantine_path)
+            logger.error(f"Quarantined corrupted daily summary file: {summary_file} -> {quarantine_path}")
+        except OSError as e:
+            logger.error(f"Failed to quarantine corrupted daily summary file {summary_file}: {e}", exc_info=True)
+
+        backup_file = summary_file.with_suffix(summary_file.suffix + '.bak')
+        if backup_file.exists():
+            try:
+                with open(backup_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                logger.warning(f"Recovered daily summary from backup {backup_file} after cache corruption.")
+                return data
+            except DataManager._LOAD_ERRORS as e:
+                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
+
+        return {}
 
     def save_daily_summary(self, data: Dict) -> None:
         """日次サマリの集計状態をJSONファイルに保存する。
@@ -907,6 +967,7 @@ class DataManager:
             data (Dict): 保存対象の集計状態。
         """
         summary_file = self._daily_summary_file()
+        tmp_path: Optional[Path] = None
         try:
             summary_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -914,9 +975,31 @@ class DataManager:
             tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+
+            # #462: 書き込んだ内容が正しく読み戻せることを検証する(save_known_castsと同じ)。
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                json.load(f)
+
+            # 直前の正常データをバックアップとして残す。load_daily_summaryが破損時の
+            # 復旧に使う(save_known_castsと同じtmp書き込み+replaceのアトミックパターン)。
+            if summary_file.exists():
+                backup_path = summary_file.with_suffix(summary_file.suffix + '.bak')
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
+                try:
+                    bak_tmp_path.write_bytes(summary_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
+                except OSError as e:
+                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    bak_tmp_path.unlink(missing_ok=True)
+
             tmp_path.replace(summary_file)
-        except IOError as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save daily summary: {e}", exc_info=True)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def record_daily_new_casts(self, site_id: str, count: int) -> None:
         """サイト単位で検知した新規キャスト件数を、直近の送信以降の累積集計に加算する。
@@ -1679,6 +1762,9 @@ def _run_monitor_locked() -> None:
         return
 
     data_manager = DataManager(data_dir)
+    # #461: 破損検知のたびに増え続ける.corrupted-*隔離ファイルを、巡回のたびに
+    # 一定期間より古いものだけ削除する(失敗しても本処理は継続する)。
+    data_manager.cleanup_old_quarantine_files()
 
     monitor = None
     notifier = None

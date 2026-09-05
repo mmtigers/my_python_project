@@ -212,3 +212,70 @@ class TestImageUpload:
         decoded.load()
         assert decoded.size == (32, 16)
         assert decoded.format == "JPEG"
+
+
+class TestDeleteUploadedImageRollback:
+    """#442: AvatarUploader.tsxの2段階アップロードのうち2段階目が失敗した際の
+    ロールバック用エンドポイント(DELETE /api/quest/upload/{filename})のHTTPテスト。"""
+
+    JPEG_MAGIC = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01"
+
+    @pytest.fixture(autouse=True)
+    def _clean_upload_dir(self, isolated_db, tmp_path, monkeypatch):
+        upload_dir = tmp_path / "uploads"
+        upload_dir.mkdir()
+        monkeypatch.setattr(config, "UPLOAD_DIR", str(upload_dir))
+        yield upload_dir
+
+    def _upload_one(self, api_client):
+        res = api_client.post(
+            "/api/quest/upload",
+            files={"file": ("photo.jpg", io.BytesIO(self.JPEG_MAGIC + b"\x00" * 100), "image/jpeg")},
+        )
+        assert res.status_code == 200
+        return res.json()["url"]
+
+    def test_deletes_an_unlinked_upload(self, api_client, _clean_upload_dir):
+        url = self._upload_one(api_client)
+        filename = url.rsplit("/", 1)[-1]
+
+        res = api_client.delete(f"/api/quest/upload/{filename}")
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "deleted"
+        assert list(_clean_upload_dir.iterdir()) == []
+
+    def test_does_not_delete_an_upload_already_linked_to_a_user(self, api_client, _clean_upload_dir):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult')"
+            )
+        url = self._upload_one(api_client)
+        filename = url.rsplit("/", 1)[-1]
+
+        link_res = api_client.post("/api/quest/user/update", json={"user_id": "dad", "avatar_url": url})
+        assert link_res.status_code == 200
+
+        res = api_client.delete(f"/api/quest/upload/{filename}")
+
+        assert res.status_code == 200
+        assert res.json()["status"] == "skipped"
+        assert len(list(_clean_upload_dir.iterdir())) == 1
+
+    def test_deleting_a_nonexistent_filename_is_idempotent(self, api_client, _clean_upload_dir):
+        res = api_client.delete("/api/quest/upload/does-not-exist.png")
+        assert res.status_code == 200
+        assert res.json()["status"] == "skipped"
+
+    def test_path_traversal_filename_does_not_escape_upload_dir(self, api_client, tmp_path, _clean_upload_dir):
+        outside_file = tmp_path / "secret.txt"
+        outside_file.write_bytes(b"do-not-delete")
+
+        res = api_client.delete("/api/quest/upload/..%2Fsecret.txt")
+
+        # ルーティング自体が一致せず404になる場合・basename化されて対象ファイルが
+        # upload_dir内に見つからず"skipped"になる場合のいずれでもよいが、
+        # どちらにしてもupload_dir外のファイルは削除されないこと。
+        assert res.status_code in (200, 404)
+        assert outside_file.exists()
