@@ -509,6 +509,14 @@ class TestGetAllViewDataSharedQuestBoostViewer:
     履歴に関わらずボーナスが常に0になっていた(実害はないが意味が誤り)。
     viewer_user_id(閲覧中のユーザー)を渡した場合は、そのユーザーの履歴を
     代表として使うことを検証する。
+
+    F-L6(#412): 'siblings'クエストは_process_coop_quest_completionが兄妹2人分の
+    quest_historyを同一completed_atで必ずセットで作成するため、どちらの子の
+    user_idで見ても連続達成ボーナスは同じ結果になるはずだが、以前はviewer_user_id
+    が兄妹のどちらでもない場合(親が閲覧中、または横画面4分割ビューでviewer_user_id
+    が常にusers[0]固定になる場合。Echo Show等)にボーナスが常に0固定になっていた。
+    viewer_user_idの有無・値によらず、兄妹のいずれかのuser_idで正しくボーナスが
+    算出されることを検証する。
     """
     def _seed_shared_quest_with_history(self, cur):
         cur.execute(
@@ -530,16 +538,39 @@ class TestGetAllViewDataSharedQuestBoostViewer:
             VALUES ('son', 101, 'Shared Quest', 100, 100, ?, 'approved')
         """, (three_days_ago,))
 
-    def test_boost_is_always_zero_without_a_viewer(self, isolated_db):
+    def test_boost_uses_a_sibling_participant_even_without_a_viewer(self, isolated_db):
+        """F-L6(#412): viewer_user_idが無くても(例: 親が閲覧、または横画面4分割
+        ビューでviewer_user_idを渡さない/兄妹でない場合)、'siblings'クエストは
+        兄妹のいずれかのuser_idの履歴で正しくボーナスが算出されるべきで、
+        以前のように常に0になってはならない。"""
         with common.get_db_cursor(commit=True) as cur:
             self._seed_shared_quest_with_history(cur)
 
         game_system = GameSystem()
         data = game_system.get_all_view_data()
 
+        # days_diff=3 -> missed_days=2 -> bonus_ratio=0.2 -> 100 * 0.2 = 20
         quest = next(q for q in data["quests"] if q["quest_id"] == 101)
-        assert quest["bonus_gold"] == 0
-        assert quest["bonus_exp"] == 0
+        assert quest["bonus_gold"] == 20
+        assert quest["bonus_exp"] == 20
+
+    def test_boost_uses_a_sibling_participant_when_viewer_is_a_parent(self, isolated_db):
+        """F-L6(#412): viewer_user_idが兄妹のどちらでもない(親等)場合も、
+        'siblings'クエストのボーナスは兄妹の履歴で算出されるべきで、
+        親自身にはこのクエストの履歴が無いため以前は常に0になっていた。"""
+        with common.get_db_cursor(commit=True) as cur:
+            self._seed_shared_quest_with_history(cur)
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
+                "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
+            )
+
+        game_system = GameSystem()
+        data = game_system.get_all_view_data(viewer_user_id="dad")
+
+        quest = next(q for q in data["quests"] if q["quest_id"] == 101)
+        assert quest["bonus_gold"] == 20
+        assert quest["bonus_exp"] == 20
 
     def test_boost_uses_viewers_own_history_when_target_user_is_not_a_real_user(self, isolated_db):
         """Issue #176回帰防止: _seed_shared_quest_with_historyは以前naiveなOS

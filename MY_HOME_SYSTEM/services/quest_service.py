@@ -1232,6 +1232,15 @@ class GameSystem:
             # target_user が実在ユーザーでない場合は、閲覧中のユーザー(viewer_user_id)の
             # 履歴を代表として使う。
             known_user_ids = {u['user_id'] for u in users}
+            # F-L6(#412): target_user='siblings'(兄妹連携)クエストは、_process_coop_quest_completion
+            # が兄妹2人分のquest_historyを同一completed_atで必ずセットで作成するため、
+            # どちらの子のuser_idで見ても連続達成ボーナスは同じ結果になるはずだが、
+            # 以前は下のelse節でviewer_user_idにフォールバックしていたため、viewer_user_idが
+            # 兄妹のどちらでもない場合(親が閲覧中、または横画面4分割ビューでviewer_user_idが
+            # 常にusers[0]固定になる場合。Echo Show等)、その閲覧者にはこのクエストの
+            # quest_history行が一切無いため連続達成ボーナスが常に0固定になっていた。
+            # 兄妹のいずれか(以下の実装では最初に見つかった方)のuser_idを使う。
+            sibling_child_ids = [u['user_id'] for u in users if u.get('role') == ROLE_CHILD]
 
             # 品質(#409 N+1対策): 以前はここでクエストごとにcalculate_quest_boostを呼び、
             # クエストごとにquest_historyへの個別SELECTを発行していた(GET /data 1回で
@@ -1257,6 +1266,8 @@ class GameSystem:
                 # 閲覧中のユーザー(viewer_user_id)の履歴で算出する。
                 if q['target_user'] == 'all' or not q['target_user']:
                     boost_user_id = viewer_user_id
+                elif q['target_user'] == 'siblings' and sibling_child_ids:
+                    boost_user_id = sibling_child_ids[0]
                 else:
                     boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
                 if boost_user_id:
