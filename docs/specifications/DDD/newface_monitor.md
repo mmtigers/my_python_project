@@ -28,7 +28,7 @@
 * `SiteConfig`データクラスは監視対象1サイト分の設定（対象URL、CSSセレクタ、画像取得方法、名前抽出時の特殊処理フラグ等）を保持し、モジュールimport時に`_load_sites(SITES_JSON_PATH)`が`sites.json`を読み込んで`MonitorConfig.SITES`（`SiteConfig`インスタンス79件のリスト）を構築する（2026-09-02にサイト閉鎖が確認された`bellica`が削除され80件から79件になった。削除理由は`sites.json`の該当エントリの`_comment`フィールドとして残されている）。各サイトのHTML構造の違い（lazyload画像、インラインCSS背景画像、年齢バッジの位置、クエリパラメータ形式のID等）を、コード変更ではなく`SiteConfig`のフラグ・パラメータ調整のみで吸収する設計である。バリデーション自体は`SiteConfig`（frozen dataclass）に委譲しており、`sites.json`側はデータを保持するだけという役割分担は変わっていない。
 * 根拠: [SiteConfigクラスと_load_sites定義] (行番号: 129〜134 / 抜粋: "新しいサイトを監視対象に加える場合は、sites.json にこのデータクラスの\n    フィールド名をキーとするエントリを1件追加するだけでよい\n    （コード本体の変更は不要。読み込みは _load_sites が担う）。")、[_load_sitesとMonitorConfig.SITES] (行番号: 208〜275 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")
 * `requests`と`BeautifulSoup`を用いて各サイトをスクレイピングし、キャスト情報（ID・名前・詳細URL・画像URL・年齢）を抽出、サイトごとに保存された既知キャスト一覧（JSON永続化、`known_casts_{site_id}.json`）との差分検知により新規キャストのみをDiscordへ通知する。
-* 根拠: [WebMonitor._parse_htmlとCastMember] (行番号: 685〜836, 327〜343 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:")
+* 根拠: [WebMonitor._parse_htmlとCastMember] (行番号: 1306〜1370, 327〜343 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:")
 * 1サイトの通信障害・レイアウト変更・パースエラーが他サイトの監視処理に波及しないよう、サイト単位の処理は`_check_site`関数として分離され、例外は`run_monitor`内でサイトごとに個別捕捉される。
 * 根拠: [_check_site Docstring] (行番号: 1170〜1179 / 抜粋: "サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が\n    他サイトの監視処理に波及しないようにする。")
 * **（2026-09-02のbellica閉鎖対応で追加）** サイト別の連続失敗回数を`site_failures.json`に永続化し、`CONSECUTIVE_FAILURE_ALERT_THRESHOLD`（24回=1時間毎実行前提で約1日）に達したサイトは「閉鎖・移転の疑い」としてDiscordへ1回だけテキストアラートを送信した上で、以降の失敗ログをERRORからWARNINGへ降格する（一次ヘルスチェックのERROR監視が恒久的に消失したサイトで発報し続けないようにするため）。キャストを1件以上取得できた時点で連続失敗状態はリセットされ、通常のERROR運用に自動的に戻る。**（Issue #395で拡張）** 失敗として計上する対象はネットワーク例外に加えて「別ドメインへのリダイレクト（200を返す消失サイト）」「キャスト0件」にも広げられ、ログの降格はアラート送信の成否ではなく閾値到達で判定し、アラートは全サイト処理後にまとめて送信（失敗サイト割合が`SELF_OUTAGE_SUPPRESS_RATIO`超なら自局側障害とみなして抑止）する。
@@ -144,7 +144,7 @@
 
 ### `AGE_PATTERN` (モジュール定数)（D-L12で変更）
 
-* **役割**: 名前要素のテキストから年齢を抽出するための正規表現。"うるは(23歳)"のような全角/半角括弧付き数字、または「歳」「才」が続く数字表記のいずれかにマッチする。ランキングバッジ等の1桁の括弧数字（例: "(1)"）を誤って年齢と判定しないよう、桁数を2桁に限定している。**（D-L12で変更）** 括弧内の「歳」「才」の有無を判別できるよう、以前は非捕捉グループだった`(?:歳|才)?`を捕捉グループ`(歳|才)?`に変更した。マッチ結果は3グループ: `group(1)`＝括弧内の数字、`group(2)`＝括弧内の「歳」「才」（無ければ`None`）、`group(3)`＝括弧無しで「歳」「才」が続く数字。呼び出し側（`_parse_html`）は、`group(2)`が`None`（＝括弧内に「歳」「才」の明示が無い）の場合のみ、`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲かどうかで年齢として採用するか判定する（詳細は`WebMonitor._parse_html`参照）。以前は括弧内の数字を「歳」「才」の有無に関わらず無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。
+* **役割**: 名前要素のテキストから年齢を抽出するための正規表現。"うるは(23歳)"のような全角/半角括弧付き数字、または「歳」「才」が続く数字表記のいずれかにマッチする。ランキングバッジ等の1桁の括弧数字（例: "(1)"）を誤って年齢と判定しないよう、桁数を2桁に限定している。**（D-L12で変更）** 括弧内の「歳」「才」の有無を判別できるよう、以前は非捕捉グループだった`(?:歳|才)?`を捕捉グループ`(歳|才)?`に変更した。マッチ結果は3グループ: `group(1)`＝括弧内の数字、`group(2)`＝括弧内の「歳」「才」（無ければ`None`）、`group(3)`＝括弧無しで「歳」「才」が続く数字。呼び出し側（**品質で`_parse_html`から分離**された`WebMonitor._extract_cast_age`）は、`group(2)`が`None`（＝括弧内に「歳」「才」の明示が無い）の場合のみ、`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲かどうかで年齢として採用するか判定する（詳細は`WebMonitor._extract_cast_age`参照）。以前は括弧内の数字を「歳」「才」の有無に関わらず無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。
 * 根拠: [定義とコメント] (行番号: 116〜129 / 抜粋: "# 名前要素のテキストから年齢を抽出するための正規表現。\n# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、\n...\n# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも\n# 無条件に年齢とみなしていたため" / "AGE_PATTERN = re.compile(r'[（(]\\s*(\\d{2})\\s*(歳|才)?\\s*[）)]|(\\d{2})\\s*(?:歳|才)')")
 
 
@@ -216,7 +216,7 @@
 * 根拠: [定数定義とコメント] (行番号: 303〜305 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
 
 
-* **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._parse_html`のAge Extraction部分で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
+* **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._extract_cast_age`（**品質で`_parse_html`から分離**）で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
 * 根拠: [定数定義とコメント] (行番号: 306〜311 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
 
 
@@ -729,26 +729,44 @@
 * 根拠: [try-exceptブロックとコメント] (行番号: 942〜948 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
 
 
-### `WebMonitor._parse_html`（D-L12で変更）
+### `WebMonitor._extract_raw_name` / `_extract_cast_age` / `_extract_cast_link_and_id` / `_extract_cast_image_url`（品質で追加）
 
-* **役割**: `BeautifulSoup`オブジェクトから、サイト設定済みCSSセレクタ（`selector_container`, `selector_name`, `selector_link`, `selector_image`）を用いて各キャストのコンテナ要素を抽出し、名前・年齢・詳細URL・ID・画像URLを取り出して`CastMember`集合を構築する。名前抽出は`name_first_text_only`/`name_strip_after_tab`フラグに応じて分岐し、リンク抽出はコンテナ自体が`<a>`要素であるフォールバックにも対応する。**（D-L12で変更）** 年齢抽出は`AGE_PATTERN`の3グループ（括弧内数字/括弧内「歳」「才」/括弧無し数字）を分解し、`(1)`括弧無しで「歳」「才」が続く場合、`(2)`括弧内数字に「歳」「才」が明示されている場合は無条件に年齢として採用し、`(3)`括弧内数字のみ（「歳」「才」の明示無し）の場合は`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲内でのみ採用する（範囲外なら`age`は空文字のまま）。以前は`(3)`のケースも無条件に年齢として採用しており、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。ID抽出は`id_query_param`指定時のクエリパラメータ優先、次にキー=値形式でないクエリ文字列全体、最後にパス末尾セグメントの順でフォールバックし、それでも取得できない場合はコンテナHTMLのSHA1フィンガープリントを付与した`name_{name}_{fingerprint}`形式のIDを生成する。画像抽出は`image_from_style`指定時のインラインCSS背景画像抽出、通常時は`image_attr`（未取得なら`src`へのフォールバック）を用いる。
-* 根拠: [メソッド定義とDocstring] (行番号: 685〜694 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[D-L12: 年齢抽出の分岐] (行番号: 1194〜1213 / 抜粋: "bracket_num, bracket_suffix, plain_num = age_match.groups()\n                        if bracket_num is not None:\n                            # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、\n                            # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを\n                            # 確認し、部屋番号・順位バッジ等の誤検知を減らす。\n                            if bracket_suffix or (\n                                MonitorConfig.AGE_PLAUSIBLE_MIN\n                                <= int(bracket_num)\n                                <= MonitorConfig.AGE_PLAUSIBLE_MAX\n                            ):\n                                age = bracket_num\n                        else:\n                            age = plain_num")
+* **役割**: いずれも`_parse_html`のキャストカードごとのパース処理（以前は170行超・深いネストの単一ループ本体だった）から分離された純粋な抽出処理の静的メソッド群。`_extract_raw_name`は名前要素・名前文字列の抽出（`name_first_text_only`/`name_strip_after_tab`フラグの分岐を含む）、`_extract_cast_age`は`AGE_PATTERN`を用いた年齢抽出（D-L12の妥当性チェックを含む）、`_extract_cast_link_and_id`は詳細URL・IDの抽出（`id_query_param`優先→キー=値でないクエリ文字列→パス末尾セグメント→SHA1フィンガープリントの順のフォールバック）、`_extract_cast_image_url`は画像URLの抽出（`image_from_style`によるインラインCSS抽出、または`image_attr`／`src`フォールバック）を、それぞれ副作用なしに行う。名前が空文字だった場合の`skip_unnamed_casts`分岐によるカード読み飛ばし（`continue`）とそれに伴うログ出力は、ループ制御が必要なため`_parse_html`側に残されている。
+* 根拠: [各メソッド定義とDocstring] (行番号: 1131〜1132, 1166〜1167, 1200〜1201, 1276〜1277 / 抜粋: "def _extract_raw_name(div: Tag, site: SiteConfig) -> Tuple[str, Optional[Tag]]:", "def _extract_cast_age(name_elem: Optional[Tag]) -> str:", "def _extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str) -> Tuple[str, str]:", "def _extract_cast_image_url(div: Tag, site: SiteConfig) -> str:")
+
+
+* **引数/リクエスト**: `_extract_raw_name(div: Tag, site: SiteConfig)`、`_extract_cast_age(name_elem: Optional[Tag])`、`_extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str)`（`name`はID抽出が全フォールバックを尽くしても取得できない場合のフィンガープリント付きID生成に使用）、`_extract_cast_image_url(div: Tag, site: SiteConfig)`
+* 根拠: [各シグネチャ] (行番号: 1131, 1166, 1200, 1276)
+
+
+* **戻り値/レスポンス**: `_extract_raw_name`は`Tuple[str, Optional[Tag]]`（名前文字列とname_elem）、`_extract_cast_age`は`str`（年齢文字列、抽出不可なら空文字）、`_extract_cast_link_and_id`は`Tuple[str, str]`（detail_url, cast_id）、`_extract_cast_image_url`は`str`（画像URL、抽出不可なら空文字）
+* 根拠: [各戻り値ヒント] (行番号: 1131, 1166, 1200, 1276)
+
+
+* **副作用**: いずれもなし（純粋な文字列/タプル抽出処理のみ。ログ出力は行わない）
+* **エラーハンドリング**: いずれもなし（呼び出し元`_parse_html`の`try/except`が個別要素のパース失敗全体を捕捉する）
+
+
+### `WebMonitor._parse_html`（D-L12で変更、品質でヘルパーメソッドへ分割）
+
+* **役割**: `BeautifulSoup`オブジェクトから、`selector_container`でキャストのコンテナ要素を抽出し、各コンテナについて`_extract_raw_name`/`_extract_cast_age`/`_extract_cast_link_and_id`/`_extract_cast_image_url`（いずれも品質で追加）を順に呼び出して`CastMember`を構築する。**（品質で変更）** 以前は名前・年齢・リンク/ID・画像の4種の抽出ロジックが170行超の単一`for`ループ本体に直接書かれ、深くネストした条件分岐で読みにくかったため、ループ制御（`skip_unnamed_casts`時の`continue`とログ出力）のみを本メソッドに残し、各フィールドの純粋な抽出処理を上記4つの静的ヘルパーメソッドへ分離した。抽出ロジック自体（`AGE_PATTERN`の3グループ判定、ID抽出の複数段フォールバック等、D-L12を含む）は分離前と完全に同一である。
+* 根拠: [メソッド定義とDocstring] (行番号: 1306〜1315 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1328, 1351〜1353 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`（解析対象のHTML）, `site: SiteConfig`（対象サイトの設定。セレクタ・ベースURLに使用）
-* 根拠: [引数定義とDocstring] (行番号: 685, 688〜690 / 抜粋: "soup (BeautifulSoup): 解析対象のHTML。\n            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。")
+* 根拠: [引数定義とDocstring] (行番号: 1306, 1309〜1311 / 抜粋: "soup (BeautifulSoup): 解析対象のHTML。\n            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。")
 
 
 * **戻り値/レスポンス**: `Set[CastMember]`（抽出されたキャストの集合。コンテナ要素が見つからない場合は空集合）
-* 根拠: [Docstringと各return] (行番号: 692〜693, 703, 836 / 抜粋: "Returns:\n            Set[CastMember]: 抽出されたキャストの集合。")
+* 根拠: [Docstringと各return] (行番号: 1313〜1314, 1324, 1370 / 抜粋: "Returns:\n            Set[CastMember]: 抽出されたキャストの集合。")
 
 
-* **副作用**: セレクタが要素にマッチしなかった場合の警告ログ出力、個別要素のパース失敗時の警告ログ出力、デバッグログ出力。URLの正規化（クエリ文字列・フラグメントの除去によるID安定化、`urljoin`による絶対URL化、別ドメインリンクへのドメインプレフィックス付与）を行う。
-* 根拠: [ID正規化のコメントと処理] (行番号: 775〜782 / 抜粋: "# クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与\n                        # されるとcast_idが実行ごとにブレて「新規キャスト」の\n                        # 誤検知を招くため、先に除去する")
+* **副作用**: セレクタが要素にマッチしなかった場合の警告ログ出力、個別要素のパース失敗時の警告ログ出力、デバッグログ出力。URLの正規化（クエリ文字列・フラグメントの除去によるID安定化、`urljoin`による絶対URL化、別ドメインリンクへのドメインプレフィックス付与）は`_extract_cast_link_and_id`（品質で追加）に委譲される。
+* 根拠: [ID正規化のコメントと処理（委譲先）] (行番号: 1244〜1251 / 抜粋: "# クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与\n                # されるとcast_idが実行ごとにブレて「新規キャスト」の\n                # 誤検知を招くため、先に除去する")
 
 
 * **エラーハンドリング**: コンテナ要素が1件も見つからない場合は警告ログを出力し空集合を返す。個別のキャスト要素パース中に例外が発生した場合は警告ログを出力し、その要素をスキップして次の要素の処理を継続する（`continue`）。
-* 根拠: [try-exceptブロック] (行番号: 830〜833 / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
+* 根拠: [try-exceptブロック] (行番号: 1364〜1367 / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
 
 
 ### `WebMonitor.close`

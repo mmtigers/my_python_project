@@ -41,7 +41,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from bs4 import BeautifulSoup, NavigableString
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 # MY_HOME_SYSTEM Core Imports
 try:
@@ -1128,6 +1128,181 @@ class WebMonitor:
             logger.debug(f"Network error during scraping of site '{site.site_id}': {e}")
             raise
 
+    @staticmethod
+    def _extract_raw_name(div: Tag, site: SiteConfig) -> Tuple[str, Optional[Tag]]:
+        """キャストカードから名前とname要素を抽出する（品質: _parse_htmlから分離）。
+
+        ログ出力・"Unknown"フォールバック・空名時のcontinue判断は呼び出し元
+        （_parse_html）が担うため、ここでは純粋な文字列抽出のみを行う。
+
+        Args:
+            div (Tag): 1件分のキャストカード要素。
+            site (SiteConfig): 対象サイトの設定（セレクタに使用）。
+
+        Returns:
+            Tuple[str, Optional[Tag]]: (抽出された名前（空文字の場合あり）, name_elem)。
+        """
+        name_elem = div.select_one(site.selector_name)
+        if name_elem and site.name_first_text_only:
+            name = ""
+            for child in name_elem.contents:
+                if isinstance(child, NavigableString):
+                    candidate = child.strip()
+                    if candidate:
+                        name = candidate
+                        break
+            if not name:
+                name = name_elem.get_text(strip=True)
+        elif name_elem:
+            name = name_elem.get_text(strip=True)
+        else:
+            name = ""
+        if site.name_strip_after_tab and '\t' in name:
+            # "芹沢\t\t\t(40歳)" のように、年齢等の付加情報が兄弟要素では
+            # なく同一テキストノード内にタブ区切りで同居しているサイト向け
+            name = name.split('\t')[0].strip()
+        return name, name_elem
+
+    @staticmethod
+    def _extract_cast_age(name_elem: Optional[Tag]) -> str:
+        """name要素全体のテキストから年齢を抽出する（品質: _parse_htmlから分離）。
+
+        name_first_text_only/name_strip_after_tab で名前から年齢表記を
+        切り離しているサイトでも年齢自体は失わずに取得できるよう、
+        name抽出時の絞り込み前のname_elem全体のテキスト(年齢の兄弟要素・
+        タブ区切り部分を含む)から抽出する。
+
+        Args:
+            name_elem (Optional[Tag]): 名前要素（存在しない場合はNone）。
+
+        Returns:
+            str: 抽出された年齢文字列（抽出できない場合は空文字）。
+        """
+        age = ""
+        if name_elem:
+            age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
+            if age_match:
+                bracket_num, bracket_suffix, plain_num = age_match.groups()
+                if bracket_num is not None:
+                    # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
+                    # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを
+                    # 確認し、部屋番号・順位バッジ等の誤検知を減らす。
+                    if bracket_suffix or (
+                        MonitorConfig.AGE_PLAUSIBLE_MIN
+                        <= int(bracket_num)
+                        <= MonitorConfig.AGE_PLAUSIBLE_MAX
+                    ):
+                        age = bracket_num
+                else:
+                    age = plain_num
+        return age
+
+    @staticmethod
+    def _extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str) -> Tuple[str, str]:
+        """キャストカードから詳細URLとIDを抽出する（品質: _parse_htmlから分離）。
+
+        Args:
+            div (Tag): 1件分のキャストカード要素。
+            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。
+            name (str): 抽出済みの名前（cast_idのフォールバック生成に使用）。
+
+        Returns:
+            Tuple[str, str]: (detail_url, cast_id)。
+        """
+        link_elem = div.select_one(site.selector_link)
+        if not link_elem and div.name == 'a' and div.get('href'):
+            # コンテナ自体が<a>で、詳細ページへのリンクを子孫ではなく
+            # 自分自身が持っているサイト向けのフォールバック
+            # （個別の<li>等でラップされずカードそのものが<a>になっている構造）
+            link_elem = div
+        detail_url = ""
+        cast_id = ""
+
+        if link_elem and link_elem.get('href'):
+            href = link_elem.get('href')
+            detail_url = urljoin(site.target_url, href)
+
+            if site.id_query_param:
+                # 'profile.php?id=931' のようにクエリパラメータでキャストを
+                # 識別するサイト向け: 指定パラメータの値をそのままIDとする
+                query_values = parse_qs(urlparse(href).query).get(site.id_query_param)
+                if query_values:
+                    cast_id = query_values[0]
+                    # 姉妹店等、自サイトとは別ドメインへのリンクが同じ一覧に
+                    # 混在するサイト向け: 別ドメインの場合はIDが自サイト内の
+                    # 採番と衝突しうるため、ドメイン名を付与して区別する
+                    link_domain = urlparse(href).netloc
+                    site_domain = urlparse(site.target_url).netloc
+                    if link_domain and link_domain != site_domain:
+                        cast_id = f"{link_domain}_{cast_id}"
+
+            if not cast_id:
+                # 'profile.html?12199' のようにキー=値形式ではなく、
+                # クエリ文字列自体（'='を含まない）がIDを表すサイト向け
+                raw_query = urlparse(href).query
+                if raw_query and '=' not in raw_query:
+                    cast_id = raw_query
+
+            if not cast_id:
+                # パスからIDを生成 (例: /prof/123 -> 123)
+                # クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与
+                # されるとcast_idが実行ごとにブレて「新規キャスト」の
+                # 誤検知を招くため、先に除去する
+                href_no_query = href.split('?')[0]
+                href_no_fragment = href_no_query.split('#')[0]
+                clean_path = href_no_fragment.rstrip('/')
+                cast_id = os.path.basename(clean_path)
+
+        if not cast_id:
+            # フォールバック: 名前をIDとする。ただし同一ページ内で複数件が
+            # 同時にこのフォールバックに落ちた場合（例: 名前も"Unknown"に
+            # なる要素が複数存在する）、IDが完全に同一になり
+            # Set[CastMember]内で衝突して片方が黙って失われてしまう
+            # （id/hashともにidのみに依拠しているため）。
+            # コンテナの生HTML（get_text()ではなくstr()）のフィンガープリントを
+            # 付与することで、テキストが同一/空でも画像src等の属性差異が
+            # あれば別要素として区別できるようにする。
+            fingerprint = hashlib.sha1(str(div).encode('utf-8')).hexdigest()[:10]
+            cast_id = f"name_{name}_{fingerprint}"
+
+        if not detail_url:
+            # 個別プロフィールページへのリンクを持たないサイト向けのフォールバック:
+            # Discord通知のembed urlが空文字のまま送信されるのを避けるため、
+            # 一覧ページ自体のURLを代わりに使う
+            detail_url = site.target_url
+
+        return detail_url, cast_id
+
+    @staticmethod
+    def _extract_cast_image_url(div: Tag, site: SiteConfig) -> str:
+        """キャストカードから画像URLを抽出する（品質: _parse_htmlから分離）。
+
+        Args:
+            div (Tag): 1件分のキャストカード要素。
+            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。
+
+        Returns:
+            str: 抽出された画像URL（抽出できない場合は空文字）。
+        """
+        img_elem = div.select_one(site.selector_image)
+        image_url = ""
+        if img_elem:
+            if site.image_from_style:
+                # 'background-image:url(...)' 形式のインラインCSSから抽出
+                # (<img src> ではなくCSSで背景画像として指定されるサイト向け)
+                style_match = re.search(r'url\(([^)]+)\)', img_elem.get('style', ''))
+                image_src = style_match.group(1).strip('\'"') if style_match else ""
+            else:
+                image_src = img_elem.get(site.image_attr, '')
+                if not image_src and site.image_attr != 'src':
+                    # 一部の掲載枠のみ通常の<img src>を使い、他の枠は
+                    # lazyload用属性を使う、といった混在サイト向けの
+                    # フォールバック(指定属性が無い場合のみ'src'を試す)
+                    image_src = img_elem.get('src', '')
+            if image_src:
+                image_url = urljoin(site.target_url, image_src)
+        return image_url
+
     def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:
         """HTMLスープからキャスト情報を抽出する。
 
@@ -1150,26 +1325,7 @@ class WebMonitor:
 
         for div in containers:
             try:
-                # Name Extraction
-                name_elem = div.select_one(site.selector_name)
-                if name_elem and site.name_first_text_only:
-                    name = ""
-                    for child in name_elem.contents:
-                        if isinstance(child, NavigableString):
-                            candidate = child.strip()
-                            if candidate:
-                                name = candidate
-                                break
-                    if not name:
-                        name = name_elem.get_text(strip=True)
-                elif name_elem:
-                    name = name_elem.get_text(strip=True)
-                else:
-                    name = ""
-                if site.name_strip_after_tab and '\t' in name:
-                    # "芹沢\t\t\t(40歳)" のように、年齢等の付加情報が兄弟要素では
-                    # なく同一テキストノード内にタブ区切りで同居しているサイト向け
-                    name = name.split('\t')[0].strip()
+                name, name_elem = self._extract_raw_name(div, site)
 
                 if not name:
                     if site.skip_unnamed_casts:
@@ -1192,110 +1348,9 @@ class WebMonitor:
                         )
                     name = "Unknown"
 
-                # Age Extraction
-                # name_first_text_only/name_strip_after_tab で名前から年齢表記を
-                # 切り離しているサイトでも年齢自体は失わずに取得できるよう、
-                # 上記の絞り込み前のname_elem全体のテキスト(年齢の兄弟要素・
-                # タブ区切り部分を含む)から抽出する
-                age = ""
-                if name_elem:
-                    age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
-                    if age_match:
-                        bracket_num, bracket_suffix, plain_num = age_match.groups()
-                        if bracket_num is not None:
-                            # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
-                            # 括弧内の数字のみ(suffix無し)の場合は妥当な年齢範囲内かを
-                            # 確認し、部屋番号・順位バッジ等の誤検知を減らす。
-                            if bracket_suffix or (
-                                MonitorConfig.AGE_PLAUSIBLE_MIN
-                                <= int(bracket_num)
-                                <= MonitorConfig.AGE_PLAUSIBLE_MAX
-                            ):
-                                age = bracket_num
-                        else:
-                            age = plain_num
-
-                # Link & ID Extraction
-                link_elem = div.select_one(site.selector_link)
-                if not link_elem and div.name == 'a' and div.get('href'):
-                    # コンテナ自体が<a>で、詳細ページへのリンクを子孫ではなく
-                    # 自分自身が持っているサイト向けのフォールバック
-                    # （個別の<li>等でラップされずカードそのものが<a>になっている構造）
-                    link_elem = div
-                detail_url = ""
-                cast_id = ""
-
-                if link_elem and link_elem.get('href'):
-                    href = link_elem.get('href')
-                    detail_url = urljoin(site.target_url, href)
-
-                    if site.id_query_param:
-                        # 'profile.php?id=931' のようにクエリパラメータでキャストを
-                        # 識別するサイト向け: 指定パラメータの値をそのままIDとする
-                        query_values = parse_qs(urlparse(href).query).get(site.id_query_param)
-                        if query_values:
-                            cast_id = query_values[0]
-                            # 姉妹店等、自サイトとは別ドメインへのリンクが同じ一覧に
-                            # 混在するサイト向け: 別ドメインの場合はIDが自サイト内の
-                            # 採番と衝突しうるため、ドメイン名を付与して区別する
-                            link_domain = urlparse(href).netloc
-                            site_domain = urlparse(site.target_url).netloc
-                            if link_domain and link_domain != site_domain:
-                                cast_id = f"{link_domain}_{cast_id}"
-
-                    if not cast_id:
-                        # 'profile.html?12199' のようにキー=値形式ではなく、
-                        # クエリ文字列自体（'='を含まない）がIDを表すサイト向け
-                        raw_query = urlparse(href).query
-                        if raw_query and '=' not in raw_query:
-                            cast_id = raw_query
-
-                    if not cast_id:
-                        # パスからIDを生成 (例: /prof/123 -> 123)
-                        # クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与
-                        # されるとcast_idが実行ごとにブレて「新規キャスト」の
-                        # 誤検知を招くため、先に除去する
-                        href_no_query = href.split('?')[0]
-                        href_no_fragment = href_no_query.split('#')[0]
-                        clean_path = href_no_fragment.rstrip('/')
-                        cast_id = os.path.basename(clean_path)
-
-                if not cast_id:
-                    # フォールバック: 名前をIDとする。ただし同一ページ内で複数件が
-                    # 同時にこのフォールバックに落ちた場合（例: 名前も"Unknown"に
-                    # なる要素が複数存在する）、IDが完全に同一になり
-                    # Set[CastMember]内で衝突して片方が黙って失われてしまう
-                    # （id/hashともにidのみに依拠しているため）。
-                    # コンテナの生HTML（get_text()ではなくstr()）のフィンガープリントを
-                    # 付与することで、テキストが同一/空でも画像src等の属性差異が
-                    # あれば別要素として区別できるようにする。
-                    fingerprint = hashlib.sha1(str(div).encode('utf-8')).hexdigest()[:10]
-                    cast_id = f"name_{name}_{fingerprint}"
-
-                if not detail_url:
-                    # 個別プロフィールページへのリンクを持たないサイト向けのフォールバック:
-                    # Discord通知のembed urlが空文字のまま送信されるのを避けるため、
-                    # 一覧ページ自体のURLを代わりに使う
-                    detail_url = site.target_url
-
-                # Image Extraction
-                img_elem = div.select_one(site.selector_image)
-                image_url = ""
-                if img_elem:
-                    if site.image_from_style:
-                        # 'background-image:url(...)' 形式のインラインCSSから抽出
-                        # (<img src> ではなくCSSで背景画像として指定されるサイト向け)
-                        style_match = re.search(r'url\(([^)]+)\)', img_elem.get('style', ''))
-                        image_src = style_match.group(1).strip('\'"') if style_match else ""
-                    else:
-                        image_src = img_elem.get(site.image_attr, '')
-                        if not image_src and site.image_attr != 'src':
-                            # 一部の掲載枠のみ通常の<img src>を使い、他の枠は
-                            # lazyload用属性を使う、といった混在サイト向けの
-                            # フォールバック(指定属性が無い場合のみ'src'を試す)
-                            image_src = img_elem.get('src', '')
-                    if image_src:
-                        image_url = urljoin(site.target_url, image_src)
+                age = self._extract_cast_age(name_elem)
+                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)
+                image_url = self._extract_cast_image_url(div, site)
 
                 cast = CastMember(
                     id=cast_id,
