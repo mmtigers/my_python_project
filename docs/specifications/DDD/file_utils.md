@@ -16,8 +16,8 @@
 
 ## 2. ファイルの概要
 
-* DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`と、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`の2つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
+* DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。**（品質で追加）** 加えて、DDD配下の各スクリプトから姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する`resolve_my_home_system_root`も提供する。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
 * 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
@@ -28,7 +28,9 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`) | 根拠: [import文] (行番号: 6 / 抜粋: "import re") |
+| `os` | 標準ライブラリ | `resolve_my_home_system_root`の`MY_HOME_SYSTEM_ROOT`環境変数の読み取り(`os.getenv`)（品質で追加） | 根拠: [import文] (行番号: 6 / 抜粋: "import os") |
+| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re") |
+| `Path` (`pathlib`) | 標準ライブラリ | `resolve_my_home_system_root`の引数・戻り値の型、ディレクトリ存在確認（品質で追加） | 根拠: [import文] (行番号: 8 / 抜粋: "from pathlib import Path") |
 
 ### ブラックボックスとなる外部要素
 
@@ -56,6 +58,28 @@
 
 * **エラーハンドリング**: なし（例外を送出する処理は含まれていない。`filename`が文字列でない場合の型チェックも存在しない）
 * 根拠: [関数本体] (行番号: 21〜40 / 抜粋: "safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()\n\n    encoded = safe.encode('utf-8')\n    if len(encoded) > max_length:\n        safe = encoded[:max_length].decode('utf-8', errors='ignore')")
+
+
+### `resolve_my_home_system_root` (品質で追加)
+
+* **役割**: DDD配下の各スクリプトから、姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する共通ヘルパー。以前は`batch_download_discord.py`(`MY_HOME_SYSTEM_ROOT`環境変数 + "services"ディレクトリを上位探索するロバストな方式)と、`newface_monitor.py`/`extract_youtube_urls.py`(`current_dir.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみの単純な方式)という異なる2方式が個別に実装されていた(DRY違反かつ挙動の不統一。前者は探索に失敗すると`current_dir`自身にフォールバックしていたため、実際には`run_task.sh`が渡すPYTHONPATHに暗黙依存する形で動いていた)。解決順序は、(1) `MY_HOME_SYSTEM_ROOT`環境変数を最優先、(2) `current_dir.parent / "MY_HOME_SYSTEM"`に`services`ディレクトリが実在すればそれを使用、(3) 無ければ`current_dir`から親ディレクトリを最大`search_depth`階層まで遡り`services`サブディレクトリを持つ最初のディレクトリを使用、(4) いずれも見つからなければ個人環境固有の固定パスへフォールバックせず`current_dir`自身を返す(呼出し元のImportErrorハンドリングによるフェイルソフトに委ねる)。
+* 根拠: [関数定義とDocstring] (行番号: 45〜73 / 抜粋: "def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Path:")、環境変数優先 (行番号: 76〜78 / 抜粋: "env_root = os.getenv(\"MY_HOME_SYSTEM_ROOT\")\n    if env_root:\n        return Path(env_root)")、兄弟ディレクトリ判定 (行番号: 80〜82 / 抜粋: "sibling_root = current_dir.parent / \"MY_HOME_SYSTEM\"\n    if (sibling_root / \"services\").exists():\n        return sibling_root")、上位探索とフォールバック (行番号: 84〜90 / 抜粋: "candidate = current_dir\n    for _ in range(search_depth):\n        if (candidate / \"services\").exists():\n            return candidate\n        candidate = candidate.parent\n\n    return current_dir")
+
+
+* **引数/リクエスト**: `current_dir: Path`（呼出し元スクリプトの`Path(__file__).resolve().parent`）, `search_depth: int = 3`（上位探索で遡る最大階層数）
+* 根拠: [関数シグネチャ] (行番号: 45)
+
+
+* **戻り値/レスポンス**: `Path`（解決されたMY_HOME_SYSTEMルート、またはそれに準ずるディレクトリ）
+* 根拠: [型ヒント] (行番号: 45)
+
+
+* **副作用**: なし（`os.getenv`によるプロセス環境変数の読み取り、`Path.exists()`によるファイルシステム参照のみ。書き込みや`sys.path`の変更自体は呼出し元が行う）
+* 根拠: [関数本体] (行番号: 76〜90)
+
+
+* **エラーハンドリング**: なし（例外を送出する処理は含まれていない。いずれの手順でも解決に失敗した場合は最終的に`current_dir`を返すのみで、呼出し元(`core.*`/`services.*`のimportに対する`except ImportError`)がフェイルソフトする設計）
+* 根拠: [関数本体全体] (行番号: 45〜90)
 
 
 ### `DiscordCircuitBreaker`
@@ -99,6 +123,20 @@ flowchart TD
     Return --> End["End"]
 ```
 
+`resolve_my_home_system_root`の解決順序フローを示します。
+
+```mermaid
+flowchart TD
+    Start["Start: resolve_my_home_system_root(current_dir, search_depth)"] --> EnvCheck{"MY_HOME_SYSTEM_ROOT<br>環境変数が設定されているか?"}
+    EnvCheck -- Yes --> ReturnEnv["戻り値: Path(env_root)"]
+    EnvCheck -- No --> SiblingCheck{"current_dir.parent / 'MY_HOME_SYSTEM'<br>に services ディレクトリがあるか?"}
+    SiblingCheck -- Yes --> ReturnSibling["戻り値: sibling_root"]
+    SiblingCheck -- No --> SearchLoop["current_dirから親ディレクトリを<br>最大search_depth階層まで遡り探索"]
+    SearchLoop --> FoundCheck{"servicesディレクトリを<br>持つ祖先が見つかったか?"}
+    FoundCheck -- Yes --> ReturnCandidate["戻り値: candidate"]
+    FoundCheck -- No --> ReturnCurrentDir["戻り値: current_dir自身<br>(固定パスへのフォールバックはしない)"]
+```
+
 `DiscordCircuitBreaker`の状態遷移(各メソッド呼び出しによる`_open`フラグの変化)を示します。
 
 ```mermaid
@@ -121,20 +159,29 @@ graph TD
     subgraph "file_utils.py"
         sanitize_filename["sanitize_filename()"]
         DiscordCircuitBreaker["DiscordCircuitBreaker"]
+        resolve_my_home_system_root["resolve_my_home_system_root()"]
     end
 
     subgraph "外部依存"
         re_mod["re (標準ライブラリ)"]
+        os_mod["os (標準ライブラリ)"]
+        pathlib_mod["pathlib.Path (標準ライブラリ)"]
     end
 
     subgraph "呼び出し元 (別ファイル)"
-        batch_dl["batch_download_discord.py: DiscordNotifier.send()"]
-        newface["newface_monitor.py: DiscordNotifier"]
+        batch_dl["batch_download_discord.py: DiscordNotifier.send() / PROJECT_ROOT解決"]
+        newface["newface_monitor.py: DiscordNotifier / PROJECT_ROOT解決"]
+        extract_urls["extract_youtube_urls.py: PROJECT_ROOT解決"]
     end
 
     sanitize_filename --> re_mod
+    resolve_my_home_system_root --> os_mod
+    resolve_my_home_system_root --> pathlib_mod
     batch_dl --> DiscordCircuitBreaker
+    batch_dl --> resolve_my_home_system_root
     newface --> DiscordCircuitBreaker
+    newface --> resolve_my_home_system_root
+    extract_urls --> resolve_my_home_system_root
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -146,6 +193,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **`resolve_my_home_system_root`の`services`ディレクトリ判定は簡易的**: MY_HOME_SYSTEMのルートかどうかを`services`という名前のサブディレクトリの存在だけで判定しており、たまたま`services`という名前のディレクトリを持つ無関係なディレクトリを誤ってルートと判定する可能性はゼロではない。ただし`MY_HOME_SYSTEM_ROOT`環境変数による明示的な上書きが常に可能であるため、誤判定時の回避手段は用意されている。
 * **入力型の未検証**: `filename`引数が`str`型であることを前提としており、`None`や非文字列が渡された場合の型チェック・エラーハンドリングが存在しない。呼び出し元での事前検証に依存する設計となっている。
 * **禁止文字リストの限定性**: 置換対象は`\/*?:"<>|`の8文字のみであり、制御文字（NULバイト等）やOS/ファイルシステム固有の予約語（Windowsの`CON`, `PRN`等）には対応していない。
 * **`max_length`のデフォルト値の前提**: Docstringに「拡張子は含まない前提」と明記されているが、関数自体は拡張子の有無を判別するロジックを持たず、呼び出し元が拡張子を別途扱う必要がある。

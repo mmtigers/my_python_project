@@ -17,7 +17,7 @@
 * [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS監視・容量管理という運用文脈での関連。
 * [batch_download_discord.md](./batch_download_discord.md) — 一時ファイル経由のアトミック書き込み（`.tmp`→`replace`）という同一パターンを採用している同じDDDサブシステム内の類似スクリプト（`DataManager.save_known_casts`のコメントで直接言及されている）。また、`run_monitor`の多重起動防止ロックは、本ファイルの`BatchDownloader.run`が既に採用している`fcntl.flock`による同種のロックパターンを踏襲したものである（本ファイルのコメントで直接言及されている）。
 * [test_newface_monitor_lock.md](./test_newface_monitor_lock.md) — 本ファイルの多重起動防止ロック（`run_monitor`/`_run_monitor_locked`/`_MONITOR_LOCK_FILE_PATH`）を検証する回帰テストの解析ドキュメント。
-* [file_utils.md](./file_utils.md) — `DiscordNotifier`がインスタンス単位で保持する`DiscordCircuitBreaker`（Discord Webhookへの連続送信失敗検知用）の実装。`batch_download_discord.py`の`DiscordNotifier.send`とも共通利用される。
+* [file_utils.md](./file_utils.md) — `DiscordNotifier`がインスタンス単位で保持する`DiscordCircuitBreaker`（Discord Webhookへの連続送信失敗検知用）の実装。`batch_download_discord.py`の`DiscordNotifier.send`とも共通利用される。加えて、`PROJECT_ROOT`(MY_HOME_SYSTEM)を解決する`resolve_my_home_system_root`も提供する（品質で追加、`batch_download_discord.py`/`extract_youtube_urls.py`と共通化）。
 
 ## 2. ファイルの概要
 
@@ -62,7 +62,8 @@
 | `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作全般 | 根拠: [import文] (行番号: 26 / 抜粋: "from pathlib import Path") |
 | `typing.List`, `Set`, `Dict`, `Optional`, `Tuple` | 標準ライブラリ | 型ヒント全般（`Tuple`は`record_site_failure`の戻り値型） | 根拠: [import文] (行番号: 26 / 抜粋: "from typing import List, Set, Dict, Optional, Tuple") |
 | `urllib.parse.urljoin`, `urlparse`, `parse_qs` | 標準ライブラリ | 相対URL（キャスト詳細ページ・画像）の絶対URL化、クエリパラメータからのID抽出 | 根拠: [import文] (行番号: 28 / 抜粋: "from urllib.parse import urljoin, urlparse, parse_qs") |
-| `file_utils.DiscordCircuitBreaker` | 内部モジュール(DDD配下) | `DiscordNotifier`が保持するDiscord Webhook連続送信失敗検知用サーキットブレーカー | 根拠: [import文] (行番号: 29 / 抜粋: "from file_utils import DiscordCircuitBreaker") |
+| `file_utils.DiscordCircuitBreaker` | 内部モジュール(DDD配下) | `DiscordNotifier`が保持するDiscord Webhook連続送信失敗検知用サーキットブレーカー | 根拠: [import文] (行番号: 30 / 抜粋: "from file_utils import DiscordCircuitBreaker, resolve_my_home_system_root") |
+| `file_utils.resolve_my_home_system_root` | 内部モジュール(DDD配下) | **（品質で追加）** `PROJECT_ROOT`(MY_HOME_SYSTEM)の解決。以前は`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみの単純な方式を個別に実装していたが、`batch_download_discord.py`と共通化した(`MY_HOME_SYSTEM_ROOT`環境変数優先、無ければ`services`ディレクトリの上位探索にフォールバック) | 根拠: [import文とPROJECT_ROOT解決] (行番号: 30, 37 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)") |
 | `requests` | サードパーティ | HTTPセッションの生成・GETリクエスト送信、Discord Webhookへの POST送信 | 根拠: [import文] (行番号: 36 / 抜粋: "import requests") |
 | `requests.adapters.HTTPAdapter` | サードパーティ | セッションへのリトライ用アダプタのマウント | 根拠: [import文] (行番号: 37 / 抜粋: "from requests.adapters import HTTPAdapter") |
 | `urllib3.util.retry.Retry` | サードパーティ | HTTPリクエストのリトライポリシー定義（Discord向けは429の`Retry-After`尊重を含む） | 根拠: [import文] (行番号: 38 / 抜粋: "from urllib3.util.retry import Retry") |

@@ -27,11 +27,14 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
-from file_utils import DiscordCircuitBreaker
+from file_utils import DiscordCircuitBreaker, resolve_my_home_system_root
 
-# プロジェクトルート（DDDの親ディレクトリ）をパスに追加
+# プロジェクトルート（MY_HOME_SYSTEM）をパスに追加。
+# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約
+# (以前はbatch_download_discord.pyと異なる、固定の兄弟ディレクトリ前提のみの
+# 単純な方式を個別に実装していた)。
 CURRENT_DIR = Path(__file__).resolve().parent # ~/develop/DDD
-PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM" # ~/develop/MY_HOME_SYSTEM
+PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR) # ~/develop/MY_HOME_SYSTEM
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 

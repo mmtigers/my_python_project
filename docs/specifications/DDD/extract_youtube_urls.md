@@ -14,7 +14,7 @@
 * [../MY_HOME_SYSTEM/nas_utils.md](../MY_HOME_SYSTEM/nas_utils.md) — 本ファイルがインポートを試みる`core.nas_utils.get_managed_target_directory`の実装候補（同名関数のシグネチャ・実装が確認できる）。
 * [../MY_HOME_SYSTEM/logger.md](../MY_HOME_SYSTEM/logger.md) — 本ファイルがインポートを試みる`core.logger.get_logger`の実装候補に関する参考情報。
 * [batch_download_discord.md](./batch_download_discord.md) — 同じDDDサブシステム内で`yt_dlp`と`file_utils.sanitize_filename`を併用する類似スクリプトとの比較参考。
-* [newface_monitor.md](./newface_monitor.md) — 本ファイルの`PROJECT_ROOT`解決方式（`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`）と`get_managed_target_directory`フォールバックの`fallback_dir_str`尊重パターンは、同じDDDサブシステム内で先行して修正済みのnewface_monitor.pyの同一パターンを踏襲したものである（コード内コメントで直接言及されている）。
+* [newface_monitor.md](./newface_monitor.md) — 本ファイルの`get_managed_target_directory`フォールバックの`fallback_dir_str`尊重パターンは、同じDDDサブシステム内で先行して修正済みのnewface_monitor.pyの同一パターンを踏襲したものである（コード内コメントで直接言及されている）。`PROJECT_ROOT`解決も、以前は本ファイル・newface_monitor.pyそれぞれが個別に実装していた`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみの単純な方式だったが、現在は両ファイルとも`file_utils.resolve_my_home_system_root`（品質で追加）へ集約されている。
 * [test_extract_youtube_urls_paths.md](./test_extract_youtube_urls_paths.md) — 本ファイルの`PROJECT_ROOT`解決・`core.*`インポート可否・フォールバックスタブの引数尊重・`_verify_environment`のフォールバック検知・（Issue #123回帰テストとして追加された）`process_subscriptions`のNAS状態再評価タイミングを検証する回帰テストの解析ドキュメント。
 * `test_extract_youtube_urls_save_base_dir.py`（Issue #243回帰テスト。専用の仕様書は本リポジトリの命名規則上作成しない対象＝`test_*.py`のため対応なし）— `FileManager.save`への`base_dir`引数受け渡し、および`process_subscriptions`/`UrlExtractorApp.run`が`get_output_base_dir()`を1回だけ呼ぶことを検証する。
 
@@ -22,8 +22,8 @@
 
 * モジュールDocstring上「YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)」と称される、指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプトである。
 * 根拠: [モジュールDocstring] (行番号: 4〜9 / 抜粋: "YouTube URL Extractor (Integrated with MY_HOME_SYSTEM)\n------------------------------------------------------\n指定されたYouTubeチャンネルやプレイリストから動画URLを抽出するスクリプト。\nMY_HOME_SYSTEMのエコシステム（ロガー、ディレクトリ構成）に準拠。")
-* `PROJECT_ROOT`は`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`（`newface_monitor.py`と同じ方式）として解決される。`core/`の実体は`MY_HOME_SYSTEM/core`配下にあり、DDDの単なる親ディレクトリ（リポジトリルート）を指す実装では`core.*`のインポートが常に失敗し、常にファイル内フォールバックスタブへ落ちてしまう不具合があったための修正である。
-* 根拠: [PROJECT_ROOT定義とコメント] (行番号: 29〜34 / 抜粋: "# newface_monitor.py と同じ方式: core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)。DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまっていた。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM"  # ~/develop/MY_HOME_SYSTEM")
+* `PROJECT_ROOT`は`file_utils.resolve_my_home_system_root(CURRENT_DIR)`（**品質で変更**。以前は本ファイル・`newface_monitor.py`がそれぞれ個別に`CURRENT_DIR.parent / "MY_HOME_SYSTEM"`という固定の兄弟ディレクトリ前提のみで実装しており、両ファイルで重複していた）として解決される。`core/`の実体は`MY_HOME_SYSTEM/core`配下にあり、DDDの単なる親ディレクトリ（リポジトリルート）を指す実装では`core.*`のインポートが常に失敗し、常にファイル内フォールバックスタブへ落ちてしまう不具合があったための修正である。共通化後も、環境変数`MY_HOME_SYSTEM_ROOT`による明示指定 → `CURRENT_DIR.parent / "MY_HOME_SYSTEM"`（`services`ディレクトリの存在確認付き） → 上位ディレクトリの`services`探索 → 解決不能時は`CURRENT_DIR`自身、という解決順序（`batch_download_discord.py`で先行実装済みだったロバストな方式）は変わらない。
+* 根拠: [PROJECT_ROOT定義とコメント] (行番号: 30〜37 / 抜粋: "# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)。\n# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約\n# (以前はnewface_monitor.pyと同じ、固定の兄弟ディレクトリ前提のみの単純な方式を\n# 個別に実装していた)。core/ は develop/MY_HOME_SYSTEM/core に実在する\n# (develop/core ではない)ため、DDDの単なる親ディレクトリではImportErrorになり、\n# 常にローカルフォールバック用スタブへ落ちてしまう点に変わりはない。\nCURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD\nPROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)  # ~/develop/MY_HOME_SYSTEM")、共通化先の実装 (参考: [file_utils.md](./file_utils.md) の `resolve_my_home_system_root` 節)
 * `MY_HOME_SYSTEM`の共通コア機能（`core.logger.get_logger`, `core.nas_utils.get_managed_target_directory`）のインポートを試み、失敗時（開発環境・単体実行時）はファイル内にフォールバック実装（標準`logging`ベースのロガー、`fallback_dir_str`引数を尊重するディレクトリ解決関数）を用意している。
 * 根拠: [try-exceptブロック] (行番号: 38〜42 / 抜粋: "try:\n    from core.logger import get_logger\n    from core.nas_utils import get_managed_target_directory\n    logger = get_logger(__name__)\nexcept ImportError:")
 * `SubscriptionManager._verify_environment`によるNASフォールバック検知は、出力先ベースディレクトリと`AppConfig.LOCAL_DIR_STR`（絶対パス）を`Path.resolve()`で正規化した上で完全一致比較する。フォールバック関数が想定外の相対パスを返す場合でも検知漏れが起きないようにするための修正であることがコメントで明記されている。
@@ -57,6 +57,7 @@
 | `contextlib.closing` | 標準ライブラリ | SQLite接続・カーソルの確実なクローズ（`with closing(...)`） | 根拠: [import文] (行番号: 20 / 抜粋: "from contextlib import closing") |
 | `yt_dlp` | サードパーティ | YouTubeチャンネル/プレイリスト/動画のメタデータ抽出(`extract_info`) | 根拠: [import文] (行番号: 22 / 抜粋: "import yt_dlp") |
 | `file_utils.sanitize_filename` (as `_shared_sanitize_filename`) | ローカルモジュール | 保存ファイル名のサニタイズ処理の委譲先 | 根拠: [import文] (行番号: 24 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
+| `file_utils.resolve_my_home_system_root` | ローカルモジュール（**品質で追加**） | `PROJECT_ROOT`（`MY_HOME_SYSTEM`のパス）解決処理の委譲先。`newface_monitor.py`/`batch_download_discord.py`と共通化されている | 根拠: [import文] (行番号: 25 / 抜粋: "from file_utils import resolve_my_home_system_root") |
 | `core.logger.get_logger` | 内部モジュール（オプショナル、try節） | ロガーインスタンスの取得。インポート失敗時はファイル内フォールバック実装（`logging.getLogger`ベース）を使用 | 根拠: [import文] (行番号: 39 / 抜粋: "from core.logger import get_logger") |
 | `core.nas_utils.get_managed_target_directory` | 内部モジュール（オプショナル、try節） | NAS/ローカルの出力先ディレクトリの解決・管理。インポート失敗時はファイル内フォールバック実装（`fallback_dir_str`引数があればそれを、なければ`Path("./data")`を返す）を使用 | 根拠: [import文] (行番号: 40 / 抜粋: "from core.nas_utils import get_managed_target_directory") |
 
@@ -450,6 +451,7 @@ graph TD
 
     subgraph "外部依存(ローカルモジュール)"
         file_utils_mod["file_utils.sanitize_filename"]
+        file_utils_root["file_utils.resolve_my_home_system_root"]
     end
 
     subgraph "外部依存(サードパーティ/標準ライブラリ)"
@@ -486,6 +488,8 @@ graph TD
     core_nas_utils --> NAS
 
     UrlExtractorApp -.->|"インポート成功時"| core_logger
+    file_utils_root -.->|"PROJECT_ROOT解決"| core_logger
+    file_utils_root -.->|"PROJECT_ROOT解決"| core_nas_utils
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）

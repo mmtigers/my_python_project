@@ -1,9 +1,11 @@
-"""DDD配下の複数スクリプトで共通のファイル名サニタイズ処理。
+"""DDD配下の複数スクリプトで共通のファイル名サニタイズ処理・プロジェクトルート解決。
 
 batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に
 ほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。
 """
+import os
 import re
+from pathlib import Path
 
 
 def sanitize_filename(filename: str, max_length: int = 200) -> str:
@@ -38,6 +40,54 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
         # フォールバック名を補う。
         safe = "untitled"
     return safe
+
+
+def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Path:
+    """DDD配下の各スクリプトから、姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを
+    解決する共通ヘルパー(品質: プロジェクトルート解決の3スクリプト不統一を解消)。
+
+    以前はbatch_download_discord.py(MY_HOME_SYSTEM_ROOT環境変数 + "services"
+    ディレクトリを上位探索するロバストな方式)と、newface_monitor.py /
+    extract_youtube_urls.py(`current_dir.parent / "MY_HOME_SYSTEM"`という固定の
+    兄弟ディレクトリ前提の単純な方式)という異なる2方式がそれぞれ個別に実装
+    されていた(DRY違反かつ挙動の不統一。前者は探索に失敗するとCURRENT_DIR自身に
+    フォールバックしていたため、実際には`run_task.sh`が渡すPYTHONPATHに暗黙依存する
+    形で動いていた)。
+
+    解決順序:
+        1. 環境変数 MY_HOME_SYSTEM_ROOT が設定されていればそれを最優先する。
+        2. `current_dir.parent / "MY_HOME_SYSTEM"`(このリポジトリの標準レイアウト。
+           実機デプロイ先の`develop/DDD`・`develop/MY_HOME_SYSTEM`双方の兄弟ディレクトリ
+           構成にも合致する)に"services"ディレクトリが実在すればそれを使う。
+        3. 上記が無ければ、current_dirから親ディレクトリを最大search_depth階層まで
+           遡り、"services"サブディレクトリを持つ最初のディレクトリを使う。
+        4. いずれも見つからなければ、開発者個人の環境に依存した固定パスへの
+           フォールバックはせず、current_dir自身を返す(呼出し元はcore.*/services.*の
+           importが失敗した場合のImportErrorハンドリングでフェイルソフトする設計のため、
+           ここで例外を送出したり決め打ちのパスを返したりする必要はない)。
+
+    Args:
+        current_dir: 呼出し元スクリプトの`Path(__file__).resolve().parent`。
+        search_depth: 手順3で遡る最大階層数。
+
+    Returns:
+        解決されたMY_HOME_SYSTEMルート(またはそれに準ずる)ディレクトリのPath。
+    """
+    env_root = os.getenv("MY_HOME_SYSTEM_ROOT")
+    if env_root:
+        return Path(env_root)
+
+    sibling_root = current_dir.parent / "MY_HOME_SYSTEM"
+    if (sibling_root / "services").exists():
+        return sibling_root
+
+    candidate = current_dir
+    for _ in range(search_depth):
+        if (candidate / "services").exists():
+            return candidate
+        candidate = candidate.parent
+
+    return current_dir
 
 
 class DiscordCircuitBreaker:

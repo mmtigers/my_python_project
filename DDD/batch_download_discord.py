@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
+from file_utils import resolve_my_home_system_root
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -64,20 +65,10 @@ FORCE_MODE = "--force" in sys.argv
 CLEAR_COOLDOWN_MODE = "--clear-cooldown" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
-_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")
-if _env_root:
-    PROJECT_ROOT = Path(_env_root)
-else:
-    PROJECT_ROOT = CURRENT_DIR
-    for _ in range(3):
-        if (PROJECT_ROOT / "services").exists():
-            break
-        PROJECT_ROOT = PROJECT_ROOT.parent
-    else:
-        # 開発者個人の環境に依存した固定パスへのフォールバックはせず、
-        # notification_service が見つからない場合は下の except ImportError で
-        # 無効化されるだけにする（他の環境でも安全に動く）。
-        PROJECT_ROOT = CURRENT_DIR
+# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約。
+# notification_service が見つからない場合は下の except ImportError で無効化
+# されるだけなので、ここで解決に失敗しても他の環境で安全に動く。
+PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
