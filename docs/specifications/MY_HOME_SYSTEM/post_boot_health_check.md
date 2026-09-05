@@ -292,24 +292,24 @@
 
 ### `PostBootHealthCheck.check_network_and_apis`
 
-* **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
-* 根拠: `def check_network_and_apis(self):` (行番号: 136〜157 / 抜粋: "def check_network_and_apis(self):")
+* **役割**: `8.8.8.8` へのping疎通確認を行い、失敗時はネットワークエラーとして即座に結果を追加し処理を打ち切る。成功時はSwitchBot（`switchbot_service.create_switchbot_auth_headers()`による認証ヘッダー付き）とNatureRemo（`Authorization: Bearer`ヘッダー付き。**#411 品質で修正**: `config.NATURE_REMO_ACCESS_TOKEN`が未設定の場合、以前は`f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"`がそのまま`"Bearer None"`という実在しないトークンとして送信され、「未設定」ではなく「API NG」として誤報告していた。未設定時はNatureRemoのチェック自体を`api_targets`に含めずスキップする）のAPIへ、ステータスコード検証込みの`_check_http`で疎通確認し結果を追加する。
+* 根拠: `def check_network_and_apis(self):` (行番号: 137〜166 / 抜粋: "def check_network_and_apis(self):")、NatureRemoのスキップ判定 (行番号: 153〜158 / 抜粋: "if config.NATURE_REMO_ACCESS_TOKEN:")
 
 
 * **引数/リクエスト**: `self` のみ
-* 根拠: (行番号: 136 / 抜粋: "def check_network_and_apis(self):")
+* 根拠: (行番号: 137 / 抜粋: "def check_network_and_apis(self):")
 
 
 * **戻り値/レスポンス**: なし（`self.results` へ追加。ping失敗時は途中で `return` して以降のAPIチェックを行わない）
-* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 141〜142 / 抜粋: "return ")
+* 根拠: `self.results.append(CheckResult("Network", STATUS_ERR, "Offline (Ping NG)"))\n            return` (行番号: 142〜143 / 抜粋: "return ")
 
 
-* **副作用**: `ping` コマンドのサブプロセス実行（`timeout=10`付き）、`switchbot_service.create_switchbot_auth_headers()`呼び出し、SwitchBot/NatureRemo APIへの認証ヘッダー付きHTTP GETリクエスト（`_check_http`経由）、`self.results` への追加。
-* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)` (行番号: 139 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)")
+* **副作用**: `ping` コマンドのサブプロセス実行（`timeout=10`付き）、`switchbot_service.create_switchbot_auth_headers()`呼び出し、SwitchBot/(設定時のみ)NatureRemo APIへの認証ヘッダー付きHTTP GETリクエスト（`_check_http`経由）、`self.results` への追加。
+* 根拠: `subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)` (行番号: 140 / 抜粋: "subprocess.check_call(["ping", "-c", "1", "-W", "2", "8.8.8.8"], stdout=subprocess.DEVNULL, timeout=10)")
 
 
 * **エラーハンドリング**: ping失敗時（bare except）は `STATUS_ERR` を追加して即 `return`。個々のAPI呼び出しは `_check_http` 内部で例外・非2xx/3xxステータスの両方を判定し、失敗時は `api_ngs` リストに追加、全体としては処理を継続する。
-* 根拠: `except:` (行番号: 140 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 151 / 抜粋: "if not self._check_http(url, headers=headers):")
+* 根拠: `except:` (行番号: 141 / 抜粋: "except:"), `if not self._check_http(url, headers=headers):` (行番号: 160 / 抜粋: "if not self._check_http(url, headers=headers):")
 
 
 

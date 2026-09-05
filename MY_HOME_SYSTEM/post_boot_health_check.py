@@ -143,10 +143,19 @@ class PostBootHealthCheck:
             return 
 
         # API
+        # #411 品質: NATURE_REMO_ACCESS_TOKEN未設定時、以前は f-string展開で
+        # "Authorization: Bearer None" という実在しないトークンをそのまま送信し、
+        # 「未設定」ではなく「API NG」として誤報告していた。未設定のAPIは
+        # チェック自体をスキップする。
         api_targets = [
             ("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),
-            ("NatureRemo", "https://api.nature.global/1/users/me", {"Authorization": f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"}),
         ]
+        if config.NATURE_REMO_ACCESS_TOKEN:
+            api_targets.append((
+                "NatureRemo",
+                "https://api.nature.global/1/users/me",
+                {"Authorization": f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"},
+            ))
         api_ngs = []
         for name, url, headers in api_targets:
             if not self._check_http(url, headers=headers):
