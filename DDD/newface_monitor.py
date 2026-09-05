@@ -3,11 +3,12 @@
 
 """
 NewFace Monitor System (Refactored for MY_HOME_SYSTEM)
-Targets: MonitorConfig.SITES に登録された複数サイト
+Targets: sites.json に登録された複数サイト（起動時に MonitorConfig.SITES へ読み込まれる）
 
 Description:
     複数のWebサイトの新人紹介ページを定期巡回し、新規キャストの追加を検知してDiscordに通知する。
-    監視対象サイトは MonitorConfig.SITES に SiteConfig を追加するだけで拡張できる。
+    監視対象サイトは sites.json に1エントリ追加するだけで拡張できる（Issue #413で
+    本ファイル内のPythonリテラルからJSON外出しに変更。コード変更は不要）。
     MY_HOME_SYSTEMのエコシステムに統合されたバージョン。
 """
 
@@ -133,8 +134,9 @@ AGE_PATTERN = re.compile(r'[（(]\s*(\d{2})\s*(歳|才)?\s*[）)]|(\d{2})\s*(?:�
 class SiteConfig:
     """監視対象サイト1件分の設定。
 
-    新しいサイトを監視対象に加える場合は、このデータクラスのインスタンスを
-    MonitorConfig.SITES に追加するだけでよい（コード本体の変更は不要）。
+    新しいサイトを監視対象に加える場合は、sites.json にこのデータクラスの
+    フィールド名をキーとするエントリを1件追加するだけでよい
+    （コード本体の変更は不要。読み込みは _load_sites が担う）。
 
     Attributes:
         site_id (str): サイトを一意に識別するID（データファイル名等に使用）。
@@ -205,980 +207,78 @@ class SiteConfig:
         return self.data_filename or f"known_casts_{self.site_id}.json"
 
 
+# Issue #413: 監視対象サイト定義（旧: 本ファイル内の約970行のPythonリテラル、
+# 79サイト分）を sites.json へ外出しした。サイト追加のたびに2000行超の
+# 本ロジックファイルを編集する必要をなくし、spec-drift監査の毎回発火も防ぐ。
+# バリデーション自体はSiteConfig（frozen dataclass）に委譲し、JSON側は
+# データを保持するだけに留める（設計方針: SITES外部化は「サイト定義データを
+# JSONへ」であって「バリデーションをJSONスキーマで肩代わりする」ではない）。
+SITES_JSON_PATH: Path = CURRENT_DIR / 'sites.json'
+
+
+def _load_sites(json_path: Path) -> List[SiteConfig]:
+    """sites.json を読み込み、SiteConfigのリストとして返す。
+
+    JSON側の各エントリは SiteConfig のフィールド名をそのままキーとして持つ
+    （省略したフィールドは SiteConfig 側のデフォルト値が使われる）。
+    `_comment` キーはサイト追加理由等を残すためのドキュメント専用フィールドで、
+    SiteConfig の構築には使わない。
+
+    起動時（モジュールimport時）に1回だけ呼ばれる想定。ファイル欠損・JSON
+    構文エラー・各エントリのフィールド不正（必須フィールド欠落・未知フィールド等、
+    SiteConfigのコンストラクタが拒否する内容）・site_idの重複はいずれも
+    ここで例外を送出し、監視対象サイトの設定不備を黙ってスキップせず
+    起動時点で確実に気付けるようにする。
+
+    Args:
+        json_path (Path): sites.json のパス。
+
+    Returns:
+        List[SiteConfig]: 読み込んだサイト設定のリスト（JSON内の出現順）。
+
+    Raises:
+        RuntimeError: 上記のいずれかの不正があった場合。
+    """
+    try:
+        raw_text = json_path.read_text(encoding='utf-8')
+    except OSError as e:
+        raise RuntimeError(f"サイト設定ファイルが読み込めません: {json_path} ({e})") from e
+
+    try:
+        raw_entries = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"サイト設定ファイルのJSONが不正です: {json_path} ({e})") from e
+
+    if not isinstance(raw_entries, list):
+        raise RuntimeError(f"サイト設定ファイルの形式が不正です（配列である必要があります）: {json_path}")
+
+    sites: List[SiteConfig] = []
+    seen_ids: Set[str] = set()
+    for index, entry in enumerate(raw_entries):
+        if not isinstance(entry, dict):
+            raise RuntimeError(f"sites.json の{index}番目のエントリがオブジェクトではありません: {entry!r}")
+        # _comment はドキュメント専用フィールドのため構築対象から除外する。
+        fields = {k: v for k, v in entry.items() if k != '_comment'}
+        try:
+            site = SiteConfig(**fields)
+        except TypeError as e:
+            raise RuntimeError(
+                f"sites.json の{index}番目のエントリ(site_id={entry.get('site_id')!r})が不正です: {e}"
+            ) from e
+        if site.site_id in seen_ids:
+            raise RuntimeError(f"sites.json に site_id の重複があります: {site.site_id!r}")
+        seen_ids.add(site.site_id)
+        sites.append(site)
+    return sites
+
+
 class MonitorConfig:
     """モニタリング設定および定数管理クラス。"""
 
     # Target Sites
-    # 新規サイトを監視対象に追加する場合は、このリストに SiteConfig を追記する。
-    SITES: List[SiteConfig] = [
-        SiteConfig(
-            site_id='petitpetit_dream',
-            name='ぷちぷちどりーむ',
-            target_url='https://petitpetit-dream.com/newface/',
-            selector_container='ul.gallist li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            # 既存運用データ（known_casts.json）との後方互換のためファイル名を明示指定
-            data_filename='known_casts.json',
-        ),
-        SiteConfig(
-            site_id='merci_spa',
-            name='Mrs.Merci SPA',
-            target_url='https://merci-spa.com/girllist',
-            selector_container='div.therapist_list > div',
-            selector_name='h3.therapist_name',
-            selector_link='a.therapist_meta',
-            selector_image='p.therapist_img img',
-        ),
-        SiteConfig(
-            site_id='osaka_milktea',
-            name='ミルクティー -milktea-',
-            target_url='https://osakamilktea.com/sp/newface.php',
-            selector_container='main#newface section > ul',
-            selector_name='div.name',
-            # div.photo 内にSNSアイコンへのリンク/画像も混在しているため、
-            # プロフィールページへのリンクをhrefで明示的に絞り込む
-            selector_link='a[href*="profile.php"]',
-            selector_image='a[href*="profile.php"] img',
-            # 詳細URLが './profile.php?id=931' のようにクエリパラメータで
-            # キャストを識別する形式のため、'id'パラメータの値をIDとして使う
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='itadaki',
-            name='ITADAKI（イタダキ）',
-            target_url='https://www.itadaki-top.com/staff/',
-            selector_container='div#companion ul li',
-            selector_name='div.txt a',
-            selector_link='div.txt a',
-            selector_image='div.img img',
-            # 画像がlazyload実装のため、実URLは src ではなく data-original に入っている
-            image_attr='data-original',
-        ),
-        SiteConfig(
-            site_id='cecile',
-            name='Cecile セシル',
-            target_url='https://cecile.men-este.com/therapist.html',
-            # レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る
-            selector_container='div.staff-box:has(a)',
-            selector_name='li.staff-name',
-            selector_link='div.staff-image a',
-            selector_image='div.staff-image a',
-            # サムネイルが<img src>ではなく<a>のインラインCSS背景画像で指定されている
-            image_from_style=True,
-            # 詳細URLが './profile.html?sid=83' 形式のため 'sid'パラメータをIDとして使う
-            id_query_param='sid',
-        ),
-        SiteConfig(
-            site_id='restpia',
-            name='Restpia レストピア',
-            target_url='https://restpia-es.com/therapist.html',
-            # レイアウト調整用の空divが混在するため、リンクを持つ要素のみに絞る
-            selector_container='div.staff-box:has(a)',
-            # box-inner内の最初のliが名前（class指定がないため先頭要素で取得）
-            selector_name='ul.box-inner li',
-            selector_link='div.staff-image01 a',
-            selector_image='div.staff-image01 a',
-            image_from_style=True,
-            id_query_param='sid',
-        ),
-        SiteConfig(
-            site_id='anju_spa',
-            name='Anju spa（アンジュスパ）',
-            target_url='https://anjuspa.com/cast/',
-            selector_container='ul.gallist li',
-            # petitpetit-dreamと異なり、名前が<a>で囲まれていないためarticle h3のみで取得
-            selector_name='article h3',
-            selector_link='a[href*="/profile?id="]',
-            selector_image='div.ph img',
-            # 詳細URLが '/profile?id=191' 形式のため 'id'パラメータをIDとして使う
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='sr_himawari',
-            name='シークレットルームヒマワリ',
-            target_url='https://sr-himawari.com/cast/',
-            selector_container='ul.gallist li',
-            selector_name='article h3',
-            selector_link='a[href*="/profile?id="]',
-            selector_image='div.ph img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='aura',
-            name='AURA（オーラ）',
-            target_url='https://aura-takatsuki.com/itemList.html',
-            selector_container='li.itemData',
-            selector_name='a.itemName',
-            selector_link='a.itemName',
-            # ホバー用の2枚目画像(layerHover)より先に通常表示用の画像がDOM順で
-            # 出現するため、select_one（最初の一致）で正しく通常画像を取得できる
-            selector_image='a.imageLink img.castImage',
-        ),
-        SiteConfig(
-            site_id='viaura',
-            name='ミセス美オーラ',
-            target_url='https://mrs-viaura.com/model.html',
-            # 各キャストを囲むdivにはclass指定が無いため、
-            # プロフィールへのリンクを直接の子に持つdivをコンテナとする
-            selector_container='div:has(> a[href^="model_profile"])',
-            selector_name='h3.model_name',
-            selector_link='a[href^="model_profile"]',
-            # div.model_image内の最初のimgはランクアイコンのため、
-            # 直接の子要素のimgのみに絞って実際の写真を取得する
-            # （写真未登録のキャストは "no_image.webp" プレースホルダーになる）
-            selector_image='div.model_image > img',
-            # このサイトはShift-JISでエンコードされているが、
-            # BeautifulSoupがmetaタグから自動判定するためコード側の対応は不要
-        ),
-        SiteConfig(
-            site_id='kitty',
-            name='kitty',
-            target_url='https://spa-kt.com/girl',
-            selector_container='div.c-panel',
-            selector_name='p.c-panel__name',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            # 詳細URLが 'profile?lid=23' 形式のため 'lid'パラメータをIDとして使う
-            id_query_param='lid',
-        ),
-        # bellica は2026-09-02にサイト閉鎖を確認したため監視対象から削除
-        # (ドメインがホスティング業者のデフォルト自己署名証明書+ポータルサイト
-        # www.undernavi.com への302リダイレクトに変化し、コンテンツが消失)
-        SiteConfig(
-            site_id='osaka_mkd',
-            name='もくきん堂',
-            target_url='https://www.osaka-mkd.com/newface/',
-            selector_container='ul.newface_list li',
-            # 同じ<li>内に複数の<p>があり名前用のclass指定が無いため、
-            # 出現順（1番目:入店日, 2番目:名前, 3番目:年齢）で位置指定する
-            selector_name='p:nth-of-type(2)',
-            selector_link='a.list-girl-image',
-            # <a>内には実写真imgの後にプレミアムバッジ用imgもあるが、
-            # 実写真が先に出現するためselect_one（最初の一致）で問題ない
-            selector_image='a.list-girl-image img',
-        ),
-        SiteConfig(
-            site_id='la_bella',
-            name='LA BELLA（ラベーラ）',
-            target_url='https://labella-osaka.net/newface/',
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            # 画像がlazyload実装のため、実URLはsrcではなくdata-original属性に入っている
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='mrs_komoriuta',
-            name='ミセスの子守唄',
-            target_url='https://mrs-komoriuta.com/newface/',
-            # LA BELLAと同一テンプレート（KNZ系）のため設定内容も同様
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='milkspa_a',
-            name='みるくSPAα（ミルクスパアルファ）',
-            target_url='https://milkspa-a.com/newface.html',
-            # ul#newface-wrapper の子孫セレクタで単純にliを取ると、各キャスト内の
-            # ul.state（出勤アイコン等）配下のliまで拾ってしまうため、
-            # 直接の子要素(>)のみをコンテナとする
-            selector_container='ul#newface-wrapper > li',
-            selector_name='p.name',
-            selector_link='div.thum a',
-            selector_image='div.thum a img',
-        ),
-        SiteConfig(
-            site_id='yui_mrstei',
-            name='結-YUI-ミセス邸',
-            target_url='https://yui-mrstei.com/cast/',
-            # Anju spa / シークレットルームヒマワリと同一テンプレート系列
-            selector_container='ul.gallist li',
-            selector_name='article h3',
-            selector_link='a[href*="/profile?id="]',
-            selector_image='div.ph img',
-            id_query_param='id',
-            # 一覧末尾に名前空・身長0cmのプレースホルダーカード
-            # (例: profile?id=81) が混ざるため、名前が取れないカードは除外する
-            skip_unnamed_casts=True,
-        ),
-        SiteConfig(
-            site_id='aube_spa',
-            name='Mrs.AUBE SPA（オーブスパ）',
-            target_url='https://aube-spa.com/girllist',
-            # Mrs.Merci SPA / Restpiaと同一テンプレート系列
-            selector_container='div.therapist_list > div',
-            selector_name='h3.therapist_name',
-            selector_link='a.therapist_meta',
-            selector_image='p.therapist_img img',
-        ),
-        SiteConfig(
-            site_id='mrs_luxe',
-            name='Mrs.Luxe（ミセスリュクス）',
-            target_url='https://luxe-mrs.com/lady.php',
-            selector_container='ul.ladyList li',
-            selector_name='h2.ladyName',
-            selector_link='a[href*="lady_num="]',
-            selector_image='span.thumb img',
-            id_query_param='lady_num',
-        ),
-        SiteConfig(
-            site_id='mrs_onlyone',
-            name='Mrs.OnlyOne（ミセスオンリーワン）',
-            target_url='https://mrs-onlyone.com/girllist',
-            # Mrs.Merci SPA / Restpia / Mrs.AUBE SPAと同一テンプレート系列
-            selector_container='div.therapist_list > div',
-            selector_name='h3.therapist_name',
-            selector_link='a.therapist_meta',
-            selector_image='p.therapist_img img',
-        ),
-        SiteConfig(
-            site_id='tropical_spa',
-            name='トロピカルSPA',
-            target_url='https://tropical-osaka.com/news.php',
-            # Bellicaと同一テンプレート系列。新人情報一覧が個別プロフィール
-            # ページへのリンクを持たないブログ形式のため、リンクは常に
-            # 見つからない（detail_urlは一覧ページURLへ、cast_idは名前ベース
-            # へフォールバックする）
-            selector_container='ul.newsList li',
-            selector_name='h2.title',
-            selector_link='a',
-            selector_image='span.thumb img',
-        ),
-        SiteConfig(
-            site_id='tenjoubito_premium',
-            name='天上人PREMIUM',
-            target_url='https://www.tenjoubitopr.com/staff/',
-            # 各キャストの<li>等のラッパーが無く、カード自体が<a>要素のため、
-            # 子孫に<a>は存在しない（selector_linkは常にマッチしない）。
-            # コンテナ自体をリンクとして使うフォールバック(_parse_html側で対応)を利用する
-            selector_container='div#staff a.cbox',
-            selector_name='p.name',
-            selector_link='a',
-            selector_image='div.img img',
-            # 画像がlazyload実装のため、実URLはsrcではなくdata-original属性に入っている
-            image_attr='data-original',
-        ),
-        SiteConfig(
-            site_id='restspa_premium',
-            name='REST SPA PREMIUM（レストスパプレミアム）',
-            target_url='https://restspa-premium.com/newface/',
-            # petitpetit-dreamと同一テンプレート系列だが、article内にタグ一覧の
-            # <ul><li>が入れ子であるため、子孫セレクタだとそのliまで拾って
-            # しまう。直接の子要素(>)のみをコンテナとする
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            # 詳細URLが '/profile?id=220' 形式のため 'id'パラメータをIDとして使う
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='firstclass_osaka',
-            name='ファーストクラス',
-            target_url='https://firstclass-osaka.net/rookie',
-            selector_container='div.cast_post',
-            selector_name='footer h3',
-            selector_link='a.cast_image',
-            selector_image='a.cast_image img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='chaton',
-            name='Chaton〜シャトン〜',
-            target_url='https://spa-chaton.com/girl',
-            # kittyと同一テンプレート系列
-            selector_container='div.c-panel',
-            selector_name='p.c-panel__name',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            id_query_param='lid',
-        ),
-        SiteConfig(
-            site_id='yolu_spa',
-            name='YOLU SPA Mrs.',
-            target_url='https://mrs-yoluspa.net/%e3%82%bb%e3%83%a9%e3%83%94%e3%82%b9%e3%83%88%e4%b8%80%e8%a6%a7/',
-            selector_container='div.therapist-item',
-            selector_name='a.name-link',
-            selector_link='a.name-link',
-            selector_image='img.therapist-image',
-        ),
-        SiteConfig(
-            site_id='rose_gentleman',
-            name='薔薇と紳士',
-            target_url='https://www.rose-gentleman.com/therapist.php',
-            selector_container='ul#list li',
-            selector_name='div.name',
-            selector_link='a[href*="profile.php?id="]',
-            selector_image='div.image img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='royal_thoroughb',
-            name='Royal Thoroughb（ロイヤルサラブ）',
-            target_url='https://royalthoroughb.com/newface/',
-            # LA BELLA / ミセスの子守唄 / DEAR Premiumと同一テンプレート(KNZ系)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='dear_premium',
-            name='DEAR Premium（ディアープレミアム）',
-            target_url='https://dear-premium.net/newface/',
-            # LA BELLA / ミセスの子守唄 / Royal Thoroughbと同一テンプレート(KNZ系)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='kakurega',
-            name='隠れ家',
-            target_url='https://kakurega-iyashi.com/girllist',
-            # Mrs.Merci SPA / Restpia / Mrs.AUBE SPA / Mrs.OnlyOneと同一テンプレート系列。
-            # このサイトはdiv.therapist_list_wrapperという追加のラッパーが挟まるが、
-            # selector_name等は子孫探索のため影響を受けない
-            selector_container='div.therapist_list > div',
-            selector_name='h3.therapist_name',
-            selector_link='a.therapist_meta',
-            selector_image='p.therapist_img img',
-        ),
-        SiteConfig(
-            site_id='tororintime',
-            name='とろりんタイム',
-            target_url='https://tororintime.com/newface/',
-            # ぷちぷちどりーむと同一テンプレート(gallist/article/h3系)。
-            # div.type内に別のul>liのタグ一覧が入れ子になっているため、
-            # コンテナは子要素セレクタ(>)で直下のliのみに絞り込む
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='osaka_milktea_therapist',
-            name='ミルクティー -milktea-（セラピスト一覧）',
-            target_url='https://osakamilktea.com/therapist.php',
-            # 既存のosaka_milktea(newface.php/新人情報)とは別ページ(therapist.php/在籍一覧)のため、
-            # 別サイトとして独立管理する
-            selector_container='main#therapist ul > li.box',
-            selector_name='div.name',
-            selector_link='a[href*="profile.php"]',
-            selector_image='a[href*="profile.php"] img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='mrs_femmefatale',
-            name='Mrs.Femme Fatale（ミセスファムファタール）',
-            target_url='https://mrs-femmefatale.com/newface/',
-            # LA BELLA / ミセスの子守唄 / Royal Thoroughb / DEAR Premiumと同一テンプレート(KNZ系)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='yudanete',
-            name='ゆだねて',
-            target_url='https://www.yudanete.com/therapist.html',
-            # サムネイル画像は<img>ではなく、リンク(<a>)自体のstyle属性に
-            # background-imageとして埋め込まれている。また、グリッドレイアウト用の
-            # 空のdiv.staff-box（余白調整用）が末尾に混在するため:has()で除外する
-            selector_container='div.staff-wrap > div.staff-box:has(li.staff-name)',
-            selector_name='li.staff-name',
-            selector_link='a[href*="profile.html"]',
-            selector_image='div.staff-image a',
-            image_from_style=True,
-            id_query_param='sid',
-        ),
-        SiteConfig(
-            site_id='aromade_skit',
-            name='すきっと',
-            target_url='https://aromade-skit.com/therapists/',
-            selector_container='ul.therapists-boxwrap > li.therapists-box',
-            selector_name='h3.name',
-            selector_link='a.expand-link',
-            selector_image='a.expand-link img',
-            id_query_param='author',
-        ),
-        SiteConfig(
-            site_id='aquaspa_osaka',
-            name='aqua SPA(アクアスパ)',
-            target_url='https://aquaspa-osaka.com/newface/',
-            # とろりんタイム/ぷちぷちどりーむと同一テンプレート(gallist/article/h3系)
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='genie',
-            name='genie(ジーニー)',
-            target_url='https://genie-osaka.com/staff.html',
-            # 詳細URLが 'profile.html?12199' のようにキー=値ではなくクエリ文字列
-            # 自体でIDを表す新規パターン。id_query_paramは指定不要（_parse_html側の
-            # 汎用フォールバックでクエリ文字列全体を自動的にIDとして採用する）。
-            # サムネイルはfigure直下の<img>のみを対象とし、内側にネストされた
-            # NEWバッジ用<img>は子要素セレクタ(>)で除外する
-            selector_container='ul.c-list-therapist > li',
-            selector_name='div.c-list-therapist__name',
-            selector_link='a[href*="profile.html"]',
-            selector_image='figure.c-list-therapist__img > img',
-        ),
-        SiteConfig(
-            site_id='amaou_therapi',
-            name='ミセスあまおうセラピ',
-            target_url='https://amaou-therapi.jp/lady.php',
-            selector_container='ul.ladyList > li',
-            selector_name='h2.ladyName',
-            selector_link='a[href*="lady_detail.php"]',
-            selector_image='span.thumb img',
-            id_query_param='lady_num',
-        ),
-        SiteConfig(
-            site_id='spamaybe',
-            name='spaMAYBE',
-            target_url='https://spamaybe.com/girl',
-            # kitty/Chatonと同一テンプレート系列(c-panel系)
-            selector_container='div.c-panel',
-            selector_name='p.c-panel__name',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            id_query_param='lid',
-        ),
-        SiteConfig(
-            site_id='alyo',
-            name='ALYO（アルヨ）',
-            target_url='https://alyo.net/newface/',
-            # la_bella等と同一テンプレート(KNZ系listTypeJ)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='club_leggenda',
-            name='CLUB LEGGENDA（クラブレジェンダ）',
-            target_url='https://club-leggenda.com/list/',
-            # ALYO/la_bella等と同一テンプレート(KNZ系listTypeJ)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='grandluxe_osaka',
-            name='Grand Luxe（グランリュクス）',
-            target_url='https://www.grandluxe-osaka.com/therapist.php',
-            selector_container='ul#list > li',
-            selector_name='div.name',
-            selector_link='a[href*="profile.php"]',
-            selector_image='div.image img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='yoluspa_osaka',
-            name='YOLU SPA 大阪店',
-            # 旧設定ではスケジュール(SCHEDULE)ページを巡回対象にしていたが、
-            # このページは「その日の出勤シフト」を表示するものであり、シフトに
-            # 入っていないキャストは掲載されない。そのため既存在籍者でも、たまたま
-            # まだシフト表に登場していない間はknown_castsに載らず、初めて
-            # シフトに入った日に毎回「新規キャスト」として誤検知されてしまう
-            # (実際、シフト表の運用開始から数日で50名超の既存在籍者が次々
-            # "新規"扱いされる異常な検知が続いた)。姉妹店yolu_spa
-            # (mrs-yoluspa.net)と同じURLパターンの「セラピスト一覧」
-            # (全キャスト常設ページ)に変更し、シフトに関わらず安定して
-            # 全在籍者を検知できるようにする
-            target_url='https://yoluspa-osaka.net/%e3%82%bb%e3%83%a9%e3%83%94%e3%82%b9%e3%83%88%e4%b8%80%e8%a6%a7/',
-            # 既存のyolu_spa(mrs-yoluspa.net)とはドメインが異なる別店舗だが、
-            # 同一テンプレート(クラス名体系)のためセレクタは流用
-            selector_container='div.therapist-item',
-            selector_name='a.name-link',
-            selector_link='a.name-link',
-            selector_image='img.therapist-image',
-        ),
-        SiteConfig(
-            site_id='esthe_aromaone',
-            name='Aroma One（アロマワン）',
-            target_url='https://esthe-aromaone.com/cast/',
-            # WordPress製のキャストアーカイブ(新規パターン)
-            selector_container='ul.castlist > li',
-            selector_name='h3.name',
-            selector_link='a[href*="/cast/"]',
-            selector_image='div.photo img',
-        ),
-        SiteConfig(
-            site_id='mrs_holic',
-            name='Mrs.HOLIC（ミセスホリック）',
-            target_url='https://mrs-holic.com/newface.html',
-            # 新規パターン: 個別の<li>ではなく<div class="onebox">がカードの単位。
-            # カード全体を1つの<a>が包んでいるため直下のaをそのままリンクとして使う
-            selector_container='div.newgirlbox > div.onebox',
-            selector_name='div.name',
-            selector_link='a',
-            selector_image='div.img img',
-        ),
-        SiteConfig(
-            site_id='iyashinadeshiko',
-            name='癒しなでしこ',
-            target_url='https://iyashinadeshiko.com/newface/',
-            # とろりんタイム/aqua SPA等と同一テンプレート(gallist/article/h3系)
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='zenith_osaka',
-            name='ZENITH OSAKA（ゼニス大阪）',
-            target_url='https://zenithosaka.net/newface/',
-            # ALYO等と同一テンプレート(KNZ系listTypeJ)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='ore_no_ie',
-            name='俺の家（おれのいえ）',
-            target_url='https://ore-no-ie.com/staff.php',
-            # 新規パターン: カード全体を1つの<a>が包む構造(Mrs.HOLICと同系統)。
-            # サムネイル画像はNEW/体験入店バッジ用のimgと区別するためclassを明示指定
-            selector_container='ul.cast_box > li',
-            selector_name='p.name',
-            selector_link='a',
-            selector_image='img.profile_thum',
-            id_query_param='sid',
-        ),
-        SiteConfig(
-            site_id='highspec_osaka',
-            name='SPAハイスペ',
-            target_url='https://highspec-osaka.net/newface/',
-            # KNZ系listTypeJ(ALYO等と同一テンプレート)
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='femme_fatale_osaka',
-            name='Femme Fatale（ファムファタール）',
-            target_url='https://femmefatale-osaka.net/newface/',
-            # KNZ系listTypeJ。既存のmrs_femmefatale(Mrs.Femme Fatale/
-            # mrs-femmefatale.com)とは別ドメインの別店舗のため区別して登録
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='kifujinclub',
-            name='貴婦人倶楽部',
-            target_url='https://kifujinclub.com/newface/',
-            # KNZ系listTypeJ
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='busty_osaka',
-            name='Busty Osaka（バスティオオサカ）',
-            target_url='https://busty-osaka.com/therapist.php',
-            # grandluxe_osakaと同一テンプレート系列(ul#list、profile.php?id=形式)
-            selector_container='ul#list > li',
-            selector_name='div.name',
-            selector_link='a[href*="profile.php"]',
-            selector_image='div.image img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='moonr_osaka',
-            name='ミセス・ムーンR',
-            target_url='https://www.moonr.jp/newface/',
-            # KNZ系listTypeJ
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='mrs_lavons',
-            name='Mrs．LAVONS（ラボン）',
-            target_url='https://mrs-lavons.com/girl',
-            # kitty/Chaton/spaMAYBEと同一テンプレート系列(c-panel系)
-            selector_container='div.c-panel',
-            selector_name='p.c-panel__name',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            id_query_param='lid',
-        ),
-        SiteConfig(
-            site_id='jukumadam',
-            name='道頓堀の熟マダム',
-            target_url='https://jukumadam.net/model.html',
-            # 新規パターン(Shift-JISサイト。BeautifulSoupが生バイト列から
-            # 自動的にエンコーディングを検出するためコード側の対応は不要)
-            selector_container='div.model_list',
-            selector_name='div.model_name',
-            selector_link='a',
-            selector_image='img.listimg',
-        ),
-        SiteConfig(
-            site_id='pinkcompltion',
-            name='pinkcompltion（ピンクコンプリ―ション）',
-            target_url='https://pinkcompltion.net/model.html',
-            # jukumadamと同一テンプレート(model_list系、Shift-JIS)
-            selector_container='div.model_list',
-            selector_name='div.model_name',
-            selector_link='a',
-            selector_image='img.listimg',
-        ),
-        SiteConfig(
-            site_id='naniwajoshi',
-            name='なにわ女子',
-            target_url='https://naniwajoshi.com/cast/',
-            # gallist系だが、petitpetit_dream等と異なりカード全体を1つの<a>が
-            # 包む構造(h3に子孫の<a>は無い)。list_todayバッジ画像はdiv.phの
-            # 外側の兄弟要素として配置されているため、除外指定なしでも
-            # div.ph img の子孫探索で自動的に対象外となる
-            selector_container='ul.gallist > li',
-            selector_name='h3',
-            selector_link='a',
-            selector_image='div.ph img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='mrs_luxia',
-            name='Mrs.LUXIA',
-            target_url='https://nipponbashi-mrsluxia.com/newface/',
-            # petitpetit_dreamと同一テンプレート(umihey.sakura.ne.jp系、
-            # gallist/article/h3系)
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='karisome_bekkan',
-            name='かりそめ別館',
-            target_url='https://karisome-bekkan.net/newface/',
-            # KNZ(planKNZ CMS)系テンプレート。la_bella等と同一構造
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='toroten',
-            name='とろてんSPA',
-            target_url='https://toroten.net/newface/',
-            # KNZ(planKNZ CMS)系テンプレート。la_bella等と同一構造
-            selector_container='div.listTypeJ li',
-            selector_name='h3',
-            selector_link='a[href*="profile?uid="]',
-            selector_image='img.myPhoto',
-            image_attr='data-original',
-            id_query_param='uid',
-        ),
-        SiteConfig(
-            site_id='yuraku_tei',
-            name='優楽亭',
-            target_url='https://yuraku-tei.net/newface/',
-            # petitpetit_dreamと同一テンプレート(tarao.sakura.ne.jp系、
-            # gallist/article/h3系)
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='luxy_osaka',
-            name='LUXY（ラグジー）',
-            target_url='https://luxy-spa.com/therapist.php',
-            # Grand Luxe系テンプレート(grandluxe_osaka等と同一構造。姉妹店として
-            # ヘッダーからgrandluxe-osaka.comへ相互リンクしており同一運営と判明)
-            selector_container='ul#list > li',
-            selector_name='div.name',
-            selector_link='a[href*="profile.php"]',
-            selector_image='div.image img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='atarispa',
-            name='当たりスパ',
-            target_url='https://atarispa.net/therapist/newface.php',
-            # 新規パターン。name要素(article h3)内に年齢バッジ<span>が
-            # 兄弟要素として同居しており、get_text()では "さな(27)" のように
-            # 汚染されるため name_first_text_only=True で直下テキストのみ採用
-            selector_container='li.animation',
-            selector_name='article h3',
-            selector_link='a[href*="/therapist/detail.php"]',
-            selector_image='div.ph img',
-            id_query_param='id',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='milk_parfait',
-            name='みるくぱふぇ',
-            target_url='https://milk-parfait.com/girl',
-            # c-panel系テンプレート(kitty等と類似)。ただしp.c-panel__nameは
-            # "りこ(21)"のように年齢を含むため、代わりにp.js-eng_name span
-            # (年齢を含まない<span>要素)を名前として採用
-            selector_container='div.c-panel',
-            selector_name='p.js-eng_name span',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            id_query_param='lid',
-        ),
-        SiteConfig(
-            site_id='arrow_kyoto',
-            name='ARROW京都',
-            target_url='https://www.arrowkyoto.com/p/9/',
-            # 新規パターン。カード全体を1つの<a>が包む構造で、詳細ページは
-            # 外部サイト(estama.jp)。掲載枠によって画像が通常の<img src>と
-            # lazyload用<img data-lazy-src>のどちらかに分かれているため、
-            # image_attr='data-lazy-src'を指定(未指定時は自動的に'src'を
-            # 試すフォールバックが働く)
-            selector_container='li.grid_imgbd',
-            selector_name='p',
-            selector_link='a',
-            selector_image='img',
-            image_attr='data-lazy-src',
-        ),
-        SiteConfig(
-            site_id='purewhite',
-            name='Pure White（ピュアホワイト）',
-            target_url='https://purewhite-aroma.com/cast/',
-            # gallist系テンプレート(カード全体を1つの<a>が包む構造)。姉妹店
-            # 「ピンクパンサー」のキャストが同一一覧に混在し、そちらは
-            # pinkpanther-esthe.com側のprofile?id=を使うため、自サイトの
-            # IDと衝突しうる(id_query_param使用時のドメイン別プレフィックス
-            # 付与ロジックにより自動的に区別される)
-            selector_container='ul.gallist li.list__item',
-            selector_name='article h3',
-            selector_link='a',
-            selector_image='div.ph img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='kyo_spa',
-            name='京spa',
-            target_url='https://esthe-kyospa.com/cast/',
-            # WordPress製のキャストアーカイブ(esthe_aromaoneと同一テンプレート)。
-            # div.photo内にはSNSアイコン画像も存在するため、selector_imageは
-            # 詳細ページへのリンク配下のimgに絞り込む
-            selector_container='ul.castlist > li',
-            selector_name='h3.name',
-            selector_link='a[href*="/cast/"]',
-            selector_image='a[href*="/cast/"] img',
-        ),
-        SiteConfig(
-            site_id='goodrad',
-            name='グッドラッド',
-            target_url='https://goodrad.men-es.jp/therapist.html',
-            # men-es.jp系CMSテンプレート(cecile/restpiaと同一構造)。レイアウト
-            # 調整用の空divが混在するため、リンクを持つ要素のみに絞る
-            selector_container='div.staff-box:has(a)',
-            selector_name='ul.box-inner li',
-            selector_link='div.staff-image01 a',
-            selector_image='div.staff-image01 a',
-            image_from_style=True,
-            id_query_param='sid',
-        ),
-        SiteConfig(
-            site_id='spade',
-            name='SPADE～スペード～',
-            target_url='https://esthe-spade.com/cast/',
-            # gallist系テンプレート(Pure White等と同一構造)
-            selector_container='ul.gallist li.list__item',
-            selector_name='article h3',
-            selector_link='a',
-            selector_image='div.ph img',
-            id_query_param='id',
-        ),
-        SiteConfig(
-            site_id='momoten',
-            name='桃色天使2.0',
-            target_url='https://momotenestama.com/therapist/',
-            # 新規パターン。ページ上部の「PICK UP」プレビューと「THERAPIST LIST」
-            # 本編セクションに同じキャストが重複掲載されるため、本編セクションの
-            # みに絞る。name要素内には年齢が兄弟の<span>として同居するため
-            # name_first_text_only=Trueを使用
-            selector_container='section.p-therapist-list-section div.c-therapist-cards__item',
-            selector_name='span.c-therapist-cards__name',
-            selector_link='a.c-therapist-cards__link',
-            selector_image='img',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='yurikago',
-            name='ゆりかご京都',
-            target_url='https://yurikago-kyoto.com/therapist/',
-            # 新規パターン。WordPress製。name要素内には入店日等の付加情報の後に
-            # 年齢が兄弟の<span>として同居するため name_first_text_only=True
-            selector_container='li.therapistbox',
-            selector_name='p.therapist_name',
-            selector_link='a',
-            selector_image='img',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='bimajo',
-            name='The 美魔女',
-            target_url='https://kyoto-esthe.com/casts/',
-            # 新規パターン。name要素内の年齢が兄弟要素ではなく同一テキスト
-            # ノード内にタブ文字区切りで同居する("芹沢\t\t\t(40歳)")ため、
-            # name_strip_after_tab=Trueでタブ以降を除去
-            selector_container='div.cast__item',
-            selector_name='span.cast__name',
-            selector_link='div.cast__thumb a',
-            selector_image='div.cast__thumb img',
-            name_strip_after_tab=True,
-        ),
-        SiteConfig(
-            site_id='mrs_coquettish',
-            name='ミセスコケティッシュ',
-            target_url='https://mrs-coquettish.com/staff.php',
-            # 新規パターン。p.name内は<small>Name</small>ラベルの後ろに
-            # 実際の名前がテキストノードとして続く構造のため、
-            # name_first_text_only=Trueで(空白のみでない)最初のテキスト
-            # ノードを採用
-            selector_container='ul.cast_box li',
-            selector_name='p.name',
-            selector_link='a',
-            selector_image='img.staff',
-            image_attr='data-src',
-            id_query_param='sid',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='tensai_spa',
-            name='天才スパ',
-            target_url='https://tensai-spa.com/girl',
-            # c-panel系テンプレート(milk_parfait等と同一構造)。一部キャストは
-            # 詳細ページが外部サイト(estama.jp)でlidクエリパラメータを
-            # 持たないが、その場合はパス末尾から自動的にIDを生成する
-            # 既存のフォールバックで対応可能
-            selector_container='div.c-panel',
-            selector_name='p.js-eng_name span',
-            selector_link='div.c-panel__image a',
-            selector_image='div.c-panel__image img',
-            id_query_param='lid',
-        ),
-        SiteConfig(
-            site_id='only_kyoto',
-            name='ONLY～オンリー～',
-            target_url='https://only-kyoto.net/staff.php',
-            # 新規パターン。name要素内には年齢の後にSNSアイコン用の<object>が
-            # 兄弟要素として同居するため name_first_text_only=True
-            selector_container='ul.cast_box li',
-            selector_name='dl.name p',
-            selector_link='a',
-            selector_image='img.staff_img',
-            id_query_param='sid',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='tiana_esthe',
-            name='Ti.ana～ティアナ～',
-            target_url='https://tiana-esthe.com/staff.php',
-            # only_kyotoと同一運営・同一テンプレート(相互リンクあり)。
-            # 画像はlazyload実装で実URLがdata-srcに入っている点が異なる
-            selector_container='ul.cast_box li',
-            selector_name='div.name',
-            selector_link='a',
-            selector_image='img.staff_img',
-            image_attr='data-src',
-            id_query_param='sid',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='flowerspa_kyoto',
-            name='Mrs.FlowerSpa京都・滋賀',
-            target_url='https://flowerspa-kyoto.com/girllist',
-            # 新規パターン。コンテナはclass指定のない裸の<div>のため親要素
-            # 経由で絞り込む。詳細ページへのリンクはカード先頭の中身が空の
-            # <a class="therapist_meta">がオーバーレイとして機能する
-            selector_container='div.therapist_list > div',
-            selector_name='h3.therapist_name',
-            selector_link='a.therapist_meta',
-            selector_image='p.therapist_img img',
-            name_first_text_only=True,
-        ),
-        SiteConfig(
-            site_id='mulala',
-            name='MULALA（ムララ）',
-            target_url='https://www.mulala-kyoto.com/therapist',
-            # 新規パターン(caskan CMS)。詳細ページへのリンクがパス末尾に
-            # そのままIDを含む構造のため、id_query_paramなしでも既存の
-            # パス末尾フォールバックで正しくIDを取得できる
-            selector_container='ul.therapist-datas > li',
-            selector_name='a.therapist-datas-name',
-            selector_link='div.therapist-datas-tmb a',
-            selector_image='div.therapist-datas-tmb img',
-        ),
-        SiteConfig(
-            site_id='bijuku_maria',
-            name='美熟MARIA',
-            target_url='https://bijuku-maria.com/newface.php',
-            # 既存のo-pack.jp系CMSテンプレートに完全一致(mrs_luxe/
-            # amaou_therapiと同一構造)
-            selector_container='ul.ladyList li',
-            selector_name='h2.ladyName',
-            selector_link='a[href*="lady_detail.php"]',
-            selector_image='span.thumb img',
-            id_query_param='lady_num',
-        ),
-        SiteConfig(
-            site_id='esthegame_kyoto',
-            name='エステゲーム京都',
-            target_url='https://esthegame.com/newface/',
-            # 既存のgallist/article/h3系テンプレートに完全一致(mrs_luxia等
-            # と同一構造)。list_todayバッジ画像がdiv.ph内に同居するため除外
-            selector_container='ul.gallist > li',
-            selector_name='article h3 a',
-            selector_link='article h3 a',
-            selector_image='div.ph img:not(.list_today)',
-            id_query_param='id',
-        ),
-    ]
+    # 新規サイトを監視対象に追加する場合は sites.json に1エントリ追記するだけでよい
+    # （本クラス・本ファイルの変更は不要。フィールドの意味は SiteConfig のdocstring参照）。
+    SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)
 
     # File Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
@@ -1548,7 +648,7 @@ class DiscordNotifier:
             f"(疎通不能・別ドメインへのリダイレクト・キャスト0件のいずれか)。\n"
             f"URL: {site.target_url}\n"
             f"サイト閉鎖・ドメイン移転の可能性があります。復旧見込みが無ければ "
-            f"newface_monitor.py の MonitorConfig.SITES から当該エントリを削除してください。\n"
+            f"sites.json から当該エントリを削除してください。\n"
             f"(本アラートは疎通が回復するまで1回だけ送信され、以降の失敗ログはWARNINGに降格されます)"
         )
 
