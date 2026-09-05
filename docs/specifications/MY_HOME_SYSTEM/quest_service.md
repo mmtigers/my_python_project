@@ -18,7 +18,8 @@
 * [sound_manager.md](./sound_manager.md) - `sound_manager.play`の実体(`core.sound_manager`)
 * [notification_service.md](./notification_service.md) - `notification_service.send_push`の実体(`services.notification_service`)
 * [switchbot_service.md](./switchbot_service.md) - `switchbot_service.send_device_command`の実体(TVロック解除、`_trigger_tv_unlock`内でローカルインポート)
-* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`/`UPLOAD_DIR`（B6で追加、`_delete_orphaned_avatar`が参照）等の設定値の提供元
+* [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`/`LINE_USER_ID`/`UPLOAD_DIR`（B6で追加、`_delete_orphaned_avatar`が参照）/`YOUTUBE_REWARD_IDS`（YouTube系ごほうび券クールダウンの対象reward_id）等の設定値の提供元
+* [InventoryList.md](../family-quest/src/features/shop/components/InventoryList.md) - `GET /api/quest/inventory/{user_id}`のレスポンス形状(`items`/`youtube_cooldown_remaining_seconds`/`is_youtube_reward`)を消費するフロントエンドコンポーネント
 * `fix_quest_reset_period.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `quest_master.reset_period`列の値(`'weekly_monday'`→`'daily'`)を一括修正するワンショットスクリプト。本ファイルの`is_within_reset_period`が`'daily'`/`'weekly'`の2値しか扱わないことと関連が疑われる
 
 ## 2. ファイルの概要
@@ -36,6 +37,9 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: (行番号: 301〜312, 724〜738 / 抜粋: "quest_users を書き換えうる全経路(承認・取消・完了)が対象ユーザー単位で\n        # 直列化されるよう、completion lock とは独立に user balance lock も取得する。")
 * 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 822〜825 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")
 
+**（YouTubeごほうび券クールダウン機能で追加）** 連続視聴による目の負担を防ぐため、`config.YOUTUBE_REWARD_IDS`に含まれるYouTube系ごほうび券を使用してから`YOUTUBE_REWARD_COOLDOWN_SECONDS`(15分)は次の1枚を使用できないようにするクールダウン機構を追加した。判定は`_get_youtube_cooldown_remaining_seconds`が`user_inventory`から直近の消費時刻(`used_at`)を読み取って行い、`InventoryService._use_item_locked`で使用可否を判定するほか、`InventoryService.get_user_inventory`のレスポンスにも残り秒数を含めてフロントエンド(`InventoryList.tsx`)がカウントダウン表示できるようにする。`InventoryService.use_item`は新設の`_get_item_use_lock(user_id)`を取得したうえで実処理を`_use_item_locked`に委譲し、異なるYouTube系ごほうび券をほぼ同時に使用しようとするTOCTOUレースを防ぐ。
+* 根拠: `YOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60` (行番号: 57)、`def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:` (行番号: 85〜109)、`def _get_item_use_lock(user_id: str) -> threading.Lock:` (行番号: 205〜211)、`if item['reward_id'] in config.YOUTUBE_REWARD_IDS:` (行番号: 1104)
+
 ## 3. 外部依存関係
 
 ### インポート一覧
@@ -44,9 +48,9 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 | --- | --- | --- | --- |
 | `datetime` | 標準ライブラリ | 日付や時刻の操作・比較 | `import datetime` (行番号: 1) |
 | `importlib` | 標準ライブラリ | マスターデータモジュールのリロード | `import importlib` (行番号: 2) |
-| `os` | 標準ライブラリ | **（B6で追加）** `UserService._delete_orphaned_avatar`が旧アバターファイルのファイル名抽出(`os.path.basename`)・パス結合(`os.path.join`)・パストラバーサル対策(`os.path.dirname`/`os.path.normpath`)・存在確認と削除(`os.path.exists`/`os.remove`)に使用 | `import os` (行番号: 3) |
-| `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 4) |
-| `math` | 標準ライブラリ | インポートされているが、本ファイル内では`math.`の呼び出しは一切確認できない(未使用) | `import math` (行番号: 5) |
+| `math` | 標準ライブラリ | **（YouTubeごほうび券クールダウン機能で追加）** クールダウン残り秒数を分単位に切り上げる(`math.ceil`)ために`_get_youtube_cooldown_remaining_seconds`と`InventoryService._use_item_locked`が使用 | `import math` (行番号: 3) |
+| `os` | 標準ライブラリ | **（B6で追加）** `UserService._delete_orphaned_avatar`が旧アバターファイルのファイル名抽出(`os.path.basename`)・パス結合(`os.path.join`)・パストラバーサル対策(`os.path.dirname`/`os.path.normpath`)・存在確認と削除(`os.path.exists`/`os.remove`)に使用 | `import os` (行番号: 4) |
+| `random` | 標準ライブラリ | ランダムクエスト発生判定(`random.Random(seed)`) | `import random` (行番号: 5) |
 | `threading` | 標準ライブラリ | `process_complete_quest`の二重実行防止用ロック(`threading.Lock`)の生成・管理、および`_trigger_tv_unlock`内での非同期スレッド実行 | `import threading` (行番号: 6) |
 | `contextlib.ExitStack` | 標準ライブラリ | `_acquire_user_balance_locks`が複数ユーザー分の`threading.Lock`をまとめて取得・解放するためのコンテキストマネージャ（Issue #98で追加） | `from contextlib import ExitStack` (行番号: 7) |
 | `typing` (`List`, `Dict`, `Any`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント（`Tuple`は`_completion_locks`のキー型`Tuple[str, int]`に使用） | `from typing import List, Dict, Any, Optional, Tuple` (行番号: 8) |
@@ -112,6 +116,19 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * **エラーハンドリング**: `datetime.datetime.fromisoformat`等での例外は`except Exception:`で捕捉し`None`を返す（呼び出し元には送出しない）
 * 根拠: (行番号: 67〜68 / 抜粋: "except Exception:\n        return None")
 
+### `YOUTUBE_REWARD_COOLDOWN_SECONDS` (モジュールレベル定数) と `_get_youtube_cooldown_remaining_seconds` (モジュールレベル関数)
+
+* **役割**: 連続視聴による目の負担を防ぐため、`config.YOUTUBE_REWARD_IDS`に含まれるYouTube系ごほうび券を使用してから、次の1枚を使用できるようになるまでのクールダウン(秒、`YOUTUBE_REWARD_COOLDOWN_SECONDS`＝15分＝900)を定義する。`_get_youtube_cooldown_remaining_seconds(cur, user_id)`は、`user_inventory`から対象`user_id`・対象`reward_id`群・`status = 'consumed'`のうち直近の`used_at`を1件取得し、`_seconds_since_iso_timestamp`で経過秒数を算出したうえで`YOUTUBE_REWARD_COOLDOWN_SECONDS`との差分を残り秒数として返す(クールダウン対象IDが未設定、または対象IDを一度も使用していない場合は`0`)。`InventoryService.get_user_inventory`(表示用)と`InventoryService._use_item_locked`(使用可否の判定)の両方から、同一クエリロジックとして呼び出される。
+* 根拠: `YOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60` (行番号: 57 / 抜粋: "# YouTube系ごほうび券(config.YOUTUBE_REWARD_IDS)を使用してから、次のYouTube系\n# ごほうび券を使用できるまでのクールダウン(秒)。連続視聴による目の負担を防ぐ。\nYOUTUBE_REWARD_COOLDOWN_SECONDS = 15 * 60")、`def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:` (行番号: 85〜109)
+* **引数/リクエスト**: `cur`(呼び出し元が保持するDBカーソル。呼び出し元のトランザクション内で実行される)、`user_id: str`
+* 根拠: (行番号: 85)
+* **戻り値/レスポンス**: `int`（クールダウン残り秒数。クールダウン対象外・未使用時は`0`。`math.ceil`で切り上げる）
+* 根拠: `remaining = YOUTUBE_REWARD_COOLDOWN_SECONDS - elapsed\n    return max(0, math.ceil(remaining))` (行番号: 108〜109)
+* **副作用**: `user_inventory`への読み取りクエリ1回（引数`cur`をそのまま使うため、呼び出し元のトランザクション内で実行される。関数自体はコミットしない）
+* 根拠: (行番号: 92〜96)
+* **エラーハンドリング**: `config.YOUTUBE_REWARD_IDS`が空リストの場合、該当行が無い場合、`_seconds_since_iso_timestamp`が`None`を返す場合はいずれも例外を送出せず`0`を返す
+* 根拠: (行番号: 86〜87, 98〜99, 102〜103)
+
 ### `_get_completion_lock` (モジュールレベル関数) と `_completion_locks` / `_completion_locks_guard` (モジュールレベル変数)
 
 * **役割**: `Tuple[str, int]` のキーを受け取り `threading.Lock` を管理する簡易レジストリ。同一キーに対して常に同一の`Lock`インスタンスを返す（初回アクセス時に`_completion_locks_guard`で保護しつつ生成）。`process_complete_quest`が「直近履歴を読む→報酬を書く」という手順のため、同一キーへの同時リクエストが競合すると報酬が二重加算されるレースコンディションがあり、それを防ぐために処理全体をプロセス内で直列化する目的で導入されている。渡されるキー自体は本関数の関知するところではなく、呼び出し元`process_complete_quest`が`_get_completion_lock_key`で算出する（通常クエストは`(user_id, quest_id)`、兄妹連携クエストは`('__coop__', quest_id)`）。
@@ -163,6 +180,19 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: (行番号: 139〜141 / 抜粋: "_purchase_locks[key] = lock")
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 136〜142)
+
+### `_get_item_use_lock` (モジュールレベル関数) と `_item_use_locks` / `_item_use_locks_guard` (モジュールレベル変数)
+
+* **役割**: `user_id`をキーとして`threading.Lock`を管理する簡易レジストリ（`_get_completion_lock`等と同一の構造）。`InventoryService.use_item`は「YouTube系ごほうび券の直近`used_at`を読む→クールダウン判定→`consumed`へ更新」というTOCTOUを持ち、同一ユーザーが異なるYouTube系ごほうび券(例: 10:00券と30:00券)をほぼ同時に使用しようとすると、両リクエストがクールダウンなし(0秒)を読んでしまい15分ロックをすり抜け得る。`InventoryService.use_item`が本ロックを取得したうえで`_use_item_locked`に処理を委譲することで、同一ユーザーの`use_item`呼び出し全体をプロセス内で直列化しこのレースを防ぐ。
+* 根拠: `_item_use_locks: Dict[str, threading.Lock] = {}` (行番号: 201), `def _get_item_use_lock(user_id: str) -> threading.Lock:` (行番号: 205〜211)
+* **引数/リクエスト**: `user_id: str`
+* 根拠: (行番号: 205)
+* **戻り値/レスポンス**: `threading.Lock`
+* 根拠: (行番号: 205, 211 / 抜粋: "return lock")
+* **副作用**: `_item_use_locks`辞書への書き込み（キー未登録時のみ）。他のロックレジストリと同様、エントリを削除する処理は存在せず辞書は増え続ける。
+* 根拠: (行番号: 208〜210 / 抜粋: "_item_use_locks[user_id] = lock")
+* **エラーハンドリング**: なし
+* 根拠: (行番号: 205〜211)
 
 ### `UserService.get_family_chronicle`
 
@@ -530,29 +560,29 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 
 ### `InventoryService.get_user_inventory`
 
-* **役割**: 指定ユーザーの`'owned'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する（`reward_master.description`を`desc`として、`reward_master.icon_key`を`icon`として別名取得する）。Issue #116で修正: 以前はSQLのフィルタ条件に`'pending'`も含まれていたが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い`ShopService.process_purchase_reward`は`'owned'`でのみ挿入し`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新するため、`'pending'`は新規購入では到達しない値になっていた。しかし廃止前の旧承認フロー由来で`'pending'`のまま残っている既存データが存在する環境では、この行が一覧に含まれてしまい、タップすると`use_item`が`status != 'owned'`により`HTTPException(400)`を返す「押せないアイテム」としてUIに表示されてしまう不具合があったため、`'pending'`をフィルタから除外し`'owned'`のみを返すよう修正した。あわせて、以前はSELECT対象に`reward_master.description`が含まれておらず、レスポンスに`desc`キー自体が存在しなかった（フロントエンドが常に「説明はありません」というフォールバック文言を表示していた）ため、`rm.description as desc`を追加した。
-* 根拠: `def get_user_inventory(self, user_id: str) -> List[dict]:` (行番号: 780〜791)
+* **役割**: 指定ユーザーの`'owned'`状態のインベントリアイテム一覧を、`reward_master`と結合し購入日時降順で取得する（`reward_master.description`を`desc`として、`reward_master.icon_key`を`icon`として別名取得する）。Issue #116で修正: 以前はSQLのフィルタ条件に`'pending'`も含まれていたが、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い`ShopService.process_purchase_reward`は`'owned'`でのみ挿入し`InventoryService.use_item`は`'owned'`から直接`'consumed'`へ更新するため、`'pending'`は新規購入では到達しない値になっていた。しかし廃止前の旧承認フロー由来で`'pending'`のまま残っている既存データが存在する環境では、この行が一覧に含まれてしまい、タップすると`use_item`が`status != 'owned'`により`HTTPException(400)`を返す「押せないアイテム」としてUIに表示されてしまう不具合があったため、`'pending'`をフィルタから除外し`'owned'`のみを返すよう修正した。あわせて、以前はSELECT対象に`reward_master.description`が含まれておらず、レスポンスに`desc`キー自体が存在しなかった（フロントエンドが常に「説明はありません」というフォールバック文言を表示していた）ため、`rm.description as desc`を追加した。**（YouTubeごほうび券クールダウン機能で変更）** 取得した各アイテムには、`config.YOUTUBE_REWARD_IDS`に含まれるかどうかを表す`is_youtube_reward`フラグ(bool)を付与する。戻り値もフラットな配列から`{"items": [...], "youtube_cooldown_remaining_seconds": int}`という辞書に変更され、`_get_youtube_cooldown_remaining_seconds`が算出したクールダウン残り秒数を併せて返す。フロントエンド(`family-quest`の`InventoryList.tsx`)はこのフラグと残り秒数を使って、クールダウン中のYouTube系アイテムの「つかう」操作を無効化し残り時間を表示する。
+* 根拠: `def get_user_inventory(self, user_id: str) -> Dict[str, Any]:` (行番号: 1054〜1078)、`item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 1070)、`return {"items": items, "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds}` (行番号: 1075〜1078)
 * **引数/リクエスト**: `user_id: str`
-* 根拠: (行番号: 780)
-* **戻り値/レスポンス**: `List[dict]`
-* 根拠: (行番号: 780, 791)
-* **副作用**: DB参照（`user_inventory`, `reward_master`）
-* 根拠: (行番号: 782〜790)
+* 根拠: (行番号: 1054)
+* **戻り値/レスポンス**: `Dict[str, Any]`（`{"items": List[dict], "youtube_cooldown_remaining_seconds": int}`。各`items`要素に`is_youtube_reward: bool`を含む）
+* 根拠: (行番号: 1075〜1078)
+* **副作用**: DB参照（`user_inventory`, `reward_master`。クールダウン算出のため`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ発行）
+* 根拠: (行番号: 1056〜1064, 1073)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 780〜791)
+* 根拠: (行番号: 1054〜1078)
 
-### `InventoryService.use_item`
+### `InventoryService.use_item` / `InventoryService._use_item_locked`
 
-* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。**（Issue #369で修正）** UPDATEは`WHERE id = ? AND status = 'owned'`の条件付きで行い、`cur.rowcount == 0`（SELECT後に別リクエストが先に消費していた）なら`HTTPException(400)`を送出する。以前はSELECT→Python判定→無条件UPDATEだったため、連打された2リクエストがWALで両方`'owned'`を読み、両方が消費・履歴INSERT・通知を実行する二重使用が起きていた。LINE通知（`config.LINE_USER_ID`宛）と`"quest_clear"`サウンド再生は、以前はトランザクション内で実行されLINE API往復中もSQLiteの書き込みロックを保持していたが、現在は`get_db_cursor`ブロックを抜けたコミット後に実行する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
-* 根拠: 関数Docstring `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 966〜969 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")、`WHERE id = ? AND status = 'owned'` (行番号: 993)、`if cur.rowcount == 0:` (行番号: 995〜996)、コミット後の`notification_service.send_push`/`sound_manager.play` (行番号: 1009〜1013)
+* **役割**: アイテムを使用し、即座に消費を確定する（親の承認は不要）。`use_item`は`_get_item_use_lock(user_id)`でユーザー単位のプロセス内ロックを取得したうえで、実処理を`_use_item_locked`に委譲する薄いラッパー（**YouTubeごほうび券クールダウン機能で追加**。詳細は`_get_item_use_lock`を参照）。`_use_item_locked`は所有者(`user_id`)・所有状態(`'owned'`)を確認したうえで、対象アイテムの`reward_id`が`config.YOUTUBE_REWARD_IDS`に含まれる場合のみ`_get_youtube_cooldown_remaining_seconds`でクールダウン残り秒数を判定し、`0`より大きければ`HTTPException(429)`（分単位に切り上げたメッセージ付き）を送出して消費を拒否する。クールダウン判定を通過（またはYouTube系対象外）した場合、対象`user_inventory`行の`status`を直ちに`'consumed'`へ更新し（`used_at`に現在時刻を記録）、`quest_history`へ`quest_id=0`・`status='approved'`のログ行を挿入する。**（Issue #369で修正）** UPDATEは`WHERE id = ? AND status = 'owned'`の条件付きで行い、`cur.rowcount == 0`（SELECT後に別リクエストが先に消費していた）なら`HTTPException(400)`を送出する。以前はSELECT→Python判定→無条件UPDATEだったため、連打された2リクエストがWALで両方`'owned'`を読み、両方が消費・履歴INSERT・通知を実行する二重使用が起きていた。LINE通知（`config.LINE_USER_ID`宛）と`"quest_clear"`サウンド再生は、以前はトランザクション内で実行されLINE API往復中もSQLiteの書き込みロックを保持していたが、現在は`get_db_cursor`ブロックを抜けたコミット後に実行する。`'pending'`状態を経由し`ROLE_ADULT`が承認する2段階の承認フローは存在しない（アイテム使用時の親承認フローはコミット`9d5edec`で廃止された）。
+* 根拠: `def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:\n        with _get_item_use_lock(user_id):\n            return self._use_item_locked(user_id, inventory_id)` (行番号: 1080〜1082)、関数Docstring `def _use_item_locked(self, user_id: str, inventory_id: int) -> Dict[str, str]:` (行番号: 1084〜1086 / 抜粋: "アイテムを使用し、即座に消費を確定する(親の承認は不要)。")、`if item['reward_id'] in config.YOUTUBE_REWARD_IDS:\n                cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)\n                if cooldown_remaining > 0:` (行番号: 1104〜1106)、`raise HTTPException(\n                        429,\n                        f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",\n                    )` (行番号: 1108〜1111)、`WHERE id = ? AND status = 'owned'` (行番号: 1122)、`if cur.rowcount == 0:` (行番号: 1124〜1125)
 * **引数/リクエスト**: `user_id: str`, `inventory_id: int`
-* 根拠: (行番号: 793)
+* 根拠: (行番号: 1080, 1084)
 * **戻り値/レスポンス**: `Dict[str, str]`（`{"status": "consumed", "message": "つかいました！"}`）
-* 根拠: (行番号: 793, 832)
-* **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
-* 根拠: (行番号: 813〜817, 819〜823, 826〜829, 830)
-* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`、条件付きUPDATEの`rowcount == 0`（並行リクエストが先に消費済み）の場合も `HTTPException(400)`
-* 根拠: (行番号: 980〜982 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")、(行番号: 995〜996 / 抜粋: "if cur.rowcount == 0:\n                raise HTTPException(400, \"Cannot use this item\")")
+* 根拠: (行番号: 1084, 行末の`return`)
+* **副作用**: DB参照（`reward_master`/`quest_users`とのJOINでアイテム取得。YouTube系の場合`_get_youtube_cooldown_remaining_seconds`経由でもう1クエリ）/更新（`user_inventory`の状態を`'consumed'`に）、`quest_history`への新規INSERT、`notification_service.send_push`、`sound_manager.play("quest_clear")`
+* 根拠: (行番号: 1089〜1096, 1105, 1119〜1123, 1128〜1131)
+* **エラーハンドリング**: アイテム不在 `HTTPException(404)`、所有者不一致 `HTTPException(403)`、状態が`'owned'`でない場合 `HTTPException(400)`、YouTube系ごほうび券がクールダウン中の場合 `HTTPException(429)`、条件付きUPDATEの`rowcount == 0`（並行リクエストが先に消費済み）の場合は `HTTPException(400)`
+* 根拠: (行番号: 1098〜1100 / 抜粋: "if not item: raise HTTPException(404, \"Item not found\")\n            if item['user_id'] != user_id: raise HTTPException(403, \"Not your item\")\n            if item['status'] != 'owned': raise HTTPException(400, \"Cannot use this item\")")、(行番号: 1104〜1111 / YouTubeクールダウン判定)、(行番号: 1124〜1125 / 抜粋: "if cur.rowcount == 0:\n                raise HTTPException(400, \"Cannot use this item\")")
 
 ### `GameSystem.__init__`
 
@@ -726,13 +756,18 @@ flowchart TD
     RCallLocked --> REnd[End]
 ```
 
-以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。
+以下は、アイテム使用処理（`use_item`）のフローです。親の承認は不要で、単一トランザクション内で即座に消費が確定します（アイテム使用時の親承認フローはコミット`9d5edec`で廃止されました）。`use_item`は`_get_item_use_lock(user_id)`取得後に`_use_item_locked`へ委譲し（YouTubeごほうび券クールダウン機能で追加）、所有者・状態チェックの後にYouTube系ごほうび券のみクールダウン判定を行います。
 
 ```mermaid
 flowchart TD
-    UStart[Start: use_item] --> UCheck{"アイテムが存在し、<br>所有者一致 かつ<br>status == 'owned' か"}
+    UStart[Start: use_item] --> ULock["_get_item_use_lock(user_id)で<br>プロセス内ロックを取得"]
+    ULock --> UCheck{"アイテムが存在し、<br>所有者一致 かつ<br>status == 'owned' か"}
     UCheck -- No --> UErr[HTTPException 400/403/404]
-    UCheck -- Yes --> USetConsumed["user_inventory.status = 'consumed'<br>(used_atに現在時刻)"]
+    UCheck -- Yes --> UYoutubeCheck{"reward_id が<br>config.YOUTUBE_REWARD_IDS に<br>含まれるか"}
+    UYoutubeCheck -- No --> USetConsumed
+    UYoutubeCheck -- Yes --> UCooldownCheck{"_get_youtube_cooldown_remaining_seconds<br>> 0 か"}
+    UCooldownCheck -- Yes --> UCooldownErr["HTTPException 429<br>(残り分数を含むメッセージ)"]
+    UCooldownCheck -- No --> USetConsumed["user_inventory.status = 'consumed'<br>(used_atに現在時刻)"]
     USetConsumed --> UInsertHistory["quest_historyへ quest_id=0・<br>status='approved'のログ行を挿入"]
     UInsertHistory --> UNotify["外部: notification_service.send_push<br>「使用しました」"]
     UNotify --> UPlaySound["外部: sound_manager.play 'quest_clear'"]
@@ -830,6 +865,7 @@ graph TD
     InventoryService -.-> user_inventory
     InventoryService -.-> quest_history
     InventoryService -.-> quest_users
+    InventoryService -.->|"YOUTUBE_REWARD_IDS(YouTubeクールダウン)"| config
 
     UserService -.-> common
     delete_orphaned_avatar -.->|"UPLOAD_DIR(B6)"| config
@@ -871,8 +907,8 @@ graph TD
 * 根拠: `if reset_period == 'daily': ... elif reset_period == 'weekly': ... return False` (行番号: 235〜242)
 * **`calculate_quest_boost`と`is_within_reset_period`の「現在時刻」基準不一致（Issue #108で解消済み）**: 以前は`is_within_reset_period`がJST（+9時間、標準ライブラリのみで定義）に厳密に変換して比較する一方、`calculate_quest_boost`は`datetime.datetime.now()`（サーバーのOSローカル時刻）をそのまま使用しており、サーバーのOSタイムゾーンがJST以外（例: UTC環境）の場合、JST 0時〜9時の間の判定で連続日ボーナスの`days_diff`が1小さくなる不具合があった（M-1-4は`is_within_reset_period`のtzinfo無し値の解釈をUTCからJSTへ修正したのみで、この2関数間の基準不一致自体は未解消のまま残っていた）。Issue #108で`calculate_quest_boost`も同じJST基準（`datetime.timezone(+9時間)`）に統一され解消済み。
 * 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 214, 274)
-* **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`辞書もエントリを削除しない同じ設計である。
-* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `_completion_locks[key] = lock` (行番号: 81), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `_user_balance_locks[user_id] = lock` (行番号: 103), `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `_purchase_locks[key] = lock` (行番号: 141)
+* **`process_complete_quest`の二重加算防止ロックはプロセス内限定**: `_get_completion_lock`は`threading.Lock`のみを対象としており、複数プロセス/複数ワーカーで稼働する構成では別プロセスからの同時リクエストまでは防げない。`_completion_locks`辞書はエントリを削除する処理を持たず、キーの組み合わせが増え続ける設計である。H-3で追加された`_get_user_balance_lock`（`process_approve_quest`/`process_cancel_quest`用）、Issue #101で追加された`_get_purchase_lock`（`process_purchase_reward`用）、**YouTubeごほうび券クールダウン機能で追加された`_get_item_use_lock`（`InventoryService.use_item`用）**も同様に`threading.Lock`のみを対象とし、それぞれ`_user_balance_locks`/`_purchase_locks`/`_item_use_locks`辞書もエントリを削除しない同じ設計である。
+* 根拠: `_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 72), `_completion_locks[key] = lock` (行番号: 81), `_user_balance_locks: Dict[str, threading.Lock] = {}` (行番号: 94), `_user_balance_locks[user_id] = lock` (行番号: 103), `_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}` (行番号: 132), `_purchase_locks[key] = lock` (行番号: 141), `_item_use_locks: Dict[str, threading.Lock] = {}` (行番号: 201), `_item_use_locks[user_id] = lock` (行番号: 210)
 * **quest_usersを書き換える4経路のロック体系は依然3レジストリに分かれたまま(Issue #161で経路間のlost updateのみ解消)**: `_completion_locks`/`_user_balance_locks`/`_purchase_locks`という3つの独立したロックレジストリ自体は統合されておらず、`process_complete_quest`/`process_purchase_reward`が`_get_user_balance_lock`を(それぞれcompletion/purchase lockより外側で)追加取得するようになっただけである。取得順序は常に balance lock → completion/purchase lock に統一されており、いずれの経路も balance lock を取得してから自分専用のロックを取得するだけで、balance lock 取得後に他の経路のロック(completion/purchase)を待つことはない。そのため経路間の循環待ちは生じずデッドロックの心配はないが、レジストリが3つに分かれている構造自体は残っているため、新しく`quest_users`を書き換える経路を追加する際は、この`_get_user_balance_lock`を(自身の専用ロックより外側で)取得することを個別に判断・実装する必要があり、忘れると同種のlost updateが再発し得る。
 * 根拠: (行番号: 300〜315, 723〜741 / 抜粋: "ロック取得順序は常に balance lock → completion/purchase lock に統一し、\n        # 経路間のデッドロックを防ぐ。")
 * **`_get_completion_lock_key`はロック取得前にDBへ1回問い合わせる**: 兄妹連携クエストかどうかを判定するために`quest_master`をSELECTする処理が、ロック取得そのものより前・かつ別の`get_db_cursor`トランザクションとして実行される。この問い合わせと実際のロック取得の間にはわずかな非アトミックな隙間があるが、判定対象は`target_user`という更新されることがほぼ無いマスタ値であり、ここでのTOCTOU（read-then-lock間のズレ）が実害あるレースを生む経路は確認できていない（Issue #96の修正で導入）。

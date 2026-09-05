@@ -10,7 +10,7 @@
 
 ## 関連ドキュメント
 
-- [types/index.md](../types/index.md) — `InventoryItem`型定義の提供元。
+- [types/index.md](../types/index.md) — `InventoryItem`/`InventoryResponse`型定義の提供元。
 - [useGameData.md](../hooks/useGameData.md) — 本クライアントを利用してクエスト関連APIを呼び出す上位フック。
 - [InventoryList.md](../features/shop/components/InventoryList.md) — インベントリ関連メソッドの利用元。
 - [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `/inventory/*`等、バックエンド側APIエンドポイントの実装元。
@@ -28,7 +28,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `InventoryItem` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem } from \"../types\";") |
+| `InventoryResponse` | 型(Type/Interface) | `fetchInventory`の戻り値の型指定として使用（**YouTubeごほうび券クールダウン機能で変更**: 以前は`InventoryItem`を直接importし戻り値も`Promise<InventoryItem[]>`だったが、`{items, youtube_cooldown_remaining_seconds}`を返す`InventoryResponse`に変更） | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse } from \"../types\";") |
 
 ### ブラックボックスとなる外部要素
 
@@ -167,24 +167,24 @@
 
 ### インベントリ関連メソッド (`fetchInventory`, `useItem`)
 
-* **役割**: `ApiClient` クラスに組み込まれた、インベントリAPIの呼び出し専用メソッド群。`fetchInventory` は指定ユーザーの所持アイテム一覧を取得し、`useItem` は指定アイテムの使用をバックエンドへ要求する。承認待ち状態を経由せず、呼び出し即座に使用リクエストを送信する。
-* 根拠: [Inventory Methods セクション] (行番号: 97〜105 / 抜粋: "// --- Inventory Methods ---")
+* **役割**: `ApiClient` クラスに組み込まれた、インベントリAPIの呼び出し専用メソッド群。`fetchInventory` は指定ユーザーの所持アイテム一覧とYouTubeごほうび券クールダウン残り秒数を取得し、`useItem` は指定アイテムの使用をバックエンドへ要求する。承認待ち状態を経由せず、呼び出し即座に使用リクエストを送信する。**（YouTubeごほうび券クールダウン機能で変更）** `fetchInventory`は以前`InventoryItem[]`を直接返す設計だったが、バックエンド(`GET /api/quest/inventory/{user_id}`)のレスポンス形状が`{items, youtube_cooldown_remaining_seconds}`という辞書に変更されたのに合わせ、`InventoryResponse`をそのまま返すよう変更された（配列を取り出す処理はこのメソッドでは行わず、呼び出し元の`InventoryList.tsx`が`data?.items`で取り出す）。
+* 根拠: [Inventory Methods セクション] (行番号: 125〜133 / 抜粋: "// --- Inventory Methods ---")
 
 
 * **引数/リクエスト**: メソッドに応じたパラメータ (`fetchInventory`: `userId: string`。`useItem`: `userId: string`, `inventoryId: number`)
-* 根拠: [各メソッドの引数定義] (行番号: 99, 103 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
+* 根拠: [各メソッドの引数定義] (行番号: 126, 130 / 抜粋: "async useItem(userId: string, inventoryId: number): Promise<ApiResponse> {")
 
 
-* **戻り値/レスポンス**: `fetchInventory`は`Promise<InventoryItem[]>`、`useItem`は`Promise<ApiResponse>`
-* 根拠: [各メソッドの戻り値型定義] (行番号: 99, 103 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryItem[]> {")
+* **戻り値/レスポンス**: `fetchInventory`は`Promise<InventoryResponse>`、`useItem`は`Promise<ApiResponse>`
+* 根拠: [各メソッドの戻り値型定義] (行番号: 126, 130 / 抜粋: "async fetchInventory(userId: string): Promise<InventoryResponse> {")
 
 
 * **副作用**: `get`/`post`（ひいては`_request`）を介したネットワーク通信。`fetchInventory`は`GET /api/quest/inventory/{userId}`、`useItem`は`POST /api/quest/inventory/use`を呼び出す。
-* 根拠: [各メソッドの実装] (行番号: 100, 104 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
+* 根拠: [各メソッドの実装] (行番号: 131〜132 / 抜粋: "return this.post<ApiResponse>('/api/quest/inventory/use', { user_id: userId, inventory_id: inventoryId });")
 
 
 * **エラーハンドリング**: `_request` の実装に依存
-* 根拠: [各メソッドの実装] (行番号: 100, 104 / 抜粋: "return this.get<InventoryItem[]>(`/api/quest/inventory/${userId}`);")
+* 根拠: [各メソッドの実装] (行番号: 127 / 抜粋: "return this.get<InventoryResponse>(`/api/quest/inventory/${userId}`);")
 
 
 
@@ -236,7 +236,7 @@ flowchart TD
 ```mermaid
 graph TD
     subgraph "外部ファイル (ブラックボックス)"
-        Types["../types (InventoryItem)"]
+        Types["../types (InventoryResponse)"]
     end
 
     subgraph "環境依存"
@@ -281,7 +281,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryItem`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryItem } from \"../types\";") |
+| 高 | `../types.ts` (または `../types/index.ts` 等) | `ApiResponse` 以外の戻り値型 (`InventoryResponse`とその`items: InventoryItem[]`) の正確な構造を把握し、API利用側で利用できるプロパティを確定するため。 | 根拠: [import宣言] (行番号: 3 / 抜粋: "import { InventoryResponse } from \"../types\";") |
 | 中 | `.env` ファイル | `VITE_API_URL` に設定される具体的なバックエンドのホスト情報を特定し、ルーティング全容を把握するため。 | 根拠: [getBaseUrl関数] (行番号: 8 / 抜粋: "if (import.meta.env.VITE_API_URL) {") |
 | 中 | バックエンドルーティングファイル (例: FastAPIの `main.py` やルーター設定) | `/api/quest/inventory/*` などのエンドポイントが実際にどのようなビジネスロジックを実行しているか把握するため。 | 根拠: [各API呼び出し先エンドポイント] (行番号: 104 / 抜粋: "'/api/quest/inventory/use'") |
 

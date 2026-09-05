@@ -11,7 +11,8 @@
 ## 関連ドキュメント
 
 - [useGameData.md](../hooks/useGameData.md) — `User`/`Quest`/`QuestHistory`/`Reward`/`QuestResult`型の主要な利用元。
-- [apiClient.md](../lib/apiClient.md) — `InventoryItem`型の利用元。
+- [apiClient.md](../lib/apiClient.md) — `InventoryItem`/`InventoryResponse`型の利用元。
+- [InventoryList.md](../features/shop/components/InventoryList.md) — `InventoryItem.is_youtube_reward`/`InventoryResponse`の利用元。
 - [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
 - [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
 - [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。
@@ -21,8 +22,8 @@
 ## 2. ファイルの概要
 
 * アプリケーション全体で使用される共通のデータ構造（型定義、インターフェース）を定義し、提供する。
-* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。
-* 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜114 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `QuestResult`の7件のみで`PendingInventory`は存在しないことを確認)
+* ユーザー、クエスト、クエスト履歴、報酬、インベントリ、クエスト完了結果のドメインモデルの型を網羅している。装備・ボス・ギルド依頼・ファミリーマイレージ関連の型（`Equipment`, `Boss`, `OwnedEquipment`, `BossEffect`, `FamilyMileage`, `Bounty`）は、それらの機能自体の廃止に伴い本ファイルには存在しない。承認待ちインベントリを表す型（`PendingInventory`）も、アイテム使用時の親承認フローの廃止（2026-08-29 コミット`9d5edec`、`family-quest/CLAUDE.md`の改訂メモに記載）に伴い本ファイルには存在しない。**（YouTubeごほうび券クールダウン機能で追加）** `GET /api/quest/inventory/{user_id}`のレスポンス全体を表す`InventoryResponse`型が追加され、`interface`/`type`の宣言は8件になった。
+* 根拠: [インターフェース一覧・PendingInventoryの不在] (行番号: 1〜122 / 抜粋: 全文を確認し、`interface`/`type`の宣言は`ID`, `User`, `Quest`, `QuestHistory`, `Reward`, `InventoryItem`, `InventoryResponse`, `QuestResult`の8件のみで`PendingInventory`は存在しないことを確認)
 * 根拠: [全体] (行番号: 3 / 抜粋: "// 共通の型定義")
 
 ## 3. 外部依存関係
@@ -104,8 +105,19 @@
 
 ### `InventoryItem`
 
-* **役割**: インベントリアイテムのデータ構造の定義（`MY_HOME_SYSTEM/models/quest.py`の`InventoryItem`に対応）。**（Issue #390で修正）** `desc`はサーバー側が`Optional[str] = None`のため`string | null`を許容する任意フィールドに、また`used_at?: string | null`を追加した。
-* 根拠: [該当要素] (行番号: 92〜104 / 抜粋: "// インベントリアイテム (models/quest.py の InventoryItem に対応)\n// #390: desc はサーバー側 Optional[str] のため null を許容する。\nexport interface InventoryItem {", "desc?: string | null;", "used_at?: string | null;")
+* **役割**: インベントリアイテムのデータ構造の定義（`MY_HOME_SYSTEM/models/quest.py`の`InventoryItem`に対応）。**（Issue #390で修正）** `desc`はサーバー側が`Optional[str] = None`のため`string | null`を許容する任意フィールドに、また`used_at?: string | null`を追加した。**（YouTubeごほうび券クールダウン機能で追加）** `is_youtube_reward: boolean`フィールドを追加した。このアイテムがYouTube連続使用防止クールダウン(15分)の対象かどうかを表し、判定ロジック自体はバックエンド(`config.YOUTUBE_REWARD_IDS`)側に一本化されているため、フロントエンド(`InventoryList.tsx`)はこのフラグを見るだけでよい。
+* 根拠: [該当要素] (行番号: 99〜114 / 抜粋: "// インベントリアイテム (models/quest.py の InventoryItem に対応)\n// #390: desc はサーバー側 Optional[str] のため null を許容する。\nexport interface InventoryItem {", "desc?: string | null;", "used_at?: string | null;", "is_youtube_reward: boolean;")
+
+
+* **引数/リクエスト**: 該当なし
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: なし
+
+### `InventoryResponse` (YouTubeごほうび券クールダウン機能で追加)
+
+* **役割**: `GET /api/quest/inventory/{user_id}`のレスポンス全体のデータ構造の定義。以前は`InventoryItem[]`という配列を直接返していたが、YouTube系ごほうび券のクールダウン残り秒数(`youtube_cooldown_remaining_seconds`)を併せて返す必要が生じたため、`{items, youtube_cooldown_remaining_seconds}`という辞書形状に変更された。`items`は従来どおり`InventoryItem[]`。
+* 根拠: [該当要素] (行番号: 116〜122 / 抜粋: "// GET /api/quest/inventory/{user_id} のレスポンス。\n// #(YouTubeクールダウン): 単純な配列から、YouTube系ごほうび券の残りクールダウン\n// 秒数を併せて返すオブジェクトに変更した。\nexport interface InventoryResponse {\n    items: InventoryItem[];\n    youtube_cooldown_remaining_seconds: number;\n}")
 
 
 * **引数/リクエスト**: 該当なし

@@ -746,7 +746,7 @@ def prewarm_nas_paths() -> None:
 # 使用するreward_master.reward_id)を1枚使用してから次の1枚を使用できるまでの
 # クールダウン対象IDを指定する(services/quest_service.py InventoryService.use_item)。
 # 17.のTV_UNLOCK_QUEST_IDSと同じ「カンマ区切りの整数」形式。
-# 既定値はquest_data.pyのYouTube報酬(10,11,10:00/30:00/60:00)の現在のreward_id。
+# 既定値はquest_data.pyのYouTube報酬(10:00/30:00/60:00)の現在のreward_id(10,11,12)。
 _youtube_reward_ids_str: str = os.getenv("YOUTUBE_REWARD_IDS", "10,11,12")
 YOUTUBE_REWARD_IDS: List[int] = []
 if _youtube_reward_ids_str:
