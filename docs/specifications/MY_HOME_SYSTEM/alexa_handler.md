@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -45,8 +46,8 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `ask_sdk_core`/`ask_sdk_model`(`CustomSkillBuilder`, `HandlerInput`, `Response`, `RenderDocumentDirective`等)の内部実装 | 外部パッケージ(`ask-sdk-core`/`ask-sdk-model`)のディスパッチ・シリアライズ処理の詳細は本ファイルからは分からない。 | 根拠: [各種インポート] (行番号: 18-24) |
-| `config.ALEXA_SKILL_ID`の実際の値 | `.env`等から供給される値そのものは本ファイルからは分からない。 | 根拠: [変数参照] (行番号: 212 / 抜粋: "if config.ALEXA_SKILL_ID:") |
-| `services.quest_service.game_system.get_all_view_data()`が返す`data`の完全なスキーマ | 本ファイルでは`data.get("pendingQuests", [])`の要素の`user_id`、`data.get("users", [])`の要素の`user_id`/`name`/`avatar`/`level`/`exp`/`nextLevelExp`/`gold`のみを参照しており、それ以外にどのようなキーが含まれるかは本ファイルからは分からない。 | 根拠: [呼び出しおよびキー参照] (行番号: 46, 49-52, 55-68 / 抜粋: "data = game_system.get_all_view_data()") |
+| `config.ALEXA_SKILL_ID`の実際の値 | `.env`等から供給される値そのものは本ファイルからは分からない。 | 根拠: [変数参照] (行番号: 224 / 抜粋: "if config.ALEXA_SKILL_ID:") |
+| `services.quest_service.game_system.get_all_view_data()`が返す`data`の完全なスキーマ | 本ファイルでは`data.get("pendingQuests", [])`の要素の`user_id`、`data.get("users", [])`の要素の`user_id`/`name`/`avatar`/`level`/`exp`/`nextLevelExp`/`gold`のみを参照しており、それ以外にどのようなキーが含まれるかは本ファイルからは分からない。 | 根拠: [呼び出しおよびキー参照] (行番号: 51, 54-57, 60-73 / 抜粋: "data = game_system.get_all_view_data()") |
 | `alexa/apl/main_screen.json`(APLドキュメント)の内容 | `_load_apl_document()`が読み込むJSONファイルの実体であり、`datasources={"payload": {"familyData": family_data}}`(行番号113)がどのように画面へレンダリングされるかの詳細は、このJSON自体を解析しない限り本ファイルからは分からない(なお`.json`ファイルは本リポジトリの仕様書ドリフト対象外のため対応する仕様書は存在しない)。 | 根拠: [ファイルパス定義および読み込み] (行番号: 32, 39 / 抜粋: "_APL_DOCUMENT_PATH = os.path.join(...)", "_apl_document_cache = json.load(f)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -69,6 +70,27 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **エラーハンドリング**: なし
 * 根拠: [変数宣言] (行番号: 32-33 / 抜粋: '_APL_DOCUMENT_PATH = os.path.join(os.path.dirname(__file__), "..", "alexa", "apl", "main_screen.json")\n_apl_document_cache: Optional[Dict[str, Any]] = None')
 
+### `_ALEXA_SPEECH_SAFE_LIMIT`（Issue #452 で追加）
+
+* **役割**: Alexaの読み上げ(`outputSpeech`)の実際の上限文字数(8000字)に対する安全マージンを見たモジュールレベル定数(`7500`)。`LaunchRequestHandler.handle`のAPL非対応デバイス向けフォールバック処理で、家族全員分の詳細読み上げ文の合計がこの文字数を超える場合に、詳細列挙をやめ要約に切り替える判定に使われる。
+* 根拠: [モジュールレベル変数宣言とコメント] (行番号: 35-38 / 抜粋: "# #452: Alexaの読み上げ(outputSpeech)は8000文字が上限。家族人数が増えて\n# 全員分の詳細を連結すると将来的にこれへ抵触しうるため、安全マージンを見て\n# この文字数を超える場合は詳細列挙をやめ要約に切り替える。\n_ALEXA_SPEECH_SAFE_LIMIT = 7500")
+
+
+* **引数/リクエスト**: 該当なし
+* 根拠: 同上
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: 同上
+
+
+* **副作用**: なし(値の代入のみ)
+* 根拠: 同上
+
+
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
 ### `_load_apl_document()`
 
 * **役割**: APLドキュメント(`main_screen.json`)を読み込んで返す。2回目以降の呼び出しでは`_apl_document_cache`にキャッシュ済みの内容をそのまま返し、ファイルの再読み込みを行わない。
@@ -76,7 +98,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `Dict[str, Any]`(パース済みのAPLドキュメント)
 * **副作用**: 初回呼び出し時のみ、ファイルシステムからの読み込み(`open`)とグローバル変数`_apl_document_cache`への書き込み。
 * **エラーハンドリング**: なし(ファイルが存在しない場合や不正なJSONの場合の`try/except`は本関数内に存在しない)。
-* 根拠: [関数定義] (行番号: 36-41 / 抜粋: "def _load_apl_document() -> Dict[str, Any]:\n    global _apl_document_cache\n    if _apl_document_cache is None:\n        with open(_APL_DOCUMENT_PATH, \"r\", encoding=\"utf-8\") as f:\n            _apl_document_cache = json.load(f)\n    return _apl_document_cache")
+* 根拠: [関数定義] (行番号: 41-46 / 抜粋: "def _load_apl_document() -> Dict[str, Any]:\n    global _apl_document_cache\n    if _apl_document_cache is None:\n        with open(_APL_DOCUMENT_PATH, \"r\", encoding=\"utf-8\") as f:\n            _apl_document_cache = json.load(f)\n    return _apl_document_cache")
 
 ### `_build_family_datasource()`
 
@@ -85,7 +107,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `Dict[str, Any]`。キーは`title`(固定文字列"ファミリークエスト")、`users`(各要素が`userId`/`name`/`avatar`/`level`/`exp`/`nextLevelExp`/`expPercent`/`gold`/`pendingCount`を持つリスト)、`pendingTotal`(承認待ちクエストの総件数)。
 * **副作用**: `game_system.get_all_view_data()`の呼び出しに伴う副作用(DBアクセス等、詳細は[quest_service.md](./quest_service.md)を参照)。
 * **エラーハンドリング**: 本関数自体に`try/except`はない(呼び出し元の`LaunchRequestHandler.handle`が例外を捕捉する)。
-* 根拠: [関数定義] (行番号: 44-75 / 抜粋: "def _build_family_datasource() -> Dict[str, Any]:")、[avatarのデフォルト値] (行番号: 62 / 抜粋: '"avatar": u.get("avatar") or "🙂",')、[expPercent計算] (行番号: 56-58 / 抜粋: "next_level_exp = u.get(\"nextLevelExp\") or 0\n    exp = u.get(\"exp\") or 0\n    exp_percent = round(min(exp / next_level_exp, 1.0) * 100) if next_level_exp > 0 else 0")
+* 根拠: [関数定義] (行番号: 49-80 / 抜粋: "def _build_family_datasource() -> Dict[str, Any]:")、[avatarのデフォルト値] (行番号: 67 / 抜粋: '"avatar": u.get("avatar") or "🙂",')、[expPercent計算] (行番号: 61-63 / 抜粋: "next_level_exp = u.get(\"nextLevelExp\") or 0\n    exp = u.get(\"exp\") or 0\n    exp_percent = round(min(exp / next_level_exp, 1.0) * 100) if next_level_exp > 0 else 0")
 
 ### `_supports_apl(handler_input)`
 
@@ -94,16 +116,20 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `bool`(`handler_input.request_envelope.context.system.device.supported_interfaces.alexa_presentation_apl`が`None`でなければ`True`)
 * **副作用**: なし
 * **エラーハンドリング**: なし(`supported_interfaces`や`device`が想定外の構造だった場合の例外処理は存在しない)。
-* 根拠: [関数定義] (行番号: 78-80 / 抜粋: "def _supports_apl(handler_input: HandlerInput) -> bool:\n    supported = handler_input.request_envelope.context.system.device.supported_interfaces\n    return supported.alexa_presentation_apl is not None")
+* 根拠: [関数定義] (行番号: 83-85 / 抜粋: "def _supports_apl(handler_input: HandlerInput) -> bool:\n    supported = handler_input.request_envelope.context.system.device.supported_interfaces\n    return supported.alexa_presentation_apl is not None")
 
 ### `LaunchRequestHandler`
 
 * **役割**: 「アレクサ、ファミクエを開いて」で発火する`LaunchRequest`を処理する中心的なハンドラ。`_build_family_datasource()`でデータを組み立て、承認待ち件数があれば読み上げ文にその件数を付加する。APL対応デバイスでは`RenderDocumentDirective`でメイン画面をレンダリングし、非対応デバイスでは家族ごとのレベル・ゴールドを読み上げ文に追加する(フォールバック)。
+* **（Issue #452 で修正）** APL非対応デバイス向けの読み上げフォールバックでは、以前は家族の人数分の詳細文をそのまま`speech`へ無条件に連結していた。現在は先に`"".join(...)`で全員分の詳細文(`details`)を組み立ててから、`len(speech) + len(details)`が`_ALEXA_SPEECH_SAFE_LIMIT`(7500)を超えるかどうかを判定し、超える場合は個別詳細の列挙をやめて`"{人数}人分のデータがあります。詳細は画面でご確認ください。"`という短い要約文に切り替える。超えない場合は従来どおり`details`をそのまま追記する。
+* 根拠: [フォールバック分岐(#452)] (行番号: 121-131 / 抜粋: "details = \"\".join(\n                f\"{u['name']}さんはレベル{u['level']}、{u['gold']}ゴールドです。\"\n                for u in family_data[\"users\"]\n            )\n            if len(speech) + len(details) > _ALEXA_SPEECH_SAFE_LIMIT:\n                # #452: 上限に近づく場合は個別詳細を諦め、件数のみの要約に切り替える\n                speech += f\"{len(family_data['users'])}人分のデータがあります。詳細は画面でご確認ください。\"\n            else:\n                speech += details")
+
+
 * **引数/リクエスト**: `can_handle(handler_input: HandlerInput) -> bool`、`handle(handler_input: HandlerInput) -> Response`
 * **戻り値/レスポンス**: `can_handle`は`bool`(`is_request_type("LaunchRequest")(handler_input)`の結果)。`handle`は`Response`。
 * **副作用**: `_build_family_datasource()`経由での`game_system.get_all_view_data()`呼び出し、失敗時の`logger.exception`呼び出し、APL対応時は`_load_apl_document()`(初回のみファイル読み込み)。
 * **エラーハンドリング**: `_build_family_datasource()`が例外を送出した場合、`logger.exception`でスタックトレース付きログを出力し、「ファミリークエストのデータ取得に失敗しました。少し時間をおいて試してください。」と読み上げてセッションを終了(`set_should_end_session(True)`)する。それ以外の正常系では`set_should_end_session(False)`でセッションを継続する。
-* 根拠: [クラス定義とcan_handle] (行番号: 83-87 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 89-101 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 103-106 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 108-119 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
+* 根拠: [クラス定義とcan_handle] (行番号: 88-92 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 94-106 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 108-111 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 113-131 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
 
 ### `HelpIntentHandler`
 
@@ -112,7 +138,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`is_intent_name("AMAZON.HelpIntent")(handler_input)`の結果(`bool`)。`handle`は`Response`。
 * **副作用**: なし
 * **エラーハンドリング**: なし(セッションは`set_should_end_session(False)`で継続)。
-* 根拠: [クラス定義] (行番号: 125-138 / 抜粋: 'class HelpIntentHandler(AbstractRequestHandler):\n    """Alexa認定に必須のビルトインインテント。「アレクサ、ヘルプ」で発火する。"""\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.HelpIntent")(handler_input)')
+* 根拠: [クラス定義] (行番号: 137-150 / 抜粋: 'class HelpIntentHandler(AbstractRequestHandler):\n    """Alexa認定に必須のビルトインインテント。「アレクサ、ヘルプ」で発火する。"""\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.HelpIntent")(handler_input)')
 
 ### `CancelOrStopIntentHandler`
 
@@ -121,7 +147,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`AMAZON.CancelIntent`または`AMAZON.StopIntent`のいずれかに一致すれば`True`。`handle`は`Response`。
 * **副作用**: なし
 * **エラーハンドリング**: なし(`set_should_end_session(True)`でセッション終了)。
-* 根拠: [クラス定義] (行番号: 141-156 / 抜粋: 'def can_handle(self, handler_input: HandlerInput) -> bool:\n        return (\n            is_intent_name("AMAZON.CancelIntent")(handler_input)\n            or is_intent_name("AMAZON.StopIntent")(handler_input)\n        )')
+* 根拠: [クラス定義] (行番号: 153-168 / 抜粋: 'def can_handle(self, handler_input: HandlerInput) -> bool:\n        return (\n            is_intent_name("AMAZON.CancelIntent")(handler_input)\n            or is_intent_name("AMAZON.StopIntent")(handler_input)\n        )')
 
 ### `FallbackIntentHandler`
 
@@ -130,7 +156,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`is_intent_name("AMAZON.FallbackIntent")(handler_input)`の結果。`handle`は`Response`。
 * **副作用**: なし
 * **エラーハンドリング**: なし(`set_should_end_session(False)`でセッション継続)。
-* 根拠: [クラス定義] (行番号: 159-172 / 抜粋: 'class FallbackIntentHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.FallbackIntent")(handler_input)')
+* 根拠: [クラス定義] (行番号: 171-184 / 抜粋: 'class FallbackIntentHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.FallbackIntent")(handler_input)')
 
 ### `NavigateHomeIntentHandler`
 
@@ -139,7 +165,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`is_intent_name("AMAZON.NavigateHomeIntent")(handler_input)`の結果。`handle`は`Response`(`speak`呼び出しなし)。
 * **副作用**: なし
 * **エラーハンドリング**: なし(`set_should_end_session(True)`のみ)。
-* 根拠: [クラス定義] (行番号: 175-186 / 抜粋: '"""Echo Show等でユーザーが「ホームに戻って」と言ったときの必須ハンドラ。\n\n    Amazonのマルチモーダル認定要件どおり、発話なしでセッションを終了し、\n    Alexaのホーム画面への遷移をデバイス側に委ねる。\n    """\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.NavigateHomeIntent")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.set_should_end_session(True).response')
+* 根拠: [クラス定義] (行番号: 187-198 / 抜粋: '"""Echo Show等でユーザーが「ホームに戻って」と言ったときの必須ハンドラ。\n\n    Amazonのマルチモーダル認定要件どおり、発話なしでセッションを終了し、\n    Alexaのホーム画面への遷移をデバイス側に委ねる。\n    """\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_intent_name("AMAZON.NavigateHomeIntent")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.set_should_end_session(True).response')
 
 ### `SessionEndedRequestHandler`
 
@@ -148,7 +174,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`is_request_type("SessionEndedRequest")(handler_input)`の結果。`handle`は`handler_input.response_builder.response`。
 * **副作用**: なし
 * **エラーハンドリング**: なし
-* 根拠: [クラス定義] (行番号: 189-194 / 抜粋: "class SessionEndedRequestHandler(AbstractRequestHandler):\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"SessionEndedRequest\")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.response")
+* 根拠: [クラス定義] (行番号: 201-206 / 抜粋: "class SessionEndedRequestHandler(AbstractRequestHandler):\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"SessionEndedRequest\")(handler_input)\n\n    def handle(self, handler_input: HandlerInput) -> Response:\n        return handler_input.response_builder.response")
 
 ### `CatchAllExceptionHandler`
 
@@ -157,7 +183,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は常に`True`。`handle`は`Response`。
 * **副作用**: `logger.error`によるスタックトレース付きエラーログ出力(`exc_info=exception`)。
 * **エラーハンドリング**: 「すみません、うまく処理できませんでした。」と読み上げてセッションを終了(`set_should_end_session(True)`)する。
-* 根拠: [クラス定義] (行番号: 197-208 / 抜粋: "class CatchAllExceptionHandler(AbstractExceptionHandler):\n    def can_handle(self, handler_input: HandlerInput, exception: Exception) -> bool:\n        return True\n\n    def handle(self, handler_input: HandlerInput, exception: Exception) -> Response:\n        logger.error(f\"Alexa skill unhandled error: {exception}\", exc_info=exception)")
+* 根拠: [クラス定義] (行番号: 209-220 / 抜粋: "class CatchAllExceptionHandler(AbstractExceptionHandler):\n    def can_handle(self, handler_input: HandlerInput, exception: Exception) -> bool:\n        return True\n\n    def handle(self, handler_input: HandlerInput, exception: Exception) -> Response:\n        logger.error(f\"Alexa skill unhandled error: {exception}\", exc_info=exception)")
 
 ### `sb` / `skill`(モジュール末尾のビルダー初期化)
 
@@ -166,7 +192,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `skill`(`CustomSkillBuilder.create()`の戻り値)
 * **副作用**: `config.ALEXA_SKILL_ID`が未設定の場合、モジュールインポート時に`logger.warning`が発火する。
 * **エラーハンドリング**: なし(`config.ALEXA_SKILL_ID`が空の場合でも例外は送出せず、警告ログを出力した上でスキルID検証を無効にしたまま処理を継続する)。
-* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 211-215 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 217-223 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 225 / 抜粋: "skill = sb.create()")
+* 根拠: [ビルダー初期化とスキルID検証分岐] (行番号: 223-227 / 抜粋: 'sb = CustomSkillBuilder()\nif config.ALEXA_SKILL_ID:\n    sb.skill_id = config.ALEXA_SKILL_ID\nelse:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')、[ハンドラ登録] (行番号: 229-235 / 抜粋: "sb.add_request_handler(LaunchRequestHandler())\nsb.add_request_handler(HelpIntentHandler())\nsb.add_request_handler(CancelOrStopIntentHandler())\nsb.add_request_handler(FallbackIntentHandler())\nsb.add_request_handler(NavigateHomeIntentHandler())\nsb.add_request_handler(SessionEndedRequestHandler())\nsb.add_exception_handler(CatchAllExceptionHandler())")、[skill構築] (行番号: 237 / 抜粋: "skill = sb.create()")
 
 ## 5. 処理フロー図
 
@@ -188,7 +214,11 @@ flowchart TD
     LoadApl --> AddDirective["RenderDocumentDirectiveを追加<br>(APLメイン画面 + familyData)"]
     AddDirective --> FinalSpeech
 
-    CheckApl -- No --> AppendUserSpeech["家族ごとのレベル・ゴールドをspeechに追記(読み上げフォールバック)"]
+    CheckApl -- No --> BuildDetails["家族ごとのレベル・ゴールド文をdetailsとして連結"]
+    BuildDetails --> CheckSpeechLimit{"len(speech)+len(details) ><br/>_ALEXA_SPEECH_SAFE_LIMIT(7500)?"}
+    CheckSpeechLimit -- Yes --> AppendSummary["speechに'{人数}人分のデータがあります。<br/>詳細は画面でご確認ください。'を追記(#452要約フォールバック)"]
+    CheckSpeechLimit -- No --> AppendUserSpeech["speechにdetails(家族ごとの詳細)を追記"]
+    AppendSummary --> FinalSpeech
     AppendUserSpeech --> FinalSpeech["speak(speech)<br>set_should_end_session(False)"]
     FinalSpeech --> EndOk([End: 正常応答])
 ```
@@ -274,16 +304,16 @@ graph TD
 ## 8. 保守上の注意点
 
 * `_load_apl_document()`のキャッシュ(`_apl_document_cache`)はプロセスのグローバル変数であり、プロセスを再起動しない限り`main_screen.json`の変更は反映されない。
-* 根拠: (行番号: 33, 36-41 / 抜粋: "_apl_document_cache: Optional[Dict[str, Any]] = None")
+* 根拠: (行番号: 33, 41-46 / 抜粋: "_apl_document_cache: Optional[Dict[str, Any]] = None")
 
 * `_build_family_datasource()`・`_load_apl_document()`のいずれも独自の`try/except`を持たず、例外は呼び出し元の`LaunchRequestHandler.handle`(データ取得失敗時のみ)、または`CatchAllExceptionHandler`(その他の未処理例外全般)に委ねられている。
-* 根拠: (行番号: 36-75, 92-101, 197-208)
+* 根拠: (行番号: 41-80, 97-106, 209-220)
 
 * `config.ALEXA_SKILL_ID`が未設定の場合、スキルID検証(`sb.skill_id`)が無効なまま動作を継続する設計であり、警告ログのみでモジュールのインポート自体は失敗しない。
-* 根拠: (行番号: 212-215 / 抜粋: 'else:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')
+* 根拠: (行番号: 224-227 / 抜粋: 'else:\n    logger.warning("⚠️ ALEXA_SKILL_ID is not set — skill ID verification is DISABLED. Set the env var to enable it.")')
 
-* `LaunchRequestHandler.handle`は、APL非対応デバイス向けの読み上げフォールバック時、家族の人数分だけ`speech`にレベル・ゴールドの文言を連結していく(行番号118-119)。家族の人数が多い場合、読み上げ文が非常に長くなる可能性があるが、文字数の上限チェックは本ファイル内には存在しない。
-* 根拠: (行番号: 116-119 / 抜粋: 'for u in family_data["users"]:\n                speech += f"{u[\'name\']}さんはレベル{u[\'level\']}、{u[\'gold\']}ゴールドです。"')
+* **[修正済み] 読み上げ文字数の上限チェック（Issue #452）**: `LaunchRequestHandler.handle`は、APL非対応デバイス向けの読み上げフォールバック時、以前は家族の人数分だけ`speech`にレベル・ゴールドの文言を無条件に連結しており、家族の人数が多い場合に読み上げ文がAlexaの`outputSpeech`実上限(8000字)を超えて破綻する恐れがあった。現在は`_ALEXA_SPEECH_SAFE_LIMIT`(7500)を安全マージンとして、連結後の合計文字数がこれを超える場合は個別詳細の列挙をやめ「{人数}人分のデータがあります。詳細は画面でご確認ください。」という短い要約文に切り替えるようになった。なお、この`_ALEXA_SPEECH_SAFE_LIMIT`はハードコードされた定数であり、家族の人数や1人あたりの文言長（名前の長さ等）によっては、要約への切り替え自体は起きるとしても、その閾値7500字が実際のAlexa APIの上限8000字に対して常に十分な安全マージンかどうかは、名前欄の文字数制限等の外部要因に依存する。
+* 根拠: [フォールバック分岐(#452)] (行番号: 121-131 / 抜粋: 'details = "".join(\n                f"{u[\'name\']}さんはレベル{u[\'level\']}、{u[\'gold\']}ゴールドです。"\n                for u in family_data["users"]\n            )\n            if len(speech) + len(details) > _ALEXA_SPEECH_SAFE_LIMIT:\n                speech += f"{len(family_data[\'users\'])}人分のデータがあります。詳細は画面でご確認ください。"\n            else:\n                speech += details')、[定数定義] (行番号: 35-38)
 
 ## 9. 不明事項一覧
 

@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `dbbfc81` |
 
 ## 関連ドキュメント
 
@@ -13,12 +14,14 @@
 - [sensor_service.md](./sensor_service.md) — `core.utils.get_now_iso`の直接の利用元
 - `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `common.get_now_iso`経由での利用元
 - [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
+- [quest_service.md](./quest_service.md) — Issue #435で、キー単位のロック管理を`threading.Lock`辞書の場当たり実装から本ファイルの`RefCountedLockRegistry`利用へ置き換えた利用元
 
 ## 2. ファイルの概要
 
 * システム全体で共通して使用されるユーティリティ関数群を提供する。
 * "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。
 * ネットワーク障害やストレージの復帰遅延など、一時的な障害に対する指数関数的バックオフを用いたリトライ機能を提供する。
+* キー単位で`threading.Lock`を参照カウント付きで管理する`RefCountedLockRegistry`クラス（Issue #435で追加）を提供する。
 
 ## 3. 外部依存関係
 
@@ -26,14 +29,16 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `datetime` | 標準ライブラリ | 現在日時の取得、フォーマット変換 | 根拠: [import文] (行番号: 1 / 抜粋: "import datetime") |
-| `pytz` | 外部ライブラリ | タイムゾーンの指定("Asia/Tokyo") | 根拠: [import文] (行番号: 2 / 抜粋: "import pytz") |
-| `time` | 標準ライブラリ | リトライ時の待機(`time.sleep`) | 根拠: [import文] (行番号: 3 / 抜粋: "import time") |
-| `functools` | 標準ライブラリ | デコレータの作成(`functools.wraps`) | 根拠: [import文] (行番号: 4 / 抜粋: "import functools") |
-| `logging` | 標準ライブラリ | ロガーの取得とログ出力 | 根拠: [import文] (行番号: 5 / 抜粋: "import logging") |
-| `os` | 標準ライブラリ | アクセス権限のチェック(`os.access`) | 根拠: [import文] (行番号: 6 / 抜粋: "import os") |
-| `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作 | 根拠: [import文] (行番号: 7 / 抜粋: "from pathlib import Path") |
-| `typing.Callable`, `Any`, `Union` | 標準ライブラリ | 型ヒントの定義 | 根拠: [import文] (行番号: 8 / 抜粋: "from typing import Callable, A...") |
+| `contextlib`（Issue #435で追加） | 標準ライブラリ | `RefCountedLockRegistry.acquire`をコンテキストマネージャとして実装する`@contextlib.contextmanager`デコレータの提供 | 根拠: [import文] (行番号: 1 / 抜粋: "import contextlib") |
+| `datetime` | 標準ライブラリ | 現在日時の取得、フォーマット変換 | 根拠: [import文] (行番号: 2 / 抜粋: "import datetime") |
+| `pytz` | 外部ライブラリ | タイムゾーンの指定("Asia/Tokyo") | 根拠: [import文] (行番号: 3 / 抜粋: "import pytz") |
+| `threading`（Issue #435で追加） | 標準ライブラリ | `RefCountedLockRegistry`が管理する`threading.Lock`本体、および内部エントリの参照カウント操作を保護するガード用ロックの生成 | 根拠: [import文] (行番号: 4 / 抜粋: "import threading") |
+| `time` | 標準ライブラリ | リトライ時の待機(`time.sleep`) | 根拠: [import文] (行番号: 5 / 抜粋: "import time") |
+| `functools` | 標準ライブラリ | デコレータの作成(`functools.wraps`) | 根拠: [import文] (行番号: 6 / 抜粋: "import functools") |
+| `logging` | 標準ライブラリ | ロガーの取得とログ出力 | 根拠: [import文] (行番号: 7 / 抜粋: "import logging") |
+| `os` | 標準ライブラリ | アクセス権限のチェック(`os.access`) | 根拠: [import文] (行番号: 8 / 抜粋: "import os") |
+| `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作 | 根拠: [import文] (行番号: 9 / 抜粋: "from pathlib import Path") |
+| `typing.Callable`, `Any`, `Dict`（Issue #435で追加）, `Union` 他 | 標準ライブラリ | 型ヒントの定義（`Dict`は`RefCountedLockRegistry._entries`の型ヒントに使用） | 根拠: [import文] (行番号: 10 / 抜粋: "from typing import Callable, Any, Dict, Optional, Tuple, Type, Union") |
 
 ### ブラックボックスとなる外部要素
 
@@ -109,6 +114,29 @@
 
 * **エラーハンドリング**: なし
 * 根拠: [get_display_date] (行番号: 18〜19 / 抜粋: "return datetime.datetime.now(p...")
+
+
+
+### `RefCountedLockRegistry`（Issue #435 で追加）
+
+* **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
+* 根拠: [クラス定義とdocstring] (行番号: 24〜39 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
+
+
+* **引数/リクエスト**: `__init__`は引数なし。内部に`_entries: Dict[Any, _Entry]`（キーごとの`lock`と`ref_count`を持つ内部クラス`_Entry`のインスタンス）と、`_entries`辞書自体への操作を保護する`_guard: threading.Lock`を保持する。
+* 根拠: [__init__] (行番号: 48〜50 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
+
+
+* **戻り値/レスポンス**: 該当なし（クラス自体はコンストラクタで値を返さない。メソッドの戻り値は各メソッドの項を参照）
+* 根拠: [__init__] (行番号: 48〜50)
+
+
+* **副作用**: `acquire(key)`はキーに対応する`_Entry`が無ければ新規作成して辞書へ登録し、`ref_count`をインクリメントしてから`entry.lock`を実際に獲得(`with entry.lock:`)して`yield`する。ブロックを抜けると`finally`で`ref_count`をデクリメントし、`0`になり、かつ辞書中のエントリが自分自身のままである場合(`self._entries.get(key) is entry`)にのみそのエントリを`del`で削除する。エントリの追加・カウント操作・削除の判定はすべて`self._guard`で保護される。
+* 根拠: [acquireコンテキストマネージャ] (行番号: 52〜67 / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
+
+
+* **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。
+* 根拠: [keys, __contains__] (行番号: 70〜77 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
 
 
 
@@ -198,6 +226,27 @@
 
 ```mermaid
 flowchart TD
+    %% RefCountedLockRegistry.acquire のフロー (Issue #435)
+    subgraph RefCountedLockRegistry_acquire["RefCountedLockRegistry.acquire(key)"]
+        RA[Start: acquire呼び出し] --> RB["_guard取得"]
+        RB --> RC{"keyに対応するEntryが存在するか"}
+        RC -- No --> RD[新規Entry作成し辞書へ登録]
+        RC -- Yes --> RE[既存Entryを使用]
+        RD --> RF[ref_count += 1]
+        RE --> RF
+        RF --> RG["_guard解放"]
+        RG --> RH["entry.lockを実際に取得 (with文)"]
+        RH --> RI[yield: 呼び出し元の処理を実行]
+        RI --> RJ["entry.lock解放 (with文終了)"]
+        RJ --> RK["_guard取得 (finally)"]
+        RK --> RL[ref_count -= 1]
+        RL --> RM{"ref_count == 0 かつ<br/>辞書中のEntryが自分自身のままか"}
+        RM -- Yes --> RN[辞書からEntryをdel]
+        RM -- No --> RO["_guard解放"]
+        RN --> RO
+        RO --> RP[End]
+    end
+
     %% with_exponential_backoff のフロー
     subgraph with_exponential_backoff_wrapper["with_exponential_backoff (wrapper)"]
         A[Start: 実行開始] --> B[attempt = 0]
@@ -245,19 +294,25 @@ graph TD
         get_now_iso["get_now_iso()"]
         get_today_date_str["get_today_date_str()"]
         get_display_date["get_display_date()"]
+        RefCountedLockRegistry["RefCountedLockRegistry (Issue #435)"]
         with_exponential_backoff["with_exponential_backoff()"]
         wait_for_storage_warmup["wait_for_storage_warmup()"]
     end
 
     subgraph 外部モジュール
+        contextlib["contextlib"]
         datetime["datetime"]
         pytz["pytz"]
+        threading["threading"]
         time["time"]
         functools["functools"]
         logging["logging"]
         os["os"]
         pathlib["pathlib.Path"]
     end
+
+    RefCountedLockRegistry --> contextlib
+    RefCountedLockRegistry --> threading
 
     get_now_iso --> datetime
     get_now_iso --> pytz
@@ -286,6 +341,7 @@ graph TD
 | 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
 | 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 56〜57 / 抜粋: "def wait_for_storage_warmup(ta...") |
+| 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
 
 ## 8. 保守上の注意点
 
@@ -293,6 +349,7 @@ graph TD
 * `with_exponential_backoff`、`wait_for_storage_warmup`、`retry_with_backoff` はいずれも `time.sleep()` を使用した同期的処理である。非同期フレームワーク（`asyncio`, `FastAPI`の非同期エンドポイントなど）で実行した場合、イベントループ全体をブロックする可能性がある。
 * `wait_for_storage_warmup` では、`os.access` や `Path(target_path)` 自体が例外（権限エラー以外のOSレベルのエラーなど）を発生させた場合のハンドリングが実装されていない。
 * **（Issue #292で新規追加）`retry_with_backoff`**: `with_exponential_backoff`(無限リトライの`while True`デコレータ)や`wait_for_storage_warmup`(パス存在確認限定・呼び出し元なし)とは異なり、任意のcallableを有限回数リトライしつつ最後の例外を再送出する汎用ヘルパーとして追加された。既に`config.py::verify_and_initialize_storage`と`monitors/nas_monitor.py::check_write_permission`から実際に呼び出されている(下記相互参照参照)。
+* **（Issue #435で新規追加）`RefCountedLockRegistry`**: `services/quest_service.py`が保持していた「キーの組み合わせが増えるたびに`threading.Lock`エントリが辞書に無制限に蓄積し、二度と削除されない」3箇所の場当たり実装を置き換えるために追加された。`services/camera_service.py`の`_RefCountedLock`/`_vod_generation_lock`と同じ「参照カウント方式」を採用しており、クラスdocstringには「`lock.locked()`が`False`なら削除する単純な方式では、辞書からロックを取り出した直後から実際に獲得するまでの隙間で別スレッドが剪定してしまい、同一キーに対し2つの別々の`Lock`オブジェクトが生成されて同時に『取得成功』しうる(排他制御が本来防ぐべき事態の再発)」という設計上の注意が明記されている。`acquire(key)`はコンテキストマネージャとして提供され、`with`ブロックを抜けた後に参照カウントが0かつ辞書中のエントリが自分自身のままである場合にのみエントリを削除するため、他スレッドが同じキーで新しいエントリを既に作成済みの場合は誤って削除しない設計になっている。
 
 ## 9. 不明事項一覧
 
