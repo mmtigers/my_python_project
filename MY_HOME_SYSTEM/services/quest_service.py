@@ -294,9 +294,16 @@ class QuestService:
     def __init__(self):
         self.user_service = UserService()
 
-    def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:
-        # 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる
-        
+    def _compute_boost_from_last_completed(self, quest: Any, last_completed_at: Optional[str]) -> Dict[str, int]:
+        """
+        品質(#409 N+1対策): calculate_quest_boostのDBアクセスを伴わない純粋な計算部分。
+        「対象クエストの直近の完了日時(last_completed_at、無ければNone)」さえ分かれば
+        ボーナスを算出できるため、DBクエリ部分を呼び出し側へ切り出した。
+        get_all_view_dataのようにクエスト×ユーザーの組合せ数だけ呼ぶ場面では、
+        呼び出し側で全組合せ分の直近完了日時を1クエリでまとめて取得し、この関数へ
+        渡すことでN+1クエリを避けられる。単発呼び出し(process_complete_quest)は
+        従来どおりcalculate_quest_boost経由でDBへ1回だけ問い合わせる。
+        """
         # 1. クエストタイプのチェック
         # sqlite3.Row は辞書のように [] でアクセス可能です
         if quest['quest_type'] != 'daily':
@@ -318,16 +325,6 @@ class QuestService:
         if (quest['reset_period'] or 'daily') != 'daily':
             return {"gold": 0, "exp": 0}
 
-        # --- 以下、既存ロジック ---
-        # Q-L1(#409): 以前は status='approved' のみを見ていたため、承認待ち(pending)の日を
-        # 「サボった日」と誤判定して連続達成ボーナスが付いていた。process_complete_quest の
-        # スパム/周期チェックと同じく rejected 以外を「実施済み」として扱う。
-        last_hist = cur.execute("""
-            SELECT completed_at FROM quest_history 
-            WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
-            ORDER BY completed_at DESC LIMIT 1
-        """, (user_id, quest['quest_id'])).fetchone()
-
         # M-1-3系: is_within_reset_periodと同様、経過日数の判定はJST基準で
         # 行う必要がある。以前はdatetime.datetime.now()(OSローカル時刻)を
         # 使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の
@@ -335,9 +332,9 @@ class QuestService:
         now_jst = datetime.datetime.now(JST)
         last_date = None
 
-        if last_hist:
+        if last_completed_at:
             try:
-                dt = datetime.datetime.fromisoformat(last_hist['completed_at'])
+                dt = datetime.datetime.fromisoformat(last_completed_at)
                 last_date = dt.date()
             except Exception:
                 pass
@@ -350,13 +347,34 @@ class QuestService:
 
         if days_diff <= 1:
             return {"gold": 0, "exp": 0}
-        
+
         missed_days = days_diff - 1
         bonus_ratio = min(missed_days * 0.10, 1.0)
         bonus_gold = int(quest['gold_gain'] * bonus_ratio)
         bonus_exp = int(quest['exp_gain'] * bonus_ratio)
 
         return {"gold": bonus_gold, "exp": bonus_exp}
+
+    def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:
+        # 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる
+
+        # ボーナス対象外と分かっているクエスト(daily以外・曜日限定・reset_period≠daily)は
+        # DBに問い合わせるまでもないため、_compute_boost_from_last_completed側の
+        # 早期returnガードに先に判定させ、無駄なSELECTを避ける。
+        if quest['quest_type'] != 'daily' or quest['day_of_week'] or (quest['reset_period'] or 'daily') != 'daily':
+            return {"gold": 0, "exp": 0}
+
+        # Q-L1(#409): 以前は status='approved' のみを見ていたため、承認待ち(pending)の日を
+        # 「サボった日」と誤判定して連続達成ボーナスが付いていた。process_complete_quest の
+        # スパム/周期チェックと同じく rejected 以外を「実施済み」として扱う。
+        last_hist = cur.execute("""
+            SELECT completed_at FROM quest_history
+            WHERE user_id = ? AND quest_id = ? AND status != 'rejected'
+            ORDER BY completed_at DESC LIMIT 1
+        """, (user_id, quest['quest_id'])).fetchone()
+
+        last_completed_at = last_hist['completed_at'] if last_hist else None
+        return self._compute_boost_from_last_completed(quest, last_completed_at)
 
     def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:
         # 同一ユーザー・同一クエストへの同時多重リクエストによる二重加算を防ぐため、
@@ -1142,12 +1160,23 @@ class GameSystem:
             # 所持者がいる(所有中/申請中/使用済問わずuser_inventoryに行が残る)報酬を削除すると
             # IntegrityErrorでsync_master_data全体が失敗する。参照が残っている報酬は削除をスキップし、
             # 警告ログのみ出す(マスタからは消えているが所持データは保持される)。
-            for row in stale_rewards:
-                stale_reward_id = row['reward_id']
-                still_referenced = cur.execute(
-                    "SELECT 1 FROM user_inventory WHERE reward_id = ? LIMIT 1", (stale_reward_id,)
-                ).fetchone()
-                if still_referenced:
+            # 品質(#409 N+1対策): 以前はstale_rewards1件ごとに個別SELECTを発行していた。
+            # 対象のreward_id群についてuser_inventory側の参照有無を1クエリでまとめて
+            # 取得し、以降はPython側の集合演算で判定する。
+            stale_reward_ids = [row['reward_id'] for row in stale_rewards]
+            if stale_reward_ids:
+                ph_stale = ','.join(['?'] * len(stale_reward_ids))
+                referenced_reward_ids = {
+                    row['reward_id'] for row in cur.execute(
+                        f"SELECT DISTINCT reward_id FROM user_inventory WHERE reward_id IN ({ph_stale})",
+                        stale_reward_ids,
+                    )
+                }
+            else:
+                referenced_reward_ids = set()
+
+            for stale_reward_id in stale_reward_ids:
+                if stale_reward_id in referenced_reward_ids:
                     logger.warning(
                         f"⚠️ reward_id={stale_reward_id} はマスタから削除されましたが、"
                         "user_inventoryに参照が残っているため削除をスキップします。"
@@ -1204,6 +1233,24 @@ class GameSystem:
             # 履歴を代表として使う。
             known_user_ids = {u['user_id'] for u in users}
 
+            # 品質(#409 N+1対策): 以前はここでクエストごとにcalculate_quest_boostを呼び、
+            # クエストごとにquest_historyへの個別SELECTを発行していた(GET /data 1回で
+            # クエスト数分のクエリが発生)。対象となりうる全(user_id, quest_id)組合せの
+            # 「直近の非rejected完了日時」を1クエリでまとめて取得し、辞書引きに
+            # 置き換える。completed_atはcore.utils.get_now_iso()(常にJSTのisoformat、
+            # 固定長・ゼロ埋め)で記録されるため、文字列としてのMAX()が時系列上の
+            # 最新値と一致する(calculate_quest_boost個別呼び出し版のORDER BY DESC
+            # LIMIT 1と同じ前提)。
+            last_completed_map: Dict[tuple, str] = {
+                (row['user_id'], row['quest_id']): row['last_completed_at']
+                for row in cur.execute("""
+                    SELECT user_id, quest_id, MAX(completed_at) AS last_completed_at
+                    FROM quest_history
+                    WHERE status != 'rejected'
+                    GROUP BY user_id, quest_id
+                """)
+            }
+
             for q in filtered_quests:
                 # Q-L2(#409): target_user='all' の daily クエストも、完了時には閲覧ユーザーの
                 # 履歴に基づくボーナスが付くのに、表示側は常に 0 固定だった。'all' の場合は
@@ -1213,7 +1260,8 @@ class GameSystem:
                 else:
                     boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id
                 if boost_user_id:
-                    boost = self.quest_service.calculate_quest_boost(cur, boost_user_id, q)
+                    last_completed_at = last_completed_map.get((boost_user_id, q['quest_id']))
+                    boost = self.quest_service._compute_boost_from_last_completed(q, last_completed_at)
                     q['bonus_gold'] = boost['gold']
                     q['bonus_exp'] = boost['exp']
                 else:
