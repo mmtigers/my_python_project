@@ -20,12 +20,18 @@ ENV_EXAMPLE_PATH = BASE_DIR / ".env.example"
 
 # os.getenv("KEY") / os.getenv('KEY', default) の第1引数を拾う
 _GETENV_RE = re.compile(r"""os\.getenv\(\s*["']([A-Z][A-Z0-9_]*)["']""")
+# #411 S-L6: config._get_int_env("KEY", default) 経由で読む整数系環境変数も拾う
+# (直書きの int(os.getenv(...)) だとモジュールimport時にValueErrorでconfig全体が
+# 落ちるため、ヘルパー経由に置き換えた結果 os.getenv(...) の直接呼び出しが
+# ヘルパー内部の1箇所に集約され、上のGETENV_REだけでは検出できなくなったため)
+_INT_ENV_RE = re.compile(r"""_get_int_env\(\s*["']([A-Z][A-Z0-9_]*)["']""")
 # .env.example の非コメント行 "KEY=..." を拾う
 _ENV_LINE_RE = re.compile(r"^([A-Z][A-Z0-9_]*)\s*=", re.MULTILINE)
 
 
 def _config_env_keys() -> set[str]:
-    return set(_GETENV_RE.findall(CONFIG_PATH.read_text(encoding="utf-8")))
+    text = CONFIG_PATH.read_text(encoding="utf-8")
+    return set(_GETENV_RE.findall(text)) | set(_INT_ENV_RE.findall(text))
 
 
 def _example_env_keys() -> set[str]:

@@ -151,6 +151,27 @@
 * `WEBHOOK_BASE_URL: Optional[str]`（行番号: 210）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
 * `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 522）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
 
+### `_get_int_env`
+
+* **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`・`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT` の8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102〜117)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 362)
+
+
+* **引数/リクエスト**: `name: str` (環境変数名), `default: int` (未設定/パース失敗時のデフォルト値)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102)
+
+
+* **戻り値/レスポンス**: `int`
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102)
+
+
+* **副作用**: パース失敗時に `logger.warning` を出力
+* 根拠: `logger.warning(f"⚠️ 環境変数 {name}='{raw}' は整数として解釈できません。デフォルト値 {default} を使用します。")` (行番号: 116)
+
+
+* **エラーハンドリング**: `int(raw)` の `ValueError` を捕捉してデフォルト値にフォールバック
+* 根拠: `except ValueError:` (行番号: 115)
+
 ### `ensure_safe_path_with_backoff`
 
 * **役割**: `verify_and_initialize_storage`を呼び出してパスを検証し、失敗した場合はローカルのフォールバックディレクトリを作成して返す。
