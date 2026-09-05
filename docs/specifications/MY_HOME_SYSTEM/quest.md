@@ -41,11 +41,13 @@
 ### `MasterUser`
 
 * **役割**: Domain Modelsとしてユーザーの基本情報を定義する。
-* 根拠: クラス名と継承元 (行番号: 9 / 抜粋: "class MasterUser(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 16 / 抜粋: "class MasterUser(BaseModel):")
+* **（Issue #454 で追加）** `level`/`exp`/`gold` に `Field(ge=...)` の境界チェックを追加した。以前は `MasterQuest`/`MasterReward` 側の gold 系フィールドのみ `ge=0` が付いており、`MasterUser.gold` には無かった非対称を解消するもの。
+* 根拠: `level: int = Field(default=1, ge=1)`、`exp: int = Field(default=0, ge=0)`、`gold: int = Field(default=50, ge=0)` (models/quest.py 行番号: 20〜24)
 
 
-* **引数/リクエスト (フィールド)**: `user_id` (str), `name` (str), `job_class` (str), `level` (int, 初期値: 1), `exp` (int, 初期値: 0), `gold` (int, 初期値: 50), `avatar` (str, 初期値: '🙂'), `role` (Optional[str], 初期値: None)
-* 根拠: フィールド定義 (行番号: 10〜17 / 抜粋: "level: int = 1" など)
+* **引数/リクエスト (フィールド)**: `user_id` (str), `name` (str), `job_class` (str), `level` (int, 初期値: 1, `ge=1`), `exp` (int, 初期値: 0, `ge=0`), `gold` (int, 初期値: 50, `ge=0`), `avatar` (str, 初期値: '🙂'), `role` (Optional[str], 初期値: None)
+* 根拠: フィールド定義 (行番号: 17〜25 / 抜粋: "level: int = Field(default=1, ge=1)" など)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -56,8 +58,8 @@
 * 根拠: 処理ロジックを含まないため (行番号: 9〜17 / 抜粋: "class MasterUser(BaseModel):")
 
 
-* **エラーハンドリング**: なし（明示的なバリデーション処理なし）
-* 根拠: クラス内に例外処理の記述がないため (行番号: 9〜17 / 抜粋: "class MasterUser(BaseModel):")
+* **エラーハンドリング**: 明示的な例外処理の記述はないが、`level`/`exp`/`gold` は Pydantic の `Field(ge=...)` により、インスタンス化時に下限を下回る値(0以下のlevel、負のexp/gold)が渡されると `pydantic.ValidationError` を送出する。
+* 根拠: フィールド定義 (行番号: 20, 21, 24 / 抜粋: "level: int = Field(default=1, ge=1)", "exp: int = Field(default=0, ge=0)", "gold: int = Field(default=50, ge=0)")
 
 
 
