@@ -9,15 +9,13 @@
 
 ## 関連ドキュメント
 
-* [line_handler.md](./line_handler.md) - 呼び出し元(ステータス確認・クエスト・承認却下・体調記録コマンドの委譲先として本ファイルを呼び出す)
-* [quest_service.md](./quest_service.md) - 委譲先(`game_system`, `quest_service`によるクエスト・ユーザー状態の処理実体)
-* [common.md](./common.md) - `get_db_cursor`等を再エクスポートするFacade
+* [line_handler.md](./line_handler.md) - 呼び出し元(体調記録コマンドの委譲先・AI応答の文字数分割ヘルパーの提供元として本ファイルを呼び出す)
 * [database.md](./database.md) - `save_log_async`の実体を提供
 * [config.md](./config.md) - `FAMILY_SETTINGS`等の設定値を提供
 
 ## 2. ファイルの概要
 
-このファイルは、システムにおいてLINEメッセージからの情報を記録および取得し、LINE Messaging APIのメッセージモデル（`TextMessage`など）を生成して返す責務を持つ。日常の健康・食事・行動ログの記録と、ゲーム化されたクエストのステータス照会、受注可能クエストの表示、およびクエストの承認・却下処理を担当している。
+このファイルは、システムにおいてLINEメッセージからの情報を記録し、LINE Messaging APIのメッセージモデル（`TextMessage`）を生成して返す責務を持つ。日常の健康・食事ログの記録と、LINEの5000字メッセージ制限に対応する長文分割ヘルパーを担当している。**（#358で撤去）** 以前このファイルにあった、ゲーム化されたクエストのステータス照会・受注可能クエストの表示・クエストの承認/却下処理(`get_user_status_message`/`get_active_quests_message`/`process_approval_command`)は、LINE の `event.source.user_id`（`U`+32hex）を Family Quest の `quest_users.user_id`（`dad`/`mom`/`son`/`daughter`）へマッピングする仕組みがリポジトリ内に存在せず、本番では常に失敗メッセージしか返さないデッドコードだったため、オーナー判断（LINE経由のクエスト機能は廃止）により削除された。クエストの確認・完了報告・承認は family-quest フロントエンドで行う。
 
 ## 3. 外部依存関係
 
@@ -27,23 +25,22 @@
 | --- | --- | --- | --- |
 | `asyncio` | 標準ライブラリ | 非同期処理の実行 | `import asyncio` (行番号: 2 / 抜粋: "import asyncio") |
 | `typing` | 標準ライブラリ | 型ヒントの提供。`Union`（元々使用）に加え`List`もIssue #377で`split_text_into_line_messages`の型ヒントに使用され始めた | `from typing import List, Union` (行番号: 3 / 抜粋: "from typing import List, Union") |
-| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`と`FlexMessage`のみ | `from linebot.v3.messaging...` (行番号: 6-9 / 抜粋: "from linebot.v3.messaging imp...") |
-| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 11 / 抜粋: "import config") |
-| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 12 / 抜粋: "from core.logger import setup...") |
-| `core.utils` | 外部モジュール | 時刻や日付文字列の取得 | `from core.utils import...` (行番号: 13 / 抜粋: "from core.utils import get_no...") |
-| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 14 / 抜粋: "from core.database import sav...") |
-| `services.quest_service` | 外部モジュール | ゲームやクエスト情報の処理 | `from services.quest_service...` (行番号: 17 / 抜粋: "from services.quest_service i...") |
+| `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`のみ | `from linebot.v3.messaging import TextMessage` (行番号: 6 / 抜粋: "from linebot.v3.messaging import TextMessage") |
+| `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 8 / 抜粋: "import config") |
+| `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 9 / 抜粋: "from core.logger import setup...") |
+| `core.utils` | 外部モジュール | 時刻や日付文字列の取得 | `from core.utils import...` (行番号: 10 / 抜粋: "from core.utils import get_no...") |
+| `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 11 / 抜粋: "from core.database import sav...") |
 
 **（Issue #410で削除）** 以前このテーブルにあった`sqlite3`（標準ライブラリ）・`datetime`（標準ライブラリ）・`common`（外部モジュール）・`linebot.v3.messaging`の`QuickReply`/`QuickReplyItem`/`MessageAction`（未使用インポートとして記載）・`typing`の`Tuple`/`Optional`/`Dict`/`Any`（未使用インポートとして記載、ただし実際には元々インポートされていなかった旧版の誤記）は、`log_daily_action`/`log_ohayo`/`get_daily_health_summary_text`の削除に伴い（`sqlite3`/`datetime`/`common`は）実際に未使用となったため削除、または（`QuickReply`系・`typing`系は）元々インポートされていなかった旧版の記載誤りだった。
+
+**（#358で削除）** 以前このテーブルにあった`linebot.v3.messaging`の`FlexMessage`（型ヒントのみで使用）・`services.quest_service`の`game_system`/`quest_service`/`ROLE_CHILD`は、それらを参照していた`get_user_status_message`/`get_active_quests_message`/`process_approval_command`の削除に伴い未使用となったため削除した。
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 22 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
-| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 41 / 抜粋: "save_ok = await save_log_async(") |
-| `game_system.get_all_view_data` | 返却されるデータの正確な辞書構造（キーの存在保証など）が不明。 | `data = await asyncio.to_threa...` (行番号: 109 / 抜粋: "data = await asyncio.to_threa...") |
-| `quest_service.process_approve_quest` / `process_reject_quest` | 承認・却下に伴う具体的なステータス変更の内部ロジックや返却値の詳細構造が不明。 | `res = await asyncio.to_thread...` (行番号: 183 / 抜粋: "res = await asyncio.to_thread...") |
+| `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 16 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
+| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 64 / 抜粋: "save_ok = await save_log_async(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -105,26 +102,10 @@
 
 
 
-### `get_user_status_message`
+### [削除済み] `get_user_status_message` / `get_active_quests_message` / `process_approval_command`（Issue #358で削除）
 
-* **役割**: 外部のゲームシステムから全ユーザーデータを取得し、該当するユーザーのステータス情報を含む`TextMessage`を返す。
-* 根拠: `async def get_user_status_me...` (行番号: 107-130 / 抜粋: "def get_user_status_message(u")
-
-
-* **引数/リクエスト**: `user_id` (str)
-* 根拠: 関数の引数定義 (行番号: 107 / 抜粋: "user_id: str")
-
-
-* **戻り値/レスポンス**: `Union[TextMessage, FlexMessage]`
-* 根拠: 戻り値の型ヒント (行番号: 107 / 抜粋: "-> Union[TextMessage, FlexMes")
-
-
-* **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 109 / 抜粋: "await asyncio.to_thread(game_")
-
-
-* **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
-* 根拠: `except Exception as e:` (行番号: 128 / 抜粋: "except Exception as e:")
+* 3関数とも「LINE経由のFamily Questコマンド」の実処理を担っていたが、いずれもLINEの`event.source.user_id`（`U`+32hex）をFamily Questの`quest_users.user_id`（`dad`/`mom`/`son`/`daughter`）へマッピングする仕組みがリポジトリ内に存在せず、本番では`get_user_status_message`は常に「ユーザーデータが見つかりません」、`process_approval_command`は常に承認権限エラー、`get_active_quests_message`は`target='all'`以外のクエストが全て非表示という、実質的に機能しないデッドコードだった。加えて`process_approval_command`が受け取る想定だった`approve:`/`reject:` postbackを生成する箇所がリポジトリ内に一切存在しなかった（`handlers/line_handler.py`側もデッドコード）。オーナー判断（Issue #358: LINE経由のクエスト機能は廃止）により3関数とも削除した。クエストの確認・完了報告・承認は family-quest フロントエンド（`GET/POST /api/quest/*`）で行う。
+* 根拠: 削除前のコミット履歴(本仕様書の旧版)、および現行`services/line_service.py`に3関数が存在しないこと
 
 
 
@@ -154,90 +135,9 @@
 * **エラーハンドリング**: なし
 * 根拠: 関数本体 (行番号: 39-61)
 
-### `get_active_quests_message`
-
-* **役割**: 外部のゲームシステムからクエスト一覧を取得し、該当ユーザーが受注可能なクエストを抽出してメッセージを返す。対象判定(`quest['target_user']`)は、`'all'`なら全員、それ以外は`target == user_id`の完全一致が基本だが、`target == 'siblings'`（兄妹連携クエスト）の場合のみ例外的に、呼び出し元`user_id`とは比較せず「`role_child`のユーザー全員が対象」として扱う（Issue #109の修正。以前は`target != 'all' and target != user_id`のみの判定だったため、`'siblings'`がどの`user_id`とも一致せず常にスキップされ、LINE経由では兄妹連携クエストが誰にも表示されなかった）。**（#291で修正）** 参照フィールドは`q['target']`から、`quest_master`の実カラム名である`q['target_user']`に変更された（quest_serviceが以前このビューへ付与していた`target`という重複フィールド名の廃止に追随したもの）。**（Issue #377で修正）** クエスト件数が多いと5000字を超えうるため、最終的な文字列連結結果を`split_text_into_line_messages`に通してから返す（通常件数では従来どおり単一`TextMessage`）。
-* 根拠: `async def get_active_quests_message(user_id: str)...` (行番号: 176-215 / 抜粋: "async def get_active_quests_message(user_id: str) -> Union[TextMessage, FlexMessage, List[TextMessage]]:")
-* 根拠: `siblings`判定分岐 (行番号: 189-195 / 抜粋: "users = data.get("users", [])", "if target == 'siblings':\n                if user_role != ROLE_CHILD:\n                    continue")
-* 根拠: 文字数分割 (行番号: 211 / 抜粋: "return split_text_into_line_messages(\"\\n\".join(lines))")
-
-
-* **引数/リクエスト**: `user_id` (str)
-* 根拠: 関数の引数定義 (行番号: 176 / 抜粋: "user_id: str")
-
-
-* **戻り値/レスポンス**: `Union[TextMessage, FlexMessage, List[TextMessage]]`（Issue #377でクエスト一覧が長文化した場合の分割に対応するため`List[TextMessage]`が追加された）
-* 根拠: 戻り値の型ヒント (行番号: 176 / 抜粋: "-> Union[TextMessage, FlexMessage, List[TextMessage]]")
-
-
-* **副作用**: `asyncio.to_thread` を用いた外部関数(`game_system.get_all_view_data`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 179 / 抜粋: "await asyncio.to_thread(game_")
-
-
-* **エラーハンドリング**: データ取得時等の汎用エラー(`Exception`)をキャッチし、エラーメッセージを返す。
-* 根拠: `except Exception as e:` (行番号: 213 / 抜粋: "except Exception as e:")
-
-
-
-### `process_approval_command`
-
-* **役割**: 入力テキストを解析し、クエストの承認または却下の処理を実行して結果の`TextMessage`を返す。**（Issue #181で修正）** 承認時のメッセージ構築において、`quest_service.process_approve_quest`の戻り値dictに存在しない`bossEffect`キーを参照する死に分岐（2026年8月のリファクタリングで削除済みのボス戦機能への残存参照、CLAUDE.md規約違反）が存在したが、これを削除した。
-* 根拠: `async def process_approval_c...` (行番号: 170-200 / 抜粋: "def process_approval_command(")、削除箇所 (行番号: 184-187 / 抜粋: "msg = f\"✅ 承認しました！\\n獲得: {res['earnedExp']}EXP, {res['earnedGold']}G\"\n            if res.get('leveledUp'):\n                msg += f\"\\n🎉 レベルアップ！ Lv.{res['newLevel']}\"\n            return TextMessage(text=msg)")
-
-
-* **引数/リクエスト**: `approver_id` (str), `text` (str)
-* 根拠: 関数の引数定義 (行番号: 170 / 抜粋: "approver_id: str, text: str")
-
-
-* **戻り値/レスポンス**: `TextMessage`
-* 根拠: 戻り値の型ヒント (行番号: 170 / 抜粋: "-> TextMessage:")
-
-
-* **副作用**: `asyncio.to_thread` を用いた外部関数(`quest_service.process_approve_quest` または `process_reject_quest`)の同期呼び出し。
-* 根拠: `await asyncio.to_thread...` (行番号: 183, 192 / 抜粋: "await asyncio.to_thread(")
-
-
-* **エラーハンドリング**: ID変換時の `ValueError` をキャッチし専用メッセージを返す。その他の `Exception` をキャッチし、例外に `detail` 属性があればそれを付与したエラーメッセージを返す。
-* 根拠: `except ValueError:` および `except Exception as e:` (行番号: 195, 197 / 抜粋: "except ValueError:")
-
-
-
 ## 5. 処理フロー図
 
-以下は `process_approval_command` のロジックを示すフローチャートです。
-
-```mermaid
-flowchart TD
-    Start([Start]) --> Split[入力テキストをスペースで分割]
-    Split --> CheckLen{要素数が2以上か?}
-    CheckLen -- No --> RetErr1["警告メッセージ返却"]
-    CheckLen -- Yes --> ParseID[2番目の要素を数値に変換]
-    
-    ParseID --> CheckApprove{コマンドに承認が含まれるか?}
-    CheckApprove -- Yes --> CallApprove[外部：quest_service.process_approve_quest]
-    CallApprove --> BuildMsgApprove[結果メッセージの構築]
-    BuildMsgApprove --> RetApprove["TextMessage返却"]
-    
-    CheckApprove -- No --> CheckReject{コマンドに却下が含まれるか?}
-    CheckReject -- Yes --> CallReject[外部：quest_service.process_reject_quest]
-    CallReject --> RetReject["TextMessage返却"]
-    CheckReject -- No --> RetUnknown["不明なコマンドメッセージ返却"]
-
-    ParseID -. 例外 .-> CatchVal{ValueError例外発生?}
-    CatchVal -- Yes --> RetErrNum["数値指定エラー返却"]
-    
-    CallApprove -. 例外 .-> CatchEx{汎用Exception発生?}
-    CallReject -. 例外 .-> CatchEx
-    CatchEx -- Yes --> RetErrDetail["エラー詳細メッセージ返却"]
-    
-    RetErr1 --> End([End])
-    RetApprove --> End
-    RetReject --> End
-    RetUnknown --> End
-    RetErrNum --> End
-    RetErrDetail --> End
-
-```
+**（#358で削除）** 以前ここにあった`process_approval_command`のロジックを示すフローチャートは、同関数の削除に伴い撤去した。
 
 ## 6. 依存関係図
 
@@ -248,9 +148,6 @@ graph TD
     subgraph "line_service.py"
         log_child_health
         log_food_record
-        get_user_status_message
-        get_active_quests_message
-        process_approval_command
         split_text_into_line_messages["split_text_into_line_messages(Issue #377で追加)"]
     end
 
@@ -259,11 +156,6 @@ graph TD
         setup_logging
         get_now_iso
         get_today_date_str
-    end
-
-    subgraph "外部: services.quest_service"
-        game_system
-        quest_service
     end
 
     subgraph "外部: その他"
@@ -283,16 +175,11 @@ graph TD
     %% Issue #410: log_daily_action / log_ohayo / get_daily_health_summary_text は
     %% 未使用関数として削除済み(それに伴い common への依存も解消)
 
-    get_user_status_message --> game_system
-    get_user_status_message --> linebot_v3_messaging
+    %% Issue #358: get_user_status_message / get_active_quests_message /
+    %% process_approval_command は未使用となったため削除済み
+    %% (それに伴い services.quest_service への依存も解消)
 
-    get_active_quests_message --> game_system
-    get_active_quests_message --> linebot_v3_messaging
-    get_active_quests_message -->|Issue #377| split_text_into_line_messages
     split_text_into_line_messages --> linebot_v3_messaging
-
-    process_approval_command --> quest_service
-    process_approval_command --> linebot_v3_messaging
 
 ```
 
@@ -300,20 +187,17 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `services/quest_service.py` | クエスト承認・却下時の具体的なステータス更新処理、およびユーザー情報のデータ構造を把握するため。 | `import game_system, quest_service` の呼び出しがあるため。 |
 | 中 | `core/database.py` | ログを保存する `save_log_async` の詳細なトランザクション管理やDBスキーマを確認するため。 | `from core.database import save_log_async` の呼び出しがあるため。 |
-| 中 | `common.py` | `get_db_cursor` の接続プーリングの有無やリソース管理の仕様を確認するため。 | `import common` および `common.get_db_cursor()` の呼び出しがあるため。 |
 | 低 | `config.py` | 定数（家族メンバーの一覧やテーブル名）の定義構造を特定するため。 | `config.FAMILY_SETTINGS["members"]` の参照があるため。 |
 
 ## 8. 保守上の注意点
 
 * **[修正済み] Issue #410 保守性**: `get_daily_health_summary_text`（`cur.connection.row_factory = sqlite3.Row`のno-op設定を含んでいた）は、`log_daily_action`・`log_ohayo`とともに本番未参照の未使用関数だったため削除した（詳細は「削除済み」セクション参照）。
-* `process_approval_command` において、`hasattr(e, 'detail')` を用いて例外の詳細を取得しようとしているが、外部システム (`quest_service`) が投げる特定の例外構造に暗黙的に依存している。
-* `game_system.get_all_view_data` や `quest_service.process_approve_quest` が同期関数である前提で `asyncio.to_thread` を用いて非同期実行しているが、これらの関数内部でのDB書き込みや排他制御がスレッドセーフに行われているかの確認が必要。
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
-* 旧版の本セクションは「`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`が未使用インポートされている」と記載していたが、確認したところ本ファイルはそもそも`TextMessage`/`FlexMessage`以外を`linebot.v3.messaging`からインポートしておらず誤りだった（訂正のみ。Issue #410とは無関係）。
-* **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: `get_active_quests_message`が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加し、`get_active_quests_message`の戻り値をこれに通すようにした。同関数は`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）にも使われている。
-* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 34, 36)、`split_text_into_line_messages` (行番号: 39-61)、`get_active_quests_message`での使用 (行番号: 211)
+* 旧版の本セクションは「`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`が未使用インポートされている」と記載していたが、確認したところ本ファイルはそもそも`TextMessage`以外を`linebot.v3.messaging`からインポートしておらず誤りだった（訂正のみ。Issue #410とは無関係）。
+* **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: 旧`get_active_quests_message`（Issue #358で削除）が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加して対応した。同関数は現在も`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）に使われている。
+* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 25, 27)、`split_text_into_line_messages` (行番号: 30-52)
+* **[修正済み] Issue #358 LINE経由のFamily Questコマンドが本番で成立しない**: `get_user_status_message`/`get_active_quests_message`/`process_approval_command`（LINE ID と `quest_users.user_id` のマッピングが存在せず本番で機能しないデッドコード）を削除した。詳細は「削除済み」セクション参照。
 
 ## 9. 不明事項一覧
 
@@ -321,15 +205,13 @@ graph TD
 | --- | --- | --- |
 | `TARGET_MEMBERS` の具体的な要素数と型 | 外部の設定ファイルから読み込まれるため。 | `config.py` |
 | DBの各テーブルの正確なスキーマ | 実行時に指定されるテーブルのカラム定義が本ファイル内に存在しないため。 | `core/database.py` またはマイグレーションファイル |
-| `game_system.get_all_view_data()` の返却値のスキーマ | 返却される辞書のキー (`level`, `gold`, `quests` など) が存在するかどうかの保証が不明なため。 | `services/quest_service.py` |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `TARGET_MEMBERS` の具体的な要素数と型 | `MY_HOME_SYSTEM/services/line_service.py`28行目で`TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]`と定義されていることを確認した上で、`MY_HOME_SYSTEM/config.py`470行目を直接確認した。`FAMILY_SETTINGS["members"]`は`["智矢", "涼花", "将博", "春菜"]`という4件の実名文字列からなる`List[str]`であり、`TARGET_MEMBERS`もこれをそのまま参照するため同じく4要素の`List[str]`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:28`, `MY_HOME_SYSTEM/config.py:469-470` |
-| DBの各テーブルの正確なスキーマ | `MY_HOME_SYSTEM/core/database.py`13〜24行目を直接確認した。DBアクセスは`get_db_cursor(commit=False)`という汎用的なSQLite接続コンテキストマネージャで提供され、23〜24行目で`PRAGMA journal_mode=WAL;`・`PRAGMA foreign_keys=ON;`が実行されWALモードと外部キー制約が有効化される設計であることを確認した。本ファイル(`line_service.py`)自体は73〜80行目で`config.SQLITE_TABLE_CHILD`(実体`"child_health_records"`)テーブルの`condition, timestamp`列を`SELECT`しているのみで他テーブルへの直接アクセスはなく、`child_health_records`の正確なスキーマは`MY_HOME_SYSTEM/init_unified_db.py`244〜252行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラムとして定義されていることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:13-24`, `MY_HOME_SYSTEM/services/line_service.py:73-80`, `MY_HOME_SYSTEM/init_unified_db.py:244-252` |
-| `game_system.get_all_view_data()` の返却値のスキーマ | `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`(797行目)を直接確認した。887〜891行目の`return`文で`{"users": users, "quests": filtered_quests, "rewards": rewards, "completedQuests": completed, "logs": logs, "pendingQuests": pending}`という辞書を返しており、`users`は`SELECT * FROM quest_users`(799行目)、`quests`は`SELECT * FROM quest_master`(805行目、`filter_active_quests`でフィルタ後)、`rewards`は`SELECT * FROM reward_master`(817行目)の各結果に基づくことを確認した。`level`/`gold`という個別キーは戻り値の辞書には存在せず、それらは`users`配列内の各要素（`quest_users`テーブルの行）のフィールドとして含まれる設計であり、`current_schema.sql`164〜171行目で`quest_users`テーブルに`level INTEGER DEFAULT 1`・`gold INTEGER DEFAULT 0`列が実在することも直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:797-799,805,817,887-891`, `MY_HOME_SYSTEM/current_schema.sql:164-171` |
+| `TARGET_MEMBERS` の具体的な要素数と型 | `MY_HOME_SYSTEM/services/line_service.py`16行目で`TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]`と定義されていることを確認した上で、`MY_HOME_SYSTEM/config.py`470行目を直接確認した。`FAMILY_SETTINGS["members"]`は`["智矢", "涼花", "将博", "春菜"]`という4件の実名文字列からなる`List[str]`であり、`TARGET_MEMBERS`もこれをそのまま参照するため同じく4要素の`List[str]`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:16`, `MY_HOME_SYSTEM/config.py:469-470` |
+| DBの各テーブルの正確なスキーマ | `MY_HOME_SYSTEM/core/database.py`13〜24行目を直接確認した。DBアクセスは`get_db_cursor(commit=False)`という汎用的なSQLite接続コンテキストマネージャで提供され、23〜24行目で`PRAGMA journal_mode=WAL;`・`PRAGMA foreign_keys=ON;`が実行されWALモードと外部キー制約が有効化される設計であることを確認した。本ファイル(`line_service.py`)自体は64〜67行目で`config.SQLITE_TABLE_CHILD`(実体`"child_health_records"`)テーブルへ`INSERT`しているのみで他テーブルへの直接アクセスはなく、`child_health_records`の正確なスキーマは`MY_HOME_SYSTEM/init_unified_db.py`244〜252行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラムとして定義されていることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:13-24`, `MY_HOME_SYSTEM/services/line_service.py:64-67`, `MY_HOME_SYSTEM/init_unified_db.py:244-252` |
 
 ## 10. 自己検証結果
 

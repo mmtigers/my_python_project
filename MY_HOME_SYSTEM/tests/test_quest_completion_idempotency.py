@@ -39,9 +39,12 @@ JST = pytz.timezone("Asia/Tokyo")
 
 def _seed_quest(user_id: str = "dad", quest_id: int = 9001):
     with common.get_db_cursor(commit=True) as cur:
+        # #370 (Q-M2): 完了処理の即時報酬/pending振り分けは role == ROLE_ADULT で
+        # 判定するため(不明=子ども)、このファイルのスパムガード/周期リセットの
+        # テストは即時報酬(success)を前提としており role_adult を明示する。
         cur.execute(
-            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
-            (user_id, "Test", "Warrior", 1, 0, 0),
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, "Test", "Warrior", 1, 0, 0, "role_adult"),
         )
         cur.execute(
             "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain, reset_period) VALUES (?, ?, ?, ?, ?, ?)",
@@ -100,8 +103,8 @@ class TestSpamGuardIsTimezoneSafe:
         """
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
-                ("dad", "Test", "Warrior", 1, 0, 0),
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0, "role_adult"),
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",
@@ -209,8 +212,8 @@ class TestResetPeriodEnforcement:
         """
         with common.get_db_cursor(commit=True) as cur:
             cur.execute(
-                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) VALUES (?, ?, ?, ?, ?, ?)",
-                ("dad", "Test", "Warrior", 1, 0, 0),
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("dad", "Test", "Warrior", 1, 0, 0, "role_adult"),
             )
             cur.execute(
                 "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) VALUES (?, ?, ?, ?, ?)",

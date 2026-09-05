@@ -16,8 +16,8 @@
 
 ## 2. ファイルの概要
 
-* クエストの`target_user`フィールドが、渡された`User`にとって対象かどうかを判定する純粋関数`isQuestVisibleToUser`を提供するモジュール。**（Issue #412 品質で追加）** 以前は`QuestList.tsx`（一覧のフィルタ）と`FamilyDashboard.tsx`（「今日やることが無いか」の判定）に、`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致というほぼ同一の判定ロジックが重複して実装されており、判定基準を変更する際に両ファイルを漏れなく修正する必要があった。本ファイルへ集約し、両者から呼び出す形にした。
-* 根拠: ファイル冒頭コメント (行番号: 1〜7 / 抜粋: "// #412(品質): クエストの target_user 判定（'all' / 'siblings' / 'role_' プレフィックス /\n// 個別 user_id 一致）は以前 QuestList.tsx（一覧のフィルタ）と FamilyDashboard.tsx\n// （「今日やることが無いか」の判定）に、ほぼ同一のロジックが重複して実装されていた。\n// ここに集約し、両者から参照する。")
+* クエストの`target_user`フィールドが、渡された`User`にとって対象かどうかを判定する純粋関数`isQuestVisibleToUser`を提供するモジュール。**（Issue #412 品質で追加）** 以前は`QuestList.tsx`（一覧のフィルタ）と`FamilyDashboard.tsx`（「今日やることが無いか」の判定）に、`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致というほぼ同一の判定ロジックが重複して実装されており、判定基準を変更する際に両ファイルを漏れなく修正する必要があった。本ファイルへ集約し、両者から呼び出す形にした。**（Q-M3/F-M5・Issue #371で削除）** `role_`プレフィックス一致の分岐は削除された。サーバー側の完了API(`services/quest_service.py`の`_process_complete_quest_locked`)が`target_user`を`'all'`/本人/`'siblings'`以外は無条件403で拒否するため、`role_*`ターゲットのクエストは一覧に表示されても誰も完了できないという不整合な潜在バグだった(`quest_data.py`に実際の`role_*`ターゲットが存在しないため顕在化していなかった)。オーナー判断(`role_*`ターゲットは今後も使わない)により、バックエンド側の対応する共有表示計算(`GameSystem.get_all_view_data`内の`is_shared_completed_by`等の付与)とあわせて削除した。
+* 根拠: ファイル冒頭コメント (行番号: 1〜11 / 抜粋: "// #412(品質): クエストの target_user 判定（'all' / 'siblings' / 個別 user_id 一致）は\n// 以前 QuestList.tsx（一覧のフィルタ）と FamilyDashboard.tsx（「今日やることが無いか」の\n// 判定）に、ほぼ同一のロジックが重複して実装されていた。ここに集約し、両者から参照する。\n//\n// #371 (Q-M3/F-M5): 'role_' プレフィックスのターゲット判定は、サーバー側の完了API")、現行の関数本体に`startsWith('role_')`分岐が存在しないこと (行番号: 15〜22)
 
 ## 3. 外部依存関係
 
@@ -25,7 +25,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `Quest`, `User` | 型定義 | 判定対象のクエスト・ユーザーの型 | 根拠: (行番号: 8 / 抜粋: "import { Quest, User } from '@/types';") |
+| `Quest`, `User` | 型定義 | 判定対象のクエスト・ユーザーの型 | 根拠: (行番号: 13 / 抜粋: "import { Quest, User } from '@/types';") |
 
 ### ブラックボックスとなる外部要素
 
@@ -35,8 +35,8 @@
 
 ### `isQuestVisibleToUser` (export関数)
 
-* **役割**: `quest.target_user`の値に応じて、`user`にとってそのクエストが対象かどうかを判定する。`target_user`が未設定または`'all'`なら常に対象。`'siblings'`（兄妹連携クエスト）なら`user.role === 'role_child'`のときのみ対象。`'role_'`で始まる値（例: `'role_adult'`）なら`user.role`が完全一致するときのみ対象。それ以外は`target_user`が`user.user_id`と完全一致するときのみ対象（個別指名）。
-* 根拠: (行番号: 10〜21 / 抜粋: "export function isQuestVisibleToUser(quest: Quest, user: User): boolean {\n    const target = quest.target_user;\n    if (!target || target === 'all') return true;\n\n    if (target === 'siblings') {\n        // 兄妹連携クエスト: 対象は子ども(role_child)全員\n        return user.role === 'role_child';\n    }\n    if (target.startsWith('role_')) {\n        return user.role === target;\n    }\n    return target === user.user_id;\n}")
+* **役割**: `quest.target_user`の値に応じて、`user`にとってそのクエストが対象かどうかを判定する。`target_user`が未設定または`'all'`なら常に対象。`'siblings'`（兄妹連携クエスト）なら`user.role === 'role_child'`のときのみ対象。それ以外は`target_user`が`user.user_id`と完全一致するときのみ対象（個別指名）。**（Q-M3/F-M5・Issue #371で削除）** 以前あった`'role_'`で始まる値（例: `'role_adult'`）を`user.role`との完全一致で対象とする分岐は削除された。理由は本ファイル冒頭のコメントおよび§2参照。
+* 根拠: (行番号: 15〜24 / 抜粋: "export function isQuestVisibleToUser(quest: Quest, user: User): boolean {\n    const target = quest.target_user;\n    if (!target || target === 'all') return true;\n\n    if (target === 'siblings') {\n        // 兄妹連携クエスト: 対象は子ども(role_child)全員\n        return user.role === 'role_child';\n    }\n    return target === user.user_id;\n}")
 
 * **引数/リクエスト**: `quest: Quest`, `user: User`
 * **戻り値/レスポンス**: `boolean`
@@ -53,11 +53,7 @@ flowchart TD
     IsSiblings -- はい --> RoleChild{"user.role === 'role_child' ?"}
     RoleChild -- はい --> True2["true を返す"]
     RoleChild -- いいえ --> False1["false を返す"]
-    IsSiblings -- いいえ --> IsRolePrefixed{"target_user が 'role_' で始まる ?"}
-    IsRolePrefixed -- はい --> RoleMatch{"user.role === target_user ?"}
-    RoleMatch -- はい --> True3["true を返す"]
-    RoleMatch -- いいえ --> False2["false を返す"]
-    IsRolePrefixed -- いいえ --> UserMatch{"target_user === user.user_id ?"}
+    IsSiblings -- いいえ --> UserMatch{"target_user === user.user_id ?"}
     UserMatch -- はい --> True4["true を返す"]
     UserMatch -- いいえ --> False3["false を返す"]
 ```
@@ -81,8 +77,8 @@ graph TD
 ## 8. 保守上の注意点
 
 * **判定基準を変更する際はこのファイルのみを直せばよい**: 以前は`QuestList.tsx`と`FamilyDashboard.tsx`の2箇所に重複していたロジックが本ファイルに一本化されたため、`target_user`の対象範囲（新しいプレフィックスの追加等）を変更する場合は本ファイルのみを修正すればよい。
-* **`role_`プレフィックスの判定は`startsWith`による前方一致**: `role_adult`/`role_child`以外の`role_`で始まる値が将来追加された場合も、`user.role`との完全一致でのみ対象になる（前方一致ではない）。
-* 根拠: (行番号: 18〜19 / 抜粋: "if (target.startsWith('role_')) {\n        return user.role === target;\n    }")
+* **[修正済み] Issue #371 (Q-M3/F-M5) `role_`プレフィックス判定が完了APIと不整合だった**: 以前は`target_user`が`'role_'`で始まる値（例: `'role_adult'`）なら`user.role`との完全一致で表示対象とする分岐があったが、サーバー側の完了API(`services/quest_service.py`の`_process_complete_quest_locked`)は`target_user`が`'all'`/本人/`'siblings'`以外の場合を無条件403で拒否するため、`role_*`ターゲットのクエストは一覧に表示されても誰も完了できなかった(`quest_data.py`に実際の`role_*`ターゲットが存在しないため顕在化していなかった潜在バグ)。オーナー判断(`role_*`ターゲットは今後も使わない)により該当分岐を削除した。新しい`role_`系プレフィックスによる複数人ターゲットが今後必要になった場合は、まずサーバー側の完了APIの許可条件を先に整備すること(表示だけを許可すると同じ不整合が再発する)。
+* 根拠: 削除前の分岐(本仕様書の旧版)、現行の関数本体(行番号: 15〜24)に`startsWith`が存在しないこと、ファイル冒頭コメント(行番号: 7〜12)
 
 ## 9. 不明事項一覧
 

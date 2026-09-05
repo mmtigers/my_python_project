@@ -23,14 +23,14 @@ describe('isQuestVisibleToUser', () => {
         expect(isQuestVisibleToUser(quest('siblings'), adult)).toBe(false);
     });
 
-    it('a "role_" prefixed target matches only that role', () => {
-        expect(isQuestVisibleToUser(quest('role_adult'), adult)).toBe(true);
-        expect(isQuestVisibleToUser(quest('role_adult'), child)).toBe(false);
-        expect(isQuestVisibleToUser(quest('role_child'), child)).toBe(true);
-    });
-
-    it('a plain target_user matches only that exact user_id', () => {
+    it('a plain target_user matches only that exact user_id (#371: "role_" prefix targeting was removed, unused/never-created)', () => {
         expect(isQuestVisibleToUser(quest('son'), child)).toBe(true);
         expect(isQuestVisibleToUser(quest('son'), otherChild)).toBe(false);
+
+        // #371: 'role_'プレフィックスは特別扱いせず、他の値と同様にuser_idの完全一致でのみ判定する
+        // (バックエンドの完了APIが'role_*'ターゲットを常に403で拒否するため、表示側で
+        // 特別扱いすると「一覧には出るが完了できない」不整合になる)。
+        expect(isQuestVisibleToUser(quest('role_adult'), adult)).toBe(false);
+        expect(isQuestVisibleToUser(quest('role_child'), child)).toBe(false);
     });
 });

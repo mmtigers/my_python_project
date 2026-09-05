@@ -4,20 +4,22 @@ Issue #243の回帰テスト。
 
 FileManager.save()は以前、呼び出しのたびに常にAppConfig.get_output_base_dir()を
 呼んでいた。get_output_base_dir()はNASマウント確認・自己修復・障害通知を伴う重い
-処理であり、process_subscriptions()自身はこれを巡回開始時に1回だけ呼ぶよう配慮
-されていたにもかかわらず、save()内部での再呼び出しにより、1チャンネル/1URLから
-複数のExtractionResultが得られる場合に保存件数分だけ再評価されていた。NAS未
-マウント時のsudo mount再試行やDiscord/LINE通知が結果件数分だけ重複発生しうる。
+処理であり、1チャンネル/1URLから複数のExtractionResultが得られる場合に
+保存件数分だけ再評価されていた。NAS未マウント時のsudo mount再試行やDiscord/LINE
+通知が結果件数分だけ重複発生しうる。
 
 本テストは、
     1. FileManager.save()にbase_dirを渡した場合、get_output_base_dir()が
        呼ばれないこと
     2. base_dirを渡さない場合は従来通りget_output_base_dir()が呼ばれること
        (後方互換の確認)
-    3. process_subscriptions()が、1URLから複数のExtractionResultが得られても
-       get_output_base_dir()を1回しか呼ばないこと
-    4. UrlExtractorApp.run()(対話/直接URL実行)も同様に1回しか呼ばないこと
+    3. UrlExtractorApp.run()(対話/直接URL実行)が、1URLから複数のExtractionResultが
+       得られても get_output_base_dir()を1回しか呼ばないこと
 を検証する。
+
+（#413 D-L11で削除）以前ここには、削除された SubscriptionManager
+(process_subscriptions)についても同種の呼び出し回数を検証する項目があったが、
+SubscriptionManager自体の削除に伴い該当テストクラスも削除した。
 
 同じディレクトリの test_extract_youtube_urls_paths.py は importlib.reload() で
 extract_youtube_urls モジュールを再ロードするテストを含むため、本ファイルでも
@@ -27,11 +29,9 @@ DDDにはpytest基盤(conftest.py等)が無いため、本ファイルは
 `pytest DDD/test_extract_youtube_urls_save_base_dir.py` のように直接指定して
 実行する(MY_HOME_SYSTEM/pytest.ini の testpaths=tests のスコープ外)。
 """
-import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
@@ -71,47 +71,10 @@ class TestFileManagerSaveAcceptsBaseDir:
         mock_get_base.assert_called_once()
 
 
-class TestProcessSubscriptionsCallsGetOutputBaseDirOnce:
-    def _make_db_with_urls(self, tmp_path, urls):
-        db_path = tmp_path / "home_system.db"
-        with closing(sqlite3.connect(db_path)) as conn:
-            conn.execute(
-                """
-                CREATE TABLE youtube_subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_url TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 1
-                )
-                """
-            )
-            for url in urls:
-                conn.execute(
-                    "INSERT INTO youtube_subscriptions (channel_url, is_active) VALUES (?, 1)", (url,)
-                )
-            conn.commit()
-        return db_path
-
-    def test_get_output_base_dir_called_once_for_multiple_results_from_one_url(self, tmp_path):
-        self._make_db_with_urls(tmp_path, [CHANNEL_URL])
-
-        extractor = MagicMock()
-        # 1つのURLから複数のExtractionResultがyieldされる状況を模す
-        # (例: /videosタブと複数プレイリストからそれぞれ結果が得られるケース)
-        extractor.extract_iter.return_value = iter([_make_result("v1"), _make_result("v2"), _make_result("v3")])
-        extractor.last_extract_internal_failures = 0
-        file_manager = module.FileManager()
-
-        manager = module.SubscriptionManager(extractor, file_manager)
-
-        with patch.object(
-            module.AppConfig, "get_output_base_dir", return_value=tmp_path / "data"
-        ) as mock_get_base, patch("extract_youtube_urls.time.sleep"):
-            manager.process_subscriptions()
-
-        assert mock_get_base.call_count == 1, (
-            "1URLから複数の結果が得られても、get_output_base_dir()はsave()内で"
-            "再評価されず1回だけ呼ばれるべき"
-        )
+# #413 (D-L11): 以前ここにあった TestProcessSubscriptionsCallsGetOutputBaseDirOnce
+# は、削除された SubscriptionManager(定期巡回/サブスクリプション機能。事実上の
+# デッド機能だったためオーナー判断で撤去)専用のテストだったため削除した。
+# process_subscriptions()向けのget_output_base_dir()呼び出し回数検証は不要になった。
 
 
 class TestUrlExtractorAppRunCallsGetOutputBaseDirOnce:
