@@ -6,6 +6,7 @@ import time
 import socket
 import subprocess
 import tempfile
+import threading
 import traceback
 import signal
 import uuid
@@ -63,15 +64,41 @@ MOTION_COOLDOWN_SEC: int = getattr(config, 'MOTION_COOLDOWN_SEC', 60)
 
 # 各カメラの最終検知時刻を保持する辞書
 last_motion_detected: Dict[str, float] = {}
+# #439: last_motion_detected はカメラごとの監視スレッドから並行して読み書きされる。
+# 個々のdict操作自体はGILにより原子的だが、クールダウン判定の「読んでから書く」までを
+# 不可分にするためにこのLockで保護する。
+_motion_lock = threading.Lock()
 
 active_pullpoints: List[Any] = []
+# #439: active_pullpoints はカメラごとの監視スレッドから並行してappend/removeされる。
+# 「in で存在確認してからremove」の間に他スレッドが同じ要素を削除すると
+# list.remove()がValueErrorを送出しうる(finally節内で発生すると後始末処理が
+# 中断する)ため、追加・削除・読み取りをこのLockで保護する。
+_pullpoints_lock = threading.Lock()
+
+
+def _add_pullpoint(pullpoint: Any) -> None:
+    with _pullpoints_lock:
+        active_pullpoints.append(pullpoint)
+
+
+def _discard_pullpoint(pullpoint: Any) -> None:
+    """active_pullpointsから安全に削除する(既に削除済みでも例外を出さない)。"""
+    with _pullpoints_lock:
+        try:
+            active_pullpoints.remove(pullpoint)
+        except ValueError:
+            pass
+
 
 def cleanup_handler(signum: int, frame: Any) -> None:
     """プロセス終了時のクリーンアップ。"""
     logger.info(f"🛑 Shutdown signal ({signum}) received. Cleaning up subscriptions...")
     # 他スレッド(monitor_single_camera)が同時に active_pullpoints を変更しうるため、
     # イテレーション中の RuntimeError(list changed size)を避けてコピーを走査する
-    for svc in list(active_pullpoints):
+    with _pullpoints_lock:
+        pullpoints_snapshot = list(active_pullpoints)
+    for svc in pullpoints_snapshot:
         try:
             if hasattr(svc, 'Unsubscribe'):
                 svc.Unsubscribe()
@@ -354,14 +381,13 @@ def process_camera_event(msg: Any, cam_conf: Dict[str, Any]) -> None:
 
         # 4. クールダウン（Debounce）処理の追加
         current_time: float = time.time()
-        last_detected_time: float = last_motion_detected.get(cam_id, 0.0)
-        
-        if current_time - last_detected_time < MOTION_COOLDOWN_SEC:
-            logger.debug(f"🏃 [{cam_name}] Motion Detected (Skipped due to cooldown)")
-            return
-            
-        # 状態更新（有効な検知として処理を進めるため、タイムスタンプを更新）
-        last_motion_detected[cam_id] = current_time
+        with _motion_lock:
+            last_detected_time: float = last_motion_detected.get(cam_id, 0.0)
+            if current_time - last_detected_time < MOTION_COOLDOWN_SEC:
+                logger.debug(f"🏃 [{cam_name}] Motion Detected (Skipped due to cooldown)")
+                return
+            # 状態更新（有効な検知として処理を進めるため、タイムスタンプを更新）
+            last_motion_detected[cam_id] = current_time
 
         # 5. 動体検知時のアクション（DB保存・画像取得）
         logger.info(f"🏃 [{cam_name}] Motion Detected!")
@@ -469,7 +495,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             
             pullpoint.zeep_client.transport.session.auth = HTTPDigestAuth(cam_conf['user'], cam_conf['pass'])
 
-            active_pullpoints.append(pullpoint)
+            _add_pullpoint(pullpoint)
             current_pullpoint = pullpoint
             
             # 接続成功時にエラーカウントをリセット
@@ -582,9 +608,9 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 if "Unknown error" in err_msg or "Unauthorized" in err_msg:
                     logger.error(f"💡 Hint: Check PASSWORD and CAMERA TIME settings.")
             
-            if current_pullpoint in active_pullpoints: 
-                active_pullpoints.remove(current_pullpoint)
-            
+            if current_pullpoint:
+                _discard_pullpoint(current_pullpoint)
+
             # ホストが生きている場合のみ緊急診断を実行
             if is_host_reachable(ip_address):
                 perform_emergency_diagnosis(ip_address)
@@ -601,8 +627,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             # 【修正2】リソース解放処理の明示的な記録
             logger.debug(f"🧹 [{cam_name}] Starting resource cleanup...")
             if current_pullpoint:
-                if current_pullpoint in active_pullpoints:
-                    active_pullpoints.remove(current_pullpoint)
+                _discard_pullpoint(current_pullpoint)
                 try:
                     current_pullpoint.Unsubscribe()
                     logger.debug(f"🗑️ [{cam_name}] Unsubscribed from PullPoint successfully.")

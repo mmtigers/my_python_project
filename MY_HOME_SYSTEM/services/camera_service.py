@@ -31,6 +31,13 @@ _active_processes: Dict[str, subprocess.Popen] = {}
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
 
+# #439: 上記3辞書はFastAPIの同期エンドポイント(スレッドプール実行)から複数スレッドで
+# 同時に読み書きされうる。個々のdict操作自体はGILにより原子的だが、
+# 「チェックしてから更新する」までの一連の操作は原子的ではなく、既に終了した
+# プロセスをactiveと誤認したり、プロセス管理情報が不整合になったりし得るため、
+# 読み書きの一連の操作をこのLockで保護する。
+_state_lock = threading.Lock()
+
 # VOD生成のcheck-then-act競合(同一cam_id・日付への同時リクエストで
 # ffmpegが二重起動し同一ファイルへ書き込む)を防ぐための、process_key単位ロック。
 #
@@ -77,6 +84,32 @@ def _vod_generation_lock(process_key: str):
                 del _vod_generation_locks[process_key]
 
 
+# #439: ライブHLS配信の起動も、同一cam_idへの同時リクエストで「実行中でない」の
+# チェックとffmpeg起動・登録までを不可分にする必要がある(_vod_generation_lockと同じ
+# check-then-act競合)。cam_id単位の参照カウント付きロックとして同じ仕組みを流用する。
+_live_stream_locks: Dict[str, _RefCountedLock] = {}
+_live_stream_locks_guard = threading.Lock()
+
+
+@contextlib.contextmanager
+def _live_stream_lock(cam_id: str):
+    """cam_id単位でライブHLS配信の起動を排他制御するコンテキストマネージャ。"""
+    with _live_stream_locks_guard:
+        entry = _live_stream_locks.get(cam_id)
+        if entry is None:
+            entry = _RefCountedLock()
+            _live_stream_locks[cam_id] = entry
+        entry.ref_count += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _live_stream_locks_guard:
+            entry.ref_count -= 1
+            if entry.ref_count == 0 and _live_stream_locks.get(cam_id) is entry:
+                del _live_stream_locks[cam_id]
+
+
 def stop_all_processes(timeout: float = 5.0) -> int:
     """ライブ配信・VOD生成の全 ffmpeg 子プロセスを停止する(サーバー終了時に呼ぶ)。
 
@@ -86,7 +119,9 @@ def stop_all_processes(timeout: float = 5.0) -> int:
     """
     stopped = 0
     for registry in (_active_processes, _active_vod_processes):
-        for key, proc in list(registry.items()):
+        with _state_lock:
+            items = list(registry.items())
+        for key, proc in items:
             try:
                 if proc.poll() is None:
                     proc.terminate()
@@ -97,7 +132,8 @@ def stop_all_processes(timeout: float = 5.0) -> int:
                     stopped += 1
             except Exception as e:
                 logger.warning(f"ffmpeg プロセス停止に失敗 ({key}): {e}")
-            registry.pop(key, None)
+            with _state_lock:
+                registry.pop(key, None)
     if stopped:
         logger.info(f"🛑 ffmpeg プロセスを {stopped} 件停止しました")
     return stopped
@@ -107,9 +143,10 @@ def _prune_finished_vod_processes() -> None:
     """完了済み(poll()がNoneでない)プロセスを_active_vod_processesから除去する。
     キーがcam_id×target_dateの組み合わせのため、剪定しないと日々増え続けて
     無限に蓄積してしまう。"""
-    finished_keys = [key for key, proc in _active_vod_processes.items() if proc.poll() is not None]
-    for key in finished_keys:
-        _active_vod_processes.pop(key, None)
+    with _state_lock:
+        finished_keys = [key for key, proc in _active_vod_processes.items() if proc.poll() is not None]
+        for key in finished_keys:
+            _active_vod_processes.pop(key, None)
 
 
 def _mask_rtsp_url_for_log(url: str) -> str:
@@ -148,11 +185,14 @@ def find_wsdl_path() -> Optional[str]:
 
 def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
     cam_id = cam_conf['id']
-    if cam_id in _rtsp_cache:
-        return _rtsp_cache[cam_id]
+    with _state_lock:
+        cached = _rtsp_cache.get(cam_id)
+    if cached:
+        return cached
 
     if cam_conf.get("rtsp_url"):
-        _rtsp_cache[cam_id] = cam_conf["rtsp_url"]
+        with _state_lock:
+            _rtsp_cache[cam_id] = cam_conf["rtsp_url"]
         return cam_conf["rtsp_url"]
 
     try:
@@ -179,7 +219,8 @@ def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
         
         auth_uri = f"rtsp://{safe_user}:{safe_pass}@{parsed.netloc}{parsed.path}?{parsed.query}"
         
-        _rtsp_cache[cam_id] = auth_uri
+        with _state_lock:
+            _rtsp_cache[cam_id] = auth_uri
         return auth_uri
     except Exception as e:
         logger.error(f"❌ [{cam_conf['name']}] ONVIF経由のRTSP URL取得に失敗: {e}")
@@ -187,10 +228,19 @@ def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:
 
 def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
     cam_id = cam_conf['id']
+    # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が
+    # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。
+    with _live_stream_lock(cam_id):
+        return _start_hls_stream_locked(cam_conf, cam_id)
+
+
+def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     cam_dir = init_output_dir(HLS_LIVE_DIR, cam_id)
     playlist_path = os.path.join(cam_dir, "stream.m3u8")
 
-    if cam_id in _active_processes and _active_processes[cam_id].poll() is None:
+    with _state_lock:
+        existing = _active_processes.get(cam_id)
+    if existing is not None and existing.poll() is None:
         return playlist_path
 
     try:
@@ -234,7 +284,8 @@ def start_hls_stream(cam_conf: Dict[str, Any]) -> str:
         # 閉じてよい。閉じないと、プロセスがクラッシュして再起動されるたびに
         # ファイルハンドルがプロセス内に蓄積してリークする。
         log_file.close()
-    _active_processes[cam_id] = process
+    with _state_lock:
+        _active_processes[cam_id] = process
     return playlist_path
 
 def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
@@ -304,7 +355,9 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     _prune_finished_vod_processes()
 
     # 1. 排他制御: 既に同じカメラ・日付の変換プロセスが実行中の場合は処理をスキップ
-    if process_key in _active_vod_processes and _active_vod_processes[process_key].poll() is None:
+    with _state_lock:
+        existing_vod_process = _active_vod_processes.get(process_key)
+    if existing_vod_process is not None and existing_vod_process.poll() is None:
         logger.info(f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成は既に実行中です。")
         # フロントエンドが500エラー（FileResponseのクラッシュ）にならないよう、生成を待機する
         for _ in range(10):
@@ -383,7 +436,8 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
 
     # 3. subprocess.run (ブロック) から Popen (非同期) に変更し、プロセスを登録する
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    _active_vod_processes[process_key] = process
+    with _state_lock:
+        _active_vod_processes[process_key] = process
 
     # 4. フロントエンドが404にならないよう、プレイリストファイルが生成されるまで少し待機する
     for _ in range(10):
