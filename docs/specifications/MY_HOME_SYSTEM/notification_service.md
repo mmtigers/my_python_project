@@ -11,12 +11,12 @@
 
 * [config.md](./config.md) - `LINE_CHANNEL_ACCESS_TOKEN`, `DISCORD_WEBHOOK_*`等の設定値を提供
 * [logger.md](./logger.md) - `setup_logging`の実体
-* [common.md](./common.md) - `send_push`, `send_reply`等を再エクスポートするFacade
+* [common.md](./common.md) - `send_push`等を再エクスポートするFacade（**Issue #未採番で修正**: 本ファイルから`send_reply`・`get_line_message_quota`は未使用のため削除済み。`common.py`側が引き続きこれらを再エクスポートしようとしている場合は`common.md`側で要確認）
 * 呼び出し元多数: [memory_monitor.md](./memory_monitor.md), [nas_monitor.md](./nas_monitor.md), [nas_utils.md](./nas_utils.md), [sensor_service.md](./sensor_service.md), [post_boot_health_check.md](./post_boot_health_check.md), [quest_service.md](./quest_service.md)(`InventoryService.use_item`経由)
 
 ## 2. ファイルの概要
 
-DiscordおよびLINEプラットフォームへのメッセージ（テキスト・画像）通知を行うためのサービスモジュール。WebhookやPush API/Reply APIを利用し、指定されたプラットフォームへメッセージを送信する責務を持つ。LINE送信失敗時にDiscordへフォールバックする統合通知機能も備えている。
+DiscordおよびLINEプラットフォームへのメッセージ（テキスト・画像）通知を行うためのサービスモジュール。WebhookやPush APIを利用し、指定されたプラットフォームへメッセージを送信する責務を持つ。LINE送信失敗時にDiscordへフォールバックする統合通知機能も備えている。**（Issue #未採番で修正）** 以前はLINE Reply API経由の返信送信(`send_reply`)とメッセージクォータ確認(`get_line_message_quota`)も提供していたが、いずれも呼び出し元が存在しない未使用コードだったため削除された。
 
 ## 3. 外部依存関係
 
@@ -28,7 +28,7 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 | `logging` | 標準 | 未使用 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "import logging") |
 | `requests` | 外部 | HTTPリクエスト送信 | 根拠: [インポート宣言] (行番号: 4 / 抜粋: "import requests") |
 | `typing` | 標準 | 型ヒントの提供 | 根拠: [インポート宣言] (行番号: 5 / 抜粋: "from typing import List...") |
-| `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 8〜18 / 抜粋: "from linebot.v3.messaging...") |
+| `linebot.v3.messaging` | 外部 | LINE API v3のクライアント | 根拠: [インポート宣言] (行番号: 7〜16 / 抜粋: "from linebot.v3.messaging...")。**（Issue #未採番で修正）** `send_reply`削除に伴い、以前インポートしていた`ReplyMessageRequest`は未使用となったためインポート自体を削除済み。 |
 | `config` | 外部 | 設定値（トークンやURL）の取得 | 根拠: [インポート宣言] (行番号: 20 / 抜粋: "import config") |
 | `core.logger` | 外部 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "from core.logger import setup_logging") |
 
@@ -172,50 +172,10 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 
 
-### `send_reply`
+### （削除済み）`send_reply` / `get_line_message_quota`
 
-* **役割**: LINE Messaging API (v3) を利用し、受け取ったリプライトークンに対して返信メッセージを送信する。
-* 根拠: [関数定義] (行番号: 142〜165 / 抜粋: "def send_reply(reply_token: str...")
-
-
-* **引数/リクエスト**: `reply_token: str`, `messages: List[Any]`
-* 根拠: [関数定義] (行番号: 142 / 抜粋: "def send_reply(reply_token: str...")
-
-
-* **戻り値/レスポンス**: `bool`
-* 根拠: [戻り値] (行番号: 162, 165 / 抜粋: "return True ... return False")
-
-
-* **副作用**: LINE APIへのHTTP POSTリクエスト実行。
-* 根拠: [外部通信] (行番号: 154〜161 / 抜粋: "line_bot_api.reply_message(...)")
-
-
-* **エラーハンドリング**: 例外発生時にエラーログを出力しFalseを返す。
-* 根拠: [例外処理] (行番号: 163〜165 / 抜粋: "except Exception as e: ... return False")
-
-
-
-### `get_line_message_quota`
-
-* **役割**: LINE Messaging API (v3) を利用し、LINEの当月のメッセージ送信可能枠を取得する。
-* 根拠: [関数定義] (行番号: 167〜176 / 抜粋: "def get_line_message_quota() ->...")
-
-
-* **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 167 / 抜粋: "def get_line_message_quota() ->...")
-
-
-* **戻り値/レスポンス**: `Optional[Any]`
-* 根拠: [戻り値] (行番号: 173, 176 / 抜粋: "return line_bot_api.get_message_quota()")
-
-
-* **副作用**: LINE APIへのHTTP GETリクエスト実行。
-* 根拠: [外部通信] (行番号: 173 / 抜粋: "return line_bot_api.get_message_quota()")
-
-
-* **エラーハンドリング**: 例外発生時にエラーログを出力しNoneを返す。
-* 根拠: [例外処理] (行番号: 174〜176 / 抜粋: "except Exception as e: ... return None")
-
+* **（Issue #未採番で削除）** LINE Reply API経由で返信を送る`send_reply(reply_token, messages)`、および当月のLINEメッセージ送信可能枠を取得する`get_line_message_quota()`は、いずれも呼び出し元が存在しない未使用コードだったため本ファイルから完全に削除された。これに伴い、`send_reply`が使用していた`ReplyMessageRequest`のインポートも削除されている（§3参照）。`send_push`／`_send_discord_webhook`／`_send_line_push`など他の関数は変更されていない。
+* 根拠: 削除は差分（`git diff`）で確認。現在の`services/notification_service.py`は`send_push`の`return success`（229行目）で終了しており、これ以降に関数定義は存在しない。
 
 
 ## 5. 処理フロー図
@@ -265,8 +225,6 @@ graph TD
         _send_discord_webhook
         _send_line_push
         send_push
-        send_reply
-        get_line_message_quota
     end
     
     subgraph "外部モジュール / API"
@@ -290,14 +248,6 @@ graph TD
     send_push --> _send_discord_webhook
     send_push --> _send_line_push
     send_push --> logger
-    
-    send_reply --> line_configuration
-    send_reply --> linebot_api
-    send_reply --> logger
-    
-    get_line_message_quota --> line_configuration
-    get_line_message_quota --> linebot_api
-    get_line_message_quota --> logger
 
 ```
 
@@ -312,7 +262,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * `json` および `logging` がインポートされているが使用されていない。
-* `_send_line_push` 内の `type` が `"flex"` の辞書型メッセージは、以前は変換処理が `pass` で未実装（無言で破棄）だったが、Issue #322対応で `FlexContainer.from_dict` によるv3 `FlexMessage` オブジェクトへの変換が実装された（`altText`/`alt_text` キーを代替テキストとして使用、無い場合は`"通知"`）。変換に失敗した場合はメッセージ内容つきのエラーログを出して当該メッセージのみ破棄し、`text`/`flex` 以外の未対応型の辞書も警告ログを出して破棄する（サイレントに落とさない）。なお `send_reply` 側は従来どおり `text` 型辞書のみ変換対象である。
+* `_send_line_push` 内の `type` が `"flex"` の辞書型メッセージは、以前は変換処理が `pass` で未実装（無言で破棄）だったが、Issue #322対応で `FlexContainer.from_dict` によるv3 `FlexMessage` オブジェクトへの変換が実装された（`altText`/`alt_text` キーを代替テキストとして使用、無い場合は`"通知"`）。変換に失敗した場合はメッセージ内容つきのエラーログを出して当該メッセージのみ破棄し、`text`/`flex` 以外の未対応型の辞書も警告ログを出して破棄する（サイレントに落とさない）。**（Issue #未採番で修正）** `text` 型辞書のみを変換対象としていた `send_reply`（LINE Reply API送信関数）は未使用のため削除済みであり、本ファイルの辞書メッセージ変換ロジックは現在 `_send_line_push` のみが担う。
 * `_send_discord_webhook` のタイムアウトは送信内容によって異なる（画像添付時: `timeout=60`、テキストのみ: `timeout=10`）。いずれもハードコードされている。
 * `_send_discord_webhook` はHTTPステータスコードが200/204以外の場合、`res.text`を含めたエラー内容をログに出力してからFalseを返す（Discord API側のエラー原因特定を目的とした挙動）。
 * `send_push`および`_send_discord_webhook`には`filename`引数（デフォルト`"snapshot.jpg"`）があり、画像添付時のアップロードファイル名を呼び出し元から指定できる。MIMEタイプは明示せず、Discord側の拡張子判定に委ねている。
