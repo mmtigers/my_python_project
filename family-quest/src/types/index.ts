@@ -108,6 +108,17 @@ export interface InventoryItem {
     purchased_at: string;
     used_at?: string | null;
     category?: string;
+    // YouTube連続使用防止クールダウン(15分)の対象かどうか。判定はバックエンド
+    // (config.YOUTUBE_REWARD_IDS)側に一本化し、フロントではこのフラグのみ見る。
+    is_youtube_reward: boolean;
+}
+
+// GET /api/quest/inventory/{user_id} のレスポンス。
+// #(YouTubeクールダウン): 単純な配列から、YouTube系ごほうび券の残りクールダウン
+// 秒数を併せて返すオブジェクトに変更した。
+export interface InventoryResponse {
+    items: InventoryItem[];
+    youtube_cooldown_remaining_seconds: number;
 }
 
 // #102/#363: クエスト完了APIが実際に成功した時点で App → QuestList/QuestItem へ

@@ -142,7 +142,7 @@ class TestInventoryEndpoints:
         self._purchase_reward(seeded_client)
         res = seeded_client.get("/api/quest/inventory/dad")
         assert res.status_code == 200
-        items = res.json()
+        items = res.json()["items"]
         assert len(items) == 1
         assert items[0]["status"] == "owned"
 
@@ -158,7 +158,7 @@ class TestInventoryEndpoints:
 
         res = seeded_client.get("/api/quest/inventory/dad")
         assert res.status_code == 200
-        assert res.json()[0]["desc"] == "テスト用の説明文"
+        assert res.json()["items"][0]["desc"] == "テスト用の説明文"
 
     def test_get_inventory_excludes_legacy_pending_status_rows(self, seeded_client):
         """Issue #116回帰防止: 旧承認フローの遺物としてstatus='pending'の行がuser_inventoryに
@@ -175,7 +175,7 @@ class TestInventoryEndpoints:
 
         res = seeded_client.get("/api/quest/inventory/dad")
         assert res.status_code == 200
-        items = res.json()
+        items = res.json()["items"]
         assert len(items) == 1
         assert all(item["status"] != "pending" for item in items)
 
@@ -226,7 +226,7 @@ class TestInventoryEndpoints:
 
         inventory_res = seeded_client.get("/api/quest/inventory/dad")
         assert inventory_res.status_code == 200
-        assert inventory_res.json() == []
+        assert inventory_res.json()["items"] == []
 
         chronicle_res = seeded_client.get("/api/quest/family/chronicle")
         assert chronicle_res.status_code == 200

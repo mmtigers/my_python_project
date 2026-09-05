@@ -738,3 +738,19 @@ def prewarm_nas_paths() -> None:
     for name in ("ASSETS_DIR", "TMP_VIDEO_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
+
+# ==========================================
+# 21. Family Quest: YouTubeごほうび券クールダウン設定
+# ==========================================
+# 連続視聴による目の負担を防ぐため、YouTube系のごほうび券(user_inventory経由で
+# 使用するreward_master.reward_id)を1枚使用してから次の1枚を使用できるまでの
+# クールダウン対象IDを指定する(services/quest_service.py InventoryService.use_item)。
+# 17.のTV_UNLOCK_QUEST_IDSと同じ「カンマ区切りの整数」形式。
+# 既定値はquest_data.pyのYouTube報酬(10,11,10:00/30:00/60:00)の現在のreward_id。
+_youtube_reward_ids_str: str = os.getenv("YOUTUBE_REWARD_IDS", "10,11,12")
+YOUTUBE_REWARD_IDS: List[int] = []
+if _youtube_reward_ids_str:
+    try:
+        YOUTUBE_REWARD_IDS = [int(r.strip()) for r in _youtube_reward_ids_str.split(",") if r.strip().isdigit()]
+    except Exception as e:
+        logger.warning(f"⚠️ YOUTUBE_REWARD_IDS parse error: {e}")
