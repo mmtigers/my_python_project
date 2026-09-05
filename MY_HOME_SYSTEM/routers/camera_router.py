@@ -1,6 +1,6 @@
+import asyncio
 import os
 import re
-import time
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -53,22 +53,27 @@ def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):
     return {"id": camera_id, "enabled": payload.enabled}
 
 @router.get("/live/{camera_id}/stream.m3u8")
-def get_live_stream(camera_id: str):
+async def get_live_stream(camera_id: str):
     """ライブHLSプレイリスト（.m3u8）の取得"""
     cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
     if not cam_conf:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    playlist_path = camera_service.start_hls_stream(cam_conf)
-    
+    # #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、
+    # イベントループを止めないようスレッドプールへオフロードする。
+    playlist_path = await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)
+
     if not playlist_path:
         raise HTTPException(status_code=500, detail="Failed to initialize stream")
 
-    # ffmpegの初期セグメント生成を最大5秒待機
+    # ffmpegの初期セグメント生成を最大5秒待機。
+    # #457: 以前はtime.sleep(同期)でこの間ワーカースレッドを占有し続け、
+    # 同時アクセス集中時に他リクエストの遅延要因になっていた。asyncio.sleepに
+    # 変更し、待機中はイベントループを他のリクエスト処理に譲る。
     for _ in range(10):
         if os.path.exists(playlist_path):
             return FileResponse(playlist_path, media_type="application/vnd.apple.mpegurl")
-        time.sleep(0.5)
+        await asyncio.sleep(0.5)
 
     raise HTTPException(status_code=503, detail="Stream generation timeout")
 

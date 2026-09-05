@@ -288,7 +288,11 @@ class QuestService:
             # 週の月曜日を基準にする
             start_of_week = today_jst - datetime.timedelta(days=today_jst.weekday())
             return completed_date >= start_of_week
-        
+
+        # #446: 'daily'/'weekly' 以外の値(空文字・NULL・想定外の文字列等)は
+        # 常に無効(未完了)扱いとなる。原因調査が難航しないよう、想定外の値を
+        # 検知したことをログに残す。
+        logger.warning(f"⚠️ is_within_reset_period: 未知のreset_period値 ({reset_period!r}) のため常にFalseを返します。")
         return False
 
     def __init__(self):

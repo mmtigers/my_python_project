@@ -1,3 +1,4 @@
+import errno
 import os
 import json
 import shutil
@@ -214,8 +215,12 @@ class NasMonitor:
                 dir_path = os.path.join(root, d)
                 try:
                     os.rmdir(dir_path)
-                except OSError:
-                    pass  # 中身があるディレクトリは無視
+                except OSError as e:
+                    # #450: 「ディレクトリが空でない」は無視してよい想定内のケースだが、
+                    # 権限エラー等それ以外のOSErrorは種別を問わず握りつぶしていたため
+                    # 気づけなかった。ENOTEMPTY以外はログに残す。
+                    if e.errno != errno.ENOTEMPTY:
+                        logger.warning(f"空ディレクトリの削除に失敗しました: {dir_path}: {e}")
 
     def get_disk_usage(self) -> Optional[Dict[str, float]]:
         """ディスク使用量を取得 (GB単位)"""

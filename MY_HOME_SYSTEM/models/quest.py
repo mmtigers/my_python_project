@@ -17,9 +17,11 @@ class MasterUser(BaseModel):
     user_id: str
     name: str
     job_class: str
-    level: int = 1
-    exp: int = 0
-    gold: int = 50
+    level: int = Field(default=1, ge=1)
+    exp: int = Field(default=0, ge=0)
+    # #454: MasterQuest/MasterRewardのgold系フィールドは既にge=0だが、
+    # MasterUserのgoldには境界チェックが無かった。業務上あり得ない負値を防ぐ。
+    gold: int = Field(default=50, ge=0)
     avatar: str = '🙂'
     role: Optional[str] = None
 

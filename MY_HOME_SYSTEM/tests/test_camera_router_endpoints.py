@@ -93,7 +93,13 @@ def test_get_live_stream_failed_initialization_returns_500(api_client, one_camer
 def test_get_live_stream_times_out_if_playlist_never_appears(api_client, one_camera, tmp_path, monkeypatch):
     never_created = tmp_path / "never.m3u8"
     monkeypatch.setattr(camera_router.camera_service, "start_hls_stream", lambda cam_conf: str(never_created))
-    monkeypatch.setattr(camera_router.time, "sleep", lambda s: None)  # 実時間の待機をスキップ
+
+    async def _no_wait(seconds):
+        return None
+
+    # #457: get_live_streamはtime.sleepからasyncio.sleepに変更されたため、
+    # 実時間の待機をスキップするパッチ対象もそれに合わせる。
+    monkeypatch.setattr(camera_router.asyncio, "sleep", _no_wait)
 
     res = api_client.get("/api/cameras/live/cam1/stream.m3u8")
     assert res.status_code == 503
