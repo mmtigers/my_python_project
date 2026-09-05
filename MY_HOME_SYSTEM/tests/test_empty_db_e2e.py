@@ -5,13 +5,18 @@ Issue #330 (スキーマ管理のmigrations/一本化) の回帰テスト。
 8/22レビューレポート「テスト追加優先順位: Critical」で推奨されていた
 「空DBからのE2E」テスト。H-2(新規/再構築DBで承認フローが無効化される)の
 再発防止として、migrations/ だけで構築したDBが実経路
-(サーバー起動 → sync_master → 子の完了 → 親の承認) を通ることを検証する。
+(サーバー起動 → sync_master → 子の完了 → 親の承認) を通ることを検証する狙いで
+当初 TestEmptyDbEndToEnd クラスを追加したが、#414 C-L5 の棚卸しで
+tests/test_h2_fresh_db_e2e.py::TestFreshDbApprovalFlowE2E と実質的に同一の
+回帰(空DB→migrations→sync_master→子の完了→親の承認)を重複してカバーしている
+ことが判明したため削除した。当該フロー(実quest_dataを使用)の検証は
+test_h2_fresh_db_e2e.py 側に一本化されている。本ファイルは、以下の
+スキーマ移設検証(TestMigrationsOnlySchemaEquivalence)のみを担う。
 
-あわせて、init_unified_db.init_db() がスキーマ定義を持っていた時代
-(リファクタ前) に構築されるスキーマのスナップショット
-(tests/fixtures/legacy_init_db_schema.json) と、migrations/ のみで構築した
-スキーマを突き合わせ、ベースライン移設(0000_baseline_schema.sql)の
-写経ミス・取りこぼしを機械的に検知する。
+init_unified_db.init_db() がスキーマ定義を持っていた時代(リファクタ前)に
+構築されるスキーマのスナップショット(tests/fixtures/legacy_init_db_schema.json)
+と、migrations/ のみで構築したスキーマを突き合わせ、ベースライン移設
+(0000_baseline_schema.sql)の写経ミス・取りこぼしを機械的に検知する。
 """
 import json
 import os
@@ -20,7 +25,6 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
 from core.migrations import apply_pending_migrations
 
 FIXTURE_PATH = os.path.join(
@@ -109,62 +113,3 @@ class TestMigrationsOnlySchemaEquivalence:
             assert before == after
         finally:
             conn.close()
-
-
-class TestEmptyDbEndToEnd:
-    """空DB → migrations構築 → sync → 子の完了 → 親の承認 の実経路E2E (H-2再発防止)。"""
-
-    def test_fresh_db_supports_sync_complete_approve_flow(self, isolated_db, api_client):
-        # 1. マスタ同期: role/reset_period/description カラムが存在しないと失敗する
-        #    (レガシー実行時ALTERは退役済みのため、migrations供給の実証になる)
-        res = api_client.post("/api/quest/sync_master")
-        assert res.status_code == 200
-
-        # 2. quest_data 由来のユーザーにroleが投入されていること (H-2の核心)
-        with common.get_db_cursor() as cur:
-            dad_role = cur.execute(
-                "SELECT role FROM quest_users WHERE user_id='dad'"
-            ).fetchone()["role"]
-            daughter_role = cur.execute(
-                "SELECT role FROM quest_users WHERE user_id='daughter'"
-            ).fetchone()["role"]
-        assert dad_role == "role_adult"
-        assert daughter_role == "role_child"
-
-        # 3. 時間帯・曜日制約のない決定的なテスト用クエストを追加
-        #    (quest_dataの実クエストはstart_time/days依存で時刻により結果が変わるため)
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO quest_master (quest_id, title, quest_type, exp_gain, gold_gain) "
-                "VALUES (9999, 'E2E検証クエスト', 'daily', 10, 5)"
-            )
-
-        # 4. 子の完了 → 承認待ち(pending)になること
-        res = api_client.post(
-            "/api/quest/complete", json={"user_id": "daughter", "quest_id": 9999}
-        )
-        assert res.status_code == 200
-        assert res.json()["status"] == "pending"
-
-        with common.get_db_cursor() as cur:
-            history_id = cur.execute(
-                "SELECT id FROM quest_history WHERE user_id='daughter' AND quest_id=9999 "
-                "ORDER BY id DESC LIMIT 1"
-            ).fetchone()["id"]
-
-        # 5. 親の承認 → 成功し、報酬が付与されること
-        res = api_client.post(
-            "/api/quest/approve", json={"approver_id": "dad", "history_id": history_id}
-        )
-        assert res.status_code == 200
-        assert res.json()["status"] == "success"
-
-        with common.get_db_cursor() as cur:
-            status = cur.execute(
-                "SELECT status FROM quest_history WHERE id=?", (history_id,)
-            ).fetchone()["status"]
-            gold = cur.execute(
-                "SELECT gold FROM quest_users WHERE user_id='daughter'"
-            ).fetchone()["gold"]
-        assert status == "approved"
-        assert gold >= 5

@@ -5,6 +5,7 @@ import asyncio
 import time
 import socket
 import subprocess
+import tempfile
 import traceback
 import signal
 import uuid
@@ -203,7 +204,8 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
         return None
 
     latest_mp4 = mp4_files[0]
-    output_tmp = f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"
+    # C-L7: 実行環境のTMPDIR等に追従させるため /tmp 直書きではなく tempfile.gettempdir() 経由で解決する
+    output_tmp = os.path.join(tempfile.gettempdir(), f"snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg")
     
     # 設計書「エラーハンドリングと自動復旧」準拠: NVRのバッファフラッシュ遅延を考慮したリトライ
     max_retries = 3
