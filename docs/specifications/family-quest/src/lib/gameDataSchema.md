@@ -16,10 +16,10 @@
 
 ## 2. ファイルの概要
 
-`GameSystem.get_all_view_data`（`/api/quest/data`）のレスポンスに限り、`useGameData.ts`の取得境界でZodによるランタイム検証を行うためのスキーマ定義ファイル。バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義(`src/types/index.ts`)が乖離していても、OpenAPI→TS生成パイプラインが存在しないためビルド時には検知できず、フィールド名二重化のような不整合の温床になっていたこと（Issue #291）を受けて追加された。バックエンドが実際に返しているフィールド名と型をここに明示し、ここに定義されていないフィールドをコンポーネント側で参照した場合、TypeScript上は型チェックを通過しても実行時には常に`undefined`になる「幽霊フィールド」であることが`.parse()`失敗によってすぐ分かるようにするのが目的。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`/`logs`の6つの配列フィールドからなる`gameDataResponseSchema`を唯一のエクスポートとして提供する。
+`GameSystem.get_all_view_data`（`/api/quest/data`）のレスポンスに限り、`useGameData.ts`の取得境界でZodによるランタイム検証を行うためのスキーマ定義ファイル。バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義(`src/types/index.ts`)が乖離していても、OpenAPI→TS生成パイプラインが存在しないためビルド時には検知できず、フィールド名二重化のような不整合の温床になっていたこと（Issue #291）を受けて追加された。バックエンドが実際に返しているフィールド名と型をここに明示し、ここに定義されていないフィールドをコンポーネント側で参照した場合、TypeScript上は型チェックを通過しても実行時には常に`undefined`になる「幽霊フィールド」であることが`.parse()`失敗によってすぐ分かるようにするのが目的。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5つの配列フィールドからなる`gameDataResponseSchema`を唯一のエクスポートとして提供する。**（#412 API契約で修正）** 以前は`logs`(`adventureLogSchema`)も検証対象に含めていたが、`gameData.logs`(`AdventureLog`型)はどのコンポーネントからも参照されておらず、`useGameData.ts`側の対応する型・フィールドごと削除されたため、本ファイルでも検証対象から外した。
 * 根拠: ファイル冒頭コメント (行番号: 1〜14 / 抜粋: "// #291: バックエンド(MY_HOME_SYSTEM)のAPIレスポンス形状とフロントエンドの型定義\n// (src/types/index.ts)が乖離していても、OpenAPI→TS生成パイプラインが無いため\n// ビルド時には検知できなかった(フィールド名二重化のような不整合の温床になっていた)。\n// GameSystem.get_all_view_data (/api/quest/data) のレスポンスに限り、useGameData.ts\n// の取得境界でZodによるランタイム検証を行い、バックエンドが実際に返している\n// フィールド名と型をここに明示する。ここに無いフィールドをコンポーネント側で\n// 参照しても、たとえTypeScript上は通っても実行時には常にundefinedになる\n// (\"幽霊フィールド\")ことがすぐ分かるようにするのが目的。")
 * 根拠: `.strict()`を使わない方針のコメント (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
-* 根拠: `export const gameDataResponseSchema` (行番号: 80〜87 / 抜粋: "export const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n    logs: z.array(adventureLogSchema),\n});")
+* 根拠: `export const gameDataResponseSchema` (行番号: 80〜90 / 抜粋: "// #412(API契約): logs(AdventureLog)はどのコンポーネントからも参照されておらず、\nexport const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
 
 ## 3. 外部依存関係
 
@@ -50,8 +50,8 @@
 ### `questSchema` (モジュールレベル定数、非export)
 
 * **役割**: `gameData.quests`配列の1要素（`quest_master`テーブルの行 + `filter_active_quests`/`get_all_view_data`が付与する`bonus_gold`/`bonus_exp`等）を検証するZodスキーマ。`quest_id`/`title`は必須、他はすべて任意（`description`/`icon_key`/`start_time`/`end_time`/`target_user`/`pre_requisite_quest_id`は`.nullable()`も許容）。`days`は`number[] | string | null`のいずれかを許容する。共有クエスト判定用の`is_shared_completed_by`/`shared_completed_by_name`/`is_shared_pending_by`/`shared_pending_by_name`も任意フィールドとして含む。
-* 根拠: [定数定義] (行番号: 31〜50 / 抜粋: "const questSchema = z.object({\n    quest_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),")
-* 根拠: `days`の型 (行番号: 43 / 抜粋: "days: z.union([z.array(z.number()), z.string(), z.null()]).optional(),")
+* 根拠: [定数定義] (行番号: 35〜54 / 抜粋: "const questSchema = z.object({\n    quest_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),")
+* 根拠: `days`の型 (行番号: 47 / 抜粋: "days: z.union([z.array(z.number()), z.string(), z.null()]).optional(),")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -61,7 +61,7 @@
 ### `rewardSchema` (モジュールレベル定数、非export)
 
 * **役割**: `gameData.rewards`配列の1要素（`reward_master`テーブルの行）を検証するZodスキーマ。`reward_id`/`title`/`cost_gold`は必須、`description`/`category`/`icon_key`/`target`は`.nullable().optional()`。
-* 根拠: [定数定義] (行番号: 52〜60 / 抜粋: "const rewardSchema = z.object({\n    reward_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),\n    category: z.string().nullable().optional(),\n    cost_gold: z.number(),\n    icon_key: z.string().nullable().optional(),\n    target: z.string().nullable().optional(),\n});")
+* 根拠: [定数定義] (行番号: 56〜64 / 抜粋: "const rewardSchema = z.object({\n    reward_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),\n    category: z.string().nullable().optional(),\n    cost_gold: z.number(),\n    icon_key: z.string().nullable().optional(),\n    target: z.string().nullable().optional(),\n});")
 
 * **引数/リクエスト**: 該当なし
 * **戻り値/レスポンス**: 該当なし
@@ -78,20 +78,10 @@
 * **副作用**: なし
 * **エラーハンドリング**: 該当なし
 
-### `adventureLogSchema` (モジュールレベル定数、非export)
-
-* **役割**: `gameData.logs`配列の1要素（`QuestService._fetch_recent_logs`のレスポンス、`useGameData.ts`の`AdventureLog`型に対応）を検証するZodスキーマ。`id`/`text`/`dateStr`/`timestamp`の4フィールドすべてが必須（`.optional()`/`.nullable()`が一切付与されていない、本ファイル内で唯一のスキーマ）。
-* 根拠: [定数定義] (行番号: 73〜78 / 抜粋: "const adventureLogSchema = z.object({\n    id: z.string(),\n    text: z.string(),\n    dateStr: z.string(),\n    timestamp: z.string(),\n});")
-
-* **引数/リクエスト**: 該当なし
-* **戻り値/レスポンス**: 該当なし
-* **副作用**: なし
-* **エラーハンドリング**: 該当なし
-
 ### `gameDataResponseSchema` (export定数)
 
-* **役割**: 本ファイルの唯一のエクスポート。`/api/quest/data`（`GameSystem.get_all_view_data`）のレスポンス全体を検証するトップレベルのZodスキーマ。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`/`logs`の6配列フィールドをそれぞれ対応するサブスキーマの`z.array()`として持つ。オブジェクト全体・各サブスキーマともに`.strict()`は使われておらず、未知の追加フィールドはZodのデフォルト挙動により無視され、`.parse()`失敗の原因にはならない。
-* 根拠: [定数定義] (行番号: 80〜87 / 抜粋: "export const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n    logs: z.array(adventureLogSchema),\n});")
+* **役割**: 本ファイルの唯一のエクスポート。`/api/quest/data`（`GameSystem.get_all_view_data`）のレスポンス全体を検証するトップレベルのZodスキーマ。`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の5配列フィールドをそれぞれ対応するサブスキーマの`z.array()`として持つ。オブジェクト全体・各サブスキーマともに`.strict()`は使われておらず、未知の追加フィールドはZodのデフォルト挙動により無視され、`.parse()`失敗の原因にはならない。**（#412 API契約で修正）** 以前は`logs: z.array(adventureLogSchema)`も含んでいたが、`adventureLogSchema`ごと削除された（`gameData.logs`はどのコンポーネントからも参照されていなかったため）。
+* 根拠: [定数定義] (行番号: 80〜90 / 抜粋: "export const gameDataResponseSchema = z.object({\n    users: z.array(userSchema),\n    quests: z.array(questSchema),\n    rewards: z.array(rewardSchema),\n    completedQuests: z.array(questHistorySchema),\n    pendingQuests: z.array(questHistorySchema),\n});")
 * 根拠: `.strict()`を使わない方針 (行番号: 12〜14 / 抜粋: "// 既知でないフィールドは(zodのデフォルト挙動により)無視して構わない。将来\n// バックエンドが新しいフィールドを追加した場合にparseが失敗しないよう、\n// 意図的に .strict() は使わない。")
 
 * **引数/リクエスト**: 該当なし（スキーマオブジェクト自体はデータを受け取らない。実際の検証は呼び出し元`useGameData.ts`が`gameDataResponseSchema.parse(raw)`として呼び出す）
@@ -112,14 +102,12 @@ flowchart TD
     Root --> RewardsField["rewards: z.array(rewardSchema)"]
     Root --> CompletedField["completedQuests: z.array(questHistorySchema)"]
     Root --> PendingField["pendingQuests: z.array(questHistorySchema)"]
-    Root --> LogsField["logs: z.array(adventureLogSchema)"]
 
     UsersField --> UserSchemaDef["userSchema:\nuser_id/name/level/exp/gold は必須\navatar/medal_count/job_class/role/hp/maxHp は任意"]
     QuestsField --> QuestSchemaDef["questSchema:\nquest_id/title は必須\n他は任意(一部nullable)、daysはunion型"]
     RewardsField --> RewardSchemaDef["rewardSchema:\nreward_id/title/cost_gold は必須\n他はnullable+任意"]
-    CompletedField --> HistorySchemaDef["questHistorySchema:\nuser_id/quest_id/status は必須\nstatusはenum(4値)"]
+    CompletedField --> HistorySchemaDef["questHistorySchema:\nuser_id/quest_id/status は必須\nstatusはenum(3値)"]
     PendingField --> HistorySchemaDef
-    LogsField --> LogSchemaDef["adventureLogSchema:\nid/text/dateStr/timestamp すべて必須"]
 
     ExternalCaller["外部: useGameData.ts の gameData queryFn"] -->|"raw = await apiClient.get(endpoint)"| ParseCall["gameDataResponseSchema.parse(raw)"]
     ParseCall -->|検証成功| CastResult["as GameDataResponse として返却"]
@@ -136,7 +124,6 @@ graph TD
         questSchema
         rewardSchema
         questHistorySchema
-        adventureLogSchema
         gameDataResponseSchema["gameDataResponseSchema (export)"]
     end
 
@@ -152,13 +139,11 @@ graph TD
     questSchema --> zod
     rewardSchema --> zod
     questHistorySchema --> zod
-    adventureLogSchema --> zod
 
     gameDataResponseSchema --> userSchema
     gameDataResponseSchema --> questSchema
     gameDataResponseSchema --> rewardSchema
     gameDataResponseSchema --> questHistorySchema
-    gameDataResponseSchema --> adventureLogSchema
 
     useGameData -->|import + .parse() 呼び出し| gameDataResponseSchema
 ```
@@ -168,13 +153,13 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `../hooks/useGameData.ts` | `gameDataResponseSchema`の唯一の呼び出し元であり、`.parse()`失敗時（`ZodError`）に`useQuery`のエラー状態がどう扱われるか（本フックの戻り値に`error`が公開されているか等）を確認するため。 | `gameDataResponseSchema.parse(raw) as GameDataResponse;`（`useGameData.ts`側） |
-| 高 | `MY_HOME_SYSTEM/services/quest_service.py` の `GameSystem.get_all_view_data` | 本ファイルの各スキーマが実際のバックエンドレスポンス（`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`/`logs`の実データ）と完全に一致しているかを検証するため。 | `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` |
+| 高 | `MY_HOME_SYSTEM/services/quest_service.py` の `GameSystem.get_all_view_data` | 本ファイルの各スキーマが実際のバックエンドレスポンス（`users`/`quests`/`rewards`/`completedQuests`/`pendingQuests`の実データ）と完全に一致しているかを検証するため。 | `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` |
 | 中 | `../types/index.ts` | `GameDataResponse`関連の各TypeScript型（`User`/`Quest`/`Reward`/`QuestHistory`）と本ファイルの各Zodスキーマとの間で、フィールドの必須/任意・型が一致しているかを突き合わせるため。 | `import { User, Quest, QuestHistory, Reward, QuestResult } from '@/types';`（`useGameData.ts`側） |
 | 低 | `zod`パッケージのドキュメント | `.optional()`/`.nullable()`/`.union()`/`.enum()`等の挙動、および`.parse()`失敗時の`ZodError`の構造を確認するため。 | `import { z } from 'zod';` |
 
 ## 8. 保守上の注意点
 
-* **バックエンド実レスポンスとの契約テスト（Issue #390）**: `gameDataSchema.test.ts`に、`GameSystem.get_all_view_data`の実レスポンス形状（`SELECT *`による全カラム、`null`の`role`/`avatar`/`job_class`、`use_item`が記録する`quest_id=0`の履歴行、兄妹連携の`linked_history_id`、`_fetch_recent_logs`の`logs`）を模したfixtureを`gameDataResponseSchema.safeParse`に通す契約テストがある。バックエンドのレスポンス形状（`quest_service.py`の`get_all_view_data`/`filter_active_quests`/`_fetch_recent_logs`、`migrations/`のカラム定義）を変更した際は、このfixtureと本スキーマの両方を更新すること。
+* **バックエンド実レスポンスとの契約テスト（Issue #390）**: `gameDataSchema.test.ts`に、`GameSystem.get_all_view_data`の実レスポンス形状（`SELECT *`による全カラム、`null`の`role`/`avatar`/`job_class`、`use_item`が記録する`quest_id=0`の履歴行、兄妹連携の`linked_history_id`）を模したfixtureを`gameDataResponseSchema.safeParse`に通す契約テストがある。バックエンドのレスポンス形状（`quest_service.py`の`get_all_view_data`/`filter_active_quests`、`migrations/`のカラム定義）を変更した際は、このfixtureと本スキーマの両方を更新すること。**（#412 API契約で補足）** テスト側のfixtureには`adventureLogSchema`削除後も`logs`キーが残っているが、`.strict()`を使わない設計のため`gameDataResponseSchema`からは単に無視されるだけで、テストの通過には影響しない。
 * 根拠: `family-quest/src/lib/gameDataSchema.test.ts`（テストファイルのため仕様書は持たない）
 * **NULL可カラムは`.nullable().optional()`にする**: SQLiteの`quest_users`/`quest_history`はほとんどのカラムがNULL可であり、`SELECT *`の結果がそのまま届く。`.optional()`だけでは「キーが無い」ことしか許容せず`null`は拒否されるため、新しいカラムをスキーマに追加する際はDBのNULL制約を`migrations/`で確認し、NULL可なら`.nullable().optional()`にすること。
 * 根拠: (行番号: 17〜20, 66〜68)
@@ -184,9 +169,9 @@ graph TD
 * **`userSchema`は`nextLevelExp`を検証対象に含まない**: `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.get_all_view_data`を直接確認したところ、`users`の各要素に`u['nextLevelExp'] = game_logic.GameLogic.calculate_next_level_exp(u['level'])`という形で`nextLevelExp`フィールドが常に付与される（`.strict()`ではないため`.parse()`自体は成功する）。しかし`userSchema`にはこのフィールドの定義がなく、検証対象から漏れている。`.strict()`でないため実害（`.parse()`失敗）はないが、`userSchema`を「バックエンドが実際に返しているフィールドの一覧」として参照する際は、`nextLevelExp`が抜け落ちている点に注意が必要である。
 * 根拠: (行番号: 17〜29 / 抜粋: "const userSchema = z.object({\n    user_id: z.string(),\n    name: z.string(),\n    level: z.number(),\n    exp: z.number(),\n    avatar: z.string().optional(),")、`MY_HOME_SYSTEM/services/quest_service.py`側の`nextLevelExp`付与箇所（直接ソース確認、行番号は`quest_service.md`の相互参照情報を参照）
 * **`questSchema`の`bonus_gold`/`bonus_exp`は任意扱いだが実際は常に付与される**: `GameSystem.get_all_view_data`は`filtered_quests`の全要素に対し、`target_user`の値にかかわらず必ず`q['bonus_gold']`/`q['bonus_exp']`のいずれかの分岐で数値（`0`を含む）を設定しており、値が存在しないケースはない。`questSchema`側は`.optional()`としているため、`.parse()`自体はこの点で失敗することはないが、スキーマ上は「無くてもよい」フィールドとして緩く定義されている。
-* 根拠: (行番号: 38 / 抜粋: "bonus_gold: z.number().optional(),")、`quest_service.md`の`GameSystem.get_all_view_data`解析内容（`if q['target_user'] and q['target_user'] != 'all': ... else: q['bonus_gold'] = 0`等、いずれの分岐でも設定される）
-* **モジュールレベル定数はすべて非export**: `gameDataResponseSchema`以外の5つのサブスキーマ（`userSchema`/`questSchema`/`rewardSchema`/`questHistorySchema`/`adventureLogSchema`）は`export`されておらず、本ファイル外から個別に参照することはできない。他のコンポーネントが「クエスト単体だけを検証したい」といった用途で再利用したい場合は、まずこれらを`export`する変更が必要になる。
-* 根拠: (行番号: 17, 31, 52, 62, 73 / 抜粋: "const userSchema = z.object({", "const questSchema = z.object({", "const rewardSchema = z.object({", "const questHistorySchema = z.object({", "const adventureLogSchema = z.object({")
+* 根拠: (行番号: 41 / 抜粋: "bonus_gold: z.number().optional(),")、`quest_service.md`の`GameSystem.get_all_view_data`解析内容（`if q['target_user'] and q['target_user'] != 'all': ... else: q['bonus_gold'] = 0`等、いずれの分岐でも設定される）
+* **モジュールレベル定数はすべて非export**: `gameDataResponseSchema`以外の4つのサブスキーマ（`userSchema`/`questSchema`/`rewardSchema`/`questHistorySchema`）は`export`されておらず、本ファイル外から個別に参照することはできない。他のコンポーネントが「クエスト単体だけを検証したい」といった用途で再利用したい場合は、まずこれらを`export`する変更が必要になる。
+* 根拠: (行番号: 21, 35, 56, 69 / 抜粋: "const userSchema = z.object({", "const questSchema = z.object({", "const rewardSchema = z.object({", "const questHistorySchema = z.object({")
 
 ## 9. 不明事項一覧
 
@@ -205,7 +190,7 @@ graph TD
 ## 10. 自己検証結果
 
 * [x] 完了: 推測・外部ファイルの仕様を一切含んでいない
-* [x] 完了: 全関数・全クラス・全コンポーネントを列挙した（本ファイルは6つのモジュールレベル定数のみで構成されており、すべて列挙した）
+* [x] 完了: 全関数・全クラス・全コンポーネントを列挙した（本ファイルは5つのモジュールレベル定数のみで構成されており、すべて列挙した）
 * [x] 完了: 全てのインポート要素を列挙した
 * [x] 完了: すべての仕様説明に「根拠（行番号・抜粋）」を明記した
 * [x] 完了: 根拠漏れが0件である

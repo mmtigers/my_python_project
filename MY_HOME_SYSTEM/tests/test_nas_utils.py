@@ -93,3 +93,36 @@ def test_get_managed_target_directory_falls_back_without_nameerror_when_config_i
         f"落ちた可能性がある):\nstdout={result.stdout}\nstderr={result.stderr}"
     )
     assert "PROBE_OK" in result.stdout
+
+
+class TestAttemptRemountTimeout:
+    """#411 S-L9: attempt_remountのsudo mount呼出しにtimeoutが無く、
+    autofsのデッドロックやネットワークマウントのハング時に無期限ブロックしうる
+    問題の回帰テスト。"""
+
+    def test_passes_a_timeout_to_subprocess_run(self, monkeypatch):
+        sys.path.insert(0, str(MY_HOME_SYSTEM_DIR))
+        from core import nas_utils
+
+        captured_kwargs = {}
+
+        def _fake_run(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(nas_utils.subprocess, "run", _fake_run)
+
+        assert nas_utils.attempt_remount("/mnt/nas") is True
+        assert captured_kwargs.get("timeout") is not None
+        assert captured_kwargs["timeout"] > 0
+
+    def test_timeout_expired_is_treated_as_failure_not_a_crash(self, monkeypatch):
+        sys.path.insert(0, str(MY_HOME_SYSTEM_DIR))
+        from core import nas_utils
+
+        def _fake_run(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout"))
+
+        monkeypatch.setattr(nas_utils.subprocess, "run", _fake_run)
+
+        assert nas_utils.attempt_remount("/mnt/nas") is False

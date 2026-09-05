@@ -173,6 +173,8 @@
 
 
 * **副作用**: ローカルDB (`config.SQLITE_DB_PATH`) に対するSELECTクエリの発行。
+* **（#411 S-L8で修正）** 接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、LINE Botへのリクエストのたびに接続がcloseされずリークしていた。`contextlib.closing`で明示的にcloseするよう変更した。
+* 根拠: `with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:` (行番号: 138)
 * 根拠: `with sqlite3.connect(config.SQLITE_DB_PATH) as conn:` / `cur.execute(f"...")` (行番号: 133, 139-143 / 抜粋: "with sqlite3.connect(config.SQLITE_DB_PATH) as conn:")
 
 

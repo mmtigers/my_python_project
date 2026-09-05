@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/init_unified_db.py
+import contextlib
 import sqlite3
 from typing import List, Dict
 import config
@@ -81,8 +82,11 @@ def init_db() -> None:
         apply_pending_migrations(cur.connection)
 
     # 検証実行
+    # #411 S-L8: `with sqlite3.connect(...) as conn:` は接続をcloseしない
+    # (sqlite3の既知の挙動。commit/rollbackのみ行う)ため、contextlib.closingで
+    # 明示的にcloseする。
     try:
-        with sqlite3.connect(config.SQLITE_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:
             validate_schema_integrity(conn)
     except Exception as e:
         logger.error(f"Schema Validation Failed: {e}")

@@ -37,11 +37,15 @@ def attempt_remount(mount_point: str) -> bool:
     logger.info(f"🔄 接続エラーを検知。再マウントを試行します: {mount_point}")
     try:
         # OSのmountコマンドを呼び出し（sudoers設定が必要）
+        # #411 S-L9: timeout未指定だとautofsのデッドロックやネットワークマウントの
+        # ハング時にsubprocess.runが無期限にブロックし、呼出元の監視ループ全体を
+        # 巻き込んで停止させうる。妥当な上限(30秒)を設定する。
         res = subprocess.run(
             ["sudo", "mount", mount_point],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            timeout=30,
         )
         if res.returncode == 0:
             logger.info(f"✅ 再マウントに成功しました: {mount_point}")
@@ -49,6 +53,9 @@ def attempt_remount(mount_point: str) -> bool:
         else:
             logger.error(f"❌ 再マウント失敗: {res.stderr.strip()}")
             return False
+    except subprocess.TimeoutExpired:
+        logger.error(f"❌ 再マウントがタイムアウトしました(30秒): {mount_point}")
+        return False
     except Exception as e:
         logger.error(f"❌ 再マウント実行中の例外エラー: {e}")
         return False

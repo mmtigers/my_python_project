@@ -16,6 +16,10 @@ from models.switchbot import DeviceStatusResponse
 logger = setup_logging("service.switchbot")
 
 DEVICE_NAME_CACHE: Dict[str, str] = {}
+# fetch_device_name_cache() の呼出元がどこにも無く DEVICE_NAME_CACHE が常に空のままだった
+# 問題(#411 S-L2)への対応。lifespan からの明示的な事前ロードは行わず、
+# get_device_name_by_id() の初回呼出し(＝最初のWebhook受信)時に一度だけ遅延ロードする。
+_fetch_attempted = False
 
 def request_switchbot_api(url: str, headers: Dict[str, str], max_retries: int = 4) -> Optional[Dict[str, Any]]:
     """SwitchBot APIへのリクエスト（Exponential Backoff リトライ付き）"""
@@ -142,7 +146,11 @@ def fetch_device_name_cache() -> bool:
         return False
 
 def get_device_name_by_id(device_id: str) -> Optional[str]:
-    """IDから名前を検索する関数"""
+    """IDから名前を検索する関数。キャッシュが空ならここで一度だけ遅延ロードを試みる。"""
+    global _fetch_attempted
+    if not DEVICE_NAME_CACHE and not _fetch_attempted:
+        _fetch_attempted = True
+        fetch_device_name_cache()
     return DEVICE_NAME_CACHE.get(device_id, None)
 
 def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:

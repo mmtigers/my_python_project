@@ -17,8 +17,8 @@
 
 ## 2. ファイルの概要
 
-* LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を、SDKのイベントハンドラーとして解析し、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が署名検証込みで `line_handler.handle(body, signature)`（SDKの`WebhookHandler.handle`）を呼び出し、登録済みのイベントハンドラー（本ファイルの`handle_message`/`handle_postback`）をディスパッチする構成になっている。
-* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 310-311 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")
+* LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を解析し、適切な処理（ステータス確認、クエスト処理、子供の体調記録、AI解析、その他のロジック）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が担う。**（Issue #376で全面改修）** 以前は`callback_line()`がSDKの`WebhookHandler.handle(body, signature)`を呼び出し、署名検証・パース・ディスパッチをHTTPレスポンス送信前に一括完走させていたが、AI呼び出し等の遅延がreply token失効リスクに直結していたため、現在は`callback_line()`側で`line_handler.parser.parse()`により署名検証とパースのみを行って即座に応答し、本ファイルの`dispatch_events()`が実処理のエントリポイントとして`BackgroundTasks`経由で呼ばれる構成に変わった。`line_handler.add(...)`によるSDKへのハンドラー登録（`handle_message`/`handle_postback`）自体は後方互換のため維持しているが、実際の呼び出し経路は`dispatch_events()`内の`isinstance`分岐であり、SDKの自動ディスパッチ機構は使われていない。
+* 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 356-357 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")、`dispatch_events`定義 (行番号: 360-392 / 抜粋: "def dispatch_events(events: List[Any]) -> None:")
 
 
 
@@ -280,13 +280,59 @@
 
 
 
+### `_SEEN_EVENT_IDS` / `_evict_oldest_seen_event_ids` / `_is_duplicate_event` (Issue #376で追加)
+
+* **役割**: `webhookEventId`（line-bot-sdk 3.21.0でEvent基底クラスの必須フィールド、ULID形式）ベースの冪等化キャッシュ。LINEのWebhook配信は「少なくとも1回」到達を保証する仕様であり、`_is_redelivery`が検知する明示的な再配信以外にもネットワーク遅延等で同一イベントが複数回届く可能性があるため、直近処理済みのイベントIDを記録して二重処理（体調・食事等の記録の二重登録、AI呼び出しの二重実行）を防ぐ。単一プロセス・LAN限定の個人用サービスのため新規DBテーブルは設けず、`_profile_cache`と同様にプロセス内メモリ・サイズ上限(`_SEEN_EVENT_IDS_MAX_SIZE`=500)つきの辞書で管理する（プロセス再起動で消える点は許容）。`_evict_oldest_seen_event_ids`は上限超過時に検知時刻が古いものから削除する。`_is_duplicate_event`は未処理のIDなら記録した上で`False`を、直近処理済みのIDなら`True`を返す。`webhook_event_id`が取得できないイベント（テスト用モック等）は冪等化できないため誤って処理を止めないよう`False`を返す。`BackgroundTasks`はスレッドプール(`run_in_threadpool`)で実行されるため、`_seen_event_ids_lock`（`threading.Lock`）で確認と記録を保護する。
+* 根拠: `_SEEN_EVENT_IDS: Dict[str, float] = {}` (行番号: 76〜78)、`def _evict_oldest_seen_event_ids() -> None:` (行番号: 83〜90)、`def _is_duplicate_event(event) -> bool:` (行番号: 93〜109)
+
+
+* **引数/リクエスト**: `_is_duplicate_event(event)`: イベントオブジェクト
+* 根拠: (行番号: 93)
+
+
+* **戻り値/レスポンス**: `_is_duplicate_event`は`bool`（重複なら`True`）
+* 根拠: (行番号: 93, 103, 109)
+
+
+* **副作用**: `_SEEN_EVENT_IDS`への書き込み・削除（ロック保護下）
+* 根拠: (行番号: 104〜107)
+
+
+* **エラーハンドリング**: `webhook_event_id`が取得できない場合は`False`を返すのみ（例外は送出しない）
+* 根拠: `if not event_id: return False` (行番号: 101〜102)
+
+
+### `dispatch_events` (Issue #376で追加)
+
+* **役割**: `routers/webhook_router.py`が署名検証・パース済みのイベント一覧を`BackgroundTasks`経由で渡してくる、実処理のエントリポイント。イベントごとに`_is_duplicate_event`で冪等化チェックを行い（重複ならスキップしてINFOログ）、`MessageEvent`+`TextMessageContent`なら`handle_message`、`PostbackEvent`なら`handle_postback`へ振り分ける（`line_handler.add(...)`での登録内容と同じ組合せ）。イベント単位で`try/except`を掛けており、1件の処理で例外が起きても後続イベントの処理を止めない（`handle_message`/`handle_postback`自体も内部で例外を握り潰すが、このループでも二重に防御する）。
+* 根拠: `def dispatch_events(events: List[Any]) -> None:` (行番号: 360〜392)
+
+
+* **引数/リクエスト**: `events: List[Any]`（`line_handler.parser.parse()`が返すパース済みイベントのリスト）
+* 根拠: (行番号: 360)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: (行番号: 360)
+
+
+* **副作用**: `handle_message`/`handle_postback`の実行に伴う副作用一式、重複スキップ時のINFOログ、例外発生時のERRORログ
+* 根拠: (行番号: 380〜392)
+
+
+* **エラーハンドリング**: イベントごとの`try/except Exception`で例外を捕捉しERRORログ（`exc_info=True`）を出力、後続イベントの処理は継続する
+* 根拠: `except Exception as e: logger.error(f"dispatch_events Error: {e}", exc_info=True)` (行番号: 391〜392)
+
+
 ## 5. 処理フロー図
 
-本ファイルはSDKのイベントハンドラー本体のみを定義する。署名検証と`line_handler.handle()`の呼び出しは`routers/webhook_router.py`の`callback_line()`（本ファイル外）が担う。SDK初期化に成功した場合のみ、モジュール末尾で`handle_message`/`handle_postback`がイベントハンドラーとして登録される。
+本ファイルは実処理のディスパッチ本体（`dispatch_events`）とハンドラー関数（`handle_message`/`handle_postback`）を定義する。署名検証・パースは`routers/webhook_router.py`の`callback_line()`（本ファイル外）が担い、パース済みイベントを`BackgroundTasks`経由で`dispatch_events()`へ渡す。SDK初期化に成功した場合、モジュール末尾で`handle_message`/`handle_postback`が`line_handler.add(...)`にも登録されるが（後方互換）、実際の呼び出しは`dispatch_events()`内の`isinstance`分岐を経由する。
 
 ```mermaid
 flowchart TD
-    Start([Start: SDKがイベントをディスパッチ]) --> RouteEvent{イベント種別}
+    Start([Start: dispatch_events()がBackgroundTasks経由で呼ばれる]) --> DupCheck{"_is_duplicate_event?"}
+    DupCheck -- Yes --> SkipDup["スキップ(INFOログ)"]
+    DupCheck -- No --> RouteEvent{イベント種別}
     
     RouteEvent -- MessageEvent --> HandleMsg["handle_message()"]
     HandleMsg --> GetDisplayName["_get_display_name()"]

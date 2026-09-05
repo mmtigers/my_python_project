@@ -22,7 +22,7 @@ import pytest
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
 
-from file_utils import sanitize_filename, DiscordCircuitBreaker  # noqa: E402
+from file_utils import sanitize_filename, DiscordCircuitBreaker, resolve_my_home_system_root  # noqa: E402
 
 
 class TestSanitizeFilenameBasicBehavior:
@@ -122,3 +122,48 @@ class TestDiscordCircuitBreaker:
         assert breaker.is_open is True
         breaker.record_success()
         assert breaker.is_open is False
+
+
+class TestResolveMyHomeSystemRoot:
+    """品質: プロジェクトルート解決の3スクリプト不統一を解消したresolve_my_home_system_rootの回帰テスト。
+
+    以前はbatch_download_discord.py(MY_HOME_SYSTEM_ROOT環境変数 + servicesディレクトリを
+    上位探索するロバストな方式)と、newface_monitor.py/extract_youtube_urls.py
+    (current_dir.parent / "MY_HOME_SYSTEM"という固定の兄弟ディレクトリ前提のみの単純な
+    方式)という異なる2方式が個別に実装されていた。
+    """
+
+    def test_env_var_override_takes_priority(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MY_HOME_SYSTEM_ROOT", str(tmp_path / "custom_root"))
+        current_dir = tmp_path / "DDD"
+        current_dir.mkdir()
+        assert resolve_my_home_system_root(current_dir) == tmp_path / "custom_root"
+
+    def test_resolves_sibling_my_home_system_directory(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("MY_HOME_SYSTEM_ROOT", raising=False)
+        current_dir = tmp_path / "DDD"
+        current_dir.mkdir()
+        sibling = tmp_path / "MY_HOME_SYSTEM"
+        (sibling / "services").mkdir(parents=True)
+
+        assert resolve_my_home_system_root(current_dir) == sibling
+
+    def test_falls_back_to_upward_search_when_sibling_layout_is_absent(self, tmp_path, monkeypatch):
+        """develop/DDDのようにMY_HOME_SYSTEMという名前の兄弟ディレクトリが
+        存在しないレイアウトでも、servicesディレクトリを持つ祖先を探索できること。"""
+        monkeypatch.delenv("MY_HOME_SYSTEM_ROOT", raising=False)
+        project_root = tmp_path / "develop"
+        (project_root / "services").mkdir(parents=True)
+        current_dir = project_root / "DDD"
+        current_dir.mkdir()
+
+        assert resolve_my_home_system_root(current_dir) == project_root
+
+    def test_falls_back_to_current_dir_when_nothing_is_found(self, tmp_path, monkeypatch):
+        """個人環境固有の固定パスへフォールバックせず、呼出し元がImportErrorで
+        フェイルソフトできるようcurrent_dir自身を返すこと。"""
+        monkeypatch.delenv("MY_HOME_SYSTEM_ROOT", raising=False)
+        current_dir = tmp_path / "isolated" / "DDD"
+        current_dir.mkdir(parents=True)
+
+        assert resolve_my_home_system_root(current_dir) == current_dir

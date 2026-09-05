@@ -69,7 +69,7 @@
 | --- | --- | --- |
 | `services.notification_service._send_discord_webhook` | 実装が別ファイルに存在し、Webhook URLや認証方式、`image_data`引数の扱いなど詳細は本ファイルからは不明。ただし見つからない場合のフォールバック(`_standalone_send_discord_webhook`)自体は本ファイル内に実装があり、無効化されたダミー(`pass`)ではなく`os.getenv`で`DISCORD_WEBHOOK_ERROR`/`DISCORD_WEBHOOK_NOTIFY`(または`DISCORD_WEBHOOK_URL`)を参照し`requests.post`で実際に送信する簡易実装であることは本ファイルから確認できる。 | 根拠: [フォールバック関数定義とimport/except] (行番号: 84〜115 / 抜粋: "def _standalone_send_discord_webhook(messages, image_data=None, channel="notify") -> bool:", "_send_discord_webhook = _standalone_send_discord_webhook") |
 | `file_utils.sanitize_filename` | サニタイズの具体的なルール（禁止文字、長さ制限等）が本ファイルからは不明。 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 65〜79 / 抜粋: "_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")") |
+| `MY_HOME_SYSTEM_ROOT` 環境変数 / `services` ディレクトリ探索 | プロジェクトルート自動探索ロジックが依存する `services` ディレクトリの実際の配置や、環境変数が設定される運用上の前提が不明。**（品質で修正）** 解決ロジック自体は`file_utils.resolve_my_home_system_root`へ集約され、`newface_monitor.py`/`extract_youtube_urls.py`と共通化された。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 67〜72 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)")、詳細は`file_utils.md`の`resolve_my_home_system_root`を参照 |
 | `yt_dlp.YoutubeDL` / `yt_dlp.version.__version__` | `extract_info`/`download`の内部実装や、バージョン文字列の生成規則の詳細は`yt_dlp`本体に依存し、本ファイルからは分からない。 | 根拠: [yt_dlp利用箇所] (行番号: 472, 547, 915 / 抜粋: "installed = datetime.datetime.strptime(yt_dlp.version.__version__, "%Y.%m.%d")", "with yt_dlp.YoutubeDL(ydl_opts) as ydl:") |
 | `curl_cffi`のブラウザ偽装(`impersonate`)実装 | `impersonate="chrome"`が実際にどのChrome版相当のTLS/HTTP指紋を再現するか、対応バージョンの下限など`curl_cffi`本体の実装詳細は本ファイルからは分からない。 | 根拠: [curl_cffi呼び出し箇所] (行番号: 701〜706, 746〜751 / 抜粋: "impersonate="chrome",") |
 
@@ -793,31 +793,53 @@
 * 根拠: [Issue #104修正のtry/except] (行番号: 801〜815 / 抜粋: "try:\n                for future in as_completed(futures):\n                    idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる\n                    resolved[idx] = local_uri\n            except Exception:", "executor.shutdown(wait=True, cancel_futures=True)\n                raise")
 
 
-### `ScrapingStrategy._download_with_ytdlp`
+### `ScrapingStrategy._prepare_fragment_tmp_dir` / `_merge_fragments_and_transfer_to_nas`（品質で追加）
 
-* **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化→`_download_segments_and_localize_manifest`で全セグメントを`curl_cffi`経由で並行ダウンロードしローカル`file://` URIへ差し替える、というパイプラインを実行したうえで、以下の**ローカルディスク完結の結合＋NASへの2段階転送**方式でファイルを完成させる（PR #72でNAS上に直接結合する旧実装から変更）。
-  1. セグメント本体・差し替え済みマニフェスト(`playlist.m3u8`)は`CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")`という**ローカルディスク**上の一時ディレクトリ(`tmp_dir`)へ書き込む（NAS上の`save_dir`ではない）。開始前に同名`tmp_dir`が残っていれば削除してから作り直し、書き込み前に`FileSystemManager.check_disk_space`で`CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB`以上の空きを確認する。
+* **役割**: いずれも`_download_with_ytdlp`（以前は約135行の単一メソッドだった）から分離された静的/インスタンスメソッド。`_prepare_fragment_tmp_dir`は**ローカルディスク**上のセグメント取得用一時ディレクトリ(`tmp_dir`)の準備（既存ディレクトリの削除→再作成→`FileSystemManager.check_disk_space`による空き容量確認）を担う。`_merge_fragments_and_transfer_to_nas`は、セグメント取得(`_download_segments_and_localize_manifest`)→結合前の空き容量再チェック→`yt_dlp`によるローカルディスク上での結合→NAS上の一時ファイルへの`shutil.copy2`転送→ファイルサイズ検証→アトミックな`replace`、という一連の処理を担う。両メソッドとも副作用の内容自体は分離前の`_download_with_ytdlp`と完全に同一であり、`_merge_fragments_and_transfer_to_nas`が送出する例外は呼び出し元`_download_with_ytdlp`の`try/except`がそのまま捕捉する。
+* 根拠: [各メソッド定義とDocstring] (行番号: 965〜966, 995〜996 / 抜粋: "def _prepare_fragment_tmp_dir(tmp_dir: Path) -> bool:", "def _merge_fragments_and_transfer_to_nas(")
+
+
+* **引数/リクエスト**: `_prepare_fragment_tmp_dir(tmp_dir: Path)`。`_merge_fragments_and_transfer_to_nas(self, localized_manifest: str, page_url: str, tmp_dir: Path, local_merged_path: Path, nas_tmp_path: Path, final_path: Path)`
+* 根拠: [各シグネチャ] (行番号: 966, 997〜1004)
+
+
+* **戻り値/レスポンス**: いずれも`bool`。`_prepare_fragment_tmp_dir`はディレクトリ作成失敗・空き容量不足時`False`（エラーログ出力済み）。`_merge_fragments_and_transfer_to_nas`は結合前の空き容量不足時のみ`False`（エラーログ出力済み）、それ以外の失敗は例外として送出される。
+* 根拠: [戻り値ヒントと各return] (行番号: 966, 1024〜1030, 1096)
+
+
+* **副作用**: `_prepare_fragment_tmp_dir`は`tmp_dir`の`shutil.rmtree`/`mkdir`。`_merge_fragments_and_transfer_to_nas`は`_download_segments_and_localize_manifest`によるネットワークアクセス（`curl_cffi`）とローカルディスクへの書き込み、`yt_dlp`によるローカルディスク上での結合実行、`shutil.copy2`によるNAS上の一時ファイルへのコピー、検証成功時の`nas_tmp_path.replace(final_path)`。
+* 根拠: [処理本体] (行番号: 980〜992, 1052〜1096)
+
+
+* **エラーハンドリング**: `_prepare_fragment_tmp_dir`はディレクトリ作成失敗時の`OSError`を捕捉してエラーログを出力し`False`を返す。`_merge_fragments_and_transfer_to_nas`自体には`try/except`は無く、NASサイズ不一致時に`OSError`を送出するのみで、それ以外の例外はそのまま呼び出し元へ伝播する。
+* 根拠: [OSError捕捉とサイズ検証] (行番号: 971〜973, 1088〜1094)
+
+
+### `ScrapingStrategy._download_with_ytdlp`（品質でヘルパーメソッドへ分割）
+
+* **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化したうえで、`_prepare_fragment_tmp_dir`（品質で追加）による一時ディレクトリ準備、`_merge_fragments_and_transfer_to_nas`（品質で追加）による**ローカルディスク完結の結合＋NASへの2段階転送**（PR #72でNAS上に直接結合する旧実装から変更）を呼び出し、成功時のDiscord通知・失敗時の後始末（`final_path`/`nas_tmp_path`の削除、`BotDetectionError`判定）を行う。**（品質で変更）** 以前はこれら一時ディレクトリ準備・結合・NAS転送の処理がすべて本メソッド内にベタ書きされていたため、`_prepare_fragment_tmp_dir`と`_merge_fragments_and_transfer_to_nas`（いずれも品質で追加）へ分離した。分離後も各処理の内容・エラーハンドリング・`finally`節での`tmp_dir`削除は分離前と完全に同一である。
+  1. セグメント本体・差し替え済みマニフェスト(`playlist.m3u8`)は`CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")`という**ローカルディスク**上の一時ディレクトリ(`tmp_dir`)へ書き込む（NAS上の`save_dir`ではない）。`_prepare_fragment_tmp_dir`が、開始前に同名`tmp_dir`が残っていれば削除してから作り直し、書き込み前に`FileSystemManager.check_disk_space`で`CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB`以上の空きを確認する。
   2. セグメント取得完了後、結合(`yt-dlp`)＋その後の`FixupM3u8`（ffmpeg再多重化）でさらに同程度のディスクを消費する見込みから、取得済みバイト数の約2.2倍の空き容量があるかを結合開始前に**再度**確認し、不足していれば具体的なバイト数を含むエラーログを出力して`False`を返す（ここで中断せず結合まで進めてディスクフルで失敗すると、それまでの帯域・時間が丸ごと無駄になるため）。
   3. `yt_dlp`の`outtmpl`は`final_path`（NAS上）ではなく`local_merged_path`（`tmp_dir`内、ローカルディスク上）を指す。ソースコメントによれば、HLSの`hlsnative`ダウンローダーはローカル`file://`入力であっても出力先(`outtmpl`)に対し「フラグメント毎に`<name>.part-FragN.part`を書き込んでから結合」という動作をするため、これをNAS上で行うと結局NAS上に数百〜数千個の小ファイルが書き込まれ、セグメント取得側で対処したのと同じNASマウント遅延由来の問題（書き込み直後の読み込みでの"fragment not found"、長時間のハング）が結合段階で再発していた（実機のNAS上に大量の`*.part-FragN.part`/`*.ytdl`が残留する形で確認済み）。
   4. 結合完了後、完成した1ファイルのみをNASへ転送する。ローカルディスク→NAS(CIFS)という異種ファイルシステム間のコピーは原子的にできないため、まず`shutil.copy2`で`nas_tmp_path`（`final_path.with_name(final_path.name + ".nastmp")`、NAS上の一時名）へコピーし、`local_merged_path.stat().st_size`と`nas_tmp_path.stat().st_size`を比較する**ファイルサイズ検証**を行う。ソースコメントによれば、NAS(CIFS)は接続が不安定な場合があり、実機のdmesgで`"sends on sock ... stuck for 15 seconds"`や`"No writable handle in writepages"`が確認されており、この場合`shutil.copy2`自体は例外を送出せず「見かけ上成功」してしまい、末尾のmoov atomが丸ごと欠落した再生不能なmp4が生成される実害が確認されている。サイズが一致しない場合は不完全な`nas_tmp_path`を削除して`OSError`を送出する。
   5. サイズ検証に成功した場合のみ、同一ファイルシステム内(NAS上)でのアトミックな`nas_tmp_path.replace(final_path)`を行い、その後Discord成功通知を送信する。
-* 根拠: [_download_with_ytdlp全体とローカル/NAS 2段階転送のコメント] (行番号: 826〜830, 837〜869, 880〜902, 904〜916, 918〜945 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:", "tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")", "'outtmpl': str(local_merged_path),", "local_size = local_merged_path.stat().st_size\n            nas_size = nas_tmp_path.stat().st_size\n            if nas_size != local_size:", "nas_tmp_path.replace(final_path)")
+* 根拠: [_download_with_ytdlpとヘルパー呼び出し] (行番号: 1102〜1131, 1133〜1140 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:", "tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")\n        if not self._prepare_fragment_tmp_dir(tmp_dir):\n            return False", "if not self._merge_fragments_and_transfer_to_nas(\n                localized_manifest, page_url, tmp_dir, local_merged_path, nas_tmp_path, final_path\n            ):\n                return False")
 
 
 * **引数/リクエスト**: `m3u8_url: str`, `final_path: Path`（NAS上の最終保存先）, `page_url: str`, `save_dir: Path`
-* 根拠: [引数定義] (行番号: 826 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
+* 根拠: [引数定義] (行番号: 1102 / 抜粋: "def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（NAS転送・サイズ検証まで成功時`True`。マニフェスト取得失敗・一時ディレクトリ作成失敗・ローカルディスク空き容量不足（初回/結合前の再チェックいずれか）・ダウンロード失敗時は`False`）
-* 根拠: [return文] (行番号: 833, 849, 856, 902, 948, 959 / 抜粋: "if not FileSystemManager.check_disk_space(tmp_dir, min_free_gb=CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB):\n            shutil.rmtree(tmp_dir, ignore_errors=True)\n            return False")
+* 根拠: [return文] (行番号: 1108〜1109, 1117〜1118, 1136〜1137, 1143, 1163, 1174 / 抜粋: "if not self._prepare_fragment_tmp_dir(tmp_dir):\n            return False")
 
 
-* **副作用**: `_fetch_m3u8_manifest`/`_download_segments_and_localize_manifest`によるネットワークアクセス（`curl_cffi`）と**ローカルディスク**上の`tmp_dir`へのファイル書き込み（セグメント本体・`playlist.m3u8`）、ローカルディスクの空き容量チェック（開始前・結合前の2回）、`yt_dlp`によるローカルディスク上での結合実行（`outtmpl`は`local_merged_path`）、`shutil.copy2`によるNAS上の一時ファイル(`nas_tmp_path`)へのコピー、ファイルサイズ比較検証、検証成功時の`nas_tmp_path.replace(final_path)`によるアトミックなNAS上での確定、成功時のDiscord通知、`finally`節での`tmp_dir`削除(`shutil.rmtree`、成功・失敗いずれの場合も実行)。
-* 根拠: [ローカル結合とNAS転送処理] (行番号: 840, 854, 904〜913, 925, 935〜943, 945, 960〜961 / 抜粋: "tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")", "shutil.copy2(str(local_merged_path), str(nas_tmp_path))", "nas_tmp_path.replace(final_path)", "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
+* **副作用**: `_prepare_fragment_tmp_dir`/`_merge_fragments_and_transfer_to_nas`（いずれも品質で追加）への委譲による、ネットワークアクセス・ローカルディスクへのファイル書き込み・NASへの転送。成功時のDiscord通知、`finally`節での`tmp_dir`削除(`shutil.rmtree`、成功・失敗いずれの場合も実行)。
+* 根拠: [ヘルパー呼び出しとfinally] (行番号: 1117, 1133〜1138, 1174〜1175 / 抜粋: "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
 
 
-* **エラーハンドリング**: マニフェスト取得失敗時（`None`）、一時ディレクトリ作成失敗時（`OSError`）、初回または結合前のディスク空き容量不足時はエラーログを出力して`False`を返す（後者2つは`tmp_dir`を削除してから返す）。`BotDetectionError`発生時は生成済みの`final_path`と`nas_tmp_path`（存在すれば）を削除したうえで再送出する。それ以外の例外（NASサイズ不一致による`OSError`含む）はエラーログを出力し、`final_path`が存在すれば削除、`nas_tmp_path`も削除したうえで、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。いずれの経路でも`finally`節で`tmp_dir`（ローカル一時ディレクトリ）を削除する。
-* 根拠: [try-except-finally] (行番号: 949〜961 / 抜粋: "except BotDetectionError:\n            if final_path.exists(): final_path.unlink()\n            nas_tmp_path.unlink(missing_ok=True)\n            raise\n        except Exception as e:", "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
+* **エラーハンドリング**: マニフェスト取得失敗時（`None`）、`_prepare_fragment_tmp_dir`失敗時（一時ディレクトリ作成失敗・空き容量不足）はエラーログ出力済みで`False`を返す。`BotDetectionError`発生時は生成済みの`final_path`と`nas_tmp_path`（存在すれば）を削除したうえで再送出する。それ以外の例外（NASサイズ不一致による`OSError`含む）はエラーログを出力し、`final_path`が存在すれば削除、`nas_tmp_path`も削除したうえで、ボット検知マーカーに一致する場合は`BotDetectionError`として再送出、それ以外は`False`を返す。いずれの経路でも`finally`節で`tmp_dir`（ローカル一時ディレクトリ）を削除する。
+* 根拠: [try-except-finally] (行番号: 1164〜1175 / 抜粋: "except BotDetectionError:\n            if final_path.exists(): final_path.unlink()\n            nas_tmp_path.unlink(missing_ok=True)\n            raise\n        except Exception as e:", "finally:\n            shutil.rmtree(tmp_dir, ignore_errors=True)")
 
 
 ### `BatchDownloader.__init__`（D-L3で変更）
@@ -952,23 +974,45 @@
 * 根拠: [try-exceptとfinally] (行番号: 1289〜1297, 1300〜1305 / 抜粋: "except (BlockingIOError, OSError):\n            # D-L4: 他インスタンス実行中によるスキップは異常系ではなく想定内の\n            # 正常系(newface_monitor.run_monitorと同じ扱い)であり、sys.exit(1)\n            # で終了するとrun_task.sh側がERRORとして記録してしまっていた。\n            # 正常終了(終了コード0)として扱うようreturnに変更する。" / "logger.info(\"⏭️ 他のインスタンスが既に実行中のため終了します (lock busy)\")\n            os.close(lock_fd)\n            return")
 
 
-### `BatchDownloader._run_locked`
+### `BatchDownloader._preflight_checks` / `_prepare_tasks` / `_process_tasks`（品質で追加）
 
-* **役割**: ロック取得後のメイン処理本体。**（Issue #398で変更）** 冒頭で`FileSystemManager.sweep_stale_fragment_dirs()`を呼び出し、前回実行のクラッシュ等でローカルディスク上に残留した`*.fragments.tmp`を一掃したうえで、依存関係チェック、クールダウン確認、時間帯・NASマウント確認、タスク収集、YouTube機能無効時のフィルタリング＆パージ、1回あたりのタスク数上限適用、各タスクの逐次ダウンロード実行（ボット検知時は即座にクールダウンをトリガーして中断）を行う。
-* 根拠: [_run_lockedと冒頭のsweep呼び出し] (行番号: 1251〜1276 / 抜粋: "def _run_locked(self) -> None:\n        # #398: 前回実行のクラッシュ等で残留した*.fragments.tmpを、他プロセスとの\n        # 競合が無いことが保証されたロック取得後の最初に一掃する" / "FileSystemManager.sweep_stale_fragment_dirs()")
+* **役割**: いずれも`_run_locked`（以前は約120行の単一メソッドだった）から分離されたインスタンスメソッド。`_preflight_checks`は、ロック取得後最初に行うべき前提条件チェック（**Issue #398**の`FileSystemManager.sweep_stale_fragment_dirs()`による残留一時ディレクトリの掃除、依存関係チェック、クールダウン確認、時間帯確認、NASマウント確認）をまとめ、いずれかで中断すべき場合は`False`を返す。`_prepare_tasks`は、`_collect_tasks`によるタスク収集、YouTube機能無効時のフィルタリング＆パージ（`_purge_skipped_tasks`）、`MAX_TASKS_PER_RUN`による1回あたりのタスク数上限適用を行い、今回実行対象のタスクリストを返す（実行対象が無ければ空リスト）。`_process_tasks`は、収集済みタスクを順次`DownloadStrategy.download`で処理するメインループ（ボット検知時の即時中断、連続失敗閾値到達時の中断、タスク間の`_sleep_between_tasks`を含む）を担う。3メソッドとも分離前の`_run_locked`と処理内容・ログ出力・エラーハンドリングは完全に同一である。
+* 根拠: [各メソッド定義とDocstring] (行番号: 1352〜1353, 1387〜1388, 1432〜1433 / 抜粋: "def _preflight_checks(self) -> bool:", "def _prepare_tasks(self) -> List[DownloadTask]:", "def _process_tasks(self, tasks: List[DownloadTask]) -> None:")
+
+
+* **引数/リクエスト**: `_preflight_checks(self)`、`_prepare_tasks(self)`、`_process_tasks(self, tasks: List[DownloadTask])`
+* 根拠: [各シグネチャ] (行番号: 1352, 1387, 1432)
+
+
+* **戻り値/レスポンス**: `_preflight_checks`は`bool`（処理を継続してよい場合`True`）。`_prepare_tasks`は`List[DownloadTask]`（実行対象タスク。無ければ空リスト）。`_process_tasks`は`None`。
+* 根拠: [戻り値ヒント] (行番号: 1352, 1387, 1432)
+
+
+* **副作用**: `_preflight_checks`は`sweep_stale_fragment_dirs`・依存関係チェック・クールダウン確認・NASマウント確認、いずれかの中断条件でのログ出力。`_prepare_tasks`は`_collect_tasks`/`_purge_skipped_tasks`の呼び出しとログ出力。`_process_tasks`は各`DownloadStrategy.download`実行によるファイル保存とDiscord通知、`HistoryManager.add_history`への追記、`CooldownManager.trigger_cooldown`の呼び出し、タスク間の`_sleep_between_tasks`。
+* 根拠: [各処理本体] (行番号: 1357〜1382, 1394〜1429, 1436〜1486)
+
+
+* **エラーハンドリング**: `_process_tasks`が、`BotDetectionError`を捕捉した場合は`exc_info=True`付きで`logger.critical`によりログ出力したうえでクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。**（本PRで修正）** `logger.critical`呼び出しに以前`exc_info`が付いておらず、同じメソッド内の他の例外ログ（`except Exception as e:`側）が`exc_info=True`付きであることとの一貫性が無かった。
+* 根拠: [try-exceptとbreak] (行番号: 1443〜1465 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
+
+
+### `BatchDownloader._run_locked`（品質でヘルパーメソッドへ分割）
+
+* **役割**: ロック取得後のメイン処理本体。**（品質で変更）** 以前は前提条件チェック・タスク収集/フィルタリング・メインループが全て本メソッド内にベタ書きされていたため、`_preflight_checks`・`_prepare_tasks`・`_process_tasks`（いずれも品質で追加）へ分離した。本メソッドは、`_preflight_checks`が`False`を返せば即`return`、`_prepare_tasks`が空リストを返せば即`return`、それ以外は起動バナーのログを出力したうえで`_process_tasks`へ委譲する、という3ステップのみで構成される。分離後も各処理の内容・ログ出力・エラーハンドリングは分離前と完全に同一である。
+* 根拠: [_run_locked全体] (行番号: 1488〜1502 / 抜粋: "def _run_locked(self) -> None:\n        if not self._preflight_checks():\n            return\n\n        tasks = self._prepare_tasks()\n        if not tasks:\n            return" / "self._process_tasks(tasks)")
 
 
 * **引数/リクエスト**: なし
 * **戻り値/レスポンス**: `None`
-* 根拠: [戻り値ヒント] (行番号: 935 / 抜粋: "def _run_locked(self) -> None:")
+* 根拠: [戻り値ヒント] (行番号: 1488 / 抜粋: "def _run_locked(self) -> None:")
 
 
-* **副作用**: **（Issue #398で追加）** `FileSystemManager.sweep_stale_fragment_dirs()`によるローカル一時ディレクトリの掃除。依存関係・クールダウン・時間帯・NASマウントの各チェック、`_collect_tasks`/`_purge_skipped_tasks`の呼び出し、`MAX_TASKS_PER_RUN`によるタスク数制限、各`DownloadStrategy.download`の実行によるファイル保存とDiscord通知、`HistoryManager.add_history`への追記、`CooldownManager.trigger_cooldown`の呼び出し、タスク間の`_sleep_between_tasks`。
-* 根拠: [メインループ] (行番号: 1000〜1046 / 抜粋: "for i, task in enumerate(tasks):")
+* **副作用**: `_preflight_checks`/`_prepare_tasks`/`_process_tasks`（いずれも品質で追加）への委譲による間接的な副作用と、起動バナーのログ出力。
+* 根拠: [起動バナー] (行番号: 1496〜1500 / 抜粋: "logger.info(\"=\"*60)\n        logger.info(\"   🚀 Smart Pipeline Downloader (v2.4.0)\")")
 
 
-* **エラーハンドリング**: `BotDetectionError`を捕捉した場合は`exc_info=True`付きで`logger.critical`によりログ出力したうえでクールダウンをトリガーし、Discord通知を送信してループを`break`で即座に中断する。それ以外の個別タスク実行時の例外は捕捉してエラーログを出力し、次のタスクへ処理を継続する。連続失敗数が`CONSECUTIVE_FAILURE_THRESHOLD`に達した場合もエラー通知のうえループを中断する。時間帯超過時や停止シグナル受信時はループを`break`で中断する。**（本PRで修正）** `logger.critical`呼び出しに以前`exc_info`が付いておらず、同じ`_run_locked`内の他の例外ログ（`except Exception as e:`側、行番号1256）が`exc_info=True`付きであることとの一貫性が無かった。
-* 根拠: [try-exceptとbreak] (行番号: 1243〜1265 / 抜粋: "except BotDetectionError as e:\n                logger.critical(f"🚨 ボット検知/レート制限の兆候を検知しました: {e}", exc_info=True)\n                CooldownManager.trigger_cooldown()")
+* **エラーハンドリング**: 本メソッド自体には`try/except`は無い。個別タスク実行時のエラーハンドリングは`_process_tasks`（品質で追加）に委譲される（詳細は同メソッドの項を参照）。
+* 根拠: [メソッド本体] (行番号: 1488〜1502)
 
 
 ## 5. 処理フロー図
@@ -1103,7 +1147,7 @@ flowchart TD
 | --- | --- | --- | --- |
 | 高 | `services/notification_service.py` | Discordへの実際のWebhook送信ロジック、接続先URL、引数の仕様（`image_data`など）がブラックボックスとなっているため。 | 根拠: [import文] (行番号: 85 / 抜粋: "from services.notification_service import _send_discord_webhook") |
 | 中 | `file_utils.py` | `sanitize_filename` の具体的なサニタイズルール（禁止文字、長さ制限等）を確認するため。 | 根拠: [import文] (行番号: 42 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| 低 | プロジェクトルート直下の `services/` ディレクトリ構成 | `PROJECT_ROOT` の自動探索ロジックが依存する前提ディレクトリ構造を確認するため。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 71〜74 / 抜粋: "if (PROJECT_ROOT / "services").exists():") |
+| 低 | プロジェクトルート直下の `services/` ディレクトリ構成 | `resolve_my_home_system_root`（`file_utils.py`）の自動探索ロジックが依存する前提ディレクトリ構造を確認するため。 | 根拠: [PROJECT_ROOT解決処理] (行番号: 71 / 抜粋: "PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)") |
 
 ## 8. 保守上の注意点
 

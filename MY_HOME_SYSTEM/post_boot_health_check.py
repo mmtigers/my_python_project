@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import time
@@ -142,10 +143,19 @@ class PostBootHealthCheck:
             return 
 
         # API
+        # #411 品質: NATURE_REMO_ACCESS_TOKEN未設定時、以前は f-string展開で
+        # "Authorization: Bearer None" という実在しないトークンをそのまま送信し、
+        # 「未設定」ではなく「API NG」として誤報告していた。未設定のAPIは
+        # チェック自体をスキップする。
         api_targets = [
             ("SwitchBot", "https://api.switch-bot.com/v1.0/devices", switchbot_service.create_switchbot_auth_headers()),
-            ("NatureRemo", "https://api.nature.global/1/users/me", {"Authorization": f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"}),
         ]
+        if config.NATURE_REMO_ACCESS_TOKEN:
+            api_targets.append((
+                "NatureRemo",
+                "https://api.nature.global/1/users/me",
+                {"Authorization": f"Bearer {config.NATURE_REMO_ACCESS_TOKEN}"},
+            ))
         api_ngs = []
         for name, url, headers in api_targets:
             if not self._check_http(url, headers=headers):
@@ -167,11 +177,14 @@ class PostBootHealthCheck:
             return
 
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA quick_check;")
-            result = cursor.fetchone()[0]
-            conn.close()
+            # #411 S-L8: 以前はconn.close()を成功パスの末尾でしか呼んでおらず、
+            # cursor.execute/fetchoneが例外を送出するとexcept節には到達するが
+            # 接続はcloseされずリークしていた。contextlib.closingでどの終了経路
+            # でも確実にcloseする。
+            with contextlib.closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA quick_check;")
+                result = cursor.fetchone()[0]
 
             if result == "ok":
                 self.results.append(CheckResult("Database", STATUS_OK, "Integrity OK"))

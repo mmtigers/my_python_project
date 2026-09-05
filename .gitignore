@@ -94,6 +94,10 @@ DDD/list.txt
 DDD/history.txt
 DDD/data/
 DDD/*.json
+# ただし sites.json は known_casts_*.json 等の実行時データとは異なり、
+# newface_monitor.py の監視対象サイト定義(旧: ファイル内Pythonリテラル)を
+# 保持するソース設定ファイルであるため追跡対象とする (#413)。
+!DDD/sites.json
 # DDD 配下にコミット対象の画像・動画・音声は存在しない
 DDD/**/*.jpg
 DDD/**/*.png

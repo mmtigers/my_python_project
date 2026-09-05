@@ -22,16 +22,19 @@ from contextlib import closing
 import yt_dlp
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
+from file_utils import resolve_my_home_system_root
 
 # ==========================================
 # 0. 環境設定 & ロギング (Unified Logging)
 # ==========================================
-# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)
-# newface_monitor.py と同じ方式: core/ は develop/MY_HOME_SYSTEM/core に実在する
-# (develop/core ではない)。DDDの単なる親ディレクトリではImportErrorになり、
-# 常にローカルフォールバック用スタブへ落ちてしまっていた。
+# プロジェクトルートへのパス解決 (DDD/ から MY_HOME_SYSTEM/core/ を参照するため)。
+# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約
+# (以前はnewface_monitor.pyと同じ、固定の兄弟ディレクトリ前提のみの単純な方式を
+# 個別に実装していた)。core/ は develop/MY_HOME_SYSTEM/core に実在する
+# (develop/core ではない)ため、DDDの単なる親ディレクトリではImportErrorになり、
+# 常にローカルフォールバック用スタブへ落ちてしまう点に変わりはない。
 CURRENT_DIR = Path(__file__).resolve().parent  # ~/develop/DDD
-PROJECT_ROOT = CURRENT_DIR.parent / "MY_HOME_SYSTEM"  # ~/develop/MY_HOME_SYSTEM
+PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)  # ~/develop/MY_HOME_SYSTEM
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 

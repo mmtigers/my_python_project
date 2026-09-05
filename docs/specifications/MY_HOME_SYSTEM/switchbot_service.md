@@ -185,23 +185,23 @@
 ### `get_device_name_by_id`
 
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。
-* 根拠: `get_device_name_by_id` (行番号: 144〜146 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 148〜153 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
-* 根拠: `get_device_name_by_id` (行番号: 144 / 抜粋: "device_id: str")
+* 根拠: `get_device_name_by_id` (行番号: 148 / 抜粋: "device_id: str")
 
 
 * **戻り値/レスポンス**: `Optional[str]` (見つかった場合はデバイス名、存在しない場合はNone)
-* 根拠: `get_device_name_by_id` (行番号: 144 / 抜粋: "-> Optional[str]:")
+* 根拠: `get_device_name_by_id` (行番号: 148 / 抜粋: "-> Optional[str]:")
 
 
-* **副作用**: なし
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 146 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* **副作用**: `DEVICE_NAME_CACHE` が空かつ未試行(`_fetch_attempted`が`False`)の場合、`fetch_device_name_cache()` を1回だけ呼び出して遅延ロードを試みる（**#411 S-L2で追加**: 以前は `fetch_device_name_cache` の呼出元がどこにも無く、`DEVICE_NAME_CACHE` は常に空のままだったため、`devices.json` に登録の無いセンサーからのWebhookは常に `Unknown_<mac>` 表示になっていた）。プロセス起動後の初回呼出し(＝最初のWebhook受信)時にのみ発火し、成否に関わらず以後は再試行しない。
+* 根拠: `get_device_name_by_id` (行番号: 148〜153 / 抜粋: "if not DEVICE_NAME_CACHE and not _fetch_attempted:")
 
 
-* **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）
-* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 146 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
+* **エラーハンドリング**: なし（辞書の `get` メソッドによりKeyErrorを回避）。遅延ロード自体が失敗しても`fetch_device_name_cache`内で例外は握り潰され`False`が返るのみで、本関数は`None`を返す。
+* 根拠: `DEVICE_NAME_CACHE.get` (行番号: 153 / 抜粋: "return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 

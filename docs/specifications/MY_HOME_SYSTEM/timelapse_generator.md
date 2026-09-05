@@ -317,7 +317,7 @@ graph TD
 * 対象カメラは `_main_locked`内のローカル辞書 `TARGET_CAM_MAP`（行番号: 320〜324）に「防犯カメラ」「駐車場カメラ」「玄関カメラ」の3台がハードコードされており、`config`側の設定には依存していない。カメラを追加・変更する際は本ファイルを直接編集する必要がある。
 * **多重起動防止ロックの追加（Issue #240で修正）**: 姉妹システム(`smart_timelapse_generator.py`/`daily_timelapse_job.py`)は`timelapse_job_lock()`(fcntlベースの排他ロック)で多重実行を防いでいるが、本ファイルは以前この仕組みを一切使用しておらず、`main`末尾の`cleanup_tmp_video_dir(config.TMP_VIDEO_DIR)`が共有一時ディレクトリ(`config.TMP_VIDEO_DIR`)配下を無条件に全消去するため、二重起動（手動実行とcron実行の重複等）時に一方の処理中クリップファイルがもう一方のクリーンアップで削除されうる不具合があった。修正後は`main()`が`smart_timelapse_generator.py`の`timelapse_job_lock()`を取得し、取得できた場合のみ処理本体`_main_locked()`を実行するようになった（取得できなかった場合は警告ログを出力してスキップ）。
 * `process_video_clips` や `upload_video_to_discord` で `subprocess.run` を実行する際、`shell=False`（リスト形式の引数）であるためコマンドインジェクションの脆弱性は低いが、例外処理が設定されていない箇所がある（`stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL` で実行されている箇所の失敗が検知されない）。
-* `upload_video_to_discord` で `getattr(config, 'DISCORD_WEBHOOK_REPORT', getattr(config, 'DISCORD_WEBHOOK_URL', None))` としているため、2つめの `getattr` でも属性が存在しない場合は `None` となる。
+* **`#411 S-L1`で修正**: 以前は `upload_video_to_discord` で `getattr(config, 'DISCORD_WEBHOOK_REPORT', getattr(config, 'DISCORD_WEBHOOK_URL', None))` としていたが、`config.DISCORD_WEBHOOK_REPORT` は `config.py` で常にモジュール属性として定義されるため `getattr` の第2引数（フォールバック）は「属性自体が存在しない場合」にしか働かず、値が `None`/空文字列のときは機能しなかった。`config.DISCORD_WEBHOOK_REPORT or config.DISCORD_WEBHOOK_URL` に変更し、未設定時に確実に `DISCORD_WEBHOOK_URL` へフォールバックするようにした（行番号: 234）。
 * `main` 内でのクリーンアップ処理（`os.remove(f)`）でエラー（使用中など）が発生した場合に例外がキャッチされずプロセスが終了する。
 * `--limit` 引数（検証用）は0より大きい場合のみ有効化され、`event_times` を先頭からその件数に切り詰める。本番運用では未指定（0）を想定した実装になっている。
 

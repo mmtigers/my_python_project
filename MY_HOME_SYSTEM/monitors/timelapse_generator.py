@@ -228,8 +228,10 @@ def upload_video_to_discord(file_path: str, message: str) -> None:
     # ★修正: Discordの10MB制限に対応するため、余裕を見て 8MB を閾値にする
     max_size = 8 * 1024 * 1024
     
-    # configからの取得を安全に行う
-    webhook_url = getattr(config, 'DISCORD_WEBHOOK_REPORT', getattr(config, 'DISCORD_WEBHOOK_URL', None))
+    # configからの取得を安全に行う(#411 S-L1: DISCORD_WEBHOOK_REPORTはconfig.pyで常に
+    # 定義される属性なので、未設定時はNoneや空文字列になるだけでgetattrの第2引数
+    # (フォールバック)は機能しない。空文字列/Noneのときにフォールバックさせるにはorを使う)
+    webhook_url = config.DISCORD_WEBHOOK_REPORT or config.DISCORD_WEBHOOK_URL
     
     if not webhook_url:
         logger.error("❌ DiscordのWebhook URLが設定されていません。")

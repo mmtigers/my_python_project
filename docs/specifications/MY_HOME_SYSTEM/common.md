@@ -10,7 +10,6 @@
 ## 関連ドキュメント
 
 * [logger.md](./logger.md) - `core.logger`の実体。`setup_logging`, `DiscordErrorHandler`を提供
-* [network.md](./network.md) - `core.network`の実体。`get_retry_session`, `create_resilient_session`, `retry_api_call`を提供
 * [database.md](./database.md) - `core.database`の実体。`get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async`を提供
 * [utils.md](./utils.md) - `core.utils`の実体。`get_now_iso`, `get_today_date_str`, `get_display_date`を提供
 * [notification_service.md](./notification_service.md) - `services.notification_service`の実体。`send_push`, `send_reply`, `get_line_message_quota`, `_send_discord_webhook`, `_send_line_push`を提供
@@ -42,7 +41,6 @@
 | `setup_logging` | 外部関数 | グローバルロガーの初期化 | `from core.logger import setup...` (行番号: 15 / 抜粋: "from core.logger import setup") |
 | `DiscordErrorHandler` | 外部クラス等 | 本ファイル内では使用されていない（外部提供用） | `from core.logger import setup...` (行番号: 15 / 抜粋: "from core.logger import setup") |
 | `get_now_iso`, `get_today_date_str`, `get_display_date` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.utils import get_no...` (行番号: 16 / 抜粋: "from core.utils import get_no") |
-| `get_retry_session`, `create_resilient_session`, `retry_api_call` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.network import (` (行番号: 17〜21 / 抜粋: "from core.network import (") |
 | `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from core.database import (` (行番号: 22〜27 / 抜粋: "from core.database import (") |
 | `send_push`, `send_reply`, `get_line_message_quota`, `_send_discord_webhook`, `_send_line_push` | 外部関数等 | 本ファイル内では使用されていない（外部提供用） | `from services.notification_se...` (行番号: 31〜37 / 抜粋: "from services.notification_se") |
 

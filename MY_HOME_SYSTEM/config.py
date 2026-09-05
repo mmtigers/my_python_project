@@ -98,6 +98,24 @@ def verify_and_initialize_storage(base_path: str, max_retries: int = 5) -> bool:
 
     return True
 
+
+def _get_int_env(name: str, default: int) -> int:
+    """環境変数を整数として読み込む。未設定/空文字はデフォルト値、非数値は
+    警告ログを出してデフォルト値にフォールバックする(#411 S-L6)。
+
+    以前は各所で int(os.getenv(name, "default")) を直書きしており、環境変数に
+    誤って空文字や非数値(例: コメント混じりの値)が設定されるとモジュール
+    import時に ValueError が送出され、config 全体のロードが失敗していた。
+    """
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning(f"⚠️ 環境変数 {name}='{raw}' は整数として解釈できません。デフォルト値 {default} を使用します。")
+        return default
+
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stdout)
     formatter = logging.Formatter('[%(levelname)s] %(name)s: %(message)s')
@@ -341,7 +359,7 @@ else:
 
 # 動体検知の過剰発火を防ぐためのクールダウン（秒）
 # デフォルトは60秒。.envで上書き可能。
-MOTION_COOLDOWN_SEC: int = int(os.getenv("MOTION_COOLDOWN_SEC", "60"))
+MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)
 
 # ==========================================
 # 5. 給与(Salary)設定
@@ -463,7 +481,7 @@ UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # ディスクを圧迫し得た。アバター画像用途を想定した上限とする。
 # M15/Issue #325: フロントエンド(family-quest/src/components/ui/AvatarUploader.tsx の
 # MAX_AVATAR_SIZE_BYTES)と同じ5MBに揃えている。変更時は両方を更新すること。
-UPLOAD_MAX_FILE_SIZE_MB: int = int(os.getenv("UPLOAD_MAX_FILE_SIZE_MB", "5"))
+UPLOAD_MAX_FILE_SIZE_MB: int = _get_int_env("UPLOAD_MAX_FILE_SIZE_MB", 5)
 
 # ==========================================
 # 11. 動画処理(タイムラプス・NVR録画)設定
@@ -517,11 +535,11 @@ TIMELAPSE_SEGMENT_TIME: str = "40"
 # 12. 保持期間・クリーンアップ設定
 # ==========================================
 # NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
-RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))
+RECORDING_RETENTION_DAYS: int = _get_int_env("RECORDING_RETENTION_DAYS", 30)
 # #359: 録画VODのHLSセグメントキャッシュ(BASE_DIR/data/hls_streams/vod)の保持日数
-HLS_VOD_RETENTION_DAYS: int = int(os.getenv("HLS_VOD_RETENTION_DAYS", "3"))
+HLS_VOD_RETENTION_DAYS: int = _get_int_env("HLS_VOD_RETENTION_DAYS", 3)
 # DBバックアップの保持日数
-DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))
+DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
 # ==========================================
@@ -583,9 +601,9 @@ CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqu
 # CLINIC_HTML_DIR / CLINIC_STATS_CSV / CLINIC_GRAPH_PATH はASSETS_DIR(遅延解決)配下の
 # ため、モジュール__getattr__で遅延解決する
 
-CLINIC_MONITOR_START_HOUR: int = int(os.getenv("CLINIC_MONITOR_START_HOUR", "8"))
-CLINIC_MONITOR_END_HOUR: int = int(os.getenv("CLINIC_MONITOR_END_HOUR", "19"))
-CLINIC_REQUEST_TIMEOUT: int = int(os.getenv("CLINIC_REQUEST_TIMEOUT", "10"))
+CLINIC_MONITOR_START_HOUR: int = _get_int_env("CLINIC_MONITOR_START_HOUR", 8)
+CLINIC_MONITOR_END_HOUR: int = _get_int_env("CLINIC_MONITOR_END_HOUR", 19)
+CLINIC_REQUEST_TIMEOUT: int = _get_int_env("CLINIC_REQUEST_TIMEOUT", 10)
 CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
 
 # 自動作成ディレクトリへの追加 (printをloggerに置き換え)

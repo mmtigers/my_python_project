@@ -25,7 +25,9 @@
 
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
 * システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
-* 根拠: [CORSミドルウェア設定] (行番号: 171-177 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
+* 根拠: [CORSミドルウェア設定] (行番号: 195-204 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
+* **（#411 S-L7で修正）** `allow_credentials`は`config.CORS_ORIGINS != ["*"]`で動的に決定する。以前は`ALLOW_ALL_ORIGINS=true`で`CORS_ORIGINS=["*"]`になっている場合でも`allow_credentials=True`に固定されており、StarletteのCORSMiddlewareはワイルドカード＋認証情報付きリクエストに対してリクエスト元Originをそのままエコーバックする(仕様上「*」は認証情報付きレスポンスヘッダとしては使えないため)。結果として、`ALLOW_ALL_ORIGINS=true`時は任意オリジンからCookie等の資格情報付きアクセスを実質許可してしまっていた。ワイルドカード指定時のみ`allow_credentials`をFalseにする。
+* 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 203)
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
 * アプリケーション起動・終了時（ライフサイクル）に連動して、サブプロセス（カメラ監視スクリプト、スケジューラースクリプト）の起動と終了管理、およびセンサー関連タスクのキャンセル処理を行う。
 * 未捕捉例外のグローバルハンドリングを担う。

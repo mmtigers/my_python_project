@@ -67,6 +67,29 @@ class TestCheckNetworkAndApis:
         assert result.status == STATUS_OK
         assert result.message == "All Connected"
 
+    def test_nature_remo_check_is_skipped_when_token_not_configured(self, monkeypatch):
+        """#411 品質: NATURE_REMO_ACCESS_TOKEN未設定時、以前は"Bearer None"という
+        実在しないトークンをそのまま送信し「未設定」ではなく「API NG」と誤報告していた。
+        未設定ならチェック自体をスキップし、他のAPIが正常ならOKになることを確認する。"""
+        monkeypatch.setattr(config, "NATURE_REMO_ACCESS_TOKEN", None)
+        called_urls = []
+
+        def fake_get(url, headers=None, timeout=5):
+            called_urls.append((url, headers))
+            res = MagicMock()
+            res.status_code = 200
+            return res
+
+        checker = PostBootHealthCheck()
+        with patch.object(health_check_module.subprocess, "check_call"):
+            with patch.object(health_check_module.requests, "get", side_effect=fake_get):
+                checker.check_network_and_apis()
+
+        assert not any("nature.global" in url for url, _ in called_urls)
+        result = checker.results[-1]
+        assert result.status == STATUS_OK
+        assert result.message == "All Connected"
+
 
 class TestCheckRecentLogs:
     def test_tail_failure_is_warn_not_silently_clean(self, tmp_path):

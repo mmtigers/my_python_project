@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
+from file_utils import resolve_my_home_system_root
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -64,20 +65,10 @@ FORCE_MODE = "--force" in sys.argv
 CLEAR_COOLDOWN_MODE = "--clear-cooldown" in sys.argv
 
 CURRENT_DIR = Path(__file__).resolve().parent
-_env_root = os.getenv("MY_HOME_SYSTEM_ROOT")
-if _env_root:
-    PROJECT_ROOT = Path(_env_root)
-else:
-    PROJECT_ROOT = CURRENT_DIR
-    for _ in range(3):
-        if (PROJECT_ROOT / "services").exists():
-            break
-        PROJECT_ROOT = PROJECT_ROOT.parent
-    else:
-        # 開発者個人の環境に依存した固定パスへのフォールバックはせず、
-        # notification_service が見つからない場合は下の except ImportError で
-        # 無効化されるだけにする（他の環境でも安全に動く）。
-        PROJECT_ROOT = CURRENT_DIR
+# 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約。
+# notification_service が見つからない場合は下の except ImportError で無効化
+# されるだけなので、ここで解決に失敗しても他の環境で安全に動く。
+PROJECT_ROOT = resolve_my_home_system_root(CURRENT_DIR)
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
@@ -971,6 +962,143 @@ class ScrapingStrategy(DownloadStrategy):
                 new_lines[idx] = local_uri
         return "\n".join(new_lines)
 
+    @staticmethod
+    def _prepare_fragment_tmp_dir(tmp_dir: Path) -> bool:
+        """セグメント取得用の一時ディレクトリを準備する（品質: _download_with_ytdlpから分離）。
+
+        前回実行がクラッシュ等で中断した場合、同名のtmp_dirが未クリーンアップの
+        まま残っている可能性がある。古いフラグメント/結合途中ファイルが今回の
+        試行に混入しないよう、開始前に必ず削除してから作り直す。動画1本あたり
+        数GBのフラグメントを書き込むため、事前に空き容量も確認する。ここを
+        怠ると、ローカルディスクを圧迫してシステム全体（他プロセスやSSH
+        セッション等）に影響しかねない。
+
+        Args:
+            tmp_dir (Path): 準備対象の一時ディレクトリ。
+
+        Returns:
+            bool: 準備に成功した場合True。ディレクトリ作成失敗・空き容量
+                不足の場合はFalse（いずれもエラーログ出力済み）。
+        """
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        try:
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(f"⚠️ 一時フラグメント用ディレクトリの作成に失敗しました: {e}", exc_info=True)
+            return False
+
+        if not FileSystemManager.check_disk_space(tmp_dir, min_free_gb=CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB):
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return False
+
+        return True
+
+    def _merge_fragments_and_transfer_to_nas(
+        self,
+        localized_manifest: str,
+        page_url: str,
+        tmp_dir: Path,
+        local_merged_path: Path,
+        nas_tmp_path: Path,
+        final_path: Path,
+    ) -> bool:
+        """セグメントを取得してyt-dlpで結合し、完成ファイルをNASへ転送する
+        （品質: _download_with_ytdlpから分離）。
+
+        セグメント取得・yt-dlpによる結合(merge)はローカルディスク上で完結させ、
+        完成した1ファイルのみを最後にNASへ移す(理由は呼び出し元のコメント参照)。
+        呼び出し元の_download_with_ytdlpがtry/exceptでBotDetectionError・
+        その他の例外を捕捉するため、本メソッドは例外をそのまま送出する。
+
+        Args:
+            localized_manifest (str): ローカル化済みm3u8マニフェスト文字列。
+            page_url (str): 元動画ページのURL。
+            tmp_dir (Path): セグメント取得用の一時ディレクトリ。
+            local_merged_path (Path): 結合後ファイルのローカル一時パス。
+            nas_tmp_path (Path): NAS上での転送用一時パス。
+            final_path (Path): 最終的な保存先パス（NAS上）。
+
+        Returns:
+            bool: 結合・転送に成功した場合True。ディスク空き容量不足の
+                場合のみFalse（エラーログ出力済み）。それ以外の失敗は
+                例外として送出される。
+        """
+        logger.info(f"📥 セグメント取得開始 (curl_cffi): {final_path.name}")
+        local_manifest = self._download_segments_and_localize_manifest(
+            localized_manifest, page_url, tmp_dir
+        )
+
+        tmp_manifest_path = tmp_dir / "playlist.m3u8"
+        tmp_manifest_path.write_text(local_manifest, encoding="utf-8")
+
+        # セグメント取得完了時点の実サイズをもとに、この先の結合
+        # (yt-dlpによるフラグメント連結)と、その後のFixupM3u8
+        # (タイムスタンプ補正のためのffmpeg再多重化。別ファイルへの
+        # 書き出しを伴う)でさらに同程度のディスク使用が発生することを
+        # 見込み、重い処理を始める前にもう一度空き容量を確認する。
+        # これを怠ると、数十分かけてセグメントを取得した後、結合〜後処理の
+        # 終盤でディスクフルにより"Conversion failed!"のような要領を
+        # 得ないエラーで失敗し、それまでの時間と帯域が丸ごと無駄になる
+        # (実機で確認)。
+        downloaded_bytes = sum(f.stat().st_size for f in tmp_dir.iterdir() if f.is_file())
+        _, _, free_bytes = shutil.disk_usage(tmp_dir)
+        # 結合済みファイル本体 + FixupM3u8が新たに書き出す修正版ファイルの
+        # 分として、取得済みセグメント合計の約2.2倍の空きを要求する。
+        required_bytes = int(downloaded_bytes * 2.2)
+        if free_bytes < required_bytes:
+            logger.error(
+                f"⚠️ ローカルディスクの空き容量不足のため結合処理を中断します "
+                f"(取得済み: 約{downloaded_bytes // (2**30)}GB, "
+                f"必要目安: 約{required_bytes // (2**30)}GB, "
+                f"空き: {free_bytes // (2**30)}GB)。"
+                f"{CONFIG.LOCAL_TMP_DIR} の空き容量を増やしてから再実行してください。"
+            )
+            return False
+
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': str(local_merged_path),
+            'quiet': not CONFIG.SHOW_PROGRESS_BAR,
+            'no_warnings': True,
+            # セグメントは既にローカルへ取得済みのため、yt-dlpにはローカル
+            # ファイルとして渡す(file://URL)。結合処理のみyt-dlp/ffmpegに
+            # 任せ、ネットワークアクセスは一切発生させない。
+            'enable_file_urls': True,
+        }
+        logger.info(f"📥 結合開始 (yt-dlp, ローカルディスク上): {final_path.name}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([tmp_manifest_path.resolve().as_uri()])
+
+        # 完成した1ファイルのみをNASへ書き出す。同一ファイルシステム間の
+        # os.replace()は原子的だが、ローカルディスク→NASという異なる
+        # ファイルシステム間の移動は原子的にできない。そこで
+        # 「save_dir内の一時名へコピー→save_dir内でos.replace()」の2段階に
+        # することで、コピー中に中断してもfinal_path自体は書き換わらず、
+        # _should_skip()が中途半端なファイルを完成済みと誤認しないようにする。
+        logger.info(f"📤 NASへ転送中: {final_path.name}")
+        shutil.copy2(str(local_merged_path), str(nas_tmp_path))
+
+        # NAS(CIFS)は接続が不安定な場合があり、実機のdmesgでも
+        # "sends on sock ... stuck for 15 seconds"や"No writable handle
+        # in writepages"(バッファ済み書き込みをサーバーへ反映できな
+        # かったことを示す)が確認されている。この場合shutil.copy2自体は
+        # 例外を送出せず「見かけ上成功」してしまうことがあり、末尾の
+        # moov atomが丸ごと欠落した再生不能なmp4が生成される実害を確認
+        # した。コピー元とコピー先のファイルサイズを比較し、転送が
+        # 不完全だった場合は成功扱いにしない。
+        local_size = local_merged_path.stat().st_size
+        nas_size = nas_tmp_path.stat().st_size
+        if nas_size != local_size:
+            nas_tmp_path.unlink(missing_ok=True)
+            raise OSError(
+                f"NASへの転送後にファイルサイズが一致しませんでした "
+                f"(ローカル: {local_size} bytes, NAS: {nas_size} bytes)。"
+                "NASの接続不安定による転送不良の可能性があります。"
+            )
+
+        nas_tmp_path.replace(final_path)
+        return True
+
     def _download_with_ytdlp(self, m3u8_url: str, final_path: Path, page_url: str, save_dir: Path) -> bool:
         # HLS(m3u8)は「マニフェスト・全セグメントをcurl_cffi(ブラウザ偽装)で
         # 自前取得してローカルに保存 → yt-dlpにはローカルファイルのみを渡して
@@ -986,21 +1114,7 @@ class ScrapingStrategy(DownloadStrategy):
         # (理由はCONFIG.LOCAL_TMP_DIRのコメント参照)。結合済みの最終ファイルの
         # みNAS上のfinal_pathへ書き出す。
         tmp_dir = CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")
-        # 前回実行がクラッシュ等で中断した場合、同名のtmp_dirが未クリーンアップの
-        # まま残っている可能性がある。古いフラグメント/結合途中ファイルが今回の
-        # 試行に混入しないよう、開始前に必ず削除してから作り直す。
-        shutil.rmtree(tmp_dir, ignore_errors=True)
-        try:
-            tmp_dir.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.error(f"⚠️ 一時フラグメント用ディレクトリの作成に失敗しました: {e}", exc_info=True)
-            return False
-
-        # 動画1本あたり数GBのフラグメントを書き込むため、事前に空き容量を確認する。
-        # ここを怠ると、ローカルディスクを圧迫してシステム全体（他プロセスや
-        # SSHセッション等）に影響しかねない。
-        if not FileSystemManager.check_disk_space(tmp_dir, min_free_gb=CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB):
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if not self._prepare_fragment_tmp_dir(tmp_dir):
             return False
 
         # yt-dlpによる結合(merge)先もローカルディスクにする。以前はここに
@@ -1017,80 +1131,10 @@ class ScrapingStrategy(DownloadStrategy):
         nas_tmp_path = final_path.with_name(final_path.name + ".nastmp")
 
         try:
-            logger.info(f"📥 セグメント取得開始 (curl_cffi): {final_path.name}")
-            local_manifest = self._download_segments_and_localize_manifest(
-                localized_manifest, page_url, tmp_dir
-            )
-
-            tmp_manifest_path = tmp_dir / "playlist.m3u8"
-            tmp_manifest_path.write_text(local_manifest, encoding="utf-8")
-
-            # セグメント取得完了時点の実サイズをもとに、この先の結合
-            # (yt-dlpによるフラグメント連結)と、その後のFixupM3u8
-            # (タイムスタンプ補正のためのffmpeg再多重化。別ファイルへの
-            # 書き出しを伴う)でさらに同程度のディスク使用が発生することを
-            # 見込み、重い処理を始める前にもう一度空き容量を確認する。
-            # これを怠ると、数十分かけてセグメントを取得した後、結合〜後処理の
-            # 終盤でディスクフルにより"Conversion failed!"のような要領を
-            # 得ないエラーで失敗し、それまでの時間と帯域が丸ごと無駄になる
-            # (実機で確認)。
-            downloaded_bytes = sum(f.stat().st_size for f in tmp_dir.iterdir() if f.is_file())
-            _, _, free_bytes = shutil.disk_usage(tmp_dir)
-            # 結合済みファイル本体 + FixupM3u8が新たに書き出す修正版ファイルの
-            # 分として、取得済みセグメント合計の約2.2倍の空きを要求する。
-            required_bytes = int(downloaded_bytes * 2.2)
-            if free_bytes < required_bytes:
-                logger.error(
-                    f"⚠️ ローカルディスクの空き容量不足のため結合処理を中断します "
-                    f"(取得済み: 約{downloaded_bytes // (2**30)}GB, "
-                    f"必要目安: 約{required_bytes // (2**30)}GB, "
-                    f"空き: {free_bytes // (2**30)}GB)。"
-                    f"{CONFIG.LOCAL_TMP_DIR} の空き容量を増やしてから再実行してください。"
-                )
+            if not self._merge_fragments_and_transfer_to_nas(
+                localized_manifest, page_url, tmp_dir, local_merged_path, nas_tmp_path, final_path
+            ):
                 return False
-
-            ydl_opts = {
-                'format': 'best',
-                'outtmpl': str(local_merged_path),
-                'quiet': not CONFIG.SHOW_PROGRESS_BAR,
-                'no_warnings': True,
-                # セグメントは既にローカルへ取得済みのため、yt-dlpにはローカル
-                # ファイルとして渡す(file://URL)。結合処理のみyt-dlp/ffmpegに
-                # 任せ、ネットワークアクセスは一切発生させない。
-                'enable_file_urls': True,
-            }
-            logger.info(f"📥 結合開始 (yt-dlp, ローカルディスク上): {final_path.name}")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([tmp_manifest_path.resolve().as_uri()])
-
-            # 完成した1ファイルのみをNASへ書き出す。同一ファイルシステム間の
-            # os.replace()は原子的だが、ローカルディスク→NASという異なる
-            # ファイルシステム間の移動は原子的にできない。そこで
-            # 「save_dir内の一時名へコピー→save_dir内でos.replace()」の2段階に
-            # することで、コピー中に中断してもfinal_path自体は書き換わらず、
-            # _should_skip()が中途半端なファイルを完成済みと誤認しないようにする。
-            logger.info(f"📤 NASへ転送中: {final_path.name}")
-            shutil.copy2(str(local_merged_path), str(nas_tmp_path))
-
-            # NAS(CIFS)は接続が不安定な場合があり、実機のdmesgでも
-            # "sends on sock ... stuck for 15 seconds"や"No writable handle
-            # in writepages"(バッファ済み書き込みをサーバーへ反映できな
-            # かったことを示す)が確認されている。この場合shutil.copy2自体は
-            # 例外を送出せず「見かけ上成功」してしまうことがあり、末尾の
-            # moov atomが丸ごと欠落した再生不能なmp4が生成される実害を確認
-            # した。コピー元とコピー先のファイルサイズを比較し、転送が
-            # 不完全だった場合は成功扱いにしない。
-            local_size = local_merged_path.stat().st_size
-            nas_size = nas_tmp_path.stat().st_size
-            if nas_size != local_size:
-                nas_tmp_path.unlink(missing_ok=True)
-                raise OSError(
-                    f"NASへの転送後にファイルサイズが一致しませんでした "
-                    f"(ローカル: {local_size} bytes, NAS: {nas_size} bytes)。"
-                    "NASの接続不安定による転送不良の可能性があります。"
-                )
-
-            nas_tmp_path.replace(final_path)
 
             DiscordNotifier.send(f"✅ 動画保存完了 (missav)\nファイル: `{final_path.name}`\n場所: `{save_dir.name}`")
             return True
@@ -1305,7 +1349,13 @@ class BatchDownloader:
             finally:
                 os.close(lock_fd)
 
-    def _run_locked(self) -> None:
+    def _preflight_checks(self) -> bool:
+        """ロック取得後の前提条件チェック（品質: _run_lockedから分離）。
+
+        Returns:
+            bool: 処理を継続してよい場合True。クールダウン中・時間外・NAS
+                未マウントのいずれかで中断すべき場合はFalse（ログ出力済み）。
+        """
         # #398: 前回実行のクラッシュ等で残留した*.fragments.tmpを、他プロセスとの
         # 競合が無いことが保証されたロック取得後の最初に一掃する(SDカード上の
         # ローカルディスクを圧迫し続け、LOCAL_TMP_MIN_FREE_SPACE_GBチェックで
@@ -1320,23 +1370,31 @@ class BatchDownloader:
                 f"🧊 ボット検知クールダウン中のため今回の実行をスキップします "
                 f"（解除予定: {cooldown_until.strftime('%Y-%m-%d %H:%M:%S')}）"
             )
-            return
+            return False
 
         if not SystemHealthChecker.is_within_time_window():
-            if FORCE_MODE: 
+            if FORCE_MODE:
                 logger.debug("⚠️ FORCEモード: 時間制限無視")
             else:
                 logger.info(f"🕒 指定時間外（{CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00）のため終了（--forceで無視可能）")
-                return
+                return False
 
         if not SystemHealthChecker.verify_nas_mount():
-            return
+            return False
 
+        return True
+
+    def _prepare_tasks(self) -> List[DownloadTask]:
+        """今回実行分のタスクリストを収集・フィルタ・上限適用する（品質: _run_lockedから分離）。
+
+        Returns:
+            List[DownloadTask]: 今回実行対象のタスクリスト（実行対象がない場合は空リスト）。
+        """
         tasks = self._collect_tasks()
         if not tasks:
             logger.info("処理対象のURLがありません。")
-            return
-        
+            return []
+
         # YouTube無効時はタスクを除外し、パージ処理へ回す
         skipped_tasks = []
         if not CONFIG.ENABLE_YOUTUBE_DL:
@@ -1346,17 +1404,17 @@ class BatchDownloader:
                     skipped_tasks.append(t)
                 else:
                     valid_tasks.append(t)
-            
+
             if skipped_tasks:
                 logger.info(f"🚫 YouTube機能が無効なため、{len(skipped_tasks)} 件のタスクをスキップおよびパージします。")
                 self._purge_skipped_tasks(skipped_tasks)
-            
+
             tasks = valid_tasks
 
         # パージ後、タスクが0になった場合は終了
         if not tasks:
             logger.info("パージ処理の結果、実行可能なタスクがなくなりました。")
-            return
+            return []
 
         # 1回の実行あたりのタスク数を制限する。ジッター付きの間隔を空けていても、
         # 「1回の起動で数百件を一気に処理する」こと自体が異常なアクセス量になり得るため、
@@ -1369,12 +1427,14 @@ class BatchDownloader:
                 f"{total_pending}件中{len(tasks)}件のみ処理します（残りは次回以降に持ち越し）。"
             )
 
-        logger.info("="*60)
-        logger.info("   🚀 Smart Pipeline Downloader (v2.4.0)")
-        logger.info(f"   Schedule: {CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00")
-        logger.info(f"   Tasks: {len(tasks)}")
-        logger.info("="*60)
+        return tasks
 
+    def _process_tasks(self, tasks: List[DownloadTask]) -> None:
+        """収集済みタスクを順次ダウンロード実行するメインループ（品質: _run_lockedから分離）。
+
+        Args:
+            tasks (List[DownloadTask]): 今回実行対象のタスクリスト。
+        """
         consecutive_failures = 0
         for i, task in enumerate(tasks):
             if self._shutdown_requested: break
@@ -1424,6 +1484,22 @@ class BatchDownloader:
                 self._sleep_between_tasks(task.url)
 
         logger.info("🎉 全処理終了")
+
+    def _run_locked(self) -> None:
+        if not self._preflight_checks():
+            return
+
+        tasks = self._prepare_tasks()
+        if not tasks:
+            return
+
+        logger.info("="*60)
+        logger.info("   🚀 Smart Pipeline Downloader (v2.4.0)")
+        logger.info(f"   Schedule: {CONFIG.START_HOUR}:00 - {CONFIG.END_HOUR}:00")
+        logger.info(f"   Tasks: {len(tasks)}")
+        logger.info("="*60)
+
+        self._process_tasks(tasks)
 
 if __name__ == "__main__":
     if CLEAR_COOLDOWN_MODE:

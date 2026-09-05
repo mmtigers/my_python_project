@@ -11,7 +11,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from core.migrations import apply_pending_migrations
+from core.migrations import apply_pending_migrations, _split_statements, _strip_line_comment
 
 
 def _make_minimal_schema(conn: sqlite3.Connection) -> None:
@@ -211,3 +211,45 @@ def test_apply_pending_migrations_reraises_and_does_not_record_unknown_errors(tm
         assert "0001_broken.sql" not in applied
     finally:
         conn.close()
+
+
+class TestSplitStatementsRobustness:
+    """#411 品質: _split_statementsのロバスト化。
+
+    このリポジトリの規約(コメント・docstringは日本語で書く)ではALTER文の前に
+    長い日本語の説明コメントを書くことが多く、以前の単純な';'分割だと、その
+    プローズ文中に句点代わりのセミコロンが登場した場合に、コメントを読み切る
+    前に誤って文が分割されてしまう恐れがあった。
+    """
+
+    def test_semicolon_inside_a_line_comment_does_not_split_the_statement(self):
+        sql = (
+            "-- この修正ではA;Bのような構成にした。\n"
+            "ALTER TABLE foo ADD COLUMN bar TEXT;\n"
+        )
+        assert _split_statements(sql) == ["ALTER TABLE foo ADD COLUMN bar TEXT"]
+
+    def test_multiple_statements_with_comments_split_correctly(self):
+        sql = (
+            "-- 1つ目のカラム追加\n"
+            "ALTER TABLE foo ADD COLUMN a TEXT;\n"
+            "-- 2つ目; セミコロンを含む説明文\n"
+            "ALTER TABLE foo ADD COLUMN b TEXT;\n"
+            "UPDATE foo SET a = 'x';\n"
+        )
+        assert _split_statements(sql) == [
+            "ALTER TABLE foo ADD COLUMN a TEXT",
+            "ALTER TABLE foo ADD COLUMN b TEXT",
+            "UPDATE foo SET a = 'x'",
+        ]
+
+    def test_blank_and_comment_only_lines_are_ignored(self):
+        sql = "\n-- コメントのみの行\n\nALTER TABLE foo ADD COLUMN c TEXT;\n"
+        assert _split_statements(sql) == ["ALTER TABLE foo ADD COLUMN c TEXT"]
+
+    def test_strip_line_comment_does_not_treat_hyphens_inside_string_literal_as_comment(self):
+        # 文字列リテラル内の "--" はコメント開始として扱わない
+        assert _strip_line_comment("UPDATE foo SET note = 'a--b'") == "UPDATE foo SET note = 'a--b'"
+
+    def test_strip_line_comment_removes_trailing_comment(self):
+        assert _strip_line_comment("ALTER TABLE foo ADD COLUMN c TEXT -- 説明") == "ALTER TABLE foo ADD COLUMN c TEXT "

@@ -97,7 +97,9 @@
 
 
 * `validate_schema_integrity` 呼び出しを含む `sqlite3.connect` ブロック実行時の `Exception` をキャッチし `logger.error` でログ出力。
-* 根拠: `try: ... except Exception as e:` (行番号: 83-88 / 抜粋: "logger.error(f\"Schema Validation Failed: {e}\")")
+* 根拠: `try: ... except Exception as e:` (行番号: 84-89 / 抜粋: "logger.error(f\"Schema Validation Failed: {e}\")")
+* **（#411 S-L8で修正）** 接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため接続がリークしていた。`contextlib.closing`で明示的にcloseするよう変更した。
+* 根拠: `with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:` (行番号: 89)
 
 ## 5. 処理フロー図
 

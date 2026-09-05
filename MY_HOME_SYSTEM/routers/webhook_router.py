@@ -1,9 +1,8 @@
 # MY_HOME_SYSTEM/routers/webhook_router.py
-import asyncio
 import hmac
 import time
 from typing import Optional
-from fastapi import APIRouter, Request, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Request, Header, HTTPException
 from linebot.v3.exceptions import InvalidSignatureError
 
 import config
@@ -18,7 +17,11 @@ logger = setup_logging("webhook_router")
 router = APIRouter()
 
 @router.post("/callback/line")
-async def callback_line(request: Request, x_line_signature: Optional[str] = Header(None)) -> str:
+async def callback_line(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_line_signature: Optional[str] = Header(None),
+) -> str:
     """LINE Bot Webhook"""
     if not line_handler.line_handler:
         raise HTTPException(status_code=501, detail="LINE Bot not configured")
@@ -35,15 +38,25 @@ async def callback_line(request: Request, x_line_signature: Optional[str] = Head
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Body is not valid UTF-8")
 
+    # Issue #376: 以前は WebhookHandler.handle() が署名検証・パース・ディスパッチ
+    # (AI呼び出し・DB書き込み・LINE返信を含む)を全てHTTPレスポンス送信前に完走させて
+    # いたため、AI経路の遅延がそのまま reply token(約1分で失効)の失効リスクに直結して
+    # いた。ここでは署名検証とイベントのパースのみを同期的に行い(HMAC計算とJSONパースの
+    # みでネットワークI/Oを伴わないため軽量)、即座に200を返す。実処理
+    # (handlers/line_handler.dispatch_events、イベント単位の例外隔離・再配信スキップ・
+    # webhookEventIdベースの冪等化・AI呼び出し等はそちら側で行う)はBackgroundTasksで
+    # レスポンス送信後に実行する。
     try:
-        # 同期ハンドラをスレッドで実行。
-        # 複数イベント一括配信時のイベント単位の例外隔離は handlers/line_handler.py の
-        # 各ハンドラ(handle_message / handle_postback)側で行う(#376)。
-        await asyncio.to_thread(line_handler.line_handler.handle, body, x_line_signature)
+        events = line_handler.line_handler.parser.parse(body, x_line_signature)
     except InvalidSignatureError:
         raise HTTPException(status_code=400)
     except Exception as e:
-        logger.error(f"LINE callback error: {e}")
+        # 署名は正しいが本文が不正(JSON decode失敗等)。LINE側のリトライ挙動に
+        # 巻き込まれないよう、ログのみで200を返す(以前からの挙動を踏襲)。
+        logger.error(f"LINE callback parse error: {e}")
+        return "OK"
+
+    background_tasks.add_task(line_handler.dispatch_events, events)
     return "OK"
 
 # 対象とするセンサーのデバイスタイプ（温湿度計やプラグ等は除外）

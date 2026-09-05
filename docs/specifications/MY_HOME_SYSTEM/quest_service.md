@@ -244,20 +244,22 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: (行番号: 178 / 抜粋: "self.user_service = UserService()")
 * **エラーハンドリング**: なし
 
-### `QuestService.calculate_quest_boost`
+### `QuestService._compute_boost_from_last_completed` / `QuestService.calculate_quest_boost`
 
-* **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」は、Issue #108の修正により`is_within_reset_period`と同じJST基準（`datetime.timezone(+9時間)`）に統一された（以前はサーバーのローカル時刻`datetime.datetime.now()`を使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の判定で`days_diff`が1小さくなる不具合があった）。
-* 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 247〜298)
+* **役割**: 対象クエストが`quest_type == 'daily'`かつ`day_of_week`が未設定（曜日限定でない）の場合のみ、最終完了日からの経過日数に応じて取得経験値・ゴールドのボーナスを計算する（`missed_days × 10%`、最大100%）。判定に用いる「現在時刻」は、Issue #108の修正により`is_within_reset_period`と同じJST基準（`datetime.timezone(+9時間)`）に統一された（以前はサーバーのローカル時刻`datetime.datetime.now()`を使っており、サーバーOSのタイムゾーンがJST以外だとJST 0時〜9時の間の判定で`days_diff`が1小さくなる不具合があった）。**（品質・#409 N+1対策で分割）** 計算本体は、DBアクセスを伴わない純粋関数`_compute_boost_from_last_completed(quest, last_completed_at)`へ切り出されている。`calculate_quest_boost(cur, user_id, quest)`は、対象クエストの直近の非rejected完了日時を`quest_history`へ1回問い合わせてから`_compute_boost_from_last_completed`に委譲する薄いラッパーで、単発呼び出し（`process_complete_quest`）から使われる。`get_all_view_data`のようにクエスト×ユーザーの組合せ数だけボーナスを算出する場面では、呼び出し側が全組合せ分の直近完了日時を1クエリでまとめて取得し、`_compute_boost_from_last_completed`へ直接渡すことでN+1クエリを避けている（詳細は`get_all_view_data`の項を参照）。
+* 根拠: `def _compute_boost_from_last_completed(self, quest: Any, last_completed_at: Optional[str]) -> Dict[str, int]:` (行番号: 297〜356)、`def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 358〜370)
 * **（Issue #409 Q-L1 で修正）** 最終実施日の取得条件を `status = 'approved'` から `status != 'rejected'` に変更し、承認待ちの日を「サボり」と誤判定しないようにした。
-* 根拠: `WHERE user_id = ? AND quest_id = ? AND status != 'rejected'` (calculate_quest_boost 内の SELECT)
-* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 252〜253), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 259〜260)
-* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')\n        now_jst = datetime.datetime.now(JST)` (行番号: 273〜274)
-* **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
-* 根拠: (行番号: 247〜248 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
-* **戻り値/レスポンス**: `Dict[str, int]`（`gold`, `exp`の追加ボーナス）
-* 根拠: (行番号: 247, 298)
-* **副作用**: DB参照（`quest_history`）
-* 根拠: (行番号: 263〜267)
+* 根拠: `WHERE user_id = ? AND quest_id = ? AND status != 'rejected'` (calculate_quest_boost 内の SELECT、行番号: 366〜369)
+* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 309〜310)、`if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 316〜317)。`calculate_quest_boost`側にも同じ3条件をまとめた早期return判定があり(行番号: 364〜365)、対象外と分かっているクエストではDB問い合わせ自体を避ける。
+* **（Issue #409 Q-L11 で修正）** `quest_type='daily'`だが`reset_period='weekly'`(週1回のペースで達成すればよいクエスト)の場合、この「連続達成ボーナス」は最終完了日からの経過日数を「サボった日数」とみなして加点する設計のため、正常に毎週1回のペースで完了しているだけでも`days_diff`が常に約7となり、実質常時+60%相当のボーナスが付与されてしまう潜在バグがあった(未発火のまま残っていたが、`reset_period='weekly'`のdailyクエストが実際に作成されれば発現する状態だった)。`reset_period`が(未設定時のデフォルトの)`'daily'`以外の場合はボーナス自体を発生させないようにした。
+* 根拠: `if (quest['reset_period'] or 'daily') != 'daily': return {"gold": 0, "exp": 0}` (行番号: 325〜326)
+* 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 332、`JST`はモジュールレベル定数)
+* **引数/リクエスト**: `_compute_boost_from_last_completed`: `quest: Any`, `last_completed_at: Optional[str]`。`calculate_quest_boost`: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
+* 根拠: (行番号: 297, 358)
+* **戻り値/レスポンス**: いずれも`Dict[str, int]`（`gold`, `exp`の追加ボーナス）
+* 根拠: (行番号: 297, 358)
+* **副作用**: `calculate_quest_boost`のみDB参照（`quest_history`）。`_compute_boost_from_last_completed`は副作用なし。
+* 根拠: (行番号: 366〜369)
 * **エラーハンドリング**: 日時パースエラー時に`pass`で無視し、ボーナスなし扱いとする。
 * 根拠: (行番号: 281〜282 / 抜粋: "except Exception:\n                pass")
 
@@ -586,7 +588,11 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: `def get_all_view_data(self, viewer_user_id: Optional[str] = None) -> Dict[str, Any]:` (行番号: 1128), `users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]` (行番号: 1130), 並べ替え処理 (行番号: 1141〜1143 / 抜粋: "if quest_data:\n                canonical_order = {u['user_id']: i for i, u in enumerate(quest_data.USERS)}\n                users.sort(key=lambda u: canonical_order.get(u['user_id'], len(canonical_order)))")
 * **（Issue #409 Q-L2 で修正）** `target_user='all'` のクエストも `viewer_user_id` の履歴で `calculate_quest_boost` を算出する（以前は常に 0）。JST 計算を囲んでいた到達不能な try/except を削除。あわせて `_process_approve_quest_locked` は履歴のユーザーが存在しない場合 404 を返す。
 * 根拠: `if q['target_user'] == 'all' or not q['target_user']: boost_user_id = viewer_user_id`
-* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 1147), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 1151)
+* 根拠: `known_user_ids = {u['user_id'] for u in users}` (行番号: 1223), `boost_user_id = q['target_user'] if q['target_user'] in known_user_ids else viewer_user_id` (行番号: 1232)
+* **（品質・#409 N+1対策で修正）** 以前は`filtered_quests`のループ内でクエストごとに`calculate_quest_boost`を呼び、クエストごとにquest_historyへの個別SELECTを発行していた（`GET /data`1回でクエスト数分のクエリが発生）。ループの前に対象となりうる全`(user_id, quest_id)`組合せの「直近の非rejected完了日時」を`GROUP BY`付き1クエリでまとめて取得する`last_completed_map`辞書を構築し、ループ内ではDBアクセスを伴わない純粋関数`calculate_quest_boost._compute_boost_from_last_completed`にこの辞書からの引き当て結果を渡すだけにした（DBへ問い合わせる`calculate_quest_boost`本体は、単発呼び出しの`process_complete_quest`からのみ引き続き使われる）。同様に`sync_master_data`の失効報酬(`stale_rewards`)判定も、報酬ごとの個別`SELECT 1 FROM user_inventory ...`を、対象`reward_id`群をまとめて問い合わせる1クエリ(`SELECT DISTINCT reward_id ... WHERE reward_id IN (...)`)に置き換えた。
+* 根拠: `last_completed_map: Dict[tuple, str] = {` (行番号: 1244〜1252)、`def _compute_boost_from_last_completed(self, quest: Any, last_completed_at: Optional[str]) -> Dict[str, int]:` (`calculate_quest_boost`直前に定義)、`referenced_reward_ids = {` (`sync_master_data`内、`stale_reward_ids`構築直後)
+* **（F-L6・#412で修正）** `target_user='siblings'`(兄妹連携)クエストは、`_process_coop_quest_completion`が兄妹2人分の`quest_history`を必ず同一`completed_at`でセット作成するため、どちらの子の`user_id`で見ても連続達成ボーナスは本来同じ結果になる。しかし以前は`target_user`が`known_user_ids`に含まれない(=実在ユーザーでない)場合に一律`viewer_user_id`へフォールバックしていたため、`viewer_user_id`が兄妹のどちらでもない場合(親が閲覧中、または横画面4分割ビュー(Echo Show)で`viewer_user_id`が常に`users[0]`固定になる場合)、その閲覧者にはこのクエストの`quest_history`行が一切無く連続達成ボーナスが常に0固定になっていた。`target_user == 'siblings'`の場合は`viewer_user_id`を無視し、実際に`ROLE_CHILD`の`user_id`(`sibling_child_ids`の先頭)を代表として使うよう変更した。
+* 根拠: `sibling_child_ids = [u['user_id'] for u in users if u.get('role') == ROLE_CHILD]` (行番号: 1243)、`elif q['target_user'] == 'siblings' and sibling_child_ids: boost_user_id = sibling_child_ids[0]` (行番号: 1269〜1270)
 * 根拠: 報酬フィールドの一本化 (行番号: 1164〜1170 / 抜粋: "rewards = [dict(row) for row in cur.execute(\"SELECT * FROM reward_master\")]\n            for r in rewards:\n                # #291: icon/cost という重複フィールド名の付与(icon_key/cost_gold\n                # の別名)を廃止し、DBの実カラム名に一本化する。desc は\n                # description の同期用レガシー列(sync_strict.py参照)であり、\n                # このビュー応答では description のみを正としてdesc自体を落とす。\n                r.pop('desc', None)")
 * 根拠: `try:\n                now_jst = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))` ... `except Exception as jst_err:` (行番号: 1173〜1177)
 * **引数/リクエスト**: `viewer_user_id: Optional[str] = None`（省略時は`None`。`target_user`が実在ユーザーでない共有クエストのボーナス計算で、閲覧中ユーザーの代表IDとして使われる）

@@ -27,7 +27,8 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `subprocess` | 標準ライブラリ | OSコマンド（systemctl, pgrep, vcgencmd）の実行 | 根拠: `import subprocess` (行番号: 2 / 抜粋: "import subprocess") |
+| `re` | 標準ライブラリ | `is_process_alive`のpgrep用パターン組み立て(`re.escape`)（#411 S-L11で追加） | 根拠: `import re` (行番号: 2 / 抜粋: "import re") |
+| `subprocess` | 標準ライブラリ | OSコマンド（systemctl, pgrep, vcgencmd）の実行 | 根拠: `import subprocess` (行番号: 3 / 抜粋: "import subprocess") |
 | `time` | 標準ライブラリ | 現在時刻の取得（リマインダー間隔の判定用） | 根拠: `import time` (行番号: 3 / 抜粋: "import time") |
 | `traceback` | 標準ライブラリ | 例外発生時のスタックトレース取得 | 根拠: `import traceback` (行番号: 4 / 抜粋: "import traceback") |
 | `Path` | 標準ライブラリ | ロックファイルのパス生成とファイル操作 | 根拠: `from pathlib import Path` (行番号: 5 / 抜粋: "from pathlib import Path") |
@@ -74,7 +75,9 @@
 ### `is_process_alive`
 
 * **役割**: `pgrep -f`コマンドを使用して、指定したキーワードに合致するプロセスが起動しているかを判定する。
-* 根拠: `is_process_alive` (行番号: 58〜69 / 抜粋: "res = subprocess.run...")
+* 根拠: `is_process_alive` (行番号: 58〜77 / 抜粋: "res = subprocess.run...")
+* **（#411 S-L11で修正）** 以前は`pgrep -f process_keyword`の単純な部分文字列マッチだったため、`cat unified_server.py`や`vim unified_server.py`のような無関係なコマンドの引数にキーワードが含まれるだけでもヒットし、本来のサーバープロセスが落ちていても誤って「生きている」と判定しうる誤検知の余地があった。`python[0-9.]*\s+\S*<keyword>(\s|$)`という正規表現を組み立て、pythonインタプリタが当該スクリプトを引数として実行しているパターンにのみマッチするよう絞り込んだ。
+* 根拠: `pattern = rf"python[0-9.]*\s+\S*{re.escape(process_keyword)}(\s|$)"` (行番号: 69)
 
 
 * **引数/リクエスト**: `process_keyword: str`
@@ -86,11 +89,11 @@
 
 
 * **副作用**: OSコマンド（`pgrep`）の実行。
-* 根拠: `subprocess.run(["pgrep", "-f", process_keyword]` (行番号: 63〜66 / 抜粋: "res = subprocess.run...")
+* 根拠: `subprocess.run(["pgrep", "-f", pattern]` (行番号: 71〜74 / 抜粋: "res = subprocess.run...")
 
 
 * **エラーハンドリング**: 実行時に例外が発生した場合は `False` を返す。
-* 根拠: `except Exception:` (行番号: 68〜69 / 抜粋: "except Exception:\n        return False")
+* 根拠: `except Exception:` (行番号: 76〜77 / 抜粋: "except Exception:\n        return False")
 
 
 
