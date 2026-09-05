@@ -87,7 +87,6 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [init_unified_db.md](./init_unified_db.md) | SQLiteデータベースの初期化とスキーマ整合性検証を行うスクリプト。テーブル・インデックス作成、マイグレーション適用を行う。 |
 | [logger.md](./logger.md) | システム全体のログ出力設定を管轄するモジュール。コンソール出力、ファイル保存、エラー時のDiscord通知を行う。 |
 | [nas_utils.md](./nas_utils.md) | NASディレクトリへのアクセス状態確認、再マウント試行、ローカルへのフォールバック、復旧時の同期機能を提供するユーティリティ。 |
-| [network.md](./network.md) | HTTPエラーに対するリトライ設定を組み込んだHTTPセッション構築機能、およびAPI呼び出し用のリトライデコレータを提供する。 |
 | [run_task.md](./run_task.md) | 指定されたPythonスクリプトを所定のディレクトリ・仮想環境下で実行し、実行結果をログファイルに記録する。 |
 | [scheduler_boot.md](./scheduler_boot.md) | 指定間隔でプロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行・管理する無限ループのスケジューラ。 |
 | [smart_timelapse_generator.md](./smart_timelapse_generator.md) | OpenCVの背景差分で動画中の動きのある領域を検出し、FFmpegで該当部分を結合したタイムラプス動画を生成、Discordへアップロードする。 |
