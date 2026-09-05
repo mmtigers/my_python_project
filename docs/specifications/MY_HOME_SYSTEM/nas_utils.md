@@ -45,23 +45,25 @@ NASディレクトリへのアクセス状態の確認、マウント外れ時�
 ### `attempt_remount`
 
 * **役割**: OSの`mount`コマンドを`sudo`権限付きで実行し、指定されたマウントポイントの再マウントを試みる。
-* 根拠: `attempt_remount` (行番号: 19〜45 / 抜粋: "res = subprocess.run...")
+* 根拠: `attempt_remount` (行番号: 28〜51 / 抜粋: "res = subprocess.run...")
+* **（#411 S-L9で修正）** 以前は`subprocess.run`に`timeout`未指定で、autofsのデッドロックやネットワークマウント先のハング時に無期限にブロックしうり、呼出元の監視ループ全体を巻き込んで停止させる恐れがあった。`timeout=30`を設定し、`subprocess.TimeoutExpired`を明示的に捕捉してFalseを返すようにした。
+* 根拠: `timeout=30,` (行番号: 48)、`except subprocess.TimeoutExpired:` (行番号: 56〜58)
 
 
 * **引数/リクエスト**: `mount_point: str` (対象のマウントポイント)
-* 根拠: `attempt_remount`引数 (行番号: 19 / 抜粋: "def attempt_remount(mount_point: str) -> bool:")
+* 根拠: `attempt_remount`引数 (行番号: 28 / 抜粋: "def attempt_remount(mount_point: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (コマンドが正常終了(`returncode == 0`)した場合はTrue、それ以外はFalse)
-* 根拠: `attempt_remount`戻り値 (行番号: 39, 42, 45 / 抜粋: "return True", "return False")
+* 根拠: `attempt_remount`戻り値 (行番号: 50, 53, 58, 61 / 抜粋: "return True", "return False")
 
 
 * **副作用**: OSコマンド(`sudo mount`)の実行、ログの出力
-* 根拠: `attempt_remount`内処理 (行番号: 28, 31 / 抜粋: "res = subprocess.run...", "logger.info(...)")
+* 根拠: `attempt_remount`内処理 (行番号: 40, 45 / 抜粋: "res = subprocess.run...", "logger.info(...)")
 
 
-* **エラーハンドリング**: `Exception`をキャッチし、エラーログを出力してFalseを返す。
-* 根拠: `attempt_remount`例外処理 (行番号: 43〜45 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: `subprocess.TimeoutExpired`とその他の`Exception`を別々にキャッチし、いずれもエラーログを出力してFalseを返す。
+* 根拠: `attempt_remount`例外処理 (行番号: 56〜61 / 抜粋: "except subprocess.TimeoutExpired:", "except Exception as e:")
 
 
 
