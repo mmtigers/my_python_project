@@ -9,10 +9,10 @@
 
 本モジュールは migrations/ 配下の *.sql ファイルをファイル名の昇順で適用し、
 適用済みバージョンを schema_migrations テーブルで管理する軽量なランナー。
-既存の quest_service.py 側の実行時チェックは、init_db() を経由しない
-既存の本番運用パス（sync_master_data の初回呼び出し時にのみ列が追加される
-運用）との後方互換のため、あえて残している。今後のスキーマ変更は
-本モジュール経由（migrations/ 配下への追加）で行うことを推奨する。
+quest_service.py 側にあった上記の実行時チェックは Issue #330 で完全に退役済み
+(quest_service.sync_master_data 参照)であり、migrations/ (0000ベースライン+
+0001以降) がスキーマの唯一の定義元である。今後のスキーマ変更は
+本モジュール経由（migrations/ 配下への追加）で行うこと。
 """
 import os
 import sqlite3
@@ -50,17 +50,38 @@ def _discover_migration_files() -> List[str]:
     return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(".sql"))
 
 
+def _strip_line_comment(line: str) -> str:
+    """1行から `--` 以降の行コメントを取り除く。シングルクォート文字列内の `--`
+    （通常のマイグレーションでは想定しにくいが）は保持する単純な状態機械。"""
+    in_string = False
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if ch == "'":
+            in_string = not in_string
+        elif not in_string and ch == "-" and line[i:i + 2] == "--":
+            return line[:i]
+        i += 1
+    return line
+
+
 def _split_statements(sql: str) -> List[str]:
     """
     マイグレーションSQLを ';' 区切りのステートメント単位に分割する。
 
     このリポジトリのマイグレーション規約(migrations/README.md)は「ALTER TABLE ...
     ADD COLUMN を先頭に、後続はシンプルなUPDATE」という単純な構成のみを前提として
-    いるため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は想定しない
-    単純な ';' 分割で足りる（行コメント `-- ...` はステートメント本体の前に残っても
-    SQLiteのパーサが読み飛ばすため問題ない）。
+    いるため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は想定しない。
+    ただし、このリポジトリの規約(コメント・docstringは日本語で書く)では
+    ALTER文の前に長い日本語の説明コメントを書くことが多く(#411 品質:
+    _split_statementsのロバスト化)、そのプローズ文中に句点代わりの
+    セミコロンが登場すると、
+    行コメント全体をまだ読み切っていないのに文が分割されてしまう恐れがある。
+    分割前に各行の `--` 以降の行コメントを取り除くことで、コメント内の
+    セミコロンが誤った分割点にならないようにする。
     """
-    return [s.strip() for s in sql.split(";") if s.strip()]
+    cleaned = "\n".join(_strip_line_comment(line) for line in sql.splitlines())
+    return [s.strip() for s in cleaned.split(";") if s.strip()]
 
 
 def apply_pending_migrations(conn: sqlite3.Connection) -> None:

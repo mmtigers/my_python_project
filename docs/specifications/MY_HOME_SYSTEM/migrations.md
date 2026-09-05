@@ -105,23 +105,28 @@
 * 根拠: `[os.path.isdir分岐]` (行番号: 48〜49 / 抜粋: "if not os.path.isdir(MIGRATIONS_DIR):\n        return []")
 
 
+### `_strip_line_comment`
+
+* **役割**: 1行から`--`以降の行コメントを除去する（**#411 品質で追加**）。シングルクォート文字列中に現れる`-`はコメント開始と誤認しないよう、単純な状態機械でクォート内かどうかを追跡する。
+* 根拠: `def _strip_line_comment(line: str) -> str:` (行番号: 53〜65)
+
 ### `_split_statements`
 
-* **役割**: マイグレーションSQL文字列を`;`区切りでステートメント単位のリストに分割する（Issue #99で新設）。空白のみの要素は除外する。このリポジトリのマイグレーション規約(`migrations/README.md`)が「`ALTER TABLE ... ADD COLUMN`を先頭に、後続はシンプルな`UPDATE`」という単純な構成のみを前提としているため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は考慮しない単純な`;`分割で実装されている。
-* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 53〜63 / 抜粋: "return [s.strip() for s in sql.split(\";\") if s.strip()]")
+* **役割**: マイグレーションSQL文字列を`;`区切りでステートメント単位のリストに分割する（Issue #99で新設）。空白のみの要素は除外する。このリポジトリのマイグレーション規約(`migrations/README.md`)が「`ALTER TABLE ... ADD COLUMN`を先頭に、後続はシンプルな`UPDATE`」という単純な構成のみを前提としているため、文字列/BLOBリテラル内にセミコロンを含むような複雑な文は考慮しない。**（#411 品質で修正）** ただしこのリポジトリの規約(コメント・docstringは日本語で書く)ではALTER文の前に長い日本語の説明コメントを書くことが多く、そのプローズ文中に句点代わりのセミコロンが登場するとコメントを読み切る前に誤って分割されてしまう恐れがあった。`;`で分割する前に各行を`_strip_line_comment`で処理し、行コメント内のセミコロンが分割点にならないようにした。
+* 根拠: `def _split_statements(sql: str) -> List[str]:` (行番号: 68〜84 / 抜粋: "cleaned = \"\\n\".join(_strip_line_comment(line) for line in sql.splitlines())")
 * **引数/リクエスト**: `sql: str`(マイグレーションファイルの全文)
-* 根拠: (行番号: 53)
+* 根拠: (行番号: 68)
 * **戻り値/レスポンス**: `List[str]`(前後の空白を除去したステートメント文字列のリスト。空要素は含まない)
-* 根拠: (行番号: 63)
+* 根拠: (行番号: 84)
 * **副作用**: なし(純粋な文字列処理)
-* 根拠: (行番号: 53〜63)
+* 根拠: (行番号: 68〜84)
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 53〜63)
+* 根拠: (行番号: 68〜84)
 
 ### `apply_pending_migrations`
 
 * **役割**: 追跡テーブルの確保、適用済みバージョンの取得を行った上で、未適用の`.sql`ファイルをファイル名昇順で1件ずつ読み込み、`_split_statements`でステートメント単位に分割して1文ずつ`conn.execute`で実行し、成功時は`schema_migrations`に記録する（Issue #99: 以前は`conn.executescript(sql)`でスクリプト全体を一度に実行していたため、先頭の`ALTER TABLE`が「duplicate column」で失敗するとその時点でスクリプト全体の実行が中断され、後続のデータ移行文(`UPDATE`等)が1文も実行されないままマイグレーション全体が適用済み記録されてしまっていた)。ステートメントごとの`sqlite3.OperationalError`発生時は、モジュールレベルの`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言の場合のみ警告ログを出してそのステートメントをスキップし、後続の文の実行を継続する。ファイル全体としてそれ以外の`OperationalError`が発生した場合は`conn.rollback()`したうえでエラーログを出力し、バージョンを記録せずそのまま再送出して起動処理自体を失敗させる（M-2で導入された選別ロジック自体は維持したまま、Issue #99でステートメント単位の粒度に変更）。
-* 根拠: `[apply_pending_migrations]` (行番号: 66〜115 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
+* 根拠: `[apply_pending_migrations]` (行番号: 87〜136 / 抜粋: "def apply_pending_migrations(conn: sqlite3.Connection) -> None:")
 
 
 * **引数/リクエスト**: `conn` (`sqlite3.Connection`。マイグレーションを適用する対象のDB接続)
@@ -215,7 +220,7 @@ graph TD
 
 * **`OperationalError`の選別許容、ステートメント単位に変更（M-2で導入、Issue #99でステートメント粒度に修正）**: `apply_pending_migrations`は`_ALREADY_APPLIED_ERROR_PATTERNS`(`"duplicate column"`, `"already exists"`)に該当する既知のエラー文言のみを「既に別経路で適用済み」とみなして警告ログで許容し、それ以外の`OperationalError`はロールバックのうえ再送出して起動を失敗させる設計になっている。#99以前は`conn.executescript(sql)`でファイル全体を一括実行していたため、先頭のALTERがduplicate columnで失敗すると後続のUPDATE文が1文も実行されずに「適用済み」記録されてしまっていたが、`_split_statements`でステートメント単位に分割し1文ずつ`conn.execute`する方式に変更したことで、既知パターンのエラーはそのステートメントのみスキップして後続の文の実行が継続されるようになった。`_ALREADY_APPLIED_ERROR_PATTERNS`の文言判定は`str(e).lower()`への部分一致(`in`演算子)であるため、無関係なエラーメッセージにたまたま`"already exists"`等の文字列が含まれる場合は依然として誤って「適用済み」とみなされ得る点は変わっていない。 根拠: `[内側except: ステートメント単位の判定]` (行番号: 100〜107 / 抜粋: "if not any(pattern in message for pattern in _ALREADY_APPLIED_ERROR_PATTERNS):\n                        raise")
 * **`OperationalError`以外の例外は未捕捉**: マイグレーションSQL実行時に`sqlite3.IntegrityError`など`OperationalError`以外の例外が発生した場合は、内側・外側いずれの`try`でも捕捉されず、そのまま呼び出し元(`unified_server.py`等の起動処理)に伝播し、起動処理自体を止める可能性がある。 根拠: `[except節がOperationalErrorのみ(内側/外側とも)]` (行番号: 100, 112 / 抜粋: "except sqlite3.OperationalError as e:")
-* **旧来のスキーマ変更経路との併存**: モジュールdocstringで明言されている通り、`quest_service.py`側の実行時チェック(SELECT失敗時のALTER TABLE)は後方互換のためあえて残されており、スキーマ変更の経路が本モジュールと旧来の仕組みの2系統に分かれている。将来的な整合性維持には注意が必要。 根拠: `[モジュールdocstring]` (行番号: 12〜15 / 抜粋: "既存の quest_service.py 側の実行時チェックは、init_db() を経由しない\n既存の本番運用パス（sync_master_data の初回呼び出し時にのみ列が追加される\n運用）との後方互換のため、あえて残している。")
+* **旧来のスキーマ変更経路は完全退役済み（#411 品質でdocstringの記述を訂正）**: `quest_service.py`側にあった「SELECTを試して失敗したらALTER TABLE」式の実行時チェックは、以前このモジュールのdocstringで「後方互換のためあえて残している」と説明されていたが、実際にはIssue #330で既に完全に退役済み(`quest_service.sync_master_data`のコメント参照)であり、モジュールdocstringが実態と乖離した記述のまま残っていた。migrations/(0000ベースライン+0001以降)がスキーマの唯一の定義元であることをdocstringに明記するよう訂正した。 根拠: `[モジュールdocstring]` (行番号: 10〜15)、`MY_HOME_SYSTEM/services/quest_service.py`の`sync_master_data`内コメント(「Issue #330: 以前ここにあった...レガシー実行時マイグレーション...は完全退役した」)
 * **ファイル名の辞書式ソートに依存**: マイグレーションの適用順序は`sorted()`によるファイル名の辞書式ソートに完全依存しており(行番号50)、ファイル名の命名規則(`0001_`, `0002_`等の連番プレフィックス)が崩れると適用順序が意図と異なる可能性がある。 根拠: `[sorted]` (行番号: 50 / 抜粋: "return sorted(f for f in os.listdir(MIGRATIONS_DIR) if f.endswith(\".sql\"))")
 * **`_split_statements`は文字列/BLOBリテラル内のセミコロンを考慮しない単純な`;`分割**: `migrations/README.md`が定める「ALTER TABLE ADD COLUMNを先頭に、後続はシンプルなUPDATE」という規約の範囲では問題ないが、将来的に文字列リテラル中に`;`を含むデータ移行文(例: `UPDATE ... SET description = '...; ...'`)を書くと、意図しない位置で文が分割され構文エラーになる可能性がある。SQLパーサを使わない素朴な実装であることに留意が必要。 根拠: `[_split_statements]` (行番号: 53〜63 / 抜粋: "return [s.strip() for s in sql.split(\";\") if s.strip()]")
 
