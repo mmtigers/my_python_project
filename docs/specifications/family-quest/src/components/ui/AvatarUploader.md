@@ -100,21 +100,22 @@
 
 ### `handleUpload` (内部関数)
 
-* **役割**: 選択されたファイルを`FormData`（フィールド名`file`）に格納し、`/api/quest/upload`へアップロードして返ってきたURLを`/api/quest/user/update`へ明示的に紐付ける2段階のアップロード処理を行う。成功時は`onUploadComplete`を呼び出し`uploadDone`を`true`にするが、`onClose`は呼ばない（モーダルは自動では閉じない）。以前は存在しない`/api/quest/upload_avatar`にPOSTしており常に失敗していたバグの修正が施されている。
-* 根拠: `const handleUpload = async () =>` (行番号: 52〜78 / 抜粋: "const handleUpload = async () => {")
-* 根拠: バグ修正のコメント (行番号: 61〜64 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
+* **役割**: 選択されたファイルを`FormData`（フィールド名`file`）に格納し、`/api/quest/upload`へアップロードして返ってきたURLを`/api/quest/user/update`へ明示的に紐付ける2段階のアップロード処理を行う。成功時は`onUploadComplete`を呼び出し`uploadDone`を`true`にするが、`onClose`は呼ばない（モーダルは自動では閉じない）。以前は存在しない`/api/quest/upload_avatar`にPOSTしており常に失敗していたバグの修正が施されている。**（#442で追加）** 1段階目のアップロードが成功した時点で返ってきたURLを`uploadedUrl`（`try`ブロック外で宣言したローカル変数）に保持しておき、その後（＝2段階目の紐付け）で例外が発生した場合、`catch`ブロック内で`uploadedUrl`からファイル名を取り出し、`DELETE /api/quest/upload/{filename}`へのベストエフォートのロールバック削除リクエストを追加で発行する。このロールバック呼び出し自体の失敗は`.catch()`で握りつぶしてコンソールにログ出力するのみで、ユーザーには通常の（1つ目の）エラーメッセージのみが表示される。
+* 根拠: `const handleUpload = async () =>` (行番号: 54〜95 / 抜粋: "const handleUpload = async () => {")
+* 根拠: バグ修正のコメント (行番号: 62〜65 / 抜粋: "// ★バグ修正: 以前は存在しない /api/quest/upload_avatar にPOSTしており\n            // 常に失敗していた(実際のアップロード先は /api/quest/upload、フィールド名は file)。\n            // さらにアップロードするだけではユーザーのアバターには反映されないため、\n            // 返ってきたURLを /api/quest/user/update で明示的に紐付ける。")
+* 根拠: ロールバック削除の追加 (行番号: 66, 69, 80〜91 / 抜粋: "let uploadedUrl: string | null = null;", "uploadedUrl = url;", "// #442: 1段階目(画像アップロード)は成功したが2段階目(ユーザーへの紐付け)が\n            // 失敗した場合、アップロード済みの画像がどのユーザーにも紐付かないまま\n            // サーバー上に孤立して残ってしまう。ベストエフォートでロールバック削除を\n            // 試みる(失敗してもユーザーへは元のエラーのみを表示する)。\n            if (uploadedUrl) {\n                const filename = uploadedUrl.split('/').pop();\n                if (filename) {\n                    apiClient.delete(`/api/quest/upload/${encodeURIComponent(filename)}`).catch(rollbackError => {\n                        console.error('Failed to roll back orphaned avatar upload:', rollbackError);\n                    });\n                }\n            }")
 
 * **引数/リクエスト**: なし
-* 根拠: `() =>` (行番号: 52 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `() =>` (行番号: 54 / 抜粋: "const handleUpload = async () => {")
 
 * **戻り値/レスポンス**: `Promise<void>`
-* 根拠: `async` の指定 (行番号: 52 / 抜粋: "const handleUpload = async () => {")
+* 根拠: `async` の指定 (行番号: 54 / 抜粋: "const handleUpload = async () => {")
 
-* **副作用**: `setUploading` によるローディング状態変更、`setErrorMessage(null)`によるエラー表示クリア、`apiClient.postForm`（画像アップロード）と`apiClient.post`（アバターURL紐付け）による2回のネットワーク通信、成功時の `onUploadComplete` 呼び出しと `setUploadDone(true)`、`finally`での`setUploading(false)`。
-* 根拠: `setUploading(true);`, `await apiClient.postForm(...)`, `await apiClient.post(...)`, `onUploadComplete();`, `setUploadDone(true);` (行番号: 55〜71)
+* **副作用**: `setUploading` によるローディング状態変更、`setErrorMessage(null)`によるエラー表示クリア、`apiClient.postForm`（画像アップロード）と`apiClient.post`（アバターURL紐付け）による2回のネットワーク通信、成功時の `onUploadComplete` 呼び出しと `setUploadDone(true)`。**（#442で追加）** 2段階目が失敗した場合、`uploadedUrl`が設定されていれば`apiClient.delete('/api/quest/upload/{filename}')`によるロールバック削除リクエスト（結果を待たない fire-and-forget、失敗時は`console.error`のみ）を追加で発行する。`finally`での`setUploading(false)`。
+* 根拠: `setUploading(true);`, `await apiClient.postForm(...)`, `await apiClient.post(...)`, `onUploadComplete();`, `setUploadDone(true);` (行番号: 57〜75)、ロールバック削除 (行番号: 84〜90)
 
-* **エラーハンドリング**: `try-catch-finally` 構文で通信エラーをキャッチし`errorMessage`にセットする（`Error`インスタンスなら`error.message`、それ以外は既定文言）。成否に関わらず `finally` ブロックでローディング状態を解除する。ファイル未選択時は早期リターンする。
-* 根拠: `if (!fileInputRef.current?.files?.[0]) return;`, `try { ... } catch (error) { ... } finally { ... }` (行番号: 53, 60〜77 / 抜粋: "try {\n            const { url } = await apiClient.postForm...")
+* **エラーハンドリング**: `try-catch-finally` 構文で通信エラーをキャッチし`errorMessage`にセットする（`Error`インスタンスなら`error.message`、それ以外は既定文言）。**（#442で追加）** 続けて、1段階目のアップロードが成功していた（`uploadedUrl`が非`null`）場合のみ、孤立した画像ファイルのベストエフォートなロールバック削除（`apiClient.delete`、失敗は`console.error`にログするのみでユーザーには通知しない）を試みる。成否に関わらず `finally` ブロックでローディング状態を解除する。ファイル未選択時は早期リターンする。
+* 根拠: `if (!fileInputRef.current?.files?.[0]) return;`, `try { ... } catch (error) { ... } finally { ... }` (行番号: 55, 67〜94 / 抜粋: "try {\n            const { url } = await apiClient.postForm...")
 
 ### `triggerSelect` (内部関数)
 
@@ -168,7 +169,12 @@ flowchart TD
     ApiCall1 -- 失敗 --> CatchError["catchブロック: console.error()"]
     ApiCall2 -- 失敗 --> CatchError
     CatchError --> SetUploadError["setErrorMessage(エラー内容)"]
-    SetUploadError --> FinallyBlock
+    SetUploadError --> CheckUploadedUrl{"#442: uploadedUrlが設定済み?\n(=1段階目は成功していた)"}
+    CheckUploadedUrl -- Yes --> RollbackDelete["外部(fire-and-forget): apiClient.delete('/api/quest/upload/{filename}')"]
+    RollbackDelete -- 失敗時のみ --> LogRollbackError["console.error() (ユーザーには非表示)"]
+    CheckUploadedUrl -- No --> FinallyBlock
+    LogRollbackError --> FinallyBlock
+    RollbackDelete -- 成功 --> FinallyBlock
 
     FinallyBlock --> RenderResult["インラインでerrorMessage/成功メッセージを表示\n(uploadDone時はボタンが「閉じる」のみに切替)"]
     RenderResult --> End([End])
@@ -199,6 +205,7 @@ graph TD
     subgraph External System
         UploadAPI["API: POST /api/quest/upload"]
         UpdateAPI["API: POST /api/quest/user/update"]
+        DeleteAPI["API: DELETE /api/quest/upload/{filename} (#442: ロールバック用)"]
         BrowserAPI["FileReader / FormData"]
     end
 
@@ -209,6 +216,7 @@ graph TD
     AvatarUploader -->|"use"| apiClient
     apiClient -.->|"HTTP POST"| UploadAPI
     apiClient -.->|"HTTP POST"| UpdateAPI
+    apiClient -.->|"HTTP DELETE (2段階目失敗時のみ)"| DeleteAPI
     AvatarUploader -->|"use"| BrowserAPI
 ```
 
@@ -222,10 +230,11 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **アップロード成功後にモーダルが自動で閉じない**: `handleUpload` 成功時は `onUploadComplete()` を呼び出して `uploadDone` を `true` にするのみで、`onClose()` は呼ばれない（70〜71行目）。親コンポーネント（`App.tsx`）の `onUploadComplete` は独自に `refreshData()` と `showToast` による成功トーストを表示するため、アバター変更成功時は本コンポーネントの成功メッセージ表示とトーストが同時に発生する構成になっている点に注意が必要。
-* **アップロード先が2エンドポイントに分かれている**: 画像自体のアップロード（`POST /api/quest/upload`）と、ユーザーレコードへのアバターURL紐付け（`POST /api/quest/user/update`）が別々のリクエストとして順に実行される。1つ目が成功し2つ目が失敗した場合、画像はサーバーにアップロード済みだがユーザーには反映されない状態になりうる（本ファイルからはロールバック処理の有無は判断できない）。
-* 根拠: (行番号: 65〜66 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });")
-* **`FormData` 送信時のファイル参照**: `handleUpload` 関数内で送信するファイルを `fileInputRef.current.files[0]` から直接参照している（58行目）。状態管理されている `preview` に紐づくファイルオブジェクトを使用していない。
+* **アップロード成功後にモーダルが自動で閉じない**: `handleUpload` 成功時は `onUploadComplete()` を呼び出して `uploadDone` を `true` にするのみで、`onClose()` は呼ばれない（74〜75行目）。親コンポーネント（`App.tsx`）の `onUploadComplete` は独自に `refreshData()` と `showToast` による成功トーストを表示するため、アバター変更成功時は本コンポーネントの成功メッセージ表示とトーストが同時に発生する構成になっている点に注意が必要。
+* **[修正済み] アップロード先が2エンドポイントに分かれている件のロールバック（#442）**: 画像自体のアップロード（`POST /api/quest/upload`）と、ユーザーレコードへのアバターURL紐付け（`POST /api/quest/user/update`）は依然として別々のリクエストとして順に実行される。以前は1つ目が成功し2つ目が失敗した場合、アップロード済み画像がどのユーザーにも紐付かないまま孤立してサーバーに残り続けていた。現在は`catch`ブロックで`uploadedUrl`（1段階目成功時にセットされる）が設定されていれば、`DELETE /api/quest/upload/{filename}`へのベストエフォートのロールバック削除を追加で発行する。ただし、このロールバック自体はレスポンスを待たない(`.catch()`のみ、`await`しない) fire-and-forgetであり、ロールバック自体が失敗（ネットワーク断・サーバー側エラー等）した場合は`console.error`にログするのみでユーザーには一切通知されず、孤立ファイルの残存を完全には防げない。
+* 根拠: (行番号: 68〜91 / 抜粋: "const { url } = await apiClient.postForm<{ url: string }>('/api/quest/upload', formData);\n            uploadedUrl = url;\n            await apiClient.post('/api/quest/user/update', { user_id: user.user_id, avatar_url: url });", "if (uploadedUrl) {\n                const filename = uploadedUrl.split('/').pop();\n                if (filename) {\n                    apiClient.delete(`/api/quest/upload/${encodeURIComponent(filename)}`).catch(rollbackError => {\n                        console.error('Failed to roll back orphaned avatar upload:', rollbackError);\n                    });\n                }\n            }")
+* **ファイル名の抽出方法**: ロールバック削除対象のファイル名は`uploadedUrl.split('/').pop()`（86行目）で、URLの末尾セグメントをそのまま使う簡易な文字列処理。クエリ文字列やフラグメントを含むURLが返された場合の考慮は無い（本ファイルからは`/api/quest/upload`が返す`url`の正確な形式は不明。§9参照）。
+* **`FormData` 送信時のファイル参照**: `handleUpload` 関数内で送信するファイルを `fileInputRef.current.files[0]` から直接参照している（60行目）。状態管理されている `preview` に紐づくファイルオブジェクトを使用していない。
 * **クライアント側バリデーションはあるがサーバー側の検証内容は不明**: 画像形式（`image/`プレフィックス）とサイズ上限（5MB, `MAX_AVATAR_SIZE_BYTES`）はクライアント側で検証されているが、サーバー側で同等の検証が行われているかは本ファイルからは判断できない。
 * **トリミング処理の不在**: テキストに「正方形にトリミングされます」とあるが、本ファイル内（クライアントサイド）に画像をトリミング・クロップする処理はない。
 * **Issue #117で修正: `preview`/`user.avatar`の`<img src>`直接使用**: 以前はプレビューエリアの表示条件が`preview || user.avatar`（真偽値のみで判定）で、真であれば無条件に`<img src={preview || user.avatar}>`をレンダリングしていた。`user.avatar`はアップロード画像パス（`/uploads/...`）だけでなく未設定時の絵文字デフォルト値（`'⚔️'`等）も取りうるため、絵文字が渡ると壊れた画像アイコンになっていた。`Header.tsx`/`UserStatusCard.tsx`/`FamilyLog.tsx`で既に使われている`isSameOriginAvatarPath`（`@/lib/utils`）による同一オリジンパス判定を導入し、`preview`（選択直後のdata:URL、常に画像として妥当）またはパス形式の`user.avatar`のときのみ`<img>`を描画するよう修正した。
@@ -238,14 +247,15 @@ graph TD
 | 画像のトリミング責務 | フロントエンドに処理がないため、サーバー側で期待通りにトリミングされているか不明なため。 | バックエンドのエンドポイント処理ファイル |
 | `User` 型の全体像 | `user_id`, `avatar` 以外のプロパティが本コンポーネント以外でどのように影響するか不明なため。 | `@/types/index.ts`（または該当の型定義ファイル） |
 | サーバー側のファイルサイズ・形式検証の有無 | クライアント側の5MB/画像形式チェックがサーバー側でも二重に検証されているか不明なため。 | バックエンドのエンドポイント処理ファイル |
-| アップロード成功・紐付け失敗時の整合性 | `/api/quest/upload`成功後に`/api/quest/user/update`が失敗した場合、アップロード済み画像がどう扱われるか（孤立ファイルとして残るか等）不明なため。 | バックエンドのエンドポイント処理ファイル |
+| ロールバック用`DELETE /api/quest/upload/{filename}`エンドポイントの実装詳細 | **（#442）** フロント側は紐付け失敗時にこのエンドポイントへベストエフォートで削除リクエストを送るのみで、サーバー側が実際にどのファイルシステム上のパスを削除するか、権限チェックの有無、他ユーザーの画像を誤って指定した場合の挙動などは本ファイルからは不明なため。 | バックエンドのエンドポイント処理ファイル (`MY_HOME_SYSTEM/routers/quest_router.py`) |
+| `/api/quest/upload`が返す`url`の正確なフォーマット | ロールバック時の`uploadedUrl.split('/').pop()`によるファイル名抽出（86行目）が、クエリ文字列やフラグメントを含む可能性のあるURL形式に対して常に正しいファイル名を返すか、本ファイルからは判断できないため。 | バックエンドのエンドポイント処理ファイル |
 
 ## 相互参照による補足情報
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `apiClient.postForm`/`apiClient.post` の詳細仕様 | `family-quest/src/lib/apiClient.ts`を直接確認した。`postForm`(56〜61行目)は`Content-Type`ヘッダーを明示的に指定せず`body: formData`をそのまま渡す実装で、コメント(53〜55行目)により「ブラウザにboundary付きのヘッダーを自動生成させるため（手動指定するとboundaryが欠落しリクエストが壊れるため）」と明記されている。`post`(43〜51行目)は`Content-Type: application/json`を付与し`JSON.stringify(body)`を送信する。共通の`_request`メソッド(77〜95行目)は`response.ok`が`false`の場合、レスポンスボディを`.json()`でパースし(失敗時は`{}`)、`errorData.detail`が文字列であればそれを、そうでなければ`API Error: {status}`という文字列を`message`として`Error`を`throw`する(83〜88行目)。この`Error`の`message`は`apiClient`呼び出し元(`useGameData.ts`の`extractErrorDetail`等)がユーザー向けエラー表示に利用する。 | 直接ソース確認: `family-quest/src/lib/apiClient.ts:43-95` |
-| 画像のトリミング責務／サーバー側のファイルサイズ・形式検証の有無／アップロード成功・紐付け失敗時の整合性 | `MY_HOME_SYSTEM/routers/quest_router.py`および`MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`POST /upload`(`upload_image`、89〜118行目)は拡張子チェック(`.jpg`/`.jpeg`/`.png`/`.gif`/`.webp`、92〜95行目)とマジックナンバー検証(`validate_image_header`、82〜87行目、JPEG/PNG/GIF/WEBPの先頭バイト列を確認)のみを行い、画像を正方形にトリミング・リサイズする処理はコード上に存在しない。ファイルサイズの上限チェック（`MAX_AVATAR_SIZE_BYTES`相当のサーバー側検証）も本関数内には存在せず、`MY_HOME_SYSTEM/config.py`・`MY_HOME_SYSTEM/tests/test_quest_router_api.py`（アップロードのテストケース群、134〜199行目）を確認してもファイルサイズを検証するテスト・実装は見つからなかった。`POST /user/update`(`update_user_avatar`、77〜79行目)は`UserService.update_avatar`(quest_service.py 105〜115行目)を呼び出し、`quest_users`テーブルの`avatar`カラムをUPDATEするのみで、ユーザーが存在しない場合は`HTTPException(status_code=404)`(108〜109行目)を送出する。`update_avatar`内には、アップロード済み画像ファイル（`/upload`が保存したファイル）を削除・ロールバックする処理や、アップロードとの紐付けを検証する処理は存在せず、2エンドポイントは完全に独立している（アップロード成功後に`/user/update`が失敗した場合、アップロード済みファイルは孤立したまま`config.UPLOAD_DIR`に残り続けると考えられる）。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:77-118`, `MY_HOME_SYSTEM/services/quest_service.py:105-115` |
+| 画像のトリミング責務／サーバー側のファイルサイズ・形式検証の有無／アップロード成功・紐付け失敗時の整合性 | `MY_HOME_SYSTEM/routers/quest_router.py`および`MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`POST /upload`(`upload_image`、89〜118行目)は拡張子チェック(`.jpg`/`.jpeg`/`.png`/`.gif`/`.webp`、92〜95行目)とマジックナンバー検証(`validate_image_header`、82〜87行目、JPEG/PNG/GIF/WEBPの先頭バイト列を確認)のみを行い、画像を正方形にトリミング・リサイズする処理はコード上に存在しない。ファイルサイズの上限チェック（`MAX_AVATAR_SIZE_BYTES`相当のサーバー側検証）も本関数内には存在せず、`MY_HOME_SYSTEM/config.py`・`MY_HOME_SYSTEM/tests/test_quest_router_api.py`（アップロードのテストケース群、134〜199行目）を確認してもファイルサイズを検証するテスト・実装は見つからなかった。`POST /user/update`(`update_user_avatar`、77〜79行目)は`UserService.update_avatar`(quest_service.py 105〜115行目)を呼び出し、`quest_users`テーブルの`avatar`カラムをUPDATEするのみで、ユーザーが存在しない場合は`HTTPException(status_code=404)`(108〜109行目)を送出する。`update_avatar`内には、アップロード済み画像ファイル（`/upload`が保存したファイル）を削除・ロールバックする処理や、アップロードとの紐付けを検証する処理は存在せず、2エンドポイントはサーバー側では完全に独立している。**（#442でフロント側に追記）** `family-quest/src/components/ui/AvatarUploader.tsx`の`handleUpload`は、2段階目（`/user/update`）が失敗した場合に`DELETE /api/quest/upload/{filename}`（`MY_HOME_SYSTEM/routers/quest_router.py`87〜88行目に存在を確認）へベストエフォートの削除リクエストを追加で送るようになったため、サーバー側の自動ロールバックは無いままだが、フロント側がクライアント主導でこのケースの孤立ファイル解消を試みる構成になった（ロールバック自体が失敗した場合は従来どおり孤立したまま残る）。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:77-118`, `MY_HOME_SYSTEM/services/quest_service.py:105-115`, `family-quest/src/components/ui/AvatarUploader.tsx:80-91` |
 | `User` 型の全体像 | `family-quest/src/types/index.ts`9〜26行目を直接確認した。`interface User`は`user_id: string`, `name: string`, `level: number`, `exp: number`, `avatar?: string`, `icon?: string`, `medal_count?: number`, `job_class?: string`, `gold: number`, `role?: string`, `hp?: number`, `maxHp?: number`の12フィールドを持つ。20〜23行目のコメントにより、`hp`/`maxHp`はバックエンド(MY_HOME_SYSTEM)側で計算された値をそのまま使う設計（`calculate_max_hp(level) = level * 20 + 5`）であり、フロント側で独自に再計算してはいけないと明記されている。 | 直接ソース確認: `family-quest/src/types/index.ts:9-26` |
 
 ## 10. 自己検証結果

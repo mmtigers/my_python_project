@@ -65,24 +65,26 @@
 
 ### `ApiClient` (クラス)
 
-* **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ機能固有のメソッド群を提供する。
-* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
+* **役割**: API通信のベースとなるクラス。コンストラクタでベースURLを受け取り、共通のHTTPメソッドラッパー (`get`, `post`, `postForm`, `put`, `delete`) と、インベントリ機能固有のメソッド群を提供する。**（Issue #476で修正）** クラス自体が`export class ApiClient`として外部からもインポート可能にエクスポートされるようになった（以前はモジュール内部限定で、シングルトンインスタンス`apiClient`のみがエクスポートされていた）。また、コンストラクタが受け取った`baseUrl`の末尾のスラッシュを`replace(/\/+$/, '')`で正規化して除去するようになった。
+* 根拠: [ApiClientクラス定義] (行番号: 49〜137 / 抜粋: "export class ApiClient {")
+* 根拠: `export`化 (行番号: 49 / 抜粋: "export class ApiClient {")
+* 根拠: 末尾スラッシュの正規化 (行番号: 52〜57 / 抜粋: "constructor(baseUrl: string) {\n        // #476: VITE_API_URL等に末尾スラッシュ付きの値が設定されていても、\n        // cleanEndpoint(先頭に'/'を付与)と結合した際に「//」が生じないよう、\n        // 末尾のスラッシュをここで正規化しておく。\n        this.baseUrl = baseUrl.replace(/\\/+$/, '');\n    }")
 
 
 * **引数/リクエスト**: コンストラクタにて `baseUrl: string`
-* 根拠: [constructor] (行番号: 35〜37 / 抜粋: "constructor(baseUrl: string) {")
+* 根拠: [constructor] (行番号: 52〜57 / 抜粋: "constructor(baseUrl: string) {")
 
 
 * **戻り値/レスポンス**: クラスインスタンス
-* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 49〜137 / 抜粋: "export class ApiClient {")
 
 
 * **副作用**: なし（メソッド呼び出し時に発生）
-* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 49〜137 / 抜粋: "export class ApiClient {")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [ApiClientクラス定義] (行番号: 32〜106 / 抜粋: "class ApiClient {")
+* 根拠: [ApiClientクラス定義] (行番号: 49〜137 / 抜粋: "export class ApiClient {")
 
 
 
@@ -287,7 +289,10 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **ベースURLとエンドポイントの結合**: `_request` 内で `cleanEndpoint` として先頭のスラッシュを付与・補完しているが、`this.baseUrl` の末尾のスラッシュの有無については検査・トリム処理がない。環境変数やオリジンの末尾にスラッシュが含まれていた場合、URLが `//` となる可能性がある。
+* **[修正済み] ベースURLとエンドポイントの結合時の`//`混入（Issue #476）**: `_request` 内で `cleanEndpoint` として先頭のスラッシュを付与・補完しているが、以前は`this.baseUrl` の末尾のスラッシュの有無について検査・トリム処理が無く、`VITE_API_URL`等の環境変数やオリジンの末尾にスラッシュが含まれていた場合、結合後のURLが `//` となる可能性があった。現在はコンストラクタで`baseUrl.replace(/\/+$/, '')`により末尾の連続するスラッシュを正規化して除去してから`this.baseUrl`に保持するようになった。
+* 根拠: (行番号: 52〜57 / 抜粋: "constructor(baseUrl: string) {\n        // #476: VITE_API_URL等に末尾スラッシュ付きの値が設定されていても、\n        // cleanEndpoint(先頭に'/'を付与)と結合した際に「//」が生じないよう、\n        // 末尾のスラッシュをここで正規化しておく。\n        this.baseUrl = baseUrl.replace(/\\/+$/, '');\n    }")
+* **`ApiClient`クラスのエクスポート（Issue #476）**: 以前は`ApiClient`クラス自体はモジュール内部限定で、シングルトンインスタンス`apiClient`のみが外部にエクスポートされていた。現在は`export class ApiClient`としてクラス自体も外部から利用可能（例えばテストコードが独自の`baseUrl`で別インスタンスを生成する場合など）になっている。シングルトン`apiClient`の使い方自体（`export const apiClient = new ApiClient(BASE_URL);`）は変わっていない。
+* 根拠: (行番号: 49, 139 / 抜粋: "export class ApiClient {", "export const apiClient = new ApiClient(BASE_URL);")
 * **SSR環境の考慮**: `typeof window !== 'undefined'` の判定を行っているが、`undefined` (例: SSR/Node環境) かつ `.env` が未定義の場合、ベースURLが空文字 `''` となる。これによりリクエストが相対パスとして処理されるか、エラーになる。
 * **エラー時のJSONパース**: `response.json().catch(() => ({}))` と記載されており、APIが `text/html` 等の非JSONエラーレスポンスを返した場合、パースエラーは握りつぶされて常に空オブジェクトとして扱われる。
 * **[修正済み] 204/空ボディ応答でのJSONパース失敗（Issue #412 F-L3）**: 以前は成功応答を一律 `response.json()` していたため、`cancel`/`reject`系などボディを返さないエンドポイントで `"Unexpected end of JSON input"` が発生していた。`response.status === 204` および空文字列本文の場合は `undefined` を返すようにした。
