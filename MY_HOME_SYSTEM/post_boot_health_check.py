@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 import time
@@ -167,11 +168,14 @@ class PostBootHealthCheck:
             return
 
         try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA quick_check;")
-            result = cursor.fetchone()[0]
-            conn.close()
+            # #411 S-L8: 以前はconn.close()を成功パスの末尾でしか呼んでおらず、
+            # cursor.execute/fetchoneが例外を送出するとexcept節には到達するが
+            # 接続はcloseされずリークしていた。contextlib.closingでどの終了経路
+            # でも確実にcloseする。
+            with contextlib.closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA quick_check;")
+                result = cursor.fetchone()[0]
 
             if result == "ok":
                 self.results.append(CheckResult("Database", STATUS_OK, "Integrity OK"))

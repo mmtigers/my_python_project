@@ -317,6 +317,8 @@
 
 * **役割**: SQLite DBファイルの存在確認と `PRAGMA quick_check` による整合性チェックを行う。
 * 根拠: `def check_database(self):` (行番号: 160〜181 / 抜粋: "def check_database(self):")
+* **（#411 S-L8で修正）** 以前は `conn.close()` を成功パス（`quick_check`実行後）の末尾でしか呼んでおらず、`cursor.execute`/`fetchone`が例外を送出した場合は`except Exception`節へは到達するが接続はcloseされずリークしていた。`contextlib.closing`でどの終了経路でも確実にcloseするよう変更した。
+* 根拠: `with contextlib.closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:` (行番号: 175)
 
 
 * **引数/リクエスト**: `self` のみ

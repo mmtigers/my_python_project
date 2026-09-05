@@ -63,6 +63,8 @@
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。転送成功後は `_backup_config_files` を呼び出し、`config.BACKUP_FILES` に列挙されたDB以外の設定ファイルもあわせてNASへコピーする。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
 * 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜76 / 抜粋: "def perform_backup() -> Tu...")
+* **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
+* 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
 
 
 * **引数/リクエスト**: なし

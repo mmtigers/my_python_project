@@ -1,6 +1,7 @@
 # MY_HOME_SYSTEM/handlers/line_logic.py
 import config
 import asyncio
+import contextlib
 import sqlite3
 import datetime
 from urllib.parse import parse_qsl
@@ -130,8 +131,11 @@ def get_daily_health_summary():
     summary_lines = []
     
     # common.get_db_cursor の代わりに直接接続
+    # #411 S-L8: `with sqlite3.connect(...) as conn:` は接続をcloseしない
+    # (sqlite3の既知の挙動。commit/rollbackのみ行う)。LINE Botのリクエストの
+    # たびに呼ばれる関数のため、contextlib.closingで明示的にcloseする。
     try:
-        with sqlite3.connect(config.SQLITE_DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:
             conn.row_factory = sqlite3.Row
             cur = conn.cursor()
             

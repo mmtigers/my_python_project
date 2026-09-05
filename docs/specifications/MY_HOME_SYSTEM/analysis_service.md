@@ -67,6 +67,8 @@
 
 * **エラーハンドリング**: なし
 * 根拠: 該当関数内に `try-except` なし (行番号: 32〜39 / 抜粋: "def get_ro_db_connection()")
+* **呼出し側での接続管理について（#411 S-L8で修正）**: この関数が返す接続を `with get_ro_db_connection() as conn:` の形で使っている呼出し元（`load_nas_status`・`load_bicycle_data`・`load_ranking_dates`）は、sqlite3の`Connection.__exit__`がcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、接続がcloseされずリークしていた。この3箇所を`with contextlib.closing(get_ro_db_connection()) as conn:`に変更し、明示的にcloseするようにした。`load_data_from_db`・`load_weather_history`・`load_yearly_temperature_stats`・`load_ranking_data`は元々`try/finally`で`conn.close()`していたため対象外。
+* 根拠: `with contextlib.closing(get_ro_db_connection()) as conn:` (`load_nas_status`: 行番号167、`load_bicycle_data`: 行番号380、`load_ranking_dates`: 行番号400)
 
 
 

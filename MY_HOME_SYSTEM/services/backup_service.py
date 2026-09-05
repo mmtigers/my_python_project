@@ -1,3 +1,4 @@
+import contextlib
 import sqlite3
 import os
 import datetime
@@ -38,9 +39,13 @@ def perform_backup() -> Tuple[bool, str, float]:
     try:
         # Phase 1: Local Backup (Fast & Safe)
         os.makedirs(temp_dir, exist_ok=True)
-        with sqlite3.connect(src_db_path) as src_conn:
-            with sqlite3.connect(str(temp_path)) as dst_conn:
-                src_conn.backup(dst_conn, pages=-1)
+        # #411 S-L8: `with sqlite3.connect(...) as conn:` はトランザクションの
+        # commit/rollbackのみを行い、接続自体はcloseしない(sqlite3の既知の挙動)。
+        # 定期実行されるバックアップ処理で接続がcloseされずに残り続けるのを防ぐため
+        # contextlib.closingで明示的にcloseする。
+        with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \
+             contextlib.closing(sqlite3.connect(str(temp_path))) as dst_conn:
+            src_conn.backup(dst_conn, pages=-1)
         
         local_size_mb = os.path.getsize(temp_path) / (1024 * 1024)
         logger.info(f"✅ Local backup created: {local_size_mb:.2f} MB")

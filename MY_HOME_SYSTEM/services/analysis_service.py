@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/services/analysis_service.py
+import contextlib
 import sqlite3
 import shutil
 import subprocess
@@ -160,7 +161,10 @@ def load_nas_status() -> Optional[pd.Series]:
     """NASの最新状態を取得"""
     table_name = getattr(config, "SQLITE_TABLE_NAS", "nas_records")
     try:
-        with get_ro_db_connection() as conn:
+        # #411 S-L8: `with get_ro_db_connection() as conn:` はsqlite3.Connectionの
+        # __exit__がcommit/rollbackのみでcloseしない既知の挙動により、接続がcloseされず
+        # リークしていた。contextlib.closingで明示的にcloseする。
+        with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
             if not cur.fetchone():
@@ -373,7 +377,7 @@ def load_bicycle_data(limit: int = 2000) -> pd.DataFrame:
     """駐輪場データを取得"""
     table_name = getattr(config, "SQLITE_TABLE_BICYCLE", "bicycle_parking_records")
     try:
-        with get_ro_db_connection() as conn:
+        with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()
             cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
             if not cur.fetchone():
@@ -393,7 +397,7 @@ def load_ai_report() -> Optional[pd.Series]:
 def load_ranking_dates(limit: int = 3) -> List[str]:
     """ランキングの日付リストを取得"""
     try:
-        with get_ro_db_connection() as conn:
+        with contextlib.closing(get_ro_db_connection()) as conn:
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
             if not cur.fetchone(): return []
