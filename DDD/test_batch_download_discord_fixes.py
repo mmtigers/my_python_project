@@ -100,6 +100,54 @@ class TestHistoryManagerLogsFailures:
 
         assert "https://example.com/video1" in module.HistoryManager.load_history()
 
+    def test_add_history_maintains_a_backup_file(self, tmp_path, monkeypatch):
+        """#464: 追記のたびにバックアップ(.bak)が最新状態に更新されること。"""
+        history_path = tmp_path / "history.txt"
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, HISTORY_FILE_PATH=history_path))
+
+        module.HistoryManager.add_history("https://example.com/video1")
+        module.HistoryManager.add_history("https://example.com/video2")
+
+        backup_path = tmp_path / "history.txt.bak"
+        assert backup_path.exists()
+        backup_content = backup_path.read_text(encoding="utf-8")
+        assert "https://example.com/video1" in backup_content
+        assert "https://example.com/video2" in backup_content
+
+    def test_load_history_recovers_from_backup_when_primary_is_corrupted(self, tmp_path, monkeypatch, caplog):
+        """#464: 主履歴ファイルの読み込みに失敗した場合、バックアップから
+        既にダウンロード済みのURLを復旧できること(空履歴への転落を防ぐ)。"""
+        history_path = tmp_path / "history.txt"
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, HISTORY_FILE_PATH=history_path))
+
+        # 正常な状態でバックアップを作っておく
+        module.HistoryManager.add_history("https://example.com/already-downloaded")
+
+        # 主ファイルの読み込みだけを失敗させる(バックアップの読み込みは失敗させない)
+        real_open = open
+
+        def _flaky_open(path, *args, **kwargs):
+            if str(path) == str(history_path):
+                raise OSError("simulated corruption")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _flaky_open, raising=False)
+
+        with caplog.at_level(logging.WARNING, logger=module.logger.name):
+            result = module.HistoryManager.load_history()
+
+        assert result == {"https://example.com/already-downloaded"}
+        assert any("バックアップ" in rec.message and "復旧" in rec.message for rec in caplog.records)
+
+    def test_load_history_falls_back_to_empty_when_backup_also_fails(self, tmp_path, monkeypatch):
+        """バックアップも存在しない/読めない場合は、従来通り安全側(空履歴)に倒れること。"""
+        history_path = tmp_path / "history.txt"
+        history_path.write_text("dummy", encoding="utf-8")
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(module.CONFIG, HISTORY_FILE_PATH=history_path))
+        monkeypatch.setattr(module, "open", lambda *a, **k: (_ for _ in ()).throw(OSError("boom")), raising=False)
+
+        assert module.HistoryManager.load_history() == set()
+
 
 class TestUniversalYtDlpStrategyOuttmplUsesPathsHome:
     """D-L1: source_nameに'%'が含まれる場合、outtmpl文字列への直接埋め込みが

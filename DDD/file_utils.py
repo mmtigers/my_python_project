@@ -7,6 +7,15 @@ import os
 import re
 from pathlib import Path
 
+# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。
+# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、
+# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
 
 def sanitize_filename(filename: str, max_length: int = 200) -> str:
     """ファイル名として使用できない文字を置換し、長さを制限する。
@@ -20,7 +29,9 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
     Returns:
         安全なファイル名文字列。
     """
-    safe = re.sub(r'[\\/*?:"<>|]', '_', filename).strip()
+    # #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル
+    # システムで問題になるため同様に置換する。
+    safe = re.sub(r'[\\/*?:"<>|\x00-\x1f\x7f]', '_', filename).strip()
 
     # #175: 以前は safe[:max_length] で「文字数」を制限していたが、UTF-8では
     # 日本語1文字が3バイトになるため、200文字(最大600バイト)がext4等の255バイト
@@ -39,6 +50,12 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
         # ".mp4" のような隠しファイル(空stem)が生成されてしまうため、安全な
         # フォールバック名を補う。
         safe = "untitled"
+
+    # #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は
+    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。
+    if safe.upper() in _WINDOWS_RESERVED_NAMES:
+        safe = f"{safe}_"
+
     return safe
 
 

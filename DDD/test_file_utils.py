@@ -82,6 +82,24 @@ class TestSanitizeFilenameNeverReturnsEmptyString:
         )
 
 
+class TestSanitizeFilenameWindowsCompat:
+    """Issue #469: Windows予約語・制御文字への対応(NASがWindows系ファイル
+    システムを経由する場合の互換性向上)。"""
+
+    def test_control_characters_are_replaced(self):
+        result = sanitize_filename("a\x00b\x1fc\x7fd")
+        assert result == "a_b_c_d"
+
+    @pytest.mark.parametrize("reserved", ["CON", "con", "PRN", "AUX", "NUL", "COM1", "LPT9"])
+    def test_windows_reserved_names_are_suffixed(self, reserved):
+        result = sanitize_filename(reserved)
+        assert result.upper() != reserved.upper()
+        assert result == f"{reserved}_"
+
+    def test_non_reserved_name_is_unaffected(self):
+        assert sanitize_filename("CONcert") == "CONcert"
+
+
 class TestDiscordCircuitBreaker:
     """DiscordCircuitBreaker のサーキットブレーカー挙動の回帰テスト。
 

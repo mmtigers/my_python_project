@@ -17,7 +17,9 @@ DDDにはpytest基盤(conftest.py等)が無いため、本ファイルは
 `pytest DDD/test_newface_monitor_datamanager.py` のように直接指定して実行する
 (MY_HOME_SYSTEM/pytest.ini の testpaths=tests のスコープ外)。
 """
+import os
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -326,6 +328,44 @@ class TestLoadDailySummaryCorruption:
         assert result["counts"]["restpia_test"] == 3
 
 
+class TestLoadDailySummaryRecoversFromBackup:
+    """Issue #462: load_daily_summaryはload_known_castsほど手厚い復旧機構を
+    持たず、破損時に累積中の未送信カウントが失われ0から再カウントされていた。
+    load_known_castsと同じ隔離+バックアップ復旧を適用する。"""
+
+    def test_recovers_counts_from_backup_after_corruption(self, tmp_path):
+        dm = DataManager(tmp_path)
+
+        # 正常な状態で保存し、.bakを作らせておく
+        dm.save_daily_summary({"counts": {"restpia_test": 5}})
+        dm.save_daily_summary({"counts": {"restpia_test": 8}})
+
+        summary_file = tmp_path / "daily_summary.json"
+        backup_file = summary_file.with_suffix(summary_file.suffix + ".bak")
+        assert backup_file.exists()
+
+        # 主ファイルを破損させる
+        summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
+
+        result = dm.load_daily_summary()
+
+        # 直前(2回目保存時点)のバックアップから復旧できること
+        assert result["counts"]["restpia_test"] == 5
+
+        # 破損ファイルは隔離されて残っていること
+        quarantined = list(tmp_path.glob("daily_summary.json.corrupted-*"))
+        assert len(quarantined) == 1
+
+    def test_returns_empty_dict_when_backup_is_also_unusable(self, tmp_path):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
+
+        result = dm.load_daily_summary()
+
+        assert result == {}
+
+
 class TestDailySummaryLateCountsNotLost:
     """Issue #183の回帰テスト: 以前はrecord_daily_new_castsがカレンダー日付変更時に
     集計を無条件リセットしていたため、(1) 21時台のサマリ送信後(22時〜24時)に
@@ -452,6 +492,49 @@ class TestDailySummarySendFailureDoesNotLoseCounts:
         result = dm.load_daily_summary()
         assert result["counts"] == {}
         assert result["last_sent_date"] == "2026-08-30"
+
+
+class TestCleanupOldQuarantineFiles:
+    """Issue #461: .corrupted-*隔離ファイルの自動クリーンアップが存在せず、
+    破損が繰り返されるたびに際限なく蓄積しうる問題の回帰テスト。"""
+
+    def test_old_quarantine_files_are_deleted(self, tmp_path):
+        dm = DataManager(tmp_path)
+        old_file = tmp_path / "known_casts_site.json.corrupted-20200101000000"
+        old_file.write_text("{}", encoding="utf-8")
+        old_time = time.time() - 40 * 86400
+        os.utime(old_file, (old_time, old_time))
+
+        deleted = dm.cleanup_old_quarantine_files()
+
+        assert deleted == 1
+        assert not old_file.exists()
+
+    def test_recent_quarantine_files_are_kept(self, tmp_path):
+        dm = DataManager(tmp_path)
+        recent_file = tmp_path / "known_casts_site.json.corrupted-20260101000000"
+        recent_file.write_text("{}", encoding="utf-8")
+
+        deleted = dm.cleanup_old_quarantine_files()
+
+        assert deleted == 0
+        assert recent_file.exists()
+
+    def test_non_quarantine_files_are_untouched(self, tmp_path):
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / "known_casts_site.json"
+        data_file.write_text("{}", encoding="utf-8")
+        backup_file = tmp_path / "known_casts_site.json.bak"
+        backup_file.write_text("{}", encoding="utf-8")
+        old_time = time.time() - 40 * 86400
+        os.utime(data_file, (old_time, old_time))
+        os.utime(backup_file, (old_time, old_time))
+
+        deleted = dm.cleanup_old_quarantine_files()
+
+        assert deleted == 0
+        assert data_file.exists()
+        assert backup_file.exists()
 
 
 if __name__ == "__main__":
