@@ -1,11 +1,13 @@
+import contextlib
 import datetime
 import pytz
+import threading
 import time
 import functools
 import logging
 import os
 from pathlib import Path
-from typing import Callable, Any, Optional, Tuple, Type, Union
+from typing import Callable, Any, Dict, Optional, Tuple, Type, Union
 
 logger = logging.getLogger("core")
 
@@ -17,6 +19,62 @@ def get_today_date_str() -> str:
 
 def get_display_date() -> str:
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%m/%d")
+
+
+class RefCountedLockRegistry:
+    """キー単位の threading.Lock を参照カウント付きで管理するレジストリ。
+
+    #435: quest_service.py の完了/残高/購入ロックは、キーの組み合わせ
+    (ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが
+    無制限に蓄積していた。参照している呼び出しが居なくなった時点で
+    エントリを辞書から削除することでこれを防ぐ。
+
+    services/camera_service.py の _RefCountedLock/_vod_generation_lock と
+    同じ考え方: ロック取得中(参照カウント>0)のエントリは絶対に削除しない。
+    単純に「lock.locked()がFalseなら削除」する方式だと、辞書からロック
+    オブジェクトを取り出した直後・実際にwith文で獲得する直前の隙間で
+    別スレッドが剪定してしまい、同一キーに対して2つの別々のLockオブジェクトが
+    生成されて同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)
+    ため、参照カウントで安全性を担保する。
+    """
+
+    class _Entry:
+        __slots__ = ("lock", "ref_count")
+
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.ref_count = 0
+
+    def __init__(self) -> None:
+        self._entries: Dict[Any, "RefCountedLockRegistry._Entry"] = {}
+        self._guard = threading.Lock()
+
+    @contextlib.contextmanager
+    def acquire(self, key: Any):
+        """key単位で排他制御するコンテキストマネージャ。"""
+        with self._guard:
+            entry = self._entries.get(key)
+            if entry is None:
+                entry = self._Entry()
+                self._entries[key] = entry
+            entry.ref_count += 1
+        try:
+            with entry.lock:
+                yield
+        finally:
+            with self._guard:
+                entry.ref_count -= 1
+                if entry.ref_count == 0 and self._entries.get(key) is entry:
+                    del self._entries[key]
+
+    def keys(self):
+        """現在エントリが存在するキー一覧(テスト・デバッグ用)。"""
+        with self._guard:
+            return list(self._entries.keys())
+
+    def __contains__(self, key: Any) -> bool:
+        with self._guard:
+            return key in self._entries
 
 def with_exponential_backoff(
     base_delay: int = 5, 

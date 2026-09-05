@@ -16,17 +16,45 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from services import quest_service
 
 
-def test_same_key_returns_same_lock_instance():
+def test_same_key_serializes_sequential_acquisitions_and_cleans_up_afterward():
+    """#435: 参照カウント付きレジストリ化後も、同一キーへの取得は正しく
+    直列化でき(再入時にデッドロックしない)、使用後はレジストリから
+    エントリが自動的に削除される(キーが増え続けても無制限に肥大化しない)。"""
     key = ("user1", 101)
-    lock_a = quest_service._get_completion_lock(key)
-    lock_b = quest_service._get_completion_lock(key)
-    assert lock_a is lock_b
+    with quest_service._get_completion_lock(key):
+        pass
+    assert key not in quest_service._completion_locks
+
+    with quest_service._get_completion_lock(key):
+        pass
+    assert key not in quest_service._completion_locks
 
 
-def test_different_key_returns_different_lock_instance():
-    lock_a = quest_service._get_completion_lock(("user1", 101))
-    lock_b = quest_service._get_completion_lock(("user1", 102))
-    assert lock_a is not lock_b
+def test_different_keys_do_not_block_each_other():
+    key_a = ("user1", 101)
+    key_b = ("user1", 102)
+    a_acquired = threading.Event()
+    release_a = threading.Event()
+
+    def hold_a():
+        with quest_service._get_completion_lock(key_a):
+            a_acquired.set()
+            release_a.wait(timeout=5)
+
+    t = threading.Thread(target=hold_a)
+    t.start()
+    assert a_acquired.wait(timeout=5)
+
+    try:
+        start = time.monotonic()
+        with quest_service._get_completion_lock(key_b):
+            elapsed = time.monotonic() - start
+    finally:
+        release_a.set()
+        t.join(timeout=5)
+
+    # key_a のロック保持中でも、別キーの key_b は待たされず即座に取得できる
+    assert elapsed < 1.0
 
 
 def test_concurrent_access_to_same_key_is_serialized():

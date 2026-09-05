@@ -11,6 +11,7 @@ import common
 import config
 import game_logic
 from core import sound_manager
+from core.utils import RefCountedLockRegistry
 from services import notification_service, switchbot_service
 from core.logger import setup_logging
 
@@ -85,17 +86,14 @@ def _seconds_since_iso_timestamp(timestamp_str: Optional[str]) -> Optional[float
 # 別スレッドでほぼ同時に到達すると、どちらも「直近の完了履歴なし」を読んでしまい、
 # 経験値・ゴールド・ボスダメージが二重に加算されるレースコンディションが発生しうる。
 # そのため、同一キーへの処理はプロセス内で直列化する。
-_completion_locks: Dict[Tuple[str, int], threading.Lock] = {}
-_completion_locks_guard = threading.Lock()
+# #435: 参照カウント付きレジストリを使い、使用を終えたキーは自動的に
+# 辞書から削除する(ユーザーID×クエストIDの組み合わせが増え続けても無制限に
+# 肥大化しない)。
+_completion_locks = RefCountedLockRegistry()
 
 
-def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:
-    with _completion_locks_guard:
-        lock = _completion_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _completion_locks[key] = lock
-        return lock
+def _get_completion_lock(key: Tuple[str, int]):
+    return _completion_locks.acquire(key)
 
 
 # ==========================================
@@ -107,17 +105,13 @@ def _get_completion_lock(key: Tuple[str, int]) -> threading.Lock:
 # 連続タップするhandleApproveAll)、一方の更新が消失するレースが起こりうる。
 # quest_users(gold/exp/level)を書き換える処理は、対象ユーザー単位でプロセス内
 # 直列化する。
-_user_balance_locks: Dict[str, threading.Lock] = {}
-_user_balance_locks_guard = threading.Lock()
+# #435: 参照カウント付きレジストリを使い、使用を終えたユーザーIDは自動的に
+# 辞書から削除する。
+_user_balance_locks = RefCountedLockRegistry()
 
 
-def _get_user_balance_lock(user_id: str) -> threading.Lock:
-    with _user_balance_locks_guard:
-        lock = _user_balance_locks.get(user_id)
-        if lock is None:
-            lock = threading.Lock()
-            _user_balance_locks[user_id] = lock
-        return lock
+def _get_user_balance_lock(user_id: str):
+    return _user_balance_locks.acquire(user_id)
 
 
 def _acquire_user_balance_locks(user_ids) -> ExitStack:
@@ -145,17 +139,13 @@ def _acquire_user_balance_locks(user_ids) -> ExitStack:
 # すり抜け、残高が足りる限り2回とも独立した正当な購入として成立してしまう
 # (ゴールド二重消費+アイテム二重取得)。process_complete_quest の完了ロックと
 # 同様に、同一(user_id, reward_id)への処理をプロセス内で直列化する。
-_purchase_locks: Dict[Tuple[str, int], threading.Lock] = {}
-_purchase_locks_guard = threading.Lock()
+# #435: 参照カウント付きレジストリを使い、使用を終えたキーは自動的に
+# 辞書から削除する。
+_purchase_locks = RefCountedLockRegistry()
 
 
-def _get_purchase_lock(key: Tuple[str, int]) -> threading.Lock:
-    with _purchase_locks_guard:
-        lock = _purchase_locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _purchase_locks[key] = lock
-        return lock
+def _get_purchase_lock(key: Tuple[str, int]):
+    return _purchase_locks.acquire(key)
 
 
 # ==========================================
