@@ -77,18 +77,14 @@ const questHistorySchema = z.object({
     linked_history_id: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
-const adventureLogSchema = z.object({
-    id: z.string(),
-    text: z.string(),
-    dateStr: z.string(),
-    timestamp: z.string(),
-});
-
+// #412(API契約): logs(AdventureLog)はどのコンポーネントからも参照されておらず、
+// useGameData.ts側のGameDataResponse/AdventureLog型も削除したため、ここでも
+// 検証対象から外す(冒頭のコメントの通り、未知のフィールドはstripされるだけで
+// parse自体は失敗しない)。
 export const gameDataResponseSchema = z.object({
     users: z.array(userSchema),
     quests: z.array(questSchema),
     rewards: z.array(rewardSchema),
     completedQuests: z.array(questHistorySchema),
     pendingQuests: z.array(questHistorySchema),
-    logs: z.array(adventureLogSchema),
 });
