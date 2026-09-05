@@ -100,9 +100,8 @@ def split_prompts(input_file: Path, output_dir: Path) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Split a numbered prompt list Markdown file into individual files.")
     parser.add_argument(
-        "input_file", nargs="?",
-        default="一ノ瀬蓮_プロンプト1000選.md",
-        help="Input Markdown file (default: %(default)s)"
+        "input_file",
+        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"
     )
     parser.add_argument(
         "output_dir", nargs="?",

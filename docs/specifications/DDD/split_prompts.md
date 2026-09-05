@@ -73,8 +73,8 @@
 * 根拠: [関数定義] (行番号: 83〜102 / 抜粋: "def main() -> None:\n    parser = argparse.ArgumentParser(description="Split a numbered prompt list Markdown file into individual files.")")
 
 
-* **引数/リクエスト**: なし（`sys.argv`経由でコマンドライン引数を`argparse`が解析）。位置引数`input_file`（デフォルト`"一ノ瀬蓮_プロンプト1000選.md"`）、`output_dir`（デフォルト`"split_results"`）はいずれも省略可能。
-* 根拠: [argparse定義] (行番号: 85〜94 / 抜粋: "parser.add_argument(\n        "input_file", nargs="?",\n        default="一ノ瀬蓮_プロンプト1000選.md",")
+* **引数/リクエスト**: なし（`sys.argv`経由でコマンドライン引数を`argparse`が解析）。位置引数`input_file`は**（D-L13で修正）** 必須（以前は特定の個人用途を前提とした固定ファイル名`"一ノ瀬蓮_プロンプト1000選.md"`がデフォルト値になっており、汎用スクリプトとして他環境で実行した際に紛らわしい/意図しないデフォルト依存を招きうる問題があった。省略時は`argparse`が使用方法を表示して終了する）。`output_dir`（デフォルト`"split_results"`）は引き続き省略可能。
+* 根拠: [argparse定義] (行番号: 102〜110 / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
 
 
 * **戻り値/レスポンス**: `None`
@@ -161,7 +161,6 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 低 | `file_utils.py` | `sanitize_filename`の具体的なサニタイズルールを確認するため。既に`docs/specifications/DDD/file_utils.md`として解析済みだが、本ファイルの挙動理解のため相互参照が必要。 | 根拠: [import文] (行番号: 18 / 抜粋: "from file_utils import sanitize_filename as _shared_sanitize_filename") |
-| 低 | `一ノ瀬蓮_プロンプト1000選.md`（デフォルト入力ファイル） | `input_file`引数のデフォルト値として指定されているデータファイルであり、実際にどのような内容・件数のプロンプト一覧が想定されているかを確認するため（本ファイルはPythonソースファイルではないため対象外の可能性あり）。 | 根拠: [argparse定義] (行番号: 87 / 抜粋: "default="一ノ瀬蓮_プロンプト1000選.md",") |
 
 ## 8. 保守上の注意点
 
@@ -173,8 +172,8 @@ graph TD
 * 根拠: [同一実行内衝突時のサフィックス付与とコメント] (行番号: 68〜87 / 抜粋: "# #244: 同一実行内で複数の項目が同じファイル名(番号+サニタイズ後タイトル)に\n    # 解決すると、以前は無警告で後勝ちの上書きとなり、先に書き出した項目の内容が\n    # 完全に失われていた。")、前回実行分の上書き (行番号: 90〜91 / 抜粋: "if filepath.exists():\n            logger.warning(f"⚠️ 上書き: {filename} は既に存在します（前回実行分の可能性）")")
 * **`pad_width`計算の前提**: ゼロ埋め幅は実際に出現する番号「文字列」の最大長（最小2桁）を基準に動的決定される設計だが、`matches`が空の場合はこの計算自体が実行されない（`HasMatches`分岐で早期`return`されるため空リストに対する`max()`のエラーは発生しない）。
 * 根拠: [pad_width計算] (行番号: 61 / 抜粋: "pad_width = max(2, max(len(num_str) for num_str, _, _ in matches))")
-* **CLIデフォルト値の環境依存性**: `input_file`のデフォルト値`"一ノ瀬蓮_プロンプト1000選.md"`は特定の用途・環境を前提とした固定値であり、汎用スクリプトとして流用する際は明示的な引数指定が推奨される。
-* 根拠: [argparse定義] (行番号: 85〜89 / 抜粋: "default="一ノ瀬蓮_プロンプト1000選.md",")
+* **（D-L13で修正）CLIデフォルト値の環境依存性は解消済み**: 以前は`input_file`のデフォルト値が`"一ノ瀬蓮_プロンプト1000選.md"`という特定の用途・環境を前提とした固定値になっており、汎用スクリプトとして他環境で実行した際に紛らわしかった。`input_file`を必須引数に変更し、省略時は`argparse`が使用方法を表示して終了するようにした。
+* 根拠: [argparse定義] (行番号: 102〜105 / 抜粋: "parser.add_argument(\n        "input_file",\n        help="Input Markdown file (「番号. タイトル」「Prompt: 内容」形式)"\n    )")
 
 ## 9. 不明事項一覧
 
