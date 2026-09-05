@@ -109,6 +109,15 @@ def _get_youtube_cooldown_remaining_seconds(cur, user_id: str) -> int:
     return max(0, math.ceil(remaining))
 
 
+def _is_youtube_cooldown_enforced() -> bool:
+    """
+    YouTube系ごほうび券のクールダウンを実際に強制する日(config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM、
+    JST基準)を迎えているかどうかを返す。いきなり制限がかかると子どもが困惑するため、
+    この日より前は使用を拒否せず、family-quest側に予告バナーを表示するだけに留める。
+    """
+    return datetime.datetime.now(JST).date() >= config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM
+
+
 # ==========================================
 # Completion Lock (Race Condition Guard)
 # ==========================================
@@ -1070,11 +1079,28 @@ class InventoryService:
                 item['is_youtube_reward'] = item['reward_id'] in config.YOUTUBE_REWARD_IDS
                 items.append(item)
 
-            youtube_cooldown_remaining_seconds = _get_youtube_cooldown_remaining_seconds(cur, user_id)
+            cooldown_enforced = _is_youtube_cooldown_enforced()
+            youtube_cooldown_remaining_seconds = (
+                _get_youtube_cooldown_remaining_seconds(cur, user_id) if cooldown_enforced else 0
+            )
+
+            # 猶予期間中(cooldown_enforced=False)は、実際に制限が始まる日を予告する情報を
+            # 返す。フロントエンド(InventoryList.tsx)はこれを見て告知バナーを表示する。
+            # 施行開始後・クールダウン対象IDが未設定の場合はNone。
+            youtube_cooldown_announcement = None
+            if not cooldown_enforced and config.YOUTUBE_REWARD_IDS:
+                days_remaining = (
+                    config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM - datetime.datetime.now(JST).date()
+                ).days
+                youtube_cooldown_announcement = {
+                    "starts_on": config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM.isoformat(),
+                    "days_remaining": max(0, days_remaining),
+                }
 
         return {
             "items": items,
             "youtube_cooldown_remaining_seconds": youtube_cooldown_remaining_seconds,
+            "youtube_cooldown_announcement": youtube_cooldown_announcement,
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
@@ -1101,7 +1127,9 @@ class InventoryService:
 
             # 連続視聴による目の負担を防ぐため、YouTube系ごほうび券は前回使用から
             # YOUTUBE_REWARD_COOLDOWN_SECONDS(15分)経過するまで再使用できないようにする。
-            if item['reward_id'] in config.YOUTUBE_REWARD_IDS:
+            # ただしYOUTUBE_REWARD_COOLDOWN_ENFORCE_FROMを迎えるまでは実際には拒否しない
+            # (いきなり制限がかかると子どもが困惑するため、事前に予告バナーのみ表示する)。
+            if item['reward_id'] in config.YOUTUBE_REWARD_IDS and _is_youtube_cooldown_enforced():
                 cooldown_remaining = _get_youtube_cooldown_remaining_seconds(cur, user_id)
                 if cooldown_remaining > 0:
                     remaining_minutes = math.ceil(cooldown_remaining / 60)

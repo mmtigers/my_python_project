@@ -29,6 +29,13 @@ function formatCooldown(totalSeconds: number): string {
     return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+// "2026-09-12" のようなISO日付を "9/12(土)" のような表示用文字列にする
+// (YouTubeごほうび券クールダウンの予告バナー用)。
+function formatAnnouncementDate(isoDate: string): string {
+    const date = new Date(`${isoDate}T00:00:00`);
+    return date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', weekday: 'short' });
+}
+
 export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
     const queryClient = useQueryClient();
     const { play } = useSound();
@@ -50,6 +57,7 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         refetchInterval: 5000
     });
     const items = data?.items;
+    const cooldownAnnouncement = data?.youtube_cooldown_announcement ?? null;
 
     // YouTube系ごほうび券の連続使用防止クールダウン(15分)の残り秒数。
     // サーバー値(5秒間隔のポーリングで再同期)を起点に、表示だけ1秒間隔でローカルに
@@ -100,15 +108,30 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
         </div>
     );
 
+    // YouTubeごほうび券クールダウンの猶予期間中(実際の制限開始前)の予告バナー。
+    // いきなり制限がかかると子どもが困惑するため、施行日を迎えるまで表示しておく。
+    const announcementBanner = cooldownAnnouncement && (
+        <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-800 text-xs">
+            <span className="text-base leading-none flex-shrink-0">📢</span>
+            <p>
+                <span className="font-bold">{formatAnnouncementDate(cooldownAnnouncement.starts_on)}から</span>、
+                YouTubeのごほうび券は使うと15分間、次の1枚が使えなくなります(目を休めるため)。
+            </p>
+        </div>
+    );
+
     if (!items || items.length === 0) {
         return (
-            <div className="text-center p-8 bg-white/50 rounded-xl border-2 border-dashed border-slate-300">
-                <div className="text-6xl mb-4 opacity-50">🎒</div>
-                <h3 className="text-lg font-bold text-slate-600 mb-2">まだなにも持っていません</h3>
-                <p className="text-sm text-slate-500">
-                    「ごほうび」タブで、ためたゴールドを使って<br />
-                    アイテムをゲットしよう！
-                </p>
+            <div className="flex flex-col gap-3">
+                {announcementBanner}
+                <div className="text-center p-8 bg-white/50 rounded-xl border-2 border-dashed border-slate-300">
+                    <div className="text-6xl mb-4 opacity-50">🎒</div>
+                    <h3 className="text-lg font-bold text-slate-600 mb-2">まだなにも持っていません</h3>
+                    <p className="text-sm text-slate-500">
+                        「ごほうび」タブで、ためたゴールドを使って<br />
+                        アイテムをゲットしよう！
+                    </p>
+                </div>
             </div>
         );
     }
@@ -122,6 +145,9 @@ export const InventoryList: React.FC<Props> = ({ userId, panelMode }) => {
 
     return (
         <div className={`grid ${gridClass} gap-2 pb-20`}>
+            {announcementBanner && (
+                <div className="col-span-full">{announcementBanner}</div>
+            )}
             {items.map((item: InventoryItem) => {
                 // 目の負担を防ぐため、YouTube系ごほうび券は前回使用から15分は使えない。
                 const isCoolingDown = item.is_youtube_reward && youtubeCooldownSeconds > 0;

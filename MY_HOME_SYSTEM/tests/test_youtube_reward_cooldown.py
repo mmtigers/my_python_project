@@ -70,6 +70,9 @@ def _iso_seconds_ago(seconds: int) -> str:
 @pytest.fixture(autouse=True)
 def _youtube_reward_ids(monkeypatch):
     monkeypatch.setattr(qs_module.config, "YOUTUBE_REWARD_IDS", YOUTUBE_REWARD_IDS)
+    # 猶予期間(施行前の予告のみ)のテストはこの日付を未来に上書きする。それ以外の
+    # テストは「既に施行済み」を前提とするため、常に過去日をデフォルトにしておく。
+    monkeypatch.setattr(qs_module.config, "YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM", datetime.date(2000, 1, 1))
     monkeypatch.setattr(qs_module.notification_service, "send_push", lambda *a, **k: None)
     monkeypatch.setattr(qs_module.sound_manager, "play", lambda *a, **k: None)
 
@@ -136,8 +139,12 @@ def test_get_user_inventory_reports_cooldown_and_youtube_flag(isolated_db):
     service.use_item("son", used_id)
 
     result = service.get_user_inventory("son")
-    assert set(result.keys()) == {"items", "youtube_cooldown_remaining_seconds"}
+    assert set(result.keys()) == {
+        "items", "youtube_cooldown_remaining_seconds", "youtube_cooldown_announcement",
+    }
     assert 0 < result["youtube_cooldown_remaining_seconds"] <= 15 * 60
+    # 施行済み(ENFORCE_FROMが過去)のため、予告バナー用の情報は出ない
+    assert result["youtube_cooldown_announcement"] is None
 
     items_by_id = {item["id"]: item for item in result["items"]}
     # 消費済みのアイテムは(既存仕様どおり)一覧に含まれない
@@ -153,3 +160,62 @@ def test_get_user_inventory_reports_zero_cooldown_when_never_used(isolated_db):
 
     result = service.get_user_inventory("son")
     assert result["youtube_cooldown_remaining_seconds"] == 0
+
+
+class TestGracePeriodBeforeEnforcement:
+    """
+    ENFORCE_FROM(施行日)より前は、いきなり制限がかかると子どもが困惑するため、
+    使用自体は拒否せず、family-quest側に予告バナーを表示するための情報だけを返す。
+    """
+
+    def _set_enforce_from_in_future(self, monkeypatch, days_from_now: int = 7):
+        future_date = (datetime.datetime.now(JST) + datetime.timedelta(days=days_from_now)).date()
+        monkeypatch.setattr(qs_module.config, "YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM", future_date)
+        return future_date
+
+    def test_use_item_is_not_blocked_before_enforce_date(self, isolated_db, monkeypatch):
+        self._set_enforce_from_in_future(monkeypatch)
+        _seed()
+        service = qs_module.InventoryService()
+        first_id = _grant_item("son", 701)
+        second_id = _grant_item("son", 702)
+
+        # 施行前は連続使用しても拒否されない
+        assert service.use_item("son", first_id)["status"] == "consumed"
+        assert service.use_item("son", second_id)["status"] == "consumed"
+
+    def test_get_user_inventory_returns_announcement_before_enforce_date(self, isolated_db, monkeypatch):
+        future_date = self._set_enforce_from_in_future(monkeypatch, days_from_now=7)
+        _seed()
+        service = qs_module.InventoryService()
+        used_id = _grant_item("son", 701)
+        _grant_item("son", 702)
+        service.use_item("son", used_id)
+
+        result = service.get_user_inventory("son")
+        # 施行前なので、実際に使用済みでも残りクールダウンは常に0
+        assert result["youtube_cooldown_remaining_seconds"] == 0
+
+        announcement = result["youtube_cooldown_announcement"]
+        assert announcement is not None
+        assert announcement["starts_on"] == future_date.isoformat()
+        assert 0 <= announcement["days_remaining"] <= 7
+
+    def test_no_announcement_when_no_youtube_reward_ids_configured(self, isolated_db, monkeypatch):
+        self._set_enforce_from_in_future(monkeypatch)
+        monkeypatch.setattr(qs_module.config, "YOUTUBE_REWARD_IDS", [])
+        _seed()
+        service = qs_module.InventoryService()
+        _grant_item("son", 701)
+
+        result = service.get_user_inventory("son")
+        assert result["youtube_cooldown_announcement"] is None
+
+    def test_announcement_disappears_once_enforce_date_arrives(self, isolated_db, monkeypatch):
+        # デフォルトのfixtureは既にENFORCE_FROMを過去日にしている(=施行済み)
+        _seed()
+        service = qs_module.InventoryService()
+        _grant_item("son", 701)
+
+        result = service.get_user_inventory("son")
+        assert result["youtube_cooldown_announcement"] is None
