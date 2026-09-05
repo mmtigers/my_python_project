@@ -301,12 +301,21 @@ class QuestService:
         # sqlite3.Row は辞書のように [] でアクセス可能です
         if quest['quest_type'] != 'daily':
             return {"gold": 0, "exp": 0}
-        
+
         # 2. 曜日指定のチェック (修正箇所)
         # 原因: DB生データには 'days' キーがなく、'day_of_week' カラムが存在する。
         # また sqlite3.Row に .get() は存在しないためAttributeErrorになる。
         # 修正: 'day_of_week' カラムの値を確認する。値が入っていれば曜日限定なのでブースト対象外。
-        if quest['day_of_week']: 
+        if quest['day_of_week']:
+            return {"gold": 0, "exp": 0}
+
+        # Q-L11(#409): quest_type='daily'だがreset_period='weekly'(=週1回の
+        # ペースで達成すればよいクエスト)の場合、以下の「連続達成ボーナス」は
+        # 直近の完了日からの経過日数を「サボった日数」とみなして加点する設計のため、
+        # 正常に毎週1回のペースで完了しているだけでも days_diff が常に約7となり
+        # 毎回+60%相当のボーナスが付与されてしまっていた(潜在バグ・未発火)。
+        # このボーナスはdaily(毎日実施が前提)クエストのみを対象とする。
+        if (quest['reset_period'] or 'daily') != 'daily':
             return {"gold": 0, "exp": 0}
 
         # --- 以下、既存ロジック ---

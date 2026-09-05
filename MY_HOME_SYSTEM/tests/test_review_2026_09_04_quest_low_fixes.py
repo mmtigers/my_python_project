@@ -65,6 +65,30 @@ def test_bonus_treats_pending_day_as_done(isolated_db):
     assert boost["gold"] == 10
 
 
+def test_weekly_reset_period_daily_quest_gets_no_missed_day_bonus(isolated_db):
+    """Q-L11(#409): quest_type='daily'だがreset_period='weekly'(週1回のペースで
+    達成すればよいクエスト)の場合、正常に毎週1回のペースで完了しているだけでも
+    days_diff が常に約7となり、以前は「連続達成ボーナス」ロジックが誤って
+    +60%相当を加点する潜在バグがあった。reset_period='weekly'ではボーナス自体を
+    発生させないことを確認する。"""
+    with common.get_db_cursor(commit=True) as cur:
+        cur.execute(
+            "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, medal_count, role) "
+            "VALUES ('dad', 'Dad', 'Warrior', 1, 0, 0, 0, ?)", (ROLE_ADULT,),
+        )
+        cur.execute(
+            "INSERT INTO quest_master (quest_id, title, exp_gain, gold_gain, quest_type, target_user, reset_period) "
+            "VALUES (902, '週次テスト', 10, 100, 'daily', 'all', 'weekly')"
+        )
+        now_jst = datetime.datetime.now(qs_module.JST)
+        one_week_ago = (now_jst - datetime.timedelta(days=7)).isoformat()
+        cur.execute("INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, completed_at, status) "
+                    "VALUES ('dad', 902, '週次テスト', 10, 100, ?, 'approved')", (one_week_ago,))
+        quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = 902").fetchone()
+        boost = qs_module.QuestService().calculate_quest_boost(cur, "dad", quest)
+    assert boost == {"gold": 0, "exp": 0}
+
+
 def test_cancel_reverts_medals(isolated_db, monkeypatch):
     _quiet(monkeypatch)
     _seed(gold=0)

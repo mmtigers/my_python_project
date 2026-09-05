@@ -250,8 +250,10 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 * 根拠: `def calculate_quest_boost(self, cur, user_id: str, quest: Any) -> Dict[str, int]:` (行番号: 247〜298)
 * **（Issue #409 Q-L1 で修正）** 最終実施日の取得条件を `status = 'approved'` から `status != 'rejected'` に変更し、承認待ちの日を「サボり」と誤判定しないようにした。
 * 根拠: `WHERE user_id = ? AND quest_id = ? AND status != 'rejected'` (calculate_quest_boost 内の SELECT)
-* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 252〜253), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 259〜260)
-* 根拠: `JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')\n        now_jst = datetime.datetime.now(JST)` (行番号: 273〜274)
+* 根拠: `if quest['quest_type'] != 'daily': return {"gold": 0, "exp": 0}` (行番号: 302〜303), `if quest['day_of_week']: return {"gold": 0, "exp": 0}` (行番号: 309〜310)
+* **（Issue #409 Q-L11 で修正）** `quest_type='daily'`だが`reset_period='weekly'`(週1回のペースで達成すればよいクエスト)の場合、この「連続達成ボーナス」は最終完了日からの経過日数を「サボった日数」とみなして加点する設計のため、正常に毎週1回のペースで完了しているだけでも`days_diff`が常に約7となり、実質常時+60%相当のボーナスが付与されてしまう潜在バグがあった(未発火のまま残っていたが、`reset_period='weekly'`のdailyクエストが実際に作成されれば発現する状態だった)。`reset_period`が(未設定時のデフォルトの)`'daily'`以外の場合はボーナス自体を発生させないようにした。
+* 根拠: `if (quest['reset_period'] or 'daily') != 'daily': return {"gold": 0, "exp": 0}` (行番号: 318〜319)
+* 根拠: `now_jst = datetime.datetime.now(JST)` (行番号: 335、`JST`はモジュールレベル定数)
 * **引数/リクエスト**: `cur`, `user_id: str`, `quest: Any`（`sqlite3.Row`を想定）
 * 根拠: (行番号: 247〜248 / 抜粋: "# 修正: 型ヒントを dict から Any (sqlite3.Row) へ変更し、実態に合わせる")
 * **戻り値/レスポンス**: `Dict[str, int]`（`gold`, `exp`の追加ボーナス）
