@@ -17,9 +17,9 @@
 * Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。3つの公開関数`render_electricity`, `render_temperature`, `render_takasago`で構成される。
 * 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 9, 56, 106 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 * `render_electricity`は、渡された`df_sensor`から「Nature Remo E Lite」デバイスの消費電力を今日・昨日で重ねた折れ線グラフ、および「Plug」を含むデバイスタイプの本日の個別家電電力を表示する。
-* 根拠: `df_sensor["device_type"] == "Nature Remo E Lite"` (行番号: 23 / 抜粋: "(df_sensor[\"device_type\"] == \"Nature Remo E Lite\") &"), `df_sensor["device_type"].str.contains("Plug", na=False)` (行番号: 46 / 抜粋: "(df_sensor[\"device_type\"].str.contains(\"Plug\", na=False)) &")
+* 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 54 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
 * `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`analysis_service.load_yearly_temperature_stats`から取得した年間の室内外最高/最低気温推移を表示する。
-* 根拠: `df_sensor["device_type"].str.contains("Meter", na=False)` (行番号: 66 / 抜粋: "(df_sensor[\"device_type\"].str.contains(\"Meter\", na=False)) &"), `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 89 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)")
+* 根拠: `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)` (行番号: 74 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_METER, na=False)) &"), `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 97 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)")
 * `render_takasago`は、`df_sensor`のうち`location`が「高砂」であるレコードを最大50件、開閉・接触状態とともに表形式表示する。
 * 根拠: `df_sensor[df_sensor["location"] == "高砂"][["timestamp", "friendly_name", "contact_state"]].head(50)` (行番号: 111 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"][[\"timestamp\", \"friendly_name\", \"contact_state\"]].head(50)")
 
@@ -55,7 +55,7 @@
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は`st.info`表示後に早期`return`）
-* 根拠: `if df_sensor.empty:\n        st.info("データがありません")\n        return` (行番号: 11〜13 / 抜粋: "if df_sensor.empty:")
+* 根拠: `if df_sensor.empty:\n        st.info("データがありません")\n        return` (行番号: 18〜20 / 抜粋: "if df_sensor.empty:")
 
 
 * **副作用**: `st.columns`, `st.subheader`, `st.plotly_chart`, `st.info`によるStreamlit画面への描画。外部データ取得は行わず、渡された`df_sensor`の日時フィルタ・グラフ生成のみを行う。
@@ -78,7 +78,7 @@
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空、または`device_type`列が存在しない場合は`st.info`表示後に早期`return`）
-* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:\n        st.info("データがありません")\n        return` (行番号: 58〜60 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:")
+* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:\n        st.info("データがありません")\n        return` (行番号: 66〜68 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:")
 
 
 * **副作用**: `analysis_service.load_yearly_temperature_stats(now.year)`経由の外部データ取得。`st.columns`, `st.subheader`, `st.plotly_chart`, `st.markdown`, `st.info`によるUI描画。
@@ -195,12 +195,12 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **デバイスタイプ文字列のハードコード**: `"Nature Remo E Lite"`, `"Plug"`, `"Meter"`といったデバイスタイプの判定文字列が各関数内に直接埋め込まれており、これらの文字列が実際のデバイスマスタと一致しなくなった場合、グラフが空になっても気づきにくい。
-* 根拠: `df_sensor["device_type"] == "Nature Remo E Lite"` (行番号: 23 / 抜粋: "(df_sensor[\"device_type\"] == \"Nature Remo E Lite\") &"), `df_sensor["device_type"].str.contains("Plug", na=False)` (行番号: 46 / 抜粋: "(df_sensor[\"device_type\"].str.contains(\"Plug\", na=False)) &")
+* **[修正済み・Issue #451/#453] デバイスタイプ文字列のハードコード**: 以前は`"Nature Remo E Lite"`, `"Plug"`, `"Meter"`といったデバイスタイプの判定文字列が各関数内に直接埋め込まれており、これらの文字列が実際のデバイスマスタと一致しなくなってもグラフが空になるだけで気づきにくかった。現在はファイル冒頭の`DEVICE_TYPE_NATURE_REMO_E_LITE`/`DEVICE_TYPE_KEYWORD_PLUG`/`DEVICE_TYPE_KEYWORD_METER`という名前付き定数に集約し、加えて該当データが0件の場合の表示を`st.info`から`st.warning`へ変更して、デバイス名変更等による恒常的な0件化に気づけるようにした（`render_electricity`の「Nature Remo E Liteのデータがありません」「プラグデータなし」、`render_temperature`の「今日の室温データなし」「今日の湿度データなし」）。ただし`render_electricity`/`render_temperature`冒頭の`df_sensor.empty`ガード（データ取得自体が空の場合）は引き続き`st.info`のままで、デバイスタイプ不一致という特定の懸念に絞った変更である。
+* 根拠: 定数定義 (行番号: 12-14 / 抜粋: "DEVICE_TYPE_NATURE_REMO_E_LITE = \"Nature Remo E Lite\""), 警告表示への変更 (行番号: 49, 62, 85, 93)
 
 
 * **`render_temperature`のみ列存在チェックあり**: `render_temperature`は`"device_type" not in df_sensor.columns`を明示的にチェックしているが、`render_electricity`・`render_takasago`は同様のチェックを行わずに`df_sensor["device_type"]`や`df_sensor["location"]`へ直接アクセスしており、列が存在しない`DataFrame`が渡された場合に`KeyError`となる可能性がある（3関数間でのチェック方針が不統一）。
-* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:` (行番号: 58 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:"), `df_sensor[df_sensor["location"] == "高砂"]` （列存在チェックなし） (行番号: 111 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"]")
+* 根拠: `if df_sensor.empty or "device_type" not in df_sensor.columns:` (行番号: 66 / 抜粋: "if df_sensor.empty or \"device_type\" not in df_sensor.columns:"), `df_sensor[df_sensor["location"] == "高砂"]` （列存在チェックなし） (行番号: 119 / 抜粋: "df_sensor[df_sensor[\"location\"] == \"高砂\"]")
 
 
 * **エラーハンドリングの欠如**: 3関数のいずれにも`try/except`による例外捕捉がなく、`analysis_service.load_yearly_temperature_stats`が例外を送出した場合、タブ全体の描画が中断する可能性がある。

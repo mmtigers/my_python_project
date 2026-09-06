@@ -900,8 +900,8 @@
 * 根拠: [メイン処理と送信成否分岐] (行番号: 1292, 1298, 1305〜1311 / 抜粋: "data = data_manager.load_daily_summary()" / "sent = notifier.notify_daily_summary(counts, site_names, today_str)" / "if sent:\n        data_manager.save_daily_summary({'counts': {}, 'last_sent_date': today_str})\n    else:\n        logger.error(\n            "Daily summary notification failed; keeping accumulated counts for retry "")
 
 
-* **エラーハンドリング**: 現在時刻が21時台でない場合、または当日分が送信済みの場合は早期`return`する（例外処理は本関数にはない）。
-* 根拠: [ガード節] (行番号: 1037〜1038, 1042〜1043 / 抜粋: "if now.hour != 21:\n        return")
+* **エラーハンドリング**: 現在時刻が21時台でない場合、または当日分が送信済みの場合は早期`return`する（例外処理は本関数にはない）。**[修正済み・Issue #451]** 以前は判定条件にリテラル`21`が直書きされていたが、現在は`MonitorConfig.DAILY_SUMMARY_HOUR`定数を参照する(値は変更していない)。
+* 根拠: [ガード節] (行番号: 1690 / 抜粋: "if now.hour != MonitorConfig.DAILY_SUMMARY_HOUR:\n        return")
 
 
 ### `_MONITOR_LOCK_FILE_PATH` (モジュール定数)
@@ -1212,7 +1212,7 @@ graph TD
 * **（D-L6で追加）Discord embedの文字数上限は250文字に安全側で切り詰める**: `DiscordNotifier._EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`はいずれもDiscordの実際の上限（title 256文字、field.value 1024文字）より小さい250文字に設定している。今後embedへ新しいフィールドを追加する際、そのフィールド値がスクレイピング結果（外部サイト由来で長さが保証されない文字列）である場合は、`_truncate_for_embed`で同様に切り詰めること。
 * **（D-L9で追加）日次サマリの計上件数はnotify()の戻り値に依存する**: `_check_site`は`data_manager.record_daily_new_casts`に渡す件数として`notifier.notify(...)`の戻り値（実送信件数）を使う。`notify`のシグネチャを変更する場合（戻り値の意味を変える等）は、この呼び出し元の前提が崩れないか確認すること。
 * **（D-L12で追加）`AGE_PLAUSIBLE_MIN`/`AGE_PLAUSIBLE_MAX`は経験的な範囲であり万能ではない**: 括弧内の数字に「歳」「才」の明示が無い場合のみこの範囲（18〜79）でフィルタするが、この範囲内に収まる非年齢の2桁数字（部屋番号・順位バッジ等）は依然として誤って年齢と判定されうる。あくまで明らかに範囲外の値（例: レビューで指摘された"(85)"）を除外するための最小限の足切りであり、完全な誤検知防止ではない。
-* **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（21時固定）などがすべて`MonitorConfig`にハードコードされている。
+* **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（`DAILY_SUMMARY_HOUR`、既定21時）などが`MonitorConfig`クラスの名前付き定数として集約されている(各サイト定義自体は#413で`sites.json`へ外出し済み)。**[Issue #451: 対応済み]** これらは元々`MonitorConfig`という単一クラスに集約されており、「多数のマジックナンバーが各所に散在」という状態ではなかった。唯一関数内にリテラル直書きだった日次サマリ送信時刻(`21`)のみ`DAILY_SUMMARY_HOUR`定数として`MonitorConfig`に追加し、`_maybe_send_daily_summary`から参照するよう変更した。設定ファイル化(`sites.json`のような外部化)までは行っていない。
 * **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
 * 根拠: [OSError分岐のコメント] (行番号: 696〜703 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")
 * **（Issue #461で解消）`.corrupted-*`隔離ファイルの自動クリーンアップを追加**: 以前は`DataManager.load_known_casts`/`load_daily_summary`が内容起因の読み込み失敗時に破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`として同一ディレクトリに退避するのみで、これらの隔離ファイルを削除・世代整理する処理が本ファイル内のどこにも存在せず、破損が繰り返し発生する運用環境では際限なく蓄積し続ける可能性があった。現在は`DataManager.cleanup_old_quarantine_files`（`_run_monitor_locked`が`DataManager`生成直後に1回だけ呼び出す）が、`_QUARANTINE_RETENTION_DAYS`（既定30日）より`mtime`が古い`.corrupted-*`ファイルを削除する。ただし`.bak`バックアップファイル自体は元々1世代のみが上書き保持される設計であり、こちらのクリーンアップは元から不要（新設のクリーンアップ対象にも含まれない）。

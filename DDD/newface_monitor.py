@@ -301,6 +301,10 @@ class MonitorConfig:
 
     # Notification Settings
     DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
+    # Issue #451: 1時間毎のcron実行のうち、この時(hour)の実行でのみ日次サマリを
+    # Discordへ送信する(_maybe_send_daily_summary参照)。以前は関数内に21という
+    # リテラルが直書きされていた。
+    DAILY_SUMMARY_HOUR: int = 21
 
     # Detection Settings
     # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
@@ -1683,7 +1687,7 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManag
             束縛されたDataManager(#364)。
     """
     now = datetime.now()
-    if now.hour != 21:
+    if now.hour != MonitorConfig.DAILY_SUMMARY_HOUR:
         return
 
     today_str = now.strftime('%Y-%m-%d')

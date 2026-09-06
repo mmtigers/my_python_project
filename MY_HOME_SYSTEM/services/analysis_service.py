@@ -1,5 +1,6 @@
 # MY_HOME_SYSTEM/services/analysis_service.py
 import contextlib
+import re
 import sqlite3
 import shutil
 import subprocess
@@ -37,37 +38,40 @@ def get_ro_db_connection() -> sqlite3.Connection:
         f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0
     )
 
-def _parse_timestamp_to_jst(value) -> pd.Timestamp:
-    """
-    タイムスタンプ文字列をJSTのTimestampへ変換する。
+# #456: naive/aware混在カラムをベクトル化で処理するため、末尾のtzオフセット
+# (+09:00/+0900等)またはZ終端の有無で2群に振り分けるための判定パターン。
+_TZ_OFFSET_SUFFIX_PATTERN = re.compile(r"(?:Z|[+-]\d{2}:?\d{2})$")
 
-    M-1-4: オフセット付き(aware)の文字列はそのオフセットを尊重してJSTへ変換する。
+
+def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:
+    """
+    タイムスタンプ文字列の列をJSTのtz-aware列へ変換する。
+
+    M-1-4: オフセット付き(aware)の文字列はそのオフセットを尊重してJSTへ変換し、
     tzinfoが無い(naive)文字列は、保存規約(core.utils.get_now_iso)に合わせて
-    「元からJSTで記録されている」とみなしてlocalizeする。以前は
-    pd.to_datetime(..., utc=True) で一律UTCとみなしていたため、tzinfoの無い
-    レガシーレコード(get_now_iso導入以前のデータ)がグラフ・電気代集計で
-    9時間ズレる原因になっていた。
-    """
-    ts = pd.Timestamp(value)
-    if ts.tzinfo is None:
-        return ts.tz_localize("Asia/Tokyo")
-    return ts.tz_convert("Asia/Tokyo")
+    「元からJSTで記録されている」とみなしてlocalizeする。この2系統は変換方法
+    自体が異なるため、`pd.to_datetime`へ一括で(`utc=True`等)渡すとnaive値を
+    誤ってUTCとみなしてしまい9時間ズレが再発する。そのため文字列表現の時点で
+    マスク分割し、群ごとに`pd.to_datetime`をベクトル化して適用する
+    (#456: 旧実装は`.apply()`で1行ずつ`pd.Timestamp(value)`を呼んでいた)。
 
+    L-L3 (#410): 不正な値は`errors='coerce'`により当該行のみ`pd.NaT`になり、
+    他の行の処理は継続される(1行の不正なタイムスタンプでパネル全体が
+    空扱いになっていた不具合の再発防止)。
+    """
+    has_offset = series.astype("string").str.contains(_TZ_OFFSET_SUFFIX_PATTERN, na=False)
 
-def _parse_timestamp_to_jst_coerce(value) -> pd.Timestamp:
-    """
-    L-L3 (#410): `_parse_timestamp_to_jst`は不正なタイムスタンプ文字列に対して例外を
-    送出する。以前は`process_dataframe`がこれを`.apply()`でそのまま呼んでいたため、
-    1行でも不正なタイムスタンプがあると例外が`load_data_from_db`の`except Exception`
-    まで伝播し、パネル全体のデータが空扱いになっていた(該当行だけでなく全行が
-    失われる)。`pandas`の`errors='coerce'`相当に、パース失敗時は当該行のみ`pd.NaT`
-    にして処理を継続する。
-    """
-    try:
-        return _parse_timestamp_to_jst(value)
-    except (ValueError, TypeError) as e:
-        logger.warning(f"Timestamp parse failed, coercing to NaT: {value!r} ({e})")
-        return pd.NaT
+    parts = []
+
+    naive_values = series[~has_offset]
+    if not naive_values.empty:
+        parts.append(pd.to_datetime(naive_values, errors="coerce").dt.tz_localize("Asia/Tokyo"))
+
+    aware_values = series[has_offset]
+    if not aware_values.empty:
+        parts.append(pd.to_datetime(aware_values, errors="coerce", utc=True).dt.tz_convert("Asia/Tokyo"))
+
+    return pd.concat(parts).sort_index()
 
 
 def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
@@ -77,7 +81,7 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    df["timestamp"] = df["timestamp"].apply(_parse_timestamp_to_jst_coerce)
+    df["timestamp"] = _vectorized_parse_timestamps_to_jst(df["timestamp"])
 
     return df
 
