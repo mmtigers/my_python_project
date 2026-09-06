@@ -25,7 +25,9 @@ def render_traffic():
 
     c_t1, c_t2 = st.columns(2)
     for col, line, name in [(c_t1, line_g, "JR 宝塚線"), (c_t2, line_a, "JR 神戸線")]:
-        if line["is_delay"]:
+        # Issue #438: is_delayだけ直接インデックスアクセスで、is_unavailableは
+        # .get()という方針不統一があった。キー欠落時も例外にならないよう統一する。
+        if line.get("is_delay"):
             bg_color, status_color = "#ffebee", "#d32f2f"
         elif line.get("is_unavailable"):
             # Low修正: 取得不可を平常運転と同じ緑色で表示しない(遅延見逃し防止)

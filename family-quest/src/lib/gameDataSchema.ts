@@ -50,7 +50,9 @@ const questSchema = z.object({
     icon_key: z.string().nullable().optional(),
     start_time: z.string().nullable().optional(),
     end_time: z.string().nullable().optional(),
-    days: z.union([z.array(z.number()), z.string(), z.null()]).optional(),
+    // Issue #474: 実際のAPIレスポンスでは常に number[] | null (string分岐は
+    // 対応する実データが存在しなかったため削除)
+    days: z.union([z.array(z.number()), z.null()]).optional(),
     target_user: z.string().nullable().optional(),
     pre_requisite_quest_id: z.number().nullable().optional(),
     is_shared_completed_by: z.string().optional(),

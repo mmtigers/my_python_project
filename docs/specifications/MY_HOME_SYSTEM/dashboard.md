@@ -131,10 +131,11 @@
 
 
 * **エラーハンドリング**:
-    * データ読み込みからタブレンダリングまでの全体を `try...except Exception as e:` で捕捉する。
-    * 例外捕捉時、エラーメッセージをログ出力（`logger.error`）した上で、`common.send_push` によるDiscord通知を試みる。この通知処理自体は入れ子の `try...except Exception: pass` で保護されており、通知失敗時も処理は継続する（例外を握りつぶす）。
+    * データ読み込み（`analysis_service.load_*()`・AIレポート取得・パース）を`try...except Exception as e:`で捕捉する。この範囲の失敗は全タブが依存する前提データが揃わないことを意味するため、ダッシュボード全体をエラー画面にする。
+    * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は`summary.render_summary()`の呼び出しと各タブの`with tab_x: ...`ブロックの中身を、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。
+    * 上記の外側`except Exception as e:`で捕捉した場合、エラーメッセージをログ出力（`logger.error`）した上で、`common.send_push`によるDiscord通知を試みる。**[修正済み・Issue #438]** この通知処理自体の失敗は、以前は`except Exception: pass`で握りつぶしていたが、現在は`except Exception as notify_err: logger.warning(...)`でログに記録するよう変更した。
     * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
-* 根拠: `except Exception as e:` (行番号: 143〜159 / 抜粋: "except Exception as e:"), `except Exception:\n            pass` (行番号: 153〜154 / 抜粋: "except Exception:\n            pass")、トレースバックのログのみ化 (行番号: 155〜159 / 抜粋: "logger.error(traceback.format_exc())")
+* 根拠: 外側`except Exception as e:` (行番号: 159〜177 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 169〜172 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 177 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるタブ単位保護 (行番号: 96〜141 / 抜粋: "with view_common.safe_section(")
 
 
 
@@ -145,30 +146,29 @@
 ```mermaid
 flowchart TD
     Start(["Start: main()"]) --> Sidebar["サイドバー設定・CSS適用・現在時刻ログ"]
-    Sidebar --> TryStart(["Tryブロック開始"])
+    Sidebar --> TryStart(["Tryブロック開始(データ読み込み)"])
 
     TryStart --> LoadData["外部: analysis_service.load_*() でデータ読み込み"]
     LoadData --> LoadReport["外部: analysis_service.load_ai_report()"]
     LoadReport --> CheckReport{"report が None でないか"}
     CheckReport -- Yes --> RenderReport["時間帯アイコン付きでAIレポートを展開表示"]
     CheckReport -- No --> RenderSummary
-    RenderReport --> RenderSummary["外部: summary.render_summary()"]
+    RenderReport --> RenderSummary["safe_section('サマリー')で保護: summary.render_summary()"]
 
     RenderSummary --> CreateTabs["st.tabs() で11タブ生成"]
-    CreateTabs --> RenderTabs["各タブへ view モジュールの render 系関数を委譲"]
-    RenderTabs --> End(["End: 正常終了"])
+    CreateTabs --> RenderTabs["各タブをsafe_section()で個別に保護し、viewモジュールのrender系関数へ委譲"]
+    RenderTabs --> End(["End: 正常終了(1タブの例外は他タブに波及しない)"])
 
-    TryStart -. 例外発生 .-> Catch(["except Exception as e"])
+    TryStart -. データ読み込みで例外発生 .-> Catch(["except Exception as e"])
     LoadData -. 例外発生 .-> Catch
-    RenderTabs -. 例外発生 .-> Catch
 
     Catch --> LogErr["logger.error(err_msg)"]
     LogErr --> TryNotify(["Tryブロック: Discord通知"])
     TryNotify --> SendPush["外部: common.send_push(...)"]
-    SendPush -. 通知失敗 .-> IgnoreErr["except Exception: pass（握りつぶし）"]
+    SendPush -. 通知失敗 .-> LogWarn["except Exception as notify_err: logger.warning(...)"]
     SendPush --> ShowError
-    IgnoreErr --> ShowError["st.error() + st.code(traceback)"]
-    ShowError --> EndErr(["End: エラー画面表示"])
+    LogWarn --> ShowError["st.error() (詳細はlogger.errorのみ)"]
+    ShowError --> EndErr(["End: エラー画面表示(データ読み込み失敗時のみ)"])
 ```
 
 ## 6. 依存関係図
@@ -225,7 +225,7 @@ graph TD
 ## 8. 保守上の注意点
 
 * **ロガー設定方式の不統一**: 本ファイルは `logging.basicConfig()` と `logging.getLogger(__name__)` を直接使用してロガーを構築しているが、`switchbot_service.py` や `backup_service.py` 等の他サービスは `core.logger.setup_logging` を利用している。両方の初期化方式が同一プロセス内で混在すると、ハンドラの重複登録やログフォーマットの不一致が発生する可能性がある。
-* **二重の広範な例外キャッチ**: `main()` 全体を `except Exception as e:` で捕捉した上、その中のDiscord通知処理もさらに `except Exception: pass` で握りつぶしている。通知失敗の原因（設定不備やネットワーク断など）が完全に不可視化される。
+* **[修正済み・Issue #438] 二重の広範な例外キャッチとタブ横断の巻き込み**: 以前は`main()`全体（データ読み込み〜全タブのレンダリング）を1つの`except Exception as e:`で捕捉しており、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブまで巻き込んでいた。その中のDiscord通知処理も`except Exception: pass`で握りつぶしており、通知失敗の原因が完全に不可視化されていた。現在は各タブの描画（`with tab_x: ...`のブロック内）と`summary.render_summary`の呼び出しを、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャでそれぞれ個別に囲み、1タブの例外が他タブに波及しないようにした。`main()`直下の`try/except`は初期データ読み込み(全タブが依存するため、失敗時は全体をエラー画面にする判断は維持)専用として残り、その中のDiscord通知失敗は`pass`ではなく`logger.warning`で記録するよう変更した。
 * **`report["timestamp"]` の型分岐**: 71〜77行目で `ts` が文字列かつ `"T"` を含む場合のみ `datetime.fromisoformat` でパースし、それ以外（文字列だが `"T"` を含まない場合を含む）は `datetime.now()` にフォールバックしている。この場合、表示される時刻がAIレポート自体のタイムスタンプと異なる可能性がある。
 * **サイドバーとメイン画面での重複処理**: `view_common.CUSTOM_CSS` の `st.markdown` 呼び出し（48行目・55行目）および `datetime.now(pytz.timezone("Asia/Tokyo"))` の取得（50行目・56行目）がサイドバーブロックとメインのtryブロックでそれぞれ重複して実行されている。
 * **更新ボタン押下時の`st.rerun()`**: `st.cache_data.clear()` 直後に `st.rerun()` を呼んでおり、キャッシュ全クリア＋全データ再読み込みとなるため、データ量によっては応答が遅くなる可能性がある。

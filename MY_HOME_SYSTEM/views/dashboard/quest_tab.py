@@ -4,12 +4,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from services.quest_service import game_system
+from . import common as view_common
 
 def render():
     """Family Questの状況を表示するタブ"""
     st.title("⚔️ Family Quest 現在の状況")
-    
-    try:
+
+    # Issue #438: 他のタブと同じ共通ヘルパーで例外を隔離する(以前は本関数
+    # 独自のtry/exceptだったが、dashboard.py側のタブ単位保護と方針を揃えた)。
+    with view_common.safe_section("クエスト"):
         data = game_system.get_all_view_data()
         users = data.get('users', [])
         logs = data.get('logs', [])
@@ -65,6 +68,3 @@ def render():
                     st.write("---")
             else:
                 st.write("まだ冒険の記録がありません")
-
-    except Exception as e:
-        st.error(f"クエスト情報の読み込みに失敗しました: {e}")

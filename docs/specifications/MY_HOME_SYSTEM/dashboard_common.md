@@ -33,6 +33,9 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `html` | 標準ライブラリ | **（Issue #378で追加。旧版の記述を訂正）** `render_status_card_html`が`title`/`value`をHTMLエスケープするために使用（`html.escape`）。以前このテーブルは本ファイルが`streamlit`をインポートしていると記載していたが、実際には（Issue #378時点・それ以前も含め）本ファイルは`streamlit`を一切インポートしておらず誤りだった（`CUSTOM_CSS`の適用や`render_status_card_html`の呼び出しは呼び出し元で行われる） | `import html` (行番号: 2 / 抜粋: "import html") |
+| `logging`, `traceback` | 標準ライブラリ | **（Issue #438で追加）** `safe_section`が例外発生時にエラー内容とtracebackをログへ記録するために使用。 | `import logging`, `import traceback` (行番号: 3-4) |
+| `contextlib.contextmanager` | 標準ライブラリ | `safe_section`をコンテキストマネージャとして実装するために使用。 | `from contextlib import contextmanager` (行番号: 5) |
+| `streamlit` | サードパーティ | **（Issue #438で追加。上記の「streamlit未インポート」という記述は本Issue以降は当てはまらなくなった）** `safe_section`が例外捕捉時に`st.error`でプレースホルダを画面表示するために使用。`CUSTOM_CSS`の適用や`render_status_card_html`の呼び出し自体は引き続き呼び出し元が行う。 | `import streamlit as st` (行番号: 7) |
 
 ### ブラックボックスとなる外部要素
 
@@ -66,23 +69,46 @@
 ### `render_status_card_html`
 
 * **役割**: タイトル・値・テーマ名を受け取り、`CUSTOM_CSS`で定義された`.status-card`クラスおよびテーマクラス（`{theme}`）を適用したステータスカードのHTML文字列を生成して返す。**（Issue #378で修正）** `title`・`value`は`unsafe_allow_html=True`経由でそのまま描画される呼び出し元(`views/dashboard/summary.py`)が多く、以前はスクレイピング/DB由来の文字列（クエストタイトル等）をそのまま埋め込むと格納型XSSになり得た。`title`は常に`html.escape`する。`value`も既定でエスケープするが、`views/dashboard/summary.py`の`get_bicycle_status`のように前日比の色付け（`<span>`等）を意図的に組み立てて渡す呼び出し元向けに、キーワード専用引数`value_is_html`（既定`False`）で`value`のエスケープをスキップできる（`title`は`value_is_html`の影響を受けず常にエスケープされる）。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 50 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")、エスケープ処理 (行番号: 63〜64 / 抜粋: "safe_title = html.escape(title)")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 57 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")、エスケープ処理 (行番号: 70 / 抜粋: "safe_title = html.escape(title)")
 
 
 * **引数/リクエスト**: `title` (型: `str`。カードの見出し文字列。常にエスケープされる)、`value` (型: `str`。カードに表示する値。`value_is_html=True`時のみHTMLタグを含む文字列を許容)、`theme` (型: `str`。`CUSTOM_CSS`で定義されたテーマクラス名。例: `"theme-green"`)、`value_is_html` (型: `bool`。キーワード専用、既定`False`。Issue #378で追加)
-* 根拠: 関数シグネチャ (行番号: 50)
+* 根拠: 関数シグネチャ (行番号: 57)
 
 
 * **戻り値/レスポンス**: `str` (`<div class="status-card {theme}">`内に、エスケープ後の`title`/`value`を埋め込んだHTML文字列)
-* 根拠: `return f"""\n    <div class="status-card {theme}">\n        <div class="status-title">{safe_title}</div>\n        <div class="status-value">{safe_value}</div>\n    </div>\n    """` (行番号: 65〜69 / 抜粋: "return f\"\"\"")
+* 根拠: `return f"""\n    <div class="status-card {theme}">\n        <div class="status-title">{safe_title}</div>\n        <div class="status-value">{safe_value}</div>\n    </div>\n    """` (行番号: 72〜76 / 抜粋: "return f\"\"\"")
 
 
 * **副作用**: なし（文字列を生成して返すのみの純粋関数。画面描画・外部I/Oは行わない）
-* 根拠: 関数本体全体 (行番号: 50〜70)
+* 根拠: 関数本体全体 (行番号: 57〜77)
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。渡された引数の型・内容に関するバリデーションも存在しない）
-* 根拠: 関数本体全体 (行番号: 50〜70)
+* 根拠: 関数本体全体 (行番号: 57〜77)
+
+
+
+### `safe_section` (コンテキストマネージャ、Issue #438で追加)
+
+* **役割**: ダッシュボードの1セクション(タブ・サマリー等)の描画を`with`ブロックとして囲み、内部で発生した例外を捕捉してそのセクションのプレースホルダ表示に閉じ込める。以前は`dashboard.py`の`main()`全体を1つの`try/except`で囲んでおり、いずれか1つのタブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な他のタブの表示まで巻き込んでいた。本関数の導入により、`dashboard.py`・`quest_tab.py`はタブ単位で例外を隔離するようになった。L-L5 (#410)と同じ方針で、`traceback`等の内部詳細(ファイルパス・設定値等)は画面に出さずログにのみ残す。
+* 根拠: 関数Docstring・実装 (行番号: 81〜100 / 抜粋: "def safe_section(section_name: str):")
+
+
+* **引数/リクエスト**: `section_name` (型: `str`。エラーメッセージに含めるセクション名。例: `"クエスト"`)
+* 根拠: 関数シグネチャ (行番号: 81)
+
+
+* **戻り値/レスポンス**: なし(`@contextmanager`によるジェネレータ関数で、`with`文のコンテキストマネージャとして使用する)
+* 根拠: `@contextmanager` デコレータと `yield` (行番号: 80, 96)
+
+
+* **副作用**: 例外発生時、`logger.error`でエラー内容と`traceback.format_exc()`を出力し、`st.error`で画面にプレースホルダメッセージを表示する。
+* 根拠: `logger.error(f"{section_name}の表示中にエラーが発生しました: {e}")` / `logger.error(traceback.format_exc())` / `st.error(f"⚠️ {section_name}の表示中にエラーが発生しました。ログを確認してください。")` (行番号: 98〜100)
+
+
+* **エラーハンドリング**: `with`ブロック内で送出された`Exception`(およびそのサブクラス)を全て捕捉し、呼び出し元へは伝播させない。
+* 根拠: `except Exception as e:` (行番号: 97)
 
 
 

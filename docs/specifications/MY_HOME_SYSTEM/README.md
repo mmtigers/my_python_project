@@ -91,8 +91,6 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [scheduler_boot.md](./scheduler_boot.md) | 指定間隔でプロジェクト内のPythonスクリプトを定期的にサブプロセスとして実行・管理する無限ループのスケジューラ。 |
 | [smart_timelapse_generator.md](./smart_timelapse_generator.md) | OpenCVの背景差分で動画中の動きのある領域を検出し、FFmpegで該当部分を結合したタイムラプス動画を生成、Discordへアップロードする。 |
 | [start_all.md](./start_all.md) | MY_HOME_SYSTEMのクリーンアップ、初期設定、および関連プロセス群の起動を統括するスクリプト。 |
-| [timelapse_generator.md](./timelapse_generator.md) | DBのイベント検知時刻をもとにNVR録画からクリップを抽出・結合してタイムラプス動画を生成し、Discordへアップロードする。 |
-| [timelapse_runner.md](./timelapse_runner.md) | timelapse_generator.pyを定時または手動実行の条件に基づきサブプロセスとして起動・管理するランナースクリプト。 |
 | [utils.md](./utils.md) | システム全体で共通して使用されるユーティリティ関数群（タイムゾーン処理、指数バックオフによるリトライ機能等）を提供する。 |
 | [migrations.md](./migrations.md) | `migrations/`配下の`*.sql`ファイルを順に適用し、適用済みバージョンを`schema_migrations`テーブルで管理する軽量マイグレーションランナー。 |
 | [dashboard_common.md](./dashboard_common.md) | `views/dashboard`配下の各タブから共通利用されるCSSスタイル定義とステータスカードHTML生成関数を提供するモジュール（同名の`common.py`Facadeとはファイル名衝突のため別名で管理）。 |
@@ -112,3 +110,4 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | `bounty_router.md` (`routers/bounty_router.py`) | 報酬（ギルド討伐依頼）システムのAPIルーティング。2026-08のFamily Quest大改修(ギルド機能廃止、`d1599d6`/`ffdc8c2`/`1818d5a`)に伴い削除。 |
 | `ai_logic.md` (`handlers/ai_logic.py`) | Gemini Function Calling用の宣言スタブ。呼び出し経路(`line_logic.handle_message()`)ごと到達不能なデッドコードだったため削除。後継は[ai_service.md](./ai_service.md)。 |
 | `scripts_claude_log_watchdog.md` (`scripts/claude_log_watchdog.sh`) | Issue #339 対応(`e7b4175`)で削除。一次チェック部分は[health_watch.md](./health_watch.md)へ、`claude -p`起動部分は[scripts_claude_investigate.md](./scripts_claude_investigate.md)へ分割移設。 |
+| `timelapse_runner.md` (`monitors/timelapse_runner.py`) / `timelapse_generator.md` (`monitors/timelapse_generator.py`) | Issue #485: `scheduler_boot.py`でコメントアウト済み・`deploy/cron/crontab`にも未登録で、実行経路が存在しない到達不能コード(本番434行)だったため削除。手動運用は無いことを確認済み。姉妹システムの[smart_timelapse_generator.md](./smart_timelapse_generator.md)/`daily_timelapse_job.py`は別系統のため引き続き稼働中。 |
