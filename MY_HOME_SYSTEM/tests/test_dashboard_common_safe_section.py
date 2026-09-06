@@ -59,7 +59,7 @@ class TestDashboardTabIsolation:
         mock_st = MagicMock()
         mock_st.sidebar.__enter__ = MagicMock(return_value=mock_st)
         mock_st.sidebar.__exit__ = MagicMock(return_value=False)
-        mock_st.tabs.return_value = [MagicMock() for _ in range(11)]
+        mock_st.tabs.return_value = [MagicMock() for _ in range(10)]
         mock_st.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
         mock_st.expander.return_value.__exit__ = MagicMock(return_value=False)
 
@@ -81,7 +81,6 @@ class TestDashboardTabIsolation:
             stack.enter_context(patch.object(dashboard.health_tab, "render"))
             stack.enter_context(patch.object(dashboard.sensor_tab, "render_takasago"))
             stack.enter_context(patch.object(dashboard.log_tab, "render_logs"))
-            stack.enter_context(patch.object(dashboard.log_tab, "render_trends"))
             stack.enter_context(patch.object(dashboard.log_tab, "render_system"))
             stack.enter_context(patch.object(dashboard.misc_tab, "render_bicycle"))
             stack.enter_context(patch.object(dashboard, "logger"))

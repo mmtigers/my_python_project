@@ -17,33 +17,6 @@ def render_logs(df_sensor: pd.DataFrame):
             width="stretch",
         )
 
-def render_trends():
-    """トレンドタブ"""
-    st.title("🌟 最近の流行・トレンド推移")
-    dates = analysis_service.load_ranking_dates(limit=3)
-    if not dates:
-        st.info("データがありません。")
-        return
-
-    def render_history_section(title, ranking_type):
-        st.subheader(title)
-        cols = st.columns(len(dates))
-        for i, date_str in enumerate(dates):
-            with cols[i]:
-                label = "今週" if i == 0 else ("先週" if i == 1 else "先々週")
-                st.markdown(f"**{label} ({date_str[5:]})**")
-                df = analysis_service.load_ranking_data(date_str, ranking_type)
-                if df.empty:
-                    st.write("- データなし -")
-                    continue
-                for _, row in df.iterrows():
-                    url = f"https://play.google.com/store/apps/details?id={row['app_id']}"
-                    st.markdown(f"{row['rank']}. [{row['title']}]({url})")
-
-    render_history_section("🆓 無料トップ (流行)", "free")
-    st.markdown("---")
-    render_history_section("💰 売上トップ (人気)", "grossing")
-
 def render_system():
     """システム管理タブ"""
     st.title("🔧 システム管理コックピット")

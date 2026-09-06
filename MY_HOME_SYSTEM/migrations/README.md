@@ -44,12 +44,16 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 
 - `current_schema.sql` には `0000_baseline_schema.sql` が持つ `CREATE INDEX` 文が
   3つ含まれていない。
-- `current_schema.sql` には baseline に存在しないテーブル(`haircut_history`,
-  `app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)や列
-  (`device_records.battery_level`、`food_records.date`/`menu`/`created_at`)が
-  含まれている。特に `app_rankings` は `services/analysis_service.py` が参照する
-  ため、空DB(`migrations/`のみ適用した状態)ではこの機能が黙って無効になる点に
-  注意すること。
+- `current_schema.sql` には baseline に存在しない列(`device_records.battery_level`、
+  `food_records.date`/`menu`/`created_at`)が含まれている。
+
+Issue #507: 以前はここに baseline に存在しないテーブル(`haircut_history`,
+`app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)も既知の差分
+として記載していたが、いずれもリポジトリ内のどこからも読み書きされていない死蔵
+テーブルだったため(`app_rankings` だけ `services/analysis_service.py` に読み手が
+あったが、収集・書き込み側が存在せず機能として死んでいた)、オーナー判断で
+ダッシュボードの対応UIごと削除し、`current_schema.sql` からもこれら5テーブルを
+削除した。
 
 `tests/test_current_schema_sql.py` が、`migrations/*.sql` の
 `ALTER TABLE ... ADD COLUMN` で追加される列が `current_schema.sql` の

@@ -98,6 +98,11 @@ def main():
             summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)
 
         # --- タブ切り替え ---
+        # Issue #507: 「📊 トレンド」タブ(app_rankingsテーブル参照)は、書き込み側の
+        # 収集コードが存在せず(収集用のgoogle-play-scraperもIssue #496で未使用
+        # パッケージとして削除済み)、migrations/にもテーブル定義が無いため新規構築
+        # したDBでは永久に「データがありません」としか出ない死んだ機能だった。
+        # オーナー判断によりUIごと削除した。
         tabs = st.tabs([
             "⚔️ クエスト",
             "🚃 電車遅延",
@@ -107,14 +112,13 @@ def main():
             "🏥 健康管理",
             "👵 高砂実家",
             "📝 ログ分析",
-            "📊 トレンド",
             "🔧 システム管理",
             "🚲 駐輪場",
         ])
 
         (
             tab_quest, tab_train, tab_photo, tab_elec, tab_temp,
-            tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_bicycle
+            tab_health, tab_taka, tab_log, tab_sys, tab_bicycle
         ) = tabs
 
         # --- 各タブのレンダリング (View層へ委譲) ---
@@ -146,9 +150,6 @@ def main():
         with tab_log:
             with view_common.safe_section("ログ分析"):
                 log_tab.render_logs(df_sensor)
-        with tab_trends:
-            with view_common.safe_section("トレンド"):
-                log_tab.render_trends()
         with tab_sys:
             with view_common.safe_section("システム管理"):
                 log_tab.render_system()

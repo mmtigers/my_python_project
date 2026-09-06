@@ -417,39 +417,6 @@ def load_ai_report() -> Optional[pd.Series]:
     df = load_data_from_db(query)
     return df.iloc[0] if not df.empty else None
 
-def load_ranking_dates(limit: int = 3) -> List[str]:
-    """ランキングの日付リストを取得"""
-    try:
-        with contextlib.closing(get_ro_db_connection()) as conn:
-            cur = conn.cursor()
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='app_rankings'")
-            if not cur.fetchone(): return []
-            query = f"SELECT DISTINCT date FROM app_rankings ORDER BY date DESC LIMIT {limit}"
-            df = pd.read_sql_query(query, conn)
-            return df["date"].tolist()
-    except Exception as e:
-        logger.error(f"Ranking Dates Load Error: {e}")
-        return []
-
-def load_ranking_data(date_str: str, ranking_type: str) -> pd.DataFrame:
-    """特定日付・タイプのランキングを取得"""
-    # 保守性(#410, bandit B608): date_str は load_ranking_dates() が返すDB由来の値
-    # (app_rankings.dateの実データ)であり、テーブル名等の識別子ではなく値そのもの
-    # なので、f-string埋め込みではなくプレースホルダで渡せる。
-    query = """
-        SELECT rank, title, app_id FROM app_rankings
-        WHERE date = ? AND ranking_type = ?
-        ORDER BY rank ASC
-    """
-    conn = get_ro_db_connection()
-    try:
-        return pd.read_sql_query(query, conn, params=(date_str, ranking_type))
-    except Exception as e:
-        logger.error(f"Ranking Data Load Error: {e}")
-        return pd.DataFrame()
-    finally:
-        conn.close()
-
 # ==========================================
 # System Stats & Utils
 # ==========================================
