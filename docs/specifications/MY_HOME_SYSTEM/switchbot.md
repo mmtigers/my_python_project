@@ -23,12 +23,10 @@ SwitchBotに関連するWebhookペイロードおよびAPI経由のデバイス�
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `BaseModel` | クラス | データモデルの基底クラス | 根拠: `from pydantic import BaseModel, Field` (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
-| `Field` | 関数 | ファイル内での利用なし | 根拠: `from pydantic import BaseModel, Field` (行番号: 2 / 抜粋: "import BaseModel, Field") |
-| `Optional` | 型 | Null（None）許容型の定義 | 根拠: `from typing import Optional, Union, Dict, Any` (行番号: 3 / 抜粋: "import Optional, Union, Dict") |
-| `Union` | 型 | ファイル内での利用なし | 根拠: `from typing import Optional, Union, Dict, Any` (行番号: 3 / 抜粋: "Union, Dict, Any") |
-| `Dict` | 型 | 辞書型の定義 | 根拠: `from typing import Optional, Union, Dict, Any` (行番号: 3 / 抜粋: "Union, Dict, Any") |
-| `Any` | 型 | 任意の型の定義 | 根拠: `from typing import Optional, Union, Dict, Any` (行番号: 3 / 抜粋: "Union, Dict, Any") |
+| `BaseModel` | クラス | データモデルの基底クラス | 根拠: `from pydantic import BaseModel` (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
+| `Optional` | 型 | Null（None）許容型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "import Optional, Dict, Any") |
+| `Dict` | 型 | 辞書型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "Optional, Dict, Any") |
+| `Any` | 型 | 任意の型の定義 | 根拠: `from typing import Optional, Dict, Any` (行番号: 3 / 抜粋: "Optional, Dict, Any") |
 
 ### ブラックボックスとなる外部要素
 
@@ -158,7 +156,6 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **未使用コード**: `pydantic` からの `Field`、および `typing` からの `Union` のインポート文が存在するが、ファイル内で一度も使用されていない。
 * **型定義の曖昧さ**: `DeviceStatusResponse` の `body` プロパティは `Any` を含んで定義されており、デバイスによって中身が大きく変わるため、利用側で動的な型判定やキーの存在チェック（安全なアクセス）が必要になる構造となっている。
 * **`detectionState`と`openState`の混同に注意**: `SwitchBotContext`は両フィールドを別々に持つが、名前が似ているため混同しやすい。`detectionState`はWoContact/WoPresence共通で内蔵PIRのモーション検知結果("DETECTED"/"NOT_DETECTED")を表し、`openState`はWoContact固有の実際の開閉状態("open"/"close"/"timeOutNotClose")を表す。利用側(`webhook_router.py`)がこの2つを取り違えると、実機からのWebhookでは開閉検知の通知が正しく発火しない(Issue #251)。
 * 根拠: `detectionState: Optional[str] = None` (行番号: 13 / 抜粋: "detectionState: Optional[str] = None"), `openState: Optional[str] = None` (行番号: 19 / 抜粋: "openState: Optional[str] = None")

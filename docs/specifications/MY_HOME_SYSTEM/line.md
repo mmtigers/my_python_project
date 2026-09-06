@@ -26,8 +26,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `pydantic.BaseModel` | 外部ライブラリ | データモデル定義の基底クラスとして使用 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "from pydantic import BaseModel, Field") |
-| `pydantic.Field` | 外部ライブラリ | インポートされているがファイル内では未使用 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "from pydantic import BaseModel, Field") |
+| `pydantic.BaseModel` | 外部ライブラリ | データモデル定義の基底クラスとして使用 | 根拠: [インポート宣言] (行番号: 2 / 抜粋: "from pydantic import BaseModel") |
 | `typing.List` | 標準ライブラリ | リスト型の型ヒントとして使用 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "from typing import List, Optional, Any") |
 | `typing.Optional` | 標準ライブラリ | 省略可能な項目の型ヒントとして使用 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "from typing import List, Optional, Any") |
 | `typing.Any` | 標準ライブラリ | 任意の型を許容する型ヒントとして使用 | 根拠: [インポート宣言] (行番号: 3 / 抜粋: "from typing import List, Optional, Any") |
@@ -206,7 +205,6 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `pydantic` から `Field` がインポートされていますが、ファイル内では一度も使用されておらず未使用インポートとなっています。
 * `LineEvent` クラスにおける `postback` プロパティの型が `Optional[Any]` となっており、Pydanticによる厳密な型検証が行われません。
 * `LineEvent` の `replyToken`, `message`, `postback` はいずれも `Optional` であるため、イベントタイプ（例: messageイベントかpostbackイベントか）に応じた必須項目のチェックはこのモデル単体では機能しません。
 * 2026年のリファクタリング（コミット `1ecbe3b`）で `InputMode`（Enum）と `UserInputState`（BaseModel）が削除された。消費者だった `handlers/line_logic.py` の `USER_INPUT_STATE` ステートマシン自体が到達不能コードとして削除されたことに伴う整理であり、`from enum import Enum` のインポートも同時に除去されている。
