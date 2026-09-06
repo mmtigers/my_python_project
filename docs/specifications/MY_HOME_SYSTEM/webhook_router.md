@@ -234,6 +234,7 @@ graph TD
 
 * `switchbot_webhook` は `config.SWITCHBOT_WEBHOOK_TOKEN` が未設定の場合、トークン検証を行わず従来通り動作する（後方互換のためのオプトイン設計）。設定時のみ `?token=...` クエリパラメータとの一致を `hmac.compare_digest` で検証し、不一致・未指定であれば HTTP 401 を返す。
 * 根拠: トークン検証ブロック (行番号: 51〜53)
+* **（Issue #328調査用、削除予定）** `switchbot_webhook`冒頭に`logger.info(f"[Issue #328診断] SwitchBot Webhook受信: {body.model_dump()}")`という一時的な診断ログを追加している。`models/switchbot.py`の`body: Any`解消の前提として、実機からの生ペイロードをデバイス種別ごとに収集する目的のみの一時的な変更であり、外部から見た戻り値・処理内容に変化はない。調査完了後に削除される想定のため、削除時に本行も併せて除去すること。
 
 
 * `callback_line` において、`InvalidSignatureError` 以外の例外が発生した場合、ロガーには出力されるが例外は再スローされず `"OK"` が返却される。**（L-L1で範囲を縮小）** 以前は署名ヘッダ欠落時のSDK内部`AttributeError`もこの経路で200になっていたが、現在は署名欠落・UTF-8デコード失敗を事前に400で弾くため、この汎用ハンドラに到達するのはSDK/ハンドラ実行中の想定外例外のみ。複数イベント一括配信時に1件目の例外で以降のイベントが処理されない問題は、`handlers/line_handler.py`側の`handle_message`/`handle_postback`がイベント単位で例外を握る（`exc_info=True`でログ）ことで解消している（#376）。
