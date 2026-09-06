@@ -82,6 +82,45 @@ class TestFireInvestigateHook:
         assert fake_logger.error.called
 
 
+class TestCheckAppLogs:
+    """check_app_logs のIssue #339層2調査で発覚した誤検知バグの回帰テスト。
+
+    pip_install.log のように行に一切タイムスタンプが無いファイルは、
+    LogAnalyzer._analyze_file 内で effective_dt が常に None になり、
+    start_date によるフィルタが効かないため、ファイルの中身が更新されて
+    いなくても毎回無条件に「新規エラー」として再カウントされてしまっていた。
+    """
+
+    def test_ignores_stale_file_with_no_timestamped_lines(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
+        stale_log = tmp_path / "pip_install.log"
+        stale_log.write_text(
+            "ERROR: pip's dependency resolver does not currently take into account...\n"
+        )
+        # 「前回チェック以降」より古い更新日時にする(=中身は更新されていない)
+        old_time = (datetime.datetime.now() - datetime.timedelta(hours=1)).timestamp()
+        os.utime(stale_log, (old_time, old_time))
+
+        since = datetime.datetime.now() - datetime.timedelta(minutes=30)
+        result = health_watch.check_app_logs(since)
+
+        assert result is None
+
+    def test_still_detects_error_in_recently_updated_file_without_timestamps(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
+        recent_log = tmp_path / "pip_install.log"
+        recent_log.write_text("ERROR: something just failed\n")
+        # ファイル自体は since より新しく更新されている
+        recent_time = datetime.datetime.now().timestamp()
+        os.utime(recent_log, (recent_time, recent_time))
+
+        since = datetime.datetime.now() - datetime.timedelta(minutes=30)
+        result = health_watch.check_app_logs(since)
+
+        assert result is not None
+        assert "pip_install.log" in result
+
+
 class TestRunChecksHookGating:
     """run_checks内でのフック発火が通知抑制(_should_notify)と連動していること。"""
 
