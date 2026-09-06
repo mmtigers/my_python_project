@@ -28,7 +28,15 @@ jobs:
     runs-on: ubuntu-latest
     # C-L1 (Issue #414): LLMレビューが応答待ちで固まった場合の上限
     timeout-minutes: 30
-    if: github.event.pull_request.draft == false
+    # Issue #482: Dependabot が起動したワークフローは claude-code-action 側の
+    # allowed_bots ガード(非人間アクターを既定で拒否する安全機構)で必ず失敗し、
+    # 依存更新PRのチェックが常時赤くなっていた(2026-09-04 の18件すべてで
+    # "Workflow initiated by non-human actor: dependabot (type: Bot)")。
+    # 依存更新PRの差分はバージョン文字列のみで、下の prompt が挙げる CLAUDE.md の
+    # 規約(レイヤリング・get_db_cursor()経由・マイグレーションの冪等性等)を
+    # 適用する対象がほぼ無く、破壊は test.yml の4ジョブが検知する。
+    # レビュー対象に含めたい場合は除外ではなく allowed_bots で明示許可すること。
+    if: github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

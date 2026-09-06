@@ -40,8 +40,12 @@ if [[ "${1:-}" == "--if-stale" ]]; then
     echo "[deploy] family-quest: dist/ が古いか未記録 (built='${recorded:-none}' head='${current:-unknown}')。再ビルドします..."
 fi
 
-echo "[deploy] family-quest: npm install..."
-npm install --no-audit --no-fund
+# Issue #489: CI(test.yml の frontend ジョブ)と同じ npm ci を使い、
+# package-lock.json を厳密に守る。npm install だと lockfile を再解決して
+# 書き換える余地があり、(1) CIが検証したのと別の依存ツリーで本番ビルドされる、
+# (2) 実機の git ツリーが dirty になって次回の git pull が失敗する、の2点が起きうる。
+echo "[deploy] family-quest: npm ci..."
+npm ci --no-audit --no-fund
 
 echo "[deploy] family-quest: build..."
 npm run build

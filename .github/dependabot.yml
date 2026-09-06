@@ -3,6 +3,13 @@
 # 起票し、更新の取りこぼしを防ぐ(PRのCIゲートは test.yml が担う)。
 # 週次実行は月曜 09:00 JST に揃え、定期監査ワークフロー(spec-drift/pip-audit)と
 # 同じタイミングで棚卸しできるようにしている。
+#
+# Issue #482: 当初 groups が未設定で、minor/patch まで1依存1PRとして起票していた。
+# 2026-09-04 には18本が一斉に立ち、棚卸しが追いつかず全件が滞留した(推移依存の
+# typing-inspection にまでPRが立つ状態。根本的には requirements.txt が pip freeze の
+# 平坦なダンプであることに起因する。Issue #496)。全エコシステムで minor/patch を
+# minor-and-patch グループにまとめ、破壊的変更を含みうる major だけを従来どおり
+# 個別PRとして残し、単独で評価できるようにする。
 version: 2
 updates:
   # GitHub Actions (SHAピン留めの更新。コメントのバージョン表記も自動更新される)
@@ -13,6 +20,11 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:  # Issue #482: 詳細はファイル冒頭のコメント参照
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "github-actions"
@@ -25,6 +37,11 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:  # Issue #482: 詳細はファイル冒頭のコメント参照
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "python"
@@ -39,6 +56,11 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:  # Issue #482: 詳細はファイル冒頭のコメント参照
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "python"
@@ -52,6 +74,11 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "Asia/Tokyo"
+    groups:  # Issue #482: 詳細はファイル冒頭のコメント参照
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
     labels:
       - "dependencies"
       - "javascript"

@@ -66,6 +66,35 @@ jobs:
         run: ruff check . --output-format=github
         continue-on-error: true
 
+      - name: ShellCheck (correctness gate - blocking)
+        # Issue #486: Python(ruff)・TypeScript(ESLint)には静的解析があるのに、
+        # 本番の起動(start_all.sh)と全cronの実行基盤(run_task.sh)を担うシェル
+        # スクリプトだけが対象外だった。ruff の「明確なバグのみブロッキング」
+        # (F821/F822/F823/E9)と同じ方針で、error レベルのみをゲートにする。
+        # 導入時点で error は0件のため、Issue #401 の npm run lint と同様に
+        # 追加コストなしでブロッキング化できる。
+        # shellcheck は ubuntu-latest にプリインストール済み。-x は source 先も辿る。
+        working-directory: .
+        run: |
+          shellcheck -S error -x \
+            MY_HOME_SYSTEM/*.sh \
+            MY_HOME_SYSTEM/tools/*.sh \
+            MY_HOME_SYSTEM/scripts/*.sh \
+            family-quest/deploy.sh
+
+      - name: ShellCheck (full report - non-blocking)
+        # ruff/bandit のフルレポートと同じ扱い。導入時点の warning は3件
+        # (tools/keep_alive_anker.sh の SC2155、tools/connect_speaker.sh の
+        # SC1090/SC2034)。これらでPRを一律ブロックはせず可視化のみ行う。
+        working-directory: .
+        run: |
+          shellcheck -x \
+            MY_HOME_SYSTEM/*.sh \
+            MY_HOME_SYSTEM/tools/*.sh \
+            MY_HOME_SYSTEM/scripts/*.sh \
+            family-quest/deploy.sh
+        continue-on-error: true
+
       - name: Spec drift script tests (pytest .github/scripts/)
         # Issue #402: check_spec_drift.py の回帰テストは従来「手動実行前提」でCI未実行
         # だった。tmp_path 上の疑似リポジトリで完結するようになったため、
@@ -143,9 +172,12 @@ jobs:
 
       - name: Run tests with coverage
         # Issue #367: .coveragerc の omit を「本当に実行不能なもの」だけに絞った
-        # 真のビュー(2026-09-04時点の実測 67%: 6,575 stmts / miss 2,151)を基準に、
-        # 約3pt下の 64 を閾値とする(旧 45 は omit で水増しされた公式ビュー 87% に
-        # 対する値で、退行検知として機能していなかった)。段階的に引き上げること。
+        # 真のビューを基準に、実測より約3pt下を閾値とする(旧 45 は omit で水増し
+        # された公式ビュー 87% に対する値で、退行検知として機能していなかった)。
+        # Issue #494: 実測が 2026-09-04 の 67%(6,575 stmts / miss 2,151)から
+        # 2026-09-06 に 69.92%(7,233 stmts / miss 2,176)へ上がったため、同じ
+        # 「約3pt下」の方針で 64 -> 67 へ引き上げる。引き続き段階的に上げること
+        # (マージンは、無関係なPRが数行の未テストコードで赤くならないためのもの)。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -157,7 +189,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=64
+            --cov-fail-under=67
 
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
@@ -200,9 +232,12 @@ jobs:
             MY_HOME_SYSTEM/requirements-dev.txt
 
       - name: Install dependencies
+        # Issue #499: bandit は AST ベースの静的解析、pip-audit は -r で
+        # requirements ファイルを読むだけで、いずれも解析対象パッケージが
+        # インストールされている必要はない。dev 依存(bandit / pip-audit 本体)
+        # だけを入れる。
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Bandit (High severity - blocking)
