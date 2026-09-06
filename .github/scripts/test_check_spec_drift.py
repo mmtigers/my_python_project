@@ -223,9 +223,24 @@ def test_full_audit_does_not_flag_ddd_test_files_as_undocumented(pseudo_repo):
     assert "DDD/test_" not in "\n".join(report.undocumented)
 
 
-def test_full_audit_does_not_flag_existing_ddd_test_docs_as_orphaned(pseudo_repo):
+def test_full_audit_flags_test_docs_as_orphaned(pseudo_repo):
+    """Issue #508: テストの仕様書は孤立として報告されること。
+
+    #124 で is_test_file を doc_to_source_candidates(逆引き)に適用しなかった結果、
+    テストの仕様書は「is_tracked_source が対象外にするので必須ではない」のに
+    「逆引きは同名のテストソースへ解決するので孤立でもない」という死角に落ち、
+    更新もされず監査にも出ない状態で残り続けていた(実リポジトリで DDD 5件・
+    family-quest 2件)。CLAUDE.md の規約は「テストは仕様書の対象外」であり、
+    仕様書が正当なのは対応ソースが is_tracked_source を満たす場合だけなので、
+    そこに揃えて孤立として報告する。
+
+    なお doc_to_source_candidates 自体の挙動は変えていない(直上の
+    test_doc_to_source_candidates_still_resolves_existing_test_doc_to_its_source
+    が引き続き通ること)。判定を変えたのは cmd_full 側のみ。
+    """
     report = module.cmd_full()
-    assert "DDD/test_" not in "\n".join(report.orphaned)
+    orphaned_str = "\n".join(report.orphaned)
+    assert "docs/specifications/DDD/test_newface_monitor_lock.md" in orphaned_str
 
 
 # --- Issue #188の回帰テスト ---
@@ -254,12 +269,41 @@ def test_full_audit_is_clean_once_orphaned_docs_are_removed(pseudo_repo):
     孤立ドキュメント整理がテストを壊さないことの確認)。"""
     (module.SPEC_ROOT / "MY_HOME_SYSTEM" / "ai_logic.md").unlink()
     (module.SPEC_ROOT / "MY_HOME_SYSTEM" / "bounty_router.md").unlink()
+    # Issue #508: テストの仕様書も孤立として報告されるようになったため、
+    # 「クリーン」にするにはこれも削除する必要がある。
+    (module.SPEC_ROOT / "DDD" / "test_newface_monitor_lock.md").unlink()
     _commit_all(pseudo_repo, "remove orphaned docs", date="1700000100 +0000")
 
     report = module.cmd_full()
     assert report.orphaned == []
     assert report.undocumented == []
     assert report.stale == []
+
+
+# --- Issue #508の回帰テスト ---
+#
+# docs/specifications/ 直下にソース対応の無い文書(手順書等)を置くと、
+# doc_to_source_candidates が空リストを返し、cmd_full の `if candidates` 判定を
+# 素通りして永久に検知されなかった。規約(docs/specifications/README.md)では
+# 直下に置いてよいのは README.md と 全体設計書.md のみ。
+
+
+def test_full_audit_flags_spec_root_doc_without_any_source_candidate(pseudo_repo):
+    """仕様書ルート直下のソース非対応文書(例: 手順書)が孤立として報告されること。"""
+    _write(pseudo_repo, "docs/specifications/デプロイ手順.md")
+    _commit_all(pseudo_repo, "add stray procedure doc", date="1700000100 +0000")
+
+    report = module.cmd_full()
+    assert "docs/specifications/デプロイ手順.md" in "\n".join(report.orphaned)
+
+
+def test_full_audit_still_exempts_readme_and_overall_design_doc(pseudo_repo):
+    """README.md と 全体設計書.md は候補が空でも孤立として報告しないこと
+    (規約上の例外。上のテストの裏返しで、除外が効いていることを確認する)。"""
+    report = module.cmd_full()
+    orphaned_str = "\n".join(report.orphaned)
+    assert "全体設計書.md" not in orphaned_str
+    assert "README.md" not in orphaned_str
 
 
 # --- Issue #283の回帰テスト ---

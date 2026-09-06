@@ -10,7 +10,6 @@
 ## 関連ドキュメント
 
 * [newface_monitor.md](./newface_monitor.md) — 本ファイルが無害化する`DISCORD_WEBHOOK_ERROR`等の環境変数を実際に読み取り、`core.logger.get_logger()`経由でDiscordErrorHandlerに焼き込む側のモジュール。
-* [test_conftest_masks_discord_webhook.md](./test_conftest_masks_discord_webhook.md) — 本ファイルの防護が実際に機能していることを検証する回帰テスト。
 * `MY_HOME_SYSTEM/tests/conftest.py`（対応する仕様書は`docs/specifications/`配下に見つからなかった） — 本ファイルが踏襲した「importより前に環境変数を空文字で潰す」という同一の防護パターンの先行実装。
 
 ## 2. ファイルの概要
