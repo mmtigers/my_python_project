@@ -120,6 +120,15 @@ def check_app_logs(since: datetime.datetime) -> Optional[str]:
         # run_task.shが書くERROR行(タイムスタンプなし)での自己発火も防ぐ
         if os.path.basename(filepath) == "health_watch.log":
             continue
+        # Issue #339層2調査で発覚: pip_install.log等、行に一切タイムスタンプが
+        # 無いファイルは LogAnalyzer._analyze_file 内の effective_dt が常に None に
+        # なり、start_date によるフィルタ(121行目)が効かないため、ファイルの中身が
+        # 更新されなくても毎回無条件に「新規エラー」として再カウントされてしまう
+        # (恒久的な誤検知・再通知抑制期間明けの誤通知)。週次の LogAnalyzer.run_analysis
+        # と同じ mtime 足切りをここでも適用し、前回マーカー以降に更新されていない
+        # ファイルは解析対象から除外する。
+        if not analyzer._is_recent_file(filepath):
+            continue
         analyzer._analyze_file(filepath)
 
     errors = {f: d for f, d in analyzer.report_data.items() if d["errors"] > 0}
