@@ -108,6 +108,21 @@ def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Pat
     return current_dir
 
 
+_DISCORD_WEBHOOK_URL_RE = re.compile(r"(/api/webhooks/\d+)/[A-Za-z0-9_\-]+")
+
+
+def redact_discord_webhook_url(text: str) -> str:
+    """文字列中の Discord Webhook URL のトークン部分をマスクする。
+
+    requests.HTTPError / ConnectionError の str() は "... for url: https://discord.com/
+    api/webhooks/<id>/<token>" のように送信先URLを丸ごと含む。これを logger.error で
+    そのまま出力すると、ログファイルだけでなく core.logger.DiscordErrorHandler 経由で
+    エラー通知チャンネルにも Webhook トークンが転記されてしまうため、ログ出力前に
+    必ずこの関数を通す。
+    """
+    return _DISCORD_WEBHOOK_URL_RE.sub(r"\1/<redacted>", str(text))
+
+
 class DiscordCircuitBreaker:
     """Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする
     プロセス内サーキットブレーカー。

@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
-from file_utils import DiscordCircuitBreaker, resolve_my_home_system_root
+from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root
 
 # プロジェクトルート（MY_HOME_SYSTEM）をパスに追加。
 # 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約
@@ -560,10 +560,13 @@ class DiscordNotifier:
                 # 含まれるため、原因究明用にログへ残す。あわせて送信元のURL系フィールドも
                 # 出力し、原因切り分け（不正URL/文字数超過等）を後から追えるようにする
                 body = e.response.text[:300] if e.response is not None else ""
+                # exc_info(トレースバック)は requests の例外メッセージ経由で Webhook URL
+                # (トークン込み)をそのまま含むため付けない(core.logger 経由でエラー通知
+                # チャンネルにも転記される)。
                 logger.error(
-                    f"Failed to send notification for {cast.name}: {e} | body: {body} | "
-                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}",
-                    exc_info=True,
+                    f"Failed to send notification for {cast.name}: {type(e).__name__}: "
+                    f"{redact_discord_webhook_url(e)} | body: {body} | "
+                    f"detail_url: {cast.detail_url} | image_url: {cast.image_url}"
                 )
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
@@ -576,7 +579,7 @@ class DiscordNotifier:
                     break
                 self._circuit_breaker.record_failure()
             except requests.RequestException as e:
-                logger.error(f"Failed to send notification for {cast.name}: {e}", exc_info=True)
+                logger.error(f"Failed to send notification for {cast.name}: {type(e).__name__}: {redact_discord_webhook_url(e)}")
                 self._circuit_breaker.record_failure()
 
         return sent_count
@@ -633,7 +636,7 @@ class DiscordNotifier:
             self._circuit_breaker.record_success()
             return True
         except requests.RequestException as e:
-            logger.error(f"Failed to send daily summary notification: {e}", exc_info=True)
+            logger.error(f"Failed to send daily summary notification: {type(e).__name__}: {redact_discord_webhook_url(e)}")
             self._circuit_breaker.record_failure()
             return False
 
@@ -676,7 +679,7 @@ class DiscordNotifier:
             self._circuit_breaker.record_success()
             return True
         except requests.RequestException as e:
-            logger.error(f"Failed to send site failure alert for site '{site.site_id}': {e}", exc_info=True)
+            logger.error(f"Failed to send site failure alert for site '{site.site_id}': {type(e).__name__}: {redact_discord_webhook_url(e)}")
             self._circuit_breaker.record_failure()
             return False
 
@@ -946,7 +949,20 @@ class DataManager:
 
         try:
             with open(summary_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+            # JSONとしては読めるが形状が不正({} 以外のトップレベル、'counts' が辞書以外)な
+            # ファイルは、以前は検証せずそのまま返していたため record_daily_new_casts の
+            # data.setdefault / counts.get で AttributeError となり、_check_site が
+            # notify() の後・save_known_casts() の前で中断して「通知済みだが既知に
+            # 保存されない」→毎時同じキャストを再通知し続ける状態に陥っていた
+            # (#174/#183 が潰したのと同じ失敗モード)。load_site_failures(#395)と同様に
+            # 内容破損として扱い、下の隔離+バックアップ復旧へ進める。
+            if self._is_valid_daily_summary(data):
+                return data
+            logger.error(
+                f"Malformed daily summary in {summary_file} (expected {{'counts': {{...}}}}, "
+                f"got {type(data).__name__}); treating as corrupted."
+            )
         except DataManager._LOAD_ERRORS as e:
             # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError
             # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま
@@ -974,12 +990,28 @@ class DataManager:
             try:
                 with open(backup_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                logger.warning(f"Recovered daily summary from backup {backup_file} after cache corruption.")
-                return data
+                if self._is_valid_daily_summary(data):
+                    logger.warning(f"Recovered daily summary from backup {backup_file} after cache corruption.")
+                    return data
+                logger.error(f"Backup file {backup_file} is also malformed; starting from an empty summary.")
             except DataManager._LOAD_ERRORS as e:
                 logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         return {}
+
+    @staticmethod
+    def _is_valid_daily_summary(data: object) -> bool:
+        """daily_summary.json の内容が record_daily_new_casts / _maybe_send_daily_summary が
+        前提とする形状({'counts': {site_id: int}, 'last_sent_date': str} のうち、存在する
+        キーが正しい型)かを判定する。"""
+        if not isinstance(data, dict):
+            return False
+        # 'counts' キーが存在する場合は辞書でなければならない(None も不可:
+        # record_daily_new_casts の data.setdefault('counts', {}) は既存キーの値を
+        # そのまま返すため、None だと counts.get で AttributeError になる)。
+        if 'counts' in data and not isinstance(data['counts'], dict):
+            return False
+        return True
 
     def save_daily_summary(self, data: Dict) -> None:
         """日次サマリの集計状態をJSONファイルに保存する。
@@ -1678,7 +1710,18 @@ def _check_site(
         # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ
         # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。
         sent_count = notifier.notify(new_casts, site_name=site.name)
-        data_manager.record_daily_new_casts(site.site_id, sent_count)
+        # 日次サマリの集計は「通知は済んだが既知キャストの保存はまだ」という位置で
+        # 呼ばれる。ここで例外が漏れると save_known_casts に到達せず、通知済みの
+        # キャストが毎時「新規」として再通知され続けるため、集計の失敗は既知
+        # キャストの永続化を妨げないよう隔離する(サマリの件数が欠けるだけに留める)。
+        try:
+            data_manager.record_daily_new_casts(site.site_id, sent_count)
+        except Exception as e:
+            logger.error(
+                f"Failed to record daily summary for site '{site.site_id}' "
+                f"(known casts will still be saved): {e}",
+                exc_info=True,
+            )
     else:
         logger.debug(f"No new casts detected for site '{site.site_id}'.")
 

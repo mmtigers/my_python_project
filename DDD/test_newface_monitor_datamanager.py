@@ -541,3 +541,45 @@ if __name__ == "__main__":
     import pytest
 
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+class TestLoadDailySummaryRejectsMalformedShape:
+    """JSONとしては正しいが形状が不正(トップレベルがリスト、'counts'が辞書以外)な
+    daily_summary.json は、以前は無検証で返され record_daily_new_casts が
+    AttributeError で中断していた。_check_site 内では notify() の後・
+    save_known_casts() の前で起きるため、通知済みキャストが既知に保存されず
+    毎時再通知され続ける。内容破損として隔離・復旧されることを確認する。"""
+
+    @pytest.mark.parametrize("raw", ['[]', '{"counts": null}', '{"counts": 5}', '"str"', '42'])
+    def test_malformed_summary_is_quarantined_and_treated_as_empty(self, tmp_path, raw):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        summary_file.write_text(raw, encoding="utf-8")
+
+        assert dm.load_daily_summary() == {}
+        assert not summary_file.exists()
+        assert len(list(tmp_path.glob(f"{summary_file.name}.corrupted-*"))) == 1
+
+    @pytest.mark.parametrize("raw", ['[]', '{"counts": 5}'])
+    def test_record_daily_new_casts_survives_malformed_summary(self, tmp_path, raw):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        summary_file.write_text(raw, encoding="utf-8")
+
+        dm.record_daily_new_casts("restpia_test", 2)  # 例外を送出しないこと
+
+        assert dm.load_daily_summary()["counts"]["restpia_test"] == 2
+
+    def test_malformed_backup_is_not_restored(self, tmp_path):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        backup_file = summary_file.with_suffix(summary_file.suffix + ".bak")
+        summary_file.write_text("[]", encoding="utf-8")
+        backup_file.write_text('{"counts": "bad"}', encoding="utf-8")
+
+        assert dm.load_daily_summary() == {}
+
+    def test_valid_summary_with_only_last_sent_date_is_accepted(self, tmp_path):
+        dm = DataManager(tmp_path)
+        (tmp_path / "daily_summary.json").write_text('{"last_sent_date": "2026-09-01"}', encoding="utf-8")
+        assert dm.load_daily_summary() == {"last_sent_date": "2026-09-01"}

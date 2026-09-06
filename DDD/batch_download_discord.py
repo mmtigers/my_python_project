@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
+from file_utils import redact_discord_webhook_url
 from file_utils import resolve_my_home_system_root
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -93,7 +94,8 @@ def _standalone_send_discord_webhook(messages, image_data=None, channel="notify"
         resp.raise_for_status()
         return True
     except Exception as e:
-        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {e}")
+        # 例外文字列には送信先の Webhook URL(トークン込み)が含まれるためマスクする
+        logger.warning(f"⚠️ Discord Webhook送信に失敗しました: {redact_discord_webhook_url(e)}")
         return False
 
 try:
@@ -281,7 +283,19 @@ def _is_bot_detection_error(exc: Exception) -> bool:
     if any(excluded in message for excluded in CONFIG.BOT_DETECTION_EXCLUDED_MARKERS):
         return False
     for marker in CONFIG.BOT_DETECTION_MARKERS:
-        if re.search(rf"\b{re.escape(marker)}\b", message):
+        if marker.isdigit():
+            # 数字マーカー(403/429/503)は \b だけでは不十分: 正規表現の単語境界は
+            # "-" "/" "." も境界とみなすため、品番・パス・一時ファイル名に含まれる
+            # 数字列("ssis-403" "ipx-403:" "/dm18/ja/ssis-403" "ssni-429.mp4.fragments"
+            # "seg-403-v1")にも一致し、単なる通信エラー1件で BotDetectionError →
+            # 12時間クールダウンに入っていた。前後が英数字・"-"・"/"・"."(直後に
+            # 英数字が続く場合)のいずれかであれば「識別子の一部」とみなして除外する。
+            # "HTTP Error 403: Forbidden" / "too many 503 error responses" /
+            # "error 429." のような本来の文言は引き続き一致する。
+            pattern = rf"(?<![\w\-/.]){re.escape(marker)}(?![\w\-/]|\.\w)"
+        else:
+            pattern = rf"\b{re.escape(marker)}\b"
+        if re.search(pattern, message):
             return True
     return False
 
@@ -971,7 +985,7 @@ class ScrapingStrategy(DownloadStrategy):
                 for future in as_completed(futures):
                     idx, local_uri = future.result()  # 例外はそのまま呼び出し元へ伝播させる
                     resolved[idx] = local_uri
-            except Exception:
+            except BaseException:
                 # ボット検知(403/429/503)等で一部セグメントが例外を出した場合、
                 # 「即時セッション中断」を実際に機能させるため、まだ実行が
                 # 始まっていない残りのセグメント取得をキャンセルする。
@@ -980,6 +994,11 @@ class ScrapingStrategy(DownloadStrategy):
                 # ブロック中のCDNへのHTTP GETを完走し終えるまで例外の伝播が
                 # 遅延してしまっていた(実行中の最大_FRAGMENT_DOWNLOAD_WORKERS件は
                 # 完了を待つが、キュー済みの残りはリクエスト自体を送らずに済む)。
+                # Exception ではなく BaseException を捕捉する: 2回目の停止シグナルで
+                # _handle_signal が送出する KeyboardInterrupt は Exception の派生ではなく、
+                # 以前はここを素通りして with ブロック終了時の shutdown(wait=True)
+                # (cancel_futures なし)に落ち、「即時強制中断」のはずが数千件の
+                # キュー済みセグメントを完走するまで止まらなかった。
                 executor.shutdown(wait=True, cancel_futures=True)
                 raise
 

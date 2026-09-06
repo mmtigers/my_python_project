@@ -360,3 +360,65 @@ class TestDiscordNotifierCircuitBreaker:
 
         assert result is True
         assert notifier._circuit_breaker.is_open is False
+
+
+class TestCheckSiteSavesKnownCastsEvenIfDailySummaryFails:
+    """record_daily_new_casts は notify() の後・save_known_casts() の前で呼ばれる。
+    ここで例外が漏れると通知済みキャストが既知として保存されず、毎時同じキャストが
+    再通知され続ける(#174/#183 と同じ失敗モード)。集計の失敗は隔離されること。"""
+
+    def test_save_known_casts_is_called_when_record_daily_raises(self, tmp_path, monkeypatch):
+        assert module.MonitorConfig.SITES, "sites.json に監視対象サイトが無い"
+        site = module.MonitorConfig.SITES[0]
+        new_cast = _make_cast("https://example.test/img.jpg")
+        monitor = MagicMock()
+        monitor.fetch_current_casts.return_value = {new_cast}
+        notifier = MagicMock()
+        notifier.notify.return_value = 1
+
+        monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=set()))
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+        monkeypatch.setattr(
+            module.DataManager, "record_daily_new_casts",
+            MagicMock(side_effect=AttributeError("'NoneType' object has no attribute 'get'")),
+        )
+        monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
+
+        result = module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
+
+        assert not result.failed
+        notifier.notify.assert_called_once()
+        mock_save.assert_called_once()
+        saved_casts = mock_save.call_args.args[-1]
+        assert new_cast in saved_casts
+
+
+class TestNotifierDoesNotLogWebhookToken:
+    def test_http_error_log_does_not_contain_token(self, caplog):
+        import logging
+        import requests
+
+        token = "AbCdEf-GhIj_KlMn0123456789"
+        notifier = DiscordNotifier(webhook_url=f"https://discord.com/api/webhooks/123/{token}")
+        response = MagicMock()
+        response.status_code = 400
+        response.text = "bad request"
+        err = requests.HTTPError(
+            f"400 Client Error: Bad Request for url: https://discord.com/api/webhooks/123/{token}",
+            response=response,
+        )
+        response.raise_for_status.side_effect = err
+        notifier.session.post = MagicMock(return_value=response)
+
+        original_propagate = module.logger.propagate
+        module.logger.propagate = True
+        try:
+            with caplog.at_level(logging.ERROR, logger="newface_monitor"):
+                sent = notifier.notify([_make_cast("https://example.test/i.jpg")], site_name="テストサイト")
+        finally:
+            module.logger.propagate = original_propagate
+
+        assert sent == 0
+        assert any("Failed to send notification" in r.message for r in caplog.records)
+        assert token not in caplog.text
