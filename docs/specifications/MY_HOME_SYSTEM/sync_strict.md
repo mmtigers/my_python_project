@@ -11,7 +11,7 @@
 
 - [common.md](./common.md) — `setup_logging`・`get_db_cursor`を再エクスポートするFacadeモジュール
 - [database.md](./database.md) — `common.get_db_cursor`の実体(`core.database.get_db_cursor`)
-- [quest_data.md](./quest_data.md) — 同期元マスターデータ`QUESTS`/`REWARDS`/`USERS`の定義元
+- [quest_data.md](./quest_data.md) — 同期元マスターデータ`QUESTS`/`REWARDS`の定義元
 - [init_unified_db.md](./init_unified_db.md) — `quest_master`/`reward_master`テーブルのスキーマ定義元
 - [quest_service.md](./quest_service.md) — `is_within_reset_period`の実装元。`reset_period`列に`'daily'`/`'weekly'`以外の値(旧`'weekly_monday'`等)が入ると常に`False`を返す
 
@@ -40,7 +40,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 | `argparse` | 標準ライブラリ | CLI引数(`--dry-run`, `-y`/`--yes`, `--allow-empty-master`)のパース | `import argparse` (行番号: 1) |
 | `sys` | 標準ライブラリ | 異常終了時のプロセス終了 (`sys.exit(1)`) | `import sys` (行番号: 2) |
 | `common` | 内部モジュール | ロガーのセットアップ(`setup_logging`)およびDBカーソルの取得(`get_db_cursor`) | `import common` (行番号: 3) |
-| `quest_data` (`QUESTS`, `REWARDS`, `USERS`) | 内部モジュール | 同期元となるマスターデータ | `from quest_data import QUESTS, REWARDS, USERS` (行番号: 4) |
+| `quest_data` (`QUESTS`, `REWARDS`) | 内部モジュール | 同期元となるマスターデータ | `from quest_data import QUESTS, REWARDS` (行番号: 4) |
 | `traceback` (ローカルインポート) | 標準ライブラリ | `main`内で予期しない例外発生時のスタックトレース出力 | `import traceback` (行番号: 243、`main`内) |
 
 ### ブラックボックスとなる外部要素
@@ -49,7 +49,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 | --- | --- | --- |
 | `common.setup_logging` | 内部実装が提供されておらず、設定されるロガーの詳細仕様が不明 | `logger = common.setup_logging("strict_sync")` (行番号: 7) |
 | `common.get_db_cursor` | 接続先DBの種類やトランザクションの詳細な制御方法が不明 | `with common.get_db_cursor(commit=not dry_run) as cur:` (行番号: 221) |
-| `quest_data`の各変数 | `QUESTS`, `REWARDS`, `USERS`の全プロパティ構造が現在のファイルからは`.get()`で参照されているキーしか読み取れない | `from quest_data import QUESTS, REWARDS, USERS` (行番号: 4) |
+| `quest_data`の各変数 | `QUESTS`, `REWARDS`の全プロパティ構造が現在のファイルからは`.get()`で参照されているキーしか読み取れない | `from quest_data import QUESTS, REWARDS` (行番号: 4) |
 | `init_unified_db.py` | コメントでのみ言及されており、DBの厳密なテーブルスキーマが不明 | コメント (行番号: 52 / 抜粋: "init_unified_db.py の定義と一致させる") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -257,7 +257,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `common.py` | データベース接続の仕様（利用しているRDBMSなど）や、トランザクションのコミット/ロールバックの挙動を特定するため。 | 根拠: `import common` (行番号: 3 / 抜粋: "import common") |
-| 高 | `quest_data.py` | 同期元となるマスターデータ `QUESTS`、`REWARDS` の正確なスキーマおよび内容を確認するため。 | 根拠: `QUESTS` (行番号: 4 / 抜粋: "from quest_data import QUESTS, REWARDS, USERS") |
+| 高 | `quest_data.py` | 同期元となるマスターデータ `QUESTS`、`REWARDS` の正確なスキーマおよび内容を確認するため。 | 根拠: `QUESTS` (行番号: 4 / 抜粋: "from quest_data import QUESTS, REWARDS") |
 | 中 | `init_unified_db.py` | DBのテーブル `quest_master` と `reward_master` の厳密なカラム定義、データ型、制約を確認するため。 | 根拠: コメント (行番号: 52 / 抜粋: "(init_unified_db.py の定義と一致させる)") |
 | 中 | `services/quest_service.py` | `is_within_reset_period`が`reset_period`列のどの値を有効として扱うか（`'daily'`/`'weekly'`のみ）を確認し、`sync_quests`が書き込む値との整合性を検証するため。 | 根拠: コメント (行番号: 57〜63 / 抜粋: "is_within_reset_period() が扱えない値のため") |
 
@@ -275,8 +275,6 @@ graph TD
 * 根拠: `sync_quests`の`else`分岐 (行番号: 41〜43), `sync_rewards`の`else`分岐 (行番号: 112〜114)
 * **データ取得におけるフォールバック**: マスターデータの辞書から値を取得する際、`.get('exp_gain', q.get('exp', 0))`のように、キーが存在しない場合に代替キーやデフォルト値を使用している箇所が複数ある。
 * 根拠: フォールバック処理 (行番号: 47〜49 / 抜粋: "exp_val = q.get('exp_gain', q.get('exp', 0))")
-* **未使用のインポート**: `quest_data`からインポートされている`USERS`は、現在のファイル内では一度も使用されていない。
-* 根拠: インポート文 (行番号: 4 / 抜粋: "from quest_data import QUESTS, REWARDS, USERS")
 * **null安全性**: Upsert時のSQLにおいて、辞書の`.get()`メソッドで取得した値（キーが存在しない場合は`None`になるもの、例えば`q.get('days')`）がそのままSQLのパラメータとして渡されており、DBスキーマ側でNULLが許可されていないとエラーになる可能性がある。
 * 根拠: パラメータ渡し (行番号: 91 / 抜粋: "q.get('days'),              # days (0,1,2...)")
 * **`confirm_or_abort`の対話プロンプトはCLI実行前提**: `input_func`のデフォルトは組み込み`input`であり、`unified_server.py`等のAPI経由で本モジュールの関数を直接呼び出すような使い方は想定されていない(現状そのような呼び出し元は本ファイルからは確認できない)。

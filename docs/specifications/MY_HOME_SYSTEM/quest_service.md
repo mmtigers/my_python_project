@@ -65,7 +65,7 @@ H-3の修正により、`process_approve_quest`/`process_cancel_quest`（`quest_
 | `services.switchbot_service` | 内部モジュール | TVプラグのON操作コマンド送信(`_trigger_tv_unlock`)。**（Issue #293で修正）** 以前は`_trigger_tv_unlock`内のローカルimportのみでモジュールレベルには無かったが、`notification_service`と同じ行でモジュールレベルへ統合した。 | `from services import notification_service, switchbot_service` (行番号: 15) |
 | `core.logger` (`setup_logging`) | 内部モジュール | ロガー設定 | `from core.logger import setup_logging` (行番号: 16) |
 | `models.quest` (`MasterUser`, `MasterQuest`, `MasterReward`) | 内部モジュール | マスターデータの型定義(モデル) | `from models.quest import MasterUser, MasterQuest, MasterReward` (行番号: 19) |
-| `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`) | `import quest_data` / `from .. import quest_data` |
+| `quest_data` | 内部モジュール(例外処理付きインポート) | マスターデータのハードコードリスト(`USERS`/`QUESTS`/`REWARDS`)。**（Issue #487で変更）** `sys.path`にPROJECT_ROOTが入っているため通常の`import quest_data`のみで解決する。以前あった`except ImportError`内の`from .. import quest_data`フォールバックは、`services`がトップレベルパッケージであるため構造上決して成功しない到達不能コードだった上、mypyがこの1行で解析を停止する原因になっていたため削除された。 | `import quest_data` (行番号: 46) |
 
 **（Issue #293で削除）** `pytz`(外部ライブラリ、`Asia/Tokyo`タイムゾーン用)は、モジュールレベル定数`JST`(標準ライブラリの固定オフセット版、後述)への一本化に伴い本ファイルから完全に不要になったため削除した。同様に、`is_within_reset_period`内のローカル`import datetime`(冗長)、`_trigger_tv_unlock`内のローカル`import threading`・`from services import notification_service`(いずれも冗長、モジュールレベルで既にインポート済み)も削除した。
 
@@ -936,7 +936,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `common.py` | トランザクションスコープの境界や`get_now_iso`の日時フォーマットが、データの整合性・タイムゾーン判定の正しさに強く影響するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 235) |
 | 高 | `game_logic.py` | 報酬やレベルアップ等のコアドメインロジック（`calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`）を含むため。 | `game_logic.GameLogic.calc_level_progress(...)` (行番号: 467) |
-| 高 | `quest_data.py` | `sync_master_data`で読み込まれる`USERS`/`QUESTS`/`REWARDS`の実データの型・値が、DBテーブルの各カラム仕様と`reset_period`の実際の分布に直接影響するため。`reset_period`列の供給はIssue #330以降migrations側（0002/0008、DEFAULT `'daily'`）に一本化されており、個々のクエスト定義に`reset_period`キーが無い場合に`quest_data.py`側で実際にどの値が使われているかを確認する必要がある。 | `import quest_data` (行番号: 30, 33) |
+| 高 | `quest_data.py` | `sync_master_data`で読み込まれる`USERS`/`QUESTS`/`REWARDS`の実データの型・値が、DBテーブルの各カラム仕様と`reset_period`の実際の分布に直接影響するため。`reset_period`列の供給はIssue #330以降migrations側（0002/0008、DEFAULT `'daily'`）に一本化されており、個々のクエスト定義に`reset_period`キーが無い場合に`quest_data.py`側で実際にどの値が使われているかを確認する必要がある。 | `import quest_data` (行番号: 46) |
 | 中 | `fix_quest_reset_period.py` | `quest_master.reset_period`が`'weekly_monday'`から`'daily'`へ一括変換されるワンショットスクリプトであり、`is_within_reset_period`が`'daily'`/`'weekly'`のみを扱う設計との整合性（未実行環境や`'boss_'`接頭辞クエストでの挙動）を確認するため。 | `is_within_reset_period`の`if reset_period == 'daily': ... elif reset_period == 'weekly': ...` (行番号: 235〜241) |
 | 中 | `services/switchbot_service.py` | 非同期のTVロック解除に失敗した場合の影響範囲・再送ロジックの有無を確認するため。 | `switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")` (行番号: 414) |
 | 中 | マイグレーション定義ファイル (例: `core/migrations.py` またはその配下のスクリプト) | `quest_history.linked_history_id`カラムの型・制約・追加時期が本ファイルからは確認できないため。 | `hist['linked_history_id']` (行番号: 378) |

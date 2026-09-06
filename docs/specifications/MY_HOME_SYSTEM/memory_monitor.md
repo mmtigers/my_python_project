@@ -29,7 +29,7 @@
 | `os` | 標準ライブラリ | パス操作、ディレクトリ作成、ファイル存在確認 | `import os` (行番号: 1) |
 | `sys` | 標準ライブラリ | システムパス (`sys.path`) へのプロジェクトルート追加 | `import sys` (行番号: 2) |
 | `time` | 標準ライブラリ | 現在時刻の取得 (クールダウン判定・記録用) | `import time` (行番号: 3) |
-| `typing` (`List`, `Dict`, `Any`, `Tuple`) | 標準ライブラリ | 型ヒントの定義 | `from typing import ...` (行番号: 4) |
+| `typing` (`List`, `Tuple`) | 標準ライブラリ | 型ヒントの定義 | `from typing import List, Tuple` (行番号: 4) |
 | `psutil` | 外部ライブラリ | システム全体のメモリ情報やプロセス情報の取得 | `import psutil` (行番号: 6) |
 | `config` | 内部モジュール | 各種設定値（閾値、クールダウン秒数、通知先等）の取得 | `import config` (行番号: 13) |
 | `setup_logging` | 内部モジュール | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 14) |
@@ -158,7 +158,7 @@
 * **エラーハンドリング**:
 * プロセスごとのメモリチェックループ内で、プロセス状態に起因する例外（`NoSuchProcess` 等）を捕捉しスキップする。
 * それ以外の予期せぬ例外は `Exception` で捕捉し、エラーログを出力する。
-* 根拠: `except (psutil.NoSuchProcess, ...) as e:` (行番号: 129〜131), `except Exception as e:` (行番号: 132〜133 / 抜粋: `logger.error(...)`)
+* 根拠: `except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess): continue` (行番号: 129〜131), `except Exception as e:` (行番号: 132〜133 / 抜粋: `logger.error(...)`)
 
 
 
