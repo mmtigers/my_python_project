@@ -57,7 +57,13 @@ export interface Quest {
     icon_key?: string;
     start_time?: string;
     end_time?: string;
-    days?: number[] | string | null;
+    // Issue #474: バックエンド(services/quest_service.py の get_all_view_data)は
+    // day_of_week カラム(カンマ区切り文字列)を常に number[] | null へ変換してから
+    // 送出しており、実際のAPIレスポンスで days が生の文字列になることはない
+    // (文字列形式はサーバー内部の MasterQuest.days でのみ使われ、フロントへは渡らない)。
+    // 以前この型は number[] | string | null だったが、対応する実際の入力が
+    // 存在しない string 分岐だったため削除した。
+    days?: number[] | null;
     target_user?: string;
     pre_requisite_quest_id?: number | null;
     // ★共有クエスト判定用 (バックエンドの get_available_quests が付与するフィールド)

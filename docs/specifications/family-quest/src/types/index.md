@@ -71,7 +71,9 @@
 
 * **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
 * **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`
-* 根拠: [該当要素] (行番号: 36〜59 / 抜粋: "// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface Quest {")
+* **（Issue #474で修正）** `days`プロパティは以前`number[] | string | null`だったが、実際のAPIレスポンス(バックエンドの`services/quest_service.py`の`get_all_view_data`)はDBカラム`day_of_week`(カンマ区切り文字列)を常に`number[] | null`へ変換してから送出しており、文字列のまま`days`が返ってくる経路は存在しないと判明したため、`number[] | null`に絞った(`string`分岐に対応する実際の入力が存在しなかった)。
+* 根拠: [該当要素] (行番号: 43〜74 / 抜粋: "// #390: difficulty はバックエンドが送出しない幽霊フィールドだったため削除。\nexport interface Quest {")
+* 根拠: [days型の絞り込み(Issue #474)] (行番号: 60〜66 / 抜粋: "// Issue #474: バックエンド(services/quest_service.py の get_all_view_data)は\n// day_of_week カラム(カンマ区切り文字列)を常に number[] | null へ変換してから\n// 送出しており、実際のAPIレスポンスで days が生の文字列になることはない\n// (文字列形式はサーバー内部の MasterQuest.days でのみ使われ、フロントへは渡らない)。\n// 以前この型は number[] | string | null だったが、対応する実際の入力が\n// 存在しない string 分岐だったため削除した。\n    days?: number[] | null;")
 * 根拠: [フィールド名統一のコメント] (行番号: 29〜34 / 抜粋: "// ★フィールド名の統一(Issue #291): 以前はDBの実カラム名(quest_id/exp_gain/\n// gold_gain/icon_key/quest_type/target_user)に加え、バックエンドが一部のみ\n// 付与していた別名(id/exp/gold/icon/type/target)も型として許容しており、\n// どちらが実際に送られてくるか不明瞭だった(id/exp/gold/descは実際には\n// 一度もAPIから送られてこない幽霊フィールドだった)。サーバー側の実カラム名に\n// 一本化し、フロントの参照側もフォールバック連鎖を廃止した。")
 
 
@@ -196,7 +198,7 @@ graph TD
 
 * **（Issue #291で解消済み）** かつては多くのインターフェース（`Quest`, `Reward` など）において、`description` と `desc` のように類似した意味を持つ複数のプロパティ（`id`/`quest_id`、`exp`/`exp_gain`、`gold`/`gold_gain`、`icon`/`icon_key`、`type`/`quest_type`、`target`/`target_user`、`history_id`/`id`、`cost`/`cost_gold`など）が併存していたが、これらのうち`id`/`exp`/`gold`/`desc`(`Quest`)、`history_id`(`QuestHistory`)、`id`/`cost`/`desc`/`icon`(`Reward`)はバックエンドAPIから一度も送られてこない「幽霊フィールド」だったと判明し、型定義から削除された。現在はDBの実カラム名（`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`/`description`/`reward_id`/`cost_gold`等）のみに一本化されている。
 * `ID` 型が `number | string` のユニオン型となっているため、これらを参照する各インターフェース側のプロパティ（`id`, `quest_id` 等）を利用する際、厳密な型判定が必要になる場面が発生します。
-* `Quest` インターフェースの `days` プロパティの型が `number[] | string | null` と多岐にわたり、使用箇所で複雑な型チェックやパース処理が要求される構造になっています。
+* **（Issue #474で解消済み）** かつて`Quest`インターフェースの`days`プロパティは`number[] | string | null`と多岐にわたる型だったが、`string`分岐に対応する実際の入力がAPIから送られてくることはないと判明したため`number[] | null`に絞られた。
 * **[撤去済み] Issue #327 `hp`/`maxHp`フィールドの削除**: `User.maxHp`はバックエンドの`calculate_max_hp(level) = level * 20 + 5`で計算される値であり、フロントエンド側で独自に再計算してはならない旨(過去に誤った式で再計算しバックエンドの値とズレて表示されるリグレッションが実際に発生していた、Issue #471)がかつて専用のJSDocコメントで明記されていた。しかし対応する表示UI(`UserStatusCard.tsx`)は既に存在せず、いつ・なぜ表示が無くなったか記録が残っていなかったため2026-08-29の棚卸し以来「要追加確認」のまま宙ぶらりんだった(Issue #327)。オーナー判断によりHP表示は廃止で確定し、`hp`/`maxHp`フィールド自体を型定義・`gameDataSchema.ts`のZodスキーマから削除した。バックエンド(`MY_HOME_SYSTEM`)は引き続き`hp`/`maxHp`を送出するため、これらの値が今後フロントで再び必要になった場合は`User`インターフェースへの再追加が必要。
 * 根拠: 現行`User`インターフェース(行番号: 15〜34)に`hp`/`maxHp`が存在しないこと、`family-quest/src/lib/gameDataSchema.ts`の`userSchema`に`hp`/`maxHp`が存在しないこと
 * **（Issue #470で追加）** `User.nextLevelExp?: number` は`gameDataSchema.ts`の`userSchema`が新たに検証対象へ含めるようになった、バックエンドの次レベル必要経験値フィールドに対応する。追加前は型として存在せず、`gameDataResponseSchema`が`.strict()`でないため実行時に無音でstripされていた。

@@ -78,7 +78,7 @@
 | `ONVIFCamera` (onvifライブラリ) | `create_media_service`, `GetProfiles`, `create_type`, `GetStreamUri` 等のメソッドの内部実装・通信プロトコル詳細は本ファイルからは不明。 | 根拠: [ONVIFCameraの利用箇所] (行番号: 102 / 抜粋: "mycam = ONVIFCamera(cam_conf['ip'], cam_conf.get('port', 80), cam_conf['user'], cam_conf.get('pass', ''), wsdl_dir=wsdl_path)") |
 | `config` | `config.NVR_RECORD_DIR`の値、`config.DEVICES_JSON_PATH`が指す実際のファイルパス、`config.CAMERAS`の実データがどのように設定されているか（環境変数、設定ファイル等）が本ファイルからは不明。 | 根拠: [config参照] (行番号: 294 / 抜粋: "nvr_base_dir = config.NVR_RECORD_DIR") |
 | `setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | 根拠: [ロガー生成] (行番号: 19 / 抜粋: "logger = setup_logging(\"camera_service\")") |
-| `ffmpeg` / `nice` (外部コマンド) | `subprocess.Popen`で起動される外部コマンドの内部動作・エラー時の終了コード仕様は本ファイルの管理対象外。 | 根拠: [Popen呼び出し] (行番号: 143, 170, 294, 310 / 抜粋: "\"nice\", \"-n\", \"15\",") |
+| `ffmpeg` / `nice` (外部コマンド) | `subprocess.Popen`で起動される外部コマンドの内部動作・エラー時の終了コード仕様は本ファイルの管理対象外。 | 根拠: [Popen呼び出し] (行番号: 265, 433 / 抜粋: "\"nice\", \"-n\", str(FFMPEG_NICE_LEVEL),")（Issue #451でnice値をハードコード文字列から`FFMPEG_NICE_LEVEL`定数へ変更） |
 | `devices.json` (外部ファイル) | `set_camera_enabled`が読み書きする対象であり、既存カメラエントリの正確なJSON構造・件数は本ファイルからは不明。 | 根拠: [devices.json読み書き] (行番号: 325, 328〜329 / 抜粋: "if not os.path.exists(config.DEVICES_JSON_PATH):") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -558,7 +558,7 @@ graph TD
 * **`_start_hls_stream_locked`の広範な例外抑制**: `get_rtsp_url`呼び出しを`except Exception:`で包括的に捕捉し、詳細を握りつぶして空文字列を返している（呼び出し元では失敗理由が判別できない）。Issue #439で`start_hls_stream`から実処理が`_start_hls_stream_locked`へ分離されたが、この挙動自体は変わっていない。
 * **ffmpeg起動失敗の未捕捉**: `_start_hls_stream_locked`および`_generate_record_playlist_locked`内の`subprocess.Popen`呼び出し自体（例: ffmpeg実行ファイルが存在しない場合の`FileNotFoundError`）に対するtry-exceptが存在せず、例外は呼び出し元に伝播する。
 * **RTSP URLのargv経由の残存露出**: ログファイルへの平文露出は`-hide_banner`/`-loglevel error`と`_mask_rtsp_url_for_log`により対策されたが、`subprocess.Popen`に渡す`cmd`のargv自体には認証情報込みのRTSP URLがそのまま含まれており、`ps`コマンド等によるプロセス一覧の閲覧では引き続き見える。ffmpeg CLIの仕様上URLを間接参照する手段がなく、完全な対策は本ファイルの変更のみでは行えない既知の残存リスクである。
-* **ハードコードされたパス・値**: NVRのフォールバックパス`/mnt/nas/home_system/nvr_recordings`、ffmpegの`nice`優先度`15`、HLSセグメント長(`2`秒/`4`秒)やリストサイズ(`5`)、待機ループの最大回数(`10`回)・間隔(`0.5`秒)、ffmpegログのパーミッション(`0o600`)、devices.jsonの一時ファイル拡張子(`.tmp`)など多数のマジックナンバー・固定値がコード中に直接埋め込まれている。
+* **[修正済み・Issue #451] ffmpeg/HLS関連のマジックナンバー**: 以前はffmpegの`nice`優先度`15`、HLSセグメント長(`2`秒/`4`秒)やリストサイズ(`5`)、待機ループの最大回数(`10`回)・間隔(`0.5`秒)、ffmpegログのパーミッション(`0o600`)、正常時のセグメントduration既定値(`600.0`秒)、duration異常値判定閾値(`43200`秒)が、各呼び出し箇所に直接埋め込まれていた。現在はファイル冒頭に`FFMPEG_NICE_LEVEL`/`HLS_LIVE_SEGMENT_SECONDS`/`HLS_LIVE_LIST_SIZE`/`HLS_VOD_SEGMENT_SECONDS`/`FFMPEG_LOG_FILE_MODE`/`DEFAULT_SEGMENT_DURATION_SECONDS`/`MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS`/`PLAYLIST_WAIT_MAX_ATTEMPTS`/`PLAYLIST_WAIT_POLL_INTERVAL_SEC`という名前付き定数として集約している(値は変更していない)。なお、NVRの保存先パスは元々`config.NVR_RECORD_DIR`経由であり、以前存在した環境変数直読みのフォールバック(`getattr`/`os.getenv`)は#405で既に撤去済み。devices.jsonの一時ファイル拡張子(`.tmp`)は本Issueの対象外として未着手。
 * **`get_record_start_offset`と`_generate_record_playlist_locked`のロジック重複**: 両関数とも「NVR保存先の解決」「mp4ファイル名からの時刻抽出」処理をそれぞれ個別に実装しており、重複コードとなっている。
 * **`set_camera_enabled`のファイルI/O例外未捕捉**: `devices.json`の読み込み・書き込み時に発生し得る`json.JSONDecodeError`や`OSError`等に対するtry-exceptが本関数内に存在せず、呼び出し元（`camera_router.py`の`PUT /settings/{camera_id}`）に例外がそのまま伝播する設計になっている。
 

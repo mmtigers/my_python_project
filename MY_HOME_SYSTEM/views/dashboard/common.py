@@ -1,5 +1,12 @@
 # MY_HOME_SYSTEM/views/dashboard/common.py
 import html
+import logging
+import traceback
+from contextlib import contextmanager
+
+import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 CUSTOM_CSS = """
 <style>
@@ -68,3 +75,26 @@ def render_status_card_html(title: str, value: str, theme: str, *, value_is_html
         <div class="status-value">{safe_value}</div>
     </div>
     """
+
+
+@contextmanager
+def safe_section(section_name: str):
+    """
+    ダッシュボードの1セクション(タブ・サマリー等)の描画を例外から保護する共通ヘルパー。
+
+    Issue #438: ダッシュボード各所で列存在チェック・try/exceptの方針が関数ごとに
+    バラバラだった。特に以前の`dashboard.py`は`main()`全体を1つの`try/except`で
+    囲んでおり、いずれか1つのタブの描画で例外が起きるとダッシュボード全体が
+    エラー画面になり、無関係な他のタブの表示まで巻き込んでいた。本ヘルパーで
+    セクション単位に例外を隔離し、失敗したセクションだけプレースホルダを表示して
+    他のセクションの描画には影響させないようにする。
+
+    L-L5 (#410)と同じ理由で、`traceback`等の内部詳細(ファイルパス・設定値等)は
+    画面には出さずログにのみ残す。
+    """
+    try:
+        yield
+    except Exception as e:
+        logger.error(f"{section_name}の表示中にエラーが発生しました: {e}")
+        logger.error(traceback.format_exc())
+        st.error(f"⚠️ {section_name}の表示中にエラーが発生しました。ログを確認してください。")

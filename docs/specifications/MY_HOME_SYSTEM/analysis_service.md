@@ -72,68 +72,47 @@
 
 
 
-### `_parse_timestamp_to_jst`
+### `_vectorized_parse_timestamps_to_jst` (関数、Issue #456でベクトル化)
 
-* **役割**: タイムスタンプ値をJSTの`pd.Timestamp`へ変換する。オフセット付き(aware)の値はそのオフセットを尊重してJSTへ変換し、tzinfoが無い(naive)値は保存規約(`core.utils.get_now_iso`)に合わせて「元からJSTで記録されている」とみなして`tz_localize`する（M-1-4: 以前は`process_dataframe`が`pd.to_datetime(..., utc=True)`で一律UTCとみなしていたため、tzinfoの無いレガシーレコードがグラフ・電気代集計で9時間ズレる原因になっていた）。
-* 根拠: `_parse_timestamp_to_jst` のDocstring (行番号: 43〜48 / 抜粋: "pd.to_datetime(..., utc=True) で一律UTCとみなしていたため、tzinfoの無い")
-
-
-* **引数/リクエスト**: `value`（型ヒントなし。タイムスタンプ文字列またはタイムスタンプ相当の値を想定）
-* 根拠: `def _parse_timestamp_to_jst(value) -> pd.Timestamp:` (行番号: 39 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
+* **役割**: タイムスタンプ文字列の列をJSTのtz-aware列へ一括変換する。**[修正済み・Issue #456]** 以前は`_parse_timestamp_to_jst`/`_parse_timestamp_to_jst_coerce`という2つのヘルパーを`.apply()`で1行ずつ呼び出しており、大量データで処理速度が劣化する非ベクトル化実装だった。列の末尾がtzオフセット(`+09:00`等)または`Z`かどうかを`_TZ_OFFSET_SUFFIX_PATTERN`の正規表現で判定し、naive/aware(オフセット付き)の2群に分割した上で、群ごとに`pd.to_datetime`を一括適用する。naive群は保存規約(`core.utils.get_now_iso`)に合わせて「元からJSTで記録されている」とみなして`tz_localize("Asia/Tokyo")`し、aware群はそのオフセットを尊重して`utc=True`でパースしてから`tz_convert("Asia/Tokyo")`する(M-1-4: この2系統を`pd.to_datetime`へ一括で(`utc=True`等)渡すとnaive値を誤ってUTCとみなしてしまい9時間ズレが再発するため、文字列表現の時点でマスク分割している)。両群とも`errors="coerce"`のため、不正な値は当該行のみ`pd.NaT`になる(L-L3 #410と同じ挙動を維持)。
+* 根拠: 関数Docstring・実装 (行番号: 43〜74 / 抜粋: "def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:")
 
 
-* **戻り値/レスポンス**: `pd.Timestamp`（Asia/Tokyoにローカライズ/変換済み）
-* 根拠: `-> pd.Timestamp:` (行番号: 39 / 抜粋: "-> pd.Timestamp:")
+* **引数/リクエスト**: `series` (`pd.Series`): タイムスタンプ文字列の列
+* 根拠: 関数シグネチャ (行番号: 46)
+
+
+* **戻り値/レスポンス**: `pd.Series`（Asia/Tokyoにtz-aware化された`datetime64`列。パース失敗要素は`pd.NaT`）
+* 根拠: `-> pd.Series:` および `return pd.concat(parts).sort_index()` (行番号: 46, 74)
 
 
 * **副作用**: なし
-* 根拠: `ts = pd.Timestamp(value)` で新規オブジェクトを生成するのみ (行番号: 50 / 抜粋: "ts = pd.Timestamp(value)")
+* 根拠: 入力`series`を変更せず新規Seriesを構築・結合するのみ (行番号: 62〜74)
 
 
-* **エラーハンドリング**: なし（`pd.Timestamp(value)`が不正な値でパースに失敗した場合の例外は本関数内で捕捉されず、呼び出し元に伝播する。**（Issue #410 L-L3で対応）** `process_dataframe`は本関数を直接ではなく、例外を`pd.NaT`へ丸める`_parse_timestamp_to_jst_coerce`経由で呼ぶようになった）
-* 根拠: 該当関数内に `try-except` なし (行番号: 39〜53 / 抜粋: "def _parse_timestamp_to_jst(value) -> pd.Timestamp:")
-
-### `_parse_timestamp_to_jst_coerce` (関数、Issue #410 L-L3で追加)
-
-* **役割**: `_parse_timestamp_to_jst`を`try/except`で包み、`ValueError`/`TypeError`（不正なタイムスタンプ文字列のパース失敗）を`pd.NaT`に丸めて返す。以前は`process_dataframe`が`_parse_timestamp_to_jst`を`.apply()`で直接呼んでいたため、1行でも不正なタイムスタンプがあると例外が`load_data_from_db`の`except Exception`まで伝播し、他の正常な行も含めてパネル全体が「データなし」（空DataFrame）扱いになっていた。`pandas`の`pd.to_datetime(..., errors='coerce')`相当の挙動を、独自の`_parse_timestamp_to_jst`ロジックに対して実現するためのラッパー。
-* 根拠: `def _parse_timestamp_to_jst_coerce(value) -> pd.Timestamp:` (行番号: 56〜69)
-
-
-* **引数/リクエスト**: `value`（`_parse_timestamp_to_jst`と同じ）
-* 根拠: 関数シグネチャ (行番号: 56)
-
-
-* **戻り値/レスポンス**: `pd.Timestamp`（成功時）または`pd.NaT`（`ValueError`/`TypeError`発生時）
-* 根拠: `return _parse_timestamp_to_jst(value)` / `return pd.NaT` (行番号: 66, 69)
-
-
-* **副作用**: パース失敗時に`logger.warning`でログ出力
-* 根拠: `logger.warning(f"Timestamp parse failed, coercing to NaT: {value!r} ({e})")` (行番号: 68)
-
-
-* **エラーハンドリング**: `ValueError`/`TypeError`のみを捕捉して`pd.NaT`を返す。それ以外の例外は呼び出し元へ伝播する。
-* 根拠: `except (ValueError, TypeError) as e:` (行番号: 67〜69)
+* **エラーハンドリング**: `pd.to_datetime(..., errors="coerce")`により、パース失敗要素は例外を送出せず`pd.NaT`になる。
+* 根拠: `errors="coerce"` (行番号: 68, 72)
 
 ### `process_dataframe`
 
-* **役割**: DataFrameの `timestamp` カラムの各値を`_parse_timestamp_to_jst_coerce`（Issue #410 L-L3で`_parse_timestamp_to_jst`から変更）に通し、日本時間（Asia/Tokyo）に変換する。不正な値を含む行はエラーではなく`pd.NaT`になる。
-* 根拠: `process_dataframe` (行番号: 79 / 抜粋: "df[\"timestamp\"] = df[\"timestamp\"].apply(_parse_timestamp_to_jst_coerce)")
+* **役割**: DataFrameの `timestamp` カラムを`_vectorized_parse_timestamps_to_jst`に通し、日本時間（Asia/Tokyo）に変換する。不正な値を含む行はエラーではなく`pd.NaT`になる。
+* 根拠: `process_dataframe` (行番号: 82 / 抜粋: "df[\"timestamp\"] = _vectorized_parse_timestamps_to_jst(df[\"timestamp\"])")
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
-* 根拠: `df: pd.DataFrame` (行番号: 72 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
+* 根拠: `df: pd.DataFrame` (行番号: 77 / 抜粋: "def process_dataframe(df: pd.DataFrame)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (変換後のデータフレーム)
-* 根拠: `-> pd.DataFrame` (行番号: 72 / 抜粋: "-> pd.DataFrame:")
+* 根拠: `-> pd.DataFrame` (行番号: 77 / 抜粋: "-> pd.DataFrame:")
 
 
-* **副作用**: なし（`_parse_timestamp_to_jst_coerce`経由でのログ出力を除く）
-* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (行番号: 77 / 抜粋: "df = df.copy()")
+* **副作用**: なし
+* 根拠: `df = df.copy()` でコピーを作成し副作用を回避 (行番号: 80 / 抜粋: "df = df.copy()")
 
 
-* **エラーハンドリング**: **（Issue #410 L-L3で修正）** 内部で呼び出す`_parse_timestamp_to_jst_coerce`が`ValueError`/`TypeError`を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。それ以外の予期しない例外（`_parse_timestamp_to_jst_coerce`が再送出するもの）は依然として呼び出し元へ伝播する。
-* 根拠: 該当関数内に `try-except` なし、`_parse_timestamp_to_jst_coerce`への委譲 (行番号: 72〜81 / 抜粋: "def process_dataframe(")
+* **エラーハンドリング**: **（Issue #410 L-L3で修正、#456でベクトル化）** 内部で呼び出す`_vectorized_parse_timestamps_to_jst`が不正な値を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。
+* 根拠: 該当関数内に `try-except` なし、`_vectorized_parse_timestamps_to_jst`への委譲 (行番号: 77〜85 / 抜粋: "def process_dataframe(")
 
 
 
@@ -588,7 +567,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `process_dataframe` は `timestamp` カラムの各値へ `_parse_timestamp_to_jst` を `.apply()` で1件ずつ適用する実装であり、ベクトル化された `pd.to_datetime` に比べて大量データでは処理速度が低下する可能性がある。また `_parse_timestamp_to_jst` はtzinfoの無い(naive)値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`するため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う新たな前提）。
+* **[修正済み] Issue #456: process_dataframeの非ベクトル化タイムスタンプ変換**: 以前は`timestamp`カラムの各値へ`_parse_timestamp_to_jst`を`.apply()`で1件ずつ適用する実装であり、ベクトル化された`pd.to_datetime`に比べて大量データでは処理速度が低下する懸念があった。現在は`_vectorized_parse_timestamps_to_jst`がnaive/aware2群への分割とその群単位の`pd.to_datetime`一括適用でベクトル化している。なお、naive値を常にJST（`core.utils.get_now_iso`の保存規約）とみなして`tz_localize`する前提は変更していないため、万一この規約に反してUTC等の別タイムゾーンでnaiveなタイムスタンプが書き込まれるテーブル・経路が将来的に生まれた場合、9時間のズレが再発する点は同様に残る（M-1-4でUTC一律解釈からJST一律解釈に変更されたことに伴う前提）。
 * `calculate_monthly_cost_cumulative` では、直近データ間の差分（`time_diff`）が1.0時間以内のものだけを抽出し、その総和に一律で `31` を掛けて月額概算を算出しているため、月の実際の稼働日数や欠損データの有無によって計算結果がブレる可能性がある。
 * **（Issue #170で解消）デバイス混在によるtime_diffの誤算出**: 以前は`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)の行を無差別にSELECTし、`device_id`でグループ化せず時系列のまま`diff()`を取っていたため、(1)プラグの消費電力がスマートメーターの計測値へ二重計上され、(2)複数拠点のスマートメーター等が交互に記録された場合に直前行が別デバイスとなり誤った時間幅が使われる、という2つの系統的な計算誤差があった。現在はSQL側で`device_name LIKE '%Remo%'`によりスマートメーターの行のみに絞り、`time_diff`の算出も`device_id`ごとにグループ化してから行う。`weekly_analyze_report.get_analysis_data`の電気代算出(`SELECT AVG(wattage)`)にも同様の問題があり、同じ`device_name LIKE '%Remo%'`条件で修正済み。
 * `get_memory_usage` は `subprocess.run(["free", "-m"])` の出力を文字列分割でパースしているため、OSのディストリビューションやバージョン変更により `free` コマンドの出力形式が変わると `IndexError` 等が発生するリスクがある。

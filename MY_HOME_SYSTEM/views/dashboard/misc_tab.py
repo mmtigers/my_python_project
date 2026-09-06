@@ -11,6 +11,12 @@ import pytz
 import config
 from services import train_service
 
+# Issue #451: 出勤/帰宅ルート判定の時間帯閾値(時)。4〜11時台は出勤ルート、
+# 12〜23時台は帰宅ルート、それ以外(深夜0〜3時台)も帰宅ルートを表示する。
+COMMUTE_ROUTE_START_HOUR = 4
+COMMUTE_ROUTE_END_HOUR = 12
+RETURN_ROUTE_END_HOUR = 23
+
 def render_traffic():
     st.subheader("🚃 JR宝塚線・神戸線 運行状況")
     jr_status = train_service.get_jr_traffic_status()
@@ -19,7 +25,9 @@ def render_traffic():
 
     c_t1, c_t2 = st.columns(2)
     for col, line, name in [(c_t1, line_g, "JR 宝塚線"), (c_t2, line_a, "JR 神戸線")]:
-        if line["is_delay"]:
+        # Issue #438: is_delayだけ直接インデックスアクセスで、is_unavailableは
+        # .get()という方針不統一があった。キー欠落時も例外にならないよう統一する。
+        if line.get("is_delay"):
             bg_color, status_color = "#ffebee", "#d32f2f"
         elif line.get("is_unavailable"):
             # Low修正: 取得不可を平常運転と同じ緑色で表示しない(遅延見逃し防止)
@@ -42,9 +50,9 @@ def render_traffic():
     
     current_hour = now_jst.hour
     container = st.container()
-    if 4 <= current_hour < 12:
+    if COMMUTE_ROUTE_START_HOUR <= current_hour < COMMUTE_ROUTE_END_HOUR:
         _render_route_search(container, "伊丹(兵庫県)", "長岡京", "📤 出勤ルート")
-    elif 12 <= current_hour <= 23:
+    elif COMMUTE_ROUTE_END_HOUR <= current_hour <= RETURN_ROUTE_END_HOUR:
         _render_route_search(container, "長岡京", "伊丹(兵庫県)", "📥 帰宅ルート")
     else:
         st.caption("※深夜帯のため帰宅ルートを表示します")

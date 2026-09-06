@@ -11,7 +11,7 @@
 
 * [quest_service.md](./quest_service.md) - `services.quest_service.game_system`の実体。`get_all_view_data`を提供する呼び出し先
 * [dashboard.md](./dashboard.md) - 呼び出し元。`views.dashboard.quest_tab`をインポートし、クエストタブとして`quest_tab.render()`を呼び出す
-* [dashboard_common.md](./dashboard_common.md) - 同じ`views/dashboard`パッケージ内の共通CSS/カード生成モジュール（本ファイルからは直接インポートされていない）
+* [dashboard_common.md](./dashboard_common.md) - **（Issue #438で変更。旧記述を訂正）** 以前は本ファイルから直接インポートされていなかったが、現在は`from . import common as view_common`で`safe_section`をインポートし、例外の隔離に使用している。
 
 ## 2. ファイルの概要
 
@@ -21,8 +21,8 @@
 * 根拠: `users.sort(key=lambda x: x['exp'], reverse=True)` および `rank_icon = "👑" if i == 0 else "🛡️"` (行番号: 18, 27 / 抜粋: "users.sort(key=lambda x: x['exp'], reverse=True)")
 * 経験値ランキングをPlotlyの棒グラフ（職業別に色分け）で可視化する列と、直近5件の達成履歴（クエストログ）をMarkdownで表示する列の2カラムレイアウトを持つ。
 * 根拠: `fig = px.bar(...)` および `for log in logs[:5]:` (行番号: 43〜50, 59 / 抜粋: "fig = px.bar(")
-* データ取得・描画処理全体を`try...except`で囲み、例外発生時は画面上にエラーメッセージを表示する。
-* 根拠: `except Exception as e:` (行番号: 65〜66 / 抜粋: "except Exception as e:\n        st.error(f\"クエスト情報の読み込みに失敗しました: {e}\")")
+* データ取得・描画処理全体を`views.dashboard.common.safe_section`（`with`ブロック）で囲み、例外発生時はセクション名入りのプレースホルダを画面表示する。**[修正済み・Issue #438]** 以前は本関数独自の`try...except Exception as e: st.error(...)`だったが、`dashboard.py`の他タブと同じ共通ヘルパー(`safe_section`)へ統一し、詳細なtracebackはログにのみ出力するようになった(L-L5 #410と同じ方針)。
+* 根拠: `with view_common.safe_section("クエスト"):` (行番号: 15 / 抜粋: "with view_common.safe_section(\"クエスト\"):")
 
 ## 3. 外部依存関係
 
@@ -65,8 +65,8 @@
 * 根拠: `users.sort(key=lambda x: x['exp'], reverse=True)` (行番号: 18 / 抜粋: "users.sort(key=lambda x: x['exp'], reverse=True)"), `st.plotly_chart(fig, width="stretch")` (行番号: 52 / 抜粋: "st.plotly_chart(fig, width=\"stretch\")")
 
 
-* **エラーハンドリング**: 関数本体全体（データ取得からUI描画まで）を`try...except Exception as e:`で捕捉し、例外発生時は`st.error`でエラーメッセージ（例外内容込み）を画面表示する。処理は再送出されない。
-* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 69 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: 関数本体全体（データ取得からUI描画まで）を`view_common.safe_section("クエスト")`で捕捉し、例外発生時は詳細を含まない汎用プレースホルダ（セクション名入り）を`st.error`で画面表示する。処理は再送出されない。**[修正済み・Issue #438]** 以前は例外内容(`{e}`)をそのまま画面に表示していたが、他タブと同じ共通ヘルパーに統一したことで、詳細はログにのみ出力されるようになった。
+* 根拠: `with view_common.safe_section("クエスト"):` (行番号: 15)、[dashboard_common.md](./dashboard_common.md)の`safe_section`実装
 
 
 
@@ -148,8 +148,8 @@ graph TD
 * 根拠: `users.sort(key=lambda x: x['exp'], reverse=True)` (行番号: 18 / 抜粋: "users.sort(key=lambda x: x['exp'], reverse=True)")
 
 
-* **広範な例外キャッチ**: `except Exception as e:`でデータ取得からUI描画までの全処理を一括して捕捉しており、`KeyError`（`u['exp']`等のキー欠損）とネットワーク/DBエラーが区別されずに同一のエラーメッセージとして表示される。ログ出力（`logging`）は行われていない。
-* 根拠: `except Exception as e:\n        st.error(f"クエスト情報の読み込みに失敗しました: {e}")` (行番号: 69 / 抜粋: "except Exception as e:")
+* **[一部修正済み・Issue #438] 広範な例外キャッチ**: `safe_section`はデータ取得からUI描画までの全処理を一括して捕捉するため、`KeyError`（`u['exp']`等のキー欠損）とネットワーク/DBエラーは依然として区別されずに同一のプレースホルダメッセージになる。ただし、以前ログ出力(`logging`)が一切無かった点は`safe_section`側で`logger.error`によるエラー内容・traceback記録が追加され解消された。
+* 根拠: [dashboard_common.md](./dashboard_common.md)の`safe_section`実装（`logger.error`呼び出し）
 
 
 * **コメントと実装の不一致**: 57行目のコメントは `logs`の要素を`{'text':..., 'dateStr':...}`のリストと説明しているが、実際のコード（64行目）では`log['timestamp']`が参照されており、キー名の不一致がある。

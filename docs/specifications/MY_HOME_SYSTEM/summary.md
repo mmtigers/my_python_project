@@ -97,7 +97,7 @@
 ### `get_traffic_status`
 
 * **役割**: JR宝塚線・神戸線の運行状況（`train_service.get_jr_traffic_status()`）から、運休・遅延・情報取得不可・平常運転の4段階でステータスを判定する。情報取得不可を平常運転と偽らず区別するための分岐。
-* 根拠: `def get_traffic_status() -> Tuple[str, str]:` (行番号: 86〜98 / 抜粋: "def get_traffic_status() -> Tuple[str, str]:"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):` (行番号: 94 / 抜粋: "elif line_g.get(\"is_unavailable\") or line_a.get(\"is_unavailable\"):")
+* 根拠: `def get_traffic_status() -> Tuple[str, str]:` (行番号: 86〜101 / 抜粋: "def get_traffic_status() -> Tuple[str, str]:"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):` (行番号: 97 / 抜粋: "elif line_g.get(\"is_unavailable\") or line_a.get(\"is_unavailable\"):")
 
 
 * **引数/リクエスト**: なし
@@ -105,15 +105,15 @@
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (いずれかの路線が運休中: `"⛔ 運休発生"`/`theme-red`、遅延あり: `"⚠️ 遅延あり"`/`theme-yellow`、いずれかの路線が取得不可(`is_unavailable`): `"⚪ 情報取得不可"`/`theme-gray`、それ以外: `"🟢 平常運転"`/`theme-green`)
-* 根拠: `if line_g.get("is_suspended") or line_a.get("is_suspended"):\n        return "⛔ 運休発生", "theme-red"` (行番号: 90〜91 / 抜粋: "if line_g.get(\"is_suspended\") or line_a.get(\"is_suspended\"):"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):\n        return "⚪ 情報取得不可", "theme-gray"` (行番号: 94〜96 / 抜粋: "return \"⚪ 情報取得不可\", \"theme-gray\"")
+* 根拠: `if line_g.get("is_suspended") or line_a.get("is_suspended"):\n        return "⛔ 運休発生", "theme-red"` (行番号: 93〜94 / 抜粋: "if line_g.get(\"is_suspended\") or line_a.get(\"is_suspended\"):"), `elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):\n        return "⚪ 情報取得不可", "theme-gray"` (行番号: 97〜99 / 抜粋: "return \"⚪ 情報取得不可\", \"theme-gray\"")
 
 
 * **副作用**: `train_service.get_jr_traffic_status()`経由の外部データ取得。
 * 根拠: `jr_status = train_service.get_jr_traffic_status()` (行番号: 87 / 抜粋: "jr_status = train_service.get_jr_traffic_status()")
 
 
-* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。`line_g.get("is_suspended")`は`get`によるキー欠如への耐性があるが、`line_g["is_delay"]`は直接インデックス参照であり`KeyError`となりうる）
-* 根拠: `elif line_g["is_delay"] or line_a["is_delay"]:` (行番号: 92 / 抜粋: "elif line_g[\"is_delay\"] or line_a[\"is_delay\"]:")
+* **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）。**[修正済み・Issue #438]** 以前は`line_g.get("is_suspended")`等が`get`によるキー欠如への耐性がある一方、`line_g["is_delay"]`だけ直接インデックス参照で`KeyError`となりうるという方針の不統一があったが、`is_delay`も`.get()`に統一し、キー欠落時も例外にならないようにした。
+* 根拠: `elif line_g.get("is_delay") or line_a.get("is_delay"):` (行番号: 95 / 抜粋: "elif line_g.get(\"is_delay\") or line_a.get(\"is_delay\"):")
 
 
 

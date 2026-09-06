@@ -94,7 +94,8 @@ def main():
                 st.markdown(report["message"].replace("\n", "  \n"))
 
         # --- サマリー (トップ) 表示 ---
-        summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)
+        with view_common.safe_section("サマリー"):
+            summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)
 
         # --- タブ切り替え ---
         tabs = st.tabs([
@@ -112,33 +113,48 @@ def main():
         ])
 
         (
-            tab_quest, tab_train, tab_photo, tab_elec, tab_temp, 
+            tab_quest, tab_train, tab_photo, tab_elec, tab_temp,
             tab_health, tab_taka, tab_log, tab_trends, tab_sys, tab_bicycle
         ) = tabs
 
         # --- 各タブのレンダリング (View層へ委譲) ---
+        # Issue #438: 以前はmain()全体を1つのtry/exceptで囲んでおり、いずれか1つの
+        # タブの描画で例外が起きるとダッシュボード全体がエラー画面になり、無関係な
+        # 他のタブまで巻き込んでいた。タブ単位でview_common.safe_sectionを使い
+        # 例外を隔離し、失敗したタブだけがエラー表示になるようにする。
         with tab_quest:
-            quest_tab.render()
+            with view_common.safe_section("クエスト"):
+                quest_tab.render()
         with tab_train:
-            misc_tab.render_traffic()
+            with view_common.safe_section("電車遅延"):
+                misc_tab.render_traffic()
         with tab_photo:
-            misc_tab.render_photos(df_security_log)
+            with view_common.safe_section("防犯カメラ"):
+                misc_tab.render_photos(df_security_log)
         with tab_elec:
-            sensor_tab.render_electricity(df_sensor, now)
+            with view_common.safe_section("電力・環境"):
+                sensor_tab.render_electricity(df_sensor, now)
         with tab_temp:
-            sensor_tab.render_temperature(df_sensor, now)
+            with view_common.safe_section("気温詳細"):
+                sensor_tab.render_temperature(df_sensor, now)
         with tab_health:
-            health_tab.render(df_child, df_poop, df_food)
+            with view_common.safe_section("健康管理"):
+                health_tab.render(df_child, df_poop, df_food)
         with tab_taka:
-            sensor_tab.render_takasago(df_sensor)
+            with view_common.safe_section("高砂実家"):
+                sensor_tab.render_takasago(df_sensor)
         with tab_log:
-            log_tab.render_logs(df_sensor)
+            with view_common.safe_section("ログ分析"):
+                log_tab.render_logs(df_sensor)
         with tab_trends:
-            log_tab.render_trends()
+            with view_common.safe_section("トレンド"):
+                log_tab.render_trends()
         with tab_sys:
-            log_tab.render_system()
+            with view_common.safe_section("システム管理"):
+                log_tab.render_system()
         with tab_bicycle:
-            misc_tab.render_bicycle(df_bicycle)
+            with view_common.safe_section("駐輪場"):
+                misc_tab.render_bicycle(df_bicycle)
 
     except Exception as e:
         err_msg = f"📉 Dashboard Error: {e}"
@@ -150,8 +166,10 @@ def main():
                 target="discord",
                 channel="error",
             )
-        except Exception:
-            pass
+        except Exception as notify_err:
+            # 通知自体の失敗を握りつぶさず、少なくともログには残す
+            # (本体のエラー(logger.error(err_msg))とは別に記録する)。
+            logger.warning(f"Discordへのエラー通知にも失敗しました: {notify_err}")
         st.error("システムエラーが発生しました。ログを確認してください。")
         # L-L5 (#410): traceback.format_exc()を画面表示していると、内部の
         # ファイルパスや設定値がLAN内の閲覧者に露出する。画面には汎用メッセージ

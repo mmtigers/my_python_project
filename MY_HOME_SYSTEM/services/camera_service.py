@@ -27,6 +27,17 @@ HLS_VOD_DIR = os.path.join(BASE_DIR, "data", "hls_streams", "vod")
 # #359: 当日分の録画VODプレイリストを再生成せずに再利用する猶予秒数
 VOD_TODAY_REUSE_SECONDS = 300
 
+# Issue #451: ffmpeg起動コマンドに直書きされていたマジックナンバー群を集約
+FFMPEG_NICE_LEVEL = 15  # ffmpegの優先度(nice値)。他プロセスを圧迫しない程度に低優先度化
+HLS_LIVE_SEGMENT_SECONDS = 2  # ライブHLS配信のセグメント長(秒)
+HLS_LIVE_LIST_SIZE = 5  # ライブHLS配信でプレイリストに保持するセグメント数
+HLS_VOD_SEGMENT_SECONDS = 4  # 録画VODのHLSセグメント長(秒)
+FFMPEG_LOG_FILE_MODE = 0o600  # ffmpeg.logのパーミッション(所有者のみ読み書き可)
+DEFAULT_SEGMENT_DURATION_SECONDS = 600.0  # 正常な10分ファイルのデフォルトduration(秒)
+MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS = 43200  # ファイル間の時間差の異常値判定閾値(12時間、秒)
+PLAYLIST_WAIT_MAX_ATTEMPTS = 10  # 生成中プレイリスト待機の最大試行回数
+PLAYLIST_WAIT_POLL_INTERVAL_SEC = 0.5  # 生成中プレイリスト待機のポーリング間隔(秒)
+
 _active_processes: Dict[str, subprocess.Popen] = {}
 _active_vod_processes: Dict[str, subprocess.Popen] = {} # VOD排他制御用の辞書を追加
 _rtsp_cache: Dict[str, str] = {}
@@ -251,7 +262,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     logger.info(f"🎥 [{cam_conf['name']}] ライブHLS配信を開始 (RTSP: {_mask_rtsp_url_for_log(rtsp_url)})")
 
     cmd = [
-        "nice", "-n", "15",
+        "nice", "-n", str(FFMPEG_NICE_LEVEL),
         "ffmpeg", "-y",
         # -hide_banner/-loglevel error: 認証情報込みのRTSP URLが
         # ffmpeg自身の起動バナー("Input #0, rtsp, from 'rtsp://user:pass@...'")
@@ -263,8 +274,8 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
         "-c:v", "copy",
         "-an",
         "-f", "hls",
-        "-hls_time", "2",
-        "-hls_list_size", "5",
+        "-hls_time", str(HLS_LIVE_SEGMENT_SECONDS),
+        "-hls_list_size", str(HLS_LIVE_LIST_SIZE),
         "-hls_flags", "delete_segments",
         playlist_path
     ]
@@ -274,7 +285,7 @@ def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:
     log_path = os.path.join(cam_dir, "ffmpeg.log")
     log_file = open(log_path, "w")
     try:
-        os.chmod(log_path, 0o600)
+        os.chmod(log_path, FFMPEG_LOG_FILE_MODE)
     except OSError:
         pass
     try:
@@ -360,10 +371,10 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     if existing_vod_process is not None and existing_vod_process.poll() is None:
         logger.info(f"⏳ [{cam_conf['name']}] {target_date} の録画プレイリスト生成は既に実行中です。")
         # フロントエンドが500エラー（FileResponseのクラッシュ）にならないよう、生成を待機する
-        for _ in range(10):
+        for _ in range(PLAYLIST_WAIT_MAX_ATTEMPTS):
             if os.path.exists(playlist_path):
                 return playlist_path
-            time.sleep(0.5)
+            time.sleep(PLAYLIST_WAIT_POLL_INTERVAL_SEC)
         return None
 
     # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
@@ -394,7 +405,7 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
             f.write(f"file '{mp4}'\n")
             
             # 次のファイルとの時間差を計算し、動画の再生時間(duration)を明示する
-            duration = 600.0  # 正常な10分ファイル(600秒)をデフォルトとする
+            duration = DEFAULT_SEGMENT_DURATION_SECONDS
             
             if i < len(mp4_files) - 1:
                 try:
@@ -409,7 +420,7 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
                     
                     # 0秒以上かつ異常値(12時間以上等)でなければ、実時間差をdurationに設定
                     # これにより、ファイルが欠落している隙間は最終フレームで停止したまま時間を稼ぐ
-                    if 0 < diff_seconds <= 43200:
+                    if 0 < diff_seconds <= MAX_PLAUSIBLE_SEGMENT_GAP_SECONDS:
                         duration = diff_seconds
                 except Exception as e:
                     logger.warning(f"Failed to calculate duration for {mp4}: {e}")
@@ -419,7 +430,7 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     logger.info(f"🎞️ [{cam_conf['name']}] {target_date} の録画プレイリスト生成中...")
 
     cmd = [
-        "nice", "-n", "15",
+        "nice", "-n", str(FFMPEG_NICE_LEVEL),
         "ffmpeg", "-y",
         "-f", "concat",
         "-safe", "0",
@@ -427,7 +438,7 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
         "-c:v", "copy",
         "-an",
         "-f", "hls",
-        "-hls_time", "4",
+        "-hls_time", str(HLS_VOD_SEGMENT_SECONDS),
         "-hls_playlist_type", "vod",
         playlist_path
     ]

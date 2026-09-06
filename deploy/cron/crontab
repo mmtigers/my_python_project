@@ -1,3 +1,9 @@
+# ラズパイ一次ヘルスチェック (毎時10分。Issue #339 層1・#484/#492)
+# home_system.serviceおよびそのプロセスツリー配下の監視(server_watchdog.py等)が
+# 丸ごと停止した場合でも、cron駆動でサービスから独立したこのチェックだけは動き続ける。
+# 毎時0分に走るnewface_monitor等の負荷と重ねないよう10分にずらしている。
+10 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/health_watch.py
+
 # 週間ログ分析 (日曜 08:50)
 50 8 * * 0 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/log_analyzer.py
 

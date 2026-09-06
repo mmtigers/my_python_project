@@ -27,6 +27,28 @@ sudo systemctl enable health-check.service
 `start_all.sh` が内部で `unified_server.py` を `nohup` バックグラウンド起動し、
 `unified_server.py` がさらに `scheduler_boot.py` 等を起動する。
 
+> **`Restart=always` を使わない理由(Issue #492・決定: 案A)**: `Type=oneshot` +
+> `RemainAfterExit=yes` の構成では、`start_all.sh` 自体が正常終了した時点で
+> systemdは「成功して完了した」と扱う。実際のサーバープロセス(`unified_server.py`)は
+> `nohup ... & disown` でsystemdの管理下から外れているため、`Restart=always` を
+> 付けても`start_all.sh`が異常終了しない限り再起動はトリガーされず、
+> `unified_server.py`単独のクラッシュに対しては実質的に無効。`Type=simple` +
+> `Restart=on-failure` へ移行する案(`start_all.sh`のバックグラウンド起動をやめ、
+> `unified_server.py`をsystemdのフォアグラウンドプロセスにする)も検討したが、
+> `start_all.sh` Phase 0(旧プロセスのクリーンアップ)・Streamlitダッシュボードの
+> 別プロセス起動との整合を取り直す必要があり変更規模が大きいため、今回は見送った。
+>
+> 代わりに、`unified_server.py`単独のクラッシュ検知は
+> [health_watch.md](../../../docs/specifications/MY_HOME_SYSTEM/health_watch.md)
+> （`monitors/health_watch.py`、cron駆動でこのサービスのプロセスツリーから独立、
+> `deploy/cron/crontab`に毎時10分で登録、Issue #339/#484）に委ねる。
+> `scheduler_boot.py`配下の監視群(`server_watchdog.py`等)は本サービスと同じ
+> プロセスツリーで動くため、本サービスごと落ちると一緒に停止し検知できないが、
+> cron駆動の`health_watch.py`はその穴を塞ぐ位置づけになる。**自動復旧は行わず、
+> Discord通知を受けて人間が`systemctl restart home_system.service`等で復旧する**
+> 運用とする(runbookのガードレール「自動適用・自動デプロイ・`systemctl restart`の
+> 自動実行は行わない」と整合)。
+
 導入手順(実機側):
 
 ```bash

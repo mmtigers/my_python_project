@@ -5,6 +5,7 @@ batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に
 """
 import os
 import re
+import threading
 from pathlib import Path
 
 # #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。
@@ -122,30 +123,39 @@ class DiscordCircuitBreaker:
 
     cron等で毎回新規プロセスとして起動される運用のため、プロセスをまたいだ
     状態は永続化しない(次回実行は必ず閉じた状態から始まる)。
+
+    Issue #458: newface_monitor.py がサイト巡回をスレッドプールで並列化した際、
+    1つの DiscordNotifier(=1つの本インスタンス)が複数スレッドから同時に
+    notify() を呼び出されるようになったため、状態変更を threading.Lock で保護する。
     """
 
     def __init__(self, failure_threshold: int = 3):
         self._failure_threshold = failure_threshold
         self._consecutive_failures = 0
         self._open = False
+        self._lock = threading.Lock()
 
     @property
     def is_open(self) -> bool:
         """送信をスキップすべき(連続失敗数が閾値に達した)場合True。"""
-        return self._open
+        with self._lock:
+            return self._open
 
     def record_success(self) -> None:
         """送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。"""
-        self._consecutive_failures = 0
-        self._open = False
+        with self._lock:
+            self._consecutive_failures = 0
+            self._open = False
 
     def record_failure(self) -> None:
         """送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。"""
-        self._consecutive_failures += 1
-        if self._consecutive_failures >= self._failure_threshold:
-            self._open = True
+        with self._lock:
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= self._failure_threshold:
+                self._open = True
 
     def trip(self) -> None:
         """Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した
         場合に、閾値を待たず即座にブレーカーを開く。"""
-        self._open = True
+        with self._lock:
+            self._open = True
