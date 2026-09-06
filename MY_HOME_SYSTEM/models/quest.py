@@ -75,7 +75,7 @@ class RewardAction(BaseModel):
     reward_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class HistoryAction(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=64)
     history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
 
 class ApproveAction(BaseModel):
@@ -97,7 +97,7 @@ _EMOJI_AVATAR_MAX_LEN = 16
 
 
 class UpdateUserAction(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=64)
     avatar_url: str
 
     @field_validator("avatar_url")
@@ -151,5 +151,7 @@ class UseItemResponse(BaseModel):
     message: str
 
 class UseItemAction(BaseModel):
-    user_id: str
-    inventory_id: int
+    # Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で
+    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。
+    user_id: str = Field(min_length=1, max_length=64)
+    inventory_id: int = Field(ge=1, le=_SQLITE_INT_MAX)
