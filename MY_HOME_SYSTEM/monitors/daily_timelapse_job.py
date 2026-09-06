@@ -88,6 +88,12 @@ def run_daily_timelapse(camera_name: str, target_date_str: str = None, start_tim
     target_files = sorted(glob.glob(os.path.join(nvr_dir, f"{date_prefix}_*.mp4")))
     
     # --- 時間帯フィルタリング処理 ---
+    # Issue #497 (C-4): target_filesが空でstart_time_str/end_time_strが指定されている
+    # 場合、この分岐に入らずstart_time/end_timeが未束縛のまま156行目付近の
+    # 出力ファイル名組み立てで参照され、NameErrorになりうる(pyrightの
+    # reportPossiblyUnboundVariableで検出済み)。先に None で束縛しておく。
+    start_time = None
+    end_time = None
     if target_files and (start_time_str or end_time_str):
         try:
             start_time = parse_time(start_time_str) if start_time_str else None

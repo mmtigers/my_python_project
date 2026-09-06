@@ -17,8 +17,8 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
-* 根拠: スクリプト全体 (行番号: 4〜125 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
+* 根拠: スクリプト全体 (行番号: 4〜151 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
 
@@ -116,49 +116,72 @@
 
 
 
-### [要素名4：Phase 2: family-quest フロントエンド鮮度チェック]
+### [要素名4：Phase 1.5: Python依存関係の鮮度チェック]
 
-* **役割**: サーバー起動前に`family-quest/deploy.sh --if-stale`を実行し、配信用ビルド成果物`dist/`が現在のチェックアウト(HEAD)の`family-quest`ツリーからビルドされたものかを冪等チェックさせ、古ければ再ビルドさせる。コメントに、`git pull`以外の経路(`git reset --hard`等)での更新では`post-merge`フックが発火せず、`dist/`が旧世代のままサーバーだけ新コードで起動してAPIスキーマ不整合を起こした障害(2026-09-01)の再発防止である旨が明記されている。
-* 根拠: Phase 2ブロック (行番号: 96〜105 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
+* **役割**: `requirements.txt`のSHA256ハッシュを算出し、`.venv/.requirements-sha256`に記録済みのハッシュと比較する。一致しなければ`requirements.txt`が変更されたと判断し、`$PYTHON_EXEC -m pip install -r requirements.txt`を実行して`.venv`を追従させ、成功時のみ新しいハッシュを記録する。family-questの`deploy.sh --if-stale`と同じ冪等チェックの思想をバックエンドの依存関係にも適用したもの（Issue #483: `requirements.txt`変更後に`.venv`が追従しないと`ImportError`で起動失敗しうる問題への対応）。
+* 根拠: Phase 1.5ブロック (行番号: 101〜120 / 抜粋: "# --- Phase 1.5: Python依存関係の鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 96-105)
+* 根拠: 引数受け取り処理なし (行番号: 101-120)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 96-105)
+* 根拠: 戻り値返却なし (行番号: 101-120)
+
+
+* **副作用**: `requirements.txt`変更時の`pip install`実行（`.venv`へのパッケージインストール）。その標準出力・標準エラー出力の`logs/pip_install.log`への書き込み。成功時は`.venv/.requirements-sha256`への書き込み。
+* 根拠: 実行・リダイレクト処理 (行番号: 108 / 抜粋: ""$PYTHON_EXEC" -m pip install -r requirements.txt > logs/pip_install.log 2>&1")
+
+
+* **エラーハンドリング**: `pip install`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`.venv`のまま起動を続ける方がサーバー未起動よりマシという設計判断で、Phase 2のfamily-quest鮮度チェックと同じ方針）。失敗時はハッシュファイルを更新しないため、次回起動時にも再度`pip install`が試みられる。
+* 根拠: if-else分岐 (行番号: 109〜114 / 抜粋: "echo "⚠️ pip install failed. Starting with existing .venv...."")
+
+
+
+### [要素名5：Phase 2: family-quest フロントエンド鮮度チェック]
+
+* **役割**: サーバー起動前に`family-quest/deploy.sh --if-stale`を実行し、配信用ビルド成果物`dist/`が現在のチェックアウト(HEAD)の`family-quest`ツリーからビルドされたものかを冪等チェックさせ、古ければ再ビルドさせる。コメントに、`git pull`以外の経路(`git reset --hard`等)での更新では`post-merge`フックが発火せず、`dist/`が旧世代のままサーバーだけ新コードで起動してAPIスキーマ不整合を起こした障害(2026-09-01)の再発防止である旨が明記されている。
+* 根拠: Phase 2ブロック (行番号: 122〜131 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
+
+
+* **引数/リクエスト**: なし
+* 根拠: 引数受け取り処理なし (行番号: 122-131)
+
+
+* **戻り値/レスポンス**: なし
+* 根拠: 戻り値返却なし (行番号: 122-131)
 
 
 * **副作用**: `family-quest/deploy.sh --if-stale`の実行（`dist/`が古い場合はnpm install/buildによる`dist/`の再生成が発生する）。その標準出力・標準エラー出力の`logs/quest_deploy.log`への書き込み。標準出力へのログ表示。
-* 根拠: 実行・リダイレクト処理 (行番号: 103 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
+* 根拠: 実行・リダイレクト処理 (行番号: 128 / 抜粋: "bash "$QUEST_DIR/deploy.sh" --if-stale > logs/quest_deploy.log 2>&1")
 
 
 * **エラーハンドリング**: `deploy.sh`が失敗しても警告を表示するのみでスクリプトは続行する（既存の`dist/`を配信し続ける方がサーバー未起動よりマシという設計判断がコメントに明記されている）。
-* 根拠: if分岐と設計コメント (行番号: 101, 103〜105 / 抜粋: "# ビルド失敗でもサーバー起動は続行する(旧distを配信し続ける方がマシなため)")
+* 根拠: if分岐と設計コメント (行番号: 126, 128〜130 / 抜粋: "# ビルド失敗でもサーバー起動は続行する(旧distを配信し続ける方がマシなため)")
 
 
 
-### [要素名5：Phase 3 & 4: 初期化およびサーバー起動]
+### [要素名6：Phase 3 & 4: 初期化およびサーバー起動]
 
 * **役割**: Webhook修正スクリプト(`switchbot_webhook_fix.py`)を実行し、その後`unified_server.py`と`dashboard.py`(Streamlit)をバックグラウンドで起動する。各プロセスの標準出力・標準エラー出力は`logs/`ディレクトリ内のログファイルにリダイレクトする。
-* 根拠: 起動処理ブロック (行番号: 107〜125 / 抜粋: "echo "--- Start Home System Server ---"")
+* 根拠: 起動処理ブロック (行番号: 133〜151 / 抜粋: "echo "--- Start Home System Server ---"")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数受け取り処理なし (行番号: 107-125)
+* 根拠: 引数受け取り処理なし (行番号: 133-151)
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: 戻り値返却なし (行番号: 107-125)
+* 根拠: 戻り値返却なし (行番号: 133-151)
 
 
 * **副作用**: 3つのPythonスクリプトの実行（うち2つはバックグラウンドプロセスとして常駐）。`logs/webhook_fix.log`, `logs/server_boot.log`, `logs/dashboard_boot.log` ファイルの作成および上書き。
-* 根拠: 実行・リダイレクト処理 (行番号: 109, 116, 122 / 抜粋: "> logs/server_boot.log 2>&1 &")
+* 根拠: 実行・リダイレクト処理 (行番号: 135, 142, 148 / 抜粋: "> logs/server_boot.log 2>&1 &")
 
 
 * **エラーハンドリング**: なし（各Pythonスクリプト内のエラーはログファイルへ書き込まれるが、本スクリプト側でのプロセス起動失敗時のハンドリングはない）。
-* 根拠: バックグラウンド実行処理 (行番号: 116, 122 / 抜粋: "&")
+* 根拠: バックグラウンド実行処理 (行番号: 142, 148 / 抜粋: "&")
 
 
 
@@ -180,7 +203,10 @@ flowchart TD
     WaitLoop -- "5秒経過でも残存" --> PkillHard["残存する対象ごとにpkill -9で強制終了"]
     PkillHard --> CheckNAS[NASマウントポイント確認]
     CheckNAS --> MountLoop{最大5回・自動マウントトリガー+Exponential Backoffでリトライ}
-    MountLoop --> QuestDeploy["外部：family-quest/deploy.sh --if-stale (dist鮮度チェック・必要ならリビルド)"]
+    MountLoop --> ReqHashCheck{requirements.txtのSHA256が.venv/.requirements-sha256と一致するか?}
+    ReqHashCheck -- 一致 --> QuestDeploy
+    ReqHashCheck -- 不一致 --> PipInstall["pip install -r requirements.txt (成功時のみハッシュ更新)"]
+    PipInstall -- "成功/失敗いずれでも続行" --> QuestDeploy["外部：family-quest/deploy.sh --if-stale (dist鮮度チェック・必要ならリビルド)"]
     QuestDeploy -- "成功/失敗いずれでも続行" --> WebhookFix["外部：switchbot_webhook_fix.py()"]
     WebhookFix --> ServerBoot["外部：unified_server.py() バックグラウンド起動"]
     ServerBoot --> DashboardBoot["外部：dashboard.py() バックグラウンド起動"]
@@ -237,7 +263,8 @@ graph TD
 * **影響範囲の広いプロセス停止 (`pkill -f`)**: `pkill -f "streamlit run"` などは部分一致でプロセスを終了させるため、このシステムとは無関係の別プロジェクトのStreamlitプロセスが実行中の場合、巻き込んで終了させてしまう危険性がある。
 * **プロセスの起動監視漏れ**: `unified_server.py` および `dashboard.py` をバックグラウンドで起動しているが、プロセスが正常に立ち上がったかどうか（即座にクラッシュしていないか）の死活監視・エラー検知のロジックは存在しない。
 * **[修正済み] pkill対象名の実体不一致**: 以前は`CLEANUP_TARGETS`に相当する停止対象が`scheduler.py`という実在しないプロセス名で個別に`pkill`されており、実体`scheduler_boot.py`にマッチしないため再起動のたびに旧schedulerプロセスが生き残り、`unified_server.py`起動時に新しいschedulerプロセスと重複起動する不具合があった。存在しない`bluetooth_monitor.py`への`pkill`も無害だが無意味であった。現在は実ファイル名を用いた`CLEANUP_TARGETS`配列に置き換えられ、この2点は解消されている。
-* **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（68〜94行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
+* **[修正済み] NASマウント確認が待たずに次フェーズへ進んでいた**: 以前のPhase 1は`mountpoint -q`を1回チェックするのみで、未マウントでも警告を表示するだけで即座にPhase 3(Webhook修正)・Phase 4(サーバー起動)へ進んでいた。起動直後はautofsのアイドルアンマウント後の自動マウント完了まで数秒かかることがあり、これは`config.py`の`verify_and_initialize_storage`（Exponential Backoffで自己修復）が扱う遅延と同種の事象であるにもかかわらず、本スクリプト側にはリトライが一切なかった。現在はパスアクセスによる自動マウントのトリガーと、最大5回・Exponential Backoff（1s/2s/4s/8s/16s）のリトライへ変更されている（74〜99行目）。ただしリトライを尽くしても未マウントの場合は依然として警告のみで後続フェーズへ進む点（アプリ側のバックオフ・フォールバックに委ねる設計）は変わらない。
+* **[修正済み] requirements.txt変更時に.venvが追従しない問題(Issue #483)**: 以前は本スクリプトにPython依存関係を更新する経路が一切なく、`requirements.txt`を変更するPRをマージして実機で`git pull`しても`.venv`は古いままだった。新規パッケージをimportするコードが含まれていれば`unified_server.py`が`ImportError`で起動失敗し、2026-09-01のfamily-quest dist不整合障害と同型の穴がバックエンド側に残っていた。現在はPhase 1.5で`requirements.txt`のSHA256ハッシュを`.venv/.requirements-sha256`と比較し、不一致なら`pip install -r requirements.txt`を実行してハッシュを更新するようになっている（101〜120行目）。`requirements.txt`変更後の初回起動はpipインストール分だけ遅くなる点、およびネットワーク断時は`pip install`が失敗し既存の`.venv`のまま起動を続行する点に留意。
 
 ## 9. 不明事項一覧
 

@@ -101,3 +101,39 @@ class TestStartAllShBackgroundProcessesSurviveLogout:
                 f"バックグラウンド起動の直後にdisownが無く、シェルのジョブ管理から"
                 f"外れていない: {line!r}"
             )
+
+
+class TestStartAllShPythonDependencyFreshnessCheck:
+    """Issue #483: requirements.txt 変更後に実機の .venv が追従しないと
+    ImportError で起動失敗しうる問題への対応(family-quest の deploy.sh
+    --if-stale と同じ、ハッシュ比較による冪等チェック)を検証する。"""
+
+    def test_dependency_freshness_check_runs_between_nas_mount_and_frontend_build(self):
+        script = _read_script()
+        nas_phase_idx = script.index("Check NAS Mount")
+        dependency_phase_idx = script.index("Check Python dependencies freshness")
+        frontend_phase_idx = script.index("Ensure family-quest dist is fresh")
+        assert nas_phase_idx < dependency_phase_idx < frontend_phase_idx
+
+    def test_hash_file_is_stored_under_venv_directory(self):
+        script = _read_script()
+        m = re.search(r'REQ_HASH_FILE="([^"]+)"', script)
+        assert m, "REQ_HASH_FILE の定義が見つかりません"
+        assert m.group(1).startswith(".venv/"), (
+            ".venv/ は gitignore 済みのため、ハッシュファイルもここに置き "
+            "副作用を出さないこと"
+        )
+
+    def test_pip_install_uses_python_exec_and_targets_requirements_txt(self):
+        script = _read_script()
+        assert '"$PYTHON_EXEC" -m pip install -r requirements.txt' in script
+
+    def test_pip_install_failure_does_not_abort_startup(self):
+        """pip install失敗時は警告を出すのみで、スクリプトの実行(サーバー起動)を
+        continueすること(旧依存で動かす方が起動失敗より優先される)。"""
+        script = _read_script()
+        section_start = script.index("Check Python dependencies freshness")
+        section_end = script.index("Ensure family-quest dist is fresh")
+        section = script[section_start:section_end]
+        assert "pip install failed" in section
+        assert "exit" not in section

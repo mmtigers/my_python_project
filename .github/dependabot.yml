@@ -16,6 +16,11 @@ updates:
     labels:
       - "dependencies"
       - "github-actions"
+    # Issue #482: minor/patchはまとめて1PRにグループ化し、棚卸しコストを下げる。
+    # メジャー更新は破壊的変更を単独で評価できるよう従来どおり個別PRのまま残す。
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
 
   # MY_HOME_SYSTEM (FastAPIバックエンド): requirements.txt / requirements-dev.txt
   - package-ecosystem: "pip"
@@ -30,6 +35,9 @@ updates:
       - "python"
     # 依存が多くPRが大量に立つのを避けるため、同時オープン数を抑える
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
 
   # DDD (バッチ処理): requirements.txt
   - package-ecosystem: "pip"
@@ -43,6 +51,9 @@ updates:
       - "dependencies"
       - "python"
     open-pull-requests-limit: 3
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
 
   # family-quest (React/TypeScriptフロントエンド): package.json / package-lock.json
   - package-ecosystem: "npm"
@@ -56,3 +67,6 @@ updates:
       - "dependencies"
       - "javascript"
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]

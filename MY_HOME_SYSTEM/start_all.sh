@@ -98,6 +98,27 @@ if command -v mountpoint >/dev/null 2>&1; then
   fi
 fi
 
+# --- Phase 1.5: Python依存関係の鮮度チェック ---
+# requirements.txt が変わったのに .venv が追従していないと ImportError で
+# 起動に失敗する。family-quest の deploy.sh --if-stale と同じ冪等チェックを
+# バックエンドにも適用する。ビルド失敗でもサーバー起動は続行する
+# (旧依存で動かす方が停止よりマシ。deploy.sh と同じ判断)。
+echo "--- Check Python dependencies freshness ---"
+REQ_HASH_FILE=".venv/.requirements-sha256"
+if [ -f requirements.txt ]; then
+  current_req="$(sha256sum requirements.txt | cut -d' ' -f1)"
+  recorded_req="$(cat "$REQ_HASH_FILE" 2>/dev/null || true)"
+  if [ "$current_req" != "$recorded_req" ]; then
+    echo "--- requirements.txt changed: updating .venv ---"
+    if "$PYTHON_EXEC" -m pip install -r requirements.txt > logs/pip_install.log 2>&1; then
+      echo "$current_req" > "$REQ_HASH_FILE"
+      echo "✅ Dependencies updated."
+    else
+      echo "⚠️ pip install failed. Starting with existing .venv. See logs/pip_install.log" >&2
+    fi
+  fi
+fi
+
 # --- Phase 2: family-quest フロントエンドの鮮度チェック ---
 # git pull 以外の経路(git reset --hard 等)でチェックアウトが更新されると
 # post-merge フックが発火せず、dist/ が旧世代のままサーバーだけ新コードで

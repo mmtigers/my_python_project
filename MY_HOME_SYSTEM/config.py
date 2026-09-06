@@ -493,7 +493,7 @@ UPLOAD_MAX_FILE_SIZE_MB: int = _get_int_env("UPLOAD_MAX_FILE_SIZE_MB", 5)
 NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
 # タイムラプス生成設定
-# (monitors/smart_timelapse_generator.py, monitors/scheduled_timelapse.py が
+# (monitors/smart_timelapse_generator.py が
 #  getattr(config, "TIMELAPSE_...", デフォルト値) で参照する。以前はここに対応する
 #  定数が定義されておらず、常にハードコードされたデフォルト値へフォールバックしていた)
 from datetime import time as _dt_time

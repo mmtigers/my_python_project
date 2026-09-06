@@ -37,15 +37,16 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 ROLE_ADULT = 'role_adult'
 ROLE_CHILD = 'role_child'
 
-# quest_data import fallback
+# Issue #487: quest_data は sys.path に PROJECT_ROOT が入っているため通常の
+# importで解決する。以前あった `from .. import quest_data` のフォールバックは、
+# services がトップレベルパッケージ(MY_HOME_SYSTEM/services/__init__.py の親は
+# パッケージではない)であるため構造上決して成功せず、到達不能コードだった上、
+# mypyがこの1行で解析を停止しコードベース全体を検証できなくなっていた。
 try:
     import quest_data
 except ImportError:
-    try:
-        from .. import quest_data
-    except ImportError:
-        logger.warning("quest_data module not found via relative import.")
-        quest_data = None
+    logger.warning("quest_data module not found.")
+    quest_data = None
 
 
 # _process_complete_quest_locked のスパムチェック間隔(秒)。infiniteクエストのみ

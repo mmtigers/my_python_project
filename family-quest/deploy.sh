@@ -40,8 +40,12 @@ if [[ "${1:-}" == "--if-stale" ]]; then
     echo "[deploy] family-quest: dist/ が古いか未記録 (built='${recorded:-none}' head='${current:-unknown}')。再ビルドします..."
 fi
 
-echo "[deploy] family-quest: npm install..."
-npm install --no-audit --no-fund
+echo "[deploy] family-quest: npm ci..."
+# Issue #489: CI(test.ymlのfrontendジョブ)と同じnpm ciを使い、package-lock.jsonを
+# 厳密に守る。npm installだとpackage.jsonの範囲指定(^18.3.1等)を再解決して
+# lockfileを書き換えてしまい、(1) CIが緑でも実機は別バージョンでビルドされうる、
+# (2) 実機のgitツリーがdirtyになり次回のgit pullが失敗する、という2つの問題を招く。
+npm ci --no-audit --no-fund
 
 echo "[deploy] family-quest: build..."
 npm run build

@@ -223,10 +223,29 @@ def load_sensor_data(limit: int = 5000) -> pd.DataFrame:
         )
 
     # --- 統合 ---
+    # Issue #491: df_meter/df_powerはdf_legacyが持つ列(contact_state等)の一部を
+    # 欠いている。単純にreindexで列を揃えるだけだと、新たに追加された列が
+    # 全NaNのfloat64として作られ、df_legacy側の同名列(object dtypeの文字列)と
+    # concatする際にdtypeが定まらず、pd.concatがFutureWarning(「空/全NAの列を
+    # 除外してdtypeを決定する挙動は将来変更される」)を出していた。列ごとに
+    # 想定dtypeを明示してキャストしておくことで、concat側のdtype推測
+    # (将来変更される経路)を経由させず、この警告の対象外にする。
+    _SENSOR_COLUMN_DTYPES = {
+        "timestamp": "object",
+        "device_id": "object",
+        "device_name": "object",
+        "device_type": "object",
+        "temperature_celsius": "float64",
+        "humidity_percent": "float64",
+        "power_watts": "float64",
+        "contact_state": "object",
+        "movement_state": "object",
+        "brightness_state": "object",
+    }
     df_list = []
-    if not df_legacy.empty: df_list.append(df_legacy)
-    if not df_meter.empty: df_list.append(df_meter)
-    if not df_power.empty: df_list.append(df_power)
+    for df in (df_legacy, df_meter, df_power):
+        if not df.empty:
+            df_list.append(df.reindex(columns=list(_SENSOR_COLUMN_DTYPES)).astype(_SENSOR_COLUMN_DTYPES))
 
     if not df_list:
         return pd.DataFrame()

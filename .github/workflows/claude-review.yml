@@ -28,7 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     # C-L1 (Issue #414): LLMレビューが応答待ちで固まった場合の上限
     timeout-minutes: 30
-    if: github.event.pull_request.draft == false
+    # Issue #482: Dependabotがトリガーするpull_requestイベントには通常の
+    # リポジトリシークレットが供給されず、CLAUDE_CODE_OAUTH_TOKENが空のまま
+    # 実行され毎回9〜10秒で失敗していた(claude-execution-output.json不在)。
+    # 18件のDependabot PRが常時赤いCIのまま滞留し、test.ymlの本物の失敗を
+    # 見落とすリスクを生んでいたため、Dependabot PRはレビュー対象から除外する。
+    if: github.event.pull_request.draft == false && github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:

@@ -1,0 +1,20 @@
+# Issue #497 (C-3): ruffの設定ファイルが存在せず、デフォルトルール(E4/E7/E9/F)
+# のみで動いていた。MY_HOME_SYSTEM/DDDの両方とも `sys.path.append(PROJECT_ROOT)`
+# 直後にimportする構造上、E402(module-import-not-at-top-of-file)を恒久的に
+# 解消できず、非ブロッキングのフルレポートに常時100件超が出続けてレポート自体を
+# 読まなくさせていた。構造上避けられないものだけを明示的に無効化する。
+#
+# このファイルは repo ルートに置く(MY_HOME_SYSTEM/・DDD/ のいずれで
+# `ruff check .` を実行しても、ruff は現在のディレクトリから上位へ辿って
+# 設定ファイルを探索するため、両サブシステムに同じ設定が適用される)。
+#
+# `ruff --fix` / `ruff format` による一括整形は行わないこと。このリポジトリの
+# docs/specifications/ 配下の仕様書は行番号を明記してソースを引用する規約が
+# あり、一括整形すると全仕様書の引用と git blame が壊れる。
+[lint]
+ignore = [
+    # sys.path.append(PROJECT_ROOT) の後に import する必要があるため
+    # (MY_HOME_SYSTEM・DDDの多くのエントリーポイント・monitorsスクリプトで
+    # 恒久的に発生する)。
+    "E402",
+]
