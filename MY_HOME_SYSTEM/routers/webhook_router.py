@@ -79,11 +79,6 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
         if not token or not hmac.compare_digest(token, config.SWITCHBOT_WEBHOOK_TOKEN):
             raise HTTPException(status_code=401, detail="Invalid token")
 
-    # Issue #328: 実機のペイロード形式を確認するための一時的な診断ログ。
-    # models/switchbot.py の body: Any 解消の前提として、実際に届く生ペイロードを
-    # デバイス種別ごとに数件収集する目的のみで追加(調査完了後に削除予定)。
-    logger.info(f"[Issue #328診断] SwitchBot Webhook受信: {body.model_dump()}")
-
     ctx = body.context
     mac = ctx.deviceMac
     
