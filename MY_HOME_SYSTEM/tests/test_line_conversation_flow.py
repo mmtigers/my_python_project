@@ -47,6 +47,9 @@ def make_function_call(name, args):
 def ai_configured(monkeypatch):
     monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-key-for-test")
     monkeypatch.setattr(ai_service, "MODEL_NAME", "gemini-2.0-flash")
+    # Issue #520: google-genai はモジュールレベルのconfigure()ではなくClientを持つ。
+    # 未設定のままだとanalyze_text_and_executeが早期returnしてDBまで到達しない。
+    monkeypatch.setattr(ai_service, "client", MagicMock())
     monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
 
 

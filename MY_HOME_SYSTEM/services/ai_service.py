@@ -8,16 +8,16 @@ import time
 import traceback
 from typing import Optional, Dict, Any, List
 
-import google.generativeai as genai
-from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
-from google.ai.generativelanguage_v1beta.types import content
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 
 # Retry logic
 from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential_jitter,
-    retry_if_exception_type,
+    retry_if_exception,
 )
 
 import config
@@ -32,12 +32,17 @@ from services import line_service
 logger = setup_logging("ai_service")
 
 # === Gemini 初期化 ===
+# Issue #520: 旧SDK google-generativeai から後継の google-genai へ移行した。
+# 旧SDKは google-ai-generativelanguage==0.6.15 を厳密固定しており、それが
+# protobuf<6 を要求するため、protobuf関連パッケージ群が一切更新できなくなっていた。
+# 旧SDKのモジュールレベル genai.configure() は廃止され、Clientインスタンスを持つ。
 if config.GEMINI_API_KEY:
-    genai.configure(api_key=config.GEMINI_API_KEY)
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
     # Gemini 1.5 Flash / 2.0 Flash を推奨
     MODEL_NAME = 'gemini-2.0-flash'
 else:
     logger.warning("⚠️ GEMINI_API_KEYが設定されていません。AI機能は無効です。")
+    client = None
     MODEL_NAME = None
 
 # 定数設定
@@ -445,8 +450,19 @@ def _log_retry_attempt(retry_state):
         f"(Attempt {retry_state.attempt_number}/{MAX_RETRIES})"
     )
 
+def _is_quota_error(exc: BaseException) -> bool:
+    """
+    レート制限/クォータ超過(HTTP 429)かどうか。
+
+    Issue #520: 旧SDKでは google.api_core の ResourceExhausted という専用の例外型で
+    判別できたが、google-genai はHTTPステータスを持つ APIError に一本化されている。
+    型ではなくコードで判定する。
+    """
+    return isinstance(exc, genai_errors.APIError) and getattr(exc, "code", None) == 429
+
+
 @retry(
-    retry=retry_if_exception_type(ResourceExhausted),
+    retry=retry_if_exception(_is_quota_error),
     wait=wait_exponential_jitter(initial=2, max=10),
     stop=stop_after_attempt(MAX_RETRIES),
     before_sleep=_log_retry_attempt,
@@ -457,14 +473,15 @@ async def _call_gemini_api_with_retry(chat_session, prompt: str):
     Gemini APIを呼び出す内部関数。Tenacityによるリトライロジックを含む。
     
     Args:
-        chat_session: Gemini ChatSessionオブジェクト
+        chat_session: google-genai の AsyncChat オブジェクト
         prompt (str): 送信するプロンプト
 
     Returns:
         GenerateContentResponse: APIレスポンス
     """
-    # 同期メソッドの場合は asyncio.to_thread でラップして実行
-    return await asyncio.to_thread(chat_session.send_message, prompt)
+    # Issue #520: google-genai は client.aio 経由でネイティブに非同期のため、
+    # 旧SDKの同期メソッドを包んでいた asyncio.to_thread は不要になった。
+    return await chat_session.send_message(prompt)
 
 
 # ==========================================
@@ -488,8 +505,10 @@ def _extract_function_calls(response) -> List[Any]:
 
 def _response_text_or_none(response) -> Optional[str]:
     """
-    Issue #374: `response.text` は function_call パートしか無い応答や空応答で
-    ValueError を送出する(google-generativeai の仕様)。例外を送出せず None を返す。
+    Issue #374: 旧SDK(google-generativeai)の `response.text` は、function_call
+    パートしか無い応答や空応答で ValueError を送出した。google-genai では None を
+    返すようになったが(Issue #520で確認)、SDKの版差で再び送出side に戻っても
+    壊れないよう try/except は残す。
     """
     try:
         text = response.text
@@ -527,7 +546,7 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
     Returns:
         Optional[str]: LINEに返信するメッセージテキスト (Noneの場合は返信なし)
     """
-    if not MODEL_NAME or not config.GEMINI_API_KEY:
+    if not MODEL_NAME or not config.GEMINI_API_KEY or client is None:
         return None
 
     # 1. 簡易レートリミットチェック
@@ -536,7 +555,6 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         return FALLBACK_MESSAGE
 
     try:
-        model = genai.GenerativeModel(MODEL_NAME, tools=tools_schema)
         
         system_prompt = f"""
         あなたは「セバスチャン」という名前の、有能で忠実な執事です。
@@ -554,17 +572,29 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
         - 雑談の場合は、気の利いた返答を短めに返してください。
         """
 
-        # Geminiセッション開始 (Auto Function Calling無効化)
-        chat_manual = model.start_chat(enable_automatic_function_calling=False)
+        # Geminiセッション開始 (Auto Function Calling無効化)。
+        # Issue #520: 旧SDKの GenerativeModel(...).start_chat(...) は
+        # client.aio.chats.create(...) に置き換わり、tools と自動関数呼び出しの
+        # 設定は GenerateContentConfig にまとまった。tools_schema の dict 形式は
+        # そのまま受け付けられるため、スキーマ定義は変更していない。
+        chat_manual = client.aio.chats.create(
+            model=MODEL_NAME,
+            config=genai_types.GenerateContentConfig(
+                tools=tools_schema,
+                automatic_function_calling=genai_types.AutomaticFunctionCallingConfig(
+                    disable=True
+                ),
+            ),
+        )
         full_prompt = f"{system_prompt}\n\nユーザーメッセージ: {text}"
 
         # 2. API呼び出し (Retry Logic適用)
         try:
             response = await _call_gemini_api_with_retry(chat_manual, full_prompt)
-        except ResourceExhausted:
-            logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
-            return FALLBACK_MESSAGE
-        except GoogleAPIError as e:
+        except genai_errors.APIError as e:
+            if _is_quota_error(e):
+                logger.warning("⚠️ Gemini Quota Exhausted after max retries.")
+                return FALLBACK_MESSAGE
             logger.error(f"❌ Gemini API Fatal Error: {e}")
             return "申し訳ございません。AIサービスで予期せぬエラーが発生しました。"
 
@@ -605,28 +635,26 @@ async def analyze_text_and_execute(user_id: str, user_name: str, text: str) -> O
 
                 tool_result = await _dispatch_tool(user_id, user_name, fname, fargs)
                 tool_results.append(tool_result)
-                function_responses.append(content.Part(
-                    function_response=content.FunctionResponse(
-                        name=fname,
-                        response={"result": tool_result}
-                    )
+                function_responses.append(genai_types.Part.from_function_response(
+                    name=fname,
+                    response={"result": tool_result},
                 ))
 
             # ツールの結果送信もリトライ対象にする (今回は簡易的に同じリトライ関数を利用)
             try:
                 response = await _call_gemini_api_with_retry(chat_manual, function_responses)
-            except ResourceExhausted:
-                # ツール実行は成功しているが、最終回答生成でコケた場合
-                logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
-                return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
-            except GoogleAPIError as e:
+            except genai_errors.APIError as e:
+                if _is_quota_error(e):
+                    # ツール実行は成功しているが、最終回答生成でコケた場合
+                    logger.warning("⚠️ Gemini Quota Exhausted during tool output generation.")
+                    return _tool_results_fallback(tool_results, "AIの応答生成が制限を超過したため、実行結果のみ表示します")
                 # #232: ツール実行(record_child_health/record_food等、DB書き込みを伴う)は
-                # 既に成功しているにもかかわらず、最終応答生成でResourceExhausted以外の
-                # GoogleAPIErrorが発生すると、以前はここで捕捉されず関数末尾の汎用
+                # 既に成功しているにもかかわらず、最終応答生成でクォータ超過以外の
+                # APIErrorが発生すると、以前はここで捕捉されず関数末尾の汎用
                 # except Exceptionまで伝播し「処理中にエラーが発生しました」という
                 # 一般エラーになっていた。ユーザーは保存に失敗したと誤解して同じ内容を
                 # 再送信し、冪等性チェックの無い記録処理が重複登録を起こしうる。
-                # ResourceExhaustedと同様にtool_resultを返し、実行結果を正しく伝える。
+                # クォータ超過と同様にtool_resultを返し、実行結果を正しく伝える。
                 logger.error(f"❌ Gemini API Fatal Error during tool output generation: {e}")
                 return _tool_results_fallback(tool_results, "AIの応答生成でエラーが発生したため、実行結果のみ表示します")
 

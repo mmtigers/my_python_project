@@ -5,7 +5,7 @@ services/ai_service.py のテスト。
 - tool_search_db のテーブル許可リスト(既存)
 - SimpleRateLimiter のウィンドウ制御
 - analyze_text_and_execute のオーケストレーション分岐(APIキー無し/レート制限/
-  ツール呼び出しディスパッチ/未知ツール/空応答/ResourceExhausted/GoogleAPIError/
+  ツール呼び出しディスパッチ/未知ツール/空応答/クォータ超過(429)/その他APIエラー/
   汎用例外)
 - tool_record_child_health / tool_record_food のline_serviceへの委譲
 - _call_gemini_api_with_retry のtenacityリトライ挙動
@@ -23,7 +23,21 @@ import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from google.api_core.exceptions import GoogleAPIError, ResourceExhausted
+from google.genai import errors as genai_errors
+
+
+def _quota_error(message: str = "quota exceeded") -> genai_errors.ClientError:
+    """クォータ超過(HTTP 429)を模した例外。
+
+    Issue #520: 旧SDKの ResourceExhausted 相当。google-genai は専用の例外型を持たず
+    APIError にHTTPステータスを載せるため、code=429 のClientErrorとして作る。
+    """
+    return genai_errors.ClientError(429, {"error": {"message": message}})
+
+
+def _fatal_api_error(message: str = "fatal error") -> genai_errors.ServerError:
+    """クォータ超過以外の、リトライしても回復しないAPIエラー(旧GoogleAPIError相当)。"""
+    return genai_errors.ServerError(500, {"error": {"message": message}})
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -63,9 +77,14 @@ def no_retry_sleep(monkeypatch):
 
 @pytest.fixture
 def ai_configured(monkeypatch):
-    """APIキー設定済み状態を模す(モジュールimport時に決まるMODEL_NAMEを上書き)。"""
+    """APIキー設定済み状態を模す(モジュールimport時に決まるMODEL_NAME/clientを上書き)。
+
+    Issue #520: google-genai はモジュールレベルの genai.configure() ではなく
+    Clientインスタンスを持つため、テストでもダミーのclientを差し込む必要がある。
+    """
     monkeypatch.setattr(config, "GEMINI_API_KEY", "fake-key-for-test")
     monkeypatch.setattr(ai_service, "MODEL_NAME", "gemini-2.0-flash")
+    monkeypatch.setattr(ai_service, "client", MagicMock())
 
 
 def test_extract_referenced_tables_simple_select():
@@ -383,7 +402,7 @@ class TestAnalyzeTextAndExecute:
         monkeypatch.setattr(
             ai_service,
             "_call_gemini_api_with_retry",
-            AsyncMock(side_effect=ResourceExhausted("quota exceeded")),
+            AsyncMock(side_effect=_quota_error()),
         )
 
         result = await ai_service.analyze_text_and_execute("U1", "太郎", "こんにちは")
@@ -396,7 +415,7 @@ class TestAnalyzeTextAndExecute:
         monkeypatch.setattr(
             ai_service,
             "_call_gemini_api_with_retry",
-            AsyncMock(side_effect=GoogleAPIError("fatal error")),
+            AsyncMock(side_effect=_fatal_api_error()),
         )
 
         result = await ai_service.analyze_text_and_execute("U1", "太郎", "こんにちは")
@@ -408,12 +427,14 @@ class TestAnalyzeTextAndExecute:
         self, ai_configured, monkeypatch
     ):
         """rate_limiterチェック自体は外側のtry/exceptの外にあるため、
-        意図的にtryブロック内部(genai.GenerativeModel構築時)で例外を起こして
-        汎用exceptフォールバックを検証する。"""
+        意図的にtryブロック内部(チャットセッション生成時)で例外を起こして
+        汎用exceptフォールバックを検証する。
+        Issue #520: 旧SDKの genai.GenerativeModel 構築点が
+        client.aio.chats.create(...) に移ったため、そちらを差し替える。"""
         monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
-        monkeypatch.setattr(
-            ai_service.genai, "GenerativeModel", MagicMock(side_effect=Exception("boom"))
-        )
+        broken_client = MagicMock()
+        broken_client.aio.chats.create.side_effect = Exception("boom")
+        monkeypatch.setattr(ai_service, "client", broken_client)
 
         result = await ai_service.analyze_text_and_execute("U1", "太郎", "こんにちは")
 
@@ -505,7 +526,7 @@ class TestAnalyzeTextAndExecute:
         monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
         fc = make_function_call("record_food", {"item": "カレー"})
         mock_retry = AsyncMock(
-            side_effect=[make_response(function_call=fc), ResourceExhausted("quota exceeded")]
+            side_effect=[make_response(function_call=fc), _quota_error()]
         )
         monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
         monkeypatch.setattr(
@@ -531,7 +552,7 @@ class TestAnalyzeTextAndExecute:
         monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
         fc = make_function_call("record_food", {"item": "カレー"})
         mock_retry = AsyncMock(
-            side_effect=[make_response(function_call=fc), GoogleAPIError("fatal, non-retryable")]
+            side_effect=[make_response(function_call=fc), _fatal_api_error("fatal, non-retryable")]
         )
         monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
         monkeypatch.setattr(
@@ -545,10 +566,14 @@ class TestAnalyzeTextAndExecute:
 
 
 class TestCallGeminiApiWithRetry:
+    """Issue #520: google-genai の AsyncChat.send_message は awaitable なため、
+    チャットセッションのモックは AsyncMock で作る(旧SDKは同期メソッドを
+    asyncio.to_thread で包んでいたので MagicMock で足りていた)。"""
+
     @pytest.mark.asyncio
     async def test_succeeds_without_retry_on_first_call(self, no_retry_sleep):
         chat_session = MagicMock()
-        chat_session.send_message.return_value = make_response(text="ok")
+        chat_session.send_message = AsyncMock(return_value=make_response(text="ok"))
 
         result = await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
@@ -558,11 +583,11 @@ class TestCallGeminiApiWithRetry:
     @pytest.mark.asyncio
     async def test_retries_on_resource_exhausted_then_succeeds(self, no_retry_sleep):
         chat_session = MagicMock()
-        chat_session.send_message.side_effect = [
-            ResourceExhausted("x"),
-            ResourceExhausted("x"),
+        chat_session.send_message = AsyncMock(side_effect=[
+            _quota_error(),
+            _quota_error(),
             make_response(text="ok after retries"),
-        ]
+        ])
 
         result = await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
@@ -572,9 +597,9 @@ class TestCallGeminiApiWithRetry:
     @pytest.mark.asyncio
     async def test_reraises_after_max_attempts_exhausted(self, no_retry_sleep):
         chat_session = MagicMock()
-        chat_session.send_message.side_effect = ResourceExhausted("always exhausted")
+        chat_session.send_message = AsyncMock(side_effect=_quota_error("always exhausted"))
 
-        with pytest.raises(ResourceExhausted):
+        with pytest.raises(genai_errors.ClientError):
             await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
         assert chat_session.send_message.call_count == ai_service.MAX_RETRIES
@@ -582,9 +607,9 @@ class TestCallGeminiApiWithRetry:
     @pytest.mark.asyncio
     async def test_does_not_retry_on_non_resource_exhausted_exception(self, no_retry_sleep):
         chat_session = MagicMock()
-        chat_session.send_message.side_effect = GoogleAPIError("fatal, non-retryable")
+        chat_session.send_message = AsyncMock(side_effect=_fatal_api_error("fatal, non-retryable"))
 
-        with pytest.raises(GoogleAPIError):
+        with pytest.raises(genai_errors.ServerError):
             await ai_service._call_gemini_api_with_retry(chat_session, "prompt")
 
         assert chat_session.send_message.call_count == 1
@@ -941,7 +966,7 @@ class TestToolRecordFunctionsReportSaveFailure:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
         monkeypatch.setattr(ai_service.rate_limiter, "allow_request", AsyncMock(return_value=True))
         fc = make_function_call("record_child_health", {"child_name": "智矢", "condition": "元気"})
-        mock_retry = AsyncMock(side_effect=[make_response(function_call=fc), ResourceExhausted("quota")])
+        mock_retry = AsyncMock(side_effect=[make_response(function_call=fc), _quota_error()])
         monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
 
         result = await ai_service.analyze_text_and_execute("U1", "太郎", "智矢は元気")
@@ -1111,7 +1136,7 @@ class TestChainedFunctionCalls:
         mock_retry = AsyncMock(side_effect=[
             _FunctionCallOnlyResponse([make_fc_part(fc1)]),
             _FunctionCallOnlyResponse([make_fc_part(fc2)]),
-            ResourceExhausted("quota"),
+            _quota_error(),
         ])
         monkeypatch.setattr(ai_service, "_call_gemini_api_with_retry", mock_retry)
         monkeypatch.setattr(
