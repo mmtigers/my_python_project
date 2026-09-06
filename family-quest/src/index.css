@@ -1,3 +1,23 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind CSS v4。v3の @tailwind base/components/utilities の3行はこの1行に統合された。 */
+@import "tailwindcss";
+
+/*
+ * v3の tailwind.config.js にあった theme.extend 相当。v4では設定ファイルではなく
+ * CSSの @theme に書く。content の指定も不要になった(v4はソースを自動検出する)。
+ *
+ * この wiggle アニメーションは現時点でどのコンポーネントからも使われていないが、
+ * v3から引き継いだ定義をこの移行で黙って落とさないよう残している。
+ */
+@theme {
+  --animate-wiggle: wiggle 0.3s ease-in-out infinite;
+}
+
+@keyframes wiggle {
+  0%,
+  100% {
+    transform: rotate(-3deg);
+  }
+  50% {
+    transform: rotate(3deg);
+  }
+}
