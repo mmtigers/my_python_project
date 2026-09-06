@@ -57,20 +57,55 @@ jobs:
         # 「pip-auditがレポートファイルを書いたか」を $GITHUB_OUTPUT に記録し、
         # 次のステップはファイルの中身ではなくこの2値で clean/vuln/failure を判定する。
         # ファイルが無い場合はアーティファクト用に固定文言のファイルを作っておく。
+        #
+        # MY_HOME_SYSTEM と DDD は別々の .venv で動く独立した環境であり、同じパッケージを
+        # 異なるバージョン制約で固定している(例: beautifulsoup4 は MY_HOME_SYSTEM が
+        # ==4.14.3、DDD が >=4.15.0)。pip-audit に3ファイルを一度に -r 指定すると単一の
+        # 仮想環境で全制約を同時に解決しようとして ResolutionImpossible で exit 1
+        # (レポート未生成)になり、実際には脆弱性が無くても毎週「チェック自体が失敗」の
+        # Issue が起票され続ける。実機と同じ単位(MY_HOME_SYSTEM の2ファイル / DDD の
+        # 1ファイル)で個別に監査し、結果を1つのレポートに結合する。
         run: |
-          set +e
-          pip-audit -r requirements.txt -r requirements-dev.txt -r ../DDD/requirements.txt \
-            --desc -f markdown -o pip-audit-report.md
-          code=$?
-          set -e
-          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
-          if [ -f pip-audit-report.md ]; then
-            echo "report_written=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "report_written=false" >> "$GITHUB_OUTPUT"
+          overall_code=0
+          report_written=false
+          : > pip-audit-report.md
+          run_audit() {
+            # $1: 表示名  $2..: pip-audit に渡す -r 引数
+            local label="$1"; shift
+            local out="pip-audit-${label}.md"
+            rm -f "$out"
+            set +e
+            pip-audit "$@" --desc -f markdown -o "$out"
+            local code=$?
+            set -e
+            echo "pip-audit (${label}) exit code: ${code}"
+            if [ -f "$out" ]; then
+              report_written=true
+              {
+                echo "### ${label}"
+                echo
+                cat "$out"
+                echo
+              } >> pip-audit-report.md
+            fi
+            # 1件でも「pip-audit 自体のエラー(exit 1 かつレポート未生成、または 1 以外の
+            # 非ゼロ)」があれば、脆弱性検知(exit 1 + レポート有り)より優先して failure 扱いにする。
+            if [ "$code" -ne 0 ]; then
+              if [ "$code" -eq 1 ] && [ -f "$out" ]; then
+                if [ "$overall_code" -eq 0 ]; then overall_code=1; fi
+              else
+                overall_code=2
+              fi
+            fi
+          }
+          run_audit MY_HOME_SYSTEM -r requirements.txt -r requirements-dev.txt
+          run_audit DDD -r ../DDD/requirements.txt
+          echo "exit_code=${overall_code}" >> "$GITHUB_OUTPUT"
+          echo "report_written=${report_written}" >> "$GITHUB_OUTPUT"
+          if [ "$report_written" != "true" ]; then
             echo "No known vulnerabilities found" > pip-audit-report.md
           fi
-          echo "pip-audit exit code: ${code}"
+          echo "overall exit code: ${overall_code}"
 
       - name: Create or update tracking issue
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
