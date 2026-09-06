@@ -7,22 +7,16 @@
     2.  認証・API設定 (Secrets)
     3.  システム・パス設定
     4.  デバイス・ルール設定
-    5.  給与(Salary)設定
-    6.  ショッピング・美容院予約 監視設定
-    7.  土地価格監視設定
-    8.  Google Photos 連携設定
-    9.  不動産情報(REINFOLIB)設定
-    10. NAS & Network設定
-    11. 動画処理(タイムラプス・NVR録画)設定
-    12. 保持期間・クリーンアップ設定
-    13. Sound & Family設定
-    14. 外部サイト監視設定 (SUUMO)
-    15. 小児科予約監視設定 (Clinic Monitor)
-    16. メモリ監視設定
-    17. TVロック機能設定
-    18. Alexaスキル設定
-    19. ラズパイ監視(health_watch)設定
-    20. NASパスの遅延解決 (Issue #330 PR-B)
+    5.  NAS & Network設定
+    6.  動画処理(タイムラプス・NVR録画)設定
+    7.  保持期間・クリーンアップ設定
+    8.  Sound & Family設定
+    9.  メモリ監視設定
+    10. TVロック機能設定
+    11. Alexaスキル設定
+    12. ラズパイ監視(health_watch)設定
+    13. NASパスの遅延解決 (Issue #330 PR-B)
+    14. Family Quest: YouTubeごほうび券クールダウン設定
 """
 import os
 import time
@@ -196,7 +190,6 @@ class DeviceConfig(BaseModel):
 # ==========================================
 # 1. 環境・機能フラグ設定
 # ==========================================
-ENV: str = os.getenv("ENV", "development")
 # BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが
 # BT確認をスキップしサウンドカード確認にフォールバックする。
 # 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`
@@ -229,19 +222,12 @@ WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")
 
 # Discord Webhooks
 DISCORD_WEBHOOK_ERROR: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR")
-DISCORD_WEBHOOK_ERROR_CAM: Optional[str] = os.getenv("DISCORD_WEBHOOK_ERROR_CAM")
 DISCORD_WEBHOOK_REPORT: Optional[str] = os.getenv("DISCORD_WEBHOOK_REPORT")
 DISCORD_WEBHOOK_NOTIFY: Optional[str] = os.getenv("DISCORD_WEBHOOK_NOTIFY")
 DISCORD_WEBHOOK_URL: Optional[str] = DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")
 
-# GMAIL & Gemini
-GMAIL_USER: Optional[str] = os.getenv("GMAIL_USER")
-GMAIL_APP_PASSWORD: Optional[str] = os.getenv("GMAIL_APP_PASSWORD")
+# Gemini
 GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
-SALARY_MAIL_SENDER: Optional[str] = os.getenv("SALARY_MAIL_SENDER")
-
-# 不動産情報 (WebURLは 9. 不動産情報(REINFOLIB)設定 を参照)
-REINFOLIB_API_KEY: Optional[str] = os.getenv("REINFOLIB_API_KEY")
 
 # ==========================================
 # 3. システム・パス設定
@@ -275,9 +261,7 @@ SQLITE_TABLE_POWER_USAGE: str = "power_usage"
 SQLITE_TABLE_DAILY_LOGS: str = "daily_logs"
 
 # Legacy/Specific Tables
-SQLITE_TABLE_OHAYO: str = "ohayo_records"
 SQLITE_TABLE_FOOD: str = "food_records"
-SQLITE_TABLE_HEALTH: str = "health_records"
 SQLITE_TABLE_CAR: str = "car_records"
 SQLITE_TABLE_CHILD: str = "child_health_records"
 SQLITE_TABLE_DEFECATION: str = "defecation_records"
@@ -289,46 +273,12 @@ SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
 
 # デフォルトアセット
-DEFAULT_ASSETS_DIR: str = os.path.join(BASE_DIR, "defaults")
-DEFAULT_SOUND_SOURCE: str = os.path.join(DEFAULT_ASSETS_DIR, "sounds")
+DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")
 
 # ==========================================
 # 4. デバイス・ルール設定
 # ==========================================
 NOTIFICATION_TARGET: str = os.getenv("NOTIFICATION_TARGET", "discord")
-
-# --- 子供設定 ---
-_children_str: str = os.getenv("CHILDREN_NAMES", "")
-CHILDREN_NAMES: List[str] = _children_str.split(",") if _children_str else []
-CHILD_SYMPTOMS: List[str] = ["😊 元気いっぱい", "🤒 お熱がある", "🤧 鼻水・咳", "🤮 お腹の調子が悪い", "🤕 怪我した", "✏️ その他"]
-CHILD_CHECK_TIME: str = "07:30"
-
-OHAYO_KEYWORDS: List[str] = ["おはよ", "おはよう"]
-MESSAGE_LENGTH_LIMIT: int = 30
-
-MENU_OPTIONS: Dict[str, List[str]] = {
-    "自炊": ["カレーライス", "豚しゃぶ", "焼き魚", "うどん", "味噌汁とご飯", "野菜炒め", "オムライス"],
-    "外食": ["マクドナルド", "魚べえ", "サイゼリヤ", "丸亀製麺"],
-    "その他": ["スーパーの惣菜", "コンビニ", "冷凍食品", "カップ麺"]
-}
-
-# --- 記念日・イベント設定 ---
-IMPORTANT_DATES: List[Dict[str, Any]] = []
-_events_path: str = os.path.join(BASE_DIR, "family_events.json")
-if os.path.exists(_events_path):
-    try:
-        with open(_events_path, "r", encoding="utf-8") as f:
-            IMPORTANT_DATES = json.load(f)
-    except Exception as e:
-        logger.warning(f"⚠️ 記念日設定の読み込みに失敗: {e}")
-
-CHECK_ZOROME: bool = True
-
-# --- 車検知キーワード ---
-CAR_RULE_KEYWORDS: Dict[str, List[str]] = {
-    "LEAVE": ["Exit", "Leave", "Out"],
-    "RETURN": ["Enter", "In", "Arrive"]
-}
 
 # --- デバイス設定の読み込み (devices.json) ---
 CAMERAS: List[Dict[str, Any]] = []
@@ -349,98 +299,12 @@ if os.path.exists(DEVICES_JSON_PATH):
 else:
     logger.info(f"ℹ️ devices.json not found at {DEVICES_JSON_PATH}. Running without device config.")
 
-# カメラ互換性用変数
-if CAMERAS:
-    CAMERA_IP: Optional[str] = CAMERAS[0].get("ip")
-    CAMERA_USER: Optional[str] = CAMERAS[0].get("user")
-    CAMERA_PASS: Optional[str] = CAMERAS[0].get("pass")
-else:
-    CAMERA_IP, CAMERA_USER, CAMERA_PASS = None, None, None
-
 # 動体検知の過剰発火を防ぐためのクールダウン（秒）
 # デフォルトは60秒。.envで上書き可能。
 MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)
 
 # ==========================================
-# 5. 給与(Salary)設定
-# ==========================================
-_passwords_str: str = os.getenv("SALARY_PDF_PASSWORDS", "")
-SALARY_PDF_PASSWORDS: List[str] = [p.strip() for p in _passwords_str.split(",") if p.strip()]
-
-# SALARY_IMAGE_DIR はASSETS_DIR(遅延解決)配下のため、同じくモジュール__getattr__で遅延解決する
-SALARY_DATA_DIR: str = os.path.join(BASE_DIR, "data")
-SALARY_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "salary_history.csv")
-BONUS_CSV_PATH: str = os.path.join(SALARY_DATA_DIR, "bonus_history.csv")
-
-# ==========================================
-# 6. ショッピング・美容院予約 監視設定
-# ==========================================
-# --- ショッピング解析設定 ---
-SHOPPING_TARGETS: List[Dict[str, Any]] = [
-    {
-        "platform": "Amazon",
-        "sender": "auto-confirm@amazon.co.jp",
-        "subject_keywords": ["Amazon.co.jpのご注文", "注文済み", "Amazon.co.jp order"]
-    },
-    {
-        "platform": "Rakuten",
-        "sender": "order@rakuten.co.jp",
-        "subject_keywords": ["注文内容ご確認", "ご注文内容の確認", "発送のご案内"]
-    }
-]
-
-# --- 美容院・散髪予約の設定 ---
-HAIRCUT_TARGETS: List[Dict[str, Any]] = [
-    {
-        "platform": "HotPepperBeauty",
-        "sender": "reserve@beauty.hotpepper.jp",
-        "subject_keywords": ["ご予約が確定いたしました"]
-    }
-]
-HAIRCUT_CYCLE_DAYS: int = 60
-
-# --- 自転車駐車場 ---
-BICYCLE_PARKING_URL: str = "https://www.midi-kintetsu.com/mpns/pa/h-itami/teiki/index.php"
-
-# ==========================================
-# 7. 土地価格監視設定
-# ==========================================
-LAND_PRICE_TARGETS: List[Dict[str, Any]] = [
-    {
-        "city_code": "28207",
-        "city_name": "伊丹市",
-        "districts": ["鈴原町"],
-        "filter_chome": list(range(1, 9))
-    },
-    {
-        "city_code": "28216",
-        "city_name": "高砂市",
-        "districts": ["西畑", "鍵町"],
-        "filter_chome": [1]
-    },
-    {
-        "city_code": "29201",
-        "city_name": "奈良市",
-        "districts": ["西九条町"],
-        "filter_chome": [1]
-    }
-]
-
-# ==========================================
-# 8. Google Photos 連携設定
-# ==========================================
-GOOGLE_PHOTOS_CREDENTIALS: str = os.path.join(BASE_DIR, "google_photos_credentials.json")
-GOOGLE_PHOTOS_TOKEN: str = os.path.join(BASE_DIR, "google_photos_token.json")
-GOOGLE_PHOTOS_SCOPES: List[str] = ['https://www.googleapis.com/auth/photoslibrary']
-
-# ==========================================
-# 9. 不動産情報(REINFOLIB)設定
-# ==========================================
-# APIキー(REINFOLIB_API_KEY)は 2. 認証・API設定 (Secrets) を参照
-REINFOLIB_WEB_URL: str = "https://www.reinfolib.mlit.go.jp/"
-
-# ==========================================
-# 10. NAS & Network設定
+# 5. NAS & Network設定
 # ==========================================
 NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")
 NAS_CHECK_TIMEOUT: int = 5
@@ -484,11 +348,8 @@ UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 UPLOAD_MAX_FILE_SIZE_MB: int = _get_int_env("UPLOAD_MAX_FILE_SIZE_MB", 5)
 
 # ==========================================
-# 11. 動画処理(タイムラプス・NVR録画)設定
+# 6. 動画処理(タイムラプス・NVR録画)設定
 # ==========================================
-# テンポラリ動画保存先ディレクトリ (NAS上のパス。Issue #330 PR-Bで遅延解決へ移行。
-# 初回の config.TMP_VIDEO_DIR アクセス時にバックオフ付き検証が走りキャッシュされる)
-
 # NVR録画ファイルのベースディレクトリ
 NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")
 
@@ -496,8 +357,6 @@ NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordin
 # (monitors/smart_timelapse_generator.py が
 #  getattr(config, "TIMELAPSE_...", デフォルト値) で参照する。以前はここに対応する
 #  定数が定義されておらず、常にハードコードされたデフォルト値へフォールバックしていた)
-from datetime import time as _dt_time
-
 TIMELAPSE_FPS_ANALYZE: int = 1
 TIMELAPSE_WIDTH: int = 320
 TIMELAPSE_HEIGHT: int = 180
@@ -517,22 +376,8 @@ TIMELAPSE_FAST_STREAM_COPY_MODE: bool = False
 TIMELAPSE_FONT_FILE: str = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 TIMELAPSE_MAX_FILE_SIZE_MB: int = 22
 
-TIMELAPSE_CAMERAS: Dict[str, str] = {
-    "entrance": os.path.join(NVR_RECORD_DIR, "entrance"),
-    "garden": os.path.join(NVR_RECORD_DIR, "garden"),
-    "parking": os.path.join(NVR_RECORD_DIR, "parking"),
-}
-TIMELAPSE_SCHEDULES: Dict[str, tuple] = {
-    "morning": (_dt_time(7, 50), _dt_time(8, 30), _dt_time(8, 30), _dt_time(9, 0)),
-    "evening": (_dt_time(15, 0), _dt_time(16, 0), _dt_time(16, 0), _dt_time(16, 30)),
-}
-TIMELAPSE_FPS: str = "15"
-TIMELAPSE_BITRATE: str = "1500k"
-TIMELAPSE_MAXRATE: str = "2000k"
-TIMELAPSE_SEGMENT_TIME: str = "40"
-
 # ==========================================
-# 12. 保持期間・クリーンアップ設定
+# 7. 保持期間・クリーンアップ設定
 # ==========================================
 # NVR録画・カメラスナップショットの保持日数（これを超えたファイルはnas_monitor.pyが自動削除）
 RECORDING_RETENTION_DAYS: int = _get_int_env("RECORDING_RETENTION_DAYS", 30)
@@ -543,7 +388,7 @@ DB_BACKUP_RETENTION_DAYS: int = _get_int_env("DB_BACKUP_RETENTION_DAYS", 30)
 DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")
 
 # ==========================================
-# 13. Sound & Family設定
+# 8. Sound & Family設定
 # ==========================================
 # SOUND_DIR はASSETS_DIR(遅延解決)配下のため、モジュール__getattr__で遅延解決する
 
@@ -588,36 +433,7 @@ if os.path.exists(_family_local_path):
         logger.warning(f"family_members.local.json の読み込みに失敗しました（プレースホルダーで続行します）: {_e}")
 
 # ==========================================
-# 14. 外部サイト監視設定 (SUUMO)
-# ==========================================
-SUUMO_SEARCH_URL: Optional[str] = os.getenv("SUUMO_SEARCH_URL")
-SUUMO_MAX_BUDGET: int = 70000
-SUUMO_MONITOR_INTERVAL: int = 3600
-
-# ==========================================
-# 15. 小児科予約監視設定 (Clinic Monitor)
-# ==========================================
-CLINIC_MONITOR_URL: str = os.getenv("CLINIC_MONITOR_URL", "https://ssc6.doctorqube.com/itami-shounika/")
-# CLINIC_HTML_DIR / CLINIC_STATS_CSV / CLINIC_GRAPH_PATH はASSETS_DIR(遅延解決)配下の
-# ため、モジュール__getattr__で遅延解決する
-
-CLINIC_MONITOR_START_HOUR: int = _get_int_env("CLINIC_MONITOR_START_HOUR", 8)
-CLINIC_MONITOR_END_HOUR: int = _get_int_env("CLINIC_MONITOR_END_HOUR", 19)
-CLINIC_REQUEST_TIMEOUT: int = _get_int_env("CLINIC_REQUEST_TIMEOUT", 10)
-CLINIC_USER_AGENT: str = os.getenv("CLINIC_USER_AGENT", "MyHomeSystem/1.0 (Family Health Monitor)")
-
-# 自動作成ディレクトリへの追加 (printをloggerに置き換え)
-# NAS配下(ASSETS_DIR/SALARY_IMAGE_DIR/CLINIC_HTML_DIR)の作成はIssue #330 PR-Bで
-# 遅延解決側(_resolve_assets_dir)へ移動し、import時はローカルディレクトリのみ扱う。
-for d in [LOG_DIR, SALARY_DATA_DIR]:
-    try:
-        if not os.path.exists(d):
-            os.makedirs(d, exist_ok=True)
-    except Exception as e:
-        logger.warning(f"⚠️ Warning: Failed to ensure directory existence '{d}': {e}")
-
-# ==========================================
-# 16. メモリ監視設定
+# 9. メモリ監視設定
 # ==========================================
 # システム全体のメモリ使用率警告閾値 (%)
 MEMORY_ALERT_PERCENT: float = 85.0
@@ -629,7 +445,7 @@ MEMORY_ALERT_COOLDOWN_SEC: int = 7200
 MEMORY_ALERT_LAST_NOTIFY_FILE: str = os.path.join(FALLBACK_ROOT, "last_memory_alert.txt")
 
 # ==========================================
-# 17. TVロック機能設定
+# 10. TVロック機能設定
 # ==========================================
 _tv_unlock_quest_ids_str: str = os.getenv("TV_UNLOCK_QUEST_IDS", "")
 TV_UNLOCK_QUEST_IDS: List[int] = []
@@ -643,7 +459,7 @@ if _tv_unlock_quest_ids_str:
 TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 
 # ==========================================
-# 18. Alexaスキル設定
+# 11. Alexaスキル設定
 # ==========================================
 # Alexa Developer Consoleでスキルを作成すると発行される "amzn1.ask.skill.xxxx" 形式のID。
 # 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId
@@ -652,7 +468,7 @@ TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")
 ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
 
 # ==========================================
-# 19. ラズパイ監視(health_watch)設定
+# 12. ラズパイ監視(health_watch)設定
 # ==========================================
 # Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。
 # 設定すると monitors/health_watch.py が異常検知時(通知抑制の内側)に
@@ -664,9 +480,9 @@ ALEXA_SKILL_ID: Optional[str] = os.getenv("ALEXA_SKILL_ID")
 HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv("HEALTH_WATCH_INVESTIGATE_HOOK")
 
 # ==========================================
-# 20. NASパスの遅延解決 (Issue #330 PR-B)
+# 13. NASパスの遅延解決 (Issue #330 PR-B)
 # ==========================================
-# ASSETS_DIR / TMP_VIDEO_DIR はNAS上のパスであり、以前はモジュールimport時に
+# ASSETS_DIR はNAS上のパスであり、以前はモジュールimport時に
 # ensure_safe_path_with_backoff(書き込みテスト + Exponential Backoff、最悪 約31秒)を
 # 実行していたため、NAS障害・マウント遅延時にconfigをimportするだけの
 # テスト・CLIツール・cronスクリプトまで長時間ブロックしていた。
@@ -677,16 +493,11 @@ HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv("HEALTH_WATCH_INVESTIGA
 # 従来どおり起動時点で検証が走る。
 
 # ASSETS_DIR 配下で自動作成するサブディレクトリ
-# (旧: import時のディレクトリ自動作成ループにあったNAS配下分)
-_ASSETS_SUBDIRS_TO_CREATE: List[str] = ["salary_images", "clinic_html"]
+_ASSETS_SUBDIRS_TO_CREATE: List[str] = []
 
 # ASSETS_DIR から派生する遅延解決パス (属性名 -> ASSETS_DIRからの相対パス)
 _ASSETS_DERIVED_PATHS: Dict[str, str] = {
-    "SALARY_IMAGE_DIR": "salary_images",
     "SOUND_DIR": "sounds",
-    "CLINIC_HTML_DIR": "clinic_html",
-    "CLINIC_STATS_CSV": "clinic_stats.csv",
-    "CLINIC_GRAPH_PATH": "clinic_trend.png",
 }
 
 
@@ -713,10 +524,6 @@ def __getattr__(name: str) -> str:
     """
     if name == "ASSETS_DIR":
         value = _resolve_assets_dir()
-    elif name == "TMP_VIDEO_DIR":
-        value = ensure_safe_path_with_backoff(
-            os.path.join(NAS_PROJECT_ROOT, "tmp_video"), "tmp_video"
-        )
     elif name in _ASSETS_DERIVED_PATHS:
         # ASSETS_DIR の解決(必要なら)を経由して派生パスを組み立てる
         assets_dir = globals().get("ASSETS_DIR") or __getattr__("ASSETS_DIR")
@@ -735,17 +542,17 @@ def prewarm_nas_paths() -> None:
     NASの検証・フォールバック判定を済ませる。失敗してもensure_safe_path_with_backoff
     自体がローカルへフォールバックするため例外は送出しない。
     """
-    for name in ("ASSETS_DIR", "TMP_VIDEO_DIR", *_ASSETS_DERIVED_PATHS):
+    for name in ("ASSETS_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
 
 # ==========================================
-# 21. Family Quest: YouTubeごほうび券クールダウン設定
+# 14. Family Quest: YouTubeごほうび券クールダウン設定
 # ==========================================
 # 連続視聴による目の負担を防ぐため、YouTube系のごほうび券(user_inventory経由で
 # 使用するreward_master.reward_id)を1枚使用してから次の1枚を使用できるまでの
 # クールダウン対象IDを指定する(services/quest_service.py InventoryService.use_item)。
-# 17.のTV_UNLOCK_QUEST_IDSと同じ「カンマ区切りの整数」形式。
+# 10.のTV_UNLOCK_QUEST_IDSと同じ「カンマ区切りの整数」形式。
 # 既定値はquest_data.pyのYouTube報酬(10:00/30:00/60:00)の現在のreward_id(10,11,12)。
 _youtube_reward_ids_str: str = os.getenv("YOUTUBE_REWARD_IDS", "10,11,12")
 YOUTUBE_REWARD_IDS: List[int] = []

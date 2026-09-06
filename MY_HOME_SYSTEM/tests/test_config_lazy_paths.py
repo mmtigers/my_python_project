@@ -3,7 +3,7 @@
 config.py のNASパス遅延解決(Issue #330 PR-B、PEP 562のモジュール__getattr__)のテスト。
 
 以前は import config の時点で ensure_safe_path_with_backoff (書き込みテスト+
-Exponential Backoff、最悪 約31秒/パス) がNAS上の ASSETS_DIR / TMP_VIDEO_DIR に対して
+Exponential Backoff、最悪 約31秒/パス) がNAS上の ASSETS_DIR に対して
 実行され、NAS障害時にconfigをimportするだけのプロセスまでブロックしていた。
 現在は初回アクセス時に解決してモジュール属性へキャッシュする。
 """
@@ -19,7 +19,7 @@ import config
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-_LAZY_NAMES = ["ASSETS_DIR", "TMP_VIDEO_DIR", *config._ASSETS_DERIVED_PATHS]
+_LAZY_NAMES = ["ASSETS_DIR", *config._ASSETS_DERIVED_PATHS]
 
 
 @pytest.fixture
@@ -56,9 +56,6 @@ class TestLazyResolution:
         assert first == second == str(tmp_path / "assets")
         # 2回目のアクセスはモジュール属性キャッシュ経由で、検証は1回しか走らないこと
         assert calls == ["assets"]
-        # 旧import時ループにあったNAS配下サブディレクトリも解決時に作成されること
-        assert os.path.isdir(os.path.join(first, "salary_images"))
-        assert os.path.isdir(os.path.join(first, "clinic_html"))
 
     def test_derived_paths_join_onto_assets_dir(self, clean_lazy_cache, tmp_path, monkeypatch):
         monkeypatch.setattr(
@@ -68,19 +65,6 @@ class TestLazyResolution:
 
         assets = config.ASSETS_DIR
         assert config.SOUND_DIR == os.path.join(assets, "sounds")
-        assert config.SALARY_IMAGE_DIR == os.path.join(assets, "salary_images")
-        assert config.CLINIC_HTML_DIR == os.path.join(assets, "clinic_html")
-        assert config.CLINIC_STATS_CSV == os.path.join(assets, "clinic_stats.csv")
-        assert config.CLINIC_GRAPH_PATH == os.path.join(assets, "clinic_trend.png")
-
-    def test_tmp_video_dir_resolves_lazily(self, clean_lazy_cache, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            config, "ensure_safe_path_with_backoff",
-            lambda p, f, max_retries=5: str(tmp_path / f),
-        )
-        assert config.TMP_VIDEO_DIR == str(tmp_path / "tmp_video")
-        # キャッシュされ、以後は__getattr__を経由しない(=モジュール属性に昇格)
-        assert vars(config)["TMP_VIDEO_DIR"] == str(tmp_path / "tmp_video")
 
     def test_unknown_attribute_still_raises_attribute_error(self):
         with pytest.raises(AttributeError):
@@ -105,7 +89,7 @@ class TestImportDoesNotTouchNasPaths:
         """
         code = (
             "import config, sys; "
-            "lazy = ['ASSETS_DIR', 'TMP_VIDEO_DIR', *config._ASSETS_DERIVED_PATHS]; "
+            "lazy = ['ASSETS_DIR', *config._ASSETS_DERIVED_PATHS]; "
             "resolved = [n for n in lazy if n in vars(config)]; "
             "sys.exit(0 if not resolved else 1)"
         )

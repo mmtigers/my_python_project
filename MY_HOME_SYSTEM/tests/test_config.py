@@ -143,17 +143,6 @@ class TestFrontendUrlOriginInCorsOrigins:
             assert "https://example.com" in cfg.CORS_ORIGINS
 
 
-class TestChildrenNamesParsing:
-    def test_empty_string_produces_empty_list_not_list_with_empty_string(self):
-        """''.split(',') は [''] になってしまうため、空文字を明示的にハンドリングしているか"""
-        with _with_env(CHILDREN_NAMES=None) as cfg:
-            assert cfg.CHILDREN_NAMES == []
-
-    def test_comma_separated_names(self):
-        with _with_env(CHILDREN_NAMES="太郎,花子") as cfg:
-            assert cfg.CHILDREN_NAMES == ["太郎", "花子"]
-
-
 class TestDevicesJsonValidation:
     @contextlib.contextmanager
     def _with_devices_json(self, content: str):
@@ -263,3 +252,62 @@ class TestVerifyAndInitializeStorage:
         result = config.verify_and_initialize_storage(str(target), max_retries=2)
 
         assert result is False
+
+
+class TestIssue488DeadConstantsRemoved:
+    """Issue #488: 未実装機能(給与PDF処理・小児科予約監視・SUUMO/地価監視・
+    Google Photos連携・買い物/美容院予約監視)向けの定数と、廃止済み機能
+    (旧timelapse_runner.py等)の残骸定数など、アプリ内のどこからも参照されて
+    いなかった53件の定数を削除した(オーナー判断により削除確定)。
+    再度復活しないよう、モジュールから消えていることを回帰テストで固定する。
+    """
+
+    _REMOVED_NAMES = [
+        # 給与(Salary)PDF処理 (8件、未実装)
+        "SALARY_PDF_PASSWORDS", "SALARY_DATA_DIR", "SALARY_CSV_PATH", "BONUS_CSV_PATH",
+        "SALARY_MAIL_SENDER", "GMAIL_USER", "GMAIL_APP_PASSWORD", "SALARY_IMAGE_DIR",
+        # 小児科予約監視 (8件、未実装)
+        "CLINIC_MONITOR_URL", "CLINIC_MONITOR_START_HOUR", "CLINIC_MONITOR_END_HOUR",
+        "CLINIC_REQUEST_TIMEOUT", "CLINIC_USER_AGENT",
+        "CLINIC_HTML_DIR", "CLINIC_STATS_CSV", "CLINIC_GRAPH_PATH",
+        # SUUMO/地価/不動産監視 (6件、未実装)
+        "SUUMO_SEARCH_URL", "SUUMO_MAX_BUDGET", "SUUMO_MONITOR_INTERVAL",
+        "LAND_PRICE_TARGETS", "REINFOLIB_API_KEY", "REINFOLIB_WEB_URL",
+        # Google Photos連携 (3件、未実装)
+        "GOOGLE_PHOTOS_CREDENTIALS", "GOOGLE_PHOTOS_TOKEN", "GOOGLE_PHOTOS_SCOPES",
+        # 買い物/美容院予約監視 (3件、未実装)
+        "SHOPPING_TARGETS", "HAIRCUT_TARGETS", "HAIRCUT_CYCLE_DAYS",
+        # 子供の健康チェック関連 (3件、未実装)
+        "CHILDREN_NAMES", "CHILD_CHECK_TIME", "CHILD_SYMPTOMS",
+        # ENV / DISCORD_WEBHOOK_ERROR_CAM (2件)
+        "ENV", "DISCORD_WEBHOOK_ERROR_CAM",
+        # 旧timelapse_runner.py/timelapse_generator.py(#485で削除済み)専用の残骸 (10件)
+        "CAMERA_IP", "CAMERA_USER", "CAMERA_PASS",
+        "TIMELAPSE_CAMERAS", "TIMELAPSE_SCHEDULES", "TIMELAPSE_FPS",
+        "TIMELAPSE_BITRATE", "TIMELAPSE_MAXRATE", "TIMELAPSE_SEGMENT_TIME",
+        "TMP_VIDEO_DIR",
+        # その他、直接・間接いずれからも未参照だったもの (10件)
+        "OHAYO_KEYWORDS", "CAR_RULE_KEYWORDS", "CHECK_ZOROME", "IMPORTANT_DATES",
+        "MENU_OPTIONS", "MESSAGE_LENGTH_LIMIT",
+        "SQLITE_TABLE_HEALTH", "SQLITE_TABLE_OHAYO",
+        "BICYCLE_PARKING_URL", "DEFAULT_ASSETS_DIR",
+    ]
+
+    def test_53_confirmed_dead_constants_are_gone(self):
+        assert len(self._REMOVED_NAMES) == 53
+        still_present = [name for name in self._REMOVED_NAMES if hasattr(config, name)]
+        assert still_present == []
+
+    def test_allow_all_origins_was_kept_despite_looking_unreferenced(self):
+        """ALLOW_ALL_ORIGINS は直接参照するコードは無いが、import時に
+        CORS_ORIGINS を書き換えるため削除してはならない(このテストが常に
+        参照する形にすることで、今後の類似の棚卸しでの誤削除を防ぐ)。"""
+        assert hasattr(config, "ALLOW_ALL_ORIGINS")
+        with _with_env(ALLOW_ALL_ORIGINS="true") as cfg:
+            assert cfg.CORS_ORIGINS == ["*"]
+
+    def test_default_sound_source_still_resolves_without_default_assets_dir(self):
+        """DEFAULT_ASSETS_DIR という名前のモジュール属性は削除したが、
+        実際に使われているのは派生値の DEFAULT_SOUND_SOURCE 側であり、
+        そちらは BASE_DIR から直接組み立てる形にして残している。"""
+        assert config.DEFAULT_SOUND_SOURCE == os.path.join(config.BASE_DIR, "defaults", "sounds")

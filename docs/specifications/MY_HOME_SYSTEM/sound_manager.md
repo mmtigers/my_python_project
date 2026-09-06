@@ -177,9 +177,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 利用可能な`event_key`の一覧 | `MY_HOME_SYSTEM/config.py`455-461行目の`SOUND_MAP: Dict[str, str] = {...}`を直接確認した。キー(`event_key`)は`"level_up"`, `"quest_clear"`, `"medal_get"`, `"submit"`, `"approve"`の5種類であり、それぞれ`"level_up.mp3"`, `"quest_clear.mp3"`, `"medal_get.mp3"`, `"submit.mp3"`, `"approve.mp3"`というファイル名にマッピングされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:455-461` |
-| 再生に使用されるコマンドの実体 | `MY_HOME_SYSTEM/config.py`452-453行目を直接確認した。`SOUND_PLAYER_CMD: str = "mpg123"`、`SOUND_PLAYER_ARGS: List[str] = ["-o", "pulse"]`というリテラル値が定義されており、環境変数経由ではなくハードコードされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:452-453` |
-| デフォルトの音声ファイル配置場所 | `MY_HOME_SYSTEM/config.py`254-256行目を直接確認した。`DEFAULT_ASSETS_DIR: str = os.path.join(BASE_DIR, "defaults")`(255行目)、`DEFAULT_SOUND_SOURCE: str = os.path.join(DEFAULT_ASSETS_DIR, "sounds")`(256行目)と定義されており、`BASE_DIR`配下の`defaults/sounds`ディレクトリがデフォルトの音声ファイル配置場所であることを確認した。なお`sound_manager.py`90行目で`config.DEFAULT_SOUND_SOURCE`はコピー元として使われ、実際の再生対象パスは450行目で別途定義される`SOUND_DIR: str = os.path.join(ASSETS_DIR, "sounds")`(`sound_manager.py`29・71・73・74・85行目で使用)であることも直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:254-256, 450`（参考: `MY_HOME_SYSTEM/core/sound_manager.py:29, 71-74, 85, 90`） |
+| 利用可能な`event_key`の一覧 | `MY_HOME_SYSTEM/config.py`398-404行目の`SOUND_MAP: Dict[str, str] = {...}`を直接確認した。キー(`event_key`)は`"level_up"`, `"quest_clear"`, `"medal_get"`, `"submit"`, `"approve"`の5種類であり、それぞれ`"level_up.mp3"`, `"quest_clear.mp3"`, `"medal_get.mp3"`, `"submit.mp3"`, `"approve.mp3"`というファイル名にマッピングされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:398-404` |
+| 再生に使用されるコマンドの実体 | `MY_HOME_SYSTEM/config.py`395-396行目を直接確認した。`SOUND_PLAYER_CMD: str = "mpg123"`、`SOUND_PLAYER_ARGS: List[str] = ["-o", "pulse"]`というリテラル値が定義されており、環境変数経由ではなくハードコードされていることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:395-396` |
+| デフォルトの音声ファイル配置場所 | `MY_HOME_SYSTEM/config.py`276行目を直接確認した。`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")`と定義されており、`BASE_DIR`配下の`defaults/sounds`ディレクトリがデフォルトの音声ファイル配置場所であることを確認した(Issue #488で、直接参照の無かった中間定数`DEFAULT_ASSETS_DIR`は削除され、`BASE_DIR`から直接組み立てる形に変更された。挙動は変わらない)。なお`sound_manager.py`90行目で`config.DEFAULT_SOUND_SOURCE`はコピー元として使われ、実際の再生対象パスは別途定義される`SOUND_DIR`(`config.py`の`_ASSETS_DERIVED_PATHS`経由でNAS上の`ASSETS_DIR`配下に遅延解決される。`sound_manager.py`29・71・73・74・85行目で使用)であることも直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:276`（参考: `MY_HOME_SYSTEM/core/sound_manager.py:29, 71-74, 85, 90`） |
 
 ## 10. 自己検証結果
 
