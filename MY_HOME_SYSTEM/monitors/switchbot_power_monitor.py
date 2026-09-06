@@ -54,15 +54,27 @@ def _load_persisted_states() -> Dict[str, Dict[str, Any]]:
 def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:
     # #449: 書き込み中に他プロセスの読み取り/書き込みと競合しないよう
     # flock(排他ロック)で保護する。
+    # ただし open(..., "w") はロック取得より前にファイルを切り詰めるため、その瞬間に
+    # LOCK_SH で読んだ側は空ファイル → JSONDecodeError → {} (全デバイス初期状態扱い)
+    # になっていた。一時ファイルに書き切ってから os.replace で原子的に差し替える
+    # (読み手は常に「旧の完全な内容」か「新の完全な内容」のどちらかを見る)。
+    tmp_path = f"{_STATE_FILE}.tmp.{os.getpid()}"
     try:
-        with open(_STATE_FILE, "w", encoding="utf-8") as f:
+        with open(tmp_path, "w", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 json.dump(states, f)
+                f.flush()
+                os.fsync(f.fileno())
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        os.replace(tmp_path, _STATE_FILE)
     except Exception as e:
         logger.warning(f"⚠️ Failed to persist device states: {e}")
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 def fetch_device_status_sync(device_id: str, device_type: str) -> Optional[Dict[str, Any]]:
     """SwitchBot APIからステータスを取得する（同期処理ラッパー）。"""

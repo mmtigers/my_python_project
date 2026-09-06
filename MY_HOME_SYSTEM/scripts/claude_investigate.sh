@@ -145,6 +145,10 @@ EOF
 
 # --- Claude Code CLI をヘッドレス起動 ---
 # ★フラグは未検証(冒頭の注意参照)。timeoutはSIGTERM後10秒でSIGKILLに昇格させる。
+# stderr は jq に流さない(以前は 2>&1 で合流させていたため、CLI が警告を1行でも stderr に
+# 出すと JSON が壊れて RESULT が空になり、pipefail で CLAUDE_EXIT が jq のパースエラー
+# コードになって「失敗理由不明」の通知になっていた)。stderr は本スクリプトの stderr
+# (health_watch が claude_investigate.log へ取り込む)へそのまま流す。
 # Issue #379: --disallowedTools "Read(.env*)" で .env* の読み取りを機械的に禁止する
 # (--allowedTools はワイルドカードで既に絞ってあるが、Readツール自体は元々パス無制限
 # だったため、ログ由来の誘導文でルート直下の.env等を読ませてIssue本文へ貼らせる経路が
@@ -155,7 +159,7 @@ RESULT=$(timeout --kill-after=10 "$TIMEOUT_SEC" claude -p "$PROMPT" \
   --allowedTools "$ALLOWED_TOOLS" \
   --disallowedTools "Read(.env*)" \
   --max-turns "$MAX_TURNS" \
-  --output-format json 2>&1 | jq -r '.result // .')
+  --output-format json | jq -r '.result // .')
 CLAUDE_EXIT=$?
 set -e
 

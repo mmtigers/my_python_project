@@ -157,3 +157,29 @@ class TestRunChecksHookGating:
 
         assert health_watch.run_checks() == 0
         fire.assert_not_called()
+
+
+class TestCheckAppLogsIgnoresInvestigationHookOutput:
+    """層2フック(claude_investigate.sh)の出力先 claude_investigate.log には調査結果として
+    "ERROR"/"Traceback" 等の語が常に含まれる。これを check_app_logs が読むと、翌回の
+    チェックで新規エラー扱い→再発報→フック再起動→さらに出力、の自己増殖ループになる。"""
+
+    def test_claude_investigate_log_is_excluded(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
+        hook_log = tmp_path / "claude_investigate.log"
+        hook_log.write_text(
+            f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} [INFO] hook: 調査結果\n"
+            "Traceback (most recent call last):\n"
+            "RuntimeError: ERROR found in home_system.log\n"
+        )
+        since = datetime.datetime.now() - datetime.timedelta(minutes=30)
+        assert health_watch.check_app_logs(since) is None
+
+    def test_other_logs_are_still_checked(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "LOG_DIR", str(tmp_path))
+        (tmp_path / "home_system.log").write_text(
+            f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S} [ERROR] quest_router: boom\n"
+        )
+        since = datetime.datetime.now() - datetime.timedelta(minutes=30)
+        result = health_watch.check_app_logs(since)
+        assert result is not None and "home_system.log" in result

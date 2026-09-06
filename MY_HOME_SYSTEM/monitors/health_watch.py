@@ -117,8 +117,12 @@ def check_app_logs(since: datetime.datetime) -> Optional[str]:
     # home_system.log 経由で翌回の自分のチェックに引っかかる自己発火を防ぐ)
     analyzer.IGNORE_PATTERNS = analyzer.IGNORE_PATTERNS + ["health_watch"]
     for filepath in glob.glob(os.path.join(config.LOG_DIR, "*.log")):
-        # run_task.shが書くERROR行(タイムスタンプなし)での自己発火も防ぐ
-        if os.path.basename(filepath) == "health_watch.log":
+        # run_task.shが書くERROR行(タイムスタンプなし)での自己発火も防ぐ。
+        # claude_investigate.log は層2フック(_run_investigation_hook)自身の出力先で、
+        # 調査結果の本文に "ERROR"/"Traceback" 等の語が含まれるのが常態のため、これを
+        # 読むと翌回のチェックが「新規エラー」として再発報→再度フック起動→さらに出力、
+        # という自己増殖ループになる(runbook/コメントは除外済みと記していたが未実装だった)。
+        if os.path.basename(filepath) in ("health_watch.log", "claude_investigate.log"):
             continue
         # Issue #339層2調査で発覚: pip_install.log等、行に一切タイムスタンプが
         # 無いファイルは LogAnalyzer._analyze_file 内の effective_dt が常に None に
@@ -221,7 +225,7 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
     )
     try:
         # フックの出力はrun_task.sh経由の自ログではなく専用ファイルへ残す
-        # (check_app_logsはhealth_watch関連行を除外するため自己発火もしない)
+        # (check_app_logs はこのファイル名を明示的に除外するため自己発火しない)
         out_path = os.path.join(config.LOG_DIR, "claude_investigate.log")
         with open(out_path, "a", encoding="utf-8") as out:
             proc = subprocess.Popen(

@@ -407,14 +407,17 @@ class NasMonitor:
         # 通知判定 (容量不足または定期レポート)
         is_full = usage['percent'] > 90
         now = datetime.now()
-        is_report_time = (now.hour == 8)
+        today_str = now.strftime("%Y-%m-%d")
+        # 日次レポートも保持期間削除(#388)と同じ理由で「hour == 8」の一致判定ではなく
+        # 「今日まだ送っていない かつ 8時以降」で判定する(7:5x → 9:0x とずれた日に
+        # レポートが丸ごと飛んでいた)。
+        is_report_time = now.hour >= 8 and previous_state.get("last_report_date") != today_str
 
         # 保持期間を超えた録画・バックアップの自動削除(1日1回)。
         # #388: 以前は「実行時刻の hour == 8」だけで判定していたが、scheduler の実行間隔は
         # 毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は
         # 8時台の実行が無く、その日の削除がまるごとスキップされていた。状態ファイルに
         # 最終実行日を持ち、「今日まだ実行していない かつ 8時以降」で判定する。
-        today_str = now.strftime("%Y-%m-%d")
         if now.hour >= 8 and previous_state.get("last_cleanup_date") != today_str:
             self.run_retention_cleanup()
             previous_state["last_cleanup_date"] = today_str
@@ -440,6 +443,9 @@ class NasMonitor:
             [{"type": "text", "text": msg}],
             target="discord", channel=channel
         )
+        if is_report_time:
+            previous_state["last_report_date"] = today_str
+            self._save_state(previous_state)
 
 if __name__ == "__main__":
     monitor = NasMonitor()

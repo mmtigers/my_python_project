@@ -31,12 +31,18 @@ echo "--- Cleanup Old Processes ---"
 # (#360: scheduler が起動した監視スクリプト(monitors/*.py)と、ライブ配信/VOD生成の
 #  ffmpeg は旧世代が孤児化して残ると、新世代と同じ HLS パスへ二重書き込みしたり
 #  古い設定で DB 書き込み・保持期間削除を続けたりするため、停止対象に含める。)
+# 監視スクリプトのパターンは scheduler_boot.py(TASKS)が起動するものだけを列挙する。以前の
+# "python.*monitors/[a-z_]*\.py" は、systemd の network_logger.service や cron 起動の
+# health_watch.py / daily_timelapse_job.py(ffmpeg を伴い数分〜数十分走る) / log_analyzer.py
+# まで巻き添えで SIGTERM していた(サービス再起動のたびにタイムラプス生成が途中で殺され、
+# network_logger は Restart=always で1周期分欠損)。scheduler_boot.py の TASKS を変更したら
+# ここも合わせて更新すること(tests/test_start_all_sh.py が両者の整合を検証する)。
 CLEANUP_TARGETS=(
   "unified_server.py"
   "camera_monitor.py"
   "scheduler_boot.py"
   "streamlit run"
-  "python.*monitors/[a-z_]*\.py"
+  "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\.py"
   "ffmpeg.*hls_streams"
 )
 
