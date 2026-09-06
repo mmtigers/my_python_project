@@ -335,9 +335,25 @@ def cmd_full() -> Report:
         if rel.name in {"全体設計書.md", "README.md"}:
             continue
         candidates = doc_to_source_candidates(doc)
-        # 実在確認もワーキングツリーではなく git 管理下かどうかで行う
-        # (未追跡の同名ファイルがあっても孤立判定を覆さない)。
-        if candidates and not any(c in tracked_set for c in candidates):
+
+        # Issue #508: 以前は「候補が1件も git 管理下に無い」ことだけを孤立の条件に
+        # していたため、2つの死角があった。
+        #
+        # (1) テストの仕様書: is_tracked_source は test_*.py 等を仕様書の対象外に
+        #     するのに、逆引きは同名のテストソースへ解決してしまうため、
+        #     「仕様書は不要なのに孤立にもならない」状態で残り続けていた
+        #     (2026-09 時点で DDD 5件・family-quest 2件が該当し、full 監査は
+        #     1件も報告していなかった)。仕様書が正当なのは「対応ソースが
+        #     is_tracked_source を満たす」場合だけなので、その条件に揃える。
+        # (2) 候補を1件も算出できない仕様書: docs/specifications/ 直下に置かれた
+        #     ソース対応の無い文書(手順書等)は candidates が空になり、
+        #     `if candidates` で素通りしていた。README.md と 全体設計書.md 以外に
+        #     そうした文書を置くのは規約違反(docs/specifications/README.md 参照)の
+        #     ため、孤立として報告する。
+        if not candidates:
+            report.orphaned.append(str(rel))
+            continue
+        if not any(c in tracked_set and is_tracked_source(c) for c in candidates):
             report.orphaned.append(str(rel))
 
     return report

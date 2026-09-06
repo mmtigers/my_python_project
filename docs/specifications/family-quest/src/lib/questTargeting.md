@@ -10,8 +10,8 @@
 
 ## 関連ドキュメント
 
-* [../../features/quest/components/QuestList.md](../../features/quest/components/QuestList.md) - `sortedQuests`のフィルタ内で本関数を呼ぶ利用元（縦画面のクエスト一覧）
-* [../../features/family/components/FamilyDashboard.md](../../features/family/components/FamilyDashboard.md) - `hasNothingToDo`内で本関数を呼ぶ利用元（横画面4人パネルの「今日やることが無いか」判定）
+* [../features/quest/components/QuestList.md](../features/quest/components/QuestList.md) - `sortedQuests`のフィルタ内で本関数を呼ぶ利用元（縦画面のクエスト一覧）
+* [../features/family/components/FamilyDashboard.md](../features/family/components/FamilyDashboard.md) - `hasNothingToDo`内で本関数を呼ぶ利用元（横画面4人パネルの「今日やることが無いか」判定）
 * [../types/index.md](../types/index.md) - `Quest`/`User`型の定義元
 
 ## 2. ファイルの概要

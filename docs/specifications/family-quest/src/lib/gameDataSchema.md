@@ -12,7 +12,7 @@
 
 * [../hooks/useGameData.md](../hooks/useGameData.md) - `gameDataResponseSchema`/`purchaseResponseSchema`の利用元。`gameData`クエリ(`GET /api/quest/data`)の取得境界、および`buyRewardMutation`(`POST /api/quest/reward/purchase`、Issue #444)のレスポンス検証でそれぞれ`.parse()`を呼び出す。
 * [../types/index.md](../types/index.md) - `GameDataResponse`関連の型（`User`/`Quest`/`Reward`/`QuestHistory`）の定義元。本ファイルのZodスキーマはこれらの型が実際にAPIから受け取る値の形を明示する。
-* [../../../../MY_HOME_SYSTEM/quest_service.md](../../../../MY_HOME_SYSTEM/quest_service.md) - 本ファイルが検証対象とする`GET /api/quest/data`レスポンスの生成元(`GameSystem.get_all_view_data`)。
+* [../../../MY_HOME_SYSTEM/quest_service.md](../../../MY_HOME_SYSTEM/quest_service.md) - 本ファイルが検証対象とする`GET /api/quest/data`レスポンスの生成元(`GameSystem.get_all_view_data`)。
 
 ## 2. ファイルの概要
 

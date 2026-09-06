@@ -11,7 +11,7 @@
 ## 関連ドキュメント
 
 * [../../main.md](../../main.md) - 唯一の呼び出し元。`isCameraView`の判定（`window.location.pathname`が「カメラルート」かどうか）に本ファイルの`isCameraRoute`を使う（Issue #472で、以前ここに直接書かれていた`pathname.includes('/camera')`という部分一致判定を置き換えた）。
-* [../../../../../MY_HOME_SYSTEM/unified_server.md](../../../../../MY_HOME_SYSTEM/unified_server.md) - `/camera`・`/camera/{full_path}`を専用のFastAPIルートで、`/quest/{full_path}`をSPAのcatch-allフォールバック（`index.html`への委譲）でそれぞれ配信するバックエンド側のルーティング実装元。本ファイルのファイル冒頭コメントが前提とする「`/quest/camera`もクライアントサイドでカメラビューとして扱う必要がある」という設計はここに由来する。
+* [../../../MY_HOME_SYSTEM/unified_server.md](../../../MY_HOME_SYSTEM/unified_server.md) - `/camera`・`/camera/{full_path}`を専用のFastAPIルートで、`/quest/{full_path}`をSPAのcatch-allフォールバック（`index.html`への委譲）でそれぞれ配信するバックエンド側のルーティング実装元。本ファイルのファイル冒頭コメントが前提とする「`/quest/camera`もクライアントサイドでカメラビューとして扱う必要がある」という設計はここに由来する。
 
 ## 2. ファイルの概要
 
