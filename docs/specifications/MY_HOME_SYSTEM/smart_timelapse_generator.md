@@ -413,7 +413,7 @@
 ### `log_cpu_usage`
 
 * **役割**: `psutil`がインストールされている場合のみ、現在のCPU使用率をINFOレベルでログ出力する。
-* 根拠: 関数定義 (行番号: 234-235 / 抜粋: "if HAS_PSUTIL: logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")")
+* 根拠: 関数定義 (行番号: 269-271 / 抜粋: "if psutil is not None: logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")")
 
 
 * **引数/リクエスト**: なし。
@@ -425,8 +425,8 @@
 * **副作用**: `psutil`利用可能時のログ出力。
 
 
-* **エラーハンドリング**: なし。`psutil`が未インストールの環境では`HAS_PSUTIL`フラグにより処理自体がスキップされる（インポート時の`try/except ImportError`により判定）。
-* 根拠: `try: import psutil; HAS_PSUTIL = True except ImportError: HAS_PSUTIL = False` (行番号: 20-24)
+* **エラーハンドリング**: なし。`psutil`が未インストールの環境では`psutil is not None`の判定により処理自体がスキップされる（インポート時の`try/except ImportError`により判定）。**[修正済み・Issue #497 C-4]** 以前は真偽値フラグ`HAS_PSUTIL`を別途保持し`if HAS_PSUTIL:`で分岐していたが、`psutil`変数自体の束縛と`HAS_PSUTIL`の値が相関しているという事実は静的解析(pyright等)からは読み取れず、267行目付近の`psutil`参照を「importが失敗していれば未束縛」と誤検知する余地があった。現在は`import`失敗時に`psutil = None`を代入する形に変更し、`if psutil is not None:`で判定することで、フラグ変数を経由せず`psutil`自体の束縛状態のみで分岐が完結するようになっている。
+* 根拠: `try: import psutil except ImportError: psutil = None` (行番号: 27-31)
 
 
 
