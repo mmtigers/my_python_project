@@ -8,11 +8,17 @@
 -- (2026-09時点で判明している既知の差分。Issue #411調査時点):
 --   - 本ファイルには migrations/0000_baseline_schema.sql が持つ CREATE INDEX 文が
 --     3つ含まれていない。
---   - 本ファイルには baseline に存在しないテーブル(haircut_history, app_rankings,
---     quest_tasks, quest_status, youtube_subscriptions)や列
---     (device_records.battery_level、food_records.date/menu/created_at)が
---     含まれている。特に app_rankings は services/analysis_service.py が参照する
---     ため、空DB(migrationsのみ適用)ではこの機能が黙って無効になる。
+--   - 本ファイルには baseline に存在しない列(device_records.battery_level、
+--     food_records.date/menu/created_at)が含まれている。
+--
+-- Issue #507: 以前はここに baseline に存在しないテーブル(haircut_history,
+-- app_rankings, quest_tasks, quest_status, youtube_subscriptions)も含まれていたが、
+-- いずれもリポジトリ内のどこからも読み書きされていない完全な死蔵テーブルだったため
+-- (app_rankingsだけは services/analysis_service.py に読み手があったが、書き手・
+-- 収集スクリプトが存在せず機能として死んでいたため、ダッシュボードのUIごと削除した。
+-- 他の4件はそもそも読み書きコードが元から存在しなかった)、オーナー判断により
+-- この参考ドキュメントからも削除した(本ファイルの位置づけを「migrations/が実際に
+-- 作るスキーマの参考」に一致させるため)。
 --
 -- tests/test_current_schema_sql.py が、migrations/*.sql の ALTER TABLE ADD COLUMN
 -- で追加される列が本ファイルのCREATE TABLE文に含まれているかを機械的にチェックする
@@ -107,11 +113,6 @@ CREATE TABLE haircut_records (
         email_id TEXT UNIQUE,-- 重複防止
         timestamp DATETIME NOT NULL
     );
-CREATE TABLE haircut_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    reservation_date TEXT UNIQUE,
-                    created_at TEXT
-                );
 CREATE TABLE food_records (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         date TEXT,  -- YYYY-MM-DD
@@ -136,19 +137,6 @@ CREATE TABLE weather_history (
             umbrella_level TEXT,
             recorded_at TEXT,
             UNIQUE(date, location)
-        );
-CREATE TABLE app_rankings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            date TEXT NOT NULL,
-            ranking_type TEXT, -- 'free' (無料人気) or 'grossing' (売上人気)
-            rank INTEGER,
-            app_id TEXT,
-            title TEXT,
-            developer TEXT,
-            icon_url TEXT,
-            score REAL,
-            recorded_at TEXT,
-            UNIQUE(date, ranking_type, rank)
         );
 CREATE TABLE bicycle_parking_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -235,20 +223,6 @@ CREATE TABLE reward_history (
         cost_gold INTEGER,
         redeemed_at DATETIME NOT NULL
     );
-CREATE TABLE quest_tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            points INTEGER DEFAULT 0,
-            target_user_id INTEGER,
-            FOREIGN KEY (target_user_id) REFERENCES quest_users(id)
-        );
-CREATE TABLE quest_status (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            task_id INTEGER,
-            date TEXT NOT NULL,
-            is_completed INTEGER DEFAULT 1,
-            FOREIGN KEY (task_id) REFERENCES quest_tasks(id)
-        );
 CREATE TABLE equipment_master (
                 equipment_id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -351,12 +325,6 @@ CREATE TABLE power_usage (
                 wattage REAL,
                 timestamp DATETIME NOT NULL
             );
-CREATE TABLE youtube_subscriptions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        channel_url TEXT UNIQUE NOT NULL,
-                        is_active INTEGER DEFAULT 1,
-                        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
 CREATE TABLE family_mileage (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 target_name TEXT NOT NULL,

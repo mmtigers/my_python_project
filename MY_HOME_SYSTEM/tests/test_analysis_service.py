@@ -286,15 +286,6 @@ class TestLoadAiReport:
         assert row["message"] == "週次レポート"
 
 
-class TestLoadRankingData:
-    def test_load_ranking_dates_returns_empty_when_table_missing(self, isolated_db):
-        assert analysis_service.load_ranking_dates() == []
-
-    def test_load_ranking_data_returns_empty_when_table_missing(self, isolated_db):
-        result = analysis_service.load_ranking_data("2026-01-01", "free")
-        assert result.empty
-
-
 class TestWeatherFunctionsFailSoftOnSchemaMismatch:
     """
     Issue #114で修正済み: 以前はweather_historyテーブルの実カラムと
@@ -461,61 +452,3 @@ class TestLoadWeatherHistoryUsesJst:
         assert str(captured["tz"]) == "Asia/Tokyo"
 
 
-class TestLoadRankingDataParametrized:
-    """
-    app_rankings はマイグレーション(migrations/*.sql)には存在しない旧テーブルで、
-    isolated_db フィクスチャでは初期化されない(TestLoadRankingData の
-    「テーブル無し」テスト参照)。これらのテストはテーブル自体をローカルに
-    作成してからデータを投入する。
-    """
-
-    @pytest.fixture(autouse=True)
-    def _create_app_rankings_table(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS app_rankings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    date TEXT NOT NULL,
-                    ranking_type TEXT,
-                    rank INTEGER,
-                    app_id TEXT,
-                    title TEXT,
-                    developer TEXT,
-                    icon_url TEXT,
-                    score REAL,
-                    recorded_at TEXT
-                )
-            """)
-
-    def test_returns_rows_matching_date_and_type(self, isolated_db):
-        """保守性(#410, bandit B608)の回帰テスト: f-string埋め込みからプレースホルダ化
-        した後も、通常のクエリ結果は変わらないこと。"""
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
-                "('2026-09-01', 'free', 1, 'アプリA', 'com.example.a')"
-            )
-            cur.execute(
-                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
-                "('2026-09-01', 'grossing', 1, 'アプリB', 'com.example.b')"
-            )
-
-        result = analysis_service.load_ranking_data("2026-09-01", "free")
-
-        assert len(result) == 1
-        assert result.iloc[0]["title"] == "アプリA"
-
-    def test_value_containing_single_quote_does_not_break_query(self, isolated_db):
-        """プレースホルダ化により、値にシングルクォートが含まれても
-        (f-string埋め込みなら構文エラーやインジェクションになりうる形でも)
-        安全に扱えること。"""
-        with common.get_db_cursor(commit=True) as cur:
-            cur.execute(
-                "INSERT INTO app_rankings (date, ranking_type, rank, title, app_id) VALUES "
-                "('2026-09-01', \"weird' type\", 1, 'アプリC', 'com.example.c')"
-            )
-
-        result = analysis_service.load_ranking_data("2026-09-01", "weird' type")
-
-        assert len(result) == 1
-        assert result.iloc[0]["title"] == "アプリC"

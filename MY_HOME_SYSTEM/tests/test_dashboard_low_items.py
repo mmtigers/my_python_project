@@ -28,7 +28,7 @@ def _mock_st():
     mock = MagicMock()
     mock.sidebar.__enter__ = MagicMock(return_value=mock)
     mock.sidebar.__exit__ = MagicMock(return_value=False)
-    mock.tabs.return_value = [MagicMock() for _ in range(11)]
+    mock.tabs.return_value = [MagicMock() for _ in range(10)]
     mock.expander.return_value.__enter__ = MagicMock(return_value=MagicMock())
     mock.expander.return_value.__exit__ = MagicMock(return_value=False)
     return mock
@@ -45,7 +45,6 @@ def _patch_view_modules():
         patch.object(dashboard.health_tab, "render"),
         patch.object(dashboard.sensor_tab, "render_takasago"),
         patch.object(dashboard.log_tab, "render_logs"),
-        patch.object(dashboard.log_tab, "render_trends"),
         patch.object(dashboard.log_tab, "render_system"),
         patch.object(dashboard.misc_tab, "render_bicycle"),
         patch.object(dashboard.summary, "render_summary"),

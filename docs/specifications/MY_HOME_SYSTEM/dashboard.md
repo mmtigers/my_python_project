@@ -18,7 +18,7 @@
 
 * Streamlit製ダッシュボードアプリケーションのエントリーポイント。ページ設定・ロガー設定などアプリ全体の初期化を行う。
 * `services.analysis_service` からセンサー・子供・排泄・食事・車・防犯ログ・駐輪場・NASステータス等のデータを読み込み、AIレポート（`load_ai_report`）を取得して展開表示する。
-* サマリー表示（`views.dashboard.summary`）と11個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、トレンド、システム管理、駐輪場）のレンダリングを、それぞれ対応する `views.dashboard` 配下のビューモジュールに委譲する。
+* サマリー表示（`views.dashboard.summary`）と10個のタブ（クエスト、電車遅延、防犯カメラ、電力・環境、気温詳細、健康管理、高砂実家、ログ分析、システム管理、駐輪場）のレンダリングを、それぞれ対応する `views.dashboard` 配下のビューモジュールに委譲する。**（Issue #507で削除）** 以前は「トレンド」タブ(11個目)も存在したが、参照先の`app_rankings`テーブルへの書き込みコードが存在せず機能として死んでいたため、UIごと削除された。
 * アプリ実行中に例外が発生した場合、エラーログを出力しDiscordへ通知を試み、画面上に汎用エラーメッセージを表示するフェイルセーフ処理を持つ（**Issue #410 L-L5で修正**: トレースバックは以前画面にも表示していたが、内部情報の露出防止のためログのみに変更した）。
 
 ## 3. 外部依存関係
@@ -41,7 +41,7 @@
 | `views.dashboard.sensor_tab` | 内部モジュール | 電力・気温・高砂実家タブのレンダリング | `sensor_tab,` (行番号: 18 / 抜粋: "sensor_tab,") |
 | `views.dashboard.health_tab` | 内部モジュール | 健康管理タブのレンダリング | `health_tab,` (行番号: 19 / 抜粋: "health_tab,") |
 | `views.dashboard.misc_tab` | 内部モジュール | 電車遅延・防犯カメラ・駐輪場タブのレンダリング | `misc_tab,` (行番号: 20 / 抜粋: "misc_tab,") |
-| `views.dashboard.log_tab` | 内部モジュール | ログ分析・トレンド・システム管理タブのレンダリング | `log_tab` (行番号: 21 / 抜粋: "log_tab") |
+| `views.dashboard.log_tab` | 内部モジュール | ログ分析・システム管理タブのレンダリング | `log_tab` (行番号: 21 / 抜粋: "log_tab") |
 
 ### ブラックボックスとなる外部要素
 
@@ -49,14 +49,14 @@
 | --- | --- | --- |
 | `services.analysis_service` の各関数 | `load_sensor_data`, `load_generic_data`, `load_bicycle_data`, `load_nas_status`, `load_ai_report`, `apply_friendly_names` の実装（DBアクセス方法やデータ整形ロジック）が本ファイルからは不明。 | `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)") |
 | `config` の各設定値 | `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_DEFECATION`, `SQLITE_TABLE_FOOD`, `SQLITE_TABLE_CAR`, `LINE_USER_ID` の実際の値がどこでどう定義されているか不明。 | `config.SQLITE_TABLE_CHILD` (行番号: 60 / 抜粋: "df_child = analysis_service.load_generic_data(config.SQLITE_TABLE_CHILD)") |
-| `common.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `common.send_push(` (行番号: 148 / 抜粋: "common.send_push(") |
+| `common.send_push` | エラー通知の送信方式・成否時の挙動（例外送出の有無など）が不明。 | `common.send_push(` (行番号: 165 / 抜粋: "common.send_push(") |
 | `view_common.CUSTOM_CSS` | CSSの具体的な内容・スタイル定義が不明。 | `view_common.CUSTOM_CSS` (行番号: 48 / 抜粋: "st.markdown(view_common.CUSTOM_CSS, unsafe_allow_html=True)") |
-| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` (行番号: 97 / 抜粋: "summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)") |
-| `quest_tab.render` | クエストタブの内部実装が不明。 | `quest_tab.render()` (行番号: 121 / 抜粋: "quest_tab.render()") |
-| `misc_tab` の各関数 | `render_traffic`, `render_photos`, `render_bicycle` の内部実装が不明。 | `misc_tab.render_traffic()` (行番号: 123 / 抜粋: "misc_tab.render_traffic()") |
-| `sensor_tab` の各関数 | `render_electricity`, `render_temperature`, `render_takasago` の内部実装が不明。 | `sensor_tab.render_electricity(df_sensor, now)` (行番号: 127 / 抜粋: "sensor_tab.render_electricity(df_sensor, now)") |
-| `health_tab.render` | 健康管理タブの内部実装が不明。 | `health_tab.render(df_child, df_poop, df_food)` (行番号: 131 / 抜粋: "health_tab.render(df_child, df_poop, df_food)") |
-| `log_tab` の各関数 | `render_logs`, `render_trends`, `render_system` の内部実装が不明。 | `log_tab.render_logs(df_sensor)` (行番号: 135 / 抜粋: "log_tab.render_logs(df_sensor)") |
+| `summary.render_summary` | サマリー部の描画ロジック・使用データ項目の詳細が不明。 | `summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)` (行番号: 98 / 抜粋: "summary.render_summary(now, df_sensor, df_car, df_bicycle, nas_data)") |
+| `quest_tab.render` | クエストタブの内部実装が不明。 | `quest_tab.render()` (行番号: 131 / 抜粋: "quest_tab.render()") |
+| `misc_tab` の各関数 | `render_traffic`, `render_photos`, `render_bicycle` の内部実装が不明。 | `misc_tab.render_traffic()` (行番号: 133 / 抜粋: "misc_tab.render_traffic()") |
+| `sensor_tab` の各関数 | `render_electricity`, `render_temperature`, `render_takasago` の内部実装が不明。 | `sensor_tab.render_electricity(df_sensor, now)` (行番号: 140 / 抜粋: "sensor_tab.render_electricity(df_sensor, now)") |
+| `health_tab.render` | 健康管理タブの内部実装が不明。 | `health_tab.render(df_child, df_poop, df_food)` (行番号: 146 / 抜粋: "health_tab.render(df_child, df_poop, df_food)") |
+| `log_tab` の各関数 | `render_logs`, `render_system` の内部実装が不明。 | `log_tab.render_logs(df_sensor)` (行番号: 152 / 抜粋: "log_tab.render_logs(df_sensor)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -108,8 +108,8 @@
 
 ### `main`
 
-* **役割**: サイドバー設定、各種データの読み込み、AIレポート表示、サマリー表示、11個のタブの切り替え・レンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（Issue #410 L-L2で修正）** AIレポートの`timestamp`が`"T"`を含まない旧フォーマット（`"YYYY-MM-DD HH:MM:SS"`、保存規約`core.utils.get_now_iso`導入前のレガシーデータ）の場合、以前は`datetime.now()`（現在時刻）にフォールバックしており、レポートの実際の生成時刻に関わらず「たった今」の報告であるかのように表示されていた。旧フォーマットとして明示的に`strptime`でパースし、JSTとして`localize`するよう修正した。**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
-* 根拠: `def main():` (行番号: 39〜159 / 抜粋: "def main():")、タイムスタンプの旧フォーマット対応 (行番号: 74-85 / 抜粋: "report_time = tz_jst.localize(datetime.strptime(ts, \"%Y-%m-%d %H:%M:%S\"))")、トレースバックのログのみ化 (行番号: 155-159 / 抜粋: "logger.error(traceback.format_exc())")
+* **役割**: サイドバー設定、各種データの読み込み、AIレポート表示、サマリー表示、10個のタブの切り替え・レンダリングを行うアプリ本体の処理。例外発生時はログ記録・Discord通知・エラー画面表示を行う。**（Issue #410 L-L2で修正）** AIレポートの`timestamp`が`"T"`を含まない旧フォーマット（`"YYYY-MM-DD HH:MM:SS"`、保存規約`core.utils.get_now_iso`導入前のレガシーデータ）の場合、以前は`datetime.now()`（現在時刻）にフォールバックしており、レポートの実際の生成時刻に関わらず「たった今」の報告であるかのように表示されていた。旧フォーマットとして明示的に`strptime`でパースし、JSTとして`localize`するよう修正した。**（Issue #410 L-L5で修正）** 例外発生時に画面表示していた`traceback.format_exc()`を`logger.error`によるログ出力のみに変更し、内部のファイルパス・設定値がLAN内の閲覧者に露出しないようにした。
+* 根拠: `def main():` (行番号: 39〜178 / 抜粋: "def main():")、タイムスタンプの旧フォーマット対応 (行番号: 74-85 / 抜粋: "report_time = tz_jst.localize(datetime.strptime(ts, \"%Y-%m-%d %H:%M:%S\"))")、トレースバックのログのみ化 (行番号: 178 / 抜粋: "logger.error(traceback.format_exc())")
 
 
 * **引数/リクエスト**: なし
@@ -125,9 +125,9 @@
     * `st.cache_data.clear()` によるキャッシュクリアと `st.rerun()` による再実行（更新ボタン押下時）。
     * `analysis_service` 経由での複数のデータ読み込み（センサー、子供、排泄、食事、車、防犯ログ、駐輪場、NASステータス、AIレポート）。
     * AIレポートがある場合、時間帯に応じたアイコン付きの展開エリアにメッセージを表示する。
-    * サマリーおよび11タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
+    * サマリーおよび10タブ分のUIレンダリング（各ビューモジュールへ処理委譲）。
     * 例外発生時、エラーログ出力・Discordへのエラー通知（`common.send_push`）・画面への汎用エラーメッセージ表示。**（Issue #410 L-L5で修正）** トレースバックは画面表示せず、ログ（`logger.error`）にのみ出力する。
-* 根拠: `st.cache_data.clear()` (行番号: 44 / 抜粋: "st.cache_data.clear()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `common.send_push(` (行番号: 148 / 抜粋: "common.send_push(")
+* 根拠: `st.cache_data.clear()` (行番号: 44 / 抜粋: "st.cache_data.clear()"), `analysis_service.load_sensor_data(limit=10000)` (行番号: 59 / 抜粋: "df_sensor = analysis_service.load_sensor_data(limit=10000)"), `common.send_push(` (行番号: 165 / 抜粋: "common.send_push(")
 
 
 * **エラーハンドリング**:
@@ -135,7 +135,7 @@
     * **[修正済み・Issue #438]** 以前はこの`try`ブロックがサマリー表示・全タブのレンダリングまで含んでおり、いずれか1タブの描画例外でもダッシュボード全体がエラー画面になっていた。現在は`summary.render_summary()`の呼び出しと各タブの`with tab_x: ...`ブロックの中身を、[dashboard_common.md](./dashboard_common.md)の`safe_section`コンテキストマネージャで個別に囲み、1つのセクションの例外が他のセクションの描画を止めないようにした（詳細は8節参照）。
     * 上記の外側`except Exception as e:`で捕捉した場合、エラーメッセージをログ出力（`logger.error`）した上で、`common.send_push`によるDiscord通知を試みる。**[修正済み・Issue #438]** この通知処理自体の失敗は、以前は`except Exception: pass`で握りつぶしていたが、現在は`except Exception as notify_err: logger.warning(...)`でログに記録するよう変更した。
     * 最後に `st.error(...)` でユーザー向けの汎用エラーメッセージを表示する。**（Issue #410 L-L5で修正）** 以前は続けて`st.code(traceback.format_exc())`でトレースバックを画面に出力していたが、内部のファイルパス・設定値の露出防止のため`logger.error(traceback.format_exc())`によるログ出力のみに変更した。
-* 根拠: 外側`except Exception as e:` (行番号: 159〜177 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 169〜172 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 177 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるタブ単位保護 (行番号: 96〜141 / 抜粋: "with view_common.safe_section(")
+* 根拠: 外側`except Exception as e:` (行番号: 160〜178 / 抜粋: "except Exception as e:")、通知失敗のログ化 (行番号: 170〜173 / 抜粋: "except Exception as notify_err:")、トレースバックのログのみ化 (行番号: 178 / 抜粋: "logger.error(traceback.format_exc())")、`safe_section`によるタブ単位保護 (行番号: 97〜157 / 抜粋: "with view_common.safe_section(")
 
 
 
@@ -155,7 +155,7 @@ flowchart TD
     CheckReport -- No --> RenderSummary
     RenderReport --> RenderSummary["safe_section('サマリー')で保護: summary.render_summary()"]
 
-    RenderSummary --> CreateTabs["st.tabs() で11タブ生成"]
+    RenderSummary --> CreateTabs["st.tabs() で10タブ生成"]
     CreateTabs --> RenderTabs["各タブをsafe_section()で個別に保護し、viewモジュールのrender系関数へ委譲"]
     RenderTabs --> End(["End: 正常終了(1タブの例外は他タブに波及しない)"])
 
@@ -245,9 +245,9 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `analysis_service` の各読み込み関数の仕様 | `MY_HOME_SYSTEM/services/analysis_service.py`を直接確認した。`get_ro_db_connection()`(32〜39行目)は`sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0)`で読み取り専用接続を返し、これを内部で用いる`load_generic_data(table_name, limit=500)`(150行目)は`SELECT * FROM {table_name} ORDER BY timestamp DESC LIMIT {limit}`を実行、`load_sensor_data(limit=5000)`(155行目)は`device_records`・SwitchBotメーターログ・電力使用量の複数テーブルを統合して`pd.DataFrame`を返す、`load_nas_status()`(133行目)/`load_ai_report()`(343行目)はそれぞれ最新1件を`Optional[pd.Series]`で返す設計であることを確認した。ファイル全体を`cache_data`および`import streamlit`で検索したが該当箇所はなく、`st.cache_data`によるキャッシュは実装されていないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/analysis_service.py:32-39, 133-170, 343-347` |
-| 各タブビューモジュールの実装詳細 | `MY_HOME_SYSTEM/views/dashboard/`配下の各ファイルを直接確認した。`summary.py`は`get_takasago_status(df_sensor, now)`(13行目)、`get_itami_status(df_sensor, now)`(36行目)、`get_traffic_status()`(86行目)、`get_server_status()`(97行目)、`get_nas_status_simple(nas_data)`(103行目)等のステータス取得関数群、`quest_tab.py`は引数なしの`render()`(8行目)、`sensor_tab.py`は`render_electricity(df_sensor, now)`(9行目)/`render_temperature(df_sensor, now)`(56行目)/`render_takasago(df_sensor)`(106行目)、`health_tab.py`は`render(df_child, df_poop, df_food)`(5行目)、`misc_tab.py`は`render_traffic()`(14行目)/`render_photos(df_security_log)`(84行目)/`render_bicycle(df_bicycle)`(110行目)、`log_tab.py`は`render_logs(df_sensor)`(10行目)/`render_trends()`(22行目)/`render_system()`(49行目)を持つことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/summary.py:13-103`, `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:8`, `MY_HOME_SYSTEM/views/dashboard/sensor_tab.py:9-106`, `MY_HOME_SYSTEM/views/dashboard/health_tab.py:5`, `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:14-110`, `MY_HOME_SYSTEM/views/dashboard/log_tab.py:10-49` |
+| 各タブビューモジュールの実装詳細 | `MY_HOME_SYSTEM/views/dashboard/`配下の各ファイルを直接確認した。`summary.py`は`get_takasago_status(df_sensor, now)`(13行目)、`get_itami_status(df_sensor, now)`(36行目)、`get_traffic_status()`(86行目)、`get_server_status()`(97行目)、`get_nas_status_simple(nas_data)`(103行目)等のステータス取得関数群、`quest_tab.py`は引数なしの`render()`(8行目)、`sensor_tab.py`は`render_electricity(df_sensor, now)`(9行目)/`render_temperature(df_sensor, now)`(56行目)/`render_takasago(df_sensor)`(106行目)、`health_tab.py`は`render(df_child, df_poop, df_food)`(5行目)、`misc_tab.py`は`render_traffic()`(14行目)/`render_photos(df_security_log)`(84行目)/`render_bicycle(df_bicycle)`(110行目)、`log_tab.py`は`render_logs(df_sensor)`(8行目)/`render_system()`(20行目)を持つことを確認した。**（Issue #507で削除）** `log_tab.py`にはかつて`render_trends()`(旧22行目、`app_rankings`テーブル参照)も存在したが、書き込み側の収集コードが無く機能として死んでいたため、対応する「トレンド」タブの登録ごと削除された。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/summary.py:13-103`, `MY_HOME_SYSTEM/views/dashboard/quest_tab.py:8`, `MY_HOME_SYSTEM/views/dashboard/sensor_tab.py:9-106`, `MY_HOME_SYSTEM/views/dashboard/health_tab.py:5`, `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:14-110`, `MY_HOME_SYSTEM/views/dashboard/log_tab.py:8-87` |
 | `config` の設定値の実体 | `MY_HOME_SYSTEM/config.py`を直接確認した。`SQLITE_TABLE_CHILD`(245行目)は`"child_health_records"`という文字列定数、`LINE_USER_ID`(185行目)は`os.getenv("LINE_USER_ID")`で環境変数由来（既定値なし、未設定時は`None`）であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185, 245` |
-| `common.send_push` の仕様 | `MY_HOME_SYSTEM/common.py:31-37`が`services.notification_service`から`send_push`を再インポートしているFacadeであることを直接確認した上で、`MY_HOME_SYSTEM/services/notification_service.py:116-163`の実装を直接確認した。Issue #289で`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`に再設計されており、`target`が`"both"`または`"discord"`を含む場合に`_send_discord_webhook`、`"both"`または`"line"`を含む場合に`user_id`(省略時は`config.LINE_USER_ID`にフォールバック)を用いて`_send_line_push`をそれぞれ呼び出す統合プッシュ通知関数であることを確認した。本ファイル(`dashboard.py`)は`target="discord"`のみで呼び出すため`user_id`は渡していない。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:116-163`, `MY_HOME_SYSTEM/dashboard.py:138-141` |
+| `common.send_push` の仕様 | `MY_HOME_SYSTEM/common.py:31-37`が`services.notification_service`から`send_push`を再インポートしているFacadeであることを直接確認した上で、`MY_HOME_SYSTEM/services/notification_service.py:116-163`の実装を直接確認した。Issue #289で`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`に再設計されており、`target`が`"both"`または`"discord"`を含む場合に`_send_discord_webhook`、`"both"`または`"line"`を含む場合に`user_id`(省略時は`config.LINE_USER_ID`にフォールバック)を用いて`_send_line_push`をそれぞれ呼び出す統合プッシュ通知関数であることを確認した。本ファイル(`dashboard.py`)は`target="discord"`のみで呼び出すため`user_id`は渡していない。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:31-37`, `MY_HOME_SYSTEM/services/notification_service.py:116-163`, `MY_HOME_SYSTEM/dashboard.py:165-169` |
 | `view_common.CUSTOM_CSS` の内容 | `MY_HOME_SYSTEM/views/dashboard/common.md`（本リポジトリの解析済み仕様書）および`MY_HOME_SYSTEM/views/dashboard/common.py`を直接確認した。`CUSTOM_CSS`(4行目〜)は`<style>`タグを含むCSS定義を格納した1つの長い文字列定数であり、本ファイル(`views/dashboard/common.py`)自体は`st.markdown`等での適用処理を持たず、単にこの文字列を定義しているのみであることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/common.py:4-5` |
 
 ## 10. 自己検証結果
