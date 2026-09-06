@@ -39,7 +39,6 @@
 | `google.genai.errors` | 外部ライブラリ | Gemini API呼び出し時の例外ハンドリング（`APIError`とそのHTTPステータス） | `from google.genai import errors as genai_errors` (行番号: 12 / 抜粋: "from google.genai import errors as genai_errors") |
 | `google.genai.types` | 外部ライブラリ | `GenerateContentConfig`・`AutomaticFunctionCallingConfig`・`Part.from_function_response` の構築 | `from google.genai import types as genai_types` (行番号: 13 / 抜粋: "from google.genai import types as genai_types") |
 | `retry_if_exception` | 外部ライブラリ | クォータ超過(429)判定関数によるリトライ条件指定 | `from tenacity import (... retry_if_exception,)` (行番号: 21 / 抜粋: "retry_if_exception,") |
-| `content` | 外部ライブラリ | Gemini APIの関数呼び出し結果レスポンス生成用 | `from google.ai.generativelanguage_v1beta.types import content` (抜粋: "from google.ai.generativelanguage_v1beta.types import content") |
 | `tenacity` | 外部ライブラリ | API呼び出し失敗時のリトライ制御 | `from tenacity import (...)` (抜粋: "from tenacity import (") |
 | `config` | 内部モジュール | APIキー、DBテーブル名、家族設定などの定数参照 | `import config` (抜粋: "import config") |
 | `common` | 内部モジュール | **（Issue #357で用途変更）** `common.get_db_cursor`によるDB接続の取得（以前は`common.execute_read_query`でクエリ実行を委譲していた） | `import common` (抜粋: "import common")、`with common.get_db_cursor() as cursor:` (行番号: 281) |
