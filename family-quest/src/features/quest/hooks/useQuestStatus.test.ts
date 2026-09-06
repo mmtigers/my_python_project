@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getQuestLockState } from './useQuestStatus';
+import { canCancelQuest, getQuestLockState } from './useQuestStatus';
 import { Quest, QuestHistory, User } from '@/types';
 
 const user: User = { user_id: 'alice', name: 'Alice', level: 1, exp: 0, gold: 0 };
@@ -81,5 +81,28 @@ describe('getQuestLockState', () => {
         const state = getQuestLockState(quest, user, [], pending);
         expect(state.isPending).toBe(false);
         expect(state.pendingEntry).toBeUndefined();
+    });
+});
+
+describe('canCancelQuest', () => {
+    it('allows cancelling a pending infinite quest (child submission awaiting approval)', () => {
+        const state = getQuestLockState(makeQuest({ quest_type: 'infinite' }), user, [], [makeHistory({ status: 'pending' })]);
+        expect(state.isInfinite).toBe(true);
+        expect(state.isPending).toBe(true);
+        expect(canCancelQuest(state, false)).toBe(true);
+    });
+
+    it('does not allow cancelling an infinite quest that merely has approved completions', () => {
+        const state = getQuestLockState(makeQuest({ quest_type: 'infinite' }), user, [makeHistory({ status: 'approved' })], []);
+        expect(state.isDone).toBe(false);
+        expect(canCancelQuest(state, false)).toBe(false);
+    });
+
+    it('allows cancelling a done or pending normal quest, unless locked', () => {
+        const done = getQuestLockState(makeQuest(), user, [makeHistory()], []);
+        expect(canCancelQuest(done, false)).toBe(true);
+        expect(canCancelQuest(done, true)).toBe(false);
+        const untouched = getQuestLockState(makeQuest(), user, [], []);
+        expect(canCancelQuest(untouched, false)).toBe(false);
     });
 });

@@ -380,7 +380,11 @@ function App() {
     // 無限クエストは常に「完了」扱い
     // ★実機検証で子どもの誤操作(意図しない完了)が多かったため、完了(クリア)には
     // 確認ダイアログを挟む(取り消しは長押しで保護されているため対象外)。
-    if (isInfinite) {
+    // ただし子どもの申請が承認待ち(pendingEntry)のときは、カード側で長押し(取消)のみが
+    // 有効になっているため、ここでも通常クエストと同じ取消経路へ流す。以前は pendingEntry を
+    // 見る前に無条件で完了モーダルを開いていたため、申請中の無限クエストは取り消せず、
+    // 完了しようとしても「すでに申請中です」のエラーになる袋小路だった。
+    if (isInfinite && !pendingEntry) {
       setConfirmUser(user);
       setConfirmTarget(q);
       setConfirmMode('complete');
@@ -388,7 +392,8 @@ function App() {
     }
 
     // 3. 完了済み、または申請中リストにあるかを探す
-    const historyEntry = pendingEntry || completedEntry;
+    // (無限クエストは完了済み履歴(completedEntry)を取消対象にしない: 周回前提のため)
+    const historyEntry = isInfinite ? pendingEntry : (pendingEntry || completedEntry);
 
     if (historyEntry) {
       // 既に履歴がある（完了or申請中）ならワンタップで取り消し。

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CompletedSignal, User, Quest, QuestHistory } from '@/types';
 import { Card } from '@/components/ui/Card';
 import { CooldownRing } from '@/components/ui/CooldownRing';
-import { useQuestStatus, getQuestLockState, getQuestProcessingKey } from '../hooks/useQuestStatus';
+import { useQuestStatus, getQuestLockState, getQuestProcessingKey, canCancelQuest } from '../hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
 import { useSound } from '@/hooks/useSound';
 import { useLongPress } from '@/hooks/useLongPress';
@@ -99,8 +99,10 @@ const QuestItem: React.FC<{
     const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;
 
     // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの
-    // 誤取り消しを防ぐ。無限クエストは取り消し概念がないため対象外。
-    const canCancel = !isInfinite && (isDone || isPending) && !isEffectivelyLocked;
+    // 誤取り消しを防ぐ。
+    // (無限クエストは完了済み(isDone)にはならないが、子どもの申請中(isPending)は
+    // 通常クエストと同様に取り消し可能。判定は useQuestStatus.canCancelQuest に集約)
+    const canCancel = canCancelQuest({ isDone, isPending }, isEffectivelyLocked);
 
     const runComplete = () => {
         // #102: 完了音・クールダウン開始はここでは行わない(上のuseEffect/App側を参照)。

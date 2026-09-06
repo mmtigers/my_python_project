@@ -112,7 +112,7 @@ const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReje
                                             {quest.quest_title}
                                         </p>
                                         <p className="text-sm text-gray-500">
-                                            担当: {getUserName(quest.user_id)} / 報酬: {quest.gold_earned}G
+                                            担当: {getUserName(quest.user_id)} / 報酬: {quest.gold_earned ?? 0}G
                                         </p>
                                     </div>
                                     <div className="flex gap-2 flex-shrink-0">
