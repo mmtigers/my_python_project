@@ -19,6 +19,7 @@
 ## 2. ファイルの概要
 
 * 環境変数に設定されたベースURLを用いて、SwitchBotおよびLINE BotのWebhookエンドポイントを自動的に更新・修復する。更新が行われた場合はプッシュ通知を送信して報告する。加えて、SwitchBot側で旧設定を削除した後に新規登録が失敗した(Webhookが未設定のまま残る)危険な状態を検知した場合は、更新の成否に関わらず必ずエラー通知を送信する(Issue #166)。
+* **（Issue #318で追加）** `config.SWITCHBOT_WEBHOOK_TOKEN`が設定されている場合、SwitchBotへ登録するWebhook URLに`?token=...`をクエリパラメータとして付与する。`routers/webhook_router.py`はこのトークンが設定されると`?token=...`が一致しないリクエストを401で拒否する仕様のため、登録URL側にも同じトークンを含めないと実際のSwitchBot Webhookが全て拒否されてしまう。
 * 根拠: [関数 `fix_all_webhooks` の処理内容、およびログ文字列] (行番号: 120〜148 / 抜粋: "🚀 Webhook自動修復ツール起動")
 
 
@@ -35,7 +36,7 @@
 | `requests` | サードパーティ | 外部API（SwitchBot, LINE）へのHTTPリクエスト送信 | `import requests` (行番号: 5, 36, 46, 51, 86, 91) |
 | `time` | 標準ライブラリ | APIコール間のスリープ処理（待機） | `import time` (行番号: 6, 47) |
 | `common` | カスタムモジュール | ロガー設定の初期化、および完了時のプッシュ通知送信 | `import common` (行番号: 18, 26, 117) |
-| `config` | カスタムモジュール | LINEチャネルアクセストークンやユーザーIDの設定値取得 | `import config` (行番号: 19, 73, 79, 86, 117) |
+| `config` | カスタムモジュール | LINEチャネルアクセストークンやユーザーIDの設定値取得。**（Issue #318で追加）** `SWITCHBOT_WEBHOOK_TOKEN`(登録URLに付与するトークン)の取得にも使用する。 | `import config` (行番号: 18), `if config.SWITCHBOT_WEBHOOK_TOKEN:` (行番号: 38) |
 | `services.switchbot_service` (as `sb_tool`) | カスタムモジュール | SwitchBot API通信用の認証ヘッダー生成 | `from services import switchbot_service as sb_tool` (行番号: 20, 33, 50) |
 
 ### ブラックボックスとなる外部要素
@@ -51,8 +52,8 @@
 
 ### `update_switchbot_webhook`
 
-* **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。
-* 根拠: [関数定義およびDocstring] (行番号: 28〜37 / 抜粋: "SwitchBotのWebhook URLを更新")
+* **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。**（Issue #318で追加）** `config.SWITCHBOT_WEBHOOK_TOKEN`が設定されている場合、登録・照会に用いる`target_url`に`?token=...`を付与する(`webhook_router.py`側のトークン検証と一致させるため)。
+* 根拠: [関数定義およびDocstring] (行番号: 27〜36 / 抜粋: "SwitchBotのWebhook URLを更新"), `if config.SWITCHBOT_WEBHOOK_TOKEN:\n        ...\n        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"` (行番号: 38〜42)
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
@@ -213,6 +214,7 @@ graph TD
 * すべての `requests` 呼び出し（SwitchBot/LINE双方）に `timeout=10` が明示的に設定されており、外部APIの応答遅延によるプロセスハングは一定範囲で防止されている。
 * `traceback` モジュールがインポートされているが、スクリプト内で使用されていない未使用コードが存在する。
 * `update_switchbot_webhook`の戻り値は`True`/`False`/`None`の3値であり、`fix_all_webhooks`側は必ず`is None`で危険な状態を判定し、成功通知の判定には`bool(sb_result)`で真偽値化してから使う必要がある(Issue #166)。単純な`if sb_result:`ではなく`is None`チェックを省略・誤読すると、旧設定削除後の新規登録失敗が再び無通知のまま埋もれる。
+* **`SWITCHBOT_WEBHOOK_TOKEN`とURL登録の整合性(Issue #318)**: `webhook_router.py`はこのトークンが設定されると`?token=...`が一致しない全リクエストを401で拒否する。本スクリプトが登録するURLに同じトークンを含めていないと、実際のSwitchBotデバイスからのWebhookが全て401で拒否され、モーションセンサー等のイベント連携が無通知のまま停止する。`.env`にトークンを追加しただけでは有効化されず、本スクリプト(`start_all.sh`経由で起動時に毎回実行される)による登録URLの更新が完了して初めて機能する。
 
 ## 9. 不明事項一覧
 
