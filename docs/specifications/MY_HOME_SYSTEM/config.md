@@ -153,119 +153,119 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 
 #### 追加された設定値（Issue #359 / #405）
 
-* `WEBHOOK_BASE_URL: Optional[str]`（行番号: 210）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
-* `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 522）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
+* `WEBHOOK_BASE_URL: Optional[str]`（行番号: 221）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
+* `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 385）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
 
 ### `_get_int_env`
 
-* **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`・`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT` の8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102〜117)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 362)
+* **役割**: 環境変数を整数として読み込む共通ヘルパー（**#411 S-L6で追加**）。以前は `MOTION_COOLDOWN_SEC`・`UPLOAD_MAX_FILE_SIZE_MB`・`RECORDING_RETENTION_DAYS`・`HLS_VOD_RETENTION_DAYS`・`DB_BACKUP_RETENTION_DAYS`に加え、小児科予約監視の`CLINIC_MONITOR_START_HOUR`・`CLINIC_MONITOR_END_HOUR`・`CLINIC_REQUEST_TIMEOUT`の計8変数それぞれで `int(os.getenv(name, "default"))` を直書きしており、`.env` に空文字や非数値（例: コメント混じりの値）が誤って設定されると `int()` が `ValueError` を送出し、`config` モジュール全体のimportが失敗してサーバーが起動不能になっていた。未設定/空文字はデフォルト値、非数値は警告ログを出してデフォルト値にフォールバックするようにした。なお小児科予約監視機能自体は未実装のままIssue #488で`config.py`から削除されたため、現在この関数を呼び出しているのは前者5箇所のみである。
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96〜111)、呼出し例: `MOTION_COOLDOWN_SEC: int = _get_int_env("MOTION_COOLDOWN_SEC", 60)` (行番号: 304)
 
 
 * **引数/リクエスト**: `name: str` (環境変数名), `default: int` (未設定/パース失敗時のデフォルト値)
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96)
 
 
 * **戻り値/レスポンス**: `int`
-* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 102)
+* 根拠: `def _get_int_env(name: str, default: int) -> int:` (行番号: 96)
 
 
 * **副作用**: パース失敗時に `logger.warning` を出力
-* 根拠: `logger.warning(f"⚠️ 環境変数 {name}='{raw}' は整数として解釈できません。デフォルト値 {default} を使用します。")` (行番号: 116)
+* 根拠: `logger.warning(f"⚠️ 環境変数 {name}='{raw}' は整数として解釈できません。デフォルト値 {default} を使用します。")` (行番号: 110)
 
 
 * **エラーハンドリング**: `int(raw)` の `ValueError` を捕捉してデフォルト値にフォールバック
-* 根拠: `except ValueError:` (行番号: 115)
+* 根拠: `except ValueError:` (行番号: 109)
 
 ### `ensure_safe_path_with_backoff`
 
 * **役割**: `verify_and_initialize_storage`を呼び出してパスを検証し、失敗した場合はローカルのフォールバックディレクトリを作成して返す。
-* 根拠: [関数定義] (行番号: 98〜102 / 抜粋: `def ensure_safe_path_with_back`)
+* 根拠: [関数定義] (行番号: 120〜124 / 抜粋: `def ensure_safe_path_with_back`)
 
 
 * **引数/リクエスト**: `preferred_path` (str: 本来の保存パス), `fallback_name` (str: フォールバック時ディレクトリ名), `max_retries` (int: 最大リトライ回数。デフォルト5)
-* 根拠: [引数定義] (行番号: 99 / 抜粋: `preferred_path: str, `)
+* 根拠: [引数定義] (行番号: 121〜123 / 抜粋: `preferred_path: str, `)
 
 
 * **戻り値/レスポンス**: `str` (安全な書き込みパス)
-* 根拠: [戻り値型ヒント] (行番号: 102 / 抜粋: `-> str:`)
+* 根拠: [戻り値型ヒント] (行番号: 124 / 抜粋: `-> str:`)
 
 
 * **副作用**: `verify_and_initialize_storage`の副作用に加え、フォールバックディレクトリの作成(`os.makedirs`)。
-* 根拠: [フォールバック作成] (行番号: 127 / 抜粋: `os.makedirs(fallback_path, exi`)
+* 根拠: [フォールバック作成] (行番号: 149 / 抜粋: `os.makedirs(fallback_path, exi`)
 
 
 * **エラーハンドリング**: フォールバックディレクトリ作成時の`Exception`をキャッチし、エラーログを出力して`preferred_path`を返す。
-* 根拠: [例外捕捉] (行番号: 133 / 抜粋: `except Exception as fatal_e:`)
+* 根拠: [例外捕捉] (行番号: 155 / 抜粋: `except Exception as fatal_e:`)
 
 
 
 ### `CameraConfig`
 
 * **役割**: カメラ設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 166〜176 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 166〜176 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 166〜176 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 166〜176 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 144〜154 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [Pydanticの継承] (行番号: 166〜176 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
 
 ### `NotifySettings`
 
 * **役割**: 通知設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 178〜181 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 178〜181 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 178〜181 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [クラス定義] (行番号: 178〜181 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 156〜159 / 抜粋: `class NotifySettings(BaseModel`)
+* 根拠: [Pydanticの継承] (行番号: 178〜181 / 抜粋: `class NotifySettings(BaseModel`)
 
 
 
 ### `DeviceConfig`
 
 * **役割**: デバイス設定のデータ構造とバリデーションを定義するPydanticモデル。
-* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 183〜188 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **引数/リクエスト**: なし（Pydanticによるインスタンス化時に属性を受け取る）
-* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 183〜188 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 183〜188 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **副作用**: なし
-* 根拠: [クラス定義] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [クラス定義] (行番号: 183〜188 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 * **エラーハンドリング**: Pydanticの機能に依存するバリデーションエラー(`ValidationError`)。
-* 根拠: [Pydanticの継承] (行番号: 161〜166 / 抜粋: `class DeviceConfig(BaseModel):`)
+* 根拠: [Pydanticの継承] (行番号: 183〜188 / 抜粋: `class DeviceConfig(BaseModel):`)
 
 
 
@@ -280,22 +280,16 @@ flowchart TD
     DefModels --> LoadEnvVars["環境変数・パス定数の初期化"]
     LoadEnvVars --> CheckNAS["NAS等ディレクトリの検証・作成"]
     
-    CheckNAS --> LoadFamilyEvents{"family_events.json が存在するか?"}
-    LoadFamilyEvents -- Yes --> ReadEvents["外部: family_events.json 読み込み"]
-    LoadFamilyEvents -- No --> LoadDevicesJson
-    ReadEvents --> LoadDevicesJson
-    
-    LoadDevicesJson{"devices.json が存在するか?"}
+    CheckNAS --> LoadDevicesJson{"devices.json が存在するか?"}
     LoadDevicesJson -- Yes --> ReadDevices["外部: devices.json 読み込み・Pydanticパース"]
-    ReadDevices --> InitCameraVars["カメラIP/User/Pass初期化"]
     LoadDevicesJson -- No --> EmptyDeviceConfig["空設定で初期化"]
-    EmptyDeviceConfig --> InitCameraVars
-    
-    InitCameraVars --> ParseOtherVars["その他環境変数等のパース・初期化"]
-    ParseOtherVars --> EnsureDirs["ログ・アセット等ディレクトリの自動作成ループ"]
-    EnsureDirs --> End(["End モジュール読み込み完了"])
+    ReadDevices --> ParseOtherVars
+    EmptyDeviceConfig --> ParseOtherVars["その他環境変数等のパース・初期化"]
+    ParseOtherVars --> End(["End モジュール読み込み完了"])
 
 ```
+
+（Issue #488で、それまで存在した`family_events.json`読み込み分岐と、`devices.json`読み込み後の「カメラIP/User/Pass初期化」ノード、および末尾の「ログ・アセット等ディレクトリの自動作成ループ」ノードはいずれもソースから削除された処理に対応するため、このフロー図からも削除した。）
 
 ## 6. 依存関係図
 
@@ -324,7 +318,6 @@ flowchart TD
     subgraph SubResources["外部ファイル・リソース"]
         env_file[".env"]
         devices_json["devices.json"]
-        family_events_json["family_events.json"]
         file_system["ファイルシステム (OSディレクトリ)"]
     end
 
@@ -348,27 +341,28 @@ flowchart TD
     %% 外部リソースへの依存
     dotenv --> env_file
     SubConfig --> devices_json
-    SubConfig --> family_events_json
     verify_and_initialize_storage --> file_system
     ensure_safe_path_with_backoff --> file_system
     SubConfig --> file_system
 
 ```
 
+（Issue #488で`family_events.json`の読み込みが完全に削除されたため、対応する`family_events_json`ノードとその依存エッジをこの依存関係図からも削除した。）
+
 ## 7. 次のステップ（リバースエンジニアリングの提案）
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `devices.json` | 各種デバイス（カメラ・モニター等）の具体的な設定や台数が記載されており、システムの実態を把握するために必須。 | 根拠: `DEVICES_JSON_PATH: str = os.` (行番号: 234 / 抜粋: `DEVICES_JSON_PATH: str = os.`) |
-| 中 | DBアクセス関連ファイル (例: `database.py` や `models.py`) | `SQLITE_TABLE_SENSOR`など多数のテーブル名定数が定義されており、実際のスキーマやデータ操作ロジックを解析する必要がある。 | 根拠: `SQLITE_TABLE_SENSOR: str = ` (行番号: 237 / 抜粋: `SQLITE_TABLE_SENSOR: str = `) |
-| 中 | APIクライアント実装 (例: `switchbot.py`, `nature_remo.py`) | SwitchBotやNature RemoのAPIトークンが定義されており、これらを利用する外部通信ロジックを特定するため。 | 根拠: `SWITCHBOT_API_TOKEN: Optiona` (行番号: 179 / 抜粋: `SWITCHBOT_API_TOKEN: Optiona`) |
-| 低 | 通知処理の実装 (例: `notifier.py` や `discord.py`) | Discord WebhookやLINEのトークンが定義されており、各種通知がいつ・どのような条件で発火するかを確認するため。 | 根拠: `DISCORD_WEBHOOK_NOTIFY: Opti` (行番号: 199 / 抜粋: `DISCORD_WEBHOOK_NOTIFY: Opti`) |
+| 高 | `devices.json` | 各種デバイス（カメラ・モニター等）の具体的な設定や台数が記載されており、システムの実態を把握するために必須。 | 根拠: `DEVICES_JSON_PATH: str = os.` (行番号: 255 / 抜粋: `DEVICES_JSON_PATH: str = os.`) |
+| 中 | DBアクセス関連ファイル (例: `database.py` や `models.py`) | `SQLITE_TABLE_SENSOR`など多数のテーブル名定数が定義されており、実際のスキーマやデータ操作ロジックを解析する必要がある。 | 根拠: `SQLITE_TABLE_SENSOR: str = ` (行番号: 258 / 抜粋: `SQLITE_TABLE_SENSOR: str = `) |
+| 中 | APIクライアント実装 (例: `switchbot.py`, `nature_remo.py`) | SwitchBotやNature RemoのAPIトークンが定義されており、これらを利用する外部通信ロジックを特定するため。 | 根拠: `SWITCHBOT_API_TOKEN: Optiona` (行番号: 204 / 抜粋: `SWITCHBOT_API_TOKEN: Optiona`) |
+| 低 | 通知処理の実装 (例: `notifier.py` や `discord.py`) | Discord WebhookやLINEのトークンが定義されており、各種通知がいつ・どのような条件で発火するかを確認するため。 | 根拠: `DISCORD_WEBHOOK_NOTIFY: Opti` (行番号: 226 / 抜粋: `DISCORD_WEBHOOK_NOTIFY: Opti`) |
 
 ## 8. 保守上の注意点
 
 * モジュールロード時にファイルI/O（ディレクトリ作成・テストファイルの書き込み）や`time.sleep`を伴う処理（`verify_and_initialize_storage`）が実行されるため、マウント失敗時などはインポート自体に最大で数秒〜数十秒の遅延が発生する可能性がある。
 * `fallback_path`を作成する際のフェイルセーフで例外が発生した場合、エラーログを出力しつつ元の`preferred_path`を返す仕様になっているため、後続の処理で書き込みエラー(`PermissionError`等)が誘発される可能性がある。
-* モジュールロード時に外部の`devices.json`や`family_events.json`を読み込む仕様であり、JSONの構文エラーが発生した場合は例外をキャッチして警告を出すが、設定は空のまま処理が続行される。
+* モジュールロード時に外部の`devices.json`を読み込む仕様であり、JSONの構文エラーが発生した場合は例外をキャッチして警告を出すが、設定は空のまま処理が続行される（Issue #488で`family_events.json`の読み込みは完全に削除された）。
 * メモリ使用率やストレージ等の警告通知に関連する定数（例：`MEMORY_ALERT_PERCENT`）が存在するが、このファイル単体では監視機構そのものは実装されていない。
 * `TV_UNLOCK_QUEST_IDS` は環境変数のカンマ区切り文字列から数字のみを抽出して`int`変換しており、`isdigit()`を満たさない値（不正なID等）は例外を送出せず黙って除外される仕様のため、設定ミスに気づきにくい。
 * `YOUTUBE_REWARD_IDS`も同じパース方式(`isdigit()`を満たす要素のみ`int`化)のため同じ落とし穴を持つ。加えて`TV_UNLOCK_QUEST_IDS`(未設定時は空リスト=機能無効)と異なり、環境変数が未設定の場合は既定値`"10,11,12"`にフォールバックしてクールダウン機能が有効な状態になる点に注意(明示的に`YOUTUBE_REWARD_IDS=`(空文字)を設定した場合のみ空リストとなり無効化される)。
