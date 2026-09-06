@@ -507,7 +507,7 @@ def _response_text_or_none(response) -> Optional[str]:
     """
     Issue #374: 旧SDK(google-generativeai)の `response.text` は、function_call
     パートしか無い応答や空応答で ValueError を送出した。google-genai では None を
-    返すようになったが(Issue #520で確認)、SDKの版差で再び送出side に戻っても
+    返すようになったが(Issue #520で確認)、SDKの版差で再び送出する挙動に戻っても
     壊れないよう try/except は残す。
     """
     try:
