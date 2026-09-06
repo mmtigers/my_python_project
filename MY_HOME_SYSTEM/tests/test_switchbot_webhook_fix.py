@@ -82,6 +82,38 @@ class TestUpdateSwitchbotWebhook:
 
         assert result is None
 
+    def test_appends_token_to_target_url_when_configured(self, monkeypatch):
+        """Issue #318: SWITCHBOT_WEBHOOK_TOKEN設定時、webhook_router.py側は
+        ?token=... が一致しないリクエストを401で拒否するため、SwitchBot側に
+        登録するURLにも同じtokenをクエリパラメータとして含める必要がある。"""
+        monkeypatch.setattr(wf.config, "SWITCHBOT_WEBHOOK_TOKEN", "secret-token")
+        token_url = f"{TARGET_URL}?token=secret-token"
+        query_resp = _mock_response({"body": {"urls": [token_url]}})
+
+        with patch.object(wf.requests, "post", return_value=query_resp) as mock_post:
+            result = wf.update_switchbot_webhook(BASE_URL)
+
+        assert result is False  # 既にtoken付きURLが登録済みなので変更なし
+        called_json = mock_post.call_args.kwargs["json"]
+        assert called_json == {"action": "queryUrl"}
+
+    def test_registers_token_url_when_currently_registered_without_token(self, monkeypatch):
+        """token未設定時代の古いURL(token無し)が残っている場合、token付きURLへ
+        削除・再登録されること。"""
+        monkeypatch.setattr(wf.config, "SWITCHBOT_WEBHOOK_TOKEN", "secret-token")
+        token_url = f"{TARGET_URL}?token=secret-token"
+        query_resp = _mock_response({"body": {"urls": [TARGET_URL]}})  # token無しの旧URL
+        delete_resp = _mock_response({"statusCode": 100})
+        setup_resp = _mock_response({"statusCode": 100})
+
+        with patch.object(wf.requests, "post", side_effect=[query_resp, delete_resp, setup_resp]) as mock_post, \
+             patch.object(wf.time, "sleep"):
+            result = wf.update_switchbot_webhook(BASE_URL)
+
+        assert result is True
+        setup_call_json = mock_post.call_args_list[2].kwargs["json"]
+        assert setup_call_json["url"] == token_url
+
 
 class TestFixAllWebhooksNotifiesOnDangerousState:
     def test_sends_error_alert_when_switchbot_registration_fails_after_delete(self, monkeypatch):

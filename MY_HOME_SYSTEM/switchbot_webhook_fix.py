@@ -35,6 +35,11 @@ def update_switchbot_webhook(base_url):
                 成否に関わらずこの状態を必ず通知すること)
     """
     target_url = f"{base_url}/webhook/switchbot"
+    if config.SWITCHBOT_WEBHOOK_TOKEN:
+        # routers/webhook_router.py はSWITCHBOT_WEBHOOK_TOKEN設定時、クエリパラメータ
+        # ?token=... が一致しないリクエストを401で拒否する(Issue #318)。ここでtokenを
+        # 付与しないと、SwitchBot側から届く実際のWebhookが全て401で弾かれてしまう。
+        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"
     logger.info(f"🔧 [SwitchBot] 設定確認: {target_url}")
 
     headers = sb_tool.create_switchbot_auth_headers()
