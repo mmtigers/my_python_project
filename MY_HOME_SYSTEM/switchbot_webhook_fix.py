@@ -2,6 +2,7 @@
 import sys
 import os
 import requests
+import re
 import time
 
 # --- 1. 強制パス設定 (Path Injection) ---
@@ -24,6 +25,14 @@ except ImportError as e:
 # ロガー設定
 logger = common.setup_logging("webhook_fix")
 
+_TOKEN_QUERY_RE = re.compile(r"((?:^|[?&])token=)[^&\s]*")
+
+
+def _mask_token(url: str) -> str:
+    """URL中の ?token=... の値をマスクする(ログ出力用)。"""
+    return _TOKEN_QUERY_RE.sub(r"\1***", url)
+
+
 def update_switchbot_webhook(base_url):
     """SwitchBotのWebhook URLを更新
 
@@ -40,7 +49,8 @@ def update_switchbot_webhook(base_url):
         # ?token=... が一致しないリクエストを401で拒否する(Issue #318)。ここでtokenを
         # 付与しないと、SwitchBot側から届く実際のWebhookが全て401で弾かれてしまう。
         target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"
-    logger.info(f"🔧 [SwitchBot] 設定確認: {target_url}")
+    # 共有シークレット(token)をログ(home_system.log / Discord経由のログ転記)に残さない
+    logger.info(f"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}")
 
     headers = sb_tool.create_switchbot_auth_headers()
 
@@ -57,7 +67,7 @@ def update_switchbot_webhook(base_url):
 
     # 古い設定を削除
     for old_url in urls:
-        logger.info(f"   🗑️ 古い設定を削除: {old_url}")
+        logger.info(f"   🗑️ 古い設定を削除: {_mask_token(old_url)}")
         try:
             requests.post("https://api.switch-bot.com/v1.1/webhook/deleteWebhook", headers=headers, json={"action": "deleteWebhook", "url": old_url}, timeout=10)
         except Exception as e:

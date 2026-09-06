@@ -54,7 +54,8 @@ def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply:
             ReplyMessageRequest(
                 replyToken=reply_token,
                 messages=[msg]
-            )
+            ),
+            _request_timeout=config.LINE_API_REQUEST_TIMEOUT
         )
     except Exception as e:
         logger.error(f"Reply Error: {e}")
@@ -65,10 +66,10 @@ def get_user_name(event, line_bot_api: MessagingApi) -> str:
         user_id = event.source.user_id
         if event.source.type == "group":
             group_id = event.source.group_id
-            profile = line_bot_api.get_group_member_profile(group_id, user_id)
+            profile = line_bot_api.get_group_member_profile(group_id, user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)
             return profile.display_name
         elif event.source.type == "user":
-            profile = line_bot_api.get_profile(user_id)
+            profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)
             return profile.display_name
     except Exception:
         pass
@@ -247,7 +248,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                     ReplyMessageRequest(
                         replyToken=reply_token,
                         messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
-                    )
+                    ),
+                    _request_timeout=config.LINE_API_REQUEST_TIMEOUT
                 )
 
         # === 2. 詳細入力パネル表示 ===
@@ -260,7 +262,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                         TextMessage(text="気になる方の体調を入力してください👇"),
                         FlexMessage(altText="体調入力パネル", contents=flex_container)
                     ]
-                )
+                ),
+                _request_timeout=config.LINE_API_REQUEST_TIMEOUT
             )
 
         # === 3. 個別記録 ===
@@ -303,7 +306,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                         ReplyMessageRequest(
                             replyToken=reply_token,
                             messages=[FlexMessage(altText="記録完了", contents=FlexContainer.from_dict(button_flex))]
-                        )
+                        ),
+                        _request_timeout=config.LINE_API_REQUEST_TIMEOUT
                     )
 
         # === 4. 記録確認 & 修正 ===
@@ -343,7 +347,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                 ReplyMessageRequest(
                     replyToken=reply_token,
                     messages=[FlexMessage(altText="記録サマリ", contents=FlexContainer.from_dict(flex_content))]
-                )
+                ),
+                _request_timeout=config.LINE_API_REQUEST_TIMEOUT
             )
 
         # === 5. 食事アンケート回答 ===
@@ -387,7 +392,8 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
                 ReplyMessageRequest(
                     replyToken=reply_token,
                     messages=[TextMessage(text="⚠️ 不明な操作、または未対応のアクションです。")]
-                )
+                ),
+                _request_timeout=config.LINE_API_REQUEST_TIMEOUT
             )
 
     except Exception as e:

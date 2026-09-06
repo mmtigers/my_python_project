@@ -170,7 +170,8 @@ def _send_line_push(user_id: str, messages: List[Any]) -> bool:
                 PushMessageRequest(
                     to=user_id,
                     messages=sdk_messages
-                )
+                ),
+                _request_timeout=config.LINE_API_REQUEST_TIMEOUT
             )
         return True
 

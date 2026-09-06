@@ -4,6 +4,7 @@ import threading
 import time
 import traceback
 import os
+import re
 import requests
 from logging.handlers import WatchedFileHandler
 import config
@@ -61,6 +62,14 @@ def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SE
 
 
 atexit.register(flush_pending_discord_notifications)
+
+
+_WEBHOOK_URL_RE = re.compile(r"(/api/webhooks/\d+)/[A-Za-z0-9_\-]+")
+
+
+def _redact_webhook_url(text: str) -> str:
+    """Discord Webhook URL のトークン部分をマスクする(ログ出力用)。"""
+    return _WEBHOOK_URL_RE.sub(r"\1/<redacted>", str(text))
 
 
 def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:
@@ -135,19 +144,34 @@ class DiscordErrorHandler(logging.Handler):
     def _send_webhook(url, payload):
         try:
             requests.post(url, json=payload, timeout=5)
-        except Exception:
+        except Exception as e:
             # #436: 以前はここで完全に握りつぶしており、Webhook URL失効やネットワーク障害で
             # 通知システム自体が壊れていても誰も気づけなかった。最低限の可視化として
             # 標準エラー出力に警告ログを残す。
-            _webhook_failure_logger.warning("Discord webhook送信に失敗しました: %s", url, exc_info=True)
+            # URL にはWebhookトークンが含まれるため、ID部分だけ残してマスクして出力する。
+            # exc_info(トレースバック)は requests の例外メッセージ経由で生URLを含むため付けず、
+            # 例外種別とマスク済みメッセージのみを残す。
+            _webhook_failure_logger.warning(
+                "Discord webhook送信に失敗しました: %s (%s: %s)",
+                _redact_webhook_url(url), type(e).__name__, _redact_webhook_url(e),
+            )
 
 def setup_logging(name: str, webhook_url: str = None) -> logging.Logger:
     """ロガーのセットアップ"""
     logger = logging.getLogger(name)
     logger.propagate = False
     
-    if logger.handlers:
-        logger.handlers.clear()
+    # 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。
+    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた
+    # home_system.log のファイルディスクリプタが閉じられずに残り、関数内で
+    # get_logger() を呼ぶ経路(DDD/newface_monitor.py の storage_warmup 等)では
+    # 呼び出しのたびに fd がリークしていた(pytest の ResourceWarning でも検出)。
+    for existing_handler in list(logger.handlers):
+        logger.removeHandler(existing_handler)
+        try:
+            existing_handler.close()
+        except Exception:
+            pass
     
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')

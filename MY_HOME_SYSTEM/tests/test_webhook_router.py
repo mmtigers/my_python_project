@@ -408,3 +408,50 @@ class TestLineCallbackWebhookEventIdIdempotency:
 
         assert res.status_code == 200
         assert processed == [("U1", "ステータス"), ("U1", "ステータス")]
+
+
+# ---------------------------------------------------------------------------
+# 非ASCIIトークン / イベントループ阻害の回帰テスト
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_non_ascii_token_is_rejected_with_401_not_typeerror(configured_token):
+    """hmac.compare_digest は str 同士だと非ASCII文字で TypeError を送出する。
+    公開エンドポイントのため、以前は ?token=%C3%A9 の1リクエストで 500 + Discord
+    エラー通知を誰でも発生させられた。401 で静かに拒否されること。"""
+    with pytest.raises(HTTPException) as exc_info:
+        await webhook_router.switchbot_webhook(_make_body(), token="é")
+    assert exc_info.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_configured_token_still_matches(monkeypatch):
+    """設定側のトークンが非ASCIIでも、一致していれば受理されること(bytes比較の対称性)"""
+    monkeypatch.setattr(config, "SWITCHBOT_WEBHOOK_TOKEN", "ひみつ")
+    with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+         patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)), \
+         patch.object(webhook_router.sb_tool, "get_device_name_by_id", return_value="玄関ドア"):
+        result = await webhook_router.switchbot_webhook(_make_body(), token="ひみつ")
+    assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_device_name_lookup_runs_off_the_event_loop_thread():
+    """get_device_name_by_id はキャッシュ未取得時に SwitchBot API へ同期HTTP(最大約47秒)を
+    行うため、イベントループのスレッド上で直接呼ぶと全リクエストが停止する。
+    ワーカースレッドで実行されていることを検証する。"""
+    import threading
+
+    loop_thread_id = threading.get_ident()
+    seen_thread_ids = []
+
+    def fake_lookup(mac):
+        seen_thread_ids.append(threading.get_ident())
+        return "玄関ドア"
+
+    with patch("routers.webhook_router.save_log_async", new=AsyncMock(return_value=True)), \
+         patch.object(webhook_router.sensor_service, "process_sensor_data", new=AsyncMock(return_value=None)), \
+         patch.object(webhook_router.sb_tool, "get_device_name_by_id", side_effect=fake_lookup):
+        result = await webhook_router.switchbot_webhook(_make_body(mac="mac_thread_test"), token=None)
+
+    assert result["status"] == "success"
+    assert seen_thread_ids and seen_thread_ids[0] != loop_thread_id

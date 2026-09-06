@@ -132,7 +132,7 @@ def _get_display_name(user_id: str) -> str:
     user_name = "Unknown"
     try:
         if line_bot_api:
-            profile = line_bot_api.get_profile(user_id)
+            profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)
             user_name = profile.display_name
     except Exception:
         pass
@@ -159,7 +159,8 @@ def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] 
             ReplyMessageRequest(
                 reply_token=reply_token,
                 messages=messages
-            )
+            ),
+            _request_timeout=config.LINE_API_REQUEST_TIMEOUT
         )
         return
     except Exception as e:
@@ -173,7 +174,8 @@ def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] 
             PushMessageRequest(
                 to=user_id,
                 messages=messages
-            )
+            ),
+            _request_timeout=config.LINE_API_REQUEST_TIMEOUT
         )
     except Exception as e:
         logger.error(f"LINE Push Fallback Failed: {e}")
