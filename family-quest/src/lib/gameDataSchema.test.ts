@@ -13,7 +13,10 @@ import { gameDataResponseSchema } from './gameDataSchema';
 const realisticResponse = {
     users: [
         {
-            // quest_users の全カラム + get_all_view_data が付与する nextLevelExp/maxHp/hp
+            // quest_users の全カラム + get_all_view_data が付与する nextLevelExp/maxHp/hp。
+            // #327: maxHp/hpはUserStatusCard.tsxの対応表示が無く未使用のためスキーマからは
+            // 除いたが、バックエンドは引き続き送出するため、schemaが未知フィールドとして
+            // 無視できることの確認を兼ねてfixtureにはそのまま残す。
             user_id: 'dad', name: 'まさひろ', job_class: '会社員', level: 3, exp: 120, gold: 45,
             medal_count: 2, avatar: '/uploads/dad_20260901.png', updated_at: '2026-09-01T08:00:00',
             role: 'role_adult', nextLevelExp: 300, maxHp: 65, hp: 65,
@@ -41,13 +44,16 @@ const realisticResponse = {
             days: null, bonus_gold: 0, bonus_exp: 0,
         },
         {
+            // #371: target_user は以前ここで 'role_adult' としていたが、role_ プレフィックスの
+            // ターゲティングは quest_data.py に実例が無いまま撤去された(quest_service.pyの
+            // 表示側計算・questTargeting.tsの判定ともに削除済み)ため、is_shared_pending_by/
+            // shared_pending_by_name はバックエンドから二度と送出されない。個別ユーザー宛の
+            // 現実的な例に置き換える。
             quest_id: 2, title: '寝かしつけ', description: 'どちらかが対応', quest_type: 'daily',
-            exp_gain: 20, gold_gain: 10, icon_key: '🌙', day_of_week: '0,1,2,3,4', target_user: 'role_adult',
+            exp_gain: 20, gold_gain: 10, icon_key: '🌙', day_of_week: '0,1,2,3,4', target_user: 'mom',
             start_date: null, end_date: null, pre_requisite_quest_id: null, occurrence_chance: 1.0,
             start_time: '19:00', end_time: '22:00', reset_period: 'daily',
             days: [0, 1, 2, 3, 4], bonus_gold: 5, bonus_exp: 5,
-            // 共有クエスト(role_ プレフィックス)で誰かが対応済み/申請中のときのみ付与される
-            is_shared_pending_by: 'mom', shared_pending_by_name: 'はるな',
         },
         {
             quest_id: 3, title: 'きょうだいでお手伝い', description: null, quest_type: 'daily',

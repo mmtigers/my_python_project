@@ -15,12 +15,10 @@ get_managed_target_directory が使われるが、これが引数を無視して
 同一バグ)。
 """
 import importlib
-import logging
-import sqlite3
 import sys
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -123,138 +121,11 @@ class TestFallbackStubRespectsExplicitPath:
         assert result == Path("./data")
 
 
-class TestVerifyEnvironmentDetectsFallback:
-    def test_detects_fallback_when_base_dir_matches_local_dir_exactly(self):
-        with patch.object(module.AppConfig, "get_output_base_dir", return_value=Path(module.AppConfig.LOCAL_DIR_STR)):
-            manager = module.SubscriptionManager.__new__(module.SubscriptionManager)
-            assert manager._verify_environment() is False
-
-    def test_does_not_flag_fallback_when_base_dir_is_the_real_nas_path(self):
-        with patch.object(
-            module.AppConfig, "get_output_base_dir", return_value=Path(module.AppConfig.NAS_DIR_STR)
-        ):
-            manager = module.SubscriptionManager.__new__(module.SubscriptionManager)
-            assert manager._verify_environment() is True
-
-    def test_detects_fallback_even_with_non_normalized_path_representation(self):
-        """H-12回帰防止: 旧実装(部分文字列 in チェック)は、フォールバック関数が
-        バグって短い相対パス './data' を返した場合にフォールバック状態を
-        検知できなかった。パス正規化した比較であれば、表記が違っても
-        同一パスとして検知できること。"""
-        messy_path = Path(module.AppConfig.LOCAL_DIR_STR + "/../" + Path(module.AppConfig.LOCAL_DIR_STR).name)
-        with patch.object(module.AppConfig, "get_output_base_dir", return_value=messy_path):
-            manager = module.SubscriptionManager.__new__(module.SubscriptionManager)
-            assert manager._verify_environment() is False
-
-
-class TestProcessSubscriptionsUsesFreshDbPath:
-    """
-    Issue #123回帰テスト: アプリ起動(SubscriptionManager構築)時点ではNASが
-    フォールバック中でも、process_subscriptions()の実行時までにNASが復帰して
-    いれば(autofsの再マウント遅延はこのリポジトリで既知の事象)、NAS側の
-    home_system.dbを正しく参照してサブスクリプションを処理できること。
-
-    修正前は db_path が __init__ 時点のNAS状態(フォールバック中)で固定され、
-    process_subscriptions() 側の環境検証だけが最新状態(復帰済み)を見るため、
-    検証は通過するのにDBはローカルの空DBを新規作成してしまい、NAS側に登録
-    済みのサブスクリプションが1件も読み込まれず「無言のno-op」になっていた。
-    """
-
-    def test_recovers_and_reads_nas_db_when_nas_comes_back_before_processing(self, tmp_path):
-        nas_base = tmp_path / "nas" / "youtube_extractor" / "data"
-        local_base = tmp_path / "local" / "data"
-        nas_base.mkdir(parents=True)
-        local_base.mkdir(parents=True)
-
-        nas_db_path = nas_base.parent / "home_system.db"
-        # NAS側DBに事前にアクティブなサブスクリプションを1件登録しておく
-        # (プロセス起動より前の巡回で既に登録済み、という状況を再現)
-        with closing(sqlite3.connect(nas_db_path)) as conn:
-            conn.execute(
-                """
-                CREATE TABLE youtube_subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_url TEXT UNIQUE NOT NULL,
-                    is_active INTEGER DEFAULT 1,
-                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                "INSERT INTO youtube_subscriptions (channel_url, is_active) VALUES (?, 1)",
-                ("https://example.test/channel/known",),
-            )
-            conn.commit()
-
-        class _RecoverableBaseDir:
-            """NASフォールバック→復帰、という時間経過をシミュレートするコールバック。"""
-
-            def __init__(self, local_dir, nas_dir):
-                self.local_dir = local_dir
-                self.nas_dir = nas_dir
-                self.recovered = False
-
-            def __call__(self):
-                return self.nas_dir if self.recovered else self.local_dir
-
-        base_dir_resolver = _RecoverableBaseDir(local_base, nas_base)
-
-        extractor = MagicMock()
-        extractor.extract_iter.return_value = iter([])
-        file_manager = MagicMock()
-
-        with patch.object(module.AppConfig, "get_output_base_dir", side_effect=base_dir_resolver), \
-                patch.object(module.AppConfig, "LOCAL_DIR_STR", str(local_base)):
-            # UrlExtractorApp.__init__と同じタイミングでSubscriptionManagerを構築する
-            # (この時点ではまだNASはフォールバック中)
-            manager = module.SubscriptionManager(extractor, file_manager)
-
-            # その後、巡回開始までにNASが復帰する
-            base_dir_resolver.recovered = True
-
-            manager.process_subscriptions()
-
-        # NAS側に事前登録されていたサブスクリプションが実際に処理されたこと
-        # (ローカルの空DBが使われていれば、ここは一度も呼ばれない)
-        extractor.extract_iter.assert_called_once_with("https://example.test/channel/known")
-
-        # ローカル側にはゴミの空DBが作られていないこと
-        assert not (local_base.parent / "home_system.db").exists()
-
-
-class TestProcessSubscriptionsHandlesMkdirOSError:
-    """Issue #185の回帰テスト: db_path.parent.mkdir()が送出しうるOSError
-    (権限エラー・読み取り専用マウント等)はsqlite3.Errorのサブクラスでは
-    ないため、以前は`except sqlite3.Error`節で捕捉されず--cron実行全体が
-    未処理例外で異常終了していた。process_subscriptions内の他の失敗経路
-    (エラーログ出力+安全なreturn)と同じフェイルソフト方針に統一されている
-    ことを確認する。"""
-
-    def test_mkdir_permission_error_is_caught_and_logged_not_raised(self, tmp_path, caplog):
-        base = tmp_path / "data"
-        base.mkdir(parents=True)
-
-        extractor = MagicMock()
-        file_manager = MagicMock()
-        manager = module.SubscriptionManager(extractor, file_manager)
-
-        # core.logger.setup_logging() は propagate=False で設定するため、
-        # rootロガーに依拠するcaplogがそのままでは記録できない
-        # (test_newface_monitor_notifier.pyの同種コメント参照)。
-        # テスト実行中だけ強制的にTrueへ切り替え、終了後に元の値へ戻す。
-        original_propagate = module.logger.propagate
-        module.logger.propagate = True
-        try:
-            with patch.object(module.AppConfig, "get_output_base_dir", return_value=base), \
-                    patch("pathlib.Path.mkdir", side_effect=PermissionError("Permission denied")), \
-                    caplog.at_level(logging.ERROR, logger=module.logger.name):
-                # 例外を送出せずに完走すること自体が回帰確認の対象
-                manager.process_subscriptions()
-        finally:
-            module.logger.propagate = original_propagate
-
-        extractor.extract_iter.assert_not_called()
-        assert any("DB初期化エラー" in r.message for r in caplog.records)
+# #413 (D-L11): 以前ここにあった TestVerifyEnvironmentDetectsFallback /
+# TestProcessSubscriptionsUsesFreshDbPath / TestProcessSubscriptionsHandlesMkdirOSError
+# は、削除された SubscriptionManager(定期巡回/サブスクリプション機能。事実上の
+# デッド機能だったためオーナー判断で撤去)専用のテストだったため、クラス本体と
+# あわせて削除した。
 
 
 if __name__ == "__main__":

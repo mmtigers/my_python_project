@@ -31,3 +31,29 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
 - `unified_server.py` の起動時（`lifespan`）
 
 のいずれからも呼び出されます。
+
+## `../current_schema.sql` との関係 (Issue #411)
+
+`MY_HOME_SYSTEM/current_schema.sql` は、実行時にはどこからも参照・実行されない
+参考ドキュメントであり、「あるべき姿」の記述として位置づける（本番DBの実機ダンプ
+ではない）。上記のとおり**このディレクトリ(`migrations/`)がスキーマの唯一の
+定義元**であり、`current_schema.sql` はそれと矛盾したり実行時の挙動を決定したり
+しない。
+
+2026-09時点で判明している既知の差分（Issue #411調査時点。解消の予定は無い）:
+
+- `current_schema.sql` には `0000_baseline_schema.sql` が持つ `CREATE INDEX` 文が
+  3つ含まれていない。
+- `current_schema.sql` には baseline に存在しないテーブル(`haircut_history`,
+  `app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)や列
+  (`device_records.battery_level`、`food_records.date`/`menu`/`created_at`)が
+  含まれている。特に `app_rankings` は `services/analysis_service.py` が参照する
+  ため、空DB(`migrations/`のみ適用した状態)ではこの機能が黙って無効になる点に
+  注意すること。
+
+`tests/test_current_schema_sql.py` が、`migrations/*.sql` の
+`ALTER TABLE ... ADD COLUMN` で追加される列が `current_schema.sql` の
+`CREATE TABLE` 文に含まれているか(一方向のみ)を機械的にチェックしているが、
+上記のような「`current_schema.sql` にしか無い」差分は検知しない。実際のDB
+スキーマを確認する必要がある場合は、必ず本ディレクトリ(`migrations/`)を正とし、
+`current_schema.sql` を参照する場合もこの位置づけを踏まえること。

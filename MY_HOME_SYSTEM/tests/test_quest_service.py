@@ -84,10 +84,13 @@ class TestQuestService(unittest.TestCase):
         """テストに必要な最低限のマスタデータを投入"""
         with common.get_db_cursor(commit=True) as cur:
             # ユーザー
+            # #370 (Q-M2): クエスト完了の即時報酬/pending振り分けは role == ROLE_ADULT で
+            # 判定するようになった(不明=子ども)ため、即時報酬を前提とするテストでは
+            # 明示的に ROLE_ADULT を指定する。
             cur.execute("""
-                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, ("user1", "TestPlayer", "Novice", 1, 0, 100))
+                INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, ("user1", "TestPlayer", "Novice", 1, 0, 100, ROLE_ADULT))
             
             # クエスト
             cur.execute("""

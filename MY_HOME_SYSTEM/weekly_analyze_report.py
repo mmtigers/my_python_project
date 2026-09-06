@@ -54,11 +54,17 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
     with common.get_db_cursor() as cursor:
         if not cursor:
             return None
-        
+
+        # Issue #497 (C-4): start_strはtry節内の1行目で組み立てられていたが、
+        # 直前のdatetime.datetime.now(...)が例外を送出した場合、except節での
+        # ログ出力(start_strを参照)がNameErrorに化けてしまう
+        # (pyrightのreportPossiblyUnboundVariableで検出済み)。strftime自体は
+        # 実質失敗しないため、try節の外側で先に組み立てておく。
+        start_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+
         try:
             now = datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
-            start_str = start_dt.strftime("%Y-%m-%d %H:%M:%S")
-            
+
             data: Dict[str, Any] = {}
 
             # 1. 食事の傾向

@@ -22,18 +22,12 @@ export interface User {
     job_class?: string | null;
     gold: number;
     role?: string | null;
-    // バックエンド(MY_HOME_SYSTEM)から送られてくるHP。個々のプレイヤーはダメージを
-    // 受けない仕様のため hp は常に maxHp と等しい。
-    hp?: number;
-    /**
-     * #471: ⚠️ 常にバックエンドの計算結果をそのまま表示すること。
-     *
-     * `calculate_max_hp(level) = level * 20 + 5` (MY_HOME_SYSTEM側)で計算される値。
-     * フロント側で独自に再計算してはいけない — 過去に誤った式で再計算し、
-     * バックエンドの値とズレて表示されるリグレッションが実際に発生している。
-     * レベルからHPを表示する場合は、必ずこの `maxHp` フィールドを参照すること。
-     */
-    maxHp?: number;
+    // #327: hp/maxHp(バックエンドが送出していたHP関連フィールド)は、UserStatusCard.tsx
+    // に対応する表示UIが既に存在せず(いつ・なぜ表示が無くなったか記録が残っていなかった
+    // ため一時「要追加確認」だった)、オーナー判断によりHP表示は廃止で確定したため
+    // フィールド自体も削除した。バックエンド(MY_HOME_SYSTEM)側は現在も
+    // get_all_view_dataでhp/maxHpを送出し続けているが(#471のcalculate_max_hp等)、
+    // フロント側では未使用であるため型定義・Zodスキーマから除いている。
     // #470: get_all_view_dataが付与する次レベルまでの必要経験値。
     // gameDataSchema.ts の userSchema にも対応するフィールドを追加済み。
     nextLevelExp?: number;

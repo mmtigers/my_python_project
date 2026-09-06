@@ -28,8 +28,10 @@ const userSchema = z.object({
     job_class: z.string().nullable().optional(),
     gold: z.number(),
     role: z.string().nullable().optional(),
-    hp: z.number().optional(),
-    maxHp: z.number().optional(),
+    // #327: hp/maxHpはバックエンドが送出し続けているが、対応する表示UI
+    // (UserStatusCard.tsx)が既に存在せずフロント側では未使用のため、
+    // オーナー判断(HP表示は廃止で確定)によりスキーマから除いた。.strict()を
+    // 使わないため、未知フィールドとして無視されるだけでparseエラーにはならない。
     // #470: get_all_view_dataが実際に付与しているフィールドだが、.strict()を
     // 使わないためこれまでスキーマに含まれておらず、parse後は無音で消えていた
     // (バックエンドの新フィールド追加を検知できないこの設計の既知の穴の一例)。

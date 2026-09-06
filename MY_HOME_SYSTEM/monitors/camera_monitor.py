@@ -43,13 +43,18 @@ from services.notification_service import send_push
 # === ログ・定数設定 ===
 logger = setup_logging("camera")
 
+# Issue #497 (C-4): os.path.join自体が失敗した場合、ASSETS_DIRがtry節内でしか
+# 束縛されず、except節でのログ出力(52行目)がNameErrorに化けてしまい、原因が
+# 隠れる(到達可能性は低いが、pyrightのreportPossiblyUnboundVariableで検出済み)。
+# try節の外側で先に組み立てておく。
+_nas_assets_dir = os.path.join(config.ASSETS_DIR, "snapshots")
 try:
-    ASSETS_DIR: str = os.path.join(config.ASSETS_DIR, "snapshots")
+    ASSETS_DIR: str = _nas_assets_dir
     os.makedirs(ASSETS_DIR, exist_ok=True)
 except (PermissionError, OSError) as e:
     # NAS等が書き込み不可の場合、ローカルの一時ディレクトリにフォールバック
     fallback_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_assets", "snapshots")
-    logger.warning(f"⚠️ Failed to create NAS directory '{ASSETS_DIR}': {e}")
+    logger.warning(f"⚠️ Failed to create NAS directory '{_nas_assets_dir}': {e}")
     logger.warning(f"   -> 📂 Switching to local fallback: '{fallback_path}'")
     ASSETS_DIR = fallback_path
     os.makedirs(ASSETS_DIR, exist_ok=True)

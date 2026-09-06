@@ -20,11 +20,15 @@ from typing import List, Tuple, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from contextlib import contextmanager
 
+# Issue #497 (C-4): 以前は成否を別変数HAS_PSUTILで持ち回っていたため、pyrightは
+# 267行目のpsutil参照を「importが失敗していれば未束縛」と判定していた
+# (HAS_PSUTILとpsutilの束縛が相関している事実は静的解析からは分からない)。
+# psutil自体をNoneに束縛し直すことで、常にどちらかの値が入っていることを
+# 型チェッカにも分かる形にする。
 try:
     import psutil
-    HAS_PSUTIL = True
 except ImportError:
-    HAS_PSUTIL = False
+    psutil = None
 
 # プロジェクトルートの解決と追加
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -263,7 +267,7 @@ def mark_as_done(records_dir: str, base_filename: str, summary: SummaryInfo):
         json.dump(asdict(summary), f, indent=2, ensure_ascii=False)
 
 def log_cpu_usage():
-    if HAS_PSUTIL:
+    if psutil is not None:
         logger.info(f"現在のCPU使用率: {psutil.cpu_percent()}%")
 
 # ==========================================

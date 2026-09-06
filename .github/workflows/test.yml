@@ -73,57 +73,37 @@ jobs:
         working-directory: .
         run: python -m pytest .github/scripts/ -q
 
+      - name: Pyright (report - non-blocking)
+        # Issue #487: 以前は services/quest_service.py:45 の到達不能な相対import
+        # (削除済み)でmypyが1行目で解析を停止し、型チェッカがコードベースを
+        # 一切検証できていなかった。ruff/bandit/shellcheckと同じ「まず非
+        # ブロッキングで可視化してから絞る」方針でpyrightを導入する
+        # (mypyより高速でvenv解決が容易なため推奨)。
+        run: npx --yes pyright@1.1.390 --outputjson . || true
+        continue-on-error: true
+
+      - name: ShellCheck (report - non-blocking)
+        # Issue #486: Pythonにはruff、TypeScriptにはESLintがあるのに、本番の起動と
+        # 全cronを担うシェルスクリプト(start_all.sh/run_task.sh等)には静的解析が
+        # 無かった。ruff/banditと同じ方針(まずフルレポートを可視化し、error 0件を
+        # 維持できるようになったらブロッキング化する)を適用する。shellcheckは
+        # ubuntu-latestにプリインストール済みのため追加インストールは不要。
+        working-directory: .
+        run: |
+          shellcheck -x \
+            MY_HOME_SYSTEM/*.sh \
+            MY_HOME_SYSTEM/tools/*.sh \
+            MY_HOME_SYSTEM/scripts/*.sh \
+            family-quest/deploy.sh
+        continue-on-error: true
+
   test:
     name: Test + Coverage
     runs-on: ubuntu-latest
-    # C-L1 (Issue #414): pytest約1分 + DDDテスト約3分半 + インストール時間に対して十分な余裕
+    # C-L1 (Issue #414): pytest約1分 + DDDテスト約15秒 + インストール時間に対して十分な余裕
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          # pull_request時のDDD変更検知(下のCheck for DDD changesステップ)で、
-          # マージコミットの親(HEAD^1=ベースブランチ)との差分を取るために必要。
-          fetch-depth: 2
-
-      - name: Check for DDD changes
-        # DDDテストは全体の約3分半(重い回帰テスト2件+yt_dlp等のimport)を占めるが、
-        # DDDは他サブシステムからほぼ独立しているため、PRの差分に関連ファイルが
-        # 含まれない場合はスキップして良い。push/workflow_dispatch時、および差分を
-        # 判定できない異常時は、安全側に倒して常に実行する。
-        #
-        # Issue #368: DDD/newface_monitor.py・extract_youtube_urls.py は sys.path に
-        # MY_HOME_SYSTEM を足して core.logger / core.nas_utils / core.utils / config を
-        # 直接importするため、DDD/ だけでなくそれらのimport先も pathspec に含める
-        # (以前は core/ や config.py の変更PRでDDDテストが黙ってスキップされていた)。
-        # また git diff 自体の失敗が "changed=false" に倒れないよう pipefail を付ける。
-        id: ddd_changes
-        working-directory: .
-        run: |
-          set -o pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! git rev-parse -q --verify 'HEAD^1' >/dev/null; then
-            echo "::warning::マージコミットの親を取得できないため、安全側に倒してDDDテストを実行します"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          ddd_pathspec="DDD/ MY_HOME_SYSTEM/core/ MY_HOME_SYSTEM/config.py MY_HOME_SYSTEM/common.py"
-          # shellcheck disable=SC2086  # pathspecは意図的に単語分割する
-          if ! changed_files=$(git diff --name-only HEAD^1 HEAD -- $ddd_pathspec); then
-            echo "::warning::git diff に失敗したため、安全側に倒してDDDテストを実行します"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ -n "$changed_files" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "DDD/** またはDDDのimport先(${ddd_pathspec}) に変更あり: DDDテストを実行します"
-            echo "$changed_files"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "DDD/** およびDDDのimport先に変更なし: DDDテストをスキップします"
-          fi
 
       - name: Set up Python 3.11
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
@@ -134,6 +114,7 @@ jobs:
           cache-dependency-path: |
             MY_HOME_SYSTEM/requirements.txt
             MY_HOME_SYSTEM/requirements-dev.txt
+            DDD/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -142,10 +123,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run tests with coverage
-        # Issue #367: .coveragerc の omit を「本当に実行不能なもの」だけに絞った
-        # 真のビュー(2026-09-04時点の実測 67%: 6,575 stmts / miss 2,151)を基準に、
-        # 約3pt下の 64 を閾値とする(旧 45 は omit で水増しされた公式ビュー 87% に
-        # 対する値で、退行検知として機能していなかった)。段階的に引き上げること。
+        # Issue #367で.coveragercのomitを「本当に実行不能なもの」だけに絞った真の
+        # ビューを基準に64を設定したが、Issue #494時点の実測(2026-09-06: 69.92%,
+        # 7,233 stmts / miss 2,176)に対して約6ptの余裕があり退行を見逃していたため、
+        # 実測より約3pt下の67へ引き上げた。段階的に引き上げること。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -157,18 +138,22 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=64
+            --cov-fail-under=67
 
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
         # DDD/conftest.py(#103/#137)がDiscord/LINE Webhook系の環境変数をマスクする
         # ため、logger.error/critical経由で本番Webhookへ誤通知する心配はない。
-        if: steps.ddd_changes.outputs.changed == 'true'
         working-directory: ./DDD
         run: pip install -r requirements.txt
 
       - name: Run DDD tests
-        if: steps.ddd_changes.outputs.changed == 'true'
+        # Issue #493: DDDは全体の約3分半かかるという前提でPR差分ベースの条件付き
+        # スキップ(約37行のbashとpathspec維持)を行っていたが、実測は15秒程度
+        # (CI全体でも約2分)であり、そもそも短縮の必要性が薄かった。この機構は
+        # Issue #368で「pathspec の維持漏れによりDDDテストが黙ってスキップされる」
+        # という失敗モードを既に一度起こしており、リスクがコストに見合わないため
+        # 撤去し、常に実行する。
         working-directory: ./DDD
         run: python -m pytest -v
 
@@ -200,9 +185,12 @@ jobs:
             MY_HOME_SYSTEM/requirements-dev.txt
 
       - name: Install dependencies
+        # Issue #499: このジョブが実行するのはbandit(ASTベースの静的解析)と
+        # pip-audit(-r指定でファイルを読むだけ)のみで、いずれもrequirements.txt
+        # (117パッケージ)のインストール済み環境を必要としない。dev依存(bandit/
+        # pip-audit本体)のみを入れる。
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
       - name: Bandit (High severity - blocking)
@@ -277,8 +265,18 @@ jobs:
         # 最小限としてまずビルド検証(tsc型チェック含む)をブロッキング条件にする。
         run: npm run build
 
-      - name: Test (vitest)
+      - name: Test (vitest + coverage)
         # family-questにはテストが1件も無かった。まずgetQuestLockState
         # (ロック/完了/申請中判定の共通ロジック)・isSameOriginAvatarPath
         # (M-9-5のアバターURL検証)・useOnlineStatusの回帰テストで土台を作る。
-        run: npm test
+        # Issue #495: バックエンドと異なりカバレッジ計測が無かったため追加する。
+        # 閾値はまだ設定せず、まず可視化のみ行う。
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-coverage-report
+          path: family-quest/coverage/
+          retention-days: 14

@@ -596,6 +596,8 @@ graph TD
 * SQLiteの接続時に `?mode=ro` (Read Only) と URI オプションを使用しているため、SQLiteのバージョンやコンパイルオプションによっては URI がサポートされず接続エラーになる可能性がある。
 * **[修正済み] Issue #410 L-L2/L-L3/保守性 まとめ**: (1) `calculate_monthly_cost_cumulative`の`start_of_month`に`microsecond=0`を追加し、月初ちょうど0時のレコードが文字列比較の境界で漏れる問題を解消（本番の保存規約通り、DB側・`start_of_month`側の双方が`.isoformat()`（JSTオフセット付き）である前提のもとで成立する修正）。(2) `load_weather_history`の`start_date`算出をnaive`datetime.now()`からJST明示の`datetime.now(pytz.timezone("Asia/Tokyo"))`へ変更。(3) `process_dataframe`が1行の不正なタイムスタンプで全行を失っていた問題を、パース失敗時に`pd.NaT`へ丸める`_parse_timestamp_to_jst_coerce`の導入で解消。(4) `load_ranking_data`のf-string SQL埋め込み（bandit B608）をプレースホルダ化。(5) `load_yearly_temperature_stats`内の2箇所のbare `except:`を`except Exception:`へ変更。
 * 根拠: `calculate_monthly_cost_cumulative` (行番号: 246)、`load_weather_history` (行番号: 295)、`_parse_timestamp_to_jst_coerce`/`process_dataframe` (行番号: 56-69, 79)、`load_ranking_data` (行番号: 412-419)、`load_yearly_temperature_stats`のexcept (行番号: 346, 350)
+* **[修正済み] Issue #491: load_sensor_dataのpandas FutureWarning**: `df_legacy`/`df_meter`/`df_power`の3フレームを`pd.concat`する際、フレームによって存在する列が異なり(一部の列は特定のフレームにしか無い)、欠損列を補うために発生する空/全NA列のdtypeが曖昧になることで「DataFrame concatenation with empty or all-NA entries is deprecated」というFutureWarningが発生していた。`reindex`だけでは新規に補われた列がfloat64のNaNとして残り曖昧さが解消しないため、列ごとの想定dtypeを`_SENSOR_COLUMN_DTYPES`辞書として明示し、`reindex`後に`astype(_SENSOR_COLUMN_DTYPES)`で型を強制してから`concat`するよう修正した。`pytest.ini`側で`services.*`パッケージ限定の`error::FutureWarning`をCIで検知するようにしたため(`MY_HOME_SYSTEM/pytest.ini`)、同種の警告が再発すればテスト失敗として検知される。
+* 根拠: `_SENSOR_COLUMN_DTYPES`定義・reindexループ・`pd.concat` (行番号: 233-253)
 
 ## 9. 不明事項一覧
 

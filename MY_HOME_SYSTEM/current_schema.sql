@@ -1,3 +1,24 @@
+-- Issue #411: このファイルの位置づけについて
+-- 「migrations/ がスキーマの唯一の定義元である」(Issue #330、migrations/README.md参照)
+-- という方針のもと、本ファイルは実行時に一切参照・実行されない参考ドキュメントである
+-- (テストからのみ間接的に参照される。後述)。「あるべき姿」の記述として位置づけ、
+-- 本番DBの実ダンプ(実機ダンプ)ではないことをここに明記する。
+--
+-- 現状 migrations/ 配下の全マイグレーションを適用したスキーマと完全一致してはいない
+-- (2026-09時点で判明している既知の差分。Issue #411調査時点):
+--   - 本ファイルには migrations/0000_baseline_schema.sql が持つ CREATE INDEX 文が
+--     3つ含まれていない。
+--   - 本ファイルには baseline に存在しないテーブル(haircut_history, app_rankings,
+--     quest_tasks, quest_status, youtube_subscriptions)や列
+--     (device_records.battery_level、food_records.date/menu/created_at)が
+--     含まれている。特に app_rankings は services/analysis_service.py が参照する
+--     ため、空DB(migrationsのみ適用)ではこの機能が黙って無効になる。
+--
+-- tests/test_current_schema_sql.py が、migrations/*.sql の ALTER TABLE ADD COLUMN
+-- で追加される列が本ファイルのCREATE TABLE文に含まれているかを機械的にチェックする
+-- (一方向のチェックのみで、上記のような「本ファイルにしか無い」差分は検知しない)。
+-- 実際のDBスキーマを確認する必要がある場合は、必ず migrations/ 配下(適用順は
+-- core/migrations.py の apply_pending_migrations() 参照)を正とすること。
 CREATE TABLE device_records (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME NOT NULL,

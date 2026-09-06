@@ -16,26 +16,26 @@ process_subscriptions側のgot_resultがTrueになり、内部の大量プレイ
     1. extract_iter内部のリクエスト間にもジッター待機が挟まること
     2. 内部のプレイリスト取得失敗がlast_extract_internal_failuresとして
        記録されること
-    3. process_subscriptionsが、got_result=Trueでも内部失敗があれば
-       サーキットブレーカーの連続失敗カウントを増加させること
 を検証する。
+
+（#413 D-L11で削除）以前ここには、削除された SubscriptionManager
+(process_subscriptions)が got_result=True でも内部失敗があればサーキット
+ブレーカーの連続失敗カウントを増加させることを検証する3点目の項目があったが、
+SubscriptionManager自体の削除に伴い該当テストクラスも削除した。
 
 同じディレクトリの test_extract_youtube_urls_paths.py は importlib.reload() で
 extract_youtube_urls モジュールを再ロードするテストを含む。reload()は同一の
 モジュール名前空間を書き換えるため、モジュール属性(AppConfig等)を本ファイルの
 import時に一度だけローカル変数へエイリアスしてしまうと、他ファイルのreload後に
 テストスイート全体を実行した際、そのエイリアスが古いクラスオブジェクトを指したまま
-になり、patchが実際にSubscriptionManager等が参照する（reload後の）新しいクラス
-オブジェクトに反映されない。そのため本ファイルでは常に `module.AppConfig` 等、
-モジュール属性への動的参照でアクセスする。
+になる。そのため本ファイルでは常に `module.AppConfig` 等、モジュール属性への
+動的参照でアクセスする。
 
 DDDにはpytest基盤(conftest.py等)が無いため、本ファイルは
 `pytest DDD/test_extract_youtube_urls_rate_limit.py` のように直接指定して
 実行する(MY_HOME_SYSTEM/pytest.ini の testpaths=tests のスコープ外)。
 """
-import sqlite3
 import sys
-from contextlib import closing
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -150,87 +150,11 @@ class TestExtractIterTracksInternalFailures:
         assert extractor.last_extract_internal_failures == 1
 
 
-class TestProcessSubscriptionsCircuitBreakerDetectsInternalFailures:
-    """#227: got_result=True(1件でも結果を取得できた)であっても、
-    extract_iter内部で失敗が発生していればサーキットブレーカーの連続失敗
-    カウントに反映されること。"""
-
-    def _make_db_with_urls(self, tmp_path, urls):
-        # process_subscriptions() は db_path = current_base.parent / "home_system.db"
-        # としてDBパスを導出するため、get_output_base_dir()が返す値の一段上に置く。
-        db_path = tmp_path / "home_system.db"
-        with closing(sqlite3.connect(db_path)) as conn:
-            conn.execute(
-                """
-                CREATE TABLE youtube_subscriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    channel_url TEXT NOT NULL,
-                    is_active INTEGER NOT NULL DEFAULT 1
-                )
-                """
-            )
-            for url in urls:
-                conn.execute(
-                    "INSERT INTO youtube_subscriptions (channel_url, is_active) VALUES (?, 1)", (url,)
-                )
-            conn.commit()
-        return db_path
-
-    def test_internal_failures_increment_consecutive_failures_despite_got_result(self, tmp_path):
-        """3チャンネル全てでgot_result=Trueだが内部失敗が閾値回連続したため、
-        以前は決して中断しなかった巡回が、修正後はサーキットブレーカーで中断すること。"""
-        urls = [
-            "https://www.youtube.com/@ch1",
-            "https://www.youtube.com/@ch2",
-            "https://www.youtube.com/@ch3",
-        ]
-        self._make_db_with_urls(tmp_path, urls)
-
-        extractor = MagicMock()
-        # 1件は結果をyieldしつつ、常に内部失敗が1件発生している状態を模す
-        extractor.extract_iter.return_value = iter([_make_result()])
-        extractor.last_extract_internal_failures = 1
-        file_manager = MagicMock()
-
-        manager = module.SubscriptionManager(extractor, file_manager)
-
-        original_propagate = module.logger.propagate
-        module.logger.propagate = True
-        try:
-            with patch.object(module.AppConfig, "get_output_base_dir", return_value=tmp_path / "data"), \
-                    patch.object(module.AppConfig, "CONSECUTIVE_FAILURE_THRESHOLD", 2), \
-                    patch("extract_youtube_urls.time.sleep"):
-                manager.process_subscriptions()
-        finally:
-            module.logger.propagate = original_propagate
-
-        # 3件登録されているが、2件目の処理で連続失敗閾値(2)に達し中断するため、
-        # 3件目は処理されない
-        assert extractor.extract_iter.call_count == 2
-
-    def test_no_internal_failures_keeps_resetting_consecutive_failures(self, tmp_path):
-        """回帰防止: 内部失敗が無い場合は従来通りgot_result=Trueで
-        連続失敗カウントがリセットされ、全件処理されること。"""
-        urls = [
-            "https://www.youtube.com/@ch1",
-            "https://www.youtube.com/@ch2",
-            "https://www.youtube.com/@ch3",
-        ]
-        self._make_db_with_urls(tmp_path, urls)
-
-        extractor = MagicMock()
-        extractor.extract_iter.return_value = iter([_make_result()])
-        extractor.last_extract_internal_failures = 0
-        file_manager = MagicMock()
-
-        manager = module.SubscriptionManager(extractor, file_manager)
-
-        with patch.object(module.AppConfig, "get_output_base_dir", return_value=tmp_path / "data"), \
-                patch.object(module.AppConfig, "CONSECUTIVE_FAILURE_THRESHOLD", 2), \
-                patch("extract_youtube_urls.time.sleep"):
-            manager.process_subscriptions()
-
-        assert extractor.extract_iter.call_count == 3
+# #413 (D-L11): 以前ここにあった TestProcessSubscriptionsCircuitBreakerDetectsInternalFailures
+# は、削除された SubscriptionManager(定期巡回/サブスクリプション機能。事実上の
+# デッド機能だったためオーナー判断で撤去)専用のテストだったため削除した。
+# extract_iter自体のジッター待機・内部失敗カウントのテスト(上記2クラス)は
+# SubscriptionManagerに依存しないため引き続き対象。
 
 
 if __name__ == "__main__":

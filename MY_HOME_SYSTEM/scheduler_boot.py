@@ -1,4 +1,4 @@
-# MY_HOME_SYSTEM/scheduler.py
+# MY_HOME_SYSTEM/scheduler_boot.py
 import collections
 import time
 import signal

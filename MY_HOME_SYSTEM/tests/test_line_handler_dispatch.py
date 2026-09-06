@@ -33,43 +33,27 @@ def _clean_profile_cache():
 
 @pytest.mark.asyncio
 class TestProcessMessageAsyncDispatch:
-    async def test_status_command_dispatches_to_get_user_status_message(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="status-reply"))
-        monkeypatch.setattr(line_handler.line_service, "get_user_status_message", mock_fn)
-        mock_reply = MagicMock()
-        monkeypatch.setattr(line_handler, "reply_message", mock_reply)
+    # #358: LINE経由のFamily Questコマンド(ステータス/クエスト/承認/却下)は、
+    # LINE ID を quest_users.user_id へマッピングする仕組みが無く本番で機能しない
+    # デッドコードだったため撤去した(オーナー判断)。これらの文言はAIフォールバックへ
+    # 委ねられることを regression として確認しておく。
+    async def test_status_like_text_falls_back_to_ai(self, monkeypatch):
+        mock_ai = AsyncMock(return_value="AI reply")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
+        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
 
         await line_handler._process_message_async("U1", "太郎", "ステータス", "tok")
 
-        mock_fn.assert_called_once_with("U1")
-        assert mock_reply.call_args[0][0] == "tok"
+        mock_ai.assert_called_once_with("U1", "太郎", "ステータス")
 
-    async def test_quest_command_dispatches_to_get_active_quests_message(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="quest-reply"))
-        monkeypatch.setattr(line_handler.line_service, "get_active_quests_message", mock_fn)
-        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
-
-        await line_handler._process_message_async("U1", "太郎", "クエスト", "tok")
-
-        mock_fn.assert_called_once_with("U1")
-
-    async def test_approve_prefix_dispatches_to_process_approval_command(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="approved"))
-        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+    async def test_approve_prefix_text_falls_back_to_ai(self, monkeypatch):
+        mock_ai = AsyncMock(return_value="AI reply")
+        monkeypatch.setattr(line_handler.ai_service, "analyze_text_and_execute", mock_ai)
         monkeypatch.setattr(line_handler, "reply_message", MagicMock())
 
         await line_handler._process_message_async("U1", "太郎", "承認 5", "tok")
 
-        mock_fn.assert_called_once_with("U1", "承認 5")
-
-    async def test_reject_prefix_dispatches_to_process_approval_command(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="rejected"))
-        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
-        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
-
-        await line_handler._process_message_async("U1", "太郎", "却下 5", "tok")
-
-        mock_fn.assert_called_once_with("U1", "却下 5")
+        mock_ai.assert_called_once_with("U1", "太郎", "承認 5")
 
     async def test_child_health_message_detects_member_and_condition(self, monkeypatch):
         mock_fn = AsyncMock(return_value=MagicMock(text="logged"))
@@ -182,24 +166,31 @@ class TestReplyMessage:
 
 class TestHandleMessageWrapper:
     def test_parses_event_strips_text_and_dispatches(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="reply"))
-        monkeypatch.setattr(line_handler.line_service, "get_user_status_message", mock_fn)
-        monkeypatch.setattr(line_handler, "reply_message", MagicMock())
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
 
         event = MagicMock()
         event.source.user_id = "U1"
-        event.message.text = " ステータス "
+        event.message.text = " こんにちは "
         event.reply_token = "tok"
 
         line_handler.handle_message(event)
 
-        mock_fn.assert_called_once_with("U1")
+        mock_process.assert_called_once()
+        call_args = mock_process.call_args[0]
+        assert call_args[0] == "U1"
+        assert call_args[2] == "こんにちは"
+        assert call_args[3] == "tok"
 
 
 class TestHandlePostbackWrapper:
-    def test_approve_postback_dispatches_as_approve_command(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="approved"))
-        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
+    # #358: approve:/reject: postback の専用処理(LINE経由のクエスト承認/却下)は、
+    # それを生成する送信元がリポジトリ内に存在しないデッドコードだったため撤去した。
+    # そのようなデータが届いても既存ロジック(line_logic.py)への委譲に流れることを
+    # regression として確認する。
+    def test_approve_like_postback_delegates_to_line_logic(self, monkeypatch):
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
 
         event = MagicMock()
         event.source.user_id = "U1"
@@ -208,33 +199,7 @@ class TestHandlePostbackWrapper:
 
         line_handler.handle_postback(event)
 
-        mock_fn.assert_called_once_with("U1", "承認 42")
-
-    def test_reject_postback_dispatches_as_reject_command(self, monkeypatch):
-        mock_fn = AsyncMock(return_value=MagicMock(text="rejected"))
-        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
-
-        event = MagicMock()
-        event.source.user_id = "U1"
-        event.postback.data = "reject:7"
-        event.reply_token = "tok"
-
-        line_handler.handle_postback(event)
-
-        mock_fn.assert_called_once_with("U1", "却下 7")
-
-    def test_malformed_approval_postback_is_caught_without_raising(self, monkeypatch):
-        mock_fn = AsyncMock()
-        monkeypatch.setattr(line_handler.line_service, "process_approval_command", mock_fn)
-
-        event = MagicMock()
-        event.source.user_id = "U1"
-        event.postback.data = "approve:1:extra"
-        event.reply_token = "tok"
-
-        line_handler.handle_postback(event)
-
-        mock_fn.assert_not_called()
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
 
     def test_non_approval_postback_delegates_to_line_logic(self, monkeypatch):
         mock_delegate = MagicMock()
@@ -434,7 +399,7 @@ class TestHandleMessageIsolationAndRedelivery:
 
     def test_postback_exception_outside_inner_try_does_not_propagate(self, monkeypatch):
         monkeypatch.setattr(
-            line_handler.line_service, "process_approval_command", AsyncMock(side_effect=RuntimeError("boom"))
+            line_handler.line_logic, "handle_postback", MagicMock(side_effect=RuntimeError("boom"))
         )
         event = MagicMock()
         event.source.user_id = "U1"
@@ -477,12 +442,12 @@ class TestAiPathTimeBudget:
 
     async def test_every_reply_path_passes_user_id_for_push_fallback(self, monkeypatch):
         monkeypatch.setattr(
-            line_handler.line_service, "get_user_status_message", AsyncMock(return_value=MagicMock(text="s"))
+            line_handler.ai_service, "analyze_text_and_execute", AsyncMock(return_value="s")
         )
         mock_reply = MagicMock()
         monkeypatch.setattr(line_handler, "reply_message", mock_reply)
 
-        await line_handler._process_message_async("U9", "太郎", "ステータス", "tok")
+        await line_handler._process_message_async("U9", "太郎", "こんにちは", "tok")
 
         assert mock_reply.call_args.kwargs.get("user_id") == "U9"
 

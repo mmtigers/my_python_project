@@ -36,7 +36,14 @@
 #
 # 入力: 標準入力に異常サマリ(health_watch.pyの検知内容)
 # 環境変数:
-#   CLAUDE_INVESTIGATE_PROJECT_DIR : リポジトリのパス (既定: /home/masahiro/develop/my_python_project)
+#   CLAUDE_INVESTIGATE_PROJECT_DIR : リポジトリのパス (既定: /home/masahiro/develop。
+#                                    Issue #380: 以前の既定値は
+#                                    /home/masahiro/develop/my_python_project であり、
+#                                    tools/connect_speaker.sh・tools/keep_alive_*.sh・
+#                                    run_task.sh・全systemdユニット・start_all.shが
+#                                    使う実機パス(/home/masahiro/develop/MY_HOME_SYSTEM)
+#                                    と食い違っていたため、cd失敗+set -eで層2調査が
+#                                    無言で一度も動かない不具合があった)
 #   CLAUDE_INVESTIGATE_TIMEOUT_SEC : claude -p 全体のタイムアウト秒 (既定: 900)
 #   CLAUDE_INVESTIGATE_MAX_TURNS   : --max-turns の値 (既定: 30)
 #   CLAUDE_INVESTIGATE_DRY_RUN     : 1でドライラン(gh起票なし・調査結果の通知のみ)。
@@ -52,7 +59,7 @@
 
 set -euo pipefail
 
-PROJECT_DIR="${CLAUDE_INVESTIGATE_PROJECT_DIR:-/home/masahiro/develop/my_python_project}"
+PROJECT_DIR="${CLAUDE_INVESTIGATE_PROJECT_DIR:-/home/masahiro/develop}"
 HOME_SYSTEM_DIR="$PROJECT_DIR/MY_HOME_SYSTEM"
 LOCK_FILE="$HOME_SYSTEM_DIR/logs/.claude_investigate.lock"
 TIMEOUT_SEC="${CLAUDE_INVESTIGATE_TIMEOUT_SEC:-900}"
@@ -60,6 +67,14 @@ MAX_TURNS="${CLAUDE_INVESTIGATE_MAX_TURNS:-30}"
 DRY_RUN="${CLAUDE_INVESTIGATE_DRY_RUN:-0}"
 # Issue #379: 異常サマリをプロンプトへ埋め込む際の文字数上限。
 SUMMARY_MAX_CHARS="${CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS:-4000}"
+
+# Issue #380: パス不一致でcdが無言で失敗する(set -eで即終了し、層2調査が
+# 一度も動いていないこと自体に気づけない)事態を避けるため、明示的にチェックする。
+if [ ! -d "$HOME_SYSTEM_DIR" ]; then
+  echo "[$(date)] エラー: HOME_SYSTEM_DIR '$HOME_SYSTEM_DIR' が存在しません。" \
+       "CLAUDE_INVESTIGATE_PROJECT_DIR (既定: /home/masahiro/develop) を実機のパスに合わせて設定してください。" >&2
+  exit 1
+fi
 
 cd "$HOME_SYSTEM_DIR"
 mkdir -p logs
