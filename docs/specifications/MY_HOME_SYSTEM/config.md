@@ -16,21 +16,20 @@
 * [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)、`config.YOUTUBE_REWARD_IDS`(YouTube系ごほうび券クールダウン対象reward_id)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
-* `google_photos_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - `config.GOOGLE_PHOTOS_TOKEN`, `GEMINI_API_KEY`等を参照する呼び出し元
 * `financial_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） - 本ファイルとは対照的に`config`モジュール経由ではなく`os.getenv`を直接使用する設計(個人情報保護のため)
 
 ## 2. ファイルの概要
 
 * システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。
-* 根拠: [環境変数読み込み処理] (行番号: 171 / 抜粋: `ENV: str = os.getenv("ENV"`)
+* 根拠: [環境変数読み込み処理] (行番号: 204 / 抜粋: `SWITCHBOT_API_TOKEN: Optional[str] = os.getenv("SWITCHBOT_API_TOKEN")`)
 
 
-* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（既定値は環境変数未設定時`"F4:4E:FC:B6:65:D4"`）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。
-* 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 170〜180 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\nENV: str = os.getenv(\"ENV\", \"development\")\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"F4:4E:FC:B6:65:D4\")")
+* BTスピーカー運用の有効/無効を切り替えるフラグ`ENABLE_BLUETOOTH`（既定`False`）を定義する。`False`の間は`post_boot_health_check.py`のSpeakerチェックがBluetooth確認をスキップしサウンドカード確認へフォールバックする。あわせて、Anker SoundCore 2（`tools/connect_speaker.sh`, `tools/keep_alive_anker.sh`と同一デバイス）のMACアドレス`SPEAKER_BLUETOOTH_MAC`（既定値は環境変数未設定時`"F4:4E:FC:B6:65:D4"`）も同じ「1. 環境・機能フラグ設定」セクションで定義されている。Issue #488で、このセクションにあった未参照の`ENV`定数は削除された（現在このセクションは`ENABLE_BLUETOOTH`/`SPEAKER_BLUETOOTH_MAC`の2定数のみ）。
+* 根拠: [ENABLE_BLUETOOTH/SPEAKER_BLUETOOTH_MAC定義とコメント] (行番号: 190〜199 / 抜粋: "# ==========================================\n# 1. 環境・機能フラグ設定\n# ==========================================\n# BTスピーカー運用の有効/無効。Falseの間はpost_boot_health_checkのSpeakerチェックが\n# BT確認をスキップしサウンドカード確認にフォールバックする。\n# 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`\n# と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。\nENABLE_BLUETOOTH: bool = False\n# Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)\nSPEAKER_BLUETOOTH_MAC: str = os.getenv(\"SPEAKER_BLUETOOTH_MAC\", \"F4:4E:FC:B6:65:D4\")")
 
 
 * SwitchBot Webhookの共有シークレット検証用トークン(`SWITCHBOT_WEBHOOK_TOKEN`)を環境変数から読み込む(`routers/webhook_router.py`が参照。未設定時は検証をスキップする後方互換設計)。
-* 根拠: [環境変数読み込み処理] (抜粋: `SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")`)
+* 根拠: [環境変数読み込み処理] (行番号: 218 / 抜粋: `SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")`)
 
 
 * ロガーの初期化設定を行う。
@@ -38,62 +37,58 @@
 
 
 * NASなどの外部ストレージのマウント遅延を考慮したディレクトリの検証、作成、書き込みテストを行う関数を提供する。
-* 根拠: [ストレージ検証関数] (行番号: 43 / 抜粋: `def verify_and_initialize_stora`)
+* 根拠: [ストレージ検証関数] (行番号: 40 / 抜粋: `def verify_and_initialize_stora`)
 
 
 * NAS死活監視(`monitors/nas_monitor.py`)の書き込みテストがタイムアウトした際の再試行回数(`NAS_WRITE_CHECK_RETRIES`、既定3)を定義する。`verify_and_initialize_storage`と同様、autofsのアイドルアンマウント後の再トリガーやNAS本体のディスクスピンアップによる一過性の遅延を、単発のタイムアウトで即座に障害と判定せずExponential Backoffで吸収する目的で追加された。
-* 根拠: [NAS & Network設定セクション] (行番号: 412〜416 / 抜粋: `NAS_WRITE_CHECK_RETRIES: int = 3`)
+* 根拠: [NAS & Network設定セクション] (行番号: 315 / 抜粋: `NAS_WRITE_CHECK_RETRIES: int = 3`)
 
 
 * `Pydantic`を用いてデバイスやカメラの設定スキーマを定義する。
-* 根拠: [Pydanticモデル定義] (行番号: 144 / 抜粋: `class CameraConfig(BaseModel):`)
+* 根拠: [Pydanticモデル定義] (行番号: 166 / 抜粋: `class CameraConfig(BaseModel):`)
 
 
-* 外部設定ファイル（`devices.json`, `family_events.json`）を読み込み、グローバル変数にパース結果を格納する。
-* 根拠: [JSON読み込み処理] (行番号: 304 / 抜粋: `with open(DEVICES_JSON_PATH, `)
-
-
-* ログ用、アセット用などの必須ディレクトリが存在しない場合、自動的に作成する。
-* 根拠: [ディレクトリ自動作成ループ] (行番号: 567 / 抜粋: `os.makedirs(d, exist_ok=True)`)
+* 外部設定ファイル（`devices.json`）を読み込み、グローバル変数にパース結果を格納する。Issue #488で、それまで存在した`family_events.json`（`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除された。
+* 根拠: [JSON読み込み処理] (行番号: 287〜300 / 抜粋: `with open(DEVICES_JSON_PATH, "r", encoding="utf-8") as f:`)
 
 
 * `FAMILY_SETTINGS["members"]` の実名キー自体は `handlers/line_handler.py` 等でのメッセージ文字列マッチングに機能的に使用されているためソース上に残しつつ、年齢などの個人情報は Git 管理対象外の `family_members.local.json` が存在すればそこから読み込んでマージする（存在しなくてもプレースホルダーのままアプリは起動できる）。
-* 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 532 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
+* 根拠: [家族設定のローカルオーバーライド読み込み] (行番号: 424〜433 / 抜粋: `_family_local_path = os.path.join(os.path.dirname`)
 
 
-* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、小児科予約監視URL（`CLINIC_MONITOR_URL`等）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。
-* 根拠: [Retention / TV Lock / Clinic Monitor 各セクションの定数群] (行番号: 493 / 抜粋: `RECORDING_RETENTION_DAYS: int = int(os.getenv`)
+* NVR録画・DBバックアップの保持日数（`RECORDING_RETENTION_DAYS`, `DB_BACKUP_RETENTION_DAYS`）、メモリ監視閾値（`MEMORY_ALERT_PERCENT`等）、TVロック機能に関連するクエストID（`TV_UNLOCK_QUEST_IDS`）、Alexaスキル検証用ID（`ALEXA_SKILL_ID`）、ラズパイ監視のフックスクリプトパス（`HEALTH_WATCH_INVESTIGATE_HOOK`）など、他の監視・運用系モジュールが参照する多数の設定値・閾値定数も本ファイルに定義されている。（Issue #488で、同種の未実装機能だった小児科予約監視の`CLINIC_MONITOR_URL`等はこのグループから削除された）
+* 根拠: [保持期間設定セクション] (行番号: 383 / 抜粋: `RECORDING_RETENTION_DAYS: int = _get_int_env(`)
 
 
 * CORS許可オリジン(`CORS_ORIGINS`)を定義する。以前は`unified_server.py`側にも別のハードコードされたオリジンリストが存在し、実際に使われるのはそちらだけで本ファイルの値は参照されない「死に設定」だったが、Streamlitダッシュボード・LAN内開発サーバー・Cloudflare Tunnel公開ドメインを含む形でこちらに一本化された（`unified_server.py`側は本リストを直接参照するよう変更済み）。`FRONTEND_URL`（既定値はパス付きの`"http://192.168.1.200:8000/quest"`）を`CORS_ORIGINS`へ追加する際は、`urlparse`で`scheme://netloc`部分のみを取り出した`_frontend_origin`を使う（Issue #112の修正。ブラウザが送信する`Origin`ヘッダーはscheme://host[:port]のみでパスを含まないため、Starletteの`CORSMiddleware`の完全一致比較ではパス付きの値が永久に一致しない「死にエントリ」になっていた）。`FRONTEND_URL`自体は`post_boot_health_check.py`等が実際にHTTPリクエストを送る完全なURLとして使われているため、パスを保持したまま変更していない。
-* 根拠: [CORS許可オリジン定義] (行番号: 438 / 抜粋: `CORS_ORIGINS: List[str] = [`)
-* 根拠: [_frontend_originの算出(Issue #112)] (行番号: 427, 433 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
+* 根拠: [CORS許可オリジン定義] (行番号: 331〜338 / 抜粋: `CORS_ORIGINS: List[str] = [`)
+* 根拠: [_frontend_originの算出(Issue #112)] (行番号: 320, 326 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
 
 
 * クエスト機能のファイルアップロード(`/api/quest/upload`)におけるアップロード可能な最大ファイルサイズ(MB単位、環境変数で上書き可、既定5MB)を定義する。M15/Issue #325対応で、フロントエンド(`family-quest/src/components/ui/AvatarUploader.tsx`の`MAX_AVATAR_SIZE_BYTES`)の5MBと揃えられた(以前は既定10MBでフロントと不一致だった)。
-* 根拠: [アップロード上限設定] (行番号: 436 / 抜粋: `UPLOAD_MAX_FILE_SIZE_MB: int = `)
+* 根拠: [アップロード上限設定] (行番号: 348 / 抜粋: `UPLOAD_MAX_FILE_SIZE_MB: int = `)
 
 
-* タイムラプス動画生成(`monitors/smart_timelapse_generator.py`)が`getattr(config, "TIMELAPSE_...", デフォルト値)`の形で参照する解像度・背景差分検出パラメータ・監視対象カメラフォルダ(`TIMELAPSE_CAMERAS`)・実行スケジュール(`TIMELAPSE_SCHEDULES`)・エンコード設定等の定数群を定義する。以前は対応する定数が本ファイルに存在せず、常にハードコードされたデフォルト値へフォールバックしていた。（Issue #498: `monitors/scheduled_timelapse.py`は実在しないファイルへの言及だったため削除）
-* 根拠: [タイムラプス生成設定] (行番号: 450 / 抜粋: `# タイムラプス生成設定`)
+* タイムラプス動画生成(`monitors/smart_timelapse_generator.py`)が`getattr(config, "TIMELAPSE_...", デフォルト値)`の形で参照する解像度・背景差分検出パラメータ・エンコード設定等の定数群を定義する。以前は対応する定数が本ファイルに存在せず、常にハードコードされたデフォルト値へフォールバックしていた。（Issue #498: `monitors/scheduled_timelapse.py`は実在しないファイルへの言及だったため削除）Issue #488で、既に削除済みだった`monitors/timelapse_runner.py`/`monitors/timelapse_generator.py`(Issue #485で削除)の残置設定だった`TIMELAPSE_CAMERAS`(監視対象カメラフォルダ)・`TIMELAPSE_SCHEDULES`(実行スケジュール)・`TIMELAPSE_FPS`/`TIMELAPSE_BITRATE`/`TIMELAPSE_MAXRATE`/`TIMELAPSE_SEGMENT_TIME`(エンコード設定)がこのセクションから削除され、`monitors/smart_timelapse_generator.py`が現在も参照する定数群のみが残った。
+* 根拠: [タイムラプス生成設定] (行番号: 356 / 抜粋: `# タイムラプス生成設定`)
 
 
-* 「19. ラズパイ監視(health_watch)設定」セクション(Issue #339)で、層2(異常検知時のClaude自動調査)のフックスクリプト絶対パス`HEALTH_WATCH_INVESTIGATE_HOOK`（環境変数、既定は未設定=`None`）を定義する。設定すると`monitors/health_watch.py`が異常検知時(通知抑制の内側)にこのスクリプトを異常サマリつきでfire-and-forget起動し、未設定なら層1の検知・通知のみで従来と同一挙動になる、というコメントが付されている。想定値は`MY_HOME_SYSTEM/scripts/claude_investigate.sh`で、実機セットアップ完了までは未設定のままにする旨も明記されている。
-* 根拠: [HEALTH_WATCH_INVESTIGATE_HOOK定義とコメント] (行番号: 627〜638 / 抜粋: "# ==========================================\n# 19. ラズパイ監視(health_watch)設定\n# ==========================================\n# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。", "HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv(\"HEALTH_WATCH_INVESTIGATE_HOOK\")")
+* 「12. ラズパイ監視(health_watch)設定」セクション(Issue #339)で、層2(異常検知時のClaude自動調査)のフックスクリプト絶対パス`HEALTH_WATCH_INVESTIGATE_HOOK`（環境変数、既定は未設定=`None`）を定義する。設定すると`monitors/health_watch.py`が異常検知時(通知抑制の内側)にこのスクリプトを異常サマリつきでfire-and-forget起動し、未設定なら層1の検知・通知のみで従来と同一挙動になる、というコメントが付されている。想定値は`MY_HOME_SYSTEM/scripts/claude_investigate.sh`で、実機セットアップ完了までは未設定のままにする旨も明記されている。（Issue #488でモジュールdocstring目次の番号が旧19番から12番へ振り直された）
+* 根拠: [HEALTH_WATCH_INVESTIGATE_HOOK定義とコメント] (行番号: 470〜480 / 抜粋: "# ==========================================\n# 12. ラズパイ監視(health_watch)設定\n# ==========================================\n# Issue #339: 層2(異常検知時のClaude自動調査)のフックスクリプトの絶対パス。", "HEALTH_WATCH_INVESTIGATE_HOOK: Optional[str] = os.getenv(\"HEALTH_WATCH_INVESTIGATE_HOOK\")")
 
 
-* 「20. NASパスの遅延解決 (Issue #330 PR-B)」セクションで、NAS上のパス定数(`ASSETS_DIR`/`TMP_VIDEO_DIR`とその派生`SALARY_IMAGE_DIR`/`SOUND_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。旧import時ディレクトリ自動作成ループのNAS配下分(`salary_images`/`clinic_html`)は`_resolve_assets_dir()`内へ移動し、import時ループはローカルの`LOG_DIR`/`SALARY_DATA_DIR`のみを扱う。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。
-* 根拠: [遅延解決セクション] (抜粋: "# 20. NASパスの遅延解決 (Issue #330 PR-B)", "def __getattr__(name: str) -> str:", "def prewarm_nas_paths() -> None:")
+* 「13. NASパスの遅延解決 (Issue #330 PR-B)」セクション(Issue #488でモジュールdocstring目次の番号が旧20番から13番へ振り直された)で、NAS上のパス定数(`ASSETS_DIR`とその派生`SOUND_DIR`のみ)をPEP 562のモジュール`__getattr__`により**初回アクセス時に解決してモジュール属性へキャッシュ**する。以前はimport時に`ensure_safe_path_with_backoff`(書き込みテスト+Exponential Backoff、最悪 約31秒/パス)を実行しており、NAS障害・マウント遅延時にconfigをimportするだけのテスト・CLIツール・cronスクリプトまでブロックしていた。Issue #488で、未実装の給与PDF機能・小児科予約監視機能が削除されたことに伴い、`__getattr__`が扱っていた`TMP_VIDEO_DIR`分岐(旧・タイムラプス機能の残置設定)、および派生パス辞書`_ASSETS_DERIVED_PATHS`が保持していた`SALARY_IMAGE_DIR`/`CLINIC_HTML_DIR`/`CLINIC_STATS_CSV`/`CLINIC_GRAPH_PATH`は削除され、`_ASSETS_DERIVED_PATHS`は`{"SOUND_DIR": "sounds"}`の1エントリのみとなった。同様に、`ASSETS_DIR`配下で自動作成するサブディレクトリのリスト`_ASSETS_SUBDIRS_TO_CREATE`も(旧`["salary_images", "clinic_html"]`から)空リスト`[]`になった。`prewarm_nas_paths()`が解決する名前のタプルからも`TMP_VIDEO_DIR`が外れ、現在は`("ASSETS_DIR", *_ASSETS_DERIVED_PATHS)`のみとなっている。サーバー起動時は`unified_server.py`のlifespanが`prewarm_nas_paths()`を呼び、遅延化前と同じく起動時点で検証を済ませる。利用側の書き方(`config.ASSETS_DIR`等)は不変で、未知の属性名は従来どおり`AttributeError`を送出する。
+* 根拠: [遅延解決セクション] (行番号: 482〜547 / 抜粋: "# 13. NASパスの遅延解決 (Issue #330 PR-B)", "_ASSETS_SUBDIRS_TO_CREATE: List[str] = []", "_ASSETS_DERIVED_PATHS: Dict[str, str] = {\n    \"SOUND_DIR\": \"sounds\",\n}", "def __getattr__(name: str) -> str:", "def prewarm_nas_paths() -> None:\n    ...\n    for name in (\"ASSETS_DIR\", *_ASSETS_DERIVED_PATHS):")
 
 
-* 「21. Family Quest: YouTubeごほうび券クールダウン設定」セクションで、Family Questの子ども向けYouTube系ごほうび券について、連続視聴による目の負担を防ぐためのクールダウン対象reward_idを`YOUTUBE_REWARD_IDS`(環境変数`YOUTUBE_REWARD_IDS`、カンマ区切りの整数、未設定時は既定値`"10,11,12"`)として定義する。パース方式は「17. TVロック機能設定」の`TV_UNLOCK_QUEST_IDS`と同じ(`isdigit()`を満たす要素のみ`int`化してリスト化、パース例外は`logger.warning`のみで握りつぶす)。`services/quest_service.py`の`InventoryService.use_item`/`get_user_inventory`が参照する。
-* 根拠: [Family Quest: YouTubeごほうび券クールダウン設定セクション] (行番号: 742〜756 / 抜粋: "# 21. Family Quest: YouTubeごほうび券クールダウン設定", "_youtube_reward_ids_str: str = os.getenv(\"YOUTUBE_REWARD_IDS\", \"10,11,12\")", "YOUTUBE_REWARD_IDS: List[int] = []")
+* 「14. Family Quest: YouTubeごほうび券クールダウン設定」セクション(Issue #488でモジュールdocstring目次の番号が旧21番から14番へ振り直された)で、Family Questの子ども向けYouTube系ごほうび券について、連続視聴による目の負担を防ぐためのクールダウン対象reward_idを`YOUTUBE_REWARD_IDS`(環境変数`YOUTUBE_REWARD_IDS`、カンマ区切りの整数、未設定時は既定値`"10,11,12"`)として定義する。パース方式は「10. TVロック機能設定」の`TV_UNLOCK_QUEST_IDS`と同じ(`isdigit()`を満たす要素のみ`int`化してリスト化、パース例外は`logger.warning`のみで握りつぶす)。`services/quest_service.py`の`InventoryService.use_item`/`get_user_inventory`が参照する。
+* 根拠: [Family Quest: YouTubeごほうび券クールダウン設定セクション] (行番号: 549〜563 / 抜粋: "# 14. Family Quest: YouTubeごほうび券クールダウン設定", "_youtube_reward_ids_str: str = os.getenv(\"YOUTUBE_REWARD_IDS\", \"10,11,12\")", "YOUTUBE_REWARD_IDS: List[int] = []")
 * 同セクションに、クールダウンを実際に強制し始める日を表す`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`(環境変数`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`、`YYYY-MM-DD`形式、既定値`"2026-09-12"`、`datetime.date`型)を追加した。いきなり制限がかかると子どもが困惑するため、この日を迎えるまでは`InventoryService.use_item`が実際には使用を拒否せず、family-quest側に予告バナーのみを表示する猶予期間を設ける目的。パース失敗時は`logger.warning`を出したうえで`date(2000, 1, 1)`(=常に施行済み扱い、安全側の即時強制)にフォールバックする。
-* 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 760〜770 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
+* 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 571〜577 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
 
 
-* 「18. Alexaスキル設定」セクションで、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
-* 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 614〜621 / 抜粋: "# ==========================================\n# 18. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
+* 「11. Alexaスキル設定」セクション(Issue #488でモジュールdocstring目次の番号が旧18番から11番へ振り直された)で、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
+* 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 461〜468 / 抜粋: "# ==========================================\n# 11. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 
 
 
