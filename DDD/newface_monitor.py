@@ -21,6 +21,8 @@ import sys
 import logging
 import hashlib
 import fcntl
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
@@ -301,6 +303,17 @@ class MonitorConfig:
 
     # Notification Settings
     DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
+    # Issue #451: 1時間毎のcron実行のうち、この時(hour)の実行でのみ日次サマリを
+    # Discordへ送信する(_maybe_send_daily_summary参照)。以前は関数内に21という
+    # リテラルが直書きされていた。
+    DAILY_SUMMARY_HOUR: int = 21
+
+    # Concurrency Settings
+    # Issue #458: 79サイトを単一プロセスで逐次処理しておりサイト数に比例して
+    # 実行時間が増大していた。ThreadPoolExecutorで並列化するにあたり、対象サイトの
+    # WAF誤検知や外部サイトへの負荷を抑えるため、同時実行数を小さく制限する
+    # (79並列で一斉アクセスするのではなく、小さいバッチで回す)。
+    SITE_CHECK_MAX_WORKERS: int = 8
 
     # Detection Settings
     # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
@@ -729,6 +742,14 @@ class DataManager:
                 ないことを確認した上で渡す前提。
         """
         self.data_dir = Path(data_dir)
+        # Issue #458: サイト巡回がスレッドプールで並列化されたことで、
+        # daily_summary.json/site_failures.json(全サイト共通の1ファイルに
+        # 集約管理)への読み込み→更新→書き込みが複数スレッドから同時に
+        # 走りうるようになった。read-modify-writeの間に他スレッドの書き込みが
+        # 割り込むと更新が失われるため、これらの共通ファイルを操作するメソッド
+        # 全体をこのロックで直列化する(サイト単位のknown_castsファイルは
+        # サイトごとに別ファイルのため対象外)。
+        self._shared_file_lock = threading.Lock()
 
     def _data_file(self, site: SiteConfig) -> Path:
         """指定サイトの既知キャスト保存先JSONファイルのパスを返す。"""
@@ -1024,10 +1045,11 @@ class DataManager:
         if count <= 0:
             return
 
-        data = self.load_daily_summary()
-        counts = data.setdefault('counts', {})
-        counts[site_id] = counts.get(site_id, 0) + count
-        self.save_daily_summary(data)
+        with self._shared_file_lock:
+            data = self.load_daily_summary()
+            counts = data.setdefault('counts', {})
+            counts[site_id] = counts.get(site_id, 0) + count
+            self.save_daily_summary(data)
 
     def _site_failures_file(self) -> Path:
         """サイト別の連続巡回失敗状態を保存するファイルのパスを返す。
@@ -1099,11 +1121,12 @@ class DataManager:
         Returns:
             Tuple[int, bool]: (更新後の連続失敗回数, アラート送信済みかどうか)。
         """
-        data = self.load_site_failures()
-        entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
-        entry['count'] = int(entry.get('count', 0)) + 1
-        self.save_site_failures(data)
-        return entry['count'], bool(entry.get('alerted', False))
+        with self._shared_file_lock:
+            data = self.load_site_failures()
+            entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
+            entry['count'] = int(entry.get('count', 0)) + 1
+            self.save_site_failures(data)
+            return entry['count'], bool(entry.get('alerted', False))
 
     def mark_site_failure_alerted(self, site_id: str) -> None:
         """サイトの閉鎖疑いアラートを送信済みとして記録する。
@@ -1111,10 +1134,11 @@ class DataManager:
         Args:
             site_id (str): アラートを送信したサイトのID。
         """
-        data = self.load_site_failures()
-        entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
-        entry['alerted'] = True
-        self.save_site_failures(data)
+        with self._shared_file_lock:
+            data = self.load_site_failures()
+            entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
+            entry['alerted'] = True
+            self.save_site_failures(data)
 
     def clear_site_failure(self, site_id: str) -> None:
         """サイトへの疎通成功時に連続失敗状態を解消する。
@@ -1125,11 +1149,12 @@ class DataManager:
         Args:
             site_id (str): 疎通に成功したサイトのID。
         """
-        data = self.load_site_failures()
-        if site_id not in data:
-            return
-        del data[site_id]
-        self.save_site_failures(data)
+        with self._shared_file_lock:
+            data = self.load_site_failures()
+            if site_id not in data:
+                return
+            del data[site_id]
+            self.save_site_failures(data)
 
 
 def _normalized_netloc(url: str) -> str:
@@ -1683,7 +1708,7 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManag
             束縛されたDataManager(#364)。
     """
     now = datetime.now()
-    if now.hour != 21:
+    if now.hour != MonitorConfig.DAILY_SUMMARY_HOUR:
         return
 
     today_str = now.strftime('%Y-%m-%d')
@@ -1775,19 +1800,37 @@ def _run_monitor_locked() -> None:
 
         # #395: 閉鎖疑いアラートはサイト処理中に即時送信せず、全サイト処理後に
         # 失敗サイトの割合(自局側障害の疑い)を見てからまとめて送信判断する。
+        #
+        # #458: 以前は79サイトを単一プロセスで逐次処理しており、サイト数に
+        # 比例して実行時間が増大していた。ThreadPoolExecutorで並列化するが、
+        # 79並列で一斉アクセスするとWAF誤検知や対象サイトへの負荷につながるため
+        # SITE_CHECK_MAX_WORKERSで同時実行数を絞る。monitor/notifier(および
+        # 内部のrequests.Session)は全スレッドで共有するが、各セッションは
+        # ヘッダー/クッキーを呼び出しごとに変更しないため、GET/POSTの並行発行
+        # 自体はスレッドセーフ。DiscordNotifierのサーキットブレーカーと、
+        # DataManagerが読み書きするサイト横断の共有ファイル
+        # (daily_summary.json/site_failures.json)は、それぞれ内部でロックを
+        # 取るように変更済み(DiscordCircuitBreaker/DataManager._shared_file_lock)。
+        # 1サイトの予期しない例外は、他サイトの処理を止めずfuture.result()の
+        # except節でのみ捕捉する(逐次実装時と同じ隔離方針)。
         failed_count = 0
         pending_alerts: List[Tuple[SiteConfig, int]] = []
-        for site in MonitorConfig.SITES:
-            try:
-                result = _check_site(monitor, notifier, site, data_manager)
-            except Exception as e:
-                # 1サイトの予期しない例外で他サイトの処理を止めない
-                logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
-                continue
-            if result.failed:
-                failed_count += 1
-            if result.pending_alert_count is not None:
-                pending_alerts.append((site, result.pending_alert_count))
+        with ThreadPoolExecutor(max_workers=MonitorConfig.SITE_CHECK_MAX_WORKERS) as executor:
+            future_to_site = {
+                executor.submit(_check_site, monitor, notifier, site, data_manager): site
+                for site in MonitorConfig.SITES
+            }
+            for future in as_completed(future_to_site):
+                site = future_to_site[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    logger.critical(f"Critical error while checking site '{site.site_id}': {e}", exc_info=True)
+                    continue
+                if result.failed:
+                    failed_count += 1
+                if result.pending_alert_count is not None:
+                    pending_alerts.append((site, result.pending_alert_count))
 
         _send_pending_site_failure_alerts(
             notifier, data_manager, pending_alerts, failed_count, len(MonitorConfig.SITES)

@@ -26,7 +26,6 @@ import sys
 # 本物のDiscord/LINEに通知が飛ぶ事故が発生した。notification_service経由で
 # 送信されうる認証情報は全てここでマスクする。
 os.environ["DISCORD_WEBHOOK_ERROR"] = ""
-os.environ["DISCORD_WEBHOOK_ERROR_CAM"] = ""
 os.environ["DISCORD_WEBHOOK_REPORT"] = ""
 os.environ["DISCORD_WEBHOOK_NOTIFY"] = ""
 os.environ["DISCORD_WEBHOOK_URL"] = ""

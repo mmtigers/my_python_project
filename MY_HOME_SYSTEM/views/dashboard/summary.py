@@ -87,9 +87,12 @@ def get_traffic_status() -> Tuple[str, str]:
     jr_status = train_service.get_jr_traffic_status()
     line_g = jr_status["宝塚線"]
     line_a = jr_status["神戸線"]
+    # Issue #438: 同一関数内で is_suspended/is_unavailable は .get() を使う一方、
+    # is_delay だけ直接インデックスアクセスになっており方針が不統一だった。
+    # キーが欠落した応答でも例外にならないよう .get() へ統一する。
     if line_g.get("is_suspended") or line_a.get("is_suspended"):
         return "⛔ 運休発生", "theme-red"
-    elif line_g["is_delay"] or line_a["is_delay"]:
+    elif line_g.get("is_delay") or line_a.get("is_delay"):
         return "⚠️ 遅延あり", "theme-yellow"
     elif line_g.get("is_unavailable") or line_a.get("is_unavailable"):
         # Low修正: 取得不可を「平常運転」と偽らず区別する(遅延見逃し防止)

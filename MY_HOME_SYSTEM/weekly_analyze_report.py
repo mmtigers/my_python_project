@@ -283,8 +283,7 @@ def run_report() -> None:
     # common.send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
     if common.send_push([{"type": "text", "text": full_msg}], target="discord"):
         logger.info("✅ レポート送信完了")
-        # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない。
-        # monitors/timelapse_runner.pyの--force時の扱いと同様)
+        # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない)
         if not is_force:
             os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
             with open(LAST_RUN_FILE, "w") as f:

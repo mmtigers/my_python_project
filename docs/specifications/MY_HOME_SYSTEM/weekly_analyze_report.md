@@ -238,7 +238,7 @@ graph TD
 * `get_analysis_data` の例外処理では `except Exception as e:` と広範な例外をキャッチしており、`None` を返す仕様になっている。一時的なDBエラーと致命的な構文エラーの区別がつかない。
 * `table_power = getattr(config, "SQLITE_TABLE_POWER_USAGE", "power_usage")` において、`config.py` に変数が存在しない場合のフォールバック値 `"power_usage"` がハードコードされている。
 * Issue #289で`common.send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`(LINE宛先)引数が不要になった。これに伴い`run_report`のプッシュ通知処理からは、以前存在した`config.LINE_USER_ID`と`target="discord"`の不一致な組み合わせ渡しが解消されている。
-* Issue #234修正前は月曜8時台判定(`is_monday and is_morning`)のみに依存しており、実行済みを記録する永続フラグが存在しなかったため、外部cron(リポジトリ管理外)が同一時間枠内で本スクリプトを複数回起動すると重複送信され得た。`monitors/tv_lock_monitor.py`の`LAST_RUN_FILE`方式(日付文字列をテキストファイルへ記録)を踏襲し、`config.FALLBACK_ROOT`配下にフラグファイルを追加した。フラグは送信成功時のみ書き込まれる(送信失敗時に書き込むと再試行が永久にブロックされるため)。`--force`実行時はこのフラグチェック自体をバイパスし、かつフラグへの書き込みも行わない(手動テスト実行が本番の定時実行を妨げないようにするための挙動で、`monitors/timelapse_runner.py`の`--force`時の扱いと同様)。
+* Issue #234修正前は月曜8時台判定(`is_monday and is_morning`)のみに依存しており、実行済みを記録する永続フラグが存在しなかったため、外部cron(リポジトリ管理外)が同一時間枠内で本スクリプトを複数回起動すると重複送信され得た。`monitors/tv_lock_monitor.py`の`LAST_RUN_FILE`方式(日付文字列をテキストファイルへ記録)を踏襲し、`config.FALLBACK_ROOT`配下にフラグファイルを追加した。フラグは送信成功時のみ書き込まれる(送信失敗時に書き込むと再試行が永久にブロックされるため)。`--force`実行時はこのフラグチェック自体をバイパスし、かつフラグへの書き込みも行わない(手動テスト実行が本番の定時実行を妨げないようにするための挙動)。
 
 ## 9. 不明事項一覧
 
