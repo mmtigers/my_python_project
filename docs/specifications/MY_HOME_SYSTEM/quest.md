@@ -67,11 +67,12 @@
 
 * **役割**: Domain Modelsとしてクエスト情報を定義する。
 * 根拠: クラス名と継承元 (行番号: 19 / 抜粋: "class MasterQuest(BaseModel):")
-* **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite']`、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。
+* **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite']`、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。**（2026-09-06 品質監査で修正）** 本モデルが受け付ける `'monthly'` は、以前は `services/quest_service.py` の `is_within_reset_period` に対応する分岐が無く常に `False`(未完了扱い)となっていたが、同関数に `'monthly'`(JSTの暦月一致)分岐が追加され、3値すべてがサービス側でも判定されるようになった（[quest_service.md](./quest_service.md) の `QuestService.is_within_reset_period` を参照）。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。
 * 根拠: `_SQLITE_INT_MAX = 2**63 - 1`、`_DAY_OF_WEEK_RE`、`def _validate_days` (models/quest.py)
+* 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'` (行番号: 47)
 
 
-* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `type` (str), `target` (str, 初期値: 'all'), `exp` (int), `gold` (int), `icon` (str), `days` (Optional[str], 初期値: None), `start_date` (Optional[str], 初期値: None), `end_date` (Optional[str], 初期値: None), `chance` (Optional[float], 初期値: 1.0), `start_time` (Optional[str], 初期値: None), `end_time` (Optional[str], 初期値: None), `pre_requisite_quest_id` (Optional[int], 初期値: None), `reset_period` (Optional[str], 初期値: 'daily')
+* **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `type` (str), `target` (str, 初期値: 'all'), `exp` (int), `gold` (int), `icon` (str), `days` (Optional[str], 初期値: None), `start_date` (Optional[str], 初期値: None), `end_date` (Optional[str], 初期値: None), `chance` (Optional[float], 初期値: 1.0), `start_time` (Optional[str], 初期値: None), `end_time` (Optional[str], 初期値: None), `pre_requisite_quest_id` (Optional[int], 初期値: None), `reset_period` (Optional[Literal['daily','weekly','monthly']], 初期値: 'daily')
 * 根拠: フィールド定義 (行番号: 20〜35 / 抜粋: "target: str = 'all'" など)
 
 
@@ -111,26 +112,10 @@
 
 
 
-### `UserAction`
+### ~~`UserAction`~~ （存在しない）
 
-* **役割**: Request Modelsとしてユーザー固有のアクションリクエストを定義する。
-* 根拠: コメントとクラス名 (行番号: 46〜47 / 抜粋: "# Request Models", "class UserAction(BaseModel):")
-
-
-* **引数/リクエスト (フィールド)**: `user_id` (str)
-* 根拠: フィールド定義 (行番号: 48 / 抜粋: "user_id: str")
-
-
-* **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 47 / 抜粋: "class UserAction(BaseModel):")
-
-
-* **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 47〜48 / 抜粋: "class UserAction(BaseModel):")
-
-
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 47〜48 / 抜粋: "class UserAction(BaseModel):")
+* **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `UserAction`（`user_id` のみ）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
+* 根拠: コメント (行番号: 67〜68 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `UserAction` が無いこと (行番号: 1〜157)
 
 
 
@@ -183,11 +168,11 @@
 ### `HistoryAction`
 
 * **役割**: Request Modelsとして履歴に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 58 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 77 / 抜粋: "class HistoryAction(BaseModel):")
 
 
-* **引数/リクエスト (フィールド)**: `user_id` (str), `history_id` (int)
-* 根拠: フィールド定義 (行番号: 59〜60 / 抜粋: "history_id: int" など)
+* **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `history_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、`QuestAction`/`RewardAction`/`ApproveAction` と同じ `min_length=1, max_length=64` の制約が付与された。
+* 根拠: フィールド定義 (行番号: 78〜79 / 抜粋: "user_id: str = Field(min_length=1, max_length=64)", "history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -198,8 +183,8 @@
 * 根拠: 処理ロジックを含まないため (行番号: 58〜60 / 抜粋: "class HistoryAction(BaseModel):")
 
 
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 58〜60 / 抜粋: "class HistoryAction(BaseModel):")
+* **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`history_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。
+* 根拠: フィールド定義 (行番号: 78〜79 / 抜粋: "user_id: str = Field(min_length=1, max_length=64)", "history_id: int = Field(ge=1, le=_SQLITE_INT_MAX)")
 
 
 
@@ -232,8 +217,8 @@
 * 根拠: クラス名と継承元 (行番号: 82 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 86〜98)
 
 
-* **引数/リクエスト (フィールド)**: `user_id` (str), `avatar_url` (str、上記バリデータ付き)
-* 根拠: フィールド定義 (行番号: 83〜84 / 抜粋: "avatar_url: str" など)
+* **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `avatar_url` (str、上記バリデータ付き)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、他のリクエストモデルと同じ `min_length=1, max_length=64` の制約が付与された。
+* 根拠: フィールド定義 (行番号: 100〜101 / 抜粋: "user_id: str = Field(min_length=1, max_length=64)", "avatar_url: str")
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -364,26 +349,10 @@
 
 
 
-### `InventoryItem`
+### ~~`InventoryItem`~~ （存在しない）
 
-* **役割**: Inventory Modelsとしてインベントリ内のアイテム情報を定義する。
-* 根拠: コメントとクラス名 (行番号: 94〜95 / 抜粋: "# Inventory Models", "class InventoryItem(BaseModel):")
-
-
-* **引数/リクエスト (フィールド)**: `id` (int), `reward_id` (int), `title` (str), `desc` (Optional[str], 初期値: None), `icon` (str), `status` (str), `purchased_at` (str), `used_at` (Optional[str], 初期値: None)
-* 根拠: フィールド定義 (行番号: 96〜103 / 抜粋: "status: str         # owned, pending, consumed" など)
-
-
-* **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 95 / 抜粋: "class InventoryItem(BaseModel):")
-
-
-* **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 95〜103 / 抜粋: "class InventoryItem(BaseModel):")
-
-
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 95〜103 / 抜粋: "class InventoryItem(BaseModel):")
+* **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `InventoryItem`（`id`/`reward_id`/`title`/`desc`/`icon`/`status` 等）が定義されていると記述していたが、上記 `MasterQuest` の項に記載のとおり Issue #409 で未使用モデルとして削除済みであり、現行の `models/quest.py` にこのクラスは存在しない。本仕様書からも定義の記述を撤去した。
+* 根拠: コメント (行番号: 67〜68 / 抜粋: "# Request Models\n# (#409: 未使用だった UserAction / InventoryItem は削除)")、`models/quest.py` の全クラス定義に `InventoryItem` が無いこと (行番号: 1〜157)
 
 
 
@@ -412,47 +381,31 @@
 
 ### `UseItemAction`
 
-* **役割**: Inventory Modelsとしてアイテム使用時のアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 109 / 抜粋: "class UseItemAction(BaseModel):")
+* **役割**: Inventory Modelsとしてアイテム使用時のアクションリクエストを定義する。**（2026-09-06 品質監査で修正）** Issue #409 (Q-L4) で他のリクエストモデルに付与された ID 上限(`_SQLITE_INT_MAX` = `2**63-1`)が本モデルだけ漏れており、`inventory_id=2**64` を渡すと `sqlite3` の `OverflowError` で500になっていた（`/quest/cancel` 等は422）ため、`user_id`/`inventory_id` の両方に他モデルと同じ境界が付与された。
+* 根拠: クラス名と継承元 (行番号: 153 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 154〜155 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
 
 
-* **引数/リクエスト (フィールド)**: `user_id` (str), `inventory_id` (int)
-* 根拠: フィールド定義 (行番号: 110〜111 / 抜粋: "inventory_id: int" など)
-
-
-* **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 109 / 抜粋: "class UseItemAction(BaseModel):")
-
-
-* **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 109〜111 / 抜粋: "class UseItemAction(BaseModel):")
-
-
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 109〜111 / 抜粋: "class UseItemAction(BaseModel):")
-
-
-
-### `ConsumeItemAction`
-
-* **役割**: Inventory Modelsとしてアイテム消費時のアクションリクエスト（親の承認等）を定義する。
-* 根拠: クラス名とフィールドコメント (行番号: 113〜114 / 抜粋: "class ConsumeItemAction(BaseModel):", "approver_id: str    # 親のID")
-
-
-* **引数/リクエスト (フィールド)**: `approver_id` (str), `inventory_id` (int)
-* 根拠: フィールド定義 (行番号: 114〜115 / 抜粋: "inventory_id: int" など)
+* **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `inventory_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)
+* 根拠: フィールド定義 (行番号: 156〜157 / 抜粋: "user_id: str = Field(min_length=1, max_length=64)", "inventory_id: int = Field(ge=1, le=_SQLITE_INT_MAX)")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 113 / 抜粋: "class ConsumeItemAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 153 / 抜粋: "class UseItemAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 113〜115 / 抜粋: "class ConsumeItemAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 153〜157 / 抜粋: "class UseItemAction(BaseModel):")
 
 
-* **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 113〜115 / 抜粋: "class ConsumeItemAction(BaseModel):")
+* **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`inventory_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。
+* 根拠: フィールド定義 (行番号: 156〜157 / 抜粋: "user_id: str = Field(min_length=1, max_length=64)", "inventory_id: int = Field(ge=1, le=_SQLITE_INT_MAX)")
+
+
+
+### ~~`ConsumeItemAction`~~ （存在しない）
+
+* **（2026-09-06 品質監査で修正）** 以前の本仕様書は本ファイルに `ConsumeItemAction`（`approver_id`/`inventory_id`）が定義されていると記述していたが、現行の `models/quest.py` にこのクラスは存在せず（ファイル末尾のクラスは `UseItemAction`、行番号: 153〜157）、`routers/quest_router.py` のインポート（行番号: 14〜18）にも含まれていない。アイテム使用時の親承認フロー廃止（コミット `9d5edec`、[quest_router.md](./quest_router.md) 参照）に伴い削除済みであるため、本仕様書からも定義の記述を撤去した。
+* 根拠: `models/quest.py` の全クラス定義に `ConsumeItemAction` が無いこと (行番号: 1〜157)、`routers/quest_router.py` (行番号: 14〜18 / 抜粋: "from models.quest import (\n    SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,\n    QuestAction, ApproveAction, HistoryAction, RewardAction,\n    UpdateUserAction, SoundTestRequest, UseItemAction\n)")
 
 
 
@@ -511,9 +464,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| モデルの実際の使用箇所 | `MY_HOME_SYSTEM/routers/quest_router.py`14〜17行目を直接確認したところ、`from models.quest import (SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse, QuestAction, ApproveAction, HistoryAction, RewardAction, UpdateUserAction, SoundTestRequest, UseItemAction, ConsumeItemAction)`と、本ファイルが定義するモデルの大半をエンドポイントの引数・レスポンス型として直接インポートしていることを確認した。また`MY_HOME_SYSTEM/services/quest_service.py`18行目・693〜701行目を直接確認したところ、`from models.quest import MasterUser, MasterQuest, MasterReward`でインポートし、`GameSystem.sync_master_data`内で`MasterUser(**u)`, `MasterQuest(**q_data)`, `MasterReward(**r)`という形で`quest_data.py`の生データをバリデーションする用途に使用していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:14-17`, `MY_HOME_SYSTEM/services/quest_service.py:18, 693-701` |
+| モデルの実際の使用箇所 | `MY_HOME_SYSTEM/routers/quest_router.py`14〜18行目を直接確認したところ、`from models.quest import (SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse, QuestAction, ApproveAction, HistoryAction, RewardAction, UpdateUserAction, SoundTestRequest, UseItemAction)`（**（2026-09-06 品質監査で修正）** 以前ここに記載していた `ConsumeItemAction` は現行のインポートにも `models/quest.py` にも存在しない）と、本ファイルが定義するモデルの大半をエンドポイントの引数・レスポンス型として直接インポートしていることを確認した。また`MY_HOME_SYSTEM/services/quest_service.py`18行目・693〜701行目を直接確認したところ、`from models.quest import MasterUser, MasterQuest, MasterReward`でインポートし、`GameSystem.sync_master_data`内で`MasterUser(**u)`, `MasterQuest(**q_data)`, `MasterReward(**r)`という形で`quest_data.py`の生データをバリデーションする用途に使用していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:14-18`, `MY_HOME_SYSTEM/services/quest_service.py:18, 693-701` |
 | データベーススキーマとのマッピング | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認したところ、DBアクセスは全て`cur.execute("SELECT ...")`/`cur.execute("UPDATE ...")`等の生SQL文字列で行われており(例: 65, 84, 88, 107, 439行目)、SQLAlchemy等のORMは一切importされていない(importはPydanticモデルとFastAPI関連のみ)ことを確認した。したがってPydanticモデルとテーブルスキーマとの明示的なORMマッピングは存在せず、`sqlite3.Row`から辞書的に値を取り出してPydanticモデルへ手動で詰め替える設計であることを確認した。ただしDBの完全なスキーマ自体は`current_schema.sql`(全346行、36テーブル)で確認可能である。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:65, 84, 88, 107, 439`（参考: `MY_HOME_SYSTEM/current_schema.sql:1-346`） |
-| Enumの未利用理由 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`role`は24〜25行目の`ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'`というモジュールレベルの文字列定数と`if user['role'] == ROLE_CHILD:`(250, 344行目)のような直接比較のみで判定され、Enum型は一切使われていない。`reset_period`は`is_within_reset_period(self, completed_at_str, reset_period)`(119〜149行目)で`if reset_period == 'daily': ... elif reset_period == 'weekly': ...`という文字列直接比較のみで判定され、それ以外の値は142〜149行目の分岐を素通りして`return False`となる（Enumによる制約は存在しない）。`status`についても`quest_history.status`や`user_inventory.status`の値(`'pending'`, `'approved'`, `'rejected'`, `'owned'`, `'consumed'`)はSQL文字列リテラルや`hist['status'] != 'pending'`(324, 400行目)のような直接比較で扱われており、これらを制約するEnumクラスやCHECK制約は`quest_service.py`内には存在しないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:24-25, 119-149, 250, 324, 344, 400` |
+| Enumの未利用理由 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`role`は24〜25行目の`ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'`というモジュールレベルの文字列定数と`if user['role'] == ROLE_CHILD:`(250, 344行目)のような直接比較のみで判定され、Enum型は一切使われていない。`reset_period`は`is_within_reset_period(self, completed_at_str, reset_period)`で`if reset_period == 'daily': ... elif reset_period == 'weekly': ... elif reset_period == 'monthly': ...`という文字列直接比較のみで判定され、それ以外の値は分岐を素通りして`logger.warning`の後`return False`となる（Enumによる制約は存在しない。**（2026-09-06 品質監査で修正）** 以前は`'daily'`/`'weekly'`の2分岐のみだったが、`MasterQuest.reset_period`の`Literal`と揃う形で`'monthly'`分岐が追加された。現行の`quest_service.py`行番号: 373〜390）。`status`についても`quest_history.status`や`user_inventory.status`の値(`'pending'`, `'approved'`, `'rejected'`, `'owned'`, `'consumed'`)はSQL文字列リテラルや`hist['status'] != 'pending'`(324, 400行目)のような直接比較で扱われており、これらを制約するEnumクラスやCHECK制約は`quest_service.py`内には存在しないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:24-25, 119-149, 250, 324, 344, 400` |
 
 ## 10. 自己検証結果
 

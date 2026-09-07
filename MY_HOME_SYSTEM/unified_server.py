@@ -5,6 +5,7 @@ import datetime
 import subprocess
 import logging
 import ipaddress
+import re
 
 from typing import AsyncGenerator, Optional, Callable, Awaitable
 
@@ -85,6 +86,48 @@ class SilencePolicyFilter(logging.Filter):
             
         return True # 上記のどれにも引っかからなければ出力 (True)
 
+# アクセスログ中のクエリパラメータ秘密情報(SwitchBot Webhook の ?token=... 等)をマスクする
+# 正規表現。値は '&' / 空白 / 引用符 まで。
+_QUERY_SECRET_RE = re.compile(r"(?i)((?:^|[?&])(?:token|secret|password|api_key|access_token)=)[^&\s\"']*")
+
+
+def redact_query_secrets(text: str) -> str:
+    """URL/パス文字列中の秘密系クエリパラメータの値を *** に置換する。"""
+    return _QUERY_SECRET_RE.sub(r"\1***", text)
+
+
+class SecretRedactionFilter(logging.Filter):
+    """uvicorn のアクセスログ('%s - "%s %s HTTP/%s" %d')に含まれるクエリ文字列から
+    共有シークレットをマスクするフィルター。
+
+    SwitchBot Webhook は署名検証機構が無く、config.SWITCHBOT_WEBHOOK_TOKEN を
+    ?token=... のクエリパラメータで受け取る設計(Issue #318)のため、uvicorn の
+    アクセスログ(get_path_with_query_string でクエリ込みのパスを出力する)にそのまま
+    残っていた。SilencePolicyFilter は POST を抑制しないため、SwitchBot のイベントごとに
+    "POST /webhook/switchbot?token=<secret> 200" が home_system.log / journal に書かれ、
+    log_analyzer や scripts/claude_investigate.sh がそれを Issue 本文へ貼り付ける経路も
+    あった。ログレコードの args (パス位置)を書き換えることで、後段のどのハンドラ/
+    フォーマッタでもマスク済みの値だけが出力されるようにする。
+    """
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            args = record.args
+            if isinstance(args, tuple):
+                record.args = tuple(
+                    redact_query_secrets(a) if isinstance(a, str) else a for a in args
+                )
+            elif isinstance(args, dict):
+                record.args = {
+                    k: (redact_query_secrets(v) if isinstance(v, str) else v) for k, v in args.items()
+                }
+            if isinstance(record.msg, str) and not args:
+                record.msg = redact_query_secrets(record.msg)
+        except Exception:
+            # マスク処理の失敗でログ出力自体を止めない
+            pass
+        return True
+
+
 # Global State
 scheduler_process: Optional[subprocess.Popen] = None
 camera_process = None
@@ -92,8 +135,10 @@ camera_process = None
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """アプリケーションのライフサイクル管理"""
     
-    # UvicornのアクセスロガーにSilence Policyを適用
-    logging.getLogger("uvicorn.access").addFilter(SilencePolicyFilter())
+    # UvicornのアクセスロガーにSilence Policyと秘密情報マスクを適用
+    access_logger = logging.getLogger("uvicorn.access")
+    access_logger.addFilter(SecretRedactionFilter())
+    access_logger.addFilter(SilencePolicyFilter())
     
     logger.info("🚀 --- API Server Starting Up ---")
 

@@ -88,6 +88,18 @@ export function getQuestLockState(
     };
 }
 
+/**
+ * 「長押しで取り消せるか」の判定。完了済み(isDone)または申請中(isPending)なら取り消し可能。
+ * 無限クエストは isDone が常に false(周回前提)なので「完了済みの取消」は存在しないが、
+ * 子ども(role_child)の申請は無限クエストでも pending 行として残るため、申請中の取消は
+ * 通常クエストと同様に許可する。以前は `!isInfinite` で一律に除外していたため、無限
+ * クエストを申請した子どものカードが「確認待ち / 長押しで取消」と表示されるのに長押しが
+ * 効かず、タップすると「すでに申請中です」のエラーになる袋小路になっていた。
+ */
+export function canCancelQuest(state: Pick<QuestLockState, 'isDone' | 'isPending'>, isEffectivelyLocked: boolean): boolean {
+    return (state.isDone || state.isPending) && !isEffectivelyLocked;
+}
+
 export const useQuestStatus = ({ quest, currentUser, completedQuests, pendingQuests }: UseQuestStatusProps) => {
     const status = useMemo(() => {
         const { isLocked, isDone, isPending, isInfinite, myCompletions } =

@@ -17,8 +17,9 @@
 ## 2. ファイルの概要
 
 * DDD配下の複数スクリプト（モジュールDocstringによれば`batch_download_discord.py`および`extract_youtube_urls.py`）で個別に重複実装されていたファイル名サニタイズ処理を、DRY違反解消のため1箇所に集約した共通ユーティリティモジュールである。**（品質で追加）** 加えて、DDD配下の各スクリプトから姉妹サブシステムMY_HOME_SYSTEMのルートディレクトリを解決する`resolve_my_home_system_root`も提供する。
-* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つである。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。**（Issue #469で追加）** 禁止記号8種に加えてASCII制御文字(`0x00`〜`0x1F`、`0x7F`)もアンダースコアへ置換対象とし、さらに置換・切り詰め後の名前がWindows予約デバイス名（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与する（モジュールレベル定数`_WINDOWS_RESERVED_NAMES`で定義）。
+* 提供する機能は、ファイルシステム上で使用できない記号をアンダースコアに置換し、かつ長さを制限した安全なファイル名文字列を生成する関数`sanitize_filename`、Discord Webhookへの連続送信失敗を検知して以降の送信をスキップするプロセス内サーキットブレーカークラス`DiscordCircuitBreaker`、MY_HOME_SYSTEMルートディレクトリを解決する`resolve_my_home_system_root`の3つに加え、**（2026-09-06 品質監査で修正）** ログ出力前に文字列中のDiscord Webhook URLのトークン部分をマスクする`redact_discord_webhook_url`（4つ目）である。変換結果が空文字列になった場合（入力が`".."`や`"."`等の記号のみで構成されていた場合等）は、呼び出し元が拡張子を連結するだけの用途（例: `sanitize_filename(video_id) + ".mp4"`）で空stemの隠しファイルが生成されるのを防ぐため、`"untitled"`というフォールバック名を補う。**（Issue #469で追加）** 禁止記号8種に加えてASCII制御文字(`0x00`〜`0x1F`、`0x7F`)もアンダースコアへ置換対象とし、さらに置換・切り詰め後の名前がWindows予約デバイス名（`CON`/`PRN`/`AUX`/`NUL`/`COM1`〜`9`/`LPT1`〜`9`、大文字小文字区別なしの完全一致）と一致する場合は末尾に`_`を付与する（モジュールレベル定数`_WINDOWS_RESERVED_NAMES`で定義）。
 * 根拠: [モジュールDocstring] (行番号: 1〜5 / 抜粋: "batch_download_discord.py / extract_youtube_urls.py がそれぞれ個別に\nほぼ同一のロジックを実装していた（DRY違反）ため、ここに集約する。")
+* 根拠: [redact_discord_webhook_url定義] (行番号: 111〜122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
 * 根拠: [_WINDOWS_RESERVED_NAMES定義とコメント] (行番号: 10〜17 / 抜粋: "# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。\n# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、\n# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。\n_WINDOWS_RESERVED_NAMES = frozenset(\n    {\"CON\", \"PRN\", \"AUX\", \"NUL\"}\n    | {f\"COM{i}\" for i in range(1, 10)}\n    | {f\"LPT{i}\" for i in range(1, 10)}\n)")、制御文字置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\\\/*?:\"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
 * 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 43〜58 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
@@ -30,7 +31,7 @@
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | `resolve_my_home_system_root`の`MY_HOME_SYSTEM_ROOT`環境変数の読み取り(`os.getenv`)（品質で追加） | 根拠: [import文] (行番号: 6 / 抜粋: "import os") |
-| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re") |
+| `re` | 標準ライブラリ | 禁止文字を検出・置換するための正規表現処理(`re.sub`)。**（2026-09-06 品質監査で修正）** 加えてDiscord Webhook URLのトークン部分を検出する`_DISCORD_WEBHOOK_URL_RE`のコンパイル(`re.compile`)と置換(`.sub`) | 根拠: [import文] (行番号: 7 / 抜粋: "import re")、[利用箇所] (行番号: 111, 122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))") |
 | `Path` (`pathlib`) | 標準ライブラリ | `resolve_my_home_system_root`の引数・戻り値の型、ディレクトリ存在確認（品質で追加） | 根拠: [import文] (行番号: 8 / 抜粋: "from pathlib import Path") |
 
 ### ブラックボックスとなる外部要素
@@ -96,6 +97,50 @@
 
 * **エラーハンドリング**: なし（例外を送出する処理は含まれていない。いずれの手順でも解決に失敗した場合は最終的に`current_dir`を返すのみで、呼出し元(`core.*`/`services.*`のimportに対する`except ImportError`)がフェイルソフトする設計）
 * 根拠: [関数本体全体] (行番号: 45〜90)
+
+
+### `_DISCORD_WEBHOOK_URL_RE`（モジュールレベル変数、**（2026-09-06 品質監査で修正）**追加）
+
+* **役割**: `redact_discord_webhook_url`が使用するコンパイル済み正規表現。Discord Webhook URLのパス部分`/api/webhooks/<数字ID>`をグループ1として捕捉し、その直後の`/`に続くトークン部分（`A-Za-z0-9_-`の1文字以上）までを一致範囲とする。
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")")
+
+
+* **引数/リクエスト**: 該当なし（モジュールレベル定数）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **戻り値/レスポンス**: 該当なし（`re.Pattern`オブジェクト）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **副作用**: なし（モジュールimport時にコンパイルされるのみ）
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [変数定義] (行番号: 111 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(...)")
+
+
+### `redact_discord_webhook_url`（**（2026-09-06 品質監査で修正）**追加）
+
+* **役割**: 文字列中のDiscord Webhook URLのトークン部分をマスクする関数。Docstringによれば、`requests.HTTPError`/`ConnectionError`の`str()`は"... for url: https://discord.com/api/webhooks/<id>/<token>"のように送信先URLを丸ごと含み、これを`logger.error`でそのまま出力するとログファイルだけでなく`core.logger.DiscordErrorHandler`経由でエラー通知チャンネルにもWebhookトークンが転記されてしまうため、ログ出力前に必ずこの関数を通すことを意図している。
+* 根拠: [関数定義とDocstring] (行番号: 114〜121 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。\n\n    requests.HTTPError / ConnectionError の str() は \"... for url: https://discord.com/\n    api/webhooks/<id>/<token>\" のように送信先URLを丸ごと含む。これを logger.error で\n    そのまま出力すると、ログファイルだけでなく core.logger.DiscordErrorHandler 経由で\n    エラー通知チャンネルにも Webhook トークンが転記されてしまうため、ログ出力前に\n    必ずこの関数を通す。")
+
+
+* **引数/リクエスト**: `text: str` — マスク対象の文字列。実装は`str(text)`で文字列化してから処理するため、呼び出し元（`batch_download_discord.py`・`newface_monitor.py`）は例外オブジェクトをそのまま渡している。
+* 根拠: [引数定義とstr()変換] (行番号: 114, 122 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **戻り値/レスポンス**: `str` — `_DISCORD_WEBHOOK_URL_RE`に一致した各箇所を「グループ1（`/api/webhooks/<id>`）＋`/<redacted>`」に置換した文字列。一致箇所が無ければ`str(text)`がそのまま返る。
+* 根拠: [return文] (行番号: 122 / 抜粋: "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **副作用**: なし（純粋な文字列変換のみ）
+* 根拠: [関数本体] (行番号: 122 / 抜粋: "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+
+
+* **エラーハンドリング**: なし（例外を捕捉・送出する処理は含まれていない）
+* 根拠: [関数本体] (行番号: 114〜122 / 抜粋: 前掲)
 
 
 ### `DiscordCircuitBreaker`
@@ -180,6 +225,8 @@ graph TD
         WindowsReserved["_WINDOWS_RESERVED_NAMES<br>(#469で追加)"]
         DiscordCircuitBreaker["DiscordCircuitBreaker"]
         resolve_my_home_system_root["resolve_my_home_system_root()"]
+        redact["redact_discord_webhook_url()<br>(2026-09-06 品質監査で追加)"]
+        WebhookRe["_DISCORD_WEBHOOK_URL_RE"]
     end
 
     subgraph "外部依存"
@@ -189,7 +236,7 @@ graph TD
     end
 
     subgraph "呼び出し元 (別ファイル)"
-        batch_dl["batch_download_discord.py: DiscordNotifier.send() / PROJECT_ROOT解決"]
+        batch_dl["batch_download_discord.py: DiscordNotifier.send() / _standalone_send_discord_webhook() / PROJECT_ROOT解決"]
         newface["newface_monitor.py: DiscordNotifier / PROJECT_ROOT解決"]
         extract_urls["extract_youtube_urls.py: PROJECT_ROOT解決"]
     end
@@ -203,6 +250,10 @@ graph TD
     newface --> DiscordCircuitBreaker
     newface --> resolve_my_home_system_root
     extract_urls --> resolve_my_home_system_root
+    redact --> WebhookRe
+    WebhookRe --> re_mod
+    batch_dl --> redact
+    newface --> redact
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）

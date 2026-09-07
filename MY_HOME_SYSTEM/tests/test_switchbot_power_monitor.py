@@ -88,3 +88,28 @@ class TestDeviceStatePersistsAcrossProcessRestarts:
             "even though this simulates a freshly-started process"
         )
         assert current_status_arg == {"power_state": "ON"}
+
+
+class TestPersistedStateWriteIsAtomic:
+    def test_reader_never_sees_truncated_file_during_write(self, isolated_state_file, monkeypatch):
+        """open(..., "w") はロック取得より前にファイルを切り詰めるため、書き込み途中に
+        読んだ側が空ファイル → JSONDecodeError → {} (全デバイス初期状態扱い)になっていた。
+        一時ファイル + os.replace で、読み手は常に旧か新の完全な内容を見ること。"""
+        import json
+        spm._save_persisted_states({"dev1": {"state": "on"}})
+
+        observed = {}
+        real_dump = json.dump
+
+        def dump_and_peek(obj, fp, *a, **k):
+            # 書き込みの真っ最中に本番パスを読む(=他プロセスの読み取りを模す)
+            with open(isolated_state_file, "r", encoding="utf-8") as f:
+                observed["during_write"] = f.read()
+            return real_dump(obj, fp, *a, **k)
+
+        monkeypatch.setattr(spm.json, "dump", dump_and_peek)
+        spm._save_persisted_states({"dev1": {"state": "off"}})
+
+        assert json.loads(observed["during_write"]) == {"dev1": {"state": "on"}}
+        assert spm._load_persisted_states() == {"dev1": {"state": "off"}}
+        assert not [p for p in os.listdir(os.path.dirname(isolated_state_file)) if ".tmp." in p]

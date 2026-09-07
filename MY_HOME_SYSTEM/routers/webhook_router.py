@@ -1,4 +1,5 @@
 # MY_HOME_SYSTEM/routers/webhook_router.py
+import asyncio
 import hmac
 import time
 from typing import Optional
@@ -76,7 +77,13 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     # config.SWITCHBOT_WEBHOOK_TOKEN が設定されている場合のみ、
     # クエリパラメータ ?token=... による簡易な共有シークレット検証を行う。
     if config.SWITCHBOT_WEBHOOK_TOKEN:
-        if not token or not hmac.compare_digest(token, config.SWITCHBOT_WEBHOOK_TOKEN):
+        # hmac.compare_digest は str 同士だと非ASCII文字を含む場合に TypeError を送出する
+        # ("comparing strings with non-ASCII characters is not supported")。このエンドポイントは
+        # 外部公開されているため、?token=%C3%A9 のような1リクエストで 500 + Discordエラー通知
+        # (global_exception_handler 経由)を誰でも発生させられていた。bytes に揃えて比較する。
+        if not token or not hmac.compare_digest(
+            token.encode("utf-8"), config.SWITCHBOT_WEBHOOK_TOKEN.encode("utf-8")
+        ):
             raise HTTPException(status_code=401, detail="Invalid token")
 
     ctx = body.context
@@ -117,7 +124,11 @@ async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     # --- これ以降は重複していない有効なイベントのみが通過する ---
     
     # デバイス情報の解決 (既存ロジック)
-    api_name = sb_tool.get_device_name_by_id(mac)
+    # get_device_name_by_id はキャッシュ未取得時(プロセス起動後の最初のイベント)に
+    # SwitchBot API へ同期HTTP(最大 10秒×4回 + バックオフ ≒ 47秒)を行う。async ハンドラ内で
+    # 直接呼ぶとその間イベントループ全体(LINE callback・Alexa・/health・quest API)が停止する
+    # ため、スレッドプールへ逃がす。
+    api_name = await asyncio.to_thread(sb_tool.get_device_name_by_id, mac)
     device_conf = next((d for d in config.MONITOR_DEVICES if d.get("id") == mac), None)
     
     name = api_name or (device_conf.get("name") if device_conf else f"Unknown_{mac}")

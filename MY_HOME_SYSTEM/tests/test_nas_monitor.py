@@ -463,3 +463,53 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestNasMonitorDailyReportOncePerDay:
+    """日次レポートは「hour == 8」の一致判定だと、scheduler の実行間隔(3600〜3610s)の
+    ずれで 7:5x → 9:0x になった日に丸ごと飛んでいた(#388 で保持期間削除側だけ修正済み)。
+    「今日まだ送っていない かつ 8時以降」で判定し、送信後に last_report_date を保存すること。"""
+
+    def _make_monitor(self, monkeypatch, state):
+        monitor = NasMonitor()
+        monkeypatch.setattr(monitor, "check_ping", lambda: True)
+        monkeypatch.setattr(monitor, "check_mount", lambda: True)
+        monkeypatch.setattr(monitor, "check_write_permission", lambda: True)
+        monkeypatch.setattr(monitor, "get_disk_usage", lambda: {"percent": 50.0, "used_gb": 1, "total_gb": 2, "free_gb": 1})
+        monkeypatch.setattr(monitor, "save_to_db", lambda *a, **k: None)
+        monkeypatch.setattr(monitor, "run_retention_cleanup", lambda: None)
+        monkeypatch.setattr(monitor, "_load_state", lambda: state)
+        monkeypatch.setattr(monitor, "_save_state", lambda s: state.update(s))
+        return monitor
+
+    def test_report_is_sent_at_9am_when_8am_run_was_skipped(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-06 09:05:00"):
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == ["report"]
+        assert state["last_report_date"] == "2026-09-06"
+
+    def test_report_is_not_sent_twice_on_the_same_day(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True, "last_report_date": "2026-09-06", "last_cleanup_date": "2026-09-06"}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-06 12:05:00"):
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == []
+
+    def test_report_is_not_sent_before_8am(self, monkeypatch):
+        from freezegun import freeze_time
+        import monitors.nas_monitor as nm
+        state = {"is_healthy": True}
+        sent = []
+        monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
+        with freeze_time("2026-09-06 07:55:00"):
+            self._make_monitor(monkeypatch, state).run()
+        assert sent == []
+        assert "last_report_date" not in state

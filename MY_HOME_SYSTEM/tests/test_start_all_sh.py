@@ -22,7 +22,8 @@ def _read_script() -> str:
 def _cleanup_targets() -> list:
     """CLEANUP_TARGETS=(...) 配列の要素(実際にpkill/pgrepへ渡されるパターン)を抽出する"""
     script = _read_script()
-    m = re.search(r"CLEANUP_TARGETS=\((.*?)\)", script, flags=re.DOTALL)
+    # 配列要素(正規表現)自体に括弧を含みうるため、行頭の ")" までを配列本体とみなす
+    m = re.search(r"CLEANUP_TARGETS=\((.*?)\n\)", script, flags=re.DOTALL)
     assert m, "CLEANUP_TARGETS配列が見つかりません"
     return re.findall(r'"([^"]+)"', m.group(1))
 
@@ -67,9 +68,25 @@ class TestStartAllShCleanupTargets:
             "camera_monitor.py",
             "scheduler_boot.py",
             "streamlit run",
-            "python.*monitors/[a-z_]*\\.py",
+            "python.*monitors/(switchbot_power_monitor|nature_remo_monitor|server_watchdog|tv_lock_monitor|memory_monitor|nas_monitor)\\.py",
             "ffmpeg.*hls_streams",
         }
+
+    def test_monitors_pattern_only_matches_scheduler_children(self):
+        """監視スクリプトの停止パターンは scheduler_boot.TASKS が起動するものだけに一致し、
+        systemd(network_logger.service)や cron(health_watch/daily_timelapse_job/log_analyzer)
+        で独立に動くスクリプトを巻き添えで SIGTERM しないこと。"""
+        import re
+        import scheduler_boot
+
+        pattern = next(t for t in _cleanup_targets() if t.startswith("python.*monitors/"))
+        regex = re.compile(pattern)
+        for task in scheduler_boot.TASKS:
+            cmdline = f"/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 {task['script']}"
+            assert regex.search(cmdline), f"scheduler child not covered: {task['script']}"
+        for independent in ("network_logger", "health_watch", "daily_timelapse_job", "log_analyzer", "smart_timelapse_generator", "camera_monitor"):
+            cmdline = f"/home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python3 monitors/{independent}.py"
+            assert not regex.search(cmdline), f"independent process would be killed: {independent}"
 
 
 class TestStartAllShBackgroundProcessesSurviveLogout:

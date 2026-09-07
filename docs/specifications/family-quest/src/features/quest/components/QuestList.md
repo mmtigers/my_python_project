@@ -72,6 +72,9 @@
 
 ### `QuestItem`
 
+* **（2026-09-06 品質監査で修正）** `canCancel` の判定を `useQuestStatus.canCancelQuest({ isDone, isPending }, isEffectivelyLocked)` に集約した。以前は `!isInfinite && (isDone || isPending) && !isEffectivelyLocked` で無限クエストを一律除外していたため、申請中(`isPending`)の無限クエストは「長押しで取消」表示なのに取り消せなかった。
+* 根拠: (行番号: 105, 7 / 抜粋: "const canCancel = canCancelQuest({ isDone, isPending }, isEffectivelyLocked);", "canCancelQuest } from '../hooks/useQuestStatus'")
+
 * **役割**: 個別のクエストカードを描画し、状態に応じたバッジ表示（優先度順に上位`MAX_VISIBLE_BADGES`件＋「+N」）やタップ/長押し操作に応じたコールバック実行を担う。`panelMode`が真のときはビューポート幅基準の`md:`拡大・2カラム化に乗らず、常に「狭い列でも崩れず、かつタップしやすい」固定サイズのクラス群（`cardSizeClasses`等、8種類）を使う。`iconFirst`が真のときはアイコンサイズを拡大しつつ説明文（`quest.description`）を非表示にする。共有クエスト（`is_shared_completed_by`/`is_shared_pending_by`が自分以外）は`isEffectivelyLocked`として扱われクリック不可になる。完了済み/申請中の取消は`useLongPress`による長押しでのみ発火し、通常タップは新規完了（`handleTapComplete`）にのみ作用する。**Issue #102の修正**: 無限クエストのクールダウン（60秒、`isCooldown`ステート）は、以前はタップ直後（確認モーダルを開く前）に`runComplete`内で完了音の再生とともに開始しており、確認モーダルで「キャンセル」しても音が鳴りクールダウンに入ってしまう不具合があった。修正後は、`App`側から渡される`completedSignal`（完了APIが実際に成功した時点でのみ`CompletedSignal`型の`{ id, userId, nonce }`がセットされる）を監視する`useEffect`でのみ、`isInfinite`かつ`completedSignal.id === questId`（`questId = quest.quest_id`）**かつ`completedSignal.userId === currentUser.user_id`**のときに限りクールダウンを開始するようになった。**（Issue #363で修正）** 以前は`id`の一致しか見ていなかったため、横画面の4人パネル表示（`FamilyDashboard`が同じ`completedSignal`を全パネルへ渡す）で兄が「食器の片付け（infinite, target all）」を完了すると、妹・パパ・ママのパネルの同クエストも60秒間"Wait..."でタップ不能になっていた（サーバー側のクールダウンは(user, quest)単位であり、純粋なクライアント側の誤ロック）。`runComplete`自体は現在、`isCooldown`/`isEffectivelyLocked`のガード判定と`onClick`（確認モーダルを開く）呼び出しのみを行い、音声再生は行わない。完了音の再生（`clear`/`submit`）も同じ理由で`App.tsx`の`runQuestAction`側に移動しており、本コンポーネントの`useSound().play()`は取消時（`runCancel`）の`'cancel'`音のみに使われる。**（#291で修正）** アイコン表示は`quest.icon || quest.icon_key`から`quest.icon_key`のみの参照に、獲得ゴールド表示は`quest.gold_gain || quest.gold`から`quest.gold_gain || 0`に、`questId`の算出は`quest.id ?? quest.quest_id`から`quest.quest_id`のみの参照に、それぞれ簡略化された（いずれも`icon`/`gold`/`id`がバックエンドAPIから一度も送られてこない幽霊フィールドだったため）。
 * 根拠: `const QuestItem: React.FC` (行番号: 40〜294 / 抜粋: "const QuestItem: React.FC<{")
 * 根拠: パネルモード時のクラス切り替え (行番号: 123〜124 / 抜粋: "const cardSizeClasses = panelMode ? 'p-1 min-h-[56px]' : 'min-h-[56px] md:p-3 md:h-full';")
@@ -270,6 +273,8 @@ graph TD
 * 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）、本ファイル内の呼び出し（`if (!isQuestVisibleToUser(q, currentUser)) return false;`）
 * バッジ表示は`badgeCandidates`に優先度（`priority`が小さいほど優先: 未開放0 < 対応済み1 < 申請中2 < 期間限定3 < 時間限定4）を付けてソートし、上位`MAX_VISIBLE_BADGES`（2件）のみ表示、残りは「+N」でまとめられる。バッジ種別を追加する際はこの優先度体系に組み込む必要がある。
 * 根拠: (行番号: 121〜168 / 抜粋: "// ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)\n    const badgeCandidates: BadgeCandidate[] = [];")
+
+* **（2026-09-06 品質監査で修正）** 本仕様書で「バックエンドの `get_available_quests` が付与する」と記述している `is_shared_completed_by` / `is_shared_pending_by`(`isSharedCompleted`/`isSharedPending`/`isSharedDoneByOther` の判定元)について、バックエンド(`MY_HOME_SYSTEM/services/quest_service.py`)に `get_available_quests` という関数は存在せず、これらのフィールドも現行の `GET /api/quest/data` 応答には含まれない(Issue #371 で撤去。行番号: 1512 付近のコメント)。TypeScript 側の型定義(`src/types/index.ts`)には残っているため、上記の共有クエスト系の分岐は常に `false` になる到達不能コードである。
 
 ## 9. 不明事項一覧
 

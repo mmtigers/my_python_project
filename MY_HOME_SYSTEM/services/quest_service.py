@@ -237,7 +237,8 @@ class UserService:
         }
 
     def _fetch_full_adventure_logs(self, cur) -> List[dict]:
-        q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' ORDER BY completed_at DESC LIMIT 100").fetchall()
+        # Q-L5: use_item が quest_id=0 で挿入する「アイテム使用」行はクエスト達成ではないため除外する
+        q_rows = cur.execute("SELECT 'quest' as type, user_id, quest_title as title, gold_earned as gold, exp_earned as exp, completed_at as ts FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY completed_at DESC LIMIT 100").fetchall()
         r_rows = cur.execute("SELECT 'reward' as type, user_id, reward_title as title, cost_gold as gold, 0 as exp, redeemed_at as ts FROM reward_history ORDER BY redeemed_at DESC LIMIT 100").fetchall()
 
         all_events = sorted(q_rows + r_rows, key=lambda x: x['ts'], reverse=True)[:100]
@@ -375,8 +376,14 @@ class QuestService:
             # 週の月曜日を基準にする
             start_of_week = today_jst - datetime.timedelta(days=today_jst.weekday())
             return completed_date >= start_of_week
+        elif reset_period == 'monthly':
+            # models.quest.MasterQuest.reset_period は 'monthly' を受け付けるのに、ここに分岐が
+            # 無く常に False(=未完了扱い)になっていた。monthly のクエストは周期内に何度でも
+            # 完了・多重報酬でき、completedQuests にも一切現れない状態だった(現行の
+            # quest_data.py に monthly は無いが、追加した瞬間に発現する)。JST の暦月で判定する。
+            return (completed_date.year, completed_date.month) == (today_jst.year, today_jst.month)
 
-        # #446: 'daily'/'weekly' 以外の値(空文字・NULL・想定外の文字列等)は
+        # #446: 'daily'/'weekly'/'monthly' 以外の値(空文字・NULL・想定外の文字列等)は
         # 常に無効(未完了)扱いとなる。原因調査が難航しないよう、想定外の値を
         # 検知したことをログに残す。
         logger.warning(f"⚠️ is_within_reset_period: 未知のreset_period値 ({reset_period!r}) のため常にFalseを返します。")
@@ -534,6 +541,26 @@ class QuestService:
             if not self._is_quest_currently_active(quest):
                 raise HTTPException(status_code=403, detail="This quest is not currently available")
 
+            # 前提クエスト(pre_requisite_quest_id)の達成チェック。フロントエンド
+            # (useQuestStatus.getQuestLockState)は「前提クエストの今周期の承認済み履歴」が
+            # 無ければカードをロックするが、サーバー側には対応する検査が無く、API直叩きで
+            # ロックを素通りして報酬を得られた。フロントと同じ条件(承認済み・前提クエスト自身の
+            # reset_period 内)で拒否する。前提クエストがマスタから消えている場合は daily 扱い。
+            prereq_id = quest['pre_requisite_quest_id'] if 'pre_requisite_quest_id' in quest.keys() else None
+            if prereq_id:
+                prereq_quest = cur.execute(
+                    "SELECT reset_period FROM quest_master WHERE quest_id = ?", (prereq_id,)
+                ).fetchone()
+                prereq_period = (prereq_quest['reset_period'] if prereq_quest else None) or 'daily'
+                prereq_hist = cur.execute("""
+                    SELECT completed_at FROM quest_history
+                    WHERE user_id = ? AND quest_id = ? AND status = 'approved'
+                    ORDER BY completed_at DESC LIMIT 1
+                """, (user_id, prereq_id)).fetchone()
+                if not (prereq_hist and prereq_hist['completed_at']
+                        and self.is_within_reset_period(prereq_hist['completed_at'], prereq_period)):
+                    raise HTTPException(status_code=403, detail="前提クエストがまだ達成されていません")
+
             # スパムチェック
             last_hist = cur.execute("""
                 SELECT completed_at FROM quest_history 
@@ -559,7 +586,7 @@ class QuestService:
             if quest['quest_type'] != 'infinite' and last_hist and last_hist['completed_at']:
                 reset_period = quest['reset_period'] or 'daily'
                 if self.is_within_reset_period(last_hist['completed_at'], reset_period):
-                    period_label = "今週" if reset_period == 'weekly' else "本日"
+                    period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")
                     raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
 
             now_iso = common.get_now_iso()
@@ -687,6 +714,11 @@ class QuestService:
             return self._process_approve_quest_locked(approver_id, history_id)
 
     def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:
+        # TV解錠(SwitchBot API 経由の副作用)はトランザクションのコミット後に起動する。
+        # 以前は with ブロック内(コミット前)でスレッドを起動していたため、コミットが
+        # 失敗(ディスクフル・ロック待ちタイムアウト等)して承認がロールバックされても
+        # TVだけが点く可能性があった(Q-L7 は use_item 側だけを修正していた)。
+        tv_unlock_quest_id: Optional[int] = None
         with common.get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
@@ -703,9 +735,11 @@ class QuestService:
                 raise HTTPException(status_code=404, detail="User of this history not found")
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (hist['quest_id'],)).fetchone()
 
+            # quest_history.gold_earned/exp_earned は NULL 許容列のため、サービス外で挿入された
+            # 行を承認すると user['gold'] + None の TypeError → 500 になっていた。0 扱いにする。
             override_rewards = {
-                "gold": hist['gold_earned'],
-                "exp": hist['exp_earned']
+                "gold": hist['gold_earned'] or 0,
+                "exp": hist['exp_earned'] or 0
             }
 
             result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
@@ -729,10 +763,13 @@ class QuestService:
             # (sync_master_data の DELETE ... NOT IN でマスタ行が消えても quest_history は残るため)。
             if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:
                 if user['role'] == ROLE_CHILD:
-                    self._trigger_tv_unlock(quest['quest_id'])
+                    tv_unlock_quest_id = quest['quest_id']
 
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
-            return result
+
+        if tv_unlock_quest_id is not None:
+            self._trigger_tv_unlock(tv_unlock_quest_id)
+        return result
 
     def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:
         """兄妹連携クエストの相方側 quest_history 行を承認済みに確定する(冪等)。
@@ -751,7 +788,7 @@ class QuestService:
         if not linked_user:
             return None
 
-        override_rewards = {"gold": linked_hist['gold_earned'], "exp": linked_hist['exp_earned']}
+        override_rewards = {"gold": linked_hist['gold_earned'] or 0, "exp": linked_hist['exp_earned'] or 0}
         reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
         logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
         return {"user_id": linked_hist['user_id'], **reward_result}
@@ -933,7 +970,7 @@ class QuestService:
             )
 
         new_level, new_exp = game_logic.GameLogic.calc_level_down(
-            user['level'], user['exp'], hist['exp_earned']
+            user['level'], user['exp'], hist['exp_earned'] or 0
         )
         new_gold = current_gold - gold_earned
         # Q-L3(#409): メダルも戻す(履歴に記録が無い古い行は 0 扱い)
@@ -1495,7 +1532,7 @@ class GameSystem:
     def _fetch_recent_logs(self, cur) -> List[dict]:
         q_logs = cur.execute("""
             SELECT id, user_id, quest_title as title, 'quest' as type, completed_at as ts 
-            FROM quest_history WHERE status='approved' ORDER BY id DESC LIMIT 20
+            FROM quest_history WHERE status='approved' AND quest_id != 0 ORDER BY id DESC LIMIT 20
         """).fetchall()
         r_logs = cur.execute("""
             SELECT id, user_id, reward_title as title, 'reward' as type, redeemed_at as ts 

@@ -36,7 +36,8 @@ def fake_line_api(monkeypatch):
 def test_first_call_fetches_profile_from_api(fake_line_api):
     name = line_handler._get_display_name("U123")
     assert name == "太郎"
-    fake_line_api.get_profile.assert_called_once_with("U123")
+    assert fake_line_api.get_profile.call_count == 1
+    assert fake_line_api.get_profile.call_args.args == ("U123",)
 
 
 def test_repeated_calls_within_ttl_use_cache(fake_line_api, monkeypatch):

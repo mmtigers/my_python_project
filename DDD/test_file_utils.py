@@ -185,3 +185,23 @@ class TestResolveMyHomeSystemRoot:
         current_dir.mkdir(parents=True)
 
         assert resolve_my_home_system_root(current_dir) == current_dir
+
+
+class TestRedactDiscordWebhookUrl:
+    def test_token_segment_is_masked(self):
+        from file_utils import redact_discord_webhook_url
+        text = ("HTTPSConnectionPool(host='discord.com'): Max retries exceeded with url: "
+                "/api/webhooks/123456789012345678/AbCdEf-GhIj_KlMn0123456789 (Caused by ...)")
+        out = redact_discord_webhook_url(text)
+        assert "AbCdEf-GhIj_KlMn0123456789" not in out
+        assert "/api/webhooks/123456789012345678/<redacted>" in out
+
+    def test_full_url_form_is_masked(self):
+        from file_utils import redact_discord_webhook_url
+        out = redact_discord_webhook_url("404 Client Error for url: https://discord.com/api/webhooks/1/tok3n")
+        assert out == "404 Client Error for url: https://discord.com/api/webhooks/1/<redacted>"
+
+    def test_non_string_input_and_unrelated_text_pass_through(self):
+        from file_utils import redact_discord_webhook_url
+        assert redact_discord_webhook_url(ValueError("boom")) == "boom"
+        assert redact_discord_webhook_url("nothing to hide") == "nothing to hide"

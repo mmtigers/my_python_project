@@ -1104,3 +1104,53 @@ class TestDiscordNotifierCircuitBreaker:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
+
+
+class TestIsBotDetectionErrorIgnoresIdentifiersWithSeparators:
+    """正規表現の単語境界(\\b)は "-" "/" "." も境界とみなすため、品番・パス・
+    一時ファイル名に含まれる数字列にも一致していた。通信エラー1件で
+    BotDetectionError → 12時間クールダウンに入る誤検知の回帰テスト。"""
+
+    @pytest.mark.parametrize("message", [
+        "Max retries exceeded with url: /dm18/ja/ssis-403 (Caused by NewConnectionError)",
+        "ERROR: [generic] ipx-403: Unable to download webpage: HTTP Error 404: Not Found",
+        "ERROR: Postprocessing: file /tmp/x/ssni-429.mp4.fragments.tmp/ssni-429.mp4 does not exist",
+        "https://cdn.example.test/seg-403-v1-a1.ts: Connection reset by peer",
+        "ERROR: [generic] video/503/index: Unsupported URL",
+        "HTTPSConnectionPool(host='example.test', port=443): /path/429/",
+    ])
+    def test_does_not_misfire_on_ids_and_paths(self, message):
+        assert module._is_bot_detection_error(Exception(message)) is False
+
+    @pytest.mark.parametrize("message", [
+        "HTTP Error 403: Forbidden",
+        "https://example.test/seg_000.ts: HTTP 403（ボット検知/レート制限の可能性）",
+        "requests.exceptions.RetryError: too many 503 error responses",
+        "ERROR: Unable to download webpage: HTTP Error 429: Too Many Requests (caused by ...)",
+        "status=403",
+        "Server returned error 429.",
+        "(429) rate limited",
+    ])
+    def test_genuine_status_code_messages_are_still_detected(self, message):
+        assert module._is_bot_detection_error(Exception(message)) is True
+
+
+class TestDiscordWebhookUrlIsNotLogged:
+    def test_standalone_send_failure_log_does_not_contain_webhook_token(self, monkeypatch, caplog):
+        webhook = "https://discord.com/api/webhooks/123456789/AbCdEfGhIjKlMnOpQrStUvWxYz-_0123456789"
+        monkeypatch.setenv("DISCORD_WEBHOOK_NOTIFY", webhook)
+
+        def fake_post(url, **kwargs):
+            raise module.requests.ConnectionError(
+                f"HTTPSConnectionPool(host='discord.com'): Max retries exceeded with url: {url}"
+            )
+
+        monkeypatch.setattr(module.requests, "post", fake_post)
+        module.logger.propagate = True
+        try:
+            with caplog.at_level(logging.WARNING, logger=module.logger.name):
+                assert module._standalone_send_discord_webhook([{"text": "hello"}]) is False
+        finally:
+            module.logger.propagate = False
+        assert "Discord Webhook送信に失敗しました" in caplog.text
+        assert "AbCdEfGhIjKlMnOpQrStUvWxYz" not in caplog.text

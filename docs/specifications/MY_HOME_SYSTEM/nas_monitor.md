@@ -347,6 +347,9 @@
 
 ### 関数 `run`
 
+* **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
+* 根拠: (行番号: 410〜414, 446〜448 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
+
 * **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
 * 根拠: `def run(self) -> None:` (行番号: 216〜286 / 抜粋: "def run(self) -> None:")
 * **（Issue #388 で修正）** 保持期間クリーンアップの「1日1回」判定を `now.hour == 8` から「`now.hour >= 8` かつ状態ファイルの `last_cleanup_date` が今日でない」に変更し、実行後に `last_cleanup_date` を保存する。scheduler の実行間隔は毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は 8 時台の実行が無く、その日の削除がまるごとスキップされていた。あわせて健全性遷移時の `_save_state` は `previous_state` を丸ごと保存し、`last_cleanup_date` を消さないようにした。

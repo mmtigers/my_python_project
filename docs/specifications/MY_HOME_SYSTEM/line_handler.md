@@ -83,6 +83,9 @@
 
 ### `_get_display_name`
 
+* **（2026-09-06 品質監査で修正）** `line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(`config.LINE_API_REQUEST_TIMEOUT`、既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は `_request_timeout` 未指定だと urllib3 に `timeout=None`(無期限ブロック)を渡すため、api.line.me への TCP がブラックホール化すると BackgroundTasks のワーカースレッドが永久に塞がっていた。
+* 根拠: [get_profile 呼び出し] (行番号: 135 / 抜粋: "profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)")、[定数定義] (`MY_HOME_SYSTEM/config.py` 行番号: 219 / 抜粋: "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
+
 * **役割**: LINEユーザーの表示名を取得する。`_profile_cache`（TTL=3600秒）にキャッシュがあればAPI呼び出しをせずそれを返し、なければ`line_bot_api.get_profile`を呼び出してキャッシュに格納する。メッセージ受信のたびに外部APIを呼んでいた従来の実装から変更され、API呼び出し頻度を抑制する。**（Issue #410で修正）** キャッシュ書き込み後に`_evict_oldest_profile_cache_entries`を呼び、`_profile_cache`が上限を超えないようにする。
 * 根拠: `def _get_display_name(user_id: str) -> str:` (行番号: 126-142 / 抜粋: "def _get_display_name(user_id: str) -> str:")、エビクション呼び出し (行番号: 141 / 抜粋: "_evict_oldest_profile_cache_entries()")
 
@@ -131,6 +134,9 @@
 * 根拠: (行番号: 64-65)
 
 ### `reply_message`
+
+* **（2026-09-06 品質監査で修正）** `reply_message` と `push_message` フォールバックの両方に `_request_timeout=config.LINE_API_REQUEST_TIMEOUT` を渡す(`_get_display_name` と同じ理由)。
+* 根拠: (行番号: 163, 178 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: `line_bot_api.reply_message` を用いてユーザーにメッセージを返信するラッパー関数。単一のメッセージオブジェクトが渡された場合はリストに変換して送信する。`line_bot_api` が初期化されていない場合は何もせず終了する。**（Issue #376で修正）** 返信が失敗（reply tokenの期限切れ等）し、かつ`user_id`が渡されている場合は`line_bot_api.push_message`（`PushMessageRequest`）へフォールバックして同じメッセージを届ける（以前はログのみで無応答だった）。
 * 根拠: `def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):` (行番号: 146-179 / 抜粋: "def reply_message(reply_token: str, messages: List[Any], user_id: Optional[str] = None):")、push フォールバック (行番号: 168-179 / 抜粋: "line_bot_api.push_message(")
@@ -433,6 +439,9 @@ graph TD
 * 根拠: `if line_handler: line_handler.add(...)` (行番号: 336-338 / 抜粋: "if line_handler:")
 
 
+
+* **（2026-09-06 品質監査で修正）** 本仕様書の「関連ドキュメント」および上記「非同期処理の実行」で「`callback_line()` が `asyncio.to_thread` 経由で `line_handler.handle` を実行する」と記述していたが、現行の `routers/webhook_router.py` は `line_handler.line_handler.parser.parse(body, x_line_signature)` で署名検証とイベントのパースのみを同期的に行い、実処理 `dispatch_events` は `BackgroundTasks` でレスポンス送信後に実行する(Issue #376)。`asyncio.to_thread` も `line_handler.handle` も使われていない。
+* 根拠: (`MY_HOME_SYSTEM/routers/webhook_router.py` 行番号: 51, 60 / 抜粋: "events = line_handler.line_handler.parser.parse(body, x_line_signature)", "background_tasks.add_task(")
 
 ## 9. 不明事項一覧
 

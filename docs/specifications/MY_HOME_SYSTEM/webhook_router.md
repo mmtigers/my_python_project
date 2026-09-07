@@ -105,6 +105,9 @@
 
 ### エンドポイント `switchbot_webhook`
 
+* **（2026-09-06 品質監査で修正）** (1) トークン検証は `hmac.compare_digest(token.encode("utf-8"), config.SWITCHBOT_WEBHOOK_TOKEN.encode("utf-8"))` の bytes 比較に変更した。`str` 同士の `compare_digest` は非ASCII文字を含むと `TypeError` を送出するため、以前は外部公開エンドポイントに `?token=%C3%A9` を1回送るだけで 500 + `global_exception_handler` 経由の Discord エラー通知を誰でも発生させられた。(2) `sb_tool.get_device_name_by_id(mac)` は `await asyncio.to_thread(...)` でスレッドプール実行に変更した。キャッシュ未取得時(プロセス起動後の最初のイベント)は SwitchBot API へ同期HTTP(最大 10秒×4回 + バックオフ)を行うため、`async def` ハンドラ内で直接呼ぶとその間イベントループ全体(LINE callback・Alexa・`/health`・quest API)が停止していた。
+* 根拠: [bytes比較] (行番号: 84〜86 / 抜粋: "hmac.compare_digest(\n            token.encode(\"utf-8\"), config.SWITCHBOT_WEBHOOK_TOKEN.encode(\"utf-8\")")、[to_thread] (行番号: 131 / 抜粋: "api_name = await asyncio.to_thread(sb_tool.get_device_name_by_id, mac)")、[import] (行番号: 2 / 抜粋: "import asyncio")
+
 * **役割**: SwitchBotからのWebhookを受信し、(設定されていれば)共有シークレットトークンを検証したうえで、対象デバイスか、および重複イベントでないかを検証し、ログ保存とセンサーロジックの呼び出しを行う。デバイスタイプの判定には`ctx.deviceType`(context直下、公式Webhook形式)を優先し、`None`の場合のみ`body.deviceType`(トップレベル)、それも無ければ`"Unknown"`にフォールバックする（コミット`94c2198`, H-4修正）。この解決済みの`device_type`変数は、`sensor_service.process_sensor_data`の第4引数にもそのまま渡される（#94修正: 以前はここで未解決の`body.deviceType`（公式Webhook形式では`context`側にのみ値が入るため常に`None`）を渡していたため、公式形式のモーションイベントが`process_sensor_data`側のMotion判定に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。開閉/検知ステータスを表す`state`変数は、`device_type`が`"WoContact"`/`"Contact Sensor"`かつ`ctx.openState`が設定されている場合はそちらを優先し、それ以外は`ctx.detectionState`を用いる（Issue #251修正: WoContactの`detectionState`は内蔵PIRのモーション検知結果であり開閉状態ではないため、開閉判定を誤らせないよう区別した）。
 * 根拠: `switchbot_webhook`関数定義とその内部処理 (行番号: 45〜119 / 抜粋: `@router.post("/webhook/switchbot")`), `state`解決の分岐 (行番号: 68-80 / 抜粋: "if device_type in (\"WoContact\", \"Contact Sensor\") and ctx.openState is not None:"), `await sensor_service.process_sensor_data(mac, name, location, device_type, state)` (行番号: 117)
 
@@ -269,6 +272,8 @@ graph TD
 * 根拠: 関数全体の構造 (行番号: 45〜116)
 
 
+
+* **（2026-09-06 品質監査で修正）** 本仕様書内の以下の記述は現行コードと食い違っていたため訂正する。(a) 「関連ドキュメント」「処理フロー図(`外部: line_handler.handle()`)」「次のステップ」にある `line_handler.line_handler.handle` は現行コードに存在せず、`callback_line` は `line_handler.line_handler.parser.parse(...)` でパースした後 `background_tasks.add_task(line_handler.dispatch_events, ...)` を登録する(行番号: 51, 60)。(b) 不明事項一覧の「センサーデータ処理の副作用」にある `send_push(config.LINE_USER_ID, [...], None, "discord", "notify")` の位置引数呼び出しは現行の `services/sensor_service.py` には無く、`asyncio.to_thread(send_push, [...], target="discord", channel="notify")` のキーワード引数で呼ばれ `config.LINE_USER_ID` は参照していない(`MY_HOME_SYSTEM/services/sensor_service.py` 行番号: 141〜145)。(c) 同表の「`.env.example` に `SWITCHBOT_WEBHOOK_TOKEN` のキー記載なし」は現行では誤りで、`MY_HOME_SYSTEM/.env.example` 行番号 17 に記載がある。
 
 ## 9. 不明事項一覧
 

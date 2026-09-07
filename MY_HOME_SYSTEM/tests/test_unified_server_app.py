@@ -16,6 +16,7 @@ import importlib
 import logging
 import os
 import subprocess
+from unittest.mock import MagicMock
 import sys
 from unittest.mock import patch
 
@@ -304,3 +305,46 @@ class TestLifespan:
         # シャットダウン後は起動したプロセスすべてに terminate が呼ばれていること
         for _args, proc in spawned:
             assert proc.terminated is True
+
+
+class TestSecretRedactionFilter:
+    """SwitchBot Webhook の共有シークレット(?token=...)が uvicorn のアクセスログに
+    平文で残らないことの回帰テスト。"""
+
+    def test_token_query_value_is_masked_in_access_log(self):
+        filt = unified_server.SecretRedactionFilter()
+        record = _make_uvicorn_access_record("POST", "/webhook/switchbot?token=super-secret-123", 200)
+        assert filt.filter(record) is True
+        rendered = record.getMessage()
+        assert "super-secret-123" not in rendered
+        assert "/webhook/switchbot?token=***" in rendered
+
+    def test_token_in_the_middle_of_query_string_is_masked(self):
+        filt = unified_server.SecretRedactionFilter()
+        record = _make_uvicorn_access_record("POST", "/webhook/switchbot?a=1&token=abc&b=2", 200)
+        filt.filter(record)
+        assert record.getMessage().count("abc") == 0
+        assert "?a=1&token=***&b=2" in record.getMessage()
+
+    def test_paths_without_secrets_are_unchanged(self):
+        filt = unified_server.SecretRedactionFilter()
+        record = _make_uvicorn_access_record("GET", "/api/quest/data?viewer_user_id=dad", 200)
+        before = record.getMessage()
+        filt.filter(record)
+        assert record.getMessage() == before
+
+    def test_redact_query_secrets_helper(self):
+        assert unified_server.redact_query_secrets("https://x.example/webhook/switchbot?token=s3cr3t") == \
+            "https://x.example/webhook/switchbot?token=***"
+        assert unified_server.redact_query_secrets("no query here") == "no query here"
+
+    def test_filter_is_installed_on_uvicorn_access_logger_by_lifespan(self, monkeypatch):
+        import subprocess as _subprocess
+        from starlette.testclient import TestClient
+
+        monkeypatch.setattr(unified_server.config, "SQLITE_DB_PATH", ":memory:")
+        monkeypatch.setattr(_subprocess, "Popen", lambda *a, **k: MagicMock(pid=0))
+        monkeypatch.setattr(unified_server, "apply_pending_migrations", lambda conn: None)
+        with TestClient(unified_server.app):
+            filters = logging.getLogger("uvicorn.access").filters
+            assert any(isinstance(f, unified_server.SecretRedactionFilter) for f in filters)

@@ -121,6 +121,12 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
         queryKey: ['chronicle'],
         queryFn: () => apiClient.get('/api/quest/family/chronicle'),
         staleTime: 1000 * 60 * 5,
+        // queryClient は refetchOnWindowFocus:false で、この useQuery は App に常駐して
+        // アンマウントされないため、staleTime だけでは再取得の契機が無い(このデバイス
+        // 自身の mutation が invalidate したときだけ更新される)。横画面キオスク(Echo Show)
+        // のように他デバイスで完了・承認された記録が反映されなかったため、gameData と
+        // 同様に定期ポーリングで追従させる(年代記は変化頻度が低いので 60 秒)。
+        refetchInterval: 1000 * 60,
     });
 
     // --- Actions (Mutations) ---

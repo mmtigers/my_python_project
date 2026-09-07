@@ -211,6 +211,12 @@ LINE_CHANNEL_ACCESS_TOKEN: Optional[str] = os.getenv("LINE_CHANNEL_ACCESS_TOKEN"
 LINE_CHANNEL_SECRET: Optional[str] = os.getenv("LINE_CHANNEL_SECRET")
 LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")
 LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
+# LINE Messaging API 呼び出し(reply/push/get_profile 等)の (接続, 読み取り) タイムアウト秒。
+# line-bot-sdk v3 は _request_timeout 未指定だと urllib3 に timeout=None(無期限ブロック)を
+# 渡すため、api.line.me への TCP がブラックホール化した場合に BackgroundTasks の
+# ワーカースレッドが永久に塞がり、anyio のスレッドプール(既定40)が枯渇すると同期 def の
+# 全エンドポイント(/api/quest/* 等)まで停止する。Discord/SwitchBot 系は元々タイムアウト付き。
+LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)
 
 # SwitchBot WebhookはLINEと異なり署名検証機構がないため、
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。

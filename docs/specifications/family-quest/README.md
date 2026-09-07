@@ -15,7 +15,7 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
-| [Header.md](./src/components/layout/Header.md) | ユーザー切替および記録（家族の年代記）表示へのナビゲーション機能を持つヘッダーUI。状態を持たないプレゼンテーションコンポーネントで、`hideUserSwitcher`が真の場合はユーザー切替行を省略する。 |
+| [Header.md](./src/components/layout/Header.md) | ユーザー切替および記録（家族の年代記）表示へのナビゲーション機能を持つヘッダーUI。状態を持たないプレゼンテーションコンポーネントで、`showUserSwitcher`が偽の場合はユーザー切替行を省略する（2026-09-06 品質監査: 旧記述の`hideUserSwitcher`は #479 で`showUserSwitcher`へ改名済み。`Header.tsx` 行番号 21）。 |
 | [BottomNav.md](./src/components/layout/BottomNav.md) | 画面下部固定のフッターナビゲーション。「クエスト」「ごほうび」「もちもの」「記録」の4タブで構成される。 |
 
 ## src/components/ui

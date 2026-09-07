@@ -128,6 +128,9 @@ DiscordおよびLINEプラットフォームへのメッセージ（テキスト
 
 ### `_send_line_push`
 
+* **（2026-09-06 品質監査で修正）** `line_bot_api.push_message(PushMessageRequest(...), _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は未指定だと無期限ブロックになるため。
+* 根拠: (行番号: 174 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+
 * **役割**: LINE Messaging API (v3) を利用し、指定ユーザーIDに対してプッシュメッセージを送信する。辞書型で渡されたメッセージをv3用オブジェクト(`TextMessage`等)に変換する互換性維持処理を含む。
 * 根拠: [関数定義] (行番号: 73〜114 / 抜粋: "def _send_line_push(user_id: str...")
 

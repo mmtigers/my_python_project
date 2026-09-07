@@ -62,6 +62,8 @@ except (PermissionError, OSError) as e:
 BINDING_NAME: str = '{http://www.onvif.org/ver10/events/wsdl}PullPointSubscriptionBinding'
 PRIORITY_MAP: Dict[str, int] = {"intrusion": 100, "person": 80, "vehicle": 50, "motion": 10}
 SESSION_LIFETIME: int = 3600
+# PullMessages がこの回数連続で失敗したら、SESSION_LIFETIME を待たずに再接続する
+PULL_FAILURE_RECONNECT_THRESHOLD: int = 3
 RENEW_DURATION: str = "PT600S"
 
 # クールダウンの秒数を設定 (config.py から読み込み。未定義時は60秒)
@@ -512,6 +514,12 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
             last_subscribe_time = time.time()
             FORCE_RECONNECT_INTERVAL_SEC = 540  # 9分
 
+            # PullMessages の連続失敗回数(玄関以外のカメラ用)。カメラの再起動等で
+            # サブスクリプションが消えた場合、以前は SESSION_LIFETIME(3600秒)が経過する
+            # まで毎 0.5 秒 debug ログを出しながら events=None で回り続け、最長1時間
+            # 動体検知が止まっていた。閾値に達したらループを抜けて再接続する。
+            consecutive_pull_failures = 0
+
             # 4. 監視ループ
             while True:
                 current_time = time.time()
@@ -530,6 +538,7 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
 
                 try:
                     events: Any = pullpoint.PullMessages({'Timeout': timedelta(seconds=2), 'MessageLimit': 100})
+                    consecutive_pull_failures = 0
                     # ... (ログ出力等は省略せず元の通り) ...
                     if events:
                         # Low: 元々はデバッグ目的で玄関カメラのみ info に変更されていたが、
@@ -547,9 +556,18 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                         logger.warning(f"⚠️ [{cam_name}] Failed to pull messages: {e}. Breaking loop to reconnect.")
                         break # 例外を握りつぶさず、ループを抜けて外側の Exponential Backoff 再接続へ移行
                     else:
-                        # ★ 駐車場カメラ・庭カメラは絶対にこのルート（既存のまま）を通る ★
-                        logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
+                        # 駐車場カメラ・庭カメラ: 単発の失敗は従来どおり debug に留めるが、
+                        # 連続して失敗する場合は接続が死んでいる(サブスクリプション消失等)
+                        # とみなして玄関カメラと同様に再接続へ移行する。
+                        consecutive_pull_failures += 1
                         events = None
+                        if consecutive_pull_failures >= PULL_FAILURE_RECONNECT_THRESHOLD:
+                            logger.warning(
+                                f"⚠️ [{cam_name}] PullMessages failed {consecutive_pull_failures} times in a row: {e}. "
+                                "Breaking loop to reconnect."
+                            )
+                            break
+                        logger.debug(f"[{cam_name}] Failed to pull messages: {e}")
 
                 time.sleep(0.5)
 

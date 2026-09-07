@@ -329,6 +329,9 @@
 
 ### `monitor_single_camera`
 
+* **（2026-09-06 品質監査で修正）** 玄関カメラ以外(駐車場・庭)の `PullMessages` 失敗時の扱いを変更した。以前は例外を DEBUG ログに落として `events = None` で継続するだけだったため、カメラ再起動等でサブスクリプションが消えると `SESSION_LIFETIME`(3600秒)が経過するまで最長1時間、動体検知が止まったまま(警告も出ない)だった。監視ループ開始時に `consecutive_pull_failures = 0` を置き、`PullMessages` 成功時に 0 へ戻し、失敗が `PULL_FAILURE_RECONNECT_THRESHOLD`(3)回連続したら WARNING を出して `break` し、外側の再接続処理へ移行する(玄関カメラは従来どおり1回目で `break`)。
+* 根拠: [定数] (行番号: 66 / 抜粋: "PULL_FAILURE_RECONNECT_THRESHOLD: int = 3")、[カウンタ初期化・リセット・判定] (行番号: 521, 541, 562〜570 / 抜粋: "consecutive_pull_failures += 1", "if consecutive_pull_failures >= PULL_FAILURE_RECONNECT_THRESHOLD:", "Breaking loop to reconnect.")
+
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
 * 根拠: `monitor_single_camera` (行番号: 376〜616 / 抜粋: "def monitor_single_camera(")
 
