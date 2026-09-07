@@ -53,7 +53,10 @@ try:
     os.makedirs(ASSETS_DIR, exist_ok=True)
 except (PermissionError, OSError) as e:
     # NAS等が書き込み不可の場合、ローカルの一時ディレクトリにフォールバック
-    fallback_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_assets", "snapshots")
+    # Issue #537: 以前は BASE_DIR/temp_assets/snapshots という独自パスで、nas_monitor の同期
+    # (sync_fallback_data)も保持期間削除の対象にもならず SD カードに無制限に蓄積していた。
+    # config.ensure_safe_path_with_backoff と同じ FALLBACK_ROOT/assets 配下に統一する。
+    fallback_path = os.path.join(config.FALLBACK_ROOT, "assets", "snapshots")
     logger.warning(f"⚠️ Failed to create NAS directory '{_nas_assets_dir}': {e}")
     logger.warning(f"   -> 📂 Switching to local fallback: '{fallback_path}'")
     ASSETS_DIR = fallback_path
@@ -202,6 +205,20 @@ def check_camera_time(devicemgmt: Any, cam_name: str) -> bool:
         # 監視そのものを止めないためのFail-Soft対応
         return True
 
+def _nvr_search_patterns(nas_folder: str, now: dt_class) -> list:
+    """動体検知時に最新の NVR 録画チャンクを探す glob パターン(当日分)を返す。
+
+    Issue #537: 0時台は「最新のチャンク」が前日 23:5x 開始のファイル(前日日付のプレフィックス)
+    であることが普通で、当日プレフィックスだけだと "No NVR video files found" になり
+    スナップショットが保存されなかった。0時台に限り前日分のパターンも加える。
+    """
+    patterns = [os.path.join(nas_folder, f"{now.strftime('%Y%m%d')}_*.mp4")]
+    if now.hour == 0:
+        yesterday = now - timedelta(days=1)
+        patterns.append(os.path.join(nas_folder, f"{yesterday.strftime('%Y%m%d')}_*.mp4"))
+    return patterns
+
+
 def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> Optional[bytes]:
     """
     NAS(NVR)に常時録画されている最新の動画ファイル(.mp4)から、
@@ -229,9 +246,10 @@ def capture_snapshot_from_nvr(cam_conf: dict, target_time: dt_class = None) -> O
     # #411 S-L10: 以前は "**/*.mp4" で全期間(NVRの保存期間分、数十日)を毎回CIFS越しに
     # 再帰globしていたため動体検知のたびに高コストなI/Oが発生していた。録画ファイル名は
     # camera_service.py と同じ "{YYYYMMDD}_*.mp4" 形式なので、当日分だけに絞って検索する。
-    today_str = dt_class.now().strftime("%Y%m%d")
-    search_pattern = os.path.join(nas_folder, f"{today_str}_*.mp4")
-    mp4_files = sorted(glob.glob(search_pattern), key=os.path.getmtime, reverse=True)
+    mp4_files = sorted(
+        (f for pattern in _nvr_search_patterns(nas_folder, dt_class.now()) for f in glob.glob(pattern)),
+        key=os.path.getmtime, reverse=True,
+    )
     
     if not mp4_files:
         logger.warning(f"⚠️ [{cam_conf['name']}] No NVR video files found in {nas_folder}.")

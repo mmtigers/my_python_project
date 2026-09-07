@@ -84,3 +84,27 @@ class TestEntranceCameraPayloadLoggingIsNotInfoLevel:
         assert "logger.debug(f\"🔬 [RAW EVENTS]" in source
         assert "logger.debug(f\"📦 [EVENT PAYLOAD]" in source
         assert "logger.debug(f\"📝 [PAYLOAD DETAIL]" in source
+
+
+class TestNvrSearchPatternsAroundMidnight:
+    """Issue #537: 0時台は前日日付プレフィックスの録画チャンクも検索対象にする。"""
+
+    def test_daytime_only_searches_today(self):
+        now = datetime.datetime(2026, 9, 7, 13, 5, 0)
+        assert camera_monitor._nvr_search_patterns("/nas/cam", now) == ["/nas/cam/20260907_*.mp4"]
+
+    def test_midnight_hour_also_searches_yesterday(self):
+        now = datetime.datetime(2026, 9, 7, 0, 3, 0)
+        assert camera_monitor._nvr_search_patterns("/nas/cam", now) == [
+            "/nas/cam/20260907_*.mp4", "/nas/cam/20260906_*.mp4",
+        ]
+
+    def test_year_boundary(self):
+        now = datetime.datetime(2027, 1, 1, 0, 30, 0)
+        assert camera_monitor._nvr_search_patterns("/nas/cam", now)[1] == "/nas/cam/20261231_*.mp4"
+
+    def test_fallback_snapshot_dir_is_under_fallback_root(self):
+        import inspect
+        src = inspect.getsource(camera_monitor)
+        assert 'os.path.join(config.FALLBACK_ROOT, "assets", "snapshots")' in src
+        assert '"temp_assets", "snapshots"' not in src
