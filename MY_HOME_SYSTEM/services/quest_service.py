@@ -45,7 +45,7 @@ from services.quest.locks import (
     _user_balance_locks,
     logger,
 )
-from services.quest.user_service import UserService
+from services.quest.user_service import ImageTooLargeError, InvalidImageError, UserService
 from services.quest.quest_service import QuestService
 from services.quest.shop_service import ShopService
 from services.quest.inventory_service import InventoryService, inventory_service
@@ -88,6 +88,8 @@ __all__ = [
     "_user_balance_locks",
     "logger",
     "UserService",
+    "InvalidImageError",
+    "ImageTooLargeError",
     "QuestService",
     "ShopService",
     "InventoryService",

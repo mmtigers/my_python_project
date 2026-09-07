@@ -459,6 +459,14 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     return playlist_path if os.path.exists(playlist_path) else None
 
 
+def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:
+    """config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに
+    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に
+    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ
+    一元化するために切り出した)。"""
+    return next((c for c in config.CAMERAS if c["id"] == camera_id), None)
+
+
 def set_camera_enabled(camera_id: str, enabled: bool) -> bool:
     """devices.json 上の該当カメラの enabled フラグを更新し、config.CAMERAS にも反映する。
     devices.json が存在しない、または該当カメラが見つからない場合は False を返す。"""
