@@ -240,3 +240,44 @@ class TestFetchDeviceNameCache:
         monkeypatch.setattr(switchbot_service.requests, "get", _always_fails)
 
         assert switchbot_service.fetch_device_name_cache() is False
+
+
+class TestDeviceNameCacheRetry:
+    """Issue #533: 取得失敗後、再起動まで再試行しなかった問題の回帰テスト。"""
+
+    @pytest.fixture(autouse=True)
+    def _reset(self, monkeypatch):
+        switchbot_service.DEVICE_NAME_CACHE.clear()
+        monkeypatch.setattr(switchbot_service, "_last_fetch_attempt_at", None)
+        yield
+        switchbot_service.DEVICE_NAME_CACHE.clear()
+
+    def test_failed_fetch_is_retried_after_interval(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(switchbot_service, "fetch_device_name_cache", lambda: calls.append(1) or False)
+        clock = {"t": 1000.0}
+        monkeypatch.setattr(switchbot_service.time, "monotonic", lambda: clock["t"])
+
+        assert switchbot_service.get_device_name_by_id("d1") is None
+        assert switchbot_service.get_device_name_by_id("d1") is None
+        assert len(calls) == 1, "再試行間隔内では再取得しない"
+
+        clock["t"] += switchbot_service.DEVICE_NAME_FETCH_RETRY_SEC
+        assert switchbot_service.get_device_name_by_id("d1") is None
+        assert len(calls) == 2, "間隔経過後は再取得する"
+
+    def test_successful_fetch_is_not_repeated(self, monkeypatch):
+        calls = []
+
+        def fake_fetch():
+            calls.append(1)
+            switchbot_service.DEVICE_NAME_CACHE["d1"] = "玄関ドア"
+            return True
+
+        monkeypatch.setattr(switchbot_service, "fetch_device_name_cache", fake_fetch)
+        clock = {"t": 0.0}
+        monkeypatch.setattr(switchbot_service.time, "monotonic", lambda: clock["t"])
+        assert switchbot_service.get_device_name_by_id("d1") == "玄関ドア"
+        clock["t"] += switchbot_service.DEVICE_NAME_FETCH_RETRY_SEC * 2
+        assert switchbot_service.get_device_name_by_id("d1") == "玄関ドア"
+        assert len(calls) == 1
