@@ -7,6 +7,12 @@
 # 週間ログ分析 (日曜 08:50)
 50 8 * * 0 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh monitors/log_analyzer.py
 
+# 週間レポート(電気代・センサー集計の Discord 通知、月曜 08:30)
+# weekly_analyze_report.py は「月曜の8時台」以外は no-op で、同日二重起動は
+# FALLBACK_ROOT/last_weekly_report.txt の実行済みフラグ(#234)で抑止される。
+# Issue #528: 以前はこのリポジトリ外の cron でのみ起動されていて復旧手順から漏れていた。
+30 8 * * 1 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh weekly_analyze_report.py
+
 # データベースバックアップ (毎日 04:00)
 # Note: 元コメントは日曜03:00でしたが、コードは毎日04:00でした。コードを優先しています。
 0 4 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/MY_HOME_SYSTEM/services/backup_service.py
