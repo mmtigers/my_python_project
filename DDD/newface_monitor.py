@@ -23,7 +23,7 @@ import hashlib
 import fcntl
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import List, Set, Dict, Optional, Tuple
@@ -319,6 +319,12 @@ class MonitorConfig:
     # 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は
     # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値
     MASS_DETECTION_WARNING_THRESHOLD: int = 20
+    # Issue #538: known_casts は #237 以来 union 保存(既知キャストを消さない)のため、
+    # 退店済みキャストやフォールバック ID の揺れで生じたエントリが無限に蓄積していた。
+    # 一覧ページからこの回数連続で欠けたキャストは剪定する(1時間毎のcron前提で約7日分。
+    # #237 が防ぎたかった「単発のパース失敗で消える→再通知」は、単発では到底達しない
+    # 閾値にすることで引き続き防ぐ)。
+    KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168
     # D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と
     # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない
     # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で
@@ -393,12 +399,17 @@ class CastMember:
         image_url (str): サムネイル画像のURL。
         age (str): 年齢（数字のみ、例: "23"）。一覧ページ上に年齢表記が
             見つからないサイト・キャストでは空文字となる。
+        missed_runs (int): 一覧ページから連続して欠けていた巡回回数(Issue #538)。
+            一覧に載っていれば0に戻り、MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES
+            に達した既知キャストは known_casts から剪定される。既存のJSONに
+            このキーが無くても既定値0で読み込める。
     """
     id: str
     name: str
     detail_url: str
     image_url: str
     age: str = ""
+    missed_runs: int = 0
 
     def __hash__(self) -> int:
         return hash(self.id)
@@ -1423,7 +1434,7 @@ class WebMonitor:
             # 画像 URL(無ければ表示テキスト、それも無ければ生HTML)だけを材料にする。
             image_url = WebMonitor._extract_cast_image_url(div, site)
             stable_source = image_url or div.get_text(" ", strip=True) or str(div)
-            fingerprint = hashlib.sha1(f"{name}|{stable_source}".encode('utf-8')).hexdigest()[:10]
+            fingerprint = hashlib.sha1(f"{name}|{stable_source}".encode('utf-8'), usedforsecurity=False).hexdigest()[:10]
             cast_id = f"name_{name}_{fingerprint}"
 
         if not detail_url:
@@ -1650,6 +1661,44 @@ def _send_pending_site_failure_alerts(
             data_manager.mark_site_failure_alerted(site.site_id)
 
 
+def _merge_known_casts(
+    known_casts: Set[CastMember],
+    current_casts: Set[CastMember],
+    prune_after: int = MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES,
+) -> Tuple[Set[CastMember], int]:
+    """既知キャストと今回取得したキャストをマージし、長期間欠けているキャストを剪定する(Issue #538)。
+
+    #237 の「常に union で保存する」方針は維持しつつ、一覧ページに載っていなかった
+    既知キャストの `missed_runs` を1増やし、`prune_after` 回連続で欠けたものだけを
+    集合から外す。一覧に載っていたキャストは `missed_runs` を0へ戻す。
+    今回初めて見つかったキャストは `missed_runs=0` で追加する。
+
+    Args:
+        known_casts (Set[CastMember]): 保存済みの既知キャスト。
+        current_casts (Set[CastMember]): 今回の巡回で取得したキャスト(空でないこと。
+            空の場合は呼び出し側 `_check_site` が到達前に失敗計上して戻る)。
+        prune_after (int): この回数連続で欠けたキャストを剪定する閾値。
+
+    Returns:
+        Tuple[Set[CastMember], int]: (保存すべきキャスト集合, 剪定した件数)。
+    """
+    merged: Set[CastMember] = set()
+    pruned = 0
+    for cast in known_casts:
+        if cast in current_casts:
+            merged.add(replace(cast, missed_runs=0))
+            continue
+        missed = cast.missed_runs + 1
+        if missed >= prune_after:
+            pruned += 1
+            continue
+        merged.add(replace(cast, missed_runs=missed))
+    for cast in current_casts:
+        if cast not in merged:
+            merged.add(replace(cast, missed_runs=0))
+    return merged, pruned
+
+
 def _check_site(
     monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig, data_manager: DataManager
 ) -> SiteCheckResult:
@@ -1723,7 +1772,15 @@ def _check_site(
     # 引き続き掲載されている)がknown_castsから恒久的に消え、次回正常にパース
     # できた際に「新規キャスト」として誤って再通知される。新規検知の有無に
     # 関わらず常にunionで保存することで、既知キャストが消えないようにする。
-    updated_casts = known_casts.union(current_casts)
+    # Issue #538: ただし union だけでは退店済みキャストやフォールバック ID の揺れで
+    # 生じたエントリが無限に蓄積するため、一覧から長期間(KNOWN_CAST_PRUNE_AFTER_MISSES
+    # 回連続)欠けているキャストは剪定する。単発のパース漏れでは閾値に達しない。
+    updated_casts, pruned_count = _merge_known_casts(known_casts, current_casts)
+    if pruned_count:
+        logger.info(
+            f"Pruned {pruned_count} stale cast(s) from site '{site.site_id}' "
+            f"(absent for {MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES} consecutive runs)."
+        )
     if new_casts:
         logger.info(f"Detected {len(new_casts)} new casts on site '{site.site_id}'.")
         # D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで

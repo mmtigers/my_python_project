@@ -56,7 +56,7 @@
 | `logging` | 標準ライブラリ | フォールバック時のロガー基本設定・生成 | 根拠: [import文] (行番号: 20 / 抜粋: "import logging") |
 | `hashlib` | 標準ライブラリ | ID未取得時のフォールバックIDを生成するためのフィンガープリント(sha1)算出 | 根拠: [import文] (行番号: 21 / 抜粋: "import hashlib") |
 | `fcntl` | 標準ライブラリ | 多重起動防止ロックファイルへの排他ロック(`flock`)取得・解放 | 根拠: [import文] (行番号: 22 / 抜粋: "import fcntl") |
-| `dataclasses.dataclass`, `asdict` | 標準ライブラリ | `SiteConfig`/`CastMember`データクラスの定義、辞書変換 | 根拠: [import文] (行番号: 24 / 抜粋: "from dataclasses import dataclass, asdict") |
+| `dataclasses.dataclass`, `asdict`, `replace` | 標準ライブラリ | `SiteConfig`/`CastMember`データクラスの定義、辞書変換。`replace` は **Issue #538** で追加され、`_merge_known_casts` が `missed_runs` だけを差し替えた `CastMember` を作るために使う | 根拠: [import文] (行番号: 26 / 抜粋: "from dataclasses import dataclass, asdict, replace") |
 | `datetime.datetime` | 標準ライブラリ | 現在時刻の取得（日次サマリの日付判定、21時台判定） | 根拠: [import文] (行番号: 25 / 抜粋: "from datetime import datetime") |
 | `pathlib.Path` | 標準ライブラリ | ファイル・ディレクトリパスの操作全般 | 根拠: [import文] (行番号: 26 / 抜粋: "from pathlib import Path") |
 | `typing.List`, `Set`, `Dict`, `Optional`, `Tuple` | 標準ライブラリ | 型ヒント全般（`Tuple`は`record_site_failure`の戻り値型） | 根拠: [import文] (行番号: 26 / 抜粋: "from typing import List, Set, Dict, Optional, Tuple") |
@@ -215,6 +215,10 @@
 * 根拠: [定数定義とコメント] (行番号: 303〜305 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
 
 
+* **`KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168`について（Issue #538で追加）**: `_merge_known_casts` が既知キャストを剪定する閾値。known_casts は #237 以来 union 保存(既知キャストを消さない)のため、退店済みキャストやフォールバック ID の揺れで生じたエントリが無限に蓄積していた。一覧ページからこの回数連続で欠けたキャストだけを剪定する(1時間毎のcron前提で約7日分)。#237 が防ぎたかった「単発のパース失敗で消える→再通知」は、単発では到底達しない閾値にすることで引き続き防ぐ。
+* 根拠: [定数定義とコメント] (行番号: 321〜327 / 抜粋: "# Issue #538: known_casts は #237 以来 union 保存(既知キャストを消さない)のため、", "KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168")
+
+
 * **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._extract_cast_age`（**品質で`_parse_html`から分離**）で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
 * 根拠: [定数定義とコメント] (行番号: 306〜311 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
 
@@ -277,11 +281,11 @@
 
 ### `CastMember`
 
-* **役割**: キャスト情報（ID、名前、詳細URL、画像URL、年齢）を表現するデータクラス。ID(`id`)に基づくハッシュ・等価比較を独自定義することで、`Set[CastMember]`による重複排除・差分検知を可能にしている。
-* 根拠: [クラス定義とDocstring] (行番号: 370〜381 / 抜粋: "@dataclass\nclass CastMember:\n    """キャスト情報を表現するデータクラス。")
+* **役割**: キャスト情報（ID、名前、詳細URL、画像URL、年齢）を表現するデータクラス。ID(`id`)に基づくハッシュ・等価比較を独自定義することで、`Set[CastMember]`による重複排除・差分検知を可能にしている。**（Issue #538で追加）** `missed_runs: int = 0` フィールドは、一覧ページから連続して欠けていた巡回回数を保持する。一覧に載っていれば `_merge_known_casts` が0へ戻し、`MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES` に達した既知キャストは known_casts から剪定される。`to_dict`(`asdict`)で JSON にも `missed_runs` が書き出されるが、既存の JSON にこのキーが無くても既定値0で読み込める(`CastMember(**item)`)。
+* 根拠: [クラス定義とDocstring] (行番号: 391〜412 / 抜粋: "@dataclass\nclass CastMember:\n    """キャスト情報を表現するデータクラス。", "missed_runs: int = 0")
 
 
-* **引数/リクエスト**: `id: str`, `name: str`, `detail_url: str`, `image_url: str`, `age: str = ""`（一覧ページ上に年齢表記が見つからない場合は空文字）
+* **引数/リクエスト**: `id: str`, `name: str`, `detail_url: str`, `image_url: str`, `age: str = ""`（一覧ページ上に年齢表記が見つからない場合は空文字）, `missed_runs: int = 0`（**Issue #538で追加**。連続欠落回数）
 * 根拠: [フィールド定義とDocstring] (行番号: 379〜380, 382〜385 / 抜粋: "age (str): 年齢（数字のみ、例: "23"）。一覧ページ上に年齢表記が\n            見つからないサイト・キャストでは空文字となる。")
 
 
@@ -893,7 +897,30 @@
 * 根拠: [送信成否分岐] (行番号: 1350〜1353 / 抜粋: "if notifier.notify_site_failure_alert(site, count):\n            data_manager.mark_site_failure_alerted(site.site_id)")
 
 
+### `_merge_known_casts`（Issue #538で追加）
+
+* **役割**: 既知キャスト集合と今回取得したキャスト集合をマージし、長期間欠けているキャストを剪定する純粋関数。#237 の「常に union で保存する」方針は維持しつつ、一覧ページに載っていなかった既知キャストの `missed_runs` を1増やし(`dataclasses.replace`)、`prune_after` 回連続で欠けたものだけを集合から外す。一覧に載っていたキャストは `missed_runs` を0へ戻し、今回初めて見つかったキャストは `missed_runs=0` で追加する。`_check_site` は `current_casts` が空の場合(パース全滅)にはこの関数へ到達せず失敗計上して戻るため、全滅時に既知キャストの欠落回数が進むことはない。
+* 根拠: [関数定義とDocstring] (行番号: 1664〜1699 / 抜粋: "def _merge_known_casts(\n    known_casts: Set[CastMember],\n    current_casts: Set[CastMember],\n    prune_after: int = MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES,\n) -> Tuple[Set[CastMember], int]:", "merged.add(replace(cast, missed_runs=0))", "if missed >= prune_after:\n            pruned += 1\n            continue")
+
+
+* **引数/リクエスト**: `known_casts: Set[CastMember]`（保存済みの既知キャスト）, `current_casts: Set[CastMember]`（今回取得したキャスト。空でないこと）, `prune_after: int = MonitorConfig.KNOWN_CAST_PRUNE_AFTER_MISSES`（剪定閾値）
+* 根拠: (行番号: 1664〜1668)
+
+
+* **戻り値/レスポンス**: `Tuple[Set[CastMember], int]`（保存すべきキャスト集合, 剪定した件数）
+* 根拠: (行番号: 1668, 1699 / 抜粋: "return merged, pruned")
+
+
+* **副作用**: なし（入力の集合・要素は変更せず、`replace` で新しい `CastMember` を生成する）
+* **エラーハンドリング**: なし
+
+
+
 ### `_check_site`
+
+* **（Issue #538 で修正）** 保存する集合は `known_casts.union(current_casts)` ではなく `_merge_known_casts(known_casts, current_casts)` で求める。union 相当の結果に加えて、`KNOWN_CAST_PRUNE_AFTER_MISSES` 回連続で一覧から欠けている既知キャストが剪定され、剪定件数が1以上なら INFO ログ(「Pruned N stale cast(s) ...」)を出す。Issue #531 の未送信キャスト除外はその後に適用される。
+* 根拠: (行番号: 1774〜1782 / 抜粋: "updated_casts, pruned_count = _merge_known_casts(known_casts, current_casts)", "f\"Pruned {pruned_count} stale cast(s) from site '{site.site_id}' \"")
+
 
 * **（Issue #531 で修正）** 通知は `notifier.notify_casts(...)` を呼び、返された未送信キャストを `updated_casts` から除外してから `save_known_casts` する(WARNING ログ付き)。以前は送信成否に関わらず `known_casts ∪ current_casts` を保存していたため、Discord 障害・ブレーカー開放・401/404 の実行で検知した新規キャストは既知扱いになり二度と通知されなかった。除外されたキャストは次回実行で再び新規として検知され再通知される。
 * 根拠: (行番号: 1728〜1737 / 抜粋: "sent_count, unsent_casts = notifier.notify_casts(new_casts, site_name=site.name)", "updated_casts = updated_casts.difference(unsent_casts)")
@@ -1054,7 +1081,7 @@ flowchart TD
 
     HasNew -- Yes --> Notify["外部：notifier.notify(new_casts, site_name)<br>(Discord Webhook送信)"]
     Notify --> RecordDaily["外部：DataManager.record_daily_new_casts"]
-    RecordDaily --> UnionSave["外部：DataManager.save_known_casts(known ∪ current)<br>(#237で常時union化)"]
+    RecordDaily --> UnionSave["外部：DataManager.save_known_casts(_merge_known_casts(known, current))<br>(#237で常時union化、#538で長期欠落キャストを剪定)"]
     UnionSave --> NextSite
 
     HasNew -- No --> UnionSave
