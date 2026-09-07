@@ -158,6 +158,7 @@ def test_mass_detection_warning_logged_when_known_casts_exist(caplog, monkeypatc
     monitor = MagicMock()
     monitor.fetch_current_casts.return_value = current_casts
     notifier = MagicMock()
+    notifier.notify_casts.return_value = (1, [])
 
     import logging
 
@@ -224,6 +225,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         monitor = MagicMock()
         monitor.fetch_current_casts.return_value = current_casts
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
 
         monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=known_casts))
         mock_save = MagicMock()
@@ -248,6 +250,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
         monitor = MagicMock()
         monitor.fetch_current_casts.return_value = current_casts
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
 
         monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=known_casts))
         mock_save = MagicMock()
@@ -257,7 +260,7 @@ class TestCheckSiteKnownCastsSaveIsAlwaysUnion:
 
         module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
 
-        notifier.notify.assert_called_once()
+        notifier.notify_casts.assert_called_once()
         mock_save.assert_called_once()
         saved_site, saved_casts = mock_save.call_args[0]
         assert saved_casts == {cast_a, cast_new}
@@ -374,6 +377,7 @@ class TestCheckSiteSavesKnownCastsEvenIfDailySummaryFails:
         monitor = MagicMock()
         monitor.fetch_current_casts.return_value = {new_cast}
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify.return_value = 1
 
         monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=set()))
@@ -388,7 +392,7 @@ class TestCheckSiteSavesKnownCastsEvenIfDailySummaryFails:
         result = module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
 
         assert not result.failed
-        notifier.notify.assert_called_once()
+        notifier.notify_casts.assert_called_once()
         mock_save.assert_called_once()
         saved_casts = mock_save.call_args.args[-1]
         assert new_cast in saved_casts
@@ -422,3 +426,74 @@ class TestNotifierDoesNotLogWebhookToken:
         assert sent == 0
         assert any("Failed to send notification" in r.message for r in caplog.records)
         assert token not in caplog.text
+
+
+class TestUnsentCastsAreNotPersistedAsKnown:
+    """Issue #531: 送信できなかったキャストを既知として保存すると二度と通知されない。"""
+
+    def _notifier_with_responses(self, responses):
+        import requests
+        notifier = DiscordNotifier(webhook_url="https://discordapp.com/api/webhooks/test")
+        calls = iter(responses)
+
+        def fake_post(*a, **k):
+            r = next(calls)
+            resp = MagicMock()
+            resp.status_code = r
+            resp.text = ""
+            if r >= 400:
+                err = requests.HTTPError(f"{r} error", response=resp)
+                resp.raise_for_status.side_effect = err
+            else:
+                resp.raise_for_status.return_value = None
+            return resp
+
+        notifier.session.post = MagicMock(side_effect=fake_post)
+        return notifier
+
+    def test_notify_casts_returns_failed_casts(self, monkeypatch):
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        casts = [_make_cast(f"https://example.test/{i}.jpg") for i in range(3)]
+        for i, c in enumerate(casts):
+            c.id = f"cast-{i}"
+        notifier = self._notifier_with_responses([204, 500, 204])
+        sent, unsent = notifier.notify_casts(casts, site_name="s")
+        assert sent == 2
+        assert [c.id for c in unsent] == ["cast-1"]
+
+    def test_401_marks_all_remaining_casts_unsent(self, monkeypatch):
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+        casts = [_make_cast(f"https://example.test/{i}.jpg") for i in range(3)]
+        for i, c in enumerate(casts):
+            c.id = f"cast-{i}"
+        notifier = self._notifier_with_responses([401])
+        sent, unsent = notifier.notify_casts(casts, site_name="s")
+        assert sent == 0
+        assert [c.id for c in unsent] == ["cast-0", "cast-1", "cast-2"]
+
+    def test_unconfigured_webhook_returns_all_casts_unsent(self):
+        notifier = DiscordNotifier(webhook_url="")
+        casts = [_make_cast("https://example.test/0.jpg")]
+        assert notifier.notify_casts(casts) == (0, casts)
+
+    def test_check_site_excludes_unsent_casts_from_known(self, tmp_path, monkeypatch):
+        assert module.MonitorConfig.SITES
+        site = module.MonitorConfig.SITES[0]
+        sent_cast = _make_cast("https://example.test/a.jpg"); sent_cast.id = "sent"
+        failed_cast = _make_cast("https://example.test/b.jpg"); failed_cast.id = "failed"
+        monitor = MagicMock()
+        monitor.fetch_current_casts.return_value = {sent_cast, failed_cast}
+        notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [failed_cast])
+        monkeypatch.setattr(module.DataManager, "load_known_casts", MagicMock(return_value=set()))
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+        monkeypatch.setattr(module.DataManager, "record_daily_new_casts", MagicMock())
+        monkeypatch.setattr(module.DataManager, "clear_site_failure", MagicMock())
+
+        module._check_site(monitor, notifier, site, module.DataManager(tmp_path))
+
+        saved = mock_save.call_args.args[-1]
+        assert sent_cast in saved
+        assert failed_cast not in saved
+        module.DataManager.record_daily_new_casts.assert_called_once_with(site.site_id, 1)

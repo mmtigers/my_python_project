@@ -481,7 +481,17 @@ class DiscordNotifier:
             self.session.close()
 
     def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:
+        """新規キャスト情報をDiscordに通知し、送信成功件数を返す(notify_casts の薄いラッパー)。"""
+        sent_count, _unsent = self.notify_casts(new_casts, site_name=site_name)
+        return sent_count
+
+    def notify_casts(self, new_casts: List[CastMember], site_name: str = "") -> Tuple[int, List[CastMember]]:
         """新規キャスト情報をDiscordに通知する。
+
+        Issue #531: 戻り値に「送信できなかったキャスト」を含める。以前は件数(int)しか
+        返しておらず、_check_site はサーキットブレーカー開放・401/404・ネットワーク断で
+        送れなかったキャストまで known_casts に保存していたため、そのキャストは二度と
+        通知されなかった(例: 03:00 の実行時に Discord が落ちていると新規5件が黙って消える)。
 
         Args:
             new_casts (List[CastMember]): 通知対象の新規キャストリスト。
@@ -489,19 +499,21 @@ class DiscordNotifier:
                 どのサイトの新着かを区別できるよう埋め込みタイトルに付与する。
 
         Returns:
-            int: 実際にDiscordへの送信に成功した件数（D-L9）。サーキット
-                ブレーカーが開いて送信をスキップしたキャストは含まない。
-                呼び出し元(_check_site)はこの値を日次サマリの集計に用いる
-                ことで、送信できなかった分まで過大計上しないようにする。
+            Tuple[int, List[CastMember]]: (実際にDiscordへの送信に成功した件数（D-L9）,
+                送信できなかったキャストのリスト)。サーキットブレーカーが開いて
+                スキップしたキャスト・HTTPエラー/ネットワークエラーになったキャストは
+                後者に含まれる。呼び出し元(_check_site)は前者を日次サマリの集計に、
+                後者を「既知キャストに保存しない(=次回再通知する)」判定に用いる。
         """
         if not self.webhook_url or 'YOUR_DISCORD' in self.webhook_url:
             logger.warning("Discord Webhook URL is not configured. Skipping notification.")
-            return 0
+            return 0, list(new_casts)
 
         site_prefix = f"【{site_name}】" if site_name else ""
         sent_count = 0
+        unsent: List[CastMember] = []
 
-        for cast in new_casts:
+        for index, cast in enumerate(new_casts):
             if self._circuit_breaker.is_open:
                 # 連続送信失敗によりサーキットブレーカーが開いている間は、
                 # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。
@@ -509,6 +521,7 @@ class DiscordNotifier:
                     "Discord Webhookへの連続送信失敗を検知しているため、"
                     "残りの通知をスキップします。"
                 )
+                unsent.extend(new_casts[index:])
                 break
 
             safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)
@@ -568,6 +581,7 @@ class DiscordNotifier:
                     f"{redact_discord_webhook_url(e)} | body: {body} | "
                     f"detail_url: {cast.detail_url} | image_url: {cast.image_url}"
                 )
+                unsent.append(cast)
                 if status in (401, 404):
                     # Webhook自体が無効/失効している可能性が高く、残り件数分リトライしても
                     # 無駄なだけなので即座にブレーカーを開いて打ち切る。
@@ -576,13 +590,15 @@ class DiscordNotifier:
                         "Aborting remaining notifications for this run."
                     )
                     self._circuit_breaker.trip()
+                    unsent.extend(new_casts[index + 1:])
                     break
                 self._circuit_breaker.record_failure()
             except requests.RequestException as e:
                 logger.error(f"Failed to send notification for {cast.name}: {type(e).__name__}: {redact_discord_webhook_url(e)}")
                 self._circuit_breaker.record_failure()
+                unsent.append(cast)
 
-        return sent_count
+        return sent_count, unsent
 
     def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:
         """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。
@@ -1709,7 +1725,16 @@ def _check_site(
         # D-L9: サーキットブレーカーが開いて送信をスキップしたキャストまで
         # 日次サマリに計上すると、実際にDiscordへ送られていない件数分だけ
         # 過大報告になる。notify()の戻り値(実際に送信できた件数)を使う。
-        sent_count = notifier.notify(new_casts, site_name=site.name)
+        sent_count, unsent_casts = notifier.notify_casts(new_casts, site_name=site.name)
+        if unsent_casts:
+            # Issue #531: 送信できなかったキャストは既知に保存しない(次回の実行で
+            # 再び「新規」として検知され、再通知される)。以前は送信成否に関わらず
+            # 保存していたため、Discord 障害時の新規キャストは二度と通知されなかった。
+            logger.warning(
+                f"{len(unsent_casts)} cast(s) on site '{site.site_id}' could not be notified; "
+                "they will be retried on the next run."
+            )
+            updated_casts = updated_casts.difference(unsent_casts)
         # 日次サマリの集計は「通知は済んだが既知キャストの保存はまだ」という位置で
         # 呼ばれる。ここで例外が漏れると save_known_casts に到達せず、通知済みの
         # キャストが毎時「新規」として再通知され続けるため、集計の失敗は既知

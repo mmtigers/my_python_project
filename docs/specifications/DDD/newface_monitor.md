@@ -407,6 +407,9 @@
 
 ### `DiscordNotifier.notify`（D-L6・D-L9で変更）
 
+* **（Issue #531 で修正）** 送信本体を新設の `notify_casts(new_casts, site_name) -> Tuple[int, List[CastMember]]` に移し、`notify` はその戻り値の件数だけを返す薄いラッパーになった。`notify_casts` は (送信成功件数, 送信できなかったキャストのリスト) を返す。未送信には Webhook 未設定時の全件、サーキットブレーカー開放時の残り全件、HTTPError/RequestException になったキャスト、401/404 でブレーカーをトリップした際の残り全件が含まれる。
+* 根拠: (行番号: 483〜486, 488〜601 / 抜粋: "sent_count, _unsent = self.notify_casts(new_casts, site_name=site_name)", "def notify_casts(self, new_casts: List[CastMember], site_name: str = \"\") -> Tuple[int, List[CastMember]]:", "return sent_count, unsent")
+
 * **（2026-09-06 品質監査で修正）** `requests.HTTPError` / `requests.RequestException` の ERROR ログから `exc_info=True` を外し、例外は `{type(e).__name__}: {redact_discord_webhook_url(e)}` の形で出力する。requests の例外文字列(およびトレースバック)は送信先 Webhook URL(トークン込み)を丸ごと含み、`core.logger.DiscordErrorHandler` 経由でエラー通知チャンネルにも転記されるため、`file_utils.redact_discord_webhook_url` でトークン部分をマスクする。
 * 根拠: (行番号: 564〜570, 582 / 抜粋: "f\"Failed to send notification for {cast.name}: {type(e).__name__}: \"\n                    f\"{redact_discord_webhook_url(e)} | body: {body} | \"")、[import] (行番号: 32)
 
@@ -885,6 +888,9 @@
 
 
 ### `_check_site`
+
+* **（Issue #531 で修正）** 通知は `notifier.notify_casts(...)` を呼び、返された未送信キャストを `updated_casts` から除外してから `save_known_casts` する(WARNING ログ付き)。以前は送信成否に関わらず `known_casts ∪ current_casts` を保存していたため、Discord 障害・ブレーカー開放・401/404 の実行で検知した新規キャストは既知扱いになり二度と通知されなかった。除外されたキャストは次回実行で再び新規として検知され再通知される。
+* 根拠: (行番号: 1728〜1737 / 抜粋: "sent_count, unsent_casts = notifier.notify_casts(new_casts, site_name=site.name)", "updated_casts = updated_casts.difference(unsent_casts)")
 
 * **（2026-09-06 品質監査で修正）** `notifier.notify(...)` の後の `data_manager.record_daily_new_casts(site.site_id, sent_count)` を `try/except Exception` で囲み、失敗しても ERROR ログ(`exc_info=True`)のみ出して後続の `save_known_casts` を必ず実行する。この呼び出しは「通知は済んだが既知キャストの保存はまだ」という位置にあり、例外が漏れると通知済みキャストが毎時「新規」として再通知され続ける(#174/#183 と同じ失敗モード)ため、集計の失敗を隔離する。
 * 根拠: (行番号: 1717〜1725 / 抜粋: "try:\n            data_manager.record_daily_new_casts(site.site_id, sent_count)\n        except Exception as e:", "(known casts will still be saved)")
