@@ -109,7 +109,17 @@ SQLiteのみを使用し、単一ファイル `config.SQLITE_DB_PATH`（デフ�
 
 ### DDD バッチ処理
 
-他の2サブシステムとは、NASマウントを共有している点を除き独立している（MY_HOME_SYSTEM側の `nas_monitor.py` は、DDDによってNAS容量が逼迫した際にスロットリング/アラートを行うことができる）。`batch_download_discord.py` は `DownloadStrategy` を軸としたストラテジーパターン（`UniversalYtDlpStrategy` vs `ScrapingStrategy`）を採用し、同時実行を防ぐために `fcntl.flock` によるロックファイルを使用している — この領域に新しい長時間稼働のcron的スクリプトを追加する際は、同じロック方式に従うこと。
+NASマウントを共有している（MY_HOME_SYSTEM側の `nas_monitor.py` は、DDDによってNAS容量が逼迫した際にスロットリング/アラートを行うことができる）だけでなく、`sys.path` に `MY_HOME_SYSTEM/` を追加して `core.*` を直接importする実依存もある（Issue #553）。ルート解決は `DDD/file_utils.py` の `resolve_my_home_system_root()` に集約されている。
+
+| ファイル | import 内容 |
+| --- | --- |
+| `newface_monitor.py` | `core.logger.get_logger`、`core.nas_utils.get_managed_target_directory`、`core.utils.wait_for_storage_warmup` |
+| `extract_youtube_urls.py` | `core.logger.get_logger`、`core.nas_utils.get_managed_target_directory` |
+| `batch_download_discord.py` | `services.notification_service._send_discord_webhook`（`_standalone_send_discord_webhook` フォールバックあり） |
+
+各スクリプトに `try/except ImportError` のフォールバックはあるが、本番（ラズパイ）経路では MY_HOME_SYSTEM が存在する前提で `core` を使うため、CI・単体テストだけでは気づけない実依存になっている。`core.logger` は import 時に `config` をロードするため、**`MY_HOME_SYSTEM/core/logger.py`・`nas_utils.py`・`utils.py` のシグネチャを変更した場合は、DDD のテスト（`DDD/conftest.py` が同じ `core.*` を import する前提で書かれている）も必ず実行すること**。
+
+`batch_download_discord.py` は `DownloadStrategy` を軸としたストラテジーパターン（`UniversalYtDlpStrategy` vs `ScrapingStrategy`）を採用し、同時実行を防ぐために `fcntl.flock` によるロックファイルを使用している — この領域に新しい長時間稼働のcron的スクリプトを追加する際は、同じロック方式に従うこと。
 
 ## 仕様書ドリフト規約
 

@@ -102,7 +102,7 @@ graph TD
 
 * **対象環境変数を追加する際は本ファイルも更新が必要**: `MY_HOME_SYSTEM/config.py`側に新しいDiscord/LINE等の通知系認証情報の環境変数が追加された場合、本ファイルの無害化対象リストにも同時に追加しない限り、その新しい環境変数はテスト実行中も実際の値のまま残り、同種の事故が再発しうる。
 * **pytestのcollection順序への暗黙の依存**: 本ファイルの防護は「pytestが同一ディレクトリのconftest.pyを他のテストファイルより先にimportする」というpytestの標準動作に依存している。`DDD/`配下でpytest以外の方法（例: `python newface_monitor.py`を直接実行、または個別スクリプトをテスト目的でimportする等）でモジュールをロードする場合、本ファイルは一切ロードされず無害化は効かない。
-* **`MY_HOME_SYSTEM/tests/conftest.py`との重複**: 同じ無害化ロジック（対象環境変数リストと空文字への上書き）が`MY_HOME_SYSTEM/tests/conftest.py`と本ファイルの2箇所に重複して存在する。将来的に共通ヘルパーへ切り出す余地があるが、`MY_HOME_SYSTEM`と`DDD`は独立したサブシステムというモノレポの設計方針（`CLAUDE.md`）を踏まえると、意図的な重複である可能性もある。
+* **`MY_HOME_SYSTEM/tests/conftest.py`との重複**: 同じ無害化ロジック（対象環境変数リストと空文字への上書き）が`MY_HOME_SYSTEM/tests/conftest.py`と本ファイルの2箇所に重複して存在する。将来的に共通ヘルパーへ切り出す余地があるが、`DDD`は`sys.path`経由で`MY_HOME_SYSTEM/core.*`等を直接importする実依存があるとはいえ（Issue #553）、テストの防護ロジックはパッケージをまたいで暗黙に依存させず各側で完結させる方が安全なため、意図的な重複である可能性もある。
 
 ## 9. 不明事項一覧
 
