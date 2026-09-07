@@ -25,6 +25,13 @@ import config
 from services import notification_service, switchbot_service
 from services import quest_service as quest_service_module
 from services.quest_service import QuestService, GameSystem
+# Issue #550でGameSystem/QuestServiceの実装はservices/quest/配下へ分割された。
+# loggerはモジュールごとに束縛された別オブジェクトの属性ではなく、各モジュールの
+# グローバル名として個別にimportされているため、`logger`自体を差し替える
+# (patch.objectで名前を丸ごと置き換える)テストは、実際にログ出力するメソッドが
+# 定義されているモジュールを直接指定する必要がある。
+from services.quest import game_system as game_system_impl_module
+from services.quest import quest_service as quest_service_impl_module
 
 
 def _seed_user_and_quest(gold_gain=10, exp_gain=20, day_of_week=None):
@@ -695,7 +702,7 @@ class TestSyncMasterData:
             )
 
         game_system = GameSystem()
-        with patch.object(quest_service_module, "logger") as mock_logger:
+        with patch.object(game_system_impl_module, "logger") as mock_logger:
             result = game_system.sync_master_data()
 
         assert result["status"] == "synced"
@@ -900,7 +907,7 @@ class TestFilterActiveQuestsDateParseErrorLogging:
             "day_of_week": None,
         }
 
-        with patch.object(quest_service_module, "logger") as mock_logger:
+        with patch.object(quest_service_impl_module, "logger") as mock_logger:
             result = quest_service.filter_active_quests([bad_quest])
 
         assert result == []  # パースエラー時は除外される(既存挙動)
