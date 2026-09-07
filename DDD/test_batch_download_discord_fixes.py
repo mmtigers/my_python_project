@@ -1208,3 +1208,40 @@ class TestTopLevelListSentinelDoesNotCollideWithListDirFile:
         ])
         assert list_file.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep"]
         assert inner.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep2"]
+
+
+class TestMasterPlaylistVariantSelection:
+    """Issue #538: 'source'(マスタープレイリスト)へのフォールバック時に variant を辿る。"""
+
+    MASTER = (
+        "#EXTM3U\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=842x480\n"
+        "480p/index.m3u8\n"
+        "#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n"
+        "720p/index.m3u8\n"
+    )
+    MEDIA = "#EXTM3U\n#EXTINF:2.0,\nhttps://cdn.example.test/seg_000.ts\n#EXT-X-ENDLIST\n"
+
+    def test_picks_highest_bandwidth_variant_as_absolute_url(self):
+        url = module.ScrapingStrategy._select_variant_from_master(self.MASTER, "https://cdn.example.test/v/playlist.m3u8")
+        assert url == "https://cdn.example.test/v/720p/index.m3u8"
+
+    def test_media_playlist_returns_none(self):
+        assert module.ScrapingStrategy._select_variant_from_master(self.MEDIA, "https://cdn.example.test/v/playlist.m3u8") is None
+
+    def test_download_with_ytdlp_refetches_variant(self, tmp_path, monkeypatch):
+        strategy = module.ScrapingStrategy(save_base_dir=tmp_path, session=MagicMock())
+        fetched = []
+
+        def fake_fetch(m3u8_url, page_url):
+            fetched.append(m3u8_url)
+            return self.MASTER if m3u8_url.endswith("playlist.m3u8") else self.MEDIA
+
+        monkeypatch.setattr(strategy, "_fetch_m3u8_manifest", fake_fetch)
+        localized = {}
+        monkeypatch.setattr(strategy, "_localize_m3u8_manifest", lambda text, url: localized.setdefault("url", url) or text)
+        # 一時ディレクトリ準備で False を返して以降(セグメント取得・結合)には進ませない
+        monkeypatch.setattr(strategy, "_prepare_fragment_tmp_dir", lambda d: False)
+        assert strategy._download_with_ytdlp("https://cdn.example.test/v/playlist.m3u8", tmp_path / "out.mp4", "https://page", tmp_path) is False
+        assert fetched == ["https://cdn.example.test/v/playlist.m3u8", "https://cdn.example.test/v/720p/index.m3u8"]
+        assert localized["url"] == "https://cdn.example.test/v/720p/index.m3u8"

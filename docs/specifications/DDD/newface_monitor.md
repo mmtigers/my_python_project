@@ -780,6 +780,9 @@
 
 ### `WebMonitor._extract_raw_name` / `_extract_cast_age` / `_extract_cast_link_and_id` / `_extract_cast_image_url`（品質で追加）
 
+* **（Issue #538 で修正）** `_extract_cast_link_and_id` で ID を抽出できない場合のフォールバック ID のフィンガープリントを、コンテナの生 HTML 全体(`str(div)`)から「名前 + 画像 URL(無ければ表示テキスト、それも無ければ生 HTML)」の SHA1 先頭10桁に変更した。以前は lazyload 状態・「NEW」バッジ・nonce 等のリクエストごとに変わる属性で毎回 ID が変わり、毎時再通知と `known_casts_*.json` の無限成長を招き得た。(同 Issue の「N 回連続で欠けたキャストの剪定」は未実装。)
+* 根拠: (行番号: 1424〜1427 / 抜粋: "image_url = WebMonitor._extract_cast_image_url(div, site)", "stable_source = image_url or div.get_text(\" \", strip=True) or str(div)")
+
 * **役割**: いずれも`_parse_html`のキャストカードごとのパース処理（以前は170行超・深いネストの単一ループ本体だった）から分離された純粋な抽出処理の静的メソッド群。`_extract_raw_name`は名前要素・名前文字列の抽出（`name_first_text_only`/`name_strip_after_tab`フラグの分岐を含む）、`_extract_cast_age`は`AGE_PATTERN`を用いた年齢抽出（D-L12の妥当性チェックを含む）、`_extract_cast_link_and_id`は詳細URL・IDの抽出（`id_query_param`優先→キー=値でないクエリ文字列→パス末尾セグメント→SHA1フィンガープリントの順のフォールバック）、`_extract_cast_image_url`は画像URLの抽出（`image_from_style`によるインラインCSS抽出、または`image_attr`／`src`フォールバック）を、それぞれ副作用なしに行う。名前が空文字だった場合の`skip_unnamed_casts`分岐によるカード読み飛ばし（`continue`）とそれに伴うログ出力は、ループ制御が必要なため`_parse_html`側に残されている。
 * 根拠: [各メソッド定義とDocstring] (行番号: 1131〜1132, 1166〜1167, 1200〜1201, 1276〜1277 / 抜粋: "def _extract_raw_name(div: Tag, site: SiteConfig) -> Tuple[str, Optional[Tag]]:", "def _extract_cast_age(name_elem: Optional[Tag]) -> str:", "def _extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str) -> Tuple[str, str]:", "def _extract_cast_image_url(div: Tag, site: SiteConfig) -> str:")
 

@@ -839,6 +839,9 @@
 
 ### `ScrapingStrategy._download_with_ytdlp`（品質でヘルパーメソッドへ分割）
 
+* **（Issue #538 で修正）** マニフェスト取得後、新設の静的メソッド `_select_variant_from_master(manifest_text, manifest_url)` で `#EXT-X-STREAM-INF` を含むマスタープレイリストかを判定し、該当すれば `BANDWIDTH` 最大の variant を `urljoin` した URL で `_fetch_m3u8_manifest` を取り直してからローカル化する(1段のみ)。以前は `_extract_m3u8_url` が `source`(マスター)にフォールバックした際、variant の `.m3u8` を「セグメント」として取得して `file://` 基準の相対 URI 解決に失敗し、merge 失敗・tmp 削除・失敗カウントになっていた。
+* 根拠: (行番号: 838〜854, 1192〜1198 / 抜粋: "def _select_variant_from_master(manifest_text: str, manifest_url: str) -> Optional[str]:", "variant_url = self._select_variant_from_master(manifest_text, m3u8_url)")
+
 * **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化したうえで、`_prepare_fragment_tmp_dir`（品質で追加）による一時ディレクトリ準備、`_merge_fragments_and_transfer_to_nas`（品質で追加）による**ローカルディスク完結の結合＋NASへの2段階転送**（PR #72でNAS上に直接結合する旧実装から変更）を呼び出し、成功時のDiscord通知・失敗時の後始末（`final_path`/`nas_tmp_path`の削除、`BotDetectionError`判定）を行う。**（品質で変更）** 以前はこれら一時ディレクトリ準備・結合・NAS転送の処理がすべて本メソッド内にベタ書きされていたため、`_prepare_fragment_tmp_dir`と`_merge_fragments_and_transfer_to_nas`（いずれも品質で追加）へ分離した。分離後も各処理の内容・エラーハンドリング・`finally`節での`tmp_dir`削除は分離前と完全に同一である。
   1. セグメント本体・差し替え済みマニフェスト(`playlist.m3u8`)は`CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")`という**ローカルディスク**上の一時ディレクトリ(`tmp_dir`)へ書き込む（NAS上の`save_dir`ではない）。`_prepare_fragment_tmp_dir`が、開始前に同名`tmp_dir`が残っていれば削除してから作り直し、書き込み前に`FileSystemManager.check_disk_space`で`CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB`以上の空きを確認する。
   2. セグメント取得完了後、結合(`yt-dlp`)＋その後の`FixupM3u8`（ffmpeg再多重化）でさらに同程度のディスクを消費する見込みから、取得済みバイト数の約2.2倍の空き容量があるかを結合開始前に**再度**確認し、不足していれば具体的なバイト数を含むエラーログを出力して`False`を返す（ここで中断せず結合まで進めてディスクフルで失敗すると、それまでの帯域・時間が丸ごと無駄になるため）。

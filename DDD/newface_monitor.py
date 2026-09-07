@@ -1415,10 +1415,15 @@ class WebMonitor:
             # なる要素が複数存在する）、IDが完全に同一になり
             # Set[CastMember]内で衝突して片方が黙って失われてしまう
             # （id/hashともにidのみに依拠しているため）。
-            # コンテナの生HTML（get_text()ではなくstr()）のフィンガープリントを
-            # 付与することで、テキストが同一/空でも画像src等の属性差異が
-            # あれば別要素として区別できるようにする。
-            fingerprint = hashlib.sha1(str(div).encode('utf-8')).hexdigest()[:10]
+            # 名前に加えて「安定した識別材料」のフィンガープリントを付与し、テキストが
+            # 同一/空でも画像srcが異なれば別要素として区別できるようにする。
+            # Issue #538: 以前はコンテナの生HTML全体(str(div))をハッシュしていたため、
+            # lazyload 状態・「NEW」バッジ・nonce 等のリクエストごとに変わる属性があると
+            # 毎回 ID が変わり、毎時再通知 + known_casts の無限成長を招いていた。
+            # 画像 URL(無ければ表示テキスト、それも無ければ生HTML)だけを材料にする。
+            image_url = WebMonitor._extract_cast_image_url(div, site)
+            stable_source = image_url or div.get_text(" ", strip=True) or str(div)
+            fingerprint = hashlib.sha1(f"{name}|{stable_source}".encode('utf-8')).hexdigest()[:10]
             cast_id = f"name_{name}_{fingerprint}"
 
         if not detail_url:

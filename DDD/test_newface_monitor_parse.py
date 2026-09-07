@@ -127,3 +127,34 @@ class TestSkipUnnamedCasts:
         by_id = {c.id: c for c in casts}
         assert by_id["81"].name == "Unknown"
         assert "Empty name extracted" not in caplog.text
+
+
+class TestFallbackCastIdIsStableAcrossVolatileAttributes:
+    """Issue #538: フォールバック ID のフィンガープリントは画像 URL(と名前)のみを材料にし、
+    lazyload 状態やバッジ等の揮発的な属性で毎回変わらないこと。"""
+
+    def _site(self):
+        return module.SiteConfig(
+            site_id="fp_test", name="FP", target_url="https://example.test/list",
+            selector_container="div.cast", selector_name="span.name", selector_link="a.none",
+            selector_image="img",
+        )
+
+    def _div(self, html):
+        from bs4 import BeautifulSoup
+        return BeautifulSoup(html, "html.parser").select_one("div.cast")
+
+    def test_volatile_attribute_does_not_change_id(self):
+        site = self._site()
+        a = self._div('<div class="cast" data-loaded="false"><span class="name">Alice</span><img src="/img/a.jpg"><span class="badge">NEW</span></div>')
+        b = self._div('<div class="cast" data-loaded="true" data-nonce="x1"><span class="name">Alice</span><img src="/img/a.jpg"></div>')
+        _, id_a = module.WebMonitor._extract_cast_link_and_id(a, site, "Alice")
+        _, id_b = module.WebMonitor._extract_cast_link_and_id(b, site, "Alice")
+        assert id_a == id_b
+        assert id_a.startswith("name_Alice_")
+
+    def test_different_image_gives_different_id(self):
+        site = self._site()
+        a = self._div('<div class="cast"><span class="name">Alice</span><img src="/img/a.jpg"></div>')
+        b = self._div('<div class="cast"><span class="name">Alice</span><img src="/img/b.jpg"></div>')
+        assert module.WebMonitor._extract_cast_link_and_id(a, site, "Alice")[1] != module.WebMonitor._extract_cast_link_and_id(b, site, "Alice")[1]

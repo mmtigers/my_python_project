@@ -834,6 +834,25 @@ class ScrapingStrategy(DownloadStrategy):
             
         return None
 
+    @staticmethod
+    def _select_variant_from_master(manifest_text: str, manifest_url: str) -> Optional[str]:
+        """マスタープレイリスト(#EXT-X-STREAM-INF を含む)なら、BANDWIDTH が最大の variant の
+        絶対 URL を返す。メディアプレイリスト(セグメント列挙)なら None を返す(Issue #538)。"""
+        if "#EXT-X-STREAM-INF" not in manifest_text:
+            return None
+        best: Tuple[int, Optional[str]] = (-1, None)
+        lines = [ln.strip() for ln in manifest_text.splitlines()]
+        for i, line in enumerate(lines):
+            if not line.startswith("#EXT-X-STREAM-INF"):
+                continue
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            bandwidth = int(m.group(1)) if m else 0
+            # 属性行の直後にある最初の非コメント・非空行が variant の URI
+            uri = next((ln for ln in lines[i + 1:] if ln and not ln.startswith("#")), None)
+            if uri and bandwidth > best[0]:
+                best = (bandwidth, urljoin(manifest_url, uri))
+        return best[1]
+
     def _fetch_m3u8_manifest(self, m3u8_url: str, page_url: str) -> Optional[str]:
         """m3u8マニフェスト本体を、ブラウザ偽装(impersonate)付きで直接取得する。
 
@@ -1164,6 +1183,19 @@ class ScrapingStrategy(DownloadStrategy):
         manifest_text = self._fetch_m3u8_manifest(m3u8_url, page_url)
         if manifest_text is None:
             return False
+
+        # Issue #538: _extract_m3u8_url が source1280/source842 を見つけられず 'source'
+        # (マスタープレイリスト)にフォールバックした場合、以前は variant の .m3u8 を
+        # 「セグメント」として取得してしまい、file:// 基準の相対 URI 解決に失敗して
+        # merge 失敗・tmp 削除・失敗カウントになっていた。#EXT-X-STREAM-INF を含む場合は
+        # 最も帯域の大きい variant を辿ってメディアプレイリストを取り直す(1段のみ)。
+        variant_url = self._select_variant_from_master(manifest_text, m3u8_url)
+        if variant_url:
+            logger.info(f"🎚️ マスタープレイリストを検出。variant を取得します: {variant_url}")
+            manifest_text = self._fetch_m3u8_manifest(variant_url, page_url)
+            if manifest_text is None:
+                return False
+            m3u8_url = variant_url
 
         localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
 
