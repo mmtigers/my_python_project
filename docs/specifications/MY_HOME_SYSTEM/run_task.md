@@ -146,6 +146,9 @@ graph TD
 * `PROJECT_ROOT` および `DEVELOP_ROOT` にハードコードされた絶対パス (`/home/masahiro/develop/...`) が使用されており、実行環境（ユーザー名など）が変わると動作しません。
 * 第一引数 (`$1`) に対して、パスや拡張子の検証が行われていないため、任意のコマンドや意図しないファイルが実行される可能性があります。
 
+* **（2026-09-06 品質監査で修正）** `PYTHONPATH` の組み立てを `"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"` に変更した。cron では `PYTHONPATH` が未設定のため、以前の `...:${PYTHONPATH}` は末尾に空要素(=カレントディレクトリ)を暗黙の import ルートとして加えていた。
+* 根拠: (行番号: 31 / 抜粋: "export PYTHONPATH=\"${DEVELOP_ROOT}:${PROJECT_ROOT}${PYTHONPATH:+:${PYTHONPATH}}\"")
+
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |

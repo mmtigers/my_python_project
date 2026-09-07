@@ -84,6 +84,9 @@
 
 ### 関数 `send_reply_text`
 
+* **（2026-09-06 品質監査で修正）** `api.reply_message(..., _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウトを渡す(SDK 既定は無期限ブロック)。
+* 根拠: (行番号: 58 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+
 * **役割**: LINE Messaging APIを呼び出してテキストメッセージを返信する。
 * 根拠: `def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):` (行番号: 52-64 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
 
@@ -106,6 +109,9 @@
 
 
 ### 関数 `get_user_name`
+
+* **（2026-09-06 品質監査で修正）** `get_group_member_profile` / `get_profile` の両呼び出しに `_request_timeout=config.LINE_API_REQUEST_TIMEOUT` を渡す。
+* 根拠: (行番号: 69, 72 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: イベント情報に基づいて、グループメンバーまたはユーザー自身の表示名を取得する。
 * 根拠: `def get_user_name(event, line_bot_api: MessagingApi) -> str:` (行番号: 66-79 / 抜粋: "def get_user_name(event, line_bot_api: MessagingApi) -> str:")
@@ -186,6 +192,9 @@
 
 
 ### 関数 `handle_postback`
+
+* **（2026-09-06 品質監査で修正）** 本関数内の全 `line_bot_api.reply_message(...)` 呼び出し(5箇所)に `_request_timeout=config.LINE_API_REQUEST_TIMEOUT` を渡す。
+* 根拠: (行番号: 252, 266, 310, 351, 396 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。**（保守性 #410で修正）** `check_status`の記録確認画面の日付表示(`today_disp`)を、naiveな`datetime.datetime.now()`（サーバーのローカルタイムゾーン依存）から`core.utils.get_display_date()`（JST基準・`"%m/%d"`形式）へ変更した。また、`LinePostbackData(**raw_dict)`のバリデーション失敗時に`action`のみで再構築するtry/exceptフォールバックを削除した——`LinePostbackData`は`action`必須以外は全て`Optional`で`extra`設定も既定(未知フィールドは無視)のため、`raw_dict`に`action`キーが含まれる限り例外は送出されず、このフォールバックは到達不能だった。削除後、万一`action`キーが無い等でモデル構築が失敗しても、関数末尾の`except Exception`で握り潰される（挙動は実質変わらない: 到達不能だった旧フォールバックが動いていた場合の出力と、削除後に末尾の汎用ハンドラで捕捉された場合とで、ユーザーへの応答が「不明な操作」相当になる点は同じ）。
 * 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 167-390 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")

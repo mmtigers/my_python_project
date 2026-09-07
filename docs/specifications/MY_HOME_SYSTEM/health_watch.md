@@ -172,6 +172,9 @@
 
 ### `check_app_logs`
 
+* **（2026-09-06 品質監査で修正）** `logs/*.log` の走査で `health_watch.log` に加えて `claude_investigate.log`(層2フック `_run_investigation_hook` の出力先)もファイル名で除外する。以前は「`health_watch` を含む行の除外」しか無く、フックの調査結果本文に常在する `ERROR`/`Traceback` 等の語が翌回のチェックで新規エラーとして数えられ、再発報→フック再起動→さらに出力、という自己増殖ループになり得た(本仕様書・runbook では除外済みと記載されていたが未実装だった)。
+* 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
+
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
 * 根拠: [関数定義] (行番号: 107〜142 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
@@ -299,7 +302,7 @@
 * 根拠: [関数定義] (行番号: 190)
 
 
-* **副作用**: `subprocess.Popen`によるフックスクリプトの起動（`start_new_session=True`でdetachし、層1プロセス終了後も生存させる）、フックの標準出力/標準エラーの`logs/claude_investigate.log`への追記リダイレクト（`check_app_logs`はhealth_watch関連行を除外するため自己発火しない）、標準入力への異常サマリ書き込みとclose、ロガーへの記録。
+* **副作用**: `subprocess.Popen`によるフックスクリプトの起動（`start_new_session=True`でdetachし、層1プロセス終了後も生存させる）、フックの標準出力/標準エラーの`logs/claude_investigate.log`への追記リダイレクト（`check_app_logs` は `claude_investigate.log` をファイル名で除外するため自己発火しない。**（2026-09-06 品質監査で修正）** 以前は除外が未実装だった）、標準入力への異常サマリ書き込みとclose、ロガーへの記録。
 * 根拠: [Popen呼び出し] (行番号: 214〜227 / 抜粋: "proc = subprocess.Popen(\n                [hook],\n                stdin=subprocess.PIPE,", "start_new_session=True")
 
 
@@ -464,7 +467,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `LogAnalyzer`の走査仕様 | `ERROR_KEYWORDS`は`["ERROR", "CRITICAL", "Traceback", "Exception", "Failed password"]`、`IGNORE_PATTERNS`には"log_analyzer"自身の除外等が含まれる。タイムスタンプはISO形式(`YYYY-MM-DD HH:MM:SS`)とSyslog形式(`Mmm DD HH:MM:SS`)の2種に対応。 | [log_analyzer.md](./log_analyzer.md) および直接ソース確認: `MY_HOME_SYSTEM/monitors/log_analyzer.py:18-38, 61-92` |
-| `setup_logging`の出力先 | コンソール、`config.BASE_DIR/logs/home_system.log`への`TimedRotatingFileHandler`、およびERRORレベル以上のDiscordハンドラの3種（`notification_service.md`の相互参照補足と同一）。全ロガーが共通の`home_system.log`へも書くことが、本ファイルの自己発火対策(1)の背景である。 | [notification_service.md](./notification_service.md) 相互参照補足 |
+| `setup_logging`の出力先 | コンソール、`config.LOG_DIR/home_system.log`への`WatchedFileHandler`(ローテーションは logrotate 側。**（2026-09-06 品質監査で修正）** 以前は`TimedRotatingFileHandler`と記述していたが `core/logger.py` 行番号 196 は `WatchedFileHandler`)、およびERRORレベル以上のDiscordハンドラの3種（`notification_service.md`の相互参照補足と同一）。全ロガーが共通の`home_system.log`へも書くことが、本ファイルの自己発火対策(1)の背景である。 | [notification_service.md](./notification_service.md) 相互参照補足 |
 
 ## 10. 自己検証結果
 

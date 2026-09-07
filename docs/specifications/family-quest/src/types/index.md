@@ -16,7 +16,7 @@
 - [useQuestStatus.md](../features/quest/hooks/useQuestStatus.md) — `User`/`Quest`/`QuestHistory`型を用いたロック・完了判定ロジックの実装元。
 - [QuestList.md](../features/quest/components/QuestList.md) — `Quest`型の共有クエスト判定フィールド（`is_shared_completed_by`等）の利用元。
 - [RewardList.md](../features/shop/components/RewardList.md) — `Reward`/`User`型の利用元。
-- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与するバックエンドAPIの実装元。
+- [quest_router.md](../../../MY_HOME_SYSTEM/quest_router.md) — `Quest`の共有クエスト判定フィールドを付与(**2026-09-06 品質監査**: バックエンド `services/quest_service.py` に `get_available_quests` は存在せず、`is_shared_*` は現行の `GET /api/quest/data` 応答に含まれない。Issue #371 で撤去済みのため型定義のみが残る)するバックエンドAPIの実装元。
 
 ## 2. ファイルの概要
 

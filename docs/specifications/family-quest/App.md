@@ -225,6 +225,9 @@
 
 ### `handleQuestClick` (App内の関数)
 
+* **（2026-09-06 品質監査で修正）** 無限クエストの分岐を `if (isInfinite && !pendingEntry)` に変更し、申請中(`pendingEntry` あり)の無限クエストは通常クエストと同じ取消経路(`runQuestAction(user, 'cancel', ...)`)へ流す。`historyEntry` は `isInfinite ? pendingEntry : (pendingEntry || completedEntry)` とし、無限クエストの承認済み履歴(`completedEntry`)は取消対象にしない(周回前提)。以前は `pendingEntry` を見る前に無条件で完了モーダルを開いていたため、申請中の無限クエストは取り消せず、完了しようとしても「すでに申請中です」のエラーになっていた(`QuestList.tsx` 側は `canCancel` により長押し時のみ本関数を呼ぶ)。
+* 根拠: (行番号: 387〜392, 396 / 抜粋: "if (isInfinite && !pendingEntry) {", "const historyEntry = isInfinite ? pendingEntry : (pendingEntry || completedEntry);")
+
 * **役割**: クエストクリック時に、`select`音を再生した上で、履歴として渡されたかどうか、`getQuestLockState`が返す無限クエスト判定・申請中/完了履歴の有無に応じて処理を振り分ける。履歴として渡された場合、および既存の申請中/完了履歴が見つかった場合は`runQuestAction`を`'cancel'`モードでワンタップ実行する。一方、無限クエストの場合、および未実施のクエストを完了しようとする場合は（実機検証で子どもの誤操作が多かったため）即実行せず、`confirmUser`/`confirmTarget`/`confirmMode('complete')`をセットして`ConfirmModal`による確認を挟む。取消対象が既存履歴の場合、`quest_title`が履歴側に無ければ`q.title`から補完する。
 * 根拠: (270〜309行目 / 抜粋: "const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {")
 * 根拠: 無限クエストの確認ダイアログ化 (284〜292行目 / 抜粋: "// 無限クエストは常に「完了」扱い\n    // ★実機検証で子どもの誤操作(意図しない完了)が多かったため、完了(クリア)には\n    // 確認ダイアログを挟む(取り消しは長押しで保護されているため対象外)。\n    if (isInfinite) {\n      setConfirmUser(user);\n      setConfirmTarget(q);\n      setConfirmMode('complete');\n      return;\n    }")

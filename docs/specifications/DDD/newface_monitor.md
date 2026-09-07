@@ -407,6 +407,9 @@
 
 ### `DiscordNotifier.notify`（D-L6・D-L9で変更）
 
+* **（2026-09-06 品質監査で修正）** `requests.HTTPError` / `requests.RequestException` の ERROR ログから `exc_info=True` を外し、例外は `{type(e).__name__}: {redact_discord_webhook_url(e)}` の形で出力する。requests の例外文字列(およびトレースバック)は送信先 Webhook URL(トークン込み)を丸ごと含み、`core.logger.DiscordErrorHandler` 経由でエラー通知チャンネルにも転記されるため、`file_utils.redact_discord_webhook_url` でトークン部分をマスクする。
+* 根拠: (行番号: 564〜570, 582 / 抜粋: "f\"Failed to send notification for {cast.name}: {type(e).__name__}: \"\n                    f\"{redact_discord_webhook_url(e)} | body: {body} | \"")、[import] (行番号: 32)
+
 * **役割**: 新規キャストのリストを受け取り、各キャストごとにDiscord埋め込みメッセージ(embed)を構築してWebhook経由で送信する。`site_name`が指定されている場合はどのサイトの新着かを区別できるよう埋め込みタイトルに`【サイト名】`のプレフィックスを付与する。Webhook URL未設定時は送信をスキップする。**（本PRで一般化）** 以前は認証エラー(401/404)発生時のみ残りの通知処理を打ち切る簡易的な打ち切りロジックだったが、タイムアウトや接続エラー等の他の失敗モードには対応していなかった。現在は`self._circuit_breaker`（`DiscordCircuitBreaker`）を用い、ループ先頭でブレーカーが開いていれば残りのキャストの送信自体をスキップする。401/404発生時は即座に`trip()`でブレーカーを開き、それ以外の`requests.RequestException`発生時は`record_failure()`で連続失敗を積算し既定3回で開く。**（D-L6で追加）** embedの`title`（`✨ 新人キャスト情報{site_prefix}: {cast.name}`）と`fields`の`Name`/`Link`の`value`は、いずれも`self._truncate_for_embed`で`_EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`（250文字）に切り詰めてから送信する。`cast.name`はスクレイピング結果でありサイト側の表示崩れ等で想定外に長くなりうるため、Discordの実際の上限（title 256文字、field.value 1024文字）を超えてembed全体が拒否される事態を防ぐ。
 * 根拠: [メソッド定義とDocstring] (行番号: 467〜481 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:\n        """新規キャスト情報をDiscordに通知する。")、[D-L6: title/field.valueの切り詰め] (行番号: 498〜509, 522〜524 / 抜粋: "safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)" / "\"title\": self._truncate_for_embed(\n                            f\"✨ 新人キャスト情報{site_prefix}: {cast.name}\", self._EMBED_TITLE_MAX_LEN\n                        ),")
 
@@ -429,6 +432,9 @@
 
 ### `DiscordNotifier.notify_daily_summary`
 
+* **（2026-09-06 品質監査で修正）** 送信失敗の ERROR ログは `exc_info` 無しで `{type(e).__name__}: {redact_discord_webhook_url(e)}` を出力する(`notify` と同じ理由)。
+* 根拠: (行番号: 639 / 抜粋: "logger.error(f\"Failed to send daily summary notification: {type(e).__name__}: {redact_discord_webhook_url(e)}\")")
+
 * **役割**: その日に新規検知したサイト別件数を、個別キャスト通知(embed形式)とは異なるテキスト形式(content)で1件だけDiscordへ通知する。**（Issue #226で修正）** 以前は戻り値が常に`None`で送信成否を呼び出し元へ伝える手段が無く、呼び出し元`_maybe_send_daily_summary`は送信の成否を確認せず無条件に集計をクリアしていたため、Webhook未設定時やDiscordへの送信失敗時にも集計が失われ、同日中の再送もできなくなっていた。送信成否を`bool`で返すよう修正し、呼び出し元が成功時のみ集計をクリアできるようにした。**（本PRで追加）** `self._circuit_breaker`が開いている場合は送信自体を試みずスキップして`False`を返す。
 * 根拠: [メソッド定義とDocstring] (行番号: 506〜522 / 抜粋: "def notify_daily_summary(self, counts: Dict[str, int], site_names: Dict[str, str], date_str: str) -> bool:\n        """その日に新規検知したサイト別件数を、テキスト形式でDiscordに通知する。")
 
@@ -450,6 +456,9 @@
 
 
 ### `DiscordNotifier.notify_site_failure_alert`（2026-09-02のbellica閉鎖対応で追加）
+
+* **（2026-09-06 品質監査で修正）** 送信失敗の ERROR ログは `exc_info` 無しで `{type(e).__name__}: {redact_discord_webhook_url(e)}` を出力する(`notify` と同じ理由)。
+* 根拠: (行番号: 682)
 
 * **役割**: 連続巡回失敗中のサイトについて「閉鎖・移転の疑い」をDiscordへテキスト形式(content)で通知するメソッド。サイト名・site_id・対象URL・連続失敗回数と、復旧見込みが無い場合の対処（`MonitorConfig.SITES`からのエントリ削除）を案内する文面を送信する。
 * 根拠: [メソッド定義とDocstring] (行番号: 561〜571 / 抜粋: "def notify_site_failure_alert(self, site: SiteConfig, failure_count: int) -> bool:\n        """連続巡回失敗中のサイトについて「閉鎖・移転の疑い」をDiscordへテキスト通知する。")
@@ -613,6 +622,22 @@
 
 
 ### `DataManager.load_daily_summary`（Issue #462で変更）
+
+* **（2026-09-06 品質監査で修正）** JSON として読めた内容を `_is_valid_daily_summary(data)` で形状検証し、不正(トップレベルが辞書でない、`'counts'` キーがあって辞書でない — `null` を含む)な場合は ERROR ログを出して内容破損として扱い、`_LOAD_ERRORS` と同じ隔離(`.corrupted-*`)+ `.bak` 復旧の経路へ進める(復旧した `.bak` の内容も同様に検証し、不正なら空辞書)。以前は `[]` や `{"counts": null}` をそのまま返し、`record_daily_new_casts` の `data.setdefault`/`counts.get` で `AttributeError` になっていた。
+* 根拠: (行番号: 952〜965, 993〜996 / 抜粋: "if self._is_valid_daily_summary(data):\n                return data", "Backup file {backup_file} is also malformed; starting from an empty summary.")
+
+### `DataManager._is_valid_daily_summary` **（2026-09-06 品質監査で修正）**
+
+* **役割**: `daily_summary.json` の内容が `record_daily_new_casts` / `_maybe_send_daily_summary` が前提とする形状か(辞書であり、`'counts'` キーが存在する場合はその値が辞書か)を判定する静的メソッド。
+* 根拠: (行番号: 1002〜1015 / 抜粋: "@staticmethod\n    def _is_valid_daily_summary(data: object) -> bool:", "if 'counts' in data and not isinstance(data['counts'], dict):\n            return False")
+* **引数/リクエスト**: `data: object`
+* 根拠: (行番号: 1003)
+* **戻り値/レスポンス**: `bool`
+* 根拠: (行番号: 1010〜1015)
+* **副作用**: なし
+* 根拠: 純粋関数(行番号: 1003〜1015)
+* **エラーハンドリング**: なし
+* 根拠: 同上
 
 * **役割**: 日次サマリの集計状態（`{'counts': {...}, 'last_sent_date': ...}`形式）を`self._daily_summary_file()`からJSONとして読み込むインスタンスメソッド。**（Issue #174で修正）** 以前は`load_known_casts`と同じ「非UTF-8破損によるファイル読み込み失敗」に対する例外捕捉が`(json.JSONDecodeError, IOError)`という狭いパターンのままで、`UnicodeDecodeError`(`IOError`のサブクラスではなく`ValueError`のサブクラス)を捕捉できなかった。この結果、破損した`daily_summary.json`を読もうとすると例外が未捕捉のまま`record_daily_new_casts`経由で`_check_site`を脱出し、`save_known_casts`が実行されないまま処理が中断していた。次回(毎時)実行でも同じ既知キャストが「新規」として再検知されDiscordへ再通知され続ける、という無限反復を招いていた。現在は`load_known_casts`と同じ`DataManager._LOAD_ERRORS`（`OSError`, `ValueError`, `TypeError`, `KeyError`）で捕捉する。**（Issue #462で追加）** さらに、`load_known_casts`と同じ隔離＋バックアップ復旧の仕組みを適用するよう拡張された。以前は読み込み失敗時に即座に空辞書を返しており、破損のたびに累積中の未送信カウントが0にリセットされていたが（無限再通知自体は#183/#174で解消済みだったものの、集計の耐障害性は`load_known_casts`より弱いままだった）、現在は(1)破損ファイルを`{ファイル名}.corrupted-{タイムスタンプ}`へリネームして隔離し、(2)`.bak`バックアップファイルが存在すればそこからの復旧を試み、(3)復旧にも失敗した場合にのみ空辞書へフォールバックする。**（Issue #183で修正）** 集計状態のスキーマから`'date'`キーを廃止した（後述の`record_daily_new_casts`参照）。
 * 根拠: [メソッド定義とDocstring] (行番号: 913〜921 / 抜粋: "def load_daily_summary(self) -> Dict:\n        """日次サマリの集計状態を読み込む。")、隔離・復旧処理とコメント (行番号: 938〜961 / 抜粋: "# #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。\n        # 以前はここで即座に空辞書を返しており、破損時に累積中の未送信カウントが\n        # 0にリセットされていた" / "quarantine_path = summary_file.with_name(\n            f\"{summary_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}\"\n        )" / "backup_file = summary_file.with_suffix(summary_file.suffix + '.bak')\n        if backup_file.exists():")
@@ -861,6 +886,9 @@
 
 ### `_check_site`
 
+* **（2026-09-06 品質監査で修正）** `notifier.notify(...)` の後の `data_manager.record_daily_new_casts(site.site_id, sent_count)` を `try/except Exception` で囲み、失敗しても ERROR ログ(`exc_info=True`)のみ出して後続の `save_known_casts` を必ず実行する。この呼び出しは「通知は済んだが既知キャストの保存はまだ」という位置にあり、例外が漏れると通知済みキャストが毎時「新規」として再通知され続ける(#174/#183 と同じ失敗モード)ため、集計の失敗を隔離する。
+* 根拠: (行番号: 1717〜1725 / 抜粋: "try:\n            data_manager.record_daily_new_casts(site.site_id, sent_count)\n        except Exception as e:", "(known casts will still be saved)")
+
 * **役割**: 1サイト分の巡回（既知キャスト読み込み→現在キャスト取得→差分検知→通知→保存）を行い、`SiteCheckResult`（失敗計上の有無と閉鎖疑いアラートの要否）を返す関数。サイト単位の処理を分離することで、あるサイトの通信障害・レイアウト変更が他サイトの監視処理に波及しないようにする。
 * 根拠: [関数定義とDocstring] (行番号: 1356〜1373 / 抜粋: "def _check_site(\n    monitor: WebMonitor, notifier: DiscordNotifier, site: SiteConfig, data_manager: DataManager\n) -> SiteCheckResult:\n    \"\"\"1サイト分の巡回・差分検知・通知・保存を行う。" / "Returns:\n        SiteCheckResult: 失敗計上の有無と、閉鎖疑いアラートの要否(#395)。")
 
@@ -937,7 +965,7 @@
 
 ### `_run_monitor_locked`
 
-* **役割**: モニタープロセス全体のメインロジック（多重起動防止ロック取得後に`run_monitor`から呼び出される処理本体）。**（Issue #364で変更）** 冒頭で`MonitorConfig.get_data_dir()`を**1回だけ**呼び出してデータディレクトリを解決し、(1)それがローカルフォールバック先であれば`MonitorConfig.is_local_fallback_dir`で検知してERRORログを出し実行全体を中断、(2)そうでなければストレージのウォームアップ確認後に`DataManager(data_dir)`を生成し、`MonitorConfig.SITES`に登録された全サイトを順に`_check_site(monitor, notifier, site, data_manager)`で処理し、最後に`_maybe_send_daily_summary(notifier, data_manager)`を呼び出すオーケストレーション関数。フォールバック検知が`wait_for_storage_warmup`より前にある理由は、`get_data_dir()`がローカルフォールバック先を`mkdir`済みで返すためウォームアップ確認が必ず通過し、そこでは検知できないためである。**（Issue #461で追加）** `DataManager(data_dir)`生成直後に`data_manager.cleanup_old_quarantine_files()`を呼び出し、`_QUARANTINE_RETENTION_DAYS`（既定30日）より古い`.corrupted-*`隔離ファイルを1実行につき1回だけ削除する（サイトループの前に行うため、当該実行中に新たに作られる隔離ファイルは対象外）。
+* **役割**: モニタープロセス全体のメインロジック（多重起動防止ロック取得後に`run_monitor`から呼び出される処理本体）。**（Issue #364で変更）** 冒頭で`MonitorConfig.get_data_dir()`を**1回だけ**呼び出してデータディレクトリを解決し、(1)それがローカルフォールバック先であれば`MonitorConfig.is_local_fallback_dir`で検知してERRORログを出し実行全体を中断、(2)そうでなければストレージのウォームアップ確認後に`DataManager(data_dir)`を生成し、`MonitorConfig.SITES`に登録された全サイトを`_check_site(monitor, notifier, site, data_manager)`で処理し(**（2026-09-06 品質監査で修正）** 以前の本仕様書は「順に」と記述していたが、現行コードは `ThreadPoolExecutor` で並列に処理する。行番号: 1863)、最後に`_maybe_send_daily_summary(notifier, data_manager)`を呼び出すオーケストレーション関数。フォールバック検知が`wait_for_storage_warmup`より前にある理由は、`get_data_dir()`がローカルフォールバック先を`mkdir`済みで返すためウォームアップ確認が必ず通過し、そこでは検知できないためである。**（Issue #461で追加）** `DataManager(data_dir)`生成直後に`data_manager.cleanup_old_quarantine_files()`を呼び出し、`_QUARANTINE_RETENTION_DAYS`（既定30日）より古い`.corrupted-*`隔離ファイルを1実行につき1回だけ削除する（サイトループの前に行うため、当該実行中に新たに作られる隔離ファイルは対象外）。
 * 根拠: [関数定義とDocstring・解決・フォールバック判定・DataManager生成] (行番号: 1340〜1366 / 抜粋: "def _run_monitor_locked() -> None:\n    """モニタープロセスのメインロジック。MonitorConfig.SITESに登録された全サイトを順に処理する。"""" / "# #364: データディレクトリはここで1回だけ解決し、DataManagerに束縛して全サイトで\n    # 使い回す。get_data_dir()はNAS未マウント時にsudo mount・Discord/LINE通知を伴う\n    # 重い処理のため、サイト処理のたびに再評価してはならない" / "data_dir = MonitorConfig.get_data_dir()" / "if MonitorConfig.is_local_fallback_dir(data_dir):" / "data_manager = DataManager(data_dir)")
 
 

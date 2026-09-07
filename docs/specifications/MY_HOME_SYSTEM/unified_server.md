@@ -35,6 +35,8 @@
 
 ## 3. 外部依存関係
 
+* **（2026-09-06 品質監査で修正）** 標準ライブラリ `re` を追加インポート(`SecretRedactionFilter` 用)。根拠: (行番号: 8 / 抜粋: "import re")
+
 ### インポート一覧
 
 | 名称 | 種類 | 用途 | 根拠 |
@@ -78,6 +80,22 @@
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `SilencePolicyFilter`
+
+* **（2026-09-06 品質監査で修正）** 直前に `_QUERY_SECRET_RE` / `redact_query_secrets(text)` / `SecretRedactionFilter` が追加された(次項)。`lifespan` は `uvicorn.access` ロガーに `SecretRedactionFilter` → `SilencePolicyFilter` の順で両方を登録する。
+* 根拠: (行番号: 140〜141 / 抜粋: "access_logger.addFilter(SecretRedactionFilter())\n    access_logger.addFilter(SilencePolicyFilter())")
+
+### `redact_query_secrets` / `SecretRedactionFilter` **（2026-09-06 品質監査で修正）**
+
+* **役割**: `redact_query_secrets(text)` は URL/パス文字列中の `token`/`secret`/`password`/`api_key`/`access_token` クエリパラメータの値(`&`・空白・引用符まで)を `***` に置換する(大文字小文字無視)。`SecretRedactionFilter` は `logging.Filter` で、uvicorn アクセスログ(`'%s - "%s %s HTTP/%s" %d'`)のレコードの `args`(tuple/dict)内の文字列と、`args` が無い場合の `msg` にこの置換を適用し、常に `True`(出力継続)を返す。SwitchBot Webhook は `?token=` で共有シークレットを受け取る設計(Issue #318)であり、`SilencePolicyFilter` は POST を抑制しないため、以前は SwitchBot のイベントごとに `POST /webhook/switchbot?token=<secret> 200` が `home_system.log`/journal に平文で残っていた(log_analyzer / `scripts/claude_investigate.sh` が Issue 本文へ転記する経路もあった)。
+* 根拠: [正規表現と関数] (行番号: 91〜96 / 抜粋: "_QUERY_SECRET_RE = re.compile(", "def redact_query_secrets(text: str) -> str:")、[フィルタ] (行番号: 99〜128 / 抜粋: "class SecretRedactionFilter(logging.Filter):", "record.args = tuple(\n                    redact_query_secrets(a) if isinstance(a, str) else a for a in args\n                )")
+* **引数/リクエスト**: `redact_query_secrets(text: str)`、`SecretRedactionFilter.filter(record: logging.LogRecord)`
+* 根拠: (行番号: 94, 112)
+* **戻り値/レスポンス**: 置換済み文字列 / 常に `True`
+* 根拠: (行番号: 96, 128)
+* **副作用**: `record.args` / `record.msg` の書き換え(後段の全ハンドラ・フォーマッタでマスク済みの値のみが出力される)
+* 根拠: (行番号: 115〜124)
+* **エラーハンドリング**: マスク処理中の例外は `except Exception: pass` で握りつぶし、ログ出力自体は止めない
+* 根拠: (行番号: 125〜127 / 抜粋: "except Exception:\n            # マスク処理の失敗でログ出力自体を止めない\n            pass")
 
 * **役割**: Uvicorn等のアクセスログ出力を評価し、GETリクエストかつ正常系（200 OK または 304 Not Modified）で、特定のパス・キーワード（ポーリング、ヘルスチェック、静的アセット等）を含む場合のみログ出力を抑制する（Falseを返す）。それ以外や例外発生時はログを出力する。**（Issue #177で修正）** 正常系判定は以前`" 200 "`/`" 304 "`という前後スペース付きの部分文字列一致だったが、uvicornの実際のアクセスログフォーマット（`h11_impl.py`/`httptools_impl.py`の`'%s - "%s %s HTTP/%s" %d'`）ではステータスコードがメッセージ末尾に前方スペースのみで出力され後方にスペースが付かない（例: `'127.0.0.1 - "GET /path HTTP/1.1" 200'`）ため、この判定は常に不一致となり抑制対象キーワード判定へ到達しない死にコードになっていた。現在は末尾の空白を除去したうえで`endswith(" 200")`/`endswith(" 304")`により末尾一致で判定する。
 * 根拠: `class SilencePolicyFilter(logg` (行番号: 42-91 / 抜粋: "class SilencePolicyFilter(logg")、末尾一致判定への修正 (行番号: 57-65 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")

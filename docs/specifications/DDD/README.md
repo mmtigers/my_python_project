@@ -5,7 +5,7 @@
 | 仕様書 | 対象ソース | 概要 |
 | --- | --- | --- |
 | [batch_download_discord.md](./batch_download_discord.md) | `batch_download_discord.py` | 複数URLリストからの動画バッチダウンロードCLI。`yt-dlp`/スクレイピングの戦略パターン、ロックファイルによる多重起動防止、実行許可時間帯制御、Discord通知を備える。 |
-| [file_utils.md](./file_utils.md) | `file_utils.py` | `batch_download_discord.py`・`extract_youtube_urls.py`で重複していたファイル名サニタイズ処理を集約した共通ユーティリティ(`sanitize_filename`)。 |
+| [file_utils.md](./file_utils.md) | `file_utils.py` | `batch_download_discord.py`・`extract_youtube_urls.py`で重複していたファイル名サニタイズ処理を集約した共通ユーティリティ(`sanitize_filename`)。**（2026-09-06 品質監査で修正）** 加えてMY_HOME_SYSTEMルート解決(`resolve_my_home_system_root`)、Discord Webhook送信のプロセス内サーキットブレーカー(`DiscordCircuitBreaker`)、ログ出力前にDiscord Webhook URLのトークン部分をマスクする`redact_discord_webhook_url`も提供する。 |
 | [newface_monitor.md](./newface_monitor.md) | `newface_monitor.py` | 対象サイトの新人キャスト紹介ページを定期巡回し、新規追加をDiscord Webhookで通知するバッチスクリプト。 |
 | [split_prompts.md](./split_prompts.md) | `split_prompts.py` | 「番号. タイトル」+「Prompt: 内容」形式で列挙されたMarkdownファイルを、項目ごとの個別Markdownファイルへ分割するスクリプト。 |
 | [extract_youtube_urls.md](./extract_youtube_urls.md) | `extract_youtube_urls.py` | 指定されたYouTubeチャンネル・プレイリストから動画URLを抽出するスクリプト。MY_HOME_SYSTEMの共通コア機能に準拠しつつ単体実行時はフォールバック実装を用いる。 |

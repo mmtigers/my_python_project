@@ -114,6 +114,9 @@
 
 ### `_parse_timestamp`
 
+* **（2026-09-06 品質監査で修正）** syslog 形式(年なし)を現在年で補完した結果が現在時刻より1日以上未来になる場合は前年のログとみなして1年戻す。以前は「簡易的に現在年とする」コメントのまま未対応で、年明け直後に前年12月の行を読むと未来日付になり `start_date` のフィルタを素通りして必ずカウントされていた。
+* 根拠: (行番号: 88〜89 / 抜粋: "if dt > self.now + datetime.timedelta(days=1):\n                    dt = dt.replace(year=self.now.year - 1)")
+
 * **役割**: ログの行頭文字列からタイムスタンプを抽出し、`datetime`オブジェクトに変換する。
 * 根拠: `_parse_timestamp` (行番号: 62-92 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 

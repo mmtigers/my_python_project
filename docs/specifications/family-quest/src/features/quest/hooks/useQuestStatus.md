@@ -85,6 +85,19 @@
 
 
 
+### `canCancelQuest` **（2026-09-06 品質監査で修正）**
+
+* **役割**: 「長押しで取り消せるか」を判定する純粋関数。`isDone || isPending` かつ `!isEffectivelyLocked` のとき `true`。無限クエストは `isDone` が常に `false`(周回前提)だが、子どもの申請は無限クエストでも `pending` 行として残るため申請中の取消は通常クエストと同様に許可する。以前 `QuestList.tsx` 側で `!isInfinite && (isDone || isPending) && ...` と一律に除外していたため、無限クエストを申請した子どものカードが「確認待ち / 長押しで取消」と表示されるのに長押しが効かず、タップすると「すでに申請中です」になる袋小路だった。
+* 根拠: (行番号: 91〜101 / 抜粋: "export function canCancelQuest(state: Pick<QuestLockState, 'isDone' | 'isPending'>, isEffectivelyLocked: boolean): boolean {\n    return (state.isDone || state.isPending) && !isEffectivelyLocked;")
+* **引数/リクエスト**: `state: Pick<QuestLockState, 'isDone' | 'isPending'>`, `isEffectivelyLocked: boolean`
+* 根拠: (行番号: 99)
+* **戻り値/レスポンス**: `boolean`
+* 根拠: (行番号: 100)
+* **副作用**: なし
+* 根拠: 純粋関数(行番号: 99〜101)
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
 ### `useQuestStatus`
 
 * **役割**: `getQuestLockState`の結果をもとに、無限クエストの表示回数付きタイトル(`displayTitle`)とUI表示用の`variant`を算出し、メモ化されたオブジェクトとして返すCustom Hook。

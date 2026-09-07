@@ -100,6 +100,9 @@
 
 ### `_save_persisted_states`
 
+* **（2026-09-06 品質監査で修正）** 状態ファイルへ直接 `open(..., "w")` するのではなく、`{_STATE_FILE}.tmp.{pid}` に書き切って `flush`/`fsync` した後 `os.replace` で原子的に差し替える。`open("w")` は `flock(LOCK_EX)` 取得より前にファイルを切り詰めるため、その瞬間に `LOCK_SH` で読んだ側(手動実行等)が空ファイル → `JSONDecodeError` → `{}`(全デバイス初期状態扱い)になっていた(#449 の flock 追加では閉じていなかった競合)。失敗時は一時ファイルを削除する。
+* 根拠: (行番号: 61〜77 / 抜粋: "tmp_path = f\"{_STATE_FILE}.tmp.{os.getpid()}\"", "os.replace(tmp_path, _STATE_FILE)", "os.remove(tmp_path)")
+
 * **役割**: 渡された状態辞書をJSONとして`_STATE_FILE`へ書き込み、次回プロセス実行時に復元できるようにする。`main`の終了直前に呼び出される。**（Issue #449で追加）** 書き込み中は`fcntl.flock`による排他ロック(`LOCK_EX`)をファイル記述子に対して取得し、他プロセスによる読み取り/書き込みとの競合を防ぐ。ロックは`json.dump`実行後に`finally`節で必ず解放される。
 * 根拠: [関数定義] (行番号: 54-65 / 抜粋: "`def _save_persisted_states(states: Dict[str, Dict[str, Any]]) -> None:`")、[flock取得コメント] (行番号: 55-56 / 抜粋: "`# #449: 書き込み中に他プロセスの読み取り/書き込みと競合しないよう`")、[flock取得・解放] (行番号: 59, 62-63 / 抜粋: "`fcntl.flock(f.fileno(), fcntl.LOCK_EX)`", "`finally:`", "`fcntl.flock(f.fileno(), fcntl.LOCK_UN)`")
 

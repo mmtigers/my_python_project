@@ -93,7 +93,7 @@
 
 リポジトリ側の実装（Issue #339）:
 
-- `monitors/health_watch.py` の `_fire_investigate_hook()`: 異常検知かつ通知抑制(`_should_notify`)を通過したときのみ、`config.HEALTH_WATCH_INVESTIGATE_HOOK` のスクリプトを異常サマリ(標準入力)つきでfire-and-forget起動する。未設定なら完全no-op。フックの出力は `logs/claude_investigate.log` に追記される（`check_app_logs` の自己発火除外対象）。
+- `monitors/health_watch.py` の `_fire_investigate_hook()`: 異常検知かつ通知抑制(`_should_notify`)を通過したときのみ、`config.HEALTH_WATCH_INVESTIGATE_HOOK` のスクリプトを異常サマリ(標準入力)つきでfire-and-forget起動する。未設定なら完全no-op。フックの出力は `logs/claude_investigate.log` に追記される（`check_app_logs` はこのファイル名を明示的に除外する。2026-09-06 品質監査: 以前は除外が未実装だった）。
 - `scripts/claude_investigate.sh`: 調査専用スクリプト。flockによる多重起動防止、`timeout`(既定900秒)+`--max-turns`(既定30)、`--allowedTools` の機械的制限、`CLAUDE_INVESTIGATE_DRY_RUN=1` でのドライラン(gh起票なし)に対応。環境変数は `.env.example` の「ラズパイ監視 層2」セクション参照。
 
 有効化手順（ラズパイ側。下の「準備」完了後）:

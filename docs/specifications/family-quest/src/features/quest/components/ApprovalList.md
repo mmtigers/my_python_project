@@ -85,6 +85,9 @@
 
 ### `ApprovalList`
 
+* **（2026-09-06 品質監査で修正）** 報酬表示を `{quest.gold_earned ?? 0}G` にした。`gold_earned` は `gameDataSchema.ts` で nullable のため、`null` の行では「報酬: G」と描画されていた。
+* 根拠: (行番号: 115 / 抜粋: "担当: {getUserName(quest.user_id)} / 報酬: {quest.gold_earned ?? 0}G")
+
 * **役割**: 承認待ちクエストの一覧を表示し、各クエストについて親から渡されたハンドラ（`onApprove`/`onReject`）を、複数件あれば一括承認ハンドラ（`onApproveAll`）を、ボタン押下またはスワイプ操作から呼び出すReactコンポーネント。`pendingQuests`が空の場合は何も描画しない。`collapsed`が真の間は見出し行のみを表示し、詳細リストを畳む。
 * 根拠: (行番号: 57〜133 / 抜粋: "const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll, busyHistoryIds = [], isApprovingAll = false }) => {")
 * **（Issue #391 / F-L8）** 各行は`busy = quest.id != null && busyHistoryIds.includes(quest.id)`を判定し、`busy`なら`SwipeableRow`にスワイプハンドラを渡さず（ドラッグ無効）、却下ボタンは`disabled`、承認ボタンは`isLoading`（`Button`のスピナー表示＋disabled）にする。「クエストをすべて承認」ボタンは`isApprovingAll`の間`isLoading`になる。以前は一括承認中に個別の「承認」をタップすると、サーバー側で既に承認済みのため400「承認待ちではありません」のエラーモーダルが出ていた。

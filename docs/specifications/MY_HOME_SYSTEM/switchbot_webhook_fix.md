@@ -52,6 +52,22 @@
 
 ### `update_switchbot_webhook`
 
+* **（2026-09-06 品質監査で修正）** 「設定確認」「古い設定を削除」の2つの INFO ログは `_mask_token(url)` でクエリの `token=` の値を `***` にマスクして出力する(以前は共有シークレット `SWITCHBOT_WEBHOOK_TOKEN` が `home_system.log` に平文で残っていた)。
+* 根拠: (行番号: 53, 70 / 抜粋: "logger.info(f\"🔧 [SwitchBot] 設定確認: {_mask_token(target_url)}\")", "logger.info(f\"   🗑️ 古い設定を削除: {_mask_token(old_url)}\")")
+
+### `_mask_token` **（2026-09-06 品質監査で修正）**
+
+* **役割**: URL 文字列中の `?token=...` / `&token=...` の値部分を `***` に置換して返す(ログ出力用)。
+* 根拠: (行番号: 28〜33 / 抜粋: "_TOKEN_QUERY_RE = re.compile(", "def _mask_token(url: str) -> str:")
+* **引数/リクエスト**: `url: str`
+* 根拠: (行番号: 31)
+* **戻り値/レスポンス**: マスク済み文字列
+* 根拠: (行番号: 33)
+* **副作用**: なし
+* 根拠: 純粋関数(行番号: 28〜33)
+* **エラーハンドリング**: なし
+* 根拠: 同上
+
 * **役割**: SwitchBot APIを利用してWebhook URLの現在設定を取得し、必要に応じて古い設定の削除と新しいURLの登録を行う。**（Issue #318で追加）** `config.SWITCHBOT_WEBHOOK_TOKEN`が設定されている場合、登録・照会に用いる`target_url`に`?token=...`を付与する(`webhook_router.py`側のトークン検証と一致させるため)。
 * 根拠: [関数定義およびDocstring] (行番号: 27〜36 / 抜粋: "SwitchBotのWebhook URLを更新"), `if config.SWITCHBOT_WEBHOOK_TOKEN:\n        ...\n        target_url = f"{target_url}?token={config.SWITCHBOT_WEBHOOK_TOKEN}"` (行番号: 38〜42)
 
