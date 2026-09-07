@@ -25,7 +25,7 @@ Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けの�
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
 | `date` | coreutils(外部コマンド) | ログ用タイムスタンプ(`YYYY-MM-DD HH:MM:SS`)の生成。**Issue #249で修正**: 以前はスクリプト起動時に1回だけ呼び出されグローバル変数`TIMESTAMP`に保存されていたが、現在は`log()`関数内で呼び出しのたびに実行される | 根拠: `[log()内のdate呼び出し]` (行番号: 24 / 抜粋: "timestamp=$(date '+%Y-%m-%d %H:%M:%S')") |
-| `id` | coreutils(外部コマンド) | 実行ユーザーのUIDを取得し`XDG_RUNTIME_DIR`を組み立てる | 根拠: `[id -u]` (行番号: 15 / 抜粋: "export XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"") |
+| `id` | coreutils(外部コマンド) | 実行ユーザーのUIDを取得し`XDG_RUNTIME_DIR`を組み立てる | 根拠: `[id -u]` (行番号: 14〜15 / 抜粋: "XDG_RUNTIME_DIR=\"/run/user/$(id -u)\"" / "export XDG_RUNTIME_DIR") |
 | `pactl` | 外部コマンド(PipeWire/PulseAudio制御CLI) | シンク一覧を取得し、対象スピーカーが接続済みシンクに含まれるか確認 | 根拠: `[pactl list sinks short]` (行番号: 25, 45 / 抜粋: "pactl list sinks short | grep -q") |
 | `grep` | coreutils(外部コマンド) | `pactl`の出力からMACアドレス(`:`を`_`に置換した文字列)を検索 | 根拠: `[grep -q]` (行番号: 25, 45 / 抜粋: "grep -q \"${SPEAKER_MAC//:/_}\"") |
 | `command` | Bashビルトイン | `sox`コマンドがPATH上に存在するか確認 | 根拠: `[command -v sox]` (行番号: 57 / 抜粋: "if command -v sox &> /dev/null; then") |
@@ -70,7 +70,7 @@ Anker SoundCore 2 Bluetoothスピーカー(PipeWire/PulseAudio環境)向けの�
 
 
 * **引数/リクエスト**: コマンドライン引数は使用しない。cron実行を想定した環境変数`XDG_RUNTIME_DIR`・`DBUS_SESSION_BUS_ADDRESS`を自ら設定する。
-* 根拠: `[環境変数エクスポート]` (行番号: 14〜15 / 抜粋: "export DBUS_SESSION_BUS_ADDRESS=\"unix:path=${XDG_RUNTIME_DIR}/bus\"")
+* 根拠: `[環境変数エクスポート]` (行番号: 14〜16 / 抜粋: "export DBUS_SESSION_BUS_ADDRESS=\"unix:path=${XDG_RUNTIME_DIR}/bus\"")
 
 
 * **戻り値/レスポンス**: 明示的な`exit`コードは設定されていない(最後に実行したコマンドの終了コードがそのままスクリプトの終了コードとなる)。
@@ -170,6 +170,9 @@ graph TD
 | 中 | crontab設定または systemd タイマー定義(ファイル名不明・推測) | 本スクリプトが定期実行される仕組み(実行間隔・実行ユーザー)を確認するため。本ファイル単体では実行契機が不明。 | 根拠: `[cron実行を前提としたコメント]` (行番号: 14 / 抜粋: "# cron実行時でもPipeWireソケットを見つけられるようにする") |
 
 ## 8. 保守上の注意点
+
+* **（Issue #532 で変更）shellcheck ブロッキング化に伴う整理**: CI の `lint` ジョブで `shellcheck -x` が本ファイルを対象にブロッキング実行されるようになった。`export XDG_RUNTIME_DIR="/run/user/$(id -u)"` の 1 行は、コマンド置換の失敗が `export` の戻り値に隠れる SC2155 を避けるため「代入」と「`export`」の 2 行に分割した(値・意味は同じ)。以降本ファイルを編集する際は、ローカルでも `shellcheck -x MY_HOME_SYSTEM/tools/keep_alive_anker.sh` が 0 件であることを確認すること。
+* 根拠: `XDG_RUNTIME_DIR="/run/user/$(id -u)"` (行番号: 14)、`export XDG_RUNTIME_DIR` (行番号: 15)
 
 * **ハードコードされた絶対パス**: `LOGFILE`・`CONNECT_SCRIPT`が`/home/masahiro/develop/MY_HOME_SYSTEM/...`という特定ユーザー環境のパスで固定されており、環境変数や設定ファイルによる切り替えができない。 根拠: `[LOGFILE, CONNECT_SCRIPT定義]` (行番号: 8, 10 / 抜粋: "LOGFILE=\"/home/masahiro/develop/MY_HOME_SYSTEM/logs/bluetooth_monitor.log\"")
 * **ハードコードされたMACアドレス**: `SPEAKER_MAC`がコード中に直接埋め込まれており、機種変更時はスクリプト自体の書き換えが必要。 根拠: `[SPEAKER_MAC定義]` (行番号: 9 / 抜粋: "SPEAKER_MAC=\"F4:4E:FC:B6:65:D4\" # Anker SoundCore 2 MAC Address")

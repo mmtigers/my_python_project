@@ -24,7 +24,7 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `$ENV_FILE` (.env) | 環境変数読み込み | DiscordのWebhook通知先URLを取得するため | 環境変数読み込みブロック (行番号: 16〜20 / 抜粋: `source "$ENV_FILE"`) |
+| `$ENV_FILE` (.env) | 環境変数読み込み | DiscordのWebhook通知先URLを取得するため | 環境変数読み込みブロック (行番号: 16〜21 / 抜粋: `# shellcheck source=/dev/null` / `source "$ENV_FILE"`) |
 
 ### ブラックボックスとなる外部要素
 
@@ -191,10 +191,13 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `.env` | Discord Webhookへの通知先URLなど、システム動作の成否に直結する重要な環境変数の実態を確認するため。 | 環境変数読み込み処理 (行番号: 8, 16〜20 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
+| 高 | `.env` | Discord Webhookへの通知先URLなど、システム動作の成否に直結する重要な環境変数の実態を確認するため。 | 環境変数読み込み処理 (行番号: 8, 16〜21 / 抜粋: `ENV_FILE="$PROJECT_DIR/.env"`) |
 | 中 | `crontab` 設定、または `systemd` のサービス/タイマーファイル | 本スクリプト内に無限ループ等の常駐処理が存在しないため、どのようなトリガー（定期実行、システム起動時など）で本スクリプトが起動されているか全容を把握するため。 | 実行タイミングを制御する記述がファイル内に存在しないため (行番号取得不可 / 抜粋: 該当なし) |
 
 ## 8. 保守上の注意点
+
+* **（Issue #532 で変更）shellcheck ブロッキング化に伴う整理**: CI の `lint` ジョブで `shellcheck -x` が本ファイルを対象にブロッキング実行されるようになった。`.env` の `source` 行の直前に `# shellcheck source=/dev/null`(SC1090 の抑止。`.env` は実行環境にのみ存在し静的解析では追えないため)を置き、どこからも参照されていなかった `CURRENT_STATUS` 変数(SC2034)の代入 3 箇所(初期値 `"UNKNOWN"`、接続時 `"OK"`、切断時 `"NG"`)を削除した。状態判定は従来どおり `$STATUS_FILE` に書き込む `LAST_STATUS` の値だけで行っており、挙動の変更はない。以降本ファイルを編集する際は、ローカルでも `shellcheck -x MY_HOME_SYSTEM/tools/connect_speaker.sh` が 0 件であることを確認すること。
+* 根拠: `# shellcheck source=/dev/null` (行番号: 18)、`LAST_STATUS=$(cat "$STATUS_FILE")` (行番号: 86)、`if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then` (行番号: 89)
 
 * `/tmp/speaker_connection_status` ファイルを利用して前回の状態を保持しているため、OSの再起動を行うとファイルが消失し、初回実行時は必ず `UNKNOWN` 状態から評価が開始される仕様となっている。
 * 通知メッセージのエスケープ処理に `python3` のワンライナーを使用しているため、実行環境に Python3 がインストールされていない場合、構文エラーが発生し通知内容が破損・未送信になる可能性がある。
