@@ -223,3 +223,45 @@ class TestVerifyTimestamp:
         naive_timestamp = datetime.datetime.now().isoformat()
         with pytest.raises(av.AlexaVerificationError):
             av.verify_timestamp(naive_timestamp)
+
+
+class TestSignaturePrecheckAndNegativeCache:
+    """Issue #541: 署名の形式検査を証明書取得より前に行い、取得失敗は短時間キャッシュする。"""
+
+    @pytest.fixture(autouse=True)
+    def _clear_negative_cache(self):
+        av._cert_negative_cache.clear()
+        yield
+        av._cert_negative_cache.clear()
+
+    def test_short_signature_is_rejected_without_fetching_certificate(self):
+        import base64
+        sig = base64.b64encode(b"x" * 16).decode()
+        with patch("core.av.requests.get") as mock_get:
+            with pytest.raises(av.AlexaVerificationError, match="outside the expected RSA range"):
+                av.verify_signature(b"body", sig, "https://s3.amazonaws.com/echo.api/echo-api-cert.pem")
+        mock_get.assert_not_called()
+
+    def test_non_base64_signature_is_rejected_without_fetching_certificate(self):
+        with patch("core.av.requests.get") as mock_get:
+            with pytest.raises(av.AlexaVerificationError, match="Invalid base64"):
+                av.verify_signature(b"body", "@@not-base64@@", "https://s3.amazonaws.com/echo.api/echo-api-cert.pem")
+        mock_get.assert_not_called()
+
+    def test_fetch_failure_is_negatively_cached(self):
+        import base64
+        sig = base64.b64encode(b"x" * 256).decode()
+        url = "https://s3.amazonaws.com/echo.api/random-" + "a" * 8 + ".pem"
+        with patch("core.av.requests.get", side_effect=requests.exceptions.ConnectionError("down")) as mock_get:
+            with pytest.raises(av.AlexaVerificationError, match="Failed to fetch"):
+                av.verify_signature(b"body", sig, url)
+            with pytest.raises(av.AlexaVerificationError, match="negative cache"):
+                av.verify_signature(b"body", sig, url)
+        assert mock_get.call_count == 1
+
+    def test_valid_signature_still_accepted(self, rsa_key):
+        pem = _make_cert(rsa_key)
+        body = b'{"hello": "world"}'
+        sig = _sign_and_encode(rsa_key, body)
+        with patch("core.av.requests.get", return_value=_mock_get(pem)):
+            av.verify_signature(body, sig, "https://s3.amazonaws.com/echo.api/echo-api-cert.pem")

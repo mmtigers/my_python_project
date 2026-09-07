@@ -135,6 +135,9 @@
 
 ### `verify_signature`
 
+* **（Issue #541 で修正）** 証明書取得(`_fetch_leaf_certificate`、外部 HTTP 最大5秒)の前に `Signature` を `base64.b64decode(..., validate=True)` でデコードし、長さが `SIGNATURE_MIN_BYTES`(128)〜`SIGNATURE_MAX_BYTES`(512)の RSA 鍵長範囲外なら `AlexaVerificationError` で即拒否する。以前は base64 デコードが証明書取得の後にあり、未認証の呼び出し側が毎回異なる `SignatureCertChainUrl` を付けるだけでスレッドプールのワーカーを拘束できた。あわせて `_fetch_leaf_certificate` は取得失敗(RequestException / PEM 不正 / 空)を `_cert_negative_cache` に `CERT_NEGATIVE_CACHE_TTL_SECONDS`(60秒)記憶し、同じ URL への再検証は外部フェッチせずに検証エラーにする(負キャッシュ)。
+* 根拠: (行番号: 175〜183, 63〜68, 105〜112, 122〜124 / 抜粋: "if not (SIGNATURE_MIN_BYTES <= len(signature) <= SIGNATURE_MAX_BYTES):", "raise AlexaVerificationError(\"Certificate chain fetch recently failed (negative cache)\")")
+
 * **役割**: `Signature`ヘッダと`SignatureCertChainUrl`ヘッダを使ってリクエストボディの署名を検証する公開関数。(1) 両ヘッダの非空チェック、(2) `_validate_cert_chain_url`によるURL形式検証、(3) `_fetch_leaf_certificate`によるリーフ証明書取得、(4) 証明書の有効期限チェック（`not_valid_before_utc <= now <= not_valid_after_utc`）、(5) SANに`echo-api.amazon.com`が含まれるかのチェック、(6) `Signature`ヘッダのbase64デコード、(7) リーフ証明書の公開鍵によるRSA署名検証（PKCS1v15パディング + SHA1ハッシュ、Amazon Alexaの署名アルゴリズム仕様で固定）、を順に行う。
 * 根拠: [関数定義とDocstring] (行番号: 103〜107 / 抜粋: "def verify_signature(raw_body: bytes, signature_b64: str, cert_chain_url: str) -> None:\n    \"\"\"SignatureヘッダとSignatureCertChainUrlヘッダを使ってリクエストボディを検証する。\n\n    検証失敗時は AlexaVerificationError を送出する。\n    \"\"\"")
 * **（Issue #385 で修正）** SAN拡張が無い証明書で送出される `x509.ExtensionNotFound` を `AlexaVerificationError` に変換する（以前は router で500になっていた）。
