@@ -130,7 +130,8 @@ jobs:
         # Issue #367で.coveragercのomitを「本当に実行不能なもの」だけに絞った真の
         # ビューを基準に64を設定したが、Issue #494時点の実測(2026-09-06: 69.92%,
         # 7,233 stmts / miss 2,176)に対して約6ptの余裕があり退行を見逃していたため、
-        # 実測より約3pt下の67へ引き上げた。段階的に引き上げること。
+        # 実測より約3pt下の67へ引き上げた。Issue #536: PR #526 後の実測 73.10% に
+        # 合わせて 70 へ再度引き上げた。段階的に引き上げること。
         env:
           # CI環境用の環境変数。SQLITE_DB_PATHはconfig.py側で読み込まれるよう修正済み。
           SQLITE_DB_PATH: ":memory:"
@@ -142,7 +143,7 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml \
             --cov-report=html \
-            --cov-fail-under=67
+            --cov-fail-under=70
 
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
