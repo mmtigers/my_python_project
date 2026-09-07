@@ -49,6 +49,9 @@
 
 ### `questSchema` (モジュールレベル定数、非export)
 
+* **（Issue #530 で修正）** `is_shared_completed_by` / `shared_completed_by_name` / `is_shared_pending_by` / `shared_pending_by_name` のスキーマ項目を削除した(バックエンドが送出しないため)。
+* 根拠: (行番号: 58 / 抜粋: "// #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除")
+
 * **役割**: `gameData.quests`配列の1要素（`quest_master`テーブルの行 + `filter_active_quests`/`get_all_view_data`が付与する`bonus_gold`/`bonus_exp`等）を検証するZodスキーマ。`quest_id`/`title`は必須、他はすべて任意（`description`/`icon_key`/`start_time`/`end_time`/`target_user`/`pre_requisite_quest_id`は`.nullable()`も許容）。`days`は`number[] | null`のいずれかを許容する。**[修正済み・Issue #474]** 以前は`string`も許容していたが、`services/quest_service.py`の`get_all_view_data`が`day_of_week`カラム(カンマ区切り文字列)を常に`number[]`または`None`へ変換してから送出しており、実際のAPIレスポンスで`days`が生の文字列になることは無いことを確認した上で`string`分岐を削除した(文字列形式はサーバー内部の`MasterQuest.days`でのみ使われ、フロントへは渡らない)。共有クエスト判定用の`is_shared_completed_by`/`shared_completed_by_name`/`is_shared_pending_by`/`shared_pending_by_name`も任意フィールドとして含む。
 * 根拠: [定数定義] (行番号: 35〜54 / 抜粋: "const questSchema = z.object({\n    quest_id: z.number(),\n    title: z.string(),\n    description: z.string().nullable().optional(),")
 * 根拠: `days`の型 (行番号: 55 / 抜粋: "days: z.union([z.array(z.number()), z.null()]).optional(),")
