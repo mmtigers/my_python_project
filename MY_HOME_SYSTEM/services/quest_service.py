@@ -991,14 +991,20 @@ class QuestService:
         today_date = now.date()
         current_time_str = now.strftime("%H:%M")
 
-        if quest['quest_type'] == 'limited':
+        # #529: 以前は quest_type == 'limited' のときだけ期間を評価していたため、'special' 等に
+        # start_date/end_date を設定しても無視されていた(期限切れでも出現し続ける)。設定が
+        # あればタイプに関わらず評価する('limited' は「期間が本質」のタイプ名として残す)。
+        # (quest は sqlite3.Row / dict のどちらも来るため keys() で列の有無を確認する)
+        start_date = quest['start_date'] if 'start_date' in quest.keys() else None
+        end_date = quest['end_date'] if 'end_date' in quest.keys() else None
+        if start_date or end_date:
             try:
-                if quest['start_date']:
-                    y, m, d = map(int, quest['start_date'].split('-'))
+                if start_date:
+                    y, m, d = map(int, start_date.split('-'))
                     if today_date < datetime.date(y, m, d):
                         return False
-                if quest['end_date']:
-                    y, m, d = map(int, quest['end_date'].split('-'))
+                if end_date:
+                    y, m, d = map(int, end_date.split('-'))
                     if today_date > datetime.date(y, m, d):
                         return False
             except ValueError as e:
