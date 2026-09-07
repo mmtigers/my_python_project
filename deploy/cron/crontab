@@ -11,8 +11,11 @@
 # Note: 元コメントは日曜03:00でしたが、コードは毎日04:00でした。コードを優先しています。
 0 4 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/MY_HOME_SYSTEM/services/backup_service.py
 
-# 毎日 AM 4:00 に、30日(mtime +30)より古いmp4ファイルをNASから削除する
-0 4 * * * find /mnt/nas/home_system/nvr_recordings -type f -name "*.mp4" -mtime +30 -delete
+# 録画(nvr_recordings)・HLS VOD キャッシュの保持期間削除は monitors/nas_monitor.py の
+# run_retention_cleanup(scheduler_boot 経由・1日1回)が .env の RECORDING_RETENTION_DAYS /
+# HLS_VOD_RETENTION_DAYS を参照して行う。以前ここにあった find -mtime +30 -delete は
+# 設定値と無関係に30日で消してしまい(Issue #527)、削除件数も Discord サマリに計上されない
+# ため撤去した。cron 側に同種の削除を追加しないこと。
 
 # 2. 一括ダウンロード (毎日 2:00 に変更)
 0 2 * * * /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh /home/masahiro/develop/DDD/batch_download_discord.py
@@ -27,6 +30,3 @@
 
 # newface monitor per 1hour
 0 * * * * cd /home/masahiro/develop/DDD &&  /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
-
-# 毎日 04:00 に、30日(mtime +30)より古いカメラ録画VODキャッシュ(HLS)をローカルディスクから削除する
-0 4 * * * find /home/masahiro/develop/MY_HOME_SYSTEM/data/hls_streams/vod -type f -mtime +30 -delete
