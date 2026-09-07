@@ -73,21 +73,26 @@ jobs:
         working-directory: .
         run: python -m pytest .github/scripts/ -q
 
-      - name: Pyright (report - non-blocking)
+      - name: Pyright (correctness gate - blocking)
         # Issue #487: 以前は services/quest_service.py:45 の到達不能な相対import
         # (削除済み)でmypyが1行目で解析を停止し、型チェッカがコードベースを
         # 一切検証できていなかった。ruff/bandit/shellcheckと同じ「まず非
         # ブロッキングで可視化してから絞る」方針でpyrightを導入する
         # (mypyより高速でvenv解決が容易なため推奨)。
-        run: npx --yes pyright@1.1.390 --outputjson . || true
-        continue-on-error: true
+        # Issue #532: MY_HOME_SYSTEM/pyrightconfig.json で typeCheckingMode を off にし、
+        # 未定義名・未束縛変数・await 漏れ(reportUnusedCoroutine)等の「明確なバグ」
+        # 診断だけを error にしてブロッキング化した(line-bot-sdk 等の型スタブ起因の
+        # 241 件は対象外)。診断を追加する場合は同ファイルで有効化する。
+        run: npx --yes pyright@1.1.390 .
 
-      - name: ShellCheck (report - non-blocking)
+      - name: ShellCheck (blocking)
         # Issue #486: Pythonにはruff、TypeScriptにはESLintがあるのに、本番の起動と
         # 全cronを担うシェルスクリプト(start_all.sh/run_task.sh等)には静的解析が
         # 無かった。ruff/banditと同じ方針(まずフルレポートを可視化し、error 0件を
         # 維持できるようになったらブロッキング化する)を適用する。shellcheckは
         # ubuntu-latestにプリインストール済みのため追加インストールは不要。
+        # Issue #532: 残っていた3件(SC1090/SC2034/SC2155)を解消し、指摘 0 件を
+        # 維持するためブロッキング化した。
         working-directory: .
         run: |
           shellcheck -x \
@@ -95,7 +100,6 @@ jobs:
             MY_HOME_SYSTEM/tools/*.sh \
             MY_HOME_SYSTEM/scripts/*.sh \
             family-quest/deploy.sh
-        continue-on-error: true
 
   test:
     name: Test + Coverage

@@ -15,6 +15,7 @@ MAX_RETRIES=3
 # ==========================================
 if [ -f "$ENV_FILE" ]; then
     set -a
+    # shellcheck source=/dev/null
     source "$ENV_FILE"
     set +a
 fi
@@ -83,11 +84,9 @@ if [ ! -f "$STATUS_FILE" ]; then
 fi
 
 LAST_STATUS=$(cat "$STATUS_FILE")
-CURRENT_STATUS="UNKNOWN"
 
 # 1. 接続状態チェック
 if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
-    CURRENT_STATUS="OK"
     
     # 切断状態から復旧した場合のみ通知
     if [ "$LAST_STATUS" = "NG" ]; then
@@ -105,7 +104,6 @@ if bluetoothctl info "$MAC" | grep -q "Connected: yes"; then
 fi
 
 # 2. 切断検知時の処理
-CURRENT_STATUS="NG"
 
 # 初回検知時のみ通知する（連発防止）
 if [ "$LAST_STATUS" != "NG" ]; then
