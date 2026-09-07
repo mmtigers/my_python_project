@@ -27,4 +27,5 @@ git config --get core.hooksPath
 - `core.hooksPath` を設定すると `.git/hooks/` 配下のフック(以前ローカル設置していた
   `post-merge` を含む)は一切実行されなくなる。追加のフックが必要なら、このディレクトリに
   実行権限付き(`chmod +x`)で置いてコミットすること。
-- フックは CI の shellcheck(`test.yml` の lint ジョブ)の対象に含まれている。
+- フックは CI の shellcheck(`test.yml` の lint ジョブ)の対象に含まれている。フックを追加したら
+  `test.yml` の shellcheck 対象リストにもファイル名で追加すること(README を巻き込まないよう glob は使わない)。
