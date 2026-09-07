@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import { fileURLToPath } from 'url'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -39,7 +40,8 @@ export default defineConfig({
   base: '/quest/',
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      // Issue #539: ESM 設定ファイルでは __dirname は非推奨(Vite 8 で警告)のため import.meta.url から解決する
+      '@': path.resolve(fileURLToPath(new URL('.', import.meta.url)), './src'),
     },
   },
   server: {

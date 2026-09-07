@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from 'vitest/config'
-import viteConfig from './vite.config.ts'
+import viteConfig from './vite.config'
 
 // vite.config.ts に `test` フィールドを直接足すと、defineConfig の
 // オーバーロード解決が壊れ build.rollupOptions.output.manualChunks の型が
