@@ -41,6 +41,11 @@ if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:
 # プロフィール表示名のキャッシュ (ログ用のためだけに毎回 LINE API を叩かないようにする)
 _PROFILE_CACHE_TTL_SEC = 3600
 _profile_cache: Dict[str, tuple] = {}  # user_id -> (display_name, cached_at)
+# Issue #542: _profile_cache は BackgroundTasks の複数スレッドから同時に読み書きされる。
+# _evict_oldest_profile_cache_entries の sorted(_profile_cache, ...) が別スレッドの挿入と
+# 重なると RuntimeError(dictionary changed size during iteration)になり、handle_message の
+# except でそのメッセージが無応答のまま捨てられていた。_seen_event_ids_lock と同じ方式で保護する。
+_profile_cache_lock = threading.Lock()
 # 保守性(#410): TTLは「エントリが古いか」の判定にのみ使われ、キャッシュから自動で
 # エントリを削除する仕組みが無かったため、ユニークな話者が増えるほど_profile_cacheが
 # 無制限に成長し続けていた(プロセスは長時間稼働するため実質的なメモリリーク)。
@@ -115,6 +120,7 @@ def _evict_oldest_profile_cache_entries() -> None:
     保守性(#410): `_profile_cache`が`_PROFILE_CACHE_MAX_SIZE`件を超えている場合、
     キャッシュ時刻(`cached_at`)が古いエントリから順に削除して上限内に収める。
     """
+    # 呼び出し側が _profile_cache_lock を保持していること(Issue #542)
     overflow = len(_profile_cache) - _PROFILE_CACHE_MAX_SIZE
     if overflow <= 0:
         return
@@ -125,7 +131,8 @@ def _evict_oldest_profile_cache_entries() -> None:
 
 def _get_display_name(user_id: str) -> str:
     """LINEのユーザー表示名を取得する。TTL付きでキャッシュし、API呼び出し頻度を抑える。"""
-    cached = _profile_cache.get(user_id)
+    with _profile_cache_lock:
+        cached = _profile_cache.get(user_id)
     if cached and (time.time() - cached[1]) < _PROFILE_CACHE_TTL_SEC:
         return cached[0]
 
@@ -137,8 +144,9 @@ def _get_display_name(user_id: str) -> str:
     except Exception:
         pass
 
-    _profile_cache[user_id] = (user_name, time.time())
-    _evict_oldest_profile_cache_entries()
+    with _profile_cache_lock:
+        _profile_cache[user_id] = (user_name, time.time())
+        _evict_oldest_profile_cache_entries()
     return user_name
 
 

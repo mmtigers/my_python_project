@@ -49,7 +49,9 @@ export interface Quest {
     gold_gain?: number;
     bonus_gold?: number;
     bonus_exp?: number;
-    quest_type?: 'daily' | 'weekly' | 'infinite' | 'challenge' | string;
+    // #530: バックエンド(models/quest.py MasterQuest.type)が送出しうる値に揃える。
+    // 以前の 'weekly' | 'challenge' はサーバーが一度も送出しない値だった。
+    quest_type?: 'daily' | 'special' | 'infinite' | 'limited' | 'random' | string;
     _isInfinite?: boolean;
     // #412(F-L10): masterData.js のフォールバック(サーバー接続エラー時の案内)専用の
     // 疑似クエストであることを示すフロントエンド拡張フラグ。バックエンドは送出しない。
@@ -66,11 +68,9 @@ export interface Quest {
     days?: number[] | null;
     target_user?: string;
     pre_requisite_quest_id?: number | null;
-    // ★共有クエスト判定用 (バックエンドの get_available_quests が付与するフィールド)
-    is_shared_completed_by?: string;
-    shared_completed_by_name?: string;
-    is_shared_pending_by?: string;
-    shared_pending_by_name?: string;
+    // #530: 以前ここにあった is_shared_completed_by / shared_completed_by_name /
+    // is_shared_pending_by / shared_pending_by_name は、バックエンドが #371 以降
+    // 送出しない(get_available_quests という関数も存在しない)幽霊フィールドだったため削除。
 }
 
 // クエスト履歴

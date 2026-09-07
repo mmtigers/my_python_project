@@ -73,6 +73,9 @@
 
 ### `send_inactive_notification`
 
+* **（Issue #534 で修正）** `asyncio.sleep(timeout)` 明けに、通知送信(`asyncio.to_thread(send_push, ...)`)より前に `IS_ACTIVE[mac] = False` を設定する。以前は `finally` でのみ落としていたため、送信中(キャンセル不能)に次の検知が届くと `process_sensor_data` は「まだアクティブ」とみなして再開通知を出さず、ユーザーには「止まりました」だけが残っていた。`finally` 側の後片付け(#387 の superseded 判定)はそのまま残る。
+* 根拠: (行番号: 74 / 抜粋: "IS_ACTIVE[mac] = False" の直後に "try:\n        await asyncio.to_thread(")
+
 * **役割**: 指定された時間待機後、動きが止まった旨の通知を送信し、タスク状態をクリアする。
 * 根拠: `[send_inactive_notification]` (行番号: 61 / 抜粋: "msg: str = f"💤【{location}・見守")
 * **（Issue #387 で修正）** `finally` の後片付け（`IS_ACTIVE[mac]=False`・`MOTION_TASKS` からの削除）は、`MOTION_TASKS[mac]` に「自分とは別の、まだ完了していない `asyncio.Task`」が登録されている（＝通知送信中に次の検知が来て新しいタイマータスクに置き換えられた）場合はスキップする。以前は無条件に実行していたため新タスクの参照を消してしまい、直後の検知で二重通知、さらに参照を失った新タスクが cancel 不能のまま満了して誤った「止まりました」通知を出していた。

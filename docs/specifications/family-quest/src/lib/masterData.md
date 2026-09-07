@@ -40,6 +40,9 @@
 
 ### 定数：`INITIAL_USERS`
 
+* **（Issue #530 で修正）** `INITIAL_USERS` から `hp` / `maxHp` / `inventory` を削除した(#327 で `User` 型から削除済みのフィールド)。
+* 根拠: (行番号: 13 / 抜粋: "// #530: hp/maxHp/inventory は #327 で User 型から削除済みのため撤去")
+
 * **役割**: 接続エラー時に使用されるゲストユーザーのフォールバックデータを定義する。
 * 根拠: [定数定義] (行番号: 4〜18 / 抜粋: "export const INITIAL_USERS = [")
 

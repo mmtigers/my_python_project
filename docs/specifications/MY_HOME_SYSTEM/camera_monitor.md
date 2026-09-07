@@ -224,6 +224,9 @@
 
 ### `capture_snapshot_from_nvr`
 
+* **（Issue #537 で修正）** 録画チャンクの検索パターンを新設の `_nvr_search_patterns(nas_folder, now)` で組み立てる。当日プレフィックス(`YYYYMMDD_*.mp4`)に加え、`now.hour == 0` のときは前日プレフィックスも検索する(0時台は最新チャンクが前日 23:5x 開始のファイルであるため、以前は "No NVR video files found" で画像が保存されなかった)。また、NAS 側ディレクトリ作成失敗時のフォールバック先を `BASE_DIR/temp_assets/snapshots` から `config.FALLBACK_ROOT/assets/snapshots` に変更した(`nas_monitor` の保持期間削除・同期の対象パスに揃える)。
+* 根拠: [パターン関数] (行番号: 208〜219 / 抜粋: "if now.hour == 0:\n        yesterday = now - timedelta(days=1)")、[呼び出し] (行番号: 250)、[フォールバック先] (行番号: 59)
+
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
 * 根拠: `capture_snapshot_from_nvr` (行番号: 171〜249 / 抜粋: "def capture_snapshot_from_nvr(")
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。

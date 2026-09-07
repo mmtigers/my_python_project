@@ -839,6 +839,9 @@
 
 ### `ScrapingStrategy._download_with_ytdlp`（品質でヘルパーメソッドへ分割）
 
+* **（Issue #538 で修正）** マニフェスト取得後、新設の静的メソッド `_select_variant_from_master(manifest_text, manifest_url)` で `#EXT-X-STREAM-INF` を含むマスタープレイリストかを判定し、該当すれば `BANDWIDTH` 最大の variant を `urljoin` した URL で `_fetch_m3u8_manifest` を取り直してからローカル化する(1段のみ)。以前は `_extract_m3u8_url` が `source`(マスター)にフォールバックした際、variant の `.m3u8` を「セグメント」として取得して `file://` 基準の相対 URI 解決に失敗し、merge 失敗・tmp 削除・失敗カウントになっていた。
+* 根拠: (行番号: 838〜854, 1192〜1198 / 抜粋: "def _select_variant_from_master(manifest_text: str, manifest_url: str) -> Optional[str]:", "variant_url = self._select_variant_from_master(manifest_text, m3u8_url)")
+
 * **役割**: 抽出したm3u8 URLについて、`_fetch_m3u8_manifest`でマニフェスト本文を取得→`_localize_m3u8_manifest`で相対URIを絶対URL化したうえで、`_prepare_fragment_tmp_dir`（品質で追加）による一時ディレクトリ準備、`_merge_fragments_and_transfer_to_nas`（品質で追加）による**ローカルディスク完結の結合＋NASへの2段階転送**（PR #72でNAS上に直接結合する旧実装から変更）を呼び出し、成功時のDiscord通知・失敗時の後始末（`final_path`/`nas_tmp_path`の削除、`BotDetectionError`判定）を行う。**（品質で変更）** 以前はこれら一時ディレクトリ準備・結合・NAS転送の処理がすべて本メソッド内にベタ書きされていたため、`_prepare_fragment_tmp_dir`と`_merge_fragments_and_transfer_to_nas`（いずれも品質で追加）へ分離した。分離後も各処理の内容・エラーハンドリング・`finally`節での`tmp_dir`削除は分離前と完全に同一である。
   1. セグメント本体・差し替え済みマニフェスト(`playlist.m3u8`)は`CONFIG.LOCAL_TMP_DIR / (final_path.name + ".fragments.tmp")`という**ローカルディスク**上の一時ディレクトリ(`tmp_dir`)へ書き込む（NAS上の`save_dir`ではない）。`_prepare_fragment_tmp_dir`が、開始前に同名`tmp_dir`が残っていれば削除してから作り直し、書き込み前に`FileSystemManager.check_disk_space`で`CONFIG.LOCAL_TMP_MIN_FREE_SPACE_GB`以上の空きを確認する。
   2. セグメント取得完了後、結合(`yt-dlp`)＋その後の`FixupM3u8`（ffmpeg再多重化）でさらに同程度のディスクを消費する見込みから、取得済みバイト数の約2.2倍の空き容量があるかを結合開始前に**再度**確認し、不足していれば具体的なバイト数を含むエラーログを出力して`False`を返す（ここで中断せず結合まで進めてディスクフルで失敗すると、それまでの帯域・時間が丸ごと無駄になるため）。
@@ -1202,6 +1205,9 @@ flowchart TD
 * 根拠: [ydl_optsのコメント] (行番号: 462〜466 / 抜粋: "# M-7-3: リスト1行がプレイリストURL(またはチャンネルURL)だった場合、\n            # noplaylistが無いとyt-dlpがその1タスクの中で全件を無制限にダウンロード")
 * **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
 * **ディレクトリ作成失敗時のOSError全般の捕捉（Issue #236で修正）**: `FileSystemManager.ensure_dir`は以前`except PermissionError:`のみを定義しており、読み取り専用マウント（`Errno 30`）・NAS切断中のI/Oエラー（`Errno 5`）・ディスクフル（`Errno 28`）等の他の`OSError`サブクラスは専用のDiscord通知を経由せず呼び出し元（最終的には`run_locked`の`except Exception`）へ伝播していた。同種のmkdir呼び出しを持つ`extract_youtube_urls.py`の`process_subscriptions`（#185）が先に`except (sqlite3.Error, OSError)`でOSError全般を捕捉するよう修正済みだったのに対し、本ファイルはその横展開から取り残されていた。`except OSError as e:`節を追加し、原因（`Errno`）を含めた専用通知を送信するよう修正した。
+
+* **（Issue #535 で修正）** トップレベル `list.txt` 由来タスクの `source_name` に文字列 `"list"` ではなくモジュール定数 `TOP_LEVEL_LIST_SOURCE = "__list_txt__"` を使う(`_collect_tasks` の `_add(url, TOP_LEVEL_LIST_SOURCE)`、`_determine_save_dir` と `_purge_skipped_tasks` の判定)。以前は `list/list.txt`(stem = `"list"`)のタスクと区別できず、保存先がカテゴリルートになり、パージが `CURRENT_DIR/list.txt` を書き換えてスキップ済み URL が毎回再アーカイブされていた。あわせて `_get_strategy` の「YouTube 無効時は `None` を返す」分岐(`_prepare_tasks` が先に除外するため到達不能)と呼び出し側の `None` チェックを削除し、戻り値を `DownloadStrategy`(非 Optional)にした。
+* 根拠: (行番号: 380, 637, 1278, 1331, 1240 / 抜粋: "TOP_LEVEL_LIST_SOURCE: str = \"__list_txt__\"", "def _get_strategy(self, url: str) -> DownloadStrategy:")
 
 ## 9. 不明事項一覧
 

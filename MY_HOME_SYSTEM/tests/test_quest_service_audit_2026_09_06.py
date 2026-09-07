@@ -218,3 +218,71 @@ class TestTvUnlockRunsAfterCommit:
         monkeypatch.setattr(quest_service_module.QuestService, "_trigger_tv_unlock", fake_trigger)
         QuestService().process_approve_quest("dad", history_id)
         assert observed == {"status_at_trigger": "approved", "quest_id": 7}
+
+
+class TestUseItemReleasesLockBeforePush:
+    """Issue #544: use_item のユーザー単位ロックは DB 更新(コミット)までで解放され、
+    LINE push / 効果音の実行中は保持されないこと。以前は _use_item_locked の末尾で同期の
+    send_push まで行っていたため、LINE が遅いと同一ユーザーの次の use_item が待たされていた。"""
+
+    def _seed_item(self):
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
+                "VALUES ('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
+            )
+            cur.execute("INSERT INTO reward_master (reward_id, title, cost_gold) VALUES (1, 'Juice', 10)")
+            cur.execute(
+                "INSERT INTO user_inventory (user_id, reward_id, status, purchased_at) "
+                "VALUES ('dad', 1, 'owned', ?)", (datetime.datetime.now(JST).isoformat(),)
+            )
+            return cur.lastrowid
+
+    def test_push_runs_after_lock_released_and_after_commit(self, isolated_db, monkeypatch):
+        import threading
+
+        observed = {}
+
+        def fake_push(*args, **kwargs):
+            # 別スレッドからユーザー単位ロックを取得できれば、送信中はロックが解放されている
+            acquired = threading.Event()
+
+            def _try_lock():
+                with quest_service_module._get_item_use_lock("dad"):
+                    acquired.set()
+
+            t = threading.Thread(target=_try_lock)
+            t.start()
+            observed["lock_free_during_push"] = acquired.wait(timeout=2.0)
+            t.join(timeout=2.0)
+            # コミット済み(別接続から消費済みが見える)であることも確認する
+            with common.get_db_cursor() as cur:
+                observed["status_at_push"] = cur.execute(
+                    "SELECT status FROM user_inventory WHERE id = ?", (observed["inv_id"],)
+                ).fetchone()["status"]
+            observed["message"] = kwargs["messages"][0]["text"]
+
+        monkeypatch.setattr(quest_service_module.notification_service, "send_push", fake_push)
+        monkeypatch.setattr(quest_service_module.sound_manager, "play", lambda *a, **k: None)
+        inv_id = self._seed_item()
+        observed["inv_id"] = inv_id
+
+        result = quest_service_module.InventoryService().use_item("dad", inv_id)
+
+        assert result == {"status": "consumed", "message": "つかいました！"}
+        assert observed["lock_free_during_push"] is True
+        assert observed["status_at_push"] == "consumed"
+        assert "Juice" in observed["message"]
+
+    def test_use_item_locked_returns_response_and_message(self, isolated_db, monkeypatch):
+        """_use_item_locked は (レスポンス, 通知文) を返し、自身では送信しない。"""
+        calls = []
+        monkeypatch.setattr(
+            quest_service_module.notification_service, "send_push", lambda *a, **k: calls.append(1)
+        )
+        monkeypatch.setattr(quest_service_module.sound_manager, "play", lambda *a, **k: None)
+        inv_id = self._seed_item()
+        result, msg = quest_service_module.InventoryService()._use_item_locked("dad", inv_id)
+        assert result["status"] == "consumed"
+        assert "Juice" in msg
+        assert calls == []

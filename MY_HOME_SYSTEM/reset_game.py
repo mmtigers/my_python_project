@@ -146,7 +146,13 @@ def reset_user_data(target_user):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
+        # Issue #544: 本スクリプトは unified_server とは別プロセスで動くため、サービス層の
+        # ユーザー単位ロック(_user_balance_locks)の外で実行される。せめてDB側では
+        # BEGIN IMMEDIATE で先に書き込みロックを取り、以下の UPDATE/DELETE を1トランザクションで
+        # 確定させる(承認処理の SELECT→絶対値 SET と交錯しても、途中状態が見えないようにする)。
+        cursor.execute("BEGIN IMMEDIATE")
+
         # ★修正箇所: medal_count = 0 を追加
         cursor.execute("""
             UPDATE quest_users 
@@ -155,13 +161,30 @@ def reset_user_data(target_user):
         """, (user_id,))
         
         if cursor.rowcount == 0:
+            conn.rollback()
             logging.warning(f"ID '{user_id}' のデータが見つかりませんでした。")
             print(f"⚠️ 注意: データが見つかりませんでした。")
         else:
+            # Issue #544: 以前は quest_users のみゼロ化し、approved の quest_history と
+            # user_inventory を残していた。そのためリセット後も「本日完了済み」表示が続き、
+            # リセット前の履歴を取り消そうとすると #356 のガード(残高 < 付与額)で拒否されて
+            # 混乱していた。履歴とインベントリも同じトランザクションで削除する。
+            # reward_history(購入ログ)は残高に影響しない監査用の記録のため対象外。
+            cursor.execute("DELETE FROM quest_history WHERE user_id = ?", (user_id,))
+            deleted_history = cursor.rowcount
+            cursor.execute("DELETE FROM user_inventory WHERE user_id = ?", (user_id,))
+            deleted_inventory = cursor.rowcount
             conn.commit()
-            logging.info(f"DB更新成功: {user_label} のデータをリセットしました。")
+            logging.info(
+                f"DB更新成功: {user_label} のデータをリセットしました。"
+                f"(quest_history {deleted_history}件, user_inventory {deleted_inventory}件を削除)"
+            )
             # メッセージにもメダルリセットを含める
-            print(f"\n✅ {user_label} さんのデータをリセットしました (Level=1, Exp=0, Gold=0, Medal=0)。")
+            print(
+                f"\n✅ {user_label} さんのデータをリセットしました "
+                f"(Level=1, Exp=0, Gold=0, Medal=0, クエスト履歴 {deleted_history}件削除, "
+                f"インベントリ {deleted_inventory}件削除)。"
+            )
         
     except Exception as e:
         error_msg = f"リセット処理中にエラーが発生: {str(e)}"
@@ -188,7 +211,11 @@ def main():
     if not selected:
         sys.exit(0)
     
-    confirm = input(f"\n本当に '{selected['label']}' のデータをリセットしますか？ (y/n): ").strip().lower()
+    # Issue #544: 履歴・インベントリも削除するようになったため、確認文でその旨を明示する
+    confirm = input(
+        f"\n本当に '{selected['label']}' のデータをリセットしますか？"
+        " (Level/Exp/Gold/Medal を初期化し、クエスト履歴とインベントリを全削除します) (y/n): "
+    ).strip().lower()
     if confirm != 'y':
         logging.info("ユーザーにより操作がキャンセルされました。")
         print("キャンセルしました。")

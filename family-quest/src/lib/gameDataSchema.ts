@@ -55,10 +55,7 @@ const questSchema = z.object({
     days: z.union([z.array(z.number()), z.null()]).optional(),
     target_user: z.string().nullable().optional(),
     pre_requisite_quest_id: z.number().nullable().optional(),
-    is_shared_completed_by: z.string().optional(),
-    shared_completed_by_name: z.string().optional(),
-    is_shared_pending_by: z.string().optional(),
-    shared_pending_by_name: z.string().optional(),
+    // #530: is_shared_* / shared_*_name はバックエンドが送出しないため削除
 });
 
 const rewardSchema = z.object({

@@ -185,6 +185,9 @@
 
 ### `get_device_name_by_id`
 
+* **（Issue #533 で修正）** 遅延ロードの制御を bool の `_fetch_attempted` から最終試行時刻 `_last_fetch_attempt_at`(`time.monotonic()`)に変更し、キャッシュが空のまま `DEVICE_NAME_FETCH_RETRY_SEC`(600秒)経過したら再取得を試みる。以前は一度失敗すると再起動まで再試行しなかった。
+* 根拠: (行番号: 27〜28, 168〜174 / 抜粋: "retry_due = (\n            _last_fetch_attempt_at is None\n            or (now - _last_fetch_attempt_at) >= DEVICE_NAME_FETCH_RETRY_SEC\n        )")
+
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。**（Issue #439で修正）** 「キャッシュが空かつ未試行かをチェックしてから`_fetch_attempted`を立てる」処理と、最終的なキャッシュ読み取りは、いずれも`_device_cache_lock`保持下で行うよう修正された。以前はロード無しでこのチェックを行っており、Webhookリクエストが集中する起動直後に複数スレッドが同時に「キャッシュ空・未試行」と判定してしまい、`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が並行して複数回走りうる状態だった。ネットワークI/Oを伴う`fetch_device_name_cache()`自体の呼び出しは、`_device_cache_lock`を一度解放してから（ロックの外側で）行う。
 * 根拠: `get_device_name_by_id` (行番号: 158〜169 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
 

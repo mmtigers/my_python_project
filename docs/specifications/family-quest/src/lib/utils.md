@@ -68,6 +68,9 @@
 
 ### 関数 `isSameOriginAvatarPath`
 
+* **（Issue #540 で修正）** `//` 始まりに加えて `/` + バックスラッシュ始まり(正規表現 `/^\/[\\/]/`)も拒否する。ブラウザは http(s) URL 中のバックスラッシュをスラッシュに正規化するため、`/\evil.example/x` はプロトコル相対の外部 URL として解釈されていた(`UpdateUserAction` はバックスラッシュを拒否するため API 経由では到達しないが、`quest_data.py`/DB 直接編集由来の `avatar` は無検証)。
+* 根拠: (行番号: 22 / 抜粋: "return !!url && url.startsWith('/') && !/^\/[\\/]/.test(url);")
+
 * **役割**: アバター画像のURLが自サーバー内の相対パス（`/uploads/...`等）であるかどうかを判定する型ガード関数。`url`が`"/"`で始まり、かつ`"//"`（プロトコル相対URL）では始まらない場合にのみ`true`を返す。
 * 根拠: (行番号: 19〜21 / 抜粋: "export function isSameOriginAvatarPath(url: string | undefined | null): url is string {\n    return !!url && url.startsWith('/') && !url.startsWith('//');\n}")
 

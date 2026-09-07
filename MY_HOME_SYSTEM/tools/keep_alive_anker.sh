@@ -11,7 +11,8 @@ CONNECT_SCRIPT="/home/masahiro/develop/MY_HOME_SYSTEM/tools/connect_speaker.sh"
 
 # --- Environment Setup for PipeWire/PulseAudio (CRUCIAL) ---
 # cron実行時でもPipeWireソケットを見つけられるようにする
-export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export XDG_RUNTIME_DIR
 export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 
 # ログ関数

@@ -10,6 +10,11 @@
 --     3つ含まれていない。
 --   - 本ファイルには baseline に存在しない列(device_records.battery_level、
 --     food_records.date/menu/created_at)が含まれている。
+--   - (Issue #543 で追記) 本ファイル側のみ NOT NULL: device_records.device_name/device_id/
+--     device_type、ohayo_records.user_id/timestamp、daily_records.user_id/date/category/value/
+--     timestamp、health_records.timestamp、car_records.timestamp。DEFAULT が異なる列:
+--     party_state.max_hp(baseline 100 / 本ファイル 1000)、party_state.week_start_date
+--     (baseline なし / 本ファイル '')。tests/test_current_schema_sql.py が許容リストとして検証する。
 --
 -- Issue #507: 以前はここに baseline に存在しないテーブル(haircut_history,
 -- app_rankings, quest_tasks, quest_status, youtube_subscriptions)も含まれていたが、

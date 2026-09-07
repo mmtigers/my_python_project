@@ -277,6 +277,13 @@ class NasMonitor:
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".mp4",)),
             ("スナップショット", os.path.join(getattr(config, "ASSETS_DIR", ""), "snapshots"),
              getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
+            # Issue #537: camera_monitor は起動時に NAS が落ちていると FALLBACK_ROOT/assets/snapshots
+            # に書き続け(ASSETS_DIR は import 時に1回だけ解決)、sync_fallback_data は
+            # 「異常→正常」遷移時にしか rsync しないため、その後に書かれた退避ファイルは
+            # 誰にも掃除されず SD カードに蓄積していた。退避先も同じ保持期間で削除する。
+            ("スナップショット(ローカル退避)",
+             os.path.join(getattr(config, "FALLBACK_ROOT", ""), "assets", "snapshots"),
+             getattr(config, "RECORDING_RETENTION_DAYS", 30), (".jpg", ".jpeg")),
             # タイムラプス動画の生成先(monitors/smart_timelapse_generator.pyの
             # setup_directories)はNAS(config.ASSETS_DIR)ではなくローカルの
             # config.BASE_DIR/assets/timelapse であり、以前はここがNAS側の

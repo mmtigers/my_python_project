@@ -372,6 +372,14 @@ def _looks_like_block_page(html: str) -> bool:
     return any(marker in lowered for marker in CONFIG.SCRAPING_BLOCK_PAGE_MARKERS)
 
 
+# Issue #535: トップレベル list.txt 由来タスクの source_name に使うセンチネル。以前は "list"
+# という文字列を使っていたため、list/list.txt(stem = "list")のタスクと区別できず、保存先が
+# カテゴリルートになる・_purge_skipped_tasks が list/list.txt ではなく CURRENT_DIR/list.txt
+# を書き換える(スキップ済み URL が毎回再アーカイブされる)問題があった。
+# 通常のファイル stem として現れない名前にする。
+TOP_LEVEL_LIST_SOURCE: str = "__list_txt__"
+
+
 class DownloadTask(NamedTuple):
     url: str
     source_name: str
@@ -626,7 +634,7 @@ class DownloadStrategy(ABC):
         pass
 
     def _determine_save_dir(self, source_name: str, category: str = "others") -> Optional[Path]:
-        if source_name == "list":
+        if source_name == TOP_LEVEL_LIST_SOURCE:
             target_dir = self.save_base_dir / category
         else:
             target_dir = self.save_base_dir / category / source_name
@@ -825,6 +833,25 @@ class ScrapingStrategy(DownloadStrategy):
             return fallback.group(1)
             
         return None
+
+    @staticmethod
+    def _select_variant_from_master(manifest_text: str, manifest_url: str) -> Optional[str]:
+        """マスタープレイリスト(#EXT-X-STREAM-INF を含む)なら、BANDWIDTH が最大の variant の
+        絶対 URL を返す。メディアプレイリスト(セグメント列挙)なら None を返す(Issue #538)。"""
+        if "#EXT-X-STREAM-INF" not in manifest_text:
+            return None
+        best: Tuple[int, Optional[str]] = (-1, None)
+        lines = [ln.strip() for ln in manifest_text.splitlines()]
+        for i, line in enumerate(lines):
+            if not line.startswith("#EXT-X-STREAM-INF"):
+                continue
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            bandwidth = int(m.group(1)) if m else 0
+            # 属性行の直後にある最初の非コメント・非空行が variant の URI
+            uri = next((ln for ln in lines[i + 1:] if ln and not ln.startswith("#")), None)
+            if uri and bandwidth > best[0]:
+                best = (bandwidth, urljoin(manifest_url, uri))
+        return best[1]
 
     def _fetch_m3u8_manifest(self, m3u8_url: str, page_url: str) -> Optional[str]:
         """m3u8マニフェスト本体を、ブラウザ偽装(impersonate)付きで直接取得する。
@@ -1157,6 +1184,19 @@ class ScrapingStrategy(DownloadStrategy):
         if manifest_text is None:
             return False
 
+        # Issue #538: _extract_m3u8_url が source1280/source842 を見つけられず 'source'
+        # (マスタープレイリスト)にフォールバックした場合、以前は variant の .m3u8 を
+        # 「セグメント」として取得してしまい、file:// 基準の相対 URI 解決に失敗して
+        # merge 失敗・tmp 削除・失敗カウントになっていた。#EXT-X-STREAM-INF を含む場合は
+        # 最も帯域の大きい variant を辿ってメディアプレイリストを取り直す(1段のみ)。
+        variant_url = self._select_variant_from_master(manifest_text, m3u8_url)
+        if variant_url:
+            logger.info(f"🎚️ マスタープレイリストを検出。variant を取得します: {variant_url}")
+            manifest_text = self._fetch_m3u8_manifest(variant_url, page_url)
+            if manifest_text is None:
+                return False
+            m3u8_url = variant_url
+
         localized_manifest = self._localize_m3u8_manifest(manifest_text, m3u8_url)
 
         # フラグメントはNAS上のsave_dirではなくローカルディスクに一時保存する
@@ -1229,14 +1269,10 @@ class BatchDownloader:
         logger.critical("🛑🛑 2回目の停止シグナルを検知したため、実行中の処理を強制中断します")
         raise KeyboardInterrupt("second interrupt signal received; forcing immediate shutdown")
 
-    def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
-        # 【修正】ハードコードではなく、設定フラグで制御するように変更
-        if "youtube.com" in url or "youtu.be" in url:
-            if not CONFIG.ENABLE_YOUTUBE_DL:
-                logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")
-                return None
-            # 有効な場合は通常のフローへ進む
-
+    def _get_strategy(self, url: str) -> DownloadStrategy:
+        # Issue #535: 以前ここにあった「YouTube 無効時は None を返す」分岐は、_prepare_tasks が
+        # ENABLE_YOUTUBE_DL=False のとき YouTube タスクを先に除外(パージ)するため到達不能な
+        # デッドコードだった。戻り値を非 Optional にし、呼び出し側の None チェックも削除した。
         # missavなら専用ストラテジー、それ以外はUniversal
         if "missav" in url:
             return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
@@ -1271,7 +1307,7 @@ class BatchDownloader:
                         if url and not url.startswith("#"):
                             url = _normalize_url(url)
                             if url not in self.history:
-                                _add(url, "list")
+                                _add(url, TOP_LEVEL_LIST_SOURCE)
             except Exception as e:
                 logger.error(f"リスト読み込みエラー ({CONFIG.LIST_FILE_PATH.name}): {e}", exc_info=True)
 
@@ -1324,7 +1360,7 @@ class BatchDownloader:
 
         # 3. 元ファイルからの物理削除（インメモリでフィルタリングして上書き）
         for source_name, urls_to_remove in tasks_by_source.items():
-            if source_name == "list":
+            if source_name == TOP_LEVEL_LIST_SOURCE:
                 file_path = CONFIG.LIST_FILE_PATH
             else:
                 file_path = CONFIG.LIST_DIR_PATH / f"{source_name}.txt"
@@ -1495,10 +1531,6 @@ class BatchDownloader:
 
             try:
                 strategy = self._get_strategy(task.url)
-
-                # 【追加】YouTube等のスキップ対象（None）だった場合は次へ
-                if strategy is None:
-                    continue
 
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)

@@ -1,0 +1,12 @@
+{
+  "include": ["."],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.venv", "**/venv", "tests", "temp_fallback", "logs"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "off",
+  "reportUndefinedVariable": "error",
+  "reportPossiblyUnbound": "error",
+  "reportUnboundVariable": "error",
+  "reportUnusedCoroutine": "error",
+  "reportSelfClsParameterName": "warning",
+  "reportUnhashable": "error"
+}

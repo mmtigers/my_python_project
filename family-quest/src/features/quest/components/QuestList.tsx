@@ -89,14 +89,12 @@ const QuestItem: React.FC<{
     const baseGold = quest.gold_gain || 0;
     const totalGold = baseGold + bonusGold;
 
-    const isSharedCompleted = !!quest.is_shared_completed_by && quest.is_shared_completed_by !== currentUser.user_id;
-    const isSharedPending = !!quest.is_shared_pending_by && quest.is_shared_pending_by !== currentUser.user_id;
-    const isSharedDoneByOther = isSharedCompleted || isSharedPending;
-    const sharedName = quest.shared_completed_by_name || quest.shared_pending_by_name;
     // #412(F-L10): masterData.js のフォールバック(案内専用の疑似クエスト、
     // quest._isFallback)は完了APIを叩けないため、ロック中と同様にタップ・長押しを
     // 無効化する(以前はタップ可能で、完了しようとすると404等のエラーモーダルになっていた)。
-    const isEffectivelyLocked = isLocked || isSharedDoneByOther || !!quest._isFallback;
+    // #530: 以前ここで OR していた共有クエスト判定(is_shared_* 由来)は、バックエンドが
+    // 送出しないフィールドに基づく常に false の分岐だったため削除した。
+    const isEffectivelyLocked = isLocked || !!quest._isFallback;
 
     // 完了済み/申請中の取り消しは「長押し」でのみ発火させ、うっかりタップでの
     // 誤取り消しを防ぐ。
@@ -153,20 +151,11 @@ const QuestItem: React.FC<{
 
     // ▼ バッジ候補を優先度付きで作り、上位2件だけを表示する(角度①: バッジ過多の整理)
     const badgeCandidates: BadgeCandidate[] = [];
-    if (isLocked && !isSharedDoneByOther) {
+    if (isLocked) {
         badgeCandidates.push({
             key: 'locked', priority: 0, node: (
                 <span key="locked" className={`bg-gray-500 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold flex items-center gap-0.5`}>
                     <Lock size={10} /> 未開放
-                </span>
-            )
-        });
-    }
-    if (isSharedDoneByOther) {
-        badgeCandidates.push({
-            key: 'shared', priority: 1, node: (
-                <span key="shared" className={`bg-gray-600 text-white ${badgeSizeClasses} px-1.5 py-0.5 rounded font-bold border border-gray-400`}>
-                    {sharedName}が対応済み
                 </span>
             )
         });

@@ -185,13 +185,14 @@ class TestLoadKnownCastsTransientIOErrorIsNotQuarantined:
 
         monitor = MagicMock()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         mock_save = MagicMock()
         monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
 
         module._check_site(monitor, notifier, site, dm)
 
         monitor.fetch_current_casts.assert_not_called()
-        notifier.notify.assert_not_called()
+        notifier.notify_casts.assert_not_called()
         mock_save.assert_not_called()
         assert data_file.exists()
 
@@ -402,6 +403,8 @@ class TestDailySummaryLateCountsNotLost:
         fixed_dt = _fixed_datetime(monkeypatch, module.datetime(2026, 8, 30, 21, 0, 0))
 
         notifier = MagicMock()
+
+        notifier.notify_casts.return_value = (1, [])
         # 1回目の21時台送信(件数0)
         module._maybe_send_daily_summary(notifier, dm)
         assert notifier.notify_daily_summary.call_count == 1
@@ -437,6 +440,7 @@ class TestDailySummaryLateCountsNotLost:
 
         fixed_dt._now = module.datetime(2026, 8, 31, 21, 0, 0)  # 翌日21時台の実行
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         module._maybe_send_daily_summary(notifier, dm)
 
         sent_counts = notifier.notify_daily_summary.call_args.args[0]
@@ -455,6 +459,8 @@ class TestDailySummarySendFailureDoesNotLoseCounts:
         dm.record_daily_new_casts("restpia_test", 3)
 
         notifier = MagicMock()
+
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_daily_summary.return_value = False  # Webhook失敗を模す
 
         module._maybe_send_daily_summary(notifier, dm)
@@ -485,6 +491,8 @@ class TestDailySummarySendFailureDoesNotLoseCounts:
         dm.record_daily_new_casts("restpia_test", 3)
 
         notifier = MagicMock()
+
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_daily_summary.return_value = True
 
         module._maybe_send_daily_summary(notifier, dm)

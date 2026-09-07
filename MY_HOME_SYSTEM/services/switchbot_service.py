@@ -20,9 +20,14 @@ DEVICE_NAME_CACHE: Dict[str, str] = {}
 # fetch_device_name_cache() の呼出元がどこにも無く DEVICE_NAME_CACHE が常に空のままだった
 # 問題(#411 S-L2)への対応。lifespan からの明示的な事前ロードは行わず、
 # get_device_name_by_id() の初回呼出し(＝最初のWebhook受信)時に一度だけ遅延ロードする。
-_fetch_attempted = False
-# #439: DEVICE_NAME_CACHE/_fetch_attempted は複数のWebhookリクエストスレッドから
-# 並行してアクセスされうる。「キャッシュが空か確認してから_fetch_attemptedを立てる」
+# Issue #533: 以前は bool(_fetch_attempted)で「一度でも試みたら二度と取得しない」だったため、
+# 最初の Webhook 到着時に SwitchBot API/DNS が落ちていると(起動直後・ネットワーク瞬断で
+# 起きやすい)devices.json に無いデバイスは再起動まで Unknown_<mac> のままだった。
+# 最終試行時刻(monotonic)を持ち、DEVICE_NAME_FETCH_RETRY_SEC 経過後に再試行する。
+_last_fetch_attempt_at: Optional[float] = None
+DEVICE_NAME_FETCH_RETRY_SEC: float = 600.0
+# #439: DEVICE_NAME_CACHE/_last_fetch_attempt_at は複数のWebhookリクエストスレッドから
+# 並行してアクセスされうる。「キャッシュが空か確認してから_last_fetch_attempt_atを更新する」
 # チェックのタイミングが重なると、初回リクエストが集中した際にAPI呼び出しが
 # 複数回走ってしまうため、このLockで保護する(APIコール自体はLock外で行う)。
 _device_cache_lock = threading.Lock()
@@ -157,11 +162,16 @@ def fetch_device_name_cache() -> bool:
 
 def get_device_name_by_id(device_id: str) -> Optional[str]:
     """IDから名前を検索する関数。キャッシュが空ならここで一度だけ遅延ロードを試みる。"""
-    global _fetch_attempted
+    global _last_fetch_attempt_at
     with _device_cache_lock:
-        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted
+        now = time.monotonic()
+        retry_due = (
+            _last_fetch_attempt_at is None
+            or (now - _last_fetch_attempt_at) >= DEVICE_NAME_FETCH_RETRY_SEC
+        )
+        should_fetch = not DEVICE_NAME_CACHE and retry_due
         if should_fetch:
-            _fetch_attempted = True
+            _last_fetch_attempt_at = now
     if should_fetch:
         # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない
         fetch_device_name_cache()

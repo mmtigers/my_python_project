@@ -361,21 +361,17 @@ function App() {
     play('cancel');
   };
 
-  const handleQuestClick = (user: User, q: Quest | QuestHistory, isHistory: boolean) => {
+  // #530: 以前の第3引数 isHistory(履歴タブからのワンタップ取消)は全呼び出しが false で
+  // 到達不能な分岐だったため削除した。本関数はクエストリストからのタップ/長押し専用。
+  const handleQuestClick = (user: User, q: Quest) => {
     // #391: 送信中のクエストの再タップは静かに無視する(確認モーダルも開かない)。
     if (processingQuestKeysRef.current.has(getQuestProcessingKey(user.user_id, q.quest_id))) return;
     play('select');
 
-    // 1. 履歴タブなど、明示的に履歴として渡された場合 → ワンタップで取り消し
-    if (isHistory) {
-      runQuestAction(user, 'cancel', q);
-      return;
-    }
-
-    // 2. クエストリストから渡された場合 (q は Quest 型)
+    // クエストリストから渡された場合 (q は Quest 型)
     // ロック/申請中/完了の判定は useQuestStatus と共通の getQuestLockState に集約
     const { isInfinite, pendingEntry, completedEntry } =
-      getQuestLockState(q as Quest, user, completedQuests, pendingQuests);
+      getQuestLockState(q, user, completedQuests, pendingQuests);
 
     // 無限クエストは常に「完了」扱い
     // ★実機検証で子どもの誤操作(意図しない完了)が多かったため、完了(クリア)には
@@ -400,7 +396,7 @@ function App() {
       // targetには Quest オブジェクトではなく、見つかった History オブジェクトを渡す
       // ※Historyオブジェクトに quest_title が結合されている前提ですが、
       //  もし不足している場合は q.title を補完する必要があります。
-      runQuestAction(user, 'cancel', { ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });
+      runQuestAction(user, 'cancel', { ...historyEntry, quest_title: q.title || historyEntry.quest_title });
     } else {
       // 未実施なら確認ダイアログを挟んでから完了
       setConfirmUser(user);
@@ -686,7 +682,7 @@ function App() {
             completedQuests={completedQuests}
             pendingQuests={pendingQuests}
             rewards={rewards}
-            onQuestClick={(user, q) => handleQuestClick(user, q, false)}
+            onQuestClick={handleQuestClick}
             onBuyReward={handleBuyReward}
             onApprove={handleApprove}
             onReject={handleReject}
@@ -744,7 +740,7 @@ function App() {
                   completedQuests={completedQuests}
                   pendingQuests={pendingQuests}
                   currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(currentUser, q, false)}
+                  onQuestClick={(q) => handleQuestClick(currentUser, q)}
                   completedSignal={completedSignal}
                   processingQuestKeys={processingQuestKeys}
                   iconFirst={iconFirstUserIds.includes(currentUser.user_id)}

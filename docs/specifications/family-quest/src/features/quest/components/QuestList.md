@@ -72,6 +72,9 @@
 
 ### `QuestItem`
 
+* **（Issue #530 で修正）** `isSharedCompleted` / `isSharedPending` / `isSharedDoneByOther` / `sharedName` の算出と「〜が対応済み」バッジを削除し、`isEffectivelyLocked = isLocked || !!quest._isFallback` とした(判定元の `is_shared_*` はバックエンドが送出しない常に `false` の分岐だった)。本仕様書の他所にある共有クエスト判定の記述は歴史的経緯として残すが、現行コードには存在しない。
+* 根拠: (行番号: 95〜97 / 抜粋: "const isEffectivelyLocked = isLocked || !!quest._isFallback;")
+
 * **（2026-09-06 品質監査で修正）** `canCancel` の判定を `useQuestStatus.canCancelQuest({ isDone, isPending }, isEffectivelyLocked)` に集約した。以前は `!isInfinite && (isDone || isPending) && !isEffectivelyLocked` で無限クエストを一律除外していたため、申請中(`isPending`)の無限クエストは「長押しで取消」表示なのに取り消せなかった。
 * 根拠: (行番号: 105, 7 / 抜粋: "const canCancel = canCancelQuest({ isDone, isPending }, isEffectivelyLocked);", "canCancelQuest } from '../hooks/useQuestStatus'")
 

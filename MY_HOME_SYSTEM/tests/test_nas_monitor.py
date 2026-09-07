@@ -513,3 +513,15 @@ class TestNasMonitorDailyReportOncePerDay:
             self._make_monitor(monkeypatch, state).run()
         assert sent == []
         assert "last_report_date" not in state
+
+
+class TestFallbackSnapshotsAreCleanedUp:
+    """Issue #537: NAS 障害時の退避先 FALLBACK_ROOT/assets/snapshots も保持期間削除の対象にする。"""
+
+    def test_fallback_snapshot_dir_is_a_retention_target(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config, "FALLBACK_ROOT", str(tmp_path / "fb"))
+        monitor = NasMonitor()
+        seen = []
+        monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
+        monitor.run_retention_cleanup()
+        assert (str(tmp_path / "fb" / "assets" / "snapshots"), (".jpg", ".jpeg")) in seen

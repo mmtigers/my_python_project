@@ -69,6 +69,9 @@
 
 ### `Quest`
 
+* **（Issue #530 で修正）** `quest_type` の union を `'daily' | 'special' | 'infinite' | 'limited' | 'random' | string` に変更(以前の `'weekly' | 'challenge'` はサーバーが送出しない値)。`is_shared_completed_by` / `shared_completed_by_name` / `is_shared_pending_by` / `shared_pending_by_name` はバックエンドが #371 以降送出しない幽霊フィールドのため削除した。
+* 根拠: (行番号: 54, 71〜73 / 抜粋: "quest_type?: 'daily' | 'special' | 'infinite' | 'limited' | 'random' | string;", "#530: 以前ここにあった is_shared_completed_by")
+
 * **役割**: クエスト情報のデータ構造の定義。`is_shared_completed_by`等、共有クエスト判定用のフィールド（バックエンドの`get_available_quests`が付与）を含む。**（Issue #291で修正）** 以前はDBの実カラム名(`quest_id`/`exp_gain`/`gold_gain`/`icon_key`/`quest_type`/`target_user`)に加え、バックエンドが一部のみ付与していた別名(`id`/`exp`/`gold`/`icon`/`type`/`target`)も型として許容しており、どちらが実際に送られてくるか不明瞭だった。調査の結果`id`/`exp`/`gold`/`desc`は実際には一度もAPIから送られてこない「幽霊フィールド」だったと判明し、サーバー側の実カラム名のみに一本化された（`desc`はそもそも別名として型に含まれていなかったが、同種の問題として言及されている）。
 * **（Issue #390で修正）** `difficulty?: number`はバックエンドが送出しない幽霊フィールドだったため削除。`description`はNULL可カラムのため`string | null`を許容する。**（Issue #412 F-L10で追加）** `_isFallback?: boolean`は`_isInfinite`と同じ位置づけのフロントエンド拡張フラグで、`masterData.js`の`MASTER_QUESTS`（サーバー接続エラー時の案内専用の疑似クエスト、完了APIを持たない）であることを示す。バックエンドは送出しない。根拠: 49行目 `_isFallback?: boolean;`
 * **（Issue #474で修正）** `days`プロパティは以前`number[] | string | null`だったが、実際のAPIレスポンス(バックエンドの`services/quest_service.py`の`get_all_view_data`)はDBカラム`day_of_week`(カンマ区切り文字列)を常に`number[] | null`へ変換してから送出しており、文字列のまま`days`が返ってくる経路は存在しないと判明したため、`number[] | null`に絞った(`string`分岐に対応する実際の入力が存在しなかった)。

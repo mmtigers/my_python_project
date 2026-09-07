@@ -139,70 +139,70 @@
 
 ### `reset_user_data`
 
-* **役割**: 指定されたユーザーの `level`, `exp`, `gold`, `medal_count` を初期値（1, 0, 0, 0）にリセットするUPDATE文を実行する。
-* 根拠: `def reset_user_data(target_user):` (行番号: 130〜168 / 抜粋: "def reset_user_data(target_user):\n    """\n    指定されたユーザーのゲームデータをリセットする\n    """")
+* **役割**: 指定されたユーザーの `level`, `exp`, `gold`, `medal_count` を初期値（1, 0, 0, 0）にリセットするUPDATE文を実行する。**（Issue #544で修正）** あわせて、同一トランザクション内で当該ユーザーの `quest_history` 行と `user_inventory` 行をすべて `DELETE` する。以前は `quest_users` のみゼロ化していたため、リセット後も承認済み履歴によって「本日完了済み」表示が続き、リセット前の履歴を取り消そうとすると `quest_service` の #356 ガード（残高 < 付与額）で拒否されて混乱していた。`reward_history`（購入ログ）は残高に影響しない監査用の記録として削除対象外。トランザクションは `BEGIN IMMEDIATE` で開始し、先に書き込みロックを取得してから UPDATE/DELETE を実行する（本スクリプトは `unified_server` とは別プロセスで動くためサービス層のユーザー単位ロックの外で実行される。DB側で書き込みを1トランザクションにまとめることで途中状態が他の接続から見えないようにするが、承認処理の read-modify-write（絶対値 `SET gold=?`）とリセットが交錯した場合にリセット結果が上書きされうる点は残っており、稼働中のサーバーに対して実行する場合は承認操作が行われていない時間帯に実行すること）。
+* 根拠: `def reset_user_data(target_user):` (行番号: 136 / 抜粋: "指定されたユーザーのゲームデータをリセットする")、`cursor.execute("BEGIN IMMEDIATE")` (行番号: 154)、`cursor.execute("DELETE FROM quest_history WHERE user_id = ?", (user_id,))` (行番号: 173)、`cursor.execute("DELETE FROM user_inventory WHERE user_id = ?", (user_id,))` (行番号: 175)
 
 
 * **引数/リクエスト**: `target_user: dict`（`{"label": ..., "db_id": ...}`。`select_user_interactive` の戻り値）
-* 根拠: (行番号: 130 / 抜粋: "def reset_user_data(target_user):")
+* 根拠: (行番号: 136 / 抜粋: "def reset_user_data(target_user):")
 
 
 * **戻り値/レスポンス**: なし（明示的な `return` を持たない）
-* 根拠: (行番号: 130〜168 / 抜粋: "def reset_user_data(target_user):")
+* 根拠: (行番号: 136〜193 / 抜粋: "def reset_user_data(target_user):")
 
 
-* **副作用**: `quest_users` テーブルへのUPDATE実行とコミット、成功・失敗メッセージの標準出力、対象データ未存在時の警告ログ、失敗時のエラーログ・プロセス終了、`finally` ブロックでのDB接続クローズ。
-* 根拠: `cursor.execute("""\n            UPDATE quest_users \n            SET level = 1, exp = 0, gold = 0, medal_count = 0 \n            WHERE user_id = ?\n        """, (user_id,))` (行番号: 145〜149 / 抜粋: "UPDATE quest_users "), `conn.commit()` (行番号: 155 / 抜粋: "conn.commit()")
+* **副作用**: `quest_users` テーブルへのUPDATE、`quest_history`・`user_inventory` からの対象ユーザー行のDELETE（Issue #544）とコミット、削除件数を含む成功メッセージ（`クエスト履歴 N件削除, インベントリ M件削除`）とINFOログの出力、対象データ未存在時の警告ログとロールバック、失敗時のエラーログ・プロセス終了、`finally` ブロックでのDB接続クローズ。
+* 根拠: `cursor.execute("""\n            UPDATE quest_users \n            SET level = 1, exp = 0, gold = 0, medal_count = 0 \n            WHERE user_id = ?\n        """, (user_id,))` (行番号: 157〜161 / 抜粋: "UPDATE quest_users "), `deleted_history = cursor.rowcount` (行番号: 174), `conn.commit()` (行番号: 177 / 抜粋: "conn.commit()")
 
 
-* **エラーハンドリング**: `cursor.rowcount == 0`（対象ユーザーが存在しない）の場合は警告ログと注意メッセージを出力するのみでコミットは行わない。UPDATE実行中に任意の `Exception` が発生した場合、エラーログ（メッセージ＋トレースバック）を出力し、標準出力にエラーメッセージとログファイルパスを表示した上で `sys.exit(1)` する。`finally` 節で接続が確立していれば必ずクローズする。
-* 根拠: `if cursor.rowcount == 0:` (行番号: 151〜153 / 抜粋: "if cursor.rowcount == 0:"), `except Exception as e:` (行番号: 160〜165 / 抜粋: "sys.exit(1)")
+* **エラーハンドリング**: `cursor.rowcount == 0`（対象ユーザーが存在しない）の場合は `conn.rollback()` で `BEGIN IMMEDIATE` のトランザクションを閉じたうえで警告ログと注意メッセージを出力し、DELETE・コミットは行わない（Issue #544）。UPDATE実行中に任意の `Exception` が発生した場合、エラーログ（メッセージ＋トレースバック）を出力し、標準出力にエラーメッセージとログファイルパスを表示した上で `sys.exit(1)` する。`finally` 節で接続が確立していれば必ずクローズする。
+* 根拠: `if cursor.rowcount == 0:\n            conn.rollback()` (行番号: 163〜164), `except Exception as e:` (行番号: 187〜192 / 抜粋: "sys.exit(1)")
 
 
 
 ### `main`
 
 * **役割**: `fetch_users` → `select_user_interactive` → 確認プロンプト → `reset_user_data` の一連の対話フローを制御するエントリーポイント。
-* 根拠: `def main():` (行番号: 170〜190 / 抜粋: "def main():\n    logging.info("スクリプト起動: ユーザー選択モード")")
+* 根拠: `def main():` (行番号: 199〜223 / 抜粋: "def main():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 170 / 抜粋: "def main():")
+* 根拠: (行番号: 199 / 抜粋: "def main():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 170〜190 / 抜粋: "def main():")
+* 根拠: (行番号: 199〜223 / 抜粋: "def main():")
 
 
-* **副作用**: ログ出力（起動・キャンセル）、`fetch_users`/`select_user_interactive`/`reset_user_data` の呼び出し、確認プロンプトの表示、ユーザー未取得時・未選択時・確認拒否時の `sys.exit`。
-* 根拠: `confirm = input(f"\n本当に '{selected['label']}' のデータをリセットしますか？ (y/n): ").strip().lower()` (行番号: 184 / 抜粋: "confirm = input(f"\n本当に '{selected['label']}' のデータをリセットしますか？ (y/n): ").strip().lower()")
+* **副作用**: ログ出力（起動・キャンセル）、`fetch_users`/`select_user_interactive`/`reset_user_data` の呼び出し、確認プロンプトの表示（Issue #544: 履歴・インベントリも全削除する旨を明示する文言に変更）、ユーザー未取得時・未選択時・確認拒否時の `sys.exit`。
+* 根拠: `confirm = input(` (行番号: 215)、`" (Level/Exp/Gold/Medal を初期化し、クエスト履歴とインベントリを全削除します) (y/n): "` (行番号: 217)
 
 
 * **エラーハンドリング**: `fetch_users` の結果が空の場合はエラーログとメッセージを出力し `sys.exit(1)`。`select_user_interactive` の戻り値が `None`（Falsy）の場合は `sys.exit(0)`。確認入力が `"y"` 以外の場合はキャンセルログ・メッセージを出力し `sys.exit(0)`。それ以外の場合のみ `reset_user_data` を呼び出す。
-* 根拠: `if not users_info:` (行番号: 175〜178 / 抜粋: "sys.exit(1)"), `if confirm != 'y':` (行番号: 185〜188 / 抜粋: "sys.exit(0)")
+* 根拠: `if not users_info:` (行番号: 205〜208 / 抜粋: "sys.exit(1)"), `if confirm != 'y':` (行番号: 219〜222 / 抜粋: "sys.exit(0)")
 
 
 
 ### モジュールレベル実行部（`if __name__ == "__main__":`）
 
 * **役割**: スクリプトを直接実行した場合に `main()` を呼び出す。
-* 根拠: `if __name__ == "__main__":\n    main()` (行番号: 192〜193 / 抜粋: "if __name__ == "__main__":\n    main()")
+* 根拠: `if __name__ == "__main__":\n    main()` (行番号: 226〜227 / 抜粋: "if __name__ == "__main__":\n    main()")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 192〜193 / 抜粋: "main()")
+* 根拠: (行番号: 226〜227 / 抜粋: "main()")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: (行番号: 192〜193 / 抜粋: "main()")
+* 根拠: (行番号: 226〜227 / 抜粋: "main()")
 
 
 * **副作用**: `main()` の実行（対話的なDBリセット処理全体）。
-* 根拠: (行番号: 193 / 抜粋: "main()")
+* 根拠: (行番号: 227 / 抜粋: "main()")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 192〜193 / 抜粋: "if __name__ == "__main__":")
+* 根拠: (行番号: 226〜227 / 抜粋: "if __name__ == "__main__":")
 
 
 

@@ -225,6 +225,9 @@
 
 ### `handleQuestClick` (App内の関数)
 
+* **（Issue #530 で修正）** シグネチャを `(user: User, q: Quest)` に変更し、第3引数 `isHistory` と「履歴として渡された場合はワンタップで取消」分岐を削除した(全呼び出しが `false` を渡しており到達不能だった)。`getQuestLockState(q, ...)` の `as Quest` キャストと `'title' in q` 分岐も不要になった。
+* 根拠: (行番号: 364〜366 / 抜粋: "// #530: 以前の第3引数 isHistory(履歴タブからのワンタップ取消)は全呼び出しが false で", "const handleQuestClick = (user: User, q: Quest) => {")
+
 * **（2026-09-06 品質監査で修正）** 無限クエストの分岐を `if (isInfinite && !pendingEntry)` に変更し、申請中(`pendingEntry` あり)の無限クエストは通常クエストと同じ取消経路(`runQuestAction(user, 'cancel', ...)`)へ流す。`historyEntry` は `isInfinite ? pendingEntry : (pendingEntry || completedEntry)` とし、無限クエストの承認済み履歴(`completedEntry`)は取消対象にしない(周回前提)。以前は `pendingEntry` を見る前に無条件で完了モーダルを開いていたため、申請中の無限クエストは取り消せず、完了しようとしても「すでに申請中です」のエラーになっていた(`QuestList.tsx` 側は `canCancel` により長押し時のみ本関数を呼ぶ)。
 * 根拠: (行番号: 387〜392, 396 / 抜粋: "if (isInfinite && !pendingEntry) {", "const historyEntry = isInfinite ? pendingEntry : (pendingEntry || completedEntry);")
 
@@ -234,7 +237,7 @@
 * 根拠: `quest_title`補完 (302行目 / 抜粋: "runQuestAction(user, 'cancel', { ...historyEntry, quest_title: ('title' in q ? q.title : undefined) || historyEntry.quest_title });")
 * 根拠: 未実施クエストの確認ダイアログ化 (303〜308行目 / 抜粋: "} else {\n      // 未実施なら確認ダイアログを挟んでから完了\n      setConfirmUser(user);\n      setConfirmTarget(q);\n      setConfirmMode('complete');\n    }")
 
-* **引数/リクエスト**: `user: User`, `q: Quest | QuestHistory`, `isHistory: boolean`
+* **引数/リクエスト**: `user: User`, `q: Quest`(**（Issue #530 で修正）** 以前は `q: Quest | QuestHistory`, `isHistory: boolean`)
 * **戻り値/レスポンス**: なし (void)
 * **副作用**: `isHistory`または既存履歴ありの場合は`runQuestAction`（取消）の呼び出し、それ以外（無限クエスト・未実施クエスト）の場合は`confirmUser`/`confirmTarget`/`confirmMode`の更新による`ConfirmModal`表示、`select`音の再生
 * **エラーハンドリング**: なし。取消は分岐先の`runQuestAction`側で、完了は確認後の`executeConfirm`経由の`runQuestAction`側でエラー処理を行う。

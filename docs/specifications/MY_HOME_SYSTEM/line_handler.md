@@ -83,6 +83,9 @@
 
 ### `_get_display_name`
 
+* **（Issue #542 で修正）** `_profile_cache` の読み書きと `_evict_oldest_profile_cache_entries` の呼び出しを新設の `_profile_cache_lock`(`threading.Lock`)で保護する。以前は BackgroundTasks の複数スレッドから同時に更新されると `sorted(_profile_cache, ...)` が `RuntimeError: dictionary changed size during iteration` になり、`handle_message` の `except` で当該メッセージが無応答のまま捨てられ得た。
+* 根拠: (行番号: 48, 134, 147 / 抜粋: "_profile_cache_lock = threading.Lock()", "with _profile_cache_lock:\n        _profile_cache[user_id] = (user_name, time.time())\n        _evict_oldest_profile_cache_entries()")
+
 * **（2026-09-06 品質監査で修正）** `line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)` として接続/読み取りタイムアウト(`config.LINE_API_REQUEST_TIMEOUT`、既定 `(5.0, 15.0)` 秒)を渡す。line-bot-sdk v3 は `_request_timeout` 未指定だと urllib3 に `timeout=None`(無期限ブロック)を渡すため、api.line.me への TCP がブラックホール化すると BackgroundTasks のワーカースレッドが永久に塞がっていた。
 * 根拠: [get_profile 呼び出し] (行番号: 135 / 抜粋: "profile = line_bot_api.get_profile(user_id, _request_timeout=config.LINE_API_REQUEST_TIMEOUT)")、[定数定義] (`MY_HOME_SYSTEM/config.py` 行番号: 219 / 抜粋: "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
 

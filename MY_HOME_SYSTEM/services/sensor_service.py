@@ -66,6 +66,12 @@ async def send_inactive_notification(mac: str, name: str, location: str, timeout
     # 通知の送信に失敗してもIS_ACTIVE/MOTION_TASKSは必ずクリーンアップする。
     # そうしないと「動きが再開した」通知が二度と出なくなる。
     msg: str = f"💤【{location}・見守り】\n{name} の動きが止まりました（{int(timeout/60)}分経過）"
+    # Issue #534: 送信(to_thread、キャンセル不能)の前に非アクティブへ落とす。以前は finally で
+    # のみ False にしていたため、送信中に次の検知が届くと process_sensor_data は
+    # 「まだアクティブ」とみなして再開通知を出さず、届くのは「止まりました」だけになり、
+    # ユーザーには誤った停止状態が残っていた。先に False にしておけば、送信中に届いた検知は
+    # 「非アクティブ→アクティブ」の遷移として「動きがありました」を送る(停止→再開の順)。
+    IS_ACTIVE[mac] = False
     try:
         await asyncio.to_thread(
             send_push,

@@ -32,7 +32,11 @@ class MasterQuest(BaseModel):
     id: int = Field(ge=1, le=_SQLITE_INT_MAX)
     title: str = Field(min_length=1, max_length=200)
     desc: Optional[str] = None
-    type: Literal['daily', 'special', 'infinite']
+    # #529: 'limited'(start_date/end_date による期間限定)と 'random'(occurrence_chance による
+    # 日替わり出現抽選)は services/quest_service.py の _is_quest_currently_active・フロントエンド
+    # (useQuestStatus.ts/QuestList.tsx)・仕様書がいずれも対応済みなのに、本 Literal だけが
+    # 許容しておらず、quest_data.py に追加した瞬間 sync_master_data が 500 で全体中断していた。
+    type: Literal['daily', 'special', 'infinite', 'limited', 'random']
     target: str = 'all'
     exp: int = Field(ge=0)
     gold: int = Field(ge=0)
@@ -40,7 +44,7 @@ class MasterQuest(BaseModel):
     days: Optional[str] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    chance: Optional[float] = 1.0
+    chance: Optional[float] = Field(default=1.0, ge=0.0, le=1.0)
     start_time: Optional[str] = None
     end_time: Optional[str] = None
     pre_requisite_quest_id: Optional[int] = None

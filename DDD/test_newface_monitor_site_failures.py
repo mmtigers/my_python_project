@@ -42,6 +42,12 @@ DataManager = module.DataManager
 MonitorConfig = module.MonitorConfig
 
 
+def _mock_notifier() -> MagicMock:
+    notifier = MagicMock()
+    notifier.notify_casts.return_value = (1, [])
+    return notifier
+
+
 def _make_site(site_id: str = "failure_test") -> "SiteConfig":
     return SiteConfig(
         site_id=site_id,
@@ -141,7 +147,7 @@ class TestHandleSiteNetworkFailure:
         既定では失敗サイトが 1/79 (自局側障害とはみなされない)として送信する。
         """
         pending = module._handle_site_network_failure(
-            notifier, site, requests.RequestException("connection refused"), dm
+            site, requests.RequestException("connection refused"), dm
         )
         if pending is not None:
             module._send_pending_site_failure_alerts(
@@ -154,6 +160,7 @@ class TestHandleSiteNetworkFailure:
     ):
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
 
         with caplog.at_level(logging.WARNING, logger="newface_monitor"):
             pending = self._fail_once(notifier, site, dm)
@@ -168,6 +175,7 @@ class TestHandleSiteNetworkFailure:
     def test_alert_sent_once_when_threshold_reached(self, data_dir, dm):
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD + 5):
@@ -184,6 +192,7 @@ class TestHandleSiteNetworkFailure:
         一次ヘルスチェック(ERROR監視)を発報させ続けないこと。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD):
@@ -203,6 +212,7 @@ class TestHandleSiteNetworkFailure:
         """閾値到達時の失敗(アラートを送った当回)もWARNING扱いになること。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD - 1):
@@ -219,6 +229,7 @@ class TestHandleSiteNetworkFailure:
         """Discord送信失敗時はalertedを立てず、次回の失敗時に再試行すること。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = False
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD + 2):
@@ -234,6 +245,7 @@ class TestHandleSiteNetworkFailure:
         発報が続いていた)。送信の再試行自体は別管理で継続される。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = False
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD - 1):
@@ -254,6 +266,7 @@ class TestHandleSiteNetworkFailure:
         ディレクトリ(#364で1回だけ束縛)の同一ファイルへ書き込むこと。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
 
         for _ in range(MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD):
@@ -275,6 +288,7 @@ class TestSelfOutageSuppression:
     def test_alerts_are_suppressed_when_most_sites_failed(self, data_dir, dm):
         sites = [_make_site(f"site_{i}") for i in range(4)]
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
         pending = [(site, MonitorConfig.CONSECUTIVE_FAILURE_ALERT_THRESHOLD) for site in sites]
 
@@ -287,6 +301,7 @@ class TestSelfOutageSuppression:
     def test_alerts_are_sent_when_only_a_minority_failed(self, data_dir, dm):
         site = _make_site("site_0")
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
 
         module._send_pending_site_failure_alerts(
@@ -311,6 +326,7 @@ class TestSelfOutageSuppression:
         monitor.fetch_current_casts.side_effect = requests.RequestException("network is unreachable")
         monkeypatch.setattr(module, "WebMonitor", MagicMock(return_value=monitor))
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
         notifier.notify_site_failure_alert.return_value = True
         monkeypatch.setattr(module, "DiscordNotifier", MagicMock(return_value=notifier))
         monkeypatch.setattr(module, "get_managed_target_directory", MagicMock(return_value=data_dir))
@@ -363,7 +379,7 @@ class TestDisappearedSiteReturning200:
         monitor = MagicMock()
         monitor.fetch_current_casts.side_effect = module.SiteUnavailableError("redirected")
 
-        result = module._check_site(monitor, MagicMock(), site, dm)
+        result = module._check_site(monitor, _mock_notifier(), site, dm)
 
         assert result.failed is True
         assert dm.load_site_failures()[site.site_id]["count"] == 1
@@ -379,7 +395,7 @@ class TestDisappearedSiteReturning200:
         monitor.fetch_current_casts.return_value = set()
 
         with caplog.at_level(logging.WARNING, logger="newface_monitor"):
-            result = module._check_site(monitor, MagicMock(), site, dm)
+            result = module._check_site(monitor, _mock_notifier(), site, dm)
 
         assert result.failed is True
         assert dm.load_site_failures()[site.site_id]["count"] == 2
@@ -404,6 +420,7 @@ class TestCheckSiteIntegration:
         """_check_site経由で失敗記録→疎通回復でリセットの一連が動くこと。"""
         site = _make_site()
         notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
 
         monitor = MagicMock()
         monitor.fetch_current_casts.side_effect = requests.RequestException("boom")
