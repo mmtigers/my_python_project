@@ -46,6 +46,16 @@ CREATE TABLE群は0000へ移設済みで、`init_db()` は本ディレクトリ�
   3つ含まれていない。
 - `current_schema.sql` には baseline に存在しない列(`device_records.battery_level`、
   `food_records.date`/`menu`/`created_at`)が含まれている。
+- (Issue #543 で追記) `current_schema.sql` 側のみ `NOT NULL` が付いている列:
+  `device_records.device_name`/`device_id`/`device_type`、`ohayo_records.user_id`/`timestamp`、
+  `daily_records.user_id`/`date`/`category`/`value`/`timestamp`、`health_records.timestamp`、
+  `car_records.timestamp`。
+- (Issue #543 で追記) `DEFAULT` が異なる列: `party_state.max_hp`(baseline `100` / current
+  `1000`)、`party_state.week_start_date`(baseline なし / current `''`)。
+
+これらの差分は `tests/test_current_schema_sql.py::test_migrated_schema_matches_current_schema_sql_except_known_diffs`
+が「既知の差分」の許容リストとして機械的に検証しており、ここに書かれていない差分が
+生じるとテストが失敗する(差分を増減させたら README とテストの両方を更新すること)。
 
 Issue #507: 以前はここに baseline に存在しないテーブル(`haircut_history`,
 `app_rankings`, `quest_tasks`, `quest_status`, `youtube_subscriptions`)も既知の差分

@@ -66,3 +66,81 @@ def test_schema_migrations_tracking_table_is_present_in_current_schema_sql():
     with open(SCHEMA_FILE, "r", encoding="utf-8") as f:
         schema_sql = f.read()
     assert "CREATE TABLE schema_migrations" in schema_sql
+
+
+
+# Issue #543: migrations/ を全適用したスキーマと current_schema.sql の列定義(型・NOT NULL・DEFAULT)を
+# 比較する。README(migrations/README.md)に記載した既知の差分だけを許容し、それ以外の差分
+# (新しいマイグレーションの反映漏れ、README に無い差分の混入)を検知する。
+import re as _re
+import sqlite3 as _sqlite3
+import sys as _sys
+
+_sys.path.append(BASE_DIR)
+
+# (テーブル, 列) -> (migrated 側の (型, notnull, default), current_schema 側の同タプル)。None は列が無いことを表す。
+KNOWN_SCHEMA_DIFFS = {
+    ("car_records", "timestamp"): (("DATETIME", 0, None), ("DATETIME", 1, None)),
+    ("daily_records", "category"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("daily_records", "date"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("daily_records", "timestamp"): (("DATETIME", 0, None), ("DATETIME", 1, None)),
+    ("daily_records", "user_id"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("daily_records", "value"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("device_records", "battery_level"): (None, ("INTEGER", 0, None)),
+    ("device_records", "device_id"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("device_records", "device_name"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("device_records", "device_type"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("food_records", "created_at"): (None, ("TEXT", 0, None)),
+    ("food_records", "date"): (None, ("TEXT", 0, None)),
+    ("food_records", "menu"): (None, ("TEXT", 0, None)),
+    ("health_records", "timestamp"): (("DATETIME", 0, None), ("DATETIME", 1, None)),
+    ("ohayo_records", "timestamp"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("ohayo_records", "user_id"): (("TEXT", 0, None), ("TEXT", 1, None)),
+    ("party_state", "max_hp"): (("INTEGER", 0, "100"), ("INTEGER", 0, "1000")),
+    ("party_state", "week_start_date"): (("TEXT", 0, None), ("TEXT", 0, "''")),
+}
+
+
+def _table_columns(conn):
+    out = {}
+    for (table,) in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ):
+        out[table] = {
+            row[1]: (row[2].upper(), row[3], row[4])
+            for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+    return out
+
+
+def test_migrated_schema_matches_current_schema_sql_except_known_diffs():
+    from core.migrations import apply_pending_migrations
+
+    migrated_conn = _sqlite3.connect(":memory:")
+    apply_pending_migrations(migrated_conn)
+    migrated = _table_columns(migrated_conn)
+
+    with open(SCHEMA_FILE, "r", encoding="utf-8") as f:
+        schema_sql = f.read()
+    # sqlite_sequence はユーザーが CREATE できない内部テーブル(ダンプ由来の行)なので除外して読み込む
+    schema_sql = _re.sub(r"CREATE TABLE sqlite_sequence\s*\([^;]*\);", "", schema_sql)
+    current_conn = _sqlite3.connect(":memory:")
+    current_conn.executescript(schema_sql)
+    current = _table_columns(current_conn)
+
+    assert set(migrated) == set(current), (
+        f"テーブル集合が一致しません: migrated のみ={sorted(set(migrated) - set(current))}, "
+        f"current_schema.sql のみ={sorted(set(current) - set(migrated))}"
+    )
+
+    actual_diffs = {}
+    for table in sorted(migrated):
+        for column in sorted(set(migrated[table]) | set(current[table])):
+            a, b = migrated[table].get(column), current[table].get(column)
+            if a != b:
+                actual_diffs[(table, column)] = (a, b)
+
+    unexpected = {k: v for k, v in actual_diffs.items() if KNOWN_SCHEMA_DIFFS.get(k) != v}
+    stale = {k: v for k, v in KNOWN_SCHEMA_DIFFS.items() if actual_diffs.get(k) != v}
+    assert not unexpected, f"migrations/README.md に無い差分があります: {unexpected}"
+    assert not stale, f"解消済みなのに許容リストに残っている差分があります: {stale}"
