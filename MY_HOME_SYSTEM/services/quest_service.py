@@ -1182,12 +1182,29 @@ class InventoryService:
         }
 
     def use_item(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        # Issue #544: ユーザー単位ロックの保持範囲はDB更新(コミット)までに限定する。
+        # 以前は _use_item_locked の末尾で同期の LINE push(最大15秒)まで実行していたため、
+        # LINE が遅い/タイムアウトした場合に同一ユーザーの次の use_item がその往復の間
+        # 直列化されていた。外部副作用はロック解放後に行う。
         with _get_item_use_lock(user_id):
-            return self._use_item_locked(user_id, inventory_id)
+            result, msg = self._use_item_locked(user_id, inventory_id)
 
-    def _use_item_locked(self, user_id: str, inventory_id: int) -> Dict[str, str]:
+        # 外部副作用(LINE送信・効果音)はコミット後・ロック解放後に実行する。以前はトランザクション
+        # 内でLINE APIの往復を待っていたため、その間SQLiteの書き込みロックを保持し続け、
+        # 他のwriterが "database is locked" 待ちになっていた(Q-L7)。
+        notification_service.send_push(
+            user_id=config.LINE_USER_ID,
+            messages=[{"type": "text", "text": msg}]
+        )
+        sound_manager.play("quest_clear")
+
+        return result
+
+    def _use_item_locked(self, user_id: str, inventory_id: int) -> Tuple[Dict[str, str], str]:
         """
         アイテムを使用し、即座に消費を確定する(親の承認は不要)。
+        戻り値は (APIレスポンス, 通知メッセージ)。通知の送信は呼び出し側(use_item)が
+        ロック解放後に行う(#544)。
         """
         with common.get_db_cursor(commit=True) as cur:
             sql = """
@@ -1238,16 +1255,7 @@ class InventoryService:
 
             msg = f"🎒 {item['user_name']}が「{item['title']}」を使用しました。"
 
-        # 外部副作用(LINE送信・効果音)はコミット後に実行する。以前はトランザクション内で
-        # LINE APIの往復を待っていたため、その間SQLiteの書き込みロックを保持し続け、
-        # 他のwriterが "database is locked" 待ちになっていた(Q-L7)。
-        notification_service.send_push(
-            user_id=config.LINE_USER_ID,
-            messages=[{"type": "text", "text": msg}]
-        )
-        sound_manager.play("quest_clear")
-
-        return {"status": "consumed", "message": "つかいました！"}
+        return {"status": "consumed", "message": "つかいました！"}, msg
 
 
 class GameSystem:
