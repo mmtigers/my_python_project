@@ -20,6 +20,9 @@ describe('isSameOriginAvatarPath', () => {
 
     it('rejects a protocol-relative URL (M-9-5)', () => {
         expect(isSameOriginAvatarPath('//evil.example/x.png')).toBe(false);
+        // Issue #540: ブラウザは '/\\' を '//' に正規化するため同様に拒否する
+        expect(isSameOriginAvatarPath('/\\evil.example/x.png')).toBe(false);
+        expect(isSameOriginAvatarPath('/\\\\evil.example/x.png')).toBe(false);
     });
 
     it('rejects an absolute external URL', () => {
