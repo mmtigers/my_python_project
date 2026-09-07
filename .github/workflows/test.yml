@@ -16,7 +16,7 @@ concurrency:
 # write-all トークンが供給される余地があった。読み取り専用に固定する。
 permissions:
   contents: read
-  # カバレッジのラチェット比較(master の直近成功 run の成果物を gh run download で取得)に必要
+  # カバレッジのラチェット比較(master の直近成功 run の成果物を actions/download-artifact で取得)に必要
   actions: read
 
 defaults:
@@ -165,20 +165,33 @@ jobs:
             --cov-report=html \
             --cov-fail-under=70
 
-      - name: Download master coverage baseline
-        # カバレッジのラチェット比較元。master の直近成功 run の成果物 coverage-report
-        # (retention 14日)から coverage.xml を取り出す。無ければ比較はスキップされ、
-        # 固定閾値(--cov-fail-under)だけがゲートになる。
+      - name: Find latest successful master run (coverage baseline)
+        # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)の ID を REST API で
+        # 引く。無ければ空のまま次のステップがスキップされ、固定閾値(--cov-fail-under)だけが
+        # ゲートになる。
         if: github.event_name == 'pull_request'
+        id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test.yml --branch master \
-                     --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$run_id" ]; then echo "master に成功 run がありません。比較をスキップします。"; exit 0; fi
-          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n coverage-report -D coverage-baseline
-          ls -R coverage-baseline | head -20
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
+                     --jq '.workflow_runs[0].id // empty')"
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "baseline run: ${run_id:-(none)}"
+
+      - name: Download master coverage baseline
+        # 別 run の成果物取得は run-id + github-token を指定した actions/download-artifact で行う
+        # (gh run download は同じ条件で "no valid artifacts found" になることがあった)。
+        # 成果物の保持期限(14日)切れ等で取れなくても失敗にはしない(比較スキップ)。
+        if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: coverage-report
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: MY_HOME_SYSTEM/coverage-baseline
 
       - name: Coverage ratchet vs master (blocking, PR only)
         # 固定閾値は床として据え置き、master の実測から 0.5pt を超えて下がったら失敗させる
@@ -341,17 +354,28 @@ jobs:
         # 閾値はまだ設定せず、まず可視化のみ行う。
         run: npm run test:coverage
 
-      - name: Download master frontend coverage baseline
+      - name: Find latest successful master run (frontend coverage baseline)
         # バックエンドと同じラチェット比較。vitest の json-summary(coverage-summary.json)を使う。
         if: github.event_name == 'pull_request'
+        id: baseline_run
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow test.yml --branch master \
-                     --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
-          if [ -z "$run_id" ]; then echo "master に成功 run がありません。比較をスキップします。"; exit 0; fi
-          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n frontend-coverage-report -D coverage-baseline
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
+                     --jq '.workflow_runs[0].id // empty')"
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "baseline run: ${run_id:-(none)}"
+
+      - name: Download master frontend coverage baseline
+        if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: frontend-coverage-report
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: family-quest/coverage-baseline
 
       - name: Frontend coverage ratchet vs master (blocking, PR only)
         # Issue #495 で「まず可視化」とした frontend にも閾値の代わりにラチェットを適用する
