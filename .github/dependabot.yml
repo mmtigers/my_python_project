@@ -1,6 +1,8 @@
 # Issue #400: 依存更新の自動化。SHAピン留めしたGitHub Actionsは手動更新しないと
 # 陳腐化するため、Dependabot で週次のPRを自動起票する。pip/npm も同じ週次で
 # 起票し、更新の取りこぼしを防ぐ(PRのCIゲートは test.yml が担う)。
+# minor/patch のグループPRは dependabot-auto-merge.yml が CI 成功後に自動マージする
+# (メジャー更新は人が判断)。
 # 週次実行は月曜 09:00 JST に揃え、定期監査ワークフロー(spec-drift/pip-audit)と
 # 同じタイミングで棚卸しできるようにしている。
 version: 2

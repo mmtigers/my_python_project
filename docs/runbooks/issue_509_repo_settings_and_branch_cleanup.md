@@ -33,6 +33,24 @@ GitHub UI: `Settings` → `General` → `Pull Requests` → `Automatically delet
 これにより、今後PRがマージされるたびにheadブランチが自動削除され、
 今回のような滞留の再発を防ぐ。
 
+## 2.5. Allow auto-merge の有効化 (Dependabot 自動マージの前提)
+
+GitHub UI: `Settings` → `General` → `Pull Requests` → `Allow auto-merge` にチェック
+
+`.github/workflows/dependabot-auto-merge.yml` は、Dependabot の minor/patch 更新PRに対して
+GitHub の auto-merge を有効化するだけで、マージ自体は **1. の required status checks が全て
+成功した時点で GitHub 側が行う**。したがって本ワークフローが機能するには、1. の
+branch protection(required checks)と本設定の両方が必要である。
+
+- required checks が未設定だと、GitHub は PR を `CLEAN`/`UNSTABLE`(即マージ可能)と判定する。
+  この状態で auto-merge を有効化すると CI 未完了のままマージされうるため、ワークフローは
+  `mergeStateStatus` が `BLOCKED`(required checks 待ち)のときだけ有効化し、それ以外は
+  何もせず失敗する(Dependabot PR の当該ジョブが赤くなるのはこの設定漏れのサイン)。
+- `Allow auto-merge` が無効だと `gh pr merge --auto` が拒否され、同様にジョブが失敗する。
+- メジャー更新(`version-update:semver-major`)は対象外で、従来どおり人がマージする。
+- 本ワークフローは 1. の required checks に含めないこと(メジャー更新PRでは常に
+  スキップ相当の成功で終わるが、人間のPRでは `if` 条件でジョブ自体が走らない)。
+
 ## 3. 既存の滞留ブランチの棚卸し (F-2本体)
 
 ### 調査方法

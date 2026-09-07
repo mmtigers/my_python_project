@@ -70,6 +70,9 @@ sudo systemctl enable network_logger.service
 ```
 
 実機の設定を変更した場合は、このファイルにも反映してコミットすること。
+反映漏れは、毎時cronの `monitors/health_watch.py`(チェック7: 実機構成ドリフト検知)が
+本ディレクトリの `*.service` と `/etc/systemd/system/` 側の同名ファイルをコメント・空行を除いて比較し、
+差分・未導入があれば Discord の error チャンネルへ通知する(自動で書き戻しはしない)。
 
 ## (削除済み) pi-monitor.service
 

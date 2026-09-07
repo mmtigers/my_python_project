@@ -7,8 +7,9 @@
 # ★修正1: 親ディレクトリ(develop)も含めないと "No module named 'MY_HOME_SYSTEM'" エラーになる
 export PYTHONPATH="/home/masahiro/develop:/home/masahiro/develop/MY_HOME_SYSTEM"
 
-PROJECT_DIR="/home/masahiro/develop/MY_HOME_SYSTEM"
-QUEST_DIR="/home/masahiro/develop/family-quest"
+DEVELOP_ROOT="/home/masahiro/develop"
+PROJECT_DIR="$DEVELOP_ROOT/MY_HOME_SYSTEM"
+QUEST_DIR="$DEVELOP_ROOT/family-quest"
 cd "$PROJECT_DIR" || exit 1
 
 # Pythonパス
@@ -123,6 +124,27 @@ if [ -f requirements.txt ]; then
       echo "⚠️ pip install failed. Starting with existing .venv. See logs/pip_install.log" >&2
     fi
   fi
+fi
+
+# --- Phase 1.6: git フックの登録 (core.hooksPath) ---
+# family-quest の post-merge フック(git pull 後の deploy.sh --if-stale 自動実行)は
+# 以前 .git/hooks/post-merge にローカル設置されていて git 管理外だったため、
+# リポジトリを clone し直すたびに手で再設置が必要だった。リポジトリ管理の
+# deploy/git-hooks/ を core.hooksPath として登録し(冪等)、再設置作業をなくす。
+# 注意: core.hooksPath を設定すると .git/hooks/ 配下のフックは実行されなくなる
+# (追加のフックは deploy/git-hooks/ に置いてコミットすること)。
+echo "--- Register git hooks (core.hooksPath) ---"
+HOOKS_DIR="$DEVELOP_ROOT/deploy/git-hooks"
+if [ -d "$HOOKS_DIR" ] && git -C "$DEVELOP_ROOT" rev-parse --git-dir > /dev/null 2>&1; then
+  if [ "$(git -C "$DEVELOP_ROOT" config --get core.hooksPath)" != "$HOOKS_DIR" ]; then
+    if git -C "$DEVELOP_ROOT" config core.hooksPath "$HOOKS_DIR"; then
+      echo "✅ core.hooksPath = $HOOKS_DIR"
+    else
+      echo "⚠️ Failed to set core.hooksPath. post-merge hook may not run on git pull." >&2
+    fi
+  fi
+else
+  echo "⚠️ $HOOKS_DIR not found or $DEVELOP_ROOT is not a git repository. Skipping hook registration." >&2
 fi
 
 # --- Phase 2: family-quest フロントエンドの鮮度チェック ---

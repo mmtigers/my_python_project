@@ -6,7 +6,7 @@
 | 言語 | Bash (Shell Script) ※指定フォーマット外ですが実態に合わせて記載 |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `014457e` (+同一PR内のPhase 2追加変更) |
+| 解析基準コミット | `0e15b41` (+同一PR内のPhase 1.6追加変更) |
 
 ## 関連ドキュメント
 
@@ -17,7 +17,7 @@
 
 ## 2. ファイルの概要
 
-* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
+* システム全体において、`MY_HOME_SYSTEM`のクリーンアップ、初期設定、および関連するプロセス群の起動を統括するスクリプト。環境変数の設定、`CLEANUP_TARGETS`配列に列挙された既存プロセス群への段階的な終了処理（優しい停止→最大5秒待機→対象ごとの強制終了フォールバック）、NASのマウント確認（自動マウントのトリガーとExponential Backoffによるリトライ）、Python依存関係の鮮度チェック（`requirements.txt`のSHA256ハッシュ比較による冪等`pip install`、Issue #483）、gitフックの登録（リポジトリ管理の`deploy/git-hooks/`を`core.hooksPath`として冪等に設定）、family-questフロントエンドの鮮度チェック（`deploy.sh --if-stale`による冪等リビルド）、Webhookの修正スクリプト実行、そしてコアサーバーとダッシュボードのバックグラウンド起動を担っている。
 * 根拠: スクリプト全体 (行番号: 4〜151 / 抜粋: "MY_HOME_SYSTEM 起動スクリプト")
 
 ## 3. 外部依存関係
@@ -47,7 +47,7 @@
 
 ### [要素名1：環境セットアップ]
 
-* **役割**: `PYTHONPATH`とプロジェクトディレクトリの変数を設定し、対象ディレクトリへ移動する。その後、仮想環境のPython実行ファイルの有無を判定してパスを決定し、ログ用ディレクトリを作成する。
+* **役割**: `PYTHONPATH`とディレクトリ変数(`DEVELOP_ROOT`=リポジトリルート、それを基点にした`PROJECT_DIR`・`QUEST_DIR`)を設定し、対象ディレクトリへ移動する。その後、仮想環境のPython実行ファイルの有無を判定してパスを決定し、ログ用ディレクトリを作成する。
 * 根拠: 環境変数および初期処理 (行番号: 8〜22 / 抜粋: "export PYTHONPATH="..."")
 
 
@@ -59,7 +59,7 @@
 * 根拠: 戻り値返却なし (行番号: 8-22)
 
 
-* **副作用**: 環境変数`PYTHONPATH`, `PROJECT_DIR`, `QUEST_DIR`, `PYTHON_EXEC`の設定。カレントディレクトリの変更。`logs`ディレクトリの作成。
+* **副作用**: 環境変数`PYTHONPATH`, `DEVELOP_ROOT`, `PROJECT_DIR`, `QUEST_DIR`, `PYTHON_EXEC`の設定。カレントディレクトリの変更。`logs`ディレクトリの作成。
 * 根拠: コマンド群 (行番号: 8〜22 / 抜粋: "mkdir -p logs")
 
 
@@ -139,10 +139,33 @@
 
 
 
+### [要素名4.5：Phase 1.6: git フックの登録 (core.hooksPath)]
+
+* **役割**: リポジトリ管理のgitフックディレクトリ`$DEVELOP_ROOT/deploy/git-hooks`(post-mergeフック: `git pull`後に`family-quest/deploy.sh --if-stale`を自動実行)を、`git config core.hooksPath`でリポジトリに登録する。コメントに、以前は`.git/hooks/post-merge`へのローカル設置でgit管理外だったためclone後に手で再設置が必要だった経緯と、`core.hooksPath`を設定すると`.git/hooks/`配下のフックは実行されなくなる注意が明記されている。
+* 根拠: Phase 1.6ブロック (行番号: 129〜148 / 抜粋: "# --- Phase 1.6: git フックの登録 (core.hooksPath) ---")
+
+
+* **引数/リクエスト**: なし
+* 根拠: 引数受け取り処理なし (行番号: 129-148)
+
+
+* **戻り値/レスポンス**: なし
+* 根拠: 戻り値返却なし (行番号: 129-148)
+
+
+* **副作用**: ディレクトリが存在し`$DEVELOP_ROOT`がgitリポジトリである場合に限り、現在の`core.hooksPath`が`$HOOKS_DIR`と異なるときだけ`git -C "$DEVELOP_ROOT" config core.hooksPath "$HOOKS_DIR"`を実行する(冪等。既に登録済みなら何もしない)。標準出力へのログ表示。
+* 根拠: 判定と設定処理 (行番号: 137〜141 / 抜粋: 'git -C "$DEVELOP_ROOT" config core.hooksPath "$HOOKS_DIR"')
+
+
+* **エラーハンドリング**: ディレクトリ不在・gitリポジトリでない・`git config`失敗のいずれも警告を標準エラー出力へ表示するのみでスクリプトは続行する(フック登録の失敗でサーバー起動を止めない)。
+* 根拠: else分岐 (行番号: 142〜148 / 抜粋: "Skipping hook registration.")
+
+
+
 ### [要素名5：Phase 2: family-quest フロントエンド鮮度チェック]
 
 * **役割**: サーバー起動前に`family-quest/deploy.sh --if-stale`を実行し、配信用ビルド成果物`dist/`が現在のチェックアウト(HEAD)の`family-quest`ツリーからビルドされたものかを冪等チェックさせ、古ければ再ビルドさせる。コメントに、`git pull`以外の経路(`git reset --hard`等)での更新では`post-merge`フックが発火せず、`dist/`が旧世代のままサーバーだけ新コードで起動してAPIスキーマ不整合を起こした障害(2026-09-01)の再発防止である旨が明記されている。
-* 根拠: Phase 2ブロック (行番号: 122〜131 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
+* 根拠: Phase 2ブロック (行番号: 150〜159 / 抜粋: "# --- Phase 2: family-quest フロントエンドの鮮度チェック ---")
 
 
 * **引数/リクエスト**: なし
@@ -204,9 +227,12 @@ flowchart TD
     PkillHard --> CheckNAS[NASマウントポイント確認]
     CheckNAS --> MountLoop{最大5回・自動マウントトリガー+Exponential Backoffでリトライ}
     MountLoop --> ReqHashCheck{requirements.txtのSHA256が.venv/.requirements-sha256と一致するか?}
-    ReqHashCheck -- 一致 --> QuestDeploy
+    ReqHashCheck -- 一致 --> HooksCheck
     ReqHashCheck -- 不一致 --> PipInstall["pip install -r requirements.txt (成功時のみハッシュ更新)"]
-    PipInstall -- "成功/失敗いずれでも続行" --> QuestDeploy["外部：family-quest/deploy.sh --if-stale (dist鮮度チェック・必要ならリビルド)"]
+    PipInstall -- "成功/失敗いずれでも続行" --> HooksCheck{core.hooksPath が deploy/git-hooks を指しているか?}
+    HooksCheck -- 一致 --> QuestDeploy
+    HooksCheck -- "不一致/未設定" --> SetHooks["git config core.hooksPath deploy/git-hooks (失敗しても警告のみ)"]
+    SetHooks --> QuestDeploy["外部：family-quest/deploy.sh --if-stale (dist鮮度チェック・必要ならリビルド)"]
     QuestDeploy -- "成功/失敗いずれでも続行" --> WebhookFix["外部：switchbot_webhook_fix.py()"]
     WebhookFix --> ServerBoot["外部：unified_server.py() バックグラウンド起動"]
     ServerBoot --> DashboardBoot["外部：dashboard.py() バックグラウンド起動"]
@@ -221,6 +247,7 @@ graph TD
     start_all["start_all.sh"]
     PYTHONPATH["環境変数: PYTHONPATH"]
     QuestDeploy["family-quest/deploy.sh"]
+    GitHooks["deploy/git-hooks/ (core.hooksPath)"]
     WebhookFix["switchbot_webhook_fix.py"]
     Server["unified_server.py"]
     Dashboard["dashboard.py"]
@@ -232,6 +259,8 @@ graph TD
     Proc4["streamlit run"]
 
     start_all -->|設定| PYTHONPATH
+    start_all -->|"git config core.hooksPath (冪等)"| GitHooks
+    GitHooks -->|"post-merge フックから実行 (--if-stale)"| QuestDeploy
     start_all -->|"フォアグラウンド実行 (--if-stale)"| QuestDeploy
     start_all -->|フォアグラウンド実行| WebhookFix
     start_all -->|バックグラウンド実行| Server
@@ -257,7 +286,7 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* **ハードコードされた絶対パス**: 環境変数 `PYTHONPATH`, `PROJECT_DIR`, `QUEST_DIR` が `/home/masahiro/develop/...` としてハードコードされているため、実行環境（ユーザー名やディレクトリ構成）が変わると動作しない。
+* **ハードコードされた絶対パス**: 環境変数 `PYTHONPATH`, `DEVELOP_ROOT`(およびそれを基点にした `PROJECT_DIR`, `QUEST_DIR`, `HOOKS_DIR`) が `/home/masahiro/develop/...` としてハードコードされているため、実行環境（ユーザー名やディレクトリ構成）が変わると動作しない。
 * **[修正済み] 未使用変数だった`QUEST_DIR`**: 以前は`QUEST_DIR`変数が定義のみで一度も参照されていなかったが、Phase 2(family-quest鮮度チェック)の追加により`bash "$QUEST_DIR/deploy.sh" --if-stale`(103行目)で使用されるようになった。
 * **Phase 2はビルド失敗を握りつぶす設計**: `deploy.sh --if-stale`が失敗しても警告表示のみで後続フェーズへ進むため、フロントのビルドが壊れている場合は旧`dist/`が配信され続ける。ビルド失敗の検知は`logs/quest_deploy.log`の確認に依存する。また、鮮度判定は`dist/.built-tree`に記録されたgitツリーハッシュとHEADの比較であり、未コミットのローカル変更は検知対象外(詳細は`family-quest/deploy.sh`のコメントを参照)。
 * **影響範囲の広いプロセス停止 (`pkill -f`)**: `pkill -f "streamlit run"` などは部分一致でプロセスを終了させるため、このシステムとは無関係の別プロジェクトのStreamlitプロセスが実行中の場合、巻き込んで終了させてしまう危険性がある。

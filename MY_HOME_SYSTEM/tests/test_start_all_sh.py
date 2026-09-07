@@ -154,3 +154,40 @@ class TestStartAllShPythonDependencyFreshnessCheck:
         section = script[section_start:section_end]
         assert "pip install failed" in section
         assert "exit" not in section
+
+
+class TestStartAllShGitHooksRegistration:
+    """Phase 1.6: post-merge フック(deploy/git-hooks/)の core.hooksPath 登録。
+
+    以前は .git/hooks/post-merge にローカル設置していて git 管理外だったため、
+    clone し直すたびに手で再設置が必要だった。リポジトリ管理のフックディレクトリを
+    start_all.sh が冪等に登録すること、およびフック本体が実行可能な状態で
+    コミットされていることを検証する。
+    """
+
+    REPO_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
+
+    def test_registers_repo_managed_hooks_dir_as_core_hookspath(self):
+        script = _read_script()
+        assert 'HOOKS_DIR="$DEVELOP_ROOT/deploy/git-hooks"' in script
+        assert 'git -C "$DEVELOP_ROOT" config core.hooksPath "$HOOKS_DIR"' in script
+
+    def test_registration_is_idempotent_and_never_aborts_startup(self):
+        """既に登録済みなら再設定せず、失敗しても警告のみでサーバー起動へ進むこと。"""
+        script = _read_script()
+        assert 'config --get core.hooksPath)" != "$HOOKS_DIR"' in script
+        phase = script[script.index("Register git hooks"): script.index("Ensure family-quest dist is fresh")]
+        assert "exit" not in phase, "フック登録の失敗でサーバー起動を止めてはいけない"
+
+    def test_registration_runs_before_frontend_freshness_check(self):
+        script = _read_script()
+        assert script.index("Register git hooks") < script.index("Ensure family-quest dist is fresh")
+
+    def test_post_merge_hook_exists_and_is_executable(self):
+        hook = os.path.join(self.REPO_ROOT, "deploy", "git-hooks", "post-merge")
+        assert os.path.isfile(hook), "deploy/git-hooks/post-merge がリポジトリに無い"
+        assert os.access(hook, os.X_OK), "post-merge に実行権限が無い(chmod +x してコミットすること)"
+        with open(hook, "r", encoding="utf-8") as f:
+            content = f.read()
+        assert content.startswith("#!"), "shebang が無い"
+        assert "deploy.sh" in content and "--if-stale" in content

@@ -16,6 +16,7 @@
   monitors/health_watch.py （run_task.sh経由、home_system.serviceから独立）
     - service active / journalctl err..emerg / logs/*.log のERROR
     - ディスク・メモリ閾値 / NASマウント
+    - 実機構成(crontab / systemd / logrotate)とリポジトリ deploy/ の乖離
     - 異常あり → Discord errorチャンネルへ要約通知（同一異常の再通知は6時間抑制）
     - 異常なし → 通知せず終了
 
@@ -86,6 +87,7 @@
 - `logs/*.log` に前回マーカー以降で `ERROR`/`CRITICAL` 等を含む行がある（キーワード・除外は `log_analyzer.py` と共通。WARNINGは週次レポートに任せる）
 - ルートディスク使用率 ≥ 90% / メモリ使用率 ≥ 90%（`services/analysis_service.py` と同じ取得方法）
 - `NAS_MOUNT_POINT` がマウントされていない
+- 実機構成がリポジトリと乖離している(チェック7・構成ドリフト検知): `crontab -l` と `deploy/cron/crontab`、`/etc/systemd/system/*.service` と `MY_HOME_SYSTEM/deploy/systemd/*.service`、`/etc/logrotate.d/home_system` と `MY_HOME_SYSTEM/deploy/logrotate/home_system` を、コメント・空行を除いた内容で比較し、差分・未導入・crontab未登録を報告する。各READMEの「実機を変更したらこのファイルにも反映してコミット」の反映漏れを機械的に拾う位置づけで、自動で書き戻しはしない(実機側が正なら `crontab -l > deploy/cron/crontab` 等でリポジトリへ反映、リポジトリ側が正なら各READMEの導入手順で再導入)
 
 誤検知（flakyな一時的エラー等）が続く場合は、`LogAnalyzer.IGNORE_PATTERNS` や閾値側を見直す。
 
