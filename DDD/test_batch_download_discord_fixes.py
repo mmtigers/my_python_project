@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pytest
+from unittest.mock import MagicMock
 
 DDD_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(DDD_DIR))
@@ -1154,3 +1155,56 @@ class TestDiscordWebhookUrlIsNotLogged:
             module.logger.propagate = False
         assert "Discord Webhook送信に失敗しました" in caplog.text
         assert "AbCdEfGhIjKlMnOpQrStUvWxYz" not in caplog.text
+
+
+class TestTopLevelListSentinelDoesNotCollideWithListDirFile:
+    """Issue #535: list/list.txt(stem="list")がトップレベル list.txt のセンチネルと衝突し、
+    保存先がカテゴリルートになる・パージ先が誤るバグの回帰テスト。"""
+
+    def test_determine_save_dir_distinguishes_sentinel_from_list_stem(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(module.FileSystemManager, "ensure_dir", staticmethod(lambda p: True))
+        monkeypatch.setattr(module.FileSystemManager, "check_disk_space", staticmethod(lambda p: True))
+        strategy = module.UniversalYtDlpStrategy(save_base_dir=tmp_path, session=MagicMock())
+        assert strategy._determine_save_dir(module.TOP_LEVEL_LIST_SOURCE, "cat") == tmp_path / "cat"
+        assert strategy._determine_save_dir("list", "cat") == tmp_path / "cat" / "list"
+
+    def test_collect_tasks_tags_top_level_and_list_dir_file_differently(self, tmp_path, monkeypatch):
+        import dataclasses
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("https://example.test/top\n", encoding="utf-8")
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        (list_dir / "list.txt").write_text("https://example.test/inner\n", encoding="utf-8")
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(
+            module.CONFIG, LIST_FILE_PATH=list_file, LIST_DIR_PATH=list_dir,
+            HISTORY_FILE_PATH=tmp_path / "history.txt", BASE_SAVE_DIR=tmp_path / "save",
+        ))
+        monkeypatch.setattr(module.HistoryManager, "load_history", staticmethod(lambda: set()))
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader.history = set()
+        tasks = downloader._collect_tasks()
+        by_url = {t.url: t.source_name for t in tasks}
+        assert by_url["https://example.test/top"] == module.TOP_LEVEL_LIST_SOURCE
+        assert by_url["https://example.test/inner"] == "list"
+
+    def test_purge_writes_back_to_the_right_file(self, tmp_path, monkeypatch):
+        import dataclasses
+        list_file = tmp_path / "list.txt"
+        list_file.write_text("https://example.test/top\nhttps://example.test/keep\n", encoding="utf-8")
+        list_dir = tmp_path / "list"
+        list_dir.mkdir()
+        inner = list_dir / "list.txt"
+        inner.write_text("https://example.test/inner\nhttps://example.test/keep2\n", encoding="utf-8")
+        save_dir = tmp_path / "save"
+        save_dir.mkdir()
+        monkeypatch.setattr(module, "CONFIG", dataclasses.replace(
+            module.CONFIG, LIST_FILE_PATH=list_file, LIST_DIR_PATH=list_dir,
+            HISTORY_FILE_PATH=tmp_path / "history.txt", BASE_SAVE_DIR=save_dir,
+        ))
+        downloader = module.BatchDownloader.__new__(module.BatchDownloader)
+        downloader._purge_skipped_tasks([
+            module.DownloadTask("https://example.test/top", module.TOP_LEVEL_LIST_SOURCE),
+            module.DownloadTask("https://example.test/inner", "list"),
+        ])
+        assert list_file.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep"]
+        assert inner.read_text(encoding="utf-8").strip().splitlines() == ["https://example.test/keep2"]

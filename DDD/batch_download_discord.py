@@ -372,6 +372,14 @@ def _looks_like_block_page(html: str) -> bool:
     return any(marker in lowered for marker in CONFIG.SCRAPING_BLOCK_PAGE_MARKERS)
 
 
+# Issue #535: トップレベル list.txt 由来タスクの source_name に使うセンチネル。以前は "list"
+# という文字列を使っていたため、list/list.txt(stem = "list")のタスクと区別できず、保存先が
+# カテゴリルートになる・_purge_skipped_tasks が list/list.txt ではなく CURRENT_DIR/list.txt
+# を書き換える(スキップ済み URL が毎回再アーカイブされる)問題があった。
+# 通常のファイル stem として現れない名前にする。
+TOP_LEVEL_LIST_SOURCE: str = "__list_txt__"
+
+
 class DownloadTask(NamedTuple):
     url: str
     source_name: str
@@ -626,7 +634,7 @@ class DownloadStrategy(ABC):
         pass
 
     def _determine_save_dir(self, source_name: str, category: str = "others") -> Optional[Path]:
-        if source_name == "list":
+        if source_name == TOP_LEVEL_LIST_SOURCE:
             target_dir = self.save_base_dir / category
         else:
             target_dir = self.save_base_dir / category / source_name
@@ -1229,14 +1237,10 @@ class BatchDownloader:
         logger.critical("🛑🛑 2回目の停止シグナルを検知したため、実行中の処理を強制中断します")
         raise KeyboardInterrupt("second interrupt signal received; forcing immediate shutdown")
 
-    def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:
-        # 【修正】ハードコードではなく、設定フラグで制御するように変更
-        if "youtube.com" in url or "youtu.be" in url:
-            if not CONFIG.ENABLE_YOUTUBE_DL:
-                logger.info(f"🚫 YouTube機能は設定により無効化されています: {url}")
-                return None
-            # 有効な場合は通常のフローへ進む
-
+    def _get_strategy(self, url: str) -> DownloadStrategy:
+        # Issue #535: 以前ここにあった「YouTube 無効時は None を返す」分岐は、_prepare_tasks が
+        # ENABLE_YOUTUBE_DL=False のとき YouTube タスクを先に除外(パージ)するため到達不能な
+        # デッドコードだった。戻り値を非 Optional にし、呼び出し側の None チェックも削除した。
         # missavなら専用ストラテジー、それ以外はUniversal
         if "missav" in url:
             return ScrapingStrategy(CONFIG.BASE_SAVE_DIR, self.session)
@@ -1271,7 +1275,7 @@ class BatchDownloader:
                         if url and not url.startswith("#"):
                             url = _normalize_url(url)
                             if url not in self.history:
-                                _add(url, "list")
+                                _add(url, TOP_LEVEL_LIST_SOURCE)
             except Exception as e:
                 logger.error(f"リスト読み込みエラー ({CONFIG.LIST_FILE_PATH.name}): {e}", exc_info=True)
 
@@ -1324,7 +1328,7 @@ class BatchDownloader:
 
         # 3. 元ファイルからの物理削除（インメモリでフィルタリングして上書き）
         for source_name, urls_to_remove in tasks_by_source.items():
-            if source_name == "list":
+            if source_name == TOP_LEVEL_LIST_SOURCE:
                 file_path = CONFIG.LIST_FILE_PATH
             else:
                 file_path = CONFIG.LIST_DIR_PATH / f"{source_name}.txt"
@@ -1495,10 +1499,6 @@ class BatchDownloader:
 
             try:
                 strategy = self._get_strategy(task.url)
-
-                # 【追加】YouTube等のスキップ対象（None）だった場合は次へ
-                if strategy is None:
-                    continue
 
                 if strategy.download(task):
                     HistoryManager.add_history(task.url)

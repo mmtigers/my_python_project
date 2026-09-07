@@ -147,7 +147,7 @@ class TestHandleSiteNetworkFailure:
         既定では失敗サイトが 1/79 (自局側障害とはみなされない)として送信する。
         """
         pending = module._handle_site_network_failure(
-            notifier, site, requests.RequestException("connection refused"), dm
+            site, requests.RequestException("connection refused"), dm
         )
         if pending is not None:
             module._send_pending_site_failure_alerts(

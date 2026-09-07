@@ -1203,6 +1203,9 @@ flowchart TD
 * **多重起動防止パターンの他ファイルへの伝播**: 本ファイルの`fcntl.flock`によるロックパターンは、同じDDDサブシステム内の`newface_monitor.py`にも同様の目的（cronの多重実行によるデータ競合防止）で移植されている。
 * **ディレクトリ作成失敗時のOSError全般の捕捉（Issue #236で修正）**: `FileSystemManager.ensure_dir`は以前`except PermissionError:`のみを定義しており、読み取り専用マウント（`Errno 30`）・NAS切断中のI/Oエラー（`Errno 5`）・ディスクフル（`Errno 28`）等の他の`OSError`サブクラスは専用のDiscord通知を経由せず呼び出し元（最終的には`run_locked`の`except Exception`）へ伝播していた。同種のmkdir呼び出しを持つ`extract_youtube_urls.py`の`process_subscriptions`（#185）が先に`except (sqlite3.Error, OSError)`でOSError全般を捕捉するよう修正済みだったのに対し、本ファイルはその横展開から取り残されていた。`except OSError as e:`節を追加し、原因（`Errno`）を含めた専用通知を送信するよう修正した。
 
+* **（Issue #535 で修正）** トップレベル `list.txt` 由来タスクの `source_name` に文字列 `"list"` ではなくモジュール定数 `TOP_LEVEL_LIST_SOURCE = "__list_txt__"` を使う(`_collect_tasks` の `_add(url, TOP_LEVEL_LIST_SOURCE)`、`_determine_save_dir` と `_purge_skipped_tasks` の判定)。以前は `list/list.txt`(stem = `"list"`)のタスクと区別できず、保存先がカテゴリルートになり、パージが `CURRENT_DIR/list.txt` を書き換えてスキップ済み URL が毎回再アーカイブされていた。あわせて `_get_strategy` の「YouTube 無効時は `None` を返す」分岐(`_prepare_tasks` が先に除外するため到達不能)と呼び出し側の `None` チェックを削除し、戻り値を `DownloadStrategy`(非 Optional)にした。
+* 根拠: (行番号: 380, 637, 1278, 1331, 1240 / 抜粋: "TOP_LEVEL_LIST_SOURCE: str = \"__list_txt__\"", "def _get_strategy(self, url: str) -> DownloadStrategy:")
+
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |

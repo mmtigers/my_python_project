@@ -1551,7 +1551,6 @@ class SiteCheckResult:
 
 
 def _handle_site_network_failure(
-    notifier: DiscordNotifier,
     site: SiteConfig,
     exc: Exception,
     data_manager: DataManager,
@@ -1681,7 +1680,7 @@ def _check_site(
     try:
         current_casts = monitor.fetch_current_casts(site)
     except (requests.RequestException, SiteUnavailableError) as e:
-        pending = _handle_site_network_failure(notifier, site, e, data_manager)
+        pending = _handle_site_network_failure(site, e, data_manager)
         return SiteCheckResult(failed=True, pending_alert_count=pending)
 
     if not current_casts:
@@ -1690,7 +1689,7 @@ def _check_site(
         # セレクタ不一致等のレイアウト変更の可能性もあるため単発ではERRORにせず、
         # 連続失敗として計上し閾値到達で閉鎖疑いアラートの対象にする。
         pending = _handle_site_network_failure(
-            notifier, site, SiteUnavailableError("no casts parsed"), data_manager,
+            site, SiteUnavailableError("no casts parsed"), data_manager,
             log_level=logging.WARNING,
         )
         return SiteCheckResult(failed=True, pending_alert_count=pending)
