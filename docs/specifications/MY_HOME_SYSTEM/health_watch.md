@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `0e15b41` (+同一PR内のチェック7追加変更) |
 
 ## 関連ドキュメント
 
@@ -18,8 +19,8 @@
 
 ## 2. ファイルの概要
 
-ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウントの6項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。
-* 根拠: モジュールdocstring (行番号: 17-25 / 抜粋: "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
+ラズパイの一次ヘルスチェックを行うcron想定のスクリプト。`home_system.service`の稼働状態、journalctlのエラーログ、アプリログのERROR行、ディスク/メモリ使用率、NASマウント、実機構成(crontab/systemd/logrotate)とリポジトリ`deploy/`配下の一致(チェック7・構成ドリフト検知)の7項目を決定論的にチェックし、異常があればDiscordのerrorチャンネルへ要約を通知する。前回チェック時刻をマーカーファイルで管理してログ走査の重複を防ぎ、同一の異常セットが継続する間は再通知を6時間抑制する。自動復旧(systemctl restart等)は行わない。**Issue #339(層2)**: `config.HEALTH_WATCH_INVESTIGATE_HOOK`にスクリプトパスが設定されている場合のみ、通知と同じ抑制の内側で自動調査フック(`scripts/claude_investigate.sh`)を`_fire_investigate_hook()`によりfire-and-forget起動する。未設定(既定)なら従来どおり検知・通知のみ。
+* 根拠: モジュールdocstring (行番号: 9-18, 23-26 / 抜粋: "7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と\n     一致しているか(構成ドリフト検知。", "層2(Issue #339): config.HEALTH_WATCH_INVESTIGATE_HOOK にスクリプトパスが\n設定されている場合のみ、通知と同じ抑制の内側で自動調査フック")
 
 ## 3. 外部依存関係
 
@@ -27,15 +28,16 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `datetime` | 標準 | マーカー時刻の読み書き・経過時間計算 | 根拠: [インポート宣言] (行番号: 21 / 抜粋: "import datetime") |
-| `glob` | 標準 | `logs/*.log`のパターンマッチング | 根拠: [インポート宣言] (行番号: 22 / 抜粋: "import glob") |
+| `datetime` | 標準 | マーカー時刻の読み書き・経過時間計算 | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "import datetime") |
+| `difflib` | 標準 | 構成ファイル差分の要約(`unified_diff`) | 根拠: [インポート宣言] (行番号: 30 / 抜粋: "import difflib") |
+| `glob` | 標準 | `logs/*.log`・`deploy/systemd/*.service`等のパターンマッチング | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "import glob") |
 | `hashlib` | 標準 | 異常セットのフィンガープリント生成 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import hashlib") |
 | `json` | 標準 | 再通知抑制状態ファイルの読み書き | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "import json") |
 | `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import os") |
 | `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import shutil") |
 | `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import subprocess") |
 | `sys` | 標準 | パス追加・終了コード返却 | 根拠: [インポート宣言] (行番号: 28 / 抜粋: "import sys") |
-| `typing` | 標準 | 型ヒント(`List`, `Optional`) | 根拠: [インポート宣言] (行番号: 29 / 抜粋: "from typing import List, Optional") |
+| `typing` | 標準 | 型ヒント(`List`, `Optional`, `Tuple`) | 根拠: [インポート宣言] (行番号: 38 / 抜粋: "from typing import List, Optional, Tuple") |
 | `config` | 自作 | `LOG_DIR`, `NAS_MOUNT_POINT`の取得 | 根拠: [インポート宣言] (行番号: 33 / 抜粋: "import config") |
 | `core.logger` | 自作 | ロガーのセットアップ | 根拠: [インポート宣言] (行番号: 34 / 抜粋: "from core.logger import setup_logging") |
 | `services.notification_service` | 自作 | 異常通知の送信 | 根拠: [インポート宣言] (行番号: 35 / 抜粋: "from services.notification_service import send_push") |
@@ -51,14 +53,15 @@
 | `setup_logging` | ロガーの具体的な設定が不明。 | 根拠: [関数呼び出し] (行番号: 38 / 抜粋: 'logger = setup_logging("health_watch")') |
 | `send_push` | 送信処理の内部実装・エラー挙動が不明。 | 根拠: [関数呼び出し] (行番号: 225 / 抜粋: 'send_push([{"type": "text", "text": msg}], target="discord", channel="error")') |
 | `LogAnalyzer` | 走査キーワード・タイムスタンプ解析の実装詳細は別ファイル。 | 根拠: [クラス利用] (行番号: 109〜118 / 抜粋: "analyzer = LogAnalyzer(days_back=0)") |
-| 外部コマンド `systemctl`/`journalctl`/`free` | OS側コマンドの出力仕様に依存。 | 根拠: [外部コマンド実行] (行番号: 72〜75, 84〜91, 143 / 抜粋: 'subprocess.run(["systemctl", "is-active", ...])') |
+| 外部コマンド `systemctl`/`journalctl`/`free`/`crontab` | OS側コマンドの出力仕様に依存。 | 根拠: [外部コマンド実行] (行番号: 100〜103, 112〜119, 184, 243 / 抜粋: 'subprocess.run(["systemctl", "is-active", ...])', 'subprocess.run(["crontab", "-l"], ...)') |
+| 実機側ファイル `/etc/systemd/system/*.service`・`/etc/logrotate.d/*` | 実機に導入済みの構成ファイル。存在・内容は実行環境に依存。 | 根拠: [定数定義] (行番号: 74〜77 / 抜粋: '(os.path.join(HOME_SYSTEM_DIR, "deploy", "systemd"), "*.service", "/etc/systemd/system")') |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### モジュール定数群
 
-* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。
-* 根拠: [変数宣言] (行番号: 41〜53 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"' ほか)
+* **役割**: 監視対象サービス名(`WATCH_SERVICE_NAME`)、ディスク/メモリ閾値(90.0%)、マーカーファイルパス(`LOG_DIR/.claude_watch_marker`)、再通知抑制状態ファイルパス(`LOG_DIR/.claude_watch_notify_state`)、再通知間隔(6時間)、初回実行時の遡り時間(1時間)、通知抜粋の最大文字数(400)を定義する。加えてチェック7(構成ドリフト検知)用に、リポジトリルート(`REPO_ROOT`、本ファイルの2階層上)、リポジトリ管理のcrontab(`TRACKED_CRONTAB` = `deploy/cron/crontab`)、(リポジトリ側ディレクトリ, globパターン, 実機側導入先)の組(`TRACKED_CONFIG_DIRS`: `MY_HOME_SYSTEM/deploy/systemd/*.service`→`/etc/systemd/system`、`MY_HOME_SYSTEM/deploy/logrotate/*`→`/etc/logrotate.d`)、比較除外ファイル名(`CONFIG_IGNORE_BASENAMES` = `README.md`)、通知に載せる差分行の上限(`DIFF_LINES_LIMIT` = 3)を定義する。
+* 根拠: [変数宣言] (行番号: 49〜62, 64〜81 / 抜粋: 'WATCH_SERVICE_NAME: str = "home_system.service"', 'TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")' ほか)
 
 
 * **引数/リクエスト**: 該当なし
@@ -265,6 +268,121 @@
 
 
 
+### `_normalize_config_lines`
+
+* **役割**: 構成ファイルの比較用正規化。各行の行末空白を落とし、空行と`#`始まりのコメント行を除いた行リストを返す(`crontab -e`で付くヘッダや環境依存のコメント差を差分とみなさないため)。
+* 根拠: [関数定義] (行番号: 204〜218 / 抜粋: 'if not line or line.lstrip().startswith("#"):')
+
+
+* **引数/リクエスト**: `text: str`
+* 根拠: [関数定義] (行番号: 204)
+
+
+* **戻り値/レスポンス**: `List[str]`
+* 根拠: [戻り値] (行番号: 218)
+
+
+* **副作用**: なし
+* 根拠: [関数定義] (行番号: 204〜218)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数定義] (行番号: 204〜218)
+
+
+
+### `_config_diff_summary`
+
+* **役割**: リポジトリ側(`expected`)と実機側(`actual`)を`_normalize_config_lines`で正規化して比較し、一致すれば`None`、差分があれば`difflib.unified_diff`(`n=0`)の`+`/`-`行(ヘッダ行`+++`/`---`は除外)を先頭`DIFF_LINES_LIMIT`本まで各80文字で連結した1行要約(`"<label>: 差分 N行 (...; ... ほかM行)"`)を返す。
+* 根拠: [関数定義] (行番号: 221〜234 / 抜粋: 'return f"{label}: 差分 {len(changes)}行 ({shown}{more})"')
+
+
+* **引数/リクエスト**: `label: str`, `expected: str`, `actual: str`
+* 根拠: [関数定義] (行番号: 221)
+
+
+* **戻り値/レスポンス**: `Optional[str]`
+* 根拠: [戻り値] (行番号: 226, 234)
+
+
+* **副作用**: なし
+* 根拠: [関数定義] (行番号: 221〜234)
+
+
+* **エラーハンドリング**: なし
+* 根拠: [関数定義] (行番号: 221〜234)
+
+
+
+### `_check_crontab_drift`
+
+* **役割**: `TRACKED_CRONTAB`が存在しなければ比較対象外として`None`を返す。存在すれば`crontab -l`を実行し、終了コード非0なら未登録として`"crontab: 実機に未登録です (<stderr/stdoutの先頭行>)"`を、成功時は`_config_diff_summary("crontab", ...)`の結果を返す。
+* 根拠: [関数定義] (行番号: 237〜249 / 抜粋: 'res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 237)
+
+
+* **戻り値/レスポンス**: `Optional[str]`
+* 根拠: [戻り値] (行番号: 240, 248, 249)
+
+
+* **副作用**: `crontab -l`の実行(読み取りのみ)
+* 根拠: [外部コマンド実行] (行番号: 243)
+
+
+* **エラーハンドリング**: `crontab`コマンドの非0終了は「未登録」として異常文字列で報告する。コマンド自体が存在しない場合(`FileNotFoundError`)等の例外は関数内で捕捉せず、`run_checks`側の内部エラー扱いになる。
+* 根拠: [分岐] (行番号: 244〜248)
+
+
+
+### `_check_host_files_drift`
+
+* **役割**: `TRACKED_CONFIG_DIRS`の各組について、リポジトリ側ディレクトリでglobに一致するファイル(`CONFIG_IGNORE_BASENAMES`を除く)ごとに、実機側ディレクトリの同名ファイルと`_config_diff_summary`で比較する。実機側が無ければ`"<path>: 実機に未導入です"`、読み取れなければ`"<path>: 読み取れません (<例外クラス名>)"`、差分があればその要約を、所見リストとして返す。
+* 根拠: [関数定義] (行番号: 252〜275 / 抜粋: 'findings.append(f"{host_path}: 実機に未導入です")')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 252)
+
+
+* **戻り値/レスポンス**: `List[str]`(異常が無ければ空リスト)
+* 根拠: [戻り値] (行番号: 275)
+
+
+* **副作用**: なし(ファイル読み取りのみ)
+* 根拠: [関数定義] (行番号: 252〜275)
+
+
+* **エラーハンドリング**: 実機側ファイルの`FileNotFoundError`は「未導入」、その他の`OSError`は「読み取れません」として所見に変換し、残りのファイルの比較を続行する。リポジトリ側ファイルの読み取り失敗は捕捉しない。
+* 根拠: [例外処理] (行番号: 264〜270)
+
+
+
+### `check_deploy_config_drift` (**チェック7: 構成ドリフト検知**)
+
+* **役割**: `_check_crontab_drift`と`_check_host_files_drift`の所見をまとめ、1件でもあれば`"実機構成がリポジトリ(deploy/)と一致しません:"`に続けて各所見を箇条書きし、末尾に対処の指針(実機側が正なら`deploy/`へ反映してコミット、リポジトリ側が正なら各READMEの導入手順で再導入)を付けた異常メッセージを返す。無ければ`None`。docstringに、各READMEの「実機を変更したらこのファイルにも反映してコミット」という人手の同期の反映漏れを機械的に検知する目的と、自動での書き戻しは行わない旨が明記されている。
+* 根拠: [関数定義] (行番号: 278〜297 / 抜粋: '"実機構成がリポジトリ(deploy/)と一致しません:\\n"')
+
+
+* **引数/リクエスト**: なし
+* 根拠: [関数定義] (行番号: 278)
+
+
+* **戻り値/レスポンス**: `Optional[str]`
+* 根拠: [戻り値] (行番号: 291〜297)
+
+
+* **副作用**: なし(`crontab -l`の実行とファイル読み取りのみ)
+* 根拠: [関数定義] (行番号: 278〜297)
+
+
+* **エラーハンドリング**: 関数内には無し(下位関数で捕捉されない例外は`run_checks`側で内部エラーとして捕捉される)。
+* 根拠: [関数定義] (行番号: 278〜297)
+
+
+
 ### `_should_notify`
 
 * **役割**: 異常セット(チェック名の組)のSHA-256フィンガープリントを前回通知時と比較し、同一セットが`RENOTIFY_INTERVAL_SEC`(6時間)内に再検知された場合は通知を抑制する。通知する場合は状態ファイルを更新する。
@@ -313,8 +431,8 @@
 
 ### `run_checks`
 
-* **役割**: 6つのチェック関数を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 232〜285 / 抜粋: "def run_checks() -> int:")、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* **役割**: 7つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
+* 根拠: [関数定義] (行番号: 364〜420 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
@@ -362,7 +480,7 @@
 ```mermaid
 flowchart TD
     Start([Start: run_checks]) --> ReadMarker["_read_marker で前回時刻を取得<br/>(無ければ1時間前)"]
-    ReadMarker --> Loop["6チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas"]
+    ReadMarker --> Loop["7チェックを順に実行<br/>service / journal / app_logs / disk / memory / nas / deploy_config"]
     Loop --> CheckErr{"チェックが例外?"}
     CheckErr -- Yes --> LogInternal["logger.error + internal_errorsに追加<br/>残りのチェックは続行"]
     CheckErr -- No --> HasResult{"異常メッセージあり?"}
@@ -401,6 +519,11 @@ graph TD
         check_disk_usage
         check_memory_usage
         check_nas_mount
+        check_deploy_config_drift
+        _check_crontab_drift
+        _check_host_files_drift
+        _config_diff_summary
+        _normalize_config_lines
         _read_marker
         _write_marker
         _should_notify
@@ -414,6 +537,9 @@ graph TD
         systemctl["systemctl (外部コマンド)"]
         journalctl["journalctl (外部コマンド)"]
         free["free (外部コマンド)"]
+        crontab["crontab -l (外部コマンド)"]
+        deploy_repo["deploy/cron/crontab<br/>MY_HOME_SYSTEM/deploy/systemd/*.service<br/>MY_HOME_SYSTEM/deploy/logrotate/*"]
+        deploy_host["/etc/systemd/system/*.service<br/>/etc/logrotate.d/*"]
     end
 
     run_checks --> check_service_active
@@ -422,6 +548,16 @@ graph TD
     run_checks --> check_disk_usage
     run_checks --> check_memory_usage
     run_checks --> check_nas_mount
+    run_checks --> check_deploy_config_drift
+    check_deploy_config_drift --> _check_crontab_drift
+    check_deploy_config_drift --> _check_host_files_drift
+    _check_crontab_drift --> crontab
+    _check_crontab_drift --> deploy_repo
+    _check_crontab_drift --> _config_diff_summary
+    _check_host_files_drift --> deploy_repo
+    _check_host_files_drift --> deploy_host
+    _check_host_files_drift --> _config_diff_summary
+    _config_diff_summary --> _normalize_config_lines
     run_checks --> _read_marker
     run_checks --> _write_marker
     run_checks --> _should_notify
@@ -452,6 +588,7 @@ graph TD
 * マーカーは通知の成否に関わらず更新されるため、通知に失敗したログエラーは次回以降再検知されない。通知失敗自体は終了コード1として`run_task.sh`のログに残り、週次の`log_analyzer.py`レポートで回収される設計（根拠: 行番号: 207〜208, 236〜237のコメント）。
 * ディスク/メモリ閾値・再通知間隔はモジュール定数としてハードコードされている（環境変数化されていない）（根拠: 行番号: 41〜53）。
 * cron登録・死活監視（Cloudflare Tunnelアラート）との組み合わせは `docs/runbooks/raspi_claude_log_monitoring.md` に運用手順として記載されている。
+* **チェック7(構成ドリフト検知)の導入先パスはハードコード**: `TRACKED_CONFIG_DIRS`の実機側ディレクトリ(`/etc/systemd/system`、`/etc/logrotate.d`)は各READMEの導入手順と一致させる前提であり、導入先を変えたら両方を更新すること。比較はコメント・空行を除いた内容のみで、ファイルの権限・所有者や`systemctl enable`状態は見ない。差分は同一異常セットの継続として6時間ごとに再通知され続けるため、意図的に実機だけ変えた場合も`deploy/`へ反映すること（根拠: 行番号: 64〜81, 278〜297）。
 * **層2フック（Issue #339）は`.env`の`HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら完全no-op**であり、実機のClaude Code CLI・ghセットアップとフラグ確認（runbookの有効化手順）が済むまで設定しないこと。フックの実体は`scripts/claude_investigate.sh`（[scripts_claude_investigate.md](./scripts_claude_investigate.md)）で、多重起動防止（flock）・タイムアウト・許可ツール制限はスクリプト側が持つ（根拠: 行番号: 190〜230）。
 
 ## 9. 不明事項一覧

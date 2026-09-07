@@ -13,6 +13,9 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
   4. ルートディスク使用率が閾値超過していないか
   5. メモリ使用率が閾値超過していないか
   6. NASがマウントされているか
+  7. 実機構成(crontab / systemdユニット / logrotate設定)がリポジトリの deploy/ 配下と
+     一致しているか(構成ドリフト検知。各READMEの「実機を変更したらこのファイルにも
+     反映してコミットすること」を人手に頼らず機械的に検知する)
 
 異常があれば notification_service 経由でDiscordのerrorチャンネルへ要約を通知する。
 自動復旧(systemctl restart等)は行わない(ランブックのガードレール参照)。
@@ -24,6 +27,7 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 """
 
 import datetime
+import difflib
 import glob
 import hashlib
 import json
@@ -31,7 +35,7 @@ import os
 import shutil
 import subprocess
 import sys
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -56,6 +60,25 @@ RENOTIFY_INTERVAL_SEC: int = 6 * 3600
 DEFAULT_LOOKBACK_SEC: int = 3600
 # 通知に載せるログ抜粋の最大文字数
 SNIPPET_LIMIT: int = 400
+
+# === 実機構成のドリフト検知 (チェック7) ===
+# リポジトリで管理している実機構成と、実機に実際に導入されている内容の対応。
+# 導入先パスは各READMEの導入手順(deploy/cron/README.md、
+# MY_HOME_SYSTEM/deploy/systemd/README.md、同 logrotate/README.md)と一致させること。
+REPO_ROOT: str = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+HOME_SYSTEM_DIR: str = os.path.join(REPO_ROOT, "MY_HOME_SYSTEM")
+# リポジトリ管理の crontab (crontab -l と突き合わせる)
+TRACKED_CRONTAB: str = os.path.join(REPO_ROOT, "deploy", "cron", "crontab")
+# (リポジトリ側ディレクトリ, globパターン, 実機側の導入先ディレクトリ)。
+# リポジトリ側ディレクトリ内の各ファイルは、実機側の同名ファイルと突き合わせる。
+TRACKED_CONFIG_DIRS: List[Tuple[str, str, str]] = [
+    (os.path.join(HOME_SYSTEM_DIR, "deploy", "systemd"), "*.service", "/etc/systemd/system"),
+    (os.path.join(HOME_SYSTEM_DIR, "deploy", "logrotate"), "*", "/etc/logrotate.d"),
+]
+# 構成ファイル比較で無視するファイル名(READMEは導入対象ではない)
+CONFIG_IGNORE_BASENAMES: Tuple[str, ...] = ("README.md",)
+# 通知に載せる差分行(+/-)の最大本数(ファイルごと)
+DIFF_LINES_LIMIT: int = 3
 
 
 def _read_marker() -> datetime.datetime:
@@ -178,6 +201,102 @@ def check_nas_mount() -> Optional[str]:
     return None
 
 
+def _normalize_config_lines(text: str) -> List[str]:
+    """構成ファイルの比較用に正規化する。
+
+    行末の空白を落とし、空行とコメント行(#始まり)を除く。crontab -l は
+    導入時のファイルをそのまま返すが、crontab -e で編集した場合や環境によって
+    先頭にコメントヘッダが付く場合があるため、実行内容(ジョブ行・設定行)だけを
+    比較対象にする。
+    """
+    lines = []
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        lines.append(line)
+    return lines
+
+
+def _config_diff_summary(label: str, expected: str, actual: str) -> Optional[str]:
+    """リポジトリ側(expected)と実機側(actual)の正規化後の差分を1行要約にする。差分が無ければNone。"""
+    exp_lines = _normalize_config_lines(expected)
+    act_lines = _normalize_config_lines(actual)
+    if exp_lines == act_lines:
+        return None
+    changes = [
+        ln for ln in difflib.unified_diff(exp_lines, act_lines, lineterm="", n=0)
+        if (ln.startswith("+") or ln.startswith("-"))
+        and not ln.startswith("+++") and not ln.startswith("---")
+    ]
+    shown = "; ".join(ln[:80] for ln in changes[:DIFF_LINES_LIMIT])
+    more = f" ほか{len(changes) - DIFF_LINES_LIMIT}行" if len(changes) > DIFF_LINES_LIMIT else ""
+    return f"{label}: 差分 {len(changes)}行 ({shown}{more})"
+
+
+def _check_crontab_drift() -> Optional[str]:
+    """crontab -l とリポジトリ管理の deploy/cron/crontab の差分を返す。"""
+    if not os.path.isfile(TRACKED_CRONTAB):
+        return None  # リポジトリ側に無ければ比較対象外(チェックの失敗ではない)
+    with open(TRACKED_CRONTAB, "r", encoding="utf-8") as f:
+        expected = f.read()
+    res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+    if res.returncode != 0:
+        # "no crontab for <user>" は未登録。それ以外の失敗も未登録相当として報告する
+        detail = (res.stderr or res.stdout).strip().splitlines()
+        reason = detail[0][:80] if detail else f"exit {res.returncode}"
+        return f"crontab: 実機に未登録です ({reason})"
+    return _config_diff_summary("crontab", expected, res.stdout)
+
+
+def _check_host_files_drift() -> List[str]:
+    """systemdユニット・logrotate設定など、リポジトリ管理ファイルと実機側ファイルの差分一覧を返す。"""
+    findings: List[str] = []
+    for repo_dir, pattern, host_dir in TRACKED_CONFIG_DIRS:
+        for repo_path in sorted(glob.glob(os.path.join(repo_dir, pattern))):
+            name = os.path.basename(repo_path)
+            if name in CONFIG_IGNORE_BASENAMES or not os.path.isfile(repo_path):
+                continue
+            host_path = os.path.join(host_dir, name)
+            with open(repo_path, "r", encoding="utf-8") as f:
+                expected = f.read()
+            try:
+                with open(host_path, "r", encoding="utf-8") as f:
+                    actual = f.read()
+            except FileNotFoundError:
+                findings.append(f"{host_path}: 実機に未導入です")
+                continue
+            except OSError as e:
+                findings.append(f"{host_path}: 読み取れません ({e.__class__.__name__})")
+                continue
+            summary = _config_diff_summary(host_path, expected, actual)
+            if summary:
+                findings.append(summary)
+    return findings
+
+
+def check_deploy_config_drift() -> Optional[str]:
+    """実機構成(crontab / systemd / logrotate)がリポジトリの deploy/ 配下と一致しているか。
+
+    各READMEは「実機の設定を変更した場合は、このファイルにも反映してコミットすること」
+    と人手の同期を前提にしているが、忘れると故障時の復旧手順(リポジトリからの再導入)が
+    実機の実態と食い違う。比較はコメント・空行を除いた実行内容のみで行い、
+    差分・未導入・未登録があれば異常として報告する(自動で書き戻しはしない)。
+    """
+    findings: List[str] = []
+    crontab_finding = _check_crontab_drift()
+    if crontab_finding:
+        findings.append(crontab_finding)
+    findings.extend(_check_host_files_drift())
+    if findings:
+        return (
+            "実機構成がリポジトリ(deploy/)と一致しません:\n"
+            + "\n".join(f"  - {f}" for f in findings)
+            + "\n  → 実機側が正なら deploy/ 配下へ反映してコミット、リポジトリ側が正なら各READMEの導入手順で再導入してください"
+        )
+    return None
+
+
 def _should_notify(anomaly_keys: List[str], now: datetime.datetime) -> bool:
     """同一の異常セットが継続している間の再通知を抑制する。
 
@@ -255,6 +374,7 @@ def run_checks() -> int:
         ("disk", check_disk_usage),
         ("memory", check_memory_usage),
         ("nas", check_nas_mount),
+        ("deploy_config", check_deploy_config_drift),
     ]
 
     anomalies: List[str] = []

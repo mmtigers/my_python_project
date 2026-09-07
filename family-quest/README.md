@@ -7,15 +7,15 @@
 
 `dist/` はディスク直読みで配信されるため、**ビルド完了 = デプロイ完了**(サーバー再起動不要)。
 
-- 自動: リポジトリルートの `git pull` で family-quest に変更があると、post-merge フック(`.git/hooks/post-merge`)が `deploy.sh` を自動実行する
+- 自動: リポジトリルートの `git pull` で family-quest に変更があると、post-merge フック(リポジトリ管理の `deploy/git-hooks/post-merge`)が `deploy.sh --if-stale` を自動実行する
 - 手動:
 
 ```bash
 ./deploy.sh
 ```
 
-フックはローカル設定のため、リポジトリを clone し直した場合は `.git/hooks/post-merge` の再設置が必要
-(family-quest の変更を検知して `bash family-quest/deploy.sh` を呼ぶだけの薄いスクリプト)。
+フックは `MY_HOME_SYSTEM/start_all.sh` がサーバー起動のたびに `git config core.hooksPath deploy/git-hooks` で
+冪等に登録するため、clone し直しても手動の再設置は不要(詳細は [deploy/git-hooks/README.md](../deploy/git-hooks/README.md))。
 
 ## 開発
 

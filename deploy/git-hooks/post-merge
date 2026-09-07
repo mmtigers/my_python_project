@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# ==========================================
+# post-merge フック: git pull 後に family-quest の配信用ビルド dist/ を最新化する
+# ==========================================
+# 以前は実機の .git/hooks/post-merge にローカル設置されていて git 管理外だったため、
+# リポジトリを clone し直すたびに手で再設置が必要だった。このディレクトリ
+# (deploy/git-hooks/) を core.hooksPath として登録することで、フックもリポジトリで
+# 管理し、再設置作業をなくす。
+#
+# 登録: MY_HOME_SYSTEM/start_all.sh の Phase 1.6 がサーバー起動のたびに冪等に
+#       `git config core.hooksPath <リポジトリ>/deploy/git-hooks` を設定する。
+#       手動で登録する場合:
+#         git config core.hooksPath "$(git rev-parse --show-toplevel)/deploy/git-hooks"
+# 注意: core.hooksPath を設定すると .git/hooks/ 配下のフックは一切実行されなくなる。
+#       追加のフックが必要なら、このディレクトリに置いてコミットすること。
+#
+# deploy.sh --if-stale は dist/.built-tree に記録されたツリーハッシュと HEAD の
+# family-quest ツリーを比較し、変更が無ければ何もしないため、family-quest に無関係な
+# pull でもコストはかからない。ビルド失敗は警告のみ(git の post-merge フックの
+# 終了コードは pull の結果に影響しない。start_all.sh の Phase 2 が次回起動時に再試行する)。
+set -u
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+deploy_sh="$repo_root/family-quest/deploy.sh"
+
+if [ -z "$repo_root" ] || [ ! -f "$deploy_sh" ]; then
+    echo "[post-merge] family-quest/deploy.sh が見つかりません (repo_root='${repo_root}')。スキップします。" >&2
+    exit 0
+fi
+
+if ! bash "$deploy_sh" --if-stale; then
+    echo "[post-merge] ⚠️ family-quest のビルドに失敗しました。旧 dist/ が配信され続けます。" >&2
+fi
+exit 0

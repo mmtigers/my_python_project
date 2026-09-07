@@ -20,3 +20,7 @@ crontab -l
 
 実機の crontab を変更した場合は、このファイルにも反映してコミットすること
 (`crontab -l > deploy/cron/crontab` で同期できる)。
+
+反映漏れは、毎時cronの `MY_HOME_SYSTEM/monitors/health_watch.py`(チェック7: 実機構成ドリフト検知)が
+`crontab -l` と本ファイルをコメント・空行を除いて比較し、差分があれば Discord の error チャンネルへ
+通知する(自動で書き戻しはしない)。

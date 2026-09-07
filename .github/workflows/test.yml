@@ -93,13 +93,16 @@ jobs:
         # ubuntu-latestにプリインストール済みのため追加インストールは不要。
         # Issue #532: 残っていた3件(SC1090/SC2034/SC2155)を解消し、指摘 0 件を
         # 維持するためブロッキング化した。
+        # deploy/git-hooks/post-merge はリポジトリ管理の git フック(拡張子なし。同
+        # ディレクトリの README.md を巻き込まないよう glob ではなくファイル名で列挙する)。
         working-directory: .
         run: |
           shellcheck -x \
             MY_HOME_SYSTEM/*.sh \
             MY_HOME_SYSTEM/tools/*.sh \
             MY_HOME_SYSTEM/scripts/*.sh \
-            family-quest/deploy.sh
+            family-quest/deploy.sh \
+            deploy/git-hooks/post-merge
 
   test:
     name: Test + Coverage
