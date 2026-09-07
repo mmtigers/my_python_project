@@ -30,7 +30,7 @@
 
 | ワークフロー | 契機 | 内容 |
 | --- | --- | --- |
-| `test.yml` | push / PR | lint(ruff、`.github/scripts/`のpytest)・テスト+カバレッジ(`MY_HOME_SYSTEM`、差分に応じて`DDD`)・セキュリティスキャン(bandit、pip-audit)・フロントエンドビルド(`family-quest`のlint/build/vitest)。 |
+| `test.yml` | push / PR | lint(ruff+merge-base比の新規指摘ゲート、pyright、shellcheck、`.github/scripts/`のpytest)・テスト+カバレッジ(`MY_HOME_SYSTEM`、続けて`DDD`も常時実行。固定閾値に加えmaster比のカバレッジラチェット)・セキュリティスキャン(bandit、pip-audit。merge-base比の新規指摘ゲート)・フロントエンドビルド(`family-quest`のlint/build/vitest)。 |
 | `claude-review.yml` | PR | Claude Code Actionによる自動コードレビュー(`CLAUDE.md`の規約を踏まえた指摘をPRコメントとして投稿)。 |
 | `spec-drift-pr-check.yml` | PR | ソースと`docs/specifications/`の対応関係チェック(PR差分)。非ブロッキングでPRコメントに結果を投稿。 |
 | `spec-drift-weekly-audit.yml` | 週次 | 同チェックのリポジトリ全体監査。検知があればIssue(`spec-drift-audit`ラベル)を自動起票/更新。 |
@@ -38,3 +38,5 @@
 | `pip-audit-weekly-audit.yml` | 週次 | `requirements*.txt`(MY_HOME_SYSTEM・DDD)の既知CVE監査。検知があればIssue(`pip-audit-audit`ラベル)を自動起票/更新。 |
 
 依存関係の更新は`.github/dependabot.yml`(GitHub Actions・pip・npm、週次)で自動起票され、minor/patchは`dependabot-auto-merge.yml`がCI成功後に自動マージする。
+
+Actionsの外側では、Claude CodeのRoutine(定期起動セッション)が毎週月曜に「前週差分の品質監査→Issue起票」と「仕様書ドリフト(Issue #20)の解消→Draft PR」を行う。一覧・プロンプトは[docs/runbooks/claude_routines.md](./docs/runbooks/claude_routines.md)。

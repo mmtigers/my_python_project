@@ -16,6 +16,8 @@ concurrency:
 # write-all トークンが供給される余地があった。読み取り専用に固定する。
 permissions:
   contents: read
+  # カバレッジのラチェット比較(master の直近成功 run の成果物を actions/download-artifact で取得)に必要
+  actions: read
 
 defaults:
   run:
@@ -29,6 +31,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # ruff ラチェット(merge-base との比較)のため履歴が必要
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -65,6 +70,18 @@ jobs:
         working-directory: ./DDD
         run: ruff check . --output-format=github
         continue-on-error: true
+
+      - name: Ruff ratchet - no new findings vs merge-base (blocking, PR only)
+        # フルレポートの既存指摘(MY_HOME_SYSTEM 約90件・DDD 約15件)は、仕様書が行番号で
+        # ソースを引用する規約のため一括整形で消せない(ruff.toml 冒頭参照)。
+        # 代わりに merge-base 時点と比較して「増えた指摘」だけをブロックする
+        # (.github/scripts/check_lint_ratchet.py)。既存指摘を減らす PR は通る。
+        if: github.event_name == 'pull_request'
+        working-directory: .
+        run: |
+          merge_base="$(git merge-base "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
+          python3 .github/scripts/check_lint_ratchet.py --tool ruff --dir MY_HOME_SYSTEM --base "$merge_base"
+          python3 .github/scripts/check_lint_ratchet.py --tool ruff --dir DDD --base "$merge_base"
 
       - name: Spec drift script tests (pytest .github/scripts/)
         # Issue #402: check_spec_drift.py の回帰テストは従来「手動実行前提」でCI未実行
@@ -148,6 +165,44 @@ jobs:
             --cov-report=html \
             --cov-fail-under=70
 
+      - name: Find latest successful master run (coverage baseline)
+        # カバレッジのラチェット比較元。master の直近成功 run(本ワークフロー)の ID を REST API で
+        # 引く。無ければ空のまま次のステップがスキップされ、固定閾値(--cov-fail-under)だけが
+        # ゲートになる。
+        if: github.event_name == 'pull_request'
+        id: baseline_run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
+                     --jq '.workflow_runs[0].id // empty')"
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "baseline run: ${run_id:-(none)}"
+
+      - name: Download master coverage baseline
+        # 別 run の成果物取得は run-id + github-token を指定した actions/download-artifact で行う
+        # (gh run download は同じ条件で "no valid artifacts found" になることがあった)。
+        # 成果物の保持期限(14日)切れ等で取れなくても失敗にはしない(比較スキップ)。
+        if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: coverage-report
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: MY_HOME_SYSTEM/coverage-baseline
+
+      - name: Coverage ratchet vs master (blocking, PR only)
+        # 固定閾値は床として据え置き、master の実測から 0.5pt を超えて下がったら失敗させる
+        # (.github/scripts/check_coverage_ratchet.py)。これまで人手で行っていた
+        # 「実測より約3pt下へ段階的に引き上げる」運用(Issue #494/#536)を不要にする。
+        if: github.event_name == 'pull_request'
+        run: |
+          baseline="$(find coverage-baseline -name coverage.xml -print -quit 2>/dev/null || true)"
+          python3 ../.github/scripts/check_coverage_ratchet.py --label backend \
+            --current coverage.xml --baseline "${baseline:-coverage-baseline/missing.xml}"
+
       - name: Install DDD dependencies
         # lint/bandit(H-11)はDDDにも対象拡大済みだが、pytestだけCIから未実行だった。
         # DDD/conftest.py(#103/#137)がDiscord/LINE Webhook系の環境変数をマスクする
@@ -181,6 +236,9 @@ jobs:
     timeout-minutes: 20  # C-L1 (Issue #414)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # bandit ラチェット(merge-base との比較)のため履歴が必要
+          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -210,14 +268,29 @@ jobs:
         run: bandit -r . -x ./tests -f txt -o bandit-report.txt || true
         continue-on-error: true
 
+      - name: Bandit DDD (High severity - blocking)
+        # H-11 当時は既存の High severity 指摘(SHA1使用等)が残っていたため非ブロッキングに
+        # していたが、2026-09 時点で High は 0 件になったため MY_HOME_SYSTEM と同じ基準で
+        # ブロッキング化する。
+        working-directory: ./DDD
+        run: bandit -r . -lll
+
       - name: Bandit DDD (full report - non-blocking)
-        # H-11: DDDは従来CI対象外だった。MY_HOME_SYSTEMと異なり既存のHigh
-        # severity指摘(SHA1使用等)が残っているため、いきなりブロッキングには
-        # せず、まず可視化を優先する(MY_HOME_SYSTEM側のBandit Medium/Lowの
-        # 扱いと同様の方針)。
         working-directory: ./DDD
         run: bandit -r . -f txt -o bandit-report-ddd.txt || true
         continue-on-error: true
+
+      - name: Bandit ratchet - no new Medium+ findings vs merge-base (blocking, PR only)
+        # Medium/Low の既存指摘(主に f-string SQL の B608、LOW confidence)は残っているため
+        # 一律ブロックはしないが、merge-base 時点より増えた指摘はブロックする。
+        # 対象は severity/confidence とも Medium 以上(-ll -ii)。B608 は confidence LOW
+        # のため対象外で、このリポジトリで常用している f-string SQL は引っかからない。
+        if: github.event_name == 'pull_request'
+        working-directory: .
+        run: |
+          merge_base="$(git merge-base "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}")"
+          python3 .github/scripts/check_lint_ratchet.py --tool bandit --dir MY_HOME_SYSTEM --base "$merge_base" -- -x ./tests -ll -ii
+          python3 .github/scripts/check_lint_ratchet.py --tool bandit --dir DDD --base "$merge_base" -- -ll -ii
 
       - name: pip-audit (known CVEs - non-blocking)
         # Issue #324 (2026-09-02) で既知CVE付きの固定バージョンは一括更新済みで、
@@ -280,6 +353,38 @@ jobs:
         # Issue #495: バックエンドと異なりカバレッジ計測が無かったため追加する。
         # 閾値はまだ設定せず、まず可視化のみ行う。
         run: npm run test:coverage
+
+      - name: Find latest successful master run (frontend coverage baseline)
+        # バックエンドと同じラチェット比較。vitest の json-summary(coverage-summary.json)を使う。
+        if: github.event_name == 'pull_request'
+        id: baseline_run
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/test.yml/runs?branch=master&status=success&per_page=1" \
+                     --jq '.workflow_runs[0].id // empty')"
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+          echo "baseline run: ${run_id:-(none)}"
+
+      - name: Download master frontend coverage baseline
+        if: github.event_name == 'pull_request' && steps.baseline_run.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: frontend-coverage-report
+          run-id: ${{ steps.baseline_run.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: family-quest/coverage-baseline
+
+      - name: Frontend coverage ratchet vs master (blocking, PR only)
+        # Issue #495 で「まず可視化」とした frontend にも閾値の代わりにラチェットを適用する
+        # (固定閾値は引き続き設定しない。master 比 0.5pt 超の低下だけを失敗にする)。
+        if: github.event_name == 'pull_request'
+        run: |
+          baseline="$(find coverage-baseline -name coverage-summary.json -print -quit 2>/dev/null || true)"
+          python3 ../.github/scripts/check_coverage_ratchet.py --label frontend \
+            --current coverage/coverage-summary.json --baseline "${baseline:-coverage-baseline/missing.json}"
 
       - name: Upload frontend coverage report
         if: always()
