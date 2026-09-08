@@ -354,6 +354,12 @@ ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "tr
 if ALLOW_ALL_ORIGINS:
     CORS_ORIGINS = ["*"]
 
+# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を
+# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される
+# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の
+# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。
+RESET_GAME_API_BASE_URL: str = os.getenv("RESET_GAME_API_BASE_URL", "http://127.0.0.1:8000")
+
 UPLOAD_DIR: str = os.path.join(BASE_DIR, "uploads")
 # M-9-3: /api/quest/upload にファイルサイズ上限が無く、巨大アップロードで
 # ディスクを圧迫し得た。アバター画像用途を想定した上限とする。

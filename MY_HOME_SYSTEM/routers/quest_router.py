@@ -12,7 +12,7 @@ from core.logger import setup_logging
 from models.quest import (
     SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse,
     QuestAction, ApproveAction, HistoryAction, RewardAction,
-    UpdateUserAction, SoundTestRequest, UseItemAction
+    UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse
 )
 from services.quest_service import (
     game_system, quest_service, shop_service, user_service, inventory_service,
@@ -76,6 +76,13 @@ def seed_data_endpoint():
 @router.post("/user/update")
 def update_user_avatar(action: UpdateUserAction):
     return user_service.update_avatar(action.user_id, action.avatar_url)
+
+# Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたユーザーリセットを
+# サーバーAPI経由に置き換える。権限チェック(admin_idがrole_adultか)はProcessApproveQuest等
+# と同様サービス層(UserService.reset_user_data)で行う。
+@router.post("/admin/reset_user", response_model=ResetUserResponse)
+def reset_user(action: ResetUserAction):
+    return user_service.reset_user_data(action.admin_id, action.target_user_id)
 
 # #442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの紐付け)の
 # うち2段階目が失敗した際、1段階目でアップロード済みの画像をロールバック削除するための
