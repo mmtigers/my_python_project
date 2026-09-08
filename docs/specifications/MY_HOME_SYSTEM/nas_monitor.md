@@ -14,7 +14,7 @@
 * [config.md](./config.md) - `NAS_IP`, 各保持日数等の設定値を提供
 * [database.md](./database.md) - `save_log_generic`の実体
 * [notification_service.md](./notification_service.md) - `send_push`の実体
-* [utils.md](./utils.md) - `get_now_iso`の実体
+* [utils.md](./utils.md) - `get_now_iso`の実体。Issue #592で追加された`get_now_jst`（8時判定のJST基準化に使用）の実体でもある
 * [analysis_service.md](./analysis_service.md) - `save_to_db`が書き込む`nas_records`テーブルを`load_nas_status`で読み、ダッシュボードのNASステータスカード・NAS状態パネルへ供給する読み手側(Issue #168)
 
 ## 2. ファイルの概要
@@ -35,13 +35,13 @@
 | `subprocess` | 標準ライブラリ | pingおよびrsyncコマンドの実行 | 根拠: `import subprocess` (行番号: 5 / 抜粋: "import subprocess") |
 | `sys` | 標準ライブラリ | モジュール検索パスへの親ディレクトリ追加 | 根拠: `import sys` (行番号: 6 / 抜粋: "import sys") |
 | `time` | 標準ライブラリ | 保持期間の基準時刻（カットオフ）の計算 | 根拠: `import time` (行番号: 7 / 抜粋: "import time") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得（レポート時間の判定） | 根拠: `from datetime import datetime` (行番号: 8 / 抜粋: "from datetime import datetime") |
-| `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 9 / 抜粋: "from typing import Dict...") |
-| `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 14 / 抜粋: "import config") |
-| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 15 / 抜粋: "from core.logger import setup...") |
-| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 16 / 抜粋: "from core.database import sav...") |
-| `get_now_iso` | 自作モジュール | 現在時刻のISOフォーマット取得 | 根拠: `get_now_iso` (行番号: 17 / 抜粋: "from core.utils import get_no...") |
-| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 18 / 抜粋: "from services.notification...") |
+| `Dict, Optional, Any, Tuple` | 標準ライブラリ(typing) | 型アノテーション | 根拠: `from typing import Dict, Optional, Any, Tuple` (行番号: 8 / 抜粋: "from typing import Dict...") |
+| `config` | 自作モジュール | NASのIP、マウント先、LINE ID、保持期間などの設定値取得 | 根拠: `import config` (行番号: 13 / 抜粋: "import config") |
+| `setup_logging` | 自作モジュール | ロガーの初期化と取得 | 根拠: `setup_logging` (行番号: 14 / 抜粋: "from core.logger import setup...") |
+| `save_log_generic` | 自作モジュール | データベースへのログ保存 | 根拠: `save_log_generic` (行番号: 15 / 抜粋: "from core.database import sav...") |
+| `get_now_iso`, `retry_with_backoff`（Issue #292） | 自作モジュール | 現在時刻のISOフォーマット取得、NAS I/O向けExponential Backoffリトライ | 根拠: `get_now_iso`, `retry_with_backoff` (行番号: 16 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst") |
+| `get_now_jst`（Issue #592で追加） | 自作モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「8時以降」判定はJSTの8時を意図していたため、ホストがJST以外の設定だと意図しない実時刻で判定されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_iso, retry_with_backoff, get_now_jst` (行番号: 16 / 抜粋: "from core.utils import get_now_iso, retry_with_backoff, get_now_jst")、`now = get_now_jst()` (行番号: 415〜417 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()") |
+| `send_push` | 自作モジュール | プッシュ通知の送信 | 根拠: `send_push` (行番号: 17 / 抜粋: "from services.notification...") |
 
 ### ブラックボックスとなる外部要素
 
@@ -351,28 +351,30 @@
 ### 関数 `run`
 
 * **（2026-09-06 品質監査で修正）** 日次レポート(`is_report_time`)の判定を `now.hour == 8` の一致から「`now.hour >= 8` かつ状態ファイルの `last_report_date` が今日でない」に変更し、送信後に `last_report_date` を `_save_state` で保存する(Issue #388 で保持期間削除側に施したのと同じ修正。scheduler の実行間隔のずれで 7:5x → 9:0x になった日はレポートが丸ごと飛んでいた)。`today_str` の算出は両判定より前に移動した。
-* 根拠: (行番号: 410〜414, 446〜448 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
+* 根拠: (行番号: 417〜422, 454〜456 / 抜粋: "is_report_time = now.hour >= 8 and previous_state.get(\"last_report_date\") != today_str", "if is_report_time:\n            previous_state[\"last_report_date\"] = today_str\n            self._save_state(previous_state)")
+* **（Issue #592で修正）** 上記「8時以降」判定に使う現在時刻(`now`)の取得方法自体を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。「8時以降」判定はJSTの8時を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻で日次レポート・保持期間クリーンアップの両方が判定されてしまう問題があった（Issue #382/#293と同じ不具合クラス）。この変更に伴い`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`クラスは、`freeze_time(...)`の引数をJST時刻の文字列からUTC相当の文字列に変更した（freezegunは素の文字列をUTCとして解釈するため。例: `freeze_time("2026-09-06 09:05:00")`は元々JST 9:05のつもりだったが実際にはUTC 9:05=JST 18:05と解釈されており、修正前から気づかれずにいたテスト側のバグだった。修正後は`freeze_time("2026-09-06 00:05:00")  # JST 09:05`のようにUTC時刻を明示する）。
+* 根拠: `now = get_now_jst()` (行番号: 415〜417 / 抜粋: "# Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン\n        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。\n        now = get_now_jst()")
 
 * **役割**: Ping、マウント、書き込み権限の確認を順に実行し、状態変化（正常⇔異常）の判定と保存、DBへの記録を必ず行う。異常継続中はここで処理を終了し、正常時はさらに保持期間超過ファイルの自動削除（レポート時刻のみ）と、状況（容量不足・定時）に応じた通知を統括する。
-* 根拠: `def run(self) -> None:` (行番号: 216〜286 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 371〜456 / 抜粋: "def run(self) -> None:")
 * **（Issue #388 で修正）** 保持期間クリーンアップの「1日1回」判定を `now.hour == 8` から「`now.hour >= 8` かつ状態ファイルの `last_cleanup_date` が今日でない」に変更し、実行後に `last_cleanup_date` を保存する。scheduler の実行間隔は毎回 3600〜3610s と少しずつ後ろにずれるため、7:59 台の次が 9:00 台になる日は 8 時台の実行が無く、その日の削除がまるごとスキップされていた。あわせて健全性遷移時の `_save_state` は `previous_state` を丸ごと保存し、`last_cleanup_date` を消さないようにした。
-* 根拠: `today_str = now.strftime("%Y-%m-%d")` (行番号: 412〜416)、`previous_state["is_healthy"] = False` (行番号: 378〜379)、`previous_state["is_healthy"] = True` (行番号: 385〜386)
+* 根拠: `today_str = now.strftime("%Y-%m-%d")` (行番号: 417〜418)、`previous_state["is_healthy"] = False` (行番号: 383〜389)、`previous_state["is_healthy"] = True` (行番号: 392〜397)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run(self) -> None:` (行番号: 216 / 抜粋: "def run(self) -> None:")
+* 根拠: `def run(self) -> None:` (行番号: 371 / 抜粋: "def run(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 216 / 抜粋: "-> None:")
+* 根拠: `-> None:` (行番号: 371 / 抜粋: "-> None:")
 
 
 * **副作用**: `save_to_db`呼び出し（毎回）、`send_push`呼び出し（異常検知時・容量不足時・定時レポート時）、`sync_fallback_data`呼び出し（復旧検知時）、`run_retention_cleanup`呼び出し（レポート時刻のみ、ファイル削除を伴う）、および`_save_state`によるステート保存。
-* 根拠: `self.save_to_db(...)` (行番号: 245), `send_push(...)` (行番号: 230〜234, 282〜286), `self.sync_fallback_data()` (行番号: 240), `self.run_retention_cleanup()` (行番号: 264)
+* 根拠: `self.save_to_db(...)` (行番号: 401), `send_push(...)` (行番号: 386, 450〜453), `self.sync_fallback_data()` (行番号: 395), `self.run_retention_cleanup()` (行番号: 430)
 
 
 * **エラーハンドリング**: 異常継続時はDB記録後に早期リターンし、以降のレポート・クリーンアップ処理には到達しない。ディスク使用量取得に失敗した場合（`usage`が`None`）も早期リターンする。
-* 根拠: `if not is_currently_healthy: return` (行番号: 248〜249) および `if not usage: return` (行番号: 254〜255)
+* 根拠: `if not is_currently_healthy: return` (行番号: 404〜405) および `if not usage: return` (行番号: 410〜411)
 
 
 
@@ -448,6 +450,7 @@ flowchart TD
         db["core.database.save_log_generic"]
         logger["core.logger.setup_logging"]
         utils["core.utils.get_now_iso"]
+        utilsJst["core.utils.get_now_jst (Issue #592)"]
         push["services.notification_service.send_push"]
         pingCmd["OS Command: ping"]
         rsyncCmd["OS Command: rsync"]
@@ -459,6 +462,7 @@ flowchart TD
     NasMonitor --> db
     NasMonitor --> logger
     NasMonitor --> utils
+    NasMonitor --> utilsJst
     NasMonitor --> push
     NasMonitor --> pingCmd
     NasMonitor --> rsyncCmd
@@ -482,6 +486,7 @@ flowchart TD
 * **[修正済み] `_cleanup_empty_dirs`のOSError握りつぶし（Issue #450）**: 以前は`os.rmdir`実行時の`OSError`が全て`pass`されており、ディレクトリが空でない（`ENOTEMPTY`、想定内）以外の予期せぬ権限エラー等も種別を問わず握りつぶされていた。現在は`e.errno`が`errno.ENOTEMPTY`の場合のみ無視し、それ以外は`logger.warning`でログに残すよう修正された。
 * `cleanup_old_files`はファイルの`mtime`（更新日時）のみで削除対象を判定するため、意図的にタイムスタンプが古いまま保持したいファイルも保持日数を超えていれば削除対象となる点に注意が必要。
 * `run_retention_cleanup`は`is_report_time`（毎日8時台）にのみ実行されるため、1日1回しか実行機会がない。8時台にスクリプトが実行されなかった場合、その日はクリーンアップがスキップされる。
+* **（Issue #592で修正）** 上記「8時台」判定の基準となる現在時刻(`now`)の取得を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から、"Asia/Tokyo"のaware `datetime`を返す`core.utils.get_now_jst()`（[utils.md](./utils.md)参照）に置き換えた(417行目)。Issue #592自体は元々`monitors/camera_monitor.py`(#382)と`services/quest_service.py`(#293)の2件の既存修正がタイムゾーン非依存かどうかを検証する調査だったが（結論: 両方とも元からタイムゾーン非依存で問題なし）、その追加調査で本ファイルの「8時以降」判定を含む別の4箇所が実際にホスト依存のnaive時刻を使っていたことが判明し、本ファイルはその修正対象の1つとなった。`from datetime import datetime`のimportは不要になり削除された。回帰テストの`TestNasMonitorDailyReportOncePerDay`は`freeze_time(...)`の引数をJST時刻からUTC相当の文字列に変更し(freezegunは素の文字列をUTCとして解釈するため)、`test_review_2026_09_04_server_fixes.py::test_cleanup_runs_once_per_day_regardless_of_exact_hour`は偽の`datetime`クラスを`monitors.nas_monitor.datetime`へ代入するパッチから`monkeypatch.setattr("monitors.nas_monitor.get_now_jst", lambda: fake_now["value"])`（可変dictホルダー）へ変更された。
 * `run_retention_cleanup`の「DBバックアップ」対象は以前拡張子`.db`のみに限定していたが、同じ`DB_BACKUPS_DIR`には`services/backup_service.py`の`_backup_config_files`がコピーする設定ファイルのバックアップ(`config.py`/`.env`/`devices.json`。`.env`はコピー時に拡張子なしのファイル名になる)も置かれるため、`.db`限定では設定ファイルのバックアップコピーが一切削除対象にならず無限蓄積していた(Issue #191)。`DB_BACKUPS_DIR`がバックアップ専用ディレクトリであることを踏まえ、`extensions=None`(拡張子で絞り込まず全ファイル対象)に修正した。`cleanup_old_files`の`extensions`引数はこれに合わせて`Optional[Tuple[str, ...]]`となり、`None`の場合は拡張子チェックをスキップする。
 * `run`関数内において、`check_ping`、`check_mount`、`check_write_permission`はショートサーキット評価のように実装されており、前段が`False`の場合は後段は実行されず即座に`False`が代入される。
 * `run`関数内において、`save_to_db`は正常・異常を問わず毎回呼び出されるが、`is_currently_healthy`が`False`の場合はそこで早期リターンし、以降のリテンションクリーンアップおよびレポート通知ロジックには到達しない。
