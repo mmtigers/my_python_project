@@ -24,7 +24,7 @@ from linebot.v3.webhooks import PostbackEvent
 from core.logger import setup_logging
 logger = setup_logging("line_logic")
 # ▲▲▲ ▲▲▲
-from core.utils import get_now_iso, get_today_date_str, get_display_date
+from core.utils import get_now_iso, get_today_date_str, get_display_date, get_meal_time_category_from_now
 from core.database import save_log_async, save_logs_batch_async
 from models.line import LinePostbackData
 
@@ -363,10 +363,13 @@ def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):
             
             final_rec = f"{category}: {item}"
 
+            # Issue #583: meal_time_categoryは以前固定文字列"Dinner"だった。実際の記録時刻
+            # から時間帯を判定する(ここでのcategoryは麺類等の食品ジャンルであり時間帯を
+            # 表さないため、時間帯カテゴリは記録時刻そのものを基準にする)。
             save_ok = sync_run(save_log_async(
                 config.SQLITE_TABLE_FOOD,
                 ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-                (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())
+                (user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())
             ))
 
             if not save_ok:

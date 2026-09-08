@@ -35,4 +35,9 @@
 15 15 * * * cd /home/masahiro/develop/MY_HOME_SYSTEM && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python monitors/daily_timelapse_job.py entrance --date $(date +\%Y-\%m-\%d) --start 13:00 --end 15:00
 
 # newface monitor per 1hour
-0 * * * * cd /home/masahiro/develop/DDD &&  /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
+# Issue #587: DDD/logs はリポジトリ管理外(.gitignore対象)で、他のcronエントリと
+# 異なりrun_task.sh(起動のたびにMY_HOME_SYSTEM/logsをmkdir -pするstart_all.shに
+# 依存)を経由しないため、このディレクトリを作成する手段がどこにも無かった。
+# 存在しない場合はリダイレクト自体が失敗しPythonプロセスが一切起動しない
+# (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
+0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1

@@ -15,11 +15,14 @@
 - `weather_service.py`（本リポジトリに実体なし。実機デプロイ先にのみ存在すると見られる） — `common.get_now_iso`経由での利用元
 - [config.md](./config.md) — 類似の指数バックオフ待機ロジック(`verify_and_initialize_storage`)を独自に実装している関連モジュール
 - [quest_service.md](./quest_service.md) — Issue #435で、キー単位のロック管理を`threading.Lock`辞書の場当たり実装から本ファイルの`RefCountedLockRegistry`利用へ置き換えた利用元
+- [line_service.md](./line_service.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`log_food_record`が`food_records.meal_time_category`の算出に使用）
+- [line_logic.md](./line_logic.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`handle_postback`の`food_record_direct`アクションが`food_records.meal_time_category`の算出に使用）
 
 ## 2. ファイルの概要
 
 * システム全体で共通して使用されるユーティリティ関数群を提供する。
 * "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。
+* 現在時刻(JST)から食事記録の時間帯カテゴリ（"Breakfast"/"Lunch"/"Snack"/"Dinner"）を推定する`get_meal_time_category_from_now`（Issue #583で追加）を提供する。
 * ネットワーク障害やストレージの復帰遅延など、一時的な障害に対する指数関数的バックオフを用いたリトライ機能を提供する。
 * キー単位で`threading.Lock`を参照カウント付きで管理する`RefCountedLockRegistry`クラス（Issue #435で追加）を提供する。
 
@@ -114,6 +117,29 @@
 
 * **エラーハンドリング**: なし
 * 根拠: [get_display_date] (行番号: 18〜19 / 抜粋: "return datetime.datetime.now(p...")
+
+
+
+### `get_meal_time_category_from_now`（Issue #583 で追加）
+
+* **役割**: "Asia/Tokyo" タイムゾーンの現在時刻の「時」だけを取り出し、食事記録の時間帯カテゴリ（`food_records.meal_time_category`列に保存する値）を4段階（"Breakfast"/"Lunch"/"Snack"/"Dinner"）のいずれかとして返す。4時台〜10時台は"Breakfast"、11時台〜14時台は"Lunch"、15時台〜17時台は"Snack"、それ以外（18時台〜翌3時台）は"Dinner"を返す。関数docstringによれば、`log_food_record`/`food_record_direct`のいずれもこの値を実際の記録時刻に関わらず常に固定文字列"Dinner"で保存していたバグ（Issue #583）の修正として追加され、呼び出し元が受け取る`category`引数（AIが渡す朝食/昼食/夕食等のラベル、または食事アンケートの麺類等の食品ジャンルラベル）は用途が呼び出し元ごとに異なり必ずしも時間帯を表さないため、記録時刻そのものから時間帯を判定する設計にしている（`category`自体は従来どおり`menu_category`列にのみ使われ、本関数の追加によって`category`の扱いは変化しない）。
+* 根拠: [get_meal_time_category_from_now関数定義とdocstring、および分岐] (行番号: 23〜40 / 抜粋: "def get_meal_time_category_from_now() -> str:\n    \"\"\"現在時刻(JST)から食事記録の時間帯カテゴリ...\n    hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"")
+
+
+* **引数/リクエスト**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 23 / 抜粋: "def get_meal_time_category_from_now() -> str:")
+
+
+* **戻り値/レスポンス**: `str`。現在時刻(JST)の時に応じて`"Breakfast"`（4時〜10時台）、`"Lunch"`（11時〜14時台）、`"Snack"`（15時〜17時台）、`"Dinner"`（それ以外、18時〜翌3時台）のいずれか一つ。
+* 根拠: [get_meal_time_category_from_now] (行番号: 33〜40 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"\n    if 11 <= hour < 15:\n        return \"Lunch\"\n    if 15 <= hour < 18:\n        return \"Snack\"\n    return \"Dinner\"")
+
+
+* **副作用**: なし（`datetime.datetime.now`によるシステム時計の参照のみで、状態の書き込みは行わない）
+* 根拠: [get_meal_time_category_from_now] (行番号: 33 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 33〜40 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
 
 
 
@@ -294,6 +320,7 @@ graph TD
         get_now_iso["get_now_iso()"]
         get_today_date_str["get_today_date_str()"]
         get_display_date["get_display_date()"]
+        get_meal_time_category_from_now["get_meal_time_category_from_now() (Issue #583)"]
         RefCountedLockRegistry["RefCountedLockRegistry (Issue #435)"]
         with_exponential_backoff["with_exponential_backoff()"]
         wait_for_storage_warmup["wait_for_storage_warmup()"]
@@ -320,6 +347,8 @@ graph TD
     get_today_date_str --> pytz
     get_display_date --> datetime
     get_display_date --> pytz
+    get_meal_time_category_from_now --> datetime
+    get_meal_time_category_from_now --> pytz
 
     with_exponential_backoff --> functools
     with_exponential_backoff --> time
@@ -342,6 +371,7 @@ graph TD
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
 | 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 56〜57 / 抜粋: "def wait_for_storage_warmup(ta...") |
 | 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
+| 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (行番号: 26〜29 / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
 
 ## 8. 保守上の注意点
 
@@ -350,6 +380,7 @@ graph TD
 * `wait_for_storage_warmup` では、`os.access` や `Path(target_path)` 自体が例外（権限エラー以外のOSレベルのエラーなど）を発生させた場合のハンドリングが実装されていない。
 * **（Issue #292で新規追加）`retry_with_backoff`**: `with_exponential_backoff`(無限リトライの`while True`デコレータ)や`wait_for_storage_warmup`(パス存在確認限定・呼び出し元なし)とは異なり、任意のcallableを有限回数リトライしつつ最後の例外を再送出する汎用ヘルパーとして追加された。既に`config.py::verify_and_initialize_storage`と`monitors/nas_monitor.py::check_write_permission`から実際に呼び出されている(下記相互参照参照)。
 * **（Issue #435で新規追加）`RefCountedLockRegistry`**: `services/quest_service.py`が保持していた「キーの組み合わせが増えるたびに`threading.Lock`エントリが辞書に無制限に蓄積し、二度と削除されない」3箇所の場当たり実装を置き換えるために追加された。`services/camera_service.py`の`_RefCountedLock`/`_vod_generation_lock`と同じ「参照カウント方式」を採用しており、クラスdocstringには「`lock.locked()`が`False`なら削除する単純な方式では、辞書からロックを取り出した直後から実際に獲得するまでの隙間で別スレッドが剪定してしまい、同一キーに対し2つの別々の`Lock`オブジェクトが生成されて同時に『取得成功』しうる(排他制御が本来防ぐべき事態の再発)」という設計上の注意が明記されている。`acquire(key)`はコンテキストマネージャとして提供され、`with`ブロックを抜けた後に参照カウントが0かつ辞書中のエントリが自分自身のままである場合にのみエントリを削除するため、他スレッドが同じキーで新しいエントリを既に作成済みの場合は誤って削除しない設計になっている。
+* **（Issue #583で新規追加）`get_meal_time_category_from_now`**: `services/line_service.py`の`log_food_record`と`handlers/line_logic.py`の`handle_postback`（`food_record_direct`アクション）の両方が、`food_records.meal_time_category`列に実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたバグの修正として追加された。両呼び出し元とも、以前この列に渡していた値をそのまま本関数の呼び出しに置き換えただけであり、`category`引数（呼び出し元ごとに意味が異なるラベルで、`menu_category`列にのみ使われる）の扱いには手を加えていない。本モジュール単体の`grep`調査時点では、この列を書き込み後に読み出している箇所（ダッシュボード集計・分析処理等）はリポジトリ内に見つからず、`meal_time_category`は書き込み専用（write-only）のカラムのままである可能性がある——この点は本ファイルの解析範囲外であり実際の利用有無は呼び出し元（line_service.md/line_logic.md）や集計系ドキュメント側で要確認。回帰テストは`MY_HOME_SYSTEM/tests/test_core_utils.py`の`TestGetMealTimeCategoryFromNow`クラス（`test_buckets_hour_into_expected_category`、時刻0/3/4/7/10/11/13/14/15/17/18/21/23時をパラメータ化して各時間帯境界を検証）で追加されている。
 
 ## 9. 不明事項一覧
 

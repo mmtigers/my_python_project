@@ -7,7 +7,7 @@ from linebot.v3.messaging import TextMessage
 
 import config
 from core.logger import setup_logging
-from core.utils import get_now_iso, get_today_date_str
+from core.utils import get_now_iso, get_today_date_str, get_meal_time_category_from_now
 from core.database import save_log_async
 
 # ロガー設定
@@ -27,27 +27,74 @@ LINE_TEXT_MAX_CHARS = 4900
 LINE_MAX_MESSAGES_PER_REPLY = 5
 
 
+def _line_text_length(text: str) -> int:
+    """LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)でtextの長さを数える。
+
+    Issue #588: LINE公式ドキュメント(text-character-count)によれば、Messaging APIは
+    文字数をUTF-16コードユニット単位で数え、BMP(基本多言語面)外の文字(絵文字等、
+    Pythonの1コードポイントがUTF-16ではサロゲートペア=2コードユニットになる文字)は
+    2文字分としてカウントされる。以前はPythonの`len(str)`(コードポイント単位)で
+    数えていたため、そのような文字を含むテキストでは実際のLINE側カウントより
+    少なく見積もってしまい、この関数が「上限内」と判定したメッセージでも
+    Messaging API側では上限超過として送信失敗しうる状態だった。
+    """
+    return len(text.encode('utf-16-le')) // 2
+
+
+def _take_line_chars(text: str, max_chars: int) -> str:
+    """`text`の先頭から、LINE基準(UTF-16コードユニット単位)で`max_chars`文字
+    以内に収まる最長のプレフィックスを返す(サロゲートペアの途中では切らない)。
+    """
+    result: List[str] = []
+    total = 0
+    for ch in text:
+        ch_len = 2 if ord(ch) > 0xFFFF else 1
+        if total + ch_len > max_chars:
+            break
+        result.append(ch)
+        total += ch_len
+    return "".join(result)
+
+
+def _split_by_line_char_count(text: str, max_chars: int) -> List[str]:
+    """`text`をLINE基準(UTF-16コードユニット単位)で`max_chars`文字以内の
+    チャンクに分割する(サロゲートペアを分断しない)。
+    """
+    chunks: List[str] = []
+    remaining = text
+    while remaining:
+        piece = _take_line_chars(remaining, max_chars)
+        if not piece:
+            # max_charsが1(UTF-16単位)未満のような呼び出しは想定していないが、
+            # 万一空文字しか切り出せない場合に無限ループしないための安全策。
+            piece = remaining[0]
+        chunks.append(piece)
+        remaining = remaining[len(piece):]
+    return chunks
+
+
 def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:
     """
     Issue #377: 長文を LINE の5000字制限に収まる `TextMessage` へ変換する。
 
-    テキストが `LINE_TEXT_MAX_CHARS` 字以下ならそのまま単一の `TextMessage` を返す
-    （`handlers.line_handler.reply_message` は単一オブジェクト・リストのどちらも
-    受け付けるため、既存呼び出し元の挙動は変わらない）。超過する場合のみ
-    `LINE_TEXT_MAX_CHARS` 字ごとに分割した `TextMessage` のリストを返し、1回の
-    reply/pushで送れる上限(`LINE_MAX_MESSAGES_PER_REPLY`件)を超えるときは末尾を
-    切り詰めて注記を付ける（全文を無制限に送り続けることはしない）。
+    テキストが `LINE_TEXT_MAX_CHARS` 字(Issue #588: LINE基準のUTF-16コードユニット
+    単位)以下ならそのまま単一の `TextMessage` を返す（`handlers.line_handler.reply_message`
+    は単一オブジェクト・リストのどちらも受け付けるため、既存呼び出し元の挙動は
+    変わらない）。超過する場合のみ `LINE_TEXT_MAX_CHARS` 字ごとに分割した
+    `TextMessage` のリストを返し、1回のreply/pushで送れる上限
+    (`LINE_MAX_MESSAGES_PER_REPLY`件)を超えるときは末尾を切り詰めて注記を付ける
+    （全文を無制限に送り続けることはしない）。
     """
-    if len(text) <= LINE_TEXT_MAX_CHARS:
+    if _line_text_length(text) <= LINE_TEXT_MAX_CHARS:
         return TextMessage(text=text)
 
-    chunks = [text[i:i + LINE_TEXT_MAX_CHARS] for i in range(0, len(text), LINE_TEXT_MAX_CHARS)]
+    chunks = _split_by_line_char_count(text, LINE_TEXT_MAX_CHARS)
     if len(chunks) > LINE_MAX_MESSAGES_PER_REPLY:
         chunks = chunks[:LINE_MAX_MESSAGES_PER_REPLY]
         notice = "\n…(文字数上限のため以下省略)"
         last = chunks[-1]
-        if len(last) + len(notice) > LINE_TEXT_MAX_CHARS:
-            last = last[:LINE_TEXT_MAX_CHARS - len(notice)]
+        if _line_text_length(last) + _line_text_length(notice) > LINE_TEXT_MAX_CHARS:
+            last = _take_line_chars(last, LINE_TEXT_MAX_CHARS - _line_text_length(notice))
         chunks[-1] = last + notice
     return [TextMessage(text=c) for c in chunks]
 
@@ -75,10 +122,13 @@ async def log_food_record(user_id: str, user_name: str, category: str, item: str
     """食事を記録し、返信メッセージを返す"""
     final_rec = f"{category}: {item}" + (" (手入力)" if is_manual else "")
     # Issue #373: log_child_health と同様に save_log_async の戻り値を確認する。
+    # Issue #583: meal_time_categoryは以前固定文字列"Dinner"だった。実際の記録時刻から
+    # 時間帯を判定する(categoryはAIが渡す朝食/昼食/夕食等だが、記録時刻と必ずしも
+    # 一致しない可能性があるため、時間帯カテゴリは記録時刻そのものを基準にする)。
     save_ok = await save_log_async(
         config.SQLITE_TABLE_FOOD,
         ["user_id", "user_name", "meal_date", "meal_time_category", "menu_category", "timestamp"],
-        (user_id, user_name, get_today_date_str(), "Dinner", final_rec, get_now_iso())
+        (user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())
     )
     if not save_ok:
         logger.error(f"log_food_record の記録保存に失敗しました (user_id={user_id}, item={item})")

@@ -145,7 +145,7 @@
 ### `AGE_PATTERN` (モジュール定数)（D-L12で変更）
 
 * **役割**: 名前要素のテキストから年齢を抽出するための正規表現。"うるは(23歳)"のような全角/半角括弧付き数字、または「歳」「才」が続く数字表記のいずれかにマッチする。ランキングバッジ等の1桁の括弧数字（例: "(1)"）を誤って年齢と判定しないよう、桁数を2桁に限定している。**（D-L12で変更）** 括弧内の「歳」「才」の有無を判別できるよう、以前は非捕捉グループだった`(?:歳|才)?`を捕捉グループ`(歳|才)?`に変更した。マッチ結果は3グループ: `group(1)`＝括弧内の数字、`group(2)`＝括弧内の「歳」「才」（無ければ`None`）、`group(3)`＝括弧無しで「歳」「才」が続く数字。呼び出し側（**品質で`_parse_html`から分離**された`WebMonitor._extract_cast_age`）は、`group(2)`が`None`（＝括弧内に「歳」「才」の明示が無い）の場合のみ、`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`の範囲かどうかで年齢として採用するか判定する（詳細は`WebMonitor._extract_cast_age`参照）。以前は括弧内の数字を「歳」「才」の有無に関わらず無条件に年齢とみなしていたため、"(85)"のような部屋番号・順位バッジ等の括弧付き2桁数字を誤って年齢と判定しうる懸念があった。
-* 根拠: [定義とコメント] (行番号: 116〜129 / 抜粋: "# 名前要素のテキストから年齢を抽出するための正規表現。\n# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、\n...\n# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも\n# 無条件に年齢とみなしていたため" / "AGE_PATTERN = re.compile(r'[（(]\\s*(\\d{2})\\s*(歳|才)?\\s*[）)]|(\\d{2})\\s*(?:歳|才)')")
+* 根拠: [定義とコメント] (行番号: 122〜135 / 抜粋: "# 名前要素のテキストから年齢を抽出するための正規表現。\n# "うるは(23歳)" / "浅見ゆき（30）" / "小鳥(ことり)セラピスト  22歳" のように、\n...\n# D-L12: 括弧内の数字は「歳」「才」が続かない場合(第2group=None)でも\n# 無条件に年齢とみなしていたため" / "AGE_PATTERN = re.compile(r'[（(]\\s*(\\d{2})\\s*(歳|才)?\\s*[）)]|(\\d{2})\\s*(?:歳|才)')")
 
 
 ### `SiteConfig`
@@ -200,36 +200,46 @@
 ### `MonitorConfig`
 
 * **役割**: 監視対象サイト一覧（`SITES`）、ファイルパス、ネットワーク設定（User-Agent、タイムアウト、リトライ）、Discord Webhook URLなど、モニタリング処理全体で使用される設定値・定数を集約管理するクラス（インスタンス化は行われない）。
-* 根拠: [クラス定義とDocstring] (行番号: 275〜276 / 抜粋: "class MonitorConfig:\n    """モニタリング設定および定数管理クラス。"""")
+* 根拠: [クラス定義とDocstring] (行番号: 299〜300 / 抜粋: "class MonitorConfig:\n    """モニタリング設定および定数管理クラス。"""")
 
 
 * **引数/リクエスト**: なし（クラス変数として静的に定義）
-* 根拠: [クラス変数定義群] (行番号: 278〜362 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")
+* 根拠: [クラス変数定義群] (行番号: 299〜407 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")
 
 
 * **戻り値/レスポンス**: 該当なし
-* **副作用**: `SITES`のクラス変数定義時に`_load_sites(SITES_JSON_PATH)`を呼び出し`sites.json`を読み込む（不正があれば`RuntimeError`でモジュールimport自体が失敗する）。`DISCORD_WEBHOOK_URL`のクラス変数定義時に環境変数`DISCORD_WEBHOOK_URL`を読み込む。
-* 根拠: [クラス変数の初期化式] (行番号: 281 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)")、[環境変数読み込み] (行番号: 300 / 抜粋: "DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')")
+* **副作用**: `SITES`のクラス変数定義時に`_load_sites(SITES_JSON_PATH)`を呼び出し`sites.json`を読み込む（不正があれば`RuntimeError`でモジュールimport自体が失敗する）。`DISCORD_WEBHOOK_URL`のクラス変数定義時にモジュールレベル関数`_resolve_discord_webhook_url()`（**Issue #586で追加**）を呼び出し、環境変数`DISCORD_WEBHOOK_NOTIFY`→`DISCORD_WEBHOOK_URL`の優先順位で解決する（後述）。
+* 根拠: [クラス変数の初期化式] (行番号: 305, 328 / 抜粋: "SITES: List[SiteConfig] = _load_sites(SITES_JSON_PATH)" / "DISCORD_WEBHOOK_URL: Optional[str] = _resolve_discord_webhook_url()")
+
+### `_resolve_discord_webhook_url`（Issue #586で新規追加）
+
+* **役割**: Discord通知先のWebhook URLを環境変数から解決するモジュールレベル関数。`MY_HOME_SYSTEM/config.py`は`DISCORD_WEBHOOK_NOTIFY`を優先し未設定時のみレガシーの`DISCORD_WEBHOOK_URL`にフォールバックする(`DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")`)が、本ファイルは以前`os.getenv('DISCORD_WEBHOOK_URL')`のみを参照する独自解決をしており、実機で`DISCORD_WEBHOOK_NOTIFY`のみが設定されている運用（config.py側の優先順位に合わせた設定）では本ファイルの通知だけが無設定として扱われ、Discord通知が一切送信されなくなっていた。config.pyと同じ優先順位に揃えるためモジュールレベル関数として切り出した。**この「1行の式のためだけに関数を切り出す」という一見過剰な設計の理由**: `MonitorConfig.DISCORD_WEBHOOK_URL`はモジュールimport時に1度だけ評価されるクラス属性であり、値を差し替えて挙動をテストするには本来`importlib.reload`でモジュールを再評価する必要がある。しかし本ファイルの他の回帰テストは`newface_monitor`モジュールを`sys.modules`経由で共有しており、`reload`はそのモジュールオブジェクトのクラスを新しいオブジェクトへ作り直してしまうため、他テストファイルが同モジュールに対して行っている`monkeypatch.setattr`ベースのフィクスチャを壊す（実際に試して確認された）。この副作用を避けるため、環境変数の優先順位解決だけを独立関数へ切り出し、`_resolve_discord_webhook_url()`を直接呼び出すだけで`importlib.reload`無しに単体テストできるようにした（関数自身のDocstringにも同旨の記載がある）。
+* 根拠: [関数定義とDocstring] (行番号: 224〜239 / 抜粋: "def _resolve_discord_webhook_url() -> Optional[str]:\n    """通知先のDiscord Webhook URLを環境変数から解決する。" / "MonitorConfigのクラス属性(モジュールimport時に1度だけ評価される)から\n    切り出した関数として定義することで、モジュール全体をimportlib.reloadせずに\n    単体テストできるようにしている。")、[reloadを避ける理由の詳細] (`test_newface_monitor_discord_webhook_priority.py` 行番号: 13〜17 / 抜粋: "`MonitorConfig.DISCORD_WEBHOOK_URL`はモジュールimport時に1度だけ評価される\nクラス属性のため、環境変数を変えて直接テストすることができない\n(importlib.reloadはモジュールを共有する他のテストファイルの状態を壊すため\n使わない)。解決ロジックを切り出した`_resolve_discord_webhook_url()`関数を\n直接呼び出すことで、モジュール全体のreload無しに単体テストする。")、回帰テスト`test_newface_monitor_discord_webhook_priority.py::TestResolveDiscordWebhookUrlPriority`（3パターン: 両方設定/URLのみ/両方未設定）
+* **引数**: なし
+* **戻り値**: `Optional[str]`。`DISCORD_WEBHOOK_NOTIFY`が設定されていればその値、未設定なら`DISCORD_WEBHOOK_URL`の値、いずれも未設定なら`None`。
+* **副作用**: なし（環境変数の読み取りのみ）
+* **エラーハンドリング**: なし
+* 根拠: [解決式] (行番号: 240 / 抜粋: "return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')")
 
 
 * **`MASS_DETECTION_WARNING_THRESHOLD: int = 20`について**: `_check_site`が既知キャスト存在下での大量新規検知（known_castsデータ喪失等による誤検知の疑い）を警告ログとして検出する際の閾値。通常運用時の新規検知は数件〜十数件程度であることを踏まえた目安値。
-* 根拠: [定数定義とコメント] (行番号: 303〜305 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
+* 根拠: [定数定義とコメント] (行番号: 342〜344 / 抜粋: "# 通常運用時の新規検知は数件〜十数件程度のため、この件数以上の差分は\n    # known_castsデータの喪失/巻き戻り等による誤検知の疑いとして警告する目安値\n    MASS_DETECTION_WARNING_THRESHOLD: int = 20")
 
 
 * **`KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168`について（Issue #538で追加）**: `_merge_known_casts` が既知キャストを剪定する閾値。known_casts は #237 以来 union 保存(既知キャストを消さない)のため、退店済みキャストやフォールバック ID の揺れで生じたエントリが無限に蓄積していた。一覧ページからこの回数連続で欠けたキャストだけを剪定する(1時間毎のcron前提で約7日分)。#237 が防ぎたかった「単発のパース失敗で消える→再通知」は、単発では到底達しない閾値にすることで引き続き防ぐ。
-* 根拠: [定数定義とコメント] (行番号: 321〜327 / 抜粋: "# Issue #538: known_casts は #237 以来 union 保存(既知キャストを消さない)のため、", "KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168")
+* 根拠: [定数定義とコメント] (行番号: 345〜350 / 抜粋: "# Issue #538: known_casts は #237 以来 union 保存(既知キャストを消さない)のため、", "KNOWN_CAST_PRUNE_AFTER_MISSES: int = 168")
 
 
 * **`AGE_PLAUSIBLE_MIN: int = 18` / `AGE_PLAUSIBLE_MAX: int = 79`について（D-L12で追加）**: `AGE_PATTERN`が「歳」「才」の明示無しに括弧内の2桁数字を年齢と判定する場合の妥当性チェック用範囲。`WebMonitor._extract_cast_age`（**品質で`_parse_html`から分離**）で、括弧内数字に「歳」「才」の明示が無い場合のみこの範囲でフィルタする（範囲外なら年齢として採用しない）。「歳」「才」で明示された数字は、この範囲に関わらず無条件に信頼する。
-* 根拠: [定数定義とコメント] (行番号: 306〜311 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
+* 根拠: [定数定義とコメント] (行番号: 351〜356 / 抜粋: "# D-L12: AGE_PATTERNが「歳」「才」の明示無しに括弧内の2桁数字を年齢と\n    # 判定する場合の妥当性チェック用範囲。この範囲外の値は年齢として採用しない\n    # (部屋番号・順位バッジ等の誤検知を減らすための足切り。「歳」「才」で\n    # 明示された数字は範囲に関わらず信頼する)。\n    AGE_PLAUSIBLE_MIN: int = 18\n    AGE_PLAUSIBLE_MAX: int = 79")
 
 
 * **`CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24`について（2026-09-02のbellica閉鎖対応で追加）**: ネットワーク起因の巡回失敗がこの回数連続したサイトを「閉鎖・移転の疑い」としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格するための閾値。1時間毎のcron実行前提で約1日分に相当する。2026-09-02のbellica閉鎖時に、消失したサイトが毎時ERRORを出し続けて一次ヘルスチェックが発報し続けた事象の再発防止として導入された。
-* 根拠: [定数定義とコメント] (行番号: 313〜319 / 抜粋: "# ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」\n    # としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格する\n    CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24")
+* 根拠: [定数定義とコメント] (行番号: 358〜364 / 抜粋: "# ネットワーク起因の巡回失敗がこの回数連続したサイトは「閉鎖・移転の疑い」\n    # としてDiscordへ1回だけアラート通知し、以降の失敗ログをWARNINGに降格する\n    CONSECUTIVE_FAILURE_ALERT_THRESHOLD: int = 24")
 
 
 * **`SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5`について（Issue #395で追加）**: 同一実行内で失敗として計上したサイト数が総サイト数に占める割合がこの値を超える場合、個々のサイトの閉鎖ではなく自局側（Pi側の回線断・DNS障害等）の障害とみなし、`_send_pending_site_failure_alerts`が閉鎖疑いアラートの一斉送信を抑止する（79サイト分のアラートが同時に飛ぶのを防ぐ）。
-* 根拠: [定数定義とコメント] (行番号: 320〜323 / 抜粋: "# #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、\n    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、\n    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。\n    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5")
+* 根拠: [定数定義とコメント] (行番号: 365〜368 / 抜粋: "# #395: 同一実行内で失敗したサイト数が総数に占める割合がこの値を超える場合、\n    # 個々のサイトの閉鎖ではなく自局側(Pi側の回線断・DNS障害等)の障害とみなし、\n    # 閉鎖疑いアラートの一斉送信を抑止する(79サイト分のアラートが同時に飛ぶのを防ぐ)。\n    SELF_OUTAGE_SUPPRESS_RATIO: float = 0.5")
 
 
 * **エラーハンドリング**: なし（`SITES`初期化時の`_load_sites`呼び出しが例外を送出しうる点を除く。上記`_load_sites`の項を参照）
@@ -795,47 +805,66 @@
 * 根拠: [try-exceptブロックとコメント] (行番号: 942〜948 / 抜粋: "except requests.RequestException as e:\n            # 呼び出し元でハンドリングするために再送出する。ログの重大度は\n            # 連続失敗状態に応じて _handle_site_network_failure が決定するため、\n            # ここでは無条件にERRORを記録しない")
 
 
-### `WebMonitor._extract_raw_name` / `_extract_cast_age` / `_extract_cast_link_and_id` / `_extract_cast_image_url`（品質で追加）
+### `WebMonitor._extract_raw_name` / `_extract_cast_link_and_id` / `_extract_cast_image_url`（品質で追加）
 
 * **（Issue #538 で修正）** `_extract_cast_link_and_id` で ID を抽出できない場合のフォールバック ID のフィンガープリントを、コンテナの生 HTML 全体(`str(div)`)から「名前 + 画像 URL(無ければ表示テキスト、それも無ければ生 HTML)」の SHA1 先頭10桁に変更した。以前は lazyload 状態・「NEW」バッジ・nonce 等のリクエストごとに変わる属性で毎回 ID が変わり、毎時再通知と `known_casts_*.json` の無限成長を招き得た。(同 Issue の「N 回連続で欠けたキャストの剪定」は未実装。)
-* 根拠: (行番号: 1424〜1427 / 抜粋: "image_url = WebMonitor._extract_cast_image_url(div, site)", "stable_source = image_url or div.get_text(\" \", strip=True) or str(div)")
+* 根拠: (行番号: 1559〜1560 / 抜粋: "image_url = WebMonitor._extract_cast_image_url(div, site)", "stable_source = image_url or div.get_text(\" \", strip=True) or str(div)")
 
-* **役割**: いずれも`_parse_html`のキャストカードごとのパース処理（以前は170行超・深いネストの単一ループ本体だった）から分離された純粋な抽出処理の静的メソッド群。`_extract_raw_name`は名前要素・名前文字列の抽出（`name_first_text_only`/`name_strip_after_tab`フラグの分岐を含む）、`_extract_cast_age`は`AGE_PATTERN`を用いた年齢抽出（D-L12の妥当性チェックを含む）、`_extract_cast_link_and_id`は詳細URL・IDの抽出（`id_query_param`優先→キー=値でないクエリ文字列→パス末尾セグメント→SHA1フィンガープリントの順のフォールバック）、`_extract_cast_image_url`は画像URLの抽出（`image_from_style`によるインラインCSS抽出、または`image_attr`／`src`フォールバック）を、それぞれ副作用なしに行う。名前が空文字だった場合の`skip_unnamed_casts`分岐によるカード読み飛ばし（`continue`）とそれに伴うログ出力は、ループ制御が必要なため`_parse_html`側に残されている。
-* 根拠: [各メソッド定義とDocstring] (行番号: 1131〜1132, 1166〜1167, 1200〜1201, 1276〜1277 / 抜粋: "def _extract_raw_name(div: Tag, site: SiteConfig) -> Tuple[str, Optional[Tag]]:", "def _extract_cast_age(name_elem: Optional[Tag]) -> str:", "def _extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str) -> Tuple[str, str]:", "def _extract_cast_image_url(div: Tag, site: SiteConfig) -> str:")
-
-
-* **引数/リクエスト**: `_extract_raw_name(div: Tag, site: SiteConfig)`、`_extract_cast_age(name_elem: Optional[Tag])`、`_extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str)`（`name`はID抽出が全フォールバックを尽くしても取得できない場合のフィンガープリント付きID生成に使用）、`_extract_cast_image_url(div: Tag, site: SiteConfig)`
-* 根拠: [各シグネチャ] (行番号: 1131, 1166, 1200, 1276)
+* **役割**: いずれも`_parse_html`のキャストカードごとのパース処理（以前は170行超・深いネストの単一ループ本体だった）から分離された純粋な抽出処理の静的メソッド群。`_extract_raw_name`は名前要素・名前文字列の抽出（`name_first_text_only`/`name_strip_after_tab`フラグの分岐を含む）、`_extract_cast_link_and_id`は詳細URL・IDの抽出（`id_query_param`優先→キー=値でないクエリ文字列→パス末尾セグメント→SHA1フィンガープリントの順のフォールバック）、`_extract_cast_image_url`は画像URLの抽出（`image_from_style`によるインラインCSS抽出、または`image_attr`／`src`フォールバック）を、それぞれ副作用なしに行う。年齢抽出を担う`_extract_cast_age`は**Issue #589でロジックが変更された**ため、次項で独立して説明する。名前が空文字だった場合の`skip_unnamed_casts`分岐によるカード読み飛ばし（`continue`）とそれに伴うログ出力は、ループ制御が必要なため`_parse_html`側に残されている。
+* 根拠: [各メソッド定義とDocstring] (行番号: 1415〜1416, 1492〜1493, 1573〜1574 / 抜粋: "def _extract_raw_name(div: Tag, site: SiteConfig) -> Tuple[str, Optional[Tag]]:", "def _extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str) -> Tuple[str, str]:", "def _extract_cast_image_url(div: Tag, site: SiteConfig) -> str:")
 
 
-* **戻り値/レスポンス**: `_extract_raw_name`は`Tuple[str, Optional[Tag]]`（名前文字列とname_elem）、`_extract_cast_age`は`str`（年齢文字列、抽出不可なら空文字）、`_extract_cast_link_and_id`は`Tuple[str, str]`（detail_url, cast_id）、`_extract_cast_image_url`は`str`（画像URL、抽出不可なら空文字）
-* 根拠: [各戻り値ヒント] (行番号: 1131, 1166, 1200, 1276)
+* **引数/リクエスト**: `_extract_raw_name(div: Tag, site: SiteConfig)`、`_extract_cast_link_and_id(div: Tag, site: SiteConfig, name: str)`（`name`はID抽出が全フォールバックを尽くしても取得できない場合のフィンガープリント付きID生成に使用）、`_extract_cast_image_url(div: Tag, site: SiteConfig)`
+* 根拠: [各シグネチャ] (行番号: 1415, 1492, 1573)
+
+
+* **戻り値/レスポンス**: `_extract_raw_name`は`Tuple[str, Optional[Tag]]`（名前文字列とname_elem）、`_extract_cast_link_and_id`は`Tuple[str, str]`（detail_url, cast_id）、`_extract_cast_image_url`は`str`（画像URL、抽出不可なら空文字）
+* 根拠: [各戻り値ヒント] (行番号: 1415, 1492, 1573)
 
 
 * **副作用**: いずれもなし（純粋な文字列/タプル抽出処理のみ。ログ出力は行わない）
 * **エラーハンドリング**: いずれもなし（呼び出し元`_parse_html`の`try/except`が個別要素のパース失敗全体を捕捉する）
 
 
+### `WebMonitor._extract_cast_age`（D-L12で追加、Issue #589で修正）
+
+* **役割**: name要素全体のテキスト（`name_elem.get_text(strip=True)`。`name_first_text_only`/`name_strip_after_tab`で名前から切り離された年齢の兄弟要素・タブ区切り部分も含む）から`AGE_PATTERN`にマッチする年齢候補を抽出する`@staticmethod`。**（Issue #589で修正）** 以前は`AGE_PATTERN.search()`により文字列中最初（最も左）の1件のみを候補とし、それが「歳」「才」の明示が無い括弧内数字でD-L12の妥当性範囲チェック（`MonitorConfig.AGE_PLAUSIBLE_MIN`〜`AGE_PLAUSIBLE_MAX`、18〜79）に落ちた場合、以降の候補を一切試さないまま抽出自体が空文字で終わっていた（例: `"No.(12) さくら(25歳)"`のように、部屋番号・連番等の括弧数字が本来の年齢表記より前に出現するケース。`"(12)"`が却下された時点で検索打ち切りとなり、後続の`"(25歳)"`を一切試さなかった）。現在は`AGE_PATTERN.finditer()`で文字列中の全マッチを出現順に走査し、(a)括弧内数字に「歳」「才」の明示がある、(b)括弧内数字のみだが妥当性範囲内である、(c)括弧無しで「歳」「才」が続く数字（正規表現上この形式は常に「歳」「才」を伴う）、のいずれかを満たす最初の候補が見つかった時点でそれを採用し`break`する。妥当性チェックに落ちた候補は（以前のように抽出全体を打ち切るのではなく）読み飛ばされ、ループが後続の候補を試す点が変更点であり、D-L12由来の妥当性チェックそのものの範囲・判定基準（`MonitorConfig.AGE_PLAUSIBLE_MIN`/`MAX`）は変更していない。回帰テストは`test_newface_monitor_parse.py`の`TestExtractCastAgeSkipsImplausibleLeadingNumber`（4パターン: 却下後の後続候補採用、通常時の非退行確認、妥当な年齢が皆無な場合に空文字を維持、「歳」「才」明示時は範囲外でも信頼するD-L12挙動の維持）。
+* 根拠: [メソッド定義とDocstring] (行番号: 1449〜1463 / 抜粋: "@staticmethod\n    def _extract_cast_age(name_elem: Optional[Tag]) -> str:\n        \"\"\"name要素全体のテキストから年齢を抽出する（品質: _parse_htmlから分離）。")、[Issue #589のコメントとfinditerループ] (行番号: 1466〜1489 / 抜粋: "# Issue #589: 以前はAGE_PATTERN.search()で最初の一致のみを見ていたため、\n            # \"No.(12) さくら(25歳)\"のように年齢より前に(歳/才の無い)2桁の括弧数字\n            # (連番・部屋番号等)が出現すると、その数字がD-L12の妥当性範囲チェックで\n            # 却下された時点で検索を打ち切ってしまい、後続の本来の年齢\n            # (\"(25歳)\")を一切試さないまま年齢抽出自体が失敗していた。\n            # finditer()で全ての候補を出現順に走査し、妥当性チェックを通過する\n            # 最初の候補が見つかるまで後続の候補も試すよう修正した。" / "for age_match in AGE_PATTERN.finditer(name_elem.get_text(strip=True)):" / "if bracket_suffix or (\n                        MonitorConfig.AGE_PLAUSIBLE_MIN\n                        <= int(bracket_num)\n                        <= MonitorConfig.AGE_PLAUSIBLE_MAX\n                    ):\n                        age = bracket_num\n                        break")
+
+
+* **引数/リクエスト**: `name_elem: Optional[Tag]`（名前要素。存在しない場合は`None`）
+* 根拠: [引数定義とDocstring] (行番号: 1450, 1459 / 抜粋: "def _extract_cast_age(name_elem: Optional[Tag]) -> str:" / "name_elem (Optional[Tag]): 名前要素（存在しない場合はNone）。")
+
+
+* **戻り値/レスポンス**: `str`（抽出された年齢文字列。`name_elem`が`None`、またはテキスト中に妥当な年齢候補が1件も見つからない場合は空文字のまま）
+* 根拠: [Docstringと初期化・return文] (行番号: 1461〜1462, 1464, 1489 / 抜粋: "Returns:\n            str: 抽出された年齢文字列（抽出できない場合は空文字）。" / "age = \"\"" / "return age")
+
+
+* **副作用**: なし（`name_elem.get_text(strip=True)`によるテキスト抽出と正規表現マッチのみ。ログ出力・状態変更は行わない）
+* **エラーハンドリング**: なし（`name_elem`が`None`の場合は`if name_elem:`分岐によりループ自体を実行せず空文字を返す。個別要素のパース失敗全体は呼び出し元`_parse_html`の`try/except`が捕捉する）
+* 根拠: [name_elemのNoneガード] (行番号: 1465 / 抜粋: "if name_elem:")
+
+
 ### `WebMonitor._parse_html`（D-L12で変更、品質でヘルパーメソッドへ分割）
 
-* **役割**: `BeautifulSoup`オブジェクトから、`selector_container`でキャストのコンテナ要素を抽出し、各コンテナについて`_extract_raw_name`/`_extract_cast_age`/`_extract_cast_link_and_id`/`_extract_cast_image_url`（いずれも品質で追加）を順に呼び出して`CastMember`を構築する。**（品質で変更）** 以前は名前・年齢・リンク/ID・画像の4種の抽出ロジックが170行超の単一`for`ループ本体に直接書かれ、深くネストした条件分岐で読みにくかったため、ループ制御（`skip_unnamed_casts`時の`continue`とログ出力）のみを本メソッドに残し、各フィールドの純粋な抽出処理を上記4つの静的ヘルパーメソッドへ分離した。抽出ロジック自体（`AGE_PATTERN`の3グループ判定、ID抽出の複数段フォールバック等、D-L12を含む）は分離前と完全に同一である。
-* 根拠: [メソッド定義とDocstring] (行番号: 1306〜1315 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1328, 1351〜1353 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
+* **役割**: `BeautifulSoup`オブジェクトから、`selector_container`でキャストのコンテナ要素を抽出し、各コンテナについて`_extract_raw_name`/`_extract_cast_age`/`_extract_cast_link_and_id`/`_extract_cast_image_url`（いずれも品質で追加）を順に呼び出して`CastMember`を構築する。**（品質で変更）** 以前は名前・年齢・リンク/ID・画像の4種の抽出ロジックが170行超の単一`for`ループ本体に直接書かれ、深くネストした条件分岐で読みにくかったため、ループ制御（`skip_unnamed_casts`時の`continue`とログ出力）のみを本メソッドに残し、各フィールドの純粋な抽出処理を上記4つの静的ヘルパーメソッドへ分離した。抽出ロジック自体（ID抽出の複数段フォールバック等）は分離前と完全に同一である。ただし年齢抽出（`_extract_cast_age`）のみ、分離後に**Issue #589**で`.search()`から`.finditer()`ベースへ実装が変更されている（D-L12の妥当性チェック自体の範囲・判定基準は変更なし。詳細は前項参照）。
+* 根拠: [メソッド定義とDocstring] (行番号: 1602〜1611 / 抜粋: "def _parse_html(self, soup: BeautifulSoup, site: SiteConfig) -> Set[CastMember]:\n        """HTMLスープからキャスト情報を抽出する。")、[ヘルパー呼び出し] (行番号: 1624, 1647〜1649 / 抜粋: "name, name_elem = self._extract_raw_name(div, site)", "age = self._extract_cast_age(name_elem)\n                detail_url, cast_id = self._extract_cast_link_and_id(div, site, name)\n                image_url = self._extract_cast_image_url(div, site)")
 
 
 * **引数/リクエスト**: `soup: BeautifulSoup`（解析対象のHTML）, `site: SiteConfig`（対象サイトの設定。セレクタ・ベースURLに使用）
-* 根拠: [引数定義とDocstring] (行番号: 1306, 1309〜1311 / 抜粋: "soup (BeautifulSoup): 解析対象のHTML。\n            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。")
+* 根拠: [引数定義とDocstring] (行番号: 1602, 1606〜1607 / 抜粋: "soup (BeautifulSoup): 解析対象のHTML。\n            site (SiteConfig): 対象サイトの設定（セレクタ・ベースURLに使用）。")
 
 
 * **戻り値/レスポンス**: `Set[CastMember]`（抽出されたキャストの集合。コンテナ要素が見つからない場合は空集合）
-* 根拠: [Docstringと各return] (行番号: 1313〜1314, 1324, 1370 / 抜粋: "Returns:\n            Set[CastMember]: 抽出されたキャストの集合。")
+* 根拠: [Docstringと各return] (行番号: 1609〜1610, 1620, 1666 / 抜粋: "Returns:\n            Set[CastMember]: 抽出されたキャストの集合。")
 
 
 * **副作用**: セレクタが要素にマッチしなかった場合の警告ログ出力、個別要素のパース失敗時の警告ログ出力、デバッグログ出力。URLの正規化（クエリ文字列・フラグメントの除去によるID安定化、`urljoin`による絶対URL化、別ドメインリンクへのドメインプレフィックス付与）は`_extract_cast_link_and_id`（品質で追加）に委譲される。
-* 根拠: [ID正規化のコメントと処理（委譲先）] (行番号: 1244〜1251 / 抜粋: "# クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与\n                # されるとcast_idが実行ごとにブレて「新規キャスト」の\n                # 誤検知を招くため、先に除去する")
+* 根拠: [ID正規化のコメントと処理（委譲先）] (行番号: 1538〜1545 / 抜粋: "# クエリ文字列(?utm=...等)やURLフラグメント(#...等)が付与\n                # されるとcast_idが実行ごとにブレて「新規キャスト」の\n                # 誤検知を招くため、先に除去する")
 
 
 * **エラーハンドリング**: コンテナ要素が1件も見つからない場合は警告ログを出力し空集合を返す。個別のキャスト要素パース中に例外が発生した場合は警告ログを出力し、その要素をスキップして次の要素の処理を継続する（`continue`）。
-* 根拠: [try-exceptブロック] (行番号: 1364〜1367 / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
+* 根拠: [try-exceptブロック] (行番号: 1660〜1663 / 抜粋: "except Exception as e:\n                # 個別のパースエラーで全体を止めない\n                logger.warning(f"Error parsing specific cast element (site: '{site.site_id}'): {e}")\n                continue")
 
 
 ### `WebMonitor.close`
@@ -1295,7 +1324,10 @@ graph TD
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
 * **（D-L6で追加）Discord embedの文字数上限は250文字に安全側で切り詰める**: `DiscordNotifier._EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`はいずれもDiscordの実際の上限（title 256文字、field.value 1024文字）より小さい250文字に設定している。今後embedへ新しいフィールドを追加する際、そのフィールド値がスクレイピング結果（外部サイト由来で長さが保証されない文字列）である場合は、`_truncate_for_embed`で同様に切り詰めること。
 * **（D-L9で追加）日次サマリの計上件数はnotify()の戻り値に依存する**: `_check_site`は`data_manager.record_daily_new_casts`に渡す件数として`notifier.notify(...)`の戻り値（実送信件数）を使う。`notify`のシグネチャを変更する場合（戻り値の意味を変える等）は、この呼び出し元の前提が崩れないか確認すること。
+* **（Issue #586で追加）モジュールimport時に1度だけ評価されるクラス属性を単体テストする際は、値解決ロジックをモジュールレベル関数へ切り出す**: `MonitorConfig.DISCORD_WEBHOOK_URL`は以前`os.getenv('DISCORD_WEBHOOK_URL')`という式をクラス変数の初期化式に直接書いていたが、この式自体を環境変数を変えて検証するには本来`importlib.reload`でモジュールを再評価する必要がある。しかし本ファイルの回帰テスト群は`newface_monitor`モジュールを`sys.modules`経由で共有しており、`reload`はモジュールのクラスオブジェクトを新しく作り直すため、他のテストファイルが同モジュールに対して行っている`monkeypatch.setattr`ベースのフィクスチャを壊す（実際に試して確認された）。このため「1行の式のために関数を1つ切り出す」一見過剰な設計を採り、`_resolve_discord_webhook_url()`という独立関数に解決ロジックを移し、`DISCORD_WEBHOOK_URL`はこれを呼び出すだけにした。同種の「クラス属性の初期化式をimportlib.reload無しに単体テストしたい」という制約に今後遭遇した場合も、このパターン（ロジックをモジュールレベル関数へ切り出し、クラス属性からはそれを呼ぶだけにする）を踏襲すること。回帰テストは`test_newface_monitor_discord_webhook_priority.py::TestResolveDiscordWebhookUrlPriority`。
+* 根拠: [`_resolve_discord_webhook_url`定義とDocstring] (行番号: 224〜240)、[reloadを避ける理由] (`test_newface_monitor_discord_webhook_priority.py` 行番号: 13〜17)
 * **（D-L12で追加）`AGE_PLAUSIBLE_MIN`/`AGE_PLAUSIBLE_MAX`は経験的な範囲であり万能ではない**: 括弧内の数字に「歳」「才」の明示が無い場合のみこの範囲（18〜79）でフィルタするが、この範囲内に収まる非年齢の2桁数字（部屋番号・順位バッジ等）は依然として誤って年齢と判定されうる。あくまで明らかに範囲外の値（例: レビューで指摘された"(85)"）を除外するための最小限の足切りであり、完全な誤検知防止ではない。
+* **（Issue #589で追加）`_extract_cast_age`は「最初の1件」ではなく「最初に妥当性チェックを通る1件」を探す**: 直上のD-L12の妥当性チェック（`AGE_PLAUSIBLE_MIN`/`AGE_PLAUSIBLE_MAX`の範囲判定）自体は変更していないが、以前は`AGE_PATTERN.search()`で得た文字列中最初の1件だけにこのチェックを適用し、そこで落ちると（後ろに本来の年齢表記があっても）抽出全体を空文字で諦めていた。現在は`AGE_PATTERN.finditer()`で全候補を出現順に試し、チェックを通らない候補は読み飛ばして次を試すため、"No.(12) さくら(25歳)"のように非年齢の括弧数字が本来の年齢より先に出現するテキストでも正しく後続の年齢を拾える。新たにこの関数へ手を加える際は、`break`が「最初に見つかった候補」ではなく「最初に見つかった**妥当な**候補」で行われている点（＝ループを回し切る前に安易に`return`しない設計）を崩さないこと。回帰テストは`test_newface_monitor_parse.py::TestExtractCastAgeSkipsImplausibleLeadingNumber`。
 * **ハードコードされた値**: 各サイトの対象URL・CSSセレクタ、NASパス(`/mnt/nas/home_system/newface_monitor/data`)、User-Agent文字列、タイムアウト・リトライ回数、日次サマリ送信時刻（`DAILY_SUMMARY_HOUR`、既定21時）などが`MonitorConfig`クラスの名前付き定数として集約されている(各サイト定義自体は#413で`sites.json`へ外出し済み)。**[Issue #451: 対応済み]** これらは元々`MonitorConfig`という単一クラスに集約されており、「多数のマジックナンバーが各所に散在」という状態ではなかった。唯一関数内にリテラル直書きだった日次サマリ送信時刻(`21`)のみ`DAILY_SUMMARY_HOUR`定数として`MonitorConfig`に追加し、`_maybe_send_daily_summary`から参照するよう変更した。設定ファイル化(`sites.json`のような外部化)までは行っていない。
 * **（Issue #365で追加）隔離は内容起因の破損に限る**: `DataManager.load_known_casts`が`.corrupted-*`へ隔離するのは`_CONTENT_ERRORS`（`ValueError`/`TypeError`/`KeyError`）で読めなかった場合だけであり、`OSError`（NAS/CIFSの瞬断等）の場合は`KnownCastsUnavailableError`を送出して`_check_site`が当該サイトを今回の実行ではスキップする（巡回・通知・保存なし）。この例外を新たな呼び出し元で握りつぶして空集合として続行すると、全キャストの再通知とunion保存による退店済みキャストの復活を再発させるため、必ずスキップ扱いにすること。回帰テストは`test_newface_monitor_datamanager.py`の`TestLoadKnownCastsTransientIOErrorIsNotQuarantined`/`TestLoadKnownCastsContentErrorsAreQuarantined`。
 * 根拠: [OSError分岐のコメント] (行番号: 696〜703 / 抜粋: "# 中身は正しい可能性が高いため隔離せず、当該サイトの処理を\n            # スキップさせる(以前は種別を問わず .corrupted-* へ退避していたため、\n            # 正常なファイルが隔離され、.bakが無ければ空集合→全キャスト再通知、\n            # 以降はunionで保存されるため隔離前のデータは永久に戻らなかった)。")

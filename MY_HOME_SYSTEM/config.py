@@ -271,6 +271,14 @@ SQLITE_TABLE_FOOD: str = "food_records"
 SQLITE_TABLE_CAR: str = "car_records"
 SQLITE_TABLE_CHILD: str = "child_health_records"
 SQLITE_TABLE_DEFECATION: str = "defecation_records"
+# Issue #584: このテーブルへのINSERT/UPDATE経路はこのリポジトリ内には存在しない
+# (`analysis_service.load_ai_report`による読み取りのみ)。`dashboard.py`が
+# `timestamp`列を新形式(core.utils.get_now_ioのISO8601)・旧形式("YYYY-MM-DD
+# HH:MM:SS"のnaive文字列)の両方でパースできるよう作られている(Issue #410 L-L2)
+# ことから、過去に実データが書き込まれていたと考えられ、このリポジトリ管理外の
+# 外部プロセス(実機で手動運用、または別リポジトリのスクリプト)がこのテーブルへ
+# 書き込む前提の設計と判断している。本リポジトリ側に書込コードを追加する対応は
+# 不要(表示側のみで完結する)。
 SQLITE_TABLE_AI_REPORT: str = "ai_report_records"
 SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
