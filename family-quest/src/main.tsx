@@ -9,6 +9,7 @@ import { SettingsProvider } from './context/SettingsContext'
 import { ToastProvider } from './context/ToastContext'
 import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary'
 import { isCameraRoute } from './lib/routing'
+import { isOutsideServiceWorkerScope, createUpdateChecker } from './lib/outOfScopeReload'
 
 // CameraDashboard(hls.js含む)は /camera 専用でFamily Quest本体とは同時に使われないため、
 // 動的importで別チャンクに分離し、通常のクエスト画面の初回読み込みバンドルから除外する。
@@ -51,6 +52,18 @@ registerSW({
     console.error('SW registration failed:', error);
   },
 });
+
+// #591: `/camera`はService Workerのスコープ(`/quest/`)外のため、上のcontrollerchange
+// による自動リロード(#362)がこのページでは発火しない。ページ自身のHTMLを定期的に
+// no-cacheで再取得しLast-Modifiedの変化を見ることで、同じ更新検知を代替する。
+if (isOutsideServiceWorkerScope(window.location.pathname)) {
+  const checkForUpdate = createUpdateChecker(window.location.pathname, {
+    fetch: window.fetch.bind(window),
+    reload: () => window.location.reload(),
+    onError: (e: unknown) => console.warn('Camera page update check failed:', e),
+  });
+  window.setInterval(checkForUpdate, SW_UPDATE_INTERVAL_MS);
+}
 
 // getElementById は null を返す可能性があるため、! (Non-null assertion) またはチェックを入れる
 const rootElement = document.getElementById('root');

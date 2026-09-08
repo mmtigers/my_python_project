@@ -105,6 +105,7 @@ graph TD
 * **クエリ文字列・フラグメントは考慮しない**: `pathname`は`window.location.pathname`（クエリ文字列やハッシュを含まない）を渡す前提の関数であり、本関数自体は`?`や`#`を含む完全なURLを渡された場合の処理を持たない。例えば`/camera?x=1`を渡した場合、`'/camera?x=1'.split('/')`は`['', 'camera?x=1']`となり、`segments[0]`は`'camera?x=1'`（`'camera'`と一致しない）になるため`false`と判定される点に注意。
 * 根拠: [関数の実装、クエリ文字列処理が存在しないことを確認] (行番号: 17〜19)
 * **`/quest/camera`より深い階層は`quest`直下のセグメントのみで判定される**: `segments[1] === 'camera'`は2番目のセグメントのみを見るため、`/quest/camera/history`のように3番目以降にセグメントが続いても真になる（`routing.test.ts`の`'/quest/camera/history'`ケースで確認済み）一方、`/quest/settings/camera`のように`camera`が3番目のセグメントに来るケースは`segments[1]`が`'settings'`のため偽になる。
+* **同じ`src/lib`配下の`isOutsideServiceWorkerScope`(Issue #591)とは無関係の別関数である**: [outOfScopeReload.md](outOfScopeReload.md)の`isOutsideServiceWorkerScope`も本ファイルと同様「パスをセグメントに分割して先頭セグメントを見る」実装だが、判定基準・目的は異なる（`isCameraRoute`は「カメラビューをマウントすべきか」、`isOutsideServiceWorkerScope`は「Service Workerのスコープ`/quest/`の外か」を判定する）。`/quest/camera`のように結果が食い違うパスもあり、一方が他方を代替・包含するものではない。
 
 ## 9. 不明事項一覧
 
