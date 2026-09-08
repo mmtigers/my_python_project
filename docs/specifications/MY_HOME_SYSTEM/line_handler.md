@@ -20,7 +20,7 @@
 * LINE Bot API（v3）からのWebhookイベント（テキストメッセージ受信、ポストバック受信）を解析し、適切な処理（子供の体調記録、AI解析、line_logicへのポストバック委譲）へ振り分けるディスパッチャとしての責務を担う。実際のWebhook HTTPエンドポイント自体は本ファイルには存在せず、`routers/webhook_router.py` の `callback_line()` が担う。**（Issue #376で全面改修）** 以前は`callback_line()`がSDKの`WebhookHandler.handle(body, signature)`を呼び出し、署名検証・パース・ディスパッチをHTTPレスポンス送信前に一括完走させていたが、AI呼び出し等の遅延がreply token失効リスクに直結していたため、現在は`callback_line()`側で`line_handler.parser.parse()`により署名検証とパースのみを行って即座に応答し、本ファイルの`dispatch_events()`が実処理のエントリポイントとして`BackgroundTasks`経由で呼ばれる構成に変わった。`line_handler.add(...)`によるSDKへのハンドラー登録（`handle_message`/`handle_postback`）自体は後方互換のため維持しているが、実際の呼び出し経路は`dispatch_events()`内の`isinstance`分岐であり、SDKの自動ディスパッチ機構は使われていない。
 * 根拠: `line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)`, `line_handler.add(PostbackEvent)(handle_postback)` (行番号: 337-338 / 抜粋: "line_handler.add(MessageEvent, message=TextMessageContent)(handle_message)")、`dispatch_events`定義 (行番号: 341-375 / 抜粋: "def dispatch_events(events: List[Any]) -> None:")
 * **（#358で撤去）** 以前`_process_message_async`にあった、LINE経由のFamily Questコマンド（`msg_text`が「ステータス」「クエスト」に一致、または「承認」「却下」で始まる場合の`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`呼び出し）、および`handle_postback`にあった`approve:`/`reject:` postbackをコマンド文字列へ変換して`_process_message_async`へ渡す分岐は、LINEの`event.source.user_id`とFamily Questの`quest_users.user_id`のマッピングが存在せず本番では機能しないデッドコードだったため撤去された（オーナー判断、Issue #358）。クエストの確認・完了報告・承認は現在family-quest フロントエンドのみで行う。
-* 根拠: `_process_message_async`内の撤去コメント (行番号: 268-271 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、`handle_postback`内の撤去コメント (行番号: 320-322 / 抜粋: "以前ここにあった approve:/reject: postback の処理")
+* 根拠: `_process_message_async`内の撤去コメント (行番号: 278-281 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、`handle_postback`内の撤去コメント (行番号: 338-340 / 抜粋: "以前ここにあった approve:/reject: postback の処理")
 
 ## 3. 外部依存関係
 
@@ -423,8 +423,8 @@ graph TD
 * 根拠: モジュールレベルの条件分岐 (行番号: 32-39 / 抜粋: "if config.LINE_CHANNEL_ACCESS_TOKEN and config.LINE_CHANNEL_SECRET:")
 
 
-* **[削除済み] Issue #358 LINE経由のFamily Questコマンドが本番で成立しない**: `_process_message_async`にあった「ステータス」「クエスト」への完全一致分岐、および「承認」「却下」で始まる文字列への分岐（`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`の呼び出し）と、`handle_postback`にあった`approve:`/`reject:` postbackをコマンド文字列へ変換して`_process_message_async`へ渡す分岐は、LINEの`event.source.user_id`（`U`+32hex）をFamily Questの`quest_users.user_id`（`dad`/`mom`/`son`/`daughter`）へマッピングする仕組みがリポジトリ内に存在せず、本番では常に失敗メッセージしか返さないデッドコードだった。さらに`approve:`/`reject:` postbackを生成する送信元（ボタン等）がリポジトリ内に一切存在しなかった（生成側自体が無いデッドコード）。オーナー判断（Issue #358: LINE経由のクエスト機能は廃止）により両分岐とも削除した。クエストの確認・完了報告・承認は family-quest フロントエンド（`GET/POST /api/quest/*`）でのみ行う。これに伴い`handle_postback`内の`reply_token`（行番号315）は現在このメソッド内では未使用（コメントアウトされた通知処理のみに登場する）変数になっている。
-* 根拠: `_process_message_async`内の撤去コメント (行番号: 268-271)、`handle_postback`内の撤去コメント (行番号: 320-322)、`reply_token`代入 (行番号: 316)
+* **[削除済み] Issue #358 LINE経由のFamily Questコマンドが本番で成立しない**: `_process_message_async`にあった「ステータス」「クエスト」への完全一致分岐、および「承認」「却下」で始まる文字列への分岐（`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`の呼び出し）と、`handle_postback`にあった`approve:`/`reject:` postbackをコマンド文字列へ変換して`_process_message_async`へ渡す分岐は、LINEの`event.source.user_id`（`U`+32hex）をFamily Questの`quest_users.user_id`（`dad`/`mom`/`son`/`daughter`）へマッピングする仕組みがリポジトリ内に存在せず、本番では常に失敗メッセージしか返さないデッドコードだった。さらに`approve:`/`reject:` postbackを生成する送信元（ボタン等）がリポジトリ内に一切存在しなかった（生成側自体が無いデッドコード）。オーナー判断（Issue #358: LINE経由のクエスト機能は廃止）により両分岐とも削除した。クエストの確認・完了報告・承認は family-quest フロントエンド（`GET/POST /api/quest/*`）でのみ行う。これに伴い`handle_postback`内の`reply_token`（行番号334。Issue #572のガード追加により行番号が旧315から移動）は現在このメソッド内では未使用（コメントアウトされた通知処理のみに登場する）変数になっている。
+* 根拠: `_process_message_async`内の撤去コメント (行番号: 278-281)、`handle_postback`内の撤去コメント (行番号: 338-340)、`reply_token`代入 (行番号: 334)
 
 
 * **[修正済み] Issue #375 「元気ない」の反転記録・2名併記時の取りこぼし**: 体調キーワード分岐は`"元気" in msg_text`の部分一致で「元気ない/元気がない/元気なし」も「元気」として記録し、また最初に一致した1名のみ処理して2名目以降を無言で捨てていた。`_detect_condition_keyword`（否定表現を先に判定し`CONDITION_NOT_GENKI`＝「元気なし」を返す）と`_extract_health_targets`（全メンバーを出現順に列挙し名前ごとの区間で判定、区間にキーワードが無ければ全体判定へフォールバック）に置き換えた。判定は依然として定型キーワードの部分一致であり、「熱がある」等キーワード外の表現は「不明」として記録される（AIフォールバックには回らない）点は従来どおり。
@@ -432,15 +432,19 @@ graph TD
 
 
 * **[修正済み] Issue #376 / L-L1 reply token期限切れ・再配信による重複記録・イベント単位の例外隔離**: Webhook応答前に同期的にAI処理（tenacityリトライ×連鎖ツール呼び出し）を完走する構造のため、LINEのreply token（約1分）を超過すると`reply_message`が400になり無応答、さらに再配信を有効化していると同一イベントが再送されて記録が二重化していた。対応: (1) `AI_REPLY_TIMEOUT_SEC`(20秒)で`asyncio.wait_for`によりAI経路を打ち切り、超過時は確認を促す文言を返信、(2) `reply_message`は失敗時に`user_id`宛て`push_message`へフォールバック、(3) `deliveryContext.isRedelivery=true`のイベントは`handle_message`/`handle_postback`でスキップ、(4) 両ハンドラを`try/except`で包み、複数イベント一括配信時に1件目の例外で後続が処理されない問題を隔離。さらに`webhookEventId`ベースの冪等化キャッシュ(`_SEEN_EVENT_IDS`)を`dispatch_events`に導入し、署名検証後に即200を返してから`BackgroundTasks`経由で`dispatch_events`が実処理を行う構成に変更した（`callback_line`側での署名検証・パースと、本ファイルでの実処理を分離）。`asyncio.wait_for`の打ち切りはコルーチンをキャンセルするが、`run_in_executor`/`to_thread`上で進行中のDB書き込み・Gemini呼び出しのスレッドは止まらないため、タイムアウト応答後に記録が完了している可能性がある。
-* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 53)、`_is_redelivery` (行番号: 56-65)、`reply_message`のpushフォールバック (行番号: 168-179)、`handle_message` (行番号: 233-263)、AI経路の`wait_for` (行番号: 285-304)、`handle_postback` (行番号: 306-334)、`dispatch_events`と`_is_duplicate_event` (行番号: 93-110, 341-375)
+* 根拠: `AI_REPLY_TIMEOUT_SEC` (行番号: 53)、`_is_redelivery` (行番号: 56-65)、`reply_message`のpushフォールバック (行番号: 168-179)、`handle_message` (行番号: 233-263)、AI経路の`wait_for` (行番号: 285-304)、`handle_postback` (行番号: 316-352。Issue #572のガード追加分だけ後方へ移動)、`dispatch_events`と`_is_duplicate_event` (行番号: 93-110, 341-375)
 
 
-* **[修正済み] Issue #410 L-L6 グループ発言でuser_idがNoneのケース未考慮**: `event.source.user_id`はグループでの発言時、プロフィール未共有等の理由でLINEの仕様上`None`になりうる。`_get_display_name(None)`は`get_profile(None)`の例外を握り潰し`"Unknown"`を返すだけなので、以前はこの状態に気づかないまま処理が続行し、`user_id=NULL`のまま体調・食事等の記録がDB保存されていた。`handle_message`は`user_id`が`None`の場合、警告ログを出して`_get_display_name`/`_process_message_async`を呼ばず早期returnする（`handle_postback`側は本Issueの対象外として未対応のまま）。
-* 根拠: `handle_message`の`if user_id is None:` (行番号: 248-250)
+* **[修正済み] Issue #410 L-L6 グループ発言でuser_idがNoneのケース未考慮**: `event.source.user_id`はグループでの発言時、プロフィール未共有等の理由でLINEの仕様上`None`になりうる。`_get_display_name(None)`は`get_profile(None)`の例外を握り潰し`"Unknown"`を返すだけなので、以前はこの状態に気づかないまま処理が続行し、`user_id=NULL`のまま体調・食事等の記録がDB保存されていた。`handle_message`は`user_id`が`None`の場合、警告ログを出して`_get_display_name`/`_process_message_async`を呼ばず早期returnする（`handle_postback`側は本Issueの対象外として当初は未対応のまま残っていたが、Issue #572で同等のガードが追加された。次項参照）。
+* 根拠: `handle_message`の`if user_id is None:` (行番号: 258-260)
+
+
+* **[修正済み] Issue #572 `handle_postback`にIssue #410のuser_id=Noneガードが無かった非対称性**: Issue #410（L-L6）は`handle_message`にのみ`event.source.user_id is None`（グループでのプロフィール未共有等）の早期returnガードを追加し、兄弟関数である`handle_postback`（体調ボタン・「みんな元気」一括操作・食事アンケート等のPostbackを`line_logic.handle_postback`へ委譲するディスパッチャ）は対象外のまま残っていた。このため、プロフィール未共有のユーザーがグループでPostbackボタンを押すと、`user_id=None`のまま`line_logic.handle_postback`へ処理が進み、`user_id`が`NULL`の体調記録（例: `child_health_records`へ`(None, 'グループの人', '智矢', '😊 元気いっぱい')`のような紐付け不能な行）が保存され得た。対応として、`handle_postback`内で`user_id = event.source.user_id`を読み取った直後・`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`handle_message`のIssue #410ガードと同じスタイル（警告ログ＋早期return）のガードを追加し、両ハンドラー間の非対称性を解消した。回帰テストとして`tests/test_line_handler_dispatch.py`の`TestHandlePostbackWrapper.test_none_user_id_skips_delegation`（`event.source.user_id = None`のモックPostbackイベントで`line_handler.handle_postback(event)`を呼び、`line_logic.handle_postback`が一度も呼ばれないことを検証）を追加した。
+* 根拠: `handle_postback`の`if user_id is None:` (行番号: 324-331 / 抜粋: "if user_id is None:")、対応する`handle_message`側のガード (行番号: 258-260)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。
-* 根拠: `if line_handler: line_handler.add(...)` (行番号: 336-338 / 抜粋: "if line_handler:")
+* 根拠: `if line_handler: line_handler.add(...)` (行番号: 354-356 / 抜粋: "if line_handler:")
 
 
 
