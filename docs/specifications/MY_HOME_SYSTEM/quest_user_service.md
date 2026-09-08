@@ -12,17 +12,17 @@
 ## 関連ドキュメント
 
 * [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.user_service import UserService, InvalidImageError, ImageTooLargeError`として本ファイルのクラス・例外を再エクスポートする
-* [quest_locks.md](./quest_locks.md) - `logger`のみを本ファイルにimportさせる（ロック関数は使用しない）
+* [quest_locks.md](./quest_locks.md) - **（Issue #547で変更）** 従来`logger`のみを本ファイルにimportさせていたが、`ROLE_ADULT`（管理者ロール定数）と`_get_user_balance_lock`（ユーザー単位の排他ロック取得関数）も新たにimportして`reset_user_data`/`_reset_user_data_locked`が使用する
 * [quest_quest_service.md](./quest_quest_service.md) - `QuestService.__init__`が`UserService()`インスタンスを保持する（`self.user_service`）ため、本ファイルへ依存する
 * [quest_game_system.md](./quest_game_system.md) - `GameSystem.__init__`が`UserService()`インスタンスを保持する
 * [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`の実体
 * [config.md](./config.md) - `config.UPLOAD_DIR`（`_delete_orphaned_avatar`/`save_avatar_image`/`delete_unlinked_avatar`が参照）および`config.UPLOAD_MAX_FILE_SIZE_MB`（**Issue #551で追加**、`save_avatar_image`が参照）の提供元
-* [quest_router.md](./quest_router.md) - `user_service.get_family_chronicle`/`update_avatar`/`delete_unlinked_avatar`/`save_avatar_image`の呼び出し元FastAPIルーター。**（Issue #551で追加）** `routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像検証・保存ロジック（旧`validate_image_header`関数含む）は本ファイルの`save_avatar_image`へ移設され、ルーター側は`InvalidImageError`/`ImageTooLargeError`を捕捉してHTTPステータスへ変換するだけの薄い委譲コードになった
+* [quest_router.md](./quest_router.md) - `user_service.get_family_chronicle`/`update_avatar`/`delete_unlinked_avatar`/`save_avatar_image`の呼び出し元FastAPIルーター。**（Issue #551で追加）** `routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像検証・保存ロジック（旧`validate_image_header`関数含む）は本ファイルの`save_avatar_image`へ移設され、ルーター側は`InvalidImageError`/`ImageTooLargeError`を捕捉してHTTPステータスへ変換するだけの薄い委譲コードになった。**（Issue #547で追加）** 新設の`POST /api/quest/admin/reset_user`エンドポイントが`user_service.reset_user_data`を呼び出す（呼び出しコンテキスト・HTTPステータスマッピングの詳細は`quest_router.md`側を参照）
 
 ## 2. ファイルの概要
 
-`quest_users`テーブルを中心とした、家族の統計情報(`get_family_chronicle`)・冒険ログ(`_fetch_full_adventure_logs`)の集約と、ユーザーのアバター画像の更新・アップロード・削除(`update_avatar`/`_delete_orphaned_avatar`/`save_avatar_image`/`delete_unlinked_avatar`)を担う`UserService`クラス1つを定義するファイル。アバター関連の各メソッドはいずれも`config.UPLOAD_DIR`配下のアップロード済み画像ファイルを扱うための、パストラバーサル対策とファイル参照確認を伴う処理である。**（Issue #551で追加）** 従来`routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像アップロードの検証・保存ロジック（拡張子ホワイトリスト・マジックバイト検証・チャンク単位のストリーミング書き込み・サイズ上限チェックと失敗時のクリーンアップ）一式が、非同期メソッド`save_avatar_image`としてこのファイルへ移設された。これに伴い、検証失敗を表す2つのドメイン例外クラス`InvalidImageError`/`ImageTooLargeError`（いずれも`ValueError`のサブクラス）と、マジックバイト判定を行うモジュールレベル関数`_validate_image_header`、許可拡張子の集合`_ALLOWED_AVATAR_EXTENSIONS`もあわせて本ファイルへ追加されている。
-根拠: `class UserService:` (行番号: 43)、`def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 44)、`def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 97)、`async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 144)、モジュールdocstring相当のコメント (行番号: 13-17 / 抜粋: "# Issue #551: routers/quest_router.py の upload_image に直書きされていた\n# 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。")
+`quest_users`テーブルを中心とした、家族の統計情報(`get_family_chronicle`)・冒険ログ(`_fetch_full_adventure_logs`)の集約、ユーザーデータのリセット(`reset_user_data`/`_reset_user_data_locked`)、ユーザーのアバター画像の更新・アップロード・削除(`update_avatar`/`_delete_orphaned_avatar`/`save_avatar_image`/`delete_unlinked_avatar`)を担う`UserService`クラス1つを定義するファイル。アバター関連の各メソッドはいずれも`config.UPLOAD_DIR`配下のアップロード済み画像ファイルを扱うための、パストラバーサル対策とファイル参照確認を伴う処理である。**（Issue #551で追加）** 従来`routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像アップロードの検証・保存ロジック（拡張子ホワイトリスト・マジックバイト検証・チャンク単位のストリーミング書き込み・サイズ上限チェックと失敗時のクリーンアップ）一式が、非同期メソッド`save_avatar_image`としてこのファイルへ移設された。これに伴い、検証失敗を表す2つのドメイン例外クラス`InvalidImageError`/`ImageTooLargeError`（いずれも`ValueError`のサブクラス）と、マジックバイト判定を行うモジュールレベル関数`_validate_image_header`、許可拡張子の集合`_ALLOWED_AVATAR_EXTENSIONS`もあわせて本ファイルへ追加されている。**（Issue #547で追加）** `reset_game.py`の対話的リセット処理をAPI化した`reset_user_data`（薄いロック取得ラッパー）と、実処理を行う`_reset_user_data_locked`が追加された。いずれも`quest_users`/`quest_history`/`user_inventory`の残高・履歴を書き換える他の全経路（完了・承認・取消・購入）と同じ`_get_user_balance_lock`の中で実行することで、別プロセスで動く`reset_game.py`との競合を防ぐ設計になっている。
+根拠: `class UserService:` (行番号: 43)、`def get_family_chronicle(self) -> Dict[str, Any]:` (行番号: 44)、`def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 97)、`def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 147)、`async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 194)、モジュールdocstring相当のコメント (行番号: 13-17 / 抜粋: "# Issue #551: routers/quest_router.py の upload_image に直書きされていた\n# 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。")
 
 ## 3. 外部依存関係
 
@@ -38,16 +38,20 @@
 | `fastapi.UploadFile` | 外部ライブラリ/型 | **（Issue #551で追加）** `save_avatar_image`の引数`file`の型注釈 | `from fastapi import HTTPException, UploadFile` (行番号: 7) |
 | `common` | 内部モジュール | DBカーソル取得(`get_db_cursor`)、現在時刻(ISO)取得(`get_now_iso`) | `import common` (行番号: 9) |
 | `config` | 内部モジュール | `UPLOAD_DIR`の参照、**（Issue #551で追加）** `UPLOAD_MAX_FILE_SIZE_MB`の参照 | `import config` (行番号: 10) |
-| `services.quest.locks.logger` | 内部モジュール | ログ出力 | `from services.quest.locks import logger` (行番号: 11) |
+| `services.quest.locks.logger` | 内部モジュール | ログ出力 | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
+| `services.quest.locks.ROLE_ADULT` | 内部モジュール | **（Issue #547で追加）** `reset_user_data`が`admin_id`の`quest_users.role`が管理者ロールかどうかを判定する際に参照する定数(`'role_adult'`) | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
+| `services.quest.locks._get_user_balance_lock` | 内部モジュール | **（Issue #547で追加）** `reset_user_data`が対象ユーザー単位の排他ロックを取得するために使用。完了・承認・取消・購入と同じロックレジストリを共有する | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with common.get_db_cursor() as cur:` (行番号: 45) |
-| `config.UPLOAD_DIR`の実際の値 | `config.py`側の定義が本ファイルからは不明 | `file_path = os.path.join(config.UPLOAD_DIR, filename)` (行番号: 168, 222) |
-| `config.UPLOAD_MAX_FILE_SIZE_MB`の実際の値 | **（Issue #551で追加）** `save_avatar_image`がサイズ上限判定に使用する値・環境変数上書きの有無が本ファイルからは不明 | `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 174) |
-| DBの各テーブルスキーマ | `quest_users`/`quest_history`/`reward_history`の各カラムの型・制約は本ファイルからは不明 | `cur.execute("SELECT level, gold FROM quest_users")` (行番号: 46) |
+| `config.UPLOAD_DIR`の実際の値 | `config.py`側の定義が本ファイルからは不明 | `file_path = os.path.join(config.UPLOAD_DIR, filename)` (行番号: 218, 272) |
+| `config.UPLOAD_MAX_FILE_SIZE_MB`の実際の値 | **（Issue #551で追加）** `save_avatar_image`がサイズ上限判定に使用する値・環境変数上書きの有無が本ファイルからは不明 | `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 224) |
+| DBの各テーブルスキーマ | `quest_users`/`quest_history`/`reward_history`/`user_inventory`の各カラムの型・制約は本ファイルからは不明 | `cur.execute("SELECT level, gold FROM quest_users")` (行番号: 46) |
+| `services.quest.locks.ROLE_ADULT`の実際の値 | **（Issue #547で追加）** 定数の実値（文字列か列挙型か等）が本ファイルからは不明 | `if not admin or admin['role'] != ROLE_ADULT:` (行番号: 117) |
+| `services.quest.locks._get_user_balance_lock`の実装 | **（Issue #547で追加）** ロックの粒度（ユーザー単位かどうか）・ブロッキング時のタイムアウト有無が本ファイルからは不明 | `with _get_user_balance_lock(target_user_id):` (行番号: 111) |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -122,33 +126,59 @@
 * **エラーハンドリング**: なし（`ev['type']`が`'quest'`/`'reward'`のいずれでもない場合`text`は空文字のまま。SQLの`type`リテラルが`'quest'`/`'reward'`のみのため実際には発生しない）
 * 根拠: (行番号: 83〜87)
 
+### `UserService.reset_user_data`（Issue #547で追加）
+
+* **役割**: `reset_game.py`が別プロセスから直接DBを書き換えていたユーザーデータのリセット処理をAPI化したもの。対象ユーザー単位の排他ロック(`_get_user_balance_lock`)を取得したうえで`_reset_user_data_locked`に処理を委譲する薄いラッパー。`reset_game.py`は`unified_server`とは別プロセス(別のPythonインタプリタ)で動くため、同じモジュールをimportしてもこのロックオブジェクトをプロセス間で共有できないという制約があり、`reset_game.py`側もこのメソッド(サーバーAPI経由)を呼ぶ限りにおいて、完了・承認・取消・購入の他の全経路と同じロックの下で直列化される。
+* 根拠: `def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 97〜112 / 抜粋: "Issue #547: reset_game.py の対話的リセットをAPI化したもの。")、`with _get_user_balance_lock(target_user_id):\n            return self._reset_user_data_locked(admin_id, target_user_id)` (行番号: 111〜112)
+* **引数/リクエスト**: `admin_id: str`（リセットを実行する管理者のuser_id）, `target_user_id: str`（リセット対象のuser_id）
+* 根拠: (行番号: 97)
+* **戻り値/レスポンス**: `Dict[str, Any]`（`_reset_user_data_locked`の戻り値をそのまま返す）
+* 根拠: (行番号: 112)
+* **副作用**: `_get_user_balance_lock(target_user_id)`によるロックの取得・解放（`with`文のスコープ）
+* 根拠: (行番号: 111〜112)
+* **エラーハンドリング**: なし（`_reset_user_data_locked`が送出する`HTTPException`はそのまま伝播する）
+* 根拠: (行番号: 111〜112)
+
+### `UserService._reset_user_data_locked`（Issue #547で追加）
+
+* **役割**: `reset_user_data`のロック取得後に実行される実処理。`common.get_db_cursor(commit=True)`の単一トランザクション内で、まず`admin_id`に対応する`quest_users.role`を取得し`ROLE_ADULT`（`'role_adult'`）でなければ403を送出、次に`target_user_id`が`quest_users`に存在しなければ404を送出する。両チェックを通過した場合のみ、対象ユーザーの`quest_users`(`level`, `exp`, `gold`, `medal_count`)を初期値(1, 0, 0, 0)にUPDATEし、`quest_history`・`user_inventory`の対象ユーザー行をすべてDELETEする(#544由来。`reward_history`(購入ログ)は残高に影響しない監査用の記録として削除対象外)。削除件数をログ出力したうえで、削除件数を含む辞書を返す。
+* 根拠: `def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 114〜145)、`cur.execute(\n                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",\n                (target_user_id,),\n            )` (行番号: 127〜130)、`cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))` (行番号: 131)、`cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))` (行番号: 133)
+* **引数/リクエスト**: `admin_id: str`, `target_user_id: str`
+* 根拠: (行番号: 114)
+* **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "reset", "deletedHistoryCount": <int>, "deletedInventoryCount": <int>}`）
+* 根拠: `return {\n            "status": "reset",\n            "deletedHistoryCount": deleted_history,\n            "deletedInventoryCount": deleted_inventory,\n        }` (行番号: 141〜145)
+* **副作用**: DB更新（`quest_users`のUPDATE）、DB削除（`quest_history`・`user_inventory`の対象ユーザー行）とコミット（`get_db_cursor(commit=True)`）、成功時のINFOログ出力
+* 根拠: (行番号: 115, 127〜134, 136〜139)
+* **エラーハンドリング**: `admin`が存在しない、または`role`が`ROLE_ADULT`でない場合`HTTPException(status_code=403, detail="リセット権限がありません")`。`target_user_id`が`quest_users`に存在しない場合`HTTPException(status_code=404, detail="対象ユーザーが見つかりません")`。
+* 根拠: `if not admin or admin['role'] != ROLE_ADULT:\n                raise HTTPException(status_code=403, detail="リセット権限がありません")` (行番号: 117〜118)、`if not target:\n                raise HTTPException(status_code=404, detail="対象ユーザーが見つかりません")` (行番号: 121〜122)
+
 ### `UserService.update_avatar`
 
 * **役割**: 対象ユーザーの存在を確認したうえで`quest_users.avatar`を更新する。更新前の`avatar`列の値を`old_avatar`として保持し、`get_db_cursor(commit=True)`のトランザクション内で、旧アバターを他ユーザーが参照していないか(`SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ?`)を確認する。トランザクションを抜けた後、他ユーザーからの参照が無い場合のみ`_delete_orphaned_avatar`を呼び出して旧アバターファイルの削除を試みる。
-* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 97〜120)
-* 根拠: `still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ? LIMIT 1",\n                (old_avatar, user_id),\n            ).fetchone() is not None` (行番号: 111〜114)、`if not still_referenced:\n            self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 118〜119)
+* 根拠: `def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:` (行番号: 147〜170)
+* 根拠: `still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? AND user_id != ? LIMIT 1",\n                (old_avatar, user_id),\n            ).fetchone() is not None` (行番号: 161〜164)、`if not still_referenced:\n            self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 168〜169)
 * **引数/リクエスト**: `user_id: str`, `avatar_url: str`
-* 根拠: (行番号: 97)
+* 根拠: (行番号: 147)
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"status": "updated", "avatar": avatar_url}`）
-* 根拠: (行番号: 120)
+* 根拠: (行番号: 170)
 * **副作用**: DB更新（`quest_users.avatar`/`updated_at`）、DB参照（他ユーザーの`avatar`参照確認）、ログ出力、`_delete_orphaned_avatar`の呼び出しによるファイル削除の試行（`get_db_cursor`のトランザクション外・他ユーザーからの参照が無い場合のみ）
-* 根拠: (行番号: 105〜106, 111〜114, 116, 118〜119)
+* 根拠: (行番号: 155〜156, 161〜164, 166, 168〜169)
 * **エラーハンドリング**: ユーザー不在時に`HTTPException(status_code=404, detail="User not found")`
-* 根拠: (行番号: 100〜101)
+* 根拠: (行番号: 150〜151)
 
 ### `UserService._delete_orphaned_avatar`
 
 * **役割**: アバター差し替え後にディスクへ残り続ける旧アバターファイルの削除を試みる。`old_avatar`が空/`None`、新旧URLが同一、または`/uploads/`配下のパスでない(絵文字などアップロードファイル以外の値)場合はいずれも早期`return`で何もしない。パストラバーサル対策として、`old_avatar`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合したうえで、結合結果の親ディレクトリが正規化済み`config.UPLOAD_DIR`と一致することを確認してから削除する。
-* 根拠: `def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:` (行番号: 122〜142)
-* 根拠: `if not old_avatar or old_avatar == new_avatar:\n            return\n        if not old_avatar.startswith("/uploads/"):\n            return` (行番号: 127〜130)、`if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return` (行番号: 134〜135)
+* 根拠: `def _delete_orphaned_avatar(self, old_avatar: Optional[str], new_avatar: str) -> None:` (行番号: 172〜192)
+* 根拠: `if not old_avatar or old_avatar == new_avatar:\n            return\n        if not old_avatar.startswith("/uploads/"):\n            return` (行番号: 177〜180)、`if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return` (行番号: 184〜185)
 * **引数/リクエスト**: `old_avatar: Optional[str]`（更新前のavatar列の値）, `new_avatar: str`（更新後のavatar URL）
-* 根拠: (行番号: 122)
+* 根拠: (行番号: 172)
 * **戻り値/レスポンス**: なし（`-> None`）
-* 根拠: (行番号: 122)
+* 根拠: (行番号: 172)
 * **副作用**: 条件を満たす場合、ローカルファイルシステムから旧アバターファイルを削除(`os.remove`)。削除成功時はログ出力(`logger.info`)。
-* 根拠: `os.remove(file_path)\n                logger.info(f"Orphaned avatar removed: {file_path}")` (行番号: 139〜140)
+* 根拠: `os.remove(file_path)\n                logger.info(f"Orphaned avatar removed: {file_path}")` (行番号: 189〜190)
 * **エラーハンドリング**: 各早期returnの条件（`old_avatar`が無い/同一/`/uploads/`配下でない/パストラバーサル対策の一致チェックに失敗）はいずれも例外を送出せず何もしない。`os.remove`が`OSError`を送出した場合は`except OSError`で捕捉し警告ログを出力するのみで再送出しない。
-* 根拠: `except OSError as e:\n            logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")` (行番号: 141〜142)
+* 根拠: `except OSError as e:\n            logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")` (行番号: 191〜192)
 
 ### `UserService.save_avatar_image`（非同期メソッド、Issue #551で追加）
 
@@ -181,6 +211,28 @@
 * 根拠: `if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return False` (行番号: 223〜224)、`if still_referenced:\n            return False` (行番号: 231〜232)、`if not os.path.exists(file_path):\n                return False` (行番号: 235〜236)、`except OSError as e:\n            logger.warning(f"Failed to remove unlinked avatar {file_path}: {e}")\n            return False` (行番号: 240〜242)
 
 ## 5. 処理フロー図
+
+**（Issue #547で追加）** `reset_user_data`/`_reset_user_data_locked`のフローを以下に示す。`reset_user_data`はロック取得のみを行う薄いラッパーで、実処理は`_reset_user_data_locked`にある。
+
+```mermaid
+flowchart TD
+    Start([Start: reset_user_data]) --> Lock["_get_user_balance_lock(target_user_id)を取得"]
+    Lock --> Locked["_reset_user_data_locked(admin_id, target_user_id)呼び出し"]
+    Locked --> Tx2["get_db_cursor(commit=True)開始"]
+    Tx2 --> CheckAdmin{"adminが存在し\nrole==ROLE_ADULTか?"}
+    CheckAdmin -- No --> Raise403["HTTPException(403)"]
+    CheckAdmin -- Yes --> CheckTarget{"target_user_idは\nquest_usersに存在するか?"}
+    CheckTarget -- No --> Raise404_2["HTTPException(404)"]
+    CheckTarget -- Yes --> UpdateUsers["UPDATE quest_users\nSET level=1, exp=0, gold=0, medal_count=0"]
+    UpdateUsers --> DeleteHistory["DELETE FROM quest_history"]
+    DeleteHistory --> DeleteInventory["DELETE FROM user_inventory"]
+    DeleteInventory --> LogInfo["logger.infoで削除件数を出力"]
+    LogInfo --> TxEnd2["トランザクション終了(コミット)"]
+    TxEnd2 --> ReturnDict["{status: reset, deletedHistoryCount, deletedInventoryCount}を返す"]
+    ReturnDict --> End2([End])
+    Raise403 -.->|"呼び出し元(reset_user_data)へ伝播"| End2
+    Raise404_2 -.->|"呼び出し元(reset_user_data)へ伝播"| End2
+```
 
 ```mermaid
 flowchart TD
@@ -266,6 +318,8 @@ graph TD
         CommonMod["common"]
         ConfigMod["config"]
         LocksLogger["services.quest.locks.logger"]
+        LocksRoleAdult["services.quest.locks.ROLE_ADULT (Issue #547)"]
+        LocksBalanceLock["services.quest.locks._get_user_balance_lock (Issue #547)"]
     end
 
     UserServiceFile --> OsMod
@@ -275,6 +329,8 @@ graph TD
     UserServiceFile -->|"get_db_cursor/get_now_iso"| CommonMod
     UserServiceFile -->|"UPLOAD_DIR / UPLOAD_MAX_FILE_SIZE_MB"| ConfigMod
     UserServiceFile -->|"ログ出力"| LocksLogger
+    UserServiceFile -->|"admin_idの権限判定"| LocksRoleAdult
+    UserServiceFile -->|"対象ユーザー単位の排他ロック"| LocksBalanceLock
 
     SaveAvatarImage["UserService.save_avatar_image() (Issue #551)"]
     SaveAvatarImage -->|"検証"| ValidateHeader["_validate_image_header()"]
@@ -283,10 +339,18 @@ graph TD
     SaveAvatarImage --> UuidMod
     SaveAvatarImage --> AiofilesMod
 
+    ResetUserData["UserService.reset_user_data() (Issue #547)"]
+    ResetUserData --> LocksBalanceLock
+    ResetUserData --> ResetUserDataLocked["UserService._reset_user_data_locked() (Issue #547)"]
+    ResetUserDataLocked --> LocksRoleAdult
+    ResetUserDataLocked -->|"送出"| HttpExc["fastapi.HTTPException(403/404)"]
+
     QuestServiceFile["services/quest/quest_service.py"] -->|"QuestService.__init__でインスタンス化"| UserServiceFile
     GameSystemFile["services/quest/game_system.py"] -->|"GameSystem.__init__でインスタンス化"| UserServiceFile
     ShimFile["services/quest_service.py(互換シム)"] -->|"UserService/InvalidImageError/ImageTooLargeErrorを再エクスポート"| UserServiceFile
     QuestRouterFile["routers/quest_router.py (Issue #551)"] -->|"await save_avatar_image() / except InvalidImageError, ImageTooLargeError"| UserServiceFile
+    QuestRouterFile -->|"reset_user()がreset_user_data()を呼び出す (Issue #547)"| UserServiceFile
+    ResetGameFile["reset_game.py (別プロセス、Issue #547)"] -.->|"HTTP POST /api/quest/admin/reset_user"| QuestRouterFile
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -309,6 +373,8 @@ graph TD
 * 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 174)、`while content := await file.read(1024 * 1024):` (行番号: 178)
 * **（Issue #551で追加）`save_avatar_image`の例外送出パターンは`upload_image`側の実装に強く依存する**: `InvalidImageError`/`ImageTooLargeError`のメッセージ文字列は`str(e)`としてそのままHTTPレスポンスの`detail`に使われる設計（呼び出し元`quest_router.upload_image`参照）であるため、メッセージ文言を変更する際は呼び出し元のユーザー向け表示への影響を確認する必要がある。
 * 根拠: (行番号: 156, 159, 164, 188〜190)、呼び出し元: `routers/quest_router.py` (行番号: 96-99)
+* **（Issue #547で追加）`reset_user_data`は対象ユーザー1人分の残高フィールドのみをロックする**: `admin_id`に対応する行はロックの対象外で読み取りのみ行う。仮に`admin_id`自身の`quest_users`行が別スレッドから同時に更新されても、本メソッドの権限チェック（`role`の一時点でのSELECT）には影響しない設計になっている（`quest_service.py`の`_acquire_user_balance_locks`が複数ユーザーをまとめてロックするのとは異なり、こちらは`target_user_id`単独のみをロックする）。
+* 根拠: `with _get_user_balance_lock(target_user_id):` (行番号: 111)、`admin = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()` (行番号: 116)
 
 ## 9. 不明事項一覧
 
