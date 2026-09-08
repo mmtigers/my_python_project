@@ -28,7 +28,7 @@
 | `linebot.v3.messaging` | 外部ライブラリ | LINEメッセージモデルの構築。使用されているのは`TextMessage`のみ | `from linebot.v3.messaging import TextMessage` (行番号: 6 / 抜粋: "from linebot.v3.messaging import TextMessage") |
 | `config` | 外部モジュール | 設定値や定数の取得 | `import config` (行番号: 8 / 抜粋: "import config") |
 | `core.logger` | 外部モジュール | ロガーの設定 | `from core.logger import...` (行番号: 9 / 抜粋: "from core.logger import setup...") |
-| `core.utils` | 外部モジュール | 時刻や日付文字列の取得 | `from core.utils import...` (行番号: 10 / 抜粋: "from core.utils import get_no...") |
+| `core.utils` | 外部モジュール | 時刻や日付文字列の取得。`get_meal_time_category_from_now`（Issue #583で追加）は`log_food_record`が`food_records.meal_time_category`の算出に使用する | `from core.utils import get_now_iso, get_today_date_str, get_meal_time_category_from_now` (行番号: 10) |
 | `core.database` | 外部モジュール | 非同期でのログ保存 | `from core.database import...` (行番号: 11 / 抜粋: "from core.database import sav...") |
 
 **（Issue #410で削除）** 以前このテーブルにあった`sqlite3`（標準ライブラリ）・`datetime`（標準ライブラリ）・`common`（外部モジュール）・`linebot.v3.messaging`の`QuickReply`/`QuickReplyItem`/`MessageAction`（未使用インポートとして記載）・`typing`の`Tuple`/`Optional`/`Dict`/`Any`（未使用インポートとして記載、ただし実際には元々インポートされていなかった旧版の誤記）は、`log_daily_action`/`log_ohayo`/`get_daily_health_summary_text`の削除に伴い（`sqlite3`/`datetime`/`common`は）実際に未使用となったため削除、または（`QuickReply`系・`typing`系は）元々インポートされていなかった旧版の記載誤りだった。
@@ -74,24 +74,24 @@
 
 ### `log_food_record`
 
-* **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `log_child_health`と同様に`save_log_async`の戻り値を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージを返す。
-* 根拠: `async def log_food_record...` (行番号: 51-63 / 抜粋: "def log_food_record(user_id:")、`save_ok = await save_log_async(` (行番号: 55)、`if not save_ok:` (行番号: 60-62)
+* **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `log_child_health`と同様に`save_log_async`の戻り値を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージを返す。**（Issue #583で修正）** DB書き込みの`meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。本関数が受け取る`category`引数（`ai_service`が渡す朝食/昼食/夕食等のAIラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
+* 根拠: `async def log_food_record...` (行番号: 74-89 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")、`save_ok = await save_log_async(` (行番号: 81-85 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")、`if not save_ok:` (行番号: 86-88)
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `category` (str), `item` (str), `is_manual` (bool, デフォルト `False`)
-* 根拠: 関数の引数定義 (行番号: 51 / 抜粋: "category: str, item: str, is_")
+* 根拠: 関数の引数定義 (行番号: 74 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")
 
 
 * **戻り値/レスポンス**: `TextMessage`。成功時は`"🍽️ {category}「{item}」を記録しました！"`、保存失敗時は`f"{SAVE_FAILED_PREFIX}。{category}「{item}」は保存されていません。もう一度お試しください。"`。
-* 根拠: 戻り値の型ヒント (行番号: 51 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 62)、成功時 (行番号: 63)
+* 根拠: 戻り値の型ヒント (行番号: 74 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 88)、成功時 (行番号: 89)
 
 
-* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。
-* 根拠: `save_ok = await save_log_async(` (行番号: 55)、`logger.error(f"log_food_record の記録保存に失敗しました ...")` (行番号: 61)
+* **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。書き込む`meal_time_category`列の値は`get_meal_time_category_from_now()`（Issue #583で追加、呼び出し時点のJST時刻に依存）の戻り値。
+* 根拠: `save_ok = await save_log_async(` (行番号: 81)、`get_meal_time_category_from_now()` (行番号: 84)、`logger.error(f"log_food_record の記録保存に失敗しました ...")` (行番号: 87)
 
 
 * **エラーハンドリング**: `try-except`は無いが、`save_log_async`の戻り値`False`を失敗として扱い失敗メッセージを返す（Issue #373）。
-* 根拠: `if not save_ok:` (行番号: 60-62)
+* 根拠: `if not save_ok:` (行番号: 86-88)
 
 
 
@@ -114,10 +114,15 @@
 * **役割**: `LINE_TEXT_MAX_CHARS`（`4900`）はLINEの`TextMessage`1件あたりの文字数上限（実際の上限は5000字で、超過するとMessaging APIが400を返す）に安全マージンを取った、本ファイルが扱う1メッセージあたりの上限。`LINE_MAX_MESSAGES_PER_REPLY`（`5`）は1回のreply/pushで送信できるメッセージ数の上限。
 * 根拠: `LINE_TEXT_MAX_CHARS = 4900` (行番号: 34)、`LINE_MAX_MESSAGES_PER_REPLY = 5` (行番号: 36)
 
-### `split_text_into_line_messages` (関数、Issue #377で追加)
+### `_line_text_length` / `_take_line_chars` / `_split_by_line_char_count` (関数、Issue #588で追加)
 
-* **役割**: 長文を LINE の5000字制限に収まる`TextMessage`へ変換する。テキストが`LINE_TEXT_MAX_CHARS`字以下ならそのまま単一の`TextMessage`を返す（`handlers.line_handler.reply_message`は単一オブジェクト・リストのどちらも受け付けるため、短文の場合の呼び出し元の挙動は変わらない）。超過する場合のみ`LINE_TEXT_MAX_CHARS`字ごとに分割した`TextMessage`のリストを返し、`LINE_MAX_MESSAGES_PER_REPLY`件を超えるときは末尾を切り詰めて「(文字数上限のため以下省略)」の注記を付ける（全文を無制限に送り続けることはしない）。`handlers/line_handler.py`のAI応答返信でも使われる。
-* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 39-61)
+* **役割**: LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)を再現するためのヘルパー群。`_line_text_length`は`text.encode('utf-16-le')`のバイト長を2で割ってUTF-16コードユニット数を返す(BMP外の文字、例えば絵文字はサロゲートペア=2コードユニットとしてカウントされる)。以前は`split_text_into_line_messages`本体がPythonの`len(str)`(Unicodeコードポイント単位)で文字数を判定・分割しており、絵文字を含むテキストでは実際のLINE側カウント(UTF-16コードユニット単位、LINE公式ドキュメント[text-character-count](https://developers.line.biz/en/docs/messaging-api/text-character-count/)参照)より少なく見積もってしまい、この関数が「上限内」と判定したメッセージでもMessaging API側では文字数上限超過として送信失敗しうる状態だった。`_take_line_chars`は`text`の先頭からLINE基準で`max_chars`文字以内に収まる最長のプレフィックスを返す(Pythonの文字列インデックスは常にコードポイント単位のため、サロゲートペアの片方だけを含む不正な文字列を生成することはない)。`_split_by_line_char_count`は`_take_line_chars`を繰り返し呼び出してテキスト全体をチャンクに分割する。
+* 根拠: [関数定義とコメント] (行番号: 30〜73 / 抜粋: "def _line_text_length(text: str) -> int:\n    \"\"\"LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)でtextの長さを数える。\n\n    Issue #588:")、回帰テスト`tests/test_line_service.py::TestLineTextLengthCountsUtf16CodeUnits`
+
+### `split_text_into_line_messages` (関数、Issue #377で追加、Issue #588でUTF-16基準に修正)
+
+* **役割**: 長文を LINE の5000字制限に収まる`TextMessage`へ変換する。テキストが`LINE_TEXT_MAX_CHARS`字(**Issue #588**: LINE基準のUTF-16コードユニット単位。以前はPythonの`len(str)`によるコードポイント単位だった)以下ならそのまま単一の`TextMessage`を返す（`handlers.line_handler.reply_message`は単一オブジェクト・リストのどちらも受け付けるため、短文の場合の呼び出し元の挙動は変わらない）。超過する場合のみ`_split_by_line_char_count`でLINE基準の`LINE_TEXT_MAX_CHARS`字ごとに分割した`TextMessage`のリストを返し、`LINE_MAX_MESSAGES_PER_REPLY`件を超えるときは末尾を`_take_line_chars`で切り詰めて「(文字数上限のため以下省略)」の注記を付ける（全文を無制限に送り続けることはしない）。`handlers/line_handler.py`のAI応答返信でも使われる。
+* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 76-98)
 
 
 * **引数/リクエスト**: `text: str`
@@ -156,6 +161,7 @@ graph TD
         setup_logging
         get_now_iso
         get_today_date_str
+        get_meal_time_category_from_now["get_meal_time_category_from_now (Issue #583)"]
     end
 
     subgraph "外部: その他"
@@ -170,6 +176,7 @@ graph TD
     log_food_record --> save_log_async
     log_food_record --> get_today_date_str
     log_food_record --> get_now_iso
+    log_food_record --> get_meal_time_category_from_now
     log_food_record --> linebot_v3_messaging
 
     %% Issue #410: log_daily_action / log_ohayo / get_daily_health_summary_text は
@@ -196,8 +203,11 @@ graph TD
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
 * 旧版の本セクションは「`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`が未使用インポートされている」と記載していたが、確認したところ本ファイルはそもそも`TextMessage`以外を`linebot.v3.messaging`からインポートしておらず誤りだった（訂正のみ。Issue #410とは無関係）。
 * **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: 旧`get_active_quests_message`（Issue #358で削除）が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加して対応した。同関数は現在も`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）に使われている。
-* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 25, 27)、`split_text_into_line_messages` (行番号: 30-52)
+* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 25, 27)、`split_text_into_line_messages` (行番号: 76-98)
+* **[修正済み] Issue #588 文字数カウントがPythonのコードポイント単位でLINE基準(UTF-16コードユニット単位)と不一致**: `split_text_into_line_messages`は以前`len(str)`(Pythonのコードポイント単位)で文字数を判定・分割していたが、LINE Messaging APIは文字数をUTF-16コードユニット単位で数え、絵文字等のBMP外の文字はサロゲートペア(2コードユニット)としてカウントする。この差により、絵文字を多用するテキストでは実際のLINE側カウントより少なく見積もり、本関数が「上限内」と誤判定したメッセージがMessaging API側では上限超過で送信失敗しうった。`_line_text_length`/`_take_line_chars`/`_split_by_line_char_count`を新設し、UTF-16コードユニット単位でカウント・分割するよう修正した。
+* 根拠: [関数定義とコメント] (行番号: 30-73)、回帰テスト`tests/test_line_service.py::TestLineTextLengthCountsUtf16CodeUnits`
 * **[修正済み] Issue #358 LINE経由のFamily Questコマンドが本番で成立しない**: `get_user_status_message`/`get_active_quests_message`/`process_approval_command`（LINE ID と `quest_users.user_id` のマッピングが存在せず本番で機能しないデッドコード）を削除した。詳細は「削除済み」セクション参照。
+* **[修正済み] Issue #583 `meal_time_category`が常に`"Dinner"`固定だった**: `log_food_record`が`food_records`テーブルへINSERTする`meal_time_category`列は、実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していた（同じバグは`handlers/line_logic.py`の`handle_postback`の`food_record_direct`アクションにも存在した）。`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"を判定）を新設し、両箇所ともその戻り値を渡すよう修正した。`meal_time_category`列自体を読み出す本番コード（ダッシュボード集計等）は本ファイル・`line_logic.py`ともに見つからず、現時点でも書き込み専用（write-only）のカラムのままであることに変わりはない（低影響のサイレントバグだった）。回帰テストは`MY_HOME_SYSTEM/tests/test_core_utils.py`の`TestGetMealTimeCategoryFromNow`クラスに追加されている（本ファイル自体に対する新規テストではなく、`core/utils.py`側のテスト）。
 
 ## 9. 不明事項一覧
 

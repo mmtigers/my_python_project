@@ -20,6 +20,25 @@ def get_today_date_str() -> str:
 def get_display_date() -> str:
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%m/%d")
 
+def get_meal_time_category_from_now() -> str:
+    """現在時刻(JST)から食事記録の時間帯カテゴリ(food_records.meal_time_category)を推定する。
+
+    Issue #583: 以前はlog_food_record/food_record_directのいずれも、実際の記録時刻に
+    関わらずこの値を常に固定文字列"Dinner"で保存していた。呼び出し元が受け取る
+    "category"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の
+    食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため、
+    ここでは記録時刻そのものから時間帯を判定する(食品ジャンルの文字列は
+    menu_category側にそのまま残す)。
+    """
+    hour = datetime.datetime.now(pytz.timezone("Asia/Tokyo")).hour
+    if 4 <= hour < 11:
+        return "Breakfast"
+    if 11 <= hour < 15:
+        return "Lunch"
+    if 15 <= hour < 18:
+        return "Snack"
+    return "Dinner"
+
 
 class RefCountedLockRegistry:
     """キー単位の threading.Lock を参照カウント付きで管理するレジストリ。
