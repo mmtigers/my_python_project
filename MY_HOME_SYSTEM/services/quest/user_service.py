@@ -1,12 +1,43 @@
 """services/quest_service.py から分割(Issue #550)。"""
 import os
+import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import HTTPException
+import aiofiles
+from fastapi import HTTPException, UploadFile
 
 import common
 import config
 from services.quest.locks import logger
+
+# Issue #551: routers/quest_router.py の upload_image に直書きされていた
+# 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。
+# 検証失敗はHTTPExceptionではなくValueError派生のドメイン例外で表現し、
+# ルーター側でHTTPステータスコードへマッピングする(CLAUDE.mdの「ルーターは
+# パース・検証のみ、ロジックはservices/*.pyへ委譲する」規約に合わせるため)。
+_ALLOWED_AVATAR_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+
+
+class InvalidImageError(ValueError):
+    """アップロードされたファイルが画像として不正(拡張子不許可・マジックバイト不一致等)。
+    ルーターはこれを400にマッピングする。"""
+
+
+class ImageTooLargeError(ValueError):
+    """アップロードされたファイルがconfig.UPLOAD_MAX_FILE_SIZE_MBを超過している。
+    ルーターはこれを413にマッピングする。"""
+
+
+def _validate_image_header(header: bytes) -> bool:
+    if header.startswith(b'\xff\xd8\xff'):
+        return True
+    if header.startswith(b'\x89PNG\r\n\x1a\n'):
+        return True
+    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):
+        return True
+    if header.startswith(b'RIFF') and header[8:12] == b'WEBP':
+        return True
+    return False
 
 
 class UserService:
@@ -109,6 +140,68 @@ class UserService:
                 logger.info(f"Orphaned avatar removed: {file_path}")
         except OSError as e:
             logger.warning(f"Failed to remove orphaned avatar {file_path}: {e}")
+
+    async def save_avatar_image(self, file: UploadFile) -> str:
+        """
+        アップロードされたファイルを拡張子・マジックバイトで画像として検証し、
+        UUID採番したファイル名で config.UPLOAD_DIR 配下へ保存する。戻り値は
+        保存先を指す相対URL(例: "/uploads/xxxx.png")。
+
+        検証失敗(ファイル名なし・拡張子不許可・マジックバイト不一致)は
+        InvalidImageError、サイズ上限超過は ImageTooLargeError を送出する。
+        いずれもルーター(quest_router.upload_image)がHTTPExceptionへ変換する。
+        """
+        # Q-L6(#409): filename が無い multipart は以前 os.path.splitext(None) の TypeError → 500 だった
+        if not file.filename:
+            raise InvalidImageError("ファイル名がありません")
+        file_ext = os.path.splitext(file.filename)[1].lower()
+        if file_ext not in _ALLOWED_AVATAR_EXTENSIONS:
+            raise InvalidImageError("許可されていないファイル形式です(拡張子)")
+
+        header = await file.read(12)
+        if not _validate_image_header(header):
+            logger.warning(f"Invalid file header detected. Ext: {file_ext}")
+            raise InvalidImageError("ファイルの内容が画像として認識できません")
+
+        await file.seek(0)
+        new_filename = f"{uuid.uuid4()}{file_ext}"
+        file_path = os.path.join(config.UPLOAD_DIR, new_filename)
+
+        try:
+            # M-9-3: ファイルサイズ上限を設けず、チャンクを読めるだけ書き込み続けると
+            # 巨大アップロードでディスクを圧迫し得た。書き込みながら累計サイズを
+            # 追跡し、上限超過時は書きかけのファイルを削除して413を返す。
+            max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024
+            total_bytes = 0
+            too_large = False
+            async with aiofiles.open(file_path, "wb") as buffer:
+                while content := await file.read(1024 * 1024):
+                    total_bytes += len(content)
+                    if total_bytes > max_bytes:
+                        too_large = True
+                        break
+                    await buffer.write(content)
+
+            if too_large:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                raise ImageTooLargeError(
+                    f"ファイルサイズが上限({config.UPLOAD_MAX_FILE_SIZE_MB}MB)を超えています"
+                )
+        except ImageTooLargeError:
+            raise
+        except Exception:
+            # Q-L6(#409): 書き込み途中(ディスクフル等)の例外では書きかけファイルが残っていた
+            logger.exception(f"Avatar image write failed: {file_path}")
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except OSError:
+                    pass
+            raise
+
+        logger.info(f"Image Uploaded: {new_filename}")
+        return f"/uploads/{new_filename}"
 
     def delete_unlinked_avatar(self, filename: str) -> bool:
         """#442: AvatarUploader.tsxの2段階アップロード(画像アップロード→ユーザーへの

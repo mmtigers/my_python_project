@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -12,6 +13,16 @@ router = APIRouter()
 
 class CameraSettingsUpdate(BaseModel):
     enabled: bool
+
+
+def _require_camera(camera_id: str) -> Dict[str, Any]:
+    """camera_idに対応するカメラ設定を返し、無ければ404を送出する(#551)。
+    5箇所に重複していた `next((c for c in config.CAMERAS if c["id"] == camera_id), None)`
+    + 404送出を一元化したもの。"""
+    cam_conf = camera_service.get_camera_config_or_none(camera_id)
+    if not cam_conf:
+        raise HTTPException(status_code=404, detail="Camera not found")
+    return cam_conf
 
 
 def _resolve_segment_path(base_dir: str, camera_id: str, filename: str) -> str:
@@ -55,9 +66,7 @@ def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):
 @router.get("/live/{camera_id}/stream.m3u8")
 async def get_live_stream(camera_id: str):
     """ライブHLSプレイリスト（.m3u8）の取得"""
-    cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
-    if not cam_conf:
-        raise HTTPException(status_code=404, detail="Camera not found")
+    cam_conf = _require_camera(camera_id)
 
     # #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、
     # イベントループを止めないようスレッドプールへオフロードする。
@@ -92,9 +101,7 @@ def _validate_target_date(target_date: str) -> None:
 def get_record_info(camera_id: str, target_date: str):
     """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""
     _validate_target_date(target_date)
-    cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
-    if not cam_conf:
-        raise HTTPException(status_code=404, detail="Camera not found")
+    cam_conf = _require_camera(camera_id)
 
     offset = camera_service.get_record_start_offset(cam_conf, target_date)
     return {"offset_seconds": offset}
@@ -105,9 +112,7 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
     _validate_target_date(target_date)
     # .m3u8 プレイリストの要求の場合
     if filename.endswith(".m3u8"):
-        cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
-        if not cam_conf:
-            raise HTTPException(status_code=404, detail="Camera not found")
+        cam_conf = _require_camera(camera_id)
 
         playlist_path = camera_service.generate_record_playlist(cam_conf, target_date)
         if not playlist_path:
@@ -117,9 +122,7 @@ def get_record_file(camera_id: str, target_date: str, filename: str):
 
     # .ts セグメントの要求の場合
     elif filename.endswith(".ts"):
-        cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
-        if not cam_conf:
-            raise HTTPException(status_code=404, detail="Camera not found")
+        _require_camera(camera_id)
 
         # NASの元動画に日付フォルダは無いため、生成されたtsファイルも camera_id 直下のパスで解決する
         segment_path = _resolve_segment_path(camera_service.HLS_VOD_DIR, camera_id, filename)
@@ -140,9 +143,7 @@ def get_live_segment(camera_id: str, segment_file: str):
     if not segment_file.endswith(".ts"):
         raise HTTPException(status_code=400, detail="Unsupported file extension")
 
-    cam_conf = next((c for c in config.CAMERAS if c["id"] == camera_id), None)
-    if not cam_conf:
-        raise HTTPException(status_code=404, detail="Camera not found")
+    _require_camera(camera_id)
 
     segment_path = _resolve_segment_path(camera_service.HLS_LIVE_DIR, camera_id, segment_file)
     if not os.path.exists(segment_path):
