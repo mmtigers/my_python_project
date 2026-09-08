@@ -732,6 +732,20 @@ class KnownCastsUnavailableError(Exception):
     """
 
 
+class DataFileUnavailableError(Exception):
+    """load_daily_summary/load_site_failuresが、ファイルは存在するのにI/Oエラーで
+    読めなかったことを示す例外(#578)。KnownCastsUnavailableErrorと同じ位置づけ
+    (NAS/CIFSの瞬断等による一時的な読み込み失敗)だが、対象データが異なるため
+    別クラスにしている。
+
+    以前はOSErrorも他の内容起因の破損と同じ扱いで空の初期状態({})を返しており、
+    呼び出し元がその空状態のまま無条件でsave_*を呼ぶと、たまたま読み込みに
+    失敗しただけの既存データ(他サイトのsite_failures状態、累積中のdaily_summary
+    カウント等)が丸ごと上書きで消えていた。呼び出し元はこの例外を捕捉して
+    保存処理をスキップし、既存の永続化状態に触れないこと。
+    """
+
+
 class DataManager:
     """データの永続化と読み込みを担当するクラス。
 
@@ -887,7 +901,20 @@ class DataManager:
                     f"Recovered {len(casts)} casts from backup {backup_file} after cache corruption."
                 )
                 return casts
-            except DataManager._LOAD_ERRORS as e:
+            except OSError as e:
+                # #578: .bak自体はCIFS/autofsの瞬断で開けなかっただけの可能性があり、
+                # 中身は正しいかもしれない。空集合へフォールバックすると全キャストの
+                # 再通知・union保存による退店済みキャストの復活を招くため、本体の
+                # OSError(#365)と同様に当該サイトの処理をスキップさせる。
+                logger.error(
+                    f"I/O error while loading backup {backup_file}; "
+                    f"skipping site '{site.site_id}' for this run: {e}",
+                    exc_info=True,
+                )
+                raise KnownCastsUnavailableError(
+                    f"{site.site_id}: backup casts file is unreadable ({e})"
+                ) from e
+            except DataManager._CONTENT_ERRORS as e:
                 logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
@@ -968,7 +995,12 @@ class DataManager:
             Dict: {'counts': {site_id: count}, 'last_sent_date': 'YYYY-MM-DD'}
                 形式の集計状態。'counts'は直近の送信以降に累積した未送信件数
                 (#183参照。カレンダー日付ではなく「前回送信からの累積」で管理する)。
-                ファイルが存在しない・読み込みに失敗した場合は空辞書を返す。
+                ファイルが存在しない場合は空辞書を返す。
+
+        Raises:
+            DataFileUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合(#578)。呼び出し元は保存処理をスキップし、
+                既存の永続化状態(累積中のカウント等)を保持すること。
         """
         summary_file = self._daily_summary_file()
         if not summary_file.exists():
@@ -990,13 +1022,24 @@ class DataManager:
                 f"Malformed daily summary in {summary_file} (expected {{'counts': {{...}}}}, "
                 f"got {type(data).__name__}); treating as corrupted."
             )
-        except DataManager._LOAD_ERRORS as e:
+        except OSError as e:
+            # #578: CIFS/autofsの瞬断でopen()が失敗しただけの可能性があり、
+            # 中身は正しいかもしれない。load_known_casts(#365)と同様、隔離せず
+            # 例外を送出して呼び出し元に保存処理をスキップさせる(以前は
+            # _LOAD_ERRORS経由で空辞書を返しており、その空状態のままsave_*が
+            # 呼ばれると累積中のカウントが丸ごと消えていた)。
+            logger.error(
+                f"I/O error while loading daily summary from {summary_file}; "
+                f"skipping this run: {e}",
+                exc_info=True,
+            )
+            raise DataFileUnavailableError(f"daily summary file is unreadable ({e})") from e
+        except DataManager._CONTENT_ERRORS as e:
             # #174: load_known_castsと同じ「非UTF-8破損でUnicodeDecodeError
             # (IOErrorのサブクラスではなくValueErrorのサブクラス)が未捕捉のまま
             # 伝播する」バグが本メソッドにも残っていた。伝播すると
             # record_daily_new_casts経由でsave_known_castsまで到達できず、
             # 毎時同じキャストが「新規」として再通知され続ける無限反復を招く。
-            # _LOAD_ERRORSに統一して同じ破損パターンを確実に捕捉する。
             logger.error(f"Failed to load daily summary from {summary_file}: {e}", exc_info=True)
 
         # #462: load_known_castsと同じ復旧機構(隔離+バックアップ復旧)を適用する。
@@ -1021,7 +1064,12 @@ class DataManager:
                     logger.warning(f"Recovered daily summary from backup {backup_file} after cache corruption.")
                     return data
                 logger.error(f"Backup file {backup_file} is also malformed; starting from an empty summary.")
-            except DataManager._LOAD_ERRORS as e:
+            except OSError as e:
+                # #578: 本体と同じ理由で、.bakのOSErrorも空辞書へフォールバックせず
+                # スキップさせる。
+                logger.error(f"I/O error while loading backup {backup_file}; skipping this run: {e}", exc_info=True)
+                raise DataFileUnavailableError(f"backup daily summary file is unreadable ({e})") from e
+            except DataManager._CONTENT_ERRORS as e:
                 logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
 
         return {}
@@ -1105,7 +1153,14 @@ class DataManager:
             return
 
         with self._shared_file_lock:
-            data = self.load_daily_summary()
+            try:
+                data = self.load_daily_summary()
+            except DataFileUnavailableError as e:
+                # #578: 読み込めない状態のまま保存すると累積中の他サイト分の
+                # カウントを消してしまうため、今回のcount加算は諦めて既存の
+                # 永続化状態に触れない(詳細なERRORログはload_daily_summary側で出力済み)。
+                logger.warning(f"Skipping daily summary update for site '{site_id}': {e}")
+                return
             counts = data.setdefault('counts', {})
             counts[site_id] = counts.get(site_id, 0) + count
             self.save_daily_summary(data)
@@ -1123,8 +1178,12 @@ class DataManager:
         Returns:
             Dict: {site_id: {'count': int, 'alerted': bool}} 形式の状態。
                 'count'は現在継続中の連続失敗回数、'alerted'は閉鎖疑いアラートを
-                Discordへ送信済みかどうか。ファイルが存在しない・読み込みに
-                失敗した場合は空辞書を返す。
+                Discordへ送信済みかどうか。ファイルが存在しない場合は空辞書を返す。
+
+        Raises:
+            DataFileUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
+                読めなかった場合(#578)。呼び出し元は保存処理をスキップし、
+                他サイト分を含む既存の永続化状態を保持すること。
         """
         failures_file = self._site_failures_file()
         if not failures_file.exists():
@@ -1147,7 +1206,21 @@ class DataManager:
                         f"Ignoring malformed site failure entries in {failures_file}: {invalid}"
                     )
                 return {k: v for k, v in data.items() if isinstance(v, dict)}
-        except DataManager._LOAD_ERRORS as e:
+        except OSError as e:
+            # #578: CIFS/autofsの瞬断でopen()が失敗しただけの可能性があり、
+            # 中身(他サイト分の count/alerted 状態を含む)は正しいかもしれない。
+            # 以前は他の内容起因の破損と同じ扱いで空辞書を返しており、呼び出し元
+            # (record_site_failure等)がその空状態のままsave_site_failuresを呼ぶと
+            # 79サイト分の状態が丸ごと消え、既にアラート済みのサイトが再アラート
+            # されていた。load_known_casts(#365)と同様、隔離せず例外を送出して
+            # 呼び出し元に保存処理をスキップさせる。
+            logger.error(
+                f"I/O error while loading site failures from {failures_file}; "
+                f"skipping this run: {e}",
+                exc_info=True,
+            )
+            raise DataFileUnavailableError(f"site failures file is unreadable ({e})") from e
+        except DataManager._CONTENT_ERRORS as e:
             # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
             # 含めて読み込み失敗として扱い、監視処理本体を止めない
             logger.error(f"Failed to load site failures from {failures_file}: {e}", exc_info=True)
@@ -1179,9 +1252,16 @@ class DataManager:
 
         Returns:
             Tuple[int, bool]: (更新後の連続失敗回数, アラート送信済みかどうか)。
+                永続化状態が読めなかった場合は保存をスキップし、今回は
+                「連続失敗0回・未アラート」として扱う(#578。他サイト分の
+                状態を巻き添えで消さないため)。
         """
         with self._shared_file_lock:
-            data = self.load_site_failures()
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                logger.warning(f"Skipping site failure recording for '{site_id}': {e}")
+                return 0, False
             entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
             entry['count'] = int(entry.get('count', 0)) + 1
             self.save_site_failures(data)
@@ -1194,7 +1274,13 @@ class DataManager:
             site_id (str): アラートを送信したサイトのID。
         """
         with self._shared_file_lock:
-            data = self.load_site_failures()
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため
+                # スキップする(次回実行時に閾値到達が続いていれば改めて送信判断される)。
+                logger.warning(f"Skipping alerted-flag update for '{site_id}': {e}")
+                return
             entry = data.setdefault(site_id, {'count': 0, 'alerted': False})
             entry['alerted'] = True
             self.save_site_failures(data)
@@ -1209,7 +1295,14 @@ class DataManager:
             site_id (str): 疎通に成功したサイトのID。
         """
         with self._shared_file_lock:
-            data = self.load_site_failures()
+            try:
+                data = self.load_site_failures()
+            except DataFileUnavailableError as e:
+                # #578: 読めない状態のまま保存すると他サイト分の状態を消してしまうため
+                # スキップする(誤ってcountがクリアされないまま残るだけで、次回巡回で
+                # 再度成功すれば改めて解消を試みられる)。
+                logger.warning(f"Skipping site failure clear for '{site_id}': {e}")
+                return
             if site_id not in data:
                 return
             del data[site_id]
@@ -1841,7 +1934,13 @@ def _maybe_send_daily_summary(notifier: DiscordNotifier, data_manager: DataManag
         return
 
     today_str = now.strftime('%Y-%m-%d')
-    data = data_manager.load_daily_summary()
+    try:
+        data = data_manager.load_daily_summary()
+    except DataFileUnavailableError as e:
+        # #578: 読めない状態で送信判断をすると誤った空集計を送りかねないため、
+        # 今回はスキップして次回実行時に改めて試みる(累積中のカウントは保持される)。
+        logger.warning(f"Skipping daily summary send this run: {e}")
+        return
     if data.get('last_sent_date') == today_str:
         return
 

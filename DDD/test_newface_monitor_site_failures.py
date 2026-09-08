@@ -137,6 +137,85 @@ class TestSiteFailureLifecycle:
         assert dm.load_site_failures() == {}
 
 
+class TestLoadSiteFailuresTransientIOErrorIsNotQuarantined:
+    """Issue #578の回帰テスト。
+
+    load_site_failuresは以前、OSError(CIFS/autofsの瞬断等)も他の内容起因の
+    破損と同じ扱いで空辞書{}を返していた。record_site_failure/
+    mark_site_failure_alerted/clear_site_failureがその空状態のまま無条件で
+    save_site_failuresを呼ぶと、たまたま読み込みに失敗しただけの、他サイト分を
+    含む既存の連続失敗状態が丸ごと消え、既にアラート済みのサイトが再アラート
+    されていた。load_known_casts(#365)と同様、OSErrorはDataFileUnavailableError
+    として送出し、呼び出し元に保存処理をスキップさせること。
+    """
+
+    @staticmethod
+    def _flaky_open(failures_file):
+        real_open = open
+
+        def _open(path, *args, **kwargs):
+            if str(path) == str(failures_file):
+                raise OSError(5, "Input/output error")
+            return real_open(path, *args, **kwargs)
+
+        return _open
+
+    def test_os_error_raises_data_file_unavailable_and_keeps_file(
+        self, data_dir, dm, monkeypatch
+    ):
+        failures_file = data_dir / "site_failures.json"
+        original_content = '{"other_site": {"count": 3, "alerted": true}}'
+        failures_file.write_text(original_content, encoding="utf-8")
+        monkeypatch.setattr(module, "open", self._flaky_open(failures_file), raising=False)
+
+        with pytest.raises(module.DataFileUnavailableError):
+            dm.load_site_failures()
+
+        assert failures_file.exists()
+        assert failures_file.read_text(encoding="utf-8") == original_content
+
+    def test_record_site_failure_skips_save_and_preserves_other_sites_on_io_error(
+        self, data_dir, dm, monkeypatch
+    ):
+        dm.record_site_failure("other_site")
+        dm.mark_site_failure_alerted("other_site")
+
+        failures_file = data_dir / "site_failures.json"
+        monkeypatch.setattr(module, "open", self._flaky_open(failures_file), raising=False)
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_site_failures", mock_save)
+
+        count, alerted = dm.record_site_failure("site_a")
+
+        assert (count, alerted) == (0, False)
+        mock_save.assert_not_called()
+
+    def test_mark_site_failure_alerted_skips_save_on_io_error(self, data_dir, dm, monkeypatch):
+        dm.record_site_failure("other_site")
+
+        failures_file = data_dir / "site_failures.json"
+        monkeypatch.setattr(module, "open", self._flaky_open(failures_file), raising=False)
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_site_failures", mock_save)
+
+        # 例外を送出せず完走すること自体が回帰確認の対象
+        dm.mark_site_failure_alerted("site_a")
+
+        mock_save.assert_not_called()
+
+    def test_clear_site_failure_skips_save_on_io_error(self, data_dir, dm, monkeypatch):
+        dm.record_site_failure("other_site")
+
+        failures_file = data_dir / "site_failures.json"
+        monkeypatch.setattr(module, "open", self._flaky_open(failures_file), raising=False)
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_site_failures", mock_save)
+
+        dm.clear_site_failure("site_a")
+
+        mock_save.assert_not_called()
+
+
 class TestHandleSiteNetworkFailure:
     def _fail_once(self, notifier, site, dm, failed_count=1, total_count=79):
         """1回分の失敗を、_run_monitor_locked と同じ流れで処理する。
