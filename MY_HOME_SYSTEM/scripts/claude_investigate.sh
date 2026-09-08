@@ -75,6 +75,21 @@ DRY_RUN="${CLAUDE_INVESTIGATE_DRY_RUN:-0}"
 # Issue #379: 異常サマリをプロンプトへ埋め込む際の文字数上限。
 SUMMARY_MAX_CHARS="${CLAUDE_INVESTIGATE_SUMMARY_MAX_CHARS:-4000}"
 
+# Issue #577: 異常サマリ・調査結果は日本語主体(health_watch.py等の文言)で
+# 1文字あたり約3バイトのため、wc -c/head -c によるバイト単位の判定・切り詰めだと
+# 実質の上限が文字数換算で約1/3になるうえ、マルチバイト文字の途中で切断され
+# 不正なUTF-8バイト列がプロンプト/通知へ埋め込まれうる。wc -m/cut -c は
+# ロケール設定次第でバイト単位にフォールバックしうるため、ロケールに依存せず
+# 確実にUTF-8文字単位で数える/切り詰めるためPython3を使う。
+utf8_char_count() {
+  python3 -c 'import sys; print(len(sys.stdin.read()))'
+}
+
+truncate_utf8_chars() {
+  # $1: 最大文字数。標準入力の文字列を先頭からその文字数までに切り詰めて出力する。
+  python3 -c 'import sys; sys.stdout.write(sys.stdin.read()[:int(sys.argv[1])])' "$1"
+}
+
 # Issue #380: パス不一致でcdが無言で失敗する(set -eで即終了し、層2調査が
 # 一度も動いていないこと自体に気づけない)事態を避けるため、明示的にチェックする。
 if [ ! -d "$HOME_SYSTEM_DIR" ]; then
@@ -107,9 +122,9 @@ echo "$ANOMALY_SUMMARY"
 # 外部由来文字列を含みうる。プロンプトへ無制限に埋め込むとプロンプトインジェクションの
 # 経路になるため、埋め込み前に長さを上限で切り詰める(通知時のDiscord向け切り詰めとは
 # 別に、プロンプト自体への埋め込み量を制限する)。
-ANOMALY_SUMMARY_LEN=$(printf '%s' "$ANOMALY_SUMMARY" | wc -c)
+ANOMALY_SUMMARY_LEN=$(printf '%s' "$ANOMALY_SUMMARY" | utf8_char_count)
 if [ "$ANOMALY_SUMMARY_LEN" -gt "$SUMMARY_MAX_CHARS" ]; then
-  ANOMALY_SUMMARY="$(printf '%s' "$ANOMALY_SUMMARY" | head -c "$SUMMARY_MAX_CHARS")
+  ANOMALY_SUMMARY="$(printf '%s' "$ANOMALY_SUMMARY" | truncate_utf8_chars "$SUMMARY_MAX_CHARS")
 ...(${SUMMARY_MAX_CHARS}字を超えたため以下省略)"
 fi
 
@@ -180,7 +195,7 @@ echo "$RESULT"
 # --- 通知 (notification_service.pyと同じDiscord WebhookのURLを再利用する想定) ---
 if [ -n "${WATCHDOG_NOTIFY_WEBHOOK_URL:-}" ]; then
   # Discordのcontent上限(2000字)に収まるよう調査結果は先頭1500字に切り詰める
-  SNIPPET=$(printf '%s' "$RESULT" | head -c 1500)
+  SNIPPET=$(printf '%s' "$RESULT" | truncate_utf8_chars 1500)
   PAYLOAD=$(jq -n --arg content "[ラズパイ監視] 異常検知・自動調査の結果:
 ${SNIPPET}" '{content: $content}')
   curl -fsS -X POST "$WATCHDOG_NOTIFY_WEBHOOK_URL" \
