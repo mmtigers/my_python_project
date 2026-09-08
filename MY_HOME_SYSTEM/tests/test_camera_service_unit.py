@@ -254,10 +254,12 @@ class TestGenerateRecordPlaylistConcurrency:
         def _fake_popen(cmd, **kwargs):
             with lock_for_playlist:
                 popen_call_count["n"] += 1
-                # プレイリストファイルの生成を模倣
+                # プレイリストファイルの生成を模倣(#562: 実際のffmpegが`-hls_playlist_type vod`で
+                # 正常完走時に書き込む#EXT-X-ENDLISTも含める。無いと2回目の呼び出しが
+                # _playlist_is_completeにより「不完全」と判定され、意図せず再生成されてしまう)
                 playlist_path = cmd[-1]
                 with open(playlist_path, "w") as f:
-                    f.write("#EXTM3U\n")
+                    f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
             proc = MagicMock()
             proc.poll.return_value = 0  # 即完了扱い
             return proc
@@ -279,3 +281,59 @@ class TestGenerateRecordPlaylistConcurrency:
 
         assert popen_call_count["n"] == 1
         assert all(r is not None for r in results)
+
+
+class TestGenerateRecordPlaylistPastDateCacheCompleteness:
+    """#562回帰防止: 過去日付キャッシュは#EXT-X-ENDLISTの有無で完全性を確認してから
+    返すこと。シャットダウン時のterminate等で生成途中のまま終わったプレイリストを
+    完成品として恒久的に返し続けない。"""
+
+    def _setup(self, tmp_path, monkeypatch):
+        nvr_dir = tmp_path / "nvr"
+        cam_nvr_dir = nvr_dir / "TestCam"
+        cam_nvr_dir.mkdir(parents=True)
+        (cam_nvr_dir / "20260101_100000.mp4").write_bytes(b"x")
+
+        monkeypatch.setattr(config, "NVR_RECORD_DIR", str(nvr_dir), raising=False)
+        vod_dir = tmp_path / "vod"
+        monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(vod_dir))
+        return vod_dir
+
+    def test_incomplete_past_playlist_is_not_served_from_cache(self, tmp_path, monkeypatch):
+        vod_dir = self._setup(tmp_path, monkeypatch)
+        cam_dir = vod_dir / "cam1"
+        cam_dir.mkdir(parents=True)
+        playlist_path = cam_dir / "record_20260101.m3u8"
+        # ENDLISTを持たない = ffmpegがterminate等で生成途中のまま終わった状態を模倣
+        playlist_path.write_text("#EXTM3U\n#EXT-X-VERSION:3\n")
+
+        popen_call_count = {"n": 0}
+
+        def _fake_popen(cmd, **kwargs):
+            popen_call_count["n"] += 1
+            with open(cmd[-1], "w") as f:
+                f.write("#EXTM3U\n#EXT-X-ENDLIST\n")
+            proc = MagicMock()
+            proc.poll.return_value = 0
+            return proc
+
+        cam_conf = {"id": "cam1", "name": "TestCam"}
+        with patch.object(camera_service.subprocess, "Popen", side_effect=_fake_popen):
+            result = camera_service.generate_record_playlist(cam_conf, "20260101")
+
+        assert result == str(playlist_path)
+        assert popen_call_count["n"] == 1, "不完全なキャッシュはそのまま返さず再生成すること"
+
+    def test_complete_past_playlist_is_served_from_cache(self, tmp_path, monkeypatch):
+        vod_dir = self._setup(tmp_path, monkeypatch)
+        cam_dir = vod_dir / "cam1"
+        cam_dir.mkdir(parents=True)
+        playlist_path = cam_dir / "record_20260101.m3u8"
+        playlist_path.write_text("#EXTM3U\n#EXT-X-ENDLIST\n")
+
+        cam_conf = {"id": "cam1", "name": "TestCam"}
+        with patch.object(camera_service.subprocess, "Popen") as mock_popen:
+            result = camera_service.generate_record_playlist(cam_conf, "20260101")
+
+        assert result == str(playlist_path)
+        mock_popen.assert_not_called()
