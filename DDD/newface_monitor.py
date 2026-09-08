@@ -221,6 +221,25 @@ class SiteConfig:
 SITES_JSON_PATH: Path = CURRENT_DIR / 'sites.json'
 
 
+def _resolve_discord_webhook_url() -> Optional[str]:
+    """通知先のDiscord Webhook URLを環境変数から解決する。
+
+    #586: MY_HOME_SYSTEM/config.py は`DISCORD_WEBHOOK_NOTIFY`を優先し、未設定時
+    のみレガシーの`DISCORD_WEBHOOK_URL`にフォールバックする
+    (`DISCORD_WEBHOOK_NOTIFY or os.getenv("DISCORD_WEBHOOK_URL")`)。本ファイルは
+    独立してこの値を解決しており、以前は`DISCORD_WEBHOOK_URL`のみを参照していた
+    ため、実機で`DISCORD_WEBHOOK_NOTIFY`のみが設定されている場合(config.py側の
+    優先順位に合わせた運用)、本ファイルの通知だけが無設定として扱われ
+    「not configured」警告のみでDiscord通知が一切送信されなくなっていた。
+    config.pyと同じ優先順位に揃える。
+
+    MonitorConfigのクラス属性(モジュールimport時に1度だけ評価される)から
+    切り出した関数として定義することで、モジュール全体をimportlib.reloadせずに
+    単体テストできるようにしている。
+    """
+    return os.getenv('DISCORD_WEBHOOK_NOTIFY') or os.getenv('DISCORD_WEBHOOK_URL')
+
+
 def _load_sites(json_path: Path) -> List[SiteConfig]:
     """sites.json を読み込み、SiteConfigのリストとして返す。
 
@@ -306,7 +325,7 @@ class MonitorConfig:
     RETRY_BACKOFF: float = 1.0
 
     # Notification Settings
-    DISCORD_WEBHOOK_URL: Optional[str] = os.getenv('DISCORD_WEBHOOK_URL')
+    DISCORD_WEBHOOK_URL: Optional[str] = _resolve_discord_webhook_url()
     # Issue #451: 1時間毎のcron実行のうち、この時(hour)の実行でのみ日次サマリを
     # Discordへ送信する(_maybe_send_daily_summary参照)。以前は関数内に21という
     # リテラルが直書きされていた。
@@ -1444,8 +1463,14 @@ class WebMonitor:
         """
         age = ""
         if name_elem:
-            age_match = AGE_PATTERN.search(name_elem.get_text(strip=True))
-            if age_match:
+            # Issue #589: 以前はAGE_PATTERN.search()で最初の一致のみを見ていたため、
+            # "No.(12) さくら(25歳)"のように年齢より前に(歳/才の無い)2桁の括弧数字
+            # (連番・部屋番号等)が出現すると、その数字がD-L12の妥当性範囲チェックで
+            # 却下された時点で検索を打ち切ってしまい、後続の本来の年齢
+            # ("(25歳)")を一切試さないまま年齢抽出自体が失敗していた。
+            # finditer()で全ての候補を出現順に走査し、妥当性チェックを通過する
+            # 最初の候補が見つかるまで後続の候補も試すよう修正した。
+            for age_match in AGE_PATTERN.finditer(name_elem.get_text(strip=True)):
                 bracket_num, bracket_suffix, plain_num = age_match.groups()
                 if bracket_num is not None:
                     # D-L12: 「歳」「才」が明示されている場合は無条件に信頼するが、
@@ -1457,8 +1482,10 @@ class WebMonitor:
                         <= MonitorConfig.AGE_PLAUSIBLE_MAX
                     ):
                         age = bracket_num
+                        break
                 else:
                     age = plain_num
+                    break
         return age
 
     @staticmethod
