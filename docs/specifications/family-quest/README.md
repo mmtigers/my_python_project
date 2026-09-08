@@ -1,6 +1,6 @@
 # family-quest 仕様書一覧
 
-タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された48件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
+タスク(クエスト)をRPG風に管理するReact/TypeScript製SPA「Family Quest」の仕様書索引です。`src/`のディレクトリ構造をミラーする形で格納された54件の仕様書を、実際のディレクトリ構造に沿って整理しています。全体像・他サブシステムとの連携は[全体設計書.md](../全体設計書.md)の「3. サブシステムB: Family Quest」を参照してください。
 
 対応するソースファイル自体が削除済みの仕様書は、末尾の「廃止済み仕様書一覧」に記録のみ残しています(Issue #402 で仕様書ファイル自体は削除済み。新規の実装・参照の対象ではありません)。
 
@@ -26,6 +26,7 @@
 | [Button.md](./src/components/ui/Button.md) | Framer Motionによるアニメーション付きボタン。バリエーション・サイズ・ローディング状態を制御し、クリック時に外部フックで音声再生も行う。 |
 | [Card.md](./src/components/ui/Card.md) | 汎用的なカード型UIコンポーネント。`variant`や`onClick`の有無に応じて適用スタイルを動的に切り替える。 |
 | [ChunkErrorBoundary.md](./src/components/ui/ChunkErrorBoundary.md) | `lazy()`チャンクの読み込み失敗(SW更新後の旧チャンク404)を捕捉し自動再読み込みするエラーバウンダリ。それ以外の描画エラーには「再読み込み」ボタン付きフォールバックを表示する。 |
+| [ConfirmModal.md](./src/components/ui/ConfirmModal.md) | クエスト完了・報酬購入・クエスト却下の確認モーダル。Issue #552で`App.tsx`から抽出された。 |
 | [CooldownRing.md](./src/components/ui/CooldownRing.md) | 無限クエストの連打防止クールダウン(60秒)の残り時間を、円形SVGプログレスリングとして視覚的に表示するコンポーネント。 |
 | [CountUp.md](./src/components/ui/CountUp.md) | `framer-motion`のバネ物理モデルを用いて数値をカウントアップ表示するコンポーネント。プレフィックス・サフィックス・カンマ区切りに対応。 |
 | [HlsPlayer.md](./src/components/ui/HlsPlayer.md) | `hls.js`を用いてHLS形式の映像ストリームを再生する汎用UIコンポーネント。カメラ機能で利用され、非対応ブラウザ向けのネイティブ再生フォールバックも備える。 |
@@ -95,6 +96,8 @@
 | [useGameData.md](./src/hooks/useGameData.md) | React Queryを用いて、ユーザー・クエスト・報酬・年代記・承認待ちインベントリ等のデータ取得・定期更新（ポーリング）と、完了・承認・却下・取消・購入のAPIリクエストを統合管理するカスタムフック。 |
 | [useLayoutMode.md](./src/hooks/useLayoutMode.md) | 横画面／縦画面のレイアウト判定を行うカスタムフック。`window.matchMedia`の一致状況を購読し、リサイズや画面回転にリアルタイムに追従する。 |
 | [useLongPress.md](./src/hooks/useLongPress.md) | クエスト取り消し操作の誤タップ防止のための長押しジェスチャーを提供するカスタムフック。 |
+| [useConfirmDialog.md](./src/hooks/useConfirmDialog.md) | 完了・購入・却下の確認モーダルまわりの状態クラスタ(confirmMode/confirmTarget/confirmUser/rejectReason/isConfirming)を保持するカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
+| [useCurrentUser.md](./src/hooks/useCurrentUser.md) | 選択中ユーザーの`localStorage`永続化解決・保存を行うカスタムフック。Issue #552で`App.tsx`から新規抽出。 |
 | [useOnlineStatus.md](./src/hooks/useOnlineStatus.md) | `navigator.onLine`と`online`/`offline`イベントを利用してオンライン／オフライン状態を検知するカスタムフック。 |
 | [useSound.md](./src/hooks/useSound.md) | 効果音を再生するためのカスタムフック。音声ファイルパスを一元管理し、`HTMLAudioElement`インスタンスをキャッシュする。 |
 
@@ -102,11 +105,14 @@
 
 | 仕様書 | 概要 |
 | --- | --- |
+| [actionResult.md](./src/lib/actionResult.md) | `useGameData`の各種ミューテーション結果を表す`ActionResult`型と、エラーメッセージを解決する`resolveErrorText`を提供する。Issue #552で`App.tsx`から新規抽出。 |
 | [apiClient.md](./src/lib/apiClient.md) | バックエンドAPIへ通信するHTTPクライアント（`ApiClient`クラス）を提供。ベースURL解決・共通ヘッダ設定・JSON送受信・エラーハンドリングをカプセル化する。 |
+| [currentUserStorage.md](./src/lib/currentUserStorage.md) | 選択中ユーザーの`user_id`を`localStorage`へ読み書きするヘルパー(`loadSavedUserId`/`saveCurrentUserId`)。Issue #552で`App.tsx`から新規抽出。 |
 | [errorDetail.md](./src/lib/errorDetail.md) | `apiClient`がスローした例外から表示用文字列を取り出す`extractErrorDetail`と、`/api/quest/data`取得失敗（Zod検証失敗を含む）をバナー向けに要約する`describeGameDataError`を提供する。 |
 | [masterData.md](./src/lib/masterData.md) | サーバー接続エラー発生時のみ使用されるフォールバック用のダミーデータを定義・エクスポートする。 |
 | [queryClient.md](./src/lib/queryClient.md) | `@tanstack/react-query`の`QueryClient`を初期化し、システム全体のデータフェッチングのデフォルト動作（再試行回数・キャッシュ期限等）を定義したインスタンスをエクスポートする。 |
 | [questTargeting.md](./src/lib/questTargeting.md) | クエストの`target_user`判定（`all`/`siblings`/`role_`プレフィックス/個別`user_id`一致）を行う`isQuestVisibleToUser`を提供する。`QuestList.tsx`と`FamilyDashboard.tsx`で重複していたロジックを集約したもの。 |
+| [userRole.md](./src/lib/userRole.md) | 保護者判定`isParentUser`と、承認・却下・購入の記録名義となる代表親を解決する`getRepresentativeParent`を提供する。Issue #552で`App.tsx`から新規抽出。 |
 | [utils.md](./src/lib/utils.md) | Tailwind CSSのクラス名をマージ（結合・競合解決）するユーティリティ関数`cn`を提供する。 |
 
 ## src/types
