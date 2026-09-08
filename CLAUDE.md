@@ -87,6 +87,10 @@ npm run lint     # ESLint
 
 `/quest/{full_path}` と `/camera/{full_path}` のルートは、`family-quest` のSPAビルドを静的ファイルとして配信する。パストラバーサル対策（realpath化したdistディレクトリに対する `os.path.commonpath` チェック）を行い、クライアント側ルーティングのために `index.html` へフォールバックする。
 
+### 依存性注入(DI)について
+
+`MY_HOME_SYSTEM/` は意図的にDIコンテナ・FastAPIの `Depends()` を導入していない（Issue #554で採否を検討し、現状維持を採用）。サービス（`services/*.py`）はモジュールレベルのシングルトンとしてインスタンス化され、ルーターはこれを直接importして使う（例: `routers/quest_router.py` の `from services.quest_service import game_system, quest_service, shop_service, user_service, inventory_service`）。設定も `config` モジュールのグローバル定数を各所が直接参照する（`config.UPLOAD_DIR`、`config.CAMERAS` 等）。個人用IoTシステム・単一プロセス・SQLiteという前提では、DIコンテナを導入する利益より複雑化のコストの方が大きいと判断したための意図的な設計であり、欠陥ではない。テストの分離は `tests/conftest.py` の `isolated_db` フィクスチャや、個々のテストによる `config.SQLITE_DB_PATH` 等の直接monkeypatchで行っており、この方式で十分に成立している。新規のルーター・サービスを追加する際も `Depends()` によるDIは導入せず、既存のモジュールレベルシングルトン+直接importのパターンに従うこと。
+
 ### データベース
 
 SQLiteのみを使用し、単一ファイル `config.SQLITE_DB_PATH`（デフォルトは `config.py` と同じ場所の `home_system.db`。環境変数 `SQLITE_DB_PATH` で上書き可能で、CIではこれを `:memory:` に設定している。ただし `isolated_db` フィクスチャや既存テストの大半はこの環境変数ではなく `config.SQLITE_DB_PATH` をテストごとの一時ファイルへ直接monkeypatch/再代入している）。読み書きの標準的な方法は `core/database.py` の `get_db_cursor()` コンテキストマネージャで、`sqlite3.OperationalError`（"database is locked"）時のリトライ、WALモード・外部キー制約の設定、例外時のロールバックを行う。新規コードでは生の `sqlite3.connect()` を直接開くのではなく、これ（または単純なINSERT用の `save_log_generic`/`save_log_async`）を使うこと。
