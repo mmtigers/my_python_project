@@ -40,58 +40,58 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config`内の定数 | `FAMILY_SETTINGS`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD`の具体的な値や構造が不明。 | `TARGET_MEMBERS = config.FAMIL...` (行番号: 16 / 抜粋: "TARGET_MEMBERS = config.FAMIL...") |
-| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 64 / 抜粋: "save_ok = await save_log_async(") |
+| `core.database.save_log_async` | 非同期DB書き込みの実装詳細や対象スキーマ構造が不明。本ファイルは戻り値が真偽値（失敗時`False`、例外は送出しないFail-Soft）であることのみを前提とする（Issue #373）。 | `save_ok = await save_log_async(` (行番号: 111 / 抜粋: "save_ok = await save_log_async(") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `SAVE_FAILED_PREFIX` (変数、Issue #373で追加)
 
 * **役割**: `log_child_health` / `log_food_record` がDB保存に失敗したときに返す`TextMessage`本文の共通プレフィックス `"⚠️ 記録に失敗しました"`。呼び出し元（`ai_service.tool_record_child_health` / `tool_record_food`）はこのプレフィックスで返信の成否を判別する。
-* 根拠: `SAVE_FAILED_PREFIX = "⚠️ 記録に失敗しました"` (行番号: 29)
+* 根拠: `SAVE_FAILED_PREFIX = "⚠️ 記録に失敗しました"` (行番号: 20)
 
 ### `log_child_health`
 
 * **役割**: 子供の体調をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `save_log_async`の戻り値（Fail-Softで`False`）を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージ（保存されていない旨と再試行の案内）を返す。以前は戻り値を無視して常に成功メッセージを組み立てていたため、DBロック超過・ディスクフル等で保存されていないのに「記録しました」と返す無言のデータ欠損が起きていた（`line_logic.py`側はH-7で修正済みだったが本関数は未修正だった）。
-* 根拠: `async def log_child_health...` (行番号: 35-49 / 抜粋: "def log_child_health(user_id:")、`save_ok = await save_log_async(` (行番号: 41)、`if not save_ok:` (行番号: 46-48)
+* 根拠: `async def log_child_health...` (行番号: 105-119 / 抜粋: "def log_child_health(user_id:")、`save_ok = await save_log_async(` (行番号: 111)、`if not save_ok:` (行番号: 116-118)
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `child_name` (str), `condition` (str)
-* 根拠: 関数の引数定義 (行番号: 35 / 抜粋: "user_id: str, user_name: str,")
+* 根拠: 関数の引数定義 (行番号: 105 / 抜粋: "user_id: str, user_name: str,")
 
 
 * **戻り値/レスポンス**: `TextMessage`。成功時は`"【{child_name}】{condition} を記録しました！🏥"`、保存失敗時は`f"{SAVE_FAILED_PREFIX}。【{child_name}】{condition} は保存されていません。もう一度お試しください。"`。
-* 根拠: 戻り値の型ヒント (行番号: 35 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 48)、成功時 (行番号: 49)
+* 根拠: 戻り値の型ヒント (行番号: 105 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 118)、成功時 (行番号: 119)
 
 
 * **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。
-* 根拠: `save_ok = await save_log_async(` (行番号: 41)、`logger.error(f"log_child_health の記録保存に失敗しました ...")` (行番号: 47)
+* 根拠: `save_ok = await save_log_async(` (行番号: 111)、`logger.error(f"log_child_health の記録保存に失敗しました ...")` (行番号: 117)
 
 
 * **エラーハンドリング**: `try-except`は無いが、`save_log_async`の戻り値`False`を失敗として扱い失敗メッセージを返す（Issue #373）。
-* 根拠: `if not save_ok:` (行番号: 46-48)
+* 根拠: `if not save_ok:` (行番号: 116-118)
 
 
 
 ### `log_food_record`
 
 * **役割**: 食事内容をDBに記録し、記録完了の`TextMessage`を返す。**（Issue #373で修正）** `log_child_health`と同様に`save_log_async`の戻り値を確認し、失敗時はエラーログを出力したうえで`SAVE_FAILED_PREFIX`で始まる失敗メッセージを返す。**（Issue #583で修正）** DB書き込みの`meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。本関数が受け取る`category`引数（`ai_service`が渡す朝食/昼食/夕食等のAIラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
-* 根拠: `async def log_food_record...` (行番号: 74-89 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")、`save_ok = await save_log_async(` (行番号: 81-85 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")、`if not save_ok:` (行番号: 86-88)
+* 根拠: `async def log_food_record...` (行番号: 121-136 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")、`save_ok = await save_log_async(` (行番号: 128-132 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")、`if not save_ok:` (行番号: 133-135)
 
 
 * **引数/リクエスト**: `user_id` (str), `user_name` (str), `category` (str), `item` (str), `is_manual` (bool, デフォルト `False`)
-* 根拠: 関数の引数定義 (行番号: 74 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")
+* 根拠: 関数の引数定義 (行番号: 121 / 抜粋: "async def log_food_record(user_id: str, user_name: str, category: str, item: str, is_manual: bool = False) -> TextMessage:")
 
 
 * **戻り値/レスポンス**: `TextMessage`。成功時は`"🍽️ {category}「{item}」を記録しました！"`、保存失敗時は`f"{SAVE_FAILED_PREFIX}。{category}「{item}」は保存されていません。もう一度お試しください。"`。
-* 根拠: 戻り値の型ヒント (行番号: 74 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 88)、成功時 (行番号: 89)
+* 根拠: 戻り値の型ヒント (行番号: 121 / 抜粋: "-> TextMessage:")、失敗時 (行番号: 135)、成功時 (行番号: 136)
 
 
 * **副作用**: 外部関数(`save_log_async`)によるDB書き込み。保存失敗時は`logger.error`。書き込む`meal_time_category`列の値は`get_meal_time_category_from_now()`（Issue #583で追加、呼び出し時点のJST時刻に依存）の戻り値。
-* 根拠: `save_ok = await save_log_async(` (行番号: 81)、`get_meal_time_category_from_now()` (行番号: 84)、`logger.error(f"log_food_record の記録保存に失敗しました ...")` (行番号: 87)
+* 根拠: `save_ok = await save_log_async(` (行番号: 128)、`get_meal_time_category_from_now()` (行番号: 131)、`logger.error(f"log_food_record の記録保存に失敗しました ...")` (行番号: 134)
 
 
 * **エラーハンドリング**: `try-except`は無いが、`save_log_async`の戻り値`False`を失敗として扱い失敗メッセージを返す（Issue #373）。
-* 根拠: `if not save_ok:` (行番号: 86-88)
+* 根拠: `if not save_ok:` (行番号: 133-135)
 
 
 
@@ -112,7 +112,7 @@
 ### `LINE_TEXT_MAX_CHARS` / `LINE_MAX_MESSAGES_PER_REPLY` (変数、Issue #377で追加)
 
 * **役割**: `LINE_TEXT_MAX_CHARS`（`4900`）はLINEの`TextMessage`1件あたりの文字数上限（実際の上限は5000字で、超過するとMessaging APIが400を返す）に安全マージンを取った、本ファイルが扱う1メッセージあたりの上限。`LINE_MAX_MESSAGES_PER_REPLY`（`5`）は1回のreply/pushで送信できるメッセージ数の上限。
-* 根拠: `LINE_TEXT_MAX_CHARS = 4900` (行番号: 34)、`LINE_MAX_MESSAGES_PER_REPLY = 5` (行番号: 36)
+* 根拠: `LINE_TEXT_MAX_CHARS = 4900` (行番号: 25)、`LINE_MAX_MESSAGES_PER_REPLY = 5` (行番号: 27)
 
 ### `_line_text_length` / `_take_line_chars` / `_split_by_line_char_count` (関数、Issue #588で追加)
 
@@ -122,23 +122,23 @@
 ### `split_text_into_line_messages` (関数、Issue #377で追加、Issue #588でUTF-16基準に修正)
 
 * **役割**: 長文を LINE の5000字制限に収まる`TextMessage`へ変換する。テキストが`LINE_TEXT_MAX_CHARS`字(**Issue #588**: LINE基準のUTF-16コードユニット単位。以前はPythonの`len(str)`によるコードポイント単位だった)以下ならそのまま単一の`TextMessage`を返す（`handlers.line_handler.reply_message`は単一オブジェクト・リストのどちらも受け付けるため、短文の場合の呼び出し元の挙動は変わらない）。超過する場合のみ`_split_by_line_char_count`でLINE基準の`LINE_TEXT_MAX_CHARS`字ごとに分割した`TextMessage`のリストを返し、`LINE_MAX_MESSAGES_PER_REPLY`件を超えるときは末尾を`_take_line_chars`で切り詰めて「(文字数上限のため以下省略)」の注記を付ける（全文を無制限に送り続けることはしない）。`handlers/line_handler.py`のAI応答返信でも使われる。
-* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 76-98)
+* 根拠: `def split_text_into_line_messages(text: str) -> Union[TextMessage, List[TextMessage]]:` (行番号: 76-99)
 
 
 * **引数/リクエスト**: `text: str`
-* 根拠: 関数シグネチャ (行番号: 39)
+* 根拠: 関数シグネチャ (行番号: 76)
 
 
 * **戻り値/レスポンス**: `Union[TextMessage, List[TextMessage]]`
-* 根拠: `return TextMessage(text=text)` (行番号: 51) / `return [TextMessage(text=c) for c in chunks]` (行番号: 61)
+* 根拠: `return TextMessage(text=text)` (行番号: 89) / `return [TextMessage(text=c) for c in chunks]` (行番号: 99)
 
 
 * **副作用**: なし
-* 根拠: 関数本体 (行番号: 39-61)
+* 根拠: 関数本体 (行番号: 76-99)
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数本体 (行番号: 39-61)
+* 根拠: 関数本体 (行番号: 76-99)
 
 ## 5. 処理フロー図
 
@@ -203,7 +203,7 @@ graph TD
 * 全体的に `except Exception as e:` による広範な例外キャッチが行われており、予期せぬシステムエラーが握りつぶされる構造になっている。
 * 旧版の本セクションは「`linebot.v3.messaging`から`QuickReply`, `QuickReplyItem`, `MessageAction`が未使用インポートされている」と記載していたが、確認したところ本ファイルはそもそも`TextMessage`以外を`linebot.v3.messaging`からインポートしておらず誤りだった（訂正のみ。Issue #410とは無関係）。
 * **[修正済み] Issue #377 LINEの5000字テキスト制限未考慮**: 旧`get_active_quests_message`（Issue #358で削除）が組み立てるクエスト一覧テキストは件数に応じて無制限に伸び、5000字を超えるとLINE Messaging APIが400を返す（呼び出し元`handlers/line_handler.py`の`reply_message`は例外を`logger.error`で握るだけなのでユーザーには何も届かなかった）。`split_text_into_line_messages`（`LINE_TEXT_MAX_CHARS`=4900字ごとに分割、`LINE_MAX_MESSAGES_PER_REPLY`=5件を超える場合は末尾切り詰め）を追加して対応した。同関数は現在も`handlers/line_handler.py`のGemini応答返信（`ai_service.analyze_text_and_execute`の戻り値）に使われている。
-* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 25, 27)、`split_text_into_line_messages` (行番号: 76-98)
+* 根拠: `LINE_TEXT_MAX_CHARS`/`LINE_MAX_MESSAGES_PER_REPLY` (行番号: 25, 27)、`split_text_into_line_messages` (行番号: 76-99)
 * **[修正済み] Issue #588 文字数カウントがPythonのコードポイント単位でLINE基準(UTF-16コードユニット単位)と不一致**: `split_text_into_line_messages`は以前`len(str)`(Pythonのコードポイント単位)で文字数を判定・分割していたが、LINE Messaging APIは文字数をUTF-16コードユニット単位で数え、絵文字等のBMP外の文字はサロゲートペア(2コードユニット)としてカウントする。この差により、絵文字を多用するテキストでは実際のLINE側カウントより少なく見積もり、本関数が「上限内」と誤判定したメッセージがMessaging API側では上限超過で送信失敗しうった。`_line_text_length`/`_take_line_chars`/`_split_by_line_char_count`を新設し、UTF-16コードユニット単位でカウント・分割するよう修正した。
 * 根拠: [関数定義とコメント] (行番号: 30-73)、回帰テスト`tests/test_line_service.py::TestLineTextLengthCountsUtf16CodeUnits`
 * **[修正済み] Issue #358 LINE経由のFamily Questコマンドが本番で成立しない**: `get_user_status_message`/`get_active_quests_message`/`process_approval_command`（LINE ID と `quest_users.user_id` のマッピングが存在せず本番で機能しないデッドコード）を削除した。詳細は「削除済み」セクション参照。
@@ -220,8 +220,8 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `TARGET_MEMBERS` の具体的な要素数と型 | `MY_HOME_SYSTEM/services/line_service.py`16行目で`TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]`と定義されていることを確認した上で、`MY_HOME_SYSTEM/config.py`470行目を直接確認した。`FAMILY_SETTINGS["members"]`は`["智矢", "涼花", "将博", "春菜"]`という4件の実名文字列からなる`List[str]`であり、`TARGET_MEMBERS`もこれをそのまま参照するため同じく4要素の`List[str]`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:16`, `MY_HOME_SYSTEM/config.py:469-470` |
-| DBの各テーブルの正確なスキーマ | `MY_HOME_SYSTEM/core/database.py`13〜24行目を直接確認した。DBアクセスは`get_db_cursor(commit=False)`という汎用的なSQLite接続コンテキストマネージャで提供され、23〜24行目で`PRAGMA journal_mode=WAL;`・`PRAGMA foreign_keys=ON;`が実行されWALモードと外部キー制約が有効化される設計であることを確認した。本ファイル(`line_service.py`)自体は64〜67行目で`config.SQLITE_TABLE_CHILD`(実体`"child_health_records"`)テーブルへ`INSERT`しているのみで他テーブルへの直接アクセスはなく、`child_health_records`の正確なスキーマは`MY_HOME_SYSTEM/init_unified_db.py`244〜252行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラムとして定義されていることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:13-24`, `MY_HOME_SYSTEM/services/line_service.py:64-67`, `MY_HOME_SYSTEM/init_unified_db.py:244-252` |
+| `TARGET_MEMBERS` の具体的な要素数と型 | `MY_HOME_SYSTEM/services/line_service.py`16行目で`TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]`と定義されていることを確認した上で、`MY_HOME_SYSTEM/config.py`427行目を直接確認した。`FAMILY_SETTINGS["members"]`は`["智矢", "涼花", "将博", "春菜"]`という4件の実名文字列からなる`List[str]`であり、`TARGET_MEMBERS`もこれをそのまま参照するため同じく4要素の`List[str]`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/line_service.py:16`, `MY_HOME_SYSTEM/config.py:427` |
+| DBの各テーブルの正確なスキーマ | **（訂正: 旧版は`init_unified_db.py`をスキーマ定義元として引用していたが、これは現在誤りである）** `MY_HOME_SYSTEM/core/database.py`20〜53行目(`get_db_cursor`)を直接確認した。DBアクセスは`get_db_cursor(commit=False)`という汎用的なSQLite接続コンテキストマネージャで提供され、31〜32行目で`PRAGMA journal_mode=WAL;`・`PRAGMA foreign_keys=ON;`が実行されWALモードと外部キー制約が有効化される設計であることを確認した。本ファイル(`line_service.py`)自体は111〜115行目で`config.SQLITE_TABLE_CHILD`(実体`"child_health_records"`)テーブルへ`INSERT`しているのみで他テーブルへの直接アクセスはなく、`init_unified_db.py`を確認したところ現在は`CREATE TABLE`文を一切含まない(全162行、Issue #330のスキーマ管理一本化以降は`core/migrations.py`経由のマイグレーション適用と検証のみを行う薄いラッパー)。`child_health_records`の正確なスキーマは唯一の定義元である`MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql`158〜165行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラムとして定義されていることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:20-53`(PRAGMA設定は31-32), `MY_HOME_SYSTEM/services/line_service.py:111-115`, `MY_HOME_SYSTEM/init_unified_db.py`(全162行、CREATE TABLEなし), `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql:158-165` |
 
 ## 10. 自己検証結果
 

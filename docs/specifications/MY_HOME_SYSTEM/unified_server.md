@@ -25,13 +25,13 @@
 
 * FastAPIを用いたAPIサーバーのエントリーポイント（起動・設定スクリプト）である。
 * システムのルートディレクトリ解決、CORS設定、IPアドレスベースの検証（Cloudflare等リバースプロキシ対応）、ログ抑制フィルターの設定、各種ルーターの統合を行う。CORS許可オリジンは`config.CORS_ORIGINS`を直接参照する（M-8-2で、本ファイル側に別途あった重複ハードコードリストを削除し一本化した。以前は本ファイル側のリストのみが実際に使われ、`config.py`側の設定やその元になる`ALLOW_ALL_ORIGINS`環境変数を変更してもCORS設定に反映されない状態だった）。
-* 根拠: [CORSミドルウェア設定] (行番号: 195-204 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
+* 根拠: [CORSミドルウェア設定] (行番号: 245-251 / 抜粋: "allow_origins=config.CORS_ORIGINS,")
 * **（#411 S-L7で修正）** `allow_credentials`は`config.CORS_ORIGINS != ["*"]`で動的に決定する。以前は`ALLOW_ALL_ORIGINS=true`で`CORS_ORIGINS=["*"]`になっている場合でも`allow_credentials=True`に固定されており、StarletteのCORSMiddlewareはワイルドカード＋認証情報付きリクエストに対してリクエスト元Originをそのままエコーバックする(仕様上「*」は認証情報付きレスポンスヘッダとしては使えないため)。結果として、`ALLOW_ALL_ORIGINS=true`時は任意オリジンからCookie等の資格情報付きアクセスを実質許可してしまっていた。ワイルドカード指定時のみ`allow_credentials`をFalseにする。
-* 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 203)
+* 根拠: `allow_credentials=config.CORS_ORIGINS != ["*"]` (行番号: 248)
 * 静的ファイル（`/assets`, `/uploads`, SPA用ファイル）の配信ルーティングを行う。
 * アプリケーション起動・終了時（ライフサイクル）に連動して、サブプロセス（カメラ監視スクリプト、スケジューラースクリプト）の起動と終了管理、およびセンサー関連タスクのキャンセル処理を行う。
 * 未捕捉例外のグローバルハンドリングを担う。
-* 根拠: `app = FastAPI(...)` (行番号: 159-164 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 344 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
+* 根拠: `app = FastAPI(...)` (行番号: 230-235 / 抜粋: "app = FastAPI("), `uvicorn.run(...)` (行番号: 430 / 抜粋: "uvicorn.run(app, host="0.0.0.0"")
 
 ## 3. 外部依存関係
 
@@ -65,13 +65,13 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 269 / 抜粋: "quest_dist_dir = getattr(config") |
-| `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 39 / 抜粋: "logger = setup_logging("unifie") |
-| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 156 / 抜粋: "sensor_service.cancel_all_tasks") |
-| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明） | `app.include_router(...)` (行番号: 247-251 / 抜粋: "app.include_router(webhook_router.router)") |
-| `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 120 / 抜粋: "camera_process = subprocess.Po") |
-| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 127 / 抜粋: "scheduler_process = subprocess.") |
-| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 112 / 抜粋: "apply_pending_migrations(migration_conn)") |
+| `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 355 / 抜粋: "quest_dist_dir = getattr(config") |
+| `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 35 / 抜粋: "logger = setup_logging("unifie") |
+| `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 227 / 抜粋: "sensor_service.cancel_all_tasks") |
+| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明） | `app.include_router(...)` (行番号: 333-337 / 抜粋: "app.include_router(webhook_router.router)") |
+| `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 183 / 抜粋: "camera_process = subprocess.Po") |
+| `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 192 / 抜粋: "scheduler_process = subprocess.") |
+| `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 165 / 抜粋: "apply_pending_migrations(migration_conn)") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
@@ -94,23 +94,23 @@
 * 根拠: (行番号: 125〜127 / 抜粋: "except Exception:\n            # マスク処理の失敗でログ出力自体を止めない\n            pass")
 
 * **役割**: Uvicorn等のアクセスログ出力を評価し、GETリクエストかつ正常系（200 OK または 304 Not Modified）で、特定のパス・キーワード（ポーリング、ヘルスチェック、静的アセット等）を含む場合のみログ出力を抑制する（Falseを返す）。それ以外や例外発生時はログを出力する。**（Issue #177で修正）** 正常系判定は以前`" 200 "`/`" 304 "`という前後スペース付きの部分文字列一致だったが、uvicornの実際のアクセスログフォーマット（`h11_impl.py`/`httptools_impl.py`の`'%s - "%s %s HTTP/%s" %d'`）ではステータスコードがメッセージ末尾に前方スペースのみで出力され後方にスペースが付かない（例: `'127.0.0.1 - "GET /path HTTP/1.1" 200'`）ため、この判定は常に不一致となり抑制対象キーワード判定へ到達しない死にコードになっていた。現在は末尾の空白を除去したうえで`endswith(" 200")`/`endswith(" 304")`により末尾一致で判定する。
-* 根拠: `class SilencePolicyFilter(logg` (行番号: 42-91 / 抜粋: "class SilencePolicyFilter(logg")、末尾一致判定への修正 (行番号: 57-65 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")
+* 根拠: `class SilencePolicyFilter(logg` (行番号: 38-87 / 抜粋: "class SilencePolicyFilter(logg")、末尾一致判定への修正 (行番号: 53-60 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")
 
 
 * **引数/リクエスト**: `record: logging.LogRecord`
-* 根拠: `def filter(self, record: loggin` (行番号: 48 / 抜粋: "def filter(self, record: loggin")
+* 根拠: `def filter(self, record: loggin` (行番号: 44 / 抜粋: "def filter(self, record: loggin")
 
 
 * **戻り値/レスポンス**: `bool` (True: ログ出力、False: ログ抑制)
-* 根拠: `-> bool:` (行番号: 48 / 抜粋: "def filter(self, record: loggin")
+* 根拠: `-> bool:` (行番号: 44 / 抜粋: "def filter(self, record: loggin")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 48-91 / 抜粋: "def filter(self, record: loggin")
+* 根拠: 該当関数内処理 (行番号: 44-87 / 抜粋: "def filter(self, record: loggin")
 
 
 * **エラーハンドリング**: 関数内部での例外発生時は全てキャッチし無視(`pass`)することで、ロギング処理全体の停止を防ぎ、デフォルトとして`True`を返す安全策を持つ。
-* 根拠: `except Exception: pass` (行番号: 87-89 / 抜粋: "except Exception: pass")
+* 根拠: `except Exception: pass` (行番号: 83-85 / 抜粋: "except Exception:\n            # フィルタ処理中の予期せぬエラーでアプリケーションを止めないための安全策\n            pass")
 
 
 
@@ -143,160 +143,160 @@
 ### `ip_restriction_middleware`
 
 * **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス以外では、`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。**（Issue #321・2026-09-03決定）** 非プライベートIPからのアクセスをブロックしない現在の挙動は、意図的な設計として正式に確定している。`Cf-Access-Jwt-Assertion`の署名/aud検証は一度PR #80で実装されたが2026-08-28の障害でrevertされ、再実装せずエッジのCloudflare Access（インフラ側）への委譲を正式設計とする案（案B）が採用された。この設計はオリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
-* 根拠: `async def ip_restriction_middle` (行番号: 178-236 / 抜粋: "async def ip_restriction_middle")
+* 根拠: `async def ip_restriction_middle` (行番号: 254-322 / 抜粋: "async def ip_restriction_middle")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def ip_restriction_middle` (行番号: 178 / 抜粋: "async def ip_restriction_middle")
+* 根拠: `async def ip_restriction_middle` (行番号: 254 / 抜粋: "async def ip_restriction_middle")
 
 
 * **戻り値/レスポンス**: `Response` (後続の処理結果)
-* 根拠: `-> Response:` (行番号: 178 / 抜粋: "-> Response:")
+* 根拠: `-> Response:` (行番号: 254 / 抜粋: "-> Response:")
 
 
 * **副作用**: 外部ネットワークからのアクセス判定時(`logger.info`)のログ出力。
-* 根拠: `logger.info(f"Allowed extern` (行番号: 235 / 抜粋: "logger.info(f"Allowed extern")
+* 根拠: `logger.info(f"Allowed extern` (行番号: 321 / 抜粋: "logger.info(f"Allowed extern")
 
 
 * **エラーハンドリング**: IPアドレス解析時(`ipaddress.ip_address`)の`ValueError`を補足し無視(`pass`)する。
-* 根拠: `except ValueError: pass` (行番号: 220-221 / 抜粋: "except ValueError: pass")
+* 根拠: `except ValueError: pass` (行番号: 303-304 / 抜粋: "except ValueError: pass")
 
 
 
 ### `global_exception_handler`
 
 * **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
-* 根拠: `async def global_exception_hand` (行番号: 239-244 / 抜粋: "async def global_exception_hand")
+* 根拠: `async def global_exception_hand` (行番号: 325-330 / 抜粋: "async def global_exception_hand")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_hand` (行番号: 239 / 抜粋: "async def global_exception_hand")
+* 根拠: `async def global_exception_hand` (行番号: 325 / 抜粋: "async def global_exception_hand")
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
-* 根拠: `return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})` (行番号: 241-244 / 抜粋: "content={"detail": "Internal Server Error"}")
+* 根拠: `return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})` (行番号: 327-330 / 抜粋: "content={"detail": "Internal Server Error"}")
 
 
 * **副作用**: エラーログへのスタックトレース出力。
-* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 240 / 抜粋: "logger.error(f"🔥 Global Exce")
+* 根拠: `logger.error(f"🔥 Global Exce` (行番号: 326 / 抜粋: "logger.error(f"🔥 Global Exce")
 
 
 * **エラーハンドリング**: なし（本メソッド自体が最上位の例外ハンドラ）
-* 根拠: `@app.exception_handler(Exceptio` (行番号: 238 / 抜粋: "@app.exception_handler(Exceptio")
+* 根拠: `@app.exception_handler(Exceptio` (行番号: 324 / 抜粋: "@app.exception_handler(Exceptio")
 
 
 
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_` (行番号: 283-298 / 抜粋: "async def serve_quest_spa(full_")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 281-282)
+* 根拠: `async def serve_quest_spa(full_` (行番号: 369-384 / 抜粋: "async def serve_quest_spa(full_")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_` (行番号: 283 / 抜粋: "async def serve_quest_spa(full_")
+* 根拠: `async def serve_quest_spa(full_` (行番号: 369 / 抜粋: "async def serve_quest_spa(full_")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(target_fil` (行番号: 292 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 288 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(target_fil` (行番号: 378 / 抜粋: "return FileResponse(target_file"), `return JSONResponse(status_code` (行番号: 374 / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 283-298 / 抜粋: "async def serve_quest_spa(full_")
+* 根拠: 該当関数内処理 (行番号: 369-384 / 抜粋: "async def serve_quest_spa(full_")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
-* 根拠: `if os.path.exists(index_path):` (行番号: 296-298 / 抜粋: "if os.path.exists(index_path):")
+* 根拠: `if os.path.exists(index_path):` (行番号: 382-384 / 抜粋: "if os.path.exists(index_path):")
 
 
 
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 306-310 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 302-305)
+* 根拠: `async def serve_quest_root():` (行番号: 392-396 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 306 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 392 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
-* 根拠: `return FileResponse(index_path)` (行番号: 309 / 抜粋: "return FileResponse(index_path)"), `return JSONResponse(status_code` (行番号: 310 / 抜粋: "return JSONResponse(status_code")
+* 根拠: `return FileResponse(index_path)` (行番号: 395 / 抜粋: "return FileResponse(index_path)"), `return JSONResponse(status_code` (行番号: 396 / 抜粋: "return JSONResponse(status_code")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 306-310 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 392-396 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
-* 根拠: `if os.path.exists(index_path):` (行番号: 308-310 / 抜粋: "if os.path.exists(index_path):")
+* 根拠: `if os.path.exists(index_path):` (行番号: 394-396 / 抜粋: "if os.path.exists(index_path):")
 
 
 
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 318-323 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 404-409 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 318 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 404 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
-* 根拠: `return { "status": "ok", ... }` (行番号: 319-323 / 抜粋: "return { "status": "ok", "sy")
+* 根拠: `return { "status": "ok", ... }` (行番号: 405-409 / 抜粋: "return {")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 318-323 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 404-409 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 318-323 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 404-409 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: ヘルスチェック用に正常稼働を示すJSONを返す。
-* 根拠: `async def health_check():` (行番号: 326-327 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 412-413 / 抜粋: "async def health_check():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def health_check():` (行番号: 326 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 412 / 抜粋: "async def health_check():")
 
 
 * **戻り値/レスポンス**: `dict` (statusキーを含む)
-* 根拠: `return {"status": "healthy"}` (行番号: 327 / 抜粋: "return {"status": "healthy"}")
+* 根拠: `return {"status": "healthy"}` (行番号: 413 / 抜粋: "return {"status": "healthy"}")
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 326-327 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 412-413 / 抜粋: "async def health_check():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 326-327 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 412-413 / 抜粋: "async def health_check():")
 
 
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 329-344 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 415-430 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 329)
+* 根拠: (行番号: 415)
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: (行番号: 329)
+* 根拠: (行番号: 415)
 
 
 * **副作用**: `uvicorn.run`の呼び出し（ASGIサーバーの起動。呼び出しはブロッキングでプロセスの生存期間中戻らない）
-* 根拠: (行番号: 344 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
+* 根拠: (行番号: 430 / 抜粋: "uvicorn.run(app, host="0.0.0.0", port=8000)")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 329-344)
+* 根拠: (行番号: 415-430)
 
 
 
@@ -378,11 +378,11 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | システム全体の静的パス(`QUEST_DIST_DIR`等)や他の設定変数を決定しており、システムの配置構造を把握するため。 | `import config` (行番号: 34)、`getattr(config, "QUEST_DIST_DIR", None)` (行番号: 269) |
-| 高 | `scheduler_boot.py` | APIサーバー起動と同時にサブプロセスとして起動・ライフサイクル共有されるため、非同期で動作する定期処理の仕様把握に必須であるため。 | `scheduler_script = os.path.join(PROJECT_ROOT, "scheduler_boot.py")` (行番号: 132) |
-| 中 | `routers/quest_router.py` | `/api/quest`パス配下にマウントされる処理群であり、システム名である「Family Quest API」のコアドメイン処理を把握するため。 | `app.include_router(quest_router.router, prefix="/api/quest")` (行番号: 248) |
-| 中 | `routers/camera_router.py` | `/api/cameras`パス配下にマウントされ、SPAルーティング(`/camera/*`)とも連動するカメラ機能のAPI仕様を把握するため。 | `app.include_router(camera_router.router, prefix="/api/cameras")` (行番号: 250) |
-| 中 | `services/sensor_service.py` | 終了処理にタスクキャンセルが含まれており、起動後に常駐するセンサー処理の内容と影響範囲を特定するため。 | `sensor_service.cancel_all_tasks()` (行番号: 163) |
+| 高 | `config.py` | システム全体の静的パス(`QUEST_DIST_DIR`等)や他の設定変数を決定しており、システムの配置構造を把握するため。 | `import config` (行番号: 24)、`getattr(config, "QUEST_DIST_DIR", None)` (行番号: 355) |
+| 高 | `scheduler_boot.py` | APIサーバー起動と同時にサブプロセスとして起動・ライフサイクル共有されるため、非同期で動作する定期処理の仕様把握に必須であるため。 | `scheduler_script = os.path.join(PROJECT_ROOT, "scheduler_boot.py")` (行番号: 190) |
+| 中 | `routers/quest_router.py` | `/api/quest`パス配下にマウントされる処理群であり、システム名である「Family Quest API」のコアドメイン処理を把握するため。 | `app.include_router(quest_router.router, prefix="/api/quest")` (行番号: 334) |
+| 中 | `routers/camera_router.py` | `/api/cameras`パス配下にマウントされ、SPAルーティング(`/camera/*`)とも連動するカメラ機能のAPI仕様を把握するため。 | `app.include_router(camera_router.router, prefix="/api/cameras")` (行番号: 336) |
+| 中 | `services/sensor_service.py` | 終了処理にタスクキャンセルが含まれており、起動後に常駐するセンサー処理の内容と影響範囲を特定するため。 | `sensor_service.cancel_all_tasks()` (行番号: 227) |
 
 ## 8. 保守上の注意点
 

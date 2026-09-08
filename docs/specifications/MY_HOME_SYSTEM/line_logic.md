@@ -21,8 +21,8 @@
 * LINEプラットフォームへ返すテキスト、QuickReply、FlexMessageなどのUIコンポーネントを生成・送信するヘルパー関数群も提供する。
 * 2026年のリファクタリング（コミット `1ecbe3b`）により、`handle_message`、`ask_outing_question`、`handle_child_record`、`handle_stomach_record` および `USER_INPUT_STATE` ステートマシンは削除された。これらは本番のLINE Webhook経路（`handlers/line_handler.py`）から一切呼び出されない到達不能コードだったため。テキストメッセージの自由文処理は現在 `handlers/line_handler.py` の `_process_message_async()` → `services/ai_service.py` に一本化されている。
 * コミット `8525dc2`（H-7修正）により、`all_genki`・`child_check`・`food_record_direct`の3記録フローは`sync_run(save_log_async(...))`(または`all_genki`は後述の`save_logs_batch_async`)の戻り値（保存成否のbool）を検査するようになった。保存に失敗した場合は成功メッセージを返さず「⚠️ 記録に失敗しました。もう一度お試しください。」を返信しエラーログを出力する。これに伴い`sync_run`自体も、内部で例外が発生した場合に暗黙の`None`ではなく明示的に`False`を返すよう変更された。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼びリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、一部だけ失敗しても既に成功していた分がコミット済みのまま残った。案内どおりユーザーが再試行すると成功済み分まで重複INSERTされていた。現在は`save_logs_batch_async`(単一トランザクションで全件保存)を1回呼び出す方式に変更し、1件でも失敗すれば全件ロールバックされる真のall-or-nothingにしている。
-* 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 226-228 / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 48-50 / 抜粋: "return False")
-* 根拠: [ファイル全体の構成] (行番号: 1-405 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
+* 根拠: `if not save_all_ok:\n                logger.error(...)\n                send_reply_text(..., "⚠️ 記録に失敗しました。もう一度お試しください。")` (行番号: 226-228 / 抜粋: "if not save_all_ok:"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 44-46 / 抜粋: "return False")
+* 根拠: [ファイル全体の構成] (行番号: 1-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 
 ## 3. 外部依存関係
 
@@ -35,12 +35,12 @@
 | `sqlite3` | 標準ライブラリ | データベースへの直接接続・クエリ実行 | `import sqlite3` (行番号: 4 / 抜粋: "import sqlite3") |
 | `datetime` | 標準ライブラリ | 日時のフォーマット処理 | `import datetime` (行番号: 5 / 抜粋: "import datetime") |
 | `parse_qsl` | 標準ライブラリ (`urllib.parse`) | Postbackデータのパース | `from urllib.parse import parse_qsl` (行番号: 6 / 抜粋: "from urllib.parse import parse_qsl") |
-| `MessagingApi`, `ReplyMessageRequest`, `TextMessage`, `FlexMessage`, `FlexContainer`, `QuickReply` | 外部ライブラリ (`linebot.v3.messaging`) | LINE APIのクライアント・メッセージモデル。`QuickReply`は`send_reply_text`の引数型ヒントで使用（**保守性 #410で修正**: 以前ここに含まれていた`QuickReplyItem`/`MessageAction`は、未使用だった`create_quick_reply`関数の削除に伴い未使用インポートとなったため削除した。旧版の本テーブルが記載していた`json`インポート・`PushMessageRequest`/`PostbackAction`の未使用インポートは、確認したところ現行ファイルには存在せず誤りだった） | `from linebot.v3.messaging import (` (行番号: 9-15 / 抜粋: "from linebot.v3.messaging import (") |
-| `PostbackEvent` | 外部ライブラリ (`linebot.v3.webhooks`) | LINE Webhookイベントの型定義 | `from linebot.v3.webhooks import PostbackEvent` (行番号: 16 / 抜粋: "from linebot.v3.webhooks import PostbackEvent") |
-| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 22 / 抜粋: "from core.logger import setup_logging") |
+| `MessagingApi`, `ReplyMessageRequest`, `TextMessage`, `FlexMessage`, `FlexContainer`, `QuickReply` | 外部ライブラリ (`linebot.v3.messaging`) | LINE APIのクライアント・メッセージモデル。`QuickReply`は`send_reply_text`の引数型ヒントで使用（**保守性 #410で修正**: 以前ここに含まれていた`QuickReplyItem`/`MessageAction`は、未使用だった`create_quick_reply`関数の削除に伴い未使用インポートとなったため削除した。旧版の本テーブルが記載していた`json`インポート・`PushMessageRequest`/`PostbackAction`の未使用インポートは、確認したところ現行ファイルには存在せず誤りだった） | `from linebot.v3.messaging import (` (行番号: 10-17 / 抜粋: "from linebot.v3.messaging import (") |
+| `PostbackEvent` | 外部ライブラリ (`linebot.v3.webhooks`) | LINE Webhookイベントの型定義 | `from linebot.v3.webhooks import PostbackEvent` (行番号: 18 / 抜粋: "from linebot.v3.webhooks import PostbackEvent") |
+| `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化 | `from core.logger import setup_logging` (行番号: 24 / 抜粋: "from core.logger import setup_logging") |
 | `get_now_iso` / `get_today_date_str` / `get_display_date`（Issue #410で追加） / `get_meal_time_category_from_now`（Issue #583で追加） | 外部モジュール (`core.utils`) | 現在日時の取得。`get_display_date`は`check_status`の日付表示（JST基準`"%m/%d"`）に、naiveな`datetime.datetime.now()`の代わりに使う。`get_meal_time_category_from_now`は`food_record_direct`アクションが`food_records.meal_time_category`の算出に使う（現在時刻(JST)から"Breakfast"/"Lunch"/"Snack"/"Dinner"を判定） | `from core.utils import get_now_iso, get_today_date_str, get_display_date, get_meal_time_category_from_now` (行番号: 27 / 抜粋: "from core.utils import get_now_iso, get_today_date_str, get_display_date, get_meal_time_category_from_now") |
-| `save_log_async` / `save_logs_batch_async`（Issue #231で追加） | 外部モジュール (`core.database`) | ログの非同期DB保存(単発/複数行を単一トランザクションで一括保存) | `from core.database import save_log_async, save_logs_batch_async` (行番号: 26 / 抜粋: "from core.database import save_log_async, save_logs_batch_async") |
-| `LinePostbackData` | 外部モジュール (`models.line`) | Postbackデータパース用モデル | `from models.line import LinePostbackData` (行番号: 27 / 抜粋: "from models.line import LinePostbackData") |
+| `save_log_async` / `save_logs_batch_async`（Issue #231で追加） | 外部モジュール (`core.database`) | ログの非同期DB保存(単発/複数行を単一トランザクションで一括保存) | `from core.database import save_log_async, save_logs_batch_async` (行番号: 28 / 抜粋: "from core.database import save_log_async, save_logs_batch_async") |
+| `LinePostbackData` | 外部モジュール (`models.line`) | Postbackデータパース用モデル | `from models.line import LinePostbackData` (行番号: 29 / 抜粋: "from models.line import LinePostbackData") |
 
 ### ブラックボックスとなる外部要素
 
@@ -63,23 +63,23 @@
 ### 関数 `sync_run`
 
 * **役割**: 非同期コルーチンをイベントループを作成して同期的に実行する。呼び出し元（`all_genki`/`child_check`/`food_record_direct`の各記録フロー）が保存成否を判定できるよう、戻り値はコルーチンの戻り値をそのまま返し、実行時に例外が発生した場合は`False`を返す。
-* 根拠: `def sync_run(coro):` (行番号: 39-50 / 抜粋: "def sync_run(coro):"), `戻り値はコルーチンの戻り値。実行時に例外が発生した場合はFalseを返す。` (行番号: 44 / 抜粋: "戻り値はコルーチンの戻り値。実行時に例外が発生した場合はFalseを返す。")
+* 根拠: `def sync_run(coro):` (行番号: 35-46 / 抜粋: "def sync_run(coro):"), `戻り値はコルーチンの戻り値。実行時に例外が発生した場合はFalseを返す。` (行番号: 40 / 抜粋: "戻り値はコルーチンの戻り値。実行時に例外が発生した場合はFalseを返す。")
 
 
 * **引数/リクエスト**: `coro` (コルーチンオブジェクト)
-* 根拠: `def sync_run(coro):` (行番号: 39 / 抜粋: "def sync_run(coro):")
+* 根拠: `def sync_run(coro):` (行番号: 35 / 抜粋: "def sync_run(coro):")
 
 
 * **戻り値/レスポンス**: `asyncio.run(coro)`の実行結果（型定義なし。`save_log_async`呼び出し時は`bool`）。例外発生時は明示的に`False`。
-* 根拠: `return asyncio.run(coro)` (行番号: 47 / 抜粋: "return asyncio.run(coro)"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 48-50 / 抜粋: "return False")
+* 根拠: `return asyncio.run(coro)` (行番号: 43 / 抜粋: "return asyncio.run(coro)"), `except Exception as e:\n        logger.error(f"Sync execution error: {e}")\n        return False` (行番号: 44-46 / 抜粋: "return False")
 
 
 * **副作用**: 新規イベントループの生成と実行。
-* 根拠: `return asyncio.run(coro)` (行番号: 47 / 抜粋: "return asyncio.run(coro)")
+* 根拠: `return asyncio.run(coro)` (行番号: 43 / 抜粋: "return asyncio.run(coro)")
 
 
 * **エラーハンドリング**: 例外発生時はロガーにてエラー出力し、`False`を返す（呼び出し元の`all()`/`not`チェックで保存失敗として扱われる）。
-* 根拠: `except Exception as e: logger.error(...); return False` (行番号: 48-50 / 抜粋: "return False")
+* 根拠: `except Exception as e: logger.error(...); return False` (行番号: 44-46 / 抜粋: "return False")
 
 
 
@@ -89,23 +89,23 @@
 * 根拠: (行番号: 58 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: LINE Messaging APIを呼び出してテキストメッセージを返信する。
-* 根拠: `def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):` (行番号: 52-64 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
+* 根拠: `def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):` (行番号: 48-61 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
 
 
 * **引数/リクエスト**: `api` (MessagingApi), `reply_token` (str), `text` (str), `quick_reply` (QuickReply, デフォルトNone)
-* 根拠: 引数定義 (行番号: 52 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
+* 根拠: 引数定義 (行番号: 48 / 抜粋: "def send_reply_text(api: MessagingApi, reply_token: str, text: str, quick_reply: QuickReply = None):")
 
 
 * **戻り値/レスポンス**: なし (None)
-* 根拠: return文なし (行番号: 52-64 / 抜粋: "api.reply_message(")
+* 根拠: return文なし (行番号: 48-61 / 抜粋: "api.reply_message(")
 
 
 * **副作用**: 外部API (LINE API) へのネットワークリクエスト実行。
-* 根拠: `api.reply_message(` (行番号: 57 / 抜粋: "api.reply_message(")
+* 根拠: `api.reply_message(` (行番号: 53 / 抜粋: "api.reply_message(")
 
 
 * **エラーハンドリング**: APIリクエスト失敗時に例外をキャッチしログ出力する。
-* 根拠: `except Exception as e: logger.error(...)` (行番号: 63-64 / 抜粋: "except Exception as e:")
+* 根拠: `except Exception as e: logger.error(...)` (行番号: 60-61 / 抜粋: "except Exception as e:")
 
 
 
@@ -115,23 +115,23 @@
 * 根拠: (行番号: 69, 72 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: イベント情報に基づいて、グループメンバーまたはユーザー自身の表示名を取得する。
-* 根拠: `def get_user_name(event, line_bot_api: MessagingApi) -> str:` (行番号: 66-79 / 抜粋: "def get_user_name(event, line_bot_api: MessagingApi) -> str:")
+* 根拠: `def get_user_name(event, line_bot_api: MessagingApi) -> str:` (行番号: 63-76 / 抜粋: "def get_user_name(event, line_bot_api: MessagingApi) -> str:")
 
 
 * **引数/リクエスト**: `event` (Webhookイベント), `line_bot_api` (MessagingApi)
-* 根拠: 引数定義 (行番号: 66 / 抜粋: "def get_user_name(event, line_bot_api: MessagingApi) -> str:")
+* 根拠: 引数定義 (行番号: 63 / 抜粋: "def get_user_name(event, line_bot_api: MessagingApi) -> str:")
 
 
 * **戻り値/レスポンス**: `str` (表示名 または "家族のみんな")
-* 根拠: `return profile.display_name` / `return "家族のみんな"` (行番号: 73, 76, 79 / 抜粋: "return "家族のみんな"")
+* 根拠: `return profile.display_name` / `return "家族のみんな"` (行番号: 70, 73, 76 / 抜粋: "return "家族のみんな"")
 
 
 * **副作用**: 外部API (LINE API) へのプロファイル取得リクエスト。
-* 根拠: `profile = line_bot_api.get_group_member_profile(...)` / `profile = line_bot_api.get_profile(user_id)` (行番号: 72, 75 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
+* 根拠: `profile = line_bot_api.get_group_member_profile(...)` / `profile = line_bot_api.get_profile(user_id)` (行番号: 69, 72 / 抜粋: "profile = line_bot_api.get_profile(user_id)")
 
 
 * **エラーハンドリング**: 取得失敗時は例外を握り潰し（`pass`）、デフォルト値を返す。
-* 根拠: `except Exception: pass` (行番号: 77-78 / 抜粋: "except Exception:")
+* 根拠: `except Exception: pass` (行番号: 74-75 / 抜粋: "except Exception:")
 
 
 
@@ -145,23 +145,23 @@
 ### 関数 `create_health_carousel_flex`
 
 * **役割**: `TARGET_MEMBERS`ごとに体調入力用のFlexMessageカルーセルを作成する。
-* 根拠: `def create_health_carousel_flex():` (行番号: 79-125 / 抜粋: "def create_health_carousel_flex():")
+* 根拠: `def create_health_carousel_flex():` (行番号: 81-127 / 抜粋: "def create_health_carousel_flex():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: 引数定義 (行番号: 79 / 抜粋: "def create_health_carousel_flex():")
+* 根拠: 引数定義 (行番号: 81 / 抜粋: "def create_health_carousel_flex():")
 
 
 * **戻り値/レスポンス**: `FlexContainer` オブジェクト
-* 根拠: `return FlexContainer.from_dict({"type": "carousel", "contents": bubbles})` (行番号: 125 / 抜粋: "return FlexContainer.from_dict({"type": "carousel", "contents": bubbles})")
+* 根拠: `return FlexContainer.from_dict({"type": "carousel", "contents": bubbles})` (行番号: 127 / 抜粋: "return FlexContainer.from_dict({"type": "carousel", "contents": bubbles})")
 
 
 * **副作用**: なし
-* 根拠: [関数本体] (行番号: 79-125 / 抜粋: 副作用を伴う処理なし)
+* 根拠: [関数本体] (行番号: 81-127 / 抜粋: 副作用を伴う処理なし)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [関数本体] (行番号: 79-125 / 抜粋: "try-exceptなし")
+* 根拠: [関数本体] (行番号: 81-127 / 抜粋: "try-exceptなし")
 
 
 
@@ -198,10 +198,10 @@
 ### 関数 `handle_postback`
 
 * **（2026-09-06 品質監査で修正）** 本関数内の全 `line_bot_api.reply_message(...)` 呼び出し(5箇所)に `_request_timeout=config.LINE_API_REQUEST_TIMEOUT` を渡す。
-* 根拠: (行番号: 257, 271, 315, 356, 401 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
+* 根拠: (行番号: 257, 271, 315, 356, 404 / 抜粋: "_request_timeout=config.LINE_API_REQUEST_TIMEOUT")
 
 * **役割**: ボタン押下などのPostbackEventを受信し、設定された `action` ごとに適切な記録（全件元気、子別記録、食事アンケート等）やUI表示を行う。`InputMode`/`UserInputState`ベースの手入力継続状態はもはや設定しない（コミット `1ecbe3b` で該当ロジックを撤去済み）。「その他（手入力）」系の分岐（`child_check`の`status=other`、`food_manual`）では状態を設定する代わりに案内テキストのみ返信し、続く自由文メッセージは `handlers/line_handler.py` のAIフォールバック(`services/ai_service.py`)経由で処理される前提になっている。コミット`8525dc2`（H-7修正）以降、`all_genki`・`child_check`（`target_name`ありの保存分岐）・`food_record_direct`の3フローは、DB保存結果（bool）を検査してから応答を分岐する。保存成功時のみ従来通りの完了メッセージ（Flex/テキスト）を返し、失敗時は「⚠️ 記録に失敗しました。もう一度お試しください。」を返信してエラーログを出力する。**（Issue #231で修正）** `all_genki`は以前、`TARGET_MEMBERS`分の`save_log_async`をそれぞれ独立に呼び出しリスト内包表記で結果を`all()`判定していたため、各呼び出しが個別にcommitされ、1件でも失敗すると「全体を失敗扱い」として案内する一方で既に成功していた分はコミット済みのまま残っていた。ユーザーが案内どおり再試行すると、成功済み分まで再度INSERTされ重複行が生じる不具合があった。現在は`save_logs_batch_async`(単一トランザクションで全件保存し1件でも失敗すれば全件ロールバックする)を1回呼び出すことで、真にall-or-nothingにし再試行を安全にしている。**（保守性 #410で修正）** `check_status`の記録確認画面の日付表示(`today_disp`)を、naiveな`datetime.datetime.now()`（サーバーのローカルタイムゾーン依存）から`core.utils.get_display_date()`（JST基準・`"%m/%d"`形式）へ変更した。また、`LinePostbackData(**raw_dict)`のバリデーション失敗時に`action`のみで再構築するtry/exceptフォールバックを削除した——`LinePostbackData`は`action`必須以外は全て`Optional`で`extra`設定も既定(未知フィールドは無視)のため、`raw_dict`に`action`キーが含まれる限り例外は送出されず、このフォールバックは到達不能だった。削除後、万一`action`キーが無い等でモデル構築が失敗しても、関数末尾の`except Exception`で握り潰される（挙動は実質変わらない: 到達不能だった旧フォールバックが動いていた場合の出力と、削除後に末尾の汎用ハンドラで捕捉された場合とで、ユーザーへの応答が「不明な操作」相当になる点は同じ）。**（Issue #583で修正）** `food_record_direct`アクションがDB保存する`food_records.meal_time_category`列は、以前は実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたが、現在は新設の`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"のいずれかを判定するヘルパー）の戻り値をそのまま渡すよう修正されている。ここでの`category`変数（クイックリプライの選択肢が渡す麺類等の食品ジャンルラベル）はこの修正でも扱いが変わっておらず、従来どおり`menu_category`列（`f"{category}: {item}"`の形）にのみ使われる。
-* 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 177-405 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
+* 根拠: `def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):` (行番号: 177-408 / 抜粋: "def handle_postback(event: PostbackEvent, line_bot_api: MessagingApi):")
 * 根拠: `save_all_ok = sync_run(save_logs_batch_async(` (行番号: 220-224 / 抜粋: "save_all_ok = sync_run(save_logs_batch_async(")、`if not save_all_ok:` (行番号: 226 / 抜粋: "if not save_all_ok:")、`pb = LinePostbackData(**raw_dict)` (行番号: 203)、`today_disp = get_display_date()` (行番号: 324)
 * 根拠: `elif action == "food_record_direct":` (行番号: 360)、`save_ok = sync_run(save_log_async(` (行番号: 369-373 / 抜粋: "(user_id, user_name, get_today_date_str(), get_meal_time_category_from_now(), final_rec, get_now_iso())")
 
@@ -211,7 +211,7 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: [関数本体] (行番号: 177-405 / 抜粋: "return"文は存在しない)
+* 根拠: [関数本体] (行番号: 177-408 / 抜粋: "return"文は存在しない)
 
 
 * **副作用**:
@@ -225,7 +225,7 @@
 * 未定義の`action`はFail-Safe分岐でユーザーに警告テキストを返信する。
 * `all_genki`/`child_check`/`food_record_direct`はDB保存結果が偽の場合、成功メッセージを送らずエラーログ出力＋失敗テキスト返信を行う。
 * 全体の処理エラーをキャッチしログ出力する。
-* 根拠: `else: logger.warning(...)` / `except Exception as e: logger.error(...)` (行番号: 393-402, 404-405 / 抜粋: "logger.warning(f\"Unknown action received:")
+* 根拠: `else: logger.warning(...)` / `except Exception as e: logger.error(...)` (行番号: 396-405, 407-408 / 抜粋: "logger.warning(f\"Unknown action received:")
 * 根拠: `logger.error(f"all_genki の記録保存に失敗しました (user_id={user_id})")` (行番号: 227 / 抜粋: "の記録保存に失敗しました")
 
 
@@ -315,7 +315,7 @@ graph TD
 | 高 | `config.py` | `TARGET_MEMBERS`, `FAMILY_SETTINGS`, `SQLITE_DB_PATH`, `SQLITE_TABLE_CHILD`, `SQLITE_TABLE_FOOD` など、ロジック内で多用される定数やDB設定の実態を把握する必要があるため。 | `config.FAMILY_SETTINGS["members"]` 等 (行番号: 35) |
 | 中 | `core/database.py` | `save_log_async`/`save_logs_batch_async` 関数の非同期DB保存のトランザクション管理やエラーハンドリング詳細の確認が必要なため（[database.md](./database.md)に解析結果あり）。 | `save_log_async(...)` / `save_logs_batch_async(...)` (行番号: 28, 220) |
 | 中 | `handlers/line_handler.py` | 自由文メッセージ（AIフォールバック）が本ファイルの案内テキスト送信後にどう処理へ接続されるかを確認するため。 | `_process_message_async()` への一本化に関する記述 (概要セクション参照) |
-| 低 | `models/line.py` | `LinePostbackData` のバリデーションルールが、Postback処理の挙動にどう影響しているかを理解するため。 | `from models.line import LinePostbackData` (行番号: 33) |
+| 低 | `models/line.py` | `LinePostbackData` のバリデーションルールが、Postback処理の挙動にどう影響しているかを理解するため。 | `from models.line import LinePostbackData` (行番号: 29) |
 
 ## 8. 保守上の注意点
 
@@ -327,7 +327,7 @@ graph TD
 * **[修正済み] Issue #571 バグ**: `get_daily_health_summary`のアイコン選択が`"元気" in status`という部分文字列マッチのみだったため、Issue #375で`handlers/line_handler.py`の`_detect_condition_keyword()`が否定表現（「元気ない」「元気がない」「元気なし」「元気じゃない」「元気ではない」）を正規化した固定文字列`CONDITION_NOT_GENKI = "元気なし"`（"元気"を部分文字列として含む）まで誤って肯定判定し、体調不良（元気なし）の記録が✅（元気）として表示される意味の反転が発生していた。DBの`condition`列にどんな文字列が入り得るかは`handlers/line_handler.py`側の正規化ロジック（本ファイルの外、[line_handler.md](./line_handler.md)参照）に依存しており、本ファイル単体の実装だけを見ていると気付きにくい不具合だった。否定表現（`"元気なし"`）を先に判定してから肯定表現（`"元気"`）を判定するよう修正した。
 * 根拠: `icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")` (行番号: 164 / 抜粋: "元気なし")
 * **保存失敗チェックの実装が箇所ごとにやや不統一**: `all_genki`は`save_logs_batch_async`(単一トランザクションでの一括保存、Issue #231で導入)の単一の戻り値を`save_all_ok`として判定するのに対し、`child_check`/`food_record_direct`は単一行の`save_log_async`の戻り値を`save_ok`変数で判定する。3フローともロジック自体は`sync_run(...)`の直後にチェックする形で個別に実装されており、共通ヘルパー化はされていない。**（Issue #231で修正）** 以前の`all_genki`はリスト内包表記で全員分の`save_log_async`の結果を集め`all()`で判定していたが、これは「1件でも失敗すれば全体を失敗扱いとする」という判定自体は正しくても、各`save_log_async`呼び出しが独立にcommitされるため、失敗扱いにした後も既に成功した分がDBに残ってしまう不整合があった。判定ロジックの統一自体は本Issueのスコープ外で未解消のまま残っている。
-* 根拠: `save_results = [\n                sync_run(save_log_async(\n ...\n                for name in TARGET_MEMBERS\n            ]\n\n            if not all(save_results):` (行番号: 228-237 / 抜粋: "if not all(save_results):")
+* 根拠: **（citation訂正）** ここで説明している`save_results = [...]` / `if not all(save_results):` というIssue #231修正前の実装は、現在の`handlers/line_logic.py`には存在しない（Issue #231で`save_logs_batch_async`呼び出しに置き換え済みのため、この行番号で現在参照できるのは置き換え後のコードのみ）。現在のコードでの対応箇所は `save_all_ok = sync_run(save_logs_batch_async(` 〜 `if not save_all_ok:` (行番号: 220-226 / 抜粋: "if not save_all_ok:")。
 * **[修正済み] Issue #583 `meal_time_category`が常に`"Dinner"`固定だった**: `food_record_direct`アクションが`food_records`テーブルへINSERTする`meal_time_category`列は、実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していた（同じバグが`services/line_service.py`の`log_food_record`にも存在した）。`core.utils.get_meal_time_category_from_now()`（呼び出し時点のJST時刻から"Breakfast"/"Lunch"/"Snack"/"Dinner"を判定）を新設し、両箇所ともその戻り値を渡すよう修正した。ここでの`category`変数（クイックリプライの食品ジャンルラベル、例: 麺類）は元々時間帯を表す値ではなく、この修正でも`menu_category`列への使われ方は変わっていない。`meal_time_category`列自体を読み出す本番コードは本ファイル・`line_service.py`ともに見つからず、現時点でも書き込み専用（write-only）のカラムのままであることに変わりはない（低影響のサイレントバグだった）。回帰テストは`MY_HOME_SYSTEM/tests/test_core_utils.py`の`TestGetMealTimeCategoryFromNow`クラスに追加されている（本ファイル自体に対する新規テストではなく、`core/utils.py`側のテスト）。
 
 ## 9. 不明事項一覧
@@ -342,9 +342,9 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| データベースのスキーマ構造 | `config.py`と`init_unified_db.py`/`current_schema.sql`を直接確認した。`config.SQLITE_TABLE_CHILD`(実体は`"child_health_records"`、`config.py`245行目)は`init_unified_db.py`244〜252行目より`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラム構成、`config.SQLITE_TABLE_FOOD`(`"food_records"`、`config.py`242行目)は194〜203行目より`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, meal_date TEXT, meal_time_category TEXT, menu_category TEXT, timestamp DATETIME`の7カラム構成であることを確認した。`current_schema.sql`48〜54行目・94〜99行目も同趣旨のカラム構成であることを確認した（`food_records`側は過去のカラム`date`/`menu`/`created_at`が残存する等、若干の差異はある）。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:242,245`, `MY_HOME_SYSTEM/init_unified_db.py:193-203,242-252`, `MY_HOME_SYSTEM/current_schema.sql:48-54,94-99` |
-| 設定値の構造と中身 | `MY_HOME_SYSTEM/config.py`469〜477行目を直接確認した。`FAMILY_SETTINGS["styles"]`は`{"智矢": {"color": "#1E90FF", "age": None, "icon": "👦"}, "涼花": {...}, "将博": {...}, "春菜": {...}}`という、実名4名をキーとし`color`(カラーコード文字列)・`age`(初期値`None`、479〜488行目のロジックで`family_members.local.json`が存在すれば上書きされる)・`icon`(絵文字)を値に持つ辞書構造であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:469-488` |
-| Postbackモデルのプロパティ | `MY_HOME_SYSTEM/models/line.py`23〜30行目を直接確認した。`LinePostbackData`は`action: str`(必須)、`child: Optional[str] = None`、`status: Optional[str] = None`、`value: Optional[str] = None`(いずれも任意、デフォルト`None`)の4フィールドを持つPydanticモデルであることを確認した。`extra`の設定（未知フィールドの扱い）は明示されておらずpydanticの既定（無視）に従うため、`raw_dict`に定義外のキーが含まれてもバリデーションエラーにはならないことを確認した（Issue #410で判明: これにより`handlers/line_logic.py`の旧`except Exception: pb = LinePostbackData(action=...)`フォールバックは`action`キーが存在する限り到達不能だった）。 | 直接ソース確認: `MY_HOME_SYSTEM/models/line.py:23-30` |
+| データベースのスキーマ構造 | **（訂正: 旧版は`init_unified_db.py`をスキーマ定義元として引用していたが、これは現在誤りである）** `config.py`と`init_unified_db.py`を直接確認したところ、`init_unified_db.py`は現在`CREATE TABLE`文を一切含まない(全162行)。Issue #330のスキーマ管理一本化により、スキーマの唯一の定義元は`migrations/0000_baseline_schema.sql`である。`config.SQLITE_TABLE_CHILD`(実体は`"child_health_records"`、`config.py`272行目)は`migrations/0000_baseline_schema.sql`158〜165行目より`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`の6カラム構成、`config.SQLITE_TABLE_FOOD`(`"food_records"`、`config.py`270行目)は118〜126行目より`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, meal_date TEXT, meal_time_category TEXT, menu_category TEXT, timestamp DATETIME`の7カラム構成であることを確認した。`current_schema.sql`98〜106行目・130〜137行目も同一のカラム構成であることを確認した(両テーブルとも0001以降のマイグレーションによるカラム追加は無く、ベースラインのまま。旧版が記載していた「`food_records`側に過去のカラム`date`/`menu`/`created_at`が残存する」という差異は、現在のソースでは確認できず誤りだった)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:270,272`, `MY_HOME_SYSTEM/init_unified_db.py`(全162行、CREATE TABLEなし), `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql:118-126,158-165`, `MY_HOME_SYSTEM/current_schema.sql:98-106,130-137` |
+| 設定値の構造と中身 | `MY_HOME_SYSTEM/config.py`426〜434行目を直接確認した。`FAMILY_SETTINGS["styles"]`は`{"智矢": {"color": "#1E90FF", "age": None, "icon": "👦"}, "涼花": {...}, "将博": {...}, "春菜": {...}}`という、実名4名をキーとし`color`(カラーコード文字列)・`age`(初期値`None`、436〜447行目のロジックで`family_members.local.json`が存在すれば上書きされる)・`icon`(絵文字)を値に持つ辞書構造であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:426-447` |
+| Postbackモデルのプロパティ | `MY_HOME_SYSTEM/models/line.py`29〜37行目を直接確認した。`LinePostbackData`は`action: str`(必須)、`child: Optional[str] = None`、`status: Optional[str] = None`、`value: Optional[str] = None`(いずれも任意、デフォルト`None`)の4フィールドを持つPydanticモデルであることを確認した。`extra`の設定（未知フィールドの扱い）は明示されておらずpydanticの既定（無視）に従うため、`raw_dict`に定義外のキーが含まれてもバリデーションエラーにはならないことを確認した（Issue #410で判明: これにより`handlers/line_logic.py`の旧`except Exception: pb = LinePostbackData(action=...)`フォールバックは`action`キーが存在する限り到達不能だった）。 | 直接ソース確認: `MY_HOME_SYSTEM/models/line.py:29-37` |
 
 ## 10. 自己検証結果
 

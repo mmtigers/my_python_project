@@ -20,7 +20,7 @@
 
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
 * 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。**（Issue #231で追加）** 単一行の`save_log_generic`/`save_log_async`に加え、複数行を単一トランザクションでまとめて保存する`save_logs_batch_generic`/`save_logs_batch_async`を提供する。複数行を独立にINSERTすると、途中の1件が失敗しても既に成功した分がコミット済みのまま残り、失敗通知を受けたユーザーの再試行で重複保存を招くケース(`handlers/line_logic.py`の`all_genki`)があったため、真のall-or-nothingを実現する手段として追加された。
-* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 98-125 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
+* 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 98-129 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
 * **（B3で追加、Issue #409 Q-L9で`save_logs_batch_generic`にも同一の検証を追加）** `save_log_generic`はSQL文字列へ直接展開せざるを得ない`table`/`columns_list`（プレースホルダ化不可）について、実行前にモジュールレベル正規表現`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証（英数字・アンダースコアのみ、数字始まり不可）を行うようになった。現状の全呼び出し元はリテラル固定値かconfig定数のみのため実害はないが、将来動的な値が渡された場合のSQLインジェクションに対する構造的な防御として追加された。`save_logs_batch_generic`も同じ文字列展開方式でSQLを組み立てるため、Issue #409（Q-L9）で同一の`_SQL_IDENTIFIER_RE`検証が追加されており、現在は両関数とも同じチェックを経由する（詳細は8節を参照）。
 * 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 79〜81 / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`save_logs_batch_generic`側の同じ検証 (行番号: 111〜113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
@@ -200,23 +200,23 @@
 ### `save_logs_batch_async`（Issue #231で追加）
 
 * **役割**: `save_logs_batch_generic` を非同期で実行するためのラッパー関数。
-* 根拠: (行番号: 122-125 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
+* 根拠: (行番号: 126-127 / 抜粋: "async def save_logs_batch_async(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """save_logs_batch_generic の非同期ラッパー"""")
 
 
 * **引数/リクエスト**: `table` (str), `columns_list` (List[str]), `values_list` (List[tuple]) （`save_logs_batch_generic` と同等）
-* 根拠: (行番号: 122)
+* 根拠: (行番号: 126)
 
 
 * **戻り値/レスポンス**: `bool`: `save_logs_batch_generic` の実行結果。
-* 根拠: (行番号: 125 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
+* 根拠: (行番号: 129 / 抜粋: "return await loop.run_in_executor(None, save_logs_batch_generic, table, columns_list, values_list)")
 
 
 * **副作用**: 非同期スレッドプールでの `save_logs_batch_generic` の実行。
-* 根拠: (行番号: 125 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
+* 根拠: (行番号: 129 / 抜粋: "loop.run_in_executor(None, save_logs_batch_generic")
 
 
 * **エラーハンドリング**: なし（内部で呼び出す `save_logs_batch_generic` のエラーハンドリングに依存）。
-* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 122-125)
+* 根拠: 関数内に `try...except` ブロックが存在しない (行番号: 126-129)
 
 
 
@@ -332,7 +332,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | 対象データベースのファイルパス | `MY_HOME_SYSTEM/config.py:222`を直接確認した。`SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "home_system.db")`であり、環境変数`SQLITE_DB_PATH`が設定されていればその値、未設定時は`config.py`が配置されたディレクトリ（`BASE_DIR`）直下の`home_system.db`が既定パスとなることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212, 222` |
-| 操作対象のテーブル名・スキーマ | `MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`CREATE TABLE IF NOT EXISTS`文が合計34件存在し、`users`(76行目), `quests`(93行目), `quest_history`(109行目), `{config.SQLITE_TABLE_DAILY_LOGS}`(123行目), `{config.SQLITE_TABLE_SWITCHBOT_LOGS}`(134行目), `{config.SQLITE_TABLE_POWER_USAGE}`(146行目), `device_records`(163行目), `{config.SQLITE_TABLE_OHAYO}`(183行目), `{config.SQLITE_TABLE_FOOD}`(195行目), `daily_records`(209行目), `{config.SQLITE_TABLE_HEALTH}`(222行目), `{config.SQLITE_TABLE_CAR}`(233行目), `{config.SQLITE_TABLE_CHILD}`(244行目), `{config.SQLITE_TABLE_DEFECATION}`(256行目), `{config.SQLITE_TABLE_AI_REPORT}`(269行目), `{config.SQLITE_TABLE_SHOPPING}`(278行目), `haircut_records`(291行目), `weather_history`(305行目), `security_logs`(317行目), `{config.SQLITE_TABLE_BICYCLE}`(329行目), `land_price_records`(340行目), `{config.SQLITE_TABLE_NAS}`(357行目), `quest_users`(377行目), `quest_master`(392行目), `reward_master`(413行目), `reward_history`(426行目), `equipment_master`(438行目), `user_equipments`(450行目), `party_state`(462行目), `user_inventory`(477行目), `family_mileage`(490行目), `family_mileage_history`(501行目), `bounties`(512行目), `suumo_records`(531行目)を含むテーブル群が初期化されることを確認した。あわせて`validate_schema_integrity(conn)`(11〜29行目)が`PRAGMA table_info(table)`で主要テーブルの必須カラムを検証すること、`core/migrations.py`の`apply_pending_migrations(conn)`(49〜75行目)が`migrations/`配下の`*.sql`をファイル名昇順で適用し`schema_migrations`テーブルで適用済みバージョンを追跡する別系統のマイグレーション機構であることも確認した（`config.md`の相互参照セクションで既出の調査結果と一致）。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:11-29, 76-531`, `MY_HOME_SYSTEM/core/migrations.py:28-75` |
+| 操作対象のテーブル名・スキーマ | **（訂正: 旧版は`init_unified_db.py`をスキーマ定義元として引用していたが、これは現在誤りである）** `MY_HOME_SYSTEM/init_unified_db.py`を直接確認したところ、現在は`CREATE TABLE`文を一切含まない(全162行)。Issue #330のスキーマ管理一本化により、スキーマの唯一の定義元は`MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql`へ移設済みで、`init_unified_db.py`の`init_db()`は`core/migrations.py`の`apply_pending_migrations()`呼び出しと`validate_schema_integrity()`によるカラム検証のみを行う薄いラッパーである。`migrations/0000_baseline_schema.sql`を直接確認したところ`CREATE TABLE IF NOT EXISTS`文が合計34件存在し、`users`(20行目), `quests`(34行目), `quest_history`(47行目), `daily_logs`(59行目)[=config.SQLITE_TABLE_DAILY_LOGS], `switchbot_meter_logs`(68行目)[=config.SQLITE_TABLE_SWITCHBOT_LOGS], `power_usage`(78行目)[=config.SQLITE_TABLE_POWER_USAGE], `device_records`(90行目)[=config.SQLITE_TABLE_SENSOR], `ohayo_records`(108行目)[=config.SQLITE_TABLE_OHAYO], `food_records`(118行目)[=config.SQLITE_TABLE_FOOD], `daily_records`(129行目), `health_records`(140行目)[=config.SQLITE_TABLE_HEALTH], `car_records`(149行目)[=config.SQLITE_TABLE_CAR], `child_health_records`(158行目)[=config.SQLITE_TABLE_CHILD], `defecation_records`(168行目)[=config.SQLITE_TABLE_DEFECATION], `ai_report_records`(179行目)[=config.SQLITE_TABLE_AI_REPORT], `shopping_records`(186行目)[=config.SQLITE_TABLE_SHOPPING], `haircut_records`(196行目), `weather_history`(208行目), `security_logs`(221行目), `bicycle_parking_records`(231行目)[=config.SQLITE_TABLE_BICYCLE], `land_price_records`(239行目), `nas_records`(254行目)[=config.SQLITE_TABLE_NAS], `quest_users`(270行目), `quest_master`(282行目), `reward_master`(300行目), `reward_history`(310行目), `equipment_master`(319行目), `user_equipments`(328行目), `party_state`(337行目), `user_inventory`(349行目), `family_mileage`(359行目), `family_mileage_history`(367行目), `bounties`(376行目), `suumo_records`(392行目)を含むテーブル群が定義されていることを確認した。あわせて`init_unified_db.py`の`validate_schema_integrity(conn)`(32〜75行目)が`PRAGMA table_info(table)`で主要テーブルの必須カラムを検証すること、`core/migrations.py`の`apply_pending_migrations(conn)`(97〜146行目)が`migrations/`配下の`*.sql`をファイル名昇順で適用し`schema_migrations`テーブルで適用済みバージョンを追跡する別系統のマイグレーション機構であることも確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql:20-401`, `MY_HOME_SYSTEM/init_unified_db.py:32-75`, `MY_HOME_SYSTEM/core/migrations.py:97-146` |
 
 ## 10. 自己検証結果
 
