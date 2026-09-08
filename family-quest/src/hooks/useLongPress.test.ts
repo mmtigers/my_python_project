@@ -40,10 +40,41 @@ describe('useLongPress', () => {
         });
         expect(result.current.wasFiredRecently()).toBe(true);
 
+        // #568: 猶予時間(400ms)を過ぎても、同じプレスから発火した分は
+        // 次の pointerdown が来るまで true のままであること(以前は時間切れで
+        // false に戻り、離した瞬間の click が誤って抑止されなくなっていた)。
         act(() => {
             vi.advanceTimersByTime(1);
         });
+        expect(result.current.wasFiredRecently()).toBe(true);
+
+        // 次のプレス(pointerdown)が始まって初めて false に戻る
+        act(() => {
+            result.current.handlers.onPointerDown(pointerEvent());
+        });
         expect(result.current.wasFiredRecently()).toBe(false);
+    });
+
+    it('still suppresses the click when the finger is held well past clickSuppressMs before release (#568)', () => {
+        // #568再現: 長押し発火(thresholdMs)後もclickSuppressMsを超えて指を
+        // 押し続けてから離すと、以前は経過時間だけで判定していたため
+        // wasFiredRecently()がfalseになり、離した瞬間のclickが抑止されなかった。
+        const onLongPress = vi.fn();
+        const { result } = renderHook(() => useLongPress({ onLongPress, thresholdMs: 550, clickSuppressMs: 400 }));
+
+        act(() => {
+            result.current.handlers.onPointerDown(pointerEvent());
+        });
+        act(() => {
+            // 発火(550ms)後、猶予時間(400ms)を大きく超えるまで指を押し続ける
+            vi.advanceTimersByTime(550 + 1000);
+        });
+        expect(onLongPress).toHaveBeenCalledTimes(1);
+
+        act(() => {
+            result.current.handlers.onPointerUp(pointerEvent());
+        });
+        expect(result.current.wasFiredRecently()).toBe(true);
     });
 
     it('does not report wasFiredRecently for a short tap that never reached the threshold', () => {
