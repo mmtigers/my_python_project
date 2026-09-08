@@ -72,7 +72,11 @@ class AppConfig:
     # File Paths
     BASE_DIR: Path = CURRENT_DIR
     NAS_DIR_STR: str = '/mnt/nas/home_system/youtube_extractor/data'  # 本環境のNASパスに適宜変更してください
-    LOCAL_DIR_STR: str = str(BASE_DIR / 'data')
+    # #580: 以前はnewface_monitor.pyと同じ`BASE_DIR / 'data'`を共有していたため、
+    # NAS未マウント中に片方のスクリプトが書いたフォールバックデータを、NAS復旧後に
+    # もう片方のnas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
+    # 移動してしまう経路があった。スクリプトごとにサブディレクトリを分離する。
+    LOCAL_DIR_STR: str = str(BASE_DIR / 'data' / 'youtube_extractor')
     MOUNT_POINT: str = '/mnt/nas'
 
     SUB_DIR_NAME: str = "list"
