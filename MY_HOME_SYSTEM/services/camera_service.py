@@ -321,6 +321,18 @@ def get_record_start_offset(cam_conf: Dict[str, Any], target_date: str) -> int:
             return 0
 
 
+def _playlist_is_complete(path: str) -> bool:
+    """m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ
+    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。
+    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは
+    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return "#EXT-X-ENDLIST" in f.read()
+    except OSError:
+        return False
+
+
 def generate_record_playlist(cam_conf: Dict[str, Any], target_date: str) -> Optional[str]:
     """
     指定された日付の録画ファイル群を結合し、シームレス再生用のVODプレイリストを生成する
@@ -379,8 +391,14 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
 
     # 2. キャッシュ: 過去日付（録画が確定済み）かつ既にプレイリストが生成済みであれば、再エンコードせずそれを返す
     #    当日分は録画ファイルが増え続けるため、キャッシュ対象から除外し毎回最新の状態で再生成する
+    #    #562: シャットダウン時のffmpeg terminate(Issue #360系)や、下記の生成待機タイムアウトに
+    #    より生成途中で終わったプレイリストが存在すると、以前は完全性を確認せずそのまま
+    #    「完成品」としてHLS_VOD_RETENTION_DAYS(既定3日)の間ずっと配信し続けてしまっていた。
+    #    ffmpegは`-hls_playlist_type vod`指定時、正常に完走した場合にのみ末尾へ
+    #    `#EXT-X-ENDLIST`タグを書き込むため、これの有無で完全性を確認してからキャッシュを返す。
+    #    不完全なら以降の生成処理へフォールスルーし、再生成する。
     today_str = datetime.now().strftime("%Y%m%d")
-    if target_date < today_str and os.path.exists(playlist_path):
+    if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):
         logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
         return playlist_path
 
