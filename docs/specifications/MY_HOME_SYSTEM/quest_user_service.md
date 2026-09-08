@@ -39,7 +39,7 @@
 | `common` | 内部モジュール | DBカーソル取得(`get_db_cursor`)、現在時刻(ISO)取得(`get_now_iso`) | `import common` (行番号: 9) |
 | `config` | 内部モジュール | `UPLOAD_DIR`の参照、**（Issue #551で追加）** `UPLOAD_MAX_FILE_SIZE_MB`の参照 | `import config` (行番号: 10) |
 | `services.quest.locks.logger` | 内部モジュール | ログ出力 | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
-| `services.quest.locks.ROLE_ADULT` | 内部モジュール | **（Issue #547で追加）** `reset_user_data`が`admin_id`の`quest_users.role`が管理者ロールかどうかを判定する際に参照する定数(`'role_adult'`) | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
+| `services.quest.locks.ROLE_ADULT` | 内部モジュール | **（Issue #547で追加）** `_reset_user_data_locked`が`admin_id`の`quest_users.role`が管理者ロールかどうかを判定する際に参照する定数。実際の値は本ファイルからは不明（ブラックボックスとなる外部要素参照） | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
 | `services.quest.locks._get_user_balance_lock` | 内部モジュール | **（Issue #547で追加）** `reset_user_data`が対象ユーザー単位の排他ロックを取得するために使用。完了・承認・取消・購入と同じロックレジストリを共有する | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
 
 ### ブラックボックスとなる外部要素
@@ -141,7 +141,7 @@
 
 ### `UserService._reset_user_data_locked`（Issue #547で追加）
 
-* **役割**: `reset_user_data`のロック取得後に実行される実処理。`common.get_db_cursor(commit=True)`の単一トランザクション内で、まず`admin_id`に対応する`quest_users.role`を取得し`ROLE_ADULT`（`'role_adult'`）でなければ403を送出、次に`target_user_id`が`quest_users`に存在しなければ404を送出する。両チェックを通過した場合のみ、対象ユーザーの`quest_users`(`level`, `exp`, `gold`, `medal_count`)を初期値(1, 0, 0, 0)にUPDATEし、`quest_history`・`user_inventory`の対象ユーザー行をすべてDELETEする(#544由来。`reward_history`(購入ログ)は残高に影響しない監査用の記録として削除対象外)。削除件数をログ出力したうえで、削除件数を含む辞書を返す。
+* **役割**: `reset_user_data`のロック取得後に実行される実処理。`common.get_db_cursor(commit=True)`の単一トランザクション内で、まず`admin_id`に対応する`quest_users.role`を取得し`ROLE_ADULT`（実際の値は本ファイルからは不明）と一致しなければ403を送出、次に`target_user_id`が`quest_users`に存在しなければ404を送出する。両チェックを通過した場合のみ、対象ユーザーの`quest_users`(`level`, `exp`, `gold`, `medal_count`)を初期値(1, 0, 0, 0)にUPDATEし、`quest_history`・`user_inventory`の対象ユーザー行をすべてDELETEする(#544由来。`reward_history`(購入ログ)は残高に影響しない監査用の記録として削除対象外)。削除件数をログ出力したうえで、削除件数を含む辞書を返す。
 * 根拠: `def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:` (行番号: 114〜145)、`cur.execute(\n                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",\n                (target_user_id,),\n            )` (行番号: 127〜130)、`cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))` (行番号: 131)、`cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))` (行番号: 133)
 * **引数/リクエスト**: `admin_id: str`, `target_user_id: str`
 * 根拠: (行番号: 114)
@@ -357,33 +357,38 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットを確認するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 98) |
-| 中 | `config.py`（[config.md](./config.md)） | `UPLOAD_DIR`の実際の値・ディレクトリ構成、および**（Issue #551で追加）** `UPLOAD_MAX_FILE_SIZE_MB`の既定値・環境変数上書きの有無を確認するため。 | `config.UPLOAD_DIR` (行番号: 168, 222)、`config.UPLOAD_MAX_FILE_SIZE_MB` (行番号: 174, 189) |
-| 中 | `routers/quest_router.py`（[quest_router.md](./quest_router.md)） | `save_avatar_image`/`delete_unlinked_avatar`/`update_avatar`/`get_family_chronicle`の実際の呼び出しコンテキスト(HTTPメソッド・エンドポイントパス・例外→HTTPステータスのマッピング)を確認するため。 | 関連ドキュメント欄参照 |
+| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットを確認するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 148) |
+| 中 | `config.py`（[config.md](./config.md)） | `UPLOAD_DIR`の実際の値・ディレクトリ構成、および**（Issue #551で追加）** `UPLOAD_MAX_FILE_SIZE_MB`の既定値・環境変数上書きの有無を確認するため。 | `config.UPLOAD_DIR` (行番号: 218, 272)、`config.UPLOAD_MAX_FILE_SIZE_MB` (行番号: 224, 239) |
+| 中 | `routers/quest_router.py`（[quest_router.md](./quest_router.md)） | `save_avatar_image`/`delete_unlinked_avatar`/`update_avatar`/`get_family_chronicle`/**（Issue #547で追加）** `reset_user_data`の実際の呼び出しコンテキスト(HTTPメソッド・エンドポイントパス・例外→HTTPステータスのマッピング)を確認するため。 | 関連ドキュメント欄参照 |
+| 中 | `services/quest/locks.py`（[quest_locks.md](./quest_locks.md)） | **（Issue #547で追加）** `ROLE_ADULT`の実際の値と`_get_user_balance_lock`のロック粒度（ユーザー単位かどうか）・ブロッキング時のタイムアウト有無を確認するため。 | `from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger` (行番号: 11) |
 
 ## 8. 保守上の注意点
 
 * **`_delete_orphaned_avatar`と`delete_unlinked_avatar`はほぼ同一のパストラバーサル対策ロジックを個別に実装している**: 両者とも「`os.path.basename`でファイル名抽出→`UPLOAD_DIR`と結合→`os.path.dirname`の一致確認」という同じパターンをそれぞれ独立に書いており、共通ヘルパーへの統合はされていない。
-* 根拠: (行番号: 132〜135, 221〜224)
+* 根拠: (行番号: 182〜185, 271〜274)
 * **`_fetch_full_adventure_logs`は`ev['type']`が`'quest'`/`'reward'`以外の値になり得ない前提**: SQLの`SELECT 'quest' as type`/`SELECT 'reward' as type`というリテラルに依存しており、将来他の種別のログをマージする場合は`text`組み立てのif/elif分岐を追加する必要がある。
 * 根拠: (行番号: 74, 75, 84, 86)
 * **`update_avatar`のファイル削除はベストエフォート・トランザクション外**: DBのUPDATEコミットとファイル削除は別ステップであり、アトミックではない。`_delete_orphaned_avatar`は`OSError`を握りつぶすため、アバター更新自体のレスポンスには一切影響しない。
-* 根拠: `self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 119、`with common.get_db_cursor(commit=True)`ブロックの外)、`except OSError as e:` (行番号: 141)
+* 根拠: `self._delete_orphaned_avatar(old_avatar, avatar_url)` (行番号: 169、`with common.get_db_cursor(commit=True)`ブロックの外)、`except OSError as e:` (行番号: 191)
 * **（Issue #551で追加）`save_avatar_image`の検証はチャンク単位の累計サイズのみで行われる**: `Content-Length`ヘッダ等によるアップロード開始前の事前拒否は行っておらず、上限超過はストリーミング書き込みの途中で判明した時点（1MBチャンク境界）で打ち切られる。
-* 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 174)、`while content := await file.read(1024 * 1024):` (行番号: 178)
+* 根拠: `max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 224)、`while content := await file.read(1024 * 1024):` (行番号: 228)
 * **（Issue #551で追加）`save_avatar_image`の例外送出パターンは`upload_image`側の実装に強く依存する**: `InvalidImageError`/`ImageTooLargeError`のメッセージ文字列は`str(e)`としてそのままHTTPレスポンスの`detail`に使われる設計（呼び出し元`quest_router.upload_image`参照）であるため、メッセージ文言を変更する際は呼び出し元のユーザー向け表示への影響を確認する必要がある。
-* 根拠: (行番号: 156, 159, 164, 188〜190)、呼び出し元: `routers/quest_router.py` (行番号: 96-99)
-* **（Issue #547で追加）`reset_user_data`は対象ユーザー1人分の残高フィールドのみをロックする**: `admin_id`に対応する行はロックの対象外で読み取りのみ行う。仮に`admin_id`自身の`quest_users`行が別スレッドから同時に更新されても、本メソッドの権限チェック（`role`の一時点でのSELECT）には影響しない設計になっている（`quest_service.py`の`_acquire_user_balance_locks`が複数ユーザーをまとめてロックするのとは異なり、こちらは`target_user_id`単独のみをロックする）。
+* 根拠: (行番号: 206, 209, 214, 238〜240)、呼び出し元: `routers/quest_router.py` (行番号: 96-99)
+* **（Issue #547で追加）`reset_user_data`はUPDATE/DELETEとも冪等な設計**: `quest_users`の更新は現在値に依存しない絶対値SET（`level=1, exp=0, gold=0, medal_count=0`）であり、`quest_history`/`user_inventory`のDELETEも対象行が既に無ければ`cur.rowcount`が0になるだけで例外は発生しない。そのため同一`target_user_id`に対して誤って複数回呼び出しても（`reset_game.py`側のリトライ等）副作用は安全に収束する。
+* 根拠: `cur.execute(\n                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",\n                (target_user_id,),\n            )` (行番号: 127〜130)、`cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))\n            deleted_history = cur.rowcount` (行番号: 131〜132)、`cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))\n            deleted_inventory = cur.rowcount` (行番号: 133〜134)
+* **（Issue #547で追加）`reset_user_data`がロックするのは`target_user_id`のみ**: `_get_user_balance_lock`には`target_user_id`だけが渡され、`admin_id`側は対象外で読み取り専用。仮に`admin_id`自身の`quest_users`行が別スレッドから同時に更新されても、本メソッドの権限チェック（`role`の一時点でのSELECT）には影響しない設計になっている。他の経路（クエスト完了・承認・取消・購入等）が複数ユーザーをまとめてロックするケースがあるかどうかは本ファイルからは不明（`services/quest/quest_service.py`側の確認が必要、次のステップ参照）。
 * 根拠: `with _get_user_balance_lock(target_user_id):` (行番号: 111)、`admin = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()` (行番号: 116)
 
 ## 9. 不明事項一覧
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| DB各テーブルのスキーマ | `quest_users`/`quest_history`/`reward_history`の各カラムの型・制約は本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
+| DB各テーブルのスキーマ | `quest_users`/`quest_history`/`reward_history`/`user_inventory`の各カラムの型・制約は本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
 | `config.UPLOAD_DIR`の実際の値 | `.env`依存の実値は本ファイルからは確認できない。 | `config.py`, `.env`（gitignore対象） |
 | `config.UPLOAD_MAX_FILE_SIZE_MB`の実際の値 | **（Issue #551で追加）** 既定値・環境変数での上書きの有無が本ファイルからは確認できない。 | `config.py` |
 | `common.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
+| `services.quest.locks.ROLE_ADULT`の実際の値・`_get_user_balance_lock`のロック粒度 | **（Issue #547で追加）** `ROLE_ADULT`が文字列定数か列挙型か、`_get_user_balance_lock`がユーザーIDごとに個別の`threading.Lock`を返すのか・ブロッキング時にタイムアウトがあるのかが本ファイルからは不明。 | `services/quest/locks.py` |
+| `POST /api/quest/admin/reset_user`のHTTPステータスコードのマッピング詳細・認可経路 | **（Issue #547で追加）** `reset_user_data`/`_reset_user_data_locked`が送出する`HTTPException(403/404)`をルーターがそのまま返すのか、`admin_id`をどう特定するのか（リクエストボディか認証済みセッションか等）が本ファイルからは不明。 | `routers/quest_router.py` |
 
 ## 10. 自己検証結果
 
