@@ -156,7 +156,12 @@ def get_daily_health_summary():
                     except Exception:
                         time_str = "??:??"
                     status = row["condition"]
-                    icon = "✅" if "元気" in status else "⚠️"
+                    # #571: 部分文字列マッチ("元気" in status)だと、Issue #375で否定表現用に
+                    # 正規化される固定文字列(handlers/line_handler.py の
+                    # CONDITION_NOT_GENKI = "元気なし")も"元気"を含むため誤って
+                    # ✅(元気)と判定していた(「元気ない」等の否定入力が意味の反転した
+                    # 表示になっていた)。否定表現を先に判定する。
+                    icon = "⚠️" if "元気なし" in status else ("✅" if "元気" in status else "⚠️")
                     summary_lines.append(f"{icon} {name}: {status} ({time_str})")
                 else:
                     summary_lines.append(f"❓ {name}: (未記録)")
