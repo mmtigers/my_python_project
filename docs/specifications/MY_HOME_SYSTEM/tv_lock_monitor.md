@@ -12,6 +12,7 @@
 - [config.md](./config.md) — `TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`等の設定値を提供(`TV_UNLOCK_QUEST_IDS`関連のクエスト連携定数も定義)
 - [logger.md](./logger.md) — `core.logger.setup_logging`の実体
 - [switchbot_service.md](./switchbot_service.md) — `send_device_command`の実装元
+- [utils.md](./utils.md) — Issue #592で追加された`get_now_jst`の実体。本ファイルの「深夜2時」判定はJSTの深夜2時を意図しているため、ホストOSのタイムゾーン設定に依存しないよう`datetime.now()`から置き換えられた
 
 ## 2. ファイルの概要
 
@@ -24,27 +25,28 @@
 
 | 名称 | 種類 | 用途 | 根拠 |
 | --- | --- | --- | --- |
-| `sys` | 標準ライブラリ | プロジェクトルートのパス解決 | 根拠: `sys.path.append` (行番号: 2, 8-9 / 抜粋: "sys.path.append(PROJECT_ROOT)") |
-| `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 7, 18, 32, 45 / 抜粋: "import os") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得と日付のフォーマット | 根拠: `datetime.now()` (行番号: 4, 25 / 抜粋: "from datetime import datetime") |
-| `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 11, 18, 21 / 抜粋: "import config") |
-| `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 12, 15 / 抜粋: "from core.logger import setup_logging") |
-| `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 40 / 抜粋: "from services import switchbot_service") |
+| `sys` | 標準ライブラリ | プロジェクトルートのパス解決 | 根拠: `sys.path.append` (行番号: 2, 7-8 / 抜粋: "sys.path.append(PROJECT_ROOT)") |
+| `os` | 標準ライブラリ | パス操作、ファイル存在確認、ディレクトリ作成 | 根拠: `os.path.dirname`, `os.path.exists` など (行番号: 3, 6, 18, 35, 48 / 抜粋: "import os") |
+| `config` | 外部モジュール | デバイスIDやルートディレクトリの取得 | 根拠: `config.TV_PLUG_DEVICE_ID` 等 (行番号: 10, 18, 21 / 抜粋: "import config") |
+| `core.logger` | 外部モジュール | ロガーの初期化処理 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "from core.logger import setup_logging") |
+| `core.utils.get_now_jst`（Issue #592で追加） | 外部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime`で標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接使っており、この「深夜2時」判定はJSTの深夜2時を意図していたため、ホストがJST以外の設定だと意図しない実時刻に実行されてしまう問題があった。本関数への置き換えに伴い`from datetime import datetime`のimportは不要になり削除された | 根拠: `from core.utils import get_now_jst` (行番号: 12 / 抜粋: "from core.utils import get_now_jst")、`now = get_now_jst()` (行番号: 25-28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う...\n    now = get_now_jst()") |
+| `services.switchbot_service` | 外部モジュール | 外部デバイス（SwitchBot）へのコマンド送信 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "from services import switchbot_service") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `config` | 設定値（`TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`）の実態や設定元が現在のファイルからは判断不可 | 根拠: `config` (行番号: 11, 18, 21 / 抜粋: "import config") |
-| `setup_logging` | ログの出力先、フォーマットなどの具体的な処理内容が不明 | 根拠: `setup_logging` (行番号: 12, 15 / 抜粋: "logger = setup_logging...") |
-| `send_device_command` | 内部の通信処理、エラー仕様、および戻り値の正確なスキーマが不明 | 根拠: `send_device_command` (行番号: 13, 40 / 抜粋: "switchbot_service.send_device_command") |
+| `config` | 設定値（`TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`）の実態や設定元が現在のファイルからは判断不可 | 根拠: `config` (行番号: 10, 18, 21 / 抜粋: "import config") |
+| `setup_logging` | ログの出力先、フォーマットなどの具体的な処理内容が不明 | 根拠: `setup_logging` (行番号: 11, 15 / 抜粋: "logger = setup_logging...") |
+| `get_now_jst` | "Asia/Tokyo"タイムゾーンの解決に用いる`pytz`の詳細な挙動（うるう秒等のエッジケース）は本ファイルからは不明。実体は`core/utils.py`（Issue #592で追加） | 根拠: `get_now_jst` (行番号: 12, 28 / 抜粋: "now = get_now_jst()") |
+| `send_device_command` | 内部の通信処理、エラー仕様、および戻り値の正確なスキーマが不明 | 根拠: `send_device_command` (行番号: 13, 43 / 抜粋: "switchbot_service.send_device_command") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
 ### `main`
 
-* **役割**: 設定値からデバイスIDを確認し、現在時刻が2:00〜2:05の範囲内かつ当日未実行の場合に、外部サービスを通じてTVプラグをオフにする。成功時は実行記録をファイルに保存する。
-* 根拠: `main` (行番号: 20-51 / 抜粋: "def main():")
+* **役割**: 設定値からデバイスIDを確認し、現在時刻が2:00〜2:05の範囲内かつ当日未実行の場合に、外部サービスを通じてTVプラグをオフにする。成功時は実行記録をファイルに保存する。**（Issue #592で修正）** 「現在時刻」の取得は、以前は標準ライブラリの`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を直接呼び出していたが、この「深夜2:00〜2:05」判定はJSTの深夜2時台を意図しているため、ホストがJST以外の設定だと本来と異なる実時刻に実行されてしまう問題があった（Issue #382/#293と同じ不具合クラス。#382/#293自体は別Issueで既にタイムゾーン非依存な実装に修正済みだったため対象外）。`core.utils.get_now_jst()`（"Asia/Tokyo"タイムゾーンのaware `datetime`を返す）に置き換え、`from datetime import datetime`のimportは不要になり削除された。
+* 根拠: `main` (行番号: 20〜54 / 抜粋: "def main():")、JST化のコメントと置き換え (行番号: 25〜28 / 抜粋: "# Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()\n    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を\n    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。\n    now = get_now_jst()")
 
 
 * **引数/リクエスト**: なし
@@ -52,23 +54,23 @@
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `main` (行番号: 20-51 / 抜粋: "return")
+* 根拠: `main` (行番号: 20〜54 / 抜粋: "return")
 
 
 * **副作用**:
 * 外部APIまたはデバイスに対するオフコマンド（"turnOff"）送信
-* 根拠: `send_device_command`呼び出し (行番号: 40 / 抜粋: "switchbot_service.send_device_command")
+* 根拠: `send_device_command`呼び出し (行番号: 43 / 抜粋: "switchbot_service.send_device_command")
 
 
 * ローカルファイルシステム上のディレクトリ作成、およびファイル（`last_tv_lock.txt`）への日付文字列書き込み
-* 根拠: `os.makedirs`, `open` (行番号: 45-47 / 抜粋: "with open(LAST_RUN_FILE, "w") as f:")
+* 根拠: `os.makedirs`, `open` (行番号: 48-50 / 抜粋: "with open(LAST_RUN_FILE, "w") as f:")
 
 
 
 
 * **エラーハンドリング**:
 * コマンド送信時やファイル書き込み時に発生する汎用例外（`Exception`）をキャッチし、エラーログを出力する。
-* 根拠: `try-except`ブロック (行番号: 39-51 / 抜粋: "except Exception as e:")
+* 根拠: `try-except`ブロック (行番号: 42-54 / 抜粋: "except Exception as e:")
 
 
 
@@ -124,6 +126,7 @@ graph TD
     
     subgraph 外部モジュール
         Logger["core.logger\n(setup_logging)"]
+        Utils["core.utils\n(get_now_jst) (Issue #592)"]
         Config["config\n(TV_PLUG_DEVICE_ID, FALLBACK_ROOT)"]
         SwitchBot["services.switchbot_service\n(send_device_command)"]
     end
@@ -131,7 +134,6 @@ graph TD
     subgraph 標準ライブラリ
         Sys["sys"]
         Os["os"]
-        Datetime["datetime"]
     end
     
     subgraph ファイルシステム
@@ -140,7 +142,7 @@ graph TD
     
     Monitor -->|パス解決| Sys
     Monitor -->|パス/ファイル操作| Os
-    Monitor -->|現在時刻取得| Datetime
+    Monitor -->|JST現在時刻取得| Utils
     
     Monitor -->|初期化| Logger
     Monitor -->|設定値参照| Config
@@ -154,15 +156,17 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `config.py` | 使用されている定数（`TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`）の値や設定の仕組みを把握するため | 根拠: `config.FALLBACK_ROOT`等 (行番号: 11, 18, 21) |
-| 高 | `services/switchbot_service.py` | `send_device_command`関数が行っている実際の通信手段（HTTP, SDK等）や、返却されるレスポンスデータの構造を明確にするため | 根拠: `send_device_command` (行番号: 40) |
+| 高 | `config.py` | 使用されている定数（`TV_PLUG_DEVICE_ID`, `FALLBACK_ROOT`）の値や設定の仕組みを把握するため | 根拠: `config.FALLBACK_ROOT`等 (行番号: 10, 18, 21) |
+| 高 | `services/switchbot_service.py` | `send_device_command`関数が行っている実際の通信手段（HTTP, SDK等）や、返却されるレスポンスデータの構造を明確にするため | 根拠: `send_device_command` (行番号: 43) |
 | 中 | `core/logger.py` | システム全体のログ管理方針や、`setup_logging`がどこにログを出力するのかを確認するため | 根拠: `setup_logging` (行番号: 15) |
+| 中 | `core/utils.py` | Issue #592で追加された`get_now_jst`の実装詳細、および他の呼び出し元（nas_monitor.py, camera_service.py, train_service.py）との使われ方の違いを確認するため | 根拠: `from core.utils import get_now_jst` (行番号: 12) |
 
 ## 8. 保守上の注意点
 
 * `LAST_RUN_FILE`の書き込み時の例外は`try-except`内で処理されるが、読み込み時（行番号: 32-34）のファイル操作には明示的な例外処理（`PermissionError`等の捕捉）が存在しないため、ファイル権限などに問題がある場合はスクリプトがクラッシュする可能性がある。
 * `config.TV_PLUG_DEVICE_ID`が未設定（`None`や空文字）の場合、例外は発生せずログを出力して正常に処理がスキップされる。
 * `switchbot_service.send_device_command`の戻り値`res`が`None`である場合や辞書型でない場合を考慮し、`res and res.get("statusCode") == 100`としてNull安全なチェックが行われている。
+* **（Issue #592で修正）** 「深夜2:00〜2:05」判定用の現在時刻取得を、ホストOSのタイムゾーン設定に依存するnaiveな`datetime.now()`から`core.utils.get_now_jst()`（Issue #592で追加、"Asia/Tokyo"のaware `datetime`を返す）に置き換えた。Issue #592自体は元々`monitors/camera_monitor.py`(#382)と`services/quest_service.py`(#293)の2件の既存修正がタイムゾーン非依存かどうかを検証する調査だったが（結論: 両方とも元からタイムゾーン非依存で問題なし）、その追加調査で本ファイルを含む別の4箇所が実際にホスト依存のnaive時刻を使っていたことが判明し、本ファイルはその修正対象の1つとなった。詳細は[utils.md](./utils.md)の`get_now_jst`項を参照。回帰テストは`MY_HOME_SYSTEM/tests/test_tv_lock_monitor.py`で、`patch.object(tv_lock_monitor, "get_now_jst", lambda: <固定値>)`によるmonkeypatchパターンに変更され、実際のpytzでlocalizeしたaware `datetime`で`.hour`/`.minute`/`.strftime()`の挙動がnaiveと変わらないことを確認する`test_hour_check_uses_jst_regardless_of_host_timezone`が新設された。
 
 ## 9. 不明事項一覧
 

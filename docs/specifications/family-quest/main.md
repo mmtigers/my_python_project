@@ -92,7 +92,7 @@ flowchart TD
     GetElement --> CheckNull{"rootElementはnullか？"}
     CheckNull -- Yes --> ThrowError["Error: 'Failed to find the root element' をスロー"]
     ThrowError --> EndError([End])
-    CheckNull -- No --> CheckCamera["外部：window.location.pathname.includes('/camera')"]
+    CheckNull -- No --> CheckCamera["外部：isCameraRoute(window.location.pathname)"]
     CheckCamera --> CreateRoot["外部：ReactDOM.createRoot(rootElement)"]
     CreateRoot --> IsCameraView{"isCameraView === true?"}
     IsCameraView -- Yes --> RenderCamera["render() 呼び出し<br>(React.StrictMode → ChunkErrorBoundary → QueryClientProvider → Suspense → CameraDashboardをネスト<br>lazy()により初回描画時に動的import)"]
@@ -138,12 +138,12 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `./App.tsx` | アプリケーションのルートであり、画面の描画内容やルーティング等の主要な機能の全体像を把握するために必須であるため。 | 根拠: `App` (行番号: 3 / 抜粋: "import App from './App'") |
-| 高 | `./features/camera/components/CameraDashboard.tsx` | `/camera`パスでマウントされるもう一方のルートコンポーネントであり、カメラ機能の全体像を把握するために必須であるため。 | 根拠: `CameraDashboard` (行番号: 12 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
-| 中 | `./context/SettingsContext.tsx`, `./context/ToastContext.tsx` | `App`分岐のみをラップするコンテキストの実装内容（`CameraDashboard`側で利用不可な理由の裏付け）を確認するため。 | 根拠: `SettingsProvider`, `ToastProvider` (行番号: 7-8 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'\nimport { ToastProvider } from './context/ToastContext'") |
-| 中 | `./lib/queryClient.ts` または `.js` | React Queryによるデータフェッチのグローバルなキャッシュ戦略やエラーハンドリングの設定内容を確認するため。 | 根拠: `queryClient` (行番号: 6 / 抜粋: "import { queryClient } from './lib/queryClient'") |
-| 中 | `index.html` | マウント対象となる `<div id="root"></div>` 要素が確実に定義されているか、およびメタデータ等を確認するため。 | 根拠: `document.getElementById` (行番号: 15 / 抜粋: "document.getElementById('root'); ") |
-| 低 | `./index.css` | アプリケーション全体に適用されているベーススタイルやCSS変数の定義状況を把握するため。 | 根拠: `index.css` (行番号: 4 / 抜粋: "import './index.css'") |
+| 高 | `./App.tsx` | アプリケーションのルートであり、画面の描画内容やルーティング等の主要な機能の全体像を把握するために必須であるため。 | 根拠: `App` (行番号: 4 / 抜粋: "import App from './App' // 拡張子は省略可能") |
+| 高 | `./features/camera/components/CameraDashboard.tsx` | `/camera`パスでマウントされるもう一方のルートコンポーネントであり、カメラ機能の全体像を把握するために必須であるため。 | 根拠: `CameraDashboard` (行番号: 16 / 抜粋: "const CameraDashboard = lazy(() => import('./features/camera/components/CameraDashboard'))") |
+| 中 | `./context/SettingsContext.tsx`, `./context/ToastContext.tsx` | `App`分岐のみをラップするコンテキストの実装内容（`CameraDashboard`側で利用不可な理由の裏付け）を確認するため。 | 根拠: `SettingsProvider`, `ToastProvider` (行番号: 8-9 / 抜粋: "import { SettingsProvider } from './context/SettingsContext'\nimport { ToastProvider } from './context/ToastContext'") |
+| 中 | `./lib/queryClient.ts` または `.js` | React Queryによるデータフェッチのグローバルなキャッシュ戦略やエラーハンドリングの設定内容を確認するため。 | 根拠: `queryClient` (行番号: 7 / 抜粋: "import { queryClient } from './lib/queryClient'") |
+| 中 | `index.html` | マウント対象となる `<div id="root"></div>` 要素が確実に定義されているか、およびメタデータ等を確認するため。 | 根拠: `document.getElementById` (行番号: 69 / 抜粋: "const rootElement = document.getElementById('root');") |
+| 低 | `./index.css` | アプリケーション全体に適用されているベーススタイルやCSS変数の定義状況を把握するため。 | 根拠: `index.css` (行番号: 5 / 抜粋: "import './index.css'") |
 | 中 | `./lib/routing.ts` | **（Issue #472で追加）** `isCameraRoute`の正確な判定ロジック（どのパスがカメラルートとみなされるか）を確認するため。本ファイル単体では呼び出しているのみで判定条件の詳細は不明。 | 根拠: (行番号: 11 / 抜粋: "import { isCameraRoute } from './lib/routing'") |
 
 ## 8. 保守上の注意点

@@ -468,7 +468,13 @@ if __name__ == "__main__":
 class TestNasMonitorDailyReportOncePerDay:
     """日次レポートは「hour == 8」の一致判定だと、scheduler の実行間隔(3600〜3610s)の
     ずれで 7:5x → 9:0x になった日に丸ごと飛んでいた(#388 で保持期間削除側だけ修正済み)。
-    「今日まだ送っていない かつ 8時以降」で判定し、送信後に last_report_date を保存すること。"""
+    「今日まだ送っていない かつ 8時以降」で判定し、送信後に last_report_date を保存すること。
+
+    Issue #592: この「8時」はJSTの8時を意図しており、monitors/nas_monitor.py は
+    core.utils.get_now_jst() で明示的にJST時刻を取得するようになった。
+    freeze_time() はタイムゾーン指定の無い文字列をUTCとして解釈するため、
+    以下の各テストはJSTでの意図した時刻から9時間引いたUTC時刻を指定している
+    (例: JST 09:05 を意図する場合は freeze_time("... 00:05:00"))。"""
 
     def _make_monitor(self, monkeypatch, state):
         monitor = NasMonitor()
@@ -488,7 +494,7 @@ class TestNasMonitorDailyReportOncePerDay:
         state = {"is_healthy": True}
         sent = []
         monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
-        with freeze_time("2026-09-06 09:05:00"):
+        with freeze_time("2026-09-06 00:05:00"):  # JST 09:05
             self._make_monitor(monkeypatch, state).run()
         assert sent == ["report"]
         assert state["last_report_date"] == "2026-09-06"
@@ -499,7 +505,7 @@ class TestNasMonitorDailyReportOncePerDay:
         state = {"is_healthy": True, "last_report_date": "2026-09-06", "last_cleanup_date": "2026-09-06"}
         sent = []
         monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
-        with freeze_time("2026-09-06 12:05:00"):
+        with freeze_time("2026-09-06 03:05:00"):  # JST 12:05
             self._make_monitor(monkeypatch, state).run()
         assert sent == []
 
@@ -509,7 +515,7 @@ class TestNasMonitorDailyReportOncePerDay:
         state = {"is_healthy": True}
         sent = []
         monkeypatch.setattr(nm, "send_push", lambda *a, **k: sent.append(k.get("channel")))
-        with freeze_time("2026-09-06 07:55:00"):
+        with freeze_time("2026-09-05 22:55:00"):  # JST 09/06 07:55
             self._make_monitor(monkeypatch, state).run()
         assert sent == []
         assert "last_report_date" not in state

@@ -10,6 +10,7 @@ import glob
 from datetime import datetime
 from typing import Optional, Dict, Any
 from core.logger import setup_logging
+from core.utils import get_now_jst
 import config
 
 try:
@@ -397,7 +398,12 @@ def _generate_record_playlist_locked(cam_conf: Dict[str, Any], target_date: str,
     #    ffmpegは`-hls_playlist_type vod`指定時、正常に完走した場合にのみ末尾へ
     #    `#EXT-X-ENDLIST`タグを書き込むため、これの有無で完全性を確認してからキャッシュを返す。
     #    不完全なら以降の生成処理へフォールスルーし、再生成する。
-    today_str = datetime.now().strftime("%Y%m%d")
+    # Issue #592: target_dateはフロントエンド(ブラウザのローカル日付、実質JST)から
+    # 渡される「YYYYMMDD」形式の日付で、実世界のJSTカレンダー日を意図している。
+    # ホストOSのタイムゾーン設定に依存するnaiveなdatetime.now()で today_str を
+    # 求めると、ホストがJST以外の設定の場合、JSTの日付境界(UTCの日付境界と
+    # 9時間ずれる)をまたぐ時間帯で「当日」の判定を誤りうるため、明示的にJSTを使う。
+    today_str = get_now_jst().strftime("%Y%m%d")
     if target_date < today_str and os.path.exists(playlist_path) and _playlist_is_complete(playlist_path):
         logger.debug(f"✅ [{cam_conf['name']}] {target_date} のプレイリストは生成済みのためキャッシュを返します。")
         return playlist_path

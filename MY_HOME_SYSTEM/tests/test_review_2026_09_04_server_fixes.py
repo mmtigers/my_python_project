@@ -30,6 +30,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core import alexa_verifier as av
 from core import logger as core_logger
+from core.utils import get_now_jst
 from monitors import log_analyzer as la_module
 from monitors.nas_monitor import NasMonitor
 from services import camera_service, notification_service, sensor_service
@@ -69,18 +70,15 @@ class TestVodRetentionAndDailyCleanup:
         monkeypatch.setattr(monitor, "run_retention_cleanup", lambda: calls.append(1))
         monkeypatch.setattr(monitor, "save_to_db", lambda *a, **k: None)
 
-        class _FakeDT:
-            _now = datetime(2026, 9, 4, 9, 0, 5)
-
-            @classmethod
-            def now(cls):
-                return cls._now
-
-        monkeypatch.setattr("monitors.nas_monitor.datetime", _FakeDT)
+        # Issue #592: nas_monitor.pyはcore.utils.get_now_jst()経由でJST時刻を
+        # 取得するようになったため、モジュールレベルのdatetimeクラスではなく
+        # この関数をパッチする(ここでの時刻はJSTのつもりの時刻でよい)。
+        fake_now = {"value": datetime(2026, 9, 4, 9, 0, 5)}
+        monkeypatch.setattr("monitors.nas_monitor.get_now_jst", lambda: fake_now["value"])
         with patch("monitors.nas_monitor.send_push", lambda *a, **k: True):
             monitor.run()          # 9:00 台(8時台の実行が無かった日)でも実行される
             monitor.run()          # 同日2回目は実行されない
-            _FakeDT._now = datetime(2026, 9, 5, 8, 0, 5)
+            fake_now["value"] = datetime(2026, 9, 5, 8, 0, 5)
             monitor.run()          # 翌日は再び実行される
 
         assert len(calls) == 2
@@ -380,7 +378,10 @@ def test_lifespan_shutdown_stops_ffmpeg(isolated_db, monkeypatch):
 def test_today_playlist_is_reused_within_grace_period(tmp_path, monkeypatch):
     monkeypatch.setattr(camera_service, "HLS_VOD_DIR", str(tmp_path / "vod"))
     monkeypatch.setattr(config, "NVR_RECORD_DIR", str(tmp_path / "nvr"))
-    today = datetime.now().strftime("%Y%m%d")
+    # Issue #592: camera_service.generate_record_playlistの内部判定はcore.utils.
+    # get_now_jst()でJST基準の「今日」を求めるようになったため、テスト側も
+    # 同じ基準で「今日」を用意する(CI実行環境のOSタイムゾーンに関わらず一致させる)。
+    today = get_now_jst().strftime("%Y%m%d")
     nvr = tmp_path / "nvr" / "cam1"
     nvr.mkdir(parents=True)
     (nvr / f"{today}_000000.mp4").write_bytes(b"x")

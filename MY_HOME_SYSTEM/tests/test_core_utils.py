@@ -290,3 +290,41 @@ class TestGetMealTimeCategoryFromNow:
     def test_buckets_hour_into_expected_category(self, monkeypatch, hour, expected):
         self._fixed_now(monkeypatch, hour)
         assert utils.get_meal_time_category_from_now() == expected
+
+
+class TestGetNowJst:
+    """Issue #592の追加調査の回帰テスト。
+
+    monitors/tv_lock_monitor.py・monitors/nas_monitor.py・services/camera_service.py・
+    services/train_service.pyが、ホストOSのタイムゾーン設定に依存するnaiveな
+    datetime.now()の代わりに使うようになったget_now_jst()自体の単体テスト。
+    freezegunでUTCの特定時刻に固定し、JSTへの変換が常に+9時間になることを検証する。
+    """
+
+    def test_returns_aware_datetime_in_jst(self):
+        result = utils.get_now_jst()
+        assert result.tzinfo is not None
+        assert result.utcoffset() == datetime.timedelta(hours=9)
+
+    def test_converts_frozen_utc_instant_to_jst_correctly(self):
+        from freezegun import freeze_time
+
+        with freeze_time("2026-09-05 22:55:00"):  # UTC
+            result = utils.get_now_jst()
+
+        # UTC 22:55 + 9h = JST 07:55 (翌日)
+        assert (result.year, result.month, result.day) == (2026, 9, 6)
+        assert (result.hour, result.minute) == (7, 55)
+
+    def test_result_is_always_nine_hours_ahead_of_utc(self):
+        """明示的にAsia/Tokyoタイムゾーンを指定しているため、UTCとの差は
+        常に+9時間で固定されること(サマータイムの無いJSTの特性)。"""
+        from freezegun import freeze_time
+
+        with freeze_time("2026-01-15 03:00:00"):
+            winter_result = utils.get_now_jst()
+        with freeze_time("2026-07-15 03:00:00"):
+            summer_result = utils.get_now_jst()
+
+        assert winter_result.utcoffset() == datetime.timedelta(hours=9)
+        assert summer_result.utcoffset() == datetime.timedelta(hours=9)

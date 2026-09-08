@@ -41,3 +41,20 @@
 # 存在しない場合はリダイレクト自体が失敗しPythonプロセスが一切起動しない
 # (cronはシェルのリダイレクトエラーを検知できず無言で失敗する)。mkdir -pを追加する。
 0 * * * * cd /home/masahiro/develop/DDD && mkdir -p /home/masahiro/develop/DDD/logs && /home/masahiro/develop/MY_HOME_SYSTEM/.venv/bin/python newface_monitor.py >> /home/masahiro/develop/DDD/logs/newface_monitor.log 2>&1
+
+# Bluetoothスピーカー(Anker SoundCore 2)のキープアライブ (Issue #585)
+# tools/keep_alive_anker.sh自身が「cron実行時でもPipeWireソケットを見つけられる
+# ように」という前提のコメントを持つ(=cron起動を前提に書かれている)にも関わらず、
+# 本ファイル・MY_HOME_SYSTEM/deploy/systemd/のいずれにも実行契機が無く、実質的に
+# 一度も実行されていなかった可能性がある。オーディオアンプの無音自動オフを防ぐ
+# という目的上、一般的なBluetoothスピーカーのオートパワーオフ時間(10〜20分程度)
+# より十分短い間隔として5分毎に設定する(実機の実際のオートオフ時間に応じて
+# 調整の余地あり)。
+*/5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_anker.sh
+
+# 同じBluetoothスピーカー経路向けの、別方式(mpg123での無音MP3再生)のハートビート。
+# keep_alive_anker.sh(上記)とkeep_alive_speaker.shはdocs/specifications側で
+# 「同じログファイルを共有する、別方式のキープアライブスクリプト」として並記されて
+# おり、どちらかが他方の後継/レガシーであるとは明記されていない。両方に実行契機が
+# 無かった状態を解消するため、干渉を避けるべく上記と時刻をずらして同じ間隔で登録する。
+2-59/5 * * * * /home/masahiro/develop/MY_HOME_SYSTEM/tools/keep_alive_speaker.sh

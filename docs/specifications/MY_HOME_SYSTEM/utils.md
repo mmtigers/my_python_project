@@ -17,11 +17,15 @@
 - [quest_service.md](./quest_service.md) — Issue #435で、キー単位のロック管理を`threading.Lock`辞書の場当たり実装から本ファイルの`RefCountedLockRegistry`利用へ置き換えた利用元
 - [line_service.md](./line_service.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`log_food_record`が`food_records.meal_time_category`の算出に使用）
 - [line_logic.md](./line_logic.md) — Issue #583で追加された`get_meal_time_category_from_now`の利用元（`handle_postback`の`food_record_direct`アクションが`food_records.meal_time_category`の算出に使用）
+- [tv_lock_monitor.md](./tv_lock_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（深夜2時判定のJST基準化）
+- [nas_monitor.md](./nas_monitor.md) — Issue #592で追加された`get_now_jst`の利用元（8時判定のJST基準化）
+- [camera_service.md](./camera_service.md) — Issue #592で追加された`get_now_jst`の利用元（`generate_record_playlist`内部の当日判定のJST基準化）
+- [train_service.md](./train_service.md) — Issue #592で追加された`get_now_jst`の利用元（Yahoo!路線情報検索時刻のJST基準化）
 
 ## 2. ファイルの概要
 
 * システム全体で共通して使用されるユーティリティ関数群を提供する。
-* "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。
+* "Asia/Tokyo" タイムゾーンに基づいた現在日時の取得処理を提供する。`get_now_jst`（Issue #592で追加）は、"Asia/Tokyo"タイムゾーンの現在時刻をawareな`datetime.datetime`オブジェクトのまま返す点で、文字列を返す`get_now_iso`/`get_today_date_str`/`get_display_date`と異なる。
 * 現在時刻(JST)から食事記録の時間帯カテゴリ（"Breakfast"/"Lunch"/"Snack"/"Dinner"）を推定する`get_meal_time_category_from_now`（Issue #583で追加）を提供する。
 * ネットワーク障害やストレージの復帰遅延など、一時的な障害に対する指数関数的バックオフを用いたリトライ機能を提供する。
 * キー単位で`threading.Lock`を参照カウント付きで管理する`RefCountedLockRegistry`クラス（Issue #435で追加）を提供する。
@@ -120,26 +124,49 @@
 
 
 
-### `get_meal_time_category_from_now`（Issue #583 で追加）
+### `get_now_jst`（Issue #592で追加）
 
-* **役割**: "Asia/Tokyo" タイムゾーンの現在時刻の「時」だけを取り出し、食事記録の時間帯カテゴリ（`food_records.meal_time_category`列に保存する値）を4段階（"Breakfast"/"Lunch"/"Snack"/"Dinner"）のいずれかとして返す。4時台〜10時台は"Breakfast"、11時台〜14時台は"Lunch"、15時台〜17時台は"Snack"、それ以外（18時台〜翌3時台）は"Dinner"を返す。関数docstringによれば、`log_food_record`/`food_record_direct`のいずれもこの値を実際の記録時刻に関わらず常に固定文字列"Dinner"で保存していたバグ（Issue #583）の修正として追加され、呼び出し元が受け取る`category`引数（AIが渡す朝食/昼食/夕食等のラベル、または食事アンケートの麺類等の食品ジャンルラベル）は用途が呼び出し元ごとに異なり必ずしも時間帯を表さないため、記録時刻そのものから時間帯を判定する設計にしている（`category`自体は従来どおり`menu_category`列にのみ使われ、本関数の追加によって`category`の扱いは変化しない）。
-* 根拠: [get_meal_time_category_from_now関数定義とdocstring、および分岐] (行番号: 23〜40 / 抜粋: "def get_meal_time_category_from_now() -> str:\n    \"\"\"現在時刻(JST)から食事記録の時間帯カテゴリ...\n    hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"")
+* **役割**: "Asia/Tokyo" タイムゾーンの現在日時をawareな`datetime.datetime`オブジェクトとして返す。docstringによれば、`monitors/tv_lock_monitor.py`の深夜2時判定・`monitors/nas_monitor.py`の8時判定・`services/train_service.py`の乗換案内API検索時刻のように「実際の現地時刻(JST)」を前提に組まれた判定・計算が、ホストOSのタイムゾーン設定に依存する`datetime.now()`（naive、ローカルタイムゾーン）を使っていたため、ホストがJST以外の設定だと意図した実時刻とずれて動作してしまう問題（Issue #382/#293と同じ不具合クラス）への対応として追加された。
+* 根拠: [get_now_jst関数定義とdocstring] (行番号: 23〜35 / 抜粋: "def get_now_jst() -> datetime.datetime:\n    \"\"\"現在時刻をJSTのaware datetimeで返す。\n\n    Issue #592の追加調査で判明した問題への対応: ...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_meal_time_category_from_now] (行番号: 23 / 抜粋: "def get_meal_time_category_from_now() -> str:")
+* 根拠: [get_now_jst] (行番号: 23 / 抜粋: "def get_now_jst() -> datetime.datetime:")
 
 
-* **戻り値/レスポンス**: `str`。現在時刻(JST)の時に応じて`"Breakfast"`（4時〜10時台）、`"Lunch"`（11時〜14時台）、`"Snack"`（15時〜17時台）、`"Dinner"`（それ以外、18時〜翌3時台）のいずれか一つ。
-* 根拠: [get_meal_time_category_from_now] (行番号: 33〜40 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"\n    if 11 <= hour < 15:\n        return \"Lunch\"\n    if 15 <= hour < 18:\n        return \"Snack\"\n    return \"Dinner\"")
+* **戻り値/レスポンス**: `datetime.datetime`。"Asia/Tokyo"タイムゾーンを明示的に付与したaware(タイムゾーン情報付き)の現在日時。`get_now_iso`等の既存関数（`str`を返す）と異なり、呼び出し元が`.hour`/`.strftime()`/`+ timedelta(...)`等の`datetime`演算をそのまま行える生の`datetime`オブジェクトを返す点が特徴。
+* 根拠: [get_now_jst] (行番号: 23, 35 / 抜粋: "def get_now_jst() -> datetime.datetime:\n...\n    return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
 
 
-* **副作用**: なし（`datetime.datetime.now`によるシステム時計の参照のみで、状態の書き込みは行わない）
-* 根拠: [get_meal_time_category_from_now] (行番号: 33 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+* **副作用**: なし
+* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [get_meal_time_category_from_now] (行番号: 33〜40 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+* 根拠: [get_now_jst] (行番号: 35 / 抜粋: "return datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\"))")
+
+
+
+### `get_meal_time_category_from_now`（Issue #583 で追加）
+
+* **役割**: "Asia/Tokyo" タイムゾーンの現在時刻の「時」だけを取り出し、食事記録の時間帯カテゴリ（`food_records.meal_time_category`列に保存する値）を4段階（"Breakfast"/"Lunch"/"Snack"/"Dinner"）のいずれかとして返す。4時台〜10時台は"Breakfast"、11時台〜14時台は"Lunch"、15時台〜17時台は"Snack"、それ以外（18時台〜翌3時台）は"Dinner"を返す。関数docstringによれば、`log_food_record`/`food_record_direct`のいずれもこの値を実際の記録時刻に関わらず常に固定文字列"Dinner"で保存していたバグ（Issue #583）の修正として追加され、呼び出し元が受け取る`category`引数（AIが渡す朝食/昼食/夕食等のラベル、または食事アンケートの麺類等の食品ジャンルラベル）は用途が呼び出し元ごとに異なり必ずしも時間帯を表さないため、記録時刻そのものから時間帯を判定する設計にしている（`category`自体は従来どおり`menu_category`列にのみ使われ、本関数の追加によって`category`の扱いは変化しない）。**（Issue #592の注記）** 本関数自体は元々`datetime.datetime.now(pytz.timezone("Asia/Tokyo"))`でJSTを明示していたため、Issue #592の追加調査でもタイムゾーン非依存であることが確認され、`get_now_jst`への置き換え対象にはなっていない。
+* 根拠: [get_meal_time_category_from_now関数定義とdocstring、および分岐] (行番号: 37〜54 / 抜粋: "def get_meal_time_category_from_now() -> str:\n    \"\"\"現在時刻(JST)から食事記録の時間帯カテゴリ...\n    hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"")
+
+
+* **引数/リクエスト**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 37 / 抜粋: "def get_meal_time_category_from_now() -> str:")
+
+
+* **戻り値/レスポンス**: `str`。現在時刻(JST)の時に応じて`"Breakfast"`（4時〜10時台）、`"Lunch"`（11時〜14時台）、`"Snack"`（15時〜17時台）、`"Dinner"`（それ以外、18時〜翌3時台）のいずれか一つ。
+* 根拠: [get_meal_time_category_from_now] (行番号: 47〜54 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour\n    if 4 <= hour < 11:\n        return \"Breakfast\"\n    if 11 <= hour < 15:\n        return \"Lunch\"\n    if 15 <= hour < 18:\n        return \"Snack\"\n    return \"Dinner\"")
+
+
+* **副作用**: なし（`datetime.datetime.now`によるシステム時計の参照のみで、状態の書き込みは行わない）
+* 根拠: [get_meal_time_category_from_now] (行番号: 47 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
+
+
+* **エラーハンドリング**: なし
+* 根拠: [get_meal_time_category_from_now] (行番号: 47〜54 / 抜粋: "hour = datetime.datetime.now(pytz.timezone(\"Asia/Tokyo\")).hour")
 
 
 
@@ -320,6 +347,7 @@ graph TD
         get_now_iso["get_now_iso()"]
         get_today_date_str["get_today_date_str()"]
         get_display_date["get_display_date()"]
+        get_now_jst["get_now_jst() (Issue #592)"]
         get_meal_time_category_from_now["get_meal_time_category_from_now() (Issue #583)"]
         RefCountedLockRegistry["RefCountedLockRegistry (Issue #435)"]
         with_exponential_backoff["with_exponential_backoff()"]
@@ -349,6 +377,8 @@ graph TD
     get_display_date --> pytz
     get_meal_time_category_from_now --> datetime
     get_meal_time_category_from_now --> pytz
+    get_now_jst --> datetime
+    get_now_jst --> pytz
 
     with_exponential_backoff --> functools
     with_exponential_backoff --> time
@@ -381,6 +411,7 @@ graph TD
 * **（Issue #292で新規追加）`retry_with_backoff`**: `with_exponential_backoff`(無限リトライの`while True`デコレータ)や`wait_for_storage_warmup`(パス存在確認限定・呼び出し元なし)とは異なり、任意のcallableを有限回数リトライしつつ最後の例外を再送出する汎用ヘルパーとして追加された。既に`config.py::verify_and_initialize_storage`と`monitors/nas_monitor.py::check_write_permission`から実際に呼び出されている(下記相互参照参照)。
 * **（Issue #435で新規追加）`RefCountedLockRegistry`**: `services/quest_service.py`が保持していた「キーの組み合わせが増えるたびに`threading.Lock`エントリが辞書に無制限に蓄積し、二度と削除されない」3箇所の場当たり実装を置き換えるために追加された。`services/camera_service.py`の`_RefCountedLock`/`_vod_generation_lock`と同じ「参照カウント方式」を採用しており、クラスdocstringには「`lock.locked()`が`False`なら削除する単純な方式では、辞書からロックを取り出した直後から実際に獲得するまでの隙間で別スレッドが剪定してしまい、同一キーに対し2つの別々の`Lock`オブジェクトが生成されて同時に『取得成功』しうる(排他制御が本来防ぐべき事態の再発)」という設計上の注意が明記されている。`acquire(key)`はコンテキストマネージャとして提供され、`with`ブロックを抜けた後に参照カウントが0かつ辞書中のエントリが自分自身のままである場合にのみエントリを削除するため、他スレッドが同じキーで新しいエントリを既に作成済みの場合は誤って削除しない設計になっている。
 * **（Issue #583で新規追加）`get_meal_time_category_from_now`**: `services/line_service.py`の`log_food_record`と`handlers/line_logic.py`の`handle_postback`（`food_record_direct`アクション）の両方が、`food_records.meal_time_category`列に実際の記録時刻に関わらず常に固定文字列`"Dinner"`を保存していたバグの修正として追加された。両呼び出し元とも、以前この列に渡していた値をそのまま本関数の呼び出しに置き換えただけであり、`category`引数（呼び出し元ごとに意味が異なるラベルで、`menu_category`列にのみ使われる）の扱いには手を加えていない。本モジュール単体の`grep`調査時点では、この列を書き込み後に読み出している箇所（ダッシュボード集計・分析処理等）はリポジトリ内に見つからず、`meal_time_category`は書き込み専用（write-only）のカラムのままである可能性がある——この点は本ファイルの解析範囲外であり実際の利用有無は呼び出し元（line_service.md/line_logic.md）や集計系ドキュメント側で要確認。回帰テストは`MY_HOME_SYSTEM/tests/test_core_utils.py`の`TestGetMealTimeCategoryFromNow`クラス（`test_buckets_hour_into_expected_category`、時刻0/3/4/7/10/11/13/14/15/17/18/21/23時をパラメータ化して各時間帯境界を検証）で追加されている。
+* **（Issue #592で新規追加）`get_now_jst`**: Issue #592は元々`monitors/camera_monitor.py::check_camera_time`（#382）と`services/quest_service.py`のJST定数（#293）というホストOSのタイムゾーン設定に関する既存修正2件がタイムゾーン非依存かどうかを検証する調査だったが、その過程で別の3箇所（`monitors/tv_lock_monitor.py`の深夜2時判定、`monitors/nas_monitor.py`の8時判定、`services/camera_service.py::generate_record_playlist`内部の`_generate_record_playlist_locked`の当日判定、`services/train_service.py::get_route_info`の乗換案内API検索時刻）が、ホストOSのタイムゾーン設定に依存する素の`datetime.now()`（naive）を「実際のJST時刻」のつもりで使っていることが判明し、本関数はその4箇所の置き換え先として追加された（#382/#293自体は元からaware UTC/固定オフセットのdatetimeを使っておりタイムゾーン非依存だったため、この4箇所の修正はIssue #592の追加調査で見つかった別件の対応であり、#382/#293自体の再修正ではない）。呼び出し元の詳細は各ファイルのドキュメント（tv_lock_monitor.md, nas_monitor.md, camera_service.md, train_service.md）の該当箇所を参照。本関数自体は`test_core_utils.py`の`TestGetNowJst`クラス（`test_returns_aware_datetime_in_jst`・`test_converts_frozen_utc_instant_to_jst_correctly`・`test_result_is_always_nine_hours_ahead_of_utc`の3テスト。freezegunでUTCの固定時刻からJSTへの変換が常に+9時間になることを検証）で単体テストされており、加えて各呼び出し元側のテスト（`test_tv_lock_monitor.py`、`test_nas_monitor.py`、`test_review_2026_09_04_server_fixes.py`）でも`get_now_jst`をmonkeypatchする形で回帰確認されている。
 
 ## 9. 不明事項一覧
 
