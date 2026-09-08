@@ -5,7 +5,6 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
 from typing import Dict, Optional, Any, Tuple
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -14,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import config
 from core.logger import setup_logging
 from core.database import save_log_generic
-from core.utils import get_now_iso, retry_with_backoff
+from core.utils import get_now_iso, retry_with_backoff, get_now_jst
 from services.notification_service import send_push
 
 # ロガー設定
@@ -413,7 +412,9 @@ class NasMonitor:
 
         # 通知判定 (容量不足または定期レポート)
         is_full = usage['percent'] > 90
-        now = datetime.now()
+        # Issue #592: 「8時以降」判定はJSTの8時を意図しており、ホストOSのタイムゾーン
+        # 設定に依存するnaiveなdatetime.now()ではなく明示的にJSTの現在時刻を使う。
+        now = get_now_jst()
         today_str = now.strftime("%Y-%m-%d")
         # 日次レポートも保持期間削除(#388)と同じ理由で「hour == 8」の一致判定ではなく
         # 「今日まだ送っていない かつ 8時以降」で判定する(7:5x → 9:0x とずれた日に

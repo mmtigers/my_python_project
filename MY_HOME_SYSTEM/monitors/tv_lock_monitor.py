@@ -1,7 +1,6 @@
 # MY_HOME_SYSTEM/monitors/tv_lock_monitor.py
 import sys
 import os
-from datetime import datetime
 
 # プロジェクトルートへのパス解決
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,6 +9,7 @@ if PROJECT_ROOT not in sys.path:
 
 import config
 from core.logger import setup_logging
+from core.utils import get_now_jst
 from services import switchbot_service
 
 logger = setup_logging("monitor.tv_lock")
@@ -22,8 +22,11 @@ def main():
         logger.debug("TV_PLUG_DEVICE_ID is not set. Skipping.")
         return
 
-    now = datetime.now()
-    
+    # Issue #592: ホストOSのタイムゾーン設定に依存しないよう、naiveなdatetime.now()
+    # ではなく明示的にJSTの現在時刻を使う(この「深夜2時」判定はJSTの深夜2時を
+    # 意図しており、ホストがJST以外の設定だと別の実時刻に実行されてしまう)。
+    now = get_now_jst()
+
     # 毎日 深夜 2:00 〜 2:05 の間に実行する
     if now.hour == 2 and 0 <= now.minute <= 5:
         today_str = now.strftime("%Y-%m-%d")

@@ -20,6 +20,20 @@ def get_today_date_str() -> str:
 def get_display_date() -> str:
     return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).strftime("%m/%d")
 
+def get_now_jst() -> datetime.datetime:
+    """現在時刻をJSTのaware datetimeで返す。
+
+    Issue #592の追加調査で判明した問題への対応: `monitors/tv_lock_monitor.py`の
+    深夜2時判定、`monitors/nas_monitor.py`の8時判定、`services/train_service.py`の
+    乗換案内API検索時刻のように、「実際の現地時刻(JST)」を前提に組まれた判定・
+    計算がホストOSのタイムゾーン設定に依存する`datetime.now()`(naive、ローカル
+    タイムゾーン)を使っていた。ホストがJST以外の設定だと、意図した実時刻と
+    ずれた時刻で判定・計算されてしまう(#382/#293と同じ不具合クラス)。
+    これらの呼び出し元をこの関数に置き換えることで、ホストのOS設定に関わらず
+    常に正しいJST時刻を基準にする。
+    """
+    return datetime.datetime.now(pytz.timezone("Asia/Tokyo"))
+
 def get_meal_time_category_from_now() -> str:
     """現在時刻(JST)から食事記録の時間帯カテゴリ(food_records.meal_time_category)を推定する。
 
