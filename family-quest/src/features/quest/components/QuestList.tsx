@@ -70,13 +70,30 @@ const QuestItem: React.FC<{
     // クエストidだけでなく「誰の完了か」(userId)も一致する場合のみクールダウンに入れる。
     // 以前は id しか見ておらず、兄が完了した無限クエストが妹・パパ・ママのパネルでも
     // 60秒 "Wait..." になっていた(サーバー側のクールダウンは (user, quest) 単位)。
+    // #567: 上記のuserId一致チェックだけでは2つの誤動作が残っていた。
+    // (a) 兄が完了しクールダウン中に妹へユーザー切替すると、userId不一致でeffectは
+    //     早期returnするが、既にtrueになっているisCooldownを戻す処理が無く、
+    //     切り替え先のパネルが操作不能のまま固着していた。
+    // (b) タブ切替等でQuestListが再マウントされると、isCooldown(state)は初期化される
+    //     一方でcompletedSignal(props)は古いままのため、id/userId一致だけを見ると
+    //     とっくに終わっているはずのクールダウンが丸ごと(60秒)再発火していた。
+    // completedSignal.nonceは発火時刻(Date.now())であるため、不一致時は明示的に
+    // isCooldownを解除し(a)、一致時も経過時間を差し引いた残り時間のみをロックする(b)。
     const questId = quest.quest_id;
     const currentUserId = currentUser.user_id;
     useEffect(() => {
         if (!isInfinite || !completedSignal) return;
-        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) return;
+        if (completedSignal.id !== questId || completedSignal.userId !== currentUserId) {
+            setIsCooldown(false);
+            return;
+        }
+        const remainingMs = COOLDOWN_MS - (Date.now() - completedSignal.nonce);
+        if (remainingMs <= 0) {
+            setIsCooldown(false);
+            return;
+        }
         setIsCooldown(true);
-        const timer = setTimeout(() => setIsCooldown(false), COOLDOWN_MS);
+        const timer = setTimeout(() => setIsCooldown(false), remainingMs);
         return () => clearTimeout(timer);
     }, [completedSignal, isInfinite, questId, currentUserId]);
 
@@ -116,7 +133,7 @@ const QuestItem: React.FC<{
         onClick({ ...quest, _isInfinite: !!isInfinite });
     };
 
-    const { isPressing, pressProgress, wasFiredRecently, handlers: longPressHandlers } = useLongPress({
+    const { isPressing, pressProgress, wasFiredRecently, clearFiredFlag, handlers: longPressHandlers } = useLongPress({
         onLongPress: runCancel,
         disabled: !canCancel || isProcessing,
         thresholdMs: 550,
@@ -130,7 +147,15 @@ const QuestItem: React.FC<{
         // 100〜300ms)が指を離すより先に終わると、同じDOMノードに本ハンドラが付いた状態で
         // pointerup 由来の click が届き、直前に取り消したクエストの完了確認モーダルが
         // 開いてしまう(子どもが「はい」を押せば即再申請)。長押し発火直後の click は無視する。
-        if (wasFiredRecently()) return;
+        if (wasFiredRecently()) {
+            // #568: 取消が成立した直後はcanCancelがfalseに変わり、longPressHandlers
+            // (onPointerDown等)自体がこの要素から外れる(下記JSX参照)ため、次の
+            // pointerdownを待つだけではフラグが二度とリセットされない。ここで
+            // 1回抑止に使った時点で明示的に消費し、以降の正当なタップ(完了確認)を
+            // 恒久的にブロックしないようにする。
+            clearFiredFlag();
+            return;
+        }
         runComplete();
     };
 

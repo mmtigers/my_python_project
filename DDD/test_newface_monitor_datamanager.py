@@ -197,6 +197,83 @@ class TestLoadKnownCastsTransientIOErrorIsNotQuarantined:
         assert data_file.exists()
 
 
+class TestLoadKnownCastsBackupTransientIOErrorIsNotQuarantined:
+    """Issue #578の回帰テスト。
+
+    load_known_castsの.bak復旧読み込みは、主ファイルのOSError処理(#365)と
+    異なり、OSErrorも他の内容起因の破損と同じ扱いで空集合を返していた。
+    CIFS/autofsの瞬断で.bakのopen()が失敗しただけで中身は正しい可能性が
+    あるにもかかわらず、空集合へフォールバックすると全キャスト再通知・
+    union保存による退店済みキャストの復活を招く。主ファイルのOSErrorと同じく
+    KnownCastsUnavailableErrorを送出し、当該サイトの処理をスキップさせること。
+    """
+
+    def test_backup_os_error_raises_known_casts_unavailable_and_keeps_backup(
+        self, tmp_path, monkeypatch
+    ):
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        backup_file = data_file.with_suffix(data_file.suffix + ".bak")
+        backup_content = (
+            '[{"id": "1", "name": "Alice", "detail_url": "u", "image_url": "i", "age": "20"}]'
+        )
+        backup_file.write_text(backup_content, encoding="utf-8")
+        # 主ファイルは内容破損(JSON構文エラー)にして.bak復旧経路へ進ませる
+        data_file.write_text('[{"id": "1", "name": "truncated', encoding="utf-8")
+
+        original_read = DataManager._read_casts_file
+
+        def _flaky_read(path):
+            if path == backup_file:
+                raise OSError(5, "Input/output error")
+            return original_read(path)
+
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(_flaky_read))
+
+        with pytest.raises(module.KnownCastsUnavailableError):
+            dm.load_known_casts(site)
+
+        # 主ファイルは内容破損のため隔離されるが、.bak自体は読めなかっただけで
+        # 中身は無傷のまま残っていること
+        assert not data_file.exists()
+        assert len(list(tmp_path.glob(f"{data_file.name}.corrupted-*"))) == 1
+        assert backup_file.exists()
+        assert backup_file.read_text(encoding="utf-8") == backup_content
+
+    def test_check_site_skips_fetch_notify_and_save_on_backup_io_error(self, tmp_path, monkeypatch):
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+        data_file = tmp_path / site.get_data_filename()
+        backup_file = data_file.with_suffix(data_file.suffix + ".bak")
+        backup_file.write_text(
+            '[{"id": "1", "name": "Alice", "detail_url": "u", "image_url": "i", "age": "20"}]',
+            encoding="utf-8",
+        )
+        data_file.write_text('[{"id": "1", "name": "truncated', encoding="utf-8")
+
+        original_read = DataManager._read_casts_file
+
+        def _flaky_read(path):
+            if path == backup_file:
+                raise OSError(5, "Input/output error")
+            return original_read(path)
+
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(_flaky_read))
+
+        monitor = MagicMock()
+        notifier = MagicMock()
+        notifier.notify_casts.return_value = (1, [])
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_known_casts", mock_save)
+
+        module._check_site(monitor, notifier, site, dm)
+
+        monitor.fetch_current_casts.assert_not_called()
+        notifier.notify_casts.assert_not_called()
+        mock_save.assert_not_called()
+
+
 class TestSaveKnownCastsBackup:
     def test_save_keeps_previous_version_as_backup(self, tmp_path, monkeypatch):
         site = _make_site("known_casts_restpia_test.json")
@@ -365,6 +442,118 @@ class TestLoadDailySummaryRecoversFromBackup:
         result = dm.load_daily_summary()
 
         assert result == {}
+
+
+class TestLoadDailySummaryTransientIOErrorIsNotQuarantined:
+    """Issue #578の回帰テスト。
+
+    load_daily_summaryは以前、OSError(CIFS/autofsの瞬断等)も他の内容起因の
+    破損と同じ扱いで空辞書{}を返していた。record_daily_new_casts/
+    _maybe_send_daily_summaryがその空状態のまま無条件でsave_daily_summaryを
+    呼ぶ(または誤った空集計を送信する)と、たまたま読み込みに失敗しただけの
+    既存の累積カウントが丸ごと消えていた。load_known_casts(#365)と同様、
+    OSErrorはDataFileUnavailableErrorとして送出し、呼び出し元に保存/送信処理を
+    スキップさせること。
+    """
+
+    def test_primary_file_os_error_raises_data_file_unavailable_and_keeps_file(
+        self, tmp_path, monkeypatch
+    ):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        original_content = '{"counts": {"restpia_test": 5}}'
+        summary_file.write_text(original_content, encoding="utf-8")
+
+        real_open = open
+
+        def _flaky_open(path, *args, **kwargs):
+            if str(path) == str(summary_file):
+                raise OSError(5, "Input/output error")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _flaky_open, raising=False)
+
+        with pytest.raises(module.DataFileUnavailableError):
+            dm.load_daily_summary()
+
+        # 正常なファイルが隔離されず、そのまま残っていること
+        assert summary_file.exists()
+        assert summary_file.read_text(encoding="utf-8") == original_content
+        assert list(tmp_path.glob("daily_summary.json.corrupted-*")) == []
+
+    def test_backup_file_os_error_raises_data_file_unavailable_and_keeps_backup(
+        self, tmp_path, monkeypatch
+    ):
+        dm = DataManager(tmp_path)
+        summary_file = tmp_path / "daily_summary.json"
+        backup_file = summary_file.with_suffix(summary_file.suffix + ".bak")
+        backup_content = '{"counts": {"restpia_test": 5}}'
+        backup_file.write_text(backup_content, encoding="utf-8")
+        # 主ファイルは内容破損にして.bak復旧経路へ進ませる
+        summary_file.write_bytes(b'{"date": "2026-08-30", "\xf9broken": 1}')
+
+        real_open = open
+
+        def _flaky_open(path, *args, **kwargs):
+            if str(path) == str(backup_file):
+                raise OSError(5, "Input/output error")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _flaky_open, raising=False)
+
+        with pytest.raises(module.DataFileUnavailableError):
+            dm.load_daily_summary()
+
+        assert backup_file.exists()
+        assert backup_file.read_text(encoding="utf-8") == backup_content
+
+    def test_record_daily_new_casts_skips_save_and_preserves_counts_on_io_error(
+        self, tmp_path, monkeypatch
+    ):
+        dm = DataManager(tmp_path)
+        dm.save_daily_summary({"counts": {"other_site": 5}})
+
+        summary_file = tmp_path / "daily_summary.json"
+        real_open = open
+
+        def _flaky_open(path, *args, **kwargs):
+            if str(path) == str(summary_file):
+                raise OSError(5, "Input/output error")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _flaky_open, raising=False)
+        mock_save = MagicMock()
+        monkeypatch.setattr(module.DataManager, "save_daily_summary", mock_save)
+
+        # 例外を送出せず完走すること自体が回帰確認の対象
+        dm.record_daily_new_casts("restpia_test", 3)
+
+        mock_save.assert_not_called()
+
+    def test_maybe_send_daily_summary_skips_send_on_io_error(self, tmp_path, monkeypatch):
+        """#578: 読み込み失敗時に誤った空集計を送信せず、次回実行に委ねること
+        (累積カウントを保持したまま送信をスキップする)。"""
+        dm = DataManager(tmp_path)
+        dm.save_daily_summary({"counts": {"restpia_test": 5}})
+
+        summary_file = tmp_path / "daily_summary.json"
+        real_open = open
+
+        def _flaky_open(path, *args, **kwargs):
+            if str(path) == str(summary_file):
+                raise OSError(5, "Input/output error")
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(module, "open", _flaky_open, raising=False)
+        _fixed_datetime(
+            monkeypatch,
+            module.datetime(2026, 8, 30, module.MonitorConfig.DAILY_SUMMARY_HOUR, 0, 0),
+        )
+        notifier = MagicMock()
+
+        module._maybe_send_daily_summary(notifier, dm)
+
+        notifier.notify_daily_summary.assert_not_called()
 
 
 class TestDailySummaryLateCountsNotLost:

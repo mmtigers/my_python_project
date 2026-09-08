@@ -232,6 +232,22 @@ class TestHandlePostbackWrapper:
         mock_logger.error.assert_called_once()
         assert "Logic Delegation Error" in mock_logger.error.call_args[0][0]
 
+    def test_none_user_id_skips_delegation(self, monkeypatch):
+        # #572 (L-L6 #410 の修正漏れ): handle_message には既にuser_id=Noneガードが
+        # あったが、Postback経路(体調ボタン等)には無く、グループでのプロフィール
+        # 未共有時にuser_id=NULLのまま記録が保存されてしまっていた。
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+
+        event = MagicMock()
+        event.source.user_id = None
+        event.postback.data = "child_check&child=智矢&status=genki"
+        event.reply_token = "tok"
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_not_called()
+
 
 # ==========================================
 # Issue #375: 「元気ない」の否定判定と2名併記時の全員記録

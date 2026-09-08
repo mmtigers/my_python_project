@@ -40,25 +40,71 @@ describe('QuestList completedSignal cooldown (#363)', () => {
     });
 
     it('puts the completing user\'s own panel into cooldown', () => {
-        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: 1 };
+        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: Date.now() };
         renderPanel(son, signal);
         expect(screen.getByText('Wait...')).toBeInTheDocument();
     });
 
     it('does NOT lock the same infinite quest on another member\'s panel', () => {
-        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: 1 };
+        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: Date.now() };
         renderPanel(daughter, signal);
         expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
     });
 
     it('ignores a signal for a different quest id even for the same user', () => {
-        const signal: CompletedSignal = { id: 99, userId: 'son', nonce: 1 };
+        const signal: CompletedSignal = { id: 99, userId: 'son', nonce: Date.now() };
         renderPanel(son, signal);
         expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
     });
 
     it('does nothing without a signal', () => {
         renderPanel(son, null);
+        expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
+    });
+});
+
+describe('QuestList completedSignal cooldown edge cases (#567)', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    it('does not lock when replaying a signal older than the cooldown window (stale prop on remount)', () => {
+        // #567(b): タブ切替等での再マウント時、isCooldown(state)は初期化されるが
+        // completedSignal(props)は完了時点のまま残る。nonceが60秒より前なら
+        // クールダウンはとっくに終わっているはずで、再ロックしてはならない。
+        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: Date.now() - 70_000 };
+        renderPanel(son, signal);
+        expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
+    });
+
+    it('clears cooldown when the panel switches away from the completing user', () => {
+        // #567(a): 兄の完了でクールダウン中に、同じパネルの表示ユーザーを妹へ
+        // 切り替えると、userId不一致のisCooldownが解除されず固着していた。
+        const signal: CompletedSignal = { id: 10, userId: 'son', nonce: Date.now() };
+        const { rerender } = render(
+            <QuestList
+                quests={[infiniteQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={son}
+                onQuestClick={vi.fn()}
+                completedSignal={signal}
+                panelMode
+            />
+        );
+        expect(screen.getByText('Wait...')).toBeInTheDocument();
+
+        rerender(
+            <QuestList
+                quests={[infiniteQuest]}
+                completedQuests={[]}
+                pendingQuests={[]}
+                currentUser={daughter}
+                onQuestClick={vi.fn()}
+                completedSignal={signal}
+                panelMode
+            />
+        );
         expect(screen.queryByText('Wait...')).not.toBeInTheDocument();
     });
 });
@@ -113,10 +159,10 @@ describe('QuestList long-press cancel -> click race (#389)', () => {
         // 修正前はここで完了確認(onQuestClick 2回目)が開いていた
         expect(onQuestClick).toHaveBeenCalledTimes(1);
 
-        // 4. 猶予時間を過ぎてからの通常タップは完了確認として受け付ける
-        act(() => {
-            vi.advanceTimersByTime(400);
-        });
+        // 4. 直前のclickでの抑止時にclearFiredFlag()が消費済みのため、後続の通常タップは
+        //    完了確認として受け付ける(#568: 取消成立後はcanCancelがfalseになり
+        //    longPressHandlersが外れるため、次のpointerdownを待つだけでは
+        //    フラグがリセットされない。抑止した側で明示的に消費する必要がある)
         fireEvent.click(title);
         expect(onQuestClick).toHaveBeenCalledTimes(2);
     });
