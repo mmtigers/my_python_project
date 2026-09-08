@@ -69,6 +69,10 @@
 * 根拠: [_frontend_originの算出(Issue #112)] (行番号: 326, 332 / 抜粋: `FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://192.168.1.200:8000/quest")`, `_frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))`)
 
 
+* `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL(`RESET_GAME_API_BASE_URL`、既定値`"http://127.0.0.1:8000"`)を定義する(Issue #547)。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしており、LAN内の他端末からのアクセスを想定したホストIP指定である`FRONTEND_URL`とは用途が異なるためこの用途には流用しない、という趣旨のコメントが付されている。
+* 根拠: [RESET_GAME_API_BASE_URL定義とコメント] (行番号: 357〜361 / 抜粋: "# Issue #547: reset_game.py が管理者向けリセットAPI(POST /api/quest/admin/reset_user)を\n# 呼び出す際のサーバーのベースURL。reset_game.pyはunified_serverと同じホストで実行される\n# 前提の対話スクリプトのため、既定値はループバックアドレスとする(FRONTEND_URLはLAN内の\n# 他端末からのアクセスを想定したホストのIP指定のため、この用途には流用しない)。\nRESET_GAME_API_BASE_URL: str = os.getenv(\"RESET_GAME_API_BASE_URL\", \"http://127.0.0.1:8000\")")
+
+
 * クエスト機能のファイルアップロード(`/api/quest/upload`)におけるアップロード可能な最大ファイルサイズ(MB単位、環境変数で上書き可、既定5MB)を定義する。M15/Issue #325対応で、フロントエンド(`family-quest/src/components/ui/AvatarUploader.tsx`の`MAX_AVATAR_SIZE_BYTES`)の5MBと揃えられた(以前は既定10MBでフロントと不一致だった)。
 * 根拠: [アップロード上限設定] (行番号: 354 / 抜粋: `UPLOAD_MAX_FILE_SIZE_MB: int = `)
 
@@ -155,10 +159,11 @@ Issue #488で、`family_events.json`（家族の記念日・イベント設定`I
 
 
 
-#### 追加された設定値（Issue #359 / #405）
+#### 追加された設定値（Issue #359 / #405 / #547）
 
 * `WEBHOOK_BASE_URL: Optional[str]`（行番号: 227）: `switchbot_webhook_fix.py` が Webhook URL を再登録する際の公開ベースURL。以前はスクリプト側で `os.environ.get()` を直接読んでおり `.env.example` 整合テストの死角だった（Issue #405）。
 * `HLS_VOD_RETENTION_DAYS: int`（既定 3、行番号: 391）: 録画VODのHLSセグメントキャッシュ（`BASE_DIR/data/hls_streams/vod`）の保持日数。`monitors/nas_monitor.py` の `run_retention_cleanup` が参照する（Issue #359）。
+* `RESET_GAME_API_BASE_URL: str`（既定`"http://127.0.0.1:8000"`、行番号: 361）: `reset_game.py`が管理者向けリセットAPI(`POST /api/quest/admin/reset_user`)を呼び出す際のサーバーのベースURL。`reset_game.py`は`unified_server`と同じホストで実行される対話スクリプトという前提のため既定値はループバックアドレスとしている(LAN内の他端末からのアクセスを想定した`FRONTEND_URL`とは用途が異なるため流用しない)（Issue #547）。
 
 ### `_get_int_env`
 

@@ -211,6 +211,29 @@
 
 
 
+### `ResetUserAction`
+
+* **役割**: Request Modelsとして、`reset_game.py` が別プロセスから直接DBを書き換えていたユーザーデータのリセット処理をサーバーAPI経由に置き換えるための入力モデル。**（Issue #547で追加）**
+* 根拠: クラス名と継承元 (行番号: 96 / 抜粋: "class ResetUserAction(BaseModel):")、コメント (行番号: 92〜95 / 抜粋: "Issue #547: reset_game.py が別プロセスから直接DBを書き換えていたリセット処理を\n# サーバーAPI経由に置き換えるための入力モデル。admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
+
+
+* **引数/リクエスト (フィールド)**: `admin_id` (str, `Field(min_length=1, max_length=64)`), `target_user_id` (str, `Field(min_length=1, max_length=64)`)
+* 根拠: フィールド定義 (行番号: 97〜98 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)", "target_user_id: str = Field(min_length=1, max_length=64)")
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: データモデル定義のため (行番号: 96 / 抜粋: "class ResetUserAction(BaseModel):")
+
+
+* **副作用**: なし
+* 根拠: 処理ロジックを含まないため (行番号: 96〜98 / 抜粋: "class ResetUserAction(BaseModel):")
+
+
+* **エラーハンドリング**: 明示的な例外処理の記述はないが、`admin_id`/`target_user_id` が空文字または65文字以上の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。クラス自体には `admin_id` が管理者（`role_adult`）かどうかを検証するロジックはなく、コメントによればその検証はサービス層(`UserService.reset_user_data`)の責務である。
+* 根拠: フィールド定義 (行番号: 97〜98 / 抜粋: "admin_id: str = Field(min_length=1, max_length=64)", "target_user_id: str = Field(min_length=1, max_length=64)")、コメント (行番号: 93〜94 / 抜粋: "admin_idはApproveAction.approver_id等と\n# 同様、サービス層(UserService.reset_user_data)がquest_users.role='role_adult'かどうかを\n# 検証する。")
+
+
+
 ### `UpdateUserAction`
 
 * **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。**（Issue #372で追加）** `avatar_url`に`field_validator`を持ち、`routers/quest_router.py`の`upload_image`が生成する`/uploads/<uuid4>.<jpg|jpeg|png|gif|webp>`形式（`_UPLOADED_AVATAR_RE`）か、パス区切り(`/`, `\\`)・HTML特殊文字(`<`, `>`, `"`, `'`)を含まず先頭が`.`でない16文字以下の短い文字列（絵文字アバター、`_EMOJI_AVATAR_MAX_LEN`）のみを受け付ける。それ以外は`ValueError`を送出し、FastAPIにより422となる。任意の`/uploads/`パスを許すと、他ユーザーのアップロード画像を自分のアバターに指定してから絵文字に戻す操作で、そのファイルが孤立扱いになり削除される経路が残るため。
@@ -323,6 +346,29 @@
 
 * **エラーハンドリング**: なし
 * 根拠: クラス内に例外処理の記述がないため (行番号: 87〜88 / 抜粋: "class CancelResponse(BaseModel):")
+
+
+
+### `ResetUserResponse`
+
+* **役割**: Response Modelsとして、`ResetUserAction` によるユーザーデータリセット処理の結果（削除件数）を返すレスポンスを定義する。**（Issue #547で追加）**
+* 根拠: クラス名と継承元 (行番号: 156 / 抜粋: "class ResetUserResponse(BaseModel):")
+
+
+* **引数/リクエスト (フィールド)**: `status` (str), `deletedHistoryCount` (int), `deletedInventoryCount` (int)
+* 根拠: フィールド定義 (行番号: 157〜159 / 抜粋: "status: str", "deletedHistoryCount: int", "deletedInventoryCount: int")
+
+
+* **戻り値/レスポンス**: 該当なし
+* 根拠: データモデル定義のため (行番号: 156 / 抜粋: "class ResetUserResponse(BaseModel):")
+
+
+* **副作用**: なし
+* 根拠: 処理ロジックを含まないため (行番号: 156〜159 / 抜粋: "class ResetUserResponse(BaseModel):")
+
+
+* **エラーハンドリング**: なし
+* 根拠: クラス内に例外処理の記述がないため (行番号: 156〜159 / 抜粋: "class ResetUserResponse(BaseModel):")
 
 
 
@@ -464,7 +510,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| モデルの実際の使用箇所 | `MY_HOME_SYSTEM/routers/quest_router.py`14〜18行目を直接確認したところ、`from models.quest import (SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse, QuestAction, ApproveAction, HistoryAction, RewardAction, UpdateUserAction, SoundTestRequest, UseItemAction)`（**（2026-09-06 品質監査で修正）** 以前ここに記載していた `ConsumeItemAction` は現行のインポートにも `models/quest.py` にも存在しない）と、本ファイルが定義するモデルの大半をエンドポイントの引数・レスポンス型として直接インポートしていることを確認した。また`MY_HOME_SYSTEM/services/quest_service.py`18行目・693〜701行目を直接確認したところ、`from models.quest import MasterUser, MasterQuest, MasterReward`でインポートし、`GameSystem.sync_master_data`内で`MasterUser(**u)`, `MasterQuest(**q_data)`, `MasterReward(**r)`という形で`quest_data.py`の生データをバリデーションする用途に使用していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:14-18`, `MY_HOME_SYSTEM/services/quest_service.py:18, 693-701` |
+| モデルの実際の使用箇所 | `MY_HOME_SYSTEM/routers/quest_router.py`12〜16行目を直接確認したところ、`from models.quest import (SyncResponse, CompleteResponse, CancelResponse, PurchaseResponse, UseItemResponse, QuestAction, ApproveAction, HistoryAction, RewardAction, UpdateUserAction, SoundTestRequest, UseItemAction, ResetUserAction, ResetUserResponse)`（**（2026-09-06 品質監査で修正）** 以前ここに記載していた `ConsumeItemAction` は現行のインポートにも `models/quest.py` にも存在しない。**（Issue #547で追記）** `ResetUserAction`/`ResetUserResponse` が新規追加され、インポート元の行番号も14〜18行目から12〜16行目にずれている）と、本ファイルが定義するモデルの大半をエンドポイントの引数・レスポンス型として直接インポートしていることを確認した。また`MY_HOME_SYSTEM/services/quest_service.py`18行目・693〜701行目を直接確認したところ、`from models.quest import MasterUser, MasterQuest, MasterReward`でインポートし、`GameSystem.sync_master_data`内で`MasterUser(**u)`, `MasterQuest(**q_data)`, `MasterReward(**r)`という形で`quest_data.py`の生データをバリデーションする用途に使用していることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/quest_router.py:12-16`, `MY_HOME_SYSTEM/services/quest_service.py:18, 693-701` |
 | データベーススキーマとのマッピング | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認したところ、DBアクセスは全て`cur.execute("SELECT ...")`/`cur.execute("UPDATE ...")`等の生SQL文字列で行われており(例: 65, 84, 88, 107, 439行目)、SQLAlchemy等のORMは一切importされていない(importはPydanticモデルとFastAPI関連のみ)ことを確認した。したがってPydanticモデルとテーブルスキーマとの明示的なORMマッピングは存在せず、`sqlite3.Row`から辞書的に値を取り出してPydanticモデルへ手動で詰め替える設計であることを確認した。ただしDBの完全なスキーマ自体は`current_schema.sql`(全346行、36テーブル)で確認可能である。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:65, 84, 88, 107, 439`（参考: `MY_HOME_SYSTEM/current_schema.sql:1-346`） |
 | Enumの未利用理由 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`role`は24〜25行目の`ROLE_ADULT = 'role_adult'` / `ROLE_CHILD = 'role_child'`というモジュールレベルの文字列定数と`if user['role'] == ROLE_CHILD:`(250, 344行目)のような直接比較のみで判定され、Enum型は一切使われていない。`reset_period`は`is_within_reset_period(self, completed_at_str, reset_period)`で`if reset_period == 'daily': ... elif reset_period == 'weekly': ... elif reset_period == 'monthly': ...`という文字列直接比較のみで判定され、それ以外の値は分岐を素通りして`logger.warning`の後`return False`となる（Enumによる制約は存在しない。**（2026-09-06 品質監査で修正）** 以前は`'daily'`/`'weekly'`の2分岐のみだったが、`MasterQuest.reset_period`の`Literal`と揃う形で`'monthly'`分岐が追加された。現行の`quest_service.py`行番号: 373〜390）。`status`についても`quest_history.status`や`user_inventory.status`の値(`'pending'`, `'approved'`, `'rejected'`, `'owned'`, `'consumed'`)はSQL文字列リテラルや`hist['status'] != 'pending'`(324, 400行目)のような直接比較で扱われており、これらを制約するEnumクラスやCHECK制約は`quest_service.py`内には存在しないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:24-25, 119-149, 250, 324, 344, 400` |
 
