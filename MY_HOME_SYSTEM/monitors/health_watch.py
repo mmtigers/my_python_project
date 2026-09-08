@@ -326,7 +326,7 @@ def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None
     設定されている場合、異常サマリを標準入力で渡してスクリプトを
     fire-and-forget のサブプロセスとして起動する(完了は待たない。
     調査は数分かかりうるが、毎時cronの層1を長時間ブロックしないため)。
-    多重起動防止(flock)・タイムアウト・--max-turns 等のガードレールは
+    多重起動防止(flock)・タイムアウト・--max-budget-usd 等のガードレールは
     フックスクリプト側が持つ。本関数は _should_notify と同じ抑制の内側で
     呼ばれるため、同一異常セット継続中の再発火も通知と同じ6時間間隔に収まる。
     フックの起動失敗は層1の検知・通知を巻き込まない(ログのみ)。
