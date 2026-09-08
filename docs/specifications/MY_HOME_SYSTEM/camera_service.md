@@ -10,7 +10,7 @@
 ## 関連ドキュメント
 
 - [config.md](./config.md) — `NVR_RECORD_DIR`、`CAMERAS`、`DEVICES_JSON_PATH`設定を提供する。
-- [camera_router.md](./camera_router.md) — 呼び出し元。本ファイルの各関数がどのHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかが確認できる（`PUT /settings/{camera_id}`が`set_camera_enabled`を呼び出す）。
+- [camera_router.md](./camera_router.md) — 呼び出し元。本ファイルの各関数がどのHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかが確認できる（`PUT /settings/{camera_id}`が`set_camera_enabled`を呼び出す）。**（Issue #551で追加）** `get_camera_config_or_none`はルーター側の新設ヘルパー`_require_camera`から呼び出される。
 - [camera_monitor.md](./camera_monitor.md) — 同様のONVIF/WSDL動的探索ロジック（`find_wsdl_path`）を持つ姉妹モジュール（動体検知監視用）。
 - [logger.md](./logger.md) — `setup_logging`の実装元。
 
@@ -379,26 +379,48 @@
 * 根拠: [各ガード節とtry-except] (行番号: 338〜340, 346〜348, 358〜365, 414〜415 / 抜粋: "except Exception as e:\n                    logger.warning(f\"Failed to calculate duration for {mp4}: {e}\")")
 
 
+### `get_camera_config_or_none`（Issue #551で新規追加）
+
+* **役割**: `config.CAMERAS`（`devices.json`からロードされたカメラ定義一覧）から`camera_id`に一致する設定辞書を検索して返す。見つからない場合は`None`を返す（例外は送出しない）。ルーター側の`camera_router.py`に5箇所重複していた`next((c for c in config.CAMERAS if c["id"] == camera_id), None)` + `HTTPException(404)`のうち、検索部分だけを本関数へ切り出し、404送出自体はルーター側の新設ヘルパー`_require_camera`が担うように責務分割した。
+* 根拠: [関数定義とDocstring] (行番号: 462〜467 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
+
+
+* **引数/リクエスト**: `camera_id: str`
+* 根拠: [引数定義] (行番号: 462 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:")
+
+
+* **戻り値/レスポンス**: `Optional[Dict[str, Any]]`（見つかったカメラ設定の辞書、または`None`）
+* 根拠: [戻り値] (行番号: 467 / 抜粋: "return next((c for c in config.CAMERAS if c[\"id\"] == camera_id), None)")
+
+
+* **副作用**: なし（`config.CAMERAS`の参照のみ）
+* 根拠: (行番号: 467)
+
+
+* **エラーハンドリング**: なし（見つからない場合は`None`を返すのみで例外は送出しない）
+* 根拠: (行番号: 467)
+
+
 ### `set_camera_enabled`
 
 * **役割**: `devices.json`上の該当カメラの`enabled`フラグを更新し、`config.CAMERAS`（メモリ上のキャッシュ）にも反映する。`devices.json`が存在しない場合、または該当カメラIDが見つからない場合は`False`を返す。書き込みは一時ファイル(`.tmp`)への書き込み後に`os.replace`で本ファイルへアトミックに置き換える方式であり、書き込み途中のクラッシュ・電源断による`devices.json`破損を防ぐ。
-* 根拠: [関数定義とDocstring] (行番号: 451〜453 / 抜粋: "\"\"\"devices.json 上の該当カメラの enabled フラグを更新し、config.CAMERAS にも反映する。")
+* 根拠: [関数定義とDocstring] (行番号: 470〜472 / 抜粋: "\"\"\"devices.json 上の該当カメラの enabled フラグを更新し、config.CAMERAS にも反映する。")
 
 
 * **引数/リクエスト**: `camera_id: str`, `enabled: bool`
-* 根拠: [引数定義] (行番号: 451 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
+* 根拠: [引数定義] (行番号: 470 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool`（成功時`True`、`devices.json`不在または該当カメラ未検出時は`False`）
-* 根拠: [各return文] (行番号: 455, 463, 478 / 抜粋: "return True")
+* 根拠: [各return文] (行番号: 474, 482, 497 / 抜粋: "return True")
 
 
 * **副作用**: `devices.json`の読み込み(`json.load`)、対象カメラの`enabled`フィールド更新、一時ファイルへの書き込みと`os.replace`によるアトミックな置き換え、`config.CAMERAS`内の対応するカメラ辞書の`enabled`フィールド更新。
-* 根拠: [アトミック書込] (行番号: 465〜475 / 抜粋: "tmp_path = f\"{config.DEVICES_JSON_PATH}.tmp\"")
+* 根拠: [アトミック書込] (行番号: 484〜494 / 抜粋: "tmp_path = f\"{config.DEVICES_JSON_PATH}.tmp\"")
 
 
 * **エラーハンドリング**: `devices.json`が存在しない場合、または該当カメラIDが見つからない場合は`False`を返す（例外は送出しない）。`json.load`やファイルI/O自体で発生し得る例外（不正なJSON、権限エラー等）に対するtry-exceptは本関数内に存在せず、呼び出し元に伝播する。
-* 根拠: [ガード節] (行番号: 454〜455, 462〜463 / 抜粋: "if target is None:\n        return False")
+* 根拠: [ガード節] (行番号: 473〜474, 481〜482 / 抜粋: "if target is None:\n        return False")
 
 
 ## 5. 処理フロー図
@@ -475,6 +497,7 @@ graph TD
         get_record_start_offset["get_record_start_offset()"]
         generate_record_playlist["generate_record_playlist()"]
         generate_record_playlist_locked["_generate_record_playlist_locked()"]
+        get_camera_config_or_none["get_camera_config_or_none() (Issue #551)"]
         set_camera_enabled["set_camera_enabled()"]
     end
 
@@ -539,6 +562,8 @@ graph TD
     set_camera_enabled --> json_mod
     set_camera_enabled --> os_mod
     set_camera_enabled --> devices_json
+
+    get_camera_config_or_none --> config
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -547,7 +572,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `config.py` | `config.NVR_RECORD_DIR`属性の有無や値、`config.DEVICES_JSON_PATH`、`cam_conf`辞書（`id`, `ip`, `user`, `pass`, `port`, `rtsp_url`, `nas_folder`, `name`, `enabled`）を供給する`CAMERAS`設定の全容を把握する必要があるため。 | 根拠: [getattr呼び出し] (行番号: 182 / 抜粋: "nvr_base_dir = getattr(config, 'NVR_RECORD_DIR', ...)") |
 | 中 | `core/logger.py` | `setup_logging`によるロガー設定（出力先、フォーマット、ログレベル）を確認するため。 | 根拠: [import文] (行番号: 11 / 抜粋: "from core.logger import setup_logging") |
-| 中 | `routers/camera_router.py` | 本モジュールの各関数（`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `HLS_LIVE_DIR`, `HLS_VOD_DIR`）がどのようなHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかを確認するため。 | 根拠: [呼び出し元ファイル。本ファイル単体からは不明] |
+| 中 | `routers/camera_router.py` | 本モジュールの各関数（`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`（Issue #551）, `HLS_LIVE_DIR`, `HLS_VOD_DIR`）がどのようなHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかを確認するため。 | 根拠: [呼び出し元ファイル。本ファイル単体からは不明] |
 | 低 | `onvif`ライブラリ（サードパーティパッケージ） | `ONVIFCamera`クラスの`GetProfiles`/`GetStreamUri`等のAPI仕様を確認するため。 | 根拠: [try-exceptインポート] (行番号: 14〜17 / 抜粋: "from onvif import ONVIFCamera") |
 | 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 322〜349 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
 
