@@ -8,7 +8,7 @@ from fastapi import HTTPException, UploadFile
 
 import common
 import config
-from services.quest.locks import logger
+from services.quest.locks import ROLE_ADULT, _get_user_balance_lock, logger
 
 # Issue #551: routers/quest_router.py の upload_image に直書きされていた
 # 画像保存ロジック(拡張子/マジックバイト検証・サイズ上限付き保存)をこちらへ移した。
@@ -93,6 +93,56 @@ class UserService:
                 "dateStr": ev['ts'].split('T')[0] if 'T' in ev['ts'] else ev['ts'].split(' ')[0]
             })
         return formatted
+
+    def reset_user_data(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:
+        """Issue #547: reset_game.py の対話的リセットをAPI化したもの。
+
+        reset_game.py は unified_server とは別プロセス(別のPythonインタプリタ)で
+        動くため、たとえ同じモジュールをimportしても _get_user_balance_lock が
+        保持するロックオブジェクト(プロセス内メモリ上のthreading.Lock)を稼働中の
+        サーバープロセスと共有できない。#544で追加したBEGIN IMMEDIATEはDB側の
+        原子性のみを保証するため、process_approve_quest等の「SELECT→Pythonで
+        計算→絶対値SET」というread-modify-writeとreset_game.pyの直接DB操作が
+        交錯すると、承認側のUPDATEがリセット結果を上書きしうる問題が残っていた。
+        このメソッドをサービス層に置き、quest_users/quest_history/user_inventoryを
+        書き換える他の全経路(完了・承認・取消・購入)と同じ_get_user_balance_lockの
+        中で実行することで、reset_game.py側もこのAPIを呼ぶ限り直列化される。
+        """
+        with _get_user_balance_lock(target_user_id):
+            return self._reset_user_data_locked(admin_id, target_user_id)
+
+    def _reset_user_data_locked(self, admin_id: str, target_user_id: str) -> Dict[str, Any]:
+        with common.get_db_cursor(commit=True) as cur:
+            admin = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (admin_id,)).fetchone()
+            if not admin or admin['role'] != ROLE_ADULT:
+                raise HTTPException(status_code=403, detail="リセット権限がありません")
+
+            target = cur.execute("SELECT user_id FROM quest_users WHERE user_id = ?", (target_user_id,)).fetchone()
+            if not target:
+                raise HTTPException(status_code=404, detail="対象ユーザーが見つかりません")
+
+            # #544由来: quest_usersのゼロ化に加え、quest_history/user_inventoryも
+            # 同一トランザクションで削除する(reward_history(購入ログ)は残高に
+            # 影響しない監査用の記録のため対象外)。
+            cur.execute(
+                "UPDATE quest_users SET level = 1, exp = 0, gold = 0, medal_count = 0 WHERE user_id = ?",
+                (target_user_id,),
+            )
+            cur.execute("DELETE FROM quest_history WHERE user_id = ?", (target_user_id,))
+            deleted_history = cur.rowcount
+            cur.execute("DELETE FROM user_inventory WHERE user_id = ?", (target_user_id,))
+            deleted_inventory = cur.rowcount
+
+            logger.info(
+                f"User Data Reset: Admin={admin_id}, Target={target_user_id}, "
+                f"deleted_history={deleted_history}, deleted_inventory={deleted_inventory}"
+            )
+
+        return {
+            "status": "reset",
+            "deletedHistoryCount": deleted_history,
+            "deletedInventoryCount": deleted_inventory,
+        }
 
     def update_avatar(self, user_id: str, avatar_url: str) -> Dict[str, Any]:
         with common.get_db_cursor(commit=True) as cur:
