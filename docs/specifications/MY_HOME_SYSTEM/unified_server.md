@@ -19,7 +19,7 @@
 - [webhook_router.md](./webhook_router.md) — Webhook例外パス(`/webhook/switchbot`, `/callback/line`)を持つルーター
 - [system_router.md](./system_router.md) — `/api/system`にマウントされるルーター(手動バックアップ)
 - [camera_router.md](./camera_router.md) — `/api/cameras`にマウントされ、SPAルーティング(`/camera/*`)とも連動するルーター
-- `routers/alexa_router.py`(Issue #126で追記: 対応する仕様書は現時点で未作成) — タグ`alexa`でマウントされるルーター（33, 244行目）
+- `routers/alexa_router.py`(Issue #126で追記: 対応する仕様書は現時点で未作成) — タグ`alexa`でマウントされるルーター（30, 337行目）
 
 ## 2. ファイルの概要
 
@@ -43,27 +43,23 @@
 | --- | --- | --- | --- |
 | `os` | 標準ライブラリ | パス操作、環境変数アクセス | 根拠: `[os]` (行番号: 2 / 抜粋: "import os") |
 | `sys` | 標準ライブラリ | Pythonパス追加、実行パス取得 | 根拠: `[sys]` (行番号: 3 / 抜粋: "import sys") |
-| `asyncio` | 標準ライブラリ | 非同期処理用（未使用だがインポート有） | 根拠: `[asyncio]` (行番号: 4 / 抜粋: "import asyncio") |
-| `datetime` | 標準ライブラリ | 現在時刻の取得 | 根拠: `[datetime]` (行番号: 5 / 抜粋: "import datetime") |
-| `subprocess` | 標準ライブラリ | 外部プロセスの起動・管理 | 根拠: `[subprocess]` (行番号: 6 / 抜粋: "import subprocess") |
-| `signal` | 標準ライブラリ | シグナル管理（未使用だがインポート有） | 根拠: `[signal]` (行番号: 7 / 抜粋: "import signal") |
-| `logging` | 標準ライブラリ | ログの出力、フィルター作成 | 根拠: `[logging]` (行番号: 8 / 抜粋: "import logging") |
-| `contextlib.asynccontextmanager` | 標準ライブラリ | 非同期コンテキストマネージャー（未使用だがインポート有。`lifespan`にデコレータとして付与されていない） | 根拠: `[asynccontextmanager]` (行番号: 9 / 抜粋: "from contextlib import asynccon") |
-| `ipaddress` | 標準ライブラリ | IPアドレスのパースと検証 | 根拠: `[ipaddress]` (行番号: 10 / 抜粋: "import ipaddress") |
-| `typing` (AsyncGenerator, Optional, Callable, Awaitable) | 標準ライブラリ | 型ヒントの定義 | 根拠: `[typing]` (行番号: 12 / 抜粋: "from typing import AsyncGenerat") |
-| `fastapi` | 外部パッケージ | Webフレームワーク基本機能 | 根拠: `[FastAPI]` (行番号: 14 / 抜粋: "from fastapi import FastAPI, Re") |
-| `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 15 / 抜粋: "from fastapi.staticfiles import") |
-| `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 16 / 抜粋: "from fastapi.responses import J") |
-| `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 17 / 抜粋: "from fastapi.middleware.cors im") |
-| `fastapi.exceptions` | 外部パッケージ | リクエスト検証例外（未使用だが有） | 根拠: `[RequestValidationError]` (行番号: 18 / 抜粋: "from fastapi.exceptions import ") |
-| `uvicorn` | 外部パッケージ | ASGIサーバーの起動 | 根拠: `[uvicorn]` (行番号: 341 / 抜粋: "import uvicorn") |
-| `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 25 / 抜粋: "import sqlite3") |
-| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 27 / 抜粋: "import config") |
-| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 28 / 抜粋: "from core.logger import setup_l") |
-| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 29 / 抜粋: "from core.migrations import apply_pending_migrations") |
-| `services.sensor_service` | ローカルモジュール | センサータスクの管理 | 根拠: `[sensor_service]` (行番号: 30 / 抜粋: "from services import sensor_ser") |
-| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`) | ローカルモジュール | 各APIエンドポイントのルーター（Issue #126で修正: 過去の解析時点では未記載だった`alexa_router`を追加） | 根拠: `[routers]` (行番号: 33 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router") |
-| `handlers.line_handler` | ローカルモジュール | LINEハンドラー（ファイル内未使用） | 根拠: `[line_handler]` (行番号: 36 / 抜粋: "from handlers import line_handl") |
+| `datetime` | 標準ライブラリ | 現在時刻の取得 | 根拠: `[datetime]` (行番号: 4 / 抜粋: "import datetime") |
+| `subprocess` | 標準ライブラリ | 外部プロセスの起動・管理 | 根拠: `[subprocess]` (行番号: 5 / 抜粋: "import subprocess") |
+| `logging` | 標準ライブラリ | ログの出力、フィルター作成 | 根拠: `[logging]` (行番号: 6 / 抜粋: "import logging") |
+| `ipaddress` | 標準ライブラリ | IPアドレスのパースと検証 | 根拠: `[ipaddress]` (行番号: 7 / 抜粋: "import ipaddress") |
+| `re` | 標準ライブラリ | アクセスログ中の秘密情報マスク用正規表現(`_QUERY_SECRET_RE`/`redact_query_secrets`/`SecretRedactionFilter`) | 根拠: `[re]` (行番号: 8 / 抜粋: "import re") |
+| `typing` (AsyncGenerator, Optional, Callable, Awaitable) | 標準ライブラリ | 型ヒントの定義 | 根拠: `[typing]` (行番号: 10 / 抜粋: "from typing import AsyncGenerat") |
+| `fastapi` | 外部パッケージ | Webフレームワーク基本機能 | 根拠: `[FastAPI]` (行番号: 12 / 抜粋: "from fastapi import FastAPI, Re") |
+| `fastapi.staticfiles` | 外部パッケージ | 静的ファイル配信 | 根拠: `[StaticFiles]` (行番号: 13 / 抜粋: "from fastapi.staticfiles import") |
+| `fastapi.responses` | 外部パッケージ | JSON/ファイルレスポンス生成 | 根拠: `[JSONResponse, FileResponse]` (行番号: 14 / 抜粋: "from fastapi.responses import J") |
+| `fastapi.middleware.cors` | 外部パッケージ | CORS処理ミドルウェア | 根拠: `[CORSMiddleware]` (行番号: 15 / 抜粋: "from fastapi.middleware.cors im") |
+| `uvicorn` | 外部パッケージ | ASGIサーバーの起動（トップレベルではなく`_run_uvicorn_server`関数内でのローカルインポート） | 根拠: `[uvicorn]` (行番号: 427 / 抜粋: "import uvicorn") |
+| `sqlite3` | 標準ライブラリ | 起動時マイグレーション適用のためのDB接続確立 | 根拠: `[sqlite3]` (行番号: 22 / 抜粋: "import sqlite3") |
+| `config` | ローカルモジュール | 設定値(`QUEST_DIST_DIR`, `SQLITE_DB_PATH`等)の取得 | 根拠: `[config]` (行番号: 24 / 抜粋: "import config") |
+| `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 25 / 抜粋: "from core.logger import setup_l") |
+| `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 26 / 抜粋: "from core.migrations import apply_pending_migrations") |
+| `services.sensor_service`, `services.camera_service` | ローカルモジュール | センサータスクの管理(`sensor_service`)、シャットダウン時のffmpegプロセス一括停止(`camera_service.stop_all_processes()`) | 根拠: `[sensor_service, camera_service]` (行番号: 27 / 抜粋: "from services import sensor_service, camera_service") |
+| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`) | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 30 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router") |
 
 ### ブラックボックスとなる外部要素
 
@@ -121,26 +117,26 @@
 ### `lifespan`
 
 * **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
-* 根拠: `async def lifespan(app: FastA` (行番号: 97-157 / 抜粋: "async def lifespan(app: FastA")
+* 根拠: `async def lifespan(app: FastA` (行番号: 135-228 / 抜粋: "async def lifespan(app: FastA")
 * **（Issue #383 / #360 で修正）** 起動時マイグレーションは `sqlite3.connect(..., timeout=30.0)` で接続し、失敗時は `logger.critical`（Discord 通知）を出して `app.state.migration_ok = False` とし、camera_monitor / scheduler の子プロセスを起動しない（以前は既定 5 秒の timeout で失敗しやすく、失敗を握りつぶしてサービスを継続していた）。camera_monitor の `Popen` も scheduler と同様に try/except で保護する。終了処理では scheduler / camera_monitor に加えて `camera_service.stop_all_processes()` でライブ配信・VOD 生成の ffmpeg も停止する（孤児化による HLS 二重書き込みの防止）。
-* 根拠: `migration_ok = True` (行番号: 116)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 118)、`logger.critical(` (行番号: 125)、`app.state.migration_ok = migration_ok` (行番号: 129)、`if migration_ok:` (行番号: 133)、`camera_service.stop_all_processes()` (行番号: 178)
-* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 105-106 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
+* 根拠: `migration_ok = True` (行番号: 161)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 163)、`logger.critical(` (行番号: 170-173)、`app.state.migration_ok = migration_ok` (行番号: 174)、`if migration_ok:` (行番号: 178)、`camera_service.stop_all_processes()` (行番号: 223)
+* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 145-146 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
 
 
 * **引数/リクエスト**: `app: FastAPI`
-* 根拠: `async def lifespan(app: FastA` (行番号: 97 / 抜粋: "async def lifespan(app: FastA")
+* 根拠: `async def lifespan(app: FastA` (行番号: 135 / 抜粋: "async def lifespan(app: FastA")
 
 
 * **戻り値/レスポンス**: `AsyncGenerator[None, None]`
-* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 97 / 抜粋: "-> AsyncGenerator[None, None]:")
+* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 135 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
 * **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
-* 根拠: 該当関数内処理 (行番号: 105-106, 110-117, 119-121, 124-133, 139-146, 148-155 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "apply_pending_migrations(migration_conn)", "scheduler_process.terminate()")
+* 根拠: 該当関数内処理 (行番号: 145-146, 151-154, 161-174, 176-197, 203-219 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "logger.critical(", "scheduler_process.terminate()")
 
 
-* **エラーハンドリング**: NASパスプリウォーム失敗時・マイグレーション適用失敗時の例外(`Exception`)をそれぞれ捕捉しエラーログ出力のうえ起動は継続する。スケジューラー起動失敗時の例外(`Exception`)、プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)を捕捉し、フォールバック（エラーログ出力や強制kill）を実行する。カメラ監視サブプロセス(`camera_process`)の起動自体には例外処理がなく、失敗時はそのまま例外が送出される。
-* 根拠: `except Exception as e: logger.error(f"⚠️ Migration check failed...")` (行番号: 116-117 / 抜粋: "Migration check failed"), `except Exception as e:` (行番号: 132-133 / 抜粋: "Failed to start scheduler"), `except subprocess.TimeoutExpired` (行番号: 143-144, 152-153 / 抜粋: "except subprocess.TimeoutExpired")
+* **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスはいずれも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている。上記の「役割」欄末尾に記載の通り）。camera_monitorの起動、scheduler起動はいずれも個別の`try/except Exception`で保護されており（Issue #360でcamera_monitor起動もscheduler同様に保護）、一方が起動に失敗してももう一方には影響せずエラーログを出力して起動処理を継続する。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
+* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 153-154 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 168-173 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 178 / 抜粋: "if migration_ok:"), `except Exception as e: logger.error(f"Failed to start camera monitor...")` (行番号: 185-186 / 抜粋: "Failed to start camera monitor"), `except Exception as e: logger.error(f"Failed to start scheduler...")` (行番号: 196-197 / 抜粋: "Failed to start scheduler"), `except subprocess.TimeoutExpired` (行番号: 208, 217 / 抜粋: "except subprocess.TimeoutExpired")
 
 
 
@@ -391,11 +387,10 @@ graph TD
 ## 8. 保守上の注意点
 
 * `ip_restriction_middleware` 内でIP制限のロジックが実装されているが、現状は `return await call_next(request)` が分岐の最終地点で必ず呼ばれるため、事実上すべてのIPからのアクセスが遮断されずに後続処理へ流れる状態となっている。この挙動はIssue #321（2026-09-03決定・案B）によりバグではなく正式な設計として確定済み（アプリ層でのJWT検証は行わず、外部アクセス制御はエッジのCloudflare Accessに委譲する）。
-* モジュール `handlers.line_handler` はインポートされているが、ファイル内で一度も使用されていない（未使用インポート）。
-* `contextlib.asynccontextmanager` もインポートされているが、`lifespan`関数には`@asynccontextmanager`デコレータが付与されておらず（`FastAPI(lifespan=lifespan)`に直接渡されている）、ファイル内で一度も使用されていない（未使用インポート）。
+* **（本項目は現行ソースとの不一致を解消）** 過去の解析では `handlers.line_handler` と `contextlib.asynccontextmanager` が本ファイルに未使用インポートとして存在すると記載していたが、現行の`unified_server.py:1-30`のインポート一覧にはこの2つはいずれも存在しない（実際にインポートされていない。LINE関連のハンドリングは本ファイルではなく`routers/webhook_router.py`側の責務であり、`lifespan`は`@asynccontextmanager`を使わず`FastAPI(lifespan=lifespan)`に直接渡す形のままである点は変わらない）。
 * サブプロセス（`camera_process`, `scheduler_process`）はグローバル変数として定義および管理されており、プロセス停止処理（`terminate()`や`kill()`）で状態変異（副作用）を伴う。
-* シャットダウン時、スケジューラープロセス・カメラ監視プロセスの双方とも終了待ち（`wait`）が5秒でタイムアウトし、強制キル（`kill`）される同一パターンの処理となっている（行番号: 145-152, 147-154）。
-* カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`、行番号: 127）の起動は、スケジューラー起動処理（行番号: 130-139）とは異なり `try-except` で囲まれていないため、起動に失敗した場合は `lifespan` 全体が例外で停止し、アプリケーションが起動できない可能性がある。
+* シャットダウン時、スケジューラープロセス・カメラ監視プロセスの双方とも終了待ち（`wait`）が5秒でタイムアウトし、強制キル（`kill`）される同一パターンの処理となっている（行番号: 206-209, 215-218）。
+* **（Issue #360 で修正・本項目は現行ソースとの不一致を解消）** 過去の解析では、カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`）の起動はスケジューラー起動処理とは異なり `try-except` で囲まれておらず、起動失敗時に `lifespan` 全体が例外停止しうると記載していたが、現行ソースでは camera_monitor の起動もスケジューラーと同様に個別の `try/except Exception` で保護されている（行番号: 181-186）。どちらか一方の起動に失敗しても `logger.error` を出力するのみで、もう一方や `lifespan` 自体の実行には影響しない。
 * `config.QUEST_DIST_DIR` が未定義またはパスに存在しない場合、システムは例外終了せず警告ログのみを出力する（null安全性/フォールバック）。
 * Webhook受信の例外パス（`/webhook/switchbot`, `/callback/line`）はハードコードで定義されている。
 * **本番起動経路が`uvicorn.access`ロガーのレベルを固定し`SilencePolicyFilter`を無効化していた（Issue #229で修正）**: `_run_uvicorn_server`（本番起動経路、`if __name__ == "__main__":`から呼ばれる）は以前、`uvicorn.config.LOGGING_CONFIG`を書き換えて`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコード自体が作られず、`lifespan()`が登録する`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されない状態になっていた。既存の単体テスト（`SilencePolicyFilter.filter()`を直接呼び出すもの）はこの「ロガーのレベルチェックでレコードが作られない」経路を検知できない設計だったため、この不具合はテストがグリーンのまま本番のみで発生していた。現在は本番起動経路がデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使うよう修正されている。

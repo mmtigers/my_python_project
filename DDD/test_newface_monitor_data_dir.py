@@ -179,5 +179,29 @@ class TestIsLocalFallbackDir:
         assert MonitorConfig.is_local_fallback_dir(tmp_path) is False
 
 
+class TestLocalFallbackDirIsIsolatedFromOtherScripts:
+    """Issue #580の回帰テスト。
+
+    以前はnewface_monitor.pyとextract_youtube_urls.pyが同じ`BASE_DIR / 'data'`
+    をローカルフォールバック先として共有していた。NAS未マウント中に一方が
+    書いたフォールバックデータを、NAS復旧後にもう一方の
+    core.nas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
+    丸ごと移動してしまう経路があったため、スクリプトごとに専用サブディレクトリへ
+    分離した。両モジュールの値が一致しないことを固定する。
+    """
+
+    def test_local_dir_differs_from_extract_youtube_urls(self):
+        import extract_youtube_urls
+
+        newface_local = Path(MonitorConfig.LOCAL_DIR_STR).resolve()
+        youtube_local = Path(extract_youtube_urls.AppConfig.LOCAL_DIR_STR).resolve()
+
+        assert newface_local != youtube_local
+        # 親(DDD/data)は共有してよいが、直下ではなく専用サブディレクトリであること
+        assert newface_local.parent == youtube_local.parent
+        assert newface_local.name == "newface_monitor"
+        assert youtube_local.name == "youtube_extractor"
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))

@@ -21,8 +21,8 @@
 * SQLiteデータベースへの接続、クエリ実行、データの書き込みを管理するユーティリティ機能を提供する。
 * 接続のリトライ機構（接続確立時のみ、ロック時の待機）、WALモードおよび外部キー制約(`PRAGMA foreign_keys`)の有効化、読み取り専用モードでの安全なデータ検索、および同期・非同期に対応した汎用的なデータ挿入（INSERT）機能を実装している。**（Issue #231で追加）** 単一行の`save_log_generic`/`save_log_async`に加え、複数行を単一トランザクションでまとめて保存する`save_logs_batch_generic`/`save_logs_batch_async`を提供する。複数行を独立にINSERTすると、途中の1件が失敗しても既に成功した分がコミット済みのまま残り、失敗通知を受けたユーザーの再試行で重複保存を招くケース(`handlers/line_logic.py`の`all_genki`)があったため、真のall-or-nothingを実現する手段として追加された。
 * 根拠: `get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async` 関数の定義 (行番号: 20-96 / 抜粋: "DB接続コンテキストマネージャ (接続確立のみリトライ", "読み取り専用モードで安全にSELECTを実行する", "汎用データ保存関数")、`save_logs_batch_generic`/`save_logs_batch_async` (行番号: 98-125 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:")
-* **（B3で追加）** `save_log_generic`はSQL文字列へ直接展開せざるを得ない`table`/`columns_list`（プレースホルダ化不可）について、実行前にモジュールレベル正規表現`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証（英数字・アンダースコアのみ、数字始まり不可）を行うようになった。現状の全呼び出し元はリテラル固定値かconfig定数のみのため実害はないが、将来動的な値が渡された場合のSQLインジェクションに対する構造的な防御として追加された。`save_logs_batch_generic`は同じ文字列展開方式でSQLを組み立てるにもかかわらず、この検証を経由しない（詳細は8節を参照）。
-* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 79〜81 / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
+* **（B3で追加、Issue #409 Q-L9で`save_logs_batch_generic`にも同一の検証を追加）** `save_log_generic`はSQL文字列へ直接展開せざるを得ない`table`/`columns_list`（プレースホルダ化不可）について、実行前にモジュールレベル正規表現`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証（英数字・アンダースコアのみ、数字始まり不可）を行うようになった。現状の全呼び出し元はリテラル固定値かconfig定数のみのため実害はないが、将来動的な値が渡された場合のSQLインジェクションに対する構造的な防御として追加された。`save_logs_batch_generic`も同じ文字列展開方式でSQLを組み立てるため、Issue #409（Q-L9）で同一の`_SQL_IDENTIFIER_RE`検証が追加されており、現在は両関数とも同じチェックを経由する（詳細は8節を参照）。
+* 根拠: `_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")` (行番号: 18 / 抜粋: "_SQL_IDENTIFIER_RE = re.compile(r\"^[A-Za-z_][A-Za-z0-9_]*$\")")、`if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 79〜81 / 抜粋: "logger.error(f\"データ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`save_logs_batch_generic`側の同じ検証 (行番号: 111〜113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
 
 
@@ -171,10 +171,10 @@
 
 ### `save_logs_batch_generic`（Issue #231で追加）
 
-* **役割**: 複数行をまとめて単一トランザクションで保存する汎用関数。**（Issue #231で追加）** `save_log_generic`を複数回呼び出す実装(`handlers/line_logic.py`の`all_genki`等)では、各呼び出しがそれぞれ独立に`commit`されるため、複数行のうち途中の1件が失敗しても、既に成功した分はコミット済みのまま残ってしまう不具合があった。呼び出し元は「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促す設計だったが、実際には成功済み分が残ったままのため、再試行すると重複して保存されていた。本関数は単一の`get_db_cursor(commit=True)`ブロック内で全件INSERTすることで、1件でも失敗すれば例外が`get_db_cursor`側の`rollback`へ伝播し全件ロールバックされる、真のall-or-nothingを実現する。**`save_log_generic`とは異なり、B3で追加された`_SQL_IDENTIFIER_RE`による`table`/`columns_list`の識別子検証は行わない**（詳細は8節を参照）。
+* **役割**: 複数行をまとめて単一トランザクションで保存する汎用関数。**（Issue #231で追加）** `save_log_generic`を複数回呼び出す実装(`handlers/line_logic.py`の`all_genki`等)では、各呼び出しがそれぞれ独立に`commit`されるため、複数行のうち途中の1件が失敗しても、既に成功した分はコミット済みのまま残ってしまう不具合があった。呼び出し元は「1件でも失敗すれば全体を失敗扱いとする」と案内しユーザーに再試行を促す設計だったが、実際には成功済み分が残ったままのため、再試行すると重複して保存されていた。本関数は単一の`get_db_cursor(commit=True)`ブロック内で全件INSERTすることで、1件でも失敗すれば例外が`get_db_cursor`側の`rollback`へ伝播し全件ロールバックされる、真のall-or-nothingを実現する。**`save_log_generic`と同様、Issue #409（Q-L9）でB3の`_SQL_IDENTIFIER_RE`による`table`/`columns_list`の識別子検証が追加されている**（詳細は次項および8節を参照）。
 * 根拠: [関数定義とDocstring] (行番号: 98-109 / 抜粋: "def save_logs_batch_generic(table: str, columns_list: List[str], values_list: List[tuple]) -> bool:\n    """複数行をまとめて単一トランザクションで保存する汎用関数。")
-* **（Issue #409 Q-L9 で修正）** `save_log_generic` と同じ `_SQL_IDENTIFIER_RE` によるテーブル名・カラム名の検証を追加。
-* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(...)` (save_logs_batch_generic 冒頭)
+* **（Issue #409 Q-L9 で修正）** `save_log_generic` と同じ `_SQL_IDENTIFIER_RE` によるテーブル名・カラム名の検証を追加。現在は両関数とも同一の識別子ホワイトリスト検証を経由する。
+* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 111-113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 
 
 * **引数/リクエスト**:
@@ -185,15 +185,15 @@
 
 
 * **戻り値/レスポンス**: `bool`: 全件の保存に成功した場合は`True`、いずれか1件でも失敗した場合は`False`（この場合、全件がロールバックされテーブルには一切残らない）。
-* 根拠: (行番号: 117, 120 / 抜粋: "return True", "return False")
+* 根拠: (行番号: 121, 124 / 抜粋: "return True", "return False")
 
 
 * **副作用**: 単一のDBトランザクション内での複数回のINSERT実行（データ書き込み）。
-* 根拠: (行番号: 111-116 / 抜粋: "with get_db_cursor(commit=True) as cur:\n            placeholders = ", ".join(["?"] * len(columns_list))\n            columns = ", ".join(columns_list)\n            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"\n            for values in values_list:\n                cur.execute(sql, values)")
+* 根拠: (行番号: 115-120 / 抜粋: "with get_db_cursor(commit=True) as cur:\n            placeholders = ", ".join(["?"] * len(columns_list))\n            columns = ", ".join(columns_list)\n            sql = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"\n            for values in values_list:\n                cur.execute(sql, values)")
 
 
-* **エラーハンドリング**: `save_log_generic`と異なり`table`/`columns_list`の識別子検証は行わず、直接SQLを組み立てて実行する。`get_db_cursor`のwith文全体を囲む`try/except Exception`で、いずれかの行のINSERT失敗・接続エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して`False`を返す。この際、同一トランザクション内で既に実行済みだった他の行のINSERTも`get_db_cursor`の`except`節による`conn.rollback()`で取り消される。
-* 根拠: (行番号: 118-120 / 抜粋: "except Exception as e:\n        logger.error(f"バッチデータ保存失敗 ({table}): {e}")\n        return False")
+* **エラーハンドリング**: まず`table`/`columns_list`を`_SQL_IDENTIFIER_RE`で検証し（Issue #409 Q-L9、`save_log_generic`と同一のチェック）、不正な場合はDBアクセス前にエラーログを出力して`False`を返す。検証を通過した後は`get_db_cursor`のwith文全体を囲む`try/except Exception`で、いずれかの行のINSERT失敗・接続エラー・`get_db_cursor`が再送出する例外のいずれもキャッチし、ロガーにエラーを出力して`False`を返す。この際、同一トランザクション内で既に実行済みだった他の行のINSERTも`get_db_cursor`の`except`節による`conn.rollback()`で取り消される。
+* 根拠: `if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):` (行番号: 111-113 / 抜粋: "logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")、`except Exception as e:` (行番号: 122-124 / 抜粋: "except Exception as e:\n        logger.error(f"バッチデータ保存失敗 ({table}): {e}")\n        return False")
 
 
 
@@ -296,6 +296,7 @@ graph TD
 
     save_logs_batch_generic --> get_db_cursor
     save_logs_batch_generic --> logger
+    save_logs_batch_generic -->|Issue #409: table/columns検証| sql_identifier_re
 
     save_logs_batch_async --> asyncio
     save_logs_batch_async --> save_logs_batch_generic
@@ -315,8 +316,8 @@ graph TD
 
 * `get_db_cursor` の `with` 文本体（`yield`後）で例外が発生した場合はロールバックされた後に例外が再送出される (行番号: 49-51) ため、呼び出し元で適切なエラーハンドリングを行う必要がある（H-1で書き直され、以前存在した「本体例外がリトライされ`RuntimeError`に化ける」不具合は解消されている）。
 * `execute_read_query` で例外が発生した場合、例外を送出せず文字列 (`検索エラー: ...`) を返す。呼び出し元が戻り値を常にJSON文字列としてパースしようとすると、パースエラー（`JSONDecodeError`など）が発生する可能性が高い。
-* **`save_log_generic`と`save_logs_batch_generic`でSQL文字列展開時の防御が非対称（B3で一部解消）**: いずれも `values_list` に対してプレースホルダー（`?`）を用いているが、`table` と `columns_list` は文字列展開でSQL文に直接埋め込まれている点は共通である。**（B3で追加）** `save_log_generic`はSQL組み立て前に`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証を行うようになり、`table`/`columns_list`に不正な文字種が含まれる場合はINSERTを実行せず`False`を返すようになった。一方`save_logs_batch_generic`（Issue #231で追加）はこの検証を経由せず、B3以前と変わらず`table`/`columns_list`をそのまま文字列展開する。現状の全呼び出し元はいずれもリテラル固定値かconfig定数のみのため実害はないが、将来`save_logs_batch_generic`に動的な値を渡す変更が入った場合は同種のSQLインジェクションリスクが残る。
-* 根拠: `save_log_generic`の検証 (行番号: 79-81 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):")、`save_logs_batch_generic`に検証が無いこと (行番号: 98-120。同関数の定義全体に`_SQL_IDENTIFIER_RE`の参照が存在しない)
+* **`save_log_generic`と`save_logs_batch_generic`はSQL文字列展開時の識別子検証が同一（Issue #409 Q-L9で非対称を解消済み）**: いずれも `values_list` に対してプレースホルダー（`?`）を用いているが、`table` と `columns_list` は文字列展開でSQL文に直接埋め込まれている点は共通である。**（B3で追加）** `save_log_generic`はSQL組み立て前に`_SQL_IDENTIFIER_RE`によるSQLite識別子ホワイトリスト検証を行うようになり、`table`/`columns_list`に不正な文字種が含まれる場合はINSERTを実行せず`False`を返すようになった。当初`save_logs_batch_generic`（Issue #231で追加）はこの検証を経由しない非対称な状態だったが、**（Issue #409 Q-L9で修正）** 同じ`_SQL_IDENTIFIER_RE`による検証が追加され、現在は両関数とも同一のチェックを行う。現状の全呼び出し元はいずれもリテラル固定値かconfig定数のみのため実害はないが、この検証は将来いずれかの関数に動的な値が渡された場合のSQLインジェクションに対する構造的な防御として両関数に共通して機能する。
+* 根拠: `save_log_generic`の検証 (行番号: 79-81 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):")、`save_logs_batch_generic`の検証 (行番号: 111-113 / 抜粋: "if not _SQL_IDENTIFIER_RE.match(table) or not all(_SQL_IDENTIFIER_RE.match(c) for c in columns_list):\n        logger.error(f\"バッチデータ保存失敗: 不正なtable/カラム名 (table={table!r}, columns={columns_list!r})\")\n        return False")
 * `get_db_cursor` は接続確立時に`sqlite3.OperationalError`以外の例外（例: PRAGMA実行時のエラー）が発生した場合、`except sqlite3.OperationalError`節では捕捉されずリトライされないまま例外がそのまま送出される（`conn`は開いたままクローズされない）。この経路は本ファイル内に専用の例外処理を持たない。
 
 ## 9. 不明事項一覧
