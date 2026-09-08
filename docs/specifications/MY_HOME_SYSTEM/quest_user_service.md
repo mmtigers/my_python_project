@@ -183,32 +183,32 @@
 ### `UserService.save_avatar_image`（非同期メソッド、Issue #551で追加）
 
 * **役割**: **（Issue #551）** 以前`routers/quest_router.py`の`upload_image`エンドポイントに直書きされていた画像アップロード処理を丸ごと移設したもの。アップロードされたファイルをファイル名の有無・拡張子・マジックバイトで画像として検証したうえで、UUID採番したファイル名で`config.UPLOAD_DIR`配下へ非同期ストリーミング書き込みし、`config.UPLOAD_MAX_FILE_SIZE_MB`を超えた場合は書きかけのファイルを削除して`ImageTooLargeError`を送出する。戻り値は保存先を指す相対URL（例: `"/uploads/xxxx.png"`）。呼び出し元(`routers/quest_router.py`の`upload_image`)がこれら例外をHTTPExceptionへ変換する。
-* 根拠: `async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 144)、docstring (行番号: 145〜153 / 抜粋: "アップロードされたファイルを拡張子・マジックバイトで画像として検証し、\n        UUID採番したファイル名で config.UPLOAD_DIR 配下へ保存する。")
-* 検証順序: (1) `file.filename`が空なら`InvalidImageError`(行番号: 155〜156)、(2) 拡張子が`_ALLOWED_AVATAR_EXTENSIONS`外なら`InvalidImageError`(行番号: 157〜159)、(3) 先頭12バイトを読み`_validate_image_header`の判定結果が`False`なら`InvalidImageError`(行番号: 161〜164)。
-* 根拠: `if not file.filename:\n            raise InvalidImageError("ファイル名がありません")` (行番号: 155〜156)、`file_ext = os.path.splitext(file.filename)[1].lower()\n        if file_ext not in _ALLOWED_AVATAR_EXTENSIONS:\n            raise InvalidImageError("許可されていないファイル形式です(拡張子)")` (行番号: 157〜159)、`header = await file.read(12)\n        if not _validate_image_header(header):\n            logger.warning(f"Invalid file header detected. Ext: {file_ext}")\n            raise InvalidImageError("ファイルの内容が画像として認識できません")` (行番号: 161〜164)
-* 保存処理: 検証通過後`file.seek(0)`でシーク位置を戻し(行番号166)、`uuid.uuid4()`でファイル名採番(行番号167)、`aiofiles.open`で1MBチャンクずつ非同期書き込みしながら累計サイズ`total_bytes`を追跡する(行番号170〜183)。累計が`max_bytes`(`config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`)を超えた場合は書き込みを打ち切り`too_large`フラグを立て(行番号180〜182)、ループを抜けた後に書きかけファイルを`os.remove`で削除して`ImageTooLargeError`を送出する(行番号185〜190)。
-* 根拠: `await file.seek(0)` (行番号: 166)、`new_filename = f"{uuid.uuid4()}{file_ext}"` (行番号: 167)、`max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 174)、`async with aiofiles.open(file_path, "wb") as buffer:\n                while content := await file.read(1024 * 1024):` (行番号: 177〜178)、`if too_large:\n                if os.path.exists(file_path):\n                    os.remove(file_path)\n                raise ImageTooLargeError(...)` (行番号: 185〜190)
+* 根拠: `async def save_avatar_image(self, file: UploadFile) -> str:` (行番号: 194)、docstring (行番号: 195〜203 / 抜粋: "アップロードされたファイルを拡張子・マジックバイトで画像として検証し、\n        UUID採番したファイル名で config.UPLOAD_DIR 配下へ保存する。")
+* 検証順序: (1) `file.filename`が空なら`InvalidImageError`(行番号: 205〜206)、(2) 拡張子が`_ALLOWED_AVATAR_EXTENSIONS`外なら`InvalidImageError`(行番号: 207〜209)、(3) 先頭12バイトを読み`_validate_image_header`の判定結果が`False`なら`InvalidImageError`(行番号: 211〜214)。
+* 根拠: `if not file.filename:\n            raise InvalidImageError("ファイル名がありません")` (行番号: 205〜206)、`file_ext = os.path.splitext(file.filename)[1].lower()\n        if file_ext not in _ALLOWED_AVATAR_EXTENSIONS:\n            raise InvalidImageError("許可されていないファイル形式です(拡張子)")` (行番号: 207〜209)、`header = await file.read(12)\n        if not _validate_image_header(header):\n            logger.warning(f"Invalid file header detected. Ext: {file_ext}")\n            raise InvalidImageError("ファイルの内容が画像として認識できません")` (行番号: 211〜214)
+* 保存処理: 検証通過後`file.seek(0)`でシーク位置を戻し(行番号216)、`uuid.uuid4()`でファイル名採番(行番号217)、`aiofiles.open`で1MBチャンクずつ非同期書き込みしながら累計サイズ`total_bytes`を追跡する(行番号220〜233)。累計が`max_bytes`(`config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024`)を超えた場合は書き込みを打ち切り`too_large`フラグを立て(行番号230〜232)、ループを抜けた後に書きかけファイルを`os.remove`で削除して`ImageTooLargeError`を送出する(行番号235〜240)。
+* 根拠: `await file.seek(0)` (行番号: 216)、`new_filename = f"{uuid.uuid4()}{file_ext}"` (行番号: 217)、`max_bytes = config.UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024` (行番号: 224)、`async with aiofiles.open(file_path, "wb") as buffer:\n                while content := await file.read(1024 * 1024):` (行番号: 227〜228)、`if too_large:\n                if os.path.exists(file_path):\n                    os.remove(file_path)\n                raise ImageTooLargeError(...)` (行番号: 235〜240)
 * **引数/リクエスト**: `file: UploadFile`
-* 根拠: (行番号: 144)
+* 根拠: (行番号: 194)
 * **戻り値/レスポンス**: `str`（保存先を指す相対URL、例: `"/uploads/{uuid}{拡張子}"`）
-* 根拠: `return f"/uploads/{new_filename}"` (行番号: 204)
+* 根拠: `return f"/uploads/{new_filename}"` (行番号: 254)
 * **副作用**: `config.UPLOAD_DIR`配下への非同期ファイル書き込み(`aiofiles.open`)、サイズ超過・書き込み失敗時の書きかけファイル削除(`os.remove`)、ログ出力(`logger.warning`/`logger.info`/`logger.exception`)。
-* 根拠: (行番号: 163, 177〜183, 186〜187, 195〜200, 203)
+* 根拠: (行番号: 213, 227〜233, 236〜237, 245〜250, 253)
 * **エラーハンドリング**: ファイル名なし・拡張子不許可・マジックバイト不一致はいずれも`InvalidImageError`を送出。サイズ上限超過は書きかけファイルを削除したうえで`ImageTooLargeError`を送出。書き込み中に発生したその他の`Exception`（`ImageTooLargeError`以外）は`logger.exception`でログ出力後、書きかけファイルが存在すれば削除を試み(`OSError`は無視)、元の例外を`raise`で再送出する。
-* 根拠: `except ImageTooLargeError:\n            raise\n        except Exception:\n            # Q-L6(#409): 書き込み途中(ディスクフル等)の例外では書きかけファイルが残っていた\n            logger.exception(f"Avatar image write failed: {file_path}")\n            if os.path.exists(file_path):\n                try:\n                    os.remove(file_path)\n                except OSError:\n                    pass\n            raise` (行番号: 191〜201)
+* 根拠: `except ImageTooLargeError:\n            raise\n        except Exception:\n            # Q-L6(#409): 書き込み途中(ディスクフル等)の例外では書きかけファイルが残っていた\n            logger.exception(f"Avatar image write failed: {file_path}")\n            if os.path.exists(file_path):\n                try:\n                    os.remove(file_path)\n                except OSError:\n                    pass\n            raise` (行番号: 241〜251)
 
 ### `UserService.delete_unlinked_avatar`
 
 * **役割**: `AvatarUploader.tsx`側の2段階アップロードフロー（1. 画像アップロード→2. `/user/update`でのユーザーへの紐付け）のうち2段階目が失敗した際のロールバック用。`filename`から`os.path.basename`でファイル名部分のみを取り出し`config.UPLOAD_DIR`と結合し、結合結果の親ディレクトリが正規化済み`UPLOAD_DIR`と一致することを確認してパストラバーサルを防ぐ。加えて`quest_users`テーブルに当該ファイルを`avatar`として参照する行が1件でも存在すれば削除しない（安全策）。
-* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 206〜243)、docstring (行番号: 207〜220 / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
+* 根拠: `def delete_unlinked_avatar(self, filename: str) -> bool:` (行番号: 256〜292)、docstring (行番号: 257〜270 / 抜粋: "#442: AvatarUploader.tsxの2段階アップロード...")
 * **引数/リクエスト**: `filename: str`（削除対象のアップロード済みファイル名。ディレクトリ部分は`os.path.basename`で無視される）
-* 根拠: (行番号: 206, 221)
+* 根拠: (行番号: 256, 271)
 * **戻り値/レスポンス**: `bool`（実際に削除できた場合のみ`True`。参照中・パス不正・ファイル未存在・削除失敗時は`False`）
-* 根拠: 各`return`文 (行番号: 224, 232, 236, 239, 242)
+* 根拠: 各`return`文 (行番号: 274, 282, 286, 289, 292)
 * **副作用**: `config.UPLOAD_DIR`配下のパス解決、DB参照(`common.get_db_cursor()`で`quest_users.avatar`を参照確認)、条件を満たす場合のファイル削除(`os.remove`)、削除成功時のログ出力(`logger.info`)
-* 根拠: `with common.get_db_cursor() as cur:\n            still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? LIMIT 1", (avatar_value,)\n            ).fetchone() is not None` (行番号: 227〜230)、`os.remove(file_path)\n            logger.info(f"Unlinked avatar removed (rollback): {file_path}")` (行番号: 237〜238)
+* 根拠: `with common.get_db_cursor() as cur:\n            still_referenced = cur.execute(\n                "SELECT 1 FROM quest_users WHERE avatar = ? LIMIT 1", (avatar_value,)\n            ).fetchone() is not None` (行番号: 277〜280)、`os.remove(file_path)\n            logger.info(f"Unlinked avatar removed (rollback): {file_path}")` (行番号: 287〜288)
 * **エラーハンドリング**: パストラバーサル対策の一致チェックに失敗した場合、いずれかのユーザーから参照中の場合、対象ファイルが存在しない場合はいずれも`False`を返す（例外は送出しない）。`os.remove`が`OSError`を送出した場合は`except OSError`で捕捉し警告ログを出力したうえで`False`を返す。
-* 根拠: `if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return False` (行番号: 223〜224)、`if still_referenced:\n            return False` (行番号: 231〜232)、`if not os.path.exists(file_path):\n                return False` (行番号: 235〜236)、`except OSError as e:\n            logger.warning(f"Failed to remove unlinked avatar {file_path}: {e}")\n            return False` (行番号: 240〜242)
+* 根拠: `if os.path.dirname(file_path) != os.path.normpath(config.UPLOAD_DIR):\n            return False` (行番号: 273〜274)、`if still_referenced:\n            return False` (行番号: 281〜282)、`if not os.path.exists(file_path):\n                return False` (行番号: 285〜286)、`except OSError as e:\n            logger.warning(f"Failed to remove unlinked avatar {file_path}: {e}")\n            return False` (行番号: 290〜292)
 
 ## 5. 処理フロー図
 
