@@ -50,7 +50,7 @@
 | `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 212 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
 | `line_service.log_child_health` / `line_service.split_text_into_line_messages` | 引数に対する具体的な処理内容および戻り値の型・形式が不明。**（#358で縮小）** 以前ブラックボックス視していた`get_user_status_message`/`get_active_quests_message`/`process_approval_command`は削除済みのため対象外。 | 該当要素の呼び出し (行番号: 280, 294 / 抜粋: "responses.append(await line_service.log_child_health(user_id, user_name, child, cond))") |
 | `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 288-289 / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
-| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は`PostbackEvent`のすべてが無条件でここへ委譲される。 | 該当要素の呼び出し (行番号: 328 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
+| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は`PostbackEvent`のすべてが無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
 | `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -265,27 +265,28 @@
 
 ### `handle_postback`
 
-* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 306-334 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 310-312)、撤去コメント (行番号: 320-322 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 326-328 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 333-334)
+* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。**（Issue #572で修正）** `handle_message`にはIssue #410（L-L6）で`event.source.user_id is None`（グループでのプロフィール未共有等）時の早期returnガードが追加されていたが、本関数には同等のガードが無く非対称だった。`user_id = event.source.user_id`で読み取った直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`user_id`が`None`なら警告ログを出して処理をスキップするガードを追加し、この非対称性を解消した。
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 316-352 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 320-322)、`user_id`のNoneガード (行番号: 324-331 / 抜粋: "if user_id is None:")、撤去コメント (行番号: 338-340 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 344-346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 351-352)
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 306 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* 根拠: 引数定義 (行番号: 316 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 再配信スキップ時の空`return` (行番号: 312)。それ以外は関数末尾まで到達し暗黙的に`None`を返す。
+* 根拠: 再配信スキップ時の空`return` (行番号: 322)。**（Issue #572で追加）** `user_id`Noneガード時の空`return` (行番号: 331)。それ以外は関数末尾まで到達し暗黙的に`None`を返す。
 
 
 * **副作用**: `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`/`logger.error`によるログ出力。
-* 根拠: 関数呼び出し (行番号: 328 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
+* 根拠: 関数呼び出し (行番号: 346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
 
 
 * **エラーハンドリング**:
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
 * **（L-L1で追加）** 上記以外（`event`属性アクセス等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
-* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 329-330)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 333-334)
+* **（Issue #572で追加）** `user_id`が`None`の場合は`data_str`/`reply_token`の取得も`line_logic.handle_postback`への委譲も行わず、警告ログを出して早期returnする（`handle_message`のIssue #410ガードと同じスタイル）。
+* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 347-348)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 351-352)、`user_id`のNoneガード (行番号: 329-331 / 抜粋: "if user_id is None:")
 
 
 
@@ -354,7 +355,7 @@ flowchart TD
     UpdateCache --> RunAsyncMessage
 
     RouteEvent -- PostbackEvent --> HandlePostback["handle_postback()"]
-    HandlePostback --> RedeliveryPB{"_is_redelivery?"}
+    HandlePostback --> RedeliveryPB{"_is_redelivery? / user_id is None?"}
     RedeliveryPB -- Yes --> SkipPB["スキップ(警告ログ)"]
     RedeliveryPB -- No --> LogicPostback["外部：line_logic.handle_postback()<br>(#358: 承認/却下の先取り分岐は撤去済み。常にここへ委譲)"]
 

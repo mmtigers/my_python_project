@@ -322,6 +322,14 @@ def handle_postback(event: PostbackEvent):
             return
 
         user_id = event.source.user_id
+        # #572 (L-L6 #410 の修正漏れ): handle_message には既にこのガードがあるが、
+        # 同じくグループでの操作時にuser_idがNoneになりうるPostback経路(体調ボタン・
+        # 全員元気・食事アンケート等、line_logic.handle_postbackへの委譲)には無かった。
+        # 記録の紐付け先が無いため、user_id不明のイベントはここでも処理をスキップする。
+        if user_id is None:
+            logger.warning("⚠️ event.source.user_id が取得できないため処理をスキップします(グループでのプロフィール未共有等の可能性)")
+            return
+
         data_str = event.postback.data
         reply_token = event.reply_token
 
