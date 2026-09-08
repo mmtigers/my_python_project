@@ -267,6 +267,58 @@ class TestUniversalYtDlpStrategyNoPlaylist:
         assert captured_opts.get("noplaylist") is True
 
 
+class TestUniversalYtDlpStrategyRejectsPlaylistTypeInfo:
+    """#566回帰防止: 'noplaylist'は動画IDを含まない純粋なプレイリスト/チャンネル
+    URLには効果がない(yt-dlpのInfoExtractor._yes_playlistがvideo_id不在時は
+    noplaylistを一切参照しないため)。extract_infoの戻り値の_typeが'playlist'/
+    'multi_video'の場合、ダウンロードを行わずFalseを返すこと。"""
+
+    def _make_strategy(self, tmp_path, monkeypatch, info):
+        strategy = module.UniversalYtDlpStrategy.__new__(module.UniversalYtDlpStrategy)
+        monkeypatch.setattr(strategy, "_determine_save_dir", lambda *a, **k: tmp_path)
+
+        class _FakeYoutubeDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def extract_info(self, url, download=False):
+                return info
+
+            def prepare_filename(self, info):
+                if info.get("_type") in ("playlist", "multi_video"):
+                    raise AssertionError("プレイリスト型infoに対してprepare_filenameを呼んではならない")
+                return str(tmp_path / "dummy.mp4")
+
+            def process_ie_result(self, info, download=True):
+                raise AssertionError("プレイリスト型infoに対してprocess_ie_resultを呼んではならない")
+
+        monkeypatch.setattr(module.yt_dlp, "YoutubeDL", _FakeYoutubeDL)
+        return strategy
+
+    @pytest.mark.parametrize("type_value", ["playlist", "multi_video"])
+    def test_playlist_type_info_is_rejected(self, tmp_path, monkeypatch, type_value):
+        info = {"_type": type_value, "title": "dummy playlist"}
+        strategy = self._make_strategy(tmp_path, monkeypatch, info)
+        task = module.DownloadTask(url="https://www.youtube.com/playlist?list=dummy", source_name="test_list")
+
+        assert strategy.download(task) is False
+
+    def test_single_video_type_info_is_not_rejected(self, tmp_path, monkeypatch):
+        """_typeが'video'(または未設定)の通常の単一動画は従来どおり処理を継続すること。"""
+        info = {"_type": "video", "title": "dummy video"}
+        strategy = self._make_strategy(tmp_path, monkeypatch, info)
+        monkeypatch.setattr(strategy, "_should_skip", lambda filename: True)
+        task = module.DownloadTask(url="https://www.youtube.com/watch?v=dummy", source_name="test_list")
+
+        assert strategy.download(task) is True
+
+
 class TestPackerBaseNDigits:
     """D-L5: p,a,c,k,e,dパッカーの復元関数(JS側の"e")と同じ規則で、radix(a)に
     応じた桁の文字列表現を返すこと。以前はradixを無視してbase36固定(mod 36)

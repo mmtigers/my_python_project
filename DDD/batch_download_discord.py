@@ -699,6 +699,21 @@ class UniversalYtDlpStrategy(DownloadStrategy):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(task.url, download=False)
+
+                # #566: yt-dlpの'noplaylist'は「動画とプレイリストの両方を指すURL
+                # (watch?v=X&list=Y)で動画側だけを選ぶ」オプションであり、動画IDを
+                # 含まない純粋なプレイリスト/チャンネルURLには効果がない
+                # (yt-dlp内部のInfoExtractor._yes_playlistがvideo_id不在時は
+                # noplaylistを一切参照せず常にプレイリスト全体を返す実装のため)。
+                # 'noplaylist'指定だけでは防げないこのケースを、抽出結果の_typeで
+                # 明示的に検知し、MAX_TASKS_PER_RUN等の1回あたりの上限governanceが
+                # 迂回されないようにする。
+                if info.get('_type') in ('playlist', 'multi_video'):
+                    logger.warning(
+                        f"⚠️ プレイリスト/チャンネルURLは対象外です(1動画のみ処理可能): {task.url}"
+                    )
+                    return False
+
                 filename = Path(ydl.prepare_filename(info)).with_suffix('.mp4')
 
                 if self._should_skip(filename): return True
