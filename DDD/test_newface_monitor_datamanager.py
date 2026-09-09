@@ -479,6 +479,54 @@ class TestLoadDailySummaryRecoversFromBackup:
         assert result == {}
 
 
+class TestSaveDailySummaryRetry:
+    """2026-09-09運用障害対応: save_known_castsと同じ書き込み→読み戻し検証を
+    持つsave_daily_summaryにも、NAS等の一時的な書き込み不良に備えたリトライを
+    追加した(save_known_castsと共通の_retry_transient_writeヘルパー経由)。"""
+
+    def test_retries_and_recovers_from_transient_failure(self, tmp_path, monkeypatch):
+        dm = DataManager(tmp_path)
+
+        original_write_and_verify = DataManager._write_and_verify_json_tmp
+        call_count = {"n": 0}
+
+        def _flaky_write_and_verify(tmp_path, data):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return original_write_and_verify(tmp_path, data)
+
+        monkeypatch.setattr(
+            module.DataManager, "_write_and_verify_json_tmp", staticmethod(_flaky_write_and_verify)
+        )
+        sleep_calls = []
+        monkeypatch.setattr(module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+        dm.save_daily_summary({"counts": {"restpia_test": 3}})
+
+        assert dm.load_daily_summary() == {"counts": {"restpia_test": 3}}
+        assert sleep_calls == [DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS]
+
+    def test_gives_up_after_max_attempts_and_leaves_existing_file_untouched(self, tmp_path, monkeypatch):
+        dm = DataManager(tmp_path)
+        dm.save_daily_summary({"counts": {"restpia_test": 1}})
+
+        monkeypatch.setattr(
+            module.DataManager,
+            "_write_and_verify_json_tmp",
+            staticmethod(lambda tmp_path, data: (_ for _ in ()).throw(ValueError("boom"))),
+        )
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+
+        dm.save_daily_summary({"counts": {"restpia_test": 99}})
+
+        summary_file = tmp_path / "daily_summary.json"
+        tmp_file = summary_file.with_suffix(summary_file.suffix + ".tmp")
+        assert not tmp_file.exists()
+        # 保存に失敗したため、直前(1回目)の正常な内容がそのまま残る
+        assert dm.load_daily_summary() == {"counts": {"restpia_test": 1}}
+
+
 class TestLoadDailySummaryTransientIOErrorIsNotQuarantined:
     """Issue #578の回帰テスト。
 
