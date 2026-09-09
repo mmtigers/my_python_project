@@ -1322,18 +1322,38 @@ class DataManager:
         """
         return self.data_dir / 'site_failures.json'
 
+    @staticmethod
+    def _is_valid_site_failures(data: object) -> bool:
+        """site_failures.json の内容が最低限「site_idをキーとする辞書」という
+        形状かを判定する静的メソッド(load_daily_summaryの`_is_valid_daily_summary`
+        と同じ役割)。各エントリの値がdictかどうかの検証・フィルタは、一部の
+        サイトのみ不正でも他サイト分の記録を活かすため(#395)、本メソッドでは
+        全体を無効とせず呼び出し元(load_site_failures)側で個別に行う。"""
+        return isinstance(data, dict)
+
     def load_site_failures(self) -> Dict:
         """サイト別の連続巡回失敗状態を読み込む。
+
+        2026-09-09 運用障害対応: 以前は内容破損時に空辞書を返すのみで、
+        load_known_casts/load_daily_summaryが持つ「破損ファイルを`.corrupted-*`へ
+        隔離し`.bak`バックアップから復旧する」経路を持たなかった。このため
+        (1)同じ破損ファイルへの読み込み失敗が巡回のたびに繰り返され続け、
+        (2)save_site_failuresが書き込むようになった`.bak`(前項参照)が
+        一切読まれないままだった。load_daily_summaryと同じ隔離+バックアップ
+        復旧の仕組みを適用する。
 
         Returns:
             Dict: {site_id: {'count': int, 'alerted': bool}} 形式の状態。
                 'count'は現在継続中の連続失敗回数、'alerted'は閉鎖疑いアラートを
-                Discordへ送信済みかどうか。ファイルが存在しない場合は空辞書を返す。
+                Discordへ送信済みかどうか。ファイルが存在しない場合、または
+                内容破損＋隔離＋`.bak`バックアップからの復旧も全て失敗した
+                場合は空辞書を返す。
 
         Raises:
             DataFileUnavailableError: ファイルは存在するがI/Oエラー(OSError)で
-                読めなかった場合(#578)。呼び出し元は保存処理をスキップし、
-                他サイト分を含む既存の永続化状態を保持すること。
+                読めなかった場合(#578)。一次ファイル・`.bak`のいずれでも
+                発生しうる。呼び出し元は保存処理をスキップし、他サイト分を
+                含む既存の永続化状態を保持すること。
         """
         failures_file = self._site_failures_file()
         if not failures_file.exists():
@@ -1342,20 +1362,12 @@ class DataManager:
         try:
             with open(failures_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                # 破損等で辞書以外が保存されていた場合も安全に初期状態へ戻す
-                if not isinstance(data, dict):
-                    return {}
-                # #395: トップレベルだけでなく各エントリも辞書であることを検証する。
-                # {"site": 5} のような値が混入すると record_site_failure の
-                # entry.get で AttributeError となり、_run_monitor_locked の
-                # CRITICAL(Discord発報)が毎時繰り返されていた。不正なエントリは
-                # 初期状態(記録なし)として読み飛ばす。
-                invalid = [k for k, v in data.items() if not isinstance(v, dict)]
-                if invalid:
-                    logger.warning(
-                        f"Ignoring malformed site failure entries in {failures_file}: {invalid}"
-                    )
-                return {k: v for k, v in data.items() if isinstance(v, dict)}
+            if DataManager._is_valid_site_failures(data):
+                return DataManager._filter_valid_site_failure_entries(data, failures_file)
+            logger.error(
+                f"Malformed site failures in {failures_file} (expected a dict keyed by "
+                f"site_id, got {type(data).__name__}); treating as corrupted."
+            )
         except OSError as e:
             # #578: CIFS/autofsの瞬断でopen()が失敗しただけの可能性があり、
             # 中身(他サイト分の count/alerted 状態を含む)は正しいかもしれない。
@@ -1371,10 +1383,62 @@ class DataManager:
             )
             raise DataFileUnavailableError(f"site failures file is unreadable ({e})") from e
         except DataManager._CONTENT_ERRORS as e:
-            # load_daily_summaryと同様、非UTF-8破損(UnicodeDecodeError)まで
-            # 含めて読み込み失敗として扱い、監視処理本体を止めない
+            # #174/#365と同様、非UTF-8破損(UnicodeDecodeError)まで含めて
+            # 読み込み失敗として扱う。以前はここで直接空辞書を返していたが、
+            # 現在は下の隔離+バックアップ復旧へ進める(2026-09-09対応)。
             logger.error(f"Failed to load site failures from {failures_file}: {e}", exc_info=True)
-            return {}
+
+        # 2026-09-09 運用障害対応: load_known_casts/load_daily_summaryと同じ
+        # 復旧機構(隔離+バックアップ復旧)を適用する。
+        quarantine_path = failures_file.with_name(
+            f"{failures_file.name}.corrupted-{datetime.now():%Y%m%d%H%M%S}"
+        )
+        try:
+            failures_file.rename(quarantine_path)
+            logger.error(f"Quarantined corrupted site failures file: {failures_file} -> {quarantine_path}")
+        except OSError as e:
+            logger.error(f"Failed to quarantine corrupted site failures file {failures_file}: {e}", exc_info=True)
+
+        backup_file = failures_file.with_suffix(failures_file.suffix + '.bak')
+        if backup_file.exists():
+            try:
+                with open(backup_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if DataManager._is_valid_site_failures(data):
+                    logger.warning(f"Recovered site failures from backup {backup_file} after cache corruption.")
+                    return DataManager._filter_valid_site_failure_entries(data, backup_file)
+                logger.error(f"Backup file {backup_file} is also malformed; starting from an empty state.")
+            except OSError as e:
+                # #578: 本体と同じ理由で、.bakのOSErrorも空辞書へフォールバックせず
+                # スキップさせる。
+                logger.error(f"I/O error while loading backup {backup_file}; skipping this run: {e}", exc_info=True)
+                raise DataFileUnavailableError(f"backup site failures file is unreadable ({e})") from e
+            except DataManager._CONTENT_ERRORS as e:
+                logger.error(f"Backup file {backup_file} is also unusable: {e}", exc_info=True)
+
+        return {}
+
+    @staticmethod
+    def _filter_valid_site_failure_entries(data: Dict, source_file: Path) -> Dict:
+        """トップレベルは辞書だが個々のエントリの値がdictでない場合を弾く(#395)。
+
+        `{"site": 5}`のような値が混入すると`record_site_failure`の`entry.get`で
+        `AttributeError`となり、`_run_monitor_locked`のCRITICAL(Discord発報)が
+        毎時繰り返されていた。不正なエントリのみを読み飛ばし、他の正常な
+        エントリは活かす(load_daily_summaryの`_is_valid_daily_summary`のように
+        ファイル全体を無効とはしない)。
+
+        Args:
+            data (Dict): トップレベルが辞書であることを確認済みの読み込み結果。
+            source_file (Path): ログ出力用の読み込み元パス(一次ファイル/`.bak`)。
+
+        Returns:
+            Dict: 値がdictであるエントリのみを残した辞書。
+        """
+        invalid = [k for k, v in data.items() if not isinstance(v, dict)]
+        if invalid:
+            logger.warning(f"Ignoring malformed site failure entries in {source_file}: {invalid}")
+        return {k: v for k, v in data.items() if isinstance(v, dict)}
 
     def save_site_failures(self, data: Dict) -> None:
         """サイト別の連続巡回失敗状態をJSONファイルに保存する。

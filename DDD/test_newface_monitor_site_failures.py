@@ -137,6 +137,60 @@ class TestSiteFailureLifecycle:
         assert dm.load_site_failures() == {}
 
 
+class TestLoadSiteFailuresRecoversFromBackup:
+    """2026-09-09運用障害対応: load_site_failuresはload_known_casts/
+    load_daily_summaryほど手厚い復旧機構を持たず、破損時に連続失敗カウント・
+    アラート送信済みフラグがリセットされ、かつ破損ファイル自体も隔離されない
+    ため同じ破損ファイルへの読み込み失敗が巡回のたびに繰り返され続けていた。
+    load_known_casts/load_daily_summaryと同じ隔離+バックアップ復旧を適用する。"""
+
+    def test_recovers_from_backup_after_corruption(self, data_dir, dm):
+        # 正常な状態で保存し、.bakを作らせておく
+        dm.record_site_failure("site_a")
+        dm.record_site_failure("site_a")
+
+        failures_file = data_dir / "site_failures.json"
+        backup_file = failures_file.with_suffix(failures_file.suffix + ".bak")
+        assert backup_file.exists()
+
+        # 主ファイルを破損させる
+        failures_file.write_bytes(b'{"site_a": \xf9broken')
+
+        result = dm.load_site_failures()
+
+        # 直前(2回目保存前、.bak作成時点)の内容から復旧できること
+        assert result == {"site_a": {"count": 1, "alerted": False}}
+
+        # 破損ファイルは隔離されて残っていること
+        quarantined = list(data_dir.glob("site_failures.json.corrupted-*"))
+        assert len(quarantined) == 1
+
+    def test_returns_empty_dict_when_backup_is_also_unusable(self, data_dir, dm):
+        failures_file = data_dir / "site_failures.json"
+        failures_file.write_bytes(b'{"site_a": \xf9broken')
+
+        result = dm.load_site_failures()
+
+        assert result == {}
+
+    def test_malformed_shape_is_quarantined_and_recovers_from_backup(self, data_dir, dm):
+        """トップレベルが辞書でない(リスト等)場合も内容破損として隔離+復旧対象になること。"""
+        dm.record_site_failure("site_a")
+        dm.record_site_failure("site_a")  # 2回目の保存で.bakが作られる
+
+        failures_file = data_dir / "site_failures.json"
+        backup_file = failures_file.with_suffix(failures_file.suffix + ".bak")
+        assert backup_file.exists()
+
+        failures_file.write_text("[]", encoding="utf-8")
+
+        result = dm.load_site_failures()
+
+        # 直前(2回目保存前、.bak作成時点)の内容から復旧できること
+        assert result == {"site_a": {"count": 1, "alerted": False}}
+        assert list(data_dir.glob("site_failures.json.corrupted-*"))
+
+
 class TestSaveSiteFailuresHardening:
     """2026-09-09運用障害対応: save_site_failuresはsave_known_casts/
     save_daily_summaryより無防備で、書き込み後の読み戻し検証・.bakバックアップ・
