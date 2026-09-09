@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, asdict, replace
 from datetime import datetime
 from pathlib import Path
-from typing import List, Set, Dict, Optional, Tuple
+from typing import Callable, List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
 from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root
@@ -980,6 +980,50 @@ class DataManager:
         return set()
 
     @staticmethod
+    def _retry_transient_write(tmp_path: Path, write_and_verify: Callable[[], None]) -> None:
+        """一時ファイルへの書き込み+検証処理を、NAS等の一時的な書き込み不良に
+        備えて最大`_SAVE_VERIFY_MAX_ATTEMPTS`回リトライする共通ヘルパー。
+
+        `save_known_casts`・`save_daily_summary`・`save_site_failures`はいずれも
+        「一時ファイルへ書き込み→読み戻して検証」という同じ形の処理を持ち、
+        この検証がNAS等の一過性の書き込み不良（例: nas_monitor.pyの日次保持期間
+        超過ファイル自動削除とのNAS I/O競合）で失敗することがある。3箇所に
+        同じリトライループを複製する代わりに、実際の書き込み+検証処理
+        (`write_and_verify`)だけを呼び出し元から受け取り、リトライ制御は
+        ここに集約する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。失敗のたびに
+                best-effortで削除してから再試行する。
+            write_and_verify (Callable[[], None]): 一時ファイルへの書き込みと
+                読み戻し検証を行うコールバック。`tmp_path`への書き込みを
+                前提とする（呼び出し元が`tmp_path`をクロージャで束縛する）。
+
+        Raises:
+            OSError: 全リトライを使い切ってもファイルI/Oが失敗し続けた場合。
+            ValueError: 全リトライを使い切っても書き込んだ内容が正しく
+                読み戻せなかった場合(json.JSONDecodeErrorを含む)。
+            TypeError: 全リトライを使い切っても読み戻した内容の型が想定と
+                異なった場合。
+        """
+        last_error: Optional[Exception] = None
+        for attempt in range(1, DataManager._SAVE_VERIFY_MAX_ATTEMPTS + 1):
+            try:
+                write_and_verify()
+                return
+            except (OSError, ValueError, TypeError) as e:
+                last_error = e
+                tmp_path.unlink(missing_ok=True)
+                if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
+                    logger.warning(
+                        f"Write verification failed for {tmp_path} "
+                        f"(attempt {attempt}/{DataManager._SAVE_VERIFY_MAX_ATTEMPTS}); "
+                        f"retrying after a transient storage issue: {e}"
+                    )
+                    time.sleep(DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS)
+        raise last_error
+
+    @staticmethod
     def _write_and_verify_tmp(tmp_path: Path, data: list) -> None:
         """一時ファイルへJSONを書き込み、直後に読み戻して内容を検証する。
 
@@ -1019,29 +1063,14 @@ class DataManager:
             tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')
 
             # 2026-09-09 運用障害対応: 書き込み→読み戻し検証(D-L8)がNAS等の
-            # 一時的な書き込み不良で失敗することがあるため、短い間隔で数回
-            # リトライする(nas_monitor.pyの日次保持期間超過ファイル自動削除等、
-            # 他プロセスとのNAS I/O競合による一過性の空振りを想定)。全て失敗
-            # した場合のみ最後の例外を外側のexceptへ伝播させ、既存データは
+            # 一時的な書き込み不良で失敗することがあるため、_retry_transient_write
+            # で短い間隔で数回リトライする(nas_monitor.pyの日次保持期間超過ファイル
+            # 自動削除等、他プロセスとのNAS I/O競合による一過性の空振りを想定)。
+            # 全て失敗した場合のみ最後の例外が外側のexceptへ伝播し、既存データは
             # 保持したまま今回の保存を諦める(安全側の挙動自体は変更しない)。
-            last_error: Optional[Exception] = None
-            for attempt in range(1, DataManager._SAVE_VERIFY_MAX_ATTEMPTS + 1):
-                try:
-                    DataManager._write_and_verify_tmp(tmp_path, data)
-                    last_error = None
-                    break
-                except (OSError, ValueError, TypeError) as e:
-                    last_error = e
-                    tmp_path.unlink(missing_ok=True)
-                    if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
-                        logger.warning(
-                            f"Write verification failed for {tmp_path} "
-                            f"(attempt {attempt}/{DataManager._SAVE_VERIFY_MAX_ATTEMPTS}); "
-                            f"retrying after a transient storage issue: {e}"
-                        )
-                        time.sleep(DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS)
-            if last_error is not None:
-                raise last_error
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_tmp(tmp_path, data)
+            )
 
             # 直前の正常データをバックアップとして残す。次回読み込み失敗時、
             # 空集合へのフォールバック（全キャスト再通知）を避けるために使う。
@@ -1186,6 +1215,30 @@ class DataManager:
             return False
         return True
 
+    @staticmethod
+    def _write_and_verify_json_tmp(tmp_path: Path, data: Dict) -> None:
+        """一時ファイルへJSON(Dict)を書き込み、直後に読み戻して検証する。
+
+        `_write_and_verify_tmp`のDict版。`save_daily_summary`/`save_site_failures`
+        はCastMemberへの再構築が不要な単純な辞書を保存するため、`_read_casts_file`
+        ではなく`json.load`のみで検証する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。
+            data (Dict): JSONシリアライズ対象の辞書。
+
+        Raises:
+            OSError: ファイルI/Oに失敗した場合。
+            ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
+                (json.JSONDecodeErrorを含む)。
+        """
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する
+        # (_write_and_verify_tmpと同じ理由。#462)。
+        with open(tmp_path, 'r', encoding='utf-8') as f:
+            json.load(f)
+
     def save_daily_summary(self, data: Dict) -> None:
         """日次サマリの集計状態をJSONファイルに保存する。
 
@@ -1199,12 +1252,11 @@ class DataManager:
 
             # アトミック書き込み: save_known_castsと同じパターン
             tmp_path = summary_file.with_suffix(summary_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # #462: 書き込んだ内容が正しく読み戻せることを検証する(save_known_castsと同じ)。
-            with open(tmp_path, 'r', encoding='utf-8') as f:
-                json.load(f)
+            # 2026-09-09 運用障害対応: save_known_castsと同じ理由でリトライする。
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
+            )
 
             # 直前の正常データをバックアップとして残す。load_daily_summaryが破損時の
             # 復旧に使う(save_known_castsと同じtmp書き込み+replaceのアトミックパターン)。
@@ -1327,20 +1379,47 @@ class DataManager:
     def save_site_failures(self, data: Dict) -> None:
         """サイト別の連続巡回失敗状態をJSONファイルに保存する。
 
+        2026-09-09 運用障害対応: 以前は書き込んだ内容の読み戻し検証・`.bak`
+        バックアップ・失敗時の一時ファイル削除のいずれも持たず、`save_known_casts`/
+        `save_daily_summary`より無防備だった(例外捕捉も`IOError`のみで
+        `ValueError`/`TypeError`を捕捉しなかった)。他の2つと同じ安全策一式
+        (検証・バックアップ・tmp削除・NAS等の一過性書き込み不良へのリトライ)
+        を揃える。
+
         Args:
             data (Dict): 保存対象の状態。
         """
         failures_file = self._site_failures_file()
+        tmp_path: Optional[Path] = None
         try:
             failures_file.parent.mkdir(parents=True, exist_ok=True)
 
             # アトミック書き込み: save_known_castsと同じパターン
             tmp_path = failures_file.with_suffix(failures_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            DataManager._retry_transient_write(
+                tmp_path, lambda: DataManager._write_and_verify_json_tmp(tmp_path, data)
+            )
+
+            # 直前の正常データをバックアップとして残す(save_known_casts/
+            # save_daily_summaryと同じtmp書き込み+replaceのアトミックパターン)。
+            if failures_file.exists():
+                backup_path = failures_file.with_suffix(failures_file.suffix + '.bak')
+                bak_tmp_path = backup_path.with_suffix(backup_path.suffix + '.tmp')
+                try:
+                    bak_tmp_path.write_bytes(failures_file.read_bytes())
+                    bak_tmp_path.replace(backup_path)
+                except OSError as e:
+                    logger.warning(f"Failed to update backup file {backup_path}: {e}")
+                    bak_tmp_path.unlink(missing_ok=True)
+
             tmp_path.replace(failures_file)
-        except IOError as e:
+        except (OSError, ValueError, TypeError) as e:
             logger.error(f"Failed to save site failures: {e}", exc_info=True)
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     def record_site_failure(self, site_id: str) -> Tuple[int, bool]:
         """サイトの巡回失敗を1回分記録し、更新後の連続失敗状態を返す。

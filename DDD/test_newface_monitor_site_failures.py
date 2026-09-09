@@ -137,6 +137,59 @@ class TestSiteFailureLifecycle:
         assert dm.load_site_failures() == {}
 
 
+class TestSaveSiteFailuresHardening:
+    """2026-09-09運用障害対応: save_site_failuresはsave_known_casts/
+    save_daily_summaryより無防備で、書き込み後の読み戻し検証・.bakバックアップ・
+    失敗時の一時ファイル削除のいずれも持たず、例外捕捉もIOError単独(ValueError/
+    TypeErrorを捕捉しない)だった。他の2つと同じ安全策一式(検証・バックアップ・
+    tmp削除・NAS等の一過性書き込み不良へのリトライ)を揃える。"""
+
+    def test_backup_file_is_created_on_second_save(self, data_dir, dm):
+        dm.record_site_failure("site_a")
+        dm.record_site_failure("site_a")
+
+        failures_file = data_dir / "site_failures.json"
+        backup_file = failures_file.with_suffix(failures_file.suffix + ".bak")
+        assert backup_file.exists()
+
+    def test_retries_and_recovers_from_transient_failure(self, data_dir, dm, monkeypatch):
+        original_write_and_verify = DataManager._write_and_verify_json_tmp
+        call_count = {"n": 0}
+
+        def _flaky_write_and_verify(tmp_path, data):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return original_write_and_verify(tmp_path, data)
+
+        monkeypatch.setattr(
+            module.DataManager, "_write_and_verify_json_tmp", staticmethod(_flaky_write_and_verify)
+        )
+        sleep_calls = []
+        monkeypatch.setattr(module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+        count, alerted = dm.record_site_failure("site_a")
+
+        assert (count, alerted) == (1, False)
+        assert dm.load_site_failures() == {"site_a": {"count": 1, "alerted": False}}
+        assert sleep_calls == [DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS]
+
+    def test_verification_failure_does_not_leave_tmp_file_behind(self, data_dir, dm, monkeypatch):
+        monkeypatch.setattr(
+            module.DataManager,
+            "_write_and_verify_json_tmp",
+            staticmethod(lambda tmp_path, data: (_ for _ in ()).throw(ValueError("boom"))),
+        )
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
+
+        dm.record_site_failure("site_a")
+
+        failures_file = data_dir / "site_failures.json"
+        tmp_file = failures_file.with_suffix(failures_file.suffix + ".tmp")
+        assert not tmp_file.exists()
+        assert not failures_file.exists()
+
+
 class TestLoadSiteFailuresTransientIOErrorIsNotQuarantined:
     """Issue #578の回帰テスト。
 
