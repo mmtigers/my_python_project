@@ -366,6 +366,21 @@
 * **エラーハンドリング**: なし
 
 
+### `DiscordNotifier._to_well_formed_url`（2026-09-09 運用障害対応で追加）
+
+* **役割**: DiscordのembedのURL系フィールド(`embed.url`、`thumbnail.url`)へ渡すURLを、`requests.utils.requote_uri`でRFC準拠の形へパーセントエンコードする。運用ログで、画像URLが`https://`で始まっていても日本語ファイル名や全角スペースが未エンコードのまま含まれる場合（例: `.../20260402130316-ニコ　加工済.jpg`）、Discordがそれを「well formed」なURLと認めず`400 Bad Request`でembed全体を拒否する事象が発生した。`requote_uri`は既にパーセントエンコード済みの部分を二重エンコードせず、非ASCII文字・スペース等のみを安全にエンコードするため、これを用いる。
+* 根拠: [静的メソッドの定義とDocstring] (行番号: 477〜489 / 抜粋: "def _to_well_formed_url(url: str) -> str:\n        \"\"\"DiscordのembedのURL系フィールド向けに、URLをRFC準拠の形へパーセントエンコードする。\n\n        スクレイピング元サイトのHTML(imgのsrc属性・aのhref属性等)には、日本語の\n        ファイル名や全角スペースが未エンコードのまま残っていることがある")
+
+
+* **引数/リクエスト**: `_to_well_formed_url(url: str)`
+* **戻り値/レスポンス**: `str`（`requests.utils.requote_uri(url)`の結果。既にパーセントエンコード済みの部分は変化せず、非ASCII文字・スペース等のみエンコードされる）
+* 根拠: [戻り値ヒントと処理] (行番号: 478, 490 / 抜粋: "def _to_well_formed_url(url: str) -> str:" / "return requests.utils.requote_uri(url)")
+
+
+* **副作用**: なし（純粋な文字列処理）
+* **エラーハンドリング**: なし
+
+
 ### `DiscordNotifier.__init__`
 
 * **役割**: Discordへの通知送信を担当するサービスクラスのコンストラクタ。Webhook URLを保持し、レート制限に自動追従するHTTPセッションを生成する。あわせて、このインスタンスの生存期間(=1回のプロセス実行の間)だけ有効な`DiscordCircuitBreaker`インスタンスを生成し保持する。
@@ -441,8 +456,8 @@
 * 根拠: [戻り値ヒントとreturn文] (行番号: 517, 520 / 抜粋: "def notify(self, new_casts: List[CastMember], site_name: str = "") -> int:" / "return sent_count")
 
 
-* **副作用**: Webhook URL未設定時の警告ログ出力、ループ先頭でのサーキットブレーカー開放チェック（開いていれば警告ログを出力し`break`）、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`/`trip`)、**（D-L9で追加）** 送信成功のたびの`sent_count`インクリメント。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。`cast.image_url`が`http://`/`https://`で始まらない場合（lazyload画像のプレースホルダーとして`data:`URIや相対パスが混入したケース等）は、embedの`thumbnail`を送信せず空オブジェクトにする（Discord側のURL形式バリデーション失敗による`400 Bad Request`を避けるため）。
-* 根拠: [ブレーカーチェックと送信処理・thumbnail URL検証・sent_count加算] (行番号: 551〜558, 579〜591, 602, 602〜604 / 抜粋: "if self._circuit_breaker.is_open:\n                # 連続送信失敗によりサーキットブレーカーが開いている間は、\n                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。" / "thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else \"\"" / "self._circuit_breaker.record_success()\n                sent_count += 1")
+* **副作用**: Webhook URL未設定時の警告ログ出力、ループ先頭でのサーキットブレーカー開放チェック（開いていれば警告ログを出力し`break`）、各キャストごとのレート制限回避待機(`time.sleep(1)`)、Discord Webhookへの`session.post`呼び出し、成功/失敗のログ出力と`self._circuit_breaker`の状態更新(`record_success`/`record_failure`/`trip`)、**（D-L9で追加）** 送信成功のたびの`sent_count`インクリメント。年齢(`cast.age`)が存在する場合のみ`Age`フィールドを追加する。`cast.image_url`が`http://`/`https://`で始まらない場合（lazyload画像のプレースホルダーとして`data:`URIや相対パスが混入したケース等）は、embedの`thumbnail`を送信せず空オブジェクトにする（Discord側のURL形式バリデーション失敗による`400 Bad Request`を避けるため）。**（2026-09-09 運用障害対応で追加）** スキーム判定を通過した`cast.image_url`、および`cast.detail_url`（`embed.url`とLinkフィールド双方に使用）は、送信前に`self._to_well_formed_url`でパーセントエンコードしてから使う。日本語ファイル名・全角スペース等の未エンコード文字を含むURLは`http(s)`で始まっていてもDiscordに「well formed」と認められず`400 Bad Request`でembed全体が拒否されていたための対応。
+* 根拠: [ブレーカーチェックと送信処理・thumbnail URL検証・sent_count加算] (行番号: 551〜558, 579〜591, 602, 602〜604 / 抜粋: "if self._circuit_breaker.is_open:\n                # 連続送信失敗によりサーキットブレーカーが開いている間は、\n                # 無駄なリクエストを重ねないよう残り件数分の送信をスキップする。" / "thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else \"\"" / "self._circuit_breaker.record_success()\n                sent_count += 1")、[URLエンコード適用箇所] (行番号: 579, 590, 599〜605, 615 / 抜粋: "safe_detail_url = self._to_well_formed_url(cast.detail_url)" / "thumbnail_url = self._to_well_formed_url(thumbnail_url)" / "\"url\": safe_detail_url,")
 
 
 * **エラーハンドリング**: Webhook URLが未設定または`'YOUR_DISCORD'`を含む場合は警告ログを出力し即座に`0`を返す（**D-L9で変更**。以前は`return`のみで戻り値は常に`None`だった）。`requests.HTTPError`発生時はレスポンス本文の先頭300文字に加え、原因切り分け用として`detail_url`/`image_url`を含めてエラーログを出力し（**2026-09-06 品質監査で修正**。トレースバックがWebhook URLを含むトークンごと露出させるため`exc_info`は付けず、`{type(e).__name__}: {redact_discord_webhook_url(e)}`の形でURLをマスクして出力する）、ステータスコードが401または404であればさらにエラーログを出力したうえで`self._circuit_breaker.trip()`を呼び即座にブレーカーを開いて通知ループを`break`で打ち切る（401/404以外は`record_failure()`のみ呼び、次のキャストの処理を継続する）。それ以外の`requests.RequestException`発生時も同様に`exc_info`無しでエラーログを出力し`record_failure()`を呼んで次のキャストの処理を継続する。
@@ -1324,6 +1339,7 @@ graph TD
 * **[修正済み・Issue #458] 79サイトを1プロセスで逐次処理する構成**: 以前は`run_monitor`が`MonitorConfig.SITES`の全79件を単一プロセス内で順次処理しており、1回の実行時間がサイト数に比例して増大していた。現在は`_run_monitor_locked`が`ThreadPoolExecutor`（`MonitorConfig.SITE_CHECK_MAX_WORKERS`、既定8）でサイト処理を並列化している。79並列で一斉アクセスするとWAF誤検知や対象サイトへの負荷増大を招くため、同時実行数は小さく制限している。並列化に伴い、`DataManager`が読み書きするサイト横断の共有ファイル(`daily_summary.json`/`site_failures.json`)への読み込み→更新→書き込みが複数スレッドから同時に走りうるようになったため、`DataManager.__init__`で生成する`threading.Lock`（`_shared_file_lock`）で`record_daily_new_casts`/`record_site_failure`/`mark_site_failure_alerted`/`clear_site_failure`の各メソッド全体を直列化している（サイト単位の`known_casts`ファイルはサイトごとに別ファイルのためこのロックの対象外）。各サイト間の待機（`fetch_current_casts`内の`time.sleep(random.uniform(1.0, 3.0))`）自体は変更していない。
 * **`id_query_param`未指定時の複数段フォールバック**: `_parse_html`のID抽出は`id_query_param`指定時のクエリパラメータ優先、次に「キー=値」形式でないクエリ文字列全体、最後にパス末尾セグメントという複数段のフォールバックロジックであり、サイトのURL構造変更時に意図しないIDが生成される可能性がある。
 * **（D-L6で追加）Discord embedの文字数上限は250文字に安全側で切り詰める**: `DiscordNotifier._EMBED_TITLE_MAX_LEN`/`_EMBED_FIELD_VALUE_MAX_LEN`はいずれもDiscordの実際の上限（title 256文字、field.value 1024文字）より小さい250文字に設定している。今後embedへ新しいフィールドを追加する際、そのフィールド値がスクレイピング結果（外部サイト由来で長さが保証されない文字列）である場合は、`_truncate_for_embed`で同様に切り詰めること。
+* **（2026-09-09 運用障害対応で追加）embedのURL系フィールドはhttp(s)判定だけでは不十分**: `cast.image_url`/`cast.detail_url`はスクレイピング元サイトのHTML(`img`のsrc属性・`a`のhref属性等)から`urljoin`で組み立てられるが、日本語ファイル名・全角スペース等がパーセントエンコードされないまま残ることがある(例: `.../20260402130316-ニコ　加工済.jpg`)。この種のURLは`http://`/`https://`で始まっていてもDiscordには「well formed」と認められず、`thumbnail`を条件分岐で弾く既存のスキーム判定（D-L9当時の対応）だけでは防げない。今後embedへ新しいURL系フィールドを追加する場合も、スキーム判定に加えて必ず`DiscordNotifier._to_well_formed_url`（`requests.utils.requote_uri`）を通してから送信すること。回帰テストは`test_newface_monitor_notifier.py::test_non_ascii_image_url_is_percent_encoded_in_thumbnail`・`test_non_ascii_detail_url_is_percent_encoded_in_embed_url_and_link_field`。
 * **（D-L9で追加）日次サマリの計上件数はnotify()の戻り値に依存する**: `_check_site`は`data_manager.record_daily_new_casts`に渡す件数として`notifier.notify(...)`の戻り値（実送信件数）を使う。`notify`のシグネチャを変更する場合（戻り値の意味を変える等）は、この呼び出し元の前提が崩れないか確認すること。
 * **（Issue #586で追加）モジュールimport時に1度だけ評価されるクラス属性を単体テストする際は、値解決ロジックをモジュールレベル関数へ切り出す**: `MonitorConfig.DISCORD_WEBHOOK_URL`は以前`os.getenv('DISCORD_WEBHOOK_URL')`という式をクラス変数の初期化式に直接書いていたが、この式自体を環境変数を変えて検証するには本来`importlib.reload`でモジュールを再評価する必要がある。しかし本ファイルの回帰テスト群は`newface_monitor`モジュールを`sys.modules`経由で共有しており、`reload`はモジュールのクラスオブジェクトを新しく作り直すため、他のテストファイルが同モジュールに対して行っている`monkeypatch.setattr`ベースのフィクスチャを壊す（実際に試して確認された）。このため「1行の式のために関数を1つ切り出す」一見過剰な設計を採り、`_resolve_discord_webhook_url()`という独立関数に解決ロジックを移し、`DISCORD_WEBHOOK_URL`はこれを呼び出すだけにした。同種の「クラス属性の初期化式をimportlib.reload無しに単体テストしたい」という制約に今後遭遇した場合も、このパターン（ロジックをモジュールレベル関数へ切り出し、クラス属性からはそれを呼ぶだけにする）を踏襲すること。回帰テストは`test_newface_monitor_discord_webhook_priority.py::TestResolveDiscordWebhookUrlPriority`。
 * 根拠: [`_resolve_discord_webhook_url`定義とDocstring] (行番号: 224〜240)、[reloadを避ける理由] (`test_newface_monitor_discord_webhook_priority.py` 行番号: 13〜17)

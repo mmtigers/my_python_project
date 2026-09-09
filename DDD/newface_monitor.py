@@ -474,6 +474,22 @@ class DiscordNotifier:
         suffix = "…(省略)"
         return text[: max(max_len - len(suffix), 0)] + suffix
 
+    @staticmethod
+    def _to_well_formed_url(url: str) -> str:
+        """DiscordのembedのURL系フィールド向けに、URLをRFC準拠の形へパーセントエンコードする。
+
+        スクレイピング元サイトのHTML(imgのsrc属性・aのhref属性等)には、日本語の
+        ファイル名や全角スペースが未エンコードのまま残っていることがある
+        (例: ".../20260402130316-ニコ　加工済.jpg")。DiscordはembedのURL系フィールド
+        (embed.url、thumbnail.url等)に「well formed」なURLを要求しており、
+        こうした未エンコードの非ASCII文字をそのまま渡すとそのフィールドのみならず
+        embed全体が400 Bad Requestで拒否される(cast.name等の他フィールドは
+        正常でも通知自体が失われる)。requests.utils.requote_uri は既に
+        パーセントエンコード済みの部分は二重エンコードせず、それ以外の文字
+        (非ASCII・スペース等)のみを安全にエンコードするため、ここに用いる。
+        """
+        return requests.utils.requote_uri(url)
+
     def __init__(self, webhook_url: Optional[str]):
         """
         Args:
@@ -558,6 +574,10 @@ class DiscordNotifier:
                 unsent.extend(new_casts[index:])
                 break
 
+            # 送信するURL系フィールド(embed.url、Linkフィールド、thumbnail.url)は
+            # いずれもここで一度だけ整形し、以降は同じ値を使い回す。
+            safe_detail_url = self._to_well_formed_url(cast.detail_url)
+
             safe_name = self._truncate_for_embed(cast.name, self._EMBED_FIELD_VALUE_MAX_LEN)
             fields = [{"name": "Name", "value": safe_name, "inline": True}]
             if cast.age:
@@ -567,7 +587,7 @@ class DiscordNotifier:
             fields.append({
                 "name": "Link",
                 "value": self._truncate_for_embed(
-                    f"[詳細ページへ]({cast.detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
+                    f"[詳細ページへ]({safe_detail_url})", self._EMBED_FIELD_VALUE_MAX_LEN
                 ),
                 "inline": True,
             })
@@ -577,6 +597,12 @@ class DiscordNotifier:
             # 遅延読み込み(lazyload)画像のプレースホルダー(data:image/gif;base64,...等)を
             # 誤ってimage_urlとして拾ってしまうサイトがあるため、ここで弾く。
             thumbnail_url = cast.image_url if cast.image_url.startswith(('http://', 'https://')) else ""
+            if thumbnail_url:
+                # 日本語ファイル名・全角スペース等の未エンコード文字を含むURLは
+                # http(s)で始まっていてもDiscordに「well formed」と認められず
+                # 400で拒否されるため(_to_well_formed_urlのdocstring参照)、
+                # スキーム判定を通過した後にパーセントエンコードする。
+                thumbnail_url = self._to_well_formed_url(thumbnail_url)
 
             payload = {
                 "username": "New Face Monitor",
@@ -586,7 +612,7 @@ class DiscordNotifier:
                             f"✨ 新人キャスト情報{site_prefix}: {cast.name}", self._EMBED_TITLE_MAX_LEN
                         ),
                         "description": "新しいキャストが追加されました！",
-                        "url": cast.detail_url,
+                        "url": safe_detail_url,
                         "color": 16738740,  # Pinkish
                         "fields": fields,
                         "thumbnail": {"url": thumbnail_url} if thumbnail_url else {}
