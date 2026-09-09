@@ -827,6 +827,16 @@ class DataManager:
     # 圧迫し得た。この日数より古い隔離ファイルは巡回のたびに削除する。
     _QUARANTINE_RETENTION_DAYS = 30
 
+    # 2026-09-09 運用障害対応: save_known_castsの一時ファイル書き込み→読み戻し
+    # 検証(D-L8)が、NAS等の一時的な書き込み不良(例: nas_monitor.pyの日次
+    # 保持期間超過ファイル自動削除とのNAS I/O競合)により空ファイル/破損内容と
+    # なって失敗することがある。検証失敗時は即座に諦めて既存データを保持する
+    # (安全側の設計自体は正しい)が、単発の一過性事象でもその回の新規検知が
+    # 「既知」として保存されず次回再通知されてしまうため、書き込み→検証全体を
+    # 短い間隔で数回リトライしてから諦めるようにする。
+    _SAVE_VERIFY_MAX_ATTEMPTS = 3
+    _SAVE_VERIFY_RETRY_DELAY_SECONDS = 2.0
+
     def __init__(self, data_dir: Path):
         """
         Args:
@@ -969,6 +979,27 @@ class DataManager:
         # データ破損時は安全側に倒して空集合（再通知される可能性があるがシステム停止よりマシ）
         return set()
 
+    @staticmethod
+    def _write_and_verify_tmp(tmp_path: Path, data: list) -> None:
+        """一時ファイルへJSONを書き込み、直後に読み戻して内容を検証する。
+
+        Args:
+            tmp_path (Path): 書き込み先の一時ファイルパス。
+            data (list): JSONシリアライズ対象のリスト(CastMember.to_dict()の結果)。
+
+        Raises:
+            OSError: ファイルI/Oに失敗した場合。
+            ValueError: 書き込んだ内容が正しいJSONとして読み戻せなかった場合
+                (json.JSONDecodeErrorを含む)。
+            TypeError: 読み戻した内容からCastMemberを再構築できなかった場合。
+        """
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
+        # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
+        # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
+        DataManager._read_casts_file(tmp_path)
+
     def save_known_casts(self, site: SiteConfig, casts: Set[CastMember]) -> None:
         """指定サイトのキャストデータをJSONファイルに保存する。
 
@@ -986,13 +1017,31 @@ class DataManager:
             # 書き込み中断時に既存データが破損/空になるのを防ぐ
             # (batch_download_discord.py の _purge_skipped_tasks と同じパターン)
             tmp_path = data_file.with_suffix(data_file.suffix + '.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
 
-            # 書き込んだ内容が正しく読み戻せることを検証してから本番ファイルへ反映する。
-            # NAS等での書き込み中断による不可視の破損（バイト単位の欠損等）を
-            # ここで検知できれば、破損データへの置き換え自体を未然に防げる。
-            DataManager._read_casts_file(tmp_path)
+            # 2026-09-09 運用障害対応: 書き込み→読み戻し検証(D-L8)がNAS等の
+            # 一時的な書き込み不良で失敗することがあるため、短い間隔で数回
+            # リトライする(nas_monitor.pyの日次保持期間超過ファイル自動削除等、
+            # 他プロセスとのNAS I/O競合による一過性の空振りを想定)。全て失敗
+            # した場合のみ最後の例外を外側のexceptへ伝播させ、既存データは
+            # 保持したまま今回の保存を諦める(安全側の挙動自体は変更しない)。
+            last_error: Optional[Exception] = None
+            for attempt in range(1, DataManager._SAVE_VERIFY_MAX_ATTEMPTS + 1):
+                try:
+                    DataManager._write_and_verify_tmp(tmp_path, data)
+                    last_error = None
+                    break
+                except (OSError, ValueError, TypeError) as e:
+                    last_error = e
+                    tmp_path.unlink(missing_ok=True)
+                    if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
+                        logger.warning(
+                            f"Write verification failed for {tmp_path} "
+                            f"(attempt {attempt}/{DataManager._SAVE_VERIFY_MAX_ATTEMPTS}); "
+                            f"retrying after a transient storage issue: {e}"
+                        )
+                        time.sleep(DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS)
+            if last_error is not None:
+                raise last_error
 
             # 直前の正常データをバックアップとして残す。次回読み込み失敗時、
             # 空集合へのフォールバック（全キャスト再通知）を避けるために使う。
