@@ -348,7 +348,10 @@ class TestSaveKnownCastsBackup:
 
     def test_verification_failure_does_not_leave_tmp_file_behind(self, tmp_path, monkeypatch):
         """D-L8: tmpファイルの読戻し検証に失敗した場合、以前は.json.tmpが
-        削除されずディレクトリに残り続けていた。best-effortで削除すること。"""
+        削除されずディレクトリに残り続けていた。best-effortで削除すること。
+        2026-09-09運用障害対応でリトライが追加されたため、実際のsleepは
+        monkeypatchで無効化し、常に失敗し続けるケース(リトライを使い切って
+        最終的に諦める)を検証する。"""
         site = _make_site("known_casts_restpia_test.json")
         dm = DataManager(tmp_path)
 
@@ -356,6 +359,7 @@ class TestSaveKnownCastsBackup:
             raise ValueError("simulated verification failure")
 
         monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(_raise_on_verify))
+        monkeypatch.setattr(module.time, "sleep", lambda *_: None)
 
         dm.save_known_casts(
             site, {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
@@ -365,6 +369,37 @@ class TestSaveKnownCastsBackup:
         tmp_path_file = data_file.with_suffix(data_file.suffix + ".tmp")
         assert not tmp_path_file.exists()
         assert not data_file.exists()  # 検証失敗のためreplaceまで到達していない
+
+    def test_verification_retries_and_recovers_from_transient_failure(self, tmp_path, monkeypatch):
+        """2026-09-09運用障害対応: NAS等の一時的な書き込み不良で読み戻し検証が
+        一度失敗しても、リトライで回復すれば保存は成功すること。
+        (実運用ログ: nas_monitor.pyの日次保持期間超過ファイル自動削除との
+        NAS I/O競合と推測される、'Expecting value: line 1 column 1 (char 0)'
+        というJSONDecodeErrorでsave_known_castsが失敗する事象)"""
+        site = _make_site("known_casts_restpia_test.json")
+        dm = DataManager(tmp_path)
+
+        original_read = DataManager._read_casts_file
+        call_count = {"n": 0}
+
+        def _flaky_read(path):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return original_read(path)
+
+        monkeypatch.setattr(module.DataManager, "_read_casts_file", staticmethod(_flaky_read))
+        sleep_calls = []
+        monkeypatch.setattr(module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+        casts = {CastMember(id="1", name="Alice", detail_url="u", image_url="i", age="20")}
+        dm.save_known_casts(site, casts)
+
+        data_file = tmp_path / site.get_data_filename()
+        assert data_file.exists()
+        assert dm.load_known_casts(site) == casts
+        # 1回失敗→1回リトライして成功したので、リトライ待機は1回だけ発生する
+        assert sleep_calls == [DataManager._SAVE_VERIFY_RETRY_DELAY_SECONDS]
 
 
 class TestLoadDailySummaryCorruption:
