@@ -850,9 +850,19 @@ class DataManager:
         # 集約管理)への読み込み→更新→書き込みが複数スレッドから同時に
         # 走りうるようになった。read-modify-writeの間に他スレッドの書き込みが
         # 割り込むと更新が失われるため、これらの共通ファイルを操作するメソッド
-        # 全体をこのロックで直列化する(サイト単位のknown_castsファイルは
-        # サイトごとに別ファイルのため対象外)。
-        self._shared_file_lock = threading.Lock()
+        # 全体をロックで直列化する(サイト単位のknown_castsファイルはサイト
+        # ごとに別ファイルのため対象外)。
+        #
+        # 2026-09-10: 以前はdaily_summary.json/site_failures.jsonの両方を
+        # 単一の_shared_file_lockで直列化していたが、_retry_transient_write
+        # (2026-09-09運用障害対応)の追加によりNAS I/O不良時は最大2回×2秒の
+        # sleepをロック保持したまま行うようになった。単一ロックだと例えば
+        # site_failures.json側のリトライがdaily_summary.json側の無関係な
+        # 更新まで巻き添えでブロックしてしまうため、ファイルごとに別ロックへ
+        # 分離する(同一ファイルへの同時読み書きが更新を失う問題は、
+        # ファイルごとのロックでも変わらず防止できる)。
+        self._daily_summary_lock = threading.Lock()
+        self._site_failures_lock = threading.Lock()
 
     def _data_file(self, site: SiteConfig) -> Path:
         """指定サイトの既知キャスト保存先JSONファイルのパスを返す。"""
@@ -1013,7 +1023,10 @@ class DataManager:
                 return
             except (OSError, ValueError, TypeError) as e:
                 last_error = e
-                tmp_path.unlink(missing_ok=True)
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 if attempt < DataManager._SAVE_VERIFY_MAX_ATTEMPTS:
                     logger.warning(
                         f"Write verification failed for {tmp_path} "
@@ -1302,7 +1315,7 @@ class DataManager:
         if count <= 0:
             return
 
-        with self._shared_file_lock:
+        with self._daily_summary_lock:
             try:
                 data = self.load_daily_summary()
             except DataFileUnavailableError as e:
@@ -1497,7 +1510,7 @@ class DataManager:
                 「連続失敗0回・未アラート」として扱う(#578。他サイト分の
                 状態を巻き添えで消さないため)。
         """
-        with self._shared_file_lock:
+        with self._site_failures_lock:
             try:
                 data = self.load_site_failures()
             except DataFileUnavailableError as e:
@@ -1514,7 +1527,7 @@ class DataManager:
         Args:
             site_id (str): アラートを送信したサイトのID。
         """
-        with self._shared_file_lock:
+        with self._site_failures_lock:
             try:
                 data = self.load_site_failures()
             except DataFileUnavailableError as e:
@@ -1535,7 +1548,7 @@ class DataManager:
         Args:
             site_id (str): 疎通に成功したサイトのID。
         """
-        with self._shared_file_lock:
+        with self._site_failures_lock:
             try:
                 data = self.load_site_failures()
             except DataFileUnavailableError as e:
@@ -2287,7 +2300,8 @@ def _run_monitor_locked() -> None:
         # 自体はスレッドセーフ。DiscordNotifierのサーキットブレーカーと、
         # DataManagerが読み書きするサイト横断の共有ファイル
         # (daily_summary.json/site_failures.json)は、それぞれ内部でロックを
-        # 取るように変更済み(DiscordCircuitBreaker/DataManager._shared_file_lock)。
+        # 取るように変更済み(DiscordCircuitBreaker/DataManager._daily_summary_lock
+        # /DataManager._site_failures_lock)。
         # 1サイトの予期しない例外は、他サイトの処理を止めずfuture.result()の
         # except節でのみ捕捉する(逐次実装時と同じ隔離方針)。
         failed_count = 0
