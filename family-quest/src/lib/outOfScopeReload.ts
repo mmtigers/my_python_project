@@ -11,9 +11,11 @@
 // SWの管理外にあるページに対しては、ページ自身のHTMLを定期的にno-cacheで
 // 再取得しLast-Modifiedヘッダの変化を見ることで、同じ問題を防ぐ。
 
+import { getPathSegments } from './pathSegments';
+
 /** 現在のパスがService Workerのスコープ(`/quest/`)外かどうかを判定する。 */
 export function isOutsideServiceWorkerScope(pathname: string): boolean {
-    const segments = pathname.split('/').filter(Boolean);
+    const segments = getPathSegments(pathname);
     return segments[0] !== 'quest';
 }
 
@@ -45,6 +47,14 @@ export function createUpdateChecker(pathname: string, deps: UpdateCheckDeps) {
             deps.reload();
             return;
         }
-        lastModified = current;
+        // current === null(Last-Modifiedヘッダが無い応答。例: デプロイの瞬間に
+        // index.htmlが一時的に見つからず、ヘッダ無しのエラー応答が返るケース)の
+        // 場合、既知のベースラインをnullで上書きしてはならない。上書きすると、
+        // 次回ポーリングで新しいビルドのLast-Modifiedを取得しても
+        // 「ベースライン不明」として扱われ、変化を検知できずreloadが発火しない
+        // (#591が防ぐはずだった「旧バンドル固着」を再発させる。コードレビュー指摘)。
+        if (current !== null) {
+            lastModified = current;
+        }
     };
 }

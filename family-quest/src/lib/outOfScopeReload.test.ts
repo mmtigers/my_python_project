@@ -97,4 +97,30 @@ describe('createUpdateChecker (#591)', () => {
 
         expect(reload).not.toHaveBeenCalled();
     });
+
+    it('does not lose the known baseline when a single poll is missing Last-Modified, and still detects a later change', async () => {
+        // コードレビュー指摘の回帰テスト: デプロイの瞬間にindex.htmlが一時的に
+        // 見つからずLast-Modified無しの応答が挟まっても、既知のベースラインを
+        // nullで上書きしてはならない。そうしないと、直後に新しいビルドを
+        // 検知してもベースライン不明として再学習するだけでreloadが発火しない。
+        const reload = vi.fn();
+        const responses: (string | null)[] = [
+            'Mon, 01 Jan 2026 00:00:00 GMT', // 通常のポーリング(ベースライン確立)
+            null, // デプロイ中の瞬断: Last-Modifiedヘッダ無しの応答
+            'Tue, 02 Jan 2026 00:00:00 GMT', // デプロイ完了後の新しいビルド
+        ];
+        const fetchImpl = vi.fn().mockImplementation(() =>
+            Promise.resolve({ headers: { get: () => responses.shift() ?? null } })
+        );
+        const checker = createUpdateChecker('/camera', { fetch: fetchImpl, reload });
+
+        await checker(); // baseline: 'Mon...'
+        expect(reload).not.toHaveBeenCalled();
+
+        await checker(); // Last-Modified欠落。baselineは'Mon...'のまま維持されるべき
+        expect(reload).not.toHaveBeenCalled();
+
+        await checker(); // 'Tue...'を検知し、'Mon...'との差分でreloadが発火するべき
+        expect(reload).toHaveBeenCalledTimes(1);
+    });
 });
