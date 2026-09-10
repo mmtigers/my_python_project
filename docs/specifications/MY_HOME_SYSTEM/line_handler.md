@@ -81,6 +81,27 @@
 * **エラーハンドリング**: なし（超過が無ければ早期return）
 * 根拠: `if overflow <= 0: return` (行番号: 119-120)
 
+### `_is_authorized_line_user` (関数、Issue #620で追加)
+
+* **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。`config.SWITCHBOT_WEBHOOK_TOKEN`と同じく、allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。
+* 根拠: `def _is_authorized_line_user(user_id: str) -> bool:` (行番号: 132-144)、後方互換の早期return (行番号: 142-143 / 抜粋: "if not config.AUTHORIZED_LINE_USER_IDS:\n        return True")
+
+
+* **引数/リクエスト**: `user_id: str`
+* 根拠: 関数シグネチャ (行番号: 132)
+
+
+* **戻り値/レスポンス**: `bool`(認可済みなら`True`)
+* 根拠: `return user_id in config.AUTHORIZED_LINE_USER_IDS` (行番号: 144)
+
+
+* **副作用**: なし
+* 根拠: 関数本体 (行番号: 132-144)
+
+
+* **エラーハンドリング**: なし
+* 根拠: 関数本体 (行番号: 132-144)
+
 ### `_get_display_name`
 
 * **（Issue #542 で修正）** `_profile_cache` の読み書きと `_evict_oldest_profile_cache_entries` の呼び出しを新設の `_profile_cache_lock`(`threading.Lock`)で保護する。以前は BackgroundTasks の複数スレッドから同時に更新されると `sorted(_profile_cache, ...)` が `RuntimeError: dictionary changed size during iteration` になり、`handle_message` の `except` で当該メッセージが無応答のまま捨てられ得た。
@@ -238,8 +259,8 @@
 
 ### `_process_message_async`
 
-* **役割**: 受信したテキストメッセージを処理する非同期ロジック。「子供記録」または「体調」というキーワードを含む場合は体調記録の分岐へ、それ以外（または体調記録の分岐で対象メンバーが1人も見つからなかった場合）はAI解析（`ai_service.analyze_text_and_execute`）へフォールバックする。**（#358で撤去）** 以前ここにあった「ステータス」「クエスト」への完全一致、および「承認」「却下」で始まる文字列に対する分岐（`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`の呼び出し）は、LINE IDと`quest_users.user_id`のマッピングが存在せず本番で機能しないデッドコードだったため削除された（オーナー判断、Issue #358）。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合はAI解析へフォールバックする。
-* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 265 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、撤去コメント (行番号: 268-271 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、体調分岐 (行番号: 273-283 / 抜粋: "targets = _extract_health_targets(msg_text)")、AIフォールバック (行番号: 285-304 / 抜粋: "# 2. AI Analysis (Fallback)")
+* **役割**: 受信したテキストメッセージを処理する非同期ロジック。「子供記録」または「体調」というキーワードを含む場合は体調記録の分岐へ、それ以外（または体調記録の分岐で対象メンバーが1人も見つからなかった場合）はAI解析（`ai_service.analyze_text_and_execute`）へフォールバックする。**（#358で撤去）** 以前ここにあった「ステータス」「クエスト」への完全一致、および「承認」「却下」で始まる文字列に対する分岐（`line_service.get_user_status_message`/`get_active_quests_message`/`process_approval_command`の呼び出し）は、LINE IDと`quest_users.user_id`のマッピングが存在せず本番で機能しないデッドコードだったため削除された（オーナー判断、Issue #358）。**（Issue #375で修正）** 体調記録の分岐は`_extract_health_targets`でメッセージ中の全メンバーと各人の体調（否定表現を優先判定）を取得し、全員分`line_service.log_child_health`を呼んだうえで、返信メッセージを1回の`reply_message`にまとめて（最大5件）送信する。メンバー名が1つも含まれない場合はAI解析へフォールバックする。**（Issue #620で修正）** 体調・食事記録の分岐とAI解析フォールバックの両方に入る前に`_is_authorized_line_user(user_id)`で認可チェックを行い、`config.AUTHORIZED_LINE_USER_IDS`に含まれない`user_id`からのメッセージは、どちらの処理にも進ませず警告ログを出して早期returnする(誰が認可対象かを教える返信はしない)。
+* 根拠: `async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):` (行番号: 265 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")、撤去コメント (行番号: 268-271 / 抜粋: "以前ここにあった LINE 経由の Family Quest コマンド")、認可ガード (行番号: 298-303 / 抜粋: "if not _is_authorized_line_user(user_id):\n        logger.warning(...)\n        return")、体調分岐 (行番号: 305-315 / 抜粋: "targets = _extract_health_targets(msg_text)")、AIフォールバック (行番号: 317-336 / 抜粋: "# 2. AI Analysis (Fallback)")
 
 
 * **引数/リクエスト**:
@@ -247,19 +268,19 @@
 * `user_name`: `str`型 (ユーザーの表示名)
 * `msg_text`: `str`型 (受信したテキストメッセージ)
 * `reply_token`: `str`型 (返信用トークン)
-* 根拠: 引数定義 (行番号: 265 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
+* 根拠: 引数定義 (行番号: 290 / 抜粋: "async def _process_message_async(user_id: str, user_name: str, msg_text: str, reply_token: str):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 体調記録分岐の`return` (行番号: 283)。AI分岐は関数末尾まで到達し暗黙的に`None`を返す。
+* 根拠: 認可ガードの`return`(行番号: 303)。体調記録分岐の`return` (行番号: 315)。AI分岐は関数末尾まで到達し暗黙的に`None`を返す。
 
 
-* **副作用**: `line_service.log_child_health`/`line_service.split_text_into_line_messages`、`ai_service.analyze_text_and_execute` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。
-* 根拠: サービス呼び出し (行番号: 280, 282, 288-294 / 抜粋: "ai_resp_text = await asyncio.wait_for(")
+* **副作用**: `line_service.log_child_health`/`line_service.split_text_into_line_messages`、`ai_service.analyze_text_and_execute` への処理委譲に伴う副作用、および `reply_message` によるメッセージ送信。**（Issue #376で修正）** すべての`reply_message`呼び出しに`user_id=`を渡し、返信失敗時のpushフォールバックを可能にしている。AI経路は`asyncio.wait_for(..., timeout=AI_REPLY_TIMEOUT_SEC)`で総時間を制限する。**（Issue #620で追加）** 未認可ユーザーの場合は`logger.warning`の出力のみで、以降のいずれの副作用も発生しない。
+* 根拠: サービス呼び出し (行番号: 312, 314, 320-326 / 抜粋: "ai_resp_text = await asyncio.wait_for(")、認可ガードの`logger.warning` (行番号: 302 / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました")
 
 
-* **エラーハンドリング**: AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。体調記録の分岐（1.）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
-* 根拠: `except asyncio.TimeoutError:` (行番号: 295-301)、`except Exception as e: logger.error(...)` (行番号: 302-304 / 抜粋: "except Exception as e:")
+* **エラーハンドリング**: **（Issue #620で追加）** 最初に`_is_authorized_line_user(user_id)`が`False`を返す場合、警告ログのみでそれ以降のいずれの処理にも進まず早期returnする。AI処理 (`ai_service.analyze_text_and_execute`) が`AI_REPLY_TIMEOUT_SEC`秒以内に終わらない場合（`asyncio.TimeoutError`）はエラーログを出力し「⏳ 処理に時間がかかりすぎたため中断しました。記録が反映されているか確認のうえ…」を返信する（Issue #376。打ち切り時点でスレッド上のDB書き込みが完了している可能性があるため、確認を促す文言にしている）。その他の例外はエラーログを出力し、固定のエラーメッセージ("😓 すみません、うまく処理できませんでした。")をユーザーに返信する。体調記録の分岐（1.）にはtry-exceptがない（呼び出し元`handle_message`のイベント単位隔離で握られる）。
+* 根拠: 認可ガード (行番号: 301-303 / 抜粋: "if not _is_authorized_line_user(user_id):")、`except asyncio.TimeoutError:` (行番号: 327-333)、`except Exception as e: logger.error(...)` (行番号: 334-336 / 抜粋: "except Exception as e:")
 
 
 
@@ -359,7 +380,9 @@ flowchart TD
     RedeliveryPB -- Yes --> SkipPB["スキップ(警告ログ)"]
     RedeliveryPB -- No --> LogicPostback["外部：line_logic.handle_postback()<br>(#358: 承認/却下の先取り分岐は撤去済み。常にここへ委譲)"]
 
-    RunAsyncMessage --> HealthKeyword{"'子供記録'または'体調'を含むか"}
+    RunAsyncMessage --> AuthCheck{"Issue #620: _is_authorized_line_user?"}
+    AuthCheck -- No --> SkipUnauthorized["スキップ(警告ログ)"]
+    AuthCheck -- Yes --> HealthKeyword{"'子供記録'または'体調'を含むか"}
     HealthKeyword -- No --> CallAI["外部：ai_service.analyze_text_and_execute()<br>(タイムアウト20秒)"]
     HealthKeyword -- Yes --> ExtractTargets["Issue #375: _extract_health_targets<br>(全メンバー・否定表現優先)"]
     ExtractTargets -- "メンバー無し" --> CallAI
@@ -441,6 +464,10 @@ graph TD
 
 * **[修正済み] Issue #572 `handle_postback`にIssue #410のuser_id=Noneガードが無かった非対称性**: Issue #410（L-L6）は`handle_message`にのみ`event.source.user_id is None`（グループでのプロフィール未共有等）の早期returnガードを追加し、兄弟関数である`handle_postback`（体調ボタン・「みんな元気」一括操作・食事アンケート等のPostbackを`line_logic.handle_postback`へ委譲するディスパッチャ）は対象外のまま残っていた。このため、プロフィール未共有のユーザーがグループでPostbackボタンを押すと、`user_id=None`のまま`line_logic.handle_postback`へ処理が進み、`user_id`が`NULL`の体調記録（例: `child_health_records`へ`(None, 'グループの人', '智矢', '😊 元気いっぱい')`のような紐付け不能な行）が保存され得た。対応として、`handle_postback`内で`user_id = event.source.user_id`を読み取った直後・`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`handle_message`のIssue #410ガードと同じスタイル（警告ログ＋早期return）のガードを追加し、両ハンドラー間の非対称性を解消した。回帰テストとして`tests/test_line_handler_dispatch.py`の`TestHandlePostbackWrapper.test_none_user_id_skips_delegation`（`event.source.user_id = None`のモックPostbackイベントで`line_handler.handle_postback(event)`を呼び、`line_logic.handle_postback`が一度も呼ばれないことを検証）を追加した。
 * 根拠: `handle_postback`の`if user_id is None:` (行番号: 324-331 / 抜粋: "if user_id is None:")、対応する`handle_message`側のガード (行番号: 258-260)
+
+
+* **[新規] Issue #620 未認可LINEユーザーによる体調・食事記録の偽装・AI経由DB検索が可能だった**: LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できる一方、`_process_message_async`は送信元が家族かどうかを一切検証していなかった。これにより、第三者が体調・食事記録(`line_service.log_child_health`/`log_food_record`)を任意の内容で書き込んだり、AI解析フォールバック(`ai_service.analyze_text_and_execute`)経由で`ai_service.ALLOWED_SEARCH_TABLES`(体調・食事・買い物・電力使用量)を検索したりできた。`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)を新設し、`_is_authorized_line_user(user_id)`で`_process_message_async`の冒頭(体調記録・AIフォールバックの両分岐より前)を一括ガードした。allowlist自体が未設定の場合は`config.SWITCHBOT_WEBHOOK_TOKEN`と同じ後方互換方針で常に認可済み扱いとなる点に注意(**認可を実際に有効化するには`.env`で明示的に設定する必要がある**)。なお`handlers/line_logic.py`のPostback経路(体調ボタン・「みんな元気」一括操作・食事アンケート等、`save_log_async`を直接呼ぶ)はこのガードの対象外のまま残っており、別途の検討が必要。
+* 根拠: `_is_authorized_line_user`定義 (行番号: 132-144)、`_process_message_async`内のガード呼び出し (行番号: 301-303 / 抜粋: "if not _is_authorized_line_user(user_id):")、`config.AUTHORIZED_LINE_USER_IDS`定義 (`MY_HOME_SYSTEM/config.py` 行番号: 228-230)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。

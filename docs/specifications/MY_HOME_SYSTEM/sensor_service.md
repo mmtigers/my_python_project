@@ -16,6 +16,7 @@
 - [logger.md](./logger.md) — `core.logger.setup_logging`の実体
 - [switchbot_power_monitor.md](./switchbot_power_monitor.md) — 呼び出し元(`process_power_data`, `process_meter_data`を呼び出す)
 - [webhook_router.md](./webhook_router.md) — 呼び出し元(`is_duplicate_webhook`, `process_sensor_data`を呼び出す)
+- [line_handler.md](./line_handler.md) — Issue #621のサイズ上限+LRU方式eviction(`_MAC_CACHE_MAX_SIZE`/`_evict_stale_macs`)は、本ファイルの`_profile_cache`/`_PROFILE_CACHE_MAX_SIZE`(Issue #410)と同じ設計パターン
 
 ## 2. ファイルの概要
 
@@ -48,26 +49,47 @@
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
 
+### `_MAC_CACHE_MAX_SIZE` / `_mac_last_seen` / `_evict_stale_macs` / `_touch_mac`（Issue #621で追加）
+
+* **役割**: `EVENT_CACHE`/`IS_ACTIVE`/`LAST_NOTIFY_TIME`/`MOTION_TASKS`の4つはすべてSwitchBot Webhookの`context.deviceMac`（攻撃者が任意の値を送りつけて増やせるキー）をキーにしており、以前はエントリを削除する仕組みが無かったため無制限に成長し続けていた（プロセスは長時間稼働するため実質的なメモリリーク）。`_mac_last_seen`（mac→最終アクセス時刻の辞書）を4キャッシュ共通のLRU基準として新設し、`_MAC_CACHE_MAX_SIZE`（500）を超えたら`_evict_stale_macs`が最終アクセス時刻の古いMACから順に4キャッシュすべてからエントリを削除する。`_touch_mac(mac)`は最終アクセス時刻の更新とeviction呼び出しをまとめたヘルパーで、`is_duplicate_webhook`・`process_sensor_data`の冒頭から呼ばれる。`MOTION_TASKS`に未完了のタスクが残っている場合は、参照を失ったタスクが`MOTION_TIMEOUT`秒（15分）孤立して残留しないよう、辞書から削除する前に`cancel()`する。単一のFastAPI非同期エンドポイントから直接awaitされ他スレッドからの並行アクセスが無いため、`handlers/line_handler.py`の`_profile_cache`のような`threading.Lock`は使用していない。
+* 根拠: `_MAC_CACHE_MAX_SIZE = 500` / `_mac_last_seen: Dict[str, float] = {}` (行番号: 38-39)、`def _evict_stale_macs() -> None:` (行番号: 42-63)、`def _touch_mac(mac: str) -> None:` (行番号: 66-71)、タスクキャンセル (行番号: 58-59 / 抜粋: "if isinstance(task, asyncio.Task) and not task.done():\n            task.cancel()")
+
+
+* **引数/リクエスト**: `_evict_stale_macs()`: なし。`_touch_mac(mac: str)`: `mac: str`
+* 根拠: 関数シグネチャ (行番号: 42, 66)
+
+
+* **戻り値/レスポンス**: いずれも`None`
+* 根拠: 関数シグネチャ (行番号: 42, 66)
+
+
+* **副作用**: `_mac_last_seen`への書き込み・削除、上限超過時は`EVENT_CACHE`/`IS_ACTIVE`/`LAST_NOTIFY_TIME`/`MOTION_TASKS`すべてからの該当MACの削除（`MOTION_TASKS`は削除前に未完了タスクを`cancel()`）。
+* 根拠: (行番号: 56-63, 70-71)
+
+
+* **エラーハンドリング**: なし（上限超過が無ければ`_evict_stale_macs`は早期return）
+* 根拠: `if overflow <= 0: return` (行番号: 52-53)
+
 ### `is_duplicate_webhook`
 
-* **役割**: インメモリキャッシュ（`EVENT_CACHE`）を参照し、直近イベントから `DEDUPE_TTL_SECONDS`（3秒）以内で同一ステータスの場合は重複と判定しキャッシュを更新する。
-* 根拠: `[is_duplicate_webhook]` (行番号: 43 / 抜粋: "last_event['state'] == state a")
+* **役割**: インメモリキャッシュ（`EVENT_CACHE`）を参照し、直近イベントから `DEDUPE_TTL_SECONDS`（3秒）以内で同一ステータスの場合は重複と判定しキャッシュを更新する。**（Issue #621で修正）** 判定の前に`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準（最終アクセス時刻）を更新する。
+* 根拠: `[is_duplicate_webhook]` (行番号: 82 / 抜粋: "last_event['state'] == state a")、`_touch_mac`呼び出し (行番号: 82 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `state: str`, `event_timestamp: float`
-* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 73 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 * **戻り値/レスポンス**: `bool`
-* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: ") -> bool:")
+* 根拠: `[is_duplicate_webhook]` (行番号: 73 / 抜粋: ") -> bool:")
 
 
-* **副作用**: グローバル変数 `EVENT_CACHE` への書き込みおよび更新。
-* 根拠: `[is_duplicate_webhook]` (行番号: 47 / 抜粋: "EVENT_CACHE[mac] = {")
+* **副作用**: `_touch_mac`経由の`_mac_last_seen`更新・上限超過時のeviction、およびグローバル変数 `EVENT_CACHE` への書き込みおよび更新。
+* 根拠: `_touch_mac(mac)` (行番号: 82)、`EVENT_CACHE[mac] = {` (行番号: 93)
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[is_duplicate_webhook]` (行番号: 29 / 抜粋: "def is_duplicate_webhook(mac: ")
+* 根拠: `[is_duplicate_webhook]` (行番号: 73 / 抜粋: "def is_duplicate_webhook(mac: ")
 
 
 
@@ -101,24 +123,24 @@
 
 ### `process_sensor_data`
 
-* **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。モーション判定は`dev_type`が`"Motion"`を部分一致で含む場合（デバイス一覧APIの語彙`"Motion Sensor"`向け）に加え、`dev_type`がSwitchBot公式Webhookの語彙`"WoPresence"`と完全一致する場合にも成立する（#94修正: 以前は`"Motion" in dev_type`のみだったため、公式Webhook形式(`context.deviceType="WoPresence"`)のモーションイベントがこの分岐に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。
-* 根拠: `[process_sensor_data]` (行番号: 101 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")
+* **役割**: モーションセンサーまたは開閉センサーの状態変化を検知し、必要に応じて通知送信や無反応検知タイマーのセット・キャンセルを行う。モーション判定は`dev_type`が`"Motion"`を部分一致で含む場合（デバイス一覧APIの語彙`"Motion Sensor"`向け）に加え、`dev_type`がSwitchBot公式Webhookの語彙`"WoPresence"`と完全一致する場合にも成立する（#94修正: 以前は`"Motion" in dev_type`のみだったため、公式Webhook形式(`context.deviceType="WoPresence"`)のモーションイベントがこの分岐に到達せず、見守り通知・無反応監視タイマーが一切発火しなかった）。**（Issue #621で修正）** 関数冒頭で`_touch_mac(mac)`を呼び、サイズ上限つきキャッシュのLRU基準を更新する。
+* 根拠: `[process_sensor_data]` (行番号: 167 / 抜粋: "if dev_type and (\"Motion\" in dev_type or dev_type == \"WoPresence\"):")、`_touch_mac`呼び出し (行番号: 157 / 抜粋: "_touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新")
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `dev_type: str`, `state: str`
-* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: "def process_sensor_data(mac: s")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: ") -> None:")
+* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: ") -> None:")
 
 
-* **副作用**: グローバル変数 `MOTION_TASKS` のキャンセル・新規タスク追加、`IS_ACTIVE` および `LAST_NOTIFY_TIME` の更新、`send_push` を用いた外部API呼び出し。
-* 根拠: `[process_sensor_data]` (行番号: 105 / 抜粋: "MOTION_TASKS[mac] = asyncio.cr")
+* **副作用**: `_touch_mac`経由の`_mac_last_seen`更新・上限超過時のeviction、グローバル変数 `MOTION_TASKS` のキャンセル・新規タスク追加、`IS_ACTIVE` および `LAST_NOTIFY_TIME` の更新、`send_push` を用いた外部API呼び出し。
+* 根拠: `_touch_mac(mac)` (行番号: 157)、`[process_sensor_data]` (行番号: 182 / 抜粋: "MOTION_TASKS[mac] = asyncio.cr")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[process_sensor_data]` (行番号: 78 / 抜粋: "def process_sensor_data(mac: s")
+* 根拠: `[process_sensor_data]` (行番号: 149 / 抜粋: "def process_sensor_data(mac: s")
 
 
 
@@ -275,8 +297,9 @@ graph TD
 ## 8. 保守上の注意点
 
 * `EVENT_CACHE`, `IS_ACTIVE`, `MOTION_TASKS` などの状態がインメモリ（グローバル変数）で管理されているため、アプリケーションプロセスの再起動によりこれらの状態が初期化・喪失される。
+* **[修正済み] Issue #621 攻撃者制御可能な`deviceMac`によるキャッシュの無制限肥大化**: `EVENT_CACHE`/`IS_ACTIVE`/`LAST_NOTIFY_TIME`/`MOTION_TASKS`はいずれもSwitchBot Webhookの`context.deviceMac`をキーにしており、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時は特に、攻撃者が任意のMACを送りつけてエントリを無制限に増やせた（`handlers/line_handler.py`の`_profile_cache`/`_SEEN_EVENT_IDS`で#410/#376にて既に対応済みだったのと同じ種類の問題が本ファイルには残っていた）。`_mac_last_seen`をLRU基準とする共通の`_evict_stale_macs`/`_touch_mac`を導入し、`_MAC_CACHE_MAX_SIZE`（500）超過時は最終アクセス時刻の古いMACから4キャッシュすべてを一括削除するようにした（`MOTION_TASKS`は削除前にタスクを`cancel()`する）。
 * `process_power_data` 内で、データベースの読み取りを行う同期関数（`_fetch_prev_wattage`）が `asyncio.to_thread` を用いて呼び出されている。
-* `MOTION_TASKS` に追加された非同期タスクは、条件により `cancel()` されない限りバックグラウンドで指定された時間（`MOTION_TIMEOUT`）実行され続ける。
+* `MOTION_TASKS` に追加された非同期タスクは、条件により `cancel()` されない限りバックグラウンドで指定された時間（`MOTION_TIMEOUT`）実行され続ける。**（Issue #621で追加）** ただし`_MAC_CACHE_MAX_SIZE`超過によるevictionが発生した場合は、`MOTION_TIMEOUT`を待たずに`_evict_stale_macs`が該当タスクを`cancel()`する。
 * `process_power_data` 内の例外処理は `Exception` を広範にキャッチしており、DB取得時のあらゆるエラーがログ記録のみで通過し、`prev_wattage` は `0.0` として処理が続行される仕様となっている。
 * DBから取得したレコード（`row`）に対し、辞書アクセス（`row['wattage']`）が失敗した場合にインデックスアクセス（`row[0]`）でフォールバックを試行する処理が存在する。
 
