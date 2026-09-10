@@ -85,6 +85,8 @@ npm run lint     # ESLint
 - `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（ブロックはしない）、`/webhook/switchbot` と `/callback/line` は外部からのトラフィックを受け付ける必要があるため無条件に許可している。**これは意図的な設計として正式に確定している**（Issue #321・2026-09-03決定）: アプリ層では`Cf-Access-Jwt-Assertion`のJWT検証を行わず（一度PR #80で実装したが2026-08-28の障害でrevert済みで、再実装しない方針を採用）、外部アクセス制御はエッジのCloudflare Accessに委譲する。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
 - CORSの許可オリジンは `config.CORS_ORIGINS` の1箇所だけに存在する（環境変数 `ALLOW_ALL_ORIGINS=true` で `["*"]` に上書き可能）。`unified_server.py` 側に別のハードコードされたオリジンリストを追加しないこと — 過去に2つの別々のリストが存在し、片方しか実際には反映されていないというバグがあった。
 
+Family Quest APIの認可設計にも既知の妥協点が1つある: リクエストボディ中の `user_id`/`approver_id` はクライアント入力のまま信頼しており、サーバー側でセッション等から認可を検証していない。これは個人用IoTシステム・単一プロセス・LAN内を信頼境界とする前提のもとで「意思決定によりスコープ外」と合意済みの設計（`docs/reports/CODE_REVIEW_REPORT_ALL.md` Critical#1、2026-09-02棚卸し課題4）であり、追跡はIssue #614で行う。この判断を覆す場合は、LAN外からの到達経路（Cloudflare Access委譲の前提、上記参照）とセットで再検討すること。
+
 `/quest/{full_path}` と `/camera/{full_path}` のルートは、`family-quest` のSPAビルドを静的ファイルとして配信する。パストラバーサル対策（realpath化したdistディレクトリに対する `os.path.commonpath` チェック）を行い、クライアント側ルーティングのために `index.html` へフォールバックする。
 
 ### 依存性注入(DI)について
