@@ -1,5 +1,7 @@
 // family-quest/src/lib/routing.ts
 
+import { getPathSegments } from './pathSegments';
+
 // #472: main.tsxのルートビュー切り替え判定を、単体テスト可能な純粋関数として分離する。
 //
 // バックエンド(MY_HOME_SYSTEM/unified_server.py)は '/camera' 配下を専用ルートで、
@@ -14,6 +16,6 @@
 // 分割し、先頭セグメントが 'camera' であるか、先頭が 'quest' で2番目が
 // 'camera' である場合のみカメラビューとして扱う。
 export function isCameraRoute(pathname: string): boolean {
-    const segments = pathname.split('/').filter(Boolean);
+    const segments = getPathSegments(pathname);
     return segments[0] === 'camera' || (segments[0] === 'quest' && segments[1] === 'camera');
 }
