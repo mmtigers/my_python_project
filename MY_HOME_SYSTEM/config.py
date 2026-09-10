@@ -218,6 +218,18 @@ LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")
 # 全エンドポイント(/api/quest/* 等)まで停止する。Discord/SwitchBot 系は元々タイムアウト付き。
 LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)
 
+# Issue #620: LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できてしまうため、
+# 体調・食事記録の書き込み(services/line_service.py の log_child_health/log_food_record)と
+# AI経由のDB検索(services/ai_service.py の analyze_text_and_execute。
+# ai_service.ALLOWED_SEARCH_TABLES経由で体調・食事・買い物・電力使用量を検索できる)を、
+# 認可済みの家族のLINEユーザーID(event.source.user_id、"U"+32桁hex形式)のみに許可する。
+# カンマ区切りで複数指定可能。SWITCHBOT_WEBHOOK_TOKENと同様、未設定(空)の場合は
+# 従来通り検証なし(後方互換。認可を有効にするには.envで明示的に設定すること)。
+_authorized_line_user_ids_str: str = os.getenv("AUTHORIZED_LINE_USER_IDS", "")
+AUTHORIZED_LINE_USER_IDS: List[str] = [
+    uid.strip() for uid in _authorized_line_user_ids_str.split(",") if uid.strip()
+]
+
 # SwitchBot WebhookはLINEと異なり署名検証機構がないため、
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
 # 未設定の場合は従来通り検証なし（後方互換）。

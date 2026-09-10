@@ -129,6 +129,21 @@ def _evict_oldest_profile_cache_entries() -> None:
         del _profile_cache[uid]
 
 
+def _is_authorized_line_user(user_id: str) -> bool:
+    """
+    Issue #620: 送信元LINEユーザーが認可済みの家族(`config.AUTHORIZED_LINE_USER_IDS`)かを
+    判定する。LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できるため、
+    体調・食事記録の書き込み(line_service.log_child_health/log_food_record)と
+    AI経由のDB検索(ai_service.analyze_text_and_execute)をこのallowlistで制限する。
+
+    `config.SWITCHBOT_WEBHOOK_TOKEN`と同様、allowlist自体が未設定(空)の場合は
+    従来通り検証なし(後方互換)として常にTrueを返す。
+    """
+    if not config.AUTHORIZED_LINE_USER_IDS:
+        return True
+    return user_id in config.AUTHORIZED_LINE_USER_IDS
+
+
 def _get_display_name(user_id: str) -> str:
     """LINEのユーザー表示名を取得する。TTL付きでキャッシュし、API呼び出し頻度を抑える。"""
     with _profile_cache_lock:
@@ -279,6 +294,13 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
     # 承認N/却下N)は、LINE ID と quest_users.user_id のマッピングが存在せず本番では
     # 機能しないデッドコードだったため撤去した(オーナー判断: LINE経由のクエスト機能は廃止)。
     # クエストの確認・完了報告・承認は family-quest フロントエンドを使うこと。
+
+    # Issue #620: 体調・食事記録の書き込み(1.)とAI経由のDB検索(2.)の両方の経路を
+    # ここで一括してガードする。未認可ユーザーには(誰が認可対象かを教えることになる
+    # 返信はせず)redelivery/user_id不明時と同様に無言でスキップする。
+    if not _is_authorized_line_user(user_id):
+        logger.warning(f"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました (user_id={user_id})")
+        return
 
     # 1. Health & Life Log Commands
     if "子供記録" in msg_text or "体調" in msg_text:

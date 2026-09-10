@@ -28,9 +28,11 @@ def _reset_sensor_state():
     sensor_service.LAST_NOTIFY_TIME.clear()
     sensor_service.EVENT_CACHE.clear()
     sensor_service.MOTION_TASKS.clear()
+    sensor_service._mac_last_seen.clear()
     yield
     sensor_service.cancel_all_tasks()
     sensor_service.MOTION_TASKS.clear()
+    sensor_service._mac_last_seen.clear()
 
 
 class TestIsDuplicateWebhook:
@@ -282,3 +284,46 @@ class TestInactiveStateIsClearedBeforeSending:
         assert any("止まりました" in m for m in sent)
         assert any("動きがありました" in m for m in sent)
         assert sensor_service.IS_ACTIVE["mac_motion"] is True
+
+
+@pytest.mark.asyncio
+class TestCacheEviction:
+    """Issue #621の回帰テスト: 攻撃者が制御可能な context.deviceMac をキーにした
+    4つのキャッシュ/タスク管理(EVENT_CACHE/IS_ACTIVE/LAST_NOTIFY_TIME/MOTION_TASKS)
+    が上限を超えて無制限に成長しないこと。"""
+
+    async def test_event_cache_eviction_bounds_size(self, monkeypatch):
+        monkeypatch.setattr(sensor_service, "_MAC_CACHE_MAX_SIZE", 5)
+        for i in range(8):
+            sensor_service.is_duplicate_webhook(f"mac{i}", "open", float(i))
+
+        assert len(sensor_service.EVENT_CACHE) == 5
+        assert len(sensor_service._mac_last_seen) == 5
+        # 古い順(mac0〜mac2)は削除され、直近5件だけが残る
+        assert set(sensor_service.EVENT_CACHE.keys()) == {"mac3", "mac4", "mac5", "mac6", "mac7"}
+
+    async def test_motion_state_eviction_cancels_pending_task_and_clears_all_caches(self, monkeypatch):
+        """MOTION_TASKS/IS_ACTIVE/LAST_NOTIFY_TIMEも同じMAC単位で連動して削除され、
+        削除されるタスクが未完了ならキャンセルされること。"""
+        monkeypatch.setattr(sensor_service, "_MAC_CACHE_MAX_SIZE", 2)
+        with patch.object(sensor_service, "send_push", MagicMock(return_value=True)):
+            await sensor_service.process_sensor_data("mac_old", "古いセンサー", "リビング", "Motion Sensor", "detected")
+            old_task = sensor_service.MOTION_TASKS["mac_old"]
+
+            await sensor_service.process_sensor_data("mac_mid", "中間センサー", "リビング", "Motion Sensor", "detected")
+            # 上限(2)を超える3件目の追加により mac_old が最も古いエントリとして追い出される
+            await sensor_service.process_sensor_data("mac_new", "新しいセンサー", "リビング", "Motion Sensor", "detected")
+
+        assert "mac_old" not in sensor_service.MOTION_TASKS
+        assert "mac_old" not in sensor_service.IS_ACTIVE
+        assert "mac_old" not in sensor_service._mac_last_seen
+
+        # send_inactive_notification は CancelledError を内部で捕捉して静かに
+        # returnする(既存のTestSendInactiveNotification.test_cancellation_leaves_active_state_untouched
+        # と同じ挙動)ため、キャンセル要求が実際に伝播したことは正常終了で確認する。
+        await old_task
+        assert old_task.done()
+
+        for t in list(sensor_service.MOTION_TASKS.values()):
+            if isinstance(t, asyncio.Task):
+                t.cancel()

@@ -13,6 +13,7 @@
 * [database.md](./database.md) / [init_unified_db.md](./init_unified_db.md) - `config.SQLITE_DB_PATH`, `SQLITE_TABLE_*`定数群を参照する呼び出し元
 * [notification_service.md](./notification_service.md) - `config.LINE_CHANNEL_ACCESS_TOKEN`, `config.DISCORD_WEBHOOK_*`を参照する呼び出し元
 * [webhook_router.md](./webhook_router.md) - `config.SWITCHBOT_WEBHOOK_TOKEN`(SwitchBot Webhook共有シークレット検証)を参照する呼び出し元
+* [line_handler.md](./line_handler.md) - `config.AUTHORIZED_LINE_USER_IDS`(認可済みLINEユーザーIDのallowlist)を参照する呼び出し元
 * [quest_service.md](./quest_service.md) - `config.TV_UNLOCK_QUEST_IDS`(TVロック解除対象クエストID)、`config.YOUTUBE_REWARD_IDS`(YouTube系ごほうび券クールダウン対象reward_id)を参照する呼び出し元
 * [sound_manager.md](./sound_manager.md) - `config.SOUND_MAP`, `SOUND_DIR`, `SOUND_PLAYER_CMD`等を参照する呼び出し元
 * [smart_timelapse_generator.md](./smart_timelapse_generator.md) - 解像度・しきい値・Webhook URL等の設定値を参照する呼び出し元
@@ -34,6 +35,10 @@
 
 * **（2026-09-06 品質監査で修正）** LINE Messaging API呼び出し(reply/push/get_profile等)に渡す(接続, 読み取り)タイムアウト秒のタプル`LINE_API_REQUEST_TIMEOUT`（固定値`(5.0, 15.0)`、環境変数からは読まない）を「2. 認証・API設定」セクションに追加した。コメントによれば、line-bot-sdk v3は`_request_timeout`未指定だとurllib3に`timeout=None`(無期限ブロック)を渡すため、`api.line.me`へのTCPがブラックホール化した場合に`BackgroundTasks`のワーカースレッドが永久に塞がり、anyioのスレッドプール(既定40)が枯渇すると同期`def`の全エンドポイント(`/api/quest/*`等)まで停止する — その対策として追加された定数であり、`handlers/line_handler.py`・`handlers/line_logic.py`・`services/notification_service.py`の各LINE API呼び出しが`_request_timeout=config.LINE_API_REQUEST_TIMEOUT`として参照する（各仕様書参照）。
 * 根拠: [定数定義とコメント] (行番号: 213〜219 / 抜粋: "# LINE Messaging API 呼び出し(reply/push/get_profile 等)の (接続, 読み取り) タイムアウト秒。", "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
+
+
+* **（Issue #620で追加）** 「2. 認証・API設定」セクションに、認可済みの家族のLINEユーザーID(`event.source.user_id`、`"U"`+32桁hex形式)のallowlist`AUTHORIZED_LINE_USER_IDS`(環境変数`AUTHORIZED_LINE_USER_IDS`、カンマ区切り)を追加した。`handlers/line_handler.py`の`_is_authorized_line_user`が、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する際に参照する。パース方式は`TV_UNLOCK_QUEST_IDS`等と同様の「カンマ分割してstrip、空要素は除外」だが、`isdigit()`によるフィルタは行わない(LINEユーザーIDは`U`始まりの文字列のため)。`SWITCHBOT_WEBHOOK_TOKEN`と同じく、未設定(空文字列)の場合は空リストとなり後方互換(検証なし)として扱われる。
+* 根拠: [AUTHORIZED_LINE_USER_IDS定義とコメント] (行番号: 221〜230 / 抜粋: "# Issue #620: LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できてしまうため、", "_authorized_line_user_ids_str: str = os.getenv(\"AUTHORIZED_LINE_USER_IDS\", \"\")", "AUTHORIZED_LINE_USER_IDS: List[str] = [\n    uid.strip() for uid in _authorized_line_user_ids_str.split(\",\") if uid.strip()\n]")
 
 
 * ロガーの初期化設定を行う。

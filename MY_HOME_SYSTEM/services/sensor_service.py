@@ -26,6 +26,50 @@ DEDUPE_TTL_SECONDS: float = 3.0  # 3秒以内の同一ステータスは重複�
 MOTION_TIMEOUT: int = 900       # 15分 (見守りタイマー)
 CONTACT_COOLDOWN: int = 300     # 5分 (通知抑制)
 
+# Issue #621: 上記4つのキャッシュ/タスク管理はすべて SwitchBot Webhook の
+# context.deviceMac をキーにしており、このMACアドレスは(config.SWITCHBOT_WEBHOOK_TOKEN
+# 未設定時は特に)攻撃者が任意の値を送りつけて増やせる。エントリを削除する仕組みが
+# 無かったため、ユニークなMACが増えるほど4つとも無制限に成長し続けていた
+# (プロセスは長時間稼働するため実質的なメモリリーク)。
+# handlers/line_handler.py の _profile_cache/_SEEN_EVENT_IDS(#410, #376)と同じ
+# 「サイズ上限 + 最終アクセス時刻が古いものから削除」方式を、4つとも同一MACキーで
+# 連動させて適用する(4つとも同じ攻撃者制御キーで肥大化するため、共通の
+# 最終アクセス時刻テーブルで一括管理する)。
+_MAC_CACHE_MAX_SIZE = 500
+_mac_last_seen: Dict[str, float] = {}  # mac -> 最終アクセス時刻 (4キャッシュ共通のLRU基準)
+
+
+def _evict_stale_macs() -> None:
+    """
+    `_mac_last_seen` が `_MAC_CACHE_MAX_SIZE` 件を超えている場合、最終アクセス時刻が
+    古いMACから順に EVENT_CACHE/IS_ACTIVE/LAST_NOTIFY_TIME/MOTION_TASKS すべての
+    エントリを削除する。
+
+    MOTION_TASKSに未完了のタスクが残っている場合、辞書から削除するだけだと
+    参照を失ったタスクが孤立したまま最大MOTION_TIMEOUT秒(15分)残留し続けるため、
+    先にキャンセルしてから削除する。
+    """
+    overflow = len(_mac_last_seen) - _MAC_CACHE_MAX_SIZE
+    if overflow <= 0:
+        return
+    oldest_macs = sorted(_mac_last_seen, key=lambda m: _mac_last_seen[m])[:overflow]
+    for mac in oldest_macs:
+        task = MOTION_TASKS.pop(mac, None)
+        if isinstance(task, asyncio.Task) and not task.done():
+            task.cancel()
+        IS_ACTIVE.pop(mac, None)
+        LAST_NOTIFY_TIME.pop(mac, None)
+        EVENT_CACHE.pop(mac, None)
+        del _mac_last_seen[mac]
+
+
+def _touch_mac(mac: str) -> None:
+    """指定MACの最終アクセス時刻を記録し、上限超過分を削除する(呼び出し元でロック取得は不要。
+    sensor_service はFastAPIの非同期エンドポイントから直接awaitされ、他スレッドから
+    並行アクセスされることが無いため、_profile_cacheのようなthreading.Lockは不要)。"""
+    _mac_last_seen[mac] = time.time()
+    _evict_stale_macs()
+
 def is_duplicate_webhook(mac: str, state: str, event_timestamp: float) -> bool:
     """
     Webhookイベントの重複排除を判定する。
@@ -35,8 +79,10 @@ def is_duplicate_webhook(mac: str, state: str, event_timestamp: float) -> bool:
     1. 同一MACアドレスに対する直近のイベントとステータス(state)が完全に一致していること
     2. 直近のイベント処理時刻から `DEDUPE_TTL_SECONDS` 秒以内の受信であること
     """
+    _touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新
+
     last_event: Optional[Dict[str, Any]] = EVENT_CACHE.get(mac)
-    
+
     if last_event:
         time_passed: float = event_timestamp - last_event["timestamp"]
         # ステータスが同じ、かつTTL内の連続受信であれば重複として弾く
@@ -108,9 +154,11 @@ async def process_sensor_data(mac: str, name: str, location: str, dev_type: str,
     - INFO: 状態が「非アクティブ → アクティブ」に変化した場合、またはドア開閉などの明確なイベント。
     - DEBUG: 既に「アクティブ」な状態での継続的な検知（モーションセンサーの連続反応など）。
     """
+    _touch_mac(mac)  # Issue #621: サイズ上限つきキャッシュのLRU基準を更新
+
     msg: Optional[str] = None
     now: float = time.time()
-    
+
     # Motion Sensor Logic
     # "Motion" 部分一致はデバイス一覧API語彙("Motion Sensor")向け。
     # SwitchBot公式Webhookの語彙("WoPresence")はこの部分一致に合致しないため、
