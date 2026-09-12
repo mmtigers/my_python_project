@@ -50,7 +50,7 @@
 | `config.FAMILY_SETTINGS["members"]` | データ構造やリストに含まれる要素の型・内容が不明 | 該当要素の使用 (行番号: 212 / 抜粋: "for member in config.FAMILY_SETTINGS[\"members\"]:") |
 | `line_service.log_child_health` / `line_service.split_text_into_line_messages` | 引数に対する具体的な処理内容および戻り値の型・形式が不明。**（#358で縮小）** 以前ブラックボックス視していた`get_user_status_message`/`get_active_quests_message`/`process_approval_command`は削除済みのため対象外。 | 該当要素の呼び出し (行番号: 280, 294 / 抜粋: "responses.append(await line_service.log_child_health(user_id, user_name, child, cond))") |
 | `ai_service.analyze_text_and_execute` | AI解析の具体的なロジック、副作用、戻り値の仕様が不明 | 該当要素の呼び出し (行番号: 288-289 / 抜粋: "ai_resp_text = await asyncio.wait_for(") |
-| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は`PostbackEvent`のすべてが無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
+| `line_logic.handle_postback` | 委譲先の具体的な処理内容および副作用が不明。**（#358で明確化）** 承認/却下 postback を本ファイル側で先取りする分岐が撤去されたため、現在は認可済みユーザーの`PostbackEvent`がすべて無条件でここへ委譲される。**（Issue #572で変更なし）** 委譲前に`user_id is None`ガードが追加されたが、ガードを通過した場合の委譲先自体は変わらない。**（Issue #623で変更なし）** 委譲前に`_is_authorized_line_user(user_id)`ガードが追加されたが、これも同様にガードを通過した場合の委譲先自体は変わらない。 | 該当要素の呼び出し (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)") |
 | `routers/webhook_router.py` の `callback_line` | 本ファイル外の実装であり、Webhook HTTPエントリーポイントとしての署名検証・ディスパッチの具体的な呼び出し経路は本ファイル内の記述からは確認できない | ファイル内に対応するルーター定義が存在しない（本ファイルはSDKのイベントハンドラー登録のみを行う） |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -286,28 +286,29 @@
 
 ### `handle_postback`
 
-* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。**（Issue #572で修正）** `handle_message`にはIssue #410（L-L6）で`event.source.user_id is None`（グループでのプロフィール未共有等）時の早期returnガードが追加されていたが、本関数には同等のガードが無く非対称だった。`user_id = event.source.user_id`で読み取った直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`user_id`が`None`なら警告ログを出して処理をスキップするガードを追加し、この非対称性を解消した。
-* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 316-352 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 320-322)、`user_id`のNoneガード (行番号: 324-331 / 抜粋: "if user_id is None:")、撤去コメント (行番号: 338-340 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 344-346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 351-352)
+* **役割**: `PostbackEvent` (ボタン押下など) を受け取るハンドラー。`line_logic.handle_postback` へ処理を丸投げする。**（#358で撤去）** 以前ここにあった、`data`文字列が`"approve:"`/`"reject:"`で始まる場合にコマンド文字列へ変換して`_process_message_async`を呼び出す分岐は、それを生成する送信元（対応するpostbackアクションの発行元）がリポジトリ内に一切存在しないデッドコードだったため撤去された（オーナー判断、Issue #358）。これにより、本関数を通過する`PostbackEvent`はすべて`line_logic.handle_postback`へ委譲される。**（Issue #376 / L-L1で修正）** 先頭で`_is_redelivery`が真ならスキップし、関数全体を`try/except Exception`で包んでイベント単位で例外を隔離する。**（Issue #572で修正）** `handle_message`にはIssue #410（L-L6）で`event.source.user_id is None`（グループでのプロフィール未共有等）時の早期returnガードが追加されていたが、本関数には同等のガードが無く非対称だった。`user_id = event.source.user_id`で読み取った直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`user_id`が`None`なら警告ログを出して処理をスキップするガードを追加し、この非対称性を解消した。**（Issue #623で修正）** `_process_message_async`にはIssue #620で`_is_authorized_line_user(user_id)`によるallowlistガードが既に導入されていたが、本関数（Postback経路）には同等のガードが無く、`_process_message_async`と同様の非対称性が残っていた。`user_id is None`ガードの直後、`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`_is_authorized_line_user(user_id)`が`False`を返す場合は警告ログのみを出して早期returnするガードを追加し、この非対称性を解消した（誰が認可対象かを教えることになる返信はしない点、allowlist未設定時は後方互換で誰でも許可される点も`_process_message_async`と同じ）。
+* 根拠: `def handle_postback(event: PostbackEvent):` (行番号: 338 / 抜粋: "def handle_postback(event: PostbackEvent):")、再配信スキップ (行番号: 342-344)、`user_id`のNoneガード (行番号: 346-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 355-362 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、撤去コメント (行番号: 369-371 / 抜粋: "以前ここにあった approve:/reject: postback の処理")、委譲 (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、例外隔離 (行番号: 382-383)
 
 
 * **引数/リクエスト**:
 * `event`: `PostbackEvent`型
-* 根拠: 引数定義 (行番号: 316 / 抜粋: "def handle_postback(event: PostbackEvent):")
+* 根拠: 引数定義 (行番号: 338 / 抜粋: "def handle_postback(event: PostbackEvent):")
 
 
 * **戻り値/レスポンス**: なし (`None`)
-* 根拠: 再配信スキップ時の空`return` (行番号: 322)。**（Issue #572で追加）** `user_id`Noneガード時の空`return` (行番号: 331)。それ以外は関数末尾まで到達し暗黙的に`None`を返す。
+* 根拠: 再配信スキップ時の空`return` (行番号: 344)。`user_id`Noneガード時の空`return` (行番号: 353)。**（Issue #623で追加）** 認可ガード時の空`return` (行番号: 362)。それ以外は関数末尾まで到達し暗黙的に`None`を返す。
 
 
-* **副作用**: `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`/`logger.error`によるログ出力。
-* 根拠: 関数呼び出し (行番号: 346 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")
+* **副作用**: `line_logic.handle_postback` の実行に伴う副作用、および`logger.info`/`logger.warning`/`logger.error`によるログ出力。**（Issue #623で追加）** 未認可ユーザーの場合は`logger.warning`の出力のみで、`line_logic.handle_postback`への委譲を含む以降のいずれの副作用も発生しない。
+* 根拠: 関数呼び出し (行番号: 377 / 抜粋: "line_logic.handle_postback(event, line_bot_api)")、認可ガードの`logger.warning` (行番号: 361 / 抜粋: "logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました")
 
 
 * **エラーハンドリング**:
 * `line_logic.handle_postback` 委譲時の例外はキャッチしてエラーログを出力（ユーザーへの通知はコメントアウトされている）。
 * **（L-L1で追加）** 上記以外（`event`属性アクセス等）も外側の`except Exception`で捕捉し`exc_info=True`で記録する。
 * **（Issue #572で追加）** `user_id`が`None`の場合は`data_str`/`reply_token`の取得も`line_logic.handle_postback`への委譲も行わず、警告ログを出して早期returnする（`handle_message`のIssue #410ガードと同じスタイル）。
-* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 347-348)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 351-352)、`user_id`のNoneガード (行番号: 329-331 / 抜粋: "if user_id is None:")
+* **（Issue #623で追加）** `_is_authorized_line_user(user_id)`が`False`の場合も同様に、`data_str`/`reply_token`の取得・`line_logic.handle_postback`への委譲を行わず警告ログのみで早期returnする（`_process_message_async`のIssue #620ガードと同じスタイル）。
+* 根拠: `except Exception as e: logger.error(f"Logic Delegation Error: {e}")` (行番号: 378-379)、`except Exception as e: logger.error(f"handle_postback Error: {e}", exc_info=True)` (行番号: 382-383)、`user_id`のNoneガード (行番号: 351-353 / 抜粋: "if user_id is None:")、**（Issue #623で追加）** 認可ガード (行番号: 360-362 / 抜粋: "if not _is_authorized_line_user(user_id):")
 
 
 
@@ -378,7 +379,9 @@ flowchart TD
     RouteEvent -- PostbackEvent --> HandlePostback["handle_postback()"]
     HandlePostback --> RedeliveryPB{"_is_redelivery? / user_id is None?"}
     RedeliveryPB -- Yes --> SkipPB["スキップ(警告ログ)"]
-    RedeliveryPB -- No --> LogicPostback["外部：line_logic.handle_postback()<br>(#358: 承認/却下の先取り分岐は撤去済み。常にここへ委譲)"]
+    RedeliveryPB -- No --> AuthCheckPB{"Issue #623: _is_authorized_line_user?"}
+    AuthCheckPB -- No --> SkipUnauthorizedPB["スキップ(警告ログ)"]
+    AuthCheckPB -- Yes --> LogicPostback["外部：line_logic.handle_postback()<br>(#358: 承認/却下の先取り分岐は撤去済み。常にここへ委譲)"]
 
     RunAsyncMessage --> AuthCheck{"Issue #620: _is_authorized_line_user?"}
     AuthCheck -- No --> SkipUnauthorized["スキップ(警告ログ)"]
@@ -466,8 +469,12 @@ graph TD
 * 根拠: `handle_postback`の`if user_id is None:` (行番号: 324-331 / 抜粋: "if user_id is None:")、対応する`handle_message`側のガード (行番号: 258-260)
 
 
-* **[新規] Issue #620 未認可LINEユーザーによる体調・食事記録の偽装・AI経由DB検索が可能だった**: LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できる一方、`_process_message_async`は送信元が家族かどうかを一切検証していなかった。これにより、第三者が体調・食事記録(`line_service.log_child_health`/`log_food_record`)を任意の内容で書き込んだり、AI解析フォールバック(`ai_service.analyze_text_and_execute`)経由で`ai_service.ALLOWED_SEARCH_TABLES`(体調・食事・買い物・電力使用量)を検索したりできた。`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)を新設し、`_is_authorized_line_user(user_id)`で`_process_message_async`の冒頭(体調記録・AIフォールバックの両分岐より前)を一括ガードした。allowlist自体が未設定の場合は`config.SWITCHBOT_WEBHOOK_TOKEN`と同じ後方互換方針で常に認可済み扱いとなる点に注意(**認可を実際に有効化するには`.env`で明示的に設定する必要がある**)。なお`handlers/line_logic.py`のPostback経路(体調ボタン・「みんな元気」一括操作・食事アンケート等、`save_log_async`を直接呼ぶ)はこのガードの対象外のまま残っており、別途の検討が必要。
+* **[修正済み] Issue #620 未認可LINEユーザーによる体調・食事記録の偽装・AI経由DB検索が可能だった**: LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できる一方、`_process_message_async`は送信元が家族かどうかを一切検証していなかった。これにより、第三者が体調・食事記録(`line_service.log_child_health`/`log_food_record`)を任意の内容で書き込んだり、AI解析フォールバック(`ai_service.analyze_text_and_execute`)経由で`ai_service.ALLOWED_SEARCH_TABLES`(体調・食事・買い物・電力使用量)を検索したりできた。`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)を新設し、`_is_authorized_line_user(user_id)`で`_process_message_async`の冒頭(体調記録・AIフォールバックの両分岐より前)を一括ガードした。allowlist自体が未設定の場合は`config.SWITCHBOT_WEBHOOK_TOKEN`と同じ後方互換方針で常に認可済み扱いとなる点に注意(**認可を実際に有効化するには`.env`で明示的に設定する必要がある**)。マージ当初は`handlers/line_logic.py`のPostback経路(体調ボタン・「みんな元気」一括操作・食事アンケート等、`save_log_async`を直接呼ぶ)がこのガードの対象外のまま残っており別途の検討課題としていたが、この非対称性はIssue #623で解消された(次項参照)。
 * 根拠: `_is_authorized_line_user`定義 (行番号: 132-144)、`_process_message_async`内のガード呼び出し (行番号: 301-303 / 抜粋: "if not _is_authorized_line_user(user_id):")、`config.AUTHORIZED_LINE_USER_IDS`定義 (`MY_HOME_SYSTEM/config.py` 行番号: 228-230)
+
+
+* **[修正済み] Issue #623 `handle_postback`にIssue #620のallowlistガードが無かった非対称性**: 上記Issue #620は`_process_message_async`(テキストメッセージ経路)にのみ`_is_authorized_line_user(user_id)`ガードを追加し、兄弟関数である`handle_postback`(体調ボタン・「みんな元気」一括操作・食事アンケート等のPostbackを`line_logic.handle_postback`へ委譲するディスパッチャ)は対象外のまま残っていた。このため、未認可(allowlist外)のLINEユーザーであってもPostbackボタン操作(`line_logic.handle_postback`が直接呼ぶ`save_log_async`経由)であれば体調・食事記録を書き込めてしまう非対称な抜け道が残っていた。対応として、`handle_postback`内で`user_id is None`ガードの直後・`data_str`/`reply_token`の取得や`line_logic.handle_postback`への委譲より前に、`_process_message_async`のIssue #620ガードと同じスタイル(警告ログのみ・後方互換の空allowlist許可を含む)のガードを追加し、両ハンドラー間の非対称性を解消した。`line_logic.handle_postback`自体は変更しておらず、認可チェックは呼び出し元である本ファイルの`handle_postback`に一元化されている。回帰テストとして`tests/test_line_handler_dispatch.py`に`TestHandlePostbackAuthorizedUserGuard`(未認可ユーザーのPostbackが`line_logic.handle_postback`に一切到達しないこと、認可済みユーザーは従来通り処理されること、allowlist未設定時は後方互換で誰でも利用できることを検証)を追加した。
+* 根拠: `handle_postback`の認可ガード (行番号: 355-362 / 抜粋: "if not _is_authorized_line_user(user_id):\n            logger.warning(f\"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})\")\n            return")、対応する`_process_message_async`側のガード (行番号: 301-303)
 
 
 * **イベントハンドラー登録の条件分岐**: `handle_message`/`handle_postback`関数自体は常に定義されるが、SDKへのイベントハンドラー登録（`line_handler.add(...)`）は`if line_handler:`ブロック内でのみ行われる。認証情報が無い環境（テスト等）ではハンドラー関数を直接呼び出す形でのみロジックを検証できる。

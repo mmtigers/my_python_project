@@ -352,6 +352,15 @@ def handle_postback(event: PostbackEvent):
             logger.warning("⚠️ event.source.user_id が取得できないため処理をスキップします(グループでのプロフィール未共有等の可能性)")
             return
 
+        # Issue #623: handle_message(_process_message_async)には#620で導入された
+        # allowlist(`_is_authorized_line_user`)ガードが既にあったが、Postback経路
+        # (体調ボタン・全員元気・食事アンケート等、line_logic.handle_postbackへの委譲)
+        # には無かった。未認可ユーザーには(誰が認可対象かを教えることになる返信はせず)
+        # メッセージ経路と同様に無言でスキップする。
+        if not _is_authorized_line_user(user_id):
+            logger.warning(f"⚠️ 未認可のLINEユーザーからのPostbackを拒否しました (user_id={user_id})")
+            return
+
         data_str = event.postback.data
         reply_token = event.reply_token
 
