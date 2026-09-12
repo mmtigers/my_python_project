@@ -111,6 +111,10 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }
 
     const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);
     const handleSwipe = (offsetX: number) => {
+        // sm以上(640px、Tailwindのsmブレークポイントと同じ)では全員並列表示に戻るため、
+        // グリッド上のマウスドラッグ(ログ本文のテキスト選択等)でユーザーが誤って切り替わらないよう、
+        // スマホ幅でのみスワイプ判定を行う(App.tsxのlayoutMode==='portrait'限定のスワイプと同じ考え方)。
+        if (typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches) return;
         if (selectedIndex === -1) return;
         if (offsetX < -60 && selectedIndex < users.length - 1) {
             setSelectedUserId(users[selectedIndex + 1].user_id);
