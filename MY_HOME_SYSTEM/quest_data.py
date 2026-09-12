@@ -120,7 +120,7 @@ QUESTS = [
     {'id': 1021, 'title': '宿題と明日の準備', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '🎒', 'days': '0,1,2,3,4','desc': '宿題をクリアして明日必要なものをランドセルに入れよう'},
     # 土日の宿題（週末課題）: 金・土・日のいずれかで完了報告すればよく、reset_period='weekly'により
     # その週(月曜起点)の残りの表示対象日でも既に達成済みとして扱われ、カードは再度表示されない。
-    {'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'B', 'exp': 150, 'gold': 200, 'icon': '📚', 'days': '4,5,6', 'reset_period': 'weekly', 'desc': '金・土・日のうちに週末の宿題をクリアしよう'},
+    {'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 120, 'gold': 170, 'icon': '📚', 'days': '4,5,6', 'reset_period': 'weekly', 'desc': '金・土・日のうちに週末の宿題をクリアしよう'},
     # {'id': 30, 'title': '学校の宿題', 'type': 'special', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '📝', 'desc': '宿題をクリアだ！'},
     # {'id': 1025, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 40, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
     {'id': 1026, 'title': '小学校に行く', 'type': 'daily', 'target': 'son', 'category': 'study', 'difficulty': 'C', 'exp': 100, 'gold': 100, 'icon': '🏢','days': '0,1,2,3,4', 'desc': '小学校に歩いて行こう'},
