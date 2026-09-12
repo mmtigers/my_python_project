@@ -583,7 +583,7 @@ function App() {
         )}
 
         {viewMode === 'familyLog' && (
-          <FamilyLog chronicle={chronicle} users={users} />
+          <FamilyLog chronicle={chronicle} users={users} initialUserId={currentUser.user_id} />
         )}
 
       </div>

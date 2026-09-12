@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { History, Clock } from 'lucide-react';
 import { ChronicleItem } from '@/hooks/useGameData';
 import { User } from '@/types';
@@ -7,6 +7,9 @@ import { isSameOriginAvatarPath } from '../../../lib/utils';
 interface FamilyLogProps {
     chronicle: ChronicleItem[];
     users: User[];
+    // スマホ幅(1カラム表示)で最初に選ぶユーザー。他画面で選択中のユーザーを想定し、
+    // 省略時はusersの先頭を使う。
+    initialUserId?: string;
 }
 
 // 時刻フォーマット関数
@@ -90,7 +93,15 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
 // ★バグ修正: 冒険の記録は以前タブで1人ずつ切り替える形式だったが、ホーム画面(横画面の
 // 4人並びパネル)と同様に、最初から全員分を並べて表示する。家族の総力(パーティランク・
 // 総レベルなど)の集計表示は不要とのことなので廃止した。
-const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {
+//
+// ★改善: スマホ幅(sm未満)では上記の並列表示が1カラムに潰れ、目的の人の記録を見るのに
+// 大量スクロールが必要という指摘を受け、スマホ幅限定で「名前タブで1人だけ表示」に変更した
+// (sm以上のタブレット/PC幅は従来通り全員並列表示のまま)。
+const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {
+    const [selectedUserId, setSelectedUserId] = useState(
+        () => initialUserId ?? users[0]?.user_id
+    );
+
     if (!chronicle) return <div className="text-center py-10">冒険の記録を読み込んでいます...</div>;
 
     return (
@@ -100,13 +111,33 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users }) => {
                 <h3 className="font-bold text-lg">冒険の記録</h3>
             </div>
 
+            {/* スマホ幅専用の名前タブ。sm以上は全員並列表示になるため不要で隠す。 */}
+            <div className="flex gap-1.5 sm:hidden">
+                {users.map(user => (
+                    <button
+                        key={user.user_id}
+                        onClick={() => setSelectedUserId(user.user_id)}
+                        className={`flex-1 min-h-[36px] px-1 rounded-lg text-xs font-bold truncate transition-colors ${user.user_id === selectedUserId
+                            ? 'bg-purple-600 text-white shadow-md'
+                            : 'bg-gray-800 text-gray-400'
+                            }`}
+                    >
+                        {user.name}
+                    </button>
+                ))}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
                 {users.map(user => (
-                    <UserLogColumn
+                    <div
                         key={user.user_id}
-                        user={user}
-                        entries={chronicle.filter(item => item.userId === user.user_id)}
-                    />
+                        className={user.user_id === selectedUserId ? 'block' : 'hidden sm:block'}
+                    >
+                        <UserLogColumn
+                            user={user}
+                            entries={chronicle.filter(item => item.userId === user.user_id)}
+                        />
+                    </div>
                 ))}
             </div>
         </div>
