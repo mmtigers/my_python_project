@@ -274,6 +274,15 @@ def handle_message(event: MessageEvent):
             logger.warning("⚠️ event.source.user_id が取得できないため処理をスキップします(グループでのプロフィール未共有等の可能性)")
             return
 
+        # Issue #620: allowlistの判定は `_process_message_async` 側にもあるが、そこまで進むと
+        # 未認可ユーザー1メッセージにつき `_get_display_name` が LINE の Profile API を1回
+        # 叩き(=第三者が外部APIのレートを消費でき)、さらに上限つきの `_profile_cache` が
+        # 第三者のuser_idで埋まって家族のエントリを押し出してしまう。Postback経路
+        # (handle_postback、#623)と同様、外部API呼び出し・本文のログ出力より前に弾く。
+        if not _is_authorized_line_user(user_id):
+            logger.warning(f"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました (user_id={user_id})")
+            return
+
         msg_text = event.message.text.strip()
         reply_token = event.reply_token
 
@@ -298,6 +307,8 @@ async def _process_message_async(user_id: str, user_name: str, msg_text: str, re
     # Issue #620: 体調・食事記録の書き込み(1.)とAI経由のDB検索(2.)の両方の経路を
     # ここで一括してガードする。未認可ユーザーには(誰が認可対象かを教えることになる
     # 返信はせず)redelivery/user_id不明時と同様に無言でスキップする。
+    # 呼び出し元の handle_message にも同じガードを置いているが(外部API呼び出し前に
+    # 弾くため)、この関数はテストや将来の別経路から直接呼ばれうるため多重防御として残す。
     if not _is_authorized_line_user(user_id):
         logger.warning(f"⚠️ 未認可のLINEユーザーからのメッセージを拒否しました (user_id={user_id})")
         return

@@ -694,6 +694,56 @@ class TestHandleMessageUserIdNoneGuard:
         mock_process.assert_called_once()
 
 
+class TestHandleMessageAuthorizationBeforeProfileFetch:
+    """Issue #620 の追加回帰テスト: allowlistが設定されている場合、未認可ユーザーの
+    メッセージは `_get_display_name`(LINE Profile API呼び出し + `_profile_cache` への
+    登録)にも到達しないこと。以前は `_process_message_async` 側でしか弾いていなかったため、
+    第三者が1メッセージにつき1回の外部API呼び出しを発生させ、上限つきの
+    `_profile_cache` を自分のuser_idで埋めて家族のエントリを押し出せた。"""
+
+    def _event(self, user_id="Uintruder", text="こんにちは"):
+        event = MagicMock()
+        event.source.user_id = user_id
+        event.message.text = text
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+        return event
+
+    def test_unauthorized_message_does_not_call_profile_api(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_display_name = MagicMock()
+        monkeypatch.setattr(line_handler, "_get_display_name", mock_display_name)
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="Uintruder"))
+
+        mock_display_name.assert_not_called()
+        mock_process.assert_not_called()
+
+    def test_authorized_message_is_processed_normally(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1"])
+        monkeypatch.setattr(line_handler, "_get_display_name", MagicMock(return_value="パパ"))
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="U1"))
+
+        mock_process.assert_called_once()
+
+    def test_empty_allowlist_allows_everyone_backward_compatible(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        mock_display_name = MagicMock(return_value="誰でも")
+        monkeypatch.setattr(line_handler, "_get_display_name", mock_display_name)
+        mock_process = AsyncMock()
+        monkeypatch.setattr(line_handler, "_process_message_async", mock_process)
+
+        line_handler.handle_message(self._event(user_id="Uanyone"))
+
+        mock_display_name.assert_called_once_with("Uanyone")
+        mock_process.assert_called_once()
+
+
 class TestProfileCacheBounding:
     """保守性(#410) の回帰テスト: _profile_cacheが上限を超えて無制限に成長しないこと。"""
 
