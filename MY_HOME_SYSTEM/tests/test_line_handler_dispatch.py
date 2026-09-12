@@ -323,6 +323,51 @@ class TestHandlePostbackWrapper:
         mock_delegate.assert_not_called()
 
 
+class TestHandlePostbackAuthorizedUserGuard:
+    """Issue #623 の回帰テスト: handle_message(_process_message_async)には#620で
+    allowlist(`config.AUTHORIZED_LINE_USER_IDS`)ガードが既にあったが、Postback経路
+    (line_logic.handle_postbackへの委譲)には無かった。未認可のLINEユーザーからの
+    Postbackがline_logic.handle_postbackに一切到達しないこと。
+    allowlist自体が未設定(空)の場合は従来通り誰でも利用できる(後方互換)こと。"""
+
+    def _event(self, data="show_health_input", user_id="Uintruder"):
+        event = MagicMock()
+        event.source.user_id = user_id
+        event.postback.data = data
+        event.reply_token = "tok"
+        event.delivery_context.is_redelivery = False
+        return event
+
+    def test_unauthorized_user_postback_is_blocked(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["Uauthorized"])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+
+        line_handler.handle_postback(self._event(user_id="Uintruder"))
+
+        mock_delegate.assert_not_called()
+
+    def test_authorized_user_postback_is_processed_normally(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", ["U1"])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+        event = self._event(user_id="U1")
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
+
+    def test_empty_allowlist_allows_everyone_backward_compatible(self, monkeypatch):
+        monkeypatch.setattr(line_handler.config, "AUTHORIZED_LINE_USER_IDS", [])
+        mock_delegate = MagicMock()
+        monkeypatch.setattr(line_handler.line_logic, "handle_postback", mock_delegate)
+        event = self._event(user_id="Uanyone")
+
+        line_handler.handle_postback(event)
+
+        mock_delegate.assert_called_once_with(event, line_handler.line_bot_api)
+
+
 # ==========================================
 # Issue #375: 「元気ない」の否定判定と2名併記時の全員記録
 # ==========================================
