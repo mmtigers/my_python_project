@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
 import { History, Clock } from 'lucide-react';
 import { ChronicleItem } from '@/hooks/useGameData';
 import { User } from '@/types';
@@ -97,12 +98,26 @@ const UserLogColumn: React.FC<{ user: User; entries: ChronicleItem[] }> = ({ use
 // ★改善: スマホ幅(sm未満)では上記の並列表示が1カラムに潰れ、目的の人の記録を見るのに
 // 大量スクロールが必要という指摘を受け、スマホ幅限定で「名前タブで1人だけ表示」に変更した
 // (sm以上のタブレット/PC幅は従来通り全員並列表示のまま)。
+//
+// ★改善: 名前タブのタップに加え、メイン画面(App.tsx)のユーザー切替・タブ切替と同様の
+// 左右スワイプでも1人表示を切り替えられるようにした。末尾/先頭では折り返さない(他画面の
+// スワイプ切替と同じ挙動に揃える)。
 const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }) => {
     const [selectedUserId, setSelectedUserId] = useState(
         () => initialUserId ?? users[0]?.user_id
     );
 
     if (!chronicle) return <div className="text-center py-10">冒険の記録を読み込んでいます...</div>;
+
+    const selectedIndex = users.findIndex(user => user.user_id === selectedUserId);
+    const handleSwipe = (offsetX: number) => {
+        if (selectedIndex === -1) return;
+        if (offsetX < -60 && selectedIndex < users.length - 1) {
+            setSelectedUserId(users[selectedIndex + 1].user_id);
+        } else if (offsetX > 60 && selectedIndex > 0) {
+            setSelectedUserId(users[selectedIndex - 1].user_id);
+        }
+    };
 
     return (
         <div className="space-y-3 animate-in fade-in duration-500 pb-6">
@@ -127,7 +142,10 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <motion.div
+                className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3"
+                onPanEnd={(_e, info) => handleSwipe(info.offset.x)}
+            >
                 {users.map(user => (
                     <div
                         key={user.user_id}
@@ -139,7 +157,7 @@ const FamilyLog: React.FC<FamilyLogProps> = ({ chronicle, users, initialUserId }
                         />
                     </div>
                 ))}
-            </div>
+            </motion.div>
         </div>
     );
 };
