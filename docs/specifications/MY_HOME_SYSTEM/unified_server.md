@@ -20,6 +20,7 @@
 - [system_router.md](./system_router.md) — `/api/system`にマウントされるルーター(手動バックアップ)
 - [camera_router.md](./camera_router.md) — `/api/cameras`にマウントされ、SPAルーティング(`/camera/*`)とも連動するルーター
 - `routers/alexa_router.py`(Issue #126で追記: 対応する仕様書は現時点で未作成) — タグ`alexa`でマウントされるルーター（30, 337行目）
+- [routine_router.md](./routine_router.md) — `/api/routine`にマウントされるルーター（デイリールーティン/すごろく機能。30, 338行目）
 
 ## 2. ファイルの概要
 
@@ -59,7 +60,7 @@
 | `core.logger.setup_logging` | ローカルモジュール | ロガーの初期化処理 | 根拠: `[setup_logging]` (行番号: 25 / 抜粋: "from core.logger import setup_l") |
 | `core.migrations.apply_pending_migrations` | ローカルモジュール | 起動時のスキーママイグレーション適用 | 根拠: `[apply_pending_migrations]` (行番号: 26 / 抜粋: "from core.migrations import apply_pending_migrations") |
 | `services.sensor_service`, `services.camera_service` | ローカルモジュール | センサータスクの管理(`sensor_service`)、シャットダウン時のffmpegプロセス一括停止(`camera_service.stop_all_processes()`) | 根拠: `[sensor_service, camera_service]` (行番号: 27 / 抜粋: "from services import sensor_service, camera_service") |
-| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`) | ローカルモジュール | 各APIエンドポイントのルーター | 根拠: `[routers]` (行番号: 30 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router") |
+| `routers.*` (`quest_router`, `webhook_router`, `system_router`, `camera_router`, `alexa_router`, `routine_router`) | ローカルモジュール | 各APIエンドポイントのルーター。**（デイリールーティン機能追加で修正）** `routine_router`が新たにインポートされ`/api/routine`にマウントされる（下記「ブラックボックスとなる外部要素」および§8参照） | 根拠: `[routers]` (行番号: 30 / 抜粋: "from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router") |
 
 ### ブラックボックスとなる外部要素
 
@@ -68,7 +69,7 @@
 | `config.QUEST_DIST_DIR` | 設定ファイル内の変数の有無・パス文字列が不明 | `getattr(config, "QUEST_DIST_DIR", None)` (行番号: 355 / 抜粋: "quest_dist_dir = getattr(config") |
 | `setup_logging()` | ログ出力フォーマット等の詳細仕様が不明 | `logger = setup_logging("unifie")` (行番号: 35 / 抜粋: "logger = setup_logging("unifie") |
 | `sensor_service.cancel_all_tasks()` | キャンセルされる具体的なタスク内容が不明 | `sensor_service.cancel_all_tasks()` (行番号: 227 / 抜粋: "sensor_service.cancel_all_tasks") |
-| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明） | `app.include_router(...)` (行番号: 333-337 / 抜粋: "app.include_router(webhook_router.router)") |
+| 各ルーター (`webhook`, `quest`, `system`, `camera`, `alexa`, `routine`) | 各パス配下の具体的なルーティング定義が不明（`alexa_router`は対応する仕様書が現時点で未作成のため特に不明。`routine_router`は[routine_router.md](./routine_router.md)を参照） | `app.include_router(...)` (行番号: 333-338 / 抜粋: "app.include_router(webhook_router.router)") |
 | `monitors/camera_monitor.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, camera_script])` (行番号: 183 / 抜粋: "camera_process = subprocess.Po") |
 | `scheduler_boot.py` | 起動する外部スクリプトの処理内容が不明 | `subprocess.Popen([sys.executable, scheduler_script])` (行番号: 192 / 抜粋: "scheduler_process = subprocess.") |
 | `apply_pending_migrations()` | マイグレーション適用の具体的な内部処理は `core/migrations.py` にあるため不明 | `apply_pending_migrations(migration_conn)` (行番号: 165 / 抜粋: "apply_pending_migrations(migration_conn)") |
@@ -400,7 +401,7 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | 設定値の内容 | `QUEST_DIST_DIR`などの変数値が不明 | `config.py` |
-| APIルーティング詳細 | `/api/quest`、`/api/system`、`/api/cameras`配下の実際のエンドポイント定義が不明 | `routers/quest_router.py`, `routers/system_router.py`, `routers/webhook_router.py`, `routers/camera_router.py` |
+| APIルーティング詳細 | `/api/quest`、`/api/system`、`/api/cameras`、`/api/routine`配下の実際のエンドポイント定義が不明 | `routers/quest_router.py`, `routers/system_router.py`, `routers/webhook_router.py`, `routers/camera_router.py`, `routers/routine_router.py` |
 | キャンセルされるタスク | `sensor_service.cancel_all_tasks()`の対象タスク仕様が不明 | `services/sensor_service.py` |
 | サブプロセスの処理仕様 | カメラの監視仕様および定期実行されるスケジューラ仕様が不明 | `monitors/camera_monitor.py`, `scheduler_boot.py` |
 | ログ設定の詳細 | `setup_logging`内で設定されるハンドラやフォーマッタの実装が不明 | `core/logger.py` |
@@ -410,7 +411,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | 設定値の内容 | `config.md`の解析によれば、`config.py`は`load_dotenv()`による環境変数読み込みに加え、NASなど外部ストレージのマウント遅延を考慮したディレクトリ検証・作成関数を提供する設計であることが判明した。ただし`QUEST_DIST_DIR`個別の値自体は`config.md`側でも確認できていない。 | config.md |
-| APIルーティング詳細 | `quest_router.md`の解析によれば`/api/quest`配下はゲームデータ同期・クエスト完了・承認・報酬購入・画像アップロード等のエンドポイント群、`webhook_router.md`の解析によれば`/callback/line`・`/webhook/switchbot`はLINE署名検証とSwitchBotイベントの重複排除・DB保存を行うエンドポイント群、`camera_router.md`の解析によれば`/api/cameras`配下はカメラ設定一覧・ライブHLS配信・録画配信のエンドポイント群であることがそれぞれ判明した。`system_router.md`(本バッチ内)の解析によれば`/api/system`配下は手動バックアップの単一エンドポイントであることが判明している。 | quest_router.md, webhook_router.md, camera_router.md |
+| APIルーティング詳細 | `quest_router.md`の解析によれば`/api/quest`配下はゲームデータ同期・クエスト完了・承認・報酬購入・画像アップロード等のエンドポイント群、`webhook_router.md`の解析によれば`/callback/line`・`/webhook/switchbot`はLINE署名検証とSwitchBotイベントの重複排除・DB保存を行うエンドポイント群、`camera_router.md`の解析によれば`/api/cameras`配下はカメラ設定一覧・ライブHLS配信・録画配信のエンドポイント群であることがそれぞれ判明した。`system_router.md`(本バッチ内)の解析によれば`/api/system`配下は手動バックアップの単一エンドポイントであることが判明している。`routine_router.md`の解析によれば`/api/routine`配下はデイリールーティン(すごろく形式の生活導線UI)の本日状態取得(`GET /today`)とステップ完了(`POST /complete`)の2エンドポイントであり、実処理は`services/routine_service.py`に委譲される薄いルーターであることが判明した。 | quest_router.md, webhook_router.md, camera_router.md, routine_router.md |
 | キャンセルされるタスク | `sensor_service.md`の解析によれば、`cancel_all_tasks()`はグローバル変数`MOTION_TASKS`(モーションセンサーの無反応検知タイマー用の非同期タスク群)を全てキャンセルする関数であることが判明した。 | sensor_service.md |
 | サブプロセスの処理仕様 | `camera_monitor.md`の解析によれば、`monitors/camera_monitor.py`はONVIFプロトコルでカメラの動体検知イベントを監視しDB保存・スナップショット保存を行うスクリプトであることが判明した。`scheduler_boot.md`の解析によれば、`scheduler_boot.py`は`ThreadPoolExecutor`で複数の定期タスクスクリプトを並列実行する無限ループのスケジューラであることが判明した。 | camera_monitor.md, scheduler_boot.md |
 | ログ設定の詳細 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
