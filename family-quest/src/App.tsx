@@ -3,6 +3,9 @@ import { motion } from 'framer-motion';
 import { WifiOff, AlertTriangle } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
 import { useGameData, LevelUpInfo } from './hooks/useGameData';
+import { useRoutineData } from './hooks/useRoutineData';
+import RoutineFlow, { RoutineFreeTimeBanner } from './features/routine/components/RoutineFlow';
+import { isRoutineFlowBlocking, isRoutineFlowFreeTime } from './lib/routineDataSchema';
 import { useSound } from './hooks/useSound';
 import { useLayoutMode } from './hooks/useLayoutMode';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -111,6 +114,18 @@ function App() {
   } = useGameData(currentUserIdx, handleLevelUp);
 
   const currentUser = users[currentUserIdx] || INITIAL_USERS[0];
+
+  // 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後
+  // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。
+  const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(currentUser.user_id);
+  const activeRoutineKey: 'am' | 'pm' | null =
+    routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'
+      : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'
+        : null;
+  const freeTimeRoutineKey: 'am' | 'pm' | null =
+    !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.am) ? 'am'
+      : !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.pm) ? 'pm'
+        : null;
 
   // #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの
   // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。
@@ -550,17 +565,33 @@ function App() {
                 else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);
               }}
             >
-              {activeTab === 'quest' && (
-                <QuestList
-                  quests={quests}
-                  completedQuests={completedQuests}
-                  pendingQuests={pendingQuests}
-                  currentUser={currentUser}
-                  onQuestClick={(q) => handleQuestClick(currentUser, q)}
-                  completedSignal={completedSignal}
-                  processingQuestKeys={processingQuestKeys}
-                  iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
+              {activeTab === 'quest' && activeRoutineKey && routineFlows && (
+                <RoutineFlow
+                  flowKey={activeRoutineKey}
+                  flow={routineFlows[activeRoutineKey]}
+                  onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
+                  isCompleting={isCompletingRoutine}
                 />
+              )}
+
+              {activeTab === 'quest' && !activeRoutineKey && (
+                <>
+                  {freeTimeRoutineKey && routineFlows && (
+                    <div className="mb-3">
+                      <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />
+                    </div>
+                  )}
+                  <QuestList
+                    quests={quests}
+                    completedQuests={completedQuests}
+                    pendingQuests={pendingQuests}
+                    currentUser={currentUser}
+                    onQuestClick={(q) => handleQuestClick(currentUser, q)}
+                    completedSignal={completedSignal}
+                    processingQuestKeys={processingQuestKeys}
+                    iconFirst={iconFirstUserIds.includes(currentUser.user_id)}
+                  />
+                </>
               )}
 
               {activeTab === 'shop' && (

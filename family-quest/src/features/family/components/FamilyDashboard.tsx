@@ -10,6 +10,9 @@ import { useSettings } from '@/context/useSettings';
 import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
 import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
+import { useRoutineData } from '@/hooks/useRoutineData';
+import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';
+import { isRoutineFlowBlocking, isRoutineFlowFreeTime } from '@/lib/routineDataSchema';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -133,6 +136,18 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
 
+    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を
+    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。
+    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);
+    const activeRoutineKey: 'am' | 'pm' | null =
+        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'
+            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'
+                : null;
+    const freeTimeRoutineKey: 'am' | 'pm' | null =
+        !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.am) ? 'am'
+            : !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.pm) ? 'pm'
+                : null;
+
     // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
     // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
     // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを
@@ -185,18 +200,35 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
             {/* パネルごとに独立スクロール(要件5) */}
             <div className="p-2 overflow-y-auto max-h-[60vh]">
-                {tab === 'quest' && (
-                    <QuestList
-                        quests={quests}
-                        completedQuests={completedQuests}
-                        pendingQuests={pendingQuests}
-                        currentUser={user}
-                        onQuestClick={onQuestClick}
-                        completedSignal={completedSignal}
-                        processingQuestKeys={processingQuestKeys}
-                        panelMode
-                        iconFirst={iconFirst}
+                {tab === 'quest' && activeRoutineKey && routineFlows && (
+                    <RoutineFlow
+                        flowKey={activeRoutineKey}
+                        flow={routineFlows[activeRoutineKey]}
+                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
+                        isCompleting={isCompletingRoutine}
+                        compact
                     />
+                )}
+
+                {tab === 'quest' && !activeRoutineKey && (
+                    <>
+                        {freeTimeRoutineKey && routineFlows && (
+                            <div className="mb-2">
+                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />
+                            </div>
+                        )}
+                        <QuestList
+                            quests={quests}
+                            completedQuests={completedQuests}
+                            pendingQuests={pendingQuests}
+                            currentUser={user}
+                            onQuestClick={onQuestClick}
+                            completedSignal={completedSignal}
+                            processingQuestKeys={processingQuestKeys}
+                            panelMode
+                            iconFirst={iconFirst}
+                        />
+                    </>
                 )}
                 {tab === 'shop' && (
                     <RewardShop
