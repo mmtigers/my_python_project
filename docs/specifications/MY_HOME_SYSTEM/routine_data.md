@@ -132,71 +132,71 @@
 
 ### `ROUTINE_FLOWS`
 
-* **役割**: フローキー(`'am'`/`'pm'`)をキーとする`RoutineFlow`の辞書。`am`は「起きてから出発まで」(開始05:00、6ステップ)、`pm`は「帰ってから寝るまで」(開始15:00、6ステップ)を定義する。**（土日対応で変更）** いずれも`day_of_week`は`ALL_DAYS`(月〜日)であり、平日・土日ともに同じ時刻(05:00/15:00)で開始する。チェックポイントは`am`の`free`ステップに`checkpoint_time='07:50'`(平日)・`weekend_checkpoint_time='09:30'`(土日、**土日対応で追加**)、`pm`の`free`ステップに`checkpoint_time='20:00'`(平日・土日とも共通、`weekend_checkpoint_time`は未設定)を設定する。
-* 根拠: [定数宣言] (行番号: 38-74 / 抜粋: "ROUTINE_FLOWS: dict[str, RoutineFlow] = {\n    'am': {\n        'title': '起きてから出発まで',\n        # 土日も同じフローを使う(要件: なるべく平日と揃える)。チェックポイント時刻だけ\n        # 'free'ステップのweekend_checkpoint_timeで土日用に上書きする。\n        'day_of_week': ALL_DAYS,")
+* **役割**: フローキー(`'am'`/`'pm'`)をキーとする`RoutineFlow`の辞書。`am`は「起きてから出発まで」(開始05:00、6ステップ)、`pm`は「帰ってから寝るまで」(開始14:00、6ステップ)を定義する。**（土日対応で変更）** いずれも`day_of_week`は`ALL_DAYS`(月〜日)であり、平日・土日ともに同じ時刻(05:00/14:00)で開始する。チェックポイントは`am`の`free`ステップに`checkpoint_time='07:50'`(平日)・`weekend_checkpoint_time='09:30'`(土日、**土日対応で追加**)、`pm`の`free`ステップに`checkpoint_time='20:00'`(平日・土日とも共通、`weekend_checkpoint_time`は未設定)を設定する。
+* 根拠: [定数宣言] (行番号: 38-73 / 抜粋: "ROUTINE_FLOWS: dict[str, RoutineFlow] = {\n    'am': {\n        'title': '起きてから出発まで',\n        # 土日も同じフローを使う(要件: なるべく平日と揃える)。チェックポイント時刻だけ\n        # 'free'ステップのweekend_checkpoint_timeで土日用に上書きする。\n        'day_of_week': ALL_DAYS,")
 * 根拠: `am`の`free`ステップの土日上書き (行番号: 52-53 / 抜粋: "# 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30'},")
-* 根拠: `pm`の`free`ステップは土日も同時刻 (行番号: 68-69 / 抜粋: "# 就寝準備の締切は土日も平日と同じ20:00(要件確認済み)。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '20:00', 'weekend_checkpoint_time': None},")
+* 根拠: `pm`の`free`ステップは土日も同時刻 (行番号: 67-68 / 抜粋: "# 就寝準備の締切は土日も平日と同じ20:00(要件確認済み)。\n            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '20:00', 'weekend_checkpoint_time': None},")
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [定数宣言] (行番号: 38-74)
+* 根拠: [定数宣言] (行番号: 38-73)
 
 
 * **戻り値/レスポンス**: 該当なし(値は`dict[str, RoutineFlow]`のリテラル)
-* 根拠: [定数宣言] (行番号: 38-74)
+* 根拠: [定数宣言] (行番号: 38-73)
 
 
 * **副作用**: なし
-* 根拠: [定数宣言] (行番号: 38-74)
+* 根拠: [定数宣言] (行番号: 38-73)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [定数宣言] (行番号: 38-74)
+* 根拠: [定数宣言] (行番号: 38-73)
 
 
 
 ### `get_checkpoint_index`
 
 * **役割**: 渡された`flow`の`steps`を先頭から走査し、`checkpoint_time`が真値(空文字・None以外)であるステップの最初のインデックスを返す。フロー内にチェックポイントを持つステップが存在しない場合は`None`を返す。
-* 根拠: [関数定義] (行番号: 77-82 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
+* 根拠: [関数定義] (行番号: 76-81 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`
-* 根拠: [関数定義] (行番号: 77 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
+* 根拠: [関数定義] (行番号: 76 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
 
 
 * **戻り値/レスポンス**: `Optional[int]` — チェックポイントを持つ最初のステップのインデックス、無ければ`None`
-* 根拠: [戻り値] (行番号: 80-82 / 抜粋: "return idx" / "return None")
+* 根拠: [戻り値] (行番号: 79-81 / 抜粋: "return idx" / "return None")
 
 
 * **副作用**: なし
-* 根拠: [関数定義] (行番号: 77-82、副作用となるI/O・状態変更コードは存在しない)
+* 根拠: [関数定義] (行番号: 76-81、副作用となるI/O・状態変更コードは存在しない)
 
 
 * **エラーハンドリング**: なし(例外送出処理は実装されていない。`flow['steps']`のキーアクセスは`RoutineFlow`が常に`steps`キーを持つ前提で行われる)
-* 根拠: [関数定義] (行番号: 77-82、`try`/`except`は存在しない)
+* 根拠: [関数定義] (行番号: 76-81、`try`/`except`は存在しない)
 
 
 ### `get_effective_checkpoint_time`（土日対応で新規追加）
 
 * **役割**: 渡された`step`について、`now`の曜日が土日(`WEEKEND_DAYS`に含まれる)かつ`step['weekend_checkpoint_time']`が真値であればその値を、そうでなければ`step['checkpoint_time']`をそのまま返す。`services/routine_service.py`側は、チェックポイントの締切判定([routine_service.md](./routine_service.md)の`_apply_forced_transition`)とレスポンス表示用の`checkpoint_time`算出([routine_service.md](./routine_service.md)の`_serialize_flow`)の両方でこの関数を経由するようになった(以前はどちらも`step['checkpoint_time']`を直接参照していた)。
-* 根拠: [関数定義] (行番号: 85-92 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:\n    \"\"\"`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。\n\n    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。\n    \"\"\"\n    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
+* 根拠: [関数定義] (行番号: 84-91 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:\n    \"\"\"`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。\n\n    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。\n    \"\"\"\n    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
 
 
 * **引数/リクエスト**: `step: RoutineStep`, `now: datetime.datetime`
-* 根拠: [関数定義] (行番号: 85 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 84 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` — 実際に使うべき締切時刻('HH:MM'形式)、チェックポイントでないステップ(`checkpoint_time`も`weekend_checkpoint_time`も`None`)の場合は`None`
-* 根拠: [戻り値] (行番号: 90-92 / 抜粋: "if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
+* 根拠: [戻り値] (行番号: 89-91 / 抜粋: "if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
 
 
 * **副作用**: なし
-* 根拠: [関数定義] (行番号: 85-92、副作用となるI/O・状態変更コードは存在しない)
+* 根拠: [関数定義] (行番号: 84-91、副作用となるI/O・状態変更コードは存在しない)
 
 
 * **エラーハンドリング**: なし(`try`/`except`は存在しない。`now`が`None`の場合は`now.weekday()`の呼び出しで`AttributeError`になるが、呼び出し元(`routine_service.py`)は常に`datetime.datetime`を渡す前提で、この関数自体はNoneチェックを行わない)
-* 根拠: [関数定義] (行番号: 85-92、`try`/`except`は存在しない)
+* 根拠: [関数定義] (行番号: 84-91、`try`/`except`は存在しない)
 
 
 
@@ -271,8 +271,8 @@ graph TD
 
 ## 8. 保守上の注意点
 
-* `pm`フローの`start_trigger_time`は`'15:00'`とハードコードされているが、これは「仮の既定値」であり実際の下校/帰宅時刻に合わせて要調整であるとコメントで明記されている(ユーザー確認事項)。**（土日対応で追加確認）** 土日もこの値を平日と同じにすることはユーザーに確認済みだが、`'15:00'`という値自体が実際の下校/帰宅時刻を正しく反映しているかという元々の疑問は未解決のまま残っている。
-  根拠: [コメント] (行番号: 61-63 / 抜粋: "# 仮の既定値。実際の下校/帰宅時刻に合わせて要調整(ユーザー確認事項)。土日も同じ\n        # (要件確認済み)。\n        'start_trigger_time': '15:00',")
+* **[修正済み]** `pm`フローの`start_trigger_time`は、以前は「仮の既定値」「ユーザー確認事項」とコメントされた未確定の値`'15:00'`だったが、ユーザーが実際の下校/帰宅時刻として`'14:00'`を確定させたため、コメントも含めて更新された。土日も同じ`'14:00'`を使う(要件確認済み)。
+  根拠: [コメント] (行番号: 61 / 抜粋: "# 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。\n        'start_trigger_time': '14:00',")
 * `FULL_BONUS_GOLD = 150`はquest_data.pyのREWARDS(id=11「Youtube (30:00)」、`cost_gold`)と同額になるよう意図的に設定されている旨がコメントに明記されている。そのため`quest_data.py`側のこの報酬の価格を変更する場合は、本ファイルの`FULL_BONUS_GOLD`も見直しが必要になる(2つの値の同期はコード上強制されておらず、コメントによる申し合わせのみである)。**（土日対応で確認済み）** この満額は土日・平日で同額であり、土日用の別金額は設けられていない。
   根拠: [コメント] (行番号: 33-35 / 抜粋: "# フロー完走ボーナスの満額 (Youtube 30分チケット(quest_data.py REWARDS id=11)と同額)。")
 * `am`フローの開始時刻`'05:00'`についても、それより前にアプリを開くと前日分の状態のままになる旨がコメントされている。**（土日対応で確認済み）** この時刻は土日も平日と同じ05:00である。
@@ -286,7 +286,6 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `start_trigger_time = '15:00'`(pmフロー)の妥当性 | コメント上「仮の既定値」「ユーザー確認事項」と明記されているのみで、実際の下校/帰宅時刻や確定した値・確定時期は本ファイルからは不明。 | ユーザーへの直接確認、または将来の設定ファイル化を示す別コミット |
 | `icon_key`の実際の表示アイコンとの対応関係 | 本ファイルでは文字列キー(例: `'wash'`, `'meal'`)が定義されているのみで、これをどのアイコン画像/絵文字に変換するかはフロントエンド側の実装(`family-quest`)に依存し不明。 | `family-quest/src/features/routine/`配下のコンポーネント(本タスクのスコープ外) |
 | ステップ内容を将来的に親が編集できるようにする管理UIの計画有無 | モジュールdocstringは「親が編集する対象ではない」という現状の設計方針を述べるのみで、将来的な可変化の計画有無には触れていない。 | 該当ファイルなし(仕様・ロードマップ文書の追加が必要) |
 

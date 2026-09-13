@@ -56,6 +56,24 @@ class TestFlowStartGating:
         assert state['flows']['am']['started'] is True
         assert state['flows']['am']['steps'][0]['status'] == 'current'
 
+    def test_pm_flow_not_started_before_14(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_at(13, 59))
+        assert state['flows']['pm']['started'] is False
+
+    def test_pm_flow_started_after_14(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_at(14, 0))
+        assert state['flows']['pm']['started'] is True
+        assert state['flows']['pm']['steps'][0]['status'] == 'current'
+
+    def test_pm_flow_started_after_14_on_weekend(self, isolated_db):
+        """夕方(pm)の開始トリガーは土日も平日と同じ14:00(要件確認済み)。"""
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        assert state['flows']['pm']['started'] is True
+        assert state['flows']['pm']['steps'][0]['status'] == 'current'
+
     def test_unknown_user_returns_404(self, isolated_db):
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
