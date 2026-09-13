@@ -117,23 +117,18 @@ function App() {
 
   // 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後
   // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。
+  // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)
+  // がFamilyDashboard.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。
+  // runQuestActionInner(通常クエスト)と同様にエラーをトーストで示す。
   const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
     currentUser.user_id,
-    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' })
-  );
-  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
-
-  // #(コードレビューで発覚): 以前はcompleteRoutineStepの戻り値(success/detail)を
-  // 呼び出し元が無条件に握りつぶしており、ポーリング(15秒)が追いつく前に古い表示の
-  // ステップをタップして409/400になっても、ボタンが黙って反応しなくなるだけで
-  // 何も通知されなかった。runQuestActionInner(通常クエスト)と同様にエラーをトーストで示す。
-  const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {
-    const res = await completeRoutineStep(flowKey, stepKey);
-    if (!res.success) {
-      showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' }),
+    (detail) => {
+      showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
       play('cancel');
     }
-  };
+  );
+  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
 
   // #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの
   // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。
@@ -577,7 +572,7 @@ function App() {
                 <RoutineFlow
                   flowKey={activeRoutineKey}
                   flow={routineFlows[activeRoutineKey]}
-                  onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}
+                  onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
                   isCompleting={isCompletingRoutine}
                 />
               )}

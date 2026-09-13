@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `0d67384` |
+| 解析基準コミット | `0d67384` (+同一ブランチ内でエラートースト重複ロジックのonErrorへの集約を追加修正) |
 
 ## 関連ドキュメント
 
@@ -29,7 +29,7 @@
 * 根拠: コンポーネント直前のコメント (行番号: 44〜47 / 抜粋: "// 横画面(Echo Show 15等の常設デバイス)用メインレイアウト。\n// パパ・ママ・兄・妹を1行4列で常時表示し、各パネル内でその人のステータスと\n// その日のクエスト一覧が完結する(別画面への誘導をしない)。親向けの承認機能は\n// 独立画面を持たず、このメイン画面上部に常時統合表示する。")
 * 根拠: `FamilyDashboard`関数定義 (行番号: 48 / 抜粋: "const FamilyDashboard: React.FC<FamilyDashboardProps> = ({")
 * 根拠: `FamilyPanel`関数定義およびタブ状態 (行番号: 135, 139 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({", "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
-* 根拠: バグ修正コメント（テーマカラーとリングの分離） (行番号: 141〜144 / 抜粋: "// ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、\n    // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。\n    // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを\n    // 「直前に操作した」ことの一時的なハイライトとして使う。")
+* 根拠: バグ修正コメント（テーマカラーとリングの分離） (行番号: 160〜163 / 抜粋: "// ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、\n    // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。\n    // パネルの縁取りは常にそのユーザーのテーマカラーを表示し、リング(強調枠)だけを\n    // 「直前に操作した」ことの一時的なハイライトとして使う。")
 
 ## 3. 外部依存関係
 
@@ -135,7 +135,7 @@
 * 根拠: 独立スクロールのコメント (行番号: 201 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
 * 根拠: タブ切替コメント (行番号: 168〜170 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
 * 根拠: `onClickCapture={onInteract}` (行番号: 161)
-* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 217〜234 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
+* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 212〜229 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
 * 根拠: `QuestList`への`completedSignal`転送 (行番号: 226 / 抜粋: "completedSignal={completedSignal}")
 
 
@@ -147,9 +147,9 @@
 * 根拠: (行番号: 159〜239 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
-* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id, onLevelUp)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。チェックポイント通過ボーナスでレベルアップした場合は`onLevelUp`コールバック内で`play('levelUp')`と`showToast`によるLEVEL UP演出を行う。**（コードレビューで発覚した欠落を修正して追加）** `handleRoutineStepComplete`が`completeRoutineStep`の戻り値を見て、失敗時に`showToast`＋`play('cancel')`でエラーを通知する（以前はこの戻り値が無条件に握りつぶされていた）。
+* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id, onLevelUp, onError)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。チェックポイント通過ボーナスでレベルアップした場合は`onLevelUp`コールバック内で`play('levelUp')`と`showToast`によるLEVEL UP演出を行う。**（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラー通知（`showToast`＋`play('cancel')`）は`onError`コールバックとして`useRoutineData`へ渡され、`completeStep`内部の`catch`節から直接呼ばれる。以前は本ファイル自前の`handleRoutineStepComplete`が`completeRoutineStep`の戻り値を見て同じ処理をしていたが（`App.tsx`にも一字一句同じ関数が重複していたため）、`useRoutineData.ts`の`onError`引数へ集約され、本ファイルからは削除された。
 * 根拠: (行番号: 137 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
-* 根拠: `useSound`/`useToast`取得と`useRoutineData`呼び出し・`selectRoutineFlow` (行番号: 140〜152 / 抜粋: "const { play } = useSound();\n    const { showToast } = useToast();\n\n    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        }\n    );\n    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、[`handleRoutineStepComplete`定義] (行番号: 157〜163 / 抜粋: "const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {\n        const res = await completeRoutineStep(flowKey, stepKey);\n        if (!res.success) {\n            showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        }\n    };")
+* 根拠: `useSound`/`useToast`取得と`useRoutineData`呼び出し・`selectRoutineFlow` (行番号: 140〜158 / 抜粋: "const { play } = useSound();\n    const { showToast } = useToast();\n\n    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)\n    // がApp.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        },\n        (detail) => {\n            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        }\n    );\n    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")
 
 
 * **エラーハンドリング**: なし
@@ -173,7 +173,7 @@ flowchart TD
     IdleCheck --> PanelRender["FamilyPanel Render (userごと)"]
 
     subgraph "FamilyPanel 内部"
-        PanelRender --> RoutineHook["useRoutineData(user.user_id, onLevelUp) でrouteFlows等を取得(すごろく機能)"]
+        PanelRender --> RoutineHook["useRoutineData(user.user_id, onLevelUp, onError) でrouteFlows等を取得(すごろく機能、追加修正)"]
         RoutineHook --> RoutineKeys["selectRoutineFlow(routineFlows) で\nactiveRoutineKey / freeTimeRoutineKey を算出\n(コードレビューでApp.tsxとの重複ロジックをこの関数へ集約)"]
         RoutineKeys --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
         BorderCalc --> TabState{"tab の値は？(初期値 'quest')"}
@@ -270,7 +270,7 @@ graph TD
 * **アイコン優先表示の外部化**: 以前はモジュール定数`ICON_FIRST_USER_IDS`でハードコードされていたが、現在は`useSettings()`から取得する`iconFirstUserIds`に置き換えられ、設定画面側で管理される構成になっている。
 * 根拠: (行番号: 52, 101 / 抜粋: "const { iconFirstUserIds, userThemeColors } = useSettings();", "iconFirst={iconFirstUserIds.includes(user.user_id)}")
 * **[修正済み] テーマカラーとハイライトリングの分離**: パネルのボーダー色は常にそのユーザーのテーマカラー（`themeColorKey`）を反映し、リング（強調枠）だけを「直前に操作した」ことの一時的なハイライトとして使う設計に変更された。以前はテーマカラーが`isActive`時のみ適用されていたため、設定画面で色を選んでも操作するまで反映されないという不具合があった。
-* 根拠: (行番号: 141〜150)
+* 根拠: (行番号: 160〜169)
 * **[修正済み] タブ構成の再変更**: 一時的にごほうび画面へ「もちもの」を統合していたが、クエスト/ごほうび/もちものの3タブ構成に戻された。
 * 根拠: (行番号: 162 / 抜粋: "★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。")
 * **パネルごとに独立したタブ状態**: 各`FamilyPanel`は`tab`ステートを個別に持つため、あるユーザーのパネルで「ごほうび」タブを開いていても他ユーザーのパネルには影響しない。
@@ -283,10 +283,12 @@ graph TD
 * 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）
 * **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
 * 根拠: (行番号: 111, 226 / 抜粋: "completedSignal={completedSignal}")
-* **（すごろく機能で追加）** `useRoutineData`は`FamilyDashboard`ではなく各`FamilyPanel`が個別に呼び出す: `App.tsx`（縦画面）は`currentUser`1人分のみ`useRoutineData`を呼び出すのに対し、本ファイルの横画面レイアウトでは`FamilyPanel`が4人ぶん並行してマウントされるため、`useRoutineData(user.user_id)`もユーザーごとに独立したインスタンス（独立したReact Queryの`queryKey`、独立した15秒ポーリング）として4回呼び出される。`FamilyDashboardProps`/`FamilyPanelProps`に`routineFlows`等を渡すためのProps追加は行われておらず、あくまで`FamilyPanel`内部で完結する。
-* 根拠: (行番号: 141 / 抜粋: "const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);")
+* **（すごろく機能で追加）** `useRoutineData`は`FamilyDashboard`ではなく各`FamilyPanel`が個別に呼び出す: `App.tsx`（縦画面）は`currentUser`1人分のみ`useRoutineData`を呼び出すのに対し、本ファイルの横画面レイアウトでは`FamilyPanel`が4人ぶん並行してマウントされるため、`useRoutineData(user.user_id, onLevelUp, onError)`もユーザーごとに独立したインスタンス（独立したReact Queryの`queryKey`、独立した15秒ポーリング）として4回呼び出される。`FamilyDashboardProps`/`FamilyPanelProps`に`routineFlows`等を渡すためのProps追加は行われておらず、あくまで`FamilyPanel`内部で完結する。
+* 根拠: (行番号: 147〜157 / 抜粋: "const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        },\n        (detail) => {\n            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        }\n    );")
 * **（すごろく機能で追加、コードレビューで重複解消）** `activeRoutineKey`/`freeTimeRoutineKey`の判定ロジックは、以前は`App.tsx`と本ファイルにそれぞれ同じ三項演算子の連鎖（`am`を`pm`より優先）が重複実装されていたが、`@/lib/routineDataSchema.ts`の`selectRoutineFlow(routineFlows)`ヘルパーに集約され、本ファイルはその戻り値`{ activeKey, freeTimeKey }`を分割代入で受け取るだけになった。判定内容自体（amがブロッキング中ならpm側は評価せず`'am'`を採用）は変わっていない。
-* 根拠: (行番号: 152 / 抜粋: "const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、判定ロジック本体は `../../../lib/routineDataSchema.md` を参照
+* 根拠: (行番号: 158 / 抜粋: "const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、判定ロジック本体は `../../../lib/routineDataSchema.md` を参照
+* **（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラートースト表示ロジック（`res.success`を見て`showToast`＋`play('cancel')`を呼ぶ`handleRoutineStepComplete`）は、以前は`App.tsx`にも一字一句同じ形で重複していた。`onLevelUp`と同じ設計方針に倣い、`useRoutineData`の第3引数`onError`へこのロジックを集約し、本ファイルからは`handleRoutineStepComplete`自体が削除された（`onCompleteStep`は`completeRoutineStep`を直接呼ぶだけになった）。
+* 根拠: (行番号: 147〜157, 216)
 
 ## 9. 不明事項一覧
 

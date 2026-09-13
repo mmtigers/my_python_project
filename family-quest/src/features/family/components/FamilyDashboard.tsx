@@ -142,25 +142,20 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
     // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を
     // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。
+    // #(コードレビューで発覚): 完了報告失敗時のエラートースト表示(旧handleRoutineStepComplete)
+    // がApp.tsx側と一字一句重複していたため、useRoutineData自体のonErrorへ集約した。
     const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
         user.user_id,
         (info) => {
             play('levelUp');
             showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });
+        },
+        (detail) => {
+            showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+            play('cancel');
         }
     );
     const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
-
-    // #(コードレビューで発覚): App.tsx側と同じく、以前はcompleteRoutineStepの戻り値を
-    // 無条件に握りつぶしていた。ポーリング(15秒)が追いつく前の古い表示をタップして
-    // 409/400になっても何も通知されなかったため、トーストで知らせる。
-    const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {
-        const res = await completeRoutineStep(flowKey, stepKey);
-        if (!res.success) {
-            showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
-            play('cancel');
-        }
-    };
 
     // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
     // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
@@ -218,7 +213,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                     <RoutineFlow
                         flowKey={activeRoutineKey}
                         flow={routineFlows[activeRoutineKey]}
-                        onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}
+                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
                         isCompleting={isCompletingRoutine}
                         compact
                     />
