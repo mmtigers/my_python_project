@@ -6,12 +6,15 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a522e0a` |
+| 解析基準コミット | `0d67384` |
 
 ## 関連ドキュメント
 
 * [main.md](main.md) - 本コンポーネントをルートとしてマウントする呼び出し元（想定）
 * [src/hooks/useGameData.md](src/hooks/useGameData.md) - ユーザー/クエスト/報酬データの取得・更新関数（`completeQuest`等）を提供するカスタムフック
+* [src/hooks/useRoutineData.md](src/hooks/useRoutineData.md) - **（すごろく機能で新規追加）** 「きょうのすごろく」の当日フロー状態取得・ステップ完了報告を提供するカスタムフック。`currentUser.user_id`で呼び出す
+* [src/features/routine/components/RoutineFlow.md](src/features/routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** すごろくUI本体。デフォルトエクスポート`RoutineFlow`（誘導中の全ステップ表示）と名前付きエクスポート`RoutineFreeTimeBanner`（自由時間中バナー）の両方を縦画面の`quest`タブ内で使用
+* [src/lib/routineDataSchema.md](src/lib/routineDataSchema.md) - **（すごろく機能で新規追加、コードレビューでApp.tsx側の重複ロジックをselectRoutineFlowへ集約）** `selectRoutineFlow`（誘導中/自由時間中のフローキーをam優先で判定するヘルパー）と`RoutineFlowState`等の型の実装元
 * [src/hooks/useLayoutMode.md](src/hooks/useLayoutMode.md) - `landscape`/`portrait`のレイアウトモード判定フック
 * [src/hooks/useSound.md](src/hooks/useSound.md) - 効果音再生フック
 * [src/hooks/useOnlineStatus.md](src/hooks/useOnlineStatus.md) - オンライン/オフライン判定フック
@@ -47,6 +50,8 @@
 * 根拠: Issue #552抽出後のimport群 (行番号: 9〜10, 19〜20, 26 / 抜粋: "import { useCurrentUser } from './hooks/useCurrentUser';\nimport { useConfirmDialog } from './hooks/useConfirmDialog';", "import { isParentUser, getRepresentativeParent } from './lib/userRole';\nimport { ActionResult, resolveErrorText } from './lib/actionResult';", "import { ConfirmModal } from './components/ui/ConfirmModal';")
 * 根拠: `useCurrentUser`のコメント (行番号: 115〜117 / 抜粋: "// #393: usersが実データに揃ったら保存済みuser_idを解決し、以後のcurrentUserIdxの\n  // 変化(ユーザー切替)を都度localStorageへ保存する(#552でuseCurrentUserへ抽出)。\n  useCurrentUser(users, currentUserIdx, setCurrentUserIdx);")
 * 根拠: `useConfirmDialog`の分割代入 (行番号: 51〜55 / 抜粋: "const {\n    confirmMode, confirmTarget, confirmUser, rejectReason, setRejectReason,\n    isConfirming, setIsConfirming, isConfirmingRef,\n    openConfirm, closeConfirm,\n  } = useConfirmDialog();")
+* **（すごろく機能で追加）** `currentUser`確定後、`useRoutineData(currentUser.user_id, onLevelUp)`を呼び出す。第2引数の`onLevelUp`は`handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' })`を呼ぶコールバックで、チェックポイント通過ボーナスでレベルアップした際にクエスト完了時と同じLEVEL UPトーストを出すために**（コードレビューで発覚した欠落を修正して追加）**された。`flows`（`am`/`pm`2系統のフロー状態）は`lib/routineDataSchema`の`selectRoutineFlow`（**コードレビューで発覚した重複を解消するために導入**。以前は`isRoutineFlowBlocking`/`isRoutineFlowFreeTime`を使った同じ4分岐の三項演算子が本ファイルと`FamilyDashboard.tsx`に重複していた）に渡され、`activeRoutineKey`（誘導中のフローキー、`am`優先）と`freeTimeRoutineKey`（`activeRoutineKey`が無い場合のみ判定される自由時間中のフローキー）が算出される。縦画面の`quest`タブ描画（後述の「レンダリング分岐」参照）で、`QuestList`の代わりに`RoutineFlow`を表示するか、`QuestList`の上に`RoutineFreeTimeBanner`を重ねて表示するかの分岐に使われる。さらに`handleRoutineStepComplete`（**コードレビューで発覚した欠落を修正して追加**）が`completeRoutineStep`の戻り値(`{success, detail}`)を見て、失敗時に`showToast`でエラーを通知する（以前は戻り値が無条件に握りつぶされ、ポーリングが追いつく前の古い表示をタップして409/400になってもボタンが黙って反応しなくなるだけだった）。
+* 根拠: `useRoutineData`呼び出しと`selectRoutineFlow` (行番号: 118〜124 / 抜粋: "// 「きょうのすごろく」: 平日朝/夕方の生活導線UI。誘導中(自由時間・未開始・完了後\n  // 以外)はクエスト選択画面より優先して表示し、迷わず1本道で進めるようにする。\n  const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n    currentUser.user_id,\n    (info) => handleLevelUp({ user: currentUser.name, level: info.newLevel, job: currentUser.job_class || '無職' })\n  );\n  const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、[`handleRoutineStepComplete`定義] (行番号: 130〜136 / 抜粋: "const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {\n    const res = await completeRoutineStep(flowKey, stepKey);\n    if (!res.success) {\n      showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n      play('cancel');\n    }\n  };")
 
 ## 3. 外部依存関係
 
@@ -59,38 +64,43 @@
 | `WifiOff`, `AlertTriangle` | コンポーネント | オフライン時のバナーアイコン表示、データ取得失敗バナーのアイコン（Issue #390） | 根拠: (行番号: 3 / 抜粋: "import { WifiOff, AlertTriangle } from 'lucide-react';") |
 | `INITIAL_USERS` | 定数 | ユーザーデータが未取得または存在しない場合のフォールバック | 根拠: (行番号: 4 / 抜粋: "import { INITIAL_USERS } from './lib/masterData';") |
 | `useGameData`, `LevelUpInfo` | カスタムフック / 型定義 | ゲーム全体のデータ・状態更新関数の取得、レベルアップ情報の型 | 根拠: (行番号: 5 / 抜粋: "import { useGameData, LevelUpInfo } from './hooks/useGameData';") |
-| `useSound` | カスタムフック | 効果音再生関数の取得 | 根拠: (行番号: 6 / 抜粋: "import { useSound } from './hooks/useSound';") |
-| `useLayoutMode` | カスタムフック | 横画面/縦画面のレイアウトモード判定 | 根拠: (行番号: 7 / 抜粋: "import { useLayoutMode } from './hooks/useLayoutMode';") |
-| `useOnlineStatus` | カスタムフック | オンライン/オフライン状態の判定 | 根拠: (行番号: 8 / 抜粋: "import { useOnlineStatus } from './hooks/useOnlineStatus';") |
-| `useCurrentUser` | カスタムフック（Issue #552で新規追加） | 選択中ユーザーの永続化解決・保存 | 根拠: (行番号: 9 / 抜粋: "import { useCurrentUser } from './hooks/useCurrentUser';") |
-| `useConfirmDialog` | カスタムフック（Issue #552で新規追加） | 確認モーダルまわりの状態クラスタの取得 | 根拠: (行番号: 10 / 抜粋: "import { useConfirmDialog } from './hooks/useConfirmDialog';") |
-| `useSettings` | カスタムフック(コンテキスト) | 表示密度(`density`)、アイコン優先表示ユーザーID一覧(`iconFirstUserIds`)の取得 | 根拠: (行番号: 11 / 抜粋: "import { useSettings } from './context/useSettings';") |
-| `useToast` | カスタムフック(コンテキスト) | トースト通知表示関数(`showToast`)の取得 | 根拠: (行番号: 12 / 抜粋: "import { useToast } from './context/useToast';") |
-| `RewardShop` | コンポーネント | 「ごほうび」タブの表示 | 根拠: (行番号: 13 / 抜粋: "import RewardShop from './features/shop/components/RewardShop';") |
-| `InventoryList` | コンポーネント | 「もちもの」タブの表示 | 根拠: (行番号: 14 / 抜粋: "import { InventoryList } from './features/shop/components/InventoryList';") |
-| `FamilyDashboard` | コンポーネント | 横画面用、4人常時表示レイアウトの表示 | 根拠: (行番号: 15 / 抜粋: "import FamilyDashboard from './features/family/components/FamilyDashboard';") |
-| `CompletedSignal`, `ID`, `Quest`, `QuestHistory`, `Reward`, `User` | 型定義 | 各オブジェクトの型定義 | 根拠: (行番号: 17 / 抜粋: "import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';") |
-| `getQuestLockState`, `getQuestProcessingKey` | 関数 | クエストの無限判定・申請中/完了履歴の検索、多重送信防止用キーの生成 | 根拠: (行番号: 18 / 抜粋: "import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';") |
-| `isParentUser`, `getRepresentativeParent` | 関数（Issue #552で`./lib/userRole`へ移動） | 保護者判定、承認・却下・購入の記録名義となる代表親の解決 | 根拠: (行番号: 19 / 抜粋: "import { isParentUser, getRepresentativeParent } from './lib/userRole';") |
-| `ActionResult`, `resolveErrorText` | 型定義 / 関数（Issue #552で`./lib/actionResult`へ移動） | ミューテーション結果の型、エラーメッセージ解決関数 | 根拠: (行番号: 20 / 抜粋: "import { ActionResult, resolveErrorText } from './lib/actionResult';") |
-| `Header` | コンポーネント | 画面上部のヘッダー表示 | 根拠: (行番号: 23 / 抜粋: "import Header from './components/layout/Header';") |
-| `BottomNav`, `BottomNavTab` | コンポーネント / 型 | 縦画面用フッターナビの表示、タブ種別の型 | 根拠: (行番号: 24 / 抜粋: "import BottomNav, { BottomNavTab } from './components/layout/BottomNav';") |
-| `MessageModal` | コンポーネント | エラーメッセージのモーダル表示 | 根拠: (行番号: 25 / 抜粋: "import MessageModal from './components/ui/MessageModal';") |
-| `ConfirmModal` | コンポーネント（Issue #552で`./components/ui/ConfirmModal`へ移動） | 完了・購入・却下の確認モーダル表示 | 根拠: (行番号: 26 / 抜粋: "import { ConfirmModal } from './components/ui/ConfirmModal';") |
-| `ChunkErrorBoundary` | コンポーネント | `lazy()`チャンク読み込み失敗時の自動再読み込み | 根拠: (行番号: 27 / 抜粋: "import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';") |
-| `AvatarUploader` (lazy) | コンポーネント | アバター画像アップロード画面の表示（動的import） | 根拠: (行番号: 31 / 抜粋: "const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));") |
-| `SettingsModal` (lazy) | コンポーネント | 表示設定モーダルの表示（動的import） | 根拠: (行番号: 32 / 抜粋: "const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));") |
-| `UserStatusCard` | コンポーネント | 現在選択中ユーザーのステータス表示（縦画面） | 根拠: (行番号: 34 / 抜粋: "import UserStatusCard from './features/family/components/UserStatusCard';") |
-| `QuestList` | コンポーネント | クエスト一覧の表示（縦画面） | 根拠: (行番号: 35 / 抜粋: "import QuestList from './features/quest/components/QuestList';") |
-| `ApprovalList` | コンポーネント | 承認待ちクエスト一覧の表示（縦画面、保護者のみ） | 根拠: (行番号: 36 / 抜粋: "import ApprovalList from './features/quest/components/ApprovalList';") |
-| `FamilyLog` | コンポーネント | ファミリーのログ（記録）表示 | 根拠: (行番号: 37 / 抜粋: "import FamilyLog from './features/family/components/FamilyLog';") |
+| `useRoutineData` | カスタムフック（すごろく機能で新規追加） | 「きょうのすごろく」の当日フロー状態取得・ステップ完了報告 | 根拠: (行番号: 6 / 抜粋: "import { useRoutineData } from './hooks/useRoutineData';") |
+| `RoutineFlow` (default), `RoutineFreeTimeBanner` | コンポーネント（すごろく機能で新規追加） | `RoutineFlow`はすごろく誘導中の全ステップ表示、`RoutineFreeTimeBanner`は自由時間中の現在地バナー表示 | 根拠: (行番号: 7 / 抜粋: "import RoutineFlow, { RoutineFreeTimeBanner } from './features/routine/components/RoutineFlow';") |
+| `selectRoutineFlow` | 関数（すごろく機能で新規追加、コードレビューで重複解消のため導入） | `routineFlows.am`/`routineFlows.pm`から、誘導中(`activeRoutineKey`)/自由時間中(`freeTimeRoutineKey`)のフローキーを`am`優先でまとめて算出するヘルパー | 根拠: (行番号: 8 / 抜粋: "import { selectRoutineFlow } from './lib/routineDataSchema';") |
+| `useSound` | カスタムフック | 効果音再生関数の取得 | 根拠: (行番号: 9 / 抜粋: "import { useSound } from './hooks/useSound';") |
+| `useLayoutMode` | カスタムフック | 横画面/縦画面のレイアウトモード判定 | 根拠: (行番号: 10 / 抜粋: "import { useLayoutMode } from './hooks/useLayoutMode';") |
+| `useOnlineStatus` | カスタムフック | オンライン/オフライン状態の判定 | 根拠: (行番号: 11 / 抜粋: "import { useOnlineStatus } from './hooks/useOnlineStatus';") |
+| `useCurrentUser` | カスタムフック（Issue #552で新規追加） | 選択中ユーザーの永続化解決・保存 | 根拠: (行番号: 12 / 抜粋: "import { useCurrentUser } from './hooks/useCurrentUser';") |
+| `useConfirmDialog` | カスタムフック（Issue #552で新規追加） | 確認モーダルまわりの状態クラスタの取得 | 根拠: (行番号: 13 / 抜粋: "import { useConfirmDialog } from './hooks/useConfirmDialog';") |
+| `useSettings` | カスタムフック(コンテキスト) | 表示密度(`density`)、アイコン優先表示ユーザーID一覧(`iconFirstUserIds`)の取得 | 根拠: (行番号: 14 / 抜粋: "import { useSettings } from './context/useSettings';") |
+| `useToast` | カスタムフック(コンテキスト) | トースト通知表示関数(`showToast`)の取得 | 根拠: (行番号: 15 / 抜粋: "import { useToast } from './context/useToast';") |
+| `RewardShop` | コンポーネント | 「ごほうび」タブの表示 | 根拠: (行番号: 16 / 抜粋: "import RewardShop from './features/shop/components/RewardShop';") |
+| `InventoryList` | コンポーネント | 「もちもの」タブの表示 | 根拠: (行番号: 17 / 抜粋: "import { InventoryList } from './features/shop/components/InventoryList';") |
+| `FamilyDashboard` | コンポーネント | 横画面用、4人常時表示レイアウトの表示 | 根拠: (行番号: 18 / 抜粋: "import FamilyDashboard from './features/family/components/FamilyDashboard';") |
+| `CompletedSignal`, `ID`, `Quest`, `QuestHistory`, `Reward`, `User` | 型定義 | 各オブジェクトの型定義 | 根拠: (行番号: 20 / 抜粋: "import { CompletedSignal, ID, Quest, QuestHistory, Reward, User } from '@/types';") |
+| `getQuestLockState`, `getQuestProcessingKey` | 関数 | クエストの無限判定・申請中/完了履歴の検索、多重送信防止用キーの生成 | 根拠: (行番号: 21 / 抜粋: "import { getQuestLockState, getQuestProcessingKey } from './features/quest/hooks/useQuestStatus';") |
+| `isParentUser`, `getRepresentativeParent` | 関数（Issue #552で`./lib/userRole`へ移動） | 保護者判定、承認・却下・購入の記録名義となる代表親の解決 | 根拠: (行番号: 22 / 抜粋: "import { isParentUser, getRepresentativeParent } from './lib/userRole';") |
+| `ActionResult`, `resolveErrorText` | 型定義 / 関数（Issue #552で`./lib/actionResult`へ移動） | ミューテーション結果の型、エラーメッセージ解決関数 | 根拠: (行番号: 23 / 抜粋: "import { ActionResult, resolveErrorText } from './lib/actionResult';") |
+| `Header` | コンポーネント | 画面上部のヘッダー表示 | 根拠: (行番号: 26 / 抜粋: "import Header from './components/layout/Header';") |
+| `BottomNav`, `BottomNavTab` | コンポーネント / 型 | 縦画面用フッターナビの表示、タブ種別の型 | 根拠: (行番号: 27 / 抜粋: "import BottomNav, { BottomNavTab } from './components/layout/BottomNav';") |
+| `MessageModal` | コンポーネント | エラーメッセージのモーダル表示 | 根拠: (行番号: 28 / 抜粋: "import MessageModal from './components/ui/MessageModal';") |
+| `ConfirmModal` | コンポーネント（Issue #552で`./components/ui/ConfirmModal`へ移動） | 完了・購入・却下の確認モーダル表示 | 根拠: (行番号: 29 / 抜粋: "import { ConfirmModal } from './components/ui/ConfirmModal';") |
+| `ChunkErrorBoundary` | コンポーネント | `lazy()`チャンク読み込み失敗時の自動再読み込み | 根拠: (行番号: 30 / 抜粋: "import ChunkErrorBoundary from './components/ui/ChunkErrorBoundary';") |
+| `AvatarUploader` (lazy) | コンポーネント | アバター画像アップロード画面の表示（動的import） | 根拠: (行番号: 34 / 抜粋: "const AvatarUploader = lazy(() => import('./components/ui/AvatarUploader'));") |
+| `SettingsModal` (lazy) | コンポーネント | 表示設定モーダルの表示（動的import） | 根拠: (行番号: 35 / 抜粋: "const SettingsModal = lazy(() => import('./components/ui/SettingsModal'));") |
+| `UserStatusCard` | コンポーネント | 現在選択中ユーザーのステータス表示（縦画面） | 根拠: (行番号: 37 / 抜粋: "import UserStatusCard from './features/family/components/UserStatusCard';") |
+| `QuestList` | コンポーネント | クエスト一覧の表示（縦画面） | 根拠: (行番号: 38 / 抜粋: "import QuestList from './features/quest/components/QuestList';") |
+| `ApprovalList` | コンポーネント | 承認待ちクエスト一覧の表示（縦画面、保護者のみ） | 根拠: (行番号: 39 / 抜粋: "import ApprovalList from './features/quest/components/ApprovalList';") |
+| `FamilyLog` | コンポーネント | ファミリーのログ（記録）表示 | 根拠: (行番号: 40 / 抜粋: "import FamilyLog from './features/family/components/FamilyLog';") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| インポートされている全UIコンポーネント（`RewardShop`, `InventoryList`, `FamilyDashboard`, `Header`, `BottomNav`, `AvatarUploader`, `SettingsModal`, `MessageModal`, `ConfirmModal`, `ChunkErrorBoundary`, `UserStatusCard`, `QuestList`, `ApprovalList`, `FamilyLog`） | 実装ファイルが本ファイルからは提供されておらず、内部のレンダリング内容や副作用は各コンポーネント自身の仕様書を参照する必要がある | 根拠: インポート文全体 (行番号: 13〜15, 23〜27, 31〜32, 34〜37) |
+| インポートされている全UIコンポーネント（`RewardShop`, `InventoryList`, `FamilyDashboard`, `RoutineFlow`, `RoutineFreeTimeBanner`, `Header`, `BottomNav`, `AvatarUploader`, `SettingsModal`, `MessageModal`, `ConfirmModal`, `ChunkErrorBoundary`, `UserStatusCard`, `QuestList`, `ApprovalList`, `FamilyLog`） | 実装ファイルが本ファイルからは提供されておらず、内部のレンダリング内容や副作用は各コンポーネント自身の仕様書を参照する必要がある | 根拠: インポート文全体 (行番号: 7, 16〜18, 26〜30, 34〜35, 37〜40) |
 | `useGameData` | 実装が別ファイルであり、非同期処理の成否判定やDBとの通信有無、データの初期構造の詳細は本ファイルからは不明 | 根拠: (行番号: 5 / 抜粋: "import { useGameData, LevelUpInfo } from './hooks/useGameData';") |
+| `useRoutineData` | 実装が別ファイルであり、`GET /api/routine/today`のポーリング詳細・`POST /api/routine/complete`の成否判定は本ファイルからは不明（詳細は`useRoutineData.md`を参照） | 根拠: (行番号: 6 / 抜粋: "import { useRoutineData } from './hooks/useRoutineData';") |
+| `selectRoutineFlow` | 実装が別ファイル（`lib/routineDataSchema.ts`）であり、優先順位判定の詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる（詳細は`routineDataSchema.md`を参照） | 根拠: (行番号: 8 / 抜粋: "import { selectRoutineFlow } from './lib/routineDataSchema';") |
 | `useSound` | 音声ファイルのパスや再生ロジックが不明 | 根拠: (行番号: 6 / 抜粋: "import { useSound } from './hooks/useSound';") |
 | `useLayoutMode` | `landscape`/`portrait`の判定条件（メディアクエリ等）の詳細が本ファイルからは不明 | 根拠: (行番号: 7 / 抜粋: "import { useLayoutMode } from './hooks/useLayoutMode';") |
 | `useOnlineStatus` | オンライン判定の具体的な実装が不明 | 根拠: (行番号: 8 / 抜粋: "import { useOnlineStatus } from './hooks/useOnlineStatus';") |
@@ -279,17 +289,18 @@
 
 ### `App` のレンダリング分岐（JSX本体）
 
-* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、`/api/quest/data`の取得失敗バナー（Issue #390。`gameDataError`が非`null`のとき、`role="alert"`の琥珀色バーに「データの取得に失敗しました: {gameDataError}」と`refetchGameData`を呼ぶ「再試行」ボタンを表示）、`Header`（`showUserSwitcher={layoutMode !== 'landscape'}`, `showLogSwitcher={layoutMode !== 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`（`completedSignal`/`processingQuestKeys`/`busyHistoryIds={approvingHistoryIds}`/`isApprovingAll`を含むpropsを渡す）、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた`QuestList`（`completedSignal`/`processingQuestKeys`を渡す）/`RewardShop`/`InventoryList`、`viewMode === 'familyLog'`なら`FamilyLog`（**改善で追加**: スマホ幅で最初に選択するユーザーをメイン画面と揃えるため`initialUserId={currentUser.user_id}`を渡す）を描画する。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`、それ以外は`max-w-md md:max-w-5xl`に切り替わる。末尾で`ConfirmModal`（`mode={confirmMode}`, `target={confirmTarget}`, `rejectReason`, `onSelectRejectReason={setRejectReason}`, `onConfirm={executeConfirm}`, `onCancel={() => { closeConfirm(); play('cancel'); }}`, `isConfirming`）と、`messageData`があれば`MessageModal`を描画する。
-* 根拠: (行番号: 492, 494, 514, 585 / 抜粋: "${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}", "{viewMode === 'main' && layoutMode === 'landscape' && (\n          <FamilyDashboard", "{viewMode === 'main' && layoutMode === 'portrait' && (", "{viewMode === 'familyLog' && (")
-* 根拠: `FamilyLog`への`initialUserId`の受け渡し (行番号: 586 / 抜粋: "<FamilyLog chronicle={chronicle} users={users} initialUserId={currentUser.user_id} />")
-* 根拠: データ取得失敗バナー (行番号: 447〜466 / 抜粋: "{/* #390: /api/quest/data の取得失敗(ネットワーク・Zod検証失敗)を画面に出す。", "{gameDataError && (\n        <div\n          role=\"alert\"", "<span className=\"truncate\">データの取得に失敗しました: {gameDataError}</span>", "onClick={() => { refetchGameData(); play('tap'); }}")
-* 根拠: `FamilyDashboard`への多重送信防止propsの受け渡し (行番号: 494〜512 / 抜粋: "<FamilyDashboard\n            users={users}\n            quests={quests}\n            completedQuests={completedQuests}\n            pendingQuests={pendingQuests}\n            rewards={rewards}\n            onQuestClick={handleQuestClick}\n            onBuyReward={handleBuyReward}\n            onApprove={handleApprove}\n            onReject={handleReject}\n            onApproveAll={handleApproveAll}\n            completedSignal={completedSignal}\n            processingQuestKeys={processingQuestKeys}\n            busyHistoryIds={approvingHistoryIds}\n            isApprovingAll={isApprovingAll}\n            onAvatarClick={(user) => setAvatarUser(user)}\n          />")
-* 根拠: `ConfirmModal`への呼び出し (行番号: 598〜606 / 抜粋: "<ConfirmModal\n        mode={confirmMode}\n        target={confirmTarget}\n        rejectReason={rejectReason}\n        onSelectRejectReason={setRejectReason}\n        onConfirm={executeConfirm}\n        onCancel={() => { closeConfirm(); play('cancel'); }}\n        isConfirming={isConfirming}\n      />")
-* 根拠: スワイプ操作 (行番号: 543〜551 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
+* **役割**: `isLoading`ならローディング表示のみを返す。それ以外は、オフライン時のバナー（`!isOnline`、`WifiOff`アイコン付き）、`/api/quest/data`の取得失敗バナー（Issue #390。`gameDataError`が非`null`のとき、`role="alert"`の琥珀色バーに「データの取得に失敗しました: {gameDataError}」と`refetchGameData`を呼ぶ「再試行」ボタンを表示）、`Header`（`showUserSwitcher={layoutMode !== 'landscape'}`, `showLogSwitcher={layoutMode !== 'portrait'}`, `showBackToMain={layoutMode === 'landscape'}`）を描画したのち、`viewMode === 'main' && layoutMode === 'landscape'`なら`FamilyDashboard`（`completedSignal`/`processingQuestKeys`/`busyHistoryIds={approvingHistoryIds}`/`isApprovingAll`を含むpropsを渡す）、`viewMode === 'main' && layoutMode === 'portrait'`なら`UserStatusCard`＋（保護者なら）`ApprovalList`＋スワイプ対応の`motion.div`内で`activeTab`（`quest`/`shop`/`inventory`）に応じた表示、`viewMode === 'familyLog'`なら`FamilyLog`（**改善で追加**: スマホ幅で最初に選択するユーザーをメイン画面と揃えるため`initialUserId={currentUser.user_id}`を渡す）を描画する。**（すごろく機能で変更）** `activeTab === 'quest'`の中身は単純な`QuestList`直接描画ではなくなり、`activeRoutineKey`（前述の状態/フック節を参照）が真であれば`QuestList`の代わりに`RoutineFlow`（`flowKey={activeRoutineKey}`, `flow={routineFlows[activeRoutineKey]}`, `onCompleteStep`は`handleRoutineStepComplete(activeRoutineKey, stepKey)`を呼ぶコールバック(**コードレビューで発覚した欠落を修正**: 以前は`completeRoutineStep`を直接呼び戻り値を無視していた), `isCompleting={isCompletingRoutine}`）を描画し、`activeRoutineKey`が無ければ、`freeTimeRoutineKey`が真の場合のみ`QuestList`の直前に`RoutineFreeTimeBanner`（`flowKey={freeTimeRoutineKey}`, `flow={routineFlows[freeTimeRoutineKey]}`）を挟んだうえで、従来通りの`QuestList`（`completedSignal`/`processingQuestKeys`を渡す）を描画する。`shop`/`inventory`タブの中身（`RewardShop`/`InventoryList`）はすごろく機能による変更を受けていない。縦画面のときのみ`BottomNav`を表示する。コンテナの最大幅は`densityWrapperClass`（`density === 'compact'`で余白を縮小）と`layoutMode === 'landscape'`のとき`max-w-[min(92vw,1800px)]`、それ以外は`max-w-md md:max-w-5xl`に切り替わる。末尾で`ConfirmModal`（`mode={confirmMode}`, `target={confirmTarget}`, `rejectReason`, `onSelectRejectReason={setRejectReason}`, `onConfirm={executeConfirm}`, `onCancel={() => { closeConfirm(); play('cancel'); }}`, `isConfirming`）と、`messageData`があれば`MessageModal`を描画する。
+* 根拠: (行番号: 494, 507, 509, 529, 616 / 抜粋: "${layoutMode === 'landscape' ? 'max-w-[min(92vw,1800px)]' : 'max-w-md md:max-w-5xl'}", "{viewMode === 'main' && layoutMode === 'landscape' && (\n          <FamilyDashboard", "{viewMode === 'main' && layoutMode === 'portrait' && (", "{viewMode === 'familyLog' && (")
+* 根拠: `FamilyLog`への`initialUserId`の受け渡し (行番号: 617 / 抜粋: "<FamilyLog chronicle={chronicle} users={users} initialUserId={currentUser.user_id} />")
+* 根拠: データ取得失敗バナー (行番号: 466〜468 / 抜粋: "{gameDataError && (\n        <div\n          role=\"alert\"")
+* 根拠: `FamilyDashboard`への多重送信防止propsの受け渡し (行番号: 510〜525 / 抜粋: "<FamilyDashboard\n            users={users}\n            quests={quests}\n            completedQuests={completedQuests}\n            pendingQuests={pendingQuests}\n            rewards={rewards}\n            onQuestClick={handleQuestClick}\n            onBuyReward={handleBuyReward}\n            onApprove={handleApprove}\n            onReject={handleReject}\n            onApproveAll={handleApproveAll}\n            completedSignal={completedSignal}\n            processingQuestKeys={processingQuestKeys}\n            busyHistoryIds={approvingHistoryIds}\n            isApprovingAll={isApprovingAll}\n            onAvatarClick={(user) => setAvatarUser(user)}\n          />")
+* 根拠: `ConfirmModal`への呼び出し (行番号: 629〜636 / 抜粋: "<ConfirmModal\n        mode={confirmMode}\n        target={confirmTarget}\n        rejectReason={rejectReason}\n        onSelectRejectReason={setRejectReason}\n        onConfirm={executeConfirm}\n        onCancel={() => { closeConfirm(); play('cancel'); }}\n        isConfirming={isConfirming}\n      />")
+* 根拠: スワイプ操作 (行番号: 558〜567 / 抜粋: "{/* 角度⑯: 左右スワイプでもクエスト/ごほうびタブを切り替えられるようにする */}\n            <motion.div\n              className=\"min-h-[300px] animate-fade-in\"\n              onPanEnd={(_e, info) => {\n                const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];")
+* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 576〜592 / 抜粋: "{activeTab === 'quest' && activeRoutineKey && routineFlows && (\n                <RoutineFlow\n                  flowKey={activeRoutineKey}\n                  flow={routineFlows[activeRoutineKey]}\n                  onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}\n                  isCompleting={isCompletingRoutine}\n                />\n              )}", "{activeTab === 'quest' && !activeRoutineKey && (\n                <>\n                  {freeTimeRoutineKey && routineFlows && (\n                    <div className=\"mb-3\">\n                      <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                    </div>\n                  )}\n                  <QuestList")
 
-* **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。この`Suspense`は`ChunkErrorBoundary`で包まれており（Issue #362）、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。
-* 根拠: `ChunkErrorBoundary`によるラップ (行番号: 617〜621 / 抜粋: "{/* #362: SW更新で旧チャンクがprecacheから消えた後に lazy() の import() が404すると、\n          ErrorBoundaryが無い場合はルートごとアンマウントされ白画面になる。\n          ChunkErrorBoundaryがチャンク読込失敗を検知して自動で再読み込みする。 */}\n      <ChunkErrorBoundary>\n      <Suspense fallback={null}>")
-* 根拠: (行番号: 621〜636 / 抜粋: "<Suspense fallback={null}>\n        {avatarUser && (\n          <AvatarUploader\n            user={avatarUser}\n            onClose={() => setAvatarUser(null)}\n            onUploadComplete={() => {\n              refreshData();\n              showToast({ title: \"変更完了\", text: \"アバターを変更しました！\", icon: '🖼️' });\n            }}\n          />\n        )}\n\n        {settingsOpen && (\n          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />\n        )}\n      </Suspense>")
+* **副作用**: `avatarUser`が設定されている場合、`Suspense`配下で遅延ロードされた`AvatarUploader`の`onUploadComplete`から`refreshData()`と`showToast`による成功通知が行われる。`settingsOpen`が真の場合、同じく`Suspense`配下で遅延ロードされた`SettingsModal`が表示される。この`Suspense`は`ChunkErrorBoundary`で包まれており（Issue #362）、SW更新後に旧チャンクが404になって`lazy()`がthrowしても、Appツリー全体がアンマウントされて白画面になることはなく、バウンダリが自動で再読み込みする。**（すごろく機能で追加）** `useRoutineData(currentUser.user_id, onLevelUp)`によるポーリング通信（15秒間隔、詳細は`useRoutineData.md`参照）も本コンポーネントの副作用に加わる。完了報告の成否は`handleRoutineStepComplete`が`showToast`/`play('cancel')`で通知し、チェックポイント通過ボーナスでのレベルアップは`onLevelUp`経由で既存の`handleLevelUp`(`play('levelUp')`＋LEVEL UPトースト)を呼ぶ。
+* 根拠: `ChunkErrorBoundary`によるラップ (行番号: 651〜652 / 抜粋: "<ChunkErrorBoundary>\n      <Suspense fallback={null}>")
+* 根拠: (行番号: 652〜665 / 抜粋: "<Suspense fallback={null}>\n        {avatarUser && (\n          <AvatarUploader\n            user={avatarUser}\n            onClose={() => setAvatarUser(null)}\n            onUploadComplete={() => {\n              refreshData();\n              showToast({ title: \"変更完了\", text: \"アバターを変更しました！\", icon: '🖼️' });\n            }}\n          />\n        )}\n\n        {settingsOpen && (\n          <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} users={users} />\n        )}\n      </Suspense>")
 
 ## 5. 処理フロー図
 
@@ -378,6 +389,9 @@ graph TD
     App --> ActionResultLib["外部: lib/actionResult.ts (ActionResult, resolveErrorText)"]
 
     App --> UseGameData["外部: hooks/useGameData.ts"]
+    App -->|"すごろく機能で追加"| UseRoutineData["外部: hooks/useRoutineData.ts"]
+    App -->|"すごろく機能で追加"| RoutineFlowFile["外部: features/routine/components/RoutineFlow.tsx\n(RoutineFlow default + RoutineFreeTimeBanner)"]
+    App -->|"すごろく機能で追加(選択ヘルパー、コードレビューで重複解消のためisRoutineFlowBlocking/FreeTimeの直接呼び出しから移行)"| RoutineDataSchema["外部: lib/routineDataSchema.ts\n(selectRoutineFlow)"]
     App --> UseSound["外部: hooks/useSound.ts"]
     App --> UseLayoutMode["外部: hooks/useLayoutMode.ts"]
     App --> UseOnlineStatus["外部: hooks/useOnlineStatus.ts"]
@@ -426,6 +440,9 @@ graph TD
 * **`runQuestAction`と`runQuestActionInner`の呼び分けに注意**: 完了/取消の実行は必ず外側の`runQuestAction`（多重送信防止ガード付き）経由で呼び出す必要があり、`runQuestActionInner`を直接呼ぶと`processingQuestKeysRef`によるガードを迂回してしまう。
 * **`executeConfirm`の`complete`分岐は`runQuestAction`を経由するため、二重のガードが掛かる**: `isConfirmingRef`（Issue #101、確認ボタン連打用）と`processingQuestKeysRef`（Issue #391、完了/取消API送信中用）は独立したガードであり、`executeConfirm`から`runQuestAction`を呼ぶ完了フローではその両方が働く。ガードの責務を混同して片方を削除しないこと。
 * **`approvingHistoryIdsRef`/`isApprovingAllRef`とそれぞれの見た目用state(`approvingHistoryIds`/`isApprovingAll`)は必ずセットで更新する**: refを直接操作した後は`syncApprovingHistoryIds()`（または対応する`setIsApprovingAll`）を呼ばないと、実際のガード状態とUIの表示（ローディング等）がずれる。
+* **（すごろく機能で追加、コードレビューでApp.tsx/FamilyDashboard.tsxの重複を`selectRoutineFlow`へ集約）** `activeRoutineKey`/`freeTimeRoutineKey`は`am`を`pm`より優先して判定する。この優先順位ロジック自体は本ファイルにはもう存在せず、`lib/routineDataSchema.ts`の`selectRoutineFlow`に一本化されている（詳細は`routineDataSchema.md`参照）。将来この優先順位ルールを変更する場合の修正箇所は`selectRoutineFlow`1箇所のみで済む。
+* **（すごろく機能で追加）** `useRoutineData(currentUser.user_id)`は`currentUserIdx`の切替のたびに`userId`引数が変わり、React Queryの`queryKey`（`['routineToday', userId]`）が変わるため、ユーザーを切り替えると新しいクエリとしてポーリングが再開される（`useGameData.ts`の`viewerUserIdRef`のような「切替直後の即時再フェッチ」処理はこちらには存在せず、初回取得は通常の`useQuery`のマウント時フェッチに任せている）。
+* **（コードレビューで発覚した欠落を修正）** `handleRoutineStepComplete`は既存の`runQuestActionInner`（通常クエスト完了）と同じ「失敗時はエラーをトーストで示す」パターンに揃えたもの。`onLevelUp`は既存の`handleLevelUp`をそのまま再利用しており、ルーティンのチェックポイント通過によるレベルアップも通常クエストのレベルアップと見た目上区別が付かない同じ演出になる（`RoutineLevelUpInfo`が`newLevel`のみを持つため、`user`/`job`は`currentUser`から呼び出し側で補っている点に注意。詳細は`useRoutineData.md`参照）。
 
 ## 9. 不明事項一覧
 
@@ -433,6 +450,7 @@ graph TD
 | --- | --- | --- |
 | `useGameData`の内部実装 | `completeQuest`等が`ActionResult`の各フィールドをどう設定するか、ポーリング間隔等の詳細が本ファイルからは不明 | src/hooks/useGameData.ts |
 | `getQuestLockState`/`getQuestProcessingKey`の内部実装 | 無限クエスト判定・処理中キーの生成ロジックの詳細が本ファイルからは不明 | src/features/quest/hooks/useQuestStatus.ts |
+| （すごろく機能で追加）`routineFlows`のバックエンド側生成条件 | `activeRoutineKey`/`freeTimeRoutineKey`の元になる`routineFlows.am`/`routineFlows.pm`の実際の値がどのタイミングでどう変わるか（チェックポイント通過等）は`useRoutineData.ts`/`routineDataSchema.ts`側の解析に譲る | src/hooks/useRoutineData.ts, src/lib/routineDataSchema.ts |
 
 ## 相互参照による補足情報
 

@@ -27,7 +27,7 @@ from core.migrations import apply_pending_migrations
 from services import sensor_service, camera_service
 
 # Routers
-from routers import quest_router, webhook_router, system_router, camera_router, alexa_router
+from routers import quest_router, webhook_router, system_router, camera_router, alexa_router, routine_router
 
 # Handlers
 
@@ -335,6 +335,7 @@ app.include_router(quest_router.router, prefix="/api/quest", tags=["quest"])
 app.include_router(system_router.router, prefix="/api/system", tags=["system"])
 app.include_router(camera_router.router, prefix="/api/cameras", tags=["cameras"])
 app.include_router(alexa_router.router, tags=["alexa"])
+app.include_router(routine_router.router, prefix="/api/routine", tags=["routine"])
 
 # --- Static Files & SPA Serving ---
 

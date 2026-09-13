@@ -10,6 +10,11 @@ import { useSettings } from '@/context/useSettings';
 import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';
 import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
+import { useRoutineData } from '@/hooks/useRoutineData';
+import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';
+import { selectRoutineFlow } from '@/lib/routineDataSchema';
+import { useSound } from '@/hooks/useSound';
+import { useToast } from '@/context/useToast';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -132,6 +137,30 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
     onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
+    const { play } = useSound();
+    const { showToast } = useToast();
+
+    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を
+    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。
+    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
+        user.user_id,
+        (info) => {
+            play('levelUp');
+            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });
+        }
+    );
+    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
+
+    // #(コードレビューで発覚): App.tsx側と同じく、以前はcompleteRoutineStepの戻り値を
+    // 無条件に握りつぶしていた。ポーリング(15秒)が追いつく前の古い表示をタップして
+    // 409/400になっても何も通知されなかったため、トーストで知らせる。
+    const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {
+        const res = await completeRoutineStep(flowKey, stepKey);
+        if (!res.success) {
+            showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+            play('cancel');
+        }
+    };
 
     // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
     // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
@@ -185,18 +214,35 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
 
             {/* パネルごとに独立スクロール(要件5) */}
             <div className="p-2 overflow-y-auto max-h-[60vh]">
-                {tab === 'quest' && (
-                    <QuestList
-                        quests={quests}
-                        completedQuests={completedQuests}
-                        pendingQuests={pendingQuests}
-                        currentUser={user}
-                        onQuestClick={onQuestClick}
-                        completedSignal={completedSignal}
-                        processingQuestKeys={processingQuestKeys}
-                        panelMode
-                        iconFirst={iconFirst}
+                {tab === 'quest' && activeRoutineKey && routineFlows && (
+                    <RoutineFlow
+                        flowKey={activeRoutineKey}
+                        flow={routineFlows[activeRoutineKey]}
+                        onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}
+                        isCompleting={isCompletingRoutine}
+                        compact
                     />
+                )}
+
+                {tab === 'quest' && !activeRoutineKey && (
+                    <>
+                        {freeTimeRoutineKey && routineFlows && (
+                            <div className="mb-2">
+                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />
+                            </div>
+                        )}
+                        <QuestList
+                            quests={quests}
+                            completedQuests={completedQuests}
+                            pendingQuests={pendingQuests}
+                            currentUser={user}
+                            onQuestClick={onQuestClick}
+                            completedSignal={completedSignal}
+                            processingQuestKeys={processingQuestKeys}
+                            panelMode
+                            iconFirst={iconFirst}
+                        />
+                    </>
                 )}
                 {tab === 'shop' && (
                     <RewardShop

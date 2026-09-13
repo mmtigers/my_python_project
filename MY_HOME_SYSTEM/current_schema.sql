@@ -347,3 +347,22 @@ CREATE TABLE "quest_master" (
         pre_requisite_quest_id INTEGER DEFAULT NULL,
         reset_period TEXT DEFAULT 'daily'
 );
+CREATE TABLE routine_progress (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    flow_key TEXT NOT NULL,
+    progress_date TEXT NOT NULL, 
+    current_step_index INTEGER NOT NULL DEFAULT 0,
+    in_free_time INTEGER NOT NULL DEFAULT 0,
+    
+    
+    
+    steps_status TEXT NOT NULL DEFAULT '{}',
+    bonus_gold INTEGER NOT NULL DEFAULT 0,
+    bonus_exp INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(user_id, flow_key, progress_date)
+);
+CREATE INDEX idx_routine_progress_user_date
+    ON routine_progress(user_id, progress_date);
