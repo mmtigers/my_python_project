@@ -22,6 +22,9 @@ const startedFlowSchema = z.object({
     is_complete: z.boolean(),
     bonus_gold: z.number(),
     bonus_exp: z.number(),
+    // チェックポイント通過ボーナスでレベルアップした「その1回のレスポンス」でのみtrue。
+    leveled_up: z.boolean(),
+    new_level: z.number().nullable(),
     steps: z.array(routineStepSchema),
 });
 
@@ -31,6 +34,10 @@ const notStartedFlowSchema = z.object({
 });
 
 const routineFlowSchema = z.union([startedFlowSchema, notStartedFlowSchema]);
+
+// POST /api/routine/complete のレスポンス(RoutineService._serialize_flowの戻り値、
+// 常にstarted=trueの形)の検証に使う。useRoutineData.tsのcompleteStepMutationが利用する。
+export const routineActiveFlowSchema = startedFlowSchema;
 
 export const routineTodayResponseSchema = z.object({
     date: z.string(),
@@ -52,3 +59,35 @@ export const isRoutineFlowBlocking = (flow: RoutineFlowState | undefined): flow 
 
 export const isRoutineFlowFreeTime = (flow: RoutineFlowState | undefined): flow is RoutineActiveFlow =>
     !!flow && flow.started && flow.in_free_time;
+
+export type RoutineFlowsMap = RoutineTodayResponse['flows'];
+
+export interface SelectedRoutineFlow {
+    // 誘導中(すごろくが画面を占有すべき)のフローキー。無ければnull。
+    activeKey: 'am' | 'pm' | null;
+    // 誘導中のフローが無い場合のみ、自由時間中バナーを出すべきフローキー。
+    freeTimeKey: 'am' | 'pm' | null;
+}
+
+// App.tsx(縦画面・自分1人分)とFamilyDashboard.tsx(横画面・FamilyPanelごと)の
+// どちらも同じ「amをpmより優先する」判定を必要とするため、ここに集約する
+// (元は両ファイルに同じ三項演算子の連鎖が重複していた)。
+export const selectRoutineFlow = (flows: RoutineFlowsMap | undefined): SelectedRoutineFlow => {
+    if (!flows) return { activeKey: null, freeTimeKey: null };
+
+    const activeKey: 'am' | 'pm' | null = isRoutineFlowBlocking(flows.am)
+        ? 'am'
+        : isRoutineFlowBlocking(flows.pm)
+            ? 'pm'
+            : null;
+
+    const freeTimeKey: 'am' | 'pm' | null = activeKey
+        ? null
+        : isRoutineFlowFreeTime(flows.am)
+            ? 'am'
+            : isRoutineFlowFreeTime(flows.pm)
+                ? 'pm'
+                : null;
+
+    return { activeKey, freeTimeKey };
+};

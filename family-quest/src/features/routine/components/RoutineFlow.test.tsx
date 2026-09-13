@@ -12,6 +12,8 @@ const amFlow: RoutineActiveFlow = {
     is_complete: false,
     bonus_gold: 0,
     bonus_exp: 0,
+    leveled_up: false,
+    new_level: null,
     steps: [
         { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, status: 'done' },
         { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, status: 'current' },

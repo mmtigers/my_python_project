@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
     isRoutineFlowBlocking,
     isRoutineFlowFreeTime,
+    selectRoutineFlow,
     RoutineFlowState,
 } from './routineDataSchema';
 
@@ -16,6 +17,8 @@ const activeFlow: RoutineFlowState = {
     is_complete: false,
     bonus_gold: 0,
     bonus_exp: 0,
+    leveled_up: false,
+    new_level: null,
     steps: [
         { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, status: 'done' },
         { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, status: 'current' },
@@ -52,5 +55,31 @@ describe('isRoutineFlowFreeTime', () => {
         expect(isRoutineFlowFreeTime(freeTimeFlow)).toBe(true);
         expect(isRoutineFlowFreeTime(activeFlow)).toBe(false);
         expect(isRoutineFlowFreeTime(notStarted)).toBe(false);
+    });
+});
+
+describe('selectRoutineFlow', () => {
+    it('returns nulls when flows are not loaded yet', () => {
+        expect(selectRoutineFlow(undefined)).toEqual({ activeKey: null, freeTimeKey: null });
+    });
+
+    it('prefers am over pm when both flows are actively blocking', () => {
+        expect(selectRoutineFlow({ am: activeFlow, pm: activeFlow })).toEqual({ activeKey: 'am', freeTimeKey: null });
+    });
+
+    it('falls back to pm when only pm is blocking', () => {
+        expect(selectRoutineFlow({ am: notStarted, pm: activeFlow })).toEqual({ activeKey: 'pm', freeTimeKey: null });
+    });
+
+    it('reports free time only when nothing is actively blocking, am preferred', () => {
+        expect(selectRoutineFlow({ am: freeTimeFlow, pm: freeTimeFlow })).toEqual({ activeKey: null, freeTimeKey: 'am' });
+    });
+
+    it('never reports free time while a flow is blocking, even if the other is in free time', () => {
+        expect(selectRoutineFlow({ am: activeFlow, pm: freeTimeFlow })).toEqual({ activeKey: 'am', freeTimeKey: null });
+    });
+
+    it('returns nulls when neither flow is started', () => {
+        expect(selectRoutineFlow({ am: notStarted, pm: notStarted })).toEqual({ activeKey: null, freeTimeKey: null });
     });
 });

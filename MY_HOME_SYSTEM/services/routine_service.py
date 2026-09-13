@@ -82,10 +82,10 @@ class RoutineService:
             common.get_now_iso(), progress['id'],
         ))
 
-    def _grant_bonus(self, cur, user_id: str, gold: int, exp: int) -> None:
+    def _grant_bonus(self, cur, user_id: str, gold: int, exp: int) -> Dict[str, Any]:
         user = cur.execute("SELECT * FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
         if not user:
-            return
+            return {"leveled_up": False, "new_level": None}
         new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(
             user['level'], user['exp'], exp
         )
@@ -95,6 +95,7 @@ class RoutineService:
         )
         if leveled_up:
             sound_manager.play("level_up")
+        return {"leveled_up": leveled_up, "new_level": new_level}
 
     def _apply_forced_transition(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
@@ -138,7 +139,9 @@ class RoutineService:
 
         self._save_progress(cur, progress)
         if bonus_gold or bonus_exp:
-            self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)
+            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)
+            progress['leveled_up'] = bonus_result['leveled_up']
+            progress['new_level'] = bonus_result['new_level']
 
         logger.info(
             f"Routine Checkpoint Passed: User={user_id}, Flow={flow_key}, "
@@ -168,6 +171,14 @@ class RoutineService:
             "is_complete": progress['current_step_index'] >= len(flow['steps']),
             "bonus_gold": progress['bonus_gold'],
             "bonus_exp": progress['bonus_exp'],
+            # Issue発覚(コードレビュー): チェックポイント通過時のボーナスでレベルアップ
+            # しても、quest_service._apply_quest_rewardsのようにleveledUp/newLevelを
+            # レスポンスへ含めていなかったため、フロントは常にLEVEL UPトーストを出せず
+            # サイレントにDBだけ更新されていた。このフラグは_apply_forced_transitionが
+            # チェックポイントを通過した「その呼び出し」でのみprogressへ積まれる
+            # (以後の呼び出しは冪等ガードで早期returnするため再度立つことはない)。
+            "leveled_up": progress.get('leveled_up', False),
+            "new_level": progress.get('new_level'),
             "steps": steps_out,
         }
 

@@ -12,7 +12,9 @@ import { getQuestLockState } from '../../quest/hooks/useQuestStatus';
 import { isQuestVisibleToUser } from '@/lib/questTargeting';
 import { useRoutineData } from '@/hooks/useRoutineData';
 import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';
-import { isRoutineFlowBlocking, isRoutineFlowFreeTime } from '@/lib/routineDataSchema';
+import { selectRoutineFlow } from '@/lib/routineDataSchema';
+import { useSound } from '@/hooks/useSound';
+import { useToast } from '@/context/useToast';
 
 interface FamilyDashboardProps {
     users: User[];
@@ -135,18 +137,30 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
     onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,
 }) => {
     const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');
+    const { play } = useSound();
+    const { showToast } = useToast();
 
     // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を
     // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。
-    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);
-    const activeRoutineKey: 'am' | 'pm' | null =
-        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'
-            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'
-                : null;
-    const freeTimeRoutineKey: 'am' | 'pm' | null =
-        !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.am) ? 'am'
-            : !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.pm) ? 'pm'
-                : null;
+    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(
+        user.user_id,
+        (info) => {
+            play('levelUp');
+            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });
+        }
+    );
+    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);
+
+    // #(コードレビューで発覚): App.tsx側と同じく、以前はcompleteRoutineStepの戻り値を
+    // 無条件に握りつぶしていた。ポーリング(15秒)が追いつく前の古い表示をタップして
+    // 409/400になっても何も通知されなかったため、トーストで知らせる。
+    const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {
+        const res = await completeRoutineStep(flowKey, stepKey);
+        if (!res.success) {
+            showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
+            play('cancel');
+        }
+    };
 
     // ★バグ修正: 以前はテーマカラーを isActive(直前に操作したパネル)の時だけ適用していたため、
     // 設定画面で色を選んでも、操作するまでメイン画面(横画面)に何も反映されなかった。
@@ -204,7 +218,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
                     <RoutineFlow
                         flowKey={activeRoutineKey}
                         flow={routineFlows[activeRoutineKey]}
-                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}
+                        onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}
                         isCompleting={isCompletingRoutine}
                         compact
                     />

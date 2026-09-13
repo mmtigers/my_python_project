@@ -109,6 +109,32 @@ class TestCheckpointBonus:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['gold'] == 150
         assert row['exp'] == 30
+        # コードレビューで発覚: 以前はleveled_up/new_levelがレスポンスに含まれず、
+        # レベルアップしてもフロントがLEVEL UPトーストを出す手段が無かった。
+        # new_levelは(quest_service._apply_quest_rewardsと同様)レベルアップの有無に
+        # 関わらず常に付与後の実際のレベルを返す。フロントはleveled_upの方でゲートする。
+        assert am['leveled_up'] is False
+        assert am['new_level'] == 1
+
+    def test_checkpoint_bonus_level_up_is_reported_in_response(self, isolated_db):
+        """チェックポイント通過ボーナスでレベルアップした場合、その1回のレスポンスに
+        leveled_up/new_levelが載ること(#コードレビューで発覚した欠落の回帰防止)。
+        Lv1→2の必要経験値は100(game_logic.calculate_next_level_exp)なので、
+        既存exp=80 + 満額ボーナスexp=30 = 110 でレベルアップする。
+        """
+        _seed_user(gold=0, exp=80)
+        for key in ('wash', 'meal', 'clothes', 'teeth'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+
+        state = routine_service.get_today_state('daughter', now=_at(7, 51))
+        am = state['flows']['am']
+        assert am['leveled_up'] is True
+        assert am['new_level'] == 2
+
+        with common.get_db_cursor() as cur:
+            row = cur.execute("SELECT level, exp FROM quest_users WHERE user_id='daughter'").fetchone()
+        assert row['level'] == 2
+        assert row['exp'] == 10
 
     def test_partial_completion_prorates_bonus_and_marks_remind(self, isolated_db):
         _seed_user(gold=0, exp=0)
