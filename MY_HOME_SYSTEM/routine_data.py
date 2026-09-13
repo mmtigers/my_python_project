@@ -18,6 +18,11 @@ class RoutineStep(TypedDict):
     # 土日はチェックポイント時刻だけ変える(要件: フロー構成・ステップは平日と揃える)。
     # Noneなら平日と同じcheckpoint_timeをそのまま使う。
     weekend_checkpoint_time: Optional[str]
+    # Trueなら土日はこのステップ自体をスキップする(要件: 休日PMはおやつ休憩から開始)。
+    weekend_skip: bool
+    # Trueならこのステップは日付をまたいで引き継ぐ(要件: 宿題は金曜終わっていれば
+    # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。
+    weekend_carryover: bool
 
 
 class RoutineFlow(TypedDict):
@@ -45,29 +50,33 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
         # 前日分の状態のまま)。土日も同じ(要件確認済み)。
         'start_trigger_time': '05:00',
         'steps': [
-            {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'meal', 'label': '朝ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'clothes', 'label': '着替える', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
+            {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'meal', 'label': '朝ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'clothes', 'label': '着替える', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
             # 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30'},
-            {'key': 'leave', 'label': '出発', 'icon_key': 'leave', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'leave', 'label': '出発', 'icon_key': 'leave', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
         ],
     },
     'pm': {
         'title': '帰ってから寝るまで',
-        # 土日も同じフローを使う(要件: なるべく平日と揃える)。
+        # 土日も同じフローを使う(要件: なるべく平日と揃える)。土日は先頭の
+        # handwashだけスキップし、おやつ休憩から開始する(要件確認済み)。
         'day_of_week': ALL_DAYS,
         # 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。
         'start_trigger_time': '14:00',
         'steps': [
-            {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
+            # 土日は手洗い・うがいをスキップし、おやつ休憩からスタートする(要件確認済み)。
+            {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False},
+            {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
+            # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
+            {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True},
             # 就寝準備の締切は土日も平日と同じ20:00(要件確認済み)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '20:00', 'weekend_checkpoint_time': None},
-            {'key': 'nightprep', 'label': '寝る準備', 'icon_key': 'nightprep', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
-            {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '20:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'nightprep', 'label': '寝る準備', 'icon_key': 'nightprep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
+            {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False},
         ],
     },
 }

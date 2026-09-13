@@ -7,7 +7,7 @@ services/quest/locks.py の user balance lock を quest_service と共用し、
 """
 import datetime
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import HTTPException
 
@@ -15,7 +15,7 @@ import common
 import game_logic
 from core import sound_manager
 from routine_data import (
-    FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, RoutineFlow,
+    FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, WEEKEND_DAYS, RoutineFlow,
     get_checkpoint_index, get_effective_checkpoint_time,
 )
 from services.quest.locks import JST, _get_user_balance_lock, logger
@@ -32,11 +32,82 @@ class RoutineService:
         trigger = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         return now >= trigger
 
-    def _empty_statuses(self, flow: RoutineFlow) -> Dict[str, str]:
-        return {
-            step['key']: ('current' if idx == 0 else 'locked')
-            for idx, step in enumerate(flow['steps'])
-        }
+    def _carryover_lookback_dates(self, now: datetime.datetime) -> List[str]:
+        """weekend_carryoverステップについて、完了済みか確認すべき過去日付を返す。
+
+        土曜は金曜のみ、日曜は金曜・土曜の両方を遡る(要件: 金曜終わっていれば
+        土日とも不要、土曜終わっていれば日曜だけ不要)。平日は遡らない。
+        """
+        weekday = now.weekday()
+        if weekday == 5:  # 土曜
+            return [self._today_str(now - datetime.timedelta(days=1))]
+        if weekday == 6:  # 日曜
+            return [
+                self._today_str(now - datetime.timedelta(days=1)),
+                self._today_str(now - datetime.timedelta(days=2)),
+            ]
+        return []
+
+    def _was_done_on_any_date(self, cur, user_id: str, flow_key: str, key: str, dates: List[str]) -> bool:
+        if not dates:
+            return False
+        placeholders = ','.join('?' for _ in dates)
+        rows = cur.execute(
+            f"SELECT steps_status FROM routine_progress "  # nosec B608
+            f"WHERE user_id=? AND flow_key=? AND progress_date IN ({placeholders})",
+            (user_id, flow_key, *dates),
+        ).fetchall()
+        return any(json.loads(row['steps_status']).get(key) == 'done' for row in rows)
+
+    def _resolve_skip_keys(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, now: datetime.datetime) -> Set[str]:
+        """今日スキップ(達成済み扱い)すべきステップのkey集合を返す。
+
+        weekend_skip(例: 土日はhandwash不要)とweekend_carryover(例: 宿題は
+        金曜/土曜に完了していれば以降不要)の2種類があり、いずれも平日には適用しない。
+        """
+        skip_keys: Set[str] = set()
+        if now.weekday() not in WEEKEND_DAYS:
+            return skip_keys
+        lookback_dates = self._carryover_lookback_dates(now)
+        for step in flow['steps']:
+            if step['weekend_skip']:
+                skip_keys.add(step['key'])
+            elif step['weekend_carryover'] and self._was_done_on_any_date(cur, user_id, flow_key, step['key'], lookback_dates):
+                skip_keys.add(step['key'])
+        return skip_keys
+
+    def _empty_statuses(self, flow: RoutineFlow, skip_keys: Set[str]) -> Tuple[Dict[str, str], int]:
+        """スキップ分を'done'扱いにしたうえで、最初の未スキップステップを'current'にする。
+
+        戻り値は(steps_status, current_step_index)。全ステップがスキップ済みの場合の
+        current_step_indexはlen(flow['steps'])(=フロー完了扱い)になる。
+        """
+        statuses: Dict[str, str] = {}
+        current_index = len(flow['steps'])
+        found_current = False
+        for idx, step in enumerate(flow['steps']):
+            if step['key'] in skip_keys:
+                statuses[step['key']] = 'done'
+                continue
+            if not found_current:
+                statuses[step['key']] = 'current'
+                current_index = idx
+                found_current = True
+            else:
+                statuses[step['key']] = 'locked'
+        return statuses, current_index
+
+    def _next_active_index(self, flow: RoutineFlow, statuses: Dict[str, str], start_index: int) -> int:
+        """start_index以降で、スキップ済み('done'が既に立っている)ステップを飛ばした
+        最初のステップのインデックスを返す(無ければlen(flow['steps']))。
+
+        現状はチェックポイント以前のステップしかweekend_skip/weekend_carryoverの
+        対象にしていないが、以降のステップが対象になった場合にも安全なようにする。
+        """
+        idx = start_index
+        while idx < len(flow['steps']) and statuses.get(flow['steps'][idx]['key']) == 'done':
+            idx += 1
+        return idx
 
     def _row_to_progress(self, row) -> Dict[str, Any]:
         return {
@@ -48,7 +119,9 @@ class RoutineService:
             'bonus_exp': row['bonus_exp'],
         }
 
-    def _get_or_create_progress(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str) -> Dict[str, Any]:
+    def _get_or_create_progress(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
+    ) -> Dict[str, Any]:
         row = cur.execute(
             "SELECT * FROM routine_progress WHERE user_id=? AND flow_key=? AND progress_date=?",
             (user_id, flow_key, date_str),
@@ -56,15 +129,22 @@ class RoutineService:
         if row:
             return self._row_to_progress(row)
 
+        skip_keys = self._resolve_skip_keys(cur, user_id, flow_key, flow, now)
+        statuses, current_index = self._empty_statuses(flow, skip_keys)
+        # スキップの結果、初期状態から既にチェックポイントに到達している場合
+        # (現状は起こらないが、将来handwash以外もweekend_skip化された場合に備える)、
+        # complete_stepと同じくin_free_timeも合わせて立てる。
+        in_free_time = current_index < len(flow['steps']) and bool(flow['steps'][current_index]['checkpoint_time'])
+
         now_iso = common.get_now_iso()
         cur.execute("""
             INSERT INTO routine_progress
                 (user_id, flow_key, progress_date, current_step_index, in_free_time,
                  steps_status, bonus_gold, bonus_exp, created_at, updated_at)
-            VALUES (?, ?, ?, 0, 0, ?, 0, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
         """, (
-            user_id, flow_key, date_str,
-            json.dumps(self._empty_statuses(flow), ensure_ascii=False),
+            user_id, flow_key, date_str, current_index, int(in_free_time),
+            json.dumps(statuses, ensure_ascii=False),
             now_iso, now_iso,
         ))
         row = cur.execute(
@@ -134,7 +214,7 @@ class RoutineService:
         progress['bonus_gold'] = bonus_gold
         progress['bonus_exp'] = bonus_exp
 
-        next_index = checkpoint_idx + 1
+        next_index = self._next_active_index(flow, progress['steps_status'], checkpoint_idx + 1)
         progress['current_step_index'] = next_index
         progress['in_free_time'] = False
         if next_index < len(flow['steps']):
@@ -203,7 +283,7 @@ class RoutineService:
                     if not self._is_flow_started_today(flow, now):
                         flows_out[flow_key] = {"started": False, "title": flow['title']}
                         continue
-                    progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str)
+                    progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)
                     progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
                     flows_out[flow_key] = self._serialize_flow(flow, progress, now)
 
@@ -227,7 +307,7 @@ class RoutineService:
                     raise HTTPException(status_code=400, detail="このフローはまだ開始していません")
 
                 date_str = self._today_str(now)
-                progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str)
+                progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str, now)
                 progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
 
                 idx = progress['current_step_index']
@@ -241,7 +321,7 @@ class RoutineService:
                     raise HTTPException(status_code=400, detail="自由時間は時間になると自動的に次へ進みます")
 
                 progress['steps_status'][step_key] = 'done'
-                next_index = idx + 1
+                next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)
                 progress['current_step_index'] = next_index
                 if next_index < len(flow['steps']):
                     next_step = flow['steps'][next_index]
