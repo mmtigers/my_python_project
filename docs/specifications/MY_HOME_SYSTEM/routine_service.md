@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `83b42db` |
+| 解析基準コミット | `0d67384` |
 
 ## 関連ドキュメント
 
@@ -21,7 +21,7 @@
 ## 2. ファイルの概要
 
 デイリールーティン(すごろく形式の生活導線UI)のサービス層。ファイル冒頭のdocstringが述べる通り、`routers/routine_router.py`はパース・検証のみを行いロジックはここに委譲するというCLAUDE.mdのレイヤリング規約に従う。`quest_users`テーブル(gold/exp/level)への書き込みを伴うため、`services/quest/locks.py`のユーザー残高ロックを`quest_service`と共用し、クエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ設計である。ユーザーごと・フロー(`am`/`pm`)ごと・日付ごとの進捗を`routine_progress`テーブルに保持し、チェックポイント時刻を過ぎた際に未完了ステップを「まだだよ(remind)」に変えつつ達成率に応じたボーナス(gold/exp)を按分付与する「強制切替」ロジック(`_apply_forced_transition`)が本ファイルの中核である。公開メソッドは`get_today_state`(状態取得)と`complete_step`(ステップ完了)の2つで、モジュールレベルシングルトン`routine_service`としてインスタンス化され`routine_router.py`から直接importされる(CLAUDE.mdのDI非導入方針・モジュールレベルシングルトンパターンに従う)。
-根拠: [モジュールdocstring] (行番号: 1-6 / 抜粋: "routers/routine_router.py はパース・検証のみを行い、ロジックはここに委譲する\n(CLAUDE.mdのレイヤリング規約)。quest_users(gold/exp/level)への書き込みを伴うため、\nservices/quest/locks.py の user balance lock を quest_service と共用し、\nクエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ。")、[モジュールレベルシングルトン] (行番号: 242 / 抜粋: "routine_service = RoutineService()")
+根拠: [モジュールdocstring] (行番号: 1-6 / 抜粋: "routers/routine_router.py はパース・検証のみを行い、ロジックはここに委譲する\n(CLAUDE.mdのレイヤリング規約)。quest_users(gold/exp/level)への書き込みを伴うため、\nservices/quest/locks.py の user balance lock を quest_service と共用し、\nクエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ。")、[モジュールレベルシングルトン] (行番号: 253 / 抜粋: "routine_service = RoutineService()")
 
 ## 3. 外部依存関係
 
@@ -45,11 +45,11 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor(commit=True)`の内部実装 | SQLiteのロック再試行・WALモード設定・例外時ロールバック等の具体的な実装は`core/database.py`側にあり本ファイルからは不明。 | [with文] (行番号: 176, 202 / 抜粋: "with common.get_db_cursor(commit=True) as cur:") |
+| `common.get_db_cursor(commit=True)`の内部実装 | SQLiteのロック再試行・WALモード設定・例外時ロールバック等の具体的な実装は`core/database.py`側にあり本ファイルからは不明。 | [with文] (行番号: 187, 213 / 抜粋: "with common.get_db_cursor(commit=True) as cur:") |
 | `common.get_now_iso()`の出力形式 | 生成されるISO文字列の具体的なフォーマット(タイムゾーン表記等)が本ファイルからは不明。 | [関数呼び出し] (行番号: 56, 65, 82, 94 / 抜粋: "now_iso = common.get_now_iso()") |
 | `game_logic.GameLogic.calc_level_progress`の内部計算式 | レベルアップに必要な経験値テーブル等の計算ロジックの詳細は不明。詳細は[game_logic.md](./game_logic.md)参照。 | [関数呼び出し] (行番号: 89-91 / 抜粋: "game_logic.GameLogic.calc_level_progress(\n            user['level'], user['exp'], exp\n        )") |
 | `sound_manager.play`の実際の音声再生手段 | 音声ファイルの実体・再生失敗時の挙動が不明。詳細は[sound_manager.md](./sound_manager.md)参照。 | [関数呼び出し] (行番号: 97 / 抜粋: "sound_manager.play(\"level_up\")") |
-| `_get_user_balance_lock`の内部実装(`RefCountedLockRegistry`) | 参照カウント付きロックレジストリの具体的な排他制御実装は`core/utils.py`側にあり不明。詳細は[quest_locks.md](./quest_locks.md)参照。 | [with文] (行番号: 175, 201 / 抜粋: "with _get_user_balance_lock(user_id):") |
+| `_get_user_balance_lock`の内部実装(`RefCountedLockRegistry`) | 参照カウント付きロックレジストリの具体的な排他制御実装は`core/utils.py`側にあり不明。詳細は[quest_locks.md](./quest_locks.md)参照。 | [with文] (行番号: 186, 212 / 抜粋: "with _get_user_balance_lock(user_id):") |
 | `routine_progress`テーブルのスキーマ全体 | 本ファイルはSQL文中でカラム名を参照するのみで、テーブル定義自体(制約・インデックス・デフォルト値)は`migrations/0010_add_routine_progress.sql`にあり、マイグレーションは仕様書ドリフト規約の対象外のため直接引用にとどめる(§8参照)。 | [SQL文] (行番号: 49-52, 57-66 / 抜粋: "SELECT * FROM routine_progress WHERE user_id=? AND flow_key=? AND progress_date=?") |
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
@@ -57,11 +57,11 @@
 ### `RoutineService` (クラス)
 
 * **役割**: デイリールーティンの状態取得・ステップ完了処理をまとめるサービスクラス。全メソッドがインスタンスメソッドとして定義され、モジュール末尾で単一のシングルトン`routine_service`としてインスタンス化される。
-* 根拠: [クラス定義] (行番号: 21 / 抜粋: "class RoutineService:")、[シングルトン化] (行番号: 242 / 抜粋: "routine_service = RoutineService()")
+* 根拠: [クラス定義] (行番号: 21 / 抜粋: "class RoutineService:")、[シングルトン化] (行番号: 253 / 抜粋: "routine_service = RoutineService()")
 
 
 * **引数/リクエスト**: 該当なし(クラス定義自体はコンストラクタを持たず、`object`のデフォルト`__init__`を使用)
-* 根拠: [クラス定義] (行番号: 21-242、`__init__`の明示的定義は存在しない)
+* 根拠: [クラス定義] (行番号: 21-253、`__init__`の明示的定義は存在しない)
 
 
 * **戻り値/レスポンス**: 該当なし
@@ -217,139 +217,139 @@
 
 ### `_grant_bonus`
 
-* **役割**: 指定ユーザーに`gold`・`exp`を付与する。`quest_users`テーブルから該当ユーザーを取得できなければ何もせず早期リターンする。取得できた場合は`game_logic.GameLogic.calc_level_progress(user['level'], user['exp'], exp)`で新しい`level`/`exp`/レベルアップ有無を計算し、`level`・`exp`・`gold`(既存値+付与分)・`updated_at`を`UPDATE`する。レベルアップした場合は`sound_manager.play("level_up")`を呼ぶ。
-* 根拠: [メソッド定義] (行番号: 85-97 / 抜粋: "def _grant_bonus(self, cur, user_id: str, gold: int, exp: int) -> None:\n        user = cur.execute(\"SELECT * FROM quest_users WHERE user_id=?\", (user_id,)).fetchone()\n        if not user:\n            return\n        new_level, new_exp_val, leveled_up = game_logic.GameLogic.calc_level_progress(\n            user['level'], user['exp'], exp\n        )\n        cur.execute(\n            \"UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?\",\n            (new_level, new_exp_val, user['gold'] + gold, common.get_now_iso(), user_id),\n        )\n        if leveled_up:\n            sound_manager.play(\"level_up\")")
+* **役割**: 指定ユーザーに`gold`・`exp`を付与する。`quest_users`テーブルから該当ユーザーを取得できなければ何もせず`{"leveled_up": False, "new_level": None}`を返す。取得できた場合は`game_logic.GameLogic.calc_level_progress(user['level'], user['exp'], exp)`で新しい`level`/`exp`/レベルアップ有無を計算し、`level`・`exp`・`gold`(既存値+付与分)・`updated_at`を`UPDATE`する。レベルアップした場合は`sound_manager.play("level_up")`を呼ぶ。**（コードレビューで発覚した欠落を修正）** 以前は戻り値が`None`固定で、呼び出し元(`_apply_forced_transition`)がレベルアップの有無を一切知る手段が無く、`quest_service._apply_quest_rewards`のように`leveledUp`/`newLevel`をAPIレスポンスへ含める経路が存在しなかった(フロントは常にLEVEL UP演出を出せなかった)。`{"leveled_up": bool, "new_level": int}`を返すよう修正し、`new_level`はレベルアップの有無に関わらず付与後の実際のレベルを常に返す(`quest_service._apply_quest_rewards`と同じ規約)。
+* 根拠: [メソッド定義] (行番号: 85-98 / 抜粋: "def _grant_bonus(self, cur, user_id: str, gold: int, exp: int) -> Dict[str, Any]:\n        user = cur.execute(\"SELECT * FROM quest_users WHERE user_id=?\", (user_id,)).fetchone()\n        if not user:\n            return {\"leveled_up\": False, \"new_level\": None}")、[戻り値] (行番号: 98 / 抜粋: "return {\"leveled_up\": leveled_up, \"new_level\": new_level}")
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`gold: int`、`exp: int`
 * 根拠: [メソッド定義] (行番号: 85)
 
 
-* **戻り値/レスポンス**: `None`
-* 根拠: [型ヒント] (行番号: 85 / 抜粋: "-> None:")
+* **戻り値/レスポンス**: `Dict[str, Any]` — `{"leveled_up": bool, "new_level": Optional[int]}`。対象ユーザーが存在しない場合は`{"leveled_up": False, "new_level": None}`。
+* 根拠: [戻り値] (行番号: 88, 98 / 抜粋: "return {\"leveled_up\": False, \"new_level\": None}", "return {\"leveled_up\": leveled_up, \"new_level\": new_level}")
 
 
 * **副作用**: `quest_users`テーブルへの`UPDATE`(該当ユーザーが存在する場合のみ)。レベルアップ時は`sound_manager.play("level_up")`による効果音再生。
 * 根拠: [UPDATE文] (行番号: 92-95)、[効果音再生] (行番号: 96-97 / 抜粋: "if leveled_up:\n            sound_manager.play(\"level_up\")")
 
 
-* **エラーハンドリング**: 対象ユーザーが存在しない場合は例外を送出せず早期リターンで何もしない(サイレントスキップ)。
-* 根拠: [条件分岐] (行番号: 87-88 / 抜粋: "if not user:\n            return")
+* **エラーハンドリング**: 対象ユーザーが存在しない場合は例外を送出せず早期リターンで`{"leveled_up": False, "new_level": None}`を返す(サイレントスキップ)。
+* 根拠: [条件分岐] (行番号: 87-88 / 抜粋: "if not user:\n            return {\"leveled_up\": False, \"new_level\": None}")
 
 
 
 ### `_apply_forced_transition`
 
-* **役割**: チェックポイント(自由時間の終了予定時刻)を過ぎていれば、チェックポイントより前の未完了ステップを`'remind'`(「まだだよ」)に変え、チェックポイント以前のステップの達成率に応じたボーナスを`_grant_bonus`で付与したうえで、進捗をチェックポイントの次のステップへ進める。`current_step_index`が既にチェックポイントを通過していれば何もしない(冪等)ため、メソッドdocstringが明記する通り`get_today_state`(GET)・`complete_step`(POST)のどちらからも安全に呼べる設計になっている。
-* 根拠: [メソッド定義・docstring] (行番号: 99-108 / 抜粋: "def _apply_forced_transition(\n        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime\n    ) -> Dict[str, Any]:\n        \"\"\"チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを\n        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを\n        付与したうえでチェックポイントの次のステップへ進める。\n\n        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、\n        GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。\n        \"\"\"")
+* **役割**: チェックポイント(自由時間の終了予定時刻)を過ぎていれば、チェックポイントより前の未完了ステップを`'remind'`(「まだだよ」)に変え、チェックポイント以前のステップの達成率に応じたボーナスを`_grant_bonus`で付与したうえで、進捗をチェックポイントの次のステップへ進める。`current_step_index`が既にチェックポイントを通過していれば何もしない(冪等)ため、メソッドdocstringが明記する通り`get_today_state`(GET)・`complete_step`(POST)のどちらからも安全に呼べる設計になっている。**（コードレビューで発覚した欠落を修正）** ボーナスを付与した場合、`_grant_bonus`の戻り値(`leveled_up`/`new_level`)を`progress['leveled_up']`/`progress['new_level']`へ積み、`_serialize_flow`のレスポンスへ反映できるようにした(以前はこの伝播が無く、レベルアップがフロントへ一切通知されなかった)。ボーナスが0の場合(達成率0)はこれらのキー自体が`progress`に追加されないため、`_serialize_flow`側は`.get(..., False)`/`.get(...)`で安全にデフォルト値を補う。
+* 根拠: [メソッド定義・docstring] (行番号: 100-109 / 抜粋: "def _apply_forced_transition(\n        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime\n    ) -> Dict[str, Any]:\n        \"\"\"チェックポイント(自由時間の終了予定時刻)を過ぎていれば、未完了ステップを\n        「まだだよ」に変え、チェックポイントより前のステップの達成率に応じたボーナスを\n        付与したうえでチェックポイントの次のステップへ進める。\n\n        current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、\n        GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。\n        \"\"\"")、[leveled_up/new_levelの伝播] (行番号: 141-144 / 抜粋: "if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up']\n            progress['new_level'] = bonus_result['new_level']")
 
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`flow_key: str`、`flow: RoutineFlow`、`progress: Dict[str, Any]`、`now: datetime.datetime`
-* 根拠: [メソッド定義] (行番号: 99-101)
+* 根拠: [メソッド定義] (行番号: 100-102)
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]`(更新後、または変更が無かった場合はそのままの`progress`)
-* 根拠: [戻り値] (行番号: 111, 117, 147 / 抜粋: "return progress")
+* **戻り値/レスポンス**: `Dict[str, Any]`(更新後、または変更が無かった場合はそのままの`progress`。チェックポイント通過時のみ`leveled_up`/`new_level`キーが追加される)
+* 根拠: [戻り値] (行番号: 112, 118, 150 / 抜粋: "return progress")、[追加キー] (行番号: 143-144)
 
 
-* **副作用**: チェックポイント通過条件を満たした場合、`self._save_progress(cur, progress)`による`routine_progress`のUPDATE、`self._grant_bonus(...)`による`quest_users`のUPDATE(ボーナスが0でない場合のみ)、および`logger.info(...)`によるログ出力を行う。条件を満たさない場合は副作用なし。
-* 根拠: [呼び出し] (行番号: 139-146 / 抜粋: "self._save_progress(cur, progress)\n        if bonus_gold or bonus_exp:\n            self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n\n        logger.info(\n            f\"Routine Checkpoint Passed: User={user_id}, Flow={flow_key}, \"\n            f\"Ratio={ratio:.2f}, Gold={bonus_gold}, Exp={bonus_exp}\"\n        )")
+* **副作用**: チェックポイント通過条件を満たした場合、`self._save_progress(cur, progress)`による`routine_progress`のUPDATE、`self._grant_bonus(...)`による`quest_users`のUPDATE(ボーナスが0でない場合のみ、レベルアップ時は効果音再生も伴う)、および`logger.info(...)`によるログ出力を行う。条件を満たさない場合は副作用なし。
+* 根拠: [呼び出し] (行番号: 140-149 / 抜粋: "self._save_progress(cur, progress)\n        if bonus_gold or bonus_exp:\n            bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)\n            progress['leveled_up'] = bonus_result['leveled_up']\n            progress['new_level'] = bonus_result['new_level']\n\n        logger.info(\n            f\"Routine Checkpoint Passed: User={user_id}, Flow={flow_key}, \"\n            f\"Ratio={ratio:.2f}, Gold={bonus_gold}, Exp={bonus_exp}\"\n        )")
 
 
 * **エラーハンドリング**: 明示的な`try`/`except`は無い。`checkpoint_idx is None`(チェックポイントを持つステップがフローに存在しない)、または既に`current_step_index > checkpoint_idx`(通過済み)の場合は何もせず`progress`をそのまま返す早期リターンでガードしている。`eligible_keys`が空の場合は達成率`ratio`を`1.0`とみなす(ゼロ除算回避)。
-* 根拠: [早期リターン] (行番号: 109-111 / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:\n            return progress")、[時刻未到達の早期リターン] (行番号: 116-117 / 抜粋: "if now < deadline:\n            return progress")、[ゼロ除算回避] (行番号: 121 / 抜粋: "ratio = (done_count / len(eligible_keys)) if eligible_keys else 1.0")
+* 根拠: [早期リターン] (行番号: 110-112 / 抜粋: "checkpoint_idx = get_checkpoint_index(flow)\n        if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:\n            return progress")、[時刻未到達の早期リターン] (行番号: 117-118 / 抜粋: "if now < deadline:\n            return progress")、[ゼロ除算回避] (行番号: 122 / 抜粋: "ratio = (done_count / len(eligible_keys)) if eligible_keys else 1.0")
 
 
 
 ### `_serialize_flow`
 
-* **役割**: `flow`(定義)と`progress`(内部表現)から、APIレスポンス用の辞書を組み立てる。チェックポイントの有無・時刻、各ステップの`is_checkpoint`/`status`、`current_step_index`、`in_free_time`、全ステップ完了判定(`is_complete`)、ボーナスgold/expを含む。
-* 根拠: [メソッド定義] (行番号: 149-172 / 抜粋: "def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Dict[str, Any]:\n        checkpoint_idx = get_checkpoint_index(flow)\n        checkpoint_time = flow['steps'][checkpoint_idx]['checkpoint_time'] if checkpoint_idx is not None else None")
+* **役割**: `flow`(定義)と`progress`(内部表現)から、APIレスポンス用の辞書を組み立てる。チェックポイントの有無・時刻、各ステップの`is_checkpoint`/`status`、`current_step_index`、`in_free_time`、全ステップ完了判定(`is_complete`)、ボーナスgold/expを含む。**（コードレビューで発覚した欠落を修正）** `leveled_up`/`new_level`も含めるようになった。これらは`progress`に無ければ(=このリクエストでチェックポイントを通過していなければ)`.get(..., False)`/`.get(...)`によりそれぞれ`False`/`None`にフォールバックする。
+* 根拠: [メソッド定義] (行番号: 152-154 / 抜粋: "def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Dict[str, Any]:\n        checkpoint_idx = get_checkpoint_index(flow)\n        checkpoint_time = flow['steps'][checkpoint_idx]['checkpoint_time'] if checkpoint_idx is not None else None")、[leveled_up/new_levelのフォールバック] (行番号: 180-181 / 抜粋: "\"leveled_up\": progress.get('leveled_up', False),\n            \"new_level\": progress.get('new_level'),")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`、`progress: Dict[str, Any]`
-* 根拠: [メソッド定義] (行番号: 149)
+* 根拠: [メソッド定義] (行番号: 152)
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]`(`started`, `title`, `checkpoint_time`, `current_step_index`, `in_free_time`, `is_complete`, `bonus_gold`, `bonus_exp`, `steps`(各要素は`key`/`label`/`icon_key`/`is_checkpoint`/`status`))
-* 根拠: [戻り値] (行番号: 162-172)
+* **戻り値/レスポンス**: `Dict[str, Any]`(`started`, `title`, `checkpoint_time`, `current_step_index`, `in_free_time`, `is_complete`, `bonus_gold`, `bonus_exp`, `leveled_up`, `new_level`, `steps`(各要素は`key`/`label`/`icon_key`/`is_checkpoint`/`status`))
+* 根拠: [戻り値] (行番号: 165-183)
 
 
 * **副作用**: なし
-* 根拠: [メソッド定義] (行番号: 149-172)
+* 根拠: [メソッド定義] (行番号: 152-183)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [メソッド定義] (行番号: 149-172、`try`/`except`は存在しない)
+* 根拠: [メソッド定義] (行番号: 152-183、`try`/`except`は存在しない)
 
 
 
 ### `get_today_state`
 
 * **役割**: 指定ユーザーの本日時点における全フロー(`ROUTINE_FLOWS`の各キー)の状態を取得する公開メソッド。ユーザー残高ロックとDBカーソルを取得したうえで、対象ユーザーの存在確認、各フローについて開始判定(`_is_flow_started_today`)・進捗取得または作成(`_get_or_create_progress`)・強制切替適用(`_apply_forced_transition`)・シリアライズ(`_serialize_flow`)を行う。
-* 根拠: [メソッド定義] (行番号: 174-192 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:\n        with _get_user_balance_lock(user_id):\n            with common.get_db_cursor(commit=True) as cur:")
+* 根拠: [メソッド定義] (行番号: 185-203 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:\n        with _get_user_balance_lock(user_id):\n            with common.get_db_cursor(commit=True) as cur:")
 
 
 * **引数/リクエスト**: `user_id: str`、`now: Optional[datetime.datetime] = None`(省略時は`datetime.datetime.now(JST)`)
-* 根拠: [メソッド定義] (行番号: 174 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:")、[デフォルト値解決] (行番号: 181 / 抜粋: "now = now or datetime.datetime.now(JST)")
+* 根拠: [メソッド定義] (行番号: 185 / 抜粋: "def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:")、[デフォルト値解決] (行番号: 192 / 抜粋: "now = now or datetime.datetime.now(JST)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]` — `{"date": date_str, "flows": flows_out}`。`flows_out`の各値は、未開始フローなら`{"started": False, "title": flow['title']}`、開始済みなら`_serialize_flow`の戻り値。
-* 根拠: [戻り値] (行番号: 192 / 抜粋: "return {\"date\": date_str, \"flows\": flows_out}")、[未開始時の値] (行番号: 186 / 抜粋: "flows_out[flow_key] = {\"started\": False, \"title\": flow['title']}")
+* 根拠: [戻り値] (行番号: 203 / 抜粋: "return {\"date\": date_str, \"flows\": flows_out}")、[未開始時の値] (行番号: 197 / 抜粋: "flows_out[flow_key] = {\"started\": False, \"title\": flow['title']}")
 
 
 * **副作用**: `_get_user_balance_lock(user_id)`によるプロセス内ロック取得・解放、`common.get_db_cursor(commit=True)`によるDBトランザクション(コミット)、`_get_or_create_progress`による`routine_progress`への`INSERT`(初回のみ)、`_apply_forced_transition`経由での`UPDATE`とボーナス付与・ログ出力(条件成立時のみ)。
-* 根拠: [with文] (行番号: 175-176 / 抜粋: "with _get_user_balance_lock(user_id):\n            with common.get_db_cursor(commit=True) as cur:")、[メソッド呼び出し] (行番号: 188-190)
+* 根拠: [with文] (行番号: 186-187 / 抜粋: "with _get_user_balance_lock(user_id):\n            with common.get_db_cursor(commit=True) as cur:")、[メソッド呼び出し] (行番号: 199-201)
 
 
 * **エラーハンドリング**: 対象ユーザーが`quest_users`テーブルに存在しない場合、`HTTPException(status_code=404, detail="User not found")`を送出する。
-* 根拠: [例外送出] (行番号: 177-179 / 抜粋: "user = cur.execute(\"SELECT 1 FROM quest_users WHERE user_id=?\", (user_id,)).fetchone()\n                if not user:\n                    raise HTTPException(status_code=404, detail=\"User not found\")")
+* 根拠: [例外送出] (行番号: 188-190 / 抜粋: "user = cur.execute(\"SELECT 1 FROM quest_users WHERE user_id=?\", (user_id,)).fetchone()\n                if not user:\n                    raise HTTPException(status_code=404, detail=\"User not found\")")
 
 
 
 ### `complete_step`
 
 * **役割**: 指定ユーザーの指定フロー・指定ステップを完了させる公開メソッド。`flow_key`の妥当性チェック、ユーザー存在確認、フロー開始済みチェック、進捗取得(`_get_or_create_progress`)と強制切替の適用(`_apply_forced_transition`)、現在のステップとの一致チェック、チェックポイントステップでないことのチェック、ステップを`'done'`にして次ステップへ進める処理、保存(`_save_progress`)、そして直後に締切を過ぎていた場合に備えた再度の強制切替適用を行う。
-* 根拠: [メソッド定義] (行番号: 194-239 / 抜粋: "def complete_step(\n        self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None\n    ) -> Dict[str, Any]:")
+* 根拠: [メソッド定義] (行番号: 205-250 / 抜粋: "def complete_step(\n        self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None\n    ) -> Dict[str, Any]:")
 
 
 * **引数/リクエスト**: `user_id: str`、`flow_key: str`、`step_key: str`、`now: Optional[datetime.datetime] = None`(省略時は`datetime.datetime.now(JST)`)
-* 根拠: [メソッド定義] (行番号: 194-196)、[デフォルト値解決] (行番号: 207 / 抜粋: "now = now or datetime.datetime.now(JST)")
+* 根拠: [メソッド定義] (行番号: 205-207)、[デフォルト値解決] (行番号: 218 / 抜粋: "now = now or datetime.datetime.now(JST)")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`(`_serialize_flow(flow, progress)`の戻り値、更新後の状態)
-* 根拠: [戻り値] (行番号: 239 / 抜粋: "return self._serialize_flow(flow, progress)")
+* 根拠: [戻り値] (行番号: 250 / 抜粋: "return self._serialize_flow(flow, progress)")
 
 
 * **副作用**: `_get_user_balance_lock(user_id)`・`common.get_db_cursor(commit=True)`によるロック・トランザクション、`_get_or_create_progress`による`INSERT`(初回のみ)、対象ステップを`'done'`・次ステップを`'current'`にした上での`_save_progress`による`UPDATE`、および2回の`_apply_forced_transition`呼び出し(1回目: 完了処理前の状態同期、2回目: 完了直後にチェックポイントへ到達し既に締切時刻を過ぎていた場合の即時通過処理)に伴う追加の`UPDATE`・ボーナス付与・ログ出力(条件成立時)。
-* 根拠: [ロック・トランザクション] (行番号: 201-202)、[1回目の強制切替] (行番号: 213 / 抜粋: "progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")、[ステップ完了処理] (行番号: 225-232)、[2回目の強制切替とそのコメント] (行番号: 234-237 / 抜粋: "# 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合\n                # (例: 出遅れて自由時間に入った瞬間には既に7:50だった)、この場で\n                # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。\n                progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")
+* 根拠: [ロック・トランザクション] (行番号: 212-213)、[1回目の強制切替] (行番号: 224 / 抜粋: "progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")、[ステップ完了処理] (行番号: 236-243)、[2回目の強制切替とそのコメント] (行番号: 245-248 / 抜粋: "# 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合\n                # (例: 出遅れて自由時間に入った瞬間には既に7:50だった)、この場で\n                # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。\n                progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)")
 
 
 * **エラーハンドリング**: (1) `flow_key`が`ROUTINE_FLOWS`に存在しなければ`HTTPException(404, "Unknown flow_key")`。(2) 対象ユーザーが存在しなければ`HTTPException(404, "User not found")`。(3) フローが本日まだ開始していなければ`HTTPException(400, "このフローはまだ開始していません")`。(4) 進捗の`current_step_index`が既に全ステップ数以上(完了済み)であれば`HTTPException(400, "本日のフローは完了しています")`。(5) リクエストの`step_key`が現在のステップキーと一致しなければ`HTTPException(409, "表示が古いようです。再読み込みしてください")`。(6) 現在のステップがチェックポイント(自由時間)であれば`HTTPException(400, "自由時間は時間になると自動的に次へ進みます")`(自由時間は時間経過による自動遷移のみで、明示的な完了操作は許可しない)。
-* 根拠: [flow_key検証] (行番号: 197-198 / 抜粋: "if flow_key not in ROUTINE_FLOWS:\n            raise HTTPException(status_code=404, detail=\"Unknown flow_key\")")、[ユーザー検証] (行番号: 204-205 / 抜粋: "if not user:\n                    raise HTTPException(status_code=404, detail=\"User not found\")")、[開始判定] (行番号: 208-209 / 抜粋: "if not self._is_flow_started_today(flow, now):\n                    raise HTTPException(status_code=400, detail=\"このフローはまだ開始していません\")")、[完了済み判定] (行番号: 216-217 / 抜粋: "if idx >= len(flow['steps']):\n                    raise HTTPException(status_code=400, detail=\"本日のフローは完了しています\")")、[ステップ不一致判定] (行番号: 220-221 / 抜粋: "if current_step['key'] != step_key:\n                    raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")")、[チェックポイント判定] (行番号: 222-223 / 抜粋: "if current_step['checkpoint_time']:\n                    raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")")
+* 根拠: [flow_key検証] (行番号: 208-209 / 抜粋: "if flow_key not in ROUTINE_FLOWS:\n            raise HTTPException(status_code=404, detail=\"Unknown flow_key\")")、[ユーザー検証] (行番号: 215-216 / 抜粋: "if not user:\n                    raise HTTPException(status_code=404, detail=\"User not found\")")、[開始判定] (行番号: 219-220 / 抜粋: "if not self._is_flow_started_today(flow, now):\n                    raise HTTPException(status_code=400, detail=\"このフローはまだ開始していません\")")、[完了済み判定] (行番号: 227-228 / 抜粋: "if idx >= len(flow['steps']):\n                    raise HTTPException(status_code=400, detail=\"本日のフローは完了しています\")")、[ステップ不一致判定] (行番号: 231-232 / 抜粋: "if current_step['key'] != step_key:\n                    raise HTTPException(status_code=409, detail=\"表示が古いようです。再読み込みしてください\")")、[チェックポイント判定] (行番号: 233-234 / 抜粋: "if current_step['checkpoint_time']:\n                    raise HTTPException(status_code=400, detail=\"自由時間は時間になると自動的に次へ進みます\")")
 
 
 
 ### `routine_service` (モジュールレベルシングルトン)
 
 * **役割**: `RoutineService`の唯一のインスタンス。`routine_router.py`はこの変数を直接importして両エンドポイントの処理を委譲する(CLAUDE.mdのモジュールレベルシングルトン+直接importパターン)。
-* 根拠: [インスタンス化] (行番号: 242 / 抜粋: "routine_service = RoutineService()")
+* 根拠: [インスタンス化] (行番号: 253 / 抜粋: "routine_service = RoutineService()")
 
 
 * **引数/リクエスト**: 該当なし
-* 根拠: [インスタンス化] (行番号: 242)
+* 根拠: [インスタンス化] (行番号: 253)
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: [インスタンス化] (行番号: 242)
+* 根拠: [インスタンス化] (行番号: 253)
 
 
 * **副作用**: モジュールロード時に`RoutineService()`のインスタンス化を行う。
-* 根拠: [インスタンス化] (行番号: 242)
+* 根拠: [インスタンス化] (行番号: 253)
 
 
 * **エラーハンドリング**: なし
-* 根拠: [インスタンス化] (行番号: 242)
+* 根拠: [インスタンス化] (行番号: 253)
 
 
 
@@ -372,7 +372,8 @@ flowchart TD
     Advance --> SaveProgress["self._save_progress(cur, progress)"]
     SaveProgress --> BonusCheck{"bonus_gold or bonus_exp が真?"}
     BonusCheck -- Yes --> GrantBonus["self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)"]
-    GrantBonus --> LogInfo["logger.info('Routine Checkpoint Passed: ...')"]
+    GrantBonus --> StoreLevelInfo["progress['leveled_up'] / ['new_level'] = 戻り値"]
+    StoreLevelInfo --> LogInfo["logger.info('Routine Checkpoint Passed: ...')"]
     BonusCheck -- No --> LogInfo
     LogInfo --> ReturnUpdated(["return progress（更新済み）"])
 ```
@@ -436,8 +437,9 @@ graph TD
 * ボーナス額`FULL_BONUS_GOLD = 150`/`FULL_BONUS_EXP = 30`は、`routine_data.py`のコメントにより`quest_data.py`のREWARDS(id=11「Youtube (30:00)」、`cost_gold`)と同額になるよう意図的に設定されている。この一致はコード上強制されていないため、`quest_data.py`側でこの報酬の価格を変更した場合は、`FULL_BONUS_GOLD`(および必要なら`FULL_BONUS_EXP`)を見直す必要がある。
 * `steps_status`は`routine_progress`テーブルにJSON TEXTとして保存されており、正規化された別テーブルにはしていない。この設計判断は`migrations/0010_add_routine_progress.sql`のSQLコメントに明記されている:「ステップ数が少なく(最大6件/フロー)、進捗の可視化以外の用途で個別ステップを検索する必要が無いため、正規化した別テーブルにはせずJSONで持つ。」(同SQLファイル13-16行目)。将来的にステップ単位での検索・集計が必要になった場合は、この設計の見直しが必要になる。
 * `_get_user_balance_lock`は`services/quest/locks.py`から`quest_service`と共用されているため、あるユーザーのルーティン完了処理(`complete_step`/`get_today_state`)とクエスト完了/承認処理は同一ユーザーに対してプロセス内で直列化される。これは`quest_users`(gold/exp/level)への読み取り→計算→書き込みという同じread-modify-writeパターンをルーティン側とクエスト側の双方が持つため、lost updateを避ける目的で意図的に共用されている(モジュールdocstring参照)。裏を返せば、同一ユーザーに対する大量のルーティン操作とクエスト操作が同時に発生すると、ロック待ちによる直列化でレイテンシが増える可能性がある。
-* `complete_step`は`_apply_forced_transition`を2回呼び出す(処理前と処理後)。2回目の呼び出しについては「直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合、この場で通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする」というコメントが付されている(行番号: 234-236)。`_apply_forced_transition`自体は冪等(`current_step_index > checkpoint_idx`なら何もしない)なため、2回呼んでも二重にボーナスが付与されることはない。
+* `complete_step`は`_apply_forced_transition`を2回呼び出す(処理前と処理後)。2回目の呼び出しについては「直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合、この場で通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする」というコメントが付されている(行番号: 245-247)。`_apply_forced_transition`自体は冪等(`current_step_index > checkpoint_idx`なら何もしない)なため、2回呼んでも二重にボーナスが付与されることはない。
 * `_grant_bonus`は対象ユーザーが`quest_users`に存在しない場合、例外を送出せずサイレントに何もしない(早期リターン)。`get_today_state`/`complete_step`自体はメソッド冒頭で別途ユーザー存在確認(`HTTPException(404)`)を行っているため、通常経路では`_grant_bonus`内のこのケースには到達しないと考えられるが、`_grant_bonus`単体としてはその前提を強制していない。
+* **（コードレビューで発覚した欠落を修正）** `_serialize_flow`の戻り値は`leveled_up`/`new_level`を含む。ただしこれらは`_apply_forced_transition`が「その呼び出しでチェックポイントを通過した」場合にのみ`progress`へ積まれる一時的な値であり、`routine_progress`テーブルには永続化されない(`_row_to_progress`はDB行から再構築するため、この2キーを一切含まない)。つまり、チェックポイント通過を跨いだ次のリクエスト以降は`leveled_up=False`/`new_level=None`に戻る「一度きりの通知」として設計されている。フロント側(`useRoutineData.ts`)もこの前提でミューテーション成功時のみ`onLevelUp`を発火する。
 
 ## 9. 不明事項一覧
 

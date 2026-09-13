@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `83b42db` |
+| 解析基準コミット | `0d67384` |
 
 ## 関連ドキュメント
 
@@ -19,7 +19,7 @@
 * [../../../types/index.md](../../../types/index.md) - `ID`/`User`/`Quest`/`QuestHistory`/`Reward`型の定義元
 * [../../../hooks/useRoutineData.md](../../../hooks/useRoutineData.md) - **（すごろく機能で新規追加）** `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、「きょうのすごろく」の当日フロー状態取得・ステップ完了報告フック
 * [../../routine/components/RoutineFlow.md](../../routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** `FamilyPanel`の`quest`タブが`compact`付きで表示するすごろくUI本体（デフォルトエクスポート`RoutineFlow`と名前付きエクスポート`RoutineFreeTimeBanner`の両方）
-* [../../../lib/routineDataSchema.md](../../../lib/routineDataSchema.md) - **（すごろく機能で新規追加）** `isRoutineFlowBlocking`/`isRoutineFlowFreeTime`（誘導中/自由時間中の判定関数）の実装元
+* [../../../lib/routineDataSchema.md](../../../lib/routineDataSchema.md) - **（すごろく機能で新規追加、コードレビューでApp.tsx側との重複をselectRoutineFlowへ集約）** `selectRoutineFlow`（誘導中/自由時間中のフローキーをam優先で判定するヘルパー）の実装元
 * [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）。縦画面側でも同様の`useRoutineData`+`RoutineFlow`/`RoutineFreeTimeBanner`パターンを採る
 
 ## 2. ファイルの概要
@@ -51,7 +51,9 @@
 | `isQuestVisibleToUser` | 関数（Issue #412 品質で`lib/questTargeting`へ集約） | `hasNothingToDo`内でのクエスト対象判定に使用 | `import { isQuestVisibleToUser } from '@/lib/questTargeting';` (行番号: 12) |
 | `useRoutineData` | カスタムフック（すごろく機能で新規追加） | `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、当日のすごろくフロー状態取得・ステップ完了報告 | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
 | `RoutineFlow` (default), `RoutineFreeTimeBanner` | コンポーネント（すごろく機能で新規追加） | `RoutineFlow`はすごろく誘導中の全ステップ表示（`compact`付き）、`RoutineFreeTimeBanner`は自由時間中の現在地バナー表示 | `import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';` (行番号: 14) |
-| `isRoutineFlowBlocking`, `isRoutineFlowFreeTime` | 関数（すごろく機能で新規追加） | `routineFlows.am`/`routineFlows.pm`それぞれについて「誘導中(ブロッキング)か」「自由時間中か」を判定する型ガード | `import { isRoutineFlowBlocking, isRoutineFlowFreeTime } from '@/lib/routineDataSchema';` (行番号: 15) |
+| `selectRoutineFlow` | 関数（すごろく機能で新規追加、コードレビューで重複解消のため導入） | `routineFlows.am`/`routineFlows.pm`から誘導中/自由時間中のフローキーをam優先でまとめて算出するヘルパー | `import { selectRoutineFlow } from '@/lib/routineDataSchema';` (行番号: 15) |
+| `useSound` | フック（すごろく機能で新規追加） | `FamilyPanel`内でLEVEL UP演出(`play('levelUp')`)・エラー通知(`play('cancel')`)の効果音を再生するために使用 | `import { useSound } from '@/hooks/useSound';` (行番号: 16) |
+| `useToast` | フック（すごろく機能で新規追加） | `FamilyPanel`内でLEVEL UPトースト・エラートーストを表示するために使用。`FamilyDashboard`から`App.tsx`経由で渡されるProps ではなく、`FamilyPanel`が直接Reactコンテキストとして取得する | `import { useToast } from '@/context/useToast';` (行番号: 17) |
 
 ### ブラックボックスとなる外部要素
 
@@ -59,6 +61,7 @@
 | --- | --- | --- |
 | `UserStatusCard`, `QuestList`, `ApprovalList`, `RewardShop`, `InventoryList`, `RoutineFlow`, `RoutineFreeTimeBanner` | 実装ファイルが本タスクでは提供されておらず（`InventoryList`/`RoutineFlow`は別ファイルとして解析済みだが、本ファイル側では利用箇所の観測のみ）、内部のレンダリング内容や副作用の全容は本ファイル単体からは不明 | インポート文 (行番号: 4〜8, 14) |
 | `useRoutineData` | `@/hooks/useRoutineData`に実装があり、ポーリング間隔・エラーハンドリングの詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| `selectRoutineFlow` | `@/lib/routineDataSchema`に実装があり、優先順位判定の詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる（詳細は`routineDataSchema.md`参照） | `import { selectRoutineFlow } from '@/lib/routineDataSchema';` (行番号: 15) |
 | `useSettings` | `@/context/useSettings`に実装があり、`iconFirstUserIds`/`userThemeColors`をどのように算出・永続化しているかが本ファイルからは不明 | `import { useSettings } from '@/context/useSettings';` (行番号: 9) |
 | `THEME_BORDER_CLASSES`, `THEME_RING_CLASSES` | `@/context/settingsShared`に定義された定数オブジェクトであり、取りうるキーの全容が本ファイルからは不明 | `import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';` (行番号: 10) |
 | `getQuestLockState` | `../../quest/hooks/useQuestStatus`に実装があり、ロック判定・完了判定の詳細ロジックは本ファイルからは呼び出し結果の型（`isLocked`/`isDone`）のみ確認可能 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
@@ -132,7 +135,7 @@
 * 根拠: 独立スクロールのコメント (行番号: 201 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
 * 根拠: タブ切替コメント (行番号: 168〜170 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
 * 根拠: `onClickCapture={onInteract}` (行番号: 161)
-* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 203〜232 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
+* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 217〜234 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => handleRoutineStepComplete(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
 * 根拠: `QuestList`への`completedSignal`転送 (行番号: 226 / 抜粋: "completedSignal={completedSignal}")
 
 
@@ -144,9 +147,9 @@
 * 根拠: (行番号: 159〜239 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
-* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。
+* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id, onLevelUp)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。チェックポイント通過ボーナスでレベルアップした場合は`onLevelUp`コールバック内で`play('levelUp')`と`showToast`によるLEVEL UP演出を行う。**（コードレビューで発覚した欠落を修正して追加）** `handleRoutineStepComplete`が`completeRoutineStep`の戻り値を見て、失敗時に`showToast`＋`play('cancel')`でエラーを通知する（以前はこの戻り値が無条件に握りつぶされていた）。
 * 根拠: (行番号: 137 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
-* 根拠: `useRoutineData`呼び出しと2つのキー算出 (行番号: 139〜149 / 抜粋: "// 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);\n    const activeRoutineKey: 'am' | 'pm' | null =\n        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'\n            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'\n                : null;\n    const freeTimeRoutineKey: 'am' | 'pm' | null =\n        !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.am) ? 'am'\n            : !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.pm) ? 'pm'\n                : null;")
+* 根拠: `useSound`/`useToast`取得と`useRoutineData`呼び出し・`selectRoutineFlow` (行番号: 140〜152 / 抜粋: "const { play } = useSound();\n    const { showToast } = useToast();\n\n    // 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(\n        user.user_id,\n        (info) => {\n            play('levelUp');\n            showToast({ title: 'LEVEL UP!', text: `${user.name}は Lv.${info.newLevel} になった！`, icon: '⚡' });\n        }\n    );\n    const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、[`handleRoutineStepComplete`定義] (行番号: 157〜163 / 抜粋: "const handleRoutineStepComplete = async (flowKey: 'am' | 'pm', stepKey: string) => {\n        const res = await completeRoutineStep(flowKey, stepKey);\n        if (!res.success) {\n            showToast({ title: 'エラー', text: res.detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });\n            play('cancel');\n        }\n    };")
 
 
 * **エラーハンドリング**: なし
@@ -170,8 +173,8 @@ flowchart TD
     IdleCheck --> PanelRender["FamilyPanel Render (userごと)"]
 
     subgraph "FamilyPanel 内部"
-        PanelRender --> RoutineHook["useRoutineData(user.user_id) でrouteFlows等を取得(すごろく機能)"]
-        RoutineHook --> RoutineKeys["activeRoutineKey / freeTimeRoutineKey を算出\n(isRoutineFlowBlocking / isRoutineFlowFreeTime)"]
+        PanelRender --> RoutineHook["useRoutineData(user.user_id, onLevelUp) でrouteFlows等を取得(すごろく機能)"]
+        RoutineHook --> RoutineKeys["selectRoutineFlow(routineFlows) で\nactiveRoutineKey / freeTimeRoutineKey を算出\n(コードレビューでApp.tsxとの重複ロジックをこの関数へ集約)"]
         RoutineKeys --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
         BorderCalc --> TabState{"tab の値は？(初期値 'quest')"}
         TabState -- "quest" --> RoutineActiveCheck{"activeRoutineKey が真?\n(すごろく機能)"}
@@ -223,7 +226,7 @@ graph TD
     Hook_useQuestStatus["getQuestLockState (../../quest/hooks/useQuestStatus)"]
     Lib_questTargeting["isQuestVisibleToUser (@/lib/questTargeting)"]
     Hook_useRoutineData["useRoutineData (@/hooks/useRoutineData、すごろく機能で新規追加)"]
-    Lib_routineDataSchema["isRoutineFlowBlocking/isRoutineFlowFreeTime\n(@/lib/routineDataSchema、すごろく機能で新規追加)"]
+    Lib_routineDataSchema["selectRoutineFlow\n(@/lib/routineDataSchema、すごろく機能で新規追加、\nコードレビューでApp.tsxとの重複ロジックを集約)"]
 
     Types["@/types (ID, User, Quest, QuestHistory, Reward)"]
 
@@ -282,8 +285,8 @@ graph TD
 * 根拠: (行番号: 111, 226 / 抜粋: "completedSignal={completedSignal}")
 * **（すごろく機能で追加）** `useRoutineData`は`FamilyDashboard`ではなく各`FamilyPanel`が個別に呼び出す: `App.tsx`（縦画面）は`currentUser`1人分のみ`useRoutineData`を呼び出すのに対し、本ファイルの横画面レイアウトでは`FamilyPanel`が4人ぶん並行してマウントされるため、`useRoutineData(user.user_id)`もユーザーごとに独立したインスタンス（独立したReact Queryの`queryKey`、独立した15秒ポーリング）として4回呼び出される。`FamilyDashboardProps`/`FamilyPanelProps`に`routineFlows`等を渡すためのProps追加は行われておらず、あくまで`FamilyPanel`内部で完結する。
 * 根拠: (行番号: 141 / 抜粋: "const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);")
-* **（すごろく機能で追加）** `activeRoutineKey`/`freeTimeRoutineKey`は`am`を`pm`より優先して判定する: `App.tsx`側の同名ロジックと同じ三項演算子の連鎖であり、`isRoutineFlowBlocking(routineFlows.am)`が真であればその時点で`'am'`が採用され`routineFlows.pm`側は評価されない。
-* 根拠: (行番号: 142〜145 / 抜粋: "const activeRoutineKey: 'am' | 'pm' | null =\n        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'\n            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'\n                : null;")
+* **（すごろく機能で追加、コードレビューで重複解消）** `activeRoutineKey`/`freeTimeRoutineKey`の判定ロジックは、以前は`App.tsx`と本ファイルにそれぞれ同じ三項演算子の連鎖（`am`を`pm`より優先）が重複実装されていたが、`@/lib/routineDataSchema.ts`の`selectRoutineFlow(routineFlows)`ヘルパーに集約され、本ファイルはその戻り値`{ activeKey, freeTimeKey }`を分割代入で受け取るだけになった。判定内容自体（amがブロッキング中ならpm側は評価せず`'am'`を採用）は変わっていない。
+* 根拠: (行番号: 152 / 抜粋: "const { activeKey: activeRoutineKey, freeTimeKey: freeTimeRoutineKey } = selectRoutineFlow(routineFlows);")、判定ロジック本体は `../../../lib/routineDataSchema.md` を参照
 
 ## 9. 不明事項一覧
 
