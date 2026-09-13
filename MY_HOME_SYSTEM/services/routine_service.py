@@ -53,7 +53,7 @@ class RoutineService:
             return False
         placeholders = ','.join('?' for _ in dates)
         rows = cur.execute(
-            f"SELECT steps_status FROM routine_progress "
+            f"SELECT steps_status FROM routine_progress "  # nosec B608
             f"WHERE user_id=? AND flow_key=? AND progress_date IN ({placeholders})",
             (user_id, flow_key, *dates),
         ).fetchall()
