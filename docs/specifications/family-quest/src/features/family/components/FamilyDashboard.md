@@ -191,11 +191,13 @@ flowchart TD
     end
 
     RenderQuestList --> QuestClickCb["onQuestClick(quest) → 親へ onQuestClick(user, quest) として伝播"]
+    RenderBannerThenQuestList --> QuestClickCb
     RenderRewardShop --> BuyCb["onBuy(reward) → 親へ onBuyReward(user, reward) として伝播"]
 
     QuestClickCb --> End["End"]
     BuyCb --> End
     RenderInventoryList --> End
+    RenderRoutineFlow --> End
     Interact --> End
 
 ```
@@ -214,10 +216,14 @@ graph TD
     UI_ApprovalList["ApprovalList (../../quest/components/ApprovalList)"]
     UI_RewardShop["RewardShop (../../shop/components/RewardShop)"]
     UI_InventoryList["InventoryList (../../shop/components/InventoryList)"]
+    UI_RoutineFlow["RoutineFlow (default) / RoutineFreeTimeBanner\n(../../routine/components/RoutineFlow、すごろく機能で新規追加)"]
 
     Hook_useSettings["useSettings (@/context/useSettings)"]
     Const_settingsShared["THEME_BORDER_CLASSES/THEME_RING_CLASSES (@/context/settingsShared)"]
     Hook_useQuestStatus["getQuestLockState (../../quest/hooks/useQuestStatus)"]
+    Lib_questTargeting["isQuestVisibleToUser (@/lib/questTargeting)"]
+    Hook_useRoutineData["useRoutineData (@/hooks/useRoutineData、すごろく機能で新規追加)"]
+    Lib_routineDataSchema["isRoutineFlowBlocking/isRoutineFlowFreeTime\n(@/lib/routineDataSchema、すごろく機能で新規追加)"]
 
     Types["@/types (ID, User, Quest, QuestHistory, Reward)"]
 
@@ -227,11 +233,15 @@ graph TD
     FamilyDashboard --> Hook_useSettings
     FamilyDashboard --> UI_ApprovalList
     hasNothingToDo --> Hook_useQuestStatus
+    hasNothingToDo --> Lib_questTargeting
     FamilyDashboard -->|Render (userごと)| FamilyPanel
 
     FamilyPanel --> UI_UserStatusCard
     FamilyPanel --> Const_settingsShared
-    FamilyPanel -->|tab==='quest'| UI_QuestList
+    FamilyPanel -->|"すごろく機能で追加(user.user_idごとに個別呼び出し)"| Hook_useRoutineData
+    FamilyPanel -->|"すごろく機能で追加(判定関数)"| Lib_routineDataSchema
+    FamilyPanel -->|"tab==='quest' かつ activeRoutineKey真(すごろく機能)"| UI_RoutineFlow
+    FamilyPanel -->|"tab==='quest' かつ activeRoutineKey偽(すごろく機能)"| UI_QuestList
     FamilyPanel -->|tab==='shop'| UI_RewardShop
     FamilyPanel -->|tab==='inventory'| UI_InventoryList
     FamilyPanel -->|import| Types
@@ -247,6 +257,8 @@ graph TD
 | 中 | `../../quest/hooks/useQuestStatus.ts` | `getQuestLockState`の判定ロジック（`isLocked`/`isDone`の算出条件）を把握し、`hasNothingToDo`の正確な意味を確認するため。 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
 | 中 | `../../quest/components/ApprovalList.tsx` | メイン画面上部に常時統合表示される承認機能（`onApproveAll`含む）の内部実装を把握するため。 | `import ApprovalList from '../../quest/components/ApprovalList';` (行番号: 6) |
 | 低 | `@/types` | `User`の`role`/`user_id`や`Quest`/`Reward`の詳細なスキーマを把握するため。 | `import { ID, User, Quest, QuestHistory, Reward } from '@/types';` (行番号: 3) |
+| 中 | `@/hooks/useRoutineData.ts`（すごろく機能で新規追加） | 各`FamilyPanel`が個別に呼び出す`useRoutineData(user.user_id)`のポーリング間隔・キャッシュキー設計を把握するため（既に`useRoutineData.md`で解析済み）。 | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| 中 | `../../routine/components/RoutineFlow.tsx`（すごろく機能で新規追加） | `compact`付きで描画される`RoutineFlow`/`RoutineFreeTimeBanner`の内部実装を把握するため（既に`RoutineFlow.md`で解析済み）。 | `import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';` (行番号: 14) |
 
 ## 8. 保守上の注意点
 
@@ -267,7 +279,11 @@ graph TD
 * **[修正済み] 兄妹連携クエスト(`target_user === 'siblings'`)対応**: 以前は`target === 'siblings'`（兄妹連携クエスト）が`all`/`role_*`/`user_id`完全一致のいずれにも一致せず全ユーザーから除外されていた（画面に表示されず機能が起動不能だった）バグを修正済み。**（Issue #412 品質で修正）** この判定ロジック自体は`QuestList.tsx`にも重複していたため`lib/questTargeting.ts`の`isQuestVisibleToUser`に集約された（本ファイルは同関数を呼び出すのみ）。**（#291で修正）** 参照フィールド名は`q.target`から`q.target_user`（`quest_master`の実カラム名）に変更された。
 * 根拠: `../../../lib/questTargeting.md`（判定ロジック本体）
 * **`completedSignal`の単純な素通し（Issue #102）**: `FamilyDashboardProps`/`FamilyPanelProps`に追加された`completedSignal: { id: ID; nonce: number } | null`は、`App.tsx`が完了APIの成功時にのみセットする値であり、`FamilyDashboard`・`FamilyPanel`自身はこの値を判定・加工せず、そのまま`FamilyPanel`経由で`QuestList`（さらにその内部の`QuestItem`）へ転送するだけである。実際の発火判定（無限クエストのクールダウン開始・完了音再生）は`App.tsx`の`runQuestAction`および`QuestList.tsx`の`QuestItem`内`useEffect`側の責務であり、本ファイルの管轄外。
-* 根拠: (行番号: 111, 202 / 抜粋: "completedSignal={completedSignal}")
+* 根拠: (行番号: 111, 226 / 抜粋: "completedSignal={completedSignal}")
+* **（すごろく機能で追加）** `useRoutineData`は`FamilyDashboard`ではなく各`FamilyPanel`が個別に呼び出す: `App.tsx`（縦画面）は`currentUser`1人分のみ`useRoutineData`を呼び出すのに対し、本ファイルの横画面レイアウトでは`FamilyPanel`が4人ぶん並行してマウントされるため、`useRoutineData(user.user_id)`もユーザーごとに独立したインスタンス（独立したReact Queryの`queryKey`、独立した15秒ポーリング）として4回呼び出される。`FamilyDashboardProps`/`FamilyPanelProps`に`routineFlows`等を渡すためのProps追加は行われておらず、あくまで`FamilyPanel`内部で完結する。
+* 根拠: (行番号: 141 / 抜粋: "const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);")
+* **（すごろく機能で追加）** `activeRoutineKey`/`freeTimeRoutineKey`は`am`を`pm`より優先して判定する: `App.tsx`側の同名ロジックと同じ三項演算子の連鎖であり、`isRoutineFlowBlocking(routineFlows.am)`が真であればその時点で`'am'`が採用され`routineFlows.pm`側は評価されない。
+* 根拠: (行番号: 142〜145 / 抜粋: "const activeRoutineKey: 'am' | 'pm' | null =\n        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'\n            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'\n                : null;")
 
 ## 9. 不明事項一覧
 
@@ -279,6 +295,7 @@ graph TD
 | `ApprovalList`の内部実装 | `pendingQuests`/`users`/`onApproveAll`をどう描画し、`onApprove`/`onReject`をどう発火させるかが不明なため。 | `../../quest/components/ApprovalList.tsx` |
 | `RewardShop`/`InventoryList`の内部実装 | パネル内「ごほうび」「もちもの」タブの描画内容・操作フローの詳細が不明なため。 | `../../shop/components/RewardShop.tsx`, `../../shop/components/InventoryList.tsx` |
 | `User.role`の取りうる値の全容 | `'role_adult'`以外の値（子ども側の`role`文字列）が本ファイルからは特定できないため。 | `@/types` |
+| （すごろく機能で追加）`routineFlows`のバックエンド側生成条件 | 各`FamilyPanel`が個別に取得する`routineFlows.am`/`routineFlows.pm`の実際の値がどのタイミングでどう変わるか（チェックポイント通過等）は`useRoutineData.ts`/`routineDataSchema.ts`側の解析に譲る。 | `@/hooks/useRoutineData.ts`, `@/lib/routineDataSchema.ts` |
 
 ## 相互参照による補足情報
 
