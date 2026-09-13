@@ -14,7 +14,11 @@ const POLL_INTERVAL_MS = 1000 * 15;
 // と、何も操作せずポーリングだけで検知される受動的な通過(下のuseEffect)の両方が経路になる。
 export type RoutineLevelUpInfo = { newLevel: number };
 
-export const useRoutineData = (userId: string | undefined, onLevelUp?: (info: RoutineLevelUpInfo) => void) => {
+export const useRoutineData = (
+    userId: string | undefined,
+    onLevelUp?: (info: RoutineLevelUpInfo) => void,
+    onError?: (detail: string) => void,
+) => {
     const queryClient = useQueryClient();
 
     const { data, isLoading, error } = useQuery<RoutineTodayResponse>({
@@ -71,12 +75,18 @@ export const useRoutineData = (userId: string | undefined, onLevelUp?: (info: Ro
         },
     });
 
+    // コードレビューで発覚: 完了報告失敗時のエラートースト表示ロジックが
+    // App.tsx・FamilyDashboard.tsxの両方に一字一句同じ形で重複していた
+    // (handleRoutineStepComplete)。onLevelUpと同じ「呼び出し元のコールバックを
+    // 受け取る」形にし、ここへ集約する。
     const completeStep = async (flowKey: 'am' | 'pm', stepKey: string) => {
         try {
             await completeStepMutation.mutateAsync({ flowKey, stepKey });
             return { success: true };
         } catch (e) {
-            return { success: false, detail: e instanceof Error ? e.message : String(e) };
+            const detail = e instanceof Error ? e.message : String(e);
+            onError?.(detail);
+            return { success: false, detail };
         }
     };
 

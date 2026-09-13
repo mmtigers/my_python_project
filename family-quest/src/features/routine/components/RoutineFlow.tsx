@@ -137,7 +137,7 @@ const RoutineStepRow: React.FC<{
                 </div>
                 {!isLast && (
                     step.is_checkpoint ? (
-                        <span className={`my-1 flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${THEME[flowKey].chip}`}>
+                        <span className={`my-1 flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${theme.chip}`}>
                             <Clock size={10} />{checkpointTime}
                         </span>
                     ) : (

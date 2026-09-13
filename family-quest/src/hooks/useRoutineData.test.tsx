@@ -102,3 +102,49 @@ describe('useRoutineData announces level-ups discovered by polling (code review 
         expect(onLevelUp).toHaveBeenCalledTimes(1);
     });
 });
+
+// コードレビューで発覚: 完了報告失敗時のエラートースト表示ロジック(旧handleRoutineStepComplete)
+// がApp.tsx・FamilyDashboard.tsxの両方に一字一句同じ形で重複していた。onLevelUpと同様に
+// onErrorコールバックとしてこのフック自体に集約し、呼び出し元は自前でtry/catch相当を
+// 書かなくてよくなったことを確認する。
+describe('useRoutineData calls onError on a failed completeStep (code review finding: duplicated error toast logic)', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('calls onError with the failure detail when POST /complete rejects', async () => {
+        const getMock = vi.mocked(apiClient.get);
+        getMock.mockResolvedValue(makeTodayResponse());
+        const postMock = vi.mocked(apiClient.post);
+        postMock.mockRejectedValue(new Error('表示が古いようです。再読み込みしてください'));
+
+        const onError = vi.fn();
+        const wrapper = createWrapper();
+        const { result } = renderHook(() => useRoutineData('daughter', undefined, onError), { wrapper });
+
+        await waitFor(() => expect(result.current.flows?.am).toBeDefined());
+
+        const outcome = await result.current.completeStep('am', 'wash');
+
+        expect(outcome).toEqual({ success: false, detail: '表示が古いようです。再読み込みしてください' });
+        expect(onError).toHaveBeenCalledWith('表示が古いようです。再読み込みしてください');
+    });
+
+    it('does not call onError when completeStep succeeds', async () => {
+        const getMock = vi.mocked(apiClient.get);
+        getMock.mockResolvedValue(makeTodayResponse());
+        const postMock = vi.mocked(apiClient.post);
+        postMock.mockResolvedValue(makeFlow());
+
+        const onError = vi.fn();
+        const wrapper = createWrapper();
+        const { result } = renderHook(() => useRoutineData('daughter', undefined, onError), { wrapper });
+
+        await waitFor(() => expect(result.current.flows?.am).toBeDefined());
+
+        const outcome = await result.current.completeStep('am', 'wash');
+
+        expect(outcome).toEqual({ success: true });
+        expect(onError).not.toHaveBeenCalled();
+    });
+});
