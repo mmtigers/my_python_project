@@ -32,6 +32,10 @@ def _at(hour, minute):
     return MONDAY.replace(hour=hour, minute=minute)
 
 
+def _saturday_at(hour, minute):
+    return (MONDAY + datetime.timedelta(days=5)).replace(hour=hour, minute=minute)  # 2024-01-06は土曜日
+
+
 class TestFlowStartGating:
     def test_am_flow_not_started_before_5am(self, isolated_db):
         _seed_user()
@@ -45,11 +49,12 @@ class TestFlowStartGating:
         assert state['flows']['am']['steps'][0]['status'] == 'current'
         assert all(s['status'] == 'locked' for s in state['flows']['am']['steps'][1:])
 
-    def test_am_flow_not_started_on_weekend(self, isolated_db):
+    def test_am_flow_started_on_weekend(self, isolated_db):
+        """土日も平日と同じ05:00開始トリガーでフローが始まる(要件: 平日と揃える)。"""
         _seed_user()
-        saturday = MONDAY + datetime.timedelta(days=5, hours=6)  # 2024-01-06 06:00 (土)
-        state = routine_service.get_today_state('daughter', now=saturday)
-        assert state['flows']['am']['started'] is False
+        state = routine_service.get_today_state('daughter', now=_saturday_at(6, 0))
+        assert state['flows']['am']['started'] is True
+        assert state['flows']['am']['steps'][0]['status'] == 'current'
 
     def test_unknown_user_returns_404(self, isolated_db):
         from fastapi import HTTPException
@@ -182,6 +187,45 @@ class TestCheckpointBonus:
         am = state['flows']['am']
         assert am['current_step_index'] == 5
         assert am['bonus_gold'] == round(150 * (1 / 4))
+
+
+class TestWeekendCheckpointOverride:
+    """土日は朝(am)のチェックポイントだけ09:30に後ろ倒しする(要件: なるべく平日と揃える)。"""
+
+    def test_am_checkpoint_time_field_is_930_on_saturday(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_saturday_at(6, 0))
+        assert state['flows']['am']['checkpoint_time'] == '09:30'
+
+    def test_am_checkpoint_time_field_is_750_on_weekday(self, isolated_db):
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_at(6, 0))
+        assert state['flows']['am']['checkpoint_time'] == '07:50'
+
+    def test_am_not_forced_past_at_800_on_saturday(self, isolated_db):
+        """平日なら7:50超えで強制通過する8:00でも、土日は09:30まではまだ猶予がある。"""
+        _seed_user(gold=0, exp=0)
+        for key in ('wash', 'meal', 'clothes', 'teeth'):
+            routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
+        state = routine_service.get_today_state('daughter', now=_saturday_at(8, 0))
+        am = state['flows']['am']
+        assert am['in_free_time'] is True
+        assert am['bonus_gold'] == 0
+
+    def test_am_forced_past_at_931_on_saturday(self, isolated_db):
+        _seed_user(gold=0, exp=0)
+        for key in ('wash', 'meal', 'clothes', 'teeth'):
+            routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
+        state = routine_service.get_today_state('daughter', now=_saturday_at(9, 31))
+        am = state['flows']['am']
+        assert am['in_free_time'] is False
+        assert am['bonus_gold'] == 150
+
+    def test_pm_checkpoint_time_unchanged_on_saturday(self, isolated_db):
+        """夕方(pm)は土日も平日と同じ20:00のまま(要件確認済み)。"""
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_saturday_at(15, 0))
+        assert state['flows']['pm']['checkpoint_time'] == '20:00'
 
 
 class TestRouterHttp:

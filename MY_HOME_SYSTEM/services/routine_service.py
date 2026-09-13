@@ -14,7 +14,10 @@ from fastapi import HTTPException
 import common
 import game_logic
 from core import sound_manager
-from routine_data import FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, RoutineFlow, get_checkpoint_index
+from routine_data import (
+    FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, RoutineFlow,
+    get_checkpoint_index, get_effective_checkpoint_time,
+)
 from services.quest.locks import JST, _get_user_balance_lock, logger
 
 
@@ -112,7 +115,7 @@ class RoutineService:
             return progress
 
         checkpoint_step = flow['steps'][checkpoint_idx]
-        hour, minute = map(int, checkpoint_step['checkpoint_time'].split(':'))
+        hour, minute = map(int, get_effective_checkpoint_time(checkpoint_step, now).split(':'))
         deadline = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if now < deadline:
             return progress
@@ -149,9 +152,13 @@ class RoutineService:
         )
         return progress
 
-    def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Dict[str, Any]:
+    def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime) -> Dict[str, Any]:
         checkpoint_idx = get_checkpoint_index(flow)
-        checkpoint_time = flow['steps'][checkpoint_idx]['checkpoint_time'] if checkpoint_idx is not None else None
+        # 土日は締切時刻が変わりうる(get_effective_checkpoint_time)ため、表示用の
+        # checkpoint_timeも「今日」時点の実際の時刻をnowから解決する。
+        checkpoint_time = (
+            get_effective_checkpoint_time(flow['steps'][checkpoint_idx], now) if checkpoint_idx is not None else None
+        )
         steps_out = [
             {
                 "key": step['key'],
@@ -198,7 +205,7 @@ class RoutineService:
                         continue
                     progress = self._get_or_create_progress(cur, user_id, flow_key, flow, date_str)
                     progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
-                    flows_out[flow_key] = self._serialize_flow(flow, progress)
+                    flows_out[flow_key] = self._serialize_flow(flow, progress, now)
 
                 return {"date": date_str, "flows": flows_out}
 
@@ -247,7 +254,7 @@ class RoutineService:
                 # 通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする。
                 progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
 
-                return self._serialize_flow(flow, progress)
+                return self._serialize_flow(flow, progress, now)
 
 
 routine_service = RoutineService()
