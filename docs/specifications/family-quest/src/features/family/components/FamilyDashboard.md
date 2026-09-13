@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `6007292` |
+| 解析基準コミット | `83b42db` |
 
 ## 関連ドキュメント
 
@@ -17,7 +17,10 @@
 * [../../shop/components/RewardShop.md](../../shop/components/RewardShop.md) - パネル内「ごほうび」タブの表示コンポーネント
 * [../../shop/components/InventoryList.md](../../shop/components/InventoryList.md) - パネル内「もちもの」タブの表示コンポーネント（`panelMode`付き）
 * [../../../types/index.md](../../../types/index.md) - `ID`/`User`/`Quest`/`QuestHistory`/`Reward`型の定義元
-* [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）
+* [../../../hooks/useRoutineData.md](../../../hooks/useRoutineData.md) - **（すごろく機能で新規追加）** `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、「きょうのすごろく」の当日フロー状態取得・ステップ完了報告フック
+* [../../routine/components/RoutineFlow.md](../../routine/components/RoutineFlow.md) - **（すごろく機能で新規追加）** `FamilyPanel`の`quest`タブが`compact`付きで表示するすごろくUI本体（デフォルトエクスポート`RoutineFlow`と名前付きエクスポート`RoutineFreeTimeBanner`の両方）
+* [../../../lib/routineDataSchema.md](../../../lib/routineDataSchema.md) - **（すごろく機能で新規追加）** `isRoutineFlowBlocking`/`isRoutineFlowFreeTime`（誘導中/自由時間中の判定関数）の実装元
+* [../../../../App.md](../../../../App.md) - 呼び出し元（横画面レイアウト時のメイン表示コンポーネントとして使用）。縦画面側でも同様の`useRoutineData`+`RoutineFlow`/`RoutineFreeTimeBanner`パターンを採る
 
 ## 2. ファイルの概要
 
@@ -45,12 +48,17 @@
 | `useSettings` | フック | テーマ設定（アイコン優先ユーザー、ユーザーごとのテーマカラー）の取得 | `import { useSettings } from '@/context/useSettings';` (行番号: 9) |
 | `THEME_BORDER_CLASSES`, `THEME_RING_CLASSES` | 定数オブジェクト | テーマカラーキーに対応するボーダー/リングのTailwindクラス名解決 | `import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';` (行番号: 10) |
 | `getQuestLockState` | 関数 | クエストのロック状態・完了状態を判定し、パネルの「今日やることがない」判定に使用 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
+| `isQuestVisibleToUser` | 関数（Issue #412 品質で`lib/questTargeting`へ集約） | `hasNothingToDo`内でのクエスト対象判定に使用 | `import { isQuestVisibleToUser } from '@/lib/questTargeting';` (行番号: 12) |
+| `useRoutineData` | カスタムフック（すごろく機能で新規追加） | `FamilyPanel`が`user.user_id`ごとに個別に呼び出す、当日のすごろくフロー状態取得・ステップ完了報告 | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
+| `RoutineFlow` (default), `RoutineFreeTimeBanner` | コンポーネント（すごろく機能で新規追加） | `RoutineFlow`はすごろく誘導中の全ステップ表示（`compact`付き）、`RoutineFreeTimeBanner`は自由時間中の現在地バナー表示 | `import RoutineFlow, { RoutineFreeTimeBanner } from '../../routine/components/RoutineFlow';` (行番号: 14) |
+| `isRoutineFlowBlocking`, `isRoutineFlowFreeTime` | 関数（すごろく機能で新規追加） | `routineFlows.am`/`routineFlows.pm`それぞれについて「誘導中(ブロッキング)か」「自由時間中か」を判定する型ガード | `import { isRoutineFlowBlocking, isRoutineFlowFreeTime } from '@/lib/routineDataSchema';` (行番号: 15) |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `UserStatusCard`, `QuestList`, `ApprovalList`, `RewardShop`, `InventoryList` | 実装ファイルが本タスクでは提供されておらず（`InventoryList`のみ別ファイルとして解析済みだが、本ファイル側では利用箇所の観測のみ）、内部のレンダリング内容や副作用の全容は本ファイル単体からは不明 | インポート文 (行番号: 4〜8) |
+| `UserStatusCard`, `QuestList`, `ApprovalList`, `RewardShop`, `InventoryList`, `RoutineFlow`, `RoutineFreeTimeBanner` | 実装ファイルが本タスクでは提供されておらず（`InventoryList`/`RoutineFlow`は別ファイルとして解析済みだが、本ファイル側では利用箇所の観測のみ）、内部のレンダリング内容や副作用の全容は本ファイル単体からは不明 | インポート文 (行番号: 4〜8, 14) |
+| `useRoutineData` | `@/hooks/useRoutineData`に実装があり、ポーリング間隔・エラーハンドリングの詳細は本ファイルからは呼び出し結果の利用箇所のみ確認できる | `import { useRoutineData } from '@/hooks/useRoutineData';` (行番号: 13) |
 | `useSettings` | `@/context/useSettings`に実装があり、`iconFirstUserIds`/`userThemeColors`をどのように算出・永続化しているかが本ファイルからは不明 | `import { useSettings } from '@/context/useSettings';` (行番号: 9) |
 | `THEME_BORDER_CLASSES`, `THEME_RING_CLASSES` | `@/context/settingsShared`に定義された定数オブジェクトであり、取りうるキーの全容が本ファイルからは不明 | `import { THEME_BORDER_CLASSES, THEME_RING_CLASSES } from '@/context/settingsShared';` (行番号: 10) |
 | `getQuestLockState` | `../../quest/hooks/useQuestStatus`に実装があり、ロック判定・完了判定の詳細ロジックは本ファイルからは呼び出し結果の型（`isLocked`/`isDone`）のみ確認可能 | `import { getQuestLockState } from '../../quest/hooks/useQuestStatus';` (行番号: 11) |
@@ -118,25 +126,27 @@
 
 ### `FamilyPanel`
 
-* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じて`QuestList`（`panelMode`固定、`iconFirst`とIssue #102で追加された`completedSignal`をProps経由でそのまま転送）、`RewardShop`、または`InventoryList`（`panelMode`固定）を表示する。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
-* 根拠: (行番号: 137〜220 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
-* 根拠: ボーダー/リングのバグ修正コメント (行番号: 143〜146)
-* 根拠: 独立スクロールのコメント (行番号: 193 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
-* 根拠: タブ切替コメント (行番号: 163〜165 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
-* 根拠: `onClickCapture={onInteract}` (行番号: 156)
-* 根拠: `QuestList`への`completedSignal`転送 (行番号: 202 / 抜粋: "completedSignal={completedSignal}")
+* **役割**: 1ユーザー分のパネルを描画する。パネルのボーダー色は常に`themeColorKey`（あれば`THEME_BORDER_CLASSES`、無ければ`isActive`時`border-yellow-400`／それ以外`border-gray-700`）を反映し、リング（強調枠）は`isActive`の時のみ付与する。`isIdle`の場合はパネル全体に`opacity-70`を適用する。パネル上部に`UserStatusCard`、その下にタブ切替（`quest`/`shop`/`inventory`、Echo Show 15でのタッチ操作を想定し44px以上のタップ領域を確保、アイコンのみ表示）、下部に選択中タブに応じたコンテンツを表示する。**（すごろく機能で変更）** `quest`タブの中身は単純な`QuestList`直接描画ではなくなり、`activeRoutineKey`（後述）が真であれば`QuestList`の代わりに`RoutineFlow`（`compact`付き）を表示し、`activeRoutineKey`が無ければ、`freeTimeRoutineKey`（後述）が真の場合のみ`RoutineFreeTimeBanner`を`QuestList`の直前に挟んだうえで、従来通りの`QuestList`（`panelMode`固定、`iconFirst`とIssue #102で追加された`completedSignal`をProps経由でそのまま転送）を表示する。`shop`/`inventory`タブの中身（`RewardShop`/`InventoryList`（`panelMode`固定））はすごろく機能による変更を受けていない。コンテンツ領域はパネルごとに独立スクロール（`max-h-[60vh] overflow-y-auto`）を持つ。パネル内のどこかをクリックすると`onInteract`（`onClickCapture`）が発火する。
+* 根拠: (行番号: 133〜240 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({")
+* 根拠: ボーダー/リングのバグ修正コメント (行番号: 150〜153)
+* 根拠: 独立スクロールのコメント (行番号: 201 / 抜粋: "{/* パネルごとに独立スクロール(要件5) */}")
+* 根拠: タブ切替コメント (行番号: 168〜170 / 抜粋: "{/* タブ切替: Echo Show 15でのタッチ操作を想定し、タップ領域を大きめに確保。\n                ★バグ修正: ごほうび画面へのもちもの統合をやめ、クエスト/ごほうび/もちものの3タブに戻す。\n                テキストは不要のためアイコンのみ表示する(aria-labelで読み上げは維持) */}")
+* 根拠: `onClickCapture={onInteract}` (行番号: 161)
+* **（すごろく機能で追加）** 根拠: `quest`タブの`RoutineFlow`/`RoutineFreeTimeBanner`分岐 (行番号: 203〜232 / 抜粋: "{tab === 'quest' && activeRoutineKey && routineFlows && (\n                    <RoutineFlow\n                        flowKey={activeRoutineKey}\n                        flow={routineFlows[activeRoutineKey]}\n                        onCompleteStep={(stepKey) => completeRoutineStep(activeRoutineKey, stepKey)}\n                        isCompleting={isCompletingRoutine}\n                        compact\n                    />\n                )}\n\n                {tab === 'quest' && !activeRoutineKey && (\n                    <>\n                        {freeTimeRoutineKey && routineFlows && (\n                            <div className=\"mb-2\">\n                                <RoutineFreeTimeBanner flowKey={freeTimeRoutineKey} flow={routineFlows[freeTimeRoutineKey]} />\n                            </div>\n                        )}\n                        <QuestList")
+* 根拠: `QuestList`への`completedSignal`転送 (行番号: 226 / 抜粋: "completedSignal={completedSignal}")
 
 
 * **引数/リクエスト**: `FamilyPanelProps`
-* 根拠: (行番号: 137〜140 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({\n    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,\n    onInteract, onQuestClick, onBuyReward, completedSignal, onAvatarClick,\n}) => {")
+* 根拠: (行番号: 133〜136 / 抜粋: "const FamilyPanel: React.FC<FamilyPanelProps> = ({\n    user, quests, completedQuests, pendingQuests, rewards, iconFirst, isActive, themeColorKey, isIdle,\n    onInteract, onQuestClick, onBuyReward, completedSignal, processingQuestKeys, onAvatarClick,\n}) => {")
 
 
 * **戻り値/レスポンス**: JSX.Element
-* 根拠: (行番号: 154〜219 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
+* 根拠: (行番号: 159〜239 / 抜粋: "return (\n        <div\n            onClickCapture={onInteract}")
 
 
-* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。
-* 根拠: (行番号: 141 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
+* **副作用**: `tab`ローカルステート（`'quest' | 'shop' | 'inventory'`、初期値`'quest'`）の更新。`onInteract`の呼び出しによる親（`FamilyDashboard`）側の`activeUserId`更新。**（すごろく機能で追加）** `useRoutineData(user.user_id)`の呼び出しによる`GET /api/routine/today`の15秒間隔ポーリング（`user.user_id`ごとに独立したReact Queryの`queryKey`を持つため、4パネル分が個別に発火する）。
+* 根拠: (行番号: 137 / 抜粋: "const [tab, setTab] = useState<'quest' | 'shop' | 'inventory'>('quest');")
+* 根拠: `useRoutineData`呼び出しと2つのキー算出 (行番号: 139〜149 / 抜粋: "// 「きょうのすごろく」: パネルごとに自分のペースで進む(全員同じフロー定義を\n    // 個別に進行する想定、CLAUDE.md参照)。誘導中はクエスト一覧より優先表示する。\n    const { flows: routineFlows, completeStep: completeRoutineStep, isCompleting: isCompletingRoutine } = useRoutineData(user.user_id);\n    const activeRoutineKey: 'am' | 'pm' | null =\n        routineFlows && isRoutineFlowBlocking(routineFlows.am) ? 'am'\n            : routineFlows && isRoutineFlowBlocking(routineFlows.pm) ? 'pm'\n                : null;\n    const freeTimeRoutineKey: 'am' | 'pm' | null =\n        !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.am) ? 'am'\n            : !activeRoutineKey && routineFlows && isRoutineFlowFreeTime(routineFlows.pm) ? 'pm'\n                : null;")
 
 
 * **エラーハンドリング**: なし
@@ -160,9 +170,15 @@ flowchart TD
     IdleCheck --> PanelRender["FamilyPanel Render (userごと)"]
 
     subgraph "FamilyPanel 内部"
-        PanelRender --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
+        PanelRender --> RoutineHook["useRoutineData(user.user_id) でrouteFlows等を取得(すごろく機能)"]
+        RoutineHook --> RoutineKeys["activeRoutineKey / freeTimeRoutineKey を算出\n(isRoutineFlowBlocking / isRoutineFlowFreeTime)"]
+        RoutineKeys --> BorderCalc["borderClass/ringClass を themeColorKey と isActive から算出"]
         BorderCalc --> TabState{"tab の値は？(初期値 'quest')"}
-        TabState -- "quest" --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal をそのまま転送 #102)"]
+        TabState -- "quest" --> RoutineActiveCheck{"activeRoutineKey が真?\n(すごろく機能)"}
+        RoutineActiveCheck -- Yes --> RenderRoutineFlow["RoutineFlow を compact 付きで描画\n(onCompleteStep→completeRoutineStep)"]
+        RoutineActiveCheck -- No --> FreeTimeCheck{"freeTimeRoutineKey が真?"}
+        FreeTimeCheck -- Yes --> RenderBannerThenQuestList["RoutineFreeTimeBanner を表示したうえで\nQuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal をそのまま転送 #102)"]
+        FreeTimeCheck -- No --> RenderQuestList["QuestList を panelMode 付きで描画\n(iconFirst = iconFirstUserIds.includes(user.user_id)、completedSignal をそのまま転送 #102)"]
         TabState -- "shop" --> RenderRewardShop["RewardShop を描画"]
         TabState -- "inventory" --> RenderInventoryList["InventoryList を panelMode 付きで描画"]
         TabClickQuest["「クエスト」ボタンクリック"] --> SetTabQuest["setTab('quest')"]

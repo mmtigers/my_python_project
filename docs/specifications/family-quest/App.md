@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `a522e0a` |
+| 解析基準コミット | `83b42db` |
 
 ## 関連ドキュメント
 
@@ -389,6 +389,9 @@ graph TD
     App --> ActionResultLib["外部: lib/actionResult.ts (ActionResult, resolveErrorText)"]
 
     App --> UseGameData["外部: hooks/useGameData.ts"]
+    App -->|"すごろく機能で追加"| UseRoutineData["外部: hooks/useRoutineData.ts"]
+    App -->|"すごろく機能で追加"| RoutineFlowFile["外部: features/routine/components/RoutineFlow.tsx\n(RoutineFlow default + RoutineFreeTimeBanner)"]
+    App -->|"すごろく機能で追加(判定関数)"| RoutineDataSchema["外部: lib/routineDataSchema.ts\n(isRoutineFlowBlocking, isRoutineFlowFreeTime)"]
     App --> UseSound["外部: hooks/useSound.ts"]
     App --> UseLayoutMode["外部: hooks/useLayoutMode.ts"]
     App --> UseOnlineStatus["外部: hooks/useOnlineStatus.ts"]
@@ -437,6 +440,8 @@ graph TD
 * **`runQuestAction`と`runQuestActionInner`の呼び分けに注意**: 完了/取消の実行は必ず外側の`runQuestAction`（多重送信防止ガード付き）経由で呼び出す必要があり、`runQuestActionInner`を直接呼ぶと`processingQuestKeysRef`によるガードを迂回してしまう。
 * **`executeConfirm`の`complete`分岐は`runQuestAction`を経由するため、二重のガードが掛かる**: `isConfirmingRef`（Issue #101、確認ボタン連打用）と`processingQuestKeysRef`（Issue #391、完了/取消API送信中用）は独立したガードであり、`executeConfirm`から`runQuestAction`を呼ぶ完了フローではその両方が働く。ガードの責務を混同して片方を削除しないこと。
 * **`approvingHistoryIdsRef`/`isApprovingAllRef`とそれぞれの見た目用state(`approvingHistoryIds`/`isApprovingAll`)は必ずセットで更新する**: refを直接操作した後は`syncApprovingHistoryIds()`（または対応する`setIsApprovingAll`）を呼ばないと、実際のガード状態とUIの表示（ローディング等）がずれる。
+* **（すごろく機能で追加）** `activeRoutineKey`/`freeTimeRoutineKey`は`am`を`pm`より優先して判定する: `isRoutineFlowBlocking`/`isRoutineFlowFreeTime`のいずれも`routineFlows.am`を先に評価し、真であればその時点で`'am'`を採用して`routineFlows.pm`側は評価されない（三項演算子の連鎖）。朝夕どちらのフローも同時に誘導中/自由時間中になりうる場合の優先順位はこの評価順のみで決まり、`pm`が優先されることはない。
+* **（すごろく機能で追加）** `useRoutineData(currentUser.user_id)`は`currentUserIdx`の切替のたびに`userId`引数が変わり、React Queryの`queryKey`（`['routineToday', userId]`）が変わるため、ユーザーを切り替えると新しいクエリとしてポーリングが再開される（`useGameData.ts`の`viewerUserIdRef`のような「切替直後の即時再フェッチ」処理はこちらには存在せず、初回取得は通常の`useQuery`のマウント時フェッチに任せている）。
 
 ## 9. 不明事項一覧
 
@@ -444,6 +449,7 @@ graph TD
 | --- | --- | --- |
 | `useGameData`の内部実装 | `completeQuest`等が`ActionResult`の各フィールドをどう設定するか、ポーリング間隔等の詳細が本ファイルからは不明 | src/hooks/useGameData.ts |
 | `getQuestLockState`/`getQuestProcessingKey`の内部実装 | 無限クエスト判定・処理中キーの生成ロジックの詳細が本ファイルからは不明 | src/features/quest/hooks/useQuestStatus.ts |
+| （すごろく機能で追加）`routineFlows`のバックエンド側生成条件 | `activeRoutineKey`/`freeTimeRoutineKey`の元になる`routineFlows.am`/`routineFlows.pm`の実際の値がどのタイミングでどう変わるか（チェックポイント通過等）は`useRoutineData.ts`/`routineDataSchema.ts`側の解析に譲る | src/hooks/useRoutineData.ts, src/lib/routineDataSchema.ts |
 
 ## 相互参照による補足情報
 
