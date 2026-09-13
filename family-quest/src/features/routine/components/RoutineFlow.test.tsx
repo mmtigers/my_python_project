@@ -7,32 +7,47 @@ const amFlow: RoutineActiveFlow = {
     started: true,
     title: '起きてから出発まで',
     checkpoint_time: '07:50',
-    current_step_index: 1,
+    current_step_index: 0,
     in_free_time: false,
     is_complete: false,
     bonus_gold: 0,
     bonus_exp: 0,
+    preview_bonus_gold: 50,
+    bonus_full_gold: 150,
     leveled_up: false,
     new_level: null,
     steps: [
-        { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, status: 'done' },
-        { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, status: 'current' },
-        { key: 'clothes', label: '着替える', icon_key: 'clothes', is_checkpoint: false, status: 'remind' },
-        { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, status: 'locked' },
-        { key: 'leave', label: '出発', icon_key: 'leave', is_checkpoint: false, status: 'locked' },
+        { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, is_checklist: true, status: 'done' },
+        { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, is_checklist: true, status: 'current' },
+        { key: 'clothes', label: '着替える', icon_key: 'clothes', is_checkpoint: false, is_checklist: true, status: 'remind' },
+        { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, is_checklist: false, status: 'locked' },
+        { key: 'leave', label: '出発', icon_key: 'leave', is_checkpoint: false, is_checklist: false, status: 'locked' },
     ],
 };
 
 describe('RoutineFlow', () => {
     afterEach(() => cleanup());
 
-    it('highlights the current step and calls onCompleteStep when tapped', () => {
+    it('renders checklist items as tappable rows that call onCompleteStep with their key', () => {
         const onCompleteStep = vi.fn();
         render(<RoutineFlow flowKey="am" flow={amFlow} onCompleteStep={onCompleteStep} />);
 
         expect(screen.getByText('朝ごはん')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: '完了！' }));
+        fireEvent.click(screen.getByRole('button', { name: /朝ごはん/ }));
         expect(onCompleteStep).toHaveBeenCalledWith('meal');
+    });
+
+    it('lets an already-checked checklist item be tapped again to toggle it off', () => {
+        const onCompleteStep = vi.fn();
+        render(<RoutineFlow flowKey="am" flow={amFlow} onCompleteStep={onCompleteStep} />);
+
+        fireEvent.click(screen.getByRole('button', { name: /顔を洗う/ }));
+        expect(onCompleteStep).toHaveBeenCalledWith('wash');
+    });
+
+    it('shows the live departure-bonus preview alongside the checklist', () => {
+        render(<RoutineFlow flowKey="am" flow={amFlow} onCompleteStep={vi.fn()} />);
+        expect(screen.getByText('出発ボーナス 50 / 150')).toBeInTheDocument();
     });
 
     it('shows the gentle "まだだよ" reminder for a forced-skipped step instead of a penalty', () => {

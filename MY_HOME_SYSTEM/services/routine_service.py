@@ -77,24 +77,40 @@ class RoutineService:
         return skip_keys
 
     def _empty_statuses(self, flow: RoutineFlow, skip_keys: Set[str]) -> Tuple[Dict[str, str], int]:
-        """スキップ分を'done'扱いにしたうえで、最初の未スキップステップを'current'にする。
+        """スキップ分を'done'扱いにしたうえで初期状態を組み立てる。
+
+        checklist=Trueなステップ(順不同でチェックできるグループ、例: 朝の準備5項目)が
+        残っている場合は、それら全てを同時に'current'(未チェック・チェック可能)にし、
+        current_step_indexはその先頭のインデックスにする(単なるフェーズの目印であり、
+        チェックリスト内の個々の状態はsteps_statusの方で管理する)。
+        checklistステップが無い、またはスキップで全て埋まっている場合は、従来通り
+        先頭から最初の未スキップステップだけを'current'にする逐次ロジックにフォールバックする。
 
         戻り値は(steps_status, current_step_index)。全ステップがスキップ済みの場合の
         current_step_indexはlen(flow['steps'])(=フロー完了扱い)になる。
         """
         statuses: Dict[str, str] = {}
-        current_index = len(flow['steps'])
-        found_current = False
-        for idx, step in enumerate(flow['steps']):
+        checklist_remaining_indices = [
+            idx for idx, step in enumerate(flow['steps'])
+            if step['checklist'] and step['key'] not in skip_keys
+        ]
+        for step in flow['steps']:
             if step['key'] in skip_keys:
                 statuses[step['key']] = 'done'
-                continue
-            if not found_current:
+            elif step['checklist']:
                 statuses[step['key']] = 'current'
-                current_index = idx
-                found_current = True
             else:
                 statuses[step['key']] = 'locked'
+
+        if checklist_remaining_indices:
+            return statuses, checklist_remaining_indices[0]
+
+        current_index = len(flow['steps'])
+        for idx, step in enumerate(flow['steps']):
+            if statuses[step['key']] != 'done':
+                statuses[step['key']] = 'current'
+                current_index = idx
+                break
         return statuses, current_index
 
     def _next_active_index(self, flow: RoutineFlow, statuses: Dict[str, str], start_index: int) -> int:
@@ -165,6 +181,32 @@ class RoutineService:
             common.get_now_iso(), progress['id'],
         ))
 
+    def _eligible_done_ratio(self, flow: RoutineFlow, progress: Dict[str, Any]) -> float:
+        """チェックポイントより前の全ステップのうち、'done'の割合(0.0〜1.0)を返す。
+
+        チェックポイントが無いフロー、またはチェックポイントより前にステップが
+        無いフローは常に1.0(満額)とみなす(ゼロ除算回避)。
+        """
+        checkpoint_idx = get_checkpoint_index(flow)
+        if checkpoint_idx is None:
+            return 1.0
+        eligible_keys = [s['key'] for s in flow['steps'][:checkpoint_idx]]
+        if not eligible_keys:
+            return 1.0
+        done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')
+        return done_count / len(eligible_keys)
+
+    def _compute_bonus_preview(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Tuple[int, int]:
+        """「今チェックしている分」を基準にしたボーナス見込み額(gold, exp)を返す。
+
+        チェックポイント通過前は「今チェックポイントを迎えたらいくらもらえるか」の
+        ライブプレビュー、通過後は_apply_forced_transitionが確定させたratioと同じ値に
+        自然に収束する(いずれも同じ_eligible_done_ratioを使うため)。実際の付与は
+        _apply_forced_transitionでのみ行われ、この関数はDBを変更しない(表示専用)。
+        """
+        ratio = self._eligible_done_ratio(flow, progress)
+        return round(FULL_BONUS_GOLD * ratio), round(FULL_BONUS_EXP * ratio)
+
     def _grant_bonus(self, cur, user_id: str, gold: int, exp: int) -> Dict[str, Any]:
         user = cur.execute("SELECT * FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
         if not user:
@@ -200,9 +242,8 @@ class RoutineService:
         if now < deadline:
             return progress
 
+        ratio = self._eligible_done_ratio(flow, progress)
         eligible_keys = [s['key'] for s in flow['steps'][:checkpoint_idx]]
-        done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')
-        ratio = (done_count / len(eligible_keys)) if eligible_keys else 1.0
 
         for k in eligible_keys:
             if progress['steps_status'].get(k) != 'done':
@@ -232,6 +273,40 @@ class RoutineService:
         )
         return progress
 
+    def _toggle_checklist_step(self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any]) -> None:
+        """checklist=Trueなステップを順不同でチェック/チェック解除する(要件: 朝の準備は
+        好きな順にチェックでき、間違えたら取り消せるようにしたい)。
+
+        チェックポイントを既に通過している(current_step_indexがチェックポイントの
+        インデックスより後)場合は、ボーナスが確定済みのため変更を拒否する。
+        チェックリスト全項目が'done'になった/でなくなったタイミングで、フローの
+        現在地(current_step_index)・in_free_timeをチェックポイントの前後に
+        まとめて進める/戻す。
+        """
+        checkpoint_idx = get_checkpoint_index(flow)
+        if checkpoint_idx is not None and progress['current_step_index'] > checkpoint_idx:
+            raise HTTPException(status_code=400, detail="すでに出発済みのため変更できません")
+
+        key = target_step['key']
+        # 'current'=未チェック(いつでもチェック可能)、'done'=チェック済み、の2値をトグルする。
+        progress['steps_status'][key] = 'current' if progress['steps_status'].get(key) == 'done' else 'done'
+
+        if checkpoint_idx is None:
+            return
+
+        checklist_keys = [s['key'] for s in flow['steps'][:checkpoint_idx] if s['checklist']]
+        all_done = bool(checklist_keys) and all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)
+        checkpoint_key = flow['steps'][checkpoint_idx]['key']
+        if all_done:
+            progress['current_step_index'] = checkpoint_idx
+            progress['in_free_time'] = True
+            progress['steps_status'][checkpoint_key] = 'current'
+        else:
+            first_checklist_idx = next(i for i, s in enumerate(flow['steps']) if s['checklist'])
+            progress['current_step_index'] = first_checklist_idx
+            progress['in_free_time'] = False
+            progress['steps_status'][checkpoint_key] = 'locked'
+
     def _serialize_flow(self, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime) -> Dict[str, Any]:
         checkpoint_idx = get_checkpoint_index(flow)
         # 土日は締切時刻が変わりうる(get_effective_checkpoint_time)ため、表示用の
@@ -245,10 +320,12 @@ class RoutineService:
                 "label": step['label'],
                 "icon_key": step['icon_key'],
                 "is_checkpoint": bool(step['checkpoint_time']),
+                "is_checklist": step['checklist'],
                 "status": progress['steps_status'].get(step['key'], 'locked'),
             }
             for step in flow['steps']
         ]
+        preview_bonus_gold, _preview_bonus_exp = self._compute_bonus_preview(flow, progress)
         return {
             "started": True,
             "title": flow['title'],
@@ -258,6 +335,11 @@ class RoutineService:
             "is_complete": progress['current_step_index'] >= len(flow['steps']),
             "bonus_gold": progress['bonus_gold'],
             "bonus_exp": progress['bonus_exp'],
+            # チェックリスト(例: 朝の準備)を1つチェックするたびに増えていく、出発時に
+            # もらえるゴールドの見込み額(要件: チェックした分が画面でわかるようにしたい)。
+            # チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。
+            "preview_bonus_gold": preview_bonus_gold,
+            "bonus_full_gold": FULL_BONUS_GOLD,
             # Issue発覚(コードレビュー): チェックポイント通過時のボーナスでレベルアップ
             # しても、quest_service._apply_quest_rewardsのようにleveledUp/newLevelを
             # レスポンスへ含めていなかったため、フロントは常にLEVEL UPトーストを出せず
@@ -314,19 +396,28 @@ class RoutineService:
                 if idx >= len(flow['steps']):
                     raise HTTPException(status_code=400, detail="本日のフローは完了しています")
 
-                current_step = flow['steps'][idx]
-                if current_step['key'] != step_key:
-                    raise HTTPException(status_code=409, detail="表示が古いようです。再読み込みしてください")
-                if current_step['checkpoint_time']:
-                    raise HTTPException(status_code=400, detail="自由時間は時間になると自動的に次へ進みます")
+                target_step = next((s for s in flow['steps'] if s['key'] == step_key), None)
+                if target_step is None:
+                    raise HTTPException(status_code=404, detail="Unknown step_key")
 
-                progress['steps_status'][step_key] = 'done'
-                next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)
-                progress['current_step_index'] = next_index
-                if next_index < len(flow['steps']):
-                    next_step = flow['steps'][next_index]
-                    progress['steps_status'][next_step['key']] = 'current'
-                    progress['in_free_time'] = bool(next_step['checkpoint_time'])
+                if target_step['checklist']:
+                    # チェックリストのステップは現在地(current_step_index)に関わらず
+                    # 順不同でチェック/チェック解除できる(要件: 朝の準備は好きな順で良い)。
+                    self._toggle_checklist_step(flow, progress, target_step)
+                else:
+                    current_step = flow['steps'][idx]
+                    if current_step['key'] != step_key:
+                        raise HTTPException(status_code=409, detail="表示が古いようです。再読み込みしてください")
+                    if current_step['checkpoint_time']:
+                        raise HTTPException(status_code=400, detail="自由時間は時間になると自動的に次へ進みます")
+
+                    progress['steps_status'][step_key] = 'done'
+                    next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)
+                    progress['current_step_index'] = next_index
+                    if next_index < len(flow['steps']):
+                        next_step = flow['steps'][next_index]
+                        progress['steps_status'][next_step['key']] = 'current'
+                        progress['in_free_time'] = bool(next_step['checkpoint_time'])
                 self._save_progress(cur, progress)
 
                 # 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合

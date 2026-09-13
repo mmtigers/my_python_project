@@ -10,6 +10,8 @@ const routineStepSchema = z.object({
     label: z.string(),
     icon_key: z.string(),
     is_checkpoint: z.boolean(),
+    // 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。
+    is_checklist: z.boolean(),
     status: z.enum(['locked', 'current', 'done', 'remind']),
 });
 
@@ -22,6 +24,10 @@ const startedFlowSchema = z.object({
     is_complete: z.boolean(),
     bonus_gold: z.number(),
     bonus_exp: z.number(),
+    // チェックリストを1つチェックするたびに増える、出発ボーナスの見込みgold額。
+    // チェックポイント通過前はライブプレビュー、通過後はbonus_goldと同じ値になる。
+    preview_bonus_gold: z.number(),
+    bonus_full_gold: z.number(),
     // チェックポイント通過ボーナスでレベルアップした「その1回のレスポンス」でのみtrue。
     leveled_up: z.boolean(),
     new_level: z.number().nullable(),
