@@ -58,9 +58,8 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
         'title': '帰ってから寝るまで',
         # 土日も同じフローを使う(要件: なるべく平日と揃える)。
         'day_of_week': ALL_DAYS,
-        # 仮の既定値。実際の下校/帰宅時刻に合わせて要調整(ユーザー確認事項)。土日も同じ
-        # (要件確認済み)。
-        'start_trigger_time': '15:00',
+        # 実際の下校/帰宅時刻に合わせてユーザーが確定した値。土日も同じ14:00。
+        'start_trigger_time': '14:00',
         'steps': [
             {'key': 'handwash', 'label': '手洗い・うがい', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
             {'key': 'snack', 'label': 'おやつ休憩', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None},
