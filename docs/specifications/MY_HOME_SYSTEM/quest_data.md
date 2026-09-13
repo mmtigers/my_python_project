@@ -27,9 +27,9 @@
 * ファイル冒頭に2つの独立したモジュールdocstring（改訂履歴コメント）が存在し、更新履歴（Phase 4.1, Phase 5.1）が記述されている。
 * 一部のクエスト定義行はコメントアウトされており、過去に存在した／将来復活しうるクエストが無効化された状態で残されている。
 * `QUESTS` には、兄妹どちらか一方が完了報告すると2人とも報酬を得る「兄妹連携」クエスト（`target: 'siblings'`、id: 1040, 1041）と、「九九」学習用クエスト（id: 1030, 1031）が定義されている。
-* 根拠: `{'id': 1040, 'title': 'いっしょにおかたづけ', ... 'target': 'siblings', ...}` (行番号: 141 / 抜粋: "'target': 'siblings'"), `{'id': 1030, 'title': '今日の九九タイム', ...}` (行番号: 129 / 抜粋: "今日の九九タイム")
+* 根拠: `{'id': 1040, 'title': 'いっしょにおかたづけ', ... 'target': 'siblings', ...}` (行番号: 144 / 抜粋: "'target': 'siblings'"), `{'id': 1030, 'title': '今日の九九タイム', ...}` (行番号: 132 / 抜粋: "今日の九九タイム")
 * 「智矢 (Son)」向けには通常クエスト（平日: id 1021、`days: '0,1,2,3,4'`、`reset_period`未指定＝既定の`'daily'`）に加え、`days: '4,5,6'`（金・土・日）かつ`reset_period: 'weekly'`を明示指定した週末専用クエスト（id: 1023、「土日の宿題」）が定義されている。`reset_period: 'weekly'`は`services/quest/quest_service.py`の`is_within_reset_period`が「その週の月曜日以降に完了済みか」で判定するため、金・土・日のいずれかで一度完了報告すれば、同じ週の残りの出現対象日（土・日）ではカードが「完了済み」表示のまま再度は出現しない（翌週の月曜以降にリセットされる）。
-* 根拠: `{'id': 1023, 'title': '土日の宿題', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}` (行番号: 123 / 抜粋: "'days': '4,5,6', 'reset_period': 'weekly'"), 直前のコメント (行番号: 121〜122 / 抜粋: "金・土・日のいずれかで完了報告すればよく、reset_period='weekly'により\n    # その週(月曜起点)の残りの表示対象日でも既に達成済みとして扱われ、カードは再度表示されない。")
+* 根拠: `{'id': 1023, 'title': '土日の宿題', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}` (行番号: 126 / 抜粋: "'days': '4,5,6', 'reset_period': 'weekly'"), 直前のコメント (行番号: 124〜125 / 抜粋: "金・土・日のいずれかで完了報告すればよく、reset_period='weekly'により\n    # その週(月曜起点)の残りの表示対象日でも既に達成済みとして扱われ、カードは再度表示されない。")
 
 ## 3. 外部依存関係
 
@@ -144,19 +144,19 @@
 ### `QUESTS`
 
 * **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance`, `reset_period` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。B-5（特別：涼花）セクションには、id: 305（お手伝い）、id: 306（自分のおもちゃの片付け）、id: 307（なぞり書きプリント）の3件が追加され、いずれも`type: 'infinite'`（何度でも挑戦できる）で定義されている。A-4（通常：智矢）セクションには、`days: '4,5,6'`（金・土・日）かつ`reset_period: 'weekly'`を明示指定した週末専用クエスト（id: 1023「土日の宿題」）が追加されている。
-* 根拠: `QUESTS = [` (行番号: 81〜213 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 141, 212 / 抜粋: "'target': 'siblings'"), 追加された3件 (行番号: 205〜207 / 抜粋: "{'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', ...}"), 週末宿題クエスト (行番号: 123 / 抜粋: "{'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}")
+* 根拠: `QUESTS = [` (行番号: 81〜216 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 144, 215 / 抜粋: "'target': 'siblings'"), 追加された3件 (行番号: 208〜210 / 抜粋: "{'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', ...}"), 週末宿題クエスト (行番号: 126 / 抜粋: "{'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
 * 根拠: (行番号: 81 / 抜粋: "QUESTS = [")
 
 
-* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が57件、コメントアウトされ無効化された定義が11件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
-* 根拠: 最初の要素 (行番号: 89 / 抜粋: "{'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},"), コメントアウトされた要素の例 (行番号: 116 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 141 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 129 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}"), 涼花向けに追加された3件 (行番号: 205〜207), 週末宿題クエスト (行番号: 123 / 抜粋: "{'id': 1023, 'title': '土日の宿題', ...}")
+* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が56件、コメントアウトされ無効化された定義が11件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。かつて先頭に存在した`id: 1100`（【朝】毎朝ミッション）は、朝の準備がroutine_data.pyの「きょうのすごろく」amフロー側の順不同チェックリストへ統合されたため削除され、4行の説明コメントに置き換えられている（詳細は保守上の注意点を参照）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
+* 根拠: 先頭の削除コメント (行番号: 89〜92 / 抜粋: "# id=1100「【朝】毎朝ミッション」は、朝の準備がroutine_data.py(「きょうのすごろく」am\n    # フローの順不同チェックリスト)へ統合されたため廃止(要件確認済み)。"), 最初の有効な要素 (行番号: 93 / 抜粋: "{'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', ...}"), コメントアウトされた要素の例 (行番号: 119 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 144 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 132 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}"), 涼花向けに追加された3件 (行番号: 208〜210), 週末宿題クエスト (行番号: 126 / 抜粋: "{'id': 1023, 'title': '土日の宿題', ...}")
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 81〜213 / 抜粋: "QUESTS = [")
+* 根拠: (行番号: 81〜216 / 抜粋: "QUESTS = [")
 
 
 * **エラーハンドリング**: なし（バリデーションロジックを含まない。またコメント行78〜79に `category` と `difficulty` の凡例が記されているのみで、実行時の値チェックは行われていない）
@@ -167,23 +167,23 @@
 ### `REWARDS`
 
 * **役割**: ゴールド（`cost_gold`）と交換できる報酬アイテムの定義リスト。各要素は `id`, `title`, `category`, `cost_gold`, `icon_key`, `desc` を基本キーとし、任意で `target`（対象者制限）を持つ。
-* 根拠: `REWARDS = [` (行番号: 218〜260 / 抜粋: "REWARDS = [\n    # --- Small (消費型) ---\n    {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦', 'desc': '頑張った自分へのご褒美デザート'},")
+* 根拠: `REWARDS = [` (行番号: 221〜266 / 抜粋: "REWARDS = [\n    # --- Small (消費型) ---\n    {'id': 1, 'title': 'コンビニスイーツ購入権', 'category': 'food', 'cost_gold': 300, 'icon_key': '🍦', 'desc': '頑張った自分へのご褒美デザート'},")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
-* 根拠: (行番号: 218 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 221 / 抜粋: "REWARDS = [")
 
 
 * **戻り値/レスポンス**: `list[dict]`。有効な報酬定義23件を含む。`cost_gold` は 50〜1,100,000 まで幅広く設定されている（最高額は "アルハンブラ" の1,100,000）。
-* 根拠: `{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},` (行番号: 253 / 抜粋: "{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000,")
+* 根拠: `{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000, 'icon_key': '🍀', 'desc': '四つ葉のクローバーが象徴する幸運。ママへの究極の感謝状', 'target': 'mom'},` (行番号: 256 / 抜粋: "{'id': 999, 'title': 'アルハンブラ (Van Cleef & Arpels)', 'category': 'special', 'cost_gold': 1100000,")
 
 
 * **副作用**: モジュールインポート時にメモリ上へリストが構築される。
-* 根拠: (行番号: 218〜260 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 221〜266 / 抜粋: "REWARDS = [")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 218〜260 / 抜粋: "REWARDS = [")
+* 根拠: (行番号: 221〜266 / 抜粋: "REWARDS = [")
 
 
 
@@ -198,7 +198,7 @@ flowchart TD
     Doc2 --> InitLogger["logger = logging.getLogger(__name__)"]
     InitLogger --> BuildUsers["USERS リストを構築 (4件、infoはプレースホルダー)"]
     BuildUsers --> CheckLocal{"quest_users.local.json は存在するか?"}
-    CheckLocal -- No --> BuildQuests["QUESTS リストを構築 (有効57件 / コメントアウト11件)"]
+    CheckLocal -- No --> BuildQuests["QUESTS リストを構築 (有効56件 / コメントアウト11件)"]
     CheckLocal -- Yes --> LoadLocal["外部: quest_users.local.json を読み込みJSONパース"]
     LoadLocal --> MergeCheck{"読み込み・パースは成功したか?"}
     MergeCheck -- Yes --> MergeUsers["user_id が一致しdict型のoverrideを USERS に dict.update でマージ"]
@@ -249,20 +249,21 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `game_logic.py` | 同ディレクトリ内に存在するファイルであり、`QUESTS` の `type`（daily/special/infinite）や `USERS` の `level`/`exp`/`gold` 等、ゲーム進行ロジックが必要とするキーが本ファイルに定義されているため、これらを消費する実装が存在すると推測される。 | `'level': 1, 'exp': 0, 'gold': 0` (行番号: 37 / 抜粋: "'level': 1, 'exp': 0, 'gold': 0, 'avatar': '⚔️',") |
-| 高 | `services/quest_service.py` | 同ディレクトリの `services/` 配下に存在するファイルであり、命名から `QUESTS`/`REWARDS` データを用いたクエスト管理サービスである可能性が高い。`target: 'siblings'` を消費する兄妹連携ロジックの実体を確認する必要がある。 | `QUESTS = [` (行番号: 81 / 抜粋: "QUESTS = ["), `'target': 'siblings'` (行番号: 141) |
+| 高 | `services/quest_service.py` | 同ディレクトリの `services/` 配下に存在するファイルであり、命名から `QUESTS`/`REWARDS` データを用いたクエスト管理サービスである可能性が高い。`target: 'siblings'` を消費する兄妹連携ロジックの実体を確認する必要がある。 | `QUESTS = [` (行番号: 81 / 抜粋: "QUESTS = ["), `'target': 'siblings'` (行番号: 144) |
 | 中 | `views/dashboard/quest_tab.py` | `dashboard.py` の解析より、クエストタブの描画を担当するモジュールであることが判明しており、本データがどう画面表示に使われるかを確認するため。 | `QUESTS = [` (行番号: 81 / 抜粋: "QUESTS = [")（`quest_data.py` 自体からの直接参照ではなく、周辺ファイル調査から得た推測） |
 | 低 | `current_schema.sql` | `USERS` の `user_id`, `level`, `exp`, `gold` 等がDBの `quest_users` テーブル等と対応している可能性があり、データモデルの一致を確認するため。 | `'user_id': 'dad'` (行番号: 36 / 抜粋: "'user_id': 'dad', 'name': 'まさひろ',") |
 
 ## 8. 保守上の注意点
 
 * **二重docstringによる無駄な式文**: ファイル冒頭に2つの独立したdocstringが連続して記述されており（5〜11行目、12〜18行目）、Pythonの言語仕様上、実際にモジュールの `__doc__` として保持されるのは最初の1つのみである。2つ目（Phase 5.1の更新履歴）は評価されるだけで破棄され、実質的に「無視される」ドキュメントコメントとなっている。
-* **コメントアウトされたクエストの残存**: `QUESTS` 内に9件のコメントアウトされた要素（例: 116〜122行目、184行目、191〜192行目）が残っており、有効なクエストと無効なクエストが同一ファイル内に混在している。将来のメンテナンス時にコメントを外し忘れる／意図せず有効化するリスクがある。
-* **[修正済み] `id` の重複**: かつて `QUESTS` 内で `id: 15/16/17`（洗濯物関連クエスト）が `target: 'dad'`（161〜163行目）と `target: 'mom'`（173〜175行目）の双方に同じ `id` で重複しており、`sync_master_data`側の`quest_id`主キー競合で`dad`向けの定義が`mom`向けの定義に上書きされ実質無効化される不具合があったが、`mom`側は `id: 505/506/507` に採番し直され（173〜175行目）、重複は解消されている。`id` の一意性がグローバル（`QUESTS`全体で一意）であるべきという前提がこの修正から確認できる。
+* **[新規] `id: 1100`「毎朝ミッション」の削除**: 従来 `QUESTS` の先頭（旧89行目）に存在した `id: 1100`「【朝】毎朝ミッション」は、朝の準備が `routine_data.py` の「きょうのすごろく」`am`フロー側の順不同チェックリスト（`meal`/`clothes`/`wash`/`teeth`/`toilet`の5項目）へ統合されたため削除され、経緯を説明する4行のコメント（89〜92行目）に置き換えられている。全項目達成時にTVの電源をONにする処理（旧・本クエスト承認時の`config.TV_UNLOCK_QUEST_IDS`経由の処理）も、`services/routine_service.py`側（`_toggle_checklist_step`から`services/switchbot_service.py`の`trigger_tv_unlock`を呼ぶ形）へ移設されている。
+* **コメントアウトされたクエストの残存**: `QUESTS` 内に9件のコメントアウトされた要素（例: 119〜122行目、190行目、197〜198行目）が残っており、有効なクエストと無効なクエストが同一ファイル内に混在している。将来のメンテナンス時にコメントを外し忘れる／意図せず有効化するリスクがある。
+* **[修正済み] `id` の重複**: かつて `QUESTS` 内で `id: 15/16/17`（洗濯物関連クエスト）が `target: 'dad'`（167〜169行目）と `target: 'mom'`（176〜178行目）の双方に同じ `id` で重複しており、`sync_master_data`側の`quest_id`主キー競合で`dad`向けの定義が`mom`向けの定義に上書きされ実質無効化される不具合があったが、`mom`側は `id: 505/506/507` に採番し直され（176〜178行目）、重複は解消されている。`id` の一意性がグローバル（`QUESTS`全体で一意）であるべきという前提がこの修正から確認できる。
 * **バリデーションの不在**: `category`, `difficulty`, `type`, `target` 等の値がコメント（25, 78〜79行目）で列挙された想定値と一致しているかを検証する仕組みはファイル内に存在しない。誤字や想定外の値が入っても実行時エラーにはならない。
-* **ハードコードされた金額バランス**: 報酬の `cost_gold` が50から1,100,000まで大きく開きがあり（212〜257行目）、ゲームバランスの調整はすべて本ファイルの手動編集に依存している。
-* **兄妹連携クエスト (`target: 'siblings'`)**: `id: 1040`（行番号: 141）と `id: 1041`（行番号: 212）の2件が定義されている。コメント（行番号: 139, 210）に「どちらか一方が完了報告すると2人とも報酬を得る」と明記されているが、その実処理（片方の完了で両者へ保留行を作成しカスケード承認する等のロジック）は本ファイルには存在せず、消費側（推定: `services/quest_service.py`）に委ねられている。
-* **九九クエストの段階分け見送り**: `id: 1031`（行番号: 199）直前のコメント（行番号: 196〜198）に、前提クエストによる段階連結方式を採用しない理由（「当日中の完了」しか判定できない実装のため複数日にまたがる進行チェーンに不向き）が明記されている。
-* **週末宿題クエスト (`id: 1023`) の `reset_period: 'weekly'` は本ファイル内で唯一の使用例**: `days`（曜日限定）と `reset_period: 'weekly'` を併用する組み合わせは、他のクエスト定義（例: `id: 1008`「朝の会 開催」は`days: '5,6'`だが`reset_period`は未指定＝既定の`'daily'`のまま）には存在せず、`id: 1023`（行番号: 123）が本ファイル内で唯一の実例である。両者の組み合わせの実際の意味（曜日限定の出現期間内で「週内一度」の完了とみなす）は`services/quest/quest_service.py`の`is_within_reset_period`/`_is_quest_currently_active`側のロジックに依存しており、本ファイル単体からは読み取れない。
+* **ハードコードされた金額バランス**: 報酬の `cost_gold` が50から1,100,000まで大きく開きがあり（221〜266行目）、ゲームバランスの調整はすべて本ファイルの手動編集に依存している。
+* **兄妹連携クエスト (`target: 'siblings'`)**: `id: 1040`（行番号: 144）と `id: 1041`（行番号: 215）の2件が定義されている。コメント（行番号: 142, 213）に「どちらか一方が完了報告すると2人とも報酬を得る」と明記されているが、その実処理（片方の完了で両者へ保留行を作成しカスケード承認する等のロジック）は本ファイルには存在せず、消費側（推定: `services/quest_service.py`）に委ねられている。
+* **九九クエストの段階分け見送り**: `id: 1031`（行番号: 202）直前のコメント（行番号: 199〜201）に、前提クエストによる段階連結方式を採用しない理由（「当日中の完了」しか判定できない実装のため複数日にまたがる進行チェーンに不向き）が明記されている。
+* **週末宿題クエスト (`id: 1023`) の `reset_period: 'weekly'` は本ファイル内で唯一の使用例**: `days`（曜日限定）と `reset_period: 'weekly'` を併用する組み合わせは、他のクエスト定義（例: `id: 1008`「朝の会 開催」は`days: '5,6'`だが`reset_period`は未指定＝既定の`'daily'`のまま）には存在せず、`id: 1023`（行番号: 126）が本ファイル内で唯一の実例である。両者の組み合わせの実際の意味（曜日限定の出現期間内で「週内一度」の完了とみなす）は`services/quest/quest_service.py`の`is_within_reset_period`/`_is_quest_currently_active`側のロジックに依存しており、本ファイル単体からは読み取れない。
 * **かつて存在した `EQUIPMENTS` / `BOSSES` リストの削除**: 旧バージョンに存在した装備品定義 (`EQUIPMENTS`) およびボスモンスター定義 (`BOSSES`) のリストは、ボス戦闘・装備機能の廃止に伴い本ファイルから削除されている。
 * **`USERS[].info` のプレースホルダー化とローカルオーバーライド（M-9-1）**: かつて `USERS[].info` に実年齢や住宅ローン残高（「5,400万」等）が直接ハードコードされていたが、個人情報保護のためtracked source上はプレースホルダー文字列に置き換えられ（30〜33, 36〜54行目）、実データは`quest_users.local.json`（gitignore対象。サンプルとして`quest_users.local.json.example`が存在する）から読み込んで上書きする方式に変更された（57〜73行目）。読み込み失敗は`try/except Exception`で広く捕捉され`logger.warning`のみでモジュールロードは継続するため（65, 72〜73行目）、ファイルが破損していても起動は妨げられない一方、上書きが黙って効かなくなるリスクがある。`QUEST_USERS_LOCAL_PATH`環境変数でパスを差し替え可能（60〜63行目、テスト用）。
 
@@ -282,7 +283,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | このデータを消費するロジックの実体 | `MY_HOME_SYSTEM/services/quest_service.py`の`GameSystem.sync_master_data`(688〜704行目)を直接確認した。`importlib.reload(quest_data)`(692行目)で再読み込みした上で、`quest_data.USERS`を`[MasterUser(**u) for u in quest_data.USERS]`(693行目)、`quest_data.QUESTS`を`MasterQuest(**q_data)`(694〜699行目)、`quest_data.REWARDS`を`[MasterReward(**r) for r in quest_data.REWARDS]`(701行目)でそれぞれPydanticモデルにバリデーションした後、`quest_users`/`quest_master`テーブルへ`INSERT ... ON CONFLICT DO UPDATE`で同期する設計であることを確認した。一方`MY_HOME_SYSTEM/game_logic.py`と`MY_HOME_SYSTEM/views/dashboard/quest_tab.py`を直接確認したが、いずれも`quest_data`を一切importしておらず、`quest_data`を直接消費するのは`quest_service.py`のみであることを確認した(`game_logic.py`は純粋な計算ロジックのみ、`quest_tab.py`は`game_system.get_all_view_data()`経由でDB化後のデータを参照する設計)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:688-704`（`MY_HOME_SYSTEM/game_logic.py`, `MY_HOME_SYSTEM/views/dashboard/quest_tab.py`は`quest_data`のimportなしを確認） |
-| [修正済み] `id` の一意性制約の仕様 | `MY_HOME_SYSTEM/quest_data.py`のQUESTS配列(81〜207行目)を直接確認した。かつては`id: 15`(161行目`target: 'dad'`, 旧173行目`target: 'mom'`、いずれも「洗濯物を干す」)、`id: 16`(162行目`dad`, 旧174行目`mom`、「洗濯物を畳む」)、`id: 17`(163行目`dad`, 旧175行目`mom`、「洗濯物をしまう」)が、それぞれ異なる`target`で重複して存在していた。DB側は`MY_HOME_SYSTEM/current_schema.sql`174行目で`quest_master.quest_id INTEGER PRIMARY KEY AUTOINCREMENT`であり、`sync_master_data`(`services/quest_service.py`744〜761行目)は`INSERT INTO quest_master (quest_id, ...) VALUES (...) ON CONFLICT(quest_id) DO UPDATE SET ...`という形でリスト順に処理するため、同一`id`の2件目(`target: 'mom'`側、ファイル内でより後方に定義)が1件目(`target: 'dad'`側)を上書きし、DB上には後勝ちで1行しか残らず`dad`向けの「洗濯物を干す/畳む/しまう」クエストが実質的に無効化される不具合だった。現在は`mom`側が`id: 505/506/507`(173〜175行目)に採番し直されており、この重複・上書きは解消されている。したがって`id`はQUESTS配列全体でグローバルに一意であるべき、という設計意図が確認できる。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:161-163, 173-175`, `MY_HOME_SYSTEM/services/quest_service.py:737-761`, `MY_HOME_SYSTEM/current_schema.sql:174` |
+| [修正済み] `id` の一意性制約の仕様 | `MY_HOME_SYSTEM/quest_data.py`のQUESTS配列(81〜216行目)を直接確認した。かつては`id: 15`(167行目`target: 'dad'`, 旧176行目`target: 'mom'`、いずれも「洗濯物を干す」)、`id: 16`(168行目`dad`, 旧177行目`mom`、「洗濯物を畳む」)、`id: 17`(169行目`dad`, 旧178行目`mom`、「洗濯物をしまう」)が、それぞれ異なる`target`で重複して存在していた。DB側は`MY_HOME_SYSTEM/current_schema.sql`174行目で`quest_master.quest_id INTEGER PRIMARY KEY AUTOINCREMENT`であり、`sync_master_data`(`services/quest_service.py`744〜761行目)は`INSERT INTO quest_master (quest_id, ...) VALUES (...) ON CONFLICT(quest_id) DO UPDATE SET ...`という形でリスト順に処理するため、同一`id`の2件目(`target: 'mom'`側、ファイル内でより後方に定義)が1件目(`target: 'dad'`側)を上書きし、DB上には後勝ちで1行しか残らず`dad`向けの「洗濯物を干す/畳む/しまう」クエストが実質的に無効化される不具合だった。現在は`mom`側が`id: 505/506/507`(176〜178行目)に採番し直されており、この重複・上書きは解消されている。したがって`id`はQUESTS配列全体でグローバルに一意であるべき、という設計意図が確認できる。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:167-169, 176-178`, `MY_HOME_SYSTEM/services/quest_service.py:737-761`, `MY_HOME_SYSTEM/current_schema.sql:174` |
 | DBスキーマとの対応関係 | `MY_HOME_SYSTEM/current_schema.sql`164〜171行目の`CREATE TABLE quest_users`を直接確認した。`user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, updated_at DATETIME, avatar TEXT DEFAULT '🙂', medal_count INTEGER DEFAULT 0, role TEXT`という10カラム構成であることを確認した。`quest_data.py`の`USERS`(34〜55行目)の`user_id`キーはこのテーブルの`user_id`列と一致し、`sync_master_data`(`services/quest_service.py`726〜735行目)の`INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role, updated_at) VALUES (...) ON CONFLICT(user_id) DO UPDATE ...`で実際に同期されることを直接確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:164-171`, `MY_HOME_SYSTEM/services/quest_service.py:726-735` |
 | `quest_users.local.json` の実際のスキーマ・内容 | 実体の`quest_users.local.json`はリポジトリ内に存在しない(`.gitignore`の`*.local.json`規則により追跡対象外)が、サンプルファイル`MY_HOME_SYSTEM/quest_users.local.json.example`(全6行)を直接確認した。内容は`{"dad": {"info": "35歳 / INTJ"}, "mom": {"info": "32歳"}, "son": {"info": "5歳"}, "daughter": {"info": "2歳"}}`という、`USERS`の`user_id`をキーとし値に上書き対象フィールドを持つ辞書を持つフラットな構造であることが判明した。この構造は`quest_data.py`64〜73行目の読み込みロジック(`_users_by_id[_user_id].update(_overrides)`)が期待する形式と一致し、`user_id`が一致すれば`info`等のキーのみが上書きされる設計であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_users.local.json.example`, `MY_HOME_SYSTEM/quest_data.py:64-73` |
 | `target: 'siblings'` の実処理 | `MY_HOME_SYSTEM/services/quest_service.py`を直接確認した。`_get_sibling_partner_id(self, cur, user_id)`(274〜283行目)は`cur.execute("SELECT user_id FROM quest_users WHERE role = ?", (ROLE_CHILD,))`(279行目)により`role = 'role_child'`のユーザーがちょうど2人(281行目`len(child_ids) != 2`で検証、それ以外は`HTTPException(400)`)であることを前提に相方の`user_id`を解決する設計であることを確認した。`_process_coop_quest_completion(self, cur, user, quest, now_iso, total_exp, total_gold)`(285〜314行目)は、報告者本人の`quest_history`行(状態`pending`)を`INSERT`(292〜296行目)した後、相方分の`quest_history`行を`linked_history_id`付きで`INSERT`(298〜302行目)し、さらに報告者側の行にも相手の`id`を`UPDATE`で書き戻す(304行目)ことで双方向にリンクする設計であることを確認した。承認処理`process_approve_quest`(316〜340行目)では`hist['linked_history_id'] is not None`の場合に`_approve_linked_history`(339〜340行目)で連結先も同一トランザクション内でカスケード承認することを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest_service.py:274-340` |

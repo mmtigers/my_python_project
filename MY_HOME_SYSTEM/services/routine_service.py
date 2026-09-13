@@ -12,13 +12,15 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from fastapi import HTTPException
 
 import common
+import config
 import game_logic
 from core import sound_manager
 from routine_data import (
     FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, WEEKEND_DAYS, RoutineFlow,
     get_checklist_range, get_checkpoint_index, get_effective_checkpoint_time,
 )
-from services.quest.locks import JST, _get_user_balance_lock, logger
+from services import switchbot_service
+from services.quest.locks import JST, ROLE_CHILD, _get_user_balance_lock, logger
 
 
 class RoutineService:
@@ -273,7 +275,10 @@ class RoutineService:
         )
         return progress
 
-    def _toggle_checklist_step(self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any]) -> None:
+    def _toggle_checklist_step(
+        self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],
+        flow_key: str, user_role: Optional[str],
+    ) -> None:
         """checklist=Trueなステップを順不同でチェック/チェック解除する(要件: 朝の準備・
         寝る準備は好きな順にチェックでき、間違えたら取り消せるようにしたい)。
 
@@ -286,6 +291,13 @@ class RoutineService:
         トグルも同様に拒否する。
         チェックリスト全項目が'done'になった/でなくなったタイミングで、フローの
         現在地(current_step_index)・in_free_timeをブロックの前後にまとめて進める/戻す。
+
+        （毎朝ミッション統合で追加）amフローのチェックリスト(朝の準備)が新たに
+        全項目達成状態へ遷移した瞬間(既に全達成だった状態からのトグルでは発火しない)、
+        対象ユーザーが子供(ROLE_CHILD)であれば、旧quest_id=1100「毎朝ミッション」
+        (廃止済み、routine_data.py参照)の承認時と同じTV電源ON処理
+        (switchbot_service.trigger_tv_unlock)を呼ぶ。pmの寝る準備チェックリストは
+        対象外。
         """
         start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する
         if progress['current_step_index'] > end:
@@ -294,11 +306,16 @@ class RoutineService:
         key = target_step['key']
         if progress['steps_status'].get(key) == 'locked':
             raise HTTPException(status_code=400, detail="まだこのステップには進んでいません")
+
+        checklist_keys = [flow['steps'][i]['key'] for i in range(start, end)]
+        was_all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)
+
         # 'current'=未チェック(いつでもチェック可能)、'done'=チェック済み、の2値をトグルする。
         progress['steps_status'][key] = 'current' if progress['steps_status'].get(key) == 'done' else 'done'
 
-        checklist_keys = [flow['steps'][i]['key'] for i in range(start, end)]
         all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)
+        if all_done and not was_all_done and flow_key == 'am' and user_role == ROLE_CHILD and config.TV_PLUG_DEVICE_ID:
+            switchbot_service.trigger_tv_unlock("朝の準備チェックリスト全項目達成")
         if all_done:
             progress['current_step_index'] = end
             if end < len(flow['steps']):
@@ -386,7 +403,7 @@ class RoutineService:
 
         with _get_user_balance_lock(user_id):
             with common.get_db_cursor(commit=True) as cur:
-                user = cur.execute("SELECT 1 FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
+                user = cur.execute("SELECT role FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
                 if not user:
                     raise HTTPException(status_code=404, detail="User not found")
 
@@ -410,7 +427,7 @@ class RoutineService:
                     # チェックリストのステップは、そのブロックに進行が到達していれば
                     # (='locked'でなければ)順不同でチェック/チェック解除できる
                     # (要件: 朝の準備・寝る準備は好きな順で良い)。
-                    self._toggle_checklist_step(flow, progress, target_step)
+                    self._toggle_checklist_step(flow, progress, target_step, flow_key, user['role'])
                 else:
                     current_step = flow['steps'][idx]
                     if current_step['key'] != step_key:

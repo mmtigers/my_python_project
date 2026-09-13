@@ -16,12 +16,16 @@
 - [webhook_router.md](./webhook_router.md) — 呼び出し元(`get_device_name_by_id`を利用)
 - [switchbot_webhook_fix.md](./switchbot_webhook_fix.md) — 呼び出し元(`create_switchbot_auth_headers`を利用)
 - [tv_lock_monitor.md](./tv_lock_monitor.md) — 呼び出し元(`send_device_command`を利用)
+- [quest_quest_service.md](./quest_quest_service.md) — 呼び出し元(`services/quest/quest_service.py`のクエスト承認処理から`trigger_tv_unlock`を利用)
+- [routine_service.md](./routine_service.md) — 呼び出し元(朝の準備チェックリスト全項目達成時に`trigger_tv_unlock`を利用)
+- [notification_service.md](./notification_service.md) — `trigger_tv_unlock`のFail-Soft通知先(`send_push`)を提供
 
 ## 2. ファイルの概要
 
 * SwitchBot APIとのHTTP通信（GET/POSTリクエスト、Exponential Backoffによるリトライ処理、HMAC認証ヘッダーの生成）を担う。
 * デバイスのステータス取得、デバイスへのコマンド送信処理を提供する。
 * デバイスリストを取得し、デバイスIDとデバイス名のマッピングをメモリ上のキャッシュ（グローバル変数）に保持・取得する機能を提供する。
+* TVプラグの電源ON処理（`trigger_tv_unlock`）を、複数の呼び出し元（`services/quest/quest_service.py`のクエスト承認処理、`services/routine_service.py`の朝の準備チェックリスト完了処理）から共有される非同期・Fail-Softなヘルパーとして提供する（毎朝ミッション統合で追加）。
 
 ## 3. 外部依存関係
 
@@ -40,6 +44,7 @@
 | `config` | 内部モジュール | APIホストURL、トークン、シークレット等の設定値取得 | 根拠: `import config` (行番号: 11 / 抜粋: "import config") |
 | `core.logger` | 内部モジュール | ロガー（`setup_logging`）の取得 | 根拠: `from core.logger import...` (行番号: 14 / 抜粋: "from core.logger import setup_logging") |
 | `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 15 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
+| `services.notification_service`（毎朝ミッション統合で追加） | 内部モジュール | `trigger_tv_unlock`のFail-Soft通知（TV電源ON失敗時に親グループへLINE Push） | 根拠: `from services import notification_service` (行番号: 16 / 抜粋: "from services import notification_service") |
 
 ### ブラックボックスとなる外部要素
 
@@ -131,6 +136,28 @@
 * **エラーハンドリング**: 実行中の任意の例外（`Exception`）をキャッチし、エラーログを出力して `None` を返す。
 * 根拠: `except Exception as e` (行番号: 74〜76 / 抜粋: "except Exception as e:")
 
+
+
+### `trigger_tv_unlock`（毎朝ミッション統合で追加）
+
+* **役割**: TVプラグ（`config.TV_PLUG_DEVICE_ID`）の電源をONにする処理を、デーモンスレッド上で非同期・Fail-Softに実行する共有ヘルパー。元は`services/quest/quest_service.py`の`QuestService._trigger_tv_unlock`（クエスト承認時のTVロック解除専用）だったが、`services/routine_service.py`（朝の準備チェックリスト全項目達成時）でも同じ処理が必要になったため本ファイルへ切り出され、両呼び出し元から共有される。呼び出し元は事前に`config.TV_PLUG_DEVICE_ID`が設定されているかを確認する必要があり、本関数自体はその設定有無をガードしない（切り出し前の`QuestService._trigger_tv_unlock`の挙動をそのまま踏襲）。
+* 根拠: `trigger_tv_unlock` (行番号: 94〜125 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (行番号: 97〜100 / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
+
+
+* **引数/リクエスト**: `context`: `str`（ログ出力にのみ使う識別用の文字列。例: `"quest_id=101"`、`"朝の準備チェックリスト全項目達成"`）
+* 根拠: `trigger_tv_unlock` (行番号: 94 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")
+
+
+* **戻り値/レスポンス**: `None`（結果はログ出力とFail-Soft通知のみで呼び出し元へは返さない。TV電源ONの成否を呼び出し元が同期的に知る手段はない）
+* 根拠: `trigger_tv_unlock` (行番号: 94 / 抜粋: "-> None:")
+
+
+* **副作用**: `daemon=True`の`threading.Thread`を起動し、その中で`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び出す。成功時は情報ログのみ。失敗時（`send_device_command`が`None`または`statusCode`が100以外を返した場合、または例外発生時）はエラーログを出力し、さらに`config.LINE_PARENTS_GROUP_ID`が設定されていれば`notification_service.send_push`で親グループへLINE通知を送る。呼び出し元スレッド（APIルーティング処理）はこのスレッド起動をブロックしない。
+* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 105〜125 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 124〜125 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
+
+
+* **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。
+* 根拠: `raise Exception` (行番号: 112 / 抜粋: "raise Exception(f\"API returned error: {res}\")")、`except Exception as e` (行番号: 113〜114 / 抜粋: "except Exception as e:\n            logger.error(f\"❌ TV Unlock failed: {e}\")")
 
 
 ### `create_switchbot_auth_headers`
@@ -263,6 +290,7 @@ graph TD
         request_switchbot_api["request_switchbot_api()"]
         post_switchbot_api["post_switchbot_api()"]
         send_device_command["send_device_command()"]
+        trigger_tv_unlock["trigger_tv_unlock()（毎朝ミッション統合で追加）"]
         create_switchbot_auth_headers["create_switchbot_auth_headers()"]
         fetch_device_name_cache["fetch_device_name_cache()"]
         get_device_name_by_id["get_device_name_by_id()"]
@@ -275,6 +303,7 @@ graph TD
         models_switchbot["models.switchbot"]
         requests["requests"]
         threading_mod["threading"]
+        notification_service["services.notification_service"]
     end
 
     logger --> core_logger
@@ -286,6 +315,11 @@ graph TD
     send_device_command --> create_switchbot_auth_headers
     send_device_command --> config
     send_device_command --> post_switchbot_api
+
+    trigger_tv_unlock --> send_device_command
+    trigger_tv_unlock --> config
+    trigger_tv_unlock --> threading_mod
+    trigger_tv_unlock --> notification_service
 
     fetch_device_name_cache --> create_switchbot_auth_headers
     fetch_device_name_cache --> request_switchbot_api

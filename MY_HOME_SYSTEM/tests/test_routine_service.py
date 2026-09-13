@@ -9,22 +9,25 @@ datetime.datetime.now() をmonkeypatchせず、公開メソッドに now を明�
 既存パターンに合わせた)。テストは常に2024-01-01(月曜日, JST)を基準にする。
 """
 import datetime
+from unittest.mock import MagicMock
 
 import pytest
 
 import common
+import config
+from services import switchbot_service
 from services.routine_service import routine_service
 
 JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 MONDAY = datetime.datetime(2024, 1, 1, tzinfo=JST)  # 2024-01-01は月曜日
 
 
-def _seed_user(user_id='daughter', gold=0, exp=0, level=1):
+def _seed_user(user_id='daughter', gold=0, exp=0, level=1, role='role_child'):
     with common.get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
-            "VALUES (?, ?, ?, ?, ?, ?, 'role_child')",
-            (user_id, 'テスト子', 'Novice', level, exp, gold),
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, 'テスト子', 'Novice', level, exp, gold, role),
         )
 
 
@@ -194,6 +197,79 @@ class TestStepCompletion:
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'am', 'wash', now=_at(4, 0))
         assert exc_info.value.status_code == 400
+
+
+class TestMorningChecklistTvUnlock:
+    """（毎朝ミッション統合で新規追加）朝の準備チェックリストが新たに全項目達成
+    状態へ遷移した瞬間、旧「毎朝ミッション」クエスト承認時と同じTV電源ON処理
+    (switchbot_service.trigger_tv_unlock)を呼ぶことのテスト。"""
+
+    def test_completing_all_am_checklist_items_triggers_tv_unlock(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        mock_trigger.assert_not_called()  # まだ4/5項目なので発火しない
+
+        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 0))
+        mock_trigger.assert_called_once()
+
+    def test_tv_unlock_not_triggered_without_device_id_configured(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", None)
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
+        """親自身がルーティンを完了させても、子供向けのTV解錠報酬は発火しない。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='dad', role='role_adult')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('dad', 'am', key, now=_at(6, 0))
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_not_triggered_by_pm_night_checklist(self, isolated_db, monkeypatch):
+        """pmの寝る準備チェックリストは対象外(amのみ)。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
+
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_fires_again_after_uncheck_and_recomplete(self, isolated_db, monkeypatch):
+        """全達成→1つ取り消し→再チェック、で再度「新たに全達成」になった場合は
+        再度発火する(取り消し自体では発火しない)。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        assert mock_trigger.call_count == 1
+
+        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 1))  # 取り消し
+        assert mock_trigger.call_count == 1  # 取り消しでは発火しない
+
+        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 2))  # 再チェック
+        assert mock_trigger.call_count == 2
 
 
 class TestCheckpointBonus:

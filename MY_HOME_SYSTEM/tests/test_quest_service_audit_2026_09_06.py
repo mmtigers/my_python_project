@@ -22,6 +22,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import common
 import config
+from services import switchbot_service
 from services import quest_service as quest_service_module
 from services.quest_service import QuestService, UserService, GameSystem, JST
 
@@ -208,16 +209,16 @@ class TestTvUnlockRunsAfterCommit:
 
         observed = {}
 
-        def fake_trigger(self, quest_id):
+        def fake_trigger(context):
             # 別接続から見て承認がコミット済みであること(=コミット後に呼ばれていること)を確認する
             with common.get_db_cursor() as cur:
                 row = cur.execute("SELECT status FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             observed["status_at_trigger"] = row["status"]
-            observed["quest_id"] = quest_id
+            observed["context"] = context
 
-        monkeypatch.setattr(quest_service_module.QuestService, "_trigger_tv_unlock", fake_trigger)
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", fake_trigger)
         QuestService().process_approve_quest("dad", history_id)
-        assert observed == {"status_at_trigger": "approved", "quest_id": 7}
+        assert observed == {"status_at_trigger": "approved", "context": "quest_id=7"}
 
 
 class TestUseItemReleasesLockBeforePush:

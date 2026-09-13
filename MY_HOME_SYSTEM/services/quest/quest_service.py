@@ -1,7 +1,6 @@
 """services/quest_service.py から分割(Issue #550)。"""
 import datetime
 import random
-import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -10,7 +9,7 @@ import common
 import config
 import game_logic
 from core import sound_manager
-from services import notification_service, switchbot_service
+from services import switchbot_service
 from services.quest.locks import (
     INFINITE_QUEST_COOLDOWN_SECONDS,
     JST,
@@ -452,7 +451,7 @@ class QuestService:
             logger.info(f"Child Quest Approved: Attacker={attacker_id}, Exp={override_rewards['exp']}, Gold={override_rewards['gold']}")
 
         if tv_unlock_quest_id is not None:
-            self._trigger_tv_unlock(tv_unlock_quest_id)
+            switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")
         return result
 
     def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:
@@ -476,29 +475,6 @@ class QuestService:
         reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
         logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
         return {"user_id": linked_hist['user_id'], **reward_result}
-
-    def _trigger_tv_unlock(self, quest_id: int):
-        def unlock_task():
-            logger.info(f"📺 Initiating TV Unlock (Turn ON) for quest_id: {quest_id}")
-            try:
-                res = switchbot_service.send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")
-                if res and res.get("statusCode") == 100:
-                    logger.info("✅ TV Unlock successful.")
-                else:
-                    raise Exception(f"API returned error: {res}")
-            except Exception as e:
-                logger.error(f"❌ TV Unlock failed: {e}")
-                # Fail-Soft: エラー時は親グループへ通知
-                if config.LINE_PARENTS_GROUP_ID:
-                    msg = "⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。"
-                    notification_service.send_push(
-                        user_id=config.LINE_PARENTS_GROUP_ID,
-                        messages=[{"type": "text", "text": msg}]
-                    )
-
-        # APIコールでAPIルーティング（メインスレッド）をブロックしないよう非同期で実行
-        t = threading.Thread(target=unlock_task, daemon=True)
-        t.start()
 
     def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
         # #228: process_approve_quest と同じユーザー単位ロックに参加させる。
