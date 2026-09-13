@@ -7,7 +7,7 @@ quest_master とは異なり、この内容は療育目的で固定された生�
 Days Key: 0=月, 1=火, 2=水, 3=木, 4=金, 5=土, 6=日 (quest_data.pyと同じ規約)
 """
 import datetime
-from typing import List, Optional, TypedDict
+from typing import List, Optional, Tuple, TypedDict
 
 
 class RoutineStep(TypedDict):
@@ -24,10 +24,12 @@ class RoutineStep(TypedDict):
     # 土日は不要、土曜終わっていれば日曜は不要)。判定はroutine_service側で行う。
     weekend_carryover: bool
     # Trueならこのステップは同じフロー内の他のchecklist=Trueなステップと合わせて
-    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備は
-    # 順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueなステップは
-    # 先頭から連続する一塊のみを想定しており、routine_service側の初期化・トグル処理も
-    # この前提(単一の連続グループ)で書かれている。
+    # 順不同でチェックできる「チェックリスト」グループの一員になる(要件: 朝の準備・
+    # 寝る準備は順番を強制せず好きな順にチェックしたい)。フロー内でchecklist=Trueな
+    # ステップは連続する一塊のみを想定している(get_checklist_range参照)。この塊は
+    # フロー先頭(例: amの朝の準備5項目)・チェックポイント通過後(例: pmの寝る準備4項目)
+    # のどちらにも置けるが、routine_service側はシーケンシャルな進行が塊の先頭indexに
+    # 到達した時点で塊全体を一括'current'にする、という単一の仕組みで両対応している。
     checklist: bool
 
 
@@ -83,9 +85,18 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
             # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
             {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
-            # 就寝準備の締切は土日も平日と同じ20:00(要件確認済み)。
-            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '20:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
-            {'key': 'nightprep', 'label': '寝る準備', 'icon_key': 'nightprep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            # 明日の準備も宿題と同じ繰越ルール(要件確認済み: 金曜/土曜に完了していれば
+            # 以降の土日は不要)。
+            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
+            # 自由時間→寝る準備の締切を18:00に変更(要件確認済み)。土日も平日と同じ
+            # 18:00のまま(要件確認済み: 現状維持)。
+            {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '18:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            # 寝る準備4項目は朝の準備と同様、順番を強制しないチェックリスト
+            # (要件確認済み)。チェックポイント(free)通過後に一括で'current'になる。
+            {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            {'key': 'nightclothes', 'label': '着替え', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            {'key': 'nightteeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
@@ -98,6 +109,19 @@ def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:
         if step['checkpoint_time']:
             return idx
     return None
+
+
+def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:
+    """フロー内のchecklist=Trueな連続ブロックの(開始index, 終了index+1)を返す。
+
+    checklist=Trueなステップが無ければNone。ブロックはフロー先頭(am)・
+    チェックポイント通過後(pm)のどちらにも置けるが、単一の連続ブロックのみを
+    想定している(routine_service側の初期化・トグル処理もこの前提で書かれている)。
+    """
+    indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]
+    if not indices:
+        return None
+    return indices[0], indices[-1] + 1
 
 
 def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:

@@ -80,6 +80,61 @@ describe('RoutineFlow', () => {
     });
 });
 
+// 寝る準備(晩ごはん・お風呂・着替え・歯磨き)はチェックポイント(自由時間)より後に
+// 置かれたチェックリスト。amの朝の準備(チェックポイントより前)と異なり、出発
+// ボーナスとは無関係になるため、ボーナス表示チップが出ないことも合わせて確認する。
+const pmFlow: RoutineActiveFlow = {
+    started: true,
+    title: '帰ってから寝るまで',
+    checkpoint_time: '18:00',
+    current_step_index: 5,
+    in_free_time: false,
+    is_complete: false,
+    bonus_gold: 150,
+    bonus_exp: 30,
+    preview_bonus_gold: 150,
+    bonus_full_gold: 150,
+    leveled_up: false,
+    new_level: null,
+    steps: [
+        { key: 'handwash', label: '手洗い・うがい', icon_key: 'handwash', is_checkpoint: false, is_checklist: false, status: 'done' },
+        { key: 'snack', label: 'おやつ休憩', icon_key: 'snack', is_checkpoint: false, is_checklist: false, status: 'done' },
+        { key: 'homework', label: '宿題', icon_key: 'homework', is_checkpoint: false, is_checklist: false, status: 'done' },
+        { key: 'tomorrow_prep', label: '明日の準備', icon_key: 'tomorrow_prep', is_checkpoint: false, is_checklist: false, status: 'done' },
+        { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, is_checklist: false, status: 'done' },
+        { key: 'dinner', label: '晩ごはん', icon_key: 'meal', is_checkpoint: false, is_checklist: true, status: 'current' },
+        { key: 'bath', label: 'お風呂', icon_key: 'bath', is_checkpoint: false, is_checklist: true, status: 'done' },
+        { key: 'nightclothes', label: '着替え', icon_key: 'clothes', is_checkpoint: false, is_checklist: true, status: 'current' },
+        { key: 'nightteeth', label: '歯磨き', icon_key: 'teeth', is_checkpoint: false, is_checklist: true, status: 'current' },
+        { key: 'sleep', label: '就寝', icon_key: 'sleep', is_checkpoint: false, is_checklist: false, status: 'locked' },
+    ],
+};
+
+describe('RoutineFlow (pm evening checklist)', () => {
+    afterEach(() => cleanup());
+
+    it('renders the checklist block between the preceding and following path steps, not always first', () => {
+        render(<RoutineFlow flowKey="pm" flow={pmFlow} onCompleteStep={vi.fn()} />);
+        const labels = screen.getAllByText(/手洗い・うがい|自由時間|晩ごはん|就寝/).map((el) => el.textContent);
+        // '自由時間'(チェックポイント直前の一本道)は寝る準備チェックリストより前、
+        // '就寝'(チェックリスト後続の一本道)はチェックリストより後に描画される。
+        expect(labels.indexOf('自由時間')).toBeLessThan(labels.indexOf('晩ごはん'));
+        expect(labels.indexOf('就寝')).toBeGreaterThan(labels.indexOf('晩ごはん'));
+    });
+
+    it('lets night checklist items be tapped in any order', () => {
+        const onCompleteStep = vi.fn();
+        render(<RoutineFlow flowKey="pm" flow={pmFlow} onCompleteStep={onCompleteStep} />);
+        fireEvent.click(screen.getByRole('button', { name: /お風呂/ }));
+        expect(onCompleteStep).toHaveBeenCalledWith('bath');
+    });
+
+    it('does not show a departure-bonus chip for a checklist positioned after the checkpoint', () => {
+        render(<RoutineFlow flowKey="pm" flow={pmFlow} onCompleteStep={vi.fn()} />);
+        expect(screen.queryByText(/出発ボーナス/)).not.toBeInTheDocument();
+    });
+});
+
 describe('RoutineFreeTimeBanner', () => {
     afterEach(() => cleanup());
 

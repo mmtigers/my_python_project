@@ -9,7 +9,7 @@ import React from 'react';
 import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star, DoorOpen,
-    Waves, Cookie, Pencil, Moon, BedDouble, Bath,
+    Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -24,7 +24,12 @@ const ICONS: Record<string, LucideIcon> = {
     handwash: Waves,
     snack: Cookie,
     homework: Pencil,
-    nightprep: Moon,
+    // 「明日の準備」(要件: 宿題の次に追加)。
+    tomorrow_prep: Backpack,
+    // 「お風呂」(要件: 寝る準備を晩ごはん/お風呂/着替え/歯磨きに分割)。
+    // トイレはlucide-reactに専用アイコンが無いため既にBathを転用しており、
+    // 実際の入浴と見分けが付くようShowerHeadを充てる。
+    bath: ShowerHead,
     sleep: BedDouble,
 };
 
@@ -93,48 +98,73 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
         return <RoutineFreeTimeBanner flowKey={flowKey} flow={flow} />;
     }
 
-    // チェックリスト項目(順不同でチェックできる、例: 朝の準備5項目)はフロー先頭に
-    // 連続してまとまっている前提(routine_data.pyの設計と合わせている)。すごろく/
-    // 路線図の一本道には乗せず、専用のチェックボックスUIとしてまとめて表示する。
+    // チェックリスト項目(順不同でチェックできる、例: 朝の準備5項目・寝る準備4項目)は
+    // フロー内で連続する一塊(routine_data.py get_checklist_range参照)。すごろく/
+    // 路線図の一本道には乗せず、専用のチェックボックスUIとしてひとまとめに表示するが、
+    // ブロックの位置自体はamなら先頭、pmならチェックポイント通過後と実際のflow.steps
+    // 上の並び順が異なるため、単純に「チェックリスト→残りの一本道」の順で並べると
+    // pmでは表示順が生活動線と逆転してしまう。そのためflow.steps全体を1回だけ走査し、
+    // チェックリストに差し掛かった位置でブロックを1つだけ差し込む形で組み立てる。
     const checklistSteps = flow.steps.filter((step) => step.is_checklist);
     const pathSteps = flow.steps.filter((step) => !step.is_checklist);
+    const lastPathKey = pathSteps.length > 0 ? pathSteps[pathSteps.length - 1].key : null;
+    // 出発ボーナス(preview_bonus_gold)はチェックポイントより前のステップの達成率で
+    // 決まる(routine_service._eligible_done_ratio)。チェックリストがチェックポイントの
+    // 「後」にある場合(例: pmの寝る準備4項目)は、その時点でボーナスは既に確定済みで
+    // チェックしても金額は変わらないため、ボーナス表示自体を出さない(要件確認済みの
+    // 範囲外だが、出しっぱなしだと「チェックすると増える」ように誤解させてしまうため)。
+    const checkpointIndex = flow.steps.findIndex((step) => step.is_checkpoint);
+    const checklistStartIndex = flow.steps.findIndex((step) => step.is_checklist);
+    const checklistAffectsBonus = checkpointIndex === -1 || checklistStartIndex < checkpointIndex;
 
-    return (
-        <div className="flex flex-col">
-            {checklistSteps.length > 0 && (
-                <RoutineChecklistBlock
-                    flowKey={flowKey}
-                    steps={checklistSteps}
-                    previewBonusGold={flow.preview_bonus_gold}
-                    fullBonusGold={flow.bonus_full_gold}
-                    onToggleStep={onCompleteStep}
-                    isCompleting={!!isCompleting}
-                    compact={!!compact}
-                />
-            )}
-            {pathSteps.map((step, idx) => (
-                <RoutineStepRow
-                    key={step.key}
-                    flowKey={flowKey}
-                    step={step}
-                    checkpointTime={flow.checkpoint_time}
-                    isLast={idx === pathSteps.length - 1}
-                    onComplete={() => onCompleteStep(step.key)}
-                    isCompleting={!!isCompleting}
-                    compact={!!compact}
-                />
-            ))}
-        </div>
-    );
+    let checklistRendered = false;
+    const rows = flow.steps.reduce<React.ReactNode[]>((acc, step) => {
+        if (step.is_checklist) {
+            if (!checklistRendered) {
+                checklistRendered = true;
+                acc.push(
+                    <RoutineChecklistBlock
+                        key="checklist-block"
+                        flowKey={flowKey}
+                        steps={checklistSteps}
+                        previewBonusGold={checklistAffectsBonus ? flow.preview_bonus_gold : null}
+                        fullBonusGold={flow.bonus_full_gold}
+                        onToggleStep={onCompleteStep}
+                        isCompleting={!!isCompleting}
+                        compact={!!compact}
+                    />
+                );
+            }
+            return acc;
+        }
+        acc.push(
+            <RoutineStepRow
+                key={step.key}
+                flowKey={flowKey}
+                step={step}
+                checkpointTime={flow.checkpoint_time}
+                isLast={step.key === lastPathKey}
+                onComplete={() => onCompleteStep(step.key)}
+                isCompleting={!!isCompleting}
+                compact={!!compact}
+            />
+        );
+        return acc;
+    }, []);
+
+    return <div className="flex flex-col">{rows}</div>;
 };
 
-// 朝の準備等、順不同でチェックできる項目をまとめて表示するブロック。チェックの
-// たびに出発ボーナスの見込み額(preview_bonus_gold)が増えていく様子も併せて見せる
-// (要件: 1つチェックすると出発ゴールドが増え、それが画面で分かるようにしたい)。
+// 朝の準備等、順不同でチェックできる項目をまとめて表示するブロック。チェックポイント
+// より前のチェックリスト(例: 朝の準備)ではチェックのたびに出発ボーナスの見込み額
+// (preview_bonus_gold)が増えていく様子も併せて見せる(要件: 1つチェックすると出発
+// ゴールドが増え、それが画面で分かるようにしたい)。previewBonusGoldがnullの場合
+// (チェックポイント後のチェックリスト、例: pmの寝る準備4項目)はボーナス表示自体を省く
+// (ボーナスは既に確定済みでチェックしても金額が変わらないため、誤解を避ける)。
 const RoutineChecklistBlock: React.FC<{
     flowKey: 'am' | 'pm';
     steps: RoutineStep[];
-    previewBonusGold: number;
+    previewBonusGold: number | null;
     fullBonusGold: number;
     onToggleStep: (stepKey: string) => void;
     isCompleting: boolean;
@@ -145,9 +175,11 @@ const RoutineChecklistBlock: React.FC<{
         <div className={`rounded-2xl border p-4 mb-4 ${theme.spotlight}`}>
             <div className="flex items-center justify-between gap-2 mb-3">
                 <span className={`text-xs font-bold ${theme.text}`}>できたらチェック！(じゅんばんは自由だよ)</span>
-                <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${theme.chip}`}>
-                    <Coins size={12} />出発ボーナス {previewBonusGold} / {fullBonusGold}
-                </span>
+                {previewBonusGold !== null && (
+                    <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${theme.chip}`}>
+                        <Coins size={12} />出発ボーナス {previewBonusGold} / {fullBonusGold}
+                    </span>
+                )}
             </div>
             <div className="flex flex-col gap-2">
                 {steps.map((step) => (
