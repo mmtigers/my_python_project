@@ -51,18 +51,27 @@ class TestFlowStartGating:
         assert state['flows']['am']['started'] is False
 
     def test_am_flow_started_after_5am(self, isolated_db):
+        """朝の準備5項目(チェックリスト)は順番を問わず全て最初から'current'
+        (チェック可能)になり、自由時間・出発だけが'locked'のまま(要件確認済み)。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_at(5, 0))
-        assert state['flows']['am']['started'] is True
-        assert state['flows']['am']['steps'][0]['status'] == 'current'
-        assert all(s['status'] == 'locked' for s in state['flows']['am']['steps'][1:])
+        am = state['flows']['am']
+        assert am['started'] is True
+        checklist_keys = ['meal', 'clothes', 'wash', 'teeth', 'toilet']
+        statuses = {s['key']: s['status'] for s in am['steps']}
+        assert [s['key'] for s in am['steps'][:5]] == checklist_keys
+        assert all(statuses[k] == 'current' for k in checklist_keys)
+        assert statuses['free'] == 'locked'
+        assert statuses['leave'] == 'locked'
+        assert am['current_step_index'] == 0
 
     def test_am_flow_started_on_weekend(self, isolated_db):
         """土日も平日と同じ05:00開始トリガーでフローが始まる(要件: 平日と揃える)。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(6, 0))
-        assert state['flows']['am']['started'] is True
-        assert state['flows']['am']['steps'][0]['status'] == 'current'
+        am = state['flows']['am']
+        assert am['started'] is True
+        assert am['steps'][0]['status'] == 'current'
 
     def test_pm_flow_not_started_before_14(self, isolated_db):
         _seed_user()
@@ -98,28 +107,85 @@ class TestFlowStartGating:
 
 
 class TestStepCompletion:
-    def test_completing_steps_advances_current_index(self, isolated_db):
+    def test_completing_checklist_step_in_any_order(self, isolated_db):
+        """朝の準備は順不同でチェックできる(要件確認済み)。表示順(meal→clothes→
+        wash→teeth→toilet)を無視して、後ろの項目から先にチェックしても良い。"""
         _seed_user()
-        state = routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
-        assert state['current_step_index'] == 1
-        assert state['steps'][0]['status'] == 'done'
-        assert state['steps'][1]['status'] == 'current'
+        state = routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 0))
+        statuses = {s['key']: s['status'] for s in state['steps']}
+        assert statuses['toilet'] == 'done'
+        assert statuses['meal'] == 'current'  # 他の項目は引き続きチェック可能なまま
+        assert state['current_step_index'] == 0  # チェックリストフェーズの目印は不変
 
-    def test_wrong_step_key_returns_409(self, isolated_db):
-        from fastapi import HTTPException
+        state = routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 1))
+        statuses = {s['key']: s['status'] for s in state['steps']}
+        assert statuses['meal'] == 'done'
+        assert statuses['toilet'] == 'done'
+
+    def test_toggling_checklist_step_off_again(self, isolated_db):
+        """一度チェックした項目は再タップで取り消せる(要件確認済み)。"""
         _seed_user()
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
+        state = routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 1))
+        statuses = {s['key']: s['status'] for s in state['steps']}
+        assert statuses['wash'] == 'current'
+
+    def test_completing_all_checklist_items_advances_to_free_time(self, isolated_db):
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            state = routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        assert state['current_step_index'] == 5  # 'free'(チェックポイント)が現在地
+        assert state['in_free_time'] is True
+        assert state['steps'][5]['status'] == 'current'
+
+    def test_unchecking_after_all_done_reverts_to_checklist_phase(self, isolated_db):
+        """5項目全てチェックして自由時間に入った後、1つ取り消すとチェックリスト
+        フェーズに戻り、まだ出発(チェックポイント通過)していない扱いになる。"""
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        state = routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 1))
+        assert state['current_step_index'] == 0
+        assert state['in_free_time'] is False
+        assert state['steps'][5]['status'] == 'locked'  # 'free'
+
+    def test_unknown_step_key_returns_404(self, isolated_db):
+        from fastapi import HTTPException
+        _seed_user()
         with pytest.raises(HTTPException) as exc_info:
-            routine_service.complete_step('daughter', 'am', 'teeth', now=_at(6, 1))
+            routine_service.complete_step('daughter', 'am', 'not_a_real_step', now=_at(6, 0))
+        assert exc_info.value.status_code == 404
+
+    def test_wrong_step_key_returns_409_for_non_checklist_step(self, isolated_db):
+        """チェックリストでないステップ(自由時間より後)は引き続き逐次進行のまま。"""
+        from fastapi import HTTPException
+        _seed_user()
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        # 'free'は締切前なので直接完了しようとすると400、'leave'は現在地ではないので409
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('daughter', 'am', 'leave', now=_at(6, 1))
         assert exc_info.value.status_code == 409
 
     def test_completing_checkpoint_step_directly_is_rejected(self, isolated_db):
         from fastapi import HTTPException
         _seed_user()
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
         with pytest.raises(HTTPException) as exc_info:
             routine_service.complete_step('daughter', 'am', 'free', now=_at(6, 30))
+        assert exc_info.value.status_code == 400
+
+    def test_toggling_checklist_step_after_departure_is_rejected(self, isolated_db):
+        """チェックポイントを過ぎて出発済みになった後は、チェックリストの
+        取り消し・再チェックはできない(要件確認済み: ボーナス確定後はロック)。"""
+        from fastapi import HTTPException
+        _seed_user(gold=0, exp=0)
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        routine_service.get_today_state('daughter', now=_at(7, 51))  # チェックポイント強制通過
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('daughter', 'am', 'toilet', now=_at(7, 52))
         assert exc_info.value.status_code == 400
 
     def test_completing_before_flow_start_is_rejected(self, isolated_db):
@@ -133,7 +199,7 @@ class TestStepCompletion:
 class TestCheckpointBonus:
     def test_full_completion_awards_full_bonus(self, isolated_db):
         _seed_user(gold=0, exp=0)
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
         # 7:50を過ぎてから状態取得すると、チェックポイントを強制的に通過する
@@ -141,8 +207,8 @@ class TestCheckpointBonus:
         am = state['flows']['am']
         assert am['bonus_gold'] == 150
         assert am['bonus_exp'] == 30
-        assert am['current_step_index'] == 5  # 'leave' が現在地
-        assert am['steps'][4]['status'] == 'done'  # 'free' も通過済みとして完了扱い
+        assert am['current_step_index'] == 6  # 'leave' が現在地
+        assert am['steps'][5]['status'] == 'done'  # 'free' も通過済みとして完了扱い
 
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
@@ -162,7 +228,7 @@ class TestCheckpointBonus:
         既存exp=80 + 満額ボーナスexp=30 = 110 でレベルアップする。
         """
         _seed_user(gold=0, exp=80)
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
         state = routine_service.get_today_state('daughter', now=_at(7, 51))
@@ -177,30 +243,50 @@ class TestCheckpointBonus:
 
     def test_partial_completion_prorates_bonus_and_marks_remind(self, isolated_db):
         _seed_user(gold=0, exp=0)
-        # 4ステップ中2つだけ完了させる
+        # 5項目中2つだけ完了させる
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
         routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 5))
 
         state = routine_service.get_today_state('daughter', now=_at(7, 51))
         am = state['flows']['am']
-        assert am['bonus_gold'] == 75  # round(150 * 0.5)
-        assert am['bonus_exp'] == 15  # round(30 * 0.5)
+        assert am['bonus_gold'] == 60  # round(150 * 2/5)
+        assert am['bonus_exp'] == 12  # round(30 * 2/5)
 
         statuses = {s['key']: s['status'] for s in am['steps']}
         assert statuses['wash'] == 'done'
         assert statuses['meal'] == 'done'
         assert statuses['clothes'] == 'remind'
         assert statuses['teeth'] == 'remind'
+        assert statuses['toilet'] == 'remind'
 
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
-        assert row['gold'] == 75
-        assert row['exp'] == 15
+        assert row['gold'] == 60
+        assert row['exp'] == 12
+
+    def test_preview_bonus_gold_grows_as_checklist_items_are_checked(self, isolated_db):
+        """出発ボーナスの見込み額は、チェックポイント通過前でもチェックした分だけ
+        画面に反映される(要件確認済み: チェックのたびに増えていくのが分かるように)。"""
+        _seed_user()
+        state = routine_service.get_today_state('daughter', now=_at(6, 0))
+        assert state['flows']['am']['preview_bonus_gold'] == 0
+        assert state['flows']['am']['bonus_full_gold'] == 150
+
+        state = routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 1))
+        assert state['preview_bonus_gold'] == 30  # round(150 * 1/5)
+
+        state = routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 2))
+        assert state['preview_bonus_gold'] == 60  # round(150 * 2/5)
+
+        # チェックポイント通過後は最終的なbonus_goldと一致する(値が飛ばない)。
+        state = routine_service.get_today_state('daughter', now=_at(7, 51))
+        am = state['flows']['am']
+        assert am['preview_bonus_gold'] == am['bonus_gold'] == 60
 
     def test_checkpoint_passage_is_idempotent(self, isolated_db):
         """チェックポイント通過後に何度状態取得しても、ボーナスは1回しか付与されない。"""
         _seed_user(gold=0, exp=0)
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
 
         routine_service.get_today_state('daughter', now=_at(7, 51))
@@ -212,15 +298,15 @@ class TestCheckpointBonus:
         assert row['gold'] == 150
         assert row['exp'] == 30
 
-    def test_forced_transition_while_still_on_earlier_step(self, isolated_db):
-        """チェックポイントの手前(自由時間に入る前)で締切時刻を過ぎても強制的に通過する。"""
+    def test_forced_transition_while_still_in_checklist_phase(self, isolated_db):
+        """チェックリストが途中(自由時間に入る前)で締切時刻を過ぎても強制的に通過する。"""
         _seed_user(gold=0, exp=0)
         routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
-        # 'meal'が現在地のまま7:50を過ぎる
+        # チェックリストが1/5しか終わっていないまま7:50を過ぎる
         state = routine_service.get_today_state('daughter', now=_at(8, 0))
         am = state['flows']['am']
-        assert am['current_step_index'] == 5
-        assert am['bonus_gold'] == round(150 * (1 / 4))
+        assert am['current_step_index'] == 6
+        assert am['bonus_gold'] == round(150 * (1 / 5))
 
 
 class TestWeekendCheckpointOverride:
@@ -239,7 +325,7 @@ class TestWeekendCheckpointOverride:
     def test_am_not_forced_past_at_800_on_saturday(self, isolated_db):
         """平日なら7:50超えで強制通過する8:00でも、土日は09:30まではまだ猶予がある。"""
         _seed_user(gold=0, exp=0)
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         state = routine_service.get_today_state('daughter', now=_saturday_at(8, 0))
         am = state['flows']['am']
@@ -248,7 +334,7 @@ class TestWeekendCheckpointOverride:
 
     def test_am_forced_past_at_931_on_saturday(self, isolated_db):
         _seed_user(gold=0, exp=0)
-        for key in ('wash', 'meal', 'clothes', 'teeth'):
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
             routine_service.complete_step('daughter', 'am', key, now=_saturday_at(6, 0))
         state = routine_service.get_today_state('daughter', now=_saturday_at(9, 31))
         am = state['flows']['am']

@@ -6,10 +6,10 @@
 // (services/routine_service.py)ため、このコンポーネントには手動で進める手段を
 // 持たせず、現在のステップの完了報告のみを行う。
 import React from 'react';
-import { Bell, Check, Clock, LucideIcon } from 'lucide-react';
+import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star, DoorOpen,
-    Waves, Cookie, Pencil, Moon, BedDouble,
+    Waves, Cookie, Pencil, Moon, BedDouble, Bath,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -18,6 +18,7 @@ const ICONS: Record<string, LucideIcon> = {
     meal: UtensilsCrossed,
     clothes: Shirt,
     teeth: Sparkles,
+    toilet: Bath,
     free: Star,
     leave: DoorOpen,
     handwash: Waves,
@@ -92,21 +93,116 @@ const RoutineFlow: React.FC<RoutineFlowProps> = ({ flowKey, flow, onCompleteStep
         return <RoutineFreeTimeBanner flowKey={flowKey} flow={flow} />;
     }
 
+    // チェックリスト項目(順不同でチェックできる、例: 朝の準備5項目)はフロー先頭に
+    // 連続してまとまっている前提(routine_data.pyの設計と合わせている)。すごろく/
+    // 路線図の一本道には乗せず、専用のチェックボックスUIとしてまとめて表示する。
+    const checklistSteps = flow.steps.filter((step) => step.is_checklist);
+    const pathSteps = flow.steps.filter((step) => !step.is_checklist);
+
     return (
         <div className="flex flex-col">
-            {flow.steps.map((step, idx) => (
+            {checklistSteps.length > 0 && (
+                <RoutineChecklistBlock
+                    flowKey={flowKey}
+                    steps={checklistSteps}
+                    previewBonusGold={flow.preview_bonus_gold}
+                    fullBonusGold={flow.bonus_full_gold}
+                    onToggleStep={onCompleteStep}
+                    isCompleting={!!isCompleting}
+                    compact={!!compact}
+                />
+            )}
+            {pathSteps.map((step, idx) => (
                 <RoutineStepRow
                     key={step.key}
                     flowKey={flowKey}
                     step={step}
                     checkpointTime={flow.checkpoint_time}
-                    isLast={idx === flow.steps.length - 1}
+                    isLast={idx === pathSteps.length - 1}
                     onComplete={() => onCompleteStep(step.key)}
                     isCompleting={!!isCompleting}
                     compact={!!compact}
                 />
             ))}
         </div>
+    );
+};
+
+// 朝の準備等、順不同でチェックできる項目をまとめて表示するブロック。チェックの
+// たびに出発ボーナスの見込み額(preview_bonus_gold)が増えていく様子も併せて見せる
+// (要件: 1つチェックすると出発ゴールドが増え、それが画面で分かるようにしたい)。
+const RoutineChecklistBlock: React.FC<{
+    flowKey: 'am' | 'pm';
+    steps: RoutineStep[];
+    previewBonusGold: number;
+    fullBonusGold: number;
+    onToggleStep: (stepKey: string) => void;
+    isCompleting: boolean;
+    compact: boolean;
+}> = ({ flowKey, steps, previewBonusGold, fullBonusGold, onToggleStep, isCompleting, compact }) => {
+    const theme = THEME[flowKey];
+    return (
+        <div className={`rounded-2xl border p-4 mb-4 ${theme.spotlight}`}>
+            <div className="flex items-center justify-between gap-2 mb-3">
+                <span className={`text-xs font-bold ${theme.text}`}>できたらチェック！(じゅんばんは自由だよ)</span>
+                <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold whitespace-nowrap ${theme.chip}`}>
+                    <Coins size={12} />出発ボーナス {previewBonusGold} / {fullBonusGold}
+                </span>
+            </div>
+            <div className="flex flex-col gap-2">
+                {steps.map((step) => (
+                    <RoutineChecklistItem
+                        key={step.key}
+                        flowKey={flowKey}
+                        step={step}
+                        onToggle={() => onToggleStep(step.key)}
+                        isCompleting={isCompleting}
+                        compact={compact}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const RoutineChecklistItem: React.FC<{
+    flowKey: 'am' | 'pm';
+    step: RoutineStep;
+    onToggle: () => void;
+    isCompleting: boolean;
+    compact: boolean;
+}> = ({ flowKey, step, onToggle, isCompleting, compact }) => {
+    const theme = THEME[flowKey];
+    const Icon = ICONS[step.icon_key] || Star;
+    const checked = step.status === 'done';
+    const remind = step.status === 'remind';
+    const iconSize = compact ? 14 : 18;
+
+    let boxClass = 'border-gray-500 text-gray-400';
+    if (checked) boxClass = theme.node;
+    if (remind) boxClass = 'border-orange-500 text-orange-300';
+
+    let rowClass = 'border-gray-600 bg-gray-800/60';
+    if (checked) rowClass = theme.nodeDone;
+    if (remind) rowClass = 'bg-orange-900/40 border-orange-500';
+
+    return (
+        <button
+            type="button"
+            onClick={onToggle}
+            disabled={isCompleting}
+            className={`flex items-center gap-3 w-full rounded-xl border px-3 py-2.5 text-left transition-colors disabled:opacity-50 ${rowClass}`}
+        >
+            <span className={`flex items-center justify-center rounded-full border-2 flex-none ${compact ? 'w-7 h-7' : 'w-9 h-9'} ${boxClass}`}>
+                {checked ? <Check size={iconSize} /> : remind ? <Bell size={iconSize} /> : <Icon size={iconSize} />}
+            </span>
+            <span className={`flex-1 font-bold ${compact ? 'text-sm' : 'text-base'} ${checked ? theme.text : remind ? 'text-orange-300' : 'text-gray-200'}`}>
+                {step.label}
+            </span>
+            {remind && (
+                <span className="rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5 flex-none">まだだよ</span>
+            )}
+        </button>
     );
 };
 

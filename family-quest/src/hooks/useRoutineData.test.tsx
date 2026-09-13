@@ -31,6 +31,8 @@ function makeFlow(overrides: Record<string, unknown> = {}) {
         is_complete: false,
         bonus_gold: 150,
         bonus_exp: 30,
+        preview_bonus_gold: 150,
+        bonus_full_gold: 150,
         leveled_up: false,
         new_level: null,
         steps: [],
