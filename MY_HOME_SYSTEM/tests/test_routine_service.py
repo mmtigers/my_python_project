@@ -208,29 +208,32 @@ class TestStepCompletion:
 class TestMorningChecklistTvUnlock:
     """（毎朝ミッション統合で新規追加）朝の準備チェックリストが新たに全項目達成
     状態へ遷移した瞬間、旧「毎朝ミッション」クエスト承認時と同じTV電源ON処理
-    (switchbot_service.trigger_tv_unlock)を呼ぶことのテスト。"""
+    (switchbot_service.trigger_tv_unlock)を呼ぶことのテスト。
+
+    対象は智矢(user_id='son')に限定されるため、テストも'son'を使う
+    (TV_UNLOCK_TARGET_USER_ID参照)。"""
 
     def test_completing_all_am_checklist_items_triggers_tv_unlock(self, isolated_db, monkeypatch):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('meal', 'clothes', 'wash', 'teeth'):
-            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+            routine_service.complete_step('son', 'am', key, now=_at(6, 0))
         mock_trigger.assert_not_called()  # まだ4/5項目なので発火しない
 
-        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 0))
+        routine_service.complete_step('son', 'am', 'toilet', now=_at(6, 0))
         mock_trigger.assert_called_once()
 
     def test_tv_unlock_not_triggered_without_device_id_configured(self, isolated_db, monkeypatch):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", None)
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
-            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+            routine_service.complete_step('son', 'am', key, now=_at(6, 0))
         mock_trigger.assert_not_called()
 
     def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
@@ -244,22 +247,34 @@ class TestMorningChecklistTvUnlock:
             routine_service.complete_step('dad', 'am', key, now=_at(6, 0))
         mock_trigger.assert_not_called()
 
+    def test_tv_unlock_not_triggered_for_non_target_child(self, isolated_db, monkeypatch):
+        """涼花(daughter)もrole_childだが、TV解錠の対象は智矢(son)に限定されている
+        ため、涼花が完了させても発火しない(要件確認済み)。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='daughter', role='role_child')
+
+        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
+            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+        mock_trigger.assert_not_called()
+
     def test_tv_unlock_fires_again_after_uncheck_and_recomplete(self, isolated_db, monkeypatch):
         """全達成→1つ取り消し→再チェック、で再度「新たに全達成」になった場合は
         再度発火する(取り消し自体では発火しない)。"""
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
-            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
+            routine_service.complete_step('son', 'am', key, now=_at(6, 0))
         assert mock_trigger.call_count == 1
 
-        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 1))  # 取り消し
+        routine_service.complete_step('son', 'am', 'toilet', now=_at(6, 1))  # 取り消し
         assert mock_trigger.call_count == 1  # 取り消しでは発火しない
 
-        routine_service.complete_step('daughter', 'am', 'toilet', now=_at(6, 2))  # 再チェック
+        routine_service.complete_step('son', 'am', 'toilet', now=_at(6, 2))  # 再チェック
         assert mock_trigger.call_count == 2
 
 
@@ -269,19 +284,22 @@ class TestEveningFreeTimeTvUnlock:
     (switchbot_service.trigger_tv_unlock)を呼ぶことのテスト。朝の準備チェックリスト
     と異なり、pmはchecklist=Falseの逐次ステップの完了(complete_stepの非チェック
     リスト分岐)がトリガーであり、チェックポイント締切(18:00)超過による強制遷移
-    (_apply_forced_transition)経由では発火しない点が特徴。"""
+    (_apply_forced_transition)経由では発火しない点が特徴。
+
+    対象は智矢(user_id='son')に限定されるため、テストも'son'を使う
+    (TV_UNLOCK_TARGET_USER_ID参照)。"""
 
     def test_completing_tomorrow_prep_triggers_tv_unlock(self, isolated_db, monkeypatch):
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('handwash', 'snack', 'homework'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+            routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()  # 明日の準備がまだなので発火しない
 
-        state = routine_service.complete_step('daughter', 'pm', 'tomorrow_prep', now=_at(14, 0))
+        state = routine_service.complete_step('son', 'pm', 'tomorrow_prep', now=_at(14, 0))
         mock_trigger.assert_called_once_with("夕方の自由時間開始(宿題・明日の準備完了)")
         assert state['in_free_time'] is True
 
@@ -289,10 +307,10 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", None)
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+            routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
     def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
@@ -306,6 +324,18 @@ class TestEveningFreeTimeTvUnlock:
             routine_service.complete_step('dad', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
+    def test_tv_unlock_not_triggered_for_non_target_child(self, isolated_db, monkeypatch):
+        """涼花(daughter)もrole_childだが、TV解錠の対象は智矢(son)に限定されている
+        ため、涼花が完了させても発火しない(要件確認済み)。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='daughter', role='role_child')
+
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        mock_trigger.assert_not_called()
+
     def test_tv_unlock_not_triggered_when_deadline_forces_skip_past_free_time(self, isolated_db, monkeypatch):
         """宿題・明日の準備を完了しないまま18:00の締切を過ぎた場合、
         _apply_forced_transitionが寝る準備チェックリストへ直接進める(自由時間を
@@ -313,12 +343,12 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
-        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
-        routine_service.complete_step('daughter', 'pm', 'snack', now=_at(14, 0))
+        routine_service.complete_step('son', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.complete_step('son', 'pm', 'snack', now=_at(14, 0))
         # 宿題・明日の準備は完了させないまま締切(18:00)を過ぎる
-        state = routine_service.get_today_state('daughter', now=_at(18, 1))
+        state = routine_service.get_today_state('son', now=_at(18, 1))
         pm = state['flows']['pm']
         assert pm['in_free_time'] is False
         mock_trigger.assert_not_called()
@@ -329,15 +359,15 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
+        _seed_user(user_id='son', role='role_child')
 
         for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+            routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         assert mock_trigger.call_count == 1  # 'tomorrow_prep'完了で自由時間開始トリガーが発火
 
-        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        routine_service.get_today_state('son', now=_at(18, 1))  # チェックポイント通過
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
+            routine_service.complete_step('son', 'pm', key, now=_at(18, 5))
 
         assert mock_trigger.call_count == 1  # 寝る準備チェックリストの完了では増えない
 
