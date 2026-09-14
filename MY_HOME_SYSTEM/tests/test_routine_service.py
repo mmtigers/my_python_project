@@ -65,7 +65,6 @@ class TestFlowStartGating:
         assert [s['key'] for s in am['steps'][:5]] == checklist_keys
         assert all(statuses[k] == 'current' for k in checklist_keys)
         assert statuses['free'] == 'locked'
-        assert statuses['leave'] == 'locked'
         assert am['current_step_index'] == 0
 
     def test_am_flow_started_on_weekend(self, isolated_db):
@@ -160,14 +159,21 @@ class TestStepCompletion:
         assert exc_info.value.status_code == 404
 
     def test_wrong_step_key_returns_409_for_non_checklist_step(self, isolated_db):
-        """チェックリストでないステップ(自由時間より後)は引き続き逐次進行のまま。"""
+        """チェックリストでないステップ(寝る準備チェックリストより後の'sleep')は
+        引き続き逐次進行のまま。（画面非表示化でamの'leave'が廃止されたため、
+        同種の非チェックリストステップとしてpmの'sleep'を使う）"""
         from fastapi import HTTPException
         _seed_user()
-        for key in ('meal', 'clothes', 'wash', 'teeth', 'toilet'):
-            routine_service.complete_step('daughter', 'am', key, now=_at(6, 0))
-        # 'free'は締切前なので直接完了しようとすると400、'leave'は現在地ではないので409
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
+        # 現在地は非チェックリストの'sleep'。既に完了済みの非チェックリストステップ
+        # 'homework'を渡すと(現在地と不一致のため)409。'dinner'等チェックリスト側の
+        # キーは対象が違うため使えない(_toggle_checklist_step経由となり409にならない)。
         with pytest.raises(HTTPException) as exc_info:
-            routine_service.complete_step('daughter', 'am', 'leave', now=_at(6, 1))
+            routine_service.complete_step('daughter', 'pm', 'homework', now=_at(18, 6))
         assert exc_info.value.status_code == 409
 
     def test_completing_checkpoint_step_directly_is_rejected(self, isolated_db):
@@ -238,21 +244,6 @@ class TestMorningChecklistTvUnlock:
             routine_service.complete_step('dad', 'am', key, now=_at(6, 0))
         mock_trigger.assert_not_called()
 
-    def test_tv_unlock_not_triggered_by_pm_night_checklist(self, isolated_db, monkeypatch):
-        """pmの寝る準備チェックリストは対象外(amのみ)。"""
-        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
-        mock_trigger = MagicMock()
-        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
-        _seed_user(role='role_child')
-
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
-        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
-        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
-            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
-
-        mock_trigger.assert_not_called()
-
     def test_tv_unlock_fires_again_after_uncheck_and_recomplete(self, isolated_db, monkeypatch):
         """全達成→1つ取り消し→再チェック、で再度「新たに全達成」になった場合は
         再度発火する(取り消し自体では発火しない)。"""
@@ -272,6 +263,85 @@ class TestMorningChecklistTvUnlock:
         assert mock_trigger.call_count == 2
 
 
+class TestEveningFreeTimeTvUnlock:
+    """（夕方フリータイムTV解錠で新規追加）pmフローで宿題・明日の準備まで完了し、
+    自由時間('free'ステップ)に到達した瞬間にTV電源ON処理
+    (switchbot_service.trigger_tv_unlock)を呼ぶことのテスト。朝の準備チェックリスト
+    と異なり、pmはchecklist=Falseの逐次ステップの完了(complete_stepの非チェック
+    リスト分岐)がトリガーであり、チェックポイント締切(18:00)超過による強制遷移
+    (_apply_forced_transition)経由では発火しない点が特徴。"""
+
+    def test_completing_tomorrow_prep_triggers_tv_unlock(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('handwash', 'snack', 'homework'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        mock_trigger.assert_not_called()  # 明日の準備がまだなので発火しない
+
+        state = routine_service.complete_step('daughter', 'pm', 'tomorrow_prep', now=_at(14, 0))
+        mock_trigger.assert_called_once_with("夕方の自由時間開始(宿題・明日の準備完了)")
+        assert state['in_free_time'] is True
+
+    def test_tv_unlock_not_triggered_without_device_id_configured(self, isolated_db, monkeypatch):
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", None)
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
+        """親自身が完了させても、子供向けのTV解錠報酬は発火しない。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='dad', role='role_adult')
+
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('dad', 'pm', key, now=_at(14, 0))
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_not_triggered_when_deadline_forces_skip_past_free_time(self, isolated_db, monkeypatch):
+        """宿題・明日の準備を完了しないまま18:00の締切を過ぎた場合、
+        _apply_forced_transitionが寝る準備チェックリストへ直接進める(自由時間を
+        経由しない)ため、TVは発火しない。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.complete_step('daughter', 'pm', 'snack', now=_at(14, 0))
+        # 宿題・明日の準備は完了させないまま締切(18:00)を過ぎる
+        state = routine_service.get_today_state('daughter', now=_at(18, 1))
+        pm = state['flows']['pm']
+        assert pm['in_free_time'] is False
+        mock_trigger.assert_not_called()
+
+    def test_tv_unlock_not_triggered_by_pm_night_checklist_completion(self, isolated_db, monkeypatch):
+        """自由時間開始トリガーが1回発火した後、寝る準備チェックリスト
+        (_toggle_checklist_step経由、amのみが対象)の完了ではそれ以上増えない。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(role='role_child')
+
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
+        assert mock_trigger.call_count == 1  # 'tomorrow_prep'完了で自由時間開始トリガーが発火
+
+        routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
+
+        assert mock_trigger.call_count == 1  # 寝る準備チェックリストの完了では増えない
+
+
 class TestCheckpointBonus:
     def test_full_completion_awards_full_bonus(self, isolated_db):
         _seed_user(gold=0, exp=0)
@@ -283,7 +353,10 @@ class TestCheckpointBonus:
         am = state['flows']['am']
         assert am['bonus_gold'] == 150
         assert am['bonus_exp'] == 30
-        assert am['current_step_index'] == 6  # 'leave' が現在地
+        # （画面非表示化で変更）amは'free'がフロー最後のステップのため、チェックポイント
+        # 通過(=len(steps)に到達)が即is_complete=Trueになり、画面が表示されなくなる。
+        assert am['current_step_index'] == 6
+        assert am['is_complete'] is True
         assert am['steps'][5]['status'] == 'done'  # 'free' も通過済みとして完了扱い
 
         with common.get_db_cursor() as cur:
@@ -334,6 +407,9 @@ class TestCheckpointBonus:
         assert statuses['clothes'] == 'remind'
         assert statuses['teeth'] == 'remind'
         assert statuses['toilet'] == 'remind'
+        # （画面非表示化で変更）チェックリストを一部しか終えていなくても、チェックポイント
+        # 通過(=強制切替)が起きれば即is_complete=Trueになり画面は表示されなくなる。
+        assert am['is_complete'] is True
 
         with common.get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
@@ -382,6 +458,7 @@ class TestCheckpointBonus:
         state = routine_service.get_today_state('daughter', now=_at(8, 0))
         am = state['flows']['am']
         assert am['current_step_index'] == 6
+        assert am['is_complete'] is True
         assert am['bonus_gold'] == round(150 * (1 / 5))
 
 

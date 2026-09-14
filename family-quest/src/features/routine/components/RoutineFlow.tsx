@@ -8,7 +8,7 @@
 import React from 'react';
 import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
-    Droplet, UtensilsCrossed, Shirt, Sparkles, Star, DoorOpen,
+    Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
@@ -20,7 +20,6 @@ const ICONS: Record<string, LucideIcon> = {
     teeth: Sparkles,
     toilet: Bath,
     free: Star,
-    leave: DoorOpen,
     handwash: Waves,
     snack: Cookie,
     homework: Pencil,
@@ -263,12 +262,16 @@ const RoutineStepRow: React.FC<{
                 <div className={`rounded-full border-2 flex items-center justify-center flex-none transition-all ${nodeClass} ${nodeSize}`}>
                     {step.status === 'done' ? <Check size={iconSize} /> : step.status === 'remind' ? <Bell size={iconSize} /> : <Icon size={iconSize} />}
                 </div>
-                {!isLast && (
-                    step.is_checkpoint ? (
-                        <span className={`my-1 flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${theme.chip}`}>
-                            <Clock size={10} />{checkpointTime}
-                        </span>
-                    ) : (
+                {step.is_checkpoint ? (
+                    // チェックポイントの時刻表示は「次のステップへの接続線」ではなく
+                    // 「この時刻に自動で進む/完了する」という告知のため、そのステップが
+                    // フロー最後(isLast)でも出し続ける(例: amは'free'がチェックポイント
+                    // 兼フロー最後のステップ、画面非表示化で'leave'廃止のため)。
+                    <span className={`my-1 flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${theme.chip}`}>
+                        <Clock size={10} />{checkpointTime}
+                    </span>
+                ) : (
+                    !isLast && (
                         <div className={`w-[3px] flex-1 min-h-[16px] rounded-full ${step.status === 'done' ? theme.seg : 'bg-gray-700'}`} />
                     )
                 )}

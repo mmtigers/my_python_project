@@ -440,7 +440,20 @@ class RoutineService:
                     progress['current_step_index'] = next_index
                     self._activate_block(flow, progress['steps_status'], next_index)
                     if next_index < len(flow['steps']):
-                        progress['in_free_time'] = bool(flow['steps'][next_index]['checkpoint_time'])
+                        entered_free_time = bool(flow['steps'][next_index]['checkpoint_time'])
+                        progress['in_free_time'] = entered_free_time
+                        # （夕方フリータイムでTV解錠を追加）宿題・明日の準備まで完了して
+                        # 自由時間(pmのfreeステップ)に到達した瞬間、朝の準備チェックリスト
+                        # 全達成時と同じTV電源ON処理を呼ぶ。締切(18:00)超過による強制遷移
+                        # (_apply_forced_transition)経由でチェックリストへ直接進んだ場合は
+                        # ここを通らないため発火しない。
+                        if (
+                            entered_free_time
+                            and flow_key == 'pm'
+                            and user['role'] == ROLE_CHILD
+                            and config.TV_PLUG_DEVICE_ID
+                        ):
+                            switchbot_service.trigger_tv_unlock("夕方の自由時間開始(宿題・明日の準備完了)")
                 self._save_progress(cur, progress)
 
                 # 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合
