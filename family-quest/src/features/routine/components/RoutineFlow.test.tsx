@@ -21,7 +21,6 @@ const amFlow: RoutineActiveFlow = {
         { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, is_checklist: true, status: 'current' },
         { key: 'clothes', label: '着替える', icon_key: 'clothes', is_checkpoint: false, is_checklist: true, status: 'remind' },
         { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, is_checklist: false, status: 'locked' },
-        { key: 'leave', label: '出発', icon_key: 'leave', is_checkpoint: false, is_checklist: false, status: 'locked' },
     ],
 };
 

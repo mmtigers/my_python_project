@@ -67,8 +67,15 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             # 土日は学校が無いため、出発(チェックポイント通過)の締切を09:30に後ろ倒しする。
+            # （画面非表示化で変更）以前はこの後に単なる「出発」表示用ステップ(leave、
+            # タップ操作以外の意味を持たない)が続いていたが、削除した。'free'がこの
+            # フローで最後(かつ唯一)のchecklist=Trueブロック直後のステップのため、
+            # _apply_forced_transitionが締切通過時にnext_active_indexへ渡すindexが
+            # len(steps)と一致し、is_complete=Trueへ直接遷移するようになる(要件:
+            # 7:50を過ぎたら朝の準備の画面自体を表示しない。isRoutineFlowBlocking/
+            # isRoutineFlowFreeTimeは共にis_complete=Trueで false になるため、
+            # フロントエンド側の変更は不要)。
             {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30', 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
-            {'key': 'leave', 'label': '出発', 'icon_key': 'leave', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
     'pm': {
