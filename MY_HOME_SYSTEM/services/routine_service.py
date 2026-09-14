@@ -20,7 +20,11 @@ from routine_data import (
     get_checklist_range, get_checkpoint_index, get_effective_checkpoint_time,
 )
 from services import switchbot_service
-from services.quest.locks import JST, ROLE_CHILD, _get_user_balance_lock, logger
+from services.quest.locks import JST, _get_user_balance_lock, logger
+
+# TV自動ON/OFFの対象を智矢個人に限定するための固定user_id(要件確認済み:
+# 涼花もrole_childだが、TV操作の対象は智矢のクリアに限定したい)。
+TV_UNLOCK_TARGET_USER_ID = 'son'
 
 
 class RoutineService:
@@ -277,7 +281,7 @@ class RoutineService:
 
     def _toggle_checklist_step(
         self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],
-        flow_key: str, user_role: Optional[str],
+        flow_key: str, user_id: str,
     ) -> None:
         """checklist=Trueなステップを順不同でチェック/チェック解除する(要件: 朝の準備・
         寝る準備は好きな順にチェックでき、間違えたら取り消せるようにしたい)。
@@ -294,9 +298,10 @@ class RoutineService:
 
         （毎朝ミッション統合で追加）amフローのチェックリスト(朝の準備)が新たに
         全項目達成状態へ遷移した瞬間(既に全達成だった状態からのトグルでは発火しない)、
-        対象ユーザーが子供(ROLE_CHILD)であれば、旧quest_id=1100「毎朝ミッション」
-        (廃止済み、routine_data.py参照)の承認時と同じTV電源ON処理
-        (switchbot_service.trigger_tv_unlock)を呼ぶ。pmの寝る準備チェックリストは
+        対象ユーザーが智矢(TV_UNLOCK_TARGET_USER_ID)であれば、旧quest_id=1100
+        「毎朝ミッション」(廃止済み、routine_data.py参照)の承認時と同じTV電源ON処理
+        (switchbot_service.trigger_tv_unlock)を呼ぶ。涼花も子供(role_child)だが、
+        TV操作の対象は智矢のクリアに限定する(要件確認済み)。pmの寝る準備チェックリストは
         対象外。
         """
         start, end = get_checklist_range(flow)  # target_step['checklist']がTrueなので必ず存在する
@@ -314,7 +319,13 @@ class RoutineService:
         progress['steps_status'][key] = 'current' if progress['steps_status'].get(key) == 'done' else 'done'
 
         all_done = all(progress['steps_status'].get(k) == 'done' for k in checklist_keys)
-        if all_done and not was_all_done and flow_key == 'am' and user_role == ROLE_CHILD and config.TV_PLUG_DEVICE_ID:
+        if (
+            all_done
+            and not was_all_done
+            and flow_key == 'am'
+            and user_id == TV_UNLOCK_TARGET_USER_ID
+            and config.TV_PLUG_DEVICE_ID
+        ):
             switchbot_service.trigger_tv_unlock("朝の準備チェックリスト全項目達成")
         if all_done:
             progress['current_step_index'] = end
@@ -403,7 +414,7 @@ class RoutineService:
 
         with _get_user_balance_lock(user_id):
             with common.get_db_cursor(commit=True) as cur:
-                user = cur.execute("SELECT role FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
+                user = cur.execute("SELECT 1 FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
                 if not user:
                     raise HTTPException(status_code=404, detail="User not found")
 
@@ -427,7 +438,7 @@ class RoutineService:
                     # チェックリストのステップは、そのブロックに進行が到達していれば
                     # (='locked'でなければ)順不同でチェック/チェック解除できる
                     # (要件: 朝の準備・寝る準備は好きな順で良い)。
-                    self._toggle_checklist_step(flow, progress, target_step, flow_key, user['role'])
+                    self._toggle_checklist_step(flow, progress, target_step, flow_key, user_id)
                 else:
                     current_step = flow['steps'][idx]
                     if current_step['key'] != step_key:
@@ -446,11 +457,12 @@ class RoutineService:
                         # 自由時間(pmのfreeステップ)に到達した瞬間、朝の準備チェックリスト
                         # 全達成時と同じTV電源ON処理を呼ぶ。締切(18:00)超過による強制遷移
                         # (_apply_forced_transition)経由でチェックリストへ直接進んだ場合は
-                        # ここを通らないため発火しない。
+                        # ここを通らないため発火しない。対象は智矢(TV_UNLOCK_TARGET_USER_ID)
+                        # のみで、涼花(role_childだが対象外)がクリアしても発火しない。
                         if (
                             entered_free_time
                             and flow_key == 'pm'
-                            and user['role'] == ROLE_CHILD
+                            and user_id == TV_UNLOCK_TARGET_USER_ID
                             and config.TV_PLUG_DEVICE_ID
                         ):
                             switchbot_service.trigger_tv_unlock("夕方の自由時間開始(宿題・明日の準備完了)")
