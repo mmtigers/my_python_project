@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import types
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
@@ -21,8 +21,6 @@ from freezegun import freeze_time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import common
-import config
-from services import notification_service, switchbot_service
 from services import quest_service as quest_service_module
 from services.quest_service import QuestService, GameSystem
 # Issue #550でGameSystem/QuestServiceの実装はservices/quest/配下へ分割された。
@@ -749,102 +747,6 @@ class TestSyncMasterData:
             ).fetchone()
         assert reward_row is not None, "参照が残っている報酬は削除されずに残ること"
         assert inventory_row is not None
-
-
-class TestTriggerTvUnlock:
-    """
-    QuestService._trigger_tv_unlock() のテスト。
-    実装は threading.Thread(daemon=True) でバックグラウンド実行するため、
-    そのままでは実スレッドが絡みテストが非決定的(flaky)になる。
-    threading.Thread.start を threading.Thread.run に差し替え、
-    start()呼び出し時にターゲット関数を「同じスレッドで同期的に」実行させることで、
-    実スレッド生成を避けつつ決定的にテストする。
-    switchbot_service/notification_serviceは全てモックし、実際のAPI呼び出しは行わない。
-    """
-
-    @pytest.fixture(autouse=True)
-    def _run_background_thread_synchronously(self, monkeypatch):
-        monkeypatch.setattr(threading.Thread, "start", threading.Thread.run)
-
-    def test_success_status_code_does_not_notify_parents(self, monkeypatch):
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_not_called()
-
-    def test_non_success_status_code_notifies_parents_group(self, monkeypatch):
-        monkeypatch.setattr(
-            switchbot_service,
-            "send_device_command",
-            MagicMock(return_value={"statusCode": 190, "message": "Invalid auth"}),
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_called_once()
-        call_kwargs = mock_send_push.call_args.kwargs
-        assert call_kwargs["user_id"] == "group123"
-        assert "失敗" in call_kwargs["messages"][0]["text"]
-
-    def test_no_response_from_switchbot_is_treated_as_failure(self, monkeypatch):
-        """switchbot_service側がFail-Soft設計上Noneを返すケース(未設定/通信失敗)でも
-        例外として扱われ、親グループへの通知分岐に入ること。"""
-        monkeypatch.setattr(switchbot_service, "send_device_command", MagicMock(return_value=None))
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "group123")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_called_once()
-
-    def test_failure_without_parents_group_configured_skips_notification(self, monkeypatch):
-        """LINE_PARENTS_GROUP_ID が未設定の場合は、失敗しても通知を試みない
-        (通知失敗で二重に例外を出さないためのFail-Soft分岐)。"""
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 190})
-        )
-        mock_send_push = MagicMock()
-        monkeypatch.setattr(notification_service, "send_push", mock_send_push)
-        monkeypatch.setattr(config, "LINE_PARENTS_GROUP_ID", "")
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        mock_send_push.assert_not_called()
-
-    def test_does_not_spawn_a_real_background_thread(self, monkeypatch):
-        """daemon=Trueのスレッドとして起動されることの回帰確認(実装の意図を固定する)。"""
-        monkeypatch.setattr(
-            switchbot_service, "send_device_command", MagicMock(return_value={"statusCode": 100})
-        )
-        captured_threads = []
-        real_thread_cls = threading.Thread
-
-        class _CapturingThread(real_thread_cls):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                captured_threads.append(self)
-
-        monkeypatch.setattr(threading, "Thread", _CapturingThread)
-
-        quest_service = QuestService()
-        quest_service._trigger_tv_unlock(quest_id=101)
-
-        assert len(captured_threads) == 1
-        assert captured_threads[0].daemon is True
 
 
 class TestProcessApproveQuestWithDeletedMasterQuest:

@@ -86,7 +86,10 @@ QUESTS = [
     # ------------------------------------------
     # A-1. 通常：共通 (All)
     # ------------------------------------------
-    {'id': 1100, 'title': '【朝】毎朝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 80, 'gold': 120, 'icon': '🌅', 'start_time': '06:00', 'end_time': '09:30', 'desc': 'トイレ・洗顔・着替え・朝ごはん・歯磨き'},
+    # id=1100「【朝】毎朝ミッション」は、朝の準備がroutine_data.py(「きょうのすごろく」am
+    # フローの順不同チェックリスト)へ統合されたため廃止(要件確認済み)。全項目達成時のTV
+    # 電源ON処理はservices/routine_service.py側へ移設した(services/switchbot_service.py
+    # のtrigger_tv_unlock参照)。
     {'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 70, 'icon': '🌙', 'start_time': '19:00', 'end_time': '21:00', 'desc': 'お風呂・トイレ・歯磨き・お片付け完了。全部できたらクリア！'},
 
     # ------------------------------------------
