@@ -135,12 +135,61 @@ class RoutineService:
     def _row_to_progress(self, row) -> Dict[str, Any]:
         return {
             'id': row['id'],
+            # routine_step_events への記録(_record_step_events)に必要な識別子。
+            # 呼び出し側も同じ値を持っているが、progressだけを引き回せば記録できる
+            # ようにしておくことで、_save_progressの呼び出し箇所が増えたときに
+            # 引数の受け渡し漏れで記録が欠落するのを防ぐ。
+            'user_id': row['user_id'],
+            'flow_key': row['flow_key'],
+            'progress_date': row['progress_date'],
             'current_step_index': row['current_step_index'],
             'in_free_time': bool(row['in_free_time']),
             'steps_status': json.loads(row['steps_status']),
             'bonus_gold': row['bonus_gold'],
             'bonus_exp': row['bonus_exp'],
+            # DBに保存済みのsteps_status(差分検出の基準)。steps_statusとは別の
+            # dictオブジェクトである必要があるため、同じJSONを2回パースする。
+            '_saved_steps_status': json.loads(row['steps_status']),
         }
+
+    def _insert_step_events(
+        self, cur, progress: Dict[str, Any], changes: List[Tuple[str, Optional[str], str]],
+        source: str, occurred_at: str,
+    ) -> None:
+        """ステップの状態遷移を routine_step_events へ追記する(migrations/0011)。
+
+        changes は (step_key, from_status, to_status) のリスト。追記専用のため
+        既存の読み取り経路には一切影響しない。
+        """
+        if not changes:
+            return
+        cur.executemany("""
+            INSERT INTO routine_step_events
+                (user_id, flow_key, progress_date, step_key, from_status, to_status, source, occurred_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                progress['user_id'], progress['flow_key'], progress['progress_date'],
+                step_key, from_status, to_status, source, occurred_at,
+            )
+            for step_key, from_status, to_status in changes
+        ])
+
+    def _record_step_events(self, cur, progress: Dict[str, Any], source: str, occurred_at: str) -> None:
+        """DB保存済みの状態(`_saved_steps_status`)との差分を routine_step_events へ追記する。
+
+        _save_progress からのみ呼ばれる。steps_status を書き換える箇所
+        (_toggle_checklist_step・complete_stepの非チェックリスト分岐・
+        _apply_forced_transition)は最終的に必ず _save_progress を経由するため、
+        ここ1箇所で全ての遷移を捕捉できる。
+        """
+        saved = progress.get('_saved_steps_status') or {}
+        changes = [
+            (key, saved.get(key), to_status)
+            for key, to_status in progress['steps_status'].items()
+            if saved.get(key) != to_status
+        ]
+        self._insert_step_events(cur, progress, changes, source, occurred_at)
 
     def _get_or_create_progress(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime
@@ -174,9 +223,31 @@ class RoutineService:
             "SELECT * FROM routine_progress WHERE user_id=? AND flow_key=? AND progress_date=?",
             (user_id, flow_key, date_str),
         ).fetchone()
-        return self._row_to_progress(row)
+        progress = self._row_to_progress(row)
 
-    def _save_progress(self, cur, progress: Dict[str, Any]) -> None:
+        # 土日スキップ/繰越により「当日は実施していないのに done 扱い」で始まった
+        # ステップを記録しておく(migrations/0011)。これを残さないと、集計側が
+        # 「0時ちょうどに宿題を終えた日」として誤って所要時間に混ぜてしまう。
+        # 'current'への活性化は進行がそこへ到達しただけで遷移の記録に値しないため
+        # 対象にしない。
+        self._insert_step_events(
+            cur, progress,
+            [(s['key'], None, 'done') for s in flow['steps'] if s['key'] in skip_keys],
+            'carryover_skip', now.isoformat(),
+        )
+        return progress
+
+    def _save_progress(
+        self, cur, progress: Dict[str, Any], source: str, occurred_at: str
+    ) -> None:
+        """進捗を保存し、あわせてステップの状態遷移を routine_step_events へ追記する。
+
+        source / occurred_at は呼び出し元が持つ文脈(ユーザー操作か締切超過か、
+        およびその時刻)。updated_at に common.get_now_iso() を使う既存挙動は
+        変えず、イベントの時刻だけは注入された now を基準にする
+        (テストが now を注入する設計のため、実時刻を使うと検証できなくなる)。
+        """
+        self._record_step_events(cur, progress, source, occurred_at)
         cur.execute("""
             UPDATE routine_progress
             SET current_step_index=?, in_free_time=?, steps_status=?, bonus_gold=?, bonus_exp=?, updated_at=?
@@ -187,6 +258,10 @@ class RoutineService:
             progress['bonus_gold'], progress['bonus_exp'],
             common.get_now_iso(), progress['id'],
         ))
+        # 同一リクエスト内で _save_progress が複数回呼ばれても(complete_step は
+        # 保存後にもう一度 _apply_forced_transition を通す)同じ遷移を二重に
+        # 記録しないよう、保存済みの状態を更新する。
+        progress['_saved_steps_status'] = dict(progress['steps_status'])
 
     def _eligible_done_ratio(self, flow: RoutineFlow, progress: Dict[str, Any]) -> float:
         """チェックポイントより前の全ステップのうち、'done'の割合(0.0〜1.0)を返す。
@@ -267,7 +342,7 @@ class RoutineService:
         progress['in_free_time'] = False
         self._activate_block(flow, progress['steps_status'], next_index)
 
-        self._save_progress(cur, progress)
+        self._save_progress(cur, progress, 'forced_transition', now.isoformat())
         if bonus_gold or bonus_exp:
             bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)
             progress['leveled_up'] = bonus_result['leveled_up']
@@ -466,7 +541,7 @@ class RoutineService:
                             and config.TV_PLUG_DEVICE_ID
                         ):
                             switchbot_service.trigger_tv_unlock("夕方の自由時間開始(宿題・明日の準備完了)")
-                self._save_progress(cur, progress)
+                self._save_progress(cur, progress, 'user', now.isoformat())
 
                 # 直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合
                 # (例: 出遅れて自由時間に入った瞬間には既に7:50だった)、この場で

@@ -366,3 +366,23 @@ CREATE TABLE routine_progress (
 );
 CREATE INDEX idx_routine_progress_user_date
     ON routine_progress(user_id, progress_date);
+CREATE TABLE routine_step_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    flow_key TEXT NOT NULL,          
+    progress_date TEXT NOT NULL,     
+    step_key TEXT NOT NULL,          
+    
+    from_status TEXT,
+    to_status TEXT NOT NULL,         
+    
+    
+    
+    
+    
+    
+    source TEXT NOT NULL,
+    occurred_at TEXT NOT NULL        
+);
+CREATE INDEX idx_routine_step_events_user_date
+    ON routine_step_events(user_id, progress_date);
