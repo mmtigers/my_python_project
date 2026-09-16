@@ -153,8 +153,9 @@ describe('RoutineFreeTimeBanner', () => {
 });
 
 // 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)では、デイリークエストから
-// すごろくへ寄せたステップだけが個別の即時報酬(gold/exp)を持つ。
-const dadPmFlow: RoutineActiveFlow = {
+// すごろくへ寄せたステップだけが個別の即時報酬(gold/exp)を持つ。ここではママの
+// 「夕食を作る」(旧クエスト id=21 から移設)を持つpmフローを使う。
+const momPmFlow: RoutineActiveFlow = {
     started: true,
     title: '帰ってから寝るまで',
     checkpoint_time: '18:00',
@@ -172,8 +173,7 @@ const dadPmFlow: RoutineActiveFlow = {
     steps: [
         { key: 'handwash', label: '帰宅・手洗い', icon_key: 'handwash', is_checkpoint: false, is_checklist: false, status: 'done', gold: 0, exp: 0 },
         { key: 'snack', label: 'ひと休み', icon_key: 'snack', is_checkpoint: false, is_checklist: false, status: 'done', gold: 0, exp: 0 },
-        { key: 'kitchen_reset', label: 'キッチンリセット', icon_key: 'kitchen', is_checkpoint: false, is_checklist: false, status: 'current', gold: 50, exp: 80 },
-        { key: 'living_reset', label: 'リビングリセット', icon_key: 'living', is_checkpoint: false, is_checklist: false, status: 'locked', gold: 50, exp: 80 },
+        { key: 'cook_dinner', label: '夕食を作る', icon_key: 'kitchen', is_checkpoint: false, is_checklist: false, status: 'current', gold: 150, exp: 150 },
         { key: 'free', label: '自由時間', icon_key: 'free', is_checkpoint: true, is_checklist: false, status: 'locked', gold: 0, exp: 0 },
     ],
 };
@@ -182,14 +182,14 @@ describe('RoutineFlow step rewards (adult flows)', () => {
     afterEach(() => cleanup());
 
     it('shows the step reward next to steps that carry one', () => {
-        render(<RoutineFlow flowKey="pm" flow={dadPmFlow} onCompleteStep={vi.fn()} />);
+        render(<RoutineFlow flowKey="pm" flow={momPmFlow} onCompleteStep={vi.fn()} />);
 
-        // 「今ここ」のキッチンリセットと、まだ先のリビングリセットの2つ分。
-        expect(screen.getAllByText('50')).toHaveLength(2);
+        // 報酬チップを持つのは「今ここ」の夕食を作るのみ。
+        expect(screen.getAllByText('150')).toHaveLength(1);
     });
 
     it('shows no reward chip for steps without a step reward', () => {
-        render(<RoutineFlow flowKey="pm" flow={dadPmFlow} onCompleteStep={vi.fn()} />);
+        render(<RoutineFlow flowKey="pm" flow={momPmFlow} onCompleteStep={vi.fn()} />);
 
         expect(screen.getByText('ひと休み')).toBeInTheDocument();
         expect(screen.queryByText('0')).not.toBeInTheDocument();
@@ -197,9 +197,9 @@ describe('RoutineFlow step rewards (adult flows)', () => {
 
     it('still reports completion of a rewarded step through onCompleteStep', () => {
         const onCompleteStep = vi.fn();
-        render(<RoutineFlow flowKey="pm" flow={dadPmFlow} onCompleteStep={onCompleteStep} />);
+        render(<RoutineFlow flowKey="pm" flow={momPmFlow} onCompleteStep={onCompleteStep} />);
 
         fireEvent.click(screen.getByRole('button', { name: '完了！' }));
-        expect(onCompleteStep).toHaveBeenCalledWith('kitchen_reset');
+        expect(onCompleteStep).toHaveBeenCalledWith('cook_dinner');
     });
 });

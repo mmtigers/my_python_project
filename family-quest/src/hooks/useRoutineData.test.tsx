@@ -164,19 +164,19 @@ describe('useRoutineData reports step rewards granted by POST /complete', () => 
         const getMock = vi.mocked(apiClient.get);
         getMock.mockResolvedValue(makeTodayResponse());
         const postMock = vi.mocked(apiClient.post);
-        postMock.mockResolvedValue(makeFlow({ granted_gold: 50, granted_exp: 80 }));
+        postMock.mockResolvedValue(makeFlow({ granted_gold: 150, granted_exp: 150 }));
 
         const onStepReward = vi.fn();
         const wrapper = createWrapper();
         const { result } = renderHook(
-            () => useRoutineData('dad', undefined, undefined, onStepReward),
+            () => useRoutineData('mom', undefined, undefined, onStepReward),
             { wrapper },
         );
 
         await waitFor(() => expect(result.current.flows?.am).toBeDefined());
-        await result.current.completeStep('pm', 'kitchen_reset');
+        await result.current.completeStep('pm', 'cook_dinner');
 
-        expect(onStepReward).toHaveBeenCalledWith({ gold: 50, exp: 80 });
+        expect(onStepReward).toHaveBeenCalledWith({ gold: 150, exp: 150 });
     });
 
     it('does not call onStepReward for steps without a reward', async () => {

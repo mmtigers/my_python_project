@@ -154,7 +154,7 @@ const FamilyPanel: React.FC<FamilyPanelProps> = ({
             showToast({ title: 'エラー', text: detail || '通信状態を確認し、もう一度お試しください', icon: '⚠️' });
             play('cancel');
         },
-        // 大人用フローに寄せたステップ(パパのキッチンリセット等)の即時報酬。
+        // 大人用フローに寄せたステップ(ママの「夕食を作る」等)の即時報酬。
         (reward) => {
             play('clear');
             showToast({ title: 'クリア！', text: `${user.name}は ${reward.gold} G を手に入れた！`, icon: '💰' });

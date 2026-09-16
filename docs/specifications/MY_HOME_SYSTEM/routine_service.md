@@ -524,7 +524,7 @@
 
 ### `_grant_step_reward`（大人用フロー分離で新規追加）
 
-* **役割**: ステップ個別の即時報酬(`routine_data.RoutineStep`の`gold`/`exp`)をその場で付与する。`get_step_reward(step)`が`(0, 0)`を返せば何もしない(子ども用フローの全ステップがこれにあたる)。付与自体は`_grant_bonus`を再利用し、付与額を`progress['granted_gold']`/`progress['granted_exp']`へ加算して`_serialize_flow`がレスポンスに載せられるようにする。レベルアップした場合は`progress['leveled_up']`を`True`にするが、既に立っているフラグを消さないようORで畳み込む。`new_level`は後から付与した側が最新のレベルになるため常に上書きする。docstringによれば、シーケンシャルな進行は後戻りしないため、順番どおり完了報告した「その1回」でのみ加算され二重付与は起きない。付与時は`logger.info`で`Routine Step Reward: User=..., Step=..., Gold=..., Exp=...`を出力する。
+* **役割**: ステップ個別の即時報酬(`routine_data.RoutineStep`の`gold`/`exp`)をその場で付与する。`get_step_reward(step)`が`(0, 0)`を返せば何もしない(子ども用フローの全ステップと、大人用フローのうち報酬を持たないステップ——パパの`work`「お仕事」等——がこれにあたる)。付与自体は`_grant_bonus`を再利用し、付与額を`progress['granted_gold']`/`progress['granted_exp']`へ加算して`_serialize_flow`がレスポンスに載せられるようにする。レベルアップした場合は`progress['leveled_up']`を`True`にするが、既に立っているフラグを消さないようORで畳み込む。`new_level`は後から付与した側が最新のレベルになるため常に上書きする。docstringによれば、シーケンシャルな進行は後戻りしないため、順番どおり完了報告した「その1回」でのみ加算され二重付与は起きない。付与時は`logger.info`で`Routine Step Reward: User=..., Step=..., Gold=..., Exp=...`を出力する。
 * 根拠: [メソッド定義] (行番号: 326-347 / 抜粋: "def _grant_step_reward(self, cur, user_id: str, progress: Dict[str, Any], step: RoutineStep) -> None:" … "        gold, exp = get_step_reward(step)\n        if not gold and not exp:\n            return\n        result = self._grant_bonus(cur, user_id, gold, exp)\n        # フロント側で「+50 G」のトーストを出すための、この1レスポンス限りの加算額。\n        progress['granted_gold'] = progress.get('granted_gold', 0) + gold\n        progress['granted_exp'] = progress.get('granted_exp', 0) + exp\n        progress['leveled_up'] = bool(result['leveled_up']) or progress.get('leveled_up', False)\n        progress['new_level'] = result['new_level']")
 
 * **引数/リクエスト**: `cur`(DBカーソル)、`user_id: str`、`progress: Dict[str, Any]`(インプレースで書き換えられる)、`step: RoutineStep`
@@ -812,7 +812,7 @@ ROUTINE_FLOWSの直接importは同変更で廃止)"]
 | 高 | `migrations/0010_add_routine_progress.sql` | `routine_progress`テーブルの正確なスキーマ(カラム制約・`UNIQUE`制約・インデックス)を確認し、本ファイルのSQL文(**休日PM微修正で追加**の`_was_done_on_any_date`による日付をまたいだ`IN (...)`検索を含む)が前提とする構造を検証するため(マイグレーション自体は仕様書ドリフト規約の対象外だが、コード理解のための直接参照は有用)。 | [SQL文] (行番号: 148-150, 163-172, 61-64) |
 | 中 | `services/quest/locks.py` | `_get_user_balance_lock`が実際にどのような排他制御(参照カウント付きロック)を行っているかを確認し、`quest_service`とのロック共用によるデッドロック等のリスクを評価するため。 | [quest_locks.md](./quest_locks.md)(既存)、[インポート宣言] (行番号: 23) |
 | 中 | `game_logic.py` | `calc_level_progress`のレベルアップ判定式の詳細を確認し、`_grant_bonus`が付与するボーナスがどうレベル/経験値に反映されるかを把握するため。 | [game_logic.md](./game_logic.md)(既存)、[関数呼び出し] (行番号: 221-223) |
-| 低 | `quest_data.py` | `FULL_BONUS_GOLD`/`FULL_BONUS_EXP`の値がquest_data.pyのREWARDS(id=11)と同額に設定されている旨のコメントの妥当性を検証するため。**（大人用フロー分離で追加）** 併せて、大人用フローのステップ個別報酬が引き継いだ旧デイリークエスト(id=12/13/1006)が`QUESTS`から退役済みであり、同じ作業に対する二重付与になっていないことを確認するため。 | [routine_data.md](./routine_data.md)§8参照 |
+| 低 | `quest_data.py` | `FULL_BONUS_GOLD`/`FULL_BONUS_EXP`の値がquest_data.pyのREWARDS(id=11)と同額に設定されている旨のコメントの妥当性を検証するため。**（大人用フロー分離で追加）** 併せて、大人用フローのステップ個別報酬が引き継いだ旧デイリークエスト(id=21「夕食を作る」)が`QUESTS`から退役済みであり、同じ作業に対する二重付与になっていないこと、および報酬を持たない`work`「お仕事」ステップと併存する id=10「会社勤務 (通常)」の内容を確認するため。 | [routine_data.md](./routine_data.md)§8参照 |
 
 ## 8. 保守上の注意点
 

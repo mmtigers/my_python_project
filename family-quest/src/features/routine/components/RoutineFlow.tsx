@@ -10,7 +10,7 @@ import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
-    CookingPot, Sofa, NotebookPen,
+    CookingPot, Briefcase,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -32,11 +32,10 @@ const ICONS: Record<string, LucideIcon> = {
     bath: ShowerHead,
     sleep: BedDouble,
     // 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)のタスクステップ。
-    // 'meal'(UtensilsCrossed)は朝/晩ごはんで使っているため、キッチンリセットは
-    // 調理器具のCookingPotで見分けが付くようにする。
+    // 'meal'(UtensilsCrossed)は「食べる」側で使っているため、ママの「夕食を作る」は
+    // 調理器具のCookingPotで「作る」側と見分けが付くようにする。
     kitchen: CookingPot,
-    living: Sofa,
-    notebook: NotebookPen,
+    work: Briefcase,
 };
 
 const THEME = {

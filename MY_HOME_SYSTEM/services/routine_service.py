@@ -326,8 +326,8 @@ class RoutineService:
     def _grant_step_reward(self, cur, user_id: str, progress: Dict[str, Any], step: RoutineStep) -> None:
         """ステップ個別の即時報酬(routine_data.RoutineStepのgold/exp)をその場で付与する。
 
-        大人用フローで、生活動線そのものだったデイリークエスト(例: パパのキッチン
-        リセット)をquest_data.QUESTSから「すごろく」へ寄せた分の報酬。チェックポイント
+        大人用フローで、生活動線そのものだったデイリークエスト(例: ママの「夕食を
+        作る」)をquest_data.QUESTSから「すごろく」へ寄せた分の報酬。チェックポイント
         通過ボーナス(_apply_forced_transition)とは別枠で、順番どおり完了報告した
         「その1回」でのみ加算される(以降そのステップは'done'のままで、シーケンシャルな
         進行は後戻りしないため二重付与は起きない)。子ども用フローのステップは
