@@ -793,3 +793,177 @@ class TestRouterHttp:
     def test_get_today_missing_user_id_returns_422(self, api_client):
         res = api_client.get("/api/routine/today")
         assert res.status_code == 422
+
+
+def _step_events(user_id='daughter', flow_key=None, source=None):
+    """routine_step_events(migrations/0011)を記録順に取得するヘルパー。"""
+    sql = "SELECT * FROM routine_step_events WHERE user_id=?"
+    params: list = [user_id]
+    if flow_key:
+        sql += " AND flow_key=?"
+        params.append(flow_key)
+    if source:
+        sql += " AND source=?"
+        params.append(source)
+    sql += " ORDER BY id"
+    with common.get_db_cursor() as cur:
+        return [dict(row) for row in cur.execute(sql, tuple(params))]
+
+
+class TestStepEventRecording:
+    """ステップの状態遷移が routine_step_events へ時刻つきで追記されること
+    (migrations/0011)。steps_status は「今どうなっているか」しか持たないため、
+    「何時に何を終えたか」はこのテーブルにしか残らない。"""
+
+    def test_checklist_check_records_user_event_with_occurred_at(self, isolated_db):
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 12))
+
+        events = _step_events(flow_key='am')
+        assert len(events) == 1
+        ev = events[0]
+        assert ev['step_key'] == 'wash'
+        assert ev['from_status'] == 'current'
+        assert ev['to_status'] == 'done'
+        assert ev['source'] == 'user'
+        assert ev['progress_date'] == '2024-01-01'
+        # 実時刻ではなく注入された now を基準にすること(テスト可能性のため)
+        assert ev['occurred_at'] == _at(6, 12).isoformat()
+
+    def test_uncheck_records_reverse_transition(self, isolated_db):
+        """チェックリストは取り消せる(要件)。取り消しも遷移として残し、
+        集計側が「6:12に終えたが6:15に取り消した」を復元できるようにする。"""
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 12))
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 15))
+
+        events = _step_events(flow_key='am')
+        assert [(e['from_status'], e['to_status'], e['occurred_at']) for e in events] == [
+            ('current', 'done', _at(6, 12).isoformat()),
+            ('done', 'current', _at(6, 15).isoformat()),
+        ]
+
+    def test_each_checklist_item_records_its_own_time(self, isolated_db):
+        """所要時間の算出に必要な「項目ごとの時刻」が個別に残ること。"""
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 30))
+        routine_service.complete_step('daughter', 'am', 'clothes', now=_at(6, 41))
+
+        done_times = {
+            e['step_key']: e['occurred_at']
+            for e in _step_events(flow_key='am') if e['to_status'] == 'done'
+        }
+        assert done_times == {
+            'meal': _at(6, 30).isoformat(),
+            'clothes': _at(6, 41).isoformat(),
+        }
+
+    def test_forced_transition_is_distinguishable_from_user_action(self, isolated_db):
+        """締切超過による'remind'/'done'は source='forced_transition' で記録され、
+        自分でチェックした分(source='user')と区別できること。両者を同じ'done'として
+        混ぜると所要時間の統計が壊れるため、この区別が本テーブルの肝になる。"""
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
+        routine_service.complete_step('daughter', 'am', 'meal', now=_at(6, 5))
+
+        routine_service.get_today_state('daughter', now=_at(7, 51))
+
+        forced = _step_events(flow_key='am', source='forced_transition')
+        assert {e['step_key']: e['to_status'] for e in forced} == {
+            'clothes': 'remind',
+            'teeth': 'remind',
+            'toilet': 'remind',
+            'free': 'done',
+        }
+        assert all(e['occurred_at'] == _at(7, 51).isoformat() for e in forced)
+
+        user_done = {e['step_key'] for e in _step_events(flow_key='am', source='user')}
+        assert user_done == {'wash', 'meal'}
+
+    def test_forced_transition_recorded_only_once(self, isolated_db):
+        """_apply_forced_transition は冪等(GET/POSTのどちらからも呼ばれる)。
+        ポーリングのたびにイベントが増えないこと。"""
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'wash', now=_at(6, 0))
+        routine_service.get_today_state('daughter', now=_at(7, 51))
+        before = len(_step_events(flow_key='am'))
+
+        routine_service.get_today_state('daughter', now=_at(7, 52))
+        routine_service.get_today_state('daughter', now=_at(8, 30))
+
+        assert len(_step_events(flow_key='am')) == before
+
+    def test_no_duplicate_events_within_single_request(self, isolated_db):
+        """complete_step は保存後にもう一度 _apply_forced_transition を通すため、
+        1リクエスト内で _save_progress が2回走りうる。同じ遷移が二重に
+        記録されないこと(occurred_atまで含めて完全一致する行が無いこと)。"""
+        _seed_user()
+        # 18:00の締切を過ぎてから寝る準備(チェックリスト)をチェックする経路
+        routine_service.complete_step('daughter', 'pm', 'dinner', now=_at(18, 1))
+
+        events = _step_events(flow_key='pm')
+        keys = [
+            (e['step_key'], e['from_status'], e['to_status'], e['source'], e['occurred_at'])
+            for e in events
+        ]
+        assert len(keys) == len(set(keys))
+        # 強制遷移の直後に dinner を自分でチェックした、という2種類が並ぶ
+        assert ('dinner', 'current', 'done', 'user', _at(18, 1).isoformat()) in keys
+        # 進行が'free'へ到達しないまま締切を過ぎたため、'free'は locked -> done になる
+        assert ('free', 'locked', 'done', 'forced_transition', _at(18, 1).isoformat()) in keys
+
+    def test_non_checklist_step_completion_is_recorded(self, isolated_db):
+        _seed_user()
+        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 3))
+
+        events = _step_events(flow_key='pm')
+        done = [e for e in events if e['step_key'] == 'handwash']
+        assert len(done) == 1
+        assert done[0]['to_status'] == 'done'
+        assert done[0]['source'] == 'user'
+        assert done[0]['occurred_at'] == _at(14, 3).isoformat()
+
+    def test_weekend_skip_is_recorded_as_carryover_skip(self, isolated_db):
+        """土日にスキップされた手洗いは「当日実施していないのにdone」なので、
+        source='carryover_skip' として区別する(集計が0時ちょうどの達成として
+        誤って所要時間に混ぜないため)。"""
+        _seed_user()
+        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+
+        skips = _step_events(flow_key='pm', source='carryover_skip')
+        assert len(skips) == 1
+        assert skips[0]['step_key'] == 'handwash'
+        assert skips[0]['from_status'] is None
+        assert skips[0]['to_status'] == 'done'
+        assert skips[0]['progress_date'] == '2024-01-06'
+        assert skips[0]['occurred_at'] == _saturday_at(14, 0).isoformat()
+
+    def test_homework_carryover_from_friday_is_recorded_as_skip(self, isolated_db):
+        """金曜に終わらせた宿題が土曜に繰越スキップされる場合、
+        土曜側は 'user' ではなく 'carryover_skip' として残ること。"""
+        _seed_user()
+        for key in ('handwash', 'snack', 'homework'):
+            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
+
+        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+
+        saturday_skips = {
+            e['step_key'] for e in _step_events(flow_key='pm', source='carryover_skip')
+            if e['progress_date'] == '2024-01-06'
+        }
+        assert 'homework' in saturday_skips
+        assert 'handwash' in saturday_skips
+
+        friday_user = {
+            e['step_key'] for e in _step_events(flow_key='pm', source='user')
+            if e['progress_date'] == '2024-01-05' and e['to_status'] == 'done'
+        }
+        assert friday_user == {'handwash', 'snack', 'homework'}
+
+    def test_am_and_pm_events_are_separated_by_flow_key(self, isolated_db):
+        _seed_user()
+        routine_service.complete_step('daughter', 'am', 'teeth', now=_at(6, 50))
+        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 2))
+
+        assert {e['step_key'] for e in _step_events(flow_key='am')} == {'teeth'}
+        assert {e['step_key'] for e in _step_events(flow_key='pm')} == {'handwash', 'snack'}

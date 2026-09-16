@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `3ac46ca` (+同一ブランチ内で土日のチェックポイント時刻上書き対応・休日PMのステップスキップ/宿題引き継ぎ対応・朝の準備の順不同チェックリスト化・夜の切り替え時刻変更/寝る準備チェックリスト化/明日の準備追加・7:50超過後のam画面非表示化/pm自由時間TV解錠・TV自動ON対象を智矢個人へ限定を追加修正) |
+| 解析基準コミット | `3ac46ca` (+同一ブランチ内で土日のチェックポイント時刻上書き対応・休日PMのステップスキップ/宿題引き継ぎ対応・朝の準備の順不同チェックリスト化・夜の切り替え時刻変更/寝る準備チェックリスト化/明日の準備追加・7:50超過後のam画面非表示化/pm自由時間TV解錠・TV自動ON対象を智矢個人へ限定・ステップ状態遷移の追記記録(`routine_step_events`)を追加修正) |
 
 ## 関連ドキュメント
 
@@ -20,11 +20,12 @@
 * [config.md](./config.md)（毎朝ミッション統合で追加） - 本ファイルが`import config`でimportし`config.TV_PLUG_DEVICE_ID`を参照する設定モジュール
 * [switchbot_service.md](./switchbot_service.md)（毎朝ミッション統合で追加） - 本ファイルが`from services import switchbot_service`でimportし`switchbot_service.trigger_tv_unlock`を呼び出すSwitchBot連携モジュール。旧`quest_id=1100`「毎朝ミッション」クエスト承認時と同じTV解錠処理を共有する
 * [quest_quest_service.md](./quest_quest_service.md)（毎朝ミッション統合で追加） - `switchbot_service.trigger_tv_unlock`のもう一方の呼び出し元（クエスト承認時）。廃止された`quest_id=1100`の経緯はこちらを参照
+* `MY_HOME_SYSTEM/migrations/0011_add_routine_step_events.sql`（ステップ遷移の追記記録で追加） - 本ファイルが`INSERT`する`routine_step_events`テーブルの定義元。`migrations/`配下は仕様書の対応付け対象外(`docs/specifications/README.md`)のため、対応するMarkdownは存在しない
 
 ## 2. ファイルの概要
 
-デイリールーティン(すごろく形式の生活導線UI)のサービス層。ファイル冒頭のdocstringが述べる通り、`routers/routine_router.py`はパース・検証のみを行いロジックはここに委譲するというCLAUDE.mdのレイヤリング規約に従う。`quest_users`テーブル(gold/exp/level)への書き込みを伴うため、`services/quest/locks.py`のユーザー残高ロックを`quest_service`と共用し、クエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ設計である。ユーザーごと・フロー(`am`/`pm`)ごと・日付ごとの進捗を`routine_progress`テーブルに保持し、チェックポイント時刻を過ぎた際に未完了ステップを「まだだよ(remind)」に変えつつ達成率に応じたボーナス(gold/exp)を按分付与する「強制切替」ロジック(`_apply_forced_transition`)が本ファイルの中核である。**（土日対応で変更）** チェックポイントの締切時刻は`routine_data.get_effective_checkpoint_time(step, now)`で解決するようになり、`now`の曜日が土日であれば`weekend_checkpoint_time`（設定されていれば）を、それ以外は従来通り`checkpoint_time`を使う。この解決は`_apply_forced_transition`(締切判定)と`_serialize_flow`(レスポンス表示用の`checkpoint_time`算出)の両方で行われる。**（休日PM微修正で追加）** さらに、`routine_data.RoutineStep`に新設された`weekend_skip`(土日はステップ自体を不要とする)・`weekend_carryover`(前日以前の完了実績を引き継いで不要とする)の2フラグを解釈する処理が本ファイルに追加された。土日のみ、フロー生成時(`_get_or_create_progress`)に`_resolve_skip_keys`でスキップ対象のステップkey集合を求め、`_empty_statuses`がそれらを最初から`'done'`として扱う初期状態を組み立てる。`weekend_carryover`対象ステップについては`_carryover_lookback_dates`(土曜は前日、日曜は前日・前々日)で遡るべき日付を求め、`_was_done_on_any_date`がその日付の`routine_progress`行の`steps_status`を実際に参照して判定する。ステップ完了(`complete_step`)や強制切替(`_apply_forced_transition`)で次のステップへ進める際にスキップ済みステップを飛ばす処理は共通ヘルパー`_next_active_index`に切り出されている。**（朝の準備チェックリスト化で追加、夜の切り替え/寝る準備チェックリスト化で一般化）** `routine_data.RoutineStep`に新設された`checklist`フィールド(順不同でチェックできるグループの一員かどうか)を解釈する処理も本ファイルに追加された。以前は`checklist=True`のブロックが「フロー先頭」に固定されている前提で書かれていたが(`am`にしかチェックリストが無く、その直後がチェックポイントだったため)、`pm`フローのチェックポイント通過後(寝る準備4項目)にもチェックリストを置く要件に伴い、`routine_data.get_checklist_range(flow)`が返す`(開始index, 終了index+1)`を軸にした汎用的な実装に一般化された。新設の`_activate_block(flow, statuses, index)`は「`index`のステップに進行が到達した」ことを表現する共通処理で、それが単独ステップなら`'current'`にするだけだが、`checklist=True`なグループの一員なら`get_checklist_range`が返す範囲全体を一括で`'current'`にする。`_empty_statuses`(フロー生成時の初期化)・`_apply_forced_transition`(チェックポイント通過後の次ステップ活性化)・`complete_step`の逐次ステップ分岐(通常ステップ完了後の次ステップ活性化)の3箇所全てが、この`_activate_block`を経由するようになったことで、チェックリストが「フロー先頭」「チェックポイント通過後」のどちらに置かれていても同じコードで正しく動作する。`complete_step`は対象ステップが`checklist=True`なら現在地(`current_step_index`)と無関係に`_toggle_checklist_step`へ処理を委譲し、`'current'`⇔`'done'`のトグルとチェックリスト全項目達成時の「ブロック直後のステップ」への遷移(またはその巻き戻し)を行う。**（夜の切り替え/寝る準備チェックリスト化で変更）** この「ブロック直後のステップ」は`am`では出発チェックポイント(`free`)だが、`pm`では単なる`sleep`(就寝、チェックポイントではない)であるため、`_toggle_checklist_step`の実装も「チェックポイントの前後」という特化した表現から「チェックリストブロックの境界(boundary)の前後」という一般化された表現に書き直され、境界に到達していない(まだ`'locked'`)ブロックへのトグルを拒否するガードも新設された。達成率に応じたボーナス按分の比率計算(`_eligible_done_ratio`)は`_apply_forced_transition`と、チェックポイント通過前でも常にライブ表示できる新設の`_compute_bonus_preview`(`_serialize_flow`の`preview_bonus_gold`が使う)の両方から共有される共通ヘルパーとして切り出された(この計算式自体は`checklist`がチェックポイントの前にあるか後にあるかを意識しないため、`pm`のチェックポイント通過後チェックリストが追加された今回の変更でも計算式自体に変更は無い)。公開メソッドは`get_today_state`(状態取得)と`complete_step`(ステップ完了/チェックリストのトグル)の2つで、モジュールレベルシングルトン`routine_service`としてインスタンス化され`routine_router.py`から直接importされる(CLAUDE.mdのDI非導入方針・モジュールレベルシングルトンパターンに従う)。**（TV対象を智矢個人へ限定する修正で追加）** `_toggle_checklist_step`(朝の準備チェックリスト全達成)・`complete_step`(夕方フリータイム到達)双方のTV自動ONトリガーは、当初`services.quest.locks.ROLE_CHILD`との比較(`role`が子供かどうか)で対象者を判定していたが、涼花(`daughter`)も`role_child`でありTV操作の対象に含まれてしまうため、モジュールレベル定数`TV_UNLOCK_TARGET_USER_ID`(値`'son'`)との`user_id`比較に置き換えられた。これに伴い`from services.quest.locks import ...`から`ROLE_CHILD`のimportは削除され、`complete_step`冒頭のユーザー存在確認クエリも`role`列取得(`SELECT role FROM ...`)から存在確認のみ(`SELECT 1 FROM ...`)に戻された。
-根拠: [モジュールdocstring] (行番号: 1-6 / 抜粋: "routers/routine_router.py はパース・検証のみを行い、ロジックはここに委譲する\n(CLAUDE.mdのレイヤリング規約)。quest_users(gold/exp/level)への書き込みを伴うため、\nservices/quest/locks.py の user balance lock を quest_service と共用し、\nクエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ。")、[モジュールレベルシングルトン] (行番号: 479 / 抜粋: "routine_service = RoutineService()")、[休日PM微修正の中核メソッド群] (行番号: 68-83, 85-102, 104-114 / 抜粋: "def _resolve_skip_keys(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, now: datetime.datetime) -> Set[str]:", "def _empty_statuses(self, flow: RoutineFlow, skip_keys: Set[str]) -> Tuple[Dict[str, str], int]:", "def _next_active_index(self, flow: RoutineFlow, statuses: Dict[str, str], start_index: int) -> int:")、[朝の準備チェックリスト化の中核メソッド群、毎朝ミッション統合で3件目のシグネチャが変更] (行番号: 191-204, 206-215, 282-342 / 抜粋: "def _eligible_done_ratio(self, flow: RoutineFlow, progress: Dict[str, Any]) -> float:", "def _compute_bonus_preview(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Tuple[int, int]:", "def _toggle_checklist_step(\n        self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],\n        flow_key: str, user_id: str,\n    ) -> None:")、[夜の切り替え/寝る準備チェックリスト化の中核メソッド] (行番号: 116-133 / 抜粋: "def _activate_block(self, flow: RoutineFlow, statuses: Dict[str, str], index: int) -> None:")
+デイリールーティン(すごろく形式の生活導線UI)のサービス層。ファイル冒頭のdocstringが述べる通り、`routers/routine_router.py`はパース・検証のみを行いロジックはここに委譲するというCLAUDE.mdのレイヤリング規約に従う。`quest_users`テーブル(gold/exp/level)への書き込みを伴うため、`services/quest/locks.py`のユーザー残高ロックを`quest_service`と共用し、クエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ設計である。ユーザーごと・フロー(`am`/`pm`)ごと・日付ごとの進捗を`routine_progress`テーブルに保持し、チェックポイント時刻を過ぎた際に未完了ステップを「まだだよ(remind)」に変えつつ達成率に応じたボーナス(gold/exp)を按分付与する「強制切替」ロジック(`_apply_forced_transition`)が本ファイルの中核である。**（土日対応で変更）** チェックポイントの締切時刻は`routine_data.get_effective_checkpoint_time(step, now)`で解決するようになり、`now`の曜日が土日であれば`weekend_checkpoint_time`（設定されていれば）を、それ以外は従来通り`checkpoint_time`を使う。この解決は`_apply_forced_transition`(締切判定)と`_serialize_flow`(レスポンス表示用の`checkpoint_time`算出)の両方で行われる。**（休日PM微修正で追加）** さらに、`routine_data.RoutineStep`に新設された`weekend_skip`(土日はステップ自体を不要とする)・`weekend_carryover`(前日以前の完了実績を引き継いで不要とする)の2フラグを解釈する処理が本ファイルに追加された。土日のみ、フロー生成時(`_get_or_create_progress`)に`_resolve_skip_keys`でスキップ対象のステップkey集合を求め、`_empty_statuses`がそれらを最初から`'done'`として扱う初期状態を組み立てる。`weekend_carryover`対象ステップについては`_carryover_lookback_dates`(土曜は前日、日曜は前日・前々日)で遡るべき日付を求め、`_was_done_on_any_date`がその日付の`routine_progress`行の`steps_status`を実際に参照して判定する。ステップ完了(`complete_step`)や強制切替(`_apply_forced_transition`)で次のステップへ進める際にスキップ済みステップを飛ばす処理は共通ヘルパー`_next_active_index`に切り出されている。**（朝の準備チェックリスト化で追加、夜の切り替え/寝る準備チェックリスト化で一般化）** `routine_data.RoutineStep`に新設された`checklist`フィールド(順不同でチェックできるグループの一員かどうか)を解釈する処理も本ファイルに追加された。以前は`checklist=True`のブロックが「フロー先頭」に固定されている前提で書かれていたが(`am`にしかチェックリストが無く、その直後がチェックポイントだったため)、`pm`フローのチェックポイント通過後(寝る準備4項目)にもチェックリストを置く要件に伴い、`routine_data.get_checklist_range(flow)`が返す`(開始index, 終了index+1)`を軸にした汎用的な実装に一般化された。新設の`_activate_block(flow, statuses, index)`は「`index`のステップに進行が到達した」ことを表現する共通処理で、それが単独ステップなら`'current'`にするだけだが、`checklist=True`なグループの一員なら`get_checklist_range`が返す範囲全体を一括で`'current'`にする。`_empty_statuses`(フロー生成時の初期化)・`_apply_forced_transition`(チェックポイント通過後の次ステップ活性化)・`complete_step`の逐次ステップ分岐(通常ステップ完了後の次ステップ活性化)の3箇所全てが、この`_activate_block`を経由するようになったことで、チェックリストが「フロー先頭」「チェックポイント通過後」のどちらに置かれていても同じコードで正しく動作する。`complete_step`は対象ステップが`checklist=True`なら現在地(`current_step_index`)と無関係に`_toggle_checklist_step`へ処理を委譲し、`'current'`⇔`'done'`のトグルとチェックリスト全項目達成時の「ブロック直後のステップ」への遷移(またはその巻き戻し)を行う。**（夜の切り替え/寝る準備チェックリスト化で変更）** この「ブロック直後のステップ」は`am`では出発チェックポイント(`free`)だが、`pm`では単なる`sleep`(就寝、チェックポイントではない)であるため、`_toggle_checklist_step`の実装も「チェックポイントの前後」という特化した表現から「チェックリストブロックの境界(boundary)の前後」という一般化された表現に書き直され、境界に到達していない(まだ`'locked'`)ブロックへのトグルを拒否するガードも新設された。達成率に応じたボーナス按分の比率計算(`_eligible_done_ratio`)は`_apply_forced_transition`と、チェックポイント通過前でも常にライブ表示できる新設の`_compute_bonus_preview`(`_serialize_flow`の`preview_bonus_gold`が使う)の両方から共有される共通ヘルパーとして切り出された(この計算式自体は`checklist`がチェックポイントの前にあるか後にあるかを意識しないため、`pm`のチェックポイント通過後チェックリストが追加された今回の変更でも計算式自体に変更は無い)。公開メソッドは`get_today_state`(状態取得)と`complete_step`(ステップ完了/チェックリストのトグル)の2つで、モジュールレベルシングルトン`routine_service`としてインスタンス化され`routine_router.py`から直接importされる(CLAUDE.mdのDI非導入方針・モジュールレベルシングルトンパターンに従う)。**（TV対象を智矢個人へ限定する修正で追加）** `_toggle_checklist_step`(朝の準備チェックリスト全達成)・`complete_step`(夕方フリータイム到達)双方のTV自動ONトリガーは、当初`services.quest.locks.ROLE_CHILD`との比較(`role`が子供かどうか)で対象者を判定していたが、涼花(`daughter`)も`role_child`でありTV操作の対象に含まれてしまうため、モジュールレベル定数`TV_UNLOCK_TARGET_USER_ID`(値`'son'`)との`user_id`比較に置き換えられた。これに伴い`from services.quest.locks import ...`から`ROLE_CHILD`のimportは削除され、`complete_step`冒頭のユーザー存在確認クエリも`role`列取得(`SELECT role FROM ...`)から存在確認のみ(`SELECT 1 FROM ...`)に戻された。**（ステップ遷移の追記記録で追加）** `routine_progress.steps_status`はステップごとの現在の状態しか持たず、時刻は行全体の`updated_at`しかないため、「何時何分にどのステップを終えたか」は保存されていなかった。これを補うため、状態遷移を追記専用テーブル`routine_step_events`(`migrations/0011_add_routine_step_events.sql`)へ記録する処理が追加された。記録は`_save_progress`が呼ぶ`_record_step_events`の1箇所に集約されており、`steps_status`を書き換える3経路(`_toggle_checklist_step`・`complete_step`の逐次ステップ分岐・`_apply_forced_transition`)はいずれも最終的に`_save_progress`を経由するため、この1箇所で全ての遷移を捕捉できる。差分検出の基準として`_row_to_progress`が`_saved_steps_status`(DB保存済みの`steps_status`の複製)をprogress辞書に持たせ、`_save_progress`は保存のたびにこれを更新するため、1リクエスト内で`_save_progress`が複数回走っても(`complete_step`は保存後に再度`_apply_forced_transition`を通す)同じ遷移が二重に記録されることはない。各イベントには`source`列(`'user'`=ユーザー操作、`'forced_transition'`=締切超過による強制遷移、`'carryover_skip'`=土日スキップ/繰越により当日は実施せずdone扱いになったもの)が付き、集計側が自発的な達成と自動的な状態変化を区別できる。`occurred_at`には`updated_at`(`common.get_now_iso()`)ではなく呼び出し元が持つ`now`の`isoformat()`が使われる。既存の`steps_status`のスキーマ・読み取り経路は一切変更されていない。
+根拠: [モジュールdocstring] (行番号: 1-6 / 抜粋: "routers/routine_router.py はパース・検証のみを行い、ロジックはここに委譲する\n(CLAUDE.mdのレイヤリング規約)。quest_users(gold/exp/level)への書き込みを伴うため、\nservices/quest/locks.py の user balance lock を quest_service と共用し、\nクエスト完了/承認と同一ユーザーへの並行更新によるlost updateを防ぐ。")、[モジュールレベルシングルトン] (行番号: 479 / 抜粋: "routine_service = RoutineService()")、[休日PM微修正の中核メソッド群] (行番号: 68-83, 85-102, 104-114 / 抜粋: "def _resolve_skip_keys(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, now: datetime.datetime) -> Set[str]:", "def _empty_statuses(self, flow: RoutineFlow, skip_keys: Set[str]) -> Tuple[Dict[str, str], int]:", "def _next_active_index(self, flow: RoutineFlow, statuses: Dict[str, str], start_index: int) -> int:")、[朝の準備チェックリスト化の中核メソッド群、毎朝ミッション統合で3件目のシグネチャが変更] (行番号: 191-204, 206-215, 282-342 / 抜粋: "def _eligible_done_ratio(self, flow: RoutineFlow, progress: Dict[str, Any]) -> float:", "def _compute_bonus_preview(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Tuple[int, int]:", "def _toggle_checklist_step(\n        self, flow: RoutineFlow, progress: Dict[str, Any], target_step: Dict[str, Any],\n        flow_key: str, user_id: str,\n    ) -> None:")、[夜の切り替え/寝る準備チェックリスト化の中核メソッド] (行番号: 116-133 / 抜粋: "def _activate_block(self, flow: RoutineFlow, statuses: Dict[str, str], index: int) -> None:")、[ステップ遷移の追記記録の中核メソッド群] (行番号: 155-158, 178, 240-242 / 抜粋: "def _insert_step_events(\n        self, cur, progress: Dict[str, Any], changes: List[Tuple[str, Optional[str], str]],\n        source: str, occurred_at: str,\n    ) -> None:", "def _record_step_events(self, cur, progress: Dict[str, Any], source: str, occurred_at: str) -> None:", "def _save_progress(\n        self, cur, progress: Dict[str, Any], source: str, occurred_at: str\n    ) -> None:")
 
 ## 3. 外部依存関係
 
@@ -293,32 +294,78 @@
 
 
 
-### `_row_to_progress`
+### `_row_to_progress`（ステップ遷移の追記記録で戻り値のキーを追加）
 
-* **役割**: `routine_progress`テーブルのDB行(`row`)を、`steps_status`をJSONデコード済みの辞書として展開したアプリケーション内部表現(`Dict[str, Any]`)に変換する。
-* 根拠: [メソッド定義] (行番号: 135-143 / 抜粋: "def _row_to_progress(self, row) -> Dict[str, Any]:\n        return {\n            'id': row['id'],\n            'current_step_index': row['current_step_index'],\n            'in_free_time': bool(row['in_free_time']),\n            'steps_status': json.loads(row['steps_status']),\n            'bonus_gold': row['bonus_gold'],\n            'bonus_exp': row['bonus_exp'],\n        }")
+* **役割**: `routine_progress`テーブルのDB行(`row`)を、`steps_status`をJSONデコード済みの辞書として展開したアプリケーション内部表現(`Dict[str, Any]`)に変換する。**（ステップ遷移の追記記録で追加）** `routine_step_events`への追記に必要な識別子(`user_id`/`flow_key`/`progress_date`)と、差分検出の基準となる`_saved_steps_status`(`steps_status`と同じ内容だが別オブジェクト。同じJSON文字列を2回`json.loads`して生成する)も戻り値に含めるようになった。
+* 根拠: [メソッド定義] (行番号: 135-153 / 抜粋: "def _row_to_progress(self, row) -> Dict[str, Any]:\n        return {\n            'id': row['id'],", "'user_id': row['user_id'],\n            'flow_key': row['flow_key'],\n            'progress_date': row['progress_date'],", "'_saved_steps_status': json.loads(row['steps_status']),")
 
 
 * **引数/リクエスト**: `row`(型ヒントなし。SQLite行オブジェクト、キーアクセス`row['id']`等が可能な前提)
 * 根拠: [メソッド定義] (行番号: 135)
 
 
-* **戻り値/レスポンス**: `Dict[str, Any]`(`id`, `current_step_index`, `in_free_time`(bool化済み), `steps_status`(JSONデコード済みdict), `bonus_gold`, `bonus_exp`)
-* 根拠: [戻り値] (行番号: 136-143)
+* **戻り値/レスポンス**: `Dict[str, Any]`(`id`, **（ステップ遷移の追記記録で追加）**`user_id`, `flow_key`, `progress_date`, `current_step_index`, `in_free_time`(bool化済み), `steps_status`(JSONデコード済みdict), `bonus_gold`, `bonus_exp`, **（ステップ遷移の追記記録で追加）**`_saved_steps_status`(DB保存済み`steps_status`の複製))
+* 根拠: [戻り値] (行番号: 136-153)
 
 
 * **副作用**: なし
-* 根拠: [メソッド定義] (行番号: 135-143)
+* 根拠: [メソッド定義] (行番号: 135-153)
 
 
 * **エラーハンドリング**: なし(`json.loads`が不正なJSONに対して送出する`json.JSONDecodeError`は捕捉されない)
-* 根拠: [メソッド定義] (行番号: 133-141、`try`/`except`は存在しない)
+* 根拠: [メソッド定義] (行番号: 135-153、`try`/`except`は存在しない)
 
 
 
-### `_get_or_create_progress`（休日PM微修正で引数・初期状態の計算ロジックを変更）
+### `_insert_step_events`（ステップ遷移の追記記録で新規追加）
 
-* **役割**: 指定ユーザー・フロー・日付の`routine_progress`行を取得する。存在しなければ新規行をINSERTしてから取得し直す。**（休日PM微修正で変更）** 以前は初期状態を`_empty_statuses(flow)`のみから固定値(`current_step_index=0`, `in_free_time=0`)で組み立てていたが、新たに`now`引数を受け取り、`_resolve_skip_keys(cur, user_id, flow_key, flow, now)`でスキップ対象のkey集合を求め、それを`_empty_statuses(flow, skip_keys)`に渡して`(statuses, current_index)`を得るようになった。`in_free_time`は、算出された`current_index`のステップが(スキップの結果、または**朝の準備チェックリスト化で追加**されたチェックリスト全項目スキップの結果)最初からチェックポイントステップになっている場合に備え、`current_index`がステップ数未満かつそのステップに`checkpoint_time`が設定されているかどうかから計算する(通常は`False`になる)。INSERT文の`current_step_index`/`in_free_time`はこれら計算値を使うようにプレースホルダ化された(以前は`0`/`0`のリテラルだった)。
+* **役割**: 受け取った状態遷移のリストを`routine_step_events`テーブルへ`executemany`で追記する。`changes`が空なら何もせず早期returnする。docstringが述べる通り追記専用であり、既存の読み取り経路には一切影響しない。
+* 根拠: [メソッド定義] (行番号: 155-176 / 抜粋: "def _insert_step_events(\n        self, cur, progress: Dict[str, Any], changes: List[Tuple[str, Optional[str], str]],\n        source: str, occurred_at: str,\n    ) -> None:", "if not changes:\n            return\n        cur.executemany(\"\"\"\n            INSERT INTO routine_step_events\n                (user_id, flow_key, progress_date, step_key, from_status, to_status, source, occurred_at)\n            VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+
+
+* **引数/リクエスト**: `cur`(DBカーソル)、`progress: Dict[str, Any]`(`user_id`/`flow_key`/`progress_date`を参照)、`changes: List[Tuple[str, Optional[str], str]]`(`(step_key, from_status, to_status)`のリスト)、`source: str`、`occurred_at: str`
+* 根拠: [メソッド定義] (行番号: 155-158)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [型ヒント] (行番号: 158 / 抜粋: "    ) -> None:")
+
+
+* **副作用**: `routine_step_events`テーブルへの`INSERT`(`changes`の件数分)。
+* 根拠: [executemany] (行番号: 168-181)
+
+
+* **エラーハンドリング**: なし(`try`/`except`は存在しない)
+* 根拠: [メソッド定義] (行番号: 155-176)
+
+
+
+### `_record_step_events`（ステップ遷移の追記記録で新規追加）
+
+* **役割**: `progress['_saved_steps_status']`(DB保存済みの状態)と`progress['steps_status']`(現在の状態)を突き合わせ、値が変わったステップだけを`(key, 変更前, 変更後)`として抽出し`_insert_step_events`へ渡す。docstringが述べる通り`_save_progress`からのみ呼ばれ、`steps_status`を書き換える3経路(`_toggle_checklist_step`・`complete_step`の非チェックリスト分岐・`_apply_forced_transition`)はいずれも最終的に`_save_progress`を経由するため、ここ1箇所で全ての遷移を捕捉できる。
+* 根拠: [メソッド定義] (行番号: 178-192 / 抜粋: "def _record_step_events(self, cur, progress: Dict[str, Any], source: str, occurred_at: str) -> None:", "saved = progress.get('_saved_steps_status') or {}\n        changes = [\n            (key, saved.get(key), to_status)\n            for key, to_status in progress['steps_status'].items()\n            if saved.get(key) != to_status\n        ]")
+
+
+* **引数/リクエスト**: `cur`(DBカーソル)、`progress: Dict[str, Any]`、`source: str`、`occurred_at: str`
+* 根拠: [メソッド定義] (行番号: 178)
+
+
+* **戻り値/レスポンス**: `None`
+* 根拠: [型ヒント] (行番号: 178 / 抜粋: "-> None:")
+
+
+* **副作用**: `_insert_step_events`経由での`routine_step_events`への`INSERT`。
+* 根拠: [呼び出し] (行番号: 192 / 抜粋: "self._insert_step_events(cur, progress, changes, source, occurred_at)")
+
+
+* **エラーハンドリング**: なし(`try`/`except`は存在しない。`_saved_steps_status`が欠けている場合は`progress.get(...) or {}`により空辞書として扱われ、全ステップが変更扱いになる)
+* 根拠: [メソッド定義] (行番号: 178-192 / 抜粋: "saved = progress.get('_saved_steps_status') or {}")
+
+
+
+### `_get_or_create_progress`（休日PM微修正で引数・初期状態の計算ロジックを変更、ステップ遷移の追記記録で繰越スキップの記録を追加）
+
+* **役割**: 指定ユーザー・フロー・日付の`routine_progress`行を取得する。存在しなければ新規行をINSERTしてから取得し直す。**（休日PM微修正で変更）** 以前は初期状態を`_empty_statuses(flow)`のみから固定値(`current_step_index=0`, `in_free_time=0`)で組み立てていたが、新たに`now`引数を受け取り、`_resolve_skip_keys(cur, user_id, flow_key, flow, now)`でスキップ対象のkey集合を求め、それを`_empty_statuses(flow, skip_keys)`に渡して`(statuses, current_index)`を得るようになった。`in_free_time`は、算出された`current_index`のステップが(スキップの結果、または**朝の準備チェックリスト化で追加**されたチェックリスト全項目スキップの結果)最初からチェックポイントステップになっている場合に備え、`current_index`がステップ数未満かつそのステップに`checkpoint_time`が設定されているかどうかから計算する(通常は`False`になる)。INSERT文の`current_step_index`/`in_free_time`はこれら計算値を使うようにプレースホルダ化された(以前は`0`/`0`のリテラルだった)。**（ステップ遷移の追記記録で追加）** 行を新規作成した場合、`skip_keys`に含まれるステップ(土日スキップ・繰越により当日は実施していないのに`'done'`で始まるもの)を`from_status=None`/`to_status='done'`/`source='carryover_skip'`として`_insert_step_events`で記録する。`'current'`への活性化は「進行がそこへ到達しただけ」でありコメント上も記録対象外とされている。行が既に存在する場合(`if row:`の早期return)はこの記録を行わない。
 * 根拠: [メソッド定義] (行番号: 145-153 / 抜粋: "def _get_or_create_progress(\n        self, cur, user_id: str, flow_key: str, flow: RoutineFlow, date_str: str, now: datetime.datetime\n    ) -> Dict[str, Any]:\n        row = cur.execute(\n            \"SELECT * FROM routine_progress WHERE user_id=? AND flow_key=? AND progress_date=?\",\n            (user_id, flow_key, date_str),\n        ).fetchone()\n        if row:\n            return self._row_to_progress(row)")、[スキップ解決・初期状態計算] (行番号: 155-160 / 抜粋: "skip_keys = self._resolve_skip_keys(cur, user_id, flow_key, flow, now)\n        statuses, current_index = self._empty_statuses(flow, skip_keys)\n        # スキップの結果、初期状態から既にチェックポイントに到達している場合\n        # (現状は起こらないが、将来handwash以外もweekend_skip化された場合に備える)、\n        # complete_stepと同じくin_free_timeも合わせて立てる。\n        in_free_time = current_index < len(flow['steps']) and bool(flow['steps'][current_index]['checkpoint_time'])")
 
 
@@ -330,7 +377,7 @@
 * 根拠: [戻り値] (行番号: 153, 177 / 抜粋: "return self._row_to_progress(row)")
 
 
-* **副作用**: 該当行が存在しない場合、`routine_progress`テーブルへの`INSERT`を実行する(**休日PM微修正で変更**: `current_step_index`/`in_free_time`はスキップ計算結果、`steps_status`は`_empty_statuses`が返す`statuses`)。土日の場合、`_resolve_skip_keys`経由で`_was_done_on_any_date`が`routine_progress`への`SELECT`も行う。
+* **副作用**: 該当行が存在しない場合、`routine_progress`テーブルへの`INSERT`を実行する(**休日PM微修正で変更**: `current_step_index`/`in_free_time`はスキップ計算結果、`steps_status`は`_empty_statuses`が返す`statuses`)。土日の場合、`_resolve_skip_keys`経由で`_was_done_on_any_date`が`routine_progress`への`SELECT`も行う。**（ステップ遷移の追記記録で追加）** さらに`_insert_step_events`経由で`routine_step_events`への`INSERT`(`skip_keys`の件数分)も行う。
 * 根拠: [INSERT文] (行番号: 163-172 / 抜粋: "cur.execute(\"\"\"\n            INSERT INTO routine_progress\n                (user_id, flow_key, progress_date, current_step_index, in_free_time,\n                 steps_status, bonus_gold, bonus_exp, created_at, updated_at)\n            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)\n        \"\"\", (")
 
 
@@ -339,26 +386,30 @@
 
 
 
-### `_save_progress`
+### `_save_progress`（ステップ遷移の追記記録でシグネチャ変更・イベント記録を追加）
 
-* **役割**: 渡された`progress`(内部表現)の内容で`routine_progress`テーブルの該当行(`id`一致)を`UPDATE`する。`steps_status`は`json.dumps(..., ensure_ascii=False)`で再エンコードし、`updated_at`は`common.get_now_iso()`で更新する。
-* 根拠: [メソッド定義] (行番号: 179-189 / 抜粋: "def _save_progress(self, cur, progress: Dict[str, Any]) -> None:\n        cur.execute(\"\"\"\n            UPDATE routine_progress\n            SET current_step_index=?, in_free_time=?, steps_status=?, bonus_gold=?, bonus_exp=?, updated_at=?\n            WHERE id=?\n        \"\"\", (")
+* **役割**: 渡された`progress`(内部表現)の内容で`routine_progress`テーブルの該当行(`id`一致)を`UPDATE`する。`steps_status`は`json.dumps(..., ensure_ascii=False)`で再エンコードし、`updated_at`は`common.get_now_iso()`で更新する。**（ステップ遷移の追記記録で追加）** `UPDATE`の前に`_record_step_events`を呼んで状態遷移を`routine_step_events`へ追記し、`UPDATE`の後に`progress['_saved_steps_status']`を現在の`steps_status`の複製で更新する。docstringが述べる通り、`updated_at`に`common.get_now_iso()`を使う既存挙動は変えず、イベントの`occurred_at`だけは呼び出し元から渡された`occurred_at`を使う(テストが`now`を注入する設計のため)。
+* 根拠: [メソッド定義] (行番号: 240-266 / 抜粋: "def _save_progress(\n        self, cur, progress: Dict[str, Any], source: str, occurred_at: str\n    ) -> None:", "self._record_step_events(cur, progress, source, occurred_at)\n        cur.execute(\"\"\"\n            UPDATE routine_progress", "progress['_saved_steps_status'] = dict(progress['steps_status'])")
 
 
-* **引数/リクエスト**: `cur`(DBカーソル)、`progress: Dict[str, Any]`
-* 根拠: [メソッド定義] (行番号: 179)
+* **引数/リクエスト**: `cur`(DBカーソル)、`progress: Dict[str, Any]`、**（ステップ遷移の追記記録で追加）**`source: str`、`occurred_at: str`
+* 根拠: [メソッド定義] (行番号: 240-242)
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [型ヒント] (行番号: 179 / 抜粋: "-> None:")
+* 根拠: [型ヒント] (行番号: 242 / 抜粋: "    ) -> None:")
 
 
-* **副作用**: `routine_progress`テーブルへの`UPDATE`実行。
-* 根拠: [UPDATE文] (行番号: 180-189)
+* **副作用**: `routine_progress`テーブルへの`UPDATE`実行。**（ステップ遷移の追記記録で追加）** `_record_step_events`経由での`routine_step_events`への`INSERT`、および`progress['_saved_steps_status']`の書き換え(呼び出し元が持つ辞書を破壊的に更新する)。
+* 根拠: [UPDATE文] (行番号: 251-260)、[イベント記録] (行番号: 250 / 抜粋: "self._record_step_events(cur, progress, source, occurred_at)")、[保存済み状態の更新] (行番号: 266 / 抜粋: "progress['_saved_steps_status'] = dict(progress['steps_status'])")
 
 
 * **エラーハンドリング**: なし
-* 根拠: [メソッド定義] (行番号: 177-187、`try`/`except`は存在しない)
+* 根拠: [メソッド定義] (行番号: 240-266、`try`/`except`は存在しない)
+
+
+* **呼び出し元**: `_apply_forced_transition`(`source='forced_transition'`、`occurred_at=now.isoformat()`)と`complete_step`(`source='user'`、`occurred_at=now.isoformat()`)の2箇所。
+* 根拠: [呼び出し] (行番号: 345, 544 / 抜粋: "self._save_progress(cur, progress, 'forced_transition', now.isoformat())", "self._save_progress(cur, progress, 'user', now.isoformat())")
 
 
 
@@ -575,7 +626,7 @@
 
 ## 5. 処理フロー図
 
-以下は`get_today_state`・`complete_step`の両方から呼ばれる中核ロジック`_apply_forced_transition`のフローチャートです。**（土日対応で変更）** 締切時刻の算出に`get_effective_checkpoint_time`が挟まる点、**（夜の切り替え/寝る準備チェックリスト化で変更）** 次ステップの活性化が`_activate_block`経由になった点を反映しています。
+以下は`get_today_state`・`complete_step`の両方から呼ばれる中核ロジック`_apply_forced_transition`のフローチャートです。**（土日対応で変更）** 締切時刻の算出に`get_effective_checkpoint_time`が挟まる点、**（夜の切り替え/寝る準備チェックリスト化で変更）** 次ステップの活性化が`_activate_block`経由になった点、**（ステップ遷移の追記記録で変更）** `_save_progress`が`source`/`occurred_at`を受け取り状態遷移を`routine_step_events`へ追記するようになった点を反映しています。
 
 ```mermaid
 flowchart TD
@@ -592,7 +643,7 @@ flowchart TD
     MarkRemind --> ComputeBonus["bonus_gold = round(FULL_BONUS_GOLD * ratio)\nbonus_exp = round(FULL_BONUS_EXP * ratio)\nprogress['bonus_gold']/['bonus_exp']に設定"]
     ComputeBonus --> Advance["休日PM微修正: next_index = self._next_active_index(flow, steps_status, checkpoint_idx + 1)\n(スキップ済み'done'ステップを飛ばす)\ncurrent_step_index = next_index\nin_free_time = False"]
     Advance --> ActivateNext["夜の切り替え/寝る準備チェックリスト化: self._activate_block(flow, steps_status, next_index)\n(next_indexが単一ステップなら'current'に、\nchecklist=Trueなブロックの先頭ならブロック全体を一括で'current'に設定)"]
-    ActivateNext --> SaveProgress["self._save_progress(cur, progress)"]
+    ActivateNext --> SaveProgress["ステップ遷移の追記記録: self._save_progress(cur, progress, 'forced_transition', now.isoformat())\n(内部で_record_step_eventsが_saved_steps_statusとの差分を\nroutine_step_eventsへ追記してからUPDATEを実行する)"]
     SaveProgress --> BonusCheck{"bonus_gold or bonus_exp が真?"}
     BonusCheck -- Yes --> GrantBonus["self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)"]
     GrantBonus --> StoreLevelInfo["progress['leveled_up'] / ['new_level'] = 戻り値"]
@@ -614,7 +665,7 @@ flowchart TD
     TToggle --> TAllDoneCheck["checklist_keys = flow['steps'][start:end]の全キー\nall_done = 全てのchecklist_keysが'done'か?"]
     TAllDoneCheck -- Yes（全項目チェック済み） --> TAdvance["current_step_index = end\nend < len(steps)なら:\n  境界ステップを'current'に、\n  in_free_time = 境界ステップがcheckpoint_timeを持つか\nそれ以外: in_free_time = False"]
     TAllDoneCheck -- No（未チェックが残っている） --> TRevert["current_step_index = start（ブロック先頭）\nin_free_time = False\nend < len(steps)なら境界ステップを'locked'に設定"]
-    TAdvance --> TReturnEnd(["return（呼び出し元complete_stepがこの後_save_progressで永続化）"])
+    TAdvance --> TReturnEnd(["return（呼び出し元complete_stepがこの後_save_progress(source='user')で永続化し、\nあわせてトグルした遷移をroutine_step_eventsへ追記する）"])
     TRevert --> TReturnEnd
 ```
 
@@ -684,7 +735,7 @@ get_checklist_rangeを夜の切り替え/寝る準備チェックリスト化で
 
 * **[修正済み]** `pm`フローの`start_trigger_time`は、以前は「仮の既定値」「ユーザー確認事項」とコメントされた未確定の値`'15:00'`だったが、ユーザーが実際の下校/帰宅時刻として`'14:00'`を確定させた(土日も同じ)。この値は`_is_flow_started_today`の判定条件に直接使われるが、本ファイル(`routine_service.py`)側は`flow['start_trigger_time']`を`routine_data.py`から読むだけで値自体をハードコードしていないため、本ファイルの変更は不要だった。詳細は[routine_data.md](./routine_data.md)§8参照。
 * ボーナス額`FULL_BONUS_GOLD = 150`/`FULL_BONUS_EXP = 30`は、`routine_data.py`のコメントにより`quest_data.py`のREWARDS(id=11「Youtube (30:00)」、`cost_gold`)と同額になるよう意図的に設定されている。この一致はコード上強制されていないため、`quest_data.py`側でこの報酬の価格を変更した場合は、`FULL_BONUS_GOLD`(および必要なら`FULL_BONUS_EXP`)を見直す必要がある。
-* `steps_status`は`routine_progress`テーブルにJSON TEXTとして保存されており、正規化された別テーブルにはしていない。この設計判断は`migrations/0010_add_routine_progress.sql`のSQLコメントに明記されている:「ステップ数が少なく(最大6件/フロー)、進捗の可視化以外の用途で個別ステップを検索する必要が無いため、正規化した別テーブルにはせずJSONで持つ。」(同SQLファイル13-16行目)。将来的にステップ単位での検索・集計が必要になった場合は、この設計の見直しが必要になる。
+* `steps_status`は`routine_progress`テーブルにJSON TEXTとして保存されており、正規化された別テーブルにはしていない。この設計判断は`migrations/0010_add_routine_progress.sql`のSQLコメントに明記されている:「ステップ数が少なく(最大6件/フロー)、進捗の可視化以外の用途で個別ステップを検索する必要が無いため、正規化した別テーブルにはせずJSONで持つ。」(同SQLファイル13-16行目)。将来的にステップ単位での検索・集計が必要になった場合は、この設計の見直しが必要になる。**（ステップ遷移の追記記録で変更)** このうち「ステップ単位の時系列での集計」については、`steps_status`の形を変えるのではなく、追記専用の別テーブル`routine_step_events`(`migrations/0011_add_routine_step_events.sql`)を並置する形で対応した。同SQLファイルのコメントが述べる通り、`_eligible_done_ratio`/`_activate_block`/`_toggle_checklist_step`/`_serialize_flow`の4箇所が`steps_status`の値を素の文字列として比較しているため、値を`{status, at}`のような構造へ変えると4箇所を同時に壊すことが理由である。したがって`steps_status`は引き続き「今どうなっているか」だけを持ち、「いつそうなったか」は`routine_step_events`にのみ存在する。
 * `_get_user_balance_lock`は`services/quest/locks.py`から`quest_service`と共用されているため、あるユーザーのルーティン完了処理(`complete_step`/`get_today_state`)とクエスト完了/承認処理は同一ユーザーに対してプロセス内で直列化される。これは`quest_users`(gold/exp/level)への読み取り→計算→書き込みという同じread-modify-writeパターンをルーティン側とクエスト側の双方が持つため、lost updateを避ける目的で意図的に共用されている(モジュールdocstring参照)。裏を返せば、同一ユーザーに対する大量のルーティン操作とクエスト操作が同時に発生すると、ロック待ちによる直列化でレイテンシが増える可能性がある。
 * `complete_step`は`_apply_forced_transition`を2回呼び出す(処理前と処理後)。2回目の呼び出しについては「直後にチェックポイントへ到達し、かつ既に締切時刻を過ぎている場合、この場で通過処理まで済ませ、フロントが追加のポーリングを待たずに済むようにする」というコメントが付されている(行番号: 471-473)。`_apply_forced_transition`自体は冪等(`current_step_index > checkpoint_idx`なら何もしない)なため、2回呼んでも二重にボーナスが付与されることはない。
 * `_grant_bonus`は対象ユーザーが`quest_users`に存在しない場合、例外を送出せずサイレントに何もしない(早期リターン)。`get_today_state`/`complete_step`自体はメソッド冒頭で別途ユーザー存在確認(`HTTPException(404)`)を行っているため、通常経路では`_grant_bonus`内のこのケースには到達しないと考えられるが、`_grant_bonus`単体としてはその前提を強制していない。
@@ -700,6 +751,10 @@ get_checklist_rangeを夜の切り替え/寝る準備チェックリスト化で
 * **（朝の準備チェックリスト化で新規追加）** `_eligible_done_ratio`/`_compute_bonus_preview`という2つの独立したヘルパーへ計算ロジックを切り出したことで、`preview_bonus_gold`(表示専用、DBを変更しない)と`_apply_forced_transition`が実際に付与する`bonus_gold`(確定値、DBに永続化される)は常に同じ計算式を共有する。これにより、チェックポイント通過の前後でユーザーに見える数値が不連続に変わる(例えばプレビューでは90だったのに通過後に別の値になる)という不整合が構造的に起こらない設計になっている。逆に言えば、`preview_bonus_gold`は`_apply_forced_transition`が実際に呼ばれたかどうかに関わらず`_serialize_flow`のたびに毎回計算し直される値であり、`routine_progress`テーブルには一切保存されない。**（夜の切り替え/寝る準備チェックリスト化で確認済み）** `pm`のチェックポイント(`free`)より後にある寝る準備チェックリストは、この`eligible_keys`(チェックポイントより前の全ステップキー)の対象外であり、寝る準備の各項目をチェックしても`preview_bonus_gold`/`bonus_gold`は一切変化しない。フロント側(`family-quest/src/features/routine/components/RoutineFlow.tsx`)はこれを踏まえ、チェックポイントより後にあるチェックリストブロックには出発ボーナスの表示チップ自体を出さない([RoutineFlow.md](../../../family-quest/src/features/routine/components/RoutineFlow.md)参照)。
 * **（夜の切り替え/寝る準備チェックリスト化で新規追加）** `checklist=True`のブロックが「フロー先頭」以外の位置(チェックポイント通過後)にも置けるよう一般化されたことで、チェックリストブロックには`'locked'`(まだ到達していない)という第3の初期状態が生まれた(`am`のチェックリストはフロー先頭にあるため、実際には`_empty_statuses`によって常に即座に`'current'`へ活性化され、この`'locked'`状態を経由することは無い)。`_toggle_checklist_step`はこの`'locked'`状態でのトグルを明示的に拒否する(`HTTPException(400, "まだこのステップには進んでいません")`)。この拒否パスは`pm`フロー以外では到達し得ないため、テスト(`tests/test_routine_service.py`の`TestPmEveningSplit.test_night_checklist_locked_before_checkpoint`)は`pm`フローのチェックポイント通過前に寝る準備項目をトグルしようとするケースで検証している。
 * **（夜の切り替え/寝る準備チェックリスト化で新規追加）** `_activate_block`を`_empty_statuses`・`_apply_forced_transition`・`complete_step`(逐次ステップ分岐)の3箇所から共通で呼ぶようにしたことで、「進行がindexに到達した際にそこを活性化する」というロジックが単一箇所に集約された。ただし、この一般化は`checklist=True`なブロックが「フロー内で連続する単一の塊」であるという`routine_data.get_checklist_range`の前提(routine_data.md参照)にそのまま依存しており、本ファイル側はこの前提を検証しない。将来、1つのフローに複数の独立したチェックリストブロックを置きたくなった場合、`get_checklist_range`が単一の`(start, end)`しか返さない現在の設計では対応できず、`_activate_block`・`_toggle_checklist_step`の両方を「複数ブロックのどれに`index`が属するか」を判定できる形に書き直す必要がある。
+* **（ステップ遷移の追記記録で新規追加）** `routine_step_events`への記録は`_save_progress`(が呼ぶ`_record_step_events`)と`_get_or_create_progress`(繰越スキップ分)の2箇所にのみ存在する。前者は`steps_status`を書き換える全経路が必ず通る合流点であるため、新しい状態遷移のロジックを追加する際も`_save_progress`を経由する限り記録漏れは起きない。逆に、`_save_progress`を経由せずに`routine_progress`を直接`UPDATE`する経路を追加すると、その遷移だけが記録されない。
+* **（ステップ遷移の追記記録で新規追加）** 差分検出の基準である`progress['_saved_steps_status']`は`_row_to_progress`が生成し`_save_progress`が更新する、progress辞書内の内部用キーである(先頭の`_`はこの内部用途を表す)。`_serialize_flow`はこのキーを参照しないためAPIレスポンスには現れないが、progress辞書をそのままレスポンスへ流用するような変更を加える場合は除外が必要になる。
+* **（ステップ遷移の追記記録で新規追加）** イベントの`occurred_at`には`common.get_now_iso()`(実時刻)ではなく、呼び出し元が持つ`now`の`isoformat()`が使われる。`get_today_state`/`complete_step`は`now`引数を省略した場合`datetime.datetime.now(JST)`を使うため通常は両者が一致するが、テストが`now`を注入した場合は注入値が記録される。一方、同じ`_save_progress`内の`routine_progress.updated_at`は従来通り`common.get_now_iso()`のままであるため、`now`を注入した場合に限り両者の値は一致しない。
+* **（ステップ遷移の追記記録で新規追加）** `routine_step_events`は追記専用で、`nas_monitor.py`の保持期間削除のようなクリーンアップ対象には含まれていない(同SQLファイルのコメントが「長期の推移そのものが価値のため意図的に永続保持する」と明記)。行数は1ユーザー1日あたり最大15行程度と見積もられている。
 
 ## 9. 不明事項一覧
 
@@ -707,6 +762,7 @@ get_checklist_rangeを夜の切り替え/寝る準備チェックリスト化で
 | --- | --- | --- |
 | 将来的なルーティン編集用管理UIの計画有無 | `routine_data.py`のモジュールdocstringは「親が編集する対象ではない」という現状方針を述べるのみで、将来の管理UI追加計画の有無には触れていない。本ファイルのAPI(`get_today_state`/`complete_step`)も編集系のエンドポイントは持たない。 | 該当ファイルなし(ロードマップ文書等の追加が必要) |
 | `round()`の丸め方式による境界値での挙動 | `bonus_gold = round(FULL_BONUS_GOLD * ratio)`等はPython組み込みの`round()`(銀行丸め、0.5丁度は最近接の偶数へ丸められる)を使用しているが、この丸め方式が意図的に選択されたものかは本ファイルのコメントからは不明。 | 該当ファイルなし(設計意図の確認が必要) |
+| `routine_step_events`を読み出す側の実装 | 本ファイルは`routine_step_events`への`INSERT`のみを行い、このテーブルを`SELECT`する経路はリポジトリ内に存在しない(本ファイル・`routine_router.py`のいずれにも読み出しは無い)。集計・可視化をどこで行う計画かは本ファイルからは不明。 | 該当ファイルなし(読み出し側の実装が未作成) |
 
 ## 10. 自己検証結果
 
