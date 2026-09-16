@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { VIEW_SWIPE_THRESHOLD_PX } from './lib/uiConstants';
 import { motion } from 'framer-motion';
 import { WifiOff, AlertTriangle } from 'lucide-react';
 import { INITIAL_USERS } from './lib/masterData';
@@ -542,8 +543,8 @@ function App() {
                 (タブ切替スワイプと同じ挙動に揃える)。 */}
             <motion.div
               onPanEnd={(_e, info) => {
-                if (info.offset.x < -60 && currentUserIdx < users.length - 1) handleUserChange(currentUserIdx + 1);
-                else if (info.offset.x > 60 && currentUserIdx > 0) handleUserChange(currentUserIdx - 1);
+                if (info.offset.x < -VIEW_SWIPE_THRESHOLD_PX && currentUserIdx < users.length - 1) handleUserChange(currentUserIdx + 1);
+                else if (info.offset.x > VIEW_SWIPE_THRESHOLD_PX && currentUserIdx > 0) handleUserChange(currentUserIdx - 1);
               }}
             >
               <UserStatusCard
@@ -570,8 +571,8 @@ function App() {
               onPanEnd={(_e, info) => {
                 const order: Array<'quest' | 'shop' | 'inventory'> = ['quest', 'shop', 'inventory'];
                 const idx = order.indexOf(activeTab);
-                if (info.offset.x < -60 && idx < order.length - 1) setActiveTab(order[idx + 1]);
-                else if (info.offset.x > 60 && idx > 0) setActiveTab(order[idx - 1]);
+                if (info.offset.x < -VIEW_SWIPE_THRESHOLD_PX && idx < order.length - 1) setActiveTab(order[idx + 1]);
+                else if (info.offset.x > VIEW_SWIPE_THRESHOLD_PX && idx > 0) setActiveTab(order[idx - 1]);
               }}
             >
               {activeTab === 'quest' && activeRoutineKey && routineFlows && (

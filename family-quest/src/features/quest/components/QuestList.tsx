@@ -219,6 +219,22 @@ const QuestItem: React.FC<{
             <Card
                 variant={variant}
                 onClick={canCancel ? undefined : handleTapComplete}
+                {...(canCancel
+                    ? {
+                          // #660: 取消は長押し専用で、onClick を外すと Card が role/tabIndex を
+                          // 付けなくなるためキーボードから一切到達できなかった。長押し相当の
+                          // 操作をキーボードに用意する(Enter/Space で取消を実行)。
+                          role: 'button' as const,
+                          tabIndex: isEffectivelyLocked || isProcessing ? -1 : 0,
+                          'aria-label': `${quest.title} の完了を取り消す`,
+                          onKeyDown: (e: React.KeyboardEvent) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  runCancel();
+                              }
+                          },
+                      }
+                    : {})}
                 className={`${cardSizeClasses} transition-all duration-300 relative
                     ${!isEffectivelyLocked ? 'cursor-pointer active:scale-[0.98] select-none' : ''}
                     ${isEffectivelyLocked ? 'opacity-50 grayscale cursor-not-allowed bg-gray-200 border-gray-400' : ''}

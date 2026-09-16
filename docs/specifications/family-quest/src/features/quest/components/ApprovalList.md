@@ -17,6 +17,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** 承認/却下スワイプの閾値 `SWIPE_THRESHOLD`(90px)は `src/lib/uiConstants.ts` の `APPROVAL_SWIPE_THRESHOLD_PX` を参照する。画面切替のスワイプ(60px)より広いのは、誤操作が即座に承認・却下につながるため。
+
 * 承認待ちクエストの一覧を表示し、ユーザーが各クエストの承認・却下、または複数件をまとめて承認するためのUIコンポーネントを提供するファイル。データ（`pendingQuests`, `users`）と承認・却下・一括承認の実行関数（`onApprove`/`onReject`/`onApproveAll`）はすべて親コンポーネントからPropsとして渡され、本ファイル内でAPI通信やReact Queryの利用は一切行わない。
 * 根拠: `Props`型定義およびコンポーネント定義 (行番号: 7〜13, 52 / 抜粋: "type Props = {\n    pendingQuests: QuestHistory[];\n    users: User[];\n    onApprove: (history: QuestHistory) => void;\n    onReject: (history: QuestHistory) => void;\n    onApproveAll: () => void;\n};", "const ApprovalList: React.FC<Props> = ({ pendingQuests, users, onApprove, onReject, onApproveAll }) => {")
 * 承認待ちが多いときのために全体を折りたたみ可能にする`collapsed`ステート（既定は展開状態）を持ち、`pendingQuests`が複数件あるときは`onApproveAll`を呼ぶ一括承認ボタンを表示する。各行は`SwipeableRow`でラップされ、右スワイプ=承認、左スワイプ=却下のジェスチャーに対応する一方、スワイプに気づかない人のために既存の個別ボタンも廃止せず併存させている。

@@ -18,6 +18,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #660 で変更）** アバター画像の `alt` を固定文字列 `"avatar"` から `"<ユーザー名> のアバター"` に変更した(誰のアバターかが読み上げで分かるようにするため)。
+
 ユーザー（冒険者）の名前・職業クラス・レベル・所持ゴールド・獲得メダル数を表示する、シンプルなステータスカードUIを描画するコンポーネント。アバター（アップロード画像パス、またはアイコン文字/絵文字のフォールバック）をクリックした際に、Propsで渡されたコールバック関数を発火させるインタラクションを提供する。
 
 * 根拠: コンポーネント定義とProps使用箇所 (行番号: 11, 34〜48 / 抜粋: "const UserStatusCard: React.FC<UserStatusCardProps> = ({ user, onAvatarClick }) => {", "<span className=\"text-base font-bold text-yellow-300 tracking-widest truncate\">{user.name}</span>")

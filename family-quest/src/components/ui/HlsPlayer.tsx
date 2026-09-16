@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
+// #660: 字幕・代替音声・EME を使わないカメラ表示用途のため light ビルドを使う。
+// フル版は CameraDashboard チャンクを 533KB(> 500KB 警告)まで押し上げていた。
+// ここで使う API(isSupported / Events.ERROR・FRAG_LOADED・MANIFEST_PARSED / ErrorTypes /
+// startLoad / recoverMediaError)はいずれも light ビルドに含まれる。
+import Hls from 'hls.js/light';
 
 interface HlsPlayerProps {
     streamUrl: string;
