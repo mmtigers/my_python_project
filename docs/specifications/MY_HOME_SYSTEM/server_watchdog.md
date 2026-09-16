@@ -58,7 +58,7 @@
 
 
 * **引数/リクエスト**: `service_name: str`
-* 根拠: `service_name: str` (行番号: 42 / 抜粋: "def get_service_status(service...")
+* 根拠: `service_name: str` (行番号: 43 / 抜粋: "def get_service_status(service...")
 
 
 * **戻り値/レスポンス**: `str`
@@ -83,7 +83,7 @@
 
 
 * **引数/リクエスト**: `process_keyword: str`
-* 根拠: `process_keyword: str` (行番号: 58 / 抜粋: "def is_process_alive(process_k...")
+* 根拠: `process_keyword: str` (行番号: 59 / 抜粋: "def is_process_alive(process_k...")
 
 
 * **戻り値/レスポンス**: `bool`
@@ -149,15 +149,15 @@
 ### `check_throttling_status`
 
 * **役割**: `vcgencmd get_throttled`コマンドを実行し、ハードウェアのスロットリング状況を確認する。現在異常が発生している場合はERRORレベルでログのみ記録し（後述の通り`send_push`直接呼び出しは行わない）、過去履歴のみの場合は`_is_new_history`で当該ブートにおいて未通知のビットがあるかを判定し、未通知であればWARNINGレベルでログを記録、既に通知済みであればDEBUGレベルでログを記録するのみに留める。
-* 根拠: `check_throttling_status` (行番号: 103〜149 / 抜粋: "def check_throttling_status():")
+* 根拠: `check_throttling_status` (行番号: 130〜176 / 抜粋: "def check_throttling_status():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_throttling_status():` (行番号: 103 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 130 / 抜粋: "def check_throttling_status():")
 
 
 * **戻り値/レスポンス**: なし（定義なし）
-* 根拠: `def check_throttling_status():` (行番号: 103 / 抜粋: "def check_throttling_status():")
+* 根拠: `def check_throttling_status():` (行番号: 130 / 抜粋: "def check_throttling_status():")
 
 
 * **副作用**: OSコマンド（`vcgencmd`）の実行、`_is_new_history`経由での`THROTTLE_STATE_FILE`の読み書き、ログ出力のみ。**`send_push`の直接呼び出しは行わない**（コード中のコメント「修正点2」により、`core/logger.py`側の仕様で`logger.error`がDiscordへ自動転送されることを理由に、二重通知防止のため意図的に削除されている）。
@@ -172,11 +172,11 @@
 ### `check_health`
 
 * **役割**: サービスとプロセスのステータスを確認し、両方が正常であればロックファイルを解除し復旧通知を送信する。異常であれば、初回は停止通知を送信してロックファイルを作成し、その後は一定時間（6時間）ごとにリマインダー通知を送信する。
-* 根拠: `check_health` (行番号: 151〜192 / 抜粋: "def check_health() -> None:")
+* 根拠: `check_health` (行番号: 178〜219 / 抜粋: "def check_health() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_health() -> None:` (行番号: 151 / 抜粋: "def check_health() -> None:")
+* 根拠: `def check_health() -> None:` (行番号: 178 / 抜粋: "def check_health() -> None:")
 
 
 * **戻り値/レスポンス**: `None`

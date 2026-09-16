@@ -62,13 +62,13 @@
 ### `perform_backup`
 
 * **役割**: データベースのバックアップを実行し、NASへ転送する。転送成功後は `_backup_config_files` を呼び出し、`config.BACKUP_FILES` に列挙されたDB以外の設定ファイルもあわせてNASへコピーする。NASへの転送失敗時は管理者の介入が必要な恒久的障害として扱い、即時通知を行う。
-* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 17〜76 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup() -> Tuple[bool, str, float]:` (行番号: 16〜90 / 抜粋: "def perform_backup() -> Tu...")
 * **（#411 S-L8で修正）** 元・先の接続は以前 `with sqlite3.connect(...) as conn:` で開いていたが、sqlite3の`Connection.__exit__`はcommit/rollbackのみを行い接続自体はcloseしない既知の挙動のため、定期実行されるバックアップ処理のたびに接続がcloseされずリークしていた。`contextlib.closing`で両接続を明示的にcloseするよう変更した。
 * 根拠: `with contextlib.closing(sqlite3.connect(src_db_path)) as src_conn, \` (行番号: 46〜48)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def perform_backup():` (行番号: 17 / 抜粋: "def perform_backup() -> Tu...")
+* 根拠: `def perform_backup():` (行番号: 16 / 抜粋: "def perform_backup() -> Tu...")
 
 
 * **戻り値/レスポンス**: `Tuple[bool, str, float]`。成功時は `(True, "バックアップ完了", バックアップサイズMB)`、失敗時は `(False, エラーメッセージ, 0.0)` を返す。
@@ -90,15 +90,15 @@
 ### `_backup_config_files`
 
 * **役割**: `config.BACKUP_FILES` に列挙された設定ファイル(DB以外)をNASへコピーする。`src_db_path` と一致するエントリ（DB本体、既にPhase 1/2でバックアップ済み）はスキップする。個々のファイルのコピー失敗（ファイル不存在・`OSError`）はログに残すのみで、`perform_backup` 全体の成否には影響させない。
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 78〜97 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str) -> None:` (行番号: 92〜111 / 抜粋: "def _backup_config_files(n...")
 
 
 * **引数/リクエスト**: `nas_backup_dir: Path` (コピー先のNASバックアップディレクトリ), `timestamp: str` (ファイル名に付与するタイムスタンプ文字列), `src_db_path: str` (スキップ対象となるDBパス、`perform_backup`の`config.SQLITE_DB_PATH`)
-* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 78 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `def _backup_config_files(nas_backup_dir: Path, timestamp: str, src_db_path: str)` (行番号: 92 / 抜粋: "def _backup_config_files(n...")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 78 / 抜粋: "def _backup_config_files(n...")
+* 根拠: `-> None:` (行番号: 92 / 抜粋: "def _backup_config_files(n...")
 
 
 * **副作用**: `config.BACKUP_FILES` の各エントリについて、相対パスは `config.BASE_DIR` を基準に解決したうえで存在確認し、存在すれば `nas_backup_dir` へ `<ファイル名(拡張子除く)>_<timestamp><拡張子>` という名前で `shutil.copy2` によりコピーする。存在確認・コピー結果をログ出力する。
@@ -113,15 +113,15 @@
 ### `_notify_and_log_error`
 
 * **役割**: ERRORレベルの記録と管理者への即時通知を行う。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 99〜107 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` (行番号: 113〜120 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **引数/リクエスト**: `message: str` (エラー内容を示すメッセージ文字列)
-* 根拠: `def _notify_and_log_error(message: str)` (行番号: 99 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str)` (行番号: 113 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `-> None:` (行番号: 99 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `-> None:` (行番号: 113 / 抜粋: "def _notify_and_log_error(...)")
 
 
 * **副作用**: ロガーへのエラー書き込み、外部API呼び出し（`send_push`）。
@@ -129,7 +129,7 @@
 
 
 * **エラーハンドリング**: なし（内部で例外捕捉は行われていない）。
-* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 99〜107 / 抜粋: "def _notify_and_log_error(...)")
+* 根拠: `def _notify_and_log_error(message: str) -> None:` 内部の実装 (行番号: 113〜120 / 抜粋: "def _notify_and_log_error(...)")
 
 
 

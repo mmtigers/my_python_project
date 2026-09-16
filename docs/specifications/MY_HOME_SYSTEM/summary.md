@@ -120,11 +120,11 @@
 ### `get_server_status`
 
 * **役割**: `analysis_service.get_memory_usage()`から取得したメモリ使用率をパーセンテージ表示し、80%未満か以上かでテーマ色を切り替える。
-* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 100〜104 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
+* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 103〜107 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 100 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
+* 根拠: `def get_server_status() -> Tuple[str, str]:` (行番号: 103 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (`mem`が真値の場合: `"💻 RAM: {割合}%"`/`theme-green`（80%未満）または`theme-red`（80%以上）。それ以外: `"⚪ 取得失敗"`/`theme-gray`)
@@ -136,18 +136,18 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_server_status() -> Tuple[str, str]:` 全体 (行番号: 100〜104 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
+* 根拠: `def get_server_status() -> Tuple[str, str]:` 全体 (行番号: 103〜107 / 抜粋: "def get_server_status() -> Tuple[str, str]:")
 
 
 
 ### `get_nas_status_simple`
 
 * **役割**: 渡された`nas_data`（`Optional[pd.Series]`）の`status_ping`フィールドから、NASの稼働状態（稼働中/応答なし）を判定する。
-* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 106〜114 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
+* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 109〜117 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
 
 
 * **引数/リクエスト**: `nas_data` (型: `Optional[pd.Series]`。`status_ping`フィールドを含むことを期待するNASステータスデータ)
-* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 106 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
+* 根拠: `def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:` (行番号: 109 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (`nas_data`が`None`: `"⚪ データなし"`/`theme-gray`。`status_ping == "OK"`: `"🗄️ NAS: 稼働中"`/`theme-green`。それ以外: `"⚠️ NAS: 応答なし"`/`theme-red`。`KeyError`発生時: `"⚠️ NAS: データ異常"`/`theme-yellow`)
@@ -155,7 +155,7 @@
 
 
 * **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 106〜114 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
+* 根拠: 関数本体全体 (行番号: 109〜117 / 抜粋: "def get_nas_status_simple(nas_data: Optional[pd.Series]) -> Tuple[str, str]:")
 
 
 * **エラーハンドリング**: `nas_data["status_ping"]`アクセス時の`KeyError`を`try...except KeyError:`で捕捉し、`"⚠️ NAS: データ異常"`を返す。
@@ -166,11 +166,11 @@
 ### `get_car_status`
 
 * **役割**: 渡された`df_car`（車の入出庫ログ）の最新レコードの`action`が`"LEAVE"`であれば外出中、それ以外は在宅と判定する。
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 116〜119 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 119〜122 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
 
 
 * **引数/リクエスト**: `df_car` (型: `pd.DataFrame`。`action`列を含む車の状態ログ。先頭行が最新であることを前提とする)
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 116 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` (行番号: 119 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (`df_car`が空でなくかつ先頭行の`action`が`"LEAVE"`: `"🚗 外出中"`/`theme-yellow`。それ以外: `"🏠 在宅"`/`theme-green`)
@@ -178,22 +178,22 @@
 
 
 * **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 116〜119 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: 関数本体全体 (行番号: 119〜122 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 116〜119 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 119〜122 / 抜粋: "def get_car_status(df_car: pd.DataFrame) -> Tuple[str, str]:")
 
 
 
 ### `get_rice_status`
 
 * **役割**: `device_name`に「炊飯器」を含み、本日分の`power_watts`が500W以上のレコードがあれば「ご飯あり」と判定する。
-* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 122〜143 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
+* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 125〜146 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`device_name`, `power_watts`, `timestamp`列を含む)、`now` (型: `datetime`。基準時刻)
-* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 122 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
+* 根拠: `def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:` (行番号: 125 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (本日の最大電力が500W以上: `"🍚 ご飯あり"`/`theme-green`。それ以外（初期値）: `"🍚 炊いてない"`/`theme-red`)
@@ -201,7 +201,7 @@
 
 
 * **副作用**: なし（純粋な判定関数）
-* 根拠: 関数本体全体 (行番号: 122〜143 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
+* 根拠: 関数本体全体 (行番号: 125〜146 / 抜粋: "def get_rice_status(df_sensor: pd.DataFrame, now: datetime) -> Tuple[str, str]:")
 
 
 * **エラーハンドリング**: なし（`device_name`, `power_watts`列の存在チェックによる早期`return`のみ）
@@ -212,11 +212,11 @@
 ### `get_bicycle_status`
 
 * **役割**: 3つの対象駐輪場エリアの最新待機台数を集計し、前日同時刻帯（±2時間）との差分を矢印記号付きHTMLとして整形、合計待機数に応じたテーマを判定する。
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 145〜199 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 148〜202 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
 
 
 * **引数/リクエスト**: `df_bicycle` (型: `pd.DataFrame`。`area_name`, `timestamp`, `waiting_count`列を含む駐輪場データ)
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 145 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` (行番号: 148 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
 
 
 * **戻り値/レスポンス**: `Tuple[str, str]` (`df_bicycle`が空、または対象エリアにデータなし: `"⚪ データなし"`/`theme-gray`。データありの場合: 各エリアの現在値・前日比を含むHTML文字列、合計待機数が0: `theme-green`、10未満: `theme-yellow`、それ以上: `theme-red`)
@@ -228,7 +228,7 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 145〜199 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
+* 根拠: `def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:` 全体 (行番号: 148〜202 / 抜粋: "def get_bicycle_status(df_bicycle: pd.DataFrame) -> Tuple[str, str]:")
 
 
 
@@ -239,11 +239,11 @@
 
 
 * **引数/リクエスト**: `now` (型: `datetime`。基準時刻)、`df_sensor` (型: `pd.DataFrame`。センサーデータ)、`df_car` (型: `pd.DataFrame`。車データ)、`df_bicycle` (型: `pd.DataFrame`。駐輪場データ)、`nas_data` (型: `Optional[pd.Series]`。NASステータス)
-* 根拠: `def render_summary(\n    now: datetime,\n    df_sensor: pd.DataFrame,\n    df_car: pd.DataFrame,\n    df_bicycle: pd.DataFrame,\n    nas_data: Optional[pd.Series],\n):` (行番号: 203〜209 / 抜粋: "def render_summary(")
+* 根拠: `def render_summary(\n    now: datetime,\n    df_sensor: pd.DataFrame,\n    df_car: pd.DataFrame,\n    df_bicycle: pd.DataFrame,\n    nas_data: Optional[pd.Series],\n):` (行番号: 206〜244 / 抜粋: "def render_summary(")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_summary(...):` (行番号: 203 / 抜粋: "def render_summary(")
+* 根拠: `def render_summary(...):` (行番号: 206 / 抜粋: "def render_summary(")
 
 
 * **副作用**:
@@ -254,7 +254,7 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない。内部で呼び出す`get_*_status`関数のいずれかが例外を送出した場合、`render_summary`もそのまま呼び出し元に伝播させる）
-* 根拠: `def render_summary(...):` 全体 (行番号: 203〜239 / 抜粋: "def render_summary(")
+* 根拠: `def render_summary(...):` 全体 (行番号: 206〜244 / 抜粋: "def render_summary(")
 
 
 

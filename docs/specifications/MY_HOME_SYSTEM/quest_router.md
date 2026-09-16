@@ -81,7 +81,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 32-34 / 抜粋: "def sync_master_data():")
+* 根拠: 該当関数 (行番号: 33-34 / 抜粋: "def sync_master_data():")
 
 
 
@@ -129,7 +129,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 48-50 / 抜粋: "def complete_quest")
+* 根拠: 該当関数 (行番号: 49-50 / 抜粋: "def complete_quest")
 
 
 
@@ -152,7 +152,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 52-54 / 抜粋: "def approve_quest")
+* 根拠: 該当関数 (行番号: 53-54 / 抜粋: "def approve_quest")
 
 
 
@@ -175,7 +175,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 56-58 / 抜粋: "def reject_quest")
+* 根拠: 該当関数 (行番号: 57-58 / 抜粋: "def reject_quest")
 
 
 
@@ -198,7 +198,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 60-62 / 抜粋: "def cancel_quest")
+* 根拠: 該当関数 (行番号: 61-62 / 抜粋: "def cancel_quest")
 
 
 
@@ -221,7 +221,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 64-66 / 抜粋: "def purchase_reward")
+* 根拠: 該当関数 (行番号: 65-66 / 抜粋: "def purchase_reward")
 
 
 
@@ -244,30 +244,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 68-70 / 抜粋: "def get_family_chronicle():")
-
-
-
-### `seed_data`
-
-* **役割**: `sync_master_data` のエイリアス。マスターデータを同期する内部関数。
-* 根拠: 関数定義 (行番号: 70-71 / 抜粋: "def seed_data():")
-
-
-* **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 70 / 抜粋: "def seed_data():")
-
-
-* **戻り値/レスポンス**: 不明（`game_system.sync_master_data()` の戻り値）
-* 根拠: メソッド呼び出し (行番号: 71 / 抜粋: "return game_system.sync_master")
-
-
-* **副作用**: 不明（外部関数に依存）
-* 根拠: メソッド呼び出し (行番号: 71 / 抜粋: "game_system.sync_master_data()")
-
-
-* **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 70-71 / 抜粋: "def seed_data():")
+* 根拠: 該当関数 (行番号: 69-70 / 抜粋: "def get_family_chronicle():")
 
 
 
@@ -290,7 +267,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 72-74 / 抜粋: "def seed_data_endpoint():")
+* 根拠: 該当関数 (行番号: 73-74 / 抜粋: "def seed_data_endpoint():")
 
 
 
@@ -313,7 +290,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 76-78 / 抜粋: "def update_user_avatar")
+* 根拠: 該当関数 (行番号: 77-78 / 抜粋: "def update_user_avatar")
 
 
 
@@ -359,7 +336,7 @@
 
 
 * **エラーハンドリング**: なし（`user_service.delete_unlinked_avatar`が`bool`を返す設計のため、本エンドポイント自体は例外を送出しない。存在しないファイル・パス不正・他ユーザー参照中等はいずれも`False`＝`"skipped"`として扱われる）
-* 根拠: [該当関数] (行番号: 93-96 / 抜粋: "def delete_uploaded_image(filename: str):\n    deleted = user_service.delete_unlinked_avatar(filename)\n    return {"status": "deleted" if deleted else "skipped"}")
+* 根拠: [該当関数] (行番号: 94-96 / 抜粋: "def delete_uploaded_image(filename: str):\n    deleted = user_service.delete_unlinked_avatar(filename)\n    return {"status": "deleted" if deleted else "skipped"}")
 
 
 
@@ -428,7 +405,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 120-122 / 抜粋: "def get_inventory")
+* 根拠: 該当関数 (行番号: 121-122 / 抜粋: "def get_inventory")
 
 
 
@@ -451,7 +428,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数 (行番号: 124-126 / 抜粋: "def use_item")
+* 根拠: 該当関数 (行番号: 125-126 / 抜粋: "def use_item")
 
 
 
@@ -534,7 +511,7 @@ graph TD
 * **（Issue #547で追加）** `reset_user`(`POST /admin/reset_user`)は、本ファイルが持つ現行の唯一の`/admin/*`エンドポイントである（旧`admin_update_boss`(`POST /admin/boss/update`)は既に削除済み。§8の別項参照）。他の大半のエンドポイントと同様、本ファイル自身には認証・セッション機構は無く、リクエストボディの`admin_id`が実際に管理者（`role_adult`）であることの検証は`user_service.reset_user_data`側に完全に委譲されている（本ファイルからは検証の有無・実装は確認できない）。
 * 根拠: [ルーティング定義] (行番号: 83-85 / 抜粋: "@router.post(\"/admin/reset_user\", response_model=ResetUserResponse)\ndef reset_user(action: ResetUserAction):\n    return user_service.reset_user_data(action.admin_id, action.target_user_id)")
 * **（Issue #551で修正）** `upload_image`は、拡張子・マジックバイト検証・チャンク書き込み・サイズ上限チェック等の実装を`services/quest/user_service.py`の`UserService.save_avatar_image`へ全面的に移設した。本ファイル側に残るのは`await user_service.save_avatar_image(file)`の呼び出しと、`InvalidImageError`→400、`ImageTooLargeError`→413、その他の`Exception`→500（`logger.exception`でスタックトレース付きログ出力後）という例外ハンドリングのみである。以前あったモジュール関数`validate_image_header`（マジックバイト判定）も、この移設に伴い本ファイルからは完全に削除されている。実際のファイルI/O・検証ロジックの詳細は[quest_user_service.md](./quest_user_service.md)を参照。
-* 根拠: [関数定義] (行番号: 98-109 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
+* 根拠: [関数定義] (行番号: 99-109 / 抜粋: "async def upload_image(file: UploadFile = File(...)):\n    try:\n        url = await user_service.save_avatar_image(file)")
 * かつて存在した `purchase_equipment` (`POST /equip/purchase`), `change_equipment` (`POST /equip/change`), `admin_update_boss` (`POST /admin/boss/update`), `get_family_mileage` (`GET /family-mileage`), `update_family_mileage` (`PUT /family-mileage`), `get_weekly_analytics` (`GET /analytics/weekly`) の各エンドポイントは、ボス戦闘・装備・ファミリーマイレージ・週間ランキング機能の廃止に伴い削除されている。特に `admin_update_boss` は本ファイル内で `common.get_db_cursor` を用いて `party_state` テーブルへ直接SQLを実行する唯一の箇所だったため、これに伴い `common` モジュールへのインポートも削除されている。
 * かつて存在した `consume_item` (`POST /inventory/consume`), `cancel_item_usage` (`POST /inventory/cancel`), `get_admin_pending_inventory` (`GET /inventory/admin/pending`) の各エンドポイントは、アイテム使用時の親承認フロー廃止（コミット`9d5edec`）に伴い削除されている。これに伴い、インポートしていた `ConsumeItemAction` モデルも削除されている。`use_item` (`POST /inventory/use`) 自体のルーティング・実装コードは変更されていない。
 * `get_all_data` は `viewer_user_id`（`Optional[str]`、クエリパラメータ、既定`None`）を新たに受け取り、`game_system.get_all_view_data()` へそのまま渡すようになっている。本ファイルからは、この値が閲覧者スコープの絞り込み以外にどう使われるかは不明。

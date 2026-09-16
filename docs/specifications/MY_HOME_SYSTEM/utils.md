@@ -62,11 +62,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_now_iso] (行番号: 12 / 抜粋: "def get_now_iso() -> str:")
+* 根拠: [get_now_iso] (行番号: 14 / 抜粋: "def get_now_iso() -> str:")
 
 
 * **戻り値/レスポンス**: `str`。ISO 8601形式の日時文字列。
-* 根拠: [get_now_iso] (行番号: 12 / 抜粋: "def get_now_iso() -> str:")
+* 根拠: [get_now_iso] (行番号: 14 / 抜粋: "def get_now_iso() -> str:")
 
 
 * **副作用**: なし
@@ -85,11 +85,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_today_date_str] (行番号: 15 / 抜粋: "def get_today_date_str() -> st...")
+* 根拠: [get_today_date_str] (行番号: 17 / 抜粋: "def get_today_date_str() -> st...")
 
 
 * **戻り値/レスポンス**: `str`。"YYYY-MM-DD" 形式の日付文字列。
-* 根拠: [get_today_date_str] (行番号: 15 / 抜粋: "def get_today_date_str() -> st...")
+* 根拠: [get_today_date_str] (行番号: 17 / 抜粋: "def get_today_date_str() -> st...")
 
 
 * **副作用**: なし
@@ -108,11 +108,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [get_display_date] (行番号: 18 / 抜粋: "def get_display_date() -> str:")
+* 根拠: [get_display_date] (行番号: 20 / 抜粋: "def get_display_date() -> str:")
 
 
 * **戻り値/レスポンス**: `str`。"MM/DD" 形式の日付文字列。
-* 根拠: [get_display_date] (行番号: 18 / 抜粋: "def get_display_date() -> str:")
+* 根拠: [get_display_date] (行番号: 20 / 抜粋: "def get_display_date() -> str:")
 
 
 * **副作用**: なし
@@ -173,11 +173,11 @@
 ### `RefCountedLockRegistry`（Issue #435 で追加）
 
 * **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
-* 根拠: [クラス定義とdocstring] (行番号: 24〜39 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
+* 根拠: [クラス定義とdocstring] (行番号: 57〜110 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
 
 
 * **引数/リクエスト**: `__init__`は引数なし。内部に`_entries: Dict[Any, _Entry]`（キーごとの`lock`と`ref_count`を持つ内部クラス`_Entry`のインスタンス）と、`_entries`辞書自体への操作を保護する`_guard: threading.Lock`を保持する。
-* 根拠: [__init__] (行番号: 48〜50 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
+* 根拠: [__init__] (行番号: 81〜83 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
 
 
 * **戻り値/レスポンス**: 該当なし（クラス自体はコンストラクタで値を返さない。メソッドの戻り値は各メソッドの項を参照）
@@ -189,7 +189,7 @@
 
 
 * **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。
-* 根拠: [keys, __contains__] (行番号: 70〜77 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
+* 根拠: [keys, __contains__] (行番号: 103〜106 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
 
 
 
@@ -222,7 +222,7 @@
 ### `retry_with_backoff`
 
 * **役割**: 引数なしのcallable(`fn`)を実行し、指定した例外クラス群(`retryable_exceptions`)に該当する例外が発生した場合のみExponential Backoffで再試行する共通ユーティリティ。Issue #292で、`config.py`の`verify_and_initialize_storage`と`monitors/nas_monitor.py`の`check_write_permission`がそれぞれ個別に実装していたNAS I/O向けのExponential Backoffループを1箇所に集約するために追加された。リトライ対象の例外集合・リトライ回数・待機秒数という「ポリシー」自体は呼び出し元ごとに異なるため引数として渡せるようにしており、集約後も各呼び出し元の挙動(リトライ回数・待機秒数・リトライ対象例外)自体は変更していない。
-* 根拠: [retry_with_backoff] (行番号: 56〜64 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
+* 根拠: [retry_with_backoff] (行番号: 147〜200 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
 
 
 * **引数/リクエスト**:
@@ -399,7 +399,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
-| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 56〜57 / 抜粋: "def wait_for_storage_warmup(ta...") |
+| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 203〜243 / 抜粋: "def wait_for_storage_warmup(ta...") |
 | 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
 | 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (行番号: 26〜29 / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
 
@@ -424,7 +424,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 呼び出し元モジュールの特定 | リポジトリ全体を`core.utils`および関数名で検索し、実際の呼び出し箇所を直接確認した。`get_now_iso`: `MY_HOME_SYSTEM/common.py:16`で`core.utils`から再エクスポートされ、`MY_HOME_SYSTEM/services/sensor_service.py:9`が直接インポートして`145行目・183行目`でセンサーログのタイムスタンプに使用、`MY_HOME_SYSTEM/services/line_service.py:19`と`MY_HOME_SYSTEM/handlers/line_logic.py:31`も直接インポートしてそれぞれ`49行目`/`361行目`で使用、`MY_HOME_SYSTEM/old/weather_service.py:378`は`common.get_now_iso()`という形でFacade経由で使用している。`get_today_date_str`: `line_service.py:49,68`、`line_logic.py:154,361`が直接インポートして使用するほか、`MY_HOME_SYSTEM/old/shopping_monitor.py:276`、`MY_HOME_SYSTEM/old/collect_onvif_logs.py:45`、`MY_HOME_SYSTEM/old/send_ai_report.py:89`が`common.get_today_date_str()`の形でFacade経由で使用している。`get_display_date`は`common.py:16`で再エクスポートされているのみで、リポジトリ内を検索したが実際に呼び出している箇所は見つからなかった(未使用の可能性がある)。`with_exponential_backoff`は`MY_HOME_SYSTEM/monitors/old/car_presence_checker.py:19`が`core.utils`から直接インポートしている(本番コードでの実使用を確認できた唯一の例)ほか、`MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:29,49,64`のテストコードで使用されている。`wait_for_storage_warmup`はリポジトリ全体を検索したが本番コードからの呼び出しは見つからず、`MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:85,94,111`のテストコードでのみ使用が確認できた(`core/nas_utils.py`や`newface_monitor.py`は類似ロジックを独自に再実装しており、本関数自体は呼び出していない)。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:16`, `MY_HOME_SYSTEM/services/sensor_service.py:9,145,183`, `MY_HOME_SYSTEM/services/line_service.py:19,49,68`, `MY_HOME_SYSTEM/handlers/line_logic.py:31,154,361`, `MY_HOME_SYSTEM/old/weather_service.py:378`, `MY_HOME_SYSTEM/old/shopping_monitor.py:276`, `MY_HOME_SYSTEM/old/collect_onvif_logs.py:45`, `MY_HOME_SYSTEM/old/send_ai_report.py:89`, `MY_HOME_SYSTEM/monitors/old/car_presence_checker.py:19`, `MY_HOME_SYSTEM/tests/test_core_utils_and_network.py:29-111` |
+| 呼び出し元モジュールの特定 | **（旧版が挙げていた`MY_HOME_SYSTEM/old/`配下・`tests/test_core_utils_and_network.py`はいずれも削除済みのため、現行ツリーで取り直した）** リポジトリ全体を`core.utils`および関数名で検索し、実際の呼び出し箇所を直接確認した。`get_now_iso`: `MY_HOME_SYSTEM/common.py:16`で`core.utils`から再エクスポートされ、`services/sensor_service.py:9`が直接インポートして`222行目`/`260行目`でセンサーログのタイムスタンプに使用、`services/line_service.py:10`と`handlers/line_logic.py:27`も直接インポートしてそれぞれ`131行目`/`372行目`で使用、`services/routine_service.py`は`common.get_now_iso()`(211・259・301行目)というFacade経由で使用する。`get_today_date_str`: `services/line_service.py:10,131`、`handlers/line_logic.py:27,131,372`が直接インポートして使用。`get_display_date`: **旧版は「未使用の可能性がある」としていたが誤りで**、`handlers/line_logic.py:27,324`が「JST基準・`"%m/%d"`形式」の表示日付として実際に使用している(同322〜323行目のコメントがOSタイムゾーン依存を避ける意図を明記)。`get_now_jst`: `services/camera_service.py:13,406`と`services/train_service.py:10,97`が使用(Issue #592)。`with_exponential_backoff`: **本番コードからの呼び出しは現存せず**、`MY_HOME_SYSTEM/tests/test_core_utils.py:32,52,67`のテストからのみ使用される(旧版が唯一の本番利用例として挙げていた`monitors/old/car_presence_checker.py`はディレクトリごと削除済み)。`wait_for_storage_warmup`: **旧版は「本番コードからの呼び出しは見つからず」としていたが現在は誤りで**、`DDD/newface_monitor.py`が`from core.utils import wait_for_storage_warmup`(53行目、`try/except ImportError`のフォールバック付き)でインポートし`2275行目`の`if not wait_for_storage_warmup(data_dir):`で実際に使用している(CLAUDE.md記載の「DDDが`core.*`へ持つ実依存」の1つ)。ほかに`MY_HOME_SYSTEM/tests/test_core_utils.py:216,225,242`でも使用。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:16`, `MY_HOME_SYSTEM/services/sensor_service.py:9,222,260`, `MY_HOME_SYSTEM/services/line_service.py:10,131`, `MY_HOME_SYSTEM/handlers/line_logic.py:27,131,322-324,372`, `MY_HOME_SYSTEM/services/routine_service.py:211,259,301`, `MY_HOME_SYSTEM/services/camera_service.py:13,406`, `MY_HOME_SYSTEM/services/train_service.py:10,97`, `MY_HOME_SYSTEM/tests/test_core_utils.py:32,52,67,216,225,242`, `DDD/newface_monitor.py:53,2275`（参考: [common.md](./common.md)・[newface_monitor.md](../DDD/newface_monitor.md)） |
 | 実行環境とパッケージのバージョン | `MY_HOME_SYSTEM/requirements.txt`を直接確認したところ、88行目に`pytz==2025.2`と明記されていた(他の依存パッケージも同ファイルにバージョン固定で列挙されている)。動作対象のPythonバージョン自体はこのファイルには記載がないが、`.github/workflows/test.yml`の25〜28行目(lintジョブ)・58行目・103行目でCI実行時のPythonバージョンとして`"3.11"`が指定されていることを直接確認した。ただし本番デプロイ環境で実際に使用されるPythonバージョンを規定するDockerfile等の設定ファイルはリポジトリ内に見つからず、その点は未解消のまま残る。 | 直接ソース確認: `MY_HOME_SYSTEM/requirements.txt:88`, `.github/workflows/test.yml:25-28,58,103` |
 
 ## 10. 自己検証結果

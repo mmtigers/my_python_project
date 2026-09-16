@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 同名衝突の注意: `services/quest/quest_service.py`と`services/quest_service.py`（下位互換シム）がファイル名`quest_service`で衝突するため、`services/quest/`配下の6ファイルはいずれも`quest_`を接頭辞とした名前（`quest_locks.md`等）で区別している（`dashboard_common.md`と同じ命名規約）。本ファイル自体は`locks.py`という単独の基底名のため衝突は生じないが、他5ファイルとの命名一貫性のため同じ接頭辞を付けている。
 
@@ -269,6 +270,13 @@ graph TD
 | --- | --- | --- |
 | `RefCountedLockRegistry`の参照カウント管理の具体的なアルゴリズム | 本ファイルは`acquire()`を呼び出すのみで、内部実装（辞書からの削除タイミング、`_guard`ロックの役割等）は`core/utils.py`側にある | `core/utils.py` |
 | `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`の実際の値 | `config.py`側の定義・`.env`依存の実値は本ファイルからは確認できない | `config.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `RefCountedLockRegistry`の参照カウント管理の具体的なアルゴリズム | `MY_HOME_SYSTEM/core/utils.py`を直接確認した。`RefCountedLockRegistry`(57〜101行目)は内部クラス`_Entry`(`__slots__ = ("lock", "ref_count")`、74〜79行目)で`threading.Lock`と参照カウントを保持し、`self._entries: Dict[Any, _Entry]`と単一の`self._guard = threading.Lock()`(81〜83行目)を持つ。`acquire(key)`は`@contextlib.contextmanager`(85行目)で、(1)`_guard`下でキーのエントリを取得または新規作成し`ref_count += 1`(88〜93行目)、(2)`with entry.lock:`でキー単位の排他を張って`yield`(94〜96行目)、(3)`finally`で再び`_guard`下に入り`ref_count -= 1`し、`ref_count == 0`かつ`self._entries.get(key) is entry`のときだけ辞書から削除する(97〜101行目)、という3段構成である。この`is`比較により、削除判定中に別スレッドが同じキーで新しいエントリを作っていた場合は削除しない。クラスdocstringは、単純な`lock.locked()`ベースの剪定では「辞書からロックを取り出した直後・`with`で獲得する直前」の隙間で別スレッドが剪定し、同一キーに対して2つのLockが同時に取得成功しうる（Issue #435）ため参照カウント方式を採った、と明記している。つまり本ファイルの4レジストリは「使用中のエントリは絶対に削除されない」ことが保証され、キー(ユーザーID×クエストID等)が増え続けてもエントリは蓄積しない。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:57-101`（参考: [utils.md](./utils.md)） |
+| `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数`YOUTUBE_REWARD_IDS`のカンマ区切り文字列を既定値`"10,11,12"`として読み込み(589行目)、`[int(r.strip()) for r in ... if r.strip().isdigit()]`で`List[int]`へパースする(590〜595行目)。パース失敗時は警告ログを出して空リストのままとなる。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は環境変数の既定値`"2026-09-12"`を`datetime.date.fromisoformat`で`date`へ変換した値(604〜606行目)で、パース失敗時は`date(2000, 1, 1)`へフォールバックする=即時強制になる(608〜609行目)。したがって本ファイルの`_is_youtube_cooldown_enforced()`は2026-09-12(JST)以降`True`を返し、`_get_youtube_cooldown_remaining_seconds`のIN句は既定で`(10, 11, 12)`の3件になる。`.env`による上書きは可能だが、リポジトリ内の既定値だけで本ファイルの分岐は決定できる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:587-609`（参考: [config.md](./config.md)） |
 
 ## 10. 自己検証結果
 

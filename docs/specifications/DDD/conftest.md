@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -110,6 +111,12 @@ graph TD
 | --- | --- | --- |
 | `MY_HOME_SYSTEM/config.py`が`load_dotenv()`を`override=False`（デフォルト）で呼んでいるかどうかの直接確認 | 本ファイルのDocstringはこの前提を述べているが、`config.py`自体の実装は本ファイルの解析範囲外である。 | `MY_HOME_SYSTEM/config.py` |
 | 本ファイルが新設される前の`DDD/`のテスト実行における実際の被害範囲（過去に本物のWebhookが発火した事故の有無） | 本ファイルおよびIssue #103の記述からは「発生しうる経路が存在した」ことまでは分かるが、実際に本番環境で事故が発生したかどうかは本ファイルからは不明。 | 過去のインシデント記録（本リポジトリ内には見当たらない） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `MY_HOME_SYSTEM/config.py`が`load_dotenv()`を`override=False`（デフォルト）で呼んでいるかどうかの直接確認 | `MY_HOME_SYSTEM/config.py`を直接確認した。29行目で`from dotenv import load_dotenv`、161行目で**引数なしの`load_dotenv()`**が呼ばれている。`python-dotenv`の`load_dotenv`は`override`の既定値が`False`であるため、**既に`os.environ`に存在する変数は`.env`の値で上書きされない**。したがって本ファイル(`DDD/conftest.py`)がimport時点＝`config`ロードより前にDiscord/LINEのWebhook・トークン系環境変数を空文字へ設定しておけば、その後に`config`が`load_dotenv()`を呼んでも実際の認証情報で上書きされることはなく、本ファイルのDocstringが述べる前提は**成立していることが裏付けられた**。逆に言えば、将来`config.py`側が`load_dotenv(override=True)`へ変更されるとこの防御は無言で破られるため、`config.py:161`は本ファイルの安全性が依存している箇所である。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:29,161`（参考: [config.md](./../MY_HOME_SYSTEM/config.md)） |
 
 ## 10. 自己検証結果
 

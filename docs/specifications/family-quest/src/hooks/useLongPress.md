@@ -269,8 +269,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`/`clickSuppressMs`に実際渡される値、および`handlers`が紐付けられるDOM要素、`wasFiredRecently`/`clearFiredFlag`の具体的な呼び出しパターン | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(136〜140行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel || isProcessing, thresholdMs: 550 })`として呼び出されており、`onShortTap`・`clickSuppressMs`は渡されていない（＝短タップでは何も起きず、猶予は既定の400ms）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。戻り値の`wasFiredRecently`と`clearFiredFlag`は`handleTapComplete`(144〜160行目)内で`if (wasFiredRecently()) { clearFiredFlag(); return; }`という形で使われており（Issue #568）、抑止判定が`true`だった場合は必ずその場で`clearFiredFlag()`を呼んでフラグを消費している。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(226行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`Card`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:120,136-140,144-160,226` |
-
+| `onLongPress`/`onShortTap`/`thresholdMs`/`disabled`/`clickSuppressMs`に実際渡される値、および`handlers`が紐付けられるDOM要素、`wasFiredRecently`/`clearFiredFlag`の具体的な呼び出しパターン | `family-quest/src/features/quest/components/QuestList.tsx`を直接確認した。唯一の呼び出し箇所である`QuestItem`内(136〜140行目)で`useLongPress({ onLongPress: runCancel, disabled: !canCancel \|\| isProcessing, thresholdMs: 550 })`として呼び出されており、`onShortTap`・`clickSuppressMs`は渡されていない（＝短タップでは何も起きず、猶予は既定の400ms）。`thresholdMs`はフック既定の600msではなく550msに明示的に短縮されている。戻り値の`wasFiredRecently`と`clearFiredFlag`は`handleTapComplete`(144〜160行目)内で`if (wasFiredRecently()) { clearFiredFlag(); return; }`という形で使われており（Issue #568）、抑止判定が`true`だった場合は必ずその場で`clearFiredFlag()`を呼んでフラグを消費している。`longPressHandlers`は`{...(canCancel ? longPressHandlers : {})}`(226行目)という形で、`canCancel`（完了済み/申請中かつロックされていないクエストカード）が真の場合にのみカードのルート`Card`要素に展開される。 | 直接ソース確認: `family-quest/src/features/quest/components/QuestList.tsx:120,136-140,144-160,226` |
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -6,7 +6,7 @@
 | 言語 | Python (Pydantic) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `83b42db` |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -121,6 +121,12 @@ graph TD
 | --- | --- | --- |
 | バリデーション違反時の実際のレスポンス形状 | Pydantic/FastAPI側のデフォルト挙動に依存しており、本ファイルにはエラーレスポンスの形式・内容を示すコードが存在しない。 | FastAPI/Pydanticのバージョン・共通例外ハンドラの設定箇所(`unified_server.py`等) |
 | Responseモデルが今後追加される計画の有無 | ファイル冒頭コメントは「Request Models」区分のみを示すが、将来Responseモデルを追加する計画があるかどうかは本ファイルからは不明。 | 該当ファイルなし(ロードマップ文書等の追加が必要) |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| バリデーション違反時の実際のレスポンス形状 | `MY_HOME_SYSTEM/unified_server.py`を直接確認したところ、登録されている例外ハンドラは`@app.exception_handler(Exception)`(324〜331行目)の**1つだけ**で、`RequestValidationError`用のハンドラは定義されていない。したがって`RoutineCompleteAction`のバリデーション違反は**FastAPI/Pydantic v2の既定動作のまま**であり、HTTP **422 Unprocessable Entity** と`{"detail": [{"type": "...", "loc": ["body", "flow_key"], "msg": "...", "input": ..., "ctx": {...}}]}`形式のJSONが返る(`fastapi==0.141.1` / `pydantic==2.12.5`、`MY_HOME_SYSTEM/requirements.txt:25,73-74`)。具体的には`flow_key`が`'am'`/`'pm'`以外なら`type: "literal_error"`、`user_id`/`step_key`が空文字なら`type: "string_too_short"`、64文字超なら`type: "string_too_long"`となる。**`@app.exception_handler(Exception)`による500変換はこれより後段のため422を上書きしない**(StarletteがHTTPException/RequestValidationErrorを先に処理する)。フロントエンド(`family-quest`)側はこの422を汎用エラーとして扱っており、`detail`配列の中身を個別に解釈する実装は無い。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:324-331`, `MY_HOME_SYSTEM/requirements.txt:25,73-74`（参考: [unified_server.md](./unified_server.md)） |
 
 ## 10. 自己検証結果
 

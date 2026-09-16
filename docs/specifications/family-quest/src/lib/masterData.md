@@ -158,8 +158,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| フォールバックデータの利用箇所と適用条件 | `useGameData.md`の解析によれば、`useGameData`フックの戻り値オブジェクトにおいて`users: gameData?.users || INITIAL_USERS`のように、`useQuery`によるサーバーからの取得データが存在しない場合のフォールバック値として`INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`が使われているとされている。 | `../hooks/useGameData.md` |
-
+| フォールバックデータの利用箇所と適用条件 | `useGameData.md`の解析によれば、`useGameData`フックの戻り値オブジェクトにおいて`users: gameData?.users \|\| INITIAL_USERS`のように、`useQuery`によるサーバーからの取得データが存在しない場合のフォールバック値として`INITIAL_USERS`/`MASTER_QUESTS`/`MASTER_REWARDS`が使われているとされている。 | `../hooks/useGameData.md` |
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -6,6 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -183,6 +184,14 @@ graph TD
 | `PUT /api/cameras/settings/{camera_id}`の実際のリクエスト/レスポンス仕様、`devices.json`への永続化方法 | バックエンド実装が本ファイルに含まれないため | `MY_HOME_SYSTEM/routers/camera_router.py`等のカメラ設定APIバックエンド実装ファイル |
 | `Modal`コンポーネントの内部実装（背景クリックでの閉じる挙動、`maxWidth="md"`の実際のピクセル幅等） | 本ファイルからは`Modal`の呼び出し（props渡し）のみが確認でき、内部実装は別ファイルにあるため | `family-quest/src/components/ui/Modal.tsx` |
 | `cameras`配列の並び順がどこで決定されるか（本ファイル自体はソートを行わず渡された順に描画するのみ） | `cameras`は呼び出し元から渡される`allCameras`をそのまま参照しており、ソート処理自体は呼び出し元（`CameraDashboard.tsx`）にあるため | `family-quest/src/features/camera/components/CameraDashboard.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `PUT /api/cameras/settings/{camera_id}`の実際のリクエスト/レスポンス仕様、`devices.json`への永続化方法 | `MY_HOME_SYSTEM/routers/camera_router.py`と`MY_HOME_SYSTEM/services/camera_service.py`を直接確認した。ルーターは`@router.put("/settings/{camera_id}")` / `def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate)`(58〜64行目)で、`camera_router.py`が`app.include_router(camera_router.router, prefix="/api/cameras", ...)`(`unified_server.py:336`)でマウントされるため完全パスは`PUT /api/cameras/settings/{camera_id}`になる。**リクエストボディは`class CameraSettingsUpdate(BaseModel): enabled: bool`(14〜15行目)の1フィールドのみ**(`{"enabled": true}`)。**レスポンスは`{"id": camera_id, "enabled": payload.enabled}`**で、`camera_service.set_camera_enabled`が`False`(=該当カメラなし)を返した場合のみ`HTTPException(404, "Camera not found")`。永続化は`camera_service.set_camera_enabled(camera_id, enabled)`(494〜521行目)が担い、(1)`config.DEVICES_JSON_PATH`が存在しなければ`False`、(2)`devices.json`をロードして`cameras`配列から`id`一致の要素を探し、無ければ`False`、(3)`target["enabled"] = enabled`を設定し、**`.tmp`へ書き出して`os.replace`でアトミックに差し替える**(509〜514行目。直接上書きだと書き込み途中のクラッシュ・電源断で全カメラ設定を失うため)、(4)メモリ上の`config.CAMERAS`の該当要素にも反映して次回の`GET /settings`に即座に効かせる(516〜519行目)。なお対応する`GET /api/cameras/settings`(44〜56行目)は`config.CAMERAS`から`{"id", "name", "order"(配列インデックス+1), "enabled"(既定True)}`の配列を返す。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/camera_router.py:14-15,44-64`, `MY_HOME_SYSTEM/services/camera_service.py:494-521`, `MY_HOME_SYSTEM/unified_server.py:336`（参考: [camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md)・[camera_service.md](../../../../../MY_HOME_SYSTEM/camera_service.md)） |
+| `Modal`コンポーネントの内部実装（背景クリックでの閉じる挙動、`maxWidth="md"`の実際のピクセル幅等） | `family-quest/src/components/ui/Modal.tsx`を直接確認した。`maxWidth`は`{sm: "max-w-sm", md: "max-w-md", lg: "max-w-lg", xl: "max-w-xl"}`というTailwindクラスへの単純な写像(40〜45行目)で、**`md`はTailwind既定の`max-w-md`＝28rem(標準の16pxルートフォントで448px)**である(既定値は`sm`＝`max-w-sm`＝24rem/384px)。閉じる経路は3つ: (1)背景`<div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={handleClose} />`(53〜57行目)＝**背景クリックで閉じる**、(2)ヘッダー右上の`×`ボタン(72行目)、(3)`useEffect`内の`keydown`リスナーによる**ESCキー**(30〜36行目)。ただし`preventClose`プロパティ(Issue #394)が`true`の間は`handleClose = undefined`となり(49行目)背景クリックと`×`が無効化され、ESCリスナー自体も登録されない。本ファイル(`CameraSettingsModal`)は`preventClose`を渡していないため**3経路すべてが有効**である。またモーダル本体は`role="dialog"` / `aria-modal="true"` / `aria-label`(titleが文字列のときのみ)を持つ(61〜63行目)。`isOpen`が`false`のときは`null`を返す(38行目)ため、閉じている間は子要素が一切マウントされない＝本ファイルのローカルstateは開閉のたびに初期化される点に注意が必要である。 | 直接ソース確認: `family-quest/src/components/ui/Modal.tsx`（全体）（参考: [Modal.md](../../../components/ui/Modal.md)） |
+| `cameras`配列の並び順がどこで決定されるか（本ファイル自体はソートを行わず渡された順に描画するのみ） | `family-quest/src/features/camera/components/CameraDashboard.tsx`を直接確認した。同ファイルはReact Queryの`select`で`return [...data].sort((a, b) => a.order - b.order);`(38行目)と、**バックエンドが返す`order`フィールドの昇順**に並べ替えた結果を`allCameras`として保持する。本ファイルへは`cameras={allCameras}`(108行目)と**ソート済みかつ未フィルタの全カメラ**が渡される(ライブ表示側だけが`const cameras = useMemo(() => allCameras.filter(c => c.enabled), [allCameras])`(47行目)で有効なものに絞り込む)ため、設定モーダルには無効化済みカメラも含めた全件が`order`順に並ぶ。その`order`自体は`MY_HOME_SYSTEM/routers/camera_router.py`の`GET /settings`(44〜56行目)が`for idx, cam in enumerate(config.CAMERAS)`の`idx + 1`として採番しており、**実体は`devices.json`の`cameras`配列の記述順**である(`set_camera_enabled`は要素の`enabled`のみを書き換え配列順は変えないため、有効/無効を切り替えても並び順は変化しない)。 | 直接ソース確認: `family-quest/src/features/camera/components/CameraDashboard.tsx:30-47,108`, `MY_HOME_SYSTEM/routers/camera_router.py:44-56`, `MY_HOME_SYSTEM/services/camera_service.py:494-521`（参考: [CameraDashboard.md](./CameraDashboard.md)・[camera_router.md](../../../../../MY_HOME_SYSTEM/camera_router.md)） |
 
 ## 10. 自己検証結果
 

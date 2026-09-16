@@ -59,19 +59,19 @@
 
 
 * **引数/リクエスト**: 該当なし（型定義のため）
-* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: `class Task(TypedDict):` (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: `class Task(TypedDict):` (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **副作用**: なし
-* 根拠: 内部での状態変更なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: 内部での状態変更なし (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: エラー補足の記述なし (行番号: 20 / 抜粋: "class Task(TypedDict):")
+* 根拠: エラー補足の記述なし (行番号: 21 / 抜粋: "class Task(TypedDict):")
 
 
 
@@ -131,11 +131,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: 関数定義 (行番号: 94 / 抜粋: "def main() -> None:")
+* 根拠: 関数定義 (行番号: 199 / 抜粋: "def main() -> None:")
 
 
 * **副作用**: `ThreadPoolExecutor.submit` による `run_script` の並列実行。`TASKS` 内各タスクの `last_run` の更新。`in_flight` 辞書への `Future` の登録。1回のループ終了ごとの10秒間のスリープ。

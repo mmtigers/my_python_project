@@ -62,7 +62,7 @@
 ### `SimpleRateLimiter` (クラス)
 
 * **役割**: 指定された期間（1分）内のリクエスト数を制限する状態管理を行う。
-* 根拠: `class SimpleRateLimiter:` (行番号: 52 / 抜粋: "class SimpleRateLimiter:")
+* 根拠: `class SimpleRateLimiter:` (行番号: 61 / 抜粋: "class SimpleRateLimiter:")
 
 
 * **引数/リクエスト**: `limit: int` (デフォルト: `REQUESTS_PER_MINUTE_LIMIT`)
@@ -85,11 +85,11 @@
 ### `SimpleRateLimiter.allow_request` (メソッド)
 
 * **役割**: リクエストが許可されるかどうかを判定し、1分経過時のカウンタリセットと許可時のカウンタ加算を行う。
-* 根拠: `async def allow_request(self) -> bool:` (行番号: 63 / 抜粋: "async def allow_request(self) -> bool:")
+* 根拠: `async def allow_request(self) -> bool:` (行番号: 79 / 抜粋: "async def allow_request(self) -> bool:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def allow_request(self)` (行番号: 63 / 抜粋: "async def allow_request(self)")
+* 根拠: `def allow_request(self)` (行番号: 79 / 抜粋: "async def allow_request(self)")
 
 
 * **戻り値/レスポンス**: `bool` (許可ならTrue、制限超過ならFalse)
@@ -108,7 +108,7 @@
 ### `tool_record_child_health` (関数)
 
 * **役割**: 子供の体調を記録するため `line_service.log_child_health` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `child_name`/`condition`のいずれかが欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また`log_child_health`の返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録完了:"`ではなく`"記録失敗: ..."`を返し、AIが保存成功と誤認して完了報告しないようにする。
-* 根拠: `async def tool_record_child_health` (行番号: 99 / 抜粋: "async def tool_record_child_health")、引数欠落チェック (行番号: 116-117)、失敗プレフィックス判定 (行番号: 124-125)
+* 根拠: `async def tool_record_child_health` (行番号: 107 / 抜粋: "async def tool_record_child_health")、引数欠落チェック (行番号: 116-117)、失敗プレフィックス判定 (行番号: 124-125)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
@@ -131,7 +131,7 @@
 ### `tool_record_food` (関数)
 
 * **役割**: 食事の内容を記録するため `line_service.log_food_record` を呼び出し、結果メッセージを返す。**（Issue #373で修正）** `item`が欠落していればDBへ渡さず`"記録失敗: ..."`を返す。また返信本文が`line_service.SAVE_FAILED_PREFIX`で始まる（DB保存失敗）場合は`"記録失敗: ..."`を返す（`tool_record_child_health`と同様）。
-* 根拠: `async def tool_record_food` (行番号: 129 / 抜粋: "async def tool_record_food")、引数欠落チェック (行番号: 145-146)、失敗プレフィックス判定 (行番号: 150-151)
+* 根拠: `async def tool_record_food` (行番号: 137 / 抜粋: "async def tool_record_food")、引数欠落チェック (行番号: 145-146)、失敗プレフィックス判定 (行番号: 150-151)
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `args: Dict[str, Any]`
@@ -161,7 +161,7 @@
 ### `_skip_optional_alias` (関数、Issue #224で追加)
 
 * **役割**: `_extract_referenced_tables`が使う内部ヘルパー。指定位置に続くテーブルエイリアス（`AS name`または`name`）があれば読み飛ばした位置を返す。次の識別子が`_SQL_KEYWORDS_NOT_ALIAS`に含まれるSQLキーワード（`WHERE`/`JOIN`等、テーブル参照の終端を示すもの）の場合はエイリアスとみなさず元の位置をそのまま返す。**導入経緯**: `_extract_referenced_tables`はカンマ結合(暗黙CROSS JOIN)の2つ目以降のテーブルを、直前のテーブル名の直後にカンマが続くかで判定していたが、`FROM power_usage c, quest_users s`のように1つ目のテーブルにエイリアスが付くと識別子の直後がカンマではなくエイリアス文字列になり、カンマ判定が即座に失敗して2つ目のテーブルが検出漏れしていた。
-* 根拠: 関数定義 (行番号: 162〜169 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
+* 根拠: 関数定義 (行番号: 185〜192 / 抜粋: "def _skip_optional_alias(sql: str, pos: int) -> int:")
 
 
 
@@ -181,7 +181,7 @@
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: (行番号: 180 / 抜粋: "def _strip_sql_comments(sql: str) -> str:")
+* 根拠: (行番号: 203 / 抜粋: "def _strip_sql_comments(sql: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（コメント部分を空白に置換したSQL文字列）
@@ -204,7 +204,7 @@
 
 
 * **引数/リクエスト**: `sql: str`
-* 根拠: 関数シグネチャ (行番号: 184 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
+* 根拠: 関数シグネチャ (行番号: 207 / 抜粋: "def _extract_referenced_tables(sql: str) -> List[str]:")
 
 
 * **戻り値/レスポンス**: `List[str]` (マッチしたテーブル名のリスト。同一テーブルが複数回参照されれば重複を含みうる)
@@ -275,7 +275,7 @@
 ### `tool_search_db` (関数)
 
 * **役割**: 引数で渡されたSQLクエリが `SELECT` で始まり、かつ参照テーブルが `ALLOWED_SEARCH_TABLES` に含まれることを確認したうえで読み取り専用のDB検索を行い、結果を文字列で返す。**（Issue #357で修正）** SELECT判定の直後・テーブル抽出の前に`_QUOTED_IDENTIFIER_CHARS`（`"` `` ` `` `[`）のいずれかを含むSQLを警告ログ付きで即拒否するようになった（引用符付き識別子は`_extract_referenced_tables`が検出できず許可テーブル判定を素通りしていたため）。加えて実行先を`common.execute_read_query`から`_execute_restricted_read_query`（`set_authorizer`により許可テーブル以外の読み取り・ATTACH・PRAGMA・危険関数をSQLiteエンジン側で構造的に拒否する）へ変更した。**（B3で修正）** SQLクエリを受け取った直後、SELECT判定やテーブル抽出より前に`_strip_sql_comments`を通し、ブロックコメント(`/* */`)・行コメント(`--`)を空白に置換したうえで以降の判定・実行を行うようになった。以前は`FROM/**/tablename`のようにキーワードと識別子の間にSQLコメントを挟むことで`_extract_referenced_tables`の抽出をすり抜け、UNION SELECTと組み合わせて`ALLOWED_SEARCH_TABLES`外のテーブルを読み取れることが実証されていた。**（Issue #180で修正）** `common.execute_read_query`（実体は`core/database.py`の`execute_read_query`）は例外発生時も送出せず内部で捕捉し、"検索エラー: ..."という非空文字列として返す設計になっている。以前はこの戻り値の実際の型・意味を誤認しており、`if not rows:`（`rows`は常に非空文字列のため恒偽でデッドコード）と`except Exception`（`execute_read_query`自体は例外を送出しないため到達不能）の両方が実質機能しておらず、DB実行時エラーの文字列がそのまま正常な検索結果としてログにも残らずAIへ渡っていた。`execute_read_query`の内部エラープレフィックス（`"検索エラー:"`）を判定し、検出時は警告ログを出力したうえでAIへエラーであることが分かる形（`"DB検索エラー: ..."`）で返すよう修正した。
-* 根拠: `async def tool_search_db` (行番号: 293 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
+* 根拠: `async def tool_search_db` (行番号: 316 / 抜粋: "async def tool_search_db")、コメント除去 (行番号: 309 / 抜粋: "sql = _strip_sql_comments(sql)")、引用符付き識別子の拒否 (行番号: 318〜320 / 抜粋: "if any(ch in sql for ch in _QUOTED_IDENTIFIER_CHARS):")、実行先 (行番号: 334 / 抜粋: "result = await asyncio.to_thread(_execute_restricted_read_query, sql)")
 
 
 * **引数/リクエスト**: `args: Dict[str, Any]`
@@ -306,7 +306,7 @@
 ### `_log_retry_attempt` (関数)
 
 * **役割**: リトライ実行時にコールバックとして呼び出され、警告ログを出力する。
-* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 299 / 抜粋: "def _log_retry_attempt(retry_state):")
+* 根拠: `def _log_retry_attempt(retry_state):` (行番号: 444 / 抜粋: "def _log_retry_attempt(retry_state):")
 
 
 * **引数/リクエスト**: `retry_state`
@@ -329,7 +329,7 @@
 ### `_call_gemini_api_with_retry` (関数)
 
 * **役割**: Gemini APIへのリクエストを送信し、クォータ超過（HTTP 429）発生時に指数バックオフによるリトライを行う。**（Issue #520で変更）** `google-genai` の `AsyncChat.send_message` はネイティブに非同期のため、旧SDKの同期メソッドを包んでいた `asyncio.to_thread` は不要になった。
-* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 308〜315 / 抜粋: "async def _call_gemini_api_with_retry")
+* 根拠: `@retry(...)` / `async def _call_gemini_api_with_retry` (行番号: 471〜484 / 抜粋: "async def _call_gemini_api_with_retry")
 
 
 * **引数/リクエスト**: `chat_session`, `prompt: str`
@@ -441,7 +441,7 @@
 ### `analyze_text_and_execute` (関数)
 
 * **役割**: レートリミット確認後、システムプロンプトと共にユーザー入力をGemini APIに送信し、APIがツール呼び出しを要求した場合は該当ツールを実行し、その結果を再度APIに送信して最終的な応答文を返す。**（Issue #374で修正）** 1回目の応答取得後は`MAX_TOOL_ROUNDS`回を上限とするループになった: 各ラウンドで`_extract_function_calls`により全パートから`function_call`を収集し、無ければ`_response_text_or_none`でテキストを返す（テキストも無い場合、ツール実行済みなら`_tool_results_fallback`、未実行なら空応答エラー）。あれば全件を`_dispatch_tool`で実行し、`function_response`をまとめて1回で送信して次の応答を得る。以前は1回のツール実行後に`final_res.text`を無条件に読んでいたため、「智矢が熱、涼花も熱」のように2件目の`function_call`が返ると`response.text`が`ValueError`を送出→汎用`except`→「処理中にエラー」となり、1件目は保存済みなのにユーザーが失敗と誤解して再送→重複登録（#232と同種）という経路が残っていた。ループ上限到達時も`_tool_results_fallback`で実行結果を返す。**（Issue #232で修正）** 1回目のGemini呼び出しはクォータ超過とそれ以外のAPIエラーをそれぞれ専用メッセージで処理するのに対し、ツール実行後の2回目呼び出しは以前クォータ超過用のフォールバックしか持たず、それ以外のAPIエラーは関数末尾の汎用`except Exception`（「処理中にエラーが発生しました」）まで伝播していた。この時点で`tool_record_child_health`/`tool_record_food`は既にDB書き込みを完了しているため、ユーザーには保存が失敗したかのように見え、冪等性チェックの無い記録処理への重複登録を誘発しうる不具合があった。2回目呼び出しにも同等のハンドラを追加し、クォータ超過と同様に`tool_result`（実行結果）へ注記を添えて返すようにした。**（Issue #520で変更）** `google-genai`は例外型を`APIError`に一本化したため、両方の呼び出し点とも`except genai_errors.APIError`で受けたうえで`_is_quota_error(e)`によりクォータ超過かどうかを分岐する形になった。
-* 根拠: `async def analyze_text_and_execute` (行番号: 517 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
+* 根拠: `async def analyze_text_and_execute` (行番号: 536 / 抜粋: "async def analyze_text_and_execute")、ループ (行番号: 582〜639 / 抜粋: "for _round in range(MAX_TOOL_ROUNDS):")
 
 
 * **引数/リクエスト**: `user_id: str`, `user_name: str`, `text: str`
