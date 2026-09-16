@@ -70,13 +70,42 @@ TARGET_DEVICE_TYPES = {
     "WoContact", "WoPresence",  # 公式Webhookペイロードの語彙
 }
 
+# Issue #648: トークン未設定の拒否をERRORで通知するのはプロセス起動後の最初の1回だけにする。
+_unconfigured_webhook_error_logged: bool = False
+
+
 @router.post("/webhook/switchbot")
 async def switchbot_webhook(body: SwitchBotWebhookBody, token: str = None):
     """SwitchBot Webhook受信・処理"""
     # SwitchBotにはLINEのような署名検証機構がないため、
-    # config.SWITCHBOT_WEBHOOK_TOKEN が設定されている場合のみ、
     # クエリパラメータ ?token=... による簡易な共有シークレット検証を行う。
-    if config.SWITCHBOT_WEBHOOK_TOKEN:
+    # Issue #648: トークン未設定時は 503 で拒否する(フェイルクローズ)。このエンドポイントは
+    # ip_restriction_middleware の対象外で、エッジの Cloudflare Access もバイパスする設計
+    # (#321/#517)のため、トークンが唯一の防御になる。無検証で受け付けると第三者が任意の
+    # deviceMac を POST して device_records/daily_logs への書き込み、LINE/Discord通知、
+    # SwitchBot API 呼び出し(リトライ込み)を誘発できる。
+    # 実機のトークン設定(#318)が済むまでの移行用に、明示的なオプトイン
+    # (ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true)でのみ従来動作を残す。
+    if not config.SWITCHBOT_WEBHOOK_TOKEN:
+        if not getattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False):
+            # ERROR は core/logger の DiscordErrorHandler 経由で通知が飛ぶ。拒否のたびに出すと、
+            # 外部から誰でも通知を大量発火させられるため、プロセスごとに最初の1回だけにする。
+            global _unconfigured_webhook_error_logged
+            if not _unconfigured_webhook_error_logged:
+                _unconfigured_webhook_error_logged = True
+                logger.error(
+                    "❌ SWITCHBOT_WEBHOOK_TOKEN が未設定のため /webhook/switchbot を拒否しました(503)。"
+                    ".env に SWITCHBOT_WEBHOOK_TOKEN を設定し、SwitchBot 側の Webhook URL にも "
+                    "?token=... を付けてください(移行中は ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true で従来動作)。"
+                    " ※以降の同じ拒否は debug ログのみ。"
+                )
+            else:
+                logger.debug("SWITCHBOT_WEBHOOK_TOKEN 未設定のため /webhook/switchbot を拒否(503)。")
+            raise HTTPException(
+                status_code=503,
+                detail="SwitchBot webhook is not configured (SWITCHBOT_WEBHOOK_TOKEN is unset)",
+            )
+    else:
         # hmac.compare_digest は str 同士だと非ASCII文字を含む場合に TypeError を送出する
         # ("comparing strings with non-ASCII characters is not supported")。このエンドポイントは
         # 外部公開されているため、?token=%C3%A9 のような1リクエストで 500 + Discordエラー通知

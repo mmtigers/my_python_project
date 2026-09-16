@@ -244,7 +244,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("🚀 --- API Server Starting Up ---")
 
     if not config.SWITCHBOT_WEBHOOK_TOKEN:
-        logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.")
+        # Issue #648: 未設定時は /webhook/switchbot を 503 で拒否する(フェイルクローズ)。
+        # 移行用オプトインが立っている場合だけ従来どおり無検証で受け付ける。
+        if getattr(config, "ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", False):
+            logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set and ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true — /webhook/switchbot accepts UNAUTHENTICATED requests. Set the token and remove the opt-in.")
+        else:
+            logger.warning("⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — /webhook/switchbot will reject all requests with 503. Set the env var (and add ?token=... to the SwitchBot webhook URL) to enable it.")
 
     # NAS依存パス(ASSETS_DIR等)のプリウォーム。Issue #330 PR-Bでconfigのimport時
     # NAS検証は遅延化されたため、サーバー起動時はここで明示的に解決しておく

@@ -125,7 +125,8 @@
 * 根拠: `migration_ok = True` (行番号: 262)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 264)、`logger.critical(` (行番号: 271-274)、`app.state.migration_ok = migration_ok` (行番号: 275)、`if migration_ok:` (行番号: 278)、`camera_service.stop_all_processes()` (行番号: 320)
 * **（Issue #646 で追加）** 子プロセスは起動後 `CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに `restart_dead_children` で死活確認され、予期せず終了していれば再起動される(詳細は次項)。以前は起動時に `Popen` するだけで、`scheduler_boot.py` が落ちると配下の6監視タスクが静かに止まり、検知は毎時cronの `health_watch.py`、復旧は人手だった。
 * 根拠: `_set_child_process(child_name, _spawn_child_process(child_name))` (行番号: 283)、`supervisor_task = asyncio.create_task(_supervise_child_processes())` (行番号: 286)、`supervisor_task.cancel()` (行番号: 294)
-* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 246-247 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
+* **（Issue #648 で変更）** `SWITCHBOT_WEBHOOK_TOKEN` 未設定時の起動警告は2通りになった。移行用オプトイン `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true` が立っていれば「無検証で受け付けている」旨を、立っていなければ「`/webhook/switchbot` は全リクエストを 503 で拒否する」旨を警告する(拒否そのものは `routers/webhook_router.py` 側)。
+* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 246〜252 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:")
 
 
 * **引数/リクエスト**: `app: FastAPI`
@@ -171,11 +172,11 @@
 ### `ip_restriction_middleware`
 
 * **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス(`allowed_webhook_paths` = `/webhook/switchbot`・`/callback/line`・`/webhook/alexa`の3件)はIP解決もログ出力も行わず即座に後続へ渡す。それ以外では`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。**（Issue #321・2026-09-03決定）** 非プライベートIPからのアクセスをブロックしない現在の挙動は、意図的な設計として正式に確定している。`Cf-Access-Jwt-Assertion`の署名/aud検証は一度PR #80で実装されたが2026-08-28の障害でrevertされ、再実装せずエッジのCloudflare Access（インフラ側）への委譲を正式設計とする案（案B）が採用された。この設計はオリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 351-433 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 356-438 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 351 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 356 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **戻り値/レスポンス**: `Response` (後続の処理結果)
@@ -194,11 +195,11 @@
 ### `global_exception_handler`
 
 * **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 436-441 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 441-446 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 436 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 441 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
@@ -217,11 +218,11 @@
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 481-496 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 486-501 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 481 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 486 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -229,7 +230,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 481-496 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: 該当関数内処理 (行番号: 486-501 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -240,11 +241,11 @@
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 504-508 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
+* 根拠: `async def serve_quest_root():` (行番号: 509-513 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 504 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 509 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -252,7 +253,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 504-508 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 509-513 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -263,11 +264,11 @@
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 516-521 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 521-526 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 516 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 521 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
@@ -275,22 +276,22 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 516-521 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 521-526 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 516-521 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 521-526 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: ヘルスチェック用に正常稼働を示すJSONを返す。
-* 根拠: `async def health_check():` (行番号: 524-525 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 529-530 / 抜粋: "async def health_check():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def health_check():` (行番号: 524 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 529 / 抜粋: "async def health_check():")
 
 
 * **戻り値/レスポンス**: `dict` (statusキーを含む)
@@ -298,17 +299,17 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 524-525 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 529-530 / 抜粋: "async def health_check():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 524-525 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 529-530 / 抜粋: "async def health_check():")
 
 
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 527-542 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 532-547 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし

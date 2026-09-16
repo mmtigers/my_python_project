@@ -239,6 +239,15 @@ AUTHORIZED_LINE_USER_IDS: List[str] = [
 # 任意で共有シークレットをクエリパラメータ(?token=...)で要求できるようにする。
 # 未設定の場合は従来通り検証なし（後方互換）。
 SWITCHBOT_WEBHOOK_TOKEN: Optional[str] = os.getenv("SWITCHBOT_WEBHOOK_TOKEN")
+# Issue #648: トークン未設定時の挙動。/webhook/switchbot は ip_restriction_middleware の
+# 対象外かつエッジの Cloudflare Access もバイパスする設計(#321/#517)のため、トークンが
+# 唯一の防御になる。未設定のまま受け付けると第三者が任意の deviceMac を POST して
+# DB書き込み・LINE/Discord通知・SwitchBot API呼び出しを誘発できるため、既定では 503 で
+# 拒否する(フェイルクローズ)。実機のトークン設定が済むまでの移行用に、明示的な
+# オプトインでのみ従来どおり無検証で受け付ける。
+ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK: bool = (
+    os.getenv("ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK", "false").strip().lower() == "true"
+)
 # switchbot_webhook_fix.py が SwitchBot/LINE の Webhook URL を再登録する際の公開ベースURL
 # (例: https://home.example.com)。#405: 以前はスクリプト側で os.environ.get() を直接読んでいた。
 WEBHOOK_BASE_URL: Optional[str] = os.getenv("WEBHOOK_BASE_URL")

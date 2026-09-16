@@ -128,7 +128,7 @@
 
 
 * **エラーハンドリング**:
-* `config.SWITCHBOT_WEBHOOK_TOKEN` が設定されている場合、クエリパラメータ `token` が一致しなければ HTTP 401 を送出する(`hmac.compare_digest`によるタイミング攻撃耐性のある比較)。未設定時は従来通り検証をスキップする(後方互換)。
+* `config.SWITCHBOT_WEBHOOK_TOKEN` が設定されている場合、クエリパラメータ `token` が一致しなければ HTTP 401 を送出する(`hmac.compare_digest`によるタイミング攻撃耐性のある比較)。**（Issue #648）** 未設定の場合は HTTP 503 で拒否する(フェイルクローズ)。このエンドポイントは `ip_restriction_middleware` の対象外で、エッジの Cloudflare Access もバイパスする設計(#321/#517)のため、このトークンが唯一の防御であり、無検証で受け付けると第三者が任意の `deviceMac` を POST して `device_records`/`daily_logs` への書き込み・LINE/Discord 通知・SwitchBot API 呼び出し(リトライ込み)を誘発できた。実機のトークン設定(#318)が済むまでの移行用に、`config.ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK`(環境変数 `ALLOW_UNAUTHENTICATED_SWITCHBOT_WEBHOOK=true`)を明示的に立てた場合のみ従来どおり無検証で受け付ける。拒否時の `logger.error`(= `DiscordErrorHandler` 経由の通知)はプロセスごとに最初の1回だけで、以降は `logger.debug` に落とす(外部から通知を大量発火させられないようにするため。モジュールグローバル `_unconfigured_webhook_error_logged`)。
 * 対象外デバイスや重複イベントの場合は早期リターン。
 * 明示的な `try-except` ブロックはそれ以外にはなし。
 * 根拠: トークン検証 (行番号: 51〜53 / 抜粋: `if config.SWITCHBOT_WEBHOOK_TOKEN:`)、ガード節 (行番号: 64, 85 / 抜粋: `if device_type not in...`)
