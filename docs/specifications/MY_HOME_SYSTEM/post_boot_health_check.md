@@ -634,7 +634,7 @@ graph TD
 | --- | --- | --- |
 | `common.setup_logging` / `common.send_push` の実装 | ロガーの出力先や、Discord通知の実際の送信方式・失敗時の挙動が本ファイルからは不明。 | `common.py` |
 | `config` の各設定値の実体 | `LOG_DIR`, `SQLITE_DB_PATH`, `BACKEND_URL`, `FRONTEND_URL`, `NAS_IP`, `NAS_MOUNT_POINT`, `CAMERAS`, `LINE_USER_ID`, `NATURE_REMO_ACCESS_TOKEN`, `SPEAKER_BLUETOOTH_MAC`, `ENABLE_BLUETOOTH` の実際の値が不明。 | `config.py` |
-| 実行環境の前提 | `vcgencmd`, `bluetoothctl`, `aplay` 等のコマンドが利用可能なOS・ハードウェア（Raspberry Pi等）を前提としているかは本ファイルのみからは断定できない。（`start_all.sh`を直接確認したが`vcgencmd`/`bluetoothctl`/`aplay`への言及はなし。ただし`MY_HOME_SYSTEM/old/README.md`4行目に`- **Raspberry Pi IP**: Fixed (Static IP) via NetworkManager.`という記載を発見し、Raspberry Pi上で運用されている旨は別ファイルから確認できた） | 実行環境のセットアップ資料 or `start_all.sh` 等の起動スクリプト |
+| 実行環境の前提 | `vcgencmd`, `bluetoothctl`, `aplay` 等のコマンドが利用可能なOS・ハードウェア（Raspberry Pi等）を前提としているかは本ファイルのみからは断定できない。（`start_all.sh`を直接確認したが`vcgencmd`/`bluetoothctl`/`aplay`への言及はなし。かつての根拠だった`MY_HOME_SYSTEM/old/README.md`は`old/`ディレクトリごと削除済みのため、現行ツリーでの裏付けは「相互参照による補足情報」を参照） | 実行環境のセットアップ資料 or `start_all.sh` 等の起動スクリプト |
 | DBスキーマ | `PRAGMA quick_check` の対象となるSQLite DBの構造・想定サイズが不明。 | `config.SQLITE_DB_PATH` が指すDBファイル、または `current_schema.sql` |
 
 ## 相互参照による補足情報

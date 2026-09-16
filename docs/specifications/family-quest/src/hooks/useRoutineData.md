@@ -276,7 +276,10 @@ graph TD
 
 ## 相互参照による補足情報
 
-なし（本タスクでは`MY_HOME_SYSTEM`側のバックエンドファイルを解析対象としていないため、上記の不明事項を補足する他ドキュメントは現時点で存在しない）。
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `POST /api/routine/complete`のバックエンド実装 | バックエンド側を直接確認した。`routers/routine_router.py`は`POST /complete`を`routine_service.complete_step(action.user_id, action.flow_key, action.step_key)`へそのまま委譲するだけの薄いルーターで、`/api/routine`プレフィックスは`unified_server.py:352`の`include_router`で付く。`RoutineService.complete_step`(`services/routine_service.py:483-551`)は`_get_user_balance_lock(user_id)`を取り、`get_db_cursor(commit=True)`の単一トランザクション内で(1) ユーザー存在確認(無ければ404)、(2) フロー開始済み確認(未開始なら400)、(3) `_get_or_create_progress`→`_apply_forced_transition`で現在地を最新化、(4) 対象ステップが**チェックリスト**なら`_toggle_checklist_step`で順不同にトグル、**逐次ステップ**なら現在地と一致しなければ409(`表示が古いようです。再読み込みしてください`)・チェックポイント(自由時間)なら400(`自由時間は時間になると自動的に次へ進みます`)、(5) `_save_progress`で保存し`routine_step_events`へ遷移を追記、(6) 再度`_apply_forced_transition`を通してから`_serialize_flow`の結果を返す。戻り値は`GET /api/routine/today`の`flows[flow_key]`と**同一形状**(`started`込みの13キー)で、`date`/`flows`のラッパーは付かない。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/routine_router.py`（全体）, `MY_HOME_SYSTEM/services/routine_service.py:419-551`, `MY_HOME_SYSTEM/unified_server.py:352`（参考: [routine_router.md](../../../MY_HOME_SYSTEM/routine_router.md)・[routine_service.md](../../../MY_HOME_SYSTEM/routine_service.md)） |
+| `_apply_forced_transition`の実際の挙動 | `MY_HOME_SYSTEM/services/routine_service.py`の`_apply_forced_transition`(307行目〜)を直接確認した。これは「締切時刻(チェックポイント)を過ぎたら、ユーザー操作を待たずにその場でブロックを通過させる」処理で、`get_today_state`と`complete_step`の**両方の入口で毎回呼ばれる**(さらに`complete_step`は保存後にもう一度通す)。通過時は`_eligible_done_ratio`でそのブロックのチェック達成率を求め、`bonus_gold`/`bonus_exp`を按分して付与したうえで、達成率が100%かどうかで現在地の進め方を分岐する(全完了なら次ブロックの先頭へ進め、その先頭がチェックポイントを持つなら`in_free_time=True`、そうでなければブロック先頭に留めて未達ステップを`locked`にする。406〜417行目)。レベルアップが起きた場合は`leveled_up`/`new_level`を`progress`へ積み、`_serialize_flow`がレスポンスへ載せる(この2つは通過した「その呼び出し」でのみ立ち、以後は冪等ガードで早期returnするため再度立たない)。したがってフロント側は、ユーザーが何も操作しなくても**ポーリングのたびに状態が前進しうる**ことを前提にしてよい。 | 直接ソース確認: `MY_HOME_SYSTEM/services/routine_service.py:307-461`（参考: [routine_service.md](../../../MY_HOME_SYSTEM/routine_service.md)） |
 
 ## 10. 自己検証結果
 
