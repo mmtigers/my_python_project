@@ -4,10 +4,9 @@ import threading
 import time
 import traceback
 import os
-import re
-import requests
 from logging.handlers import WatchedFileHandler
 import config
+from core import discord as core_discord
 
 # Discord の content 上限は 2000 文字。コードフェンス等の装飾分の余裕を見て
 # 1900 文字で切り詰める(#361: 以前は無制限に連結しており、長いエラーほど 400 で
@@ -64,12 +63,12 @@ def flush_pending_discord_notifications(timeout: float = DISCORD_ATEXIT_FLUSH_SE
 atexit.register(flush_pending_discord_notifications)
 
 
-_WEBHOOK_URL_RE = re.compile(r"(/api/webhooks/\d+)/[A-Za-z0-9_\-]+")
+# #661: 正規表現の実体は core/discord.py へ移した(ここは後方互換のための残置なし)。
 
 
 def _redact_webhook_url(text: str) -> str:
-    """Discord Webhook URL のトークン部分をマスクする(ログ出力用)。"""
-    return _WEBHOOK_URL_RE.sub(r"\1/<redacted>", str(text))
+    """Discord Webhook URL のトークン部分をマスクする(core.discord への委譲。#661)。"""
+    return core_discord.redact_webhook_url(text)
 
 
 def _truncate_discord_content(content: str, limit: int = DISCORD_CONTENT_LIMIT) -> str:
@@ -143,7 +142,9 @@ class DiscordErrorHandler(logging.Handler):
     @staticmethod
     def _send_webhook(url, payload):
         try:
-            requests.post(url, json=payload, timeout=5)
+            # #661: 送信(と 429/5xx の限定リトライ)は core/discord.py に一本化した。
+            # core.discord は core.logger を import しないため循環にはならない。
+            core_discord.post_with_retry(url, json=payload, timeout=5)
         except Exception as e:
             # #436: 以前はここで完全に握りつぶしており、Webhook URL失効やネットワーク障害で
             # 通知システム自体が壊れていても誰も気づけなかった。最低限の可視化として

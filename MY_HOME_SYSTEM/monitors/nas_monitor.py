@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # 自作モジュール
 import config
+from core import state_file
 from core.logger import setup_logging
 from core.database import save_log_generic
 from core.utils import get_now_iso, retry_with_backoff, get_now_jst
@@ -53,14 +54,16 @@ class NasMonitor:
         (sync_fallback_data)がスキップされていた。破損時は安全側(異常継続扱い)に倒す。
         ファイルが無い(初回)場合だけ正常とみなす。
         """
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"State load error (異常継続扱いにフォールバック): {e}")
-                return {"is_healthy": False}
-        return {"is_healthy": True}  # 初回(ファイル無し)は正常とみなす
+        if not os.path.exists(self.state_file):
+            return {"is_healthy": True}  # 初回(ファイル無し)は正常とみなす
+        # #661: 読み書きは core/state_file.py(flock + tmp + os.replace)へ一本化した。
+        # 破損時は sentinel を返すので、ここで異常継続側に倒す。
+        sentinel = object()
+        state = state_file.read_json(self.state_file, default=sentinel)
+        if state is sentinel or not isinstance(state, dict):
+            logger.error("State load error (異常継続扱いにフォールバック)")
+            return {"is_healthy": False}
+        return state
 
     def _save_state(self, state: Dict[str, Any]) -> None:
         """現在の監視状態をファイルへ保存する。
@@ -69,20 +72,9 @@ class NasMonitor:
         一時ファイルに書き切って fsync したうえで os.replace で原子的に差し替える
         (switchbot_power_monitor._save_persisted_states と同じ方式)。
         """
-        tmp_path = f"{self.state_file}.tmp.{os.getpid()}"
-        try:
-            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(state, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_path, self.state_file)
-        except Exception as e:
-            logger.error(f"State save error: {e}")
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+        # #661: 書き込みは core/state_file.write_json_atomic に一本化(同じ tmp+fsync+replace 方式)。
+        if not state_file.write_json_atomic(self.state_file, state):
+            logger.error("State save error")
 
     def check_ping(self) -> bool:
         """NASへのPing疎通確認"""

@@ -1,8 +1,6 @@
 # MY_HOME_SYSTEM/handlers/line_logic.py
 import config
 import asyncio
-import contextlib
-import sqlite3
 import datetime
 from urllib.parse import parse_qsl
 
@@ -25,7 +23,7 @@ from core.logger import setup_logging
 logger = setup_logging("line_logic")
 # ▲▲▲ ▲▲▲
 from core.utils import get_now_iso, get_today_date_str, get_display_date, get_meal_time_category_from_now
-from core.database import save_log_async, save_logs_batch_async
+from core.database import save_log_async, save_logs_batch_async, get_ro_connection
 from models.line import LinePostbackData
 
 TARGET_MEMBERS = config.FAMILY_SETTINGS["members"]
@@ -131,13 +129,11 @@ def get_daily_health_summary():
     today_str = get_today_date_str() # YYYY-MM-DD
     summary_lines = []
     
-    # common.get_db_cursor の代わりに直接接続
-    # #411 S-L8: `with sqlite3.connect(...) as conn:` は接続をcloseしない
-    # (sqlite3の既知の挙動。commit/rollbackのみ行う)。LINE Botのリクエストの
-    # たびに呼ばれる関数のため、contextlib.closingで明示的にcloseする。
+    # #661: 読み取り専用の接続は core/database.get_ro_connection に一本化した
+    # (timeout 30秒。以前は既定の5秒で、毎日04:00のバックアップや保持期間削除と
+    # 重なると "database is locked" で LINE の応答が失敗しうる。close も同ヘルパーが行う)。
     try:
-        with contextlib.closing(sqlite3.connect(config.SQLITE_DB_PATH)) as conn:
-            conn.row_factory = sqlite3.Row
+        with get_ro_connection() as conn:
             cur = conn.cursor()
             
             for name in TARGET_MEMBERS:

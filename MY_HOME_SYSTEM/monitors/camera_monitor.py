@@ -37,6 +37,8 @@ except ImportError:
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+# #661: WSDL 探索は core/onvif_utils.py に一本化(以前は本ファイルと camera_monitor/camera_service に同一実装が重複)
+from core.onvif_utils import find_wsdl_path
 from core.logger import setup_logging
 from core.database import save_log_generic
 from services.notification_service import send_push
@@ -203,17 +205,6 @@ def is_host_reachable(ip: str) -> bool:
         logger.debug(f"Ping execution failed for {ip}: {e}")
         return False
 
-def find_wsdl_path() -> Optional[str]:
-    """WSDLファイルのディレクトリを動的に探索する。"""
-    for path in sys.path:
-        if not os.path.exists(path):
-            continue
-        candidate_standard = os.path.join(path, 'onvif', 'wsdl')
-        candidate_direct = os.path.join(path, 'wsdl')
-        for candidate in [candidate_standard, candidate_direct]:
-            if os.path.exists(os.path.join(candidate, 'devicemgmt.wsdl')):
-                return candidate
-    return None
 
 WSDL_DIR: Optional[str] = find_wsdl_path()
 

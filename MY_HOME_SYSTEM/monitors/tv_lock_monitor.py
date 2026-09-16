@@ -8,6 +8,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 import config
+from core import state_file
 from core.logger import setup_logging
 from core.utils import get_now_jst
 from services import switchbot_service
@@ -32,11 +33,9 @@ def main():
         today_str = now.strftime("%Y-%m-%d")
         
         # すでに本日実行済みかチェック
-        if os.path.exists(LAST_RUN_FILE):
-            with open(LAST_RUN_FILE, "r") as f:
-                last_run = f.read().strip()
-            if last_run == today_str:
-                return # すでに実行済み
+        # #661: 読み書きは core/state_file.py(tmp+fsync+os.replace)へ一本化した。
+        if state_file.read_text(LAST_RUN_FILE) == today_str:
+            return # すでに実行済み
 
         logger.info("📺 [TV Lock] Executing midnight TV lock (Turn OFF).")
         try:
@@ -45,9 +44,7 @@ def main():
                 logger.info("✅ [TV Lock] Successfully turned off TV plug.")
                 
                 # 実行完了の記録を保存
-                os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
-                with open(LAST_RUN_FILE, "w") as f:
-                    f.write(today_str)
+                state_file.write_text_atomic(LAST_RUN_FILE, today_str)
             else:
                 logger.error(f"❌ [TV Lock] API Error: {res}")
         except Exception as e:

@@ -11,6 +11,7 @@ from typing import Dict, Optional
 import pandas as pd
 
 import config
+from core.database import RO_CONNECT_TIMEOUT_SEC
 from core.logger import setup_logging
 
 # ロガー設定
@@ -33,9 +34,14 @@ def get_ro_db_connection() -> sqlite3.Connection:
     """
     読み取り専用でデータベース接続を取得します。
     Service層内部またはView層でキャッシュする際に使用します。
+
+    #661: タイムアウトは core/database.RO_CONNECT_TIMEOUT_SEC(30秒)に揃える。
+    以前は10秒で、バックアップや保持期間削除と重なると "database is locked" になりえた。
+    呼び出し元が接続オブジェクト自体をキャッシュするため、ここはコンテキストマネージャ
+    (get_ro_connection)ではなく接続を返す形のままにしている。
     """
     return sqlite3.connect(
-        f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=10.0
+        f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=RO_CONNECT_TIMEOUT_SEC
     )
 
 # #456: naive/aware混在カラムをベクトル化で処理するため、末尾のtzオフセット

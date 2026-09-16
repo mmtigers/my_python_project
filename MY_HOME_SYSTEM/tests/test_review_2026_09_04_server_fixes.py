@@ -264,7 +264,7 @@ class TestDiscordErrorHandlerContentLimit:
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_ERROR", "https://discord.example/webhook")
         handler = core_logger.DiscordErrorHandler()
         handler.setFormatter(logging.Formatter("%(message)s"))
-        with patch("core.logger.requests.post") as mock_post:
+        with patch("core.discord.requests.post") as mock_post:
             handler.emit(record)
             deadline = time.monotonic() + 3
             while mock_post.call_count == 0 and time.monotonic() < deadline:

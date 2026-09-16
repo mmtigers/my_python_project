@@ -52,27 +52,44 @@ def get_db_cursor(commit: bool = False):
     finally:
         conn.close()
 
+# #661: 読み取り専用接続のタイムアウトが 5s/10s/30s とばらばらだったため、
+# get_db_cursor と同じ 30 秒に揃えた共通の入り口をここに置く。バックアップ(毎日04:00)や
+# 保持期間削除と重なると、5秒では "database is locked" で LINE 応答や
+# ダッシュボードの読み取りが失敗しうる。
+RO_CONNECT_TIMEOUT_SEC: float = 30.0
+
+
+@contextmanager
+def get_ro_connection(timeout: float = RO_CONNECT_TIMEOUT_SEC):
+    """読み取り専用(`mode=ro`)の接続を開き、必ず close する(#661)。
+
+    `row_factory` は `sqlite3.Row` を設定済み。書き込みは SQLite 側が拒否する。
+    """
+    conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True, timeout=timeout)
+    try:
+        conn.row_factory = sqlite3.Row
+        yield conn
+    finally:
+        conn.close()
+
+
 def execute_read_query(query: str, params: tuple = ()) -> str:
     """読み取り専用モードで安全にSELECTを実行する"""
     # #178: conn.close()が正常経路にしかなくtry/finallyが無かったため、
     # cursor.execute()が例外を送出する(不正なSQL等)たびに接続がGC任せで
     # 残りリークしていた。connをtry節の前で初期化し、finallyで確実に
     # closeする。
-    conn = None
+    # #661: 接続は get_ro_connection に一本化した(timeout 30秒。以前は既定の5秒)。
     try:
-        conn = sqlite3.connect(f"file:{config.SQLITE_DB_PATH}?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        rows = cursor.fetchall()
+        with get_ro_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
 
-        if not rows: return "該当するデータはありませんでした。"
-        return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
+            if not rows: return "該当するデータはありませんでした。"
+            return json.dumps([dict(r) for r in rows], ensure_ascii=False, default=str)
     except Exception as e:
         return f"検索エラー: {str(e)}"
-    finally:
-        if conn:
-            conn.close()
 
 def save_log_generic(table: str, columns_list: List[str], values_list: tuple) -> bool:
     """汎用データ保存関数"""

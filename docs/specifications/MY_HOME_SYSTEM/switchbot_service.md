@@ -114,7 +114,7 @@
 ### `send_device_command`
 
 * **役割**: 指定されたデバイスIDに対し、エンドポイントURLと認証ヘッダー、ペイロードを構築し、コマンド送信リクエストを行う。
-* 根拠: `send_device_command` (行番号: 74〜92 / 抜粋: "def send_device_command(device_id: str, ...")
+* 根拠: `send_device_command` (行番号: 80〜98 / 抜粋: "def send_device_command(device_id: str, ...")
 
 
 * **引数/リクエスト**:
@@ -141,11 +141,11 @@
 ### `trigger_tv_unlock`（毎朝ミッション統合で追加）
 
 * **役割**: TVプラグ（`config.TV_PLUG_DEVICE_ID`）の電源をONにする処理を、デーモンスレッド上で非同期・Fail-Softに実行する共有ヘルパー。元は`services/quest/quest_service.py`の`QuestService._trigger_tv_unlock`（クエスト承認時のTVロック解除専用）だったが、`services/routine_service.py`（朝の準備チェックリスト全項目達成時）でも同じ処理が必要になったため本ファイルへ切り出され、両呼び出し元から共有される。呼び出し元は事前に`config.TV_PLUG_DEVICE_ID`が設定されているかを確認する必要があり、本関数自体はその設定有無をガードしない（切り出し前の`QuestService._trigger_tv_unlock`の挙動をそのまま踏襲）。
-* 根拠: `trigger_tv_unlock` (行番号: 94〜125 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (行番号: 97〜100 / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
+* 根拠: `trigger_tv_unlock` (行番号: 100〜131 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")、切り出し元に関する説明 (行番号: 97〜100 / 抜粋: "quest_service(クエスト承認時のTVロック解除)・routine_service(朝の準備\n    チェックリスト全項目達成時)など、複数の呼び出し元から共有される処理。")
 
 
 * **引数/リクエスト**: `context`: `str`（ログ出力にのみ使う識別用の文字列。例: `"quest_id=101"`、`"朝の準備チェックリスト全項目達成"`）
-* 根拠: `trigger_tv_unlock` (行番号: 94 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")
+* 根拠: `trigger_tv_unlock` (行番号: 100 / 抜粋: "def trigger_tv_unlock(context: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`（結果はログ出力とFail-Soft通知のみで呼び出し元へは返さない。TV電源ONの成否を呼び出し元が同期的に知る手段はない）
@@ -153,7 +153,7 @@
 
 
 * **副作用**: `daemon=True`の`threading.Thread`を起動し、その中で`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び出す。成功時は情報ログのみ。失敗時（`send_device_command`が`None`または`statusCode`が100以外を返した場合、または例外発生時）はエラーログを出力し、さらに`config.LINE_PARENTS_GROUP_ID`が設定されていれば`notification_service.send_push`で親グループへLINE通知を送る。呼び出し元スレッド（APIルーティング処理）はこのスレッド起動をブロックしない。
-* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 105〜121 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 124〜125 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
+* 根拠: `unlock_task` 定義とスレッド起動 (行番号: 111〜127 / 抜粋: "def unlock_task():\n        logger.info(f\"📺 Initiating TV Unlock (Turn ON) for {context}\")"), スレッド起動 (行番号: 124〜125 / 抜粋: "t = threading.Thread(target=unlock_task, daemon=True)\n    t.start()"), Fail-Soft通知 (行番号: 116〜121 / 抜粋: "if config.LINE_PARENTS_GROUP_ID:\n                msg = \"⚠️ テレビの電源ON（自動ロック解除）に失敗しました。お手数ですが、SwitchBotアプリ等から手動でつけてあげてください。\"\n                notification_service.send_push(")
 
 
 * **エラーハンドリング**: `unlock_task`内で`send_device_command`の戻り値が偽値または`statusCode != 100`の場合は`Exception`を送出して直後の`except Exception as e:`で捕捉し、任意の例外（`send_device_command`自体が投げうる例外も含む）をエラーログ出力とFail-Soft通知（LINE Push失敗時の例外は捕捉しない）で処理する。デーモンスレッド内で例外が伝播してもプロセス全体やAPIルーティングには影響しない。
@@ -163,11 +163,11 @@
 ### `create_switchbot_auth_headers`
 
 * **役割**: トークン、タイムスタンプ、nonceを用いてHMAC-SHA256署名を生成し、APIリクエストに必要な認証ヘッダー群を構築する。
-* 根拠: `create_switchbot_auth_headers` (行番号: 128〜155 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
+* 根拠: `create_switchbot_auth_headers` (行番号: 134〜161 / 抜粋: "def create_switchbot_auth_headers() -> Dict[str, str]:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `create_switchbot_auth_headers` (行番号: 128 / 抜粋: "def create_switchbot_auth_headers()")
+* 根拠: `create_switchbot_auth_headers` (行番号: 134 / 抜粋: "def create_switchbot_auth_headers()")
 
 
 * **戻り値/レスポンス**: `Dict[str, str]` (認証情報の入ったヘッダー辞書、設定不備時は空辞書)
@@ -186,11 +186,11 @@
 ### `fetch_device_name_cache`
 
 * **役割**: SwitchBot APIのデバイス一覧エンドポイントからデバイス情報を取得し、グローバル変数 `DEVICE_NAME_CACHE` にデバイスIDと名前のペアを格納する。**（Issue #439で修正）** 以前はAPIから取得したデバイス名を`DEVICE_NAME_CACHE`へループの都度ロック無しで直接書き込んでいたが、現在はまずローカル辞書`new_names`（ネットワークI/O中はロックを取得しない）へ全件を集め、最後に`_device_cache_lock`保持下で`DEVICE_NAME_CACHE.update(new_names)`によりまとめてマージする。
-* 根拠: `fetch_device_name_cache` (行番号: 157〜196 / 抜粋: "def fetch_device_name_cache() -> bool:")、[ローカル辞書への集約とロック下でのマージ] (行番号: 137〜148 / 抜粋: "new_names: Dict[str, str] = {}\n            # 通常デバイス\n            for d in body.get('deviceList', []):\n                new_names[d['deviceId']] = d['deviceName']", "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)\n                cache_size = len(DEVICE_NAME_CACHE)")
+* 根拠: `fetch_device_name_cache` (行番号: 163〜202 / 抜粋: "def fetch_device_name_cache() -> bool:")、[ローカル辞書への集約とロック下でのマージ] (行番号: 137〜148 / 抜粋: "new_names: Dict[str, str] = {}\n            # 通常デバイス\n            for d in body.get('deviceList', []):\n                new_names[d['deviceId']] = d['deviceName']", "with _device_cache_lock:\n                DEVICE_NAME_CACHE.update(new_names)\n                cache_size = len(DEVICE_NAME_CACHE)")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `fetch_device_name_cache` (行番号: 157 / 抜粋: "def fetch_device_name_cache()")
+* 根拠: `fetch_device_name_cache` (行番号: 163 / 抜粋: "def fetch_device_name_cache()")
 
 
 * **戻り値/レスポンス**: `bool` (処理の成功・失敗)
@@ -216,7 +216,7 @@
 * 根拠: (行番号: 27〜28, 168〜174 / 抜粋: "retry_due = (\n            _last_fetch_attempt_at is None\n            or (now - _last_fetch_attempt_at) >= DEVICE_NAME_FETCH_RETRY_SEC\n        )")
 
 * **役割**: `DEVICE_NAME_CACHE` から指定されたデバイスIDに対応するデバイス名を取得する。**（Issue #439で修正）** 「キャッシュが空かつ未試行かをチェックしてから`_fetch_attempted`を立てる」処理と、最終的なキャッシュ読み取りは、いずれも`_device_cache_lock`保持下で行うよう修正された。以前はロード無しでこのチェックを行っており、Webhookリクエストが集中する起動直後に複数スレッドが同時に「キャッシュ空・未試行」と判定してしまい、`fetch_device_name_cache`（SwitchBotのデバイス一覧API呼び出し）が並行して複数回走りうる状態だった。ネットワークI/Oを伴う`fetch_device_name_cache()`自体の呼び出しは、`_device_cache_lock`を一度解放してから（ロックの外側で）行う。
-* 根拠: `get_device_name_by_id` (行番号: 198〜214 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
+* 根拠: `get_device_name_by_id` (行番号: 204〜220 / 抜粋: "def get_device_name_by_id(device_id: str) -> Optional[str]:")、[ロック下でのcheck-and-set] (行番号: 161〜164 / 抜粋: "with _device_cache_lock:\n        should_fetch = not DEVICE_NAME_CACHE and not _fetch_attempted\n        if should_fetch:\n            _fetch_attempted = True")、[ロック外での遅延ロード呼び出し] (行番号: 165〜167 / 抜粋: "if should_fetch:\n        # APIリクエスト(ネットワークI/O)は_device_cache_lock保持中に行わない\n        fetch_device_name_cache()")、[ロック下での最終読み取り] (行番号: 168〜169 / 抜粋: "with _device_cache_lock:\n        return DEVICE_NAME_CACHE.get(device_id, None)")
 
 
 * **引数/リクエスト**: `device_id`: `str` (デバイスID)
@@ -239,7 +239,7 @@
 ### `get_device_status`
 
 * **役割**: 指定されたデバイスのステータス取得用URLを構築し、APIリクエストを送信して結果を取得する。
-* 根拠: `get_device_status` (行番号: 216〜229 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
+* 根拠: `get_device_status` (行番号: 222〜235 / 抜粋: "def get_device_status(device_id: str) -> Optional[Dict[str, Any]]:")
 
 
 * **引数/リクエスト**: `device_id`: `str` (対象デバイスのID)

@@ -134,11 +134,11 @@
 
 * **役割**: SIGINTやSIGTERMなどのプロセス終了シグナルを受信した際に、アクティブなPullPointサブスクリプションを解除して安全に終了する。
 * **（Issue #439 で修正）** `active_pullpoints`の走査は以前`for svc in list(active_pullpoints):`と直接コピーしていたが、`monitor_single_camera`（他スレッド）が同時にリストを変更しうるため、`_pullpoints_lock`保護下でスナップショット(`pullpoints_snapshot`)を取得してからロックを解放し、そのスナップショットを走査するよう変更された。
-* 根拠: `cleanup_handler` (行番号: 167〜183 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
+* 根拠: `cleanup_handler` (行番号: 169〜185 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")、[ロック保護下のスナップショット取得] (行番号: 99〜100 / 抜粋: "with _pullpoints_lock:\n        pullpoints_snapshot = list(active_pullpoints)")
 
 
 * **引数/リクエスト**: `signum: int` (シグナル番号), `frame: Any` (実行フレーム)
-* 根拠: `cleanup_handler` (行番号: 167 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
+* 根拠: `cleanup_handler` (行番号: 169 / 抜粋: "def cleanup_handler(signum: int, frame: Any) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
@@ -157,11 +157,11 @@
 ### `is_host_reachable`
 
 * **役割**: OSのpingコマンドを実行し、指定されたIPアドレスの到達性を確認する。
-* 根拠: `is_host_reachable` (行番号: 188〜204 / 抜粋: "def is_host_reachable(ip:")
+* 根拠: `is_host_reachable` (行番号: 190〜206 / 抜粋: "def is_host_reachable(ip:")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
-* 根拠: `is_host_reachable` (行番号: 188 / 抜粋: "def is_host_reachable(ip: str)")
+* 根拠: `is_host_reachable` (行番号: 190 / 抜粋: "def is_host_reachable(ip: str)")
 
 
 * **戻り値/レスポンス**: `bool` (到達可能ならTrue)
@@ -177,30 +177,16 @@
 
 
 
-### `find_wsdl_path`
+### `find_wsdl_path`（Issue #661 で core/onvif_utils.py へ移動）
 
-* **役割**: `sys.path` を走査し、ONVIFのWSDLファイル (`devicemgmt.wsdl`) が存在するディレクトリパスを探索する。
-* 根拠: `find_wsdl_path` (行番号: 206〜216 / 抜粋: "def find_wsdl_path() ->")
-
-
-* **引数/リクエスト**: なし
-* 根拠: `find_wsdl_path` (行番号: 206 / 抜粋: "def find_wsdl_path() ->")
-
-
-* **戻り値/レスポンス**: `Optional[str]` (見つかったディレクトリパス、なければNone)
-* 根拠: `find_wsdl_path` (行番号: 107 / 抜粋: "-> Optional[str]:")
-
-
-* **副作用**: なし
-* 根拠: `find_wsdl_path` (行番号: 116 / 抜粋: "return candidate")
-
-
-* **エラーハンドリング**: なし
+* **役割**: `sys.path` を走査し、ONVIFのWSDLファイル (`devicemgmt.wsdl`) が存在するディレクトリパスを探索する。**実体は本ファイルには無く、`core/onvif_utils.py` から import している**(以前は `services/camera_service.py` にも一字一句同じ実装が重複しており、探索規則を変えるときに片方だけ直す事故が起きうる状態だった)。モジュール読み込み時に1回だけ呼ばれ、結果は `WSDL_DIR` に保持される。
+* 根拠: `from core.onvif_utils import find_wsdl_path` (行番号: 41)、`WSDL_DIR: Optional[str] = find_wsdl_path()` (行番号: 209)
+* 詳細: [onvif_utils.md](./onvif_utils.md)
 
 ### `perform_emergency_diagnosis`
 
 * **役割**: 指定されたIPの特定ポート（80, 2020）へのTCP接続テストを行い、ポートの状態（Open/Closed）をログに出力する。
-* 根拠: `perform_emergency_diagnosis` (行番号: 220〜236 / 抜粋: "def perform_emergency_diagnosis")
+* 根拠: `perform_emergency_diagnosis` (行番号: 211〜227 / 抜粋: "def perform_emergency_diagnosis")
 
 
 * **引数/リクエスト**: `ip: str` (対象のIPアドレス)
@@ -223,7 +209,7 @@
 ### `check_camera_time`
 
 * **役割**: カメラのシステム時刻(UTC)を取得し、稼働サーバーの現在時刻(JST想定)との差分が5分(300秒)以上あるかチェックして警告を出す。
-* 根拠: `check_camera_time` (行番号: 238〜269 / 抜粋: "def check_camera_time(devicemgmt")
+* 根拠: `check_camera_time` (行番号: 229〜260 / 抜粋: "def check_camera_time(devicemgmt")
 * **（Issue #382 で修正）** カメラのUTC時刻を `tzinfo=timezone.utc` の aware datetime として組み立て、`dt_class.now(timezone.utc)` と比較する。以前は +9h した naive 値をホストローカル時刻と比較する JST 前提だったため、ホストの TZ が UTC 等の環境では差が常に 9h となり全カメラが永久に「時刻ズレ」で接続不能になっていた。
 * 根拠: `cam_time_utc = dt_class(...)` (行番号: 148〜150)、`now_utc = dt_class.now(timezone.utc)` (行番号: 151)
 
@@ -251,7 +237,7 @@
 * 根拠: [パターン関数] (行番号: 208〜219 / 抜粋: "if now.hour == 0:\n        yesterday = now - timedelta(days=1)")、[呼び出し] (行番号: 250)、[フォールバック先] (行番号: 59)
 
 * **役割**: NAS上に保存されている最新の動画ファイル(.mp4)を検索し、FFmpegを用いてファイル末尾から1秒前のフレームを切り出してJPEG画像のバイト列を返す。
-* 根拠: `capture_snapshot_from_nvr` (行番号: 285〜371 / 抜粋: "def capture_snapshot_from_nvr(")
+* 根拠: `capture_snapshot_from_nvr` (行番号: 276〜362 / 抜粋: "def capture_snapshot_from_nvr(")
 * **（Issue #405 で修正）** NVR ディレクトリは `config.NVR_RECORD_DIR` を直接参照する（以前の `getattr(config, ..., os.getenv("NVR_RECORD_DIR", ...))` は config が常に定義するため到達不能なフォールバックで、`.env.example` 整合テストの死角だった）。
 * 根拠: `nvr_base_dir = config.NVR_RECORD_DIR` (行番号: 186)
 * **[修正済み] #414 C-L7: スナップショット一時ファイルパスを`tempfile.gettempdir()`経由で解決**: `output_tmp`は以前`f"/tmp/snapshot_{cam_conf['name']}_{uuid.uuid4().hex}.jpg"`と`/tmp`を直書きしていたが、`os.path.join(tempfile.gettempdir(), f"snapshot_{...}.jpg")`に変更した。実行環境のOS標準一時ディレクトリ（Linuxでは通常`/tmp`のまま、`TMPDIR`環境変数があればそちらに追従）に解決される。テスト側(`tests/test_camera_monitor_low_priority.py`)が並列実行時に実`/tmp`をglobして他プロセスの残骸と衝突する偽陽性を避けられるよう、`tempfile.gettempdir`をmonkeypatchして隔離できるようにするための変更。
@@ -286,7 +272,7 @@
 ### `save_image_from_stream`
 
 * **役割**: `capture_snapshot_from_nvr` を呼び出してスナップショットを取得し、指定されたディレクトリ(`ASSETS_DIR`)にファイルとして保存する。
-* 根拠: `save_image_from_stream` (行番号: 374〜400 / 抜粋: "def save_image_from_stream(")
+* 根拠: `save_image_from_stream` (行番号: 365〜391 / 抜粋: "def save_image_from_stream(")
 
 
 * **引数/リクエスト**: `cam_name: str` (カメラ名), `event_type: str = "motion"` (イベント種別)
@@ -309,7 +295,7 @@
 ### `force_close_session`
 
 * **役割**: さまざまなパターンのオブジェクト（ONVIFService, ONVIFCamera, zeep_client等）からHTTPセッションを探し出して強制的にクローズし、ファイル記述子を解放する。
-* 根拠: `force_close_session` (行番号: 402〜425 / 抜粋: "def force_close_session(")
+* 根拠: `force_close_session` (行番号: 393〜416 / 抜粋: "def force_close_session(")
 
 
 * **引数/リクエスト**: `service_obj: Any` (対象オブジェクト)
@@ -332,7 +318,7 @@
 ### `process_camera_event`
 
 * **役割**: ONVIFイベントメッセージをパースし、動体検知イベントであるかを判定。クールダウン判定後、DB保存とスナップショット保存を実行する。
-* 根拠: `process_camera_event` (行番号: 427〜496 / 抜粋: "def process_camera_event(")
+* 根拠: `process_camera_event` (行番号: 418〜487 / 抜粋: "def process_camera_event(")
 
 
 * **引数/リクエスト**: `msg: Any` (ONVIFイベントメッセージ), `cam_conf: Dict[str, Any]` (カメラ設定)
@@ -360,7 +346,7 @@
 
 * **役割**: 単一のカメラに対する死活監視、ONVIF接続、イベント購読（PullPoint）ループ、例外時（ネットワーク断等）のExponential Backoffリトライ、セッション更新などを制御するメインループ。ポートは設定ファイル指定の1つのみを使用し、ローテーションは行わない。
 * **（Issue #652 で追加）** 外側ループの先頭で `is_camera_enabled(cam_conf)` を確認し、`devices.json` 上で無効化されていればONVIF接続にも到達性チェックにも進まず `DISABLED_POLL_INTERVAL_SEC`(30秒)ごとに再確認して待機する（無効化・再有効化の遷移時のみINFOログを1回出す）。内側の監視ループでも `SESSION_LIFETIME` 判定の直後に同じ確認を行い、監視中に無効化された場合は `break` して `finally` の `Unsubscribe`・セッションクローズを通り、外側の待機へ移る。
-* 根拠: `monitor_single_camera` (行番号: 499〜770 / 抜粋: "def monitor_single_camera(")
+* 根拠: `monitor_single_camera` (行番号: 490〜761 / 抜粋: "def monitor_single_camera(")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]` (対象カメラ設定)
@@ -384,11 +370,11 @@
 ### `main`
 
 * **役割**: 登録された全てのカメラ設定（`config.CAMERAS`）に対して、`ThreadPoolExecutor` を用いて並行で `monitor_single_camera` を実行する。
-* 根拠: `main` (行番号: 772〜782 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 763〜773 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `main` (行番号: 772 / 抜粋: "async def main() -> None:")
+* 根拠: `main` (行番号: 763 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`

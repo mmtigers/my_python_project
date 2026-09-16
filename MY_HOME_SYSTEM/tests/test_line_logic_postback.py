@@ -204,8 +204,10 @@ class TestCheckStatus:
         mock_line_api.reply_message.assert_called_once()
 
     def test_db_read_error_falls_back_to_error_text_in_summary(self, isolated_db, mock_line_api, monkeypatch):
+        # #661: 読み取り接続を core/database.get_ro_connection へ寄せたため、
+        # 差し替え先も line_logic が import したそのヘルパーにする。
         monkeypatch.setattr(
-            line_logic.sqlite3, "connect", MagicMock(side_effect=Exception("disk error"))
+            line_logic, "get_ro_connection", MagicMock(side_effect=Exception("disk error"))
         )
         event = fake_postback_event("action=check_status")
 
