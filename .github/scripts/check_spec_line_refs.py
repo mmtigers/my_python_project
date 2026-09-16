@@ -96,15 +96,62 @@ def _definitions(source: str) -> Tuple[Optional[Dict], Optional[Dict]]:
     return qualified, flat
 
 
-def _source_index() -> Dict[str, List[Path]]:
-    """仕様書のベース名 -> 対応しうるソースファイル"""
-    index: Dict[str, List[Path]] = collections.defaultdict(list)
+def _is_skipped_source(path: Path) -> bool:
+    """仕様書を持たない(規約上の対象外)ソースか。"""
+    name = path.stem
+    if name == "__init__" or name.startswith("test_") or "tests" in path.parts:
+        return True
+    # .venv / node_modules / 隠しディレクトリ配下は対象外
+    return any(part.startswith(".") or part in ("node_modules", "migrations") for part in path.parts)
+
+
+def _iter_sources(suffixes: Tuple[str, ...] = (".py",)) -> Iterable[Path]:
     for root in SOURCE_ROOTS:
-        for path in (REPO_ROOT / root).rglob("*.py"):
-            name = path.stem
-            if name == "__init__" or name.startswith("test_") or "tests" in path.parts:
-                continue
-            index[name].append(path)
+        base = REPO_ROOT / root
+        if not base.is_dir():
+            continue
+        for path in base.rglob("*"):
+            if path.suffix in suffixes and not _is_skipped_source(path):
+                yield path
+
+
+def _source_index(suffixes: Tuple[str, ...] = (".py",)) -> Dict[str, List[Path]]:
+    """仕様書のベース名 -> 対応しうるソースファイル。
+
+    Issue #655: 以前はソースの素の stem でしか索引しておらず、`check_spec_drift.py` が
+    採用する `<親dir>_<stem>.md` の曖昧性解消規約(例: `views/dashboard/common.py` →
+    `dashboard_common.md`)を解決できなかった。その結果 `dashboard_common.md` や
+    `quest_*.md` など10件が「候補が1件でない」として**無言でスキップ**され、
+    たとえば `dashboard_common.md` が現行と違うシグネチャを引用していても CI は緑だった。
+
+    ここでは素の stem に加えて、ソースディレクトリ直下より深いファイルを
+    `<親dir>_<stem>` でも索引する。さらに素の stem が複数候補になる場合は、
+    `<親dir>_<stem>.md` の仕様書が実在する(=そちらが正)ものを候補から外して一意化する。
+    """
+    index: Dict[str, List[Path]] = collections.defaultdict(list)
+    deep: Dict[str, List[Path]] = collections.defaultdict(list)
+    for path in _iter_sources(suffixes):
+        rel = path.relative_to(REPO_ROOT)
+        index[path.stem].append(path)
+        if len(rel.parts) > 2:
+            qualified = "%s_%s" % (rel.parts[-2], path.stem)
+            index[qualified].append(path)
+            deep[path.stem].append(path)
+
+    # 素の stem が衝突する場合、曖昧性解消済み仕様書を持つ深いファイルを候補から外す
+    for stem, paths in list(index.items()):
+        if len(paths) < 2:
+            continue
+        narrowed = []
+        for path in paths:
+            rel = path.relative_to(REPO_ROOT)
+            if path in deep.get(stem, []):
+                alt = SPEC_ROOT / rel.parts[0] / ("%s_%s.md" % (rel.parts[-2], path.stem))
+                if alt.exists():
+                    continue
+            narrowed.append(path)
+        if narrowed:
+            index[stem] = narrowed
     return index
 
 
@@ -127,8 +174,28 @@ def _resolve(symbol: str, klass: Optional[str], qualified: Dict, flat: Dict) -> 
     return None
 
 
-def scan(fix: bool = False) -> Tuple[List[Finding], int]:
-    """全仕様書を走査する。戻り値は (不一致の一覧, 検証できた引用の総数)。"""
+def _spec_expects_python_source(spec: Path) -> bool:
+    """この仕様書が Python ソースに1対1対応する規約の対象か。
+
+    family-quest(TypeScript)配下と、`.sh` にしか対応しない仕様書は本チェッカーの
+    対象外(ast が使えない)なので、スキップ警告の対象からも外す。
+    """
+    try:
+        rel = spec.relative_to(SPEC_ROOT)
+    except ValueError:
+        return False
+    if not rel.parts or rel.parts[0] not in SOURCE_ROOTS:
+        return False
+    shell_index = _source_index((".sh",))
+    return spec.stem not in shell_index
+
+
+def scan(fix: bool = False, skipped: Optional[List[Tuple[Path, str]]] = None) -> Tuple[List[Finding], int]:
+    """全仕様書を走査する。戻り値は (不一致の一覧, 検証できた引用の総数)。
+
+    `skipped` を渡すと、対応ソースを一意に決められず検証できなかった仕様書を
+    (パス, 理由) で追記する(Issue #655: 以前はこれを無言で捨てていた)。
+    """
     index = _source_index()
     findings: List[Finding] = []
     checked = 0
@@ -138,6 +205,11 @@ def scan(fix: bool = False) -> Tuple[List[Finding], int]:
             continue
         candidates = index.get(spec.stem)
         if not candidates or len(candidates) != 1:
+            if skipped is not None and _spec_expects_python_source(spec):
+                reason = "対応ソースが見つからない" if not candidates else (
+                    "同名ソースが%d件あり一意に決められない" % len(candidates)
+                )
+                skipped.append((spec, reason))
             continue
         qualified, flat = _definitions(candidates[0].read_text(encoding="utf-8"))
         if qualified is None:
@@ -217,15 +289,122 @@ def scan(fix: bool = False) -> Tuple[List[Finding], int]:
     return findings, checked
 
 
+# --- Issue #655: def/class 以外の引用の粗いレポート ---
+
+# family-quest(TypeScript)側の仕様書 → ソースの対応。docs/specifications/family-quest/src/**.md
+# は family-quest/src/**.{ts,tsx} をミラーし、App.md / main.md だけは src/ を省いた位置にある。
+FQ_SPEC_ROOT_PARTS = ("family-quest",)
+FQ_SOURCE_ROOT = "family-quest/src"
+FQ_SUFFIXES = (".ts", ".tsx")
+
+
+def _report_source_for_spec(spec: Path) -> Optional[Path]:
+    """レポート用に、仕様書へ対応するソースを1件だけ返す(見つからなければ None)。"""
+    rel = spec.relative_to(SPEC_ROOT)
+    if rel.parts and rel.parts[0] in SOURCE_ROOTS:
+        for suffixes in ((".py",), (".sh",)):
+            candidates = _source_index(suffixes).get(spec.stem) or []
+            if len(candidates) == 1:
+                return candidates[0]
+        return None
+    if rel.parts and rel.parts[0] in FQ_SPEC_ROOT_PARTS:
+        sub = rel.relative_to(rel.parts[0])
+        if sub.parts and sub.parts[0] == "src":
+            sub = sub.relative_to("src")
+        for suffix in FQ_SUFFIXES:
+            candidate = REPO_ROOT / FQ_SOURCE_ROOT / sub.with_suffix(suffix)
+            if candidate.exists():
+                return candidate
+    return None
+
+
+def _snippet_first_line(snippet: str) -> str:
+    """引用の抜粋から、照合に使う先頭1行を取り出す。"""
+    body = snippet.strip()
+    if body.startswith('"'):
+        body = body[1:]
+    # 末尾の閉じ引用符より後ろ(`")` や `") |` など、引用を囲む Markdown/表の記号)を落とす
+    close = body.rfind('"')
+    if close != -1:
+        body = body[:close]
+    body = body.split("\\n")[0]
+    return body.replace('\\"', '"').strip()
+
+
+def report_non_definition_citations() -> Tuple[Dict[str, Tuple[int, int]], int, int]:
+    """def/class 以外の引用について「抜粋の先頭行が引用行±1に実在するか」を数える。
+
+    Issue #655: 本チェッカーが保証しているのは `def X(` / `class X` で始まる引用だけで、
+    式や文の抜粋(全体の大半)は未検証だった。まずは件数を可視化する。戻り値は
+    (仕様書名 -> (不一致数, 検査数), 総不一致数, 総検査数)。
+    """
+    per_spec: Dict[str, Tuple[int, int]] = {}
+    total_bad = total_checked = 0
+    for spec in sorted(SPEC_ROOT.rglob("*.md")):
+        if spec.name == "README.md":
+            continue
+        source = _report_source_for_spec(spec)
+        if source is None:
+            continue
+        src_lines = source.read_text(encoding="utf-8").splitlines()
+        bad = checked = 0
+        for line in spec.read_text(encoding="utf-8").splitlines():
+            for b_i, block in enumerate(_BLOCK_RE.finditer(line)):
+                blocks = list(_BLOCK_RE.finditer(line))
+                stop = blocks[b_i + 1].start() if b_i + 1 < len(blocks) else len(line)
+                rest = line[block.end():stop]
+                snippets = _split_snippets(rest)
+                items = _ITEM_RE.findall(block.group(1))
+                if not snippets or len(snippets) != len(items):
+                    continue
+                for pos, snippet in enumerate(snippets):
+                    if re.match(r'"(?:async )?(?:def|class) \w+', snippet.strip()):
+                        continue  # scan() が厳密に検証済み
+                    head = _snippet_first_line(snippet)
+                    if len(head) < 8:
+                        continue  # 短すぎる抜粋は誤検知が多いので数えない
+                    cited = int(_ITEM_RE.findall(items[pos])[0].split("〜")[0].split("~")[0].split("-")[0])
+                    checked += 1
+                    window = src_lines[max(0, cited - 2): cited + 1]
+                    if not any(head in l for l in window):
+                        bad += 1
+        if checked:
+            per_spec[str(spec.relative_to(SPEC_ROOT))] = (bad, checked)
+            total_bad += bad
+            total_checked += checked
+    return per_spec, total_bad, total_checked
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--fix", action="store_true", help="不一致を実ソースの定義位置へ書き換える")
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="def/class 以外の引用も「抜粋の先頭行が引用行±1にあるか」で粗く照合し、件数だけ報告する(exit 0)",
+    )
     args = parser.parse_args(argv)
 
-    findings, checked = scan(fix=args.fix)
+    if args.report:
+        per_spec, total_bad, total_checked = report_non_definition_citations()
+        print("ℹ️ def/class 以外の引用の粗い照合: %d件中 %d件が引用行±1に見つかりません。" % (total_checked, total_bad))
+        print("   (このチェックはゲートではない。抜粋の表記ゆれによる偽陽性を含む。)")
+        print()
+        worst = sorted(per_spec.items(), key=lambda kv: kv[1][0], reverse=True)
+        for name, (bad, checked_count) in worst[:20]:
+            if bad:
+                print("  %4d/%-4d  %s" % (bad, checked_count, name))
+        return 0
+
+    skipped: List[Tuple[Path, str]] = []
+    findings, checked = scan(fix=args.fix, skipped=skipped)
     if args.fix:
         # 書き換え後に残るのは「定義そのものが見つからない」＝手で直すしかないもの
-        findings, checked = scan(fix=False)
+        skipped = []
+        findings, checked = scan(fix=False, skipped=skipped)
+
+    for spec, reason in skipped:
+        print("⚠️ 検証をスキップ: %s (%s)" % (spec.relative_to(REPO_ROOT), reason))
 
     if not findings:
         print("✅ 行番号引用チェック: %d件すべて実ソースの定義位置と一致しています。" % checked)

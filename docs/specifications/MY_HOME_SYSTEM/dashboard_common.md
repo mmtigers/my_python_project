@@ -20,11 +20,11 @@
 ## 2. ファイルの概要
 
 * `views/dashboard`パッケージ内の各タブ・サマリー描画モジュールから共通利用される、CSSスタイル定義とステータスカードHTML生成関数を提供するモジュール。
-* 根拠: `CUSTOM_CSS = """` と `def render_status_card_html(title: str, value: str, theme: str) -> str:` (行番号: 4, 50 / 抜粋: "CUSTOM_CSS = \"\"\"")
+* 根拠: `CUSTOM_CSS = """` と `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` (行番号: 4, 50 / 抜粋: "CUSTOM_CSS = \"\"\"")
 * `CUSTOM_CSS`は、フォント指定、ステータスカード（`.status-card`）、5種類のテーマ配色クラス（`.theme-green`, `.theme-yellow`, `.theme-red`, `.theme-blue`, `.theme-gray`）、経路検索カード（`.route-card`, `.route-path`等）、Streamlit標準要素のスタイル上書き（`.streamlit-expanderHeader`）を含む、文字列定数として定義されたCSSブロックである。
 * 根拠: `.status-card {` (行番号: 9 / 抜粋: "    .status-card {"), `.theme-green { background-color: #e8f5e9; ... }` (行番号: 27 / 抜粋: "    .theme-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }"), `.route-card {` (行番号: 33 / 抜粋: "    .route-card {")
-* `render_status_card_html`は、タイトル・値・テーマ名の3引数を受け取り、`status-card {theme}`クラスを持つ`div`要素のHTML文字列を組み立てて返す純粋関数である。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str) -> str:\n    """ステータスカードのHTMLを生成"""\n    return f"""\n    <div class="status-card {theme}">` (行番号: 50〜53 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* `render_status_card_html`は、タイトル・値・テーマ名に加えてキーワード専用引数 `value_is_html`(既定 `False`)を受け取り、`status-card {theme}`クラスを持つ`div`要素のHTML文字列を組み立てて返す純粋関数である。`value_is_html=True` のときは値をエスケープせずそのまま埋め込む。**(Issue #655 で訂正: 本仕様書は `check_spec_line_refs.py` の索引の死角により長らく未検証で、3引数だった頃のシグネチャと行番号が残っていた。)**
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:\n    """ステータスカードのHTMLを生成"""\n    return f"""\n    <div class="status-card {theme}">` (行番号: 57〜77 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 ## 3. 外部依存関係
 
@@ -170,7 +170,7 @@ graph TD
 
 
 * **`theme`引数のバリデーション欠如**: `render_status_card_html`は`theme`引数がCSS上定義済みのクラス名（`theme-green`等）であることを検証しない。呼び出し元がタイプミス等で未定義のテーマ名を渡した場合、CSSが適用されずスタイル崩れが発生するが、実行時エラーにはならず気づきにくい。
-* 根拠: `def render_status_card_html(title: str, value: str, theme: str) -> str:` （バリデーション処理なし） (行番号: 50 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str) -> str:")
+* 根拠: `def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:` （バリデーション処理なし） (行番号: 57 / 抜粋: "def render_status_card_html(title: str, value: str, theme: str, *, value_is_html: bool = False) -> str:")
 
 
 * **CSSがPython文字列としてハードコード**: スタイル定義がすべて`CUSTOM_CSS`という1つの長い文字列としてPythonコード内にハードコードされており、`.css`ファイルとして分離されていない。デザイン変更のたびにPythonコードの編集が必要となる。
