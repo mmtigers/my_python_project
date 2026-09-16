@@ -45,23 +45,44 @@ class NasMonitor:
         )
 
     def _load_state(self) -> Dict[str, Any]:
-        """前回の監視状態をファイルから読み込む"""
+        """前回の監視状態をファイルから読み込む。
+
+        Issue #653: ファイルが存在するのに読めない/JSONとして壊れている場合は、電源断等で
+        書き込み途中のまま残った可能性が高い。以前はこの場合も「正常」にフォールバックしており、
+        NAS 障害中に状態が壊れると「障害中だった」事実が失われて、復旧時のフォールバック同期
+        (sync_fallback_data)がスキップされていた。破損時は安全側(異常継続扱い)に倒す。
+        ファイルが無い(初回)場合だけ正常とみなす。
+        """
         if os.path.exists(self.state_file):
             try:
                 with open(self.state_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
             except Exception as e:
-                logger.error(f"State load error: {e}")
-        return {"is_healthy": True}  # デフォルトは正常とみなす
+                logger.error(f"State load error (異常継続扱いにフォールバック): {e}")
+                return {"is_healthy": False}
+        return {"is_healthy": True}  # 初回(ファイル無し)は正常とみなす
 
     def _save_state(self, state: Dict[str, Any]) -> None:
-        """現在の監視状態をファイルへ保存する"""
+        """現在の監視状態をファイルへ保存する。
+
+        Issue #653: 素の open('w') は書き込み途中のクラッシュ・電源断で不完全な JSON を残すため、
+        一時ファイルに書き切って fsync したうえで os.replace で原子的に差し替える
+        (switchbot_power_monitor._save_persisted_states と同じ方式)。
+        """
+        tmp_path = f"{self.state_file}.tmp.{os.getpid()}"
         try:
             os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            with open(self.state_file, 'w', encoding='utf-8') as f:
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(state, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.state_file)
         except Exception as e:
             logger.error(f"State save error: {e}")
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     def check_ping(self) -> bool:
         """NASへのPing疎通確認"""

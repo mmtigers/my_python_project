@@ -531,3 +531,34 @@ class TestFallbackSnapshotsAreCleanedUp:
         monkeypatch.setattr(monitor, "cleanup_old_files", lambda d, days, ext: seen.append((d, ext)) or {"deleted_count": 0, "freed_gb": 0.0})
         monitor.run_retention_cleanup()
         assert (str(tmp_path / "fb" / "assets" / "snapshots"), (".jpg", ".jpeg")) in seen
+
+
+class TestNasMonitorStateFileRobustness(unittest.TestCase):
+    """Issue #653: 状態ファイルの原子的な書き込みと、破損時の安全側フォールバック。"""
+
+    def test_corrupted_state_file_falls_back_to_unhealthy(self):
+        """書き込み途中(電源断等)で壊れた JSON が残っていた場合、「正常」ではなく
+        「異常継続」扱いにする(障害中だった事実を失って復旧同期をスキップしない)。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                monitor = NasMonitor()
+                os.makedirs(os.path.dirname(monitor.state_file), exist_ok=True)
+                with open(monitor.state_file, "w", encoding="utf-8") as f:
+                    f.write('{"is_healthy": fal')  # 途中で切れた JSON
+                self.assertEqual(monitor._load_state(), {"is_healthy": False})
+
+    def test_missing_state_file_is_treated_as_healthy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                self.assertEqual(NasMonitor()._load_state(), {"is_healthy": True})
+
+    def test_save_state_writes_atomically_and_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(config, "BASE_DIR", tmp):
+                monitor = NasMonitor()
+                monitor._save_state({"is_healthy": False, "last_cleanup_date": "2026-09-16"})
+                state_dir = os.path.dirname(monitor.state_file)
+                self.assertEqual(sorted(os.listdir(state_dir)), ["nas_monitor_state.json"])
+                self.assertEqual(
+                    monitor._load_state(), {"is_healthy": False, "last_cleanup_date": "2026-09-16"}
+                )
