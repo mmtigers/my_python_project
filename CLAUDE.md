@@ -59,6 +59,8 @@ export NOTIFICATION_TARGET="none"
 
 `tests/conftest.py` は `isolated_db` フィクスチャ（テストごとに新規SQLiteファイルを作成し `init_unified_db.init_db()` でスキーマ初期化、`config.SQLITE_DB_PATH` をmonkeypatch）と `api_client` フィクスチャ（`unified_server.app` に対する `TestClient` で、`lifespan` コンテキストを**実行しない**ため、カメラ監視/スケジューラ等のバックグラウンドサブプロセスがテスト中に一切起動しない）を提供する。新規テストはこれらのフィクスチャを優先して使うこと。これらより古いテストファイルは、各自の `setUp`/`setup_method` 内で `config.SQLITE_DB_PATH` の上書きと `init_unified_db.init_db()` をコピペするパターンを使っているが、挙動を変えるリスクを避けるため、既存ファイルを編集する際はついでにリファクタリングせず、そのファイル内の既存パターンにそのまま従うこと。
 
+日付・時刻に依存するテストは実時刻に任せず `freezegun` の `freeze_time` で固定すること（Issue #658）。タイムゾーン依存は `core/utils` の JST 固定ヘルパー（`get_now_jst`/`get_today_date_str` 等）で解消済みで、TZ を UTC/America/New_York/Pacific/Honolulu/Pacific/Kiritimati に変えても全テストが通ることは確認済みだが、「JST の日付が変わる瞬間」に走ると結果が変わる判定（`tv_lock_monitor` の深夜2時、YouTubeごほうび券の施行日 `YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM` 等）は残る。境界そのものの回帰テストは `tests/test_jst_day_boundary.py` にある。
+
 `conftest.py` は `config` がロードされる**前**に、import時点でDiscord/LINEのwebhook・トークン系環境変数をすべて空文字にしている。これは、実際の認証情報が入ったローカル `.env` によってテストが本物の通知を発火させてしまった事故が過去にあったため。`notification_service`/`line_service` の経路を通るテストを書く際は、この仕組みを回避しないこと。
 
 ### family-quest (フロントエンド)
