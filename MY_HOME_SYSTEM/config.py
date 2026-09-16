@@ -195,8 +195,13 @@ class DeviceConfig(BaseModel):
 # 再有効化する場合はTrueにした上で、OS側の `sudo systemctl enable --now bluetooth`
 # と起動時自動接続(tools/connect_speaker.sh の定期実行)の整備が必要。
 ENABLE_BLUETOOTH: bool = False
+# Issue #665: core/logger.setup_logging のログレベル。以前は INFO 固定で DEBUG 化の手段が無かった。
+# DEBUG / INFO / WARNING / ERROR / CRITICAL(不正値は INFO にフォールバック)。
+LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # Anker SoundCore 2 (tools/connect_speaker.sh, tools/keep_alive_anker.sh と同一デバイス)
-SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "F4:4E:FC:B6:65:D4")
+# Issue #663: 以前は実機の MAC アドレスがデフォルト値としてコミットされていた。個人環境値は .env に置く。
+# 未設定なら空文字(post_boot_health_check はスピーカーチェックをスキップする)。
+SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "")
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
@@ -358,13 +363,18 @@ _frontend_origin = "{0.scheme}://{0.netloc}".format(urlparse(FRONTEND_URL))
 # オリジンリストがあり、実際に使われるのは unified_server.py 側のハードコード
 # だけだったため、config.py側やALLOW_ALL_ORIGINS環境変数を変更しても
 # CORS設定に一切反映されない「死に設定」になっていた。ここに一本化する。
+# Issue #663: 以前は公開ドメイン(Cloudflare Tunnel)と LAN 内の開発サーバーのオリジンがここに直書き
+# されていた。個人環境値は .env の CORS_EXTRA_ORIGINS(カンマ区切り)で追加する。
+# 例: CORS_EXTRA_ORIGINS=https://home.example.com,http://192.168.1.200:5173
+CORS_EXTRA_ORIGINS: List[str] = [
+    o.strip() for o in os.getenv("CORS_EXTRA_ORIGINS", "").split(",") if o.strip()
+]
 CORS_ORIGINS: List[str] = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8501",   # Streamlitダッシュボード
-    "http://192.168.1.200:5173",  # LAN内フロントエンド開発サーバー
-    "https://m-mhts.com",      # Cloudflare Tunnel公開ドメイン
     _frontend_origin,
+    *CORS_EXTRA_ORIGINS,
 ]
 ALLOW_ALL_ORIGINS: bool = os.getenv("ALLOW_ALL_ORIGINS", "False").lower() == "true"
 if ALLOW_ALL_ORIGINS:

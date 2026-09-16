@@ -18,7 +18,7 @@
 ## 2. ファイルの概要
 
 システム全体のログ出力設定を管轄するモジュール。コンソールへの標準出力、ログファイル(`home_system.log`)への書き込み、およびエラー発生時（ERRORレベル以上のログ）にスタックトレースを含めてDiscordのWebhookへ自動通知する機能を提供する。ログファイルのローテーション自体は本ファイルでは行わず、`WatchedFileHandler`（書き込み専用）を用いて外部の`logrotate`にローテーション処理を一元化する設計になっている（`home_system.log`が`unified_server`・`monitors`・cronスクリプト等の複数プロセスから同時に開かれるため、各プロセスが独自にファイルをrenameする方式のハンドラではローテーションが壊れることを避けるための設計、191〜195行目のコメント参照）。Discord通知（`DiscordErrorHandler.emit`）は、Webhook送信中に呼び出し元のスレッドをブロックしないよう、バックグラウンドスレッド上で行われる。`setup_logging`とは別に、同名の呼び出しパターン(`from core.logger import get_logger`)を期待する呼び出し元向けの単純なエイリアス関数`get_logger`も提供する。**（2026-09-06 品質監査で修正）** `setup_logging`は同名ロガーの再セットアップ時に既存ハンドラを`removeHandler`したうえで`close()`するようになり（以前は`handlers.clear()`のみでファイルディスクリプタがリークしていた）、`_send_webhook`の失敗ログはWebhook URLのトークン部分を`_redact_webhook_url`でマスクし、`exc_info`を付けずに例外種別とマスク済みメッセージのみを出力するようになった。
-* 根拠: `[get_logger]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 70〜72 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
+* 根拠: `[get_logger]` (行番号: 215〜217 / 抜粋: "def get_logger(name: str) -> logging.Logger:")、`[setup_loggingのハンドラclose]` (行番号: 169〜174 / 抜粋: "for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()")、`[_redact_webhook_url]` (行番号: 70〜72 / 抜粋: "def _redact_webhook_url(text: str) -> str:")
 
 ## 3. 外部依存関係
 
@@ -180,6 +180,8 @@
 * 根拠: `[既存ハンドラのremove+close]` (行番号: 164〜174 / 抜粋: "# 同名ロガーの再セットアップ時は、既存ハンドラを close() してから外す。\n    # 以前は handlers.clear() だけだったため、WatchedFileHandler が開いていた\n    # home_system.log のファイルディスクリプタが閉じられずに残り、\n    ...\n    for existing_handler in list(logger.handlers):\n        logger.removeHandler(existing_handler)\n        try:\n            existing_handler.close()\n        except Exception:\n            pass")
 * **（Issue #384 で修正）** ファイル出力先は `config.LOG_DIR`（書き込み失敗時のフォールバック解決済み）を使う。以前は `config.BASE_DIR/logs` 固定だったため、`LOG_DIR` が `temp_fallback/logs` に落ちた場合に `health_watch`/`log_analyzer` が読む場所と実際の出力先が食い違っていた。
 * 根拠: `log_dir = getattr(config, "LOG_DIR", None) or os.path.join(config.BASE_DIR, "logs")` (行番号: 188)
+* **（Issue #665 で修正）** ロガーのレベルは`config.LOG_LEVEL`（環境変数`LOG_LEVEL`、既定`"INFO"`）を大文字化して`logging`モジュールの同名定数に解決する。定数が存在しない・整数でない不正値のときは`logging.INFO`にフォールバックする。以前は`logging.INFO`固定で、実機で DEBUG ログを出す手段が無かった。
+* 根拠: `level_name = str(getattr(config, "LOG_LEVEL", "INFO") or "INFO").upper()` (行番号: 177)
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前)、`webhook_url` (型: `str`、デフォルト `None`。Discord通知先URL)
@@ -202,11 +204,11 @@
 ### `get_logger`
 
 * **役割**: `setup_logging()`のエイリアス。`from core.logger import get_logger`という形で本関数を参照する呼び出し元向けに、`webhook_url`を渡さず`setup_logging(name)`をそのまま呼び出して結果を返す。
-* 根拠: `[get_logger]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
+* 根拠: `[get_logger]` (行番号: 215〜217 / 抜粋: "def get_logger(name: str) -> logging.Logger:\n    \"\"\"setup_logging() のエイリアス。`from core.logger import get_logger` で参照される呼び出し元向け。\"\"\"\n    return setup_logging(name)")
 
 
 * **引数/リクエスト**: `name` (型: `str`。取得するロガーの名前。`setup_logging`と異なり`webhook_url`引数は受け取らない)
-* 根拠: `[関数シグネチャ]` (行番号: 213 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[関数シグネチャ]` (行番号: 215 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 * **戻り値/レスポンス**: `logging.Logger` (`setup_logging(name)`の戻り値をそのまま返却)
@@ -218,7 +220,7 @@
 
 
 * **エラーハンドリング**: なし（`setup_logging`のエラーハンドリングに依存。`setup_logging`自体も明示的な例外捕捉を持たない）
-* 根拠: `[get_logger関数全体]` (行番号: 213〜215 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
+* 根拠: `[get_logger関数全体]` (行番号: 215〜217 / 抜粋: "def get_logger(name: str) -> logging.Logger:")
 
 
 
@@ -230,7 +232,7 @@ flowchart TD
         S1["開始"] --> S2["ロガー取得 (プロパゲート無効化)"]
         S2 --> S3{"既存ハンドラがあるか"}
         S3 -- Yes --> S4["各ハンドラを removeHandler() してから close()<br>(close()の例外は無視、2026-09-06 品質監査で修正)"]
-        S3 -- No --> S5["ログレベル(INFO)・フォーマッタ設定"]
+        S3 -- No --> S5["ログレベル(config.LOG_LEVEL、既定INFO)・フォーマッタ設定"]
         S4 --> S5
         S5 --> S6["コンソール出力用 StreamHandler 追加"]
         S6 --> S7["外部：os.makedirs(ディレクトリ作成)"]

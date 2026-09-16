@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta, date
 import pytz
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 import pandas as pd
 

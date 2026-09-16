@@ -145,7 +145,7 @@ def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "�
             detail_elm = soup.select_one('.routeDetail')
             if detail_elm:
                 stations = [s.get_text(strip=True) for s in detail_elm.select('.station dt')]
-                lines = [l.get_text(strip=True) for l in detail_elm.select('.transport div')]
+                lines = [el.get_text(strip=True) for el in detail_elm.select('.transport div')]
                 
                 details_list: List[str] = []
                 if stations: 

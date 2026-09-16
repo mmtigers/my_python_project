@@ -12,7 +12,6 @@ import sys
 from datetime import datetime
 
 import pandas as pd
-import pytest
 import pytz
 from freezegun import freeze_time
 

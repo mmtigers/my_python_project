@@ -103,7 +103,7 @@ class TestNoTracebackOnScreen:
         mock_st = _mock_st()
         with patch.object(dashboard, "st", mock_st), \
              patch.object(dashboard.analysis_service, "load_sensor_data", side_effect=RuntimeError("boom")), \
-             patch.object(dashboard, "common") as mock_common, \
+             patch.object(dashboard, "common"), \
              patch.object(dashboard, "logger") as mock_logger:
             dashboard.main()
 

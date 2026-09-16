@@ -373,7 +373,6 @@ def handle_postback(event: PostbackEvent):
             return
 
         data_str = event.postback.data
-        reply_token = event.reply_token
 
         logger.info(f"📩 Postback [{user_id}]: {data_str}")
 
