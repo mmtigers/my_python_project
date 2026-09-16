@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 import sys
 from unittest.mock import patch
 
+import pytest
 from starlette.testclient import TestClient
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -210,7 +211,16 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
     「Webhookパスだけは常に通す」という前提が壊れていないかを検知するためのテスト。
     """
 
-    def test_webhook_paths_bypass_without_ip_parsing(self, api_client, monkeypatch):
+    @pytest.mark.parametrize(
+        "path",
+        ["/callback/line", "/webhook/switchbot", "/webhook/alexa"],
+    )
+    def test_webhook_paths_bypass_without_ip_parsing(self, api_client, monkeypatch, path):
+        """外部Webhookの3パスはいずれもクライアントIP解決を経ずに素通りすること。
+
+        /webhook/alexa は長らく allowed_webhook_paths から漏れており、docstringが
+        列挙する「外部からのWebhook受信が必要なパス」の意図と非対称だった。
+        """
         import ipaddress
 
         calls = []
@@ -221,9 +231,29 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
             return original(value)
 
         monkeypatch.setattr(ipaddress, "ip_address", _spy)
-        # LINE Bot未設定環境では501になるが、ミドルウェアが素通りしていることの確認が目的
-        api_client.post("/callback/line", content=b"{}")
+        # 各エンドポイントは未設定/検証失敗で501や400を返すが、
+        # ミドルウェアが素通りしていることの確認が目的なのでステータスは問わない
+        api_client.post(path, content=b"{}")
         assert calls == []
+
+    def test_allowed_webhook_paths_matches_mounted_webhook_routes(self, api_client):
+        """実際にマウントされている外部Webhookのルートが、すべて例外パスに載っていること。
+
+        新しい外部Webhookを追加したときに allowed_webhook_paths への追記を忘れると、
+        (本ミドルウェアは遮断しないため)気づけないまま非対称が再発する。
+        """
+        mounted = {
+            route.path
+            for route in unified_server.app.routes
+            if getattr(route, "path", "").startswith(("/webhook/", "/callback/"))
+        }
+        # 本ミドルウェアの例外リストと同じ集合をテスト側にも明示して突き合わせる
+        expected_exempt = {"/webhook/switchbot", "/callback/line", "/webhook/alexa"}
+        assert mounted == expected_exempt, (
+            "外部Webhookのルート構成が変わっている。unified_server.py の "
+            "allowed_webhook_paths と本テストの expected_exempt を同時に更新すること: "
+            f"マウント済み={sorted(mounted)} / 例外リスト={sorted(expected_exempt)}"
+        )
 
     def test_normal_path_is_currently_always_allowed(self, api_client):
         """スプーフィング可能なヘッダーを一切付けなくても現状は必ず通過する(既知の未解決リスク)"""

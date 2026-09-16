@@ -157,7 +157,9 @@ graph TD
 
 ## 相互参照による補足情報
 
-（本ファイルは新規作成のため、他ドキュメントとの相互参照による補足情報はまだ存在しない。）
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `MY_HOME_SYSTEM/unified_server.py`側で`/camera`が実際に`Last-Modified`ヘッダ付きで応答することの実行時レベルでの確認 | **応答する**ことをコードから確定できた。`/camera`(および`/camera/`・`/quest`・`/quest/`)は`unified_server.py`401〜411行目の`serve_quest_root()`が処理し、`FileResponse(index_path)`を返す。`/camera/<パス>`の方は`serve_quest_spa()`(382〜399行目)で、実ファイルがあればそれを、無ければ同じく`index.html`を`FileResponse`で返す。Starlette(`starlette==1.6.0`、`requirements.txt:96`)の`FileResponse.set_stat_headers`は`os.stat`の結果から`content-length`・**`last-modified`(`formatdate(st_mtime, usegmt=True)`)**・`etag`を`headers.setdefault`で付与する実装であり、`FileResponse`を返す経路では常に`Last-Modified`が乗る。値の元は`dist/index.html`の**mtime**なので、`deploy.sh`が`vite build`で`dist/`を作り直せば必ず変化する — 本ファイルのポーリングが検知したい「再デプロイ」と一致する。なお`/quest`配下のSPAは`main.tsx`側の別経路(#362)で更新検知しており、本ファイルはスコープ外の`/camera`を補う位置づけである。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:382-411`, `starlette.responses.FileResponse.set_stat_headers`（`starlette==1.6.0`、`MY_HOME_SYSTEM/requirements.txt:96`）, `family-quest/deploy.sh`（参考: [unified_server.md](../../../MY_HOME_SYSTEM/unified_server.md)） |
 
 ## 10. 自己検証結果
 
