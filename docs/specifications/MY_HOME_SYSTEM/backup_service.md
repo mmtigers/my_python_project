@@ -17,7 +17,7 @@
 
 ## 2. ファイルの概要
 
-* データベースのバックアップを実行し、NASへ転送する。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`.env`/`devices.json`等）もNASへコピーする。
+* データベースのバックアップを実行し、NASへ転送する。あわせて `config.BACKUP_FILES` に列挙されたDB以外の設定ファイル（`config.py`/`devices.json`。Issue #649 で `.env` はシークレットの平文コピーを避けるため除外した）もNASへコピーする。復元手順は `docs/runbooks/db_restore.md`。
 * NASへの転送失敗（権限エラー・接続断等）時は、管理者の介入が必要な恒久的障害（ERROR）として扱い、即時通知を行う責務を持つ。
 
 ## 3. 外部依存関係
@@ -223,6 +223,7 @@ graph TD
 * `import time` が宣言されているが、コード内で一度も使用されていない。
 * Issue #289で`send_push`のシグネチャが再設計され、`target="discord"`のみの呼び出しに`user_id`引数が不要になった。これに伴い`_notify_and_log_error`の`send_push`呼び出しからは、以前存在した`user_id=getattr(config, "LINE_USER_ID", None)`(target="discord"であるにも関わらずLINE宛先を渡していた不整合)が撤去されている。
 * NASディレクトリ作成失敗時のエラーハンドリング（54〜58行目）は、意図的に `_notify_and_log_error`（通知）を呼び出さずログ記録のみを行ってから例外を再送出している。これは、外側の `except Exception as e:`（71行目）でも同一エラーが捕捉されて通知が二重送信されるのを防ぐための設計であり、コード中にもその旨のコメントが付されている（過去に二重通知が発生していたための対策）。この一本化された経路を崩さないよう、将来的にこのブロックへ通知呼び出しを追加する際は二重送信に注意する必要がある。
+* **（Issue #649 で変更）** `config.BACKUP_FILES` から `.env` を除外した。以前は全シークレット(SwitchBot/LINE/Discord/Gemini)を NAS の `db_backups/` へ平文でコピーしており、NAS 共有の閲覧権限がそのままシークレットの閲覧権限になっていた。`.env` はリポジトリ外(パスワードマネージャ等)で別管理し、復元手順は `docs/runbooks/db_restore.md` にまとめた(`tests/test_backup_service.py::test_env_file_is_not_in_default_backup_files` が既定値への復活を防ぐ)。
 * Issue #113で修正: 従来 `config.BACKUP_FILES`（`config.py`/`.env`/`devices.json`を列挙）はどのコードからも参照されず、`perform_backup` はDBファイル単体しかNASへ転送していなかった（CLAUDE.mdの説明と実装が食い違う死に設定になっていた）。`_backup_config_files` を新設し、`perform_backup` の転送成功後にこれを呼び出すことで、`config.BACKUP_FILES` に列挙されたファイルが実際にバックアップされるようにした。相対パスのエントリは `config.BASE_DIR` を基準に解決するため、`config.BACKUP_FILES` に新しいファイルを追加する場合は `config.BASE_DIR`（`MY_HOME_SYSTEM/`）からの相対パス、または絶対パスで指定する必要がある。
 * `_backup_config_files` が書き込む先の `nas_backup_dir`（`NAS_PROJECT_ROOT/db_backups`、すなわち `config.DB_BACKUPS_DIR`）は `monitors/nas_monitor.py` の `run_retention_cleanup` によるリテンション削除の対象でもある。以前はこの削除処理が拡張子 `.db` のみを対象としていたため、`_backup_config_files` が生成する設定ファイルのコピー（`.py`/`.json`拡張子、および`.env`はコピー時に拡張子なしのファイル名になる）は一切削除されず無限に蓄積していた（Issue #191、詳細は `docs/specifications/MY_HOME_SYSTEM/nas_monitor.md` の `run_retention_cleanup` を参照）。`nas_monitor.py` 側で `DB_BACKUPS_DIR` 全体を拡張子を問わず削除対象とするよう修正済みのため、`config.BACKUP_FILES` に新しい拡張子のファイルを追加しても、削除対象からは自動的に漏れない。
 * **(Issue #248バグ修正の背景)** `perform_backup`の外側`except Exception`ブロックは、以前はローカルの一時ファイル(`temp_path`)のみを削除しており、`shutil.copy2`によるNAS転送がディスク逼迫・切断等で途中失敗した場合、または転送後の整合性確認（サイズ比較）に失敗した場合に、NAS側へ書きかけ・破損した状態で残った不完全なファイル(`nas_final_path`)がそのまま放置されていた。データ損失は伴わない（正常なバックアップは別途成功時にのみ作成される）が、破損したゴミファイルがNAS上に無期限に蓄積するリスクがあった。現在は`temp_path`と同様に`nas_final_path`の存在確認・削除も行うが、この削除自体の失敗（NAS切断等）が発生した場合は、ログにのみ記録し元のエラー内容（戻り値の`msg`）を上書きしないようにしている。新たに同様の「ローカル/リモート両方に副産物を残しうる」処理を追加する際は、失敗時のクリーンアップ対象がローカル側だけになっていないか確認すること。

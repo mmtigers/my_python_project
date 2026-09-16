@@ -296,7 +296,11 @@ SQLITE_TABLE_SHOPPING: str = "shopping_records"
 SQLITE_TABLE_NAS: str = "nas_records"
 SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"
 
-BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
+# Issue #649: 以前は ".env" も含めていたが、全シークレット(SwitchBot/LINE/Discord/Gemini)を
+# NAS の db_backups/ へ平文でコピーすることになり、NAS 共有の閲覧権限がそのままシークレットの
+# 閲覧権限になっていた。.env はリポジトリ外の秘匿情報として別管理(パスワードマネージャ等)とし、
+# バックアップ対象から外す。復元手順は docs/runbooks/db_restore.md を参照。
+BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]
 
 # デフォルトアセット
 DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")

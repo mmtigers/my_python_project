@@ -73,13 +73,12 @@ class TestBackupFilesConfigCopy:
     def test_additional_files_in_backup_files_are_copied_to_nas(self, monkeypatch):
         for name, content in (
             ("config.py", "# dummy config"),
-            (".env", "SOME_KEY=1"),
             ("devices.json", "{}"),
         ):
             with open(os.path.join(config.BASE_DIR, name), "w", encoding="utf-8") as f:
                 f.write(content)
         monkeypatch.setattr(
-            config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "config.py", ".env", "devices.json"]
+            config, "BACKUP_FILES", [config.SQLITE_DB_PATH, "config.py", "devices.json"]
         )
 
         success, msg, size_mb = backup_service.perform_backup()
@@ -87,11 +86,16 @@ class TestBackupFilesConfigCopy:
         assert success is True
         nas_backup_dir = os.path.join(config.NAS_PROJECT_ROOT, "db_backups")
         backups = os.listdir(nas_backup_dir)
-        # DBファイル1件 + 設定ファイル3件
-        assert len(backups) == 4
+        # DBファイル1件 + 設定ファイル2件
+        assert len(backups) == 3
         assert any(name.startswith("config_") and name.endswith(".py") for name in backups)
-        assert any(name.startswith(".env_") for name in backups)
         assert any(name.startswith("devices_") and name.endswith(".json") for name in backups)
+
+    def test_env_file_is_not_in_default_backup_files(self):
+        """Issue #649: .env(全シークレット)を NAS へ平文コピーしない。既定の BACKUP_FILES に
+        .env が復活していないことを固定する。"""
+        assert ".env" not in config.BACKUP_FILES
+        assert not any(str(entry).endswith(".env") for entry in config.BACKUP_FILES)
 
     def test_missing_additional_file_is_skipped_without_failing_backup(self, monkeypatch):
         """BACKUP_FILESに存在しないファイルが列挙されていても、DBバックアップ自体は成功すること"""
