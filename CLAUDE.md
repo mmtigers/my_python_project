@@ -23,6 +23,12 @@
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
 
+# 依存の追加・変更は requirements.in / requirements-dev.in(直接依存のみ)を編集し、
+# pip-compile で lock(requirements.txt / requirements-dev.txt)を再生成する(手で編集しない。Issue #647)
+pip install pip-tools
+pip-compile --strip-extras --no-emit-index-url --output-file requirements.txt requirements.in
+pip-compile --strip-extras --no-emit-index-url --output-file requirements-dev.txt requirements-dev.in
+
 # 全テストスイート実行 (pytest.iniの asyncio_mode=auto によりasyncテストも自動実行される)
 python -m pytest tests/ -v
 

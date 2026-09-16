@@ -16,6 +16,18 @@ cp devices.json.example devices.json   # カメラ・SwitchBotデバイス等を
 
 `.env`・`devices.json`はいずれもgitignore対象(実際の資格情報・機器情報を含むため)。
 
+`requirements.txt`・`requirements-dev.txt`は`requirements.in`・`requirements-dev.in`(直接依存のみ)から
+`pip-compile`(pip-tools)で生成したlockファイルで、手で編集しない(Issue #647)。依存を追加・変更するときは
+`.in`側を編集して再生成する:
+
+```bash
+.venv/bin/pip install pip-tools
+.venv/bin/pip-compile --strip-extras --no-emit-index-url --output-file requirements.txt requirements.in
+.venv/bin/pip-compile --strip-extras --no-emit-index-url --output-file requirements-dev.txt requirements-dev.in
+```
+
+`DDD/`は本ディレクトリの`.venv`を共用する(`DDD/requirements.txt`は別途`pip install`する)。
+
 ## 起動
 
 ```bash
