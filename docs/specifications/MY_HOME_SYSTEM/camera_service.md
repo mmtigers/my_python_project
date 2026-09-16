@@ -100,7 +100,7 @@
 ### `_RefCountedLock` (クラス、Issue #247で追加)
 
 * **役割**: 参照カウント付きロックの1エントリが表す状態（実際の`threading.Lock`と、現在何人の利用者が参照中かを示す`ref_count`）を保持するだけの単純なコンテナクラス。`_vod_generation_lock`コンテキストマネージャが、使用が終わった(ref_countが0に戻った)エントリのみを安全に辞書から削除できるようにするための土台。**（Issue #439で用途拡大）** 従来は`_vod_generation_locks`（VOD生成の`process_key`単位ロック）専用だったが、現在は`_live_stream_locks`（ライブ配信の`cam_id`単位ロック）でも同じクラスがそのまま再利用されている。
-* 根拠: [クラス定義] (行番号: 65〜70 / 抜粋: "class _RefCountedLock:\n    __slots__ = (\"lock\", \"ref_count\")\n\n    def __init__(self) -> None:\n        self.lock = threading.Lock()\n        self.ref_count = 0")、[`_live_stream_locks`での再利用] (行番号: 101, 111 / 抜粋: "_live_stream_locks: Dict[str, _RefCountedLock] = {}", "entry = _RefCountedLock()")
+* 根拠: [クラス定義] (行番号: 66〜71 / 抜粋: "class _RefCountedLock:\n    __slots__ = (\"lock\", \"ref_count\")\n\n    def __init__(self) -> None:\n        self.lock = threading.Lock()\n        self.ref_count = 0")、[`_live_stream_locks`での再利用] (行番号: 101, 111 / 抜粋: "_live_stream_locks: Dict[str, _RefCountedLock] = {}", "entry = _RefCountedLock()")
 
 * **引数/リクエスト**: なし（`__init__`は引数を取らない）
 * **戻り値/レスポンス**: 該当なし
@@ -110,12 +110,12 @@
 ### `_vod_generation_lock` (コンテキストマネージャ、Issue #247で`_get_vod_generation_lock`を置き換え)
 
 * **役割**: 指定された`process_key`単位で排他制御を行うコンテキストマネージャ。`_vod_generation_locks_guard`で保護しつつ、`_vod_generation_locks`辞書から対応する`_RefCountedLock`を取得（無ければ新規作成）し`ref_count`を1増やしたうえで、実際のロック（`entry.lock`）を獲得して処理ブロックを実行する。処理完了後は`ref_count`を1減らし、0になった（＝他に利用者がいない）場合にのみそのエントリを辞書から削除する。**Issue #247で修正**: 以前の`_get_vod_generation_lock`は`threading.Lock`を返すだけの単純な取得専用関数で、一度登録されたエントリを削除する手段が無く、`カメラID_日付`の組み合わせが増えるたびに無限に蓄積していた。「ロックが未取得状態(`lock.locked() is False`)なら削除する」という単純な方式は、ロック取得元が辞書からロックオブジェクトの参照を取り出した直後・実際に`with`文で獲得する直前の隙間で、別スレッドがその一瞬の未取得状態を見て剪定してしまい、同一`process_key`に対して2つの別々のロックオブジェクトが生成され両方が同時に「取得成功」してしまう（本来このロック機構が防ぐべき、ffmpegの二重起動と全く同じ問題を再発させる）ため採用しなかった。代わりに参照カウントを導入し、そのエントリを実際に使用中の呼び出し（辞書からの取得からブロック完了まで）が1件でも存在する間は、他のスレッドが決して削除できないようにしている。**（Issue #439で同一パターンを流用）** ライブ配信起動の排他制御用に、同じ参照カウント方式を`_live_stream_lock`（後述）としてそのまま複製している。
-* 根拠: [関数定義とDocstring] (行番号: 78〜81 / 抜粋: "def _vod_generation_lock(process_key: str):\n    \"\"\"process_key単位で排他制御を行うコンテキストマネージャ。\n    使用中(参照カウント>0)のエントリは剪定されず、使用を終えた\n    (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 79〜96 / 抜粋: "def _vod_generation_lock(process_key: str):\n    \"\"\"process_key単位で排他制御を行うコンテキストマネージャ。\n    使用中(参照カウント>0)のエントリは剪定されず、使用を終えた\n    (参照カウントが0に戻った)エントリのみ_vod_generation_locksから削除される。\"\"\"")
 * 根拠: [取得・ref_count加算] (行番号: 82〜87 / 抜粋: "with _vod_generation_locks_guard:\n        entry = _vod_generation_locks.get(process_key)\n        if entry is None:\n            entry = _RefCountedLock()\n            _vod_generation_locks[process_key] = entry\n        entry.ref_count += 1")
 * 根拠: [解放・ref_count減算と条件付き削除] (行番号: 88〜95 / 抜粋: "try:\n        with entry.lock:\n            yield\n    finally:\n        with _vod_generation_locks_guard:\n            entry.ref_count -= 1\n            if entry.ref_count == 0 and _vod_generation_locks.get(process_key) is entry:\n                del _vod_generation_locks[process_key]")
 
 * **引数/リクエスト**: `process_key: str`
-* 根拠: [引数定義] (行番号: 78 / 抜粋: "def _vod_generation_lock(process_key: str):")
+* 根拠: [引数定義] (行番号: 79 / 抜粋: "def _vod_generation_lock(process_key: str):")
 
 
 * **戻り値/レスポンス**: なし（`@contextlib.contextmanager`によるジェネレータベースのコンテキストマネージャ。`with`文のブロック内で保護対象の処理を実行する）
@@ -138,7 +138,7 @@
 
 
 * **引数/リクエスト**: `cam_id: str`
-* 根拠: [引数定義] (行番号: 106 / 抜粋: "def _live_stream_lock(cam_id: str):")
+* 根拠: [引数定義] (行番号: 107 / 抜粋: "def _live_stream_lock(cam_id: str):")
 
 
 * **戻り値/レスポンス**: なし（`_vod_generation_lock`と同様のジェネレータベースのコンテキストマネージャ）
@@ -159,11 +159,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 153 / 抜粋: "def _prune_finished_vod_processes() -> None:")
+* 根拠: [関数定義] (行番号: 154 / 抜粋: "def _prune_finished_vod_processes() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数定義] (行番号: 153 / 抜粋: "def _prune_finished_vod_processes() -> None:")
+* 根拠: [関数定義] (行番号: 154 / 抜粋: "def _prune_finished_vod_processes() -> None:")
 
 
 * **副作用**: `_state_lock`保持下で`_active_vod_processes`辞書から完了済みエントリを削除する。
@@ -180,7 +180,7 @@
 
 
 * **引数/リクエスト**: `url: str`
-* 根拠: [引数定義] (行番号: 163 / 抜粋: "def _mask_rtsp_url_for_log(url: str) -> str:")
+* 根拠: [引数定義] (行番号: 164 / 抜粋: "def _mask_rtsp_url_for_log(url: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（マスク済みURL。パース処理中に例外が発生した場合は固定文字列`"***"`）
@@ -197,11 +197,11 @@
 ### `init_output_dir`
 
 * **役割**: `base_dir/camera_id` のディレクトリを作成（既存の場合はそのまま）し、そのパスを返す。
-* 根拠: [関数定義] (行番号: 180〜183 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
+* 根拠: [関数定義] (行番号: 181〜184 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
 
 
 * **引数/リクエスト**: `base_dir: str`, `camera_id: str`
-* 根拠: [引数定義] (行番号: 180 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
+* 根拠: [引数定義] (行番号: 181 / 抜粋: "def init_output_dir(base_dir: str, camera_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（作成済みディレクトリの絶対/相対パス）
@@ -222,7 +222,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 185 / 抜粋: "def find_wsdl_path() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 186 / 抜粋: "def find_wsdl_path() -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]`（見つかったWSDLディレクトリのパス、見つからない場合は`None`）
@@ -236,11 +236,11 @@
 ### `get_rtsp_url`
 
 * **役割**: カメラのRTSP URLを取得する。キャッシュ(`_rtsp_cache`)、設定内の直接指定(`rtsp_url`)、ONVIF経由の動的取得の順に解決を試み、ONVIF取得時は認証情報をURLエンコードして埋め込んだURIを構築する。**（Issue #439で修正）** `_rtsp_cache`への読み書きはいずれも`_state_lock`を保持した状態で行うよう修正された。ただし低速なONVIFネットワーク通信自体（`ONVIFCamera`接続からストリームURI取得まで）は`_state_lock`を保持したままでは行わず、通信完了後にロックを取得してキャッシュへ書き込む設計になっている（ロック保持中に外部通信でブロックし他スレッドを長時間待たせないため）。
-* 根拠: [関数定義] (行番号: 197〜238 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")、[キャッシュ読み取り] (行番号: 199〜202 / 抜粋: "with _state_lock:\n        cached = _rtsp_cache.get(cam_id)\n    if cached:\n        return cached")、[ONVIF通信外でのキャッシュ書込] (行番号: 233〜235 / 抜粋: "with _state_lock:\n            _rtsp_cache[cam_id] = auth_uri\n        return auth_uri")
+* 根拠: [関数定義] (行番号: 198〜239 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")、[キャッシュ読み取り] (行番号: 199〜202 / 抜粋: "with _state_lock:\n        cached = _rtsp_cache.get(cam_id)\n    if cached:\n        return cached")、[ONVIF通信外でのキャッシュ書込] (行番号: 233〜235 / 抜粋: "with _state_lock:\n            _rtsp_cache[cam_id] = auth_uri\n        return auth_uri")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`（カメラ設定辞書。`id`, `ip`, `user`, `pass`, `port`, `rtsp_url`等のキーを想定）
-* 根拠: [引数定義] (行番号: 197 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")
+* 根拠: [引数定義] (行番号: 198 / 抜粋: "def get_rtsp_url(cam_conf: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（RTSP URL文字列。キャッシュヒット時・直接指定時はそのまま、ONVIF取得時は認証情報埋め込み済みURI）
@@ -258,11 +258,11 @@
 ### `start_hls_stream`（Issue #439で薄いラッパーに分割）
 
 * **役割**: 指定カメラのライブHLSストリーミング起動を、`cam_id`単位の`_live_stream_lock`で排他制御しつつ、実際の処理を担う内部関数`_start_hls_stream_locked`へ委譲する薄いラッパー。**（Issue #439で修正）** 以前は本関数自体が「実行中チェック→ffmpeg起動・登録」の全ロジックを直接持っており、同一`cam_id`への同時リクエストで両方が「実行中でない」と判定しffmpegを二重起動しうる check-then-act 競合があった。現在は`_generate_record_playlist`と同じパターンで、ロック取得と実処理を分離している。
-* 根拠: [関数定義] (行番号: 240〜245 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:\n    cam_id = cam_conf['id']\n    # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が\n    # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。\n    with _live_stream_lock(cam_id):\n        return _start_hls_stream_locked(cam_conf, cam_id)")
+* 根拠: [関数定義] (行番号: 241〜246 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:\n    cam_id = cam_conf['id']\n    # #439: 同一cam_idへの同時リクエストで「実行中でないチェック→ffmpeg起動・登録」が\n    # 競合しないよう、cam_id単位でこの一連の処理全体を排他する。\n    with _live_stream_lock(cam_id):\n        return _start_hls_stream_locked(cam_conf, cam_id)")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`
-* 根拠: [引数定義] (行番号: 240 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:")
+* 根拠: [引数定義] (行番号: 241 / 抜粋: "def start_hls_stream(cam_conf: Dict[str, Any]) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（`_start_hls_stream_locked`の戻り値をそのまま返す）
@@ -279,11 +279,11 @@
 ### `_start_hls_stream_locked`（Issue #439で`start_hls_stream`から分離）
 
 * **役割**: 指定カメラのライブHLSストリーミングをffmpegプロセスとして起動する実処理。既に同一カメラIDのプロセスが実行中であれば新規起動せず既存のプレイリストパスを返す。ffmpegログファイルは`chmod 0o600`（所有者のみ読み書き可）で作成し、起動バナー経由の認証情報露出を防ぐため`-hide_banner`/`-loglevel error`オプションを付与する。呼び出し元`start_hls_stream`が取得した`cam_id`単位のロック内で実行されることを前提とする。
-* 根拠: [関数定義] (行番号: 248〜300 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
+* 根拠: [関数定義] (行番号: 249〜301 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
 
 
 * **引数/リクエスト**: `cam_conf: Dict[str, Any]`, `cam_id: str`
-* 根拠: [引数定義] (行番号: 248 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
+* 根拠: [引数定義] (行番号: 249 / 抜粋: "def _start_hls_stream_locked(cam_conf: Dict[str, Any], cam_id: str) -> str:")
 
 
 * **戻り値/レスポンス**: `str`（プレイリストファイルのパス。RTSP URL取得に失敗した場合は空文字列`""`）
@@ -325,7 +325,7 @@
 ### `_playlist_is_complete`（Issue #562で追加）
 
 * **役割**: 指定されたm3u8プレイリストファイルの中身に、ffmpegの`-hls_playlist_type vod`が処理完走時にのみ末尾へ書き込む`#EXT-X-ENDLIST`タグが含まれているかどうかを判定する。ファイルを開けない場合（`OSError`）は`False`を返す。`_generate_record_playlist_locked`が過去日付の既存プレイリストをキャッシュとして信頼してよいかどうかの判定に用いられる。
-* 根拠: [関数定義とDocstring] (行番号: 325〜329 / 抜粋: "def _playlist_is_complete(path: str) -> bool:\n    \"\"\"m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ\n    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。\n    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは\n    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 325〜334 / 抜粋: "def _playlist_is_complete(path: str) -> bool:\n    \"\"\"m3u8ファイルにffmpegの`-hls_playlist_type vod`が処理完走時のみ末尾へ\n    書き込む`#EXT-X-ENDLIST`タグが存在するかを確認する(#562)。\n    シャットダウン時のterminate等で生成途中のまま終わったプレイリストは\n    このタグを持たないため、過去日付キャッシュとして返してよいかの判定に使う。\"\"\"")
 
 
 * **引数/リクエスト**: `path: str`（判定対象のm3u8ファイルパス）
@@ -408,7 +408,7 @@
 ### `get_camera_config_or_none`（Issue #551で新規追加）
 
 * **役割**: `config.CAMERAS`（`devices.json`からロードされたカメラ定義一覧）から`camera_id`に一致する設定辞書を検索して返す。見つからない場合は`None`を返す（例外は送出しない）。ルーター側の`camera_router.py`に5箇所重複していた`next((c for c in config.CAMERAS if c["id"] == camera_id), None)` + `HTTPException(404)`のうち、検索部分だけを本関数へ切り出し、404送出自体はルーター側の新設ヘルパー`_require_camera`が担うように責務分割した。
-* 根拠: [関数定義とDocstring] (行番号: 486〜490 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
+* 根拠: [関数定義とDocstring] (行番号: 486〜491 / 抜粋: "def get_camera_config_or_none(camera_id: str) -> Optional[Dict[str, Any]]:\n    \"\"\"config.CAMERAS(devices.jsonからロードされたカメラ定義一覧)からcamera_idに\n    一致する設定を返す。見つからない場合はNoneを返す(#551: camera_router側に\n    重複していた同一のlookup+404送出を、ルーターの`_require_camera`ヘルパーへ\n    一元化するために切り出した)。\"\"\"")
 
 
 * **引数/リクエスト**: `camera_id: str`
@@ -607,7 +607,7 @@ graph TD
 | 中 | `core/logger.py` | `setup_logging`によるロガー設定（出力先、フォーマット、ログレベル）を確認するため。 | 根拠: [import文] (行番号: 11 / 抜粋: "from core.logger import setup_logging") |
 | 中 | `routers/camera_router.py` | 本モジュールの各関数（`start_hls_stream`, `get_record_start_offset`, `generate_record_playlist`, `set_camera_enabled`, `get_camera_config_or_none`（Issue #551）, `HLS_LIVE_DIR`, `HLS_VOD_DIR`）がどのようなHTTPエンドポイントから、どのようなエラーハンドリングと共に呼び出されているかを確認するため。 | 根拠: [呼び出し元ファイル。本ファイル単体からは不明] |
 | 低 | `onvif`ライブラリ（サードパーティパッケージ） | `ONVIFCamera`クラスの`GetProfiles`/`GetStreamUri`等のAPI仕様を確認するため。 | 根拠: [try-exceptインポート] (行番号: 14〜17 / 抜粋: "from onvif import ONVIFCamera") |
-| 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 488〜515 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
+| 低 | `MY_HOME_SYSTEM/tests/test_camera_service_unit.py` | URLマスクの空パスワード耐性、VODプロセスの剪定、`devices.json`のアトミック書込、ログファイルハンドルのclose、同時リクエストでのffmpeg単一起動など、本ファイルの期待仕様が単体テストとして記述されているため、実装意図の確認に有用。 | 根拠: [set_camera_enabled関数] (行番号: 494〜521 / 抜粋: "def set_camera_enabled(camera_id: str, enabled: bool) -> bool:") |
 
 ## 8. 保守上の注意点
 

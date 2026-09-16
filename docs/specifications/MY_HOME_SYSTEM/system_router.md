@@ -53,7 +53,7 @@
 ### `manual_backup`
 
 * **役割**: `/backup` パスに対するPOSTリクエストを受け取り、手動バックアップ処理をトリガーする。**（Issue #408で修正）** 以前は`async def`の中で同期的な`perform_backup()`（sqlite backup + NASへの`shutil.copy2`）を直接呼んでいたためイベントループ全体が止まり、`/webhook/switchbot`や`/callback/line`を含む全リクエストが数秒〜数十秒停止していた。現在は通常の`def`として定義し、FastAPIがスレッドプール上で実行する。
-* 根拠: [manual_backup] (行番号: 12-27 / 抜粋: "def manual_backup() -> Dict[str, Any]:")
+* 根拠: [manual_backup] (行番号: 13-27 / 抜粋: "def manual_backup() -> Dict[str, Any]:")
 
 
 * **引数/リクエスト**: なし

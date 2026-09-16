@@ -75,7 +75,7 @@
 ### `_vectorized_parse_timestamps_to_jst` (関数、Issue #456でベクトル化)
 
 * **役割**: タイムスタンプ文字列の列をJSTのtz-aware列へ一括変換する。**[修正済み・Issue #456]** 以前は`_parse_timestamp_to_jst`/`_parse_timestamp_to_jst_coerce`という2つのヘルパーを`.apply()`で1行ずつ呼び出しており、大量データで処理速度が劣化する非ベクトル化実装だった。列の末尾がtzオフセット(`+09:00`等)または`Z`かどうかを`_TZ_OFFSET_SUFFIX_PATTERN`の正規表現で判定し、naive/aware(オフセット付き)の2群に分割した上で、群ごとに`pd.to_datetime`を一括適用する。naive群は保存規約(`core.utils.get_now_iso`)に合わせて「元からJSTで記録されている」とみなして`tz_localize("Asia/Tokyo")`し、aware群はそのオフセットを尊重して`utc=True`でパースしてから`tz_convert("Asia/Tokyo")`する(M-1-4: この2系統を`pd.to_datetime`へ一括で(`utc=True`等)渡すとnaive値を誤ってUTCとみなしてしまい9時間ズレが再発するため、文字列表現の時点でマスク分割している)。両群とも`errors="coerce"`のため、不正な値は当該行のみ`pd.NaT`になる(L-L3 #410と同じ挙動を維持)。
-* 根拠: 関数Docstring・実装 (行番号: 43〜74 / 抜粋: "def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:")
+* 根拠: 関数Docstring・実装 (行番号: 46〜74 / 抜粋: "def _vectorized_parse_timestamps_to_jst(series: pd.Series) -> pd.Series:")
 
 
 * **引数/リクエスト**: `series` (`pd.Series`): タイムスタンプ文字列の列
@@ -112,7 +112,7 @@
 
 
 * **エラーハンドリング**: **（Issue #410 L-L3で修正、#456でベクトル化）** 内部で呼び出す`_vectorized_parse_timestamps_to_jst`が不正な値を`pd.NaT`へ丸めるため、1行の不正なタイムスタンプで全行が失われることはない。
-* 根拠: 該当関数内に `try-except` なし、`_vectorized_parse_timestamps_to_jst`への委譲 (行番号: 77〜85 / 抜粋: "def process_dataframe(")
+* 根拠: 該当関数内に `try-except` なし、`_vectorized_parse_timestamps_to_jst`への委譲 (行番号: 77〜86 / 抜粋: "def process_dataframe(")
 
 
 
@@ -123,7 +123,7 @@
 
 
 * **引数/リクエスト**: `df` (`pd.DataFrame`): 処理対象のデータフレーム
-* 根拠: `df: pd.DataFrame` (行番号: 69 / 抜粋: "def apply_friendly_names(df: pd.DataFrame)")
+* 根拠: `df: pd.DataFrame` (行番号: 88 / 抜粋: "def apply_friendly_names(df: pd.DataFrame)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (マッピング適用後のデータフレーム)
@@ -169,7 +169,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def load_nas_status() -> Optional[pd.Series]:` (行番号: 145 / 抜粋: "def load_nas_status()")
+* 根拠: `def load_nas_status() -> Optional[pd.Series]:` (行番号: 164 / 抜粋: "def load_nas_status()")
 
 
 * **戻り値/レスポンス**: `Optional[pd.Series]` (最新の1件。存在しない場合は `None`)
@@ -215,7 +215,7 @@
 
 
 * **引数/リクエスト**: `limit` (`int`, デフォルト `5000`): 取得件数の上限。
-* 根拠: `limit: int = 5000` (行番号: 167 / 抜粋: "def load_sensor_data(limit: int = 5000)")
+* 根拠: `limit: int = 5000` (行番号: 189 / 抜粋: "def load_sensor_data(limit: int = 5000)")
 
 
 * **戻り値/レスポンス**: `pd.DataFrame` (統合されたセンサーデータのデータフレーム)
@@ -227,7 +227,7 @@
 
 
 * **エラーハンドリング**: 内部で呼び出される `load_data_from_db` に依存。
-* 根拠: 該当関数内に独自の `try-except` なし (行番号: 167 / 抜粋: "def load_sensor_data(")
+* 根拠: 該当関数内に独自の `try-except` なし (行番号: 189 / 抜粋: "def load_sensor_data(")
 
 
 
@@ -238,7 +238,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 238 / 抜粋: "def calculate_monthly_cost_cumulative()")
+* 根拠: `def calculate_monthly_cost_cumulative() -> int:` (行番号: 265 / 抜粋: "def calculate_monthly_cost_cumulative()")
 
 
 * **戻り値/レスポンス**: `int` (計算された電気代概算)
@@ -356,7 +356,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 405 / 抜粋: "def get_disk_usage()")
+* 根拠: `def get_disk_usage() -> Optional[Dict[str, float]]:` (行番号: 424 / 抜粋: "def get_disk_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (GB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -379,7 +379,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 419 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 438 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)

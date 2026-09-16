@@ -51,11 +51,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 9 / 抜粋: "class MasterUser(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 16 / 抜粋: "class MasterUser(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 9〜17 / 抜粋: "class MasterUser(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 16〜26 / 抜粋: "class MasterUser(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`level`/`exp`/`gold` は Pydantic の `Field(ge=...)` により、インスタンス化時に下限を下回る値(0以下のlevel、負のexp/gold)が渡されると `pydantic.ValidationError` を送出する。
@@ -66,7 +66,7 @@
 ### `MasterQuest`
 
 * **役割**: Domain Modelsとしてクエスト情報を定義する。
-* 根拠: クラス名と継承元 (行番号: 19 / 抜粋: "class MasterQuest(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 28 / 抜粋: "class MasterQuest(BaseModel):")
 * **（Issue #409 で追加）** `id`/`exp`/`gold` に `Field(ge=...)`、`type` は `Literal['daily','special','infinite','limited','random']`(**（Issue #529 で修正）** 以前は `'limited'`/`'random'` を許容せず、サービス層・フロントエンド・仕様書が対応済みのタイプを `quest_data.py` に書くと `sync_master_data` が 500 になっていた。`chance` は `Field(default=1.0, ge=0.0, le=1.0)`)、`reset_period` は `Literal['daily','weekly','monthly']`、`days` は `^[0-6](,[0-6])*$` を検証する。**（2026-09-06 品質監査で修正）** 本モデルが受け付ける `'monthly'` は、以前は `services/quest_service.py` の `is_within_reset_period` に対応する分岐が無く常に `False`(未完了扱い)となっていたが、同関数に `'monthly'`(JSTの暦月一致)分岐が追加され、3値すべてがサービス側でも判定されるようになった（[quest_service.md](./quest_service.md) の `QuestService.is_within_reset_period` を参照）。`MasterReward.cost_gold` は `ge=0`。リクエストモデルの ID 系は `1〜2**63-1`、文字列は `max_length` 付き。未使用だった `UserAction`/`InventoryItem` は削除。
 * 根拠: `_SQLITE_INT_MAX = 2**63 - 1`、`_DAY_OF_WEEK_RE`、`def _validate_days` (models/quest.py)
 * 根拠: `reset_period: Optional[Literal['daily', 'weekly', 'monthly']] = 'daily'` (行番号: 47)
@@ -77,22 +77,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 19 / 抜粋: "class MasterQuest(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 28 / 抜粋: "class MasterQuest(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 19〜35 / 抜粋: "class MasterQuest(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 28〜60 / 抜粋: "class MasterQuest(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 19〜35 / 抜粋: "class MasterQuest(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 28〜60 / 抜粋: "class MasterQuest(BaseModel):")
 
 
 
 ### `MasterReward`
 
 * **役割**: Domain Modelsとして報酬情報を定義する。
-* 根拠: クラス名と継承元 (行番号: 37 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 62 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `id` (int), `title` (str), `category` (str), `cost_gold` (int), `icon_key` (str), `desc` (Optional[str], 初期値: None), `target` (str, 初期値: "all")
@@ -100,15 +100,15 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 37 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 62 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 37〜44 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 62〜69 / 抜粋: "class MasterReward(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 37〜44 / 抜粋: "class MasterReward(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 62〜69 / 抜粋: "class MasterReward(BaseModel):")
 
 
 
@@ -122,7 +122,7 @@
 ### `QuestAction`
 
 * **役割**: Request Modelsとしてクエストに関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 50 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 73 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `quest_id` (int)
@@ -130,22 +130,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 50 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 73 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 50〜52 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 73〜75 / 抜粋: "class QuestAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 50〜52 / 抜粋: "class QuestAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 73〜75 / 抜粋: "class QuestAction(BaseModel):")
 
 
 
 ### `RewardAction`
 
 * **役割**: Request Modelsとして報酬に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 54 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 77 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str), `reward_id` (int)
@@ -153,22 +153,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 54 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 77 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 54〜56 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 77〜79 / 抜粋: "class RewardAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 54〜56 / 抜粋: "class RewardAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 77〜79 / 抜粋: "class RewardAction(BaseModel):")
 
 
 
 ### `HistoryAction`
 
 * **役割**: Request Modelsとして履歴に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 77 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 81 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `history_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、`QuestAction`/`RewardAction`/`ApproveAction` と同じ `min_length=1, max_length=64` の制約が付与された。
@@ -176,11 +176,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 58 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 81 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 58〜60 / 抜粋: "class HistoryAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 81〜83 / 抜粋: "class HistoryAction(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`history_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。
@@ -191,7 +191,7 @@
 ### `ApproveAction`
 
 * **役割**: Request Modelsとして承認に関するアクションリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 62 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 85 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `approver_id` (str), `history_id` (int)
@@ -199,15 +199,15 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 62 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 85 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 62〜64 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 85〜90 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 62〜64 / 抜粋: "class ApproveAction(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 85〜90 / 抜粋: "class ApproveAction(BaseModel):")
 
 
 
@@ -237,7 +237,7 @@
 ### `UpdateUserAction`
 
 * **役割**: Request Modelsとしてユーザー情報更新のアクションリクエストを定義する。**（Issue #372で追加）** `avatar_url`に`field_validator`を持ち、`routers/quest_router.py`の`upload_image`が生成する`/uploads/<uuid4>.<jpg|jpeg|png|gif|webp>`形式（`_UPLOADED_AVATAR_RE`）か、パス区切り(`/`, `\\`)・HTML特殊文字(`<`, `>`, `"`, `'`)を含まず先頭が`.`でない16文字以下の短い文字列（絵文字アバター、`_EMOJI_AVATAR_MAX_LEN`）のみを受け付ける。それ以外は`ValueError`を送出し、FastAPIにより422となる。任意の`/uploads/`パスを許すと、他ユーザーのアップロード画像を自分のアバターに指定してから絵文字に戻す操作で、そのファイルが孤立扱いになり削除される経路が残るため。
-* 根拠: クラス名と継承元 (行番号: 82 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 86〜98)
+* 根拠: クラス名と継承元 (行番号: 111 / 抜粋: "class UpdateUserAction(BaseModel):")、`_UPLOADED_AVATAR_RE = re.compile(` (行番号: 75〜77)、`def _validate_avatar_url(cls, value: str) -> str:` (行番号: 86〜98)
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `avatar_url` (str、上記バリデータ付き)。**（2026-09-06 品質監査で修正）** 以前 `user_id` は境界なしの `str` だったが、他のリクエストモデルと同じ `min_length=1, max_length=64` の制約が付与された。
@@ -245,11 +245,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 82 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 111 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 82〜98 / 抜粋: "class UpdateUserAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 111〜127 / 抜粋: "class UpdateUserAction(BaseModel):")
 
 
 * **エラーハンドリング**: `avatar_url`が許容形式でない場合、バリデータが`ValueError`を送出する（FastAPIでは422 Unprocessable Entity）
@@ -260,7 +260,7 @@
 ### `SoundTestRequest`
 
 * **役割**: Request Modelsとしてサウンドテスト用のリクエストを定義する。
-* 根拠: クラス名と継承元 (行番号: 70 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 129 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `sound_key` (str)
@@ -268,15 +268,15 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 70 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 129 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 70〜71 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 129〜130 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 70〜71 / 抜粋: "class SoundTestRequest(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 129〜130 / 抜粋: "class SoundTestRequest(BaseModel):")
 
 
 
@@ -291,22 +291,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 74 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 133 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 74〜76 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 133〜135 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 74〜76 / 抜粋: "class SyncResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 133〜135 / 抜粋: "class SyncResponse(BaseModel):")
 
 
 
 ### `CompleteResponse`
 
 * **役割**: Response Modelsとして完了時のレスポンスを定義する。`/api/quest/complete`と`/api/quest/approve`の両エンドポイントで共有される。
-* 根拠: クラス名と継承元 (行番号: 81 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 137 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `leveledUp` (bool), `newLevel` (int), `earnedGold` (int), `earnedExp` (int), `earnedMedals` (int, 初期値: 0), `message` (Optional[str], 初期値: None)、**(Issue #238で追加)** `partnerUserId` (Optional[str], 初期値: None), `partnerLeveledUp` (bool, 初期値: False), `partnerNewLevel` (Optional[int], 初期値: None), `partnerEarnedMedals` (int, 初期値: 0)。追加された4フィールドは、兄妹連携クエストのカスケード承認(`quest_service.QuestService._process_approve_quest_locked`)時のみ相方(自分でタップしなかった方の子ども)の情報で埋まり、それ以外(通常の完了報告・単独クエストの承認)では常に既定値のままとなる。
@@ -314,22 +314,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 78 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 137 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 78〜85 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 137〜151 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 78〜85 / 抜粋: "class CompleteResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 137〜151 / 抜粋: "class CompleteResponse(BaseModel):")
 
 
 
 ### `CancelResponse`
 
 * **役割**: Response Modelsとしてキャンセル時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 87 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 153 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str)
@@ -337,15 +337,15 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 87 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 153 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 87〜88 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 153〜154 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 87〜88 / 抜粋: "class CancelResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 153〜154 / 抜粋: "class CancelResponse(BaseModel):")
 
 
 
@@ -375,7 +375,7 @@
 ### `PurchaseResponse`
 
 * **役割**: Response Modelsとして購入時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 90 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 161 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `newGold` (int)
@@ -383,15 +383,15 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 90 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 161 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 90〜92 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 161〜163 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 90〜92 / 抜粋: "class PurchaseResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 161〜163 / 抜粋: "class PurchaseResponse(BaseModel):")
 
 
 
@@ -405,7 +405,7 @@
 ### `UseItemResponse`
 
 * **役割**: Inventory Modelsとしてアイテム使用時のレスポンスを定義する。
-* 根拠: クラス名と継承元 (行番号: 105 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: クラス名と継承元 (行番号: 166 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **引数/リクエスト (フィールド)**: `status` (str), `message` (str)
@@ -413,22 +413,22 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 105 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 166 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 105〜107 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 166〜168 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 * **エラーハンドリング**: なし
-* 根拠: クラス内に例外処理の記述がないため (行番号: 105〜107 / 抜粋: "class UseItemResponse(BaseModel):")
+* 根拠: クラス内に例外処理の記述がないため (行番号: 166〜168 / 抜粋: "class UseItemResponse(BaseModel):")
 
 
 
 ### `UseItemAction`
 
 * **役割**: Inventory Modelsとしてアイテム使用時のアクションリクエストを定義する。**（2026-09-06 品質監査で修正）** Issue #409 (Q-L4) で他のリクエストモデルに付与された ID 上限(`_SQLITE_INT_MAX` = `2**63-1`)が本モデルだけ漏れており、`inventory_id=2**64` を渡すと `sqlite3` の `OverflowError` で500になっていた（`/quest/cancel` 等は422）ため、`user_id`/`inventory_id` の両方に他モデルと同じ境界が付与された。
-* 根拠: クラス名と継承元 (行番号: 153 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 154〜155 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
+* 根拠: クラス名と継承元 (行番号: 170 / 抜粋: "class UseItemAction(BaseModel):")、コメント (行番号: 154〜155 / 抜粋: "Q-L4 の上限(2**63-1)が本モデルだけ漏れており、inventory_id=2**64 で\n    # sqlite3 の OverflowError → 500 になっていた(/quest/cancel 等は 422)。")
 
 
 * **引数/リクエスト (フィールド)**: `user_id` (str, `Field(min_length=1, max_length=64)`), `inventory_id` (int, `Field(ge=1, le=_SQLITE_INT_MAX)`)
@@ -436,11 +436,11 @@
 
 
 * **戻り値/レスポンス**: 該当なし
-* 根拠: データモデル定義のため (行番号: 153 / 抜粋: "class UseItemAction(BaseModel):")
+* 根拠: データモデル定義のため (行番号: 170 / 抜粋: "class UseItemAction(BaseModel):")
 
 
 * **副作用**: なし
-* 根拠: 処理ロジックを含まないため (行番号: 153〜157 / 抜粋: "class UseItemAction(BaseModel):")
+* 根拠: 処理ロジックを含まないため (行番号: 170〜174 / 抜粋: "class UseItemAction(BaseModel):")
 
 
 * **エラーハンドリング**: 明示的な例外処理の記述はないが、`user_id` が空文字または65文字以上、`inventory_id` が1未満または `2**63-1` 超の場合は Pydantic が `ValidationError` を送出する（FastAPIでは422）。

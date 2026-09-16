@@ -50,34 +50,34 @@
 
 
 * **引数/リクエスト**: なし（クラス定義自体の引数はなし）
-* 根拠: `LogAnalyzer` (行番号: 15 / 抜粋: "class LogAnalyzer:")
+* 根拠: `LogAnalyzer` (行番号: 14 / 抜粋: "class LogAnalyzer:")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `LogAnalyzer` (行番号: 15 / 抜粋: "class LogAnalyzer:")
+* 根拠: `LogAnalyzer` (行番号: 14 / 抜粋: "class LogAnalyzer:")
 
 
 * **副作用**: なし
-* 根拠: `LogAnalyzer` (行番号: 15 / 抜粋: "class LogAnalyzer:")
+* 根拠: `LogAnalyzer` (行番号: 14 / 抜粋: "class LogAnalyzer:")
 
 
 * **エラーハンドリング**: なし
-* 根拠: `LogAnalyzer` (行番号: 15 / 抜粋: "class LogAnalyzer:")
+* 根拠: `LogAnalyzer` (行番号: 14 / 抜粋: "class LogAnalyzer:")
 
 
 
 ### `__init__`
 
 * **役割**: インスタンス変数の初期化、基準日時の算出、外部設定の取り込みを行う。
-* 根拠: `__init__` (行番号: 39-47 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 38-46 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **引数/リクエスト**: `days_back: int = 7` (さかのぼる日数)
-* 根拠: `__init__` (行番号: 39 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 38 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `__init__` (行番号: 39 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 38 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 * **副作用**: `self.days_back`, `self.log_dir`, `self.report_data`, `self.now`, `self.start_date`, `self.start_date_str` の状態を変更する。
@@ -85,22 +85,22 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `__init__` (行番号: 39-47 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
+* 根拠: `__init__` (行番号: 38-46 / 抜粋: "def __init__(self, days_back: int = 7) -> None:")
 
 
 
 ### `_is_recent_file`
 
 * **役割**: 指定されたファイルの更新日時が基準日時（`self.start_date`）以降であるかを判定する。
-* 根拠: `_is_recent_file` (行番号: 49-60 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 48-59 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **引数/リクエスト**: `filepath: str` (チェック対象のファイルパス)
-* 根拠: `_is_recent_file` (行番号: 49 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 48 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **戻り値/レスポンス**: `bool` (新しい場合はTrue、存在しない・古い・エラーの場合はFalse)
-* 根拠: `_is_recent_file` (行番号: 49 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
+* 根拠: `_is_recent_file` (行番号: 48 / 抜粋: "def _is_recent_file(self, filepath: str) -> bool:")
 
 
 * **副作用**: ファイルシステムへのアクセス（存在確認、更新日時取得）。
@@ -118,11 +118,11 @@
 * 根拠: (行番号: 88〜89 / 抜粋: "if dt > self.now + datetime.timedelta(days=1):\n                    dt = dt.replace(year=self.now.year - 1)")
 
 * **役割**: ログの行頭文字列からタイムスタンプを抽出し、`datetime`オブジェクトに変換する。
-* 根拠: `_parse_timestamp` (行番号: 62-92 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
+* 根拠: `_parse_timestamp` (行番号: 61-94 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 
 
 * **引数/リクエスト**: `line: str` (ログの1行)
-* 根拠: `_parse_timestamp` (行番号: 62 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
+* 根拠: `_parse_timestamp` (行番号: 61 / 抜粋: "def _parse_timestamp(self, line: str) -> Optional[datetime.datetime]:")
 
 
 * **戻り値/レスポンス**: `Optional[datetime.datetime]` (解析成功時は日時オブジェクト、失敗時はNone)
@@ -141,17 +141,17 @@
 ### `_analyze_file`
 
 * **役割**: ファイルを1行ずつ読み込み、無視パターンを除外した上でタイムスタンプを評価し、エラーまたは警告キーワードが含まれる行をカウント・集計する。
-* 根拠: `_analyze_file` (行番号: 94-133 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 96-144 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 * **（Issue #381 で修正）** タイムスタンプの無い行（トレースバック継続行）は、直前にパースできたタイムスタンプ `last_dt` を引き継いで `start_date` フィルタを適用する。以前はこれらの行が必ずカウントされ、1回トレースバックが出るとその日 logrotate されるまで毎時「異常」が立ち続けていた。
 * 根拠: `last_dt = None` (行番号: 111)、`effective_dt = dt if dt is not None else last_dt` (行番号: 120〜122)
 
 
 * **引数/リクエスト**: `filepath: str` (解析対象のファイルパス)
-* 根拠: `_analyze_file` (行番号: 94 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 96 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_analyze_file` (行番号: 94 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
+* 根拠: `_analyze_file` (行番号: 96 / 抜粋: "def _analyze_file(self, filepath: str) -> None:")
 
 
 * **副作用**: `self.report_data` の更新、ファイル読み込み、`logger` を用いたログ出力。
@@ -166,15 +166,15 @@
 ### `run_analysis`
 
 * **役割**: 対象となる全てのログファイルを取得し、直近の更新があるファイルに対して解析処理を順次実行した後、レポート送信処理を呼び出す。
-* 根拠: `run_analysis` (行番号: 135-153 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 146-164 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `run_analysis` (行番号: 135 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 146 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `run_analysis` (行番号: 135 / 抜粋: "def run_analysis(self) -> None:")
+* 根拠: `run_analysis` (行番号: 146 / 抜粋: "def run_analysis(self) -> None:")
 
 
 * **副作用**: 外部ファイル一覧の取得、`logger` を用いたログ出力。
@@ -189,15 +189,15 @@
 ### `_send_report`
 
 * **役割**: 集計結果(`self.report_data`)をもとにMarkdown形式のレポートメッセージを組み立て、外部通知モジュールを呼び出す。
-* 根拠: `_send_report` (行番号: 155-190 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 166-201 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **引数/リクエスト**: なし（`self`のみ）
-* 根拠: `_send_report` (行番号: 155 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 166 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `_send_report` (行番号: 155 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report` (行番号: 166 / 抜粋: "def _send_report(self) -> None:")
 
 
 * **副作用**: `common.send_push` による外部システムへの通信。
@@ -205,7 +205,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `_send_report`内部処理 (行番号: 155-190 / 抜粋: "def _send_report(self) -> None:")
+* 根拠: `_send_report`内部処理 (行番号: 166-201 / 抜粋: "def _send_report(self) -> None:")
 
 
 

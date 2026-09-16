@@ -105,7 +105,7 @@
 
 
 * **引数/リクエスト**: `mac: str`, `name: str`, `location: str`, `timeout: int`
-* 根拠: `[send_inactive_notification]` (行番号: 57 / 抜粋: "def send_inactive_notification")
+* 根拠: `[send_inactive_notification]` (行番号: 103 / 抜粋: "def send_inactive_notification")
 
 
 * **戻り値/レスポンス**: `None`
@@ -151,11 +151,11 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 * **副作用**: グローバル変数 `MOTION_TASKS` に保持されている各タスクの `cancel()` 実行。
@@ -163,7 +163,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[cancel_all_tasks]` (行番号: 125 / 抜粋: "def cancel_all_tasks() -> None")
+* 根拠: `[cancel_all_tasks]` (行番号: 202 / 抜粋: "def cancel_all_tasks() -> None")
 
 
 
@@ -174,7 +174,7 @@
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `temp: float`, `humidity: float`
-* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 212 / 抜粋: "def process_meter_data(device_")
 
 
 * **戻り値/レスポンス**: `None`
@@ -186,7 +186,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[process_meter_data]` (行番号: 135 / 抜粋: "def process_meter_data(device_")
+* 根拠: `[process_meter_data]` (行番号: 212 / 抜粋: "def process_meter_data(device_")
 
 
 
@@ -197,7 +197,7 @@
 
 
 * **引数/リクエスト**: `device_id: str`, `device_name: str`, `wattage: float`, `notify_settings: Dict[str, Any]`
-* 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "def process_power_data(device_")
+* 根拠: `[process_power_data]` (行番号: 226 / 抜粋: "def process_power_data(device_")
 
 
 * **戻り値/レスポンス**: `None`

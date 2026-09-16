@@ -117,7 +117,7 @@
 ### `_line_text_length` / `_take_line_chars` / `_split_by_line_char_count` (関数、Issue #588で追加)
 
 * **役割**: LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)を再現するためのヘルパー群。`_line_text_length`は`text.encode('utf-16-le')`のバイト長を2で割ってUTF-16コードユニット数を返す(BMP外の文字、例えば絵文字はサロゲートペア=2コードユニットとしてカウントされる)。以前は`split_text_into_line_messages`本体がPythonの`len(str)`(Unicodeコードポイント単位)で文字数を判定・分割しており、絵文字を含むテキストでは実際のLINE側カウント(UTF-16コードユニット単位、LINE公式ドキュメント[text-character-count](https://developers.line.biz/en/docs/messaging-api/text-character-count/)参照)より少なく見積もってしまい、この関数が「上限内」と判定したメッセージでもMessaging API側では文字数上限超過として送信失敗しうる状態だった。`_take_line_chars`は`text`の先頭からLINE基準で`max_chars`文字以内に収まる最長のプレフィックスを返す(Pythonの文字列インデックスは常にコードポイント単位のため、サロゲートペアの片方だけを含む不正な文字列を生成することはない)。`_split_by_line_char_count`は`_take_line_chars`を繰り返し呼び出してテキスト全体をチャンクに分割する。
-* 根拠: [関数定義とコメント] (行番号: 30〜73 / 抜粋: "def _line_text_length(text: str) -> int:\n    \"\"\"LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)でtextの長さを数える。\n\n    Issue #588:")、回帰テスト`tests/test_line_service.py::TestLineTextLengthCountsUtf16CodeUnits`
+* 根拠: [関数定義とコメント] (行番号: 30〜41 / 抜粋: "def _line_text_length(text: str) -> int:\n    \"\"\"LINE Messaging APIの文字数カウント方式(UTF-16コードユニット単位)でtextの長さを数える。\n\n    Issue #588:")、回帰テスト`tests/test_line_service.py::TestLineTextLengthCountsUtf16CodeUnits`
 
 ### `split_text_into_line_messages` (関数、Issue #377で追加、Issue #588でUTF-16基準に修正)
 

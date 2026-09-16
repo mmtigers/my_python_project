@@ -96,7 +96,7 @@
 ### `process_location`
 
 * **役割**: 拠点とトークンを受け取り、別スレッドでAPI通信を実行。取得したデータからスマートメーターの電力値 (`EPC: 231`) とセンサーの温湿度を抽出し、外部サービスへ非同期で委譲する。**（Issue #235で修正）** 電力値のパースは以前`val_str.isdigit()`で数字文字列かどうかを判定していたが、`str.isdigit()`は符号付き文字列(例: `"-120"`)に対して`False`を返すPython仕様のため、太陽光発電等による逆潮流(売電)時の負の瞬時電力値が警告も無く無条件に破棄されていた。`float(val_str)`への直接パースを`try/except`で試み、失敗時のみ警告ログを出す方式に変更した。
-* 根拠: `[process_location]` (行番号: 78〜145 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")
+* 根拠: `[process_location]` (行番号: 78〜146 / 抜粋: "async def process_location(loc")、電力値パース処理 (行番号: 99〜111 / 抜粋: "try: power_val = float(val_str)")
 
 
 * **引数/リクエスト**: `location: str` (拠点名), `token: str` (APIトークン)
@@ -119,15 +119,15 @@
 ### `main`
 
 * **役割**: 伊丹と高砂の2つの拠点情報・トークンを定義し、トークンが存在する拠点についてのみ `process_location` を順次実行する。
-* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149〜162 / 抜粋: "async def main() -> None:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149 / 抜粋: "async def main() -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: `[main]` (行番号: 142 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149 / 抜粋: "async def main() -> None:")
 
 
 * **副作用**: `process_location` の呼び出し。
@@ -135,7 +135,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: `[main]` (行番号: 142〜155 / 抜粋: "async def main() -> None:")
+* 根拠: `[main]` (行番号: 149〜162 / 抜粋: "async def main() -> None:")
 
 
 
