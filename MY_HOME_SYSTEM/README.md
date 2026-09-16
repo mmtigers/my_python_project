@@ -22,9 +22,15 @@ cp devices.json.example devices.json   # カメラ・SwitchBotデバイス等を
 ./start_all.sh
 ```
 
-`unified_server.py`(APIサーバー、内部で`scheduler_boot.py`を起動)と、ローカルホスト限定の
-Streamlitダッシュボード(`dashboard.py`、認証なしのため外部非公開)をバックグラウンド起動する。
-実機では`deploy/systemd/home_system.service`経由(`systemctl start home_system`)で起動される。
+`unified_server.py`(APIサーバー、内部で`scheduler_boot.py`と`monitors/camera_monitor.py`を起動し、
+30秒ごとに死活監視して落ちていれば再起動する)と、ローカルホスト限定の
+Streamlitダッシュボード(`dashboard.py`、認証なしのため外部非公開)をバックグラウンド起動する(手動運用・開発用の経路)。
+
+実機では`deploy/systemd/home_system.service`(`Type=simple`+`Restart=on-failure`)経由で起動される。
+同ユニットは`ExecStartPre`で`./start_all.sh --prepare`(旧プロセスの掃除・NASマウント待ち・`.venv`/`dist/`の
+鮮度チェック・Webhook再登録のみ)を実行し、`unified_server.py`本体を`ExecStart`でフォアグラウンド起動する。
+ダッシュボードは`home_dashboard.service`が別ユニットで起動する(Issue #646。導入手順は
+[deploy/systemd/README.md](./deploy/systemd/README.md))。
 
 ## 定期実行ジョブ
 

@@ -6,6 +6,7 @@
 | 言語 | Python (FastAPI) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `5111d08` (+同一PR内の Issue #646 子プロセス死活監視の追加) |
 
 ## 関連ドキュメント
 
@@ -85,7 +86,7 @@
 ### `redact_query_secrets` / `SecretRedactionFilter` **（2026-09-06 品質監査で修正）**
 
 * **役割**: `redact_query_secrets(text)` は URL/パス文字列中の `token`/`secret`/`password`/`api_key`/`access_token` クエリパラメータの値(`&`・空白・引用符まで)を `***` に置換する(大文字小文字無視)。`SecretRedactionFilter` は `logging.Filter` で、uvicorn アクセスログ(`'%s - "%s %s HTTP/%s" %d'`)のレコードの `args`(tuple/dict)内の文字列と、`args` が無い場合の `msg` にこの置換を適用し、常に `True`(出力継続)を返す。SwitchBot Webhook は `?token=` で共有シークレットを受け取る設計(Issue #318)であり、`SilencePolicyFilter` は POST を抑制しないため、以前は SwitchBot のイベントごとに `POST /webhook/switchbot?token=<secret> 200` が `home_system.log`/journal に平文で残っていた(log_analyzer / `scripts/claude_investigate.sh` が Issue 本文へ転記する経路もあった)。
-* 根拠: [正規表現と関数] (行番号: 91〜96 / 抜粋: "_QUERY_SECRET_RE = re.compile(", "def redact_query_secrets(text: str) -> str:")、[フィルタ] (行番号: 99〜128 / 抜粋: "class SecretRedactionFilter(logging.Filter):", "record.args = tuple(\n                    redact_query_secrets(a) if isinstance(a, str) else a for a in args\n                )")
+* 根拠: [正規表現と関数] (行番号: 91〜96 / 抜粋: "_QUERY_SECRET_RE = re.compile(", "def redact_query_secrets(text: str) -> str:")、[フィルタ] (行番号: 101〜130 / 抜粋: "class SecretRedactionFilter(logging.Filter):", "record.args = tuple(\n                    redact_query_secrets(a) if isinstance(a, str) else a for a in args\n                )")
 * **引数/リクエスト**: `redact_query_secrets(text: str)`、`SecretRedactionFilter.filter(record: logging.LogRecord)`
 * 根拠: (行番号: 94, 112)
 * **戻り値/レスポンス**: 置換済み文字列 / 常に `True`
@@ -96,7 +97,7 @@
 * 根拠: (行番号: 125〜127 / 抜粋: "except Exception:\n            # マスク処理の失敗でログ出力自体を止めない\n            pass")
 
 * **役割**: Uvicorn等のアクセスログ出力を評価し、GETリクエストかつ正常系（200 OK または 304 Not Modified）で、特定のパス・キーワード（ポーリング、ヘルスチェック、静的アセット等）を含む場合のみログ出力を抑制する（Falseを返す）。それ以外や例外発生時はログを出力する。**（Issue #177で修正）** 正常系判定は以前`" 200 "`/`" 304 "`という前後スペース付きの部分文字列一致だったが、uvicornの実際のアクセスログフォーマット（`h11_impl.py`/`httptools_impl.py`の`'%s - "%s %s HTTP/%s" %d'`）ではステータスコードがメッセージ末尾に前方スペースのみで出力され後方にスペースが付かない（例: `'127.0.0.1 - "GET /path HTTP/1.1" 200'`）ため、この判定は常に不一致となり抑制対象キーワード判定へ到達しない死にコードになっていた。現在は末尾の空白を除去したうえで`endswith(" 200")`/`endswith(" 304")`により末尾一致で判定する。
-* 根拠: `class SilencePolicyFilter(logging.Filter):` (行番号: 38-87 / 抜粋: "class SilencePolicyFilter(logging.Filter):")、末尾一致判定への修正 (行番号: 53-60 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")
+* 根拠: `class SilencePolicyFilter(logging.Filter):` (行番号: 40-89 / 抜粋: "class SilencePolicyFilter(logging.Filter):")、末尾一致判定への修正 (行番号: 53-60 / 抜粋: "#177: uvicornのアクセスログフォーマット('%s - \"%s %s HTTP/%s\" %d'、\n            # h11_impl.py/httptools_impl.py)ではステータスコードがメッセージ末尾に")
 
 
 * **引数/リクエスト**: `record: logging.LogRecord`
@@ -118,38 +119,63 @@
 
 ### `lifespan`
 
-* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、カメラおよびスケジューラーのサブプロセスを起動する。終了時(`yield`後)にスケジューラー・カメラ監視の両サブプロセスを停止させ、センサータスクのキャンセル処理を実行する。
-* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 135-228 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
-* **（Issue #383 / #360 で修正）** 起動時マイグレーションは `sqlite3.connect(..., timeout=30.0)` で接続し、失敗時は `logger.critical`（Discord 通知）を出して `app.state.migration_ok = False` とし、camera_monitor / scheduler の子プロセスを起動しない（以前は既定 5 秒の timeout で失敗しやすく、失敗を握りつぶしてサービスを継続していた）。camera_monitor の `Popen` も scheduler と同様に try/except で保護する。終了処理では scheduler / camera_monitor に加えて `camera_service.stop_all_processes()` でライブ配信・VOD 生成の ffmpeg も停止する（孤児化による HLS 二重書き込みの防止）。
-* 根拠: `migration_ok = True` (行番号: 161)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 163)、`logger.critical(` (行番号: 170-173)、`app.state.migration_ok = migration_ok` (行番号: 174)、`if migration_ok:` (行番号: 178)、`camera_service.stop_all_processes()` (行番号: 223)
-* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 145-146 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
+* **役割**: FastAPIの起動時(`yield`前)にアクセスログへのフィルター適用、`config.SWITCHBOT_WEBHOOK_TOKEN`が未設定の場合はSwitchBot Webhookの署名検証が無効化されている旨の警告ログ出力、NAS依存パスのプリウォーム(`config.prewarm_nas_paths()`。Issue #330 PR-Bでconfigのimport時NAS検証が遅延化されたため、サーバー起動時はここで明示的に解決する)、DBスキーママイグレーションの適用(`apply_pending_migrations`)、`CHILD_SCRIPTS`に列挙された監視子プロセス(camera_monitor / scheduler)を`_spawn_child_process`で起動し、その死活監視ループ`_supervise_child_processes`を`asyncio.create_task`で開始する。終了時(`yield`後)は監視ループを先に`cancel`してから(止めた子を再起動しないように)スケジューラー・カメラ監視の両サブプロセスを停止させ、ffmpegの停止とセンサータスクのキャンセル処理を実行する。
+* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 236-325 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
+* **（Issue #383 / #360 で修正）** 起動時マイグレーションは `sqlite3.connect(..., timeout=30.0)` で接続し、失敗時は `logger.critical`（Discord 通知）を出して `app.state.migration_ok = False` とし、camera_monitor / scheduler の子プロセスを起動しない（以前は既定 5 秒の timeout で失敗しやすく、失敗を握りつぶしてサービスを継続していた）。子プロセスの `Popen` は `_spawn_child_process` 内の try/except で保護され、一方の起動失敗がもう一方や `lifespan` 自体に影響しない。終了処理では scheduler / camera_monitor に加えて `camera_service.stop_all_processes()` でライブ配信・VOD 生成の ffmpeg も停止する（孤児化による HLS 二重書き込みの防止）。
+* 根拠: `migration_ok = True` (行番号: 262)、`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)` (行番号: 264)、`logger.critical(` (行番号: 271-274)、`app.state.migration_ok = migration_ok` (行番号: 275)、`if migration_ok:` (行番号: 278)、`camera_service.stop_all_processes()` (行番号: 320)
+* **（Issue #646 で追加）** 子プロセスは起動後 `CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに `restart_dead_children` で死活確認され、予期せず終了していれば再起動される(詳細は次項)。以前は起動時に `Popen` するだけで、`scheduler_boot.py` が落ちると配下の6監視タスクが静かに止まり、検知は毎時cronの `health_watch.py`、復旧は人手だった。
+* 根拠: `_set_child_process(child_name, _spawn_child_process(child_name))` (行番号: 283)、`supervisor_task = asyncio.create_task(_supervise_child_processes())` (行番号: 286)、`supervisor_task.cancel()` (行番号: 294)
+* 根拠: [SWITCHBOT_WEBHOOK_TOKEN未設定警告] (行番号: 246-247 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:\n        logger.warning(\"⚠️ SWITCHBOT_WEBHOOK_TOKEN is not set — SwitchBot webhook signature verification is DISABLED. Set the env var to enable it.\")")
 
 
 * **引数/リクエスト**: `app: FastAPI`
-* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 135 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
+* 根拠: `async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:` (行番号: 236 / 抜粋: "async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:")
 
 
 * **戻り値/レスポンス**: `AsyncGenerator[None, None]`
-* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 135 / 抜粋: "-> AsyncGenerator[None, None]:")
+* 根拠: `-> AsyncGenerator[None, None]:` (行番号: 236 / 抜粋: "-> AsyncGenerator[None, None]:")
 
 
-* **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、グローバル変数(`camera_process`, `scheduler_process`)の書き換え。
-* 根拠: 該当関数内処理 (行番号: 145-146, 151-154, 161-174, 176-197, 203-219 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "logger.critical(", "scheduler_process.terminate()")
+* **副作用**: Uvicornロガー設定の変更、`config.SWITCHBOT_WEBHOOK_TOKEN`未設定時の警告ログ出力、`sqlite3.connect`によるマイグレーション用DB接続の確立と`apply_pending_migrations`の実行、外部プロセス(`subprocess.Popen`)の実行と強制終了(`terminate`, `kill`)、asyncioタスク(`_supervise_child_processes`)の生成とキャンセル、グローバル変数(`camera_process`, `scheduler_process`)の書き換え(`_set_child_process`経由)。
+* 根拠: 該当関数内処理 (行番号: 246-247, 252-255, 262-275, 278-286, 293-320 / 抜粋: "if not config.SWITCHBOT_WEBHOOK_TOKEN:", "logger.critical(", "supervisor_task.cancel()", "scheduler_process.terminate()")
 
 
-* **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスはいずれも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている。上記の「役割」欄末尾に記載の通り）。camera_monitorの起動、scheduler起動はいずれも個別の`try/except Exception`で保護されており（Issue #360でcamera_monitor起動もscheduler同様に保護）、一方が起動に失敗してももう一方には影響せずエラーログを出力して起動処理を継続する。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
-* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 153-154 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 168-173 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 178 / 抜粋: "if migration_ok:"), `except Exception as e: logger.error(f"Failed to start camera monitor...")` (行番号: 185-186 / 抜粋: "Failed to start camera monitor"), `except Exception as e: logger.error(f"Failed to start scheduler...")` (行番号: 196-197 / 抜粋: "Failed to start scheduler"), `except subprocess.TimeoutExpired` (行番号: 208, 217 / 抜粋: "except subprocess.TimeoutExpired")
+* **エラーハンドリング**: NASパスプリウォーム失敗時の例外(`Exception`)は捕捉しエラーログ出力のうえ起動を継続する。**マイグレーション適用失敗時の例外(`Exception`)は、捕捉した上で`migration_ok = False`とし`logger.critical`（Discord通知経由）でCRITICALログを出力するのみで、起動そのものは継続する（`lifespan`は例外を再送出せず`yield`まで到達する）ものの、直後の`if migration_ok:`分岐によりcamera_monitor/schedulerの子プロセスも死活監視ループも起動されない**（Issue #383。以前は`logger.error`でエラーログを出すだけで握りつぶし、子プロセスの起動を含めてサービス継続していたが、この挙動は廃止されている）。子プロセスの起動失敗は`_spawn_child_process`内の`try/except Exception`で捕捉され`logger.error`を出して`None`を返す（Issue #360でcamera_monitor起動もscheduler同様に保護）。監視ループのcancel時の`CancelledError`は捕捉して握りつぶす。プロセス停止時のタイムアウト(`subprocess.TimeoutExpired`)も捕捉し、強制`kill()`へフォールバックする。
+* 根拠: `except Exception as e: logger.error(f"⚠️ NAS path prewarm failed...")` (行番号: 254-255 / 抜粋: "NAS path prewarm failed"), `except Exception as e: ... logger.critical(` (行番号: 268-274 / 抜粋: "🚨 Migration failed at startup"), `if migration_ok:` (行番号: 278 / 抜粋: "if migration_ok:"), `except (asyncio.CancelledError, Exception):` (行番号: 297 / 抜粋: "except (asyncio.CancelledError, Exception):"), `except subprocess.TimeoutExpired` (行番号: 305, 314 / 抜粋: "except subprocess.TimeoutExpired")
+
+
+
+### `restart_dead_children` / `_supervise_child_processes` / `_spawn_child_process`（Issue #646で追加）
+
+* **役割**: 監視子プロセス(`CHILD_SCRIPTS`: `camera_monitor` → `monitors/camera_monitor.py`、`scheduler` → `scheduler_boot.py`)の死活監視と自動再起動。`restart_dead_children(now)`は各子プロセスを`poll()`し、終了していれば`_spawn_child_process`で再起動して`_set_child_process`でグローバル変数を差し替え、再起動した子プロセス名の一覧を返す(テスト容易性のため同期関数)。直近1時間(`_CHILD_RESTART_WINDOW_SEC`)の再起動回数が`CHILD_RESTART_MAX_PER_HOUR`(5)に達した子プロセスはクラッシュループとみなして`_child_restart_disabled`に登録し、以後は再起動せず`logger.critical`(Discord通知)を1回だけ出す。起動時に`Popen`が失敗して`None`のままの子プロセスは監視対象外(起動失敗の無限リトライにしない)。`_supervise_child_processes`は`CHILD_MONITOR_INTERVAL_SEC`(30秒)ごとに`restart_dead_children`を呼ぶ無限ループで、`lifespan`がタスクとして起動・キャンセルする。
+* 根拠: `CHILD_SCRIPTS: Dict[str, str] = {` (行番号: 141 / 抜粋: "CHILD_SCRIPTS: Dict[str, str] = {")、`CHILD_MONITOR_INTERVAL_SEC: float = 30.0` (行番号: 146)、`CHILD_RESTART_MAX_PER_HOUR: int = 5` (行番号: 149)、`def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:` (行番号: 169 / 抜粋: "def _spawn_child_process(name: str) -> Optional[subprocess.Popen]:")、`def restart_dead_children(now: Optional[float] = None) -> List[str]:` (行番号: 184 / 抜粋: "def restart_dead_children(now: Optional[float] = None) -> List[str]:")、`async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:` (行番号: 225 / 抜粋: "async def _supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC) -> None:")
+
+
+* **引数/リクエスト**: `restart_dead_children(now: Optional[float] = None)`(`time.monotonic()`基準の現在時刻。省略時は実時刻)、`_spawn_child_process(name: str)`、`_supervise_child_processes(interval_sec: float = CHILD_MONITOR_INTERVAL_SEC)`
+* 根拠: 各関数シグネチャ (行番号: 169, 184, 225)
+
+
+* **戻り値/レスポンス**: `restart_dead_children` → `List[str]`(再起動した子プロセス名)、`_spawn_child_process` → `Optional[subprocess.Popen]`(起動失敗・スクリプト不在時は`None`)、`_supervise_child_processes` → `None`(無限ループ)
+* 根拠: `return restarted` (行番号: 222)、`return None` (行番号: 174)
+
+
+* **副作用**: `subprocess.Popen`による子プロセス起動、グローバル変数`camera_process`/`scheduler_process`・`_child_restart_history`・`_child_restart_disabled`の更新、`logger.error`(再起動時)・`logger.critical`(上限到達時)のログ出力(いずれもDiscord通知経路)。
+* 根拠: `_set_child_process(name, new_proc)` (行番号: 220)、`_child_restart_disabled.add(name)` (行番号: 203)、`logger.critical(` (行番号: 205)
+
+
+* **エラーハンドリング**: `_spawn_child_process`は`Popen`の例外を捕捉して`logger.error`のうえ`None`を返す。起動失敗も再起動試行として履歴に数え、無限に`Popen`を繰り返さない。`_supervise_child_processes`は`restart_dead_children`の例外を捕捉して`logger.error`を出し、監視ループ自身は止めない。
+* 根拠: `except Exception as e: logger.error(f"Failed to start {name}: {e}")` (行番号: 179-180)、`# 起動自体に失敗した場合も再起動試行として数え` (行番号: 214)、`logger.error(f"Child process supervision failed: {e}")` (行番号: 233)
 
 
 
 ### `ip_restriction_middleware`
 
 * **役割**: リクエスト元のIPを判定するHTTPミドルウェア。Webhookの例外パス(`allowed_webhook_paths` = `/webhook/switchbot`・`/callback/line`・`/webhook/alexa`の3件)はIP解決もログ出力も行わず即座に後続へ渡す。それ以外では`cf-connecting-ip`や`x-forwarded-for`を検証しローカル/プライベートIPかを判定するが、最終的にはアクセス遮断を行わず全リクエストを後続(`call_next`)へ渡す。**（Issue #182で修正）** 以前は非プライベートネットワークからのアクセスを`logger.debug`で記録していたが、`core/logger.py`の`setup_logging()`がロガーレベルをINFO固定にしており、DEBUGレベルへのオーバーライド手段が存在しないため、このログは常に抑制され「外部アクセスの記録」が事実上機能していなかった。本ミドルウェアのdocstring・CLAUDE.mdが明記する「非プライベートネットワークからのリクエストをログに記録する」という意図した挙動を実際に機能させるため、`logger.info`へ変更した。**（Issue #321・2026-09-03決定）** 非プライベートIPからのアクセスをブロックしない現在の挙動は、意図的な設計として正式に確定している。`Cf-Access-Jwt-Assertion`の署名/aud検証は一度PR #80で実装されたが2026-08-28の障害でrevertされ、再実装せずエッジのCloudflare Access（インフラ側）への委譲を正式設計とする案（案B）が採用された。この設計はオリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 254-322 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 351-433 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **引数/リクエスト**: `request: Request`, `call_next: Callable[[Request], Awaitable[Response]]`
-* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 254 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
+* 根拠: `async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:` (行番号: 351 / 抜粋: "async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:")
 
 
 * **戻り値/レスポンス**: `Response` (後続の処理結果)
@@ -168,11 +194,11 @@
 ### `global_exception_handler`
 
 * **役割**: アプリケーション全体で発生した未捕捉の例外をキャッチし、ログにスタックトレース付きで記録した上でステータスコード500の定型エラーレスポンスを返す。
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 339-344 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 436-441 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **引数/リクエスト**: `request: Request`, `exc: Exception`
-* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 339 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
+* 根拠: `async def global_exception_handler(request: Request, exc: Exception):` (行番号: 436 / 抜粋: "async def global_exception_handler(request: Request, exc: Exception):")
 
 
 * **戻り値/レスポンス**: `JSONResponse` (HTTP 500, `{"detail": "Internal Server Error"}`のみ)。例外の詳細文字列(`str(exc)`)はレスポンスボディに含めず、ログにのみ出力する。
@@ -191,11 +217,11 @@
 ### `serve_quest_spa` (エンドポイント: `GET /quest/{full_path:path}`, `GET /camera/{full_path:path}`)
 
 * **役割**: SPA(Single Page Application)向けのリクエストハンドラ。`/quest/*`と`/camera/*`の両方に同一ハンドラが登録されている。指定されたパスのファイルが存在する場合はそれを返し、存在しない場合はフォールバックとして`index.html`を返す。
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 384-399 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 481-496 / 抜粋: "async def serve_quest_spa(full_path: str):")、`@app.get("/quest/{full_path:path}")` / `@app.get("/camera/{full_path:path}")` (行番号: 367-368)
 
 
 * **引数/リクエスト**: `full_path: str`
-* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 384 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: `async def serve_quest_spa(full_path: str):` (行番号: 481 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -203,7 +229,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 384-399 / 抜粋: "async def serve_quest_spa(full_path: str):")
+* 根拠: 該当関数内処理 (行番号: 481-496 / 抜粋: "async def serve_quest_spa(full_path: str):")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -214,11 +240,11 @@
 ### `serve_quest_root` (エンドポイント: `GET /quest`, `GET /quest/`, `GET /camera`, `GET /camera/`)
 
 * **役割**: SPAルートパスへのアクセスに対し`index.html`を返す。`/quest`系と`/camera`系の計4パスに同一ハンドラが登録されている。
-* 根拠: `async def serve_quest_root():` (行番号: 407-411 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
+* 根拠: `async def serve_quest_root():` (行番号: 504-508 / 抜粋: "async def serve_quest_root():")、`@app.get("/quest")` 等4つのデコレータ (行番号: 388-391)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def serve_quest_root():` (行番号: 407 / 抜粋: "async def serve_quest_root():")
+* 根拠: `async def serve_quest_root():` (行番号: 504 / 抜粋: "async def serve_quest_root():")
 
 
 * **戻り値/レスポンス**: `FileResponse` または `JSONResponse` (HTTP 404)
@@ -226,7 +252,7 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 407-411 / 抜粋: "async def serve_quest_root():")
+* 根拠: 該当関数内処理 (行番号: 504-508 / 抜粋: "async def serve_quest_root():")
 
 
 * **エラーハンドリング**: `index.html`が存在しない場合は404エラーとしてJSONレスポンスを返す。
@@ -237,11 +263,11 @@
 ### `root` (エンドポイント: `GET /`)
 
 * **役割**: 稼働状態、システム名、現在時刻を返すルートAPI。
-* 根拠: `async def root():` (行番号: 419-424 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 516-521 / 抜粋: "async def root():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def root():` (行番号: 419 / 抜粋: "async def root():")
+* 根拠: `async def root():` (行番号: 516 / 抜粋: "async def root():")
 
 
 * **戻り値/レスポンス**: `dict` (status, system, timeキーを含む)
@@ -249,22 +275,22 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 419-424 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 516-521 / 抜粋: "async def root():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 419-424 / 抜粋: "async def root():")
+* 根拠: 該当関数内処理 (行番号: 516-521 / 抜粋: "async def root():")
 
 
 
 ### `health_check` (エンドポイント: `GET /health`)
 
 * **役割**: ヘルスチェック用に正常稼働を示すJSONを返す。
-* 根拠: `async def health_check():` (行番号: 427-428 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 524-525 / 抜粋: "async def health_check():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `async def health_check():` (行番号: 427 / 抜粋: "async def health_check():")
+* 根拠: `async def health_check():` (行番号: 524 / 抜粋: "async def health_check():")
 
 
 * **戻り値/レスポンス**: `dict` (statusキーを含む)
@@ -272,17 +298,17 @@
 
 
 * **副作用**: なし
-* 根拠: 該当関数内処理 (行番号: 427-428 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 524-525 / 抜粋: "async def health_check():")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 該当関数内処理 (行番号: 427-428 / 抜粋: "async def health_check():")
+* 根拠: 該当関数内処理 (行番号: 524-525 / 抜粋: "async def health_check():")
 
 
 ### `_run_uvicorn_server`（Issue #229で追加）
 
 * **役割**: 本番起動経路（`python unified_server.py`実行時の`if __name__ == "__main__":`）のエントリポイント。`uvicorn.run(app, host="0.0.0.0", port=8000)`を呼び出す。**（Issue #229で修正）** 以前はこの箇所で`uvicorn.config.LOGGING_CONFIG`を書き換え、`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコードが作られず、`lifespan()`内で登録される`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されなかった。結果、POST等の状態変更リクエストやエラーレスポンスを含め、アクセスログが本番起動経路で一切残らない状態になっていた。現在はデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使い、レコード生成自体は妨げず`SilencePolicyFilter`に選別を委ねる。本関数への切り出しは、以前は`if __name__ == "__main__":`直下にインラインで書かれ`import`されない限り実行されずテストが困難だった処理を、単体テストで`uvicorn.run`をモックして検証できるようにするため（このロジック自体はIssue #229の修正の一部）。
-* 根拠: [関数定義とコメント] (行番号: 430-445 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
+* 根拠: [関数定義とコメント] (行番号: 527-542 / 抜粋: "def _run_uvicorn_server() -> None:\n    """本番起動経路のエントリポイント(`python unified_server.py`)。\n\n    #229: 以前はここで"uvicorn.access"ロガー自体のレベルをWARNINGに固定していた。")
 
 
 * **引数/リクエスト**: なし
@@ -390,9 +416,10 @@ graph TD
 
 * `ip_restriction_middleware` 内でIP制限のロジックが実装されているが、現状は `return await call_next(request)` が分岐の最終地点で必ず呼ばれるため、事実上すべてのIPからのアクセスが遮断されずに後続処理へ流れる状態となっている。この挙動はIssue #321（2026-09-03決定・案B）によりバグではなく正式な設計として確定済み（アプリ層でのJWT検証は行わず、外部アクセス制御はエッジのCloudflare Accessに委譲する）。
 * **（本項目は現行ソースとの不一致を解消）** 過去の解析では `handlers.line_handler` と `contextlib.asynccontextmanager` が本ファイルに未使用インポートとして存在すると記載していたが、現行の`unified_server.py:1-30`のインポート一覧にはこの2つはいずれも存在しない（実際にインポートされていない。LINE関連のハンドリングは本ファイルではなく`routers/webhook_router.py`側の責務であり、`lifespan`は`@asynccontextmanager`を使わず`FastAPI(lifespan=lifespan)`に直接渡す形のままである点は変わらない）。
-* サブプロセス（`camera_process`, `scheduler_process`）はグローバル変数として定義および管理されており、プロセス停止処理（`terminate()`や`kill()`）で状態変異（副作用）を伴う。
-* シャットダウン時、スケジューラープロセス・カメラ監視プロセスの双方とも終了待ち（`wait`）が5秒でタイムアウトし、強制キル（`kill`）される同一パターンの処理となっている（行番号: 206-209, 215-218）。
-* **（Issue #360 で修正・本項目は現行ソースとの不一致を解消）** 過去の解析では、カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`）の起動はスケジューラー起動処理とは異なり `try-except` で囲まれておらず、起動失敗時に `lifespan` 全体が例外停止しうると記載していたが、現行ソースでは camera_monitor の起動もスケジューラーと同様に個別の `try/except Exception` で保護されている（行番号: 181-186）。どちらか一方の起動に失敗しても `logger.error` を出力するのみで、もう一方や `lifespan` 自体の実行には影響しない。
+* サブプロセス（`camera_process`, `scheduler_process`）はグローバル変数として定義および管理されており、プロセス停止処理（`terminate()`や`kill()`）や死活監視による再起動（`_set_child_process`）で状態変異（副作用）を伴う。`restart_dead_children`はテスト容易性のため同期関数として切り出されており、`tests/test_unified_server_app.py`の`TestChildProcessSupervisor`が「生存中は触らない」「終了していれば再起動」「1時間に上限回数を超えたら停止してCRITICAL」「lifespanが監視タスクを起動しシャットダウンでcancelする」を固定している。監視間隔や上限を変える場合は`CHILD_MONITOR_INTERVAL_SEC`/`CHILD_RESTART_MAX_PER_HOUR`だけを変えること。
+* **（Issue #646）** 本番の systemd ユニット（`deploy/systemd/home_system.service`）は`Type=simple` + `Restart=on-failure`で`unified_server.py`自体の異常終了を自動復旧し、子プロセスの異常終了は本ファイルの死活監視が復旧する、という二層構成になっている。`start_all.sh --prepare`（ExecStartPre）が旧プロセスの掃除等の前処理を担うため、本ファイルは自分より前の世代の掃除を行わない。
+* シャットダウン時、スケジューラープロセス・カメラ監視プロセスの双方とも終了待ち（`wait`）が5秒でタイムアウトし、強制キル（`kill`）される同一パターンの処理となっている（行番号: 302-306, 311-315）。
+* **（Issue #360 で修正・本項目は現行ソースとの不一致を解消）** 過去の解析では、カメラ監視サブプロセス（`camera_process = subprocess.Popen(...)`）の起動はスケジューラー起動処理とは異なり `try-except` で囲まれておらず、起動失敗時に `lifespan` 全体が例外停止しうると記載していたが、現行ソースでは両子プロセスの起動が共通の `_spawn_child_process` 内の `try/except Exception` で保護されている（行番号: 169-181）。どちらか一方の起動に失敗しても `logger.error` を出力するのみで、もう一方や `lifespan` 自体の実行には影響しない。
 * `config.QUEST_DIST_DIR` が未定義またはパスに存在しない場合、システムは例外終了せず警告ログのみを出力する（null安全性/フォールバック）。
 * Webhook受信の例外パス（`/webhook/switchbot`, `/callback/line`, `/webhook/alexa`）は`allowed_webhook_paths`にハードコードで定義されている。`/webhook/alexa`は長らくこのリストから漏れており、docstringが列挙する「外部からのWebhook受信が必要なパス」の意図と非対称だった（後述の追加で解消）。本ミドルウェアは遮断を行わないため、このリストに載せることの実際の効果は「クライアントIPの解決と外部アクセスのINFOログ出力をスキップする」ことだけだが、**リスト自体が「オリジンが外部から到達可能でなければ機能しないパス」の一覧**としてCloudflare Access側のバイパス設定の参照元になる（Issue #517では`/webhook/switchbot`・`/callback/line`がエッジでブロックされWebhookがサーバーまで届いていなかった）。新しい外部Webhookを追加した際にリストへの追記を忘れると同じ非対称が再発するため、`tests/test_unified_server_app.py`の`test_allowed_webhook_paths_matches_mounted_webhook_routes`がマウント済みの`/webhook/`・`/callback/`ルート集合と例外リストの一致を検証する。
 * **本番起動経路が`uvicorn.access`ロガーのレベルを固定し`SilencePolicyFilter`を無効化していた（Issue #229で修正）**: `_run_uvicorn_server`（本番起動経路、`if __name__ == "__main__":`から呼ばれる）は以前、`uvicorn.config.LOGGING_CONFIG`を書き換えて`"uvicorn.access"`ロガー自体のレベルを`WARNING`に固定していた。uvicornのアクセスログは常に`logger.info()`（レベル20）で出力されるため、ロガーのレベルチェックの時点でログレコード自体が作られず、`lifespan()`が登録する`SilencePolicyFilter`（GETの200/304ポーリングのみを選別して抑制し、POST・エラーは残す設計）が一度も呼び出されない状態になっていた。既存の単体テスト（`SilencePolicyFilter.filter()`を直接呼び出すもの）はこの「ロガーのレベルチェックでレコードが作られない」経路を検知できない設計だったため、この不具合はテストがグリーンのまま本番のみで発生していた。現在は本番起動経路がデフォルトの`log_config`（`uvicorn.access`はINFO）をそのまま使うよう修正されている。

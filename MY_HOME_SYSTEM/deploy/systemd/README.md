@@ -23,31 +23,25 @@ sudo systemctl enable health-check.service
 
 ## home_system.service
 
-`start_all.sh` を `ExecStart` で実行するoneshotユニット(`RemainAfterExit=yes`)。
-`start_all.sh` が内部で `unified_server.py` を `nohup` バックグラウンド起動し、
-`unified_server.py` がさらに `scheduler_boot.py` 等を起動する。
+`unified_server.py`(FastAPI サーバー本体)を `Type=simple` のフォアグラウンドプロセスとして起動し、
+異常終了時は `Restart=on-failure`(10秒後)で自動復旧する(Issue #646)。起動前に `ExecStartPre` で
+`start_all.sh --prepare` を実行し、旧プロセスの掃除・NASマウント待ち・`.venv`/`dist/` の鮮度チェック・
+Webhook再登録(Phase 0〜3)を行う。`unified_server.py` は内部で `scheduler_boot.py` と
+`monitors/camera_monitor.py` を子プロセスとして起動し、30秒ごとの死活監視で予期せず終了した子を
+再起動する(1時間に5回を超えたらクラッシュループとみなして自動再起動を止め、CRITICALをDiscordへ通知する)。
 
-> **`Restart=always` を使わない理由(Issue #492・決定: 案A)**: `Type=oneshot` +
-> `RemainAfterExit=yes` の構成では、`start_all.sh` 自体が正常終了した時点で
-> systemdは「成功して完了した」と扱う。実際のサーバープロセス(`unified_server.py`)は
-> `nohup ... & disown` でsystemdの管理下から外れているため、`Restart=always` を
-> 付けても`start_all.sh`が異常終了しない限り再起動はトリガーされず、
-> `unified_server.py`単独のクラッシュに対しては実質的に無効。`Type=simple` +
-> `Restart=on-failure` へ移行する案(`start_all.sh`のバックグラウンド起動をやめ、
-> `unified_server.py`をsystemdのフォアグラウンドプロセスにする)も検討したが、
-> `start_all.sh` Phase 0(旧プロセスのクリーンアップ)・Streamlitダッシュボードの
-> 別プロセス起動との整合を取り直す必要があり変更規模が大きいため、今回は見送った。
->
-> 代わりに、`unified_server.py`単独のクラッシュ検知は
-> [health_watch.md](../../../docs/specifications/MY_HOME_SYSTEM/health_watch.md)
-> （`monitors/health_watch.py`、cron駆動でこのサービスのプロセスツリーから独立、
-> `deploy/cron/crontab`に毎時10分で登録、Issue #339/#484）に委ねる。
-> `scheduler_boot.py`配下の監視群(`server_watchdog.py`等)は本サービスと同じ
-> プロセスツリーで動くため、本サービスごと落ちると一緒に停止し検知できないが、
-> cron駆動の`health_watch.py`はその穴を塞ぐ位置づけになる。**自動復旧は行わず、
-> Discord通知を受けて人間が`systemctl restart home_system.service`等で復旧する**
-> 運用とする(runbookのガードレール「自動適用・自動デプロイ・`systemctl restart`の
-> 自動実行は行わない」と整合)。
+> **Issue #492(決定: 案A)からの変更(Issue #646)**: 以前は `Type=oneshot` + `RemainAfterExit=yes` で
+> `start_all.sh` が `unified_server.py` を `nohup ... & disown` でバックグラウンド起動しており、
+> サーバー本体が systemd の管理外にあった。そのため `unified_server.py` 単独のクラッシュに対して
+> systemd は何もできず(oneshot には `Restart=` が効かない)、`scheduler_boot.py` が落ちると配下の
+> 6監視タスクが静かに止まり、検知は毎時cronの `health_watch.py`、復旧は人手だった。
+> 当時 `Type=simple` への移行を見送った理由は「Phase 0(旧プロセス掃除)・Streamlitダッシュボードの
+> 別プロセス起動との整合を取り直す必要がある」ことだったため、Phase 0〜3 を `start_all.sh --prepare`
+> として `ExecStartPre` に分離し、ダッシュボードは `home_dashboard.service`(下記)へ切り出した。
+> `start_all.sh` を引数なしで実行する従来の経路(手動運用・開発用)は残している。
+> runbook(`docs/runbooks/raspi_claude_log_monitoring.md`)の「自動 `systemctl restart` は行わない」は
+> Claude 自動調査側のガードレールであり、systemd 自身の `Restart=` による復旧はその対象ではない。
+> `health_watch.py`(毎時cron、本サービスから独立)による検知・通知は引き続き行う。
 
 導入手順(実機側):
 
@@ -55,6 +49,25 @@ sudo systemctl enable health-check.service
 sudo cp deploy/systemd/home_system.service /etc/systemd/system/home_system.service
 sudo systemctl daemon-reload
 sudo systemctl enable home_system.service
+sudo systemctl restart home_system.service
+systemctl status home_system.service   # Active: active (running) で Main PID が python3 unified_server.py であること
+```
+
+サーバーの標準出力・標準エラーは journal に入る(`journalctl -u home_system.service -f`)。
+アプリログは従来どおり `core/logger.py` が `logs/home_system.log` に書く。
+
+## home_dashboard.service
+
+Streamlit ダッシュボード(`dashboard.py`、認証なしのため `127.0.0.1:8501` のみにバインド)を
+`home_system.service` から独立したユニットとして常駐実行する(Issue #646。以前は `start_all.sh` の
+Phase 4 が `nohup` で起動していた)。
+
+導入手順(実機側):
+
+```bash
+sudo cp deploy/systemd/home_dashboard.service /etc/systemd/system/home_dashboard.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now home_dashboard.service
 ```
 
 ## network_logger.service
