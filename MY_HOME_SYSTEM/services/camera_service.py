@@ -1,7 +1,6 @@
 import contextlib
 import json
 import os
-import sys
 import subprocess
 import threading
 import time

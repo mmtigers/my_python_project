@@ -1,6 +1,5 @@
 # MY_HOME_SYSTEM/services/notification_service.py
 import time
-import requests
 from typing import List, Optional, Any
 
 # ▼▼▼ v3 Imports ▼▼▼

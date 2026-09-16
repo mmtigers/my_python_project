@@ -28,6 +28,7 @@ import pytest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
+from core import discord as core_discord
 from core import alexa_verifier as av
 from core import logger as core_logger
 from core.utils import get_now_jst
@@ -298,7 +299,7 @@ class TestDiscordWebhookChunkingAndRetry:
         monkeypatch.setattr(config, "DISCORD_WEBHOOK_NOTIFY", "https://discord.example/webhook")
         posts = []
         monkeypatch.setattr(
-            notification_service.requests, "post",
+            core_discord.requests, "post",
             lambda url, **kw: posts.append(kw) or MagicMock(status_code=204, headers={}),
         )
         text = "\n".join("line %04d " % i + "a" * 60 for i in range(80))  # 約 5,600 字
@@ -312,7 +313,7 @@ class TestDiscordWebhookChunkingAndRetry:
                      MagicMock(status_code=204, headers={})]
         sleeps = []
         monkeypatch.setattr(notification_service, "_retry_sleep", lambda s: sleeps.append(s))
-        monkeypatch.setattr(notification_service.requests, "post", lambda url, **kw: responses.pop(0))
+        monkeypatch.setattr(core_discord.requests, "post", lambda url, **kw: responses.pop(0))
         assert notification_service._send_discord_webhook([{"type": "text", "text": "hi"}]) is True
         assert sleeps == [0.01]
 
@@ -321,7 +322,7 @@ class TestDiscordWebhookChunkingAndRetry:
         calls = []
         monkeypatch.setattr(notification_service, "_retry_sleep", lambda s: None)
         monkeypatch.setattr(
-            notification_service.requests, "post",
+            core_discord.requests, "post",
             lambda url, **kw: calls.append(1) or MagicMock(status_code=500, headers={}, text="err"),
         )
         assert notification_service._send_discord_webhook([{"type": "text", "text": "hi"}]) is False
