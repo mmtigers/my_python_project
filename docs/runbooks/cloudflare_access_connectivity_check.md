@@ -5,8 +5,15 @@ Issue #321(2026-09-03決定)で、外部アクセス制御はアプリ層のJWT�
 **オリジン(自宅サーバー)への直接到達がCloudflareのIPレンジ経由に限定されている**
 というルーター/FW側の設定を前提とする。この前提が崩れると、
 `ip_restriction_middleware`(ログのみでブロックしない)と`/webhook/switchbot`・
-`/callback/line`の無条件許可という設計は、Cloudflare Accessをバイパスした
-無認証アクセスを許してしまう。
+`/callback/line`・`/webhook/alexa`の無条件許可という設計は、Cloudflare Accessを
+バイパスした無認証アクセスを許してしまう。
+
+逆方向の失敗もある: これらのパスはエッジのCloudflare Access側で**バイパス対象に
+設定されていないとWebhook自体がサーバーまで届かない**。Issue #517では
+`/webhook/switchbot`・`/callback/line`が実際にブロックされており、SwitchBotの
+実ペイロード調査(Issue #328)が長く進められない原因になっていた。
+アプリ側の無条件許可パスの一覧は`unified_server.py`の`allowed_webhook_paths`
+(現在は上記3件)が正で、エッジ側のバイパス設定と一致している必要がある。
 
 この前提はコードからは検証できないため、以下の手順でオーナーが定期的に
 (推奨: 四半期に1回、またはルーター/FW設定を変更した直後)確認すること。

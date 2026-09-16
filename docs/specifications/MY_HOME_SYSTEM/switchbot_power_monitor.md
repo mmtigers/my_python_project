@@ -326,6 +326,7 @@ graph TD
 | SwitchBot APIのレスポンス仕様 | `switchbot_service.md`の解析によれば、`sb_tool.get_device_status`(=`get_device_status`)は`request_switchbot_api`経由でGETリクエストを送り、レスポンスを`models.switchbot.DeviceStatusResponse`でバリデーションした辞書を返すとされ、失敗時は`None`を返すフェイルソフト設計とされる。`switchbot.md`の解析によれば、`DeviceStatusResponse`は`statusCode`, `message`, `body`(型は`Dict[str, Any]`)を持つモデルで、`body`の中身はデバイス種別により大きく異なり厳密な型定義はされていないとされる。 | switchbot_service.md, switchbot.md |
 | データ処理時のエラー制御 | `sensor_service.md`の解析によれば、`process_meter_data`は明示的な例外処理を持たず、`process_power_data`はDBからの前回値取得時の例外を`except Exception`で捕捉し前回値を`0.0`として処理を継続する(例外を再送出しない)とされる。 | sensor_service.md |
 | ログの出力先・フォーマット | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`)・ERRORレベル以上のDiscord Webhook通知の3種のハンドラを登録するとされる。 | logger.md |
+| `config.BASE_DIR`の実際のパス値 | `MY_HOME_SYSTEM/config.py`253行目に`BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))`と定義されている。`config.py`自身が置かれたディレクトリの絶対パス、すなわち**`MY_HOME_SYSTEM/` ディレクトリそのもの**であり、環境変数による上書き経路は無い。実機(Raspberry Pi)では`/home/masahiro/develop/MY_HOME_SYSTEM`、CI・ローカルではチェックアウト先の`MY_HOME_SYSTEM/`に解決される。カレントディレクトリに依存しない(`os.path.abspath(__file__)`起点)ため、cron経由(`run_task.sh`)でも直接実行でも同じ値になる。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:253`（参考: [config.md](./config.md)） |
 
 ## 10. 自己検証結果
 

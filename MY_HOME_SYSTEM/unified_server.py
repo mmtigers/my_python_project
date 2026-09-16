@@ -260,6 +260,15 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     例外として、外部からのWebhook受信が必要な以下のパスは全IPからアクセスを許可する:
     - /webhook/switchbot
     - /callback/line
+    - /webhook/alexa
+
+    このリストは「オリジンが外部から到達可能でなければ機能しないパス」の一覧でもある。
+    本ミドルウェア自体は遮断を行わないため、リストに載せることの実際の効果は
+    「クライアントIPの解決と外部アクセスのINFOログ出力をスキップする」ことだけだが、
+    Cloudflare Access側でこれらのパスをバイパス対象に設定し忘れるとWebhookが
+    サーバーまで届かなくなる(Issue #517で /webhook/switchbot・/callback/line が
+    実際にブロックされていた)。エッジ側の設定を点検する際の参照元として、
+    外部Webhookのパスを追加したらここにも必ず追記すること。
 
     許可ネットワーク:
     - プライベートIP (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12)
@@ -274,7 +283,12 @@ async def ip_restriction_middleware(request: Request, call_next: Callable[[Reque
     """
     allowed_webhook_paths = {
         "/webhook/switchbot",
-        "/callback/line"
+        "/callback/line",
+        # Alexaカスタムスキル「ファミクエ」のエンドポイント(routers/alexa_router.py)。
+        # 上2つと同じく Alexa クラウドから外部到達する必要があるが、長らくこのリストから
+        # 漏れていた(docstringが列挙する「外部Webhook」の意図と非対称だった)。
+        # 署名・タイムスタンプ検証は core/alexa_verifier.py が別途行う。
+        "/webhook/alexa",
     }
 
     # 1. 例外パスの判定（Webhook関連は無条件で許可）

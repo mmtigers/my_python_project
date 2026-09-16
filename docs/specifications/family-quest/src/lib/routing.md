@@ -111,7 +111,9 @@ graph TD
 
 ## 相互参照による補足情報
 
-（本ファイルは新規作成のため、他ドキュメントとの相互参照による補足情報はまだ存在しない。）
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `MY_HOME_SYSTEM/unified_server.py`側の実際のルーティング定義との厳密な整合 | `unified_server.py`378〜411行目を直接確認した。`QUEST_DIST_DIR`が有効な場合に定義されるのは次の2つで、本ファイルの`isCameraRoute`の前提と整合している: (1) `@app.get("/quest/{full_path:path}")` と `@app.get("/camera/{full_path:path}")` を**同じ関数**`serve_quest_spa`に付け、実ファイルがあれば`FileResponse`、無ければ`index.html`を返す(パストラバーサル対策として`os.path.commonpath`で`quest_dist_dir`配下に収まることを検証し、外れれば404)。(2) `@app.get("/quest")`・`@app.get("/quest/")`・`@app.get("/camera")`・`@app.get("/camera/")` を`serve_quest_root`に付け、いずれも`index.html`を返す。すなわち**`/camera`配下と`/quest`配下はどちらも同じSPAの`index.html`へ落ちる**ため、`/camera`・`/camera/...`に加えて`/quest/camera`・`/quest/camera/...`もクライアント側でカメラビューと判定する必要があり、本ファイルが`segments[0] === 'camera' \|\| (segments[0] === 'quest' && segments[1] === 'camera')`としているのは正しい。セグメント単位で判定するため、将来`/settings/camera-help`のようなパスを追加しても誤ってカメラビューになることはない(#472)。なお`QUEST_DIST_DIR`が未設定/不在の場合はこれらのルート自体が定義されず、警告ログのみが出る(413〜415行目)。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:370-415`（参考: [unified_server.md](../../../MY_HOME_SYSTEM/unified_server.md)・[pathSegments.md](./pathSegments.md)） |
 
 ## 10. 自己検証結果
 
