@@ -21,7 +21,7 @@
 - [alexa_router.md](./alexa_router.md) — Webhook例外パス(`/webhook/alexa`)を持つルーター
 - [system_router.md](./system_router.md) — `/api/system`にマウントされるルーター(手動バックアップ)
 - [camera_router.md](./camera_router.md) — `/api/cameras`にマウントされ、SPAルーティング(`/camera/*`)とも連動するルーター
-- `routers/alexa_router.py`(Issue #126で追記: 対応する仕様書は現時点で未作成) — タグ`alexa`でマウントされるルーター（30, 337行目）
+- `routers/alexa_router.py` — タグ`alexa`でマウントされるルーター（30, 337行目）。**(Issue #657 で訂正: 対応する仕様書 [alexa_router.md](./alexa_router.md) は作成済み。)**
 - [routine_router.md](./routine_router.md) — `/api/routine`にマウントされるルーター（デイリールーティン/すごろく機能。30, 338行目）
 
 ## 2. ファイルの概要

@@ -121,7 +121,7 @@ SQLiteのみを使用し、単一ファイル `config.SQLITE_DB_PATH`（デフ�
 
 ### DDD バッチ処理
 
-NASマウントを共有している（MY_HOME_SYSTEM側の `nas_monitor.py` は、DDDによってNAS容量が逼迫した際にスロットリング/アラートを行うことができる）だけでなく、`sys.path` に `MY_HOME_SYSTEM/` を追加して `core.*` を直接importする実依存もある（Issue #553）。ルート解決は `DDD/file_utils.py` の `resolve_my_home_system_root()` に集約されている。
+NASマウントを共有している（ただし `nas_monitor.py` はNASの死活・容量を監視して通知するだけで、DDDのバッチを止める・絞る機構は実装されていない。DDD側は `batch_download_discord.py` の `check_disk_space` で自前に空き容量を判定する。Issue #656）だけでなく、`sys.path` に `MY_HOME_SYSTEM/` を追加して `core.*` を直接importする実依存もある（Issue #553）。ルート解決は `DDD/file_utils.py` の `resolve_my_home_system_root()` に集約されている。
 
 | ファイル | import 内容 |
 | --- | --- |

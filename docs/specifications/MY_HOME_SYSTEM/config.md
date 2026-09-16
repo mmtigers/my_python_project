@@ -3,6 +3,7 @@
 | 項目 | 内容 |
 | --- | --- |
 | 対象ファイル | `config.py` |
+| 解析基準コミット | Issue #657 対応時点(2026-09-16)の master + 本PR |
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
@@ -137,6 +138,31 @@ Issue #488で、未実装のタイムラプススケジュール機能(`TIMELAPS
 Issue #488で、`family_events.json`（家族の記念日・イベント設定`IMPORTANT_DATES`用）の読み込み処理は本ファイルから完全に削除されたため、外部依存としては存在しなくなった。
 
 ## 4. 主要要素の定義（関数 / エンドポイント / コンポーネント）
+
+### 未記載だったモジュールレベル定数（Issue #657 で追記）
+
+本仕様書に記載が漏れていた定数。いずれも `config.py` のモジュールレベルで定義され、各所から直接参照される。
+
+| 定数 | 値 | 用途 |
+| --- | --- | --- |
+| `SQLITE_TABLE_BICYCLE` | `"bicycle_parking_records"` | 駐輪場記録テーブル名 |
+| `BACKUP_FILES` | `[SQLITE_DB_PATH, "config.py", "devices.json"]` | `services/backup_service.py` が NAS へ退避する対象。**Issue #649 で `.env` を除外**(NAS 共有の閲覧権限がそのままシークレットの閲覧権限になるため) |
+| `DEFAULT_SOUND_SOURCE` | `{BASE_DIR}/defaults/sounds` | 効果音の配布元(NAS 側 `SOUND_DIR` へ同期する元) |
+| `NAS_CHECK_TIMEOUT` | `5` | NAS 疎通確認のタイムアウト秒 |
+| `NVR_RECORD_DIR` | `{NAS_MOUNT_POINT}/home_system/nvr_recordings` | NVR 録画の保存先(`camera_monitor` のスナップショット抽出元) |
+| `TIMELAPSE_FONT_FILE` | `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` | タイムラプスの焼き込み文字フォント |
+| `DB_BACKUPS_DIR` | `{NAS_PROJECT_ROOT}/db_backups` | DBバックアップの出力先 |
+| `SOUND_PLAYER_ARGS` | `["-o", "pulse"]` | `core/sound_manager.py` が再生コマンドへ渡す追加引数 |
+| `MEMORY_ALERT_LAST_NOTIFY_FILE` | `{FALLBACK_ROOT}/last_memory_alert.txt` | `memory_monitor` の通知クールダウン用状態ファイル |
+
+* 根拠: `SQLITE_TABLE_BICYCLE: str = "bicycle_parking_records"` (行番号: 311)、`BACKUP_FILES: List[str] = [SQLITE_DB_PATH, "config.py", "devices.json"]` (行番号: 317)、`DEFAULT_SOUND_SOURCE: str = os.path.join(BASE_DIR, "defaults", "sounds")` (行番号: 320)、`NAS_CHECK_TIMEOUT: int = 5` (行番号: 354)、`NVR_RECORD_DIR` (行番号: 409)、`TIMELAPSE_FONT_FILE` (行番号: 431)、`DB_BACKUPS_DIR` (行番号: 443)、`SOUND_PLAYER_ARGS` (行番号: 451)、`MEMORY_ALERT_LAST_NOTIFY_FILE` (行番号: 500)
+
+### `_resolve_assets_dir` / `__getattr__` / `prewarm_nas_paths`（Issue #330 の遅延解決、#657 で追記）
+
+* **役割**: NAS 依存パス定数の遅延解決(PEP 562)。`_resolve_assets_dir()` が `ensure_safe_path_with_backoff` で `ASSETS_DIR` を検証・解決し、`_ASSETS_SUBDIRS_TO_CREATE` の各サブディレクトリを作る。モジュールの `__getattr__(name)` は `ASSETS_DIR` と `_ASSETS_DERIVED_PATHS` の派生パス(`UPLOAD_DIR`・`SOUND_DIR` 等)を初回アクセス時にだけ解決し、結果を `globals()` に書き込むため以降は通常の属性解決になる(=キャッシュ。テストは `monkeypatch.setattr`/`delattr` で上書き・再解決できる)。`prewarm_nas_paths()` は `unified_server.py` の `lifespan` から呼ばれ、遅延化前と同じく起動時点で NAS の検証・フォールバック判定を済ませる。
+* **戻り値/レスポンス**: `_resolve_assets_dir` / `__getattr__` は `str`、`prewarm_nas_paths` は `None`。未知の属性名では `__getattr__` が `AttributeError` を送出する。
+* **副作用**: NAS 上のディレクトリ作成、`globals()` への書き込み、失敗時の warning ログ(例外は送出せずローカルへフォールバック)。
+* 根拠: `def _resolve_assets_dir() -> str:` (行番号: 559)、`def __getattr__(name: str) -> str:` (行番号: 573)、`def prewarm_nas_paths() -> None:` (行番号: 593)
 
 ### `verify_and_initialize_storage`
 

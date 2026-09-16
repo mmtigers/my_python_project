@@ -12,7 +12,7 @@
 
 * [file_utils.md](./file_utils.md) — 本ファイルが利用する共通ファイル名サニタイズ処理（`sanitize_filename`）と、Discord Webhookサーキットブレーカー（`DiscordCircuitBreaker`）の実装元。後者は`newface_monitor.py`の`DiscordNotifier`とも共通利用される。
 * [../MY_HOME_SYSTEM/notification_service.md](../MY_HOME_SYSTEM/notification_service.md) — 本ファイルがフォールバック的にインポートするDiscord Webhook通知処理（`_send_discord_webhook`）の実装元。
-* [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NAS容量監視との関連（全体設計書によれば、DDDのダウンロード活動によるNAS容量逼迫を`nas_monitor.py`側が監視する運用連携があるとされる。ただし本ファイルは`nas_monitor.py`を直接importしておらず、独自の簡易的な容量チェック（`FileSystemManager.check_disk_space`）を実装している点に注意）。
+* [../MY_HOME_SYSTEM/nas_monitor.md](../MY_HOME_SYSTEM/nas_monitor.md) — NASの死活・容量監視。**(Issue #656 で訂正)** 両者の間に連携は無く、`nas_monitor.py` は通知・DB記録のみでDDDのバッチを止めたり絞ったりしない。DDD側は `FileSystemManager.check_disk_space` で独自に空き容量を判定する。
 * [../全体設計書.md](../全体設計書.md) — DDDサブシステム全体の位置付けおよびMY_HOME_SYSTEMとのNASリソース協調に関する記述。
 * [newface_monitor.md](./newface_monitor.md) — `run_monitor`の多重起動防止ロックは、本ファイルの`BatchDownloader.run`が既に採用している`fcntl.flock`による同種のロックパターンを踏襲したものである（`newface_monitor.py`のコメントで直接言及されている）。
 
@@ -474,13 +474,13 @@
 
 ### `FileSystemManager.check_disk_space`
 
-* **役割**: 対象パス（存在しない場合は存在する親ディレクトリまで遡って）のディスク空き容量を確認し、設定値(`MIN_FREE_SPACE_GB`)を下回る場合は警告通知を送信する静的メソッド。
-* 根拠: [FileSystemManager.check_disk_space] (行番号: 582〜596 / 抜粋: "def check_disk_space(path: Path) -> bool:")
+* **役割**: 対象パス（存在しない場合は存在する親ディレクトリまで遡って）のディスク空き容量を確認し、閾値を下回る場合は警告通知を送信する静的メソッド。閾値は既定で `CONFIG.MIN_FREE_SPACE_GB` だが、引数 `min_free_gb` で上書きできる(HLSフラグメントの一時保存先 `LOCAL_TMP_DIR` には `LOCAL_TMP_MIN_FREE_SPACE_GB` を渡す)。**(Issue #657 で訂正: 以前この節は引数を `path` のみと記述していた。)**
+* 根拠: [FileSystemManager.check_disk_space] (行番号: 582〜596 / 抜粋: "def check_disk_space(path: Path, min_free_gb: Optional[int] = None) -> bool:")
 
 
-* **引数/リクエスト**: `path: Path`
+* **引数/リクエスト**: `path: Path`、`min_free_gb: Optional[int] = None`
 * **戻り値/レスポンス**: `bool`（容量十分なら`True`、不足時`False`、例外時は安全側に倒して`False`）
-* 根拠: [戻り値ヒント と例外時のreturn] (行番号: 582, 375 / 抜粋: "def check_disk_space(path: Path) -> bool:", "return False")
+* 根拠: [引数と戻り値ヒント] (行番号: 582〜583 / 抜粋: "threshold_gb = CONFIG.MIN_FREE_SPACE_GB if min_free_gb is None else min_free_gb")
 
 
 * **副作用**: `DiscordNotifier.send` による容量不足時の警告通知、例外時のエラーログ出力。
@@ -902,13 +902,13 @@
 
 ### `BatchDownloader._get_strategy`
 
-* **役割**: URLの内容（YouTubeドメインか、`missav`を含むか）に応じて使用するダウンロード戦略インスタンスを決定する。YouTubeで機能フラグが無効の場合は`None`を返しスキップさせる。
-* 根拠: [_get_strategy] (行番号: 1304〜1313 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
+* **役割**: URLの内容(`missav` を含むか)に応じて使用するダウンロード戦略インスタンスを決定する。**(Issue #535)** 以前あった「YouTube で機能フラグが無効なら `None` を返す」分岐は、`_prepare_tasks` が `ENABLE_YOUTUBE_DL=False` のとき YouTube タスクを先に除外するため到達不能なデッドコードであり、削除して戻り値を非 `Optional` にした(呼び出し側の `None` チェックも削除済み)。
+* 根拠: [_get_strategy] (行番号: 1304〜1313 / 抜粋: "def _get_strategy(self, url: str) -> DownloadStrategy:")
 
 
 * **引数/リクエスト**: `url: str`
-* **戻り値/レスポンス**: `Optional[DownloadStrategy]`（`ScrapingStrategy`、`UniversalYtDlpStrategy`、またはスキップ対象時`None`）
-* 根拠: [戻り値ヒント] (行番号: 1304 / 抜粋: "def _get_strategy(self, url: str) -> Optional[DownloadStrategy]:")
+* **戻り値/レスポンス**: `DownloadStrategy`（`ScrapingStrategy` または `UniversalYtDlpStrategy`。`None` は返さない）
+* 根拠: [戻り値ヒント] (行番号: 1304 / 抜粋: "def _get_strategy(self, url: str) -> DownloadStrategy:")
 
 
 * **副作用**: 無効化されたYouTube URLに対するログ出力。
