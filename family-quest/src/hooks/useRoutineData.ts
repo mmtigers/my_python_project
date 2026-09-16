@@ -14,10 +14,16 @@ const POLL_INTERVAL_MS = 1000 * 15;
 // と、何も操作せずポーリングだけで検知される受動的な通過(下のuseEffect)の両方が経路になる。
 export type RoutineLevelUpInfo = { newLevel: number };
 
+// 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、デイリークエストから
+// すごろくへ寄せたステップを完了したときの即時報酬。クエスト完了時と同じように
+// 「いくらもらえたか」をその場で見せるために呼び出し元へ通知する。
+export type RoutineStepRewardInfo = { gold: number; exp: number };
+
 export const useRoutineData = (
     userId: string | undefined,
     onLevelUp?: (info: RoutineLevelUpInfo) => void,
     onError?: (detail: string) => void,
+    onStepReward?: (info: RoutineStepRewardInfo) => void,
 ) => {
     const queryClient = useQueryClient();
 
@@ -66,6 +72,13 @@ export const useRoutineData = (
         },
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: ['routineToday', userId] });
+            // ステップ個別報酬はquest_users.gold/expを直接動かすため、ステータス
+            // カード(useGameData)側のキャッシュも無効化しないと所持ゴールドの表示が
+            // 次のリフェッチまで古いままになる。
+            if (res.granted_gold || res.granted_exp) {
+                queryClient.invalidateQueries({ queryKey: ['gameData'] });
+                onStepReward?.({ gold: res.granted_gold, exp: res.granted_exp });
+            }
             // #(コードレビューで発覚): 以前はレスポンスを無条件に破棄しており、
             // チェックポイント通過ボーナスでレベルアップしても(サーバー側では
             // quest_users.levelが更新されているのに)LEVEL UP演出が一切出なかった。

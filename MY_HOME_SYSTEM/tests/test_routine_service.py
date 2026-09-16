@@ -314,13 +314,17 @@ class TestEveningFreeTimeTvUnlock:
         mock_trigger.assert_not_called()
 
     def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
-        """親自身が完了させても、子供向けのTV解錠報酬は発火しない。"""
+        """親自身が完了させても、子供向けのTV解錠報酬は発火しない。
+
+        パパのpmフローは子ども用と別物(宿題・明日の準備ではなく「お仕事」)なので、
+        そのユーザー自身のステップkeyで自由時間まで進める。
+        """
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='dad', role='role_adult')
 
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('work', 'handwash', 'snack'):
             routine_service.complete_step('dad', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
@@ -967,3 +971,225 @@ class TestStepEventRecording:
 
         assert {e['step_key'] for e in _step_events(flow_key='am')} == {'teeth'}
         assert {e['step_key'] for e in _step_events(flow_key='pm')} == {'handwash', 'snack'}
+
+
+def _user_balance(user_id):
+    with common.get_db_cursor() as cur:
+        row = cur.execute(
+            "SELECT gold, exp, level FROM quest_users WHERE user_id=?", (user_id,)
+        ).fetchone()
+    return row['gold'], row['exp'], row['level']
+
+
+class TestAdultFlows:
+    """パパ・ママには子ども用ではなく大人用のフローを出す。
+
+    以前は全ユーザーが ROUTINE_FLOWS(子ども用)を共用していたため、親の画面にも
+    「宿題」「明日の準備」が表示されていた(要件: これを無くし、代わりに大人版の
+    すごろくを出す)。
+    """
+
+    def test_child_still_gets_child_flow(self, isolated_db):
+        _seed_user(user_id='son', role='role_child')
+        state = routine_service.get_today_state('son', now=_at(14, 0))
+        keys = [s['key'] for s in state['flows']['pm']['steps']]
+        assert 'homework' in keys
+        assert 'tomorrow_prep' in keys
+
+    def test_parent_pm_flow_has_no_child_steps(self, isolated_db):
+        """パパのpmは14:00時点でまだ勤務中のため、一本道の先頭が「お仕事」になる。"""
+        _seed_user(user_id='dad', role='role_adult')
+        state = routine_service.get_today_state('dad', now=_at(14, 0))
+        keys = [s['key'] for s in state['flows']['pm']['steps']]
+        assert 'homework' not in keys
+        assert 'tomorrow_prep' not in keys
+        assert keys == [
+            'work', 'handwash', 'snack', 'free',
+            'dinner', 'bath', 'nightclothes', 'nightteeth', 'sleep',
+        ]
+
+    def test_mom_pm_flow_has_her_own_task_step(self, isolated_db):
+        _seed_user(user_id='mom', role='role_adult')
+        state = routine_service.get_today_state('mom', now=_at(14, 0))
+        keys = [s['key'] for s in state['flows']['pm']['steps']]
+        assert keys == [
+            'handwash', 'snack', 'cook_dinner', 'free',
+            'dinner', 'bath', 'nightclothes', 'nightteeth', 'sleep',
+        ]
+        assert 'work' not in keys  # パパ固有のステップは混ざらない
+
+    def test_parent_am_flow_matches_child_am_flow(self, isolated_db):
+        """朝のチェックリストは子どもと同一(左右対称に見せるため)。"""
+        _seed_user(user_id='dad', role='role_adult')
+        _seed_user(user_id='son', role='role_child')
+        dad = routine_service.get_today_state('dad', now=_at(6, 0))['flows']['am']
+        son = routine_service.get_today_state('son', now=_at(6, 0))['flows']['am']
+        assert [s['key'] for s in dad['steps']] == [s['key'] for s in son['steps']]
+
+    def test_unknown_adult_falls_back_to_generic_adult_flow(self, isolated_db):
+        """dad/mom以外のrole_adultユーザーも、子ども用フローには落ちない。"""
+        _seed_user(user_id='grandpa', role='role_adult')
+        state = routine_service.get_today_state('grandpa', now=_at(14, 0))
+        keys = [s['key'] for s in state['flows']['pm']['steps']]
+        assert 'homework' not in keys
+        assert keys[:3] == ['handwash', 'snack', 'free']
+
+    def test_role_null_user_falls_back_to_child_flow(self, isolated_db):
+        """quest_users.roleがNULLの旧データは従来どおり子ども用フローになる。"""
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                ('legacy', 'レガシー', 'Novice', 1, 0, 0),
+            )
+        state = routine_service.get_today_state('legacy', now=_at(14, 0))
+        assert 'homework' in [s['key'] for s in state['flows']['pm']['steps']]
+
+    def test_parent_cannot_complete_a_child_only_step(self, isolated_db):
+        from fastapi import HTTPException
+        _seed_user(user_id='dad', role='role_adult')
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('dad', 'pm', 'homework', now=_at(14, 0))
+        assert exc_info.value.status_code == 404
+
+    def test_dad_work_step_is_skipped_on_weekend(self, isolated_db):
+        """土日は勤務が無いため「お仕事」はスキップされ、「帰宅・手洗い」も
+        子ども用と同じくスキップされるので、ひと休みから始まる。"""
+        _seed_user(user_id='dad', role='role_adult')
+        state = routine_service.get_today_state('dad', now=_saturday_at(14, 0))
+        statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
+        assert statuses['work'] == 'done'
+        assert statuses['handwash'] == 'done'
+        assert statuses['snack'] == 'current'
+
+    def test_mom_cook_dinner_step_is_not_skipped_on_weekend(self, isolated_db):
+        """夕食づくりは毎日行うため、元クエスト(id=21、'days'指定なし)と同じく
+        土日もスキップされない。"""
+        _seed_user(user_id='mom', role='role_adult')
+        state = routine_service.get_today_state('mom', now=_saturday_at(14, 0))
+        statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
+        assert statuses['cook_dinner'] == 'locked'
+
+
+class TestStepRewards:
+    """quest_data.QUESTS から大人用すごろくへ寄せたクエストの、ステップ個別報酬。"""
+
+    def test_child_steps_have_no_step_reward(self, isolated_db):
+        _seed_user(user_id='son', role='role_child', gold=0, exp=0)
+        state = routine_service.complete_step('son', 'pm', 'handwash', now=_at(14, 0))
+        assert state['granted_gold'] == 0
+        assert state['granted_exp'] == 0
+        assert _user_balance('son')[:2] == (0, 0)
+
+    def test_dad_steps_have_no_step_reward(self, isolated_db):
+        """パパの「お仕事」はデイリークエスト id=10「会社勤務」が報酬を持ち続けるため、
+        すごろく側のステップには報酬を持たせない(二重計上を避ける)。"""
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        state = routine_service.complete_step('dad', 'pm', 'work', now=_at(14, 0))
+        assert state['granted_gold'] == 0
+        assert state['granted_exp'] == 0
+        assert _user_balance('dad')[:2] == (0, 0)
+
+    def test_cook_dinner_grants_the_retired_quest_reward(self, isolated_db):
+        """旧クエスト id=21「夕食を作る」と同額(exp150/gold150)がその場で入る。"""
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        routine_service.complete_step('mom', 'pm', 'handwash', now=_at(14, 0))
+        state = routine_service.complete_step('mom', 'pm', 'snack', now=_at(14, 1))
+        assert state['granted_gold'] == 0  # ひと休みには報酬が無い
+
+        state = routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(14, 2))
+        assert state['granted_gold'] == 150
+        assert state['granted_exp'] == 150
+        gold, _exp, _level = _user_balance('mom')
+        assert gold == 150
+
+    def test_step_reward_is_not_granted_twice(self, isolated_db):
+        """一本道のステップは完了後に再度completeできない(=二重付与にならない)。"""
+        from fastapi import HTTPException
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        routine_service.complete_step('mom', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.complete_step('mom', 'pm', 'snack', now=_at(14, 1))
+        routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(14, 2))
+        assert _user_balance('mom')[0] == 150
+
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(14, 3))
+        assert exc_info.value.status_code == 409
+        assert _user_balance('mom')[0] == 150
+
+    def test_weekend_skipped_step_grants_nothing(self, isolated_db):
+        """weekend_skipで'done'扱いになったステップには報酬が入らない。
+
+        パパの「お仕事」は報酬を持たないため、報酬を持つステップでこの性質を
+        確かめられるよう、ここではママの土曜フローで cook_dinner が(スキップ
+        されず)'locked'のままであり報酬も入っていないことを併せて確認する。
+        """
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        dad = routine_service.get_today_state('dad', now=_saturday_at(14, 0))
+        dad_statuses = {s['key']: s['status'] for s in dad['flows']['pm']['steps']}
+        assert dad_statuses['work'] == 'done'
+        assert _user_balance('dad')[0] == 0
+
+        routine_service.get_today_state('mom', now=_saturday_at(14, 0))
+        assert _user_balance('mom')[0] == 0
+
+    def test_missed_step_at_checkpoint_grants_nothing(self, isolated_db):
+        """18:00の締切までに完了しなかったステップは'remind'になり、報酬は入らない
+        (チェックポイント通過ボーナスの按分だけが入る)。"""
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        routine_service.complete_step('mom', 'pm', 'handwash', now=_at(14, 0))
+        state = routine_service.get_today_state('mom', now=_at(18, 1))['flows']['pm']
+        statuses = {s['key']: s['status'] for s in state['steps']}
+        assert statuses['cook_dinner'] == 'remind'
+        # 3ステップ中1つだけ完了 → 満額150Goldの1/3。夕食づくりの150Goldは入らない。
+        gold, _exp, _level = _user_balance('mom')
+        assert gold == round(150 * (1 / 3))
+
+    def test_step_rewards_are_exposed_per_step(self, isolated_db):
+        _seed_user(user_id='mom', role='role_adult')
+        state = routine_service.get_today_state('mom', now=_at(14, 0))
+        by_key = {s['key']: s for s in state['flows']['pm']['steps']}
+        assert (by_key['cook_dinner']['gold'], by_key['cook_dinner']['exp']) == (150, 150)
+        assert (by_key['snack']['gold'], by_key['snack']['exp']) == (0, 0)
+
+    def test_get_today_state_never_grants_step_rewards(self, isolated_db):
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        for _ in range(3):
+            state = routine_service.get_today_state('mom', now=_at(14, 0))
+            assert state['flows']['pm']['granted_gold'] == 0
+        assert _user_balance('mom')[0] == 0
+
+    def test_step_reward_level_up_is_reported(self, isolated_db):
+        """ステップ個別報酬でレベルアップした場合もleveled_upが立つ
+        (チェックポイントボーナスと同じ扱い)。"""
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0, level=1)
+        routine_service.complete_step('mom', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.complete_step('mom', 'pm', 'snack', now=_at(14, 1))
+        state = routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(14, 2))
+        _gold, _exp, level = _user_balance('mom')
+        assert state['leveled_up'] is (level > 1)
+        if state['leveled_up']:
+            assert state['new_level'] == level
+
+
+class TestRetiredQuestsAreGone:
+    """すごろくへ寄せたクエストが quest_data.QUESTS に残っていないこと(二重計上防止)。
+
+    逆に、すごろくへ寄せていないクエストは残っていることも併せて確認する。
+    """
+
+    def test_moved_quest_removed_from_quest_master_data(self):
+        import quest_data
+        ids = {q['id'] for q in quest_data.QUESTS}
+        assert 21 not in ids    # 夕食を作る(ママ) → MOM_ROUTINE_FLOWS の cook_dinner へ
+        assert 1006 not in ids  # 幼稚園の連絡帳記入 → 現在行っていないため廃止
+
+    def test_quests_not_moved_to_routine_remain(self):
+        """パパの会社勤務は「お仕事」ステップと併存する(ステップ側が報酬を持たない)。
+        キッチン/リビングリセットは平日には行わないため土日クエストとして残る。"""
+        import quest_data
+        by_id = {q['id']: q for q in quest_data.QUESTS}
+        assert 10 in by_id
+        assert by_id[12]['days'] == '5,6'
+        assert by_id[13]['days'] == '5,6'

@@ -16,8 +16,9 @@ import config
 import game_logic
 from core import sound_manager
 from routine_data import (
-    FULL_BONUS_EXP, FULL_BONUS_GOLD, ROUTINE_FLOWS, WEEKEND_DAYS, RoutineFlow,
+    FULL_BONUS_EXP, FULL_BONUS_GOLD, WEEKEND_DAYS, RoutineFlow, RoutineStep,
     get_checklist_range, get_checkpoint_index, get_effective_checkpoint_time,
+    get_flow_set, get_step_reward,
 )
 from services import switchbot_service
 from services.quest.locks import JST, _get_user_balance_lock, logger
@@ -28,6 +29,24 @@ TV_UNLOCK_TARGET_USER_ID = 'son'
 
 
 class RoutineService:
+    def _get_user_row(self, cur, user_id: str):
+        """quest_users の行(role含む)を返す。存在しなければ404。
+
+        フローセットの振り分け(子ども用/大人用)に role が要るため、以前の
+        `SELECT 1` による存在確認からカラム取得へ変更している。
+        """
+        user = cur.execute(
+            "SELECT user_id, role FROM quest_users WHERE user_id=?", (user_id,)
+        ).fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user
+
+    def _flow_set_for(self, cur, user_id: str) -> Dict[str, RoutineFlow]:
+        """そのユーザーに出すべきフローセットを返す(存在確認も兼ねる)。"""
+        user = self._get_user_row(cur, user_id)
+        return get_flow_set(user_id, user['role'])
+
     def _today_str(self, now: datetime.datetime) -> str:
         return now.strftime('%Y-%m-%d')
 
@@ -304,6 +323,29 @@ class RoutineService:
             sound_manager.play("level_up")
         return {"leveled_up": leveled_up, "new_level": new_level}
 
+    def _grant_step_reward(self, cur, user_id: str, progress: Dict[str, Any], step: RoutineStep) -> None:
+        """ステップ個別の即時報酬(routine_data.RoutineStepのgold/exp)をその場で付与する。
+
+        大人用フローで、生活動線そのものだったデイリークエスト(例: ママの「夕食を
+        作る」)をquest_data.QUESTSから「すごろく」へ寄せた分の報酬。チェックポイント
+        通過ボーナス(_apply_forced_transition)とは別枠で、順番どおり完了報告した
+        「その1回」でのみ加算される(以降そのステップは'done'のままで、シーケンシャルな
+        進行は後戻りしないため二重付与は起きない)。子ども用フローのステップは
+        gold/expを持たないので何もしない。
+        """
+        gold, exp = get_step_reward(step)
+        if not gold and not exp:
+            return
+        result = self._grant_bonus(cur, user_id, gold, exp)
+        # フロント側で「+50 G」のトーストを出すための、この1レスポンス限りの加算額。
+        progress['granted_gold'] = progress.get('granted_gold', 0) + gold
+        progress['granted_exp'] = progress.get('granted_exp', 0) + exp
+        progress['leveled_up'] = bool(result['leveled_up']) or progress.get('leveled_up', False)
+        progress['new_level'] = result['new_level']
+        logger.info(
+            f"Routine Step Reward: User={user_id}, Step={step['key']}, Gold={gold}, Exp={exp}"
+        )
+
     def _apply_forced_transition(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
     ) -> Dict[str, Any]:
@@ -345,7 +387,10 @@ class RoutineService:
         self._save_progress(cur, progress, 'forced_transition', now.isoformat())
         if bonus_gold or bonus_exp:
             bonus_result = self._grant_bonus(cur, user_id, bonus_gold, bonus_exp)
-            progress['leveled_up'] = bonus_result['leveled_up']
+            # 同一リクエスト内で先にステップ個別報酬(_grant_step_reward)によるレベル
+            # アップが起きている場合があるため、フラグは上書きせずORで畳む
+            # (new_levelは後から付与した側=こちらが最新のレベルになる)。
+            progress['leveled_up'] = bonus_result['leveled_up'] or progress.get('leveled_up', False)
             progress['new_level'] = bonus_result['new_level']
 
         logger.info(
@@ -431,6 +476,10 @@ class RoutineService:
                 "is_checkpoint": bool(step['checkpoint_time']),
                 "is_checklist": step['checklist'],
                 "status": progress['steps_status'].get(step['key'], 'locked'),
+                # 大人用フローに寄せたデイリークエスト相当のステップ個別報酬
+                # (子ども用フローのステップは常に0)。画面に「+50 G」として出す。
+                "gold": get_step_reward(step)[0],
+                "exp": get_step_reward(step)[1],
             }
             for step in flow['steps']
         ]
@@ -457,20 +506,22 @@ class RoutineService:
             # (以後の呼び出しは冪等ガードで早期returnするため再度立つことはない)。
             "leveled_up": progress.get('leveled_up', False),
             "new_level": progress.get('new_level'),
+            # leveled_upと同じく、ステップ個別報酬を付与した「その1回のレスポンス」
+            # でのみ非0になる(GET /todayは付与を行わないため常に0)。
+            "granted_gold": progress.get('granted_gold', 0),
+            "granted_exp": progress.get('granted_exp', 0),
             "steps": steps_out,
         }
 
     def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
         with _get_user_balance_lock(user_id):
             with common.get_db_cursor(commit=True) as cur:
-                user = cur.execute("SELECT 1 FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
-                if not user:
-                    raise HTTPException(status_code=404, detail="User not found")
+                flows = self._flow_set_for(cur, user_id)
 
                 now = now or datetime.datetime.now(JST)
                 date_str = self._today_str(now)
                 flows_out: Dict[str, Any] = {}
-                for flow_key, flow in ROUTINE_FLOWS.items():
+                for flow_key, flow in flows.items():
                     if not self._is_flow_started_today(flow, now):
                         flows_out[flow_key] = {"started": False, "title": flow['title']}
                         continue
@@ -483,15 +534,14 @@ class RoutineService:
     def complete_step(
         self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None
     ) -> Dict[str, Any]:
-        if flow_key not in ROUTINE_FLOWS:
-            raise HTTPException(status_code=404, detail="Unknown flow_key")
-        flow = ROUTINE_FLOWS[flow_key]
-
         with _get_user_balance_lock(user_id):
             with common.get_db_cursor(commit=True) as cur:
-                user = cur.execute("SELECT 1 FROM quest_users WHERE user_id=?", (user_id,)).fetchone()
-                if not user:
-                    raise HTTPException(status_code=404, detail="User not found")
+                # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、
+                # flow_keyの検証もユーザーを解決してから行う。
+                flows = self._flow_set_for(cur, user_id)
+                if flow_key not in flows:
+                    raise HTTPException(status_code=404, detail="Unknown flow_key")
+                flow = flows[flow_key]
 
                 now = now or datetime.datetime.now(JST)
                 if not self._is_flow_started_today(flow, now):
@@ -522,6 +572,7 @@ class RoutineService:
                         raise HTTPException(status_code=400, detail="自由時間は時間になると自動的に次へ進みます")
 
                     progress['steps_status'][step_key] = 'done'
+                    self._grant_step_reward(cur, user_id, progress, current_step)
                     next_index = self._next_active_index(flow, progress['steps_status'], idx + 1)
                     progress['current_step_index'] = next_index
                     self._activate_block(flow, progress['steps_status'], next_index)

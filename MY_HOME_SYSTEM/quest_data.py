@@ -96,19 +96,29 @@ QUESTS = [
     # A-2. 通常：パパ (Dad)
     # ------------------------------------------
     {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
-    {'id': 12, 'title': 'キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'days': '0,1,2,3,4',  'desc': 'シンクをピカピカにして明日を迎える'},
-    {'id': 13, 'title': 'リビングリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🪁', 'days': '0,1,2,3,4', 'desc': 'リビングをピカピカにして明日を迎える'},
- 
+    # id=12/13 のリセット系は平日には行わないため(要件確認済み)、'days' を平日
+    # (0,1,2,3,4)から土日(5,6)へ変更した。パパ用の「きょうのすごろく」
+    # (routine_data.py DAD_ROUTINE_FLOWS)には載せず、クエストのまま残す。
+    {'id': 12, 'title': 'キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'days': '5,6',  'desc': 'シンクをピカピカにして明日を迎える'},
+    {'id': 13, 'title': 'リビングリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🪁', 'days': '5,6', 'desc': 'リビングをピカピカにして明日を迎える'},
+
     # ------------------------------------------
     # A-3. 通常：ママ (Mom)
     # ------------------------------------------
     {'id': 20, 'title': '昼食を作る', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'B', 'exp': 100, 'gold': 100, 'icon': '🥪', 'start_time': '11:00', 'end_time': '14:00', 'desc': '休日のエネルギー補給'},
-    {'id': 21, 'title': '夕食を作る', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'A', 'exp': 150, 'gold': 150, 'icon': '🍳', 'start_time': '16:00', 'end_time': '20:00', 'desc': '家族の健康を作る毎日の錬金術'},
+    # id=21「夕食を作る」は、ママ用の「きょうのすごろく」(routine_data.py
+    # MOM_ROUTINE_FLOWS の pm フロー、'cook_dinner'ステップ)へ移設したため廃止。
+    # クエストとすごろくの両方に出て二重に報酬を得られる状態を避けるための退役で、
+    # 報酬額(exp150/gold150)・毎日行う点はそのままステップ個別報酬として
+    # 引き継いでいる(元の start_time/end_time による時間帯制限は、すごろく側に
+    # 同等の仕組みが無いためチェックポイント18:00までという条件に置き換わる)。
+    # パパ側の同名クエスト id=61(special)はそのまま残る。
     {'id': 23, 'title': '日中の家庭運営・育児基本給', 'type': 'daily', 'target': 'mom', 'category': 'work', 'difficulty': 'S', 'exp': 250, 'gold': 50, 'icon': '🏠', 'desc': '見えない家事と育児への報酬'},
     {'id': 1000, 'title': 'ゴミ捨て (燃えるゴミ)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '0,3', 'desc': '月・木は必ず遂行せよ', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
-    {'id': 1006, 'title': '幼稚園の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '✍️', 'days': '0,1,2,3,4', 'desc': '毎日の体調と様子を報告'},
+    # id=1006「幼稚園の連絡帳記入」は現在行っていないため廃止(要件確認済み)。
+    # すごろく(routine_data.py MOM_ROUTINE_FLOWS)にも載せていない。
     {'id': 1007, 'title': '習い事の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
     {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
 
