@@ -20,6 +20,8 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #659 で変更）** `chronicle` クエリも取得境界で `chronicleResponseSchema.parse()` によるランタイム検証を行う(以前は `gameData` と `purchase` だけが検証され、`chronicle` は無検証で `apiClient.get` の戻り値をそのまま返していた)。あわせて mutation 経路(`completeQuest` / `cancelQuest` / `approveQuest` / `rejectQuest` / `refreshData`)の回帰テストを `src/hooks/useGameData.mutations.test.tsx` に追加し、本フックのカバレッジは 42.85% から 81.41% になった。
+
 * React Queryを活用し、ゲーム内の各種データ（ユーザー、クエスト、報酬、完了/申請中履歴、家族の年代記（チャットログ）など）の取得、定期更新（ポーリング）、および状態変更（完了・承認・却下・取消・購入）のAPIリクエストを統合管理するカスタムフック `useGameData` を提供する。
 * データのローディング状態や、サーバーデータが欠損している場合のフォールバックデータ（マスターデータ等）の適用を責務としている。引数`currentUserIdx`に対応する閲覧中ユーザーの`user_id`を`viewerUserIdRef`に保持し、次回の`gameData`取得時に`viewer_user_id`クエリパラメータとして送信することで、共有クエストのボーナス計算をサーバー側で「閲覧中のユーザー」の履歴を代表として行えるようにしている。
 * **（#412で修正）** クエスト完了・キャンセル・承認・却下・報酬購入の各ミューテーションは、以前はリクエストボディに`quest.quest_id`/`historyItem.id`/`reward.reward_id`（いずれも`Quest`/`QuestHistory`/`Reward`型では表示用途向けにoptional）をそのまま渡していたため、これらが`undefined`のまま渡ると`JSON.stringify`でキーごと落ち、バックエンドの必須フィールド検証（`QuestAction`/`HistoryAction`/`RewardAction`、いずれも`int`必須）により422になる経路が型上防がれていなかった。各ラッパー関数（`completeQuest`/`cancelQuest`/`approveQuest`/`rejectQuest`/`buyReward`）の先頭でnullチェックを行い、`useMutation`の`mutationFn`自体の引数を`questId`/`historyId`/`rewardId: ID`（必須）に分離することで、undefinedがリクエスト送信経路に乗る余地をコンパイル時に断つようにした。

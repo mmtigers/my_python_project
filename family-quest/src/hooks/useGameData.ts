@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '../lib/apiClient';
 import { INITIAL_USERS, MASTER_QUESTS, MASTER_REWARDS } from '../lib/masterData';
-import { gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';
+import { chronicleResponseSchema, gameDataResponseSchema, purchaseResponseSchema } from '../lib/gameDataSchema';
 import { describeGameDataError, extractErrorDetail } from '../lib/errorDetail';
 import { ID, User, Quest, QuestHistory, Reward, QuestResult } from '@/types';
 
@@ -119,7 +119,11 @@ export const useGameData = (currentUserIdx: number, onLevelUp?: (info: LevelUpIn
     // 2. 年代記データの取得
     const { data: chronicleData } = useQuery<ChronicleResponse>({
         queryKey: ['chronicle'],
-        queryFn: () => apiClient.get('/api/quest/family/chronicle'),
+        // #659: gameData と同様、取得境界で形状を検証する(幽霊フィールドを実行時に即検知する)。
+        queryFn: async () => {
+            const raw = await apiClient.get<unknown>('/api/quest/family/chronicle');
+            return chronicleResponseSchema.parse(raw) as ChronicleResponse;
+        },
         staleTime: 1000 * 60 * 5,
         // queryClient は refetchOnWindowFocus:false で、この useQuery は App に常駐して
         // アンマウントされないため、staleTime だけでは再取得の契機が無い(このデバイス
