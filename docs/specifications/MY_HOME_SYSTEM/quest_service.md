@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 **（Issue #550で全面改訂）** 本ドキュメントは以前、1572行・5クラスを収めていた旧`services/quest_service.py`（クエスト完了・承認・ショップ・インベントリ・マスタ同期の全ロジックを1ファイルに同居させたモノリス）を文書化していた。Issue #550でそのクラス群は`services/quest/`パッケージ配下の6ファイルへ分割され、本ファイルは**既存のimportパス互換のためだけに存在する薄い再エクスポート層(シム)**として書き換えられた（115行）。実装を読む際は、以下の「関連ドキュメント」に列挙した分割後の各ファイルの仕様書を参照すること。本ファイル自体のロジックは「他モジュールからimportして`__all__`で再エクスポートする」ことと「`quest_data`モジュールのimportを試みる」ことの2点に限られる。
 
@@ -177,6 +178,12 @@ graph TD
 | --- | --- | --- |
 | `quest_data.py`の実データ内容 | 定義ファイルの実体は本ファイルからは確認できない。 | `quest_data.py`（[quest_data.md](./quest_data.md)） |
 | ルーター・テストの移行が完了する時期・条件 | モジュールdocstringは「段階的に行う」とのみ述べており、本ファイル（シム）自体をいつ廃止できるかの基準は本ファイルからは不明。 | `docs/runbooks/`配下の関連ドキュメントまたはIssue #550のその後の経過 |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `quest_data.py`の実データ内容 | `MY_HOME_SYSTEM/quest_data.py`を直接確認した。`USERS`(34〜55行目)は`dad`/`mom`/`son`/`daughter`の4件で、キーは`user_id`/`name`/`job_class`/`level`/`exp`/`gold`/`avatar`/`role`/`info`(`role`は`'role_adult'`2名・`'role_child'`2名)。`QUESTS`(81〜220行目)は`id`/`title`/`type`/`target`/`category`/`difficulty`/`exp`/`gold`/`icon`/`desc`を基本キーとし、任意で`days`/`start_time`/`end_time`/`start_date`/`end_date`/`chance`/`pre_requisite_quest_id`/`reset_period`を持つ。`REWARDS`(221〜266行目)は`id`/`title`/`category`/`cost_gold`/`icon_key`/`desc`/`target`。本ファイルはシムとして`quest_data`をモジュール属性で再エクスポートしているだけで、テストがこの属性を差し替える(monkeypatch)経路が`services/quest/game_system.py`の`from services import quest_service as _quest_service_shim`(171行目)により維持されている点が実データそのものより重要である。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:34-266`, `MY_HOME_SYSTEM/services/quest/game_system.py:168-187`（参考: [quest_data.md](./quest_data.md)・[quest_game_system.md](./quest_game_system.md)） |
 
 ## 10. 自己検証結果
 

@@ -152,8 +152,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `Modal`の`preventClose`実装詳細（直接ソース確認） | `family-quest/src/components/ui/Modal.tsx`を直接確認した。`preventClose`（13〜17行目でコメント付きで宣言、既定値`false`、27行目）が`true`の間、ESCキーの`keydown`リスナー登録自体をスキップし（30〜34行目`if (isOpen && !preventClose) window.addEventListener(...)`）、背景クリック用のハンドラも`undefined`に差し替える（48〜49行目`const handleClose = preventClose ? undefined : onClose;`）ことで、ESC・背景クリックのいずれからも`onClose`が呼ばれないようにしている。 | 直接ソース確認: `family-quest/src/components/ui/Modal.tsx:13-17, 27, 30-34, 48-49` |
-| `Button`の`isLoading`/`disabled`表示詳細 | `MessageModal.md`の解析によれば、`Button`は`disabled={disabled || isLoading}`により見た目上クリックを抑制するのみで、専用の連打防止制御は無いとされている（`handleClick`は`disabled`でも`isLoading`でもなければ`useSound`の`play('tap')`後に渡された`onClick`を呼ぶ）。ただしこれは`MessageModal.md`側の解析結果からの補足であり、`Button.tsx`のソースコード自体は本ファイルの解析時点では直接確認していない。 | ./MessageModal.md |
-
+| `Button`の`isLoading`/`disabled`表示詳細 | `MessageModal.md`の解析によれば、`Button`は`disabled={disabled \|\| isLoading}`により見た目上クリックを抑制するのみで、専用の連打防止制御は無いとされている（`handleClick`は`disabled`でも`isLoading`でもなければ`useSound`の`play('tap')`後に渡された`onClick`を呼ぶ）。ただしこれは`MessageModal.md`側の解析結果からの補足であり、`Button.tsx`のソースコード自体は本ファイルの解析時点では直接確認していない。 | ./MessageModal.md |
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

@@ -60,14 +60,14 @@
 ### クラス `NasMonitor`
 
 * **役割**: NASの状態監視、ディスク使用量確認、障害復旧時の自動切り戻し処理、および保持期間超過ファイルの自動削除をまとめたクラス。
-* 根拠: `class NasMonitor:` (行番号: 22〜290 / 抜粋: "class NasMonitor:")
+* 根拠: `class NasMonitor:` (行番号: 22〜456 / 抜粋: "class NasMonitor:")
 
 
 
 ### 関数 `__init__`
 
 * **役割**: クラス内の設定値（IP、パス、タイムアウト時間、書き込みチェックのリトライ回数、ステータス保存ファイルなど）を`config`等から初期化する。
-* 根拠: `def __init__(self) -> None:` (行番号: 25〜39 / 抜粋: "def __init__(self) -> None:")
+* 根拠: `def __init__(self) -> None:` (行番号: 25〜45 / 抜粋: "def __init__(self) -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -83,18 +83,18 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 25〜39 / 抜粋: "def __init__(self) -> None:")
+* 根拠: 関数内の処理全体 (行番号: 25〜45 / 抜粋: "def __init__(self) -> None:")
 
 
 
 ### 関数 `_load_state`
 
 * **役割**: 前回の監視状態（正常/異常）をJSONファイルから読み込む。存在しない場合は正常として扱う。
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 33〜41 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 47〜55 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 33 / 抜粋: "def _load_state(self) -> Di...")
+* 根拠: `def _load_state(self) -> Dict[str, bool]:` (行番号: 47 / 抜粋: "def _load_state(self) -> Di...")
 
 
 * **戻り値/レスポンス**: `Dict[str, bool]`（状態辞書）
@@ -113,7 +113,7 @@
 ### 関数 `_save_state`
 
 * **役割**: 現在の監視状態をJSONファイルとして保存する。
-* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 43〜49 / 抜粋: "def _save_state(self, state...")
+* 根拠: `def _save_state(self, state: Dict[str, bool]) -> None:` (行番号: 57〜64 / 抜粋: "def _save_state(self, state...")
 
 
 * **引数/リクエスト**: `state`: `Dict[str, bool]`
@@ -136,11 +136,11 @@
 ### 関数 `check_ping`
 
 * **役割**: `ping`コマンドを実行し、NASへのネットワーク疎通を確認する。
-* 根拠: `def check_ping(self) -> bool:` (行番号: 51〜63 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 66〜78 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_ping(self) -> bool:` (行番号: 51 / 抜粋: "def check_ping(self) -> boo...")
+* 根拠: `def check_ping(self) -> bool:` (行番号: 66 / 抜粋: "def check_ping(self) -> boo...")
 
 
 * **戻り値/レスポンス**: `bool`（成功時True）
@@ -159,11 +159,11 @@
 ### 関数 `check_mount`
 
 * **役割**: マウントポイントがシステム上に存在し、かつ正しくマウントされているか判定する。
-* 根拠: `def check_mount(self) -> bool:` (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 80〜84 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def check_mount(self) -> bool:` (行番号: 65 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: `def check_mount(self) -> bool:` (行番号: 80 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **戻り値/レスポンス**: `bool`（マウントされていればTrue）
@@ -171,11 +171,11 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 80〜84 / 抜粋: "def check_mount(self) -> bo...")
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 65〜69 / 抜粋: "def check_mount(self) -> bo...")
+* 根拠: 関数内の処理全体 (行番号: 80〜84 / 抜粋: "def check_mount(self) -> bo...")
 
 
 
@@ -205,11 +205,11 @@
 ### 関数 `sync_fallback_data`
 
 * **役割**: フォールバックディレクトリ(`self.fallback_dir`)配下の`assets`サブディレクトリのみを対象に、`rsync`コマンドを利用してNAS側の`self.nas_project_root`配下`assets`(=`NAS_PROJECT_ROOT/assets`。通常のNAS疎通時に`config.ASSETS_DIR`が指すパスと同一)へ同期・移動し、空ディレクトリを削除の上、復旧通知を送信する。`fallback_dir`直下には`last_memory_alert.txt`(`memory_monitor.py`)・`last_tv_lock.txt`(`tv_lock_monitor.py`)など、本来ローカル専用でNASに属さない他モニターの状態ファイルも同居しているため、同期対象を`assets`サブディレクトリに明示的に限定し、これらを巻き込んで移動・削除しないようにしている。
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 157〜199 / 抜粋: "def sync_fallback_data(self...")、`fallback_assets_dir = os.path.join(self.fallback_dir, "assets")` (行番号: 165)、`nas_assets_dir = os.path.join(self.nas_project_root, "assets")` (行番号: 170)
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 167〜208 / 抜粋: "def sync_fallback_data(self...")、`fallback_assets_dir = os.path.join(self.fallback_dir, "assets")` (行番号: 165)、`nas_assets_dir = os.path.join(self.nas_project_root, "assets")` (行番号: 170)
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 157 / 抜粋: "def sync_fallback_data(self...")
+* 根拠: `def sync_fallback_data(self) -> None:` (行番号: 167 / 抜粋: "def sync_fallback_data(self...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -228,7 +228,7 @@
 ### 関数 `_cleanup_empty_dirs`
 
 * **役割**: 指定されたディレクトリ配下の空ディレクトリを再帰的に削除する。
-* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 211〜223 / 抜粋: "def _cleanup_empty_dirs(sel...")
+* 根拠: `def _cleanup_empty_dirs(self, path: str) -> None:` (行番号: 210〜222 / 抜粋: "def _cleanup_empty_dirs(sel...")
 
 
 * **引数/リクエスト**: `path`: `str`
@@ -251,11 +251,11 @@
 ### 関数 `get_disk_usage`
 
 * **役割**: マウントポイントのディスク容量（全体、使用量、空き容量をGB単位）と使用率を計算する。
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 129〜141 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 224〜236 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 129 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: `def get_disk_usage(self) -> Optional[Dict[str, float]]:` (行番号: 224 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]`（容量情報を含む辞書、失敗時はNone）
@@ -263,7 +263,7 @@
 
 
 * **副作用**: なし
-* 根拠: 関数内の処理全体 (行番号: 129〜141 / 抜粋: "def get_disk_usage(self) ->...")
+* 根拠: 関数内の処理全体 (行番号: 224〜236 / 抜粋: "def get_disk_usage(self) ->...")
 
 
 * **エラーハンドリング**: `Exception`を捕捉し、エラーログ出力後`None`を返す。
@@ -278,7 +278,7 @@
 
 
 * **引数/リクエスト**: `directory` (`str`), `retention_days` (`int`), `extensions` (`Optional[Tuple[str, ...]]`。`None`可)
-* 根拠: 定義部 (行番号: 225〜227 / 抜粋: "def cleanup_old_files(")
+* 根拠: 定義部 (行番号: 238〜270 / 抜粋: "def cleanup_old_files(")
 
 
 * **戻り値/レスポンス**: `Dict[str, Any]`（`{"deleted_count": int, "freed_gb": float}`。`directory`が未指定またはディレクトリでない場合は空の集計値を返す）
@@ -300,7 +300,7 @@
 * 根拠: (行番号: 284〜286 / 抜粋: "(\"スナップショット(ローカル退避)\",\n             os.path.join(getattr(config, \"FALLBACK_ROOT\", \"\"), \"assets\", \"snapshots\"),")
 
 * **役割**: NVR録画・カメラスナップショット・タイムラプス動画・DBバックアップの4種類のディレクトリそれぞれについて、設定された保持日数を超えたファイルを`cleanup_old_files`経由で削除し、1件以上削除があった場合はまとめて通知を送信する。タイムラプス動画の削除対象パスは以前`config.ASSETS_DIR/timelapse`(NAS側)を指しており、実際の生成先(`monitors/smart_timelapse_generator.py`の`setup_directories`)であるローカルの`config.BASE_DIR/assets/timelapse`と食い違っていたため、誰も書かないNAS側ディレクトリを掃除し、誰も掃除しないローカルディレクトリにファイルが無限蓄積していた(Issue #171)。生成先と同じローカルパスに修正済み。DBバックアップ対象は以前拡張子`.db`のみに限定していたが、`DB_BACKUPS_DIR`は`services/backup_service.py`のDBダンプ(`.db`)と`_backup_config_files`によるDB以外の設定ファイルコピー(`config.py`/`.env`/`devices.json`。拡張子は`.py`/なし/`.json`)の両方の出力専用ディレクトリであるため、`.db`限定では設定ファイルのバックアップコピーが一切削除されず無限蓄積していた(Issue #191)。`DB_BACKUPS_DIR`はバックアップ専用ディレクトリであることを踏まえ、`extensions=None`(拡張子で絞り込まず全ファイル対象)に修正した。
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 259〜303 / 抜粋: "def run_retention_cleanup(sel...")
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 272〜330 / 抜粋: "def run_retention_cleanup(sel...")
 * **（Issue #359 で追加）** 削除対象に「録画VODキャッシュ」（`BASE_DIR/data/hls_streams/vod`、拡張子 `.ts`/`.m3u8`/`.txt`、保持日数 `config.HLS_VOD_RETENTION_DAYS`＝既定3日）を追加。`services/camera_service.py` の `generate_record_playlist` が生成するセグメントは1日分で数GB規模だが、以前はどこにも削除経路が無くローカル(SDカード)に無制限に蓄積していた。
 * 根拠: `("録画VODキャッシュ", os.path.join(getattr(config, "BASE_DIR", ""), "data", "hls_streams", "vod"), getattr(config, "HLS_VOD_RETENTION_DAYS", 3), (".ts", ".m3u8", ".txt"))` (行番号: 298〜300)
 * 根拠: `("タイムラプス動画", os.path.join(getattr(config, "BASE_DIR", ""), "assets", "timelapse"), ...)` (行番号: 266〜273)
@@ -308,7 +308,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 259 / 抜粋: "def run_retention_cleanup(sel...")
+* 根拠: `def run_retention_cleanup(self) -> None:` (行番号: 272 / 抜粋: "def run_retention_cleanup(sel...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -327,12 +327,12 @@
 ### 関数 `save_to_db`
 
 * **役割**: NASの監視結果（Ping、マウント状態）とディスク使用率をデータベースに保存する。`config.SQLITE_TABLE_SENSOR`(=`device_records`)への書き込みに加えて、`config.SQLITE_TABLE_NAS`(=`nas_records`)へも書き込む(Issue #168)。以前は`device_records`にしか書き込んでおらず、ダッシュボードのNASステータスカード(`views/dashboard/summary.py`の`get_nas_status_simple`)・NAS状態パネル(`views/dashboard/log_tab.py`)が読む`analysis_service.load_nas_status`は`nas_records`テーブルを対象にしているため、これらの表示が常に「データなし」のままだった。`nas_records`側のスキーマ(`status_ping`/`status_mount`列は文字列`'OK'`/`'NG'`)に合わせ、bool引数`ping_ok`/`mount_ok`をそれぞれ`"OK"`/`"NG"`の文字列へ変換して書き込む。`usage`が`None`(NAS到達不能時)の場合、`total_gb`/`used_gb`/`free_gb`列には`None`を書き込む(`percent`列は`device_records`向けと同じく`usage`が`None`のとき`0`を使う既存のロジックをそのまま流用する)。
-* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 284〜321 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: `def save_to_db(self, ping_ok: bool, mount_ok: bool, usage: Optional[Dict[str, float]]) -> None:` (行番号: 332〜369 / 抜粋: "def save_to_db(self, ping_...")
 * 根拠: `save_log_generic(\n            getattr(config, "SQLITE_TABLE_NAS", "nas_records"),\n            ["timestamp", "device_name", "ip_address", "status_ping", "status_mount",\n             "total_gb", "used_gb", "free_gb", "percent"],\n            (\n                get_now_iso(),\n                self.device_name,\n                self.ip,\n                "OK" if ping_ok else "NG",\n                "OK" if mount_ok else "NG",\n                usage['total_gb'] if usage else None,\n                usage['used_gb'] if usage else None,\n                usage['free_gb'] if usage else None,\n                percent\n            )\n        )` (行番号: 306〜321)
 
 
 * **引数/リクエスト**: `ping_ok: bool`, `mount_ok: bool`, `usage: Optional[Dict[str, float]]`
-* 根拠: 定義部 (行番号: 284 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 定義部 (行番号: 332 / 抜粋: "def save_to_db(self, ping_...")
 
 
 * **戻り値/レスポンス**: `None`
@@ -344,7 +344,7 @@
 
 
 * **エラーハンドリング**: なし
-* 根拠: 関数内の処理全体 (行番号: 284〜321 / 抜粋: "def save_to_db(self, ping_...")
+* 根拠: 関数内の処理全体 (行番号: 332〜369 / 抜粋: "def save_to_db(self, ping_...")
 
 
 
@@ -509,7 +509,7 @@ flowchart TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | プッシュ通知先の仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg")`(116〜163行目、Issue #289でシグネチャ再設計)を直接確認した。`target`引数は`"discord"`/`"line"`/`"both"`のいずれかを取り、`"discord"`または`"both"`の場合のみ`_send_discord_webhook`が呼ばれて`channel`引数(error/report/notify)に応じたDiscord Webhook URLへ送信される。`user_id`はLINE送信(`target`が`"line"`または`"both"`のとき)にのみ使用され、省略時は`config.LINE_USER_ID`にフォールバックする。本ファイル(`nas_monitor.py`)は`target="discord"`のみで呼び出す4箇所(186, 299, 358, 410行目)いずれも`user_id`を渡していないことを確認した(Issue #289で、以前渡していた`config.LINE_USER_ID`は撤去済み)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:116-163`（参考: `MY_HOME_SYSTEM/monitors/nas_monitor.py:186, 299, 358, 410`） |
-| DBのカラムの型定義 | `MY_HOME_SYSTEM/core/database.py`の`save_log_generic(table, columns_list, values_list)`(67〜79行目)を直接確認した。テーブル名・カラムリスト・値タプルから`INSERT INTO {table} ({columns}) VALUES ({placeholders})`を動的に構築する汎用関数であり、カラムの型自体は本関数には定義がない。本ファイル(`nas_monitor.py`)の`save_to_db`(200〜214行目)は`config.SQLITE_TABLE_SENSOR`（実体`"device_records"`、`config.py`235行目）へ`["timestamp", "device_name", "device_id", "device_type", "contact_state", "nas_usage_percent"]`列でINSERTしており(205行目)、`mount_ok`は独立した列ではなく`contact_state`列に`"mounted"`/`"unmounted"`という文字列として、`percent`（NAS使用率）は`nas_usage_percent`列に格納する設計であることを確認した。以前は`battery_level`列（`MY_HOME_SYSTEM/old/db_fix.py`14行目の`ALTER TABLE device_records ADD COLUMN battery_level INTEGER;`という一回限りの修正スクリプトで後付けされた列。`init_unified_db.py`163〜178行目の`CREATE TABLE IF NOT EXISTS device_records`初期スキーマには含まれない）へ`percent`を誤って流用していたが、`MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql`が`ALTER TABLE device_records ADD COLUMN nas_usage_percent REAL;`を実行して専用カラムを新設し、本ファイルの書き込み先も併せて切り替えられたことで、この列の混同は解消された。当該マイグレーションのコメントには「monitors/nas_monitor.py がNASのディスク使用率(%)を、電池残量用に後付けされた battery_level カラムへ誤って流用していたため、専用カラムを新設して分離する」「過去に battery_level へ書き込まれた行はそのまま残し、以後の書き込み先のみ切り替える」と明記されている。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:67-79`, `MY_HOME_SYSTEM/monitors/nas_monitor.py:200-214`, `MY_HOME_SYSTEM/config.py:235`, `MY_HOME_SYSTEM/init_unified_db.py:161-178`, `MY_HOME_SYSTEM/old/db_fix.py:14`, `MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql:1-5` |
+| DBのカラムの型定義 | `MY_HOME_SYSTEM/core/database.py`の`save_log_generic(table, columns_list, values_list)`(77〜96行目)を直接確認した。テーブル名・カラムリスト・値タプルから`INSERT INTO {table} ({columns}) VALUES ({placeholders})`を動的に構築する汎用関数であり、カラムの型自体は本関数には定義がない。本ファイル(`nas_monitor.py`)の`save_to_db`(332〜346行目)は`config.SQLITE_TABLE_SENSOR`（実体`"device_records"`、`config.py`276行目）へ`["timestamp", "device_name", "device_id", "device_type", "contact_state", "nas_usage_percent"]`列でINSERTしており(337行目)、`mount_ok`は独立した列ではなく`contact_state`列に`"mounted"`/`"unmounted"`という文字列として、`percent`（NAS使用率）は`nas_usage_percent`列に格納する設計であることを確認した。型は`MY_HOME_SYSTEM/current_schema.sql`の`CREATE TABLE device_records`で、`timestamp DATETIME NOT NULL`・`device_name TEXT`・`device_id TEXT`・`device_type TEXT`・`contact_state TEXT`・`nas_usage_percent REAL`と定義されている。以前は`battery_level`列（電池残量用に後付けされた列。**現在のスキーマには存在しない**）へ`percent`を誤って流用していたが、`MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql`が`ALTER TABLE device_records ADD COLUMN nas_usage_percent REAL;`を実行して専用カラムを新設し、本ファイルの書き込み先も併せて切り替えられたことで、この列の混同は解消された。当該マイグレーションのコメント(2〜4行目)には「monitors/nas_monitor.py がNASのディスク使用率(%)を、電池残量用に後付けされた battery_level カラムへ誤って流用していたため、専用カラムを新設して分離する」「過去に battery_level へ書き込まれた行はそのまま残し、以後の書き込み先のみ切り替える」と明記されている（**旧版が`battery_level`の追加元として挙げていた`MY_HOME_SYSTEM/old/db_fix.py`は`old/`ディレクトリごと削除済みで、ベースライン`migrations/0000_baseline_schema.sql`の`device_records`にも`battery_level`は含まれないため、この列は現在のスキーマ定義のどこにも存在しない**。実機DBに残っている場合は過去の一回限りスクリプトの痕跡である）。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:77-96`, `MY_HOME_SYSTEM/monitors/nas_monitor.py:332-346`, `MY_HOME_SYSTEM/config.py:276`, `MY_HOME_SYSTEM/current_schema.sql`, `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql:90-105`, `MY_HOME_SYSTEM/migrations/0006_add_device_records_nas_usage_percent.sql:1-5`（参考: [database.md](./database.md)） |
 | ISO時刻のタイムゾーン | `MY_HOME_SYSTEM/core/utils.py`12〜13行目を直接確認した。`get_now_iso() -> str`は`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`という1行の実装であり、`pytz`ライブラリで明示的に"Asia/Tokyo"タイムゾーンを付与した現在時刻をISO 8601形式（オフセット付き、例: `2026-08-22T12:34:56.789012+09:00`）の文字列として返すことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:12-13` |
 | 設定値の初期値と定義内容 | `MY_HOME_SYSTEM/monitors/nas_monitor.py`を直接確認したところ、本ファイルは`config`の値を`getattr(config, "属性名", デフォルト値)`で参照している(26〜29, 173〜178行目)。対応する`config.py`側の実体を直接確認した: `NAS_IP: str = os.getenv("NAS_IP", "192.168.1.20")`(408行目)、`NAS_CHECK_TIMEOUT: int = 5`(409行目、ハードコード)、`NVR_RECORD_DIR: str = os.path.join(NAS_MOUNT_POINT, "home_system", "nvr_recordings")`(436行目)、`RECORDING_RETENTION_DAYS: int = int(os.getenv("RECORDING_RETENTION_DAYS", "30"))`(442行目)、`DB_BACKUP_RETENTION_DAYS: int = int(os.getenv("DB_BACKUP_RETENTION_DAYS", "30"))`(444行目)、`DB_BACKUPS_DIR: str = os.path.join(NAS_PROJECT_ROOT, "db_backups")`(445行目)、`ASSETS_DIR`は224〜227行目で`ensure_safe_path_with_backoff(os.path.join(NAS_PROJECT_ROOT, "assets"), "assets")`(NAS到達不能時はローカルの`temp_fallback/assets`へフェイルソフト)。以前は`nas_monitor.py`28行目が存在しない属性名`FALLBACK_DIR`を参照しており常にデフォルト値へフォールバックしていたが、修正コミット(`fix quest data and config bugs`)により現在は`getattr(config, "FALLBACK_ROOT", "/tmp/temp_fallback")`(28行目)に変更され、`config.py`に実在する属性`FALLBACK_ROOT: str = os.path.join(BASE_DIR, "temp_fallback")`(213行目)を正しく参照するようになったことを確認した。ただし`config.FALLBACK_ROOT`の値(`BASE_DIR/temp_fallback`)と`getattr`のフォールバック文字列(`"/tmp/temp_fallback"`)は異なるパスであるため、両者が一致するとは限らない点は変わらず残る。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:213, 408-409, 436, 442-445`, `MY_HOME_SYSTEM/monitors/nas_monitor.py:26-29, 173-178`（`FALLBACK_ROOT`属性への参照に修正済みであることを確認） |
 

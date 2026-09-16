@@ -47,7 +47,7 @@
 ### `get_start_date`
 
 * **役割**: 指定された期間タイプ（週、月、年）に応じた集計開始日時（00:00:00）を計算して取得する。
-* 根拠: `get_start_date` 定義部 (行番号: 15〜38 / 抜粋: "def get_start_date(period_type")
+* 根拠: `get_start_date` 定義部 (行番号: 20〜43 / 抜粋: "def get_start_date(period_type")
 
 
 * **引数/リクエスト**: `period_type: str` - "week", "month", "year" のいずれか。
@@ -70,7 +70,7 @@
 ### `get_analysis_data`
 
 * **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 40〜141 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
+* 根拠: `get_analysis_data` 定義部 (行番号: 45〜152 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
@@ -93,7 +93,7 @@
 ### `generate_text_section`
 
 * **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。
-* 根拠: `generate_text_section` 定義部 (行番号: 137〜169 / 抜粋: "def generate_text_section(peri")
+* 根拠: `generate_text_section` 定義部 (行番号: 154〜186 / 抜粋: "def generate_text_section(peri")
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
@@ -116,7 +116,7 @@
 ### `is_month_end_report`
 
 * **役割**: 実行時点から7日後の月が現在の月と異なるかを判定し、月末レポート対象日であるかをチェックする。
-* 根拠: `is_month_end_report` 定義部 (行番号: 171〜179 / 抜粋: "def is_month_end_report() -> b")
+* 根拠: `is_month_end_report` 定義部 (行番号: 188〜196 / 抜粋: "def is_month_end_report() -> b")
 
 
 * **引数/リクエスト**: なし
@@ -139,7 +139,7 @@
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 192〜287 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 198〜292 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -256,7 +256,7 @@ graph TD
 | `config` モジュールの定数値 | `MY_HOME_SYSTEM/config.py`を直接確認した。本ファイルが参照する定数は以下の通り実値・型ともに確認できた: `SQLITE_TABLE_FOOD: str = "food_records"`(242行目), `SQLITE_TABLE_CAR: str = "car_records"`(244行目), `SQLITE_TABLE_CHILD: str = "child_health_records"`(245行目), `SQLITE_TABLE_POWER_USAGE: str = "power_usage"`(237行目、`保守上の注意点`で言及されている`getattr`フォールバック値`"power_usage"`と一致することを確認)、`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`(185行目、値は環境変数由来で未設定時は`None`)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185,237,242,244-245`（本ファイル内利用: `MY_HOME_SYSTEM/weekly_analyze_report.py:63,88,97,123,258`） |
 | `common` モジュールの実装詳細 | `MY_HOME_SYSTEM/common.py:22-27,31-37`で`common.get_db_cursor`/`common.send_push`がそれぞれ`core.database.get_db_cursor`/`services.notification_service.send_push`の再エクスポートであることを直接確認した上で、実装本体を直接確認した。`core.database.get_db_cursor`(`MY_HOME_SYSTEM/core/database.py:11-50`)は`@contextmanager`のDBカーソル(`sqlite3.Row`を`row_factory`に設定、17行目)を返すコンテキストマネージャで、`commit`引数が`True`の場合のみ`conn.commit()`し、`sqlite3.OperationalError`(locked)時は最大5回リトライ、それ以外の例外時は`conn.rollback()`後に再送出する。`row_factory=sqlite3.Row`のため、カーソルが返す行はキー名によるディクショナリ的アクセス(`row["column"]`)が可能である。`services.notification_service.send_push`(`MY_HOME_SYSTEM/services/notification_service.py:116-140`)は`target`引数(`"discord"`/`"line"`/`"both"`)に応じてDiscord Webhookおよび/またはLINE Messaging APIへ送信し、LINE送信失敗時はDiscordの`error`チャンネルへフォールバック通知する(戻り値`bool`)。本ファイル258行目は`target="discord"`を明示指定して呼び出しており、LINEへは送信されずDiscordのみへ送信される仕様であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/common.py:22-27,31-37`, `MY_HOME_SYSTEM/core/database.py:11-50`, `MY_HOME_SYSTEM/services/notification_service.py:116-140`（本ファイル内利用: `MY_HOME_SYSTEM/weekly_analyze_report.py:258`） |
 | データベースのスキーマ定義 | `MY_HOME_SYSTEM/init_unified_db.py`を直接確認した。`food_records`(`config.SQLITE_TABLE_FOOD`)は193〜203行目の`CREATE TABLE IF NOT EXISTS`文で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, meal_date TEXT, meal_time_category TEXT, menu_category TEXT, timestamp DATETIME`列を持つ(`menu_category`は`TEXT`型、`NOT NULL`等の追加制約はなし)。`car_records`(`config.SQLITE_TABLE_CAR`)は232〜240行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT, rule_name TEXT, timestamp DATETIME, score REAL`列を持つ(`action`は`TEXT`型、制約なし)。`power_usage`(`config.SQLITE_TABLE_POWER_USAGE`)は145〜153行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, device_name TEXT, wattage REAL, timestamp DATETIME NOT NULL`列を持つ(`wattage`は`REAL`型、制約なし)。`child_health_records`(`config.SQLITE_TABLE_CHILD`)は243〜251行目で`id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT, child_name TEXT, condition TEXT, timestamp DATETIME NOT NULL`列を持つ(`condition`は`TEXT`型、制約なし)。いずれのテーブルも`CHECK`制約や`UNIQUE`制約は定義されていないことを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/init_unified_db.py:145-153,193-203,232-240,243-251` |
-| 実行スケジューラ（Cron等）の設定 | `MY_HOME_SYSTEM/scheduler_boot.py`(全ファイル)を直接確認した。29〜43行目の`TASKS: List[Task]`リストには`monitors/switchbot_power_monitor.py`, `monitors/nature_remo_monitor.py`, `monitors/server_watchdog.py`, `monitors/tv_lock_monitor.py`, `monitors/memory_monitor.py`, `monitors/nas_monitor.py`の6件のみが登録されており(いずれも秒単位のインターバル、最大でも3600秒)、`weekly_analyze_report.py`は`TASKS`リストに含まれていないことを確認した。リポジトリ全体を`weekly_analyze_report`という文字列で検索したが、`weekly_analyze_report.py`本体・そのテストファイル(`tests/test_weekly_analyze_report.py`)以外に本スクリプトを呼び出す箇所は見つからず、`old/cron_reporter.py`は`crontab -l`の出力内容をレポートする別用途のスクリプトであり本ファイルの起動元ではないことも確認した。cron定義ファイルやsystemdタイマー定義もリポジトリ内には見つからず、コード内コメント(29〜30行目)が前提とする「scheduler.pyが月曜に実行する」という記述は現在の`scheduler_boot.py`の実装とは一致しない(登録されていない)ことが判明した。実際の起動方法は依然としてリポジトリ内からは特定できない。 | 直接ソース確認: `MY_HOME_SYSTEM/scheduler_boot.py:29-43`（`MY_HOME_SYSTEM/old/cron_reporter.py`を参考として確認、関連なしと判断） |
+| 実行スケジューラ（Cron等）の設定 | **（Issue #528で解消。旧版の「cron定義ファイルはリポジトリ内に見つからず、実際の起動方法は特定できない」という結論は現在は誤り）** 実機の crontab が`deploy/cron/crontab`としてリポジトリ管理下に入り(`deploy/cron/README.md`が「実機(Raspberry Pi)の `masahiro` ユーザーの crontab を、故障時の復旧・変更履歴管理のためにこのリポジトリでも管理する」と明記)、その14行目に`30 8 * * 1 /home/masahiro/develop/MY_HOME_SYSTEM/run_task.sh weekly_analyze_report.py`＝**毎週月曜 08:30 に`run_task.sh`経由で起動**という定義が存在する。同ファイル11〜13行目のコメントは「`weekly_analyze_report.py`は『月曜の8時台』以外は no-op で、同日二重起動は `FALLBACK_ROOT/last_weekly_report.txt`の実行済みフラグ(#234)で抑止される」「Issue #528: 以前はこのリポジトリ外の cron でのみ起動されていて復旧手順から漏れていた」と、旧版の解析時点で特定できなかった理由まで含めて説明している。`scheduler_boot.py`の`TASKS`(30〜43行目)に本スクリプトが含まれていないのは変わらず、コード内コメントが前提とする「scheduler.pyが月曜に実行する」という記述は現在も実装と一致しない(起動元はcronである)。 | 直接ソース確認: `deploy/cron/crontab:11-14`, `deploy/cron/README.md:1-16`, `MY_HOME_SYSTEM/scheduler_boot.py:30-43`（参考: [run_task.md](./run_task.md)） |
 
 ## 10. 自己検証結果
 

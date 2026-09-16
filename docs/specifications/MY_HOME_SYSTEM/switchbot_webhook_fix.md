@@ -73,7 +73,7 @@
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
-* 根拠: [関数定義] (行番号: 28 / 抜粋: "def update_switchbot_webhook(base_url):")
+* 根拠: [関数定義] (行番号: 36 / 抜粋: "def update_switchbot_webhook(base_url):")
 
 
 * **戻り値/レスポンス**: `Optional[bool]` — `True`: 新しいURLの登録に成功した(変更あり)。`False`: 既に設定済み、またはURL照会自体に失敗し何も変更していない。`None`: 旧URLを削除した後、新URLの登録に失敗した(Issue #166。SwitchBotのWebhookが未設定のまま残っている危険な状態を、「既に設定済みで変更不要」の`False`と区別するために導入された)。
@@ -100,7 +100,7 @@
 
 
 * **引数/リクエスト**: `base_url` (型: 不明 / 環境変数から取得されたベースURLの文字列)
-* 根拠: [関数定義] (行番号: 68 / 抜粋: "def update_line_webhook(base_url):")
+* 根拠: [関数定義] (行番号: 100 / 抜粋: "def update_line_webhook(base_url):")
 
 
 * **戻り値/レスポンス**: `bool` (更新が成功した場合は `True`、スキップ・設定済み・失敗時は `False`)
@@ -128,7 +128,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 120 / 抜粋: "def fix_all_webhooks():")
+* 根拠: [関数定義] (行番号: 134 / 抜粋: "def fix_all_webhooks():")
 
 
 * **戻り値/レスポンス**: なし

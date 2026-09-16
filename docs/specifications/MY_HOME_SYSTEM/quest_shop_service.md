@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 同名衝突の注意: `services/quest/quest_service.py`と`services/quest_service.py`（下位互換シム）がファイル名`quest_service`で衝突するため、`services/quest/`配下の6ファイルはいずれも`quest_`を接頭辞とした名前で区別している（`dashboard_common.md`と同じ命名規約）。本ファイルは`shop_service.py`という単独の基底名のため実際には衝突しないが、命名一貫性のため`quest_shop_service.md`とした。
 
@@ -143,6 +144,14 @@ graph TD
 | DB各テーブルのスキーマ | `reward_master`/`quest_users`/`reward_history`/`user_inventory`の各カラムの型・制約が本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
 | `common.get_now_iso`の形式 | ミリ秒・タイムゾーン情報の有無が本ファイルからは不明。 | `common.py` |
 | `reward['target']`が取りうる値の完全な一覧 | 本ファイルからは`'all'`/`'children'`/`'adults'`/特定`user_id`の4パターンの扱いのみ確認できるが、`reward_master`テーブル・`quest_data.py`側の実データにこれ以外の値が存在するかは不明。 | `quest_data.py`, `reward_master`テーブルの実データ |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DB各テーブルのスキーマ | スキーマの唯一の定義元である`MY_HOME_SYSTEM/migrations/`から生成された`MY_HOME_SYSTEM/current_schema.sql`を直接確認した。`reward_master(reward_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, cost_gold INTEGER, category TEXT, icon_key TEXT, desc TEXT, target TEXT DEFAULT 'all', description TEXT)`(`desc`と`description`が併存するのは`sync_strict.py`による移行の名残)、`quest_users(user_id TEXT PRIMARY KEY, name TEXT, job_class TEXT, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, medal_count INTEGER DEFAULT 0, avatar TEXT DEFAULT '🙂', updated_at DATETIME, role TEXT)`、`reward_history(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, reward_id INTEGER, reward_title TEXT, cost_gold INTEGER, redeemed_at DATETIME NOT NULL)`、`user_inventory(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, reward_id INTEGER, status TEXT DEFAULT 'owned', purchased_at DATETIME NOT NULL, used_at DATETIME, FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id))`。`gold`カラムには`CHECK (gold >= 0)`のような制約が無いため、残高が負にならないことは本ファイルのアトミックUPDATE(`WHERE gold >= ?`)のみが保証している。`reward_master.target`にもCHECK制約は無い。`user_inventory.reward_id`だけが`reward_master(reward_id)`への外部キーを持つ(`core/database.py`が接続ごとに`PRAGMA foreign_keys`を有効化する)。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`MY_HOME_SYSTEM/migrations/`から`python init_unified_db.py --dump-schema`で生成。参考: [init_unified_db.md](./init_unified_db.md)） |
+| `common.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
+| `reward['target']`が取りうる値の完全な一覧 | `MY_HOME_SYSTEM/quest_data.py`の`REWARDS`(221行目〜)に実際に出現する`target`値を全件抽出したところ、**`'all'` / `'children'` / `'adults'` / `'dad'` / `'mom'` / `'son'` / `'daughter'` / `'siblings'` の8種類**であった。本ファイルが明示的に分岐しているのは`'all'`・`'children'`・`'adults'`と「特定`user_id`」の4パターンだが、`'dad'`/`'mom'`/`'son'`/`'daughter'`は`quest_data.USERS`(34行目〜)に実在する`user_id`そのものなので「特定`user_id`」分岐で正しく処理される。**残る`'siblings'`だけが`quest_users.user_id`に存在しないグループ指定**であり、本ファイルの分岐ではどのユーザーにも一致しない＝そのごほうびは誰のショップにも並ばない扱いになる(`quest_master.target_user`側では`'siblings'`が兄妹連携クエストとして`services/quest/game_system.py:204-212`で特別扱いされるのに対し、`reward_master.target`側には同等の処理が無い)。`reward_master`テーブルは`sync_master_data`が`quest_data.REWARDS`から同期するため、上記以外の値が実DBに入る経路は`quest_data.py`の編集のみである。 | 直接ソース確認: `MY_HOME_SYSTEM/quest_data.py:221-266`, `MY_HOME_SYSTEM/services/quest/game_system.py:204-212`（参考: [quest_data.md](./quest_data.md)・[quest_game_system.md](./quest_game_system.md)） |
 
 ## 10. 自己検証結果
 

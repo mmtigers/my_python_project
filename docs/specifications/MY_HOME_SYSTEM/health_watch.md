@@ -84,7 +84,7 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。
-* 根拠: [関数定義] (行番号: 56〜62 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: [関数定義] (行番号: 84〜90 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
@@ -107,7 +107,7 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。
-* 根拠: [関数定義] (行番号: 65〜67 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 93〜95 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
@@ -130,7 +130,7 @@
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 70〜79 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 98〜107 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -153,7 +153,7 @@
 ### `check_journal_errors`
 
 * **役割**: `journalctl -u home_system.service -p err..emerg`で前回マーカー以降のエラーログ行を確認する。
-* 根拠: [関数定義] (行番号: 82〜99 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 110〜127 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -179,7 +179,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 107〜142 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 130〜170 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -409,7 +409,7 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 190〜230 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 322〜361 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）

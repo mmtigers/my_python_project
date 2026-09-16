@@ -120,7 +120,7 @@
 ### `get_camera_settings` (`GET /settings`)
 
 * **役割**: `config.CAMERAS` からカメラ設定一覧を読み出し、フロントエンド向けにID・名前・表示順・有効フラグを含む辞書のリストを構築して返す。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 44〜46 / 抜粋: "def get_camera_settings():\n    """フロントエンドへ有効なカメラの一覧と設定を返す"""")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 45〜56 / 抜粋: "def get_camera_settings():\n    """フロントエンドへ有効なカメラの一覧と設定を返す"""")
 
 
 * **引数/リクエスト**: なし（パスパラメータ・クエリパラメータなし）
@@ -138,7 +138,7 @@
 ### `update_camera_settings` (`PUT /settings/{camera_id}`)
 
 * **役割**: 指定カメラIDの有効/無効フラグを`camera_service.set_camera_enabled`経由で`devices.json`に永続化する。コミット`95d3e55`（E-3）で新規追加。
-* 根拠: `def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):` (行番号: 58〜64 / 抜粋: "def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):")
+* 根拠: `def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):` (行番号: 59〜64 / 抜粋: "def update_camera_settings(camera_id: str, payload: CameraSettingsUpdate):")
 
 
 * **引数/リクエスト**: `camera_id: str`（パスパラメータ）, `payload: CameraSettingsUpdate`（リクエストボディ、`enabled: bool`を含む）
@@ -160,7 +160,7 @@
 ### `get_live_stream` (`GET /live/{camera_id}/stream.m3u8`)
 
 * **役割**: 指定カメラIDのライブHLSストリーム生成を `camera_service.start_hls_stream` に依頼し、プレイリストファイル(.m3u8)が生成されるまで最大5秒待機したうえでファイルレスポンスを返す。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（挙動は変わらず、404送出のタイミング・条件は従来と同一）。**（Issue #457で修正）** 以前は同期`def`エンドポイントとして実装され、`camera_service.start_hls_stream`（ffmpeg起動等のブロッキング処理を含む）を直接呼び出し、待機ループも`time.sleep(0.5)`（同期）で実装されていたため、その間サーバーの共有スレッドプールのワーカースレッドを占有し続け、同時アクセス集中時に他リクエストの遅延要因になっていた。現在は`async def`エンドポイントに変更され、`start_hls_stream`の呼び出しは`asyncio.to_thread`でスレッドプールへオフロードし、待機ループも`await asyncio.sleep(0.5)`に変更してイベントループを他リクエストへ譲るようになった。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 66〜69 / 抜粋: "async def get_live_stream(camera_id: str):\n    """ライブHLSプレイリスト（.m3u8）の取得"""\n    cam_conf = _require_camera(camera_id)")、[オフロード呼び出し] (行番号: 71〜73 / 抜粋: "# #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、\n    # イベントループを止めないようスレッドプールへオフロードする。\n    playlist_path = await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 67〜87 / 抜粋: "async def get_live_stream(camera_id: str):\n    """ライブHLSプレイリスト（.m3u8）の取得"""\n    cam_conf = _require_camera(camera_id)")、[オフロード呼び出し] (行番号: 71〜73 / 抜粋: "# #457: start_hls_stream はffmpeg起動等のブロッキング処理を含むため、\n    # イベントループを止めないようスレッドプールへオフロードする。\n    playlist_path = await asyncio.to_thread(camera_service.start_hls_stream, cam_conf)")
 
 
 * **引数/リクエスト**: `camera_id: str`（パスパラメータ）
@@ -182,7 +182,7 @@
 ### `get_record_info` (`GET /record/{camera_id}/{target_date}/info`)
 
 * **役割**: 指定カメラ・指定日の録画ファイルのメタデータとして、開始オフセット秒数を `camera_service.get_record_start_offset` から取得し返す。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 100〜104 / 抜粋: "def get_record_info(camera_id: str, target_date: str):\n    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""\n    _validate_target_date(target_date)\n    cam_conf = _require_camera(camera_id)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 101〜107 / 抜粋: "def get_record_info(camera_id: str, target_date: str):\n    """指定日の録画ファイルのメタデータ（最初のファイルのオフセット秒数）を返す"""\n    _validate_target_date(target_date)\n    cam_conf = _require_camera(camera_id)")
 * **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
 * 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 92)、`def _validate_target_date(target_date: str) -> None:` (行番号: 95〜97)、呼び出し (行番号: 103, 112)
 
@@ -206,7 +206,7 @@
 ### `get_record_file` (`GET /record/{camera_id}/{target_date}/{filename}`)
 
 * **役割**: リクエストされたファイル名の拡張子により処理を分岐する。`.m3u8`の場合は録画プレイリストを生成・返却し、`.ts`の場合は録画セグメントファイルを配信、それ以外の拡張子は400エラーとする。**（Issue #551で修正）** 両分岐のカメラ設定ルックアップは`_require_camera(camera_id)`呼び出しに置き換わった。`.m3u8`分岐は戻り値`cam_conf`を`generate_record_playlist`に渡すため変数で受けるが、`.ts`分岐は存在確認のみが目的のため戻り値を受け取らずに呼び出すだけになっている。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 109〜112 / 抜粋: "def get_record_file(camera_id: str, target_date: str, filename: str):\n    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""")、[両分岐の呼び出し] (行番号: 115, 125 / 抜粋: "cam_conf = _require_camera(camera_id)", "_require_camera(camera_id)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 110〜135 / 抜粋: "def get_record_file(camera_id: str, target_date: str, filename: str):\n    """録画VODのプレイリスト（.m3u8）またはセグメント（.ts）を配信"""")、[両分岐の呼び出し] (行番号: 115, 125 / 抜粋: "cam_conf = _require_camera(camera_id)", "_require_camera(camera_id)")
 * **（Issue #386 で追加）** `target_date` は `_validate_target_date` で `^\d{8}$`（YYYYMMDD）に一致することを検証し、不一致なら `HTTPException(400)`。`target_date` は camera_service 側で glob パターンと concat ファイル名に埋め込まれるため、未検証だと `*` で全期間の録画を1本に結合する数時間の ffmpeg ジョブを外部から起動できた。
 * 根拠: `_TARGET_DATE_RE = re.compile(r"^\d{8}$")` (行番号: 92)、`def _validate_target_date(target_date: str) -> None:` (行番号: 95〜97)、呼び出し (行番号: 103, 112)
 
@@ -230,7 +230,7 @@
 ### `get_live_segment` (`GET /live/{camera_id}/{segment_file}`)
 
 * **役割**: ライブHLSの `.ts` セグメントファイルを、拡張子チェックとパストラバーサル検証を経て配信する。Issue #172の修正（コミット時点）により、`.ts`以外の拡張子は400で拒否するようになった。修正前は拡張子を一切検証していなかったため、`_resolve_segment_path`のパストラバーサル対策のみでは防げない形で、同一ディレクトリ内に配置される`ffmpeg.log`（RTSP認証情報を含みうる。`camera_service.md`参照）等の任意ファイルがそのまま配信され得た。**（Issue #551で修正）** カメラ設定のルックアップは`_require_camera(camera_id)`呼び出しに置き換わった（存在確認のみが目的のため戻り値は受け取らない）。
-* 根拠: [エンドポイント定義とDocstring] (行番号: 137〜139 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 143〜144 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (行番号: 146 / 抜粋: "_require_camera(camera_id)")
+* 根拠: [エンドポイント定義とDocstring] (行番号: 138〜152 / 抜粋: "def get_live_segment(camera_id: str, segment_file: str):\n    """ライブのHLSセグメント（.tsファイル）を配信"""")、[拡張子チェック] (行番号: 143〜144 / 抜粋: "if not segment_file.endswith(\".ts\"):\n        raise HTTPException(status_code=400, detail=\"Unsupported file extension\")")、[カメラ確認] (行番号: 146 / 抜粋: "_require_camera(camera_id)")
 
 
 * **引数/リクエスト**: `camera_id: str`, `segment_file: str`（いずれもパスパラメータ）

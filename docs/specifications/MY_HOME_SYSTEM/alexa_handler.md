@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `dbbfc81` |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -129,7 +129,7 @@ Alexaカスタムスキル「ファミクエ」のリクエストハンドラ群
 * **戻り値/レスポンス**: `can_handle`は`bool`(`is_request_type("LaunchRequest")(handler_input)`の結果)。`handle`は`Response`。
 * **副作用**: `_build_family_datasource()`経由での`game_system.get_all_view_data()`呼び出し、失敗時の`logger.exception`呼び出し、APL対応時は`_load_apl_document()`(初回のみファイル読み込み)。
 * **エラーハンドリング**: `_build_family_datasource()`が例外を送出した場合、`logger.exception`でスタックトレース付きログを出力し、「ファミリークエストのデータ取得に失敗しました。少し時間をおいて試してください。」と読み上げてセッションを終了(`set_should_end_session(True)`)する。それ以外の正常系では`set_should_end_session(False)`でセッションを継続する。
-* 根拠: [クラス定義とcan_handle] (行番号: 88-92 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 94-106 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 108-111 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 113-131 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
+* 根拠: [クラス定義とcan_handle] (行番号: 88-134 / 抜粋: "class LaunchRequestHandler(AbstractRequestHandler):\n\n    def can_handle(self, handler_input: HandlerInput) -> bool:\n        return is_request_type(\"LaunchRequest\")(handler_input)")、[handle定義とtry/except] (行番号: 94-106 / 抜粋: "try:\n            family_data = _build_family_datasource()\n        except Exception:\n            logger.exception(\"Failed to build family quest datasource for LaunchRequest\")")、[承認待ち件数の読み上げ追加] (行番号: 108-111 / 抜粋: 'if pending_total:\n            speech += f"承認待ちのクエストが{pending_total}件あります。"')、[APL分岐] (行番号: 113-131 / 抜粋: "if _supports_apl(handler_input):\n            response_builder.add_directive(\n                RenderDocumentDirective(\n                    token=\"familyQuestMainScreen\",\n                    document=_load_apl_document(),\n                    datasources={\"payload\": {\"familyData\": family_data}},\n                )\n            )\n        else:")
 
 ### `HelpIntentHandler`
 
@@ -324,6 +324,13 @@ graph TD
 | `services.quest_service.game_system.get_all_view_data()`が返す`data`の完全なスキーマ | 本ファイルで参照しているキー(`pendingQuests[].user_id`、`users[].{user_id,name,avatar,level,exp,nextLevelExp,gold}`)以外にどのようなフィールドが含まれるかは本ファイルからは分からない。 | `services/quest_service.py`(対応する仕様書[quest_service.md](./quest_service.md)は既存) |
 | `alexa/apl/main_screen.json`の具体的なレイアウト・データバインディング仕様 | `datasources={"payload": {"familyData": family_data}}`(行番号113)がAPL側でどのように描画されるかは、このJSONファイル自体を解析しないと分からない。 | `MY_HOME_SYSTEM/alexa/apl/main_screen.json` |
 | `ask-sdk-core`/`ask-sdk-model`の内部ディスパッチ・シリアライズの詳細 | 外部パッケージであり、本ファイルからは動作の詳細を確認できない。 | 該当外部パッケージのソース/ドキュメント |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `services.quest_service.game_system.get_all_view_data()`が返す`data`の完全なスキーマ | `MY_HOME_SYSTEM/services/quest/game_system.py`の`get_all_view_data(viewer_user_id: Optional[str] = None) -> Dict[str, Any]`(168〜318行目)を直接確認した。戻り値のトップレベルキーは**`users` / `quests` / `rewards` / `completedQuests` / `logs` / `pendingQuests` の6つ**(314〜318行目)。`users`は`SELECT * FROM quest_users`の各行(=`user_id`/`name`/`job_class`/`level`/`exp`/`gold`/`medal_count`/`avatar`/`updated_at`/`role`)に、`nextLevelExp`(`GameLogic.calculate_next_level_exp`)・`maxHp`(`calculate_max_hp`)・`hp`(=`maxHp`)を付与したdictの配列で、**`quest_data.USERS`の宣言順(dad→mom→son→daughter)にソートされている**(176〜187行目)。`pendingQuests`は`SELECT * FROM quest_history WHERE status='pending' ORDER BY completed_at DESC`の各行(=`id`/`user_id`/`quest_id`/`quest_title`/`status`/`completed_at`/`exp_earned`/`gold_earned`/`linked_history_id`/`medals_earned`)。`quests`は`filter_active_quests`通過後の`quest_master`行、`rewards`は`reward_master`行から`desc`キーを除去したもの、`completedQuests`はリセット周期内の`quest_history`行、`logs`は表示用に整形済みのログ配列である。本ファイルが参照している`pendingQuests[].user_id`と`users[].{user_id,name,avatar,level,exp,nextLevelExp,gold}`はいずれも上記に含まれ、`_build_family_datasource`が未参照のフィールド(`quests`/`rewards`/`completedQuests`/`logs`/`medal_count`/`maxHp`/`hp`/`job_class`/`role`/`updated_at`)も同時に構築されるため、Alexa経路は必要以上に重い集計を毎回呼んでいることが分かる(APL用の軽量ビューモデルを作る本ファイルの`_build_family_datasource`で切り詰めている)。 | 直接ソース確認: `MY_HOME_SYSTEM/services/quest/game_system.py:168-318`（参考: [quest_game_system.md](./quest_game_system.md)・[quest_service.md](./quest_service.md)） |
+| `alexa/apl/main_screen.json`の具体的なレイアウト・データバインディング仕様 | `MY_HOME_SYSTEM/alexa/apl/main_screen.json`を直接確認した(リポジトリ内に実在するため解析可能)。`{"type": "APL", "version": "2023.3", "theme": "dark"}`で、`mainTemplate.parameters`は`["payload"]`の1つのみ。ルートは`100vw`×`100vh`・背景`#1b1f3b`の`Container`で、(1)ヘッダー`Container`が`${payload.familyData.title}`(48dp太字)と`${payload.familyData.pendingTotal > 0 ? '承認待ち ' + payload.familyData.pendingTotal + '件' : 'すべて承認済み'}`(22dp)を表示し、(2)横スクロールの`Sequence`が`data: "${payload.familyData.users}"`をバインドして、ユーザー1人につき`300dp`×`420dp`の`Frame`カードを描画する。カード内の各バインドは`${data.avatar}`(80dp)・`${data.name}`・`Lv.${data.level}`・EXPバー(`width: "${data.expPercent}%"`の内側`Frame`)・`EXP ${data.exp}/${data.nextLevelExp}`・`💰 ${data.gold} G`、および`"when": "${data.pendingCount > 0}"`条件付きの`承認待ち ${data.pendingCount}件`である。したがって本ファイルの`_build_family_datasource`(49〜80行目)が返すdictは**`title`・`pendingTotal`・`users[]`(各要素が`avatar`/`name`/`level`/`expPercent`/`exp`/`nextLevelExp`/`gold`/`pendingCount`)というキー構成を満たす必要がある**ことが確定した(このJSONと`_build_family_datasource`の間に型検査は無く、キー名の不一致は画面上の空文字として現れるだけで例外にならない点が保守上の注意点)。 | 直接ソース確認: `MY_HOME_SYSTEM/alexa/apl/main_screen.json`（全体、`MY_HOME_SYSTEM/handlers/alexa_handler.py:49-80,113-120`と対応） |
 
 ## 10. 自己検証結果
 

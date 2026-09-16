@@ -15,7 +15,7 @@
 ## 2. ファイルの概要
 
 * Streamlitダッシュボードの「電力・環境」「気温詳細」「高砂実家」タブを描画するモジュール。3つの公開関数`render_electricity`, `render_temperature`, `render_takasago`で構成される。
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 9, 56, 106 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):`, `def render_temperature(df_sensor: pd.DataFrame, now: datetime):`, `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 16, 56, 106 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 * `render_electricity`は、渡された`df_sensor`から「Nature Remo E Lite」デバイスの消費電力を今日・昨日で重ねた折れ線グラフ、および「Plug」を含むデバイスタイプの本日の個別家電電力を表示する。
 * 根拠: `df_sensor["device_type"] == DEVICE_TYPE_NATURE_REMO_E_LITE` (行番号: 30 / 抜粋: "(df_sensor[\"device_type\"] == DEVICE_TYPE_NATURE_REMO_E_LITE) &"), `df_sensor["device_type"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)` (行番号: 54 / 抜粋: "(df_sensor[\"device_type\"].str.contains(DEVICE_TYPE_KEYWORD_PLUG, na=False)) &")（Issue #451でリテラル文字列からモジュールレベル定数へ変更、値は不変）
 * `render_temperature`は、「Meter」を含むデバイスタイプの本日の室温・湿度推移を折れ線グラフで表示し、加えて`analysis_service.load_yearly_temperature_stats`から取得した年間の室内外最高/最低気温推移を表示する。
@@ -47,11 +47,11 @@
 ### `render_electricity`
 
 * **役割**: 「Nature Remo E Lite」デバイスの今日・昨日の消費電力を1つのグラフに重ねて表示（2カラムの左）し、「Plug」を含むデバイスの本日の個別電力推移を表示（2カラムの右）する。
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 9〜54 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 16〜62 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`device_type`, `timestamp`, `power_watts`, `friendly_name`列を含むセンサーデータ)、`now` (型: `datetime`。基準となる現在時刻)
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 9 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 16 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は`st.info`表示後に早期`return`）
@@ -63,18 +63,18 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 9〜54 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 16〜62 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):")
 
 
 
 ### `render_temperature`
 
 * **役割**: 本日の室温・湿度推移（「Meter」を含むデバイスタイプ）を2カラムで表示し、加えて年間の室内外気温統計（`analysis_service`経由）を折れ線グラフで表示する。
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 56〜104 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 64〜112 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`device_type`, `timestamp`, `temperature_celsius`, `humidity_percent`, `friendly_name`列を含むセンサーデータ)、`now` (型: `datetime`。基準時刻・年間データ取得の対象年)
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 56 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` (行番号: 64 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空、または`device_type`列が存在しない場合は`st.info`表示後に早期`return`）
@@ -93,11 +93,11 @@
 ### `render_takasago`
 
 * **役割**: `df_sensor`のうち`location`が「高砂」（実家）であるレコードを最大50件、時刻・デバイス名・接触状態とともに表形式表示する。
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 106〜113 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 114〜121 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `timestamp`, `friendly_name`, `contact_state`列を含むセンサーデータ)
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 106 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` (行番号: 114 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は何も描画しない）
@@ -109,7 +109,7 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` 全体 (行番号: 106〜113 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
+* 根拠: `def render_takasago(df_sensor: pd.DataFrame):` 全体 (行番号: 114〜121 / 抜粋: "def render_takasago(df_sensor: pd.DataFrame):")
 
 
 
@@ -191,7 +191,7 @@ graph TD
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
 | 高 | `services/analysis_service.py` | `load_yearly_temperature_stats`が返す年間気温統計データの正確な生成ロジック・スキーマを把握するため。 | `df_yearly = analysis_service.load_yearly_temperature_stats(now.year)` (行番号: 89 / 抜粋: "df_yearly = analysis_service.load_yearly_temperature_stats(now.year)") |
-| 中 | `dashboard.py` | 各関数に渡される`df_sensor`, `now`引数の生成元・スキーマ（`device_type`の実際の値一覧等）を確認するため（既に`dashboard.md`で一部解析済み）。 | `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 9 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):") |
+| 中 | `dashboard.py` | 各関数に渡される`df_sensor`, `now`引数の生成元・スキーマ（`device_type`の実際の値一覧等）を確認するため（既に`dashboard.md`で一部解析済み）。 | `def render_electricity(df_sensor: pd.DataFrame, now: datetime):` (行番号: 16 / 抜粋: "def render_electricity(df_sensor: pd.DataFrame, now: datetime):") |
 
 ## 8. 保守上の注意点
 
@@ -204,7 +204,7 @@ graph TD
 
 
 * **エラーハンドリングの欠如**: 3関数のいずれにも`try/except`による例外捕捉がなく、`analysis_service.load_yearly_temperature_stats`が例外を送出した場合、タブ全体の描画が中断する可能性がある。
-* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 56〜104 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
+* 根拠: `def render_temperature(df_sensor: pd.DataFrame, now: datetime):` 全体 (行番号: 64〜112 / 抜粋: "def render_temperature(df_sensor: pd.DataFrame, now: datetime):")
 
 
 ## 9. 不明事項一覧
