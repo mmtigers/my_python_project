@@ -65,7 +65,7 @@ npm run build    # tsc -b && vite build -> dist/
 npm run lint     # ESLint
 ```
 
-ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行し、成功時にビルド元のgitツリーハッシュを `dist/.built-tree` に記録する。`./deploy.sh --if-stale` はそのハッシュがHEADの `family-quest` ツリーと一致すればビルドをスキップする冪等モードで、リポジトリ管理の `deploy/git-hooks/post-merge` フック（`MY_HOME_SYSTEM/start_all.sh` が起動時に `core.hooksPath` として冪等に登録する。以前は `.git/hooks/` へのローカル設置でclone後に再設置が必要だった）が `git pull` のたびに、また `MY_HOME_SYSTEM/start_all.sh` がサーバー起動前に、これを呼び出す（`git reset --hard` 等のpull以外の経路で更新された場合でも、次のサーバー起動時にビルド漏れが回収される。2026-09-01のAPIスキーマ不整合障害の再発防止）。
+ビルド成果物 `dist/` はバックエンドが直接配信する (`unified_server.py` が `QUEST_DIST_DIR`、デフォルトは `../family-quest/dist`、を `/quest` にマウントする) — **ビルド完了 = デプロイ完了**であり、別途のデプロイ/再起動手順は不要。`./deploy.sh` がビルドを実行し（`dist.next/` にビルドして検証し、成功時だけ `dist/` と rename で入れ替えるアトミック方式。ビルド中・失敗時も旧 `dist/` が配信され続ける — Issue #650。Node のメジャーが `package.json` の `engines` 範囲外なら失敗、`.nvmrc` と異なれば警告する）、成功時にビルド元のgitツリーハッシュを `dist/.built-tree` に記録する。`./deploy.sh --if-stale` はそのハッシュがHEADの `family-quest` ツリーと一致すればビルドをスキップする冪等モードで、リポジトリ管理の `deploy/git-hooks/post-merge` フック（`MY_HOME_SYSTEM/start_all.sh` が起動時に `core.hooksPath` として冪等に登録する。以前は `.git/hooks/` へのローカル設置でclone後に再設置が必要だった）が `git pull` のたびに、また `MY_HOME_SYSTEM/start_all.sh` がサーバー起動前に、これを呼び出す（`git reset --hard` 等のpull以外の経路で更新された場合でも、次のサーバー起動時にビルド漏れが回収される。2026-09-01のAPIスキーマ不整合障害の再発防止）。
 
 ### DDD (バッチ処理)
 
@@ -79,7 +79,7 @@ npm run lint     # ESLint
 
 ### MY_HOME_SYSTEM: リクエストフローとレイヤリング
 
-`unified_server.py` が唯一のFastAPIエントリーポイント。起動時 (`lifespan`) に未適用のSQLマイグレーションを適用し、その後 `monitors/camera_monitor.py` と `scheduler_boot.py` を（asyncioタスクではなく）**別プロセス**として起動する — これが `tests/conftest.py` の `api_client` フィクスチャが `lifespan` の実行を一切避けている理由である。ルーターは薄く作られており、`routers/*.py` はリクエストのパース・検証のみを行い、ロジックは `services/*.py` に委譲し、そこから永続化のために `core/database.py` を呼ぶ。新規エンドポイントを追加する際は、ロジックをルーターに直接書かずこのレイヤリングに従うこと。
+`unified_server.py` が唯一のFastAPIエントリーポイント。起動時 (`lifespan`) に未適用のSQLマイグレーションを適用し、その後 `monitors/camera_monitor.py` と `scheduler_boot.py` を（asyncioタスクではなく）**別プロセス**として起動し、30秒ごとに死活監視して予期せず終了していれば再起動する（1時間に5回を超えたらクラッシュループとみなして停止しCRITICALを通知。`restart_dead_children`、Issue #646） — これが `tests/conftest.py` の `api_client` フィクスチャが `lifespan` の実行を一切避けている理由である。実機では `deploy/systemd/home_system.service`（`Type=simple` + `Restart=on-failure`）が `unified_server.py` 本体をフォアグラウンドで管理し、`start_all.sh --prepare` は `ExecStartPre` の前処理（旧プロセス掃除・NAS待機・`.venv`/`dist` 鮮度チェック）のみを担う。ダッシュボードは `home_dashboard.service` で別管理。ルーターは薄く作られており、`routers/*.py` はリクエストのパース・検証のみを行い、ロジックは `services/*.py` に委譲し、そこから永続化のために `core/database.py` を呼ぶ。新規エンドポイントを追加する際は、ロジックをルーターに直接書かずこのレイヤリングに従うこと。
 
 新規エンドポイントに関わる独自ミドルウェアが2つある:
 - `ip_restriction_middleware` は非プライベートネットワークからのリクエストをログに記録するが（ブロックはしない）、`/webhook/switchbot`・`/callback/line`・`/webhook/alexa` は外部からのトラフィックを受け付ける必要があるため無条件に許可している（`allowed_webhook_paths`。このリストは同時に「エッジのCloudflare Access側でバイパス設定が必要なパス」の一覧でもあり、設定漏れがあるとWebhookがサーバーまで届かない — Issue #517。新しい外部Webhookを追加したら必ずここに追記すること。`tests/test_unified_server_app.py` がマウント済みルートとの一致を検証する）。**これは意図的な設計として正式に確定している**（Issue #321・2026-09-03決定）: アプリ層では`Cf-Access-Jwt-Assertion`のJWT検証を行わず（一度PR #80で実装したが2026-08-28の障害でrevert済みで、再実装しない方針を採用）、外部アクセス制御はエッジのCloudflare Accessに委譲する。この設計は、オリジンへの直接到達がCloudflareのIPレンジ経由に限定されていること（ルーター/FW側の設定）を前提とする。

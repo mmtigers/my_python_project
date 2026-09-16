@@ -18,6 +18,8 @@
 # family-quest ツリーを比較し、変更が無ければ何もしないため、family-quest に無関係な
 # pull でもコストはかからない。ビルド失敗は警告のみ(git の post-merge フックの
 # 終了コードは pull の結果に影響しない。start_all.sh の Phase 2 が次回起動時に再試行する)。
+# deploy.sh は dist.next/ にビルドして成功時だけ dist/ と入れ替える(Issue #650)ため、
+# ビルド中・失敗時も旧 dist/ がそのまま配信され続ける。
 set -u
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
