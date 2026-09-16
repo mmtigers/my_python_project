@@ -201,8 +201,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `sanitize_filename`の詳細ルール | `DDD/file_utils.py:9-21`を直接確認した。シグネチャは`sanitize_filename(filename: str, max_length: int = 200) -> str`。実装は`re.sub(r'[\\/*?:"<>|]', '_', filename).strip()`で禁止文字（`\ / * ? : " < > |`）をアンダースコアに置換し前後の空白を除去した後、`safe[:max_length].strip('. ')`で`max_length`（既定200文字。ext4等の255バイト制限に対する安全マージンとしてDocstringに明記）まで切り詰め、さらに末尾のピリオド・空白を除去する。関連ドキュメント`file_utils.md`の解析結果と完全に一致することを確認した。 | 直接ソース確認: `DDD/file_utils.py:9-21`（参考: [file_utils.md](./file_utils.md)） |
-
+| `sanitize_filename`の詳細ルール | `DDD/file_utils.py:9-21`を直接確認した。シグネチャは`sanitize_filename(filename: str, max_length: int = 200) -> str`。実装は`re.sub(r'[\\/*?:"<>\|]', '_', filename).strip()`で禁止文字（`\ / * ? : " < > \|`）をアンダースコアに置換し前後の空白を除去した後、`safe[:max_length].strip('. ')`で`max_length`（既定200文字。ext4等の255バイト制限に対する安全マージンとしてDocstringに明記）まで切り詰め、さらに末尾のピリオド・空白を除去する。関連ドキュメント`file_utils.md`の解析結果と完全に一致することを確認した。 | 直接ソース確認: `DDD/file_utils.py:9-21`（参考: [file_utils.md](./file_utils.md)） |
 ## 10. 自己検証結果
 
 * [x] 推測・外部ファイルの仕様を一切含んでいない

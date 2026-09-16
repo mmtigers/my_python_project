@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 同名衝突の注意: `services/quest/quest_service.py`と`services/quest_service.py`（下位互換シム）がファイル名`quest_service`で衝突するため、`services/quest/`配下の6ファイルはいずれも`quest_`を接頭辞とした名前で区別している（`dashboard_common.md`と同じ命名規約）。本ファイルは`inventory_service.py`という単独の基底名のため実際には衝突しないが、命名一貫性のため`quest_inventory_service.md`とした。
 
@@ -195,6 +196,14 @@ graph TD
 | DB各テーブルのスキーマ | `user_inventory`/`reward_master`/`quest_users`/`quest_history`の各カラムの型・制約が本ファイルからは不明。 | DBのDDL、マイグレーション定義ファイル |
 | `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.LINE_USER_ID`の実際の値 | `.env`依存の実値は本ファイルからは確認できない。 | `config.py`, `.env`（gitignore対象） |
 | `notification_service.send_push`の完全な仕様 | リトライ・失敗時の挙動が本ファイルからは不明。 | `services/notification_service.py`（[notification_service.md](./notification_service.md)） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| DB各テーブルのスキーマ | スキーマの唯一の定義元である`MY_HOME_SYSTEM/migrations/`から生成された`MY_HOME_SYSTEM/current_schema.sql`を直接確認した。`user_inventory(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, reward_id INTEGER, status TEXT DEFAULT 'owned', purchased_at DATETIME NOT NULL, used_at DATETIME, FOREIGN KEY(reward_id) REFERENCES reward_master(reward_id))`。`status`は既定`'owned'`でCHECK制約は無く、`'consumed'`等の遷移値はアプリ層の約束事である。`used_at`はNULL許容で、未使用アイテムではNULLのまま。`reward_master(reward_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, cost_gold INTEGER, category TEXT, icon_key TEXT, desc TEXT, target TEXT DEFAULT 'all', description TEXT)`、`quest_users(user_id TEXT PRIMARY KEY, ..., gold INTEGER DEFAULT 0, ..., role TEXT)`、`quest_history(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, quest_id INTEGER, quest_title TEXT, status TEXT DEFAULT 'approved', completed_at DATETIME NOT NULL, exp_earned INTEGER, gold_earned INTEGER, linked_history_id INTEGER DEFAULT NULL, medals_earned INTEGER DEFAULT 0)`。`user_inventory`には`(user_id, reward_id, status)`複合インデックスが定義されていないため、YouTubeクールダウン判定のSELECTは行数が増えると全表走査になる点が将来の注意点である。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`MY_HOME_SYSTEM/migrations/`から`python init_unified_db.py --dump-schema`で生成。参考: [init_unified_db.md](./init_unified_db.md)） |
+| `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.LINE_USER_ID`の実際の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`YOUTUBE_REWARD_IDS`は環境変数の既定値`"10,11,12"`をカンマ区切りで`List[int]`へパースしたもの(589〜595行目)で、既定では`[10, 11, 12]`。`quest_data.REWARDS`の`{'id': 10, 'title': 'Youtube (10:00)', ...}`等と対応する。`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`は既定`"2026-09-12"`を`date.fromisoformat`で変換した`datetime.date`(604〜606行目)、パース失敗時は`date(2000, 1, 1)`へフォールバックし即時強制になる(608〜609行目)。したがって**2026-09-12(JST)以降は`_is_youtube_cooldown_enforced()`が`True`を返し、クールダウンは予告段階を終えて実際に拒否される**。`LINE_USER_ID: Optional[str] = os.getenv("LINE_USER_ID")`(212行目)は既定`None`で、`.env`でのみ設定される。`None`のまま`send_push(target="line"/"both")`が呼ばれると宛先解決に失敗し、`send_push`はエラーログを出して`False`を返す(例外は送出しない)。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:212, 587-609`（参考: [config.md](./config.md)） |
+| `notification_service.send_push`の完全な仕様 | `MY_HOME_SYSTEM/services/notification_service.py`の`send_push(messages, *, target="both", channel="notify", user_id=None, image_data=None, filename="snapshot.jpg") -> bool`(182〜229行目、Issue #289でキーワード専用に再設計)を直接確認した。**リトライはLINE側には存在せず、Discord側のみ**である: `_send_discord_webhook`が呼ぶ内部のPOSTラッパーが、レート制限等の応答に対して`DISCORD_RETRY_ATTEMPTS = 1`(80行目)＝**最大1回だけ**再送し、待機時間は`Retry-After`/`X-RateLimit-Reset-After`ヘッダ値を`DISCORD_RETRY_MAX_WAIT_SECONDS = 5.0`(81行目)で上限クリップした秒数(ヘッダが無い/不正なら1.0秒)である(105〜121行目)。失敗時の挙動は**Fail-Soft**で、Discord失敗は警告ログを出して`success = False`にするだけ(205〜208行目)、LINE失敗時はDiscordの`error`チャンネルへ`⚠️ LINE送信失敗: (詳細ログ確認)`をフォールバック送信したうえで`success = False`(222〜227行目)。**いずれの経路でも例外を呼び出し元へ送出せず`bool`を返すだけ**なので、本ファイル(`InventoryService`)側でtry/exceptを重ねる必要はなく、通知失敗がアイテム使用トランザクションを巻き戻すことはない。 | 直接ソース確認: `MY_HOME_SYSTEM/services/notification_service.py:80-82, 105-121, 182-229`（参考: [notification_service.md](./notification_service.md)） |
 
 ## 10. 自己検証結果
 

@@ -6,7 +6,7 @@
 | 言語 | Python / FastAPI |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `83b42db` |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -175,6 +175,13 @@ graph TD
 | --- | --- | --- |
 | `routine_service.get_today_state`/`complete_step`の戻り値の正確なJSON形状 | 本ファイルの型ヒントは`Dict[str, Any]`のみであり、実際にどのようなキー・値構造を返すかは本ファイルからは不明。 | `services/routine_service.py` |
 | `RoutineCompleteAction`の各フィールドの制約詳細 | インポートのみで、フィールド定義自体は本ファイルには存在しない。 | `models/routine.py` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `routine_service.get_today_state`/`complete_step`の戻り値の正確なJSON形状 | `MY_HOME_SYSTEM/services/routine_service.py`を直接確認した。`get_today_state`(463〜481行目)は`{"date": "YYYY-MM-DD", "flows": {<flow_key>: <flow状態>}}`を返し、`flows`のキーは`ROUTINE_FLOWS`の全キー(`'am'`/`'pm'`)。まだ開始時刻に達していないフローは`{"started": False, "title": <フロー名>}`の2キーのみ(475行目)、開始済みのフローは`_serialize_flow`(419〜461行目)が返す**`started`(常に`True`) / `title` / `checkpoint_time` / `current_step_index` / `in_free_time` / `is_complete` / `bonus_gold` / `bonus_exp` / `preview_bonus_gold` / `bonus_full_gold` / `leveled_up` / `new_level` / `steps` の13キー**である。`steps`は各ステップにつき`key` / `label` / `icon_key` / `is_checkpoint` / `is_checklist` / `status`の6キーを持つdictの配列(`status`は`'locked'`/`'current'`/`'done'`/`'remind'`等の文字列)。`complete_step`(483〜551行目)は**同じ`_serialize_flow`の戻り値(単一フロー分の13キー)をそのまま返す**ため、`get_today_state`の`flows[flow_key]`と同一形状であり、`date`/`flows`のラッパーは付かない。エラー時は`HTTPException`を送出する: 404(`Unknown flow_key` / `User not found` / `Unknown step_key`)、400(`このフローはまだ開始していません` / `本日のフローは完了しています` / `自由時間は時間になると自動的に次へ進みます`)、409(`表示が古いようです。再読み込みしてください`)。本ファイルがこれらを一切捕捉せず素通しするため、そのままのステータスコードでクライアントへ返る。TypeScript側の対応するスキーマは`family-quest/src/lib/routineDataSchema.ts`にある。 | 直接ソース確認: `MY_HOME_SYSTEM/services/routine_service.py:419-551`（参考: [routine_service.md](./routine_service.md)・[routineDataSchema.md](./../family-quest/src/lib/routineDataSchema.md)） |
+| `RoutineCompleteAction`の各フィールドの制約詳細 | `MY_HOME_SYSTEM/models/routine.py`を直接確認した。`class RoutineCompleteAction(BaseModel)`は3フィールドのみで、`user_id: str = Field(min_length=1, max_length=64)`、`flow_key: Literal['am', 'pm']`、`step_key: str = Field(min_length=1, max_length=64)`。**`flow_key`だけが`Literal`で値域を固定**されているため、不正な`flow_key`はサービス層の`if flow_key not in ROUTINE_FLOWS`(486行目)に到達する前にPydanticの422で弾かれる(=サービス層のその404分岐は、Pydanticを経由しない直接呼び出し・テスト用の防御的チェックとして機能する)。逆に`step_key`は文字列長しか検証されないため、未知の`step_key`はサービス層の`HTTPException(404, "Unknown step_key")`(510行目)で処理される。同ファイルには`Response`モデルは定義されておらず、本ファイルの戻り値型注釈が`Dict[str, Any]`に留まっている理由と一致する。 | 直接ソース確認: `MY_HOME_SYSTEM/models/routine.py`（全体）, `MY_HOME_SYSTEM/services/routine_service.py:486`（参考: [routine.md](./routine.md)・[routine_service.md](./routine_service.md)） |
 
 ## 10. 自己検証結果
 

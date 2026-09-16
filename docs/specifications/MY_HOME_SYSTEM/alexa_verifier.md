@@ -6,6 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -299,6 +300,13 @@ graph TD
 | --- | --- | --- |
 | 呼び出し元ルーターが`AlexaVerificationError`以外の例外をどう扱うか | Issue #179の修正により`_fetch_leaf_certificate`のHTTP取得失敗（`requests.exceptions.RequestException`）は`AlexaVerificationError`へ変換されるようになったが、`x509.load_pem_x509_certificates`が不正なPEMデータに対して送出しうる`ValueError`等、本ファイル内で`AlexaVerificationError`に変換されない例外経路が他にも残っており、呼び出し元がこれらをHTTPレスポンスへどう変換するかは本ファイルからは不明。 | `MY_HOME_SYSTEM/routers/alexa_router.py` |
 | `_cert_cache`のプロセス間共有の有無 | `unified_server.py`が複数プロセス/ワーカー構成で稼働する場合、`_cert_cache`はプロセスごとに独立するかどうかが本ファイルからは不明。 | `MY_HOME_SYSTEM/unified_server.py`、デプロイ構成（起動コマンド等） |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| 呼び出し元ルーターが`AlexaVerificationError`以外の例外をどう扱うか | `MY_HOME_SYSTEM/routers/alexa_router.py`を直接確認した。`verify_signature`は`await asyncio.to_thread(verify_signature, raw_body, signature, cert_chain_url)`として呼ばれ、`except AlexaVerificationError`のみを捕捉して`HTTPException(400, "Signature verification failed")`に変換する。`verify_timestamp`も同様に`AlexaVerificationError`→400である。したがって**`x509.load_pem_x509_certificates`の`ValueError`など、本ファイル内で`AlexaVerificationError`に変換されない例外はルーターでも捕捉されず**、`MY_HOME_SYSTEM/unified_server.py`324〜331行目の`@app.exception_handler(Exception)`まで伝播し、`logger.error("🔥 Global Exception: ...", exc_info=True)`の上で`JSONResponse(status_code=500, content={"detail": "Internal Server Error"})`として返る。つまり**検証由来の失敗が400ではなく500になる経路が実在する**(Alexa側からは「スキルの不具合」として扱われ、リトライ挙動も400とは異なりうる)。なお`skill.serializer.deserialize`/`skill.invoke`だけは`except Exception`で包まれており、そこでの例外は明示的に500(`"Skill invocation failed"`)へ変換される。 | 直接ソース確認: `MY_HOME_SYSTEM/routers/alexa_router.py`（全体）, `MY_HOME_SYSTEM/unified_server.py:324-331`（参考: [alexa_router.md](./alexa_router.md)・[unified_server.md](./unified_server.md)） |
+| `_cert_cache`のプロセス間共有の有無 | `MY_HOME_SYSTEM/unified_server.py`431行目は`uvicorn.run(app, host="0.0.0.0", port=8000)`であり、**`workers`引数を指定していない=単一プロセス・単一イベントループ構成**である。起動経路も`MY_HOME_SYSTEM/start_all.sh`170行目の`nohup $PYTHON_EXEC unified_server.py ... &`が唯一で、gunicorn等のマルチワーカー起動やプロセスマネージャによる多重起動は行われていない(`start_all.sh`は`unified_server.py`を含むプロセス名リストで既存プロセスを停止してから1つだけ起動する)。したがって**`_cert_cache`はプロセス内に1つだけ存在し、実運用上「プロセスごとに独立する」問題は発生しない**。同じ前提は`routers/alexa_router.py`のコメント(#230)も「unified_serverはworkers指定なしの単一プロセス・単一イベントループ構成のため」と明記しており、`services/quest/locks.py`のプロセス内ロック群が有効に機能する前提とも共通である。将来マルチワーカー構成へ移行する場合は、証明書キャッシュのミス率がワーカー数倍になる(機能上は無害だが`requests.get`の回数が増える)点と、プロセス内ロックが効かなくなる点をセットで再検討する必要がある。 | 直接ソース確認: `MY_HOME_SYSTEM/unified_server.py:431`, `MY_HOME_SYSTEM/start_all.sh:42,170`, `MY_HOME_SYSTEM/routers/alexa_router.py`（#230コメント）（参考: [unified_server.md](./unified_server.md)・[start_all.md](./start_all.md)・[quest_locks.md](./quest_locks.md)） |
 
 ## 10. 自己検証結果
 

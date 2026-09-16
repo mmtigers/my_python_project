@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `3ac46ca` (+同一ブランチ内で土日のチェックポイント時刻上書き機能・休日PMのステップスキップ/宿題引き継ぎ機能・朝の準備の順不同チェックリスト化・夜の切り替え時刻変更/寝る準備チェックリスト化/明日の準備追加を追加修正) |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -331,6 +331,12 @@ graph TD
 | `icon_key`の実際の表示アイコンとの対応関係 | 本ファイルでは文字列キー(例: `'wash'`, `'meal'`)が定義されているのみで、これをどのアイコン画像/絵文字に変換するかはフロントエンド側の実装(`family-quest`)に依存し不明。 | `family-quest/src/features/routine/`配下のコンポーネント(本タスクのスコープ外) |
 | ステップ内容を将来的に親が編集できるようにする管理UIの計画有無 | モジュールdocstringは「親が編集する対象ではない」という現状の設計方針を述べるのみで、将来的な可変化の計画有無には触れていない。 | 該当ファイルなし(仕様・ロードマップ文書の追加が必要) |
 | `pm`フローの出発ボーナス按分対象が4項目(`handwash`/`snack`/`homework`/`tomorrow_prep`)になったことで`150`/`30`がちょうど割り切れなくなった(`round()`による非整数丸め)ことが意図的な仕様か見落としかは、本ファイルのコメントからは判断できない。`am`フローの5項目化の際は「ぴったり割り切れる」ことがコメントで明記されていたのに対し、`pm`の4項目化にはこの点への言及コメントが無い。 | `tomorrow_prep`追加のコメント(行番号: 95-97)に按分の整数性への言及が無い。 | 該当ファイルなし(要件のヒアリングが必要) |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `icon_key`の実際の表示アイコンとの対応関係 | `family-quest/src/features/routine/components/RoutineFlow.tsx`を直接確認した。同ファイル16〜33行目の`const ICONS: Record<string, LucideIcon>`が`icon_key`→`lucide-react`コンポーネントの対応表であり、**`wash: Droplet` / `meal: UtensilsCrossed` / `clothes: Shirt` / `teeth: Sparkles` / `toilet: Bath` / `free: Star` / `handwash: Waves` / `snack: Cookie` / `homework: Pencil` / `tomorrow_prep: Backpack` / `bath: ShowerHead` / `sleep: BedDouble`** の12件が登録されている。描画側は`const Icon = ICONS[step.icon_key] \|\| Star;`(207行目・250行目)と**未知キーに対して`Star`へフォールバック**するため、本ファイルに新しい`icon_key`を追加してもフロントエンドが壊れることはなく、代わりに無言で汎用の星アイコンになる(=追加時は`RoutineFlow.tsx`の`ICONS`への追記が必要だがCIでは検出されない)。本ファイルで現在使用されている`icon_key`(`meal`/`clothes`/`wash`/`teeth`/`toilet`/`free`/`handwash`/`snack`/`homework`/`tomorrow_prep`/`bath`/`sleep`の12種)は**すべて`ICONS`に登録済み**であり、フォールバックが発生する項目は無いことを確認した。なお`toilet`には専用アイコンが無いため`Bath`を転用しており、実際の入浴(`bath`)には`ShowerHead`を充てて区別している旨が同ファイルのコメント(28〜31行目)に明記されている。 | 直接ソース確認: `family-quest/src/features/routine/components/RoutineFlow.tsx:11-33,207,250`, `MY_HOME_SYSTEM/routine_data.py:64-107`（参考: [RoutineFlow.md](./../family-quest/src/features/routine/components/RoutineFlow.md)） |
 
 ## 10. 自己検証結果
 

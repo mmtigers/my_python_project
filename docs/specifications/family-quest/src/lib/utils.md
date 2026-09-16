@@ -6,6 +6,7 @@
 | 言語 | TypeScript (React等のフロントエンド環境) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
+| 解析基準コミット | `a1d2738` |
 
 ## 関連ドキュメント
 
@@ -152,6 +153,12 @@ graph TD
 | `ClassValue` の許容する詳細な型構造 | 外部ライブラリからインポートされているため。（`family-quest`配下に`node_modules`がインストールされておらず、`clsx`ライブラリの型定義ファイルはリポジトリ内に存在しないため解消不可） | `clsx` ライブラリの型定義ファイル |
 | `cn` 関数の厳密な戻り値の型 | 戻り値の型アノテーションが省略されており、`twMerge` の型定義に依存しているため。（`family-quest`配下に`node_modules`がインストールされておらず、`tailwind-merge`ライブラリの型定義ファイルはリポジトリ内に存在しないため解消不可） | `tailwind-merge` ライブラリの型定義ファイル |
 | `isSameOriginAvatarPath`が実際にどのように呼び出されているか（`false`判定時のフォールバック表示等） | 本ファイルは関数定義のみであり、呼び出し側（`Header.tsx`/`FamilyLog.tsx`/`UserStatusCard.tsx`）のコンテキストが含まれていないため | `family-quest/src/components/layout/Header.tsx`, `family-quest/src/features/family/components/FamilyLog.tsx`, `family-quest/src/features/family/components/UserStatusCard.tsx` |
+
+## 相互参照による補足情報
+
+| 元の不明事項 | 判明した内容 | 参照元ドキュメント |
+| --- | --- | --- |
+| `isSameOriginAvatarPath`が実際にどのように呼び出されているか（`false`判定時のフォールバック表示等） | 呼び出し元をリポジトリ全体から抽出したところ、**5ファイル**で使われていることが判明した(不明事項欄に挙げられていた3ファイルに加え、`src/components/ui/SettingsModal.tsx`と`src/components/ui/AvatarUploader.tsx`がある)。いずれも**三項演算子による描画分岐**という同一パターンで、`true`のときだけ`<img src={user.avatar}>`を描画し、`false`のときは`user.avatar \|\| '🙂'`＝**絵文字文字列をそのままテキストとして描画するフォールバック**になる: `Header.tsx:126-132`(`<div className="...text-3xl">{user.avatar \|\| '🙂'}</div>`)、`UserStatusCard.tsx:29-34`、`FamilyLog.tsx:39-44`。`AvatarUploader.tsx:103`は`const avatarImageSrc = preview \|\| (isSameOriginAvatarPath(user.avatar) ? user.avatar : null);`として、`data:`URLのローカルプレビューを最優先し、それが無ければ判定結果を`string \| null`へ落とす形で使う。`SettingsModal.tsx:70`も同じ描画分岐。つまり**`false`は「エラー」ではなく「アバターが未アップロードで絵文字デフォルトのままである」という正常系を意味し**、外部URLや`//evil.example/x.png`のようなプロトコル相対URLが混入した場合も同じ経路で単に絵文字表示に落ちる(壊れた画像アイコンにならない)。この分岐のために`isSameOriginAvatarPath`が`url is string`型述語として宣言されていること(TypeScriptが`true`分岐内で`user.avatar`を`string`に絞り込める)も、呼び出し側の`<img src={user.avatar}>`が型エラーにならない理由として裏付けられた。 | 直接ソース確認: `family-quest/src/components/layout/Header.tsx:126-132`, `family-quest/src/features/family/components/UserStatusCard.tsx:29-34`, `family-quest/src/features/family/components/FamilyLog.tsx:39-44`, `family-quest/src/components/ui/AvatarUploader.tsx:103,117`, `family-quest/src/components/ui/SettingsModal.tsx:68-70`（参考: [Header.md](../components/layout/Header.md)・[FamilyLog.md](../features/family/components/FamilyLog.md)・[UserStatusCard.md](../features/family/components/UserStatusCard.md)・[AvatarUploader.md](../components/ui/AvatarUploader.md)・[SettingsModal.md](../components/ui/SettingsModal.md)） |
 
 ## 10. 自己検証結果
 
