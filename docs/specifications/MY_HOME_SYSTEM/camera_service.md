@@ -48,7 +48,7 @@
 * 根拠: [プルーニング呼び出し] (行番号: 378 / 抜粋: "_prune_finished_vod_processes()")
 
 
-* `set_camera_enabled`は`devices.json`上の該当カメラの`enabled`フラグを更新し、`config.CAMERAS`にも反映する。書き込みは一時ファイル(`.tmp`)への書き込み後に`os.replace`でアトミックに置き換える方式であり、書き込み途中のクラッシュ・電源断による`devices.json`破損を防ぐ。
+* `set_camera_enabled`は`devices.json`上の該当カメラの`enabled`フラグを更新し、`config.CAMERAS`にも反映する。ここで更新されるのは**サーバープロセス内の**`config.CAMERAS`だけだが、別プロセスの`monitors/camera_monitor.py`は監視ループごとに`devices.json`を読み直す（`is_camera_enabled`、Issue #652）ため、`devices.json`への書き込みを通じて無効化・再有効化が数十秒以内に伝播する。書き込みは一時ファイル(`.tmp`)への書き込み後に`os.replace`でアトミックに置き換える方式であり、書き込み途中のクラッシュ・電源断による`devices.json`破損を防ぐ。
 * 根拠: [set_camera_enabled関数] (行番号: 505〜508 / 抜粋: "tmp_path = f\"{config.DEVICES_JSON_PATH}.tmp\"")
 
 ## 3. 外部依存関係

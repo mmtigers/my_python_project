@@ -259,6 +259,9 @@ graph TD
 
 ## 8. 保守上の注意点
 
+* **（Issue #665 の衛生対応）** `get_route_info`内の乗換路線抽出のリスト内包表記の変数名は、ruffの`E741`(ambiguous variable name `l`)を解消するため`l`から`el`へ改名した。処理内容は変更していない。
+
+
 * **HTMLスクレイピングへの依存**: `get_route_info` はYahoo!路線情報のHTML構造（CSSセレクタ `#rsltlst li.el`, `.routeSummary`, `.time`, `.fare`, `.transfer`, `.routeDetail` 等）に強く依存しており、対象サイトのマークアップ変更によって静かに（例外を出さずに）情報が取得できなくなるリスクがある。`route_data["summary"] = "取得成功"`（160行目）は`if route_elm:`ブロック（118行目）の内側で実行されるため、`route_elm` が見つからない場合は`summary`が初期値の"取得失敗"のまま返る。
 * **広範な例外キャッチによるフェイルソフト設計**: 両関数とも `except Exception as e:` で全例外を捕捉し、デフォルト値やエラーメッセージ入りの辞書を返す設計になっている。`get_jr_traffic_status`はLow修正（`is_unavailable`フラグの導入）により、取得失敗と平常運転を`results`の中身から区別できるようになったが、`get_route_info`は依然として「取得失敗（プレースホルダーのまま）」と「一部項目だけ空のまま`summary`は成功扱い」を`route_data`の中身だけで機械的に判別する専用フラグを持たない。
 * **固定のタイムアウト値**: 両関数とも `timeout=5` 秒がハードコードされており（38, 113行目）、設定ファイル等で外部から調整する仕組みがない。

@@ -2,6 +2,7 @@
 import os
 import sys
 import asyncio
+import json
 import time
 import socket
 import subprocess
@@ -78,6 +79,68 @@ last_motion_detected: Dict[str, float] = {}
 # 個々のdict操作自体はGILにより原子的だが、クールダウン判定の「読んでから書く」までを
 # 不可分にするためにこのLockで保護する。
 _motion_lock = threading.Lock()
+
+# --- #652: devices.json の enabled フラグの再読込 ---
+# set_camera_enabled(services/camera_service.py)は devices.json を書き換えて
+# サーバープロセス内の config.CAMERAS を更新するが、camera_monitor は別プロセスで
+# 起動時の config.CAMERAS を保持し続けるため、以前は UI でカメラを無効化しても
+# 再起動まで ONVIF 購読・スナップショット・通知が続いていた。各監視ループの先頭で
+# devices.json の mtime を確認し、変わっていれば enabled を読み直す(SIGHUP 方式より
+# 単純で、子プロセスの再起動・再接続も要らない)。
+ENABLED_RECHECK_INTERVAL_SEC: float = 5.0   # mtime を stat する最短間隔(秒)
+DISABLED_POLL_INTERVAL_SEC: int = 30        # 無効化中に再有効化を待つ間隔(秒)
+
+_enabled_cache: Dict[str, Any] = {"mtime_ns": None, "checked_at": 0.0, "flags": None}
+_enabled_cache_lock = threading.Lock()
+
+
+def _read_enabled_flags_from_devices_json() -> Optional[Dict[str, bool]]:
+    """devices.json を読み {camera_id: enabled} を返す。読めない・壊れている場合は None。"""
+    try:
+        with open(config.DEVICES_JSON_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {
+            str(c.get("id")): bool(c.get("enabled", True))
+            for c in data.get("cameras", [])
+            if isinstance(c, dict) and c.get("id") is not None
+        }
+    except Exception as e:
+        logger.debug(f"devices.json の enabled 再読込に失敗(前回値/起動時値を使う): {e}")
+        return None
+
+
+def is_camera_enabled(cam_conf: Dict[str, Any]) -> bool:
+    """該当カメラが現在有効かを devices.json の最新値で返す(#652)。
+
+    devices.json の mtime が前回確認時から変わっていなければキャッシュを返し、
+    stat 自体も ENABLED_RECHECK_INTERVAL_SEC に1回に抑える。devices.json が無い・
+    壊れている・該当 id が無い場合は起動時の cam_conf["enabled"](既定 True)に倒す。
+    """
+    fallback = bool(cam_conf.get("enabled", True))
+    cam_id = cam_conf.get("id")
+    if cam_id is None:
+        return fallback
+    now = time.monotonic()
+    with _enabled_cache_lock:
+        if now - _enabled_cache["checked_at"] >= ENABLED_RECHECK_INTERVAL_SEC or _enabled_cache["flags"] is None:
+            _enabled_cache["checked_at"] = now
+            try:
+                mtime_ns = os.stat(config.DEVICES_JSON_PATH).st_mtime_ns
+            except OSError:
+                mtime_ns = None
+            if mtime_ns is None:
+                _enabled_cache["mtime_ns"] = None
+                _enabled_cache["flags"] = None
+            elif mtime_ns != _enabled_cache["mtime_ns"] or _enabled_cache["flags"] is None:
+                flags = _read_enabled_flags_from_devices_json()
+                if flags is not None:
+                    _enabled_cache["mtime_ns"] = mtime_ns
+                    _enabled_cache["flags"] = flags
+        flags = _enabled_cache["flags"]
+    if not flags:
+        return fallback
+    return flags.get(str(cam_id), fallback)
+
 
 active_pullpoints: List[Any] = []
 # #439: active_pullpoints はカメラごとの監視スレッドから並行してappend/removeされる。
@@ -450,8 +513,20 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
     is_first_connect: bool = True
 
     logger.info(f"🚀 [{cam_name}] Monitor thread started.")
+    was_disabled: bool = False
 
     while True:
+        # 0. #652: devices.json 上で無効化されていれば接続せず待機する(再有効化で再開)
+        if not is_camera_enabled(cam_conf):
+            if not was_disabled:
+                logger.info(f"⏸️ [{cam_name}] devices.json で enabled=false のため監視を停止します(再有効化で再開)。")
+                was_disabled = True
+            time.sleep(DISABLED_POLL_INTERVAL_SEC)
+            continue
+        if was_disabled:
+            logger.info(f"▶️ [{cam_name}] enabled=true に戻ったため監視を再開します。")
+            was_disabled = False
+
         # 1. L3到達性の事前チェック (ホストダウン時の即時サスペンド)
         if not is_host_reachable(ip_address):
             consecutive_errors += 1
@@ -545,6 +620,11 @@ def monitor_single_camera(cam_conf: Dict[str, Any]) -> None:
                 # SESSION_LIFETIME (3600秒) 経過時のみ、安全にループを抜けてセッションを作り直す
                 if current_time - session_start_time > SESSION_LIFETIME:
                     logger.debug(f"🔄 [{cam_name}] Session lifetime reached. Refreshing gracefully...")
+                    break
+
+                # #652: UI から無効化されたら購読を解除して外側ループの待機へ移る
+                if not is_camera_enabled(cam_conf):
+                    logger.info(f"⏸️ [{cam_name}] enabled=false に変更されたため購読を解除します。")
                     break
 
                 # --- 修正: 玄関カメラ専用の自発的再接続ロジック ---
