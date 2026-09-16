@@ -241,12 +241,17 @@ class TestIpRestrictionMiddlewareCurrentBehavior:
 
         新しい外部Webhookを追加したときに allowed_webhook_paths への追記を忘れると、
         (本ミドルウェアは遮断しないため)気づけないまま非対称が再発する。
+
+        パスの列挙に OpenAPI スキーマを使うのは、`app.routes` の構造が
+        FastAPI/Starlette のバージョンで変わるため(0.141.1 + starlette 1.6.0 では
+        include_router 済みのルートが `_IncludedRouter` 配下にネストされ、
+        トップレベルの要素は `.path` を持たない)。OpenAPI 側は公開APIで、
+        `prefix=` を解決した完全なパスが得られる。
+        なお `include_in_schema=False` のルートはここに現れないが、
+        外部Webhookをスキーマから隠す運用は現状していない。
         """
-        mounted = {
-            route.path
-            for route in unified_server.app.routes
-            if getattr(route, "path", "").startswith(("/webhook/", "/callback/"))
-        }
+        schema_paths = set(unified_server.app.openapi()["paths"].keys())
+        mounted = {p for p in schema_paths if p.startswith(("/webhook/", "/callback/"))}
         # 本ミドルウェアの例外リストと同じ集合をテスト側にも明示して突き合わせる
         expected_exempt = {"/webhook/switchbot", "/callback/line", "/webhook/alexa"}
         assert mounted == expected_exempt, (
