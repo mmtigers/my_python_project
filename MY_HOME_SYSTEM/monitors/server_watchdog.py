@@ -16,6 +16,8 @@ from services.notification_service import send_push
 
 # === 設定 ===
 WATCH_SERVICE_NAME: str = "home_system.service"
+# Issue #651: 外部コマンド(systemctl/pgrep/vcgencmd)の待ち時間上限(秒)。応答しない場合に監視ループを止めない
+SUBPROCESS_TIMEOUT_SEC: int = 30
 WATCH_PROCESS_NAME: str = "unified_server.py"
 REMINDER_INTERVAL_SEC: int = 6 * 3600  # 6時間
 
@@ -50,7 +52,7 @@ def get_service_status(service_name: str) -> str:
     try:
         res = subprocess.run(
             ["systemctl", "is-active", service_name], 
-            capture_output=True, text=True, check=False
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC
         )
         return res.stdout.strip()
     except Exception:
@@ -71,7 +73,7 @@ def is_process_alive(process_keyword: str) -> bool:
     try:
         res = subprocess.run(
             ["pgrep", "-f", pattern],
-            capture_output=True, text=True, check=False
+            capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC
         )
         return res.returncode == 0
     except Exception:
@@ -133,7 +135,7 @@ def check_throttling_status():
     """
     try:
         # 【修正点1】 check=True を外し、コマンド自体の失敗でPythonをクラッシュさせない
-        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)
+        result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True, timeout=SUBPROCESS_TIMEOUT_SEC)
         
         # コマンドが失敗した場合（OSビジー状態など）は安全にスキップ
         if result.returncode != 0:

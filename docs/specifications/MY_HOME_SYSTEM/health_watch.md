@@ -84,7 +84,7 @@
 ### `_read_marker`
 
 * **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。
-* 根拠: [関数定義] (行番号: 84〜90 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* 根拠: [関数定義] (行番号: 85〜91 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
@@ -107,7 +107,7 @@
 ### `_write_marker`
 
 * **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。
-* 根拠: [関数定義] (行番号: 93〜95 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 94〜96 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
@@ -130,7 +130,7 @@
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 98〜107 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 106〜115 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -153,7 +153,7 @@
 ### `check_journal_errors`
 
 * **役割**: `journalctl -u home_system.service -p err..emerg`で前回マーカー以降のエラーログ行を確認する。
-* 根拠: [関数定義] (行番号: 110〜127 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 118〜135 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -179,7 +179,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 130〜170 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 138〜178 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -409,7 +409,7 @@
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 322〜361 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 330〜369 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -432,7 +432,7 @@
 ### `run_checks`
 
 * **役割**: 7つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 364〜420 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 372〜428 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし
@@ -590,6 +590,7 @@ graph TD
 * cron登録・死活監視（Cloudflare Tunnelアラート）との組み合わせは `docs/runbooks/raspi_claude_log_monitoring.md` に運用手順として記載されている。
 * **チェック7(構成ドリフト検知)の導入先パスはハードコード**: `TRACKED_CONFIG_DIRS`の実機側ディレクトリ(`/etc/systemd/system`、`/etc/logrotate.d`)は各READMEの導入手順と一致させる前提であり、導入先を変えたら両方を更新すること。比較はコメント・空行を除いた内容のみで、ファイルの権限・所有者や`systemctl enable`状態は見ない。差分は同一異常セットの継続として6時間ごとに再通知され続けるため、意図的に実機だけ変えた場合も`deploy/`へ反映すること（根拠: 行番号: 64〜81, 278〜297）。
 * **層2フック（Issue #339）は`.env`の`HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら完全no-op**であり、実機のClaude Code CLI・ghセットアップとフラグ確認（runbookの有効化手順）が済むまで設定しないこと。フックの実体は`scripts/claude_investigate.sh`（[scripts_claude_investigate.md](./scripts_claude_investigate.md)）で、多重起動防止（flock）・タイムアウト・許可ツール制限はスクリプト側が持つ（根拠: 行番号: 190〜230）。
+* **（Issue #651 で変更）** 外部コマンド(`systemctl is-active` / `journalctl` / `free -m` / `crontab -l`)の `subprocess.run` に `timeout=SUBPROCESS_TIMEOUT_SEC`(30秒)を付与した。あわせてエントリポイントを `main()` にまとめ、`LOCK_FILE`(`<BASE_DIR>/.health_watch.lock`)の `fcntl.flock(LOCK_EX | LOCK_NB)` で多重起動を防ぐ(取れなければ「前回がまだ実行中」として warning のみで 0 終了)。以前は systemd/journald が応答しない状況で無限待ちになり、毎時 cron の次回起動と重なって二重に通知・マーカー更新する余地があった。`tests/test_health_watch.py::TestHealthWatchMainLock` が固定する。
 
 ## 9. 不明事項一覧
 

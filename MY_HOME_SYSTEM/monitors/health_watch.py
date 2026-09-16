@@ -28,6 +28,7 @@ scheduler_boot.py 配下の監視群(server_watchdog等)は home_system.service 
 
 import datetime
 import difflib
+import fcntl
 import glob
 import hashlib
 import json
@@ -95,11 +96,18 @@ def _write_marker(dt: datetime.datetime) -> None:
         f.write(dt.isoformat())
 
 
+# Issue #651: 外部コマンドの待ち時間上限(秒)。systemd/journald が応答しない状況で無限待ちになると、
+# 毎時 cron の次回起動と重なって多重起動する(下記 LOCK_FILE と合わせて防ぐ)。
+SUBPROCESS_TIMEOUT_SEC: int = 30
+# 多重起動防止のロックファイル(cron 起動。他の長時間スクリプトと同じ flock LOCK_NB 方式)
+LOCK_FILE: str = os.path.join(config.BASE_DIR, ".health_watch.lock")
+
+
 def check_service_active() -> Optional[str]:
     """home_system.service の稼働確認。activeでなければ異常。"""
     res = subprocess.run(
         ["systemctl", "is-active", WATCH_SERVICE_NAME],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
     )
     status = res.stdout.strip() or "unknown"
     if status != "active":
@@ -115,7 +123,7 @@ def check_journal_errors(since: datetime.datetime) -> Optional[str]:
             "--since", since.strftime("%Y-%m-%d %H:%M:%S"),
             "-p", "err..emerg", "-n", "100",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC,
     )
     lines = [
         ln for ln in res.stdout.strip().splitlines()
@@ -181,7 +189,7 @@ def check_disk_usage() -> Optional[str]:
 
 def check_memory_usage() -> Optional[str]:
     """メモリ使用率の閾値チェック(analysis_serviceと同じ free -m 方式)。"""
-    res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False)
+    res = subprocess.run(["free", "-m"], capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
     lines = res.stdout.strip().split("\n")
     if len(lines) < 2:
         raise RuntimeError("free -m の出力を解析できません")
@@ -240,7 +248,7 @@ def _check_crontab_drift() -> Optional[str]:
         return None  # リポジトリ側に無ければ比較対象外(チェックの失敗ではない)
     with open(TRACKED_CRONTAB, "r", encoding="utf-8") as f:
         expected = f.read()
-    res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False)
+    res = subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False, timeout=SUBPROCESS_TIMEOUT_SEC)
     if res.returncode != 0:
         # "no crontab for <user>" は未登録。それ以外の失敗も未登録相当として報告する
         detail = (res.stderr or res.stdout).strip().splitlines()
@@ -420,5 +428,24 @@ def run_checks() -> int:
     return exit_code
 
 
+def main() -> int:
+    """エントリポイント。flock(LOCK_NB)で多重起動を防いでから run_checks() を実行する。
+
+    Issue #651: 以前は多重起動防止が無く、外部コマンド(systemctl/journalctl)の応答待ちで前回の
+    実行が残っていると、毎時 cron の次回起動が重なって二重に通知・マーカー更新していた。
+    ロックが取れない場合は前回がまだ動いているとみなして 0 で終了する(異常ではない)。
+    """
+    lock_fd = os.open(LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.warning("前回の health_watch がまだ実行中のためスキップします")
+            return 0
+        return run_checks()
+    finally:
+        os.close(lock_fd)
+
+
 if __name__ == "__main__":
-    sys.exit(run_checks())
+    sys.exit(main())

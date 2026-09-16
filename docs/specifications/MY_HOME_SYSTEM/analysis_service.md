@@ -379,7 +379,7 @@
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 438 / 抜粋: "def get_memory_usage()")
+* 根拠: `def get_memory_usage() -> Optional[Dict[str, float]]:` (行番号: 443 / 抜粋: "def get_memory_usage()")
 
 
 * **戻り値/レスポンス**: `Optional[Dict[str, float]]` (MB単位の容量とパーセンテージを格納した辞書。失敗時は `None`)
@@ -530,6 +530,7 @@ graph TD
 * 根拠: `calculate_monthly_cost_cumulative` (行番号: 246)、`load_weather_history` (行番号: 295)、`_parse_timestamp_to_jst_coerce`/`process_dataframe` (行番号: 56-69, 79)、`load_yearly_temperature_stats`のexcept (行番号: 346, 350)、現行の`analysis_service.py`に`load_ranking_data`が存在しないこと(削除の確認)
 * **[修正済み] Issue #491: load_sensor_dataのpandas FutureWarning**: `df_legacy`/`df_meter`/`df_power`の3フレームを`pd.concat`する際、フレームによって存在する列が異なり(一部の列は特定のフレームにしか無い)、欠損列を補うために発生する空/全NA列のdtypeが曖昧になることで「DataFrame concatenation with empty or all-NA entries is deprecated」というFutureWarningが発生していた。`reindex`だけでは新規に補われた列がfloat64のNaNとして残り曖昧さが解消しないため、列ごとの想定dtypeを`_SENSOR_COLUMN_DTYPES`辞書として明示し、`reindex`後に`astype(_SENSOR_COLUMN_DTYPES)`で型を強制してから`concat`するよう修正した。`pytest.ini`側で`services.*`パッケージ限定の`error::FutureWarning`をCIで検知するようにしたため(`MY_HOME_SYSTEM/pytest.ini`)、同種の警告が再発すればテスト失敗として検知される。
 * 根拠: `_SENSOR_COLUMN_DTYPES`定義・reindexループ・`pd.concat` (行番号: 233-253)
+* **（Issue #651 で変更）** `get_memory_usage`(`free -m`)と `get_system_logs`(`journalctl`、日付指定時は `-n 5000`)の `subprocess.run` に `timeout=SUBPROCESS_TIMEOUT_SEC`(30秒)を付与した。journald が応答しない場合に Streamlit ダッシュボードのリクエストを無限に固めないため(`subprocess.TimeoutExpired` は既存の `except Exception` で捕捉される)。
 
 ## 9. 不明事項一覧
 
