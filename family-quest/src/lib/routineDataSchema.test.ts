@@ -21,9 +21,11 @@ const activeFlow: RoutineFlowState = {
     bonus_full_gold: 150,
     leveled_up: false,
     new_level: null,
+    granted_gold: 0,
+    granted_exp: 0,
     steps: [
-        { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, is_checklist: true, status: 'done' },
-        { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, is_checklist: true, status: 'current' },
+        { key: 'wash', label: '顔を洗う', icon_key: 'wash', is_checkpoint: false, is_checklist: true, status: 'done', gold: 0, exp: 0 },
+        { key: 'meal', label: '朝ごはん', icon_key: 'meal', is_checkpoint: false, is_checklist: true, status: 'current', gold: 0, exp: 0 },
     ],
 };
 

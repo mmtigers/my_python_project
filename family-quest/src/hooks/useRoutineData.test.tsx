@@ -35,6 +35,8 @@ function makeFlow(overrides: Record<string, unknown> = {}) {
         bonus_full_gold: 150,
         leveled_up: false,
         new_level: null,
+        granted_gold: 0,
+        granted_exp: 0,
         steps: [],
         ...overrides,
     };
@@ -148,5 +150,51 @@ describe('useRoutineData calls onError on a failed completeStep (code review fin
 
         expect(outcome).toEqual({ success: true });
         expect(onError).not.toHaveBeenCalled();
+    });
+});
+
+// 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、デイリークエストから
+// すごろくへ寄せたステップを完了したときの即時報酬(granted_gold/granted_exp)。
+describe('useRoutineData reports step rewards granted by POST /complete', () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('calls onStepReward with the granted amounts', async () => {
+        const getMock = vi.mocked(apiClient.get);
+        getMock.mockResolvedValue(makeTodayResponse());
+        const postMock = vi.mocked(apiClient.post);
+        postMock.mockResolvedValue(makeFlow({ granted_gold: 50, granted_exp: 80 }));
+
+        const onStepReward = vi.fn();
+        const wrapper = createWrapper();
+        const { result } = renderHook(
+            () => useRoutineData('dad', undefined, undefined, onStepReward),
+            { wrapper },
+        );
+
+        await waitFor(() => expect(result.current.flows?.am).toBeDefined());
+        await result.current.completeStep('pm', 'kitchen_reset');
+
+        expect(onStepReward).toHaveBeenCalledWith({ gold: 50, exp: 80 });
+    });
+
+    it('does not call onStepReward for steps without a reward', async () => {
+        const getMock = vi.mocked(apiClient.get);
+        getMock.mockResolvedValue(makeTodayResponse());
+        const postMock = vi.mocked(apiClient.post);
+        postMock.mockResolvedValue(makeFlow());
+
+        const onStepReward = vi.fn();
+        const wrapper = createWrapper();
+        const { result } = renderHook(
+            () => useRoutineData('daughter', undefined, undefined, onStepReward),
+            { wrapper },
+        );
+
+        await waitFor(() => expect(result.current.flows?.am).toBeDefined());
+        await result.current.completeStep('am', 'wash');
+
+        expect(onStepReward).not.toHaveBeenCalled();
     });
 });

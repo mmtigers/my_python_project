@@ -6,7 +6,7 @@
 | 言語 | React (TypeScript) |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `29595e9` (PR #629 squash-merge) (+同一ブランチ内でエラートースト重複ロジックのonErrorへの集約、RoutineFlow.tsxの冗長参照を追加修正) |
+| 解析基準コミット | `29595e9` (PR #629 squash-merge) (+同一ブランチ内でエラートースト重複ロジックのonErrorへの集約、RoutineFlow.tsxの冗長参照・**大人用フロー分離に伴うステップ個別報酬通知(`onStepReward`)の追加**を追加修正) |
 
 ## 関連ドキュメント
 
@@ -20,9 +20,9 @@
 
 ## 2. ファイルの概要
 
-React Queryを用いて、「きょうのすごろく」機能のデータ取得（`GET /api/routine/today`のポーリング取得）と、1ステップの完了報告（`POST /api/routine/complete`）を提供するカスタムフック`useRoutineData`を定義するファイル。`userId`（呼び出し元のユーザーID）、任意の`onLevelUp`コールバック、**（コードレビューで発覚した重複を追加修正）** 任意の`onError`コールバックを引数に取り、そのユーザーの当日の朝(`am`)/夕方(`pm`)2系統のフロー状態、日付、ローディング状態、エラー、およびステップ完了関数`completeStep`とその送信中フラグ`isCompleting`を返す。チェックポイント（自由時間の終了）はサーバー側で時刻ベースに強制通過させる遅延評価方式のため、フロント側は15秒間隔の短いポーリング(`POLL_INTERVAL_MS`)でこれを追従する設計である。**（コードレビューで発覚した欠落を修正）** 完了報告のレスポンスが`routineActiveFlowSchema`でランタイム検証されるようになり(以前は無検証)、レスポンスが`leveled_up: true`を含む場合は`onLevelUp`コールバックを呼び出す(以前はレスポンスを無条件に破棄しており、チェックポイント通過ボーナスでレベルアップしてもLEVEL UP演出を出す手段が無かった)。**（再度のコードレビューで発覚した欠落を追加修正）** さらに、本人が何も操作せず自由時間中に締切時刻を過ぎてサーバー側が受動的にチェックポイントを通過させた場合（`GET /api/routine/today`のポーリングだけがそれを検知する経路）にも`onLevelUp`が呼ばれるよう、`data`の変化を監視する`useEffect`を追加した。以前は`completeStepMutation`の`onSuccess`（本人のステップ完了操作がトリガーになる経路）だけがこの通知を行っており、ポーリングだけで検知される受動的なレベルアップはサイレントにDBだけ更新されていた。**（さらに別のコードレビューで発覚した重複を追加修正）** `completeStep`失敗時のエラートースト表示ロジック（呼び出し元での`try`相当の分岐）が`App.tsx`・`FamilyDashboard.tsx`の両方に一字一句同じ形で重複していたため、`onLevelUp`と同じ「呼び出し元のコールバックを受け取る」形の第3引数`onError`をここへ追加し、`completeStep`内部の`catch`節から直接呼ぶようにした。
+React Queryを用いて、「きょうのすごろく」機能のデータ取得（`GET /api/routine/today`のポーリング取得）と、1ステップの完了報告（`POST /api/routine/complete`）を提供するカスタムフック`useRoutineData`を定義するファイル。`userId`（呼び出し元のユーザーID）、任意の`onLevelUp`コールバック、**（コードレビューで発覚した重複を追加修正）** 任意の`onError`コールバックを引数に取り、そのユーザーの当日の朝(`am`)/夕方(`pm`)2系統のフロー状態、日付、ローディング状態、エラー、およびステップ完了関数`completeStep`とその送信中フラグ`isCompleting`を返す。チェックポイント（自由時間の終了）はサーバー側で時刻ベースに強制通過させる遅延評価方式のため、フロント側は15秒間隔の短いポーリング(`POLL_INTERVAL_MS`)でこれを追従する設計である。**（コードレビューで発覚した欠落を修正）** 完了報告のレスポンスが`routineActiveFlowSchema`でランタイム検証されるようになり(以前は無検証)、レスポンスが`leveled_up: true`を含む場合は`onLevelUp`コールバックを呼び出す(以前はレスポンスを無条件に破棄しており、チェックポイント通過ボーナスでレベルアップしてもLEVEL UP演出を出す手段が無かった)。**（再度のコードレビューで発覚した欠落を追加修正）** さらに、本人が何も操作せず自由時間中に締切時刻を過ぎてサーバー側が受動的にチェックポイントを通過させた場合（`GET /api/routine/today`のポーリングだけがそれを検知する経路）にも`onLevelUp`が呼ばれるよう、`data`の変化を監視する`useEffect`を追加した。以前は`completeStepMutation`の`onSuccess`（本人のステップ完了操作がトリガーになる経路）だけがこの通知を行っており、ポーリングだけで検知される受動的なレベルアップはサイレントにDBだけ更新されていた。**（大人用フロー分離で追加）** 第4引数に任意の`onStepReward`コールバックが追加された。バックエンドの大人用フロー(パパ・ママ用のすごろく)では、デイリークエストから移設されたステップを完了すると`gold`/`exp`がその場で付与され、レスポンスの`granted_gold`/`granted_exp`が非0になる。この場合`completeStepMutation`の`onSuccess`は`onStepReward`を呼ぶとともに、`['gameData']`キャッシュも無効化する(付与によって`quest_users.gold`が変わるため、無効化しないとステータスカードの所持ゴールド表示が次のリフェッチまで古いままになる)。**（さらに別のコードレビューで発覚した重複を追加修正）** `completeStep`失敗時のエラートースト表示ロジック（呼び出し元での`try`相当の分岐）が`App.tsx`・`FamilyDashboard.tsx`の両方に一字一句同じ形で重複していたため、`onLevelUp`と同じ「呼び出し元のコールバックを受け取る」形の第3引数`onError`をここへ追加し、`completeStep`内部の`catch`節から直接呼ぶようにした。
 * 根拠: ファイル冒頭のポーリング間隔コメント (行番号: 7〜10 / 抜粋: "// チェックポイント(自由時間の終了)はサーバー側で時刻ベースに強制通過させる遅延評価\n// (services/routine_service.py の _apply_forced_transition)のため、フロントは\n// 短い間隔でポーリングして「時刻になった瞬間」の反映をそう待たせずに拾う。\nconst POLL_INTERVAL_MS = 1000 * 15;")
-* 根拠: `useRoutineData`関数定義と戻り値 (行番号: 17〜21, 93〜100 / 抜粋: "export const useRoutineData = (\n    userId: string | undefined,\n    onLevelUp?: (info: RoutineLevelUpInfo) => void,\n    onError?: (detail: string) => void,\n) => {", "return {\n        flows: data?.flows,\n        date: data?.date,\n        isLoading,\n        error,\n        completeStep,\n        isCompleting: completeStepMutation.isPending,\n    };")
+* 根拠: `useRoutineData`関数定義と戻り値 (行番号: 22〜27, 106〜113 / 抜粋: "export const useRoutineData = (\n    userId: string | undefined,\n    onLevelUp?: (info: RoutineLevelUpInfo) => void,\n    onError?: (detail: string) => void,\n    onStepReward?: (info: RoutineStepRewardInfo) => void,\n) => {", "return {\n        flows: data?.flows,\n        date: data?.date,\n        isLoading,\n        error,\n        completeStep,\n        isCompleting: completeStepMutation.isPending,\n    };")
 * 根拠: `onLevelUp`呼び出し(完了報告経路) (行番号: 67〜75 / 抜粋: "onSuccess: (res) => {\n            queryClient.invalidateQueries({ queryKey: ['routineToday', userId] });\n            // #(コードレビューで発覚): 以前はレスポンスを無条件に破棄しており、\n            // チェックポイント通過ボーナスでレベルアップしても(サーバー側では\n            // quest_users.levelが更新されているのに)LEVEL UP演出が一切出なかった。\n            if (res.leveled_up && res.new_level != null && onLevelUp) {\n                onLevelUp({ newLevel: res.new_level });\n            }\n        },")
 * 根拠: `onLevelUp`呼び出し(ポーリング検知経路、追加修正) (行番号: 35〜56 / 抜粋: "// コードレビューで発覚: チェックポイント通過ボーナスのレベルアップは、本人が\n    // ステップを完了した「その場」(completeStepMutationのonSuccess)だけでなく、\n    // 何も操作せず自由時間中に締切時刻を過ぎた場合はポーリング(GET /today)側の\n    // _apply_forced_transitionで受動的に起こる。", "const announcedLevelUpsRef = useRef<Set<string>>(new Set());\n    useEffect(() => {\n        if (!data || !onLevelUp) return;")
 
@@ -61,6 +61,16 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 
 * **役割**: **（コードレビューで発覚した欠落を修正して新規追加）** `onLevelUp`コールバックに渡される引数の型。`{ newLevel: number }`という単一フィールドのオブジェクト。コメントにより`useGameData.ts`の`onLevelUp`と同じ形を意図していると明記されている（ただし`useGameData.ts`側の`LevelUpInfo`は`user`/`level`/`job`の3フィールドを持ち、本フックの`RoutineLevelUpInfo`はユーザー名・職業を含まない`newLevel`のみである点で完全な同一形状ではない。9章参照）。**（再度のコードレビューで発覚した欠落を追加修正）** コメントが明記する通り、`onLevelUp`は完了報告(`completeStepMutation`)がその場でチェックポイント通過を伴った場合だけでなく、本人の操作を介さずポーリングだけで検知される受動的な通過(後述の`useEffect`)でも呼ばれる。
 * 根拠: [型定義] (行番号: 12〜15 / 抜粋: "// レベルアップ通知(useGameData.tsのonLevelUpと同じ形): チェックポイント通過に\n// 伴うレベルアップで呼ばれる。本人がステップを完了した「その場」(completeStepMutation)\n// と、何も操作せずポーリングだけで検知される受動的な通過(下のuseEffect)の両方が経路になる。\nexport type RoutineLevelUpInfo = { newLevel: number };")
+
+* **引数/リクエスト**: 該当なし（型定義であり関数ではない）
+* **戻り値/レスポンス**: 該当なし
+* **副作用**: なし
+* **エラーハンドリング**: 該当なし
+
+### `RoutineStepRewardInfo` (export型定義、大人用フロー分離で新規追加)
+
+* **役割**: `onStepReward`コールバックに渡される引数の型。`{ gold: number; exp: number }`の2フィールドを持つ。コメントによれば、バックエンドの大人用フロー(`routine_data.py`の`DAD_ROUTINE_FLOWS`/`MOM_ROUTINE_FLOWS`)でデイリークエストからすごろくへ寄せたステップを完了したときの即時報酬であり、「クエスト完了時と同じように『いくらもらえたか』をその場で見せるために呼び出し元へ通知する」ことを目的とする。
+* 根拠: [型定義] (行番号: 17〜20 / 抜粋: "// 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、デイリークエストから\n// すごろくへ寄せたステップを完了したときの即時報酬。クエスト完了時と同じように\n// 「いくらもらえたか」をその場で見せるために呼び出し元へ通知する。\nexport type RoutineStepRewardInfo = { gold: number; exp: number };")
 
 * **引数/リクエスト**: 該当なし（型定義であり関数ではない）
 * **戻り値/レスポンス**: 該当なし
@@ -113,9 +123,9 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 
 ### `completeStepMutation` (`useMutation`) / `completeStep` (ラッパー)
 
-* **役割**: `completeStepMutation`は`{ flowKey: 'am' | 'pm'; stepKey: string }`を受け取り、`POST /api/routine/complete`へ`{ user_id: userId, flow_key: flowKey, step_key: stepKey }`をボディとして送信し、レスポンスを`routineActiveFlowSchema.parse(raw)`でランタイム検証する`mutationFn`を持つ。**（コードレビューで発覚した欠落を修正）** 以前はこのレスポンスを無検証・無視していたが、検証結果(`res`)を`onSuccess`で受け取れるようになった。成功時(`onSuccess`)、`queryClient.invalidateQueries({ queryKey: ['routineToday', userId] })`で当該ユーザーの`routineToday`キャッシュを無効化し、さらに`res.leveled_up`が真かつ`res.new_level`が非nullかつ`onLevelUp`が渡されていれば`onLevelUp({ newLevel: res.new_level })`を呼ぶ。`completeStep`はこの`useMutation`を`mutateAsync`経由で呼び出す薄いラッパー関数で、呼び出し元（`RoutineFlow`コンポーネント）には`Promise<{ success: boolean; detail?: string }>`という単純な形で結果を返す。**（さらに別のコードレビューで発覚した重複を追加修正）** `completeStep`は失敗時、戻り値を返す前に`onError?.(detail)`も呼ぶようになった。以前は呼び出し元(`App.tsx`/`FamilyDashboard.tsx`)がそれぞれ`res.success`を見て自前でトーストを出す同一のラッパー関数(`handleRoutineStepComplete`)を重複して持っていた。
+* **役割**: `completeStepMutation`は`{ flowKey: 'am' | 'pm'; stepKey: string }`を受け取り、`POST /api/routine/complete`へ`{ user_id: userId, flow_key: flowKey, step_key: stepKey }`をボディとして送信し、レスポンスを`routineActiveFlowSchema.parse(raw)`でランタイム検証する`mutationFn`を持つ。**（コードレビューで発覚した欠落を修正）** 以前はこのレスポンスを無検証・無視していたが、検証結果(`res`)を`onSuccess`で受け取れるようになった。成功時(`onSuccess`)、`queryClient.invalidateQueries({ queryKey: ['routineToday', userId] })`で当該ユーザーの`routineToday`キャッシュを無効化し、**（大人用フロー分離で追加）**`res.granted_gold`または`res.granted_exp`が非0であれば`queryClient.invalidateQueries({ queryKey: ['gameData'] })`も行ったうえで`onStepReward?.({ gold: res.granted_gold, exp: res.granted_exp })`を呼び、さらに`res.leveled_up`が真かつ`res.new_level`が非nullかつ`onLevelUp`が渡されていれば`onLevelUp({ newLevel: res.new_level })`を呼ぶ。`completeStep`はこの`useMutation`を`mutateAsync`経由で呼び出す薄いラッパー関数で、呼び出し元（`RoutineFlow`コンポーネント）には`Promise<{ success: boolean; detail?: string }>`という単純な形で結果を返す。**（さらに別のコードレビューで発覚した重複を追加修正）** `completeStep`は失敗時、戻り値を返す前に`onError?.(detail)`も呼ぶようになった。以前は呼び出し元(`App.tsx`/`FamilyDashboard.tsx`)がそれぞれ`res.success`を見て自前でトーストを出す同一のラッパー関数(`handleRoutineStepComplete`)を重複して持っていた。
 * 根拠: [`useMutation`定義] (行番号: 58〜66 / 抜粋: "const completeStepMutation = useMutation({\n        mutationFn: async ({ flowKey, stepKey }: { flowKey: 'am' | 'pm'; stepKey: string }) => {\n            const raw = await apiClient.post('/api/routine/complete', {\n                user_id: userId,\n                flow_key: flowKey,\n                step_key: stepKey,\n            });\n            return routineActiveFlowSchema.parse(raw);\n        },")
-* 根拠: [`onSuccess`のonLevelUp呼び出し] (行番号: 67〜75 / 抜粋: "onSuccess: (res) => {\n            queryClient.invalidateQueries({ queryKey: ['routineToday', userId] });\n            // #(コードレビューで発覚): 以前はレスポンスを無条件に破棄しており、\n            // チェックポイント通過ボーナスでレベルアップしても(サーバー側では\n            // quest_users.levelが更新されているのに)LEVEL UP演出が一切出なかった。\n            if (res.leveled_up && res.new_level != null && onLevelUp) {\n                onLevelUp({ newLevel: res.new_level });\n            }\n        },")
+* 根拠: [`onSuccess`のステップ個別報酬通知（大人用フロー分離で追加）] (行番号: 73〜81 / 抜粋: "onSuccess: (res) => {\n            queryClient.invalidateQueries({ queryKey: ['routineToday', userId] });\n            // ステップ個別報酬はquest_users.gold/expを直接動かすため、ステータス\n            // カード(useGameData)側のキャッシュも無効化しないと所持ゴールドの表示が\n            // 次のリフェッチまで古いままになる。\n            if (res.granted_gold || res.granted_exp) {\n                queryClient.invalidateQueries({ queryKey: ['gameData'] });\n                onStepReward?.({ gold: res.granted_gold, exp: res.granted_exp });\n            }")、[`onSuccess`のonLevelUp呼び出し] (行番号: 82〜87 / 抜粋: "// #(コードレビューで発覚): 以前はレスポンスを無条件に破棄しており、\n            // チェックポイント通過ボーナスでレベルアップしても(サーバー側では\n            // quest_users.levelが更新されているのに)LEVEL UP演出が一切出なかった。\n            if (res.leveled_up && res.new_level != null && onLevelUp) {\n                onLevelUp({ newLevel: res.new_level });\n            }\n        },")
 * 根拠: [`completeStep`ラッパー定義とonError呼び出し] (行番号: 82〜91 / 抜粋: "const completeStep = async (flowKey: 'am' | 'pm', stepKey: string) => {\n        try {\n            await completeStepMutation.mutateAsync({ flowKey, stepKey });\n            return { success: true };\n        } catch (e) {\n            const detail = e instanceof Error ? e.message : String(e);\n            onError?.(detail);\n            return { success: false, detail };\n        }\n    };")
 
 * **引数/リクエスト**: `completeStep(flowKey: 'am' | 'pm', stepKey: string)`。内部の`mutationFn`は`{ flowKey, stepKey }`を受け取り、リクエストボディとして`user_id`（フック引数の`userId`をそのまま使用、`null`/`undefined`チェックは行わない）・`flow_key`・`step_key`を送信する。
@@ -124,7 +134,7 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 * **戻り値/レスポンス**: `completeStep`は`Promise<{ success: true } | { success: false; detail: string }>`。`completeStepMutation`自体の`mutationFn`は`routineActiveFlowSchema.parse(raw)`の結果(`RoutineActiveFlow`型、`leveled_up`/`new_level`を含む)を返す。
 * 根拠: (行番号: 60〜65, 85, 87〜89 / 抜粋: "const raw = await apiClient.post('/api/routine/complete', {", "return routineActiveFlowSchema.parse(raw);", "return { success: true };", "const detail = e instanceof Error ? e.message : String(e);\n            onError?.(detail);\n            return { success: false, detail };")
 
-* **副作用**: `/api/routine/complete`へのPOSTリクエスト。成功時、`queryClient.invalidateQueries`による`['routineToday', userId]`キャッシュの無効化（次回描画・次回ポーリングでの再取得を促す）、および条件成立時の`onLevelUp`呼び出し。失敗時は`onError`が渡されていれば呼び出す（**追加修正**）。
+* **副作用**: `/api/routine/complete`へのPOSTリクエスト。成功時、`queryClient.invalidateQueries`による`['routineToday', userId]`キャッシュの無効化（次回描画・次回ポーリングでの再取得を促す）、**（大人用フロー分離で追加）**ステップ個別報酬が付与された場合の`['gameData']`キャッシュの無効化と`onStepReward`呼び出し、および条件成立時の`onLevelUp`呼び出し。失敗時は`onError`が渡されていれば呼び出す（**追加修正**）。
 * 根拠: (行番号: 67〜75)
 
 * **エラーハンドリング**: `completeStep`内の`try/catch`で`completeStepMutation.mutateAsync`が投げた例外（`apiClient.post`自体の通信エラー、または`routineActiveFlowSchema.parse(raw)`の`ZodError`のいずれも含む）を捕捉し、`e instanceof Error`なら`e.message`、そうでなければ`String(e)`を`detail`として、**追加修正**: `onError?.(detail)`を呼んでから`{ success: false, detail }`を返す。例外を呼び出し元へ再スローすることはない。`mutationFn`自体（および`apiClient.post`）に固有のエラーハンドリング（リトライ等）は本ファイルには実装されていない。
@@ -132,7 +142,7 @@ React Queryを用いて、「きょうのすごろく」機能のデータ取得
 
 ### 戻り値オブジェクト
 
-* **役割**: `flows`（`data?.flows`、未取得時は`undefined`）、`date`（`data?.date`、未取得時は`undefined`）、`isLoading`（`routineToday`クエリのローディング状態）、`error`（`routineToday`クエリのエラー、未加工）、`completeStep`（上記ラッパー関数）、`isCompleting`（`completeStepMutation.isPending`）をまとめたオブジェクトを返す。`useGameData.ts`の戻り値と異なり、未取得時のフォールバックデータ（マスターデータ相当のもの）は用意されておらず、`flows`/`date`は単純に`undefined`のままとなる。**（追加修正）** `onError`が追加されてもこのオブジェクトの形自体は変わらない（`onError`はコールバックとして渡すだけで、戻り値には現れない）。
+* **役割**: `flows`（`data?.flows`、未取得時は`undefined`）、`date`（`data?.date`、未取得時は`undefined`）、`isLoading`（`routineToday`クエリのローディング状態）、`error`（`routineToday`クエリのエラー、未加工）、`completeStep`（上記ラッパー関数）、`isCompleting`（`completeStepMutation.isPending`）をまとめたオブジェクトを返す。`useGameData.ts`の戻り値と異なり、未取得時のフォールバックデータ（マスターデータ相当のもの）は用意されておらず、`flows`/`date`は単純に`undefined`のままとなる。**（追加修正）** `onError`が追加されてもこのオブジェクトの形自体は変わらない（`onError`はコールバックとして渡すだけで、戻り値には現れない）。**（大人用フロー分離で確認済み）** 第4引数`onStepReward`についても同様で、戻り値オブジェクトの形に変更は無い。
 * 根拠: (行番号: 93〜100 / 抜粋: "return {\n        flows: data?.flows,\n        date: data?.date,\n        isLoading,\n        error,\n        completeStep,\n        isCompleting: completeStepMutation.isPending,\n    };")
 
 ## 5. 処理フロー図
@@ -251,6 +261,10 @@ graph TD
 * 根拠: (行番号: 35〜56, 67〜75)
 * **（さらに別のコードレビューで発覚した重複を追加修正）** 完了報告失敗時のエラートースト表示ロジック（`res.success`を見て`showToast`＋`play('cancel')`を呼ぶ`handleRoutineStepComplete`）が、以前は`App.tsx`・`FamilyDashboard.tsx`の両方に一字一句同じ形で重複していた。`onLevelUp`と同じ設計方針に倣い、第3引数`onError`を追加して`completeStep`内部の`catch`節から直接呼ぶ形にこのロジックを集約し、両呼び出し元は`useRoutineData`の呼び出し時に`onError`コールバックを渡すだけでよくなった（呼び出し元にラッパー関数を書く必要がなくなった）。
 * 根拠: (行番号: 17〜21, 86〜90)
+* **（大人用フロー分離で新規追加）** ステップ個別報酬の付与は`quest_users.gold`/`exp`/`level`を直接動かすため、`['routineToday', userId]`だけでなく`['gameData']`の無効化も必要になる。この無効化は`res.granted_gold || res.granted_exp`が真の場合にのみ行われるので、報酬を伴わない通常のステップ完了では余計な再取得が発生しない。一方、チェックポイント通過ボーナス(`leveled_up`経路)による`gold`/`exp`の変化についてはこの無効化が行われないままである（`leveled_up`の分岐は`onLevelUp`を呼ぶだけで`invalidateQueries`を行わない）。
+* 根拠: (行番号: 73〜87 / 抜粋: "            if (res.granted_gold || res.granted_exp) {\n                queryClient.invalidateQueries({ queryKey: ['gameData'] });\n                onStepReward?.({ gold: res.granted_gold, exp: res.granted_exp });\n            }", "            if (res.leveled_up && res.new_level != null && onLevelUp) {\n                onLevelUp({ newLevel: res.new_level });\n            }")
+* **（大人用フロー分離で新規追加）** `onStepReward`は`completeStepMutation`の`onSuccess`（`POST /api/routine/complete`経路）からのみ呼ばれ、`onLevelUp`のようなポーリング検知用の`useEffect`側の経路は持たない。これはバックエンドの`granted_gold`/`granted_exp`が付与を行ったレスポンスでのみ非0になり、`GET /api/routine/today`では常に0だからである（`routineDataSchema.md`参照）。したがって「本人の完了操作なしにステップ個別報酬が入る」経路は存在しない。
+* 根拠: (行番号: 73〜81)
 
 ## 9. 不明事項一覧
 

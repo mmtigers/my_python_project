@@ -13,6 +13,11 @@ const routineStepSchema = z.object({
     // 順不同でチェック/チェック解除できる項目(例: 朝の準備5項目)かどうか。
     is_checklist: z.boolean(),
     status: z.enum(['locked', 'current', 'done', 'remind']),
+    // ステップ個別の即時報酬。大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)で、
+    // 生活動線そのものだったデイリークエストをすごろくへ寄せた分の gold/exp が入る。
+    // 子ども用フローのステップは常に0(報酬はチェックポイント通過ボーナスのみ)。
+    gold: z.number(),
+    exp: z.number(),
 });
 
 const startedFlowSchema = z.object({
@@ -31,6 +36,10 @@ const startedFlowSchema = z.object({
     // チェックポイント通過ボーナスでレベルアップした「その1回のレスポンス」でのみtrue。
     leveled_up: z.boolean(),
     new_level: z.number().nullable(),
+    // leveled_upと同様、ステップ個別報酬を付与した「その1回のレスポンス」でのみ非0。
+    // GET /today は付与を行わないため常に0になる。
+    granted_gold: z.number(),
+    granted_exp: z.number(),
     steps: z.array(routineStepSchema),
 });
 

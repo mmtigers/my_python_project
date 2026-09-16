@@ -6,7 +6,7 @@
 | 言語 | Python |
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
-| 解析基準コミット | `eee72ac` |
+| 解析基準コミット | `eee72ac` (+同一ブランチ内で**大人用「きょうのすごろく」へのデイリークエスト移設**を追加修正) |
 
 ## 関連ドキュメント
 
@@ -15,6 +15,7 @@
 * [game_logic.md](./game_logic.md) - `USERS`の`level`/`exp`/`gold`に対する計算ロジック(`calc_level_progress`等)
 * [reset_game.md](./reset_game.md) - `quest_users`テーブルの`user_id`(dad/mom/son/daughter)を対象にゲームデータをリセットするスクリプト
 * [family-quest/src/lib/masterData.md](../family-quest/src/lib/masterData.md) - フロントエンド側のフォールバック用マスターデータ(`INITIAL_USERS`, `MASTER_QUESTS`, `MASTER_REWARDS`)
+* [routine_data.md](./routine_data.md)（大人用すごろくへのクエスト移設で追加） - `QUESTS`から退役させた`id: 12`/`13`/`1006`の移設先。パパ・ママ用の「きょうのすごろく」フロー(`DAD_ROUTINE_FLOWS`/`MOM_ROUTINE_FLOWS`)のステップが、これらのクエストと同額の`gold`/`exp`をステップ個別報酬として持つ
 * [config.md](./config.md) - `USERS[].info`のプレースホルダー化＋`quest_users.local.json`によるローカル上書き(30〜33, 57〜73行目)は、`config.py`の`FAMILY_SETTINGS`/`family_members.local.json`と同じ設計方針を踏襲している
 
 ## 2. ファイルの概要
@@ -143,15 +144,15 @@
 
 ### `QUESTS`
 
-* **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance`, `reset_period` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。B-5（特別：涼花）セクションには、id: 305（お手伝い）、id: 306（自分のおもちゃの片付け）、id: 307（なぞり書きプリント）の3件が追加され、いずれも`type: 'infinite'`（何度でも挑戦できる）で定義されている。A-4（通常：智矢）セクションには、`days: '4,5,6'`（金・土・日）かつ`reset_period: 'weekly'`を明示指定した週末専用クエスト（id: 1023「土日の宿題」）が追加されている。
-* 根拠: `QUESTS = [` (行番号: 81〜216 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 144, 215 / 抜粋: "'target': 'siblings'"), 追加された3件 (行番号: 208〜210 / 抜粋: "{'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', ...}"), 週末宿題クエスト (行番号: 126 / 抜粋: "{'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}")
+* **役割**: 「通常クエスト（daily）」と「特別クエスト（special / infinite）」の全定義を保持するリスト。各要素は `id`, `title`, `type`, `target`, `category`, `difficulty`, `exp`, `gold`, `icon`, `desc` を基本キーとし、任意で `days`（曜日指定）, `start_time`, `end_time`, `chance`, `reset_period` を持つ。`target` には従来の `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'` に加え、兄妹連携クエスト用の `'siblings'` が新設されている。B-5（特別：涼花）セクションには、id: 305（お手伝い）、id: 306（自分のおもちゃの片付け）、id: 307（なぞり書きプリント）の3件が追加され、いずれも`type: 'infinite'`（何度でも挑戦できる）で定義されている。A-4（通常：智矢）セクションには、`days: '4,5,6'`（金・土・日）かつ`reset_period: 'weekly'`を明示指定した週末専用クエスト（id: 1023「土日の宿題」）が追加されている。**[新規] 大人用すごろくへのクエスト移設**: A-2（通常：パパ）の`id: 12`「キッチンリセット」・`id: 13`「リビングリセット」、A-3（通常：ママ）の`id: 1006`「幼稚園の連絡帳記入」の3件が、保護者用の「きょうのすごろく」(`routine_data.py`の`DAD_ROUTINE_FLOWS`/`MOM_ROUTINE_FLOWS`)のステップへ移設されたため削除され、経緯を説明するコメントに置き換えられている（詳細は保守上の注意点を参照）。
+* 根拠: 大人用すごろくへの移設コメント (行番号: 99〜103, 114〜116 / 抜粋: "# id=12「キッチンリセット」・id=13「リビングリセット」は、パパ用の「きょうのすごろく」\n    # (routine_data.py DAD_ROUTINE_FLOWS の pm フロー)のステップへ移設したため廃止。", "# id=1006「幼稚園の連絡帳記入」は、ママ用の「きょうのすごろく」(routine_data.py\n    # MOM_ROUTINE_FLOWS の pm フロー)のステップへ移設したため廃止(id=12/13と同じ理由)。"), `QUESTS = [` (行番号: 81〜216 / 抜粋: "QUESTS = [\n    # ==========================================\n    # 【A】 通常クエスト (Daily Quests)"), `'target': 'siblings'` (行番号: 144, 215 / 抜粋: "'target': 'siblings'"), 追加された3件 (行番号: 208〜210 / 抜粋: "{'id': 305, 'title': 'ママ・パパのおてつだい', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 306, 'title': 'じぶんのおもちゃをおかたづけ', 'type': 'infinite', 'target': 'daughter', 'category': 'house', ...}\n    {'id': 307, 'title': 'なぞり書きプリント', 'type': 'infinite', 'target': 'daughter', 'category': 'study', ...}"), 週末宿題クエスト (行番号: 126 / 抜粋: "{'id': 1023, 'title': '土日の宿題', 'type': 'daily', 'target': 'son', ... 'days': '4,5,6', 'reset_period': 'weekly', ...}")
 
 
 * **引数/リクエスト**: 該当なし（静的データ定義）
 * 根拠: (行番号: 81 / 抜粋: "QUESTS = [")
 
 
-* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が56件、コメントアウトされ無効化された定義が11件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。かつて先頭に存在した`id: 1100`（【朝】毎朝ミッション）は、朝の準備がroutine_data.pyの「きょうのすごろく」amフロー側の順不同チェックリストへ統合されたため削除され、4行の説明コメントに置き換えられている（詳細は保守上の注意点を参照）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
+* **戻り値/レスポンス**: `list[dict]`。有効（コメントアウトされていない）なクエスト定義が53件（**大人用すごろくへのクエスト移設で`id: 12`/`13`/`1006`の3件が削除され56件から減少**）、コメントアウトされ無効化された定義が11件存在する（本ファイル中のテキストとしては残存するがPythonの実行時にはリストへ含まれない）。かつて先頭に存在した`id: 1100`（【朝】毎朝ミッション）は、朝の準備がroutine_data.pyの「きょうのすごろく」amフロー側の順不同チェックリストへ統合されたため削除され、4行の説明コメントに置き換えられている（詳細は保守上の注意点を参照）。`target` キーの値は `'all'`, `'dad'`, `'mom'`, `'son'`, `'daughter'`, `'siblings'` のいずれか。`type` キーの値は `'daily'`, `'special'`, `'infinite'` のいずれかが確認できる。
 * 根拠: 先頭の削除コメント (行番号: 89〜92 / 抜粋: "# id=1100「【朝】毎朝ミッション」は、朝の準備がroutine_data.py(「きょうのすごろく」am\n    # フローの順不同チェックリスト)へ統合されたため廃止(要件確認済み)。"), 最初の有効な要素 (行番号: 93 / 抜粋: "{'id': 1105, 'title': '【夜】就寝ミッション', 'type': 'daily', 'target': 'all', ...}"), コメントアウトされた要素の例 (行番号: 119 / 抜粋: "# {'id': 1101, 'title': '登校タイムアタック (07:50)', 'type': 'daily', 'target': 'son', 'category': 'life', 'difficulty': 'B', 'exp': 100, 'gold': 50, 'icon': '⏱️', 'start_time': '07:00', 'end_time': '07:50', 'desc': '7:50までに靴を履いて玄関に立てたら成功！'},"), 兄妹連携クエストの例 (行番号: 144 / 抜粋: "{'id': 1040, 'title': 'いっしょにおかたづけ', 'type': 'daily', 'target': 'siblings', ...}"), 九九クエストの例 (行番号: 132 / 抜粋: "{'id': 1030, 'title': '今日の九九タイム', ...}"), 涼花向けに追加された3件 (行番号: 208〜210), 週末宿題クエスト (行番号: 126 / 抜粋: "{'id': 1023, 'title': '土日の宿題', ...}")
 
 
@@ -257,6 +258,8 @@ graph TD
 
 * **二重docstringによる無駄な式文**: ファイル冒頭に2つの独立したdocstringが連続して記述されており（5〜11行目、12〜18行目）、Pythonの言語仕様上、実際にモジュールの `__doc__` として保持されるのは最初の1つのみである。2つ目（Phase 5.1の更新履歴）は評価されるだけで破棄され、実質的に「無視される」ドキュメントコメントとなっている。
 * **[新規] `id: 1100`「毎朝ミッション」の削除**: 従来 `QUESTS` の先頭（旧89行目）に存在した `id: 1100`「【朝】毎朝ミッション」は、朝の準備が `routine_data.py` の「きょうのすごろく」`am`フロー側の順不同チェックリスト（`meal`/`clothes`/`wash`/`teeth`/`toilet`の5項目）へ統合されたため削除され、経緯を説明する4行のコメント（89〜92行目）に置き換えられている。全項目達成時にTVの電源をONにする処理（旧・本クエスト承認時の`config.TV_UNLOCK_QUEST_IDS`経由の処理）も、`services/routine_service.py`側（`_toggle_checklist_step`から`services/switchbot_service.py`の`trigger_tv_unlock`を呼ぶ形）へ移設されている。
+* **[新規] `id: 12`/`13`/`1006` の大人用すごろくへの移設**: パパの`id: 12`「キッチンリセット」・`id: 13`「リビングリセット」、ママの`id: 1006`「幼稚園の連絡帳記入」は、保護者用「きょうのすごろく」のステップ(`routine_data.py`の`DAD_ROUTINE_FLOWS`/`MOM_ROUTINE_FLOWS`)へ移設されたため`QUESTS`から削除され、経緯を説明するコメント（99〜103, 114〜116行目）に置き換えられている。クエストとすごろくの両方に出て同じ作業で二重に報酬を得られる状態を避けるための退役であり、報酬額（`exp: 80`/`gold: 50`、`exp: 20`/`gold: 10`）と平日のみという条件（`days: '0,1,2,3,4'`＝すごろく側の`weekend_skip: True`）はステップ個別報酬としてそのまま引き継がれている。ただしこの対応関係はコード上の同期機構ではなく双方のコメントによる申し合わせに過ぎないため、ここでこれらのクエストを復活させると同じ作業に対して報酬が二重に入る。なお、ママ向けの他のデイリークエスト（`id: 20`/`21`「昼食/夕食を作る」・`id: 23`「日中の家庭運営」・`id: 1000`〜`1002`「ゴミ捨て」）は、曜日や時間帯で内容が変わる／報酬が大きいという理由で移設対象から外され、`QUESTS`に残されている。
+* **`sync_master_data`によるDB側の削除**: `QUESTS`から要素を削除すると、`services/quest/game_system.py`の`sync_master_data`が`DELETE FROM quest_master WHERE quest_id NOT IN (...)`により`quest_master`側の行も削除する。したがって上記のような移設・退役を行う際は、対象クエストの未承認の`quest_history`（承認待ち行）が残っていないかに注意が必要である（詳細は[quest_service.md](./quest_service.md)参照）。
 * **コメントアウトされたクエストの残存**: `QUESTS` 内に9件のコメントアウトされた要素（例: 119〜122行目、190行目、197〜198行目）が残っており、有効なクエストと無効なクエストが同一ファイル内に混在している。将来のメンテナンス時にコメントを外し忘れる／意図せず有効化するリスクがある。
 * **[修正済み] `id` の重複**: かつて `QUESTS` 内で `id: 15/16/17`（洗濯物関連クエスト）が `target: 'dad'`（167〜169行目）と `target: 'mom'`（176〜178行目）の双方に同じ `id` で重複しており、`sync_master_data`側の`quest_id`主キー競合で`dad`向けの定義が`mom`向けの定義に上書きされ実質無効化される不具合があったが、`mom`側は `id: 505/506/507` に採番し直され（176〜178行目）、重複は解消されている。`id` の一意性がグローバル（`QUESTS`全体で一意）であるべきという前提がこの修正から確認できる。
 * **バリデーションの不在**: `category`, `difficulty`, `type`, `target` 等の値がコメント（25, 78〜79行目）で列挙された想定値と一致しているかを検証する仕組みはファイル内に存在しない。誤字や想定外の値が入っても実行時エラーにはならない。

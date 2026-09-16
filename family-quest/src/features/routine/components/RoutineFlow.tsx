@@ -10,6 +10,7 @@ import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
+    CookingPot, Sofa, NotebookPen,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -30,6 +31,12 @@ const ICONS: Record<string, LucideIcon> = {
     // 実際の入浴と見分けが付くようShowerHeadを充てる。
     bath: ShowerHead,
     sleep: BedDouble,
+    // 大人用フロー(routine_data.py DAD/MOM_ROUTINE_FLOWS)のタスクステップ。
+    // 'meal'(UtensilsCrossed)は朝/晩ごはんで使っているため、キッチンリセットは
+    // 調理器具のCookingPotで見分けが付くようにする。
+    kitchen: CookingPot,
+    living: Sofa,
+    notebook: NotebookPen,
 };
 
 const THEME = {
@@ -237,6 +244,17 @@ const RoutineChecklistItem: React.FC<{
     );
 };
 
+// ステップ個別の即時報酬(大人用フローに寄せたデイリークエスト相当)の表示。
+// 子ども用フローのステップは gold/exp とも0のため、何も描画しない。
+const RoutineStepRewardChip: React.FC<{ flowKey: 'am' | 'pm'; step: RoutineStep }> = ({ flowKey, step }) => {
+    if (!step.gold && !step.exp) return null;
+    return (
+        <span className={`flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-bold whitespace-nowrap flex-none ${THEME[flowKey].chip}`}>
+            <Coins size={10} />{step.gold}
+        </span>
+    );
+};
+
 const RoutineStepRow: React.FC<{
     flowKey: 'am' | 'pm';
     step: RoutineStep;
@@ -281,7 +299,10 @@ const RoutineStepRow: React.FC<{
                 {step.status === 'current' ? (
                     <div className={`rounded-2xl border p-4 ${theme.spotlight}`}>
                         <div className={`flex items-center gap-1 text-xs font-bold mb-1 ${theme.text}`}>🌟 今ここ</div>
-                        <div className="text-xl font-black text-white mb-3">{step.label}</div>
+                        <div className="flex items-center gap-2 mb-3">
+                            <div className="text-xl font-black text-white min-w-0">{step.label}</div>
+                            <RoutineStepRewardChip flowKey={flowKey} step={step} />
+                        </div>
                         <button
                             type="button"
                             onClick={onComplete}
@@ -292,9 +313,10 @@ const RoutineStepRow: React.FC<{
                         </button>
                     </div>
                 ) : (
-                    <div className={`flex items-center h-full ${compact ? 'text-xs' : 'text-sm'} ${step.status === 'locked' ? 'text-gray-500' : 'text-gray-300'}`}>
-                        {step.status === 'remind' && <span className="mr-1.5 rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5">まだだよ</span>}
-                        {step.label}
+                    <div className={`flex items-center gap-1.5 h-full ${compact ? 'text-xs' : 'text-sm'} ${step.status === 'locked' ? 'text-gray-500' : 'text-gray-300'}`}>
+                        {step.status === 'remind' && <span className="rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5 flex-none">まだだよ</span>}
+                        <span className="min-w-0">{step.label}</span>
+                        <RoutineStepRewardChip flowKey={flowKey} step={step} />
                     </div>
                 )}
             </div>

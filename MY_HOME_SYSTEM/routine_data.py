@@ -10,7 +10,7 @@ import datetime
 from typing import List, Optional, Tuple, TypedDict
 
 
-class RoutineStep(TypedDict):
+class _RoutineStepBase(TypedDict):
     key: str
     label: str
     icon_key: str
@@ -33,6 +33,20 @@ class RoutineStep(TypedDict):
     checklist: bool
 
 
+class RoutineStep(_RoutineStepBase, total=False):
+    """ステップ個別の即時報酬(任意)。
+
+    大人用フロー(ROUTINE_FLOW_SETS)で、生活動線そのものだったデイリークエスト
+    (例: パパのキッチンリセット)を quest_data.QUESTS から「すごろく」側へ寄せる
+    ために使う。指定したステップを順番どおり完了報告した時点で、元のクエストと
+    同額の gold/exp をその場で付与する(get_step_reward参照)。省略時は0で、
+    子ども用フローの全ステップは従来どおりチェックポイント通過ボーナス
+    (FULL_BONUS_GOLD/EXPの按分)だけを報酬とする。
+    """
+    gold: int
+    exp: int
+
+
 class RoutineFlow(TypedDict):
     title: str
     day_of_week: List[int]
@@ -48,6 +62,8 @@ WEEKEND_DAYS = {5, 6}
 FULL_BONUS_GOLD = 150
 FULL_BONUS_EXP = 30
 
+# 子ども(智矢・涼花)用のフローセット。大人には別セットを出す(ROUTINE_FLOW_SETS・
+# get_flow_set参照)。get_flow_setのフォールバック先でもあるため名前は据え置く。
 ROUTINE_FLOWS: dict[str, RoutineFlow] = {
     'am': {
         'title': '起きてから出発まで',
@@ -109,6 +125,121 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
     },
 }
 
+
+# ==========================================
+# 大人用フロー (パパ・ママ)
+# ==========================================
+# 以前は ROUTINE_FLOWS(子ども用)を全ユーザーで共用していたため、パパ・ママの画面にも
+# 「宿題」「明日の準備」といった子ども専用のステップがそのまま表示されていた(要件:
+# これを無くしたい)。ただし単に非表示にすると、すごろく画面を持つのが子どもだけになり
+# 「大変なのは自分だけ」という見え方になってしまうため(要件)、代わりに大人にも同じ
+# 路線図UIの大人版フローを持たせて左右対称にする。
+#
+# 骨格(朝の準備チェックリスト→自由時間チェックポイント→帰宅後の一本道→自由時間
+# チェックポイント→寝る準備チェックリスト→就寝)は子ども用と意図的に揃えてあり、
+# 一本道の「宿題」「明日の準備」の位置に、その人の平日の生活動線そのものだった
+# デイリークエストが入る(重複を避けるため、寄せたクエストは quest_data.QUESTS 側から
+# 退役させ、同額の報酬をステップのgold/expとして持たせている)。
+
+# 朝は子どもと全く同じ5項目・同じ締切にする(大人側に固有の朝の家事は無いため)。
+_ADULT_AM_CHECKLIST: List[RoutineStep] = [
+    {'key': 'meal', 'label': '朝ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'clothes', 'label': '着替える', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'wash', 'label': '顔を洗う', 'icon_key': 'wash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'teeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'toilet', 'label': 'トイレ', 'icon_key': 'toilet', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+]
+
+# 寝る準備も子どもと同じ4項目。チェックポイント(18:00)通過後に一括で'current'になる。
+_ADULT_PM_CHECKLIST: List[RoutineStep] = [
+    {'key': 'dinner', 'label': '晩ごはん', 'icon_key': 'meal', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'nightclothes', 'label': '着替え', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+    {'key': 'nightteeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+]
+
+
+def _build_adult_flows(task_steps: List[RoutineStep]) -> dict[str, RoutineFlow]:
+    """大人1人分のam/pmフローを組み立てる。
+
+    `task_steps` は pm フローの一本道(帰宅→ひと休み→ここ→自由時間)に差し込む、
+    その人固有の平日タスク。子ども用フローで「宿題」「明日の準備」が置かれている
+    位置に相当し、チェックポイント(18:00)より前にあるため出発ボーナスの按分対象にも
+    なる(_eligible_done_ratio)。
+    """
+    return {
+        'am': {
+            'title': '起きてから出発まで',
+            'day_of_week': ALL_DAYS,
+            'start_trigger_time': '05:00',
+            'steps': [*_ADULT_AM_CHECKLIST, {
+                'key': 'free', 'label': '自由時間', 'icon_key': 'free',
+                'checkpoint_time': '07:50', 'weekend_checkpoint_time': '09:30',
+                'weekend_skip': False, 'weekend_carryover': False, 'checklist': False,
+            }],
+        },
+        'pm': {
+            'title': '帰ってから寝るまで',
+            'day_of_week': ALL_DAYS,
+            'start_trigger_time': '14:00',
+            'steps': [
+                # 子ども用と同じく、土日は「帰宅・手洗い」をスキップしてひと休みから始める。
+                {'key': 'handwash', 'label': '帰宅・手洗い', 'icon_key': 'handwash', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False},
+                {'key': 'snack', 'label': 'ひと休み', 'icon_key': 'snack', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+                *task_steps,
+                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '18:00', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+                *_ADULT_PM_CHECKLIST,
+                {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
+            ],
+        },
+    }
+
+
+# パパ: 旧デイリークエスト id=12「キッチンリセット」・id=13「リビングリセット」
+# (どちらも 'days': '0,1,2,3,4' = 平日のみ、exp80/gold50)を quest_data.QUESTS から
+# 退役させてここへ移設した。weekend_skip=True が元の days 指定に対応する。
+DAD_ROUTINE_FLOWS = _build_adult_flows([
+    {'key': 'kitchen_reset', 'label': 'キッチンリセット', 'icon_key': 'kitchen', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False, 'gold': 50, 'exp': 80},
+    {'key': 'living_reset', 'label': 'リビングリセット', 'icon_key': 'living', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False, 'gold': 50, 'exp': 80},
+])
+
+# ママ: 旧デイリークエスト id=1006「幼稚園の連絡帳記入」('days': '0,1,2,3,4'、
+# exp20/gold10)を同様に移設した。夕食を作る(id=20/21)・ゴミ捨て(id=1000〜1002)・
+# 日中の家庭運営(id=23)は、曜日や時間帯で内容が変わる/報酬が大きいため
+# デイリークエストのまま残す(すごろくには載せない)。
+MOM_ROUTINE_FLOWS = _build_adult_flows([
+    {'key': 'contact_book', 'label': '幼稚園の連絡帳記入', 'icon_key': 'notebook', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': True, 'weekend_carryover': False, 'checklist': False, 'gold': 10, 'exp': 20},
+])
+
+# 上記2人以外の大人(将来ユーザーが増えた場合)向け。固有タスクを持たない素の骨格。
+ADULT_DEFAULT_ROUTINE_FLOWS = _build_adult_flows([])
+
+# user_id → その人のフローセット。ここに無いユーザーは role で解決する(get_flow_set)。
+ROUTINE_FLOW_SETS: dict[str, dict[str, RoutineFlow]] = {
+    'dad': DAD_ROUTINE_FLOWS,
+    'mom': MOM_ROUTINE_FLOWS,
+}
+
+ROLE_ADULT = 'role_adult'
+
+
+def get_flow_set(user_id: str, role: Optional[str]) -> dict[str, RoutineFlow]:
+    """そのユーザーに出すべきフローセット(flow_key -> RoutineFlow)を返す。
+
+    user_id 固有の定義を最優先し、無ければ role で振り分ける。role が未設定
+    (quest_users.role が NULL の旧データ等)の場合は従来どおり子ども用フローに
+    フォールバックする。
+    """
+    if user_id in ROUTINE_FLOW_SETS:
+        return ROUTINE_FLOW_SETS[user_id]
+    if role == ROLE_ADULT:
+        return ADULT_DEFAULT_ROUTINE_FLOWS
+    return ROUTINE_FLOWS
+
+
+def get_step_reward(step: RoutineStep) -> Tuple[int, int]:
+    """ステップ個別の即時報酬 (gold, exp) を返す。未設定なら (0, 0)。"""
+    return step.get('gold', 0), step.get('exp', 0)
 
 def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:
     """フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。"""

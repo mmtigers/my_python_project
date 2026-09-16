@@ -96,8 +96,11 @@ QUESTS = [
     # A-2. 通常：パパ (Dad)
     # ------------------------------------------
     {'id': 10, 'title': '会社勤務 (通常)', 'type': 'daily', 'target': 'dad', 'category': 'work', 'difficulty': 'C', 'exp': 200, 'gold': 100, 'icon': '🏢', 'days': '0,1,2,3,4', 'desc': '家族の生活基盤を守るための戦い'},
-    {'id': 12, 'title': 'キッチンリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🍽️', 'days': '0,1,2,3,4',  'desc': 'シンクをピカピカにして明日を迎える'},
-    {'id': 13, 'title': 'リビングリセット', 'type': 'daily', 'target': 'dad', 'category': 'house', 'difficulty': 'C', 'exp': 80, 'gold': 50, 'icon': '🪁', 'days': '0,1,2,3,4', 'desc': 'リビングをピカピカにして明日を迎える'},
+    # id=12「キッチンリセット」・id=13「リビングリセット」は、パパ用の「きょうのすごろく」
+    # (routine_data.py DAD_ROUTINE_FLOWS の pm フロー)のステップへ移設したため廃止。
+    # クエストとすごろくの両方に出て二重に報酬を得られる状態を避けるための退役で、
+    # 報酬額(exp80/gold50)・平日のみ(days='0,1,2,3,4' = weekend_skip)はそのまま
+    # ステップ個別報酬として引き継いでいる。
  
     # ------------------------------------------
     # A-3. 通常：ママ (Mom)
@@ -108,7 +111,9 @@ QUESTS = [
     {'id': 1000, 'title': 'ゴミ捨て (燃えるゴミ)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🔥', 'days': '0,3', 'desc': '月・木は必ず遂行せよ', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1001, 'title': 'ゴミ捨て (プラスチック)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '♻️', 'days': '2', 'desc': '水曜日のプラゴミ回収', 'start_time': '08:00', 'end_time': '12:00'},
     {'id': 1002, 'title': 'ゴミ捨て (ペットボトル)', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'D', 'exp': 30, 'gold': 15, 'icon': '🧴', 'days': '4', 'desc': '金曜日の資源回収', 'start_time': '08:00', 'end_time': '12:00'},
-    {'id': 1006, 'title': '幼稚園の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '✍️', 'days': '0,1,2,3,4', 'desc': '毎日の体調と様子を報告'},
+    # id=1006「幼稚園の連絡帳記入」は、ママ用の「きょうのすごろく」(routine_data.py
+    # MOM_ROUTINE_FLOWS の pm フロー)のステップへ移設したため廃止(id=12/13と同じ理由)。
+    # 報酬額(exp20/gold10)・平日のみの条件はステップ側へ引き継いでいる。
     {'id': 1007, 'title': '習い事の連絡帳記入', 'type': 'daily', 'target': 'mom', 'category': 'house', 'difficulty': 'E', 'exp': 20, 'gold': 10, 'icon': '📒', 'days': '6', 'desc': '日曜日は療育の記録'},
     {'id': 1008, 'title': '朝の会 開催', 'type': 'daily', 'target': 'mom', 'category': 'life', 'difficulty': 'C', 'exp': 50, 'gold': 30, 'icon': '🌅', 'days': '5,6', 'desc': '休日のスケジュール確認と挨拶', 'start_time': '07:00', 'end_time': '10:00'},
 
