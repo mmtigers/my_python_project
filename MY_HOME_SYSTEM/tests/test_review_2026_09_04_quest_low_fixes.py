@@ -25,7 +25,7 @@ from core.database import get_db_cursor
 from core import database as core_db
 from models.quest import MasterQuest, MasterReward, QuestAction
 from services import quest_service as qs_module
-from services.quest_service import ApprovalService, ROLE_ADULT
+from services.quest_service import ROLE_ADULT
 
 
 def _seed(role=ROLE_ADULT, gold=0):

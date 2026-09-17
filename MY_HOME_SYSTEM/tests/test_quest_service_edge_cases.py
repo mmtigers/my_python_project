@@ -83,7 +83,6 @@ class TestProcessRejectQuest:
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
             )
-        quest_service = QuestService()
         approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
             approval_service.process_reject_quest("dad", 999999)
@@ -804,7 +803,6 @@ class TestFilterActiveQuestsDateParseErrorLogging:
 
     def test_date_parse_error_log_includes_the_actual_quest_id(self, monkeypatch):
         quest_service = QuestService()
-        approval_service = ApprovalService()
         bad_quest = {
             "quest_id": 4242,
             "quest_type": "limited",
@@ -848,7 +846,6 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_none_occurrence_chance_does_not_raise_type_error(self):
         quest_service = QuestService()
-        approval_service = ApprovalService()
         quest = self._make_random_quest(None)
 
         # 例外を送出せず完走すること自体が回帰確認の対象
@@ -858,7 +855,6 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_filter_active_quests_does_not_raise_for_random_quest_with_none_chance(self):
         quest_service = QuestService()
-        approval_service = ApprovalService()
         quest = self._make_random_quest(None)
 
         result = quest_service.filter_active_quests([quest])
@@ -867,7 +863,6 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_explicit_chance_still_behaves_as_before(self):
         quest_service = QuestService()
-        approval_service = ApprovalService()
         quest_never = self._make_random_quest(0.0)
 
         assert quest_service._is_quest_currently_active(quest_never) is False, (

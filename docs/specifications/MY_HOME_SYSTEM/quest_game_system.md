@@ -12,7 +12,7 @@
 
 ## 関連ドキュメント
 
-* [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.game_system import (GameSystem, game_system, quest_service, shop_service, user_service)`として本ファイルのクラス・4つのモジュールレベルシングルトンを再エクスポートする。また本ファイルの`sync_master_data`/`get_all_view_data`が`quest_data`モジュールの現在値を読むために逆に依存する（後述）
+* [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.game_system import (GameSystem, approval_service, game_system, quest_service, shop_service, user_service)`として本ファイルのクラス・4つのモジュールレベルシングルトンを再エクスポートする。また本ファイルの`sync_master_data`/`get_all_view_data`が`quest_data`モジュールの現在値を読むために逆に依存する（後述）
 * [quest_locks.md](./quest_locks.md) - `JST`/`ROLE_CHILD`/`logger`の提供元
 * [quest_quest_service.md](./quest_quest_service.md) - `GameSystem.__init__`が`QuestService()`インスタンスを保持し、`filter_active_quests`/`_compute_boost_from_last_completed`/`is_within_reset_period`を呼び出す
 * [quest_shop_service.md](./quest_shop_service.md) - `GameSystem.__init__`が`ShopService()`インスタンスを保持する（本ファイル内で`self.shop_service`のメソッドは直接呼ばれないが、`shop_service = game_system.shop_service`としてモジュールレベルへ公開する）
@@ -28,7 +28,7 @@
 
 * **（Issue #662 で最適化）** `get_all_view_data` の「表示対象クエスト × 直近30日の承認済み履歴」の二重ループを、`quest_id` をキーにした索引(`collections.defaultdict`)を1度作る形に変えた。計算量は O(Q×H) から O(Q+H) になる。履歴は `completed_at` の降順で取得しており、索引への追加もその順序を保つため、「ユーザーごとに最新の履歴を先に評価する」という既存の判定はそのまま成り立つ(挙動は変えていない)。
 
-マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`UserService`/`ShopService`の3インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら3サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`shop_service`/`user_service`)として公開する。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
+マスターデータ(`quest_data.USERS`/`QUESTS`/`REWARDS`)とDBの同期(`sync_master_data`)、および画面表示用の集約データ生成(`get_all_view_data`)を担う`GameSystem`クラス1つを定義するファイル。`GameSystem.__init__`は`QuestService`/`ApprovalService`/`UserService`/`ShopService`の4インスタンスを合成し(`InventoryService`は含まない)、ファイル末尾でこれら4サービスと`GameSystem`自身のシングルトンをモジュールレベルの変数(`game_system`/`quest_service`/`approval_service`/`shop_service`/`user_service`)として公開する。**（Issue #662で追加）** `ApprovalService`/`approval_service`は、`QuestService`から承認・却下・取消を分離した際に加わった。`sync_master_data`/`get_all_view_data`はいずれも、`quest_data`モジュールをこのファイル自身ではモジュールグローバルとしてimportせず、実行のたびに下位互換シム(`services/quest_service.py`)を`from services import quest_service as _quest_service_shim`として動的にimportし、`_quest_service_shim.quest_data`を経由して現在値を読む設計になっている。これは、テストが`monkeypatch.setattr(services.quest_service, "quest_data", fake)`という形でシム側の属性を差し替える前提のためである。
 根拠: `class GameSystem:` (行番号: 17)、`def __init__(self):\n        self.quest_service = QuestService()\n        self.user_service = UserService()\n        self.shop_service = ShopService()` (行番号: 18〜21)
 根拠: `from services import quest_service as _quest_service_shim` (行番号: 30, 171)、コメント (行番号: 25〜29 / 抜粋: "quest_data は互換シム(services/quest_service.py)側でimportされ、テストが\n        # `from services import quest_service as qs; monkeypatch.setattr(qs, \"quest_data\", fake)`\n        # という形で差し替える(Issue #529等)。")
 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
@@ -123,9 +123,9 @@
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 320〜338)
 
-### `game_system` / `quest_service` / `shop_service` / `user_service` (モジュールレベル変数)
+### `game_system` / `quest_service` / `approval_service` / `shop_service` / `user_service` (モジュールレベル変数)
 
-* **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
+* **役割**: `GameSystem`のシングルトンインスタンス`game_system`と、その内部に保持される`quest_service`/`approval_service`/`shop_service`/`user_service`をモジュールレベルの変数として公開する。下位互換シム(`services/quest_service.py`)がこれらをそのまま再エクスポートし、`routers/quest_router.py`がシム経由でimportして使用する。
 * 根拠: `game_system = GameSystem()\nquest_service = game_system.quest_service\nshop_service = game_system.shop_service\nuser_service = game_system.user_service` (行番号: 341〜344)
 * **引数/リクエスト・戻り値/レスポンス・副作用・エラーハンドリング**: 該当なし（モジュールレベルの変数代入。`GameSystem()`のインスタンス化自体は`__init__`の副作用を参照）
 * 根拠: (行番号: 341)

@@ -61,7 +61,6 @@ class TestConcurrentAdultCompletionOfDifferentQuests:
     def test_concurrent_completions_of_different_quests_do_not_lose_balance_updates(self, isolated_db):
         quest_ids = _seed_adult_with_individual_quests()
         quest_service = QuestService()
-        approval_service = ApprovalService()
 
         with ThreadPoolExecutor(max_workers=N_QUESTS) as pool:
             results = list(pool.map(
@@ -112,7 +111,6 @@ class TestPurchaseVersusApproveCrossPathConcurrency:
                 )
                 history_ids.append(cur.lastrowid)
 
-        quest_service = QuestService()
 
         approval_service = ApprovalService()
         shop_service = ShopService()
@@ -172,7 +170,6 @@ class TestResetVersusApproveCrossPathConcurrency:
                 )
                 history_ids.append(cur.lastrowid)
 
-        quest_service = QuestService()
 
         approval_service = ApprovalService()
         user_service = UserService()

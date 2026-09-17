@@ -18,7 +18,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.database import get_db_cursor
 from services import quest_service as qs_module
-from services.quest_service import ApprovalService, ROLE_ADULT
+from services.quest_service import ROLE_ADULT
 
 
 def _seed(gold: int = 0):
