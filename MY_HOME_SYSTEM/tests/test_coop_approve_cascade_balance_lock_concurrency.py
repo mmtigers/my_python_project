@@ -22,7 +22,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.utils import get_now_iso
 from core.database import get_db_cursor
-from services.quest_service import QuestService
+from services.quest_service import ApprovalService, QuestService
 
 N_SOLO_PENDING = 11
 GOLD_PER_QUEST = 10
@@ -62,6 +62,8 @@ class TestCoopApproveCascadeBalanceLock:
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 兄妹連携クエストのpendingペアを作成(息子が報告すると、娘側にも
         # 連結されたpending行が自動生成される)
         quest_service.process_complete_quest("son", 501)
@@ -77,7 +79,7 @@ class TestCoopApproveCascadeBalanceLock:
 
         with ThreadPoolExecutor(max_workers=len(all_targets)) as pool:
             results = list(pool.map(
-                lambda hid: quest_service.process_approve_quest("dad", hid), all_targets
+                lambda hid: approval_service.process_approve_quest("dad", hid), all_targets
             ))
 
         assert all(r["status"] == "success" for r in results)

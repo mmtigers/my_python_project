@@ -12,7 +12,7 @@ from core.database import get_db_cursor
 import init_unified_db
 # 修正: 分割されたサービスをインポート
 import game_logic  # ★追加: GameLogicをインポート
-from services.quest_service import QuestService, UserService, ShopService, ROLE_ADULT, ROLE_CHILD
+from services.quest_service import ApprovalService, QuestService, UserService, ShopService, ROLE_ADULT, ROLE_CHILD
 
 class TestQuestService(unittest.TestCase):
 
@@ -47,6 +47,7 @@ class TestQuestService(unittest.TestCase):
         
         # 修正: 各サービスを個別にインスタンス化
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
         self.user_service = UserService()
         self.shop_service = ShopService()
         
@@ -173,7 +174,7 @@ class TestQuestService(unittest.TestCase):
             hist_id = hist["id"]
         
         # 修正: QuestServiceを使用
-        self.quest_service.process_cancel_quest("user1", hist_id)
+        self.approval_service.process_cancel_quest("user1", hist_id)
         
         with get_db_cursor() as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
@@ -201,13 +202,13 @@ class TestQuestService(unittest.TestCase):
             ).fetchone()
             hist_id = hist["id"]
 
-        self.quest_service.process_reject_quest("parent", hist_id)
+        self.approval_service.process_reject_quest("parent", hist_id)
 
         with get_db_cursor() as cur:
             hist_check = cur.execute("SELECT status FROM quest_history WHERE id=?", (hist_id,)).fetchone()
             self.assertEqual(hist_check["status"], "rejected")
 
-        self.quest_service.process_cancel_quest("kid", hist_id)
+        self.approval_service.process_cancel_quest("kid", hist_id)
 
         with get_db_cursor() as cur:
             kid = cur.execute("SELECT * FROM quest_users WHERE user_id='kid'").fetchone()

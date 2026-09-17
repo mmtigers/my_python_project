@@ -147,7 +147,7 @@
 * 根拠: レスポンス型指定 (行番号: 52 / 抜粋: "response_model=CompleteResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_approve_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_approve_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 54 / 抜粋: "return quest_service.process_")
 
 
@@ -170,7 +170,7 @@
 * 根拠: レスポンス型指定 (行番号: 56 / 抜粋: "response_model=CancelResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_reject_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_reject_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 58 / 抜粋: "return quest_service.process_")
 
 
@@ -193,7 +193,7 @@
 * 根拠: レスポンス型指定 (行番号: 60 / 抜粋: "response_model=CancelResponse")
 
 
-* **副作用**: 不明（外部関数 `quest_service.process_cancel_quest()` に依存）
+* **副作用**: 不明（外部関数 `approval_service.process_cancel_quest()` に依存）
 * 根拠: メソッド呼び出し (行番号: 62 / 抜粋: "return quest_service.process_")
 
 

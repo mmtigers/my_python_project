@@ -50,6 +50,7 @@ def test_cancel_after_spending_reward_is_rejected(isolated_db, monkeypatch):
     monkeypatch.setattr(qs_module.sound_manager, "play", lambda *a, **k: None)
     _seed(gold=0)
     service = qs_module.QuestService()
+    approval = qs_module.ApprovalService()
 
     service.process_complete_quest("dad", 901)
     assert _gold() == 100
@@ -60,7 +61,7 @@ def test_cancel_after_spending_reward_is_rejected(isolated_db, monkeypatch):
         cur.execute("UPDATE quest_users SET gold = 0 WHERE user_id='dad'")
 
     with pytest.raises(HTTPException) as exc:
-        service.process_cancel_quest("dad", hist_id)
+        approval.process_cancel_quest("dad", hist_id)
     assert exc.value.status_code == 400
 
     # 履歴も残高もそのまま(トランザクションが巻き戻されている)
@@ -80,12 +81,13 @@ def test_cancel_with_sufficient_balance_fully_reverts(isolated_db, monkeypatch):
     monkeypatch.setattr(qs_module.sound_manager, "play", lambda *a, **k: None)
     _seed(gold=30)
     service = qs_module.QuestService()
+    approval = qs_module.ApprovalService()
 
     service.process_complete_quest("dad", 901)
     assert _gold() == 130
     hist_id = _latest_history_id()
 
-    service.process_cancel_quest("dad", hist_id)
+    approval.process_cancel_quest("dad", hist_id)
     assert _gold() == 30
     with get_db_cursor() as cur:
         assert cur.execute("SELECT 1 FROM quest_history WHERE id=?", (hist_id,)).fetchone() is None

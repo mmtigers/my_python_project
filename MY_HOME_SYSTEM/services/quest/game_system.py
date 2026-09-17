@@ -19,12 +19,14 @@ from services.quest.master_sync_sql import (
 )
 from services.quest.quest_service import QuestService
 from services.quest.shop_service import ShopService
+from services.quest.approval_service import ApprovalService
 from services.quest.user_service import UserService
 
 
 class GameSystem:
     def __init__(self):
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
         self.user_service = UserService()
         self.shop_service = ShopService()
 
@@ -352,5 +354,6 @@ class GameSystem:
 
 game_system = GameSystem()
 quest_service = game_system.quest_service
+approval_service = game_system.approval_service
 shop_service = game_system.shop_service
 user_service = game_system.user_service

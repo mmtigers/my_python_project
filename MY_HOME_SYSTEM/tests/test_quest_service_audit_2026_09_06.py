@@ -24,7 +24,7 @@ from core.database import get_db_cursor
 import config
 from services import switchbot_service
 from services import quest_service as quest_service_module
-from services.quest_service import QuestService, UserService, GameSystem, JST
+from services.quest_service import ApprovalService, QuestService, UserService, GameSystem, JST
 
 
 def _seed_adult(gold=100):
@@ -142,7 +142,7 @@ class TestNullRewardColumnsDoNotCrash:
                 "VALUES ('son', 1, 'Q', NULL, NULL, ?, 'pending')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
-        result = QuestService().process_approve_quest("dad", history_id)
+        result = ApprovalService().process_approve_quest("dad", history_id)
         assert result["status"] == "success"
         assert result["earnedGold"] >= 0
 
@@ -154,7 +154,7 @@ class TestNullRewardColumnsDoNotCrash:
                 "VALUES ('son', 1, 'Q', NULL, 0, ?, 'approved')", (datetime.datetime.now(JST).isoformat(),)
             )
             history_id = cur.lastrowid
-        assert QuestService().process_cancel_quest("son", history_id)["status"] == "cancelled"
+        assert ApprovalService().process_cancel_quest("son", history_id)["status"] == "cancelled"
 
 
 class TestUseItemActionBounds:
@@ -217,7 +217,7 @@ class TestTvUnlockRunsAfterCommit:
             observed["context"] = context
 
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", fake_trigger)
-        QuestService().process_approve_quest("dad", history_id)
+        ApprovalService().process_approve_quest("dad", history_id)
         assert observed == {"status_at_trigger": "approved", "context": "quest_id=7"}
 
 
