@@ -16,13 +16,13 @@ from fastapi import HTTPException
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from services import quest_service as qs_module
 from services.quest_service import ROLE_ADULT
 
 
 def _seed(gold: int = 0):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
             "VALUES ('dad', 'Dad', 'Warrior', 1, 0, ?, ?)",
@@ -35,12 +35,12 @@ def _seed(gold: int = 0):
 
 
 def _latest_history_id() -> int:
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         return cur.execute("SELECT id FROM quest_history ORDER BY id DESC LIMIT 1").fetchone()["id"]
 
 
 def _gold() -> int:
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         return cur.execute("SELECT gold FROM quest_users WHERE user_id='dad'").fetchone()["gold"]
 
 
@@ -56,7 +56,7 @@ def test_cancel_after_spending_reward_is_rejected(isolated_db, monkeypatch):
     hist_id = _latest_history_id()
 
     # 報酬購入相当: 残高を直接消費する
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute("UPDATE quest_users SET gold = 0 WHERE user_id='dad'")
 
     with pytest.raises(HTTPException) as exc:
@@ -65,7 +65,7 @@ def test_cancel_after_spending_reward_is_rejected(isolated_db, monkeypatch):
 
     # 履歴も残高もそのまま(トランザクションが巻き戻されている)
     assert _gold() == 0
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         assert cur.execute("SELECT 1 FROM quest_history WHERE id=?", (hist_id,)).fetchone() is not None
 
     # 再完了も「本日完了済み」として拒否される = 無限ゴールドが成立しない
@@ -87,5 +87,5 @@ def test_cancel_with_sufficient_balance_fully_reverts(isolated_db, monkeypatch):
 
     service.process_cancel_quest("dad", hist_id)
     assert _gold() == 30
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         assert cur.execute("SELECT 1 FROM quest_history WHERE id=?", (hist_id,)).fetchone() is None

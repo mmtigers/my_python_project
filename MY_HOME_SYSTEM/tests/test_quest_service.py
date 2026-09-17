@@ -7,7 +7,8 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import config
-import common
+from core.logger import setup_logging
+from core.database import get_db_cursor
 import init_unified_db
 # 修正: 分割されたサービスをインポート
 import game_logic  # ★追加: GameLogicをインポート
@@ -20,7 +21,7 @@ class TestQuestService(unittest.TestCase):
         """ロガーのセットアップ(Issue #404: 毎テストの setUp で呼ぶと setup_logging が
         古いハンドラを close() せずに捨てるためファイルハンドルが累積していた。
         クラスで1回だけ行い、終了時に閉じる)"""
-        cls._test_logger = common.setup_logging("test_quest")
+        cls._test_logger = setup_logging("test_quest")
 
     @classmethod
     def tearDownClass(cls):
@@ -71,7 +72,7 @@ class TestQuestService(unittest.TestCase):
 
     def verify_schema(self, table_name: str, expected_columns: list[str]) -> None:
         """テーブルに必要なカラムが存在するか検証するユーティリティ"""
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             cur.execute(f"PRAGMA table_info({table_name})")
             columns = [row["name"] for row in cur.fetchall()]
             for col in expected_columns:
@@ -82,7 +83,7 @@ class TestQuestService(unittest.TestCase):
 
     def _seed_master_data(self):
         """テストに必要な最低限のマスタデータを投入"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             # ユーザー
             # #370 (Q-M2): クエスト完了の即時報酬/pending振り分けは role == ROLE_ADULT で
             # 判定するようになった(不明=子ども)ため、即時報酬を前提とするテストでは
@@ -122,14 +123,14 @@ class TestQuestService(unittest.TestCase):
         self.assertEqual(result["earnedGold"], 20)
         self.assertFalse(result["leveledUp"])
         
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
             self.assertEqual(user["exp"], 50)
             self.assertEqual(user["gold"], 120)
 
     def test_level_up_logic(self):
         """レベルアップ処理の検証"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("UPDATE quest_users SET exp=90 WHERE user_id='user1'")
         
         # 修正: QuestServiceを使用
@@ -138,7 +139,7 @@ class TestQuestService(unittest.TestCase):
         self.assertTrue(result["leveledUp"])
         self.assertEqual(result["newLevel"], 2)
         
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
             self.assertEqual(user["level"], 2)
             self.assertEqual(user["exp"], 40)
@@ -153,7 +154,7 @@ class TestQuestService(unittest.TestCase):
 
     def test_purchase_reward_insufficient_gold(self):
         """報酬購入（資金不足エラー）"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("UPDATE quest_users SET gold=10 WHERE user_id='user1'")
         
         from fastapi import HTTPException
@@ -167,14 +168,14 @@ class TestQuestService(unittest.TestCase):
         """クエストキャンセルの検証"""
         self.quest_service.process_complete_quest("user1", 101)
         
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist = cur.execute("SELECT * FROM quest_history ORDER BY id DESC LIMIT 1").fetchone()
             hist_id = hist["id"]
         
         # 修正: QuestServiceを使用
         self.quest_service.process_cancel_quest("user1", hist_id)
         
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             user = cur.execute("SELECT * FROM quest_users WHERE user_id='user1'").fetchone()
             self.assertEqual(user["exp"], 0)
             self.assertEqual(user["gold"], 100)
@@ -183,7 +184,7 @@ class TestQuestService(unittest.TestCase):
 
     def test_cancel_rejected_history_does_not_deduct_balance(self):
         """#97: 却下済み(rejected)履歴をcancelしても、報酬は付与されていないため残高が変化しないこと"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('kid', 'Kid', 'Novice', 1, 0, 100, ?), "
@@ -194,7 +195,7 @@ class TestQuestService(unittest.TestCase):
         result = self.quest_service.process_complete_quest("kid", 101)
         self.assertEqual(result["status"], "pending")
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist = cur.execute(
                 "SELECT * FROM quest_history WHERE user_id='kid' ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -202,13 +203,13 @@ class TestQuestService(unittest.TestCase):
 
         self.quest_service.process_reject_quest("parent", hist_id)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist_check = cur.execute("SELECT status FROM quest_history WHERE id=?", (hist_id,)).fetchone()
             self.assertEqual(hist_check["status"], "rejected")
 
         self.quest_service.process_cancel_quest("kid", hist_id)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             kid = cur.execute("SELECT * FROM quest_users WHERE user_id='kid'").fetchone()
             # 却下済みなので報酬は元々付与されておらず、cancelしても残高は不変
             self.assertEqual(kid["exp"], 0)

@@ -21,6 +21,7 @@ import yt_dlp
 
 from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import resolve_my_home_system_root
+from file_utils import resolve_nas_data_dir, resolve_nas_mount_point
 
 # ==========================================
 # 0. 環境設定 & ロギング (Unified Logging)
@@ -71,13 +72,16 @@ class AppConfig:
     
     # File Paths
     BASE_DIR: Path = CURRENT_DIR
-    NAS_DIR_STR: str = '/mnt/nas/home_system/youtube_extractor/data'  # 本環境のNASパスに適宜変更してください
+    # Issue #663: 以前は '/mnt/nas/...' の直書きで、コメントも「本環境のNASパスに適宜変更して
+    # ください」= 環境ごとにコードを編集する前提だった。環境変数 NAS_MOUNT_POINT(MY_HOME_SYSTEM と
+    # 共用の .env のキー)から組み立てる。未設定なら従来どおり /mnt/nas 配下。
+    NAS_DIR_STR: str = resolve_nas_data_dir('youtube_extractor')
     # #580: 以前はnewface_monitor.pyと同じ`BASE_DIR / 'data'`を共有していたため、
     # NAS未マウント中に片方のスクリプトが書いたフォールバックデータを、NAS復旧後に
     # もう片方のnas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
     # 移動してしまう経路があった。スクリプトごとにサブディレクトリを分離する。
     LOCAL_DIR_STR: str = str(BASE_DIR / 'data' / 'youtube_extractor')
-    MOUNT_POINT: str = '/mnt/nas'
+    MOUNT_POINT: str = str(resolve_nas_mount_point())
 
     SUB_DIR_NAME: str = "list"
 

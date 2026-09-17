@@ -1,6 +1,6 @@
 # MY_HOME_SYSTEM 仕様書一覧
 
-IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全79件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
+IoT機器の制御、環境データの収集・分析、各種API・Webhookの統合ルーティングを担うFastAPIバックエンドの仕様書索引（全80件）。全体像は[全体設計書.md](../全体設計書.md)を参照。カテゴリA〜Fは全体設計書「2.1 コンポーネント一覧と役割」の分類に、G「その他」は各仕様書の記述をもとに追加で割り振ったもの。
 
 ## A. コアサーバー・ルーティング機構
 
@@ -62,6 +62,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 | [quest_shop_service.md](./quest_shop_service.md) | 報酬購入時のゴールド減算・在庫付与をアトミックに行う。 |
 | [quest_inventory_service.md](./quest_inventory_service.md) | 所持アイテムの一覧取得と、YouTubeごほうび券のクールダウンを考慮したアイテム使用処理。 |
 | [quest_game_system.md](./quest_game_system.md) | quest_data(マスターデータ)とDBの同期、およびFamily Questフロントエンド向け画面集約データの生成。 |
+| [quest_master_sync_sql.md](./quest_master_sync_sql.md) | quest_master/reward_masterへのUPSERT文とパラメータ組み立ての一元管理(Issue #664)。GameSystem.sync_master_dataとsync_strict.pyの両方が使う。 |
 | [game_logic.md](./game_logic.md) | レベルアップ必要経験値・最大HP・ドロップ報酬計算といったゲームルールロジック。旧版に記載のあった「ボス討伐状況の更新」はボス機能の廃止（`d1599d6`）に伴い該当ロジックが削除されている。 |
 | [quest.md](./quest.md) | クエストシステムのドメイン/リクエスト/レスポンス/インベントリモデルを定義するPydanticモデル群。 |
 | [quest_data.md](./quest_data.md) | Family Questのマスターデータ（ユーザー情報、クエスト定義、報酬定義）を定義する純粋なデータ定義モジュール。 |
@@ -85,7 +86,7 @@ IoT機器の制御、環境データの収集・分析、各種API・Webhookの�
 
 | 仕様書 | 概要 |
 | --- | --- |
-| [common.md](./common.md) | 下位互換性のために維持されているFacadeパターンのモジュール。core/servicesの各種機能を集約してインポートする。 |
+| [common.md](./common.md) | **廃止(Issue #664)**: 下位互換性のために維持されていたFacadeパターンのモジュール。全依存を `core.*`/`services.*` の直importへ移行し、`MY_HOME_SYSTEM/common.py` は削除済み。仕様書は履歴として残している。 |
 | [config.md](./config.md) | システム全体の環境変数、定数、ディレクトリパスの定義と初期化を行う。 |
 | [daily_timelapse_job.md](./daily_timelapse_job.md) | カメラ録画から特定日時の動画チャンクを検索し、動き検知に基づくタイムラプス動画を生成してDiscordへ通知・アップロードする日次バッチ。 |
 | [discord.md](./discord.md) | Discord Webhook への POST を集約する低レベルユーティリティ。2000字上限の分割・429/5xx のリトライ・Webhook URL のマスクを担う(Issue #661)。 |

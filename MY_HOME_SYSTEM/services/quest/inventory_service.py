@@ -5,7 +5,8 @@ from typing import Any, Dict, Tuple
 
 from fastapi import HTTPException
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import config
 from core import sound_manager
 from services import notification_service
@@ -19,7 +20,7 @@ from services.quest.locks import (
 
 class InventoryService:
     def get_user_inventory(self, user_id: str) -> Dict[str, Any]:
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             sql = """
                 SELECT ui.id, ui.reward_id, ui.status, ui.purchased_at, ui.used_at,
                        rm.title, rm.description as desc, rm.icon_key as icon, rm.category
@@ -86,7 +87,7 @@ class InventoryService:
         戻り値は (APIレスポンス, 通知メッセージ)。通知の送信は呼び出し側(use_item)が
         ロック解放後に行う(#544)。
         """
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             sql = """
                 SELECT ui.*, rm.title, qu.name as user_name
                 FROM user_inventory ui
@@ -116,7 +117,7 @@ class InventoryService:
                         f"YouTubeのごほうび券は、目を休めるためあと{remaining_minutes}分ほど使えません",
                     )
 
-            now_iso = common.get_now_iso()
+            now_iso = get_now_iso()
 
             # #369: SELECT→Python判定→無条件UPDATE では、WALで読み取りがブロックされない
             # ため連打された2リクエストが両方 'owned' を読み、両方が消費処理・履歴INSERT・

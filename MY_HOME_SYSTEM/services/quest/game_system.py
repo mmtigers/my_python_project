@@ -6,10 +6,17 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import game_logic
 from models.quest import MasterQuest, MasterReward, MasterUser
 from services.quest.locks import JST, ROLE_CHILD, logger
+from services.quest.master_sync_sql import (
+    QUEST_UPSERT_SQL,
+    REWARD_UPSERT_SQL,
+    quest_upsert_params,
+    reward_upsert_params,
+)
 from services.quest.quest_service import QuestService
 from services.quest.shop_service import ShopService
 from services.quest.user_service import UserService
@@ -51,7 +58,7 @@ class GameSystem:
             logger.error(f"❌ Master Data Validation failed: {e}")
             raise HTTPException(status_code=500, detail=f"Master Data Error: {str(e)}")
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             # Issue #330: 以前ここにあった「SELECTを試して失敗したらALTER TABLE」式の
             # レガシー実行時マイグレーション(role/reset_period/descriptionカラムの追加)は
             # 完全退役した。スキーマは migrations/ 配下(0000ベースライン+0001以降)が
@@ -67,7 +74,7 @@ class GameSystem:
                         name = excluded.name,
                         job_class = excluded.job_class,
                         role = COALESCE(excluded.role, quest_users.role)
-                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, common.get_now_iso()))
+                """, (u.user_id, u.name, u.job_class, u.level, u.exp, u.gold, u.avatar, role_val, get_now_iso()))
 
             active_q_ids = [q.id for q in valid_quests]
             if active_q_ids:
@@ -86,29 +93,27 @@ class GameSystem:
                     "スキップしました(意図しない全消去を防ぐための安全弁)。"
                 )
 
+            # Issue #664: UPSERT の SQL と値の並びは services/quest/master_sync_sql.py に
+            # 一本化した(sync_strict.py と列リストが食い違う事故が #100/#164/#165 と
+            # 3度起きたため)。同期の方針(空マスタ時の安全弁等)だけがここに残る。
             for q in valid_quests:
-                cur.execute("""
-                    INSERT INTO quest_master (
-                        quest_id, title, description, quest_type, target_user, exp_gain, gold_gain,
-                        icon_key, day_of_week, start_date, end_date, occurrence_chance,
-                        start_time, end_time, pre_requisite_quest_id, reset_period
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(quest_id) DO UPDATE SET
-                        title = excluded.title,
-                        description = excluded.description,
-                        quest_type = excluded.quest_type, target_user = excluded.target_user,
-                        exp_gain = excluded.exp_gain, gold_gain = excluded.gold_gain, icon_key = excluded.icon_key,
-                        day_of_week = excluded.day_of_week, start_time = excluded.start_time, end_time = excluded.end_time,
-                        start_date = excluded.start_date, end_date = excluded.end_date, occurrence_chance = excluded.occurrence_chance,
-                        pre_requisite_quest_id = excluded.pre_requisite_quest_id,
-                        reset_period = excluded.reset_period
-                """, (
-                    q.id, q.title, q.desc, q.type, q.target, q.exp, q.gold, q.icon,
-                    q.days,
-                    q.start_date, q.end_date,
-                    q.chance, q.start_time, q.end_time,
-                    q.pre_requisite_quest_id, q.reset_period
+                cur.execute(QUEST_UPSERT_SQL, quest_upsert_params(
+                    quest_id=q.id,
+                    title=q.title,
+                    description=q.desc,
+                    quest_type=q.type,
+                    target_user=q.target,
+                    exp_gain=q.exp,
+                    gold_gain=q.gold,
+                    icon_key=q.icon,
+                    day_of_week=q.days,
+                    start_date=q.start_date,
+                    end_date=q.end_date,
+                    occurrence_chance=q.chance,
+                    start_time=q.start_time,
+                    end_time=q.end_time,
+                    pre_requisite_quest_id=q.pre_requisite_quest_id,
+                    reset_period=q.reset_period,
                 ))
 
             active_r_ids = [r.id for r in valid_rewards]
@@ -151,17 +156,15 @@ class GameSystem:
                 cur.execute("DELETE FROM reward_master WHERE reward_id = ?", (stale_reward_id,))
 
             for r in valid_rewards:
-                cur.execute("""
-                    INSERT INTO reward_master (reward_id, title, category, cost_gold, icon_key, description, target)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(reward_id) DO UPDATE SET
-                        title = excluded.title,
-                        category = excluded.category,
-                        cost_gold = excluded.cost_gold,
-                        icon_key = excluded.icon_key,
-                        description = excluded.description,
-                        target = excluded.target
-                """, (r.id, r.title, r.category, r.cost_gold, r.icon_key, r.desc, r.target))
+                cur.execute(REWARD_UPSERT_SQL, reward_upsert_params(
+                    reward_id=r.id,
+                    title=r.title,
+                    category=r.category,
+                    cost_gold=r.cost_gold,
+                    icon_key=r.icon_key,
+                    description=r.desc,
+                    target=r.target,
+                ))
 
         logger.info("✅ Master data sync completed.")
         return {"status": "synced", "message": "Master data updated."}
@@ -171,7 +174,7 @@ class GameSystem:
         # モジュールグローバルとしてimportせずシム経由で参照する。
         from services import quest_service as _quest_service_shim
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             users = [dict(row) for row in cur.execute("SELECT * FROM quest_users")]
 
             # SQLiteは "SELECT * FROM quest_users" にORDER BYが無いと、user_idが

@@ -9,8 +9,9 @@
 
 ## 関連ドキュメント
 
-- [common.md](./common.md) — `setup_logging`・`get_db_cursor`を再エクスポートするFacadeモジュール
-- [database.md](./database.md) — `common.get_db_cursor`の実体(`core.database.get_db_cursor`)
+- [quest_master_sync_sql.md](./quest_master_sync_sql.md) — UPSERT文とパラメータ組み立ての一元管理（Issue #664。`GameSystem.sync_master_data()`と共有）
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [database.md](./database.md) — `core.database.get_db_cursor`の実体(`core.database.get_db_cursor`)
 - [quest_data.md](./quest_data.md) — 同期元マスターデータ`QUESTS`/`REWARDS`の定義元
 - [init_unified_db.md](./init_unified_db.md) — `quest_master`/`reward_master`テーブルのスキーマ定義元
 - [quest_service.md](./quest_service.md) — `is_within_reset_period`の実装元。`reset_period`列に`'daily'`/`'weekly'`以外の値(旧`'weekly_monday'`等)が入ると常に`False`を返す
@@ -39,7 +40,8 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 | --- | --- | --- | --- |
 | `argparse` | 標準ライブラリ | CLI引数(`--dry-run`, `-y`/`--yes`, `--allow-empty-master`)のパース | `import argparse` (行番号: 1) |
 | `sys` | 標準ライブラリ | 異常終了時のプロセス終了 (`sys.exit(1)`) | `import sys` (行番号: 2) |
-| `common` | 内部モジュール | ロガーのセットアップ(`setup_logging`)およびDBカーソルの取得(`get_db_cursor`) | `import common` (行番号: 3) |
+| `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 3 / 抜粋: "from core.logger import setup_logging") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 4 / 抜粋: "from core.database import get_db_cursor") |
 | `quest_data` (`QUESTS`, `REWARDS`) | 内部モジュール | 同期元となるマスターデータ | `from quest_data import QUESTS, REWARDS` (行番号: 4) |
 | `traceback` (ローカルインポート) | 標準ライブラリ | `main`内で予期しない例外発生時のスタックトレース出力 | `import traceback` (行番号: 243、`main`内) |
 
@@ -47,8 +49,8 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.setup_logging` | 内部実装が提供されておらず、設定されるロガーの詳細仕様が不明 | `logger = common.setup_logging("strict_sync")` (行番号: 7) |
-| `common.get_db_cursor` | 接続先DBの種類やトランザクションの詳細な制御方法が不明 | `with common.get_db_cursor(commit=not dry_run) as cur:` (行番号: 221) |
+| `core.logger.setup_logging` | 内部実装が提供されておらず、設定されるロガーの詳細仕様が不明 | `logger = core.logger.setup_logging("strict_sync")` (行番号: 7) |
+| `core.database.get_db_cursor` | 接続先DBの種類やトランザクションの詳細な制御方法が不明 | `with core.database.get_db_cursor(commit=not dry_run) as cur:` (行番号: 221) |
 | `quest_data`の各変数 | `QUESTS`, `REWARDS`の全プロパティ構造が現在のファイルからは`.get()`で参照されているキーしか読み取れない | `from quest_data import QUESTS, REWARDS` (行番号: 4) |
 | `init_unified_db.py` | コメントでのみ言及されており、DBの厳密なテーブルスキーマが不明 | コメント (行番号: 52 / 抜粋: "init_unified_db.py の定義と一致させる") |
 
@@ -67,6 +69,8 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 * **エラーハンドリング**: なし
 * 根拠: (行番号: 10〜19)
 
+**（Issue #664 で変更）** `sync_quests`/`sync_rewards` のUPSERT文と、それに渡す値のタプルの組み立ては`services/quest/master_sync_sql.py`（[quest_master_sync_sql.md](./quest_master_sync_sql.md)）へ一本化され、`services/quest/game_system.py` の `GameSystem.sync_master_data()` と共有している。以前は同じ2テーブルへのUPSERTが両ファイルに別々に書かれており、列リストが食い違う事故が#100（`reset_period` 欠落）・#164（時間帯/期間/出現率/前提クエスト欠落）・#165（`description` 欠落）と3度起きていた。本ファイルに残るのは「マスタに無い行をどう扱うか」（確認プロンプト・`--dry-run`・`--allow-empty-master`）という方針の部分だけである。
+
 ### `sync_quests`
 
 * **役割**: `quest_data.QUESTS`を元に`quest_master`テーブルを完全同期する。`dry_run=True`の場合は`_count_rows_to_delete`で削除見込み件数と登録予定件数をログ出力するのみで、DBへは一切書き込まない。通常実行時は、マスタに存在しないIDの行を`DELETE`(`master_ids`が空なら全件`DELETE`)したうえで、`QUESTS`の各要素を`quest_id`をキーに`INSERT ... ON CONFLICT DO UPDATE`でUpsertする。Issue #164により、Upsert対象列は`quest_id`/`title`/`quest_type`/`target_user`/`exp_gain`/`gold_gain`/`icon_key`/`day_of_week`/`description`/`reset_period`/`start_time`/`end_time`/`start_date`/`end_date`/`occurrence_chance`/`pre_requisite_quest_id`の全16列(`services/quest_service.py`の`sync_master_data()`と同じ列構成)になった。
@@ -77,7 +81,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 * 根拠: (行番号: 22〜116、通常実行パスに明示的な`return`なし)
 * **副作用**: `dry_run=False`時、`quest_master`テーブルへの`DELETE`文および`INSERT ... ON CONFLICT DO UPDATE`文の発行、ログ出力(`logger.info`)
 * 根拠: (行番号: 38〜43 / 抜粋: "sql_delete = f\"DELETE FROM quest_master..."), (行番号: 73〜114 / 抜粋: "INSERT INTO quest_master (")
-* **エラーハンドリング**: なし(呼び出し元の`run_sync`/`common.get_db_cursor`に依存)
+* **エラーハンドリング**: なし(呼び出し元の`run_sync`/`core.database.get_db_cursor`に依存)
 * 根拠: (行番号: 22〜116、try-exceptなし)
 
 ### `sync_rewards`
@@ -90,7 +94,7 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 * 根拠: (行番号: 118〜196、明示的な`return`は`dry_run`時のみ)
 * **副作用**: `dry_run=False`時、`reward_master`テーブルへの行単位`DELETE`(`user_inventory`参照チェック付き)、`user_inventory`テーブルへの`SELECT`(参照確認)、`reward_master`への`INSERT ... ON CONFLICT DO UPDATE`文の発行、ログ出力
 * 根拠: (行番号: 129〜156 / 抜粋: "for row in stale_rewards: ... still_referenced = cur.execute(\"SELECT 1 FROM user_inventory..."), (行番号: 173〜195 / 抜粋: "INSERT INTO reward_master (")
-* **エラーハンドリング**: なし(呼び出し元の`run_sync`/`common.get_db_cursor`に依存)。ただし`user_inventory`に参照が残る報酬の削除は例外を送出せずスキップに変換される(#165)
+* **エラーハンドリング**: なし(呼び出し元の`run_sync`/`core.database.get_db_cursor`に依存)。ただし`user_inventory`に参照が残る報酬の削除は例外を送出せずスキップに変換される(#165)
 * 根拠: (行番号: 118〜196、try-exceptなし。スキップ処理は行番号150〜155 / 抜粋: "if still_referenced:\n            logger.warning(")
 
 ### `build_arg_parser`
@@ -132,14 +136,14 @@ Issue #165の修正により、`sync_rewards`にも2つの改善が加わった�
 
 ### `run_sync`
 
-* **役割**: 同期処理全体のエントリポイント。開始ログを出力し、`dry_run=False`の場合のみ`confirm_or_abort`で安全ガード・確認プロンプトを通過させたうえで、単一のDBカーソル(`common.get_db_cursor(commit=not dry_run)`)を使って`sync_quests`と`sync_rewards`を順に実行する。
+* **役割**: 同期処理全体のエントリポイント。開始ログを出力し、`dry_run=False`の場合のみ`confirm_or_abort`で安全ガード・確認プロンプトを通過させたうえで、単一のDBカーソル(`core.database.get_db_cursor(commit=not dry_run)`)を使って`sync_quests`と`sync_rewards`を順に実行する。
 * 根拠: `def run_sync(dry_run: bool = False, assume_yes: bool = False, allow_empty_master: bool = False, input_func=input) -> None:` (行番号: 212〜228)
 * **引数/リクエスト**: `dry_run: bool = False`, `assume_yes: bool = False`, `allow_empty_master: bool = False`, `input_func=input`
 * 根拠: (行番号: 212)
 * **戻り値/レスポンス**: なし
 * 根拠: (行番号: 212〜228、明示的な`return`なし)
 * **副作用**: `confirm_or_abort`呼び出し(`dry_run=False`時)、DBカーソルの取得と`sync_quests`/`sync_rewards`の呼び出し、ログ出力
-* 根拠: (行番号: 218〜223 / 抜粋: "with common.get_db_cursor(commit=not dry_run) as cur:\n        sync_quests(cur, dry_run=dry_run)\n        sync_rewards(cur, dry_run=dry_run)")
+* 根拠: (行番号: 218〜223 / 抜粋: "with get_db_cursor(commit=not dry_run) as cur:\n        sync_quests(cur, dry_run=dry_run)\n        sync_rewards(cur, dry_run=dry_run)")
 * **エラーハンドリング**: 本関数自体は例外を捕捉しない。`confirm_or_abort`からの`SyncAborted`、DB操作からの例外はいずれも呼び出し元(`main`)にそのまま伝播する
 * 根拠: (行番号: 212〜228、try-exceptなし)
 
@@ -168,7 +172,7 @@ flowchart TD
     DryCheck -- No --> Confirm["confirm_or_abort():<br/>空マスタガード → assume_yesなら即return → 確認プロンプト"]
     Confirm -->|SyncAborted| CatchAbort
     DryCheck -- Yes --> GetCursor
-    Confirm -->|通過| GetCursor["外部: common.get_db_cursor(commit=not dry_run)"]
+    Confirm -->|通過| GetCursor["外部: core.database.get_db_cursor(commit=not dry_run)"]
 
     GetCursor --> CallQuests["sync_quests(cur, dry_run)呼び出し"]
     CallQuests --> Q_DryCheck{"dry_run か"}
@@ -232,7 +236,7 @@ graph TD
     run_sync --> sync_quests
     run_sync --> sync_rewards
     run_sync --> logger
-    run_sync --> Ext_GetCursor["外部: common.get_db_cursor"]
+    run_sync --> Ext_GetCursor["外部: core.database.get_db_cursor"]
 
     confirm_or_abort --> SyncAborted
     confirm_or_abort --> logger
@@ -249,7 +253,7 @@ graph TD
     sync_rewards --> DB_reward_master[(DB: reward_master)]
     sync_rewards --> DB_user_inventory[(DB: user_inventory, FK参照チェック #165)]
 
-    Ext_SetupLogging["外部: common.setup_logging"] --> logger
+    Ext_SetupLogging["外部: core.logger.setup_logging"] --> logger
 ```
 
 ## 7. 次のステップ（リバースエンジニアリングの提案）
@@ -293,10 +297,10 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| 対象データベースの種類 | `database.md`の解析によれば、`common.get_db_cursor`の実体である`core.database.get_db_cursor`は`sqlite3`を用いた接続コンテキストマネージャであり、`PRAGMA journal_mode=WAL`および`PRAGMA foreign_keys=ON`を発行することが判明した。これによりSQLiteであることが裏付けられる。 | database.md |
+| 対象データベースの種類 | `database.md`の解析によれば、`core.database.get_db_cursor`の実体である`core.database.get_db_cursor`は`sqlite3`を用いた接続コンテキストマネージャであり、`PRAGMA journal_mode=WAL`および`PRAGMA foreign_keys=ON`を発行することが判明した。これによりSQLiteであることが裏付けられる。 | database.md |
 | `QUESTS`, `REWARDS` の全プロパティ構造 | `quest_data.md`の解析によれば、`QUESTS`は`id`/`title`/`type`/`target`/`category`/`difficulty`/`exp`/`gold`/`icon`/`desc`を基本キーとし任意で`days`/`start_time`/`end_time`/`chance`を持つ辞書のリスト(有効53件)、`REWARDS`は`id`/`title`/`category`/`cost_gold`/`icon_key`/`desc`を基本キーとし任意で`target`を持つ辞書のリスト(23件)であることが判明した。いずれも`reset_period`キーは持たない。 | quest_data.md |
 | DBの正確なテーブルスキーマ | **（Issue #330でスキーマの定義元が移動）** 本項目が挙げていた`init_unified_db.py`は既にスキーマ定義を持たず、現在の唯一の定義元は`MY_HOME_SYSTEM/migrations/`(空DBでは`0000_baseline_schema.sql`)と、そこから`python init_unified_db.py --dump-schema`で生成される参照用ダンプ`MY_HOME_SYSTEM/current_schema.sql`である。本ファイルが操作する2テーブルは、`current_schema.sql`によれば`quest_master(quest_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, quest_type TEXT DEFAULT 'daily', exp_gain INTEGER DEFAULT 10, gold_gain INTEGER DEFAULT 5, icon_key TEXT, day_of_week TEXT, target_user TEXT DEFAULT 'all', start_date TEXT, end_date TEXT, occurrence_chance REAL DEFAULT 1.0, start_time TEXT, end_time TEXT, days TEXT, pre_requisite_quest_id INTEGER DEFAULT NULL, reset_period TEXT DEFAULT 'daily')`(331行目〜)と、`reward_master(reward_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, cost_gold INTEGER, category TEXT, icon_key TEXT, desc TEXT, target TEXT DEFAULT 'all', description TEXT)`である。**`reward_master`に`desc`と`description`が併存している**のは本ファイルが担った移行の名残で、`services/quest/game_system.py`の`get_all_view_data`(251〜257行目)はビュー応答で`description`のみを正として`desc`を落としている。本ファイルが削除対象を数える`quest_master.quest_id`/`reward_master.reward_id`はいずれもPRIMARY KEYであり、`user_inventory.reward_id`だけが`reward_master(reward_id)`への外部キーを持つ(`core/database.py`が接続ごとに`PRAGMA foreign_keys=ON`を設定するため、使用中のごほうびを削除しようとすると外部キー違反になりうる点は本ファイルの運用上の注意点)。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql:331-332`, `MY_HOME_SYSTEM/migrations/0000_baseline_schema.sql`, `MY_HOME_SYSTEM/core/database.py:20-34`, `MY_HOME_SYSTEM/services/quest/game_system.py:251-257`（参考: [init_unified_db.md](./init_unified_db.md)・[migrations.md](./migrations.md)） |
-| トランザクションの挙動 | `common.get_db_cursor`は`MY_HOME_SYSTEM/common.py`17〜20行目で`core.database`から再エクスポートされており、実体は`MY_HOME_SYSTEM/core/database.py`20〜53行目の`@contextmanager def get_db_cursor(commit: bool = False)`である。接続確立は`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`を最大5回(1秒間隔)リトライし、`row_factory = sqlite3.Row`・`PRAGMA journal_mode=WAL`・`PRAGMA foreign_keys=ON`を設定する(29〜33行目)。`with`ブロックを抜ける際、**`commit=True`のときだけ`conn.commit()`し、ブロック内で例外が出た場合は`conn.rollback()`して再送出、いずれの場合も`finally`で`conn.close()`する**(45〜53行目)。本ファイルは`with common.get_db_cursor(commit=not dry_run) as cur:`(271行目)として`sync_quests`と`sync_rewards`を**同一カーソル・同一トランザクションで実行**するため、片方の同期中に例外が出れば両方まとめてロールバックされる。`--dry-run`時は`commit=False`となり、SELECTによる件数集計(`_count_rows_to_delete`)しか行わないことと合わせてDBへは一切の変更が残らない(ブロック終了時にコミットされないまま接続が閉じられる)。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:20-53`, `MY_HOME_SYSTEM/common.py:17-20`, `MY_HOME_SYSTEM/sync_strict.py:262-279`（参考: [database.md](./database.md)・[common.md](./common.md)） |
+| トランザクションの挙動 | `core.database.get_db_cursor`は`MY_HOME_SYSTEM/common.py`17〜20行目で`core.database`から再エクスポートされており、実体は`MY_HOME_SYSTEM/core/database.py`20〜53行目の`@contextmanager def get_db_cursor(commit: bool = False)`である。接続確立は`sqlite3.connect(config.SQLITE_DB_PATH, timeout=30.0)`を最大5回(1秒間隔)リトライし、`row_factory = sqlite3.Row`・`PRAGMA journal_mode=WAL`・`PRAGMA foreign_keys=ON`を設定する(29〜33行目)。`with`ブロックを抜ける際、**`commit=True`のときだけ`conn.commit()`し、ブロック内で例外が出た場合は`conn.rollback()`して再送出、いずれの場合も`finally`で`conn.close()`する**(45〜53行目)。本ファイルは`with core.database.get_db_cursor(commit=not dry_run) as cur:`(271行目)として`sync_quests`と`sync_rewards`を**同一カーソル・同一トランザクションで実行**するため、片方の同期中に例外が出れば両方まとめてロールバックされる。`--dry-run`時は`commit=False`となり、SELECTによる件数集計(`_count_rows_to_delete`)しか行わないことと合わせてDBへは一切の変更が残らない(ブロック終了時にコミットされないまま接続が閉じられる)。 | 直接ソース確認: `MY_HOME_SYSTEM/core/database.py:20-53`, `MY_HOME_SYSTEM/common.py:17-20`, `MY_HOME_SYSTEM/sync_strict.py:262-279`（参考: [database.md](./database.md)・[common.md](./common.md)） |
 | 本スクリプトの実運用上の呼び出しタイミング | リポジトリ内の自動実行経路をすべて確認したが、**本スクリプトを起動する定期実行・デプロイ経路は存在しない**。具体的には、実機のcrontabをリポジトリ管理下に置いた`deploy/cron/crontab`(Issue #528)に`sync_strict`のエントリは無く、`MY_HOME_SYSTEM/deploy/systemd/`配下の3ユニット(`home_system.service`・`health-check.service`・`network_logger.service`)、`MY_HOME_SYSTEM/start_all.sh`、`scheduler_boot.py`の`TASKS`(30〜43行目)のいずれからも参照されていない。リポジトリ内で`sync_strict`を参照しているのは`tests/test_sync_strict.py`と、`services/quest/game_system.py`255行目のコメント(`reward_master.desc`がレガシー列である旨の注記)だけである。したがって本スクリプトは**オーナーが必要時に手動で実行するCLIツール**という位置づけで、`build_arg_parser()`が`--dry-run`/`--yes`/`--allow-empty-master`を持ち、非dry-run時に`confirm_or_abort`で対話確認を求める設計もこれと整合する(自動実行を前提にしていない)。なお通常のマスタ同期は`POST /api/quest/seed`→`GameSystem.sync_master_data`が担い、そちらは削除を伴わない`INSERT ... ON CONFLICT DO UPDATE`が中心である点が本スクリプト(strict=マスタに無い行を削除する)との違いである。 | 直接ソース確認: `deploy/cron/crontab`（全体）, `MY_HOME_SYSTEM/deploy/systemd/`（全3ユニット）, `MY_HOME_SYSTEM/scheduler_boot.py:30-43`, `MY_HOME_SYSTEM/sync_strict.py:199-289`（参考: [run_task.md](./run_task.md)・[quest_game_system.md](./quest_game_system.md)） |
 
 ## 10. 自己検証結果

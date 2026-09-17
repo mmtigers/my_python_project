@@ -32,7 +32,7 @@
 | `difflib` | 標準 | 構成ファイル差分の要約(`unified_diff`) | 根拠: [インポート宣言] (行番号: 30 / 抜粋: "import difflib") |
 | `glob` | 標準 | `logs/*.log`・`deploy/systemd/*.service`等のパターンマッチング | 根拠: [インポート宣言] (行番号: 31 / 抜粋: "import glob") |
 | `hashlib` | 標準 | 異常セットのフィンガープリント生成 | 根拠: [インポート宣言] (行番号: 23 / 抜粋: "import hashlib") |
-| `json` | 標準 | 再通知抑制状態ファイルの読み書き | 根拠: [インポート宣言] (行番号: 24 / 抜粋: "import json") |
+| `core.state_file`（Issue #661 で `json` の直接importを置き換え） | ローカルモジュール | マーカーファイル・再通知抑制状態ファイルの原子的な読み書き(`read_text`/`write_text_atomic`/`read_json`/`write_json_atomic`) | 根拠: [インポート宣言] (行番号: 43 / 抜粋: "from core import state_file") |
 | `os` | 標準 | パス操作・マウント確認 | 根拠: [インポート宣言] (行番号: 25 / 抜粋: "import os") |
 | `shutil` | 標準 | ディスク使用量取得 | 根拠: [インポート宣言] (行番号: 26 / 抜粋: "import shutil") |
 | `subprocess` | 標準 | `systemctl`/`journalctl`/`free`の実行 | 根拠: [インポート宣言] (行番号: 27 / 抜粋: "import subprocess") |
@@ -83,54 +83,54 @@
 
 ### `_read_marker`
 
-* **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。
-* 根拠: [関数定義] (行番号: 85〜91 / 抜粋: "def _read_marker() -> datetime.datetime:")
+* **役割**: マーカーファイルから前回チェック完了時刻(ISO8601)を読み取る。**（Issue #661で修正）** ファイルの読み取り自体は`core/state_file.py`の`read_text`へ委譲し、返ってきた文字列を`datetime.fromisoformat`でパースする形に整理した。
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 85 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
 * **引数/リクエスト**: なし
-* 根拠: [関数定義] (行番号: 56)
+* 根拠: `def _read_marker() -> datetime.datetime:` (行番号: 85 / 抜粋: "def _read_marker() -> datetime.datetime:")
 
 
-* **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/不正な場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
-* 根拠: [戻り値] (行番号: 60, 62 / 抜粋: "return datetime.datetime.fromisoformat(f.read().strip())")
+* **戻り値/レスポンス**: `datetime.datetime`。ファイルが無い/空/ISO8601としてパースできない場合は現在時刻から`DEFAULT_LOOKBACK_SEC`(3600秒)遡った時刻。
+* 根拠: [フォールバック] (行番号: 97 / 抜粋: "return datetime.datetime.now() - datetime.timedelta(seconds=DEFAULT_LOOKBACK_SEC)")
 
 
-* **副作用**: マーカーファイルの読み取り。
-* 根拠: [ファイルI/O] (行番号: 59 / 抜粋: 'with open(MARKER_FILE, "r", encoding="utf-8") as f:')
+* **副作用**: マーカーファイルの読み取り（`state_file.read_text`経由）。
+* 根拠: [state_fileへの委譲] (行番号: 92 / 抜粋: "raw = state_file.read_text(MARKER_FILE)")
 
 
-* **エラーハンドリング**: `OSError`/`ValueError`を捕捉し、既定の遡り時刻を返す。
-* 根拠: [例外処理] (行番号: 61〜62 / 抜粋: "except (OSError, ValueError):")
+* **エラーハンドリング**: ファイルI/Oの失敗は`state_file.read_text`側が捕捉して警告ログを出し`None`を返す。本関数は加えて`fromisoformat`の`ValueError`を捕捉し、いずれの場合も既定の遡り時刻を返す。
+* 根拠: [例外処理] (行番号: 95-96 / 抜粋: "except ValueError:")
 
 
 
 ### `_write_marker`
 
-* **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。
-* 根拠: [関数定義] (行番号: 94〜96 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
+* **役割**: チェック開始時刻をISO8601文字列でマーカーファイルへ書き込む。**（Issue #661で修正）** 書き込みは`core/state_file.py`の`write_text_atomic`へ委譲し、一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった（途中で電源断・クラッシュしても不完全な内容が残らない）。
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `dt: datetime.datetime`
-* 根拠: [関数定義] (行番号: 65)
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
 * **戻り値/レスポンス**: `None`
-* 根拠: [関数定義] (行番号: 65)
+* 根拠: `def _write_marker(dt: datetime.datetime) -> None:` (行番号: 101 / 抜粋: "def _write_marker(dt: datetime.datetime) -> None:")
 
 
-* **副作用**: マーカーファイルの上書き。
-* 根拠: [ファイルI/O] (行番号: 66〜67 / 抜粋: 'with open(MARKER_FILE, "w", encoding="utf-8") as f:')
+* **副作用**: マーカーファイルの原子的な差し替え（`state_file.write_text_atomic`経由）。
+* 根拠: [state_fileへの委譲] (行番号: 101 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
-* **エラーハンドリング**: なし（例外は呼び出し元へ伝播する）
-* 根拠: [関数定義] (行番号: 65〜67)
+* **エラーハンドリング**: 例外は`state_file.write_text_atomic`側が捕捉して警告ログを出し`False`を返すため、本関数からは送出されない（**Issue #661 での変更点**: 以前は書き込みの失敗がそのまま呼び出し元へ伝播していた）。
+* 根拠: [state_fileへの委譲] (行番号: 101 / 抜粋: "state_file.write_text_atomic(MARKER_FILE, dt.isoformat())")
 
 
 
 ### `check_service_active`
 
 * **役割**: `systemctl is-active`で`home_system.service`の稼働状態を確認する。
-* 根拠: [関数定義] (行番号: 106〜115 / 抜粋: "def check_service_active() -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 112〜121 / 抜粋: "def check_service_active() -> Optional[str]:")
 
 
 * **引数/リクエスト**: なし
@@ -153,7 +153,7 @@
 ### `check_journal_errors`
 
 * **役割**: `journalctl -u home_system.service -p err..emerg`で前回マーカー以降のエラーログ行を確認する。
-* 根拠: [関数定義] (行番号: 118〜135 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 124〜141 / 抜粋: "def check_journal_errors(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`--since`に"%Y-%m-%d %H:%M:%S"形式で渡す）
@@ -179,7 +179,7 @@
 * 根拠: (行番号: 120〜126 / 抜粋: "if os.path.basename(filepath) in (\"health_watch.log\", \"claude_investigate.log\"):\n            continue")
 
 * **役割**: `config.LOG_DIR`配下の`*.log`から前回マーカー以降のエラー行を検出する。キーワード・除外パターン・タイムスタンプ解析は`LogAnalyzer`を流用し、週次の`log_analyzer.py`と判定基準を揃える。エラー(errors > 0)のみを異常とみなし、WARNINGは対象外。
-* 根拠: [関数定義] (行番号: 138〜178 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 144〜184 / 抜粋: "def check_app_logs(since: datetime.datetime) -> Optional[str]:")
 
 
 * **引数/リクエスト**: `since: datetime.datetime`（`analyzer.start_date`へ直接代入し「前回マーカー以降」のみを走査対象にする）
@@ -397,19 +397,19 @@
 * 根拠: [戻り値] (行番号: 176, 182 / 抜粋: "return False", "return True")
 
 
-* **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。
-* 根拠: [ファイルI/O] (行番号: 180〜181 / 抜粋: 'json.dump({"fingerprint": fingerprint, "last_notified": now.isoformat()}, f)')
+* **副作用**: 通知する判定の場合、状態ファイル(`NOTIFY_STATE_FILE`)へフィンガープリントと通知時刻(JSON)を書き込む。**（Issue #661で修正）** 読み書きはいずれも`core/state_file.py`(`read_json`/`write_json_atomic`)へ委譲し、書き込みは原子的な差し替えになった。
+* 根拠: [state_fileへの委譲] (行番号: 326-328 / 抜粋: "state_file.write_json_atomic(\n        NOTIFY_STATE_FILE, {\"fingerprint\": fingerprint, \"last_notified\": now.isoformat()}\n    )")
 
 
-* **エラーハンドリング**: 状態ファイルの読み取り失敗(`OSError`/`ValueError`/`KeyError`)は無視し、通知する側(True)に倒す。
-* 根拠: [例外処理] (行番号: 177〜178 / 抜粋: "except (OSError, ValueError, KeyError):")
+* **エラーハンドリング**: 状態ファイルが読めない・壊れている場合は`state_file.read_json`が`None`を返し、`last_notified`のパースに失敗した場合は`KeyError`/`TypeError`/`ValueError`を捕捉する。いずれも通知する側(True)に倒す（異常の通知を取りこぼすより重複通知の方が安全側）。
+* 根拠: [例外処理] (行番号: 324-325 / 抜粋: "except (KeyError, TypeError, ValueError):")
 
 
 
 ### `_fire_investigate_hook` (**Issue #339で追加**)
 
 * **役割**: 層2(自動調査)フックの発火。`config.HEALTH_WATCH_INVESTIGATE_HOOK`が未設定なら即return(既定・完全no-op)。設定済みならパスの存在と実行権限を確認し、異常サマリ(検知時刻+各異常の箇条書き)を標準入力で渡してフックスクリプトをfire-and-forgetのサブプロセスとして起動する(完了を待たない。毎時cronの層1を長時間ブロックしないため)。`run_checks`内の`_should_notify`通過後にのみ呼ばれるため、同一異常セット継続中の再発火は通知と同じ6時間間隔に収まる。
-* 根拠: [関数定義] (行番号: 330〜369 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
+* 根拠: [関数定義] (行番号: 339〜378 / 抜粋: "def _fire_investigate_hook(anomalies: List[str], now: datetime.datetime) -> None:")
 
 
 * **引数/リクエスト**: `anomalies: List[str]`（各チェックの異常メッセージ）、`now: datetime.datetime`（検知時刻）
@@ -432,7 +432,7 @@
 ### `run_checks`
 
 * **役割**: 7つのチェック関数(`service`/`journal`/`app_logs`/`disk`/`memory`/`nas`/`deploy_config`)を順に実行し、異常があれば`send_push`でDiscordのerrorチャンネルへ要約を通知し、通知抑制を通過した場合は層2フック(`_fire_investigate_hook`)も発火し、マーカーを更新してプロセスの終了コードを返すエントリーポイント。
-* 根拠: [関数定義] (行番号: 372〜428 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
+* 根拠: [関数定義] (行番号: 381〜437 / 抜粋: "def run_checks() -> int:")、[チェック一覧] (行番号: 370〜378 / 抜粋: '("deploy_config", check_deploy_config_drift),')、[フック発火] (行番号: 275〜276 / 抜粋: "# 層2フックは通知の成否に関わらず発火する(通知障害時こそ調査が必要)\n            _fire_investigate_hook(anomalies, now)")
 
 
 * **引数/リクエスト**: なし

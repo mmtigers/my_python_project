@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import HTTPException
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import config
 import game_logic
 from core import sound_manager
@@ -235,7 +236,7 @@ class RoutineService:
         # complete_stepと同じくin_free_timeも合わせて立てる。
         in_free_time = current_index < len(flow['steps']) and bool(flow['steps'][current_index]['checkpoint_time'])
 
-        now_iso = common.get_now_iso()
+        now_iso = get_now_iso()
         cur.execute("""
             INSERT INTO routine_progress
                 (user_id, flow_key, progress_date, current_step_index, in_free_time,
@@ -273,7 +274,7 @@ class RoutineService:
         """進捗を保存し、あわせてステップの状態遷移を routine_step_events へ追記する。
 
         source / occurred_at は呼び出し元が持つ文脈(ユーザー操作か締切超過か、
-        およびその時刻)。updated_at に common.get_now_iso() を使う既存挙動は
+        およびその時刻)。updated_at に get_now_iso() を使う既存挙動は
         変えず、イベントの時刻だけは注入された now を基準にする
         (テストが now を注入する設計のため、実時刻を使うと検証できなくなる)。
         """
@@ -286,7 +287,7 @@ class RoutineService:
             progress['current_step_index'], int(progress['in_free_time']),
             json.dumps(progress['steps_status'], ensure_ascii=False),
             progress['bonus_gold'], progress['bonus_exp'],
-            common.get_now_iso(), progress['id'],
+            get_now_iso(), progress['id'],
         ))
         # 同一リクエスト内で _save_progress が複数回呼ばれても(complete_step は
         # 保存後にもう一度 _apply_forced_transition を通す)同じ遷移を二重に
@@ -340,7 +341,7 @@ class RoutineService:
         )
         cur.execute(
             "UPDATE quest_users SET level=?, exp=?, gold=?, updated_at=? WHERE user_id=?",
-            (new_level, new_exp_val, user['gold'] + gold, common.get_now_iso(), user_id),
+            (new_level, new_exp_val, user['gold'] + gold, get_now_iso(), user_id),
         )
         if leveled_up:
             sound_manager.play("level_up")
@@ -538,7 +539,7 @@ class RoutineService:
 
     def get_today_state(self, user_id: str, now: Optional[datetime.datetime] = None) -> Dict[str, Any]:
         with _get_user_balance_lock(user_id):
-            with common.get_db_cursor(commit=True) as cur:
+            with get_db_cursor(commit=True) as cur:
                 flows = self._flow_set_for(cur, user_id)
 
                 now = now or datetime.datetime.now(JST)
@@ -558,7 +559,7 @@ class RoutineService:
         self, user_id: str, flow_key: str, step_key: str, now: Optional[datetime.datetime] = None
     ) -> Dict[str, Any]:
         with _get_user_balance_lock(user_id):
-            with common.get_db_cursor(commit=True) as cur:
+            with get_db_cursor(commit=True) as cur:
                 # フローの内容はユーザー(子ども/パパ/ママ)によって異なるため、
                 # flow_keyの検証もユーザーを解決してから行う。
                 flows = self._flow_set_for(cur, user_id)

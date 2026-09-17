@@ -7,11 +7,11 @@
 | 解析対象 | 提供されたコードのみ |
 | 推測・補完 | 一切なし |
 
-同名の `MY_HOME_SYSTEM/common.py`（Facadeモジュール、[common.md](./common.md)）とはファイル名が衝突するため、本仕様書は `dashboard_common.md` というファイル名で区別している。
+同名の `MY_HOME_SYSTEM/common.py`（Facadeモジュール、[common.md](./common.md)。**Issue #664 で削除済み**）とはファイル名が衝突していたため、本仕様書は `dashboard_common.md` というファイル名で区別している。
 
 ## 関連ドキュメント
 
-* [common.md](./common.md) - 同名衝突の注意（上記参照）。`MY_HOME_SYSTEM/common.py`（下位互換用Facadeモジュール）の仕様書であり、本ファイル（`views/dashboard/common.py`）とは別モジュールである
+* [common.md](./common.md) — 名前が似ているだけの別モジュール(`MY_HOME_SYSTEM/common.py`)の仕様書。**Issue #664 で `common.py` 自体は廃止された**が、本ファイル(`views/dashboard/common.py`)は無関係で存続している。
 * [dashboard.md](./dashboard.md) - `views.dashboard.common`を`view_common`としてインポートし、`CUSTOM_CSS`を`st.markdown`で適用する呼び出し元
 * [summary.md](./summary.md) - `.common`（相対インポート）から`render_status_card_html`をインポートし、9枚のステータスカード描画に使用する呼び出し元
 * [misc_tab.md](./misc_tab.md) - `.common`から`render_status_card_html`をインポートしているが、本ファイル内では未使用

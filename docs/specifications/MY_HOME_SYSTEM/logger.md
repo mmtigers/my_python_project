@@ -11,7 +11,7 @@
 ## 関連ドキュメント
 
 * [config.md](./config.md) - `BASE_DIR`, `DISCORD_WEBHOOK_ERROR`等の設定値を提供
-* [common.md](./common.md) - `setup_logging`を再エクスポートする呼び出し元(Facade)
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [nas_utils.md](./nas_utils.md) - `from core.logger import get_logger`で本ファイルの`get_logger`を利用する呼び出し元
 * システム内のほぼ全モジュール(`line_handler.md`, `nas_monitor.md`, `sensor_service.md`等多数)が`setup_logging`の呼び出し元
 

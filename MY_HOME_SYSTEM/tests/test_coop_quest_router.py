@@ -13,7 +13,7 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import game_logic
 
 
@@ -32,7 +32,7 @@ def _seed_family(cur):
 
 @pytest.fixture
 def seeded_client(isolated_db, api_client):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         _seed_family(cur)
     return api_client
 
@@ -42,7 +42,7 @@ def _complete_coop_quest(client, reporter="son"):
     assert res.status_code == 200
     assert res.json()["status"] == "pending"
 
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         rows = cur.execute(
             "SELECT * FROM quest_history WHERE quest_id = 501 ORDER BY id"
         ).fetchall()
@@ -70,7 +70,7 @@ class TestCoopQuestCompletion:
         assert set(histories.keys()) == {"son", "daughter"}
 
     def test_completion_with_only_one_child_registered_returns_400(self, isolated_db, api_client):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('son', 'Son', 'Novice', 1, 0, 0, 'role_child')"
@@ -94,7 +94,7 @@ class TestCoopQuestApproval:
         assert res.status_code == 200
         assert res.json()["status"] == "success"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             rows = {
                 row["user_id"]: dict(row)
                 for row in cur.execute(
@@ -146,7 +146,7 @@ class TestCoopQuestApprovalPartnerRewardInfo:
     def test_response_includes_partner_level_up_info(self, seeded_client, monkeypatch):
         # daughterのexpを事前に積んでおき、今回の20exp加算で確実にレベルアップさせる
         # (calculate_next_level_exp(1) == 100 のため、95+20=115 >= 100 でレベルアップ確定)
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute("UPDATE quest_users SET exp = 95 WHERE user_id = 'daughter'")
         # メダルドロップ(5%)を無効化して結果を決定的にする
         monkeypatch.setattr(game_logic.random, "random", lambda: 0.99)
@@ -165,7 +165,7 @@ class TestCoopQuestApprovalPartnerRewardInfo:
         assert body["partnerNewLevel"] == 2
         assert body["partnerEarnedMedals"] == 0
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             daughter = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
         assert daughter["level"] == 2
 
@@ -188,7 +188,7 @@ class TestCoopQuestApprovalPartnerRewardInfo:
     def test_response_has_no_partner_fields_for_non_coop_quest(self, isolated_db, api_client):
         """連携クエストでない(linked_history_idがNULLの)通常の承認では、
         partner系フィールドは既定値のままであること。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult'), "
@@ -228,7 +228,7 @@ class TestCoopQuestRejection:
         assert res.json()["status"] == "rejected"
 
         # 却下しても行は削除されず、双方とも status='rejected' として残ること
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             remaining = {
                 row["id"]: row["status"]
                 for row in cur.execute(
@@ -238,7 +238,7 @@ class TestCoopQuestRejection:
             }
         assert remaining == {son_history_id: "rejected", daughter_history_id: "rejected"}
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT * FROM quest_users WHERE user_id='son'").fetchone()
             daughter = cur.execute("SELECT * FROM quest_users WHERE user_id='daughter'").fetchone()
         # 却下なので報酬は付与されていないこと
@@ -258,7 +258,7 @@ class TestCoopQuestCancellation:
         assert res.status_code == 200
         assert res.json()["status"] == "cancelled"
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             remaining = cur.execute(
                 "SELECT id FROM quest_history WHERE id IN (?, ?)",
                 (son_history_id, daughter_history_id),

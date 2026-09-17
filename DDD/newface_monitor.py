@@ -29,7 +29,13 @@ from pathlib import Path
 from typing import Callable, List, Set, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlparse, parse_qs
 
-from file_utils import DiscordCircuitBreaker, redact_discord_webhook_url, resolve_my_home_system_root
+from file_utils import (
+    DiscordCircuitBreaker,
+    redact_discord_webhook_url,
+    resolve_my_home_system_root,
+    resolve_nas_data_dir,
+    resolve_nas_mount_point,
+)
 
 # プロジェクトルート（MY_HOME_SYSTEM）をパスに追加。
 # 品質: プロジェクトルート解決をfile_utils.resolve_my_home_system_rootへ集約
@@ -306,13 +312,16 @@ class MonitorConfig:
 
     # File Paths
     BASE_DIR: Path = Path(__file__).resolve().parent
-    NAS_DIR_STR: str = '/mnt/nas/home_system/newface_monitor/data'  # 本環境のNASパスに適宜変更してください
+    # Issue #663: 以前は '/mnt/nas/...' の直書きで、コメントも「本環境のNASパスに適宜変更して
+    # ください」= 環境ごとにコードを編集する前提だった。環境変数 NAS_MOUNT_POINT(MY_HOME_SYSTEM と
+    # 共用の .env のキー)から組み立てる。未設定なら従来どおり /mnt/nas 配下。
+    NAS_DIR_STR: str = resolve_nas_data_dir('newface_monitor')
     # #580: 以前はextract_youtube_urls.pyと同じ`BASE_DIR / 'data'`を共有していたため、
     # NAS未マウント中に片方のスクリプトが書いたフォールバックデータを、NAS復旧後に
     # もう片方のnas_utils.sync_fallback_to_nas呼び出しが誤って自分のNASディレクトリへ
     # 移動してしまう経路があった。スクリプトごとにサブディレクトリを分離する。
     LOCAL_DIR_STR: str = str(BASE_DIR / 'data' / 'newface_monitor')
-    MOUNT_POINT: str = '/mnt/nas'
+    MOUNT_POINT: str = str(resolve_nas_mount_point())
     
     # Network Settings
     USER_AGENT: str = (

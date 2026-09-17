@@ -43,6 +43,7 @@ from file_utils import sanitize_filename as _shared_sanitize_filename
 from file_utils import DiscordCircuitBreaker
 from file_utils import redact_discord_webhook_url
 from file_utils import resolve_my_home_system_root
+from file_utils import resolve_nas_mount_point
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -157,7 +158,9 @@ class AppConfig:
     LIST_DIR_PATH: Path = CURRENT_DIR / "list"
     HISTORY_FILE_PATH: Path = CURRENT_DIR / "history.txt"
     LOCK_FILE_PATH: Path = CURRENT_DIR / ".batch_download_discord.lock"
-    NAS_MOUNT_POINT: Path = Path("/mnt/nas")
+    # Issue #663: 以前は `Path("/mnt/nas")` の直書きで環境変数による変更ができなかった。
+    # `NAS_MOUNT_POINT`(MY_HOME_SYSTEM と共用の .env のキー)で上書きできる。未設定なら従来どおり /mnt/nas。
+    NAS_MOUNT_POINT: Path = field(default_factory=resolve_nas_mount_point)
     NAS_MARKER_FILE: str = ".mounted"
     # NASを経由せずローカルディスク(外付けHDD等)に直接保存する単独環境向け。
     # falseにするとverify_nas_mount()自体をスキップし、NAS未マウントでも起動できる。

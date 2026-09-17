@@ -17,7 +17,7 @@ from freezegun import freeze_time
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 import services.analysis_service as analysis_service
 
@@ -95,7 +95,7 @@ class TestLoadDataFromDb:
         assert result.empty
 
     def test_returns_rows_for_valid_query(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_NAS} "
                 "(timestamp, device_name, ip_address, status_ping, status_mount, total_gb, used_gb, free_gb, percent) "
@@ -111,7 +111,7 @@ class TestLoadNasStatus:
         assert analysis_service.load_nas_status() is None
 
     def test_returns_latest_row_when_data_exists(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             for ts in ["2026-01-01T00:00:00", "2026-01-02T00:00:00"]:
                 cur.execute(
                     f"INSERT INTO {config.SQLITE_TABLE_NAS} "
@@ -125,7 +125,7 @@ class TestLoadNasStatus:
 
 class TestLoadSensorData:
     def test_merges_legacy_meter_and_power_sources(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO device_records (timestamp, device_name, device_id, device_type) "
                 "VALUES ('2026-01-01T00:00:00', 'LegacySensor', 'dev1', 'Contact Sensor')"
@@ -154,7 +154,7 @@ class TestLoadSensorDataPowerDeviceTypeClassification:
     一致しなくなる)、全プラグの消費電力がスマートメーター全体消費のグラフへ混入していた。"""
 
     def test_plug_device_keeps_plug_device_type(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev1', 'Plug1', 50, '2026-01-01T00:00:00')"
@@ -166,7 +166,7 @@ class TestLoadSensorDataPowerDeviceTypeClassification:
         )
 
     def test_nature_remo_device_keeps_nature_remo_device_type(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) "
                 "VALUES ('dev2', 'Nature Remo E Lite (Living)', 300, '2026-01-01T00:00:00')"
@@ -197,7 +197,7 @@ class TestCalculateMonthlyCostCumulative:
         # 1秒後を基準にして安全にstart_of_month以降になるようにする。
         base = now.replace(day=1, hour=0, minute=0, second=1)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             # スマートメーター: 1時間おきに1000Wで2点(1.0kWh分)
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
@@ -217,7 +217,7 @@ class TestCalculateMonthlyCostCumulative:
 
         with_plug_result = analysis_service.calculate_monthly_cost_cumulative()
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DELETE FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = 'plug1'")
         meter_only_result = analysis_service.calculate_monthly_cost_cumulative()
 
@@ -235,7 +235,7 @@ class TestCalculateMonthlyCostCumulative:
         # (前テストと同じ理由で)月初ちょうどの境界を避けて1秒後を基準にする
         base = now.replace(day=1, hour=0, minute=0, second=1)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             # デバイスA(伊丹)とデバイスB(高砂)が10分ずれで交互に記録される
             rows = [
                 ("remo_itami", "伊丹_Nature Remo E Lite", 1000, base),
@@ -262,7 +262,7 @@ class TestLoadBicycleData:
         assert analysis_service.load_bicycle_data().empty
 
     def test_returns_rows_when_seeded(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_BICYCLE} (area_name, status_text, waiting_count, timestamp) "
                 "VALUES ('駐輪場A', '空きあり', 0, '2026-01-01T00:00:00')"
@@ -276,7 +276,7 @@ class TestLoadAiReport:
         assert analysis_service.load_ai_report() is None
 
     def test_returns_latest_report(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_AI_REPORT} (message, timestamp) "
                 "VALUES ('週次レポート', '2026-01-01T00:00:00')"
@@ -385,7 +385,7 @@ class TestLoadDataFromDbSurvivesOneBadTimestampRow:
     def test_one_malformed_timestamp_row_does_not_empty_out_whole_result(self, isolated_db):
         """L-L3 (#410) の回帰テスト: load_data_from_db経由でも、1行の不正な
         タイムスタンプでパネル全体が「データなし」にならないこと。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_NAS} "
                 "(timestamp, device_name, ip_address, status_ping, status_mount, total_gb, used_gb, free_gb, percent) "
@@ -414,7 +414,7 @@ class TestCalculateMonthlyCostCumulativeMicrosecondBoundary:
         now = datetime.now(pytz.timezone("Asia/Tokyo"))
         exact_midnight = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
                 f"('remo1', '伊丹_Nature Remo E Lite', 1000, '{exact_midnight.isoformat()}')"

@@ -32,7 +32,7 @@
 | `time` | 標準ライブラリ | 現在時刻のタイムスタンプ取得用。 | `[import time]` (行番号: 3 / 抜粋: "import time") |
 | `Dict, Optional, List, Any` | 標準ライブラリ (`typing`) | 型アノテーション用。 | `[from typing]` (行番号: 4 / 抜粋: "from typing import Dict, Optio") |
 | `config` | 外部モジュール | 定数（LINE_USER_IDやDBテーブル名など）の参照用。 | `[import config]` (行番号: 6 / 抜粋: "import config") |
-| `common` | 外部モジュール | データベースカーソル取得用（`get_db_cursor`）。 | `[import common]` (行番号: 7 / 抜粋: "import common") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 7 / 抜粋: "from core.database import get_db_cursor") |
 | `setup_logging` | 外部モジュール (`core.logger`) | ロガーの初期化用。 | `[from core.logger]` (行番号: 8 / 抜粋: "from core.logger import setup_") |
 | `get_now_iso` | 外部モジュール (`core.utils`) | 現在時刻のISO形式文字列取得用。 | `[from core.utils]` (行番号: 9 / 抜粋: "from core.utils import get_now") |
 | `save_log_async` | 外部モジュール (`core.database`) | 非同期でのデータベース保存処理用。 | `[from core.database]` (行番号: 10 / 抜粋: "from core.database import save") |
@@ -43,7 +43,7 @@
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
 | `config` 内の各定数 | `SQLITE_TABLE_SWITCHBOT_LOGS`、`SQLITE_TABLE_POWER_USAGE` の具体的な値や型が提供されていないため。 | `[config.SQLITE_TABLE_SWITCHBOT_LOGS]` (行番号: 154 / 抜粋: "config.SQLITE_TABLE_SWITCHBOT_LOGS,") |
-| `common.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[common.get_db_cursor]` (行番号: 162 / 抜粋: "with common.get_db_cursor() as") |
+| `core.database.get_db_cursor` | DB接続の具体的な実装、扱うデータベースエンジン、コンテキストマネージャが返すカーソルオブジェクトの仕様が不明であるため。 | `[core.database.get_db_cursor]` (行番号: 162 / 抜粋: "with get_db_cursor() as") |
 | `core.database.save_log_async` | テーブル名、カラムリスト、値を渡した際の内部でのクエリ生成ロジックやエラーハンドリングの挙動が不明であるため。 | `[save_log_async]` (行番号: 142 / 抜粋: "await save_log_async(") |
 | `services.notification_service.send_push` | メッセージ形式の仕様、引数として渡す `"discord"` や `"notify"` の処理分岐、外部API連携の実装が不明であるため。 | `[send_push]` (行番号: 64 / 抜粋: "send_push,") |
 
@@ -204,7 +204,7 @@
 * 根拠: `[process_power_data]` (行番号: 149 / 抜粋: "-> None:")
 
 
-* **副作用**: `common.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み、`send_push` による外部API呼び出し。
+* **副作用**: `core.database.get_db_cursor` による外部DBからの読み取り、`save_log_async` による外部DBへの書き込み、`send_push` による外部API呼び出し。
 * 根拠: `[process_power_data]` (行番号: 180 / 抜粋: "await save_log_async(")
 
 
@@ -308,7 +308,7 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | `config` 内の各種定数値 | 提供されたコード内に具体的な値の定義が含まれていないため。 | `config.py` |
-| データベースへの接続および保存の実態 | `common.get_db_cursor` と `save_log_async` の内部実装が不明であるため。 | `common.py`, `core/database.py` |
+| データベースへの接続および保存の実態 | `core.database.get_db_cursor` と `save_log_async` の内部実装が不明であるため。 | `common.py`, `core/database.py` |
 | `send_push` の送信先プラットフォーム仕様 | `target_platform` として "discord" や "notify" が指定されているが、それぞれの連携先や実際の送信フォーマットが不明であるため。 | `services/notification_service.py` |
 | `notify_settings` の全容 | `process_power_data` の引数として渡される辞書に `threshold` や `target` 以外のキーが存在するか不明であるため。 | 呼び出し元のファイル |
 
@@ -317,7 +317,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | `config` 内の各種定数値 | `sensor_service.py`が参照する`config`定数を`config.py`で直接確認した。`LINE_USER_ID`(185行目)は`Optional[str]`で環境変数`LINE_USER_ID`から取得（実際の文字列値は`.env`未追跡のため不明）。`SQLITE_TABLE_SWITCHBOT_LOGS`(236行目)は`str`型リテラル`"switchbot_meter_logs"`、`SQLITE_TABLE_POWER_USAGE`(237行目)は`str`型リテラル`"power_usage"`であることを確認した。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:185, 236-237`, `MY_HOME_SYSTEM/services/sensor_service.py:65, 120, 143, 164, 181, 208` |
-| データベースへの接続および保存の実態 | `database.md`の解析によれば、`common.get_db_cursor`の実体は`core.database.get_db_cursor`であり、`sqlite3.OperationalError`(locked)時に最大5回リトライし、WALモード・外部キー制約を有効化するコンテキストマネージャとされる。`save_log_async`は`core.database.save_log_generic`を`asyncio.to_thread`(内部的には`loop.run_in_executor`)経由で非同期実行するラッパーで、テーブル名・カラムリスト・値を渡して動的にINSERT文を構築するとされる。 | database.md |
+| データベースへの接続および保存の実態 | `database.md`の解析によれば、`core.database.get_db_cursor`の実体は`core.database.get_db_cursor`であり、`sqlite3.OperationalError`(locked)時に最大5回リトライし、WALモード・外部キー制約を有効化するコンテキストマネージャとされる。`save_log_async`は`core.database.save_log_generic`を`asyncio.to_thread`(内部的には`loop.run_in_executor`)経由で非同期実行するラッパーで、テーブル名・カラムリスト・値を渡して動的にINSERT文を構築するとされる。 | database.md |
 | `send_push` の送信先プラットフォーム仕様 | `sensor_service.py`217〜222行目の実際の呼び出し`send_push(messages=[{"type": "text", "text": msg}], target=target_platform, channel="notify")`を直接確認した(Issue #289で`send_push`のシグネチャがキーワード専用引数に再設計されたことに伴い、以前の`send_push(config.LINE_USER_ID, [...], None, target_platform, "notify")`という位置引数呼び出しから書き換えられた。`config.LINE_USER_ID`を渡さなくなったのは、`user_id`が未指定の場合`send_push`内部で自動的に`config.LINE_USER_ID`にフォールバックするよう一元化されたため)。`target_platform`（`notify_settings.get("target", "discord")`由来、既定値`"discord"`）は送信先プラットフォーム選択の`target`引数（`"discord"`/`"line"`/`"both"`のいずれか）に、固定文字列`"notify"`はDiscord側のWebhookチャンネル選択の`channel`引数（`_send_discord_webhook`内で`config.DISCORD_WEBHOOK_NOTIFY`または`DISCORD_WEBHOOK_URL`に対応）にそれぞれ渡される。 | 直接ソース確認: `MY_HOME_SYSTEM/services/sensor_service.py:204, 217-222`, `MY_HOME_SYSTEM/services/notification_service.py:30-37, 116-163` |
 | `notify_settings` の全容 | 呼び出し元`monitors/switchbot_power_monitor.py`162〜164行目で`sensor_service.process_power_data(did, dname, status["power"], device.get("notify_settings", {}))`のように`config.MONITOR_DEVICES`内の各`device`辞書から`"notify_settings"`キーを取得して渡していることを確認した。`MONITOR_DEVICES`は`config.py`307行目で`DeviceConfig(**d).model_dump()`（`by_alias`指定なし）によりダンプされており、`DeviceConfig.notify_settings`(160〜165行目)の型は`NotifySettings`(155〜158行目、フィールド名`power_threshold_watts: Optional[float]`, `notify_mode: str = "LOG_ONLY"`, `target: Optional[str] = None`)であるため、実際に渡される辞書のキーは`{"power_threshold_watts": ..., "notify_mode": ..., "target": ...}`の3つのみで、`"threshold"`というキーは存在しない。以前は`sensor_service.py`188行目が`notify_settings.get("threshold")`という異なるキー名で閾値を取得しており、常に`None`が返るため189〜190行目の`if threshold is None: return`に必ず該当し、`devices.json`経由の閾値クロス通知処理が実質的に到達不能なコード（デッドコード）になっていたが、コミット`e243a74`（"fix quest data and config bugs"）で`sensor_service.py`188行目が`notify_settings.get("power_threshold_watts")`に修正され、`switchbot_power_monitor.py`経由で実際に渡されるキー名と一致するようになったため、この閾値クロス通知処理は現在は到達可能であることを直接確認した。（ただし`monitors/nature_remo_monitor.py`113行目は`process_power_data(dev_id, dev_name, power_val, {})`のように常に空辞書を渡しており、こちらの経路は引き続き通知が発火しない。） | 直接ソース確認: `MY_HOME_SYSTEM/monitors/switchbot_power_monitor.py:162-164`, `MY_HOME_SYSTEM/config.py:155-165, 307`, `MY_HOME_SYSTEM/services/sensor_service.py:188-193`, `MY_HOME_SYSTEM/monitors/nature_remo_monitor.py:113` |
 
