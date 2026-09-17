@@ -1491,6 +1491,43 @@ class TestCatchUpAfterDeadline:
             routine_service.complete_step('daughter', 'am', 'clothes', now=_at(8, 0))
         assert exc_info.value.status_code == 400
 
+    def test_checkpoint_itself_cannot_be_completed_as_a_catch_up(self, isolated_db):
+        """自由時間(チェックポイント)自身は追いつき完了の対象外。
+
+        締切超過時、一本道が終わっていなければチェックポイント自身も'remind'になる。
+        これを直接完了報告できてしまうと、宿題を残したまま自由時間を'done'にできて
+        しまうため(レビュー指摘)、`checkpoint_time`を持つステップは追いつきの対象から
+        外している。
+        """
+        from fastapi import HTTPException
+        _seed_user(gold=0, exp=0)
+        state = routine_service.get_today_state('daughter', now=_at(17, 31))['flows']['pm']
+        assert {x['key']: x['status'] for x in state['steps']}['free'] == 'remind'
+
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('daughter', 'pm', 'free', now=_at(18, 0))
+        assert exc_info.value.status_code in (400, 409)
+
+        after = routine_service.get_today_state('daughter', now=_at(18, 1))['flows']['pm']
+        assert {x['key']: x['status'] for x in after['steps']}['free'] == 'remind'
+
+    def test_checkpoint_stays_completable_only_through_the_path(self, isolated_db, monkeypatch):
+        """自由時間を直接叩こうとした後でも、一本道を終えればTVは正しく解錠される。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='son', role='role_child', gold=0, exp=0)
+        routine_service.get_today_state('son', now=_at(17, 31))
+
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException):
+            routine_service.complete_step('son', 'pm', 'free', now=_at(18, 0))
+
+        for key in ('handwash', 'snack', 'homework'):
+            state = routine_service.complete_step('son', 'pm', key, now=_at(18, 5))
+        assert {x['key']: x['status'] for x in state['steps']}['free'] == 'done'
+        mock_trigger.assert_called_once_with("夕方の一本道を締切後に完了(追いつき)")
+
     def test_adult_step_reward_is_granted_on_catch_up(self, isolated_db):
         """ママが夕食を締切後に作っても、ステップ個別報酬は入る。"""
         _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)

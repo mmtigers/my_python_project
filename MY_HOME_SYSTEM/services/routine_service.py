@@ -648,8 +648,12 @@ class RoutineService:
                 # 締切超過で「まだだよ」になった一本道のステップは、進行が先へ進んだ
                 # 後でも(フローを最後まで終えた後でも)追いつきで完了報告できる。
                 # 完了しているか判定してから通常の完了経路のガードに入る。
+                # チェックポイント(自由時間)自身も締切で'remind'になりうるが、これは
+                # 一本道を全部終えた結果としてのみ'done'になるべきもので、直接完了報告
+                # させてはいけない(下の逐次分岐の400で従来どおり弾く)。
                 is_catch_up = (
                     not target_step['checklist']
+                    and not target_step['checkpoint_time']
                     and progress['steps_status'].get(step_key) == 'remind'
                 )
                 if idx >= len(flow['steps']) and not is_catch_up:
