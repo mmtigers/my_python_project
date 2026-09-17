@@ -172,6 +172,9 @@ class RoutineService:
             'steps_status': json.loads(row['steps_status']),
             'bonus_gold': row['bonus_gold'],
             'bonus_exp': row['bonus_exp'],
+            # 当日「実施せずにdone扱いで始まった」ステップのkey(migrations/0012)。
+            # ボーナス按分の母数から除くために使う(_eligible_done_ratio)。
+            'skipped_keys': set(json.loads(row['skipped_keys'])),
             # DBに保存済みのsteps_status(差分検出の基準)。steps_statusとは別の
             # dictオブジェクトである必要があるため、同じJSONを2回パースする。
             '_saved_steps_status': json.loads(row['steps_status']),
@@ -237,11 +240,14 @@ class RoutineService:
         cur.execute("""
             INSERT INTO routine_progress
                 (user_id, flow_key, progress_date, current_step_index, in_free_time,
-                 steps_status, bonus_gold, bonus_exp, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+                 steps_status, skipped_keys, bonus_gold, bonus_exp, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
         """, (
             user_id, flow_key, date_str, current_index, int(in_free_time),
             json.dumps(statuses, ensure_ascii=False),
+            # 当日やらずにdone扱いで始まった分を行に固定して残す(migrations/0012)。
+            # 判定はこの行の作成時に一度だけ行われるため、以降は再計算しない。
+            json.dumps(sorted(skip_keys), ensure_ascii=False),
             now_iso, now_iso,
         ))
         row = cur.execute(
@@ -289,17 +295,29 @@ class RoutineService:
         progress['_saved_steps_status'] = dict(progress['steps_status'])
 
     def _eligible_done_ratio(self, flow: RoutineFlow, progress: Dict[str, Any]) -> float:
-        """チェックポイントより前の全ステップのうち、'done'の割合(0.0〜1.0)を返す。
+        """チェックポイントより前の「当日やるべきステップ」のうち、'done'の割合を返す。
 
-        チェックポイントが無いフロー、またはチェックポイントより前にステップが
-        無いフローは常に1.0(満額)とみなす(ゼロ除算回避)。
+        スキップ(weekend_skip / weekend_carryover / weekday_skip)で最初からdone扱いに
+        なったステップは、分子だけでなく**分母からも除く**(migrations/0012の
+        skipped_keys)。以前はこれらを分母にも分子にも含めていたため、何もしていなくても
+        スキップ分だけボーナスが入っていた(例: パパの土日pmは「お仕事」がスキップされる
+        ため、一切チェックしなくても 1/3 = 50Gold が入っていた)。
+
+        チェックポイントが無いフローは1.0(満額)とみなす。当日やるべきステップが
+        1つも無い場合は0.0を返す — 「達成すべきものが無かった」のであって「満額に
+        値する達成をした」わけではないため。以前はゼロ除算回避としてここも1.0を
+        返しており、チェックポイントより前が全てスキップされるフローを定義すると
+        何もせずに満額が入る穴になっていた。
         """
         checkpoint_idx = get_checkpoint_index(flow)
         if checkpoint_idx is None:
             return 1.0
-        eligible_keys = [s['key'] for s in flow['steps'][:checkpoint_idx]]
+        skipped_keys = progress.get('skipped_keys') or set()
+        eligible_keys = [
+            s['key'] for s in flow['steps'][:checkpoint_idx] if s['key'] not in skipped_keys
+        ]
         if not eligible_keys:
-            return 1.0
+            return 0.0
         done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')
         return done_count / len(eligible_keys)
 

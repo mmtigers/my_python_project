@@ -271,6 +271,7 @@ def is_weekday_skip(step: RoutineStep) -> bool:
     """平日はこのステップをスキップするか(任意フィールド、未設定ならFalse)。"""
     return step.get('weekday_skip', False)
 
+
 def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:
     """フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。"""
     for idx, step in enumerate(flow['steps']):
