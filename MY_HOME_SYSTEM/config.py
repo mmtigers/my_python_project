@@ -291,10 +291,11 @@ SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "hom
 # Exponential Backoff(最悪 約31秒)で全importerをブロックしていたため、
 # Issue #330 PR-Bで遅延解決(ファイル末尾のモジュール__getattr__)へ移行した。
 # 利用側は従来どおり config.ASSETS_DIR で参照できる(初回アクセス時に検証・キャッシュ)。
-LOG_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(BASE_DIR, "logs"),
-    "logs"
-)
+# Issue #664: LOG_DIR も ASSETS_DIR と同じくここで ensure_safe_path_with_backoff を
+# 呼んでおり、ディスクフル・権限異常時には import だけで最大約31秒ブロックしていた
+# (Issue #330 PR-B で ASSETS_DIR を遅延化した際の取り残し)。同じモジュール__getattr__
+# による遅延解決へ移す(利用側は従来どおり config.LOG_DIR で参照できる)。
+_PREFERRED_LOG_DIR: str = os.path.join(BASE_DIR, "logs")
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json")
 
 # --- DBテーブル名定義 ---
@@ -582,14 +583,21 @@ def _resolve_assets_dir() -> str:
 
 
 def __getattr__(name: str) -> str:
-    """NAS依存パス定数の遅延解決 (PEP 562)。
+    """検証I/Oを伴うパス定数の遅延解決 (PEP 562)。
 
     通常の属性解決(モジュールglobals)に失敗した場合のみ呼ばれるため、
     一度解決して globals() に書き込んだ後は本関数を経由しない(=キャッシュ)。
     テストが monkeypatch.setattr/delattr で上書き・再解決させることも可能。
+
+    Issue #664: ASSETS_DIR(NAS上)に加え、LOG_DIR(ローカルの BASE_DIR/logs)も
+    ここで解決する。LOG_DIR は NAS 依存ではないが、同じ
+    ensure_safe_path_with_backoff を import 時に呼んでいたため、ディスクフル・
+    権限異常時に config を import するだけで最大約31秒ブロックしていた。
     """
     if name == "ASSETS_DIR":
         value = _resolve_assets_dir()
+    elif name == "LOG_DIR":
+        value = ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")
     elif name in _ASSETS_DERIVED_PATHS:
         # ASSETS_DIR の解決(必要なら)を経由して派生パスを組み立てる
         assets_dir = globals().get("ASSETS_DIR") or __getattr__("ASSETS_DIR")
@@ -608,7 +616,9 @@ def prewarm_nas_paths() -> None:
     NASの検証・フォールバック判定を済ませる。失敗してもensure_safe_path_with_backoff
     自体がローカルへフォールバックするため例外は送出しない。
     """
-    for name in ("ASSETS_DIR", *_ASSETS_DERIVED_PATHS):
+    # Issue #664: LOG_DIR も遅延化したため、ここで一緒に解決しておく
+    # (遅延化前と同じく、起動時点で検証・フォールバック判定を済ませる)。
+    for name in ("ASSETS_DIR", "LOG_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
 

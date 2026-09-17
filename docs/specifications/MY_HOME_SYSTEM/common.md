@@ -1,3 +1,27 @@
+> # ⚠️ 廃止: このファイルは 2026-09-17 時点でソース (`MY_HOME_SYSTEM/common.py`) が削除されました
+>
+> Issue #664 で、Deprecated Facade である `common.py` に依存していた全モジュール
+> (本番17ファイル + テスト34ファイル)を実体の直importへ移行し、`common.py` 自体を削除しました。
+> 移行先は次のとおりです:
+>
+> | 旧 (`common` 経由) | 新 (直import) |
+> | --- | --- |
+> | `common.setup_logging` | `from core.logger import setup_logging` |
+> | `common.get_now_iso` | `from core.utils import get_now_iso` |
+> | `common.get_db_cursor` | `from core.database import get_db_cursor` |
+> | `common.execute_read_query` | `from core.database import execute_read_query` |
+> | `common.send_push` | `from services.notification_service import send_push` |
+>
+> `common.logger`(`setup_logging("common")` で生成されていたモジュールグローバル)は
+> 参照元が無かったため、移行先はありません。
+>
+> 以下は削除前の解析内容を履歴として残したものです。現行のコードには対応しません。
+> 各シンボルの現在の仕様は [logger.md](./logger.md) / [utils.md](./utils.md) /
+> [database.md](./database.md) / [notification_service.md](./notification_service.md) を参照してください。
+>
+> なお `views/dashboard/common.py`(仕様書: [dashboard_common.md](./dashboard_common.md))は
+> 名前が似ているだけの別モジュールで、削除されていません。
+
 ## 1. 解析メタ情報
 
 | 項目 | 内容 |

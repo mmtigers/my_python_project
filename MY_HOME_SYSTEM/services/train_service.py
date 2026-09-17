@@ -6,11 +6,11 @@ from datetime import timedelta
 from typing import Dict, Any, List
 
 # 自作モジュール
-import common
+from core.logger import setup_logging
 from core.utils import get_now_jst
 
 # ロガー設定
-logger = common.setup_logging("train_service")
+logger = setup_logging("train_service")
 
 # JR西日本 運行情報API
 JR_WEST_JSON_URL: str = "https://www.train-guide.westjr.co.jp/api/v3/area_kinki_trafficinfo.json"
@@ -172,7 +172,7 @@ def get_route_info(from_station: str = "伊丹(兵庫県)", to_station: str = "�
 
 if __name__ == "__main__":
     # テスト実行用の設定
-    # common.setup_logging済みなのでコンソールにも出るはずだが念のため
+    # core.logger.setup_logging済みなのでコンソールにも出るはずだが念のため
     print("--- JR Status ---")
     print(get_jr_traffic_status())
     

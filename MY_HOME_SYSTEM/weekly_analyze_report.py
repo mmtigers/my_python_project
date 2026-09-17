@@ -1,5 +1,7 @@
 import config
-import common
+from core.logger import setup_logging
+from core.database import get_db_cursor
+from services.notification_service import send_push
 from core import state_file
 import datetime
 import os
@@ -8,7 +10,7 @@ import sys
 from typing import Dict, Optional, Any
 
 # ロガー設定 (設計書 8.1: core.loggerの使用ラッパー) [cite: 144]
-logger = common.setup_logging("weekly_report")
+logger = setup_logging("weekly_report")
 
 # 電気代の概算単価(円/kWh)。Issue #663: ここに直書きされていた値(コメント自身が
 # 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた)を config.py の
@@ -53,7 +55,7 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
     Returns:
         Optional[Dict[str, Any]]: 集計結果を含む辞書。エラー時はNone。
     """
-    with common.get_db_cursor() as cursor:
+    with get_db_cursor() as cursor:
         if not cursor:
             return None
 
@@ -281,8 +283,8 @@ def run_report() -> None:
     full_msg = msg_header + msg_body + msg_footer
     
     # LINE通知実行 (設計書 4.4: LINE Bot連携) [cite: 72]
-    # common.send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
-    if common.send_push([{"type": "text", "text": full_msg}], target="discord"):
+    # send_push は設計書外の共通関数と想定されるが、ロガー運用に従い結果を記録
+    if send_push([{"type": "text", "text": full_msg}], target="discord"):
         logger.info("✅ レポート送信完了")
         # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない)
         if not is_force:

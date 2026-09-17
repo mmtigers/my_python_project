@@ -6,7 +6,7 @@ import pytz
 import streamlit as st
 
 # 自作モジュール
-import common
+from services.notification_service import send_push
 import config
 from services import analysis_service
 
@@ -162,7 +162,7 @@ def main():
         logger.error(err_msg)
         try:
             # Discordへエラー通知
-            common.send_push(
+            send_push(
                 [{"type": "text", "text": err_msg}],
                 target="discord",
                 channel="error",

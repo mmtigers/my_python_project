@@ -4,7 +4,7 @@ import time
 from typing import Dict, Optional, Any
 
 import config
-import common
+from core.database import get_db_cursor
 from core.logger import setup_logging
 from core.utils import get_now_iso
 from core.database import save_log_async
@@ -236,7 +236,7 @@ async def process_power_data(device_id: str, device_name: str, wattage: float, n
     prev_wattage: float = 0.0
     try:
         def _fetch_prev_wattage() -> float:
-            with common.get_db_cursor() as cur:
+            with get_db_cursor() as cur:
                 row = cur.execute(
                     f"SELECT wattage FROM {config.SQLITE_TABLE_POWER_USAGE} WHERE device_id = ? ORDER BY timestamp DESC LIMIT 1",
                     (device_id,)

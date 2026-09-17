@@ -5,7 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 import config
 import game_logic
 from core import sound_manager
@@ -37,7 +38,7 @@ class QuestService:
             # DBの文字列をdatetimeオブジェクトへ変換
             dt = datetime.datetime.fromisoformat(completed_at_str)
             # M-1-4: タイムゾーン情報がない場合、以前はUTCとして記録されている
-            # とみなしていたが、保存規約(common.get_now_iso)は常にJSTで記録する
+            # とみなしていたが、保存規約(get_now_iso)は常にJSTで記録する
             # ため、tzinfo無しの古いデータも実際はJSTで記録されている。
             # このファイル内の他の日時比較(スパムチェック等)もJSTとして扱っており、
             # UTCとみなす本実装だけが矛盾して9時間ズレていた。
@@ -171,7 +172,7 @@ class QuestService:
         # Q-L10(#409): ロック辞書は user_id ごとにエントリが増え、プロセス再起動まで解放されない。
         # 存在しない user_id でロックを作らないよう、ロック取得前に存在確認する
         # (存在チェック後に取得するロック内で改めて検証されるため二重チェックは無害)。
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="User not found")
@@ -188,7 +189,7 @@ class QuestService:
         # pendingペア(quest_history 2行×2組)が二重生成されて承認時に報酬が2倍になる。
         # そのため、対象クエストが兄妹連携クエストの場合はユーザーIDに依存しない
         # 共通キーを使って直列化する。
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             quest = cur.execute(
                 "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)
             ).fetchone()
@@ -197,7 +198,7 @@ class QuestService:
         return (user_id, quest_id)
 
     def _process_complete_quest_locked(self, user_id: str, quest_id: int) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             quest = cur.execute("SELECT * FROM quest_master WHERE quest_id = ?", (quest_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
 
@@ -270,7 +271,7 @@ class QuestService:
                     period_label = {"weekly": "今週", "monthly": "今月"}.get(reset_period, "本日")
                     raise HTTPException(status_code=400, detail=f"{period_label}はこのクエストを完了済みです")
 
-            now_iso = common.get_now_iso()
+            now_iso = get_now_iso()
             boost = self.calculate_quest_boost(cur, user_id, quest)
             total_exp = quest['exp_gain'] + boost['exp']
             total_gold = quest['gold_gain'] + boost['gold']
@@ -363,7 +364,7 @@ class QuestService:
         見つからなくても404は送出しない(process_cancel_questの従来の挙動:
         存在確認自体は_process_cancel_quest_locked側に委ねる)。
         """
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             hist_peek = cur.execute(
                 "SELECT user_id, linked_history_id FROM quest_history WHERE id = ?", (history_id,)
             ).fetchone()
@@ -376,7 +377,7 @@ class QuestService:
             lock_user_ids = [hist_peek['user_id']]
 
         if hist_peek and hist_peek['linked_history_id'] is not None:
-            with common.get_db_cursor() as cur:
+            with get_db_cursor() as cur:
                 linked_peek = cur.execute(
                     "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)
                 ).fetchone()
@@ -400,7 +401,7 @@ class QuestService:
         # 失敗(ディスクフル・ロック待ちタイムアウト等)して承認がロールバックされても
         # TVだけが点く可能性があった(Q-L7 は use_item 側だけを修正していた)。
         tv_unlock_quest_id: Optional[int] = None
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
                 raise HTTPException(status_code=403, detail="承認権限がありません")
@@ -425,7 +426,7 @@ class QuestService:
                 "exp": hist['exp_earned'] or 0
             }
 
-            result = self._apply_quest_rewards(cur, user, quest, common.get_now_iso(), history_id=history_id, override_rewards=override_rewards)
+            result = self._apply_quest_rewards(cur, user, quest, get_now_iso(), history_id=history_id, override_rewards=override_rewards)
 
             attacker_id = hist['user_id']
 
@@ -472,7 +473,7 @@ class QuestService:
             return None
 
         override_rewards = {"gold": linked_hist['gold_earned'] or 0, "exp": linked_hist['exp_earned'] or 0}
-        reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, common.get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
+        reward_result = self._apply_quest_rewards(cur, linked_user, linked_quest, get_now_iso(), history_id=linked_history_id, override_rewards=override_rewards)
         logger.info(f"Coop Partner Approved: User={linked_hist['user_id']}, HistoryID={linked_history_id}")
         return {"user_id": linked_hist['user_id'], **reward_result}
 
@@ -490,7 +491,7 @@ class QuestService:
             return self._process_reject_quest_locked(approver_id, history_id, reason)
 
     def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             approver = cur.execute("SELECT role FROM quest_users WHERE user_id = ?", (approver_id,)).fetchone()
             if not approver or approver['role'] != ROLE_ADULT:
                 raise HTTPException(status_code=403, detail="承認権限がありません")
@@ -583,7 +584,7 @@ class QuestService:
             return self._process_cancel_quest_locked(user_id, history_id)
 
     def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             hist = cur.execute("SELECT * FROM quest_history WHERE id = ?", (history_id,)).fetchone()
             if not hist:
                 raise HTTPException(status_code=404, detail="History not found")
@@ -642,7 +643,7 @@ class QuestService:
         medals_earned = (hist['medals_earned'] if 'medals_earned' in hist.keys() else 0) or 0
 
         cur.execute("UPDATE quest_users SET level=?, exp=?, gold=?, medal_count = MAX(0, medal_count - ?), updated_at=? WHERE user_id=?",
-                    (new_level, new_exp, new_gold, medals_earned, common.get_now_iso(), user['user_id']))
+                    (new_level, new_exp, new_gold, medals_earned, get_now_iso(), user['user_id']))
         cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))
 
     def _is_quest_currently_active(self, quest, now: Optional[datetime.datetime] = None) -> bool:

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from services import line_service
 from linebot.v3.messaging import TextMessage
@@ -22,7 +22,7 @@ class TestLogChildHealth:
         result = await line_service.log_child_health("U1", "太郎", "daughter", "元気")
         assert "daughter" in result.text or "元気" in result.text
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 f"SELECT * FROM {config.SQLITE_TABLE_CHILD} WHERE child_name='daughter'"
             ).fetchone()
@@ -36,7 +36,7 @@ class TestLogFoodRecord:
         result = await line_service.log_food_record("U1", "太郎", "自炊", "カレー", is_manual=True)
         assert "カレー" in result.text
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(f"SELECT * FROM {config.SQLITE_TABLE_FOOD}").fetchone()
         assert "(手入力)" in row["menu_category"]
 
@@ -79,7 +79,7 @@ class TestSaveFailureIsReportedToUser:
 
     async def test_log_child_health_reports_failure_on_real_db_error(self, isolated_db):
         """モックではなく実際のDBエラー(テーブル欠落)経由でも失敗メッセージになること"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_CHILD}")
 
         result = await line_service.log_child_health("U1", "太郎", "智矢", "元気")
@@ -87,7 +87,7 @@ class TestSaveFailureIsReportedToUser:
         assert result.text.startswith(line_service.SAVE_FAILED_PREFIX)
 
     async def test_log_food_record_reports_failure_on_real_db_error(self, isolated_db):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(f"DROP TABLE {config.SQLITE_TABLE_FOOD}")
 
         result = await line_service.log_food_record("U1", "太郎", "夕食", "カレー")

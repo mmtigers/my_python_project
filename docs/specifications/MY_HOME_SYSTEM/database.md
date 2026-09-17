@@ -10,10 +10,10 @@
 ## 関連ドキュメント
 
 * [config.md](./config.md) - `config.SQLITE_DB_PATH`(DBファイルパス設定値)の提供元
-* [common.md](./common.md) - 本ファイル(`core.database`)を`get_db_cursor`, `execute_read_query`, `save_log_generic`, `save_log_async`としてFacade再エクスポートする呼び出し元
-* [init_unified_db.md](./init_unified_db.md) - `common.get_db_cursor(commit=True)`経由で本ファイルの接続処理(WALモード・外部キー制約有効化を含む)を利用してテーブル初期化を行う呼び出し元
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+* [init_unified_db.md](./init_unified_db.md) - `core.database.get_db_cursor(commit=True)`経由で本ファイルの接続処理(WALモード・外部キー制約有効化を含む)を利用してテーブル初期化を行う呼び出し元
 * [webhook_router.md](./webhook_router.md) - `core.database.save_log_async`を直接インポートして利用する呼び出し元
-* [quest_service.md](./quest_service.md) - `common.get_db_cursor`経由で本ファイルの接続処理を利用する呼び出し元
+* [quest_service.md](./quest_service.md) - `core.database.get_db_cursor`経由で本ファイルの接続処理を利用する呼び出し元
 * [analysis_service.md](./analysis_service.md) - 対照的な設計。本ファイルの`get_db_cursor`は使わず`get_ro_db_connection`による直接の`sqlite3.connect`を独自に用いている
 
 ## 2. ファイルの概要

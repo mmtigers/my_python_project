@@ -16,15 +16,16 @@ sys.path.append(BASE_DIR)
 
 try:
     import config
-    import common
+    from core.logger import setup_logging
+    from services.notification_service import send_push
     from core.database import get_ro_connection
     from services import switchbot_service
 except ImportError as e:
-    print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)
+    print(f"Error: Failed to import config or core/services modules. {e}", file=sys.stderr)
     sys.exit(1)
 
 # ロガー設定
-logger = common.setup_logging("health_check")
+logger = setup_logging("health_check")
 
 # ==========================================
 # ユーザー設定
@@ -263,7 +264,7 @@ class PostBootHealthCheck:
                 nas_status, nas_msg = STATUS_ERR, "Permission Denied"
                 error_detail = f"NAS書き込み権限エラー: {e}"
                 logger.error(error_detail)
-                common.send_push(
+                send_push(
                     messages=[{"type": "text", "text": f"🚨 [System Alert] NAS権限エラー\n内容: {error_detail}"}],
                     target="discord",
                     channel="report"
@@ -413,7 +414,7 @@ class PostBootHealthCheck:
         
         logger.info(f"Report:\n{title}\n{body}")
         
-        common.send_push(
+        send_push(
             messages=[{"type": "text", "text": f"{title}\n\n{body}"}],
             target="discord",
             channel="report"

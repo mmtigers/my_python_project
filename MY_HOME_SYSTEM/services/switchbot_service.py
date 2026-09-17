@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional
 
 import requests
 import config
-# from common import retry_api_call # 削除
+# (以前ここにあった `from common import retry_api_call` のコメントは、common.py ごと廃止された。Issue #664)
 
 from core.logger import setup_logging   # 修正: core.loggerを使用
 from models.switchbot import DeviceStatusResponse

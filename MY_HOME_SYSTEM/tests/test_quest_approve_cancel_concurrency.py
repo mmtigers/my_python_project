@@ -18,7 +18,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services.quest_service import QuestService
 
 N_PENDING = 12
@@ -27,7 +28,7 @@ EXP_PER_QUEST = 5
 
 
 def _seed_adult_and_child_with_pending_history(n=N_PENDING):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
             "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult'), "
@@ -38,7 +39,7 @@ def _seed_adult_and_child_with_pending_history(n=N_PENDING):
             cur.execute(
                 "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
                 "completed_at, status) VALUES ('son', ?, ?, ?, ?, ?, 'pending')",
-                (2000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, common.get_now_iso()),
+                (2000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, get_now_iso()),
             )
             history_ids.append(cur.lastrowid)
         return history_ids
@@ -56,7 +57,7 @@ class TestConcurrentApprove:
 
         assert all(r["status"] == "success" for r in results)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'son'").fetchone()
             approved_count = cur.execute(
                 "SELECT COUNT(*) c FROM quest_history WHERE user_id='son' AND status='approved'"
@@ -70,7 +71,7 @@ class TestConcurrentCancel:
     def test_concurrent_cancels_of_approved_history_do_not_lose_gold_rollback(self, isolated_db):
         """承認済み(gold付与済み)の履歴を並行して取り消した場合も、
         gold のロールバック(減算)が正しく全件反映されること。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('son', 'Son', 'Novice', 5, 500, 1000, 'role_child')"
@@ -80,7 +81,7 @@ class TestConcurrentCancel:
                 cur.execute(
                     "INSERT INTO quest_history (user_id, quest_id, quest_title, exp_earned, gold_earned, "
                     "completed_at, status) VALUES ('son', ?, ?, ?, ?, ?, 'approved')",
-                    (3000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, common.get_now_iso()),
+                    (3000 + i, f"Quest{i}", EXP_PER_QUEST, GOLD_PER_QUEST, get_now_iso()),
                 )
                 history_ids.append(cur.lastrowid)
 
@@ -93,7 +94,7 @@ class TestConcurrentCancel:
 
         assert all(r["status"] == "cancelled" for r in results)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             son = cur.execute("SELECT gold FROM quest_users WHERE user_id = 'son'").fetchone()
             remaining = cur.execute(
                 "SELECT COUNT(*) c FROM quest_history WHERE user_id='son'"

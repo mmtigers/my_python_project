@@ -12,7 +12,7 @@ dashboard.py の Low項目(#410)の回帰テスト:
   ことを確認する。
 
 main() はStreamlitのUI呼び出し(st.sidebar, st.tabs等)を多数含む大きな関数の
-ため、st・各Viewモジュール・analysis_service・commonを広くモックして
+ため、st・各Viewモジュール・analysis_service・send_pushを広くモックして
 テストする。
 """
 import os
@@ -103,7 +103,7 @@ class TestNoTracebackOnScreen:
         mock_st = _mock_st()
         with patch.object(dashboard, "st", mock_st), \
              patch.object(dashboard.analysis_service, "load_sensor_data", side_effect=RuntimeError("boom")), \
-             patch.object(dashboard, "common"), \
+             patch.object(dashboard, "send_push"), \
              patch.object(dashboard, "logger") as mock_logger:
             dashboard.main()
 

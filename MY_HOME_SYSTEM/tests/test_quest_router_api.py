@@ -14,12 +14,12 @@ import pytest
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 
 
 def _seed_basic_data():
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
             "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult'), "
@@ -76,7 +76,7 @@ class TestApproveRejectAuthorizationOverHttp:
         res = seeded_client.post("/api/quest/complete", json={"user_id": "daughter", "quest_id": 101})
         assert res.status_code == 200
         assert res.json()["status"] == "pending"
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT id FROM quest_history WHERE user_id='daughter' ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -246,7 +246,7 @@ class TestDeleteUploadedImageRollback:
         assert list(_clean_upload_dir.iterdir()) == []
 
     def test_does_not_delete_an_upload_already_linked_to_a_user(self, api_client, _clean_upload_dir):
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) VALUES "
                 "('dad', 'Dad', 'Warrior', 1, 0, 100, 'role_adult')"

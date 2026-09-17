@@ -17,7 +17,7 @@
 * [quest_user_service.md](./quest_user_service.md) - `QuestService.__init__`が`UserService()`インスタンスを`self.user_service`として保持する（ただし本ファイル内で`self.user_service`を実際に参照する箇所は無い）
 * [quest_game_system.md](./quest_game_system.md) - `GameSystem.__init__`が`QuestService()`インスタンスを保持し、`filter_active_quests`/`_compute_boost_from_last_completed`/`is_within_reset_period`を呼び出す最大の利用元
 * [quest_shop_service.md](./quest_shop_service.md) - 同じ`_get_user_balance_lock`（[quest_locks.md](./quest_locks.md)）を取得し、`quest_users`を書き換えうる経路として本ファイルの各メソッドと直列化の対象を共有する
-* [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`を提供するモジュール
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [config.md](./config.md) - `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`の提供元
 * [game_logic.md](./game_logic.md) - `game_logic.GameLogic.calculate_drop_rewards`/`calc_level_progress`/`calc_level_down`の実装
 * [sound_manager.md](./sound_manager.md) - `core.sound_manager.play`の実体
@@ -40,7 +40,8 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 | `random` | 標準ライブラリ | `random`型クエストの出現抽選(`random.Random(seed)`) | `import random` (行番号: 3) |
 | `typing` (`Any`, `Dict`, `List`, `Optional`, `Tuple`) | 標準ライブラリ | 型ヒント | `from typing import Any, Dict, List, Optional, Tuple` (行番号: 4) |
 | `fastapi.HTTPException` | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 6) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 8) |
+| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 8 / 抜粋: "from core.utils import get_now_iso") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 9 / 抜粋: "from core.database import get_db_cursor") |
 | `config` | 内部モジュール | `TV_UNLOCK_QUEST_IDS`/`TV_PLUG_DEVICE_ID`/`LINE_PARENTS_GROUP_ID`の参照 | `import config` (行番号: 9) |
 | `game_logic` | 内部モジュール | `GameLogic.calculate_drop_rewards`/`calc_level_progress`/`calc_level_down`の呼び出し | `import game_logic` (行番号: 10) |
 | `core.sound_manager` | 内部モジュール | 音声再生イベント発行 | `from core import sound_manager` (行番号: 11) |
@@ -52,7 +53,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 200) |
+| `core.database.get_db_cursor()` / `core.utils.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with core.database.get_db_cursor(commit=True) as cur:` (行番号: 200) |
 | `game_logic.GameLogic.*` | `calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`の計算式・詳細仕様が不明 | `game_logic.GameLogic.calculate_drop_rewards(base_gold, base_exp)` (行番号: 530) |
 | `config.*` | `TV_UNLOCK_QUEST_IDS`, `TV_PLUG_DEVICE_ID`, `LINE_PARENTS_GROUP_ID`の実際の設定値が不明 | `config.TV_UNLOCK_QUEST_IDS` (行番号: 447) |
 | `switchbot_service.trigger_tv_unlock`（毎朝ミッション統合で変更。旧`switchbot_service.send_device_command`直接呼び出し） | 非同期スレッド起動・失敗時のFail-Soft通知処理の完全な仕様が本ファイルからは不明（詳細は[switchbot_service.md](./switchbot_service.md)参照） | `switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")` (行番号: 454) |
@@ -74,7 +75,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 
 ### `QuestService.is_within_reset_period`
 
-* **役割**: 完了日時文字列(`completed_at_str`)とリセット周期文字列(`reset_period`)から、現在の期間内に完了しているかを判定する。`completed_at_str`をISOパースし、`tzinfo`が無ければ保存規約(`common.get_now_iso`)に合わせてJSTとみなして`JST`へ変換する。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す。`reset_period == 'daily'`なら当日一致、`'weekly'`なら当該週(月曜起点)以降か、`'monthly'`なら`(year, month)`の一致で判定する。上記いずれにも一致しない値（空文字・`NULL`・想定外の文字列）の場合は、警告ログを出力したうえで`False`を返す。
+* **役割**: 完了日時文字列(`completed_at_str`)とリセット周期文字列(`reset_period`)から、現在の期間内に完了しているかを判定する。`completed_at_str`をISOパースし、`tzinfo`が無ければ保存規約(`core.utils.get_now_iso`)に合わせてJSTとみなして`JST`へ変換する。変換に失敗した場合は`"%Y-%m-%d"`形式でのパースにフォールバックし、それも失敗すれば`False`を返す。`reset_period == 'daily'`なら当日一致、`'weekly'`なら当該週(月曜起点)以降か、`'monthly'`なら`(year, month)`の一致で判定する。上記いずれにも一致しない値（空文字・`NULL`・想定外の文字列）の場合は、警告ログを出力したうえで`False`を返す。
 * 根拠: `def is_within_reset_period(self, completed_at_str: str, reset_period: str) -> bool:` (行番号: 29〜71)
 * 根拠: `if dt.tzinfo is None:\n                dt = dt.replace(tzinfo=JST)` (行番号: 44〜45)
 * 根拠: `if reset_period == 'daily':\n            return completed_date == today_jst\n        elif reset_period == 'weekly':\n            ...\n        elif reset_period == 'monthly':\n            ...\n            return (completed_date.year, completed_date.month) == (today_jst.year, today_jst.month)` (行番号: 54〜65)
@@ -122,7 +123,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 
 * **役割**: `user_id`単位の`_get_user_balance_lock`と、`_get_completion_lock_key(user_id, quest_id)`で算出したキーの`_get_completion_lock`を、常にこの順(balance lock→completion lock)でネストして取得したうえで、実処理を`_process_complete_quest_locked`に委譲する薄いラッパー。ロック取得前に`quest_users`の存在を確認し、存在しない`user_id`では404を返してロック辞書にエントリを作らない。
 * 根拠: `def process_complete_quest(self, user_id: str, quest_id: int) -> Dict[str, Any]:` (行番号: 158〜181)
-* 根拠: `with common.get_db_cursor() as cur:\n            exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()\n        if not exists:\n            raise HTTPException(status_code=404, detail="User not found")` (行番号: 174〜177)
+* 根拠: `with core.database.get_db_cursor() as cur:\n            exists = cur.execute("SELECT 1 FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()\n        if not exists:\n            raise HTTPException(status_code=404, detail="User not found")` (行番号: 174〜177)
 * 根拠: `with _get_user_balance_lock(user_id):\n            with _get_completion_lock(self._get_completion_lock_key(user_id, quest_id)):\n                return self._process_complete_quest_locked(user_id, quest_id)` (行番号: 179〜181)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
 * 根拠: (行番号: 158)
@@ -137,7 +138,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 
 * **役割**: `process_complete_quest`が使用する完了ロックのキーを算出する。対象クエストの`target_user`をDBから参照し、`'siblings'`(兄妹連携クエスト)であれば`user_id`に依存しない共通キー`('__coop__', quest_id)`を返し、それ以外は`(user_id, quest_id)`を返す。この問い合わせは、実際のロック取得より前・かつ`process_complete_quest`本体とは別の`get_db_cursor`トランザクションとして実行される。
 * 根拠: `def _get_completion_lock_key(self, user_id: str, quest_id: int) -> Tuple[str, int]:` (行番号: 183〜197)
-* 根拠: `with common.get_db_cursor() as cur:\n            quest = cur.execute(\n                "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)\n            ).fetchone()\n        if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)` (行番号: 191〜197)
+* 根拠: `with core.database.get_db_cursor() as cur:\n            quest = cur.execute(\n                "SELECT target_user FROM quest_master WHERE quest_id = ?", (quest_id,)\n            ).fetchone()\n        if quest and quest['target_user'] == 'siblings':\n            return ('__coop__', quest_id)\n        return (user_id, quest_id)` (行番号: 191〜197)
 * **引数/リクエスト**: `user_id: str`, `quest_id: int`
 * 根拠: (行番号: 183)
 * **戻り値/レスポンス**: `Tuple[str, int]`
@@ -199,7 +200,7 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 * **役割**: `history_id`に対応する`quest_history`行から、ユーザー単位ロックの対象とすべき`user_id`一覧を求める共通ヘルパー。連結履歴(`linked_history_id`)がある場合は相方の`user_id`も含める。`process_approve_quest`/`process_reject_quest`/`process_cancel_quest`がそれぞれ実装していたロジックを一元化したもの。`primary_user_id`を渡さない場合は`quest_history.user_id`を主対象として使い、対象履歴が存在しなければ`HTTPException(404)`を送出する（`process_approve_quest`/`process_reject_quest`の挙動）。`primary_user_id`を渡した場合はそれを主対象としてそのまま使い、対象履歴が存在しなくても404は送出しない（`process_cancel_quest`の挙動）。
 * 根拠: `def _get_lock_user_ids_for_history(\n        self, history_id: int, primary_user_id: Optional[str] = None\n    ) -> List[str]:` (行番号: 350〜386)
 * 根拠: `if primary_user_id is not None:\n            lock_user_ids = [primary_user_id]\n        else:\n            if not hist_peek:\n                raise HTTPException(status_code=404, detail="History not found")\n            lock_user_ids = [hist_peek['user_id']]` (行番号: 371〜376)
-* 根拠: `if hist_peek and hist_peek['linked_history_id'] is not None:\n            with common.get_db_cursor() as cur:\n                linked_peek = cur.execute(\n                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)\n                ).fetchone()\n            if linked_peek:\n                lock_user_ids.append(linked_peek['user_id'])` (行番号: 378〜384)
+* 根拠: `if hist_peek and hist_peek['linked_history_id'] is not None:\n            with core.database.get_db_cursor() as cur:\n                linked_peek = cur.execute(\n                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)\n                ).fetchone()\n            if linked_peek:\n                lock_user_ids.append(linked_peek['user_id'])` (行番号: 378〜384)
 * **引数/リクエスト**: `history_id: int`, `primary_user_id: Optional[str] = None`
 * 根拠: (行番号: 350〜352)
 * **戻り値/レスポンス**: `List[str]`
@@ -225,9 +226,9 @@ Issue #550の分割で`services/quest_service.py`（旧1572行モノリス）か
 
 ### `QuestService._process_approve_quest_locked`
 
-* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を承認する実処理。TV解錠(SwitchBot API経由の副作用)は`with common.get_db_cursor(commit=True)`ブロックの**外**（コミット完了後）で行われる。ブロック内では該当時に`tv_unlock_quest_id`へ`quest['quest_id']`を記録するだけにし、ブロックを抜けた後`tv_unlock_quest_id is not None`なら`switchbot_service.trigger_tv_unlock`を呼ぶ（**毎朝ミッション統合で変更**: 以前は本クラスのプライベートメソッド`_trigger_tv_unlock`を`self._trigger_tv_unlock(tv_unlock_quest_id)`として呼んでいたが、`services/routine_service.py`側の朝の準備チェックリスト完了処理とも共有するため、`switchbot_service`モジュールの関数として切り出された。呼び出し時に渡す文字列はログ識別用の`context`引数（例: `f"quest_id={tv_unlock_quest_id}"`）に変わっている）。`override_rewards`の`gold`/`exp`は`hist['gold_earned'] or 0`/`hist['exp_earned'] or 0`として`NULL`を0扱いにする。TVロック判定の`quest`は`sync_master_data`のマスタ削除後も`quest_history`の`pending`行が残るケースで`None`になり得るため`if quest and ...`でガードされている。`_approve_linked_history`が返す相方の報酬情報を`result`辞書へ`partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`として格納する。
+* **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を承認する実処理。TV解錠(SwitchBot API経由の副作用)は`with core.database.get_db_cursor(commit=True)`ブロックの**外**（コミット完了後）で行われる。ブロック内では該当時に`tv_unlock_quest_id`へ`quest['quest_id']`を記録するだけにし、ブロックを抜けた後`tv_unlock_quest_id is not None`なら`switchbot_service.trigger_tv_unlock`を呼ぶ（**毎朝ミッション統合で変更**: 以前は本クラスのプライベートメソッド`_trigger_tv_unlock`を`self._trigger_tv_unlock(tv_unlock_quest_id)`として呼んでいたが、`services/routine_service.py`側の朝の準備チェックリスト完了処理とも共有するため、`switchbot_service`モジュールの関数として切り出された。呼び出し時に渡す文字列はログ識別用の`context`引数（例: `f"quest_id={tv_unlock_quest_id}"`）に変わっている）。`override_rewards`の`gold`/`exp`は`hist['gold_earned'] or 0`/`hist['exp_earned'] or 0`として`NULL`を0扱いにする。TVロック判定の`quest`は`sync_master_data`のマスタ削除後も`quest_history`の`pending`行が残るケースで`None`になり得るため`if quest and ...`でガードされている。`_approve_linked_history`が返す相方の報酬情報を`result`辞書へ`partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`として格納する。
 * 根拠: `def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:` (行番号: 397〜455)
-* 根拠: `tv_unlock_quest_id: Optional[int] = None\n        with common.get_db_cursor(commit=True) as cur:` (行番号: 402〜403)、`if tv_unlock_quest_id is not None:\n            switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")\n        return result` (行番号: 453〜455)
+* 根拠: `tv_unlock_quest_id: Optional[int] = None\n        with core.database.get_db_cursor(commit=True) as cur:` (行番号: 402〜403)、`if tv_unlock_quest_id is not None:\n            switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")\n        return result` (行番号: 453〜455)
 * 根拠: `override_rewards = {\n                "gold": hist['gold_earned'] or 0,\n                "exp": hist['exp_earned'] or 0\n            }` (行番号: 423〜426)
 * 根拠: `if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:\n                if user['role'] == ROLE_CHILD:\n                    tv_unlock_quest_id = quest['quest_id']` (行番号: 447〜449)
 * 根拠: `if hist['linked_history_id'] is not None:\n                partner_result = self._approve_linked_history(cur, hist['linked_history_id'])\n                if partner_result:\n                    result['partnerUserId'] = partner_result['user_id']\n                    result['partnerLeveledUp'] = partner_result['leveledUp']\n                    result['partnerNewLevel'] = partner_result['newLevel']\n                    result['partnerEarnedMedals'] = partner_result['earnedMedals']` (行番号: 436〜442)
@@ -456,7 +457,7 @@ graph TD
 
 | 優先度 | ファイル名 | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットが、データの整合性・タイムゾーン判定の正しさに強く影響するため。 | `with common.get_db_cursor(commit=True) as cur:` (行番号: 200) |
+| 高 | `common.py`（[common.md](./common.md)） | トランザクションスコープの境界や`get_now_iso`の日時フォーマットが、データの整合性・タイムゾーン判定の正しさに強く影響するため。 | `with core.database.get_db_cursor(commit=True) as cur:` (行番号: 200) |
 | 高 | `game_logic.py`（[game_logic.md](./game_logic.md)） | 報酬やレベルアップ等のコアドメインロジック（`calculate_drop_rewards`, `calc_level_progress`, `calc_level_down`）を含むため。 | `game_logic.GameLogic.calc_level_progress(...)` (行番号: 536〜538) |
 | 高 | `services/quest/locks.py`（[quest_locks.md](./quest_locks.md)） | 本ファイルが多用するロック取得順序(balance lock→completion lock)とレースコンディション対策の全体像を理解するため。 | `from services.quest.locks import (...)` (行番号: 13〜24) |
 | 中 | `services/switchbot_service.py`（[switchbot_service.md](./switchbot_service.md)） | 非同期のTVロック解除に失敗した場合の影響範囲・再送ロジックの有無を確認するため（`trigger_tv_unlock`の実装は本ファイルには存在しない）。 | `switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")` (行番号: 454) |
@@ -487,7 +488,7 @@ graph TD
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
 | DB各テーブルのスキーマ | 生SQLによるクエリが記述されているが、各カラムの型、主キーや外部キー等の制約が不明。特に`quest_history.linked_history_id`カラムがいつ・どのマイグレーションで追加されたか、外部キー制約の有無は本ファイルからは不明。 | DBのDDL(CREATE TABLE文)、マイグレーション定義ファイル |
-| `common.get_now_iso`の形式 | 現在時刻として保存する文字列表現における、ミリ秒やタイムゾーン情報の有無が不明。 | `common.py` |
+| `core.utils.get_now_iso`の形式 | 現在時刻として保存する文字列表現における、ミリ秒やタイムゾーン情報の有無が不明。 | `common.py` |
 | 各種定数の値 | `TV_UNLOCK_QUEST_IDS`, `TV_PLUG_DEVICE_ID`, `LINE_PARENTS_GROUP_ID`の実際の値が不明。 | `config.py` |
 | ゲーム計算ロジック | レベルアップ閾値や獲得報酬量、`calculate_max_hp`/`calculate_next_level_exp`の計算式が不明。 | `game_logic.py` |
 | 非同期通信のエラー処理 | `switchbot_service.trigger_tv_unlock`（旧`send_device_command`直接呼び出し）が内部で呼ぶAPIのレスポンス構造・スレッド管理・Fail-Soft通知の詳細が本ファイルからは不明。 | `services/switchbot_service.py` |
@@ -498,7 +499,7 @@ graph TD
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
 | DB各テーブルのスキーマ | スキーマの唯一の定義元である`MY_HOME_SYSTEM/migrations/`から生成された`MY_HOME_SYSTEM/current_schema.sql`を直接確認した。`quest_history(id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, quest_id INTEGER, quest_title TEXT, status TEXT DEFAULT 'approved', completed_at DATETIME NOT NULL, exp_earned INTEGER, gold_earned INTEGER, linked_history_id INTEGER DEFAULT NULL, medals_earned INTEGER DEFAULT 0)`。懸案の`linked_history_id`は**ベースライン(`migrations/0000_baseline_schema.sql`)ではなく後続の`ALTER TABLE ... ADD COLUMN`で追加された列**であり(`current_schema.sql`上も末尾にカンマ区切りで連結された形で現れる)、`DEFAULT NULL`のみで**外部キー制約は付いていない**。したがって兄妹連携クエストの相互リンク(自分のidに相方のidを入れる)の整合性はアプリ層(`_process_coop_quest_completion`)が保証する必要があり、DBはカスケード削除もNULL化も行わない。同様に`quest_users(user_id TEXT PRIMARY KEY, name, job_class, level INTEGER DEFAULT 1, exp INTEGER DEFAULT 0, gold INTEGER DEFAULT 0, medal_count INTEGER DEFAULT 0, avatar TEXT DEFAULT '🙂', updated_at DATETIME, role TEXT)`・`quest_master(quest_id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, quest_type TEXT DEFAULT 'daily', exp_gain INTEGER DEFAULT 10, gold_gain INTEGER DEFAULT 5, icon_key TEXT, day_of_week TEXT, target_user TEXT DEFAULT 'all', start_date TEXT, end_date TEXT, occurrence_chance REAL DEFAULT 1.0, start_time TEXT, end_time TEXT, days TEXT, pre_requisite_quest_id INTEGER DEFAULT NULL, reset_period TEXT DEFAULT 'daily')`にも`role`/`target_user`/`status`のCHECK制約は無い。 | 直接ソース確認: `MY_HOME_SYSTEM/current_schema.sql`（`MY_HOME_SYSTEM/migrations/`から`python init_unified_db.py --dump-schema`で生成。参考: [init_unified_db.md](./init_unified_db.md)） |
-| `common.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
+| `core.utils.get_now_iso`の形式 | `MY_HOME_SYSTEM/common.py`16行目の`from core.utils import get_now_iso`による再エクスポートであり、実体は`MY_HOME_SYSTEM/core/utils.py`14〜15行目の`return datetime.datetime.now(pytz.timezone("Asia/Tokyo")).isoformat()`である。戻り値は**JSTのタイムゾーン情報付き(`+09:00`)・マイクロ秒6桁を含むISO 8601文字列**(例: `2026-09-16T07:30:00.123456+09:00`)。固定長・ゼロ埋めのため文字列比較・`MAX()`が時系列順と一致し、`_seconds_since_iso_timestamp`が`fromisoformat`でそのままパースできる。 | 直接ソース確認: `MY_HOME_SYSTEM/core/utils.py:14-15`, `MY_HOME_SYSTEM/common.py:16`（参考: [utils.md](./utils.md)・[common.md](./common.md)） |
 | 各種定数の値 | `MY_HOME_SYSTEM/config.py`を直接確認した。`TV_UNLOCK_QUEST_IDS`は環境変数`TV_UNLOCK_QUEST_IDS`のカンマ区切り文字列(**既定値は空文字**)を`List[int]`へパースしたもので、未設定なら空リスト=TV解錠対象クエストが1件も無い状態になる(482〜489行目)。`TV_PLUG_DEVICE_ID: Optional[str] = os.getenv("TV_PLUG_DEVICE_ID")`(491行目)も既定`None`で、`None`のままなら呼び出し側のガードによりTV解錠処理自体が起動しない。`LINE_PARENTS_GROUP_ID: str = os.getenv("LINE_PARENTS_GROUP_ID", "")`(213行目)も既定は空文字で、空ならFail-Soft通知の送信がスキップされる。いずれも**リポジトリ内に実値を持たず`.env`でのみ設定される運用値**であり、未設定時は該当機能が無効化される(例外は送出されない)ことが確認できた。 | 直接ソース確認: `MY_HOME_SYSTEM/config.py:213, 482-491`（参考: [config.md](./config.md)） |
 | ゲーム計算ロジック | `MY_HOME_SYSTEM/game_logic.py`を直接確認した。`GameLogic.calculate_next_level_exp(level)`は`math.floor(100 * math.pow(1.2, level - 1))`(13〜15行目)＝Lv1で100、以降レベルごとに1.2倍の指数曲線。`GameLogic.calculate_max_hp(level)`は`level * 20 + 5`(18〜20行目)＝線形。`GameLogic.calc_level_progress(current_level, current_exp, added_exp)`(23行目〜)は`total_exp = current_exp + added_exp`から必要経験値を繰り返し差し引いてレベルアップ判定を行い、`(new_level, new_exp, is_leveled_up)`のタプルを返す。獲得報酬量そのもの(exp/gold)は計算式ではなく`quest_master.exp_gain`/`gold_gain`(＝`quest_data.QUESTS`の`exp`/`gold`)に格納された固定値である。 | 直接ソース確認: `MY_HOME_SYSTEM/game_logic.py:13-30`（参考: [game_logic.md](./game_logic.md)） |
 | 非同期通信のエラー処理 | `MY_HOME_SYSTEM/services/switchbot_service.py`の`trigger_tv_unlock(context: str) -> None`(94〜125行目)を直接確認した。内部関数`unlock_task`が`send_device_command(config.TV_PLUG_DEVICE_ID, "turnOn")`を呼び、レスポンスが`res.get("statusCode") == 100`ならINFOログのみ、それ以外は`raise Exception(f"API returned error: {res}")`で自ら例外を起こす(105〜112行目)。`except Exception`でERRORログを出し、`config.LINE_PARENTS_GROUP_ID`が設定されていれば親グループへ手動操作を促すテキストメッセージを`notification_service.send_push`で送る**Fail-Soft**設計(113〜121行目)。この`unlock_task`は`threading.Thread(target=unlock_task, daemon=True)`として別スレッドで起動される(124行目)ため、**本ファイル(クエスト完了・承認経路)は例外を一切受け取らず、TV解錠の成否がクエスト処理の結果に影響しない**。なお`trigger_tv_unlock`自身は`TV_PLUG_DEVICE_ID`未設定のガードを持たない(docstring 101〜102行目が呼び出し元の責務と明記)ため、本ファイル側の`if config.TV_PLUG_DEVICE_ID:`チェックが必須である。 | 直接ソース確認: `MY_HOME_SYSTEM/services/switchbot_service.py:94-125`（参考: [switchbot_service.md](./switchbot_service.md)・[notification_service.md](./notification_service.md)） |

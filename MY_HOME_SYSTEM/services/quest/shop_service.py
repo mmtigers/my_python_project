@@ -3,7 +3,8 @@ from typing import Any, Dict
 
 from fastapi import HTTPException
 
-import common
+from core.utils import get_now_iso
+from core.database import get_db_cursor
 from services.quest.locks import (
     ROLE_ADULT,
     _get_purchase_lock,
@@ -35,7 +36,7 @@ class ShopService:
                 return self._process_purchase_reward_locked(user_id, reward_id)
 
     def _process_purchase_reward_locked(self, user_id: str, reward_id: int) -> Dict[str, Any]:
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             reward = cur.execute("SELECT * FROM reward_master WHERE reward_id = ?", (reward_id,)).fetchone()
             user = cur.execute("SELECT * FROM quest_users WHERE user_id = ?", (user_id,)).fetchone()
 
@@ -76,7 +77,7 @@ class ShopService:
             # (二重購入でゴールドが1回分しか減らない不具合) を防ぐ。
             cur.execute(
                 "UPDATE quest_users SET gold = gold - ?, updated_at = ? WHERE user_id = ? AND gold >= ?",
-                (reward['cost_gold'], common.get_now_iso(), user_id, reward['cost_gold'])
+                (reward['cost_gold'], get_now_iso(), user_id, reward['cost_gold'])
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=400, detail="Not enough gold")
@@ -84,7 +85,7 @@ class ShopService:
             new_gold = cur.execute(
                 "SELECT gold FROM quest_users WHERE user_id = ?", (user_id,)
             ).fetchone()['gold']
-            now_iso = common.get_now_iso()
+            now_iso = get_now_iso()
 
             cur.execute("""
                 INSERT INTO reward_history (user_id, reward_id, reward_title, cost_gold, redeemed_at)
