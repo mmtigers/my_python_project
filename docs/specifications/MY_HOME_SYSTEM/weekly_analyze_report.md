@@ -47,7 +47,7 @@
 ### `get_start_date`
 
 * **役割**: 指定された期間タイプ（週、月、年）に応じた集計開始日時（00:00:00）を計算して取得する。
-* 根拠: `get_start_date` 定義部 (行番号: 21〜44 / 抜粋: "def get_start_date(period_type")
+* 根拠: `get_start_date` 定義部 (行番号: 22〜45 / 抜粋: "def get_start_date(period_type")
 
 
 * **引数/リクエスト**: `period_type: str` - "week", "month", "year" のいずれか。
@@ -69,8 +69,8 @@
 
 ### `get_analysis_data`
 
-* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 46〜153 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
+* **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。 **（Issue #663で修正）** 電気代の単価は、以前このファイルにモジュール定数`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされていた(コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と記述)。`config.py`のセクション15`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、既定31)へ移し、`config.ELEC_PRICE_PER_KWH`を参照する形にした。既定値は従来と同じため計算結果は変わらない。
+* 根拠: `get_analysis_data` 定義部 (行番号: 47〜154 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
@@ -93,7 +93,7 @@
 ### `generate_text_section`
 
 * **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。
-* 根拠: `generate_text_section` 定義部 (行番号: 155〜187 / 抜粋: "def generate_text_section(peri")
+* 根拠: `generate_text_section` 定義部 (行番号: 156〜188 / 抜粋: "def generate_text_section(peri")
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
@@ -116,7 +116,7 @@
 ### `is_month_end_report`
 
 * **役割**: 実行時点から7日後の月が現在の月と異なるかを判定し、月末レポート対象日であるかをチェックする。
-* 根拠: `is_month_end_report` 定義部 (行番号: 189〜197 / 抜粋: "def is_month_end_report() -> b")
+* 根拠: `is_month_end_report` 定義部 (行番号: 190〜198 / 抜粋: "def is_month_end_report() -> b")
 
 
 * **引数/リクエスト**: なし
@@ -139,7 +139,7 @@
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 199〜290 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 200〜291 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし

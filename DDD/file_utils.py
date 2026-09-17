@@ -108,6 +108,38 @@ def resolve_my_home_system_root(current_dir: Path, search_depth: int = 3) -> Pat
     return current_dir
 
 
+DEFAULT_NAS_MOUNT_POINT = "/mnt/nas"
+
+
+def resolve_nas_mount_point() -> Path:
+    """NASのマウントポイントを解決する(既定 `/mnt/nas`)。
+
+    Issue #663: DDDの各スクリプトは `/mnt/nas` をソースに直書きし、コメントで
+    「本環境のNASパスに適宜変更してください」と案内していた(= 環境ごとに
+    コードを編集する前提になっていた)。環境変数 `NAS_MOUNT_POINT` で
+    上書きできるようにして、個人環境値を `.env` 側へ寄せる。
+
+    キー名は MY_HOME_SYSTEM/config.py が読むものと同じ(DDDは同じ `.env` を
+    共用するため、同じNASを指すのに2つのキーを持たせない)。ただしここでは
+    `config` を import せず環境変数を直接読む — DDDが MY_HOME_SYSTEM 無しでも
+    単独で動く性質(`DDD_REQUIRE_NAS_MOUNT=false` の単独環境向け設計)を
+    崩さないため。未設定・空文字はいずれも既定値にフォールバックする。
+    """
+    raw = os.getenv("NAS_MOUNT_POINT")
+    if raw is None or raw.strip() == "":
+        return Path(DEFAULT_NAS_MOUNT_POINT)
+    return Path(raw.strip())
+
+
+def resolve_nas_data_dir(script_name: str) -> str:
+    """`<NASマウントポイント>/home_system/<script_name>/data` を返す。
+
+    `newface_monitor.py` / `extract_youtube_urls.py` がそれぞれ直書きしていた
+    NASデータディレクトリの組み立てを1箇所に集約する(Issue #663)。
+    """
+    return str(resolve_nas_mount_point() / "home_system" / script_name / "data")
+
+
 _DISCORD_WEBHOOK_URL_RE = re.compile(r"(/api/webhooks/\d+)/[A-Za-z0-9_\-]+")
 
 

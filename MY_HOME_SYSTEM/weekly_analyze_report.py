@@ -10,9 +10,10 @@ from typing import Dict, Optional, Any
 # ロガー設定 (設計書 8.1: core.loggerの使用ラッパー) [cite: 144]
 logger = common.setup_logging("weekly_report")
 
-# 定数定義 (本来はconfig.pyまたは.envから読み込むべき値)
-# 設計書 9.2: 機密情報・設定値の分離 
-DEFAULT_ELEC_PRICE_PER_KWH = 31
+# 電気代の概算単価(円/kWh)。Issue #663: ここに直書きされていた値(コメント自身が
+# 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた)を config.py の
+# セクション15へ移し、.env の ELEC_PRICE_PER_KWH で上書きできるようにした。
+# 既定値(31)は従来と同じ。
 
 # #234: 外部cron(リポジトリ管理外)による月曜8時台の多重起動時に重複送信するのを防ぐための
 # 実行済みフラグファイル。monitors/tv_lock_monitor.pyのLAST_RUN_FILEと同じ方式。
@@ -130,7 +131,7 @@ def get_analysis_data(start_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
                     elapsed_hours = 0
                 
                 kwh = (avg_watts * elapsed_hours) / 1000
-                bill = int(kwh * DEFAULT_ELEC_PRICE_PER_KWH)
+                bill = int(kwh * config.ELEC_PRICE_PER_KWH)
                 data["elec_bill"] = bill
             else:
                 data["elec_bill"] = 0

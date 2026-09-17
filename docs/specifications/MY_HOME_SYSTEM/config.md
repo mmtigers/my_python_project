@@ -101,6 +101,10 @@
 * 根拠: [YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM定義] (行番号: 577〜583 / 抜粋: "from datetime import date as _date\n_youtube_cooldown_enforce_from_str: str = os.getenv(\"YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM\", \"2026-09-12\")\ntry:\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM: _date = _date.fromisoformat(_youtube_cooldown_enforce_from_str)\nexcept Exception as e:\n    logger.warning(...)\n    YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)")
 
 
+* **（Issue #663で追加）** 「15. 週次レポート設定」セクションを新設し、`weekly_analyze_report.py`が電力量(kWh)から電気代を概算する単価`ELEC_PRICE_PER_KWH`(環境変数`ELEC_PRICE_PER_KWH`、`_get_int_env`経由、既定31)を定義する。以前は`weekly_analyze_report.py`に`DEFAULT_ELEC_PRICE_PER_KWH = 31`として直書きされており、コメント自身が「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・契約で変わる個人環境値のため`.env`へ寄せる。
+* 根拠: [週次レポート設定セクション] (行番号: 646〜652 / 抜粋: "# 15. 週次レポート設定", "ELEC_PRICE_PER_KWH: int = _get_int_env(\"ELEC_PRICE_PER_KWH\", 31)")
+
+
 * 「11. Alexaスキル設定」セクション(Issue #488でモジュールdocstring目次の番号が旧18番から11番へ振り直された)で、`routers/alexa_router.py`経由のリクエスト検証に使う`ALEXA_SKILL_ID`（Alexa Developer Consoleで発行される`"amzn1.ask.skill.xxxx"`形式のID）を定義する。設定されていれば`ask-sdk-core`がリクエストの`context.System.application.applicationId`との一致を検証し他人のスキルからのリクエストを拒否するが、未設定でも動作する（署名検証のみになる）後方互換設計であることがコメントに明記されている。
 * 根拠: [ALEXA_SKILL_ID定義とコメント] (行番号: 467〜474 / 抜粋: "# ==========================================\n# 11. Alexaスキル設定\n# ==========================================\n# Alexa Developer Consoleでスキルを作成すると発行される \"amzn1.ask.skill.xxxx\" 形式のID。\n# 設定すると、routers/alexa_router.py 経由のリクエストの context.System.application.applicationId\n# がこの値と一致するかを ask-sdk-core が検証し、他人のスキルからのリクエストを拒否する。\n# 未設定でも動作するが(署名検証だけになる)、本番では設定を強く推奨。\nALEXA_SKILL_ID: Optional[str] = os.getenv(\"ALEXA_SKILL_ID\")")
 

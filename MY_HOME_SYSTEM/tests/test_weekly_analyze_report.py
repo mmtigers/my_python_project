@@ -243,3 +243,32 @@ class TestRunReportDuplicateSendPrevention:
 
         assert mock_send.call_count == 2, "--force は手動テスト用途のためフラグの影響を受けてはならない"
         assert not flag_file.exists(), "--force 実行時はフラグを記録してはならない(通常実行をブロックしないため)"
+
+
+class TestElecPricePerKwhComesFromConfig:
+    """Issue #663: 電気代の単価は weekly_analyze_report.py の直書き定数
+    (`DEFAULT_ELEC_PRICE_PER_KWH = 31`。コメント自身が「本来はconfig」と
+    書いていた)から config.py セクション15へ移し、.env で上書きできるようにした。"""
+
+    def test_module_constant_is_gone(self):
+        assert not hasattr(report, "DEFAULT_ELEC_PRICE_PER_KWH")
+
+    def test_default_matches_the_previous_hardcoded_value(self):
+        assert config.ELEC_PRICE_PER_KWH == 31
+
+    def test_bill_follows_the_config_value(self, isolated_db, monkeypatch):
+        start = datetime.datetime.now(JST) - datetime.timedelta(days=7)
+        with common.get_db_cursor(commit=True) as cur:
+            cur.execute(
+                f"INSERT INTO {config.SQLITE_TABLE_POWER_USAGE} (device_id, device_name, wattage, timestamp) VALUES "
+                "('remo1', '伊丹_Nature Remo E Lite', 1000, datetime('now'))"
+            )
+
+        monkeypatch.setattr(config, "ELEC_PRICE_PER_KWH", 31)
+        at_31 = report.get_analysis_data(start)
+        monkeypatch.setattr(config, "ELEC_PRICE_PER_KWH", 62)
+        at_62 = report.get_analysis_data(start)
+
+        assert at_31 is not None and at_62 is not None
+        assert at_31["elec_bill"] > 0
+        assert at_62["elec_bill"] == at_31["elec_bill"] * 2

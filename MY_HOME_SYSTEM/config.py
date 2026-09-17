@@ -17,6 +17,7 @@
     12. ラズパイ監視(health_watch)設定
     13. NASパスの遅延解決 (Issue #330 PR-B)
     14. Family Quest: YouTubeごほうび券クールダウン設定
+    15. 週次レポート設定
 """
 import os
 import time
@@ -640,3 +641,12 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)
+
+# ==========================================
+# 15. 週次レポート設定
+# ==========================================
+# weekly_analyze_report.py が電力量(kWh)から電気代を概算するときの単価(円/kWh)。
+# Issue #663: 以前は weekly_analyze_report.py に直書きされており、コメント自身が
+# 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・
+# 契約で変わる個人環境値のため、.env で上書きできるようにする。
+ELEC_PRICE_PER_KWH: int = _get_int_env("ELEC_PRICE_PER_KWH", 31)
