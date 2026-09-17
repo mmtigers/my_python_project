@@ -38,7 +38,7 @@
 * 根拠: [定数定義とコメント] (行番号: 213〜219 / 抜粋: "# LINE Messaging API 呼び出し(reply/push/get_profile 等)の (接続, 読み取り) タイムアウト秒。", "LINE_API_REQUEST_TIMEOUT: tuple = (5.0, 15.0)")
 
 
-* **（Issue #620で追加）** 「2. 認証・API設定」セクションに、認可済みの家族のLINEユーザーID(`event.source.user_id`、`"U"`+32桁hex形式)のallowlist`AUTHORIZED_LINE_USER_IDS`(環境変数`AUTHORIZED_LINE_USER_IDS`、カンマ区切り)を追加した。`handlers/line_handler.py`の`_is_authorized_line_user`が、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する際に参照する。パース方式は`TV_UNLOCK_QUEST_IDS`等と同様の「カンマ分割してstrip、空要素は除外」だが、`isdigit()`によるフィルタは行わない(LINEユーザーIDは`U`始まりの文字列のため)。`SWITCHBOT_WEBHOOK_TOKEN`と同じく、未設定(空文字列)の場合は空リストとなり後方互換(検証なし)として扱われる。
+* **（Issue #620で追加）** 「2. 認証・API設定」セクションに、認可済みの家族のLINEユーザーID(`event.source.user_id`、`"U"`+32桁hex形式)のallowlist`AUTHORIZED_LINE_USER_IDS`(環境変数`AUTHORIZED_LINE_USER_IDS`、カンマ区切り)を追加した。`handlers/line_handler.py`の`_is_authorized_line_user`が、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する際に参照する。パース方式は`TV_UNLOCK_QUEST_IDS`等と同様の「カンマ分割してstrip、空要素は除外」だが、`isdigit()`によるフィルタは行わない(LINEユーザーIDは`U`始まりの文字列のため)。未設定(空文字列)の場合は空リストとなり後方互換(検証なし)として扱われる。Issue #648でフェイルクローズ化した`SWITCHBOT_WEBHOOK_TOKEN`とは異なり、こちらはフェイルオープンのままである。
 * 根拠: [AUTHORIZED_LINE_USER_IDS定義とコメント] (行番号: 221〜230 / 抜粋: "# Issue #620: LINE公式アカウントを友だち追加すれば誰でもメッセージを送信できてしまうため、", "_authorized_line_user_ids_str: str = os.getenv(\"AUTHORIZED_LINE_USER_IDS\", \"\")", "AUTHORIZED_LINE_USER_IDS: List[str] = [\n    uid.strip() for uid in _authorized_line_user_ids_str.split(\",\") if uid.strip()\n]")
 
 

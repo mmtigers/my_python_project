@@ -10,7 +10,7 @@ import { Bell, Check, Clock, Coins, LucideIcon } from 'lucide-react';
 import {
     Droplet, UtensilsCrossed, Shirt, Sparkles, Star,
     Waves, Cookie, Pencil, BedDouble, Bath, ShowerHead, Backpack,
-    CookingPot, Briefcase,
+    CookingPot, Briefcase, Sofa,
 } from 'lucide-react';
 import { RoutineFlowState, RoutineStep } from '@/lib/routineDataSchema';
 
@@ -35,6 +35,8 @@ const ICONS: Record<string, LucideIcon> = {
     // 'meal'(UtensilsCrossed)は「食べる」側で使っているため、ママの「夕食を作る」は
     // 調理器具のCookingPotで「作る」側と見分けが付くようにする。
     kitchen: CookingPot,
+    // パパの土日ステップ(キッチンリセットは上の'kitchen'を共用し、リビングはSofa)。
+    living: Sofa,
     work: Briefcase,
 };
 
