@@ -166,7 +166,7 @@ class TestStepCompletion:
         同種の非チェックリストステップとしてpmの'sleep'を使う）"""
         from fastapi import HTTPException
         _seed_user()
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
         routine_service.get_today_state('daughter', now=_at(18, 1))  # チェックポイント通過
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
@@ -291,17 +291,21 @@ class TestEveningFreeTimeTvUnlock:
     対象は智矢(user_id='son')に限定されるため、テストも'son'を使う
     (TV_UNLOCK_TARGET_USER_ID参照)。"""
 
-    def test_completing_tomorrow_prep_triggers_tv_unlock(self, isolated_db, monkeypatch):
+    def test_completing_homework_triggers_tv_unlock(self, isolated_db, monkeypatch):
+        """一本道(手洗い→おやつ→宿題)の最後を終えた瞬間に自由時間が始まる。
+
+        明日の準備は寝る準備チェックリストへ移したため、自由時間の条件から外れている。
+        """
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework'):
+        for key in ('handwash', 'snack'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
-        mock_trigger.assert_not_called()  # 明日の準備がまだなので発火しない
+        mock_trigger.assert_not_called()  # 宿題がまだなので発火しない
 
-        state = routine_service.complete_step('son', 'pm', 'tomorrow_prep', now=_at(14, 0))
+        state = routine_service.complete_step('son', 'pm', 'homework', now=_at(14, 0))
         mock_trigger.assert_called_once_with("夕方の自由時間開始(宿題・明日の準備完了)")
         assert state['in_free_time'] is True
 
@@ -311,7 +315,7 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
@@ -337,7 +341,7 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='daughter', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(14, 0))
         mock_trigger.assert_not_called()
 
@@ -366,9 +370,9 @@ class TestEveningFreeTimeTvUnlock:
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='son', role='role_child')
 
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('son', 'pm', key, now=_at(14, 0))
-        assert mock_trigger.call_count == 1  # 'tomorrow_prep'完了で自由時間開始トリガーが発火
+        assert mock_trigger.call_count == 1  # 'homework'完了で自由時間開始トリガーが発火
 
         routine_service.get_today_state('son', now=_at(18, 1))  # チェックポイント通過
         for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
@@ -635,7 +639,7 @@ class TestWeekendPmSkipAndCarryover:
     def test_skipped_steps_are_excluded_from_the_bonus_denominator(self, isolated_db):
         """スキップ扱いのステップは按分の分母から除かれ、残りを全部やれば満額になる。"""
         _seed_user(gold=0, exp=0)
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
 
         # 土曜はhandwash・homework・tomorrow_prepともスキップ済みなので、当日やるべき
@@ -653,7 +657,7 @@ class TestWeekendPmSkipAndCarryover:
         3件が分子に入り 3/4 = 112Gold が何もせずに入っていた。
         """
         _seed_user(gold=0, exp=0)
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
 
         state = routine_service.get_today_state('daughter', now=_saturday_at(18, 1))
@@ -678,23 +682,24 @@ class TestPmEveningSplit:
     追加した機能(要件確認済み)のテスト。"""
 
     def _finish_pre_checkpoint_steps(self, now):
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=now)
 
     def test_step_order_includes_tomorrow_prep_and_night_checklist(self, isolated_db):
+        """明日の準備は一本道ではなく寝る準備チェックリストの一員になった。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_at(14, 0))
         pm = state['flows']['pm']
         assert [s['key'] for s in pm['steps']] == [
-            'handwash', 'snack', 'homework', 'tomorrow_prep', 'free',
-            'dinner', 'bath', 'nightclothes', 'nightteeth', 'sleep',
+            'handwash', 'snack', 'homework', 'free',
+            'dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep', 'sleep',
         ]
         checklist_flags = {s['key']: s['is_checklist'] for s in pm['steps']}
         assert checklist_flags['dinner'] is True
         assert checklist_flags['bath'] is True
         assert checklist_flags['nightclothes'] is True
         assert checklist_flags['nightteeth'] is True
-        assert checklist_flags['tomorrow_prep'] is False
+        assert checklist_flags['tomorrow_prep'] is True
         assert checklist_flags['free'] is False
 
     def test_night_checklist_locked_before_checkpoint(self, isolated_db):
@@ -717,9 +722,12 @@ class TestPmEveningSplit:
         state = routine_service.get_today_state('daughter', now=_at(18, 1))
         pm = state['flows']['pm']
         statuses = {s['key']: s['status'] for s in pm['steps']}
-        assert all(statuses[k] == 'current' for k in ('dinner', 'bath', 'nightclothes', 'nightteeth'))
+        assert all(
+            statuses[k] == 'current'
+            for k in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep')
+        )
         assert statuses['sleep'] == 'locked'
-        assert pm['current_step_index'] == 5  # 'dinner'
+        assert pm['current_step_index'] == 4  # 'dinner'
         assert pm['in_free_time'] is False
         assert pm['bonus_gold'] == 150  # 出発ボーナスは既に確定済み(寝る準備とは無関係)
 
@@ -732,14 +740,14 @@ class TestPmEveningSplit:
         statuses = {s['key']: s['status'] for s in state['steps']}
         assert statuses['nightteeth'] == 'done'
         assert statuses['dinner'] == 'current'  # 他の項目は引き続きチェック可能
-        assert state['current_step_index'] == 5  # フェーズの目印は不変
+        assert state['current_step_index'] == 4  # フェーズの目印は不変
 
     def test_all_night_checklist_done_advances_to_sleep(self, isolated_db):
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
         routine_service.get_today_state('daughter', now=_at(18, 1))
         state = None
-        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             state = routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
         assert state['current_step_index'] == 9  # 'sleep'
         assert state['in_free_time'] is False  # 'sleep'にはcheckpoint_timeが無いため
@@ -749,11 +757,11 @@ class TestPmEveningSplit:
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
         routine_service.get_today_state('daughter', now=_at(18, 1))
-        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
 
         state = routine_service.complete_step('daughter', 'pm', 'bath', now=_at(18, 10))
-        assert state['current_step_index'] == 5  # 'dinner'に巻き戻る
+        assert state['current_step_index'] == 4  # 'dinner'に巻き戻る
         assert state['steps'][9]['status'] == 'locked'  # 'sleep'
 
     def test_wrong_step_key_returns_409_before_night_checklist_done(self, isolated_db):
@@ -773,7 +781,7 @@ class TestPmEveningSplit:
         _seed_user()
         self._finish_pre_checkpoint_steps(now=_at(14, 0))
         routine_service.get_today_state('daughter', now=_at(18, 1))
-        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth'):
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_at(18, 5))
         routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(18, 10))
 
@@ -782,10 +790,16 @@ class TestPmEveningSplit:
         assert exc_info.value.status_code == 400
 
     def test_tomorrow_prep_done_friday_skips_saturday_and_sunday(self, isolated_db):
-        """明日の準備は宿題と同じ繰越ルール(要件確認済み)。"""
+        """明日の準備は宿題と同じ繰越ルール(要件確認済み)。
+
+        寝る準備チェックリストへ移した後も繰越は効く。金曜はチェックポイントを
+        通過させてからでないとチェックリストに手が届かないため、18:01まで進める。
+        """
         _seed_user()
-        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+        for key in ('handwash', 'snack', 'homework'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
+        routine_service.get_today_state('daughter', now=_friday_at(18, 1))
+        routine_service.complete_step('daughter', 'pm', 'tomorrow_prep', now=_friday_at(18, 5))
 
         sat_state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
         statuses_sat = {s['key']: s['status'] for s in sat_state['flows']['pm']['steps']}
@@ -795,17 +809,19 @@ class TestPmEveningSplit:
         statuses_sun = {s['key']: s['status'] for s in sun_state['flows']['pm']['steps']}
         assert statuses_sun['tomorrow_prep'] == 'done'
 
-    def test_partial_pre_checkpoint_completion_prorates_bonus_over_four_steps(self, isolated_db):
-        """出発ボーナスの対象は自由時間より前の4項目(handwash/snack/homework/
-        tomorrow_prep)になった(明日の準備の追加により3→4項目に変更)。"""
+    def test_partial_pre_checkpoint_completion_prorates_bonus_over_three_steps(self, isolated_db):
+        """出発ボーナスの対象は自由時間より前の3項目(handwash/snack/homework)。
+
+        明日の準備を寝る準備チェックリストへ移したため、按分の母数は4→3へ戻った。
+        """
         _seed_user(gold=0, exp=0)
         routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
         routine_service.complete_step('daughter', 'pm', 'snack', now=_at(14, 5))
 
         state = routine_service.get_today_state('daughter', now=_at(18, 1))
         pm = state['flows']['pm']
-        assert pm['bonus_gold'] == round(150 * (2 / 4))
-        assert pm['bonus_exp'] == round(30 * (2 / 4))
+        assert pm['bonus_gold'] == round(150 * (2 / 3))
+        assert pm['bonus_exp'] == round(30 * (2 / 3))
 
 
 class TestRouterHttp:
@@ -899,11 +915,13 @@ class TestStepEventRecording:
         routine_service.get_today_state('daughter', now=_at(7, 51))
 
         forced = _step_events(flow_key='am', source='forced_transition')
+        # 締切までに一本道(ここでは朝の準備チェックリスト)を終えていないため、
+        # 自由時間も'done'ではなく'remind'になる(自由時間の時間固定をやめる変更)。
         assert {e['step_key']: e['to_status'] for e in forced} == {
             'clothes': 'remind',
             'teeth': 'remind',
             'toilet': 'remind',
-            'free': 'done',
+            'free': 'remind',
         }
         assert all(e['occurred_at'] == _at(7, 51).isoformat() for e in forced)
 
@@ -939,8 +957,9 @@ class TestStepEventRecording:
         assert len(keys) == len(set(keys))
         # 強制遷移の直後に dinner を自分でチェックした、という2種類が並ぶ
         assert ('dinner', 'current', 'done', 'user', _at(18, 1).isoformat()) in keys
-        # 進行が'free'へ到達しないまま締切を過ぎたため、'free'は locked -> done になる
-        assert ('free', 'locked', 'done', 'forced_transition', _at(18, 1).isoformat()) in keys
+        # 進行が'free'へ到達しないまま締切を過ぎたため、'free'は locked -> remind になる
+        # (時間が来ただけでは自由時間を達成扱いにしない)
+        assert ('free', 'locked', 'remind', 'forced_transition', _at(18, 1).isoformat()) in keys
 
     def test_non_checklist_step_completion_is_recorded(self, isolated_db):
         _seed_user()
@@ -1302,12 +1321,15 @@ class TestPmCheckpointIsSeventeenThirty:
         assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '09:30'
 
     def test_child_homework_is_reminded_after_1730(self, isolated_db):
-        """17:30を過ぎると宿題・明日の準備は'remind'になり、寝る準備へ進む。"""
+        """17:30を過ぎると一本道の未完了ステップは'remind'になり、寝る準備へ進む。
+
+        明日の準備は寝る準備チェックリストへ移したので、締切では'current'になる。
+        """
         _seed_user(user_id='son', role='role_child')
         state = routine_service.get_today_state('son', now=_at(17, 31))['flows']['pm']
         statuses = {x['key']: x['status'] for x in state['steps']}
         assert statuses['homework'] == 'remind'
-        assert statuses['tomorrow_prep'] == 'remind'
+        assert statuses['tomorrow_prep'] == 'current'
         assert state['in_free_time'] is False
 
     def test_child_flow_still_active_just_before_1730(self, isolated_db):
@@ -1386,3 +1408,95 @@ class TestSkippedKeysPersistence:
         }
         progress = {'steps_status': {'a': 'done', 'free': 'locked'}, 'skipped_keys': {'a'}}
         assert routine_service._eligible_done_ratio(flow, progress) == 0.0
+
+
+class TestCatchUpAfterDeadline:
+    """自由時間の時間固定をやめる変更(要件: 宿題を飛ばして自由時間に入らせない／
+    遅れても終わらせたらテレビはつく)。締切は満額ボーナスの締切としてだけ残る。"""
+
+    def test_free_time_is_not_granted_by_the_clock(self, isolated_db, monkeypatch):
+        """締切が来ただけでは自由時間は'done'にならず、TVも解錠されない。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='son', role='role_child', gold=0, exp=0)
+
+        state = routine_service.get_today_state('son', now=_at(17, 31))['flows']['pm']
+        statuses = {x['key']: x['status'] for x in state['steps']}
+        assert statuses['free'] == 'remind'
+        assert state['in_free_time'] is False
+        mock_trigger.assert_not_called()
+        # 寝る準備は締切で活性化する(晩ごはん・お風呂は宿題の進捗と無関係に進むため)
+        assert statuses['dinner'] == 'current'
+
+    def test_catch_up_after_deadline_unlocks_tv(self, isolated_db, monkeypatch):
+        """締切後でも一本道を全部終えれば自由時間が'done'になりTVがつく。"""
+        monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
+        mock_trigger = MagicMock()
+        monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
+        _seed_user(user_id='son', role='role_child', gold=0, exp=0)
+
+        routine_service.get_today_state('son', now=_at(17, 31))  # 締切通過
+        routine_service.complete_step('son', 'pm', 'handwash', now=_at(18, 0))
+        routine_service.complete_step('son', 'pm', 'snack', now=_at(18, 5))
+        mock_trigger.assert_not_called()  # 宿題が残っているうちは解錠しない
+
+        state = routine_service.complete_step('son', 'pm', 'homework', now=_at(18, 10))
+        statuses = {x['key']: x['status'] for x in state['steps']}
+        assert statuses['homework'] == 'done'
+        assert statuses['free'] == 'done'
+        mock_trigger.assert_called_once_with("夕方の一本道を締切後に完了(追いつき)")
+
+    def test_catch_up_does_not_increase_the_bonus(self, isolated_db):
+        """追いつき完了でもボーナスは締切時点の按分のまま(締切の意味を残すため)。"""
+        _seed_user(gold=0, exp=0)
+        routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(14, 0))
+        routine_service.get_today_state('daughter', now=_at(17, 31))  # 1/3で確定
+        fixed_gold, _exp, _level = _user_balance('daughter')
+        assert fixed_gold == round(150 * (1 / 3))
+
+        routine_service.complete_step('daughter', 'pm', 'snack', now=_at(18, 0))
+        routine_service.complete_step('daughter', 'pm', 'homework', now=_at(18, 5))
+        gold, _exp, _level = _user_balance('daughter')
+        assert gold == fixed_gold  # 増えない
+
+    def test_catch_up_is_possible_even_after_the_flow_is_finished(self, isolated_db):
+        """就寝まで終えた後でも、残った「まだだよ」は完了報告できる。"""
+        _seed_user(gold=0, exp=0)
+        routine_service.get_today_state('daughter', now=_at(17, 31))
+        for key in ('dinner', 'bath', 'nightclothes', 'nightteeth', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_at(18, 0))
+        routine_service.complete_step('daughter', 'pm', 'sleep', now=_at(20, 0))
+
+        state = routine_service.complete_step('daughter', 'pm', 'homework', now=_at(20, 30))
+        statuses = {x['key']: x['status'] for x in state['steps']}
+        assert statuses['homework'] == 'done'
+        assert statuses['free'] == 'remind'  # 手洗い・おやつがまだなので自由時間は未達成
+
+    def test_catch_up_does_not_move_the_current_step(self, isolated_db):
+        """追いつき完了は進行(current_step_index)を巻き戻さない。"""
+        _seed_user(gold=0, exp=0)
+        before = routine_service.get_today_state('daughter', now=_at(17, 31))['flows']['pm']
+        assert before['current_step_index'] == 4  # 'dinner'
+
+        state = routine_service.complete_step('daughter', 'pm', 'handwash', now=_at(18, 0))
+        assert state['current_step_index'] == 4
+
+    def test_morning_checklist_has_no_catch_up(self, isolated_db):
+        """朝の準備(チェックリスト)は締切後の追いつき対象外(登校時刻は動かせないため)。"""
+        from fastapi import HTTPException
+        _seed_user()
+        routine_service.get_today_state('daughter', now=_at(7, 51))
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('daughter', 'am', 'clothes', now=_at(8, 0))
+        assert exc_info.value.status_code == 400
+
+    def test_adult_step_reward_is_granted_on_catch_up(self, isolated_db):
+        """ママが夕食を締切後に作っても、ステップ個別報酬は入る。"""
+        _seed_user(user_id='mom', role='role_adult', gold=0, exp=0)
+        routine_service.get_today_state('mom', now=_at(17, 31))
+        routine_service.complete_step('mom', 'pm', 'handwash', now=_at(18, 0))
+        routine_service.complete_step('mom', 'pm', 'snack', now=_at(18, 5))
+        state = routine_service.complete_step('mom', 'pm', 'cook_dinner', now=_at(18, 30))
+        assert state['granted_gold'] == 150
+        assert state['granted_exp'] == 150

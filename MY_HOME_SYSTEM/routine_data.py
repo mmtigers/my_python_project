@@ -117,9 +117,6 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             # 金曜に完了していれば土日は不要、土曜に完了していれば日曜は不要
             # (要件確認済み)。判定はroutine_service._resolve_skip_keysが行う。
             {'key': 'homework', 'label': '宿題', 'icon_key': 'homework', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
-            # 明日の準備も宿題と同じ繰越ルール(要件確認済み: 金曜/土曜に完了していれば
-            # 以降の土日は不要)。
-            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': False},
             # 自由時間→寝る準備の締切は17:30(要件確認済み。以前は18:00だった)。
             # 土日も平日と同じ17:30のまま(要件確認済み: 現状維持)。
             {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30', 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
@@ -129,6 +126,12 @@ ROUTINE_FLOWS: dict[str, RoutineFlow] = {
             {'key': 'bath', 'label': 'お風呂', 'icon_key': 'bath', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'nightclothes', 'label': '着替え', 'icon_key': 'clothes', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
             {'key': 'nightteeth', 'label': '歯磨き', 'icon_key': 'teeth', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': True},
+            # 明日の準備は「宿題の次」の一本道から寝る準備チェックリストへ移した
+            # (要件確認済み: 智矢の「明日の準備は別枠にしてほしい」)。これにより
+            # 自由時間(チェックポイント)に入る条件は手洗い・おやつ・宿題の3つだけになり、
+            # 明日の準備は晩ごはん〜歯磨きと同じく順不同でチェックできる。繰越ルール
+            # (金曜/土曜に完了していれば以降の土日は不要)は移設後もそのまま維持する。
+            {'key': 'tomorrow_prep', 'label': '明日の準備', 'icon_key': 'tomorrow_prep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': True, 'checklist': True},
             {'key': 'sleep', 'label': '就寝', 'icon_key': 'sleep', 'checkpoint_time': None, 'weekend_checkpoint_time': None, 'weekend_skip': False, 'weekend_carryover': False, 'checklist': False},
         ],
     },
