@@ -83,7 +83,7 @@
 
 ### `_is_authorized_line_user` (関数、Issue #620で追加)
 
-* **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。`config.SWITCHBOT_WEBHOOK_TOKEN`と同じく、allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。
+* **役割**: 送信元LINEユーザー(`user_id`)が`config.AUTHORIZED_LINE_USER_IDS`(認可済み家族のLINEユーザーIDのallowlist、カンマ区切り環境変数)に含まれるかを判定する。LINE公式アカウントは友だち追加すれば誰でもメッセージを送信できるため、体調・食事記録の書き込みとAI経由のDB検索をこのallowlistで制限する目的で`_process_message_async`の冒頭から呼ばれる。allowlist自体が未設定(空リスト)の場合は後方互換として常に`True`を返す(検証なし)。**（Issue #648）** `config.SWITCHBOT_WEBHOOK_TOKEN`は未設定時に503で拒否するフェイルクローズへ変更されたため、両者の未設定時の挙動はもはや同じではない(こちらはフェイルオープンのまま)。
 * 根拠: `def _is_authorized_line_user(user_id: str) -> bool:` (行番号: 132-144)、後方互換の早期return (行番号: 142-143 / 抜粋: "if not config.AUTHORIZED_LINE_USER_IDS:\n        return True")
 
 

@@ -136,8 +136,8 @@ def _is_authorized_line_user(user_id: str) -> bool:
     体調・食事記録の書き込み(line_service.log_child_health/log_food_record)と
     AI経由のDB検索(ai_service.analyze_text_and_execute)をこのallowlistで制限する。
 
-    `config.SWITCHBOT_WEBHOOK_TOKEN`と同様、allowlist自体が未設定(空)の場合は
-    従来通り検証なし(後方互換)として常にTrueを返す。
+    allowlist自体が未設定(空)の場合は検証なし(後方互換)として常にTrueを返す。
+    Issue #648でフェイルクローズ化した`config.SWITCHBOT_WEBHOOK_TOKEN`とは挙動が異なる。
     """
     if not config.AUTHORIZED_LINE_USER_IDS:
         return True
