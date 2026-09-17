@@ -9,12 +9,14 @@ datetime.datetime.now() をmonkeypatchせず、公開メソッドに now を明�
 既存パターンに合わせた)。テストは常に2024-01-01(月曜日, JST)を基準にする。
 """
 import datetime
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
 import common
 import config
+import routine_data
 from services import switchbot_service
 from services.routine_service import routine_service
 
@@ -630,19 +632,44 @@ class TestWeekendPmSkipAndCarryover:
         assert statuses['handwash'] == 'current'
         assert statuses['homework'] == 'locked'
 
-    def test_skipped_steps_count_toward_full_bonus_ratio(self, isolated_db):
-        """スキップ扱い('done')は達成率計算でも達成済みとしてカウントされる。"""
+    def test_skipped_steps_are_excluded_from_the_bonus_denominator(self, isolated_db):
+        """スキップ扱いのステップは按分の分母から除かれ、残りを全部やれば満額になる。"""
         _seed_user(gold=0, exp=0)
         for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
             routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
 
-        # 土曜はhandwash・homework・tomorrow_prepともスキップ済みなのでsnackだけ
-        # 完了させれば満額ボーナス。
+        # 土曜はhandwash・homework・tomorrow_prepともスキップ済みなので、当日やるべき
+        # ステップはsnackだけ。それを完了させれば満額ボーナス(1/1)。
         routine_service.complete_step('daughter', 'pm', 'snack', now=_saturday_at(14, 0))
         state = routine_service.get_today_state('daughter', now=_saturday_at(18, 1))
         pm_sat = state['flows']['pm']
         assert pm_sat['bonus_gold'] == 150
         assert pm_sat['bonus_exp'] == 30
+
+    def test_skipped_steps_do_not_earn_bonus_on_their_own(self, isolated_db):
+        """スキップだけが並んだ状態で何もしなければボーナスは0になる。
+
+        同じ土曜でも、当日やるべきsnackをやらなければ0/1で0。以前はスキップ済みの
+        3件が分子に入り 3/4 = 112Gold が何もせずに入っていた。
+        """
+        _seed_user(gold=0, exp=0)
+        for key in ('handwash', 'snack', 'homework', 'tomorrow_prep'):
+            routine_service.complete_step('daughter', 'pm', key, now=_friday_at(14, 0))
+
+        state = routine_service.get_today_state('daughter', now=_saturday_at(18, 1))
+        pm_sat = state['flows']['pm']
+        assert pm_sat['bonus_gold'] == 0
+        assert pm_sat['bonus_exp'] == 0
+
+    def test_weekend_skip_alone_does_not_inflate_the_preview(self, isolated_db):
+        """按分見込み(preview_bonus_gold)もスキップ分では増えない。
+
+        土曜のpmはhandwashがスキップされるが、当日やるべきsnack/homework/
+        tomorrow_prepの3件は未着手なので見込みは0。
+        """
+        _seed_user(gold=0, exp=0)
+        state = routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        assert state['flows']['pm']['preview_bonus_gold'] == 0
 
 
 class TestPmEveningSplit:
@@ -1207,21 +1234,19 @@ class TestDadWeekdayWeekendSplit:
         gold, _exp, _level = _user_balance('dad')
         assert gold == 150  # 満額(ステップ個別報酬は平日のステップには無い)
 
-    def test_weekend_bonus_is_no_longer_full_when_nothing_is_done(self, isolated_db):
-        """土日に何もしない場合、満額ではなく按分された額しか入らない。
+    def test_weekend_bonus_is_zero_when_nothing_is_done(self, isolated_db):
+        """土日に何もしなければボーナスは0になる。
 
-        これがこの分割の目的。以前は土日のチェックポイント前ステップが0個で、
-        _eligible_done_ratio がゼロ除算回避のため 1.0 を返し常に満額だった。
-
-        なお完全に0にはならない: スキップされたステップ(土日の「お仕事」)は
-        仕様上'done'扱いで按分の分子に入るため、3ステップ中1つ達成の扱いになる。
-        この「スキップ=達成済み扱い」は子ども用フロー(土日のhandwash等)と共通の
-        既存仕様であり、本変更では踏襲している。
+        以前は2段階で壊れていた: (1) 土日のチェックポイント前ステップが0個で
+        _eligible_done_ratio がゼロ除算回避のため 1.0 を返し常に満額だった、
+        (2) 土日用ステップを足した後も、スキップされた「お仕事」が'done'扱いの
+        まま按分の分子・分母の両方に入り 1/3 = 50Gold が入っていた。
+        スキップ分を分母からも除くようにして(migrations/0012)、両方とも解消した。
         """
         _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
         routine_service.get_today_state('dad', now=_saturday_at(17, 31))
         gold, _exp, _level = _user_balance('dad')
-        assert gold == round(150 * (1 / 3))  # 満額150ではない
+        assert gold == 0
 
     def test_weekend_full_bonus_requires_both_reset_steps(self, isolated_db):
         """土日はキッチン/リビングの2つを終えて初めて満額になる。
@@ -1312,3 +1337,52 @@ class TestRetiredQuestsAreGone:
         import quest_data
         by_id = {q['id']: q for q in quest_data.QUESTS}
         assert 10 in by_id
+
+
+class TestSkippedKeysPersistence:
+    """スキップ分を按分の母数から除くための土台(migrations/0012 skipped_keys)。"""
+
+    def test_skipped_keys_are_persisted_on_the_progress_row(self, isolated_db):
+        """行の作成時にスキップ判定が確定値として保存される。"""
+        _seed_user(gold=0, exp=0)
+        routine_service.get_today_state('daughter', now=_saturday_at(14, 0))
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT skipped_keys FROM routine_progress "
+                "WHERE user_id='daughter' AND flow_key='pm'"
+            ).fetchone()
+        # 土曜のpmは手洗い・うがいだけがスキップ対象(宿題・明日の準備は金曜未完了)。
+        assert json.loads(row['skipped_keys']) == ['handwash']
+
+    def test_weekday_progress_has_no_skipped_keys(self, isolated_db):
+        """平日の子ども用フローはスキップ無しなので空配列で始まる。"""
+        _seed_user(gold=0, exp=0)
+        routine_service.get_today_state('daughter', now=_friday_at(14, 0))
+        with common.get_db_cursor() as cur:
+            row = cur.execute(
+                "SELECT skipped_keys FROM routine_progress "
+                "WHERE user_id='daughter' AND flow_key='pm'"
+            ).fetchone()
+        assert json.loads(row['skipped_keys']) == []
+
+    def test_ratio_is_zero_when_every_eligible_step_is_skipped(self):
+        """チェックポイント前が全てスキップなら満額ではなく0(ゼロ除算回避の穴)。
+
+        現行のフロー定義では起こらないが、以前はこの場合に1.0(満額)を返しており、
+        「何もしていないのに満額」の入口になっていたため、合成フローで固定しておく。
+        """
+        flow = {
+            'title': 'テスト用',
+            'day_of_week': routine_data.ALL_DAYS,
+            'start_trigger_time': '14:00',
+            'steps': [
+                {'key': 'a', 'label': 'a', 'icon_key': 'free', 'checkpoint_time': None,
+                 'weekend_checkpoint_time': None, 'weekend_skip': True,
+                 'weekend_carryover': False, 'checklist': False},
+                {'key': 'free', 'label': '自由時間', 'icon_key': 'free', 'checkpoint_time': '17:30',
+                 'weekend_checkpoint_time': None, 'weekend_skip': False,
+                 'weekend_carryover': False, 'checklist': False},
+            ],
+        }
+        progress = {'steps_status': {'a': 'done', 'free': 'locked'}, 'skipped_keys': {'a'}}
+        assert routine_service._eligible_done_ratio(flow, progress) == 0.0

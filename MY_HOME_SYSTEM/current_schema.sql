@@ -361,7 +361,7 @@ CREATE TABLE routine_progress (
     bonus_gold INTEGER NOT NULL DEFAULT 0,
     bonus_exp INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL, skipped_keys TEXT NOT NULL DEFAULT '[]',
     UNIQUE(user_id, flow_key, progress_date)
 );
 CREATE INDEX idx_routine_progress_user_date

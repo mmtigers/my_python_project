@@ -315,11 +315,11 @@
 ### `get_checkpoint_index`
 
 * **役割**: 渡された`flow`の`steps`を先頭から走査し、`checkpoint_time`が真値(空文字・None以外)であるステップの最初のインデックスを返す。フロー内にチェックポイントを持つステップが存在しない場合は`None`を返す。
-* 根拠: [関数定義] (行番号: 274-279 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
+* 根拠: [関数定義] (行番号: 275-280 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:\n    \"\"\"フロー内でチェックポイント(強制切替の境界)を持つステップのインデックスを返す。\"\"\"\n    for idx, step in enumerate(flow['steps']):\n        if step['checkpoint_time']:\n            return idx\n    return None")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`
-* 根拠: [関数定義] (行番号: 274 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
+* 根拠: [関数定義] (行番号: 275 / 抜粋: "def get_checkpoint_index(flow: RoutineFlow) -> Optional[int]:")
 
 
 * **戻り値/レスポンス**: `Optional[int]` — チェックポイントを持つ最初のステップのインデックス、無ければ`None`
@@ -337,11 +337,11 @@
 ### `get_checklist_range`（夜の切り替え/寝る準備チェックリスト化で新規追加）
 
 * **役割**: 渡された`flow`の`steps`を走査し、`checklist=True`であるステップのインデックス一覧を集め、その最初と最後(+1)を`(開始index, 終了index+1)`のタプルとして返す。`checklist=True`のステップが1つも無ければ`None`を返す。`RoutineStep.checklist`フィールドのコメントが明記する「`checklist=True`のステップはフロー内で連続する一塊のみを想定する」という前提を、実際にその範囲として取り出すヘルパーであり、以前は本ファイルに存在せず`services/routine_service.py`側が`checklist`フラグをフロー先頭からの決め打ちで扱っていたものを、フロー先頭・チェックポイント通過後のどちらにも置ける汎用的な形に一般化するために新設された。
-* 根拠: [関数定義] (行番号: 282-292 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:\n    \"\"\"フロー内のchecklist=Trueな連続ブロックの(開始index, 終了index+1)を返す。\n\n    checklist=Trueなステップが無ければNone。ブロックはフロー先頭(am)・\n    チェックポイント通過後(pm)のどちらにも置けるが、単一の連続ブロックのみを\n    想定している(routine_service側の初期化・トグル処理もこの前提で書かれている)。\n    \"\"\"\n    indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
+* 根拠: [関数定義] (行番号: 283-293 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:\n    \"\"\"フロー内のchecklist=Trueな連続ブロックの(開始index, 終了index+1)を返す。\n\n    checklist=Trueなステップが無ければNone。ブロックはフロー先頭(am)・\n    チェックポイント通過後(pm)のどちらにも置けるが、単一の連続ブロックのみを\n    想定している(routine_service側の初期化・トグル処理もこの前提で書かれている)。\n    \"\"\"\n    indices = [idx for idx, step in enumerate(flow['steps']) if step['checklist']]\n    if not indices:\n        return None\n    return indices[0], indices[-1] + 1")
 
 
 * **引数/リクエスト**: `flow: RoutineFlow`
-* 根拠: [関数定義] (行番号: 282 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:")
+* 根拠: [関数定義] (行番号: 283 / 抜粋: "def get_checklist_range(flow: RoutineFlow) -> Optional[Tuple[int, int]]:")
 
 
 * **戻り値/レスポンス**: `Optional[Tuple[int, int]]` — `checklist=True`なステップの(開始index, 終了index+1)、1つも無ければ`None`。`am`フローでは`(0, 5)`(`meal`〜`toilet`)、`pm`フローでは`(5, 9)`(`dinner`〜`nightteeth`)になる(いずれも本仕様書作成時点の`ROUTINE_FLOWS`の内容に基づく実測値)。
@@ -359,11 +359,11 @@
 ### `get_effective_checkpoint_time`（土日対応で新規追加）
 
 * **役割**: 渡された`step`について、`now`の曜日が土日(`WEEKEND_DAYS`に含まれる)かつ`step['weekend_checkpoint_time']`が真値であればその値を、そうでなければ`step['checkpoint_time']`をそのまま返す。`services/routine_service.py`側は、チェックポイントの締切判定([routine_service.md](./routine_service.md)の`_apply_forced_transition`)とレスポンス表示用の`checkpoint_time`算出([routine_service.md](./routine_service.md)の`_serialize_flow`)の両方でこの関数を経由するようになった(以前はどちらも`step['checkpoint_time']`を直接参照していた)。
-* 根拠: [関数定義] (行番号: 295-302 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:\n    \"\"\"`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。\n\n    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。\n    \"\"\"\n    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
+* 根拠: [関数定義] (行番号: 296-303 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:\n    \"\"\"`now`の曜日に応じた、そのステップの実際のチェックポイント締切時刻を返す。\n\n    土日(weekend_checkpoint_time)の上書きが無ければ平日のcheckpoint_timeをそのまま使う。\n    \"\"\"\n    if now.weekday() in WEEKEND_DAYS and step['weekend_checkpoint_time']:\n        return step['weekend_checkpoint_time']\n    return step['checkpoint_time']")
 
 
 * **引数/リクエスト**: `step: RoutineStep`, `now: datetime.datetime`
-* 根拠: [関数定義] (行番号: 295 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
+* 根拠: [関数定義] (行番号: 296 / 抜粋: "def get_effective_checkpoint_time(step: RoutineStep, now: datetime.datetime) -> Optional[str]:")
 
 
 * **戻り値/レスポンス**: `Optional[str]` — 実際に使うべき締切時刻('HH:MM'形式)、チェックポイントでないステップ(`checkpoint_time`も`weekend_checkpoint_time`も`None`)の場合は`None`
