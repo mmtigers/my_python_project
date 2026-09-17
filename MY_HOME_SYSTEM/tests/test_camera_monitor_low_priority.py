@@ -70,12 +70,13 @@ class TestEntranceCameraPayloadLoggingIsNotInfoLevel:
     """
     玄関カメラの全イベントペイロード(dir(events)含む)がデバッグ目的のまま
     INFO レベルで出力され続けていた(ログのノイズ・情報量ともに大きい)。
-    monitor_single_camera はONVIF接続を含む長い状態機械のため実行はせず、
-    該当箇所のソースを直接検証する(静的回帰テスト)。
+    ONVIF接続を含む長い経路のため実行はせず、該当箇所のソースを直接検証する
+    (静的回帰テスト)。#662 の分割で、該当箇所は monitor_single_camera から
+    イベント受信ループ(_pull_events_until_reconnect)へ移動している。
     """
 
     def test_raw_events_payload_logging_uses_debug_not_info(self):
-        source = inspect.getsource(camera_monitor.monitor_single_camera)
+        source = inspect.getsource(camera_monitor._pull_events_until_reconnect)
 
         assert "logger.info(f\"🔬 [RAW EVENTS]" not in source
         assert "logger.info(f\"📦 [EVENT PAYLOAD]" not in source
