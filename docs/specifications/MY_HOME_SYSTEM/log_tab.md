@@ -15,8 +15,10 @@
 
 ## 2. ファイルの概要
 
+* **（Issue #651 の横展開）** 「システム再起動」ボタンが呼ぶ `subprocess.run(["sudo", "systemctl", "restart", "home_system"])` に `SUBPROCESS_TIMEOUT_SEC`(30秒)を付与し、`subprocess.TimeoutExpired` を捕捉して画面にエラーを出すようにした。timeout が無いと、systemd 側が応答しない状況で Streamlit のスクリプト実行スレッドが無限に待ち、ダッシュボード全体が固まる(再起動対象が自分の動くホストのサービスであるため、詰まる場面が現実にある)。
+
 * Streamlitダッシュボードの「ログ分析」「システム管理」の2タブを描画するモジュール。2つの独立した公開関数（`render_logs`, `render_system`）で構成される。
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):`, `def render_system():` (行番号: 8, 20 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):`, `def render_system():` (行番号: 11, 20 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 * **（Issue #507で削除）** 以前は3つ目の公開関数として、直近3日分のアプリランキング(無料トップ・売上トップ)を`analysis_service.load_ranking_dates`/`load_ranking_data`経由で取得し週ごとに列表示する`render_trends`(「🌟 最近の流行・トレンド推移」タブ)が存在した。しかし参照先の`app_rankings`テーブルへ書き込むコード(収集スクリプト)がリポジトリのどこにも存在せず、収集に使うはずの`google-play-scraper`もIssue #496で未使用パッケージとして既に削除済みであり、`migrations/`にもテーブル定義が無いため新規構築したDBでは永久に「データがありません」としか表示されない死んだ機能だった(Issue #507)。オーナー判断によりUIごと削除され、対応する`analysis_service.load_ranking_dates`/`load_ranking_data`、`current_schema.sql`の`app_rankings`テーブル定義、`dashboard.py`のタブ登録もあわせて削除された。
 * `render_logs`は、渡された`df_sensor`（センサーデータ）を場所（`location`）でフィルタ可能な形で一覧表示する。
 * 根拠: `sel = st.multiselect("場所", locs, default=locs)` (行番号: 12 / 抜粋: "sel = st.multiselect(\"場所\", locs, default=locs)")
@@ -53,11 +55,11 @@
 ### `render_logs`
 
 * **役割**: `df_sensor`を場所（`location`）で絞り込むマルチセレクトと、絞り込んだ結果（最大200件）の表形式表示を提供する。
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 8〜18 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 11〜21 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 * **引数/リクエスト**: `df_sensor` (型: `pd.DataFrame`。`location`, `timestamp`, `friendly_name`, `contact_state`, `power_watts`列を含むことを前提とするセンサーデータ)
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 8 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` (行番号: 11 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 * **戻り値/レスポンス**: なし（`df_sensor`が空の場合は何も描画しない）
@@ -69,22 +71,22 @@
 
 
 * **エラーハンドリング**: なし（明示的な例外捕捉は行われていない）
-* 根拠: `def render_logs(df_sensor: pd.DataFrame):` 全体 (行番号: 8〜18 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
+* 根拠: `def render_logs(df_sensor: pd.DataFrame):` 全体 (行番号: 11〜21 / 抜粋: "def render_logs(df_sensor: pd.DataFrame):")
 
 
 
 ### `render_system`
 
 * **役割**: システム管理用の複数機能（ディスク/メモリ使用率表示、NASステータス表示、サーバーログ検索・表示、確認付きサービス再起動、バックアップ実行）をひとつのタブにまとめて提供する。
-* 根拠: `def render_system():` (行番号: 20〜88 / 抜粋: "def render_system():")
+* 根拠: `def render_system():` (行番号: 23〜103 / 抜粋: "def render_system():")
 
 
 * **引数/リクエスト**: なし
-* 根拠: `def render_system():` (行番号: 20 / 抜粋: "def render_system():")
+* 根拠: `def render_system():` (行番号: 23 / 抜粋: "def render_system():")
 
 
 * **戻り値/レスポンス**: なし
-* 根拠: `def render_system():` (行番号: 20 / 抜粋: "def render_system():")
+* 根拠: `def render_system():` (行番号: 23 / 抜粋: "def render_system():")
 
 
 * **副作用**:

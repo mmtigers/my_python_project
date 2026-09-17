@@ -2,6 +2,9 @@
 import streamlit as st
 import pandas as pd
 import subprocess
+
+# #651: systemctl 等の外部コマンドが応答しない場合にダッシュボードを固めないための上限(秒)。
+SUBPROCESS_TIMEOUT_SEC: int = 30
 from datetime import date
 from services import analysis_service
 
@@ -74,8 +77,20 @@ def render_system():
         if confirm_reboot:
             if st.button("🔄 システム再起動", type="primary"):
                 try:
-                    subprocess.run(["sudo", "systemctl", "restart", "home_system"], check=True)
+                    # #651: timeout が無いと、systemd 側が応答しない状況で Streamlit の
+                    # スクリプト実行スレッドが無限に待ち、ダッシュボード全体が固まる
+                    # (再起動対象は自分自身が動くホストのサービスなので、詰まる場面が現実にある)。
+                    subprocess.run(
+                        ["sudo", "systemctl", "restart", "home_system"],
+                        check=True,
+                        timeout=SUBPROCESS_TIMEOUT_SEC,
+                    )
                     st.success("再起動コマンド送信完了")
+                except subprocess.TimeoutExpired:
+                    st.error(
+                        f"再起動コマンドが {SUBPROCESS_TIMEOUT_SEC} 秒以内に完了しませんでした。"
+                        "systemctl 側の状態を確認してください。"
+                    )
                 except Exception as e:
                     st.error(f"エラー: {e}")
     

@@ -79,12 +79,18 @@ class NasMonitor:
         """NASへのPing疎通確認"""
         try:
             cmd = ["ping", "-c", "1", "-W", str(self.timeout), self.ip]
+            # #651: -W は ping 自身の応答待ちしか縛らないため、ping プロセス自体が
+            # 固まると呼び出し元(監視ループ)が戻らない。外側にも上限を置く。
             res = subprocess.run(
-                cmd, 
-                stdout=subprocess.DEVNULL, 
-                stderr=subprocess.DEVNULL
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=self.timeout + 5,
             )
             return res.returncode == 0
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Ping check timed out ({self.timeout + 5}s): {self.ip}")
+            return False
         except Exception as e:
             logger.error(f"Ping check error: {e}")
             return False
