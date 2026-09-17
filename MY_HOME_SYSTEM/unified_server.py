@@ -353,6 +353,46 @@ app.add_middleware(
 )
 
 @app.middleware("http")
+async def security_headers_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """
+    Issue #665: 全レスポンスに最小限のセキュリティヘッダーを付与するミドルウェア。
+
+    付与するヘッダー:
+    - `X-Content-Type-Options: nosniff` — Content-Type を無視したMIMEスニッフィングを禁止する。
+      `/quest`・`/camera` 配下は family-quest のビルド成果物を、`/uploads` は
+      ユーザーがアップロードしたアバター画像をそのまま配信するため、拡張子と実体が
+      食い違うファイルをブラウザが実行可能なリソースとして解釈しないようにする。
+    - `X-Frame-Options` — 既定 `SAMEORIGIN`(`config.SECURITY_HEADER_X_FRAME_OPTIONS`)。
+      `DENY` を既定にすると、Echo Show 等からの同一オリジンiframe埋め込みまで
+      壊れうるため既定では同一オリジンを許す。空文字にすると付与しない。
+    - `Referrer-Policy: strict-origin-when-cross-origin` — 外部への遷移時にパスを送らない。
+
+    既に値が設定されているヘッダーは上書きしない。エッジ(Cloudflare)側で
+    同じヘッダーを付与している構成では `SECURITY_HEADERS_ENABLED=false` で
+    オリジン側の付与そのものを止められる(値が二重になるのを避けるため)。
+
+    CSP は family-quest が Vite ビルドのインラインスタイル等を含むため、
+    ここでは意図的に付与しない(付けるならフロント側の実測とセットで行う)。
+    """
+    response = await call_next(request)
+
+    if not config.SECURITY_HEADERS_ENABLED:
+        return response
+
+    headers: Dict[str, str] = {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+    }
+    if config.SECURITY_HEADER_X_FRAME_OPTIONS:
+        headers["X-Frame-Options"] = config.SECURITY_HEADER_X_FRAME_OPTIONS
+
+    for name, value in headers.items():
+        if name not in response.headers:
+            response.headers[name] = value
+
+    return response
+
+@app.middleware("http")
 async def ip_restriction_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """
     リクエスト元のIPアドレスを検証し、許可されたネットワークからのアクセスのみを後続へ渡すミドルウェア。

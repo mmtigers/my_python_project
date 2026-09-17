@@ -14,7 +14,7 @@
 
 * [quest_service.md](./quest_service.md) - `services/quest_service.py`（下位互換シム）。`from services.quest.inventory_service import InventoryService, inventory_service`として本ファイルのクラス・シングルトンを再エクスポートする
 * [quest_locks.md](./quest_locks.md) - `JST`/`_get_item_use_lock`/`_get_youtube_cooldown_remaining_seconds`/`_is_youtube_cooldown_enforced`の提供元
-* [common.md](./common.md) - `common.get_db_cursor`/`common.get_now_iso`を提供するモジュール
+* [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
 * [config.md](./config.md) - `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.LINE_USER_ID`の提供元
 * [sound_manager.md](./sound_manager.md) - `core.sound_manager.play`の実体
 * [notification_service.md](./notification_service.md) - `services.notification_service.send_push`の実体
@@ -36,7 +36,8 @@
 | `math` | 標準ライブラリ | `_use_item_locked`がクールダウン残り秒数を分単位に切り上げる(`math.ceil`) | `import math` (行番号: 3) |
 | `typing` (`Any`, `Dict`, `Tuple`) | 標準ライブラリ | 型ヒント（`_use_item_locked`の戻り値型`Tuple[Dict[str, str], str]`を含む） | `from typing import Any, Dict, Tuple` (行番号: 4) |
 | `fastapi.HTTPException` | 外部ライブラリ | エラーレスポンス生成 | `from fastapi import HTTPException` (行番号: 6) |
-| `common` | 内部モジュール | DBカーソル取得、現在時刻(ISO)取得 | `import common` (行番号: 8) |
+| `core.utils.get_now_iso` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.utils import get_now_iso` (行番号: 8 / 抜粋: "from core.utils import get_now_iso") |
+| `core.database.get_db_cursor` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.database import get_db_cursor` (行番号: 9 / 抜粋: "from core.database import get_db_cursor") |
 | `config` | 内部モジュール | `YOUTUBE_REWARD_IDS`/`YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`LINE_USER_ID`の参照 | `import config` (行番号: 9) |
 | `core.sound_manager` | 内部モジュール | 音声再生イベント発行(`use_item`) | `from core import sound_manager` (行番号: 10) |
 | `services.notification_service` | 内部モジュール | LINEへのプッシュ通知(`use_item`) | `from services import notification_service` (行番号: 11) |
@@ -46,7 +47,7 @@
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.get_db_cursor()` / `common.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with common.get_db_cursor() as cur:` (行番号: 22) |
+| `core.database.get_db_cursor()` / `core.utils.get_now_iso()` | トランザクションスコープや接続の詳細、生成されるISO文字列のフォーマットが本ファイルからは不明 | `with core.database.get_db_cursor() as cur:` (行番号: 22) |
 | `config.YOUTUBE_REWARD_IDS`/`config.YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM`/`config.LINE_USER_ID`の実際の値 | `config.py`側の定義・実値が本ファイルからは不明 | `item['reward_id'] in config.YOUTUBE_REWARD_IDS` (行番号: 37) |
 | `notification_service.send_push`の完全な仕様 | 送信先・リトライ仕様等が本ファイルからは不明 | `notification_service.send_push(user_id=config.LINE_USER_ID, messages=[...])` (行番号: 75〜78) |
 | `sound_manager.play`の実体 | 再生される音声・失敗時の挙動が本ファイルからは不明 | `sound_manager.play("quest_clear")` (行番号: 79) |

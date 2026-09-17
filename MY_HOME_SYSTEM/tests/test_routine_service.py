@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import common
+from core.database import get_db_cursor
 import config
 from services import switchbot_service
 from services.routine_service import routine_service
@@ -23,7 +23,7 @@ MONDAY = datetime.datetime(2024, 1, 1, tzinfo=JST)  # 2024-01-01は月曜日
 
 
 def _seed_user(user_id='daughter', gold=0, exp=0, level=1, role='role_child'):
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute(
             "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, role) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -392,7 +392,7 @@ class TestCheckpointBonus:
         assert am['is_complete'] is True
         assert am['steps'][5]['status'] == 'done'  # 'free' も通過済みとして完了扱い
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['gold'] == 150
         assert row['exp'] == 30
@@ -418,7 +418,7 @@ class TestCheckpointBonus:
         assert am['leveled_up'] is True
         assert am['new_level'] == 2
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT level, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['level'] == 2
         assert row['exp'] == 10
@@ -444,7 +444,7 @@ class TestCheckpointBonus:
         # 通過(=強制切替)が起きれば即is_complete=Trueになり画面は表示されなくなる。
         assert am['is_complete'] is True
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['gold'] == 60
         assert row['exp'] == 12
@@ -478,7 +478,7 @@ class TestCheckpointBonus:
         routine_service.get_today_state('daughter', now=_at(8, 30))
         routine_service.get_today_state('daughter', now=_at(9, 0))
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute("SELECT gold, exp FROM quest_users WHERE user_id='daughter'").fetchone()
         assert row['gold'] == 150
         assert row['exp'] == 30
@@ -809,7 +809,7 @@ def _step_events(user_id='daughter', flow_key=None, source=None):
         sql += " AND source=?"
         params.append(source)
     sql += " ORDER BY id"
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         return [dict(row) for row in cur.execute(sql, tuple(params))]
 
 
@@ -973,7 +973,7 @@ class TestStepEventRecording:
 
 
 def _user_balance(user_id):
-    with common.get_db_cursor() as cur:
+    with get_db_cursor() as cur:
         row = cur.execute(
             "SELECT gold, exp, level FROM quest_users WHERE user_id=?", (user_id,)
         ).fetchone()
@@ -1048,7 +1048,7 @@ class TestAdultFlows:
 
     def test_role_null_user_falls_back_to_child_flow(self, isolated_db):
         """quest_users.roleがNULLの旧データは従来どおり子ども用フローになる。"""
-        with common.get_db_cursor(commit=True) as cur:
+        with get_db_cursor(commit=True) as cur:
             cur.execute(
                 "INSERT INTO quest_users (user_id, name, job_class, level, exp, gold) "
                 "VALUES (?, ?, ?, ?, ?, ?)",

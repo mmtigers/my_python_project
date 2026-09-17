@@ -17,6 +17,7 @@
     12. ラズパイ監視(health_watch)設定
     13. NASパスの遅延解決 (Issue #330 PR-B)
     14. Family Quest: YouTubeごほうび券クールダウン設定
+    15. 週次レポート設定
 """
 import os
 import time
@@ -202,6 +203,16 @@ LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
 # Issue #663: 以前は実機の MAC アドレスがデフォルト値としてコミットされていた。個人環境値は .env に置く。
 # 未設定なら空文字(post_boot_health_check はスピーカーチェックをスキップする)。
 SPEAKER_BLUETOOTH_MAC: str = os.getenv("SPEAKER_BLUETOOTH_MAC", "")
+# Issue #665: レスポンスに付与するセキュリティヘッダー(unified_server.security_headers_middleware)。
+# 既にエッジ(Cloudflare)側で同じヘッダーを付与している場合はヘッダーが重複しうるため、
+# SECURITY_HEADERS_ENABLED=false でオリジン側の付与を止められるようにしてある。
+# なお本ミドルウェアは「既に値が入っているヘッダーは上書きしない」実装なので、
+# アプリ内の個別レスポンスが明示的に設定した値を壊すことはない。
+SECURITY_HEADERS_ENABLED: bool = os.getenv("SECURITY_HEADERS_ENABLED", "true").strip().lower() != "false"
+# X-Frame-Options の値。既定は SAMEORIGIN(DENYにすると Echo Show 等からの
+# 同一オリジンiframe埋め込みまで壊れるため、既定では同一オリジンを許す)。
+# 空文字にするとこのヘッダーだけ付与しない。
+SECURITY_HEADER_X_FRAME_OPTIONS: str = os.getenv("SECURITY_HEADER_X_FRAME_OPTIONS", "SAMEORIGIN").strip()
 
 # ==========================================
 # 2. 認証・API設定 (Secrets)
@@ -280,10 +291,11 @@ SQLITE_DB_PATH: str = os.getenv("SQLITE_DB_PATH") or os.path.join(BASE_DIR, "hom
 # Exponential Backoff(最悪 約31秒)で全importerをブロックしていたため、
 # Issue #330 PR-Bで遅延解決(ファイル末尾のモジュール__getattr__)へ移行した。
 # 利用側は従来どおり config.ASSETS_DIR で参照できる(初回アクセス時に検証・キャッシュ)。
-LOG_DIR: str = ensure_safe_path_with_backoff(
-    os.path.join(BASE_DIR, "logs"),
-    "logs"
-)
+# Issue #664: LOG_DIR も ASSETS_DIR と同じくここで ensure_safe_path_with_backoff を
+# 呼んでおり、ディスクフル・権限異常時には import だけで最大約31秒ブロックしていた
+# (Issue #330 PR-B で ASSETS_DIR を遅延化した際の取り残し)。同じモジュール__getattr__
+# による遅延解決へ移す(利用側は従来どおり config.LOG_DIR で参照できる)。
+_PREFERRED_LOG_DIR: str = os.path.join(BASE_DIR, "logs")
 DEVICES_JSON_PATH: str = os.path.join(BASE_DIR, "devices.json")
 
 # --- DBテーブル名定義 ---
@@ -571,14 +583,21 @@ def _resolve_assets_dir() -> str:
 
 
 def __getattr__(name: str) -> str:
-    """NAS依存パス定数の遅延解決 (PEP 562)。
+    """検証I/Oを伴うパス定数の遅延解決 (PEP 562)。
 
     通常の属性解決(モジュールglobals)に失敗した場合のみ呼ばれるため、
     一度解決して globals() に書き込んだ後は本関数を経由しない(=キャッシュ)。
     テストが monkeypatch.setattr/delattr で上書き・再解決させることも可能。
+
+    Issue #664: ASSETS_DIR(NAS上)に加え、LOG_DIR(ローカルの BASE_DIR/logs)も
+    ここで解決する。LOG_DIR は NAS 依存ではないが、同じ
+    ensure_safe_path_with_backoff を import 時に呼んでいたため、ディスクフル・
+    権限異常時に config を import するだけで最大約31秒ブロックしていた。
     """
     if name == "ASSETS_DIR":
         value = _resolve_assets_dir()
+    elif name == "LOG_DIR":
+        value = ensure_safe_path_with_backoff(_PREFERRED_LOG_DIR, "logs")
     elif name in _ASSETS_DERIVED_PATHS:
         # ASSETS_DIR の解決(必要なら)を経由して派生パスを組み立てる
         assets_dir = globals().get("ASSETS_DIR") or __getattr__("ASSETS_DIR")
@@ -597,7 +616,9 @@ def prewarm_nas_paths() -> None:
     NASの検証・フォールバック判定を済ませる。失敗してもensure_safe_path_with_backoff
     自体がローカルへフォールバックするため例外は送出しない。
     """
-    for name in ("ASSETS_DIR", *_ASSETS_DERIVED_PATHS):
+    # Issue #664: LOG_DIR も遅延化したため、ここで一緒に解決しておく
+    # (遅延化前と同じく、起動時点で検証・フォールバック判定を済ませる)。
+    for name in ("ASSETS_DIR", "LOG_DIR", *_ASSETS_DERIVED_PATHS):
         getattr(sys.modules[__name__], name)
     logger.info("✅ NAS依存パスのプリウォーム完了")
 
@@ -630,3 +651,12 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM parse error: {e}. 即時強制にフォールバックします。")
     YOUTUBE_REWARD_COOLDOWN_ENFORCE_FROM = _date(2000, 1, 1)
+
+# ==========================================
+# 15. 週次レポート設定
+# ==========================================
+# weekly_analyze_report.py が電力量(kWh)から電気代を概算するときの単価(円/kWh)。
+# Issue #663: 以前は weekly_analyze_report.py に直書きされており、コメント自身が
+# 「本来はconfig.pyまたは.envから読み込むべき値」と書いていた。電気料金は地域・
+# 契約で変わる個人環境値のため、.env で上書きできるようにする。
+ELEC_PRICE_PER_KWH: int = _get_int_env("ELEC_PRICE_PER_KWH", 31)

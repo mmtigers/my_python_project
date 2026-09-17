@@ -6,6 +6,10 @@ config.py のNASパス遅延解決(Issue #330 PR-B、PEP 562のモジュール__
 Exponential Backoff、最悪 約31秒/パス) がNAS上の ASSETS_DIR に対して
 実行され、NAS障害時にconfigをimportするだけのプロセスまでブロックしていた。
 現在は初回アクセス時に解決してモジュール属性へキャッシュする。
+
+Issue #664: 同じ取り残しが LOG_DIR(ローカルの BASE_DIR/logs)にも残っていた。
+NAS 依存ではないがディスクフル・権限異常時には同じくブロックしうるため、同じ
+仕組みへ移した。
 """
 import os
 import subprocess
@@ -19,7 +23,8 @@ import config
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-_LAZY_NAMES = ["ASSETS_DIR", *config._ASSETS_DERIVED_PATHS]
+# Issue #664: LOG_DIR も import 時の ensure_safe_path_with_backoff から遅延解決へ移した
+_LAZY_NAMES = ["ASSETS_DIR", "LOG_DIR", *config._ASSETS_DERIVED_PATHS]
 
 
 @pytest.fixture
@@ -89,7 +94,7 @@ class TestImportDoesNotTouchNasPaths:
         """
         code = (
             "import config, sys; "
-            "lazy = ['ASSETS_DIR', *config._ASSETS_DERIVED_PATHS]; "
+            "lazy = ['ASSETS_DIR', 'LOG_DIR', *config._ASSETS_DERIVED_PATHS]; "
             "resolved = [n for n in lazy if n in vars(config)]; "
             "sys.exit(0 if not resolved else 1)"
         )
@@ -108,3 +113,37 @@ class TestImportDoesNotTouchNasPaths:
             "import時点でNAS依存パスが解決されています(遅延化の回帰): "
             f"stdout={result.stdout} stderr={result.stderr}"
         )
+
+
+class TestLogDirLazyResolution:
+    """Issue #664: LOG_DIR の遅延解決。"""
+
+    def test_log_dir_resolves_once_and_caches(self, clean_lazy_cache, tmp_path, monkeypatch):
+        calls = []
+
+        def fake_ensure(preferred_path, fallback_name, max_retries=5):
+            calls.append((preferred_path, fallback_name))
+            path = str(tmp_path / fallback_name)
+            os.makedirs(path, exist_ok=True)
+            return path
+
+        monkeypatch.setattr(config, "ensure_safe_path_with_backoff", fake_ensure)
+
+        first = config.LOG_DIR
+        second = config.LOG_DIR
+
+        assert first == second == str(tmp_path / "logs")
+        assert calls == [(config._PREFERRED_LOG_DIR, "logs")]
+
+    def test_preferred_path_is_unchanged_from_before_the_lazy_move(self):
+        """遅延化しても、解決を試みる先(BASE_DIR/logs)は従来と同じであること。"""
+        assert config._PREFERRED_LOG_DIR == os.path.join(config.BASE_DIR, "logs")
+
+    def test_getattr_default_still_works_for_logger(self, clean_lazy_cache, tmp_path, monkeypatch):
+        """core/logger.py は getattr(config, "LOG_DIR", None) で参照する。
+        遅延解決でも None にならず実パスが返ること。"""
+        monkeypatch.setattr(
+            config, "ensure_safe_path_with_backoff",
+            lambda p, f, max_retries=5: str(tmp_path / f),
+        )
+        assert getattr(config, "LOG_DIR", None) == str(tmp_path / "logs")

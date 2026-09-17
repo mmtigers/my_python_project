@@ -9,8 +9,8 @@
 
 ## 関連ドキュメント
 
-- [common.md](./common.md) — `setup_logging`を再エクスポートするFacadeモジュール
-- [logger.md](./logger.md) — `common.setup_logging`の実体(`core.logger.setup_logging`)
+- [common.md](./common.md) — **Issue #664 で `common.py` ごと廃止された Deprecated Facade**（本ファイルは実体を直importするようになった。仕様書は履歴として残っている）
+- [logger.md](./logger.md) — `core.logger.setup_logging`の実体(`core.logger.setup_logging`)
 - [dashboard.md](./dashboard.md) — 呼び出し元候補。Streamlitダッシュボードの`views/dashboard/misc_tab.py`(`render_traffic`)が本ファイルの機能を利用すると推測される
 - [utils.md](./utils.md) — Issue #592で追加された`get_now_jst`の実体。`get_route_info`の検索対象時刻（現在時刻+20分）の基準として使用
 
@@ -31,14 +31,14 @@
 | `re` | 標準ライブラリ | 時刻文字列（`HH:MM`形式）の正規表現抽出 | `import re` (行番号: 4 / 抜粋: "import re") |
 | `timedelta` | 標準ライブラリ | 検索対象時刻（現在時刻+20分）の計算 | `from datetime import timedelta` (行番号: 5 / 抜粋: "from datetime import timedelta") |
 | `typing` (`Dict`, `Any`, `List`) | 標準ライブラリ | 関数の型ヒント | `from typing import Dict, Any, List` (行番号: 6 / 抜粋: "from typing import Dict, Any, List") |
-| `common` | 内部モジュール | ロガーの生成（`setup_logging`） | `import common` (行番号: 9 / 抜粋: "import common") |
+| `core.logger.setup_logging` | ローカルモジュール | **（Issue #664 で変更）** 以前は Deprecated Facade である `common` 経由で参照していた。`common.py` の廃止に伴い実体を直接importする | 根拠: `from core.logger import setup_logging` (行番号: 9 / 抜粋: "from core.logger import setup_logging") |
 | `core.utils.get_now_jst`（Issue #592で追加） | 内部モジュール | JSTの現在時刻(aware `datetime`)の取得。以前は`from datetime import datetime, timedelta`で`datetime`をimportし、`datetime.now()`（ホストOSのタイムゾーン設定に依存するnaive時刻）を検索時刻の起点にしていたが、Yahoo!路線情報は日本国内の実時刻を前提とした検索APIのため、ホストがJST以外の設定だと実際とは異なる日時で検索してしまう問題があった。本関数への置き換えに伴い、`datetime`クラス自体は他で使われなくなったため`from datetime import datetime, timedelta`は`from datetime import timedelta`に変更された | `from core.utils import get_now_jst` (行番号: 10 / 抜粋: "from core.utils import get_now_jst") |
 
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
 | --- | --- | --- |
-| `common.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = common.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")") |
+| `core.logger.setup_logging` | 生成されるロガーの出力先・フォーマット・ログレベルの詳細が不明。 | `logger = core.logger.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = setup_logging("train_service")") |
 | JR西日本 運行情報API (`JR_WEST_JSON_URL`) | レスポンスJSONの完全な構造（`lines`キー以下の全路線ID一覧や、`status`/`text`以外のフィールドの有無）が本ファイルからは不明。 | `resp = requests.get(JR_WEST_JSON_URL, timeout=5)` (行番号: 38 / 抜粋: "resp = requests.get(JR_WEST_JSON_URL, timeout=5)") |
 | Yahoo!路線情報 (`YAHOO_SEARCH_URL`) | 検索結果HTMLのDOM構造（CSSセレクタが対象とする要素の完全な仕様）や、将来的なサイト構造変更への耐性が不明。 | `resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)` (行番号: 113 / 抜粋: "resp = requests.get(YAHOO_SEARCH_URL, params=params, timeout=5)") |
 
@@ -46,24 +46,24 @@
 
 ### `logger` (モジュールレベル変数)
 
-* **役割**: `common.setup_logging` を用いて `"train_service"` 名のロガーインスタンスを生成する。
-* 根拠: `logger = common.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")")
+* **役割**: `core.logger.setup_logging` を用いて `"train_service"` 名のロガーインスタンスを生成する。
+* 根拠: `logger = core.logger.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = setup_logging("train_service")")
 
 
 * **引数/リクエスト**: なし
-* 根拠: (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")")
+* 根拠: (行番号: 13 / 抜粋: "logger = setup_logging("train_service")")
 
 
 * **戻り値/レスポンス**: なし（グローバル変数への代入）
-* 根拠: (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")")
+* 根拠: (行番号: 13 / 抜粋: "logger = setup_logging("train_service")")
 
 
 * **副作用**: モジュール変数 `logger` の生成。
-* 根拠: (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")")
+* 根拠: (行番号: 13 / 抜粋: "logger = setup_logging("train_service")")
 
 
 * **エラーハンドリング**: なし
-* 根拠: (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")")
+* 根拠: (行番号: 13 / 抜粋: "logger = setup_logging("train_service")")
 
 
 
@@ -254,7 +254,7 @@ graph TD
 
 | 優先度 | ファイル名(推測可) | 理由 | 根拠 |
 | --- | --- | --- | --- |
-| 高 | `common.py` | `setup_logging` の実装（ログ出力先やフォーマット）を確認するため。 | `logger = common.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = common.setup_logging("train_service")") |
+| 高 | `common.py` | `setup_logging` の実装（ログ出力先やフォーマット）を確認するため。 | `logger = core.logger.setup_logging("train_service")` (行番号: 13 / 抜粋: "logger = setup_logging("train_service")") |
 | 中 | `views/dashboard/misc_tab.py` | `dashboard.py` の解析より、電車遅延タブ（`misc_tab.render_traffic()`）が本ファイルの機能を利用している可能性が高く、`get_jr_traffic_status`/`get_route_info` の戻り値がどう画面表示されるかを確認するため。 | `def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:` (行番号: 21 / 抜粋: "def get_jr_traffic_status() -> Dict[str, Dict[str, Any]]:")（`train_service.py` 自体からの直接参照ではなく、周辺ファイル調査から得た推測） |
 
 ## 8. 保守上の注意点
@@ -271,7 +271,7 @@ graph TD
 
 | 項目 | 理由 | 必要なファイル |
 | --- | --- | --- |
-| `common.setup_logging` の仕様 | ロガーの出力先・フォーマット・ログレベルが不明。 | `common.py` |
+| `core.logger.setup_logging` の仕様 | ロガーの出力先・フォーマット・ログレベルが不明。 | `common.py` |
 | JR西日本APIのレスポンス完全仕様 | `lines` オブジェクト内に `G`, `A` 以外にどのような路線IDが存在するか、`status`/`text` 以外のフィールドの有無が不明。（リポジトリ内を検索したが該当する仕様書ファイルは存在せず、解消不可。JR西日本公式APIドキュメントを要参照） | JR西日本APIの公式仕様書（本リポジトリ外） |
 | Yahoo!路線情報の現在のHTML構造 | コード中のCSSセレクタが現在のサイト構造と一致しているかは、本ファイルの解析のみでは検証できない。（リポジトリ内を検索したが対象サイトのHTMLファイルは存在せず、解消不可。外部サイトの実際の構造を要確認） | 対象サイトの実際のHTML（本リポジトリ外） |
 | 呼び出し元の利用方法 | `get_jr_traffic_status` と `get_route_info` がどの画面・どの頻度で呼び出されるかが不明。 | `views/dashboard/misc_tab.py` 等の呼び出し元 |
@@ -280,7 +280,7 @@ graph TD
 
 | 元の不明事項 | 判明した内容 | 参照元ドキュメント |
 | --- | --- | --- |
-| `common.setup_logging` の仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
+| `core.logger.setup_logging` の仕様 | `logger.md`の解析によれば、`setup_logging`はコンソール出力・日次ローテーションのファイル出力(`home_system.log`固定)・ERRORレベル以上のDiscord Webhook通知(`DiscordErrorHandler`)の3種のハンドラを登録する設計であることが判明した。 | logger.md |
 | 呼び出し元の利用方法 | `views/dashboard/misc_tab.py`を直接確認した。`render_traffic()`関数(14〜46行目)が16行目で`train_service.get_jr_traffic_status()`を呼び出し、戻り値の`jr_status["宝塚線"]`/`jr_status["神戸線"]`をStreamlitの画面(「🚃 JR宝塚線・神戸線 運行状況」セクション)に表示する。また`_render_route_search(col, from_st, to_st, label_icon)`関数(48行目〜)が51行目で`train_service.get_route_info(from_st, to_st)`を呼び出し、`render_traffic()`内で現在時刻(4〜11時: 伊丹→長岡京の出勤ルート、12〜23時および深夜帯: 長岡京→伊丹の帰宅ルート)に応じて呼び出される。呼び出し頻度自体（Streamlit画面の再描画タイミング依存)は`misc_tab.py`単体からは確認できなかった。 | 直接ソース確認: `MY_HOME_SYSTEM/views/dashboard/misc_tab.py:11, 14-51` |
 
 ## 10. 自己検証結果

@@ -12,7 +12,7 @@ from unittest.mock import patch
 # プロジェクトルートにパスを通す
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 import config
 from monitors.nas_monitor import NasMonitor
 
@@ -414,7 +414,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -434,7 +434,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=False, mount_ok=False, usage=None)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM nas_records ORDER BY id DESC LIMIT 1"
             ).fetchone()
@@ -451,7 +451,7 @@ class TestNasMonitorSaveToDbWritesNasRecords:
 
         monitor.save_to_db(ping_ok=True, mount_ok=True, usage=usage)
 
-        with common.get_db_cursor() as cur:
+        with get_db_cursor() as cur:
             row = cur.execute(
                 "SELECT * FROM device_records WHERE device_name='NAS_Monitor' ORDER BY id DESC LIMIT 1"
             ).fetchone()

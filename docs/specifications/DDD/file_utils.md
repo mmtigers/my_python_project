@@ -22,7 +22,7 @@
 * 根拠: [redact_discord_webhook_url定義] (行番号: 111〜122 / 抜粋: "_DISCORD_WEBHOOK_URL_RE = re.compile(r\"(/api/webhooks/\\d+)/[A-Za-z0-9_\\-]+\")" / "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。")
 * 根拠: [untitledフォールバックとコメント] (行番号: 22〜28 / 抜粋: "if not safe:\n        # Low: 入力が \"..\" や \".\" 等の記号のみで構成されている場合、ここまでの\n        # 処理で空文字列になりうる。呼び出し側は戻り値へ拡張子を連結するだけの\n        # ものが多く(例: sanitize_filename(video_id) + \".mp4\")、空文字のままだと\n        # \".mp4\" のような隠しファイル(空stem)が生成されてしまうため、安全な\n        # フォールバック名を補う。\n        safe = \"untitled\"")
 * 根拠: [_WINDOWS_RESERVED_NAMES定義とコメント] (行番号: 10〜17 / 抜粋: "# #469: Windows予約デバイス名(拡張子の有無に関わらず作成できない)。\n# NASがWindows系ファイルシステム(SMB/CIFS等)を経由する場合の互換性のため、\n# サニタイズ後の名前がこれらに一致する場合はサフィックスを付与する。\n_WINDOWS_RESERVED_NAMES = frozenset(\n    {\"CON\", \"PRN\", \"AUX\", \"NUL\"}\n    | {f\"COM{i}\" for i in range(1, 10)}\n    | {f\"LPT{i}\" for i in range(1, 10)}\n)")、制御文字置換 (行番号: 32〜34 / 抜粋: "# #469: 禁止文字に加え、制御文字(0x00-0x1F、0x7F)もWindows/一部ファイル\n    # システムで問題になるため同様に置換する。\n    safe = re.sub(r'[\\\\/*?:\"<>|\\x00-\\x1f\\x7f]', '_', filename).strip()")、予約名サフィックス付与 (行番号: 54〜57 / 抜粋: "# #469: Windows予約名(拡張子なしの完全一致、大文字小文字区別なし)は\n    # そのままだとファイル作成に失敗しうるため、サフィックスを付けて回避する。\n    if safe.upper() in _WINDOWS_RESERVED_NAMES:\n        safe = f\"{safe}_\"")
-* 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 126〜176 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
+* 根拠: [DiscordCircuitBreaker クラスDocstring] (行番号: 158〜208 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 ## 3. 外部依存関係
 
@@ -99,6 +99,29 @@
 * 根拠: [関数本体全体] (行番号: 45〜90)
 
 
+### `DEFAULT_NAS_MOUNT_POINT` / `resolve_nas_mount_point` / `resolve_nas_data_dir`（Issue #663 で追加）
+
+* **役割**: NASのマウントポイントと、スクリプトごとのNASデータディレクトリを環境変数から解決する。`resolve_nas_mount_point()`は環境変数`NAS_MOUNT_POINT`を読み、未設定・空文字なら`DEFAULT_NAS_MOUNT_POINT`(`"/mnt/nas"`)へフォールバックした`Path`を返す。`resolve_nas_data_dir(script_name)`はそれを使って`<マウントポイント>/home_system/<script_name>/data`の文字列を組み立てる。Issue #663 以前は、`batch_download_discord.py`の`NAS_MOUNT_POINT`、`newface_monitor.py`/`extract_youtube_urls.py`の`NAS_DIR_STR`・`MOUNT_POINT`がいずれもソースに`/mnt/nas`を直書きしており、後者2つはコメントで「本環境のNASパスに適宜変更してください」= 環境ごとにコードを編集する前提になっていた。環境変数のキー名はMY_HOME_SYSTEM/config.pyが読むものと同じ(DDDは同じ`.env`を共用するため、同じNASを指すのに2つのキーを持たせない)。ただしここでは`config`を`import`せず環境変数を直接読む — DDDがMY_HOME_SYSTEM無しでも単独で動く性質(`DDD_REQUIRE_NAS_MOUNT=false`の単独環境向け設計)を崩さないため。
+* 根拠: `def resolve_nas_mount_point() -> Path:` (行番号: 114 / 抜粋: "def resolve_nas_mount_point() -> Path:")
+* 根拠: `def resolve_nas_data_dir(script_name: str) -> str:` (行番号: 134 / 抜粋: "def resolve_nas_data_dir(script_name: str) -> str:")
+
+
+* **引数/リクエスト**: `resolve_nas_mount_point()`は引数なし。`resolve_nas_data_dir(script_name: str)`はNASデータディレクトリ名に使うスクリプト名(`"newface_monitor"` / `"youtube_extractor"`)。
+* 根拠: `def resolve_nas_data_dir(script_name: str) -> str:` (行番号: 134 / 抜粋: "def resolve_nas_data_dir(script_name: str) -> str:")
+
+
+* **戻り値/レスポンス**: `resolve_nas_mount_point()`は`Path`、`resolve_nas_data_dir()`は`str`(呼び出し元の`NAS_DIR_STR`が`str`のため)。
+* 根拠: [組み立て] (行番号: 142 / 抜粋: "return str(resolve_nas_mount_point() / \"home_system\" / script_name / \"data\")")
+
+
+* **副作用**: なし（環境変数の読み取りのみ。ディレクトリの作成・存在確認は行わない）。
+* 根拠: [環境変数の読み取り] (行番号: 132 / 抜粋: "raw = os.getenv(\"NAS_MOUNT_POINT\")")
+
+
+* **エラーハンドリング**: 例外を送出しない。未設定・空文字・空白のみの値はすべて既定値へフォールバックする。
+* 根拠: [フォールバック] (行番号: 133-134 / 抜粋: "if raw is None or raw.strip() == \"\":\n        return Path(DEFAULT_NAS_MOUNT_POINT)")
+
+
 ### `_DISCORD_WEBHOOK_URL_RE`（モジュールレベル変数、**（2026-09-06 品質監査で修正）**追加）
 
 * **役割**: `redact_discord_webhook_url`が使用するコンパイル済み正規表現。Discord Webhook URLのパス部分`/api/webhooks/<数字ID>`をグループ1として捕捉し、その直後の`/`に続くトークン部分（`A-Za-z0-9_-`の1文字以上）までを一致範囲とする。
@@ -124,11 +147,11 @@
 ### `redact_discord_webhook_url`（**（2026-09-06 品質監査で修正）**追加）
 
 * **役割**: 文字列中のDiscord Webhook URLのトークン部分をマスクする関数。Docstringによれば、`requests.HTTPError`/`ConnectionError`の`str()`は"... for url: https://discord.com/api/webhooks/<id>/<token>"のように送信先URLを丸ごと含み、これを`logger.error`でそのまま出力するとログファイルだけでなく`core.logger.DiscordErrorHandler`経由でエラー通知チャンネルにもWebhookトークンが転記されてしまうため、ログ出力前に必ずこの関数を通すことを意図している。
-* 根拠: [関数定義とDocstring] (行番号: 114〜123 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。\n\n    requests.HTTPError / ConnectionError の str() は \"... for url: https://discord.com/\n    api/webhooks/<id>/<token>\" のように送信先URLを丸ごと含む。これを logger.error で\n    そのまま出力すると、ログファイルだけでなく core.logger.DiscordErrorHandler 経由で\n    エラー通知チャンネルにも Webhook トークンが転記されてしまうため、ログ出力前に\n    必ずこの関数を通す。")
+* 根拠: [関数定義とDocstring] (行番号: 146〜155 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:\n    \"\"\"文字列中の Discord Webhook URL のトークン部分をマスクする。\n\n    requests.HTTPError / ConnectionError の str() は \"... for url: https://discord.com/\n    api/webhooks/<id>/<token>\" のように送信先URLを丸ごと含む。これを logger.error で\n    そのまま出力すると、ログファイルだけでなく core.logger.DiscordErrorHandler 経由で\n    エラー通知チャンネルにも Webhook トークンが転記されてしまうため、ログ出力前に\n    必ずこの関数を通す。")
 
 
 * **引数/リクエスト**: `text: str` — マスク対象の文字列。実装は`str(text)`で文字列化してから処理するため、呼び出し元（`batch_download_discord.py`・`newface_monitor.py`）は例外オブジェクトをそのまま渡している。
-* 根拠: [引数定義とstr()変換] (行番号: 114, 122 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
+* 根拠: [引数定義とstr()変換] (行番号: 146, 122 / 抜粋: "def redact_discord_webhook_url(text: str) -> str:" / "return _DISCORD_WEBHOOK_URL_RE.sub(r\"\\1/<redacted>\", str(text))")
 
 
 * **戻り値/レスポンス**: `str` — `_DISCORD_WEBHOOK_URL_RE`に一致した各箇所を「グループ1（`/api/webhooks/<id>`）＋`/<redacted>`」に置換した文字列。一致箇所が無ければ`str(text)`がそのまま返る。
@@ -146,19 +169,19 @@
 ### `DiscordCircuitBreaker`
 
 * **役割**: Discord Webhookへの送信が連続して失敗した回数を数え、指定した閾値(`failure_threshold`)に達すると「開いた(is_open=True)」状態になり、それ以降の送信呼び出し元に送信をスキップさせるためのプロセス内サーキットブレーカー。クラスDocstringによれば、`newface_monitor.py`の`DiscordNotifier.notify()`には元々401/404限定の簡易的な打ち切りロジックしかなく、タイムアウトや接続エラーには対応していなかった問題と、`batch_download_discord.py`側の`DiscordNotifier.send()`には同種の仕組みが一切無かった問題を、両スクリプトで共通利用できる形で解消するために追加された。cron等で毎回新規プロセスとして起動される運用を前提に、プロセスをまたいだ状態の永続化は行わない(インスタンス変数のみで状態を保持する)。
-* 根拠: [クラス定義とDocstring] (行番号: 126〜176 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
+* 根拠: [クラス定義とDocstring] (行番号: 158〜208 / 抜粋: "class DiscordCircuitBreaker:\n    \"\"\"Discord Webhookへの連続送信失敗を検知し、それ以降の送信をスキップする\n    プロセス内サーキットブレーカー。")
 
 
 * **引数/リクエスト**: `__init__(self, failure_threshold: int = 3)` — 連続失敗が何回に達したら開くかの閾値。`is_open`(プロパティ、引数なし)、`record_success()`(引数なし)、`record_failure()`(引数なし)、`trip()`(引数なし)。
-* 根拠: [各メソッド定義] (行番号: 147, 154〜157, 159, 165, 172 / 抜粋: "def __init__(self, failure_threshold: int = 3):", "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+* 根拠: [各メソッド定義] (行番号: 179, 186〜189, 191, 197, 204 / 抜粋: "def __init__(self, failure_threshold: int = 3):", "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
 
 
 * **戻り値/レスポンス**: `is_open`(プロパティ)は`bool`(送信をスキップすべきならTrue)。`__init__`/`record_success`/`record_failure`/`trip`はいずれも`None`。
-* 根拠: [型ヒント] (行番号: 154, 159, 165, 172 / 抜粋: "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
+* 根拠: [型ヒント] (行番号: 186, 191, 197, 204 / 抜粋: "def is_open(self) -> bool:", "def record_success(self) -> None:", "def record_failure(self) -> None:", "def trip(self) -> None:")
 
 
 * **副作用**: いずれもインスタンス変数(`self._consecutive_failures`, `self._open`)の書き換えのみで、外部I/Oは行わない。`record_success()`は連続失敗カウントを0にリセットしブレーカーを閉じる。`record_failure()`は連続失敗カウントを1増やし、`failure_threshold`に達した場合のみブレーカーを開く。`trip()`は閾値を無視して即座にブレーカーを開く(Docstringによれば、Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した場合向け)。**[修正済み・Issue #458]** `newface_monitor.py`がサイト巡回をThreadPoolExecutorで並列化し、1つの`DiscordNotifier`(=1つの本インスタンス)が複数スレッドから同時に呼び出されうるようになったため、`is_open`の読み取りと`record_success`/`record_failure`/`trip`によるインスタンス変数の書き換えは、すべて`__init__`で生成する`threading.Lock`(`self._lock`)で保護するようになった。
-* 根拠: [record_success本体] (行番号: 159〜163 / 抜粋: "def record_success(self) -> None:\n        \"\"\"送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。\"\"\"\n        self._consecutive_failures = 0\n        self._open = False")、[record_failure本体] (行番号: 165〜170 / 抜粋: "def record_failure(self) -> None:\n        \"\"\"送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。\"\"\"\n        self._consecutive_failures += 1\n        if self._consecutive_failures >= self._failure_threshold:\n            self._open = True")、[trip本体] (行番号: 172〜176 / 抜粋: "def trip(self) -> None:\n        \"\"\"Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した\n        場合に、閾値を待たず即座にブレーカーを開く。\"\"\"\n        self._open = True")
+* 根拠: [record_success本体] (行番号: 191〜195 / 抜粋: "def record_success(self) -> None:\n        \"\"\"送信成功時に呼び出し、連続失敗カウントとブレーカー状態をリセットする。\"\"\"\n        self._consecutive_failures = 0\n        self._open = False")、[record_failure本体] (行番号: 197〜202 / 抜粋: "def record_failure(self) -> None:\n        \"\"\"送信失敗時に呼び出す。連続失敗数が閾値に達すると自動的にブレーカーを開く。\"\"\"\n        self._consecutive_failures += 1\n        if self._consecutive_failures >= self._failure_threshold:\n            self._open = True")、[trip本体] (行番号: 204〜208 / 抜粋: "def trip(self) -> None:\n        \"\"\"Webhook自体が無効/失効している等、再試行が明らかに無意味と判明した\n        場合に、閾値を待たず即座にブレーカーを開く。\"\"\"\n        self._open = True")
 
 
 * **エラーハンドリング**: なし(例外を送出する処理は含まれていない。呼び出し順序の妥当性チェックも存在せず、`record_success`/`record_failure`/`trip`はいつ何度呼び出されても単に内部カウンタと`_open`フラグを更新するだけである)

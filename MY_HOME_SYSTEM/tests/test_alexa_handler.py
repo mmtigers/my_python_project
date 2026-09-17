@@ -12,12 +12,12 @@ from unittest.mock import MagicMock
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import common
+from core.database import get_db_cursor
 from handlers import alexa_handler
 
 
 def _seed_users_and_pending():
-    with common.get_db_cursor(commit=True) as cur:
+    with get_db_cursor(commit=True) as cur:
         cur.execute("""
             INSERT INTO quest_users (user_id, name, job_class, level, exp, gold, avatar, role)
             VALUES ('dad', 'パパ', 'warrior', 3, 40, 120, '🦸', 'role_adult')

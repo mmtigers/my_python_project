@@ -83,8 +83,9 @@ class TestPruneFinishedVodProcesses:
 class TestVodGenerationLockPruning:
     """#247: _vod_generation_locksは以前、cam_id×target_dateのキーを一度登録すると
     二度と削除されず、_active_vod_processesに対応するような剪定処理も存在しなかった
-    ため無限に蓄積し続けていた。参照カウント方式(_RefCountedLock)により、使用後は
-    自動的にエントリが削除されることを検証する。"""
+    ため無限に蓄積し続けていた。参照カウント方式(Issue #661 で
+    core.utils.RefCountedLockRegistry へ統合)により、使用後は自動的に
+    エントリが削除されることを検証する。"""
 
     def test_entry_is_removed_after_use(self):
         with camera_service._vod_generation_lock("cam1_20260101"):
@@ -100,7 +101,7 @@ class TestVodGenerationLockPruning:
         with camera_service._vod_generation_lock("cam2_20260102"):
             pass
 
-        assert camera_service._vod_generation_locks == {}
+        assert camera_service._vod_generation_locks.keys() == []
 
     def test_entry_not_removed_while_another_thread_is_waiting(self):
         """使用中(参照カウント>0)のエントリは、他スレッドが利用中の間は
@@ -174,7 +175,7 @@ class TestVodGenerationLockPruning:
             t.join(timeout=5)
 
         assert max_concurrent == 1, "同一process_keyに対する排他制御が破られている"
-        assert camera_service._vod_generation_locks == {}
+        assert camera_service._vod_generation_locks.keys() == []
 
 
 class TestSetCameraEnabledAtomicWrite:
