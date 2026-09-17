@@ -29,7 +29,7 @@
 ### `ApprovalService._get_lock_user_ids_for_history`
 
 * **役割**: `history_id`に対応する`quest_history`行から、ユーザー単位ロックの対象とすべき`user_id`一覧を求める共通ヘルパー。連結履歴(`linked_history_id`)がある場合は相方の`user_id`も含める。`process_approve_quest`/`process_reject_quest`/`process_cancel_quest`がそれぞれ実装していたロジックを一元化したもの。`primary_user_id`を渡さない場合は`quest_history.user_id`を主対象として使い、対象履歴が存在しなければ`HTTPException(404)`を送出する（`process_approve_quest`/`process_reject_quest`の挙動）。`primary_user_id`を渡した場合はそれを主対象としてそのまま使い、対象履歴が存在しなくても404は送出しない（`process_cancel_quest`の挙動）。
-* 根拠: `def _get_lock_user_ids_for_history(\n        self, history_id: int, primary_user_id: Optional[str] = None\n    ) -> List[str]:` (行番号: 28〜64)
+* 根拠: [定義] (行番号: 28〜64 / 抜粋: "def _get_lock_user_ids_for_history(")
 * 根拠: `if primary_user_id is not None:\n            lock_user_ids = [primary_user_id]\n        else:\n            if not hist_peek:\n                raise HTTPException(status_code=404, detail="History not found")\n            lock_user_ids = [hist_peek['user_id']]` (行番号: 49〜54)
 * 根拠: `if hist_peek and hist_peek['linked_history_id'] is not None:\n            with core.database.get_db_cursor() as cur:\n                linked_peek = cur.execute(\n                    "SELECT user_id FROM quest_history WHERE id = ?", (hist_peek['linked_history_id'],)\n                ).fetchone()\n            if linked_peek:\n                lock_user_ids.append(linked_peek['user_id'])` (行番号: 56〜62)
 * **引数/リクエスト**: `history_id: int`, `primary_user_id: Optional[str] = None`
@@ -44,7 +44,7 @@
 ### `ApprovalService.process_approve_quest`
 
 * **役割**: `_get_lock_user_ids_for_history`でロック対象ユーザー（`quest_history`の本来の完了者）と連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_approve_quest_locked`に委譲する薄いラッパー。連結履歴がある場合に相方のIDも合わせてロックするのは、`_process_approve_quest_locked`が`_approve_linked_history`経由で相方の`quest_users`もカスケード更新するためである。
-* 根拠: `def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:` (行番号: 66〜73)
+* 根拠: [定義] (行番号: 66〜73 / 抜粋: "def process_approve_quest(self, approver_id: str, history_id: int) -> Dict[str, Any]:")
 * 根拠: `lock_user_ids = self._get_lock_user_ids_for_history(history_id)\n        with _acquire_user_balance_locks(lock_user_ids):\n            return self._process_approve_quest_locked(approver_id, history_id)` (行番号: 71〜73)
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`
 * 根拠: (行番号: 388)
@@ -58,7 +58,7 @@
 ### `ApprovalService._process_approve_quest_locked`
 
 * **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を承認する実処理。TV解錠(SwitchBot API経由の副作用)は`with core.database.get_db_cursor(commit=True)`ブロックの**外**（コミット完了後）で行われる。ブロック内では該当時に`tv_unlock_quest_id`へ`quest['quest_id']`を記録するだけにし、ブロックを抜けた後`tv_unlock_quest_id is not None`なら`switchbot_service.trigger_tv_unlock`を呼ぶ（**毎朝ミッション統合で変更**: 以前は本クラスのプライベートメソッド`_trigger_tv_unlock`を`self._trigger_tv_unlock(tv_unlock_quest_id)`として呼んでいたが、`services/routine_service.py`側の朝の準備チェックリスト完了処理とも共有するため、`switchbot_service`モジュールの関数として切り出された。呼び出し時に渡す文字列はログ識別用の`context`引数（例: `f"quest_id={tv_unlock_quest_id}"`）に変わっている）。`override_rewards`の`gold`/`exp`は`hist['gold_earned'] or 0`/`hist['exp_earned'] or 0`として`NULL`を0扱いにする。TVロック判定の`quest`は`sync_master_data`のマスタ削除後も`quest_history`の`pending`行が残るケースで`None`になり得るため`if quest and ...`でガードされている。`_approve_linked_history`が返す相方の報酬情報を`result`辞書へ`partnerUserId`/`partnerLeveledUp`/`partnerNewLevel`/`partnerEarnedMedals`として格納する。
-* 根拠: `def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:` (行番号: 75〜133)
+* 根拠: [定義] (行番号: 75〜133 / 抜粋: "def _process_approve_quest_locked(self, approver_id: str, history_id: int) -> Dict[str, Any]:")
 * 根拠: `tv_unlock_quest_id: Optional[int] = None\n        with core.database.get_db_cursor(commit=True) as cur:` (行番号: 80〜81)、`if tv_unlock_quest_id is not None:\n            switchbot_service.trigger_tv_unlock(f"quest_id={tv_unlock_quest_id}")\n        return result` (行番号: 131〜133)
 * 根拠: `override_rewards = {\n                "gold": hist['gold_earned'] or 0,\n                "exp": hist['exp_earned'] or 0\n            }` (行番号: 101〜104)
 * 根拠: `if quest and quest['quest_id'] in config.TV_UNLOCK_QUEST_IDS and config.TV_PLUG_DEVICE_ID:\n                if user['role'] == ROLE_CHILD:\n                    tv_unlock_quest_id = quest['quest_id']` (行番号: 125〜127)
@@ -75,7 +75,7 @@
 ### `ApprovalService._approve_linked_history`
 
 * **役割**: 兄妹連携クエストで連結された相方側の`quest_history`行を承認済みに確定する。対象行が存在しない、または既に`pending`でない、または対象ユーザーが存在しない場合は何もしない冪等な実装。相方の`user_id`と`_apply_quest_rewards`の戻り値をひとつの辞書にまとめて呼び出し元へ返す。`override_rewards`の`gold`/`exp`は`linked_hist['gold_earned'] or 0`/`linked_hist['exp_earned'] or 0`として`NULL`を0扱いにする。
-* 根拠: `def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:` (行番号: 135〜155)
+* 根拠: [定義] (行番号: 135〜155 / 抜粋: "def _approve_linked_history(self, cur, linked_history_id: int) -> Optional[Dict[str, Any]]:")
 * 根拠: `if not linked_hist or linked_hist['status'] != 'pending':\n            return None` (行番号: 144〜145)、`if not linked_user:\n            return None` (行番号: 149〜150)
 * 根拠: `override_rewards = {"gold": linked_hist['gold_earned'] or 0, "exp": linked_hist['exp_earned'] or 0}` (行番号: 152)
 * **引数/リクエスト**: `cur`, `linked_history_id: int`
@@ -95,7 +95,7 @@
 ### `ApprovalService.process_reject_quest`
 
 * **役割**: `_get_lock_user_ids_for_history`で対象ユーザーと連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_reject_quest_locked`に委譲する薄いラッパー。`process_approve_quest`/`process_cancel_quest`と同じロックに参加させることで、承認と却下がほぼ同時に実行された場合の不整合を防ぐ。
-* 根拠: `def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 157〜168)
+* 根拠: [定義] (行番号: 157〜168 / 抜粋: "def process_reject_quest(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:")
 * 根拠: `lock_user_ids = self._get_lock_user_ids_for_history(history_id)\n        with _acquire_user_balance_locks(lock_user_ids):\n            return self._process_reject_quest_locked(approver_id, history_id, reason)` (行番号: 166〜168)
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
 * 根拠: (行番号: 479)
@@ -109,7 +109,7 @@
 ### `ApprovalService._process_reject_quest_locked`
 
 * **役割**: `ROLE_ADULT`のユーザーが子供のクエスト完了を却下する実処理。`quest_history`該当行の`status`列を`'rejected'`へ`UPDATE`することで却下履歴を残す（`DELETE`はしない）。主対象・連結相方いずれのUPDATEも`AND status = 'pending'`を条件に含める。連結された相方の履歴が`pending`であれば、同一トランザクション内で相方側の`status`も同様に`'rejected'`へカスケード更新する。
-* 根拠: `def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:` (行番号: 170〜198)
+* 根拠: [定義] (行番号: 170〜198 / 抜粋: "def _process_reject_quest_locked(self, approver_id: str, history_id: int, reason: Optional[str] = None) -> Dict[str, str]:")
 * 根拠: `cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (history_id,))` (行番号: 190)
 * 根拠: `if hist['linked_history_id'] is not None:\n                cur.execute("UPDATE quest_history SET status = 'rejected' WHERE id = ? AND status = 'pending'", (hist['linked_history_id'],))\n                logger.info(f"Coop Partner Rejected: HistoryID={hist['linked_history_id']}")` (行番号: 193〜195)
 * **引数/リクエスト**: `approver_id: str`, `history_id: int`, `reason: Optional[str] = None`
@@ -124,7 +124,7 @@
 ### `ApprovalService.process_cancel_quest`
 
 * **役割**: `_get_lock_user_ids_for_history`（`primary_user_id=user_id`を渡す）で対象ユーザーと連結された相方（存在する場合）を特定し、`_acquire_user_balance_locks`でそれら全員分のユーザー単位ロックをまとめて取得したうえで、実処理を`_process_cancel_quest_locked`に委譲する薄いラッパー。
-* 根拠: `def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:` (行番号: 212〜219)
+* 根拠: [定義] (行番号: 212〜219 / 抜粋: "def process_cancel_quest(self, user_id: str, history_id: int) -> Dict[str, str]:")
 * 根拠: `lock_user_ids = self._get_lock_user_ids_for_history(history_id, primary_user_id=user_id)\n        with _acquire_user_balance_locks(lock_user_ids):\n            return self._process_cancel_quest_locked(user_id, history_id)` (行番号: 217〜219)
 * **引数/リクエスト**: `user_id: str`, `history_id: int`
 * 根拠: (行番号: 576)
@@ -138,7 +138,7 @@
 ### `ApprovalService._process_cancel_quest_locked`
 
 * **役割**: 対象履歴が本人のものであることを確認したうえで、`_revert_and_delete_history`で報酬をロールバックしつつ`quest_history`行を削除する。連結された相方の履歴があれば、同一トランザクション内で相方側も`_revert_and_delete_history`でカスケード取り消しする。
-* 根拠: `def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:` (行番号: 221〜246)
+* 根拠: [定義] (行番号: 221〜246 / 抜粋: "def _process_cancel_quest_locked(self, user_id: str, history_id: int) -> Dict[str, str]:")
 * 根拠: `if hist['user_id'] != user_id:\n                raise HTTPException(status_code=403, detail="User mismatch")` (行番号: 226〜227)
 * 根拠: `linked_id = hist['linked_history_id']\n            if linked_id is not None:\n                linked_hist = cur.execute(...).fetchone()\n                if linked_hist:\n                    linked_user = cur.execute(...).fetchone()\n                    if linked_user:\n                        self._revert_and_delete_history(cur, linked_hist, linked_user)` (行番号: 236〜242)
 * **引数/リクエスト**: `user_id: str`, `history_id: int`
@@ -153,7 +153,7 @@
 ### `ApprovalService._revert_and_delete_history`
 
 * **役割**: `quest_history`1行を取り消す。`approved`であれば付与済みの経験値・ゴールドをロールバックしてから削除する。`pending`/`rejected`は報酬がまだ付与されていないため、残高には触れず単純に削除する。付与済みゴールドを既に消費している(現在の残高 < 付与額)場合は取り消し自体を拒否し、キャンセルが常に「付与の完全な巻き戻し」になることを保証する。
-* 根拠: `def _revert_and_delete_history(self, cur, hist, user) -> None:` (行番号: 248〜282)
+* 根拠: [定義] (行番号: 248〜282 / 抜粋: "def _revert_and_delete_history(self, cur, hist, user) -> None:")
 * 根拠: `if hist['status'] != 'approved':\n            cur.execute("DELETE FROM quest_history WHERE id = ?", (hist['id'],))\n            return` (行番号: 256〜258)
 * 根拠: `gold_earned = hist['gold_earned'] or 0\n        current_gold = user['gold'] or 0\n        if current_gold < gold_earned:\n            raise HTTPException(\n                status_code=400,\n                detail="獲得したゴールドを既に使用しているため、このクエストは取り消せません",\n            )` (行番号: 265〜271)
 * **引数/リクエスト**: `cur`, `hist`, `user`

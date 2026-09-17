@@ -27,7 +27,7 @@
 ### `apply_quest_rewards`
 
 * **役割**: `game_logic.GameLogic.calculate_drop_rewards`でゴールド・経験値・メダル・ラッキー判定を計算し、`calc_level_progress`でレベル・経験値・レベルアップ有無を求め、`quest_users`を更新する。`history_id`が指定されていれば既存の`quest_history`行を`'approved'`に更新（`completed_at`は書き換えない）、なければ新規挿入する。レベルアップ・ラッキー(メダル獲得)・通常クリア(新規挿入時のみ)に応じて対応するサウンドを再生する。
-* 根拠: `def apply_quest_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:` (行番号: 13〜71)
+* 根拠: [定義] (行番号: 13〜71 / 抜粋: "def apply_quest_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None) -> Dict[str, Any]:")
 * 根拠: `if history_id:\n            cur.execute("UPDATE quest_history SET status='approved', gold_earned=?, exp_earned=?, medals_earned=? WHERE id=?", ...)\n        else:\n            cur.execute("""\n                INSERT INTO quest_history (...)\n                VALUES (?, ?, ?, ?, ?, ?, ?, 'approved')\n            """, ...)` (行番号: 47〜58)
 * 根拠: `if leveled_up:\n            sound_manager.play("level_up")\n        elif is_lucky:\n            sound_manager.play("medal_get")\n        elif not history_id:\n            sound_manager.play("quest_clear")` (行番号: 60〜65)
 * **引数/リクエスト**: `cur`, `user`, `quest`, `now_iso`, `history_id=None`, `override_rewards=None`
