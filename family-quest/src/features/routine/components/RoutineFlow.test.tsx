@@ -87,7 +87,7 @@ describe('RoutineFlow', () => {
 const pmFlow: RoutineActiveFlow = {
     started: true,
     title: '帰ってから寝るまで',
-    checkpoint_time: '18:00',
+    checkpoint_time: '17:30',
     current_step_index: 5,
     in_free_time: false,
     is_complete: false,
@@ -158,7 +158,7 @@ describe('RoutineFreeTimeBanner', () => {
 const momPmFlow: RoutineActiveFlow = {
     started: true,
     title: '帰ってから寝るまで',
-    checkpoint_time: '18:00',
+    checkpoint_time: '17:30',
     current_step_index: 2,
     in_free_time: false,
     is_complete: false,
