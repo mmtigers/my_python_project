@@ -18,7 +18,7 @@ from core import sound_manager
 from routine_data import (
     FULL_BONUS_EXP, FULL_BONUS_GOLD, WEEKEND_DAYS, RoutineFlow, RoutineStep,
     get_checklist_range, get_checkpoint_index, get_effective_checkpoint_time,
-    get_flow_set, get_step_reward,
+    get_flow_set, get_step_reward, is_weekday_skip,
 )
 from services import switchbot_service
 from services.quest.locks import JST, _get_user_balance_lock, logger
@@ -87,11 +87,16 @@ class RoutineService:
     def _resolve_skip_keys(self, cur, user_id: str, flow_key: str, flow: RoutineFlow, now: datetime.datetime) -> Set[str]:
         """今日スキップ(達成済み扱い)すべきステップのkey集合を返す。
 
-        weekend_skip(例: 土日はhandwash不要)とweekend_carryover(例: 宿題は
-        金曜/土曜に完了していれば以降不要)の2種類があり、いずれも平日には適用しない。
+        土日に適用されるものが2種類 — weekend_skip(例: 土日はhandwash不要)と
+        weekend_carryover(例: 宿題は金曜/土曜に完了していれば以降不要) — 、
+        平日に適用されるものが1種類 — weekday_skip(例: パパのキッチン/リビング
+        リセットは土日だけ出す) — ある。
         """
         skip_keys: Set[str] = set()
         if now.weekday() not in WEEKEND_DAYS:
+            for step in flow['steps']:
+                if is_weekday_skip(step):
+                    skip_keys.add(step['key'])
             return skip_keys
         lookback_dates = self._carryover_lookback_dates(now)
         for step in flow['steps']:
@@ -581,7 +586,7 @@ class RoutineService:
                         progress['in_free_time'] = entered_free_time
                         # （夕方フリータイムでTV解錠を追加）宿題・明日の準備まで完了して
                         # 自由時間(pmのfreeステップ)に到達した瞬間、朝の準備チェックリスト
-                        # 全達成時と同じTV電源ON処理を呼ぶ。締切(18:00)超過による強制遷移
+                        # 全達成時と同じTV電源ON処理を呼ぶ。締切(17:30)超過による強制遷移
                         # (_apply_forced_transition)経由でチェックリストへ直接進んだ場合は
                         # ここを通らないため発火しない。対象は智矢(TV_UNLOCK_TARGET_USER_ID)
                         # のみで、涼花(role_childだが対象外)がクリアしても発火しない。

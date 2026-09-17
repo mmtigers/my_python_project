@@ -316,16 +316,15 @@ class TestEveningFreeTimeTvUnlock:
     def test_tv_unlock_not_triggered_for_adult_role(self, isolated_db, monkeypatch):
         """親自身が完了させても、子供向けのTV解錠報酬は発火しない。
 
-        パパのpmフローは子ども用と別物(宿題・明日の準備ではなく「お仕事」)なので、
-        そのユーザー自身のステップkeyで自由時間まで進める。
+        パパのpmフローは子ども用と別物(平日は「お仕事」だけ)なので、そのユーザー
+        自身のステップkeyで自由時間まで進める。
         """
         monkeypatch.setattr(config, "TV_PLUG_DEVICE_ID", "plug-1")
         mock_trigger = MagicMock()
         monkeypatch.setattr(switchbot_service, "trigger_tv_unlock", mock_trigger)
         _seed_user(user_id='dad', role='role_adult')
 
-        for key in ('work', 'handwash', 'snack'):
-            routine_service.complete_step('dad', 'pm', key, now=_at(14, 0))
+        routine_service.complete_step('dad', 'pm', 'work', now=_at(14, 0))
         mock_trigger.assert_not_called()
 
     def test_tv_unlock_not_triggered_for_non_target_child(self, isolated_db, monkeypatch):
@@ -529,10 +528,10 @@ class TestWeekendCheckpointOverride:
         assert am['bonus_gold'] == 150
 
     def test_pm_checkpoint_time_unchanged_on_saturday(self, isolated_db):
-        """夕方(pm)は土日も平日と同じ18:00のまま(要件確認済み: 現状維持)。"""
+        """夕方(pm)は土日も平日と同じ17:30のまま(要件確認済み: 現状維持)。"""
         _seed_user()
         state = routine_service.get_today_state('daughter', now=_saturday_at(15, 0))
-        assert state['flows']['pm']['checkpoint_time'] == '18:00'
+        assert state['flows']['pm']['checkpoint_time'] == '17:30'
 
 
 class TestWeekendPmSkipAndCarryover:
@@ -997,16 +996,29 @@ class TestAdultFlows:
         assert 'tomorrow_prep' in keys
 
     def test_parent_pm_flow_has_no_child_steps(self, isolated_db):
-        """パパのpmは14:00時点でまだ勤務中のため、一本道の先頭が「お仕事」になる。"""
+        """パパのpmは14:00時点でまだ勤務中のため一本道の先頭が「お仕事」で、
+        「帰宅・手洗い」「ひと休み」は持たない(要件確認済み: 平日の昼はお仕事だけ)。"""
         _seed_user(user_id='dad', role='role_adult')
         state = routine_service.get_today_state('dad', now=_at(14, 0))
         keys = [s['key'] for s in state['flows']['pm']['steps']]
         assert 'homework' not in keys
         assert 'tomorrow_prep' not in keys
+        assert 'handwash' not in keys
+        assert 'snack' not in keys
         assert keys == [
-            'work', 'handwash', 'snack', 'free',
+            'work', 'kitchen_reset', 'living_reset', 'free',
             'dinner', 'bath', 'nightclothes', 'nightteeth', 'sleep',
         ]
+
+    def test_dad_weekday_pm_shows_only_work_before_checkpoint(self, isolated_db):
+        """平日はキッチン/リビングリセットがweekday_skipで'done'扱いになるため、
+        チェックポイントより前に実際にやることは「お仕事」だけになる。"""
+        _seed_user(user_id='dad', role='role_adult')
+        state = routine_service.get_today_state('dad', now=_at(14, 0))
+        statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
+        assert statuses['work'] == 'current'
+        assert statuses['kitchen_reset'] == 'done'
+        assert statuses['living_reset'] == 'done'
 
     def test_mom_pm_flow_has_her_own_task_step(self, isolated_db):
         _seed_user(user_id='mom', role='role_adult')
@@ -1053,14 +1065,20 @@ class TestAdultFlows:
         assert exc_info.value.status_code == 404
 
     def test_dad_work_step_is_skipped_on_weekend(self, isolated_db):
-        """土日は勤務が無いため「お仕事」はスキップされ、「帰宅・手洗い」も
-        子ども用と同じくスキップされるので、ひと休みから始まる。"""
+        """土日は勤務が無いため「お仕事」はスキップされ、代わりにキッチン/リビング
+        リセットが出る(要件確認済み: 土日は別のステップにする)。
+
+        これが無いと土日はチェックポイントより前のステップが0個になり、何もせずに
+        満額ボーナスが入ってしまう。
+        """
         _seed_user(user_id='dad', role='role_adult')
         state = routine_service.get_today_state('dad', now=_saturday_at(14, 0))
         statuses = {s['key']: s['status'] for s in state['flows']['pm']['steps']}
         assert statuses['work'] == 'done'
-        assert statuses['handwash'] == 'done'
-        assert statuses['snack'] == 'current'
+        # 一本道(チェックリストではない)なので、先頭のキッチンリセットだけが
+        # 'current' になり、リビングリセットはその完了待ちで 'locked' のまま。
+        assert statuses['kitchen_reset'] == 'current'
+        assert statuses['living_reset'] == 'locked'
 
     def test_mom_cook_dinner_step_is_not_skipped_on_weekend(self, isolated_db):
         """夕食づくりは毎日行うため、元クエスト(id=21、'days'指定なし)と同じく
@@ -1173,6 +1191,108 @@ class TestStepRewards:
             assert state['new_level'] == level
 
 
+class TestDadWeekdayWeekendSplit:
+    """パパのpmは平日「お仕事」のみ、土日はキッチン/リビングリセットに入れ替わる。
+
+    土日に「お仕事」だけをスキップすると、チェックポイントより前のステップが0個になり
+    何もせずに満額ボーナスが入ってしまうため、weekday_skip=True のステップを土日側に
+    置いて按分対象を確保している(要件確認済み)。
+    """
+
+    def test_weekday_bonus_is_full_after_completing_work_alone(self, isolated_db):
+        """平日は「お仕事」1つを終えれば按分対象が全て'done'になり満額ボーナス。"""
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        routine_service.complete_step('dad', 'pm', 'work', now=_at(14, 0))
+        routine_service.get_today_state('dad', now=_at(17, 31))  # チェックポイント通過
+        gold, _exp, _level = _user_balance('dad')
+        assert gold == 150  # 満額(ステップ個別報酬は平日のステップには無い)
+
+    def test_weekend_bonus_is_no_longer_full_when_nothing_is_done(self, isolated_db):
+        """土日に何もしない場合、満額ではなく按分された額しか入らない。
+
+        これがこの分割の目的。以前は土日のチェックポイント前ステップが0個で、
+        _eligible_done_ratio がゼロ除算回避のため 1.0 を返し常に満額だった。
+
+        なお完全に0にはならない: スキップされたステップ(土日の「お仕事」)は
+        仕様上'done'扱いで按分の分子に入るため、3ステップ中1つ達成の扱いになる。
+        この「スキップ=達成済み扱い」は子ども用フロー(土日のhandwash等)と共通の
+        既存仕様であり、本変更では踏襲している。
+        """
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        routine_service.get_today_state('dad', now=_saturday_at(17, 31))
+        gold, _exp, _level = _user_balance('dad')
+        assert gold == round(150 * (1 / 3))  # 満額150ではない
+
+    def test_weekend_full_bonus_requires_both_reset_steps(self, isolated_db):
+        """土日はキッチン/リビングの2つを終えて初めて満額になる。
+
+        あわせて、旧クエスト id=12/13 と同額(各exp80/gold50)がその場で入る。
+        """
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        state = routine_service.complete_step('dad', 'pm', 'kitchen_reset', now=_saturday_at(15, 0))
+        assert state['granted_gold'] == 50
+        assert state['granted_exp'] == 80
+        state = routine_service.complete_step('dad', 'pm', 'living_reset', now=_saturday_at(15, 1))
+        assert state['granted_gold'] == 50
+
+        routine_service.get_today_state('dad', now=_saturday_at(17, 31))  # チェックポイント通過
+        gold, _exp, _level = _user_balance('dad')
+        assert gold == 50 + 50 + 150  # ステップ個別報酬2件 + 満額ボーナス
+
+    def test_weekday_reset_steps_grant_nothing(self, isolated_db):
+        """平日はweekday_skipで'done'扱いになるだけで、報酬は入らない。"""
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        routine_service.get_today_state('dad', now=_at(14, 0))
+        assert _user_balance('dad')[0] == 0
+
+    def test_weekday_reset_step_cannot_be_completed(self, isolated_db):
+        """平日はスキップ済みのため、キッチンリセットを完了報告しようとしても弾かれる。"""
+        from fastapi import HTTPException
+        _seed_user(user_id='dad', role='role_adult', gold=0, exp=0)
+        with pytest.raises(HTTPException) as exc_info:
+            routine_service.complete_step('dad', 'pm', 'kitchen_reset', now=_at(14, 0))
+        assert exc_info.value.status_code == 409
+        assert _user_balance('dad')[0] == 0
+
+
+class TestPmCheckpointIsSeventeenThirty:
+    """夕方(自由時間→寝る準備)の締切は全員共通で17:30(要件確認済み)。"""
+
+    def test_child_pm_checkpoint(self, isolated_db):
+        _seed_user(user_id='son', role='role_child')
+        state = routine_service.get_today_state('son', now=_at(14, 0))
+        assert state['flows']['pm']['checkpoint_time'] == '17:30'
+
+    def test_parent_pm_checkpoint(self, isolated_db):
+        _seed_user(user_id='dad', role='role_adult')
+        _seed_user(user_id='mom', role='role_adult')
+        for uid in ('dad', 'mom'):
+            state = routine_service.get_today_state(uid, now=_at(14, 0))
+            assert state['flows']['pm']['checkpoint_time'] == '17:30'
+
+    def test_am_checkpoint_is_unchanged(self, isolated_db):
+        """朝の締切(平日07:50/土日09:30)は変更していない。"""
+        _seed_user(user_id='son', role='role_child')
+        assert routine_service.get_today_state('son', now=_at(6, 0))['flows']['am']['checkpoint_time'] == '07:50'
+        assert routine_service.get_today_state('son', now=_saturday_at(6, 0))['flows']['am']['checkpoint_time'] == '09:30'
+
+    def test_child_homework_is_reminded_after_1730(self, isolated_db):
+        """17:30を過ぎると宿題・明日の準備は'remind'になり、寝る準備へ進む。"""
+        _seed_user(user_id='son', role='role_child')
+        state = routine_service.get_today_state('son', now=_at(17, 31))['flows']['pm']
+        statuses = {x['key']: x['status'] for x in state['steps']}
+        assert statuses['homework'] == 'remind'
+        assert statuses['tomorrow_prep'] == 'remind'
+        assert state['in_free_time'] is False
+
+    def test_child_flow_still_active_just_before_1730(self, isolated_db):
+        """17:29時点ではまだ通過していない。"""
+        _seed_user(user_id='son', role='role_child')
+        state = routine_service.get_today_state('son', now=_at(17, 29))['flows']['pm']
+        statuses = {x['key']: x['status'] for x in state['steps']}
+        assert statuses['homework'] != 'remind'
+
+
 class TestRetiredQuestsAreGone:
     """すごろくへ寄せたクエストが quest_data.QUESTS に残っていないこと(二重計上防止)。
 
@@ -1184,12 +1304,11 @@ class TestRetiredQuestsAreGone:
         ids = {q['id'] for q in quest_data.QUESTS}
         assert 21 not in ids    # 夕食を作る(ママ) → MOM_ROUTINE_FLOWS の cook_dinner へ
         assert 1006 not in ids  # 幼稚園の連絡帳記入 → 現在行っていないため廃止
+        assert 12 not in ids    # キッチンリセット(パパ) → DAD_ROUTINE_FLOWS の土日ステップへ
+        assert 13 not in ids    # リビングリセット(パパ) → 同上
 
     def test_quests_not_moved_to_routine_remain(self):
-        """パパの会社勤務は「お仕事」ステップと併存する(ステップ側が報酬を持たない)。
-        キッチン/リビングリセットは平日には行わないため土日クエストとして残る。"""
+        """パパの会社勤務は「お仕事」ステップと併存する(ステップ側が報酬を持たない)。"""
         import quest_data
         by_id = {q['id']: q for q in quest_data.QUESTS}
         assert 10 in by_id
-        assert by_id[12]['days'] == '5,6'
-        assert by_id[13]['days'] == '5,6'
