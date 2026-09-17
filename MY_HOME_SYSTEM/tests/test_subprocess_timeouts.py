@@ -37,6 +37,15 @@ def _raise_timeout(*args, **kwargs):
     raise subprocess.TimeoutExpired(cmd="dummy", timeout=1)
 
 
+# Issue #663: NAS_IP の既定は空文字になり、未設定だと check_ping() は ping せずに
+# True を返す。ここで見たいのは subprocess 呼び出しの timeout 指定なので、
+# 実際に ping が走るようドキュメント用アドレス(RFC 5737)を与える。
+def _monitor_with_ip() -> NasMonitor:
+    monitor = NasMonitor()
+    monitor.ip = "203.0.113.1"
+    return monitor
+
+
 class TestTimeoutIsPassed:
     """timeout= が実際に subprocess.run へ渡されていること。"""
 
@@ -96,14 +105,14 @@ class TestTimeoutIsPassed:
         assert run.call_args.kwargs.get("timeout") is not None
 
     def test_nas_monitor_ping(self):
-        monitor = NasMonitor()
+        monitor = _monitor_with_ip()
         with patch("monitors.nas_monitor.subprocess.run", return_value=_completed("")) as run:
             monitor.check_ping()
         assert run.call_args.kwargs.get("timeout") is not None
 
     def test_nas_monitor_ping_outer_bound_is_wider_than_the_ping_deadline(self):
         """`ping -W` は ping 自身の応答待ちしか縛らないため、外側はそれより広く取る。"""
-        monitor = NasMonitor()
+        monitor = _monitor_with_ip()
         with patch("monitors.nas_monitor.subprocess.run", return_value=_completed("")) as run:
             monitor.check_ping()
         assert run.call_args.kwargs["timeout"] > monitor.timeout
@@ -144,7 +153,7 @@ class TestTimeoutDoesNotEscape:
             server_watchdog.check_throttling_status()  # 例外が漏れなければ成功
 
     def test_nas_monitor_ping_returns_unreachable(self):
-        monitor = NasMonitor()
+        monitor = _monitor_with_ip()
         with patch("monitors.nas_monitor.subprocess.run", side_effect=_raise_timeout):
             assert monitor.check_ping() is False
 

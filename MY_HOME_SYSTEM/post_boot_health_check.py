@@ -201,7 +201,8 @@ class PostBootHealthCheck:
 
     # --- 3. Services (Wait & Retry) ---
     def check_services(self):
-        frontend_url = getattr(config, "FRONTEND_URL", "http://localhost:8000/quest/")
+        # Issue #663: 既定値は config.py の1箇所だけに持つ。
+        frontend_url = getattr(config, "FRONTEND_URL", "http://127.0.0.1:8000/quest")
         
         targets = [
             {"name": "Backend Server", "type": "port", "val": 8000, "critical": True},
@@ -246,7 +247,8 @@ class PostBootHealthCheck:
     # --- 4. Peripherals ---
     def check_peripherals(self) -> None:
         """NASの書き込み権限を含む周辺機器のチェックを行う [cite: 438]"""
-        nas_ip = getattr(config, "NAS_IP", "192.168.1.20")
+        # Issue #663: 既定値は config.py の1箇所だけに持つ(未設定なら空文字)。
+        nas_ip = getattr(config, "NAS_IP", "")
         mount_point = getattr(config, "NAS_MOUNT_POINT", "/mnt/nas")
         is_mounted = os.path.ismount(mount_point)
         
