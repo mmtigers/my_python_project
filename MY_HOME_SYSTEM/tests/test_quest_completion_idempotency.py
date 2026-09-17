@@ -32,7 +32,7 @@ from fastapi import HTTPException
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.database import get_db_cursor
-from services.quest_service import QuestService
+from services.quest_service import ApprovalService, QuestService
 
 JST = pytz.timezone("Asia/Tokyo")
 
@@ -72,6 +72,7 @@ class TestSpamGuardIsTimezoneSafe:
     def test_immediate_retry_within_10_seconds_is_rejected(self, isolated_db):
         _seed_quest()
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9001)
 
         with pytest.raises(HTTPException) as exc_info:
@@ -81,6 +82,7 @@ class TestSpamGuardIsTimezoneSafe:
     def test_retry_just_under_10_seconds_is_still_rejected(self, isolated_db):
         _seed_quest()
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9001)
         _set_last_completed_at("dad", 9001, seconds_ago=9.5)
 
@@ -111,6 +113,7 @@ class TestSpamGuardIsTimezoneSafe:
                 (9001, "TestQuest", "infinite", 10, 5),
             )
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9001)
         _set_last_completed_at("dad", 9001, seconds_ago=60.5)
 
@@ -129,6 +132,7 @@ class TestSpamGuardIsTimezoneSafe:
                 (9001, "TestQuest", "infinite", 10, 5),
             )
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9001)
         _set_last_completed_at("dad", 9001, seconds_ago=10.5)
 
@@ -150,6 +154,7 @@ class TestRepeatedCompletionAfterGuardWindow:
     def test_completion_after_guard_window_is_rejected_same_day(self, isolated_db):
         _seed_quest()
         quest_service = QuestService()
+        approval_service = ApprovalService()
         first = quest_service.process_complete_quest("dad", 9001)
         assert first["earnedGold"] == 5
 
@@ -170,6 +175,7 @@ class TestResetPeriodEnforcement:
     def test_daily_quest_can_be_completed_again_next_day(self, isolated_db):
         _seed_quest()
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9001)
         # 前日に完了したことにする -> 本日はまだ未完了のはず
         _set_last_completed_at("dad", 9001, seconds_ago=25 * 3600)
@@ -189,6 +195,7 @@ class TestResetPeriodEnforcement:
                 (9002, "WeeklyQuest", "daily", 10, 5, "weekly"),
             )
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9002)
         # 固定の「2日前」だと実行日が週の月・火曜の場合に前週へまたいでしまい
         # 週境界をランダムに踏んでflakyになるため、必ず「今週の月曜0時」を
@@ -220,6 +227,7 @@ class TestResetPeriodEnforcement:
                 (9003, "InfiniteQuest", "infinite", 10, 5),
             )
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_service.process_complete_quest("dad", 9003)
         _set_last_completed_at("dad", 9003, seconds_ago=65)
 
@@ -255,6 +263,8 @@ class TestApprovalDoesNotOverwriteCompletedAt:
 
         quest_service = QuestService()
 
+        approval_service = ApprovalService()
+
         # 前日の夜、子供が完了報告(pending)する
         report_result = quest_service.process_complete_quest("son", 9004)
         assert report_result["status"] == "pending"
@@ -272,7 +282,7 @@ class TestApprovalDoesNotOverwriteCompletedAt:
             ).fetchone()["completed_at"]
 
         # 親が翌朝に承認する
-        approve_result = quest_service.process_approve_quest("dad", history_id)
+        approve_result = approval_service.process_approve_quest("dad", history_id)
         assert approve_result["status"] == "success"
 
         with get_db_cursor() as cur:

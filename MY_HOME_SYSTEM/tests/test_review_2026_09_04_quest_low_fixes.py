@@ -25,7 +25,7 @@ from core.database import get_db_cursor
 from core import database as core_db
 from models.quest import MasterQuest, MasterReward, QuestAction
 from services import quest_service as qs_module
-from services.quest_service import ROLE_ADULT
+from services.quest_service import ApprovalService, ROLE_ADULT
 
 
 def _seed(role=ROLE_ADULT, gold=0):
@@ -94,12 +94,13 @@ def test_cancel_reverts_medals(isolated_db, monkeypatch):
     monkeypatch.setattr(qs_module.game_logic.GameLogic, "calculate_drop_rewards",
                         staticmethod(lambda g, e: {"gold": g, "exp": e, "medals": 2, "is_lucky": True}))
     service = qs_module.QuestService()
+    approval = qs_module.ApprovalService()
     service.process_complete_quest("dad", 901)
     with get_db_cursor() as cur:
         assert cur.execute("SELECT medal_count FROM quest_users WHERE user_id='dad'").fetchone()[0] == 2
         hist = cur.execute("SELECT id, medals_earned FROM quest_history ORDER BY id DESC LIMIT 1").fetchone()
         assert hist["medals_earned"] == 2
-    service.process_cancel_quest("dad", hist["id"])
+    approval.process_cancel_quest("dad", hist["id"])
     with get_db_cursor() as cur:
         assert cur.execute("SELECT medal_count FROM quest_users WHERE user_id='dad'").fetchone()[0] == 0
 

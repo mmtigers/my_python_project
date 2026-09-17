@@ -23,7 +23,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.utils import get_now_iso
 from core.database import get_db_cursor
 from services import quest_service as quest_service_module
-from services.quest_service import QuestService, GameSystem
+from services.quest_service import ApprovalService, QuestService, GameSystem
 # Issue #550でGameSystem/QuestServiceの実装はservices/quest/配下へ分割された。
 # loggerはモジュールごとに束縛された別オブジェクトの属性ではなく、各モジュールの
 # グローバル名として個別にimportされているため、`logger`自体を差し替える
@@ -64,8 +64,8 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        result = quest_service.process_reject_quest("dad", history_id)
+        approval_service = ApprovalService()
+        result = approval_service.process_reject_quest("dad", history_id)
 
         assert result["status"] == "rejected"
         with get_db_cursor() as cur:
@@ -84,8 +84,9 @@ class TestProcessRejectQuest:
                 "('dad', 'Dad', 'Warrior', 1, 0, 0, 'role_adult')"
             )
         quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service.process_reject_quest("dad", 999999)
+            approval_service.process_reject_quest("dad", 999999)
         assert exc_info.value.status_code == 404
 
     def test_reject_already_processed_history_returns_400(self, isolated_db):
@@ -101,9 +102,9 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service.process_reject_quest("dad", history_id)
+            approval_service.process_reject_quest("dad", history_id)
         assert exc_info.value.status_code == 400
 
     def test_rejected_history_is_excluded_from_family_chronicle_total_quests(self, isolated_db):
@@ -131,8 +132,8 @@ class TestProcessRejectQuest:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        quest_service.process_reject_quest("dad", history_id)
+        approval_service = ApprovalService()
+        approval_service.process_reject_quest("dad", history_id)
 
         game_system = GameSystem()
         chronicle = game_system.user_service.get_family_chronicle()
@@ -171,8 +172,8 @@ class TestGetLockUserIdsForHistory:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(history_id)
 
         assert lock_user_ids == ['son']
 
@@ -190,8 +191,8 @@ class TestGetLockUserIdsForHistory:
             """, (partner_history_id,))
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(history_id)
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(history_id)
 
         assert lock_user_ids == ['son', 'daughter']
 
@@ -201,9 +202,9 @@ class TestGetLockUserIdsForHistory:
         with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
         with pytest.raises(HTTPException) as exc_info:
-            quest_service._get_lock_user_ids_for_history(999999)
+            approval_service._get_lock_user_ids_for_history(999999)
         assert exc_info.value.status_code == 404
 
     def test_missing_history_with_primary_user_id_does_not_raise(self, isolated_db):
@@ -213,8 +214,8 @@ class TestGetLockUserIdsForHistory:
         with get_db_cursor(commit=True) as cur:
             self._seed_users(cur)
 
-        quest_service = QuestService()
-        lock_user_ids = quest_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
+        approval_service = ApprovalService()
+        lock_user_ids = approval_service._get_lock_user_ids_for_history(999999, primary_user_id='son')
 
         assert lock_user_ids == ['son']
 
@@ -248,14 +249,14 @@ class TestProcessRejectQuestConcurrentWithApprove:
             """)
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
+        approval_service = ApprovalService()
 
         # 承認処理がquest_usersへの報酬加算(_apply_quest_rewards)後、コミット前に
         # 少し待機するようにする。承認はロック取得後この時間だけロックを保持し
         # 続けるため、その間に却下側がロック取得を試みてブロックされることを
         # 利用し、確実に「承認が先にロックを取得して完走し終えてから却下が
         # 動き出す」という、Issueが報告した不整合が起きうる順序を再現する。
-        original_apply_rewards = quest_service._apply_quest_rewards
+        original_apply_rewards = approval_service._apply_quest_rewards
 
         def _slow_apply_rewards(cur, user, quest, now_iso, history_id=None, override_rewards=None):
             result = original_apply_rewards(
@@ -264,20 +265,20 @@ class TestProcessRejectQuestConcurrentWithApprove:
             time.sleep(0.2)
             return result
 
-        monkeypatch.setattr(quest_service, "_apply_quest_rewards", _slow_apply_rewards)
+        monkeypatch.setattr(approval_service, "_apply_quest_rewards", _slow_apply_rewards)
 
         results = {}
         errors = {}
 
         def _approve():
             try:
-                results["approve"] = quest_service.process_approve_quest("dad", history_id)
+                results["approve"] = approval_service.process_approve_quest("dad", history_id)
             except Exception as e:  # noqa: BLE001 - スレッド内例外を主スレッドへ伝える
                 errors["approve"] = e
 
         def _reject():
             try:
-                results["reject"] = quest_service.process_reject_quest("dad", history_id)
+                results["reject"] = approval_service.process_reject_quest("dad", history_id)
             except Exception as e:  # noqa: BLE001
                 errors["reject"] = e
 
@@ -322,6 +323,7 @@ class TestIsWithinResetPeriod:
 
     def setup_method(self):
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
 
     def test_daily_true_for_today(self):
         today_jst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9))).strftime("%Y-%m-%d")
@@ -368,6 +370,7 @@ class TestIsWithinResetPeriod:
 class TestCalculateQuestBoost:
     def setup_method(self):
         self.quest_service = QuestService()
+        self.approval_service = ApprovalService()
 
     def test_non_daily_quest_type_has_no_boost(self, isolated_db):
         with get_db_cursor() as cur:
@@ -777,8 +780,8 @@ class TestProcessApproveQuestWithDeletedMasterQuest:
             )
             history_id = cur.lastrowid
 
-        quest_service = QuestService()
-        result = quest_service.process_approve_quest("dad", history_id)
+        approval_service = ApprovalService()
+        result = approval_service.process_approve_quest("dad", history_id)
 
         assert result["status"] == "success"
         with get_db_cursor() as cur:
@@ -801,6 +804,7 @@ class TestFilterActiveQuestsDateParseErrorLogging:
 
     def test_date_parse_error_log_includes_the_actual_quest_id(self, monkeypatch):
         quest_service = QuestService()
+        approval_service = ApprovalService()
         bad_quest = {
             "quest_id": 4242,
             "quest_type": "limited",
@@ -844,6 +848,7 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_none_occurrence_chance_does_not_raise_type_error(self):
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest = self._make_random_quest(None)
 
         # 例外を送出せず完走すること自体が回帰確認の対象
@@ -853,6 +858,7 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_filter_active_quests_does_not_raise_for_random_quest_with_none_chance(self):
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest = self._make_random_quest(None)
 
         result = quest_service.filter_active_quests([quest])
@@ -861,6 +867,7 @@ class TestIsQuestCurrentlyActiveRandomOccurrenceChanceNone:
 
     def test_explicit_chance_still_behaves_as_before(self):
         quest_service = QuestService()
+        approval_service = ApprovalService()
         quest_never = self._make_random_quest(0.0)
 
         assert quest_service._is_quest_currently_active(quest_never) is False, (

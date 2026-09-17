@@ -28,7 +28,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from core.utils import get_now_iso
 from core.database import get_db_cursor
-from services.quest_service import QuestService, ShopService, UserService
+from services.quest_service import ApprovalService, QuestService, ShopService, UserService
 
 N_QUESTS = 12
 GOLD_PER_QUEST = 10
@@ -61,6 +61,7 @@ class TestConcurrentAdultCompletionOfDifferentQuests:
     def test_concurrent_completions_of_different_quests_do_not_lose_balance_updates(self, isolated_db):
         quest_ids = _seed_adult_with_individual_quests()
         quest_service = QuestService()
+        approval_service = ApprovalService()
 
         with ThreadPoolExecutor(max_workers=N_QUESTS) as pool:
             results = list(pool.map(
@@ -112,9 +113,11 @@ class TestPurchaseVersusApproveCrossPathConcurrency:
                 history_ids.append(cur.lastrowid)
 
         quest_service = QuestService()
+
+        approval_service = ApprovalService()
         shop_service = ShopService()
 
-        tasks = [lambda hid=hid: quest_service.process_approve_quest("dad", hid) for hid in history_ids]
+        tasks = [lambda hid=hid: approval_service.process_approve_quest("dad", hid) for hid in history_ids]
         tasks.append(lambda: shop_service.process_purchase_reward("son", 700))
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
@@ -170,9 +173,11 @@ class TestResetVersusApproveCrossPathConcurrency:
                 history_ids.append(cur.lastrowid)
 
         quest_service = QuestService()
+
+        approval_service = ApprovalService()
         user_service = UserService()
 
-        tasks = [lambda hid=hid: ("approve", quest_service.process_approve_quest("dad", hid)) for hid in history_ids]
+        tasks = [lambda hid=hid: ("approve", approval_service.process_approve_quest("dad", hid)) for hid in history_ids]
         tasks.append(lambda: ("reset", user_service.reset_user_data("dad", "son")))
 
         with ThreadPoolExecutor(max_workers=len(tasks)) as pool:

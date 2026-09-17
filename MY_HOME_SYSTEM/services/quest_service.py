@@ -45,12 +45,15 @@ from services.quest.locks import (
     _user_balance_locks,
     logger,
 )
+from services.quest.approval_service import ApprovalService
+from services.quest.rewards import apply_quest_rewards
 from services.quest.user_service import ImageTooLargeError, InvalidImageError, UserService
 from services.quest.quest_service import QuestService
 from services.quest.shop_service import ShopService
 from services.quest.inventory_service import InventoryService, inventory_service
 from services.quest.game_system import (
     GameSystem,
+    approval_service,
     game_system,
     quest_service,
     shop_service,
@@ -91,12 +94,15 @@ __all__ = [
     "InvalidImageError",
     "ImageTooLargeError",
     "QuestService",
+    "ApprovalService",
+    "apply_quest_rewards",
     "ShopService",
     "InventoryService",
     "inventory_service",
     "GameSystem",
     "game_system",
     "quest_service",
+    "approval_service",
     "shop_service",
     "user_service",
     "quest_data",
