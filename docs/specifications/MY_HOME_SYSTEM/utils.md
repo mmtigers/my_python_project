@@ -172,12 +172,12 @@
 
 ### `RefCountedLockRegistry`（Issue #435 で追加）
 
-* **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
+* **役割**: キー単位の`threading.Lock`を参照カウント付きで管理するレジストリクラス。**（Issue #661）** `services/camera_service.py`にも同一の実装(`_RefCountedLock`と`_vod_generation_lock`/`_live_stream_lock`)が重複していたため、そちらの利用もこのレジストリへ寄せた(挙動は同一)。`services/quest_service.py`の完了/残高/購入ロックが、キーの組み合わせ(ユーザーID×クエストID等)が増えるたびに`threading.Lock`エントリを無制限に蓄積していた3箇所の場当たり実装を置き換えるために追加された。参照しているエントリが居なくなった時点(参照カウントが0になった時点)で辞書からエントリを削除することでこれを防ぐ。クラスdocstringによれば、単純に「`lock.locked()`が`False`なら削除」する方式だと、辞書からロックオブジェクトを取り出した直後・実際に`with`文で獲得する直前の隙間で別スレッドが剪定してしまい、同一キーに対して2つの別々の`Lock`オブジェクトが生成され同時に「取得成功」してしまう(排他制御が本来防ぐべき事態の再発)ため、参照カウントで安全性を担保する設計になっている。
 * 根拠: [クラス定義とdocstring] (行番号: 57〜110 / 抜粋: "class RefCountedLockRegistry:\n    \"\"\"キー単位の threading.Lock を参照カウント付きで管理するレジストリ。...")
 
 
 * **引数/リクエスト**: `__init__`は引数なし。内部に`_entries: Dict[Any, _Entry]`（キーごとの`lock`と`ref_count`を持つ内部クラス`_Entry`のインスタンス）と、`_entries`辞書自体への操作を保護する`_guard: threading.Lock`を保持する。
-* 根拠: [__init__] (行番号: 81〜83 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
+* 根拠: [__init__] (行番号: 82〜84 / 抜粋: "def __init__(self) -> None:\n        self._entries: Dict[Any, \"RefCountedLockRegistry._Entry\"] = {}\n        self._guard = threading.Lock()")
 
 
 * **戻り値/レスポンス**: 該当なし（クラス自体はコンストラクタで値を返さない。メソッドの戻り値は各メソッドの項を参照）
@@ -188,8 +188,8 @@
 * 根拠: [acquireコンテキストマネージャ] (行番号: 52〜67 / 抜粋: "with self._guard:\n            entry = self._entries.get(key)\n            if entry is None:\n                entry = self._Entry()\n                self._entries[key] = entry\n            entry.ref_count += 1\n        try:\n            with entry.lock:\n                yield\n        finally:\n            with self._guard:\n                entry.ref_count -= 1\n                if entry.ref_count == 0 and self._entries.get(key) is entry:\n                    del self._entries[key]")
 
 
-* **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。
-* 根拠: [keys, __contains__] (行番号: 103〜106 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
+* **エラーハンドリング**: 明示的な例外捕捉はない。`acquire(key)`のブロック内で例外が発生しても、`finally`節により`ref_count`のデクリメントと(条件を満たす場合の)エントリ削除は必ず実行され、例外自体はそのまま呼び出し元へ伝播する。`keys()`は現在エントリが存在するキーの一覧を`_guard`保護下で返し(テスト・デバッグ用)、`__contains__(key)`も同様に`_guard`保護下で`key in self._entries`を返す。**（Issue #661 で追加）** `__len__()`は`_guard`保護下でエントリ数を返し、`clear()`は全エントリを破棄する(いずれもテスト・デバッグ用。`clear()`は取得中のロックがあっても辞書から消えるため本番コードからの呼び出しは想定していない)。
+* 根拠: [keys, __contains__] (行番号: 104〜107 / 抜粋: "def keys(self):\n        \"\"\"現在エントリが存在するキー一覧(テスト・デバッグ用)。\"\"\"\n        with self._guard:\n            return list(self._entries.keys())\n\n    def __contains__(self, key: Any) -> bool:\n        with self._guard:\n            return key in self._entries")
 
 
 
@@ -222,7 +222,7 @@
 ### `retry_with_backoff`
 
 * **役割**: 引数なしのcallable(`fn`)を実行し、指定した例外クラス群(`retryable_exceptions`)に該当する例外が発生した場合のみExponential Backoffで再試行する共通ユーティリティ。Issue #292で、`config.py`の`verify_and_initialize_storage`と`monitors/nas_monitor.py`の`check_write_permission`がそれぞれ個別に実装していたNAS I/O向けのExponential Backoffループを1箇所に集約するために追加された。リトライ対象の例外集合・リトライ回数・待機秒数という「ポリシー」自体は呼び出し元ごとに異なるため引数として渡せるようにしており、集約後も各呼び出し元の挙動(リトライ回数・待機秒数・リトライ対象例外)自体は変更していない。
-* 根拠: [retry_with_backoff] (行番号: 147〜200 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
+* 根拠: [retry_with_backoff] (行番号: 161〜214 / 抜粋: "def retry_with_backoff(\n    fn: Callable[[], Any],\n    *,\n    max_retries: int,\n    retryable_exceptions: Tuple[Type[BaseException], ...],\n    base_delay: float = 1.0,\n    max_delay: float = float(\"inf\"),\n    on_retry: Optional[Callable[[int, float, BaseException], None]] = None,\n) -> Any:")
 
 
 * **引数/リクエスト**:
@@ -399,7 +399,7 @@ graph TD
 | --- | --- | --- | --- |
 | 高 | `utils.py` をインポートしている各モジュール（メインの処理ファイル） | これらの関数がシステム内のどこで、どのような目的・頻度で呼び出されているか特定するため。 | 根拠: [ファイル全体] (行番号: 1〜96 / 抜粋: 提供されたコードは汎用ユーティリティであり単独では動作しないため) |
 | 高 | データベースアクセスや外部API呼び出しを実装しているファイル | `with_exponential_backoff` デコレータがどの関数に適用され、どのような例外が発生しうるのかを把握するため。 | 根拠: [with_exponential_backoff] (行番号: 42 / 抜粋: "except Exception as e:") |
-| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 203〜243 / 抜粋: "def wait_for_storage_warmup(ta...") |
+| 中 | ファイルストレージ・NASへのアクセス処理を行うファイル | `wait_for_storage_warmup` 関数がどのパスに対して実行され、復帰遅延が発生しやすい環境がどこかを確認するため。 | 根拠: [wait_for_storage_warmup] (行番号: 217〜257 / 抜粋: "def wait_for_storage_warmup(ta...") |
 | 高 | `services/quest_service.py` | Issue #435で`RefCountedLockRegistry`に置き換えられた3箇所の旧ロック辞書実装の詳細、および置き換え後の実際の利用箇所（キーの構成、`acquire`の呼び出し方）を確認するため。 | 根拠: [RefCountedLockRegistryクラスdocstring] (行番号: 27〜30 / 抜粋: "quest_service.py の完了/残高/購入ロックは、キーの組み合わせ\n(ユーザーID×クエストID等)が増えるたびに threading.Lock エントリが\n無制限に蓄積していた。") |
 | 中 | `services/ai_service.py` | Issue #583関連: `line_service.py`の`log_food_record`に渡す`category`引数（AIが判定する朝食/昼食/夕食等のラベル）がどこでどう生成されているかを確認し、`get_meal_time_category_from_now`が返す時間帯（記録時刻基準）とAI側の`category`ラベル（内容基準）がどの程度乖離しうるかを把握するため。 | 根拠: [get_meal_time_category_from_now docstring] (行番号: 26〜29 / 抜粋: "呼び出し元が受け取る\n\"category\"引数(AIが渡す朝食/昼食/夕食等、または食事アンケートの麺類等の\n食品ジャンル)は用途が呼び出し元ごとに異なり食事の時間帯を必ずしも表さないため") |
 

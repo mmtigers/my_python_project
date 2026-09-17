@@ -1,4 +1,3 @@
-import contextlib
 import os
 import sys
 import time
@@ -6,7 +5,6 @@ import socket
 import subprocess
 import shutil
 import requests
-import sqlite3
 from typing import List
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -19,6 +17,7 @@ sys.path.append(BASE_DIR)
 try:
     import config
     import common
+    from core.database import get_ro_connection
     from services import switchbot_service
 except ImportError as e:
     print(f"Error: Failed to import config or common modules. {e}", file=sys.stderr)
@@ -181,9 +180,13 @@ class PostBootHealthCheck:
         try:
             # #411 S-L8: 以前はconn.close()を成功パスの末尾でしか呼んでおらず、
             # cursor.execute/fetchoneが例外を送出するとexcept節には到達するが
-            # 接続はcloseされずリークしていた。contextlib.closingでどの終了経路
-            # でも確実にcloseする。
-            with contextlib.closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)) as conn:
+            # 接続はcloseされずリークしていた。どの終了経路でも確実にcloseする。
+            # Issue #661: 生の sqlite3.connect を core/database.get_ro_connection へ寄せた
+            # (このスクリプトは config の相対パスを自前で絶対パスへ解決しているため
+            # db_path を明示する)。timeout も他の読み取り経路と同じ30秒になり、
+            # 起動直後のマイグレーション・バックアップと重なっても
+            # "database is locked" で即座に ERROR 判定にならない。
+            with get_ro_connection(db_path=db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("PRAGMA quick_check;")
                 result = cursor.fetchone()[0]

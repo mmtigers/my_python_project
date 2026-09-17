@@ -47,7 +47,7 @@
 ### `get_start_date`
 
 * **役割**: 指定された期間タイプ（週、月、年）に応じた集計開始日時（00:00:00）を計算して取得する。
-* 根拠: `get_start_date` 定義部 (行番号: 20〜43 / 抜粋: "def get_start_date(period_type")
+* 根拠: `get_start_date` 定義部 (行番号: 21〜44 / 抜粋: "def get_start_date(period_type")
 
 
 * **引数/リクエスト**: `period_type: str` - "week", "month", "year" のいずれか。
@@ -70,7 +70,7 @@
 ### `get_analysis_data`
 
 * **役割**: 指定された開始日時から現在までの食事、車利用、電気代、体調のデータをDBから集計する。**（Issue #170で修正）** 電気代算出(`sql_power`)は以前`power_usage`テーブルの全デバイス(スマートメーター+各プラグ)を無差別に`AVG(wattage)`していたため、プラグ(個別家電。既にスマートメーターの計測値に含まれる部分集合)のアイドル値がスマートメーターの平均消費電力を希釈していた。`services/analysis_service.py`の`load_sensor_data`と同じ分類基準(`device_name`に`"Remo"`を含む)でスマートメーターの行のみに絞るよう修正した。
-* 根拠: `get_analysis_data` 定義部 (行番号: 45〜152 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
+* 根拠: `get_analysis_data` 定義部 (行番号: 46〜153 / 抜粋: "def get_analysis_data(start_dt")、電気代クエリのデバイス絞り込み (行番号: 106〜110 / 抜粋: "WHERE timestamp >= ? AND device_name LIKE '%Remo%'")
 
 
 * **引数/リクエスト**: `start_dt: datetime.datetime` - 集計開始日時。
@@ -93,7 +93,7 @@
 ### `generate_text_section`
 
 * **役割**: 集計データからレポート用のテキストセクション（詳細モードまたは簡易モード）を生成する。
-* 根拠: `generate_text_section` 定義部 (行番号: 154〜186 / 抜粋: "def generate_text_section(peri")
+* 根拠: `generate_text_section` 定義部 (行番号: 155〜187 / 抜粋: "def generate_text_section(peri")
 
 
 * **引数/リクエスト**: `period_name: str`, `data: Dict[str, Any]`, `is_simple: bool = False`
@@ -116,7 +116,7 @@
 ### `is_month_end_report`
 
 * **役割**: 実行時点から7日後の月が現在の月と異なるかを判定し、月末レポート対象日であるかをチェックする。
-* 根拠: `is_month_end_report` 定義部 (行番号: 188〜196 / 抜粋: "def is_month_end_report() -> b")
+* 根拠: `is_month_end_report` 定義部 (行番号: 189〜197 / 抜粋: "def is_month_end_report() -> b")
 
 
 * **引数/リクエスト**: なし
@@ -139,7 +139,7 @@
 ### `run_report`
 
 * **役割**: 週間レポート生成のメイン処理。実行条件の判定、データ集計の呼び出し、メッセージの構築、外部へのプッシュ通知を行う。
-* 根拠: `run_report` 定義部 (行番号: 198〜292 / 抜粋: "def run_report() -> None:")
+* 根拠: `run_report` 定義部 (行番号: 199〜290 / 抜粋: "def run_report() -> None:")
 
 
 * **引数/リクエスト**: なし
@@ -154,7 +154,7 @@
 * `sys.argv` の読み取り。
 * ロガーによる状態のログ出力（INFO, ERROR, DEBUG）。
 * `common.send_push` を呼び出し外部システムへ通知を送信。
-* 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。
+* 送信成功時、モジュール定数`LAST_RUN_FILE`(`config.FALLBACK_ROOT`配下)へ実行日(`YYYY-MM-DD`)を書き込む(Issue #234で追加。`--force`実行時は書き込まない)。**（Issue #661で修正）** このフラグファイルの読み書きは`core/state_file.py`の`read_text`/`write_text_atomic`へ委譲し、書き込みは一時ファイル + `fsync` + `os.replace`による原子的な差し替えになった(親ディレクトリの作成も`state_file`側が行うため、呼び出し側の`os.makedirs`は不要になっている)。読み取り失敗時は`None`が返り「未送信」として扱われる(重複送信より送信欠落の方が困るため)。
 * 根拠: 各種処理部 (行番号: 197, 217, 278 / 抜粋: "is_force = len(sys.argv) > 1 a", "logger.info("📊 週間レポート生成プロセ", "common.send_push([{"type": ")、実行済みフラグ書き込み (行番号: 278〜284 / 抜粋: "if not is_force: os.makedirs(...")
 
 

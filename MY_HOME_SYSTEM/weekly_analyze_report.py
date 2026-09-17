@@ -1,5 +1,6 @@
 import config
 import common
+from core import state_file
 import datetime
 import os
 import pytz
@@ -212,13 +213,12 @@ def run_report() -> None:
         return
 
     # #234: 実行済みフラグチェック (外部cronの多重起動による重複送信防止)
+    # Issue #661: 状態ファイルの読み書きは core/state_file.py に集約した
+    # (読めない場合は None が返り「未送信」として扱う。重複送信より欠落の方が困るため)。
     today_str = now.strftime("%Y-%m-%d")
-    if not is_force and os.path.exists(LAST_RUN_FILE):
-        with open(LAST_RUN_FILE, "r") as f:
-            last_run = f.read().strip()
-        if last_run == today_str:
-            logger.debug(f"⏭️ 本日は既に週間レポートを送信済みのためスキップします ({today_str})")
-            return
+    if not is_force and state_file.read_text(LAST_RUN_FILE) == today_str:
+        logger.debug(f"⏭️ 本日は既に週間レポートを送信済みのためスキップします ({today_str})")
+        return
 
     logger.info("📊 週間レポート生成プロセスを開始します...")
     
@@ -285,9 +285,7 @@ def run_report() -> None:
         logger.info("✅ レポート送信完了")
         # #234: 定時実行のときのみフラグを記録する(強制実行時は手動テスト用途のため記録しない)
         if not is_force:
-            os.makedirs(os.path.dirname(LAST_RUN_FILE), exist_ok=True)
-            with open(LAST_RUN_FILE, "w") as f:
-                f.write(today_str)
+            state_file.write_text_atomic(LAST_RUN_FILE, today_str)
     else:
         logger.error("❌ レポート送信失敗")
 
