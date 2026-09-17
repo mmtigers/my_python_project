@@ -46,6 +46,8 @@
 | `models.switchbot` | 内部モジュール | レスポンスデータ検証用のPydanticモデル取得 | 根拠: `from models.switchbot import...` (行番号: 15 / 抜粋: "from models.switchbot import DeviceStatusResponse") |
 | `services.notification_service`（毎朝ミッション統合で追加） | 内部モジュール | `trigger_tv_unlock`のFail-Soft通知（TV電源ON失敗時に親グループへLINE Push） | 根拠: `from services import notification_service` (行番号: 16 / 抜粋: "from services import notification_service") |
 
+* **（Issue #664）** 12行目には長らく `# from common import retry_api_call # 削除` というコメントだけが残っていたが、`common.py`（Deprecated Facade）そのものの廃止に伴い「common.py ごと廃止された」旨の注記へ置き換えられた。実行される import は増減しておらず、リトライは本モジュール内の `request_switchbot_api` が自前のループで行う（後述）。
+
 ### ブラックボックスとなる外部要素
 
 | 名称 | 理由 | 根拠 |
