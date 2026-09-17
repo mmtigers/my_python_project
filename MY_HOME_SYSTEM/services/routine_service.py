@@ -321,6 +321,21 @@ class RoutineService:
         done_count = sum(1 for k in eligible_keys if progress['steps_status'].get(k) == 'done')
         return done_count / len(eligible_keys)
 
+    def _is_checkpoint_path_cleared(self, flow: RoutineFlow, progress: Dict[str, Any]) -> bool:
+        """チェックポイントより前の一本道を全て終えているか(スキップ分は達成済み扱い)。
+
+        自由時間に入れるか・TVを解錠してよいかの判定に使う。締切(チェックポイント時刻)
+        を過ぎたかどうかは一切見ないため、「時間が来たから自由時間」ではなく
+        「終わったから自由時間」になる(要件: 自由時間の時間固定をやめる)。
+        """
+        checkpoint_idx = get_checkpoint_index(flow)
+        if checkpoint_idx is None:
+            return True
+        return all(
+            progress['steps_status'].get(step['key']) == 'done'
+            for step in flow['steps'][:checkpoint_idx]
+        )
+
     def _compute_bonus_preview(self, flow: RoutineFlow, progress: Dict[str, Any]) -> Tuple[int, int]:
         """「今チェックしている分」を基準にしたボーナス見込み額(gold, exp)を返す。
 
@@ -370,6 +385,44 @@ class RoutineService:
             f"Routine Step Reward: User={user_id}, Step={step['key']}, Gold={gold}, Exp={exp}"
         )
 
+    def _complete_remind_step(
+        self, cur, user_id: str, flow_key: str, flow: RoutineFlow,
+        progress: Dict[str, Any], step: RoutineStep,
+    ) -> None:
+        """締切超過で「まだだよ」になった一本道のステップを、後から完了報告する。
+
+        （自由時間の時間固定をやめる変更で新規追加）締切(17:30)を過ぎると寝る準備へ
+        進んでしまうが、宿題などを飛ばしたまま自由時間・TVを与えたくない一方で、
+        遅れても終わらせたなら報われてほしい(要件)。そこで進行(current_step_index)は
+        動かさず、そのステップだけを'done'にする。
+
+        これで一本道が全て埋まったら、チェックポイント(自由時間)も'done'にし、
+        締切前に到達した場合と同じくTVを解錠する。既に埋まっていた場合は何もしない
+        (呼び出し元が'remind'であることを確認済みのため、ここが二重に走ることはない)。
+
+        チェックポイント通過ボーナス(bonus_gold/bonus_exp)は締切時点の達成率で確定済みで、
+        追いつき完了では増えない — 締切の意味をボーナス額だけに残すため(要件)。
+        ステップ個別報酬(大人用フローのgold/exp)は実際に作業した分なのでここでも付与する。
+        """
+        progress['steps_status'][step['key']] = 'done'
+        self._grant_step_reward(cur, user_id, progress, step)
+
+        if not self._is_checkpoint_path_cleared(flow, progress):
+            return
+
+        checkpoint_idx = get_checkpoint_index(flow)
+        if checkpoint_idx is None:
+            return
+        checkpoint_step = flow['steps'][checkpoint_idx]
+        if progress['steps_status'].get(checkpoint_step['key']) == 'done':
+            return
+        progress['steps_status'][checkpoint_step['key']] = 'done'
+        logger.info(
+            f"Routine Catch-up Cleared: User={user_id}, Flow={flow_key}, Step={step['key']}"
+        )
+        if flow_key == 'pm' and user_id == TV_UNLOCK_TARGET_USER_ID and config.TV_PLUG_DEVICE_ID:
+            switchbot_service.trigger_tv_unlock("夕方の一本道を締切後に完了(追いつき)")
+
     def _apply_forced_transition(
         self, cur, user_id: str, flow_key: str, flow: RoutineFlow, progress: Dict[str, Any], now: datetime.datetime
     ) -> Dict[str, Any]:
@@ -379,6 +432,14 @@ class RoutineService:
 
         current_step_indexがチェックポイントを既に通過していれば何もしない(冪等)ため、
         GET(状態取得)・POST(ステップ完了)のどちらからも安全に呼べる。
+
+        （自由時間の時間固定をやめる変更で修正）締切を過ぎた時点でチェックポイント
+        ステップ(自由時間)を無条件に'done'にはしない。締切までに一本道を終えていなければ
+        'remind'(まだだよ)のままにし、TV解錠も行わない — 「宿題を飛ばしても時間が来れば
+        自由時間が始まる」状態を無くすため(要件)。寝る準備チェックリストの活性化だけは
+        締切で従来どおり行う(晩ごはん・お風呂は宿題の進捗と無関係に進むため)。
+        'remind'になった一本道のステップは締切後も完了報告でき(complete_step)、
+        全部終えた時点で自由時間が'done'になりTVが解錠される。
         """
         checkpoint_idx = get_checkpoint_index(flow)
         if checkpoint_idx is None or progress['current_step_index'] > checkpoint_idx:
@@ -396,7 +457,11 @@ class RoutineService:
         for k in eligible_keys:
             if progress['steps_status'].get(k) != 'done':
                 progress['steps_status'][k] = 'remind'
-        progress['steps_status'][checkpoint_step['key']] = 'done'
+        # 締切までに一本道を終えていれば自由時間は達成、終えていなければ「まだだよ」。
+        # 後者はcomplete_stepでの追いつき完了によって'done'へ変わる。
+        progress['steps_status'][checkpoint_step['key']] = (
+            'done' if self._is_checkpoint_path_cleared(flow, progress) else 'remind'
+        )
 
         bonus_gold = round(FULL_BONUS_GOLD * ratio)
         bonus_exp = round(FULL_BONUS_EXP * ratio)
@@ -576,14 +641,27 @@ class RoutineService:
                 progress = self._apply_forced_transition(cur, user_id, flow_key, flow, progress, now)
 
                 idx = progress['current_step_index']
-                if idx >= len(flow['steps']):
-                    raise HTTPException(status_code=400, detail="本日のフローは完了しています")
-
                 target_step = next((s for s in flow['steps'] if s['key'] == step_key), None)
                 if target_step is None:
                     raise HTTPException(status_code=404, detail="Unknown step_key")
 
-                if target_step['checklist']:
+                # 締切超過で「まだだよ」になった一本道のステップは、進行が先へ進んだ
+                # 後でも(フローを最後まで終えた後でも)追いつきで完了報告できる。
+                # 完了しているか判定してから通常の完了経路のガードに入る。
+                # チェックポイント(自由時間)自身も締切で'remind'になりうるが、これは
+                # 一本道を全部終えた結果としてのみ'done'になるべきもので、直接完了報告
+                # させてはいけない(下の逐次分岐の400で従来どおり弾く)。
+                is_catch_up = (
+                    not target_step['checklist']
+                    and not target_step['checkpoint_time']
+                    and progress['steps_status'].get(step_key) == 'remind'
+                )
+                if idx >= len(flow['steps']) and not is_catch_up:
+                    raise HTTPException(status_code=400, detail="本日のフローは完了しています")
+
+                if is_catch_up:
+                    self._complete_remind_step(cur, user_id, flow_key, flow, progress, target_step)
+                elif target_step['checklist']:
                     # チェックリストのステップは、そのブロックに進行が到達していれば
                     # (='locked'でなければ)順不同でチェック/チェック解除できる
                     # (要件: 朝の準備・寝る準備は好きな順で良い)。

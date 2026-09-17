@@ -318,6 +318,19 @@ const RoutineStepRow: React.FC<{
                         {step.status === 'remind' && <span className="rounded-full bg-orange-900/40 text-orange-300 text-[10px] font-bold px-2 py-0.5 flex-none">まだだよ</span>}
                         <span className="min-w-0">{step.label}</span>
                         <RoutineStepRewardChip flowKey={flowKey} step={step} />
+                        {/* 締切を過ぎて「まだだよ」になった一本道のステップは、後から
+                            終わらせれば完了報告できる(サーバー側の追いつき完了)。
+                            チェックポイント(自由時間)自体はタップ対象ではないので出さない。 */}
+                        {step.status === 'remind' && !step.is_checkpoint && (
+                            <button
+                                type="button"
+                                onClick={onComplete}
+                                disabled={isCompleting}
+                                className="ml-auto flex-none rounded-full border border-orange-500 bg-orange-900/40 px-3 py-1 text-[11px] font-bold text-orange-200 disabled:opacity-50"
+                            >
+                                いまやった！
+                            </button>
+                        )}
                     </div>
                 )}
             </div>
